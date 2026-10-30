@@ -2,7 +2,7 @@
 笔记本步骤的执行器。
 
 RealExecutor：子进程跑现有工具（与 render_batch / assemble_episode 同一套代码），环境变量 NS_PROJECT_ROOT
-指向项目目录。成人镜头一律不出（render_batch 不带 --include-adult）；笔记本从不出视频（规则 7）。
+指向项目目录。成人镜头与普通镜头一起出（2026-10-30 取消过滤器）；笔记本从不出视频（规则 7）。
 DryRunExecutor：只记录“将要执行的命令”，不碰 GPU、不出图——测试与演示用。
 """
 from __future__ import annotations
@@ -169,10 +169,19 @@ class RealExecutor(BaseExecutor):
         st = comfy_status(self.comfy_url)
         if not st["reachable"]:
             raise Waiting(f"本机 ComfyUI 未开（{self.comfy_url}）")
-        self.calls.append(("render", ctx.slug, ep, stage))
-        # 不带 --include-adult：成人镜头永不由笔记本出
-        return self._run(ctx, ["tools/render_batch.py", "--stage", stage, "--shots", f"ep{ep:02d}",
-                               "--comfy", self.comfy_url], f"ep{ep:02d}_{stage}")
+        # T44：与画布渲染队列共用一把 ComfyUI 锁；画布占用时本步骤等待（下一轮再试，不计失败）
+        from ns_orch import comfy_lock as CL
+        try:
+            fh = CL.acquire("orchestrator", f"{ctx.slug} ep{ep:02d} {stage}", timeout=0)
+        except CL.Busy as e:
+            raise Waiting(str(e))
+        try:
+            self.calls.append(("render", ctx.slug, ep, stage))
+            # 2026-10-30 取消过滤器：成人镜头也由 render_batch 一起出
+            return self._run(ctx, ["tools/render_batch.py", "--stage", stage, "--shots", f"ep{ep:02d}",
+                                   "--comfy", self.comfy_url], f"ep{ep:02d}_{stage}")
+        finally:
+            CL.release(fh)
 
     def assemble(self, ctx, ep):
         self.calls.append(("assemble", ctx.slug, ep))

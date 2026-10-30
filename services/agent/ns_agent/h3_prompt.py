@@ -6,7 +6,8 @@ H3 FL2VA 提示词（SOP_production.md §9A.1 四块结构）的纯函数构建�
 - 正文英文只来自调用方传入的 body_en（画布修改 / 将来剧本 v3 的英文正文）；没有就把剧本 motion 中文原文放进结构里，
   lint 会报 H3-A7「需要英文正文（剧本 v3 提供）」。
 - overall_soundscape 来自 soundscape 参数（编译器按 画布 > 剧本【H3 audio】> 剧本 sound 行 给出）。
-- non_diegetic_music 固定 N/A（项目规则，配乐交给后期 BGM）。
+- non_diegetic_music（项目方 2026-10-30：进 H3，指南 §4.7）：本镜人工 > 剧本 **H3提示词** 自带（非 N/A）> 本集默认 > N/A；
+  只收英文（或 N/A），中文配乐提示只给后期，不翻译（见 resolve_music）。
 - 对白：(S1)/(S2) 按首次开口顺序编号，说话人说明在 <d> 外，<d>[Chinese] 剧本原文逐字</d>；画外台词按 H3-D5；
   🎙 内心独白永远不进（H3-D6）。不加引号，不加负面词，不拼图像风格后缀。
 """
@@ -44,6 +45,50 @@ _CJK = re.compile(r"[㐀-鿿]")
 def _english(text: str) -> bool:
     outside = re.sub(r"<d>.*?</d>", " ", text or "", flags=re.S)
     return bool(outside.strip()) and not _CJK.search(outside)
+
+
+def h3_music_ok(text: str | None) -> bool:
+    """能直接放进 non_diegetic_music 的文字：N/A 或不含中文的一段英文"""
+    t = (text or "").strip()
+    return bool(t) and (t == "N/A" or (not _CJK.search(t) and "\n" not in t and "<d>" not in t))
+
+
+# 剧本【配乐】提示里表示“本镜不要配乐”的写法（规则：强度 0 写 N/A）
+SILENT_CUE_RE = re.compile(r"强度\s*0(?![.\d])|撤到静默|静默|无配乐")
+
+
+def episode_music_ok(text: str) -> tuple[bool, str]:
+    """本集【BGM】英文能否回退进 non_diegetic_music：过 H3-S3（1–3 句、一段英文、无抽象情绪词）"""
+    from ns_schema.h3_lint import MOOD_EN_RE, _sentences
+    if not h3_music_ok(text) or text.strip() == "N/A":
+        return False, "不是一段英文"
+    n = len(_sentences(text))
+    moods = sorted({m.group(0).lower() for m in MOOD_EN_RE.finditer(text)})
+    if not 1 <= n <= 3:
+        return False, f"{n} 句（H3-S3 要 1–3 句）"
+    if moods:
+        return False, f"有抽象情绪词 {'、'.join(moods)}（H3-S3）"
+    return True, ""
+
+
+def resolve_music(shot_edit: str | None = None, script_music: str | None = None,
+                  episode_default: str | None = None, cue: str | None = None) -> tuple[str, str]:
+    """H3 配乐取值 → (text, source)。source = edit | script | cue_silent | episode | episode_invalid | none。
+    - 本镜人工（英文或 N/A）优先；
+    - 剧本 **H3提示词** 里写了 non_diegetic_music（包括明确的 N/A = 本镜不要配乐）就原样用；
+    - 剧本【配乐】提示写了强度 0 / 撤到静默 → N/A；
+    - 只有剧本完全没写配乐字段时，才回退本集【BGM】英文，且它必须过 H3-S3，不过就 N/A（source=episode_invalid，warn）。
+    中文（剧本【配乐】后期提示、中文 BGM 行）不进 H3，也不翻译。"""
+    if h3_music_ok(shot_edit):
+        return shot_edit.strip(), "edit"
+    if h3_music_ok(script_music):
+        return script_music.strip(), "script"
+    if any(x and SILENT_CUE_RE.search(x) for x in (shot_edit, cue)):   # 人工 / 剧本的中文后期提示写了强度 0 / 静默
+        return MUSIC, "cue_silent"
+    if episode_default and episode_default.strip() and episode_default.strip() != "N/A":
+        ok, _why = episode_music_ok(episode_default.strip())
+        return (episode_default.strip(), "episode") if ok else (MUSIC, "episode_invalid")
+    return MUSIC, "none"
 
 
 def assemble(frames: int, body: str, soundscape: str, music: str = MUSIC) -> str:
@@ -117,7 +162,7 @@ def strip_triggers(text: str, triggers: list[str]) -> str:
 
 
 def build(shot, soundscape: str, *, frames: int | None = None, body_en: str | None = None,
-          names: tuple[str, ...] = ()) -> H3Draft:
+          names: tuple[str, ...] = (), music: str = MUSIC) -> H3Draft:
     """笔记本构建器。shot：ns_schema.script.Shot（或同名属性的对象）。"""
     frames = frames or frames_for_seconds(getattr(shot, "duration", 10) or 10)
     sents, ids, offscreen = dialogue_sentences(getattr(shot, "dialogue", None), names)
@@ -128,17 +173,19 @@ def build(shot, soundscape: str, *, frames: int | None = None, body_en: str | No
         body = " ".join([x for x in [motion.rstrip("。.") + "。" if motion else ""] + sents if x])
     if not body.startswith("[Shot 1]"):
         body = "[Shot 1] " + body
-    text = assemble(frames, body, soundscape)
+    text = assemble(frames, body, soundscape, music)
     eb, es = _english(body), _english(soundscape)
-    return H3Draft(text=text, body=body, soundscape=(soundscape or "").strip(), music=MUSIC, frames=frames,
+    return H3Draft(text=text, body=body, soundscape=(soundscape or "").strip(), music=music, frames=frames,
                    source="laptop", english_body=eb, english_soundscape=es,
                    missing=[k for k, ok in (("body", eb), ("soundscape", es)) if not ok],
                    speakers=ids, offscreen=offscreen)
 
 
 def for_shot(shot, soundscape: str, *, soundscape_edited: bool = False, body_edit: str | None = None,
-             names: tuple[str, ...] = ()) -> H3Draft:
-    """本镜的 H3 提示词：剧本 **H3提示词** 原样（画布只可改正文 / 环境声），否则笔记本构建器"""
+             names: tuple[str, ...] = (), music_edit: str | None = None,
+             episode_music: str | None = None) -> H3Draft:
+    cue = getattr(shot, "music_cue", "") or ""
+    """本镜的 H3 提示词：剧本 **H3提示词** 原样（画布只可改正文 / 环境声 / 配乐），否则笔记本构建器"""
     frames = frames_for_seconds(getattr(shot, "duration", 10) or 10)
     script_text = (getattr(shot, "h3_prompt", None) or "").strip("\n")
     _, ids, offscreen = dialogue_sentences(getattr(shot, "dialogue", None), names)
@@ -148,6 +195,8 @@ def for_shot(shot, soundscape: str, *, soundscape_edited: bool = False, body_edi
             text = replace_field(text, FIELDS[0], body_edit)
         if soundscape_edited and soundscape:
             text = replace_field(text, FIELDS[1], soundscape)
+        music, _ = resolve_music(music_edit, parse_h3(text)["fields"].get(FIELDS[2]), episode_music, cue)
+        text = replace_field(text, FIELDS[2], music)
         f = parse_h3(text)["fields"]
         body, sc = f.get(FIELDS[0], ""), f.get(FIELDS[1], "")
         eb, es = _english(body), _english(sc)
@@ -155,7 +204,8 @@ def for_shot(shot, soundscape: str, *, soundscape_edited: bool = False, body_edi
                        source="script", english_body=eb, english_soundscape=es,
                        missing=[k for k, ok in (("body", eb), ("soundscape", es)) if not ok],
                        speakers=ids, offscreen=offscreen)
-    return build(shot, soundscape, frames=frames, body_en=body_edit, names=names)
+    return build(shot, soundscape, frames=frames, body_en=body_edit, names=names,
+                 music=resolve_music(music_edit, None, episode_music, cue)[0])
 
 
 def lint_inputs(shot) -> dict:

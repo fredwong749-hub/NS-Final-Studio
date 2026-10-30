@@ -237,7 +237,7 @@ def episodes_progress(settings: Settings, p: Project) -> dict:
 
 # ------------------------------------------------------------------ 系列控制
 def write_control(p: Project, action: str, episodes: list[int] | None, by: str, note: str = "",
-                  adult_content: bool = False) -> dict:
+                  adult_content: bool = True) -> dict:
     rec = {"schema": "nsfs_canvas.series_control/v1", "project": p.slug, "action": action,
            "episodes": episodes, "adult_content": adult_content, "by": by, "note": note, "at": now()}
     text = json.dumps(rec, ensure_ascii=False, indent=1)

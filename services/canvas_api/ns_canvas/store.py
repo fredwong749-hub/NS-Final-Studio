@@ -31,6 +31,12 @@ class Queue:
         _append(self.path, req.model_dump_json(by_alias=True))
         return req
 
+    def append_raw(self, rec: dict) -> dict:
+        """按集运行的队列项（nsfs_canvas.run_item/v1）：字段由调用方给定，原样追加。"""
+        import json
+        _append(self.path, json.dumps(rec, ensure_ascii=False))
+        return rec
+
     def cancel(self, req_id: str) -> RerenderRequest:
         st = self.state().get(req_id)
         if not st:

@@ -138,10 +138,11 @@ def test_series_control(env):
     c.post(f"{P}/projects/newdrama/series", json={"action": "start"})
     assert json.loads((base / "newdrama" / "series_control.json").read_text())["episodes"] is None
     assert len((base / "series_control.log.jsonl").read_text().splitlines()) == 1
-    assert m["adult_content"] is False
+    assert m["adult_content"] is True                     # 2026-10-30 起默认开
     r = c.post(f"{P}/projects/newdrama/series", json={"action": "start", "adult_content": True}).json()
     assert r["adult_content"] is True
     assert json.loads((base / "newdrama" / "series_control.json").read_text())["adult_content"] is True
+
     assert json.loads((base / "newdrama" / "series_control.log.jsonl").read_text().splitlines()[-1])["adult_content"] is True
     for bad in ("yes", 1, "true", None):
         assert c.post(f"{P}/projects/newdrama/series", json={"action": "start", "adult_content": bad}).status_code == 422

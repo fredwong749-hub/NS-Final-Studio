@@ -84,9 +84,23 @@ def shot_gpu3_dir(shot_id: str, slug: str) -> Path:
     return gpu3_root(slug) / ep / sn
 
 
+_PARENT_RESOLVED: dict[str, Path] = {}   # 镜头目录 resolve 缓存（文件名本身不是链接）
+_DATA_RESOLVED: dict[str, Path] = {}   # P.DATA.resolve() 缓存（Windows realpath 很慢，/api/episodes 每镜调多次）
+
+
 def _rel(p: Path) -> str | None:
+    key = str(P.DATA)
+    root = _DATA_RESOLVED.get(key)
+    if root is None:
+        root = _DATA_RESOLVED[key] = P.DATA.resolve()
+    par = str(p.parent)
+    rp = _PARENT_RESOLVED.get(par)
+    if rp is None:
+        if len(_PARENT_RESOLVED) > 8192:
+            _PARENT_RESOLVED.clear()
+        rp = _PARENT_RESOLVED[par] = p.parent.resolve()
     try:
-        return p.resolve().relative_to(P.DATA.resolve()).as_posix()
+        return (rp / p.name).relative_to(root).as_posix()
     except ValueError:
         return None
 
@@ -117,7 +131,8 @@ def _take(takes: dict, stage: str) -> dict | None:
     n = (takes.get("active") or {}).get(stage)
     if n is None:
         return None
-    return next((t for t in takes.get("takes", []) if t.get("stage") == stage and t.get("n") == n), None)
+    return next((t for t in takes.get("takes") or [] if isinstance(t, dict) and t.get("stage") == stage
+                 and t.get("n") == n), None)
 
 
 def _pick(cands: list[tuple[str | None, str]]) -> dict:
@@ -131,10 +146,39 @@ def _pick(cands: list[tuple[str | None, str]]) -> dict:
     return {"rel": None, "url": None, "mirrored": False, "why": ""}
 
 
+def gpu3_takes(shot_id: str, slug: str) -> dict:
+    """T21：gpu3 takes.json 的全部版本（同笔记本 Take 结构）+ 可显示的地址（镜像有用 /files，没有经桥）。只读：
+    gpu3 的当前版本由 gpu3 决定，画布只能看 / 对比 / 请 gpu3 重出"""
+    d = shot_gpu3_dir(shot_id, slug)
+    data = _read(d / "takes.json", None)
+    if not isinstance(data, dict) or not data:   # 封板修复：takes.json 不是对象（同步到一半 / 格式错）时不 500
+        return {"takes": [], "active": {}}
+    out = []
+    for t in data.get("takes") or []:
+        if not isinstance(t, dict):
+            continue
+        t = dict(t)
+        f, lf = t.get("file"), t.get("last_frame")
+        t["url"] = file_url(f) or (bridge_url(f) if f else None)
+        t["last_url"] = file_url(lf) or (bridge_url(lf) if lf else None)
+        t["source"] = "gpu3"
+        out.append(t)
+    act = data.get("active") if isinstance(data.get("active"), dict) else {}
+    return {"takes": out, "active": {k: v for k, v in act.items() if v is not None}}
+
+
 def gpu3_chain(shot_id: str, slug: str) -> dict:
     d = shot_gpu3_dir(shot_id, slug)
     takes = _read(d / "takes.json", {"takes": [], "active": {}}) or {"takes": [], "active": {}}
+    if not isinstance(takes, dict):
+        takes = {"takes": [], "active": {}}
+    if not isinstance(takes.get("active"), dict):
+        takes = {**takes, "active": {}}
+    takes = {**takes, "takes": [t for t in takes["takes"] if isinstance(t, dict)]
+             if isinstance(takes.get("takes"), list) else []}
     status = _read(d / "status.json", {}) or {}
+    if not isinstance(status, dict):          # 封板修复 P1：gpu3 镜像里格式不对的 status.json 曾让整集 500
+        status = {}
     img, vid = _take(takes, "image"), _take(takes, "video")
     rel = lambda name: _rel(d / name)
     first = _pick([(img.get("file") if img else None, f"take image v{img['n']}" if img else ""),
@@ -174,6 +218,8 @@ def gpu3_chain(shot_id: str, slug: str) -> dict:
 
 def shot_owner(shot_id: str, slug: str, chain: dict) -> tuple[str, str]:
     owner, why = project_owner(slug)
+    if owner == "canvas":   # 画布是主链路（W2，2026-10-30 夜）：gpu3 每镜 owner 只作历史
+        return owner, why
     if owner != "gpu3" and str(chain.get("owner") or "").lower() == "gpu3":
         return "gpu3", f"{chain['dir']}/status.json owner=gpu3"
     return owner, why
@@ -190,6 +236,8 @@ def continuity_item(chain: dict, prev_id: str | None) -> dict:
         return _item("continuity", False, "warn", f"未检查（与 {prev_id} 尾帧）", "none")
     if isinstance(c, str):
         verdict, reasons = c.lower(), []
+    elif not isinstance(c, dict):             # 封板修复 P1：列表 / 数字按未知结果处理，不 500
+        verdict, reasons = "", [str(c)]
     else:
         verdict = str(c.get("verdict") or c.get("status") or c.get("result") or "").lower()
         if not verdict and "ok" in c:
@@ -315,10 +363,35 @@ def post_rerender(req: dict, timeout: float = 8.0) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def fetch_media(rel: str, range_header: str | None, timeout: float = 20.0):
-    """桥 /api/gpu3/media/<相对 data 的路径>（支持 Range）→ urllib 响应对象"""
+BRIDGE_DOWN_S = 15.0          # 桥连不上后这段时间内只读请求直接失败（不再每个都等超时）
+_bridge_down_until = 0.0
+
+
+def bridge_down() -> bool:
+    return time.monotonic() < _bridge_down_until
+
+
+def mark_bridge(ok: bool) -> None:
+    global _bridge_down_until
+    _bridge_down_until = 0.0 if ok else time.monotonic() + BRIDGE_DOWN_S
+
+
+def fetch_media(rel: str, range_header: str | None, timeout: float = 5.0):
+    """桥 /api/gpu3/media/<相对 data 的路径>（支持 Range）→ urllib 响应对象。
+    超时 ≤5 s（每次连接 / 读块）；桥刚连不上时 15 s 内直接失败，避免一屏缩略图把 API 线程池占满"""
     from urllib.parse import quote
+    if bridge_down():
+        raise urllib.error.URLError(f"gpu3 桥刚才不可达（{BRIDGE_URL}），{int(BRIDGE_DOWN_S)} 秒内不重试")
     h = {"Range": range_header} if range_header else {}
     r = urllib.request.Request(f"{BRIDGE_URL}/api/gpu3/media/{quote(rel)}", headers=h)
-    return urllib.request.urlopen(r, timeout=timeout)
+    try:
+        resp = urllib.request.urlopen(r, timeout=timeout)
+    except urllib.error.HTTPError:
+        mark_bridge(True)
+        raise
+    except (urllib.error.URLError, OSError):
+        mark_bridge(False)
+        raise
+    mark_bridge(True)
+    return resp
 

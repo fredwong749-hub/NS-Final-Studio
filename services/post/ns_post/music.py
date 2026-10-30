@@ -133,6 +133,31 @@ def read_edit_music(renders: Path, ep: int, idx: int | None = None) -> str | Non
         return None
 
 
+def h3_music_shots(shots: list[dict], episode: dict, shot_edits: dict[int, str],
+                   episode_edit: str | None = None) -> dict[int, str]:
+    """哪些镜头的 H3 视频已经自带配乐（non_diegetic_music 不是 N/A）→ {镜号: 来源}。
+    项目方 2026-10-30 定（X-4 / E8）：配乐写进 H3，后期对这些镜头不再叠加 BGM。
+    取值规则与编译器同一个函数（ns_agent.h3_prompt.resolve_music）：本镜修改 > 剧本 H3 字段 > 静默提示 > 本集默认"""
+    from ns_agent import h3_prompt as H3
+    ep_default = episode_edit or episode.get("music_bgm") or ""
+    out: dict[int, str] = {}
+    for x in shots:
+        idx = int(x["index"])
+        script_music = H3.parse_h3(x["h3_prompt"])["fields"].get(H3.FIELDS[2]) if x.get("h3_prompt") else None
+        text, source = H3.resolve_music(shot_edits.get(idx), script_music, ep_default, x.get("music_cue") or "")
+        if text != H3.MUSIC:
+            out[idx] = source
+    return out
+
+
+def stale_timeline(meta: dict, n_shots: int) -> str | None:
+    """封板修复：epXX.json 的提示时间轴按另一版剧本（镜数不同）生成 → 返回原因，不能再按镜号套用"""
+    js = meta.get("shot_starts") or meta.get("shot_durations") or []
+    if meta.get("cues") and js and len(js) != n_shots:
+        return f"cue timeline was composed for {len(js)} shots, the episode now has {n_shots}"
+    return None
+
+
 def resolve_cues(shots: list[dict], starts: list[float], meta: dict, edits: dict[int, str]) -> list[Cue]:
     """One effective cue list, sorted by time.
 
@@ -141,7 +166,7 @@ def resolve_cues(shots: list[dict], starts: list[float], meta: dict, edits: dict
     those — see `ignored_edits`). Cue times are re-anchored to our shot starts when the json's shot_starts
     differ. Without json cues: ShotEdit.music > Shot.music_cue > default (enter at 0 s, intensity 1)."""
     timed: list[Cue] = []
-    if meta.get("cues"):
+    if meta.get("cues") and not stale_timeline(meta, len(shots)):   # 过期时间轴 → 改用剧本 / 修改的提示
         json_starts = meta.get("shot_starts") or []
         for d in meta["cues"]:
             c = _cue_from_json(d)
@@ -177,8 +202,11 @@ def resolve_cues(shots: list[dict], starts: list[float], meta: dict, edits: dict
     return sorted(timed, key=lambda c: c.start_s)
 
 
-def ignored_edits(meta: dict, edits: dict[int, str]) -> dict[int, str]:
-    """Owner music edits that a json cue timeline overrides (the BGM must be regenerated on gpu3 for them)."""
+def ignored_edits(meta: dict, edits: dict[int, str], n_shots: int | None = None) -> dict[int, str]:
+    """Owner music edits that a json cue timeline overrides (the BGM must be regenerated on gpu3 for them).
+    A stale timeline (n_shots given and different) overrides nothing: the edits are applied."""
+    if n_shots is not None and stale_timeline(meta, n_shots):
+        return {}
     return dict(edits) if meta.get("cues") else {}
 
 

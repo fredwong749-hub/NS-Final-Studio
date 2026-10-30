@@ -48,6 +48,15 @@ REF_RE = re.compile(r"REF-[A-Z]+-\d+")
 VARIANTS = ("clean", "worn", "front", "3q", "side", "back")
 
 
+def character_name(cid: str) -> str:
+    """显示名：人物管理页写的 assets/characters/<id>/character.json 的 name 优先，其次内置表，最后 id"""
+    try:
+        name = (json.loads((chars_dir() / cid / "character.json").read_text(encoding="utf-8")) or {}).get("name")
+    except (OSError, ValueError):
+        name = None
+    return name or CHARACTERS.get(cid, cid)
+
+
 def chars_dir() -> Path:
     return ASSETS_DIR / "characters"
 
@@ -56,12 +65,18 @@ def rel(p: Path) -> str:
     return p.resolve().relative_to(ROOT.resolve()).as_posix()
 
 
+_ASSETS_RESOLVED: dict[str, Path] = {}
+
+
 def file_url(relpath: str | None) -> str | None:
     """相对项目根的路径 → URL；只认 assets/ 下的真实文件（REF-xx 之类返回 None）"""
     if not relpath:
         return None
     p = (ROOT / relpath).resolve()
-    if not p.is_file() or not p.is_relative_to(ASSETS_DIR.resolve()):
+    root = _ASSETS_RESOLVED.get(str(ASSETS_DIR))
+    if root is None:   # 缓存：Windows realpath 慢，/api/episodes 每镜调多次
+        root = _ASSETS_RESOLVED[str(ASSETS_DIR)] = ASSETS_DIR.resolve()
+    if not p.is_file() or not p.is_relative_to(root):
         return None
     return f"/api/assets/file?path={relpath}&v={int(p.stat().st_mtime)}"
 
@@ -85,8 +100,20 @@ def _plate_view(name: str) -> str | None:
     return None
 
 
+ARCHIVED_MARKS = ("rejected", "superseded", "retired", "废弃", "弃用", "作废")
+
+
+def _archived(stem: str) -> bool:
+    """被否决 / 已取代的旧版本（master_v1_rejected、master_v2_CL_s0_superseded…）：留档，不参与母版 / 底板挑选"""
+    n = stem.lower()
+    return any(m in n for m in ARCHIVED_MARKS)
+
+
 def classify(kind: str | None, relparts: tuple[str, ...], stem: str) -> tuple[str, str]:
     """→ (group, category)。group: plate | expression | item | look | portrait | other"""
+    in_plates = len(relparts) > 1 and relparts[0] == "plates"
+    if _archived(stem) and (in_plates or (kind or "").lower().startswith("plate")):
+        return "other", "plate_archived"
     if kind:
         head, _, tail = kind.partition("/")
         head = head.lower().rstrip("s")
@@ -320,7 +347,7 @@ def character_assets(store: LookStore, cid: str, idx: AssetIndex, usage: dict) -
     in_use = [i for i in wardrobe if i["used_by_shots"] or i["used_by_looks"]]
     missing += [f"item/{i['slot']}/{i['id']}" for i in in_use if not i["has_image"]]
     return {
-        "id": cid, "name": CHARACTERS.get(cid, cid), "dir": f"assets/characters/{cid}",
+        "id": cid, "name": character_name(cid), "dir": f"assets/characters/{cid}",
         "dir_exists": (chars_dir() / cid).is_dir(), "face_url": idx.face_url(cid),
         "master": next((e for e in es if e["group"] == "plate" and e["category"] == "master"), None),
         "hero": idx.hero(cid),
@@ -345,8 +372,18 @@ def list_characters(store: LookStore = Depends(get_store)):
 
 @router.get("/api/assets/characters/{character}")
 def get_character(character: str, store: LookStore = Depends(get_store)):
+    """§E（W5）：另并入参考图组 asset_refs、生成记录 asset_gens、版本 asset_versions、出现集数 episodes"""
     cid = _char(character)
-    return character_assets(store, cid, AssetIndex(store), item_usage(store))
+    out = character_assets(store, cid, AssetIndex(store), item_usage(store))
+    from ns_api import asset_edit as AE
+    out.update(AE.character_extras(store, cid))
+    return out
+
+
+def resolve_asset_ref(asset_id: str):
+    """W2 frame-jobs refs[].asset_id → 图片路径（相对项目根）：资产参考图 ref_id 或资产主图（W5 ns_api.asset_edit）"""
+    from ns_api import asset_edit as AE
+    return AE.resolve_asset_ref(asset_id)
 
 
 @router.get("/api/assets/file")

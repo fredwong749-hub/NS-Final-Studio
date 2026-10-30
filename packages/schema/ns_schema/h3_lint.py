@@ -17,7 +17,7 @@ import math
 import re
 
 FPS = 24
-MIN_FRAMES, MAX_FRAMES = 124, 362
+MIN_FRAMES, MAX_FRAMES = 107, 362   # K4（production_rules_v3 §1.4）：4–15 s；4 s = 107 帧（原 124 = 5 s 起）
 ALIGN_PREFIX = "How the reference pictures align with the target video"
 FIELDS = ("integrated_multimodal_description", "overall_soundscape", "non_diegetic_music")
 STYLE_OPENING = "Live-action, cinematic, shallow depth of field,"
@@ -36,6 +36,11 @@ SPEAKER_RE = re.compile(r"\((S\d+(?:\s*,\s*S\d+)*)(?:\s*[,;][^)]*)?\)")
 CJK_RE = re.compile(r"[㐀-鿿豈-﫿　-〿＀-￯]")
 NEG_EN_RE = re.compile(r"\b(no|not|never|without|don't|doesn't|avoid|nothing|none|nobody|neither|nor)\b|n't\b", re.I)
 NEG_ZH_RE = re.compile(r"[不无没别勿禁]")
+# 配乐里的抽象情绪 / 情绪功能词（指南 §4.7：只写乐器、速度、节奏、强弱）
+MOOD_EN_RE = re.compile(r"\b(sad|happy|romantic|tense|tension|emotional|melancholy|melancholic|uplifting|mood|moody|"
+                        r"atmosphere|atmospheric|feeling|feelings|evokes?|conveys?|heartfelt|dramatic|mysterious|"
+                        r"suspenseful|joyful|sorrowful|nostalgic|ominous|hopeful|sentimental|passionate|sensual)\b",
+                        re.I)
 # 图像风格后缀 / 画质词（不属于 H3 正文；风格只写 STYLE_OPENING）
 STYLE_TERM_RE = re.compile(
     r"(?<![A-Za-z0-9])\d{1,2}K(?![A-Za-z0-9])|(?<![A-Za-z0-9])\d{2,3}\s?mm(?![A-Za-z])|(?<![A-Za-z])f/\s?\d+(?:\.\d+)?|"
@@ -58,7 +63,7 @@ def snap_frames(n: int) -> int:
 
 
 def frames_for_seconds(seconds: float) -> int:
-    """剧本 **时长** → 合法帧数：ceil(秒×24) 向上对齐到 17k+5，最少 124、最多 362（§6 对照表）"""
+    """剧本 **时长** → 合法帧数：ceil(秒×24) 向上对齐到 17k+5，最少 107（4 s）、最多 362（production_rules_v3 §1.4）"""
     n = snap_frames(max(MIN_FRAMES, math.ceil(float(seconds) * FPS - 1e-9)))
     return min(n, MAX_FRAMES)
 
@@ -203,8 +208,16 @@ def lint_h3(prompt: str, frames: int | None = None, intimate: bool = False, *, s
     else:
         out.append(_r("H3-A11", 4 <= eff <= 15.1, f"时长 {eff:.2f} s（应在 4–15 s）"))
 
-    # H3-A12 长度（待验证 → warn）
-    out.append(_r("H3-A12", len(text) <= MAX_CHARS, f"{len(text)} 字符（上限 {MAX_CHARS}，待验证）", level="warn"))
+    # H3-A12 长度（K：官方 API 硬上限 “maximum of 7000 characters per text” → block，production_rules_v3 §1.5）
+    out.append(_r("H3-A12", len(text) <= MAX_CHARS, f"{len(text)} 字符（上限 {MAX_CHARS}）"))
+
+    # H3-X2（R3，warn）：首句与末句不放 <d>（H3 片头约 0.5 s 乱语；成片 0.3 s 交叉溶解吃掉首尾）
+    # <d> \u91cc\u7684\u53e5\u53f7\u4e0d\u7b97\u65ad\u53e5\uff1b</d> \u4e4b\u540e\u7b97\u4e00\u53e5\u7ed3\u675f\uff08\u201c\u2026 says: <d>\u2026</d> She settles \u2026\u201d \u7684\u672b\u53e5\u4e0d\u542b\u53f0\u8bcd\uff09
+    masked = D_BLOCK_RE.sub(lambda mm: re.sub(r"[.!?]", "\u2024", mm.group(0)), _description(text))
+    sents = [x for part in re.split(r"(?<=</d>)\s+", masked) for x in _sentences(part)]
+    edge = [i for i in ({0, len(sents) - 1} if sents else set()) if "<d>" in sents[i]]
+    out.append(_r("H3-X2", not edge, "首句 / 末句里有 <d>（台词放在中间的句子）" if edge else "首尾句无台词",
+                  level="warn", sop_ref="production_rules_v3 §1.5"))
 
     # H3-D1 <d> 只放语言标签和原文
     blocks = D_BLOCK_RE.findall(text)
@@ -291,7 +304,8 @@ def lint_h3(prompt: str, frames: int | None = None, intimate: bool = False, *, s
             probs.append(f"soundscape 里写了男性声音：{'、'.join(male)}")
         out.append(_r("H3-D7", not probs, "；".join(probs) or "亲密镜单人发声"))
     elif n_spk > 1:
-        out.append(_r("H3-D7", False, f"{n_spk} 人发声（普通对话镜暂按官方双人语法，待项目方定）", level="warn"))
+        # 项目方 2026-10-30：“普通对话镜每镜只让一个人说话”（原为 warn）
+        out.append(_r("H3-D7", False, f"{n_spk} 人发声：普通对话镜每镜只让一个人说话（项目方 2026-10-30）"))
 
     # H3-S1 soundscape：1–4 句英文、一段、无 <d>
     probs = []
@@ -312,19 +326,33 @@ def lint_h3(prompt: str, frames: int | None = None, intimate: bool = False, *, s
     out.append(_r("H3-S2", bool(sound.strip()) and sound.strip() != "N/A",
                   "overall_soundscape 不能为空或 N/A" if not sound.strip() or sound.strip() == "N/A" else "有环境声"))
 
-    # H3-S3 配乐固定 N/A
-    out.append(_r("H3-S3", music.strip() == "N/A", "non_diegetic_music 固定写 N/A（配乐交给后期 BGM）"
-                  if music.strip() != "N/A" else "N/A"))
+    # H3-S3 配乐（项目方 2026-10-30：进 H3，指南 §4.7）：N/A 或 1–3 句英文，写乐器/速度/节奏/强弱，不写抽象情绪
+    m_txt = music.strip()
+    if m_txt == "N/A":
+        out.append(_r("H3-S3", True, "N/A（本镜无配乐）"))
+    elif not m_txt:
+        out.append(_r("H3-S3", False, "non_diegetic_music 不能为空：写 1–3 句英文配乐，或 N/A"))
+    elif CJK_RE.search(m_txt) or "<d>" in m_txt or "\n" in m_txt:
+        out.append(_r("H3-S3", False, "non_diegetic_music 要写成一段英文、不写台词 <d>"))
+    else:
+        ms = _sentences(m_txt)
+        moods = sorted({h.group(0).lower() for h in MOOD_EN_RE.finditer(m_txt)})
+        probs = ([f"应为 1–3 句，现有 {len(ms)} 句"] if not 1 <= len(ms) <= 3 else []) + \
+            ([f"出现抽象情绪词：{'、'.join(moods)}（改写乐器、速度、节奏、强弱）"] if moods else [])
+        out.append(_r("H3-S3", not probs, "；".join(probs) or f"{len(ms)} 句英文配乐",
+                      level="warn" if probs else "block"))
 
     # P-B1 帧数网格
     if frames is not None:
         probs = []
         if frames % 17 != 5 or not MIN_FRAMES <= frames <= MAX_FRAMES:
-            probs.append(f"{frames} 帧不在 17k+5 网格 / {MIN_FRAMES}–{MAX_FRAMES} 范围内")
+            probs.append(f"{frames} 帧不在 17k+5 网格 / {MIN_FRAMES}–{MAX_FRAMES} 范围内（4–15 s）")
         if seconds is not None and frames != frames_for_seconds(seconds):
             probs.append(f"时长 {seconds:g} s 查表应为 {frames_for_seconds(seconds)} 帧，实际 {frames}")
         out.append(_r("P-B1", not probs, "；".join(probs) or f"{frames} 帧（{sss(frames)} s）",
                       sop_ref="SOP §9A.3；§6 表"))
+    # 启发式（warn）：H3-A6 / A9 / A10 / D8 / D9（gpu3 合并进来的检查，见文件末尾）
+    out.extend(lint_h3_extra(text, dialogue=dialogue))
     return out
 
 
@@ -336,3 +364,214 @@ def lint_ok(results: list[dict], overrides: set[str] | frozenset = frozenset()) 
 def failed_rules(results: list[dict], overrides: set[str] | frozenset = frozenset(), level: str = "block") -> list[str]:
     return [r["rule_id"] for r in results
             if not r["ok"] and r.get("level") == level and r["rule_id"] not in overrides]
+
+# ---------------------------------------------------------------- 启发式规则（gpu3 提供，2026-10-30 合并）
+# 来源 data/incoming/h3_lint_extra.py（sha256 1a6536e7…，gpu3 shot_audit 的补充检查），原样并入：
+# H3-A6、H3-A9、H3-A10、H3-D8、H3-D9，全部 level=warn，等 claude-sop 锁定后再升 block。
+# lint_h3 默认带上它们（frame_texts / cutoff / scenetrans 只有直接调 lint_h3_extra 时才能给）。
+
+X_SPEAKER_RE = re.compile(r"\((S\d+(?:\s*,\s*S\d+)*)\)")   # gpu3 原版（比 SPEAKER_RE 严格）
+
+# §9A.1 运镜词汇 [G]: Zoom In/Out, Push In/Pull Out, Pan Left/Right, Truck Left/Right, Tilt Up/Down,
+# Pedestal Up/Down, Arc Shot, Tracking Shot, Static Shot — as natural verbs inside a sentence
+CAMERA_MOVES = {
+    "zoom": r"\bzoom(?:s|ing|ed)? (?:in|out)\b",
+    "push in": r"\bpush(?:es|ing|ed)? in\b",
+    "pull out": r"\bpull(?:s|ing|ed)? (?:out|back)\b",
+    "pan": r"\bpan(?:s|ning|ned)? (?:left|right|across|to)\b",
+    "truck": r"\btruck(?:s|ing|ed)? (?:left|right)\b",
+    "tilt": r"\btilt(?:s|ing|ed)? (?:up|down)\b",
+    "pedestal": r"\bpedestal(?:s|ing|ed)? (?:up|down)\b",
+    "arc": r"\barc(?:s|ing|ed)? (?:around|shot)\b|\barc shot\b",
+    "tracking": r"\btrack(?:s|ing|ed)? (?:alongside|with|her|him|them|beside|behind)\b|\btracking shot\b",
+}
+STATIC_RE = re.compile(r"\bstatic (?:medium |wide |close-up |close |full )?shot\b|\bthe camera (?:holds|stays) still\b", re.I)
+CAMERA_SUBJ_RE = re.compile(r"\b(?:the )?camera\b", re.I)
+OFFICIAL_AMP = re.compile(r"\bwith (?:small|large) amplitude\b|\bat (?:slow|fast) speed\b", re.I)
+LOOSE_CAMERA_ADVERB = re.compile(r"\b(?:the )?camera\b[^.]{0,40}\b(slowly|quickly|gently|rapidly|slightly|smoothly|"
+                                 r"gradually|steadily)\b", re.I)
+STACKED_LABEL = re.compile(r"(?:^|[.;,]\s*)(?:camera(?: movement)?\s*:\s*)?\(?(?:Zoom In|Zoom Out|Push In|Pull Out|"
+                           r"Pan Left|Pan Right|Truck Left|Truck Right|Tilt Up|Tilt Down|Pedestal Up|Pedestal Down|"
+                           r"Arc Shot|Tracking Shot|Static Shot)\)?\s*(?:[.;]|$)")
+
+# H3-A9: plot summary / abstract emotion / inner state words (not visible or audible)
+ABSTRACT_RE = re.compile(
+    r"\b(feel(?:s|ing|ings)?|felt|emotion(?:s|al|ally)?|realiz(?:e|es|ed|ing)|remember(?:s|ed|ing)?|memor(?:y|ies)|"
+    r"think(?:s|ing)?|thought(?:s)?|wonder(?:s|ed|ing)?|decid(?:e|es|ed|ing)|hope(?:s|d)?|wish(?:es|ed)?|"
+    r"secret(?:ly)?|innermost|inner (?:voice|thoughts?|world|feelings?|conflict|turmoil|self|struggle|peace|life|"
+    r"desires?|monologue)|soul|regret(?:s|ful)?|guilt(?:y)?|shame|ashamed|longing|yearn(?:s|ing)?|"
+    r"determin(?:ed|ation)|resolve[ds]?|destiny|fate|story|plot|meanwhile|years? (?:ago|later)|"
+    r"symboli[sz](?:e|es|ing)|represent(?:s|ing)|meaning|deep down|in her mind|in his mind|knows? that|"
+    r"because|so that|in order to)\b", re.I)
+
+# H3-A6: words that make a sentence part of the motion path rather than a static description
+DYNAMIC_RE = re.compile(
+    r"\b(\w+s (?:up|down|in|out|forward|back|away|toward|towards|across|around|aside|closer)|then|as|while|until|"
+    r"begins?|continues?|gradually|slowly|quickly|step(?:s|ping)?|walk(?:s|ing)?|turn(?:s|ing)?|lift(?:s|ing)?|"
+    r"lower(?:s|ing)?|raise(?:s|ing)?|lean(?:s|ing)?|reach(?:es|ing)?|move(?:s|ing)?|glance(?:s|ing)?|"
+    r"look(?:s|ing)?|smile(?:s|ing)?|open(?:s|ing)?|close(?:s|ing)?|pull(?:s|ing)?|push(?:es|ing)?|slide(?:s|ing)?|"
+    r"rise(?:s|ing)?|fall(?:s|ing)?|sit(?:s|ting)?|stand(?:s|ing)? up|kneel(?:s|ing)?|bend(?:s|ing)?|"
+    r"touch(?:es|ing)?|grab(?:s|bing)?|drop(?:s|ping)?|pick(?:s|ing)?|place(?:s|ing)?|shift(?:s|ing)?|"
+    r"tighten(?:s|ing)?|brush(?:es|ing)?|adjust(?:s|ing)?|tuck(?:s|ing)?|press(?:es|ing)?|blink(?:s|ing)?|"
+    r"nod(?:s|ding)?|shake(?:s|ing)?|sway(?:s|ing)?|approach(?:es|ing)?|hug(?:s|ging)?|notice(?:s|ing)?|"
+    r"says?|whisper(?:s|ing)?|breathe(?:s)?|settles?|travel(?:s|ling|ing)?|tilts?|pans?|zooms?|trucks?|"
+    r"pedestals?|arcs?|tracks?|pushes|pulls)\b", re.I)
+STATIC_HINT_RE = re.compile(r"\b(wearing|dressed in|with (?:long|short|a|an|her|his)|is|are|has|have|there is|"
+                            r"there are|background|room|walls?|light(?:ing)?|hair)\b", re.I)
+
+AGE_RE = re.compile(r"\b(young|middle-aged|mature|older|elderly|teen\w*|adult|\d+-year-old|in (?:her|his) "
+                    r"(?:twenties|thirties|forties|fifties))\b", re.I)
+GENDER_RE = re.compile(r"\b(woman|man|girl|boy|female|male|lady|gentleman)\b", re.I)
+PRESENCE_RE = re.compile(r"\b(on-screen|onscreen|off-screen|offscreen|in frame|in the frame|out of frame|"
+                         r"voiceover|visible|in shot|unseen)\b", re.I)
+TIMBRE_RE = re.compile(r"\b(\w+(?:, \w+)*,? (?:and )?(?:\w+ )?voice)\b", re.I)
+PACE_RE = re.compile(r"\b(slow(?:ly)?|fast|quick(?:ly)?|unhurried|hurried|measured|rapid(?:ly)?|drawn-out|"
+                     r"clipped|halting|breathless|leisurely|deliberate(?:ly)?|pace|tempo)\b", re.I)
+
+
+def _rx(rule_id: str, ok: bool, detail: str, level: str = "warn", sop_ref: str = SOP) -> dict:
+    return {"rule_id": rule_id, "sop_ref": sop_ref, "ok": bool(ok), "detail": detail, "msg": detail, "level": level}
+
+
+def _outside_dx(text: str) -> str:
+    return D_BLOCK_RE.sub(" ", text)
+
+
+def _sentences_x(text: str) -> list[str]:
+    return [x.strip() for x in re.split(r"(?<=[.!?])\s+", text.strip()) if x.strip()]
+
+
+def _description(prompt: str) -> str:
+    m = re.search(r"integrated_multimodal_description:\s*(.*?)(?:\n\s*\n\s*overall_soundscape:|$)", prompt, re.S)
+    return (m.group(1) if m else prompt).strip()
+
+
+def camera_moves(text: str) -> list[str]:
+    plain = _outside_dx(text)
+    out = [k for k, rx in CAMERA_MOVES.items() if re.search(rx, plain, re.I)]
+    if STATIC_RE.search(plain):
+        out.append("static")
+    return out
+
+
+def _ngrams(text: str, n: int = 3) -> set:
+    w = re.findall(r"[a-z]+", text.lower())
+    return {tuple(w[i:i + n]) for i in range(len(w) - n + 1)}
+
+
+def lint_h3_extra(prompt: str, *, frame_texts: list[str] | None = None, dialogue: list[str] | None = None,
+                  cutoff: list[str] | None = None, scenetrans: list[str] | None = None,
+                  a6_overlap: float = 0.5) -> list[dict]:
+    """frame_texts: English descriptions of Picture 1 / Picture 2 (H3-A6 overlap; skipped when not given);
+    cutoff / scenetrans: dialogue lines the script marks as cut off at the end of the shot / continuing across a cut."""
+    out: list[dict] = []
+    desc = _description(prompt)
+    plain = _outside_dx(desc)
+    sents = _sentences_x(plain)
+
+    # H3-A6 the body is the motion path, not two static descriptions (one anchor sentence allowed)
+    inner = sents[1:-1] if len(sents) > 2 else []
+    static = [s for s in inner if not DYNAMIC_RE.search(s) and STATIC_HINT_RE.search(s)]
+    probs = []
+    if len(static) > 1:
+        probs.append(f"{len(static)} static description sentences between the opening and closing: "
+                     + " | ".join(s[:50] for s in static[:3]))
+    for i, ft in enumerate(frame_texts or []):
+        g = _ngrams(ft)
+        if g:
+            share = len(_ngrams(plain) & g) / len(g)
+            if share > a6_overlap:
+                probs.append(f"repeats Picture {i + 1}'s description ({share:.0%} of its 3-grams; threshold 待定)")
+    out.append(_rx("H3-A6", not probs, "; ".join(probs) or "the body describes the motion path"))
+
+    # H3-A9 visible / audible only: no plot summary, no abstract emotion words
+    snd = re.search(r"overall_soundscape:\s*(.*?)(?:\n\s*\n|$)", prompt, re.S)
+    hits = sorted({m.group(0).lower() for m in ABSTRACT_RE.finditer(plain + " " + (snd.group(1) if snd else ""))})
+    out.append(_rx("H3-A9", not hits, f"not visible / audible: {hits}" if hits else "only visible / audible details"))
+
+    # H3-A10 camera motion: official vocabulary, natural sentence, official amplitude / speed words, one move
+    probs = []
+    moves = camera_moves(desc)
+    if len(moves) > 1:
+        probs.append(f"{len(moves)} camera moves {moves} (one per shot)")
+    if STACKED_LABEL.search(plain):
+        probs.append("camera move stacked as a label; write it as a natural action in the sentence")
+    loose = sorted({m.group(1).lower() for m in LOOSE_CAMERA_ADVERB.finditer(plain)})
+    if loose:
+        probs.append(f"camera speed / amplitude {loose}: use 'at slow speed' / 'at fast speed' / "
+                     "'with small amplitude' / 'with large amplitude'")
+    for s in sents:
+        if CAMERA_SUBJ_RE.search(s) and not camera_moves(s) and re.search(r"\bcamera (?:\w+s)\b", s, re.I) \
+                and not re.search(r"\bcamera (?:holds|stays|frames|captures|shows)\b", s, re.I):
+            probs.append(f"camera verb outside the official vocabulary: {s[:60]!r}")
+    out.append(_rx("H3-A10", not probs, "; ".join(probs) or f"camera: {moves or ['none']}"))
+
+    # H3-D8 a speaker's first appearance: age, gender, on / off screen, timbre, pace
+    probs = []
+    seen = []
+    for m in X_SPEAKER_RE.finditer(desc):
+        for sid in re.split(r"\s*,\s*", m.group(1)):
+            if sid in seen:
+                continue
+            seen.append(sid)
+            start = max(desc.rfind(". ", 0, m.start()), desc.rfind("</d>", 0, m.start()))
+            ctx = desc[start + 1:m.start()]
+            miss = [k for k, rx in (("age", AGE_RE), ("gender", GENDER_RE), ("on/off screen", PRESENCE_RE),
+                                    ("timbre", TIMBRE_RE), ("pace", PACE_RE)) if not rx.search(ctx)]
+            if miss:
+                probs.append(f"({sid}) first appears without {', '.join(miss)}")
+    out.append(_rx("H3-D8", not probs, "; ".join(probs) or "every speaker introduced"))
+
+    # H3-D9 <cutoff> / <scenetrans> exactly where the script marks them
+    probs = []
+    for tag, lines in (("<cutoff>", cutoff or []), ("<scenetrans>", scenetrans or [])):
+        for line in lines:
+            i = desc.find(line.strip())
+            if i < 0:
+                continue
+            j = desc.find("</d>", i)
+            near = desc[max(0, i - 60):(j + 60) if j >= 0 else i + 60]
+            if tag not in near:
+                probs.append(f"script marks {line[:16]!r} for {tag}; the tag is missing next to its <d>")
+        if tag in desc and not lines:
+            probs.append(f"{tag} used although the script marks no such line")
+    if scenetrans and "<scenetrans>" in desc and not re.search(r"\b(continues?|carries) (?:over|across)\b", plain, re.I):
+        probs.append("<scenetrans> without saying the audio continues across the cut")
+    out.append(_rx("H3-D9", not probs, "; ".join(probs) or "no cutoff / scenetrans needed"))
+    return out
+
+
+# ---------------------------------------------------------------- 人物表锚点 / 声线（R3，production_rules_v3 §1.5）
+
+def anchor_sentence(prompt: str) -> str:
+    """integrated_multimodal_description 的第一句（锚点句）"""
+    sents = _sentences(_description(prompt or ""))
+    return sents[0] if sents else ""
+
+
+def lint_h3_registry(prompt: str, *, anchors: list[tuple[str, str]] | None = None,
+                     voices: list[tuple[str, str]] | None = None) -> list[dict]:
+    """H3-X1：锚点句逐字包含每个“在画”角色的 EN外貌短语与当前造型 EN（anchors = [(说明, 短语)]，空短语跳过）；
+    H3-X3：第 n 个说话人 (Sn) 第一次出现的那一句逐字包含其 VOICE 声线短语（voices = [(说明, 短语)]，按首次开口顺序）。
+    只做字符串包含比对；不给就不查。"""
+    out: list[dict] = []
+    ref = "production_rules_v3 §1.5"
+    if anchors is not None:
+        first = anchor_sentence(prompt)
+        miss = [f"{who}：{ph}" for who, ph in anchors if ph and ph not in first]
+        out.append(_r("H3-X1", not miss, ("锚点句（首句）缺少：" + "；".join(miss)) if miss else "锚点句含人物表 EN 与造型 EN",
+                      sop_ref=ref))
+    if voices is not None:
+        desc = _description(prompt or "")
+        sents = _sentences(D_BLOCK_RE.sub(" <d></d> ", desc))
+        miss = []
+        for n, (who, ph) in enumerate(voices, start=1):
+            if not ph:
+                continue
+            tag = re.compile(rf"\(S{n}\b")
+            sent = next((x for x in sents if tag.search(x)), None)
+            if sent is None or ph not in sent:
+                miss.append(f"(S{n}) {who}：{ph}")
+        out.append(_r("H3-X3", not miss, ("说话人首次出现的句子缺少 VOICE：" + "；".join(miss)) if miss
+                      else "说话人首次出现含 VOICE 声线短语", sop_ref=ref))
+    return out

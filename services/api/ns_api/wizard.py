@@ -141,8 +141,9 @@ def validate_script(ctx: ProjectContext, write_import: bool = True) -> dict:
             if s.dialogue:
                 dlg_shots += 1
             lines += len(s.dialogue)
-            unparsed += sum(1 for d in s.dialogue if d.speaker_note is None and d.stage is None and
-                            not re.search(r"[“\"「]", s.dialogue_raw or ""))
+            # 没有引号的段导入器放在 dialogue_stage（T04：不算台词）；整段对白都没有引号才算“解析不出”
+            unparsed += (len(getattr(s, "dialogue_stage", None) or [])
+                         if not re.search(r"[“\"「]", s.dialogue_raw or "") else 0)
             spoken = "".join(d.text for d in s.dialogue) + (s.voiceover.text if s.voiceover else "")
             chars = len(re.sub(r"[\s，。！？、…“”\"「」,.!?~～]", "", spoken))
             if s.duration and chars / s.duration > DIALOGUE_CPS:

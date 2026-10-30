@@ -38,7 +38,7 @@ VIDEO_NEGATIVE = "人物变形，面部跳变，肢体崩坏，动作过快，�
 # 全部镜头追加的负面词：不要字幕/文字，不要灰暗低饱和
 STYLE_NEGATIVE = "字幕、文字、水印、logo、标题字、画面发灰、低饱和、暗沉脏色、过曝死白"
 
-# 成人镜头判定：命中任一关键词，或整集标了 🔴
+# 成人镜头判定：命中任一关键词、人工指定，或整集标了 🔴（adult_overrides "per_shot": true 时改看本镜【亲密声】）
 ADULT_KEYWORDS = (
     "乳环", "阴环", "铁珠", "珠串", "珠链", "阴唇", "乳头", "乳晕", "下体", "私处", "裸", "胴体",
     "做爱", "性爱", "交合", "插入", "抽插", "高潮", "射精", "内射", "精液", "口交", "舔", "三穴", "同填",
@@ -83,16 +83,18 @@ TOENAIL_TERM = "脚趾甲为2厘米长的性感美甲"     # B5：从林晚 DNA 
 
 
 def material_terms(text: str, lin_wan: bool = False, present: set[str] | None = None,
-                   bible: Bible | None = None) -> list[str]:
+                   bible: Bible | None = None, already: str | None = None) -> list[str]:
     """text = 镜头原文（img，含触发词）。返回需要追加的材质条目（visual_bible [[materials]] 顺序；原文已含则跳过）。
-    带 character 的条目（脚趾甲 → 林晚）只在该角色入镜时考虑：present 为入镜角色名集合；lin_wan=True 等同林晚入镜"""
+    带 character 的条目（脚趾甲 → 林晚）只在该角色入镜时考虑：present 为入镜角色名集合；lin_wan=True 等同林晚入镜。
+    already：去重对照文本（默认 = text）。尾帧按首帧原文 + 结束状态匹配，但只和尾帧自己的文字去重"""
     b = bible or load_bible()
     present = set(present or ()) | ({"林晚"} if lin_wan else set())
+    seen = text if already is None else already
     out = []
     for m in b.materials:
         if m.character and m.character not in present:
             continue
-        if any(w in text for w in m.match) and m.term not in text and m.term not in out:
+        if any(w in text for w in m.match) and m.term not in seen and m.term not in out:
             out.append(m.term)
     return out
 # 纠正器 1.1 的“网红脸”负面与 1.2 的蓝发色号锚定不启用：项目方要求以 assets/linwan 参考图为准（浅冰蓝长发、精致妆容）
@@ -241,6 +243,8 @@ class CompiledShot:
     h3_prompt_source: str = ""      # script | laptop
     h3_frames: int = 0
     h3_missing: list[str] = field(default_factory=list)   # 笔记本草稿缺英文的块：body / soundscape
+    h3_base_prompt: str = ""         # 覆盖前的 H3 提示词（剧本 / 笔记本草稿），项目方修改的起点
+    h3_override: dict | None = None  # 项目方覆盖（ShotEdit.h3_prompt_override + 元数据），apply_edit 填写
 
 
 def _strip_triggers(text: str, triggers: list[str]) -> str:
@@ -269,15 +273,47 @@ def _negative(*parts: str, bible: Bible | None = None) -> str:
     return text
 
 
+def auto_lora_triggers(root=None) -> dict[str, list[dict]]:
+    """config/auto_lora_triggers.json 的 characters（与 tools/import_script.py 同一份；导入时已补进 img_triggers）"""
+    from .bible import project_root
+    try:
+        d = json.loads((project_root(root) / "config" / "auto_lora_triggers.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return d.get("characters") or {}
+
+
+def identity_triggers(names, existing, bible: Bible | None = None) -> list[tuple[str, str, float]]:
+    """入镜角色的系统自动补 image LoRA（config/auto_lora_triggers.json，项目方 2026-10-30“系统自动补”）
+    → [(触发词, 文件, 强度)]，existing 里已有的跳过。导入器已经把它写进 img_triggers；编译器只保证它在首帧 / 尾帧
+    触发词最前、且本机没有该 LoRA 文件时也不被剥掉（gpu3 按 LORA_REGISTRY accepted + 触发词加载）"""
+    b = bible or load_bible()
+    out = []
+    for name, entries in auto_lora_triggers(b.root).items():
+        if name not in names:
+            continue
+        for e in entries:
+            t = str(e.get("trigger") or "")
+            if t and e.get("kind", "image") == "image" and t not in existing and t not in [x[0] for x in out]:
+                out.append((t, str(e.get("file") or ""), float(e.get("strength") or 1.0)))
+    return out
+
+
 def classify_adult(ep: Episode, shot: Shot, bible: Bible | None = None) -> list[str]:
+    """默认（项目方 2026-10-30 定“恢复整集判定”）：集标题 🔴 → 本集每镜 adult。
+    config/adult_overrides.json "per_shot": true 时改为逐镜：本镜【亲密声】非空、命中关键词、或人工指定"""
+    b = bible or load_bible()
     reasons = []
-    if ep.high_intensity:
-        reasons.append("整集🔴")
+    if not b.adult_per_shot():
+        if ep.high_intensity:
+            reasons.append("整集🔴")
+    elif (getattr(shot, "sound_intimate", "") or "").strip():
+        reasons.append("亲密声")
     text = " ".join(filter(None, [shot.img_prompt, shot.motion_prompt, shot.sound,
                                   shot.voiceover.text if shot.voiceover else "",
                                   *(e.text for e in shot.extras)]))
     reasons += [f"关键词:{k}" for k in ADULT_KEYWORDS if k in text]
-    if shot.id in (forced := _forced_adult(bible)):
+    if shot.id in (forced := _forced_adult(b)):
         reasons.append(f"人工指定:{forced[shot.id]}")
     return reasons
 
@@ -321,7 +357,8 @@ def _resolver(root):
     from .bible import _stat_key
     from .looks import LookStore
     looks_dir, script = Path(root) / "data" / "looks", Path(root) / "data" / "import" / "script_v2.json"
-    key = _stat_key([script, *(looks_dir / f"{n}.json" for n in ("wardrobe", "looks", "schedule"))])
+    key = _stat_key([script, *(looks_dir / f"{n}.json" for n in ("wardrobe", "looks", "schedule")),
+                     Path(root) / "data" / "renders" / "ref_overrides.json"])   # W5：画布参考覆盖索引
     hit = _RESOLVER_CACHE.get(str(root))
     if hit and hit[0] == key:
         return hit[1]
@@ -344,11 +381,13 @@ def episode_confirmed(res, episode: int, slug: str) -> bool:
 
 
 def look_fragments(shot: Shot, present: list[str], img_text: str, locks: list[str], bible: Bible,
-                   confirmed_only: bool = True) -> list[str]:
+                   confirmed_only: bool = True, canvas_only: bool = False) -> list[str]:
     """P2 造型注入：每个入镜角色一段“【名字造型】服装，鞋，妆，发”。
     只取 [looks] slots 指定的槽位；剧本原文、角色锁、材质规则里已有的文字不重复；
-    confirmed_only：只对项目方确认过的集计划（LookPatch.owner_confirmed_at）注入。"""
-    from ns_schema.looks import CHARACTER_SLUG
+    confirmed_only：只对项目方确认过的集计划（LookPatch.owner_confirmed_at）注入。
+    画布参考覆盖（W5，§6）：项目方在画布上换过的槽位（场景 / 本镜覆盖）总是注入——集未确认或 [looks] inject 关闭时
+    （canvas_only=True）只注入这些槽位。"""
+    from ns_schema.looks import CHARACTER_SLUG, SLOTS
 
     from .looks import item_in_shot
     res = _resolver(bible.root)
@@ -358,11 +397,16 @@ def look_fragments(shot: Shot, present: list[str], img_text: str, locks: list[st
     out = []
     for name in present:
         slug = CHARACTER_SLUG.get(name)
-        if not slug or (confirmed_only and not episode_confirmed(res, shot.episode, slug)):
+        if not slug:
+            continue
+        canvas = res.canvas_slots(slug, shot.episode, shot.id) if hasattr(res, "canvas_slots") else []
+        full = not canvas_only and not (confirmed_only and not episode_confirmed(res, shot.episode, slug))
+        if not full and not canvas:
             continue
         r = res.core(slug, shot.episode, shot.id)
         parts: list[str] = []
-        for slot in bible.looks_inject_slots:
+        use = set(bible.looks_inject_slots if full else ()) | set(canvas)
+        for slot in [s_ for s_ in SLOTS if s_ in use]:
             for iid in (r.slots[slot].items if slot in r.slots else []):
                 it = res.items.get(iid)
                 if not it or (it.prompt_policy == "when_in_shot" and not item_in_shot(it, shot)):
@@ -375,6 +419,25 @@ def look_fragments(shot: Shot, present: list[str], img_text: str, locks: list[st
         if parts:
             out.append(f"【{name}造型】" + "，".join(parts))
     return out
+
+
+SCENE_SEGMENT_FIELDS = (("名称", "name"), ("空间描述", "space"), ("时段", "time_of_day"), ("光线", "light"),
+                        ("固定陈设", "fixtures"))
+
+
+def scene_segment(shot: Shot, g: ScriptGlobals) -> str:
+    """S3（fredw-92/S-back）：首帧提示词的【场景】段。冒号前是系统字段名，冒号后逐字取剧本场景表（ScriptGlobals.scene_library）
+    与本镜 **场景** 行的细节，不加任何词；剧本没写场景 → ""（旧剧本提示词不变）"""
+    sid = getattr(shot, "scene_id", None)
+    detail = (getattr(shot, "scene_detail", None) or "").strip()
+    if not sid:
+        return ""
+    entry = next((e for e in getattr(g, "scene_library", None) or [] if e.scene_id == sid), None)
+    parts = [f"{label}：{getattr(entry, attr)}" for label, attr in SCENE_SEGMENT_FIELDS
+             if entry is not None and getattr(entry, attr)]
+    if detail:
+        parts.append(f"本镜场景：{detail}")
+    return "【场景】" + "；".join(parts) if parts else ""
 
 
 def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set[str],
@@ -413,6 +476,15 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
     lock_names = [c.name for c in g.character_locks]
     names = present_characters(shot, img_body, lock_names + [c.name for c in b.characters if c.name not in lock_names], b)
     rules = {c.name: c for c in b.characters}
+    # 出图身份 LoRA 触发词放在所有触发词最前（M10：pose_* 仍在其它触发词之后）。触发词总是保留（gpu3 按
+    # LORA_REGISTRY accepted + 触发词加载）；本机有该文件时才进 image_loras
+    ident = identity_triggers(names, (), b)                # 导入已补 / 剧本已写 / 本机缺文件被剥掉的，统一放最前
+    first = [t for t, _f, _s in ident]
+    img_kept = first + [t for t in img_kept if t not in first]
+    dropped = [t for t in dropped if t not in img_kept]
+    files = {f for _t, f, _s in ident}
+    img_loras = [(f, s) for _t, f, s in ident if f and f in available_loras] + \
+        [x for x in img_loras if x[0] not in files]
 
     def lock(c) -> str:
         extra = b.scrub(rules[c.name].identity_extra) if c.name in rules and rules[c.name].identity_extra else ""
@@ -421,14 +493,17 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
     # 《image提示词》§1.2：触发词最前，角色 DNA 锁紧随其后（纠正器 1.1：DNA 段提到最前）
     locks = [lock(c) for c in g.character_locks if c.name in names]
     inject = b.looks_inject if inject_looks is None else inject_looks
+    # [looks] inject 关闭时仍注入画布参考覆盖换过的槽位（W5：项目方在画布上选的资产，canvas_only）
     frags = look_fragments(shot, [c.name for c in g.character_locks if c.name in names], shot.img_prompt, locks, b,
-                           confirmed_only=inject_confirmed_only) \
-        if inject else []
+                           confirmed_only=inject_confirmed_only, canvas_only=not inject)
     material_text = shot.img_prompt + ("，" + "，".join(frags) if frags else "")
     materials = [m for m in material_terms(material_text, present=set(names), bible=b)
                  if not any(m in lk for lk in locks)]   # 锁里已有（旧剧本）就不重复
-    image_prompt = _join("，".join(img_kept), *locks, *frags, img_body,
-                         *corrector_terms(img_body, adult=bool(reasons), bible=b),
+    # 项目方 2026-10-30：规格词由系统自动补；写作者原文里已有同一条目就不再追加（去重）
+    scene_seg = scene_segment(shot, g)      # S3：【场景】段（场景表 + 本镜场景细节原文；旧剧本为空）
+    first_own = "，".join([*locks, *frags, img_body, scene_seg])
+    image_prompt = _join("，".join(img_kept), *locks, *frags, img_body, scene_seg,
+                         *(t for t in corrector_terms(img_body, adult=bool(reasons), bible=b) if t not in first_own),
                          *materials, boost_first, lens_term(image_style, b), image_style)
 
     motion_body = _strip_triggers(shot.motion_prompt, shot.motion_triggers)
@@ -439,22 +514,40 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
         v_sound, v_sound_src = shot.sound_h3, "script_h3"
     else:
         v_sound, v_sound_src = script_soundscape(shot.sound), "script"
-    # 背景音乐只在后期加（每集一条连续音轨），H3 的 non_diegetic_music 一律 N/A；音乐文字只给画布/后期
+    # 配乐（项目方 2026-10-30）：英文配乐进 H3 的 non_diegetic_music（本镜人工 > 剧本 H3 自带 > 本集默认 > N/A，
+    # 见 H3.resolve_music）；中文提示（剧本【配乐】/ 配乐行原文）仍只给画布/后期
     post_music = {"episode_prompt": episode_music or getattr(ep, "music", "") or "",
                   "episode_bgm": getattr(ep, "music_bgm", "") or "",
                   "shot_cue": music or getattr(shot, "music_cue", "") or ""}
     post_music["source"] = ("edit" if music or episode_music else
                             "script" if any(post_music.values()) else "none")
-    v_music, v_music_src = "N/A", "fixed"
+    ep_music_default = episode_music or getattr(ep, "music_bgm", "") or ""
     # 剧本的 motion 后缀已含画面风格（无字幕等）时不再追加 [look.video].style
     video_style = "" if "无字幕" in g.motion_suffix else b.video_style
+    # H3 提示词只用剧本（**H3提示词** / 【H3 audio】/ sound 行）；画布修改只能经项目方覆盖（ShotEdit.h3_prompt_override，
+    # 由 apply_edit 换上），ShotEdit.soundscape 只影响旧版拼接；配乐例外：英文 ShotEdit.music / 本集配乐直接进 H3
+    h3_sound = shot.sound_h3 if getattr(shot, "sound_h3", "") else script_soundscape(shot.sound)
+    h3 = H3.for_shot(shot, h3_sound,
+                     names=tuple(lock_names + [c.name for c in b.characters if c.name not in lock_names]),
+                     music_edit=music, episode_music=ep_music_default)
+    v_music, v_music_src = H3.resolve_music(music, H3.parse_h3(shot.h3_prompt)["fields"].get(H3.FIELDS[2])
+                                            if getattr(shot, "h3_prompt", "") else None, ep_music_default,
+                                            getattr(shot, "music_cue", "") or "")
     legacy_video_prompt = _join("，".join(vid_kept), motion_body, g.motion_suffix, video_style, b.video_tail) \
         + soundscape_block(v_sound, v_music)
-    h3 = H3.for_shot(shot, v_sound, soundscape_edited=v_sound_src == "edit",
-                     names=tuple(lock_names + [c.name for c in b.characters if c.name not in lock_names]))
 
     end = end_state(motion_body)
-    last_prompt = _join(b.last_frame_keep + end, *locks, *frags, boost_last, lens_term(image_style, b), image_style) \
+    # 尾帧与首帧同一套规格词（G1，2026-10-30）：触发词、纠正器条目、材质条目按首帧原文 + 结束状态匹配，
+    # 规则同首帧；否则尾帧的鞋跟 / 漆皮 / 脚趾甲 / 特写 / 暗场 / 安全镜句缺失，首尾帧造型对不上
+    # 去重只对照尾帧自己的文字（结束状态 + 锁 + 造型）：首帧原文写过的条目尾帧照样要补，结束状态里写过的不再加
+    last_own = "，".join([end, *locks, *frags])
+    last_materials = [m for m in material_terms(material_text + "，" + end, present=set(names), bible=b,
+                                                already=last_own)
+                      if not any(m in lk for lk in locks)]
+    last_prompt = _join("，".join(img_kept), b.last_frame_keep + end, *locks, *frags,
+                        *(t for t in corrector_terms(img_body + "，" + end, adult=bool(reasons), bible=b)
+                          if t not in last_own),
+                        *last_materials, boost_last, lens_term(image_style, b), image_style) \
         if end or boost_last else ""
 
     safe_negative = "" if reasons else b.safe_negative
@@ -477,7 +570,12 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
 
 def present_characters(shot: Shot, img_body: str, names: list[str], bible: Bible | None = None) -> list[str]:
     """首帧画面里出现的角色（按 names 顺序）。规则：[characters.*].detect 命中；地点所有格的主人又以“他”出现；
-    写“她”且 motion 带 detect_she_with_trigger（林晚 = lnwan01）"""
+    写“她”且 motion 带 detect_she_with_trigger（林晚 = lnwan01）。
+    R3（production_rules_v3 §2.5 / 第五部分 4.1）：剧本写了 `**人物**` 行时直接用它（在画 + 局部），不再按关键词猜"""
+    cast = getattr(shot, "cast", None)
+    if cast is not None:
+        vis = {c.name for c in cast if c.visible}
+        return [n for n in names if n in vis]
     b = bible or load_bible()
     people_text, possessive = without_possessive_places(img_body, b)
     rules = {c.name: c for c in b.characters}

@@ -27,11 +27,15 @@ from pathlib import Path
 from ns_agent import h3_prompt as H3
 from ns_agent.compiler import CompiledShot, boost_text, compile_shot, insert_before_style, soundscape_block
 from ns_schema.h3_lint import frames_for_seconds
+
+# 只能经项目方专用接口写的 ShotEdit 字段（普通 PUT /edit 一律沿用已存值）
+H3_OVERRIDE_FIELDS = ("h3_prompt_override", "audit_override_requests")
 from ns_schema.edits import EpisodeEdit, ShotEdit, Take
 from ns_schema.script import ScriptImport
 
 from . import refs as R
 from . import workflows as W
+from . import comfy_client as CC
 from .comfy_client import ComfyClient, ComfyError, ComfyUnavailable
 
 ROOT = Path(os.environ.get("NS_PROJECT_ROOT") or Path(__file__).resolve().parents[3])  # T42：子进程可指向 projects/<slug>
@@ -40,14 +44,14 @@ RENDERS = DATA / "renders"
 SCRIPT_JSON = DATA / "import" / "script_v2.json"
 
 IMAGE_SIZE = (1088, 1920)
-VIDEO_SIZE = (576, 1024)
+VIDEO_SIZE = (768, 1344)   # SOP S4 P-B3 锁定（短边 768、面积 ≤768×1344、32 的倍数）；旧值 576×1024
 VIDEO_FRAMES = 243          # 10 秒；H3 帧数须落在 17k+5 网格上
 
 # 首帧锁脸：编译后的首帧提示词含角色锁【名字】时，用该角色的参考图做 Qwen 2.1 单参考编辑
 ASSETS = ROOT / "assets"
 CHARACTER_REFS = {"林晚": ASSETS / "characters" / "lin_wan" / "lin_wan.png"}
 FACE_LOCK_DEFAULT = True    # 2026-10-30 项目方要求林晚对齐 assets/linwan，并已确认参考图来源（config/face_reference.json）
-# 参考图来源审批：approved_for_adult 不为 true 时，参考编辑只能用于非成人镜头，且不作为默认
+# 参考图来源审批（历史字段；2026-10-30 取消过滤器后不再拦成人镜头）
 FACE_REF_APPROVAL = ROOT / "config" / "face_reference.json"
 # 只说明参考图的用途（技术指令），剧本提示词原文接在后面不改
 # 非成人镜头：Turbo 在 CFG 1 下负面词无效，模型会在剧本没写衣着时自行加裸露。
@@ -113,22 +117,17 @@ def snap_frames(frames: int) -> int:
 
 
 def face_ref_approved() -> bool:
-    try:
-        cfg = json.loads(FACE_REF_APPROVAL.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return False
-    return cfg.get("approved_for_adult") is True and bool(cfg.get("approved_by"))
+    """参考图来源审批只作展示；2026-10-30 取消成人过滤器后不再拦成人镜头。"""
+    return True
 
 
 def face_lock_default() -> bool:
-    return FACE_LOCK_DEFAULT and face_ref_approved()
+    return FACE_LOCK_DEFAULT
 
 
 def check_face_lock_allowed(c: CompiledShot):
-    """参考编辑的硬闸门：成人镜头在来源未批准前一律拒绝（不静默退回 t2i）"""
-    if c.adult and not face_ref_approved():
-        raise ComfyError(f"{c.shot_id} 是成人镜头，角色参考图来源未批准（config/{FACE_REF_APPROVAL.name} "
-                         "approved_for_adult 不为 true 或缺 approved_by），拒绝使用参考编辑锁脸")
+    """参考编辑对所有镜头开放；保留函数给旧调用方。"""
+    return None
 
 
 def face_reference(c: CompiledShot) -> tuple[str, Path] | None:
@@ -143,10 +142,8 @@ def image_model(c: CompiledShot) -> W.QwenModel:
 
 
 def image_negative(c: CompiledShot) -> str:
-    if c.adult:
-        return c.image_negative
-    missing = [w for w in NON_ADULT_NEGATIVE_EXTRA.split("、") if w not in c.image_negative]
-    return "、".join([c.image_negative.rstrip("、，, "), *missing]) if missing else c.image_negative
+    """所有镜头同一负面词：2026-10-30 项目方取消成人过滤器后不再给非成人镜头追加防裸露词。"""
+    return c.image_negative
 
 
 def qc_with_vlm(client):
@@ -191,6 +188,8 @@ def find_shot(script: ScriptImport, shot_id: str):
 
 def next_shot_id(script: ScriptImport, shot_id: str) -> str | None:
     ids = [s.id for ep in script.episodes for s in ep.shots]
+    if shot_id not in ids:   # fredw-92/B-fix：不在剧本里（换剧本后的旧镜头）→ None，别在后台线程里 ValueError
+        return None
     i = ids.index(shot_id)
     return ids[i + 1] if i + 1 < len(ids) else None
 
@@ -204,8 +203,21 @@ def _read_json(p: Path, default):
 
 
 def _write_json(p: Path, obj):
+    """封板修复 P1：唯一临时文件 + os.replace（被读到一半 / 进程崩溃都不会留下截断的 edits/takes/review.json）"""
+    import tempfile
+    from ns_agent.state_timeline import _replace_retry
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+    fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=p.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(obj, ensure_ascii=False, indent=2))
+        _replace_retry(tmp, p)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 # ------------------------------------------------------------------ 修改与版本
@@ -218,6 +230,35 @@ def save_edit(shot_id: str, edit: ShotEdit) -> ShotEdit:
     edit.updated_at = now()
     _write_json(shot_dir(shot_id) / "edits.json", edit.model_dump())
     return edit
+
+
+import threading  # noqa: E402
+
+_SHOT_LOCKS: dict[str, threading.RLock] = {}
+_SHOT_LOCKS_GUARD = threading.Lock()
+
+
+def shot_lock(shot_id: str) -> threading.RLock:
+    """封板修复：每镜一把可重入锁。takes.json / edits.json 的读-改-写（渲染线程 _add_take、API 设当前 / 上传 / 改写）
+    都在这把锁里做，避免互相覆盖、并发上传拿到同一个 n。只管本进程。"""
+    with _SHOT_LOCKS_GUARD:
+        lk = _SHOT_LOCKS.get(shot_id)
+        if lk is None:
+            lk = _SHOT_LOCKS[shot_id] = threading.RLock()
+        return lk
+
+
+_EP_LOCKS: dict[int, threading.RLock] = {}
+
+
+def episode_lock(ep: int) -> threading.RLock:
+    """fredw-92/B-fix：每集一把可重入锁。episode_edit.json 的读-改-写（PUT /api/episodes/{n}/edit、
+    refs/apply scope=scene）都在这把锁里做。只管本进程。"""
+    with _SHOT_LOCKS_GUARD:
+        lk = _EP_LOCKS.get(int(ep))
+        if lk is None:
+            lk = _EP_LOCKS[int(ep)] = threading.RLock()
+        return lk
 
 
 def load_takes(shot_id: str) -> dict:
@@ -258,9 +299,13 @@ def project_gate_message() -> str | None:
 
 
 def gpu3_owns(shot_id: str) -> str | None:
-    """返回 gpu3 负责的原因：项目规则，或该镜 data/renders_gpu3/epXX/SN/status.json 写了 owner=gpu3"""
-    if project_owner() == "gpu3":
+    """返回 gpu3 负责的原因：项目规则，或该镜 data/renders_gpu3/epXX/SN/status.json 写了 owner=gpu3。
+    项目 owner=canvas（2026-10-30 夜，fredw-92/W2：画布交互改图是主链路）时一律放行，gpu3 每镜 owner 只作历史。"""
+    owner = project_owner()
+    if owner == "gpu3":
         return PROJECT_GATE_MSG
+    if owner == "canvas":
+        return None
     try:
         ep, sn = shot_id.split("-")
     except ValueError:
@@ -277,10 +322,6 @@ def check_not_gpu3(shot_id: str):
     why = gpu3_owns(shot_id)
     if why:
         raise Gpu3Owned(f"{shot_id}：{why}")
-
-
-class AdultShotRejected(ValueError):
-    pass
 
 
 EXTERNAL_SOURCES = ("gpu3", "owner", "upload")   # 不是本机出的版本（gpu3 / 项目方上传）
@@ -304,26 +345,22 @@ def shot_is_adult(shot_id: str) -> bool:
 
 
 def set_active(shot_id: str, stage: str, n: int):
-    data = load_takes(shot_id)
-    take = next(t for t in data["takes"] if t["stage"] == stage and t["n"] == n)
-    if (take.get("qc") or {}).get("nudity"):
-        raise QCRejected(f"{shot_id} {stage} v{n} 未通过裸露质检，不能设为当前版本")
-    # QA-02：成人镜头的首帧/尾帧/视频由 gpu3 出；本机出的版本不能设为当前（项目方上传或 gpu3 的除外）
-    if stage in ("image", "last", "video") and take.get("source") not in EXTERNAL_SOURCES and shot_is_adult(shot_id):
-        raise AdultShotRejected(f"{shot_id} 是成人镜头，本机版本 {stage} v{n} 不能设为当前（由 gpu3 出）")
-    data["active"][stage] = n
-    _save_takes(shot_id, data)
-    d = shot_dir(shot_id)
-    if stage == "image":
-        shutil.copyfile(DATA / take["file"], d / "frame.png")
-    elif stage == "last":
-        shutil.copyfile(DATA / take["file"], d / "last.png")
-    else:
-        shutil.copyfile(DATA / take["file"], d / "video.mp4")
-        if take.get("last_frame"):
-            shutil.copyfile(DATA / take["last_frame"], d / "video_last.png")
-            if "last" not in data["active"]:   # 独立尾帧优先；没有时沿用旧行为
-                shutil.copyfile(DATA / take["last_frame"], d / "last.png")
+    with shot_lock(shot_id):   # 封板修复：每镜锁
+        data = load_takes(shot_id)
+        take = next(t for t in data["takes"] if t["stage"] == stage and t["n"] == n)
+        data["active"][stage] = n
+        _save_takes(shot_id, data)
+        d = shot_dir(shot_id)
+        if stage == "image":
+            shutil.copyfile(DATA / take["file"], d / "frame.png")
+        elif stage == "last":
+            shutil.copyfile(DATA / take["file"], d / "last.png")
+        else:
+            shutil.copyfile(DATA / take["file"], d / "video.mp4")
+            if take.get("last_frame"):
+                shutil.copyfile(DATA / take["last_frame"], d / "video_last.png")
+                if "last" not in data["active"]:   # 独立尾帧优先；没有时沿用旧行为
+                    shutil.copyfile(DATA / take["last_frame"], d / "last.png")
 
 
 def stamp_versions(shot_id: str, take: Take) -> Take:
@@ -341,61 +378,62 @@ def stamp_versions(shot_id: str, take: Take) -> Take:
 
 
 def _add_take(shot_id: str, take: Take, activate: bool = True):
-    stamp_versions(shot_id, take)
-    data = load_takes(shot_id)
-    data["takes"].append(take.model_dump())
-    _save_takes(shot_id, data)
-    if activate:
-        set_active(shot_id, take.stage, take.n)
+    with shot_lock(shot_id):   # 封板修复：每镜锁
+        stamp_versions(shot_id, take)
+        data = load_takes(shot_id)
+        used = {t["n"] for t in data["takes"] if t["stage"] == take.stage}
+        if take.n in used:   # 封板修复：渲染线程开工时取的号在出图期间被上传占了 → 顺延（文件名不变，只改版本号）
+            take.n = max(used) + 1
+        data["takes"].append(take.model_dump())
+        _save_takes(shot_id, data)
+        if activate:
+            set_active(shot_id, take.stage, take.n)
 
 
 def deactivate(shot_id: str, stage: str):
-    """撤掉当前版本：有通过质检的旧版本就退回到最新的那个，否则清空（批量脚本会重新出）"""
-    data = load_takes(shot_id)
-    clean = [t for t in data["takes"] if t["stage"] == stage and not (t.get("qc") or {}).get("nudity")
-             and t["n"] != data["active"].get(stage)]
-    if clean:
-        set_active(shot_id, stage, clean[-1]["n"])
-        return clean[-1]["n"]
-    data["active"].pop(stage, None)
-    _save_takes(shot_id, data)
-    d = shot_dir(shot_id)
-    files = {"image": ("frame.png",), "last": ("last.png",), "video": ("video.mp4", "video_last.png")}[stage]
-    if stage == "video" and "last" not in data["active"]:
-        files += ("last.png",)
-    for f in files:
-        (d / f).unlink(missing_ok=True)
-    return None
+    """撤掉当前版本：有旧版本就退回到最新的那个，否则清空（批量脚本会重新出）"""
+    with shot_lock(shot_id):   # 封板修复：每镜锁
+        data = load_takes(shot_id)
+        clean = [t for t in data["takes"] if t["stage"] == stage
+                 and t["n"] != data["active"].get(stage)]
+        if clean:
+            set_active(shot_id, stage, clean[-1]["n"])
+            return clean[-1]["n"]
+        data["active"].pop(stage, None)
+        _save_takes(shot_id, data)
+        d = shot_dir(shot_id)
+        files = {"image": ("frame.png",), "last": ("last.png",), "video": ("video.mp4", "video_last.png")}[stage]
+        if stage == "video" and "last" not in data["active"]:
+            files += ("last.png",)
+        for f in files:
+            (d / f).unlink(missing_ok=True)
+        return None
 
 
 def qc_sweep(shot_id: str, adult: bool, qc_fn=None, recheck: bool = False, only_active: bool = False
              ) -> list[dict]:
-    """给非成人镜头的已有首帧补做裸露质检；当前版本不合格就撤掉。返回被拦下的 take 列表"""
-    if adult:
-        return []
+    """给已有首帧补做裸露质检；只记录，不撤版本（成人过滤器已取消）。返回被标记的 take 列表"""
     qc_fn = qc_fn or _default_qc
-    data = load_takes(shot_id)
-    flagged = []
-    for t in data["takes"]:
-        if only_active and data["active"].get(t["stage"]) != t["n"]:
-            continue
-        if t["stage"] not in ("image", "last") or (t.get("qc") and not recheck):
-            if (t.get("qc") or {}).get("nudity"):
+    with shot_lock(shot_id):   # 封板修复：每镜锁
+        data = load_takes(shot_id)
+        flagged = []
+        for t in data["takes"]:
+            if only_active and data["active"].get(t["stage"]) != t["n"]:
+                continue
+            if t["stage"] not in ("image", "last") or (t.get("qc") and not recheck):
+                if (t.get("qc") or {}).get("nudity"):
+                    flagged.append(t)
+                continue
+            t["qc"] = qc_fn(DATA / t["file"])
+            if t["qc"]["nudity"]:
                 flagged.append(t)
-            continue
-        t["qc"] = qc_fn(DATA / t["file"])
-        if t["qc"]["nudity"]:
-            flagged.append(t)
-            _log_qc(shot_id, t)
-    _save_takes(shot_id, data)
-    for stage in ("image", "last"):
-        act = data["active"].get(stage)
-        if act is not None and any(t["n"] == act and t["stage"] == stage for t in flagged):
-            deactivate(shot_id, stage)
-    return flagged
+                _log_qc(shot_id, t)
+        _save_takes(shot_id, data)
+        return flagged
 
 
 def _next_n(shot_id: str, stage: str) -> int:
+    """取下一个版本号；调用方要连同写入 takes.json 一起放在 shot_lock(shot_id) 里（封板修复）"""
     return 1 + max((t["n"] for t in load_takes(shot_id)["takes"] if t["stage"] == stage), default=0)
 
 
@@ -416,11 +454,14 @@ def apply_edit(c: CompiledShot, e: ShotEdit, style: str = "") -> CompiledShot:
         c.last_prompt = e.last_prompt if not c.boost_last or c.boost_last in e.last_prompt             else insert_before_style(e.last_prompt, c.boost_last, style)
     if e.image_negative:
         c.image_negative = e.image_negative
-    # SOP §9A：H3 提示词只允许改正文（h3_body）；环境声（soundscape）在编译时已换进去；对齐句、配乐 N/A 固定。
-    if e.h3_body and e.h3_body.strip():
-        c.video_prompt = H3.replace_field(c.video_prompt, "integrated_multimodal_description", e.h3_body)
-        if H3._english(e.h3_body):
-            c.h3_missing = [k for k in c.h3_missing if k != "body"]
+    # SOP §9A：H3 提示词只认项目方覆盖（PUT /api/shots/{id}/h3-override 写入，带确认原话）；
+    # 通过 lint 的（renderable）才替换出视频用的 video_prompt，草稿（draft）只记录、不出视频
+    c.h3_base_prompt = c.h3_base_prompt or c.video_prompt
+    if e.h3_prompt_override:
+        c.h3_override = e.h3_prompt_override.model_dump()
+        if e.h3_prompt_override.status == "renderable":
+            c.video_prompt = e.h3_prompt_override.text
+            c.h3_missing = []
     # 旧版中文视频提示词的人工修改（整段 / 运镜 / 表情）只作用在 legacy_video_prompt（历史），不进 H3
     legacy = c.legacy_video_prompt
     if e.video_prompt:
@@ -456,7 +497,10 @@ def shot_looks_map(shot_id: str) -> dict[str, dict]:
     """data/looks 的解析结果 → {角色名: {look_id, makeup: [...], items: [...]}}；读不到就空（退回 M0 底板）"""
     try:
         from ns_agent.looks import LookStore
-        sl = LookStore().shot_looks(shot_id)
+        from ns_agent.ref_overrides import canvas_part_images
+        store = LookStore()
+        res = store.resolver()
+        sl = res.shot_looks(store.shot(shot_id))
     except Exception:  # noqa: BLE001
         return {}
     out = {}
@@ -465,6 +509,12 @@ def shot_looks_map(shot_id: str) -> dict[str, dict]:
         makeup = r.slots["makeup"].items if "makeup" in r.slots else []
         out[name] = {"look_id": r.look_id, "makeup": makeup,
                      "items": [i for slot in r.slots.values() for i in slot.items]}
+        try:   # W5：画布参考覆盖换过的单件 → 该单品的图优先当参考（refs.plan_refs part_images）
+            parts = canvas_part_images(res, r.character, sl.episode, shot_id, ROOT)
+        except Exception:  # noqa: BLE001
+            parts = {}
+        if parts:
+            out[name]["part_images"] = parts
     return out
 
 
@@ -611,16 +661,15 @@ def _run_candidates(client, shot_id: str, stage: str, c: CompiledShot, *, build_
                 rel = f"{rel_dir}/{stage}_{n:03d}.png"
                 grade = grade_fn(DATA / raw, DATA / rel)
             qc = qc_fn(DATA / rel) if qc_fn else None
-            sc = score_fn(DATA / rel, qc) if score_fn and not (qc and qc["nudity"]) else None
+            sc = score_fn(DATA / rel, qc) if score_fn else None
             take = Take(n=n, stage=stage, file=rel, raw_file=raw if grade_fn else None, seed=seed, prompt=prompt,
                         negative=meta.get("negative", ""), seconds=round(secs, 1), created_at=now(),
                         workflow=meta["workflow"](ctx), reference=ctx.get("reference"),
-                        references=ctx.get("references"), qc=qc, grade=grade, score=sc, round=rnd)
+                        references=ctx.get("references"), qc=qc, grade=grade, score=sc, round=rnd,
+                        remote=CC.remote_info(client, DATA / raw))
             _add_take(shot_id, take, activate=False)
-            if qc and qc["nudity"]:
+            if qc and qc["nudity"]:   # 只记录：2026-10-30 取消成人过滤器后裸露不再否决
                 _log_qc(shot_id, take.model_dump())
-                last_err = ComfyError(f"裸露质检不通过 v{n}: {qc.get('hits')} clip_bare={qc.get('clip_bare')}")
-                continue
             got_round.append(take)
         for t in got_round:
             if best is None or (t.score or {}).get("total", 1.0) > (best.score or {}).get("total", 1.0):
@@ -632,17 +681,18 @@ def _run_candidates(client, shot_id: str, stage: str, c: CompiledShot, *, build_
             missing = (best.score or {}).get("missing", [])
     if best is None:
         raise ComfyError(f"{shot_id} {stage} 失败: {last_err}")
-    set_active(shot_id, stage, best.n)
-    data = load_takes(shot_id)
-    review = data.setdefault("review", {})
-    total = (best.score or {}).get("total")
-    if total is not None and total < SCORE_PASS:
-        review[stage] = {"at": now(), "best": best.n, "total": total, "pass": SCORE_PASS,
-                         "missing": (best.score or {}).get("missing", []), "notes": notes,
-                         "reason": f"{rounds} 轮后最高分 {total} 低于 {SCORE_PASS}"}
-    else:
-        review.pop(stage, None)
-    _save_takes(shot_id, data)
+    with shot_lock(shot_id):   # 封板修复：每镜锁（与 API 设当前 / 上传互斥）
+        set_active(shot_id, stage, best.n)
+        data = load_takes(shot_id)
+        review = data.setdefault("review", {})
+        total = (best.score or {}).get("total")
+        if total is not None and total < SCORE_PASS:
+            review[stage] = {"at": now(), "best": best.n, "total": total, "pass": SCORE_PASS,
+                             "missing": (best.score or {}).get("missing", []), "notes": notes,
+                             "reason": f"{rounds} 轮后最高分 {total} 低于 {SCORE_PASS}"}
+        else:
+            review.pop(stage, None)
+        _save_takes(shot_id, data)
     _clear_error(shot_id)
     return best
 
@@ -651,13 +701,16 @@ def render_image(client: ComfyClient, script: ScriptImport, shot_id: str, *, see
                  attempts: int = 2, timeout_s: float = 900, size=IMAGE_SIZE,
                  face_lock: bool | None = None, qc_fn=None, candidates: int | None = None,
                  rounds: int | None = None, score_fn=_DEFAULT, grade: bool = True, ref_mode: str | None = None,
-                 method: str | None = None) -> Take:
-    """首帧（C5 多轮多候选）。gpu3 认领的镜头直接拒绝（Gpu3Owned）。face_lock: None = 按 face_lock_default()；True/False 强制开关。
+                 method: str | None = None, prompt_override: str | None = None,
+                 scene_ref: bool | None = None) -> Take:
+    """首帧（C5 多轮多候选）。scene_ref：带本镜场景定稿底图作参考（S3；None = SCENE_PLATE_REFS）。prompt_override：画布这一次整段替换的首帧提示词（原样，不写 edits.json）。gpu3 认领的镜头直接拒绝（Gpu3Owned）。face_lock: None = 按 face_lock_default()；True/False 强制开关。
     ref_mode: plate（身份底板 + 作用说明，默认）| portrait（旧：成品定妆图裁成画布比例，只做 A/B 对照）。
-    成人镜头在参考图来源批准前用参考编辑会直接报错。非成人镜头每张都做裸露质检（硬性否决）。
-    score_fn=None 关闭评分（每轮第一张通过质检的即当前）；grade=False 不调色。"""
+    参考编辑对所有镜头开放；裸露质检只记录，不否决（2026-10-30 取消成人过滤器）。
+    score_fn=None 关闭评分（每轮第一张即当前）；grade=False 不调色。"""
     check_not_gpu3(shot_id)
     c = compile_with_edits(script, shot_id, available_loras(client), **({"method": method} if method else {}))
+    if prompt_override:
+        c.image_prompt = prompt_override
     edit = load_edit(shot_id)
     use_lock = face_lock_default() if face_lock is None else face_lock
     mode = ref_mode or REF_MODE
@@ -670,9 +723,16 @@ def render_image(client: ComfyClient, script: ScriptImport, shot_id: str, *, see
             plan = _ref_plan(c, shot_id)
     if portrait or plan.refs:
         check_face_lock_allowed(c)
+    # S3（fredw-92/S-back）：本镜场景的定稿底图（或画布本镜 / 场景层选的底图）排在人物参考之后，
+    # 用途说明由 RefPlan.role_lines 生成（refs.ROLE_SCENE）
+    scene_plate = None
+    if not portrait and (SCENE_PLATE_REFS if scene_ref is None else scene_ref):
+        scene_plate = shot_scene_plate(script, shot_id)
+        if scene_plate:
+            plan = plan.with_scene(ROOT / scene_plate["path"])
     model = image_model(c)
     negative = image_negative(c)
-    qc_fn = None if c.adult else (qc_fn or qc_with_vlm(client))
+    qc_fn = qc_fn or qc_with_vlm(client)
     if score_fn is _DEFAULT:
         score_fn = _default_score(client, c, plan.face.path if plan.face else
                                   (R.face_plate("lin_wan", R.MAKEUP_DEFAULT)[0] if portrait else None))
@@ -682,7 +742,7 @@ def render_image(client: ComfyClient, script: ScriptImport, shot_id: str, *, see
     facts = [f["text"] for f in (c.visual_spec or {}).get("facts", []) if f.get("frame") in ("first", "both")]
     facts += [f for f in extra_facts(c) if f not in facts]   # 构图预选也核对“穿鞋”
     holder: dict = {}
-    two_stage = mode == "plate" and bool(plan.refs)
+    two_stage = mode == "plate" and plan.face is not None   # 只有场景底图（没有身份底板）时直接多参考编辑
     fixed = seed if seed is not None else edit.image_seed
 
     def compose(rnd: int) -> dict | None:
@@ -704,7 +764,7 @@ def render_image(client: ComfyClient, script: ScriptImport, shot_id: str, *, see
             qc = qc_fn(DATA / rel) if qc_fn else None
             r = {"file": rel, "seed": s_, "seconds": round(secs, 1), "nudity": bool(qc and qc["nudity"]),
                  "clip_bare": (qc or {}).get("clip_bare", 0.0)}
-            if not r["nudity"] and score_fn is not None and facts:
+            if score_fn is not None and facts:
                 from . import score as S
                 try:
                     v = S.vlm_check(client, DATA / rel, facts)
@@ -712,11 +772,10 @@ def render_image(client: ComfyClient, script: ScriptImport, shot_id: str, *, see
                 except Exception as e:  # noqa: BLE001
                     r["error"] = f"{type(e).__name__}"
             results.append(r)
-        clean = [r for r in results if not r["nudity"]]
-        if not clean:
+        if not results:
             return {"all": results, "best": None}
-        # 剧本核对优先；接近裸露阈值的构图降权（换脸后容易越线，ep01-S5 背影实测）
-        best = max(clean, key=lambda r: (r.get("fidelity") or 0) - max(0.0, r["clip_bare"] - 0.4))
+        # 剧本核对优先；裸露只记录，不参与淘汰（2026-10-30 取消成人过滤器）
+        best = max(results, key=lambda r: (r.get("fidelity") or 0))
         return {"all": results, "best": best}
 
     def plan_for_round(rnd, missing):
@@ -735,12 +794,18 @@ def render_image(client: ComfyClient, script: ScriptImport, shot_id: str, *, see
                 small = src.with_name(src.stem + "_ref.png")
                 im = Image.open(src).convert("RGB")
                 h = round(im.height * COMPOSE_WIDTH / im.width / 32) * 32
-                im.resize((COMPOSE_WIDTH, h), Image.LANCZOS).save(small)
+
+                def make_small():
+                    im.resize((COMPOSE_WIDTH, h), Image.LANCZOS).save(small)
+                    return small
                 key = (tuple(r.path for r in plan.refs), 1.0)
                 if key not in uploads:
                     uploads[key] = _upload_refs(client, plan, 1.0)
-                refs = [r.path.relative_to(ROOT).as_posix() for r in plan.refs]
-                return {"plan": plan, "compose": client.upload_image(small, subfolder="ns_final/refs"),
+                refs = [_rel_root(r.path) for r in plan.refs]
+                # 构图刚从同一 ComfyUI 下载：[output] 引用 + 图内缩放，不上传（fredw-92/F1）
+                compose_name = CC.input_image(client, src, "ns_final/refs", size=(COMPOSE_WIDTH, h),
+                                              prepare=make_small)
+                return {"plan": plan, "compose": compose_name,
                         "names": uploads[key], "reference": refs[0],
                         "references": [f"data/{best['file']}", *refs],
                         "note": f"构图 {len(comp['all'])} 选 1（剧本核对 {best.get('fidelity')}）"}
@@ -748,7 +813,7 @@ def render_image(client: ComfyClient, script: ScriptImport, shot_id: str, *, see
         key = (tuple(r.path for r in rp.refs), scale)
         if key not in uploads:
             uploads[key] = _upload_refs(client, rp, scale) if rp.refs else []
-        refs = [r.path.relative_to(ROOT).as_posix() for r in rp.refs]
+        refs = [_rel_root(r.path) for r in rp.refs]
         return {"plan": rp, "names": uploads[key], "note": note, "reference": refs[0] if refs else None,
                 "references": refs or None}
 
@@ -793,13 +858,46 @@ def render_image(client: ComfyClient, script: ScriptImport, shot_id: str, *, see
                              for r in comp.get("all", [])]
             return sc
 
-    return _run_candidates(
+    best = _run_candidates(
         client, shot_id, "image", c, build_wf=build_wf, prompt_for=prompt_for, seeds_key=shot_id,
         fixed_seed=fixed, attempts=attempts, timeout_s=timeout_s,
         qc_fn=qc_fn, grade_fn=grade_fn if grade else None, score_fn=final_score,
         # 两段式：每轮 n_compose 张构图里选一张，再做 1 次换脸编辑
         candidates=1 if two_stage else n_compose, rounds=rounds or ROUNDS, plan_for_round=plan_for_round,
         meta={"negative": negative, "workflow": workflow_name})
+    if scene_plate:
+        best = _note_take(shot_id, "image", best.n, scene_plate=scene_plate)
+    return best
+
+
+def _rel_root(p: Path) -> str:
+    """参考图路径（相对项目根；不在项目根下时写绝对路径，不报错）"""
+    try:
+        return Path(p).relative_to(ROOT).as_posix()
+    except ValueError:
+        return Path(p).as_posix()
+
+
+SCENE_PLATE_REFS = True     # S3：首帧自动带本镜场景定稿底图（False = 关）
+
+
+def shot_scene_plate(script: ScriptImport, shot_id: str) -> dict | None:
+    """本镜首帧要带的场景底图（ns_render.scene_plate.shot_plate）；出错 / 没有 → None（照常出图）"""
+    try:
+        from . import scene_plate as SP
+        return SP.shot_plate(script, shot_id, ROOT, RENDERS)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _note_take(shot_id: str, stage: str, n: int, **fields) -> Take:
+    """给一个已存的版本补记字段（takes.json），返回更新后的 Take"""
+    with shot_lock(shot_id):
+        data = load_takes(shot_id)
+        t = next(t for t in data["takes"] if t["stage"] == stage and t["n"] == n)
+        t.update(fields)
+        _save_takes(shot_id, data)
+    return Take.model_validate(t)
 
 
 def refine_image(client: ComfyClient, script: ScriptImport, shot_id: str, *, seed: int | None = None,
@@ -825,7 +923,7 @@ def refine_image(client: ComfyClient, script: ScriptImport, shot_id: str, *, see
     init = client.upload_image(src, subfolder="ns_final/refs")
     negative = image_negative(c)
     prompt = (plan.role_lines() if names else "") + REFINE_PREFIX + c.image_prompt
-    qc_fn = None if c.adult else (qc_fn or qc_with_vlm(client))
+    qc_fn = qc_fn or qc_with_vlm(client)
     if score_fn is _DEFAULT:
         score_fn = _default_score(client, c, plan.face.path if plan.face else None)
     n = _next_n(shot_id, "image")
@@ -855,20 +953,20 @@ def refine_image(client: ComfyClient, script: ScriptImport, shot_id: str, *, see
                 if plan.refs else None,
                 references=[f"data/{src_take['file']} (image v{act})",
                             *(r.path.relative_to(ROOT).as_posix() for r in plan.refs)],
-                qc=qc, grade=gr, score=sc, round=src_take.get("round"))
+                qc=qc, grade=gr, score=sc, round=src_take.get("round"), remote=CC.remote_info(client, DATA / raw))
     _add_take(shot_id, take, activate=False)
     if qc and qc["nudity"]:
         _log_qc(shot_id, take.model_dump())
-        return Take.model_validate(src_take)
     prev = (src_take.get("score") or {}).get("total")
     new = (sc or {}).get("total")
-    data = load_takes(shot_id)
     if prev is not None and new is not None and new < prev - REFINE_TOLERANCE:
-        data.setdefault("review", {})["refine"] = {"at": now(), "refined": n, "kept": act, "total": new,
-                                                   "prev": prev, "reason": "精修版评分明显更低，保留原版"}
-        _save_takes(shot_id, data)
+        with shot_lock(shot_id):   # 封板修复：每镜锁
+            data = load_takes(shot_id)
+            data.setdefault("review", {})["refine"] = {"at": now(), "refined": take.n, "kept": act, "total": new,
+                                                       "prev": prev, "reason": "精修版评分明显更低，保留原版"}
+            _save_takes(shot_id, data)
         return Take.model_validate(src_take)
-    set_active(shot_id, "image", n)
+    set_active(shot_id, "image", take.n)   # 封板修复：_add_take 可能顺延版本号
     return take
 
 
@@ -886,7 +984,8 @@ def _last_prompt_with_plate(last_prompt: str, plate_line: str) -> str:
 def render_last_frame(client: ComfyClient, script: ScriptImport, shot_id: str, seed: int | None = None, *,
                       attempts: int = 2, timeout_s: float = 900, candidates: int | None = None,
                       rounds: int | None = None, qc_fn=None, score_fn=_DEFAULT, grade: bool = True,
-                      model: W.QwenModel | None = None, method: str | None = None) -> Take:
+                      model: W.QwenModel | None = None, method: str | None = None,
+                      prompt_override: str | None = None) -> Take:
     """尾帧（C3，research v6 §5）：以当前首帧为图1做 Qwen 2.1 编辑，画面改为 motion 的结束状态
     （同一场景同一人物同一服装）；图2 = 该镜的身份底板（补身份）。调色以首帧为参考，避免首尾闪色。
     存为 takes/last_NNN.png（stage "last"），当前版本复制为 last.png；render_video 用它作 H3 尾帧。"""
@@ -895,6 +994,8 @@ def render_last_frame(client: ComfyClient, script: ScriptImport, shot_id: str, s
     if not (d / "frame.png").exists():
         raise ComfyError(f"{shot_id} 还没有首帧，不能做尾帧")
     c = compile_with_edits(script, shot_id, available_loras(client), **({"method": method} if method else {}))
+    if prompt_override:   # 画布这一次整段替换的尾帧提示词（原样）
+        c.last_prompt = prompt_override
     if not c.last_prompt:
         raise ComfyError(f"{shot_id} 从 motion 里取不到结束状态，没有尾帧提示词")
     plan = _ref_plan(c, shot_id)
@@ -903,14 +1004,18 @@ def render_last_frame(client: ComfyClient, script: ScriptImport, shot_id: str, s
         check_face_lock_allowed(c)
     m = model or LAST_MODEL
     negative = image_negative(c)
-    qc_fn = None if c.adult else (qc_fn or qc_with_vlm(client))
+    qc_fn = qc_fn or qc_with_vlm(client)
     first_png = d / "frame.png"
     # 首帧参考：同比例预缩放（控制编码 token），本镜固定这一份
     from PIL import Image
     snap = DATA / "cache" / "last_src" / f"{shot_id}_{LAST_FIRST_FRAME_SIZE[0]}x{LAST_FIRST_FRAME_SIZE[1]}.png"
     snap.parent.mkdir(parents=True, exist_ok=True)
-    Image.open(first_png).convert("RGB").resize(LAST_FIRST_FRAME_SIZE, Image.LANCZOS).save(snap)
-    first_name = client.upload_image(snap, subfolder="ns_final/refs")
+
+    def make_snap():
+        Image.open(first_png).convert("RGB").resize(LAST_FIRST_FRAME_SIZE, Image.LANCZOS).save(snap)
+        return snap
+    # 首帧是同一 ComfyUI 的输出原样（画布首帧不调色）→ [output] 引用 + 图内缩放，不上传（fredw-92/F1）
+    first_name = CC.input_image(client, first_png, "ns_final/refs", size=LAST_FIRST_FRAME_SIZE, prepare=make_snap)
     names = [first_name] + ([client.upload_image(R.prescale(plate), subfolder="ns_final/refs")] if plate else [])
     plate_line = LAST_ROLE_PLATE.format(i=2, name=plate.character) if plate else ""
     prompt = _last_prompt_with_plate(c.last_prompt, plate_line)
@@ -974,7 +1079,7 @@ def render_video(client: ComfyClient, script: ScriptImport, shot_id: str, *, see
     if frames is None:
         _, shot = find_shot(script, shot_id)
         frames = frames_for_duration(getattr(shot, "duration", 10) or 10)
-    frames = snap_frames(frames)
+    frames = min(max(snap_frames(frames), W.H3_FRAMES_MIN), W.H3_FRAMES_MAX)   # 17k+5，训练范围 124–362
     # 失败时：先换种子，再缩短到 158 帧
     plans = [(frames, 0), (frames, 1), (min(frames, 158), 2)][:attempts + 1]
     fixed = seed if seed is not None else edit.video_seed

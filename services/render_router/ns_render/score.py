@@ -7,7 +7,7 @@
   colour    与色调参考图的 LAB 距离（暗场/夜景放宽）；尾帧对比首帧
   sharp     主体（脸框或画面中央）Laplacian 方差 → Leica 锐度
   bokeh     主体锐度 / 背景锐度 → 大光圈焦外
-  nudity    非成人镜头硬性否决（总分 0）
+  nudity    只记录在 Take.qc，不参与评分（2026-10-30 取消成人过滤器）
 权重见 WEIGHTS；缺项（如背影镜头没有脸）按剩余权重归一。
 """
 import json
@@ -164,8 +164,6 @@ def score_image(path: Path, *, client=None, facts: list[str] | None = None, plat
                 dark: bool = False, qc: dict | None = None, colour_ref: Path | None = None,
                 vlm_image: Path | None = None, vlm_prompt: str = VLM_PROMPT) -> dict:
     parts, reasons, missing = {}, [], []
-    if qc and qc.get("nudity"):
-        return {"total": 0.0, "parts": {}, "missing": [], "reasons": ["裸露质检不通过（硬性否决）"]}
     if client is not None and facts:
         try:
             v = vlm_check(client, vlm_image or path, facts, vlm_prompt)

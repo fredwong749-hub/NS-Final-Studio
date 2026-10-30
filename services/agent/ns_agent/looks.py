@@ -165,13 +165,17 @@ def _script_md(script: ScriptImport) -> str | None:
     return None
 
 
-def detect_characters(shot: Shot) -> list[str]:
+def detect_characters(shot: Shot, bible=None) -> list[str]:
+    from .bible import load_bible
+    # 封板修复（D-6）：“她”= 该角色的 motion 触发词读 visual_bible [characters.*] detect_she_with_trigger
+    # （bible.CharacterRule.she_trigger，与编译器 present_characters 同一处配置），不再写死 lnwan01
+    she = {c.id: c.she_trigger for c in (bible or load_bible()).characters if c.she_trigger}
     text = f"{shot.img_prompt} {shot.motion_prompt}"
     out = []
     for slug, hints in PRESENCE_HINTS.items():
-        hit = any(h in text for h in hints)
+        hit = any(h in text for h in hints) or (slug in she and she[slug] in shot.motion_triggers)
         if slug == "lin_wan":
-            hit = hit or "lnwan01" in shot.motion_triggers or any(t in ADORNMENT_TRIGGERS for t in shot.img_triggers)
+            hit = hit or any(t in ADORNMENT_TRIGGERS for t in shot.img_triggers)
         if hit:
             out.append(slug)
     return out
@@ -359,8 +363,12 @@ def seed(script: ScriptImport, continuity_md: str | None = None) -> tuple[Wardro
 class Resolver:
     """纯计算：输入四份数据，不读写文件。"""
 
-    def __init__(self, script: ScriptImport, wardrobe: Wardrobe, book: LookBook, schedule: LookSchedule):
+    def __init__(self, script: ScriptImport, wardrobe: Wardrobe, book: LookBook, schedule: LookSchedule,
+                 canvas=None):
         self.script, self.schedule = script, schedule
+        # 画布参考覆盖（W5，ns_agent.ref_overrides.Canvas）：场景层 / 画布本镜层；None = 没有
+        self.canvas = canvas if canvas else None
+        self._scene_of: dict[str, str] | None = None
         self.items = {i.id: i for i in wardrobe.items}
         self.states = {s.id: s for s in wardrobe.decor_states}
         self.looks = {lk.id: lk for lk in book.looks}
@@ -371,16 +379,47 @@ class Resolver:
     # 出场角色
     def characters(self, shot: Shot) -> list[tuple[str, str]]:
         ov = self.schedule.shot_overrides.get(shot.id, {})
-        out = [(c, "detected") for c in self.schedule.shot_characters.get(shot.id, [])
+        # 按当前剧本现算（封板修复）：schedule.shot_characters 只在种子时写，重新 / 合并导入后会过期
+        # （ep01 换成 7 镜后 S7 没有角色、S2/S5/S6 角色错位）；人工增删仍走 shot_overrides
+        out = [(c, "detected") for c in detect_characters(shot)
                if not (c in ov and ov[c].present is False)]
         out += [(c, "shot") for c, p in ov.items() if p.present is not False and c not in dict(out)]
         return out
 
     def layers(self, char: str, ep: int, shot_id: str | None) -> list[tuple[str, LookPatch | None]]:
         default = self.schedule.character_defaults.get(char)
-        return [("default", LookPatch(look_id=default) if default else None),
-                ("episode", self.schedule.episodes.get(str(ep), {}).get(char)),
-                ("shot", self.schedule.shot_overrides.get(shot_id, {}).get(char) if shot_id else None)]
+        out = [("default", LookPatch(look_id=default) if default else None),
+               ("episode", self.schedule.episodes.get(str(ep), {}).get(char)),
+               ("shot", self.schedule.shot_overrides.get(shot_id, {}).get(char) if shot_id else None)]
+        if self.canvas and shot_id:     # 画布覆盖（§6）：场景层在集计划之后，画布本镜层最后
+            from .ref_overrides import to_patch
+            out.insert(2, ("scene", to_patch(self.canvas.scene(ep, self.scene_of(shot_id)), char)))
+            out.append(("shot", to_patch(self.canvas.shot(shot_id), char)))
+        return out
+
+    def scene_of(self, shot_id: str | None) -> str | None:
+        """镜头所在场景 scene_id（state_timeline.group_scenes，与时间线同一口径）；只在有场景覆盖时才算"""
+        if not shot_id or not self.canvas or not self.canvas.scenes:
+            return None
+        if self._scene_of is None:
+            from .state_timeline import group_scenes
+            self._scene_of = {r["shot_id"]: r["scene_id"] for r in group_scenes(
+                self.script, lambda s: {c for c, _ in self.characters(s)})}
+        return self._scene_of.get(shot_id)
+
+    def canvas_slots(self, char: str, ep: int, shot_id: str | None) -> list[str]:
+        """画布覆盖（场景 / 本镜）改过的槽位：整套换 look → 该造型的全部槽位；单件 → 该槽位"""
+        if not self.canvas or not shot_id:
+            return []
+        from .ref_overrides import to_patch
+        out: list[str] = []
+        for p in (to_patch(self.canvas.scene(ep, self.scene_of(shot_id)), char), to_patch(self.canvas.shot(shot_id), char)):
+            if not p:
+                continue
+            lk = self.looks.get(p.look_id or "")
+            out += list(lk.items) if lk else []
+            out += list(p.slots or {})
+        return [s for s in SLOTS if s in out]
 
     def core(self, char: str, ep: int, shot_id: str | None = None, present_source: str = "detected") -> ResolvedLook:
         r = ResolvedLook(character=char, name=CHARACTERS.get(char, char), present_source=present_source)
@@ -584,11 +623,20 @@ class LookStore:
         self.script_json = Path(script_json or DEFAULT_SCRIPT_JSON)
         self._lock = threading.RLock()
         self._script: ScriptImport | None = None
+        self._script_key: tuple[int, int] | None = None   # 读入时剧本文件的 (mtime_ns, size)
 
     @property
     def script(self) -> ScriptImport:
-        if self._script is None:
+        """封板修复（A-4）：剧本文件变了（重新 / 合并导入）就重读。原来进程里只读一次：API 单例在只有 ep01 的
+        导入时读进来，合并导入回到 60 集后仍只认 ep01 → /api/looks/episodes/2 404。测试直接赋值 _script 的不重读"""
+        try:
+            st = self.script_json.stat()
+            key = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            key = None
+        if self._script is None or (self._script_key is not None and key is not None and key != self._script_key):
             self._script = ScriptImport.model_validate_json(self.script_json.read_text(encoding="utf-8"))
+            self._script_key = key
         return self._script
 
     def _path(self, name: str) -> Path:
@@ -639,9 +687,20 @@ class LookStore:
     def schedule(self) -> LookSchedule:
         return self._read("schedule", LookSchedule)
 
-    def resolver(self) -> Resolver:
+    @property
+    def renders_dir(self) -> Path:
+        """画布覆盖索引所在（data/renders，与 data/looks 同级）"""
+        return self.dir.parent / "renders"
+
+    def canvas(self):
+        from .ref_overrides import load_canvas
+        return load_canvas(self.renders_dir)
+
+    def resolver(self, canvas=True) -> Resolver:
+        """canvas=True：并入画布参考覆盖（data/renders/ref_overrides.json）；False = 只看 data/looks；也可直接传 Canvas"""
         with self._lock:
-            return Resolver(self.script, self.wardrobe(), self.lookbook(), self.schedule())
+            cv = self.canvas() if canvas is True else (canvas or None)
+            return Resolver(self.script, self.wardrobe(), self.lookbook(), self.schedule(), cv)
 
     # ---- 查询
     def episode(self, ep: int):

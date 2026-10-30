@@ -48,12 +48,15 @@ ROLE_LOOK = "图{i}只提供{name}的服装款式与材质，不要沿用图{i}�
 ROLE_NAILS = "图{i}只提供指甲的甲型、长度、透明度与钻饰布局，不要沿用其手势、肤色和背景。"
 ROLE_SHOES = "图{i}只提供鞋子款式与材质，不要沿用其角度和背景。"
 ROLE_TAIL = "画面内容完全按以下描述："
+# S3（fredw-92/S-back）：本镜场景的定稿底图，排在人物参考之后；系统生成的用途说明（与上面同一机制）
+ROLE_SCENE = "图{i}只取场景空间与陈设，不取人物。"
+SCENE_LONG = 1024        # 场景底图预缩放长边
 
 
 @dataclass
 class RefImage:
     path: Path
-    kind: str                 # face | look | nails | shoes
+    kind: str                 # face | look | nails | shoes | scene
     character: str = ""
     design: str = ""
     angle: str = ""
@@ -73,9 +76,20 @@ class RefPlan:
     def role_lines(self, start: int = 1, tail: str = ROLE_TAIL) -> str:
         lines = []
         for i, r in enumerate(self.refs, start):
-            tpl = {"face": ROLE_FACE, "look": ROLE_LOOK, "nails": ROLE_NAILS, "shoes": ROLE_SHOES}[r.kind]
+            tpl = {"face": ROLE_FACE, "look": ROLE_LOOK, "nails": ROLE_NAILS, "shoes": ROLE_SHOES,
+                   "scene": ROLE_SCENE}[r.kind]
             lines.append(tpl.format(i=i, name=r.character))
         return "".join(lines) + tail if lines else ""
+
+    @property
+    def scene(self) -> RefImage | None:
+        return next((r for r in self.refs if r.kind == "scene"), None)
+
+    def with_scene(self, path: Path | None) -> "RefPlan":
+        """S3：场景底图排在人物参考之后（已有就不重复）"""
+        if path is None or self.scene is not None:
+            return self
+        return RefPlan([*self.refs, RefImage(Path(path), "scene")], self.makeup, self.note)
 
     def without_face(self) -> "RefPlan":
         return RefPlan([r for r in self.refs if r.kind != "face"], self.makeup, self.note + "；去掉脸部底板")
@@ -218,16 +232,18 @@ def plan_refs(text: str, characters: list[str], looks: dict[str, dict] | None = 
     lead_id = CHAR_IDS.get(lead or "")
     if lead_id:
         close = any(w in text for w in CLOSE_WORDS)
+        # W5：项目方在画布上换过的单件（looks[名]["part_images"]，相对项目根）优先于资产目录里的默认图
+        parts = {k: ROOT / v for k, v in (looks.get(lead, {}).get("part_images") or {}).items() if (ROOT / v).is_file()}
         if not close and any(w in text for w in WIDE_WORDS):
-            p = _look(lead_id, looks.get(lead, {}).get("look_id"))
+            p = parts.get("outfit") or _look(lead_id, looks.get(lead, {}).get("look_id"))
             if p:
                 plan.refs.append(RefImage(p, "look", lead))
         if any(w in text for w in FOOT_WORDS):
-            p = _item(lead_id, "shoes")
+            p = parts.get("shoes") or _item(lead_id, "shoes")
             if p:
                 plan.refs.append(RefImage(p, "shoes", lead))
         if close and any(w in text for w in HAND_WORDS):
-            p = _item(lead_id, "nails")
+            p = parts.get("nails") or _item(lead_id, "nails")
             if p:
                 plan.refs.append(RefImage(p, "nails", lead))
     # 优先级：脸 > Look > 鞋 > 甲；Qwen 最多 4 张
@@ -269,7 +285,7 @@ def target_size(r: RefImage, w: int, h: int) -> tuple[int, int]:
         return _fit(w, h, FACE_AREA)
     if r.kind == "look":
         return LOOK_SIZE
-    k = ITEM_LONG / max(w, h)
+    k = (SCENE_LONG if r.kind == "scene" else ITEM_LONG) / max(w, h)
     return max(32, round(w * k / 32) * 32), max(32, round(h * k / 32) * 32)
 
 

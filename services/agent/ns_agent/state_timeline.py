@@ -201,6 +201,54 @@ def group_scenes(script: ScriptImport, present=None) -> list[dict]:
                              "place_source": "explicit" if has_pl else (src or "inherited") if kind else "unknown",
                              "time_of_day": seg["time"], "time_source": "explicit" if has_tm else
                              "inherited" if seg["time"] else "unknown", "transition": reason if k == 0 else ""})
+    return _apply_script_scenes(script, rows)
+
+
+def script_scene_ids(script: ScriptImport) -> dict[str, str]:
+    """剧本写明的场景（S1：每镜 **场景**：<场景id>｜…）→ {shot_id: scene_id}；旧剧本 = {}"""
+    return {s.id: s.scene_id for ep in script.episodes for s in ep.shots if getattr(s, "scene_id", None)}
+
+
+def _apply_script_scenes(script: ScriptImport, rows: list[dict]) -> list[dict]:
+    """S1（fredw-92/S-back）：剧本写了场景 id 的镜头以剧本为准（id 原样，与 data/scenes.json / assets/scenes 同一套
+    sk_* id）；名称取场景表，时段从场景表的时段 / 光线原文按同一词表推断。写了场景的集重新分段：场景 id 变了或原来
+    的段首（转场 / 时段变化）都开新段。没写场景的集、旧剧本完全不变（哈希与旧版一致）"""
+    ids = script_scene_ids(script)
+    if not ids:
+        return rows
+    lib = {e.scene_id: e for e in getattr(script.globals, "scene_library", None) or []}
+    by_ep: dict[str, list[dict]] = {}
+    for r in rows:
+        by_ep.setdefault(r["shot_id"].split("-")[0], []).append(r)
+    for ep_key, lst in by_ep.items():
+        if not any(r["shot_id"] in ids for r in lst):
+            continue
+        n, prev = 0, None
+        for r in lst:
+            sid = ids.get(r["shot_id"])
+            if sid:
+                e = lib.get(sid)
+                tm = shot_time(f"{e.time_of_day}，{e.light}") if e else ""
+                r.update(scene_id=sid, place_key=sid[3:] if sid.startswith("sk_") else sid,
+                         place=(e.name if e and e.name else r["place"]), place_source="script")
+                if tm:
+                    r.update(time_of_day=tm, time_source="script")
+            # fredw-92/D2：前后两镜都写了剧本场景 id 时，关键词推断的“地点变了”（transition=place）不再开新段——
+            # 剧本 id 相同就是同一场景（实测 ep04 八镜同一 sk_ 场景被切成 6 段）；转场词 / 时段变化照旧开段
+            inferred_place = (r["transition"] == "place" and prev is not None
+                              and r["shot_id"] in ids and prev["shot_id"] in ids)
+            start = prev is None or r["scene_id"] != prev["scene_id"] or (r["segment_start"] and not inferred_place)
+            if inferred_place and not start:
+                r["transition"] = ""
+            if start:
+                n += 1
+                if prev is not None and not r["transition"] and r["scene_id"] != prev["scene_id"]:
+                    r["transition"] = "place"
+            elif r["time_of_day"] != prev["time_of_day"]:
+                r["time_of_day"] = prev["time_of_day"]       # 段内时段一致（取段首）
+            r["segment_start"] = start
+            r["segment_id"] = f"{ep_key}_seg{n:02d}"
+            prev = r
     return rows
 
 
@@ -213,15 +261,72 @@ def script_version(script: ScriptImport) -> str:
     """剧本版本取自 sources 里《剧本和镜头》的文件名（…v2.md → v2）"""
     for s in script.sources:
         if "剧本和镜头" in s.path or len(script.sources) == 1:
-            m = re.findall(r"v(\d+)", Path(s.path.replace("\\", "/")).name)
+            if getattr(s, "version", None):       # 封板修复 P2：导入时记了版本就用它
+                return s.version
+            m = VERSION_IN_NAME.findall(Path(s.path.replace("\\", "/")).name)
             if m:
                 return f"v{m[-1]}"
     return "unknown"
 
 
+# 封板修复 P2：文件名里的剧本版本只认结尾的 vN（“…v3.1.md”“…v2 .md”“…v2）”），不认“_rules_v2_”这类规则标签
+VERSION_IN_NAME = re.compile(r"(?<![A-Za-z])v(\d+)(?=(?:\.\d+)*\.md$|[ ）)])")
+
+
+S2_WAIVERS = Path("config") / "s2_waivers.json"
+
+
+def waived(root: Path, ep: int, what: str) -> dict | None:
+    """项目方一次性豁免（只作用于登记的那一集、那一项）：config/s2_waivers.json
+    {"waivers": [{"episode": 2, "skip": ["plate"], "owner_quote": "…", "scope": "…", "by": "owner", "at": "…", "revoked": false}]}
+    只由 tools/s2_waiver.py（项目方本人运行）写；没有就不豁免"""
+    try:
+        data = json.loads((root / S2_WAIVERS).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    ws = data.get("waivers") if isinstance(data, dict) else None    # 封板修复：格式不对 = 没有豁免，不崩
+    for w in ws if isinstance(ws, list) else []:
+        if not isinstance(w, dict):
+            continue
+        if (w.get("episode") == ep and what in (w.get("skip") or []) and w.get("by") == "owner"
+                and (w.get("owner_quote") or "").strip() and not w.get("revoked")):
+            return w
+    return None
+
+
+def episode_version(script: ScriptImport, ep: int) -> str:
+    """某一集来自哪一版剧本：合并导入时源文件记了 version + episodes（后导入的优先）；没记就退回整份剧本的版本"""
+    for s in reversed(script.sources):
+        if ep in (getattr(s, "episodes", None) or []):
+            # 封板修复 P1：最新认领这一集的来源没写版本 → unknown（不能继承更早来源的 v3 绕过 S1 版本条件）
+            return getattr(s, "version", None) or "unknown"
+    return script_version(script)
+
+
 def _ver_num(v: str) -> int:
     m = re.match(r"v(\d+)", v or "")
     return int(m.group(1)) if m else 0
+
+
+def source_drift(root: Path, script: ScriptImport) -> list[dict]:
+    """导入后剧本源文件（script.sources）又被改过 / 不见了 → [{path, imported_sha, current_sha}]（QA4-01）。
+    路径按导入时的绝对路径找，找不到再按文件名在 <root>/script play lib/ 下找；current_sha=None 表示文件不在"""
+    out, seen = [], set()
+    for s in script.sources:
+        want = getattr(s, "sha256", None)
+        if not want or (s.path, want) in seen:      # 合并导入可能重复登记同一源文件：只报一次
+            continue
+        seen.add((s.path, want))
+        rel = s.path.replace("\\", "/")
+        p = Path(s.path)
+        if not p.is_absolute():                     # 相对路径按项目根找，不依赖当前工作目录
+            p = root / rel
+        if not p.is_file():
+            p = root / "script play lib" / Path(rel).name
+        cur = hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
+        if cur != want:
+            out.append({"path": s.path, "imported_sha": want, "current_sha": cur})
+    return out
 
 
 def read_s1_gate(root: Path, script_sha: str | None) -> dict:
@@ -230,6 +335,8 @@ def read_s1_gate(root: Path, script_sha: str | None) -> dict:
     try:
         raw = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
+        raw = {}
+    if not isinstance(raw, dict):            # 封板修复：格式不对按“没有记录”处理（S1 不通过），不崩
         raw = {}
     same = raw.get("script_sha") == script_sha and script_sha is not None
     return {"validator_errors": raw.get("validator_errors") if same else None,
@@ -244,6 +351,8 @@ def plate_info(root: Path, scene_id: str) -> dict:
     try:
         man = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
+        man = {}
+    if not isinstance(man, dict):            # 封板修复：manifest 不是对象 → 当作没有 manifest，不崩
         man = {}
     plate = d / (man.get("plate") or "plate.png")
     sha = _sha_cached(plate) if plate.is_file() else None
@@ -516,6 +625,7 @@ def stale_inputs(root: str | Path | None, timeline: dict | None, scenes: dict | 
 
 def build(root: str | Path | None = None, previous: dict | None = None) -> tuple[dict, dict]:
     from .compiler import _resolver
+    from .ref_overrides import effective_scene, plate_path
     root = project_root(root)
     b = load_bible(root)
     script_path = root / "data" / "import" / "script_v2.json"
@@ -530,11 +640,13 @@ def build(root: str | Path | None = None, previous: dict | None = None) -> tuple
     sver = script_version(script)
     gate = read_s1_gate(root, script_sha)
     provisional = not (_ver_num(sver) >= 3 and gate["validator_errors"] == 0 and gate["g3_accepted"])
-    source = {"script": sver, "script_sha": script_sha, "bible_version": version}
+    source = {"script": sver, "script_sha": script_sha, "bible_version": version,
+              "changed_sources": source_drift(root, script)}   # 非空 = 源文件导入后改过，需重新导入
     prev_inputs = {s["shot_id"]: s.get("inputs_sha") for s in (previous or {}).get("shots", [])}
 
     groups = {r["shot_id"]: r for r in group_scenes(script, lambda s: {c for c, _ in res.characters(s)})}
     plates = {sid: plate_info(root, sid) for sid in {r["scene_id"] for r in groups.values()}}
+    scene_lib = {e.scene_id: e for e in getattr(script.globals, "scene_library", None) or []}
     g = script.globals
     globals_h = _h(g.model_dump(include={"character_locks", "image_suffix", "motion_suffix", "base_negative",
                                          "lora_triggers"}))
@@ -597,11 +709,13 @@ def build(root: str | Path | None = None, previous: dict | None = None) -> tuple
 
             plate = plates[grp["scene_id"]]
             blockers = []
-            if provisional:
+            # S1 按集判：本集来源剧本 ≥ v3 且闸门（校验 0 + 项目方验收）通过（合并导入后各集版本不同）
+            if not (_ver_num(episode_version(script, s.episode)) >= 3 and gate["validator_errors"] == 0
+                    and gate["g3_accepted"]):
                 blockers.append("s1_gate_not_passed")
             blockers += [f"lora:{r_['trigger']}:{r_['registry_status']}" for r_ in req
                          if r_["kind"] == "image" and r_["registry_status"] != "accepted"]
-            if plate["plate_status"] != "owner_confirmed":
+            if plate["plate_status"] != "owner_confirmed" and not waived(root, ep.number, "plate"):
                 blockers.append(f"plate:{grp['scene_id']}:{plate['plate_status']}")
             if not episodes[str(ep.number)]["look_confirmed"]:
                 blockers.append(f"look_unconfirmed:ep{ep.number:02d}")
@@ -630,6 +744,11 @@ def build(root: str | Path | None = None, previous: dict | None = None) -> tuple
                 "bible": {**bible_sec, "characters": {c: _h(ctx.char_cfg.get(c)) for c, v in chars.items()
                                                       if v["present"]}},
             }
+            # W5：画布换了场景底图（场景 / 本镜覆盖）才进哈希；没有覆盖时哈希与旧版一致
+            scene_ref, _src = effective_scene(getattr(res, "canvas", None), ep.number, grp["scene_id"], s.id)
+            if scene_ref:
+                sp = plate_path(root, scene_ref)
+                inputs["scene_ref"] = [scene_ref, _sha_cached(sp) if sp else None]
             inputs_sha = _h(inputs)[:16]
             row = {"shot_id": s.id, "gpu3_shot_id": f"ep{ep.number:02d}s{s.index}", "episode": ep.number,
                    "index": s.index, **{k: v for k, v in grp.items() if k != "shot_id"},
@@ -676,6 +795,11 @@ def build(root: str | Path | None = None, previous: dict | None = None) -> tuple
         # gpu3：底板对象（原 plate 字符串保留不动，见 docs「gpu3 渲染侧字段」）
         sc["plate_detail"] = {"path": sc["plate"], "sha256": sc["plate_sha256"], "status": sc["plate_status"],
                               "light": G.light_of([img_text[x] for x in sc["shots"]], sc["time_of_day"])}
+        # S1：剧本场景表里登记了这个场景 → 并入表里的原文（旧剧本没有场景表时不加字段，场景表哈希不变）
+        entry = scene_lib.get(sc["scene_id"])
+        if entry is not None:
+            sc["script_scene"] = {k: getattr(entry, k) for k in ("name", "space", "time_of_day", "light", "fixtures")}
+            sc["script_scene"]["defined_in"] = list(entry.defined_in)
     scene_list = sorted(scenes.values(), key=lambda x: (x["episode"], x["shots"][0]))
     scenes_sha = _h(scene_list)[:16]
 
@@ -774,17 +898,28 @@ def scenes_path(root: Path) -> Path:
     return root / "data" / "scenes.json"
 
 
+def _replace_retry(tmp, p: Path, tries: int = 20) -> None:
+    """封板修复 P1：Windows 上目标文件正被别的进程读（同步上传、杀毒）时 os.replace 报 WinError 5，退避重试约 5 秒"""
+    import time
+    for i in range(tries):
+        try:
+            os.replace(tmp, p)
+            return
+        except PermissionError:
+            if i == tries - 1:
+                raise
+            time.sleep(0.05 * (i + 1) if i < 10 else 0.5)
+
+
 def _atomic(p: Path, obj) -> None:
     """唯一临时文件（同目录 mkstemp）+ os.replace：并发写不会互相踩同一个 .tmp"""
     import tempfile
     p.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=p.name + ".", suffix=".tmp")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="
-") as f:
-            f.write(json.dumps(obj, ensure_ascii=False, indent=1) + "
-")
-        os.replace(tmp, p)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(obj, ensure_ascii=False, indent=1) + "\n")
+        _replace_retry(tmp, p)
     except BaseException:
         try:
             os.unlink(tmp)
@@ -819,7 +954,8 @@ def input_files(root: Path) -> list[Path]:
             root / LORA_REGISTRIES[1], root / "config" / "shot_ownership.json",
             root / "config" / "face_reference.json",
             *sorted((root / "assets" / "scenes").glob("*/manifest.json")), *_plate_files(root),
-            *sorted((root / "assets" / "characters").glob("*/plates/master.png")), root / S1_GATE]
+            *sorted((root / "assets" / "characters").glob("*/plates/master.png")), root / S1_GATE,
+            root / "data" / "renders" / "ref_overrides.json"]   # W5：画布参考覆盖索引
 
 
 LOCK_STALE_S = 600.0

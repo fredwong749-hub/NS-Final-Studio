@@ -150,7 +150,7 @@ class Gpu3Bridge:
     def series(self, ctx: ProjectContext, action: str, episodes: list[int] | None, *, adult_content: bool,
                requested_by: str) -> dict:
         note = "T42 编排器"
-        # 桥 §7.2 已支持 adult_content 布尔字段（默认 false；false 时 gpu3 跳过成人镜头）
+        # 桥 §7.2 的 adult_content 字段保留；2026-10-30 起 gpu3 不再据此跳过成人镜头
         body = {"action": action, "episodes": episodes, "by": requested_by, "note": note,
                 "adult_content": bool(adult_content)}
         try:

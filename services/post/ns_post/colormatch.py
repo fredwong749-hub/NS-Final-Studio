@@ -27,6 +27,7 @@ Method
 CPU only (numpy + OpenCV + x264); no GPU, no generation.
 """
 
+import hashlib
 import json
 import os
 import subprocess
@@ -430,6 +431,12 @@ def keyframe_candidates(clip: Path, data: Path = DATA) -> dict:
     if take:
         add(first, "take.reference", _local(take.get("reference"), data, shot_dir))
         add(last, "take.last_target", _local(take.get("last_target"), data, shot_dir))
+    # fredw-92/Q1: the shot's locked keyframes (takes.json locked.image / locked.last) before the active fallbacks
+    locked = takes.get("locked") or {}
+    for stage, lst in (("image", first), ("last", last)):
+        lt = next((t for t in rows if t.get("stage") == stage and t.get("n") == locked.get(stage)), None)
+        if lt:
+            add(lst, f"locked {stage} take {lt.get('n')}", _local(lt.get("file"), data, shot_dir))
     add(first, "frame.png", shot_dir / "frame.png")
     img = next((t for t in rows if t.get("stage") == "image" and t.get("n") == active.get("image")), None)
     if img:
@@ -522,6 +529,7 @@ def correct_clip(clip: Path, first: Path | None = None, last: Path | None = None
     if out.resolve() == clip.resolve():
         raise ValueError("refusing to overwrite the original clip")
     t0 = time.perf_counter()
+    src_sha = file_sha256(clip)          # before reading frames: the _cc is bound to exactly this source
     rep = measure_clip(clip, first, last, ff=ff, s=s, data=data)
     plan: Plan | None = rep.pop("_plan", None)
     last_ref = rep.pop("_last_ref", None)
@@ -543,6 +551,7 @@ def correct_clip(clip: Path, first: Path | None = None, last: Path | None = None
     rep["seconds"] = round(time.perf_counter() - t0, 1)
     rep["created_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     rep["source_mtime"] = clip.stat().st_mtime
+    rep["source_sha256"] = src_sha
     out.with_suffix(".json").write_text(json.dumps(rep, ensure_ascii=False, indent=1), encoding="utf-8")
     return rep
 
@@ -576,9 +585,18 @@ def _encode(ff: FFmpeg, clip: Path, plan: Plan, s: CcSettings, out: Path) -> Non
             raise FFmpegError(f"encode {out} failed: {err.read().decode('utf-8', 'replace')[-800:]}")
 
 
+def file_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def ensure_cc(clip: Path, *, ff: FFmpeg | None = None, s: CcSettings = CcSettings(), data: Path = DATA,
               log=print) -> tuple[Path | None, dict]:
-    """For assembly: reuse an up-to-date <clip>_cc.mp4 (json newer than the clip, same settings) or make one.
+    """For assembly: reuse <clip>_cc.mp4 only when its _cc.json records the same settings and the sha256 of the
+    current source clip (mtime alone is not proof — a re-rendered clip can keep it), else make a new one.
     Returns (corrected path or None when skipped, report)."""
     clip = Path(clip)
     out = cc_path(clip)
@@ -586,7 +604,8 @@ def ensure_cc(clip: Path, *, ff: FFmpeg | None = None, s: CcSettings = CcSetting
     if out.is_file() and js.is_file():
         try:
             rep = json.loads(js.read_text(encoding="utf-8"))
-            if rep.get("settings") == s.to_dict() and rep.get("source_mtime") == clip.stat().st_mtime:
+            if (rep.get("settings") == s.to_dict() and rep.get("source_sha256")
+                    and rep.get("source_sha256") == file_sha256(clip)):
                 return out, rep
         except (OSError, ValueError):
             pass

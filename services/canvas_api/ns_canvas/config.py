@@ -6,6 +6,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+def first_existing(spec: str | None, default: Path) -> Path:
+    """"a;b;c" → 第一个存在的路径；都不存在就返回第一个（报错时能看到找的是哪里）。"""
+    cands = [Path(x.strip()) for x in (spec or "").split(";") if x.strip()] or [default]
+    return next((c for c in cands if c.exists()), cands[0])
+
+
 @dataclass
 class RootCfg:
     label: str          # URL 里用的短名
@@ -27,6 +33,13 @@ class Settings:
     series_out: Path | None = None          # 默认项目的系列渲染器工作目录（ns-studio/data/run/weita）
     bench_csv: Path | None = None           # golden/bench.csv（实测每镜 GPU 秒）
     music_dir: Path | None = None           # data/music（epXX.wav）
+    h3_lint: Path | None = None             # ns_schema/h3_lint.py（同步过去的仓库）
+    rule_ids: Path | None = None            # docs/audit/rule_ids.md
+    shot_audit: Path | None = None          # gpu3 ns-studio/scripts/shot_audit.py（--explain）
+    shot_audit_python: str | None = None    # 跑它用的解释器（ns-studio/.venv/bin/python）
+    explain_timeout: float = 15.0
+    state_timeline: Path | None = None      # weita 的 state_timeline.json（needs_review）；新项目读 projects/<slug>/data/state_timeline.json
+    run_gpus: tuple[int, ...] = (0, 1, 3)   # 项目方按集运行时可选的卡（GPU 2 永不）
     projects_root: Path | None = None       # 新剧 projects/<slug>/data/import/script_v2.json（笔记本布局，gpu3 镜像在 checkout 内同路径）
     lock_dir: Path = Path("/root/.local/state/NS-Studio")
     nvidia_smi: str = "nvidia-smi"
@@ -66,6 +79,13 @@ class Settings:
                    bench_csv=env("NSC_BENCH_CSV") or (repo / "golden" / "bench.csv"),
                    music_dir=env("NSC_MUSIC_DIR") or (repo / "data" / "music"),
                    projects_root=env("NSC_PROJECTS_ROOT") or (repo / "projects"),
+                   h3_lint=first_existing(os.environ.get("NSC_H3_LINT"), repo / "packages" / "schema" / "ns_schema" / "h3_lint.py"),
+                   shot_audit=env("NSC_SHOT_AUDIT"),
+                   state_timeline=env("NSC_STATE_TIMELINE") or (repo / "data" / "state_timeline.json"),
+                   run_gpus=tuple(int(x) for x in os.environ.get("NSC_RUN_GPUS", "0,1,3").split(",") if x.strip()),
+                   shot_audit_python=os.environ.get("NSC_SHOT_AUDIT_PYTHON"),
+                   explain_timeout=float(os.environ.get("NSC_EXPLAIN_TIMEOUT", "15")),
+                   rule_ids=first_existing(os.environ.get("NSC_RULE_IDS"), repo / "docs" / "audit" / "rule_ids.md"),
                    lock_dir=env("NSC_LOCK_DIR") or Path("/root/.local/state/NS-Studio"),
                    nvidia_smi=os.environ.get("NSC_NVIDIA_SMI", "nvidia-smi"),
                    comfy=comfy,

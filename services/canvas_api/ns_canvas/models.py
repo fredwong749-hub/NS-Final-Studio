@@ -57,6 +57,11 @@ class ShotRenders(BaseModel):
     active: dict[str, int | None] = Field(default_factory=dict)   # {"image": n, "video": n}，renders_gpu3 来源
     error: str | None = None
     status: Literal["none", "queued", "rendering", "done", "failed"] = "none"
+    audit: dict | None = None          # status.json.audit（version, verdict, failures, warnings, not_checked, overrides, invalid_overrides, h3_edit, prompt_sha）
+    h3: dict | None = None             # compiled.json h3_* + edits.json h3_prompt_override + effective_sha256
+    shot_state: dict | None = None     # status.json: state, blocked, owner, scene_id, segment_id, continuity, bible_version
+    active_video: dict | None = None   # active 视频 take：prompt, prompt_sha256, reference(s), last_target, frames
+    video_gate: dict | None = None     # {verdict, prompt_sha, effective_sha256, blocked, video_ok}：画布“出视频”按钮的条件
     queue: list[dict] = Field(default_factory=list)
 
 
@@ -99,6 +104,31 @@ class SeriesControl(BaseModel):
     """POST /api/gpu3/projects/{slug}/series 的请求体；写成 series_control.json（离线也可手工放同样的 JSON）。"""
     action: Literal["start", "pause", "stop"]
     episodes: list[int] | None = None  # None = 全部
-    adult_content: StrictBool = False  # 是否允许成人镜头（只走本地模型）；必须是 JSON true/false
+    adult_content: StrictBool = True   # 是否允许成人镜头；2026-10-30 起默认开（取消过滤器）
     by: str = "owner"
     note: str = ""
+
+
+class H3EditBody(BaseModel):
+    text: str
+    by: str
+    base_sha: str | None = None        # 改之前看到的 effective_sha256；不一致返回 409
+
+
+class OverrideBody(BaseModel):
+    rule_id: str
+    owner_quote: str                   # 项目方原话（非空）
+    by: str = "owner"
+
+
+class RunBody(BaseModel):
+    """POST /api/gpu3/projects/{slug}/episodes/{ep}/run"""
+    steps: list[str]                   # frames | video | 4k（assemble 由 fredw-d9 在笔记本做，这里拒绝）
+    gpu: int
+    by: str
+    note: str
+    dry_run: StrictBool = False
+
+
+class RunCancelBody(BaseModel):
+    by: str

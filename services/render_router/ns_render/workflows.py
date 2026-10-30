@@ -24,18 +24,71 @@ class QwenModel:
     sampler: str = "euler"
 
 
+# ---- H3 参数（docs/SOP_parameters.md S4；依据 docs/research/h3_deep/00_summary.md、h3_prompt_and_fl2v.md §2）----
+# 与 gpu3 weita_render.py（H3_DIT / TURBO["t8"] / TURBO_SHIFT）保持一致；docs/research_adoption.md 记录来源。
+H3_DIT_INT8 = "minimax_h3_fl2va_pruned_int8_convrot.safetensors"   # P-A1：w4a8 + LoRA 时 adaln_proj 补丁静默失效（ComfyUI #16420）
+H3_TURBO_8STEP_768P = "minimax_h3_fl2v_turbo_8step_v1.1_768p_comfyui_bf16.safetensors"   # P-A4（与 gpu3 现行一致）
+SHIFT_768P_TURBO = (6.0, 3.0)   # P-A3：768p Turbo LoRA 的训练 shift（LightX2V 规格表）
+SHIFT_BASE = (12.0, 3.0)        # P-A3：基模 / 544p Turbo LoRA（FL2VA model_index.json sigma_shift_scales）
+H3_MIN_TURBO_STEPS = 6          # 社区 ≥8 人：4 步慢动作、蜡化、音频差（02 §2.1）
+H3_FRAMES_MIN, H3_FRAMES_MAX = 107, 362   # 4–15 s，17k+5 网格（production_rules_v3 K4：与 ns_schema.h3_lint.MIN_FRAMES 一致；4 s 档画质待实测）
+# 有损/会改长相的加速节点：一律不进 H3 图（00_summary 速度/稳定 2；03 §2.3、§5 #1）
+H3_BANNED_NODES = ("EasyCache", "LazyCache", "MiniMaxH3Cache", "SpectrumPatch", "Spectrum", "TeaCache",
+                   "CacheDiT", "SolAttention", "TorchCompileModel", "ModelPatchTorchSettings")
+
+
 @dataclass(frozen=True)
 class H3Model:
-    unet: str = "minimax_h3_fl2va_pruned_w4a8_mixed.safetensors"
+    unet: str = H3_DIT_INT8
     clip: str = "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
-    video_vae: str = "minimax_h3_video_vae_int8_convrot.safetensors"
-    audio_vae: str = "minimax_h3_audio_vae_fp32.safetensors"
-    loras: tuple[tuple[str, float], ...] = (
-        ("minimax_h3_fl2v_lightx2v_turbo_8step_v1.0_resized_avg_rank_24_bf16.safetensors", 1.0),)
+    video_vae: str = "minimax_h3_video_vae_int8_convrot.safetensors"   # int8 视频 VAE 可用（PSNR 56.7 dB）
+    audio_vae: str = "minimax_h3_audio_vae_fp32.safetensors"           # 音频 VAE 必须 fp32
+    loras: tuple[tuple[str, float], ...] = ((H3_TURBO_8STEP_768P, 1.0),)   # 强度 1.0（低→暗，高→过曝）
     steps: int = 8
-    sampler: str = "euler"
+    sampler: str = "euler"      # 不用 ancestral/SDE（音频破音 #15283）；euler 变暗约减半（HF Comfy #67）
     scheduler: str = "simple"
     fps: int = 24
+    shift: tuple[float, float] = SHIFT_768P_TURBO   # (video, audio) → MiniMaxH3SigmaShift
+    keyframe_crop: bool = True  # P-B2：首尾帧在图里用同一种 center-crop+lanczos 到画布（节点对首帧拉伸、尾帧裁切）
+
+
+# 升级/重试档：基模 20 步、无 LoRA、shift 12/3（SOP S4 P-A3/P-A5 锁定）
+H3_BASE = H3Model(loras=(), steps=20, shift=SHIFT_BASE)
+
+
+def expected_shift(loras) -> tuple[float, float]:
+    """LoRA 与 shift 的配对规则（h3_prompt_and_fl2v.md §2 Turbo 表）：768p Turbo → 6/3；544p Turbo 或无 Turbo → 12/3"""
+    turbo = [n for n, _ in loras if "turbo" in n.lower()]
+    if not turbo:
+        return SHIFT_BASE
+    return SHIFT_768P_TURBO if all("768p" in n.lower() for n in turbo) else SHIFT_BASE
+
+
+def check_h3_model(m: H3Model) -> None:
+    """出图前的参数自检（PI-23）：不合规直接报错，不消耗 GPU"""
+    errs = []
+    turbo = [n for n, _ in m.loras if "turbo" in n.lower()]
+    if "w4a8" in m.unet.lower() and m.loras:
+        errs.append(f"{m.unet} + LoRA：w4a8 下 LoRA 的 adaln_proj 不生效（ComfyUI #16420），改用 int8_convrot")
+    if tuple(m.shift) != expected_shift(m.loras):
+        errs.append(f"shift {tuple(m.shift)} 与 LoRA {turbo or '无'} 不配对，应为 {expected_shift(m.loras)}")
+    if turbo and m.steps < H3_MIN_TURBO_STEPS:
+        errs.append(f"Turbo 步数 {m.steps} < {H3_MIN_TURBO_STEPS}")
+    if any(k in m.sampler.lower() for k in ("ancestral", "sde")):
+        errs.append(f"采样器 {m.sampler}：H3 不用 ancestral/SDE")
+    if errs:
+        raise ValueError("H3 参数不合规：" + "；".join(errs))
+
+
+def turbo_sigmas(denoise: float) -> str:
+    """Turbo 8 步 sigma 的低重绘版（指令改图，W2）：从 sigma = denoise 起步（flow 模型 sigma = 噪声占比），
+    接官方表里小于它的各步。denoise 0.35 → "0.35, 0"；0.75 → "0.75, 0.704534, 0.414568, 0"。"""
+    d = min(max(float(denoise), 0.05), 1.0)
+    vals = [float(x) for x in TURBO_SIGMAS.split(",")]
+    if d >= vals[0]:
+        return TURBO_SIGMAS
+    rest = [v for v in vals if v < d]
+    return ", ".join(f"{v:g}" for v in [round(d, 6), *rest])
 
 
 def _lora_chain(wf: dict, model: list, loras, first_id: int) -> list:
@@ -87,7 +140,8 @@ def _qwen_graph(prompt: str, negative: str, width: int, height: int, seed: int, 
         "90": {"class_type": "SaveImage", "inputs": {"images": ["41", 0], "filename_prefix": prefix}},
     })
     if m.turbo:
-        wf["37"] = {"class_type": "ManualSigmas", "inputs": {"sigmas": TURBO_SIGMAS}}
+        sig = turbo_sigmas(denoise) if init_image and denoise < 1 else TURBO_SIGMAS
+        wf["37"] = {"class_type": "ManualSigmas", "inputs": {"sigmas": sig}}
     else:
         wf["37"] = {"class_type": "BasicScheduler",
                     "inputs": {"model": ["13", 0], "scheduler": "simple", "steps": m.steps, "denoise": denoise}}
@@ -119,6 +173,33 @@ def qwen_edit(prompt: str, negative: str, reference: str | list[str], width: int
                        denoise=denoise)
 
 
+def qwen_final(prompt: str, negative: str, reference: str | list[str], init_image: str, seed: int, prefix: str,
+               m: QwenModel, loras, *, pass1_size: tuple[int, int], pass2_size: tuple[int, int],
+               init_denoise: float, pass2_denoise: float, pass2_steps: int, pass2_seed_offset: int = 1) -> dict:
+    """定稿档（fredw-92/Q1；config/render_quality.json）：gpu3 weita_render.realism_graph 的两段式。
+    第一遍：Base 真 CFG，≈1.5 MP，以预览版为底图（init_denoise，同 identity_graph）并作 图1 参考；
+    第二遍：lanczos 放大到 pass2_size → VAEEncode → 低重绘 pass2_denoise（噪声种子 +offset）。节点号同 WR 50–55。"""
+    if m.turbo:
+        raise ValueError("定稿档必须用 Base（真 CFG）")
+    wf = _qwen_graph(prompt, negative, pass1_size[0], pass1_size[1], seed, prefix, m, loras, reference=reference,
+                     ref_resolution=0, crop=False, init_image=init_image, denoise=init_denoise)
+    wf.update({
+        "50": {"class_type": "ImageScale", "inputs": {"image": ["41", 0], "upscale_method": "lanczos",
+                                                      "width": pass2_size[0], "height": pass2_size[1],
+                                                      "crop": "disabled"}},
+        "51": {"class_type": "VAEEncode", "inputs": {"pixels": ["50", 0], "vae": ["12", 0]}},
+        "52": {"class_type": "RandomNoise", "inputs": {"noise_seed": int(seed) + int(pass2_seed_offset)}},
+        "53": {"class_type": "BasicScheduler", "inputs": {"model": ["13", 0], "scheduler": "simple",
+                                                          "steps": int(pass2_steps), "denoise": float(pass2_denoise)}},
+        "54": {"class_type": "SamplerCustomAdvanced",
+               "inputs": {"noise": ["52", 0], "guider": ["38", 0], "sampler": ["36", 0], "sigmas": ["53", 0],
+                          "latent_image": ["51", 0]}},
+        "55": {"class_type": "VAEDecode", "inputs": {"samples": ["54", 0], "vae": ["12", 0]}},
+    })
+    wf["90"]["inputs"]["images"] = ["55", 0]
+    return wf
+
+
 TEXT_MODEL = "qwen3vl_8b_int8_convrot.safetensors"   # Qwen Image 2.1 的文本编码器本身就是 Qwen3-VL 8B
 
 
@@ -141,6 +222,9 @@ def text_generate(prompt: str, prefix: str, image: str | None = None, max_length
 def h3_fl2va(prompt: str, first_frame: str, width: int, height: int, frames: int, seed: int, prefix: str,
              m: H3Model = H3Model(), loras: list[tuple[str, float]] = (), last_frame: str | None = None) -> dict:
     """first_frame / last_frame: ComfyUI 里的输入图片名（upload_image 的返回值）；last_frame 可选"""
+    check_h3_model(m)
+    if (frames - 5) % 17 or not H3_FRAMES_MIN <= frames <= H3_FRAMES_MAX:
+        raise ValueError(f"H3 帧数 {frames} 不在 17k+5 网格或超出 {H3_FRAMES_MIN}–{H3_FRAMES_MAX}")
     wf: dict = {
         "127": {"class_type": "UNETLoader", "inputs": {"unet_name": m.unet, "weight_dtype": "default"}},
         "128": {"class_type": "CLIPLoader", "inputs": {"clip_name": m.clip, "type": "minimax", "device": "default"}},
@@ -148,15 +232,29 @@ def h3_fl2va(prompt: str, first_frame: str, width: int, height: int, frames: int
         "120": {"class_type": "VAELoader", "inputs": {"vae_name": m.audio_vae}},
         "200": {"class_type": "LoadImage", "inputs": {"image": first_frame}},
     }
-    model = _lora_chain(wf, ["127", 0], [*m.loras, *loras], 140)
+    all_loras = [*m.loras, *loras]
+    model = _lora_chain(wf, ["127", 0], all_loras, 140)
+    shift = expected_shift(all_loras) if loras else tuple(m.shift)   # 额外 LoRA 也按配对规则
+    # 采样模型和调度器都要经过 shift 节点（sigma 由调度器的 model 算出；与 gpu3 h3_graph 相同）
+    wf["150"] = {"class_type": "MiniMaxH3SigmaShift",
+                 "inputs": {"model": model, "shift_video": float(shift[0]), "shift_audio": float(shift[1])}}
+    model = ["150", 0]
+
+    def keyframe(load_id: str, scale_id: str) -> list:
+        if not m.keyframe_crop:
+            return [load_id, 0]
+        wf[scale_id] = {"class_type": "ImageScale", "inputs": {"image": [load_id, 0], "upscale_method": "lanczos",
+                                                               "width": width, "height": height, "crop": "center"}}
+        return [scale_id, 0]
+
     wf.update({
         "131": {"class_type": "MiniMaxH3ImageToVideo",
                 "inputs": {"clip": ["128", 0], "prompt": prompt, "width": width, "height": height,
-                           "length": frames, "vae": ["119", 0], "first_frame": ["200", 0]}},
+                           "length": frames, "vae": ["119", 0], "first_frame": keyframe("200", "202")}},
     })
     if last_frame:
         wf["201"] = {"class_type": "LoadImage", "inputs": {"image": last_frame}}
-        wf["131"]["inputs"]["last_frame"] = ["201", 0]
+        wf["131"]["inputs"]["last_frame"] = keyframe("201", "203")
     wf.update({
         "126": {"class_type": "BasicGuider", "inputs": {"model": model, "conditioning": ["131", 0]}},
         "129": {"class_type": "RandomNoise", "inputs": {"noise_seed": seed}},

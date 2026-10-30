@@ -103,7 +103,17 @@ class Bible:
         return {c.name: c.detect for c in self.characters}
 
     def forced_adult(self) -> dict[str, str]:
-        return _read_overrides(self.overrides_path)
+        v = _read_overrides(self.overrides_path).get("force_adult", {})
+        # 封板修复：写成列表 ["ep01-S1", …] 时按“原因未写”处理（原来编译器 forced[shot.id] 会 TypeError）
+        if isinstance(v, list):
+            return {str(x): "（未写原因）" for x in v}
+        return v if isinstance(v, dict) else {}
+
+    def adult_per_shot(self) -> bool:
+        """adult_overrides.json "per_shot"：true = 逐镜判定；缺省 false = 集标题 🔴 整集继承（项目方 2026-10-30）"""
+        v = _read_overrides(self.overrides_path).get("per_shot", False)
+        # 封板修复：只认 JSON 布尔 true（或字符串 "true"）；原来 bool("false") 为 True，会悄悄切成逐镜判定
+        return v is True or (isinstance(v, str) and v.strip().lower() == "true")
 
     @property
     def version(self) -> str:
@@ -126,7 +136,8 @@ class Bible:
         return [w for w in self.banned_words if w and w in text]
 
 
-def _read_overrides(p: Path) -> dict[str, str]:
+def _read_overrides(p: Path) -> dict:
+    """adult_overrides.json 整个对象（按 mtime/size 缓存）；读不了 → {}"""
     try:
         st = p.stat()
     except OSError:
@@ -136,7 +147,8 @@ def _read_overrides(p: Path) -> dict[str, str]:
     if hit and hit[0] == key:
         return hit[1]
     try:
-        val = json.loads(p.read_text(encoding="utf-8")).get("force_adult", {})
+        val = json.loads(p.read_text(encoding="utf-8"))
+        val = val if isinstance(val, dict) else {}
     except (OSError, ValueError):
         val = {}
     _OVR_CACHE[str(p)] = (key, val)
@@ -160,8 +172,24 @@ def _tup(v, default) -> tuple:
     return tuple(v) if isinstance(v, (list, tuple)) else (v,)
 
 
+def _check_types(path: Path, data: dict) -> None:
+    """封板修复：类型写错时和坏 TOML 一样报清楚的 ValueError（原来是 IndexError / AttributeError，看不出哪里错）"""
+    def bad(key, want):
+        raise ValueError(f"{path} 的 {key} 必须是{want}")
+    for key in ("look", "realism", "assembly", "classification", "looks", "characters", "shot_rules_safe"):
+        if key in data and not isinstance(data[key], dict):
+            bad(f"[{key}]", "表（table）")
+    for key in ("materials", "shot_rules"):
+        if key in data and not (isinstance(data[key], list) and all(isinstance(x, dict) for x in data[key])):
+            bad(f"[[{key}]]", "表数组（[[...]]）")
+    ld = (data.get("look") or {}).get("lens_default")
+    if ld is not None and not (isinstance(ld, (list, tuple)) and len(ld) == 2):
+        bad("[look].lens_default", '两个元素的数组，如 ["50", "1.4"]')
+
+
 def _build(root: Path, path: Path, data: dict) -> Bible:
     C = _defaults()
+    _check_types(path, data)
     look = data.get("look") or {}
     video = look.get("video") or {}
     realism = data.get("realism") or {}

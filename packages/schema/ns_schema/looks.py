@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 
 Slot = Literal["outfit", "shoes", "makeup", "hair", "nails", "accessory", "other"]
 SLOTS: tuple[str, ...] = ("outfit", "shoes", "makeup", "hair", "nails", "accessory", "other")
-Layer = Literal["default", "episode", "shot"]
+Layer = Literal["default", "episode", "scene", "shot"]   # scene = 画布场景覆盖（W5，canvas-ui-spec-v3 §6）
 # 装饰可见性：visible=按镜头触发词决定；hidden=装饰在身但被遮住；in_box=可摘装饰收在匣里
 Visibility = Literal["visible", "hidden", "in_box"]
 # 何时把单品写进提示词：always=只要生效就写；when_in_shot=该镜 img 触发词/关键词命中时才写（身体装饰）

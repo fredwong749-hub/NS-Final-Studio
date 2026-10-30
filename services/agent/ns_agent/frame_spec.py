@@ -27,7 +27,8 @@ from ns_schema.script import Episode, ScriptGlobals, Shot
 from . import gpu3_fields as G3
 from .bible import Bible, load_bible
 from .compiler import (DARK_WORDS, LAST_FRAME_KEEP, _strip_triggers, classify_adult, corrector_terms, end_state,  # noqa: F401
-                       is_dark, lens_term, material_terms, split_camera, split_dash, without_possessive_places)
+                       identity_triggers, is_dark, lens_term, material_terms, split_camera, split_dash,
+                       without_possessive_places)
 
 # ------------------------------------------------------------------ 词表（确定性解析）
 
@@ -732,6 +733,9 @@ def assemble(spec: FrameSpec, shot: Shot, g: ScriptGlobals, available_triggers: 
 
     triggers = [t for t in shot.img_triggers if available_triggers is None or t in available_triggers]
     visible = {c.name for c in spec.characters}
+    # 系统自动补的角色 LoRA 触发词（config/auto_lora_triggers.json，导入时已补）：统一放最前、不重复、不被过滤
+    first = [t for t, _f, _s in identity_triggers(visible, (), b)]
+    triggers = first + [t for t in triggers if t not in first]
     locks = [f"【{c.name}】{c.description}" for c in g.character_locks if c.name in visible]
     facts_first = [f.text for f in spec.facts if f.frame == "first" and f.kind not in ("boost", "rule")]
     rules = [f.text for f in spec.facts if f.kind == "rule"]
@@ -754,10 +758,21 @@ def assemble(spec: FrameSpec, shot: Shot, g: ScriptGlobals, available_triggers: 
     corr = [t for t in corr if t not in lighting]
     worn = "，".join(wear)
     rules = [r for r in rules if r not in worn]    # QA-04：高跟描述里已含材质句就不再追加
+    # 项目方 2026-10-30：规格词由系统自动补；写作者原文里已有同一条目就不再追加（去重）
+    first_own = join(*locks, framing, *wear, pose, *by["scene"], lighting, spec.composition)
     qwen = join("，".join(triggers), *locks, framing, *wear, pose, *by["scene"], lighting, spec.composition,
-                *corr, *rules, spec.boost_first, lens_term(style, b), style)
+                *(t for t in corr if t not in first_own), *(r for r in rules if r not in first_own),
+                spec.boost_first, lens_term(style, b), style)
     end = spec.last_frame.description
-    qwen_last = join(b.last_frame_keep + end, *locks, lighting, spec.boost_last, lens_term(style, b), style)         if end or spec.boost_last else ""
+    # G1（2026-10-30）：尾帧沿用首帧的触发词、穿戴、纠正器与规则条目；结束状态里新出现的材质词（如赤脚）再补；
+    # 结束状态里写作者已写过的条目不再加
+    last_own = join(end, *locks, *wear, lighting)
+    corr_last = [t for t in corrector_terms(img_body + "，" + end, adult=spec.adult, bible=b) if t not in last_own]
+    rules_last = [r for r in rules if r not in last_own]
+    extra = [m for m in material_terms(end, present=visible, bible=b)
+             if m not in worn and m not in rules and not any(m in lk for lk in locks)]
+    qwen_last = join("，".join(triggers), b.last_frame_keep + end, *locks, *wear, lighting, *corr_last, *rules_last,
+                     *extra, spec.boost_last, lens_term(style, b), style) if end or spec.boost_last else ""
     return ModelPrompt(qwen=qwen, qwen_last=qwen_last)
 
 

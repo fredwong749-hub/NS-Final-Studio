@@ -209,7 +209,7 @@ class Engine:
             return
         first_ep = eps[0]
         gates_ok = g["G2"]["status"] == "approved" and g["G3"]["status"] == "approved"
-        adult_on = bool(self.ctx.settings().get("adult_content"))
+        adult_on = bool(self.ctx.settings().get("adult_content", True))
         for ep in eps:
             s = self._steps(st, ep)
             if s["script"]["status"] != "done":
@@ -275,8 +275,8 @@ class Engine:
         adult = sum(bool(s.get("adult")) for e in data.get("episodes", []) for s in e["shots"])
         ready = [int(k) for k, e in st["episodes"].items() if e["steps"]["last"]["status"] == "done"]
         return {"adult_content": adult_on, "adult_shots": adult, "episodes_ready": sorted(ready),
-                "note": "笔记本不出成人帧、不出视频。批准后由 gpu3 按自己的配置出成人首尾帧与全部视频；"
-                        "未锁样片（G4）前只交第一集。" + ("" if adult_on else "本剧成人内容开关为“关”，gpu3 跳过成人镜头。")}
+                "note": "批准后由 gpu3 按自己的配置出首尾帧与全部视频；未锁样片（G4）前只交第一集。"
+                        "2026-10-30 起成人镜头不再被跳过。"}
 
     def _eligible(self, s: dict, name: str) -> bool:
         prev = {"frame_spec": "script", "first": "frame_spec", "last": "first", "assemble": "video"}[name]

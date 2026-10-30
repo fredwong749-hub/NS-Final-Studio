@@ -250,7 +250,7 @@ def create_project(name: str, slug: str | None = None) -> ProjectContext:
         write_json(registry_path(), reg)
         ctx = _entry_ctx(entry)
         ctx.save_settings({"slug": slug, "name": name, "status": "draft", "created_at": entry["created_at"],
-                           "adult_content": False, "lora_plan": {}, "characters": {}, "gates": {}})
+                           "adult_content": True, "lora_plan": {}, "characters": {}, "gates": {}})
         return ctx
 
 

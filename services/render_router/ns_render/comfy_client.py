@@ -1,6 +1,18 @@
-"""最小 ComfyUI HTTP 客户端（只用标准库）：校验、上传、提交、等待、下载。"""
+"""最小 ComfyUI HTTP 客户端（只用标准库 + PIL）：校验、上传、提交、等待、下载。
+
+fredw-92/F1：笔记本 → gpu3 上行经跳板只有 8–25 KB/s，重传帧会超时。所以：
+- download() 时把输出在 gpu3 上的名字（subfolder/filename、哪个 ComfyUI）按内容 sha256 记进 RemoteIndex；
+- 之后同一个 ComfyUI（按 --output-directory 判定，两个实例目录相同也算）要用这张图时，
+  LoadImage 直接写 "subfolder/name.png [output]"（ComfyUI 0.42 实测可用），不上传；
+  需要缩放的（input_image(size=…)）在图里补一个 ImageScale；
+- 提交时 LoadImage 报 Invalid image file（gpu3 上文件没了）→ 自动改为上传再提交一次；
+- 真要上传：不透明图转 JPEG q95、按原内容 sha 命名、先 HEAD 查输入目录（两实例共用）已有就跳过、超时 ≥ 900 s。
+"""
 import hashlib
+import io
 import json
+import os
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -20,20 +32,146 @@ class ComfyUnavailable(ComfyError):
     """连不上 ComfyUI（进程没起或被杀）：不重试、不换种子，整批停下"""
 
 
+UPLOAD_TIMEOUT_S = 900          # 上传超时下限（上行 8–25 KB/s 时 3 MB 要 2–6 分钟）
+UPLOAD_JPEG_QUALITY = 95
+OUTPUT_TAG = " [output]"        # LoadImage 注解：从该实例的输出目录读
+_SCALE_SEP = " @"               # 本地占位：注解名 + " @WxH:crop"，submit 时换成 LoadImage + ImageScale
+
+
+def file_sha256(path: Path) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+class RemoteIndex:
+    """本地文件内容 sha256 → ComfyUI 输出目录里的同一文件 [{instance, base, gpu, subfolder, filename, type}]"""
+
+    MAX_PER_SHA = 4
+
+    def __init__(self, path: Path | None):
+        self.path = Path(path) if path else None
+        self._lock = threading.Lock()
+        self._data: dict | None = None if path else {}
+
+    def _load(self) -> dict:
+        if self._data is None:
+            try:
+                self._data = json.loads(self.path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                self._data = {}
+        return self._data
+
+    def _save(self):
+        if not self.path:
+            return
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self._data, ensure_ascii=False), encoding="utf-8")
+            tmp.replace(self.path)
+        except OSError:
+            pass
+
+    def add(self, sha: str, rec: dict):
+        with self._lock:
+            d = self._load()
+            recs = [r for r in d.get(sha, []) if r.get("instance") != rec.get("instance")]
+            d[sha] = ([rec] + recs)[: self.MAX_PER_SHA]
+            self._save()
+
+    def find(self, sha: str, instance: str) -> dict | None:
+        with self._lock:
+            return next((dict(r) for r in self._load().get(sha, []) if r.get("instance") == instance), None)
+
+    def forget(self, sha: str, instance: str):
+        with self._lock:
+            d = self._load()
+            if sha in d:
+                d[sha] = [r for r in d[sha] if r.get("instance") != instance]
+                if not d[sha]:
+                    del d[sha]
+                self._save()
+
+
+def _default_index_path() -> Path:
+    if os.environ.get("NS_COMFY_REMOTE_INDEX"):
+        return Path(os.environ["NS_COMFY_REMOTE_INDEX"])
+    root = Path(os.environ.get("NS_PROJECT_ROOT") or Path(__file__).resolve().parents[3])
+    return root / "data" / "cache" / "comfy_remote_outputs.json"
+
+
+remote_index = RemoteIndex(_default_index_path())   # 测试换成 RemoteIndex(tmp) / RemoteIndex(None)
+
+
+def annotated_name(rec: dict) -> str:
+    sub = rec.get("subfolder") or ""
+    return (f"{sub}/{rec['filename']}" if sub else rec["filename"]) + OUTPUT_TAG
+
+
+def _upload_payload(path: Path) -> tuple[bytes, str, str]:
+    """→ (要传的字节, 文件名, 旧名 = 原内容 sha16 + 原后缀)。不透明的 PNG/WebP/BMP 转 JPEG q95；
+    带透明 / 灰度 / 已是 JPEG 的原样传"""
+    data = Path(path).read_bytes()
+    digest = hashlib.sha256(data).hexdigest()[:16]
+    suffix = Path(path).suffix.lower()
+    legacy = digest + suffix
+    if suffix in (".png", ".webp", ".bmp"):
+        try:
+            from PIL import Image
+            im = Image.open(io.BytesIO(data))
+            opaque = im.mode == "RGB" or (im.mode == "RGBA" and im.getchannel("A").getextrema() == (255, 255))
+            if opaque:
+                buf = io.BytesIO()
+                im.convert("RGB").save(buf, "JPEG", quality=UPLOAD_JPEG_QUALITY)
+                return buf.getvalue(), digest + ".jpg", legacy
+        except Exception:  # noqa: BLE001  打不开就原样传
+            pass
+    return data, legacy, legacy
+
+
+def remote_info(client, path: Path) -> dict | None:
+    """take.remote：这张本地图在 gpu3 哪个 ComfyUI 的输出目录里叫什么（+ sha256）；假客户端 / 没记录 → None"""
+    fn = getattr(client, "remote_info", None)
+    try:
+        return fn(path) if fn else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def input_image(client, path: Path, subfolder: str = "ns_final/refs", *, size: tuple[int, int] | None = None,
+                crop: str = "disabled", prepare=None) -> str:
+    """LoadImage 用的图片名。path = 原图（多半是之前从 ComfyUI 下载的输出）；size / crop = 要的尺寸，
+    prepare() = 本地做同样缩放后的文件（要上传时才调用）。真 ComfyClient：同实例输出目录已有 → [output] 注解
+    + 图内 ImageScale；假客户端（测试）没有 input_image 方法 → 直接 upload_image(prepare())。"""
+    if hasattr(client, "input_image"):
+        return client.input_image(path, subfolder, size=size, crop=crop, prepare=prepare)
+    return client.upload_image(prepare() if prepare else Path(path), subfolder)
+
+
 class ComfyClient:
-    def __init__(self, base_url: str = "http://127.0.0.1:8188", timeout: float = 60):
+    def __init__(self, base_url: str = "http://127.0.0.1:8188", timeout: float = 60, gpu: int | None = None,
+                 upload_timeout: float = UPLOAD_TIMEOUT_S):
         self.base = base_url.rstrip("/")
         self.timeout = timeout
+        self.upload_timeout = upload_timeout
+        self.gpu = gpu
+        self.server: str | None = None         # G36：非 gpu33 的服务器名（实例标识带上它，输出目录不跨服务器互通）
         self.client_id = uuid.uuid4().hex
         self._object_info: dict | None = None
+        self._instance: str | None = None
+        self._remote: dict[str, dict] = {}     # 本客户端发出的 [output] 名 → {sha, path, subfolder, size, crop, prepare}
+        self.reuploads: list[str] = []         # 因 gpu3 上文件缺失而改为上传的（日志 / 测试用）
 
-    def _request(self, path: str, data: bytes | None = None, headers: dict | None = None) -> bytes:
-        req = urllib.request.Request(self.base + path, data=data, headers=headers or {})
+    def _request(self, path: str, data: bytes | None = None, headers: dict | None = None,
+                 timeout: float | None = None, method: str | None = None) -> bytes:
+        req = urllib.request.Request(self.base + path, data=data, headers=headers or {}, method=method)
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+            with urllib.request.urlopen(req, timeout=timeout or self.timeout) as r:
                 return r.read()
         except urllib.error.HTTPError as e:
-            raise ComfyError(f"{path}: HTTP {e.code} {e.read()[:2000].decode('utf-8', 'replace')}") from e
+            body = e.read()
+            err = ComfyError(f"{path}: HTTP {e.code} {body[:2000].decode('utf-8', 'replace')}")
+            err.status, err.body = e.code, body
+            raise err from e
         except urllib.error.URLError as e:
             raise ComfyUnavailable(f"{path}: {e.reason}") from e
         except (ConnectionError, TimeoutError) as e:
@@ -71,9 +209,62 @@ class ComfyClient:
                     problems.append(f"节点 {nid} ({cls}): 找不到 {key}={value}")
         return problems
 
-    def upload_image(self, path: Path, subfolder: str = "ns_final") -> str:
-        data = path.read_bytes()
-        name = hashlib.sha256(data).hexdigest()[:16] + path.suffix.lower()
+    # ------------------------------------------------------------ gpu3 上已有的输出直接引用（fredw-92/F1）
+
+    def instance(self) -> str:
+        """实例标识：--output-directory（两个实例目录相同 → 同一标识，[output] 注解互通）；读不到就用地址"""
+        if self._instance is None:
+            key = None
+            try:
+                argv = (self.system_stats().get("system") or {}).get("argv") or []
+                if "--output-directory" in argv:
+                    key = "out:" + str(argv[argv.index("--output-directory") + 1]).rstrip("/")
+                else:
+                    key = "out-default:" + self.base
+            except (ComfyError, ValueError, IndexError, AttributeError, TypeError):
+                pass
+            pre = f"{self.server}|" if getattr(self, "server", None) else ""
+            if key is None:
+                return pre + "url:" + self.base      # 暂时连不上：不缓存，下次再问
+            self._instance = pre + key
+        return self._instance
+
+    def remote_info(self, path: Path) -> dict | None:
+        """本地文件（下载的输出原样）在本实例输出目录里的记录 + sha256，写进 take.remote；没有 → None"""
+        try:
+            sha = file_sha256(path)
+        except OSError:
+            return None
+        rec = remote_index.find(sha, self.instance())
+        if rec:
+            rec["sha256"] = sha
+        return rec
+
+    def input_image(self, path: Path, subfolder: str = "ns_final/refs", *, size=None, crop: str = "disabled",
+                    prepare=None) -> str:
+        path = Path(path)
+        try:
+            sha = file_sha256(path)
+        except OSError:
+            sha = None
+        rec = remote_index.find(sha, self.instance()) if sha else None
+        if rec:
+            name = annotated_name(rec)
+            if size:
+                name += f"{_SCALE_SEP}{int(size[0])}x{int(size[1])}:{crop}"
+            self._remote[name] = {"sha": sha, "path": path, "subfolder": subfolder, "size": size, "crop": crop,
+                                  "prepare": prepare}
+            return name
+        return self.upload_image(prepare() if prepare else path, subfolder, remote=False)
+
+    def upload_image(self, path: Path, subfolder: str = "ns_final", remote: bool = True) -> str:
+        """同实例输出目录里已有同内容文件 → 返回 [output] 注解名；否则上传（JPEG q95、同内容跳过、≥900 s）"""
+        if remote:
+            return self.input_image(path, subfolder)
+        data, name, legacy = _upload_payload(Path(path))
+        for n in dict.fromkeys((name, legacy)):
+            if self._input_exists(subfolder, n):
+                return f"{subfolder}/{n}" if subfolder else n
         boundary = uuid.uuid4().hex
         parts = []
         for key, value in (("subfolder", subfolder), ("overwrite", "true")):
@@ -82,14 +273,97 @@ class ComfyClient:
                      f"Content-Type: application/octet-stream\r\n\r\n".encode() + data + b"\r\n")
         parts.append(f"--{boundary}--\r\n".encode())
         res = json.loads(self._request("/upload/image", b"".join(parts),
-                                       {"Content-Type": f"multipart/form-data; boundary={boundary}"}))
+                                       {"Content-Type": f"multipart/form-data; boundary={boundary}"},
+                                       timeout=max(self.timeout, self.upload_timeout)))
         return f"{res['subfolder']}/{res['name']}" if res.get("subfolder") else res["name"]
 
+    def _input_exists(self, subfolder: str, name: str) -> bool:
+        """输入目录（两个实例共用）里已有这个名字 → 不再上传（名字 = 原内容 sha，同名即同内容）"""
+        q = urllib.parse.urlencode({"filename": name, "subfolder": subfolder, "type": "input"})
+        try:
+            self._request(f"/view?{q}", method="HEAD")
+            return True
+        except ComfyError:
+            return False
+
+    def _materialize(self, workflow: dict, swap: dict | None = None) -> dict:
+        """本地占位名 → 真名：[output] 注解（要缩放的另接 ImageScale）；swap 里的（文件缺失改上传的）换成上传名"""
+        wf = json.loads(json.dumps(workflow))
+        swap = swap or {}
+        for nid, node in list(wf.items()):
+            if node.get("class_type") != "LoadImage":
+                continue
+            name = node["inputs"].get("image")
+            if not isinstance(name, str):
+                continue
+            if name in swap:
+                node["inputs"]["image"] = swap[name]
+                continue
+            spec = self._remote.get(name)
+            if spec is None:
+                continue
+            node["inputs"]["image"] = name.split(_SCALE_SEP)[0]
+            if spec["size"]:
+                sid = f"{nid}_f1scale"
+                for other in wf.values():
+                    for k, v in other["inputs"].items():
+                        if v == [nid, 0]:
+                            other["inputs"][k] = [sid, 0]
+                wf[sid] = {"class_type": "ImageScale",
+                           "inputs": {"image": [nid, 0], "upscale_method": "lanczos", "width": int(spec["size"][0]),
+                                      "height": int(spec["size"][1]), "crop": spec["crop"]}}
+        return wf
+
+    def _missing_remote(self, workflow: dict, node_errors: dict) -> list[str]:
+        """node_errors 里 LoadImage 读不到的、且是本客户端发出的 [output] 名"""
+        out = []
+        for nid, err in (node_errors or {}).items():
+            node = workflow.get(nid) or {}
+            name = (node.get("inputs") or {}).get("image")
+            if node.get("class_type") == "LoadImage" and name in self._remote and "image" in json.dumps(err):
+                out.append(name)
+        return out
+
+    def _post_prompt(self, wf: dict) -> dict:
+        try:
+            return self._json("/prompt", {"prompt": wf, "client_id": self.client_id})
+        except ComfyUnavailable:
+            raise
+        except ComfyError as e:
+            if getattr(e, "status", None) == 400:
+                try:
+                    return {"_http400": json.loads(e.body), "_msg": str(e)}
+                except (TypeError, ValueError):
+                    pass
+            raise
+
     def submit(self, workflow: dict) -> str:
-        res = self._json("/prompt", {"prompt": workflow, "client_id": self.client_id})
-        if res.get("node_errors"):
-            raise ComfyError(f"node_errors: {json.dumps(res['node_errors'], ensure_ascii=False)[:2000]}")
-        return res["prompt_id"]
+        swap: dict = {}
+        for attempt in range(2):
+            res = self._post_prompt(self._materialize(workflow, swap))
+            body = res.get("_http400") or res
+            errs = body.get("node_errors") or {}
+            missing = self._missing_remote(workflow, errs) if attempt == 0 else []
+            if missing:
+                # gpu3 输出目录里那张图没了（被清理 / 换了目录）→ 忘掉记录，改为上传后重交一次
+                if res.get("prompt_id"):
+                    try:
+                        self._json("/queue", {"delete": [res["prompt_id"]]})
+                    except ComfyError:
+                        pass
+                for name in missing:
+                    spec = self._remote[name]
+                    remote_index.forget(spec["sha"], self.instance())
+                    src = spec["prepare"]() if spec["prepare"] else spec["path"]
+                    swap[name] = self.upload_image(Path(src), spec["subfolder"], remote=False)
+                    self.reuploads.append(name)
+                continue
+            if res.get("_http400"):
+                raise ComfyError(res["_msg"])
+            if errs:
+                raise ComfyError(f"node_errors: {json.dumps(errs, ensure_ascii=False)[:2000]}")
+            return res["prompt_id"]
+        raise ComfyError("提交失败")
 
     def wait(self, prompt_id: str, timeout_s: float, poll_s: float = 3) -> dict:
         deadline = time.monotonic() + timeout_s
@@ -130,7 +404,17 @@ class ComfyClient:
         q = urllib.parse.urlencode({"filename": item["filename"], "subfolder": item.get("subfolder", ""),
                                     "type": item.get("type", "output")})
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(self._request(f"/view?{q}"))
+        data = self._request(f"/view?{q}")
+        dest.write_bytes(data)
+        if item.get("type", "output") == "output":
+            # 记下 gpu3 上的名字：之后同实例要用这张图时直接 [output] 引用，不再上传
+            try:
+                remote_index.add(hashlib.sha256(data).hexdigest(), {
+                    "instance": self.instance(), "base": self.base, "gpu": self.gpu,
+                    "subfolder": item.get("subfolder", ""), "filename": item["filename"], "type": "output",
+                    "at": time.strftime("%Y-%m-%dT%H:%M:%S")})
+            except Exception:  # noqa: BLE001  记不上只是下次要上传
+                pass
         return dest
 
     def run(self, workflow: dict, timeout_s: float) -> tuple[dict, float]:

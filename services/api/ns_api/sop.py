@@ -96,6 +96,9 @@ class Inputs:
         self.scene_by_id = {s.get("scene_id"): s for s in (self.scenes or {}).get("scenes") or [] if isinstance(s, dict)}
         self._qa: dict[int, dict | None] = {}
         self.stale = timeline_stale(self.root, self.timeline, self.scenes)
+        self.script = load_script(self.root)
+        self.ep_versions = episode_versions(self.script)       # D-1：合并导入后各集剧本版本不同，S1 按集判
+        self.source_drift = source_drift(self.root, self.timeline, self.script)
 
     def ep_dir(self, n: int) -> Path:
         return self.gpu3_root / f"ep{n:02d}"
@@ -130,6 +133,59 @@ def timeline_stale(root: Path, timeline: dict | None, scenes: dict | None) -> li
         return [f"check_failed:{type(e).__name__}"]
 
 
+def load_script(root: Path):
+    """data/import/script_v2.json → ScriptImport；没有 / 读不了 → None（SOP 退回状态表的整份版本）"""
+    p = root / "data" / "import" / "script_v2.json"
+    try:
+        if p.is_file():
+            from ns_schema.script import ScriptImport
+            return ScriptImport.model_validate_json(p.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def episode_versions(script) -> dict[int, str]:
+    """集号 → 本集来源剧本版本（ns_agent.state_timeline.episode_version：源文件记的 version/episodes，后导入的优先）"""
+    if script is None:
+        return {}
+    try:
+        from ns_agent.state_timeline import episode_version
+        return {e.number: episode_version(script, e.number) for e in script.episodes}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def source_drift(root: Path, timeline: dict | None, script=None) -> list[dict]:
+    """QA4-01：剧本源文件导入后又改过 / 不见了 → [{path, imported_sha, current_sha}]。
+    现算（ns_agent.state_timeline.source_drift，读 data/import/script_v2.json 的 sources）；算不出退回状态表记的
+    source.changed_sources。只做提醒（warn），不拦镜头"""
+    try:
+        script = script if script is not None else load_script(root)
+        if script is not None:
+            from ns_agent.state_timeline import source_drift as _drift
+            # 合并导入曾把同一源文件登记多次（旧条目是旧 sha）：同一路径只看最后（最新）一条，否则旧条目会误报
+            last = {s.path.replace("\\", "/").lower(): s for s in script.sources}
+            return _drift(root, script.model_copy(update={"sources": list(last.values())}))
+    except Exception:  # noqa: BLE001 — 提醒算不出不影响 SOP 状态
+        pass
+    d = ((timeline or {}).get("source") or {}).get("changed_sources")
+    return [x for x in d if isinstance(x, dict)] if isinstance(d, list) else []
+
+
+SOURCE_DRIFT_TEXT = "剧本源文件导入后又改过，需重新导入"
+
+
+def source_drift_warning(inp: "Inputs") -> dict | None:
+    if not getattr(inp, "source_drift", None):
+        return None
+    paths = [str(x.get("path") or "") for x in inp.source_drift]
+    gone = [str(x.get("path") or "") for x in inp.source_drift if x.get("current_sha") is None]
+    text = SOURCE_DRIFT_TEXT + "：" + "、".join(paths) + (f"（其中找不到文件：{'、'.join(gone)}）" if gone else "")
+    return {**_b("source_drift", "S1", text, "owner"), "level": "warn", "paths": paths,
+            "changed_sources": list(inp.source_drift)}
+
+
 def _stale_blocker(inp: "Inputs", stage: str) -> dict:
     names = "、".join(inp.stale[:6]) + ("…" if len(inp.stale) > 6 else "")
     return _b("timeline_stale", stage, f"状态表过期（{names} 已变）：重建前 S1/S2 一律按未通过处理", "laptop",
@@ -156,7 +212,12 @@ def s1_gate(inp: Inputs) -> dict:
     ver = (tl.get("source") or {}).get("script")
     errs, g3 = g.get("validator_errors"), bool(g.get("g3_accepted"))
     blockers = []
-    if _ver_num(ver) < 3:
+    vers = getattr(inp, "ep_versions", None) or {}
+    low = sorted(n for n, v in vers.items() if _ver_num(v) < 3)
+    if vers and low and len(low) < len(vers):   # D-1：混合版本 → 只有这些集 S1 不过
+        blockers.append(_b("script_partial_v3", "S1", f"部分集仍是 v2 等旧版（ep{ep_ranges(low)}）：这些集 S1 不过，"
+                           "v3 的集按本集判断", "gpu3", episodes=low))
+    elif (vers and low) or (not vers and _ver_num(ver) < 3):
         blockers.append(_b("script_not_v3", "S1", f"剧本还是 {ver or '未知版本'}，S1 要求 v3 加强版（v3 改写在 gpu3 LLM 上跑）", "gpu3"))
     if errs is None:
         blockers.append(_b("validator_unrecorded", "S1", "校验器错误数没有记录（须为 0）", "laptop", CLI_S1_ERRORS))
@@ -178,6 +239,23 @@ def s1_gate(inp: Inputs) -> dict:
         blockers.append(_b("s1_provisional", "S1", "状态表标记 provisional（S1 闸门未过）", "laptop", "uv run python tools/s1_gate.py"))
     return {"passed": passed, "known": True, "script": ver, "validator_errors": errs, "g3_accepted": g3,
             "g3_ref": g.get("g3_ref") or None, "checked_at": g.get("checked_at"), "blockers": blockers}
+
+
+EP_VERSION_CODES = ("script_not_v3", "script_partial_v3", "s1_provisional")
+
+
+def episode_s1_blockers(inp: Inputs, s1: dict, ep: int) -> list[dict]:
+    """D-1：本集的 S1 阻塞。剧本版本按本集来源判（episode_version）；校验器 / G3 / 状态表过期仍是项目级。
+    不知道各集版本（没有 script_v2.json）→ 原样用项目级结论"""
+    vers = getattr(inp, "ep_versions", None) or {}
+    if ep not in vers:
+        return [dict(b) for b in s1["blockers"]]
+    out = [dict(b) for b in s1["blockers"] if b["code"] not in EP_VERSION_CODES]
+    v = vers[ep]
+    if _ver_num(v) < 3:
+        out.insert(0, _b("script_not_v3", "S1", f"第 {ep} 集剧本还是 {v or '未知版本'}，S1 要求 v3 加强版"
+                                                 "（v3 改写在 gpu3 LLM 上跑）", "gpu3", episode=ep))
+    return out
 
 
 def _owner_note(rec: dict) -> str:
@@ -385,7 +463,7 @@ def shot_status(inp: Inputs, *, shot_id: str, ep: int, index: int, s1: dict, rea
     items = {i["key"]: i for i in (readiness or {}).get("items") or []}
     stages: dict[str, list[dict]] = {k: [] for k in STAGE_IDS}
     # S1：项目闸门 + 本镜剧本要素（时长必须剧本写明）
-    stages["S1"] += [dict(b) for b in s1["blockers"]]
+    stages["S1"] += episode_s1_blockers(inp, s1, ep)
     for k in S1_ITEMS:
         it = items.get(k)
         if it and (not it["ok"] or (k == "duration" and it.get("source") != "script")):
@@ -426,6 +504,11 @@ def shot_status(inp: Inputs, *, shot_id: str, ep: int, index: int, s1: dict, rea
         why = ("本集没有 qa.json" if qa is None else "qa.json 里没有这一镜" if not isinstance(q, dict)
                else f"qa.json verdict={q.get('verdict')!r}")
         stages["S4"].append(_b("qa_not_pass", "S4", f"视频 QC 未通过：{why}", "gpu3"))
+    # S4 提示（R-C4，总调度 2026-10-30）：视频 LoRA 未验收只提醒，不进 blockers、不改 passed
+    s4_warn = [{"code": "video_lora_unaccepted", "stage": "S4", "trigger": l.get("trigger"), "rule_ids": ["R-C4"],
+                "text": f"视频 LoRA {l.get('trigger')} 未验收：视频照常出，accepted 后更好"}
+               for l in (tl or {}).get("required_loras") or []
+               if l.get("kind") == "video" and l.get("registry_status") != "accepted"]
     stage = next((k for k in STAGE_IDS[:4] if stages[k]), None)
     ahead = []
     if stage in ("S1", "S2") and (has_first or has_last):
@@ -435,7 +518,8 @@ def shot_status(inp: Inputs, *, shot_id: str, ep: int, index: int, s1: dict, rea
     return {"id": shot_id, "episode": ep, "index": index, "stage": stage or "S5",
             "stage_label": STAGE_LABEL[stage or "S5"],
             "blockers": stages[stage] if stage else [],
-            "stages": {k: {"passed": not v, "blockers": v} for k, v in stages.items() if k != "S5"},
+            "stages": {k: {"passed": not v, "blockers": v, **({"warnings": s4_warn} if k == "S4" else {})}
+                       for k, v in stages.items() if k != "S5"},
             "frames_owner": frames_owner, "ahead_of_gate": ahead,
             "s2_ready": (tl or {}).get("s2_ready"), "scene_id": (tl or {}).get("scene_id"),
             "required_loras": (tl or {}).get("required_loras") or []}
@@ -489,6 +573,11 @@ def episode_status(inp: Inputs, n: int, shots: list[dict], g4: dict | None) -> d
 def owner_actions(inp: Inputs, s1: dict, gate_list: list[dict], ep_states: dict[int, dict]) -> list[dict]:
     """「待你决定」：只列项目方本人要拍板的事，每条给命令。actionable=false = 上游还没到，先别做"""
     acts = []
+    for w in s1.get("warnings") or []:
+        if w.get("code") == "source_drift":     # QA4-01：重新导入只能由项目方在画布「剧本导入」里点
+            acts.append({"gate": "source_drift", "stage": "S1", "level": "warn", "title": SOURCE_DRIFT_TEXT,
+                         "why": w["text"] + "（提醒，不拦镜头；在画布「剧本导入」确认导入）", "paths": w["paths"],
+                         "cli": None, "actionable": True, "waiting_on": []})
     if not s1.get("g3_accepted") and s1.get("known"):
         upstream = [b["text"] for b in s1["blockers"] if b["code"] in ("timeline_stale", "script_not_v3", "validator_errors",
                                                                          "validator_unrecorded")]
@@ -529,7 +618,7 @@ def owner_actions(inp: Inputs, s1: dict, gate_list: list[dict], ep_states: dict[
 def gpu_priority(s1: dict, shots: list[dict], ep_states: dict[int, dict]) -> dict:
     """★2：高优先级有待办就不把卡给低优先级。这里只算“哪一级有 gpu3 待办”，分卡由调度器做"""
     work = {k: 0 for k, _ in GPU_PRIORITY}
-    if any(b["code"] == "script_not_v3" for b in s1["blockers"]):
+    if any(b["code"] in ("script_not_v3", "script_partial_v3") for b in s1["blockers"]):
         work["S1"] = 1
     loras: dict[str, int] = {}
     plates: set[str] = set()
@@ -553,6 +642,8 @@ def gpu_priority(s1: dict, shots: list[dict], ep_states: dict[int, dict]) -> dic
 def evaluate(inp: Inputs, shot_rows: list[dict], *, project_owner: str) -> dict:
     """shot_rows：[{id, episode, index, readiness?, owner?, has_first, has_last, has_video, gpu3_status?}]（剧本顺序）"""
     s1 = s1_gate(inp)
+    drift = source_drift_warning(inp)
+    s1["warnings"] = [drift] if drift else []      # QA4-01：只提醒，不进 blockers、不改 passed
     eps = sorted({r["episode"] for r in shot_rows})
     first_ep = eps[0] if eps else None
     g4 = g4_record(inp)
@@ -569,8 +660,19 @@ def evaluate(inp: Inputs, shot_rows: list[dict], *, project_owner: str) -> dict:
     gate_list = gates(inp, s1, first_ep, ep_states)
     stage = _min_stage([e["stage"] for e in ep_states.values()]) if ep_states else "S1"
     return {"s1": s1, "shots": shots, "episodes": ep_states, "gates": gate_list, "stage": stage,
-            "owner_actions": owner_actions(inp, s1, gate_list, ep_states),
+            "owner_actions": owner_actions(inp, s1, gate_list, ep_states) + h3_override_actions(shot_rows),
             "gpu_priority": gpu_priority(s1, shots, ep_states)}
+
+
+def h3_override_actions(shot_rows: list[dict]) -> list[dict]:
+    """项目方改过的 H3 提示词，之后剧本 **H3提示词** 又更新了 → 请项目方在画布上重新确认（只列镜号）"""
+    stale = [r for r in shot_rows if r.get("h3_override_stale")]
+    if not stale:
+        return []
+    return [{"gate": "h3_override", "stage": "S4", "title": "剧本 H3 提示词已更新，请重新确认画布修改",
+             "why": f"{len(stale)} 镜：{'、'.join(r['id'] for r in stale)}（在画布视频页「H3 提示词」面板重新保存或撤销）",
+             "shots": [r["id"] for r in stale], "episodes": sorted({r["episode"] for r in stale}),
+             "cli": None, "actionable": True, "waiting_on": []}]
 
 
 def project_summary(slug: str, name: str, ev: dict, inp: Inputs) -> dict:

@@ -152,14 +152,24 @@ async def upload_color_ref(slug: str, file: UploadFile = File(...)):
 
 
 class ByBody(BaseModel):
-    by: str = "项目方"
+    by: str = ""          # 封板修复 P0：不给默认值；本人闸门由 _owner() 校验
+
+
+OWNER_BY = ("owner", "项目方")
+
+
+def _owner(by: str) -> str:
+    """封板修复 P0：项目方本人闸门（风格确认 / 角色确认 / 开工 / 卡片决定）必须显式写 by=owner（或“项目方”），agent 不得代点"""
+    if (by or "").strip() not in OWNER_BY:
+        raise HTTPException(403, "只有项目方本人能做这个决定（by=owner）；agent 不得代点")
+    return by.strip()
 
 
 @router.post("/projects/{slug}/style/confirm")
 def confirm_style(slug: str, body: ByBody):
     ctx = _ctx(slug, editable=True)
     try:
-        return W.confirm_style(ctx, body.by)
+        return W.confirm_style(ctx, _owner(body.by))
     except ValueError as e:
         _bad(e)
 
@@ -204,14 +214,14 @@ def remove_reference(slug: str, cid: str, path: str):
 
 class ConfirmBody(BaseModel):
     confirmed: bool
-    by: str = "项目方"
+    by: str = ""
 
 
 @router.post("/projects/{slug}/characters/{cid}/confirm")
 def confirm_character(slug: str, cid: str, body: ConfirmBody):
     ctx = _ctx(slug, editable=True)
     try:
-        return W.confirm_character(ctx, cid, body.confirmed, body.by)
+        return W.confirm_character(ctx, cid, body.confirmed, _owner(body.by))
     except KeyError:
         raise HTTPException(404, "没有这个角色")
     except ValueError as e:
@@ -244,6 +254,11 @@ def project_file(slug: str, path: str):
         p = ctx.resolve_inside(path)
     except ValueError:
         raise HTTPException(403, "路径越界")
+    # 封板修复 P0：默认项目的 root 是仓库根，config/ 里有密钥（*.local.json）——一律拒绝 config/、.env、*.local.*、secrets
+    rel = p.relative_to(ctx.root.resolve()).as_posix().lower()
+    if (rel.startswith(("config/", ".", "ops/", "services/", "tools/")) or ".local." in p.name.lower()
+            or "secret" in rel or p.name.lower().endswith(".env")):
+        raise HTTPException(404, "没有这个文件")
     if not p.is_file() or p.suffix.lower() not in (*W.IMG_EXT, ".md", ".toml", ".json", ".mp4"):
         raise HTTPException(404, "没有这个文件")
     return FileResponse(p)
@@ -261,7 +276,7 @@ def make_engine(ctx: PC.ProjectContext, mode: str | None = None):
 
 class StartBody(BaseModel):
     mode: str = "real"           # real | dry_run
-    by: str = "项目方"
+    by: str = ""
 
 
 @router.post("/projects/{slug}/production/start")
@@ -270,7 +285,7 @@ def production_start(slug: str, body: StartBody):
     if body.mode not in ("real", "dry_run"):
         raise HTTPException(422, "mode 只能是 real 或 dry_run")
     try:
-        make_engine(ctx, body.mode).start(body.mode, body.by)
+        make_engine(ctx, body.mode).start(body.mode, _owner(body.by))
     except ValueError as e:
         raise HTTPException(409, str(e))
     _ensure_ticker()
@@ -280,7 +295,7 @@ def production_start(slug: str, body: StartBody):
 @router.post("/projects/{slug}/production/pause")
 def production_pause(slug: str, body: ByBody):
     ctx = _ctx(slug)
-    make_engine(ctx).pause(body.by)
+    make_engine(ctx).pause(body.by or "项目方")      # 暂停是安全操作，谁都可以停
     return make_engine(ctx).board()
 
 
@@ -299,14 +314,14 @@ def production_board(slug: str):
 class Decision(BaseModel):
     decision: str
     payload: dict = {}
-    by: str = "项目方"
+    by: str = ""
 
 
 @router.post("/projects/{slug}/cards/{card_id}")
 def decide(slug: str, card_id: str, body: Decision):
     ctx = _ctx(slug)
     try:
-        make_engine(ctx).decide(card_id, body.decision, body.payload, body.by)
+        make_engine(ctx).decide(card_id, body.decision, body.payload, _owner(body.by))
     except ValueError as e:
         raise HTTPException(409, str(e))
     return make_engine(ctx).board()

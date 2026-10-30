@@ -1,6 +1,7 @@
 """Episode assembly: 6 shot videos + TTS dialogue/voiceover + H3 sound design → data/episodes/epXX.mp4.
 
-Picture: each shot is trimmed (or held on its last frame) to Shot.duration, scaled to cover 1080×1920 and
+Picture: each shot runs for its H3 video's own length (G13: the script's whole seconds only size the H3
+request); placeholder stills use Shot.duration. Scaled to cover 1080×1920 and
 center-cropped, 24 fps, H.264 (libx264, CPU). No subtitles (owner rule). Shots without a gpu3 video get a
 placeholder still clip made from the active first frame (marked in the timeline).
 
@@ -29,8 +30,8 @@ from pathlib import Path
 import numpy as np
 
 from .ffmpeg import FFmpeg, parse_loudnorm
-from .music import (find_music, fit_length, ignored_edits, level_curve, load_stems, normalise_rms,
-                    read_edit_music, resolve_cues)
+from .music import (find_music, fit_length, h3_music_shots, ignored_edits, level_curve, load_stems, normalise_rms,
+                    read_edit_music, resolve_cues, stale_timeline)
 from .speakers import SpokenLine, resolve_episode
 from .tts import (CACHE_DIR, AsrBackend, TtsBackend, Voice, asr_limit, char_error_rate, load_voice_config,
                   synthesize_cached, voice_for, wav_duration)
@@ -76,16 +77,42 @@ class Settings:
     bgm_duck_dialogue_db: float = 12.0
     bgm_duck_vo_db: float = 9.0
     bgm_duck_h3_db: float = 6.0  # epXX.json duck_spans without their own duck_db
+    # X-4 / E8 (owner 2026-10-30): music goes into H3; shots whose H3 already carries music get no BGM on top
+    bgm_skip_h3_music: bool = True
     # deliveries: 1080x1920 always; 2160x3840 when "on", or "auto" and any 4K clip exists
     deliver_4k: str = "auto"
     width_4k: int = 2160
     height_4k: int = 3840
-    crf_4k: int = 20
-    # optional per-shot colour correction to our keyframes (ns_post.colormatch; <clip>_cc.mp4). Off by default.
-    color_match: bool = False
+    # 4K H.264 (docs/upscale_4k.md "Notes for T38"): CRF 16-17 + VBV cap; grain sigma2 @ CRF 17 ~39 Mbit/s
+    crf_4k: int = 17
+    maxrate_4k: str = "60M"
+    bufsize_4k: str = "120M"
+    level_4k: str = "5.1"
+    # per-shot colour correction to the shot's locked first/last keyframes (ns_post.colormatch; <clip>_cc.mp4).
+    # None = config/render_quality.json post.color_match (default on, per_episode switch; fredw-92/Q1, research B1)
+    color_match: bool | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+QUALITY_CONFIG = ROOT / "config" / "render_quality.json"
+
+
+def color_match_enabled(ep: int, s: "Settings | None" = None, config: Path | None = None) -> bool:
+    """fredw-92/Q1 (research B1): Settings.color_match if set (CLI --color-match / --no-color-match), else
+    render_quality.json post.color_match.per_episode["<ep>"], else its default (true)."""
+    if s is not None and s.color_match is not None:
+        return bool(s.color_match)
+    try:
+        cm = json.loads(Path(config or QUALITY_CONFIG).read_text(encoding="utf-8"))["post"]["color_match"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    per = cm.get("per_episode") or {}
+    for key in (str(ep), f"ep{ep:02d}"):
+        if key in per:
+            return bool(per[key])
+    return bool(cm.get("default", False))
 
 
 # ---------------- picture sources ----------------
@@ -121,7 +148,8 @@ def find_source(ep: int, idx: int, *, data: Path = DATA, allow_laptop_video: boo
     if allow_laptop_video:
         lv = _active_file(l, "video") or ((l / "video.mp4") if (l / "video.mp4").is_file() else None)
         if lv is not None:
-            return {"kind": "video", "origin": "laptop", "path": lv}
+            l4 = lv.with_name(lv.stem + "_4k" + lv.suffix)   # fredw-92/Q1: optional gpu3 upscale_4k result
+            return {"kind": "video", "origin": "laptop", "path": lv, "path_4k": l4 if l4.is_file() else None}
     for d, origin in ((g, "gpu3"), (l, "laptop")):
         img = _active_file(d, "image") if d.is_dir() else None
         if img is None and (d / "frame.png").is_file():
@@ -275,8 +303,9 @@ def render_segment(ff: FFmpeg, src: dict, seconds: float, out: Path, s: Settings
         inp = ["-loop", "1", "-framerate", str(s.fps), "-t", f"{seconds + 1:.3f}", "-i", src["path"]]
     else:
         inp = ["-f", "lavfi", "-i", f"color=c=black:s={w}x{h}:r={s.fps}:d={seconds + 1:.3f}"]
+    vbv = ["-maxrate", s.maxrate_4k, "-bufsize", s.bufsize_4k, "-level:v", s.level_4k] if uhd else []
     ff.run([*inp, "-map", "0:v:0", "-vf", _vf(s, frames, w, h), "-an", "-c:v", "libx264", "-preset", s.preset,
-            "-crf", str(crf), "-profile:v", "high", "-pix_fmt", "yuv420p", "-r", str(s.fps),
+            "-crf", str(crf), *vbv, "-profile:v", "high", "-pix_fmt", "yuv420p", "-r", str(s.fps),
             "-threads", str(s.threads), "-video_track_timescale", "12288", str(out)])
 
 
@@ -368,7 +397,7 @@ def _color_match_source(ff: FFmpeg, src: dict, idx: int, warnings: list[str], lo
         else:
             src[out_key] = str(cc)
         info[key] = {"file": _rel(cc), "before": short_summary(rep, "before"), "after": short_summary(rep, "after"),
-                     "plan": rep.get("plan")}
+                     "plan": rep.get("plan"), "source_sha256": rep.get("source_sha256")}
     src["color_match"] = info or None
 
 
@@ -433,6 +462,9 @@ def qa_gate(qa_path: Path, srcs: list[dict], src_list: list[dict]) -> tuple[bool
             reasons.append(f"{key} 不是视频")
         elif q.get("video_sha256") != _sha256(src["path"]):
             reasons.append(f"{key} 视频与验收版本不一致（sha256）")
+        elif src.get("path_cc") and ((src.get("color_match") or {}).get("path") or {}).get("source_sha256") \
+                != q.get("video_sha256"):
+            reasons.append(f"{key} 校色版 _cc 不是由验收版本视频生成（_cc.json source_sha256 不符）")
     return not reasons, reasons
 
 def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrBackend | None = None,
@@ -450,7 +482,17 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
     t_start = time.perf_counter()
     timings: dict[str, float] = {}
     shots = sorted(episode["shots"], key=lambda x: int(x["index"]))
-    durations = [float(x.get("duration") or 10) for x in shots]
+    script_durations = [float(x.get("duration") or 10) for x in shots]
+    # G13 (owner 2026-10-30): the script writes whole seconds, H3 decides the real clip length. A shot with a
+    # video is assembled at the video's own duration; only placeholder stills fall back to the script seconds.
+    found = []
+    for shot in shots:
+        idx = int(shot["index"])
+        src = (sources or {}).get(idx) or find_source(ep, idx, data=data, allow_laptop_video=allow_laptop_video)
+        src = {k: (str(v) if isinstance(v, Path) else v) for k, v in dict(src).items()}
+        found.append((src, ff.info(src["path"]) if src["kind"] == "video" else None))
+    durations = [round(info["duration"], 3) if info else script_durations[i] for i, (_src, info) in enumerate(found)]
+    color_match = color_match_enabled(ep, s)
 
     # 1. lines + TTS
     lines = resolve_episode(episode, cfg.get("line_overrides"))
@@ -499,17 +541,12 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
         seg_files = []
         for i, shot in enumerate(shots):
             idx = int(shot["index"])
-            src = (sources or {}).get(idx) or find_source(ep, idx, data=data, allow_laptop_video=allow_laptop_video)
-            src = {k: (str(v) if isinstance(v, Path) else v) for k, v in dict(src).items()}
+            src, info = found[i]
             seconds = durations[i] + (tail if i == len(shots) - 1 else 0.0)
-            info = ff.info(src["path"]) if src["kind"] == "video" else None
             if src["kind"] != "video":
                 warnings.append(f"S{idx}: no gpu3 video — placeholder {src['kind']} clip"
                                 + (f" from {_rel(src['path'])}" if src.get("path") else ""))
-            elif info["duration"] + 0.02 < durations[i]:
-                warnings.append(f"S{idx}: video is {info['duration']:.2f}s, shot is {durations[i]:g}s; "
-                                f"last frame held {durations[i] - info['duration']:.2f}s")
-            if s.color_match and src["kind"] == "video":
+            if color_match and src["kind"] == "video":
                 _color_match_source(ff, src, idx, warnings, log)
             seg = work / f"seg{idx}.mp4"
             render_segment(ff, src, seconds, seg, s)
@@ -517,6 +554,7 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
             src_list.append(src)
             srcs.append({"shot": f"{name}-S{idx}", "index": idx, "start_s": round(starts[i], 3),
                          "duration_s": durations[i], "duration_source": shot.get("duration_source"),
+                         "script_duration_s": script_durations[i], "duration_from": "h3_video" if info else "script",
                          "picture_s": round(seconds, 6), "kind": src["kind"], "origin": src.get("origin"),
                          "placeholder": src["kind"] != "video", "file": _rel(src.get("path")),
                          "file_4k": _rel(src.get("path_4k")),
@@ -524,7 +562,7 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
                          "source_size": [info["width"], info["height"]] if info else None,
                          "trimmed_s": round(max(0.0, info["duration"] - durations[i]), 3) if info else None,
                          "h3_audio": bool(info and info["has_audio"]), "adult": shot.get("adult"),
-                         **({"color_match": src.get("color_match")} if s.color_match else {})})
+                         **({"color_match": src.get("color_match")} if color_match else {})})
         picture = _concat(ff, seg_files, work / "picture.mp4", work)
         timings["picture_s"] = round(time.perf_counter() - t, 2)
 
@@ -606,7 +644,11 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
                 edits = {int(x["index"]): read_edit_music(data / "renders", ep, int(x["index"])) for x in shots}
                 edits = {k: v for k, v in edits.items() if v}
                 cues = resolve_cues(shots, starts, music_meta, edits)
-                for k, v in ignored_edits(music_meta, edits).items():
+                stale = stale_timeline(music_meta, len(shots))
+                if stale:   # 封板修复：旧版剧本的提示时间轴不再按镜号套用
+                    warnings.append(f"BGM {name}.json is stale ({stale}): its cue timeline is ignored and the script "
+                                    f"【配乐】/ edits are used; regenerate the BGM on gpu3 (T40)")
+                for k, v in ignored_edits(music_meta, edits, len(shots)).items():
                     warnings.append(f"S{k}: owner music edit '{v}' not applied — {name}.json carries a cue "
                                     f"timeline; regenerate the BGM on gpu3 (T40) to include it")
                 m = normalise_rms(read_audio(ff, music_file, sr, work=work))
@@ -633,6 +675,13 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
                         continue
                 if h3_spans:
                     ducked = np.minimum(ducked, gain_envelope(n_total, sr, h3_spans, s.gate_fade_s)[:, None])
+                # X-4 / E8: the H3 clip already has its own music → mute the BGM over that shot
+                h3_music = h3_music_shots(shots, episode, edits, read_edit_music(data / "renders", ep)) \
+                    if s.bgm_skip_h3_music else {}
+                pos = {int(x["index"]): k for k, x in enumerate(shots)}
+                mute = [(starts[pos[i]], starts[pos[i]] + durations[pos[i]], 90.0) for i in sorted(h3_music)]
+                if mute:
+                    ducked = np.minimum(ducked, gain_envelope(n_total, sr, mute, s.gate_fade_s)[:, None])
                 speaking = ducked[:, 0] < 0.999
                 extra = np.where(speaking, 10 ** (-shot_duck / 20), 1.0).astype(np.float32)[:, None]
                 mix += m * g * ducked * extra
@@ -644,7 +693,8 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
                             "cues": [c.to_dict() for c in cues], "looped": looped,
                             "cue_source": "music_json" if music_meta.get("cues") else
                             ("script/edit" if any(c.source in ("script", "edit") for c in cues) else "default"),
-                            "duck_spans": len(h3_spans)}
+                            "duck_spans": len(h3_spans),
+                            "h3_music_shots": {f"S{k}": v for k, v in sorted(h3_music.items())}}
         raw = work / "mix.f32"
         mix.astype(np.float32).tofile(raw)
         wav = work / "mix.wav"
@@ -661,7 +711,9 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
         stem = f"{name}_PREVIEW_未完成" if preview else f"{name}_final"
         final = out_dir / f"{stem}.mp4"
         if preview:
-            warnings.append("PREVIEW：有占位镜头，输出为预览（不是成片），不生成 epXX_final / epXX 别名")
+            # fredw-92/D1：写明真实原因（ep02 全部 11 镜都是视频、只差 gpu3 qa.json 时，以前也说“有占位镜头”）
+            why = "有占位镜头" if any(x.get("placeholder") for x in srcs) else "gpu3 QA 未通过 / 没有 qa.json"
+            warnings.append(f"PREVIEW：{why}，输出为预览（不是成片），不生成 epXX_final / epXX 别名")
         outputs = [("1080p", picture, final)]
         if want_4k:
             segs4 = []
@@ -724,7 +776,7 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
         "tts": {"backend": getattr(tts, "name", type(tts).__name__), "model": cfg.get("tts_model", {}).get("id"),
                 "asr": "sensevoice" if asr is not None and type(asr).__name__ == "SenseVoiceAsr"
                 else (type(asr).__name__ if asr else None)},
-        "shots": srcs, "speech": speech, "warnings": warnings, "timings": timings, "settings": s.to_dict(),
+        "shots": srcs, "speech": speech, "warnings": warnings, "timings": timings, "settings": {**s.to_dict(), "color_match": color_match},
     }
     (out_dir / f"{name}.timeline.json").write_text(json.dumps(timeline, ensure_ascii=False, indent=1),
                                                    encoding="utf-8")
