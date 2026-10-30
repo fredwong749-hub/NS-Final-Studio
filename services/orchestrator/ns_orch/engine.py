@@ -408,7 +408,8 @@ class Engine:
             elif card_id == "G4":
                 if decision == "approve":
                     write_json(self.ctx.orchestrator_dir / "PIPELINE_LOCKED.json",
-                               {"locked_by": by, "locked_at": now(), "sample_episode": (gate.get("detail") or {}).get("episode")})
+                               {"locked_by": by, "locked_at": now(), "sample_episode": (gate.get("detail") or {}).get("episode"),
+                                "note": payload.get("note", "")})   # SOP 只认带项目方原话的锁定（ns_api.sop.g4_record）
                     gate.update(status="approved", **rec)
                 elif decision == "rework":
                     gate.update(last_rework=rec)

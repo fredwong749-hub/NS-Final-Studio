@@ -20,3 +20,6 @@ golden/**/work/
 apps/web/node_modules/
 apps/web/dist/
 *.tsbuildinfo
+
+# gpu_grab 冒烟测试遗留的本地锁文件
+gpu.lock.*

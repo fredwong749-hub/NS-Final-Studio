@@ -42,12 +42,24 @@ def compile_all(root: str | Path | None = None, inject_looks: bool | None = None
 
 
 def save_snapshot(root: str | Path | None = None, force: bool = False) -> Path:
+    import os
+    import tempfile
     root = project_root(root)
     v = bible_version(root)
     p = snapshot_dir(root) / f"{v}.json.gz"
     if p.exists() and not force:
         return p
-    shots = compile_all(root)
+    for _ in range(5):          # 编译期间输入变了 → 版本号对不上编译结果：按新版本重编（不存错版本）
+        shots = compile_all(root)
+        v2 = bible_version(root)
+        if v2 == v:
+            break
+        v = v2
+        p = snapshot_dir(root) / f"{v}.json.gz"
+        if p.exists() and not force:
+            return p
+    else:
+        raise RuntimeError("规则输入在编译期间持续变化，快照未保存")
     try:
         from .state_timeline import read_timeline
         tl = read_timeline(root) or {}
@@ -58,11 +70,18 @@ def save_snapshot(root: str | Path | None = None, force: bool = False) -> Path:
     except Exception:  # noqa: BLE001
         pass
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
-    with gzip.open(tmp, "wt", encoding="utf-8") as f:
-        json.dump({"bible_version": v, "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "shots": shots}, f,
-                  ensure_ascii=False)
-    tmp.replace(p)
+    fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=p.name + ".", suffix=".tmp")   # 唯一临时文件：并发保存互不踩
+    try:
+        with os.fdopen(fd, "wb") as raw, gzip.open(raw, "wt", encoding="utf-8") as f:
+            json.dump({"bible_version": v, "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "shots": shots}, f,
+                      ensure_ascii=False)
+        os.replace(tmp, p)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
     return p
 
 

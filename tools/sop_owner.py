@@ -136,4 +136,63 @@ def g4(root: Path, gpu3_root: Path, episode: int, quote: str | None, revoke: boo
                     bad.append(f"{sn} 当前视频与 qa.json 验收的版本不一致（sha256）")
                 locked[sn] = v["video_sha256"]
         if bad:
-            r
+            raise SystemExit(f"ep{episode:02d} 不能锁样片：" + "；".join(bad))
+        rec["g4"] = {"locked_at": _now(), "ref": q, "sample_episode": episode, "locked_by": "项目方",
+                     "video_sha256": locked}
+    _write(p, rec)
+    return rec
+
+
+def g5(root: Path, gpu3_root: Path, episode: int, quote: str | None, rework: bool) -> dict:
+    p = root / OWNER_GATES
+    rec = _read(p, {}) or {}
+    q = _quote(quote)
+    final = [x for x in (gpu3_root / f"ep{episode:02d}" / f"ep{episode:02d}_final.mp4",
+                         root / "data" / "episodes" / f"ep{episode:02d}.mp4") if x.is_file()]
+    if not final and not rework:
+        raise SystemExit(f"ep{episode:02d} 还没有 _final 成片，不能验收")
+    entry = {"decision": "rework" if rework else "publish", "decided_at": _now(), "ref": q, "by": "项目方"}
+    if final:      # 发布绑定这一版成片：之后换了 _final，SOP 视为未验收（ns_api.sop.g5_record）
+        entry.update(final=final[0].as_posix(), final_sha256=_sha(final[0]))
+    rec.setdefault("g5", {})[str(episode)] = entry
+    _write(p, rec)
+    return rec
+
+
+def main(argv=None) -> int:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--root", default=str(REPO))
+    ap.add_argument("--gpu3-root", help="gpu3 镜像（默认 <root>/data/renders_gpu3）")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    a = sub.add_parser("plate")
+    a.add_argument("scene_id")
+    a.add_argument("quote", nargs="?")
+    a.add_argument("--revoke", action="store_true")
+    a.add_argument("--no-rebuild", action="store_true")
+    b = sub.add_parser("g4")
+    b.add_argument("quote", nargs="?")
+    b.add_argument("--episode", type=int, default=1)
+    b.add_argument("--revoke", action="store_true")
+    c = sub.add_parser("g5")
+    c.add_argument("episode", type=int)
+    c.add_argument("quote", nargs="?")
+    c.add_argument("--rework", metavar="REASON")
+    sub.add_parser("show")
+    x = ap.parse_args(argv)
+    root = Path(x.root)
+    g3 = Path(x.gpu3_root) if x.gpu3_root else root / "data" / "renders_gpu3"
+    if x.cmd == "plate":
+        out = plate(root, x.scene_id, x.quote, x.revoke, not x.no_rebuild)
+    elif x.cmd == "g4":
+        out = g4(root, g3, x.episode, x.quote, x.revoke)
+    elif x.cmd == "g5":
+        out = g5(root, g3, x.episode, x.rework if x.rework is not None else x.quote, x.rework is not None)
+    else:
+        out = _read(root / OWNER_GATES, {})
+    print(json.dumps(out, ensure_ascii=False, indent=1))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
