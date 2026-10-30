@@ -1,0 +1,487 @@
+{
+ "ep01-S3": {
+  "base": {
+   "file": "D:\\NS-Final Studio\\golden\\quality_v2\\owner_ab\\work\\renders\\ep01\\S3\\takes\\image_001.png",
+   "score": {
+    "total": 0.673,
+    "parts": {
+     "fidelity": 0.6,
+     "realism": 0.8,
+     "face": 0.634,
+     "face_cos": 0.772,
+     "colour_dist": 20.35,
+     "colour": 0.323,
+     "sharp_var": 383.7,
+     "bg_var": 168.5,
+     "sharp": 0.861,
+     "smooth_frac": 0.447,
+     "bokeh": 1.0
+    },
+    "missing": [
+     "齐刘海的阴影盖住上半张脸",
+     "嘴角有一抹极轻微、自己都没察觉的上扬"
+    ],
+    "reasons": [],
+    "weights": {
+     "fidelity": 0.4,
+     "face": 0.15,
+     "realism": 0.15,
+     "colour": 0.1,
+     "sharp": 0.1,
+     "bokeh": 0.1
+    },
+    "compose": [
+     {
+      "file": "renders/ep01/S3/takes/compose_001_r1_0.png",
+      "seed": 47584697722466,
+      "fidelity": 0.6,
+      "nudity": false,
+      "clip_bare": 0.695,
+      "seconds": 87.4
+     },
+     {
+      "file": "renders/ep01/S3/takes/compose_001_r1_1.png",
+      "seed": 54532729043737,
+      "fidelity": 0.4,
+      "nudity": false,
+      "clip_bare": 0.78,
+      "seconds": 72.2
+     }
+    ]
+   },
+   "secs": 531.3,
+   "n": 1
+  },
+  "current": {
+   "file": "D:\\NS-Final Studio\\golden\\quality_v2\\owner_ab\\work\\renders\\ep01\\S3\\takes\\image_002.png",
+   "score": {
+    "total": 0.678,
+    "parts": {
+     "fidelity": 0.6,
+     "realism": 0.8,
+     "face": 0.68,
+     "face_cos": 0.788,
+     "colour_dist": 20.43,
+     "colour": 0.321,
+     "sharp_var": 323.7,
+     "bg_var": 131.4,
+     "sharp": 0.837,
+     "smooth_frac": 0.433,
+     "bokeh": 1.0
+    },
+    "missing": [
+     "齐刘海的阴影盖住上半张脸",
+     "嘴角有一抹极轻微、自己都没察觉的上扬"
+    ],
+    "reasons": [],
+    "weights": {
+     "fidelity": 0.4,
+     "face": 0.15,
+     "realism": 0.15,
+     "colour": 0.1,
+     "sharp": 0.1,
+     "bokeh": 0.1
+    },
+    "refined_from": 1
+   },
+   "secs": 132.9
+  },
+  "light": {
+   "file": "D:\\NS-Final Studio\\golden\\quality_v2\\owner_ab\\work\\renders\\ep01\\S3\\takes\\image_003.png",
+   "score": {
+    "total": 0.59,
+    "parts": {
+     "fidelity": 0.4,
+     "realism": 0.8,
+     "face": 0.617,
+     "face_cos": 0.766,
+     "colour_dist": 20.19,
+     "colour": 0.326,
+     "sharp_var": 356.7,
+     "bg_var": 122.6,
+     "sharp": 0.851,
+     "smooth_frac": 0.427,
+     "bokeh": 1.0
+    },
+    "missing": [
+     "齐刘海的阴影盖住上半张脸",
+     "嘴角有一抹极轻微、自己都没察觉的上扬",
+     "她低头掩饰"
+    ],
+    "reasons": [
+     "剧本细节不到一半"
+    ],
+    "weights": {
+     "fidelity": 0.4,
+     "face": 0.15,
+     "realism": 0.15,
+     "colour": 0.1,
+     "sharp": 0.1,
+     "bokeh": 0.1
+    },
+    "refined_from": 1
+   },
+   "secs": 129.6
+  },
+  "purelens_light": {
+   "file": "D:\\NS-Final Studio\\golden\\quality_v2\\owner_ab\\work\\renders\\ep01\\S3\\takes\\image_004.png",
+   "score": {
+    "total": 0.595,
+    "parts": {
+     "fidelity": 0.4,
+     "realism": 0.8,
+     "face": 0.654,
+     "face_cos": 0.779,
+     "colour_dist": 20.27,
+     "colour": 0.324,
+     "sharp_var": 345.4,
+     "bg_var": 120.1,
+     "sharp": 0.846,
+     "smooth_frac": 0.445,
+     "bokeh": 1.0
+    },
+    "missing": [
+     "齐刘海的阴影盖住上半张脸",
+     "嘴角有一抹极轻微、自己都没察觉的上扬",
+     "她低头掩饰"
+    ],
+    "reasons": [
+     "剧本细节不到一半"
+    ],
+    "weights": {
+     "fidelity": 0.4,
+     "face": 0.15,
+     "realism": 0.15,
+     "colour": 0.1,
+     "sharp": 0.1,
+     "bokeh": 0.1
+    },
+    "refined_from": 1
+   },
+   "secs": 103.0
+  }
+ },
+ "ep01-S6": {
+  "base": {
+   "file": "D:\\NS-Final Studio\\golden\\quality_v2\\owner_ab\\work\\renders\\ep01\\S6\\takes\\image_001.png",
+   "score": {
+    "total": 0.758,
+    "parts": {
+     "fidelity": 0.667,
+     "realism": 0.8,
+     "face": 0.837,
+     "face_cos": 0.843,
+     "colour_dist": 12.95,
+     "colour": 0.649,
+     "sharp_var": 268.6,
+     "bg_var": 81.2,
+     "sharp": 0.81,
+     "smooth_frac": 0.414,
+     "bokeh": 1.0
+    },
+    "missing": [
+     "黑暗中窗外车灯的流光周期性扫过她的瞳孔",
+     "她睁眼望着天花板"
+    ],
+    "reasons": [],
+    "weights": {
+     "fidelity": 0.4,
+     "face": 0.15,
+     "realism": 0.15,
+     "colour": 0.1,
+     "sharp": 0.1,
+     "bokeh": 0.1
+    },
+    "compose": [
+     {
+      "file": "renders/ep01/S6/takes/compose_001_r1_0.png",
+      "seed": 15771679554896,
+      "fidelity": 0.667,
+      "nudity": false,
+      "clip_bare": 0.58,
+      "seconds": 57.3
+     },
+     {
+      "file": "renders/ep01/S6/takes/compose_001_r1_1.png",
+      "seed": 136049659390038,
+      "fidelity": 0.667,
+      "nudity": false,
+      "clip_bare": 0.622,
+      "seconds": 66.1
+     }
+    ]
+   },
+   "secs": 242.5,
+   "n": 1
+  },
+  "current": {
+   "file": "D:\\NS-Final Studio\\golden\\quality_v2\\owner_ab\\work\\renders\\ep01\\S6\\takes\\image_002.png",
+   "score": {
+    "total": 0.692,
+    "parts": {
+     "fidelity": 0.5,
+     "realism": 0.8,
+     "face": 0.84,
+     "face_cos": 0.844,
+     "colour_dist": 13.06,
+     "colour": 0.647,
+     "sharp_var": 281.8,
+     "bg_var": 48.6,
+     "sharp": 0.817,
+     "smooth_frac": 0.406,
+     "bokeh": 1.0
+    },
+    "missing": [
+     "极近特写",
+     "黑暗中窗外车灯的流光周期性扫过她的瞳孔",
+     "她睁眼望着天花板"
+    ],
+    "reasons": [],
+    "weights": {
+     "fidelity": 0.4,
+     "face": 0.15,
+     "realism": 0.15,
+     "colour": 0.1,
+     "sharp": 0.1,
+     "bokeh": 0.1
+    },
+    "refined_from": 1
+   },
+   "secs": 139.0
+  },
+  "light": {
+   "file": "D:\\NS-Final Studio\\golden\\quality_v2\\owner_ab\\work\\renders\\ep01\\S6\\takes\\image_003.png",
+   "score": {
+    "total": 0.675,
+    "parts": {
+     "fidelity": 0.5,
+     "realism": 0.8,
+     "face": 0.731,
+     "face_cos": 0.806,
+     "colour_dist": 13.11,
+     "colour": 0.646,
+     "sharp_var": 265.6,
+     "bg_var": 48.8,
+     "sharp": 0.808,
+     "smooth_frac": 0.402,
+     "bokeh": 1.0
+    },
+    "missing": [
+     "极近特写",
+     "黑暗中窗外车灯的流光周期性扫过她的瞳孔",
+     "她睁眼望着天花板"
+    ],
+    "reasons": [],
+    "weights": {
+     "fidelity": 0.4,
+     "face": 0.15,
+     "realism": 0.15,
+     "colour": 0.1,
+     "sharp": 0.1,
+     "bokeh": 0.1
+    },
+    "refined_from": 1
+   },
+   "secs": 72.6
+  },
+  "purelens_light": {
+   "file": "D:\\NS-Final Studio\\golden\\quality_v2\\owner_ab\\work\\renders\\ep01\\S6\\takes\\image_004.png",
+   "score": {
+    "total": 0.76,
+    "parts": {
+     "fidelity": 0.667,
+     "realism": 0.8,
+     "face": 0.857,
+     "face_cos": 0.85,
+     "colour_dist": 12.9,
+     "colour": 0.65,
+     "sharp_var": 245.3,
+     "bg_var": 48.2,
+     "sharp": 0.797,
+     "smooth_frac": 0.402,
+     "bokeh": 1.0
+    },
+    "missing": [
+     "黑暗中窗外车灯的流光周期性扫过她的瞳孔",
+     "她睁眼望着天花板"
+    ],
+    "reasons": [],
+    "weights": {
+     "fidelity": 0.4,
+     "face": 0.15,
+     "realism": 0.15,
+     "colour": 0.1,
+     "sharp": 0.1,
+     "bokeh": 0.1
+    },
+    "refined_from": 1
+   },
+   "secs": 129.6
+  }
+ },
+ "ep03-S2": {
+  "base": {
+   "file": "D:\\NS-Final Studio\\golden\\quality_v2\\owner_ab\\work\\renders\\ep03\\S2\\takes\\image_001.png",
+   "score": {
+    "total": 0.634,
+    "parts": {
+     "fidelity": 0.4,
+     "realism": 0.8,
+     "face": 0.883,
+     "face_cos": 0.859,
+     "colour_dist": 15.91,
+     "colour": 0.413,
+     "sharp_var": 248.7,
+     "bg_var": 179.3,
+     "sharp": 0.799,
+     "smooth_frac": 0.316,
+     "bokeh": 1.0
+    },
+    "missing": [
+     "嘴唇微张想回答",
+     "睫毛湿了",
+     "齐刘海下的眼睛里怕和渴望同时在打架"
+    ],
+    "reasons": [
+     "剧本细节不到一半"
+    ],
+    "weights": {
+     "fidelity": 0.4,
+     "face": 0.15,
+     "realism": 0.15,
+     "colour": 0.1,
+     "sharp": 0.1,
+     "bokeh": 0.1
+    },
+    "compose": [
+     {
+      "file": "renders/ep03/S2/takes/compose_001_r1_0.png",
+      "seed": 31078209101160,
+      "fidelity": 0.4,
+      "nudity": false,
+      "clip_bare": 0.693,
+      "seconds": 18.1
+     },
+     {
+      "file": "renders/ep03/S2/takes/compose_001_r1_1.png",
+      "seed": 199921443964203,
+      "fidelity": 0.4,
+      "nudity": false,
+      "clip_bare": 0.468,
+      "seconds": 18.0
+     }
+    ]
+   },
+   "secs": 232.1,
+   "n": 1
+  },
+  "current": {
+   "file": "D:\\NS-Final Studio\\golden\\quality_v2\\owner_ab\\work\\renders\\ep03\\S2\\takes\\image_002.png",
+   "score": {
+    "total": 0.606,
+    "parts": {
+     "fidelity": 0.4,
+     "realism": 0.8,
+     "face": 0.857,
+     "face_cos": 0.85,
+     "colour_dist": 16.06,
+     "colour": 0.41,
+     "sharp_var": 224.4,
+     "bg_var": 131.4,
+     "sharp": 0.784,
+     "smooth_frac": 0.233,
+     "bokeh": 0.778
+    },
+    "missing": [
+     "嘴唇微张想回答",
+     "睫毛湿了",
+     "齐刘海下的眼睛里怕和渴望同时在打架"
+    ],
+    "reasons": [
+     "剧本细节不到一半"
+    ],
+    "weights": {
+     "fidelity": 0.4,
+     "face": 0.15,
+     "realism": 0.15,
+     "colour": 0.1,
+     "sharp": 0.1,
+     "bokeh": 0.1
+    },
+    "refined_from": 1
+   },
+   "secs": 133.0
+  },
+  "light": {
+   "file": "D:\\NS-Final Studio\\golden\\quality_v2\\owner_ab\\work\\renders\\ep03\\S2\\takes\\image_003.png",
+   "score": {
+    "total": 0.63,
+    "parts": {
+     "fidelity": 0.4,
+     "realism": 0.8,
+     "face": 0.871,
+     "face_cos": 0.855,
+     "colour_dist": 16.19,
+     "colour": 0.407,
+     "sharp_var": 232.8,
+     "bg_var": 164.3,
+     "sharp": 0.789,
+     "smooth_frac": 0.302,
+     "bokeh": 1.0
+    },
+    "missing": [
+     "嘴唇微张想回答",
+     "睫毛湿了",
+     "齐刘海下的眼睛里怕和渴望同时在打架"
+    ],
+    "reasons": [
+     "剧本细节不到一半"
+    ],
+    "weights": {
+     "fidelity": 0.4,
+     "face": 0.15,
+     "realism": 0.15,
+     "colour": 0.1,
+     "sharp": 0.1,
+     "bokeh": 0.1
+    },
+    "refined_from": 1
+   },
+   "secs": 108.4
+  },
+  "purelens_light": {
+   "file": "D:\\NS-Final Studio\\golden\\quality_v2\\owner_ab\\work\\renders\\ep03\\S2\\takes\\image_004.png",
+   "score": {
+    "total": 0.695,
+    "parts": {
+     "fidelity": 0.6,
+     "realism": 0.8,
+     "face": 0.82,
+     "face_cos": 0.837,
+     "colour_dist": 16.26,
+     "colour": 0.405,
+     "sharp_var": 216.2,
+     "bg_var": 158.7,
+     "sharp": 0.778,
+     "smooth_frac": 0.28,
+     "bokeh": 0.935
+    },
+    "missing": [
+     "嘴唇微张想回答",
+     "齐刘海下的眼睛里怕和渴望同时在打架"
+    ],
+    "reasons": [],
+    "weights": {
+     "fidelity": 0.4,
+     "face": 0.15,
+     "realism": 0.15,
+     "colour": 0.1,
+     "sharp": 0.1,
+     "bokeh": 0.1
+    },
+    "refined_from": 1
+   },
+   "secs": 96.6
+  }
+ }
+}

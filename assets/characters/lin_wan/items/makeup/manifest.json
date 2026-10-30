@@ -1,0 +1,619 @@
+[
+  {
+    "file": "M0_s0.png",
+    "kind": "item/makeup",
+    "design": "M0",
+    "name": "定妆原版甜妆",
+    "prompt": "图1是林晚本人：严格保持图1的脸型、五官比例、眼睛形状、鼻子、嘴唇形状、浅冰蓝色及腰直发与齐刘海、冷白皮肤完全一致，只修改妆容；改为正面胸像，双手放下不碰脸，不戴项链和任何首饰，穿素色浅灰圆领上衣，背景为干净的中性浅灰色摄影棚纸背景，柔和均匀的美妆摄影布光，Leica 镜头锐利解析力，皮肤纹理真实，画面干净无文字。妆容：保持图1原有的粉嫩甜美妆：粉色腮红、水润粉色唇釉、浓密卷翘睫毛、浅色眼影，娃娃感",
+    "seed": 171260562239572,
+    "model": "qwen_image_2.1_turbo_int8_convrot.safetensors",
+    "workflow": "qwen_edit",
+    "references": [
+      "assets/linwan/file_0000000092c081fd95f7f5b85917993d.png"
+    ],
+    "sha256": "4f150ed7f71531195ccfb075d4945219784fd31c2ac24a8eb6706211d5217f04",
+    "created_at": "2026-10-30T04:29:26",
+    "status": "superseded 2026-10-30 by L1–L8 (research v9, edited from plates/master.png CM_s1); kept for history"
+  },
+  {
+    "file": "M1_s0.png",
+    "kind": "item/makeup",
+    "design": "M1",
+    "name": "素颜通勤（REF-LW-01）",
+    "prompt": "图1是林晚本人：严格保持图1的脸型、五官比例、眼睛形状、鼻子、嘴唇形状、浅冰蓝色及腰直发与齐刘海、冷白皮肤完全一致，只修改妆容；改为正面胸像，双手放下不碰脸，不戴项链和任何首饰，穿素色浅灰圆领上衣，背景为干净的中性浅灰色摄影棚纸背景，柔和均匀的美妆摄影布光，Leica 镜头锐利解析力，皮肤纹理真实，画面干净无文字。妆容：几乎素颜的清透通勤妆：仅有薄透底妆和自然眉形，淡粉裸色润唇，无眼线无假睫毛，干净清爽的学生感",
+    "seed": 251750244608040,
+    "model": "qwen_image_2.1_turbo_int8_convrot.safetensors",
+    "workflow": "qwen_edit",
+    "references": [
+      "assets/linwan/file_0000000092c081fd95f7f5b85917993d.png"
+    ],
+    "sha256": "6d17f1620fa15a54b1782cefbcc7c6c2d8c7cb209571d1aa619575e2e8781b9d",
+    "created_at": "2026-10-30T04:29:41",
+    "status": "superseded 2026-10-30 by L1–L8 (research v9, edited from plates/master.png CM_s1); kept for history"
+  },
+  {
+    "file": "M2_s0.png",
+    "kind": "item/makeup",
+    "design": "M2",
+    "name": "ep06 过渡妆（减半红唇＋恰到好处的眼线）",
+    "prompt": "图1是林晚本人：严格保持图1的脸型、五官比例、眼睛形状、鼻子、嘴唇形状、浅冰蓝色及腰直发与齐刘海、冷白皮肤完全一致，只修改妆容；改为正面胸像，双手放下不碰脸，不戴项链和任何首饰，穿素色浅灰圆领上衣，背景为干净的中性浅灰色摄影棚纸背景，柔和均匀的美妆摄影布光，Leica 镜头锐利解析力，皮肤纹理真实，画面干净无文字。妆容：淡雅日常妆：薄涂的半哑光红唇（只涂一半饱和度的红），细而克制的黑色内眼线，淡棕眼影，柔和腮红",
+    "seed": 140287001819497,
+    "model": "qwen_image_2.1_turbo_int8_convrot.safetensors",
+    "workflow": "qwen_edit",
+    "references": [
+      "assets/linwan/file_0000000092c081fd95f7f5b85917993d.png"
+    ],
+    "sha256": "f0416612ff7df2bd5615d7ac1b02f0a5ba32925f5c47dc6df033c15a9fcc6da7",
+    "created_at": "2026-10-30T04:29:56",
+    "status": "superseded 2026-10-30 by L1–L8 (research v9, edited from plates/master.png CM_s1); kept for history"
+  },
+  {
+    "file": "M3_s0.png",
+    "kind": "item/makeup",
+    "design": "M3",
+    "name": "正红唇＋精致眼线",
+    "prompt": "图1是林晚本人：严格保持图1的脸型、五官比例、眼睛形状、鼻子、嘴唇形状、浅冰蓝色及腰直发与齐刘海、冷白皮肤完全一致，只修改妆容；改为正面胸像，双手放下不碰脸，不戴项链和任何首饰，穿素色浅灰圆领上衣，背景为干净的中性浅灰色摄影棚纸背景，柔和均匀的美妆摄影布光，Leica 镜头锐利解析力，皮肤纹理真实，画面干净无文字。妆容：精致都市妆：饱满的正红色哑光红唇，利落上扬的黑色眼线，大地色眼影，轮廓清晰的眉形，干净的高光",
+    "seed": 201904947106114,
+    "model": "qwen_image_2.1_turbo_int8_convrot.safetensors",
+    "workflow": "qwen_edit",
+    "references": [
+      "assets/linwan/file_0000000092c081fd95f7f5b85917993d.png"
+    ],
+    "sha256": "2a4fd6dac29955d4b073be82af748f65cc56207c6a7d297b78fd79dbae95ec15",
+    "created_at": "2026-10-30T04:30:11",
+    "status": "superseded 2026-10-30 by L1–L8 (research v9, edited from plates/master.png CM_s1); kept for history"
+  },
+  {
+    "file": "M4_s0.png",
+    "kind": "item/makeup",
+    "design": "M4",
+    "name": "浓妆女王（REF-LW-02）",
+    "prompt": "图1是林晚本人：严格保持图1的脸型、五官比例、眼睛形状、鼻子、嘴唇形状、浅冰蓝色及腰直发与齐刘海、冷白皮肤完全一致，只修改妆容；改为正面胸像，双手放下不碰脸，不戴项链和任何首饰，穿素色浅灰圆领上衣，背景为干净的中性浅灰色摄影棚纸背景，柔和均匀的美妆摄影布光，Leica 镜头锐利解析力，皮肤纹理真实，画面干净无文字。妆容：浓郁女王妆：深色烟熏眼妆与浓黑眼线，浓密假睫毛，深酒红色唇，明显的修容与高光，冷艳强势",
+    "seed": 151836163661577,
+    "model": "qwen_image_2.1_turbo_int8_convrot.safetensors",
+    "workflow": "qwen_edit",
+    "references": [
+      "assets/linwan/file_0000000092c081fd95f7f5b85917993d.png"
+    ],
+    "sha256": "9bf8d6abab751dcb58b56d3922806a6d666b1ec7f533d56f062edd0b1adbb726",
+    "created_at": "2026-10-30T04:30:26",
+    "status": "superseded 2026-10-30 by L1–L8 (research v9, edited from plates/master.png CM_s1); kept for history"
+  },
+  {
+    "file": "M5_s0.png",
+    "kind": "item/makeup",
+    "design": "M5",
+    "name": "夜场闪钻猫眼妆",
+    "prompt": "图1是林晚本人：严格保持图1的脸型、五官比例、眼睛形状、鼻子、嘴唇形状、浅冰蓝色及腰直发与齐刘海、冷白皮肤完全一致，只修改妆容；改为正面胸像，双手放下不碰脸，不戴项链和任何首饰，穿素色浅灰圆领上衣，背景为干净的中性浅灰色摄影棚纸背景，柔和均匀的美妆摄影布光，Leica 镜头锐利解析力，皮肤纹理真实，画面干净无文字。妆容：夜场派对妆：上扬的黑色猫眼眼线；上眼睑贴满一排清晰可见的闪亮水钻，眼尾向外延伸三到五颗较大的钻饰，下眼睑点缀细碎亮片；银色金属光泽眼影；颧骨与鼻梁有明显的闪粉高光；透亮玻璃感粉色唇釉；水钻在灯光下反射出星芒",
+    "seed": 192083504819753,
+    "model": "qwen_image_2.1_turbo_int8_convrot.safetensors",
+    "workflow": "qwen_edit",
+    "references": [
+      "assets/linwan/file_0000000092c081fd95f7f5b85917993d.png"
+    ],
+    "sha256": "4412f4fbf49c3e20b7f8d802c88fc394496d09b0273f81894d8b149ba682a8b2",
+    "created_at": "2026-10-30T04:51:04",
+    "status": "superseded 2026-10-30 by L1–L8 (research v9, edited from plates/master.png CM_s1); kept for history"
+  },
+  {
+    "file": "M5_s1.png",
+    "kind": "item/makeup",
+    "design": "M5",
+    "name": "夜场闪钻猫眼妆",
+    "prompt": "图1是林晚本人：严格保持图1的脸型、五官比例、眼睛形状、鼻子、嘴唇形状、浅冰蓝色及腰直发与齐刘海、冷白皮肤完全一致，只修改妆容；改为正面胸像，双手放下不碰脸，不戴项链和任何首饰，穿素色浅灰圆领上衣，背景为干净的中性浅灰色摄影棚纸背景，柔和均匀的美妆摄影布光，Leica 镜头锐利解析力，皮肤纹理真实，画面干净无文字。妆容：夜场派对妆：上扬的黑色猫眼眼线；上眼睑贴满一排清晰可见的闪亮水钻，眼尾向外延伸三到五颗较大的钻饰，下眼睑点缀细碎亮片；银色金属光泽眼影；颧骨与鼻梁有明显的闪粉高光；透亮玻璃感粉色唇釉；水钻在灯光下反射出星芒",
+    "seed": 192183859562484,
+    "model": "qwen_image_2.1_turbo_int8_convrot.safetensors",
+    "workflow": "qwen_edit",
+    "references": [
+      "assets/linwan/file_0000000092c081fd95f7f5b85917993d.png"
+    ],
+    "sha256": "938b472c100385fe56e4b3cef614837e3fd6c5c8ddd96ee249d10684d0059f77",
+    "created_at": "2026-10-30T04:51:13",
+    "status": "superseded 2026-10-30 by L1–L8 (research v9, edited from plates/master.png CM_s1); kept for history"
+  },
+  {
+    "file": "M6_s0.png",
+    "kind": "item/makeup",
+    "design": "M6",
+    "name": "泪痕妆",
+    "prompt": "图1是林晚本人：严格保持图1的脸型、五官比例、眼睛形状、鼻子、嘴唇形状、浅冰蓝色及腰直发与齐刘海、冷白皮肤完全一致，只修改妆容；改为正面胸像，双手放下不碰脸，不戴项链和任何首饰，穿素色浅灰圆领上衣，背景为干净的中性浅灰色摄影棚纸背景，柔和均匀的美妆摄影布光，Leica 镜头锐利解析力，皮肤纹理真实，画面干净无文字。妆容：刚哭过的妆：眼眶和鼻尖明显泛红，下眼睑噙着泪水，睫毛湿成一簇一簇，两道清晰发亮的泪痕从眼角一直流到下颌，一颗泪珠挂在下巴，黑色眼线被泪水晕开成淡淡的灰影，唇色变淡、嘴唇微微颤抖，楚楚可怜",
+    "seed": 229041644250023,
+    "model": "qwen_image_2.1_turbo_int8_convrot.safetensors",
+    "workflow": "qwen_edit",
+    "references": [
+      "assets/linwan/file_0000000092c081fd95f7f5b85917993d.png"
+    ],
+    "sha256": "7abfcae0d6055ef2ce92384bf6a414452f9a86e8918677864528ea026b5c4cf3",
+    "created_at": "2026-10-30T04:51:28",
+    "status": "superseded 2026-10-30 by L1–L8 (research v9, edited from plates/master.png CM_s1); kept for history"
+  },
+  {
+    "file": "M6_s1.png",
+    "kind": "item/makeup",
+    "design": "M6",
+    "name": "泪痕妆",
+    "prompt": "图1是林晚本人：严格保持图1的脸型、五官比例、眼睛形状、鼻子、嘴唇形状、浅冰蓝色及腰直发与齐刘海、冷白皮肤完全一致，只修改妆容；改为正面胸像，双手放下不碰脸，不戴项链和任何首饰，穿素色浅灰圆领上衣，背景为干净的中性浅灰色摄影棚纸背景，柔和均匀的美妆摄影布光，Leica 镜头锐利解析力，皮肤纹理真实，画面干净无文字。妆容：刚哭过的妆：眼眶和鼻尖明显泛红，下眼睑噙着泪水，睫毛湿成一簇一簇，两道清晰发亮的泪痕从眼角一直流到下颌，一颗泪珠挂在下巴，黑色眼线被泪水晕开成淡淡的灰影，唇色变淡、嘴唇微微颤抖，楚楚可怜",
+    "seed": 31283946342359,
+    "model": "qwen_image_2.1_turbo_int8_convrot.safetensors",
+    "workflow": "qwen_edit",
+    "references": [
+      "assets/linwan/file_0000000092c081fd95f7f5b85917993d.png"
+    ],
+    "sha256": "34f2f40fc662f8f5e8a105462c96867b16ffce43555bc387370aef1f923dbcd4",
+    "created_at": "2026-10-30T04:51:37",
+    "status": "superseded 2026-10-30 by L1–L8 (research v9, edited from plates/master.png CM_s1); kept for history"
+  },
+  {
+    "file": "M5_s2.png",
+    "kind": "item/makeup",
+    "design": "M5",
+    "name": "夜场闪钻猫眼妆",
+    "prompt": "图1是林晚本人：严格保持图1的脸型、五官比例、眼睛形状、鼻子、嘴唇形状、浅冰蓝色及腰直发与齐刘海、冷白皮肤完全一致，只修改妆容；改为正面胸像，双手放下不碰脸，不戴项链和任何首饰，穿素色浅灰圆领上衣，背景为干净的中性浅灰色摄影棚纸背景，柔和均匀的美妆摄影布光，Leica 镜头锐利解析力，皮肤纹理真实，画面干净无文字。妆容：夜场派对妆：上扬的黑色猫眼眼线，上眼睑整片铺满大颗粒银色亮片与细碎水钻，眼头和眼尾各贴一排清晰可见的小颗水钻，下眼睑也点缀细闪，水钻有清晰的刻面反光；颧骨上方明显的珠光高光；透亮玻璃感粉色唇釉带细闪",
+    "seed": 146113921722418,
+    "model": "qwen_image_2.1_turbo_int8_convrot.safetensors",
+    "workflow": "qwen_edit",
+    "references": [
+      "assets/linwan/file_0000000092c081fd95f7f5b85917993d.png"
+    ],
+    "sha256": "1519d2c5840b98e07daa80742baabb2ec69edeaa5fe77a6e69f42125a9ae6ac6",
+    "created_at": "2026-10-30T05:39:58",
+    "status": "superseded 2026-10-30 by L1–L8 (research v9, edited from plates/master.png CM_s1); kept for history"
+  },
+  {
+    "file": "M5_s3.png",
+    "kind": "item/makeup",
+    "design": "M5",
+    "name": "夜场闪钻猫眼妆",
+    "prompt": "图1是林晚本人：严格保持图1的脸型、五官比例、眼睛形状、鼻子、嘴唇形状、浅冰蓝色及腰直发与齐刘海、冷白皮肤完全一致，只修改妆容；改为正面胸像，双手放下不碰脸，不戴项链和任何首饰，穿素色浅灰圆领上衣，背景为干净的中性浅灰色摄影棚纸背景，柔和均匀的美妆摄影布光，Leica 镜头锐利解析力，皮肤纹理真实，画面干净无文字。妆容：夜场派对妆：上扬的黑色猫眼眼线，上眼睑整片铺满大颗粒银色亮片与细碎水钻，眼头和眼尾各贴一排清晰可见的小颗水钻，下眼睑也点缀细闪，水钻有清晰的刻面反光；颧骨上方明显的珠光高光；透亮玻璃感粉色唇釉带细闪",
+    "seed": 256498602442492,
+    "model": "qwen_image_2.1_turbo_int8_convrot.safetensors",
+    "workflow": "qwen_edit",
+    "references": [
+      "assets/linwan/file_0000000092c081fd95f7f5b85917993d.png"
+    ],
+    "sha256": "faba69a29a8e5e39dec5e6628b3cd974f212848a8cfeedfe0326a5ca1b90ef24",
+    "created_at": "2026-10-30T05:41:26",
+    "selected": true,
+    "status": "superseded 2026-10-30 by L1–L8 (research v9, edited from plates/master.png CM_s1); kept for history"
+  },
+  {
+    "file": "M6_s2.png",
+    "kind": "item/makeup",
+    "design": "M6",
+    "name": "泪痕妆",
+    "prompt": "图1是林晚本人：严格保持图1的脸型、五官比例、眼睛形状、鼻子、嘴唇形状、浅冰蓝色及腰直发与齐刘海、冷白皮肤完全一致，只修改妆容；改为正面胸像，双手放下不碰脸，不戴项链和任何首饰，穿素色浅灰圆领上衣，背景为干净的中性浅灰色摄影棚纸背景，柔和均匀的美妆摄影布光，Leica 镜头锐利解析力，皮肤纹理真实，画面干净无文字。妆容：刚哭过的妆：双眼眼眶明显泛红、下眼睑湿润发亮，睫毛被泪水打湿成簇，两道清晰发亮的泪痕从眼角沿脸颊一直流到下颌，脸颊上挂着一颗清晰的泪珠，黑色眼线被泪水晕开在下眼睑形成淡淡的灰黑色晕染，鼻尖微红，唇色变淡",
+    "seed": 200284192860940,
+    "model": "qwen_image_2.1_turbo_int8_convrot.safetensors",
+    "workflow": "qwen_edit",
+    "references": [
+      "assets/linwan/file_0000000092c081fd95f7f5b85917993d.png"
+    ],
+    "sha256": "f826206ed917fe606fd24ee7bce282c651a54fefc51d3e632cf3ff0dcdb0032b",
+    "created_at": "2026-10-30T05:42:29",
+    "status": "superseded 2026-10-30 by L1–L8 (research v9, edited from plates/master.png CM_s1); kept for history"
+  },
+  {
+    "file": "M6_s3.png",
+    "kind": "item/makeup",
+    "design": "M6",
+    "name": "泪痕妆",
+    "prompt": "图1是林晚本人：严格保持图1的脸型、五官比例、眼睛形状、鼻子、嘴唇形状、浅冰蓝色及腰直发与齐刘海、冷白皮肤完全一致，只修改妆容；改为正面胸像，双手放下不碰脸，不戴项链和任何首饰，穿素色浅灰圆领上衣，背景为干净的中性浅灰色摄影棚纸背景，柔和均匀的美妆摄影布光，Leica 镜头锐利解析力，皮肤纹理真实，画面干净无文字。妆容：刚哭过的妆：双眼眼眶明显泛红、下眼睑湿润发亮，睫毛被泪水打湿成簇，两道清晰发亮的泪痕从眼角沿脸颊一直流到下颌，脸颊上挂着一颗清晰的泪珠，黑色眼线被泪水晕开在下眼睑形成淡淡的灰黑色晕染，鼻尖微红，唇色变淡",
+    "seed": 242716137773088,
+    "model": "qwen_image_2.1_turbo_int8_convrot.safetensors",
+    "workflow": "qwen_edit",
+    "references": [
+      "assets/linwan/file_0000000092c081fd95f7f5b85917993d.png"
+    ],
+    "sha256": "a35e329635e46e130a0a36ce0fb479a5826b7f7a904b4fa3d96c2b8518dbf559",
+    "created_at": "2026-10-30T05:43:47",
+    "selected": true,
+    "status": "superseded 2026-10-30 by L1–L8 (research v9, edited from plates/master.png CM_s1); kept for history"
+  },
+  {
+    "file": "L1_bare_commute_s0.png",
+    "kind": "item/makeup",
+    "design": "L1",
+    "name": "素颜通勤（深棕眼）",
+    "prompt": "transform the image to realistic photograph，图1是林晚本人。保持她的脸型轮廓、鼻型、唇形、齐刘海和与图1相同的天蓝色及腰直发、肤色、脸颊小痣与整体辨识度；眼睛大小与图1一致，改为自然深棕色眼睛，不戴美瞳。去掉图1原有的妆容，只换成下面这套妆容，妆感在照片里清楚可见：几乎看不出化妆：透薄的保湿底妆，鼻翼和眼下有自然肤色不均；只用遮瑕点盖小瑕疵；灰棕色眉粉轻扫，刘海下隐约可见；睫毛只夹翘并涂一层透明睫毛膏，根根分明；无眼线、无眼影；淡淡的豆沙粉润唇膏，唇纹可见；两颊有自然血色，不是腮红块。真实相机照片质感，可见毛孔与细绒毛，真实发丝；正面胸像，双手不入画，穿素色浅灰色圆领T恤，不戴首饰；灰色无缝背景，柔和窗光，50mm 镜头。其他一切保持不变",
+    "negative": "",
+    "seed": 94821094533166,
+    "size": [
+      1024,
+      1280
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "75b73ce118d85ecd692cbb7ee1af0dd8db43ac11a685d5ccc0e39f50e76c2914",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.481,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 111.5,
+    "created_at": "2026-10-30T08:37:18"
+  },
+  {
+    "file": "L2_half_red_s0.png",
+    "kind": "item/makeup",
+    "design": "L2",
+    "name": "ep06 过渡妆（减半红唇）（深棕眼）",
+    "prompt": "transform the image to realistic photograph，图1是林晚本人。保持她的脸型轮廓、鼻型、唇形、齐刘海和与图1相同的天蓝色及腰直发、肤色、脸颊小痣与整体辨识度；眼睛大小与图1一致，改为自然深棕色眼睛，不戴美瞳。去掉图1原有的妆容，只换成下面这套妆容，妆感在照片里清楚可见：薄底妆，缎面光泽；冷调灰棕眼影只在双眼皮褶内薄薄一层；深棕细内眼线贴紧睫毛根，眼尾延长3毫米并微微上翘；睫毛膏两层，根根分明；樱桃红唇只在唇中拍开、向唇边渐淡成唇染效果，柔雾质地；玫瑰粉腮红在颧骨上方横向轻扫。真实相机照片质感，可见毛孔与细绒毛，真实发丝；正面胸像，双手不入画，穿素色浅灰色圆领T恤，不戴首饰；灰色无缝背景，柔和窗光，50mm 镜头。其他一切保持不变",
+    "negative": "",
+    "seed": 231904355888153,
+    "size": [
+      1024,
+      1280
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "e729192650ab2576a26f214f4d73c728fdd4d69f602a244cd0e56c90ad3e636f",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.303,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 102.4,
+    "created_at": "2026-10-30T08:39:02"
+  },
+  {
+    "file": "L3_red_lip_city_s0.png",
+    "kind": "item/makeup",
+    "design": "L3",
+    "name": "正红唇都市妆（灰蓝美瞳）",
+    "prompt": "transform the image to realistic photograph，图1是林晚本人。保持她的脸型轮廓、鼻型、唇形、齐刘海和与图1相同的天蓝色及腰直发、肤色、脸颊小痣与整体辨识度；眼睛大小与图1一致，保持灰蓝色美瞳。去掉图1原有的妆容，只换成下面这套妆容，妆感在照片里清楚可见：缎面薄底，可见毛孔；冷调正红（偏蓝的红）丝绒哑光唇，唇峰清晰、边缘用指腹柔化；黑色细眼线从眼中开始加粗，眼尾利落上扬约5毫米（小猫眼）；灰棕眼影在眼尾外侧轻晕；上睫毛浓而分明，下睫毛涂一层；颧骨下方有很淡的灰棕修容；腮红极淡，用来呼应唇色。真实相机照片质感，可见毛孔与细绒毛，真实发丝；正面胸像，双手不入画，穿素色浅灰色圆领T恤，不戴首饰；灰色无缝背景，柔和窗光，50mm 镜头。其他一切保持不变",
+    "negative": "",
+    "seed": 220534952823337,
+    "size": [
+      1024,
+      1280
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "6ba9b4e4b0a6c867becd9fe87f5fada7c11bf5468d9ef025113f8049eb537bbb",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.37,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 102.5,
+    "created_at": "2026-10-30T08:40:46"
+  },
+  {
+    "file": "L4_queen_s0.png",
+    "kind": "item/makeup",
+    "design": "L4",
+    "name": "浓妆女王（灰蓝美瞳）",
+    "prompt": "transform the image to realistic photograph，图1是林晚本人。保持她的脸型轮廓、鼻型、唇形、齐刘海和与图1相同的天蓝色及腰直发、肤色、脸颊小痣与整体辨识度；眼睛大小与图1一致，保持灰蓝色美瞳。去掉图1原有的妆容，只换成下面这套妆容，妆感在照片里清楚可见：妆感明显：半哑光底妆，鼻梁和颧骨高点有缎面高光，颧骨下有清晰但晕开的灰棕修容；眼窝用梅子棕到深咖做截断式加深，眼皮中段留出浅香槟色截断面；黑色拉长眼线带内眼角下勾，形成狐狸眼的拉长感；下眼睑后三分之一用深咖烟熏晕开；簇状假睫毛，眼尾最长；黑樱桃色丝绒唇，边缘干净略晕；腮红为低饱和莓果色，斜向颧骨。真实相机照片质感，可见毛孔与细绒毛，真实发丝；正面胸像，双手不入画，穿素色浅灰色圆领T恤，不戴首饰；灰色无缝背景，柔和窗光，50mm 镜头。其他一切保持不变",
+    "negative": "",
+    "seed": 215888449532310,
+    "size": [
+      1024,
+      1280
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "edf63cb549ed2732bb0b3238ca605392500de891e1deaba9e92b857f884f3f0e",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.671,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 102.7,
+    "created_at": "2026-10-30T08:42:31"
+  },
+  {
+    "file": "L5_night_crystal_s0.png",
+    "kind": "item/makeup",
+    "design": "L5",
+    "name": "夜场闪钻妆（灰蓝美瞳）",
+    "prompt": "transform the image to realistic photograph，图1是林晚本人。保持她的脸型轮廓、鼻型、唇形、齐刘海和与图1相同的天蓝色及腰直发、肤色、脸颊小痣与整体辨识度；眼睛大小与图1一致，保持灰蓝色美瞳。去掉图1原有的妆容，只换成下面这套妆容，妆感在照片里清楚可见：黑色上扬猫眼眼线；沿眼线上方镶一排大小渐变的透明水钻，眼头最小、眼尾较大，眼尾向外点缀3颗，眼头点一颗小钻；眼皮中央是银灰金属光泽眼影，眼头一点冰蓝珠光；下睫毛做成几簇漫画式小簇；其余皮肤保持缎面，只在颧骨最高处有细闪；唇为莓果粉镜面唇釉，有锐利的灯光反光；水钻在灯光下出现小星芒。真实相机照片质感，可见毛孔与细绒毛，真实发丝；正面胸像，双手不入画，穿素色浅灰色圆领T恤，不戴首饰；灰色无缝背景，柔和窗光，50mm 镜头。其他一切保持不变",
+    "negative": "",
+    "seed": 207644000599955,
+    "size": [
+      1024,
+      1280
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "902991cdcd652333205fb25998b8e7eb8f6ade8fc5a1a053c123c85301e4d7e1",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.367,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 117.4,
+    "created_at": "2026-10-30T08:44:30"
+  },
+  {
+    "file": "L7_dewy_signature_s0.png",
+    "kind": "item/makeup",
+    "design": "L7",
+    "name": "纯欲水光妆（招牌）（灰蓝美瞳）",
+    "prompt": "transform the image to realistic photograph，图1是林晚本人。保持她的脸型轮廓、鼻型、唇形、齐刘海和与图1相同的天蓝色及腰直发、肤色、脸颊小痣与整体辨识度；眼睛大小与图1一致，保持灰蓝色美瞳。去掉图1原有的妆容，只换成下面这套妆容，妆感在照片里清楚可见：水光底妆：颧骨上方、鼻梁、上唇峰和下巴有湿润光泽，其余部位柔雾，可见毛孔；豆沙玫瑰色腮红从下眼睑外侧横向晕到颧骨，鼻梁中段也扫一点，像微醺；眼皮用浅杏粉打底，眼尾用玫瑰棕轻晕；深棕眼线沿眼尾向下延伸3毫米，做出下垂的无辜眼；卧蚕用浅香槟色提亮，下方有一道浅棕阴影；上睫毛自然簇状，下睫毛有3到4小簇；唇用蓝调莓果唇釉做咬唇效果，唇中最深、向外晕开，唇中有湿润反光，唇线模糊。真实相机照片质感，可见毛孔与细绒毛，真实发丝；正面胸像，双手不入画，穿素色浅灰色圆领T恤，不戴首饰；灰色无缝背景，柔和窗光，50mm 镜头。其他一切保持不变",
+    "negative": "",
+    "seed": 14183442708242,
+    "size": [
+      1024,
+      1280
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "dc77b290dabd41cabfb8c2ec36600923f7d21c2dc68e50707a9253ed1c7b482a",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.495,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 90.3,
+    "created_at": "2026-10-30T08:46:02"
+  },
+  {
+    "file": "L8_sweet_refined_s0.png",
+    "kind": "item/makeup",
+    "design": "L8",
+    "name": "定妆原版甜妆（精修）（灰蓝美瞳）",
+    "prompt": "transform the image to realistic photograph，图1是林晚本人。保持她的脸型轮廓、鼻型、唇形、齐刘海和与图1相同的天蓝色及腰直发、肤色、脸颊小痣与整体辨识度；眼睛大小与图1一致，保持灰蓝色美瞳。去掉图1原有的妆容，只换成下面这套妆容，妆感在照片里清楚可见：保留原版粉甜方向，但收敛：薄而光泽的底妆，可见毛孔；草莓粉腮红从眼下横向轻扫，面积减半，没有圆形边界；浅粉珠光眼影，眼头有细闪；棕色内眼线，眼尾平直；睫毛浓密但根根分明，不粘连；草莓粉水润唇釉，唇中更深。真实相机照片质感，可见毛孔与细绒毛，真实发丝；正面胸像，双手不入画，穿素色浅灰色圆领T恤，不戴首饰；灰色无缝背景，柔和窗光，50mm 镜头。其他一切保持不变",
+    "negative": "",
+    "seed": 137607402325334,
+    "size": [
+      1024,
+      1280
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "2969765c886ccf70cbe8ecdaf11984150b25408503f60384b0eeeffe7ded1fc0",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.518,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 102.4,
+    "created_at": "2026-10-30T08:47:46"
+  },
+  {
+    "file": "L6_tears_on_L4_s0.png",
+    "kind": "item/makeup",
+    "design": "L6",
+    "name": "泪痕妆（叠加在 L4）",
+    "prompt": "transform the image to realistic photograph，图1是林晚本人。保持图1的脸、发型、妆容（眼妆颜色、唇色与唇的颜色深浅完全保持图1）、服装、背景、光线和构图完全不变，只叠加正在流泪的状态，泪痕要在照片里清楚可见，妆仍然好看：下眼睑盈着一线泪光；两道清晰发亮、带高光反射的泪痕从眼角斜向颧骨一直流到下颌，一颗泪珠挂在脸颊上，沿途带走一点粉底；眼线和睫毛膏在下眼睑晕成浅灰色淡影，不是黑色污块；睫毛湿成几簇；眼周、鼻尖和鼻翼泛起淡淡的粉红；唇色被擦淡一半、边缘模糊，唇面微湿。真实人像照片，可见毛孔",
+    "negative": "",
+    "seed": 279885095546026,
+    "size": [
+      1024,
+      1280
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/items/makeup/L4_queen_s0.png"
+    ],
+    "sha256": "25682340eb343305def6da6846fd23929232fa241843701d57ac2e70d7bb7f20",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.484,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 144.9,
+    "created_at": "2026-10-30T09:53:06",
+    "note": "redo (seed offset 1) replacing a rejected s0"
+  },
+  {
+    "file": "L6_tears_on_L1_s0.png",
+    "kind": "item/makeup",
+    "design": "L6",
+    "name": "泪痕妆（叠加在 L1）",
+    "prompt": "transform the image to realistic photograph，图1是林晚本人。保持图1的脸、发型、妆容（眼妆颜色、唇色与唇的颜色深浅完全保持图1）、服装、背景、光线和构图完全不变，只叠加正在流泪的状态，泪痕要在照片里清楚可见，妆仍然好看：下眼睑盈着一线泪光；两道清晰发亮、带高光反射的泪痕从眼角斜向颧骨一直流到下颌，一颗泪珠挂在脸颊上，沿途带走一点粉底；眼线和睫毛膏在下眼睑晕成浅灰色淡影，不是黑色污块；睫毛湿成几簇；眼周、鼻尖和鼻翼泛起淡淡的粉红；唇色被擦淡一半、边缘模糊，唇面微湿。真实人像照片，可见毛孔",
+    "negative": "",
+    "seed": 183056245440455,
+    "size": [
+      1024,
+      1280
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/items/makeup/L1_bare_commute_s0.png"
+    ],
+    "sha256": "7e178923115ebc0426cef7bb103e6ef584a89a7e1e5886d7b25da77a5467c3e5",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.349,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 145.0,
+    "created_at": "2026-10-30T09:55:45",
+    "note": "redo (seed offset 1) replacing a rejected s0"
+  }
+]

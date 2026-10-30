@@ -1,0 +1,346 @@
+[
+  {
+    "file": "REF-LW-01_front_s0.png",
+    "kind": "look",
+    "design": "REF-LW-01",
+    "name": "素颜通勤（性感通勤）（front）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。图2只提供服装的款式、颜色与材质，不要沿用其背景和摆放；图3只提供鞋子的款式、颜色与材质，不要沿用其背景和摆放；素颜保持图1的妆容，自然深棕色眼睛，身材修长腿长，穿收腰修身的白色衬衫（领口微开）和黑色镜面漆皮高腰包臀超短裙（像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利，裙长约28厘米，只盖住臀部），脚穿12厘米透明侧开细高跟鞋（细如筷子的针形细跟）；正面全身，面向镜头，从头顶到脚完整入画，站姿自然，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 124158598012728,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png",
+      "assets/characters/lin_wan/items/outfit/O02_product_s0.png",
+      "assets/characters/lin_wan/items/shoes/S01_side45_s0.png"
+    ],
+    "sha256": "f2d3109b51ab7dbef878476e013101d45b6b63362faceb69afe9967945db66bf",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.544,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 129.7,
+    "created_at": "2026-10-30T08:53:17"
+  },
+  {
+    "file": "REF-LW-01_back_s0.png",
+    "kind": "look",
+    "design": "REF-LW-01",
+    "name": "素颜通勤（性感通勤）（back）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。图2只提供服装的款式、颜色与材质，不要沿用其背景和摆放；图3只提供鞋子的款式、颜色与材质，不要沿用其背景和摆放；素颜保持图1的妆容，自然深棕色眼睛，身材修长腿长，穿收腰修身的白色衬衫（领口微开）和黑色镜面漆皮高腰包臀超短裙（像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利，裙长约28厘米，只盖住臀部），脚穿12厘米透明侧开细高跟鞋（细如筷子的针形细跟）；背面全身，背对镜头，看到及腰的天蓝长发，从头顶到脚完整入画，站姿自然，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 196663562656556,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png",
+      "assets/characters/lin_wan/items/outfit/O02_product_s0.png",
+      "assets/characters/lin_wan/items/shoes/S01_side45_s0.png"
+    ],
+    "sha256": "f5220ee5575cb8bd5902faf55f93532e7c91df08decfa4df116697bd8093b146",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.394,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 129.6,
+    "created_at": "2026-10-30T08:55:28"
+  },
+  {
+    "file": "REF-LW-01_34_s0.png",
+    "kind": "look",
+    "design": "REF-LW-01",
+    "name": "素颜通勤（性感通勤）（34）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。图2只提供服装的款式、颜色与材质，不要沿用其背景和摆放；图3只提供鞋子的款式、颜色与材质，不要沿用其背景和摆放；素颜保持图1的妆容，自然深棕色眼睛，身材修长腿长，穿收腰修身的白色衬衫（领口微开）和黑色镜面漆皮高腰包臀超短裙（像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利，裙长约28厘米，只盖住臀部），脚穿12厘米透明侧开细高跟鞋（细如筷子的针形细跟）；四分之三侧面全身，身体朝向画面左侧约45度，从头顶到脚完整入画，站姿自然，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 264050468073881,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png",
+      "assets/characters/lin_wan/items/outfit/O02_product_s0.png",
+      "assets/characters/lin_wan/items/shoes/S01_side45_s0.png"
+    ],
+    "sha256": "0629367d9d8e85fe23021926495e06aa9330f0e80d0537caa34a58dbf3f18378",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.709,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 129.9,
+    "created_at": "2026-10-30T08:57:39"
+  },
+  {
+    "file": "REF-LW-02_front_s0.png",
+    "kind": "look",
+    "design": "REF-LW-02",
+    "name": "浓妆女王（front）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。图2只提供风衣的款式、颜色与材质，不要沿用其背景和摆放；图3只提供鞋子的款式、颜色与材质，不要沿用其背景和摆放；浓妆女王妆：戴灰蓝色美瞳，梅子棕截断式眼妆、拉长黑色眼线、黑樱桃色丝绒唇；穿黑色漆皮长风衣（像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利，扣到领口、系紧腰带），脚穿12厘米黑色镜面漆皮侧开细高跟鞋（细如筷子的针形细跟），气场冷艳；正面全身，面向镜头，从头顶到脚完整入画，站姿自然，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 85094057875603,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png",
+      "assets/characters/lin_wan/items/outfit/O08_product_s0.png",
+      "assets/characters/lin_wan/items/shoes/S02_side45_s0.png"
+    ],
+    "sha256": "df30dd2ca05b4cd096fd4861660a25f237d52e567f053d40ddadf7198e4ce5a9",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.784,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 129.6,
+    "created_at": "2026-10-30T08:59:50"
+  },
+  {
+    "file": "REF-LW-02_34_s0.png",
+    "kind": "look",
+    "design": "REF-LW-02",
+    "name": "浓妆女王（34）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。图2只提供风衣的款式、颜色与材质，不要沿用其背景和摆放；图3只提供鞋子的款式、颜色与材质，不要沿用其背景和摆放；浓妆女王妆：戴灰蓝色美瞳，梅子棕截断式眼妆、拉长黑色眼线、黑樱桃色丝绒唇；穿黑色漆皮长风衣（像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利，扣到领口、系紧腰带），脚穿12厘米黑色镜面漆皮侧开细高跟鞋（细如筷子的针形细跟），气场冷艳；四分之三侧面全身，身体朝向画面左侧约45度，从头顶到脚完整入画，站姿自然，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 89148018760689,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png",
+      "assets/characters/lin_wan/items/outfit/O08_product_s0.png",
+      "assets/characters/lin_wan/items/shoes/S02_side45_s0.png"
+    ],
+    "sha256": "1a2dcbafa7ecc91025a7762948a4c199e4da82683527977fbcc242ea6bd35875",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.549,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 117.6,
+    "created_at": "2026-10-30T09:04:06"
+  },
+  {
+    "file": null,
+    "kind": "look_spec",
+    "design": "REF-LW-03",
+    "name": "全套 CHAIN（规格表，不出上身图）",
+    "items": {
+      "outfit": [
+        "assets/characters/lin_wan/items/outfit/O10_product_s0.png",
+        "assets/characters/lin_wan/items/outfit/O12_flatlay_dark_s0.png",
+        "assets/characters/lin_wan/items/outfit/O12_flatlay_white_s0.png",
+        "assets/characters/lin_wan/items/outfit/O12_mannequin_s0.png",
+        "assets/characters/lin_wan/items/outfit/O13_product_s0.png",
+        "assets/characters/lin_wan/items/outfit/O08_product_s0.png"
+      ],
+      "shoes": [
+        "assets/characters/lin_wan/items/shoes/S01_side45_s0.png",
+        "assets/characters/lin_wan/items/shoes/S01_profile_s0.png"
+      ],
+      "accessory": [
+        "assets/characters/lin_wan/items/accessory/A01_nipple_rings_s0.png",
+        "assets/characters/lin_wan/items/accessory/A02_rings9_s0.png",
+        "assets/characters/lin_wan/items/accessory/A03_beads9_s0.png",
+        "assets/characters/lin_wan/items/accessory/A04_belly_chain_s0.png",
+        "assets/characters/lin_wan/items/accessory/A05_tongue_stud_s0.png"
+      ],
+      "tattoo": [
+        "assets/characters/lin_wan/items/tattoo/TT1_mandala_s0.png",
+        "assets/characters/lin_wan/items/tattoo/TT2_snake_s0.png",
+        "assets/characters/lin_wan/items/tattoo/TT3_chen_s0.png",
+        "assets/characters/lin_wan/items/tattoo/TT4_wings_s0.png"
+      ],
+      "makeup": [
+        "assets/characters/lin_wan/items/makeup/L4_queen_s0.png"
+      ],
+      "nails": [
+        "assets/characters/lin_wan/items/nails/N1_BK_s0.png",
+        "assets/characters/lin_wan/items/nails/T1_HEEL_s0.png"
+      ]
+    },
+    "item_ids": [
+      "LW-O10",
+      "LW-O12",
+      "LW-O13",
+      "LW-O08",
+      "LW-S01",
+      "LW-A01",
+      "LW-A02",
+      "LW-A03",
+      "LW-A04",
+      "LW-A05",
+      "LW-TT1",
+      "LW-TT2",
+      "LW-TT3",
+      "LW-TT4",
+      "L4",
+      "LW-N1",
+      "LW-T1"
+    ],
+    "policy": "项目方 2026-10-30：Look C 只有单品清单 + 产品图；上身/成人渲染由项目方自己启动，本资产库不生成任何上身预览",
+    "created_at": "2026-10-30T09:14:18"
+  },
+  {
+    "file": "REF-LW-02_back_s0.png",
+    "kind": "look",
+    "design": "REF-LW-02",
+    "name": "浓妆女王（back）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。图2只提供风衣的款式、颜色与材质，不要沿用其背景和摆放；图3只提供鞋子的款式、颜色与材质，不要沿用其背景和摆放；浓妆女王妆：戴灰蓝色美瞳，梅子棕截断式眼妆、拉长黑色眼线、黑樱桃色丝绒唇；穿黑色漆皮长风衣（像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利，扣到领口、系紧腰带），脚穿12厘米黑色镜面漆皮侧开细高跟鞋（细如筷子的针形细跟），气场冷艳；背面全身：她完全背对镜头站立，看不到脸，镜头只看到她的后脑、及腰的天蓝色长发和后背，鞋跟朝向镜头，从头顶到脚完整入画，站姿自然，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 159449432538032,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png",
+      "assets/characters/lin_wan/items/outfit/O08_product_s0.png",
+      "assets/characters/lin_wan/items/shoes/S02_side45_s0.png"
+    ],
+    "sha256": "38df59a89cf0aa40ab4133a8370b5f10ea5f42656bc51e4257d120c1eafd82f0",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.705,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 171.8,
+    "created_at": "2026-10-30T09:50:26",
+    "note": "redo (seed offset 1) replacing a rejected s0"
+  }
+]

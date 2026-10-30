@@ -1,0 +1,1260 @@
+[
+  {
+    "file": "O09_product_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O09",
+    "name": "黑色镜面漆皮超短裙（产品）",
+    "prompt": "transform the image to realistic photograph，一条黑色镜面漆皮高腰包臀超短裙（像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利，裙长约28厘米，只盖住臀部），挂在隐形人台下半身上展示正面，深色无缝背景配两条长条柔光灯箱，漆皮上有清晰的长条形镜面反光。专业电商产品摄影，商品完整居中入画，浅灰色无缝背景，柔和箱灯，材质与缝线细节清晰，画面中没有人、没有模特、没有任何人体和皮肤，无文字无水印，shot on Phase One, 100mm macro, f/8",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 227528436730165,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "99100a50e508082bd969bbeca5eb87dd1c0004935439b7778ad1a04cd7369d86",
+    "qc": null,
+    "gen_seconds": 36.2,
+    "created_at": "2026-10-30T06:29:43"
+  },
+  {
+    "file": "O01_product_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O01",
+    "name": "入职日套装（产品）",
+    "prompt": "transform the image to realistic photograph，女式入职日套装平铺：修身白色真丝衬衫与黑色镜面漆皮高腰包臀超短裙（像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利，裙长约28厘米，只盖住臀部），一个米色文件夹放在旁边，深色无缝背景配两条长条柔光灯箱，漆皮上有清晰的长条形镜面反光。专业电商产品摄影，商品完整居中入画，浅灰色无缝背景，柔和箱灯，材质与缝线细节清晰，画面中没有人、没有模特、没有任何人体和皮肤，无文字无水印，shot on Phase One, 100mm macro, f/8",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 9298420112711,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "e24f709af8e3ecc65b12ae7a77fbb41d79a408c3d71f14721856aefbd85dbb20",
+    "qc": null,
+    "gen_seconds": 33.1,
+    "created_at": "2026-10-30T06:30:16"
+  },
+  {
+    "file": "O03_product_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O03",
+    "name": "短款针织+漆皮超短裙（产品）",
+    "prompt": "transform the image to realistic photograph，平铺：一件奶白色贴身短款罗纹针织上衣与黑色镜面漆皮高腰包臀超短裙（像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利，裙长约28厘米，只盖住臀部），深色无缝背景配两条长条柔光灯箱，漆皮上有清晰的长条形镜面反光。专业电商产品摄影，商品完整居中入画，浅灰色无缝背景，柔和箱灯，材质与缝线细节清晰，画面中没有人、没有模特、没有任何人体和皮肤，无文字无水印，shot on Phase One, 100mm macro, f/8",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 231123435014003,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "fffd0d9dc85d3c74f2a03e94f49481bb8d427b0617665a25eb4dfa8587da628a",
+    "qc": null,
+    "gen_seconds": 42.3,
+    "created_at": "2026-10-30T06:31:25"
+  },
+  {
+    "file": "O05_product_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O05",
+    "name": "黑色修身吊带短连衣裙（产品）",
+    "prompt": "transform the image to realistic photograph，一条黑色修身细吊带短连衣裙挂在透明亚克力衣架上，裙长到大腿中部。专业电商产品摄影，商品完整居中入画，浅灰色无缝背景，柔和箱灯，材质与缝线细节清晰，画面中没有人、没有模特、没有任何人体和皮肤，无文字无水印，shot on Phase One, 100mm macro, f/8",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 109197660164427,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "52e8109426d3c6ce22bafcceee92ffce78c155e00f8cf838a46469968f50a92c",
+    "qc": null,
+    "gen_seconds": 33.1,
+    "created_at": "2026-10-30T06:31:58"
+  },
+  {
+    "file": "O07_product_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O07",
+    "name": "黑色晚礼服（产品）",
+    "prompt": "transform the image to realistic photograph，黑色缎面修身及踝晚礼服挂在透明亚克力衣架上：细肩带，深V露背，侧面高开衩到大腿，裙摆垂坠。专业电商产品摄影，商品完整居中入画，浅灰色无缝背景，柔和箱灯，材质与缝线细节清晰，画面中没有人、没有模特、没有任何人体和皮肤，无文字无水印，shot on Phase One, 100mm macro, f/8",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 270927046717085,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "7bd8793c44608c2a2ad83138243b0902d887b09d09001455d6818477a6b91178",
+    "qc": null,
+    "gen_seconds": 30.1,
+    "created_at": "2026-10-30T06:32:29"
+  },
+  {
+    "file": "O08_product_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O08",
+    "name": "黑色漆皮长风衣（产品）",
+    "prompt": "transform the image to realistic photograph，黑色漆皮双排扣长风衣（像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利），长度到小腿，扣到领口，系腰带，挂在隐形人台上展示正面，深色无缝背景配两条长条柔光灯箱，漆皮上有清晰的长条形镜面反光。专业电商产品摄影，商品完整居中入画，浅灰色无缝背景，柔和箱灯，材质与缝线细节清晰，画面中没有人、没有模特、没有任何人体和皮肤，无文字无水印，shot on Phase One, 100mm macro, f/8",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 37457097365815,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "abbcac8cea16efd754d356fa4f2f90570e70e98c314c43e50fe35aded58f6aa4",
+    "qc": null,
+    "gen_seconds": 42.2,
+    "created_at": "2026-10-30T06:33:11"
+  },
+  {
+    "file": "O10_product_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O10",
+    "name": "黑色漆皮束腰（产品）",
+    "prompt": "transform the image to realistic photograph，黑色漆皮束腰（像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利），前片硬挺带钢骨，交叉的漆皮绑带从肩部延伸到腰部，胸前是镂空开窗设计，银色金属扣。穿在一个无头的哑光黑色裁缝人台上（人台只有躯干，没有头、手臂和腿），专业时装产品摄影，深灰色无缝背景，两条长条柔光灯箱，漆皮上有清晰的长条形镜面反光，画面中没有真人、没有皮肤，无文字无水印",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 98933258323391,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "b176c617800de89eeb004fbda2171e3944ccb05a3262faeb8636423637b857df",
+    "qc": null,
+    "gen_seconds": 33.1,
+    "created_at": "2026-10-30T06:33:44"
+  },
+  {
+    "file": "O11_product_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O11",
+    "name": "新束腰：更紧开窗更大（产品）",
+    "prompt": "transform the image to realistic photograph，第二件黑色漆皮束腰（像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利），比普通款更窄更紧，胸前镂空开窗更大，后背交叉系带，银色金属扣。穿在一个无头的哑光黑色裁缝人台上（人台只有躯干，没有头、手臂和腿），专业时装产品摄影，深灰色无缝背景，两条长条柔光灯箱，漆皮上有清晰的长条形镜面反光，画面中没有真人、没有皮肤，无文字无水印",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 145552249099160,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "9e8a72e2e58cc70b59bb98163ea631fb384becf7df103d0702e2d339e81b908a",
+    "qc": null,
+    "gen_seconds": 30.2,
+    "created_at": "2026-10-30T06:34:14"
+  },
+  {
+    "file": "O12_flatlay_dark_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O12",
+    "name": "黑色漆皮细带捆绑内衣（平铺，深色背景）",
+    "prompt": "transform the image to realistic photograph，图1只提供服装款式（不是人物参考）：极简黑色镜面漆皮细带捆绑内衣（harness）——挂脖细带配金属扣、胸前一枚银色O环、窄的下胸围带、无罩杯的开放式框架、正中一条腹部细带连到细带式丁字裤、两侧细的带扣胯带；不是大面积皮片、不是全罩文胸、不是连体衣；像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利；银色金属扣和O环清晰可见。整件平铺在深灰色无缝背景上俯拍，带子舒展整齐，深色无缝背景配两条长条柔光灯箱，漆皮上有清晰的长条形镜面反光，画面中没有任何人体和皮肤，无文字",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 190685517147276,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/clothes/owner_standard/latex_harness_standard.jpg"
+    ],
+    "sha256": "fbd9ae63f6ae7b071cb11033ef916488375e107bcb3e0b4c001ffed0d7247adf",
+    "qc": null,
+    "gen_seconds": 48.2,
+    "created_at": "2026-10-30T06:35:03"
+  },
+  {
+    "file": "O12_flatlay_white_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O12",
+    "name": "黑色漆皮细带捆绑内衣（平铺，白色背景）",
+    "prompt": "transform the image to realistic photograph，图1只提供服装款式（不是人物参考）：极简黑色镜面漆皮细带捆绑内衣（harness）——挂脖细带配金属扣、胸前一枚银色O环、窄的下胸围带、无罩杯的开放式框架、正中一条腹部细带连到细带式丁字裤、两侧细的带扣胯带；不是大面积皮片、不是全罩文胸、不是连体衣；像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利；银色金属扣和O环清晰可见。整件平铺在纯白无缝背景上俯拍，带子舒展整齐，柔和箱灯，漆皮有清晰的长条形反光，画面中没有任何人体和皮肤，无文字",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 155287325884568,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/clothes/owner_standard/latex_harness_standard.jpg"
+    ],
+    "sha256": "1b3a520c64eff7167e9a5a968cc91bbe398554f64b8bc14bb0ba49001caba379",
+    "qc": null,
+    "gen_seconds": 36.2,
+    "created_at": "2026-10-30T06:35:39"
+  },
+  {
+    "file": "O12_mannequin_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O12",
+    "name": "黑色漆皮细带捆绑内衣（无脸人台）",
+    "prompt": "transform the image to realistic photograph，图1只提供服装款式（不是人物参考）：极简黑色镜面漆皮细带捆绑内衣（harness）——挂脖细带配金属扣、胸前一枚银色O环、窄的下胸围带、无罩杯的开放式框架、正中一条腹部细带连到细带式丁字裤、两侧细的带扣胯带；不是大面积皮片、不是全罩文胸、不是连体衣；像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利；银色金属扣和O环清晰可见。穿在一个无头的哑光黑色裁缝人台上（人台只有躯干，没有头、手臂和腿），专业时装产品摄影，深灰色无缝背景，两条长条柔光灯箱，漆皮上有清晰的长条形镜面反光，画面中没有真人、没有皮肤，无文字无水印",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 108257171485601,
+    "size": [
+      1024,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/clothes/owner_standard/latex_harness_standard.jpg"
+    ],
+    "sha256": "befa1e247b6a730f1e2fc112e0b4c6a72ed937cc6ff3b1045125ca1daefb1eca",
+    "qc": null,
+    "gen_seconds": 60.3,
+    "created_at": "2026-10-30T06:36:39"
+  },
+  {
+    "file": "O13_product_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O13",
+    "name": "黑色漆皮 string 丁字裤（产品）",
+    "prompt": "transform the image to realistic photograph，一条黑色漆皮 string 丁字裤平铺（像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利）：正面一小片三角漆皮，两侧是细如筷子的漆皮细绳，深色无缝背景配两条长条柔光灯箱，漆皮上有清晰的长条形镜面反光。专业电商产品摄影，商品完整居中入画，浅灰色无缝背景，柔和箱灯，材质与缝线细节清晰，画面中没有人、没有模特、没有任何人体和皮肤，无文字无水印，shot on Phase One, 100mm macro, f/8",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 259730768663273,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "9cc437ba95bc0be79171d8ee385bb89a31b7f29f0ee80c0881ecc72e7969e73a",
+    "qc": null,
+    "gen_seconds": 30.2,
+    "created_at": "2026-10-30T06:37:09"
+  },
+  {
+    "file": "O14_product_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O14",
+    "name": "乳胶连体衣（产品）",
+    "prompt": "transform the image to realistic photograph，黑色高光乳胶连体衣，长袖长腿，后背拉链，完整包覆，表面湿润镜面反光。穿在一个无头的哑光黑色裁缝人台上（人台只有躯干，没有头、手臂和腿），专业时装产品摄影，深灰色无缝背景，两条长条柔光灯箱，漆皮上有清晰的长条形镜面反光，画面中没有真人、没有皮肤，无文字无水印",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 255745511331712,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "f2bc05a7aae392891364b92d8da5144c88b1b1f5faefc2b7a0ead75e500bc0fa",
+    "qc": null,
+    "gen_seconds": 42.3,
+    "created_at": "2026-10-30T06:37:52"
+  },
+  {
+    "file": "O02_product_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O02",
+    "name": "性感通勤装（产品）",
+    "prompt": "transform the image to realistic photograph，女式性感通勤装平铺俯拍（只有衣服平放在台面上，没有人穿）：收腰修身的白色棉质衬衫与黑色镜面漆皮高腰包臀超短裙（像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利，裙长约28厘米，只盖住臀部），深色无缝背景配两条长条柔光灯箱，漆皮上有清晰的长条形镜面反光。专业电商产品摄影，商品完整居中入画，浅灰色无缝背景，柔和箱灯，材质与缝线细节清晰，画面中没有人、没有模特、没有任何人体和皮肤，无文字无水印，shot on Phase One, 100mm macro, f/8",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 207513685979495,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "200af1d69339ba72fdb9249633f89c789dc912b9cd9a398677d6caa99ee7ebd5",
+    "qc": null,
+    "gen_seconds": 54.6,
+    "created_at": "2026-10-30T06:38:16",
+    "note": "redo (seed offset 1) replacing a rejected s0"
+  },
+  {
+    "file": "O15_product_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O15",
+    "name": "黑色丝袜（产品）",
+    "prompt": "transform the image to realistic photograph，一双黑色15D薄透连裤丝袜平铺展开，半透明质感，脚尖加固。专业电商产品摄影，商品完整居中入画，浅灰色无缝背景，柔和箱灯，材质与缝线细节清晰，画面中没有人、没有模特、没有任何人体和皮肤，无文字无水印，shot on Phase One, 100mm macro, f/8",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 264400335120107,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "69f0861fca9e4a1d1cab8b2fb1ea215cbdca079c948fb9af15a2925693e96194",
+    "qc": null,
+    "gen_seconds": 54.2,
+    "created_at": "2026-10-30T06:38:46"
+  },
+  {
+    "file": "O16_product_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O16",
+    "name": "真丝吊带睡衣套装（产品）",
+    "prompt": "transform the image to realistic photograph，浅粉色真丝细吊带背心与真丝短裤睡衣套装平铺，边缘有细蕾丝。专业电商产品摄影，商品完整居中入画，浅灰色无缝背景，柔和箱灯，材质与缝线细节清晰，画面中没有人、没有模特、没有任何人体和皮肤，无文字无水印，shot on Phase One, 100mm macro, f/8",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 192118163096457,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "e56fbefc8237636c812c1d8f08dc2793888128d879ccee784ba628b67670896e",
+    "qc": null,
+    "gen_seconds": 51.3,
+    "created_at": "2026-10-30T06:39:37"
+  },
+  {
+    "file": "O19_product_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O19",
+    "name": "浴巾（产品）",
+    "prompt": "transform the image to realistic photograph，一条白色厚绒浴巾，整齐叠放。专业电商产品摄影，商品完整居中入画，浅灰色无缝背景，柔和箱灯，材质与缝线细节清晰，画面中没有人、没有模特、没有任何人体和皮肤，无文字无水印，shot on Phase One, 100mm macro, f/8",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 12288623055100,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "8f718413061c9c4b233965d0d2213ac68076143bc374e616a2b5a188e64a7fb6",
+    "qc": null,
+    "gen_seconds": 30.1,
+    "created_at": "2026-10-30T06:40:07"
+  },
+  {
+    "file": "O21_product_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O21",
+    "name": "顾沉的男式西装外套（产品）",
+    "prompt": "transform the image to realistic photograph，男式黑色高定单排扣西装外套挂在木质衣架上，肩宽挺括，羊毛面料。专业电商产品摄影，商品完整居中入画，浅灰色无缝背景，柔和箱灯，材质与缝线细节清晰，画面中没有人、没有模特、没有任何人体和皮肤，无文字无水印，shot on Phase One, 100mm macro, f/8",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 83200198773811,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "fa7977064e69d5d44f46893ba07952ebce6d6276baae16f949535c5977906a33",
+    "qc": null,
+    "gen_seconds": 30.1,
+    "created_at": "2026-10-30T06:40:37"
+  },
+  {
+    "file": "O00_worn_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O00",
+    "name": "身份底板基础款（上身）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。从头顶到脚完整入画的全身站姿，面向镜头，穿一条素色深海军蓝长袖针织连衣裙（圆领、及膝、不透明），白色平底帆布鞋，不戴任何首饰，自然放松，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 229133255054028,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "d062358b4c7eb763c7e2e9a9105e13ac59a507194471a2b9ceb65397c3b13234",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.274,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 72.3,
+    "created_at": "2026-10-30T07:42:38"
+  },
+  {
+    "file": "O09_worn_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O09",
+    "name": "漆皮超短裙（上身）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。图2只提供裙子的款式、颜色与材质，不要沿用其背景和摆放；身材修长、腿长，穿搭修身显身材，她穿黑色镜面漆皮高腰包臀超短裙（像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利，裙长约28厘米，只盖住臀部）配黑色修身短袖针织上衣，脚穿12厘米透明侧开细高跟鞋（细如筷子的针形细跟），从头顶到脚完整入画的全身站姿，面向镜头，自然放松，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 62805070845753,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png",
+      "assets/characters/lin_wan/items/outfit/O09_product_s0.png"
+    ],
+    "sha256": "7566d01af1b1434ab7581cc15ac115780f775a145162f0bf372e3b26dc0b68ba",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.418,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 117.6,
+    "created_at": "2026-10-30T07:44:37"
+  },
+  {
+    "file": "O01_worn_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O01",
+    "name": "入职日套装（上身）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。图2只提供服装的款式、颜色与材质，不要沿用其背景和摆放；身材修长、腿长，穿搭修身显身材，她穿修身白色真丝衬衫（领口解开一颗扣子）和黑色镜面漆皮高腰包臀超短裙（像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利，裙长约28厘米，只盖住臀部），脚穿12厘米透明侧开细高跟鞋（细如筷子的针形细跟），双手在胸前抱着一个米色文件夹，表情礼貌又紧张，从头顶到脚完整入画的全身站姿，面向镜头，自然放松，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 142744460036786,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png",
+      "assets/characters/lin_wan/items/outfit/O01_product_s0.png"
+    ],
+    "sha256": "c8bd8c90f229c29c9f51e607b0491794f93b76cda9f75756ecea47c3858761ec",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.526,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 105.6,
+    "created_at": "2026-10-30T07:46:24"
+  },
+  {
+    "file": "O02_worn_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O02",
+    "name": "性感通勤装（上身）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。图2只提供服装的款式、颜色与材质，不要沿用其背景和摆放；身材修长、腿长，穿搭修身显身材，她穿收腰修身的白色衬衫（领口微开）和黑色镜面漆皮高腰包臀超短裙（像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利，裙长约28厘米，只盖住臀部），脚穿12厘米透明侧开细高跟鞋（细如筷子的针形细跟），从头顶到脚完整入画的全身站姿，面向镜头，自然放松，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 8282487793357,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png",
+      "assets/characters/lin_wan/items/outfit/O02_product_s0.png"
+    ],
+    "sha256": "429c015c372f80afe433c3b4b3fe1b2e0a18c2b158747dfd3eab1a51f721a321",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.718,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 117.5,
+    "created_at": "2026-10-30T07:48:24"
+  },
+  {
+    "file": "O03_worn_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O03",
+    "name": "短款针织+漆皮超短裙（上身）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。图2只提供服装的款式、颜色与材质，不要沿用其背景和摆放；身材修长、腿长，穿搭修身显身材，她穿奶白色贴身短款罗纹针织上衣（露出一点腰线）和黑色镜面漆皮高腰包臀超短裙（像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利，裙长约28厘米，只盖住臀部），脚穿12厘米透明侧开细高跟鞋（细如筷子的针形细跟），从头顶到脚完整入画的全身站姿，面向镜头，自然放松，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 125529599678100,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png",
+      "assets/characters/lin_wan/items/outfit/O03_product_s0.png"
+    ],
+    "sha256": "7ad06704c198053d2c873ef1d62b2da3c60287bb1bf3dfb915e926a384d12cc1",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.563,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 105.5,
+    "created_at": "2026-10-30T07:50:11"
+  },
+  {
+    "file": "O04_worn_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O04",
+    "name": "修身运动拉链外套（上身）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。身材修长、腿长，穿搭修身显身材，她穿浅蓝色修身短款运动拉链外套（拉链拉到胸口以上）和黑色高腰短裙，双臂习惯性环抱在胸前，从头顶到脚完整入画的全身站姿，面向镜头，自然放松，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 176295447501575,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "5b473f46a5cbb5f639e94a7a2af2fcd7a16e6e123f5350ce7949718065427f4c",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.392,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 81.4,
+    "created_at": "2026-10-30T07:51:34"
+  },
+  {
+    "file": "O07_worn_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O07",
+    "name": "黑色晚礼服（上身）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。图2只提供服装的款式、颜色与材质，不要沿用其背景和摆放；身材修长、腿长，穿搭修身显身材，她穿黑色缎面修身晚礼服（细肩带，侧面高开衩露出一条腿），一手端着香槟杯，仪态端庄，脚穿12厘米黑色细高跟（细如筷子的针形细跟），从头顶到脚完整入画的全身站姿，面向镜头，自然放松，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 199062719605465,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png",
+      "assets/characters/lin_wan/items/outfit/O07_product_s0.png"
+    ],
+    "sha256": "ea374ff1b491791633b8863bb638a59d97fc8f309bd5962ecf6cfaa021030926",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.426,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 108.4,
+    "created_at": "2026-10-30T07:59:13"
+  },
+  {
+    "file": "O08_worn_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O08",
+    "name": "黑色漆皮长风衣（上身，扣到领口）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。图2只提供风衣的款式、颜色与材质，不要沿用其背景和摆放；她穿黑色漆皮长风衣（像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利），扣子一直扣到领口，系紧腰带，风衣下摆到小腿，脚穿12厘米透明侧开细高跟鞋（细如筷子的针形细跟），从头顶到脚完整入画的全身站姿，面向镜头，自然放松，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 34880869971486,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png",
+      "assets/characters/lin_wan/items/outfit/O08_product_s0.png"
+    ],
+    "sha256": "bf965eea25891568ed818bd48146ae9078e2e01d16cd24e9d5c86e76e59eec39",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.765,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 96.5,
+    "created_at": "2026-10-30T08:02:50"
+  },
+  {
+    "file": "O15_worn_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O15",
+    "name": "黑色丝袜（上身，腿部）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。图2只提供丝袜的款式、颜色与材质，不要沿用其背景和摆放；她穿黑色镜面漆皮高腰包臀超短裙（像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利，裙长约28厘米，只盖住臀部）配黑色薄透丝袜，坐在白色椅子上，双腿并拢斜放，脚穿12厘米透明侧开细高跟鞋（细如筷子的针形细跟），画面从腰部到脚，看不到脸，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 17831032715193,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png",
+      "assets/characters/lin_wan/items/outfit/O15_product_s0.png"
+    ],
+    "sha256": "445235e23f2b9b90660ab0daaee982e226dad8098c80e4cf6a2e2d5d0b2ee433",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.225,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 105.4,
+    "created_at": "2026-10-30T08:04:38"
+  },
+  {
+    "file": "O17_worn_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O17",
+    "name": "短款真丝吊带睡裙（上身）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。身材修长、腿长，穿搭修身显身材，她穿一件香槟色短款真丝吊带睡裙（长到大腿中部），素颜，赤脚，从头顶到脚完整入画的全身站姿，面向镜头，自然放松，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 196236336608426,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "6cadf65b779f488b470e39fd0966058e31d1e673af6648b0a14db529c30125f4",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.683,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 84.4,
+    "created_at": "2026-10-30T08:13:18"
+  },
+  {
+    "file": "O21_worn_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O21",
+    "name": "披着男式西装外套（上身）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。图2只提供西装外套的款式、颜色与材质，不要沿用其背景和摆放；她穿白色修身衬衫，肩上披着一件过大的男式黑色西装外套，坐在办公椅上，双手抱着文件，半身构图，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 176730633509730,
+    "size": [
+      1024,
+      1280
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png",
+      "assets/characters/lin_wan/items/outfit/O21_product_s0.png"
+    ],
+    "sha256": "ac78b6d90e1ce6458483da629f503db0d212ead80bc765b75eb4189654bcc19c",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.528,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 120.5,
+    "created_at": "2026-10-30T08:26:48"
+  },
+  {
+    "file": "O06_worn_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O06",
+    "name": "居家：吊带背心+超短短裤（上身）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。身材修长、腿长，穿搭修身显身材，她穿黑色贴身短款罗纹长袖上衣和同色高腰针织短裤（到大腿中部），白色短袜，从头顶到脚完整入画的全身站姿，面向镜头，自然放松，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 224976075500646,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "a792675666c99f890516bfd8dde91e31d72065e87bebc6c55c4ad159c56c1826",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.786,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 96.6,
+    "created_at": "2026-10-30T09:14:39"
+  },
+  {
+    "file": "O16_worn_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O16",
+    "name": "真丝吊带睡衣（上身）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。图2只提供睡衣的款式、颜色与材质，不要沿用其背景和摆放；身材修长、腿长，穿搭修身显身材，她穿深莓果红色真丝长袖衬衫式睡衣上衣（扣子扣好）和同色真丝短裤，坐在床沿，从头顶到脚完整入画的全身站姿，面向镜头，自然放松，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 10698686981636,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png",
+      "assets/characters/lin_wan/items/outfit/O16_product_s0.png"
+    ],
+    "sha256": "78b3b9cb6088fcc352eca03b5d9f77e42f3764dcaacb9835dbc871078eb0d63c",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.796,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 150.9,
+    "created_at": "2026-10-30T09:22:07"
+  },
+  {
+    "file": "O20_worn_s0.png",
+    "kind": "item/outfit",
+    "design": "LW-O20",
+    "name": "短款修身针织开衫（上身）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。身材修长、腿长，穿搭修身显身材，她穿炭灰色短款修身针织开衫（扣好），配黑色高腰短裤（到大腿中部），从头顶到脚完整入画的全身站姿，面向镜头，自然放松，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 56626360518491,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "551085ed21481e99b196dcadeabcce4de8090ecc6928a52fc36d7c8f3ac6a271",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.622,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 114.6,
+    "created_at": "2026-10-30T09:35:12"
+  }
+]

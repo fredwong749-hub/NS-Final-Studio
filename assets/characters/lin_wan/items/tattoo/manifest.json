@@ -1,0 +1,139 @@
+[
+  {
+    "file": "TT2_snake_s0.png",
+    "kind": "item/tattoo",
+    "design": "LW-TT2",
+    "name": "黑蛇纹身（设计稿）",
+    "prompt": "transform the image to realistic photograph，一条细长盘绕的黑蛇，鳞片一片片精细排列，S形蜿蜒，蛇眼点一点红宝石色。纹身设计稿（tattoo flash）：黑色墨线画在米白色厚纸上，平铺俯拍，纸面纹理清晰，线条精细，只有设计图案，画面中没有人体和皮肤，无多余文字，柔和均匀光",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 118840869050258,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "510d63c766d3470b7e7ffc735b31d33e940108662d3d2e2a3d69d355f39c2217",
+    "qc": null,
+    "gen_seconds": 30.2,
+    "created_at": "2026-10-30T06:53:12"
+  },
+  {
+    "file": "TT3_chen_s0.png",
+    "kind": "item/tattoo",
+    "design": "LW-TT3",
+    "name": "“沉”字纹身（设计稿）",
+    "prompt": "transform the image to realistic photograph，一个手写的黑色中文行书“沉”字，笔锋细腻优雅，居中。纹身设计稿（tattoo flash）：黑色墨线画在米白色厚纸上，平铺俯拍，纸面纹理清晰，线条精细，只有设计图案，画面中没有人体和皮肤，无多余文字，柔和均匀光",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 183514743453909,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "d1a2b0c69f4a36071b5b27db1a0138c9922b3aa738fa060f71fc4cb89611165e",
+    "qc": null,
+    "gen_seconds": 45.2,
+    "created_at": "2026-10-30T06:53:57"
+  },
+  {
+    "file": "TT4_wings_s0.png",
+    "kind": "item/tattoo",
+    "design": "LW-TT4",
+    "name": "背部黑羽纹身（设计稿）",
+    "prompt": "transform the image to realistic photograph，一对对称展开的黑色羽翼，羽毛层次分明从上向下逐渐收拢。纹身设计稿（tattoo flash）：黑色墨线画在米白色厚纸上，平铺俯拍，纸面纹理清晰，线条精细，只有设计图案，画面中没有人体和皮肤，无多余文字，柔和均匀光",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 200469048170079,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "ca0b211c9d5ba1c715d05e251d43dd9ce60ee6345fd7757c1649293c0e1d6524",
+    "qc": null,
+    "gen_seconds": 30.1,
+    "created_at": "2026-10-30T06:54:27"
+  },
+  {
+    "file": "TT1_mandala_s0.png",
+    "kind": "item/tattoo",
+    "design": "LW-TT1",
+    "name": "曼陀罗纹身（设计稿）",
+    "prompt": "transform the image to realistic photograph，一个圆形放射对称的黑色曼陀罗图案（mandala）：中心小圆点，外面一圈圈同心花瓣与几何点线纹层层展开，整体是正圆形；正圆的下方左右各伸出一条向下弯曲的细藤蔓。纹身设计稿（tattoo flash）：黑色墨线画在米白色厚纸上，平铺俯拍，纸面纹理清晰，线条精细，只有设计图案，画面中没有人体和皮肤，无多余文字，柔和均匀光",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 151643505507083,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "39bd24fd06f216af1b7dcf12cf46abbcb2bef3d8e26317df8c7332aecaa31130",
+    "qc": null,
+    "gen_seconds": 54.2,
+    "created_at": "2026-10-30T06:58:09",
+    "note": "redo (seed offset 1) replacing a rejected s0"
+  }
+]

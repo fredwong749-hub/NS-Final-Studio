@@ -1,0 +1,266 @@
+[
+  {
+    "file": "gu_chen_cand_01_s0.png",
+    "kind": "candidate",
+    "design": "gu_chen",
+    "name": "gu_chen 候选 1",
+    "prompt": "Full-body identity reference photo of a 34-year-old adult Chinese man, a CEO, mature, restrained and handsome, short neat black hair swept back, defined jaw, light stubble, tall and lean; he wears a plain tailored black dress shirt (top button open) and black trousers. Head to toe in frame, standing straight, front view, arms relaxed at his sides, neutral expression, looking into the lens, plain shoes, no necklace, no jewellery, no watch, no props in his hands. Plain neutral grey seamless studio backdrop (#808080), soft even light, 50mm lens at f/8. Unretouched real photo. 真实皮肤质感，可见细小毛孔与细软绒毛，自然的轻微不对称，眼睛为真实人眼大小。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "磨皮, 塑料皮肤, 蜡像, CGI, 3D render, airbrushed, doll face, 动漫, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 赤裸上身, 项链, 首饰, 手表, 道具, 文字, 水印, 低清",
+    "seed": 115539250668396,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 3.0,
+    "preset": "SOP",
+    "lora": [
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.3
+    },
+    "references": [],
+    "sha256": "1a6b30e9f25d7d4b253bdb3e8dc867e1ce747482ed21067f31175645bd918306",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.002,
+      "vlm": false,
+      "version": "nudenet3.4+clipL14v2+qwen3vl-v3"
+    },
+    "gen_seconds": 141.7,
+    "bible_sha256": "a2fd3146d98111dd689367ef0245f2f526d14e67ebe853c06667addc6bd62fe9",
+    "reference_source": "script character lock: 34岁成年男性CEO，黑色高定衬衫，成熟克制英俊",
+    "references_used": [],
+    "status": "candidate (owner picks one; no master/LoRA until picked)",
+    "created_at": "2026-10-30T11:15:35"
+  },
+  {
+    "file": "gu_chen_cand_02_s0.png",
+    "kind": "candidate",
+    "design": "gu_chen",
+    "name": "gu_chen 候选 2",
+    "prompt": "Full-body identity reference photo of a 34-year-old adult Chinese man, a CEO, mature, restrained and handsome, short neat black hair swept back, defined jaw, light stubble, tall and lean; he wears a plain tailored black dress shirt (top button open) and black trousers. Head to toe in frame, standing straight, front view, arms relaxed at his sides, neutral expression, looking into the lens, plain shoes, no necklace, no jewellery, no watch, no props in his hands. Plain neutral grey seamless studio backdrop (#808080), soft even light, 50mm lens at f/8. Unretouched real photo. 真实皮肤质感，可见细小毛孔与细软绒毛，自然的轻微不对称，眼睛为真实人眼大小。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "磨皮, 塑料皮肤, 蜡像, CGI, 3D render, airbrushed, doll face, 动漫, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 赤裸上身, 项链, 首饰, 手表, 道具, 文字, 水印, 低清",
+    "seed": 41538746218494,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 3.0,
+    "preset": "SOP",
+    "lora": [
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.3
+    },
+    "references": [],
+    "sha256": "a66459960bc18b3f52a8991bfa8ab2faa1329bda1a16dbac8e8c6b37256006ae",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.001,
+      "vlm": false,
+      "version": "nudenet3.4+clipL14v2+qwen3vl-v3"
+    },
+    "gen_seconds": 147.8,
+    "bible_sha256": "a2fd3146d98111dd689367ef0245f2f526d14e67ebe853c06667addc6bd62fe9",
+    "reference_source": "script character lock: 34岁成年男性CEO，黑色高定衬衫，成熟克制英俊",
+    "references_used": [],
+    "status": "candidate (owner picks one; no master/LoRA until picked)",
+    "created_at": "2026-10-30T11:18:10"
+  },
+  {
+    "file": "gu_chen_cand_03_s0.png",
+    "kind": "candidate",
+    "design": "gu_chen",
+    "name": "gu_chen 候选 3",
+    "prompt": "Full-body identity reference photo of a 34-year-old adult Chinese man, a CEO, mature, restrained and handsome, short neat black hair swept back, defined jaw, light stubble, tall and lean; he wears a plain tailored black dress shirt (top button open) and black trousers. Head to toe in frame, standing straight, front view, arms relaxed at his sides, neutral expression, looking into the lens, plain shoes, no necklace, no jewellery, no watch, no props in his hands. Plain neutral grey seamless studio backdrop (#808080), soft even light, 50mm lens at f/8. Unretouched real photo. 真实皮肤质感，可见细小毛孔与细软绒毛，自然的轻微不对称，眼睛为真实人眼大小。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "磨皮, 塑料皮肤, 蜡像, CGI, 3D render, airbrushed, doll face, 动漫, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 赤裸上身, 项链, 首饰, 手表, 道具, 文字, 水印, 低清",
+    "seed": 21162965422704,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 3.0,
+    "preset": "SOP",
+    "lora": [
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.3
+    },
+    "references": [],
+    "sha256": "1395888464942a4875ff64d2dff243f6288f8525985ca181093b6dc365eb0d5f",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.006,
+      "vlm": false,
+      "version": "nudenet3.4+clipL14v2+qwen3vl-v3"
+    },
+    "gen_seconds": 138.6,
+    "bible_sha256": "a2fd3146d98111dd689367ef0245f2f526d14e67ebe853c06667addc6bd62fe9",
+    "reference_source": "script character lock: 34岁成年男性CEO，黑色高定衬衫，成熟克制英俊",
+    "references_used": [],
+    "status": "candidate (owner picks one; no master/LoRA until picked)",
+    "created_at": "2026-10-30T11:20:37"
+  },
+  {
+    "file": "gu_chen_cand_01_young_s0.png",
+    "kind": "candidate",
+    "design": "gu_chen",
+    "name": "gu_chen 候选 1",
+    "prompt": "Full-body identity reference photo of a 34-year-old adult Chinese man who looks exactly in his early thirties (youthful face for his age, smooth skin around the eyes, no grey hair, no deep wrinkles), a CEO, mature, restrained and handsome, short neat black hair swept back, defined jaw, light stubble, tall and lean; he wears a plain tailored black dress shirt (top button open) and black trousers. Head to toe in frame, standing straight, front view, arms relaxed at his sides, neutral expression, looking into the lens, plain shoes, no necklace, no jewellery, no watch, no props in his hands. Plain neutral grey seamless studio backdrop (#808080), soft even light, 50mm lens at f/8. Unretouched real photo. 真实皮肤质感，可见细小毛孔与细软绒毛，自然的轻微不对称，眼睛为真实人眼大小。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "磨皮, 塑料皮肤, 蜡像, CGI, 3D render, airbrushed, doll face, 动漫, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 赤裸上身, 项链, 首饰, 手表, 道具, 文字, 水印, 低清",
+    "seed": 97914957357695,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 3.0,
+    "preset": "SOP",
+    "lora": [
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.3
+    },
+    "references": [],
+    "sha256": "bc070ce701470320478fec5d3eb22e524598132bd42223bc81576f140a4fc832",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.006,
+      "vlm": false,
+      "version": "nudenet3.4+clipL14v2+qwen3vl-v3"
+    },
+    "gen_seconds": 138.5,
+    "bible_sha256": "a2fd3146d98111dd689367ef0245f2f526d14e67ebe853c06667addc6bd62fe9",
+    "reference_source": "script character lock: 34岁成年男性CEO，黑色高定衬衫，成熟克制英俊",
+    "references_used": [],
+    "status": "candidate (owner picks one; no master/LoRA until picked)",
+    "created_at": "2026-10-30T11:57:26"
+  },
+  {
+    "file": "gu_chen_cand_02_young_s0.png",
+    "kind": "candidate",
+    "design": "gu_chen",
+    "name": "gu_chen 候选 2",
+    "prompt": "Full-body identity reference photo of a 34-year-old adult Chinese man who looks exactly in his early thirties (youthful face for his age, smooth skin around the eyes, no grey hair, no deep wrinkles), a CEO, mature, restrained and handsome, short neat black hair swept back, defined jaw, light stubble, tall and lean; he wears a plain tailored black dress shirt (top button open) and black trousers. Head to toe in frame, standing straight, front view, arms relaxed at his sides, neutral expression, looking into the lens, plain shoes, no necklace, no jewellery, no watch, no props in his hands. Plain neutral grey seamless studio backdrop (#808080), soft even light, 50mm lens at f/8. Unretouched real photo. 真实皮肤质感，可见细小毛孔与细软绒毛，自然的轻微不对称，眼睛为真实人眼大小。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "磨皮, 塑料皮肤, 蜡像, CGI, 3D render, airbrushed, doll face, 动漫, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 赤裸上身, 项链, 首饰, 手表, 道具, 文字, 水印, 低清",
+    "seed": 198275746095687,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 3.0,
+    "preset": "SOP",
+    "lora": [
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.3
+    },
+    "references": [],
+    "sha256": "5ce90ff74528de239a550df1724e419fad69ae16559b9cfcb87519668fa74ba1",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.004,
+      "vlm": false,
+      "version": "nudenet3.4+clipL14v2+qwen3vl-v3"
+    },
+    "gen_seconds": 141.6,
+    "bible_sha256": "a2fd3146d98111dd689367ef0245f2f526d14e67ebe853c06667addc6bd62fe9",
+    "reference_source": "script character lock: 34岁成年男性CEO，黑色高定衬衫，成熟克制英俊",
+    "references_used": [],
+    "status": "candidate (owner picks one; no master/LoRA until picked)",
+    "created_at": "2026-10-30T11:59:56"
+  },
+  {
+    "file": "gu_chen_cand_03_young_s0.png",
+    "kind": "candidate",
+    "design": "gu_chen",
+    "name": "gu_chen 候选 3",
+    "prompt": "Full-body identity reference photo of a 34-year-old adult Chinese man who looks exactly in his early thirties (youthful face for his age, smooth skin around the eyes, no grey hair, no deep wrinkles), a CEO, mature, restrained and handsome, short neat black hair swept back, defined jaw, light stubble, tall and lean; he wears a plain tailored black dress shirt (top button open) and black trousers. Head to toe in frame, standing straight, front view, arms relaxed at his sides, neutral expression, looking into the lens, plain shoes, no necklace, no jewellery, no watch, no props in his hands. Plain neutral grey seamless studio backdrop (#808080), soft even light, 50mm lens at f/8. Unretouched real photo. 真实皮肤质感，可见细小毛孔与细软绒毛，自然的轻微不对称，眼睛为真实人眼大小。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "磨皮, 塑料皮肤, 蜡像, CGI, 3D render, airbrushed, doll face, 动漫, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 赤裸上身, 项链, 首饰, 手表, 道具, 文字, 水印, 低清",
+    "seed": 236448656988371,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 3.0,
+    "preset": "SOP",
+    "lora": [
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.3
+    },
+    "references": [],
+    "sha256": "17da17a09e7a8d10895ab14824d6fd33b681e31ab9241654f92c3f96929657e3",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.003,
+      "vlm": false,
+      "version": "nudenet3.4+clipL14v2+qwen3vl-v3"
+    },
+    "gen_seconds": 139.0,
+    "bible_sha256": "a2fd3146d98111dd689367ef0245f2f526d14e67ebe853c06667addc6bd62fe9",
+    "reference_source": "script character lock: 34岁成年男性CEO，黑色高定衬衫，成熟克制英俊",
+    "references_used": [],
+    "status": "candidate (owner picks one; no master/LoRA until picked)",
+    "created_at": "2026-10-30T12:02:22"
+  }
+]

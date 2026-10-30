@@ -1,0 +1,227 @@
+[
+  {
+    "file": "CL_s0.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "母版候选 CL",
+    "prompt": "transform the image to realistic photograph，把图1变成一张真实相机拍摄的照片，只改变质感，不改变内容：保持图1的同一个人、脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、粉色腮红、水润粉色唇釉、精致的粉甜妆容、手托腮的姿势、草莓水晶项链、粉色衣服、粉色玫瑰与柔和暖色逆光、奶油般的背景虚化和整体色调，构图不变；加入真实的皮肤纹理：可见细小毛孔和细绒毛，粉底下真实的肤质，自然的光线衰减；头发是真实的一根根发丝，有少量碎发与飞丝，发色与图1相近的天蓝色、只略深一点点，不发灰；灰蓝色眼睛，眼睛大小只比图1略小一点点，更接近真人比例；睫毛浓密卷翘但根根分明；真实的眼神光与湿润感；shot on Leica M11, Summilux 50mm f/1.4, natural skin texture。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 71242088288029,
+    "size": [
+      1024,
+      1472
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CL",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.25
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.3
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.2
+    },
+    "references": [
+      "assets/linwan/file_0000000092c081fd95f7f5b85917993d.png"
+    ],
+    "sha256": "bedddc2f963b196096a5b35b98c2b4690f1fbd20231b4db2eaef8314c4da25c3",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.593,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 172.0,
+    "created_at": "2026-10-30T05:51:52"
+  },
+  {
+    "file": "CL_s1.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "母版候选 CL",
+    "prompt": "transform the image to realistic photograph，把图1变成一张真实相机拍摄的照片，只改变质感，不改变内容：保持图1的同一个人、脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、粉色腮红、水润粉色唇釉、精致的粉甜妆容、手托腮的姿势、草莓水晶项链、粉色衣服、粉色玫瑰与柔和暖色逆光、奶油般的背景虚化和整体色调，构图不变；加入真实的皮肤纹理：可见细小毛孔和细绒毛，粉底下真实的肤质，自然的光线衰减；头发是真实的一根根发丝，有少量碎发与飞丝，发色与图1相近的天蓝色、只略深一点点，不发灰；灰蓝色眼睛，眼睛大小只比图1略小一点点，更接近真人比例；睫毛浓密卷翘但根根分明；真实的眼神光与湿润感；shot on Leica M11, Summilux 50mm f/1.4, natural skin texture。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 223546264276588,
+    "size": [
+      1024,
+      1472
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CL",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.25
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.3
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.2
+    },
+    "references": [
+      "assets/linwan/file_0000000092c081fd95f7f5b85917993d.png"
+    ],
+    "sha256": "97a04b638b747b236438d9716dcc80a0c628bef59808e3d8e50685e4925475bc",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.496,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 144.6,
+    "created_at": "2026-10-30T05:54:19"
+  },
+  {
+    "file": "CM_s0.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "母版候选 CM",
+    "prompt": "transform the image to realistic photograph，把图1变成一张真实相机拍摄的照片，只改变质感，不改变内容：保持图1的同一个人、脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、粉色腮红、水润粉色唇釉、精致的粉甜妆容、手托腮的姿势、草莓水晶项链、粉色衣服、粉色玫瑰与柔和暖色逆光、奶油般的背景虚化和整体色调，构图不变；加入真实的皮肤纹理：可见细小毛孔和细绒毛，粉底下真实的肤质，自然的光线衰减；头发是真实的一根根发丝，有少量碎发与飞丝，发色与图1相近的天蓝色、只略深一点点，不发灰；灰蓝色眼睛，眼睛大小只比图1略小一点点，更接近真人比例；睫毛浓密卷翘但根根分明；真实的眼神光与湿润感；shot on Leica M11, Summilux 50mm f/1.4, natural skin texture。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 81552224694894,
+    "size": [
+      1024,
+      1472
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/linwan/file_0000000092c081fd95f7f5b85917993d.png"
+    ],
+    "sha256": "34f369c8b3e943dd7b36160a1d43dd632787eca0ab53d78131e24256d263ffd0",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.544,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 120.7,
+    "created_at": "2026-10-30T05:56:21"
+  },
+  {
+    "file": "CM_s1.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "母版候选 CM",
+    "prompt": "transform the image to realistic photograph，把图1变成一张真实相机拍摄的照片，只改变质感，不改变内容：保持图1的同一个人、脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、粉色腮红、水润粉色唇釉、精致的粉甜妆容、手托腮的姿势、草莓水晶项链、粉色衣服、粉色玫瑰与柔和暖色逆光、奶油般的背景虚化和整体色调，构图不变；加入真实的皮肤纹理：可见细小毛孔和细绒毛，粉底下真实的肤质，自然的光线衰减；头发是真实的一根根发丝，有少量碎发与飞丝，发色与图1相近的天蓝色、只略深一点点，不发灰；灰蓝色眼睛，眼睛大小只比图1略小一点点，更接近真人比例；睫毛浓密卷翘但根根分明；真实的眼神光与湿润感；shot on Leica M11, Summilux 50mm f/1.4, natural skin texture。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 176464644114521,
+    "size": [
+      1024,
+      1472
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/linwan/file_0000000092c081fd95f7f5b85917993d.png"
+    ],
+    "sha256": "b8e7b00b675663743a75e4fa86538b70cc87764fa2bdbe06edf82c3343492733",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.524,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 171.8,
+    "created_at": "2026-10-30T05:59:15"
+  },
+  {
+    "file": "CS_s0.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "母版候选 CS",
+    "prompt": "transform the image to realistic photograph，把图1变成一张真实相机拍摄的照片，只改变质感，不改变内容：保持图1的同一个人、脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、粉色腮红、水润粉色唇釉、精致的粉甜妆容、手托腮的姿势、草莓水晶项链、粉色衣服、粉色玫瑰与柔和暖色逆光、奶油般的背景虚化和整体色调，构图不变；加入真实的皮肤纹理：可见细小毛孔和细绒毛，粉底下真实的肤质，自然的光线衰减；头发是真实的一根根发丝，有少量碎发与飞丝，发色与图1相近的天蓝色、只略深一点点，不发灰；灰蓝色眼睛，眼睛大小只比图1略小一点点，更接近真人比例；睫毛浓密卷翘但根根分明；真实的眼神光与湿润感；shot on Leica M11, Summilux 50mm f/1.4, natural skin texture。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 217306741336561,
+    "size": [
+      1024,
+      1472
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CS",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.65
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.3
+    },
+    "references": [
+      "assets/linwan/file_0000000092c081fd95f7f5b85917993d.png"
+    ],
+    "sha256": "66eb2603608f908163196d76e60e30f4e8bb0de5f521531c3e22b2d5f36f1ed3",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.653,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 114.5,
+    "created_at": "2026-10-30T06:01:12"
+  }
+]

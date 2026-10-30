@@ -1,0 +1,712 @@
+[
+  {
+    "file": "master_v1_rejected.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版（全部资产的身份参考）",
+    "prompt": "make the eyes realistic size, make the head smaller，把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、雾霾天蓝色及腰顺直长发（偏灰的中浅蓝，比图1略深略灰，像真实染发，发根略深）和齐刘海、冷白肤色、整体辨识度；保留左脸颊靠近鼻翼的小痣；把眼睛改为真实成年亚洲女性的正常大小（中等大小的杏眼），自然深棕色眼睛，不戴美瞳，瞳孔大小正常，去掉夸张粘连的睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 23975918951027,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R7",
+    "lora": [
+      [
+        "qwen21-t2r-v1.safetensors",
+        0.7
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "54f6fce350301d59122fe3b67d205939682f466e24ba90f42c79cece902014c1",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.378,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 66.3,
+    "created_at": "2026-10-30T05:29:31",
+    "source_ab": "golden/assets/master_ab/R7_v2_s3.png",
+    "identity": {
+      "hair": "雾霾天蓝色及腰直发+齐刘海（项目方 2026-10-30）",
+      "eyes": "自然深棕色（素颜态；浓妆/夜场用灰蓝美瞳）",
+      "mole": "左脸颊近鼻翼小痣"
+    },
+    "choice_note": "A/B 9 组（R0–R9）后选 R7：Turn2Real 0.7 + krea2 0.5 + texture-fix VAE，Base 35 步 CFG1；见 golden/assets/notes.md",
+    "status": "rejected by owner 2026-10-30: 再美一点、更像参考图"
+  },
+  {
+    "file": "id_front_s0_v1superseded.png",
+    "kind": "plate",
+    "design": "LW-ID-F",
+    "name": "正脸底板（淡妆）",
+    "prompt": "图1只提供林晚的身份：同一个真实的人，保持她的面部特征与辨识度、脸颊小痣、自然深棕色眼睛（正常大小）、冷白肤色、雾霾天蓝色（偏灰的中浅蓝，比参考图略深，像真实染发）及腰直发与齐刘海；不要沿用图1的姿势、表情、服装、背景和构图。正面头肩照，平视镜头，中性放松表情，嘴唇自然闭合，淡妆，头发自然垂在两侧和身后，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光。真实人像摄影，未修图的原片，无美颜滤镜无磨皮；皮肤可见毛孔与细小绒毛，鼻翼和T区轻微出油反光，眼下自然细纹与淡青色，脸颊极轻微的不均匀肤色，左右脸轻微不对称；真实成年亚洲女性的眼睛大小与眼裂，不放大瞳孔，睫毛自然根根分明，眼神光是灯形状的小高光；雾霾天蓝色头发有碎发与飞丝，发根略深（染发的真实感）；shot on Leica M11, Summilux 50mm f/2, Kodak Portra 400 film look, natural light falloff, focus on the near eye",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 59082241253671,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R2",
+    "lora": [
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "ff98f17322ea89ddb6bc00279a7b494a79ab72152d6a7d5256d661533e13f547",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.425,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 45.2,
+    "created_at": "2026-10-30T05:39:24",
+    "status": "superseded: made from rejected master_v1"
+  },
+  {
+    "file": "id_front_bare_s0_v1superseded.png",
+    "kind": "plate",
+    "design": "LW-ID-F-bare",
+    "name": "正脸底板（素颜）",
+    "prompt": "图1只提供林晚的身份：同一个真实的人，保持她的面部特征与辨识度、脸颊小痣、自然深棕色眼睛（正常大小）、冷白肤色、雾霾天蓝色（偏灰的中浅蓝，比参考图略深，像真实染发）及腰直发与齐刘海；不要沿用图1的姿势、表情、服装、背景和构图。正面头肩照，平视镜头，中性表情，完全素颜：无眼线无睫毛膏无唇彩，可见自然的皮肤纹理、少量雀斑和淡淡黑眼圈，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光。真实人像摄影，未修图的原片，无美颜滤镜无磨皮；皮肤可见毛孔与细小绒毛，鼻翼和T区轻微出油反光，眼下自然细纹与淡青色，脸颊极轻微的不均匀肤色，左右脸轻微不对称；真实成年亚洲女性的眼睛大小与眼裂，不放大瞳孔，睫毛自然根根分明，眼神光是灯形状的小高光；雾霾天蓝色头发有碎发与飞丝，发根略深（染发的真实感）；shot on Leica M11, Summilux 50mm f/2, Kodak Portra 400 film look, natural light falloff, focus on the near eye",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 194980807068895,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R2",
+    "lora": [
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "6664f6ed61fc22e016c1ebe43b3d8ecd415fac252970f2e2f427667b54cb4da3",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.627,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 69.3,
+    "created_at": "2026-10-30T05:40:35",
+    "status": "superseded: made from rejected master_v1"
+  },
+  {
+    "file": "id_34L_s0_v1superseded.png",
+    "kind": "plate",
+    "design": "LW-ID-34L",
+    "name": "3/4 侧脸（脸朝画面左）",
+    "prompt": "图1只提供林晚的身份：同一个真实的人，保持她的面部特征与辨识度、脸颊小痣、自然深棕色眼睛（正常大小）、冷白肤色、雾霾天蓝色（偏灰的中浅蓝，比参考图略深，像真实染发）及腰直发与齐刘海；不要沿用图1的姿势、表情、服装、背景和构图。四分之三侧脸头肩照：她的脸和身体朝向画面左侧约45度，眼睛看向画面左前方，能看到她的右耳一侧的头发，中性表情，淡妆，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光。真实人像摄影，未修图的原片，无美颜滤镜无磨皮；皮肤可见毛孔与细小绒毛，鼻翼和T区轻微出油反光，眼下自然细纹与淡青色，脸颊极轻微的不均匀肤色，左右脸轻微不对称；真实成年亚洲女性的眼睛大小与眼裂，不放大瞳孔，睫毛自然根根分明，眼神光是灯形状的小高光；雾霾天蓝色头发有碎发与飞丝，发根略深（染发的真实感）；shot on Leica M11, Summilux 50mm f/2, Kodak Portra 400 film look, natural light falloff, focus on the near eye",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 152375527659589,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R2",
+    "lora": [
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "ce06900c2547370a2dc83cf0a6db3fd4df92a4ba90ba69a9427267a72c3666cd",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.374,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 60.2,
+    "created_at": "2026-10-30T05:43:06",
+    "status": "superseded: made from rejected master_v1"
+  },
+  {
+    "file": "master.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版（项目方选定 CM_s1，中度写实）",
+    "prompt": "transform the image to realistic photograph，把图1变成一张真实相机拍摄的照片，只改变质感，不改变内容：保持图1的同一个人、脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、粉色腮红、水润粉色唇釉、精致的粉甜妆容、手托腮的姿势、草莓水晶项链、粉色衣服、粉色玫瑰与柔和暖色逆光、奶油般的背景虚化和整体色调，构图不变；加入真实的皮肤纹理：可见细小毛孔和细绒毛，粉底下真实的肤质，自然的光线衰减；头发是真实的一根根发丝，有少量碎发与飞丝，发色与图1相近的天蓝色、只略深一点点，不发灰；灰蓝色眼睛，眼睛大小只比图1略小一点点，更接近真人比例；睫毛浓密卷翘但根根分明；真实的眼神光与湿润感；shot on Leica M11, Summilux 50mm f/1.4, natural skin texture。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 176464644114521,
+    "size": [
+      1024,
+      1472
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/linwan/file_0000000092c081fd95f7f5b85917993d.png"
+    ],
+    "sha256": "b8e7b00b675663743a75e4fa86538b70cc87764fa2bdbe06edf82c3343492733",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.524,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 171.8,
+    "created_at": "2026-10-30T05:59:15",
+    "source": "golden/assets/master_cand/CM_s1.png",
+    "approved_by": "项目方 2026-10-30（最终）",
+    "identity": {
+      "hair": "参考图的天蓝色（略深）及腰直发+齐刘海",
+      "eyes": "灰蓝色美瞳（glam 母版）；素颜 L1/L2 与 id_front_bare 用自然深棕色",
+      "makeup": "参考图粉甜妆，写实只加在质感上"
+    }
+  },
+  {
+    "file": "id_front_s0.png",
+    "kind": "plate",
+    "design": "LW-ID-F",
+    "name": "正脸底板（淡妆）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。正面头肩照，平视镜头，中性放松表情，嘴唇自然闭合，保持图1的妆容，头发自然垂在两侧和身后，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 59082241253671,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "203aada900e302b7ac8ed72887870030d425e40e2632650da7d99fc6d6a3ef13",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.481,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 96.3,
+    "created_at": "2026-10-30T06:05:45"
+  },
+  {
+    "file": "id_front_heavy_s0.png",
+    "kind": "plate",
+    "design": "LW-ID-F-heavy",
+    "name": "正脸底板（浓妆）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。正面头肩照，平视镜头，中性冷艳表情，灰蓝色眼睛，不保留图1的粉甜妆，改为浓妆女王妆（妆感明显）：半哑光底妆，颧骨下晕开的灰棕修容；梅子棕到深咖截断式眼窝，拉长黑色狐狸眼线，下眼睑后三分之一深咖烟熏；簇状睫毛；黑樱桃色丝绒唇，边缘干净略晕；低饱和莓果腮红；粉底下仍可见毛孔，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 29049869550644,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "253d5da6b717ee7c2e2a5526aeff556f49c299863b2e8c7b7142a0c5051fce9d",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.743,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 96.5,
+    "created_at": "2026-10-30T06:08:45"
+  },
+  {
+    "file": "id_34L_s0.png",
+    "kind": "plate",
+    "design": "LW-ID-34L",
+    "name": "3/4 侧脸（脸朝画面左）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。四分之三侧脸头肩照：她的脸和身体朝向画面左侧约45度，眼睛看向画面左前方，能看到她的右耳一侧的头发，中性表情，保持图1的妆容，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 152375527659589,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "695829583feabd2aeee12a333826984beea2e1feb18fb103d0e5fda2eb521883",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.301,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 75.3,
+    "created_at": "2026-10-30T06:10:02"
+  },
+  {
+    "file": "body_F_s7.png",
+    "kind": "plate",
+    "design": "LW-BODY-F",
+    "name": "全身底板（正面）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。从头顶到脚完整入画的正面全身站姿，面向镜头，双臂自然垂在身侧，双脚并拢平放在地上，身材修长匀称、腿长、身高约170厘米，穿一条素色深海军蓝长袖针织连衣裙（圆领、及膝、不透明），白色平底帆布鞋，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 261926291562644,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "169c18f32ae10ae16d39a13ff9a78685806fcca87c43be77906f037d08ccf1ca",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.292,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 78.3,
+    "created_at": "2026-10-30T06:28:49"
+  },
+  {
+    "file": "id_34R_s0.png",
+    "kind": "plate",
+    "design": "LW-ID-34R",
+    "name": "3/4 侧脸（脸朝画面右）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。四分之三侧脸头肩照：她的脸和身体朝向画面右侧约45度，眼睛看向画面右前方，中性表情，保持图1的妆容，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 14768758654090,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "6845fff6dddd05e2e30a93f34b14b5a63e9f02c296ab70755eeba8f17f7bebc9",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.447,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 102.8,
+    "created_at": "2026-10-30T07:23:17"
+  },
+  {
+    "file": "id_profile_s0.png",
+    "kind": "plate",
+    "design": "LW-ID-P",
+    "name": "正侧面（脸朝画面左）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。标准正侧面头肩照：她的脸完全转向画面左侧90度，只看到一只眼睛，鼻尖和下巴的侧面轮廓清晰，齐刘海从侧面看呈一条直线，长直发垂到背后，中性表情，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 44201306175418,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "27b81990510462bb4a518ff08bccfba35a83774e5cbc3ba84b1263ba02e3da46",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.269,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 126.6,
+    "created_at": "2026-10-30T07:25:28"
+  },
+  {
+    "file": "id_back_s0.png",
+    "kind": "plate",
+    "design": "LW-ID-B",
+    "name": "背面：后脑与及腰长发",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。从正后方拍摄她的背影，看不到脸，只看到后脑和天蓝色顺直长发一直垂到腰部，发尾整齐，上半身到臀部入画，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 249452585201779,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "44eed644e59201bfdf7559e00063ea8cef4f4089fb5a9e153dd23294b0697c7d",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.723,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 132.6,
+    "created_at": "2026-10-30T07:27:42"
+  },
+  {
+    "file": "body_F_s0.png",
+    "kind": "plate",
+    "design": "LW-BODY-F",
+    "name": "全身底板（正面）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。从头顶到脚完整入画的正面全身站姿，面向镜头，双臂自然垂在身侧，双脚并拢平放在地上，身材修长匀称、腿长、身高约170厘米，穿一条素色深海军蓝长袖针织连衣裙（圆领、及膝、不透明），白色平底帆布鞋，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 32559094747237,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "049619db64b7a82274006d2ef48ffa770da8551bf46ad477e8d3bcf363da8f78",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.435,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 117.6,
+    "created_at": "2026-10-30T07:29:41"
+  },
+  {
+    "file": "body_S_s0.png",
+    "kind": "plate",
+    "design": "LW-BODY-S",
+    "name": "全身底板（侧面）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。从头顶到脚完整入画的正侧面全身站姿，身体朝向画面左侧，双臂自然垂下，身材修长匀称、腿长、身高约170厘米，穿一条素色深海军蓝长袖针织连衣裙（圆领、及膝、不透明），白色平底帆布鞋，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 168906018269135,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "1b3ba0ef20fa803843ae98d3e9324b2f558de0aa89d4b3e7dcc9a4b84b848c34",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.591,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 81.4,
+    "created_at": "2026-10-30T07:31:04"
+  },
+  {
+    "file": "body_B_s0.png",
+    "kind": "plate",
+    "design": "LW-BODY-B",
+    "name": "全身底板（背面）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。从头顶到脚完整入画的背面全身站姿，背对镜头，看不到脸，天蓝色直发垂到腰部，身材修长匀称、腿长、身高约170厘米，穿一条素色深海军蓝长袖针织连衣裙（圆领、及膝、不透明），白色平底帆布鞋，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 223720101968989,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "24fa811b73b10952a86cf78255fadd6ee64a1ce6e6bde01f930f1c1b39960b1f",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.288,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 84.4,
+    "created_at": "2026-10-30T07:32:30"
+  },
+  {
+    "file": "id_front_bare_s0.png",
+    "kind": "plate",
+    "design": "LW-ID-F-bare",
+    "name": "正脸底板（素颜，深棕眼）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份：同一个人，保持图1的脸型、眉形、眼型、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、与图1相同的天蓝色及腰直发与齐刘海；去掉图1的全部妆容：没有腮红、没有唇彩、没有眼线和假睫毛，眼睛改为自然深棕色（不戴美瞳，大小与图1一致）；不要沿用图1的姿势、手势、项链、服装、背景和构图。正面头肩照，平视镜头，中性表情，完全素颜（不保留图1的妆容）：无眼线无睫毛膏无唇彩，自然深棕色眼睛（不戴美瞳），可见自然的皮肤纹理和淡淡黑眼圈，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 194980807068895,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "4dd7573bcc834cfb22f0120c5447670f0715ee136a3047534f9d9a02f73a2620",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.59,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 129.6,
+    "created_at": "2026-10-30T09:39:32"
+  }
+]

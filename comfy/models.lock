@@ -1,0 +1,182 @@
+{
+  "_comment": "模型与 LoRA 锁定表。sha256 为 null 的条目在服务器上算好后回填；渲染前校验不一致就拒绝。LoRA 注册来源：image提示词 v2 数据E。",
+  "loras": [
+    {
+      "file": "jewellery_nprng2_v1.safetensors",
+      "kind": "image_lora",
+      "base_model": "Qwen Image 2.1",
+      "location": "gpu-server:ComfyUI/models/loras/jewellery_nprng2_v1.safetensors",
+      "sha256": null,
+      "triggers": [
+        {
+          "trigger": "nprng2",
+          "strength": [
+            0.6,
+            0.9
+          ],
+          "description": "乳环：左右乳头各一枚细金属环（共2枚）"
+        }
+      ]
+    },
+    {
+      "file": "jewellery_lbrng9_v1.safetensors",
+      "kind": "image_lora",
+      "base_model": "Qwen Image 2.1",
+      "location": "gpu-server:ComfyUI/models/loras/jewellery_lbrng9_v1.safetensors",
+      "sha256": null,
+      "triggers": [
+        {
+          "trigger": "lbrng9",
+          "strength": [
+            0.6,
+            0.9
+          ],
+          "description": "阴环：九枚小环沿大阴唇外侧对称排列"
+        }
+      ]
+    },
+    {
+      "file": "jewellery_lbrng9_beads_v1.safetensors",
+      "kind": "image_lora",
+      "base_model": "Qwen Image 2.1",
+      "location": "gpu-server:ComfyUI/models/loras/jewellery_lbrng9_beads_v1.safetensors",
+      "sha256": null,
+      "triggers": [
+        {
+          "trigger": "lbrng9_beads",
+          "strength": [
+            0.6,
+            0.9
+          ],
+          "description": "阴环挂铁珠串：九串5cm黑色铁珠，左5右4"
+        }
+      ]
+    },
+    {
+      "file": "wardrobe_heels_v1.safetensors",
+      "kind": "image_lora",
+      "base_model": "Qwen Image 2.1",
+      "location": "gpu-server:ComfyUI/models/loras/wardrobe_heels_v1.safetensors",
+      "sha256": null,
+      "triggers": [
+        {
+          "trigger": "hh12clear",
+          "strength": [
+            0.6,
+            0.8
+          ],
+          "description": "12cm透明细高跟"
+        },
+        {
+          "trigger": "hh12patent",
+          "strength": [
+            0.6,
+            0.8
+          ],
+          "description": "12cm黑漆皮细高跟"
+        }
+      ]
+    },
+    {
+      "file": "wardrobe_clothes_v1.safetensors",
+      "kind": "image_lora",
+      "base_model": "Qwen Image 2.1",
+      "location": "gpu-server:ComfyUI/models/loras/wardrobe_clothes_v1.safetensors",
+      "sha256": null,
+      "triggers": [
+        {
+          "trigger": "ptxcorset",
+          "strength": [
+            0.6,
+            0.8
+          ],
+          "description": "黑色漆皮束腰"
+        },
+        {
+          "trigger": "ptxharness",
+          "strength": [
+            0.6,
+            0.8
+          ],
+          "description": "黑色漆皮捆绑内衣（开窗/O环/细带/金属扣）"
+        },
+        {
+          "trigger": "ptxtrench",
+          "strength": [
+            0.6,
+            0.8
+          ],
+          "description": "黑色漆皮长风衣"
+        },
+        {
+          "trigger": "ltxsuit",
+          "strength": [
+            0.6,
+            0.8
+          ],
+          "description": "乳胶连体衣"
+        }
+      ]
+    },
+    {
+      "file": "lin_wan_h3_v1.safetensors",
+      "kind": "video_lora",
+      "base_model": "MiniMax H3 FL2VA",
+      "location": "gpu-server:ComfyUI/models/loras/lin_wan_h3_v1.safetensors",
+      "sha256": null,
+      "triggers": [
+        {
+          "trigger": "lnwan01",
+          "strength": [
+            0.6,
+            1.0
+          ],
+          "description": "林晚：蓝发及腰、齐刘海、冷白皮肤（来自你提供的定妆图）"
+        }
+      ]
+    }
+  ],
+  "checkpoints": [],
+  "downloads": [
+    {
+      "civitai_model": 1862761,
+      "version": "v2 Qwen2.1",
+      "base": "Qwen 2.1",
+      "file": "nicegirls_v2_qwen21.safetensors",
+      "url": "https://civitai.com/api/download/models/3352079",
+      "sha256": "8ea63de359194c1fdb9b99bfd05bd6f2aaa19da4667711f40c58bf3505fc7bce"
+    },
+    {
+      "civitai_model": 2728005,
+      "version": "Qwen2.1 v1.0",
+      "base": "Qwen 2.1",
+      "file": "purelens_qwen21.safetensors",
+      "url": "https://civitai.com/api/download/models/3431103",
+      "sha256": "386c7f6209327ec1337da055e77041452d314962d65ed7efeb920218be4330da"
+    },
+    {
+      "civitai_model": 2406218,
+      "version": "Qwen2.1 v1.0",
+      "base": "Qwen 2.1",
+      "file": "qwen21-t2r-v1.safetensors",
+      "url": "https://civitai.com/api/download/models/3404257",
+      "sha256": "ccbf244c755829513395c6203a29649311009180c3a8f01a6acfc077d608811b"
+    },
+    {
+      "civitai_model": 2808492,
+      "version": "Qwen2.1",
+      "base": "Qwen 2.1",
+      "file": "Qwen2.1_Anything2RealCharacters.safetensors",
+      "url": "https://civitai.com/api/download/models/3363600",
+      "sha256": "5db4dd2376e6017812bf1189b2fc46e52aaa2c0b7e688faac75e83e1c4dce849"
+    },
+    {
+      "civitai_model": 2728005,
+      "version": "Qwen2.1 v1.0",
+      "base": "Qwen 2.1",
+      "file": "purelens_qwen21.safetensors",
+      "url": "https://civitai.com/api/download/models/3431103",
+      "sha256": "57753c6f9dc29fac53d0713bd67e3ffee24447dac0cbf3af8f1dff8b6008d3dd"
+    }
+  ]
+}

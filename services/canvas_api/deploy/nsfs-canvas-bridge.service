@@ -1,0 +1,15 @@
+[Unit]
+Description=NS-Final gpu3 render bridge (canvas_api, 127.0.0.1:5180)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/claude-kimi-ns-studio-v1/nsfs_canvas/app/services/canvas_api
+EnvironmentFile=/root/claude-kimi-ns-studio-v1/nsfs_canvas/nsfs-canvas-bridge.env
+ExecStart=/root/claude-kimi-ns-studio-v1/nsfs_canvas/.venv/bin/uvicorn --factory ns_canvas.app:create_app --host 127.0.0.1 --port 5180 --workers 1
+Restart=on-failure
+RestartSec=5
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

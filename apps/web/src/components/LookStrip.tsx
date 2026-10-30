@@ -1,0 +1,65 @@
+import type { LookTag } from "../util";
+
+export const FIELD_LABEL: Record<string, string> = {
+  look_id: "造型",
+  outfit: "套装",
+  shoes: "鞋",
+  makeup: "妆",
+  hair: "发",
+  nails: "指甲",
+  accessory: "配饰",
+  other: "其他",
+  d_state: "装饰状态",
+  visibility: "可见性",
+};
+
+export function lookTagTitle(t: LookTag): string {
+  return [
+    t.label,
+    t.override ? "来源：本镜覆盖" : "来源：继承（默认 / 集计划）",
+    t.changed ? `换装点：与上一次出场不同（${t.changedFields.map((f) => FIELD_LABEL[f] ?? f).join("、")}）` : "",
+    ...t.conflicts.map((c) => `${c.severity === "error" ? "✖" : "⚠"} ${c.message}`),
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+export function LookStrip({
+  tags,
+  highlight,
+  onPick,
+  empty = "无出场角色",
+}: {
+  tags: LookTag[] | undefined;
+  highlight?: string | null;
+  onPick?: (character: string) => void;
+  empty?: string;
+}) {
+  if (!tags) return <div className="look-strip muted">造型…</div>;
+  if (!tags.length) return <div className="look-strip muted">{empty}</div>;
+  return (
+    <div className="look-strip">
+      {tags.map((t) => {
+        const err = t.conflicts.some((c) => c.severity === "error");
+        const warn = !err && t.conflicts.length > 0;
+        return (
+          <span
+            key={t.character}
+            className={[
+              "look-tag",
+              t.override ? "lt-override" : "lt-inherit",
+              t.changed ? "lt-changed" : "",
+              err ? "lt-conflict" : warn ? "lt-warn" : "",
+              highlight === t.character ? "lt-hl" : "",
+            ].join(" ")}
+            title={lookTagTitle(t)}
+            onClick={onPick ? (e) => (e.stopPropagation(), onPick(t.character)) : undefined}
+          >
+            {t.label}
+            {t.override && <b className="lt-mark">改</b>}
+          </span>
+        );
+      })}
+    </div>
+  );
+}

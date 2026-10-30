@@ -1,0 +1,14 @@
+Loading weights:   0%|          | 0/590 [00:00<?, ?it/s]Loading weights:   5%|4         | 27/590 [00:00<00:02, 255.84it/s]Loading weights:   9%|8         | 53/590 [00:00<00:02, 229.16it/s]Loading weights:  13%|#3        | 77/590 [00:00<00:02, 195.74it/s]Loading weights:  17%|#6        | 98/590 [00:00<00:02, 187.14it/s]Loading weights:  20%|#9        | 117/590 [00:00<00:02, 178.68it/s]Loading weights:  23%|##2       | 135/590 [00:00<00:02, 157.00it/s]Loading weights:  26%|##5       | 152/590 [00:01<00:03, 115.06it/s]Loading weights:  29%|##9       | 172/590 [00:01<00:03, 124.86it/s]Loading weights:  32%|###1      | 186/590 [00:01<00:03, 113.96it/s]Loading weights:  34%|###3      | 199/590 [00:01<00:03, 110.02it/s]Loading weights:  36%|###5      | 211/590 [00:01<00:04, 87.95it/s] Loading weights:  37%|###7      | 221/590 [00:01<00:04, 85.81it/s]Loading weights:  39%|###9      | 231/590 [00:01<00:04, 87.66it/s]Loading weights:  41%|####      | 241/590 [00:02<00:04, 84.49it/s]Loading weights: 100%|##########| 590/590 [00:02<00:00, 290.55it/s]
+05:08:09 master_ab/R5_s0 [R5] 84s seed=216629752519958 qc_bare=0.606
+05:09:20 master_ab/R5_s1 [R5] 69s seed=277036734199665 qc_bare=0.575
+05:11:05 ERROR master_ab/R6_s0: ComfyError: 执行失败: Tensor 'diffusion_model.transformer_blocks.24.attn.to_k.lora_B.weight' extends past the end of the file.
+
+File path: C:\Users\fredw\Documents\Codex\Apps\ComfyUI\models\loras\purelens_qwen21.safetensors
+
+The safetensors file is corrupt/incomplete. Check the file size and make sure you have copi
+05:11:08 ERROR master_ab/R6_s1: ComfyError: 执行失败: Tensor 'diffusion_model.transformer_blocks.24.attn.to_k.lora_B.weight' extends past the end of the file.
+
+File path: C:\Users\fredw\Documents\Codex\Apps\ComfyUI\models\loras\purelens_qwen21.safetensors
+
+The safetensors file is corrupt/incomplete. Check the file size and make sure you have copi
+05:11:08 done 2 images in 277s

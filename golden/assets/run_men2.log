@@ -1,0 +1,16 @@
+Loading weights:   0%|          | 0/590 [00:00<?, ?it/s]Loading weights:   4%|4         | 25/590 [00:00<00:02, 224.74it/s]Loading weights:   8%|8         | 48/590 [00:00<00:02, 205.28it/s]Loading weights:  12%|#1        | 69/590 [00:00<00:02, 179.23it/s]Loading weights:  15%|#4        | 88/590 [00:00<00:03, 162.74it/s]Loading weights:  18%|#7        | 105/590 [00:00<00:04, 112.37it/s]Loading weights:  20%|##        | 118/590 [00:00<00:04, 98.85it/s] Loading weights:  22%|##2       | 130/590 [00:01<00:05, 90.56it/s]Loading weights:  24%|##3       | 140/590 [00:01<00:05, 81.88it/s]Loading weights:  25%|##5       | 149/590 [00:01<00:05, 78.71it/s]Loading weights:  27%|##6       | 158/590 [00:01<00:05, 80.84it/s]Loading weights:  28%|##8       | 167/590 [00:01<00:07, 58.46it/s]Loading weights:  31%|###1      | 185/590 [00:01<00:05, 77.74it/s]Loading weights:  33%|###2      | 194/590 [00:02<00:05, 69.76it/s]Loading weights:  34%|###4      | 202/590 [00:02<00:05, 67.64it/s]Loading weights:  36%|###5      | 210/590 [00:02<00:05, 68.36it/s]Loading weights:  37%|###6      | 218/590 [00:02<00:05, 65.18it/s]Loading weights: 100%|##########| 590/590 [00:02<00:00, 238.38it/s]
+11:04:55 ../gu_chen/candidates/gu_chen_cand_01_s0 [CMT] 27s seed=115539250668396 qc_bare=0.004
+11:05:32 ../gu_chen/candidates/gu_chen_cand_02_s0 [CMT] 33s seed=41538746218494 qc_bare=0.01
+11:06:09 ../gu_chen/candidates/gu_chen_cand_03_s0 [CMT] 33s seed=21162965422704 qc_bare=0.001
+11:06:40 ../chen_yu/candidates/chen_yu_cand_01_s0 [CMT] 27s seed=61448927239318 qc_bare=0.019
+11:07:12 ../chen_yu/candidates/chen_yu_cand_02_s0 [CMT] 27s seed=97821824189786 qc_bare=0.017
+11:07:46 ../chen_yu/candidates/chen_yu_cand_03_s0 [CMT] 30s seed=140556264465427 qc_bare=0.01
+11:08:17 ../alex/candidates/alex_cand_01_s0 [CMT] 27s seed=253468253504006 qc_bare=0.0
+11:08:48 ../alex/candidates/alex_cand_02_s0 [CMT] 27s seed=219938329571475 qc_bare=0.0
+11:09:19 ../ryan/candidates/ryan_cand_01_s0 [CMT] 27s seed=204457884012904 qc_bare=0.006
+11:09:54 ../ryan/candidates/ryan_cand_02_s0 [CMT] 27s seed=162366016434623 qc_bare=0.015
+11:10:25 ../kai/candidates/kai_cand_01_s0 [CMT] 27s seed=254869871722171 qc_bare=0.002
+11:10:57 ../kai/candidates/kai_cand_02_s0 [CMT] 27s seed=211055996415786 qc_bare=0.0
+11:11:28 ../leo/candidates/leo_cand_01_s0 [CMT] 27s seed=12742362617768 qc_bare=0.0
+11:12:02 ../leo/candidates/leo_cand_02_s0 [CMT] 27s seed=237301636613221 qc_bare=0.003
+11:12:02 done 14 images in 470s

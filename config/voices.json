@@ -1,0 +1,39 @@
+{
+  "_comment": "T38 配音：每个角色一个固定的合成音色（Kokoro 通用音色，不克隆任何真人）。sid = voices.bin 里的说话人编号；name 按 sherpa-onnx 模型卡的顺序标注。f0_hz 为 2026-10-30 本机试音（同一句台词）测得的中位基频，SenseVoice 回听全部 CER 0。改音色只改这里；line_overrides 用于纠正某一句的说话人（键：epXX-SN#行号，从 0 起）。",
+  "tts_model": {
+    "id": "kokoro-multi-lang-v1_1",
+    "upstream": "hexgrad/Kokoro-82M-v1.1-zh (sherpa-onnx 导出 kokoro-multi-lang-v1_1)",
+    "licence": "Apache-2.0",
+    "env_dir": "NS_KOKORO_DIR",
+    "default_dir": "C:\\Users\\fredw\\Documents\\Codex\\Apps\\H3Storyboard\\data\\speech\\models\\kokoro-multi-lang-v1_1"
+  },
+  "asr_model": {
+    "id": "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17",
+    "licence": "FunASR model licence (SenseVoice)",
+    "env_dir": "NS_SENSEVOICE_DIR",
+    "default_dir": "C:\\Users\\fredw\\Documents\\Codex\\Apps\\H3Storyboard\\data\\speech\\models\\sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
+  },
+  "speech_python": {
+    "env": "NS_TTS_PYTHON",
+    "default": "D:\\kimi-ns-storyboard\\speech-venv\\Scripts\\python.exe",
+    "note": "独立解释器，只装 sherpa-onnx==1.13.8；本仓库不依赖 sherpa-onnx"
+  },
+  "characters": {
+    "lin_wan":       {"name": "林晚",   "gender": "female", "age": 22, "sid": 36, "voice": "zf_067", "speed": 0.9,  "f0_hz": 262, "hnr_db": 7.2, "note": "女主。按剧本声音规则（中高音区、甜而带气声、语速偏慢、尾音软）：中高音区里气声最明显（HNR 低）且音高起伏大的一档，放慢；独白🎙同一音色更慢", "vo_speed": 0.86},
+    "gu_chen":       {"name": "顾沉",   "gender": "male",   "age": 34, "sid": 68, "voice": "zm_029", "speed": 0.92, "f0_hz": 107, "note": "最低沉的男声，放慢 = 克制"},
+    "chen_yu":       {"name": "陈宇",   "gender": "male",   "age": 23, "sid": 77, "voice": "zm_050", "speed": 1.03, "f0_hz": 152, "note": "偏高、明亮 = 温暖阳光"},
+    "piercer":       {"name": "穿孔师", "gender": "female", "age": 30, "sid": 22, "voice": "zf_036", "speed": 1.0,  "f0_hz": 214},
+    "tattooist":     {"name": "纹身师", "gender": "male",   "age": 35, "sid": 84, "voice": "zm_058", "speed": 0.97, "f0_hz": 127},
+    "coworker":      {"name": "同事",   "gender": "female", "age": 28, "sid": 9,  "voice": "zf_007", "speed": 1.05, "f0_hz": 205},
+    "male_coworker": {"name": "男同事", "gender": "male",   "age": 30, "sid": 96, "voice": "zm_089", "speed": 1.05, "f0_hz": 142},
+    "clerk":         {"name": "店员",   "gender": "female", "age": 24, "sid": 43, "voice": "zf_076", "speed": 1.05, "f0_hz": 312},
+    "alex":          {"name": "Alex",   "gender": "male",   "age": 29, "sid": 61, "voice": "zm_012", "speed": 1.03, "f0_hz": 135},
+    "ryan":          {"name": "Ryan",   "gender": "male",   "age": 30, "sid": 74, "voice": "zm_037", "speed": 1.0,  "f0_hz": 124},
+    "kai":           {"name": "Kai",    "gender": "male",   "age": 27, "sid": 98, "voice": "zm_095", "speed": 0.98, "f0_hz": 161},
+    "leo":           {"name": "Leo",    "gender": "male",   "age": 33, "sid": 81, "voice": "zm_055", "speed": 0.95, "f0_hz": 121}
+  },
+  "groups": {
+    "chorus_men": ["alex", "ryan", "kai", "leo"]
+  },
+  "line_overrides": {}
+}

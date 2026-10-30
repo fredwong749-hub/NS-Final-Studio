@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+data/
+models_cache/
+previews/
+training/
+assets/**/scraped/
+*.safetensors
+.env
+config/*.local.json
+
+# 初始提交（2026-10-30）：抓取的参考图库与实验中间图不进 git
+assets/clothes/
+assets/high heels/
+golden/**/*.png
+golden/**/*.mp4
+golden/**/work/
+apps/web/node_modules/
+apps/web/dist/
+*.tsbuildinfo

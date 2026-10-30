@@ -1,0 +1,13 @@
+Loading weights:   0%|          | 0/590 [00:00<?, ?it/s]Loading weights:   3%|2         | 17/590 [00:00<00:04, 124.77it/s]Loading weights:   5%|5         | 31/590 [00:00<00:04, 131.77it/s]Loading weights:   8%|7         | 45/590 [00:00<00:04, 132.75it/s]Loading weights:  10%|#         | 59/590 [00:00<00:06, 85.88it/s] Loading weights:  12%|#1        | 70/590 [00:00<00:06, 75.13it/s]Loading weights:  13%|#3        | 79/590 [00:00<00:07, 70.59it/s]Loading weights:  17%|#6        | 98/590 [00:01<00:05, 93.33it/s]Loading weights:  19%|#8        | 111/590 [00:01<00:04, 100.16it/s]Loading weights:  21%|##        | 122/590 [00:01<00:05, 90.13it/s] Loading weights:  22%|##2       | 132/590 [00:01<00:06, 68.93it/s]Loading weights:  24%|##3       | 140/590 [00:01<00:07, 64.03it/s]Loading weights:  25%|##5       | 148/590 [00:01<00:06, 65.09it/s]Loading weights:  26%|##6       | 156/590 [00:02<00:08, 53.85it/s]Loading weights:  28%|##7       | 165/590 [00:02<00:07, 60.27it/s]Loading weights:  30%|###       | 177/590 [00:02<00:05, 69.11it/s]Loading weights:  32%|###1      | 188/590 [00:02<00:05, 72.65it/s]Loading weights:  33%|###3      | 197/590 [00:02<00:05, 76.24it/s]Loading weights:  35%|###4      | 206/590 [00:02<00:04, 78.88it/s]Loading weights: 100%|##########| 590/590 [00:02<00:00, 218.50it/s]
+05:13:03 master_ab/R2_s0 [R2] 84s seed=243863298536504 qc_bare=0.468
+05:14:47 master_ab/R2_s1 [R2] 102s seed=3085170031541 qc_bare=0.617
+05:16:33 master_ab/R3_s0 [R3] 105s seed=140946921167094 qc_bare=0.443
+05:18:32 master_ab/R3_s1 [R3] 117s seed=53318689435807 qc_bare=0.461
+05:19:27 master_ab/R7_s0 [R7] 54s seed=108770021686261 qc_bare=0.318
+05:20:19 master_ab/R7_s1 [R7] 51s seed=215185500020971 qc_bare=0.638
+05:21:09 QC FLAG master_ab/R8_s0 seed=279729759303146 {'nudity': True, 'hits': [], 'clip_bare': 0.811, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+05:21:52 master_ab/R8_s0 [R8] 42s seed=60766625931158 qc_bare=0.788
+05:22:35 master_ab/R8_s1 [R8] 42s seed=124138321274046 qc_bare=0.73
+05:23:40 master_ab/R9_s0 [R9] 63s seed=184691523123928 qc_bare=0.381
+05:24:47 master_ab/R9_s1 [R9] 66s seed=59738842950558 qc_bare=0.35
+05:24:47 done 10 images in 802s

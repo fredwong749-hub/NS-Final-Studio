@@ -1,0 +1,52 @@
+# 本地开发基础设施：Postgres / MinIO / Redis / Temporal
+# 启动: docker compose -f infra/docker-compose.yml up -d
+name: ns-final
+services:
+  postgres:
+    image: postgres:16.4
+    environment:
+      POSTGRES_USER: ns
+      POSTGRES_PASSWORD: ns-dev
+      POSTGRES_DB: ns
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: [pg:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ns"]
+      interval: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: ns
+      MINIO_ROOT_PASSWORD: ns-dev-secret
+    ports: ["127.0.0.1:9000:9000", "127.0.0.1:9001:9001"]
+    volumes: [minio:/data]
+
+  redis:
+    image: redis:7.4
+    ports: ["127.0.0.1:6379:6379"]
+
+  temporal:
+    image: temporalio/auto-setup:1.25.1
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: ns
+      POSTGRES_PWD: ns-dev
+      POSTGRES_SEEDS: postgres
+    ports: ["127.0.0.1:7233:7233"]
+
+  temporal-ui:
+    image: temporalio/ui:2.31.2
+    depends_on: [temporal]
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    ports: ["127.0.0.1:8233:8080"]
+
+volumes:
+  pg:
+  minio:

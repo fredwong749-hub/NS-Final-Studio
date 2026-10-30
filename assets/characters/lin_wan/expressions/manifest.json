@@ -1,0 +1,272 @@
+[
+  {
+    "file": "calm_s0.png",
+    "kind": "expression",
+    "design": "LW-EXP-calm",
+    "name": "平静",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。正面头肩照，只改变表情：平静、放空的表情，嘴唇自然闭合，保持图1的妆容，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 133189066630499,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "bc569499c3fa31d6060adc69b4cbb6937a68945f080f85f47628f02b6e6b8891",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.54,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 81.4,
+    "created_at": "2026-10-30T07:33:52"
+  },
+  {
+    "file": "smile_s0.png",
+    "kind": "expression",
+    "design": "LW-EXP-smile",
+    "name": "微笑",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。正面头肩照，只改变表情：真诚的浅浅微笑，嘴角上扬，眼睛微弯，露出一点牙齿，保持图1的妆容，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 251551827227998,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "54146a96f404c4ea8832f2d4f01945b3a7c9a4e96c1525b4deedd52f3ca90d70",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.601,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 93.5,
+    "created_at": "2026-10-30T07:35:27"
+  },
+  {
+    "file": "angry_s0.png",
+    "kind": "expression",
+    "design": "LW-EXP-angry",
+    "name": "怒",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。正面头肩照，只改变表情：生气：眉头紧皱，目光锐利地直视镜头，嘴唇抿紧，下颌收紧，保持图1的妆容，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 113996680033067,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "be67f548ca7e4fc70cd74a070a26977802f7863f01ef0cf891429b7ecb8dbc58",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.676,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 96.5,
+    "created_at": "2026-10-30T07:38:20"
+  },
+  {
+    "file": "surprised_s0.png",
+    "kind": "expression",
+    "design": "LW-EXP-surprised",
+    "name": "惊",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。正面头肩照，只改变表情：吃惊：眼睛睁大，眉毛上扬，嘴唇微微张开，保持图1的妆容，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 95967884547196,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "7feff799c92ee9773bf6cac3d0dc1f7daa98824a9066a6dcc266832fb1f78277",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.514,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 87.3,
+    "created_at": "2026-10-30T07:39:49"
+  },
+  {
+    "file": "seductive_s0.png",
+    "kind": "expression",
+    "design": "LW-EXP-seductive",
+    "name": "媚眼",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。正面头肩照，只改变表情：含情的媚眼：眼皮微垂、眼神从睫毛下向上看着镜头，嘴唇微启，下巴微收，保持图1的妆容，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 69637292670718,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "2d3615c57792f704b8e2e10de236e8915adcb46e8a82d8da59bf9ee5e6e650c3",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.504,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 93.6,
+    "created_at": "2026-10-30T07:41:24"
+  },
+  {
+    "file": "cry_s0.png",
+    "kind": "expression",
+    "design": "LW-EXP-cry",
+    "name": "哭（泪与笑）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。正面头肩照，只改变表情：正在流泪：眼眶和鼻尖明显泛红，下眼睑盈满泪水，两道清晰发亮的泪痕从眼角一直流到下巴，一颗泪珠挂在脸颊上，眉头微蹙，嘴角却轻轻上扬（泪与笑同框），保持图1的妆容，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 249979184034144,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "7a59efd8e7a0b6981f3dfb253860a420f74d84d4f483515a91a20bbfa7670b1a",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.464,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 117.5,
+    "created_at": "2026-10-30T09:41:31"
+  }
+]

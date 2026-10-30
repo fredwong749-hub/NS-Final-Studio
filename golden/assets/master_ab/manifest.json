@@ -1,0 +1,1008 @@
+[
+  {
+    "file": "R0_s0.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R0",
+    "prompt": "把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、浅冰蓝色及腰顺直长发和齐刘海、冷白肤色、整体辨识度；把眼睛改为真实成年亚洲女性的正常大小，去掉美瞳和夸张睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实人像摄影，未修图的原片，无美颜滤镜无磨皮；皮肤可见毛孔与细小绒毛，鼻翼和T区轻微出油反光，眼下自然细纹与淡青色，脸颊极轻微的不均匀肤色，左右脸轻微不对称；真实成年亚洲女性的眼睛大小与眼裂，不放大瞳孔，不戴美瞳，睫毛自然根根分明，眼神光是灯形状的小高光；浅冰蓝色头发有碎发与飞丝，发根略深（染发的真实感）；shot on Leica M11, Summilux 50mm f/2, Kodak Portra 400 film look, natural light falloff, focus on the near eye",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 244074933616316,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_turbo_int8_convrot.safetensors",
+    "steps": 8,
+    "cfg": 1.0,
+    "preset": "R0",
+    "lora": [],
+    "vae": "qwen_image_2.1_vae_bf16.safetensors",
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "a7a29d4c66e54249fe27578c2f30761ac9d3b6c1ff2724e9b765a558f994852e",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.691,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 18.1,
+    "created_at": "2026-10-30T05:04:33"
+  },
+  {
+    "file": "R0_s1.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R0",
+    "prompt": "把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、浅冰蓝色及腰顺直长发和齐刘海、冷白肤色、整体辨识度；把眼睛改为真实成年亚洲女性的正常大小，去掉美瞳和夸张睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实人像摄影，未修图的原片，无美颜滤镜无磨皮；皮肤可见毛孔与细小绒毛，鼻翼和T区轻微出油反光，眼下自然细纹与淡青色，脸颊极轻微的不均匀肤色，左右脸轻微不对称；真实成年亚洲女性的眼睛大小与眼裂，不放大瞳孔，不戴美瞳，睫毛自然根根分明，眼神光是灯形状的小高光；浅冰蓝色头发有碎发与飞丝，发根略深（染发的真实感）；shot on Leica M11, Summilux 50mm f/2, Kodak Portra 400 film look, natural light falloff, focus on the near eye",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 255805980988889,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_turbo_int8_convrot.safetensors",
+    "steps": 8,
+    "cfg": 1.0,
+    "preset": "R0",
+    "lora": [],
+    "vae": "qwen_image_2.1_vae_bf16.safetensors",
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "a238747ac7c61f55f71b4174293c2db2ea1110b3898604b3d6f7df6a5ac14866",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.675,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 18.1,
+    "created_at": "2026-10-30T05:04:52"
+  },
+  {
+    "file": "R1_s0.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R1",
+    "prompt": "把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、浅冰蓝色及腰顺直长发和齐刘海、冷白肤色、整体辨识度；把眼睛改为真实成年亚洲女性的正常大小，去掉美瞳和夸张睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实人像摄影，未修图的原片，无美颜滤镜无磨皮；皮肤可见毛孔与细小绒毛，鼻翼和T区轻微出油反光，眼下自然细纹与淡青色，脸颊极轻微的不均匀肤色，左右脸轻微不对称；真实成年亚洲女性的眼睛大小与眼裂，不放大瞳孔，不戴美瞳，睫毛自然根根分明，眼神光是灯形状的小高光；浅冰蓝色头发有碎发与飞丝，发根略深（染发的真实感）；shot on Leica M11, Summilux 50mm f/2, Kodak Portra 400 film look, natural light falloff, focus on the near eye",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 154193684413766,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R1",
+    "lora": [],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "3fd422e2d5207149be5b971302813048bc787b85aee33f13dbc47a87ab08da3c",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.629,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 51.2,
+    "created_at": "2026-10-30T05:05:44"
+  },
+  {
+    "file": "R1_s1.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R1",
+    "prompt": "把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、浅冰蓝色及腰顺直长发和齐刘海、冷白肤色、整体辨识度；把眼睛改为真实成年亚洲女性的正常大小，去掉美瞳和夸张睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实人像摄影，未修图的原片，无美颜滤镜无磨皮；皮肤可见毛孔与细小绒毛，鼻翼和T区轻微出油反光，眼下自然细纹与淡青色，脸颊极轻微的不均匀肤色，左右脸轻微不对称；真实成年亚洲女性的眼睛大小与眼裂，不放大瞳孔，不戴美瞳，睫毛自然根根分明，眼神光是灯形状的小高光；浅冰蓝色头发有碎发与飞丝，发根略深（染发的真实感）；shot on Leica M11, Summilux 50mm f/2, Kodak Portra 400 film look, natural light falloff, focus on the near eye",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 203831096158098,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R1",
+    "lora": [],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "46d031ff1fc2e87aac180289606d3093fa90a89c4f602e60ba0549a534be2b2b",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.591,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 78.3,
+    "created_at": "2026-10-30T05:07:04"
+  },
+  {
+    "file": "R5_s0.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R5",
+    "prompt": "把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、浅冰蓝色及腰顺直长发和齐刘海、冷白肤色、整体辨识度；把眼睛改为真实成年亚洲女性的正常大小，去掉美瞳和夸张睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实人像摄影，未修图的原片，无美颜滤镜无磨皮；皮肤可见毛孔与细小绒毛，鼻翼和T区轻微出油反光，眼下自然细纹与淡青色，脸颊极轻微的不均匀肤色，左右脸轻微不对称；真实成年亚洲女性的眼睛大小与眼裂，不放大瞳孔，不戴美瞳，睫毛自然根根分明，眼神光是灯形状的小高光；浅冰蓝色头发有碎发与飞丝，发根略深（染发的真实感）；shot on Leica M11, Summilux 50mm f/2, Kodak Portra 400 film look, natural light falloff, focus on the near eye",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 216629752519958,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R5",
+    "lora": [
+      [
+        "nicegirls_v2_qwen21.safetensors",
+        0.6
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "66a733297fe76f0232c8e289b4e659e3ec3646e94f8e33bd10d5cd0559e0ff4c",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.606,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 84.3,
+    "created_at": "2026-10-30T05:08:09"
+  },
+  {
+    "file": "R4_s0.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R4",
+    "prompt": "把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、浅冰蓝色及腰顺直长发和齐刘海、冷白肤色、整体辨识度；把眼睛改为真实成年亚洲女性的正常大小，去掉美瞳和夸张睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实人像摄影，未修图的原片，无美颜滤镜无磨皮；皮肤可见毛孔与细小绒毛，鼻翼和T区轻微出油反光，眼下自然细纹与淡青色，脸颊极轻微的不均匀肤色，左右脸轻微不对称；真实成年亚洲女性的眼睛大小与眼裂，不放大瞳孔，不戴美瞳，睫毛自然根根分明，眼神光是灯形状的小高光；浅冰蓝色头发有碎发与飞丝，发根略深（染发的真实感）；shot on Leica M11, Summilux 50mm f/2, Kodak Portra 400 film look, natural light falloff, focus on the near eye",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 271304585227963,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R4",
+    "lora": [
+      [
+        "glamour_realism_qwen21.safetensors",
+        0.6
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "917f037781eb07103d8391730a4f809f807fb2dcf1f9fe45a188bb16646e9308",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.716,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 93.3,
+    "created_at": "2026-10-30T05:08:39"
+  },
+  {
+    "file": "R5_s1.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R5",
+    "prompt": "把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、浅冰蓝色及腰顺直长发和齐刘海、冷白肤色、整体辨识度；把眼睛改为真实成年亚洲女性的正常大小，去掉美瞳和夸张睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实人像摄影，未修图的原片，无美颜滤镜无磨皮；皮肤可见毛孔与细小绒毛，鼻翼和T区轻微出油反光，眼下自然细纹与淡青色，脸颊极轻微的不均匀肤色，左右脸轻微不对称；真实成年亚洲女性的眼睛大小与眼裂，不放大瞳孔，不戴美瞳，睫毛自然根根分明，眼神光是灯形状的小高光；浅冰蓝色头发有碎发与飞丝，发根略深（染发的真实感）；shot on Leica M11, Summilux 50mm f/2, Kodak Portra 400 film look, natural light falloff, focus on the near eye",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 277036734199665,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R5",
+    "lora": [
+      [
+        "nicegirls_v2_qwen21.safetensors",
+        0.6
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "ce137402331896ee08b6bbaff0d1f64eea310124429b5ecb7d2abacac390a7c1",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.575,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 69.2,
+    "created_at": "2026-10-30T05:09:20"
+  },
+  {
+    "file": "R4_s1.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R4",
+    "prompt": "把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、浅冰蓝色及腰顺直长发和齐刘海、冷白肤色、整体辨识度；把眼睛改为真实成年亚洲女性的正常大小，去掉美瞳和夸张睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实人像摄影，未修图的原片，无美颜滤镜无磨皮；皮肤可见毛孔与细小绒毛，鼻翼和T区轻微出油反光，眼下自然细纹与淡青色，脸颊极轻微的不均匀肤色，左右脸轻微不对称；真实成年亚洲女性的眼睛大小与眼裂，不放大瞳孔，不戴美瞳，睫毛自然根根分明，眼神光是灯形状的小高光；浅冰蓝色头发有碎发与飞丝，发根略深（染发的真实感）；shot on Leica M11, Summilux 50mm f/2, Kodak Portra 400 film look, natural light falloff, focus on the near eye",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 216047468528262,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R4",
+    "lora": [
+      [
+        "glamour_realism_qwen21.safetensors",
+        0.6
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "bb185b45840c67e897bf9692f2ff08a5f483797541555cd340be908a541953d4",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.637,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 81.3,
+    "created_at": "2026-10-30T05:10:01"
+  },
+  {
+    "file": "R2_s0.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R2",
+    "prompt": "把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、浅冰蓝色及腰顺直长发和齐刘海、冷白肤色、整体辨识度；把眼睛改为真实成年亚洲女性的正常大小，去掉美瞳和夸张睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实人像摄影，未修图的原片，无美颜滤镜无磨皮；皮肤可见毛孔与细小绒毛，鼻翼和T区轻微出油反光，眼下自然细纹与淡青色，脸颊极轻微的不均匀肤色，左右脸轻微不对称；真实成年亚洲女性的眼睛大小与眼裂，不放大瞳孔，不戴美瞳，睫毛自然根根分明，眼神光是灯形状的小高光；浅冰蓝色头发有碎发与飞丝，发根略深（染发的真实感）；shot on Leica M11, Summilux 50mm f/2, Kodak Portra 400 film look, natural light falloff, focus on the near eye",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 243863298536504,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R2",
+    "lora": [
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "70a2084cb4ede12369d60cf0f791e110a50699630bd7dd3688b72b198e9fa743",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.468,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 84.4,
+    "created_at": "2026-10-30T05:13:03"
+  },
+  {
+    "file": "R2_s1.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R2",
+    "prompt": "把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、浅冰蓝色及腰顺直长发和齐刘海、冷白肤色、整体辨识度；把眼睛改为真实成年亚洲女性的正常大小，去掉美瞳和夸张睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实人像摄影，未修图的原片，无美颜滤镜无磨皮；皮肤可见毛孔与细小绒毛，鼻翼和T区轻微出油反光，眼下自然细纹与淡青色，脸颊极轻微的不均匀肤色，左右脸轻微不对称；真实成年亚洲女性的眼睛大小与眼裂，不放大瞳孔，不戴美瞳，睫毛自然根根分明，眼神光是灯形状的小高光；浅冰蓝色头发有碎发与飞丝，发根略深（染发的真实感）；shot on Leica M11, Summilux 50mm f/2, Kodak Portra 400 film look, natural light falloff, focus on the near eye",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 3085170031541,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R2",
+    "lora": [
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "93aa08112b479e4e2cca7b9a1a29f0ec2bf14e70aa70605a02c761a518638fcf",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.617,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 102.4,
+    "created_at": "2026-10-30T05:14:47"
+  },
+  {
+    "file": "R3_s0.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R3",
+    "prompt": "把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、浅冰蓝色及腰顺直长发和齐刘海、冷白肤色、整体辨识度；把眼睛改为真实成年亚洲女性的正常大小，去掉美瞳和夸张睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实人像摄影，未修图的原片，无美颜滤镜无磨皮；皮肤可见毛孔与细小绒毛，鼻翼和T区轻微出油反光，眼下自然细纹与淡青色，脸颊极轻微的不均匀肤色，左右脸轻微不对称；真实成年亚洲女性的眼睛大小与眼裂，不放大瞳孔，不戴美瞳，睫毛自然根根分明，眼神光是灯形状的小高光；浅冰蓝色头发有碎发与飞丝，发根略深（染发的真实感）；shot on Leica M11, Summilux 50mm f/2, Kodak Portra 400 film look, natural light falloff, focus on the near eye",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 140946921167094,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 2.5,
+    "preset": "R3",
+    "lora": [
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "7b9eb1f24fc142d572de2e578fa5926d68966e20598cb18b02ce7b1084eaa858",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.443,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 105.4,
+    "created_at": "2026-10-30T05:16:33"
+  },
+  {
+    "file": "R3_s1.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R3",
+    "prompt": "把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、浅冰蓝色及腰顺直长发和齐刘海、冷白肤色、整体辨识度；把眼睛改为真实成年亚洲女性的正常大小，去掉美瞳和夸张睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实人像摄影，未修图的原片，无美颜滤镜无磨皮；皮肤可见毛孔与细小绒毛，鼻翼和T区轻微出油反光，眼下自然细纹与淡青色，脸颊极轻微的不均匀肤色，左右脸轻微不对称；真实成年亚洲女性的眼睛大小与眼裂，不放大瞳孔，不戴美瞳，睫毛自然根根分明，眼神光是灯形状的小高光；浅冰蓝色头发有碎发与飞丝，发根略深（染发的真实感）；shot on Leica M11, Summilux 50mm f/2, Kodak Portra 400 film look, natural light falloff, focus on the near eye",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 53318689435807,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 2.5,
+    "preset": "R3",
+    "lora": [
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "d3ccfcf8bbf1d782f4797ac4780efd131f9a03619f6f86f294caac0248b694be",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.461,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 117.5,
+    "created_at": "2026-10-30T05:18:32"
+  },
+  {
+    "file": "R7_s0.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R7",
+    "prompt": "make the eyes realistic size, make the head smaller，把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、浅冰蓝色及腰顺直长发和齐刘海、冷白肤色、整体辨识度；把眼睛改为真实成年亚洲女性的正常大小，去掉美瞳和夸张睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实人像摄影，未修图的原片，无美颜滤镜无磨皮；皮肤可见毛孔与细小绒毛，鼻翼和T区轻微出油反光，眼下自然细纹与淡青色，脸颊极轻微的不均匀肤色，左右脸轻微不对称；真实成年亚洲女性的眼睛大小与眼裂，不放大瞳孔，不戴美瞳，睫毛自然根根分明，眼神光是灯形状的小高光；浅冰蓝色头发有碎发与飞丝，发根略深（染发的真实感）；shot on Leica M11, Summilux 50mm f/2, Kodak Portra 400 film look, natural light falloff, focus on the near eye",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 108770021686261,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R7",
+    "lora": [
+      [
+        "qwen21-t2r-v1.safetensors",
+        0.7
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "5009b8e22e0d5acdfd90059a23a31e30a58e948543151f2b67abfaba4c1defef",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.318,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 54.2,
+    "created_at": "2026-10-30T05:19:27"
+  },
+  {
+    "file": "R7_s1.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R7",
+    "prompt": "make the eyes realistic size, make the head smaller，把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、浅冰蓝色及腰顺直长发和齐刘海、冷白肤色、整体辨识度；把眼睛改为真实成年亚洲女性的正常大小，去掉美瞳和夸张睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实人像摄影，未修图的原片，无美颜滤镜无磨皮；皮肤可见毛孔与细小绒毛，鼻翼和T区轻微出油反光，眼下自然细纹与淡青色，脸颊极轻微的不均匀肤色，左右脸轻微不对称；真实成年亚洲女性的眼睛大小与眼裂，不放大瞳孔，不戴美瞳，睫毛自然根根分明，眼神光是灯形状的小高光；浅冰蓝色头发有碎发与飞丝，发根略深（染发的真实感）；shot on Leica M11, Summilux 50mm f/2, Kodak Portra 400 film look, natural light falloff, focus on the near eye",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 215185500020971,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R7",
+    "lora": [
+      [
+        "qwen21-t2r-v1.safetensors",
+        0.7
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "0b735474ecce944b7700e891e099aedaed0ef32ad195832441268865af365699",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.638,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 51.2,
+    "created_at": "2026-10-30T05:20:19"
+  },
+  {
+    "file": "R8_s0.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R8",
+    "prompt": "把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、浅冰蓝色及腰顺直长发和齐刘海、冷白肤色、整体辨识度；把眼睛改为真实成年亚洲女性的正常大小，去掉美瞳和夸张睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实人像摄影，未修图的原片，无美颜滤镜无磨皮；皮肤可见毛孔与细小绒毛，鼻翼和T区轻微出油反光，眼下自然细纹与淡青色，脸颊极轻微的不均匀肤色，左右脸轻微不对称；真实成年亚洲女性的眼睛大小与眼裂，不放大瞳孔，不戴美瞳，睫毛自然根根分明，眼神光是灯形状的小高光；浅冰蓝色头发有碎发与飞丝，发根略深（染发的真实感）；shot on Leica M11, Summilux 50mm f/2, Kodak Portra 400 film look, natural light falloff, focus on the near eye",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 60766625931158,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R8",
+    "lora": [
+      [
+        "nicegirls_v2_qwen21.safetensors",
+        0.5
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "4e8c8b5e09ef1d7617d212d65f08ef3db7606482211d7f3137649545b9278bb0",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.788,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 42.2,
+    "created_at": "2026-10-30T05:21:52"
+  },
+  {
+    "file": "R8_s1.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R8",
+    "prompt": "把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、浅冰蓝色及腰顺直长发和齐刘海、冷白肤色、整体辨识度；把眼睛改为真实成年亚洲女性的正常大小，去掉美瞳和夸张睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实人像摄影，未修图的原片，无美颜滤镜无磨皮；皮肤可见毛孔与细小绒毛，鼻翼和T区轻微出油反光，眼下自然细纹与淡青色，脸颊极轻微的不均匀肤色，左右脸轻微不对称；真实成年亚洲女性的眼睛大小与眼裂，不放大瞳孔，不戴美瞳，睫毛自然根根分明，眼神光是灯形状的小高光；浅冰蓝色头发有碎发与飞丝，发根略深（染发的真实感）；shot on Leica M11, Summilux 50mm f/2, Kodak Portra 400 film look, natural light falloff, focus on the near eye",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 124138321274046,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R8",
+    "lora": [
+      [
+        "nicegirls_v2_qwen21.safetensors",
+        0.5
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "4e5545e7596c34b7e27fc7bcf09f9f91aa7ba935aa850d6af693cdaadc525627",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.73,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 42.2,
+    "created_at": "2026-10-30T05:22:35"
+  },
+  {
+    "file": "R9_s0.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R9",
+    "prompt": "transform the image to realistic photograph，把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、浅冰蓝色及腰顺直长发和齐刘海、冷白肤色、整体辨识度；把眼睛改为真实成年亚洲女性的正常大小，去掉美瞳和夸张睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实人像摄影，未修图的原片，无美颜滤镜无磨皮；皮肤可见毛孔与细小绒毛，鼻翼和T区轻微出油反光，眼下自然细纹与淡青色，脸颊极轻微的不均匀肤色，左右脸轻微不对称；真实成年亚洲女性的眼睛大小与眼裂，不放大瞳孔，不戴美瞳，睫毛自然根根分明，眼神光是灯形状的小高光；浅冰蓝色头发有碎发与飞丝，发根略深（染发的真实感）；shot on Leica M11, Summilux 50mm f/2, Kodak Portra 400 film look, natural light falloff, focus on the near eye",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 184691523123928,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R9",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.8
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "f799ee1cfe96bfc300ddd64c0d64c102903b153d114314a0b91ad157e3c5eaa5",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.381,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 63.3,
+    "created_at": "2026-10-30T05:23:40"
+  },
+  {
+    "file": "R9_s1.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R9",
+    "prompt": "transform the image to realistic photograph，把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、浅冰蓝色及腰顺直长发和齐刘海、冷白肤色、整体辨识度；把眼睛改为真实成年亚洲女性的正常大小，去掉美瞳和夸张睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实人像摄影，未修图的原片，无美颜滤镜无磨皮；皮肤可见毛孔与细小绒毛，鼻翼和T区轻微出油反光，眼下自然细纹与淡青色，脸颊极轻微的不均匀肤色，左右脸轻微不对称；真实成年亚洲女性的眼睛大小与眼裂，不放大瞳孔，不戴美瞳，睫毛自然根根分明，眼神光是灯形状的小高光；浅冰蓝色头发有碎发与飞丝，发根略深（染发的真实感）；shot on Leica M11, Summilux 50mm f/2, Kodak Portra 400 film look, natural light falloff, focus on the near eye",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 59738842950558,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R9",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.8
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "3741bbb284fec5a476d3c04b4d618e53a69167c2a1a35fed80dc36220cf61a23",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.35,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 66.4,
+    "created_at": "2026-10-30T05:24:47"
+  },
+  {
+    "file": "R7_v2_s0.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R7",
+    "prompt": "make the eyes realistic size, make the head smaller，把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、雾霾天蓝色及腰顺直长发（偏灰的中浅蓝，比图1略深略灰，像真实染发，发根略深）和齐刘海、冷白肤色、整体辨识度；保留左脸颊靠近鼻翼的小痣；把眼睛改为真实成年亚洲女性的正常大小（中等大小的杏眼），自然深棕色眼睛，不戴美瞳，瞳孔大小正常，去掉夸张粘连的睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 271767878717696,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R7",
+    "lora": [
+      [
+        "qwen21-t2r-v1.safetensors",
+        0.7
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "30ee29816aade79efae1fa2a79f8427237d112e4b00197ba6b407699c8865b7e",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.42,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 48.2,
+    "created_at": "2026-10-30T05:26:24"
+  },
+  {
+    "file": "R7_v2_s1.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R7",
+    "prompt": "make the eyes realistic size, make the head smaller，把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、雾霾天蓝色及腰顺直长发（偏灰的中浅蓝，比图1略深略灰，像真实染发，发根略深）和齐刘海、冷白肤色、整体辨识度；保留左脸颊靠近鼻翼的小痣；把眼睛改为真实成年亚洲女性的正常大小（中等大小的杏眼），自然深棕色眼睛，不戴美瞳，瞳孔大小正常，去掉夸张粘连的睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 237533729665821,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R7",
+    "lora": [
+      [
+        "qwen21-t2r-v1.safetensors",
+        0.7
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "10c528ef3acba729d702fdc34d45dc05dbae5125dd840a55cf48ca33febcc989",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.371,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 51.2,
+    "created_at": "2026-10-30T05:27:16"
+  },
+  {
+    "file": "R7_v2_s2.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R7",
+    "prompt": "make the eyes realistic size, make the head smaller，把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、雾霾天蓝色及腰顺直长发（偏灰的中浅蓝，比图1略深略灰，像真实染发，发根略深）和齐刘海、冷白肤色、整体辨识度；保留左脸颊靠近鼻翼的小痣；把眼睛改为真实成年亚洲女性的正常大小（中等大小的杏眼），自然深棕色眼睛，不戴美瞳，瞳孔大小正常，去掉夸张粘连的睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 106796100051319,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R7",
+    "lora": [
+      [
+        "qwen21-t2r-v1.safetensors",
+        0.7
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "9718b7874831159405148a3ef461d92abfb9f44bbeedc64cf1aee42d8166c924",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.3,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 66.3,
+    "created_at": "2026-10-30T05:28:24"
+  },
+  {
+    "file": "R7_v2_s3.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R7",
+    "prompt": "make the eyes realistic size, make the head smaller，把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、雾霾天蓝色及腰顺直长发（偏灰的中浅蓝，比图1略深略灰，像真实染发，发根略深）和齐刘海、冷白肤色、整体辨识度；保留左脸颊靠近鼻翼的小痣；把眼睛改为真实成年亚洲女性的正常大小（中等大小的杏眼），自然深棕色眼睛，不戴美瞳，瞳孔大小正常，去掉夸张粘连的睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 23975918951027,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R7",
+    "lora": [
+      [
+        "qwen21-t2r-v1.safetensors",
+        0.7
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "54f6fce350301d59122fe3b67d205939682f466e24ba90f42c79cece902014c1",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.378,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 66.3,
+    "created_at": "2026-10-30T05:29:31"
+  },
+  {
+    "file": "R7_v2ref_s0.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R7",
+    "prompt": "make the eyes realistic size, make the head smaller，把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、雾霾天蓝色及腰顺直长发（偏灰的中浅蓝，比图1略深略灰，像真实染发，发根略深）和齐刘海、冷白肤色、整体辨识度；保留左脸颊靠近鼻翼的小痣；把眼睛改为真实成年亚洲女性的正常大小（中等大小的杏眼），自然深棕色眼睛，不戴美瞳，瞳孔大小正常，去掉夸张粘连的睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 80485483170593,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R7",
+    "lora": [
+      [
+        "qwen21-t2r-v1.safetensors",
+        0.7
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.3
+    },
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "8756c5491b474a30a93f064c6b8c9dd51e34dcdf003971e5b0bb5def3775318f",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.56,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 108.5,
+    "created_at": "2026-10-30T05:31:34"
+  },
+  {
+    "file": "R7_v2ref_s1.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R7",
+    "prompt": "make the eyes realistic size, make the head smaller，把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、雾霾天蓝色及腰顺直长发（偏灰的中浅蓝，比图1略深略灰，像真实染发，发根略深）和齐刘海、冷白肤色、整体辨识度；保留左脸颊靠近鼻翼的小痣；把眼睛改为真实成年亚洲女性的正常大小（中等大小的杏眼），自然深棕色眼睛，不戴美瞳，瞳孔大小正常，去掉夸张粘连的睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 175395093598525,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R7",
+    "lora": [
+      [
+        "qwen21-t2r-v1.safetensors",
+        0.7
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.3
+    },
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "8a0f6d04a5aaee1bb9a5adf13f67238aa6d06173a2b64b9233ddc98c6cce164e",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.419,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 123.4,
+    "created_at": "2026-10-30T05:33:39"
+  },
+  {
+    "file": "R7_v2ref_s2.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R7",
+    "prompt": "make the eyes realistic size, make the head smaller，把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、雾霾天蓝色及腰顺直长发（偏灰的中浅蓝，比图1略深略灰，像真实染发，发根略深）和齐刘海、冷白肤色、整体辨识度；保留左脸颊靠近鼻翼的小痣；把眼睛改为真实成年亚洲女性的正常大小（中等大小的杏眼），自然深棕色眼睛，不戴美瞳，瞳孔大小正常，去掉夸张粘连的睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 125176843390626,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R7",
+    "lora": [
+      [
+        "qwen21-t2r-v1.safetensors",
+        0.7
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.3
+    },
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "ec88e5aea0473ade9c82def4c5003d88ae9473ec03ee73eb7490a0d27ef753b7",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.485,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 138.5,
+    "created_at": "2026-10-30T05:35:59"
+  },
+  {
+    "file": "R7_v2ref_s3.png",
+    "kind": "plate",
+    "design": "LW-MASTER",
+    "name": "写实母版 A/B R7",
+    "prompt": "make the eyes realistic size, make the head smaller，把图1转为真实人像摄影：同一个人，保持脸型轮廓、鼻型、唇形、雾霾天蓝色及腰顺直长发（偏灰的中浅蓝，比图1略深略灰，像真实染发，发根略深）和齐刘海、冷白肤色、整体辨识度；保留左脸颊靠近鼻翼的小痣；把眼睛改为真实成年亚洲女性的正常大小（中等大小的杏眼），自然深棕色眼睛，不戴美瞳，瞳孔大小正常，去掉夸张粘连的睫毛，腮红减到很淡，唇部自然不嘟；皮肤有毛孔和细绒毛，无磨皮。正面胸像，平视镜头，放松的中性表情，双手不入画，不戴首饰，穿素色浅灰色圆领T恤；灰色无缝背景，柔和窗光，真实照片。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 瓷娃娃, 大眼睛, 美瞳, 动漫比例, 网红脸, 过度化妆, 过锐, CGI, 3D render, airbrushed, doll, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 内衣外露, 水印, 文字",
+    "seed": 26603979528028,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "R7",
+    "lora": [
+      [
+        "qwen21-t2r-v1.safetensors",
+        0.7
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.3
+    },
+    "references": [
+      "assets/characters/lin_wan/items/makeup/M0_s0.png"
+    ],
+    "sha256": "07735ed5f449ad8c6baeacd5ef6f99ed41f0a01aa6f0351c0fbb0d9894b585d4",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.453,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 105.7,
+    "created_at": "2026-10-30T05:37:47"
+  }
+]

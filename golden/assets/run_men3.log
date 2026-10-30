@@ -1,0 +1,16 @@
+Loading weights:   0%|          | 0/590 [00:00<?, ?it/s]Loading weights:   2%|2         | 14/590 [00:00<00:04, 122.72it/s]Loading weights:   8%|8         | 49/590 [00:00<00:02, 237.59it/s]Loading weights:  14%|#4        | 83/590 [00:00<00:02, 224.29it/s]Loading weights:  18%|#7        | 106/590 [00:00<00:03, 150.73it/s]Loading weights:  21%|##1       | 124/590 [00:00<00:03, 134.11it/s]Loading weights:  24%|##3       | 139/590 [00:00<00:03, 120.49it/s]Loading weights:  26%|##5       | 153/590 [00:01<00:03, 123.14it/s]Loading weights:  28%|##8       | 167/590 [00:01<00:03, 121.84it/s]Loading weights:  31%|###       | 180/590 [00:01<00:03, 103.96it/s]Loading weights:  32%|###2      | 191/590 [00:01<00:04, 92.92it/s] Loading weights:  34%|###4      | 203/590 [00:01<00:03, 98.42it/s]Loading weights: 100%|##########| 590/590 [00:01<00:00, 349.23it/s]
+11:15:35 ../gu_chen/candidates/gu_chen_cand_01_s0 [SOP] 142s seed=115539250668396 qc_bare=0.002
+11:18:10 ../gu_chen/candidates/gu_chen_cand_02_s0 [SOP] 148s seed=41538746218494 qc_bare=0.001
+11:20:37 ../gu_chen/candidates/gu_chen_cand_03_s0 [SOP] 139s seed=21162965422704 qc_bare=0.006
+11:23:08 ../chen_yu/candidates/chen_yu_cand_01_s0 [SOP] 142s seed=61448927239318 qc_bare=0.004
+11:25:39 ../chen_yu/candidates/chen_yu_cand_02_s0 [SOP] 142s seed=97821824189786 qc_bare=0.005
+11:28:09 ../chen_yu/candidates/chen_yu_cand_03_s0 [SOP] 142s seed=140556264465427 qc_bare=0.009
+11:30:35 ../alex/candidates/alex_cand_01_s0 [SOP] 142s seed=253468253504006 qc_bare=0.004
+11:33:01 ../alex/candidates/alex_cand_02_s0 [SOP] 139s seed=219938329571475 qc_bare=0.004
+11:35:30 ../ryan/candidates/ryan_cand_01_s0 [SOP] 142s seed=204457884012904 qc_bare=0.018
+11:37:53 ../ryan/candidates/ryan_cand_02_s0 [SOP] 139s seed=162366016434623 qc_bare=0.006
+11:40:19 ../kai/candidates/kai_cand_01_s0 [SOP] 139s seed=254869871722171 qc_bare=0.002
+11:42:45 ../kai/candidates/kai_cand_02_s0 [SOP] 139s seed=211055996415786 qc_bare=0.003
+11:45:17 ../leo/candidates/leo_cand_01_s0 [SOP] 142s seed=12742362617768 qc_bare=0.009
+11:47:46 ../leo/candidates/leo_cand_02_s0 [SOP] 145s seed=237301636613221 qc_bare=0.013
+11:47:46 done 14 images in 2101s

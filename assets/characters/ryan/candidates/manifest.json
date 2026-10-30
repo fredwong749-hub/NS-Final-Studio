@@ -1,0 +1,90 @@
+[
+  {
+    "file": "ryan_cand_01_s0.png",
+    "kind": "candidate",
+    "design": "ryan",
+    "name": "ryan 候选 1",
+    "prompt": "Full-body identity reference photo of Ryan M, an East Asian adult man around 30, sharp and capable, neat short black undercut, clean-shaven, lean muscular build; he wears a plain charcoal fitted T-shirt and black trousers. Head to toe in frame, standing straight, front view, arms relaxed at his sides, neutral expression, looking into the lens, plain shoes, no necklace, no jewellery, no watch, no props in his hands. Plain neutral grey seamless studio backdrop (#808080), soft even light, 50mm lens at f/8. Unretouched real photo. 真实皮肤质感，可见细小毛孔与细软绒毛，自然的轻微不对称，眼睛为真实人眼大小。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "磨皮, 塑料皮肤, 蜡像, CGI, 3D render, airbrushed, doll face, 动漫, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 赤裸上身, 项链, 首饰, 手表, 道具, 文字, 水印, 低清",
+    "seed": 204457884012904,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 3.0,
+    "preset": "SOP",
+    "lora": [
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.3
+    },
+    "references": [],
+    "sha256": "f7824fa042913bdcc9789601292b736854d0cc9b9a7f612d3be07df9c504d75d",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.018,
+      "vlm": false,
+      "version": "nudenet3.4+clipL14v2+qwen3vl-v3"
+    },
+    "gen_seconds": 141.6,
+    "bible_sha256": "a2fd3146d98111dd689367ef0245f2f526d14e67ebe853c06667addc6bd62fe9",
+    "reference_source": "script ep41 name list (no lock; description by asset agent, needs owner review)",
+    "references_used": [],
+    "status": "candidate (owner picks one; no master/LoRA until picked)",
+    "created_at": "2026-10-30T11:35:30"
+  },
+  {
+    "file": "ryan_cand_02_s0.png",
+    "kind": "candidate",
+    "design": "ryan",
+    "name": "ryan 候选 2",
+    "prompt": "Full-body identity reference photo of Ryan M, an East Asian adult man around 30, sharp and capable, neat short black undercut, clean-shaven, lean muscular build; he wears a plain charcoal fitted T-shirt and black trousers. Head to toe in frame, standing straight, front view, arms relaxed at his sides, neutral expression, looking into the lens, plain shoes, no necklace, no jewellery, no watch, no props in his hands. Plain neutral grey seamless studio backdrop (#808080), soft even light, 50mm lens at f/8. Unretouched real photo. 真实皮肤质感，可见细小毛孔与细软绒毛，自然的轻微不对称，眼睛为真实人眼大小。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "磨皮, 塑料皮肤, 蜡像, CGI, 3D render, airbrushed, doll face, 动漫, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 赤裸上身, 项链, 首饰, 手表, 道具, 文字, 水印, 低清",
+    "seed": 162366016434623,
+    "size": [
+      1024,
+      1536
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 3.0,
+    "preset": "SOP",
+    "lora": [
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.3
+    },
+    "references": [],
+    "sha256": "b2d429d961ec1e9fa41682aee925b306be997526782a595ff6e955f6078f20b9",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.006,
+      "vlm": false,
+      "version": "nudenet3.4+clipL14v2+qwen3vl-v3"
+    },
+    "gen_seconds": 138.6,
+    "bible_sha256": "a2fd3146d98111dd689367ef0245f2f526d14e67ebe853c06667addc6bd62fe9",
+    "reference_source": "script ep41 name list (no lock; description by asset agent, needs owner review)",
+    "references_used": [],
+    "status": "candidate (owner picks one; no master/LoRA until picked)",
+    "created_at": "2026-10-30T11:37:53"
+  }
+]

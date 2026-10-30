@@ -1,0 +1,7 @@
+{
+  "_comment": "导演加强·用我的模型生成：项目方 2026-10-30 选择 gpu3 上的 27B 无审查模型。base_url 是本机 SSH 隧道地址，确认端口后填写；instruction_file 由项目方自己编写。",
+  "base_url": "http://127.0.0.1:18097/v1",
+  "model": "Qwen3.8-27B-Uncensored-Q4_K_M.gguf",
+  "_tunnel": "ssh -N -L 18097:127.0.0.1:8097 gpu33（gpu3 llama-server，CPU 运行，每秒几个 token；与剧本改写任务共用，偶尔会重启）",
+  "instruction_file": "config/director_boost_rules.md"
+}

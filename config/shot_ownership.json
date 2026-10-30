@@ -1,0 +1,6 @@
+{
+  "_comment": "镜头首尾帧+视频由哪条流水线负责（一条链原则，docs/audit/shot_readiness_and_continuity.md）。owner=gpu3 的项目，笔记本不再为任何镜头出首尾帧，笔记本已有的帧只作历史。gpu3 另在每镜 status.json 写 {owner: \"gpu3\"}。",
+  "projects": {
+    "weita": { "owner": "gpu3", "since": "2026-10-30", "note": "为他而骚全部 360 镜；claude-gpu3 会话宣布，项目方当天指示 gpu3 全自动出首尾帧与视频" }
+  }
+}

@@ -1,0 +1,217 @@
+[
+ {
+  "variant": "new",
+  "shot": "ep01-S1",
+  "seed": 20261030,
+  "file": "D:\\NS-Final Studio\\golden\\visual_spec_pilot\\work\\new\\renders\\ep01\\S1\\takes\\image_001.png",
+  "raw": "D:\\NS-Final Studio\\golden\\visual_spec_pilot\\work\\new\\renders\\ep01\\S1\\takes\\image_001_raw.png",
+  "gen_seconds": 54.7,
+  "comfy_seconds": 45.2,
+  "score_seconds": 55.2,
+  "score": {
+   "total": 0.713,
+   "parts": {
+    "fidelity": 0.625,
+    "realism": 0.9,
+    "colour_dist": 17.21,
+    "colour": 0.384,
+    "sharp_var": 294.1,
+    "bg_var": 101.5,
+    "sharp": 0.823,
+    "smooth_frac": 0.412,
+    "bokeh": 1.0
+   },
+   "missing": [
+    "一双12cm透明细高跟鞋踏入大理石反光地面",
+    "上方虚化的黑色高亮镜面漆皮超短裙裙摆随步伐摆动",
+    "鞋跟直径约6毫米、细如一根筷子的针形细跟，跟高12厘米"
+   ],
+   "reasons": [],
+   "weights": {
+    "fidelity": 0.4,
+    "realism": 0.15,
+    "colour": 0.1,
+    "sharp": 0.1,
+    "bokeh": 0.1
+   }
+  },
+  "prompt": "清晨写字楼旋转门，低机位仰拍，一双12cm透明细高跟鞋踏入大理石反光地面，足弓线条优美，上方虚化的黑色高亮镜面漆皮超短裙裙摆随步伐摆动，晨光从玻璃幕墙斜照，衣装完整、无裸露，漆皮为像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利，鞋跟直径约6毫米、细如一根筷子的针形细跟，跟高12厘米，专业电影镜头画面感，画面干净，徕卡镜头级锐利度与通透质感，85mm人像镜头f/1.2大光圈，主体锐利对焦，前景与背景奶油般柔焦虚化、柔和圆形光斑，浓郁饱和的暖色调电影调色，色彩丰富艳丽、通透明亮，柔和的大面积光源与暖调轮廓光、高光柔和不过曝，皮肤通透有真实质感，无字幕、无文字、无水印",
+  "references": null
+ },
+ {
+  "variant": "new",
+  "shot": "ep01-S2",
+  "seed": 20261030,
+  "file": "D:\\NS-Final Studio\\golden\\visual_spec_pilot\\work\\new\\renders\\ep01\\S2\\takes\\image_001.png",
+  "raw": "D:\\NS-Final Studio\\golden\\visual_spec_pilot\\work\\new\\renders\\ep01\\S2\\takes\\image_001_raw.png",
+  "gen_seconds": 120.1,
+  "comfy_seconds": 81.2,
+  "score_seconds": 141.7,
+  "score": {
+   "total": 0.54,
+   "parts": {
+    "fidelity": 0.667,
+    "realism": 0.7,
+    "face": 0.0,
+    "face_cos": 0.433,
+    "colour_dist": 19.7,
+    "colour": 0.335,
+    "sharp_var": 361.9,
+    "bg_var": 235.9,
+    "sharp": 0.853,
+    "smooth_frac": 0.149,
+    "bokeh": 0.497
+   },
+   "missing": [
+    "蓝发齐刘海女性与黑色高定衬衫中年男总经理并排而立",
+    "楼层数字灯光映脸"
+   ],
+   "reasons": [],
+   "weights": {
+    "fidelity": 0.4,
+    "face": 0.15,
+    "realism": 0.15,
+    "colour": 0.1,
+    "sharp": 0.1,
+    "bokeh": 0.1
+   }
+  },
+  "prompt": "图1是本镜头的画面构图。保持图1的构图、机位、景别、人物姿势与朝向、表情、服装、背景和光线完全不变，只把图1中林晚的五官长相、发色与发型换成图2人物的样子。图2只提供林晚的面部身份与发型：五官、脸型、发色发型、肤色与妆容；不要沿用图2的姿势、表情、服装、首饰、背景、构图和光线。画面内容完全按以下描述：【林晚】22岁中国成年女性，蓝发及腰、齐刘海、冷白皮肤、G罩杯、长腿，真人写实；手指甲为5厘米超长透明水晶甲、镶满钻石饰品；脚趾甲为2厘米长的性感美甲（手脚入镜时必须可见），电梯轿厢，蓝发齐刘海女性与黑色高定衬衫中年男总经理并排而立，金属壁映出两人重叠倒影，楼层数字灯光映脸，狭小空间，衣装完整、无裸露，专业电影镜头画面感，画面干净，徕卡镜头级锐利度与通透质感，85mm人像镜头f/1.2大光圈，主体锐利对焦，前景与背景奶油般柔焦虚化、柔和圆形光斑，浓郁饱和的暖色调电影调色，色彩丰富艳丽、通透明亮，柔和的大面积光源与暖调轮廓光、高光柔和不过曝，皮肤通透有真实质感，无字幕、无文字、无水印",
+  "references": [
+   "data/renders/ep01/S2/takes/compose_001_r1_0.png",
+   "assets/characters/lin_wan/plates/master.png"
+  ]
+ },
+ {
+  "variant": "new",
+  "shot": "ep01-S3",
+  "seed": 20261030,
+  "file": "D:\\NS-Final Studio\\golden\\visual_spec_pilot\\work\\new\\renders\\ep01\\S3\\takes\\image_001.png",
+  "raw": "D:\\NS-Final Studio\\golden\\visual_spec_pilot\\work\\new\\renders\\ep01\\S3\\takes\\image_001_raw.png",
+  "gen_seconds": 124.5,
+  "comfy_seconds": 54.2,
+  "score_seconds": 92.8,
+  "score": {
+   "total": 0.641,
+   "parts": {
+    "fidelity": 0.4,
+    "realism": 0.8,
+    "face": 1.0,
+    "face_cos": 0.935,
+    "colour_dist": 9.74,
+    "colour": 0.582,
+    "sharp_var": 156.1,
+    "bg_var": 151.5,
+    "sharp": 0.731,
+    "smooth_frac": 0.239,
+    "bokeh": 0.797
+   },
+   "missing": [
+    "林晚低头侧脸",
+    "齐刘海的阴影盖住上半张脸",
+    "嘴角有一抹极轻微、自己都没察觉的上扬"
+   ],
+   "reasons": [
+    "剧本细节不到一半"
+   ],
+   "weights": {
+    "fidelity": 0.4,
+    "face": 0.15,
+    "realism": 0.15,
+    "colour": 0.1,
+    "sharp": 0.1,
+    "bokeh": 0.1
+   }
+  },
+  "prompt": "图1只提供林晚的面部身份与发型：五官、脸型、发色发型、肤色与妆容；不要沿用图1的姿势、表情、服装、首饰、背景、构图和光线。画面内容完全按以下描述：【林晚】22岁中国成年女性，蓝发及腰、齐刘海、冷白皮肤、G罩杯、长腿，真人写实；手指甲为5厘米超长透明水晶甲、镶满钻石饰品；脚趾甲为2厘米长的性感美甲（手脚入镜时必须可见），极近特写，林晚低头侧脸，齐刘海的阴影盖住上半张脸，嘴角有一抹极轻微、自己都没察觉的上扬，面部清晰对焦，五官锐利，衣装完整、无裸露，专业电影镜头画面感，画面干净，徕卡镜头级锐利度与通透质感，85mm人像镜头f/1.2大光圈，主体锐利对焦，前景与背景奶油般柔焦虚化、柔和圆形光斑，浓郁饱和的暖色调电影调色，色彩丰富艳丽、通透明亮，柔和的大面积光源与暖调轮廓光、高光柔和不过曝，皮肤通透有真实质感，无字幕、无文字、无水印",
+  "references": [
+   "assets/characters/lin_wan/plates/master.png"
+  ]
+ },
+ {
+  "variant": "new",
+  "shot": "ep01-S4",
+  "seed": 20261030,
+  "file": "D:\\NS-Final Studio\\golden\\visual_spec_pilot\\work\\new\\renders\\ep01\\S4\\takes\\image_001.png",
+  "raw": "D:\\NS-Final Studio\\golden\\visual_spec_pilot\\work\\new\\renders\\ep01\\S4\\takes\\image_001_raw.png",
+  "gen_seconds": 93.6,
+  "comfy_seconds": 60.3,
+  "score_seconds": 177.4,
+  "score": {
+   "total": 0.704,
+   "parts": {
+    "fidelity": 0.833,
+    "realism": 0.8,
+    "face": 0.066,
+    "face_cos": 0.573,
+    "colour_dist": 17.07,
+    "colour": 0.566,
+    "sharp_var": 334.4,
+    "bg_var": 194.2,
+    "sharp": 0.841,
+    "smooth_frac": 0.318,
+    "bokeh": 1.0
+   },
+   "missing": [
+    "陈宇放下汤碗揉她头发"
+   ],
+   "reasons": [],
+   "weights": {
+    "fidelity": 0.4,
+    "face": 0.15,
+    "realism": 0.15,
+    "colour": 0.1,
+    "sharp": 0.1,
+    "bokeh": 0.1
+   }
+  },
+  "prompt": "图1是本镜头的画面构图。保持图1的构图、机位、景别、人物姿势与朝向、表情、服装、背景和光线完全不变，只把图1中林晚的五官长相、发色与发型换成图2人物的样子。图2只提供林晚的面部身份与发型：五官、脸型、发色发型、肤色与妆容；不要沿用图2的姿势、表情、服装、首饰、背景、构图和光线。画面内容完全按以下描述：【林晚】22岁中国成年女性，蓝发及腰、齐刘海、冷白皮肤、G罩杯、长腿，真人写实；手指甲为5厘米超长透明水晶甲、镶满钻石饰品；脚趾甲为2厘米长的性感美甲（手脚入镜时必须可见），【陈宇】23岁成年男性，温暖阳光，休闲装，夜晚出租屋餐桌，暖黄台灯，年轻男生陈宇端着一碗热汤放到蓝发女性面前，桌上家常菜，温馨狭小的家，暗部保留细节，面部可辨，画面光比1:4，非纯黑，衣装完整、无裸露，专业电影镜头画面感，画面干净，徕卡镜头级锐利度与通透质感，85mm人像镜头f/1.2大光圈，主体锐利对焦，前景与背景奶油般柔焦虚化、柔和圆形光斑，浓郁饱和的暖色调电影调色，色彩丰富艳丽、通透明亮，柔和的大面积光源与暖调轮廓光、高光柔和不过曝，皮肤通透有真实质感，无字幕、无文字、无水印",
+  "references": [
+   "data/renders/ep01/S4/takes/compose_001_r1_0.png",
+   "assets/characters/lin_wan/plates/master.png"
+  ]
+ },
+ {
+  "variant": "new",
+  "shot": "ep01-S5",
+  "seed": 20261030,
+  "file": "D:\\NS-Final Studio\\golden\\visual_spec_pilot\\work\\new\\renders\\ep01\\S5\\takes\\image_001.png",
+  "raw": "D:\\NS-Final Studio\\golden\\visual_spec_pilot\\work\\new\\renders\\ep01\\S5\\takes\\image_001_raw.png",
+  "gen_seconds": 97.3,
+  "comfy_seconds": 66.2,
+  "score_seconds": 125.3,
+  "score": {
+   "total": 0.788,
+   "parts": {
+    "fidelity": 0.667,
+    "realism": 0.8,
+    "face": 1.0,
+    "face_cos": 0.967,
+    "colour_dist": 8.96,
+    "colour": 0.742,
+    "sharp_var": 203.6,
+    "bg_var": 54.2,
+    "sharp": 0.77,
+    "smooth_frac": 0.475,
+    "bokeh": 1.0
+   },
+   "missing": [
+    "林晚背对镜头洗碗",
+    "她洗碗的动作规律"
+   ],
+   "reasons": [],
+   "weights": {
+    "fidelity": 0.4,
+    "face": 0.15,
+    "realism": 0.15,
+    "colour": 0.1,
+    "sharp": 0.1,
+    "bokeh": 0.1
+   }
+  },
+  "prompt": "图1只提供林晚的面部身份与发型：五官、脸型、发色发型、肤色与妆容；不要沿用图1的姿势、表情、服装、首饰、背景、构图和光线。画面内容完全按以下描述：【林晚】22岁中国成年女性，蓝发及腰、齐刘海、冷白皮肤、G罩杯、长腿，真人写实；手指甲为5厘米超长透明水晶甲、镶满钻石饰品；脚趾甲为2厘米长的性感美甲（手脚入镜时必须可见），厨房水槽前，林晚背对镜头洗碗，肩线绷直，窗外城市夜景，她面前窗外玻璃映出自己模糊的脸，暗部保留细节，面部可辨，画面光比1:4，非纯黑，衣装完整、无裸露，专业电影镜头画面感，画面干净，徕卡镜头级锐利度与通透质感，85mm人像镜头f/1.2大光圈，主体锐利对焦，前景与背景奶油般柔焦虚化、柔和圆形光斑，浓郁饱和的暖色调电影调色，色彩丰富艳丽、通透明亮，柔和的大面积光源与暖调轮廓光、高光柔和不过曝，皮肤通透有真实质感，无字幕、无文字、无水印",
+  "references": [
+   "assets/characters/lin_wan/items/makeup/M1_s0.png"
+  ]
+ }
+]

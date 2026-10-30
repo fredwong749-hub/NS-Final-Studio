@@ -1,0 +1,1 @@
+{"base": "CM", "override": {}, "note": "生产预设 = 项目方选定母版 CM_s1 的写实强度（中）：Base 35 步 CFG1 + texture-fix VAE + Anything2Real 0.45 + krea2 0.4；身份类图加 --refine（denoise 0.25）"}

@@ -1,0 +1,273 @@
+[
+  {
+    "file": "H0_front_s0.png",
+    "kind": "item/hair",
+    "design": "LW-H0",
+    "name": "默认：冰蓝及腰直发齐刘海（正）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。天蓝色及腰顺直长发，厚度均匀的齐刘海盖到眉毛，正面头肩照，保持图1的妆容，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 117685487386711,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "84923a945f77afc52b677e3665d2ce48a129ab48e7230939c3007570876de664",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.485,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 84.5,
+    "created_at": "2026-10-30T08:28:13"
+  },
+  {
+    "file": "H1_wet_s0.png",
+    "kind": "item/hair",
+    "design": "LW-H1",
+    "name": "湿发贴脸",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。刚洗过的湿发：天蓝色头发湿透成一缕一缕贴在脸颊和肩上，刘海湿成几股，皮肤上有细小水珠，素颜，正面头肩照，保持图1的妆容，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 76726963235853,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "dc38d982b67f340e2c176970f9340314a52c14986f4171b450270ea70843b5fc",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.649,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 72.5,
+    "created_at": "2026-10-30T08:31:05"
+  },
+  {
+    "file": "H2_messy_s0.png",
+    "kind": "item/hair",
+    "design": "LW-H2",
+    "name": "凌乱 / 汗湿一缕黏额角",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。头发略显凌乱，齐刘海被汗黏住一缕贴在额角，几缕碎发散在脸侧，脸颊微红，正面头肩照，保持图1的妆容，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 33448888892303,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "066ddf60e393f66101345684b39cbc63bb7627c3a79ebbaa5e45aa49881060e5",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.682,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 81.4,
+    "created_at": "2026-10-30T08:32:28"
+  },
+  {
+    "file": "H3_wind_s0.png",
+    "kind": "item/hair",
+    "design": "LW-H3",
+    "name": "风吹发",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。一阵风从侧面吹来，天蓝色长发和刘海被吹向一侧飘起，发丝在空中散开，正面头肩照，保持图1的妆容，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 249036537955330,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "220e821fc08a2ef3785e99706a1bd10398962a806dd3b25d588f2d20c3142d39",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.615,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 87.3,
+    "created_at": "2026-10-30T08:33:56"
+  },
+  {
+    "file": "H4_bangs_swept_s0.png",
+    "kind": "item/hair",
+    "design": "LW-H4",
+    "name": "刘海被理过 / 侧拨",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。齐刘海被轻轻拨向一侧，露出一点额头，一侧头发别在耳后，正面头肩照，保持图1的妆容，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 203976561239912,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "c909a135ea0db7fe4903b8e7bfb26553b33402c1799442db4bae0624d6825dfe",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.664,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 87.3,
+    "created_at": "2026-10-30T08:35:25"
+  },
+  {
+    "file": "H0_back_s0.png",
+    "kind": "item/hair",
+    "design": "LW-H0",
+    "name": "默认：冰蓝及腰直发（背）",
+    "prompt": "transform the image to realistic photograph，图1只提供林晚的身份与妆容：同一个人，保持图1的脸型、眉形、眼型与眼线、睫毛、鼻子、唇形与饱满度、冷白肤色、脸颊小痣、灰蓝色眼睛（大小与图1一致）、与图1相同的天蓝色及腰直发与齐刘海，以及图1的粉甜妆容（粉色腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）；不要沿用图1的姿势、手势、项链、服装、背景和构图。背面照：她完全背对镜头站立，看不到脸，镜头只拍到她的后脑、后背和天蓝色顺直长发一直垂到腰部，发尾整齐，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光",
+    "negative": "",
+    "seed": 106402258548893,
+    "size": [
+      768,
+      1344
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.25
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png"
+    ],
+    "sha256": "0d585092ded8a04e04d85b81d0f1323a3ea4c11baaff5ed31c10b6455f1676ba",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.717,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 72.4,
+    "created_at": "2026-10-30T10:11:37",
+    "note": "redo (seed offset 1) replacing a rejected s0"
+  }
+]

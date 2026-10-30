@@ -1,0 +1,496 @@
+05:04:33 master_ab/R0_s0 [R0] 18s seed=244074933616316 qc_bare=0.691
+05:04:52 master_ab/R0_s1 [R0] 18s seed=255805980988889 qc_bare=0.675
+05:05:44 master_ab/R1_s0 [R1] 51s seed=154193684413766 qc_bare=0.629
+05:07:04 master_ab/R1_s1 [R1] 78s seed=203831096158098 qc_bare=0.591
+05:08:09 master_ab/R5_s0 [R5] 84s seed=216629752519958 qc_bare=0.606
+05:08:39 master_ab/R4_s0 [R4] 93s seed=271304585227963 qc_bare=0.716
+05:09:20 master_ab/R5_s1 [R5] 69s seed=277036734199665 qc_bare=0.575
+05:10:01 master_ab/R4_s1 [R4] 81s seed=216047468528262 qc_bare=0.637
+05:10:01 done 6 images in 366s
+05:11:05 ERROR master_ab/R6_s0: ComfyError: 执行失败: Tensor 'diffusion_model.transformer_blocks.24.attn.to_k.lora_B.weight' extends past the end of the file.
+
+File path: C:\Users\fredw\Documents\Codex\Apps\ComfyUI\models\loras\purelens_qwen21.safetensors
+
+The safetensors file is corrupt/incomplete. Check the file size and make sure you have copi
+05:11:08 ERROR master_ab/R6_s1: ComfyError: 执行失败: Tensor 'diffusion_model.transformer_blocks.24.attn.to_k.lora_B.weight' extends past the end of the file.
+
+File path: C:\Users\fredw\Documents\Codex\Apps\ComfyUI\models\loras\purelens_qwen21.safetensors
+
+The safetensors file is corrupt/incomplete. Check the file size and make sure you have copi
+05:11:08 done 2 images in 277s
+05:13:03 master_ab/R2_s0 [R2] 84s seed=243863298536504 qc_bare=0.468
+05:14:47 master_ab/R2_s1 [R2] 102s seed=3085170031541 qc_bare=0.617
+05:16:33 master_ab/R3_s0 [R3] 105s seed=140946921167094 qc_bare=0.443
+05:18:32 master_ab/R3_s1 [R3] 117s seed=53318689435807 qc_bare=0.461
+05:19:27 master_ab/R7_s0 [R7] 54s seed=108770021686261 qc_bare=0.318
+05:20:19 master_ab/R7_s1 [R7] 51s seed=215185500020971 qc_bare=0.638
+05:21:09 QC FLAG master_ab/R8_s0 seed=279729759303146 {'nudity': True, 'hits': [], 'clip_bare': 0.811, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+05:21:52 master_ab/R8_s0 [R8] 42s seed=60766625931158 qc_bare=0.788
+05:22:35 master_ab/R8_s1 [R8] 42s seed=124138321274046 qc_bare=0.73
+05:23:40 master_ab/R9_s0 [R9] 63s seed=184691523123928 qc_bare=0.381
+05:24:47 master_ab/R9_s1 [R9] 66s seed=59738842950558 qc_bare=0.35
+05:24:47 done 10 images in 802s
+05:26:24 master_ab/R7_v2_s0 [R7] 48s seed=271767878717696 qc_bare=0.42
+05:27:16 master_ab/R7_v2_s1 [R7] 51s seed=237533729665821 qc_bare=0.371
+05:28:24 master_ab/R7_v2_s2 [R7] 66s seed=106796100051319 qc_bare=0.3
+05:29:31 master_ab/R7_v2_s3 [R7] 66s seed=23975918951027 qc_bare=0.378
+05:29:31 done 4 images in 256s
+05:31:34 master_ab/R7_v2ref_s0 [R7] 108s seed=80485483170593 qc_bare=0.56
+05:33:39 master_ab/R7_v2ref_s1 [R7] 123s seed=175395093598525 qc_bare=0.419
+05:35:59 master_ab/R7_v2ref_s2 [R7] 138s seed=125176843390626 qc_bare=0.485
+05:37:47 master_ab/R7_v2ref_s3 [R7] 106s seed=26603979528028 qc_bare=0.453
+05:37:47 done 4 images in 495s
+05:39:24 plates/id_front_s0 [R2] 45s seed=59082241253671 qc_bare=0.425
+05:40:35 plates/id_front_bare_s0 [R2] 69s seed=194980807068895 qc_bare=0.627
+05:42:02 plates/id_front_heavy_s0 [R2] 84s seed=29049869550644 qc_bare=0.594
+05:43:06 plates/id_34L_s0 [R2] 60s seed=152375527659589 qc_bare=0.374
+05:44:24 QC FLAG plates/body_F_s0 seed=32559094747237 {'nudity': True, 'hits': [{'class': 'FEMALE_GENITALIA_EXPOSED', 'score': 0.446}], 'clip_bare': 0.917, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+05:45:20 QC FLAG plates/body_F_s0 seed=136704008789010 {'nudity': True, 'hits': [], 'clip_bare': 0.898, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+05:46:15 QC FLAG plates/body_F_s0 seed=86805853678065 {'nudity': True, 'hits': [], 'clip_bare': 0.918, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+05:47:08 QC FLAG plates/body_F_s0 seed=83267668787286 {'nudity': True, 'hits': [{'class': 'FEMALE_GENITALIA_EXPOSED', 'score': 0.5}], 'clip_bare': 0.91, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+05:47:08 FAILED plates/body_F_s0: 4 次均被质检拦截
+05:47:08 done 4 images in 524s
+05:47:40 skip plates/id_front_s0 (exists)
+05:47:40 skip plates/id_front_bare_s0 (exists)
+05:51:52 master_cand/CL_s0 [CL] 172s seed=71242088288029 qc_bare=0.593
+05:54:19 master_cand/CL_s1 [CL] 145s seed=223546264276588 qc_bare=0.496
+05:56:21 master_cand/CM_s0 [CM] 121s seed=81552224694894 qc_bare=0.544
+05:59:15 master_cand/CM_s1 [CM] 172s seed=176464644114521 qc_bare=0.524
+06:01:12 master_cand/CS_s0 [CS] 114s seed=217306741336561 qc_bare=0.653
+06:02:33 ERROR master_cand/CS_s1: ComfyError: 执行失败: HostBuffer.read_file_slice failed
+06:02:33 done 5 images in 834s
+06:05:45 plates/id_front_s0 [CM] 96s seed=59082241253671 qc_bare=0.481
+06:07:08 plates/id_front_bare_s0 [CM] 81s seed=194980807068895 qc_bare=0.638
+06:08:45 plates/id_front_heavy_s0 [CM] 97s seed=29049869550644 qc_bare=0.743
+06:10:02 plates/id_34L_s0 [CM] 75s seed=152375527659589 qc_bare=0.301
+06:11:40 QC FLAG plates/body_F_s0 seed=32559094747237 {'nudity': True, 'hits': [], 'clip_bare': 0.987, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+06:13:18 QC FLAG plates/body_F_s0 seed=136704008789010 {'nudity': True, 'hits': [], 'clip_bare': 0.965, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+06:14:31 QC FLAG plates/body_F_s0 seed=86805853678065 {'nudity': True, 'hits': [], 'clip_bare': 0.962, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+06:16:06 QC FLAG plates/body_F_s0 seed=83267668787286 {'nudity': True, 'hits': [], 'clip_bare': 0.953, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+06:16:06 FAILED plates/body_F_s0: 4 次均被质检拦截
+06:16:06 done 4 images in 734s
+06:17:21 QC FLAG plates/body_F_s5 seed=8854803766063 {'nudity': True, 'hits': [], 'clip_bare': 0.96, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+06:17:30 ERROR plates/body_F_s5: ComfyError: 执行失败: HostBuffer.read_file_slice failed
+06:17:30 done 0 images in 65s
+06:19:16 QC FLAG plates/body_F_s6 seed=221614260417018 {'nudity': True, 'hits': [], 'clip_bare': 0.891, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+06:20:48 QC FLAG plates/body_F_s6 seed=107424841189065 {'nudity': True, 'hits': [], 'clip_bare': 0.827, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+06:22:23 QC FLAG plates/body_F_s6 seed=31832318472578 {'nudity': True, 'hits': [], 'clip_bare': 0.936, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+06:23:34 QC FLAG plates/body_F_s6 seed=24832592940075 {'nudity': True, 'hits': [], 'clip_bare': 0.963, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+06:23:34 FAILED plates/body_F_s6: 4 次均被质检拦截
+06:23:34 done 0 images in 349s
+06:24:42 QC FLAG plates/body_F_s6 seed=221614260417018 {'nudity': True, 'hits': [], 'clip_bare': 0.944, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+06:25:16 QC FLAG plates/body_F_s6 seed=107424841189065 {'nudity': True, 'hits': [], 'clip_bare': 0.869, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+06:25:42 QC FLAG plates/body_F_s6 seed=31832318472578 {'nudity': True, 'hits': [], 'clip_bare': 0.926, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+06:26:43 QC FLAG plates/body_F_s6 seed=24832592940075 {'nudity': True, 'hits': [], 'clip_bare': 0.975, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+06:26:43 FAILED plates/body_F_s6: 4 次均被质检拦截
+06:26:43 done 0 images in 172s
+06:28:49 plates/body_F_s7 [CM] 78s seed=261926291562644 qc_bare=0.292
+06:28:49 done 1 images in 96s
+06:29:43 items/outfit/O09_product_s0 [CM] 36s seed=227528436730165
+06:30:16 items/outfit/O01_product_s0 [CM] 33s seed=9298420112711
+06:30:43 items/outfit/O02_product_s0 [CM] 27s seed=102136629819262
+06:31:25 items/outfit/O03_product_s0 [CM] 42s seed=231123435014003
+06:31:58 items/outfit/O05_product_s0 [CM] 33s seed=109197660164427
+06:32:29 items/outfit/O07_product_s0 [CM] 30s seed=270927046717085
+06:33:11 items/outfit/O08_product_s0 [CM] 42s seed=37457097365815
+06:33:44 items/outfit/O10_product_s0 [CM] 33s seed=98933258323391
+06:34:14 items/outfit/O11_product_s0 [CM] 30s seed=145552249099160
+06:35:03 items/outfit/O12_flatlay_dark_s0 [CM] 48s seed=190685517147276
+06:35:39 items/outfit/O12_flatlay_white_s0 [CM] 36s seed=155287325884568
+06:36:39 items/outfit/O12_mannequin_s0 [CM] 60s seed=108257171485601
+06:37:09 items/outfit/O13_product_s0 [CM] 30s seed=259730768663273
+06:37:52 items/outfit/O14_product_s0 [CM] 42s seed=255745511331712
+06:38:16 items/outfit/O02_product_s1 [CM] 55s seed=207513685979495
+06:38:16 done 1 images in 55s
+06:38:46 items/outfit/O15_product_s0 [CM] 54s seed=264400335120107
+06:39:37 items/outfit/O16_product_s0 [CM] 51s seed=192118163096457
+06:40:07 items/outfit/O19_product_s0 [CM] 30s seed=12288623055100
+06:40:37 items/outfit/O21_product_s0 [CM] 30s seed=83200198773811
+06:41:20 items/shoes/S01_side45_s0 [CM] 42s seed=27380799175363
+06:41:53 items/shoes/S01_pair_s0 [CM] 33s seed=183669322686710
+06:42:35 items/shoes/S01_profile_s0 [CM] 42s seed=186275966342184
+06:43:20 items/shoes/S01_back_s0 [CM] 45s seed=59754532845121
+06:43:50 items/shoes/S02_side45_s0 [CM] 30s seed=6122966205665
+06:44:33 items/shoes/S02_pair_s0 [CM] 42s seed=110797998393733
+06:45:03 items/shoes/S02_profile_s0 [CM] 30s seed=108683900617266
+06:45:45 items/shoes/S02_back_s0 [CM] 42s seed=41625439981752
+06:46:15 items/accessory/A01_nipple_rings_s0 [CM] 30s seed=76570404469296
+06:47:06 items/accessory/A02_rings9_s0 [CM] 51s seed=148682117626210
+06:47:29 items/shoes/S02_side45_s1 [CM] 72s seed=118148686272364
+06:47:29 done 1 images in 73s
+06:47:58 items/accessory/A03_beads9_s0 [CM] 51s seed=133247733838538
+06:48:21 items/shoes/S02_profile_s1 [CM] 51s seed=243567147804487
+06:48:21 done 1 images in 51s
+06:48:49 items/accessory/A04_belly_chain_s0 [CM] 51s seed=900714649805
+06:49:12 items/shoes/S02_pair_s1 [CM] 51s seed=181005325484348
+06:49:12 done 1 images in 52s
+06:49:56 items/accessory/A05_tongue_stud_s0 [CM] 66s seed=113120926323011
+06:50:16 items/shoes/S02_profile_s2 [CM] 48s seed=72099648283233
+06:50:16 done 1 images in 48s
+06:50:47 items/accessory/A06_velvet_box_s0 [CM] 51s seed=38322592275561
+06:51:29 items/accessory/A07_vanity_case_s0 [CM] 42s seed=78398236262937
+06:52:00 items/accessory/A08_strawberry_necklace_s0 [CM] 30s seed=136676746646446
+06:52:42 items/tattoo/TT1_mandala_s0 [CM] 42s seed=1588437113324
+06:53:12 items/tattoo/TT2_snake_s0 [CM] 30s seed=118840869050258
+06:53:57 items/tattoo/TT3_chen_s0 [CM] 45s seed=183514743453909
+06:54:27 items/tattoo/TT4_wings_s0 [CM] 30s seed=200469048170079
+06:55:32 items/shoes/S01_worn_s0 [CM] 51s seed=100075744960405 qc_bare=0.621
+06:55:49 items/accessory/A02_rings9_s1 [CM] 54s seed=279301243421321
+06:55:49 done 1 images in 55s
+06:56:51 items/shoes/S02_worn_s0 [CM] 78s seed=44411164975828 qc_bare=0.608
+06:57:14 items/accessory/A03_beads9_s1 [CM] 84s seed=169213745590971
+06:57:14 done 1 images in 85s
+06:57:46 QC FLAG items/nails/N1_BK_s0 seed=190776392685277 {'nudity': True, 'hits': [], 'clip_bare': 0.845, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+06:58:09 items/tattoo/TT1_mandala_s1 [CM] 54s seed=151643505507083
+06:58:09 done 1 images in 54s
+06:58:39 QC FLAG items/nails/N1_BK_s0 seed=129640336967131 {'nudity': True, 'hits': [], 'clip_bare': 0.952, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+06:59:24 items/accessory/A02_rings9_s2 [CM] 64s seed=268914267441668
+06:59:24 done 1 images in 64s
+06:59:46 items/nails/N1_BK_s0 [CM] 66s seed=65798108289399 qc_bare=0.726
+06:59:59 skip items/outfit/O09_product_s0 (exists)
+06:59:59 skip plates/id_front_s0 (exists)
+06:59:59 skip plates/id_front_bare_s0 (exists)
+06:59:59 skip items/outfit/O01_product_s0 (exists)
+06:59:59 skip plates/id_front_heavy_s0 (exists)
+06:59:59 skip items/outfit/O02_product_s0 (exists)
+06:59:59 skip plates/id_34L_s0 (exists)
+06:59:59 skip items/outfit/O03_product_s0 (exists)
+06:59:59 skip items/outfit/O05_product_s0 (exists)
+06:59:59 skip items/outfit/O07_product_s0 (exists)
+06:59:59 skip items/outfit/O08_product_s0 (exists)
+06:59:59 skip items/outfit/O10_product_s0 (exists)
+06:59:59 skip items/outfit/O11_product_s0 (exists)
+06:59:59 skip items/outfit/O12_flatlay_dark_s0 (exists)
+06:59:59 skip items/outfit/O12_flatlay_white_s0 (exists)
+06:59:59 skip items/outfit/O12_mannequin_s0 (exists)
+06:59:59 skip items/outfit/O13_product_s0 (exists)
+06:59:59 skip items/outfit/O14_product_s0 (exists)
+06:59:59 skip items/outfit/O15_product_s0 (exists)
+06:59:59 skip items/outfit/O16_product_s0 (exists)
+06:59:59 skip items/outfit/O19_product_s0 (exists)
+06:59:59 skip items/outfit/O21_product_s0 (exists)
+06:59:59 skip items/shoes/S01_side45_s0 (exists)
+06:59:59 skip items/shoes/S01_pair_s0 (exists)
+06:59:59 skip items/shoes/S01_profile_s0 (exists)
+06:59:59 skip items/shoes/S01_back_s0 (exists)
+06:59:59 skip items/shoes/S02_side45_s0 (exists)
+06:59:59 skip items/shoes/S02_pair_s0 (exists)
+06:59:59 skip items/shoes/S02_profile_s0 (exists)
+06:59:59 skip items/shoes/S02_back_s0 (exists)
+06:59:59 skip items/accessory/A01_nipple_rings_s0 (exists)
+06:59:59 skip items/accessory/A02_rings9_s0 (exists)
+06:59:59 skip items/accessory/A03_beads9_s0 (exists)
+06:59:59 skip items/accessory/A04_belly_chain_s0 (exists)
+06:59:59 skip items/accessory/A05_tongue_stud_s0 (exists)
+06:59:59 skip items/accessory/A06_velvet_box_s0 (exists)
+06:59:59 skip items/accessory/A07_vanity_case_s0 (exists)
+06:59:59 skip items/accessory/A08_strawberry_necklace_s0 (exists)
+06:59:59 skip items/tattoo/TT1_mandala_s0 (exists)
+06:59:59 skip items/tattoo/TT2_snake_s0 (exists)
+06:59:59 skip items/tattoo/TT3_chen_s0 (exists)
+06:59:59 skip items/tattoo/TT4_wings_s0 (exists)
+06:59:59 skip items/shoes/S01_worn_s0 (exists)
+06:59:59 skip items/shoes/S02_worn_s0 (exists)
+06:59:59 skip items/nails/N1_BK_s0 (exists)
+07:00:46 skip items/outfit/O09_product_s0 (exists)
+07:00:46 skip items/outfit/O01_product_s0 (exists)
+07:00:46 skip items/outfit/O02_product_s0 (exists)
+07:00:46 skip items/outfit/O03_product_s0 (exists)
+07:00:46 skip items/outfit/O05_product_s0 (exists)
+07:00:46 skip items/outfit/O07_product_s0 (exists)
+07:00:46 skip items/outfit/O08_product_s0 (exists)
+07:00:46 skip items/outfit/O10_product_s0 (exists)
+07:00:46 skip items/outfit/O11_product_s0 (exists)
+07:00:46 skip items/outfit/O12_flatlay_dark_s0 (exists)
+07:00:46 skip items/outfit/O12_flatlay_white_s0 (exists)
+07:00:46 skip items/outfit/O12_mannequin_s0 (exists)
+07:00:46 skip items/outfit/O13_product_s0 (exists)
+07:00:46 skip items/outfit/O14_product_s0 (exists)
+07:00:46 skip items/outfit/O15_product_s0 (exists)
+07:00:46 skip items/outfit/O16_product_s0 (exists)
+07:00:46 skip items/outfit/O19_product_s0 (exists)
+07:00:46 skip items/outfit/O21_product_s0 (exists)
+07:00:46 skip items/shoes/S01_side45_s0 (exists)
+07:00:46 skip items/shoes/S01_pair_s0 (exists)
+07:00:46 skip items/shoes/S01_profile_s0 (exists)
+07:00:46 skip items/shoes/S01_back_s0 (exists)
+07:00:46 skip items/shoes/S02_side45_s0 (exists)
+07:00:46 skip items/shoes/S02_pair_s0 (exists)
+07:00:46 skip items/shoes/S02_profile_s0 (exists)
+07:00:46 skip items/shoes/S02_back_s0 (exists)
+07:00:46 skip items/accessory/A01_nipple_rings_s0 (exists)
+07:00:46 skip items/accessory/A02_rings9_s0 (exists)
+07:00:46 skip items/accessory/A03_beads9_s0 (exists)
+07:00:46 skip items/accessory/A04_belly_chain_s0 (exists)
+07:00:46 skip items/accessory/A05_tongue_stud_s0 (exists)
+07:00:46 skip items/accessory/A06_velvet_box_s0 (exists)
+07:00:46 skip items/accessory/A07_vanity_case_s0 (exists)
+07:00:46 skip items/accessory/A08_strawberry_necklace_s0 (exists)
+07:00:46 skip items/tattoo/TT1_mandala_s0 (exists)
+07:00:46 skip items/tattoo/TT2_snake_s0 (exists)
+07:00:46 skip items/tattoo/TT3_chen_s0 (exists)
+07:00:46 skip items/tattoo/TT4_wings_s0 (exists)
+07:00:46 skip items/shoes/S01_worn_s0 (exists)
+07:00:46 skip items/shoes/S02_worn_s0 (exists)
+07:00:46 skip items/nails/N1_BK_s0 (exists)
+07:02:35 items/nails/N1_PL_s0 [CM] 94s seed=203515046623138 qc_bare=0.656
+07:03:03 items/nails/N2_BK_s0 [CM] 27s seed=148039793842280 qc_bare=0.568
+07:03:34 items/nails/N2_PL_s0 [CM] 30s seed=229202683955875 qc_bare=0.745
+07:04:27 items/nails/N3_BK_s0 [CM] 51s seed=62614507496487 qc_bare=0.637
+07:04:55 items/nails/N3_PL_s0 [CM] 27s seed=96987620012297 qc_bare=0.796
+07:05:26 items/nails/N4_BK_s0 [CM] 30s seed=190835749440681 qc_bare=0.501
+07:06:09 items/nails/N4_PL_s0 [CM] 42s seed=73262432122023 qc_bare=0.329
+07:06:40 QC FLAG items/nails/N5_BK_s0 seed=139381082890588 {'nudity': True, 'hits': [], 'clip_bare': 0.9, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+07:07:24 items/nails/N5_BK_s0 [CM] 42s seed=36075240966589 qc_bare=0.649
+07:07:55 QC FLAG items/nails/N5_PL_s0 seed=155972411823445 {'nudity': True, 'hits': [], 'clip_bare': 0.82, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+07:08:35 items/nails/N5_PL_s0 [CM] 39s seed=163939407261443 qc_bare=0.689
+07:09:06 items/nails/N6_BK_s0 [CM] 30s seed=266370696445664 qc_bare=0.403
+07:09:50 items/nails/N6_PL_s0 [CM] 42s seed=136914322927068 qc_bare=0.661
+07:10:42 QC FLAG items/nails/T1_BARE_s0 seed=111636476098335 {'nudity': True, 'hits': [], 'clip_bare': 0.922, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+07:11:13 QC FLAG items/nails/T1_BARE_s0 seed=158414781239122 {'nudity': True, 'hits': [], 'clip_bare': 0.879, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+07:11:44 QC FLAG items/nails/T1_BARE_s0 seed=98650841459722 {'nudity': True, 'hits': [], 'clip_bare': 0.849, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+07:12:25 QC FLAG items/nails/T1_BARE_s0 seed=204173263873426 {'nudity': True, 'hits': [], 'clip_bare': 0.869, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+07:12:25 FAILED items/nails/T1_BARE_s0: 4 次均被质检拦截
+07:12:59 items/nails/T1_HEEL_s0 [CM] 33s seed=107249358635431 qc_bare=0.659
+07:13:42 QC FLAG items/nails/T2_BARE_s0 seed=105603201844946 {'nudity': True, 'hits': [], 'clip_bare': 0.935, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+07:14:13 QC FLAG items/nails/T2_BARE_s0 seed=249187390777506 {'nudity': True, 'hits': [], 'clip_bare': 0.926, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+07:14:56 QC FLAG items/nails/T2_BARE_s0 seed=171401441773574 {'nudity': True, 'hits': [], 'clip_bare': 0.921, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+07:15:24 QC FLAG items/nails/T2_BARE_s0 seed=204300358435506 {'nudity': True, 'hits': [], 'clip_bare': 0.893, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+07:15:24 FAILED items/nails/T2_BARE_s0: 4 次均被质检拦截
+07:16:17 items/nails/T2_HEEL_s0 [CM] 51s seed=100152056845497 qc_bare=0.69
+07:16:48 QC FLAG items/nails/T3_BARE_s0 seed=110427019495054 {'nudity': True, 'hits': [], 'clip_bare': 0.903, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+07:17:16 QC FLAG items/nails/T3_BARE_s0 seed=254300801199232 {'nudity': True, 'hits': [], 'clip_bare': 0.962, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+07:17:59 QC FLAG items/nails/T3_BARE_s0 seed=143974168629664 {'nudity': True, 'hits': [], 'clip_bare': 0.823, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+07:18:39 QC FLAG items/nails/T3_BARE_s0 seed=233197901248885 {'nudity': True, 'hits': [], 'clip_bare': 0.857, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+07:18:39 FAILED items/nails/T3_BARE_s0: 4 次均被质检拦截
+07:19:13 items/nails/T3_HEEL_s0 [CM] 33s seed=109082143385053 qc_bare=0.638
+07:19:54 QC FLAG items/nails/T4_BARE_s0 seed=111262152929106 {'nudity': True, 'hits': [], 'clip_bare': 0.824, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+07:20:46 items/nails/T4_BARE_s0 [CM] 51s seed=66580686847670 qc_bare=0.649
+07:21:20 items/nails/T4_HEEL_s0 [CM] 33s seed=49746319521164 qc_bare=0.628
+07:21:20 done 16 images in 1234s
+07:21:23 skip plates/id_front_s0 (exists)
+07:21:23 skip plates/id_front_bare_s0 (exists)
+07:21:23 skip plates/id_front_heavy_s0 (exists)
+07:21:23 skip plates/id_34L_s0 (exists)
+07:22:50 items/nails/T1_BARE_s0 [CM] 60s seed=111636476098335 qc_bare=0.585
+07:23:17 plates/id_34R_s0 [CM] 103s seed=14768758654090 qc_bare=0.447
+07:23:42 QC FLAG items/nails/T2_BARE_s0 seed=105603201844946 {'nudity': True, 'hits': [], 'clip_bare': 0.864, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+07:24:52 QC FLAG items/nails/T2_BARE_s0 seed=249187390777506 {'nudity': True, 'hits': [], 'clip_bare': 0.902, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+07:25:28 plates/id_profile_s0 [CM] 127s seed=44201306175418 qc_bare=0.269
+07:25:54 QC FLAG items/nails/T2_BARE_s0 seed=171401441773574 {'nudity': True, 'hits': [], 'clip_bare': 0.91, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+07:27:04 QC FLAG items/nails/T2_BARE_s0 seed=204300358435506 {'nudity': True, 'hits': [], 'clip_bare': 0.906, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+07:27:04 FAILED items/nails/T2_BARE_s0: 4 次均被质检拦截
+07:27:42 plates/id_back_s0 [CM] 133s seed=249452585201779 qc_bare=0.723
+07:28:05 items/nails/T3_BARE_s0 [CM] 60s seed=110427019495054 qc_bare=0.729
+07:28:05 skip items/nails/T4_BARE_s0 (exists)
+07:28:05 done 2 images in 384s
+07:29:41 plates/body_F_s0 [CM] 118s seed=32559094747237 qc_bare=0.435
+07:31:04 plates/body_S_s0 [CM] 81s seed=168906018269135 qc_bare=0.591
+07:32:30 plates/body_B_s0 [CM] 84s seed=223720101968989 qc_bare=0.288
+07:33:52 expressions/calm_s0 [CM] 81s seed=133189066630499 qc_bare=0.54
+07:35:27 expressions/smile_s0 [CM] 93s seed=251551827227998 qc_bare=0.601
+07:36:43 expressions/cry_s0 [CM] 75s seed=249979184034144 qc_bare=0.573
+07:38:20 expressions/angry_s0 [CM] 96s seed=113996680033067 qc_bare=0.676
+07:39:49 expressions/surprised_s0 [CM] 87s seed=95967884547196 qc_bare=0.514
+07:41:24 expressions/seductive_s0 [CM] 94s seed=69637292670718 qc_bare=0.504
+07:42:38 items/outfit/O00_worn_s0 [CM] 72s seed=229133255054028 qc_bare=0.274
+07:44:37 items/outfit/O09_worn_s0 [CM] 118s seed=62805070845753 qc_bare=0.418
+07:46:24 items/outfit/O01_worn_s0 [CM] 106s seed=142744460036786 qc_bare=0.526
+07:48:24 items/outfit/O02_worn_s0 [CM] 117s seed=8282487793357 qc_bare=0.718
+07:50:11 items/outfit/O03_worn_s0 [CM] 106s seed=125529599678100 qc_bare=0.563
+07:51:34 items/outfit/O04_worn_s0 [CM] 81s seed=176295447501575 qc_bare=0.392
+07:52:59 QC FLAG items/outfit/O06_worn_s0 seed=224976075500646 {'nudity': True, 'hits': [], 'clip_bare': 0.944, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+07:54:34 QC FLAG items/outfit/O06_worn_s0 seed=190263066489495 {'nudity': True, 'hits': [], 'clip_bare': 0.903, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+07:55:57 QC FLAG items/outfit/O06_worn_s0 seed=31393482527886 {'nudity': True, 'hits': [], 'clip_bare': 0.926, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+07:57:23 QC FLAG items/outfit/O06_worn_s0 seed=107468385406158 {'nudity': True, 'hits': [], 'clip_bare': 0.892, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+07:57:23 FAILED items/outfit/O06_worn_s0: 4 次均被质检拦截
+07:59:13 items/outfit/O07_worn_s0 [CM] 108s seed=199062719605465 qc_bare=0.426
+08:01:12 QC FLAG items/outfit/O08_worn_s0 seed=34717918837997 {'nudity': True, 'hits': [], 'clip_bare': 0.832, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+08:02:50 items/outfit/O08_worn_s0 [CM] 96s seed=34880869971486 qc_bare=0.765
+08:04:38 items/outfit/O15_worn_s0 [CM] 105s seed=17831032715193 qc_bare=0.225
+08:06:22 QC FLAG items/outfit/O16_worn_s0 seed=58842267565323 {'nudity': True, 'hits': [], 'clip_bare': 0.974, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+08:08:09 QC FLAG items/outfit/O16_worn_s0 seed=267082810654882 {'nudity': True, 'hits': [], 'clip_bare': 0.924, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+08:10:06 QC FLAG items/outfit/O16_worn_s0 seed=10698686981636 {'nudity': True, 'hits': [], 'clip_bare': 0.95, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+08:11:52 QC FLAG items/outfit/O16_worn_s0 seed=143609681728061 {'nudity': True, 'hits': [], 'clip_bare': 0.944, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+08:11:52 FAILED items/outfit/O16_worn_s0: 4 次均被质检拦截
+08:13:18 items/outfit/O17_worn_s0 [CM] 84s seed=196236336608426 qc_bare=0.683
+08:14:44 QC FLAG items/outfit/O18_worn_s0 seed=16432323312452 {'nudity': True, 'hits': [], 'clip_bare': 0.947, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+08:16:16 QC FLAG items/outfit/O18_worn_s0 seed=120703578429652 {'nudity': True, 'hits': [], 'clip_bare': 0.979, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+08:17:30 QC FLAG items/outfit/O18_worn_s0 seed=115399727923286 {'nudity': True, 'hits': [], 'clip_bare': 0.972, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+08:18:53 QC FLAG items/outfit/O18_worn_s0 seed=268421515872508 {'nudity': True, 'hits': [], 'clip_bare': 0.961, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+08:18:53 FAILED items/outfit/O18_worn_s0: 4 次均被质检拦截
+08:20:19 QC FLAG items/outfit/O20_worn_s0 seed=262375267247877 {'nudity': True, 'hits': [], 'clip_bare': 0.893, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+08:21:44 QC FLAG items/outfit/O20_worn_s0 seed=56626360518491 {'nudity': True, 'hits': [], 'clip_bare': 0.818, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+08:23:19 QC FLAG items/outfit/O20_worn_s0 seed=88806901500049 {'nudity': True, 'hits': [], 'clip_bare': 0.923, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+08:24:45 QC FLAG items/outfit/O20_worn_s0 seed=183826457826131 {'nudity': True, 'hits': [], 'clip_bare': 0.949, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+08:24:45 FAILED items/outfit/O20_worn_s0: 4 次均被质检拦截
+08:26:48 items/outfit/O21_worn_s0 [CM] 121s seed=176730633509730 qc_bare=0.528
+08:28:13 items/hair/H0_front_s0 [CM] 85s seed=117685487386711 qc_bare=0.485
+08:29:52 items/hair/H0_back_s0 [CM] 97s seed=48513151732467 qc_bare=0.602
+08:31:05 items/hair/H1_wet_s0 [CM] 72s seed=76726963235853 qc_bare=0.649
+08:32:28 items/hair/H2_messy_s0 [CM] 81s seed=33448888892303 qc_bare=0.682
+08:33:56 items/hair/H3_wind_s0 [CM] 87s seed=249036537955330 qc_bare=0.615
+08:35:25 items/hair/H4_bangs_swept_s0 [CM] 87s seed=203976561239912 qc_bare=0.664
+08:37:18 items/makeup/L1_bare_commute_s0 [CM] 112s seed=94821094533166 qc_bare=0.481
+08:39:02 items/makeup/L2_half_red_s0 [CM] 102s seed=231904355888153 qc_bare=0.303
+08:40:46 items/makeup/L3_red_lip_city_s0 [CM] 102s seed=220534952823337 qc_bare=0.37
+08:42:31 items/makeup/L4_queen_s0 [CM] 103s seed=215888449532310 qc_bare=0.671
+08:44:30 items/makeup/L5_night_crystal_s0 [CM] 117s seed=207644000599955 qc_bare=0.367
+08:46:02 items/makeup/L7_dewy_signature_s0 [CM] 90s seed=14183442708242 qc_bare=0.495
+08:47:46 items/makeup/L8_sweet_refined_s0 [CM] 102s seed=137607402325334 qc_bare=0.518
+08:49:34 items/makeup/L6_tears_on_L4_s0 [CM] 106s seed=26227977817198 qc_bare=0.595
+08:51:06 items/makeup/L6_tears_on_L1_s0 [CM] 90s seed=220842196443841 qc_bare=0.457
+08:53:17 looks/REF-LW-01_front_s0 [CM] 130s seed=124158598012728 qc_bare=0.544
+08:55:28 looks/REF-LW-01_back_s0 [CM] 130s seed=196663562656556 qc_bare=0.394
+08:57:39 looks/REF-LW-01_34_s0 [CM] 130s seed=264050468073881 qc_bare=0.709
+08:59:50 looks/REF-LW-02_front_s0 [CM] 130s seed=85094057875603 qc_bare=0.784
+09:02:07 looks/REF-LW-02_back_s0 [CM] 136s seed=222645002443732 qc_bare=0.76
+09:04:06 looks/REF-LW-02_34_s0 [CM] 118s seed=89148018760689 qc_bare=0.549
+09:04:06 done 44 images in 6160s
+09:04:47 ERROR ../gu_chen/candidates/gu_chen_cand_01_s0: ComfyError: /view?filename=.._gu_chen_candidates_gu_chen_cand_01_00002_.png&subfolder=ns_final%5Clw_assets&type=output: HTTP 400 
+09:05:17 ERROR ../gu_chen/candidates/gu_chen_cand_02_s0: ComfyError: /view?filename=.._gu_chen_candidates_gu_chen_cand_02_00001_.png&subfolder=ns_final%5Clw_assets&type=output: HTTP 400 
+09:05:56 ERROR ../gu_chen/candidates/gu_chen_cand_03_s0: ComfyError: /view?filename=.._gu_chen_candidates_gu_chen_cand_03_00001_.png&subfolder=ns_final%5Clw_assets&type=output: HTTP 400 
+09:06:39 ERROR ../chen_yu/candidates/chen_yu_cand_01_s0: ComfyError: /view?filename=.._chen_yu_candidates_chen_yu_cand_01_00001_.png&subfolder=ns_final%5Clw_assets&type=output: HTTP 400 
+09:07:06 ERROR ../chen_yu/candidates/chen_yu_cand_02_s0: ComfyError: /view?filename=.._chen_yu_candidates_chen_yu_cand_02_00001_.png&subfolder=ns_final%5Clw_assets&type=output: HTTP 400 
+09:08:00 ERROR ../chen_yu/candidates/chen_yu_cand_03_s0: ComfyError: /view?filename=.._chen_yu_candidates_chen_yu_cand_03_00001_.png&subfolder=ns_final%5Clw_assets&type=output: HTTP 400 
+09:08:30 ERROR ../alex/candidates/alex_cand_01_s0: ComfyError: /view?filename=.._alex_candidates_alex_cand_01_00001_.png&subfolder=ns_final%5Clw_assets&type=output: HTTP 400 
+09:08:57 ERROR ../alex/candidates/alex_cand_02_s0: ComfyError: /view?filename=.._alex_candidates_alex_cand_02_00001_.png&subfolder=ns_final%5Clw_assets&type=output: HTTP 400 
+09:09:39 ERROR ../ryan/candidates/ryan_cand_01_s0: ComfyError: /view?filename=.._ryan_candidates_ryan_cand_01_00001_.png&subfolder=ns_final%5Clw_assets&type=output: HTTP 400 
+09:10:07 ERROR ../ryan/candidates/ryan_cand_02_s0: ComfyError: /view?filename=.._ryan_candidates_ryan_cand_02_00001_.png&subfolder=ns_final%5Clw_assets&type=output: HTTP 400 
+09:10:49 ERROR ../kai/candidates/kai_cand_01_s0: ComfyError: /view?filename=.._kai_candidates_kai_cand_01_00001_.png&subfolder=ns_final%5Clw_assets&type=output: HTTP 400 
+09:11:16 ERROR ../kai/candidates/kai_cand_02_s0: ComfyError: /view?filename=.._kai_candidates_kai_cand_02_00001_.png&subfolder=ns_final%5Clw_assets&type=output: HTTP 400 
+09:11:58 ERROR ../leo/candidates/leo_cand_01_s0: ComfyError: /view?filename=.._leo_candidates_leo_cand_01_00001_.png&subfolder=ns_final%5Clw_assets&type=output: HTTP 400 
+09:12:25 ERROR ../leo/candidates/leo_cand_02_s0: ComfyError: /view?filename=.._leo_candidates_leo_cand_02_00001_.png&subfolder=ns_final%5Clw_assets&type=output: HTTP 400 
+09:12:25 done 0 images in 495s
+09:14:10 QC FLAG ../gu_chen/candidates/gu_chen_cand_01_s0 seed=115539250668396 {'nudity': True, 'hits': [], 'clip_bare': 0.847, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:14:39 items/outfit/O06_worn_s0 [CM] 97s seed=224976075500646 qc_bare=0.786
+09:14:53 QC FLAG ../gu_chen/candidates/gu_chen_cand_01_s0 seed=141464955668235 {'nudity': True, 'hits': [], 'clip_bare': 0.953, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:16:16 QC FLAG ../gu_chen/candidates/gu_chen_cand_01_s0 seed=100173909488374 {'nudity': True, 'hits': [], 'clip_bare': 0.896, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:17:02 QC FLAG items/outfit/O16_worn_s0 seed=58842267565323 {'nudity': True, 'hits': [], 'clip_bare': 0.918, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:17:26 QC FLAG ../gu_chen/candidates/gu_chen_cand_01_s0 seed=71123615418339 {'nudity': True, 'hits': [], 'clip_bare': 0.965, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:17:26 FAILED ../gu_chen/candidates/gu_chen_cand_01_s0: 4 次均被质检拦截
+09:18:48 QC FLAG ../gu_chen/candidates/gu_chen_cand_02_s0 seed=41538746218494 {'nudity': True, 'hits': [], 'clip_bare': 0.946, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:19:34 QC FLAG items/outfit/O16_worn_s0 seed=267082810654882 {'nudity': True, 'hits': [], 'clip_bare': 0.925, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:19:59 QC FLAG ../gu_chen/candidates/gu_chen_cand_02_s0 seed=278715612819971 {'nudity': True, 'hits': [], 'clip_bare': 0.884, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:21:21 ../gu_chen/candidates/gu_chen_cand_02_s0 [CM] 81s seed=216127049111983 qc_bare=0.796
+09:22:07 items/outfit/O16_worn_s0 [CM] 151s seed=10698686981636 qc_bare=0.796
+09:22:28 QC FLAG ../gu_chen/candidates/gu_chen_cand_03_s0 seed=21162965422704 {'nudity': True, 'hits': [], 'clip_bare': 0.916, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:23:51 QC FLAG ../gu_chen/candidates/gu_chen_cand_03_s0 seed=206264420343734 {'nudity': True, 'hits': [], 'clip_bare': 0.875, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:24:27 QC FLAG items/outfit/O18_worn_s0 seed=16432323312452 {'nudity': True, 'hits': [], 'clip_bare': 0.934, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:24:49 QC FLAG ../gu_chen/candidates/gu_chen_cand_03_s0 seed=37320760131064 {'nudity': True, 'hits': [], 'clip_bare': 0.931, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:25:48 QC FLAG ../gu_chen/candidates/gu_chen_cand_03_s0 seed=7191883434060 {'nudity': True, 'hits': [], 'clip_bare': 0.839, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:25:48 FAILED ../gu_chen/candidates/gu_chen_cand_03_s0: 4 次均被质检拦截
+09:26:36 QC FLAG items/outfit/O18_worn_s0 seed=120703578429652 {'nudity': True, 'hits': [], 'clip_bare': 0.964, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:26:58 QC FLAG ../chen_yu/candidates/chen_yu_cand_01_s0 seed=61448927239318 {'nudity': True, 'hits': [], 'clip_bare': 0.995, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:27:56 QC FLAG ../chen_yu/candidates/chen_yu_cand_01_s0 seed=87902650615833 {'nudity': True, 'hits': [], 'clip_bare': 0.982, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:28:47 QC FLAG items/outfit/O18_worn_s0 seed=115399727923286 {'nudity': True, 'hits': [], 'clip_bare': 0.968, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:29:10 QC FLAG ../chen_yu/candidates/chen_yu_cand_01_s0 seed=76754767529972 {'nudity': True, 'hits': [], 'clip_bare': 0.986, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:30:05 QC FLAG ../chen_yu/candidates/chen_yu_cand_01_s0 seed=142863899099122 {'nudity': True, 'hits': [], 'clip_bare': 0.993, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:30:05 FAILED ../chen_yu/candidates/chen_yu_cand_01_s0: 4 次均被质检拦截
+09:30:55 QC FLAG items/outfit/O18_worn_s0 seed=268421515872508 {'nudity': True, 'hits': [], 'clip_bare': 0.923, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:30:55 FAILED items/outfit/O18_worn_s0: 4 次均被质检拦截
+09:31:16 QC FLAG ../chen_yu/candidates/chen_yu_cand_02_s0 seed=97821824189786 {'nudity': True, 'hits': [], 'clip_bare': 0.989, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:32:14 QC FLAG ../chen_yu/candidates/chen_yu_cand_02_s0 seed=268724425909201 {'nudity': True, 'hits': [], 'clip_bare': 0.994, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:33:15 QC FLAG items/outfit/O20_worn_s0 seed=262375267247877 {'nudity': True, 'hits': [], 'clip_bare': 0.836, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:33:37 QC FLAG ../chen_yu/candidates/chen_yu_cand_02_s0 seed=235157258756316 {'nudity': True, 'hits': [], 'clip_bare': 0.996, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:34:35 QC FLAG ../chen_yu/candidates/chen_yu_cand_02_s0 seed=95206081180016 {'nudity': True, 'hits': [], 'clip_bare': 0.996, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:34:35 FAILED ../chen_yu/candidates/chen_yu_cand_02_s0: 4 次均被质检拦截
+09:35:12 items/outfit/O20_worn_s0 [CM] 115s seed=56626360518491 qc_bare=0.622
+09:35:12 done 3 images in 1343s
+09:35:33 QC FLAG ../chen_yu/candidates/chen_yu_cand_03_s0 seed=140556264465427 {'nudity': True, 'hits': [], 'clip_bare': 0.986, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:36:29 QC FLAG items/nails/T2_BARE_s3 seed=146257463709345 {'nudity': True, 'hits': [], 'clip_bare': 0.901, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:36:41 QC FLAG ../chen_yu/candidates/chen_yu_cand_03_s0 seed=125797281866567 {'nudity': True, 'hits': [], 'clip_bare': 0.994, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:37:09 items/nails/T2_BARE_s3 [CM] 39s seed=140986636158731 qc_bare=0.726
+09:37:09 done 1 images in 114s
+09:37:33 QC FLAG ../chen_yu/candidates/chen_yu_cand_03_s0 seed=232432326125092 {'nudity': True, 'hits': [], 'clip_bare': 0.989, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:38:44 QC FLAG ../chen_yu/candidates/chen_yu_cand_03_s0 seed=112327612885371 {'nudity': True, 'hits': [], 'clip_bare': 0.989, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:38:44 FAILED ../chen_yu/candidates/chen_yu_cand_03_s0: 4 次均被质检拦截
+09:39:32 plates/id_front_bare_s0 [CM] 130s seed=194980807068895 qc_bare=0.59
+09:39:42 QC FLAG ../alex/candidates/alex_cand_01_s0 seed=253468253504006 {'nudity': True, 'hits': [], 'clip_bare': 0.989, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:40:55 QC FLAG ../alex/candidates/alex_cand_01_s0 seed=163796230785295 {'nudity': True, 'hits': [], 'clip_bare': 0.993, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:41:31 expressions/cry_s0 [CM] 118s seed=249979184034144 qc_bare=0.464
+09:41:31 done 2 images in 260s
+09:41:54 QC FLAG ../alex/candidates/alex_cand_01_s0 seed=203164880790013 {'nudity': True, 'hits': [], 'clip_bare': 0.976, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:43:37 QC FLAG ../alex/candidates/alex_cand_01_s0 seed=127616590404650 {'nudity': True, 'hits': [], 'clip_bare': 0.992, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:43:37 FAILED ../alex/candidates/alex_cand_01_s0: 4 次均被质检拦截
+09:44:47 QC FLAG looks/REF-LW-02_back_s1 seed=22999011743950 {'nudity': True, 'hits': [], 'clip_bare': 0.8, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:44:57 QC FLAG ../alex/candidates/alex_cand_02_s0 seed=219938329571475 {'nudity': True, 'hits': [], 'clip_bare': 0.948, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:46:19 QC FLAG ../alex/candidates/alex_cand_02_s0 seed=74309790508554 {'nudity': True, 'hits': [], 'clip_bare': 0.987, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:47:32 QC FLAG looks/REF-LW-02_back_s1 seed=87576602957237 {'nudity': True, 'hits': [], 'clip_bare': 0.815, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:47:54 QC FLAG ../alex/candidates/alex_cand_02_s0 seed=186659355241806 {'nudity': True, 'hits': [], 'clip_bare': 0.931, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:49:16 QC FLAG ../alex/candidates/alex_cand_02_s0 seed=232068413084477 {'nudity': True, 'hits': [], 'clip_bare': 0.997, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:49:16 FAILED ../alex/candidates/alex_cand_02_s0: 4 次均被质检拦截
+09:50:26 looks/REF-LW-02_back_s1 [CM] 172s seed=159449432538032 qc_bare=0.705
+09:50:26 done 1 images in 527s
+09:50:48 QC FLAG ../ryan/candidates/ryan_cand_01_s0 seed=204457884012904 {'nudity': True, 'hits': [{'class': 'FEMALE_BREAST_EXPOSED', 'score': 0.688}, {'class': 'FEMALE_BREAST_EXPOSED', 'score': 0.682}], 'clip_bare': 0.997, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:51:58 QC FLAG ../ryan/candidates/ryan_cand_01_s0 seed=126626684229459 {'nudity': True, 'hits': [{'class': 'FEMALE_BREAST_EXPOSED', 'score': 0.682}, {'class': 'FEMALE_BREAST_EXPOSED', 'score': 0.678}], 'clip_bare': 0.995, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:53:06 items/makeup/L6_tears_on_L4_s1 [CM] 145s seed=279885095546026 qc_bare=0.484
+09:53:06 done 1 images in 158s
+09:53:18 QC FLAG ../ryan/candidates/ryan_cand_01_s0 seed=213650677845238 {'nudity': True, 'hits': [{'class': 'FEMALE_BREAST_EXPOSED', 'score': 0.762}, {'class': 'FEMALE_BREAST_EXPOSED', 'score': 0.736}], 'clip_bare': 0.998, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:54:26 QC FLAG ../ryan/candidates/ryan_cand_01_s0 seed=144454582174159 {'nudity': True, 'hits': [{'class': 'FEMALE_BREAST_EXPOSED', 'score': 0.749}, {'class': 'FEMALE_BREAST_EXPOSED', 'score': 0.704}], 'clip_bare': 0.998, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:54:26 FAILED ../ryan/candidates/ryan_cand_01_s0: 4 次均被质检拦截
+09:55:45 items/makeup/L6_tears_on_L1_s1 [CM] 145s seed=183056245440455 qc_bare=0.349
+09:55:45 done 1 images in 157s
+09:55:57 QC FLAG ../ryan/candidates/ryan_cand_02_s0 seed=162366016434623 {'nudity': True, 'hits': [], 'clip_bare': 0.989, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:56:28 QC FLAG ../ryan/candidates/ryan_cand_02_s0 seed=13547406534045 {'nudity': True, 'hits': [{'class': 'FEMALE_BREAST_EXPOSED', 'score': 0.677}, {'class': 'FEMALE_BREAST_EXPOSED', 'score': 0.654}], 'clip_bare': 0.998, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:56:57 QC FLAG ../ryan/candidates/ryan_cand_02_s0 seed=93657848464420 {'nudity': True, 'hits': [{'class': 'FEMALE_BREAST_EXPOSED', 'score': 0.711}, {'class': 'FEMALE_BREAST_EXPOSED', 'score': 0.701}], 'clip_bare': 0.997, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:57:37 QC FLAG ../ryan/candidates/ryan_cand_02_s0 seed=248293565064797 {'nudity': True, 'hits': [{'class': 'FEMALE_BREAST_EXPOSED', 'score': 0.656}, {'class': 'FEMALE_BREAST_EXPOSED', 'score': 0.639}], 'clip_bare': 0.997, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:57:37 FAILED ../ryan/candidates/ryan_cand_02_s0: 4 次均被质检拦截
+09:58:17 QC FLAG ../kai/candidates/kai_cand_01_s0 seed=254869871722171 {'nudity': True, 'hits': [], 'clip_bare': 0.99, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:58:45 QC FLAG ../kai/candidates/kai_cand_01_s0 seed=205772566260071 {'nudity': True, 'hits': [], 'clip_bare': 0.942, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:59:29 QC FLAG ../kai/candidates/kai_cand_01_s0 seed=101237916160811 {'nudity': True, 'hits': [], 'clip_bare': 0.99, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:59:57 QC FLAG ../kai/candidates/kai_cand_01_s0 seed=232442265780063 {'nudity': True, 'hits': [], 'clip_bare': 0.985, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+09:59:57 FAILED ../kai/candidates/kai_cand_01_s0: 4 次均被质检拦截
+10:00:46 QC FLAG ../kai/candidates/kai_cand_02_s0 seed=211055996415786 {'nudity': True, 'hits': [], 'clip_bare': 0.974, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+10:01:17 QC FLAG ../kai/candidates/kai_cand_02_s0 seed=186017594193207 {'nudity': True, 'hits': [], 'clip_bare': 0.988, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+10:01:42 QC FLAG ../kai/candidates/kai_cand_02_s0 seed=79987527188825 {'nudity': True, 'hits': [], 'clip_bare': 0.991, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+10:02:25 QC FLAG ../kai/candidates/kai_cand_02_s0 seed=4391880767678 {'nudity': True, 'hits': [], 'clip_bare': 0.962, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+10:02:25 FAILED ../kai/candidates/kai_cand_02_s0: 4 次均被质检拦截
+10:02:53 QC FLAG ../leo/candidates/leo_cand_01_s0 seed=12742362617768 {'nudity': True, 'hits': [], 'clip_bare': 0.971, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+10:03:34 QC FLAG ../leo/candidates/leo_cand_01_s0 seed=63235934649778 {'nudity': True, 'hits': [], 'clip_bare': 0.967, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+10:04:05 QC FLAG ../leo/candidates/leo_cand_01_s0 seed=82299074057629 {'nudity': True, 'hits': [], 'clip_bare': 0.993, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+10:04:45 QC FLAG ../leo/candidates/leo_cand_01_s0 seed=187553197411156 {'nudity': True, 'hits': [], 'clip_bare': 0.975, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+10:04:45 FAILED ../leo/candidates/leo_cand_01_s0: 4 次均被质检拦截
+10:06:15 QC FLAG ../gu_chen/candidates/gu_chen_cand_01_s0 seed=115539250668396 {'nudity': True, 'hits': [], 'clip_bare': 0.889, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+10:06:58 QC FLAG ../gu_chen/candidates/gu_chen_cand_01_s0 seed=141464955668235 {'nudity': True, 'hits': [], 'clip_bare': 0.845, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+10:07:27 QC FLAG ../gu_chen/candidates/gu_chen_cand_01_s0 seed=100173909488374 {'nudity': True, 'hits': [], 'clip_bare': 0.862, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+10:08:10 QC FLAG ../gu_chen/candidates/gu_chen_cand_01_s0 seed=71123615418339 {'nudity': True, 'hits': [], 'clip_bare': 0.945, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+10:08:10 FAILED ../gu_chen/candidates/gu_chen_cand_01_s0: 4 次均被质检拦截
+10:08:10 done 0 images in 190s
+10:10:23 QC FLAG items/hair/H0_back_s1 seed=81229572324326 {'nudity': True, 'hits': [], 'clip_bare': 0.865, 'version': 'nudenet3.4+clipL14-v1'} -> delete & retry
+10:11:37 items/hair/H0_back_s1 [CM] 72s seed=106402258548893 qc_bare=0.717
+10:11:37 done 1 images in 160s
+11:04:55 ../gu_chen/candidates/gu_chen_cand_01_s0 [CMT] 27s seed=115539250668396 qc_bare=0.004
+11:05:32 ../gu_chen/candidates/gu_chen_cand_02_s0 [CMT] 33s seed=41538746218494 qc_bare=0.01
+11:06:09 ../gu_chen/candidates/gu_chen_cand_03_s0 [CMT] 33s seed=21162965422704 qc_bare=0.001
+11:06:40 ../chen_yu/candidates/chen_yu_cand_01_s0 [CMT] 27s seed=61448927239318 qc_bare=0.019
+11:07:12 ../chen_yu/candidates/chen_yu_cand_02_s0 [CMT] 27s seed=97821824189786 qc_bare=0.017
+11:07:46 ../chen_yu/candidates/chen_yu_cand_03_s0 [CMT] 30s seed=140556264465427 qc_bare=0.01
+11:08:17 ../alex/candidates/alex_cand_01_s0 [CMT] 27s seed=253468253504006 qc_bare=0.0
+11:08:48 ../alex/candidates/alex_cand_02_s0 [CMT] 27s seed=219938329571475 qc_bare=0.0
+11:09:19 ../ryan/candidates/ryan_cand_01_s0 [CMT] 27s seed=204457884012904 qc_bare=0.006
+11:09:54 ../ryan/candidates/ryan_cand_02_s0 [CMT] 27s seed=162366016434623 qc_bare=0.015
+11:10:25 ../kai/candidates/kai_cand_01_s0 [CMT] 27s seed=254869871722171 qc_bare=0.002
+11:10:57 ../kai/candidates/kai_cand_02_s0 [CMT] 27s seed=211055996415786 qc_bare=0.0
+11:11:28 ../leo/candidates/leo_cand_01_s0 [CMT] 27s seed=12742362617768 qc_bare=0.0
+11:12:02 ../leo/candidates/leo_cand_02_s0 [CMT] 27s seed=237301636613221 qc_bare=0.003
+11:12:02 done 14 images in 470s
+11:15:35 ../gu_chen/candidates/gu_chen_cand_01_s0 [SOP] 142s seed=115539250668396 qc_bare=0.002
+11:18:10 ../gu_chen/candidates/gu_chen_cand_02_s0 [SOP] 148s seed=41538746218494 qc_bare=0.001
+11:20:37 ../gu_chen/candidates/gu_chen_cand_03_s0 [SOP] 139s seed=21162965422704 qc_bare=0.006
+11:23:08 ../chen_yu/candidates/chen_yu_cand_01_s0 [SOP] 142s seed=61448927239318 qc_bare=0.004
+11:25:39 ../chen_yu/candidates/chen_yu_cand_02_s0 [SOP] 142s seed=97821824189786 qc_bare=0.005
+11:28:09 ../chen_yu/candidates/chen_yu_cand_03_s0 [SOP] 142s seed=140556264465427 qc_bare=0.009
+11:30:35 ../alex/candidates/alex_cand_01_s0 [SOP] 142s seed=253468253504006 qc_bare=0.004
+11:33:01 ../alex/candidates/alex_cand_02_s0 [SOP] 139s seed=219938329571475 qc_bare=0.004
+11:35:30 ../ryan/candidates/ryan_cand_01_s0 [SOP] 142s seed=204457884012904 qc_bare=0.018
+11:37:53 ../ryan/candidates/ryan_cand_02_s0 [SOP] 139s seed=162366016434623 qc_bare=0.006
+11:40:19 ../kai/candidates/kai_cand_01_s0 [SOP] 139s seed=254869871722171 qc_bare=0.002
+11:42:45 ../kai/candidates/kai_cand_02_s0 [SOP] 139s seed=211055996415786 qc_bare=0.003
+11:45:17 ../leo/candidates/leo_cand_01_s0 [SOP] 142s seed=12742362617768 qc_bare=0.009
+11:47:46 ../leo/candidates/leo_cand_02_s0 [SOP] 145s seed=237301636613221 qc_bare=0.013
+11:47:46 done 14 images in 2101s
+11:57:26 ../gu_chen/candidates/gu_chen_cand_01_young_s0 [SOP] 139s seed=97914957357695 qc_bare=0.006
+11:59:56 ../gu_chen/candidates/gu_chen_cand_02_young_s0 [SOP] 142s seed=198275746095687 qc_bare=0.004
+12:02:22 ../gu_chen/candidates/gu_chen_cand_03_young_s0 [SOP] 139s seed=236448656988371 qc_bare=0.003
+12:02:22 done 3 images in 465s

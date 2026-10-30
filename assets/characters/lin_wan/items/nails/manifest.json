@@ -1,0 +1,791 @@
+[
+  {
+    "file": "N1_BK_s0.png",
+    "kind": "item/nails",
+    "design": "LW-N1",
+    "name": "冰川满钻尖甲（手背）",
+    "prompt": "transform the image to realistic photograph，成年女性冷白皮肤的纤细双手，双手手背朝上并排平放，手掌放松、五指自然张开、彼此不交叠，俯拍特写；指甲：超长透明尖头延长甲，甲长约为手指长度的三分之二，透明水晶底，甲根带一点淡冰蓝，甲面铺满密集的细碎白色水钻，甲根一排较大的圆形钻石，指尖末端保留透明，高光镜面封层；指甲根部与甲床自然衔接，十根手指各一枚指甲，五指完整，指节清晰，透明甲下可见指尖皮肤；钻有清晰的刻面反光；柔和侧光与小点状高光；背景为中性肤灰色（#B0A8A0）；画面只有手，没有脸和身体。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 65798108289399,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "5552d15f8ffc9f5303f9febc6b08154b736e19ec2d1e3ba776b9813114c7ef64",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.726,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 66.4,
+    "created_at": "2026-10-30T06:59:46"
+  },
+  {
+    "file": "N1_PL_s0.png",
+    "kind": "item/nails",
+    "design": "LW-N1",
+    "name": "冰川满钻尖甲（手背+掌心）",
+    "prompt": "transform the image to realistic photograph，成年女性冷白皮肤的纤细双手（穿着黑色针织长袖，袖口盖到手腕），左手手背朝上、右手掌心朝上翻转，展示甲尖弧度和厚度，五指自然张开不交叠；指甲：超长透明尖头延长甲，甲长约为手指长度的三分之二，透明水晶底，甲根带一点淡冰蓝，甲面铺满密集的细碎白色水钻，甲根一排较大的圆形钻石，指尖末端保留透明，高光镜面封层；指甲根部与甲床自然衔接，十根手指各一枚指甲，五指完整，指节清晰，透明甲下可见指尖皮肤；钻有清晰的刻面反光；柔和侧光与小点状高光；双手手腕处露出黑色针织长袖的袖口（她穿着黑色长袖针织衫）；背景为中性中灰色丝绒台面；画面只有手和袖口，没有脸。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 203515046623138,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "fee80ae7fa5116b90d8985ba33b6343b93c02a2c50ffcc8e8ea0c709a3482920",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.656,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 93.6,
+    "created_at": "2026-10-30T07:02:35"
+  },
+  {
+    "file": "N2_BK_s0.png",
+    "kind": "item/nails",
+    "design": "LW-N2",
+    "name": "草莓糖霜芭蕾（手背）",
+    "prompt": "transform the image to realistic photograph，成年女性冷白皮肤的纤细双手（穿着黑色针织长袖，袖口盖到手腕），双手手背朝上并排平放，手掌放松、五指自然张开、彼此不交叠，俯拍特写；指甲：超长透明芭蕾形延长甲，甲长约为手指长度的三分之二，指尖平切、两侧收窄，透明底向甲尖渐变为淡粉色，中指和无名指各贴一颗立体粉色草莓形水晶饰品，其余手指沿甲边镶一圈细白钻，高光透亮；指甲根部与甲床自然衔接，十根手指各一枚指甲，五指完整，指节清晰，透明甲下可见指尖皮肤；钻有清晰的刻面反光；柔和侧光与小点状高光；双手手腕处露出黑色针织长袖的袖口（她穿着黑色长袖针织衫）；背景为中性中灰色丝绒台面；画面只有手和袖口，没有脸。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 148039793842280,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "8722d38f20ad5744b2cd22ab7b10b384049c76057b3470f50900e8a52404a567",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.568,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 27.1,
+    "created_at": "2026-10-30T07:03:03"
+  },
+  {
+    "file": "N2_PL_s0.png",
+    "kind": "item/nails",
+    "design": "LW-N2",
+    "name": "草莓糖霜芭蕾（手背+掌心）",
+    "prompt": "transform the image to realistic photograph，成年女性冷白皮肤的纤细双手（穿着黑色针织长袖，袖口盖到手腕），左手手背朝上、右手掌心朝上翻转，展示甲尖弧度和厚度，五指自然张开不交叠；指甲：超长透明芭蕾形延长甲，甲长约为手指长度的三分之二，指尖平切、两侧收窄，透明底向甲尖渐变为淡粉色，中指和无名指各贴一颗立体粉色草莓形水晶饰品，其余手指沿甲边镶一圈细白钻，高光透亮；指甲根部与甲床自然衔接，十根手指各一枚指甲，五指完整，指节清晰，透明甲下可见指尖皮肤；钻有清晰的刻面反光；柔和侧光与小点状高光；双手手腕处露出黑色针织长袖的袖口（她穿着黑色长袖针织衫）；背景为中性中灰色丝绒台面；画面只有手和袖口，没有脸。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 229202683955875,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "e7a10c36aebad683fc032232a02ee302063381eb822bcad90ac091488631962c",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.745,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 30.1,
+    "created_at": "2026-10-30T07:03:34"
+  },
+  {
+    "file": "N3_BK_s0.png",
+    "kind": "item/nails",
+    "design": "LW-N3",
+    "name": "极光冰透猫眼（手背）",
+    "prompt": "transform the image to realistic photograph，成年女性冷白皮肤的纤细双手（穿着黑色针织长袖，袖口盖到手腕），双手手背朝上并排平放，手掌放松、五指自然张开、彼此不交叠，俯拍特写；指甲：超长透明杏仁形延长甲，甲长约为手指长度的三分之二，冰透玻璃质感，甲面有一道银白色猫眼光带和彩虹极光偏光，甲根月牙形镶一排极光水钻，侧边点缀两三颗马眼形钻，湿润高光；指甲根部与甲床自然衔接，十根手指各一枚指甲，五指完整，指节清晰，透明甲下可见指尖皮肤；钻有清晰的刻面反光；柔和侧光与小点状高光；双手手腕处露出黑色针织长袖的袖口（她穿着黑色长袖针织衫）；背景为中性中灰色丝绒台面；画面只有手和袖口，没有脸。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 62614507496487,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "d3f817d0bb4c6fca9c74fddb5abda418c66f8817a2fbba1abeecc0cc2205fa3f",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.637,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 51.2,
+    "created_at": "2026-10-30T07:04:27"
+  },
+  {
+    "file": "N3_PL_s0.png",
+    "kind": "item/nails",
+    "design": "LW-N3",
+    "name": "极光冰透猫眼（手背+掌心）",
+    "prompt": "transform the image to realistic photograph，成年女性冷白皮肤的纤细双手（穿着黑色针织长袖，袖口盖到手腕），左手手背朝上、右手掌心朝上翻转，展示甲尖弧度和厚度，五指自然张开不交叠；指甲：超长透明杏仁形延长甲，甲长约为手指长度的三分之二，冰透玻璃质感，甲面有一道银白色猫眼光带和彩虹极光偏光，甲根月牙形镶一排极光水钻，侧边点缀两三颗马眼形钻，湿润高光；指甲根部与甲床自然衔接，十根手指各一枚指甲，五指完整，指节清晰，透明甲下可见指尖皮肤；钻有清晰的刻面反光；柔和侧光与小点状高光；双手手腕处露出黑色针织长袖的袖口（她穿着黑色长袖针织衫）；背景为中性中灰色丝绒台面；画面只有手和袖口，没有脸。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 96987620012297,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "98e245f6d84f0926827e138cf7c1cc4ffa04a51c92e7ed46e4d09137103b284c",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.796,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 27.1,
+    "created_at": "2026-10-30T07:04:55"
+  },
+  {
+    "file": "N4_BK_s0.png",
+    "kind": "item/nails",
+    "design": "LW-N4",
+    "name": "钻链珠宝甲（手背）",
+    "prompt": "transform the image to realistic photograph，成年女性冷白皮肤的纤细双手（穿着黑色针织长袖，袖口盖到手腕），双手手背朝上并排平放，手掌放松、五指自然张开、彼此不交叠，俯拍特写；指甲：超长透明尖头延长甲，甲长约为手指长度的三分之二，透明水晶底，甲根各镶一颗大水滴形钻石，一条极细的银色链条从甲根垂挂到甲面中部，末端坠一颗小钻，食指甲尖穿一个小银环；指甲根部与甲床自然衔接，十根手指各一枚指甲，五指完整，指节清晰，透明甲下可见指尖皮肤；钻有清晰的刻面反光；柔和侧光与小点状高光；双手手腕处露出黑色针织长袖的袖口（她穿着黑色长袖针织衫）；背景为中性中灰色丝绒台面；画面只有手和袖口，没有脸。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 190835749440681,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "d095112165322759d8fb71afda5986e3345a1c5f160e64ddbe9b68f925a2ff1c",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.501,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 30.1,
+    "created_at": "2026-10-30T07:05:26"
+  },
+  {
+    "file": "N4_PL_s0.png",
+    "kind": "item/nails",
+    "design": "LW-N4",
+    "name": "钻链珠宝甲（手背+掌心）",
+    "prompt": "transform the image to realistic photograph，成年女性冷白皮肤的纤细双手（穿着黑色针织长袖，袖口盖到手腕），左手手背朝上、右手掌心朝上翻转，展示甲尖弧度和厚度，五指自然张开不交叠；指甲：超长透明尖头延长甲，甲长约为手指长度的三分之二，透明水晶底，甲根各镶一颗大水滴形钻石，一条极细的银色链条从甲根垂挂到甲面中部，末端坠一颗小钻，食指甲尖穿一个小银环；指甲根部与甲床自然衔接，十根手指各一枚指甲，五指完整，指节清晰，透明甲下可见指尖皮肤；钻有清晰的刻面反光；柔和侧光与小点状高光；双手手腕处露出黑色针织长袖的袖口（她穿着黑色长袖针织衫）；背景为中性中灰色丝绒台面；画面只有手和袖口，没有脸。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 73262432122023,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "cbb0190043de6c8bdfd4c6d2d87b43bbf51275d1f38e1a2b318a0e5d3c8c70d2",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.329,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 42.1,
+    "created_at": "2026-10-30T07:06:09"
+  },
+  {
+    "file": "N5_BK_s0.png",
+    "kind": "item/nails",
+    "design": "LW-N5",
+    "name": "冰晶吹制玻璃（手背）",
+    "prompt": "transform the image to realistic photograph，成年女性冷白皮肤的纤细双手（穿着黑色针织长袖，袖口盖到手腕），双手手背朝上并排平放，手掌放松、五指自然张开、彼此不交叠，俯拍特写；指甲：超长透明芭蕾形延长甲，甲长约为手指长度的三分之二，甲面有立体的透明玻璃凝胶纹理，像吹制玻璃和冰棱，冰棱之间嵌着散落的小白钻和少量冰蓝色钻，晶莹剔透；指甲根部与甲床自然衔接，十根手指各一枚指甲，五指完整，指节清晰，透明甲下可见指尖皮肤；钻有清晰的刻面反光；柔和侧光与小点状高光；双手手腕处露出黑色针织长袖的袖口（她穿着黑色长袖针织衫）；背景为中性中灰色丝绒台面；画面只有手和袖口，没有脸。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 36075240966589,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "3d286cd0a66ca5f6ea284c9da7f3222225451f1513a51cf055fa813c8f1cc6e6",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.649,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 42.1,
+    "created_at": "2026-10-30T07:07:24"
+  },
+  {
+    "file": "N5_PL_s0.png",
+    "kind": "item/nails",
+    "design": "LW-N5",
+    "name": "冰晶吹制玻璃（手背+掌心）",
+    "prompt": "transform the image to realistic photograph，成年女性冷白皮肤的纤细双手（穿着黑色针织长袖，袖口盖到手腕），左手手背朝上、右手掌心朝上翻转，展示甲尖弧度和厚度，五指自然张开不交叠；指甲：超长透明芭蕾形延长甲，甲长约为手指长度的三分之二，甲面有立体的透明玻璃凝胶纹理，像吹制玻璃和冰棱，冰棱之间嵌着散落的小白钻和少量冰蓝色钻，晶莹剔透；指甲根部与甲床自然衔接，十根手指各一枚指甲，五指完整，指节清晰，透明甲下可见指尖皮肤；钻有清晰的刻面反光；柔和侧光与小点状高光；双手手腕处露出黑色针织长袖的袖口（她穿着黑色长袖针织衫）；背景为中性中灰色丝绒台面；画面只有手和袖口，没有脸。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 163939407261443,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "70a41556b6f0b437e66861c841c93b166daa716325fc635a6ab416708c8bf44b",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.689,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 39.4,
+    "created_at": "2026-10-30T07:08:35"
+  },
+  {
+    "file": "N6_BK_s0.png",
+    "kind": "item/nails",
+    "design": "LW-N6",
+    "name": "粉钻垃圾甲（手背）",
+    "prompt": "transform the image to realistic photograph，成年女性冷白皮肤的纤细双手（穿着黑色针织长袖，袖口盖到手腕），双手手背朝上并排平放，手掌放松、五指自然张开、彼此不交叠，俯拍特写；指甲：超长透明尖头延长甲，甲长约为手指长度的三分之二，每根手指款式不同：拇指铺满粉色水钻，食指心形钻配小珍珠，中指立体草莓水晶，无名指细银链，小指铺满白钻，透明底，高光；指甲根部与甲床自然衔接，十根手指各一枚指甲，五指完整，指节清晰，透明甲下可见指尖皮肤；钻有清晰的刻面反光；柔和侧光与小点状高光；双手手腕处露出黑色针织长袖的袖口（她穿着黑色长袖针织衫）；背景为中性中灰色丝绒台面；画面只有手和袖口，没有脸。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 266370696445664,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "47cf374a817b74841d69d891a7e06e00103a5b1138bf6db2f83162dc519f0700",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.403,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 30.2,
+    "created_at": "2026-10-30T07:09:06"
+  },
+  {
+    "file": "N6_PL_s0.png",
+    "kind": "item/nails",
+    "design": "LW-N6",
+    "name": "粉钻垃圾甲（手背+掌心）",
+    "prompt": "transform the image to realistic photograph，成年女性冷白皮肤的纤细双手（穿着黑色针织长袖，袖口盖到手腕），左手手背朝上、右手掌心朝上翻转，展示甲尖弧度和厚度，五指自然张开不交叠；指甲：超长透明尖头延长甲，甲长约为手指长度的三分之二，每根手指款式不同：拇指铺满粉色水钻，食指心形钻配小珍珠，中指立体草莓水晶，无名指细银链，小指铺满白钻，透明底，高光；指甲根部与甲床自然衔接，十根手指各一枚指甲，五指完整，指节清晰，透明甲下可见指尖皮肤；钻有清晰的刻面反光；柔和侧光与小点状高光；双手手腕处露出黑色针织长袖的袖口（她穿着黑色长袖针织衫）；背景为中性中灰色丝绒台面；画面只有手和袖口，没有脸。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 136914322927068,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "25d721780e33cb7673b8aaca9a562bb32ca1d19edad53dcb0bc5b57db7b8ca0f",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.661,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 42.2,
+    "created_at": "2026-10-30T07:09:50"
+  },
+  {
+    "file": "T1_HEEL_s0.png",
+    "kind": "item/nails",
+    "design": "LW-T1",
+    "name": "冰透满钻方圆（穿 12cm 透明高跟）",
+    "prompt": "transform the image to realistic photograph，图1只提供鞋子的款式与材质。成年女性冷白皮肤的双脚穿着12厘米透明侧开细高跟鞋（细如筷子的针形细跟），透明鞋面下清楚看到脚趾甲：脚趾甲透明冰透延长，方圆形，大脚趾甲略长出脚趾前端约7毫米，甲面铺满细白钻，其余脚趾甲根各一颗小钻，比例自然，高光镜面；她穿着黑色九分西裤（裤脚在脚踝上方），侧前45度，画面只有脚踝和脚，背景为中性中灰色。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 107249358635431,
+    "size": [
+      768,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/characters/lin_wan/items/shoes/S01_side45_s0.png"
+    ],
+    "sha256": "8ae0e464aa2522fc0297dedb2f8e8d0a44e3464fab4058bd9a9fd889fc568170",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.659,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 33.1,
+    "created_at": "2026-10-30T07:12:59"
+  },
+  {
+    "file": "T2_HEEL_s0.png",
+    "kind": "item/nails",
+    "design": "LW-T2",
+    "name": "草莓裸粉法式（穿 12cm 透明高跟）",
+    "prompt": "transform the image to realistic photograph，图1只提供鞋子的款式与材质。成年女性冷白皮肤的双脚穿着12厘米透明侧开细高跟鞋（细如筷子的针形细跟），透明鞋面下清楚看到脚趾甲：脚趾甲短杏仁形透明裸粉延长，甲尖一道细白钻法式边，大脚趾点缀一颗小粉色草莓水晶，光泽饱满；她穿着黑色九分西裤（裤脚在脚踝上方），侧前45度，画面只有脚踝和脚，背景为中性中灰色。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 100152056845497,
+    "size": [
+      768,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/characters/lin_wan/items/shoes/S01_side45_s0.png"
+    ],
+    "sha256": "d9aa2659c083d60e103ba9b472eaa75dc5ee81eccae7a1743d15c76deaea4ba0",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.69,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 51.2,
+    "created_at": "2026-10-30T07:16:17"
+  },
+  {
+    "file": "T3_HEEL_s0.png",
+    "kind": "item/nails",
+    "design": "LW-T3",
+    "name": "极光猫眼方甲（穿 12cm 透明高跟）",
+    "prompt": "transform the image to realistic photograph，图1只提供鞋子的款式与材质。成年女性冷白皮肤的双脚穿着12厘米透明侧开细高跟鞋（细如筷子的针形细跟），透明鞋面下清楚看到脚趾甲：脚趾甲方形透明延长，冰透底上有一道银白猫眼光带，甲根一排细小极光水钻，湿润高光；她穿着黑色九分西裤（裤脚在脚踝上方），侧前45度，画面只有脚踝和脚，背景为中性中灰色。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 109082143385053,
+    "size": [
+      768,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/characters/lin_wan/items/shoes/S01_side45_s0.png"
+    ],
+    "sha256": "6c48d3b509fbaa8b8c4a903b13ee461af1f54dd64e215194772ec1f4533531be",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.638,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 33.1,
+    "created_at": "2026-10-30T07:19:13"
+  },
+  {
+    "file": "T4_BARE_s0.png",
+    "kind": "item/nails",
+    "design": "LW-T4",
+    "name": "镜面红钻（赤脚）",
+    "prompt": "transform the image to realistic photograph，成年女性冷白皮肤的一双赤脚并排平放，俯视特写；脚趾甲：脚趾甲方圆形，透明延长底叠樱桃红果冻色，镜面高光，大脚趾一颗心形红钻，其余光面；十个脚趾完整，小脚趾甲按比例缩短，脚型修长干净，脚踝上方露出黑色九分西裤的裤脚（她穿着黑色长裤），背景为中性中灰色地面，画面只有脚、脚踝和裤脚。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 66580686847670,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "82a5662ffb6c60f6553162d17ac82ea819bb33edf5d62cec4a1bafe3deb81990",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.649,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 51.3,
+    "created_at": "2026-10-30T07:20:46"
+  },
+  {
+    "file": "T4_HEEL_s0.png",
+    "kind": "item/nails",
+    "design": "LW-T4",
+    "name": "镜面红钻（穿 12cm 透明高跟）",
+    "prompt": "transform the image to realistic photograph，图1只提供鞋子的款式与材质。成年女性冷白皮肤的双脚穿着12厘米透明侧开细高跟鞋（细如筷子的针形细跟），透明鞋面下清楚看到脚趾甲：脚趾甲方圆形，透明延长底叠樱桃红果冻色，镜面高光，大脚趾一颗心形红钻，其余光面；她穿着黑色九分西裤（裤脚在脚踝上方），侧前45度，画面只有脚踝和脚，背景为中性中灰色。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 49746319521164,
+    "size": [
+      768,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/characters/lin_wan/items/shoes/S01_side45_s0.png"
+    ],
+    "sha256": "9296ac7470468ce1d28a9b9089545ebbd49f5c97e74175f21123fea88c3a88ae",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.628,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 33.1,
+    "created_at": "2026-10-30T07:21:20"
+  },
+  {
+    "file": "T1_BARE_s0.png",
+    "kind": "item/nails",
+    "design": "LW-T1",
+    "name": "冰透满钻方圆（赤脚）",
+    "prompt": "transform the image to realistic photograph，脚趾甲美甲微距特写：只拍脚趾的前半部分（五个脚趾和趾甲占满画面），放在黑色丝绒上，俯视，看不到脚背以上；脚趾甲：脚趾甲透明冰透延长，方圆形，大脚趾甲略长出脚趾前端约7毫米，甲面铺满细白钻，其余脚趾甲根各一颗小钻，比例自然，高光镜面；十个脚趾完整，小脚趾甲按比例缩短，脚型修长干净，脚踝上方露出黑色九分西裤的裤脚（她穿着黑色长裤），背景为中性中灰色地面，画面只有脚、脚踝和裤脚。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 111636476098335,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "5931b55958281bcf27549b40f24a8798e8e15cdc3f9149ac93abab238d1a427d",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.585,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 60.3,
+    "created_at": "2026-10-30T07:22:50"
+  },
+  {
+    "file": "T3_BARE_s0.png",
+    "kind": "item/nails",
+    "design": "LW-T3",
+    "name": "极光猫眼方甲（赤脚）",
+    "prompt": "transform the image to realistic photograph，脚趾甲美甲微距特写：只拍脚趾的前半部分（五个脚趾和趾甲占满画面），放在黑色丝绒上，俯视，看不到脚背以上；脚趾甲：脚趾甲方形透明延长，冰透底上有一道银白猫眼光带，甲根一排细小极光水钻，湿润高光；十个脚趾完整，小脚趾甲按比例缩短，脚型修长干净，脚踝上方露出黑色九分西裤的裤脚（她穿着黑色长裤），背景为中性中灰色地面，画面只有脚、脚踝和裤脚。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 110427019495054,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "2d180fc2f2057adbc438fcfd49b24b49bd21640728bf53de703aedabd0b7ed31",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.729,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 60.2,
+    "created_at": "2026-10-30T07:28:05"
+  },
+  {
+    "file": "T2_BARE_s0.png",
+    "kind": "item/nails",
+    "design": "LW-T2",
+    "name": "草莓裸粉法式（赤脚）",
+    "prompt": "transform the image to realistic photograph，脚趾甲美甲微距特写：只拍脚趾的前半部分（五个脚趾和趾甲占满画面），放在黑色丝绒上，俯视，看不到脚背以上；脚趾甲：脚趾甲短杏仁形透明裸粉延长，甲尖一道细白钻法式边，大脚趾点缀一颗小粉色草莓水晶，光泽饱满；十个脚趾完整，小脚趾甲按比例缩短，脚型修长干净，脚踝上方露出黑色九分西裤的裤脚（她穿着黑色长裤），背景为中性中灰色地面，画面只有脚、脚踝和裤脚。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 140986636158731,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "530a305196c1f6d89a94f08a5cba51a018ed79669d21c7073167313a80da120d",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.726,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 39.2,
+    "created_at": "2026-10-30T09:37:09",
+    "note": "redo (seed offset 3) replacing a rejected s0"
+  }
+]

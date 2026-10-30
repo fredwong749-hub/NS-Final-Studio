@@ -1,0 +1,338 @@
+"""
+H3 FL2VA 提示词机检（SOP_production.md §9A.1 / §9A.3；规则编号 = docs/audit/rule_ids.md）。
+
+只用标准库、不引用本项目任何模块：gpu3 的 shot_audit.py 从同步过去的仓库直接 import 这个文件。
+
+    from ns_schema.h3_lint import lint_h3, frames_for_seconds
+    results = lint_h3(prompt, frames=243, intimate=False)
+    # -> [{"rule_id": "H3-A1", "sop_ref": "SOP §9A.1", "ok": True, "detail": "...", "msg": "...", "level": "block"}, ...]
+
+只检查能机器判定的规则；需要 LLM / VLM 判定的（H3-A6、A9、A10、D8、S1-W5 等）不在这里。
+可选参数给出时才检查对应规则：seconds（P-B1 对照表）、dialogue（H3-D3 逐字）、offscreen（H3-D5 画外台词）、
+monologue（H3-D6 内心独白）。
+"""
+from __future__ import annotations
+
+import math
+import re
+
+FPS = 24
+MIN_FRAMES, MAX_FRAMES = 124, 362
+ALIGN_PREFIX = "How the reference pictures align with the target video"
+FIELDS = ("integrated_multimodal_description", "overall_soundscape", "non_diegetic_music")
+STYLE_OPENING = "Live-action, cinematic, shallow depth of field,"
+OPEN_PHRASE = "established by Picture 1"
+CLOSE_PHRASE = "established by Picture 2 at the end of the shot"
+VO_PHRASE = "says in an off-screen voiceover"
+MAX_CHARS = 7000
+
+ALIGN_RE = re.compile(
+    r"^How the reference pictures align with the target video — Picture 1 \(from Shot 1\) aligns with the "
+    r"0\.00-second mark of the target video; Picture 2 \(from Shot (\d+)\) aligns with the (\d+\.\d{2})-second mark "
+    r"of the target video\.$")
+D_BLOCK_RE = re.compile(r"<d>(.*?)</d>", re.S)
+D_OK_RE = re.compile(r"^\[[A-Z][A-Za-z]+(?: [A-Z][A-Za-z]+)?\] \S.*$", re.S)
+SPEAKER_RE = re.compile(r"\((S\d+(?:\s*,\s*S\d+)*)(?:\s*[,;][^)]*)?\)")
+CJK_RE = re.compile(r"[㐀-鿿豈-﫿　-〿＀-￯]")
+NEG_EN_RE = re.compile(r"\b(no|not|never|without|don't|doesn't|avoid|nothing|none|nobody|neither|nor)\b|n't\b", re.I)
+NEG_ZH_RE = re.compile(r"[不无没别勿禁]")
+# 图像风格后缀 / 画质词（不属于 H3 正文；风格只写 STYLE_OPENING）
+STYLE_TERM_RE = re.compile(
+    r"(?<![A-Za-z0-9])\d{1,2}K(?![A-Za-z0-9])|(?<![A-Za-z0-9])\d{2,3}\s?mm(?![A-Za-z])|(?<![A-Za-z])f/\s?\d+(?:\.\d+)?|"
+    r"(?<![A-Za-z])(?:Leica|Summilux)(?![A-Za-z])|\bmasterpiece\b|\bbest quality\b|"
+    r"\bultra[- ]detailed\b|\bhigh(?:ly)? detailed\b|\bphotorealistic\b|\bRAW photo\b|\bbokeh\b|徕卡|大光圈|焦外|竖构图|9:16",
+    re.I)
+TIMESTAMP_RE = re.compile(r"^\[Shot 1\]\s*[\(\[]?\s*\d+(?:\.\d+)?\s*(?:s|sec|seconds|秒)?\s*[-–~]")
+MALE_SOUND_RE = re.compile(r"\b(man|men|male|his|he|him|boyfriend|husband)\b", re.I)
+SOP = "SOP §9A.1"
+
+
+# ---------------------------------------------------------------- 帧数（§9A.3、§6 对照表）
+
+def snap_frames(n: int) -> int:
+    """向上对齐到 17k+5（节点 align_frame_count 的行为）"""
+    n = max(5, int(n))
+    while n % 17 != 5:
+        n += 1
+    return n
+
+
+def frames_for_seconds(seconds: float) -> int:
+    """剧本 **时长** → 合法帧数：ceil(秒×24) 向上对齐到 17k+5，最少 124、最多 362（§6 对照表）"""
+    n = snap_frames(max(MIN_FRAMES, math.ceil(float(seconds) * FPS - 1e-9)))
+    return min(n, MAX_FRAMES)
+
+
+def sss(frames: int) -> str:
+    return f"{frames / FPS:.2f}"
+
+
+def alignment_line(frames: int, last_shot: int = 1) -> str:
+    return (f"{ALIGN_PREFIX} — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; "
+            f"Picture 2 (from Shot {last_shot}) aligns with the {sss(frames)}-second mark of the target video.")
+
+
+# ---------------------------------------------------------------- 解析
+
+def parse_h3(prompt: str) -> dict:
+    """拆成 {align, fields: {name: value}, order: [name...], layout_ok, layout_detail}。不抛异常。"""
+    text = (prompt or "").replace("\r\n", "\n").strip("\n")
+    lines = text.split("\n")
+    align = lines[0] if lines else ""
+    rest = text[len(align):]
+    fields: dict[str, str] = {}
+    order: list[str] = []
+    for m in re.finditer(r"(?m)^([A-Za-z_][A-Za-z0-9_ ]*):[ \t]?", rest):
+        name = m.group(1)
+        if name.startswith("[") or " " in name.strip():
+            continue
+        order.append(name)
+    # 按出现顺序切值
+    marks = [(m.start(), m.end(), m.group(1)) for m in re.finditer(r"(?m)^([A-Za-z_][A-Za-z0-9_]*):[ \t]?", rest)]
+    for i, (_, end, name) in enumerate(marks):
+        stop = marks[i + 1][0] if i + 1 < len(marks) else len(rest)
+        fields.setdefault(name, rest[end:stop].strip())
+    expected = (f"\n\n{FIELDS[0]}: {fields.get(FIELDS[0], '')}\n\n{FIELDS[1]}: {fields.get(FIELDS[1], '')}"
+                f"\n\n{FIELDS[2]}: {fields.get(FIELDS[2], '')}")
+    problems = []
+    if not rest.startswith("\n\n") or rest.startswith("\n\n\n"):
+        problems.append("对齐句后必须恰好空一行")
+    if tuple(order) != FIELDS:
+        problems.append(f"字段顺序/名称应为 {' → '.join(FIELDS)}，实际 {' → '.join(order) or '（无）'}")
+    elif rest.rstrip() != expected:
+        problems.append("字段之间必须各空一行、每个字段写成一段（字段值里不能有空行）")
+    return {"align": align, "fields": fields, "order": order, "layout_ok": not problems,
+            "layout_detail": "；".join(problems)}
+
+
+def _outside_d(text: str) -> str:
+    return D_BLOCK_RE.sub(" ", text or "")
+
+
+def _sentences(text: str) -> list[str]:
+    return [x for x in re.split(r"(?<=[.!?])\s+", (text or "").strip()) if x.strip()]
+
+
+def _r(rule_id: str, ok: bool, detail: str, level: str = "block", sop_ref: str = SOP) -> dict:
+    return {"rule_id": rule_id, "sop_ref": sop_ref, "ok": bool(ok), "detail": detail, "msg": detail, "level": level}
+
+
+# ---------------------------------------------------------------- 检查
+
+def lint_h3(prompt: str, frames: int | None = None, intimate: bool = False, *, seconds: float | None = None,
+            dialogue: list[str] | None = None, offscreen: list[str] | None = None,
+            monologue: list[str] | None = None) -> list[dict]:
+    """返回 [{rule_id, sop_ref, ok, detail, msg, level}]；level = block | warn（同 rule_ids.md 的级别）"""
+    out: list[dict] = []
+    text = (prompt or "").replace("\r\n", "\n").strip("\n")
+    p = parse_h3(text)
+    f = p["fields"]
+    body = f.get(FIELDS[0], "")
+    sound = f.get(FIELDS[1], "")
+    music = f.get(FIELDS[2], "")
+
+    # H3-A1 对齐句
+    m = ALIGN_RE.match(p["align"])
+    if not m:
+        det = "第一行不是官方对齐句（逐字，包括破折号 —）" if p["align"].startswith(ALIGN_PREFIX) else \
+            "第一行必须是对齐句 “How the reference pictures align with the target video — …”"
+        out.append(_r("H3-A1", False, det))
+    else:
+        shot_n, s_val = int(m.group(1)), m.group(2)
+        probs = []
+        if shot_n != 1:
+            probs.append(f"单镜头应写 Picture 2 (from Shot 1)，实际 Shot {shot_n}")
+        if frames is not None and s_val != sss(frames):
+            probs.append(f"S.SS = {s_val}，按 {frames} 帧应为 {sss(frames)}")
+        out.append(_r("H3-A1", not probs, "；".join(probs) or f"对齐句正确（{s_val} s）"))
+
+    # H3-A2 空行与字段
+    out.append(_r("H3-A2", p["layout_ok"], p["layout_detail"] or "空行与三个字段顺序正确"))
+
+    # H3-A3 单镜头、无时间戳
+    shots = body.count("[Shot ")
+    probs = []
+    if shots != 1 or not body.startswith("[Shot 1]"):
+        probs.append(f"正文必须以 [Shot 1] 开头且只有一个镜头（现有 {shots} 个 [Shot …]）")
+    if TIMESTAMP_RE.match(body):
+        probs.append("[Shot 1] 后面不写时间戳")
+    out.append(_r("H3-A3", not probs, "；".join(probs) or "单镜头 [Shot 1]"))
+
+    # H3-A4 开头 Picture 1 / 结尾收在 Picture 2
+    sents = _sentences(_outside_d(body))
+    probs = []
+    if not sents or OPEN_PHRASE not in sents[0]:
+        probs.append(f"第一句要写 “…{OPEN_PHRASE}”")
+    last = sents[-1] if sents else ""
+    if CLOSE_PHRASE not in last or not re.search(r"\bsettles? into\b", last):
+        probs.append(f"最后一句要写 “settles into … {CLOSE_PHRASE}.”")
+    out.append(_r("H3-A4", not probs, "；".join(probs) or "首帧起、尾帧收"))
+
+    # H3-A5 否定句 / 禁用清单（<d> 外；N/A 除外）
+    if FIELDS[0] in f:
+        scan = _outside_d(body) + "\n" + sound + ("\n" + music if music.strip() != "N/A" else "")
+    else:                       # 没有官方字段（旧版拼接）：整段都算正文
+        scan = _outside_d(text)
+    scan = scan.replace("N/A", " ")
+    hits = sorted({h.group(0).lower() for h in NEG_EN_RE.finditer(scan)} | set(NEG_ZH_RE.findall(scan)))
+    out.append(_r("H3-A5", not hits, f"出现否定词：{'、'.join(hits)}（改成“画面里有什么”的正向写法）" if hits
+                  else "没有否定句"))
+
+    # H3-A7 英文正文：<d> 外不出现中文
+    outside = _outside_d(text)
+    cjk = len(CJK_RE.findall(outside))
+    letters = [c for c in outside if not c.isspace()]
+    ascii_ratio = (sum(1 for c in letters if ord(c) < 128) / len(letters)) if letters else 1.0
+    out.append(_r("H3-A7", cjk == 0,
+                  f"<d> 外有 {cjk} 个中文字符（ASCII 占比 {ascii_ratio:.0%}）：需要英文正文（剧本 v3 提供）" if cjk
+                  else "正文为英文"))
+
+    # H3-A8 风格开场 + 不带图像风格后缀
+    probs = []
+    if not body.startswith("[Shot 1] " + STYLE_OPENING):
+        probs.append(f"[Shot 1] 后应以 “{STYLE_OPENING}” 开场")
+    style_hits = sorted({h.group(0) for h in STYLE_TERM_RE.finditer(_outside_d(text))})
+    if style_hits:
+        probs.append(f"带了图像风格/画质词：{'、'.join(style_hits)}（H3 正文不拼图像后缀）")
+    out.append(_r("H3-A8", not probs, "；".join(probs) or "风格开场正确"))
+
+    # H3-A11 时长 4–15 s
+    eff = frames / FPS if frames is not None else (float(m.group(2)) if m else None)
+    if eff is None:
+        out.append(_r("H3-A11", False, "无法得到时长（缺帧数且对齐句无 S.SS）"))
+    else:
+        out.append(_r("H3-A11", 4 <= eff <= 15.1, f"时长 {eff:.2f} s（应在 4–15 s）"))
+
+    # H3-A12 长度（待验证 → warn）
+    out.append(_r("H3-A12", len(text) <= MAX_CHARS, f"{len(text)} 字符（上限 {MAX_CHARS}，待验证）", level="warn"))
+
+    # H3-D1 <d> 只放语言标签和原文
+    blocks = D_BLOCK_RE.findall(text)
+    probs = []
+    if text.count("<d>") != text.count("</d>") or len(blocks) != text.count("<d>"):
+        probs.append("<d> 与 </d> 不成对")
+    bad = [b for b in blocks if not D_OK_RE.match(b) or "<" in b]
+    if bad:
+        probs.append(f"{len(bad)} 处 <d> 不是 “<d>[Chinese] 原文</d>” 格式：{bad[0][:30]}")
+    out.append(_r("H3-D1", not probs, "；".join(probs) or f"{len(blocks)} 处 <d> 格式正确"))
+
+    # H3-D2 说话人编号在 <d> 前、按首次开口顺序
+    probs, seen = [], []
+    prev_end = 0
+    for dm in D_BLOCK_RE.finditer(body):
+        lead = body[prev_end:dm.start()]
+        ids = SPEAKER_RE.findall(lead)
+        if not ids:
+            probs.append(f"<d>{dm.group(1)[:16]}…</d> 前没有 (S1)/(S2) 说话人编号")
+        else:
+            for sid in re.findall(r"S\d+", ids[-1]):
+                if sid not in seen:
+                    seen.append(sid)
+        prev_end = dm.end()
+    if seen and seen != [f"S{i + 1}" for i in range(len(seen))]:
+        probs.append(f"编号应按首次开口顺序 S1、S2…，实际 {'、'.join(seen)}")
+    out.append(_r("H3-D2", not probs, "；".join(probs) or (f"说话人 {'、'.join(seen)}" if seen else "本镜无台词")))
+
+    spoken = [re.sub(r"^\[[^\]]*\]\s?", "", b) for b in blocks]
+    # H3-D3 台词逐字
+    if dialogue is not None:
+        want = [x for x in dialogue if x and x.strip()]
+        ok = spoken == want
+        det = "台词与剧本逐字一致" if ok else \
+            f"剧本 {len(want)} 句、提示词 {len(spoken)} 句，" + next(
+                (f"第 {i + 1} 句不一致：剧本「{a}」≠ 提示词「{b}」" for i, (a, b) in enumerate(zip(want, spoken)) if a != b),
+                "条数或顺序不一致")
+        out.append(_r("H3-D3", ok, det))
+
+    # H3-D4 不用双引号包台词
+    q = len(re.findall(r"[\"“”]", text))
+    out.append(_r("H3-D4", q == 0, f"出现 {q} 个双引号（会被烧成字幕）" if q else "没有双引号"))
+
+    # H3-D5 画外音
+    # 每个 <d> 的引导段 = 上一个 </d> 之后到本 <d> 之前（不跨到前一句台词）
+    leads, prev_end = {}, 0
+    for dm in D_BLOCK_RE.finditer(body):
+        leads[dm.start()] = body[prev_end:dm.start()]
+        prev_end = dm.end()
+    vo_blocks = [dm for dm in D_BLOCK_RE.finditer(body) if "voiceover" in leads[dm.start()].lower()]
+    probs = []
+    for dm in vo_blocks:
+        if VO_PHRASE not in leads[dm.start()]:
+            probs.append("画外音要写 “says in an off-screen voiceover”")
+        after = _sentences(body[dm.end():])
+        if not after or not re.search(r"lips\b.*\bclosed", after[0], re.I):
+            probs.append("</d> 后要紧跟画面内人物嘴唇闭合的句子（…lips remain closed）")
+    for line in offscreen or []:
+        idx = next((i for i, x in enumerate(spoken) if x == line), None)
+        if idx is None or not any(re.sub(r"^\[[^\]]*\]\s?", "", dm.group(1)) == line for dm in vo_blocks):
+            probs.append(f"剧本画外台词「{line[:12]}」没按画外音写")
+    if vo_blocks or offscreen:
+        out.append(_r("H3-D5", not probs, "；".join(dict.fromkeys(probs)) or "画外音写法正确"))
+
+    # H3-D6 🎙 内心独白不进 H3
+    if monologue is not None:
+        leaked = []
+        for mono in monologue:
+            # 按标点切成小句；6 字以上的小句原样出现在提示词里才算泄漏（避免“惊喜”这类常用词误报）
+            for piece in re.split(r"[。！？!?…—\n，,；;：:“”\"「」『』（）()]+", mono or ""):
+                piece = piece.strip()
+                if len(piece) >= 6 and piece in text:
+                    leaked.append(piece)
+        out.append(_r("H3-D6", not leaked, f"内心独白进了提示词：{leaked[0]}" if leaked else "独白未进提示词"))
+
+    # H3-D7 发声人数（亲密镜 block；其余 warn）
+    n_spk = len(seen)
+    if intimate:
+        probs = []
+        if n_spk > 1:
+            probs.append(f"亲密镜只让林晚发声，现有 {n_spk} 个说话人")
+        male = sorted({h.group(0).lower() for h in MALE_SOUND_RE.finditer(sound)})
+        if male:
+            probs.append(f"soundscape 里写了男性声音：{'、'.join(male)}")
+        out.append(_r("H3-D7", not probs, "；".join(probs) or "亲密镜单人发声"))
+    elif n_spk > 1:
+        out.append(_r("H3-D7", False, f"{n_spk} 人发声（普通对话镜暂按官方双人语法，待项目方定）", level="warn"))
+
+    # H3-S1 soundscape：1–4 句英文、一段、无 <d>
+    probs = []
+    ss = _sentences(sound)
+    if not 1 <= len(ss) <= 4:
+        probs.append(f"应为 1–4 句，现有 {len(ss)} 句")
+    if "\n" in sound:
+        probs.append("要写成一段")
+    if "<d>" in sound:
+        probs.append("不写台词 <d>")
+    if CJK_RE.search(sound):
+        probs.append("要用英文")
+    if sound.strip() == "N/A":
+        probs = []
+    out.append(_r("H3-S1", not probs, "；".join(probs) or f"{len(ss)} 句英文"))
+
+    # H3-S2 soundscape 不写 N/A
+    out.append(_r("H3-S2", bool(sound.strip()) and sound.strip() != "N/A",
+                  "overall_soundscape 不能为空或 N/A" if not sound.strip() or sound.strip() == "N/A" else "有环境声"))
+
+    # H3-S3 配乐固定 N/A
+    out.append(_r("H3-S3", music.strip() == "N/A", "non_diegetic_music 固定写 N/A（配乐交给后期 BGM）"
+                  if music.strip() != "N/A" else "N/A"))
+
+    # P-B1 帧数网格
+    if frames is not None:
+        probs = []
+        if frames % 17 != 5 or not MIN_FRAMES <= frames <= MAX_FRAMES:
+            probs.append(f"{frames} 帧不在 17k+5 网格 / {MIN_FRAMES}–{MAX_FRAMES} 范围内")
+        if seconds is not None and frames != frames_for_seconds(seconds):
+            probs.append(f"时长 {seconds:g} s 查表应为 {frames_for_seconds(seconds)} 帧，实际 {frames}")
+        out.append(_r("P-B1", not probs, "；".join(probs) or f"{frames} 帧（{sss(frames)} s）",
+                      sop_ref="SOP §9A.3；§6 表"))
+    return out
+
+
+def lint_ok(results: list[dict], overrides: set[str] | frozenset = frozenset()) -> bool:
+    """block 级别全部通过（overrides = 有项目方原话豁免的 rule_id）"""
+    return all(r["ok"] or r.get("level") != "block" or r["rule_id"] in overrides for r in results)
+
+
+def failed_rules(results: list[dict], overrides: set[str] | frozenset = frozenset(), level: str = "block") -> list[str]:
+    return [r["rule_id"] for r in results
+            if not r["ok"] and r.get("level") == level and r["rule_id"] not in overrides]

@@ -1,0 +1,296 @@
+{
+  "takes": [
+    {
+      "n": 1,
+      "stage": "image",
+      "file": "renders/ep01/S5/takes/image_001.png",
+      "seed": 2289575415797,
+      "prompt": "图1只提供林晚的面部身份与发型：五官、脸型、发色发型、肤色与妆容；不要沿用图1的姿势、表情、服装、首饰、背景、构图和光线。画面内容完全按以下描述：【林晚】22岁中国成年女性，蓝发及腰、齐刘海、冷白皮肤、G罩杯、长腿，真人写实；手指甲为5厘米超长透明水晶甲、镶满钻石饰品；脚趾甲为2厘米长的性感美甲（手脚入镜时必须可见），厨房水槽前，林晚背对镜头洗碗，肩线绷直，窗外城市夜景，她面前窗外玻璃映出自己模糊的脸，暗部保留细节，面部可辨，画面光比1:4，非纯黑，衣装完整、无裸露，专业电影镜头画面感，画面干净，徕卡镜头级锐利度与通透质感，85mm人像镜头f/1.2大光圈，主体锐利对焦，前景与背景奶油般柔焦虚化、柔和圆形光斑，浓郁饱和的暖色调电影调色，色彩丰富艳丽、通透明亮，柔和的大面积光源与暖调轮廓光、高光柔和不过曝，皮肤通透有真实质感，无字幕、无文字、无水印",
+      "negative": "动漫脸、CGI感、娃娃脸、肢体变形、多余手指、脸跳变、未成年人外观、水印、横构图、字幕、画面文字、灰暗脏乱的色调、变形的手部，扭曲面部、字幕、文字、水印、logo、标题字、画面发灰、低饱和、暗沉脏色、过曝死白、裸露、走光、低俗姿势、裸体、裸背、赤裸上身、露出乳房、内衣外露",
+      "seconds": 66.3,
+      "frames": null,
+      "last_frame": null,
+      "created_at": "2026-10-30T05:25:05",
+      "workflow": "qwen_edit_plate",
+      "reference": "assets/characters/lin_wan/items/makeup/M1_s0.png",
+      "qc": {
+        "nudity": true,
+        "hits": [],
+        "clip_bare": 0.829,
+        "version": "nudenet3.4+clipL14-v1"
+      },
+      "raw_file": "renders/ep01/S5/takes/image_001_raw.png",
+      "grade": {
+        "method": "reinhard_lab",
+        "strength": 0.6,
+        "dark": true,
+        "l_share": 0.0,
+        "src_mean": [
+          33.84,
+          5.62,
+          11.75
+        ],
+        "ref_mean": [
+          64.29,
+          6.53,
+          2.24
+        ],
+        "reference": "assets/style/color_reference_01.png"
+      },
+      "score": null,
+      "round": 1,
+      "references": [
+        "assets/characters/lin_wan/items/makeup/M1_s0.png"
+      ],
+      "look_hash": null,
+      "source": null
+    },
+    {
+      "n": 2,
+      "stage": "image",
+      "file": "renders/ep01/S5/takes/image_002.png",
+      "seed": 21706092947743,
+      "prompt": "图1只提供林晚的面部身份与发型：五官、脸型、发色发型、肤色与妆容；不要沿用图1的姿势、表情、服装、首饰、背景、构图和光线。画面内容完全按以下描述：【林晚】22岁中国成年女性，蓝发及腰、齐刘海、冷白皮肤、G罩杯、长腿，真人写实；手指甲为5厘米超长透明水晶甲、镶满钻石饰品；脚趾甲为2厘米长的性感美甲（手脚入镜时必须可见），厨房水槽前，林晚背对镜头洗碗，肩线绷直，窗外城市夜景，她面前窗外玻璃映出自己模糊的脸，暗部保留细节，面部可辨，画面光比1:4，非纯黑，衣装完整、无裸露，专业电影镜头画面感，画面干净，徕卡镜头级锐利度与通透质感，85mm人像镜头f/1.2大光圈，主体锐利对焦，前景与背景奶油般柔焦虚化、柔和圆形光斑，浓郁饱和的暖色调电影调色，色彩丰富艳丽、通透明亮，柔和的大面积光源与暖调轮廓光、高光柔和不过曝，皮肤通透有真实质感，无字幕、无文字、无水印",
+      "negative": "动漫脸、CGI感、娃娃脸、肢体变形、多余手指、脸跳变、未成年人外观、水印、横构图、字幕、画面文字、灰暗脏乱的色调、变形的手部，扭曲面部、字幕、文字、水印、logo、标题字、画面发灰、低饱和、暗沉脏色、过曝死白、裸露、走光、低俗姿势、裸体、裸背、赤裸上身、露出乳房、内衣外露",
+      "seconds": 69.3,
+      "frames": null,
+      "last_frame": null,
+      "created_at": "2026-10-30T05:30:31",
+      "workflow": "qwen_edit_plate",
+      "reference": "assets/characters/lin_wan/items/makeup/M1_s0.png",
+      "qc": {
+        "nudity": false,
+        "hits": [],
+        "clip_bare": 0.456,
+        "version": "nudenet3.4+clipL14-v1"
+      },
+      "raw_file": "renders/ep01/S5/takes/image_002_raw.png",
+      "grade": {
+        "method": "reinhard_lab",
+        "strength": 0.6,
+        "dark": true,
+        "l_share": 0.0,
+        "src_mean": [
+          37.45,
+          4.09,
+          8.67
+        ],
+        "ref_mean": [
+          64.29,
+          6.53,
+          2.24
+        ],
+        "reference": "assets/style/color_reference_01.png"
+      },
+      "score": {
+        "total": 0.79,
+        "parts": {
+          "fidelity": 0.667,
+          "realism": 0.8,
+          "face": 1.0,
+          "face_cos": 0.95,
+          "colour_dist": 9.69,
+          "colour": 0.724,
+          "sharp_var": 274.5,
+          "bg_var": 114.1,
+          "sharp": 0.813,
+          "smooth_frac": 0.398,
+          "bokeh": 1.0
+        },
+        "missing": [
+          "林晚背对镜头洗碗",
+          "她洗碗的动作规律"
+        ],
+        "reasons": [],
+        "weights": {
+          "fidelity": 0.4,
+          "face": 0.15,
+          "realism": 0.15,
+          "colour": 0.1,
+          "sharp": 0.1,
+          "bokeh": 0.1
+        },
+        "compose": [
+          {
+            "file": "renders/ep01/S5/takes/compose_002_r1_0.png",
+            "seed": 182870996694705,
+            "fidelity": null,
+            "nudity": true,
+            "clip_bare": 0.934,
+            "seconds": 60.2
+          },
+          {
+            "file": "renders/ep01/S5/takes/compose_002_r1_1.png",
+            "seed": 206349181738071,
+            "fidelity": null,
+            "nudity": true,
+            "clip_bare": 0.834,
+            "seconds": 57.2
+          }
+        ]
+      },
+      "round": 1,
+      "references": [
+        "assets/characters/lin_wan/items/makeup/M1_s0.png"
+      ],
+      "look_hash": null,
+      "source": null
+    },
+    {
+      "n": 3,
+      "stage": "image",
+      "file": "renders/ep01/S5/takes/image_003.png",
+      "seed": 246428594154927,
+      "prompt": "图1只提供林晚的面部身份与发型：五官、脸型、发色发型、肤色与妆容；不要沿用图1的姿势、表情、服装、首饰、背景、构图和光线。画面内容完全按以下描述：真实人像摄影，未修图的原片，无美颜滤镜无磨皮，皮肤可见毛孔与细小绒毛，【林晚】22岁中国成年女性，蓝发及腰、齐刘海、冷白皮肤、G罩杯、长腿，真人写实；手指甲为5厘米超长透明水晶甲、镶满钻石饰品；脚趾甲为2厘米长的性感美甲（手脚入镜时必须可见），厨房水槽前，林晚背对镜头洗碗，肩线绷直，窗外城市夜景，她面前窗外玻璃映出自己模糊的脸，暗部保留细节，面部可辨，画面光比1:4，非纯黑，衣装完整、无裸露，专业电影镜头画面感，画面干净，徕卡镜头级锐利度与通透质感，85mm人像镜头f/1.2大光圈，主体锐利对焦，前景与背景奶油般柔焦虚化、柔和圆形光斑，浓郁饱和的暖色调电影调色，色彩丰富艳丽、通透明亮，柔和的大面积光源与暖调轮廓光、高光柔和不过曝，皮肤通透有真实质感，无字幕、无文字、无水印",
+      "negative": "动漫脸、CGI感、娃娃脸、肢体变形、多余手指、脸跳变、未成年人外观、水印、横构图、字幕、画面文字、灰暗脏乱的色调、变形的手部，扭曲面部、字幕、文字、水印、logo、标题字、画面发灰、低饱和、暗沉脏色、过曝死白、裸露、走光、低俗姿势、裸体、裸背、赤裸上身、露出乳房、内衣外露",
+      "seconds": 78.3,
+      "frames": null,
+      "last_frame": null,
+      "created_at": "2026-10-30T05:33:45",
+      "workflow": "qwen_refine_base",
+      "reference": "assets/characters/lin_wan/items/makeup/M1_s0.png",
+      "qc": {
+        "nudity": false,
+        "hits": [],
+        "clip_bare": 0.425,
+        "version": "nudenet3.4+clipL14-v1"
+      },
+      "raw_file": "renders/ep01/S5/takes/image_003_raw.png",
+      "grade": {
+        "method": "reinhard_lab",
+        "strength": 0.6,
+        "dark": true,
+        "l_share": 0.0,
+        "src_mean": [
+          37.2,
+          3.97,
+          8.59
+        ],
+        "ref_mean": [
+          64.29,
+          6.53,
+          2.24
+        ],
+        "reference": "assets/style/color_reference_01.png"
+      },
+      "score": {
+        "total": 0.789,
+        "parts": {
+          "fidelity": 0.667,
+          "realism": 0.8,
+          "face": 1.0,
+          "face_cos": 0.936,
+          "colour_dist": 9.73,
+          "colour": 0.723,
+          "sharp_var": 253.1,
+          "bg_var": 88.8,
+          "sharp": 0.801,
+          "smooth_frac": 0.406,
+          "bokeh": 1.0
+        },
+        "missing": [
+          "林晚背对镜头洗碗",
+          "她洗碗的动作规律"
+        ],
+        "reasons": [],
+        "weights": {
+          "fidelity": 0.4,
+          "face": 0.15,
+          "realism": 0.15,
+          "colour": 0.1,
+          "sharp": 0.1,
+          "bokeh": 0.1
+        },
+        "refined_from": 2
+      },
+      "round": 1,
+      "references": [
+        "data/renders/ep01/S5/takes/image_002.png (image v2)",
+        "assets/characters/lin_wan/items/makeup/M1_s0.png"
+      ],
+      "look_hash": null,
+      "source": null
+    },
+    {
+      "n": 1,
+      "stage": "last",
+      "file": "renders/ep01/S5/takes/last_001.png",
+      "seed": 176365916845799,
+      "prompt": "图1是本镜头的首帧画面。图2只提供林晚的面部身份与发型，用来保持人物长相一致；不要沿用图2的姿势、服装、背景和光线。保持图1的场景、机位、景别、光线、人物身份、发型与服装完全不变（同一场景同一人物同一服装），只把画面改为这个镜头动作结束时的瞬间：抬头看窗玻璃里自己的倒影三秒，手上的水一直流，【林晚】22岁中国成年女性，蓝发及腰、齐刘海、冷白皮肤、G罩杯、长腿，真人写实；手指甲为5厘米超长透明水晶甲、镶满钻石饰品；脚趾甲为2厘米长的性感美甲（手脚入镜时必须可见），专业电影镜头画面感，画面干净，徕卡镜头级锐利度与通透质感，85mm人像镜头f/1.2大光圈，主体锐利对焦，前景与背景奶油般柔焦虚化、柔和圆形光斑，浓郁饱和的暖色调电影调色，色彩丰富艳丽、通透明亮，柔和的大面积光源与暖调轮廓光、高光柔和不过曝，皮肤通透有真实质感，无字幕、无文字、无水印",
+      "negative": "动漫脸、CGI感、娃娃脸、肢体变形、多余手指、脸跳变、未成年人外观、水印、横构图、字幕、画面文字、灰暗脏乱的色调、变形的手部，扭曲面部、字幕、文字、水印、logo、标题字、画面发灰、低饱和、暗沉脏色、过曝死白、裸露、走光、低俗姿势、裸体、裸背、赤裸上身、露出乳房、内衣外露",
+      "seconds": 75.3,
+      "frames": null,
+      "last_frame": null,
+      "created_at": "2026-10-30T05:36:56",
+      "workflow": "qwen_edit_last",
+      "reference": "data/renders/ep01/S5/frame.png (image v3)",
+      "qc": {
+        "nudity": false,
+        "hits": [],
+        "clip_bare": 0.398,
+        "version": "nudenet3.4+clipL14-v1"
+      },
+      "raw_file": "renders/ep01/S5/takes/last_001_raw.png",
+      "grade": {
+        "method": "reinhard_lab",
+        "strength": 0.7,
+        "dark": true,
+        "l_share": 0.0,
+        "src_mean": [
+          37.45,
+          4.6,
+          7.92
+        ],
+        "ref_mean": [
+          37.15,
+          4.65,
+          7.78
+        ],
+        "reference": "golden/quality_v2/smoke2/renders/ep01/S5/frame.png"
+      },
+      "score": {
+        "total": 0.684,
+        "parts": {
+          "fidelity": 0.333,
+          "realism": 0.8,
+          "face": 1.0,
+          "face_cos": 0.93,
+          "colour_dist": 1.05,
+          "colour": 0.966,
+          "sharp_var": 331.9,
+          "bg_var": 176.4,
+          "sharp": 0.84,
+          "smooth_frac": 0.384,
+          "bokeh": 1.0
+        },
+        "missing": [
+          "抬头看窗玻璃里自己的倒影三秒",
+          "手上的水一直流"
+        ],
+        "reasons": [
+          "剧本细节不到一半"
+        ],
+        "weights": {
+          "fidelity": 0.4,
+          "face": 0.15,
+          "realism": 0.15,
+          "colour": 0.1,
+          "sharp": 0.1,
+          "bokeh": 0.1
+        }
+      },
+      "round": 1,
+      "references": [
+        "data/renders/ep01/S5/frame.png (image v3)",
+        "assets/characters/lin_wan/items/makeup/M1_s0.png"
+      ],
+      "look_hash": null,
+      "source": null
+    }
+  ],
+  "active": {
+    "image": 3,
+    "last": 1
+  },
+  "review": {}
+}

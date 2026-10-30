@@ -1,0 +1,798 @@
+[
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O00_worn_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.274,
+  "new": 0.014,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O01_product_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.369,
+  "new": 0.0,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O01_worn_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.526,
+  "new": 0.0,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O02_product_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.209,
+  "new": 0.0,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O02_worn_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.718,
+  "new": 0.0,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O03_product_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.466,
+  "new": 0.001,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O03_worn_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.563,
+  "new": 0.002,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O04_worn_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.392,
+  "new": 0.002,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O05_product_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.197,
+  "new": 0.004,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O06_worn_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.786,
+  "new": 0.011,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O07_product_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.506,
+  "new": 0.06,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O07_worn_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.426,
+  "new": 0.037,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O08_product_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.847,
+  "new": 0.085,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O08_worn_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.765,
+  "new": 0.145,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O09_product_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.355,
+  "new": 0.105,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O09_worn_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.418,
+  "new": 0.005,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O10_product_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.442,
+  "new": 0.229,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O11_product_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.778,
+  "new": 0.439,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O12_flatlay_dark_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.986,
+  "new": 0.137,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O12_flatlay_white_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.993,
+  "new": 0.475,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O12_mannequin_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.868,
+  "new": 0.294,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O13_product_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.894,
+  "new": 0.197,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O14_product_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.874,
+  "new": 0.173,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O15_product_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.808,
+  "new": 0.038,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O15_worn_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.225,
+  "new": 0.012,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O16_product_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.929,
+  "new": 0.043,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O16_worn_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.796,
+  "new": 0.004,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O17_worn_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.683,
+  "new": 0.053,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O19_product_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.989,
+  "new": 0.212,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O20_worn_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.622,
+  "new": 0.016,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O21_product_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.97,
+  "new": 0.016,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\outfit\\O21_worn_s0.png",
+  "label": false,
+  "src": "asset:items/outfit",
+  "old": 0.528,
+  "new": 0.031,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\looks\\REF-LW-01_34_s0.png",
+  "label": false,
+  "src": "asset:looks",
+  "old": 0.709,
+  "new": 0.001,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\looks\\REF-LW-01_back_s0.png",
+  "label": false,
+  "src": "asset:looks",
+  "old": 0.394,
+  "new": 0.037,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\looks\\REF-LW-01_front_s0.png",
+  "label": false,
+  "src": "asset:looks",
+  "old": 0.544,
+  "new": 0.001,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\looks\\REF-LW-02_34_s0.png",
+  "label": false,
+  "src": "asset:looks",
+  "old": 0.549,
+  "new": 0.08,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\looks\\REF-LW-02_back_s0.png",
+  "label": false,
+  "src": "asset:looks",
+  "old": 0.705,
+  "new": 0.515,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\looks\\REF-LW-02_front_s0.png",
+  "label": false,
+  "src": "asset:looks",
+  "old": 0.784,
+  "new": 0.069,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\plates\\body_B_s0.png",
+  "label": false,
+  "src": "asset:plates",
+  "old": 0.288,
+  "new": 0.083,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\plates\\body_F_s0.png",
+  "label": false,
+  "src": "asset:plates",
+  "old": 0.435,
+  "new": 0.024,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\plates\\body_F_s7.png",
+  "label": false,
+  "src": "asset:plates",
+  "old": 0.292,
+  "new": 0.016,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\plates\\body_S_s0.png",
+  "label": false,
+  "src": "asset:plates",
+  "old": 0.591,
+  "new": 0.051,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\plates\\id_34L_s0.png",
+  "label": false,
+  "src": "asset:plates",
+  "old": 0.301,
+  "new": 0.104,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\plates\\id_34L_s0_v1superseded.png",
+  "label": false,
+  "src": "asset:plates",
+  "old": 0.374,
+  "new": 0.078,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\plates\\id_34R_s0.png",
+  "label": false,
+  "src": "asset:plates",
+  "old": 0.447,
+  "new": 0.222,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\plates\\id_back_s0.png",
+  "label": false,
+  "src": "asset:plates",
+  "old": 0.723,
+  "new": 0.254,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\plates\\id_front_bare_s0.png",
+  "label": false,
+  "src": "asset:plates",
+  "old": 0.59,
+  "new": 0.274,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\plates\\id_front_bare_s0_v1superseded.png",
+  "label": false,
+  "src": "asset:plates",
+  "old": 0.627,
+  "new": 0.256,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\plates\\id_front_heavy_s0.png",
+  "label": false,
+  "src": "asset:plates",
+  "old": 0.743,
+  "new": 0.418,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\plates\\id_front_s0.png",
+  "label": false,
+  "src": "asset:plates",
+  "old": 0.481,
+  "new": 0.231,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\plates\\id_front_s0_v1superseded.png",
+  "label": false,
+  "src": "asset:plates",
+  "old": 0.425,
+  "new": 0.087,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\plates\\id_profile_s0.png",
+  "label": false,
+  "src": "asset:plates",
+  "old": 0.269,
+  "new": 0.069,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\plates\\master.png",
+  "label": false,
+  "src": "asset:plates",
+  "old": 0.524,
+  "new": 0.612,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\plates\\master_v2_CL_s0_superseded.png",
+  "label": false,
+  "src": "asset:plates",
+  "old": 0.593,
+  "new": 0.711,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\expressions\\angry_s0.png",
+  "label": false,
+  "src": "asset:expressions",
+  "old": 0.676,
+  "new": 0.234,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\expressions\\calm_s0.png",
+  "label": false,
+  "src": "asset:expressions",
+  "old": 0.54,
+  "new": 0.364,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\expressions\\cry_s0.png",
+  "label": false,
+  "src": "asset:expressions",
+  "old": 0.464,
+  "new": 0.086,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\expressions\\seductive_s0.png",
+  "label": false,
+  "src": "asset:expressions",
+  "old": 0.504,
+  "new": 0.301,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\expressions\\smile_s0.png",
+  "label": false,
+  "src": "asset:expressions",
+  "old": 0.601,
+  "new": 0.266,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\expressions\\surprised_s0.png",
+  "label": false,
+  "src": "asset:expressions",
+  "old": 0.514,
+  "new": 0.195,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\makeup\\L1_bare_commute_s0.png",
+  "label": false,
+  "src": "asset:items/makeup",
+  "old": 0.481,
+  "new": 0.171,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\makeup\\L2_half_red_s0.png",
+  "label": false,
+  "src": "asset:items/makeup",
+  "old": 0.303,
+  "new": 0.156,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\makeup\\L3_red_lip_city_s0.png",
+  "label": false,
+  "src": "asset:items/makeup",
+  "old": 0.37,
+  "new": 0.163,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\makeup\\L4_queen_s0.png",
+  "label": false,
+  "src": "asset:items/makeup",
+  "old": 0.671,
+  "new": 0.272,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\makeup\\L5_night_crystal_s0.png",
+  "label": false,
+  "src": "asset:items/makeup",
+  "old": 0.367,
+  "new": 0.166,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\makeup\\L6_tears_on_L1_s0.png",
+  "label": false,
+  "src": "asset:items/makeup",
+  "old": 0.349,
+  "new": 0.131,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\makeup\\L6_tears_on_L4_s0.png",
+  "label": false,
+  "src": "asset:items/makeup",
+  "old": 0.484,
+  "new": 0.101,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\makeup\\L7_dewy_signature_s0.png",
+  "label": false,
+  "src": "asset:items/makeup",
+  "old": 0.495,
+  "new": 0.174,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\makeup\\L8_sweet_refined_s0.png",
+  "label": false,
+  "src": "asset:items/makeup",
+  "old": 0.518,
+  "new": 0.171,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\makeup\\M0_s0.png",
+  "label": false,
+  "src": "asset:items/makeup",
+  "old": 0.485,
+  "new": 0.421,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\makeup\\M1_s0.png",
+  "label": false,
+  "src": "asset:items/makeup",
+  "old": 0.522,
+  "new": 0.289,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\makeup\\M2_s0.png",
+  "label": false,
+  "src": "asset:items/makeup",
+  "old": 0.486,
+  "new": 0.391,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\makeup\\M3_s0.png",
+  "label": false,
+  "src": "asset:items/makeup",
+  "old": 0.478,
+  "new": 0.455,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\makeup\\M4_s0.png",
+  "label": false,
+  "src": "asset:items/makeup",
+  "old": 0.717,
+  "new": 0.543,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\makeup\\M5_s0.png",
+  "label": false,
+  "src": "asset:items/makeup",
+  "old": 0.512,
+  "new": 0.37,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\makeup\\M5_s1.png",
+  "label": false,
+  "src": "asset:items/makeup",
+  "old": 0.485,
+  "new": 0.338,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\makeup\\M5_s2.png",
+  "label": false,
+  "src": "asset:items/makeup",
+  "old": 0.439,
+  "new": 0.298,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\makeup\\M5_s3.png",
+  "label": false,
+  "src": "asset:items/makeup",
+  "old": 0.503,
+  "new": 0.336,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\makeup\\M6_s0.png",
+  "label": false,
+  "src": "asset:items/makeup",
+  "old": 0.715,
+  "new": 0.428,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\makeup\\M6_s1.png",
+  "label": false,
+  "src": "asset:items/makeup",
+  "old": 0.59,
+  "new": 0.248,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\makeup\\M6_s2.png",
+  "label": false,
+  "src": "asset:items/makeup",
+  "old": 0.583,
+  "new": 0.226,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\lin_wan\\items\\makeup\\M6_s3.png",
+  "label": false,
+  "src": "asset:items/makeup",
+  "old": 0.624,
+  "new": 0.375,
+  "vlm": false
+ },
+ {
+  "file": "assets\\characters\\gu_chen\\candidates\\gu_chen_cand_02_s0.png",
+  "label": false,
+  "src": "asset:candidates",
+  "old": 0.796,
+  "new": 0.002,
+  "vlm": false
+ },
+ {
+  "file": "data\\renders\\ep01\\S2\\frame.png",
+  "label": false,
+  "src": "seen",
+  "old": 0.061,
+  "new": 0.056,
+  "vlm": false
+ },
+ {
+  "file": "data\\renders\\ep01\\S3\\frame.png",
+  "label": false,
+  "src": "seen",
+  "old": 0.639,
+  "new": 0.22,
+  "vlm": false
+ },
+ {
+  "file": "golden\\quality_v2\\smoke2\\renders\\ep01\\S5\\takes\\image_002.png",
+  "label": false,
+  "src": "seen",
+  "old": 0.456,
+  "new": 0.286,
+  "vlm": false
+ },
+ {
+  "file": "golden\\quality_v2\\smoke2\\renders\\ep01\\S5\\takes\\image_003.png",
+  "label": false,
+  "src": "seen",
+  "old": 0.425,
+  "new": 0.348,
+  "vlm": false
+ },
+ {
+  "file": "golden\\quality_v2\\sweep\\ep01-S5_full_768_head.png",
+  "label": false,
+  "src": "seen",
+  "old": 0.586,
+  "new": 0.549,
+  "vlm": false
+ },
+ {
+  "file": "golden\\quality_v2\\sweep\\ep01-S5_face_512_head.png",
+  "label": false,
+  "src": "seen",
+  "old": 0.579,
+  "new": 0.601,
+  "vlm": false
+ },
+ {
+  "file": "golden\\quality_v2\\sweep\\ep01-S3_two_i1_768.png",
+  "label": false,
+  "src": "seen",
+  "old": 0.877,
+  "new": 0.238,
+  "vlm": false
+ },
+ {
+  "file": "golden\\quality_v2\\sweep\\ep02-S1_two_i1_768.png",
+  "label": false,
+  "src": "seen",
+  "old": 0.782,
+  "new": 0.304,
+  "vlm": false
+ },
+ {
+  "file": "golden\\quality_v2\\sweep\\ep01-S6_two_i1_768.png",
+  "label": false,
+  "src": "seen",
+  "old": 0.724,
+  "new": 0.649,
+  "vlm": false
+ },
+ {
+  "file": "golden\\quality_v2\\idfix\\swap768.png",
+  "label": false,
+  "src": "seen",
+  "old": 0.673,
+  "new": 0.258,
+  "vlm": false
+ },
+ {
+  "file": "assets\\style\\color_reference_01.png",
+  "label": false,
+  "src": "seen",
+  "old": 0.551,
+  "new": 0.641,
+  "vlm": false
+ },
+ {
+  "file": "golden\\quality_v2\\sweep\\ep01-S5_none_0_head.png",
+  "label": true,
+  "src": "seen",
+  "old": 0.92,
+  "new": 0.52,
+  "vlm": true
+ },
+ {
+  "file": "data\\renders\\ep03\\S6\\takes\\image_001.png",
+  "label": true,
+  "src": "nudenet",
+  "old": 0.826,
+  "new": 0.1,
+  "vlm": false
+ },
+ {
+  "file": "data\\renders\\ep06\\S3\\takes\\image_001.png",
+  "label": true,
+  "src": "nudenet",
+  "old": 0.918,
+  "new": 0.016,
+  "vlm": false
+ },
+ {
+  "file": "data\\renders\\ep36\\S5\\takes\\image_001.png",
+  "label": true,
+  "src": "nudenet",
+  "old": 0.941,
+  "new": 0.058,
+  "vlm": false
+ },
+ {
+  "file": "data/renders/ep01/S5/takes/image_003.png",
+  "label": true,
+  "src": "seen",
+  "vlm": true
+ },
+ {
+  "file": "data/renders/ep04/S6/takes/image_002.png",
+  "label": true,
+  "src": "seen",
+  "vlm": true
+ }
+]

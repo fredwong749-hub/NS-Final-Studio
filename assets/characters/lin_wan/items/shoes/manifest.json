@@ -1,0 +1,359 @@
+[
+  {
+    "file": "S01_side45_s0.png",
+    "kind": "item/shoes",
+    "design": "LW-S01",
+    "name": "12cm 透明侧开细高跟（侧 45°）",
+    "prompt": "transform the image to realistic photograph，一只12厘米透明细高跟鞋：透明PVC鞋面，侧口开边（d'Orsay，鞋两侧镂空），尖头，透明内底，鞋跟直径约6毫米、细如一根筷子的针形细跟，跟高12厘米，侧面清楚可见鞋跟极细，透明亚克力针形细跟，没有任何logo，侧前45度角拍摄。专业电商产品摄影，商品完整居中入画，浅灰色无缝背景，柔和箱灯，材质与缝线细节清晰，画面中没有人、没有模特、没有任何人体和皮肤，无文字无水印，shot on Phase One, 100mm macro, f/8",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 27380799175363,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "9f94a2787df6073561280aa47a698d26e30672e7531d52001e53f63a901af3fe",
+    "qc": null,
+    "gen_seconds": 42.1,
+    "created_at": "2026-10-30T06:41:20"
+  },
+  {
+    "file": "S01_pair_s0.png",
+    "kind": "item/shoes",
+    "design": "LW-S01",
+    "name": "12cm 透明侧开细高跟（一双，正面+侧面）",
+    "prompt": "transform the image to realistic photograph，一双12厘米透明细高跟鞋：透明PVC鞋面，侧口开边（d'Orsay，鞋两侧镂空），尖头，透明内底，鞋跟直径约6毫米、细如一根筷子的针形细跟，跟高12厘米，侧面清楚可见鞋跟极细，透明亚克力针形细跟，没有任何logo，一只正面一只侧面并排摆放。专业电商产品摄影，商品完整居中入画，浅灰色无缝背景，柔和箱灯，材质与缝线细节清晰，画面中没有人、没有模特、没有任何人体和皮肤，无文字无水印，shot on Phase One, 100mm macro, f/8",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 183669322686710,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "f6266709d0a7d526925bf74d35974e902f96463f1c5a2d3f818de999f2cb7aa4",
+    "qc": null,
+    "gen_seconds": 33.1,
+    "created_at": "2026-10-30T06:41:53"
+  },
+  {
+    "file": "S01_profile_s0.png",
+    "kind": "item/shoes",
+    "design": "LW-S01",
+    "name": "12cm 透明侧开细高跟（正侧面：看鞋跟粗细）",
+    "prompt": "transform the image to realistic photograph，一只12厘米透明细高跟鞋：透明PVC鞋面，侧口开边（d'Orsay，鞋两侧镂空），尖头，透明内底，鞋跟直径约6毫米、细如一根筷子的针形细跟，跟高12厘米，侧面清楚可见鞋跟极细，透明亚克力针形细跟，没有任何logo，标准正侧面90度拍摄，鞋跟像一根筷子一样细，与鞋头宽度对比明显。专业电商产品摄影，商品完整居中入画，浅灰色无缝背景，柔和箱灯，材质与缝线细节清晰，画面中没有人、没有模特、没有任何人体和皮肤，无文字无水印，shot on Phase One, 100mm macro, f/8",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 186275966342184,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "6d5346e6605dc624fa07bafd2e469fb9b9ea16eea4d964bbca9cc22838377305",
+    "qc": null,
+    "gen_seconds": 42.2,
+    "created_at": "2026-10-30T06:42:35"
+  },
+  {
+    "file": "S01_back_s0.png",
+    "kind": "item/shoes",
+    "design": "LW-S01",
+    "name": "12cm 透明侧开细高跟（后跟）",
+    "prompt": "transform the image to realistic photograph，一只12厘米透明细高跟鞋：透明PVC鞋面，侧口开边（d'Orsay，鞋两侧镂空），尖头，透明内底，鞋跟直径约6毫米、细如一根筷子的针形细跟，跟高12厘米，侧面清楚可见鞋跟极细，透明亚克力针形细跟，没有任何logo，从后方拍摄后跟与鞋跟。专业电商产品摄影，商品完整居中入画，浅灰色无缝背景，柔和箱灯，材质与缝线细节清晰，画面中没有人、没有模特、没有任何人体和皮肤，无文字无水印，shot on Phase One, 100mm macro, f/8",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 59754532845121,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "c222e4527a72f1f45b723a1b806db8051be6b0308b5bad177d5ff70a04832542",
+    "qc": null,
+    "gen_seconds": 45.2,
+    "created_at": "2026-10-30T06:43:20"
+  },
+  {
+    "file": "S02_back_s0.png",
+    "kind": "item/shoes",
+    "design": "LW-S02",
+    "name": "12cm 黑漆皮侧开细高跟（后跟）",
+    "prompt": "transform the image to realistic photograph，一只12厘米黑色漆皮侧开细高跟鞋：像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利，侧口开边（d'Orsay，内侧镂空露出足弓），尖头，鞋跟直径约6毫米、细如一根筷子的针形细跟，跟高12厘米，侧面清楚可见鞋跟极细，黑色金属针形细跟，没有任何logo，深色无缝背景配两条长条柔光灯箱，漆皮上有清晰的长条形镜面反光，从后方拍摄后跟与鞋跟。专业电商产品摄影，商品完整居中入画，浅灰色无缝背景，柔和箱灯，材质与缝线细节清晰，画面中没有人、没有模特、没有任何人体和皮肤，无文字无水印，shot on Phase One, 100mm macro, f/8",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 41625439981752,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "f79ac988eeea5cb66b8b7f143b251c9774aee3a59869e2e57942091401cb3b54",
+    "qc": null,
+    "gen_seconds": 42.2,
+    "created_at": "2026-10-30T06:45:45"
+  },
+  {
+    "file": "S02_side45_s0.png",
+    "kind": "item/shoes",
+    "design": "LW-S02",
+    "name": "12cm 黑漆皮侧开细高跟（侧 45°）",
+    "prompt": "transform the image to realistic photograph，一只12厘米黑色漆皮侧开细高跟鞋：像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利，d'Orsay 侧开款：鞋头和后跟是分开的两片，中间内侧鞋帮整段完全敞开、露出整个足弓（侧面能清楚看到鞋身中段是空的），鞋头尖头包裹脚趾，尖头，鞋跟直径约6毫米、细如一根筷子的针形细跟，跟高12厘米，侧面清楚可见鞋跟极细，黑色金属针形细跟，没有任何logo，深色无缝背景配两条长条柔光灯箱，漆皮上有清晰的长条形镜面反光，侧前45度角拍摄。专业电商产品摄影，商品完整居中入画，浅灰色无缝背景，柔和箱灯，材质与缝线细节清晰，画面中没有人、没有模特、没有任何人体和皮肤，无文字无水印，shot on Phase One, 100mm macro, f/8",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 118148686272364,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "86c83ebc1d9440533ef6f8642597e9a40a19cef00329c8e23035a2d31e2a89a6",
+    "qc": null,
+    "gen_seconds": 72.3,
+    "created_at": "2026-10-30T06:47:29",
+    "note": "redo (seed offset 1) replacing a rejected s0"
+  },
+  {
+    "file": "S02_pair_s0.png",
+    "kind": "item/shoes",
+    "design": "LW-S02",
+    "name": "12cm 黑漆皮侧开细高跟（一双，正面+侧面）",
+    "prompt": "transform the image to realistic photograph，一双12厘米黑色漆皮侧开细高跟鞋：像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利，d'Orsay 侧开款：鞋头和后跟是分开的两片，中间内侧鞋帮整段完全敞开、露出整个足弓（侧面能清楚看到鞋身中段是空的），鞋头尖头包裹脚趾，尖头，鞋跟直径约6毫米、细如一根筷子的针形细跟，跟高12厘米，侧面清楚可见鞋跟极细，黑色金属针形细跟，没有任何logo，深色无缝背景配两条长条柔光灯箱，漆皮上有清晰的长条形镜面反光，一只正面一只侧面并排摆放。专业电商产品摄影，商品完整居中入画，浅灰色无缝背景，柔和箱灯，材质与缝线细节清晰，画面中没有人、没有模特、没有任何人体和皮肤，无文字无水印，shot on Phase One, 100mm macro, f/8",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 181005325484348,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "7617a4a7e5c353cd1a06c46f0ae1ea1f8cac27a9500dcf1132c1aefd3e193350",
+    "qc": null,
+    "gen_seconds": 51.2,
+    "created_at": "2026-10-30T06:49:12",
+    "note": "redo (seed offset 1) replacing a rejected s0"
+  },
+  {
+    "file": "S02_profile_s0.png",
+    "kind": "item/shoes",
+    "design": "LW-S02",
+    "name": "12cm 黑漆皮侧开细高跟（正侧面：看鞋跟粗细）",
+    "prompt": "transform the image to realistic photograph，一只12厘米黑色漆皮侧开细高跟鞋：像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利，d'Orsay 侧开款：鞋头和后跟是分开的两片，中间两侧鞋帮都整段完全敞开、露出整个足弓（从侧面能清楚看到鞋头与后跟之间是空的），鞋头尖头包裹脚趾，尖头，鞋跟直径约6毫米、细如一根筷子的针形细跟，跟高12厘米，侧面清楚可见鞋跟极细，黑色金属针形细跟，没有任何logo，深色无缝背景配两条长条柔光灯箱，漆皮上有清晰的长条形镜面反光，标准正侧面90度拍摄，鞋跟像一根筷子一样细，与鞋头宽度对比明显。专业电商产品摄影，商品完整居中入画，浅灰色无缝背景，柔和箱灯，材质与缝线细节清晰，画面中没有人、没有模特、没有任何人体和皮肤，无文字无水印，shot on Phase One, 100mm macro, f/8",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 72099648283233,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "e68d6dcee4b0665792c3a83320335bf45cd851f614d1060555e35c74eac24315",
+    "qc": null,
+    "gen_seconds": 48.2,
+    "created_at": "2026-10-30T06:50:16",
+    "note": "redo (seed offset 2) replacing a rejected s0"
+  },
+  {
+    "file": "S01_worn_s0.png",
+    "kind": "item/shoes",
+    "design": "LW-S01",
+    "name": "12cm 透明侧开细高跟（上脚）",
+    "prompt": "transform the image to realistic photograph，图1只提供鞋子的款式与材质。成年女性冷白皮肤的双脚穿着这双12厘米透明侧开细高跟鞋（鞋跟直径约6毫米、细如一根筷子的针形细跟，跟高12厘米，侧面清楚可见鞋跟极细），足弓优美，脚趾甲是冰透满钻的方圆形长甲，画面只有她的小腿和双脚，赤足穿鞋，站在浅灰色地面上，侧前方低机位，看不到身体其他部分，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 100075744960405,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/characters/lin_wan/items/shoes/S01_side45_s0.png"
+    ],
+    "sha256": "48b24dc9551c7bcb5e27eb16d0a5370b6c92265d0220b0f2a0f0ad32a04bacdb",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.621,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 51.2,
+    "created_at": "2026-10-30T06:55:32"
+  },
+  {
+    "file": "S02_worn_s0.png",
+    "kind": "item/shoes",
+    "design": "LW-S02",
+    "name": "12cm 黑漆皮侧开细高跟（上脚）",
+    "prompt": "transform the image to realistic photograph，图1只提供鞋子的款式与材质。成年女性冷白皮肤的双脚穿着这双12厘米黑色漆皮侧开细高跟鞋（像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利，鞋跟直径约6毫米、细如一根筷子的针形细跟，跟高12厘米，侧面清楚可见鞋跟极细），侧口露出绷起的脚背弧线，画面只有她的小腿和双脚，赤足穿鞋，站在浅灰色地面上，侧前方低机位，看不到身体其他部分，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光。真实相机拍摄的原片，未修图，皮肤有真实纹理与细小毛孔，shot on Leica M11, 50mm, Kodak Portra 400 film look",
+    "negative": "",
+    "seed": 44411164975828,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [
+      "assets/characters/lin_wan/items/shoes/S02_side45_s0.png"
+    ],
+    "sha256": "e1bf49f22ce0b313f4706ef1008b090039e783097ed10ddb5c32d7527ac2a9ab",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.608,
+      "version": "nudenet3.4+clipL14-v1"
+    },
+    "gen_seconds": 78.4,
+    "created_at": "2026-10-30T06:56:51"
+  }
+]

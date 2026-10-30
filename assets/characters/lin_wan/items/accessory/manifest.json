@@ -1,0 +1,278 @@
+[
+  {
+    "file": "A01_nipple_rings_s0.png",
+    "kind": "item/accessory",
+    "design": "LW-A01",
+    "name": "乳环 ×2（产品）",
+    "prompt": "transform the image to realistic photograph，两枚细的抛光银色钛钢圆环（直径约12毫米、线径1.2毫米、带小珠扣），并排放置。珠宝产品微距摄影，饰品平放在深灰色丝绒托盘上，柔和箱灯与清晰的金属刻面反光，画面中没有人体和皮肤，无文字无水印，100mm macro, f/11",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 76570404469296,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "28e3ae790cd859c82d4913081e036c77564256d8e604b4022808939289b42030",
+    "qc": null,
+    "gen_seconds": 30.1,
+    "created_at": "2026-10-30T06:46:15"
+  },
+  {
+    "file": "A04_belly_chain_s0.png",
+    "kind": "item/accessory",
+    "design": "LW-A04",
+    "name": "腹部链（产品）",
+    "prompt": "transform the image to realistic photograph，一条精细的银色腰链（腹部链），细链条中间垂下几缕短链和小水钻，呈弧形摆放。珠宝产品微距摄影，饰品平放在深灰色丝绒托盘上，柔和箱灯与清晰的金属刻面反光，画面中没有人体和皮肤，无文字无水印，100mm macro, f/11",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 900714649805,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "4efc974e1874c5fbf0a33d2c636dab346ad885ff543e29eb6ee209586991a994",
+    "qc": null,
+    "gen_seconds": 51.3,
+    "created_at": "2026-10-30T06:48:49"
+  },
+  {
+    "file": "A05_tongue_stud_s0.png",
+    "kind": "item/accessory",
+    "design": "LW-A05",
+    "name": "舌钉（产品）",
+    "prompt": "transform the image to realistic photograph，一枚舌钉：银色钛钢直杆（长约16毫米），两端各一颗4毫米抛光钢珠，旁边放着备用珠球。珠宝产品微距摄影，饰品平放在深灰色丝绒托盘上，柔和箱灯与清晰的金属刻面反光，画面中没有人体和皮肤，无文字无水印，100mm macro, f/11",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 113120926323011,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "edf60d55745f3ad70bff782393ad57225ed40de45d583a3461cca6fd96c8f8be",
+    "qc": null,
+    "gen_seconds": 66.2,
+    "created_at": "2026-10-30T06:49:56"
+  },
+  {
+    "file": "A06_velvet_box_s0.png",
+    "kind": "item/accessory",
+    "design": "LW-A06",
+    "name": "丝绒小盒（产品）",
+    "prompt": "transform the image to realistic photograph，一个打开的深酒红色丝绒首饰小方盒，盒内整齐卡着九枚小银环，每环挂一颗5毫米黑色小铁球。专业电商产品摄影，商品完整居中入画，浅灰色无缝背景，柔和箱灯，材质与缝线细节清晰，画面中没有人、没有模特、没有任何人体和皮肤，无文字无水印，shot on Phase One, 100mm macro, f/8",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 38322592275561,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "714c3fc55598cf504ad5b875ff99046f7ffd81c55c9a1b4a7e73860e6d4c32ab",
+    "qc": null,
+    "gen_seconds": 51.2,
+    "created_at": "2026-10-30T06:50:47"
+  },
+  {
+    "file": "A07_vanity_case_s0.png",
+    "kind": "item/accessory",
+    "design": "LW-A07",
+    "name": "妆匣（产品）",
+    "prompt": "transform the image to realistic photograph，一个打开的黑色皮革双层首饰妆匣，内衬深色丝绒，格子里放着银色小环、黑色小铁球、细链和一个小清洁盒。专业电商产品摄影，商品完整居中入画，浅灰色无缝背景，柔和箱灯，材质与缝线细节清晰，画面中没有人、没有模特、没有任何人体和皮肤，无文字无水印，shot on Phase One, 100mm macro, f/8",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 78398236262937,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "68f177a7fbbbc73ca984d0ef68e218e22c2ea191416c3ff641c447dd2f05852c",
+    "qc": null,
+    "gen_seconds": 42.4,
+    "created_at": "2026-10-30T06:51:29"
+  },
+  {
+    "file": "A08_strawberry_necklace_s0.png",
+    "kind": "item/accessory",
+    "design": "LW-A08",
+    "name": "草莓水晶项链（产品）",
+    "prompt": "transform the image to realistic photograph，一条多层银色项链，挂满粉色水钻草莓吊坠、白色珍珠和小水晶球，平铺呈U形。珠宝产品微距摄影，饰品平放在深灰色丝绒托盘上，柔和箱灯与清晰的金属刻面反光，画面中没有人体和皮肤，无文字无水印，100mm macro, f/11",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 136676746646446,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "94383cd5072aa31b97950afb4c63c704b00ff3994dde4a239fdda9b6da46476f",
+    "qc": null,
+    "gen_seconds": 30.3,
+    "created_at": "2026-10-30T06:52:00"
+  },
+  {
+    "file": "A03_beads9_s0.png",
+    "kind": "item/accessory",
+    "design": "LW-A03",
+    "name": "9 颗 5mm 黑铁球（产品）",
+    "prompt": "transform the image to realistic photograph，九枚小号银色细圆环（直径约8毫米）在深灰丝绒上排成U形弧线（左四、右四、正中一），每枚环的下方各挂着一颗很小的乌亮黑色金属小球（直径只有5毫米，比环小得多，像一粒黑胡椒），共九颗，画面里只有这九枚环和九颗小球。珠宝产品微距摄影，饰品平放在深灰色丝绒托盘上，柔和箱灯与清晰的金属刻面反光，画面中没有人体和皮肤，无文字无水印，100mm macro, f/11",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 169213745590971,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "32474e6a181ac3751f0ea5444e5eee56e5f85d2620ed50562de0048e3b96f5a2",
+    "qc": null,
+    "gen_seconds": 84.4,
+    "created_at": "2026-10-30T06:57:14",
+    "note": "redo (seed offset 1) replacing a rejected s0",
+    "known_issue": "数量不精确（扩散模型数不准，约 10–11 枚）：本图只作环/球的款式与材质参考；9 枚的数量与位置由文字和 lbrng9 / lbrng9_beads LoRA 控制"
+  },
+  {
+    "file": "A02_rings9_s0.png",
+    "kind": "item/accessory",
+    "design": "LW-A02",
+    "name": "阴环 ×9（产品）",
+    "prompt": "transform the image to realistic photograph，一共只有9枚（九枚）小号抛光银色细圆环，每枚直径约8毫米，在深灰丝绒上排成一条稀疏的浅弧线，环与环之间留出较大间隔、互不接触，数量严格为9，不多不少，画面里只有这9枚小环。珠宝产品微距摄影，饰品平放在深灰色丝绒托盘上，柔和箱灯与清晰的金属刻面反光，画面中没有人体和皮肤，无文字无水印，100mm macro, f/11",
+    "negative": "人体、模特、皮肤、手、脚、脸、裸体、文字、水印、标志、低清、变形",
+    "seed": 268914267441668,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 1.0,
+    "preset": "CM",
+    "lora": [
+      [
+        "Qwen2.1_Anything2RealCharacters.safetensors",
+        0.45
+      ],
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.4
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": null,
+    "references": [],
+    "sha256": "ee934a612d4c6f620f00009d5574d72a6cd375f683a31a45bcb2de45eaa2747e",
+    "qc": null,
+    "gen_seconds": 63.5,
+    "created_at": "2026-10-30T06:59:24",
+    "note": "redo (seed offset 2) replacing a rejected s0",
+    "known_issue": "数量不精确（扩散模型数不准，约 10–11 枚）：本图只作环/球的款式与材质参考；9 枚的数量与位置由文字和 lbrng9 / lbrng9_beads LoRA 控制"
+  }
+]

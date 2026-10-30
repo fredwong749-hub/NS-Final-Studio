@@ -1,0 +1,8 @@
+Loading weights:   0%|          | 0/590 [00:00<?, ?it/s]Loading weights:   4%|3         | 23/590 [00:00<00:03, 181.32it/s]Loading weights:   7%|7         | 44/590 [00:00<00:02, 192.07it/s]Loading weights:  11%|#         | 64/590 [00:00<00:02, 175.72it/s]Loading weights:  15%|#4        | 87/590 [00:00<00:02, 192.57it/s]Loading weights:  18%|#8        | 107/590 [00:00<00:04, 106.03it/s]Loading weights:  21%|##        | 123/590 [00:00<00:04, 115.49it/s]Loading weights:  23%|##3       | 138/590 [00:01<00:05, 89.12it/s] Loading weights:  25%|##5       | 150/590 [00:01<00:05, 84.26it/s]Loading weights:  27%|##7       | 161/590 [00:01<00:04, 86.13it/s]Loading weights:  29%|##8       | 171/590 [00:01<00:05, 83.66it/s]Loading weights:  31%|###       | 181/590 [00:01<00:05, 76.24it/s]Loading weights:  32%|###2      | 190/590 [00:01<00:06, 66.47it/s]Loading weights:  34%|###3      | 198/590 [00:02<00:06, 63.21it/s]Loading weights:  35%|###4      | 206/590 [00:02<00:05, 66.62it/s]Loading weights:  38%|###7      | 223/590 [00:02<00:04, 90.27it/s]Loading weights: 100%|##########| 590/590 [00:02<00:00, 248.14it/s]
+05:04:33 master_ab/R0_s0 [R0] 18s seed=244074933616316 qc_bare=0.691
+05:04:52 master_ab/R0_s1 [R0] 18s seed=255805980988889 qc_bare=0.675
+05:05:44 master_ab/R1_s0 [R1] 51s seed=154193684413766 qc_bare=0.629
+05:07:04 master_ab/R1_s1 [R1] 78s seed=203831096158098 qc_bare=0.591
+05:08:39 master_ab/R4_s0 [R4] 93s seed=271304585227963 qc_bare=0.716
+05:10:01 master_ab/R4_s1 [R4] 81s seed=216047468528262 qc_bare=0.637
+05:10:01 done 6 images in 366s

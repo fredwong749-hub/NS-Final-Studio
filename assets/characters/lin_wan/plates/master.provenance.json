@@ -1,0 +1,9 @@
+{
+  "file": "master.png",
+  "sha256": "b8e7b00b675663743a75e4fa86538b70cc87764fa2bdbe06edf82c3343492733",
+  "source": "golden/assets/master_cand/CM_s1.png（中度写实·种子1，由项目方参考图编辑而来）",
+  "approved_by": "项目方",
+  "approved_at": "2026-10-30",
+  "note": "项目方发来该图并说“这个最好，决定用这个”——最终决定，取代先前的 CL_s0。身份基准：后续底板、妆容、单品、首帧锁脸、图像/视频身份 LoRA 均以此为准。",
+  "supersedes": "master_v2_CL_s0_superseded.png"
+}
