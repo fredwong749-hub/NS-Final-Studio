@@ -1,4 +1,5 @@
 """H3 FL2VA 提示词（SOP §9A）：构建器 ns_agent.h3_prompt、机检 ns_schema.h3_lint、导入 **H3提示词**、编译与画布 API。"""
+import hashlib
 import json
 from pathlib import Path
 
@@ -37,7 +38,7 @@ def test_frames_table_matches_sop_6():
         assert frames_for_seconds(fr / 24) == fr            # 恰好落在格点
         if i + 1 < len(frames):
             assert frames_for_seconds(fr / 24 + 0.01) == frames[i + 1]   # 超过一点就向上取下一格
-    assert frames_for_seconds(3) == 124 and frames_for_seconds(10) == 243 and frames_for_seconds(8) == 192
+    assert frames_for_seconds(3) == 107 and frames_for_seconds(4) == 107 and frames_for_seconds(10) == 243 and frames_for_seconds(8) == 192
     assert frames_for_seconds(15) == 362
 
 
@@ -90,9 +91,10 @@ def test_lint_passes_sop_examples():
     r1 = lint_h3(EX1, frames=243, seconds=10, dialogue=[], monologue=["第一天实习。别出错，别被注意。"])
     assert lint_ok(r1) and all(r["ok"] for r in r1), [r for r in r1 if not r["ok"]]
     r2 = lint_h3(EX2, frames=243, seconds=10, dialogue=["蓝头发，很大胆。", "染了三年了……总经理。"])
-    assert lint_ok(r2), [r for r in r2 if not r["ok"]]
-    # 双人对白镜：H3-D7 只报 warn（待项目方定）；亲密镜则 block
-    assert [r["rule_id"] for r in r2 if not r["ok"]] == ["H3-D7"]
+    # 项目方 2026-10-30：普通对话镜每镜只让一个人说话 → 双人对白镜 H3-D7 也 block（官方示例 2 是双人，本项目不通过）
+    assert not lint_ok(r2) and failed_rules(r2) == ["H3-D7"]
+    # 另：gpu3 启发式 H3-D8 认为 (S2) 没写语速（warn，不拦截）
+    assert [r["rule_id"] for r in r2 if not r["ok"] and r["level"] == "warn"] == ["H3-D8"]
     assert "H3-D7" in failed_rules(lint_h3(EX2, frames=243, intimate=True))
     for r in r1:
         assert set(r) >= {"rule_id", "sop_ref", "ok", "detail", "msg", "level"}
@@ -119,7 +121,12 @@ def test_lint_mechanical_rules():
     assert "H3-D2" in failed_rules(lint_h3(EX2.replace("(S1) says quietly", "says quietly")))
     assert "H3-D3" in failed_rules(lint_h3(EX2, dialogue=["蓝头发，很大胆！", "染了三年了……总经理。"]))
     assert "H3-S1" in failed_rules(lint_h3(EX1.replace("behind her.", "behind her. A. B. C. D.")))
-    assert "H3-S3" in failed_rules(lint_h3(EX1.replace("non_diegetic_music: N/A", "non_diegetic_music: Slow piano.")))
+    # H3-S3（项目方 2026-10-30 配乐进 H3）：英文 1–3 句通过；中文 / 空 阻断；情绪词、超过 3 句警告
+    mus = lambda v: lint_h3(EX1.replace("non_diegetic_music: N/A", f"non_diegetic_music: {v}"))  # noqa: E731
+    assert "H3-S3" not in failed_rules(mus("Sparse piano notes at a slow tempo, fading out."))
+    assert "H3-S3" in failed_rules(mus("慢速钢琴"), level="block")
+    assert "H3-S3" in failed_rules(mus("Sad romantic piano."), level="warn")
+    assert "H3-S3" in failed_rules(mus("Piano. Bass. Drums. Strings."), level="warn")
     assert "P-B1" in failed_rules(lint_h3(EX1, frames=241), level="block")
     assert "P-B1" in failed_rules(lint_h3(EX1.replace("10.12", "8.71"), frames=209, seconds=8))   # 8 s → 192
 
@@ -187,17 +194,25 @@ def test_compiler_video_prompt_is_h3_without_style_or_negative():
     assert c2.video_prompt == EX1 and c2.h3_prompt_source == "script" and c2.h3_missing == []
 
 
-def test_apply_edit_h3_body_and_soundscape():
+def test_h3_only_changes_via_owner_override():
     from ns_render import pipeline as P
+    from ns_schema.edits import H3PromptOverride
     s = _shot(h3_prompt=EX1)
+    # 普通画布修改（环境声 / 旧 h3_body / 运镜）不进 H3，只进旧版拼接
     c = C.compile_shot(_ep(s), s, ScriptGlobals(), set(), soundscape="Soft rain taps on the glass.")
-    assert parse_h3(c.video_prompt)["fields"]["overall_soundscape"] == "Soft rain taps on the glass."
-    new_body = parse_h3(EX1)["fields"]["integrated_multimodal_description"].replace("slow speed", "fast speed")
-    out = P.apply_edit(c, ShotEdit(h3_body=new_body, camera="camera push in"))
-    f = parse_h3(out.video_prompt)
-    assert f["layout_ok"] and "fast speed" in f["fields"]["integrated_multimodal_description"]
-    assert f["align"] == parse_h3(EX1)["align"] and f["fields"]["non_diegetic_music"] == "N/A"
-    assert "camera push in" not in out.video_prompt and out.legacy_video_prompt.startswith("camera push in")
+    assert c.video_prompt == EX1 and "Soft rain" in c.legacy_video_prompt
+    out = P.apply_edit(c, ShotEdit(h3_body="whatever", camera="camera push in"))
+    assert out.video_prompt == EX1 and out.legacy_video_prompt.startswith("camera push in")
+    # 项目方覆盖（edits.json 嵌套格式 {text, by, at, base_sha, note}）：renderable 才替换；draft 只记录
+    ov = H3.replace_field(EX1, "overall_soundscape", "Soft rain taps on the glass.")
+
+    def edit(status):
+        return ShotEdit(h3_prompt_override=H3PromptOverride(text=ov, at="t", note="好", status=status))
+    c2 = P.apply_edit(C.compile_shot(_ep(s), s, ScriptGlobals(), set()), edit("renderable"))
+    assert c2.video_prompt == ov and c2.h3_base_prompt == EX1 and c2.h3_override["note"] == "好"
+    c3 = P.apply_edit(C.compile_shot(_ep(s), s, ScriptGlobals(), set()), edit("draft"))
+    assert c3.video_prompt == EX1 and c3.h3_override["status"] == "draft"
+    assert set(edit("draft").model_dump()["h3_prompt_override"]) >= {"text", "by", "at", "base_sha", "note"}
 
 
 # ------------------------------------------------------------------ API：来源优先级 + lint + SOP 阻塞
@@ -245,15 +260,169 @@ def test_api_h3_sources_and_lint(api):
                                                          "file": "x.mp4", "created_at": "2026"}],
                                               "active": {"video": 3}}), encoding="utf-8")
     sm3 = c.get("/api/shots/ep01-S1").json()["summary"]
-    assert sm3["h3_prompt_source"] == "gpu3" and sm3["h3_prompt"] == EX2 and not sm3["h3_editable"]
+    assert sm3["h3_prompt_source"] == "gpu3" and sm3["h3_prompt"] == EX2
+    assert sm3["h3_edit_base"]["body"].startswith("[Shot 1] camera tilt up")   # 项目方修改的起点 = 笔记本草稿，不是 gpu3
     assert sm3["h3_take"]["n"] == 3 and len(sm3["h3_take"]["prompt_sha256"]) == 64
     assert "H3-D3" in sm3["h3_failed"]          # 与剧本台词（本镜无对白）不一致
     # 剧本缺台词以外都对 → 用项目方原话豁免 H3-D3
+    # EX2 是官方双人示例：项目方 2026-10-30 起普通对话镜只许一人说话 → H3-D7 也 block，这里一并豁免
+    assert "H3-D7" in sm3["h3_failed"]
     (g / "status.json").write_text(json.dumps({"audit": {"overrides": [
-        {"rule_id": "H3-D3", "owner_quote": "这一镜按 gpu3 版本出", "by": "owner"}]}}, ensure_ascii=False),
+        {"rule_id": "H3-D3", "owner_quote": "这一镜按 gpu3 版本出", "by": "owner"},
+        {"rule_id": "H3-D7", "owner_quote": "这一镜按 gpu3 版本出", "by": "owner"}]}}, ensure_ascii=False),
         encoding="utf-8")
     sm4 = c.get("/api/shots/ep01-S1").json()["summary"]
-    assert sm4["h3_lint_ok"] and sm4["h3_overrides"] == ["H3-D3"]
+    assert sm4["h3_lint_ok"] and sm4["h3_overrides"] == ["H3-D3", "H3-D7"]
+
+
+class FakeBridge:
+    """假 gpu3 桥：按 docs/canvas.md §7.6 的契约回包；down=True 模拟隧道没开，stale=True 模拟 409"""
+
+    def __init__(self):
+        self.calls, self.down, self.stale, self.video_ok = [], False, False, False
+
+    def __call__(self, method, url, body=None, timeout=None):
+        from ns_api import gpu3_bridge as GB
+        self.calls.append((method, url, body))
+        if self.down:
+            raise GB.BridgeError("gpu3 桥不可达（test）")
+        if url.endswith("/h3_edit"):
+            if body.get("by") != "owner":
+                raise GB.BridgeError("gpu3 桥返回 403", 403)
+            if self.stale:
+                raise GB.BridgeError("gpu3 桥返回 409：stale base_sha", 409, {"detail": "stale base_sha"})
+            return {"shot": "ep01-S2", "saved": {"text": body["text"], "sha256": hashlib.sha256(body["text"].encode()).hexdigest(),
+                                                 "by": "owner", "at": "t", "base_sha": body["base_sha"]},
+                    "lint": {"ok": True, "failed": [], "warnings": [], "frames": 243, "intimate": False, "results": []},
+                    "rendered": False}
+        if url.endswith("/override"):
+            return {"shot": "ep01-S2", "request": body, "requests": [body]}
+        if method == "GET":
+            return {"video_gate": {"verdict": "pass" if self.video_ok else "fail", "prompt_sha": "a",
+                                   "effective_sha256": "a" if self.video_ok else "b", "blocked": None,
+                                   "video_ok": self.video_ok}}
+        raise AssertionError(url)
+
+
+@pytest.fixture()
+def bridge(monkeypatch):
+    from ns_api import gpu3_bridge as GB
+    fb = FakeBridge()
+    monkeypatch.setattr(GB, "_call", fb)
+    return fb
+
+
+def test_api_owner_override(api, bridge, monkeypatch):
+    from ns_api import app as app_mod
+    from ns_render import pipeline as P
+    c, data = api
+    url = "/api/shots/ep01-S2/h3-override"
+    soft = "Soft rain taps on the glass behind her."
+    shown = c.get("/api/shots/ep01-S2").json()["summary"]["h3_prompt_sha256"]
+    assert shown == hashlib.sha256(EX1.encode("utf-8")).hexdigest()       # sha256(UTF-8 原文)
+    # 只接受项目方本人 + 非空确认原话
+    assert c.put(url, json={"soundscape": soft, "note": "好", "by": "agent"}).status_code == 403
+    assert c.put(url, json={"soundscape": soft, "note": "  ", "by": "owner"}).status_code == 400
+    assert P.load_edit("ep01-S2").h3_prompt_override is None and not bridge.calls
+    # 边写边检（只读）
+    lp = c.post("/api/shots/ep01-S2/h3-lint", json={"soundscape": soft}).json()
+    assert lp["ok"] and parse_h3(lp["text"])["fields"]["overall_soundscape"] == soft
+    assert all(r["rule_href"].startswith("/api/docs/rule_ids#") for r in lp["lint"])
+    # 通过 lint → renderable，并按契约送到 gpu3（{text, by:"owner", base_sha}；note 不发）
+    r = c.put(url, json={"soundscape": soft, "note": "环境声改成雨声", "by": "owner", "base_sha": shown})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "renderable" and r.json()["delivered"] is True
+    m, u, b = bridge.calls[-1]
+    assert m == "POST" and "/api/gpu3/projects/" in u and u.endswith("/shots/ep01-S2/h3_edit")
+    assert set(b) == {"text", "by", "base_sha"} and b["by"] == "owner" and b["base_sha"] == shown
+    e = P.load_edit("ep01-S2")
+    ov = e.h3_prompt_override
+    assert ov.status == "renderable" and ov.by == "owner" and ov.note == "环境声改成雨声" and ov.base_sha == shown
+    assert ov.script_sha == hashlib.sha256(EX1.encode()).hexdigest() and ov.delivery.ok
+    assert parse_h3(ov.text)["fields"]["overall_soundscape"] == soft and parse_h3(ov.text)["align"] == parse_h3(EX1)["align"]
+    raw = json.loads((P.shot_dir("ep01-S2") / "edits.json").read_text(encoding="utf-8"))
+    assert set(raw["h3_prompt_override"]) >= {"text", "by", "at", "base_sha", "note"}
+    sm = c.get("/api/shots/ep01-S2").json()["summary"]
+    assert sm["h3_prompt_source"] == "owner_edit" and sm["h3_prompt_source_label"] == "剧本＋画布修改"
+    assert sm["h3_prompt"] == ov.text and sm["h3_lint_ok"] and not sm["h3_override_stale"]
+    assert sm["h3_override"]["delivered"] and "text" not in sm["h3_override"]
+    # 普通 PUT /edit 不能改也不会清掉覆盖 / 豁免请求
+    body = {**e.model_dump(), "h3_prompt_override": {"text": "x", "at": "t", "note": "n"}, "note": "n"}
+    assert c.put("/api/shots/ep01-S2/edit", json=body).status_code == 200
+    assert P.load_edit("ep01-S2").h3_prompt_override.text == ov.text
+    # 桥不可达 → 仍存本地，标「未送达」；重试成功后送达
+    bridge.down = True
+    r = c.put(url, json={"body": "她理了理刘海。", "note": "试一下", "by": "owner", "base_sha": shown})
+    assert r.json()["status"] == "draft" and "H3-A7" in r.json()["failed"] and r.json()["delivered"] is False
+    sm = c.get("/api/shots/ep01-S2").json()["summary"]
+    assert "草稿" in sm["h3_prompt_source_label"] and not sm["h3_lint_ok"] and not sm["h3_override"]["delivered"]
+    assert c.post("/api/shots/ep01-S2/gpu3-resend", json={"what": "h3_edit", "by": "agent"}).status_code == 403
+    bridge.down = False
+    assert c.post("/api/shots/ep01-S2/gpu3-resend", json={"what": "h3_edit", "by": "owner"}).json()["delivered"]
+    # gpu3 侧已变 → 409 stale
+    bridge.stale = True
+    d = c.put(url, json={"soundscape": soft, "note": "再改", "by": "owner", "base_sha": "old"}).json()["delivery"]
+    assert d["ok"] is False and d["code"] == 409
+    bridge.stale = False
+    # 剧本 **H3提示词** 更新 → stale + SOP「待你决定」
+    sc = app_mod._script.model_copy(deep=True)
+    sc.episodes[0].shots[1].h3_prompt = EX1.replace("slow speed", "fast speed")
+    monkeypatch.setattr(app_mod, "_script", sc)
+    sm = c.get("/api/shots/ep01-S2").json()["summary"]
+    assert sm["h3_override_stale"] and "剧本已更新" in sm["h3_prompt_source_label"]
+    from ns_api import sop as SOP
+    acts = SOP.h3_override_actions([{"id": "ep01-S2", "episode": 1, "h3_override_stale": True}])
+    assert acts[0]["title"] == "剧本 H3 提示词已更新，请重新确认画布修改" and acts[0]["shots"] == ["ep01-S2"]
+    # 撤销（只在笔记本）
+    r = c.put(url, json={"clear": True, "note": "撤销", "by": "owner"})
+    assert r.status_code == 200 and "gpu3" in r.json()["warning"]
+    assert P.load_edit("ep01-S2").h3_prompt_override is None
+
+
+def test_audit_panel_override_requests_and_video_gate(api, bridge):
+    from ns_render import pipeline as P
+    c, data = api
+    g = data / "renders_gpu3" / "ep01" / "S2"
+    g.mkdir(parents=True)
+    sha = hashlib.sha256(EX1.encode("utf-8")).hexdigest()
+    (g / "status.json").write_text(json.dumps({"audit": {
+        "verdict": "fail", "failures": [{"rule_id": "S1-W7", "sop_ref": "§6 #7", "detail": "x"}],
+        "warnings": [], "not_checked": {"H3-A6": "待定"}, "overrides": [],
+        "invalid_overrides": [{"rule_id": "H3-A1", "reason": "不可豁免"}], "prompt_sha": sha}}), encoding="utf-8")
+    sm = c.get("/api/shots/ep01-S2").json()["summary"]
+    au = sm["gpu3_audit"]
+    assert au["verdict"] == "fail" and au["failures"][0]["rule_href"] == "/api/docs/rule_ids#S1-W7"
+    assert au["failures"][0]["sop_href"] == "/api/docs/SOP_production#sec-6"
+    assert au["not_checked"] == {"H3-A6": "待定"} and au["invalid_overrides"][0]["reason"] == "不可豁免"
+    assert sm["video_gate"]["ok"] is False and sm["video_gate"]["audit_prompt_sha"] == sha
+    # 出视频：以 gpu3 video_gate.video_ok 为准（服务端 409）
+    r = c.post("/api/shots/ep01-S2/gpu3-rerender", json={"stage": "video"})
+    assert r.status_code == 409 and "出视频闸门" in r.json()["detail"]
+    assert c.get("/api/shots/ep01-S2/gpu3-state").json()["shot"]["video_gate"]["video_ok"] is False
+    bridge.down = True
+    assert c.post("/api/shots/ep01-S2/render", json={"stage": "video"}).status_code == 409
+    assert c.get("/api/shots/ep01-S2/gpu3-state").json()["reachable"] is False
+    bridge.down = False
+    # 审计豁免请求：只接受项目方原话，存本地 + 按契约发到 gpu3（{rule_id, owner_quote, by}）
+    u = "/api/shots/ep01-S2/audit-override"
+    assert c.put(u, json={"rule_id": "S1-W7", "owner_quote": "可以", "by": "agent"}).status_code == 403
+    assert c.put(u, json={"rule_id": "S1-W7", "owner_quote": "", "by": "owner"}).status_code == 400
+    r = c.put(u, json={"rule_id": "S1-W7", "owner_quote": "这一镜说话人描述按现状出", "by": "owner"})
+    assert r.status_code == 200 and r.json()["delivered"]
+    assert bridge.calls[-1][2] == {"rule_id": "S1-W7", "owner_quote": "这一镜说话人描述按现状出", "by": "owner"}
+    reqs = P.load_edit("ep01-S2").audit_override_requests
+    assert len(reqs) == 1 and reqs[0].by == "owner" and reqs[0].delivery.ok
+    assert c.get("/api/shots/ep01-S2").json()["summary"]["audit_override_requests"][0]["rule_id"] == "S1-W7"
+    assert not (g / "status.json").read_text(encoding="utf-8").count("这一镜")     # 从不写 gpu3 的 status.json
+
+
+def test_docs_served_with_anchors(api):
+    c, _ = api
+    r = c.get("/api/docs/rule_ids")
+    assert r.status_code == 200 and 'id="H3-A1"' in r.text and 'id="P-B1"' in r.text
+    s = c.get("/api/docs/SOP_production").text
+    assert 'id="sec-9A.1"' in s and 'id="sec-6"' in s
+    assert c.get("/api/docs/secrets").status_code == 404
 
 
 def test_sop_s4_blocker_for_failed_h3(monkeypatch):
@@ -275,3 +444,102 @@ def test_sop_s4_blocker_for_failed_h3(monkeypatch):
     assert st["stage"] == "S4" and b[0]["code"] == "h3_lint" and b[0]["rule_ids"] == ["H3-A7", "H3-A4"]
     assert b[0]["text"].startswith("H3 提示词未通过 §9A")
     assert SOP.shot_status(Inp(), **kw, h3_failed=[])["stage"] == "S5"
+
+
+def test_sop_s4_video_lora_warn_not_blocker(monkeypatch):
+    """R-C4（总调度 2026-10-30）：视频 LoRA 未 accepted 只在 S4 warnings 提醒，不拦、passed 不变"""
+    from ns_api import sop as SOP
+
+    class Inp:
+        tl_shots = {"ep01-S1": {"required_loras": [{"trigger": "lnwan01", "kind": "video", "registry_status": "training"},
+                                                   {"trigger": "lnwan_qi", "kind": "image", "registry_status": "accepted"}]}}
+        timeline = None
+
+        def qa(self, n):
+            return {"shots": {"S1": {"verdict": "pass"}}}
+
+    monkeypatch.setattr(SOP, "s2_blockers", lambda inp, tl, ep: [])
+    st = SOP.shot_status(Inp(), shot_id="ep01-S1", ep=1, index=1, s1={"blockers": []}, readiness=None,
+                         frames_owner="gpu3", has_first=True, has_last=True, has_video=True, gpu3_status=None,
+                         first_ep=1, g4_passed=True, h3_failed=[])
+    s4 = st["stages"]["S4"]
+    assert st["stage"] == "S5" and s4["passed"] and s4["blockers"] == []
+    assert [w["trigger"] for w in s4["warnings"]] == ["lnwan01"]
+    assert s4["warnings"][0]["text"] == "视频 LoRA lnwan01 未验收：视频照常出，accepted 后更好"
+
+
+# ------------------------------------------------------------------ gpu3 合并的启发式规则（warn）
+
+def _rule(res, rid):
+    return next(r for r in res if r["rule_id"] == rid)
+
+
+def test_extra_rules_present_as_warn_with_exact_ids():
+    res = lint_h3(EX1, frames=243)
+    for rid in ("H3-A6", "H3-A9", "H3-A10", "H3-D8", "H3-D9"):
+        r = _rule(res, rid)
+        assert r["level"] == "warn" and r["ok"], r          # 官方示例 1 全部通过
+    assert lint_ok(lint_h3(EX1.replace("lifts one hand", "secretly hopes and lifts one hand"), frames=243))  # warn 不影响 pass
+
+
+def test_extra_rule_a6_static_description():
+    from ns_schema.h3_lint import lint_h3_extra
+    bad = EX1.replace("The camera tilts up", "The room is bright. The walls are white. The camera tilts up")
+    assert not _rule(lint_h3_extra(bad), "H3-A6")["ok"]
+    assert _rule(lint_h3_extra(EX1), "H3-A6")["ok"]
+    # 与首帧描述 3-gram 大量重合
+    frame = "a pair of clear 12 cm needle heels stepping onto the reflective marble floor of an office lobby"
+    assert not _rule(lint_h3_extra(EX1, frame_texts=[frame]), "H3-A6")["ok"]
+
+
+def test_extra_rule_a9_abstract_words():
+    assert not _rule(lint_h3(EX1.replace("lifts one hand", "feels nervous because she remembers him and lifts one hand")), "H3-A9")["ok"]
+    assert _rule(lint_h3(EX1), "H3-A9")["ok"]
+
+
+def test_extra_rule_a10_camera_moves():
+    two = EX1.replace("The camera tilts up at slow speed", "The camera tilts up at slow speed and then pans left")
+    assert not _rule(lint_h3(two), "H3-A10")["ok"]
+    loose = EX1.replace("The camera tilts up at slow speed", "The camera slowly tilts up")
+    assert not _rule(lint_h3(loose), "H3-A10")["ok"]
+    assert _rule(lint_h3(EX1), "H3-A10")["ok"]
+
+
+def test_extra_rule_d8_speaker_intro():
+    bad = EX2.replace("The on-screen middle-aged man with a low, calm, unhurried voice (S1)", "He (S1)")
+    assert not _rule(lint_h3(bad), "H3-D8")["ok"]
+    ok = EX2.replace("The on-screen young woman with a soft, small, slightly nervous voice (S2)",
+                     "The on-screen young woman with a soft, small, slightly nervous voice and a slow pace (S2)")
+    assert _rule(lint_h3(ok), "H3-D8")["ok"]
+
+
+def test_extra_rule_d9_cutoff_scenetrans():
+    from ns_schema.h3_lint import lint_h3_extra
+    line = "染了三年了……总经理。"
+    assert not _rule(lint_h3_extra(EX2, cutoff=[line]), "H3-D9")["ok"]
+    cut = EX2.replace(f"<d>[Chinese] {line}</d>", f"<d>[Chinese] {line}</d><cutoff>")
+    assert _rule(lint_h3_extra(cut, cutoff=[line]), "H3-D9")["ok"]
+    assert not _rule(lint_h3_extra(cut), "H3-D9")["ok"]          # 剧本没标却用了 <cutoff>
+    assert _rule(lint_h3_extra(EX2), "H3-D9")["ok"]
+
+
+def test_rule_explain_bridge_then_local(api, monkeypatch):
+    from ns_api import gpu3_bridge as GB
+    c, _ = api
+    # 桥不可达（tests/conftest.py 默认）→ 本地 rule_ids.md + SOP 行
+    r = c.get("/api/rules/H3-A5/explain").json()
+    assert r["source"] == "local" and r["level"] == "block" and r["rule_href"] == "/api/docs/rule_ids#H3-A5"
+    assert r["sop_lines"] and all("H3-A5" in x["text"] for x in r["sop_lines"])
+    assert c.get("/api/rules/NOPE-X1/explain").status_code == 404
+    assert c.get("/api/rules/bad id/explain").status_code == 404
+    # 桥可达 → 原样透出 shot_audit --explain
+    seen = []
+
+    def fake(method, url, body=None, timeout=None):
+        seen.append(url)
+        return {"found": True, "rule_id": "H3-A5", "rule": "r", "check": "c", "level": "block", "sop_ref": "§9A.1 #8",
+                "sop_lines": [], "example_pass": "p", "example_fail": "f", "rules_sha": "x", "cached": False}
+    monkeypatch.setattr(GB, "_call", fake)
+    r = c.get("/api/rules/H3-A5/explain").json()
+    assert r["source"] == "gpu3" and r["example_fail"] == "f" and seen[-1].endswith("/api/gpu3/rules/H3-A5")
+    assert r["sop_href"] == "/api/docs/SOP_production#sec-9A.1"

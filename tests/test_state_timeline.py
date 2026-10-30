@@ -113,6 +113,11 @@ def test_owner_confirmation_clears_review_and_marks_episode(proj):
         store.confirm_episodes("1", "lin_wan", "  ")
     store.confirm_episodes("1-2", "林晚", "项目方：ep01–02 造型可以")
     tl, _ = T.build(proj)
+    # M3：本集入镜的每个角色都要确认（ep01 还有陈宇）；没确认的角色列出来
+    assert not tl["episodes"]["1"]["look_confirmed"] and tl["episodes"]["1"]["unconfirmed_characters"] == ["chen_yu"]
+    assert any(b.startswith("look_unconfirmed") for b in _rows(tl, 1)[0]["s2_blockers"])
+    store.confirm_episodes("1-2", "chen_yu", "项目方：ep01–02 造型可以")
+    tl, _ = T.build(proj)
     assert tl["episodes"]["1"]["look_confirmed"] and tl["episodes"]["1"]["confirmed_ref"] == "项目方：ep01–02 造型可以"
     assert not tl["episodes"]["3"]["look_confirmed"]
     lw = _rows(tl, 1)[0]["characters"]["lin_wan"]
@@ -199,8 +204,9 @@ def test_s2_ready_when_everything_locked(proj):
                and set(r["characters"]) == {"lin_wan"} and r["characters"]["lin_wan"]["present"])
     _make_v3(proj)
     _tool("s1_gate").main(["--root", str(proj), "--validator-errors", "0", "--accept", "项目方 OK", "--no-rebuild"])
-    LookStore(proj / "data" / "looks", proj / "data" / "import" / "script_v2.json").confirm_episodes(
-        str(row["episode"]), "lin_wan", "项目方 OK")
+    for ch in tl["episodes"][str(row["episode"])]["characters"]:       # 本集入镜的每个角色都要确认
+        LookStore(proj / "data" / "looks", proj / "data" / "import" / "script_v2.json").confirm_episodes(
+            str(row["episode"]), ch, "项目方 OK")
     _plate(proj, row["scene_id"], confirmed=True)
     tl, _ = T.build(proj)
     r = next(x for x in tl["shots"] if x["shot_id"] == row["shot_id"])
@@ -279,9 +285,9 @@ def test_inject_dedupes_script_text_and_material_terms(proj):
     from ns_schema.looks import LookPatch, WardrobeItem
     store = LookStore(proj / "data" / "looks", proj / "data" / "import" / "script_v2.json")
     store.upsert_item(WardrobeItem(id="t-side", slot="outfit", name="侧脸", description="侧脸", character="lin_wan"))
-    store.confirm_episodes("1", "lin_wan", "项目方 OK")
     store.patch_episode(1, "lin_wan", LookPatch(slots={"makeup": ["lw-makeup-bare"], "shoes": ["lora-hh12clear"],
                                                        "outfit": ["kw-mini-skirt", "t-side"]}))
+    store.confirm_episodes("1", "lin_wan", "项目方 OK")          # 确认绑定内容：先改后确认
     c = _compile(proj, "ep01-S3", inject_looks=True)
     # “侧脸”已在剧本原文 → 不重复；注入的高跟触发细跟材质规则，且只出现一次
     assert c.look_fragments == ["【林晚造型】超短裙，12cm透明细高跟，素颜"]
@@ -303,9 +309,13 @@ def test_bible_diff_lists_changed_shots(proj, capsys):
     assert B.bible_version(proj) != old
     assert tool.main([old, "--root", str(proj), "--json"]) == 0
     out = json.loads(capsys.readouterr().out)
-    closeups = {k for k, v in PS.load_snapshot(old, proj)["shots"].items() if "面部清晰对焦，五官锐利" in v["image_prompt"]}
-    assert set(out["changed"]) == closeups and closeups
-    assert all("image_prompt" in f for f in out["changed"].values())
+    # G1：尾帧也按首帧原文 + 结束状态追加纠正器条目，结束状态里写到特写的镜头只有尾帧变
+    snap = PS.load_snapshot(old, proj)["shots"]
+    closeups = {k for k, v in snap.items() if "面部清晰对焦，五官锐利" in v["image_prompt"]}
+    last_only = {k for k, v in snap.items() if "面部清晰对焦，五官锐利" in v["last_prompt"]} - closeups
+    assert set(out["changed"]) == closeups | last_only and closeups
+    assert all("image_prompt" in out["changed"][k] for k in closeups)
+    assert all("last_prompt" in out["changed"][k] for k in last_only)
     assert tool.main(["nope", "--root", str(proj)]) == 2
 
 
@@ -317,13 +327,13 @@ def test_look_edit_triggers_rebuild(proj, monkeypatch):
     monkeypatch.setattr(T, "AUTOBUILD_DELAY", 0.0)
     assert not T.timeline_path(proj).exists()
     LookStore(proj / "data" / "looks", proj / "data" / "import" / "script_v2.json").confirm_episodes(
-        "1", "lin_wan", "项目方 OK")
+        "3", "lin_wan", "项目方 OK")                                  # ep03 只有林晚入镜
     for _ in range(100):
         if T.timeline_path(proj).exists() and T.scenes_path(proj).exists():
             break
         time.sleep(0.1)
     tl = T.read_timeline(proj)
-    assert tl and tl["episodes"]["1"]["look_confirmed"]
+    assert tl and tl["episodes"]["3"]["look_confirmed"]
 
 
 def test_sandbox_looks_dir_does_not_rebuild(tmp_path, proj, monkeypatch):
@@ -335,3 +345,82 @@ def test_sandbox_looks_dir_does_not_rebuild(tmp_path, proj, monkeypatch):
     shutil.copytree(proj / "data" / "looks", other)
     LookStore(other, proj / "data" / "import" / "script_v2.json").confirm_episodes("1", "lin_wan", "x")
     assert called == []
+
+
+# ------------------------------------------------------------------ QA4-01 源文件漂移
+
+def test_source_drift_flags_edited_or_missing_script_files(tmp_path):
+    lib = tmp_path / "script play lib"
+    lib.mkdir()
+    a, b = lib / "剧本v2.md", lib / "image v2.md"
+    a.write_text("原文", encoding="utf-8")
+    b.write_text("图", encoding="utf-8")
+    sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()   # noqa: E731
+    s = ScriptImport.model_validate({"sources": [{"path": str(a), "sha256": sha(a)},
+                                                 {"path": r"D:\elsewhere\image v2.md", "sha256": sha(b)}],
+                                     "globals": {}, "episodes": []})
+    assert T.source_drift(tmp_path, s) == []                       # 绝对路径找不到时按文件名在 script play lib 找
+    old = sha(a)
+    a.write_text("原文（改过）", encoding="utf-8")
+    b.unlink()
+    d = T.source_drift(tmp_path, s)
+    assert [x["imported_sha"] for x in d] == [old, s.sources[1].sha256]
+    assert d[0]["current_sha"] == sha(a) and d[1]["current_sha"] is None
+
+
+def test_timeline_source_lists_changed_sources(proj):
+    tl, _ = T.build(proj)
+    assert isinstance(tl["source"]["changed_sources"], list)
+
+
+def test_source_drift_relative_path_duplicates_and_cwd(tmp_path, monkeypatch):
+    """合并导入后 sources 里有相对路径（相对项目根）和重复条目；cwd 不是项目根时也不能误报“文件不见了”"""
+    root = tmp_path / "proj"
+    f = root / "data" / "script_chat" / "x" / "script.md"
+    f.parent.mkdir(parents=True)
+    f.write_text("稿", encoding="utf-8")
+    sha = hashlib.sha256(f.read_bytes()).hexdigest()
+    rel = "data\\script_chat\\x\\script.md"
+    s = ScriptImport.model_validate({"sources": [{"path": rel, "sha256": sha}, {"path": rel, "sha256": sha}],
+                                     "globals": {}, "episodes": []})
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    assert T.source_drift(root, s) == []
+    f.write_text("稿（改过）", encoding="utf-8")
+    d = T.source_drift(root, s)
+    assert len(d) == 1 and d[0]["current_sha"] == hashlib.sha256(f.read_bytes()).hexdigest()
+
+
+def test_malformed_gate_and_manifest_do_not_crash(tmp_path):
+    """封板修复：s1_gate.json / 场景 manifest.json 不是对象时按“没有记录”处理"""
+    (tmp_path / "data" / "import").mkdir(parents=True)
+    for body in ("[]", '"x"', "3"):
+        (tmp_path / "data" / "import" / "s1_gate.json").write_text(body, encoding="utf-8")
+        g = T.read_s1_gate(tmp_path, "abc")
+        assert g["g3_accepted"] is False and g["validator_errors"] is None and g["stale"] is False
+    d = tmp_path / "assets" / "scenes" / "sk_x"
+    d.mkdir(parents=True)
+    (d / "manifest.json").write_text("[]", encoding="utf-8")
+    assert T.plate_info(tmp_path, "sk_x")["plate_status"] == "missing"
+
+
+
+def test_r_c4_frames_only_wait_for_image_loras(proj):
+    """R-C4（总调度 2026-10-30 定）：首尾帧（S2）只要求 image 类 LoRA accepted；H3 视频 LoRA（lnwan01 这类）
+    未验收不拦首尾帧，只在视频步提示"""
+    g3 = proj / "data" / "renders_gpu3"
+    g3.mkdir(parents=True, exist_ok=True)
+    (g3 / "LORA_REGISTRY.json").write_text(json.dumps({"loras": [
+        {"file": "lin_wan_h3_v1.safetensors", "triggers": ["lnwan01"], "kind": "video", "status": "training"},
+        {"file": "wardrobe_heels_v1.safetensors", "triggers": ["hh12clear"], "kind": "image", "status": "training"}]}),
+        encoding="utf-8")
+    tl, _ = T.build(proj)
+    rows = [r for r in tl["shots"] if any(x["trigger"] == "lnwan01" for x in r["required_loras"])]
+    assert rows, "fixture 里应有带 lnwan01 的镜头"
+    for r in rows:
+        kinds = {x["trigger"]: x["kind"] for x in r["required_loras"]}
+        assert kinds["lnwan01"] == "video"
+        assert not any(b.startswith("lora:lnwan01:") for b in r["s2_blockers"])
+    heel = [r for r in tl["shots"] if any(x["trigger"] == "hh12clear" for x in r["required_loras"])]
+    assert heel and all("lora:hh12clear:training" in r["s2_blockers"] for r in heel)

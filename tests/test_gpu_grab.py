@@ -45,12 +45,13 @@ def test_sample_job_file_accepted():
 
 
 @pytest.mark.parametrize("extra", [{"adult": True}, {"nsfw": True}, {"rating": "Adult"}, {"adult_shot": True}])
-def test_adult_refused(extra):
-    assert "adult" in G.refuse_reason({}, job(**extra), OWN)
+def test_adult_jobs_accepted(extra):
+    """2026-10-30 取消成人过滤器：gpu_grab 不再按 adult/nsfw 标记拒绝。"""
+    assert G.refuse_reason({}, job(**extra), OWN) is None
 
 
-def test_adult_flag_on_file_meta_refused():
-    assert "adult" in G.refuse_reason({"adult": True}, job(), OWN)
+def test_adult_flag_on_file_meta_accepted():
+    assert G.refuse_reason({"adult": True}, job(), OWN) is None
 
 
 def test_word_adult_in_prompt_is_not_a_flag():
@@ -136,6 +137,9 @@ def test_laptop_free_rules():
     assert "busy" in G.laptop_free({"queue_running": [["x"]], "queue_pending": []}, [])
     assert "unreachable" in G.laptop_free(None, [])
     assert "busy" in G.laptop_free({"queue_running": [], "queue_pending": []}, ["python.exe#1: render_batch.py"])
+    # X-1：本机 ComfyUI 单一锁被画布 / 编排器占着 → 不抢
+    held = G.laptop_free({"queue_running": [], "queue_pending": []}, [], {"who": "canvas", "what": "ep01-S1"})
+    assert "comfy.lock" in held and "canvas" in held
 
 
 def test_filter_busy_processes():
@@ -208,6 +212,9 @@ class FakeLaptop:
     def busy_procs(self):
         return []
 
+    def lock_holder(self):
+        return None
+
 
 def make_exec(fail_files=(), timeout_files=(), lock_check=None):
     calls = []
@@ -238,6 +245,14 @@ def _no_remote(monkeypatch):
     monkeypatch.setattr(G, "_free", lambda url: None)
 
 
+@pytest.fixture(autouse=True)
+def _isolated_comfy_lock(tmp_path, monkeypatch):
+    """测试不碰仓库里真实的 data/comfy.lock（画布 / 编排器在用）"""
+    from ns_orch import comfy_lock as CL
+    monkeypatch.setattr(CL, "LOCK_PATH", tmp_path / "comfy.lock")
+    return CL
+
+
 def test_laptop_run_moves_to_done(env):
     put(env, "a.json", [job(file="a1.png"), job(file="a2.png")])
     ex = make_exec()
@@ -258,14 +273,33 @@ def test_qc_fail_is_hard_and_goes_to_failed(env):
     assert len(ex.calls) == 2      # 不换种子重试
 
 
-def test_refused_file_never_runs(env):
+def test_refused_file_never_runs_but_adult_does(env):
     put(env, "c.json", [job(file="f.png", kind="first_frame")], project="weita")
     put(env, "d.json", [job(file="g.png", adult=True)])
     ex = make_exec()
     G.Runner(gpu3=None, laptop=FakeLaptop(), execute=ex, use_gpu3=False, ownership=OWN).once(sample_s=0)
-    assert ex.calls == []
+    assert ex.calls == [("g.png", "laptop", 3600)]
     assert "shot_ownership" in json.loads((G.FAILED / "c.json").read_text(encoding="utf-8"))["_gpu_grab"]["refused"]
-    assert "adult" in json.loads((G.FAILED / "d.json").read_text(encoding="utf-8"))["_gpu_grab"]["refused"]
+    assert (G.DONE / "d.json").exists()
+
+
+def test_laptop_yields_when_comfy_lock_held(env, _isolated_comfy_lock):
+    """X-1：画布 / 编排器拿着 comfy.lock 时，gpu_grab 不往本机 ComfyUI 派活，任务留在队列（不计失败）"""
+    CL = _isolated_comfy_lock
+    put(env, "h.json", [job(file="h1.png")])
+    ex = make_exec()
+    fh = CL.acquire("canvas", "ep01-S1", timeout=0)
+    try:
+        G.Runner(gpu3=None, laptop=FakeLaptop(), execute=ex, use_gpu3=False, ownership=OWN).once(sample_s=0)
+    finally:
+        CL.release(fh)
+    assert ex.calls == [] and (G.QUEUE / "h.json").exists() and not list(G.FAILED.glob("*.json"))
+    # 锁放开后照常跑，跑的时候 gpu_grab 自己持锁
+    seen = []
+    ex2 = make_exec(lock_check=lambda target, job_id: seen.append(CL.holder()))
+    G.Runner(gpu3=None, laptop=FakeLaptop(), execute=ex2, use_gpu3=False, ownership=OWN).once(sample_s=0)
+    assert [c[0] for c in ex2.calls] == ["h1.png"] and seen[0]["who"] == "gpu_grab"
+    assert CL.is_free()
 
 
 def test_laptop_busy_nothing_runs(env):
@@ -369,3 +403,128 @@ def test_recover_moves_running_back(env):
     (G.RUNNING / "p.json").write_text(json.dumps({"jobs": [job()]}), encoding="utf-8")
     G.Runner(gpu3=None, laptop=FakeLaptop(free=False), execute=make_exec(), use_gpu3=False, ownership=OWN).once(sample_s=0)
     assert (G.QUEUE / "p.json").exists()
+
+
+def test_acquire_never_writes_lock_outside_state_dir(tmp_path, monkeypatch):
+    """回归：状态目录不存在（或 cd 失败）时不能把锁写进当前目录。"""
+    import shutil
+    import subprocess
+    bash = shutil.which("bash")
+    if not bash:
+        pytest.skip("no bash")
+    monkeypatch.setattr(G, "STATE_DIR", "/nonexistent/NS-Studio-test")
+
+    class Local(G.Gpu3):
+        def _ssh(self, cmd, timeout=60, inp=None):
+            return subprocess.run([bash, "-c", cmd], capture_output=True, text=True, cwd=tmp_path)
+    assert Local().acquire(1, "fredw-d9 t:x.png") is False
+    assert not list(tmp_path.rglob("gpu.lock.*"))
+
+
+# ---------------------------------------------------------------- G2 edit 任务 / 场景底板任务
+def _g2_job(ref_rel, sha=None, **kw):
+    j = job(mode="edit", refs=[ref_rel], file="c_CM_s0.png", out_dir="assets/characters/c/candidates/",
+            lora=[["Qwen2.1_Anything2RealCharacters.safetensors", 0.45], ["krea2_film_texture_qwen21.safetensors", 0.4]],
+            refine={"scale": 1.5, "steps": 12, "denoise": 0.3}, project="weita", character="c", tier="CM",
+            reference={"path": ref_rel, "sha256": sha, "ai_generated_fictional_adult": True})
+    j.update(kw)
+    return j
+
+
+def _ref(env):
+    from PIL import Image
+    p = env / "projects" / "p" / "refs" / "c.png"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (64, 96), (120, 120, 120)).save(p)
+    return "projects/p/refs/c.png", G._sha(p)
+
+
+def test_g2_edit_job_accepted(env):
+    rel, sha = _ref(env)
+    meta = {"kind": "g2_master_candidates", "project": "weita", "character": "c"}
+    assert G.refuse_reason(meta, _g2_job(rel, sha), OWN) is None
+
+
+def test_g2_edit_job_ref_problems_refused(env):
+    rel, sha = _ref(env)
+    assert "sha256 mismatch" in G.refuse_reason({}, _g2_job(rel, "0" * 64), OWN)
+    assert "reference missing" in G.refuse_reason({}, _g2_job("projects/p/refs/none.png"), OWN)
+    assert "needs refs" in G.refuse_reason({}, _g2_job(rel, sha, refs=[]), OWN)
+    assert "mode" in G.refuse_reason({}, _g2_job(rel, sha, mode="i2v"), OWN)
+
+
+def test_g2_edit_graph_uses_reference_in_both_passes():
+    j = _g2_job("x.png")
+    wf, refine = G.build_graphs(j, "p", ["ns_final/gpu_grab/ref.png"])
+    assert wf["101"]["inputs"]["image"] == "ns_final/gpu_grab/ref.png"
+    assert wf["20"]["inputs"]["images.image_1"] == ["101", 0] and wf["20"]["inputs"]["prompt"] == j["prompt"]
+    assert "102" not in wf                                         # crop=False（预缩放参考图原样送入）
+    wf2 = refine("first.png")
+    assert wf2["101"]["inputs"]["image"] == "ns_final/gpu_grab/ref.png"
+    assert wf2["40"]["inputs"]["latent_image"] == ["203", 0] and "34" not in wf2
+    assert (wf2["202"]["inputs"]["width"], wf2["202"]["inputs"]["height"]) == (1536, 2304)
+    assert wf2["37"]["inputs"]["denoise"] == 0.3 and wf2["37"]["inputs"]["steps"] == 12
+    with pytest.raises(ValueError):
+        G.build_graphs(j, "p", [])
+
+
+def _plate_job(**kw):
+    j = job(kind="scene_plate", mode="t2i", size=[928, 1632], file="plate_raw.png", out_dir="assets/scenes/sk_x/",
+            refine={"upscale_to": [1152, 2016], "upscale_method": "lanczos", "scale": 1.2353, "steps": 12, "denoise": 0.3},
+            scene_id="sk_x", stem="plate", light={"time": "night"},
+            post={"center_crop": [768, 1344], "final": "plate.png", "where": "laptop: tools/gen_scenes.py finalize (CPU)"},
+            prompt="电影场景空镜底板（空场，画面中没有任何人物）：客厅，夜晚")
+    j.update(kw)
+    return j
+
+
+def test_scene_plate_job_accepted_and_upscale_to_used():
+    assert G.refuse_reason({"kind": "scene_plates"}, _plate_job(), OWN) is None
+    assert "upscale_to" in G.refuse_reason({}, _plate_job(refine={"upscale_to": [10, 10]}), OWN)
+    assert "upscale_method" in G.refuse_reason({}, _plate_job(refine={"upscale_to": [1152, 2016],
+                                                                       "upscale_method": "magic"}), OWN)
+    wf, refine = G.build_graphs(_plate_job(), "p")
+    assert (wf["34"]["inputs"]["width"], wf["34"]["inputs"]["height"]) == (928, 1632)
+    wf2 = refine("first.png")
+    s = wf2["202"]["inputs"]
+    assert (s["width"], s["height"], s["upscale_method"]) == (1152, 2016, "lanczos")
+    assert G.clamp_side(_plate_job()) is None            # 底板原尺寸交给 finalize 裁切
+    assert G.clamp_side(job()) == 1536 and G.clamp_side(job(max_side=1024)) == 1024
+
+
+def test_real_gen_scenes_jobs_accepted():
+    try:
+        sys.path.insert(0, str(Path(G.__file__).parent))
+        import gen_scenes
+        head, jobs = gen_scenes.scene_jobs(gen_scenes.ROOT, draft=True)
+    except BaseException as e:  # noqa: BLE001 — 没有 scenes.json 等
+        pytest.skip(f"gen_scenes unavailable: {e}")
+    assert jobs and all(G.refuse_reason(head, j, OWN) is None for j in jobs[:20])
+
+
+def test_dict_manifest_preserved_for_scene_plates(env):
+    d = env / "assets" / "scenes" / "sk_x"
+    d.mkdir(parents=True)
+    orig = {"plate": "plate.png", "scene_id": "sk_x", "queued": {"plate": {"seed": 1, "post": {"final": "plate.png"}}},
+            "variants": {}, "owner_confirmed_at": None}
+    (d / "manifest.json").write_text(json.dumps(orig), encoding="utf-8")
+    G.write_manifest(d, {"file": "plate_raw.png", "seed": 1, "prompt": "p"})
+    man = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
+    assert man["queued"] == orig["queued"] and man["plate"] == "plate.png" and "owner_confirmed_at" in man
+    assert man["renders"]["plate_raw.png"]["seed"] == 1
+    (d / "plate_raw.png").write_bytes(b"x")
+    assert G.manifest_has({"out_dir": "assets/scenes/sk_x/", "file": "plate_raw.png", "seed": 1, "prompt": "p"})
+
+
+def test_list_manifest_replace_and_corrupt_not_clobbered(env):
+    d = env / "assets" / "c"
+    d.mkdir(parents=True)
+    G.write_manifest(d, {"file": "a.png", "seed": 1})
+    G.write_manifest(d, {"file": "b.png", "seed": 2})
+    G.write_manifest(d, {"file": "a.png", "seed": 3})
+    man = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
+    assert [(e["file"], e["seed"]) for e in man] == [("b.png", 2), ("a.png", 3)]
+    (d / "manifest.json").write_text("{broken", encoding="utf-8")
+    with pytest.raises(ValueError):
+        G.write_manifest(d, {"file": "c.png"})
+    assert (d / "manifest.json").read_text(encoding="utf-8") == "{broken"

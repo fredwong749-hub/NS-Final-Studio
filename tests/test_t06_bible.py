@@ -5,6 +5,7 @@
 """
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -172,3 +173,23 @@ def test_compiled_shot_carries_bible_version():
 def test_current_repo_bible_compiles():
     assert len(C.bible_version()) == 12
     pytest.importorskip("tomllib")
+
+
+def test_wrong_types_raise_clear_error(tmp_path):
+    """封板修复：类型写错时报清楚的 ValueError（原来是 IndexError / AttributeError）"""
+    for body, key in (('[look]\nlens_default = "x"\n', "lens_default"), ("characters = []\n", "[characters]"),
+                      ('materials = "x"\n', "[[materials]]"), ('look = 3\n', "[look]")):
+        _write_bible(tmp_path, body)
+        with pytest.raises(ValueError, match=re.escape(key)):
+            B.load_bible(root=tmp_path)
+
+
+def test_adult_overrides_per_shot_and_list_force_adult(tmp_path):
+    """封板修复：per_shot 只认布尔 true（字符串 "false" 不能当真）；force_adult 写成列表也能用"""
+    _write_bible(tmp_path, "")
+    ov = tmp_path / "config" / "adult_overrides.json"
+    for value, want in (("false", False), ('"false"', False), ('"true"', True), ("true", True), ("1", False)):
+        ov.write_text('{"per_shot": %s, "force_adult": ["ep01-S1"]}' % value, encoding="utf-8")
+        b = B.load_bible(root=tmp_path)
+        assert b.adult_per_shot() is want, value
+        assert b.forced_adult() == {"ep01-S1": "（未写原因）"}

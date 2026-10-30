@@ -45,13 +45,16 @@ SHEETS = ROOT / "golden" / "assets" / "sheets"
 STEPS, CFG = 35, 3.0
 LORAS = [(G.LORA_FILM, 0.5)]
 REFINE = {"scale": 1.5, "steps": 12, "denoise": 0.30}
-EDIT_CFG_DEFAULT = 3.0
+# 2026-10-30 试跑（golden/assets/v2_work/pilot/id_front*_cfg3|cfg1.png）：换脸/妆容编辑段用 cfg 3 → 人显老、发色变灰、
+# 不像母版（与 notes.md R3 结论一致）；cfg 1 才保住母版长相。构图段（文生图）仍按 S2 用 cfg 3。
+EDIT_CFG_DEFAULT = 1.0
 
 VB = tomllib.loads(BIBLE.read_text(encoding="utf-8"))
 LW = VB["characters"]["lin_wan"]
 BANNED = VB["realism"]["banned_words"] + ["精致", "娃娃", "美颜", "瓷肌", "无瑕", "大眼", "仙气", "心机"]   # + v9 §1
 SKIN = VB["realism"]["skin_terms"]
 HAIR = LW["hair_color"]                       # 雾霾天蓝色及腰直发（…），齐刘海
+HAIR_HINT = "发色是一眼可见的中浅天蓝色、颜色饱和清楚，"
 EYES_BARE, EYES_GLAM = LW["eyes"]["bare"], LW["eyes"]["glam"]
 NAILS = "双手手指甲为约5厘米长的透明水晶延长尖甲，甲面镶满透明水钻"
 HEELS = "脚穿12厘米透明侧开细高跟鞋，鞋跟直径约6毫米、细如一根筷子的针形细跟"
@@ -67,11 +70,11 @@ NEG = ("磨皮, 塑料皮肤, 蜡像, 娃娃脸, 放大瞳孔, 粘连睫毛, 大
        "动漫比例, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 走光, 内衣外露, 项链, 文字, 水印")
 
 WOMAN = ("一位22岁的东亚成年女性，鹅蛋脸，下颌线柔和，中等大小的杏眼，{eyes}，鼻梁细直，嘴唇饱满、上唇有小唇珠，"
-         "左脸颊靠近鼻翼有一颗小痣，冷调白皙皮肤，" + HAIR)
+         "左脸颊靠近鼻翼有一颗小痣，冷调白皙皮肤，" + HAIR + "，" + HAIR_HINT + "双手不碰脸")
 MASTER_MAKEUP = "图2的粉甜妆容（草莓粉腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛）"
 SWAP = ("图1是这张角色资产照的画面构图。保持图1的构图、机位、景别、人物姿势与朝向、表情、服装、背景和光线不变，"
-        "只把图1中林晚的五官长相、发色与发型换成图2人物的样子（" + HAIR + "，冷白皮肤，左脸颊靠近鼻翼的小痣）{extra}；"
-        "不要沿用图2的姿势、手势、项链、服装和背景。")
+        "只把图1中林晚的五官长相、发色与发型换成图2人物的样子（与图2完全相同的鲜明天蓝色发色，" + HAIR + "，冷白皮肤，左脸颊靠近鼻翼的小痣）{extra}；"
+        "人物的手与手臂保持图1的位置（不要托腮），不要沿用图2的姿势、手势、项链、服装和背景。")
 SWAP_GLAM = "，妆容也换成" + MASTER_MAKEUP + "，" + EYES_GLAM
 SWAP_BARE = "，保持图1的素颜（不要图2的妆容），眼睛为" + EYES_BARE + "（不要图2的灰蓝色美瞳）"
 
@@ -111,9 +114,13 @@ def jobs() -> list[Job]:
     J.append(Job(P + "id_front", "plate", "LW-ID-F", "正脸底板（母版妆容）",
                  _compose(glam_eyes, light + "正面头肩照，平视镜头，中性放松表情，嘴唇自然闭合，头发自然垂在两侧和身后，" + TEE + "，" + GREY),
                  head, angle="F", supersedes=["id_front_s0.png"]))
+    # 素颜正脸：在 v2 正脸上链式编辑去妆 + 深棕眼（pilot p2：直接两段式换脸时素颜脸更像构图人物，不像母版）
     J.append(Job(P + "id_front_bare", "plate", "LW-ID-F-bare", "正脸底板（素颜，深棕眼）",
-                 _compose(EYES_BARE + "（不戴美瞳）", "完全素颜：无眼线、无睫毛膏、无唇彩、无腮红，可见自然的皮肤纹理和淡淡黑眼圈，正面头肩照，平视镜头，中性表情，嘴唇自然闭合，" + TEE + "，" + GREY),
-                 head, swap_extra=SWAP_BARE, angle="F", makeup="L1", supersedes=["id_front_bare_s0.png"]))
+                 "图1是林晚本人。保持她的脸型轮廓、眉形、眼型、鼻型、唇形与饱满度、左脸颊小痣、冷白肤色、与图1完全相同的天蓝色齐刘海长直发、"
+                 "姿势、服装、背景、光线和构图完全不变；只去掉全部妆容：没有腮红、没有唇彩、没有眼线和假睫毛，"
+                 "眼睛改为" + EYES_BARE + "（不戴美瞳，大小与图1一致），可见自然的皮肤纹理、细小毛孔和淡淡黑眼圈。真实人像照片，未修图原片",
+                 head, mode="edit", edit_base="plates/id_front_v2.png", angle="F", makeup="L1",
+                 supersedes=["id_front_bare_s0.png"]))
     J.append(Job(P + "id_34L", "plate", "LW-ID-34L", "3/4 侧脸（脸朝画面左）",
                  _compose(glam_eyes, light + "四分之三侧脸头肩照：她的脸和身体朝向画面左侧约45度，眼睛看向画面左前方，中性表情，" + TEE + "，" + GREY),
                  head, angle="34L", supersedes=["id_34L_s0.png"]))
@@ -202,6 +209,24 @@ def _v9_recipes() -> dict[str, tuple[str, str]]:
     return out
 
 
+def face_ref() -> Path:
+    """母版脸部裁切，托腮的手和项链涂成暖粉米色（否则换脸会把托腮姿势带进来：pilot id_front*_cfg1）"""
+    from PIL import ImageDraw, ImageFilter
+    out = WORK / "master_face_nohand.png"
+    src = face_crop(MASTER)
+    im = Image.open(src).convert("RGB")
+    k = im.width / 768
+    m = Image.new("L", im.size, 0)
+    d = ImageDraw.Draw(m)
+    d.polygon([(x * k, y * k) for x, y in ((585, 320), (768, 320), (768, 768), (380, 768), (445, 660), (505, 585),
+                                           (560, 520), (575, 460))], fill=255)
+    d.rectangle([0, 700 * k, im.width, im.height], fill=255)
+    m = m.filter(ImageFilter.GaussianBlur(8))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    Image.composite(Image.new("RGB", im.size, (226, 200, 196)), im, m).save(out)   # 母版背景的暖粉米色（中灰会把发色带灰）
+    return out
+
+
 # ---------------------------------------------------------------- ComfyUI（排队礼让）
 class PoliteClient(ComfyClient):
     """每次提交前看 /queue：有别人的任务在跑或排队就等（一次只跑一个任务）"""
@@ -259,6 +284,24 @@ def _refine(client, src: Path, prompt: str, refs: list[str], size, seed: int, pr
 _vlm = None
 
 
+def hair_blue(path: Path) -> float | None:
+    """S3-F3 同口径：脸框上方/两侧发带里 H∈[85,125]、S≥30 的蓝色像素占比（母版 0.52；背面图无脸返回 None）"""
+    import cv2
+    import numpy as np
+    from ns_render.score import face_box
+    b = face_box(path)
+    if not b:
+        return None
+    im = cv2.imread(str(path))
+    h, w = im.shape[:2]
+    x, y, fw, fh = b
+    regs = [im[max(0, y - int(.6 * fh)):y, x:x + fw], im[y:y + fh, max(0, x - int(.5 * fw)):x],
+            im[y:y + fh, x + fw:min(w, x + fw + int(.5 * fw))]]
+    px = np.concatenate([r.reshape(-1, 3) for r in regs if r.size])
+    hsv = cv2.cvtColor(px.reshape(-1, 1, 3), cv2.COLOR_BGR2HSV).reshape(-1, 3)
+    return round(float(((hsv[:, 0] >= 85) & (hsv[:, 0] <= 125) & (hsv[:, 1] >= 30)).mean()), 3)
+
+
 def qc(path: Path, client) -> dict:
     global _vlm
     from ns_render.qc import nudity_qc, vlm_judge
@@ -279,7 +322,7 @@ def run_job(client, job: Job, edit_cfg: float, log, pilot: str | None = None, at
     work = WORK / Path(job.id).parent
     work.mkdir(parents=True, exist_ok=True)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    face = face_crop(MASTER)
+    face = face_ref()
     face_name = client.upload_image(face)
     prefix = f"ns_final/lw_v2/{job.id.replace('/', '_')}"
     for a in range(attempts):
@@ -337,17 +380,18 @@ def run_job(client, job: Job, edit_cfg: float, log, pilot: str | None = None, at
                  "negative": NEG, "seeds": seeds, "seed": seeds["refine"], "size": list(job.size),
                  "model": G.UNET_BASE, "steps": STEPS, "cfg": CFG, "edit_cfg": edit_cfg,
                  "lora": [list(x) for x in LORAS], "vae": G.VAE_TEX, "refine": dict(REFINE),
-                 "references": ["assets/characters/lin_wan/plates/master.png (face crop)"]
+                 "references": ["assets/characters/lin_wan/plates/master.png → face crop, hand/necklace greyed: "
+                                + G.rel(face) + " sha " + G.sha256(face)[:12]]
                                if job.mode == "two_stage" else ["assets/characters/lin_wan/" + job.edit_base],
                  "master": "assets/characters/lin_wan/plates/master.png", "master_sha256": master_sha,
                  "master_source": "CM_s1 (owner-approved 2026-10-30)",
                  "bible_sha256": bible_sha, "sop": "S2 (docs/SOP_parameters.md 2026-10-30)",
-                 "sha256": G.sha256(dest), "qc": q, "attempt": a, "gen_seconds": round(secs, 1),
+                 "sha256": G.sha256(dest), "qc": q, "hair_blue_frac": hair_blue(dest), "attempt": a, "gen_seconds": round(secs, 1),
                  "supersedes": job.supersedes, "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                  "generator": "tools/gen_assets_v2.py"}
         if not pilot:
             _write_manifest(dest.parent, entry)
-        log(f"{job.id}_v2{pilot or ''} {secs:.0f}s a{a} qc_bare={q['clip_bare']} vlm={q.get('vlm')}")
+        log(f"{job.id}_v2{pilot or ''} {secs:.0f}s a{a} qc_bare={q['clip_bare']} vlm={q.get('vlm')} hair_blue={entry['hair_blue_frac']}")
         return entry
     log(f"FAILED {job.id}: {attempts} 次均被质检拦截")
     return None
@@ -419,7 +463,7 @@ def main():
             f.write(line + "\n")
 
     client = PoliteClient(args.comfy, log=log)
-    sel = [j for j in J if not args.only or any(j.id.startswith(o) for o in args.only)]
+    sel = [j for j in J if not args.only or any(j.id == o or (o.endswith("/") and j.id.startswith(o)) for o in args.only)]
     t0, n = time.monotonic(), 0
     for j in sel:
         try:

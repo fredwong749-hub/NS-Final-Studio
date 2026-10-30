@@ -1,12 +1,12 @@
 """
 批量渲染（可断点续跑），与画布共用 ns_render.pipeline 的版本管理。
 
-    uv run python tools/render_batch.py --stage image                  # 全部非成人镜头出首帧
+    uv run python tools/render_batch.py --stage image                  # 全部镜头出首帧（含成人）
     uv run python tools/render_batch.py --stage video --shots ep01     # ep01 出视频
-    uv run python tools/render_batch.py --stage image --include-adult  # 含成人镜头
+    uv run python tools/render_batch.py --stage image                  # 含成人镜头（过滤器已取消）
     uv run python tools/render_batch.py --report                       # 只重写报告
     uv run python tools/render_batch.py --stage image --face-lock on   # 含角色锁的镜头用参考图锁脸
-    uv run python tools/render_batch.py --qc                           # 只给非成人首帧补做裸露质检（不合格的撤下）
+    uv run python tools/render_batch.py --qc                           # 给已有首帧补做裸露质检（只记录）
     uv run python tools/render_batch.py --stage last --shots ep01 ep02 # 独立尾帧（以当前首帧为图1编辑出结束状态）
     uv run python tools/render_batch.py --stage image --candidates 3 --rounds 3   # C5 多候选多轮（默认值见 pipeline）
     uv run python tools/render_batch.py --stage image --method spec    # 画面说明层提示词（试点）
@@ -14,8 +14,8 @@
 首帧/尾帧：每轮多张候选 → 调色（色调参考图）→ 裸露质检 → 自动评分，最高分设为当前；不达标再来一轮，仍不达标在报告里标“待审”。
 ⚠ 不要在出图/质检进程运行时跑 --stage video（本机 32GB 内存，H3 与 Qwen/质检模型同时加载会 OOM）。
 
-非成人首帧每次出图后自动做裸露质检（NudeNet + CLIP）；不合格的版本留档但不设为当前，换种子重抽。
-跑 --stage image 前也会先给已有的非成人首帧补做质检。
+首帧每次出图后自动做裸露质检（NudeNet + CLIP），只写进 Take.qc；2026-10-30 起不再否决或撤下。
+跑 --stage image 前也会先给已有首帧补做质检。
 
 已有当前版本的镜头会跳过；--force 再出一个新版本。失败只做技术层面的重试（换种子、缩短帧数），不改写提示词。
 """
@@ -105,7 +105,7 @@ def write_report(script):
             n["qc_rejected"] += len(bad)
             n["qc_shots"] += bool(bad)
             act = next((t for t in data["takes"] if t["stage"] == "image" and t["n"] == active.get("image")), None)
-            qc_cell = "—" if c.adult else ("未检" if act and not act.get("qc") else "通过" if act else "无首帧")
+            qc_cell = "未检" if act and not act.get("qc") else "通过" if act else "无首帧"
             if bad:
                 qc_cell += f"；拦截 {', '.join('v' + str(t['n']) for t in bad)}"
             rows.append(f"| {s.id} | {'成人' if c.adult else '普通'} | {cells[0]} | {cells[1]} | {cells[2]} | {qc_cell} | "
@@ -113,8 +113,7 @@ def write_report(script):
     avg = lambda xs: f"{sum(xs) / len(xs):.0f} 秒" if xs else "—"
     text = [
         "# 渲染报告", "",
-        f"> ⏰ **提醒：成人镜头 {n['adult']} 个由你启动** —— 双击 `tools\\run_adult_batch.cmd`"
-        "（等 GPU 空闲后自动开始，已完成的会跳过；加 `-Stage both` 连尾帧一起出；视频在 gpu3 出）。", "",
+        f"> 成人镜头 {n['adult']} 个；2026-10-30 起不再单独拦截，与普通镜头一起出图。", "",
         f"更新时间：{time.strftime('%Y-%m-%d %H:%M')}", "",
         f"- 镜头 {n['shots']}（成人 {n['adult']}）",
         f"- 首帧 {n['image']}，平均 {avg(secs['image'])}",
@@ -125,8 +124,8 @@ def write_report(script):
         f"- 用了写实母版 v1（项目方未通过）作身份参考的当前版本：{n.get('master_v1', 0)}（表中标“母版v1(未通过)”，可按镜重出）",
         f"- 用项目方通过的母版 plates/master.png（{MASTER_APPROVED_AT} 起）的当前版本：{n.get('master', 0)}"
         + (f"，按镜头顺序第一个是 {first_master['shot']}" if first_master else ""),
-        f"- 裸露质检（仅非成人首帧）：拦截 {n['qc_rejected']} 个版本，涉及 {n['qc_shots']} 个镜头；"
-        "被拦的版本留档但不会设为当前（明细见 qc_log.jsonl）", "",
+        f"- 裸露质检（全部首帧，只记录）：标记 {n['qc_rejected']} 个版本，涉及 {n['qc_shots']} 个镜头；"
+        "标记只写 Take.qc，不撤版（明细见 qc_log.jsonl）", "",
         "| 镜头 | 分类 | 首帧 | 尾帧 | 视频 | 裸露质检 | 未加载的触发词（LoRA 未就绪） | 最近错误 |",
         "|---|---|---|---|---|---|---|---|", *rows,
     ]
@@ -151,15 +150,13 @@ def write_sheets(script, out_dir: str, episodes: list[str]):
         for s in ep.shots:
             data = P.load_takes(s.id)
             col = []
-            adult = compile_shot(ep, s, script.globals, set()).adult
             for stage, name in (("image", "frame.png"), ("last", "last.png")):
                 t = next((t for t in data["takes"] if t["stage"] == stage and t["n"] == data["active"].get(stage)),
                          None)
                 f = P.shot_dir(s.id) / name
                 if stage == "last" and not t:
                     f = None
-                # 成人镜头不贴图（本机不出、也不在对比表里展示）
-                im = Image.open(f).convert("RGB").resize((W_, H_)) if f and f.exists() and not adult                     else Image.new("RGB", (W_, H_))
+                im = Image.open(f).convert("RGB").resize((W_, H_)) if f and f.exists() else Image.new("RGB", (W_, H_))
                 d = ImageDraw.Draw(im)
                 sc = (t or {}).get("score") or {}
                 label = f"{s.id} {'首帧' if stage == 'image' else '尾帧'} v{(t or {}).get('n', '-')}"
@@ -167,8 +164,6 @@ def write_sheets(script, out_dir: str, episodes: list[str]):
                     label += f" {sc['total']:.2f}"
                 if stage in data.get("review", {}):
                     label += " 待审"
-                if adult:
-                    label = f"{s.id} 成人镜头（不在本机出图）"
                 d.rectangle((0, 0, W_, 24), fill=(0, 0, 0))
                 d.text((4, 2), label, fill=(255, 230, 140), font=font)
                 col.append(im)
@@ -186,10 +181,9 @@ def run_qc_sweep(script, shots: list[str], client=None, recheck: bool = False):
         for s in ep.shots:
             if shots and not any(s.id == f or s.id.startswith(f + "-") for f in shots):
                 continue
-            if compile_shot(ep, s, script.globals, set()).adult:
-                continue
             before = P.load_takes(s.id)["active"].get("image")
-            flagged = P.qc_sweep(s.id, adult=False, qc_fn=P.qc_with_vlm(client) if client else None,
+            flagged = P.qc_sweep(s.id, adult=bool(compile_shot(ep, s, script.globals, set()).adult),
+                                 qc_fn=P.qc_with_vlm(client) if client else None,
                                  recheck=recheck, only_active=recheck)
             after = P.load_takes(s.id)["active"].get("image")
             if before != after:
@@ -206,8 +200,6 @@ def _missing_after_sweep(script, args) -> list[str]:
         for s in ep.shots:
             if args.shots and not any(s.id == f or s.id.startswith(f + "-") for f in args.shots):
                 continue
-            if compile_shot(ep, s, script.globals, set()).adult and not args.include_adult:
-                continue
             if not P.load_takes(s.id)["active"].get("image"):
                 out.append(s.id)
     return out[:args.limit] if args.limit else out
@@ -221,7 +213,7 @@ def main():
     ap.add_argument("--include-adult", action="store_true")
     ap.add_argument("--force", action="store_true", help="已有版本也再出一个新版本")
     ap.add_argument("--report", action="store_true")
-    ap.add_argument("--qc", action="store_true", help="只给非成人首帧补做裸露质检")
+    ap.add_argument("--qc", action="store_true", help="给已有首帧补做裸露质检（只记录）")
     ap.add_argument("--sheets", default="", help="每集对比表输出目录（如 golden/rerun_v2），本批结束后生成")
     ap.add_argument("--comfy", default="http://127.0.0.1:8188")
     ap.add_argument("--frames", type=int, default=0, help="视频帧数（0 = 按剧本时长 duration*24+1）")
@@ -259,8 +251,6 @@ def main():
         for s in ep.shots:
             if args.shots and not any(s.id == f or s.id.startswith(f + "-") for f in args.shots):
                 continue
-            if compile_shot(ep, s, script.globals, set()).adult and not args.include_adult:
-                continue
             if args.stage == "refine":
                 if not (P.shot_dir(s.id) / "frame.png").exists():
                     continue
@@ -287,7 +277,7 @@ def main():
         write_report(script)
         return 2
     if args.stage == "image":
-        run_qc_sweep(script, args.shots)  # 先给已有非成人首帧补做质检，不合格的撤下后会在下面重出
+        run_qc_sweep(script, args.shots)  # 给已有首帧补做质检（只记录）
         todo += [sid for sid in _missing_after_sweep(script, args) if sid not in todo]
     done = 0
     script_mtime = P.SCRIPT_JSON.stat().st_mtime
@@ -296,8 +286,6 @@ def main():
             script_mtime = P.SCRIPT_JSON.stat().st_mtime
             script = P.load_script()
             print(f"[{time.strftime('%H:%M:%S')}] 剧本已重新导入，从 {shot_id} 起使用新剧本", flush=True)
-            if compile_shot(*P.find_shot(script, shot_id), script.globals, set()).adult:
-                continue
         print(f"[{time.strftime('%H:%M:%S')}] ({i}/{len(todo)}) {shot_id} {args.stage}", flush=True)
         t0 = time.time()
         try:

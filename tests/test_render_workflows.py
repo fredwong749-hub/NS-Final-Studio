@@ -74,7 +74,9 @@ def test_h3_fl2va_structure():
     _links_ok(wf)
     h3 = wf["131"]["inputs"]
     assert h3["length"] == 243 and (h3["width"], h3["height"]) == (576, 1024)
-    assert h3["first_frame"] == ["200", 0] and h3["last_frame"] == ["201", 0]
+    # 首尾帧都经同一个 center-crop（SOP P-B2）后再进 H3 节点
+    assert h3["first_frame"] == ["202", 0] and h3["last_frame"] == ["203", 0]
+    assert wf["202"]["inputs"]["image"] == ["200", 0] and wf["203"]["inputs"]["image"] == ["201", 0]
     assert wf["125"]["inputs"]["latent_image"] == ["131", 1]
     assert _by_class(wf, "LoraLoaderModelOnly")  # turbo LoRA
 
@@ -121,44 +123,16 @@ def _adult(prompt="【林晚】x"):
     return c
 
 
-@pytest.mark.parametrize("cfg", [None, {"approved_for_adult": False, "approved_by": None, "note": "待确认"},
-                                 {"approved_for_adult": True, "approved_by": None},  # 缺批准人也不算
-                                 {"approved_for_adult": "true", "approved_by": "x"}])
-def test_gate_refuses_adult_until_approved(tmp_path, monkeypatch, cfg):
+@pytest.mark.parametrize("cfg", [None, {"approved_for_adult": False, "approved_by": None},
+                                 {"approved_for_adult": True, "approved_by": None}])
+def test_adult_reference_edit_always_allowed(tmp_path, monkeypatch, cfg):
+    """2026-10-30 取消成人过滤器：来源审批不再拦成人镜头。"""
     _approval(tmp_path, monkeypatch, cfg)
-    assert not P.face_ref_approved()
-    with pytest.raises(P.ComfyError, match="成人镜头"):
-        P.check_face_lock_allowed(_adult())
-    P.check_face_lock_allowed(_compiled("【林晚】x"))  # 非成人允许
-    monkeypatch.setattr(P, "FACE_LOCK_DEFAULT", True)
-    assert P.face_lock_default() is False  # 未批准不作为默认
-
-
-def test_gate_allows_adult_when_approved(tmp_path, monkeypatch):
-    _approval(tmp_path, monkeypatch, {"approved_for_adult": True, "approved_by": "项目方", "note": "ok"})
+    assert P.face_ref_approved()
     P.check_face_lock_allowed(_adult())
-
-
-class _NoGpuClient:
-    def object_info(self):
-        return {"LoraLoaderModelOnly": {"input": {"required": {"lora_name": [[]]}}}}
-
-    def upload_image(self, *a, **k):
-        raise AssertionError("闸门必须在上传参考图之前拒绝")
-
-    def run(self, *a, **k):
-        raise AssertionError("闸门必须在提交之前拒绝")
-
-
-def test_render_image_refuses_reference_edit_on_adult_shot(tmp_path, monkeypatch):
-    _approval(tmp_path, monkeypatch, {"approved_for_adult": False, "approved_by": None})
-    monkeypatch.setattr(P, "RENDERS", tmp_path / "renders")   # 沙箱：不受项目归属闸门影响
-    monkeypatch.setattr(P, "compile_with_edits", lambda script, shot_id, loras, **k: _adult())
-    monkeypatch.setattr(P, "shot_looks_map", lambda shot_id: {})
-    monkeypatch.setattr(P, "load_edit", lambda shot_id: P.ShotEdit())
-    monkeypatch.setattr(P, "_next_n", lambda shot_id, stage: 1)
-    with pytest.raises(P.ComfyError, match="拒绝使用参考编辑"):
-        P.render_image(_NoGpuClient(), None, "ep99-S1", face_lock=True)
+    P.check_face_lock_allowed(_compiled("【林晚】x"))
+    monkeypatch.setattr(P, "FACE_LOCK_DEFAULT", True)
+    assert P.face_lock_default() is True
 
 
 def test_repo_approval_file_is_well_formed():
@@ -169,7 +143,7 @@ def test_repo_approval_file_is_well_formed():
         assert cfg.get("approved_by") and cfg.get("approved_at") and cfg.get("note")
 
 
-# ------------------------------------------------------------------ 非成人：Base 模型 + 防裸露负面 + 裸露质检
+# ------------------------------------------------------------------ 非成人：模型开关 + 负面词直通 + 裸露质检只记录
 
 def test_non_adult_model_follows_switch(monkeypatch):
     c = _compiled("清晨写字楼")
@@ -179,14 +153,11 @@ def test_non_adult_model_follows_switch(monkeypatch):
     assert P.image_model(c) == P.QWEN_BASE and not P.QWEN_BASE.turbo and P.QWEN_BASE.cfg > 1
 
 
-def test_non_adult_extra_negative():
+def test_negative_passthrough_for_all_shots():
+    """2026-10-30 取消成人过滤器：不再给非成人镜头追加防裸露负面词。"""
     c = _compiled("清晨写字楼")
     c.image_negative = "动漫脸、水印"
-    neg = P.image_negative(c)
-    assert neg.startswith("动漫脸、水印、")
-    for w in P.NON_ADULT_NEGATIVE_EXTRA.split("、"):
-        assert w in neg
-    assert P.image_negative(replace(c, image_negative=neg)) == neg  # 不重复追加
+    assert P.image_negative(c) == "动漫脸、水印"
     a = replace(c, adult=True)
     assert P.image_negative(a) == "动漫脸、水印" and P.image_model(a) == P.QWEN_TURBO
 
@@ -231,41 +202,36 @@ def _qc_sequence(results):
     return lambda path: {"nudity": next(it), "hits": [], "clip_bare": 0.0}
 
 
-def test_flagged_takes_are_kept_but_not_activated(sandbox):
+def test_nudity_is_recorded_and_candidate_is_activated(sandbox):
     client = _FakeClient()
-    take = P.render_image(client, None, "ep99-S1", qc_fn=_qc_sequence([True, True, False]), **SIMPLE)
+    take = P.render_image(client, None, "ep99-S1", qc_fn=_qc_sequence([True]), **SIMPLE)
     data = P.load_takes("ep99-S1")
-    assert take.n == 3 and data["active"]["image"] == 3
-    assert [t["qc"]["nudity"] for t in data["takes"]] == [True, True, False]
-    assert len({t["seed"] for t in data["takes"]}) == 3  # 每次换种子
-    assert (P.shot_dir("ep99-S1") / "frame.png").read_bytes() == b"x3.png"
-    assert len(P.QC_LOG.read_text(encoding="utf-8").splitlines()) == 2
-    # 当前开关选的模型 + 防裸露负面
+    assert take.n == 1 and data["active"]["image"] == 1
+    assert [t["qc"]["nudity"] for t in data["takes"]] == [True]
+    assert (P.shot_dir("ep99-S1") / "frame.png").read_bytes() == b"x1.png"
+    assert len(P.QC_LOG.read_text(encoding="utf-8").splitlines()) == 1
     wf = client.workflows[0]
     assert wf["10"]["inputs"]["unet_name"] == P.image_model(_compiled("清晨写字楼")).unet
-    assert "裸背" in wf["20"]["inputs"]["negative_prompt"]
-    with pytest.raises(P.QCRejected):
-        P.set_active("ep99-S1", "image", 1)
+    P.set_active("ep99-S1", "image", 1)   # 不再因裸露拒绝
 
 
-def test_gives_up_after_retries_without_activating(sandbox):
-    with pytest.raises(P.ComfyError, match="裸露质检"):
-        P.render_image(_FakeClient(), None, "ep99-S2", qc_fn=_qc_sequence([True] * 3), **SIMPLE)
+def test_nudity_does_not_abort_render(sandbox):
+    take = P.render_image(_FakeClient(), None, "ep99-S2", qc_fn=_qc_sequence([True]), **SIMPLE)
     data = P.load_takes("ep99-S2")
-    assert len(data["takes"]) == SIMPLE["rounds"] and "image" not in data["active"]
-    assert not (P.shot_dir("ep99-S2") / "frame.png").exists()
+    assert take.n == 1 and data["active"]["image"] == 1
+    assert (P.shot_dir("ep99-S2") / "frame.png").exists()
 
 
-def test_qc_sweep_deactivates_flagged_active_take(sandbox):
+def test_qc_sweep_reports_flagged_active_take_without_deactivating(sandbox):
     P.render_image(_FakeClient(), None, "ep99-S3", qc_fn=_qc_sequence([False]), **SIMPLE)
     data = P.load_takes("ep99-S3")
     data["takes"][0].pop("qc")  # 模拟没质检过的旧版本
     P._save_takes("ep99-S3", data)
     flagged = P.qc_sweep("ep99-S3", adult=False, qc_fn=_qc_sequence([True]))
     assert [t["n"] for t in flagged] == [1]
-    assert "image" not in P.load_takes("ep99-S3")["active"]
-    assert not (P.shot_dir("ep99-S3") / "frame.png").exists()
-    assert P.qc_sweep("ep99-S3", adult=True, qc_fn=_qc_sequence([])) == []
+    assert P.load_takes("ep99-S3")["active"]["image"] == 1
+    assert (P.shot_dir("ep99-S3") / "frame.png").exists()
+    assert [t["n"] for t in P.qc_sweep("ep99-S3", adult=True, qc_fn=_qc_sequence([True]))] == [1]
 
 
 def test_unavailable_server_is_not_retried(sandbox):

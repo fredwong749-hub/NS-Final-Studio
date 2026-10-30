@@ -16,6 +16,9 @@
   - 没有 rejected / explicit / adult / nsfw 标记，正向提示词不含露骨词
   - 身份谱系：以获批母版 plates/master.png（provenance sha256）为身份参考——entry.master_sha256 相符，或 created_at 晚于母版落盘且 references 含 plates/master.png
   - 短边 >= 768
+--with-outfit：另收 items/outfit 里的上身图（*_worn_*；产品图里没有人，不收），标注只用
+     training/lora_lin_wan_qwen21/captions_outfit.json 里按画面手写的（提示词里妆容/眼睛只在“图1参考”句里，
+     自动标注会标错；画面与提示词也有出入），没写标注的跳过。配合 --out-root 输出到单独目录，不动 v1 数据集。
 可选：training/lora_lin_wan_qwen21/captions_override.json  {"<源目录>/<文件名>": "标注"} 手工覆盖；
      entry["train_caption"] 也可覆盖；--exclude 排除指定条目。
 
@@ -23,6 +26,7 @@
     python tools/build_lin_wan_dataset.py            # 构建（先清空 dataset/）
     python tools/build_lin_wan_dataset.py --dry-run  # 只列出会收哪些图
     python tools/build_lin_wan_dataset.py --sheet    # 构建后另出 golden/lora_lin_wan/dataset_sheet.jpg
+    python tools/build_lin_wan_dataset.py --with-outfit --out-root training/lora_lin_wan_qwen21_outfit --sheet
 """
 from __future__ import annotations
 
@@ -42,8 +46,21 @@ SOURCES = ["plates", "expressions", "items/makeup"]
 OUT_ROOT = ROOT / "training" / "lora_lin_wan_qwen21"
 OUT = OUT_ROOT / "dataset"
 OVERRIDES = OUT_ROOT / "captions_override.json"
+OUTFIT_SRC = "items/outfit"
+OUTFIT_CAPTIONS = OUT_ROOT / "captions_outfit.json"
 SHEET = ROOT / "golden" / "lora_lin_wan" / "dataset_sheet.jpg"
-TRIGGER = "lnwan_qi"
+
+
+def _auto_trigger(default: str = "lnwan_qi") -> str:
+    """林晚出图 LoRA 触发词：唯一来源 config/auto_lora_triggers.json（与导入器、编译器同一份；封板修复 D-6）"""
+    try:
+        cfg = json.loads((ROOT / "config" / "auto_lora_triggers.json").read_text(encoding="utf-8"))
+        return next(e["trigger"] for e in cfg["characters"]["林晚"] if e.get("kind", "image") == "image")
+    except (OSError, ValueError, KeyError, StopIteration):
+        return default
+
+
+TRIGGER = _auto_trigger()
 MASTER = CHAR / "plates" / "master.png"
 MASTER_PROV = CHAR / "plates" / "master.provenance.json"
 # 获批母版（项目方 2026-10-30 最终选 golden/assets/master_cand/CM_s1.png，取代 CL_s0）。它没有 manifest 条目，凭 provenance 收录；
@@ -51,7 +68,7 @@ MASTER_PROV = CHAR / "plates" / "master.provenance.json"
 MASTER_SHA = None
 MASTER_CUTOFF = None
 MASTER_CAPTION = (
-    "lnwan_qi, a young woman, close-up portrait, leaning forward with her cheek resting on one hand, looking at the camera, "
+    f"{TRIGGER}, a young woman, close-up portrait, leaning forward with her cheek resting on one hand, looking at the camera, "
     "calm sultry gaze with softly parted lips, wearing a pink frilly off-shoulder top with a bow and a sparkly strawberry rhinestone necklace, "
     "sweet pink makeup with strawberry-pink glossy lips and rosy blush, grey-blue colored contact lenses, "
     "bright pastel room with pink roses and white fluffy cushions, soft backlit window light, creamy bokeh, "
@@ -278,7 +295,7 @@ def load_master():
     return digest
 
 
-def collect(exclude: set[str]):
+def collect(exclude: set[str], with_outfit: bool = False):
     overrides = json.loads(OVERRIDES.read_text("utf-8")) if OVERRIDES.is_file() else {}
     keep, skipped, seen = [], [], set()
     digest = load_master()
@@ -286,7 +303,8 @@ def collect(exclude: set[str]):
         seen.add(digest)
         keep.append({"source": "plates/master.png", "path": MASTER, "sha256": digest,
                      "caption": overrides.get("plates/master.png") or MASTER_CAPTION})
-    for src in SOURCES:
+    outfit_caps = json.loads(OUTFIT_CAPTIONS.read_text("utf-8")) if with_outfit and OUTFIT_CAPTIONS.is_file() else {}
+    for src in SOURCES + ([OUTFIT_SRC] if with_outfit else []):
         d = CHAR / src
         mf = d / "manifest.json"
         if not mf.is_file():
@@ -296,7 +314,11 @@ def collect(exclude: set[str]):
             if rel == "plates/master.png":
                 continue  # 获批母版走 provenance，manifest 里的旧 master 条目不算
             path = d / str(entry.get("file"))
+            if src == OUTFIT_SRC and "_worn_" not in path.name:
+                continue  # 产品/平铺/人台图：没有人
             reason = "excluded by --exclude" if rel in exclude else reject_reason(entry, path)
+            if reason is None and src == OUTFIT_SRC and rel not in outfit_caps:
+                reason = f"no hand-written caption in {OUTFIT_CAPTIONS.name}"
             if reason is None:
                 digest = sha256(path)
                 if digest in seen:
@@ -306,7 +328,7 @@ def collect(exclude: set[str]):
             if reason:
                 skipped.append({"source": rel, "reason": reason})
                 continue
-            cap = overrides.get(rel) or entry.get("train_caption") or caption_for(entry, src)
+            cap = outfit_caps.get(rel) or overrides.get(rel) or entry.get("train_caption") or caption_for(entry, src)
             if not cap.startswith(TRIGGER):
                 cap = f"{TRIGGER}, {cap}"
             keep.append({"source": rel, "path": path, "sha256": digest, "caption": cap})
@@ -319,7 +341,7 @@ def write_dataset(keep):
     OUT.mkdir(parents=True)
     rows = []
     for item in keep:
-        stem = item["source"].replace("items/makeup", "makeup").replace("/", "_").rsplit(".", 1)[0]
+        stem = item["source"].replace("items/makeup", "makeup").replace(OUTFIT_SRC, "outfit").replace("/", "_").rsplit(".", 1)[0]
         dst = OUT / f"{stem}.png"
         with Image.open(item["path"]) as im:
             im = ImageOps.exif_transpose(im).convert("RGB")
@@ -354,11 +376,18 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--sheet", action="store_true")
+    ap.add_argument("--with-outfit", action="store_true", help="另收 items/outfit 的上身图（标注见 captions_outfit.json）")
+    ap.add_argument("--out-root", help="输出目录（默认 training/lora_lin_wan_qwen21）；dataset/ 与 dataset_manifest.json 写在其下")
     ap.add_argument("--exclude", nargs="*", default=[], help="<源目录>/<文件名>, e.g. plates/id_front_s0.png")
     a = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-    keep, skipped = collect(set(a.exclude))
+    global OUT_ROOT, OUT, SHEET
+    if a.out_root:
+        OUT_ROOT = (ROOT / a.out_root).resolve()
+        OUT = OUT_ROOT / "dataset"
+        SHEET = OUT_ROOT / "dataset_sheet.jpg"
+    keep, skipped = collect(set(a.exclude), a.with_outfit)
     for s in skipped:
         print(f"SKIP {s['source']}: {s['reason']}")
     for k in keep:

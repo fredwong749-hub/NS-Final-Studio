@@ -143,7 +143,7 @@ def test_dialogue_without_separator_and_stacked_parens():
         ("顾沉", "方案错了。"), ("她慌", "对不起——"), ("他", "不用急。")]
     got = _parse_dialogue("（接通）（她，很小声）“……睡不着。”")
     assert (got[0].speaker_note, got[0].stage, got[0].text) == ("她，很小声", "接通", "……睡不着。")
-    assert _parse_dialogue("无台词")[0].text == "无台词"
+    assert _parse_dialogue("无台词") == []   # 没有引号的段不是台词（T04，见 Shot.dialogue_stage）
 
 
 def test_sound_blocks():

@@ -182,7 +182,7 @@ def test_character_confirmation_writes_face_reference(client):
     _upload(client, slug, "script", SCRIPT)
     chars = client.get(f"/api/projects/{slug}/characters").json()["characters"]
     cid = chars[0]["id"]
-    r = client.post(f"/api/projects/{slug}/characters/{cid}/confirm", json={"confirmed": True})
+    r = client.post(f"/api/projects/{slug}/characters/{cid}/confirm", json={"confirmed": True, "by": "项目方"})
     assert r.status_code == 422                                      # 没参考图不能确认
     client.post(f"/api/projects/{slug}/characters/{cid}/references", files={"file": ("a.png", PNG, "image/png")})
     c = client.post(f"/api/projects/{slug}/characters/{cid}/confirm", json={"confirmed": True, "by": "项目方"}).json()
@@ -226,7 +226,7 @@ def test_create_requires_checklist_then_ready(client):
 
 def test_default_project_is_read_only(client):
     assert client.put("/api/projects/weita/settings", json={"adult_content": True}).status_code == 409
-    assert client.post("/api/projects/weita/production/start", json={"mode": "dry_run"}).status_code == 409
+    assert client.post("/api/projects/weita/production/start", json={"mode": "dry_run", "by": "owner"}).status_code == 409
 
 
 # ------------------------------------------------------------------ 编排器（dry-run，经 API）
@@ -239,7 +239,7 @@ def _tick(c, slug, n=1):
 
 def test_production_dry_run_gates_and_board(client):
     slug = _wizard(client)
-    b = client.post(f"/api/projects/{slug}/production/start", json={"mode": "dry_run"}).json()
+    b = client.post(f"/api/projects/{slug}/production/start", json={"mode": "dry_run", "by": "owner"}).json()
     assert b["project"]["running"] and b["project"]["mode"] == "dry_run"
     inbox = client.get("/api/inbox").json()
     assert {c["gate"] for c in inbox} == {"G2", "G3"}
@@ -250,32 +250,32 @@ def test_production_dry_run_gates_and_board(client):
     # G2：每个角色选母版
     g2 = next(c for c in inbox if c["gate"] == "G2")
     choices = {ch["id"]: ch["candidates"][0] for ch in g2["detail"]["characters"]}
-    assert client.post(f"/api/projects/{slug}/cards/G2", json={"decision": "approve", "payload": {"choices": {}}}).status_code == 409
-    client.post(f"/api/projects/{slug}/cards/G2", json={"decision": "approve", "payload": {"choices": choices}})
+    assert client.post(f"/api/projects/{slug}/cards/G2", json={"by": "owner", "decision": "approve", "payload": {"choices": {}}}).status_code == 409
+    client.post(f"/api/projects/{slug}/cards/G2", json={"by": "owner", "decision": "approve", "payload": {"choices": choices}})
     ctx = PC.get_project(slug)
     assert all((ctx.assets_dir / "characters" / cid / "plates" / "master.png").exists() for cid in choices)
     # G3：没有 v3 → 不能采纳，只能跳过
-    assert client.post(f"/api/projects/{slug}/cards/G3", json={"decision": "approve"}).status_code == 409
-    client.post(f"/api/projects/{slug}/cards/G3", json={"decision": "skip"})
+    assert client.post(f"/api/projects/{slug}/cards/G3", json={"by": "owner", "decision": "approve"}).status_code == 409
+    client.post(f"/api/projects/{slug}/cards/G3", json={"by": "owner", "decision": "skip"})
     b = _tick(client, slug, 8)                                       # 画面说明、首帧、尾帧……一次一个笔记本任务
     ep1 = b["episodes"][0]
     assert ep1["lights"]["剧本"]["status"] == "done" and ep1["lights"]["首帧"]["status"] == "done"
     cards = client.get("/api/inbox").json()
     assert [c["gate"] for c in cards] == ["GPU3"]                    # 交 gpu3 要项目方授权
     assert ep1["lights"]["视频"]["status"] == "pending"
-    client.post(f"/api/projects/{slug}/cards/GPU3", json={"decision": "approve"})
+    client.post(f"/api/projects/{slug}/cards/GPU3", json={"by": "owner", "decision": "approve"})
     b = _tick(client, slug, 2)
     st = json.loads((ctx.orchestrator_dir / "state.json").read_text(encoding="utf-8"))
     assert st["sim_gpu3"]["started"] == [1]                          # G4 前只交第一集
     assert st["episodes"]["2"]["steps"]["handoff"]["status"] == "waiting"
     b = _tick(client, slug, 4)
     assert any(c["gate"] == "G4" for c in client.get("/api/inbox").json())
-    client.post(f"/api/projects/{slug}/cards/G4", json={"decision": "approve"})
+    client.post(f"/api/projects/{slug}/cards/G4", json={"by": "owner", "decision": "approve"})
     assert (ctx.orchestrator_dir / "PIPELINE_LOCKED.json").exists()
     b = _tick(client, slug, 12)
     assert any(c["gate"] == "G5" for c in client.get("/api/inbox").json())
     assert b["episodes"][0]["lights"]["成片"]["status"] == "gate"
-    client.post(f"/api/projects/{slug}/cards/G5:ep01", json={"decision": "publish"})
+    client.post(f"/api/projects/{slug}/cards/G5:ep01", json={"by": "owner", "decision": "publish"})
     b = client.get(f"/api/projects/{slug}/production").json()
     assert b["episodes"][0]["accept"] == "done"
     assert set(b["episodes"][0]["lights"]) == {"剧本", "首帧", "尾帧", "视频", "QA", "声音", "4K", "成片"}

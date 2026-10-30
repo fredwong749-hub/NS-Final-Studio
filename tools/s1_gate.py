@@ -45,7 +45,7 @@ def main(argv=None) -> int:
         if not a.accept.strip():
             print("--accept 必须写项目方原话/消息引用", file=sys.stderr)
             return 2
-        gate.update(g3_accepted=True, g3_ref=a.accept.strip(), accepted_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
+        gate.update(g3_accepted=True, g3_ref=a.accept.strip(), accepted_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
         changed = True
     if a.revoke:
         gate.update(g3_accepted=False, g3_ref="", accepted_at=None)
@@ -54,10 +54,12 @@ def main(argv=None) -> int:
         gate["validator_errors"] = a.validator_errors
         changed = True
     if changed:
-        gate["checked_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+        gate["checked_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())  # 封板修复：统一 UTC（笔记本 JST、gpu3 EDT）
         gate["script_sha"] = sha
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(gate, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+        tmp = p.with_name(p.name + ".tmp")          # 封板修复 P1：原子写，目标被占用时退避重试
+        tmp.write_text(json.dumps(gate, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+        T._replace_retry(tmp, p)
         if not a.no_rebuild:
             T.write(root)
     from ns_schema.script import ScriptImport
@@ -65,7 +67,12 @@ def main(argv=None) -> int:
     eff = T.read_s1_gate(root, sha)
     ver = T.script_version(script)
     prov = not (T._ver_num(ver) >= 3 and eff["validator_errors"] == 0 and eff["g3_accepted"])
-    print(json.dumps({"script": ver, "script_sha": sha, **eff, "provisional": prov}, ensure_ascii=False, indent=1))
+    drift = T.source_drift(root, script)     # QA4-01：源文件导入后又改过 → 当前 script_v2.json 不是最新剧本
+    print(json.dumps({"script": ver, "script_sha": sha, **eff, "provisional": prov, "changed_sources": drift},
+                     ensure_ascii=False, indent=1))
+    if drift:
+        print("注意：剧本源文件在导入后改过（或不见了），script_v2.json 不是最新剧本；重新导入要项目方在画布点「导入」",
+              file=sys.stderr)
     return 0
 
 

@@ -196,3 +196,26 @@ def test_keyframe_discovery_skips_the_videos_own_last_frame(tmp_path):
     kc = C.keyframe_candidates(sd / "takes" / "video_001.mp4", data)
     assert kc["first"][0][0] == "take.reference" and kc["first"][0][1].name == "image_001.png"
     assert kc["last"] == []  # no stage "last": last.png is the video's own frame, not a keyframe
+
+
+
+def test_cli_dry_run_accepts_relative_clip_path():
+    """封板修复：在仓库根目录用相对路径 --clip（片段在仓库内）时不能因 relative_to 崩溃"""
+    import shutil
+    import tempfile
+    ff = _ff()
+    kf = _keyframe()
+    from PIL import Image
+    root = Path(__file__).resolve().parents[1]
+    d = Path(tempfile.mkdtemp(prefix="cc_cli_", dir=root / "tests"))
+    try:
+        Image.fromarray(kf).save(d / "frame.png")
+        _write_clip(ff, [_drift(kf, i / (N - 1)) for i in range(N)], d / "video_001.mp4")
+        rel = d.relative_to(root).as_posix()
+        r = subprocess.run([sys.executable, "tools/color_match_clips.py", "--clip", f"{rel}/video_001.mp4",
+                            "--first", f"{rel}/frame.png", "--dry-run"],
+                           cwd=root, capture_output=True, text=True, encoding="utf-8")
+        assert r.returncode == 0, r.stderr[-800:]
+        assert "video_001" in r.stdout and "frame0" in r.stdout
+    finally:
+        shutil.rmtree(d, ignore_errors=True)

@@ -211,6 +211,7 @@ def test_gpu3_rerender_request(env, monkeypatch):
     c, _, _ = env
     sent = []
     monkeypatch.setattr(RD, "post_rerender", lambda req: (sent.append(req), {"requests": [{"id": "x"}], "errors": []})[1])
+    # 项目方 2026-10-30 夜：成人内容一律不拦，gpu3 重出不带 by、不要求项目方确认
     r = c.post("/api/shots/ep01-S2/gpu3-rerender", json={"stage": "last"})
     assert r.status_code == 200, r.text
     q = sent[0]
@@ -218,9 +219,14 @@ def test_gpu3_rerender_request(env, monkeypatch):
     assert q["stage"] == "image" and q["overrides"] == {"last_only": True}
     assert c.post("/api/shots/ep01-S2/gpu3-rerender", json={"stage": "nope"}).status_code == 400
 
-    def down(req):
+    def down(*a, **k):
         raise urllib.error.URLError("refused")
     monkeypatch.setattr(RD, "post_rerender", down)
+    from ns_api import gpu3_bridge as GB          # 出视频先问桥的 video_gate：桥不可达 → 502（不静默放行）
+
+    def bridge_down(*a, **k):
+        raise GB.BridgeError("gpu3 桥不可达（test）")
+    monkeypatch.setattr(GB, "_call", bridge_down)
     assert c.post("/api/shots/ep01-S2/gpu3-rerender", json={"stage": "video"}).status_code == 502
 
 

@@ -173,10 +173,16 @@ class _FakeLLM:
 def test_boost_suggest_requires_owner_config(env, tmp_path, monkeypatch):
     c, _, _ = env
     monkeypatch.delenv("NS_BOOST_API_KEY", raising=False)
+    # 2026-10-30 夜 W1：模型来自统一配置（用途 director_boost）；这里指到一个没填 base_url 的服务商
+    from ns_api import llm_config as LC
+    monkeypatch.setattr(LC, "PROVIDERS_FILE", tmp_path / "config" / "llm_providers.json")
+    monkeypatch.setattr(LC, "LOCAL_FILE", tmp_path / "config" / "llm_providers.local.json")
+    LC._write_json(LC.PROVIDERS_FILE, {"providers": {"x": {"name": "X", "base_url": "", "default_model": "m"}},
+                                       "purposes": {"director_boost": {"provider": "x", "model": "m"}}})
     r = c.post("/api/shots/ep01-S1/boost/suggest", json={"which": "first"})
-    assert r.status_code == 400 and "director_boost_llm" in r.json()["detail"]
+    assert r.status_code == 400 and "模型与 API" in r.json()["detail"]
     cfg = tmp_path / "config" / "director_boost_llm.json"
-    cfg.parent.mkdir(parents=True)
+    cfg.parent.mkdir(parents=True, exist_ok=True)
     rules = tmp_path / "rules.md"
     with _FakeLLM() as llm:
         cfg.write_text(json.dumps({"base_url": "", "model": "m", "instruction_file": str(rules)}), encoding="utf-8")

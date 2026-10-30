@@ -7,7 +7,10 @@
     uv run python tools/assemble_episode.py ep01 ep02 --no-asr   # 不做 SenseVoice 回听检查
     uv run python tools/assemble_episode.py ep01 --lines-only    # 只列出每句台词的说话人和音色，不合成
     uv run python tools/assemble_episode.py ep01 --tts-only      # 只合成配音（缓存到 data/cache/tts/）
-    uv run python tools/assemble_episode.py ep01 --color-match   # 可选：gpu3 片段先逐镜校色到首/尾帧（写 <clip>_cc.mp4，默认关）
+    uv run python tools/assemble_episode.py ep01                 # 默认逐镜校色到本镜定稿首/尾帧（<clip>_cc.mp4；config/render_quality.json post.color_match，可按集关）
+    uv run python tools/assemble_episode.py ep01 --no-color-match # 这次不校色（--color-match 强制开）
+    uv run python tools/assemble_episode.py ep02 --upscale-4k print   # 只打印 gpu3 upscale_4k.py 的命令（不跑）
+    uv run python tools/assemble_episode.py ep02 --upscale-4k run     # 先在 gpu3 逐镜出 4K（<clip>_4k.mp4）再装配（占 gpu3，需显式要求）
 
 规则：只用 CPU（Kokoro/SenseVoice 走 sherpa-onnx CPU，x264 软件编码）；不读写 GPU；不改 data/renders、
 data/renders_gpu3（只读）；不加字幕；1080×1920、24 fps、H.264、响度 -14 LUFS。
@@ -54,8 +57,11 @@ def main() -> int:
     ap.add_argument("--no-bgm", action="store_true", help="skip the data/music/epXX BGM layer")
     ap.add_argument("--4k", dest="uhd", choices=("auto", "on", "off"), default="auto",
                     help="2160x3840 delivery: auto = when any gpu3 takes/video_NNN_4k.mp4 exists")
-    ap.add_argument("--color-match", action="store_true",
-                    help="per-shot colour correction of gpu3 clips to their keyframes (<clip>_cc.mp4; default off)")
+    ap.add_argument("--color-match", action=argparse.BooleanOptionalAction, default=None,
+                    help="per-shot colour correction to the locked keyframes (<clip>_cc.mp4); default = "
+                         "config/render_quality.json post.color_match (on, per_episode switch)")
+    ap.add_argument("--upscale-4k", choices=("off", "print", "run"), default="off",
+                    help="optional gpu3 SeedVR2 4K per clip (scripts/upscale_4k.py shot): print the commands or run them")
     ap.add_argument("--keep-work", action="store_true")
     a = ap.parse_args()
 
@@ -78,6 +84,13 @@ def main() -> int:
                 paths = synthesize_cached(tts, reqs)
                 print(f"{len(paths)} clips in data/cache/tts/")
             continue
+        if a.upscale_4k != "off":
+            from ns_post.assemble import find_source
+            from ns_post.upscale4k import upscale
+            for shot in episode["shots"]:
+                src = find_source(ep, int(shot["index"]), allow_laptop_video=a.allow_laptop_video)
+                if src["kind"] == "video" and not src.get("path_4k"):
+                    upscale(Path(src["path"]), ep, int(shot["index"]), execute=a.upscale_4k == "run")
         tl = assemble_episode(episode, Path(a.out), tts=tts, asr=asr, settings=settings, voices_cfg=cfg,
                               allow_laptop_video=a.allow_laptop_video, keep_work=a.keep_work)
         print(json.dumps({k: tl[k] for k in ("deliveries", "duration_s", "tail_hold_s", "timings")},

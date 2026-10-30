@@ -21,7 +21,9 @@ from ns_agent.importer import script_md as IM
 from ns_schema.script import CharacterLock, Episode, LoraTrigger, ScriptGlobals, ScriptImport, Shot
 
 ROOT = Path(__file__).resolve().parent.parent
-SCRIPT_JSON = ROOT / "data" / "import" / "script_v2.json"
+# 默认用固定测试剧本（t06 金标准同一份）；NS_QA_DATA=1 时检查真实导入数据 data/import/script_v2.json
+SCRIPT_JSON = (ROOT / "data" / "import" / "script_v2.json" if os.environ.get("NS_QA_DATA") == "1" else
+               ROOT / "tests" / "fixtures" / "t06_golden" / "data" / "import" / "script_v2.json")
 RENDERS = ROOT / "data" / "renders"
 VB = tomllib.loads((ROOT / "config" / "visual_bible.toml").read_text(encoding="utf-8"))
 BANNED = VB["realism"]["banned_words"]
@@ -123,7 +125,9 @@ def _shots(script):
 
 def test_real_script_shape(script):
     assert len(script.episodes) == 60
-    bad = [f"ep{e.number:02d}:{len(e.shots)}" for e in script.episodes if len(e.shots) != 6]
+    # v2 每集 6 镜；新剧本（如 rules_v2 的 ep01 七镜）镜数可变：只要求镜号从 1 连续
+    bad = [f"ep{e.number:02d}:{[s.index for s in e.shots]}" for e in script.episodes
+           if not e.shots or [s.index for s in e.shots] != list(range(1, len(e.shots) + 1))]
     assert not bad
     empty = [(s.id, f) for _, s in _shots(script) for f in ("img_prompt", "motion_prompt", "sound")
              if not getattr(s, f).strip()]

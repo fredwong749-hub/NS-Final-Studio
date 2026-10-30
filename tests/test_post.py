@@ -156,6 +156,17 @@ def test_json_cue_timeline_wins_over_edits_and_script():
     assert resolve_cues([_shot(1)], [0.0], {}, {})[0].source == "default"
 
 
+def test_stale_json_cue_timeline_falls_back_to_script_cues():
+    """封板修复：epXX.json 按另一版剧本（6 镜）生成、本集现在 7 镜 → 不再按镜号套用旧时间轴，改用剧本 / 修改的提示"""
+    from ns_post.music import stale_timeline
+    shots = [_shot(i, cue="进入，强度1" if i == 1 else "") for i in range(1, 8)]
+    starts = [i * 8.0 for i in range(7)]
+    meta = {"shot_starts": [i * 10.0 for i in range(6)], "cues": [{"shot": 6, "action": "drop"}]}
+    assert stale_timeline(meta, 7) and not stale_timeline(meta, 6) and not stale_timeline({}, 7)
+    cues = resolve_cues(shots, starts, meta, {7: "强度3"})
+    assert [(c.shot, c.action, c.source) for c in cues] == [(1, "enter", "script"), (7, "continue", "edit")]
+    assert ignored_edits(meta, {7: "强度3"}, 7) == {} and ignored_edits(meta, {7: "强度3"}) == {7: "强度3"}
+
 def test_level_curve_fades_in_swells_and_drops():
     sr = 100
     cues = [Cue(1, 0.0, "enter", 1), Cue(2, 10.0, "swell", 3), Cue(3, 20.0, "drop")]
@@ -235,14 +246,20 @@ def test_assemble_episode_end_to_end(synthetic):
     info = ff.info(mp4)
     assert (info["width"], info["height"], info["video_codec"], info["audio_codec"]) == (1080, 1920, "h264", "aac")
     assert info["fps"] == pytest.approx(24.0)
-    total = 9.0 + tl["tail_hold_s"]
-    assert tl["frames"] == ff.count_frames(mp4) == round(3 * 24) * 3 + round(tl["tail_hold_s"] * 24)
+    # G13：有视频的镜头按 H3 片段实际时长，占位静帧按剧本秒数（3 s）
+    durs = [s["duration_s"] for s in tl["shots"]]
+    assert [s["duration_from"] for s in tl["shots"]] == ["h3_video", "script", "h3_video"]
+    assert durs[1] == 3.0
+    assert all(d == pytest.approx(s["source_duration_s"], abs=1e-3)
+               for d, s in zip(durs, tl["shots"]) if s["kind"] == "video")
+    total = sum(durs) + tl["tail_hold_s"]
+    assert tl["frames"] == ff.count_frames(mp4) == sum(round(d * 24) for d in durs) + round(tl["tail_hold_s"] * 24)
     assert info["duration"] == pytest.approx(total, abs=0.1)
     assert tl["loudness"]["measured"]["integrated_lufs"] == pytest.approx(-14.0, abs=1.0)
     assert tl["subtitles"] is False
     kinds = [(s["kind"], s.get("audio")) for s in tl["shots"]]
     assert kinds == [("video", "h3_track"), ("still", "none"), ("video", "stems")]
-    assert tl["shots"][0]["trimmed_s"] == pytest.approx(0.125, abs=0.01)
+    assert tl["shots"][0]["trimmed_s"] == 0 and tl["shots"][0]["script_duration_s"] == 3.0
     assert {s["name"] for s in tl["shots"][2]["stems"]} == {"h3_vocals", "h3_rest", "foley"}
     assert tl["bgm"]["used"] and tl["bgm"]["looped"] and [c["action"] for c in tl["bgm"]["cues"]] == ["enter", "swell"]
     sp = tl["speech"]
@@ -289,3 +306,24 @@ def test_qa_gate(tmp_path):
     assert qa_gate(qa, srcs, src_list) == (True, [])
     qa.write_text(json.dumps({"verdict": "rework", "shots": {"S1": {"verdict": "pass", "video_sha256": sha}}}), "utf-8")
     assert qa_gate(qa, srcs, src_list)[0] is False
+
+
+
+def test_h3_music_shots_follow_compiler_rule():
+    """X-4 / E8（项目方 2026-10-30）：H3 已带配乐的镜头后期不再叠 BGM；判断与编译器同一个 resolve_music"""
+    from ns_agent import h3_prompt as H3
+    from ns_post.music import h3_music_shots
+    from ns_schema.h3_lint import frames_for_seconds
+    body = ("Live-action, cinematic, shallow depth of field, a medium shot begins in the position, framing and lighting "
+            "established by Picture 1. She looks up. She settles into the pose and composition established by "
+            "Picture 2 at the end of the shot.")
+    h3 = lambda music: H3.assemble(frames_for_seconds(10), body, "Quiet room tone.", music)  # noqa: E731
+    shots = [{"index": 1, "h3_prompt": h3("N/A")},                                 # 剧本明写 N/A
+             {"index": 2, "h3_prompt": h3("Soft piano, slow tempo, quiet dynamics.")},  # 剧本自带配乐
+             {"index": 3},                                                          # 没写 → 本集默认
+             {"index": 4, "music_cue": "落下，强度0"},                                 # 静默提示
+             {"index": 5}]
+    ep = {"music_bgm": "Sparse piano, slow tempo, soft dynamics."}
+    got = h3_music_shots(shots, ep, {5: "N/A"})
+    assert got == {2: "script", 3: "episode"}
+    assert h3_music_shots(shots, {}, {}) == {2: "script"}       # 没有本集默认时只剩剧本自带的

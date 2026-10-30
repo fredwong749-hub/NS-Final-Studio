@@ -4,18 +4,19 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
-from ns_agent.looks import (DEFAULT_SCRIPT_JSON, LookStore, Resolver, compute_look_prompt, effective_look_prompt,
+from ns_agent.looks import (LookStore, Resolver, compute_look_prompt, effective_look_prompt,
                             parse_continuity_tables, parse_episode_list, resolve_character, seed)
 from ns_api import looks as api
 from ns_schema.looks import Look, LookPatch, WardrobeItem
 from ns_schema.script import ScriptImport
 
-pytestmark = pytest.mark.skipif(not DEFAULT_SCRIPT_JSON.exists(), reason="data/import/script_v2.json missing")
+# 固定测试数据（与 t06 金标准同一份 60 集 v2 剧本）：data/import 里导入了什么都不影响这些测试
+PINNED_SCRIPT = Path(__file__).resolve().parent / "fixtures" / "t06_golden" / "data" / "import" / "script_v2.json"
 
 
 @pytest.fixture(scope="module")
 def script() -> ScriptImport:
-    return ScriptImport.model_validate_json(Path(DEFAULT_SCRIPT_JSON).read_text(encoding="utf-8"))
+    return ScriptImport.model_validate_json(PINNED_SCRIPT.read_text(encoding="utf-8"))
 
 
 @pytest.fixture()
@@ -292,3 +293,48 @@ def test_router_paths():
               ("/api/looks/episodes/{n}/{character}", "PUT"), ("/api/looks/shots/{shot_id}/{character}", "PUT"),
               ("/api/looks/shots/{shot_id}", "GET"), ("/api/looks/shots/{shot_id}/{character}", "DELETE")]:
         assert p in paths
+
+
+def test_characters_follow_current_script_after_reimport(store, script):
+    """封板修复：schedule.shot_characters 只在种子时写；剧本重新 / 合并导入后新增或改写的镜头按当前剧本现算出场角色"""
+    sc = script.model_copy(deep=True)
+    ep = sc.episodes[0]
+    new = ep.shots[-1].model_copy(update={"index": len(ep.shots) + 1, "img_prompt": "极近特写，林晚的脸占据画面中心",
+                                          "motion_prompt": "她眨眼", "img_triggers": [], "motion_triggers": []})
+    ep.shots.append(new)
+    sched = store.schedule()
+    assert new.id not in sched.shot_characters
+    r = Resolver(sc, store.wardrobe(), store.lookbook(), sched)
+    assert [c for c, _src in r.characters(new)] == ["lin_wan"]
+
+
+def test_store_rereads_script_after_reimport(tmp_path, script):
+    """封板修复（A-4）：剧本只有 ep01 时读进来的 LookStore，合并导入回到多集后要能识别新集（原来进程内只读一次 → 404）"""
+    sj = tmp_path / "script_v2.json"
+    one = script.model_copy(deep=True)
+    one.episodes = one.episodes[:1]
+    sj.write_text(one.model_dump_json(), encoding="utf-8")
+    st = LookStore(tmp_path / "looks", sj)
+    assert st.episode(1).number == 1
+    with pytest.raises(KeyError):
+        st.episode(2)
+    two = script.model_copy(deep=True)
+    two.episodes = two.episodes[:2]
+    sj.write_text(two.model_dump_json(), encoding="utf-8")
+    assert st.episode(2).number == 2 and len(st.script.episodes) == 2
+
+
+def test_she_trigger_read_from_bible(tmp_path):
+    """封板修复（D-6）：looks 判断“她”是不是林晚用 visual_bible 的 detect_she_with_trigger，不写死 lnwan01"""
+    from ns_agent import bible as B
+    from ns_agent.looks import detect_characters
+    from ns_schema.script import Shot
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "visual_bible.toml").write_text(
+        '[characters.lin_wan]\nname = "林晚"\ndetect = ["林晚"]\ndetect_she_with_trigger = "lw_new"\n', encoding="utf-8")
+    b = B.load_bible(root=tmp_path)
+    s_new = Shot(episode=1, index=1, img_prompt="她站在窗边", motion_prompt="lw_new，她转身", motion_triggers=["lw_new"],
+                 source_line=1)
+    s_old = s_new.model_copy(update={"motion_prompt": "lnwan01，她转身", "motion_triggers": ["lnwan01"]})
+    assert detect_characters(s_new, b) == ["lin_wan"]
+    assert detect_characters(s_old, b) == []

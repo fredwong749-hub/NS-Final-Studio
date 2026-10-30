@@ -81,7 +81,8 @@ def main() -> int:
     ff = FFmpeg.discover()
     reports = []
     for key, clip in jobs:
-        print(f"{key}  {clip.relative_to(ROOT) if clip.resolve().is_relative_to(ROOT) else clip}")
+        # 封板修复：--clip 给相对路径时，relative_to 必须用 resolve 后的路径（否则 ValueError 崩溃）
+        print(f"{key}  {clip.resolve().relative_to(ROOT) if clip.resolve().is_relative_to(ROOT) else clip}")
         first = a.first if a.clip and clip in map(Path, a.clip) else None
         last = a.last if a.clip and clip in map(Path, a.clip) else None
         if a.dry_run:

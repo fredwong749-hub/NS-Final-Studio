@@ -1,5 +1,6 @@
 """SOP 阶段 S1–S5 / 关口 G1–G5（/api/sop/status、/api/sop/episode/{n}，ns_api.sop，tools/sop_owner.py）。
 全部在临时目录里：假的 state_timeline.json / scenes.json / schedule.json / renders_gpu3；剧本只留前两集。"""
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -7,14 +8,14 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from ns_agent.looks import DEFAULT_SCRIPT_JSON
 from ns_api import app as app_mod
 from ns_api import readiness as RD
 from ns_api import sop as SOP
 from ns_render import pipeline as P
 from ns_schema.script import ScriptImport
 
-pytestmark = pytest.mark.skipif(not DEFAULT_SCRIPT_JSON.exists(), reason="data/import/script_v2.json missing")
+# 固定测试数据（与 t06 金标准同一份 60 集 v2 剧本）：data/import 里导入了什么都不影响这些测试
+PINNED_SCRIPT = Path(__file__).resolve().parent / "fixtures" / "t06_golden" / "data" / "import" / "script_v2.json"
 
 REPO = Path(__file__).resolve().parents[1]
 PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 32
@@ -29,7 +30,7 @@ def _tool(name: str):
 
 @pytest.fixture(scope="module")
 def script() -> ScriptImport:
-    sc = ScriptImport.model_validate_json(Path(DEFAULT_SCRIPT_JSON).read_text(encoding="utf-8"))
+    sc = ScriptImport.model_validate_json(PINNED_SCRIPT.read_text(encoding="utf-8"))
     sc = sc.model_copy(deep=True)
     sc.episodes = sc.episodes[:2]
     ep = sc.episodes[0]                       # ep01 补齐 v3 要素；ep02 保持 v2
@@ -47,7 +48,8 @@ def script() -> ScriptImport:
 def _h3_prompt(s) -> str:
     from ns_agent.h3_prompt import assemble
     from ns_schema.h3_lint import frames_for_seconds
-    lines = " ".join(f"The speaker (S{i + 1}) says: <d>[Chinese] {d.text}</d>" for i, d in enumerate(s.dialogue))
+    # 项目方 2026-10-30：普通对话镜每镜只让一个人说话（H3-D7 block）→ 夹具的台词都归同一个说话人 (S1)
+    lines = " ".join(f"The speaker (S1) says: <d>[Chinese] {d.text}</d>" for d in s.dialogue)
     body = ("Live-action, cinematic, shallow depth of field, a medium shot begins in the position, framing and lighting "
             f"established by Picture 1. She lifts her gaze slowly. {lines} She settles into the pose and composition "
             "established by Picture 2 at the end of the shot.").replace("  ", " ")
@@ -82,7 +84,9 @@ def write_timeline(root: Path, script, *, provisional=True, s2=None, g3=False, v
          "plate_status": "missing" if drop_s2_fields else "candidate"}]}, ensure_ascii=False), encoding="utf-8")
     (d / "looks").mkdir(exist_ok=True)
     (d / "looks" / "schedule.json").write_text(json.dumps({"episodes": {
-        str(e.number): {"lin_wan": {"owner_confirmed_at": "x" if look_confirmed else None}} for e in script.episodes}}),
+        str(e.number): {"lin_wan": {"owner_confirmed_at": "x" if look_confirmed else None,
+                                    "owner_confirmed_ref": "项目方：造型可以" if look_confirmed else None}}
+        for e in script.episodes}}),
         encoding="utf-8")
 
 
@@ -208,7 +212,8 @@ def test_full_path_g4_g5(env, script):
     assert {s["stage"] for s in e["shots"]} == {"S4"}, [s["blockers"] for s in e["shots"]]
     assert e["shots"][0]["blockers"][0]["code"] == "qa_not_pass"
     assert gate(proj(c), "G4")["status"] == "pending"
-    qa = {"verdict": "pass", "shots": {f"S{s.index}": {"verdict": "pass"} for s in ep1}}
+    vsha = hashlib.sha256(b"mp4").hexdigest()                     # gpu3_shot 写的视频内容
+    qa = {"verdict": "pass", "shots": {f"S{s.index}": {"verdict": "pass", "video_sha256": vsha} for s in ep1}}
     (data / "renders_gpu3" / "ep01" / "qa.json").write_text(json.dumps(qa), encoding="utf-8")
     e = c.get("/api/sop/episode/1").json()
     assert {s["stage"] for s in e["shots"]} == {"S5"} and e["s4_done"]

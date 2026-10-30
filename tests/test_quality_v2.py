@@ -1,4 +1,5 @@
 """画质 v2：身份底板参考、Leica 措辞、调色、尾帧、多候选评分、导演加强、Frame Spec（不连 ComfyUI、不用 GPU）。"""
+import re
 import json
 
 import numpy as np
@@ -52,7 +53,9 @@ def test_end_state(motion, end):
 def test_last_prompt_has_continuity_and_end_state():
     ep, s = _shot("极近特写，林晚低头侧脸")
     c = C.compile_shot(ep, s, G0, set())
-    assert c.last_prompt.startswith("图1是本镜头的首帧画面。") and "同一场景同一人物同一服装" in c.last_prompt
+    # 触发词（含系统自动补的角色 LoRA，config/auto_lora_triggers.json）在最前，其后是尾帧固定句
+    body = re.sub(r"^(?:[A-Za-z0-9_]+，)+", "", c.last_prompt)
+    assert body.startswith("图1是本镜头的首帧画面。") and "同一场景同一人物同一服装" in c.last_prompt
     assert "抬眼又立刻低头" in c.last_prompt and c.end_state == "抬眼又立刻低头"
 
 
@@ -281,11 +284,12 @@ def test_low_scores_run_more_rounds_then_review(sandbox):
     assert data["review"]["image"]["best"] == t.n and data["review"]["image"]["missing"] == ["缺X"]
 
 
-def test_nude_candidate_is_never_selected(sandbox):
-    qc = iter([True, False])
+def test_nude_candidate_can_be_selected(sandbox):
+    """2026-10-30 取消成人过滤器：裸露只记录，按评分选最高。"""
+    qc = iter([True, True])
     t = P.render_image(_Client(), None, "ep99-S3", candidates=2, rounds=1, grade=False, face_lock=False,
-                       qc_fn=lambda p: {"nudity": next(qc), "hits": [], "clip_bare": 0}, score_fn=_scores([0.8]))
-    assert t.n == 2 and P.load_takes("ep99-S3")["takes"][0]["score"] is None
+                       qc_fn=lambda p: {"nudity": next(qc), "hits": [], "clip_bare": 0}, score_fn=_scores([0.8, 0.9]))
+    assert t.n == 2 and P.load_takes("ep99-S3")["takes"][0]["score"]["total"] == 0.8
 
 
 def test_last_frame_stage_and_video_priority(sandbox):
@@ -399,7 +403,7 @@ def test_spec_focus_gaze_expression_fields():
 
 
 def test_frames_follow_duration():
-    assert P.frames_for_duration(10) == 243 and P.frames_for_duration(3) == 124
+    assert P.frames_for_duration(10) == 243 and P.frames_for_duration(3) == 107   # K4：4 s 档 = 107 帧（下限）
     assert P.frames_for_duration(15) == 362 and (P.frames_for_duration(7) - 5) % 17 == 0
 
 
@@ -420,16 +424,25 @@ def test_video_prompt_ends_with_soundscape_and_music_sections():
     c = C.compile_shot(ep, s, G0, set())
     assert c.video_prompt.endswith("\n\noverall_soundscape: 心跳声铺底，电梯门开提示音\n\nnon_diegetic_music: N/A")
     assert "音效：" not in c.video_prompt and "语声" not in c.video_soundscape
-    assert (c.video_soundscape_source, c.video_music_source) == ("script", "fixed")
+    assert (c.video_soundscape_source, c.video_music_source) == ("script", "none")
     assert "overall_soundscape" not in c.image_prompt                       # 图片不受影响
     c2 = C.compile_shot(ep, s, G0, set(), soundscape="Soft rain.", music="Slow piano.", episode_music="Strings.")
-    # 背景音乐只在后期：H3 一律 N/A，音乐文字只进 post_music
-    assert c2.video_prompt.endswith("overall_soundscape: Soft rain.\n\nnon_diegetic_music: N/A")
-    assert c2.video_soundscape_source == "edit" and "Slow piano" not in c2.video_prompt
+    # 配乐进 H3（项目方 2026-10-30）：本镜英文配乐 > 本集；普通画布环境声修改仍只进旧版拼接
+    assert c2.legacy_video_prompt.endswith("overall_soundscape: Soft rain.\n\nnon_diegetic_music: Slow piano.")
+    assert c2.video_prompt.endswith("\n\nnon_diegetic_music: Slow piano.") and "Soft rain" not in c2.video_prompt
+    assert (c2.video_soundscape_source, c2.video_music_source) == ("edit", "edit")
     assert c2.post_music == {"episode_prompt": "Strings.", "episode_bgm": "", "shot_cue": "Slow piano.",
                              "source": "edit"}
     c3 = C.compile_shot(ep, s, G0, set(), episode_music="Low strings.")
-    assert c3.video_music == "N/A" and c3.post_music["episode_prompt"] == "Low strings."
+    assert (c3.video_music, c3.video_music_source) == ("Low strings.", "episode")
+    assert c3.video_prompt.endswith("\n\nnon_diegetic_music: Low strings.")
+    # 中文配乐提示只给后期、不进 H3；但写了强度 0 / 撤到静默 = 本镜不要配乐（H3 N/A，不回退本集 BGM）
+    c4 = C.compile_shot(ep, s, G0, set(), music="撤到静默：强度0", episode_music="Low strings.")
+    assert (c4.video_music, c4.video_music_source) == ("N/A", "cue_silent") and c4.post_music["shot_cue"] == "撤到静默：强度0"
+    c4b = C.compile_shot(ep, s, G0, set(), music="推高，强度 2", episode_music="Low strings.")
+    assert c4b.video_music == "Low strings."
+    c5 = C.compile_shot(ep, s, G0, set(), music="N/A", episode_music="Low strings.")
+    assert (c5.video_music, c5.video_music_source) == ("N/A", "edit")
 
 
 def test_apply_edit_keeps_sound_sections():
@@ -445,7 +458,8 @@ def test_apply_edit_keeps_sound_sections():
 
 # ------------------------------------------------------------------ QA-02/03/05
 
-def test_set_active_refuses_laptop_take_on_adult_shot(sandbox, monkeypatch):
+def test_set_active_allows_laptop_take_on_adult_shot(sandbox, monkeypatch):
+    """2026-10-30 取消成人过滤器：成人镜头也能把本机版本设为当前。"""
     monkeypatch.setattr(P, "shot_is_adult", lambda sid: sid == "ep99-S7")
     d = P.shot_dir("ep99-S7")
     (d / "takes").mkdir(parents=True)
@@ -453,19 +467,20 @@ def test_set_active_refuses_laptop_take_on_adult_shot(sandbox, monkeypatch):
     data = {"takes": [P.Take(n=1, stage="image", file="renders/ep99/S7/takes/image_001.png", seed=1, prompt="",
                              created_at="x").model_dump()], "active": {}}
     P._save_takes("ep99-S7", data)
-    with pytest.raises(P.AdultShotRejected):
-        P.set_active("ep99-S7", "image", 1)
-    data["takes"][0]["source"] = "gpu3"
-    P._save_takes("ep99-S7", data)
     P.set_active("ep99-S7", "image", 1)
+    assert P.load_takes("ep99-S7")["active"]["image"] == 1
 
 
-def test_real_adult_shots_detected():
-    assert P.shot_is_adult("ep01-S3") is False
+def test_real_adult_shots_detected(monkeypatch):
+    # 固定测试剧本（t06 金标准同一份），不受 data/import 当前导入内容影响
+    monkeypatch.setattr(P, "SCRIPT_JSON", P.ROOT / "tests" / "fixtures" / "t06_golden" / "data" / "import" / "script_v2.json")
+    P._ADULT_CACHE.clear()
     script = P.load_script()
-    adult = next(s.id for ep in script.episodes for s in ep.shots
-                 if C.compile_shot(ep, s, script.globals, set()).adult)
-    assert P.shot_is_adult(adult) is True
+    flags = {s.id: C.compile_shot(ep, s, script.globals, set()).adult for ep in script.episodes for s in ep.shots}
+    adult = next(k for k, v in flags.items() if v)
+    plain = next(k for k, v in flags.items() if not v)
+    assert P.shot_is_adult(adult) is True and P.shot_is_adult(plain) is False
+    P._ADULT_CACHE.clear()
 
 
 def test_possessive_place_keeps_owner_when_he_is_in_frame():
@@ -508,8 +523,10 @@ def test_gpu3_ownership_rule_gates_all_renders(tmp_path, monkeypatch):
             fn(None, None, "ep01-S1")
 
 
-def test_real_ownership_config_is_gpu3_for_weita():
-    assert P.project_owner("weita") == "gpu3"
+def test_real_ownership_config_is_canvas_for_weita():
+    """2026-10-30 夜（fredw-92/W2）：画布交互改图是主链路 → owner=canvas，gpu3 归属留在 history"""
+    assert P.project_owner("weita") == "canvas"
+    assert P._read_json(P.OWNERSHIP, {})["projects"]["weita"]["history"][0]["owner"] == "gpu3"
 
 
 # ------------------------------------------------------------------ 裸露质检 v3

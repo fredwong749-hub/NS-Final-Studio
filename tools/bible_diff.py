@@ -16,7 +16,7 @@ import json
 import sys
 
 from ns_agent import prompt_snapshot as PS
-from ns_agent.bible import bible_version, project_root
+from ns_agent.bible import project_root
 
 
 def main(argv=None) -> int:
@@ -30,9 +30,10 @@ def main(argv=None) -> int:
     ap.add_argument("--root", help="项目根目录（默认 NS_PROJECT_ROOT 或仓库根）")
     a = ap.parse_args(argv)
     root = project_root(a.root)
-    cur_v = bible_version(root)
-    PS.save_snapshot(root)
-    current = PS.load_snapshot(cur_v, root)["shots"]
+    # 版本号取自实际保存的快照（编译期间输入变了也对得上）；快照读不出来就直接编译当前结果
+    cur_v = PS.save_snapshot(root).name.removesuffix(".json.gz")
+    snap_cur = PS.load_snapshot(cur_v, root)
+    current = snap_cur["shots"] if snap_cur else PS.compile_all(root)
 
     if a.inject_preview:
         old, new = current, PS.compile_all(root, inject_looks=True, confirmed_only=not a.all_episodes)

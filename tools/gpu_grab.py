@@ -70,6 +70,14 @@ SHOT_KEYS = {"shot", "shot_id", "episode", "ep", "first_frame", "last_frame", "f
 SHOT_KINDS = {"frame", "first_frame", "last_frame", "frames", "video", "i2v", "fl2v", "fl2va", "h3", "shot"}
 ADULT_RATINGS = {"adult", "nsfw", "explicit", "r18", "x"}
 REQUIRED = ("prompt", "seed", "size", "model", "file", "out_dir")
+MODES = ("t2i", "edit")
+UPSCALE_METHODS = ("lanczos", "bicubic", "bilinear", "nearest-exact", "area")
+
+
+def ref_path(r: str) -> Path:
+    """参考图路径：仓库相对路径（g2_candidates 写的格式）或绝对路径。"""
+    p = Path(r)
+    return p if p.is_absolute() else ROOT / p
 
 _log_lock = threading.Lock()
 
@@ -108,8 +116,7 @@ def _is_adult(d: dict) -> bool:
 def refuse_reason(meta: dict, job: dict, ownership: dict | None = None) -> str | None:
     """不该由本任务器跑的任务 → 拒绝原因；可以跑 → None。"""
     ownership = _ownership() if ownership is None else ownership
-    if _is_adult(meta) or _is_adult(job):
-        return "adult job: 成人镜头只在本地专用流程生成，本任务器不接"
+    # 2026-10-30 项目方取消成人过滤器：不再按 adult/nsfw 标记拒绝任务
     kind = str(job.get("kind") or job.get("type") or meta.get("kind") or "t2i").lower()
     shot_like = (kind in SHOT_KINDS or SHOT_KEYS & set(job) or SHOT_KEYS & set(meta)
                  or re.search(r"(^|/)(renders(_gpu3)?|frames|run)(/|$)", str(job.get("out_dir", "")).replace("\\", "/")))
@@ -120,11 +127,35 @@ def refuse_reason(meta: dict, job: dict, ownership: dict | None = None) -> str |
             if o.get("owner") == "gpu3" and (proj == slug or slug in text):
                 return f"shot frame/video job for '{slug}' — config/shot_ownership.json: owner=gpu3（gpu3 渲染器负责）"
         return "shot frame/video job — 本任务器只跑资产/候选（assets/candidates only）"
-    if kind not in ("t2i", "image", "asset", "candidate"):
-        return f"unsupported kind '{kind}' (only t2i assets/candidates; never video)"
+    if "video" in kind:
+        return f"unsupported kind '{kind}' (images only; never video)"
+    mode = str(job.get("mode", "t2i")).lower()
+    if mode not in MODES:
+        return f"unsupported mode '{mode}' (t2i / edit only; never video)"
     missing = [k for k in REQUIRED if job.get(k) in (None, "", [])]
     if missing:
         return f"missing fields: {missing}"
+    if mode == "edit":
+        refs = job.get("refs") or []
+        if not refs or not isinstance(refs, list):
+            return "edit job needs refs: [path, ...]"
+        for r in refs:
+            if not ref_path(r).is_file():
+                return f"reference missing: {r}"
+        want = (job.get("reference") or {}).get("sha256") if isinstance(job.get("reference"), dict) else None
+        if want and len(refs) == 1 and _sha(ref_path(refs[0])) != want:
+            return f"reference sha256 mismatch: {refs[0]}"
+    ref = job.get("refine")
+    if ref is not None and not isinstance(ref, dict):
+        return "refine must be an object"
+    if isinstance(ref, dict) and ref.get("upscale_to") is not None:
+        try:
+            uw, uh = (int(x) for x in ref["upscale_to"])
+            assert 256 <= uw <= 3072 and 256 <= uh <= 3072
+        except Exception:  # noqa: BLE001
+            return f"bad refine.upscale_to {ref.get('upscale_to')}"
+        if str(ref.get("upscale_method", "lanczos")) not in UPSCALE_METHODS:
+            return f"bad refine.upscale_method {ref.get('upscale_method')}"
     try:
         w, h = (int(x) for x in job["size"])
         assert 256 <= w <= 2048 and 256 <= h <= 2048
@@ -199,7 +230,11 @@ def gpu3_free(g: int, snap: dict, tracker: IdleTracker, now: float) -> str | Non
     return None
 
 
-def laptop_free(queue: dict | None, procs: list[str]) -> str | None:
+def laptop_free(queue: dict | None, procs: list[str], lock_holder: dict | None = None) -> str | None:
+    """lock_holder：本机 ComfyUI 单一锁（ns_orch.comfy_lock，data/comfy.lock）的占用者；被画布 / 编排器占着就不抢（X-1）"""
+    if lock_holder:
+        return f"laptop ComfyUI held via comfy.lock by {lock_holder.get('who', 'unknown')}" + \
+            (f" ({lock_holder['what']})" if lock_holder.get("what") else "")
     if queue is None:
         return "laptop ComfyUI unreachable"
     if queue.get("queue_running") or queue.get("queue_pending"):
@@ -267,10 +302,12 @@ class Gpu3:
 
     def acquire(self, g: int, text: str) -> bool:
         """O_EXCL（bash noclobber）创建 gpu.lock.gpuN；lend/train.lock/assign 存在时不建。从不写 lend。"""
-        q = shlex.quote(text)
-        cmd = (f"cd {STATE_DIR} && for f in train.lock.gpu{g} train.lock.{g} lend.gpu{g} assign.gpu{g}.json; do "
-               f"[ -e $f ] && {{ echo BUSY $f; exit 2; }}; done; "
-               f"( set -C; printf '%s\\n' {q} > gpu.lock.gpu{g} ) 2>/dev/null && echo OK || {{ echo BUSY lock; exit 2; }}")
+        q, d = shlex.quote(text), shlex.quote(STATE_DIR)
+        # 全部绝对路径；状态目录不存在就退出——绝不在当前目录/家目录写锁
+        cmd = (f"[ -d {d} ] || {{ echo NOSTATE; exit 3; }}; "
+               f"for f in train.lock.gpu{g} train.lock.{g} lend.gpu{g} assign.gpu{g}.json; do "
+               f"[ -e {d}/$f ] && {{ echo BUSY $f; exit 2; }}; done; "
+               f"( set -C; printf '%s\\n' {q} > {d}/gpu.lock.gpu{g} ) 2>/dev/null && echo OK || {{ echo BUSY lock; exit 2; }}")
         try:
             r = self._ssh(f"bash -c {shlex.quote(cmd)}")
         except Exception:  # noqa: BLE001
@@ -287,7 +324,7 @@ class Gpu3:
     def release(self, g: int, text: str) -> bool:
         """只删内容与自己写的完全一致的锁。"""
         q = shlex.quote(text)
-        cmd = (f"f={STATE_DIR}/gpu.lock.gpu{g}; [ \"$(cat $f 2>/dev/null)\" = {q} ] && rm -f $f && echo RELEASED; "
+        cmd = (f"f={shlex.quote(STATE_DIR + f'/gpu.lock.gpu{g}')}; [\"$(cat $f 2>/dev/null)\" = {q} ] && rm -f $f && echo RELEASED; "
                f"[ -e $f ] || echo GONE")
         for _ in range(3):
             try:
@@ -346,7 +383,20 @@ class Tunnel:
                 self.proc.kill()
 
 
+def _comfy_lock():
+    """本机 ComfyUI 单一锁模块（T44）；导入不了（环境缺包）时返回 None，退回只看队列"""
+    try:
+        from ns_orch import comfy_lock
+        return comfy_lock
+    except Exception:  # noqa: BLE001
+        return None
+
+
 class Laptop:
+    def lock_holder(self) -> dict | None:
+        cl = _comfy_lock()
+        return cl.holder() if cl else None
+
     def queue(self) -> dict | None:
         import urllib.request
         try:
@@ -394,8 +444,10 @@ _qc_lock = threading.Lock()
 _manifest_lock = threading.Lock()
 
 
-def build_graphs(job: dict, prefix: str):
-    """返回 (第一遍工作流, refine 函数或 None)。提示词/负面词严格按任务原文，不增删。"""
+def build_graphs(job: dict, prefix: str, ref_names: list[str] | None = None):
+    """返回 (第一遍工作流, refine 函数或 None)。提示词/负面词严格按任务原文，不增删。
+    mode=edit：ref_names 为已上传到 ComfyUI 的参考图名（依次为 图1、图2…），同 tools/gen_assets.run_job
+    （本地预缩放到长边 1024，ref_resolution=0、crop=False）。"""
     from ns_render import workflows as W
     model = job["model"]
     turbo = "turbo" in model.lower()
@@ -405,21 +457,36 @@ def build_graphs(job: dict, prefix: str):
     loras = [(str(n), float(s)) for n, s in job.get("lora", []) or []]
     w, h = (int(x) for x in job["size"])
     neg = job.get("negative", "")
-    wf = W.qwen_t2i(job["prompt"], neg, w, h, int(job["seed"]), prefix, m=m, loras=loras)
+    refs = list(ref_names or [])
+    edit = str(job.get("mode", "t2i")).lower() == "edit"
+    if edit and not refs:
+        raise ValueError("edit job without uploaded references")
+
+    def graph(width, height, seed, pfx, mm):
+        if edit:
+            return W.qwen_edit(job["prompt"], neg, refs if len(refs) > 1 else refs[0], width, height, seed, pfx,
+                               m=mm, loras=loras, ref_resolution=0, crop=False)
+        return W.qwen_t2i(job["prompt"], neg, width, height, seed, pfx, m=mm, loras=loras)
+
+    wf = graph(w, h, int(job["seed"]), prefix, m)
     ref = job.get("refine")
     if not ref:
         return wf, None
 
     def refine(first_pass_name: str) -> dict:
-        # 同 tools/gen_assets.refine_graph：放大 → VAEEncode → Base 少步数低重绘
+        # 同 tools/gen_assets.refine_graph：放大 → VAEEncode → Base 少步数低重绘（edit 时带同样的参考图）
         base = model if not turbo else "qwen_image_2.1_int8_convrot.safetensors"
         m2 = W.QwenModel(unet=base, clip=m.clip, vae=m.vae, turbo=False, steps=int(ref.get("steps", 12)),
                          cfg=m.cfg, sampler=m.sampler)
-        sc = float(ref.get("scale", 1.5))
-        W2, H2 = int(w * sc) // 16 * 16, int(h * sc) // 16 * 16
-        wf2 = W.qwen_t2i(job["prompt"], neg, W2, H2, int(job["seed"]) + 1, prefix + "_r", m=m2, loras=loras)
+        if ref.get("upscale_to"):          # 场景底板：指定第二遍尺寸（gen_scenes 928×1632 → 1152×2016）
+            W2, H2 = (int(x) for x in ref["upscale_to"])
+        else:
+            sc = float(ref.get("scale", 1.5))
+            W2, H2 = int(w * sc) // 16 * 16, int(h * sc) // 16 * 16
+        wf2 = graph(W2, H2, int(job["seed"]) + 1, prefix + "_r", m2)
         wf2["201"] = {"class_type": "LoadImage", "inputs": {"image": first_pass_name}}
-        wf2["202"] = {"class_type": "ImageScale", "inputs": {"image": ["201", 0], "upscale_method": "lanczos",
+        wf2["202"] = {"class_type": "ImageScale", "inputs": {"image": ["201", 0],
+                                                             "upscale_method": str(ref.get("upscale_method", "lanczos")),
                                                              "width": W2, "height": H2, "crop": "disabled"}}
         wf2["203"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["202", 0], "vae": ["12", 0]}}
         wf2["40"]["inputs"]["latent_image"] = ["203", 0]
@@ -433,18 +500,67 @@ def _sha(p: Path) -> str:
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
 
+def prep_ref(p: Path, side: int = 1024) -> Path:
+    """参考图预缩放到长边 side（同 gen_assets.prep_ref），缓存在 data/jobs/.refcache/。"""
+    from PIL import Image
+    out = JOBS / ".refcache" / f"{_sha(p)[:16]}_{side}.png"
+    if not out.exists():
+        out.parent.mkdir(parents=True, exist_ok=True)
+        im = Image.open(p).convert("RGB")
+        im.thumbnail((side, side), Image.LANCZOS)
+        im.save(out)
+    return out
+
+
+def clamp_side(job: dict) -> int | None:
+    """输出长边上限：指定 max_side 就用它；refine.upscale_to（场景底板，finalize 自己裁）不缩；否则 1536（同 gen_assets）。"""
+    if job.get("max_side"):
+        return int(job["max_side"])
+    if isinstance(job.get("refine"), dict) and job["refine"].get("upscale_to"):
+        return None
+    return MAX_SIDE
+
+
+def _read_manifest(mp: Path):
+    """list（资产/候选目录）或 dict（assets/scenes/<id>/manifest.json）。读不懂就报错——绝不覆盖。"""
+    if not mp.exists():
+        return []
+    man = json.loads(mp.read_text(encoding="utf-8"))
+    if not isinstance(man, (list, dict)):
+        raise ValueError(f"{mp}: unexpected manifest type {type(man).__name__}")
+    return man
+
+
 def manifest_has(job: dict) -> bool:
     out = ROOT / job["out_dir"]
     try:
-        man = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+        man = _read_manifest(out / "manifest.json")
     except (OSError, ValueError):
         return False
+    entries = man if isinstance(man, list) else list((man.get("renders") or {}).values())
     return (out / job["file"]).exists() and any(
-        e.get("file") == job["file"] and e.get("seed") == job["seed"] and e.get("prompt") == job["prompt"] for e in man)
+        e.get("file") == job["file"] and e.get("seed") == job["seed"] and e.get("prompt") == job["prompt"]
+        for e in entries if isinstance(e, dict))
+
+
+def write_manifest(out_dir: Path, entry: dict):
+    """list 清单：按文件名替换/追加。dict 清单（场景底板，gen_scenes 的 queued/variants 结构）：只写
+    man["renders"][file]，其他键（queued、variants、确认字段）一律不动，finalize 照常工作。"""
+    with _manifest_lock:
+        mp = out_dir / "manifest.json"
+        man = _read_manifest(mp)
+        if isinstance(man, list):
+            man = [e for e in man if not (isinstance(e, dict) and e.get("file") == entry["file"])] + [entry]
+        else:
+            man.setdefault("renders", {})[entry["file"]] = entry
+        tmp = mp.with_name(mp.name + f".tmp{os.getpid()}")
+        tmp.write_text(json.dumps(man, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, mp)
 
 
 def comfy_execute(job: dict, base_url: str, limit_s: float, target: str, job_id: str) -> dict:
-    """在 base_url 的 ComfyUI 上出一张图 → QC v3（硬失败）→ 写 out_dir + manifest。返回 manifest 条目。"""
+    """在 base_url 的 ComfyUI 上出一张图 → QC v3（硬失败）→ 写 out_dir + manifest。返回 manifest 条目。
+    job["post"]（场景底板的裁切/调色说明）只原样记进清单，本任务器不执行（笔记本 tools/gen_scenes.py finalize 做）。"""
     from PIL import Image
     from ns_render.comfy_client import ComfyClient
     from ns_render.qc import nudity_qc, vlm_judge
@@ -453,10 +569,13 @@ def comfy_execute(job: dict, base_url: str, limit_s: float, target: str, job_id:
     client = ComfyClient(base_url)
     out_dir = ROOT / job["out_dir"]
     out_dir.mkdir(parents=True, exist_ok=True)
+    _read_manifest(out_dir / "manifest.json")           # 清单读不懂就别出图
     dest = out_dir / job["file"]
     tmp = out_dir / f".{Path(job['file']).stem}.gpu_grab.png"
     prefix = f"ns_final/gpu_grab/{Path(job['file']).stem}"
-    wf, refine = build_graphs(job, prefix)
+    refs = [ref_path(r) for r in job.get("refs") or []] if str(job.get("mode", "t2i")).lower() == "edit" else []
+    names = [client.upload_image(prep_ref(r), subfolder="ns_final/gpu_grab") for r in refs]
+    wf, refine = build_graphs(job, prefix, names)
 
     def run(graph):
         left = deadline - time.monotonic()
@@ -480,29 +599,22 @@ def comfy_execute(job: dict, base_url: str, limit_s: float, target: str, job_id:
         item = next(f for f in client.output_files(entry) if f["filename"].endswith(".png"))
         client.download(item, tmp)
     secs = time.monotonic() - t0
+    side = clamp_side(job)
     im = Image.open(tmp)
-    if max(im.size) > MAX_SIDE:
-        im.thumbnail((MAX_SIDE, MAX_SIDE), Image.LANCZOS)
+    if side and max(im.size) > side:
+        im.thumbnail((side, side), Image.LANCZOS)
         im.save(tmp)
+    size = list(im.size)
     im.close()
-    with _qc_lock:     # NudeNet/CLIP 在本机跑；看图模型用同一台 ComfyUI
+    with _qc_lock:     # NudeNet/CLIP 在本机跑；看图模型用同一台 ComfyUI。只记录，不淘汰（过滤器已取消）
         q = nudity_qc(tmp, vlm=vlm_judge(client))
-    if q["nudity"]:
-        tmp.unlink(missing_ok=True)
-        raise QCFail(f"QC v3 nudity hard fail: {json.dumps(q, ensure_ascii=False)}")
     os.replace(tmp, dest)
     keep = {k: v for k, v in job.items() if k not in ("targets",)}
-    m = {**keep, "file": dest.name, "sha256": _sha(dest), "qc": q, "gen_seconds": round(secs, 1),
-         "gpu": target, "runner": "tools/gpu_grab.py", "job_id": job_id, "requested_by": job.get("requested_by", ME),
+    m = {**keep, "file": dest.name, "sha256": _sha(dest), "output_size": size, "qc": q, "gen_seconds": round(secs, 1),
+         "references_sha256": [_sha(r) for r in refs], "gpu": target, "runner": "tools/gpu_grab.py",
+         "job_id": job_id, "requested_by": job.get("requested_by", ME),
          "created_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
-    with _manifest_lock:
-        mp = out_dir / "manifest.json"
-        try:
-            man = json.loads(mp.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            man = []
-        man = [e for e in man if e.get("file") != dest.name] + [m]
-        mp.write_text(json.dumps(man, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_manifest(out_dir, m)
     return m
 
 
@@ -622,7 +734,7 @@ class Runner:
         out: dict[str, str | None] = {}
         if self.use_laptop:
             out[LAPTOP] = "in use by gpu_grab" if LAPTOP in self.busy else \
-                laptop_free(self.laptop.queue(), self.laptop.busy_procs())
+                laptop_free(self.laptop.queue(), self.laptop.busy_procs(), self.laptop.lock_holder())
         if self.use_gpu3:
             now = self.clock()
             for g in GPU3_PORTS:
@@ -662,7 +774,7 @@ class Runner:
                 c.save()
                 continue
             if gpu is None:
-                yielded = self._run_one(c, i, job, job_id, target, LAPTOP_URL, LAPTOP_JOB_LIMIT_S)
+                yielded = self._run_laptop(c, i, job, job_id, target)
             else:
                 yielded = self._run_gpu3(c, i, job, job_id, gpu)
             c.save()
@@ -675,6 +787,21 @@ class Runner:
             return
         bad = [k for k, v in res.items() if v.get("status") == "failed"]
         self._finish(c, FAILED if bad else DONE, f"{len(res) - len(bad)} ok, {len(bad)} failed")
+
+    def _run_laptop(self, c: Claimed, i: int, job: dict, job_id: str, target: str) -> str | None:
+        """本机 ComfyUI 与画布队列 / 编排器共用一把 comfy.lock（X-1）：拿不到就让出，任务回队列下一轮再试（不计失败）"""
+        cl = _comfy_lock()
+        if cl is None:
+            return self._run_one(c, i, job, job_id, target, LAPTOP_URL, LAPTOP_JOB_LIMIT_S)
+        try:
+            fh = cl.acquire("gpu_grab", job_id, timeout=0)
+        except cl.Busy as e:
+            log(f"laptop: comfy.lock busy before {job_id}: {e}")
+            return f"laptop comfy.lock busy ({(e.info or {}).get('who', 'unknown')})"
+        try:
+            return self._run_one(c, i, job, job_id, target, LAPTOP_URL, LAPTOP_JOB_LIMIT_S)
+        finally:
+            cl.release(fh)
 
     def _run_gpu3(self, c: Claimed, i: int, job: dict, job_id: str, g: int) -> str | None:
         ok, why = self.gpu3.may_use(g)
