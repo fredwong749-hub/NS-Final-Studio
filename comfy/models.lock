@@ -124,6 +124,8 @@
       "base_model": "MiniMax H3 FL2VA",
       "location": "gpu-server:ComfyUI/models/loras/lin_wan_h3_v1.safetensors",
       "sha256": null,
+      "status": "training",
+      "status_note": "封板修复 2026-10-30：未交付（T16 林晚 H3 视频 LoRA，暂停 / 排队中），交付后补 sha256 并改 accepted；出图 LoRA lnwan_qi 的唯一配置见 config/auto_lora_triggers.json",
       "triggers": [
         {
           "trigger": "lnwan01",

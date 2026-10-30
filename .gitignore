@@ -23,3 +23,10 @@ apps/web/dist/
 
 # gpu_grab 冒烟测试遗留的本地锁文件
 gpu.lock.*
+
+# 项目方私人目录与会话记录，绝不入库（总调度 fredw-b3 2026-10-30 封板）
+/为他而骚短剧/
+*.jsonl.bak
+/p.out
+/ops/logs/
+*.lock

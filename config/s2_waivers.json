@@ -1,0 +1,15 @@
+{
+ "waivers": [
+  {
+   "episode": 2,
+   "skip": [
+    "plate"
+   ],
+   "owner_quote": "造型确认，这次跳过底图",
+   "scope": "ep02 本次端到端测试渲染",
+   "by": "owner",
+   "at": "2026-10-30T21:51:49",
+   "revoked": false
+  }
+ ]
+}

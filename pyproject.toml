@@ -25,4 +25,6 @@ build-backend = "hatchling.build"
 packages = ["packages/schema/ns_schema", "services/agent/ns_agent", "services/render_router/ns_render", "services/api/ns_api", "services/orchestrator/ns_orch"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# services/canvas_api（gpu3 渲染桥）的测试也从根目录跑（封板 T-1）；它的包 ns_canvas 不在本仓库 wheel 里，用 pythonpath 导入
+testpaths = ["tests", "services/canvas_api/tests"]
+pythonpath = ["services/canvas_api"]

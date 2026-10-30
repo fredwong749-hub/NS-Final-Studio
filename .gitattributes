@@ -5,3 +5,9 @@
 *.jpeg filter=lfs diff=lfs merge=lfs -text
 *.webp filter=lfs diff=lfs merge=lfs -text
 *.mp4 filter=lfs diff=lfs merge=lfs -text
+
+# 文本统一 LF（多会话在 Windows 写文件会转成 CRLF，2026-10-30 总调度 fredw-b3 加）
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf

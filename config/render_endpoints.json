@@ -1,0 +1,16 @@
+{
+  "_comment": "出图 / 视频的 ComfyUI 地址（W1 llm_config 的 GET/PUT /api/render/endpoints 读写 image/video；W2 ns_render.endpoints 按卡解析）。笔记本经 SSH 隧道连 gpu3：18188 → GPU0 :8188，18191 → GPU3 :8191。任务队列（ns_api/jobs.comfy_url）：本文件 image/video 的地址优先（fredw-92 定，2026-10-30 夜），没写才用环境变量 NS_COMFY_URL_GPU0 / NS_COMFY_URL_GPU3 > NS_COMFY_URL（GPU0）> 内置默认；ns_render.endpoints.url_for_gpu 单独调用时仍是环境变量优先。 fredw-92/D1 2026-10-31：GPU1（千问已撤下）加为第二条视频线，18189 → gpu3 :8189；jobs.GPUS 读本表。",
+  "image": {
+    "url": "http://127.0.0.1:18188",
+    "gpu": 0
+  },
+  "video": {
+    "url": "http://127.0.0.1:18191",
+    "gpu": 3
+  },
+  "gpus": {
+    "0": "http://127.0.0.1:18188",
+    "1": "http://127.0.0.1:18189",
+    "3": "http://127.0.0.1:18191"
+  }
+}

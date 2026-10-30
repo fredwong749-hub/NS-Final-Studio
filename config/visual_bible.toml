@@ -158,7 +158,7 @@ candidates_per_round = 3
 max_rounds = 3
 score_weights = { script_facts = 0.35, face = 0.25, realism = 0.15, color = 0.10, sharp_bokeh = 0.15 }
 pass_threshold = 0.72
-nudity_qc_non_adult = "hard_fail"
+nudity_qc_non_adult = "report_only"   # 2026-10-30 取消成人过滤器：只记录，不否决
 
 # -------------------------------------------------------------------
 # 八、成人分类（由项目方启动渲染）
