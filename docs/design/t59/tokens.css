@@ -1,0 +1,76 @@
+/* T59 design tokens（fredw-25）
+   第一原则（项目方）：“页面干净清晰”——
+   字号最多 3 级｜正文颜色 2 种｜强调色 1 个｜状态色只用在状态标签上｜靠留白和对齐分层，不靠边框和徽章。
+   两个方向共用同一套 token 名：dark = 深色剪辑台（Studio），light = 浅色内容平台（Platform）。
+   套用到画布时，apps/web 只引用这些变量，不再写死颜色 / 字号 / 圆角。 */
+
+:root, .dir-dark {
+  /* 表面：3 层 */
+  --c-bg: #0c0d10;            /* 页面 */
+  --c-raise: #15171c;         /* 抬起的面：顶栏、侧栏、检查器、选中行 */
+  --c-sunken: #1c1f25;        /* 凹陷：输入框、图片占位 */
+  --c-line: rgba(255, 255, 255, .07);   /* 唯一的分隔线颜色（只做分隔，不做框） */
+
+  /* 正文 2 色 */
+  --c-text: #e8eaee;
+  --c-text-2: #8b919c;
+
+  /* 强调色 1 个 */
+  --c-accent: #5b8cff;
+  --c-accent-soft: rgba(91, 140, 255, .12);
+
+  /* 状态色：只出现在状态标签 / 状态点上 */
+  --c-ok: #3ccf91;
+  --c-new: #f2a93b;
+  --c-bad: #f06a5f;
+
+  --c-scrim: rgba(0, 0, 0, .55);       /* 图上文字底 */
+
+  /* 字号 3 级 */
+  --fs-s: 12px;     /* 辅助：标签、元信息 */
+  --fs-m: 14px;     /* 正文 */
+  --fs-l: 20px;     /* 标题：集名、镜号、人物名 */
+  --fw-normal: 400; --fw-strong: 600;
+  --lh: 1.6;
+  --f-sans: "Inter", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  --f-num: "Inter", "PingFang SC", system-ui, sans-serif;   /* 数字用 tabular-nums */
+
+  /* 间距：8 的网格 */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-6: 24px; --sp-8: 32px; --sp-12: 48px;
+
+  /* 圆角 2 档 */
+  --r-1: 6px;       /* 按钮、输入、小图 */
+  --r-2: 10px;      /* 大图、面板 */
+
+  /* 阴影：深色方向不用阴影，只给浮层 */
+  --sh-float: 0 16px 48px rgba(0, 0, 0, .5);
+
+  /* 布局尺寸 */
+  --topbar-h: 56px;
+  --rail-w: 208px;
+  --insp-w: 480px;
+  --frame-h: 400px;           /* 集视图首尾帧高（9:16 → 宽 225） */
+}
+
+.dir-light {
+  --c-bg: #f6f6f4;
+  --c-raise: #ffffff;
+  --c-sunken: #efefec;
+  --c-line: rgba(20, 20, 30, .08);
+
+  --c-text: #17181c;
+  --c-text-2: #6f727a;
+
+  --c-accent: #2f6bff;
+  --c-accent-soft: rgba(47, 107, 255, .08);
+
+  --c-ok: #149a62;
+  --c-new: #c97a0a;
+  --c-bad: #d9443a;
+
+  --r-1: 8px;
+  --r-2: 14px;
+
+  --sh-float: 0 20px 56px rgba(20, 20, 30, .16);
+  --sh-soft: 0 1px 2px rgba(20, 20, 30, .04), 0 8px 24px rgba(20, 20, 30, .06);
+}

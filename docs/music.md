@@ -30,6 +30,9 @@ is installed as the fast fallback. Reasons:
   60–90 s quality on a 3090.
 - It uses the same model family ComfyUI ships templates for, so it is easy to inspect.
 
+
+> **Rule (X-4, owner 2026-10-30, E8):** the episode / per-shot music goes into the H3 prompt (`non_diegetic_music`, `ns_agent.h3_prompt.resolve_music`); at assembly the BGM is muted over shots whose H3 clip already carries music (`ns_post.music.h3_music_shots`, recorded as `bgm.h3_music_shots` in the timeline). The episode BGM below fills only the shots whose H3 music is `N/A`.
+
 ## 2. BGM per episode
 
 Input: `Episode.music_bgm` (v3 `**配乐**：… 【BGM】 <English prompt>`) and the per-shot `Shot.music_cue` (`【配乐】`).

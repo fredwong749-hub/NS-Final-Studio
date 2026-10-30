@@ -26,6 +26,16 @@ uv run python tools/gpu_grab.py --once --no-gpu3    # 只用笔记本（--no-lap
 - 子任务字段：`prompt`、`negative`、`seed`、`size`、`model`、`steps`、`cfg`、`lora`、`vae`、`refine`（可选，
   `{scale, steps, denoise}`，同 gen_assets 第二遍低重绘）、`file`、`out_dir`，其余字段原样写进 manifest。
   提示词/负面词**严格按原文**提交，不追加任何内容。
+- `mode`：`t2i`（默认）或 `edit`。`edit` 需要 `refs: [path, ...]`（仓库相对或绝对路径，依次为 图1、图2…；
+  G2 母版候选，`services/orchestrator/ns_orch/g2_candidates.py`）。参考图本地预缩放到长边 1024
+  （缓存 `data/jobs/.refcache/`），上传到所用 ComfyUI，`qwen_edit(ref_resolution=0, crop=False)`，refine 第二遍也带同样参考图。
+  有 `reference.sha256` 时先核对参考图哈希，不符 → 拒绝。
+- `refine.upscale_to: [w, h]` + `refine.upscale_method`（场景底板，`tools/gen_scenes.py`）：第二遍按指定尺寸放大
+  （否则按 `scale`），且输出**不**缩到 1536（交给 finalize 裁切）；其余任务长边 ≤1536，或按 `max_side`。
+- `post`（场景底板的居中裁切 + Reinhard 调色说明）**只是说明**：本任务器原样写进清单，不执行；
+  图回来后笔记本跑 `uv run python tools/gen_scenes.py finalize`。
+- 清单：`out_dir/manifest.json` 是列表时按文件名替换/追加；是对象时（场景底板，含 `queued`/`variants`/确认字段）
+  只写 `renders[<file>]`，其他键不动（finalize 依赖 `queued`）。清单读不懂 → 不出图、不覆盖。
 - 可选 `targets`（文件级或子任务级）：`["laptop", "gpu3:0", "gpu3:1", "gpu3:3"]` 的子集，默认全部。
   `gpu3:2` 会被拒绝（坏卡）。
 - 流转：`queue/` → 领取时移到 `running/` → 结束移到 `done/`（全部成功）或 `failed/`（有子任务失败/被拒）。
@@ -34,12 +44,11 @@ uv run python tools/gpu_grab.py --once --no-gpu3    # 只用笔记本（--no-lap
 
 ## 拒绝的任务（直接进 failed/，从不出图）
 
-- 成人：`adult` / `nsfw` / `explicit` / `adult_shot` 为 true，或 `rating` ∈ adult/nsfw/explicit/r18（文件级或子任务级）。
-  成人镜头只在本地专用流程生成。提示词里出现 "adult man" 之类的词不算标记。
+- 成人：`adult` / `nsfw` / `explicit` / `adult_shot` 为 true，或 `rating` ∈ adult/nsfw/explicit/r18。2026-10-30 取消成人过滤器后只作记录，不再据此拒绝；提示词里出现 "adult man" 之类的词不算标记。
 - 镜头首尾帧/视频：`kind` 为 frame/first_frame/last_frame/video/i2v/fl2v/h3/shot，或带 shot/shot_id/episode/frames/
   video/motion 字段，或 `out_dir` 在 renders/frames/run 下。`config/shot_ownership.json` 里 owner=gpu3 的项目
   （weita）原因写明"gpu3 渲染器负责"；其他项目同样拒绝（本任务器只做资产/候选）。永不出视频（笔记本绝不跑视频）。
-- 缺字段、尺寸越界、`out_dir` 在项目外、`file` 不是纯 .png 文件名、targets 非法。
+- 缺字段、尺寸越界、`mode` 不是 t2i/edit、kind 含 video、edit 缺参考图/哈希不符、`refine.upscale_to` 越界、`out_dir` 在项目外、`file` 不是纯 .png 文件名、targets 非法。
 
 ## 每张图
 
@@ -89,7 +98,7 @@ gpu3 调度器（docs/gpu_scheduler.md）为本任务器登记了消费者 `fred
    显存 <1 GB、利用率 <5%。
 2. `ssh gpu33 /root/claude-kimi-ns-studio-v1/env/comfy/bin/python …/ns-studio/scripts/ns_sched.py may-use fredw-d9-assets <gpu>`：
    退出码 0 才继续；非 0、ssh 失败、超时 = 不可用。
-3. 用 O_EXCL（bash `set -C`）创建 `gpu.lock.gpuN`，内容 `fredw-d9 <队列文件名>:<file>`；train.lock/lend/assign 已存在或
+3. 用 O_EXCL（bash `set -C`）在 gpu3 上以**绝对路径** `/root/.local/state/NS-Studio/gpu.lock.gpuN` 创建锁（状态目录不存在就退出，绝不写到别处），内容 `fredw-d9 <队列文件名>:<file>`；train.lock/lend/assign 已存在或
    锁已存在 → 放弃。
 4. 开 ssh 隧道 → 远端 ComfyUI 队列必须为空 → 出图 + QC（看图模型用同一台 gpu3 ComfyUI）。**单任务 ≤15 分钟**
    （含 refine），超时中断（ComfyUI /interrupt，只中断自己提交的任务）并放回队列；同一子任务超时 2 次 → failed。

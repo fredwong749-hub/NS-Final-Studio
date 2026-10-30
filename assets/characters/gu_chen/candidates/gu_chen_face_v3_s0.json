@@ -1,0 +1,28 @@
+{
+ "file": "gu_chen_face_v3_s0.png",
+ "character": "gu_chen",
+ "seed": 57960005998388,
+ "model": "qwen_image_2.1_int8_convrot.safetensors",
+ "loras": [
+  [
+   "krea2_film_texture_qwen21.safetensors",
+   0.5
+  ]
+ ],
+ "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+ "refine": {
+  "scale": 1.5,
+  "steps": 12,
+  "denoise": 0.3
+ },
+ "steps": 35,
+ "cfg": 3.0,
+ "bible_sha256": "a2fd3146d98111dd689367ef0245f2f526d14e67ebe853c06667addc6bd62fe9",
+ "reference_source": "script character lock: 34岁成年男性CEO，黑色高定衬衫，成熟克制英俊",
+ "sha256": "26b8e76071705992731c29801c3c90cfdb34c0b5a424b5bd43ad0c4960fa80b2",
+ "qc": "pending_v3",
+ "gpu": 1,
+ "seconds": 295,
+ "created_at": "2026-10-29T23:24:46",
+ "by": "claude-gpu3 (fredw-d9 jobs)"
+}

@@ -257,7 +257,10 @@
       "version": "nudenet3.4+clipL14-v1"
     },
     "gen_seconds": 96.3,
-    "created_at": "2026-10-30T06:05:45"
+    "created_at": "2026-10-30T06:05:45",
+    "superseded": true,
+    "superseded_by": "id_front_v2.png",
+    "status": "superseded 2026-10-30 by id_front_v2.png (rebuilt from CM_s1 master with SOP S2 recipe; QC v3)"
   },
   {
     "file": "id_front_heavy_s0.png",
@@ -347,7 +350,10 @@
       "version": "nudenet3.4+clipL14-v1"
     },
     "gen_seconds": 75.3,
-    "created_at": "2026-10-30T06:10:02"
+    "created_at": "2026-10-30T06:10:02",
+    "superseded": true,
+    "superseded_by": "id_34L_v2.png",
+    "status": "superseded 2026-10-30 by id_34L_v2.png (rebuilt from CM_s1 master with SOP S2 recipe; QC v3)"
   },
   {
     "file": "body_F_s7.png",
@@ -437,7 +443,10 @@
       "version": "nudenet3.4+clipL14-v1"
     },
     "gen_seconds": 102.8,
-    "created_at": "2026-10-30T07:23:17"
+    "created_at": "2026-10-30T07:23:17",
+    "superseded": true,
+    "superseded_by": "id_34R_v2.png",
+    "status": "superseded 2026-10-30 by id_34R_v2.png (rebuilt from CM_s1 master with SOP S2 recipe; QC v3)"
   },
   {
     "file": "id_profile_s0.png",
@@ -482,7 +491,10 @@
       "version": "nudenet3.4+clipL14-v1"
     },
     "gen_seconds": 126.6,
-    "created_at": "2026-10-30T07:25:28"
+    "created_at": "2026-10-30T07:25:28",
+    "superseded": true,
+    "superseded_by": "id_profile_v2.png",
+    "status": "superseded 2026-10-30 by id_profile_v2.png (rebuilt from CM_s1 master with SOP S2 recipe; QC v3)"
   },
   {
     "file": "id_back_s0.png",
@@ -707,6 +719,361 @@
       "version": "nudenet3.4+clipL14-v1"
     },
     "gen_seconds": 129.6,
-    "created_at": "2026-10-30T09:39:32"
+    "created_at": "2026-10-30T09:39:32",
+    "superseded": true,
+    "superseded_by": "id_front_bare_v2.png",
+    "status": "superseded 2026-10-30 by id_front_bare_v2.png (rebuilt from CM_s1 master with SOP S2 recipe; QC v3)"
+  },
+  {
+    "file": "id_front_v2.png",
+    "kind": "plate",
+    "design": "LW-ID-F",
+    "name": "正脸底板（母版妆容）",
+    "angle": "F",
+    "makeup": null,
+    "method": "two_stage_identity (compose → master face swap → refine)",
+    "compose_prompt": "真实人像照片：一位22岁的东亚成年女性，鹅蛋脸，下颌线柔和，中等大小的杏眼，灰蓝色美瞳（瞳孔大小正常），鼻梁细直，嘴唇饱满、上唇有小唇珠，左脸颊靠近鼻翼有一颗小痣，冷调白皙皮肤，雾霾天蓝色及腰直发（比参考图略深、带一点灰的真实染发色），齐刘海，发色是一眼可见的中浅天蓝色、颜色饱和清楚，双手不碰脸。淡粉色系妆容（草莓粉腮红、水润粉色唇釉、根根分明的卷翘睫毛），正面头肩照，平视镜头，中性放松表情，嘴唇自然闭合，头发自然垂在两侧和身后，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光。真实相机拍摄的人像照片，未修图原片，真实皮肤质感，可见细小毛孔与细软绒毛，自然的轻微不对称，眼睛为真实人眼大小，真实的一根根发丝与少量碎发飞丝；shot on Leica M11, Summilux 50mm f/1.4",
+    "swap_prompt": "图1是这张角色资产照的画面构图。保持图1的构图、机位、景别、人物姿势与朝向、表情、服装、背景和光线不变，只把图1中林晚的五官长相、发色与发型换成图2人物的样子（与图2完全相同的鲜明天蓝色发色，雾霾天蓝色及腰直发（比参考图略深、带一点灰的真实染发色），齐刘海，冷白皮肤，左脸颊靠近鼻翼的小痣），妆容也换成图2的粉甜妆容（草莓粉腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛），灰蓝色美瞳；人物的手与手臂保持图1的位置（不要托腮），不要沿用图2的姿势、手势、项链、服装和背景。",
+    "compose_file": "golden/assets/v2_work/plates/id_front_a0_compose.png",
+    "swap_file": "golden/assets/v2_work/plates/id_front_a0_swap.png",
+    "compose_references": [],
+    "compose_qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.107,
+      "vlm": false,
+      "version": "nudenet3.4+clipL14v2+qwen3vl-v3"
+    },
+    "negative": "磨皮, 塑料皮肤, 蜡像, 娃娃脸, 放大瞳孔, 粘连睫毛, 大面积圆形腮红, 满脸闪粉, 硬边唇线, CGI, 3D render, airbrushed, 动漫比例, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 走光, 内衣外露, 项链, 文字, 水印",
+    "seeds": {
+      "compose": 102989898380230,
+      "edit": 169491831032539,
+      "refine": 35598084942768
+    },
+    "seed": 35598084942768,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 3.0,
+    "edit_cfg": 1.0,
+    "lora": [
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.3
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png → face crop, hand/necklace greyed: golden/assets/v2_work/master_face_nohand.png sha fb459b658748"
+    ],
+    "master": "assets/characters/lin_wan/plates/master.png",
+    "master_sha256": "b8e7b00b675663743a75e4fa86538b70cc87764fa2bdbe06edf82c3343492733",
+    "master_source": "CM_s1 (owner-approved 2026-10-30)",
+    "bible_sha256": "a2fd3146d98111dd689367ef0245f2f526d14e67ebe853c06667addc6bd62fe9",
+    "sop": "S2 (docs/SOP_parameters.md 2026-10-30)",
+    "sha256": "3a979473446d3858b0dbe5460b22461bf5d5728caa60bec0b0ee8d50eac59557",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.121,
+      "vlm": false,
+      "version": "nudenet3.4+clipL14v2+qwen3vl-v3"
+    },
+    "hair_blue_frac": 0.497,
+    "attempt": 0,
+    "gen_seconds": 161.5,
+    "supersedes": [
+      "id_front_s0.png"
+    ],
+    "created_at": "2026-10-30T12:49:39",
+    "generator": "tools/gen_assets_v2.py"
+  },
+  {
+    "file": "id_front_bare_v2.png",
+    "kind": "plate",
+    "design": "LW-ID-F-bare",
+    "name": "正脸底板（素颜，深棕眼）",
+    "angle": "F",
+    "makeup": "L1",
+    "method": "single_ref_edit on v2 plate (research v9 §1) → refine",
+    "edit_prompt": "图1是林晚本人。保持她的脸型轮廓、眉形、眼型、鼻型、唇形与饱满度、左脸颊小痣、冷白肤色、与图1完全相同的天蓝色齐刘海长直发、姿势、服装、背景、光线和构图完全不变；只去掉全部妆容：没有腮红、没有唇彩、没有眼线和假睫毛，眼睛改为自然深棕色眼睛（不戴美瞳，大小与图1一致），可见自然的皮肤纹理、细小毛孔和淡淡黑眼圈。真实人像照片，未修图原片",
+    "edit_base": "assets/characters/lin_wan/plates/id_front_v2.png",
+    "edit_base_sha256": "3a979473446d3858b0dbe5460b22461bf5d5728caa60bec0b0ee8d50eac59557",
+    "edit_file": "golden/assets/v2_work/plates/id_front_bare_a0_edit.png",
+    "negative": "磨皮, 塑料皮肤, 蜡像, 娃娃脸, 放大瞳孔, 粘连睫毛, 大面积圆形腮红, 满脸闪粉, 硬边唇线, CGI, 3D render, airbrushed, 动漫比例, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 走光, 内衣外露, 项链, 文字, 水印",
+    "seeds": {
+      "compose": 15163731260542,
+      "edit": 112744020419699,
+      "refine": 181668018001793
+    },
+    "seed": 181668018001793,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 3.0,
+    "edit_cfg": 1.0,
+    "lora": [
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.3
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/id_front_v2.png"
+    ],
+    "master": "assets/characters/lin_wan/plates/master.png",
+    "master_sha256": "b8e7b00b675663743a75e4fa86538b70cc87764fa2bdbe06edf82c3343492733",
+    "master_source": "CM_s1 (owner-approved 2026-10-30)",
+    "bible_sha256": "a2fd3146d98111dd689367ef0245f2f526d14e67ebe853c06667addc6bd62fe9",
+    "sop": "S2 (docs/SOP_parameters.md 2026-10-30)",
+    "sha256": "1f39e3263187b07593ecc0fe8382f0c932327ef80e3db1d3b37685172d05b702",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.101,
+      "vlm": false,
+      "version": "nudenet3.4+clipL14v2+qwen3vl-v3"
+    },
+    "hair_blue_frac": 0.471,
+    "attempt": 0,
+    "gen_seconds": 71.0,
+    "supersedes": [
+      "id_front_bare_s0.png"
+    ],
+    "created_at": "2026-10-30T12:50:51",
+    "generator": "tools/gen_assets_v2.py"
+  },
+  {
+    "file": "id_34L_v2.png",
+    "kind": "plate",
+    "design": "LW-ID-34L",
+    "name": "3/4 侧脸（脸朝画面左）",
+    "angle": "34L",
+    "makeup": null,
+    "method": "two_stage_identity (compose → master face swap → refine)",
+    "compose_prompt": "真实人像照片：一位22岁的东亚成年女性，鹅蛋脸，下颌线柔和，中等大小的杏眼，灰蓝色美瞳（瞳孔大小正常），鼻梁细直，嘴唇饱满、上唇有小唇珠，左脸颊靠近鼻翼有一颗小痣，冷调白皙皮肤，雾霾天蓝色及腰直发（比参考图略深、带一点灰的真实染发色），齐刘海，发色是一眼可见的中浅天蓝色、颜色饱和清楚，双手不碰脸。淡粉色系妆容（草莓粉腮红、水润粉色唇釉、根根分明的卷翘睫毛），四分之三侧脸头肩照：她的脸和身体朝向画面左侧约45度，眼睛看向画面左前方，中性表情，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光。真实相机拍摄的人像照片，未修图原片，真实皮肤质感，可见细小毛孔与细软绒毛，自然的轻微不对称，眼睛为真实人眼大小，真实的一根根发丝与少量碎发飞丝；shot on Leica M11, Summilux 50mm f/1.4",
+    "swap_prompt": "图1是这张角色资产照的画面构图。保持图1的构图、机位、景别、人物姿势与朝向、表情、服装、背景和光线不变，只把图1中林晚的五官长相、发色与发型换成图2人物的样子（与图2完全相同的鲜明天蓝色发色，雾霾天蓝色及腰直发（比参考图略深、带一点灰的真实染发色），齐刘海，冷白皮肤，左脸颊靠近鼻翼的小痣），妆容也换成图2的粉甜妆容（草莓粉腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛），灰蓝色美瞳；人物的手与手臂保持图1的位置（不要托腮），不要沿用图2的姿势、手势、项链、服装和背景。",
+    "compose_file": "golden/assets/v2_work/plates/id_34L_a0_compose.png",
+    "swap_file": "golden/assets/v2_work/plates/id_34L_a0_swap.png",
+    "compose_references": [],
+    "compose_qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.064,
+      "vlm": false,
+      "version": "nudenet3.4+clipL14v2+qwen3vl-v3"
+    },
+    "negative": "磨皮, 塑料皮肤, 蜡像, 娃娃脸, 放大瞳孔, 粘连睫毛, 大面积圆形腮红, 满脸闪粉, 硬边唇线, CGI, 3D render, airbrushed, 动漫比例, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 走光, 内衣外露, 项链, 文字, 水印",
+    "seeds": {
+      "compose": 178078453295860,
+      "edit": 203616233623425,
+      "refine": 193989860384399
+    },
+    "seed": 193989860384399,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 3.0,
+    "edit_cfg": 1.0,
+    "lora": [
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.3
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png → face crop, hand/necklace greyed: golden/assets/v2_work/master_face_nohand.png sha fb459b658748"
+    ],
+    "master": "assets/characters/lin_wan/plates/master.png",
+    "master_sha256": "b8e7b00b675663743a75e4fa86538b70cc87764fa2bdbe06edf82c3343492733",
+    "master_source": "CM_s1 (owner-approved 2026-10-30)",
+    "bible_sha256": "a2fd3146d98111dd689367ef0245f2f526d14e67ebe853c06667addc6bd62fe9",
+    "sop": "S2 (docs/SOP_parameters.md 2026-10-30)",
+    "sha256": "8a85683f92fc1f0601503e3e45c379c138565321e5d5223e3370ed606c6986f9",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.139,
+      "vlm": false,
+      "version": "nudenet3.4+clipL14v2+qwen3vl-v3"
+    },
+    "hair_blue_frac": 0.48,
+    "attempt": 0,
+    "gen_seconds": 138.0,
+    "supersedes": [
+      "id_34L_s0.png"
+    ],
+    "created_at": "2026-10-30T12:53:09",
+    "generator": "tools/gen_assets_v2.py"
+  },
+  {
+    "file": "id_34R_v2.png",
+    "kind": "plate",
+    "design": "LW-ID-34R",
+    "name": "3/4 侧脸（脸朝画面右）",
+    "angle": "34R",
+    "makeup": null,
+    "method": "two_stage_identity (compose → master face swap → refine)",
+    "compose_prompt": "真实人像照片：一位22岁的东亚成年女性，鹅蛋脸，下颌线柔和，中等大小的杏眼，灰蓝色美瞳（瞳孔大小正常），鼻梁细直，嘴唇饱满、上唇有小唇珠，左脸颊靠近鼻翼有一颗小痣，冷调白皙皮肤，雾霾天蓝色及腰直发（比参考图略深、带一点灰的真实染发色），齐刘海，发色是一眼可见的中浅天蓝色、颜色饱和清楚，双手不碰脸。淡粉色系妆容（草莓粉腮红、水润粉色唇釉、根根分明的卷翘睫毛），四分之三侧脸头肩照：她的脸和身体朝向画面右侧约45度，眼睛看向画面右前方，中性表情，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光。真实相机拍摄的人像照片，未修图原片，真实皮肤质感，可见细小毛孔与细软绒毛，自然的轻微不对称，眼睛为真实人眼大小，真实的一根根发丝与少量碎发飞丝；shot on Leica M11, Summilux 50mm f/1.4",
+    "swap_prompt": "图1是这张角色资产照的画面构图。保持图1的构图、机位、景别、人物姿势与朝向、表情、服装、背景和光线不变，只把图1中林晚的五官长相、发色与发型换成图2人物的样子（与图2完全相同的鲜明天蓝色发色，雾霾天蓝色及腰直发（比参考图略深、带一点灰的真实染发色），齐刘海，冷白皮肤，左脸颊靠近鼻翼的小痣），妆容也换成图2的粉甜妆容（草莓粉腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛），灰蓝色美瞳；人物的手与手臂保持图1的位置（不要托腮），不要沿用图2的姿势、手势、项链、服装和背景。",
+    "compose_file": "golden/assets/v2_work/plates/id_34R_a0_compose.png",
+    "swap_file": "golden/assets/v2_work/plates/id_34R_a0_swap.png",
+    "compose_references": [],
+    "compose_qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.102,
+      "vlm": false,
+      "version": "nudenet3.4+clipL14v2+qwen3vl-v3"
+    },
+    "negative": "磨皮, 塑料皮肤, 蜡像, 娃娃脸, 放大瞳孔, 粘连睫毛, 大面积圆形腮红, 满脸闪粉, 硬边唇线, CGI, 3D render, airbrushed, 动漫比例, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 走光, 内衣外露, 项链, 文字, 水印",
+    "seeds": {
+      "compose": 177222591489295,
+      "edit": 171389999311846,
+      "refine": 204932442541187
+    },
+    "seed": 204932442541187,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 3.0,
+    "edit_cfg": 1.0,
+    "lora": [
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.3
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png → face crop, hand/necklace greyed: golden/assets/v2_work/master_face_nohand.png sha fb459b658748"
+    ],
+    "master": "assets/characters/lin_wan/plates/master.png",
+    "master_sha256": "b8e7b00b675663743a75e4fa86538b70cc87764fa2bdbe06edf82c3343492733",
+    "master_source": "CM_s1 (owner-approved 2026-10-30)",
+    "bible_sha256": "a2fd3146d98111dd689367ef0245f2f526d14e67ebe853c06667addc6bd62fe9",
+    "sop": "S2 (docs/SOP_parameters.md 2026-10-30)",
+    "sha256": "1b8fcebd0829781ece43d97240d2e35e8060089e934271223ad5b3615556fbe9",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.079,
+      "vlm": false,
+      "version": "nudenet3.4+clipL14v2+qwen3vl-v3"
+    },
+    "hair_blue_frac": 0.51,
+    "attempt": 0,
+    "gen_seconds": 135.1,
+    "supersedes": [
+      "id_34R_s0.png"
+    ],
+    "created_at": "2026-10-30T12:55:24",
+    "generator": "tools/gen_assets_v2.py"
+  },
+  {
+    "file": "id_profile_v2.png",
+    "kind": "plate",
+    "design": "LW-ID-P",
+    "name": "正侧面（脸朝画面左）",
+    "angle": "P",
+    "makeup": null,
+    "method": "two_stage_identity (compose → master face swap → refine)",
+    "compose_prompt": "真实人像照片：一位22岁的东亚成年女性，鹅蛋脸，下颌线柔和，中等大小的杏眼，灰蓝色美瞳（瞳孔大小正常），鼻梁细直，嘴唇饱满、上唇有小唇珠，左脸颊靠近鼻翼有一颗小痣，冷调白皙皮肤，雾霾天蓝色及腰直发（比参考图略深、带一点灰的真实染发色），齐刘海，发色是一眼可见的中浅天蓝色、颜色饱和清楚，双手不碰脸。淡粉色系妆容（草莓粉腮红、水润粉色唇釉、根根分明的卷翘睫毛），标准正侧面头肩照：她的脸完全转向画面左侧90度，只看到一只眼睛，鼻尖和下巴的侧面轮廓清晰，齐刘海从侧面看呈一条直线，长直发垂到背后，中性表情，穿素色浅灰色圆领短袖T恤，不戴任何首饰，背景为纯净的中性灰色无缝摄影背景纸（#808080），无任何道具，柔和均匀的大面积棚拍光。真实相机拍摄的人像照片，未修图原片，真实皮肤质感，可见细小毛孔与细软绒毛，自然的轻微不对称，眼睛为真实人眼大小，真实的一根根发丝与少量碎发飞丝；shot on Leica M11, Summilux 50mm f/1.4",
+    "swap_prompt": "图1是这张角色资产照的画面构图。保持图1的构图、机位、景别、人物姿势与朝向、表情、服装、背景和光线不变，只把图1中林晚的五官长相、发色与发型换成图2人物的样子（与图2完全相同的鲜明天蓝色发色，雾霾天蓝色及腰直发（比参考图略深、带一点灰的真实染发色），齐刘海，冷白皮肤，左脸颊靠近鼻翼的小痣），妆容也换成图2的粉甜妆容（草莓粉腮红、水润粉色唇釉、浓密卷翘但根根分明的睫毛），灰蓝色美瞳；人物的手与手臂保持图1的位置（不要托腮），不要沿用图2的姿势、手势、项链、服装和背景。",
+    "compose_file": "golden/assets/v2_work/plates/id_profile_a0_compose.png",
+    "swap_file": "golden/assets/v2_work/plates/id_profile_a0_swap.png",
+    "compose_references": [],
+    "compose_qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.059,
+      "vlm": false,
+      "version": "nudenet3.4+clipL14v2+qwen3vl-v3"
+    },
+    "negative": "磨皮, 塑料皮肤, 蜡像, 娃娃脸, 放大瞳孔, 粘连睫毛, 大面积圆形腮红, 满脸闪粉, 硬边唇线, CGI, 3D render, airbrushed, 动漫比例, 多余手指, 手指融合, 肢体变形, 未成年人外观, 裸体, 裸露, 走光, 内衣外露, 项链, 文字, 水印",
+    "seeds": {
+      "compose": 59874692084106,
+      "edit": 15391971810852,
+      "refine": 247515441011264
+    },
+    "seed": 247515441011264,
+    "size": [
+      1024,
+      1024
+    ],
+    "model": "qwen_image_2.1_int8_convrot.safetensors",
+    "steps": 35,
+    "cfg": 3.0,
+    "edit_cfg": 1.0,
+    "lora": [
+      [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+      ]
+    ],
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors",
+    "refine": {
+      "scale": 1.5,
+      "steps": 12,
+      "denoise": 0.3
+    },
+    "references": [
+      "assets/characters/lin_wan/plates/master.png → face crop, hand/necklace greyed: golden/assets/v2_work/master_face_nohand.png sha fb459b658748"
+    ],
+    "master": "assets/characters/lin_wan/plates/master.png",
+    "master_sha256": "b8e7b00b675663743a75e4fa86538b70cc87764fa2bdbe06edf82c3343492733",
+    "master_source": "CM_s1 (owner-approved 2026-10-30)",
+    "bible_sha256": "a2fd3146d98111dd689367ef0245f2f526d14e67ebe853c06667addc6bd62fe9",
+    "sop": "S2 (docs/SOP_parameters.md 2026-10-30)",
+    "sha256": "772f8d723be233224d59cb1644b7724b5089e9915386d4eb47e098f9475446d0",
+    "qc": {
+      "nudity": false,
+      "hits": [],
+      "clip_bare": 0.09,
+      "vlm": false,
+      "version": "nudenet3.4+clipL14v2+qwen3vl-v3"
+    },
+    "hair_blue_frac": 0.511,
+    "attempt": 0,
+    "gen_seconds": 138.4,
+    "supersedes": [
+      "id_profile_s0.png"
+    ],
+    "created_at": "2026-10-30T12:57:43",
+    "generator": "tools/gen_assets_v2.py"
   }
 ]

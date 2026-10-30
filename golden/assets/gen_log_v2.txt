@@ -2,3 +2,17 @@
 12:29:41 plates/id_front_bare_v2_cfg3 247s a0 qc_bare=0.027 vlm=False
 12:29:41 done 2/2 in 503s
 12:32:31 plates/id_front_v2_cfg1 168s a0 qc_bare=0.252 vlm=False
+12:34:43 plates/id_front_bare_v2_cfg1 132s a0 qc_bare=0.03 vlm=False
+12:34:43 done 2/2 in 301s
+12:37:56 plates/id_front_v2_p2 139s a0 qc_bare=0.117 vlm=False
+12:40:14 plates/id_front_bare_v2_p2 138s a0 qc_bare=0.023 vlm=False
+12:40:14 done 2/2 in 278s
+12:43:22 plates/id_front_v2 158s a0 qc_bare=0.122 vlm=False
+12:43:22 done 1/1 in 158s
+12:46:30 plates/id_front_v2_p3 159s a0 qc_bare=0.121 vlm=False
+12:46:30 done 1/1 in 159s
+12:49:39 plates/id_front_v2 162s a0 qc_bare=0.121 vlm=False hair_blue=0.497
+12:50:51 plates/id_front_bare_v2 71s a0 qc_bare=0.101 vlm=False hair_blue=0.471
+12:53:09 plates/id_34L_v2 138s a0 qc_bare=0.139 vlm=False hair_blue=0.48
+12:55:25 plates/id_34R_v2 135s a0 qc_bare=0.079 vlm=False hair_blue=0.51
+12:57:43 plates/id_profile_v2 138s a0 qc_bare=0.09 vlm=False hair_blue=0.511

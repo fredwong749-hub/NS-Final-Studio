@@ -70,3 +70,39 @@
 | QA-10 | ✅ 已修 | 下载异常信息里的 token 打码 |
 | QA-03/04/05 | ✅ 已修（画质 agent） | 地点所有格不再触发角色锁；无逗号运镜只去英文运镜词、括号内“——”不切；Frame Spec 不重复材质句；set_active 拒绝成人镜头的笔记本版本（QA-02 代码闸门） |
 | QA-11/12 | 等 v3 / 原稿 | — |
+
+## 2026-10-30 全站走查（fredw-92 debug agent）
+
+走查方式：CDP 无头 Chrome 逐页加载（总览 / 集 ep01 / ep01-S1 / ep60-S5 / 节点 / 资产 / 人物 / 导入 / #/projects / #/inbox / #/script-chat），收集 console 错误与警告、未捕获异常、≥400 或失败的请求、>10 s 的慢请求、是否卡在“加载中”；交互：检查器 7 个 tab、点帧开查看器、A/B、版本条、资产灯箱、导入页「校验格式」（只读）。API：枚举 `app.routes` 里的全部 GET（含各 router），参数用 ep1 / ep60、ep01-S1（gpu3 负责）、ep60-S5、lin_wan 等。不触发出图、gpu3 重出、Qwen 任务或剧本导入。脚本在会话临时目录（crawl.mjs / sweep.py），不进仓库。
+
+| ID | 页面 / 接口 | 现象 | 原因 | 修复 | 测试 |
+|---|---|---|---|---|---|
+| QA30-01（中） | `GET /api/qwen/tasks` | 每次 11–12 s | 本地已取消的任务（status=cancelled）不在 TERMINAL 里，列表每次都向上游补问，上游已删 → 404，一个约 1 s | `qwen_mailbox.TERMINAL` 加 `cancelled` → 0.9 s | `tests/test_qa_laptop_1030.py::test_qwen_list_skips_cancelled` |
+| QA30-02（高） | 集视图 / 查看器缩略图 `GET /api/gpu3-media/…/takes/*.png` | 大量 502，gpu3 镜头的帧图空白 | 桥隧道慢（2.8 MB 一张要 14–22 s），并发时 5 s 超时 → 熔断 15 s → 这段时间所有缩略图 502；每次打开都重新经桥取 | `takes/` 下带版本号的文件取完整一次就存到 `data/cache/gpu3_media/<rel>`（写 .part 再改名，长度不对就丢弃；Range 请求不存；frame/last/video.mp4 会被 gpu3 覆盖，不缓存）。第二次 0.12 s，桥断时已缓存的照样能看 | `test_gpu3_media_takes_cached` |
+| QA30-03（中） | `GET /api/episodes` | 2–12 s，页面同时加载时 13–25 s，节点视图曾卡在「加载节点画布…/加载 ep01-S1…」20 s | 每次请求都在 Windows 上做几千次 `Path.resolve()`（每次 `_rel` 都重新 resolve `P.DATA`；`assets.file_url` 每次都 resolve `ASSETS_DIR`） | `readiness._rel` 缓存 DATA 根和镜头目录的 resolve 结果（按 `str(P.DATA)` 作 key，测试换根也对）；`assets.file_url` 缓存 ASSETS_DIR 的 resolve。resolve 6465 → 2745 次，热态约 3 s | `test_rel_cached_matches_resolve` |
+| QA30-04（低） | ep60 集视图 | `GET /api/looks/episodes/61` 404 | 刷新造型时取 [n-1, n, n+1]，末集也请求 n+1 | `store.tsx`：按已知最大集号过滤 | 手动复现：打开 `/?view=episode#ep60-S5`，确认没有 404（走查第 2 轮已通过）。没有前端测试运行器 |
+| QA30-05（中） | 全部画布页 | 一打开就并发两次 `/api/episodes`（各 8.8 MB），互相拖慢到 >20 s | 开发模式下 StrictMode 双挂载；轮询 / 改动刷新和在途请求叠加，没有合并 | `store.tsx` 的 `refreshEpisodes` 合并在途请求：300 ms 内重复的调用直接复用；更晚来的调用标记一次，本次结束后再刷一次（调用方拿到的总是之后的数据） | 手动：`performance.getEntriesByType('resource')` 里 `/api/episodes` 由 2 次降到 1 次 |
+| QA30-06（信息） | 全部画布页 | `/favicon.ico` 404 | index.html 没有设图标 | ✅ 已修（fredw-25，T60）：index.html 加 `<link rel="icon" href="/favicon.svg">` + `apps/web/public/favicon.svg`；API 托管 dist 时根下静态文件直出 | `tests/test_episodes_fast.py::test_spa_serves_root_static_files_and_blocks_traversal` |
+| QA30-07（信息） | 节点视图 | React Flow 警告「hiding the attribution」 | `proOptions.hideAttribution` 需要 React Flow Pro 订阅 | 不修：是授权问题，交项目方决定 | — |
+| QA30-08（信息） | `GET /api/qwen/tasks/{id}`、`…/files` | 已取消任务返回 404 | 上游信箱已删除这个任务，属预期 | 不修 | — |
+
+API 扫描（修复后）：全部 GET 无 5xx、无超过 10 s 的请求。4xx 都是预期结果：projects/weita 的 style、characters 返回 409（现有项目不能在向导里改）；`/api/docs/REQUIREMENTS` 404（白名单外）；`/api/script-input/text` 缺 path 返回 422；gpu3-media 路径越界返回 400。
+复测：12 个页面 / 交互全部渲染，没有 console 错误或未捕获异常；除 favicon 外没有 ≥400 的请求。pytest 498 通过 / 4 跳过（含新增 3 个）；tsc 0 错误。注：复测时 `/api/script-chat/config`、`/system` 曾短暂 500（config/script_chat_rules_appendix.md 缺失，另一会话正在加这个文件），文件补上后恢复 200，不是本轮改动引起。API 已用同样的命令在 :8800 重启，加载了新代码。
+
+
+## 第 4 轮 — 2026-10-30 晚（fredw-5c，后端与工具链）
+
+范围：导入 → 编译 → frame_spec → state_timeline → 装配（T38）→ 校色（T52）。只读检查用 `scratchpad/qa/pipeline_check.py`（重新导入到临时文件后与 data/import 比对；全量编译 + build_spec 检查格式、残留触发词、重复材质句、尾帧缺规格词；state_timeline --check）。API 契约本轮未扫（fredw-92 走查已覆盖）。
+
+| ID | 严重度 | 区域 | 现象 | 修复 | 测试 |
+|---|---|---|---|---|---|
+| QA4-01（中） | 导入 / state_timeline | 剧本 .md 源文件在导入后又被改过（两份 v2 源 sha 都变了），画布读的仍是旧导入，没有任何提示 | ✅ `state_timeline.source_drift()`；时间线 `source.changed_sources`；`tools/s1_gate.py` 输出并提示“需项目方重新导入”。SOP 闸门是否据此加 blocker 由 fredw-92 决定（services/api） | `test_source_drift_flags_edited_or_missing_script_files`、`test_timeline_source_lists_changed_sources` |
+| QA4-02（高） | 编译器 G1 | 尾帧不追加触发词、材质条目（漆皮 / 6mm 细跟 / 脚趾甲）和纠正器条目（特写 / 暗场 / 安全镜），首尾帧造型对不上；frame_spec qwen_last 同样 | ✅ 两条路径都按“首帧原文 + 结束状态”补，规则同首帧；项目方定“系统自动补”，加去重（写作者已写的同一条目不再加，尾帧只和自己的文字比） | `tests/test_last_frame_specs.py`；t06 金标准更新 last_prompt / qwen_last |
+| QA4-03（高） | 渲染数据 data/renders | ep01 换成 rules_v2 剧本并恢复整集 🔴 后，S1–S6 仍挂着笔记本 04:17–07:29 按旧剧本出的当前首帧（S1 还有尾帧） | ✅ 同 QA-02：active 去掉 image/last，frame.png / last.png → `*.deactivated_adult`，文件全部保留，记入 data/renders/qc_log.jsonl | `NS_QA_DATA=1 pytest tests/test_qa_laptop.py` 22 通过 |
+| QA4-04（中） | 装配 T38 | G13 定“剧本写整数秒、实际片长交给 H3”，装配仍把每镜裁切 / 定格到剧本秒数 | ✅ 有视频的镜头按视频实际时长装配，占位静帧才用剧本秒数；时间线记 `script_duration_s`、`duration_from`。fredw-92 的 4K VBV 与 _cc source_sha256 保留 | `tests/test_post.py::test_assemble_episode_end_to_end` |
+| QA4-05（中） | 测试 | 20:02 导入只剩 ep01 时 19 个测试失败：test_looks / test_sop / test_qa_laptop / test_quality_v2 直接读 data/import/script_v2.json，并写死 60 集 × 6 镜、ep01-S3 非成人 | ✅ 功能测试改读固定剧本 `tests/fixtures/t06_golden/data/import/script_v2.json`；test_qa_laptop 默认也用它，`NS_QA_DATA=1` 才查真实数据；镜数检查改为镜号从 1 连续 | 全量 531 通过 / 4 跳过 |
+| QA4-06（低） | 测试 | `tests/test_readiness.py::test_blocked_status_and_continuity` 在一次全量里失败，单跑与重跑都通过（疑似与并发改动或用例顺序有关）；同样情况：`tests/test_episodes_fast.py::test_detail_matches_legacy_and_summary_endpoint` 在一次全量中失败（运行期间 services/api/ns_api/app.py 被改动），单跑 5/5 通过 | 观察中（封板后在无并发改动时复跑全量确认） | — |
+| QA4-07（信息） | LoRA 注册表 | 笔记本与 gpu3 的 LORA_REGISTRY.json 里 lin_wan_qi_v1 仍是 status=training、sha256=null，state_timeline 因此给林晚镜头标 `lora:lnwan_qi:training` | 原因：gpu3 真记录在 `ComfyUI/models/loras/LORA_REGISTRY.json`（accepted、sha256 873b727b…、strength 0.8，文件已在 loras/），镜像 `data/renders_gpu3/LORA_REGISTRY.json` 未同步；已告知 fredw-92 改同步源 | — |
+| QA4-08（信息） | 校色 T52 | ep01-S1/S2 本地没有匹配首帧关键帧，dry-run 跳过 | 已知（T52：等 gpu3 同步关键帧） | — |
+
+同轮按项目方决定的系统改动（非缺陷）：成人判定默认恢复整集 🔴 继承（逐镜代码保留，`config/adult_overrides.json` `"per_shot": false`）；编译器读 `config/auto_lora_triggers.json`，把 lnwan_qi 放在首尾帧触发词最前、本机缺 LoRA 文件也不剥掉、不重复；阴环珠数据改为 5mm、左4 阴蒂1 右4、不锈钢本色；SOP 时长语义（G13）。

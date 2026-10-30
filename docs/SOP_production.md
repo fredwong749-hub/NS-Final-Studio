@@ -26,6 +26,15 @@
 
 ---
 
+## ★ 分工：Qwen 负责内容，Claude 只写系统（硬规则，2026-10-30 项目方定，所有剧本、所有会话适用）
+
+> 项目方原话：“qwen负责剧本，镜头，提示词等内容写作”；“claude opus 负责写系统”；“claude不做任何内容参与，也不评价内容，分工清晰，qwen主要负责内容”。详见 `docs/REQUIREMENTS.md` G1–G3。
+
+- **Qwen（gpu3 常驻写作模型）**：剧本、分镜/镜头、画面与视频提示词、训练集标注、样图与评测提示词、造型/妆容描述，以及一切内容上的评价与挑选。
+- **Claude（所有 Claude 会话）**：只写系统——代码、流水线、调度与锁、数据格式与校验、技术检查（字段、哈希、尺寸、自动 QC），并把 Qwen 的输出原样接入。**不写、不改、不润色内容，不评价内容，也不参与任何内容审核**（不审阅、不批准/驳回、不挑选、不打分）；遇到内容问题交给 Qwen 或项目方。自动 QC 属于系统代码，Claude 可实现，标准由项目方/Qwen 定（REQUIREMENTS G5）。Blender 代码与 LoRA 也归 Qwen（G4）。
+- **项目方**：各确认关口照旧拍板。
+- **gpu3 分卡**（封板修复 2026-10-30，按 REQUIREMENTS G3）：GPU1 = Qwen LLM 常驻（:8098）；GPU0 / GPU3 = Qwen LoRA 训练 / Blender，渲染时临时借用（按 train.lock / gpu.lock 在任务边界接手，不杀进程）；GPU2 坏卡永不使用（T53）。
+
 ## ★ 阶段闸门与资源优先级（硬规则，2026-10-30 项目方定，所有剧本适用）
 
 > 项目方原话：“剧本必须把资产生成完毕，然后图片什么的，最后才分配资源生成视频；如果每个镜头缺少任何一个环节，都不会去 render 视频……用这个 SOP 来把控，不要重复制造垃圾。”
@@ -55,7 +64,8 @@
 5. **S5 4K / 重型后期**
 
 - 多部剧并存时：先按阶段优先级，再按剧的立项先后。
-- GPU 2 永不使用；GPU 借用（lend）只能由调度器写，各流水线只认调度器分给自己的卡。
+- GPU 2 永不使用。**现行（封板修复 2026-10-30，D-22）**：阶段调度器 ns-sched（T46）**关闭**，改用固定分卡（见 ★ gpu3 分卡）+ 锁协议，渲染借卡由项目方 / 总调度手动安排；下面两条只在将来重新启用调度器时适用。
+- GPU 借用（lend）只能由调度器写，各流水线只认调度器分给自己的卡。
 - 调度器每 5 分钟重算一次；任何流水线想跳级（例如资产没齐就出视频）会被拒绝并记入异常队列。
 - 测速、基准测试（bench）不属于任何生产阶段：只能用调度器标记为空闲的卡，每次不超过 10 分钟，有 S1–S5 待办时让出（协调 2026-10-30，起因是巡检 #4 发现 sage-bench 占用 GPU1）。
 
@@ -66,9 +76,9 @@
 - 剧本或资产变了（sha 变化）→ 只把受影响的镜头退回对应阶段，不整集重跑。
 - 每阶段第一次在新剧上跑时，先做 1 集样本、人看过再放量（首集即 G4）。
 
-### 4. 如何提问 SOP 管理员（claude-sop）
+### 4. 如何提问 SOP 管理员（fredw-5c；claude-sop 已结束）
 
-- **谁管**：claude-sop 是本 SOP 与 `docs/SOP_parameters.md`（参数锁定表）的唯一写入者。它只在纸面上放行或拦截；真正执行拦截的是调度器（T46）和渲染器。需要停掉什么，由它通知协调（claude-gpu3）。
+- **谁管**：fredw-5c（2026-10-30 起接替已结束的 claude-sop，总调度 fredw-b3 指派）是本 SOP 与 `docs/SOP_parameters.md`（参数锁定表）的唯一写入者；下文的“claude-sop”均指 SOP 管理员。它只在纸面上放行或拦截；真正执行拦截的是调度器（T46）和渲染器。需要停掉什么，由它通知协调（claude-gpu3）。
 - **什么时候问**：每一步动手前都要问，包括进入新阶段、启动批量、改参数、改编译输入（剧本、造型、视觉圣经）。
 - **怎么问**：发一条消息，写明“即将在 <剧/集/镜> 做 <事>，阶段 Sx，用 <参数/模型/LoRA>，依赖 <上游产物>”。
 - **它查什么**：
@@ -120,7 +130,7 @@ projects/<剧名>/
 
 ## 2. 剧本导入与校验
 
-- 格式：沿用《为他而骚》的 Markdown 结构（`## epNN《》`、`**镜N｜img**`、`**motion**`、`**sound**`、`**对白**`、`🎙`、`**负面追加**`；可选 `**时长**`、`**配乐**`、`【亲密声】`、`【H3 audio】`、`【配乐】`、触发词前缀）。
+- 格式：沿用《为他而骚》的 Markdown 结构（`## epNN《》`、`**镜N｜img**`、`**motion**`、`**sound**`、`**对白**`、`🎙`（K3：`**负面追加**` 已作废，导入器仍认旧剧本）；必写 `**时长**`（K4），可选 `**配乐**`、`【亲密声】`、`【H3 audio】`、`【配乐】`、触发词前缀）。
 - 导入器：`tools/import_script.py --script <file>` → `data/import/script_*.json`（每镜 `adult`、`duration`、对白/舞台提示拆分、触发词）。
 - 自动校验：集数×镜数、对白每秒 ≤3.5 字、触发词与 LoRA 注册表一致、装饰状态表完整；问题列入异常队列。
 - **剧本唯一写入者**：claude-gpu3（其他人改剧本发消息）。每次修改留 `*.bak-<日期>-<原因>` 备份并同步 gpu3（sha256 校验）。
@@ -144,7 +154,7 @@ projects/<剧名>/
 4. 单品库：服装、鞋、饰品——每件出“产品图 + 穿着图”；暴露类单品只做产品图（笔记本侧），穿着图走 gpu3。
 5. 造型 A/B/C 与**造型排期**（角色 × 部件 × 集段，`data/looks/`）；界面甘特图调整，改动只把受影响镜头标为过期。
 
-## 5. LoRA 训练（gpu3，GPU1 为主）
+## 5. LoRA 训练（gpu3，GPU0 / GPU3；GPU1 = Qwen LLM 常驻，封板修复 2026-10-30）
 
 | 类型 | 数据来源（只用合成/无人商品图） | 触发词示例 |
 |---|---|---|
@@ -168,19 +178,19 @@ projects/<剧名>/
 剧本写好的就该是“H3 可直接用”的素材。以下每条都进 S1 校验，任何一条不过就算 S1 校验报错：
 
 1. `S1-W1` **motion = 一个连续镜头**：从首帧状态写到尾帧状态，中间没有剪辑；只有一个主动作、一个运镜。结束状态必须和尾帧（Picture 2）画得出来的样子一致，写在 motion 最后一个“——”之后，供尾帧编辑使用（visual_bible last_frame_keep）。依据 §9A.1 第 3–5 条。
-2. `S1-W2` **时长 → 合法帧数**：`**时长**：N秒` 必须落在 5–15 s，换算成 17k+5 网格上的帧数（向上取，见下表）；超过 15 s 的镜头拆成两镜。依据 §9A.3。
+2. `S1-W2` **时长 → 合法帧数**：`**时长**：N秒` 只写整数 N，必须落在 4–15 s（K4，每镜必写，系统不再默认 10 秒）；系统换算成 17k+5 网格上的帧数（向上取，见下表），实际片长交给 H3（以对齐句的 `S.SS` 为准，项目方 2026-10-30，h3_sound G13）；超过 15 s 的镜头拆成两镜。依据 §9A.3。
 
-| 秒（≤） | 5.17 | 5.88 | 6.58 | 7.29 | 8.00 | 8.71 | 9.42 | 10.12 | 10.83 | 11.54 | 12.25 | 12.96 | 13.67 | 14.38 | 15.08 |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 帧数 | 124 | 141 | 158 | 175 | 192 | 209 | 226 | 243 | 260 | 277 | 294 | 311 | 328 | 345 | 362 |
+| 秒（≤） | 4.46 | 5.17 | 5.88 | 6.58 | 7.29 | 8.00 | 8.71 | 9.42 | 10.12 | 10.83 | 11.54 | 12.25 | 12.96 | 13.67 | 14.38 | 15.08 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 帧数 | 107 | 124 | 141 | 158 | 175 | 192 | 209 | 226 | 243 | 260 | 277 | 294 | 311 | 328 | 345 | 362 |
 
    对齐句里的 `S.SS` 取 `f"{帧数/24:.2f}"`（表中“秒”一行即此值）。
-3. `S1-W3` **【H3 audio】 = 官方 soundscape 写法**：1–4 句英文，写环境声、动作声、非语言人声，不写台词，不写否定句。H3 原生音频只让林晚发声（亲密镜头强制；普通对话镜见 §9A.1 冲突说明）；配乐一律 `N/A`，由后期 BGM 负责。
+3. `S1-W3` **【H3 audio】 = 官方 soundscape 写法**：1–4 句英文，写环境声、动作声、非语言人声，不写台词，不写否定句。H3 原生音频只让林晚发声（亲密镜头强制；普通对话镜见 §9A.1 冲突说明）；配乐写进 `non_diegetic_music`（项目方 2026-10-30）：1–3 句英文，写乐器/速度/节奏/强弱；本镜无配乐写 `N/A`。
 4. `S1-W4` **台词按说话人分条**：每句台词标明说话人（“（顾沉）…／（她）…”），原文逐字，标点不改；不用双引号包进 img 或 motion；🎙 独白单独成行（不进 H3）。编译器据此生成 `(S1)…<d>[Chinese] …</d>`。
 5. `S1-W5` **首尾帧可生成**：首帧和尾帧必须是同一个镜头的起点和终点，即同一布景、同一光线、同一套服装；姿势变化在一个连续动作里能做到；景别变化不超过一个运镜能走完的范围（例如推近一档、上摇一段）。做不到的就拆镜，或标 `AddGuide` 中间关键帧（需 A/B）。
 6. `S1-W6` img、motion 里的中英混写运镜（如 `camera push in 缓慢推近`）要能映射到 §9A.1 的运镜词汇和幅度、速度词。
 7. `S1-W7`–`S1-W9` **每镜必须有 `**H3提示词**` 字段**（项目方 2026-10-30 指令，S1 必备）：
-   - 由剧本写入者（v3 agent）直接写成 §9A.1 的官方 FL2VA 全文：对齐句（按本镜帧数算 S.SS）、空行、三个字段、英文正文、`<d>[Chinese]` 逐字对白、无否定句、`non_diegetic_music: N/A`、亲密镜只让林晚发声。
+   - 由剧本写入者（v3 agent）直接写成 §9A.1 的官方 FL2VA 全文：对齐句（按本镜帧数算 S.SS）、空行、三个字段、英文正文、`<d>[Chinese]` 逐字对白、无否定句、`non_diegetic_music` 按 §9A.1（英文配乐或 N/A）、亲密镜只让林晚发声。
    - 这个字段在 S1 就要通过 H3-A/D/S 全部检查。
    - 出视频时原样使用，只允许按实际帧数重算 S.SS。
    - 缺这个字段，S1 不通过。
@@ -190,9 +200,11 @@ projects/<剧名>/
 
 共享模块 `ns_agent.frame_spec`：把剧本镜头拆成结构化画面说明（人物朝向/清晰度/占比/可见部位、饰品计数与位置、景别机位焦段、场景母版、首帧/尾帧状态、特殊手法、必有事实），再按模型渲染提示词（镜头与质感 → 身份参考角色说明 → 姿势表情 → 服装 → 饰品计数 → 鞋 → 美甲 → 场景光线 → 他人虚实 → 正面化约束）。项目方的“首/尾帧加强”字段原样追加。
 
+gpu3 渲染字段（T08）：`focus_part`/`focus_label`（焦点部位）、每角色 `gaze_start`/`gaze_end`（camera/other/down/up/away/object/closed）、`screen_share_value`、只含表情词的 `expression`，以及从 `data/state_timeline.json` 原样复用的 `framing`/`faces_visible`/`prop_states`/`changes_within_shot`/`items_end`；拿不准的标 `*_source: guess`。格式见 `docs/frame_spec_compiler.md` §6。
+
 ## 8. 首帧/尾帧（多轮出图）
 
-- 分工：非成人镜头 → 笔记本；成人镜头 → gpu3（`TASKS.md` 规则 7）。
+- 分工（封板修复 2026-10-30，现行）：成人判定 = 集标题 🔴 整集每镜都算成人（`config/adult_overrides.json` "per_shot": false）；本剧全部首尾帧由 gpu3 出（`config/shot_ownership.json`），笔记本不出本剧的帧；成人镜头由项目方本人启动（`TASKS.md` 规则 7）。
 - 每镜：清单（`checklist.json`）→ 每轮 2–4 张候选 → VLM 逐项打分 + 人脸相似度/背景虚化/色彩/文字检测 → 定点修（局部重绘、ControlNet、Blender 难镜头）→ 最多约 4 轮。
 - 尾帧以首帧为参考编辑出动作终态；两者都存为版本，画布显示。
 - 色调轻度匹配到项目色调参考图。
@@ -205,7 +217,7 @@ projects/<剧名>/
 ## 9. 视频（gpu3 唯一出视频处）
 
 - H3 FL2VA int8 + LightX2V 8 步（约 28 分钟/243 帧镜头）；亲密镜头若音质不过关改用 base 12–16 步或 10Eros 非加速（A/B 定）。
-- 首帧 + 尾帧锁定；时长按 `**时长**` 向上取 17k+5 网格帧数（≥124 帧，≤362 帧，见 §6 表），短镜头后期裁切。
+- 首帧 + 尾帧锁定；帧数按 `**时长**` 整数秒向上取 17k+5 网格（≥107 帧 = 4 s，≤362 帧，见 §6 表）。实际片长以 H3 输出为准（对齐句 `S.SS` = 帧数/24，243 帧 → 10.12 s），不再按剧本秒数后期裁切（项目方 2026-10-30，h3_sound G13）。
 - 提示词、帧数、分辨率、采样参数全部按 **§9A H3 视频规范（官方）**；参数值以 `docs/SOP_parameters.md` 的 S4 表为准。
 - 视频去重键：sha256(首帧)+sha256(尾帧)+提示词哈希+参数；同键不重渲。
 - 重渲队列：画布 → `data/renders_gpu3/rerender_queue.jsonl` → gpu3 处理 → `rerender_events.jsonl`。
@@ -267,8 +279,8 @@ non_diegetic_music: ...
 - `H3-D9` 片尾被截断的台词用 `<cutoff>`；跨剪辑延续的台词用 `<scenetrans>`，并写明音频跨切延续（[G]）。
 - `H3-D4` 不用双引号包台词（双引号会被烧成字幕，见「已知坑」）；不写人名。
 - `H3-D6` 🎙 内心独白**不进 H3**，后期 TTS（PIPELINE_LOCKED）。
-- `H3-D7` **本项目附加规则**（不是官方规则）：H3 原生音频每镜只让一个人发声；亲密镜头只让林晚发声（docs/intimate_audio.md，标【未验证】），男方呼吸放到后期。soundscape 里**不得**写 “no male voice” 这类否定句（违反第 8 条），改为正向写法，只列出林晚的呼吸和动作声。
-  - 冲突待定：普通对话镜（如 ep01 镜2，顾沉与林晚各一句）按官方语法可以写 (S1)(S2) 两人。若严格执行“只让林晚发声”，顾沉的台词就得移到后期 TTS，会有对口型风险。claude-sop 已报协调，项目方决定前，普通对话镜按官方双人语法执行，亲密镜按单人。
+- `H3-D7` **本项目附加规则**（不是官方规则；项目方 2026-10-30 定，**block**）：**每镜只让一个人说话**——H3 原生音频里同一镜只有一个说话人 `(S1)`；亲密镜只让林晚发声，男方呼吸放到后期。两个人对话就拆成两镜，各说各的（画布机检与 `validate_script_strict` 都按 block 执行）。soundscape 里不写 “no male voice” 这类否定句（违反第 8 条），用正向写法只列出发声者的呼吸和动作声。
+  - 历史：曾因“普通对话镜按官方语法可写 (S1)(S2) 两人”挂为冲突待定，按官方双人语法执行；已由项目方 2026-10-30 的“每镜一人说话”取代。
 
 **overall_soundscape**（[G]；`H3-S1`、`H3-S2`）：
 - 1–4 句英文，写成一段，内容是环境声、动作声、非语言人声：“Use 1–4 English sentences in one continuous paragraph to summarize the ambient sound, physical action sounds, …”
@@ -277,7 +289,7 @@ non_diegetic_music: ...
 
 **non_diegetic_music**（[G]；`H3-S3`）：
 - 1–3 句英文，写乐器、速度、节奏、强弱变化，不写抽象情绪词。
-- 没有配乐写 `N/A`。**本项目固定写 `N/A`**：配乐由后期 BGM 统一铺，避免与 BGM 打架（PIPELINE_LOCKED；画布上可编辑的配乐描述只作 BGM 提示，不进 H3）。
+- 没有配乐写 `N/A`。**项目方 2026-10-30 定：配乐进 H3**（取代原“本项目固定 N/A”）。取值：本镜人工（画布）> 剧本 **H3提示词** 自带（非 N/A）> 本集默认配乐 > `N/A`；只收英文，中文【配乐】提示只给后期、不翻译。后期是否在写了配乐的镜头上再铺整集 BGM：待项目方定（建议不铺，避免双重音乐）。
 
 **长度**（[K]；`H3-A11`、`H3-A12`）：
 - 描述的总时长必须与请求的视频时长一致（“Always match the total duration of the description to the requested video length (4–15 seconds).”）。
@@ -297,16 +309,16 @@ overall_soundscape: Crisp heel clicks echo off the marble floor over the soft mu
 non_diegetic_music: N/A
 ```
 
-**示例 2：ep01 镜2（固定机位，两句对白，243 帧）**。剧本对白：（顾沉低声）“蓝头发，很大胆。”／（她小声）“染了三年了……总经理。”（按上面的冲突说明，暂用官方双人语法。）
+**示例 2：普通对话镜（一人一镜，243 帧）**——只示范结构，尖括号是占位，不是生产文本。按 H3-D7，两个人的对话拆成两镜，每镜只有一个说话人 `(S1)`；另一人的台词写在下一镜（由写作者拆镜）。
 
 ```text
 How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 10.12-second mark of the target video.
 
-integrated_multimodal_description: [Shot 1] Live-action, cinematic, shallow depth of field, a static medium shot begins in the position, framing and lighting established by Picture 1, inside a narrow elevator car where a young woman with long ice-blue hair and straight bangs stands beside a man in a black tailored shirt, both reflected in the brushed-metal wall under the glow of the floor display. The man glances sideways at her for one second and looks ahead again. The on-screen middle-aged man with a low, calm, unhurried voice (S1) says quietly: <d>[Chinese] 蓝头发，很大胆。</d> She notices, blinks three times, lowers her head, and pulls the folder tighter against her chest. The on-screen young woman with a soft, small, slightly nervous voice (S2) says: <d>[Chinese] 染了三年了……总经理。</d> The two settle into the stance, spacing, and composition established by Picture 2 at the end of the shot.
+integrated_multimodal_description: [Shot 1] Live-action, cinematic, shallow depth of field, a <景别与运镜> begins in the position, framing and lighting established by Picture 1, <场景与人物外观（正向写法）>. <动作 1>. The on-screen <说话人外观与声音特征> (S1) says <语气>: <d>[Chinese] <这一镜唯一说话人的台词></d> <动作 2>. <主体> settles into the pose and composition established by Picture 2 at the end of the shot.
 
-overall_soundscape: The elevator hums steadily as it rises, and a soft chime marks each passing floor. Both of them breathe quietly in the confined space.
+overall_soundscape: <环境声与动作声，1–4 句英文，正向写法，不写台词>
 
-non_diegetic_music: N/A
+non_diegetic_music: <1–3 句英文，乐器 / 速度 / 节奏 / 强弱；没有就写 N/A>
 ```
 
 示例里的要点：
@@ -324,7 +336,7 @@ non_diegetic_music: N/A
 |---|---|---|---|
 | 帧率 `P-B3` | 24 fps | 锁定 | [N] `FPS = 24` |
 | 帧数网格 `P-B1` | 节点会把帧数**向上**对齐到 17k+5（`while n % 17 != 5: n += 1`），所以 4n+1 规则不适用。243 = 17×14+5，合法。时长与帧数对照见 §6 表 | 锁定 | [N][CN] |
-| 时长范围 `H3-A11` | 4–15 s（[K]）；本项目取 124–362 帧 | 锁定 | [K]；[R] |
+| 时长范围 `H3-A11` | 4–15 s（[K]）；本项目取 107–362 帧（K4，2026-10-31；4 s 档画质待实测） | 锁定 | [K]；[R] |
 | 分辨率 `P-B3` | 短边 768、面积上限 768×1344、边长为 32 的倍数（`BASE_SHORT_EDGE = 768`、`MAX_PIXELS = 768 * 1344`、`CANVAS_MULTIPLE = 32`）。原生 16:9 = 1344×768；我们是 9:16，用 **768×1344** | 锁定 | [N][CN] |
 | 首尾帧预裁 `P-B2` | 节点对首帧是 `_resize(..., "disabled")`（源码注释 “plain stretch to canvas”），对尾帧是 `"center"`（“aspect-preserving cover-crop”）；[CN]：“an off-aspect image comes out stretched”。所以**两帧都要先在本地用同一种方式 center-crop + lanczos 到 768×1344，并断言尺寸后再上传** | 锁定（gpu3 weita_render L1174–1186 已实现） | [N][CN] |
 | 关键帧强度 | 没有强度参数；“`denoise` does not scale guide strength” | 锁定（官方事实） | [CN] |
@@ -361,6 +373,7 @@ non_diegetic_music: N/A
 
 - gpu3：每集 BGM（`data/music/epXX.wav`）+ 每镜分层（Demucs 人声/其余、Foley、标志音库、对方呼吸）`renders_gpu3/epXX/SN/audio/`。
 - 笔记本：TTS（独白/对白，固定声线）、混音（Foley −6..−10 dB、独白处场景 −8..−12 dB、母带 −14 LUFS/−1 dBTP）。
+- **配乐规则（X-4，项目方 2026-10-30 选“按 E8 写进 H3”）：H3 的 non_diegetic_music 带本集 / 单镜配乐（取值 = 本镜修改 > 剧本 **H3提示词** 字段 > 【配乐】静默提示（N/A）> 本集【BGM】英文，函数 ns_agent.h3_prompt.resolve_music）；后期对 H3 已带配乐的镜头不再叠加 BGM（ns_post.music.h3_music_shots，装配时这些镜头的 BGM 静音，时间线 bgm.h3_music_shots 记录）。** gpu3 渲染器（模板 / 兜底提示词）、shot_audit 的 H3-S3、audio_post 已按本规则同步（fredw-ae，封板修复）。
 
 ## 12. 4K 放大（成集 QA 通过后）
 

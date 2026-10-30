@@ -20,7 +20,7 @@
 - `ns-studio/scripts/weita_render.py`：`image_graph` / `identity_graph` / `realism_graph` 里禁用了 NoctQ 路线；另有 `frame_route` 和 `block_explicit()`。
 - `ns-studio/scripts/weita_adult.py`：`do_shot` 和成人队列。
 - `tools/weita_v3/h3_rules.py`：X-NONEXPLICIT 检查。
-- 改动前的代码副本：`ns-studio/data/archive/pre_policy_20261030/`。
+- 改动前的代码副本：`ns-studio/data/archive/pre_policy_20261030/`。注意其中 `weita_render.py` 和 `weita_series.py` 不是原件：原件被误覆盖，这两份是从现有文件反向撤掉政策补丁重建的，里面还带着后来加的 H3 字段和画布修改功能；`weita_adult.py` 是原件。
 - 以上拦截是本工作流的设定。是否在本工作流之外另行处理这些镜头，由项目方自行决定；本工作流不参与。
 
 ## 4. 不受影响、继续进行的工作

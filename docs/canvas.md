@@ -135,7 +135,7 @@ Pydantic 模型在 `services/canvas_api/ns_canvas/models.py`，契约测试在 `
 
 - `ns_schema.edits.Take` / `ShotEdit`：take 字段和 `edit` 快照的结构都以它为准。它改了，这份契约跟着改。
 - `ns_render.pipeline` 的 take 目录布局，以及「`file` 相对 `data/`」这条约定。
-- `data/import/script_v2.json`（`tools/import_script.py` 的产物）：只用来列出每集有哪些镜号。gpu3 上用的是笔记本那份的拷贝：`nsfs_canvas/data/import/script_v2.json`。
+- `data/import/script_v2.json`（`tools/import_script.py` 的产物）：只用来列出每集有哪些镜号。gpu3 上用的是笔记本那份的拷贝：`nsfs_mirror/data/import/script_v2.json`（由 `ops/sync/pull_laptop.sh` 原子推送，桥的 `NSC_SCRIPT_JSON` 指向它；封板修复）。
 
 - gpu3 `ns-studio/scripts/weita_series.py` 的文件约定：
   - `STATUS.log` 行格式 `[epXX] ✅|⚠️|⛔ …`；
@@ -180,7 +180,7 @@ Pydantic 模型在 `services/canvas_api/ns_canvas/models.py`，契约测试在 `
 
 ### 7.2 `POST /api/gpu3/projects/{slug}/series`
 
-请求体 `{"action":"start|pause|stop","episodes":[2,3]|null,"adult_content":false,"by":"fredw-d9","note":""}`。`adult_content` 默认 `false`，只接受 JSON 布尔值，`"yes"`、`1`、`null` 都返回 422。返回写下的记录和 `written` 路径。`GET` 同一路径读当前标记。
+请求体 `{"action":"start|pause|stop","episodes":[2,3]|null,"adult_content":false,"by":"fredw-d9","note":""}`。`adult_content` 默认 `true`（2026-10-30 取消成人过滤器后只作记录），只接受 JSON 布尔值，`"yes"`、`1`、`null` 都返回 422。返回写下的记录和 `written` 路径。`GET` 同一路径读当前标记。
 
 写入的文件 `series_control.json`（`nsfs_canvas.series_control/v1`）：
 
@@ -197,7 +197,7 @@ Pydantic 模型在 `services/canvas_api/ns_canvas/models.py`，契约测试在 `
   - `pause`：做完手上这一镜后停下，等到 `start` 再继续。
   - `stop`：做完手上这一镜后退出，与现有 `STOP` 文件同义。
   - `start` + `episodes`：只跑这些集。
-  - `adult_content:false`：成人镜头一律跳过（记为 blocked）；`true` 才放行，而且只走本地模型（PLAN 硬规则）。
+  - `adult_content`：2026-10-30 起只记录，不再跳过成人镜头（旧版 `false` 会记为 blocked）。
   - 桥只写标记，不碰任何进程。
 
 ### 7.3 `GET /api/gpu3/gpus`
@@ -236,6 +236,47 @@ Pydantic 模型在 `services/canvas_api/ns_canvas/models.py`，契约测试在 `
 - 新剧在 gpu3 的产物：`renders_gpu3/<slug>/epXX/SN/…`；笔记本镜像：`data/renders_gpu3/<slug>/`（只读）。
 - 新剧剧本导入：`projects/<slug>/data/import/script_v2.json`，gpu3 镜像在 nsfs_canvas checkout 内的同一相对路径。
 - **G3 回交**：gpu3 改写好的新剧 v3 剧本交到 `projects/<slug>/script/*v3*.md`，可附 `*v3_changes.md` 说明改动。项目方在向导里审阅后重新导入。
+
+### 7.6 逐镜 H3 / 审计（画布“出视频”闸门）
+
+| 方法 | 路径 | 请求体 | 作用 |
+|---|---|---|---|
+| GET | `/api/gpu3/projects/{slug}/episodes/{ep}` | — | `{project, ep, audit_summary, shots:[ShotRenders…]}`<br>`audit_summary` = `{pass, fail, blocked, none, top_failures:[{rule_id,count}]×3}`，只统计有目录的镜 |
+| GET | `/api/gpu3/projects/{slug}/shots/{epXX-SN}` | — | 一镜的 `ShotRenders`（同 `/shots/{id}?project=`） |
+| POST | `/api/gpu3/projects/{slug}/shots/{id}/h3_edit` | `{"text":"…","by":"owner","base_sha":"<effective_sha256>"}` | 写 `edits.json.h3_prompt_override`，返回 lint 结果。**不渲染** |
+| GET | `/api/gpu3/rules` | — | 解析 `docs/audit/rule_ids.md` 全表 → `{rules_sha, version, count, rules:[{rule_id, rule, check, level, sop_ref, section, retired}]}` |
+| GET | `/api/gpu3/rules/{rule_id}` | — | gpu3 `ns-studio/scripts/shot_audit.py --explain <id> --json` 的输出，原样透出（`found, rule_id, rule, check, level, sop_ref, sop_lines[{line,text}], example_pass, example_fail, implementation, heuristic, rules_version`），另加 `rules_sha`、`retired`、`cached`<br>按「rule_id + 规则表 sha256」缓存；规则表一改，缓存自动失效<br>不在规则表里或不合法 → 404（不起子进程）；脚本说 `found:false` → 404；超时（`NSC_EXPLAIN_TIMEOUT`，默认 15 s）→ 504；输出不是 JSON → 502；脚本不可用 → 503 |
+| POST | `/api/gpu3/projects/{slug}/shots/{id}/override` | `{"rule_id":"H3-A5","owner_quote":"项目方原话","by":"owner"}` | 往 `edits.json.audit_override_requests` 追加一条豁免请求。**不写 status.json** |
+
+`ShotRenders` 新增的字段，都读自 `renders_gpu3/epXX/SN/`：
+
+- `audit`：`status.json.audit` 的 `version`、`verdict`、`failures[]`、`warnings[]`、`not_checked`、`overrides[]`、`invalid_overrides[]`、`h3_edit`、`prompt_sha`，原样透出。另加 `override_requests[]`，来自 `edits.json`。没有审计数据时为 `null`。
+- `h3`：`compiled.json` 的 `h3_prompt`、`h3_prompt_sha256`、`h3_prompt_source`、`h3_prompt_base_sha256`。另加：
+  - `override`：`edits.json.h3_prompt_override` = `{text, sha256, by, at, base_sha}`；
+  - `effective_sha256`：有 override 用 override 的 sha，否则用 `h3_prompt_sha256`。
+- `shot_state`：`status.json` 的 `state`、`blocked`（如 `explicit_content_not_supported`）、`owner`、`scene_id`、`segment_id`、`continuity`、`bible_version`。
+- `active_video`：active 视频 take 的 `n`、`prompt`、`prompt_sha256`（take 没写时由桥现算）、`reference`、`references`、`last_target`、`frames`。
+- `video_gate` = `{verdict, prompt_sha, effective_sha256, blocked, video_ok}`。
+  - `video_ok` 为真需要同时满足：`verdict == "pass"`，`prompt_sha == effective_sha256`，并且没有 `blocked`。
+  - 画布据此决定“出视频”按钮能不能点；桥本身不拦截任何东西。
+
+规则：
+
+- **h3_edit**
+  - `by` 必须是 `"owner"`，否则返回 403；`text` 为空返回 422。
+  - `base_sha` 应填改之前看到的 `effective_sha256`；不一致返回 409，防止覆盖别人刚改的版本。
+  - 写入用原子替换；每次修改另外追加一行到 `edits_history.jsonl`。
+  - lint 来自同步过去的仓库 `ns_schema/h3_lint.py`（gpu3：`nsfs_mirror/packages/schema/ns_schema/h3_lint.py`），用 `lint_h3(text, frames, intimate)` 调用：
+    - `frames` 依次取 `status.video.frames`、`compiled.frames`、视频 take 的 `frames`；
+    - `intimate` 取 `compiled.adult`；
+    - 已生效的 `audit.overrides` 计入豁免。
+  - 返回 `lint = {ok, failed[], warnings[], frames, intimate, results[], lint_file}`。
+  - 改完后由 gpu3 的 `shot_audit` 重新审计，得出新的 `verdict` 和 `prompt_sha`。
+- **override**
+  - `rule_id` 必须在 `docs/audit/rule_ids.md` 表格的第一列里，并且没有标“作废”。gpu3 的 `nsfs_mirror` 里没有这份表时，用桥 checkout 里随部署带过去的副本。
+  - `owner_quote` 去掉首尾空格后不能为空；`by` 必须是 `"owner"`（否则 403）。
+  - 写入格式：`{rule_id, owner_quote, by:"owner", at}`，同时追加到 `edits_history.jsonl`。
+  - 由 gpu3 的 `shot_audit` 把请求合并进 `status.json.audit.overrides`；无效的请求进 `invalid_overrides`。
 
 ## 8. 归档
 

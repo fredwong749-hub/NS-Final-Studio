@@ -216,6 +216,7 @@ bible_version(project_root="/root/ns-final-studio")    # 指定项目根
 > 2026-10-30 按 gpu3 渲染会话的 6 项请求增加（代码 `services/agent/ns_agent/gpu3_fields.py`，测试 `tests/test_state_timeline_gpu3.py`）。
 > 全部是**从剧本原文（img / motion，去掉触发词前缀和引号内屏幕字）确定性推出的文字规则**，只增字段。
 > 拿不准一律标 `*_source: "guess"`；`inherited` = 本段前面镜头写过。统计在 `stats.gpu3`。
+> Frame Spec（T08）原样复用本节的 `framing` / `faces_visible` / `props` / `changes_within_shot` / `items_end` / `visibility_end`（`build_spec(..., timeline_shot=...)`），不再另行推导；见 `docs/frame_spec_compiler.md` §6。
 
 ### 1. 每镜 `props`
 

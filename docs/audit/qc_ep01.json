@@ -1,0 +1,3221 @@
+{
+ "qc_version": "ns_qc/2026-10-30.1",
+ "episode": 1,
+ "mirror": "D:\\NS-Final Studio\\data\\renders_gpu3\\ep01",
+ "generated_at": "2026-10-30T06:00:27+00:00",
+ "bible_version_current": "da4109a65f1c",
+ "bible_version_source": "data/state_timeline.json bible_version",
+ "face_reference": "reference assets/characters/lin_wan/lin_wan.png (config/face_reference.json)",
+ "heartbeat": {
+  "gate": "Q-S1",
+  "pi": [
+   "PI-24"
+  ],
+  "metric": "sync_heartbeat_age_min",
+  "value": 7.3,
+  "threshold": "<= 30.0",
+  "status": "suggested",
+  "on_breach": "warn",
+  "source": "production_issues PI-24: 心跳超过 30 分钟没更新 → 报警（建议值）",
+  "verdict": "pass",
+  "detail": ".last_sync_gpu3: epoch in file 2026-10-30T05:53:08+00:00",
+  "last_sync_utc": "2026-10-30T05:53:08+00:00"
+ },
+ "shots": {
+  "S1": {
+   "shot": "S1",
+   "active": {
+    "image": 8,
+    "video": 2
+   },
+   "video": "D:\\NS-Final Studio\\data\\renders_gpu3\\ep01\\S1\\takes\\video_002.mp4",
+   "gates": [
+    {
+     "gate": "Q-K1",
+     "pi": [
+      "PI-08"
+     ],
+     "metric": "video_size",
+     "value": [
+      768,
+      1344
+     ],
+     "threshold": "== [768, 1344]",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "rule_ids P-B3 (24 fps, 768×1344)",
+     "verdict": "pass",
+     "detail": "video 768×1344 @ 24 fps, 243 frames"
+    },
+    {
+     "gate": "Q-K1b",
+     "pi": [
+      "PI-08"
+     ],
+     "metric": "keyframe_aspect_rel_diff",
+     "value": 0.0,
+     "threshold": "<= 0.01",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "rule_ids P-B2 (same 4:7 centre crop for first/last; stretch vs crop → ghosting)",
+     "verdict": "pass",
+     "detail": "first keyframe 1152×2016 vs video 768×1344",
+     "edge": "first"
+    },
+    {
+     "gate": "Q-K2",
+     "pi": [
+      "PI-08"
+     ],
+     "metric": "first_frame_psnr_db",
+     "value": 32.865,
+     "threshold": ">= 20.0",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "SOP_parameters 视频 QC（锁定 2026-10-29）: 首帧 PSNR ≥20 dB",
+     "verdict": "pass",
+     "detail": "SSIM 0.9185",
+     "ssim": 0.9185
+    },
+    {
+     "gate": "Q-K6",
+     "pi": [
+      "PI-08"
+     ],
+     "metric": "first_frame_ssim",
+     "value": 0.9185,
+     "threshold": "待项目方定",
+     "status": "pending",
+     "on_breach": "info",
+     "source": "no documented SSIM bound for the first frame (待项目方定); reported only",
+     "verdict": "info",
+     "detail": "PSNR 32.865 dB"
+    },
+    {
+     "gate": "Q-K4",
+     "pi": [
+      "PI-19"
+     ],
+     "metric": "edge_dE2000",
+     "value": 1.07,
+     "threshold": "<= 4.0",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-19: 前/后 0.5 s 与首/尾帧人物区域 ΔE2000 ≤ 4（建议值，未锁定）",
+     "verdict": "pass",
+     "detail": "first 0.5s mean LAB [48.2, -1.0, 7.4] vs keyframe [49.2, -1.1, 7.1]",
+     "edge": "first"
+    },
+    {
+     "gate": "Q-K5",
+     "pi": [
+      "PI-19"
+     ],
+     "metric": "max_abs_dL",
+     "value": 1.32,
+     "threshold": "<= 8.0",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-19: 全片 L* 相对首帧漂移 ≤ 8（建议值，未锁定）",
+     "verdict": "pass",
+     "detail": "max |ΔL*| over 31/243 frames that structurally match the keyframe (≥0.85): frame 28 (1.17 s) signed -1.32; all frames: -36.59 at 5.46 s",
+     "frames_used": 31
+    },
+    {
+     "gate": "Q-K3",
+     "pi": [
+      "PI-08"
+     ],
+     "metric": "last_frame_ssim",
+     "value": null,
+     "threshold": ">= 0.55",
+     "status": "documented",
+     "on_breach": "fail",
+     "source": "consistency_impl §二 视频闸门; gpu3 weita_series LAST_SSIM_MIN = 0.55",
+     "verdict": "unchecked",
+     "detail": "no last keyframe available locally (shot has no independent last keyframe, or it was not synced — PI-08)"
+    },
+    {
+     "gate": "Q-K4",
+     "pi": [
+      "PI-19"
+     ],
+     "metric": "edge_dE2000",
+     "value": null,
+     "threshold": "<= 4.0",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-19: 前/后 0.5 s 与首/尾帧人物区域 ΔE2000 ≤ 4（建议值，未锁定）",
+     "verdict": "unchecked",
+     "detail": "no last keyframe available locally",
+     "edge": "last"
+    },
+    {
+     "gate": "Q-P6",
+     "pi": [
+      "PI-08",
+      "PI-24"
+     ],
+     "metric": "shown_frame_vs_video_frame0_structure",
+     "value": null,
+     "threshold": ">= 0.85",
+     "status": "documented",
+     "on_breach": "warn",
+     "source": "PI-08: 画布显示的帧（frame.png）必须是视频实际用的首帧; 0.85 = ns_post.colormatch match_min",
+     "verdict": "unchecked",
+     "detail": "shot has no frame.png in the mirror"
+    },
+    {
+     "gate": "Q-D1",
+     "pi": [
+      "PI-01"
+     ],
+     "metric": "sface_median",
+     "value": 0.693,
+     "threshold": ">= 0.3",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "SOP_parameters 视频 QC（锁定）: SFace 中位数 ≥0.30; gpu3 SIM_CLIP_MIN",
+     "verdict": "pass",
+     "detail": "10/22 samples with a face; min 0.414; no-face samples 12",
+     "samples": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      0.414,
+      0.624,
+      0.636,
+      0.643,
+      0.599,
+      0.743,
+      0.752,
+      0.749,
+      0.749,
+      0.753
+     ]
+    },
+    {
+     "gate": "Q-D2",
+     "pi": [
+      "PI-01"
+     ],
+     "metric": "sface_min_2s_window_median",
+     "value": 0.519,
+     "threshold": ">= 0.2",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-01: 任意连续 2 秒最小值 ≥0.20（建议值）",
+     "verdict": "pass",
+     "detail": "median per 2 s window (4 samples), minimum over windows"
+    },
+    {
+     "gate": "Q-D3",
+     "pi": [
+      "PI-03"
+     ],
+     "metric": "hair_hsv_bad_frames",
+     "value": 3,
+     "threshold": "== 0",
+     "status": "documented",
+     "on_breach": "warn",
+     "source": "S3-F3 hair_colour (gpu3 weita_series.hair_colour) applied per sampled video frame; frame gate is block, the video use is new → warn",
+     "verdict": "warn",
+     "detail": "3/10 sampled frames fail the S3-F3 HSV rule at t=[6.0, 6.5, 7.5]",
+     "hair": [
+      {
+       "t": 6.0,
+       "ok": false,
+       "hue": 104,
+       "value": 68,
+       "blue_share": 0.33,
+       "why": "navy / dark blue hair (owner: light ice-blue)"
+      },
+      {
+       "t": 6.5,
+       "ok": false,
+       "hue": 104,
+       "value": 73,
+       "blue_share": 0.65,
+       "why": "navy / dark blue hair (owner: light ice-blue)"
+      },
+      {
+       "t": 7.0,
+       "ok": true,
+       "hue": 103,
+       "value": 86,
+       "blue_share": 0.31,
+       "why": ""
+      },
+      {
+       "t": 7.5,
+       "ok": false,
+       "hue": 103,
+       "value": 85,
+       "blue_share": 0.26,
+       "why": "navy / dark blue hair (owner: light ice-blue)"
+      },
+      {
+       "t": 8.0,
+       "ok": true,
+       "hue": 104,
+       "value": 84,
+       "blue_share": 0.24,
+       "why": ""
+      },
+      {
+       "t": 8.5,
+       "ok": true,
+       "hue": 105,
+       "value": 120,
+       "blue_share": 0.65,
+       "why": ""
+      },
+      {
+       "t": 9.0,
+       "ok": true,
+       "hue": 105,
+       "value": 121,
+       "blue_share": 0.66,
+       "why": ""
+      },
+      {
+       "t": 9.5,
+       "ok": true,
+       "hue": 105,
+       "value": 120,
+       "blue_share": 0.66,
+       "why": ""
+      },
+      {
+       "t": 10.0,
+       "ok": true,
+       "hue": 105,
+       "value": 120,
+       "blue_share": 0.67,
+       "why": ""
+      },
+      {
+       "t": 10.083,
+       "ok": true,
+       "hue": 104,
+       "value": 120,
+       "blue_share": 0.67,
+       "why": ""
+      }
+     ]
+    },
+    {
+     "gate": "Q-D4",
+     "pi": [
+      "PI-03"
+     ],
+     "metric": "hair_max_dE2000_vs_first",
+     "value": 9.61,
+     "threshold": "<= 12.0",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-03: 头发 LAB ΔE ≤ 12（建议值）",
+     "verdict": "pass",
+     "detail": "hair-band LAB ΔE2000 vs first sample (t=6.0s); per sample [0.0, 4.62, 2.33, 2.1, 2.08, 9.31, 9.6, 9.54, 9.6, 9.61]"
+    },
+    {
+     "gate": "Q-D5",
+     "pi": [
+      "PI-04"
+     ],
+     "metric": "torso_ab_bhattacharyya_max",
+     "value": 0.402,
+     "threshold": "<= 0.45",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-04: 人物区域 LAB 直方图相对首帧 Bhattacharyya ≤0.45（建议值）",
+     "verdict": "pass",
+     "detail": "face-anchored torso box; worst at t=9.0s; 10 samples",
+     "per_sample": [
+      0.0,
+      0.232,
+      0.206,
+      0.203,
+      0.23,
+      0.4,
+      0.402,
+      0.401,
+      0.399,
+      0.401
+     ],
+     "mode": "face-anchored torso box"
+    },
+    {
+     "gate": "Q-D6",
+     "pi": [
+      "PI-04"
+     ],
+     "metric": "torso_dominant_dE2000_max",
+     "value": 7.08,
+     "threshold": "待项目方定",
+     "status": "pending",
+     "on_breach": "info",
+     "source": "dominant clothing colour drift; no documented bound (待项目方定)",
+     "verdict": "info",
+     "detail": "face-anchored torso box; dominant LAB ΔE2000 vs first sample",
+     "per_sample": [
+      0.0,
+      2.98,
+      3.06,
+      3.46,
+      1.55,
+      6.92,
+      6.8,
+      7.02,
+      7.08,
+      6.88
+     ]
+    },
+    {
+     "gate": "Q-A1",
+     "pi": [
+      "PI-11"
+     ],
+     "metric": "clap_music_score",
+     "value": 1.0,
+     "threshold": "<= 0.3",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-11: non_diegetic_music = N/A 时 CLAP music ≤0.30（建议值）",
+     "verdict": "warn",
+     "detail": "prompt non_diegetic_music = unspecified; sum of CLAP music-labels on the full H3 non-vocal bed (audio_post h3_rest_tags)"
+    },
+    {
+     "gate": "Q-A1b",
+     "pi": [
+      "PI-11"
+     ],
+     "metric": "bed_tonal_ratio",
+     "value": 0.885,
+     "threshold": "待项目方定",
+     "status": "pending",
+     "on_breach": "info",
+     "source": "DSP proxy for sustained tonal content in the non-vocal bed (待项目方定); reported only",
+     "verdict": "info",
+     "detail": "share of frames with a sustained tonal peak"
+    },
+    {
+     "gate": "Q-A2",
+     "pi": [
+      "PI-14"
+     ],
+     "metric": "h3_integrated_lufs",
+     "value": -13.8,
+     "threshold": "-30.0 … -16.0",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-14: H3 原声 −30…−16 LUFS（建议值）",
+     "verdict": "warn",
+     "detail": "ffmpeg ebur128 (BS.1770)"
+    },
+    {
+     "gate": "Q-A2b",
+     "pi": [
+      "PI-14"
+     ],
+     "metric": "h3_true_peak_dbtp",
+     "value": -2.9,
+     "threshold": "<= -1.0",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-14 / SOP_parameters S5 响度（待验证）: 真峰值 ≤ −1 dBTP",
+     "verdict": "pass"
+    },
+    {
+     "gate": "Q-A3",
+     "pi": [
+      "PI-13"
+     ],
+     "metric": "male_f0_voiced_s",
+     "value": 0.0,
+     "threshold": "<= 0.5",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-13: F0 中位数 <165 Hz 的人声段 >0.5 s 且本镜不允许男声 → 报（建议值）",
+     "verdict": "pass",
+     "detail": "voiced <165 Hz; H3 dialogue genders none"
+    },
+    {
+     "gate": "Q-A4",
+     "pi": [
+      "PI-13"
+     ],
+     "metric": "pitch_band_count_excess",
+     "value": 0,
+     "threshold": "<= 0",
+     "status": "pending",
+     "on_breach": "warn",
+     "source": "speaker-count proxy: voiced pitch bands (<165 Hz / ≥165 Hz, each >0.5 s) vs genders of the H3 dialogue speakers (待项目方定; no speaker-embedding model locally)",
+     "verdict": "pass",
+     "detail": "0 pitch band(s) >0.5 s vs 0 expected gender(s)"
+    },
+    {
+     "gate": "Q-A5",
+     "pi": [
+      "PI-12"
+     ],
+     "metric": "voiced_s_first_1s",
+     "value": 0.0,
+     "threshold": "< 0.3",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-12: 无对白镜头前 1.0 s 语音 <0.3 s（建议值）",
+     "verdict": "pass",
+     "detail": "voiced seconds in 0–1.0 s"
+    },
+    {
+     "gate": "Q-P1",
+     "pi": [
+      "PI-25",
+      "PI-05"
+     ],
+     "metric": "bible_version",
+     "value": [
+      "image#8:unstamped",
+      "video#2:unstamped"
+     ],
+     "threshold": "== current bible_version",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "rule_ids R-C8 (输入未过期：take 的 bible_version 等于当前值) — block",
+     "verdict": "fail",
+     "detail": "current bible_version da4109a65f1c; active takes 2, not current 2"
+    },
+    {
+     "gate": "Q-P2",
+     "pi": [
+      "PI-25"
+     ],
+     "metric": "prompt_compiled_after_render",
+     "value": true,
+     "threshold": "== False",
+     "status": "documented",
+     "on_breach": "warn",
+     "source": "PI-25: 规则/提示词改动后已出 take 必须标 stale; compiled.h3_prompt_compiled_at vs take.created_at",
+     "verdict": "warn",
+     "detail": "h3_prompt compiled 2026-10-30T03:50:53Z vs video take #2 2026-10-29T18:57:55Z; take prompt sha 99f811de878e vs compiled h3_prompt sha 42ed7bec2e43"
+    },
+    {
+     "gate": "Q-P3",
+     "pi": [
+      "PI-24"
+     ],
+     "metric": "stems_video_sha_match",
+     "value": true,
+     "threshold": "== True",
+     "status": "documented",
+     "on_breach": "fail",
+     "source": "PI-24 / SOP S5: 每镜 video_sha256 必须等于 renders_gpu3 中的文件",
+     "verdict": "pass",
+     "detail": "stems 214be0ab499b vs video 214be0ab499b"
+    },
+    {
+     "gate": "Q-P4",
+     "pi": [
+      "PI-08",
+      "PI-24"
+     ],
+     "metric": "keyframe_source_local",
+     "value": true,
+     "threshold": "== True",
+     "status": "documented",
+     "on_breach": "warn",
+     "source": "PI-08: 视频 take 实际用的首/尾帧要同步到 renders_gpu3",
+     "verdict": "pass",
+     "detail": "first keyframe recorded /root/claude-kimi-ns-studio-v1/nsfs_mirror/data/renders_gpu3/ep01/S1/frame.png → fetched from gpu3 (read-only copy)",
+     "edge": "first"
+    },
+    {
+     "gate": "Q-P4",
+     "pi": [
+      "PI-08",
+      "PI-24"
+     ],
+     "metric": "keyframe_source_local",
+     "value": false,
+     "threshold": "== True",
+     "status": "documented",
+     "on_breach": "warn",
+     "source": "PI-08: 视频 take 实际用的首/尾帧要同步到 renders_gpu3",
+     "verdict": "warn",
+     "detail": "last keyframe recorded /root/claude-kimi-ns-studio-v1/ns-studio/data/run/weita/ep01/frames/ep01s1.rr_last.png → not in the local mirror; gpu3 fetch failed",
+     "edge": "last"
+    },
+    {
+     "gate": "Q-P5",
+     "pi": [
+      "PI-24"
+     ],
+     "metric": "video_file_present_and_active",
+     "value": true,
+     "threshold": "== True",
+     "status": "documented",
+     "on_breach": "warn",
+     "source": "PI-24: 镜像里 video.mp4 = active video take（sha）",
+     "verdict": "pass",
+     "detail": "take 214be0ab499b vs video.mp4 214be0ab499b"
+    }
+   ],
+   "keyframe": {
+    "clip": "D:\\NS-Final Studio\\data\\renders_gpu3\\ep01\\S1\\takes\\video_002.mp4",
+    "video": {
+     "width": 768,
+     "height": 1344,
+     "fps": 24.0,
+     "frames": 243,
+     "duration": 10.125,
+     "color_space": "bt709",
+     "has_audio": true
+    },
+    "keyframes": {
+     "first": {
+      "recorded": "/root/claude-kimi-ns-studio-v1/nsfs_mirror/data/renders_gpu3/ep01/S1/frame.png",
+      "how": "fetched from gpu3 (read-only copy)",
+      "file": "D:\\NS-Final Studio\\data\\qc\\kf_cache\\f49c12f56b7ca5a1_frame.png"
+     },
+     "last": {
+      "recorded": "/root/claude-kimi-ns-studio-v1/ns-studio/data/run/weita/ep01/frames/ep01s1.rr_last.png",
+      "how": "not in the local mirror; gpu3 fetch failed",
+      "file": null
+     }
+    },
+    "dL_curve_1s": [
+     -1.2,
+     -1.28,
+     -0.95,
+     -4.26,
+     -11.89,
+     -23.6,
+     -31.47,
+     -18.75,
+     -14.8,
+     -3.71,
+     -3.66
+    ]
+   },
+   "drift": {
+    "clip": "D:\\NS-Final Studio\\data\\renders_gpu3\\ep01\\S1\\takes\\video_002.mp4",
+    "samples": 22,
+    "step_s": 0.5,
+    "self_similarity_to_first_face": [
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     1.0,
+     0.561,
+     0.583,
+     0.575,
+     0.491,
+     0.432,
+     0.414,
+     0.432,
+     0.428,
+     0.422
+    ],
+    "rows": [
+     {
+      "frame": 0,
+      "t": 0.0,
+      "faces": 0
+     },
+     {
+      "frame": 12,
+      "t": 0.5,
+      "faces": 0
+     },
+     {
+      "frame": 24,
+      "t": 1.0,
+      "faces": 0
+     },
+     {
+      "frame": 36,
+      "t": 1.5,
+      "faces": 0
+     },
+     {
+      "frame": 48,
+      "t": 2.0,
+      "faces": 0
+     },
+     {
+      "frame": 60,
+      "t": 2.5,
+      "faces": 0
+     },
+     {
+      "frame": 72,
+      "t": 3.0,
+      "faces": 0
+     },
+     {
+      "frame": 84,
+      "t": 3.5,
+      "faces": 0
+     },
+     {
+      "frame": 96,
+      "t": 4.0,
+      "faces": 0
+     },
+     {
+      "frame": 108,
+      "t": 4.5,
+      "faces": 0
+     },
+     {
+      "frame": 120,
+      "t": 5.0,
+      "faces": 0
+     },
+     {
+      "frame": 132,
+      "t": 5.5,
+      "faces": 0
+     },
+     {
+      "frame": 144,
+      "t": 6.0,
+      "faces": 1,
+      "sface": 0.414,
+      "face_px": 176.5,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 156,
+      "t": 6.5,
+      "faces": 1,
+      "sface": 0.624,
+      "face_px": 332.3,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 168,
+      "t": 7.0,
+      "faces": 1,
+      "sface": 0.636,
+      "face_px": 330.6,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 180,
+      "t": 7.5,
+      "faces": 1,
+      "sface": 0.643,
+      "face_px": 337.2,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 192,
+      "t": 8.0,
+      "faces": 1,
+      "sface": 0.599,
+      "face_px": 327.0,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 204,
+      "t": 8.5,
+      "faces": 1,
+      "sface": 0.743,
+      "face_px": 205.8,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 216,
+      "t": 9.0,
+      "faces": 1,
+      "sface": 0.752,
+      "face_px": 205.0,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 228,
+      "t": 9.5,
+      "faces": 1,
+      "sface": 0.749,
+      "face_px": 204.8,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 240,
+      "t": 10.0,
+      "faces": 1,
+      "sface": 0.749,
+      "face_px": 204.4,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 242,
+      "t": 10.083,
+      "faces": 1,
+      "sface": 0.753,
+      "face_px": 204.3,
+      "torso_mode": "face-anchored"
+     }
+    ]
+   },
+   "audio": {
+    "clip": "D:\\NS-Final Studio\\data\\renders_gpu3\\ep01\\S1\\takes\\video_002.mp4",
+    "non_diegetic_music_expected": "unspecified",
+    "bed_source": "D:\\NS-Final Studio\\data\\renders_gpu3\\ep01\\S1\\audio\\h3_rest_full.wav",
+    "voice_source": "D:\\NS-Final Studio\\data\\renders_gpu3\\ep01\\S1\\audio\\h3_vocals.wav",
+    "pitch": {
+     "voiced_s": 0.0,
+     "low_band_s": 0.0,
+     "high_band_s": 0.0,
+     "median_f0_hz": null
+    }
+   },
+   "stamps": {
+    "active": [
+     {
+      "stage": "image",
+      "n": 8,
+      "file": "renders_gpu3/ep01/S1/takes/image_008.png",
+      "state": "unstamped",
+      "bible_version": null
+     },
+     {
+      "stage": "video",
+      "n": 2,
+      "file": "renders_gpu3/ep01/S1/takes/video_002.mp4",
+      "state": "unstamped",
+      "bible_version": null
+     }
+    ],
+    "all": {
+     "unstamped": 10
+    }
+   },
+   "verdict": "fail",
+   "seconds": 13.4
+  },
+  "S2": {
+   "shot": "S2",
+   "active": {
+    "image": 1,
+    "video": 1
+   },
+   "video": "D:\\NS-Final Studio\\data\\renders_gpu3\\ep01\\S2\\takes\\video_001.mp4",
+   "gates": [
+    {
+     "gate": "Q-K1",
+     "pi": [
+      "PI-08"
+     ],
+     "metric": "video_size",
+     "value": [
+      768,
+      1344
+     ],
+     "threshold": "== [768, 1344]",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "rule_ids P-B3 (24 fps, 768×1344)",
+     "verdict": "pass",
+     "detail": "video 768×1344 @ 24 fps, 243 frames"
+    },
+    {
+     "gate": "Q-K2",
+     "pi": [
+      "PI-08"
+     ],
+     "metric": "first_frame_psnr_db",
+     "value": null,
+     "threshold": ">= 20.0",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "SOP_parameters 视频 QC（锁定 2026-10-29）: 首帧 PSNR ≥20 dB",
+     "verdict": "unchecked",
+     "detail": "no first keyframe available locally"
+    },
+    {
+     "gate": "Q-K4",
+     "pi": [
+      "PI-19"
+     ],
+     "metric": "edge_dE2000",
+     "value": null,
+     "threshold": "<= 4.0",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-19: 前/后 0.5 s 与首/尾帧人物区域 ΔE2000 ≤ 4（建议值，未锁定）",
+     "verdict": "unchecked",
+     "detail": "no first keyframe available locally",
+     "edge": "first"
+    },
+    {
+     "gate": "Q-K3",
+     "pi": [
+      "PI-08"
+     ],
+     "metric": "last_frame_ssim",
+     "value": null,
+     "threshold": ">= 0.55",
+     "status": "documented",
+     "on_breach": "fail",
+     "source": "consistency_impl §二 视频闸门; gpu3 weita_series LAST_SSIM_MIN = 0.55",
+     "verdict": "unchecked",
+     "detail": "no last keyframe available locally (shot has no independent last keyframe, or it was not synced — PI-08)"
+    },
+    {
+     "gate": "Q-K4",
+     "pi": [
+      "PI-19"
+     ],
+     "metric": "edge_dE2000",
+     "value": null,
+     "threshold": "<= 4.0",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-19: 前/后 0.5 s 与首/尾帧人物区域 ΔE2000 ≤ 4（建议值，未锁定）",
+     "verdict": "unchecked",
+     "detail": "no last keyframe available locally",
+     "edge": "last"
+    },
+    {
+     "gate": "Q-P6",
+     "pi": [
+      "PI-08",
+      "PI-24"
+     ],
+     "metric": "shown_frame_vs_video_frame0_structure",
+     "value": null,
+     "threshold": ">= 0.85",
+     "status": "documented",
+     "on_breach": "warn",
+     "source": "PI-08: 画布显示的帧（frame.png）必须是视频实际用的首帧; 0.85 = ns_post.colormatch match_min",
+     "verdict": "unchecked",
+     "detail": "shot has no frame.png in the mirror"
+    },
+    {
+     "gate": "Q-D1",
+     "pi": [
+      "PI-01"
+     ],
+     "metric": "sface_median",
+     "value": 0.609,
+     "threshold": ">= 0.3",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "SOP_parameters 视频 QC（锁定）: SFace 中位数 ≥0.30; gpu3 SIM_CLIP_MIN",
+     "verdict": "pass",
+     "detail": "22/22 samples with a face; min 0.498; no-face samples 0",
+     "samples": [
+      0.7,
+      0.704,
+      0.709,
+      0.702,
+      0.625,
+      0.613,
+      0.624,
+      0.626,
+      0.612,
+      0.6,
+      0.598,
+      0.633,
+      0.6,
+      0.559,
+      0.62,
+      0.554,
+      0.498,
+      0.602,
+      0.517,
+      0.554,
+      0.603,
+      0.606
+     ]
+    },
+    {
+     "gate": "Q-D2",
+     "pi": [
+      "PI-01"
+     ],
+     "metric": "sface_min_2s_window_median",
+     "value": 0.554,
+     "threshold": ">= 0.2",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-01: 任意连续 2 秒最小值 ≥0.20（建议值）",
+     "verdict": "pass",
+     "detail": "median per 2 s window (4 samples), minimum over windows"
+    },
+    {
+     "gate": "Q-D3",
+     "pi": [
+      "PI-03"
+     ],
+     "metric": "hair_hsv_bad_frames",
+     "value": 0,
+     "threshold": "== 0",
+     "status": "documented",
+     "on_breach": "warn",
+     "source": "S3-F3 hair_colour (gpu3 weita_series.hair_colour) applied per sampled video frame; frame gate is block, the video use is new → warn",
+     "verdict": "pass",
+     "detail": "0/22 sampled frames fail the S3-F3 HSV rule",
+     "hair": [
+      {
+       "t": 0.0,
+       "ok": true,
+       "hue": 104,
+       "value": 119,
+       "blue_share": 0.72,
+       "why": ""
+      },
+      {
+       "t": 0.5,
+       "ok": true,
+       "hue": 104,
+       "value": 120,
+       "blue_share": 0.72,
+       "why": ""
+      },
+      {
+       "t": 1.0,
+       "ok": true,
+       "hue": 104,
+       "value": 120,
+       "blue_share": 0.7,
+       "why": ""
+      },
+      {
+       "t": 1.5,
+       "ok": true,
+       "hue": 105,
+       "value": 120,
+       "blue_share": 0.76,
+       "why": ""
+      },
+      {
+       "t": 2.0,
+       "ok": true,
+       "hue": 105,
+       "value": 121,
+       "blue_share": 0.79,
+       "why": ""
+      },
+      {
+       "t": 2.5,
+       "ok": true,
+       "hue": 104,
+       "value": 121,
+       "blue_share": 0.79,
+       "why": ""
+      },
+      {
+       "t": 3.0,
+       "ok": true,
+       "hue": 105,
+       "value": 121,
+       "blue_share": 0.79,
+       "why": ""
+      },
+      {
+       "t": 3.5,
+       "ok": true,
+       "hue": 105,
+       "value": 120,
+       "blue_share": 0.8,
+       "why": ""
+      },
+      {
+       "t": 4.0,
+       "ok": true,
+       "hue": 105,
+       "value": 121,
+       "blue_share": 0.8,
+       "why": ""
+      },
+      {
+       "t": 4.5,
+       "ok": true,
+       "hue": 105,
+       "value": 121,
+       "blue_share": 0.8,
+       "why": ""
+      },
+      {
+       "t": 5.0,
+       "ok": true,
+       "hue": 105,
+       "value": 121,
+       "blue_share": 0.79,
+       "why": ""
+      },
+      {
+       "t": 5.5,
+       "ok": true,
+       "hue": 105,
+       "value": 122,
+       "blue_share": 0.81,
+       "why": ""
+      },
+      {
+       "t": 6.0,
+       "ok": true,
+       "hue": 105,
+       "value": 124,
+       "blue_share": 0.74,
+       "why": ""
+      },
+      {
+       "t": 6.5,
+       "ok": true,
+       "hue": 105,
+       "value": 124,
+       "blue_share": 0.73,
+       "why": ""
+      },
+      {
+       "t": 7.0,
+       "ok": true,
+       "hue": 104,
+       "value": 123,
+       "blue_share": 0.81,
+       "why": ""
+      },
+      {
+       "t": 7.5,
+       "ok": true,
+       "hue": 105,
+       "value": 118,
+       "blue_share": 0.9,
+       "why": ""
+      },
+      {
+       "t": 8.0,
+       "ok": true,
+       "hue": 104,
+       "value": 114,
+       "blue_share": 0.95,
+       "why": ""
+      },
+      {
+       "t": 8.5,
+       "ok": true,
+       "hue": 105,
+       "value": 115,
+       "blue_share": 0.93,
+       "why": ""
+      },
+      {
+       "t": 9.0,
+       "ok": true,
+       "hue": 105,
+       "value": 120,
+       "blue_share": 0.84,
+       "why": ""
+      },
+      {
+       "t": 9.5,
+       "ok": true,
+       "hue": 104,
+       "value": 122,
+       "blue_share": 0.78,
+       "why": ""
+      },
+      {
+       "t": 10.0,
+       "ok": true,
+       "hue": 104,
+       "value": 121,
+       "blue_share": 0.86,
+       "why": ""
+      },
+      {
+       "t": 10.083,
+       "ok": true,
+       "hue": 104,
+       "value": 121,
+       "blue_share": 0.86,
+       "why": ""
+      }
+     ]
+    },
+    {
+     "gate": "Q-D4",
+     "pi": [
+      "PI-03"
+     ],
+     "metric": "hair_max_dE2000_vs_first",
+     "value": 4.57,
+     "threshold": "<= 12.0",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-03: 头发 LAB ΔE ≤ 12（建议值）",
+     "verdict": "pass",
+     "detail": "hair-band LAB ΔE2000 vs first sample (t=0.0s); per sample [0.0, 0.33, 0.33, 0.36, 0.6, 0.76, 1.02, 1.23, 1.04, 1.03, 0.95, 1.36, 1.45, 1.55, 1.1, 2.68, 4.57, 4.26, 1.97, 0.96, 1.02, 1.05]"
+    },
+    {
+     "gate": "Q-D5",
+     "pi": [
+      "PI-04"
+     ],
+     "metric": "torso_ab_bhattacharyya_max",
+     "value": 0.382,
+     "threshold": "<= 0.45",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-04: 人物区域 LAB 直方图相对首帧 Bhattacharyya ≤0.45（建议值）",
+     "verdict": "pass",
+     "detail": "face-anchored torso box; worst at t=8.0s; 22 samples",
+     "per_sample": [
+      0.0,
+      0.024,
+      0.036,
+      0.054,
+      0.082,
+      0.112,
+      0.136,
+      0.143,
+      0.152,
+      0.16,
+      0.154,
+      0.159,
+      0.175,
+      0.204,
+      0.37,
+      0.365,
+      0.382,
+      0.38,
+      0.353,
+      0.34,
+      0.362,
+      0.359
+     ],
+     "mode": "face-anchored torso box"
+    },
+    {
+     "gate": "Q-D6",
+     "pi": [
+      "PI-04"
+     ],
+     "metric": "torso_dominant_dE2000_max",
+     "value": 47.67,
+     "threshold": "待项目方定",
+     "status": "pending",
+     "on_breach": "info",
+     "source": "dominant clothing colour drift; no documented bound (待项目方定)",
+     "verdict": "info",
+     "detail": "face-anchored torso box; dominant LAB ΔE2000 vs first sample",
+     "per_sample": [
+      0.0,
+      0.08,
+      0.22,
+      0.3,
+      0.3,
+      0.37,
+      0.52,
+      0.52,
+      0.62,
+      0.61,
+      0.67,
+      0.6,
+      0.64,
+      45.44,
+      47.67,
+      11.16,
+      42.25,
+      40.78,
+      46.47,
+      46.84,
+      46.16,
+      46.11
+     ]
+    },
+    {
+     "gate": "Q-A1",
+     "pi": [
+      "PI-11"
+     ],
+     "metric": "clap_music_score",
+     "value": 0.039,
+     "threshold": "<= 0.3",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-11: non_diegetic_music = N/A 时 CLAP music ≤0.30（建议值）",
+     "verdict": "pass",
+     "detail": "prompt non_diegetic_music = unspecified; sum of CLAP music-labels on the full H3 non-vocal bed (audio_post h3_rest_tags)"
+    },
+    {
+     "gate": "Q-A1b",
+     "pi": [
+      "PI-11"
+     ],
+     "metric": "bed_tonal_ratio",
+     "value": 0.109,
+     "threshold": "待项目方定",
+     "status": "pending",
+     "on_breach": "info",
+     "source": "DSP proxy for sustained tonal content in the non-vocal bed (待项目方定); reported only",
+     "verdict": "info",
+     "detail": "share of frames with a sustained tonal peak"
+    },
+    {
+     "gate": "Q-A2",
+     "pi": [
+      "PI-14"
+     ],
+     "metric": "h3_integrated_lufs",
+     "value": -9.4,
+     "threshold": "-30.0 … -16.0",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-14: H3 原声 −30…−16 LUFS（建议值）",
+     "verdict": "warn",
+     "detail": "ffmpeg ebur128 (BS.1770)"
+    },
+    {
+     "gate": "Q-A2b",
+     "pi": [
+      "PI-14"
+     ],
+     "metric": "h3_true_peak_dbtp",
+     "value": -0.3,
+     "threshold": "<= -1.0",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-14 / SOP_parameters S5 响度（待验证）: 真峰值 ≤ −1 dBTP",
+     "verdict": "warn"
+    },
+    {
+     "gate": "Q-A3",
+     "pi": [
+      "PI-13"
+     ],
+     "metric": "male_f0_voiced_s",
+     "value": null,
+     "threshold": "<= 0.5",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-13: F0 中位数 <165 Hz 的人声段 >0.5 s 且本镜不允许男声 → 报（建议值）",
+     "verdict": "unchecked",
+     "detail": "a male speaker is in the H3 dialogue"
+    },
+    {
+     "gate": "Q-A4",
+     "pi": [
+      "PI-13"
+     ],
+     "metric": "pitch_band_count_excess",
+     "value": 0,
+     "threshold": "<= 0",
+     "status": "pending",
+     "on_breach": "warn",
+     "source": "speaker-count proxy: voiced pitch bands (<165 Hz / ≥165 Hz, each >0.5 s) vs genders of the H3 dialogue speakers (待项目方定; no speaker-embedding model locally)",
+     "verdict": "pass",
+     "detail": "1 pitch band(s) >0.5 s vs 2 expected gender(s)"
+    },
+    {
+     "gate": "Q-A5",
+     "pi": [
+      "PI-12"
+     ],
+     "metric": "voiced_s_first_1s",
+     "value": null,
+     "threshold": "< 0.3",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-12: 无对白镜头前 1.0 s 语音 <0.3 s（建议值）",
+     "verdict": "unchecked",
+     "detail": "shot has H3 dialogue (start time unknown)"
+    },
+    {
+     "gate": "Q-P1",
+     "pi": [
+      "PI-25",
+      "PI-05"
+     ],
+     "metric": "bible_version",
+     "value": [
+      "image#1:unstamped",
+      "video#1:unstamped"
+     ],
+     "threshold": "== current bible_version",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "rule_ids R-C8 (输入未过期：take 的 bible_version 等于当前值) — block",
+     "verdict": "fail",
+     "detail": "current bible_version da4109a65f1c; active takes 2, not current 2"
+    },
+    {
+     "gate": "Q-P2",
+     "pi": [
+      "PI-25"
+     ],
+     "metric": "prompt_compiled_after_render",
+     "value": true,
+     "threshold": "== False",
+     "status": "documented",
+     "on_breach": "warn",
+     "source": "PI-25: 规则/提示词改动后已出 take 必须标 stale; compiled.h3_prompt_compiled_at vs take.created_at",
+     "verdict": "warn",
+     "detail": "h3_prompt compiled 2026-10-30T03:50:53Z vs video take #1 2026-10-29T18:30:41Z; take prompt sha ae64362c705b vs compiled h3_prompt sha 5d0d980b2c65"
+    },
+    {
+     "gate": "Q-P3",
+     "pi": [
+      "PI-24"
+     ],
+     "metric": "stems_video_sha_match",
+     "value": true,
+     "threshold": "== True",
+     "status": "documented",
+     "on_breach": "fail",
+     "source": "PI-24 / SOP S5: 每镜 video_sha256 必须等于 renders_gpu3 中的文件",
+     "verdict": "pass",
+     "detail": "stems ac2fc34eb9a5 vs video ac2fc34eb9a5"
+    },
+    {
+     "gate": "Q-P4",
+     "pi": [
+      "PI-08",
+      "PI-24"
+     ],
+     "metric": "keyframe_source_local",
+     "value": false,
+     "threshold": "== True",
+     "status": "documented",
+     "on_breach": "warn",
+     "source": "PI-08: 视频 take 实际用的首/尾帧要同步到 renders_gpu3",
+     "verdict": "warn",
+     "detail": "first keyframe recorded /root/claude-kimi-ns-studio-v1/ns-studio/data/run/weita/ep01/frames/ep01s2.png → not in the local mirror; gpu3 fetch failed",
+     "edge": "first"
+    },
+    {
+     "gate": "Q-P5",
+     "pi": [
+      "PI-24"
+     ],
+     "metric": "video_file_present_and_active",
+     "value": true,
+     "threshold": "== True",
+     "status": "documented",
+     "on_breach": "warn",
+     "source": "PI-24: 镜像里 video.mp4 = active video take（sha）",
+     "verdict": "pass",
+     "detail": "take ac2fc34eb9a5 vs video.mp4 ac2fc34eb9a5"
+    }
+   ],
+   "keyframe": {
+    "clip": "D:\\NS-Final Studio\\data\\renders_gpu3\\ep01\\S2\\takes\\video_001.mp4",
+    "video": {
+     "width": 768,
+     "height": 1344,
+     "fps": 24.0,
+     "frames": 243,
+     "duration": 10.125,
+     "color_space": "bt709",
+     "has_audio": true
+    },
+    "keyframes": {
+     "first": {
+      "recorded": "/root/claude-kimi-ns-studio-v1/ns-studio/data/run/weita/ep01/frames/ep01s2.png",
+      "how": "not in the local mirror; gpu3 fetch failed",
+      "file": null,
+      "tried": []
+     },
+     "last": {
+      "recorded": null,
+      "how": "none recorded",
+      "file": null
+     }
+    }
+   },
+   "drift": {
+    "clip": "D:\\NS-Final Studio\\data\\renders_gpu3\\ep01\\S2\\takes\\video_001.mp4",
+    "samples": 22,
+    "step_s": 0.5,
+    "self_similarity_to_first_face": [
+     1.0,
+     0.986,
+     0.988,
+     0.972,
+     0.876,
+     0.867,
+     0.881,
+     0.867,
+     0.867,
+     0.859,
+     0.83,
+     0.838,
+     0.812,
+     0.727,
+     0.795,
+     0.713,
+     0.683,
+     0.812,
+     0.797,
+     0.844,
+     0.851,
+     0.857
+    ],
+    "rows": [
+     {
+      "frame": 0,
+      "t": 0.0,
+      "faces": 2,
+      "sface": 0.7,
+      "face_px": 190.0,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 12,
+      "t": 0.5,
+      "faces": 2,
+      "sface": 0.704,
+      "face_px": 190.2,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 24,
+      "t": 1.0,
+      "faces": 2,
+      "sface": 0.709,
+      "face_px": 192.0,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 36,
+      "t": 1.5,
+      "faces": 3,
+      "sface": 0.702,
+      "face_px": 187.6,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 48,
+      "t": 2.0,
+      "faces": 3,
+      "sface": 0.625,
+      "face_px": 183.5,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 60,
+      "t": 2.5,
+      "faces": 3,
+      "sface": 0.613,
+      "face_px": 185.1,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 72,
+      "t": 3.0,
+      "faces": 3,
+      "sface": 0.624,
+      "face_px": 184.5,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 84,
+      "t": 3.5,
+      "faces": 3,
+      "sface": 0.626,
+      "face_px": 181.7,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 96,
+      "t": 4.0,
+      "faces": 3,
+      "sface": 0.612,
+      "face_px": 184.6,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 108,
+      "t": 4.5,
+      "faces": 3,
+      "sface": 0.6,
+      "face_px": 184.1,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 120,
+      "t": 5.0,
+      "faces": 3,
+      "sface": 0.598,
+      "face_px": 186.9,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 132,
+      "t": 5.5,
+      "faces": 3,
+      "sface": 0.633,
+      "face_px": 181.7,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 144,
+      "t": 6.0,
+      "faces": 3,
+      "sface": 0.6,
+      "face_px": 187.9,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 156,
+      "t": 6.5,
+      "faces": 3,
+      "sface": 0.559,
+      "face_px": 189.0,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 168,
+      "t": 7.0,
+      "faces": 3,
+      "sface": 0.62,
+      "face_px": 185.0,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 180,
+      "t": 7.5,
+      "faces": 3,
+      "sface": 0.554,
+      "face_px": 182.1,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 192,
+      "t": 8.0,
+      "faces": 3,
+      "sface": 0.498,
+      "face_px": 172.8,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 204,
+      "t": 8.5,
+      "faces": 3,
+      "sface": 0.602,
+      "face_px": 174.3,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 216,
+      "t": 9.0,
+      "faces": 3,
+      "sface": 0.517,
+      "face_px": 191.1,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 228,
+      "t": 9.5,
+      "faces": 3,
+      "sface": 0.554,
+      "face_px": 196.5,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 240,
+      "t": 10.0,
+      "faces": 3,
+      "sface": 0.603,
+      "face_px": 184.9,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 242,
+      "t": 10.083,
+      "faces": 3,
+      "sface": 0.606,
+      "face_px": 184.1,
+      "torso_mode": "face-anchored"
+     }
+    ]
+   },
+   "audio": {
+    "clip": "D:\\NS-Final Studio\\data\\renders_gpu3\\ep01\\S2\\takes\\video_001.mp4",
+    "non_diegetic_music_expected": "unspecified",
+    "bed_source": "clip (no separated bed)",
+    "voice_source": "D:\\NS-Final Studio\\data\\renders_gpu3\\ep01\\S2\\audio\\h3_vocals.wav",
+    "pitch": {
+     "voiced_s": 1.66,
+     "low_band_s": 0.43,
+     "high_band_s": 1.16,
+     "median_f0_hz": 188.2
+    }
+   },
+   "stamps": {
+    "active": [
+     {
+      "stage": "image",
+      "n": 1,
+      "file": "renders_gpu3/ep01/S2/takes/image_001.png",
+      "state": "unstamped",
+      "bible_version": null
+     },
+     {
+      "stage": "video",
+      "n": 1,
+      "file": "renders_gpu3/ep01/S2/takes/video_001.mp4",
+      "state": "unstamped",
+      "bible_version": null
+     }
+    ],
+    "all": {
+     "unstamped": 3
+    }
+   },
+   "verdict": "fail",
+   "seconds": 11.9
+  },
+  "S3": {
+   "shot": "S3",
+   "active": {
+    "image": 10,
+    "video": 2
+   },
+   "video": "D:\\NS-Final Studio\\data\\renders_gpu3\\ep01\\S3\\takes\\video_002.mp4",
+   "gates": [
+    {
+     "gate": "Q-K1",
+     "pi": [
+      "PI-08"
+     ],
+     "metric": "video_size",
+     "value": [
+      768,
+      1344
+     ],
+     "threshold": "== [768, 1344]",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "rule_ids P-B3 (24 fps, 768×1344)",
+     "verdict": "pass",
+     "detail": "video 768×1344 @ 24 fps, 243 frames"
+    },
+    {
+     "gate": "Q-K1b",
+     "pi": [
+      "PI-08"
+     ],
+     "metric": "keyframe_aspect_rel_diff",
+     "value": 0.0,
+     "threshold": "<= 0.01",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "rule_ids P-B2 (same 4:7 centre crop for first/last; stretch vs crop → ghosting)",
+     "verdict": "pass",
+     "detail": "first keyframe 1152×2016 vs video 768×1344",
+     "edge": "first"
+    },
+    {
+     "gate": "Q-K2",
+     "pi": [
+      "PI-08"
+     ],
+     "metric": "first_frame_psnr_db",
+     "value": 21.521,
+     "threshold": ">= 20.0",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "SOP_parameters 视频 QC（锁定 2026-10-29）: 首帧 PSNR ≥20 dB",
+     "verdict": "pass",
+     "detail": "SSIM 0.5469",
+     "ssim": 0.5469
+    },
+    {
+     "gate": "Q-K6",
+     "pi": [
+      "PI-08"
+     ],
+     "metric": "first_frame_ssim",
+     "value": 0.5469,
+     "threshold": "待项目方定",
+     "status": "pending",
+     "on_breach": "info",
+     "source": "no documented SSIM bound for the first frame (待项目方定); reported only",
+     "verdict": "info",
+     "detail": "PSNR 21.521 dB"
+    },
+    {
+     "gate": "Q-K4",
+     "pi": [
+      "PI-19"
+     ],
+     "metric": "edge_dE2000",
+     "value": 1.19,
+     "threshold": "<= 4.0",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-19: 前/后 0.5 s 与首/尾帧人物区域 ΔE2000 ≤ 4（建议值，未锁定）",
+     "verdict": "pass",
+     "detail": "first 0.5s mean LAB [55.4, 3.0, -3.0] vs keyframe [56.2, 2.2, -2.8]",
+     "edge": "first"
+    },
+    {
+     "gate": "Q-K5",
+     "pi": [
+      "PI-19"
+     ],
+     "metric": "max_abs_dL",
+     "value": 1.52,
+     "threshold": "<= 8.0",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-19: 全片 L* 相对首帧漂移 ≤ 8（建议值，未锁定）",
+     "verdict": "pass",
+     "detail": "max |ΔL*| over 15/243 frames that structurally match the keyframe (≥0.85): frame 14 (0.58 s) signed -1.52; all frames: 8.04 at 10.08 s",
+     "frames_used": 15
+    },
+    {
+     "gate": "Q-K3",
+     "pi": [
+      "PI-08"
+     ],
+     "metric": "last_frame_ssim",
+     "value": null,
+     "threshold": ">= 0.55",
+     "status": "documented",
+     "on_breach": "fail",
+     "source": "consistency_impl §二 视频闸门; gpu3 weita_series LAST_SSIM_MIN = 0.55",
+     "verdict": "unchecked",
+     "detail": "no last keyframe available locally (shot has no independent last keyframe, or it was not synced — PI-08)"
+    },
+    {
+     "gate": "Q-K4",
+     "pi": [
+      "PI-19"
+     ],
+     "metric": "edge_dE2000",
+     "value": null,
+     "threshold": "<= 4.0",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-19: 前/后 0.5 s 与首/尾帧人物区域 ΔE2000 ≤ 4（建议值，未锁定）",
+     "verdict": "unchecked",
+     "detail": "no last keyframe available locally",
+     "edge": "last"
+    },
+    {
+     "gate": "Q-P6",
+     "pi": [
+      "PI-08",
+      "PI-24"
+     ],
+     "metric": "shown_frame_vs_video_frame0_structure",
+     "value": 0.118,
+     "threshold": ">= 0.85",
+     "status": "documented",
+     "on_breach": "warn",
+     "source": "PI-08: 画布显示的帧（frame.png）必须是视频实际用的首帧; 0.85 = ns_post.colormatch match_min",
+     "verdict": "warn",
+     "detail": "frame.png structure vs video frame 0; sha equal to the keyframe used: False (not in the local mirror; gpu3 fetch failed; INFERRED by structure match 0.974)",
+     "same_sha": false
+    },
+    {
+     "gate": "Q-D1",
+     "pi": [
+      "PI-01"
+     ],
+     "metric": "sface_median",
+     "value": 0.305,
+     "threshold": ">= 0.3",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "SOP_parameters 视频 QC（锁定）: SFace 中位数 ≥0.30; gpu3 SIM_CLIP_MIN",
+     "verdict": "pass",
+     "detail": "15/22 samples with a face; min -0.023; no-face samples 7",
+     "samples": [
+      0.773,
+      0.75,
+      0.483,
+      0.5,
+      0.417,
+      0.404,
+      0.274,
+      0.336,
+      0.305,
+      0.148,
+      0.139,
+      -0.023,
+      0.062,
+      0.137,
+      0.103,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+     ]
+    },
+    {
+     "gate": "Q-D2",
+     "pi": [
+      "PI-01"
+     ],
+     "metric": "sface_min_2s_window_median",
+     "value": 0.082,
+     "threshold": ">= 0.2",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-01: 任意连续 2 秒最小值 ≥0.20（建议值）",
+     "verdict": "warn",
+     "detail": "median per 2 s window (4 samples), minimum over windows"
+    },
+    {
+     "gate": "Q-D3",
+     "pi": [
+      "PI-03"
+     ],
+     "metric": "hair_hsv_bad_frames",
+     "value": 0,
+     "threshold": "== 0",
+     "status": "documented",
+     "on_breach": "warn",
+     "source": "S3-F3 hair_colour (gpu3 weita_series.hair_colour) applied per sampled video frame; frame gate is block, the video use is new → warn",
+     "verdict": "pass",
+     "detail": "0/15 sampled frames fail the S3-F3 HSV rule",
+     "hair": [
+      {
+       "t": 0.0,
+       "ok": true,
+       "hue": 105,
+       "value": 127,
+       "blue_share": 0.78,
+       "why": ""
+      },
+      {
+       "t": 0.5,
+       "ok": true,
+       "hue": 105,
+       "value": 129,
+       "blue_share": 0.79,
+       "why": ""
+      },
+      {
+       "t": 1.0,
+       "ok": true,
+       "hue": 105,
+       "value": 123,
+       "blue_share": 0.84,
+       "why": ""
+      },
+      {
+       "t": 1.5,
+       "ok": true,
+       "hue": 105,
+       "value": 121,
+       "blue_share": 0.89,
+       "why": ""
+      },
+      {
+       "t": 2.0,
+       "ok": true,
+       "hue": 105,
+       "value": 117,
+       "blue_share": 0.86,
+       "why": ""
+      },
+      {
+       "t": 2.5,
+       "ok": true,
+       "hue": 105,
+       "value": 116,
+       "blue_share": 0.86,
+       "why": ""
+      },
+      {
+       "t": 3.0,
+       "ok": true,
+       "hue": 106,
+       "value": 117,
+       "blue_share": 0.83,
+       "why": ""
+      },
+      {
+       "t": 3.5,
+       "ok": true,
+       "hue": 106,
+       "value": 118,
+       "blue_share": 0.88,
+       "why": ""
+      },
+      {
+       "t": 4.0,
+       "ok": true,
+       "hue": 105,
+       "value": 121,
+       "blue_share": 0.87,
+       "why": ""
+      },
+      {
+       "t": 4.5,
+       "ok": true,
+       "hue": 106,
+       "value": 126,
+       "blue_share": 0.75,
+       "why": ""
+      },
+      {
+       "t": 5.0,
+       "ok": true,
+       "hue": 106,
+       "value": 126,
+       "blue_share": 0.81,
+       "why": ""
+      },
+      {
+       "t": 5.5,
+       "ok": true,
+       "hue": 109,
+       "value": 130,
+       "blue_share": 0.51,
+       "why": ""
+      },
+      {
+       "t": 6.0,
+       "ok": true,
+       "hue": 107,
+       "value": 126,
+       "blue_share": 0.58,
+       "why": ""
+      },
+      {
+       "t": 6.5,
+       "ok": true,
+       "hue": 107,
+       "value": 126,
+       "blue_share": 0.65,
+       "why": ""
+      },
+      {
+       "t": 7.0,
+       "ok": true,
+       "hue": 109,
+       "value": 126,
+       "blue_share": 0.44,
+       "why": ""
+      }
+     ]
+    },
+    {
+     "gate": "Q-D4",
+     "pi": [
+      "PI-03"
+     ],
+     "metric": "hair_max_dE2000_vs_first",
+     "value": 6.28,
+     "threshold": "<= 12.0",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-03: 头发 LAB ΔE ≤ 12（建议值）",
+     "verdict": "pass",
+     "detail": "hair-band LAB ΔE2000 vs first sample (t=0.0s); per sample [0.0, 0.3, 3.44, 5.41, 6.28, 6.26, 5.62, 5.69, 4.68, 2.12, 2.54, 4.35, 2.43, 2.61, 4.37]"
+    },
+    {
+     "gate": "Q-D5",
+     "pi": [
+      "PI-04"
+     ],
+     "metric": "torso_ab_bhattacharyya_max",
+     "value": 0.586,
+     "threshold": "<= 0.45",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-04: 人物区域 LAB 直方图相对首帧 Bhattacharyya ≤0.45（建议值）",
+     "verdict": "warn",
+     "detail": "face-anchored torso box; worst at t=7.0s; 15 samples",
+     "per_sample": [
+      0.0,
+      0.089,
+      0.257,
+      0.325,
+      0.322,
+      0.342,
+      0.351,
+      0.352,
+      0.349,
+      0.331,
+      0.339,
+      0.369,
+      0.379,
+      0.452,
+      0.586
+     ],
+     "mode": "face-anchored torso box"
+    },
+    {
+     "gate": "Q-D6",
+     "pi": [
+      "PI-04"
+     ],
+     "metric": "torso_dominant_dE2000_max",
+     "value": 47.39,
+     "threshold": "待项目方定",
+     "status": "pending",
+     "on_breach": "info",
+     "source": "dominant clothing colour drift; no documented bound (待项目方定)",
+     "verdict": "info",
+     "detail": "face-anchored torso box; dominant LAB ΔE2000 vs first sample",
+     "per_sample": [
+      0.0,
+      1.92,
+      0.74,
+      1.54,
+      2.19,
+      2.42,
+      1.34,
+      1.23,
+      1.13,
+      47.39,
+      45.72,
+      45.38,
+      44.48,
+      43.91,
+      43.52
+     ]
+    },
+    {
+     "gate": "Q-A1",
+     "pi": [
+      "PI-11"
+     ],
+     "metric": "clap_music_score",
+     "value": 0.999,
+     "threshold": "<= 0.3",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-11: non_diegetic_music = N/A 时 CLAP music ≤0.30（建议值）",
+     "verdict": "warn",
+     "detail": "prompt non_diegetic_music = unspecified; sum of CLAP music-labels on the full H3 non-vocal bed (audio_post h3_rest_tags)"
+    },
+    {
+     "gate": "Q-A1b",
+     "pi": [
+      "PI-11"
+     ],
+     "metric": "bed_tonal_ratio",
+     "value": 0.757,
+     "threshold": "待项目方定",
+     "status": "pending",
+     "on_breach": "info",
+     "source": "DSP proxy for sustained tonal content in the non-vocal bed (待项目方定); reported only",
+     "verdict": "info",
+     "detail": "share of frames with a sustained tonal peak"
+    },
+    {
+     "gate": "Q-A2",
+     "pi": [
+      "PI-14"
+     ],
+     "metric": "h3_integrated_lufs",
+     "value": -11.5,
+     "threshold": "-30.0 … -16.0",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-14: H3 原声 −30…−16 LUFS（建议值）",
+     "verdict": "warn",
+     "detail": "ffmpeg ebur128 (BS.1770)"
+    },
+    {
+     "gate": "Q-A2b",
+     "pi": [
+      "PI-14"
+     ],
+     "metric": "h3_true_peak_dbtp",
+     "value": -1.0,
+     "threshold": "<= -1.0",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-14 / SOP_parameters S5 响度（待验证）: 真峰值 ≤ −1 dBTP",
+     "verdict": "pass"
+    },
+    {
+     "gate": "Q-A3",
+     "pi": [
+      "PI-13"
+     ],
+     "metric": "male_f0_voiced_s",
+     "value": 0.0,
+     "threshold": "<= 0.5",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-13: F0 中位数 <165 Hz 的人声段 >0.5 s 且本镜不允许男声 → 报（建议值）",
+     "verdict": "pass",
+     "detail": "voiced <165 Hz; H3 dialogue genders none"
+    },
+    {
+     "gate": "Q-A4",
+     "pi": [
+      "PI-13"
+     ],
+     "metric": "pitch_band_count_excess",
+     "value": 0,
+     "threshold": "<= 0",
+     "status": "pending",
+     "on_breach": "warn",
+     "source": "speaker-count proxy: voiced pitch bands (<165 Hz / ≥165 Hz, each >0.5 s) vs genders of the H3 dialogue speakers (待项目方定; no speaker-embedding model locally)",
+     "verdict": "pass",
+     "detail": "0 pitch band(s) >0.5 s vs 0 expected gender(s)"
+    },
+    {
+     "gate": "Q-A5",
+     "pi": [
+      "PI-12"
+     ],
+     "metric": "voiced_s_first_1s",
+     "value": 0.0,
+     "threshold": "< 0.3",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-12: 无对白镜头前 1.0 s 语音 <0.3 s（建议值）",
+     "verdict": "pass",
+     "detail": "voiced seconds in 0–1.0 s"
+    },
+    {
+     "gate": "Q-P1",
+     "pi": [
+      "PI-25",
+      "PI-05"
+     ],
+     "metric": "bible_version",
+     "value": [
+      "video#2:unstamped",
+      "image#10:unstamped"
+     ],
+     "threshold": "== current bible_version",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "rule_ids R-C8 (输入未过期：take 的 bible_version 等于当前值) — block",
+     "verdict": "fail",
+     "detail": "current bible_version da4109a65f1c; active takes 2, not current 2"
+    },
+    {
+     "gate": "Q-P2",
+     "pi": [
+      "PI-25"
+     ],
+     "metric": "prompt_compiled_after_render",
+     "value": true,
+     "threshold": "== False",
+     "status": "documented",
+     "on_breach": "warn",
+     "source": "PI-25: 规则/提示词改动后已出 take 必须标 stale; compiled.h3_prompt_compiled_at vs take.created_at",
+     "verdict": "warn",
+     "detail": "h3_prompt compiled 2026-10-30T03:50:53Z vs video take #2 2026-10-29T18:31:11Z; take prompt sha 110541555e39 vs compiled h3_prompt sha 1d4f97dcb95a"
+    },
+    {
+     "gate": "Q-P3",
+     "pi": [
+      "PI-24"
+     ],
+     "metric": "stems_video_sha_match",
+     "value": true,
+     "threshold": "== True",
+     "status": "documented",
+     "on_breach": "fail",
+     "source": "PI-24 / SOP S5: 每镜 video_sha256 必须等于 renders_gpu3 中的文件",
+     "verdict": "pass",
+     "detail": "stems 3e7f35d65abd vs video 3e7f35d65abd"
+    },
+    {
+     "gate": "Q-P4",
+     "pi": [
+      "PI-08",
+      "PI-24"
+     ],
+     "metric": "keyframe_source_local",
+     "value": false,
+     "threshold": "== True",
+     "status": "documented",
+     "on_breach": "warn",
+     "source": "PI-08: 视频 take 实际用的首/尾帧要同步到 renders_gpu3",
+     "verdict": "warn",
+     "detail": "first keyframe recorded /root/claude-kimi-ns-studio-v1/ns-studio/data/run/weita/ep01/frames/ep01s3.png → not in the local mirror; gpu3 fetch failed; INFERRED by structure match 0.974",
+     "edge": "first"
+    },
+    {
+     "gate": "Q-P5",
+     "pi": [
+      "PI-24"
+     ],
+     "metric": "video_file_present_and_active",
+     "value": true,
+     "threshold": "== True",
+     "status": "documented",
+     "on_breach": "warn",
+     "source": "PI-24: 镜像里 video.mp4 = active video take（sha）",
+     "verdict": "pass",
+     "detail": "take 3e7f35d65abd vs video.mp4 3e7f35d65abd"
+    }
+   ],
+   "keyframe": {
+    "clip": "D:\\NS-Final Studio\\data\\renders_gpu3\\ep01\\S3\\takes\\video_002.mp4",
+    "video": {
+     "width": 768,
+     "height": 1344,
+     "fps": 24.0,
+     "frames": 243,
+     "duration": 10.125,
+     "color_space": "bt709",
+     "has_audio": true
+    },
+    "keyframes": {
+     "first": {
+      "recorded": "/root/claude-kimi-ns-studio-v1/ns-studio/data/run/weita/ep01/frames/ep01s3.png",
+      "how": "not in the local mirror; gpu3 fetch failed; INFERRED by structure match 0.974",
+      "file": "D:\\NS-Final Studio\\data\\renders_gpu3\\ep01\\S3\\takes\\image_002.png",
+      "inferred": true,
+      "tried": [
+       {
+        "file": "frame.png",
+        "match": 0.118
+       },
+       {
+        "file": "image_010.png",
+        "match": 0.118
+       },
+       {
+        "file": "image_011.png",
+        "match": -0.002
+       },
+       {
+        "file": "image_009.png",
+        "match": 0.458
+       },
+       {
+        "file": "image_008.png",
+        "match": 0.446
+       },
+       {
+        "file": "image_007.png",
+        "match": 0.469
+       },
+       {
+        "file": "image_002.png",
+        "match": 0.974
+       }
+      ]
+     },
+     "last": {
+      "recorded": null,
+      "how": "none recorded",
+      "file": null
+     }
+    },
+    "dL_curve_1s": [
+     -0.82,
+     -1.99,
+     -2.35,
+     -0.65,
+     0.21,
+     0.55,
+     1.76,
+     1.62,
+     2.87,
+     5.19,
+     7.12
+    ]
+   },
+   "drift": {
+    "clip": "D:\\NS-Final Studio\\data\\renders_gpu3\\ep01\\S3\\takes\\video_002.mp4",
+    "samples": 22,
+    "step_s": 0.5,
+    "self_similarity_to_first_face": [
+     1.0,
+     0.964,
+     0.637,
+     0.648,
+     0.573,
+     0.561,
+     0.409,
+     0.449,
+     0.421,
+     0.227,
+     0.185,
+     -0.02,
+     0.075,
+     0.191,
+     0.073,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ],
+    "rows": [
+     {
+      "frame": 0,
+      "t": 0.0,
+      "faces": 1,
+      "sface": 0.773,
+      "face_px": 530.4,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 12,
+      "t": 0.5,
+      "faces": 1,
+      "sface": 0.75,
+      "face_px": 523.9,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 24,
+      "t": 1.0,
+      "faces": 1,
+      "sface": 0.483,
+      "face_px": 477.2,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 36,
+      "t": 1.5,
+      "faces": 1,
+      "sface": 0.5,
+      "face_px": 470.8,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 48,
+      "t": 2.0,
+      "faces": 1,
+      "sface": 0.417,
+      "face_px": 463.5,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 60,
+      "t": 2.5,
+      "faces": 1,
+      "sface": 0.404,
+      "face_px": 462.1,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 72,
+      "t": 3.0,
+      "faces": 1,
+      "sface": 0.274,
+      "face_px": 448.2,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 84,
+      "t": 3.5,
+      "faces": 1,
+      "sface": 0.336,
+      "face_px": 493.7,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 96,
+      "t": 4.0,
+      "faces": 1,
+      "sface": 0.305,
+      "face_px": 514.7,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 108,
+      "t": 4.5,
+      "faces": 1,
+      "sface": 0.148,
+      "face_px": 492.1,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 120,
+      "t": 5.0,
+      "faces": 1,
+      "sface": 0.139,
+      "face_px": 523.2,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 132,
+      "t": 5.5,
+      "faces": 1,
+      "sface": -0.023,
+      "face_px": 446.5,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 144,
+      "t": 6.0,
+      "faces": 1,
+      "sface": 0.062,
+      "face_px": 482.0,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 156,
+      "t": 6.5,
+      "faces": 1,
+      "sface": 0.137,
+      "face_px": 506.4,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 168,
+      "t": 7.0,
+      "faces": 1,
+      "sface": 0.103,
+      "face_px": 440.8,
+      "torso_mode": "face-anchored"
+     },
+     {
+      "frame": 180,
+      "t": 7.5,
+      "faces": 0
+     },
+     {
+      "frame": 192,
+      "t": 8.0,
+      "faces": 0
+     },
+     {
+      "frame": 204,
+      "t": 8.5,
+      "faces": 0
+     },
+     {
+      "frame": 216,
+      "t": 9.0,
+      "faces": 0
+     },
+     {
+      "frame": 228,
+      "t": 9.5,
+      "faces": 0
+     },
+     {
+      "frame": 240,
+      "t": 10.0,
+      "faces": 0
+     },
+     {
+      "frame": 242,
+      "t": 10.083,
+      "faces": 0
+     }
+    ]
+   },
+   "audio": {
+    "clip": "D:\\NS-Final Studio\\data\\renders_gpu3\\ep01\\S3\\takes\\video_002.mp4",
+    "non_diegetic_music_expected": "unspecified",
+    "bed_source": "D:\\NS-Final Studio\\data\\renders_gpu3\\ep01\\S3\\audio\\h3_rest_full.wav",
+    "voice_source": "D:\\NS-Final Studio\\data\\renders_gpu3\\ep01\\S3\\audio\\h3_vocals.wav",
+    "pitch": {
+     "voiced_s": 0.0,
+     "low_band_s": 0.0,
+     "high_band_s": 0.0,
+     "median_f0_hz": null
+    }
+   },
+   "stamps": {
+    "active": [
+     {
+      "stage": "video",
+      "n": 2,
+      "file": "renders_gpu3/ep01/S3/takes/video_002.mp4",
+      "state": "unstamped",
+      "bible_version": null
+     },
+     {
+      "stage": "image",
+      "n": 10,
+      "file": "renders_gpu3/ep01/S3/takes/image_010.png",
+      "state": "unstamped",
+      "bible_version": null
+     }
+    ],
+    "all": {
+     "unstamped": 13
+    }
+   },
+   "verdict": "fail",
+   "seconds": 14.2
+  },
+  "S4": {
+   "shot": "S4",
+   "active": {
+    "image": 2,
+    "video": 1
+   },
+   "video": null,
+   "gates": [
+    {
+     "gate": "Q-K1",
+     "pi": [
+      "PI-08"
+     ],
+     "metric": "video_size",
+     "value": null,
+     "threshold": "== [768, 1344]",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "rule_ids P-B3 (24 fps, 768×1344)",
+     "verdict": "unchecked",
+     "detail": "no active video in the local mirror (takes.json active video #1)"
+    },
+    {
+     "gate": "Q-K2",
+     "pi": [
+      "PI-08"
+     ],
+     "metric": "first_frame_psnr_db",
+     "value": null,
+     "threshold": ">= 20.0",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "SOP_parameters 视频 QC（锁定 2026-10-29）: 首帧 PSNR ≥20 dB",
+     "verdict": "unchecked",
+     "detail": "no active video in the local mirror (takes.json active video #1)"
+    },
+    {
+     "gate": "Q-K3",
+     "pi": [
+      "PI-08"
+     ],
+     "metric": "last_frame_ssim",
+     "value": null,
+     "threshold": ">= 0.55",
+     "status": "documented",
+     "on_breach": "fail",
+     "source": "consistency_impl §二 视频闸门; gpu3 weita_series LAST_SSIM_MIN = 0.55",
+     "verdict": "unchecked",
+     "detail": "no active video in the local mirror (takes.json active video #1)"
+    },
+    {
+     "gate": "Q-D1",
+     "pi": [
+      "PI-01"
+     ],
+     "metric": "sface_median",
+     "value": null,
+     "threshold": ">= 0.3",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "SOP_parameters 视频 QC（锁定）: SFace 中位数 ≥0.30; gpu3 SIM_CLIP_MIN",
+     "verdict": "unchecked",
+     "detail": "no active video in the local mirror (takes.json active video #1)"
+    },
+    {
+     "gate": "Q-A1",
+     "pi": [
+      "PI-11"
+     ],
+     "metric": "clap_music_score",
+     "value": null,
+     "threshold": "<= 0.3",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-11: non_diegetic_music = N/A 时 CLAP music ≤0.30（建议值）",
+     "verdict": "unchecked",
+     "detail": "no active video in the local mirror (takes.json active video #1)"
+    },
+    {
+     "gate": "Q-A2",
+     "pi": [
+      "PI-14"
+     ],
+     "metric": "h3_integrated_lufs",
+     "value": null,
+     "threshold": "-30.0 … -16.0",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-14: H3 原声 −30…−16 LUFS（建议值）",
+     "verdict": "unchecked",
+     "detail": "no active video in the local mirror (takes.json active video #1)"
+    },
+    {
+     "gate": "Q-A3",
+     "pi": [
+      "PI-13"
+     ],
+     "metric": "male_f0_voiced_s",
+     "value": null,
+     "threshold": "<= 0.5",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-13: F0 中位数 <165 Hz 的人声段 >0.5 s 且本镜不允许男声 → 报（建议值）",
+     "verdict": "unchecked",
+     "detail": "no active video in the local mirror (takes.json active video #1)"
+    },
+    {
+     "gate": "Q-P1",
+     "pi": [
+      "PI-25",
+      "PI-05"
+     ],
+     "metric": "bible_version",
+     "value": [
+      "image#2:unstamped",
+      "video#1:unstamped"
+     ],
+     "threshold": "== current bible_version",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "rule_ids R-C8 (输入未过期：take 的 bible_version 等于当前值) — block",
+     "verdict": "fail",
+     "detail": "current bible_version da4109a65f1c; active takes 2, not current 2"
+    },
+    {
+     "gate": "Q-P2",
+     "pi": [
+      "PI-25"
+     ],
+     "metric": "prompt_compiled_after_render",
+     "value": true,
+     "threshold": "== False",
+     "status": "documented",
+     "on_breach": "warn",
+     "source": "PI-25: 规则/提示词改动后已出 take 必须标 stale; compiled.h3_prompt_compiled_at vs take.created_at",
+     "verdict": "warn",
+     "detail": "h3_prompt compiled 2026-10-30T03:50:53Z vs video take #1 2026-10-29T19:34:54Z; take prompt sha bd06832734d6 vs compiled h3_prompt sha 76b2763b2264"
+    },
+    {
+     "gate": "Q-P3",
+     "pi": [
+      "PI-24"
+     ],
+     "metric": "stems_video_sha_match",
+     "value": null,
+     "threshold": "== True",
+     "status": "documented",
+     "on_breach": "fail",
+     "source": "PI-24 / SOP S5: 每镜 video_sha256 必须等于 renders_gpu3 中的文件",
+     "verdict": "unchecked",
+     "detail": "video file not in the mirror"
+    },
+    {
+     "gate": "Q-P5",
+     "pi": [
+      "PI-24"
+     ],
+     "metric": "video_file_present_and_active",
+     "value": false,
+     "threshold": "== True",
+     "status": "documented",
+     "on_breach": "warn",
+     "source": "PI-24: 镜像里 video.mp4 = active video take（sha）",
+     "verdict": "warn",
+     "detail": "active video take #1 (renders_gpu3/ep01/S4/takes/video_001.mp4) and video.mp4 both missing"
+    }
+   ],
+   "stamps": {
+    "active": [
+     {
+      "stage": "image",
+      "n": 2,
+      "file": "renders_gpu3/ep01/S4/takes/image_002.png",
+      "state": "unstamped",
+      "bible_version": null
+     },
+     {
+      "stage": "video",
+      "n": 1,
+      "file": "renders_gpu3/ep01/S4/takes/video_001.mp4",
+      "state": "unstamped",
+      "bible_version": null
+     }
+    ],
+    "all": {
+     "unstamped": 3
+    }
+   },
+   "verdict": "fail",
+   "seconds": 0.0
+  },
+  "S5": {
+   "shot": "S5",
+   "active": {
+    "image": 22,
+    "video": 1
+   },
+   "video": null,
+   "gates": [
+    {
+     "gate": "Q-K1",
+     "pi": [
+      "PI-08"
+     ],
+     "metric": "video_size",
+     "value": null,
+     "threshold": "== [768, 1344]",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "rule_ids P-B3 (24 fps, 768×1344)",
+     "verdict": "unchecked",
+     "detail": "no active video in the local mirror (takes.json active video #1)"
+    },
+    {
+     "gate": "Q-K2",
+     "pi": [
+      "PI-08"
+     ],
+     "metric": "first_frame_psnr_db",
+     "value": null,
+     "threshold": ">= 20.0",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "SOP_parameters 视频 QC（锁定 2026-10-29）: 首帧 PSNR ≥20 dB",
+     "verdict": "unchecked",
+     "detail": "no active video in the local mirror (takes.json active video #1)"
+    },
+    {
+     "gate": "Q-K3",
+     "pi": [
+      "PI-08"
+     ],
+     "metric": "last_frame_ssim",
+     "value": null,
+     "threshold": ">= 0.55",
+     "status": "documented",
+     "on_breach": "fail",
+     "source": "consistency_impl §二 视频闸门; gpu3 weita_series LAST_SSIM_MIN = 0.55",
+     "verdict": "unchecked",
+     "detail": "no active video in the local mirror (takes.json active video #1)"
+    },
+    {
+     "gate": "Q-D1",
+     "pi": [
+      "PI-01"
+     ],
+     "metric": "sface_median",
+     "value": null,
+     "threshold": ">= 0.3",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "SOP_parameters 视频 QC（锁定）: SFace 中位数 ≥0.30; gpu3 SIM_CLIP_MIN",
+     "verdict": "unchecked",
+     "detail": "no active video in the local mirror (takes.json active video #1)"
+    },
+    {
+     "gate": "Q-A1",
+     "pi": [
+      "PI-11"
+     ],
+     "metric": "clap_music_score",
+     "value": null,
+     "threshold": "<= 0.3",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-11: non_diegetic_music = N/A 时 CLAP music ≤0.30（建议值）",
+     "verdict": "unchecked",
+     "detail": "no active video in the local mirror (takes.json active video #1)"
+    },
+    {
+     "gate": "Q-A2",
+     "pi": [
+      "PI-14"
+     ],
+     "metric": "h3_integrated_lufs",
+     "value": null,
+     "threshold": "-30.0 … -16.0",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-14: H3 原声 −30…−16 LUFS（建议值）",
+     "verdict": "unchecked",
+     "detail": "no active video in the local mirror (takes.json active video #1)"
+    },
+    {
+     "gate": "Q-A3",
+     "pi": [
+      "PI-13"
+     ],
+     "metric": "male_f0_voiced_s",
+     "value": null,
+     "threshold": "<= 0.5",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-13: F0 中位数 <165 Hz 的人声段 >0.5 s 且本镜不允许男声 → 报（建议值）",
+     "verdict": "unchecked",
+     "detail": "no active video in the local mirror (takes.json active video #1)"
+    },
+    {
+     "gate": "Q-P1",
+     "pi": [
+      "PI-25",
+      "PI-05"
+     ],
+     "metric": "bible_version",
+     "value": [
+      "video#1:unstamped",
+      "image#22:unstamped"
+     ],
+     "threshold": "== current bible_version",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "rule_ids R-C8 (输入未过期：take 的 bible_version 等于当前值) — block",
+     "verdict": "fail",
+     "detail": "current bible_version da4109a65f1c; active takes 2, not current 2"
+    },
+    {
+     "gate": "Q-P2",
+     "pi": [
+      "PI-25"
+     ],
+     "metric": "prompt_compiled_after_render",
+     "value": true,
+     "threshold": "== False",
+     "status": "documented",
+     "on_breach": "warn",
+     "source": "PI-25: 规则/提示词改动后已出 take 必须标 stale; compiled.h3_prompt_compiled_at vs take.created_at",
+     "verdict": "warn",
+     "detail": "h3_prompt compiled 2026-10-30T03:50:54Z vs video take #1 2026-10-29T18:31:21Z; take prompt sha 8f0562bc1296 vs compiled h3_prompt sha 9606d0cfe1c5"
+    },
+    {
+     "gate": "Q-P3",
+     "pi": [
+      "PI-24"
+     ],
+     "metric": "stems_video_sha_match",
+     "value": null,
+     "threshold": "== True",
+     "status": "documented",
+     "on_breach": "fail",
+     "source": "PI-24 / SOP S5: 每镜 video_sha256 必须等于 renders_gpu3 中的文件",
+     "verdict": "unchecked",
+     "detail": "video file not in the mirror"
+    },
+    {
+     "gate": "Q-P5",
+     "pi": [
+      "PI-24"
+     ],
+     "metric": "video_file_present_and_active",
+     "value": false,
+     "threshold": "== True",
+     "status": "documented",
+     "on_breach": "warn",
+     "source": "PI-24: 镜像里 video.mp4 = active video take（sha）",
+     "verdict": "warn",
+     "detail": "active video take #1 (renders_gpu3/ep01/S5/takes/video_001.mp4) and video.mp4 both missing"
+    }
+   ],
+   "stamps": {
+    "active": [
+     {
+      "stage": "video",
+      "n": 1,
+      "file": "renders_gpu3/ep01/S5/takes/video_001.mp4",
+      "state": "unstamped",
+      "bible_version": null
+     },
+     {
+      "stage": "image",
+      "n": 22,
+      "file": "renders_gpu3/ep01/S5/takes/image_022.png",
+      "state": "unstamped",
+      "bible_version": null
+     }
+    ],
+    "all": {
+     "unstamped": 23
+    }
+   },
+   "verdict": "fail",
+   "seconds": 0.0
+  },
+  "S6": {
+   "shot": "S6",
+   "active": {
+    "image": 6
+   },
+   "video": null,
+   "gates": [
+    {
+     "gate": "Q-K1",
+     "pi": [
+      "PI-08"
+     ],
+     "metric": "video_size",
+     "value": null,
+     "threshold": "== [768, 1344]",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "rule_ids P-B3 (24 fps, 768×1344)",
+     "verdict": "unchecked",
+     "detail": "no active video in the local mirror (shot has no video take)"
+    },
+    {
+     "gate": "Q-K2",
+     "pi": [
+      "PI-08"
+     ],
+     "metric": "first_frame_psnr_db",
+     "value": null,
+     "threshold": ">= 20.0",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "SOP_parameters 视频 QC（锁定 2026-10-29）: 首帧 PSNR ≥20 dB",
+     "verdict": "unchecked",
+     "detail": "no active video in the local mirror (shot has no video take)"
+    },
+    {
+     "gate": "Q-K3",
+     "pi": [
+      "PI-08"
+     ],
+     "metric": "last_frame_ssim",
+     "value": null,
+     "threshold": ">= 0.55",
+     "status": "documented",
+     "on_breach": "fail",
+     "source": "consistency_impl §二 视频闸门; gpu3 weita_series LAST_SSIM_MIN = 0.55",
+     "verdict": "unchecked",
+     "detail": "no active video in the local mirror (shot has no video take)"
+    },
+    {
+     "gate": "Q-D1",
+     "pi": [
+      "PI-01"
+     ],
+     "metric": "sface_median",
+     "value": null,
+     "threshold": ">= 0.3",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "SOP_parameters 视频 QC（锁定）: SFace 中位数 ≥0.30; gpu3 SIM_CLIP_MIN",
+     "verdict": "unchecked",
+     "detail": "no active video in the local mirror (shot has no video take)"
+    },
+    {
+     "gate": "Q-A1",
+     "pi": [
+      "PI-11"
+     ],
+     "metric": "clap_music_score",
+     "value": null,
+     "threshold": "<= 0.3",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-11: non_diegetic_music = N/A 时 CLAP music ≤0.30（建议值）",
+     "verdict": "unchecked",
+     "detail": "no active video in the local mirror (shot has no video take)"
+    },
+    {
+     "gate": "Q-A2",
+     "pi": [
+      "PI-14"
+     ],
+     "metric": "h3_integrated_lufs",
+     "value": null,
+     "threshold": "-30.0 … -16.0",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-14: H3 原声 −30…−16 LUFS（建议值）",
+     "verdict": "unchecked",
+     "detail": "no active video in the local mirror (shot has no video take)"
+    },
+    {
+     "gate": "Q-A3",
+     "pi": [
+      "PI-13"
+     ],
+     "metric": "male_f0_voiced_s",
+     "value": null,
+     "threshold": "<= 0.5",
+     "status": "suggested",
+     "on_breach": "warn",
+     "source": "production_issues PI-13: F0 中位数 <165 Hz 的人声段 >0.5 s 且本镜不允许男声 → 报（建议值）",
+     "verdict": "unchecked",
+     "detail": "no active video in the local mirror (shot has no video take)"
+    },
+    {
+     "gate": "Q-P1",
+     "pi": [
+      "PI-25",
+      "PI-05"
+     ],
+     "metric": "bible_version",
+     "value": [
+      "image#6:unstamped"
+     ],
+     "threshold": "== current bible_version",
+     "status": "locked",
+     "on_breach": "fail",
+     "source": "rule_ids R-C8 (输入未过期：take 的 bible_version 等于当前值) — block",
+     "verdict": "fail",
+     "detail": "current bible_version da4109a65f1c; active takes 1, not current 1"
+    },
+    {
+     "gate": "Q-P2",
+     "pi": [
+      "PI-25"
+     ],
+     "metric": "prompt_compiled_after_render",
+     "value": null,
+     "threshold": "== False",
+     "status": "documented",
+     "on_breach": "warn",
+     "source": "PI-25: 规则/提示词改动后已出 take 必须标 stale; compiled.h3_prompt_compiled_at vs take.created_at",
+     "verdict": "unchecked",
+     "detail": "no active video take"
+    },
+    {
+     "gate": "Q-P3",
+     "pi": [
+      "PI-24"
+     ],
+     "metric": "stems_video_sha_match",
+     "value": null,
+     "threshold": "== True",
+     "status": "documented",
+     "on_breach": "fail",
+     "source": "PI-24 / SOP S5: 每镜 video_sha256 必须等于 renders_gpu3 中的文件",
+     "verdict": "unchecked",
+     "detail": "no audio/stems.json"
+    },
+    {
+     "gate": "Q-P5",
+     "pi": [
+      "PI-24"
+     ],
+     "metric": "video_file_present_and_active",
+     "value": null,
+     "threshold": "== True",
+     "status": "documented",
+     "on_breach": "warn",
+     "source": "PI-24: 镜像里 video.mp4 = active video take（sha）",
+     "verdict": "unchecked",
+     "detail": "no active video take"
+    }
+   ],
+   "stamps": {
+    "active": [
+     {
+      "stage": "image",
+      "n": 6,
+      "file": "renders_gpu3/ep01/S6/takes/image_006.png",
+      "state": "unstamped",
+      "bible_version": null
+     }
+    ],
+    "all": {
+     "unstamped": 11
+    }
+   },
+   "verdict": "fail",
+   "seconds": 0.0
+  }
+ },
+ "verdict": "fail",
+ "stale": [
+  {
+   "shot": "S1",
+   "stage": "image",
+   "n": 8,
+   "file": "renders_gpu3/ep01/S1/takes/image_008.png",
+   "state": "unstamped",
+   "bible_version": null
+  },
+  {
+   "shot": "S1",
+   "stage": "video",
+   "n": 2,
+   "file": "renders_gpu3/ep01/S1/takes/video_002.mp4",
+   "state": "unstamped",
+   "bible_version": null
+  },
+  {
+   "shot": "S2",
+   "stage": "image",
+   "n": 1,
+   "file": "renders_gpu3/ep01/S2/takes/image_001.png",
+   "state": "unstamped",
+   "bible_version": null
+  },
+  {
+   "shot": "S2",
+   "stage": "video",
+   "n": 1,
+   "file": "renders_gpu3/ep01/S2/takes/video_001.mp4",
+   "state": "unstamped",
+   "bible_version": null
+  },
+  {
+   "shot": "S3",
+   "stage": "video",
+   "n": 2,
+   "file": "renders_gpu3/ep01/S3/takes/video_002.mp4",
+   "state": "unstamped",
+   "bible_version": null
+  },
+  {
+   "shot": "S3",
+   "stage": "image",
+   "n": 10,
+   "file": "renders_gpu3/ep01/S3/takes/image_010.png",
+   "state": "unstamped",
+   "bible_version": null
+  },
+  {
+   "shot": "S4",
+   "stage": "image",
+   "n": 2,
+   "file": "renders_gpu3/ep01/S4/takes/image_002.png",
+   "state": "unstamped",
+   "bible_version": null
+  },
+  {
+   "shot": "S4",
+   "stage": "video",
+   "n": 1,
+   "file": "renders_gpu3/ep01/S4/takes/video_001.mp4",
+   "state": "unstamped",
+   "bible_version": null
+  },
+  {
+   "shot": "S5",
+   "stage": "video",
+   "n": 1,
+   "file": "renders_gpu3/ep01/S5/takes/video_001.mp4",
+   "state": "unstamped",
+   "bible_version": null
+  },
+  {
+   "shot": "S5",
+   "stage": "image",
+   "n": 22,
+   "file": "renders_gpu3/ep01/S5/takes/image_022.png",
+   "state": "unstamped",
+   "bible_version": null
+  },
+  {
+   "shot": "S6",
+   "stage": "image",
+   "n": 6,
+   "file": "renders_gpu3/ep01/S6/takes/image_006.png",
+   "state": "unstamped",
+   "bible_version": null
+  }
+ ]
+}

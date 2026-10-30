@@ -1,5 +1,99 @@
 # Parser diff: shared importer (ns_agent.importer, synced 2026-10-30, sha 76ac895e…) vs gpu3 weita_render parser
 
+## 2026-10-30 T04 对齐（fredw-92）
+
+工具：`tools/parser_diff.py <script.md> … [--gpu3 weita_render.py] [--json]`。gpu3 解析器只读 scp 一份（gpu33:`/root/claude-kimi-ns-studio-v1/ns-studio/scripts/weita_render.py`，md5 `50eb52bc…`），
+只执行到 `def load_script` 之前的解析部分；逐镜对比 镜号、时长(+来源)、img/motion 触发词与正文、sound 正文段、【H3 audio】、【亲密声】、【配乐】、对白(说话人, 台词)、🎙、**H3提示词**，每集 【BGM】。
+v3.1 是后台返修循环正在写的文件，对比用的是 16:12 的拷贝（sha `ff2a28dc1511`）。下面的旧报告（88 条）是更早版本导入器的结果，已被本节取代。
+
+| 剧本 | 修前 | 笔记本修后 | 再打 gpu3 补丁（本地副本验证） |
+|---|---|---|---|
+| `script play lib/为他而骚 （剧本和镜头）v2.md` | 18（对白 15、img 2、motion 1） | 2（对白） | 0 |
+| `data/staging_v3/为他而骚 （剧本和镜头）v3.md` | 75（BGM 59、对白 15、img 1） | 61（BGM 59、对白 2） | 0 |
+| `data/staging_v3/为他而骚 （剧本和镜头）v3.1.md`（拷贝） | 75（同上） | 61（同上） | 0 |
+
+### 笔记本侧已改（笔记本错，契约为准）
+
+1. **对白里没有引号的段不是台词**（契约 §2.5：台词 = （说话人）+“引号”）：`（沉默三秒）`、`—`、`（无——…）`、`无台词` 原来被当成一句台词（会进 H3 `<d>`）。
+   现在 `Shot.dialogue` 只有带引号的台词，没有引号的段原文放进新字段 `Shot.dialogue_stage`；`tools/validate_qwen_script.py` 对它照旧报 S1-W4，`ns_api/wizard.py` 的“解析不出”计数改读它。（v2 12 处）
+2. **字段值的 Markdown 标记**与 gpu3 `clean()` 同口径：反斜杠转义全部还原（`0\.5` → `0.5`，`\\` → `\`），`*`（含 `*斜体*`、单边残缺）和反引号（含单边残缺）一律去掉。（v2 ep45s5 img、ep49s4 motion、ep50s4 对白、ep52s3 img）
+3. **H3提示词** 代码块逐字收集（不再做 `\*` 反转义，与 gpu3 / S1-W9 一致）；sound 段标记后允许带冒号（`【配乐】：…`，与 gpu3 同）。
+4. 回归测试 `tests/test_parser_alignment.py`（占位夹具；设 `NS_GPU3_PARSER=<weita_render.py 副本>` 时直接两边对比）。`tests/test_script_importer.py` 里 `_parse_dialogue("无台词")` 的旧断言改成新行为。
+
+### gpu3 侧补丁提案（未改 gpu3；需 gpu3 owner 应用）
+
+- **P1 台词说话人**：`UTTER_RE` 只认紧挨引号的括号，`（他，…）：“…”`（QA-07 冒号）和 `她回：“…”`（QA-08 名字+冒号）的说话人变成空 → 说话人编号 / 画外判定丢失（v2/v3 ep05s4、ep29s3）。改成与共享导入器 `LINE_RE` 同义。
+- **P2 本集 BGM**：weita `Episode` 没有 `配乐` / `【BGM】`（镜1 之前的 `**配乐**` 行进了 `ep.stray`）；现在 BGM 只能从共享导入 JSON（`shared_shot`）拿。补上 `music` / `music_bgm`，取法与导入器 `_block(…, "BGM")` 相同（v3 每集 1 条，共 59）。
+- **P3 集号**：`EP_RE` 只认两位数 `ep(\d{2})`，契约 QW-E1 允许不补零（`## ep5《…》`）→ 改 `\d+`。三份剧本目前都补零，无实际差异。
+
+本地副本打完 P1–P3 后三份剧本 0 差异、夹具 0 差异。
+
+```diff
+--- a/ns-studio/scripts/weita_render.py
++++ b/ns-studio/scripts/weita_render.py
+@@ -79,7 +79,7 @@
+ 
+ # ---------------------------------------------------------------- parser
+ 
+-EP_RE = re.compile(r"^##\s*ep(\d{2})《(.+?)》(.*)$")
++EP_RE = re.compile(r"^##\s*ep(\d+)《(.+?)》(.*)$")  # contract QW-E1: the number may be unpadded
+ BATCH_RE = re.compile(r"^#\s*《为他而骚》第(.+?)批")
+ FIELD_RE = re.compile(r"^\*\*(.+?)\*\*\s*[：:]\s*(.*)$")
+ # ep44 镜2: an escaped label without the closing ** ("\*\*镜2｜img（…）：text")
+@@ -88,7 +88,9 @@
+ LOCK_RE = re.compile(r"^【(.+?)】(.+)$")
+ TRIGGER_DEF_RE = re.compile(r"^([a-z][a-z0-9_]*)\s{2,}(\S.*)$")  # a line of the LoRA trigger table
+ LEAD_TRIGGERS_RE = re.compile(r"^([a-z][a-z0-9_]*(?:\s*[,，]\s*[a-z][a-z0-9_]*)*)\s*[，,]\s*")
+-UTTER_RE = re.compile(r"(?:（([^（）]*)）)?“([^”]*)”")
++# T04 (same as the shared importer LINE_RE): （note）“…”, （note）：“…” (QA-07) or name：“…” (QA-08)
++UTTER_RE = re.compile(r"(?:（([^（）]*)）\s*)?(?:[：:]\s*)?(?:([^\s“\"「（）：:，。／]{1,8})[：:]\s*)?“([^”]*)”")
++BGM_RE = re.compile(r"【BGM】\s*[：:]?\s*(.*?)(?=【(?:H3 audio|H3音频|亲密声|配乐)】|$)", re.S)
+ TABLE_ROW_RE = re.compile(r"^\|\s*ep(\d{2})\s*\|(.*)\|\s*$")
+ TABLE_HEAD_RE = re.compile(r"^\|\s*集\s*\|(.*)\|\s*$")
+ 
+@@ -153,6 +155,8 @@
+     batch: int
+     plot: str = ""
+     negative_extra: str = ""
++    music: str = ""  # v3 episode **配乐** line (before 镜1), verbatim
++    music_bgm: str = ""  # its 【BGM】 block (English prompt for the music model)
+     shots: list[Shot] = field(default_factory=list)
+     stray: list[str] = field(default_factory=list)  # unlabelled lines inside the episode (kept, not used)
+ 
+@@ -191,7 +195,7 @@
+ 
+ 
+ def parse_utterances(text: str) -> list[Utterance]:
+-    return [Utterance((m.group(1) or "").strip(), m.group(2)) for m in UTTER_RE.finditer(text)]
++    return [Utterance((m.group(1) or m.group(2) or "").strip(), m.group(3)) for m in UTTER_RE.finditer(text)]
+ 
+ 
+ def split_triggers(text: str, known: dict[str, str]) -> tuple[list[str], str]:
+@@ -311,6 +315,11 @@
+         if label == "负面追加":
+             ep.negative_extra = clean(value)
+             continue
++        if label == "配乐" and shot is None:  # contract R-C1: the episode BGM line comes before 镜1
++            ep.music = clean(value)
++            m_b = BGM_RE.search(ep.music)
++            ep.music_bgm = m_b.group(1).strip().rstrip("；;，, ") if m_b else ""
++            continue
+         if shot is None:
+             ep.stray.append(ln)
+             continue
+```
+
+### 剩余差异 / 已知分歧（三份剧本里 0 处，只在不合契约的输入上出现）
+
+- 字段续行：导入器把非空续行接到上一个字段（契约 §2 写明），gpu3 放进 `ep.stray` 丢掉。契约要求“每个字段写成一行”，校验器另有 QW-F0；暂不改 gpu3。
+- `**时长**` 超出 3–15：导入器保留默认 10 秒并警告，gpu3 夹到 3/15 并记为 script。校验器 S1-W2 会 block，不会进渲染。
+- `【H3音频】` 别名：gpu3 认，导入器不认（契约段名逐字为 `【H3 audio】`，校验器报 S1-W3）。
+- `**H3提示词**` 不放代码块：导入器收到下一个字段为止，gpu3 丢弃（契约要求代码块）。
+- 反斜杠后跟非 ASCII 标点：gpu3 `unescape` 一律去反斜杠，导入器按 Markdown 只还原 ASCII 标点。
+- 共享导入 JSON（`data/import/script_v2.json`）是旧导入器生成的；本次未重跑 `tools/import_script.py`（会重建时间线），需要时由导入链路 owner 重跑。
+
+## 旧报告（T04 之前）
+
 88 real differences after ignoring the inline trigger prefixes (the importer keeps `hh12clear, …，` / `lnwan01，` in img/motion text; weita splits them into img_triggers / motion_triggers).
 
 Categories:

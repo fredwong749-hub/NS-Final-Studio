@@ -79,7 +79,7 @@
 | 轮数 | 每镜最多 4 轮，任一候选通过即停 | WS L759 | 2026-10-30 | 全部 |
 | 冲突：轮数与候选数 | VB 写 3 候选×3 轮（阈值 0.72）；PL 写 2 候选×3 轮；WA（成人）写 2 轮；PL frames_fast 写有 LoRA 时每轮 1 候选 → **待验证**，需统一 | VB [generation]；PL；WA L146 | 待验证 | — |
 | VLM 核对 `S3-F5` | 本地 Qwen3-VL 8B 逐条核对 Frame Spec 事实（透明高跟、饰品计数、人数、衣着）；每帧一次调用 | PL 选片、frames_fast | 2026-10-29 | 全部 |
-| 非成人裸露 `S3-F4` | 一票否决（hard_fail） | VB nudity_qc_non_adult | 2026-10-30 | 全部 |
+| 裸露 `S3-F4` | 只记录（report_only；2026-10-30 取消成人过滤器） | VB nudity_qc_non_adult | 2026-10-30 | 全部 |
 | 尾帧生成 | 以本镜首帧为图 1，编辑到 motion 的结束状态；景别、机位、光线、身份、服装保持不变（VB last_frame_keep） | VB assembly；REQ C3 | 2026-10-30 | 全部 |
 | 场景内接力 | 同一场景下一镜的首帧，以上一镜尾帧为参考编辑生成；切换场景时重新锚定 | AUD §3.3；CP 方案 A | 2026-10-30 | 全部（实现中 T47） |
 | 衔接检查 `R-C7` | 视觉模型判断同衣、同地、同光；人物区 LAB 直方图距离、背景 CLIP 相似度的阈值 = **待验证**（尚未定数） | AUD §3.4 | 待验证 | — |
@@ -120,8 +120,9 @@
 | 加速 LoRA 版本 `P-A4` | gpu3 现在代码的 t8 = `minimax_h3_fl2v_turbo_8step_v1.1_768p_comfyui_bf16`（WR L1019，文件已在 loras/）；PL.json 仍写 `v1.0_768p` | gpu3 WR 源码 + loras 目录（22:40 巡检）；[LH] 两个文件都存在 | **需 A/B**（v1.0_768p vs v1.1_768p vs 基模 20 步，固定种子 9:16；H3R 实验 3）；A/B 后 PL 也要同步 | — | — |
 | 加速 LoRA shift `P-A3` | 768p 版用 6/3（`MiniMaxH3SigmaShift`，WR `TURBO_SHIFT = (6.0, 3.0)`）；544p 版用 12/3 | [L]（v1.0_768p 行：6/3，“Recommended settings: 8 NFE, video shift 6, audio shift 3”）；v1.1_768p 这一行在 [L] 没抓到 | 配对规则锁定；v1.1 用 6/3 → 待验证 | 2026-10-30（规则） | 全部 |
 | 加速步数 `P-A5` | 8 步（t8） | [L] 8step 行 | 锁定（随 LoRA 版本）；画质 → 需 A/B | 2026-10-30 | 全部 |
-| 采样器 / 调度器 `P-A6` | euler + simple；不用 ancestral/SDE | [R]（LightX2V 讨论 #48、ComfyUI issue #15283，社区）；WR 视频用 euler | 待验证（官方未写） | — | — |
-| 缓存加速节点 `P-A7` | 不挂 EasyCache、Spectrum、TeaCache | [R]（note.com 对比，社区） | 待验证（先禁用；gpu3 graph 未全查） | — | — |
+| 采样器 / 调度器 `P-A6` | euler + simple；不用 ancestral/SDE | [R]（LightX2V 讨论 #48、ComfyUI issue #15283，社区）；WR 视频 Turbo 档用 euler；HF Comfy #67：euler 让变暗约减半（docs/research/h3_deep/03 §2.1） | 待验证（官方未写；**gpu3 基模档 WR L1099 仍是 `res_multistep`** → 补丁 G1 + 实验 X2，见 docs/research_adoption.md）。笔记本 NR 已强制：拒绝 ancestral/SDE，基模档 euler | — | — |
+| 缓存加速节点 `P-A7` | 不挂 EasyCache、Spectrum、TeaCache、Cache-DiT、Sol-Attn、torch.compile；不加 `--fast` | [R]（note.com 对比）；h3_deep/00 §二（≥5 人无反对）；gpu3 只读核实（h3_deep/00 §一，2026-10-30 晚：无缓存/Sol/compile/`--fast`） | 锁定（禁用）；笔记本 NR `H3_BANNED_NODES` + 单测 | 2026-10-30 | 全部 |
+| 笔记本链对齐（NR） | `services/render_router/ns_render/workflows.py` 的 H3 默认值改为与本表一致：int8_convrot、v1.1 768p @1.0、`MiniMaxH3SigmaShift` 6/3（同时接采样与调度）、首尾帧同一 center-crop、768×1344、17k+5 且 124–362；出图前自检拒绝 w4a8+LoRA、shift 不配对、Turbo <6 步 | docs/research_adoption.md §二；tests/test_research_adoption_params.py | 代码值对齐（不改变上面各行的锁定/待验证状态） | 2026-10-30 | 全部 |
 | 基模（升级/重试档） `P-A3` `P-A5` | 基模 20 步（可到 25），shift 12/3，无 LoRA | [CN]（20 默认，25 提高动作质量）；[M]（12/3）；PL fallback 20 步 A/B 通过 | 锁定 | 2026-10-30 | 全部 |
 | 中间关键帧 `P-A8` | 必须经过某个姿态的镜头用 `MiniMaxH3AddGuide(frame_idx)`（负数从片尾往前数，没有强度参数） | [N] | 需 A/B | — | — |
 | 视频 QC | owner_script_qc（脸/眼/字幕）+ 首帧 PSNR ≥20 dB + 结尾身份 SFace ≥0.30（取 1.5/3.5/5.5/7.5/9.9 s） | PL；WS `SIM_CLIP_MIN`、L883 | 锁定 | 2026-10-29 | 全部 |
@@ -136,6 +137,8 @@
 | 输出 | 1080×1920 H.264 CRF18（768×1344 → lanczos 1097×1920 → 裁切）；有 4K 时另出 2160×3840 | PL；SOP §13 | 2026-10-29 | 全部 |
 | 响度 | 母带 −14 LUFS / −1 dBTP；独白处场景 −8..−12 dB；Foley −6..−10 dB | SOP §11 | 待验证（未成集实测） | — |
 | 4K QC | 身份 ≥0.75、静态闪烁比 ≤1.6、ΔE ≤4.0 | gpu3 scripts/upscale_4k.py QC_LIMITS | 待验证（A/B up4k-test 进行中） | — |
+| 4K H.264 成片编码（T38） | x264 CRF 17 + `-maxrate 60M -bufsize 120M -level:v 5.1 -profile:v high -pix_fmt yuv420p`（原 CRF 20 无 VBV） | docs/upscale_4k.md “Notes for T38”（实测 σ2 颗粒 @CRF17 ≈39 Mbit/s）；`services/post/ns_post/assemble.py` Settings.crf_4k/maxrate_4k/bufsize_4k/level_4k | 2026-10-30 | 全部 |
+| 视频逐镜校色（PI-19） | `ns_post.colormatch`（LAB gain+bias，首尾关键帧两端插值，strength 0.8，region centre）；**默认关**，等每个 take 的实际首尾帧同步后做 CPU 实验 X10 再定 | h3_deep/00 §二 颜色 1；docs/research_adoption.md B1（ep01 dry-run：6 镜只有 S3 有匹配首帧） | 待验证 | — |
 | 声音资产 | 配乐与音效库只用 CPU，可与 S3 并行，不占 GPU 优先级 | SOP ★1 | 2026-10-30 | 全部 |
 
 ## 就绪闸门（8 要素 + 衔接）
@@ -153,6 +156,7 @@
 
 | 日期 | 改动 | 证据 | 写入者 |
 |---|---|---|---|
+| 2026-10-30 | P-A7 缓存加速节点改为锁定（禁用）；P-A6 注明 gpu3 基模档仍 res_multistep（待验证不变）；新增“笔记本链对齐（NR）”行、4K H.264 编码行、视频逐镜校色行（待验证）。没有把任何“需 A/B”项升为锁定 | docs/research_adoption.md（逐条来源 + gpu3 只读核实）；tests/test_research_adoption_params.py | agent E（协调派发，研究落地） |
 | 2026-10-30 | 记录项目方决定：H3 A/B 推迟到 LoRA 与首尾帧之后；饰品 LoRA nprng2/lbrng9/lbrng9_beads 设为 deferred（等项目方修正） | 协调转达项目方决定 | claude-sop |
 | 2026-10-30 | 给各行加上 rule_id（与 docs/audit/rule_ids.md v1 对应） | 项目方指令：逐镜审计硬规则 | claude-sop |
 | 2026-10-30 | v3 切换闸门：renderer 的 S1_GATE 已合并（WR L50–54），改为锁定 | gpu3 源码 | claude-sop |

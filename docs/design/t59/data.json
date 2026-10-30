@@ -1,0 +1,497 @@
+{
+ "episode": {
+  "number": 1,
+  "title": "旋转门",
+  "synopsis": "入职第一天。顾沉的一瞥，将她从“普通女孩”的轨道上轻轻撞了出去。"
+ },
+ "shots": [
+  {
+   "id": "ep01-S1",
+   "camera": {
+    "text": "低机位仰拍·camera tilt up 缓慢上摇",
+    "source": "auto",
+    "sources": {
+     "size": "none",
+     "angle": "auto",
+     "move": "auto",
+     "lens": "none"
+    },
+    "size": "",
+    "angle": "低机位仰拍",
+    "move": "camera tilt up 缓慢上摇",
+    "lens": ""
+   },
+   "duration": {
+    "seconds": 10,
+    "source": "default"
+   },
+   "expression": {
+    "text": "眼神礼貌而紧张",
+    "source": "auto",
+    "cues": [
+     "眼神礼貌而紧张"
+    ]
+   },
+   "dialogue": [],
+   "voiceover": {
+    "note": "镜1尾入",
+    "text": "第一天实习。别出错，别被注意。……可我为什么——希望某个人，把我从人群里认出来。"
+   },
+   "script_text": "从高跟鞋沿黑色高亮镜面漆皮超短裙、腰线、G罩杯胸线摇至蓝发及腰齐刘海的脸——她抱着文件夹，眼神礼貌而紧张，理了理刘海",
+   "image_prompt": "清晨写字楼旋转门，低机位仰拍，一双12cm透明细高跟鞋踏入大理石反光地面，足弓线条优美，上方虚化的黑色高亮镜面漆皮超短裙裙摆随步伐摆动，晨光从玻璃幕墙斜照，衣装完整、无裸露，漆皮为像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利，鞋跟直径约6毫米、细如一根筷子的针形细跟，跟高12厘米，专业电影镜头画面感，画面干净，徕卡镜头级锐利度与通透质感，85mm人像镜头f/1.2大光圈，主体锐利对焦，前景与背景奶油般柔焦虚化、柔和圆形光斑，浓郁饱和的暖色调电影调色，色彩丰富艳丽、通透明亮，柔和的大面积光源与暖调轮廓光、高光柔和不过曝，皮肤通透有真实质感，无字幕、无文字、无水印",
+   "takes_count": {
+    "image": 7,
+    "last": 0,
+    "video": 1
+   },
+   "h3_prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 10.12-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] Live-action, cinematic, shallow depth of field, the shot begins in the position, framing and lighting established by Picture 1. The scripted camera move and action follow in one continuous shot: camera tilt up 缓慢上摇，从高跟鞋沿黑色高亮镜面漆皮超短裙、腰线、G罩杯胸线摇至蓝发及腰齐刘海的脸——她抱着文件夹，眼神礼貌而紧张，理了理刘海. She settles into the pose, expression, spacing and composition established by Picture 2 at the end of the shot.\n\noverall_soundscape: 高跟鞋敲击大理石清脆回声，大堂环境音，12cm stiletto heels clicking on marble\n\nnon_diegetic_music: N/A",
+   "characters": [
+    {
+     "character": "lin_wan",
+     "name": "林晚",
+     "look_name": "默认",
+     "label": "林晚 · 默认 · D0",
+     "d_state": "D0"
+    }
+   ],
+   "first_frame": "ep01_S1_first.jpg",
+   "last_frame": "ep01_S1_last.jpg",
+   "owner": "gpu3",
+   "review": "unreviewed",
+   "video": true
+  },
+  {
+   "id": "ep01-S2",
+   "camera": {
+    "text": "static camera",
+    "source": "auto",
+    "sources": {
+     "size": "none",
+     "angle": "none",
+     "move": "auto",
+     "lens": "none"
+    },
+    "size": "",
+    "angle": "",
+    "move": "static camera",
+    "lens": ""
+   },
+   "duration": {
+    "seconds": 10,
+    "source": "default"
+   },
+   "expression": {
+    "text": "她察觉后睫毛连眨三次低头",
+    "source": "auto",
+    "cues": [
+     "她察觉后睫毛连眨三次低头"
+    ]
+   },
+   "dialogue": [
+    {
+     "speaker_note": "顾沉低声",
+     "text": "蓝头发，很大胆。",
+     "stage": null
+    },
+    {
+     "speaker_note": "她小声",
+     "text": "染了三年了……总经理。",
+     "stage": null
+    }
+   ],
+   "voiceover": null,
+   "script_text": "两人沉默站着，男性侧目看她一秒收回，她察觉后睫毛连眨三次低头，抱紧怀里的文件夹贴在胸前",
+   "image_prompt": "【林晚】22岁中国成年女性，蓝发及腰、齐刘海、冷白皮肤、G罩杯、长腿，真人写实；手指甲为5厘米超长透明水晶甲、镶满钻石饰品，电梯轿厢，蓝发齐刘海女性与黑色高定衬衫中年男总经理并排而立，金属壁映出两人重叠倒影，楼层数字灯光映脸，狭小空间，衣装完整、无裸露，专业电影镜头画面感，画面干净，徕卡镜头级锐利度与通透质感，85mm人像镜头f/1.2大光圈，主体锐利对焦，前景与背景奶油般柔焦虚化、柔和圆形光斑，浓郁饱和的暖色调电影调色，色彩丰富艳丽、通透明亮，柔和的大面积光源与暖调轮廓光、高光柔和不过曝，皮肤通透有真实质感，无字幕、无文字、无水印",
+   "takes_count": {
+    "image": 5,
+    "last": 0,
+    "video": 0
+   },
+   "h3_prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 10.12-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] Live-action, cinematic, shallow depth of field, the shot begins in the position, framing and lighting established by Picture 1. The scripted camera move and action follow in one continuous shot: static camera，两人沉默站着，男性侧目看她一秒收回，她察觉后睫毛连眨三次低头，抱紧怀里的文件夹贴在胸前. The man with a low, calm voice (S2) says: <d>[Chinese] 蓝头发，很大胆。</d> The young woman with a soft voice (S1) says: <d>[Chinese] 染了三年了……总经理。</d> She settles into the pose, expression, spacing and composition established by Picture 2 at the end of the shot.\n\noverall_soundscape: 电梯运行的低鸣，楼层数字提示音，两人克制的呼吸\n\nnon_diegetic_music: N/A",
+   "characters": [
+    {
+     "character": "lin_wan",
+     "name": "林晚",
+     "look_name": "默认",
+     "label": "林晚 · 默认 · D0",
+     "d_state": "D0"
+    }
+   ],
+   "first_frame": "ep01_S2_first.jpg",
+   "last_frame": "ep01_S2_last.jpg",
+   "owner": "gpu3",
+   "review": "unreviewed",
+   "video": true
+  },
+  {
+   "id": "ep01-S3",
+   "camera": {
+    "text": "极近特写·camera push in 缓慢推近",
+    "source": "auto",
+    "sources": {
+     "size": "auto",
+     "angle": "none",
+     "move": "auto",
+     "lens": "none"
+    },
+    "size": "极近特写",
+    "angle": "",
+    "move": "camera push in 缓慢推近",
+    "lens": ""
+   },
+   "duration": {
+    "seconds": 10,
+    "source": "default"
+   },
+   "expression": {
+    "text": "睫毛颤动，嘴唇抿了抿把笑意压回去，抬眼快速瞥向画外男性方向又立刻低头，嘴角有一抹极轻微、自己都没察觉的上扬",
+    "source": "auto",
+    "cues": [
+     "睫毛颤动",
+     "嘴唇抿了抿把笑意压回去",
+     "抬眼快速瞥向画外男性方向又立刻低头",
+     "嘴角有一抹极轻微、自己都没察觉的上扬"
+    ]
+   },
+   "dialogue": [],
+   "voiceover": {
+    "note": null,
+    "text": "他看我的方式，不像看一个实习生。像看一件——迟早要拆开验货的东西。只是他自己，还不知道。"
+   },
+   "script_text": "她低头掩饰，睫毛颤动，嘴唇抿了抿把笑意压回去，抬眼快速瞥向画外男性方向又立刻低头",
+   "image_prompt": "【林晚】22岁中国成年女性，蓝发及腰、齐刘海、冷白皮肤、G罩杯、长腿，真人写实；手指甲为5厘米超长透明水晶甲、镶满钻石饰品，极近特写，林晚低头侧脸，齐刘海的阴影盖住上半张脸，嘴角有一抹极轻微、自己都没察觉的上扬，面部清晰对焦，五官锐利，衣装完整、无裸露，专业电影镜头画面感，画面干净，徕卡镜头级锐利度与通透质感，85mm人像镜头f/1.2大光圈，主体锐利对焦，前景与背景奶油般柔焦虚化、柔和圆形光斑，浓郁饱和的暖色调电影调色，色彩丰富艳丽、通透明亮，柔和的大面积光源与暖调轮廓光、高光柔和不过曝，皮肤通透有真实质感，无字幕、无文字、无水印",
+   "takes_count": {
+    "image": 3,
+    "last": 0,
+    "video": 0
+   },
+   "h3_prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 5.17-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] Live-action, cinematic, shallow depth of field, the shot begins in the position, framing and lighting established by Picture 1. The scripted camera move and action follow in one continuous shot: camera push in 缓慢推近，她低头掩饰，睫毛颤动，嘴唇抿了抿把笑意压回去，抬眼快速瞥向画外男性方向又立刻低头. She settles into the pose, expression, spacing and composition established by Picture 2 at the end of the shot.\n\noverall_soundscape: 心跳声铺底，电梯门开提示音\n\nnon_diegetic_music: N/A",
+   "characters": [
+    {
+     "character": "lin_wan",
+     "name": "林晚",
+     "look_name": "默认",
+     "label": "林晚 · 默认 · D0",
+     "d_state": "D0"
+    }
+   ],
+   "first_frame": "ep01_S3_first.jpg",
+   "last_frame": "ep01_S3_last.jpg",
+   "owner": "gpu3",
+   "review": "unreviewed",
+   "video": true
+  },
+  {
+   "id": "ep01-S4",
+   "camera": {
+    "text": "handheld follow 轻微手持",
+    "source": "auto",
+    "sources": {
+     "size": "none",
+     "angle": "none",
+     "move": "auto",
+     "lens": "none"
+    },
+    "size": "",
+    "angle": "",
+    "move": "handheld follow 轻微手持",
+    "lens": ""
+   },
+   "duration": {
+    "seconds": 10,
+    "source": "default"
+   },
+   "expression": {
+    "text": "她笑着躲，眼睛望着碗里",
+    "source": "auto",
+    "cues": [
+     "她笑着躲",
+     "眼睛望着碗里"
+    ]
+   },
+   "dialogue": [
+    {
+     "speaker_note": "陈宇",
+     "text": "加班到十一点？你们公司真狠。喝，趁热。",
+     "stage": null
+    },
+    {
+     "speaker_note": "她",
+     "text": "嗯……项目要紧嘛。",
+     "stage": null
+    }
+   ],
+   "voiceover": null,
+   "script_text": "陈宇放下汤碗揉她头发，她笑着躲，低头喝汤——某个瞬间动作停顿半拍，眼睛望着碗里",
+   "image_prompt": "【林晚】22岁中国成年女性，蓝发及腰、齐刘海、冷白皮肤、G罩杯、长腿，真人写实；手指甲为5厘米超长透明水晶甲、镶满钻石饰品，【陈宇】23岁成年男性，温暖阳光，休闲装，夜晚出租屋餐桌，暖黄台灯，年轻男生陈宇端着一碗热汤放到蓝发女性面前，桌上家常菜，温馨狭小的家，暗部保留细节，面部可辨，画面光比1:4，非纯黑，衣装完整、无裸露，专业电影镜头画面感，画面干净，徕卡镜头级锐利度与通透质感，85mm人像镜头f/1.2大光圈，主体锐利对焦，前景与背景奶油般柔焦虚化、柔和圆形光斑，浓郁饱和的暖色调电影调色，色彩丰富艳丽、通透明亮，柔和的大面积光源与暖调轮廓光、高光柔和不过曝，皮肤通透有真实质感，无字幕、无文字、无水印",
+   "takes_count": {
+    "image": 2,
+    "last": 0,
+    "video": 0
+   },
+   "h3_prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 10.12-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] Live-action, cinematic, shallow depth of field, the shot begins in the position, framing and lighting established by Picture 1. The scripted camera move and action follow in one continuous shot: handheld follow 轻微手持，陈宇放下汤碗揉她头发，她笑着躲，低头喝汤——某个瞬间动作停顿半拍，眼睛望着碗里. The man with a low, calm voice (S1) says: <d>[Chinese] 加班到十一点？你们公司真狠。喝，趁热。</d> The young woman with a soft voice (S2) says: <d>[Chinese] 嗯……项目要紧嘛。</d> She settles into the pose, expression, spacing and composition established by Picture 2 at the end of the shot.\n\noverall_soundscape: 碗筷轻碰声，电视新闻低音量\n\nnon_diegetic_music: N/A",
+   "characters": [
+    {
+     "character": "lin_wan",
+     "name": "林晚",
+     "look_name": "默认",
+     "label": "林晚 · 默认 · D0",
+     "d_state": "D0"
+    },
+    {
+     "character": "chen_yu",
+     "name": "陈宇",
+     "look_name": "默认",
+     "label": "陈宇 · 默认",
+     "d_state": null
+    }
+   ],
+   "first_frame": "ep01_S4_first.jpg",
+   "last_frame": "ep01_S4_last.jpg",
+   "owner": "gpu3",
+   "review": "unreviewed",
+   "video": true
+  },
+  {
+   "id": "ep01-S5",
+   "camera": {
+    "text": "背影·static camera",
+    "source": "auto",
+    "sources": {
+     "size": "none",
+     "angle": "auto",
+     "move": "auto",
+     "lens": "none"
+    },
+    "size": "",
+    "angle": "背影",
+    "move": "static camera",
+    "lens": ""
+   },
+   "duration": {
+    "seconds": 10,
+    "source": "default"
+   },
+   "expression": {
+    "text": "",
+    "source": "none",
+    "cues": []
+   },
+   "dialogue": [],
+   "voiceover": {
+    "note": null,
+    "text": "汤是热的，他的心也是热的。可我满脑子，是电梯里那一秒。"
+   },
+   "script_text": "背影，她洗碗的动作规律，中途停住，抬头看窗玻璃里自己的倒影三秒，手上的水一直流",
+   "image_prompt": "【林晚】22岁中国成年女性，蓝发及腰、齐刘海、冷白皮肤、G罩杯、长腿，真人写实；手指甲为5厘米超长透明水晶甲、镶满钻石饰品，厨房水槽前，林晚背对镜头洗碗，肩线绷直，窗外城市夜景，她面前窗外玻璃映出自己模糊的脸，暗部保留细节，面部可辨，画面光比1:4，非纯黑，衣装完整、无裸露，专业电影镜头画面感，画面干净，徕卡镜头级锐利度与通透质感，85mm人像镜头f/1.2大光圈，主体锐利对焦，前景与背景奶油般柔焦虚化、柔和圆形光斑，浓郁饱和的暖色调电影调色，色彩丰富艳丽、通透明亮，柔和的大面积光源与暖调轮廓光、高光柔和不过曝，皮肤通透有真实质感，无字幕、无文字、无水印",
+   "takes_count": {
+    "image": 3,
+    "last": 0,
+    "video": 0
+   },
+   "h3_prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 10.12-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] Live-action, cinematic, shallow depth of field, the shot begins in the position, framing and lighting established by Picture 1. The scripted camera move and action follow in one continuous shot: static camera 背影，她洗碗的动作规律，中途停住，抬头看窗玻璃里自己的倒影三秒，手上的水一直流. She settles into the pose, expression, spacing and composition established by Picture 2 at the end of the shot.\n\noverall_soundscape: 水流声掩盖的一下深呼吸\n\nnon_diegetic_music: N/A",
+   "characters": [
+    {
+     "character": "lin_wan",
+     "name": "林晚",
+     "look_name": "默认",
+     "label": "林晚 · 默认 · D0",
+     "d_state": "D0"
+    }
+   ],
+   "first_frame": "ep01_S5_first.jpg",
+   "last_frame": "ep01_S5_last.jpg",
+   "owner": "gpu3",
+   "review": "unreviewed",
+   "video": true
+  },
+  {
+   "id": "ep01-S6",
+   "camera": {
+    "text": "极近特写·camera push in 极缓推近",
+    "source": "auto",
+    "sources": {
+     "size": "auto",
+     "angle": "none",
+     "move": "auto",
+     "lens": "none"
+    },
+    "size": "极近特写",
+    "angle": "",
+    "move": "camera push in 极缓推近",
+    "lens": ""
+   },
+   "duration": {
+    "seconds": 10,
+    "source": "default"
+   },
+   "expression": {
+    "text": "她睁眼望着天花板，瞳孔里映着窗外灯光一次一次扫过，睫毛最后轻轻眨了一下，黑暗中窗外车灯的流光周期性扫过她的瞳孔",
+    "source": "auto",
+    "cues": [
+     "她睁眼望着天花板",
+     "瞳孔里映着窗外灯光一次一次扫过",
+     "睫毛最后轻轻眨了一下",
+     "黑暗中窗外车灯的流光周期性扫过她的瞳孔"
+    ]
+   },
+   "dialogue": [],
+   "voiceover": {
+    "note": "全集收尾独白",
+    "text": "我恋爱五年，一切都很“好”。好到他从来没问过：晚晚，你到底想成为什么样的女人？——今天，有人用一秒钟看了我。就一秒。我已经睡不着了。"
+   },
+   "script_text": "【心理外化收尾镜】她的眼睛，她睁眼望着天花板，瞳孔里映着窗外灯光一次一次扫过，睫毛最后轻轻眨了一下",
+   "image_prompt": "【林晚】22岁中国成年女性，蓝发及腰、齐刘海、冷白皮肤、G罩杯、长腿，真人写实；手指甲为5厘米超长透明水晶甲、镶满钻石饰品，【陈宇】23岁成年男性，温暖阳光，休闲装，极近特写，晚间卧室床上，陈宇熟睡的侧脸虚化在背景，前景林晚睁着的眼，黑暗中窗外车灯的流光周期性扫过她的瞳孔，面部清晰对焦，五官锐利，暗部保留细节，面部可辨，画面光比1:4，非纯黑，衣装完整、无裸露，专业电影镜头画面感，画面干净，徕卡镜头级锐利度与通透质感，85mm人像镜头f/1.2大光圈，主体锐利对焦，前景与背景奶油般柔焦虚化、柔和圆形光斑，浓郁饱和的暖色调电影调色，色彩丰富艳丽、通透明亮，柔和的大面积光源与暖调轮廓光、高光柔和不过曝，皮肤通透有真实质感，无字幕、无文字、无水印",
+   "takes_count": {
+    "image": 3,
+    "last": 0,
+    "video": 0
+   },
+   "h3_prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 5.17-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] Live-action, cinematic, shallow depth of field, the shot begins in the position, framing and lighting established by Picture 1. The scripted camera move and action follow in one continuous shot: camera push in 极缓推近她的眼睛，她睁眼望着天花板，瞳孔里映着窗外灯光一次一次扫过，睫毛最后轻轻眨了一下. She settles into the pose, expression, spacing and composition established by Picture 2 at the end of the shot.\n\noverall_soundscape: 夜虫声，陈宇绵长的鼾声，她的心跳\n\nnon_diegetic_music: N/A",
+   "characters": [
+    {
+     "character": "lin_wan",
+     "name": "林晚",
+     "look_name": "默认",
+     "label": "林晚 · 默认 · D0",
+     "d_state": "D0"
+    },
+    {
+     "character": "chen_yu",
+     "name": "陈宇",
+     "look_name": "默认",
+     "label": "陈宇 · 默认",
+     "d_state": null
+    }
+   ],
+   "first_frame": "ep01_S6_first.jpg",
+   "last_frame": null,
+   "owner": "gpu3",
+   "review": "unreviewed",
+   "video": false
+  }
+ ],
+ "faces": {
+  "lin_wan": "face_lin_wan.jpg"
+ },
+ "linwan": {
+  "hero": "lw_hero.jpg",
+  "plates": {
+   "front": "lw_plate_front.jpg",
+   "3q": "lw_plate_3q.jpg",
+   "side": "lw_plate_side.jpg",
+   "back": "lw_plate_back.jpg"
+  },
+  "items": {
+   "outfit": [
+    {
+     "img": "lw_outfit_0.jpg",
+     "name": "黑色镜面漆皮超短裙（产品）"
+    },
+    {
+     "img": "lw_outfit_1.jpg",
+     "name": "入职日套装（产品）"
+    },
+    {
+     "img": "lw_outfit_2.jpg",
+     "name": "短款针织+漆皮超短裙（产品）"
+    },
+    {
+     "img": "lw_outfit_3.jpg",
+     "name": "黑色修身吊带短连衣裙（产品）"
+    }
+   ],
+   "shoes": [
+    {
+     "img": "lw_shoes_0.jpg",
+     "name": "12cm 透明侧开细高跟（侧 45°）"
+    },
+    {
+     "img": "lw_shoes_1.jpg",
+     "name": "12cm 透明侧开细高跟（一双，正面+侧面）"
+    },
+    {
+     "img": "lw_shoes_2.jpg",
+     "name": "12cm 透明侧开细高跟（正侧面：看鞋跟粗细）"
+    }
+   ],
+   "nails": [
+    {
+     "img": "lw_nails_0.jpg",
+     "name": "冰川满钻尖甲（手背）"
+    },
+    {
+     "img": "lw_nails_1.jpg",
+     "name": "冰川满钻尖甲（手背+掌心）"
+    },
+    {
+     "img": "lw_nails_2.jpg",
+     "name": "草莓糖霜芭蕾（手背）"
+    }
+   ],
+   "hair": [
+    {
+     "img": "lw_hair_0.jpg",
+     "name": "默认：冰蓝及腰直发齐刘海（正）"
+    },
+    {
+     "img": "lw_hair_1.jpg",
+     "name": "湿发贴脸"
+    },
+    {
+     "img": "lw_hair_2.jpg",
+     "name": "凌乱 / 汗湿一缕黏额角"
+    }
+   ],
+   "makeup": [
+    {
+     "img": "lw_makeup_0.jpg",
+     "name": "定妆原版甜妆"
+    },
+    {
+     "img": "lw_makeup_1.jpg",
+     "name": "素颜通勤（REF-LW-01）"
+    },
+    {
+     "img": "lw_makeup_2.jpg",
+     "name": "ep06 过渡妆（减半红唇＋恰到好处的眼线）"
+    },
+    {
+     "img": "lw_makeup_3.jpg",
+     "name": "正红唇＋精致眼线"
+    }
+   ],
+   "accessory": [
+    {
+     "img": "lw_acc_0.jpg",
+     "name": "丝绒小盒（产品）"
+    },
+    {
+     "img": "lw_acc_1.jpg",
+     "name": "妆匣（产品）"
+    },
+    {
+     "img": "lw_acc_2.jpg",
+     "name": "草莓水晶项链（产品）"
+    }
+   ]
+  },
+  "looks": [
+   {
+    "name": "REF-LW-01",
+    "img": "lw_look_1.jpg"
+   },
+   {
+    "name": "REF-LW-02",
+    "img": "lw_look_2.jpg"
+   }
+  ],
+  "used_by_shots": 338,
+  "wardrobe": 88,
+  "missing": 5
+ },
+ "notes": [
+  "ep01-S1: 当前版本 /api/gpu3-media/renders_gpu3/ep01/S1/takes/image_008.png 取不到（HTTP Error 502: Bad Gateway），稿里用本地最新 image_007.png",
+  "ep01-S2: 当前版本 /api/gpu3-media/renders_gpu3/ep01/S2/takes/image_001.png 取不到（HTTP Error 502: Bad Gateway），稿里用本地最新 image_005_raw.png"
+ ]
+}

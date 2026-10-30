@@ -108,3 +108,40 @@
 ## 5. 分工
 - gpu3（Claude 侧）：②–⑤ 全部实现于出片程序，产物与 spec/清单/每轮分数写入 `data/renders_gpu3`。
 - fredw-d9：画布显示 spec 与清单、允许人工改 spec 后重渲；`ns_agent.compiler` 可直接读取同一份 spec 格式。
+
+## 6. gpu3 渲染字段（T08，2026-10-30，只增字段，提示词不变）
+
+格式 `packages/schema/ns_schema/frame_spec.py`，编译 `services/agent/ns_agent/frame_spec.py::build_spec(..., timeline_shot=...)`，
+测试 `tests/test_t08_frame_spec.py`。全剧统计：`uv run python -m ns_agent.frame_spec stats`。
+规则版里 `qwen` / `qwen_last` / `facts` / 角色 / 校验结果与 T06 金标准逐字相同（360 镜，带时间线和不带时间线都一样）。
+所有启发式结果都标 `*_source`：`text` = 原文写了，`guess` = 规则默认，`same` = 尾帧沿用首帧，`none` = 不适用。
+
+**镜头级**
+
+| 字段 | 含义 / 规则 |
+|---|---|
+| `focus_part` | 焦点部位：`eye` `lips` `hand` `nails` `shoes` `foot` `face` `legs` `back` `torso` `screen` `object` `other`；`""` = 中景/全景，没有单一焦点。原先的 `foot` 拆成 `shoes`（高跟/鞋）和 `foot`（脚/脚趾）；“手机”不再算 `hand`，“背景”不再算 `back` |
+| `focus_label` / `focus_object` | 中文标签（眼睛/嘴唇/手/美甲/高跟鞋/脚/脸/腿/背/身体/屏幕/物件词）；焦点是鞋、屏幕、物件时 `focus_object` 是原文词 |
+| `focus_part_source` | `text`：同一分句写了“特写X / X特写 / 手部特写 / 镜头推向X / 焦点落在X”；`guess`：特写/近景镜头取第一个描述分句里的部位；`none` |
+| `framing` / `framing_source` | 直接取 `data/state_timeline.json` 的 `framing`（extreme_close / close / medium / full）；没有时间线时用同一函数（`gpu3_fields.shot_framing`）现算 |
+| `faces_visible` / `faces_visible_source` | 同上，取时间线 `faces_visible` |
+| `prop_states[]` | 时间线 `props` 原样：`id` `name` `state` `state_end`（worn/hanging/held/on_table）+ 各自 `*_source`、`holder`、`mention`、`trigger`、`trigger_conflict` |
+| `timeline_inputs_sha` | 用到的时间线条目的 `inputs_sha`；`null` = 没读时间线（字段为现算） |
+| `risks[]` | `far_small_face`（全景且脸入镜，SOP §8 H3 小脸弱点）/ `trigger_conflict`（触发词会画成穿着，但 state≠worn）/ `wardrobe_change`（镜内换装，尾帧按 `items_end`） |
+| `expression_stripped[]` | 表情清洗去掉的片段（`位置：片段｜原因`），审计用 |
+
+**每个角色（`characters[]`）**
+
+| 字段 | 含义 / 规则 |
+|---|---|
+| `gaze_start` / `gaze_end` | `{target, at, cue, source}`。`target`：`camera` 看镜头 · `other` 看另一角色（`at` = 角色 id）· `down` 低头 · `up` 抬眼/仰头 · `away` 看别处/背对 · `object` 看物件（`at` = 原文物件词）· `closed` 闭眼 · `unknown`（路人）。首帧 = img + motion 起点里**最早**的线索，尾帧 = motion 终态里**最后**的线索（没有 → 沿用首帧，`source: same`） |
+| 视线线索 | 看向镜头/对着镜头/直视（后面不是人）→ camera；看向他/看着她/望着他/目光落在她/迎着他的视线/对视/对望/目光交汇 → other；低头/垂眼/俯视 → down；抬眼/抬头/仰头/望着天花板 → up；看向窗外/别过脸/转过头/出神/背影/背对/看向画外 → away；看着手机/盯着屏幕/看了一眼X → object；闭眼 → closed；侧脸 → 有另一人 other，否则 away（都标 guess）。主语按 `gpu3_fields.who`（“X的” > 分句里最近的人名/代词 > 林晚） |
+| 没写视线时（guess） | 脸不可见 → away；有另一人入镜 → 看对方；屏幕镜头 → 看屏幕；否则 away（不看镜头） |
+| `screen_share_value` / `screen_share_source` | 0–1。主角（原文最先提到、非焦外）= 景别表（大特写 0.9、特写 0.7、近景 0.5、中近景 0.45、中景 0.4、全景 0.2、远景 0.1）；次要人物 ×0.6；焦外 0.1；原文写了“占满画面 / 三分之二”→ `text`。`screen_share` 文本保留旧格式（次要人物改为 “0.24（次要人物）”） |
+| `screen_position` | 原文位置词：left / right / center / foreground / background / top / bottom |
+| `face_visible` | 该角色是否在 `faces_visible` 里 |
+| `changes_within_shot` / `items_end` / `visibility_end` | 时间线原样（docs/state_timeline.md §七.2） |
+| `expression.start/end` | **只放表情词**。规则版的表情词要带上下文才算（“湿透的衬衫”不再是睫毛湿润，“抿了一口汤”不再是抿唇，“环咬着”不再是咬唇；新增 咬牙、耳根泛红、皱眉、眼神迷离、发愣 等）。`sanitize_expression` 按顺序去掉含服装（clothing）、运镜（camera）、视线（gaze）、动作（action）词的片段，剩下不含表情词的也去掉（not_expression）；LLM 补全后同样清洗，`validate` 发现残留会报“表情含非表情词” |
+
+gpu3 读法：`FrameSpec.model_validate(json)`；优先看 `focus_part` + `focus_label`、每角色 `gaze_start/gaze_end.target`、
+`screen_share_value`、`expression.start/end`；`*_source == "guess"` 的字段可以被出片侧的 VLM / 人工覆盖。

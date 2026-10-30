@@ -7,6 +7,7 @@
 ## 级别说明
 
 - **block**：不通过时 `status.json.audit.verdict = fail`，视频渲染器和调度器硬拦截。只有锁定规则可以设为 block。
+- **mixed**（封板修复 2026-10-30）：同一条目按问题分级——机检结果自带 level（block / warn），渲染器与调度器照 lint 给的 level 处理；级别列写 block 的条目一律按 block。
 - **warn**：记入 `audit.warnings`，不拦截。用于「待验证 / 需 A/B」规则；规则锁定后由 claude-sop 改为 block。
 - **override（豁免）**：只能凭项目方原话豁免。写进 `status.json.audit.overrides[{rule_id, owner_quote, by, at}]`；没有原话的豁免一律无效。
 
@@ -39,7 +40,7 @@
 | H3-D4 | 不用双引号包台词；`<d>` 内不写人名 | 检查 `"` `“` `”`；检查人名表 | block | §9A.1 对白；已知坑 |
 | H3-D5 | 画外音用 `says in an off-screen voiceover`，`</d>` 后紧跟嘴唇闭合句 | 剧本标“画外”的台词：两个短语都必须出现 | block | §9A.1 对白 |
 | H3-D6 | 🎙 内心独白不进 H3 | 独白原文不得出现在提示词里 | block | §9A.1 对白 |
-| H3-D7 | 发声人数：亲密镜只让林晚发声（只有 (S1) = 林晚）；普通对话镜暂时允许多人 | adult 镜：编号数 ≤1；soundscape 里不写男声 | 亲密镜 block，其余 warn（待项目方定） | §9A.1 本项目附加规则 |
+| H3-D7 | 发声人数：亲密镜只让林晚发声（只有 (S1) = 林晚）；普通对话镜每镜只让一个人说话（项目方 2026-10-30） | 编号数 ≤1；亲密镜另查 soundscape 里不写男声 | block | §9A.1 本项目附加规则 |
 | H3-D8 | 说话人首次出现时，写清年龄、性别、是否在画面内、音色、语速 | 启发式关键词检查 | warn（待验证） | §9A.1 对白 |
 | H3-D9 | `<d>` 前后用 `<cutoff>` / `<scenetrans>` 的情形（片尾截断、跨切） | 剧本标注了才检查 | warn | §9A.1 对白 |
 
@@ -49,7 +50,7 @@
 |---|---|---|---|---|
 | H3-S1 | `overall_soundscape` 写成一段 1–4 句英文；不含 `<d>`，不复述台词 | 分句计数；CJK 检查；`<d>` 检查 | block | §9A.1 soundscape |
 | H3-S2 | `overall_soundscape` 不写 `N/A`（除非剧本明确要求全静音） | 值比对 | block | §9A.1 soundscape |
-| H3-S3 | `non_diegetic_music: N/A`（本项目固定） | 值比对 | block | §9A.1 music；参数表 |
+| H3-S3 | `non_diegetic_music`：`N/A` 或 1–3 句英文（乐器/速度/节奏/强弱，项目方 2026-10-30 起进 H3） | 空、中文、`<d>`、分段 → block；超过 3 句或抽象情绪词 → warn（同一条目，级别随问题） | mixed | §9A.1 music |
 
 ## P-A 视频模型与采样（§9A.3；SOP_parameters S4）
 
@@ -79,7 +80,7 @@
 | R-C1 | 8 要素齐全：首帧、尾帧、img、motion、时长、sound/【H3 audio】（亲密镜另加 sound_intimate）、本镜配乐 cue、本集 BGM | 字段存在且非空 | block | ★1；AUD §2 |
 | R-C2 | 首帧、尾帧、视频同属一条 take 链（同一流水线、同一 takes.json；尾帧由该首帧编辑而来） | 检查 takes 记录的父子关系 | block | ★3；AUD §2.1 |
 | R-C3 | S1 已通过：`s1_gate.json` 已 accepted，且与本镜使用的剧本 sha 一致 | sha 比对 | block | ★1 S1；参数表 v3 切换闸门 |
-| R-C4 | S2 已通过：本镜用到的触发词 / LoRA 在 LORA_REGISTRY 中都是 `accepted` | 读注册表 | block | ★1 S2 |
+| R-C4 | S2 已通过：本镜用到的 **image 类**触发词 / LoRA 在 LORA_REGISTRY 中都是 `accepted`（首尾帧只看 image 类）；H3 视频 LoRA（kind=video，如 lnwan01）只在视频步检查，accepted 之前只报 warn、不拦（总调度 2026-10-30 定，封板修复） | 读注册表；按剧本 lora_triggers / auto_lora_triggers 的 kind 分 image / video | mixed | ★1 S2 |
 | R-C5 | 本镜所在场景的底板为 owner_confirmed（若本镜使用底板） | 读 scenes.json | block | ★1 S2；state_timeline 评审 |
 | R-C6 | 帧闸门通过（S3-F 各条） | 汇总 S3-F | block | ★1 S3 |
 | R-C7 | 场景内衔接检查通过（与上一镜尾帧比对） | continuity 结果 | block | AUD §3.4 |
@@ -111,7 +112,7 @@
 | S3-F1 | 人脸相似度：SFace 与 CM_s1 母版脸部裁切余弦 ≥0.40（侧脸 ≥0.30） | WS 同法 | block | 参数表 S3 |
 | S3-F2 | 焦外：背景/主体 Laplacian 比 <1.0（全景、大全景、俯拍豁免） | WS 同法 | block | 参数表 S3 |
 | S3-F3 | 林晚发色 HSV 闸门 | WS 同法 | block | 参数表 S3 |
-| S3-F4 | 非成人镜头裸露一票否决 | 裸露 QC v3 | block | 参数表 S3 |
+| S3-F4 | 裸露质检（2026-10-30 起只记录，不再否决） | 裸露 QC v3 | warn | 参数表 S3 |
 | S3-F5 | VLM 逐条核对 Frame Spec 事实 | VLM | block | 参数表 S3 |
 | S3-F6 | 同一张图上 LoRA 强度合计 ≤1.6 | 读 take 参数 | block | 参数表 S3 |
 | S3-F7 | 色调匹配已执行（0.6；暗场 0.3），并保留原图 | 读 take 参数 | block | 参数表 S3 |
