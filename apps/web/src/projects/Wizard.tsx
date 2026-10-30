@@ -242,7 +242,7 @@ function ScriptStep({ slug }: { slug: string }) {
                       {rep.per_episode?.map((e) => (
                         <tr key={e.number} className={e.issues.length ? "warn" : ""}>
                           <td className="tnum">ep{String(e.number).padStart(2, "0")}</td>
-                          <td>{e.title}{e.high_intensity && " 🔴"}</td>
+                          <td>{e.title}{e.high_intensity && <span className="status bad"> 高强度</span>}</td>
                           <td className="tnum">{e.shots}</td>
                           <td className="tnum">{e.adult || ""}</td>
                           <td className="tnum">{e.seconds}</td>
@@ -326,6 +326,7 @@ function StyleStep({ slug }: { slug: string }) {
   const [busy, setBusy] = useState(false);
   const [err, fail, clear] = useErr();
   const [ver, setVer] = useState(0);
+  const [owner, setOwner] = useState(false); // 封板修复：G1 须勾选“我是项目方”
   useEffect(() => {
     papi.style(slug).then(setSt, fail);
   }, [slug]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -446,10 +447,15 @@ function StyleStep({ slug }: { slug: string }) {
               {st.confirmed ? (
                 <span className="chip chip-ok">G1 已确认 · {st.confirmed.by} · {st.confirmed.at}</span>
               ) : (
-                <button className="btn primary" disabled={!st.saved || dirty} onClick={() =>
-                  papi.confirmStyle(slug, "项目方").then((c) => setSt({ ...st, confirmed: c }), fail)}>
-                  G1 确认风格定稿
-                </button>
+                <>
+                  <label className="wz-check">
+                    <input type="checkbox" checked={owner} onChange={(e) => setOwner(e.target.checked)} /> 我是项目方，确认风格定稿
+                  </label>
+                  <button className="btn primary" disabled={!st.saved || dirty || !owner} onClick={() =>
+                    papi.confirmStyle(slug, "项目方").then((c) => (setOwner(false), setSt({ ...st, confirmed: c })), fail)}>
+                    G1 确认风格定稿
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -479,6 +485,7 @@ const REALISM: [Character["realism"], string][] = [
 function CharacterCard({ slug, c, onChange, color }: { slug: string; c: Character; onChange: (c: Character) => void; color: string }) {
   const [draft, setDraft] = useState<Character>(c);
   const [dirty, setDirty] = useState(false);
+  const [owner, setOwner] = useState(false); // 封板修复：G2 须勾选“我是项目方”
   const [err, fail, clear] = useErr();
   const fileRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -538,9 +545,12 @@ function CharacterCard({ slug, c, onChange, color }: { slug: string; c: Characte
           e.target.value = "";
         }} />
       </div>
+      <label className="wz-check">
+        <input type="checkbox" checked={owner} onChange={(e) => setOwner(e.target.checked)} /> 我是项目方（勾选后才能改下面的确认）
+      </label>
       <label className={`wz-confirm${c.confirmed ? " on" : ""}${c.references.length ? "" : " off"}`}>
-        <input type="checkbox" checked={c.confirmed} disabled={!c.references.length}
-          onChange={(e) => papi.confirmCharacter(slug, c.id, e.target.checked, "项目方").then(onChange, fail)} />
+        <input type="checkbox" checked={c.confirmed} disabled={!c.references.length || !owner}
+          onChange={(e) => papi.confirmCharacter(slug, c.id, e.target.checked, "项目方").then((x) => (setOwner(false), onChange(x)), fail)} />
         <span>
           <b>此角色为 AI 生成的虚构成年人</b>
           <span className="muted small">
@@ -716,18 +726,18 @@ function AdultStep({ slug }: { slug: string }) {
   if (!p || on === null) return <div className="empty">{err || "加载中…"}</div>;
   return (
     <div className="wz-body narrow">
-      <Section n="⑥" title="成人内容" hint="只有开 / 关">
+      <Section n="⑥" title="成人内容" hint="只作记录；2026-10-30 起不再跳过成人镜头">
         <div className="wz-switch">
           <button className={`wz-sw${!on ? " on" : ""}`} onClick={() => setOn(false)}>
             <b>关</b>
-            <span className="muted small">成人镜头不出图、不出视频（gpu3 跳过）</span>
+            <span className="muted small">只记录：成人镜头照常出首尾帧与视频</span>
           </button>
           <button className={`wz-sw${on ? " on adult" : ""}`} onClick={() => setOn(true)}>
             <b>开</b>
-            <span className="muted small">成人镜头的首尾帧与视频只在 gpu3 出；笔记本从不出成人画面</span>
+            <span className="muted small">成人镜头与普通镜头一起出；不再要求额外授权</span>
           </button>
         </div>
-        <div className="muted small">开启后，生产时仍需项目方在「待办」里授权「交 gpu3」才会开始。</div>
+        <div className="muted small">过滤器已取消；开关只影响记录与显示。</div>
       </Section>
       <Nav slug={slug} step="adult" onNext={async () => {
         await papi.saveSettings(slug, { adult_content: on });

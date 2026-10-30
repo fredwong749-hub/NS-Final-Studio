@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useStudio, type DrawerTab } from "../store";
 import { fmtTime, JOB_LABEL, segDiff, STAGE_LABEL } from "../util";
 import { PersonRow } from "./ShotCard";
+import type { Job, Stage } from "../types";
 import { seamState } from "./Seam";
 
 const TABS: [DrawerTab, string][] = [
@@ -11,10 +12,42 @@ const TABS: [DrawerTab, string][] = [
   ["seam", "接缝对比"],
 ];
 
+function waitText(w: NonNullable<Job["comfy_wait"]>) {
+  if (w.who === "offline") return `等待：${w.what ?? "本机 ComfyUI 未启动"}，启动后自动继续`;
+  return `等待 ComfyUI：${w.who === "orchestrator" ? "编排器" : w.who} 正在用${w.what ? `（${w.what}）` : ""}`;
+}
+
+/** T54-B / 调研 #5：每个 镜头×阶段 只看最新一次任务，最新一次失败的按阶段汇总，一键重试（仍走批量确认框） */
+function FailedRetry() {
+  const { jobs, requestBatch } = useStudio();
+  const newest = new Map<string, Job>();
+  for (const j of jobs) {
+    if (j.stage === "asset" || j.shot_id.startsWith("asset:")) continue;
+    const k = `${j.shot_id}|${j.stage}`;
+    const o = newest.get(k);
+    if (!o || j.created_at > o.created_at) newest.set(k, j);
+  }
+  const failed = new Map<Stage, string[]>();
+  for (const j of newest.values()) if (j.state === "failed" && j.stage !== "asset") failed.set(j.stage, [...(failed.get(j.stage) ?? []), j.shot_id]);
+  if (!failed.size) return null;
+  return (
+    <div className="batch-retry">
+      <span className="bad">最近失败：</span>
+      {[...failed].map(([stage, ids]) => (
+        <button key={stage} className="btn-mini" onClick={() => requestBatch(ids, stage)} title={ids.join("\n")}>
+          重试失败{STAGE_LABEL[stage]} {ids.length} 镜
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function Jobs() {
   const { jobs, select } = useStudio();
   if (!jobs.length) return <div className="muted pad">本次服务启动后还没有任务（命令行批跑不经过此队列）。</div>;
   return (
+    <>
+    <FailedRetry />
     <table className="jobs">
       <thead>
         <tr>
@@ -41,13 +74,14 @@ function Jobs() {
               {j.take != null && ` → #${j.take}`}
             </td>
             <td className="tnum">{fmtTime(j.created_at)}</td>
-            <td className="err-cell" title={j.error ?? ""}>
-              {j.error ?? ""}
+            <td className="err-cell" title={j.error ?? j.comfy_wait?.error ?? ""}>
+              {j.error ?? (j.comfy_wait ? waitText(j.comfy_wait) : "")}
             </td>
           </tr>
         ))}
       </tbody>
     </table>
+    </>
   );
 }
 

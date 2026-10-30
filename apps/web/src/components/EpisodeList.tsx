@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import { useStudio } from "../store";
-import { epCode, FILTER_LABEL, matchFilter } from "../util";
+import { epCode, EXPLICIT_LABEL, FILTER_LABEL, matchFilter } from "../util";
 
 export function EpisodeList() {
-  const { episodes, epNum, gotoEpisode, latest, filter, epLooks } = useStudio();
+  const { episodes, epNum, gotoEpisode, latest, filter, select } = useStudio();
   const [q, setQ] = useState("");
   const [onlyRed, setOnlyRed] = useState(false);
 
@@ -29,35 +29,60 @@ export function EpisodeList() {
     return { f, v, p, n };
   }, [episodes]);
 
+  // 「仅看红标」：全部集的露骨红标镜头集中列出（只列镜号，不显示镜头文字）
+  const held = useMemo(() => (episodes ?? []).flatMap((e) => e.shots.filter((s) => s.explicit_hold).map((s) => ({ ep: e.number, id: s.id }))), [episodes]);
+
   return (
     <aside className="ep-list">
       <div className="ep-list-head">
-        <div className="ep-totals tnum">
-          首帧 {totals.f}/{totals.n} · 视频 {totals.v}/{totals.n} · 通过 {totals.p}/{totals.n}
+        <div className="ep-totals tnum" title={`全剧 ${totals.n} 镜：首帧 ${totals.f} · 视频 ${totals.v} · 审核通过 ${totals.p}`}>
+          <span><b>{totals.f}</b>首帧</span>
+          <span><b>{totals.v}</b>视频</span>
+          <span><b>{totals.p}</b>通过</span>
+          <span className="ep-totals-n">/ {totals.n} 镜</span>
         </div>
         <input className="ep-search" placeholder="搜索集数 / 标题" value={q} onChange={(e) => setQ(e.target.value)} />
         <label className="ep-filter">
-          <input type="checkbox" checked={onlyRed} onChange={(e) => setOnlyRed(e.target.checked)} /> 只看 🔴
+          <input type="checkbox" checked={onlyRed} onChange={(e) => setOnlyRed(e.target.checked)} /> 只看高强度集
           {filter !== "all" && <span className="muted">· 过滤：{FILTER_LABEL[filter]}</span>}
         </label>
       </div>
+      {filter === "explicit" && (
+        <div className="explicit-list">
+          <div className="explicit-list-head">
+            <span className="chip chip-explicit">{EXPLICIT_LABEL}</span> 共 {held.length} 镜
+          </div>
+          <div className="explicit-ids">
+            {held.map((h) => (
+              <button key={h.id} className="btn-mini" onClick={() => (gotoEpisode(h.ep), select(h.id))}>
+                {h.id}
+              </button>
+            ))}
+            {held.length === 0 && <span className="muted small">没有红标镜头</span>}
+          </div>
+        </div>
+      )}
       <ul>
         {rows.map((e) => {
           const passed = e.shots.filter((s) => s.review.state === "passed").length;
           const rejected = e.shots.some((s) => s.review.state === "rejected");
-          const d = Object.values(epLooks[e.number]?.characters ?? {})[0]?.resolved.d_state.value;
           return (
             <li key={e.number}>
               <button
                 className={`ep-row${e.number === epNum ? " active" : ""}`}
                 onClick={() => gotoEpisode(e.number)}
-                title={e.synopsis}
+                title={`第 ${e.number} 集《${e.title}》\n${e.synopsis ?? ""}`}
               >
                 <span className="ep-num tnum">{String(e.number).padStart(2, "0")}</span>
                 <span className="ep-main">
                   <span className="ep-title">
-                    {e.high_intensity && <span title="高强度集">🔴</span>}
+                    {e.high_intensity && <i className="ep-hi" title="高强度集" />}
                     {e.title}
+                    {!!e.explicit_hold_count && (
+                      <span className="chip chip-explicit" title={`${e.explicit_hold_count} 镜露骨红标（项目方自行处理）`}>
+                        露骨 {e.explicit_hold_count}
+                      </span>
+                    )}
                   </span>
                   <span className="ep-prog">
                     <span className="dots6">
@@ -72,7 +97,6 @@ export function EpisodeList() {
                         return <i key={s.id} className={cls} title={`${s.id}：${s.video ? "有视频" : s.first_frame ? "有首帧" : "未出图"}${s.job ? "（任务中）" : ""}`} />;
                       })}
                     </span>
-                    {d && <span className="muted">{d}</span>}
                     <span className={`tnum ${rejected ? "bad" : passed === e.shots.length ? "good" : "muted"}`}>
                       审 {passed}/{e.shots.length}
                     </span>

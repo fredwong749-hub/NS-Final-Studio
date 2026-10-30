@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStudio, type FrameStage } from "../store";
 import type { ShotDetail, Take } from "../types";
-import { fmtTime, LAST_SOURCE_LABEL, segDiff } from "../util";
+import { fmtTime, LAST_SOURCE_LABEL, segDiff, stageActive, stageTakes } from "../util";
 import { JobBar, Score } from "./frames";
 
 const LABEL: Record<FrameStage, string> = { image: "首帧", last: "尾帧" };
@@ -13,9 +13,9 @@ interface Shown {
   srcLabel?: string;
 }
 
-function takesOf(d: ShotDetail | undefined, stage: FrameStage): Take[] {
-  return (d?.takes.takes ?? []).filter((t) => t.stage === stage).sort((a, b) => a.n - b.n);
-}
+// 版本链取法与镜头行版本条 / 检查器对比位共用（util.stageTakes / stageActive；gpu3 负责的镜头看 gpu3 链）
+const takesOf = (d: ShotDetail | undefined, stage: FrameStage): Take[] => stageTakes(d, stage);
+const activeOf = (d: ShotDetail | undefined): Partial<Record<FrameStage, number>> => ({ image: stageActive(d, "image"), last: stageActive(d, "last") });
 
 /** 全屏看图：首帧|尾帧并排，←/→ 翻当前焦点阶段的版本；A/B 对比同阶段两个版本；设为当前一键 */
 export function Viewer() {
@@ -30,12 +30,18 @@ export function Viewer() {
   const key = viewer ? `${viewer.shotId}|${viewer.stage}|${viewer.mode}|${viewer.b ?? ""}` : "";
   const lastKey = useRef("");
 
+  // 封板修复：每个镜头只自动拉一次（失败不再循环重拉）
+  const tried = useRef(new Set<string>());
   useEffect(() => {
-    if (viewer && !details[viewer.shotId]) void refreshShots([viewer.shotId]);
+    if (!viewer || details[viewer.shotId] || tried.current.has(viewer.shotId)) return;
+    tried.current.add(viewer.shotId);
+    void refreshShots([viewer.shotId]);
   }, [viewer, details, refreshShots]);
 
   const takes = useMemo(() => ({ image: takesOf(d, "image"), last: takesOf(d, "last") }), [d]);
-  const active = d?.takes.active ?? {};
+  const active = useMemo(() => activeOf(d), [d]);
+  // gpu3 的当前版本由 gpu3 决定：画布只看 / 对比
+  const readOnly = !!d?.gpu3_takes;
 
   // 打开 / 切镜 / 切模式时重置选择
   useEffect(() => {
@@ -52,12 +58,12 @@ export function Viewer() {
   const order = episode?.shots.map((x) => x.id) ?? [];
 
   // 键盘：本组件打开时独占（主 keymap 见 viewer 就让路）
-  const stateRef = useRef({ viewer, takes, pick, ab, active, d });
-  stateRef.current = { viewer, takes, pick, ab, active, d };
+  const stateRef = useRef({ viewer, takes, pick, ab, active, d, readOnly });
+  stateRef.current = { viewer, takes, pick, ab, active, d, readOnly };
   useEffect(() => {
     if (!viewer) return;
     const h = (e: KeyboardEvent) => {
-      const { viewer: v, takes: tk, pick: pk, ab: AB, active: act } = stateRef.current;
+      const { viewer: v, takes: tk, pick: pk, ab: AB, active: act, readOnly: ro } = stateRef.current;
       if (!v) return;
       const k = e.key;
       const step = (dir: 1 | -1) => {
@@ -89,7 +95,7 @@ export function Viewer() {
         }
       } else if (k === "Enter") {
         const n = v.mode === "ab" ? AB.b : pk[v.stage];
-        if (n != null && n !== act[v.stage]) void activate(v.shotId, v.stage, n);
+        if (!ro && n != null && n !== act[v.stage]) void activate(v.shotId, v.stage, n);
       } else return;
       e.preventDefault();
       e.stopPropagation();
@@ -152,6 +158,16 @@ export function Viewer() {
           </div>
         )}
         <span className="grow" />
+        {readOnly && !s?.explicit_hold && (
+          <button
+            className="btn"
+            disabled={!!st.liveJob(id, viewer.stage) || (viewer.stage === "last" && !s?.first_frame)}
+            onClick={() => st.requestGpu3(id, viewer.stage === "image" ? "image" : "last")}
+            title="gpu3 负责此镜：写进 gpu3 重渲队列；新 take 到了会出现在下面的版本条（虚线格 = 等待中）"
+          >
+            请 gpu3 重出{LABEL[viewer.stage]}
+          </button>
+        )}
         <span className="vw-keys muted">
           <kbd>←</kbd>
           <kbd>→</kbd> 翻版本 · <kbd>Tab</kbd> 切首/尾 · <kbd>C</kbd> A/B · <kbd>Enter</kbd> 设为当前 · <kbd>↑</kbd>
@@ -163,7 +179,7 @@ export function Viewer() {
       </div>
 
       <div className="vw-stage" onClick={(e) => e.stopPropagation()}>
-        {!d && <div className="muted">加载 {id}…</div>}
+        {!d && (st.detailErr[id] ? <div className="warn">{id} 加载失败：{st.detailErr[id]}</div> : <div className="muted">加载 {id}…</div>)}
         {d &&
           panels.map((p) => {
             const t = p.shown.take;
@@ -182,7 +198,12 @@ export function Viewer() {
                   <Score sc={t?.score} />
                   {t?.stale && t.stale.length > 0 && <span className="chip chip-warn" title={t.stale.join("、")}>过期</span>}
                   <span className="grow" />
-                  {t && !isActive && (
+                  {t && !isActive && readOnly && (
+                    <span className="chip chip-src-gpu3" title="gpu3 负责此镜：当前版本由 gpu3 决定（画布设为当前的接口待 gpu3 侧提供：POST /api/shots/{id}/gpu3-activate）">
+                      gpu3 版本（只读）
+                    </span>
+                  )}
+                  {t && !isActive && !readOnly && (
                     <button
                       className="btn primary"
                       disabled={!!t.qc?.nudity}

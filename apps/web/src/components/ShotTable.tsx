@@ -71,7 +71,9 @@ export function ShotTable({ ep }: { ep: Episode }) {
     });
 
   async function saveField(s: ShotSummary, field: "expression" | CamKey, v: string) {
-    const d = st.details[s.id] ?? (await api.shot(s.id));
+    // 封板修复：拉详情失败要提示
+    const d = st.details[s.id] ?? (await api.shot(s.id).catch((e: Error) => void st.notify(`${s.id} 加载失败：${e.message}`, "err")));
+    if (!d) return false;
     if (field === "expression") return st.saveEdit(s.id, { ...d.edit, expression: v.trim() || null });
     // 运镜四字段拼成「景别，机位，运镜，焦段」写进 camera（后端按同一规则拆回）
     const cam = { size: s.camera.size, angle: s.camera.angle, move: s.camera.move, lens: s.camera.lens, [field]: v.trim() };
@@ -147,8 +149,9 @@ export function ShotTable({ ep }: { ep: Episode }) {
                   </td>
                 )}
                 {on("vid") && (
-                  <td className="tbl-text" title={s.video_prompt}>
-                    <span className="clamp3">{s.video_prompt}</span>
+                  <td className="tbl-text" title={s.h3_prompt ?? s.video_prompt}>
+                    {/* 对齐句每镜都一样，列表里显示 H3 正文（integrated_multimodal_description） */}
+                    <span className="clamp3">{s.h3_blocks?.body?.replace(/^\[Shot 1\]\s*/, "") || s.video_prompt}</span>
                   </td>
                 )}
                 {on("status") && (

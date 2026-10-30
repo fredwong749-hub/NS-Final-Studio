@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import "../assets.css";
 import "./projects.css";
+import { ThemeToggle } from "../themeMode";
 import { BoardView } from "./BoardView";
 import { InboxView } from "./InboxView";
 import { go, papi, type ProjectSummary } from "./papi";
-import { useHash } from "./route";
+import { lastCanvas, useHash } from "./route";
 import { Wizard } from "./Wizard";
 
 function useInboxCount() {
@@ -101,7 +102,7 @@ export default function ProjectsApp() {
   } else {
     body = <ProjectList />;
   }
-  const back = useCallback(() => go("#/"), []);
+  const back = useCallback(() => go(lastCanvas()), []); // fredw-b3：回到离开时的那一镜
   return (
     <div className="app pj-app">
       <header className="topbar">
@@ -116,6 +117,7 @@ export default function ProjectsApp() {
           {tab === "board" && <button className="on">进度看板</button>}
         </div>
         <span className="grow" />
+        <ThemeToggle />
         <button className="btn-mini" onClick={back} title="回到《为他而骚》画布">
           ← 画布
         </button>

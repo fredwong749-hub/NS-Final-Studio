@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import { api } from "../../api";
 import { useStudio } from "../../store";
-import type { AffectedShots, AssetCatalog, AssetEntry, CharacterAssets, LookPatch, LookView, WardrobeItemView } from "../../types";
+import type { AffectedShots, AssetCatalog, AssetEntry, CharacterAssets, LookPatch, WardrobeItemView } from "../../types";
+import { CAT_FULL, itemLbItem, Lightbox, LookStage, useAssetKeys, type LbItem } from "./CharacterCard";
 import {
   faceFile,
   GenerateForm,
   LookComposer,
   lookLetter,
   PLATE_LABEL,
-  ROW_SLOTS,
   ScheduleMatrix,
   SelInspector,
   stripLook,
@@ -18,13 +18,10 @@ import {
 } from "./parts";
 import "./assets-v3.css";
 
-const CAT_FULL: Record<string, string> = { outfit: "服装", shoes: "鞋", nails: "美甲", hair: "发型", makeup: "妆容", accessory: "饰品" };
-const SLOT_SHORT: Record<string, string> = { outfit: "衣", shoes: "鞋", nails: "甲", hair: "发", makeup: "妆", accessory: "饰" };
-
-/** 资产页 v3：小云雀式角色卡（大定妆图 · 身份底板 · 造型 A/B/C 大卡 · 单品大图 · 排期） */
+/** 资产页 v3.1：小云雀式角色卡（9:16 大定妆图 · 造型 A/B/C 切换 · 单品一目了然 · 用于哪些集 · 全屏看图 · 身份底板 · 衣橱 · 排期） */
 export default function AssetsPage() {
   const st = useStudio();
-  const { notify, assetFocus, setConfirmReq, setMulti, setView, gotoEpisode, onJobsQueued, episodes } = st;
+  const { notify, assetFocus, setView, gotoEpisode, onJobsQueued, episodes } = st;
   const [cat, setCat] = useState<AssetCatalog | null>(null);
   const [sched, setSched] = useState<Schedule | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -39,7 +36,10 @@ export default function AssetsPage() {
   const [busy, setBusy] = useState(false);
   const [hlLook, setHlLook] = useState<string | null>(null);
   const [composer, setComposer] = useState(false);
+  const [lookSel, setLookSel] = useState<string | null>(() => new URLSearchParams(location.search).get("alook"));
+  const [lb, setLb] = useState<{ items: LbItem[]; index: number } | null>(null);
   const mainRef = useRef<HTMLDivElement>(null);
+  const openLb = useCallback((items: LbItem[], index: number) => items.length && setLb({ items, index: Math.max(0, index) }), []);
 
   const reload = useCallback(async () => {
     try {
@@ -63,15 +63,57 @@ export default function AssetsPage() {
     setCid(c.id);
     if (assetFocus.lookId) {
       setHlLook(assetFocus.lookId);
-      setTimeout(() => document.getElementById(`look-card-${assetFocus.lookId}`)?.scrollIntoView({ block: "center" }), 80);
+      setLookSel(assetFocus.lookId);
+      mainRef.current?.scrollTo({ top: 0 });
     } else if (assetFocus.itemId) setSel({ kind: "item", id: assetFocus.itemId });
   }, [assetFocus, cat]);
 
   useEffect(() => {
-    if (cat && !cid && cat.characters.length) setCid(cat.characters[0].id);
+    if (!cat || cid || !cat.characters.length) return;
+    // 深链 ?alook= / ?aitem= 定位到拥有它的角色
+    const owner =
+      (sel?.kind === "look" && cat.characters.find((c) => c.looks.some((l) => l.id === sel.id))) ||
+      (sel?.kind === "item" && cat.characters.find((c) => c.wardrobe.some((w) => w.id === sel.id))) ||
+      null;
+    setCid((owner || cat.characters[0]).id);
+  }, [cat, cid, sel]);
+
+  // ?alb=1：打开后直接全屏看当前定妆图（便于截图核对）
+  const albDone = useRef(false);
+  useEffect(() => {
+    if (!cat || !cid || albDone.current || !new URLSearchParams(location.search).get("alb")) return;
+    albDone.current = true;
+    setTimeout(() => document.querySelector<HTMLElement>(".av3-card")?.click(), 50);
   }, [cat, cid]);
 
   const ch = cat?.characters.find((c) => c.id === cid) ?? null;
+  const curLook = ch ? ch.looks.find((l) => l.id === lookSel) ?? ch.looks.find((l) => l.id === ch.default_look_id) ?? ch.looks[0] ?? null : null;
+
+  // 本页按键：←/→ 切换造型，F 全屏看当前定妆图，[ / ] 切换角色；同时屏蔽集视图的镜头快捷键
+  useAssetKeys((e) => {
+    if (!ch || st.confirmReq) return false;
+    const k = e.key;
+    if ((k === "ArrowLeft" || k === "ArrowRight") && ch.looks.length > 1) {
+      const i = Math.max(0, ch.looks.findIndex((l) => l.id === curLook?.id));
+      setLookSel(ch.looks[(i + (k === "ArrowRight" ? 1 : -1) + ch.looks.length) % ch.looks.length].id);
+      return true;
+    }
+    if (k === "f" || k === "F") {
+      document.querySelector<HTMLElement>(".av3-card")?.click();
+      return true;
+    }
+    if ((k === "[" || k === "]") && cat && cat.characters.length > 1) {
+      const i = cat.characters.findIndex((c) => c.id === ch.id);
+      const n = cat.characters[(i + (k === "]" ? 1 : -1) + cat.characters.length) % cat.characters.length];
+      setCid(n.id);
+      setLookSel(null);
+      setSel(null);
+      setGen(null);
+      mainRef.current?.scrollTo({ top: 0 });
+      return true;
+    }
+    return false;
+  });
 
   // Esc 关闭右侧明细面板（全局 keymap 不处理资产页）
   useEffect(() => {
@@ -85,21 +127,8 @@ export default function AssetsPage() {
     return () => window.removeEventListener("keydown", h);
   }, [st.confirmReq]);
 
-  const showAffected = useCallback(
-    (r: AffectedShots, what: string) => {
-      if (!r.affected_count) return notify(`${what}：不影响任何镜头`);
-      setConfirmReq({
-        title: what,
-        lines: [`影响 ${r.affected_count} 镜（不会自动重渲）：`, r.affected_shots.slice(0, 30).join("、") + (r.affected_count > 30 ? " …" : "")],
-        confirmLabel: "选中这些镜头",
-        onConfirm: () => {
-          setMulti(new Set(r.affected_shots));
-          setView("episode");
-        },
-      });
-    },
-    [notify, setConfirmReq, setMulti, setView],
-  );
+  // T54-B #3：影响范围 + 只更新引用 / 选中这些镜头 / 批量重出（store 公共实现）
+  const showAffected = useCallback((r: AffectedShots, what: string) => st.showAffected(r, what), [st]);
 
   const run = useCallback(
     async <T,>(fn: () => Promise<T>, ok?: (r: T) => void): Promise<T | undefined> => {
@@ -136,7 +165,7 @@ export default function AssetsPage() {
   const uploadItem = (itemId: string, file: File, variant: string) =>
     void run(
       () => api.looks.uploadItemImage(itemId, file, variant),
-      (r) => notify(`${itemId} 已上传新版本 v${r.image.version}：影响 ${r.affected_count} 镜（不会自动重渲）`),
+      (r) => showAffected(r, `${itemId} 已上传新版本 v${r.image.version}`),
     );
 
   const openGen = useCallback(
@@ -188,7 +217,23 @@ export default function AssetsPage() {
         </button>
       </div>
     );
-  if (!cat) return <div className="empty">加载资产…</div>;
+  if (!cat)
+    return (
+      <div className="av3" aria-busy="true">
+        <nav className="av3-rail" />
+        <div className="av3-main">
+          <div className="av3-skel-head" />
+          <div className="av3-stage">
+            <div className="av3-card av3-skel" />
+            <div className="av3-stage-body">
+              <div className="av3-skel-line" />
+              <div className="av3-skel-line short" />
+              <span className="muted">加载资产…</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
 
   const panelOpen = !!ch && (!!gen || !!sel);
 
@@ -202,6 +247,7 @@ export default function AssetsPage() {
             className={`av3-char${c.id === cid ? " on" : ""}`}
             onClick={() => {
               setCid(c.id);
+              setLookSel(null);
               setSel(null);
               setGen(null);
               setComposer(false);
@@ -224,53 +270,61 @@ export default function AssetsPage() {
       <div className="av3-main" ref={mainRef}>
         {ch ? (
           <>
-            <Hero ch={ch} busy={busy} onImport={() => importManifest(ch)} onReload={() => void run(async () => null)} onSel={pick} onGen={openGen} />
+            <CharHeader ch={ch} busy={busy} onImport={() => importManifest(ch)} onReload={() => void run(async () => null)} />
 
-            <section className="av3-sec">
-              <header className="av3-sec-head">
-                <h3>造型</h3>
-                <span className="muted">每集换装都从这里挑；点卡片看明细，「编辑组合」换单品</span>
-                <span className="grow" />
-                <button className={`btn${composer ? " on" : ""}`} onClick={() => setComposer((v) => !v)}>
-                  {composer ? "收起组合器" : "+ 新造型 / 编辑组合"}
-                </button>
-              </header>
-              <div className="av3-looks">
-                {ch.looks.map((lk) => (
-                  <LookCard
-                    key={lk.id}
-                    ch={ch}
-                    lk={lk}
-                    hl={hlLook === lk.id}
-                    selected={sel?.kind === "look" && sel.id === lk.id}
-                    busy={busy}
-                    onSel={() => pick({ kind: "look", id: lk.id })}
-                    onEdit={() => {
-                      setComposer(true);
-                      setHlLook(lk.id);
-                      setTimeout(() => document.getElementById(`look-col-${lk.id}`)?.scrollIntoView({ block: "nearest", inline: "center" }), 60);
-                    }}
-                    onGen={openGen}
-                    onDefault={() => void run(() => api.looks.setDefault(ch.id, lk.id), (r) => showAffected(r, `默认造型改为 ${lookLetter(lk)} · ${lk.name}`))}
-                  />
-                ))}
-                {!ch.looks.length && (
-                  <div className="av3-empty">
-                    <p>这个角色还没有造型</p>
-                    <button className="btn primary" onClick={() => setComposer(true)}>
-                      + 新造型
+            <LookStage
+              ch={ch}
+              sched={sched}
+              nEp={episodes?.length ?? 60}
+              maxRefs={cat.max_refs}
+              lookId={curLook?.id ?? null}
+              busy={busy}
+              onLook={(id) => {
+                setLookSel(id);
+                if (composer) setHlLook(id);
+              }}
+              onOpen={openLb}
+              onGenLook={(lk, refs) => openGen(`look/${lk.id}`, "", refs, lk.name)}
+              onEdit={(id) => {
+                setComposer(true);
+                setHlLook(id);
+                setTimeout(() => document.getElementById(`look-col-${id}`)?.scrollIntoView({ block: "nearest", inline: "center" }), 60);
+              }}
+              onNewLook={() => {
+                setComposer(true);
+                setTimeout(() => document.querySelector(".av3-composer")?.scrollIntoView({ block: "nearest" }), 60);
+              }}
+              onDefault={(id) => {
+                const lk = ch.looks.find((l) => l.id === id);
+                void run(() => api.looks.setDefault(ch.id, id), (r) => showAffected(r, `默认造型改为 ${lookLetter(lk)} · ${lk?.name ?? id}`));
+              }}
+              onOpenEp={(n) => {
+                gotoEpisode(n);
+                setView("episode");
+              }}
+              onUpload={uploadItem}
+            />
+
+            {composer && (
+              <section className="av3-sec">
+                <div className="av3-composer">
+                  <div className="av3-composer-head">
+                    <b>造型组合器</b>
+                    <span className="muted">从衣橱给每个插槽选单品；保存后影响用到它的镜头（不会自动重渲）</span>
+                    <span className="grow" />
+                    <button className="btn" onClick={() => setComposer(false)}>
+                      收起
                     </button>
                   </div>
-                )}
-              </div>
-              {composer && (
-                <div className="av3-composer">
                   <LookComposer
                     ch={ch}
                     decorStates={cat.decor_states}
                     busy={busy}
                     hl={hlLook}
-                    onSelect={(id) => pick({ kind: "look", id })}
+                    onSelect={(id) => {
+                      setLookSel(id);
+                      pick({ kind: "look", id });
+                    }}
                     onGen={openGen}
                     onSave={(lk, isNew) =>
                       void run(
@@ -281,8 +335,10 @@ export default function AssetsPage() {
                     onDefault={(id) => void run(() => api.looks.setDefault(ch.id, id), (r) => showAffected(r, `默认造型改为 ${id}`))}
                   />
                 </div>
-              )}
-            </section>
+              </section>
+            )}
+
+            <PlatesSection ch={ch} onOpen={openLb} onGen={openGen} />
 
             <ItemsGrid
               ch={ch}
@@ -290,6 +346,7 @@ export default function AssetsPage() {
               sel={sel}
               busy={busy}
               onSel={pick}
+              onOpen={openLb}
               onUpload={uploadItem}
               onGen={openGen}
               onImport={() => importManifest(ch)}
@@ -342,229 +399,128 @@ export default function AssetsPage() {
           ) : null}
         </aside>
       )}
+
+      {lb && (
+        <Lightbox
+          items={lb.items}
+          index={lb.index}
+          onIndex={(index) => setLb((x) => (x ? { ...x, index } : x))}
+          onClose={() => setLb(null)}
+          onDetail={pick}
+        />
+      )}
     </div>
   );
 }
 
-// ---------------------------------------------------------------- 角色头：大定妆图 + 身份底板 + 表情
+// ---------------------------------------------------------------- 角色头：名字 · 统计 · manifest
 
-function Hero({
-  ch,
-  busy,
-  onImport,
-  onReload,
-  onSel,
-  onGen,
-}: {
-  ch: CharacterAssets;
-  busy: boolean;
-  onImport: () => void;
-  onReload: () => void;
-  onSel: (s: Sel) => void;
-  onGen: (target: string, prompt?: string, refs?: string[] | null, name?: string) => void;
-}) {
-  const hero = ch.hero;
-  const heroKind = !hero ? "" : hero === ch.master || hero.category === "master" ? "写实母版" : hero.group === "plate" ? "正面底板" : "定妆原图";
-  const plates = Object.entries(ch.plates).filter(([, e]) => e) as [string, AssetEntry][];
-  const missingPlates = Object.keys(ch.plates).filter((v) => !ch.plates[v]);
+function CharHeader({ ch, busy, onImport, onReload }: { ch: CharacterAssets; busy: boolean; onImport: () => void; onReload: () => void }) {
   const withImg = ch.wardrobe.filter((w) => w.has_image).length;
   const itemFiles = Object.values(ch.items).reduce((n, l) => n + l.length, 0);
   return (
-    <section className="av3-hero">
-      <figure className={`av3-hero-img${hero ? "" : " empty"}`} onClick={() => hero && onSel({ kind: "entry", entry: hero })}>
-        {hero?.url ? (
-          <img src={hero.url} alt={ch.name} />
-        ) : (
-          <div className="av3-hero-empty">
-            <span className="av3-face-missing big" />
-            <p>还没有定妆图</p>
-            <button className="btn primary" onClick={(e) => (e.stopPropagation(), onGen("plate/master", "", null, "master"))}>
-              生成定妆母版
-            </button>
-          </div>
-        )}
-        {heroKind && <figcaption>{heroKind}</figcaption>}
-      </figure>
-
-      <div className="av3-hero-body">
-        <div className="av3-title">
-          <h2>{ch.name}</h2>
-          <span className="muted">{ch.id}</span>
-          {ch.default_look_id && (
-            <span className="muted">· 默认造型：{ch.looks.find((l) => l.id === ch.default_look_id)?.name ?? ch.default_look_id}</span>
-          )}
-        </div>
-        <div className="av3-stats">
-          <div>
-            <b>{ch.looks.length}</b>
-            <span>造型</span>
-          </div>
-          <div>
-            <b>{ch.wardrobe.length}</b>
-            <span>衣橱单品</span>
-          </div>
-          <div>
-            <b>{withImg}</b>
-            <span>有图单品</span>
-          </div>
-          <div className={ch.missing_count ? "bad" : ""}>
-            <b>{ch.missing_count}</b>
-            <span>缺图</span>
-          </div>
-          <div className={ch.unregistered ? "warn" : ""}>
-            <b>{ch.unregistered}</b>
-            <span>文件未登记</span>
-          </div>
-        </div>
-        <div className="av3-hero-actions">
-          {ch.unregistered > 0 ? (
-            <button className="btn primary big" disabled={busy} onClick={onImport} title="把 manifest 里的图片登记进衣橱（sha256 去重，同设计的多张图挂成新版本），造型和镜头才能用到">
-              {busy ? "导入中…" : `导入 manifest（${ch.unregistered} 个未登记）`}
-            </button>
-          ) : (
-            <span className={itemFiles ? "av3-ok" : "muted"}>{itemFiles ? `✓ manifest 里的 ${itemFiles} 个文件都已登记` : "目录里还没有单品文件"}</span>
-          )}
-          <button className="btn" disabled={busy} onClick={onReload}>
-            刷新
-          </button>
-          <span className="muted small">{ch.dir}</span>
-        </div>
-
-        <div className="av3-sub">
-          <h4>身份底板</h4>
-          <span className="muted">正 / 3/4 / 侧 / 背 + 表情；正面底板就是镜头行上的脸图</span>
-        </div>
-        {plates.length || ch.expressions.length ? (
-          <div className="av3-plates">
-            {plates.map(([v, e]) => (
-              <figure key={v} className="av3-plate" onClick={() => onSel({ kind: "entry", entry: e })}>
-                {e.url ? <img src={e.url} alt={v} /> : <div className="av3-missing-file">文件缺失</div>}
-                <figcaption>{PLATE_LABEL[v] ?? v}</figcaption>
-              </figure>
-            ))}
-            {ch.expressions.map((e) => (
-              <figure key={e.file} className="av3-plate" onClick={() => onSel({ kind: "entry", entry: e })}>
-                {e.url ? <img src={e.url} alt={e.category} /> : <div className="av3-missing-file">文件缺失</div>}
-                <figcaption>{e.name || e.category}</figcaption>
-              </figure>
-            ))}
-            <div className="av3-plate-add">
-              {missingPlates.length > 0 && <span className="muted">还缺 {missingPlates.map((v) => PLATE_LABEL[v] ?? v).join(" · ")}</span>}
-              {missingPlates.length > 0 && (
-                <button className="btn" onClick={() => onGen(`plate/${missingPlates[0]}`)}>
-                  生成 {PLATE_LABEL[missingPlates[0]]}
-                </button>
-              )}
-              <button className="btn" onClick={() => onGen("expression/")}>
-                + 表情
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="av3-empty row">
-            <div>
-              <p>还没有身份底板和表情图</p>
-              <span className="muted">
-                {ch.master ? "用写实母版" : hero ? `用${heroKind}` : "先有定妆图，再"}生成正 / 3/4 / 侧 / 背四张底板；完成后正面图自动成为镜头行上的脸图。
-              </span>
-            </div>
-            <button className="btn primary" onClick={() => onGen("plate/front")}>
-              生成身份底板
-            </button>
-          </div>
-        )}
+    <header className="av3-head">
+      <div className="av3-title">
+        <h2>{ch.name}</h2>
+        <span className="muted">{ch.id}</span>
       </div>
-    </section>
+      <div className="av3-stats">
+        <div>
+          <b>{ch.looks.length}</b>
+          <span>造型</span>
+        </div>
+        <div>
+          <b>{ch.wardrobe.length}</b>
+          <span>衣橱单品</span>
+        </div>
+        <div>
+          <b>{withImg}</b>
+          <span>有图单品</span>
+        </div>
+        <div className={ch.missing_count ? "bad" : ""} title={ch.missing.join("\n") || undefined}>
+          <b>{ch.missing_count}</b>
+          <span>缺图</span>
+        </div>
+        <div className={ch.unregistered ? "warn" : ""}>
+          <b>{ch.unregistered}</b>
+          <span>文件未登记</span>
+        </div>
+      </div>
+      <span className="grow" />
+      <div className="av3-hero-actions">
+        {ch.unregistered > 0 ? (
+          <button className="btn primary" disabled={busy} onClick={onImport} title="把 manifest 里的图片登记进衣橱（sha256 去重，同设计的多张图挂成新版本），造型和镜头才能用到">
+            {busy ? "导入中…" : `导入 manifest（${ch.unregistered}）`}
+          </button>
+        ) : (
+          <span className={itemFiles ? "av3-ok" : "muted"} title={ch.dir}>
+            {itemFiles ? `✓ ${itemFiles} 个文件已登记` : "目录里还没有单品文件"}
+          </span>
+        )}
+        <button className="btn" disabled={busy} onClick={onReload}>
+          {busy ? "处理中…" : "刷新"}
+        </button>
+      </div>
+    </header>
   );
 }
 
-// ---------------------------------------------------------------- 造型大卡
+// ---------------------------------------------------------------- 身份底板 + 表情（点击全屏）
 
-function LookCard({
+function PlatesSection({
   ch,
-  lk,
-  hl,
-  selected,
-  busy,
-  onSel,
-  onEdit,
+  onOpen,
   onGen,
-  onDefault,
 }: {
   ch: CharacterAssets;
-  lk: LookView;
-  hl: boolean;
-  selected: boolean;
-  busy: boolean;
-  onSel: () => void;
-  onEdit: () => void;
+  onOpen: (items: LbItem[], index: number) => void;
   onGen: (target: string, prompt?: string, refs?: string[] | null, name?: string) => void;
-  onDefault: () => void;
 }) {
-  const byId = useMemo(() => new Map(ch.wardrobe.map((w) => [w.id, w])), [ch.wardrobe]);
-  const isDefault = ch.default_look_id === lk.id;
-  const slots = ROW_SLOTS.map((slot) => ({ slot, items: (lk.items[slot] ?? []).map((id) => ({ id, w: byId.get(id) })) })).filter((x) => x.items.length);
-  const others = Object.entries(lk.items).filter(([s]) => !(ROW_SLOTS as readonly string[]).includes(s));
-  for (const [slot, ids] of others) slots.push({ slot: slot as (typeof ROW_SLOTS)[number], items: ids.map((id) => ({ id, w: byId.get(id) })) });
-  const thumbs = slots.flatMap((s) => s.items).filter((x) => x.w?.thumb_url).slice(0, 4);
-  const refs = [ch.master?.file ?? faceFile(ch), ...slots.flatMap((s) => s.items.map((x) => x.w?.image_urls.at(-1)?.file ?? null))].filter((x): x is string => !!x);
+  const plates = Object.entries(ch.plates).filter(([, e]) => e) as [string, AssetEntry][];
+  const missingPlates = Object.keys(ch.plates).filter((v) => !ch.plates[v]);
+  const entries: { e: AssetEntry; label: string }[] = [
+    ...plates.map(([v, e]) => ({ e, label: PLATE_LABEL[v] ?? v })),
+    ...ch.expressions.map((e) => ({ e, label: e.name || e.category })),
+  ];
+  const lbItems: LbItem[] = entries.map(({ e, label }) => ({ key: e.file, url: e.url, title: label, sub: e.file, sel: { kind: "entry", entry: e } }));
   return (
-    <article id={`look-card-${lk.id}`} className={`av3-look${hl ? " hl" : ""}${selected ? " sel" : ""}`} onClick={onSel}>
-      <div className={`av3-look-media${!lk.preview_url && !thumbs.length && !ch.face_url ? " blank" : ""}`}>
-        {lk.preview_url ? (
-          <img src={lk.preview_url} alt={lk.name} />
-        ) : thumbs.length || ch.face_url ? (
-          <div className={`av3-collage n${Math.min(4, thumbs.length + (ch.face_url ? 1 : 0))}`}>
-            {ch.face_url && <img src={ch.face_url} alt="" />}
-            {thumbs.map((t) => (
-              <img key={t.id} src={t.w!.thumb_url!} alt="" title={t.w!.name} />
-            ))}
-            <span className="av3-collage-tag">无预览图 · 单品拼图</span>
-          </div>
-        ) : (
-          <div className="av3-look-blank">还没有预览</div>
-        )}
-        <span className="av3-letter">{lookLetter(lk)}</span>
-      </div>
-      <div className="av3-look-body">
-        <div className="av3-look-title">
-          <b>{lk.name || lk.id}</b>
-          {isDefault && <span className="badge b-active">默认</span>}
-          {lk.decor_state && <span className="badge">{lk.decor_state}</span>}
-          <span className="grow" />
-          <span className="muted">用于 {lk.used_by_shots} 镜</span>
-        </div>
-        {slots.length ? (
-          <div className="av3-look-items">
-            {slots.map(({ slot, items }) =>
-              items.map(({ id, w }) => (
-                <div key={slot + id} className={`av3-chip${w?.has_image ? "" : " missing"}`} title={`${CAT_FULL[slot] ?? slot}：${w?.name ?? id}${w?.has_image ? "" : "\n缺图：只用文字描述"}`}>
-                  {w?.thumb_url ? <img src={w.thumb_url} alt="" /> : <span className="av3-chip-txt">{SLOT_SHORT[slot] ?? "他"}</span>}
-                  <span className="av3-chip-cap">
-                    {SLOT_SHORT[slot] ?? "他"} · {w?.name ?? id}
-                  </span>
-                </div>
-              )),
+    <section className="av3-sec">
+      <header className="av3-sec-head">
+        <h3>身份底板 · 表情</h3>
+        <span className="muted">正 / 3/4 / 侧 / 背 + 表情；正面底板就是镜头行上的脸图。点击全屏</span>
+      </header>
+      {entries.length ? (
+        <div className="av3-plates">
+          {entries.map(({ e, label }, i) => (
+            <figure key={e.file} className="av3-plate" tabIndex={0} onClick={() => onOpen(lbItems, i)} onKeyDown={(k) => k.key === "Enter" && onOpen(lbItems, i)}>
+              {e.url ? <img src={e.url} alt={label} loading="lazy" /> : <div className="av3-missing-file">文件缺失</div>}
+              <figcaption>{label}</figcaption>
+            </figure>
+          ))}
+          <div className="av3-plate-add">
+            {missingPlates.length > 0 && <span className="muted">还缺 {missingPlates.map((v) => PLATE_LABEL[v] ?? v).join(" · ")}</span>}
+            {missingPlates.length > 0 && (
+              <button className="btn" onClick={() => onGen(`plate/${missingPlates[0]}`)}>
+                生成 {PLATE_LABEL[missingPlates[0]]}
+              </button>
             )}
-          </div>
-        ) : (
-          <div className="muted">还没有放单品</div>
-        )}
-        <div className="av3-look-actions" onClick={(e) => e.stopPropagation()}>
-          <button className="btn" onClick={() => onGen(`look/${lk.id}`, "", refs, lk.name)}>
-            生成预览
-          </button>
-          <button className="btn" onClick={onEdit}>
-            编辑组合
-          </button>
-          {!isDefault && (
-            <button className="btn" disabled={busy} onClick={onDefault}>
-              设为默认
+            <button className="btn" onClick={() => onGen("expression/")}>
+              + 表情
             </button>
-          )}
+          </div>
         </div>
-      </div>
-    </article>
+      ) : (
+        <div className="av3-empty row">
+          <div>
+            <p>还没有身份底板和表情图</p>
+            <span className="muted">先有定妆图 / 母版，再生成正 / 3/4 / 侧 / 背四张底板；完成后正面图自动成为镜头行上的脸图。</span>
+          </div>
+          <button className="btn primary" onClick={() => onGen(ch.hero ? "plate/front" : "plate/master", "", null, ch.hero ? "" : "master")}>
+            {ch.hero ? "生成身份底板" : "生成定妆母版"}
+          </button>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -576,6 +532,7 @@ function ItemsGrid({
   sel,
   busy,
   onSel,
+  onOpen,
   onUpload,
   onGen,
   onImport,
@@ -585,6 +542,7 @@ function ItemsGrid({
   sel: Sel;
   busy: boolean;
   onSel: (s: Sel) => void;
+  onOpen: (items: LbItem[], index: number) => void;
   onUpload: (id: string, f: File, variant: string) => void;
   onGen: (target: string, prompt?: string, refs?: string[] | null, name?: string) => void;
   onImport: () => void;
@@ -603,6 +561,15 @@ function ItemsGrid({
   const variantFor = (slot: string) => (slot === "makeup" || slot === "hair" ? "front" : "clean");
   const unreg = (ch.items[tab] ?? []).filter((e) => !e.registered_item_id);
   const items = ch.wardrobe.filter((w) => inCat(w, tab)).sort((a, b) => Number(b.has_image) - Number(a.has_image));
+  // 全屏看图：未登记文件 + 有图单品，按网格顺序
+  const lbItems: LbItem[] = [
+    ...unreg.map((e) => ({ key: e.file, url: e.url, title: e.name || e.design || e.file, sub: "未登记进衣橱", sel: { kind: "entry", entry: e } as const })),
+    ...items.filter((w) => w.has_image || w.thumb_url).map((w) => itemLbItem(w, tab)),
+  ];
+  const openAt = (key: string) => {
+    const i = lbItems.findIndex((x) => x.key === key);
+    if (i >= 0) onOpen(lbItems, i);
+  };
   const upload = (id: string) => {
     pending.current = id;
     file.current?.click();
@@ -622,7 +589,7 @@ function ItemsGrid({
     <section className="av3-sec" id="av3-items">
       <header className="av3-sec-head">
         <h3>单品</h3>
-        <span className="muted">点卡片看大图和全部版本；把图片拖到卡片上 = 上传新版本（旧版本保留）</span>
+        <span className="muted">点卡片全屏看大图和全部版本（「明细」看来源/上传）；把图片拖到卡片上 = 上传新版本（旧版本保留）</span>
       </header>
       <div className="av3-tabs">
         {cats.map((c) => {
@@ -669,7 +636,9 @@ function ItemsGrid({
             <figure
               key={e.file}
               className={`av3-item unreg${sel?.kind === "entry" && sel.entry.file === e.file ? " sel" : ""}`}
-              onClick={() => onSel({ kind: "entry", entry: e })}
+              tabIndex={0}
+              onClick={() => openAt(e.file)}
+              onKeyDown={(k) => k.key === "Enter" && openAt(e.file)}
               title={e.prompt ?? e.file}
             >
               <div className="av3-item-img">{e.url ? <img src={e.url} alt="" loading="lazy" /> : <div className="av3-missing-file">文件缺失</div>}</div>
@@ -686,7 +655,9 @@ function ItemsGrid({
             <figure
               key={w.id}
               className={`av3-item${w.has_image ? "" : " missing"}${sel?.kind === "item" && sel.id === w.id ? " sel" : ""}${over === w.id ? " drop" : ""}`}
-              onClick={() => onSel({ kind: "item", id: w.id })}
+              tabIndex={0}
+              onClick={() => (w.has_image || w.thumb_url ? openAt(`item:${w.id}`) : onSel({ kind: "item", id: w.id }))}
+              onKeyDown={(k) => k.key === "Enter" && (w.has_image || w.thumb_url ? openAt(`item:${w.id}`) : onSel({ kind: "item", id: w.id }))}
               onDragOver={(e) => {
                 if (e.dataTransfer.types.includes("Files")) {
                   e.preventDefault();

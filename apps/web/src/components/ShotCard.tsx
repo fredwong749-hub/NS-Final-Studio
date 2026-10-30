@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState, type MouseEvent, type ReactNode } fr
 import { api } from "../api";
 import { useStudio, type Density, type InspectorTab } from "../store";
 import type { CharacterBrief, Job, ShotDetail, ShotSummary, Stage, TakeScore } from "../types";
-import { isFailed, JOB_LABEL, LAST_SOURCE_LABEL, parseReason, REVIEW_LABEL, shotLine, SLOT_LABEL, SLOT_NAME } from "../util";
+import { EXPLICIT_LABEL, isFailed, JOB_LABEL, LAST_SOURCE_LABEL, parseReason, REVIEW_LABEL, shotLine, SLOT_LABEL, SLOT_NAME } from "../util";
 
 export interface ShotCardProps {
   s: ShotSummary;
@@ -422,6 +422,11 @@ export const ShotCard = memo(function ShotCard({ s, detail, job, selected, inMul
         {s.adult && (
           <span className="badge b-adult" title="成人路由，本地渲染">
             本地
+          </span>
+        )}
+        {s.explicit_hold && (
+          <span className="badge b-explicit" title={`${EXPLICIT_LABEL}（${s.explicit_hold.sources.join("、")}）`}>
+            露骨
           </span>
         )}
         {s.has_boost && (

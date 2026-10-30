@@ -1,0 +1,21 @@
+/* T54-B（fredw-25）：镜头行人物区造型切换、缺图汇总、接缝一键衔接、批量失败重试 */
+.p3-look-sel {
+  background: var(--bg-3); border: 1px solid var(--line-2); border-radius: var(--radius); color: var(--fg-2);
+  font-size: 12px; padding: 1px 4px; max-width: 200px; cursor: pointer;
+}
+.p3-look-sel:hover { border-color: var(--accent); color: var(--fg); }
+.p3-miss {
+  font-size: 11px; color: var(--bad); display: inline-flex; align-items: center; gap: 4px;
+}
+.p3-miss::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--bad); }
+
+.seam3-wrap { display: flex; align-items: center; gap: 8px; }
+.seam3-wrap > .seam3 { flex: 1; min-width: 0; }
+.seam-link {
+  flex: none; font-size: 12px; padding: 2px 10px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--ok); background: transparent; color: var(--c-ok-text); white-space: nowrap;
+}
+.seam-link:hover { background: color-mix(in srgb, var(--c-ok) 14%, transparent); }
+
+.batch-retry { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.batch-retry .bad { color: var(--bad); }

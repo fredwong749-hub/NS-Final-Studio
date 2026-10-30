@@ -41,7 +41,9 @@ export function ReviewMode() {
             退出 Esc
           </button>
         </div>
-        {s && (
+        {/* T60：翻到下一集时本集详情可能还在路上（轻量数据没有运镜 / 表情 / 对白），先只显示画面 */}
+        {s && episode?.light && <div className="muted">加载第 {episode.number} 集…</div>}
+        {s && !episode?.light && (
           <>
             <div>
               <span className={`review-badge r-${s.review.state}`}>{REVIEW_LABEL[s.review.state]}</span>{" "}

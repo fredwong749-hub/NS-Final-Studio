@@ -2,19 +2,20 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { api } from "../api";
 import { useStudio, type InspectorTab } from "../store";
 import type { ShotDetail, ShotEdit, Stage, Take } from "../types";
-import { fmtTime, isFailed, JOB_LABEL, joinReason, LAST_SOURCE_LABEL, parseReason, REJECT_CODES, REVIEW_LABEL, segDiff, STAGE_LABEL } from "../util";
-import { AUDIO_SOURCE_LABEL, CUE_EXAMPLE, CUE_HINT, SOUNDSCAPE_EXAMPLE, SOUNDSCAPE_HINT } from "../audio";
+import { fmtTime, isFailed, JOB_LABEL, joinReason, LAST_SOURCE_LABEL, parseReason, REJECT_CODES, REVIEW_LABEL, segDiff, STAGE_LABEL, stageActive, stageTakes } from "../util";
+import { AUDIO_SOURCE_LABEL, CUE_EXAMPLE, CUE_HINT, H3_MUSIC_HINT, MUSIC_SOURCE_LABEL, SOUNDSCAPE_EXAMPLE, SOUNDSCAPE_HINT } from "../audio";
 import { LooksSection } from "./LooksSection";
 import { WatchVideo } from "./Player";
 import { RefGroup } from "./RefGroup";
 import { JobBar, Score } from "./frames";
 import { PersonRow } from "./ShotCard";
+import { ReadinessList } from "./ShotRow";
 
 // ---------- 表单：字段用字符串保存，保存时再转换 ----------
 const FORM_KEYS = [
   "expression", "image_prompt", "image_negative", "video_prompt", "note", "image_seed", "video_seed", "last_frame",
   "last_prompt", "last_seed", "last_source", "boost_first", "boost_last", "cam_size", "cam_angle", "cam_move", "cam_lens",
-  "soundscape", "music", "h3_body",
+  "soundscape", "music",
 ] as const;
 type FormKey = (typeof FORM_KEYS)[number];
 type Form = Record<FormKey, string>;
@@ -38,7 +39,6 @@ function toForm(e: ShotEdit, d: ShotDetail): Form {
     boost_last: e.boost_last ?? "",
     soundscape: e.soundscape ?? "",
     music: e.music ?? "",
-    h3_body: e.h3_body ?? "",
     cam_size: ce("size"),
     cam_angle: ce("angle"),
     cam_move: ce("move"),
@@ -75,7 +75,6 @@ function fromForm(f: Form, base: ShotEdit): ShotEdit {
     boost_last: s(f.boost_last),
     soundscape: s(f.soundscape),
     music: s(f.music),
-    h3_body: s(f.h3_body),
   };
 }
 
@@ -165,25 +164,72 @@ function Highlight({ text, marks }: { text: string; marks: (string | null | unde
 
 const H3_SOURCE_CHIP: Record<string, string> = { gpu3: "chip-ok", script: "chip-accent", laptop: "chip-warn" };
 
-/** H3 提示词（SOP §9A.1 官方 FL2VA 四块）：对齐句与配乐 N/A 固定；只可改正文与环境声 */
-function H3Panel({
-  s,
-  form,
-  setF,
-  onPrompt,
-}: {
-  s: ShotDetail["summary"];
-  form: Form;
-  setF: (k: FormKey) => (v: string) => void;
-  onPrompt: (k: FormKey, compiled: string) => (e: { target: { value: string } }) => void;
-}) {
+/** H3 提示词（SOP §9A.1 官方 FL2VA 四块）：对齐句与配乐 N/A 固定；只有项目方能改正文与环境声（需填确认原话） */
+function H3Panel({ s, id, notify, refresh }: { s: ShotDetail["summary"]; id: string; notify: (m: string, k?: "ok" | "err") => void; refresh: () => Promise<void> | void }) {
   const b = s.h3_blocks;
+  const base = s.h3_edit_base ?? b;
+  const baseBody = (base?.body ?? "").replace(/^\[Shot 1\]\s*/, "");
+  const baseSound = base?.soundscape ?? "";
+  const [body, setBody] = useState(baseBody);
+  const [sound, setSound] = useState(baseSound);
+  const [note, setNote] = useState("");
+  // E7④：原话改为可选；勾选“我是项目方”即可保存，记录里写明是勾选确认
+  const [owner, setOwner] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [undelivered, setUndelivered] = useState<string | null>(null);
+  useEffect(() => {
+    setBody(baseBody);
+    setSound(baseSound);
+  }, [baseBody, baseSound]);
+  const confirmNote = () => (note.trim() ? note.trim() : `项目方在画布勾选确认（${new Date().toLocaleString("zh-CN", { hour12: false })}）`);
   if (!b) return <div className="muted small">后端还没有下发 H3 提示词（h3_prompt）：请重启画布 API</div>;
   const lint = s.h3_lint ?? [];
-  const editable = s.h3_editable !== false;
-  const bodyDefault = b.body.replace(/^\[Shot 1\]\s*/, "");
+  const ov = s.h3_override;
   const missing = s.h3_missing ?? [];
   const failed = lint.filter((r) => !r.ok && r.level === "block" && !r.overridden);
+  const changed = body !== baseBody || sound !== baseSound;
+  const send = async (clear: boolean) => {
+    if (!owner) {
+      notify("请先勾选“我是项目方，确认这次修改”", "err");
+      return;
+    }
+    const n = confirmNote();
+    setBusy(true);
+    try {
+      // 封板修复：带上画布显示的提示词 sha（gpu3 判过期 409）
+      const r = await api.putH3Override(
+        id,
+        clear ? { note: n, clear: true } : { body: body !== baseBody ? body : null, soundscape: sound !== baseSound ? sound : null, note: n, base_sha: s.h3_prompt_sha256 ?? null },
+      );
+      // 封板修复：未送达 gpu3 不能报“可出视频”，给重发按钮
+      const lost = !clear && r.delivered === false;
+      setUndelivered(lost ? (r.delivery?.error ?? "gpu3 桥不可达或拒绝") : null);
+      if (lost) notify(`H3 已存本地，但未送达 gpu3：${r.delivery?.error ?? "桥不可达或拒绝"}（可勾选项目方后点“重发 gpu3”）`, "err");
+      else notify(clear ? "已撤销 H3 画布修改" : r.status === "renderable" ? "H3 提示词已保存（通过 §9A，可出视频）" : `已存为草稿：未通过 ${(r.failed ?? []).join("、")}`, !clear && r.status !== "renderable" ? "err" : "ok");
+      setNote("");
+      setOwner(false);
+      await refresh();
+    } catch (e) {
+      notify(`保存失败：${(e as Error).message}`, "err");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const resend = async () => {
+    if (!owner) return notify("请先勾选“我是项目方，确认这次修改”", "err");
+    setBusy(true);
+    try {
+      const r = await api.gpu3Resend(id, "h3_edit");
+      setUndelivered(r.delivered ? null : (r.delivery?.error ?? "gpu3 桥不可达或拒绝"));
+      notify(r.delivered ? "已重发到 gpu3" : `重发仍未送达 gpu3：${r.delivery?.error ?? "桥不可达或拒绝"}`, r.delivered ? "ok" : "err");
+      setOwner(false);
+      await refresh();
+    } catch (e) {
+      notify(`重发失败：${(e as Error).message}`, "err");
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <section className="h3-panel">
       <div className="h3-head">
@@ -191,12 +237,18 @@ function H3Panel({
         <span className={`chip ${H3_SOURCE_CHIP[s.h3_prompt_source ?? "laptop"] ?? "chip-dark"}`} title={s.h3_prompt_where}>
           {s.h3_prompt_source_label}
         </span>
-        <span className="chip chip-dark" title="帧数（17k+5 网格，24 fps）">
-          {s.h3_frames} 帧
+        <span
+          className={`chip ${s.duration?.source === "script" ? "chip-dark" : "chip-warn"}`}
+          title={`${s.duration?.source === "script" ? "剧本 **时长** 写明" : "剧本没写时长，按默认 10 秒"}；H3 帧数按 17k+5 网格（124–362 帧，24 fps）取档，请求里的帧数 = 这里的帧数`}
+        >
+          时长 {s.duration?.seconds ?? 10} 秒{s.duration?.source === "script" ? "" : "（剧本未写·默认）"} → H3 {s.h3_frames} 帧 ≈ {s.h3_sss ?? (s.h3_frames ? (s.h3_frames / 24).toFixed(2) : "—")} 秒
         </span>
-        <span className={`chip ${s.h3_lint_ok ? "chip-ok" : "chip-bad"}`}>
-          {s.h3_lint_ok ? "§9A 机检通过" : `§9A 未通过 ${failed.length} 条`}
-        </span>
+        <span className={`chip ${s.h3_lint_ok ? "chip-ok" : "chip-bad"}`}>{s.h3_lint_ok ? "§9A 机检通过" : `§9A 未通过 ${failed.length} 条`}</span>
+        {s.h3_override_stale && (
+          <span className="chip chip-bad" title="保存修改之后剧本 **H3提示词** 又更新了：请重新确认或撤销">
+            剧本已更新·需重新确认
+          </span>
+        )}
       </div>
       <div className="h3-lint" title="悬停看说明；黄 = warn（待验证规则，不拦截）；灰 = 项目方原话豁免">
         {lint.map((r) => (
@@ -216,59 +268,77 @@ function H3Panel({
           {missing.includes("soundscape") ? "环境声" : ""}：这里先放剧本中文原文占位（不机翻）。H3-A7 需要英文正文（剧本 v3 提供 **H3提示词**）
         </div>
       )}
-      {!editable && <div className="muted small">gpu3 最终提示词原样显示（出视频实际使用）；画布修改不作用于 gpu3 版本</div>}
+      {ov && (
+        <div className={`small ${ov.status === "renderable" ? "muted" : "warn"}`}>
+          项目方修改 {ov.at ?? ""}：「{ov.note}」· {ov.status === "renderable" ? "通过 §9A，gpu3 可出视频" : `草稿（未通过 ${ov.failed.join("、")}，S4 仍阻塞）`}
+        </div>
+      )}
       <div className="h3-block">
         <div className="h3-k">
           对齐句 <span className="field-hint">自动生成，不可改（S.SS = 帧数 / 24）</span>
         </div>
         <div className="final-prompt h3-fixed">{b.alignment}</div>
       </div>
-      <Field
-        label="integrated_multimodal_description: [Shot 1]"
-        hint="英文正文；台词写 (S1) … <d>[Chinese] 原文</d>；不写否定句、不加图像风格后缀"
-        action={
-          editable ? (
-            <button className="btn-mini" disabled={!form.h3_body} onClick={() => setF("h3_body")("")} title="丢掉人工修改">
-              恢复
-            </button>
-          ) : undefined
-        }
-      >
-        <textarea data-field="h3_body" rows={7} readOnly={!editable} value={form.h3_body || bodyDefault} onChange={onPrompt("h3_body", bodyDefault)} />
-        <Diff from={bodyDefault} to={form.h3_body} />
+      <div className="h3-block">
+        <div className="h3-k">当前生效的正文与环境声</div>
+        <div className="final-prompt">
+          <b>[Shot 1]</b> {b.body.replace(/^\[Shot 1\]\s*/, "")}
+          <br />
+          <b>overall_soundscape:</b> {b.soundscape}
+        </div>
+      </div>
+      <Field label="integrated_multimodal_description: [Shot 1]" hint="英文正文；台词写 (S1) … <d>[Chinese] 原文</d>；不写否定句、不加图像风格后缀">
+        <textarea data-field="h3_body" rows={7} value={body} onChange={(e) => setBody(e.target.value)} />
+        <Diff from={baseBody} to={body !== baseBody ? body : ""} />
       </Field>
-      <Field
-        label="overall_soundscape"
-        hint="1–4 句英文：环境声、动作声、非语言人声；不写台词、不写否定句"
-        action={
-          editable ? (
-            <>
-              <span className={`chip ${form.soundscape ? "chip-accent" : "chip-ok"}`}>
-                {form.soundscape ? "人工" : (AUDIO_SOURCE_LABEL[s.audio?.soundscape.default_source ?? ""] ?? "剧本")}
-              </span>
-              <button className="btn-mini" disabled={!form.soundscape} onClick={() => setF("soundscape")("")} title="丢掉人工修改">
-                恢复
-              </button>
-            </>
-          ) : undefined
-        }
-      >
-        <textarea
-          data-field="soundscape"
-          rows={3}
-          readOnly={!editable}
-          value={form.soundscape || b.soundscape}
-          onChange={onPrompt("soundscape", b.soundscape)}
-          placeholder={SOUNDSCAPE_EXAMPLE}
-        />
+      <Field label="overall_soundscape" hint="1–4 句英文：环境声、动作声、非语言人声；不写台词、不写否定句">
+        <textarea data-field="soundscape" rows={3} value={sound} onChange={(e) => setSound(e.target.value)} placeholder={SOUNDSCAPE_EXAMPLE} />
         <div className="audio-hint">{SOUNDSCAPE_HINT}</div>
       </Field>
       <div className="h3-block">
         <div className="h3-k">
-          non_diegetic_music <span className="field-hint">固定 N/A：配乐只在后期 BGM 铺</span>
+          non_diegetic_music{" "}
+          <span className="chip chip-dark" title="取值顺序：本镜人工 > 剧本 H3 自带 > 本集默认 > N/A">
+            {MUSIC_SOURCE_LABEL[s.h3_music_source ?? "none"] ?? s.h3_music_source}
+          </span>{" "}
+          <span className="field-hint">在下方「配乐」改（英文进 H3）</span>
         </div>
         <div className="final-prompt h3-fixed">{b.music || "N/A"}</div>
       </div>
+      <div className="h3-confirm">
+        <label title="只有项目方本人能保存 H3 修改；未通过 §9A 的只存为草稿">
+          <input type="checkbox" checked={owner} onChange={(e) => setOwner(e.target.checked)} /> 我是项目方，确认这次修改
+        </label>
+        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="原话（可选）：例 正文按这个改，可以出" />
+      </div>
+      <div className="h3-actions">
+        <button className="btn" disabled={busy || !changed || !owner} onClick={() => send(false)}>
+          保存 H3
+        </button>
+        {ov && (
+          <button className="btn-mini" disabled={busy || !owner} onClick={() => send(true)} title="撤销画布修改，回到剧本 / 笔记本草稿">
+            撤销画布修改
+          </button>
+        )}
+        {changed && (
+          <button
+            className="btn-mini"
+            disabled={busy}
+            onClick={() => {
+              setBody(baseBody);
+              setSound(baseSound);
+            }}
+          >
+            放弃未保存的改动
+          </button>
+        )}
+        {undelivered && (
+          <button className="btn-mini" disabled={busy || !owner} onClick={() => void resend()} title="原样重发已保存的 H3 修改到 gpu3（需勾选项目方）">
+            重发 gpu3
+          </button>
+        )}
+      </div>
+      {undelivered && <div className="warn small">H3 修改已存本地，未送达 gpu3：{undelivered}</div>}
       {s.h3_take && (
         <div className="muted small" title={s.h3_take.prompt}>
           gpu3 视频 v{s.h3_take.n} 实际提示词 sha256 {s.h3_take.prompt_sha256?.slice(0, 12)}…
@@ -314,8 +384,10 @@ function TakeCompare({ d, stage }: { d: ShotDetail; stage: Stage }) {
   const { preview, setPreview, activate, openViewer, liveJob } = useStudio();
   const s = d.summary;
   const id = s.id;
-  const list = d.takes.takes.filter((t) => t.stage === stage).sort((a, b) => a.n - b.n);
-  const activeN = d.takes.active[stage];
+  // gpu3 负责的镜头：看 gpu3 版本链（只读，当前由 gpu3 决定）；否则笔记本 takes
+  const list = stageTakes(d, stage);
+  const activeN = stageActive(d, stage);
+  const readOnly = !!d.gpu3_takes;
   const cur = list.find((t) => t.n === activeN);
   const newest = [...list].reverse().find((t) => t.n !== activeN);
   const picked =
@@ -367,11 +439,11 @@ function TakeCompare({ d, stage }: { d: ShotDetail; stage: Stage }) {
             <>
               <figcaption>
                 <b>新版本</b>
-                <span className="chip chip-busy">{live.job.state === "running" ? "渲染中" : "排队"}</span>
+                <span className="chip chip-busy">{live.gpu3 ? "已请 gpu3" : live.job.state === "running" ? "渲染中" : "排队"}</span>
               </figcaption>
               <div className="tc-pending">
                 <JobBar live={live} />
-                <span className="muted">完成后新{word}自动出现在这里</span>
+                <span className="muted">{live.gpu3 ? `gpu3 出完新 take 后自动出现在这里（每 30 s 查一次）` : `完成后新${word}自动出现在这里`}</span>
               </div>
             </>
           ) : cand ? (
@@ -400,9 +472,15 @@ function TakeCompare({ d, stage }: { d: ShotDetail; stage: Stage }) {
       </div>
       {cand && !live && (
         <div className="tc-actions">
-          <button className="btn primary" disabled={!!cand.qc?.nudity} onClick={() => void activate(id, stage, cand.n)} title="Shift+Enter">
-            设 v{cand.n} 为当前
-          </button>
+          {readOnly ? (
+            <span className="chip chip-src-gpu3" title="gpu3 负责此镜：当前版本由 gpu3 决定；画布“设为当前”待 gpu3 侧接口（POST /api/shots/{id}/gpu3-activate）">
+              gpu3 版本（只读）
+            </span>
+          ) : (
+            <button className="btn primary" disabled={!!cand.qc?.nudity} onClick={() => void activate(id, stage, cand.n)} title="Shift+Enter">
+              设 v{cand.n} 为当前 <kbd>Shift+Enter</kbd>
+            </button>
+          )}
           {stage !== "video" && (
             <button className="btn" onClick={() => view(cand.n)}>
               全屏对比 <kbd>C</kbd>
@@ -423,8 +501,12 @@ function TakeCompare({ d, stage }: { d: ShotDetail; stage: Stage }) {
         </div>
       )}
       {list.length > 0 && (
+        // 版本条默认折叠（总调度 / 前端返工 audit：改词→重出→对比→选定要一屏完成），点开选候选
+        <details className="tc-strip-wrap">
+          <summary className="muted">
+            全部{word}版本 {list.length} 个（点开选候选）
+          </summary>
         <div className="tc-strip">
-          <span className="muted">全部{word}版本</span>
           {[...list].reverse().map((t) => {
             const thumb = stage === "video" ? t.last_url : t.url;
             return (
@@ -440,6 +522,7 @@ function TakeCompare({ d, stage }: { d: ShotDetail; stage: Stage }) {
             );
           })}
         </div>
+        </details>
       )}
     </section>
   );
@@ -529,9 +612,19 @@ function SpecView({ v }: { v: unknown }): ReactNode {
 
 // ---------- 检查器 ----------
 export function Inspector() {
-  const { sel, details } = useStudio();
+  const { sel, details, detailErr, refreshShots } = useStudio();
   const d = sel ? details[sel] : undefined;
   if (!sel) return <aside className="inspector empty">未选择镜头</aside>;
+  // 封板修复：加载失败显示原因 + 重试，不再停在“加载…”
+  if (!d && detailErr[sel])
+    return (
+      <aside className="inspector empty">
+        {sel} 加载失败：{detailErr[sel]}{" "}
+        <button className="btn-mini" onClick={() => void refreshShots([sel])}>
+          重试
+        </button>
+      </aside>
+    );
   if (!d) return <aside className="inspector empty">加载 {sel}…</aside>;
   return <InspectorBody key={d.summary.id} d={d} />;
 }
@@ -648,6 +741,10 @@ function InspectorBody({ d }: { d: ShotDetail }) {
   }
 
   async function suggest(which: "first" | "last") {
+    if (d.summary.explicit_hold) {
+      notify("露骨红标镜头：项目方自行处理，不用模型生成", "err");
+      return;
+    }
     setSuggesting(which);
     try {
       const r = await api.boostSuggest(id, which);
@@ -732,38 +829,61 @@ function InspectorBody({ d }: { d: ShotDetail }) {
 
   return (
     <aside className="inspector v2 v3" tabIndex={-1} id="inspector">
-      <div className="insp-head sticky">
-        <div>
-          <div className="insp-id">{id}</div>
-          <div className="muted small">
-            第{d.episode.number}集 · {d.episode.title}
-          </div>
-          {s.owner === "gpu3" && (
-            <div className="small r-warn" title={s.owner_reason}>
-              gpu3 负责此镜：下面的版本是笔记本旧版本，未用于视频；「重出」会改成请 gpu3 重出
-            </div>
-          )}
+      {/* T59：头部一行镜号 + 景别·运镜·时长 + 审核状态；第二行集名与负责方（说明在悬停提示里）；通过 / 打回为文字按钮 */}
+      <div className="insp-head sticky t59">
+        <div className="ih-row">
+          <b className="ih-id">{id.split("-")[1]}</b>
+          <span className="ih-meta">
+            {[s.camera.size, s.camera.angle, s.camera.move]
+              .filter(Boolean)
+              .map((t) => (/[一-鿿]/.test(t) ? t.replace(/^[A-Za-z][A-Za-z ]*\s+(?=[一-鿿])/, "") : t)) // 运镜有中文就只显示中文
+              .map((x) => (
+              <span key={x}>{x}</span>
+            ))}
+            <span className={s.duration?.source === "script" ? "" : "ih-dflt"} title={s.duration?.source === "script" ? "剧本写明的时长" : "剧本没写时长，按默认 10 秒"}>
+              时长 {s.duration?.seconds ?? 10} 秒{s.h3_frames ? ` · ${s.h3_frames} 帧` : ""}
+              {s.duration?.source !== "script" && "（默认）"}
+            </span>
+          </span>
+          <span className="grow" />
+          <span className={`status ${s.review.state === "passed" ? "ok" : s.review.state === "rejected" ? "bad" : ""}`}>{REVIEW_LABEL[s.review.state]}</span>
         </div>
-        <div className="badges">
-          {s.adult && (
-            <span className="badge b-adult" title={c.adult_reasons.join("、")}>
-              本地
+        <div className="ih-row ih-sub">
+          <span>
+            第 {d.episode.number} 集 · {d.episode.title}
+          </span>
+          {s.owner === "gpu3" && (
+            <span
+              className="ih-owner"
+              title={`${s.owner_reason ?? ""}
+${
+                d.gpu3_takes
+                  ? "下面是 gpu3 版本链（只读）；「保存并重出」= 保存后直接请 gpu3 重出，等待状态显示在镜头行和对比位"
+                  : "下面的版本是笔记本旧版本，未用于视频；「重出」会改成请 gpu3 重出"
+              }`}
+            >
+              gpu3 负责{d.gpu3_takes ? " · 版本只读" : ""}
             </span>
           )}
-          {s.has_boost && <span className="badge b-boost">加强</span>}
+          {s.adult && (
+            <span className="status" title={c.adult_reasons.join("、")}>
+              本地渲染
+            </span>
+          )}
+          {s.has_boost && <span className="status">已加强</span>}
           {live && (
-            <span className={`badge b-${live.state}`}>
+            <span className="status busy">
               {STAGE_LABEL[live.stage]}
               {JOB_LABEL[live.state]}
             </span>
           )}
-          {failed && <span className="badge b-failed">失败</span>}
-          <span className={`review-badge r-${s.review.state}`}>{REVIEW_LABEL[s.review.state]}</span>
-          <button className="btn-mini good" disabled={!passOk} title={passOk ? "A" : "请先完整播放一遍当前视频"} onClick={() => void setReview([id], "passed")}>
-            通过 A
+          {failed && <span className="status bad">渲染失败</span>}
+          <span className="grow" />
+          <button className="ih-act" disabled={!passOk} title={passOk ? "通过（A）" : "请先完整播放一遍当前视频"} onClick={() => void setReview([id], "passed")}>
+            通过 <kbd>A</kbd>
           </button>
-          <button className="btn-mini bad" onClick={() => setRejectFor([id])} title="X">
-            打回 X
+          <button className="ih-act" onClick={() => setRejectFor([id])} title="打回（X）">
+            打回 <kbd>X</kbd>
           </button>
         </div>
       </div>
@@ -846,9 +966,11 @@ function InspectorBody({ d }: { d: ShotDetail }) {
                 </button>
               }
             >
-              <textarea data-field="image_prompt" rows={9} value={form.image_prompt || c.image_prompt} onChange={onPrompt("image_prompt", c.image_prompt)} />
+              <textarea data-field="image_prompt" rows={6} value={form.image_prompt || c.image_prompt} onChange={onPrompt("image_prompt", c.image_prompt)} />
               <Diff from={c.image_prompt} to={form.image_prompt} />
             </Field>
+            {/* 保存并重出紧贴提示词：改词 → 重出 → 上方对比位看结果 → 选定，一屏完成 */}
+            {stageBar("image")}
             <details className="more">
               <summary>负面词 · 种子 · 参考图组</summary>
             <Field
@@ -868,7 +990,6 @@ function InspectorBody({ d }: { d: ShotDetail }) {
             <div className="sub-title">本镜参考图组（送进 Qwen Image 2.1 的顺序）</div>
             <RefGroup shotId={id} />
             </details>
-            {stageBar("image")}
           </>
         )}
 
@@ -953,13 +1074,13 @@ function InspectorBody({ d }: { d: ShotDetail }) {
             <Field label="表情" hint="写 2–4 个可观察线索（眼神、眉、嘴角、呼吸、手）；运镜 / 表情只作镜头信息，不进 H3 提示词（H3 只改下方正文）">
               <input data-field="expression" value={form.expression} onChange={on("expression")} placeholder={s.expression.text || "未标注"} />
             </Field>
-            <H3Panel s={s} form={form} setF={setF} onPrompt={onPrompt} />
+            <H3Panel key={id} s={s} id={id} notify={notify} refresh={() => refreshAfter([id])} />
             {s.audio ? (
               <section className="audio-sec">
-                <div className="audio-title">配乐（后期 BGM，不进 H3）</div>
+                <div className="audio-title">配乐（英文进 H3 · 中文只给后期）</div>
                 <Field
-                  label="🎵 配乐提示（后期）"
-                  hint="不进 H3，只给后期混音"
+                  label="🎵 本镜配乐"
+                  hint={H3_MUSIC_HINT}
                   action={
                     <>
                       <span className={`chip ${form.music ? "chip-accent" : s.audio.music.default_source === "none" ? "chip-dark" : "chip-ok"}`}>
@@ -971,9 +1092,9 @@ function InspectorBody({ d }: { d: ShotDetail }) {
                     </>
                   }
                 >
-                  <div className="inherit-line" title="本集背景音乐在集头「🎵 本集背景音乐」里编辑">
+                  <div className="inherit-line" title="本集配乐在集头「🎵 本集配乐（H3 默认）」里编辑">
                     <span className="chip chip-dark">继承本集</span>
-                    <span className="muted">{s.audio.episode_music.text || "本集还没有背景音乐"}</span>
+                    <span className="muted">{s.audio.episode_music.text || "本集还没有配乐"}</span>
                   </div>
                   <textarea
                     data-field="music"
@@ -981,7 +1102,7 @@ function InspectorBody({ d }: { d: ShotDetail }) {
                     readOnly={!s.audio.supported.music}
                     value={form.music || s.audio.music.default}
                     onChange={onPrompt("music", s.audio.music.default)}
-                    placeholder={`本镜没有单独提示时沿用本集背景音乐。例：${CUE_EXAMPLE}`}
+                    placeholder={`本镜没有单独提示时沿用本集配乐（英文进 H3）。例：${CUE_EXAMPLE}`}
                   />
                   <div className="audio-hint">{CUE_HINT}</div>
                   {!s.audio.supported.music && <div className="warn small">后端字段 ShotEdit.music 还没上线：暂时只能查看</div>}
@@ -1075,6 +1196,8 @@ function InspectorBody({ d }: { d: ShotDetail }) {
 
         {tab === "review" && (
           <>
+            <div className="sub-title">就绪与衔接（行内只显示摘要）</div>
+            <ReadinessList s={s} />
             <ReviewBox d={d} />
             <Field label="备注" hint="存在 ShotEdit.note">
               <textarea rows={2} value={form.note} onChange={on("note")} />

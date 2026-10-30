@@ -14,7 +14,7 @@ function Src({ s }: { s: LookLayer | null }) {
 
 /** 检查器第 5 组：本镜每个角色解析后的造型（/api/looks/shots/{id}），可覆盖本镜 / 恢复继承。不会触发渲染。 */
 export function LooksSection({ shotId }: { shotId: string }) {
-  const { catalog, notify, refreshLooks, epNum } = useStudio();
+  const { catalog, notify, refreshLooks, epNum, showAffected } = useStudio();
   const [data, setData] = useState<ShotLooks | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -40,7 +40,10 @@ export function LooksSection({ shotId }: { shotId: string }) {
     setBusy(true);
     try {
       const r = patch ? await api.looks.patchShot(shotId, character, patch) : await api.looks.clearShot(shotId, character);
-      notify(`${patch ? "已覆盖本镜造型" : "已恢复继承"}：影响 ${r.affected_count} 镜（不会自动重渲）`);
+      const what = patch ? "已覆盖本镜造型" : "已恢复继承";
+      // 只影响本镜时只提示；波及多镜时弹影响范围（T54-B #3）
+      if (r.affected_count > 1) showAffected(r, what);
+      else notify(`${what}：影响 ${r.affected_count} 镜（不会自动重渲）`);
       setData(await api.looks.shot(shotId));
       await refreshLooks([epNum - 1, epNum, epNum + 1]);
     } catch (e) {

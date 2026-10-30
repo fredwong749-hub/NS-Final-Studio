@@ -86,7 +86,7 @@ export interface AudioSupported {
 export interface ShotAudio {
   /** 环境声 overall_soundscape（进 H3） */
   soundscape: AudioField;
-  /** 本镜配乐提示（后期混音，不进 H3） */
+  /** 本镜配乐：英文 → 进本镜 H3 non_diegetic_music（覆盖本集默认）；中文 → 只作后期提示 */
   music: AudioField;
   episode_music: AudioField;
   supported: AudioSupported;
@@ -129,13 +129,24 @@ export interface ShotSummary {
   h3_prompt_where?: string;
   h3_blocks?: H3Blocks;
   h3_frames?: number;
+  /** 帧数 / 24 的秒数（"10.12"，H3 对齐句里的 S.SS） */
+  h3_sss?: string | null;
   h3_lint?: H3LintResult[];
   h3_lint_ok?: boolean;
   h3_failed?: string[];
   h3_overrides?: string[];
   h3_missing?: string[];
+  h3_music_source?: string | null;
   h3_editable?: boolean;
+  /** 画布显示的 H3 提示词 sha256（保存覆盖时作 base_sha，gpu3 判过期） */
+  h3_prompt_sha256?: string | null;
   h3_take?: H3Take | null;
+  h3_override?: H3Override | null;
+  /** 露骨红标：项目方自行处理，画布不做任何自动动作（服务端也 409） */
+  explicit_hold?: ExplicitHold | null;
+  h3_override_stale?: boolean;
+  /** 项目方修改的起点（已有覆盖 > 剧本 / 笔记本草稿；不是 gpu3 版本） */
+  h3_edit_base?: H3Blocks;
   last_prompt: string;
   last_prompt_source: "edit" | "compiler" | "fallback";
   /** 卡片显示用：跳过角色锁 / 固定前缀后的部分 */
@@ -257,6 +268,10 @@ export interface Review {
 
 export interface Episode {
   number: number;
+  /** T60：true = 来自 /api/episodes/summary 的轻量数据（shots 只有列表 / 总览 / 过滤用的字段），不能渲染镜头行 */
+  light?: boolean;
+  /** T60：每集摘要（仅摘要接口带） */
+  summary?: { shots: number; ready: number | null; seconds: number; first_frames: number; videos: number; passed: number };
   title: string;
   high_intensity: boolean;
   tag: string;
@@ -265,6 +280,7 @@ export interface Episode {
   music?: AudioField;
   audio_supported?: AudioSupported;
   readiness?: EpisodeReadiness;
+  explicit_hold_count?: number;
   shots: ShotSummary[];
 }
 
@@ -303,6 +319,26 @@ export interface H3LintResult {
   msg: string;
   level: "block" | "warn";
   overridden?: boolean;
+}
+
+export interface ExplicitHold {
+  source: string;
+  sources: string[];
+  reason: string;
+  label: string;
+}
+
+export interface H3Override {
+  present: boolean;
+  by: string | null;
+  at: string | null;
+  note: string | null;
+  base_sha: string | null;
+  based_on: "script" | "laptop";
+  status: "renderable" | "draft";
+  failed: string[];
+  stale: boolean;
+  current_script_sha: string | null;
 }
 
 export interface H3Take {
@@ -344,8 +380,15 @@ export interface ShotEdit {
   boost_last?: string | null;
   /** 环境声 overall_soundscape（英文 1–4 句） */
   soundscape?: string | null;
-  /** H3 正文 integrated_multimodal_description（英文；对齐句 / 配乐 N/A 不可改） */
+  /** 已停用：H3 只经 putH3Override 由项目方修改 */
   h3_body?: string | null;
+  h3_prompt_override?: string | null;
+  h3_override_by?: string | null;
+  h3_override_at?: string | null;
+  h3_override_note?: string | null;
+  h3_override_base_sha?: string | null;
+  h3_override_status?: "renderable" | "draft" | null;
+  h3_override_failed?: string[] | null;
   /** 本镜配乐提示（后期） */
   music?: string | null;
   note: string;
@@ -405,6 +448,8 @@ export interface ShotDetail {
   /** "next"、上传尾帧的 /files URL，或 null */
   last_frame_target: string | null;
   takes: Takes;
+  /** T21：gpu3 负责的镜头才有（只读版本链；video 版本带 last_url 尾帧） */
+  gpu3_takes?: { takes: (Take & { last_url?: string | null })[]; active: Record<string, number> } | null;
   next_shot: string | null;
   error: { last: string; at: string } | null;
 }
@@ -711,7 +756,7 @@ export interface SopShot {
   stage: SopStage;
   stage_label: string;
   blockers: SopBlocker[];
-  stages: Record<string, { passed: boolean; blockers: SopBlocker[] }>;
+  stages: Record<string, { passed: boolean; blockers: SopBlocker[]; warnings?: { code: string; stage: string; trigger?: string; text: string; rule_ids?: string[] }[] }>;
   frames_owner: string;
   ahead_of_gate: string[];
 }
@@ -750,4 +795,136 @@ export interface SopEpisode {
   gates: SopGate[];
   owner_actions: SopOwnerAction[];
   shots: SopShot[];
+}
+
+// ---- 后端 C：Qwen 信箱代理（docs/qwen_comms.md；内容原样，不读不改）+ T44 ComfyUI 锁
+
+export type QwenKind = "script" | "lora" | "blender" | "crawl" | "image_request" | "other";
+export type QwenStatus = "queued" | "running" | "done" | "failed";
+
+export interface QwenMeta {
+  kind: QwenKind;
+  project?: string;
+  episode?: number | string;
+  shot?: string;
+  parent?: string;
+  [k: string]: unknown;
+}
+
+export interface QwenScriptValidation {
+  ok: boolean;
+  exit_code: number;
+  blocking: number | null;
+  warnings: number | null;
+  episodes_found: number;
+  repair_text: string;
+  stderr: string;
+}
+
+export interface QwenScriptInfo {
+  project: string;
+  path: string;
+  sha256: string;
+  bytes: number;
+  fetched_at: string;
+  validation: QwenScriptValidation;
+}
+
+export interface QwenTask {
+  id: string;
+  meta: QwenMeta;
+  text: string | null;
+  status: QwenStatus | null;
+  created_at: string | null;
+  updated_at?: string;
+  output?: unknown;            // = result.output 原样
+  result?: unknown;
+  error?: unknown;
+  reachable?: boolean;
+  hint?: string;
+  script?: QwenScriptInfo;
+  repair_task?: string;
+  imported?: { at: string; by: string; out: string; sha256: string; log: string };
+}
+
+export interface QwenTaskList {
+  tasks: QwenTask[];
+  reachable: boolean | null;
+  hint?: string;
+}
+
+export interface QwenHealth {
+  reachable: boolean;
+  upstream: string;
+  health?: unknown;
+  error?: string;
+  hint?: string;
+}
+
+export interface ComfyLock {
+  free: boolean;
+  holder: { who: "canvas" | "orchestrator" | string; what?: string; pid?: number; since?: string } | null;
+  lock: string;
+}
+
+/** T44：渲染任务在等本机 ComfyUI 锁时带上占用者（state 仍是 running）；拿到锁后字段消失。
+ *  who = "offline"：本机 ComfyUI 没开，任务挂起等待，启动后自动继续 */
+export interface Job {
+  comfy_wait?: ComfyLock["holder"] & { error?: string };
+}
+
+/** GET /api/render-backend：本机出图后端（ComfyUI）状态 */
+export interface RenderBackend {
+  url: string;
+  reachable: boolean;
+  running?: number;
+  pending?: number;
+  gpu?: string;
+  vram_total_mb?: number;
+  vram_used_mb?: number;
+  error?: string;
+}
+
+/** GET /api/gpu3/requests：「请 gpu3 重出」每条请求的进度（新→旧） */
+export type Gpu3RequestState =
+  "queued" | "started" | "image_done" | "video_done" | "done" | "failed" | "skipped" | "cancelled";
+export interface Gpu3Request {
+  id: string;
+  shot: string;
+  stage: "image" | "video" | "both" | string;
+  state: Gpu3RequestState;
+  at: string | null;
+  requested_at: string | null;
+  error: string | null;
+  takes: { stage: string; n: number }[];
+  source: "bridge" | "mirror";
+}
+
+/** GET /api/people：人物管理总表一行 */
+export interface Person {
+  id: string;
+  name: string;
+  role: string;
+  notes: string;
+  archived: boolean;
+  created_at?: string | null;
+  dir: string;
+  dir_exists: boolean;
+  face_url: string | null;
+  hero_url: string | null;
+  plates: Record<string, string | null>;
+  item_counts: Record<string, number>;
+  expressions: number;
+  looks: number;
+  look_labels: (string | null)[];
+  wardrobe: number;
+  missing_count: number;
+  missing: string[];
+  unregistered: number;
+  used_by_shots: number;
+}
+export interface PeopleList {
+  plate_views: string[];
+  item_categories: string[];
+  people: Person[];
 }

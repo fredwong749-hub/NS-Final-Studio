@@ -46,10 +46,12 @@ function CardView({ card, onDone }: { card: Card; onDone: () => void }) {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [owner, setOwner] = useState(false); // 封板修复：关口决定须勾选“我是项目方”
   const d = card.detail;
   const act = (key: string) => {
     setBusy(true);
     setErr("");
+    setOwner(false);
     papi
       .decide(card.project, card.id, key, { choices, note })
       .then(onDone, (e: Error) => setErr(e.message))
@@ -113,8 +115,11 @@ function CardView({ card, onDone }: { card: Card; onDone: () => void }) {
           看板
         </button>
         <span className="grow" />
+        <label className="small">
+          <input type="checkbox" checked={owner} onChange={(e) => setOwner(e.target.checked)} /> 我是项目方
+        </label>
         {card.actions.map((a) => (
-          <button key={a.key} className={`btn${a.primary ? " primary" : ""}`} disabled={busy} onClick={() => act(a.key)}>
+          <button key={a.key} className={`btn${a.primary ? " primary" : ""}`} disabled={busy || !owner} title={owner ? undefined : "先勾选「我是项目方」"} onClick={() => act(a.key)}>
             {a.label}
           </button>
         ))}

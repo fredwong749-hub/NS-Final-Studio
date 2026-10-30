@@ -1,4 +1,4 @@
-import type { Episode, Job, LookConflict, ReviewState, ShotDetail, ShotSummary } from "./types";
+import type { Episode, Job, LookConflict, ReviewState, ShotDetail, ShotSummary, Stage, Take } from "./types";
 
 export function shotLine(s: Pick<ShotSummary, "dialogue" | "voiceover">): { text: string; vo: boolean } {
   const d = s.dialogue[0];
@@ -57,7 +57,9 @@ export const staleList = (s: ShotSummary) => [...(s.stale.image ?? []), ...(s.st
 export const isStale = (s: ShotSummary) => staleList(s).length > 0;
 
 // ---------- 过滤 ----------
-export type Filter = "all" | "unreviewed" | "rejected" | "passed" | "stale" | "failed" | "edited" | "missing" | "missing_last" | "no_expr";
+export type Filter = "all" | "unreviewed" | "rejected" | "passed" | "stale" | "failed" | "edited" | "missing" | "missing_last" | "no_expr" | "explicit";
+/** 露骨红标（gpu3 status.json / BLOCKED.jsonl / 剧本 **H3校验**）：项目方自行处理 */
+export const EXPLICIT_LABEL = "露骨·项目方自行处理";
 export const FILTER_LABEL: Record<Filter, string> = {
   all: "全部",
   unreviewed: "待审",
@@ -69,6 +71,7 @@ export const FILTER_LABEL: Record<Filter, string> = {
   missing: "缺首帧",
   missing_last: "缺尾帧",
   no_expr: "表情未标注",
+  explicit: "仅看红标",
 };
 export function matchFilter(f: Filter, s: ShotSummary, job: Job | undefined): boolean {
   switch (f) {
@@ -82,6 +85,7 @@ export function matchFilter(f: Filter, s: ShotSummary, job: Job | undefined): bo
     case "missing": return !s.first_frame;
     case "missing_last": return !s.last_frame_target;
     case "no_expr": return s.expression.source === "none";
+    case "explicit": return !!s.explicit_hold;
   }
 }
 
@@ -128,4 +132,66 @@ export function isTypingTarget(t: EventTarget | null): boolean {
   if (!el) return false;
   const tag = el.tagName;
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+}
+
+/** 某阶段的版本链：gpu3 负责的镜头看 gpu3 版本链（只读；gpu3 的尾帧 = 视频版本的尾帧 last_url），否则看笔记本 takes */
+export function stageTakes(d: ShotDetail | undefined, stage: Stage): Take[] {
+  if (d?.gpu3_takes) {
+    const want = stage === "image" ? "image" : "video";
+    return d.gpu3_takes.takes
+      .filter((t) => t.stage === want)
+      .map((t) => (stage === "last" ? { ...t, url: t.last_url ?? null } : t))
+      .sort((a, b) => a.n - b.n);
+  }
+  return (d?.takes.takes ?? []).filter((t) => t.stage === stage).sort((a, b) => a.n - b.n);
+}
+
+/** 某阶段的当前版本号（gpu3：尾帧跟随当前视频版本） */
+export function stageActive(d: ShotDetail | undefined, stage: Stage): number | undefined {
+  if (d?.gpu3_takes) {
+    const a = d.gpu3_takes.active as Record<string, number | undefined>;
+    return stage === "image" ? a.image : a.video;
+  }
+  return (d?.takes.active as Partial<Record<Stage, number>> | undefined)?.[stage];
+}
+
+/** 尾帧缺独立版本时的“预期来源”（E1/E3）：gpu3 尾帧目标 > 视频末帧 > 下一镜首帧 > 由本镜首帧编辑 */
+export interface ExpectedLast {
+  kind: "gpu3" | "video" | "next" | "edit" | "none";
+  label: string;
+  /** 能预览的图（视频末帧时为视频地址，由 <video> 定位到末尾） */
+  url: string | null;
+  hint: string;
+  /** url 是视频（要定位到末尾显示） */
+  isVideo?: boolean;
+}
+export function expectedLast(s: ShotSummary): ExpectedLast {
+  // 跨集时写全镜号（ep02-S1），同集只写 S1
+  const nextIdx = !s.next_shot ? "" : s.next_shot.slice(0, 4) === s.id.slice(0, 4) ? s.next_shot.split("-")[1] : s.next_shot;
+  if (s.gpu3?.last_frame)
+    return { kind: "gpu3", label: "gpu3 尾帧目标", url: s.gpu3.last_frame, hint: `gpu3 链已有尾帧目标（${s.gpu3.last_from || "last.png"}），画布还没同步为本镜尾帧` };
+  if (s.last_frame_actual || s.video)
+    return {
+      kind: "video",
+      label: "视频末帧（实际）",
+      url: s.last_frame_actual ?? s.video,
+      isVideo: !s.last_frame_actual,
+      hint: "视频已出但没有独立尾帧：这里显示视频最后一帧，只作参考，不是给视频用的尾帧目标",
+    };
+  if (s.next_first_frame)
+    return { kind: "next", label: `下一镜首帧（${nextIdx}）`, url: s.next_first_frame, hint: `没有独立尾帧时，衔接参考 = ${nextIdx} 的首帧；要锁定为尾帧请在“其他来源”里选` };
+  if (s.first_frame) return { kind: "edit", label: "由本镜首帧编辑", url: null, hint: "尾帧 = 以本镜首帧为底图、按尾帧提示词编辑出来（gpu3 出）" };
+  return { kind: "none", label: "先出首帧", url: null, hint: "尾帧以首帧为底图：首帧出来后才能出尾帧" };
+}
+
+/** 规则 7（项目方 2026-10-30：“视频只渲染一次，全部在 gpu3”）：笔记本出视频默认关闭，
+ *  只在开发者开关打开时可用——localStorage `ns.dev.laptopVideo` = "1"，或打开一次 `?devLaptopVideo=1`（`=0` 关闭）。 */
+export function laptopVideoEnabled(): boolean {
+  try {
+    const q = new URLSearchParams(location.search).get("devLaptopVideo");
+    if (q === "1" || q === "0") localStorage.setItem("ns.dev.laptopVideo", q);
+    return localStorage.getItem("ns.dev.laptopVideo") === "1";
+  } catch {
+    return false;
+  }
 }

@@ -10,6 +10,7 @@ import {
 } from "react";
 import { api } from "./api";
 import type {
+  AffectedShots,
   BatchResult,
   Episode,
   EpisodeLooks,
@@ -21,11 +22,12 @@ import type {
   ShotSummary,
   Stage,
 } from "./types";
-import { epOfShot, flatShots, isActiveJob, latestJobs, STAGE_LABEL, type Filter } from "./util";
+import { epOfShot, EXPLICIT_LABEL, flatShots, isActiveJob, laptopVideoEnabled, latestJobs, STAGE_LABEL, type Filter } from "./util";
 
-export type View = "overview" | "episode" | "nodes" | "assets";
+export type View = "overview" | "episode" | "nodes" | "assets" | "import" | "people" | "ab";
 export type Density = "compact" | "standard" | "detail";
-export const VIEWS_ALL: View[] = ["overview", "episode", "nodes", "assets"];
+export type CanvasMode = "review" | "edit";
+export const VIEWS_ALL: View[] = ["overview", "episode", "nodes", "assets", "import", "people", "ab"];
 /** 资产页定位：从镜头卡点脸图跳过来时带上角色和造型 */
 export interface AssetFocus {
   character: string;
@@ -49,6 +51,35 @@ export interface LiveJob {
   job: Job;
   /** 排队位置（1 起）；运行中为 0 */
   pos: number;
+  /** 本地“已请 gpu3”标记（不是笔记本任务；gpu3 新 take 到达即消失） */
+  gpu3?: boolean;
+  /** 撤销本地标记（请求丢失 / 想再发一次时） */
+  clear?: () => void;
+}
+
+/** 请 gpu3 重出后的本地等待标记。后端还没有 gpu3 队列查询接口（契约见 docs：GET /api/gpu3/requests），
+ *  所以按“发出时 gpu3 链的签名”判断：签名变了 = 新 take 到了 → 清除；超过 GPU3_PENDING_TTL 视为过期 */
+export type Gpu3Stage = "image" | "last" | "video" | "both";
+export interface Gpu3Pending {
+  stage: Gpu3Stage;
+  at: string;
+  sig: string;
+}
+const GPU3_PENDING_TTL = 6 * 3600 * 1000;
+const GPU3_COVERS: Record<Gpu3Stage, Stage[]> = { image: ["image", "last"], last: ["last"], video: ["video"], both: ["image", "last", "video"] };
+/** 只看版本号 / 版本数 / 尾帧文件戳：镜像同步改了 URL 前缀（/api/gpu3-media → /files）不算新版本 */
+export const gpu3Sig = (s: ShotSummary | undefined) =>
+  s
+    ? [s.gpu3?.image_take, s.gpu3?.video_take, JSON.stringify(s.gpu3?.takes_count ?? {}), s.last_frame_target?.split("?v=")[1] ?? (s.last_frame_target ? "last" : "")].join("|")
+    : "";
+function loadGpu3Pending(): Record<string, Gpu3Pending> {
+  try {
+    const v = JSON.parse(localStorage.getItem("ns.gpu3Pending") || "{}") as Record<string, Gpu3Pending>;
+    const now = Date.now();
+    return Object.fromEntries(Object.entries(v).filter(([, p]) => p && now - new Date(p.at).getTime() < GPU3_PENDING_TTL));
+  } catch {
+    return {};
+  }
 }
 
 export interface Toast {
@@ -63,6 +94,12 @@ export interface ConfirmReq {
   confirmLabel: string;
   danger?: boolean;
   onConfirm: () => void | Promise<void>;
+  /** 第二个操作按钮（次级样式，放在主按钮左边） */
+  secondary?: { label: string; onClick: () => void | Promise<void> };
+  /** 取消按钮文字（默认「取消」） */
+  cancelLabel?: string;
+  /** 封板修复（项目方 2026-10-30）：项目方本人确认勾选框；不勾不能点主按钮（次级按钮不受限，用于“跳过成人镜”） */
+  ownerCheck?: string;
 }
 
 interface Preview {
@@ -104,7 +141,7 @@ function savePref(key: string, v: string) {
 
 function parseHash(): { ep: number | null; shot: string | null } {
   const h = decodeURIComponent(location.hash.replace(/^#\/?/, ""));
-  const m = /^ep(\d{2})(?:-S(\d))?$/.exec(h);
+  const m = /^ep(\d{2})(?:-S(\d+))?$/.exec(h); // W4a：S10、S11 也能深链
   if (!m) return { ep: null, shot: null };
   return { ep: Number(m[1]), shot: m[2] ? `ep${m[1]}-S${m[2]}` : null };
 }
@@ -114,6 +151,8 @@ function useStudioState() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [details, setDetails] = useState<Record<string, ShotDetail>>({});
+  /** 封板修复：镜头详情加载失败的原因（检查器 / 看图显示，不再无限“加载…”） */
+  const [detailErr, setDetailErr] = useState<Record<string, string>>({});
   const [epLooks, setEpLooks] = useState<Record<number, EpisodeLooks>>({});
   const [catalog, setCatalog] = useState<LookCatalog | null>(null);
   const [looksError, setLooksError] = useState<string | null>(null);
@@ -158,6 +197,20 @@ function useStudioState() {
   });
   const [watched, setWatched] = useState<Set<string>>(new Set());
   const [reviewMode, setReviewMode] = useState(false);
+  /** fredw-92/W4a 画布 v3：审片（一镜一行）/ 精修（单镜三区）；?mode=edit 便于截图 */
+  const [canvasMode, setCanvasModeState] = useState<CanvasMode>(() =>
+    new URLSearchParams(location.search).get("mode") === "edit" ? "edit" : loadPref<CanvasMode>("ns.canvasMode", "review", ["review", "edit"]),
+  );
+  const setCanvasMode = useCallback((m: CanvasMode) => {
+    setCanvasModeState(m);
+    savePref("ns.canvasMode", m);
+  }, []);
+  /** v3：旧版镜头行 + 检查器（工具菜单里切换，保留全部旧功能） */
+  const [classic, setClassicState] = useState<boolean>(() => new URLSearchParams(location.search).get("classic") === "1" || loadPref("ns.classic", "0", ["0", "1"]) === "1");
+  const setClassic = useCallback((v: boolean) => {
+    setClassicState(v);
+    savePref("ns.classic", v ? "1" : "0");
+  }, []);
   const [helpOpen, setHelpOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [confirmReq, setConfirmReq] = useState<ConfirmReq | null>(null);
@@ -167,6 +220,22 @@ function useStudioState() {
   const undoStack = useRef<UndoEntry[]>([]);
   const redoStack = useRef<UndoEntry[]>([]);
   const [clip, setClip] = useState<Clip | null>(null);
+  const [gpu3Pending, setGpu3Pending] = useState<Record<string, Gpu3Pending>>(loadGpu3Pending);
+  useEffect(() => {
+    try {
+      localStorage.setItem("ns.gpu3Pending", JSON.stringify(gpu3Pending));
+    } catch {
+      /* 隐私模式等 */
+    }
+  }, [gpu3Pending]);
+  const clearGpu3Pending = useCallback((id: string) => {
+    setGpu3Pending((m) => {
+      if (!(id in m)) return m;
+      const n = { ...m };
+      delete n[id];
+      return n;
+    });
+  }, []);
 
   // ---------------- 基础 ----------------
   const notify = useCallback((msg: string, kind: "ok" | "err" = "ok") => {
@@ -232,26 +301,113 @@ function useStudioState() {
     }
     return m;
   }, [jobs]);
-  const liveJob = useCallback((shotId: string, stage: string) => live.get(`${shotId}|${stage}`), [live]);
+  const liveJob = useCallback(
+    (shotId: string, stage: string): LiveJob | undefined => {
+      const real = live.get(`${shotId}|${stage}`);
+      if (real) return real;
+      const p = gpu3Pending[shotId];
+      if (!p || !GPU3_COVERS[p.stage].includes(stage as Stage)) return undefined;
+      const job: Job = { id: `gpu3:${shotId}:${p.stage}`, shot_id: shotId, stage: stage as Stage, seed: null, state: "queued", created_at: p.at, error: null };
+      return { job, pos: 0, gpu3: true, clear: () => clearGpu3Pending(shotId) };
+    },
+    [live, gpu3Pending, clearGpu3Pending],
+  );
   const episode = useMemo(() => episodes?.find((e) => e.number === epNum) ?? null, [episodes, epNum]);
+  // T60：切到一集时它还是轻量数据 → 先换上缓存的详情（有的话），再取最新详情
+  const epLoading = useRef(new Set<number>());
+  useEffect(() => {
+    if (!episode?.light || epLoading.current.has(episode.number)) return;
+    const n = episode.number;
+    const swap = (d: Episode) => setEpisodes((list) => list?.map((e) => (e.number === d.number ? d : e)) ?? list);
+    const cached = detailCache.current.get(n);
+    if (cached) swap(cached);
+    epLoading.current.add(n);
+    api.episode(n).then(
+      (d) => {
+        detailCache.current.set(n, d);
+        swap(d);
+      },
+      (e: Error) => setLoadError(`第 ${n} 集加载失败：${e.message}`),
+    ).finally(() => epLoading.current.delete(n));
+  }, [episode]);
 
   // ---------------- 加载 ----------------
-  const refreshEpisodes = useCallback(async () => {
-    try {
-      setEpisodes(await api.episodes());
-      setLoadError(null);
-    } catch (e) {
-      setLoadError((e as Error).message);
+  // 合并并发刷新（QA30-05）：/api/episodes 约 8 MB、服务端 3–4 s；在途时不再并发再算一份（StrictMode 双挂载 / 轮询 / 改动叠加时曾 >20 s）。
+  // 在途 300 ms 后才来的请求 = 期间可能有改动 → 本次结束后再刷一次；调用方 await 到的总是之后的数据。
+  const epInflight = useRef<{ p: Promise<void>; t: number } | null>(null);
+  const epAgain = useRef(false);
+  // T60：先摘要（服务端缓存，几十 KB）+ 当前集详情（只算一集）并行；访问过的集详情缓存，切回时先显示再刷新。
+  // 只有新接口不存在（404：API 未重启）时才退回旧 /api/episodes；5xx / 网络错误不退回（旧接口 8 MB 更慢），
+  // 显示错误并重试（封板修复）。
+  const epNumRef = useRef(epNum);
+  epNumRef.current = epNum;
+  const detailCache = useRef(new Map<number, Episode>());
+  const fastApi = useRef<boolean | null>(null);
+  const fetchEpisodes = useCallback(async (): Promise<Episode[]> => {
+    const RETRY_MS = [2000, 5000];
+    for (let attempt = 0; fastApi.current !== false; attempt++) {
+      const n = epNumRef.current;
+      try {
+        const [sum, det] = await Promise.all([api.episodesSummary(), api.episode(n).catch(() => null)]);
+        fastApi.current = true;
+        if (det) detailCache.current.set(det.number, det);
+        return sum.episodes.map((e) => (e.number === n && det ? det : e));
+      } catch (e) {
+        if ((e as { status?: number }).status === 404) {
+          fastApi.current = false;
+          break;
+        }
+        if (attempt >= RETRY_MS.length) throw e;
+        setLoadError(`集列表加载失败，${RETRY_MS[attempt] / 1000} 秒后重试：${(e as Error).message}`);
+        await new Promise((r) => setTimeout(r, RETRY_MS[attempt]));
+      }
     }
+    return api.episodes();
+  }, []);
+  const refreshEpisodes = useCallback(async () => {
+    const cur = epInflight.current;
+    if (cur) {
+      if (Date.now() - cur.t > 300) epAgain.current = true;
+      return cur.p;
+    }
+    const run = async () => {
+      do {
+        epAgain.current = false;
+        try {
+          setEpisodes(await fetchEpisodes());
+          setLoadError(null);
+        } catch (e) {
+          setLoadError((e as Error).message);
+        }
+      } while (epAgain.current);
+    };
+    const p = run().finally(() => {
+      epInflight.current = null;
+    });
+    epInflight.current = { p, t: Date.now() };
+    return p;
   }, []);
 
   const refreshShots = useCallback(
     async (ids: string[]) => {
       const res = await Promise.allSettled(ids.map((id) => api.shot(id)));
-      setDetails((d) => {
-        const next = { ...d };
-        res.forEach((r) => {
-          if (r.status === "fulfilled") next[r.value.summary.id] = r.value;
+      // 封板修复：全部失败时不换 details 引用（否则依赖 details 的 effect 会无限重拉）；失败原因记进 detailErr
+      if (res.some((r) => r.status === "fulfilled"))
+        setDetails((d) => {
+          const next = { ...d };
+          res.forEach((r) => {
+            if (r.status === "fulfilled") next[r.value.summary.id] = r.value;
+          });
+          return next;
+        });
+      setDetailErr((m) => {
+        let next = m;
+        res.forEach((r, i) => {
+          const msg = r.status === "rejected" ? String((r.reason as Error)?.message ?? r.reason) : undefined;
+          if (m[ids[i]] === msg) return;
+          if (next === m) next = { ...m };
+          if (msg === undefined) delete next[ids[i]];
+          else next[ids[i]] = msg;
         });
         return next;
       });
@@ -292,7 +448,8 @@ function useStudioState() {
   useEffect(() => {
     if (!epKey) return;
     void refreshShots(epKey.split(","));
-    void refreshLooks([epNum - 1, epNum, epNum + 1]);
+    const maxEp = Math.max(0, ...(episodes ?? []).map((e) => e.number)); // 末集不请求 ep61（404）
+    void refreshLooks([epNum - 1, epNum, epNum + 1].filter((n) => !maxEp || n <= maxEp));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [epKey]);
 
@@ -303,8 +460,14 @@ function useStudioState() {
 
   // URL hash 同步
   useEffect(() => {
+    if (location.hash.startsWith("#/")) return; // W4a：#/script-create、#/models、#/assets 等页面不被镜头号覆盖
     const h = sel ?? `ep${String(epNum).padStart(2, "0")}`;
     if (location.hash !== `#${h}`) history.replaceState(null, "", `#${h}`);
+    try {
+      sessionStorage.setItem("ns.lastCanvas", `#${h}`); // fredw-b3：从剧本创作 / 项目页回画布时回到同一镜
+    } catch {
+      /* 隐私模式 */
+    }
   }, [sel, epNum]);
   useEffect(() => {
     const on = () => {
@@ -455,7 +618,19 @@ function useStudioState() {
       const e = from.pop();
       if (!e) return notify(redo ? "没有可重做的修改" : "没有可撤销的修改");
       // 撤销 = 把旧值再写一次，同样经过后端校验
-      const ok = await saveEdit(e.shotId, redo ? e.after : e.before, { quiet: true, recordUndo: false });
+      // 封板修复：只回写这一步改过的字段，其余用当前值（不冲掉之后另设的尾帧等）
+      const want = redo ? e.after : e.before;
+      const cur = detailsRef.current[e.shotId]?.edit;
+      let body = want;
+      if (cur) {
+        const w = want as unknown as Record<string, unknown>;
+        const other = (redo ? e.before : e.after) as unknown as Record<string, unknown>;
+        const merged: Record<string, unknown> = { ...cur };
+        for (const k of new Set([...Object.keys(w), ...Object.keys(other)]))
+          if (k !== "updated_at" && JSON.stringify(w[k] ?? null) !== JSON.stringify(other[k] ?? null)) merged[k] = w[k] ?? null;
+        body = merged as unknown as ShotEdit;
+      }
+      const ok = await saveEdit(e.shotId, body, { quiet: true, recordUndo: false });
       if (ok) {
         to.push(e);
         notify(`${redo ? "已重做" : "已撤销"} ${e.shotId} 的修改`);
@@ -470,7 +645,7 @@ function useStudioState() {
         await api.saveEpisodeEdit(n, body);
         notify(
           "music" in body
-            ? `ep${String(n).padStart(2, "0")} 本集背景音乐已保存（后期混音用，不影响画面和 H3 声音）`
+            ? `ep${String(n).padStart(2, "0")} 本集配乐已保存（英文 → 本集各镜 H3 non_diegetic_music 的默认；中文只给后期混音）`
             : `ep${String(n).padStart(2, "0")} 本集导演加强已保存（作用于本集全部镜头，旧版本标为过期）`,
         );
         await refreshEpisodes();
@@ -483,8 +658,69 @@ function useStudioState() {
     [notify, refreshEpisodes],
   );
 
+  // fredw-92/W4a（项目方最新原话“成人的内容自动跳过，我们暂时不看”）：撤掉成人 / 🔴 集送 gpu3 的“我是项目方”确认；露骨红标 explicit_hold 不变
+
+  // 规则 7：视频只在 gpu3 出。批量把「出视频」写进 gpu3 重渲队列（一条汇总提示，不逐镜弹框）
+  const gpu3Video = useCallback(
+    async (ids: string[]) => {
+      let ok = 0;
+      const bad: string[] = [];
+      for (const id of ids) {
+        try {
+          await api.gpu3Rerender(id, "video", "");
+          ok++;
+          setGpu3Pending((m) => ({ ...m, [id]: { stage: "video", at: new Date().toISOString(), sig: gpu3Sig(summaryById.get(id)) } }));
+        } catch (e) {
+          bad.push(`${id}：${(e as Error).message}`);
+        }
+      }
+      notify(`已请 gpu3 出视频 ${ok} 镜${bad.length ? `；失败 ${bad.length} 镜（${bad[0]}）` : "：新版本到了会出现在镜头行"}`, bad.length ? "err" : "ok");
+      return ok > 0;
+    },
+    [notify, summaryById],
+  );
+
+  /** 请 gpu3 重出（gpu3 负责的镜头）：经桥写 gpu3 的重渲队列；last = 只重出尾帧（保留首帧） */
+  const requestGpu3 = useCallback(
+    (id: string, stage: Gpu3Stage, opts: { direct?: boolean } = {}) => {
+      if (summaryById.get(id)?.explicit_hold) return notify(`${id}：${EXPLICIT_LABEL}，不做自动重出`, "err");
+      const what = { image: "首帧（尾帧随之重编）", last: "尾帧（保留首帧）", video: "视频（保留首尾帧）", both: "首尾帧和视频" }[stage];
+      const send = async () => {
+        try {
+          await api.gpu3Rerender(id, stage, "");
+          // 本地等待标记：镜头行 / 检查器对比位 / 查看器版本条显示“已请 gpu3”，新 take 到达自动消失
+          setGpu3Pending((m) => ({ ...m, [id]: { stage, at: new Date().toISOString(), sig: gpu3Sig(summaryById.get(id)) } }));
+          notify(`${id} 已请 gpu3 重出${what}：新版本到了会出现在镜头行的版本条`);
+          return true;
+        } catch (e) {
+          notify(`${id} 发给 gpu3 失败：${(e as Error).message}`, "err");
+          return false;
+        }
+      };
+      // 检查器里「保存并重出」已经看着提示词了：不再弹确认（与笔记本链一致）
+      if (opts.direct) return void send();
+      setConfirmReq({
+        title: "请 gpu3 重出",
+        lines: [
+          `${id} 请 gpu3 重出${what}。`,
+          "请求写进 gpu3 的重渲队列（docs/canvas.md §2），由 gpu3 系列渲染器出新 take；笔记本不出图。",
+        ],
+        confirmLabel: "发给 gpu3",
+        onConfirm: async () => void (await send()),
+      });
+    },
+    [notify, summaryById],
+  );
+
   const render = useCallback(
     async (id: string, stage: Stage, seed: number | null = null) => {
+      if (summaryById.get(id)?.explicit_hold) {
+        notify(`${id}：${EXPLICIT_LABEL}，不做自动出图`, "err");
+        return false;
+      }
+      if (stage === "video" && !laptopVideoEnabled()) {
+        return gpu3Video([id]);
+      }
       try {
         const job = await api.render(id, stage, seed);
         onJobsQueued([job]);
@@ -495,17 +731,41 @@ function useStudioState() {
         return false;
       }
     },
-    [notify, onJobsQueued],
+    [notify, onJobsQueued, summaryById, gpu3Video],
   );
 
   const requestBatch = useCallback(
     (ids: string[], stage: Stage, onlyMissing = false) => {
+      if (stage === "video" && !laptopVideoEnabled()) {
+        const skipped: string[] = [];
+        const run: string[] = [];
+        for (const id of ids) {
+          const s = summaryById.get(id);
+          if (!s) continue;
+          if (s.explicit_hold) skipped.push(`${id}：${EXPLICIT_LABEL}`);
+          else if (!s.first_frame) skipped.push(`${id}：缺首帧`);
+          else if (onlyMissing && s.video) skipped.push(`${id}：已有视频`);
+          else run.push(id);
+        }
+        setConfirmReq({
+          title: "批量出视频 · 由 gpu3 渲染",
+          lines: [
+            `${run.length} 镜发给 gpu3 出视频（项目规则：视频只渲染一次，全部在 gpu3；笔记本不出视频）。`,
+            `镜头总时长 ${run.reduce((t, id) => t + (summaryById.get(id)?.duration?.seconds ?? 0), 0)} 秒；用各镜当前选定的首帧 / 尾帧。`,
+            ...(skipped.length ? [`跳过 ${skipped.length} 镜：`, ...skipped] : []),
+          ],
+          confirmLabel: `发给 gpu3（${run.length} 镜）`,
+          onConfirm: async () => void (run.length && (await gpu3Video(run))),
+        });
+        return;
+      }
       const skipped: string[] = [];
       const run: string[] = [];
       for (const id of ids) {
         const s = summaryById.get(id);
         if (!s) continue;
-        if (s.owner === "gpu3") skipped.push(`${id}：gpu3 负责此镜（避免两条链），请用「请 gpu3 重出」`);
+        if (s.explicit_hold) skipped.push(`${id}：${EXPLICIT_LABEL}`);
+        else if (s.owner === "gpu3") skipped.push(`${id}：gpu3 负责此镜（避免两条链），请用「请 gpu3 重出」`);
         else if (s.job) skipped.push(`${id}：已有任务在${s.job === "running" ? "渲染" : "排队"}`);
         else if ((stage === "video" || stage === "last") && !s.first_frame) skipped.push(`${id}：缺首帧`);
         else if (stage === "last" && !s.last_supported) skipped.push(`${id}：尾帧生成尚未上线`);
@@ -517,6 +777,8 @@ function useStudioState() {
         title: `批量渲染${STAGE_LABEL[stage]}`,
         lines: [
           `选中 ${ids.length} 镜，将入队 ${run.length} 个任务（GPU 串行执行）。`,
+          // T54-B / 调研 #5：确认框写明总时长与出图位置
+          `入队镜头总时长 ${run.reduce((t, id) => t + (summaryById.get(id)?.duration?.seconds ?? 0), 0)} 秒 · ${stage === "video" ? "视频" : "图片"}在本机 ComfyUI 出${stage === "video" ? "（开发者选项：本机出视频；项目规则是视频只在 gpu3 出）" : ""}`,
           ...(skipped.length ? [`跳过 ${skipped.length} 镜：`, ...skipped] : []),
         ],
         confirmLabel: `入队 ${run.length} 个任务`,
@@ -535,7 +797,33 @@ function useStudioState() {
         },
       });
     },
-    [summaryById, notify, onJobsQueued],
+    [summaryById, notify, onJobsQueued, gpu3Video],
+  );
+
+  /** T54-B / 调研 #3：改了造型或单品后，告诉项目方影响几集几镜，并给三个选择：只更新引用 / 选中这些镜头 / 批量重出（仍走批量确认框） */
+  const showAffected = useCallback(
+    (r: AffectedShots, what: string) => {
+      if (!r.affected_count) return notify(`${what}：不影响任何镜头`);
+      const eps = new Set(r.affected_shots.map((id) => id.split("-")[0]));
+      setConfirmReq({
+        title: what,
+        lines: [
+          `影响 ${eps.size} 集 / ${r.affected_count} 镜。引用已经更新，画面要重出才会变（不会自动重渲）。`,
+          r.affected_shots.slice(0, 30).join("、") + (r.affected_count > 30 ? " …" : ""),
+        ],
+        cancelLabel: "只更新引用",
+        secondary: {
+          label: "选中这些镜头",
+          onClick: () => {
+            setMulti(new Set(r.affected_shots));
+            setView("episode");
+          },
+        },
+        confirmLabel: `批量重出 ${r.affected_count} 镜首帧`,
+        onConfirm: () => requestBatch(r.affected_shots, "image"),
+      });
+    },
+    [notify, requestBatch, setView],
   );
 
   /** 沿链重渲：本镜尾帧锁定下一镜首帧时，先出下一镜首帧，再出本镜视频 */
@@ -562,26 +850,38 @@ function useStudioState() {
     [render],
   );
 
-  /** 请 gpu3 重出（gpu3 负责的镜头）：经桥写 gpu3 的重渲队列；last = 只重出尾帧（保留首帧） */
-  const requestGpu3 = useCallback(
-    (id: string, stage: "image" | "last" | "video" | "both") => {
-      const what = { image: "首帧（尾帧随之重编）", last: "尾帧（保留首帧）", video: "视频（保留首尾帧）", both: "首尾帧和视频" }[stage];
-      setConfirmReq({
-        title: "请 gpu3 重出",
-        lines: [`${id} 请 gpu3 重出${what}。`, "请求写进 gpu3 的重渲队列（docs/canvas.md §2），由 gpu3 系列渲染器出新 take；笔记本不出图。"],
-        confirmLabel: "发给 gpu3",
-        onConfirm: async () => {
-          try {
-            await api.gpu3Rerender(id, stage);
-            notify(`${id} 已请 gpu3 重出${what}`);
-          } catch (e) {
-            notify(`${id} 发给 gpu3 失败：${(e as Error).message}`, "err");
-          }
-        },
-      });
-    },
-    [notify],
-  );
+  // gpu3 等待标记：签名变了（新 take 到了）→ 清除并提示；超时 → 清除。等待期间每 30 s 拉一次摘要
+  useEffect(() => {
+    const ids = Object.keys(gpu3Pending);
+    if (!ids.length || !shots.length) return;
+    const now = Date.now();
+    const arrived: string[] = [];
+    const expired: string[] = [];
+    for (const id of ids) {
+      const p = gpu3Pending[id];
+      const s = summaryById.get(id);
+      if (!s) continue;
+      if (gpu3Sig(s) !== p.sig) arrived.push(id);
+      else if (now - new Date(p.at).getTime() > GPU3_PENDING_TTL) expired.push(id);
+    }
+    if (!arrived.length && !expired.length) return;
+    setGpu3Pending((m) => {
+      const n = { ...m };
+      for (const id of [...arrived, ...expired]) delete n[id];
+      return n;
+    });
+    if (arrived.length) {
+      notify(`gpu3 新版本到了：${arrived.join("、")}（点版本条对比）`);
+      void refreshShots(arrived.filter((id) => detailsRef.current[id]));
+    }
+    if (expired.length) notify(`已请 gpu3 超过 6 小时仍无新版本：${expired.join("、")}（标记已撤，可再请一次）`, "err");
+  }, [gpu3Pending, shots, summaryById, notify, refreshShots]);
+  const gpu3Waiting = Object.keys(gpu3Pending).length > 0;
+  useEffect(() => {
+    if (!gpu3Waiting) return;
+    const t = setInterval(() => void refreshEpisodes(), 30000);
+    return () => clearInterval(t);
+  }, [gpu3Waiting, refreshEpisodes]);
 
   /** 检查器「重出」：已经在检查器里看着提示词了，不再弹确认，直接入队 */
   const rerender = useCallback(
@@ -589,7 +889,7 @@ function useStudioState() {
       if (saveFirst && !(await saveFirst())) return false;
       // gpu3 负责的镜头：保存修改后改成请 gpu3 重出（修改随请求的 edit 快照一起发过去）
       if (summaryById.get(id)?.owner === "gpu3") {
-        requestGpu3(id, stage);
+        requestGpu3(id, stage, { direct: true });
         return true;
       }
       return render(id, stage);
@@ -607,8 +907,9 @@ function useStudioState() {
 
   const requestRender = useCallback(
     (id: string, stage: Stage) => {
-      // 一镜一条链：gpu3 负责的镜头（快捷键 I/E/V 也走这里）改成请 gpu3 重出
-      if (summaryById.get(id)?.owner === "gpu3") return requestGpu3(id, stage);
+      if (summaryById.get(id)?.explicit_hold) return notify(`${id}：${EXPLICIT_LABEL}，不做自动出图`, "err");
+      // 一镜一条链：gpu3 负责的镜头（快捷键 I/E/V 也走这里）改成请 gpu3 重出；视频一律请 gpu3（规则 7）
+      if (summaryById.get(id)?.owner === "gpu3" || (stage === "video" && !laptopVideoEnabled())) return requestGpu3(id, stage);
       setConfirmReq({
         title: `渲染${STAGE_LABEL[stage]}`,
         lines: [`${id} 重新渲染${STAGE_LABEL[stage]}，使用已保存的修改。`],
@@ -700,20 +1001,20 @@ function useStudioState() {
 
   return {
     // 数据
-    episodes, loadError, jobs, latest, details, epLooks, catalog, looksError,
+    episodes, loadError, jobs, latest, details, detailErr, epLooks, catalog, looksError,
     shots, summaryById, episode, epNum,
     // 视图
     view, setView, sel, multi, selection, setMulti, filter, setFilter,
     density, setDensity, cycleDensity, listMode, setListMode, inspectorHidden, setInspectorHidden,
     inspTab, openInspTab, assetFocus, setAssetFocus, openAssets, hlChar, setHlChar, saveEpisodeEdit,
     drawer, setDrawer, batchResults, compare, setCompare, seam, setSeam, preview, setPreview,
-    viewer, setViewer, openViewer, liveJob,
-    watched, markWatched, canPass, reviewMode, setReviewMode, helpOpen, setHelpOpen,
+    viewer, setViewer, openViewer, liveJob, gpu3Pending, clearGpu3Pending,
+    watched, markWatched, canPass, reviewMode, setReviewMode, canvasMode, setCanvasMode, classic, setClassic, helpOpen, setHelpOpen,
     paletteOpen, setPaletteOpen, confirmReq, setConfirmReq, rejectFor, setRejectFor, toasts, clip,
     dirtyRef,
     // 动作
     notify, refreshEpisodes, refreshShots, refreshLooks, refreshAfter, select, gotoEpisode, stepShot,
-    saveEdit, undo, render, rerender, requestRender, requestGpu3, requestBatch, requestChain, activate, setReview,
+    saveEdit, undo, render, rerender, requestRender, requestGpu3, requestBatch, showAffected, requestChain, activate, setReview,
     copyEdit, pasteEdit, onJobsQueued,
   };
 }

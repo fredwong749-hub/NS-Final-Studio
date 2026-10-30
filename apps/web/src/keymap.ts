@@ -2,7 +2,10 @@ import { useEffect, useRef } from "react";
 import { LOCK_SUPPORTED } from "./api";
 import { PASTE_FIELDS, type Studio } from "./store";
 import type { Stage } from "./types";
-import { isTypingTarget } from "./util";
+import { isTypingTarget, stageActive, stageTakes } from "./util";
+
+/** W4a：v3 画布（镜头视图、非旧版镜头行、不在 #/ 页面）才响应 L / Enter / Esc 的模式切换 */
+const v3On = (s: Studio) => s.view === "episode" && !s.classic && !location.hash.startsWith("#/");
 
 /** 下一个未审镜头（从当前往后找，到底再从头） */
 export function nextUnreviewed(st: Studio): string | null {
@@ -50,6 +53,7 @@ export function useKeymap(st: Studio) {
         else if (s.preview) s.setPreview(null);
         else if (s.multi.size) s.setMulti(new Set());
         else if (s.drawer.open) s.setDrawer({ ...s.drawer, open: false });
+        else if (v3On(s) && s.canvasMode === "edit") s.setCanvasMode("review"); // W4a：Esc 回审片
         return;
       }
       if (modal) return;
@@ -106,8 +110,12 @@ export function useKeymap(st: Studio) {
           return s.setReviewMode(!s.reviewMode);
         case "Enter": {
           if (onButton) return;
-          if (e.shiftKey && s.preview && s.preview.shotId === sel)
+          if (e.shiftKey && s.preview && s.preview.shotId === sel) {
+            // gpu3 版本链只读：不能用笔记本的 activate 设 gpu3 的版本号
+            if (s.details[sel]?.gpu3_takes) return handled(), s.notify("gpu3 负责此镜：当前版本由 gpu3 决定（画布只看 / 对比）", "err");
             return handled(), void s.activate(s.preview.shotId, s.preview.stage, s.preview.n);
+          }
+          if (v3On(s)) return handled(), s.setCanvasMode("edit"); // W4a：Enter 进精修
           return handled(), document.getElementById("inspector")?.focus();
         }
       }
@@ -132,18 +140,22 @@ export function useKeymap(st: Studio) {
         case "x":
           return s.setRejectFor(s.multi.size ? [...s.multi] : [sel]);
         case "l":
+          // W4a：v3 画布里 L = 审片 / 精修切换；旧版镜头行保留原含义
+          if (v3On(s)) return handled(), s.setCanvasMode(s.canvasMode === "edit" ? "review" : "edit");
           if (!LOCK_SUPPORTED) s.notify("锁定接口待后端提供", "err");
           return;
         case "[":
         case "]": {
           if (!d) return;
           const stage: Stage = s.inspTab === "last" ? "last" : s.inspTab === "video" ? "video" : "image";
-          const list = d.takes.takes.filter((t) => t.stage === stage).sort((a, b) => b.n - a.n);
+          // 与检查器对比位同一条版本链（gpu3 负责的镜头 = gpu3 链）
+          const list = stageTakes(d, stage).reverse();
           if (!list.length) return s.notify("还没有版本");
-          const cur = s.preview?.shotId === sel && s.preview.stage === stage ? s.preview.n : d.takes.active[stage];
+          const act = stageActive(d, stage);
+          const cur = s.preview?.shotId === sel && s.preview.stage === stage ? s.preview.n : act;
           const idx = Math.max(0, list.findIndex((t) => t.n === cur));
           const next = list[Math.min(list.length - 1, Math.max(0, idx + (k === "]" ? 1 : -1)))];
-          return s.setPreview(next.n === d.takes.active[stage] ? null : { shotId: sel, stage, n: next.n });
+          return s.setPreview(next.n === act ? null : { shotId: sel, stage, n: next.n });
         }
         case "c": {
           // 全屏 A/B 对比当前页签的阶段（首帧 / 尾帧）

@@ -13,3 +13,12 @@ export function useHash() {
   }, []);
   return hash;
 }
+
+/** fredw-b3：画布最后停留的位置（store 写入 sessionStorage），回画布时恢复选中的镜头 */
+export function lastCanvas() {
+  try {
+    return sessionStorage.getItem("ns.lastCanvas") || "#/";
+  } catch {
+    return "#/";
+  }
+}

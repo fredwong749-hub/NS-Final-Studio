@@ -1,0 +1,136 @@
+/* T59 主题（fredw-25）：两套 token，深色剪辑台默认，<html data-theme="light"> 切浅色内容平台。
+   原则（项目方）：页面干净清晰——字号 3 级、正文 2 色、强调色 1 个、状态色只用在状态标签上、靠留白分层不靠边框。
+   组件只引用变量，不写死颜色。旧变量名（--bg / --fg / --line / --ok …）保留为别名，旧组件自动跟随主题。
+   设计稿：docs/design/t59/（tokens.css 与这里一致）。 */
+
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* 表面 */
+  --c-bg: #0c0d10;
+  --c-raise: #15171c;
+  --c-sunken: #1c1f25;
+  --c-hover: #23272e;
+  --c-line: rgba(255, 255, 255, .07);
+  --c-line-2: rgba(255, 255, 255, .12);
+
+  /* 正文 2 色（--c-text-3 只给禁用 / 占位） */
+  --c-text: #e8eaee;
+  --c-text-2: #8b919c;
+  --c-text-3: #5f6570;
+
+  /* 强调色 1 个 */
+  --c-accent: #5b8cff;
+  --c-on-accent: #ffffff;
+
+  /* 状态色：只给状态标签 / 状态点 / 状态描边 */
+  --c-ok: #3ccf91;
+  --c-warn: #f2a93b;
+  --c-bad: #f06a5f;
+  --c-busy: #a78bfa;          /* 渲染中 / gpu3 */
+  --c-info: #4aa8e0;
+  --c-adult: #e07bb5;
+  /* 状态色上的文字（深底上用浅一档） */
+  --c-ok-text: #7fe0ae;
+  --c-warn-text: #f6c46e;
+  --c-bad-text: #ff9a92;
+  --c-busy-text: #cdb4ff;
+  --c-accent-text: #9cbcff;
+  --c-info-text: #8fd3ff;
+
+  /* 图上与看图器：两套主题都是深色 */
+  --c-scrim: rgba(0, 0, 0, .6);
+  --c-viewer: #07080a;
+
+  --sh-float: 0 16px 48px rgba(0, 0, 0, .5);
+  --sh-soft: none;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --c-bg: #f6f6f4;
+  --c-raise: #ffffff;
+  --c-sunken: #efefec;
+  --c-hover: #e8e8e4;
+  --c-line: rgba(20, 20, 30, .08);
+  --c-line-2: rgba(20, 20, 30, .14);
+
+  --c-text: #17181c;
+  --c-text-2: #6f727a;
+  --c-text-3: #a4a7ae;
+
+  --c-accent: #2f6bff;
+  --c-on-accent: #ffffff;
+
+  --c-ok: #149a62;
+  --c-warn: #c97a0a;
+  --c-bad: #d9443a;
+  --c-busy: #7c3aed;
+  --c-info: #0f7fbf;
+  --c-adult: #c2338a;
+  --c-ok-text: #0f7a4d;
+  --c-warn-text: #a35f00;
+  --c-bad-text: #c0352c;
+  --c-busy-text: #6d28d9;
+  --c-accent-text: #2456d6;
+  --c-info-text: #0b6aa0;
+
+  --c-scrim: rgba(0, 0, 0, .55);
+  --c-viewer: #0b0c0f;
+
+  --sh-float: 0 20px 56px rgba(20, 20, 30, .16);
+  --sh-soft: 0 1px 2px rgba(20, 20, 30, .04), 0 8px 24px rgba(20, 20, 30, .06);
+}
+
+:root {
+  /* 字号 3 级 */
+  --fs-s: 12px;
+  --fs-m: 14px;
+  --fs-l: 20px;
+  --fw-strong: 600;
+
+  /* 间距：8 的网格 */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-6: 24px; --sp-8: 32px;
+
+  /* 圆角 2 档 */
+  --r-1: 6px;
+  --r-2: 10px;
+
+  --f-sans: "Inter", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  --f-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+  /* ---- 旧变量名 → 新 token（旧组件不改也跟随主题） ---- */
+  --bg: var(--c-bg);
+  --bg-2: var(--c-raise);
+  --bg-3: var(--c-sunken);
+  --bg-4: var(--c-hover);
+  --line: var(--c-line);
+  --line-2: var(--c-line-2);
+  --fg: var(--c-text);
+  --fg-2: var(--c-text-2);
+  --fg-3: var(--c-text-2);
+  --accent: var(--c-accent);
+  --accent-soft: color-mix(in srgb, var(--c-accent) 14%, transparent);
+  --ok: var(--c-ok);
+  --warn: var(--c-warn);
+  --bad: var(--c-bad);
+  --busy: var(--c-busy);
+  --adult: var(--c-adult);
+  --radius: var(--r-1);
+  --mono: var(--f-mono);
+
+  font-family: var(--f-sans);
+  font-size: var(--fs-m);
+  color: var(--c-text);
+  background: var(--c-bg);
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-theme="light"] { --r-1: 8px; --r-2: 14px; }
+
+/* 主题切换按钮 */
+.theme-toggle { width: 30px; height: 30px; border-radius: var(--r-1); display: inline-grid; place-items: center; border: 0; background: transparent; color: var(--c-text-2); cursor: pointer; }
+.theme-toggle:hover { background: var(--c-sunken); color: var(--c-text); }
+.theme-toggle svg { width: 16px; height: 16px; }

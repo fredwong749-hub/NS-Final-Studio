@@ -24,17 +24,21 @@ import type {
   SopEpisode,
 } from "./types";
 
+/** 后端 detail → 文字（422 是数组，不能直接当字符串；封板修复：对话框 capi 共用） */
+export const detailText = (detail: unknown): string => (typeof detail === "string" ? detail : JSON.stringify(detail));
+
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, init);
   if (!r.ok) {
     let msg = `${r.status} ${r.statusText}`;
     try {
       const body = await r.json();
-      if (body?.detail) msg = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+      if (body?.detail) msg = detailText(body.detail);
     } catch {
       /* 非 JSON 错误体 */
     }
-    throw new Error(msg);
+    // 带上 HTTP 状态码：调用方按状态判断（例如只有 404 才退回旧接口），不再靠匹配错误文字
+    throw Object.assign(new Error(msg), { status: r.status });
   }
   return r.json() as Promise<T>;
 }
@@ -49,14 +53,31 @@ const sid = encodeURIComponent;
 
 export const api = {
   episodes: () => req<Episode[]>("/api/episodes"),
+  /** T60：集列表 + 每集摘要 + 每镜轻字段（服务端缓存，≤15 s 旧） */
+  episodesSummary: () => req<{ as_of: number; build_s: number | null; episodes: Episode[] }>("/api/episodes/summary"),
+  /** T60：单集完整数据（现算） */
+  episode: (n: number) => req<Episode>(`/api/episodes/${n}`),
   /** 请 gpu3 重出（经桥写 gpu3 的 rerender_queue.jsonl）；last = 只重出尾帧（保留首帧） */
+  // 封板修复（项目方 2026-10-30）：成人 / 🔴 集镜头需项目方本人确认，带 by:"owner"；否则后端 403
   gpu3Rerender: (id: string, stage: "image" | "last" | "video" | "both", note = "") =>
-    req<{ ok: boolean; request: { stage: string; note: string }; bridge: unknown }>(
+    req<{ ok: boolean; request: { stage: string; note: string; id?: string | null }; bridge: unknown; request_id?: string | null }>(
       `/api/shots/${sid(id)}/gpu3-rerender`,
-      json("POST", { stage, note }),
+      json("POST", { stage, note }), // W4a：成人镜不再要 by:"owner"（项目方：成人内容暂时不看）
     ),
   shot: (id: string) => req<ShotDetail>(`/api/shots/${sid(id)}`),
   saveEdit: (id: string, edit: ShotEdit) => req<ShotEdit>(`/api/shots/${sid(id)}/edit`, json("PUT", edit)),
+  /** 项目方修改 H3 提示词（只在 H3 面板由项目方亲自确认后调用；by 固定 "owner"，note 必填） */
+  putH3Override: (id: string, body: { body?: string | null; soundscape?: string | null; note: string; clear?: boolean; base_sha?: string | null }) =>
+    req<{ status?: string; failed?: string[]; delivered?: boolean | null; delivery?: { ok: boolean; error?: string | null; code?: number | null } }>(
+      `/api/shots/${sid(id)}/h3-override`,
+      json("PUT", { ...body, by: "owner" }),
+    ),
+  /** 封板修复：未送达 gpu3 时原样重发（项目方点按钮） */
+  gpu3Resend: (id: string, what: "h3_edit" | "override", ruleId?: string) =>
+    req<{ delivered: boolean; delivery: { ok: boolean; error?: string | null; code?: number | null } }>(
+      `/api/shots/${sid(id)}/gpu3-resend`,
+      json("POST", { what, rule_id: ruleId ?? null, by: "owner" }),
+    ),
   uploadLastFrame: (id: string, file: File) => {
     const fd = new FormData();
     fd.append("file", file);
@@ -77,8 +98,9 @@ export const api = {
   episodeEdit: (n: number) => req<EpisodeEdit>(`/api/episodes/${n}/edit`),
   saveEpisodeEdit: (n: number, body: { boost_first?: string | null; boost_last?: string | null; music?: string | null }) =>
     req<EpisodeEdit>(`/api/episodes/${n}/edit`, json("PUT", body)),
-  boostSuggest: (id: string, which: "first" | "last") =>
-    req<{ which: string; suggestion: string; model: string }>(`/api/shots/${sid(id)}/boost/suggest`, json("POST", { which })),
+  /** llm = 每处 ⚙ 覆盖（契约 §A）；不传 = 用途 director_boost 的默认 */
+  boostSuggest: (id: string, which: "first" | "last", llm?: { provider: string; model: string; params?: object } | null) =>
+    req<{ which: string; suggestion: string; model: string }>(`/api/shots/${sid(id)}/boost/suggest`, json("POST", llm ? { which, llm } : { which })),
   activate: (id: string, stage: Stage, n: number) =>
     req<Takes>(`/api/shots/${sid(id)}/takes/${stage}/${n}/activate`, { method: "POST" }),
   review: (id: string, state: ReviewState, reason = "") =>
@@ -142,3 +164,50 @@ export const api = {
 
 /** 后端是否已提供锁定接口；上线后改成 true，按钮即可用 */
 export const LOCK_SUPPORTED = false;
+
+/** 后端 C：Qwen 信箱代理（内容原样转发，画布不读不改）+ T44 ComfyUI 锁状态 */
+type QT = import("./types").QwenTask;
+export const qwenApi = {
+  health: () => req<import("./types").QwenHealth>("/api/qwen/health"),
+  create: (text: string, meta: import("./types").QwenMeta) => req<QT>("/api/qwen/tasks", json("POST", { text, meta })),
+  get: (id: string) => req<QT>(`/api/qwen/tasks/${sid(id)}`),
+  list: (q: { shot?: string; project?: string; episode?: string | number; kind?: string; refresh?: boolean; limit?: number } = {}) => {
+    const p = new URLSearchParams();
+    Object.entries(q).forEach(([k, v]) => v !== undefined && p.set(k, String(v)));
+    return req<import("./types").QwenTaskList>(`/api/qwen/tasks?${p}`);
+  },
+  files: (id: string) => req<unknown>(`/api/qwen/tasks/${sid(id)}/files`),
+  fileUrl: (id: string, path: string) =>
+    `/api/qwen/tasks/${sid(id)}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
+  scriptFetch: (id: string, project?: string) =>
+    req<import("./types").QwenScriptInfo & { report: unknown }>(`/api/qwen/tasks/${sid(id)}/script/fetch`, json("POST", { project })),
+  scriptRepair: (id: string) => req<QT>(`/api/qwen/tasks/${sid(id)}/script/repair`, { method: "POST" }),
+  /** 只在项目方点「导入」时调用 */
+  scriptImport: (id: string, project?: string) =>
+    req<{ ok: boolean; project: string; at: string; out: string; sha256: string; log: string }>(
+      `/api/qwen/tasks/${sid(id)}/script/import`, json("POST", { confirm: true, by: "owner", project })),
+  comfyLock: () => req<import("./types").ComfyLock>("/api/comfy-lock"),
+  renderBackend: () => req<import("./types").RenderBackend>("/api/render-backend"),
+};
+
+/** 「请 gpu3 重出」请求进度：桥可达读桥 /queue，否则读镜像 jsonl（POST gpu3-rerender 的响应带 request_id） */
+export const gpu3RequestsApi = {
+  list: (shots: string[], limit = 20) =>
+    req<import("./types").Gpu3Request[]>(
+      `/api/gpu3/requests?shots=${shots.map(encodeURIComponent).join(",")}&limit=${limit}`),
+};
+
+/** 人物管理页（fredw-25）：新建 / 改名 / 归档 / 上传图片 */
+export const manageApi = {
+  people: () => req<import("./types").PeopleList>("/api/people"),
+  createPerson: (b: { id: string; name: string; role?: string; notes?: string }) =>
+    req<import("./types").Person>("/api/people", json("POST", b)),
+  updatePerson: (id: string, b: { name?: string; role?: string; notes?: string; archived?: boolean }) =>
+    req<import("./types").Person>(`/api/people/${sid(id)}`, json("PUT", b)),
+  upload: (id: string, target: string, file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("target", target);
+    return req<{ file: string; url: string | null; kind: string }>(`/api/people/${sid(id)}/upload`, { method: "POST", body: fd });
+  },
+};

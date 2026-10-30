@@ -1,8 +1,8 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { AUDIO_SOURCE_LABEL, EP_MUSIC_EXAMPLE, EP_MUSIC_HINT } from "../audio";
 import { useStudio } from "../store";
-import type { CharacterBrief, Episode } from "../types";
-import { matchFilter } from "../util";
+import type { CharacterBrief, Episode, ShotSummary } from "../types";
+import { laptopVideoEnabled, matchFilter } from "../util";
 import { seamCheck, seamState } from "./Seam";
 import { SelectionBar } from "./SelectionBar";
 import { OwnerPanel, SopStageBar, useSopEpisode } from "./SopBar";
@@ -42,7 +42,15 @@ function EpisodeLooks({ ep }: { ep: Episode }) {
   );
 }
 
-/** 本集背景音乐（后期混音）：默认取剧本 **配乐** 行的【BGM】英文提示 */
+/** 本集配乐（E8）：默认取剧本 **配乐** 行的【BGM】英文提示。英文 → 本集各镜 H3 non_diegetic_music 的默认（镜头可覆盖）；中文 → 只给后期 */
+const hasZh = (x: string) => /[一-鿿]/.test(x);
+const musicRoute = (x: string) => (!x.trim() ? "none" : x.trim().toUpperCase() === "N/A" ? "na" : hasZh(x) ? "post" : "h3");
+const ROUTE_LABEL: Record<string, [string, string, string]> = {
+  h3: ["→ 进 H3", "chip-ok", "英文：作为本集各镜 H3 non_diegetic_music 的默认（镜头单独写了配乐的以镜头为准）"],
+  post: ["→ 只给后期", "chip-warn", "含中文：不进 H3，只作后期混音提示；要进 H3 请写英文"],
+  na: ["N/A · 不要配乐", "chip-dark", "N/A：本集各镜 H3 non_diegetic_music = N/A（镜头单独写了的以镜头为准）"],
+  none: ["未设", "chip-warn", "还没有本集配乐：各镜 H3 non_diegetic_music 取镜头自己的或 N/A"],
+};
 function EpisodeMusic({ ep }: { ep: Episode }) {
   const { saveEpisodeEdit } = useStudio();
   const m = ep.music;
@@ -60,12 +68,20 @@ function EpisodeMusic({ ep }: { ep: Episode }) {
   return (
     <div className="ep-music">
       <div className="ep-music-line">
-        <span className="ep-music-k">🎵 本集背景音乐（后期混音）</span>
+        <span className="ep-music-k" title={EP_MUSIC_HINT}>🎵 本集配乐（H3 默认）</span>
         <span className={`chip ${src === "edit" ? "chip-accent" : src === "none" ? "chip-warn" : "chip-ok"}`}>
           {src === "script" ? "剧本【BGM】" : AUDIO_SOURCE_LABEL[src] ?? src}
         </span>
+        {!!m?.text && (() => {
+          const [l, c, why] = ROUTE_LABEL[musicRoute(m.text)];
+          return (
+            <span className={`chip ${c}`} title={why}>
+              {l}
+            </span>
+          );
+        })()}
         <span className={`ep-music-text${m?.text ? "" : " muted"}`} title={m?.raw ? `剧本配乐行原文：${m.raw}` : undefined}>
-          {m?.text || "还没有：写一句乐器 / 速度 / 节奏，后期配乐用"}
+          {m?.text || "还没有：英文 1–3 句（乐器 / 速度 / 节奏 / 强弱）→ 本集各镜 H3 配乐默认"}
         </span>
         <button className="btn" onClick={() => setOpen((o) => !o)}>
           {open ? "收起" : "编辑"}
@@ -75,6 +91,8 @@ function EpisodeMusic({ ep }: { ep: Episode }) {
         <div className="ep-music-edit">
           <textarea rows={3} value={v} onChange={(e) => setV(e.target.value)} placeholder="Sparse piano notes at a slow tempo…" readOnly={!supported} />
           <div className="audio-hint">
+            <span className={`chip ${ROUTE_LABEL[musicRoute(v)][1]}`}>{ROUTE_LABEL[musicRoute(v)][0]}</span> {ROUTE_LABEL[musicRoute(v)][2]}
+            <br />
             {EP_MUSIC_HINT}
             <br />
             例：<i>{EP_MUSIC_EXAMPLE}</i>
@@ -88,7 +106,7 @@ function EpisodeMusic({ ep }: { ep: Episode }) {
           {!supported && <div className="warn">后端字段 EpisodeEdit.music 还没上线：暂时只能查看，保存会被拒绝</div>}
           <div className="row-actions">
             <button className="btn primary" disabled={!supported || busy || v === (m?.text ?? "")} onClick={() => void save(v.trim() || null)}>
-              保存本集背景音乐
+              保存本集配乐
             </button>
             <button
               className="btn"
@@ -98,7 +116,7 @@ function EpisodeMusic({ ep }: { ep: Episode }) {
             >
               恢复剧本默认
             </button>
-            <span className="muted small">只用于后期混音，不影响画面、不进 H3 视频提示词，不会让版本过期</span>
+            <span className="muted small">英文会改变本集各镜的 H3 视频提示词（镜头单独写了配乐的除外），不影响首尾帧；中文只给后期混音</span>
           </div>
         </div>
       )}
@@ -158,6 +176,11 @@ function EpisodeReadinessBar({ ep }: { ep: Episode }) {
       <span className={`ep-ready-count ${all ? "r-ok" : "r-fail"}`} title="首帧·尾帧（同一 take 链）·img·motion·时长·sound/H3·配乐 cue·本集 BGM 全齐且衔接通过的镜头数（docs/audit/shot_readiness_and_continuity.md §2）">
         就绪 {r.ready} / {r.total} 镜
       </span>
+      {!!ep.explicit_hold_count && (
+        <span className="chip chip-explicit" title={`本集 ${ep.explicit_hold_count} 镜露骨红标：项目方自行处理，画布不做自动动作`}>
+          露骨红标 {ep.explicit_hold_count}
+        </span>
+      )}
       <span className={`chip ${r.owner === "gpu3" ? "chip-src-gpu3" : "chip-src-laptop"}`} title="首尾帧和视频由哪条流水线负责（config/shot_ownership.json）">
         {r.owner === "gpu3" ? "gpu3 负责全集（笔记本帧只作历史）" : "笔记本负责"}
       </span>
@@ -170,6 +193,46 @@ function EpisodeReadinessBar({ ep }: { ep: Episode }) {
         <span className="muted small" title={`data/renders_gpu3/${epTag}/continuity_sheet.jpg（gpu3 合成前生成）`}>
           衔接表未生成
         </span>
+      )}
+    </div>
+  );
+}
+
+/** T54-B / 调研 #2（小云雀“截取上一镜尾帧作下一镜首帧参考”）：同集、笔记本负责的镜头才给一键衔接 */
+function canLink(left: ShotSummary, right: ShotSummary) {
+  return left.owner !== "gpu3" && left.last_frame_source !== "gpu3" && left.id.split("-")[0] === right.id.split("-")[0];
+}
+
+/** 批量菜单项：名称 + 一行说明（禁用时说明写原因） */
+function MenuItem({ label, sub, disabled, onClick }: { label: string; sub: string; disabled?: boolean; onClick: () => void }) {
+  return (
+    <button className="ep-menu-item" disabled={disabled} onClick={onClick}>
+      <span>{label}</span>
+      <small>{sub}</small>
+    </button>
+  );
+}
+
+/** T59：集头的小下拉（点外面关闭） */
+function EpMenu({ label, disabled, disabledTitle, children }: { label: string; disabled?: boolean; disabledTitle?: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const off = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    window.addEventListener("mousedown", off);
+    return () => window.removeEventListener("mousedown", off);
+  }, [open]);
+  return (
+    <div className="tb-menu" ref={ref}>
+      <button className="btn quiet" disabled={disabled} title={disabled ? disabledTitle : undefined} onClick={() => setOpen((v) => !v)}>
+        {label}
+        <i className="tb-caret" />
+      </button>
+      {open && (
+        <div className="tb-pop right" onClick={() => setOpen(false)}>
+          {children}
+        </div>
       )}
     </div>
   );
@@ -189,8 +252,11 @@ export function EpisodeView() {
   }, [sel, episode?.number]);
   const [boostOpen, setBoostOpen] = useState(false);
   const [ownerOpen, setOwnerOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
   const { sop, error: sopError } = useSopEpisode(episode?.number);
   if (!episode) return <div className="empty">请选择一集</div>;
+  // T60：摘要先到、本集详情还在路上（通常 < 0.3 s）
+  if (episode.light) return <div className="empty">加载第 {episode.number} 集…</div>;
 
   const passed = episode.shots.filter((s) => s.review.state === "passed").length;
   const rejected = episode.shots.filter((s) => s.review.state === "rejected").length;
@@ -199,6 +265,12 @@ export function EpisodeView() {
   const crossNext = lastShot?.next_shot;
   const hasEpBoost = !!(episode.edit?.boost_first || episode.edit?.boost_last);
   const gpu3Ep = episode.readiness?.owner === "gpu3";
+  // 批量出图菜单里每项要处理的镜头数（与 requestBatch 的 onlyMissing 判定一致）
+  const missing = {
+    image: episode.shots.filter((x) => !x.first_frame).length,
+    last: episode.shots.filter((x) => x.first_frame && x.last_frame_take == null && x.last_supported).length,
+    video: episode.shots.filter((x) => x.first_frame && !x.video).length,
+  };
   const openSeam = (from: string, to: string) => {
     setSeam({ from, to });
     setDrawer({ open: true, tab: "seam" });
@@ -206,51 +278,94 @@ export function EpisodeView() {
 
   return (
     <div className="episode-view">
-      <header className="ep-head">
-        <div className="ep-head-row">
-          <h2>
-            ep{String(episode.number).padStart(2, "0")} · {episode.title}
-            {episode.high_intensity && <span className="hi-tag">🔴 高强度</span>}
-            {episode.tag && <span className="tag">{episode.tag}</span>}
-          </h2>
-          <button className="btn-mini" onClick={() => setSynOpen((v) => !v)}>
-            {synOpen ? "收起梗概" : "梗概"}
-          </button>
-          <span className={`review-count${passed === episode.shots.length ? " all" : ""}`}>
-            审核 {passed}/{episode.shots.length}
-            {rejected > 0 && <span className="bad"> · 打回 {rejected}</span>}
-          </span>
+      {/* T59：集头只留 标题·梗概｜镜头索引｜批量出图▾｜串播｜本集信息▾；SOP / 就绪 / 加强 / 配乐收进「本集信息」 */}
+      <header className="ep-head t59">
+        <div className="eh-row">
+          <div className="eh-title">
+            <h2>
+              <span className="eh-num">第 {episode.number} 集</span>
+              <span className="eh-name" title={episode.title}>{episode.title}</span>
+              {episode.high_intensity && <span className="eh-flag" title="高强度集">高强度</span>}
+              {episode.tag && <span className="eh-flag">{episode.tag}</span>}
+            </h2>
+            <p className={`eh-syn${synOpen ? " open" : ""}`} onClick={() => setSynOpen((v) => !v)} title={synOpen ? "收起" : "展开梗概"}>
+              {episode.synopsis}
+            </p>
+          </div>
           <span className="grow" />
-          <button className="btn" disabled={gpu3Ep} onClick={() => requestBatch(ids, "image", true)} title={gpu3Ep ? GPU3_EP : "只跑缺首帧的镜头"}>
-            整集出首帧
-          </button>
-          <button className="btn" disabled={gpu3Ep} onClick={() => requestBatch(ids, "last", true)} title={gpu3Ep ? GPU3_EP : "只跑缺尾帧的镜头（需先有首帧）"}>
-            整集出尾帧
-          </button>
-          <button className="btn" disabled={gpu3Ep} onClick={() => requestBatch(ids, "video", true)} title={gpu3Ep ? GPU3_EP : "只跑缺视频的镜头"}>
-            整集出视频
-          </button>
-          <button className="btn" onClick={() => st.setReviewMode(true)} title="按顺序串播（审片模式）">
+          <div className="eh-index" role="tablist" aria-label="本集镜头">
+            {episode.shots.map((s) => {
+              const cls = s.review.state === "rejected" ? "bad" : !s.first_frame || (s.last_supported && !s.last_frame) ? "none" : s.video ? "ok" : "warn";
+              return (
+                <button key={s.id} role="tab" aria-selected={s.id === sel} className={s.id === sel ? "on" : ""} onClick={() => select(s.id)} title={`${s.id}：${s.video ? "有视频" : s.first_frame ? "有首帧" : "未出图"} · 审核 ${s.review.state}
+← / → 切换镜头 · ↑ / ↓ 切换集`}>
+                  <i className={`dot ${cls}`} />
+                  {s.id.split("-")[1]}
+                </button>
+              );
+            })}
+          </div>
+          <EpMenu label="批量出图">
+            {/* 每项“名称 + 一行说明”：会处理几镜；禁用时说明直接写原因（不只在悬停里） */}
+            <MenuItem
+              label="整集出首帧"
+              sub={gpu3Ep ? GPU3_EP : missing.image ? `补齐缺首帧的 ${missing.image} 镜` : "本集镜头都已有首帧"}
+              disabled={gpu3Ep || !missing.image}
+              onClick={() => requestBatch(ids, "image", true)}
+            />
+            <MenuItem
+              label="整集出尾帧"
+              sub={gpu3Ep ? GPU3_EP : missing.last ? `补齐缺尾帧的 ${missing.last} 镜（需先有首帧）` : "有首帧的镜头都已有尾帧"}
+              disabled={gpu3Ep || !missing.last}
+              onClick={() => requestBatch(ids, "last", true)}
+            />
+            <MenuItem
+              label={laptopVideoEnabled() ? "整集出视频（本机·开发者）" : "整集出视频"}
+              sub={missing.video ? `${laptopVideoEnabled() ? "本机出" : "发给 gpu3 出"}缺视频的 ${missing.video} 镜（需先有首帧）` : "有首帧的镜头都已有视频"}
+              disabled={!missing.video}
+              onClick={() => requestBatch(ids, "video", true)}
+            />
+            <i className="ep-menu-sep" />
+            <MenuItem label="全选本集镜头" sub={`选中 ${episode.shots.length} 镜，之后在底部批量操作`} onClick={() => setMulti(new Set(ids))} />
+          </EpMenu>
+          <button className="eh-link" onClick={() => st.setReviewMode(true)} title="按顺序串播（审片模式，快捷键 R）">
             串播
           </button>
-          <button className={`btn${hasEpBoost ? " on" : ""}`} onClick={() => setBoostOpen((v) => !v)} title="本集导演加强（作用于本集全部镜头）">
-            本集导演加强{hasEpBoost ? " ●" : ""}
-          </button>
-          <button className="btn-mini" onClick={() => setMulti(new Set(ids))} title={`选中本集 ${episode.shots.length} 镜（之后可批量操作）`}>
-            全选
+          <button className={`eh-link${infoOpen ? " on" : ""}`} onClick={() => setInfoOpen((v) => !v)} title="SOP 阶段、就绪、导演加强、配乐">
+            本集信息{sop?.owner_actions?.length ? <b className="eh-count">{sop.owner_actions.length}</b> : null}
           </button>
         </div>
-        <SopStageBar sop={sop} error={sopError} ownerOpen={ownerOpen} onOwner={() => setOwnerOpen((v) => !v)} />
-        {ownerOpen && sop && <OwnerPanel actions={sop.owner_actions} />}
-        <EpisodeReadinessBar ep={episode} />
-        {synOpen && <p className="synopsis">{episode.synopsis}</p>}
-        {boostOpen && <EpisodeBoost ep={episode} />}
-        <EpisodeMusic ep={episode} />
-        <div className="ep-looks">
-          <span className="muted">本集造型：</span>
-          <EpisodeLooks ep={episode} />
-          {hlChar && <span className="muted small">（已高亮，点再次取消）</span>}
+        <div className="eh-sub">
+          <span className="eh-looks">
+            <span className="eh-k" title="本集各角色用的造型；每镜用哪套见镜头行里的人物小图">本集造型</span>
+            <EpisodeLooks ep={episode} />
+          </span>
+          <span className="grow" />
+          {episode.readiness && (
+            <span className={`status ${episode.readiness.ready === episode.readiness.total && episode.readiness.total > 0 ? "ok" : ""}`}>
+              就绪 {episode.readiness.ready}/{episode.readiness.total}
+            </span>
+          )}
+          <span className={`status ${rejected ? "bad" : passed === episode.shots.length ? "ok" : ""}`}>
+            审核 {passed}/{episode.shots.length}
+            {rejected > 0 && ` · 打回 ${rejected}`}
+          </span>
+          {hasEpBoost && <span className="status">本集加强已设</span>}
         </div>
+        {infoOpen && (
+          <div className="eh-info">
+            <SopStageBar sop={sop} error={sopError} ownerOpen={ownerOpen} onOwner={() => setOwnerOpen((v) => !v)} />
+            {ownerOpen && sop && <OwnerPanel actions={sop.owner_actions} />}
+            <EpisodeReadinessBar ep={episode} />
+            <div className="eh-info-row">
+              <button className={`btn${hasEpBoost ? " on" : ""}`} onClick={() => setBoostOpen((v) => !v)} title="本集导演加强（作用于本集全部镜头）">
+                本集导演加强{hasEpBoost ? "（已设）" : ""}
+              </button>
+            </div>
+            {boostOpen && <EpisodeBoost ep={episode} />}
+            <EpisodeMusic ep={episode} />
+          </div>
+        )}
       </header>
 
       <SelectionBar />
@@ -278,6 +393,7 @@ export function EpisodeView() {
                   onClick={(e) => select(s.id, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey })}
                 />
                 {next && seam && (
+                  <div className="seam3-wrap">
                   <button className={`seam3 seam-${seam.state}`} onClick={() => openSeam(s.id, next.id)} title={`${seam.title}
 点击打开接缝对比`}>
                     <i />
@@ -293,6 +409,16 @@ export function EpisodeView() {
                     </span>
                     <i />
                   </button>
+                  {seam.state === "none" && canLink(s, next) && details[s.id] && (
+                    <button
+                      className="seam-link"
+                      onClick={() => void st.saveEdit(s.id, { ...details[s.id].edit, last_source: "next", last_frame: "next" })}
+                      title={`把 ${s.id} 的目标尾帧设为 ${next.id} 的首帧：${s.id} 的视频会收在下一镜开头的画面上（可撤销 Ctrl+Z；需重出 ${s.id} 视频才生效）`}
+                    >
+                      ⛓ 衔接：尾帧 = 下一镜首帧
+                    </button>
+                  )}
+                  </div>
                 )}
               </Fragment>
             );
@@ -300,7 +426,7 @@ export function EpisodeView() {
         </div>
       )}
       <div className="legend muted">
-        点图片全屏查看（←/→ 翻版本、A/B 对比、设为当前）· 改提示词在右侧检查器，「重出」后新版本自动出现在对比位 · Ctrl/Shift 点击多选 · T 列表 · \ 收起检查器 · ? 全部快捷键
+        点图片全屏查看（←/→ 翻版本、A/B 对比、设为当前）· 改提示词在右侧检查器「保存并重出」→ 新版本出现在图下版本条（标“新”）和对比位，点它 = A/B · Ctrl/Shift 点击多选 · T 列表 · \ 收起检查器 · ? 全部快捷键
       </div>
     </div>
   );

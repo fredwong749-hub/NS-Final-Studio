@@ -34,8 +34,11 @@ export interface GenDraft {
   name: string;
 }
 
+/** 造型字母：优先 label；没设时默认造型给 A（不用名字首字，免得“默 默认”重复），其余取名字首字 / id 末位 */
 export const lookLetter = (lk: Pick<Look, "label" | "name" | "id"> | undefined) =>
-  lk ? lk.label || (lk.name ? lk.name.slice(0, 1) : lk.id.slice(-1).toUpperCase()) : "?";
+  lk
+    ? lk.label || (/默认|default/i.test(`${lk.name ?? ""} ${lk.id}`) ? "A" : lk.name ? lk.name.slice(0, 1) : lk.id.slice(-1).toUpperCase())
+    : "?";
 
 export function stripLook(lk: Look | LookView): Look {
   return {
@@ -667,8 +670,14 @@ export function GenerateForm({
         <input value={draft.name} onChange={(e) => onChange({ ...draft, name: e.target.value })} placeholder="文件名前缀（可选）" />
       </label>
       <label className="gf-col">
-        <span>提示词</span>
-        <textarea rows={7} value={draft.prompt} onChange={(e) => onChange({ ...draft, prompt: e.target.value })} />
+        <span>提示词（由 Qwen / 项目方填写，系统原样提交）</span>
+        <textarea
+          rows={7}
+          value={draft.prompt}
+          onChange={(e) => onChange({ ...draft, prompt: e.target.value })}
+          placeholder="粘贴 Qwen 写好的提示词；参考图顺序见下方「图1、图2…」"
+        />
+        {!draft.prompt.trim() && <span className="small muted">提示词为空时不能入队</span>}
       </label>
       <div className="gf-col">
         <span>
@@ -698,7 +707,7 @@ export function GenerateForm({
         <span>模型</span>
         <select value={model} onChange={(e) => setModel(e.target.value as "qwen" | "klein")}>
           <option value="qwen">Qwen Image 2.1（本机 Turbo）</option>
-          <option value="klein">Klein</option>
+          <option value="klein" disabled>Klein（未接入）</option>
         </select>
         <span>种子</span>
         <input className="gf-seed" value={seed} onChange={(e) => setSeed(e.target.value)} placeholder="随机" inputMode="numeric" />

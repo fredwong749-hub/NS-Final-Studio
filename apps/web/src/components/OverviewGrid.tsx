@@ -85,7 +85,7 @@ export function OverviewGrid() {
               onDoubleClick={() => e.shots[0] && onOpen(e.shots[0].id)}
             >
               <b>{epCode(e.number)}</b>
-              <span className="ov-title">{e.high_intensity && "🔴"}{e.title}</span>
+              <span className="ov-title">{e.high_intensity && <i className="ep-hi" title="高强度集" />}{e.title}</span>
               <span className="ov-looks" title="本集造型">
                 {[...new Map(e.shots.flatMap((s) => s.characters).map((c) => [c.character, c])).values()].map((c) => (
                   <span key={c.character}>

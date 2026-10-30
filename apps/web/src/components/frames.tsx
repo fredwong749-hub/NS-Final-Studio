@@ -24,7 +24,28 @@ function elapsed(from?: string): string {
 /** 任务进度：排队第 N 位 / 渲染中 m:ss（不确定进度条） */
 export function JobBar({ live, compact }: { live: LiveJob; compact?: boolean }) {
   const running = live.job.state === "running";
-  useTick(running);
+  useTick(running || !!live.gpu3, live.gpu3 ? 15000 : 1000);
+  if (live.gpu3)
+    // 已请 gpu3：笔记本看不到 gpu3 队列位置（缺接口），只显示等了多久；新 take 到达后自动消失
+    return (
+      <div className={`jobbar gpu3${compact ? " compact" : ""}`} title="已写进 gpu3 重渲队列，等 gpu3 出新 take；新版本到了会自动出现在版本条">
+        <div className="jobbar-track">
+          <i />
+        </div>
+        <span>
+          已请 gpu3 · 等待 {elapsed(live.job.created_at).replace(/:\d\d$/, "")} 分
+          {live.clear && !compact && (
+            <button
+              className="link jobbar-x"
+              title="撤销本地等待标记（请求丢了 / 想再请一次）；不会取消 gpu3 上已排的任务"
+              onClick={(e) => (e.stopPropagation(), live.clear!())}
+            >
+              撤标记
+            </button>
+          )}
+        </span>
+      </div>
+    );
   return (
     <div className={`jobbar${running ? " running" : " queued"}${compact ? " compact" : ""}`}>
       <div className="jobbar-track">
@@ -62,7 +83,7 @@ type StepState = "ok" | "warn" | "none" | "busy" | "bad";
 export function steps(s: ShotSummary, liveOf: (stage: Stage) => LiveJob | undefined): [string, StepState, string][] {
   const one = (stage: Stage, has: boolean, label: string): [string, StepState, string] => {
     const lj = liveOf(stage);
-    if (lj) return [label, "busy", lj.job.state === "running" ? "渲染中" : `排队第 ${lj.pos} 位`];
+    if (lj) return [label, "busy", lj.gpu3 ? "已请 gpu3，等新 take" : lj.job.state === "running" ? "渲染中" : `排队第 ${lj.pos} 位`];
     if (!has) return [label, "none", "还没有"];
     const st = s.stale[stage] ?? [];
     if (st.length) return [label, "warn", `已过期：${st.join("、")}`];

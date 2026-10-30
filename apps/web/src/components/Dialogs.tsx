@@ -22,33 +22,49 @@ export function ConfirmDialog() {
   const { confirmReq, setConfirmReq } = useStudio();
   const [busy, setBusy] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
+  // 封板修复（项目方 2026-10-30）：项目方确认勾选框，每个新确认框都从未勾选开始
+  const [ownerOk, setOwnerOk] = useState(false);
+  useEffect(() => setOwnerOk(false), [confirmReq]);
   useEffect(() => btn.current?.focus(), [confirmReq]);
   if (!confirmReq) return null;
-  const close = () => setConfirmReq(null);
+  const req = confirmReq;
+  // 只关闭自己：操作里又弹出新的确认框（如“批量重出”→ 批量确认）时不能把新框也关掉
+  const close = () => setConfirmReq((cur) => (cur === req ? null : cur));
+  const run = async (fn: () => void | Promise<void>) => {
+    setBusy(true);
+    try {
+      await fn();
+    } finally {
+      setBusy(false);
+      close();
+    }
+  };
   return (
     <Modal title={confirmReq.title} onClose={close}>
       <div className="modal-body">
         {confirmReq.lines.map((l, i) => (
           <div key={i}>{l}</div>
         ))}
+        {confirmReq.ownerCheck && (
+          <label className="or-confirm" style={{ display: "inline-flex", gap: 6, alignItems: "center", cursor: "pointer", marginTop: 8 }}>
+            <input type="checkbox" checked={ownerOk} onChange={(e) => setOwnerOk(e.target.checked)} /> {confirmReq.ownerCheck}
+          </label>
+        )}
       </div>
       <div className="modal-foot">
         <button className="btn" onClick={close}>
-          取消
+          {confirmReq.cancelLabel ?? "取消"}
         </button>
+        {confirmReq.secondary && (
+          <button className="btn" disabled={busy} onClick={() => void run(confirmReq.secondary!.onClick)}>
+            {confirmReq.secondary.label}
+          </button>
+        )}
         <button
           ref={btn}
           className={`btn ${confirmReq.danger ? "bad" : "primary"}`}
-          disabled={busy}
-          onClick={async () => {
-            setBusy(true);
-            try {
-              await confirmReq.onConfirm();
-            } finally {
-              setBusy(false);
-              close();
-            }
-          }}
+          disabled={busy || (!!confirmReq.ownerCheck && !ownerOk)}
+          onClick={() => void run(confirmReq.onConfirm)}
         >
           {confirmReq.confirmLabel}
         </button>

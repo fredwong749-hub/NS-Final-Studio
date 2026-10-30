@@ -10,7 +10,7 @@ export function SelectionBar() {
     <div className="selection-bar">
       <b>已选 {ids.length} 镜</b>
       <button className="btn" onClick={() => requestBatch(ids, "image")}>批量渲染首帧</button>
-      <button className="btn" onClick={() => requestBatch(ids, "video")}>批量渲染视频</button>
+      <button className="btn" onClick={() => requestBatch(ids, "video")}>批量出视频</button>
       <button className="btn" onClick={() => void setReview(ids, "passed")} title="只对当前视频已完整播放过的镜头生效">
         通过
       </button>
