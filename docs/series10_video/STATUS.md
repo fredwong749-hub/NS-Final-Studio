@@ -1,6 +1,6 @@
 # series10 视频 · 夜间进度（night.py 自动写；交总调度）
 
-更新：2026-11-01 23:12:53
+更新：2026-11-01 23:38:05
 
 当前配方（data/pipeline/runs/series10_v1/video/recipe_choice.json）：face_default = i2va_pika_flex、ref_default = i2va_pika_flex、noface_default = i2va_pika_flex
 

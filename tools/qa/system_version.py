@@ -425,7 +425,9 @@ def cut(base: str | None = None, dry: bool = False, sv: str | None = None, run_t
            f"上一版：{prev}；改动文件 {len(changed)}；规则 +{len(rd['added'])} ~{len(rd['modified'])} 归档 {len(rd['archived'])}；kb {mt.get('kb_version')}",
            f"本版包含的 loop 轮次：{loops_line or '—'}", f"项目方 / 总调度决定：{'、'.join(dec) or '—'}",
            f"闸门：{'；'.join(x['name'] + ' 通过' for x in g)}", f"记录：docs/system_versions/{sv}.md", "", CO_AUTHOR]
-    mf = Path(tempfile.mkstemp(suffix=".txt")[1])
+    fd, mfn = tempfile.mkstemp(suffix=".txt")
+    os.close(fd)                     # Windows：不关 fd，之后 unlink 报 WinError 32（sv-20261101-01 首跑踩到，commit 已成、tag 手补）
+    mf = Path(mfn)
     mf.write_text("\n".join(msg) + "\n", encoding="utf-8")
     try:
         git("commit", "-q", "-F", str(mf))
@@ -490,6 +492,13 @@ def export_tag(sv: str, dirs: list[str], dest: Path) -> list[str]:
     with tarfile.open(fileobj=io.BytesIO(raw)) as tf:
         names = [m.name for m in tf.getmembers() if m.isfile()]
         tf.extractall(dest, filter="data")
+    # git archive 出来是仓库里的 LF；工作区是 CRLF（autocrlf）。内容与该版本一致（git 认为没改）的文件用工作区原字节，
+    # 免得只因换行符不同就整批重推、和日常 push 来回覆盖（sv-20261101-01 首次 deploy：gpu36 重推 292 个只差换行的文件）
+    changed = set(x for x in git("diff", "--name-only", sv, "--", *dirs).splitlines() if x)
+    for n in names:
+        src = ROOT / n
+        if n not in changed and src.is_file():
+            (dest / n).write_bytes(src.read_bytes())
     return names
 
 

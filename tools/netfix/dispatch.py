@@ -99,23 +99,107 @@ def global_pause(laptop_ctrl: dict | None, part: dict | None = None) -> tuple[bo
     return False, None
 
 
-def control_for(host: str, laptop_ctrl: dict | None, ready: dict | None, part: dict | None = None) -> dict:
+OVERRIDE = ROOT / "config/netfix/override.json"
+OVERRIDE_STATE = ROOT / "data/netfix/override_state.json"
+ASSETS_READY = ROOT / "data/autopilot/assets_ready.json"
+LEASES = ROOT / "data/producer/leases"
+ON_LAPTOP = ("laptop", "draining")
+
+
+def phases(state: dict | None = None) -> dict[str, str]:
+    """临时覆盖（总调度 23:3x）每台服务器的阶段：laptop = 它的分区由笔记本经隧道派；draining = 正在交还（笔记本不再派新单、
+    等在途完成，服务器仍不派）；server = 正常（服务器自己派）。没有状态文件 = 全部 server"""
+    st = state if state is not None else (jl(OVERRIDE_STATE, {}) or {})
+    return {h: (st.get("hosts") or {}).get(h, {}).get("phase", "server") for h in ("gpu33", "gpu36")}
+
+
+def control_for(host: str, laptop_ctrl: dict | None, ready: dict | None, part: dict | None = None,
+                ph: dict | None = None) -> dict:
     """本机 producer 的 control 字段（只这几个；control.json 其它字段读-改-写保留）"""
     part = part or partition()
+    ph = ph if ph is not None else phases()
+    ov = jl(OVERRIDE, {}) or {}
     eps = sorted(set(part["images"].get(host) or []))
+    taken = []                                   # 笔记本临时代派的服务器分区
+    if host == "laptop":
+        taken = sorted({e for h, p in ph.items() if p == "laptop" for e in (part["images"].get(h) or [])})
+        eps = sorted(set(eps) | set(taken))
     rs = ready_shots(ready)
     ready_eps = [e for e in eps if e in rs]
     only = sorted({s for e in ready_eps for s in rs[e]}) or [NONE]
-    hold = sorted({ln for h, ls in (part.get("lanes") or {}).items() if h != host for ln in ls})
+    if host == "laptop":
+        hold = sorted({ln for h, ls in (part.get("lanes") or {}).items() if h != "laptop" and ph.get(h, "server") != "laptop"
+                       for ln in ls} | {ln for ln in (ov.get("laptop_hold") or []) if any(p == "laptop" for p in ph.values())})
+    else:
+        hold = sorted({ln for h, ls in (part.get("lanes") or {}).items() if h != host for ln in ls})
+        if ph.get(host, "server") in ON_LAPTOP:  # 本机分区正由笔记本代派（或交还中）：一单都不派，防重复
+            only = [NONE]
     gp, by = global_pause(laptop_ctrl, part)
     fields = {"only": only, "hold_lanes": hold,
               "dispatch_by": {"by": "NETFIX dispatch.py", "at": iso(), "host": host,
-                              "partition_eps": eps, "ready_eps": ready_eps,
-                              "rule": "K-OPS-N04 only = 分区 ∩ 已准备好的集；hold = 别的机器的道；paused 跟随笔记本全局暂停"}}
+                              "partition_eps": eps, "ready_eps": ready_eps, "override_phases": ph, "laptop_takes_eps": taken,
+                              "rule": "K-OPS-N04 only = 分区 ∩ 已准备好的集；hold = 别的机器的道；paused 跟随笔记本全局暂停；"
+                                      "K-OPS-N06 临时覆盖：phase=laptop 的服务器分区由笔记本经隧道派、服务器 only=__none__"}}
     if host != "laptop":                     # 笔记本的 paused 就是全局开关本身，不改
         fields.update(paused=gp, paused_by=(f"GLOBAL:{by}" if gp else None),
-                      note=(f"跟随笔记本全局暂停（{by}）" if gp else f"SERVER_RESIDENT {host}：只派 ep{eps} ∩ 已准备好的集 {ready_eps}"))
+                      note=(f"跟随笔记本全局暂停（{by}）" if gp else
+                            (f"NETFIX 临时覆盖 {ph.get(host)}：本机分区 ep{eps} 由笔记本经隧道派，本机不派" if ph.get(host) in ON_LAPTOP
+                             else f"SERVER_RESIDENT {host}：只派 ep{eps} ∩ 已准备好的集 {ready_eps}")))
     return fields
+
+
+def live_leases(eps: list[int], now_t: float | None = None) -> list[str]:
+    """笔记本 producer 在途（租约没到期）的对象里属于这些集的"""
+    now_t = now_t or time.time()
+    out = []
+    for f in (LEASES.glob("*.json") if LEASES.exists() else []):
+        d = jl(f, {}) or {}
+        if float(d.get("until") or 0) <= now_t:
+            continue
+        name = f.stem
+        if any(f"ep{e:02d}-" in name for e in eps):
+            out.append(name)
+    return out
+
+
+def reconcile(now_t: float | None = None, write: bool = True) -> dict:
+    """笔记本侧状态机（监管进程每拍调用）：按 data/autopilot/assets_ready.json 逐台交还。
+    laptop →（该台 ready=true）→ draining：笔记本 only 去掉该台的集、hold 该台的道，不派新单
+    draining →（笔记本在该台集上的租约全部结束）→ server：服务器 only 恢复（server-control 下一拍生效）
+    覆盖关闭（override.active=false）同样走 draining 再回 server。开启只由 NETFIX / 总调度手动置 laptop（先确认服务器不在派单）。"""
+    now_t = now_t or time.time()
+    ov = jl(OVERRIDE, {}) or {}
+    st = jl(OVERRIDE_STATE, {}) or {"hosts": {}}
+    hosts = st.setdefault("hosts", {})
+    ar = jl(ASSETS_READY, {}) or {}
+    part = partition()
+    changed = []
+    for h in ("gpu33", "gpu36"):
+        rec = hosts.setdefault(h, {"phase": "server"})
+        ph = rec.get("phase", "server")
+        back = (not ov.get("active")) or bool((ar.get(h) or {}).get("ready"))
+        if ph == "laptop" and back:
+            rec.update(phase="draining", since=iso(), why=("override 关闭" if not ov.get("active") else f"assets_ready.{h}.ready=true"))
+            changed.append((h, "draining"))
+        elif ph == "draining":
+            busy = live_leases(part["images"].get(h) or [], now_t)
+            rec["waiting_leases"] = busy
+            if not busy:
+                rec.update(phase="server", since=iso(), why="笔记本在途单已全部结束，交还服务器")
+                changed.append((h, "server"))
+    st["at"] = iso()
+    st["active"] = bool(ov.get("active"))
+    res = {"changed": changed, "phases": phases(st)}
+    if write:
+        old = jl(OVERRIDE_STATE, {}) or {}
+        if changed or {k: v for k, v in old.items() if k != "at"} != {k: v for k, v in st.items() if k != "at"}:
+            js(OVERRIDE_STATE, st)
+        lc = jl(CONTROL, {}) or {}
+        f = control_for("laptop", lc, jl(READY, {}) or {}, part, phases(st))
+        if (lc.get("only"), lc.get("hold_lanes")) != (f["only"], f["hold_lanes"]):
+            apply(CONTROL, f)
+            res["laptop_control"] = {"only": len(f["only"]), "hold": f["hold_lanes"]}
+    return res
 
 
 def apply(ctrl_path: Path, fields: dict, dry: bool = False) -> dict:

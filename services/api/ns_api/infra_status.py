@@ -6,6 +6,8 @@ GET /api/infra/status   只读汇总，前端 5–10 s 轮询一次。
       （fails 每条连续失败拍数、down、rebuilds 重建记录、_relay_down / _relay_t 跳板探测、open 开着的报警）；
     · 两台服务器常驻 night / producer 心跳：tools/autopilot/resident_sync.py health（每 5 分钟经跳板一次）写的
       data/autopilot/resident_sync.json 的 <host>.health；
+  r39：NETFIX 隧道监管（tools/netfix/tunnel_supervisor.py）每拍写 data/netfix/net_status.json（跳板、每台 ssh 状态、每个端口、
+    重连次数、服务器同步、派单模式 dispatch_mode）；它新鲜（90 s 内）时跳板 / 连接 / 重连 / 派单都以它为准，不新鲜才退回看门狗状态。
   笔记本本机的两样（本机道 laptop:0、本机看图服务）直接探本机 127.0.0.1（不经跳板，超时 1.5 s，结果缓存 5 s）。
   端口 → 卡的对应取 infra_watchdog.TUNNELS 与 config/render_endpoints.json，不另写一份。
 返回里的 text 全是给项目方看的大白话（K-UI-037：不出现接口路径、端口号）；端口等只放在 tech 字段给“技术细节”用。
@@ -24,6 +26,8 @@ router = APIRouter(tags=["infra-status"])
 ROOT = Path(__file__).resolve().parents[3]
 WD_STATE = ROOT / "data/qa/infra_watchdog_state.json"
 RESIDENT = ROOT / "data/autopilot/resident_sync.json"
+NETFIX = ROOT / "data/netfix/net_status.json"   # r39：NETFIX 隧道监管（K-OPS-N06）写的状态，新鲜时优先用它
+NETFIX_STALE_S = 90                               # 与 net_status._doc 一致：t 超过 90 s 没更新 = 监管进程不在
 ENDPOINTS = ROOT / "config/render_endpoints.json"
 VQA_CFG = ROOT / "config/vqa.json"
 TICK_S = 30                      # 与 infra_watchdog.TICK_S 一致（看门狗一拍）
@@ -92,12 +96,88 @@ def _local(now: float) -> list[dict]:
     return out
 
 
-def build(now: float | None = None, wd: dict | None = None, res: dict | None = None, local: list | None = None) -> dict:
+PHASE_WORD = {"laptop": "由笔记本统一派图", "draining": "正在交还给服务器", "server": "服务器自己派图"}
+
+
+def _from_netfix(ns: dict, now: float) -> tuple[dict, list[dict], list[str], dict | None]:
+    """NETFIX net_status.json → 跳板 / 6 条连接 / 自动重连 / 派单模式（大白话；端口只进 tech）"""
+    r = ns.get("relay") or {}
+    up = bool(r.get("up"))
+    ds = float(r["down_since_t"]) if (not up and r.get("down_since_t")) else None
+    relay = {"ok": up, "checked_at": _hm(r.get("checked_t")), "last_ok_at": _hm(r.get("last_ok_t")),
+             "down_s": round(now - ds) if ds else None}
+    relay["text"] = "通" if up else f"不通，已断 {_ago(relay['down_s'])}"
+    hosts = ns.get("hosts") or {}
+    tunnels, reconnect = [], []
+    for port, (host, card) in TUNNEL_CARDS.items():
+        h = hosts.get(host) or {}
+        st = h.get("state") or "stopped"
+        pp = (h.get("ports") or {}).get(str(port)) or {}
+        ok = bool(pp.get("ok"))
+        name = f"{HOST_NAME[host]}·卡{card}"
+        since = float(h.get("since_t") or 0) or None
+        down_s = 0 if ok else (round(now - since) if since and st != "up" else None)
+        rebuilding = (not ok) and st in ("connecting", "backoff")
+        if ok:
+            text = "通"
+        elif st == "relay_down" or not up:
+            text = "断了（跳板断了，等跳板恢复后自动重连）"
+        elif st == "up" and pp.get("why") == "remote_down":
+            text = "连接通着，但这张卡的出图程序没响应"
+        elif st == "connecting":
+            text = (f"断了约 {_ago(down_s)}，" if down_s else "断了，") + "正在自动重连"
+        elif st == "backoff":
+            nt = float(h.get("next_try_t") or 0)
+            text = (f"断了约 {_ago(down_s)}，" if down_s else "断了，") + (f"{_ago(nt - now)}后自动再连" if nt > now else "马上自动再连")
+        elif st == "stopped":
+            text = "断了，自动重连没在运行"
+        else:
+            text = "暂时不通，正在查"
+        tunnels.append({"port": port, "host": host, "card": card, "name": name, "lane": f"{host}:{card}", "ok": ok,
+                        "fails": 0 if ok else 1, "down_s": down_s or 0, "rebuilding": rebuilding,
+                        "last_rebuild_at": _hm((h.get("last_restart") or {}).get("t")), "alert": False, "text": text,
+                        "tech": f"本机 {port} → {host}:{pp.get('remote', '?')}（{pp.get('why', '?')}）；ssh 状态 {st}，重连 {h.get('restarts', 0)} 次"})
+    for host, h in hosts.items():
+        st = h.get("state")
+        if st == "connecting":
+            reconnect.append(f"正在重连到 {HOST_NAME.get(host, host)} 的连接（已重连 {h.get('restarts', 0)} 次）")
+        elif st == "backoff":
+            nt = float(h.get("next_try_t") or 0)
+            reconnect.append(f"到 {HOST_NAME.get(host, host)} 的连接{_ago(nt - now) + '后' if nt > now else '马上'}再试一次")
+        elif st == "stopped":
+            reconnect.append(f"到 {HOST_NAME.get(host, host)} 的连接没人在管（自动重连没在运行）")
+    if not up:
+        reconnect.insert(0, "跳板断了：先等跳板恢复，再自动重连各条连接（这时不反复重连，免得加重跳板负担）")
+    dm = ns.get("dispatch_mode") or {}
+    dispatch = None
+    if dm:
+        ph = dm.get("phases") or {}
+        if dm.get("override_active"):
+            lap = [HOST_NAME.get(k, k) for k, v in ph.items() if v == "laptop"]
+            drn = [HOST_NAME.get(k, k) for k, v in ph.items() if v == "draining"]
+            srv = [HOST_NAME.get(k, k) for k, v in ph.items() if v == "server"]
+            parts = []
+            if lap:
+                parts.append(f"现在由笔记本统一派图（服务器资产补推中），{' / '.join(lap)} 推完后自动交还")
+            if drn:
+                parts.append(f"{' / '.join(drn)} 正在交还给服务器自己派")
+            if srv:
+                parts.append(f"{' / '.join(srv)} 已由服务器自己派图")
+            text = "；".join(parts) or "临时由笔记本派图"
+        else:
+            text = "两台服务器各自派图（正常模式）"
+        dispatch = {"override": bool(dm.get("override_active")), "phases": {k: PHASE_WORD.get(v, v) for k, v in ph.items()}, "text": text}
+    return relay, tunnels, reconnect, dispatch
+
+
+def build(now: float | None = None, wd: dict | None = None, res: dict | None = None, local: list | None = None, ns: dict | None = None) -> dict:
     """纯函数（测试注入 wd / res / local）：看门狗状态 + 常驻健康 + 本机探测 → 给界面的汇总"""
     now = time.time() if now is None else now
     wd = (_jl(WD_STATE, {}) or {}) if wd is None else wd
     res = (_jl(RESIDENT, {}) or {}) if res is None else res
     local = _local(now) if local is None else local
+    ns = (_jl(NETFIX, {}) or {}) if ns is None else ns
+    ns_ok = bool(ns.get("t")) and now - float(ns["t"]) < NETFIX_STALE_S
     wd_t = float(wd.get("t") or 0) or None
     wd_age = now - wd_t if wd_t else None
     wd_ok = wd_age is not None and wd_age < WD_STALE_S
@@ -145,6 +225,13 @@ def build(now: float | None = None, wd: dict | None = None, res: dict | None = N
     if not wd_ok:
         reconnect.insert(0, f"自动重连的看门狗{_ago(wd_age)}没报到，可能没在运行" if wd_age is not None else "自动重连的看门狗没有记录，可能没在运行")
 
+    dispatch = None
+    if ns_ok:
+        relay, tunnels, reconnect, dispatch = _from_netfix(ns, now)
+        relay_down = not relay["ok"]
+        if not wd_ok:     # 监管进程在跑，看门狗只做探测 / 报警，没报到不算“自动重连没人管”
+            reconnect = [r for r in reconnect if "看门狗" not in r]
+
     # 两台服务器常驻 night / producer
     servers = {}
     for host in ("gpu33", "gpu36"):
@@ -168,6 +255,10 @@ def build(now: float | None = None, wd: dict | None = None, res: dict | None = N
                     + (f"，最近心跳 {_ago(night_age_now)}前" if night_age_now is not None else "")
                     + (f"（{_ago(chk_age)}前查的；跳板断着，查不到最新）" if relay_down and chk_age is not None else ""),
         }
+        nsv = (ns.get("servers") or {}).get(host) if ns_ok else None
+        if nsv and nsv.get("sync_age_min") is not None:
+            servers[host]["sync_age_min"] = nsv["sync_age_min"]
+            servers[host]["text"] += f"；最后一次同步 {_ago(float(nsv['sync_age_min']) * 60)}前"
 
     bad_t = [t for t in tunnels if not t["ok"]]
     if relay_down:
@@ -178,11 +269,12 @@ def build(now: float | None = None, wd: dict | None = None, res: dict | None = N
         level, summary = "warn", f"{len(bad_t)} 条连接断了（{'、'.join(t['name'] for t in bad_t)}），正在自动重连"
     else:
         level, summary = "ok", "全部连接正常"
-    if not wd_ok and level == "ok":
+    if not wd_ok and not ns_ok and level == "ok":
         level, summary = "warn", "连接看起来正常，但自动重连的看门狗没报到"
     return {"at": _hm(now), "level": level, "summary": summary,
             "watchdog": {"ok": wd_ok, "at": _hm(wd_t), "age_s": round(wd_age) if wd_age is not None else None},
             "relay": relay, "tunnels": tunnels, "servers": servers, "local": local, "reconnect": reconnect,
+            "dispatch": dispatch, "source": "netfix" if ns_ok else "watchdog",
             "alerts": [{"id": a.get("id"), "level": a.get("level"), "since": a.get("ts")} for a in opened.values()]}
 
 

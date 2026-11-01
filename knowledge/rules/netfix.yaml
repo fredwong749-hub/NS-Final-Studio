@@ -49,3 +49,15 @@ rules:
     confidence: medium
     status: 确认
     date: 2026-11-01
+  - id: K-OPS-N06
+    domain: ops
+    link: [P5-P6, P7-P8]
+    title: 服务器资产没到位时，由笔记本临时代派（经隧道）；逐台交还走 laptop → draining → server 两阶段，任何时刻同一集只有一个 producer 派
+    when: 服务器常驻 producer 被 preflight（缺设定图 / refcrops / 单品图）整批挡下，而笔记本资产齐全
+    then: config/netfix/override.json active=true；data/netfix/override_state.json 每台 phase；开启顺序 = 先把服务器 server-control 写成 only=__none__ 并确认 inflight=0、无租约，再 reconcile 放开笔记本（only = 笔记本分区 ∪ phase=laptop 的服务器分区，hold 只挂 override.laptop_hold）；交还 = data/autopilot/assets_ready.json <host>.ready=true → draining（笔记本去掉该台集 + hold 该台道）→ 笔记本在该台集上的租约全部结束 → server。监管进程 30 s 一次 dispatch.reconcile()；net_status.dispatch_mode 显示。隧道卡死判定看 ssh 进程读写字节：在搬数据就不是卡死（跳板慢时不许杀正在传图的隧道）
+    check: tests/test_netfix.py::test_reconcile_hands_back_only_after_assets_ready_and_leases_done
+    evidence:
+      - {src: data/producer/log.jsonl, note: "23:43:52 覆盖生效后笔记本第一单 first:ep01-S1 → gpu33:1，23:45:45 rendered；23:44:37 监管重载一轮探测超时误杀 gpu36 隧道 → ep01-S2/S3 两次 infra_error（已改：认领按通算 + 读写字节判活）"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-01

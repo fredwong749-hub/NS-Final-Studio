@@ -20,6 +20,7 @@ import { sbUi } from "./StoryboardDetails.helpers";
 import type { V3Page } from "./TopBarV3.helpers";
 import { LiveIndicator } from "./LiveBridge";
 import { InfraChip } from "./InfraStatus";
+import { useInfra } from "./InfraStatus.helpers";
 import { ProduceButton } from "./EpisodeProduce"; // fredw-92/EB 整集出片
 import { useProduceView } from "./EpisodeProduce.helpers";
 import { Brand } from "../ds/Brand"; // momoso 标识（项目方挑定候选 2 · 双环）
@@ -207,6 +208,7 @@ export function TopBarV3({ page }: { page: V3Page | null }) {
   const pDone = (pc.done ?? 0) + (pc.skipped ?? 0);
   const pTotal = Object.values(pc).reduce((a, b) => a + b, 0);
   const etaMin = prod?.eta_s ? Math.max(1, Math.round(prod.eta_s / 60)) : null;
+  const infraOn = !!useInfra().data; // r39：顶栏连接胶囊有数据时，“出图未连上”不在按钮尾巴重复
   const qText = prodOn
     ? `整集 ${pDone}/${pTotal}${etaMin ? ` · 约 ${etaMin} 分钟` : ""}`
     : running || queued
@@ -367,7 +369,8 @@ export function TopBarV3({ page }: { page: V3Page | null }) {
         extraTitle={[prodOn ? `整集出片进行中：${pDone}/${pTotal} 步完成；画布队列 生成中 ${running} · 排队 ${queued}` : "", offline ? `${backend!.url} 连不上：${backend!.error ?? ""}` : "", interrupted ? `中断 ${interrupted}：API 重启时打断，不是画面问题，可重试` : ""].filter(Boolean).join("\n")}
         extra={
           <>
-            {prodOn || offline ? <span className="v3-q-int"> · {qText}</span> : null}
+            {/* UIRSI r39：“出图未连上”和顶栏连接胶囊重复，有连接状态时只留在悬停提示里（整集出片进度照常显示） */}
+            {prodOn || (offline && !infraOn) ? <span className="v3-q-int"> · {qText}</span> : null}
           </>
         }
       />

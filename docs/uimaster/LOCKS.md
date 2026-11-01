@@ -15,6 +15,7 @@
 
 | 文件 | 谁 | 到什么时候 |
 |---|---|---|
+| services/api/ns_api/infra_status.py（加 NETFIX 来源 + 派单模式）、services/api/ns_api/gpu_live.py（只改卡片离线文案）、apps/web/src/components/RenderTasks.tsx（只缩短顶栏按钮的数字字样）、apps/web/src/v3/{InfraStatus.tsx,InfraStatus.helpers.ts,TopBarV3.tsx} | UIRSI（r39，总调度 11-01 23:4x 派） | r39 收轮即释放 |
 | services/api/ns_api/live.py（新建：/api/events SSE + /api/progress） | UIRSI | 实时刷新做完（总调度 11-01 任务） |
 | services/api/ns_api/app.py（只加 include_router 两行） | UIRSI | 同上 |
 | apps/web/src/v3/live.ts、apps/web/src/ds/StageProgress.tsx、apps/web/src/v3/LiveBridge.tsx（新建） | UIRSI | 同上 |
@@ -74,6 +75,7 @@
 - CONSENT: AUTOPILOT -> CODERSI : tools/autopilot/resident_sync.py（push_dirs 抽函数 + push_gate：push / recover / video_up / bringup / switch / loop 推送前必须 push_check PASS，不过不推、不起常驻） | by 总调度 fredw-2b 11-01 18:5x：“push_check 做成 push / recover / video_up 的前置：不通过就不推、不起常驻。授权你改 resident_sync.py，CONSENT 写 AUTOPILOT → CODERSI……顺便按你的建议把 push 的目录计算抽成函数，push_check 直接调用”
 - CONSENT: ITERAUDIT -> CODERSI : tools/qa/iter_gate.py（只加 V2 系统版本提示一项） | by 总调度 fredw-2b 11-01 23:0x 派 CODE-RSI r3：“iter_gate 加一项：本轮改动是否已经进了某个版本，没进就提示”；项目方 22:5x“每一次迭代都是用 override system,然后用 create a new version 那个 system versions”
 - CONSENT: ITERAUDIT -> CODERSI : tools/qa/ownership.yaml（只在 CODERSI 条目加 system_version 文件） | by 总调度 fredw-2b 11-01 23:0x 派 CODE-RSI r3：“iter_gate 加一项：本轮改动是否已经进了某个版本，没进就提示”；项目方 22:5x“每一次迭代都是用 override system,然后用 create a new version 那个 system versions”
+- CONSENT: SCRIPT_RSI -> CODERSI : tests/test_hollywood.py（只改 test_head_exception_pencil_skirt_only：按 HEAD_EXCEPTIONS 反做得到导入前原稿） | by 总调度 fredw-2b 11-01 23:5x：“按‘测试跟着现行决定走’修……CONSENT 写 SCRIPT_RSI → CODERSI（HOLLYWOOD 已收工）”
 
 - CONSENT: AUTOPILOT -> ITERAUDIT : tools/pipeline/writer_prompt.py | by 总调度 fredw-2b 11-01：“tools/pipeline/writer_prompt.py 归 WORKFLOW（它在做紧急任务），总调度授权你改，在 docs/uimaster/LOCKS.md 写 CONSENT”（G29 方案 A 镜数上限；RSI 代录）
 - CONSENT: RECALL -> ITERAUDIT : tools/qa/decision_check.py | by 总调度 fredw-2b 11-01：“RECALL 名下的 decision_check.py、owner_decisions.yaml、MASTER_PICTURE.md 由总调度认领……写 CONSENT”（RSI 代录）
@@ -110,6 +112,7 @@
 - CONSENT: UIRSI -> BGM10 : services/api/ns_api/shot_audio.py | 总调度 11-01（_music_dir 指向 series10、挂 bgm 路由）
 - CONSENT: AUTOPILOT -> DATAALIGN : tools/pipeline/register_takes.py | 总调度 11-01（AUTOPILOT 不活跃；--video10 视频登记 + retract_stale_video10，D-VIDEO 任务）
 - CONSENT: UIRSI -> UIMASTER : apps/web/src/v3/**（仅 PW-019 导入路径改写：只改 import 行的路径，不碰其他逻辑；每步先在沙盒跑 tsc） | UIRSI 11-01
+- CONSENT: GPUVIEW -> UIRSI : apps/web/src/components/RenderTasks.tsx | by 总调度 fredw-2b 11-01 r39：“r38 顶栏变挤的问题，总调度的决定是 A + C……‘渲染任务’那段字缩短，CONSENT 写 GPUVIEW → UIRSI；卡片里‘ComfyUI 离线’改成大白话”
 - CONSENT: GPUVIEW -> UIRSI : services/api/ns_api/gpu_live.py | by 总调度 fredw-2b 11-01 r38 派单：“全局实时连接状态条……GPU 卡片里‘暂时连不上 N 秒’要说明原因……‘最近出图’缩略图裂图：查原因……修根因”
 - CONSENT: UIPIXEL -> UIRSI : apps/web/src/v3/infra.css | by 总调度 fredw-2b 11-01 r38 派单：“全局实时连接状态条……GPU 卡片里‘暂时连不上 N 秒’要说明原因……‘最近出图’缩略图裂图：查原因……修根因”（新建样式，UIPIXEL 不在岗）
 - CONSENT: UIPIXEL -> UIRSI : apps/web/src/ds/ZoomLayer.tsx | by 总调度 fredw-2b 11-01 r37：“P1-1 ZoomLayer：派给你，修法是让帧格自己处理点击，守住 G11 小图仍可放大”

@@ -48,6 +48,7 @@ STATUS_DOC = {
     "relay": "{up, checked_t, last_ok_t, down_since_t（不通时）, last_change_t}",
     "hosts.<h>": "{state: up|connecting|backoff|relay_down|stopped, pid, since_t（本条 ssh 起的时间）, up_since_t（端口全部通的时间）, "
                  "restarts, last_restart: {t, reason}, next_try_t, ports: {<本机口>: {remote, ok, why: ok|timeout|refused|remote_down, checked_t}}}",
+    "dispatch_mode": "派单模式（K-OPS-N06）：{override_active: 临时覆盖是否生效, phases: {gpu33|gpu36: laptop=该台分区由笔记本经隧道代派 | draining=正在交还 | server=服务器自己派}, checked_t}",
     "tunnels_up / tunnels_total": "出图 / 视频道（probe_http）通的条数 / 总数",
     "servers.<h>": "服务器自主生产：{last_health_t, last_pull_t, last_push_t, sync_age_min（最后一次并回距今分钟，界面“最后一次同步 xx 分钟前”用它）, producer_hb_age_min, producer_paused, night_state_age_min, dispatchable, autonomous: 跳板断时 true}（取自 resident_sync.json，跳板断时停在最后一次）",
 }
@@ -101,6 +102,26 @@ def pid_alive(pid: int | None) -> bool:
     try:
         code = ctypes.c_ulong()
         return bool(k.GetExitCodeProcess(h, ctypes.byref(code))) and code.value == STILL_ACTIVE
+    finally:
+        k.CloseHandle(h)
+
+
+class _IO(ctypes.Structure):
+    _fields_ = [(n, ctypes.c_ulonglong) for n in ("ReadOps", "WriteOps", "OtherOps", "ReadBytes", "WriteBytes", "OtherBytes")]
+
+
+def io_bytes(pid: int | None) -> int | None:
+    """进程累计读写字节（Windows GetProcessIoCounters）。ssh 在搬数据 = 没卡死，只是跳板慢（23:44 实测：笔记本经隧道派图时
+    探测 20 s 超时，按“卡死”杀掉会打断正在传的参考图 / 结果图）"""
+    if not pid or os.name != "nt":
+        return None
+    k = ctypes.windll.kernel32
+    h = k.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+    if not h:
+        return None
+    try:
+        c = _IO()
+        return (c.ReadBytes + c.WriteBytes + c.OtherBytes) if k.GetProcessIoCounters(h, ctypes.byref(c)) else None
     finally:
         k.CloseHandle(h)
 
@@ -222,7 +243,7 @@ class Supervisor:
                         self.log("ADOPT kill own ssh with stale forwards", hh, pid)
                         continue
                     if st["pid"] is None and pid_alive(pid):          # 上一个监管进程起的：认领，不打断
-                        st.update(pid=pid, since_t=now() - self.c.get("listen_grace_s", 45), state="connecting")
+                        st.update(pid=pid, since_t=now() - self.c.get("listen_grace_s", 45), state="up", up_since_t=now())   # 认领的按“通”算，卡死要连续 hang_rounds 轮（23:44 一轮就杀的教训）
                         self.log("ADOPT own ssh", hh, pid)
                     elif st["pid"] != pid:                            # 同 Tag 多出来的：杀
                         kill(pid)
@@ -245,7 +266,7 @@ class Supervisor:
             return
         p = subprocess.Popen(self.ssh_cmd(h), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                              stderr=open(self.dir / f"ssh_{h}.err.log", "ab"), creationflags=NOWIN)
-        st.update(pid=p.pid, since_t=now(), up_since_t=None, state="connecting", hang=0, probe_t=0.0)
+        st.update(pid=p.pid, since_t=now(), up_since_t=None, state="connecting", hang=0, probe_t=0.0, _io=None)
         st["_popen"] = p
         self.log("SPAWN", h, p.pid, reason)
 
@@ -295,6 +316,9 @@ class Supervisor:
         st["ports"] = {str(p): {"remote": rmap.get(p), "ok": r == "ok", "why": r, "checked_t": t} for p, r in res.items()}
         st["probe_t"] = t
         age = t - (st["since_t"] or t)
+        prev, cur = st.get("_io"), io_bytes(st["pid"])
+        st["_io"] = cur
+        moving = prev is not None and cur is not None and cur > prev + 4096
         if any(r in ("ok", "remote_down") for r in res.values()):   # ssh 通（至少一条通道打得开）
             st["hang"] = 0
             st["fails"] = 0
@@ -302,6 +326,11 @@ class Supervisor:
                 st["up_since_t"] = t
                 self.log("UP", h, st["pid"], {p: r for p, r in res.items()}, f"{age:.0f}s after spawn")
             st["state"] = "up"
+        elif moving:                                     # 探测超时但 ssh 在搬数据（> 4 KB / 轮）：跳板慢，不是卡死
+            st["hang"] = 0
+            for v in st["ports"].values():
+                v["why"] = "busy" if v["why"] == "timeout" else v["why"]
+            self.log("PROBE slow but ssh moving data", h, st["pid"], res)
         elif age >= self.c.get("listen_grace_s", 45) or st["state"] == "up":
             st["hang"] += 1
             self.log("PROBE fail", h, st["pid"], res, f"round {st['hang']}")
@@ -347,6 +376,13 @@ class Supervisor:
                 import dispatch
                 if dispatch.snapshot_laptop():
                     self.log("SNAPSHOT laptop_ctrl 已更新")
+                if t - getattr(self, "_rec_t", 0) >= 30:          # K-OPS-N06 临时覆盖：逐台交还状态机，30 s 一次
+                    self._rec_t = t
+                    r = dispatch.reconcile()
+                    self.mode = {"override_active": bool((dispatch.jl(dispatch.OVERRIDE, {}) or {}).get("active")),
+                                 "phases": r["phases"], "checked_t": t}
+                    if r.get("changed") or r.get("laptop_control"):
+                        self.log("DISPATCH", r)
             except Exception as e:  # noqa: BLE001
                 self.log("snapshot error", repr(e)[:200])
         self.write_status()
@@ -378,7 +414,7 @@ class Supervisor:
         js(self.status_p, {"schema": STATUS_DOC["schema"], "at": iso(), "t": now(),
                            "supervisor": {"pid": os.getpid(), "started_t": self.started, "conf": str(self.conf_path)},
                            "relay": self.relay, "hosts": pub, "tunnels_up": up, "tunnels_total": total,
-                           "servers": self.servers_view(), "_doc": STATUS_DOC})
+                           "servers": self.servers_view(), "dispatch_mode": getattr(self, "mode", None), "_doc": STATUS_DOC})
 
     def serve(self, max_s: float | None = None) -> None:
         self.log("START pid", os.getpid(), "conf", self.conf_path)

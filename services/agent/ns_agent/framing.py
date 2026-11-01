@@ -237,10 +237,12 @@ def two_shot_clause(n_people: int, subject: str | None) -> str:
     “互相看着对方……眼睛不看镜头”——同参考同 seed 2 个 seed，4 张脸看镜头 3 → 0（data/ab/video_rca/r1_img_gaze/faces.jpg，
     K-REN-703）。上面 SCRIPT-RSI 的正向句（TWO_SHOT_POSITIVE）还没实测；r2 做 3-seed A/B，若同样有效就改回正向句。
     ⤴ VIDEO-RCA r2（11-01 20:5x）A/B 完成（data/ab/video_rca/r5_img_twoshot/faces_01S5.jpg、faces_03S4.jpg，ep01-S5 / ep03-S4 × 3 seed，人工看脸）：
-    旧句看镜头 8/10 张脸；正向句 0–1/10（1 张存疑）；实测句 0/12 → 两句同样有效，按总调度决定改回正向句（K-REN-703）。"""
+    旧句看镜头 8/10 张脸；正向句 0–1/10（1 张存疑）；实测句 0/12 → 两句同样有效，按总调度决定改回正向句（K-REN-703）。
+    ⤴ VIDEO-RCA r3（11-01 22:5x，总调度亲审）：生产首批反例 ep01-S5 v5（data/renders/ep01/S5/takes/ 第 5 版，正向句）林晚、顾沉都正对镜头
+    → 按 G0 有实测证据的优先，切回实测句 TWO_SHOT_TESTED（A/B 0/12）。"""
     if n_people < 2 or subject in ("part", "object"):
         return ""
-    return TWO_SHOT_POSITIVE
+    return TWO_SHOT_TESTED
 
 
 TWO_SHOT_TESTED = ("两人同框，两张脸都清晰入画，两人以侧脸到四分之三侧脸互相看着对方，目光落在对方脸上，眼睛不看镜头"

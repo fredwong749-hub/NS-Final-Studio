@@ -7,6 +7,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools/netfix"))
 import dispatch as D  # noqa: E402
 import tunnel_supervisor as TS  # noqa: E402
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_real_override(monkeypatch, tmp_path):
+    """不读真机的临时覆盖状态（data/netfix/override_state.json）"""
+    monkeypatch.setattr(D, "OVERRIDE_STATE", tmp_path / "_none_state.json")
+    monkeypatch.setattr(D, "OVERRIDE", tmp_path / "_none_ov.json")
 
 
 # ---------------------------------------------------------------- K-OPS-N04 分区
@@ -189,3 +197,49 @@ def test_lan_proxy_binds_internal_only():
 def test_status_doc_fields():
     for k in ("relay", "hosts.<h>", "servers.<h>", "tunnels_up / tunnels_total"):
         assert k in TS.STATUS_DOC
+
+
+# ---------------------------------------------------------------- K-OPS-N06 临时覆盖：笔记本代派 + 逐台交还
+def test_override_laptop_takes_server_eps_and_servers_stop():
+    ph = {"gpu33": "laptop", "gpu36": "server"}
+    lap = D.control_for("laptop", {}, READY, ph=ph)
+    assert lap["only"] == ["ep01-S1", "ep01-S2", "ep10-S1"]               # gpu33 的 ep01 归笔记本，gpu36 的 ep02 不动
+    assert "gpu33:0" not in lap["hold_lanes"] and "gpu36:0" in lap["hold_lanes"]
+    assert D.control_for("gpu33", {}, READY, ph=ph)["only"] == [D.NONE]
+    assert D.control_for("gpu36", {}, READY, ph=ph)["only"] == ["ep02-S1"]
+    for p in ("laptop", "draining"):                                      # 交还中两边都不派该台的集
+        assert D.control_for("gpu33", {}, READY, ph={"gpu33": p, "gpu36": "server"})["only"] == [D.NONE]
+    assert "ep01-S1" not in D.control_for("laptop", {}, READY, ph={"gpu33": "draining", "gpu36": "server"})["only"]
+
+
+def test_reconcile_hands_back_only_after_assets_ready_and_leases_done(monkeypatch, tmp_path):
+    for name, val in (("OVERRIDE", tmp_path / "ov.json"), ("OVERRIDE_STATE", tmp_path / "st.json"), ("ASSETS_READY", tmp_path / "ar.json"),
+                      ("LEASES", tmp_path / "leases"), ("CONTROL", tmp_path / "control.json"), ("READY", tmp_path / "ready.json")):
+        monkeypatch.setattr(D, name, val)
+    D.js(D.OVERRIDE, {"active": True, "laptop_hold": ["gpu36:2"]})
+    D.js(D.READY, READY)
+    D.js(D.OVERRIDE_STATE, {"hosts": {"gpu33": {"phase": "laptop"}, "gpu36": {"phase": "laptop"}}})
+    D.js(D.LEASES / "first_ep02-S1.json", {"until": 9e12})
+    assert D.reconcile()["phases"] == {"gpu33": "laptop", "gpu36": "laptop"}
+    D.js(D.ASSETS_READY, {"gpu36": {"ready": True}})
+    assert D.reconcile()["phases"]["gpu36"] == "draining"
+    assert D.reconcile()["phases"]["gpu36"] == "draining"                # ep02 还有在途租约
+    assert "ep02-S1" not in D.jl(D.CONTROL)["only"]
+    D.js(D.LEASES / "first_ep02-S1.json", {"until": 0})
+    assert D.reconcile()["phases"] == {"gpu33": "laptop", "gpu36": "server"}
+
+
+def test_timeouts_while_ssh_moves_data_is_not_hang(monkeypatch, tmp_path):
+    s = FakeSup(tmp_path)
+    _patch(monkeypatch, s)
+    s.tick()
+    s.tick()
+    io = {"v": 0}
+    monkeypatch.setattr(TS, "io_bytes", lambda pid: io["v"])
+    for p in (18188, 18189, 18191):
+        s.probe[p] = "timeout"
+    for _ in range(s.c["hang_rounds"] + 2):                    # 跳板慢、隧道在传图：探测全超时但字节在涨
+        io["v"] += 100000
+        s.hosts["gpu33"]["probe_t"] = 0
+        s.tick()
+    assert s.killed == [] and s.hosts["gpu33"]["ports"]["18188"]["why"] == "busy"

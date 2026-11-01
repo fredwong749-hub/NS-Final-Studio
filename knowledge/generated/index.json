@@ -1,6 +1,6 @@
 {
- "kb_version": "kb-20261101-0707fcf8",
- "n": 444,
+ "kb_version": "kb-20261101-acf10d70",
+ "n": 445,
  "by_domain": {
   "render": 76,
   "prompt": 27,
@@ -9,7 +9,7 @@
   "review": 56,
   "loop": 9,
   "asset": 40,
-  "ops": 90,
+  "ops": 91,
   "ui": 51
  },
  "by_link": {
@@ -24,9 +24,9 @@
   "P4-P6": 23,
   "P4-P7": 22,
   "P4-P9": 16,
-  "P5-P6": 109,
+  "P5-P6": 110,
   "P6-P7": 25,
-  "P7-P8": 92,
+  "P7-P8": 93,
   "P8-P10": 13,
   "P8-P9": 10,
   "P9-P10": 15
@@ -3079,6 +3079,28 @@
    "_file": "knowledge/rules/netfix.yaml"
   },
   {
+   "id": "K-OPS-N06",
+   "domain": "ops",
+   "link": [
+    "P5-P6",
+    "P7-P8"
+   ],
+   "title": "服务器资产没到位时，由笔记本临时代派（经隧道）；逐台交还走 laptop → draining → server 两阶段，任何时刻同一集只有一个 producer 派",
+   "when": "服务器常驻 producer 被 preflight（缺设定图 / refcrops / 单品图）整批挡下，而笔记本资产齐全",
+   "then": "config/netfix/override.json active=true；data/netfix/override_state.json 每台 phase；开启顺序 = 先把服务器 server-control 写成 only=__none__ 并确认 inflight=0、无租约，再 reconcile 放开笔记本（only = 笔记本分区 ∪ phase=laptop 的服务器分区，hold 只挂 override.laptop_hold）；交还 = data/autopilot/assets_ready.json <host>.ready=true → draining（笔记本去掉该台集 + hold 该台道）→ 笔记本在该台集上的租约全部结束 → server。监管进程 30 s 一次 dispatch.reconcile()；net_status.dispatch_mode 显示。隧道卡死判定看 ssh 进程读写字节：在搬数据就不是卡死（跳板慢时不许杀正在传图的隧道）",
+   "check": "tests/test_netfix.py::test_reconcile_hands_back_only_after_assets_ready_and_leases_done",
+   "evidence": [
+    {
+     "src": "data/producer/log.jsonl",
+     "note": "23:43:52 覆盖生效后笔记本第一单 first:ep01-S1 → gpu33:1，23:45:45 rendered；23:44:37 监管重载一轮探测超时误杀 gpu36 隧道 → ep01-S2/S3 两次 infra_error（已改：认领按通算 + 读写字节判活）"
+    }
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-01",
+   "_file": "knowledge/rules/netfix.yaml"
+  },
+  {
    "id": "K-OPS-Q30",
    "domain": "ops",
    "link": [
@@ -3315,7 +3337,7 @@
    ],
    "title": "每次迭代收轮后发一个系统版本（规则 + 代码 + 配置 + 文档的 git 快照 sv-YYYYMMDD-NN），部署 = 用这一版覆盖服务器，回退 = 回到某一版",
    "when": "任何 loop 收轮（iter_gate 通过或宣布完成）；总调度巡检时；并发的多个 loop 合并进同一个版本",
-   "then": "总调度跑 .venv/Scripts/python.exe tools/qa/system_version.py cut（闸门 syntax_guard / compile --check / decision_check 0 ❌ / decision_propagation / 定向 pytest，任一不过不发版；git 只提交 .gitignore 口径的代码 / 规则 / 配置 / 文档，commit 带 Co-Authored-By，打 tag；写 docs/system_versions/<sv>.md、INDEX.md、data/system_versions/index.json），再 deploy（resident_sync 第一级推送 + push_gate + 按该版本快照逐个核 sha + 服务器 data/system_version.txt + 热重启）。回退只用 rollback 生成命令和差异预览，执行要总调度确认。iter_gate V2：本轮改动没进任何版本 → 提示",
+   "then": "总调度跑 .venv/Scripts/python.exe tools/qa/system_version.py cut（闸门 syntax_guard / compile --check / decision_check 0 ❌ / decision_propagation / 定向 pytest，任一不过不发版；git 只提交 .gitignore 口径的代码 / 规则 / 配置 / 文档，commit 带 Co-Authored-By，打 tag；写 docs/system_versions/<sv>.md、INDEX.md、data/system_versions/index.json；打 tag 后推前密钥扫描、git push origin <分支> --follow-tags，命中不推并报警 data/qa/alerts.jsonl，推送失败不影响发版——项目方 23:0x 授权，仅限发版流程），再 deploy（resident_sync 第一级推送 + push_gate + 按该版本快照逐个核 sha + 服务器 data/system_version.txt + 热重启）。回退只用 rollback 生成命令和差异预览，执行要总调度确认。iter_gate V2：本轮改动没进任何版本 → 提示",
    "check": [
     "tools/qa/system_version.py",
     "tests/test_system_version.py",
@@ -5848,7 +5870,7 @@
    ],
    "title": "首帧出图的系统句不得要求人脸“朝向镜头”；看镜头的根在首帧（视频继承首帧视线）",
    "when": "ns_agent.framing.two_shot_clause（双人镜出图系统句）、asset_refs 视线句；frame_v9 唯一出图路径",
-   "then": "双人句用正向句 framing.TWO_SHOT_POSITIVE“侧脸到四分之三侧脸，各自的视线落在画面里的人或物上（… each gaze resting on a person or object in the scene）”（SCRIPT-RSI D-SCR-07）。⤴ 11-01 19:2x 曾按证据例外换成实测句 TWO_SHOT_TESTED（“互相看着对方……眼睛不看镜头”，r1 2 seed 3/4 → 0/4）；r2 3-seed A/B（ep01-S5、ep03-S4）：旧句看镜头 8/10 张脸、正向句 0–1/10、实测句 0/12，两句同样有效 → 按总调度 r2 决定改回正向句。具体落点由剧本 img 写（QW-A7 / K-REN-G06）；VQAGATE Q9 看镜头闸门是拦截层",
+   "then": "双人句用实测句 framing.TWO_SHOT_TESTED“两人以侧脸到四分之三侧脸互相看着对方，目光落在对方脸上，眼睛不看镜头（… each looking at the other person, eyes off the lens）”。⤴ 11-01 22:5x 生产首批反例 ep01-S5 v5（data/renders/ep01/S5/takes/ 第 5 版，用的是正向句 TWO_SHOT_POSITIVE）林晚、顾沉都正对镜头（总调度亲审）→ 按 G0 有实测证据的优先切回实测句（r2 A/B：旧 8/10、正向 0–1/10、实测 0/12）。此前：19:2x 证据例外换实测句 → 20:5x A/B 后改回正向句（SCRIPT-RSI D-SCR-07）→ 本次再切回。具体落点由剧本 img 写（QW-A7 / K-REN-G06）；VQAGATE Q9 看镜头闸门是拦截层",
    "check": [
     "tests/test_video_rca.py",
     "tests/test_script_rsi_eyeline.py"
@@ -5873,6 +5895,10 @@
     {
      "src": "data/ab/video_rca/r5_img_twoshot/",
      "note": "r2：旧 8/10、正向 0–1/10、实测 0/12（3 seed × 2 镜，人工看脸）"
+    },
+    {
+     "src": "data/renders/ep01/S5/takes/",
+     "note": "生产反例：第 5 版（正向句）两人都正对镜头（总调度 11-01 22:5x 亲审）"
     }
    ],
    "confidence": "high",

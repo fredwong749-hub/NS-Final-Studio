@@ -14,13 +14,15 @@ export function InfraChip() {
   // 顶栏挤：胶囊只写“连接 5/6”这种短字，整句放悬停和弹层
   const n = data?.tunnels.length ?? 0;
   // 全部正常时只留一个绿点（悬停有整句），省出顶栏位置给步骤条；有断的才写字
-  const label = !data ? "连接…" : !data.relay.ok ? "跳板断了" : data.level === "ok" ? null : `连接 ${n - bad}/${n}`;
+  // r39（总调度定 A）：断线时只写“0/6”这类短格式，整句在悬停和弹层里
+  const label = !data ? "…" : !data.relay.ok ? "跳板断" : data.level === "ok" ? null : `${n - bad}/${n}`;
   return (
     <Pop
       className="infra-pop"
       btnClass={`infra-chip lv-${lv}`}
       align="right"
-      title={data ? `${data.summary}（${data.at} 更新）；点开看每条连接` : "正在读连接状态"}
+      title={data ? `连接状态：${data.summary}（${data.at} 更新）${data.dispatch ? `
+派图：${data.dispatch.text}` : ""}；点开看每条连接` : "正在读连接状态"}
       label={
         <>
           <i className={`infra-dot ${lv}`} aria-hidden="true" />
@@ -53,6 +55,13 @@ export function InfraPanel({ d, compact = false }: { d: InfraStatus | null; comp
       )}
       {!compact && (
         <>
+          {d.dispatch && (
+            <div className="infra-row">
+              <span className="infra-k">派图</span>
+              <i className={`infra-dot ${d.dispatch.override ? "warn" : "ok"}`} aria-hidden="true" />
+              <span>{d.dispatch.text}</span>
+            </div>
+          )}
           <div className="infra-row">
             <span className="infra-k">跳板</span>
             <i className={`infra-dot ${dotOf(d.relay.ok)}`} aria-hidden="true" />

@@ -162,3 +162,4 @@
   4. 并回：merge_pull 按新归属收文件。
   任一步跳板断开，就停在“两边都不派”的安全侧，不会两边重复派单。粒度只能是整集，不能按对象拆。
 - **8871 收编**（23:0x）：VQAGATE 的看图隧道 8871 → gpu36:8870 已并入 gpu36 主连接，`tools/vqa/tunnel.ps1` 退役，现在只调用 ensure。收编前确认过：服务 queue=0，最后一次看图在 172 s 前，8871 上没有在途连接。
+- **临时覆盖（23:4x，K-OPS-N06）**：服务器缺资产期间，由笔记本经隧道代派两台服务器的分区，服务器 only=__none__。哪台 `data/autopilot/assets_ready.json` 里 ready=true，那台就先进入 draining，再交还给服务器自己派单。当前模式看 `data/netfix/net_status.json` 的 dispatch_mode。

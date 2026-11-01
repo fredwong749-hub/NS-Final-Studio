@@ -56,7 +56,10 @@ MIN_SHOTS = DUR_WINDOW[0] // SHOT_S               # 60 秒 → 至少 10 镜
 # 人物卡不变量（I2 集头逐字）的唯一例外：项目方 11-01 21:4x AskUserQuestion 选“允许，改成铅笔裙 (Recommended)”（L-092 / D-SCR-08b）——
 # 只限 ep01 林晚造型行“深灰西装裙”→“深灰铅笔裙”这一处字面（EN 本来就是 dark grey pencil skirt），造型本身不变；新增例外须项目方原话（RSI r7 登记）
 HEAD_EXCEPTIONS: dict[int, list[tuple[str, str, str]]] = {1: [("**造型｜林晚**", "深灰西装裙", "深灰铅笔裙")]}
-ZERO_CODES: list[str] = []                        # 要求降到 0 的新 lint（K-WRT-702 = QW-W11，RSI r7 定号；由 --zero-codes 传入）
+ZERO_CODES: list[str] = []
+# r4（项目方 11-02 AskUserQuestion 选“允许改台词，出审片页 (Recommended)”）：评审扣分项（钩子 / 转折 / 潜台词）多半要动台词，
+# I1 冻结下 10 集卡在 36–42.5/50。--free-dialogue：I1 只记录不作废；说话人仍受 I3（不新增人物）约束；一律不导入，出审片页由项目方审
+FREE_DIALOGUE = [False]                        # 要求降到 0 的新 lint（K-WRT-702 = QW-W11，RSI r7 定号；由 --zero-codes 传入）
 COST_CAP_USD = 1.0                                # 试点预算（总调度：约 1 美元）
 EPISODE_CODES = {"QW-E2", "QW-E3", "QW-E6b"}      # 集级 / 集头码：逐镜返修修不了
 FROZEN_MARK = "造型｜"                             # 集头人物卡 / 造型行上的 P4 阻断：人物卡不变量冻结，单列给总调度
@@ -174,7 +177,9 @@ def constraints_text(ep_obj, base_lint: dict) -> str:
              f"- 全集 **时长** 之和：{lo}–{hi} 秒（项目方 11-01 定：每集 60–120 秒，D-SCR-08）。原稿 {sum(int(s.duration or 0) for s in ep_obj.shots)} 秒。",
              f"- 镜数：6 ≤ 镜数 ≤ max(8, 说话轮次 + 独白段数 = {turns_mono}, ⌈全集秒数 ÷ 6⌉)（D-SCR-06）：{caps}。原稿 {len(ep_obj.shots)} 镜。",
              "- 单镜时长（QW-T1）：没有台词 / 独白的镜 ≤6 秒；有台词 / 🎙 的镜 ≤ max(6, 台词字数 ÷ 4.5 + 1.5) 秒；每镜 4–15 秒整数。",
-             "- 台词与 🎙（逐字、同说话人、全集同顺序，一条不增不减；可以放进不同的镜，但顺序不变）："]
+             ("- 台词与 🎙：**本轮项目方已放开台词冻结**（接入说明第 1 条本轮不适用）——可以按评审意见改写、增删台词 / 🎙，"
+              "说话人只能是本集已有人物；台词改了配音要重做，只在明显提分（钩子 / 转折 / 潜台词 / 目标赌注）时改。原稿台词（参考）："
+              if FREE_DIALOGUE[0] else "- 台词与 🎙（逐字、同说话人、全集同顺序，一条不增不减；可以放进不同的镜，但顺序不变）：")]
     lines += [f"  {i + 1}. {x}" for i, x in enumerate(seq)]
     lines += ["- 原稿 lint 计数（每个码都不能变多；能少更好）：" + (json.dumps(base_lint["codes"], ensure_ascii=False) or "{}"),
               "  上次容易变多的码（规则原文）：" + "；".join(rule_text(c) for c in ("QW-A5", "QW-K3", "QW-LK2", "QW-W5", "H3-X1", "QW-CH4")),
@@ -223,7 +228,7 @@ def writer_user_fix(ep: int, pre: str, chunk: str, ep_obj, base_lint: dict, plan
               "两种输出任选其一：A）镜数不变：先 ```json（只含被改镜的 shots 条目），再只输出被改的完整镜头块（镜号不变）；"
               "B）评审要求拆镜 / 合镜（例如 Pika 能力项：一镜里有披衣、站起再走开等多个大动作）时：先 ```json（完整方案），"
               f"再输出全部镜头块（镜号 1..N 连续；每镜 {SHOT_S} 秒，总秒数 = {SHOT_S}×N，N ≤ {DUR_WINDOW[1] // SHOT_S}；"
-              "台词 / 🎙 逐字同序；没被点名的镜内容照抄当前版本）。"]
+              + ("台词按上面的放开说明；" if FREE_DIALOGUE[0] else "台词 / 🎙 逐字同序；") + "没被点名的镜内容照抄当前版本）。"]
     if note:
         parts += ["", f"上一次的回复没有被采用（系统校验）：{note}"]
     return "\n".join(parts)
@@ -410,7 +415,11 @@ def gate(pre: str, orig: str, cand: str, ep: int, base_lint: dict, wd: Path) -> 
         return res
     add("I0", "能导入", True, f"{len(B.shots)} 镜")
     sa, sb = FR.dialogue_seq(A), FR.dialogue_seq(B)
-    add("I1", "台词 / 🎙 逐字同序", sa == sb, "一致" if sa == sb else f"原 {sa} → 新 {sb}"[:500])
+    if FREE_DIALOGUE[0]:
+        res["checks"].append({"id": "I1", "name": "台词 / 🎙 改动（项目方 11-02 放开，只记录）", "ok": sa == sb, "report_only": True,
+                              "detail": "一致" if sa == sb else f"原 {sa} → 新 {sb}"[:1500]})
+    else:
+        add("I1", "台词 / 🎙 逐字同序", sa == sb, "一致" if sa == sb else f"原 {sa} → 新 {sb}"[:500])
     add("I2", "集头逐字（剧情 / 人物卡 / 造型）", RL.block_text(orig, "head") == RL.block_text(cand, "head"), "系统保留原集头")
     sc_a, sc_b = {s.scene_id for s in A.shots}, {s.scene_id for s in B.shots}
     nm = lambda E: {c.name for s in E.shots for c in (s.cast or [])}   # noqa: E731
@@ -453,7 +462,8 @@ def apply_head_exceptions(chunk: str, ep: int) -> tuple[str, list[str]]:
 
 
 def gate_note(g: dict) -> str:
-    s = "；".join(f"{c['id']} {c['name']} 不满足：{c['detail']}" for c in g["checks"] if not c["ok"])[:1500]
+    s = "；".join(f"{c['id']} {c['name']} 不满足：{c['detail']}" for c in g["checks"]
+                 if not c["ok"] and not (c["id"] == "I1" and c.get("report_only")))[:1500]
     if g.get("worse"):
         s += "\n变多的码的规则原文：" +"；".join(rule_text(c) for c in g["worse"])[:1500]
     return s
@@ -532,6 +542,7 @@ def cmd_run(a) -> int:
     pre, chunks = RL.split_doc(text)
     orig, ep = chunks[0], a.episode
     ZERO_CODES[:] = [c.strip() for c in (a.zero_codes or "").split(",") if c.strip()]
+    FREE_DIALOGUE[0] = bool(getattr(a, "free_dialogue", False))
     orig, head_exc = apply_head_exceptions(orig, ep)
     if a.stub:
         writer, judge = Stub("writer", orig), Stub("judge")
@@ -656,7 +667,7 @@ def cmd_run(a) -> int:
                                     for m in [re.search(r"\[((?:QW|H3)-[A-Z0-9]+)\]", s)] if m})
                 fixable = sorted(set(fixable) | {c for c in ZERO_CODES if (g.get("lint") or {}).get("codes", {}).get(c)})
                 fixable = [x for x in fixable if x not in EPISODE_CODES]
-                only_lint = all(ch["ok"] for ch in g["checks"] if ch["id"] not in ("I6", "I7", "I8"))
+                only_lint = all(ch["ok"] or ch.get("report_only") for ch in g["checks"] if ch["id"] not in ("I6", "I7", "I8"))
                 force = [f"ep{ep:02d}-S{m.group(1)}=QW-W5:{x.split('：', 1)[-1][:200]}" for x in (g.get("lint") or {}).get("shot_block", [])
                          for m in [re.search(r"\[QW-W5\] 镜(\d+)", x)] if m]
                 if not g["ok"] and only_lint and (fixable or force):
@@ -715,7 +726,7 @@ def cmd_run(a) -> int:
     best = rounds[best_idx] if best_idx is not None else None
     report = {"schema": "nsfs.hollywood/1", "episode": ep, "at": time.strftime("%F %T"), "sources": rec, "stub": a.stub,
               "dur_window": DUR_WINDOW, "base_lint": base_lint, "rounds": rounds, "head_exceptions": head_exc,
-              "zero_codes": list(ZERO_CODES),
+              "zero_codes": list(ZERO_CODES), "free_dialogue": FREE_DIALOGUE[0],
               "selected_round": best["round"] if best else None}
     if best and best["round"] > 0:
         _, bc = RL.split_doc((od / best["chunk"]).read_text(encoding="utf-8"))
@@ -872,7 +883,10 @@ def cmd_ship(a) -> int:
     import subprocess
     root = Path(a.out_dir)
     e = a.episode
-    rc = cmd_run(argparse.Namespace(episode=e, out_dir=str(root / f"ep{e:02d}"), stub=False, budget=a.budget, zero_codes=a.zero_codes))
+    if getattr(a, "free_dialogue", False):
+        a.no_import = True                        # 台词放开的版本只出审片页，导入由项目方审过再定
+    rc = cmd_run(argparse.Namespace(episode=e, out_dir=str(root / f"ep{e:02d}"), stub=False, budget=a.budget, zero_codes=a.zero_codes,
+                                    free_dialogue=getattr(a, "free_dialogue", False)))
     m = argparse.Namespace(out_dir=str(root), episodes=str(e), note=a.note)
     if cmd_merge(m) != 0 or a.no_import:
         return 1 if not a.no_import else rc
@@ -1227,6 +1241,7 @@ def main(argv=None) -> int:
     r.add_argument("--stub", action="store_true")
     r.add_argument("--budget", type=float, default=COST_CAP_USD)
     r.add_argument("--zero-codes", default="", help="要求降到 0 的新 lint 码（逗号分隔，如 K-WRT-702 的 QW 号）")
+    r.add_argument("--free-dialogue", action="store_true", help="台词放开（项目方 11-02）：I1 只记录不作废")
     p = sub.add_parser("page")
     p.add_argument("--out-dir", required=True)
     p.add_argument("--html", required=True)
@@ -1244,6 +1259,7 @@ def main(argv=None) -> int:
     sh.add_argument("--zero-codes", default="")
     sh.add_argument("--note", default="")
     sh.add_argument("--no-import", action="store_true")
+    sh.add_argument("--free-dialogue", action="store_true", help="台词放开（项目方 11-02）：I1 只记录；隐含 --no-import")
     fx = sub.add_parser("fixup", help="专项返修：作废候选里只差 lint 的那版逐镜返修变多的码")
     fx.add_argument("--out-dir", required=True)
     fx.add_argument("--budget", type=float, default=1.0)

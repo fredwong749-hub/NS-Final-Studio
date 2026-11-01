@@ -184,7 +184,7 @@ def run(code_only: bool = False, freeze: float | None = None, server: Path | Non
                     for mm in tf.getmembers():
                         if not mm.isfile():
                             continue
-                        packed_at[mm.name] = t_pack
+                        packed_at.setdefault(mm.name, t_pack)   # 记第一次打包时刻：之后被改过 = 打包后别的 loop 又改（下一次 push 会补），不算不收敛
                         got = tf.extractfile(mm).read()
                         f = src / mm.name
                         if f.exists() and got != f.read_bytes():

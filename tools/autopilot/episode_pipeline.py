@@ -199,17 +199,23 @@ def kickoff(st: dict) -> dict:
         return st["kickoff"]
     res = {"at": time.strftime("%F %T")}
     ps = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass"]
-    r1 = subprocess.run(ps + ["-File", str(ROOT / "ops/autostart/restart_producer.ps1")], capture_output=True, text=True,
-                        encoding="utf-8", errors="replace", timeout=1800)
-    res["restart_producer"] = {"rc": r1.returncode, "out": (r1.stdout + r1.stderr).strip()[-300:]}
-    r2 = subprocess.run(ps + ["-Command", "$env:VQA_WIN_N='0'; & 'D:\\ns_vqa\\start.ps1' -Restart"], capture_output=True, text=True,
-                        encoding="utf-8", errors="replace", timeout=600)
-    res["vqa_restart"] = {"rc": r2.returncode, "out": (r2.stdout + r2.stderr).strip()[-300:], "VQA_WIN_N": 0,
-                          "baseline_until": time.strftime("%F %T", time.localtime(time.time() + 1800))}
-    r3 = subprocess.run([sys.executable, str(ROOT / "tools/autopilot/producer.py"), "resume", "--by", "WORKFLOW episode_pipeline",
-                         "--note", "逐集流水线：第一集导入、作业转绿（总调度 22:2x 预先授权）"], capture_output=True, text=True,
-                        encoding="utf-8", errors="replace", timeout=120, cwd=ROOT, env={**os.environ, "PYTHONUTF8": "1"})
-    res["resume"] = {"rc": r3.returncode, "out": (r3.stdout + r3.stderr).strip()[-300:]}
+    # 23:1x 实测：capture_output=True 时，restart_producer.ps1 用 Start-Process 拉起的 producer 继承了管道句柄，
+    # subprocess.run 一直等管道 EOF（producer 不退出就永远等）→ 开工卡在第 1 步。改为输出写文件、不接管道
+    lf = OUT / "kickoff.log"
+
+    def run(args, timeout, env=None):
+        with open(lf, "a", encoding="utf-8") as fh:
+            fh.write(time.strftime("%F %T ") + " ".join(map(str, args)) + chr(10))
+            fh.flush()
+            r = subprocess.run(args, stdin=subprocess.DEVNULL, stdout=fh, stderr=subprocess.STDOUT, timeout=timeout,
+                               cwd=ROOT, env=env or {**os.environ, "PYTHONUTF8": "1"})
+        return {"rc": r.returncode, "log": str(lf.relative_to(ROOT))}
+    res["restart_producer"] = run(ps + ["-File", str(ROOT / "ops/autostart/restart_producer.ps1")], 1800)
+    res["vqa_restart"] = {**run(ps + ["-Command", r"& 'D:\ns_vqa\start.ps1' -Restart"], 600,
+                                env={**os.environ, "VQA_WIN_N": "0", "PYTHONUTF8": "1"}),
+                          "VQA_WIN_N": 0, "baseline_until": time.strftime("%F %T", time.localtime(time.time() + 1800))}
+    res["resume"] = run([sys.executable, str(ROOT / "tools/autopilot/producer.py"), "resume", "--by", "WORKFLOW episode_pipeline",
+                         "--note", "逐集流水线：第一集导入、作业转绿（总调度 22:2x 预先授权）"], 120)
     st["kickoff"] = res
     log("kickoff", json.dumps(res, ensure_ascii=False)[:600])
     return res

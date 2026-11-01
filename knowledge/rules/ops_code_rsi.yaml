@@ -82,7 +82,7 @@ rules:
     link: [P11-RETRY]
     title: 每次迭代收轮后发一个系统版本（规则 + 代码 + 配置 + 文档的 git 快照 sv-YYYYMMDD-NN），部署 = 用这一版覆盖服务器，回退 = 回到某一版
     when: 任何 loop 收轮（iter_gate 通过或宣布完成）；总调度巡检时；并发的多个 loop 合并进同一个版本
-    then: 总调度跑 .venv/Scripts/python.exe tools/qa/system_version.py cut（闸门 syntax_guard / compile --check / decision_check 0 ❌ / decision_propagation / 定向 pytest，任一不过不发版；git 只提交 .gitignore 口径的代码 / 规则 / 配置 / 文档，commit 带 Co-Authored-By，打 tag；写 docs/system_versions/<sv>.md、INDEX.md、data/system_versions/index.json），再 deploy（resident_sync 第一级推送 + push_gate + 按该版本快照逐个核 sha + 服务器 data/system_version.txt + 热重启）。回退只用 rollback 生成命令和差异预览，执行要总调度确认。iter_gate V2：本轮改动没进任何版本 → 提示
+    then: 总调度跑 .venv/Scripts/python.exe tools/qa/system_version.py cut（闸门 syntax_guard / compile --check / decision_check 0 ❌ / decision_propagation / 定向 pytest，任一不过不发版；git 只提交 .gitignore 口径的代码 / 规则 / 配置 / 文档，commit 带 Co-Authored-By，打 tag；写 docs/system_versions/<sv>.md、INDEX.md、data/system_versions/index.json；打 tag 后推前密钥扫描、git push origin <分支> --follow-tags，命中不推并报警 data/qa/alerts.jsonl，推送失败不影响发版——项目方 23:0x 授权，仅限发版流程），再 deploy（resident_sync 第一级推送 + push_gate + 按该版本快照逐个核 sha + 服务器 data/system_version.txt + 热重启）。回退只用 rollback 生成命令和差异预览，执行要总调度确认。iter_gate V2：本轮改动没进任何版本 → 提示
     check: [tools/qa/system_version.py, tests/test_system_version.py, tools/qa/iter_gate.py]
     evidence:
       - {src: docs/CHANGELOG_AGENTS.md, note: "项目方 11-01 22:5x：“记得每一次 iterate 完把东西记录下来……每一次迭代都是用 override system,然后用 create a new version 那个 system versions”（总调度 fredw-2b 派 CODE-RSI r3）"}

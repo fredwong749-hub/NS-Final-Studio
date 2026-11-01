@@ -67,8 +67,22 @@ def test_k_wrt_h03_duration_window_60_120_and_plan(H, ep01, tmp_path):
     assert shot_cap  # 公式同源
 
 
+def _before_exception(H, chunk, ep):
+    """CODE-RSI 11-01（K-OPS-C02）：23:21 HOLLYWOOD 10 集已导入，现行剧本 ep01 集头已经是例外替换后的“深灰铅笔裙”。
+    按 HEAD_EXCEPTIONS 把替换反做回去，得到导入前原稿，测试不再依赖真实剧本处在哪个状态"""
+    head = H.RL.block_text(chunk, "head")
+    lines = head.split("\n")
+    for mark, old, rep in H.HEAD_EXCEPTIONS.get(ep, []):
+        for i, ln in enumerate(lines):
+            if ln.startswith(mark) and rep in ln and old not in ln:
+                lines[i] = ln.replace(rep, old)
+    back = "\n".join(lines)
+    return H.RL.splice(chunk, "head", back) if back != head else chunk
+
+
 def test_head_exception_pencil_skirt_only(H, ep01):
-    pre, orig = ep01
+    pre, cur = ep01
+    orig = _before_exception(H, cur, 1)
     new, done = H.apply_head_exceptions(orig, 1)
     assert done and "深灰铅笔裙" in H.RL.block_text(new, "head")
     a, b = H.RL.block_text(orig, "head").splitlines(), H.RL.block_text(new, "head").splitlines()
@@ -117,3 +131,25 @@ def test_partial_reply_keeps_shot_count(H, ep01):
     assert not err and list(bmap) == [1]
     _, _, err2 = H.parse_partial('```json\n{}\n```\n\n' + blk.replace("**镜1｜img**", "**镜12｜img**", 1), 9)
     assert err2
+
+
+def test_free_dialogue_i1_report_only(H, ep01, tmp_path, monkeypatch):
+    """项目方 11-02 选“允许改台词，出审片页”：--free-dialogue 下台词改动只记录（I1 report_only），不作废、不进写作方的校验说明"""
+    import p4_adapter
+    monkeypatch.setattr(p4_adapter, "TMP", tmp_path)
+    pre, orig = ep01
+    base = H.lint(orig, 1)
+    line = H.FR.dialogue_seq(H.episode_obj(pre, orig, 1, tmp_path))[0].split("|", 1)[1]
+    cand = orig.replace(line, line.rstrip("。！？") + "，听见没有。", 1)
+    try:
+        H.FREE_DIALOGUE[0] = False
+        g = H.gate(pre, orig, cand, 1, base, tmp_path)
+        assert not next(c for c in g["checks"] if c["id"] == "I1")["ok"] and not g["ok"]
+        H.FREE_DIALOGUE[0] = True
+        g = H.gate(pre, orig, cand, 1, base, tmp_path)
+        i1 = next(c for c in g["checks"] if c["id"] == "I1")
+        assert i1["report_only"] and not i1["ok"] and "听见没有" in i1["detail"]
+        assert "I1" not in H.gate_note(g)
+        assert "已放开台词冻结" in H.constraints_text(H.episode_obj(pre, orig, 1, tmp_path), base)
+    finally:
+        H.FREE_DIALOGUE[0] = False

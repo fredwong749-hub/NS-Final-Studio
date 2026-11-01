@@ -488,8 +488,9 @@ def code_changed_since(t: float) -> bool:
     return False
 
 
-CONTROL_FILES = ["data/producer/master_rejects.json", "data/autopilot/ready_episodes.json", "data/netfix/laptop_ctrl.json"]
-OVERWRITE_FILES = {"data/netfix/laptop_ctrl.json"}      # 笔记本 control 的快照：整文件覆盖
+CONTROL_FILES = ["data/producer/master_rejects.json", "data/autopilot/ready_episodes.json", "data/netfix/laptop_ctrl.json",
+                 "data/netfix/override_state.json"]   # NETFIX 23:4x：临时覆盖状态，server-control 据此知道某台已交还
+OVERWRITE_FILES = {"data/netfix/laptop_ctrl.json", "data/netfix/override_state.json"}      # 笔记本 control 的快照：整文件覆盖
 REMOTE_MERGE = r"""
 import json, os, sys
 R = "__R__"; rel = sys.argv[1]; src = sys.argv[2]
@@ -512,7 +513,7 @@ try:
 except Exception:
     cur = {}
 out = dict(cur)
-if rel in ("data/netfix/laptop_ctrl.json",):          # 快照：整文件覆盖
+if rel in ("data/netfix/laptop_ctrl.json", "data/netfix/override_state.json"):          # 快照：整文件覆盖
     tmp = os.path.join(R, rel) + ".tmp"
     os.makedirs(os.path.dirname(tmp), exist_ok=True)
     json.dump(new, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
@@ -770,6 +771,42 @@ def verify_sha(host: str, files: list[str] | None = None, fix: bool = True) -> d
     return res
 
 
+ASSET_DIRS = ["data/pipeline/runs/series10_v1/images/refcrops", "data/pipeline/runs/series10_v1/images/refboards"]
+
+
+def push_required(host: str, batch_mb: float = 2.0) -> dict:
+    """出图必需的资产（preflight I3 / I4 读的）：选定设定图、身份脸、单品映射图、首帧作业参考图 + refcrops / refboards。
+    23:29 实测：gpu36 producer 起来后 ep02 每 20 s 被 I3“林晚 造型A 没有设定图”挡——IMGFIX 22:05 换回 v2_s202 的设定图与重裁
+    refcrops 属 tier 2 大文件没推。按清单比对只推缺的 / 不同的，小文件先（K-OPS-W09 分级、文件级续传）"""
+    need = required_data()
+    loc_all = local_manifest(["data"])
+    files = {f for f in need if f in loc_all}
+    # ⤴ 不整目录推 refcrops / refboards（23:30 实测 612 个 325 MB、预计 5 小时）：只推现行作业引用到的（required_data 已含）
+    loc = {f: loc_all[f] for f in files}
+    rem_dirs = sorted({"/".join(f.split("/")[:-1]) for f in files})
+    rem = remote_manifest(host, rem_dirs) if rem_dirs else {}
+    todo = sorted(diff_push(loc, rem), key=lambda f: loc[f][0])
+    est = estimate(todo, loc)
+    log("push_required", host, "差异", est["files"], "个文件", f"{est['mb']} MB", f"预计 {est['eta_min']} 分钟")
+    global BATCH
+    BATCH = int(batch_mb * 1024 * 1024)
+    sent = 0
+    for b in batches(todo, loc):
+        ssh(host, f"set -e; T=$(mktemp -d {OFF}/.push.XXXXXX); tar xf - -C $T; cp -a $T/. {R}/; rm -rf $T; echo ok",
+            data=tar_bytes(b), timeout=1800)
+        sent += len(b)
+    rem2 = remote_manifest(host, rem_dirs) if rem_dirs else {}
+    left = diff_push(loc, rem2)
+    log("push_required", host, "推完", sent, "；复核仍缺", len(left))
+    # NETFIX 交接（总调度 23:3x）：资产到位后它自动把笔记本的临时出图覆盖切回服务器——在这里留标记
+    mk = ROOT / "data/autopilot/assets_ready.json"
+    d = jl(mk, {}) or {}
+    d[host] = {"ready": not left, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "sent": sent, "missing": left[:50],
+               "checked": len(loc), "by": "WORKFLOW resident_sync.push_required"}
+    js(mk, d)
+    return {"host": host, "sent": sent, "estimate": est, "missing": len(left)}
+
+
 REMOTE_SMOKE = r"""
 import json, sys, time, uuid, urllib.request, subprocess, os
 R = "__R__"; PORT = __PORT__; OUTDIR = "__OUTDIR__"; SID = "__SID__"
@@ -959,6 +996,15 @@ def main(argv):
         print(json.dumps(verify_sha(argv[1]), ensure_ascii=False)[:1500])
     elif cmd == "push_control":
         print(push_control(argv[1], force="--force" in argv))
+    elif cmd == "push_required":            # 可给多台：按顺序一台推完再推下一台（共用跳板带宽），断了重试
+        for h in argv[1:]:
+            for _try in range(5):
+                try:
+                    print(push_required(h))
+                    break
+                except Exception as e:  # noqa: BLE001
+                    log("push_required error", h, repr(e)[:200])
+                    time.sleep(60)
     elif cmd == "push_frames":
         print(push_frames(argv[1]))
     elif cmd == "rebuild_jobs":

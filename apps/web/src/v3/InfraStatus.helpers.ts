@@ -18,6 +18,9 @@ export type InfraStatus = {
   local: InfraLocal[];
   reconnect: string[];
   alerts: { id: string; level: string; since: string }[];
+  /** r39：NETFIX 派单模式（临时由笔记本统一派图 / 正在交还 / 服务器自己派）；没有 NETFIX 状态时为 null */
+  dispatch?: { override: boolean; phases: Record<string, string>; text: string } | null;
+  source?: "netfix" | "watchdog";
 };
 
 const POLL_MS = 8000;

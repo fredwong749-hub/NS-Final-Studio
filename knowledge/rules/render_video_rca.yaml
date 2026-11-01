@@ -35,7 +35,7 @@ rules:
     link: [P6-P7]
     title: 首帧出图的系统句不得要求人脸“朝向镜头”；看镜头的根在首帧（视频继承首帧视线）
     when: ns_agent.framing.two_shot_clause（双人镜出图系统句）、asset_refs 视线句；frame_v9 唯一出图路径
-    then: 双人句用正向句 framing.TWO_SHOT_POSITIVE“侧脸到四分之三侧脸，各自的视线落在画面里的人或物上（… each gaze resting on a person or object in the scene）”（SCRIPT-RSI D-SCR-07）。⤴ 11-01 19:2x 曾按证据例外换成实测句 TWO_SHOT_TESTED（“互相看着对方……眼睛不看镜头”，r1 2 seed 3/4 → 0/4）；r2 3-seed A/B（ep01-S5、ep03-S4）：旧句看镜头 8/10 张脸、正向句 0–1/10、实测句 0/12，两句同样有效 → 按总调度 r2 决定改回正向句。具体落点由剧本 img 写（QW-A7 / K-REN-G06）；VQAGATE Q9 看镜头闸门是拦截层
+    then: 双人句用实测句 framing.TWO_SHOT_TESTED“两人以侧脸到四分之三侧脸互相看着对方，目光落在对方脸上，眼睛不看镜头（… each looking at the other person, eyes off the lens）”。⤴ 11-01 22:5x 生产首批反例 ep01-S5 v5（data/renders/ep01/S5/takes/ 第 5 版，用的是正向句 TWO_SHOT_POSITIVE）林晚、顾沉都正对镜头（总调度亲审）→ 按 G0 有实测证据的优先切回实测句（r2 A/B：旧 8/10、正向 0–1/10、实测 0/12）。此前：19:2x 证据例外换实测句 → 20:5x A/B 后改回正向句（SCRIPT-RSI D-SCR-07）→ 本次再切回。具体落点由剧本 img 写（QW-A7 / K-REN-G06）；VQAGATE Q9 看镜头闸门是拦截层
     check: [tests/test_video_rca.py, tests/test_script_rsi_eyeline.py]   # test_v03 的 xfail 已去掉（SCRIPT-RSI 11-01）
     evidence:
       - {src: tools/video_rca/rates.py, note: "首帧看镜头 → 片头看镜头 49/54（91%）；首帧没看 → 片头看镜头 4/10（40%）；不给首帧的 Ref2VA 3/10"}
@@ -43,6 +43,7 @@ rules:
       - {src: docs/video_rca/research_r1.md, note: "Q1：MiniMax Hailuo 指南“master image … already looking toward the camera”；Qwen-Image 会把参考头像的头部角度和视线一起贴上（BFS LoRA 作者、myaiforce，中）"}
       - {src: data/ab/video_rca/r1_img_gaze/, note: "同 seed 新旧系统句 A/B（结果见 RCA_r1.md G6/G7）"}
       - {src: data/ab/video_rca/r5_img_twoshot/, note: "r2：旧 8/10、正向 0–1/10、实测 0/12（3 seed × 2 镜，人工看脸）"}
+      - {src: data/renders/ep01/S5/takes/, note: "生产反例：第 5 版（正向句）两人都正对镜头（总调度 11-01 22:5x 亲审）"}
     confidence: high
     status: 确认
     date: 2026-11-01

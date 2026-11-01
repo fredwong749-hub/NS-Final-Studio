@@ -274,7 +274,8 @@ export function RenderTasksButton({ className, onOpenJobsPage, extra, extraTitle
         {c ? (
           <span className="rt-btn-n">
             {" "}
-            {c.rendering} 渲染 · {c.pending} 等待
+            {/* UIRSI r39（总调度定 C，顶栏挤）：数字用短字“跑 / 等 / 失败”，完整说法在悬停提示里 */}
+            {c.rendering} 跑 · {c.pending} 等
             {c.failed ? <b> · {c.failed} 失败</b> : null}
           </span>
         ) : null}

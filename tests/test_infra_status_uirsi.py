@@ -88,3 +88,59 @@ def test_frontend_wiring():
     assert "laneReason(" in gp
     h = (web / "v3" / "InfraStatus.helpers.ts").read_text(encoding="utf-8")
     assert 'fetch("/api/infra/status")' in h and "r.status === 404" in h
+
+
+# ---------------------------------------------------------------- r39：NETFIX 为主、派单模式、顶栏短字
+def _ns(**kw):
+    base = {"t": NOW - 5, "relay": {"up": True, "checked_t": NOW - 5, "last_ok_t": NOW - 5},
+            "hosts": {h: {"state": "up", "since_t": NOW - 600, "restarts": 0,
+                          "ports": {str(p): {"remote": 8188, "ok": True, "why": "ok"} for p, (hh, _) in I.TUNNEL_CARDS.items() if hh == h}}
+                      for h in ("gpu33", "gpu36")},
+            "servers": {"gpu33": {"sync_age_min": 12.0}},
+            "dispatch_mode": {"override_active": True, "phases": {"gpu33": "laptop", "gpu36": "laptop"}}}
+    base.update(kw)
+    return base
+
+
+def test_netfix_preferred_and_dispatch_text():
+    wd = {"t": NOW - 900, "fails": {"18189": 99}, "_relay_down": True, "_relay_t": NOW - 900}   # 看门狗过期、说法也旧
+    d = I.build(NOW, wd, RES, LOCAL, _ns())
+    assert d["source"] == "netfix" and d["level"] == "ok" and d["relay"]["ok"] and all(t["ok"] for t in d["tunnels"])
+    assert d["dispatch"]["override"] and d["dispatch"]["text"] == "现在由笔记本统一派图（服务器资产补推中），gpu33 / gpu36 推完后自动交还"
+    assert "最后一次同步 12 分钟前" in d["servers"]["gpu33"]["text"]
+    assert not any("看门狗" in r for r in d["reconnect"])
+    assert not any(INTERNAL.search(x) for x in _texts(d) + [d["dispatch"]["text"]])
+
+
+def test_netfix_connecting_and_remote_down():
+    ns = _ns()
+    ns["hosts"]["gpu36"].update(state="connecting", restarts=2)
+    for p in ns["hosts"]["gpu36"]["ports"].values():
+        p.update(ok=False, why="timeout")
+    ns["hosts"]["gpu33"]["ports"]["18189"].update(ok=False, why="remote_down")
+    ns["dispatch_mode"] = {"override_active": True, "phases": {"gpu33": "draining", "gpu36": "laptop"}}
+    d = I.build(NOW, {}, RES, LOCAL, ns)
+    t36 = [t for t in d["tunnels"] if t["host"] == "gpu36"]
+    assert all("正在自动重连" in t["text"] and t["rebuilding"] for t in t36)
+    assert "出图程序没响应" in next(t for t in d["tunnels"] if t["port"] == 18189)["text"]
+    assert any("gpu36" in r and "重连" in r for r in d["reconnect"])
+    assert "gpu33 正在交还" in d["dispatch"]["text"] and "gpu36 推完后自动交还" in d["dispatch"]["text"]
+    assert d["level"] == "warn"
+
+
+def test_netfix_stale_falls_back_to_watchdog():
+    wd = {"t": NOW - 10, "fails": {}, "_relay_down": False, "_relay_t": NOW - 10}
+    d = I.build(NOW, wd, RES, LOCAL, _ns(t=NOW - 600))
+    assert d["source"] == "watchdog" and d["dispatch"] is None
+
+
+def test_r39_topbar_short_texts():
+    web = ROOT / "apps" / "web" / "src"
+    inf = (web / "v3" / "InfraStatus.tsx").read_text(encoding="utf-8")
+    assert '`${n - bad}/${n}`' in inf and '"跳板断"' in inf
+    rt = (web / "components" / "RenderTasks.tsx").read_text(encoding="utf-8")
+    assert "{c.rendering} 跑 · {c.pending} 等" in rt and "渲染任务" in rt   # 按钮字“渲染任务”保留（UIAUDIT flows 按它找）
+    top = (web / "v3" / "TopBarV3.tsx").read_text(encoding="utf-8")
+    assert "prodOn || (offline && !infraOn)" in top
+    gl = (ROOT / "services" / "api" / "ns_api" / "gpu_live.py").read_text(encoding="utf-8")
+    assert "ComfyUI 离线（" not in gl and "这张卡的出图程序没响应" in gl

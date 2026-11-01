@@ -365,7 +365,7 @@ def link_state(ln: dict | None, now: float, util: float | None) -> dict | None:
         return None
     down = now - float(ln.get("down_since") or now)
     if down >= OFFLINE_AFTER_S:
-        return {"down_s": round(down), "offline": True, "text": f"ComfyUI 离线（已连不上 {round(down / 60)} 分钟）"}
+        return {"down_s": round(down), "offline": True, "text": f"这张卡的出图程序没响应（已 {round(down / 60)} 分钟）"}  # r39 大白话（总调度定）
     busy = (util or 0) >= 5
     return {"down_s": round(down), "offline": False,
             "text": f"暂时连不上（{round(down)} 秒）" + (f" · 卡在忙（利用率 {round(util)}%）" if busy else "")}
