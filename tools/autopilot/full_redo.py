@@ -1,0 +1,223 @@
+"""L-088 全量重做（WORKFLOW 牵头，项目方 11-01 ~18:0x：“图片：全部重新勾一次，用最新的瑞丽 R0 方案；视频：全部用皮卡来做，
+皮卡做不了就等”；规则 K-OPS-W08）。可续跑、可暂停；在服务器常驻模式下执行（K-OPS-W07）。
+
+前置闸门（全部 ok 才会派图片；顺序 = 总调度 18:0x / 18:3x）：
+  G20         RSI：林晚身份脸高清重裁
+  SCRIPT      SCRIPT-RSI：R11-3 剧本返修并导入（tools/pipeline/repair_chain.py）
+  G21         RSI：导入之后重编 first_frame_jobs.json（自动核：jobs 修改时间晚于 data/import/script_v2.json）
+  W5          PROD：局部特写编译器修复
+  PIKA_SMOKE  跳板恢复后服务器上 Pika 冒烟一镜，总调度亲审通过（resident_sync.py smoke）
+闸门由负责方 / 总调度登记：full_redo.py gate <ID> --by <谁> --note <证据>。
+
+做法（复用现有部件，不另造）：
+  图片：对每镜 first:<镜>，在负责该集的服务器上调 producer.py reject（驳回重出，计划 frame_v9×2，原因“L-088 全量重做（R0）”，
+        不计 3 次上限）；替换版过契约 + 本地看图闸门 → producer.auto_review_redo 自动换上（VQAGATE 已接通），旧版保留不删；
+        尾帧在首帧换版后由 producer 按过期重做。
+  视频：recipe_choice.json 全是 i2va_pika_flex，config/pipeline/video_policy.json pika_only；首帧换版 → vidgen.check_stale 把旧片
+        挪进 superseded（不删）→ 新首帧过闸门后派 Pika（video_requires_q9，VQAGATE after_network.py）；flush 类镜 hold。
+  合成：night.py 一集齐了在服务器上合成（原片 + 放大，PROD）。
+
+  status                       闸门 + 进度
+  gate ID --by X [--note N]    登记一个闸门通过
+  plan                         写 data/autopilot/full_redo/plan.json（80 镜、负责机器、hold 清单、GPU 时长估算）
+  apply [--host H] [--dry]     闸门全过才派；逐镜记 state.json，已派的跳过（可续跑）
+  pause / resume               两台服务器 producer pause / resume（by FULL_REDO）
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).parent))
+OUT = ROOT / "data/autopilot/full_redo"
+GATES = OUT / "gates.json"
+STATE = OUT / "state.json"
+PLAN = OUT / "plan.json"
+GATE_IDS = ["G20", "SCRIPT", "G21", "W5", "PIKA_SMOKE"]
+REASON = "L-088 全量重做（R0：现行 frame_v9 / 徕卡 S★）"
+PRESETS = "frame_v9,frame_v9"
+# GPU 时长估算口径（出处见 plan.json 的 basis）
+FRAME_RENDER_S = 64.1          # data/producer/log.jsonl 869 次首尾帧 render_s 中位数（p90 158.8）
+FRAME_TRIES = 1.6
+PIKA_S_PER_FRAME = 513 / 175   # ep01-S3 冒烟：GPU 513 s / 175 帧（含载入）
+VIDEO_TRIES = 1.8
+IMAGE_LANES, VIDEO_LANES = 5, 6
+
+
+def jl(p, d=None):
+    try:
+        return json.loads(Path(p).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return d
+
+
+def js(p, d):
+    p = Path(p)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    t = p.with_suffix(".tmp")
+    t.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(t, p)
+
+
+def g21_check(run_dir: Path) -> dict:
+    """K-OPS-Q24：tools/pipeline/image_jobs.jobs_vs_import（镜头集合一致 + 每条作业提示词来源 sha = 现行 script_v2.json）"""
+    import importlib.util as _ilu
+    _sp = _ilu.spec_from_file_location("ns_image_jobs_g21", Path(__file__).resolve().parents[2] / "tools/pipeline/image_jobs.py")
+    _ij = _ilu.module_from_spec(_sp)
+    _sp.loader.exec_module(_ij)
+    return _ij.jobs_vs_import(run_dir)
+
+
+def gates_status() -> dict:
+    g = jl(GATES, {}) or {}
+    out = {i: g.get(i) or {"ok": False} for i in GATE_IDS}
+    jobs = ROOT / "data/pipeline/runs/series10_v1/assets/first_frame_jobs.json"
+    script = ROOT / "data/import/script_v2.json"
+    if out["G21"].get("ok") and jobs.exists() and script.exists():
+        # K-OPS-Q24（RSI 11-01，总调度授权）：不比修改时间，核对镜头集合 + 每条作业的提示词来源 sha = 现行 script_v2.json
+        try:
+            chk = g21_check(jobs.parent.parent)
+        except Exception as e:  # noqa: BLE001
+            chk = {"ok": False, "error": repr(e)[:200]}
+        if not chk.get("ok"):
+            out["G21"] = {**out["G21"], "ok": False,
+                          "auto": "首帧作业和导入稿对不上：缺 {} 镜、多 {} 镜、提示词来源 sha 过期 {} 条{}".format(
+                              len(chk.get("missing") or []), len(chk.get("extra") or []), len(chk.get("stale_sha") or []),
+                              "；" + chk["error"] if chk.get("error") else "")}
+    return out
+
+
+def gates_ok() -> bool:
+    return all(v.get("ok") for v in gates_status().values())
+
+
+def owner_host(ep: int) -> str:
+    import resident_sync as RS
+    return next(h for h, eps in RS.HOSTS.items() if ep in eps)
+
+
+def make_plan() -> dict:
+    sys.path[:0] = [str(ROOT / p) for p in ("tools/series10_video", "services/recipes", "packages/schema", "services/agent",
+                                             "services/render_router")]
+    import build_jobs as B
+    from ns_schema.shot_spec import frames_for_seconds
+    from ns_render import pipeline as P
+    reg, specs, ch = B.R.load(), B.load_specs(), B.recipe_choice()
+    from ns_recipes import selector as S
+    shots, holds, frames_tot = [], [], 0
+    for sid, sp in sorted(specs.items(), key=lambda kv: (kv[1].episode, kv[1].index if hasattr(kv[1], "index") else kv[0])):
+        ep = sp.episode
+        fr = frames_for_seconds(sp.duration_s, 24)
+        frames_tot += fr
+        td = P.load_takes(sid) if (P.shot_dir(sid) / "takes.json").exists() else {}
+        cur = {**(td.get("locked") or {}), **(td.get("active") or {})}     # 当前 = active（无则定稿）
+        rid = ch["face_default"] if sp.faces else ch["noface_default"]
+        sel = S.select(sp, reg, allow={rid})
+        from ns_recipes import compiler as C
+        why = C.hold_reason(reg, rid, sel.overlays, sp)
+        row = {"shot": sid, "ep": ep, "host": owner_host(ep), "frames": fr, "recipe": rid,
+               "current_first": cur.get("image"), "current_last": cur.get("last"), "video_hold": why}
+        shots.append(row)
+        if why:
+            holds.append({"shot": sid, "reason": why})
+    img_s = len(shots) * 2 * FRAME_RENDER_S * FRAME_TRIES
+    vid_s = frames_tot * PIKA_S_PER_FRAME * VIDEO_TRIES
+    plan = {"schema": "nsfs.full_redo_plan/1", "decision": "L-088", "made_at": time.strftime("%F %T"), "shots": shots,
+            "video_holds": holds,
+            "estimate": {"image_gpu_h": round(img_s / 3600, 1), "video_gpu_h": round(vid_s / 3600, 1),
+                         "total_gpu_h": round((img_s + vid_s) / 3600, 1),
+                         "wall_h_if_full": round(img_s / 3600 / IMAGE_LANES + vid_s / 3600 / VIDEO_LANES, 1),
+                         "basis": {"frame_render_s_median": FRAME_RENDER_S, "frame_tries": FRAME_TRIES,
+                                   "pika_s_per_frame": round(PIKA_S_PER_FRAME, 2), "video_tries": VIDEO_TRIES,
+                                   "frames_total": frames_tot, "objects_image": len(shots) * 2,
+                                   "src": "data/producer/log.jsonl render_s 中位数；data/autopilot/pika_smoke/ep01-S3.job.json（513 s / 175 帧）"}}}
+    js(PLAN, plan)
+    return plan
+
+
+def apply(host: str | None = None, dry: bool = False, executor: str = "laptop") -> dict:
+    """executor=laptop（默认，总调度 18:4x 分工：出图由笔记本 producer 统一负责，道 = laptop:0 + 跳板通时的服务器出图道）：
+    在笔记本本机调 producer.py reject；executor=server：在负责该集的服务器上调（服务器 producer 常驻时才用）。
+    逐镜记 state.json，已标的跳过（可续跑）；能用几条道由 producer 的道表 / 退避决定（部分道可用就先跑几条）"""
+    if not gates_ok():
+        return {"ok": False, "why": "前置闸门没全过（a/b 未完成前不开始全量出图）", "gates": gates_status()}
+    import resident_sync as RS
+    plan = jl(PLAN) or make_plan()
+    st = jl(STATE, {"done": {}, "errors": {}}) or {"done": {}, "errors": {}}
+    sent = 0
+    for row in plan["shots"]:
+        if host and row["host"] != host:
+            continue
+        oid = f"first:{row['shot']}"
+        if oid in st["done"]:
+            continue
+        args = ["reject", "--obj", oid, "--n", str(int(row.get("current_first") or 0)), "--reason", REASON, "--plan", PRESETS,
+                "--by", "WORKFLOW-L088"]
+        where = "laptop" if executor == "laptop" else row["host"]
+        if dry:
+            print(where, " ".join(args))
+            continue
+        try:
+            if executor == "laptop":
+                import subprocess
+                r = subprocess.run([sys.executable, str(ROOT / "tools/autopilot/producer.py"), *args], capture_output=True, text=True,
+                                   encoding="utf-8", errors="replace", timeout=120, cwd=ROOT, env={**os.environ, "PYTHONUTF8": "1"})
+                if r.returncode:
+                    raise RuntimeError(r.stderr[-200:])
+            else:
+                cmd = (f"cd {RS.R} && OFFLINE_SELF={row['host']} {RS.OFF}/venv/bin/python tools/autopilot/producer.py "
+                       + " ".join(f"'{x}'" for x in args))
+                RS.ssh(row["host"], cmd, timeout=120, tries=4)
+            st["done"][oid] = {"at": time.strftime("%F %T"), "where": where, "reject_n": row.get("current_first")}
+            st["errors"].pop(oid, None)
+            sent += 1
+        except Exception as e:  # noqa: BLE001
+            st["errors"][oid] = repr(e)[:200]
+        js(STATE, st)
+    return {"ok": True, "sent": sent, "done": len(st["done"]), "errors": len(st["errors"])}
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("cmd", choices=["status", "gate", "plan", "apply", "pause", "resume"])
+    ap.add_argument("gate_id", nargs="?")
+    ap.add_argument("--by", default="")
+    ap.add_argument("--note", default="")
+    ap.add_argument("--host")
+    ap.add_argument("--executor", choices=["laptop", "server"], default="laptop")
+    ap.add_argument("--dry", action="store_true")
+    a = ap.parse_args(argv)
+    if a.cmd == "status":
+        print(json.dumps({"gates": gates_status(), "gates_ok": gates_ok(), "state": jl(STATE, {})}, ensure_ascii=False, indent=1)[:4000])
+    elif a.cmd == "gate":
+        if a.gate_id not in GATE_IDS or not a.by:
+            print("用法：gate <" + "|".join(GATE_IDS) + "> --by <谁> [--note 证据]")
+            return 2
+        g = jl(GATES, {}) or {}
+        g[a.gate_id] = {"ok": True, "by": a.by, "note": a.note, "at": time.strftime("%F %T")}
+        js(GATES, g)
+        print(json.dumps(gates_status(), ensure_ascii=False))
+    elif a.cmd == "plan":
+        p = make_plan()
+        print(json.dumps({"shots": len(p["shots"]), "video_holds": p["video_holds"], "estimate": p["estimate"]}, ensure_ascii=False, indent=1))
+    elif a.cmd == "apply":
+        print(json.dumps(apply(a.host, a.dry, a.executor), ensure_ascii=False, indent=1)[:3000])
+    elif a.cmd in ("pause", "resume"):
+        import resident_sync as RS
+        for h in RS.HOSTS:
+            try:
+                RS.ssh(h, f"cd {RS.R} && {RS.OFF}/venv/bin/python tools/autopilot/producer.py {a.cmd} --by FULL_REDO --note 'L-088 全量重做 {a.cmd}'",
+                       timeout=120, tries=3)
+                print(h, a.cmd, "ok")
+            except Exception as e:  # noqa: BLE001
+                print(h, a.cmd, "失败", repr(e)[:200])
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

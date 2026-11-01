@@ -1,0 +1,6 @@
+[
+ {"name":"scenes","path":"/#/assets?type=scene","sizes":[[1440,900]],"themes":["dark","light"],"wait":9000},
+ {"name":"scene_insp","path":"/#/assets?type=scene","sizes":[[1440,900]],"themes":["dark"],"wait":9000,"after":2500,"js":"const c=await W(()=>[...document.querySelectorAll('.ac-grid > *')].find(x=>x.textContent.includes('顾沉公寓')));(c?.querySelector('button')||c)?.click();"},
+ {"name":"part_pick_zone","path":"/#/assets?char=lin_wan","sizes":[[1440,900]],"themes":["dark"],"wait":7000,"js":"const r=await W(()=>[...document.querySelectorAll('#hub-look-A .hub-part-row')].find(x=>x.textContent.includes('米白衬衫')));r&&r.click();await new Promise(r=>setTimeout(r,300));document.getElementById('hub-look-A')?.scrollIntoView({block:'start'});"},
+ {"name":"ask_part","path":"/#/assets?char=lin_wan","sizes":[[1440,900]],"themes":["dark"],"wait":7000,"js":"const m=await W(()=>document.querySelector('.hub-more'));m&&m.click();const card=await W(()=>[...document.querySelectorAll('.hub-item')].find(x=>x.textContent.includes('漆皮长风衣')&&!x.querySelector('.hub-lk.on')),15000);const b=card&&[...card.querySelectorAll('.hub-lk')][0];b&&b.click();"}
+]

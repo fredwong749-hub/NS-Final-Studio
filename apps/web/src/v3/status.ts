@@ -1,13 +1,16 @@
 // fredw-92/W4a：画布 v3 统一状态词表（规格 §5）——一个圆点 + 一句“下一步”，不写系统内部状态。
 // 灰 未出 · 蓝 生成中 · 黄 待你审 · 绿 已定 · 红 失败。成人镜不加锁（项目方 2026-10-30：不做成人拦截）。
 import type { Studio } from "../store";
-import type { ShotDetail, ShotSummary, SopShot, Stage, Take } from "../types";
+import type { Episode, ShotDetail, ShotSummary, SopEpisode, SopShot, Stage, Take } from "../types";
 import { isFailed, STAGE_LABEL } from "../util";
-import { getEdit } from "./edit/state";
-import { SLOT_NAME, submitFrame, submitVideo } from "./edit/actions";
+import { etaFor, fmtSec, getEdit } from "./edit/state";
+import { laneBusyBy } from "./edit/lanes";
+import { episodeMissing } from "./StoryboardDetails.helpers";
+import { SLOT_NAME, lockAndNext, submitFrame, submitVideo } from "./edit/actions";
+import { AUTO_LONG, staleLong } from "./words";
 
 export type Dot = "gray" | "blue" | "yellow" | "green" | "red";
-export const DOT_LABEL: Record<Dot, string> = { gray: "未出", blue: "生成中", yellow: "待你审", green: "已定", red: "失败" };
+export const DOT_LABEL: Record<Dot, string> = { gray: "未出", blue: "生成中", yellow: "待你审", green: "已定", red: "出错" }; // UXF1：红 = 失败 / 坏图 / 链不完整
 
 export interface NextAction {
   label: string;
@@ -23,7 +26,7 @@ export interface ShotStatus {
   text: string;
   action: NextAction | null;
   /** “为什么卡住”小窗的条目（就绪清单、SOP 阻塞、过期原因、打回原因） */
-  why: { text: string; who?: string }[];
+  why: { text: string; who?: string; sys?: boolean }[];
 }
 
 const STAGES: Stage[] = ["image", "last", "video"];
@@ -31,45 +34,102 @@ const STAGES: Stage[] = ["image", "last", "video"];
 function whyList(s: ShotSummary, d: ShotDetail | undefined, sop: SopShot | undefined, err: string | null): ShotStatus["why"] {
   const out: ShotStatus["why"] = [];
   const seen = new Set<string>();
-  const add = (text: string, who?: string) => {
-    const k = text.trim();
+  // UX4（审查 #16）：“为什么卡住”里的每一条都过一遍人话（去 “sound/H3：” 前缀和【】，“编译器升级” → “出图规则更新”）
+  // UM-P0-01：只把项目方能处理的事列出来；系统内部检查（校验器、规则号、采纳记录、卡 / 机器、链路要求……）标 sys，界面只合成一行“系统检查中”
+  const add = (text: string, who?: string, mine = false) => {
+    const k = gapText(text).replace(/编译器升级/g, "出图规则更新");
     if (!k || seen.has(k)) return;
     seen.add(k);
-    out.push({ text: k, who });
+    const sys = !mine && (who !== "项目方" || SYS_RE.test(k));
+    out.push({ text: k, who, sys });
   };
-  if (err) add(`上次生成失败：${err}`);
-  if (s.review.state === "rejected") add(`已打回${s.review.reason ? `：${s.review.reason}` : ""}`, "项目方");
+  if (err) add("上次没生成成功 → 点主按钮重出", undefined, true);
+  if (s.review.state === "rejected") add(`你标了不要${s.review.reason ? `：${s.review.reason}` : ""} → 进精修改`, "项目方", true);
   for (const b of sop?.blockers ?? []) add(b.text, whoLabel(b.actor ?? b.actor_label));
   for (const r of s.readiness?.blocked_reasons ?? []) add(r);
   for (const r of s.readiness?.gpu3_blocked_reasons ?? []) add(r, "视频端");
-  for (const st of STAGES) for (const r of staleOf(s, d, st)) add(`${STAGE_LABEL[st]}已过期${r ? `：${r}` : ""}`);
+  for (const st of STAGES) if (staleOf(s, d, st).length) add(`${STAGE_LABEL[st]}要重出（上游改过）→ 点主按钮重出`, undefined, true);
   return out;
 }
+
+/** 系统内部检查项的字样：不给项目方看（UM-P0-01：不许出现 laptop、G3、校验器、须为 0 等） */
+export const isSysText = (t: string) => SYS_RE.test(t);
+// 文件路径 / 内部文件名（.json .yaml .py、xxx_overrides）一律算系统字样（UM-0585…0592 兜底）
+const SYS_RE = /校验器|须为|须由|\bG\d|laptop|笔记本|gpu|GPU|规则|[A-Z]{1,4}\d*-[A-Z0-9]+|编译|sha|契约|SOP|§|采纳|记录|视频端|画布|写作模型|字段|校验|对齐|帧数|\.(json|ya?ml|py|md)\b|_overrides|[a-z_]+\/[a-z_]+\.[a-z]+/;
 
 /** “谁来处理”说人话（原则 4：不出现 gpu3 / owner / canvas 等内部词） */
-const WHO: Record<string, string> = { gpu3: "视频端", GPU3: "视频端", canvas: "画布", owner: "项目方", qwen: "Qwen", Qwen: "Qwen" };
+const WHO: Record<string, string> = { gpu3: "视频端", GPU3: "视频端", canvas: "画布", owner: "项目方", qwen: "写作模型", Qwen: "写作模型" }; // UX4：千问已撤下，写作方统一叫“写作模型”
 export const whoLabel = (x?: string | null) => (x ? WHO[x] ?? x : undefined);
 
-/** 某格过期原因（镜头摘要 stale[stage] + takes.json 顶层 stale.{stage}）——过期判定只此一处 */
+/** 某格过期原因（镜头摘要 stale[stage] + stale_global[stage]（编译器升级等）+ takes.json 顶层 stale.{stage}）——过期判定只此一处。
+ *  fredw-92/UXF1（审查 #11）：精修的“过期”角标一直把 stale_global 算进去，审片行没算 → 同一张图一边“过期”一边“待你审·满意就定稿”。现在两边同源 */
 export function staleOf(s: ShotSummary, d: ShotDetail | undefined, stage: Stage): string[] {
-  const out = [...(s.stale?.[stage] ?? [])].filter((x) => x != null);
+  const out = [...(s.stale?.[stage] ?? []), ...(s.stale_global?.[stage] ?? [])].filter((x) => x != null);
   const tst = (d?.takes as { stale?: Partial<Record<string, { reason?: string } | null>> } | undefined)?.stale?.[stage];
   if (tst) out.push(tst.reason ?? "");
-  return out;
+  return [...new Set(out)];
 }
 
-/** 一格的状态（v3.1 §5.1：定稿 + 过期 只算“过期·需重出”，不算定稿） */
-export type FrameState = "none" | "draft" | "locked" | "stale";
+/** fredw-92/UXF1（审查 #6）：当前首帧 / 尾帧是不是坏图（太小 / 文件太小 / 尺寸与请求不符）→ 原因 */
+export function badOf(s: ShotSummary, d: ShotDetail | undefined, stage: Stage): string | null {
+  if (stage === "video") return null;
+  const fromSummary = s.bad?.[stage];
+  if (fromSummary) return fromSummary;
+  const n = stage === "image" ? s.first_frame_take : s.last_frame_take;
+  if (n == null) return null;
+  return d?.takes?.takes.find((t) => t.stage === stage && t.n === n)?.bad ?? null;
+}
+
+/** fredw-92/UXF4（审查 N1）：这一格是不是整集出片“自动测试定稿”的（项目方还没复审）→ 版本号。
+ *  首帧 / 尾帧：定稿版 = 自动定稿那一版；视频：当前视频 = 自动定稿那一版且还没“通过”。摘要 auto_locked 优先，没有再看详情 locked_by */
+export function autoLockOf(s: ShotSummary, d: ShotDetail | undefined, stage: Stage): number | null {
+  if (stage === "video" && s.review.state === "passed") return null;
+  const v = s.auto_locked?.[stage];
+  if (v != null) return v;
+  if (s.auto_locked) return null; // 后端给了这个字段：以它为准
+  const tk = d?.takes as { locked_by?: Record<string, { by?: string; n?: number } | null>; locked?: Record<string, number | null>; active?: Record<string, number | null> } | undefined;
+  const lb = tk?.locked_by?.[stage];
+  if (lb?.by !== "auto" || lb.n == null) return null;
+  const cur = stage === "video" ? tk?.active?.video : tk?.locked?.[stage];
+  return cur === lb.n ? lb.n : null;
+}
+
+/** 当前显示的版本号（行格里的 #n） */
+const shownN = (s: ShotSummary, stage: Stage) => (stage === "image" ? s.first_frame_take : stage === "last" ? s.last_frame_take : null);
+
+/** 一格的状态（v3.1 §5.1：定稿 + 过期 只算“过期·需重出”，不算定稿）。
+ *  fredw-92/UXF1：orphan = 没有首帧却有尾帧 / 视频（链不完整，下游作废，不计入完成数）；bad = 坏图；
+ *  locked 只在“当前显示的就是定稿版”时成立（当前 #5、定稿 #4 → 当前是草稿，不能标“已定稿”） */
+export type FrameState = "none" | "draft" | "locked" | "stale" | "bad" | "orphan" | "auto";
 export function frameState(s: ShotSummary, d: ShotDetail | undefined, stage: Stage): FrameState {
   const has = stage === "image" ? !!s.first_frame : stage === "last" ? !!s.last_frame_target : !!s.video;
   if (!has) return "none";
+  if (stage !== "image" && !s.first_frame) return "orphan";
+  if (badOf(s, d, stage)) return "bad";
   if (staleOf(s, d, stage).length) return "stale";
-  if (stage !== "video" && lockedN(d, stage) != null) return "locked";
+  if (stage !== "video") {
+    const lk = lockedOf(s, d, stage);
+    const cur = shownN(s, stage);
+    // UXF4（审查 N1）：自动测试定稿 ≠ 项目方定稿（不计入“已定”、整集出片不当作已完成）
+    if (lk != null && (cur == null || cur === lk)) return autoLockOf(s, d, stage) === lk ? "auto" : "locked";
+  } else if (autoLockOf(s, d, "video") != null) return "auto";
   return "draft";
+}
+
+/** 定稿版本号：摘要 locked_take 优先（每镜都有），没有再看详情 */
+export function lockedOf(s: ShotSummary, d: ShotDetail | undefined, stage: Stage): number | null {
+  if (stage !== "video") {
+    const v = s.locked_take?.[stage];
+    if (v !== undefined) return v ?? null;
+  }
+  return lockedN(d, stage);
 }
 
 /** 已定 = 首帧、尾帧都已定稿且都没过期（视频另计）——片段条统计、步骤条共用 */
 export const framesLocked = (s: ShotSummary, d: ShotDetail | undefined) => frameState(s, d, "image") === "locked" && frameState(s, d, "last") === "locked";
+
+/** 视频算不算“有视频”：链不完整（没有首帧）或过期的不算（审查 #10）——片段条、步骤条共用 */
+export const videoCounts = (s: ShotSummary, d: ShotDetail | undefined) => !!s.video && !["orphan", "stale"].includes(frameState(s, d, "video"));
 
 /** 整集统计：状态点计数 + 已定 + 有视频，全部来自 shotStatus / frameState（v3.1 §1.7） */
 export function episodeCounts(shots: ShotSummary[], st: Studio, sop?: { shots: SopShot[] } | null) {
@@ -82,7 +142,7 @@ export function episodeCounts(shots: ShotSummary[], st: Studio, sop?: { shots: S
     status.set(s.id, x);
     dots[x.dot]++;
     if (framesLocked(s, st.details[s.id])) locked++;
-    if (s.video) videos++;
+    if (videoCounts(s, st.details[s.id])) videos++;
   }
   return { dots, locked, videos, status, secs: shots.reduce((a, s) => a + (s.duration.seconds || 0), 0) };
 }
@@ -123,6 +183,16 @@ export function shotStatus(s: ShotSummary, st: Studio, sop?: SopShot): ShotStatu
     edit,
     watch,
     jobs: () => st.setDrawer({ open: true, tab: "jobs" }),
+    pass: () => void st.setReview([s.id], "passed"),
+    // XYQ（小云雀走查 #1）：审片行直接“定稿这一版 + 排下一步”，不用先进精修
+    "lock-first-next": () => {
+      st.select(s.id);
+      if (s.first_frame_take != null) void lockAndNext(s.id, "first", s.first_frame_take, getEdit().gpu, st.notify, st.refreshAfter, !s.last_frame_target);
+    },
+    "lock-last-next": () => {
+      st.select(s.id);
+      if (s.last_frame_take != null) void lockAndNext(s.id, "last", s.last_frame_take, getEdit().gpu, st.notify, st.refreshAfter, !s.video);
+    },
   };
   const make = (key: StatusKey, why0: ShotStatus["why"], over?: { text?: string; title?: string }): ShotStatus => {
     const r = STATUS_TABLE[key];
@@ -130,7 +200,7 @@ export function shotStatus(s: ShotSummary, st: Studio, sop?: SopShot): ShotStatu
       dot: r.dot,
       key,
       text: over?.text ?? r.text,
-      action: r.act ? { label: r.label, run: runOf[r.act], title: over?.title ?? r.title } : null,
+      action: r.act ? { label: actLabel(r.act, r.label, s), run: runOf[r.act], title: over?.title ?? r.title } : null,
       why: why0,
     };
   };
@@ -156,23 +226,60 @@ export function shotStatus(s: ShotSummary, st: Studio, sop?: SopShot): ShotStatu
   const fFirst = frameState(s, d, "image");
   const fLast = frameState(s, d, "last");
   const why1 = (stage: Stage) => staleOf(s, d, stage).filter(Boolean).join("；");
-  if (fFirst === "none") return make("no_first", why);
+  if (fFirst === "none") {
+    // 审查 #10：没有首帧却已有尾帧 / 视频 → 链不完整，下游作废；修法 = 先出首帧（再按定稿首帧重出尾帧、视频）
+    if (s.last_frame_target || s.video) {
+      const what = [s.last_frame_target && "尾帧", s.video && "视频"].filter(Boolean).join("和");
+      return make("broken_chain", [{ text: `没有首帧，现有的${what}不是由定稿首帧来的，已作废（不计入完成数）` }, ...why], {
+        text: `链不完整：没有首帧，${what}作废`,
+      });
+    }
+    return make("no_first", why);
+  }
+  if (fFirst === "bad") return make("bad_first", [{ text: badOf(s, d, "image") ?? "坏图" }, ...why], { title: `首帧 #${s.first_frame_take ?? "?"} 是${badOf(s, d, "image")}。直接重出首帧` });
   if (fFirst === "stale") return make("stale_first", why, { title: `首帧已过期：${why1("image") || "上游改过"}。直接重出首帧（要先改再出：⋯ → 进精修）` });
-  if (fFirst !== "locked") return make("review_first", why);
+  if (fFirst === "auto") return make("auto_first", why, { text: `首帧 #${s.first_frame_take ?? "?"} 是${AUTO_LONG}` });
+  if (fFirst !== "locked") {
+    const lk = lockedOf(s, d, "image");
+    if (lk != null && s.first_frame_take != null && lk !== s.first_frame_take)
+      return make("review_first", why, { text: `当前看的是 #${s.first_frame_take}，定稿是 #${lk}：满意就改定这一版` });
+    return make("review_first", why);
+  }
+  if (fLast === "bad") return make("bad_last", [{ text: badOf(s, d, "last") ?? "坏图" }, ...why], { title: `尾帧是${badOf(s, d, "last")}。由定稿首帧重出尾帧` });
   if (fLast === "stale") return make("stale_last", why, { title: `尾帧已过期：${why1("last") || "首帧定稿换了版本"}。由定稿首帧直接重出尾帧` });
+  if (fLast === "auto") return make("auto_last", why, { text: `尾帧 #${s.last_frame_take ?? "?"} 是${AUTO_LONG}` });
   if (fLast !== "locked") return make(s.last_frame_target ? "review_last" : "need_last", why);
   if (!s.video) return make("need_video", why);
   if (frameState(s, d, "video") === "stale") return make("stale_video", why, { title: `视频已过期：${why1("video") || "上游改过"}` });
   if (s.review.state === "passed") return make("done", []);
+  // UXF4（审查 N1）：视频只有一个对项目方的状态 = 通过；自动测试定稿的视频写明“待你复审”
+  if (frameState(s, d, "video") === "auto") return make(st.canPass(s) ? "review_video_watched" : "review_video", why, { text: st.canPass(s) ? "自动定稿的视频已看完，满意就通过" : `视频是${AUTO_LONG}` });
+  // UXF2→UXF1 #13：视频已完整看过一遍 → 主按钮直接“通过”（与 ⋯ / 片段条 / 精修同一个 setReview）
+  if (st.canPass(s)) return make("review_video_watched", why);
   return make("review_video", why);
 }
 
 /** 主按钮做什么：regen-* / video = 直接提交 v1 任务（frame-job regen / video-job）；edit = 进精修；watch = 串播看视频；jobs = 打开任务队列 */
-export type ActKind = "regen-first" | "regen-last" | "video" | "edit" | "watch" | "jobs";
+export type ActKind = "regen-first" | "regen-last" | "video" | "edit" | "watch" | "jobs" | "pass" | "lock-first-next" | "lock-last-next";
+
+/** XYQ（小云雀走查 #1 / #6）：主按钮文字——定稿类带版本号和“→ 下一步”；生成类直接写预计时长（小云雀把消耗写在生成按钮上） */
+export function actLabel(act: ActKind, label: string, s: ShotSummary): string {
+  const gpu = getEdit().gpu;
+  // 第二行用换行符隔开：审片行主按钮 white-space: pre-line 折成两行；别处按普通空白显示成一行
+  if (act === "lock-first-next") return `${label} #${s.first_frame_take ?? "?"}${s.last_frame_target ? "" : "\n→ 出尾帧"}`;
+  if (act === "lock-last-next") return `${label} #${s.last_frame_take ?? "?"}${s.video ? "" : "\n→ 出视频"}`;
+  // 卡被外部任务 / 训练占着：只写“约 N 秒”会误导（实际要排在后面），改写成“卡被占用·要排队”
+  const busy = act === "video" ? laneBusyBy("video", gpu, s.duration.seconds) : act === "regen-first" || act === "regen-last" ? laneBusyBy("image", gpu) : null;
+  if (busy) return `${label}\n${busy === "train" ? "卡在训练" : "卡被占用"} · 要排队`;
+  if (act === "video") return `${label}\n约 ${fmtSec(etaFor("video", gpu, s.duration.seconds).one)}`;
+  if (act === "regen-first" || act === "regen-last") return `${label}\n约 ${fmtSec(etaFor(act === "regen-first" ? "first" : "last", gpu).one)}`;
+  return label;
+}
 export type StatusKey =
   | "job_v1" | "job_old" | "failed_first" | "failed_last" | "failed_video" | "rejected"
   | "no_first" | "stale_first" | "review_first" | "stale_last" | "need_last" | "review_last"
-  | "need_video" | "stale_video" | "review_video" | "done";
+  | "need_video" | "stale_video" | "review_video" | "done" | "broken_chain" | "bad_first" | "bad_last" | "review_video_watched"
+  | "auto_first" | "auto_last";
 
 /** 状态 ↔ 一句话 ↔ 主按钮 的唯一对照表（v3.1：状态写什么，主按钮就做什么；改对应关系只改这里） */
 export const STATUS_TABLE: Record<StatusKey, { dot: Dot; text: string; label: string; act: ActKind | null; title?: string }> = {
@@ -183,14 +290,21 @@ export const STATUS_TABLE: Record<StatusKey, { dot: Dot; text: string; label: st
   failed_video: { dot: "red", text: "视频没出成，需重出", label: "重出视频", act: "video" },
   rejected: { dot: "red", text: "已打回，去精修改", label: "去精修", act: "edit" },
   no_first: { dot: "gray", text: "还没有首帧，出首帧", label: "出首帧", act: "regen-first" },
-  stale_first: { dot: "yellow", text: "首帧已过期，需重出", label: "重出首帧", act: "regen-first" },
-  review_first: { dot: "yellow", text: "待你审首帧，满意就定稿", label: "审首帧", act: "edit", title: "进精修：对比版本、改图、定稿首帧" },
-  stale_last: { dot: "yellow", text: "尾帧已过期，需重出", label: "重出尾帧", act: "regen-last" },
+  stale_first: { dot: "yellow", text: staleLong("首帧"), label: "重出首帧", act: "regen-first" },
+  broken_chain: { dot: "red", text: "链不完整：没有首帧，下游作废", label: "出首帧", act: "regen-first", title: "先出首帧并定稿，再由定稿首帧重出尾帧和视频" },
+  bad_first: { dot: "red", text: "首帧是坏图，需重出", label: "重出首帧", act: "regen-first" },
+  bad_last: { dot: "red", text: "尾帧是坏图，需重出", label: "重出尾帧", act: "regen-last" },
+  // XYQ（小云雀走查 #1）：待审首帧 / 尾帧时主按钮 = 定稿当前这一版并排下一步（下游已有就只定稿）；要对比版本、改图走 ⋯ → 进精修
+  review_first: { dot: "yellow", text: "首帧待你看：用这张，或不要", label: "定稿首帧", act: "lock-first-next", title: "定稿当前这一版首帧，并由它出尾帧（要先对比、改图：⋯ → 进精修；点首帧可全屏看）" },
+  auto_first: { dot: "yellow", text: `首帧是${AUTO_LONG}`, label: "确认首帧", act: "lock-first-next", title: "整集出片替你定稿的，不算你定稿：点这里确认这一版（要重出：⋯ → 进精修）" },
+  auto_last: { dot: "yellow", text: `尾帧是${AUTO_LONG}`, label: "确认尾帧", act: "lock-last-next", title: "整集出片替你定稿的，不算你定稿：点这里确认这一版（要重出：⋯ → 进精修）" },
+  stale_last: { dot: "yellow", text: staleLong("尾帧"), label: "重出尾帧", act: "regen-last" },
   need_last: { dot: "yellow", text: "首帧已定稿，下一步出尾帧", label: "出尾帧", act: "regen-last", title: "由定稿首帧出尾帧" },
-  review_last: { dot: "yellow", text: "待你审尾帧，满意就定稿", label: "审尾帧", act: "edit", title: "进精修：对比版本、定稿尾帧" },
+  review_last: { dot: "yellow", text: "尾帧待你看：用这张，或不要", label: "定稿尾帧", act: "lock-last-next", title: "定稿当前这一版尾帧，并出视频（要先对比：⋯ → 进精修）" },
   need_video: { dot: "yellow", text: "首尾帧已定稿，下一步出视频", label: "出视频", act: "video" },
-  stale_video: { dot: "yellow", text: "视频已过期，需重出", label: "重出视频", act: "video" },
+  stale_video: { dot: "yellow", text: staleLong("视频"), label: "重出视频", act: "video" },
   review_video: { dot: "yellow", text: "待你审视频", label: "看视频", act: "watch" },
+  review_video_watched: { dot: "yellow", text: "视频看完了：用这版，或不要", label: "通过 ✓", act: "pass", title: "通过这版视频（不满意用 ⋯ → 打回）" },
   done: { dot: "green", text: "已定，无需操作", label: "看视频", act: "watch" },
 };
 
@@ -203,10 +317,44 @@ export function lockedN(d: ShotDetail | undefined, stage: Stage): number | null 
   return pick(d.takes?.takes) ?? pick(d.gpu3_takes?.takes) ?? null;
 }
 
+/** fredw-92/UXF5（审查 N14）：运镜 / 景别只写中文（显示用，剧本原文不动、悬停仍可看原文）。
+ *  中英混写（“camera push in 缓推”）只留中文；纯英文按常见运镜词翻；auto / none 不显示。 */
+const CAM_EN: [RegExp, string][] = [
+  [/static|locked[- ]?off|fixed/i, "固定"],
+  [/push[- ]?in|dolly[- ]?in|zoom[- ]?in/i, "推近"],
+  [/pull[- ]?(back|out)|dolly[- ]?out|zoom[- ]?out/i, "拉远"],
+  [/orbit|arc shot/i, "环绕"],
+  [/handheld/i, "手持跟拍"],
+  [/tracking|follow/i, "跟拍"],
+  [/tilt[- ]?up/i, "上摇"],
+  [/tilt[- ]?down/i, "下摇"],
+  [/pan[- ]?left/i, "左摇"],
+  [/pan[- ]?right/i, "右摇"],
+  [/\bpan\b/i, "摇镜"],
+  [/crane[- ]?up|rise/i, "升镜"],
+  [/crane[- ]?down/i, "降镜"],
+  [/slow[- ]?motion/i, "慢动作"],
+  [/close[- ]?up/i, "特写"],
+  [/medium shot/i, "中景"],
+  [/wide shot|long shot/i, "全景"],
+];
+export function camText(raw: string | null | undefined): string | null {
+  const t = (raw ?? "").trim();
+  if (!t || /^(auto|none|n\/a|-|—)$/i.test(t)) return null;
+  if (/[一-鿿]/.test(t)) {
+    const zh = t.replace(/[A-Za-z][A-Za-z\s\-/]*/g, " ").replace(/\s+/g, " ").trim();
+    if (zh) return zh;
+  }
+  for (const [re, z] of CAM_EN) if (re.test(t)) return z;
+  return t;
+}
+
 /** 景别 · 运镜 · 时长（行首和精修头共用） */
 export function shotMeta(s: ShotSummary, scene?: string | null): string[] {
-  return [s.camera.size, s.camera.move || s.camera.angle, `${s.duration.seconds}s`, scene || ""].filter(Boolean) as string[];
+  return [camText(s.camera.size), camText(s.camera.move) || camText(s.camera.angle), `${s.duration.seconds}s`, scene || ""].filter(Boolean) as string[];
 }
+/** 运镜原文（悬停用） */
+export const camRaw = (s: ShotSummary) => [s.camera.size, s.camera.move, s.camera.angle].filter((x) => x && !/^(auto|none)$/i.test(x)).join(" · ");
 
 /** 本镜地点：详情的 visual_spec.scene（字符串或 {name|location|text}） */
 export function sceneOf(d: { visual_spec?: Record<string, unknown> | null } | undefined): string | null {
@@ -224,8 +372,38 @@ export function sceneOf(d: { visual_spec?: Record<string, unknown> | null } | un
 /** v3.1 §5.3：出视频前尾帧过期 → 按钮禁用并写明原因；可以出时返回 null */
 export function videoBlock(s: ShotSummary, d: ShotDetail | undefined): string | null {
   if (!s.first_frame) return "还没有首帧";
+  if (frameState(s, d, "image") === "bad") return "首帧是坏图，先重出首帧";
+  if (frameState(s, d, "last") === "bad") return "尾帧是坏图，先重出尾帧";
   if (frameState(s, d, "image") === "stale") return "首帧已过期，先重出首帧";
   if (frameState(s, d, "last") === "stale") return "尾帧已过期，先重出尾帧";
   if (!s.last_frame_target) return "还没有尾帧";
   return null;
 }
+
+/** fredw-92/UXF1（审查 #4）：剧本待补——分镜字段缺的（StoryboardDetails.missingOf）∪ SOP 停在 S1 的阻塞项。
+ *  顶栏步骤①“N 镜待补”、集头“N 镜待补 / 分镜字段齐全”、“只看这些”过滤都用这一份，不再各算各的 */
+export function scriptGaps(ep: Episode, details: Record<string, ShotDetail>, sop: SopEpisode | null | undefined): Map<string, string[]> {
+  const miss = episodeMissing(ep, details);
+  const out = new Map<string, string[]>();
+  for (const s of ep.shots) {
+    const why = (miss.get(s.id) ?? []).map((f) => gapText(`缺${f.label}`));
+    const ss = sop?.shots.find((x) => x.id === s.id);
+    for (const b of ss?.stage === "S1" ? ss.blockers.filter((b) => b.stage === "S1") : []) why.push(gapText(b.text));
+    if (why.length) out.set(s.id, [...new Set(why)]);
+  }
+  return out;
+}
+
+/** SOP 阻塞文案去掉内部前缀与 Markdown（“sound/H3：亲密镜头缺【亲密声】” → “亲密镜头缺亲密声”） */
+export const gapText = (t: string) =>
+  // UM-0585…0592：“状态表过期（looks/face_overrides.json、…item_map_overrides…）”——文件名是技术细节，正文写人话
+  /状态表过期|_overrides|\.json\b/.test(t)
+    ? "人物造型 / 单品对照表有更新，系统正在刷新"
+    : t
+    .replace(/^[A-Za-z0-9_/ ]+[:：]\s*/, "")
+    .replace(/\*\*/g, "")
+    .replace(/[【】]/g, "")
+    .replace(/（[A-Za-z0-9 _]*(audio|cue|H3)[A-Za-z0-9 _]*）/gi, "")
+    .replace(/（本镜 ?cue）/gi, "")
+    .replace(/H3 ?audio/gi, "环境声")
+    .trim();

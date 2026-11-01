@@ -1,0 +1,31 @@
+[
+  {
+    "wait": 8000,
+    "title": "看图器 ep01-S1",
+    "path": "/#ep01-S1",
+    "id": "M5_viewer3",
+    "steps": [
+      {
+        "click": "精修",
+        "after": 4000
+      },
+      {
+        "js": "for (let i=0;i<120;i++){ if (!/正在读取/.test(document.body.innerText)) break; await new Promise(r=>setTimeout(r,500)); } const b=[...document.querySelectorAll('button')].find(b=>/全屏看首尾帧/.test(b.innerText)); return b?{disabled:b.disabled,title:b.title}:'none'"
+      },
+      {
+        "after": 2000,
+        "clickAt": "(() => { const e=[...document.querySelectorAll('button')].find(b=>/全屏看首尾帧/.test(b.innerText) && b.getBoundingClientRect().width>0 && !b.disabled); const r=e?.getBoundingClientRect(); return r?[r.x+r.width/2,r.y+r.height/2]:[null,null]; })()"
+      },
+      {
+        "js": "const d=document.querySelector('[role=dialog]'); return d?{modal:d.getAttribute('aria-modal'),text:d.innerText.replace(/\\s+/g,' ').slice(0,40)}:'no dialog'"
+      },
+      {
+        "shot": "a"
+      },
+      {
+        "n": 6,
+        "tabtrap": "[role=dialog]"
+      }
+    ]
+  }
+]

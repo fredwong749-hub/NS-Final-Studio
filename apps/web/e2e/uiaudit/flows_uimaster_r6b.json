@@ -1,0 +1,30 @@
+[
+  {"id": "R6_stage", "title": "大格底栏 再生成", "path": "/#ep01-S1", "wait": 8000, "steps": [
+    {"click": "精修", "after": 5000},
+    {"clickAt": "(() => { const e=[...document.querySelectorAll('*')].find(x=>/^首帧 · #\\d+/.test((x.innerText||'').trim()) && x.getBoundingClientRect().x>500 && x.getBoundingClientRect().x<1000 && x.getBoundingClientRect().height<40); const r=e?.closest('button, [role=button], [class*=thumb], [class*=tile], [class*=mini]')?.getBoundingClientRect() || e?.getBoundingClientRect(); return r?[r.x+r.width/2,r.y+Math.min(r.height/2,60)]:[null,null]; })()", "after": 2000},
+    {"js": "await new Promise(r=>setTimeout(r,1000)); const t=document.body.innerText; return {stageLabel:(t.match(/(首帧|尾帧|视频) · #\\d+/)||[null])[0], btns:[...document.querySelectorAll('button')].filter(b=>/再生成/.test(b.innerText+(b.title||'')+(b.getAttribute('aria-label')||'')) && b.getBoundingClientRect().width>0).map(b=>({x:Math.round(b.getBoundingClientRect().x), y:Math.round(b.getBoundingClientRect().y), text:b.innerText.trim().slice(0,8), title:(b.title||'').slice(0,50)}))}"},
+    {"shot": "a"},
+    {"clickAt": "(() => { const b=[...document.querySelectorAll('button')].filter(b=>/再生成/.test(b.innerText+(b.title||'')) && b.getBoundingClientRect().width>0 && b.getBoundingClientRect().x < 520)[0]; const r=b?.getBoundingClientRect(); return r?[r.x+r.width/2,r.y+r.height/2]:[null,null]; })()", "after": 1500},
+    {"js": "return {title:document.querySelector('.ds-modal')?.innerText.slice(0,40), focus:document.activeElement?.tagName, width:Math.round(document.querySelector('.ds-modal')?.getBoundingClientRect().width||0), videoNote:/视频去视频格/.test(document.querySelector('.ds-modal')?.innerText||'')}"},
+    {"tabtrap": ".ds-modal", "n": 6},
+    {"clickAt": "(() => { const b=[...document.querySelectorAll('button')].filter(b=>/再生成/.test(b.innerText+(b.title||'')) && b.getBoundingClientRect().width>0 && b.getBoundingClientRect().x < 520)[0]; const r=b?.getBoundingClientRect(); return r?[r.x+r.width/2,r.y+r.height/2]:[null,null]; })()", "after": 1500},
+    {"typeText": "换成侧脸"},
+    {"click": "=生成", "within": ".ds-modal", "after": 2500}]},
+  {"id": "R6_versions", "title": "版本页签 再生成", "path": "/#ep01-S1", "wait": 8000, "steps": [
+    {"click": "精修", "after": 5000},
+    {"clickAt": "(() => { const e=[...document.querySelectorAll('*')].find(x=>/^首帧 · #\\d+/.test((x.innerText||'').trim()) && x.getBoundingClientRect().x>500 && x.getBoundingClientRect().x<1000 && x.getBoundingClientRect().height<40); const r=e?.closest('button, [role=button], [class*=thumb], [class*=tile], [class*=mini]')?.getBoundingClientRect() || e?.getBoundingClientRect(); return r?[r.x+r.width/2,r.y+Math.min(r.height/2,60)]:[null,null]; })()", "after": 2000},
+    {"clickAt": "(() => { const e=[...document.querySelectorAll('button,[role=tab]')].find(b=>/^版本/.test(b.innerText.trim()) && b.getBoundingClientRect().x>innerWidth*0.7 && b.getBoundingClientRect().y<120); const r=e?.getBoundingClientRect(); return r?[r.x+r.width/2,r.y+r.height/2]:[null,null]; })()", "after": 1500},
+    {"js": "const items=[...document.querySelectorAll('.v3e-ver .v3e-chain [class*=node], .v3e-ver .v3e-chain button')].filter(e=>e.getBoundingClientRect().width>0); return {chainItems:items.length, labels:items.slice(0,4).map(e=>e.innerText.replace(/\\s+/g,' ').slice(0,10)), regenInVer:[...document.querySelectorAll('.v3e-ver button')].filter(b=>/再生成/.test(b.innerText+(b.title||''))).map(b=>b.innerText.trim()+'|'+(b.title||'').slice(0,30))}"},
+    {"clickAt": "(() => { const items=[...document.querySelectorAll('.v3e-ver .v3e-chain [class*=node], .v3e-ver .v3e-chain button')].filter(e=>e.getBoundingClientRect().width>0); const e=items[2]||items[items.length-1]; const r=e?.getBoundingClientRect(); return r?[r.x+r.width/2,r.y+Math.min(r.height/2,10)]:[null,null]; })()", "after": 1200},
+    {"js": "return (document.querySelector('.v3e-ver')?.innerText.match(/选中 #\\d+/)||[null])[0]"},
+    {"clickAt": "(() => { const b=[...document.querySelectorAll('.v3e-ver button')].find(b=>/再生成/.test(b.innerText+(b.title||''))); const r=b?.getBoundingClientRect(); return r?[r.x+r.width/2,r.y+r.height/2]:[null,null]; })()", "after": 1500},
+    {"click": "=生成", "within": ".ds-modal", "after": 2500},
+    {"clickAt": "(() => { const items=[...document.querySelectorAll('.v3e-ver .v3e-chain [class*=node], .v3e-ver .v3e-chain button')].filter(e=>e.getBoundingClientRect().width>0); const e=items[0]; const r=e?.getBoundingClientRect(); return r?[r.x+r.width/2,r.y+Math.min(r.height/2,10)]:[null,null]; })()", "after": 1200},
+    {"js": "return (document.querySelector('.v3e-ver')?.innerText.match(/选中 #\\d+/)||[null])[0]"},
+    {"clickAt": "(() => { const b=[...document.querySelectorAll('.v3e-ver button')].find(b=>/再生成/.test(b.innerText+(b.title||''))); const r=b?.getBoundingClientRect(); return r?[r.x+r.width/2,r.y+r.height/2]:[null,null]; })()", "after": 1500},
+    {"click": "=生成", "within": ".ds-modal", "after": 2500},
+    {"shot": "a"}]},
+  {"id": "R6_video", "title": "视频格不出按钮", "path": "/#ep01-S1", "wait": 8000, "steps": [
+    {"click": "精修", "after": 5000},
+    {"js": "const t=document.body.innerText; const stage=document.querySelector('.v3e-stage, [class*=stage]'); return {stageLabel:(t.match(/(首帧|尾帧|视频) · #\\d+/)||[null])[0], videoEls:document.querySelectorAll('video').length, regenNearVideo:[...document.querySelectorAll('button')].filter(b=>/再生成/.test(b.innerText+(b.title||'')) && b.getBoundingClientRect().width>0 && b.getBoundingClientRect().x<520).length}"}]}
+]

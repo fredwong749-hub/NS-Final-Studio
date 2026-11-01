@@ -115,7 +115,18 @@ def handle(request, sherpa):
             stream = recognizer.create_stream()
             stream.accept_waveform(rate, samples)
             recognizer.decode_stream(stream)
-            items.append({"text": stream.result.text})
+            res = stream.result
+            item = {"text": res.text}
+            # AUD（2026-10-31）：附带 SenseVoice 的逐字时间戳与事件标签（BGM/Speech/…）；旧调用方只读 text
+            for key in ("tokens", "timestamps", "durations"):
+                v = getattr(res, key, None)
+                if v:
+                    item[key] = [x if isinstance(x, str) else float(x) for x in v]
+            for key in ("event", "lang", "emotion"):
+                v = getattr(res, key, None)
+                if v:
+                    item[key] = str(v)
+            items.append(item)
         return {"ok": True, "protocol": PROTOCOL, "items": items}
     raise ValueError(f"unknown op {op!r}")
 

@@ -1,0 +1,163 @@
+# Qwen Image 2.1 调参与提示词写法（BAKEOFF，R11-12 / R11-13，2026-11-01）。
+# 调研：docs/qwen21/RESEARCH.md（官方模型卡、GitHub、diffusers / ComfyUI 源码、官方改写器系统提示词、Comfy 文档、Civitai、HF 讨论区）。
+# 回查：docs/qwen21/BACKCHECK.md（80 条现行首帧作业 + 367 个坏例 + 506 个有契约结果的版本）；坏例库 docs/qwen21/BAD_CASES.md。
+# 检查：tools/bakeoff/qwen21_lint.py（QL01–QL15，tests/test_qwen21_lint.py）。参数类结论待 GPU A/B（tools/bakeoff/run.py qa_*），没 A/B 前不改生产默认。
+rules:
+  - id: K-REN-Q21
+    domain: render
+    link: P5-P6
+    title: Qwen 2.1 Turbo 的采样已与官方逐位一致（8 步 ManualSigmas、euler、cfg 1），不要靠加步数或换调度来救质感
+    when: 想通过改 Qwen 2.1 Turbo 的步数、调度或 sampler 改善塑料感
+    then: >-
+      保持官方 8 个 sigma（末尾补 0）、euler、cfg 1。官方原话是“other schedules have not been evaluated”，社区也说“Do not try to help the Turbo with more steps”。
+      要改善质感，从参考写法、出图尺寸、LoRA 强度、后缀措辞和提示词结构下手（K-PRM-Q22–Q27），每一项都要先跑 A/B。
+    evidence:
+      - {src: docs/qwen21/RESEARCH.md, note: 结论 1；S2、S7、S12、S25}
+    check: tools/bakeoff/run.py
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-PRM-Q22
+    domain: prompt
+    link: P4-P6
+    title: 景别首句必须和“必须入画”的部件相容：特写 / 近景不要求裙、裤、鞋、腿入画
+    when: 编译首帧提示词（剧本 img 句 + 系统补的“本镜造型要穿全：…”句）
+    then: >-
+      特写、近景、中近景里只列景别看得见的部件。腰以下的服装件、鞋、跟高不出现在正文，也不出现在“要穿全”句里。
+      造型一致靠参考板，不靠文字逼着入画。
+      回查数字：命中这条的版本 Q3（景别）不过 34/118（29%），未命中 19/324（6%）。
+      ep02-S1 首帧多次出成中景（脸高 0.16，要求的特写档位是 1），提示词同时写了“胸口以下不入画”和“跟高12厘米 / 鞋尖 / 及膝裙必须入画”。
+      系统那一半（要穿全句）交 REFLOCK；剧本那一半（img 里写鞋尖）交写作方，即 QW-W5 提案。
+    evidence:
+      - {src: docs/qwen21/BACKCHECK.md, note: QL01 × Q3}
+      - {src: docs/qwen21/BAD_CASES.md, note: 景别被撑大}
+    check: tests/test_qwen21_lint.py::test_close_up_with_lower_garments_is_flagged
+    confidence: medium
+    status: 确认
+    date: 2026-11-01
+  - id: K-PRM-Q23
+    domain: prompt
+    link: P4-P6
+    title: 局部特写（只拍手 / 脚）不写在画人物的身份段，也不写脸、肩、胸
+    when: 景别是大特写、局部特写，主体是手、脚或器物
+    then: >-
+      正文只写局部本身和它周围的物件。不拼【角色】身份锁（年龄、发型、肤色），不写“林晚胸口”“肩头”这类会把人带进画面的部位。
+      回查：命中的 9 个版本 Q1 全部不过；总调度驳回了 ep05-S3、ep05-S5、ep10-S8，原因都是“要手部大特写，出成了带脸的中近景”。
+      身份段是编译器拼的，交 REFLOCK；“肩头 / 胸口”出现在剧本 img 句时由写作方改。
+    evidence:
+      - {src: docs/qwen21/BACKCHECK.md, note: QL02 × Q1}
+      - {src: data/ab/qwen21/bad_takes.json, note: master_reject ep05-S3 / ep05-S5 / ep10-S8}
+    check: tests/test_qwen21_lint.py::test_part_close_up_with_identity_block_is_flagged
+    confidence: medium
+    status: 确认
+    date: 2026-11-01
+  - id: K-PRM-Q24
+    domain: prompt
+    link: P4-P6
+    title: cfg 1 下负面提示不起作用；正向提示词里的否定句会把被否定的东西带进画面，要改成肯定句
+    when: 写首帧正文、系统补句或后缀
+    then: >-
+      写“要什么”，不写“不要什么”。
+      例：“不是长裤”改成“及膝深灰铅笔裙”；“不背对镜头”改成“四分之三侧脸朝向镜头”；“画面里不出现脸”改成“画面只有手和器械盘”；“无字幕 / 无文字”在 cfg 1 下没用，后缀里去掉。
+      官方原话：“negative prompt … Ignored when true_cfg_scale is not greater than 1”，ComfyUI 在 cfg 1 时直接跳过负向这一遍。
+      回查：命中否定句的版本 Q2（造型）不过 87/358（24%），未命中 2/54（4%）。ep01-S5 写了“不是长裤”，两次都出成黑长裤。
+    evidence:
+      - {src: docs/qwen21/RESEARCH.md, note: 结论 4；S8、S10、S12}
+      - {src: docs/qwen21/BACKCHECK.md, note: QL03 × Q2}
+    check: tests/test_qwen21_lint.py::test_negations_raw_ids_and_weights
+    confidence: medium
+    status: 确认
+    date: 2026-11-01
+  - id: K-PRM-Q25
+    domain: prompt
+    link: P4-P6
+    title: 两人同框要求两张脸都清晰时，不能再写其中一人前景虚化、背影或只露局部
+    when: 双人镜的首帧正文
+    then: >-
+      两种写法二选一，不要混在一起：
+      一是两人都在画、都露脸（四分之三侧脸）；
+      二是一人局部或虚化，此时不写“两张脸都清晰入画”，局部的人也不写脸和发型（QW-CH6）。
+      回查：命中这条的版本 Q1 不过 30/36（83%），未命中 206/422（49%）。不过的版本多半是“画面里多了一张认不出的脸”，例如 ep03-S6 顾沉在前景虚化。
+    evidence:
+      - {src: docs/qwen21/BACKCHECK.md, note: QL06 × Q1}
+      - {src: docs/qwen21/BAD_CASES.md, note: 两人同框}
+    check: tests/test_qwen21_lint.py::test_two_faces_clear_but_one_blurred_foreground
+    confidence: medium
+    status: 确认
+    date: 2026-11-01
+  - id: K-PRM-Q26
+    domain: prompt
+    link: P5-P6
+    title: 参考图的官方写法是 <imageN>；有身份脸参考时，不再用文字描述五官和肤色
+    when: 编译器写参考标注（asset_refs.prompt_prefix）、拼角色身份锁
+    then: >-
+      官方编码模板在用户文字前拼的就是字面的“<image1><视觉块> <image2>…”，官方编辑改写器明确禁止“图1”这种写法。
+      官方改写器还说，用文字描述长相会让模型重画、相似度下降。
+      现行做法用“图N是…”，而且身份锁里写“冷白皮肤 / 深棕色眼睛 / 眼睛为真实人眼大小”，与官方相反。
+      没跑 A/B 之前不改生产：A/B 组是 qa_imgtag（只改写法）和 qa_all（四项合并），比 Q1 和质感。
+      preflight 的 I6 只认“图N是”，跑这组 A/B 前要请 REFLOCK 让 I6 同时认 <imageN>。
+    evidence:
+      - {src: docs/qwen21/RESEARCH.md, note: 结论 2、3、18；S4、S5、S6、S13、S14}
+    check: tests/test_qwen21_lint.py::test_official_reference_tag_and_face_description
+    confidence: medium
+    status: 待验
+    date: 2026-11-01
+  - id: K-REN-Q27
+    domain: render
+    link: P5-P6
+    title: 质感的候选改法（全部待 A/B）：原生 9:16 尺寸、krea2 LoRA 回到作者推荐范围、后缀去掉质量助推词
+    when: 想改 frame_v9 / leica_sstar 的出图参数，解决塑料脸
+    then: >-
+      1）尺寸：官方 9:16 原生尺寸是 1536×2752，现在用 1152×2016（1.5 倍），A/B 组 qa_native。
+      2）LoRA：krea2_film_texture 的作者在 base 40 步 CFG 2 上训练，推荐强度 0.5–0.65；在 Turbo 上的效果没人评估过，重档 0.8 超出推荐范围。A/B 组 qa_lora0，另需补一组 0.65。
+      3）后缀：官方改写器不写“焦点锐利 / 皮肤纹理清晰 / 微反差强”这类助推词，要写看得见的光源和方向。A/B 组 qa_suffix。
+      4）不要用 Qwen 自己做放大或重绘来加毛孔，会过度造纹理、显老；不要在 Turbo 上再叠加加速 LoRA。
+      每项都用同镜同种子跑契约 A/B，结果写进 RSI_LEDGER 的 BK 节；改生产默认要总调度批。
+    evidence:
+      - {src: docs/qwen21/RESEARCH.md, note: 结论 7、8、10、19、20}
+    check: tools/bakeoff/run.py
+    confidence: low
+    status: 待验
+    date: 2026-11-01
+  - id: K-PRM-Q28
+    domain: prompt
+    link: P4-P6
+    title: 原始 id、方括号标签和括号权重语法不进出图提示词
+    when: 编译出图提示词
+    then: >-
+      sk_studio、sk_elevator 这类场景 id，和【林晚】【场景】这类标签，都要换成自然语言，比如“林晚：”“场景：穿孔纹身工作室”。
+      (词:1.2) 这种权重语法对 Qwen3-VL 无效，括号会原样当文字。
+      回查：80 条现行作业全部含【】标签，Q6 文字不过 18/504，没有未命中组可对照，所以影响大小待 A/B。
+    evidence:
+      - {src: docs/qwen21/RESEARCH.md, note: 结论 6}
+      - {src: docs/qwen21/BACKCHECK.md, note: QL05、QL12}
+    check: tests/test_qwen21_lint.py::test_negations_raw_ids_and_weights
+    confidence: low
+    status: 建议
+    date: 2026-11-01
+  - id: K-WRT-Q29
+    domain: writer
+    link: P4-P6
+    title: 写作方：img 句只写景别看得见的东西，用肯定句，服装逐件写名称、颜色、材质，局部角色不写脸
+    when: 写作模型写 P4 的 img 句
+    then: >-
+      1）特写 / 近景不写鞋、跟、裙摆、地面上的鞋尖。
+      2）不写“不…、无…、不是…”，改写成要的样子。
+      3）服装逐件写名称 + 颜色 + 材质，例如“及膝深灰羊毛铅笔裙”。社区实测：只写“图2 的衣服”18 次里 7 次没换上，逐件命名后 18 次全成。
+      4）两人同框时选定“都露脸”或“一人局部”，不混写。
+      5）⤴ 已被取代（RESEARCH 11-01 按 §G0 同步）：原“年龄写年龄段，不写具体岁数”。取代者：config/script_chat_rules.md 第 5 行与 K-WRT-205（林晚 22 岁、全部角色 22 岁以上的成年人底线）、附录声线短语“22 岁成年女性”——项目方原话优先，不进写作知识包。
+      6）⤴ 已被取代（总调度 fredw-2b 11-01 裁定：项目方原话优先，附录胜出）：原“材质油亮只写在材质上，不写‘像抹了油一样’”。取代者：config/script_chat_rules_appendix.md 第 35 行漆皮镜面句（项目方 10-29 20:04 原话，一字不改）。不进写作知识包；与 Q4 油光的关系仍待 A/B，只作系统侧观察（QL04）。
+      这些是格式和可实现性要求，不评价剧情。
+      写作方的 lint 提案是 QW-W5 到 QW-W8，见 docs/qwen21/PROPOSALS.md，由 ITERAUDIT 接进 tools/qa/writer_lints.py。
+    writer_text: >-
+      img 句只写这个景别看得见的东西（特写 / 近景不写鞋、跟、裙摆、地面上的鞋尖）；用肯定句写要的样子，不写“不… / 无… / 不是…”；
+      服装逐件写名称 + 颜色 + 材质（例：及膝深灰羊毛铅笔裙）；两人同框时“两人都露脸”和“一人局部 / 虚化 / 背影”二选一，不混写。
+    targets:
+      - {kind: writer_prompt, section: 镜头字段}
+    evidence:
+      - {src: docs/qwen21/RESEARCH.md, note: 结论 15、16}
+      - {src: docs/qwen21/BACKCHECK.md}
+    check: tools/bakeoff/qwen21_lint.py
+    confidence: medium
+    status: 确认
+    date: 2026-11-01

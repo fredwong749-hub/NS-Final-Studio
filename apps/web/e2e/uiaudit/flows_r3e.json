@@ -1,0 +1,1 @@
+[{"id":"A_face","title":"身份脸说明","path":"/#/assets?type=character&char=lin_wan","wait":9000,"steps":[{"js":"const t=document.body.innerText; return {tech:(t.match(/by=owner|refs\\.face_plate|face_plate|\\.png|\\.json/g)||[]), human:(t.match(/项目方选定的身份参考|项目方通过的母版[^\\n]*/g)||[])}"},{"shot":"a"}]}]

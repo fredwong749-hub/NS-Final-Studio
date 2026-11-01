@@ -1,0 +1,27 @@
+[
+  {
+    "wait": 8000,
+    "path": "/#ep02",
+    "steps": [
+      {
+        "after": 5000,
+        "js": "location.hash='#/sound'; return 1"
+      },
+      {
+        "click": "配乐",
+        "after": 3000
+      },
+      {
+        "js": "const t=document.body.innerText; const rows=[...document.querySelectorAll('[class*=cand], [class*=bgm] li, [class*=bgm-c]')].filter(e=>e.getBoundingClientRect().width>0); const plays=[...document.querySelectorAll('.mp-play,.mp-big,.mp-audio button')].filter(e=>e.getBoundingClientRect().width>0); const use=[...document.querySelectorAll('button')].filter(b=>/用这一版/.test(b.innerText)).map(b=>({t:b.innerText.trim(), dis:b.disabled, title:b.title.slice(0,40)})); const srcs=[...document.querySelectorAll('audio')].map(a=>a.getAttribute('src')).filter(Boolean).map(s=>s.replace(/\\?.*/,'')); return {epSelect:(t.match(/第 ?\\d+ ?集/)||[null])[0], plays:plays.length, audioSrcs:srcs.slice(0,6), useButtons:use.slice(0,4), current:(t.match(/[^\\n]*(当前|在用)[^\\n]*/g)||[]).slice(0,3), failedShown:/没过|不合格/.test(t)};"
+      },
+      {
+        "shot": "a"
+      },
+      {
+        "js": "const b=document.querySelector('.mp-audio .mp-big, .mp-play'); if(!b) return 'no player'; b.click(); await new Promise(r=>setTimeout(r,2500)); return [...document.querySelectorAll('audio')].filter(a=>!a.paused).map(a=>a.src.replace(/\\?.*/,'').slice(-50)+'@'+a.currentTime.toFixed(1))"
+      }
+    ],
+    "id": "BGM_ep2",
+    "title": "配乐 ep2"
+  }
+]

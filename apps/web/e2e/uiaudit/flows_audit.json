@@ -1,0 +1,16 @@
+[
+  {
+    "title": "操作记录",
+    "id": "PD_audit",
+    "steps": [
+      {
+        "js": "const tb=document.querySelector('table'); const t=(tb||document.body).innerText; return {rows:tb?tb.querySelectorAll('tbody tr').length:0, rawPaths:(t.match(/\\/api\\/[\\w\\/{}-]+/g)||[]).slice(0,5), rawMethods:(t.match(/\\b(POST|PUT|DELETE)\\b/g)||[]).length, other:(t.match(/其他操作/g)||[]).length, sample:[...(tb?.querySelectorAll('tbody tr')||[])].slice(0,4).map(r=>r.innerText.replace(/\\s+/g,' ').slice(0,80)), titleHasPath:[...(tb?.querySelectorAll('[title]')||[])].some(e=>/\\/api\\//.test(e.title)), techDetails:/技术详情/.test(t)};"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "wait": 9000,
+    "path": "/#/audit"
+  }
+]

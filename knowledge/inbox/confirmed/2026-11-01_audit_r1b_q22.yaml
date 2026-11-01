@@ -1,0 +1,15 @@
+- id: K-OPS-Q22
+  domain: ops
+  link: [P11-RETRY]
+  title: 新派的 loop 开工前，总调度先在 ownership.yaml 给它登记自己的文件；要改别人的文件先写 CONSENT，不能边做边越界
+  when: 总调度新派一个 loop（如 RESEARCH、VIDEO-RCA、VOICE10），或派单里写了要改别的 loop 的文件
+  then: 派单的同时在 tools/qa/ownership.yaml 加这个 loop 的条目（工具目录、规则文件、数据目录）；派单里写到的跨 owner 文件，在 docs/uimaster/LOCKS.md 先写 CONSENT 行。iter_gate O1 对“改动方在 ownership.yaml 里没有条目”直接判不通过
+  check: （待补）建议：tests/test_iter_gate.py 加用例——--loop 不在 ownership.yaml 时 O1 = fail；派单模板加一项“已登记 ownership”
+  evidence:
+    - {src: docs/audit/RESEARCH_r01.md, note: "RESEARCH 改了 ITERAUDIT 的 tools/qa/writer_lints.py，没有 CONSENT；RESEARCH 自己的 tools/research/**、research_realism.yaml 都没有 owner"}
+    - {src: data/qa/iter_gate/ITERAUDIT_r3.md, note: "RSI r3 O1 越界 3 个 RECALL 文件（owner_decisions.yaml、decision_check.py、MASTER_PICTURE.md），无 CONSENT"}
+  confidence: high
+  status: 待确认
+  date: '2026-11-01'
+  attribution:
+    owner: 总调度（派单）+ ITERAUDIT（iter_gate O1）

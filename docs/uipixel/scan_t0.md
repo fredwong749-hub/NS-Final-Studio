@@ -1,0 +1,51 @@
+# UIPIXEL 扫描 t0
+
+生成：2026-10-31T16:11:23.378Z · 脚本 apps/web/e2e/uipixel/scan.mjs（检测逻辑 check.js）
+
+- 状态 1 个 × 尺寸 1440×900 × 主题 dark = 截图 1 张（目录 apps/web/e2e/uipixel/t0/，主尺寸另有 _mark 标注图）
+- **去重后问题 33 条**：严重 6 · 一般 17 · 轻微 10
+- 分类：可点区域过小 11 · 左对齐 9 · 缺悬停态 8 · 内部词/路径 4 · 间距不在刻度 1
+
+## 每页问题数
+
+| 状态 | 1440 深 |
+|---|---|
+| projects 项目首页 | 33 |
+
+## 问题清单（按严重度）
+
+| # | 级 | 类别 | 页面（尺寸/主题） | 组件 | 源码 | 量化值 | 说明 | 修法 |
+|---|---|---|---|---|---|---|---|---|
+| 1 | ●●● | 可点区域过小 | projects（1440d） | `div.v3-top-l > a.v3-brand`<br>「momoso Agentic Drama Stu」 | apps/web/src/v3/TopBarV3.tsx:311<br>apps/web/src/v3/ux4.css:6 | 22x22 | 可点区域只有 22×22px（<24 难点中）<br><sub>uipixel/t0/projects_1440_dark_mark.png #11</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 2 | ●●● | 可点区域过小 | projects（1440d） | `details.ns-old > summary`<br>「以前的稿子（5）」 | apps/web/src/v3/pages/NewScriptPage.tsx:145<br>apps/web/src/v3/pages/story.css:163 | 247x23 | 可点区域只有 247×23px（<24 难点中）<br><sub>uipixel/t0/projects_1440_dark_mark.png #14</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 3 | ●●● | 内部词/路径 | projects（1440d） | `button.v3-look.scene > span.v3-look-name`<br>「sk_office_night」 | apps/web/src/v3/ReviewRow.tsx:427<br>apps/web/src/v3/v3.css:331 | sk_office_night | 界面出现内部词「sk_office_night」<br><sub>uipixel/t0/projects_1440_dark_mark.png #22</sub> | 显示人话（场景名 / 资产名），路径放 title 或隐藏 |
+| 4 | ●●● | 内部词/路径 | projects（1440d） | `div.ns-kv > dd` | apps/web/src/v3/pages/NewScriptPage.tsx:938<br>apps/web/src/v3/pages/story.css:133 | sk_office_night | 界面出现内部词「sk_office_night」<br><sub>uipixel/t0/projects_1440_dark_mark.png #23</sub> | 显示人话（场景名 / 资产名），路径放 title 或隐藏 |
+| 5 | ●●● | 内部词/路径 | projects（1440d） | `div.ns-kv.raw > dd` | apps/web/src/v3/pages/NewScriptPage.tsx:938<br>apps/web/src/v3/pages/story.css:133 | integrated_multimodal_description | 界面出现内部词「integrated_multimodal_description」<br><sub>uipixel/t0/projects_1440_dark_mark.png #24</sub> | 显示人话（场景名 / 资产名），路径放 title 或隐藏 |
+| 6 | ●●● | 内部词/路径 | projects（1440d） | `div.ns-kv.raw > dd` | apps/web/src/v3/pages/NewScriptPage.tsx:938<br>apps/web/src/v3/pages/story.css:133 | non_diegetic_music | 界面出现内部词「non_diegetic_music」<br><sub>uipixel/t0/projects_1440_dark_mark.png #25</sub> | 显示人话（场景名 / 资产名），路径放 title 或隐藏 |
+| 7 | ●● | 左对齐 | projects（1440d） | `div.sf-page > nav.sf-steps`<br>「剧本 ① 新建剧本 故事提纲 → 自动写故事线 」 | apps/web/src/v3/pages/ScriptFlowPage.tsx:31<br>apps/web/src/v3/pages/script_flow.css:3 | 4px | 和同组兄弟左边缘差 4px（同组应左对齐）<br><sub>uipixel/t0/projects_1440_dark_mark.png #1</sub> | 同组表单项共用一条左对齐线：去掉单独的 margin-left / padding-left，提示文字放进控件列 |
+| 8 | ●● | 左对齐 | projects（1440d） | `details.ns-old > summary`<br>「以前的稿子（5）」 | apps/web/src/v3/pages/NewScriptPage.tsx:145<br>apps/web/src/v3/pages/story.css:163 | 13px | 和同组兄弟左边缘差 13px（同组应左对齐）<br><sub>uipixel/t0/projects_1440_dark_mark.png #2</sub> | 同组表单项共用一条左对齐线：去掉单独的 margin-left / padding-left，提示文字放进控件列 |
+| 9 | ●● | 左对齐 | projects（1440d） | `div.ns-run-view > div.ns-viewsw`<br>「每镜完整一行 阅读模式」 | apps/web/src/v3/pages/NewScriptPage.tsx:555<br>apps/web/src/v3/pages/story.css:217 | 3px | 和同组兄弟左边缘差 3px（同组应左对齐）<br><sub>uipixel/t0/projects_1440_dark_mark.png #3</sub> | 同组表单项共用一条左对齐线：去掉单独的 margin-left / padding-left，提示文字放进控件列 |
+| 10 | ●● | 左对齐 | projects（1440d） | `div.ns-run-view > div.v3-rows.sf-fullrows`<br>「首帧 #3 ✎ 改 🗑 尾帧未出 尾帧 视频未」 | apps/web/src/v3/Canvas.tsx:111<br>apps/web/src/v3/pages/story.css:221 | 10px | 和同组兄弟左边缘差 10px（同组应左对齐）<br><sub>uipixel/t0/projects_1440_dark_mark.png #4</sub> | 同组表单项共用一条左对齐线：去掉单独的 margin-left / padding-left，提示文字放进控件列 |
+| 11 | ●● | 左对齐 | projects（1440d） | `div.v3-rows.sf-fullrows > article.v3-row`<br>「首帧 #3 ✎ 改 🗑 尾帧未出 尾帧 视频未」 | apps/web/src/v3/ReviewRow.tsx:333<br>apps/web/src/v3/storyboard.css:4 | -4px | 和同组兄弟左边缘差 -4px（同组应左对齐）<br><sub>uipixel/t0/projects_1440_dark_mark.png #5</sub> | 同组表单项共用一条左对齐线：去掉单独的 margin-left / padding-left，提示文字放进控件列 |
+| 12 | ●● | 左对齐 | projects（1440d） | `details.ns-process > summary`<br>「写作过程与格式校验（都通过了，一般不用看）」 | apps/web/src/v3/pages/NewScriptPage.tsx:573<br>apps/web/src/v3/pages/story.css:165 | 14px | 和同组兄弟左边缘差 14px（同组应左对齐）<br><sub>uipixel/t0/projects_1440_dark_mark.png #6</sub> | 同组表单项共用一条左对齐线：去掉单独的 margin-left / padding-left，提示文字放进控件列 |
+| 13 | ●● | 左对齐 | projects（1440d） | `section.ns-stage > header.ns-stage-h` | apps/web/src/v3/pages/NewScriptPage.tsx:643<br>apps/web/src/v3/pages/story.css:80 | 4px | 和同组兄弟左边缘差 4px（同组应左对齐）<br><sub>uipixel/t0/projects_1440_dark_mark.png #7</sub> | 同组表单项共用一条左对齐线：去掉单独的 margin-left / padding-left，提示文字放进控件列 |
+| 14 | ●● | 左对齐 | projects（1440d） | `div.ns-pretty > pre.ns-raw.sm` | apps/web/src/v3/pages/NewScriptPage.tsx:717<br>apps/web/src/v3/pages/story.css:93 | 12px | 和同组兄弟左边缘差 12px（同组应左对齐）<br><sub>uipixel/t0/projects_1440_dark_mark.png #8</sub> | 同组表单项共用一条左对齐线：去掉单独的 margin-left / padding-left，提示文字放进控件列 |
+| 15 | ●● | 左对齐 | projects（1440d） | `div.ns-pretty > div.ns-shots` | apps/web/src/v3/pages/NewScriptPage.tsx:913<br>apps/web/src/v3/pages/story.css:113 | 13px | 和同组兄弟左边缘差 13px（同组应左对齐）<br><sub>uipixel/t0/projects_1440_dark_mark.png #9</sub> | 同组表单项共用一条左对齐线：去掉单独的 margin-left / padding-left，提示文字放进控件列 |
+| 16 | ●● | 缺悬停态 | projects（1440d） | `div.v3-top-l > a.v3-brand`<br>「momoso Agentic Drama Stu」 | apps/web/src/v3/TopBarV3.tsx:311<br>apps/web/src/v3/ux4.css:6 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/t0/projects_1440_dark_mark.png #26</sub> | 加 :hover 背景（--c-hover） |
+| 17 | ●● | 缺悬停态 | projects（1440d） | `div.v3-top-l > a.v3-new.on`<br>「＋ 新建剧本」 | apps/web/src/v3/TopBarV3.tsx:316<br>apps/web/src/v3/v3.css:510 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/t0/projects_1440_dark_mark.png #27</sub> | 加 :hover 背景（--c-hover） |
+| 18 | ●● | 缺悬停态 | projects（1440d） | `div.v3-popwrap.v3-ep-pick > button.v3-ep-name`<br>「第 1 集 · 入职日的一瞥 ▾」 | apps/web/src/v3/v3.css:72 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/t0/projects_1440_dark_mark.png #28</sub> | 加 :hover 背景（--c-hover） |
+| 19 | ●● | 缺悬停态 | projects（1440d） | `span.sf-step-wrap > button.sf-step.on`<br>「① 新建剧本 故事提纲 → 自动写故事线 · 大」 | apps/web/src/v3/pages/ScriptFlowPage.tsx:36<br>apps/web/src/v3/pages/script_flow.css:7 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/t0/projects_1440_dark_mark.png #29</sub> | 加 :hover 背景（--c-hover） |
+| 20 | ●● | 缺悬停态 | projects（1440d） | `div.ns-run-wrap > button.ns-run.on`<br>「漆皮之下·十日 · 10 集 写完了 10-31」 | apps/web/src/v3/pages/NewScriptPage.tsx:184<br>apps/web/src/v3/pages/story.css:8 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/t0/projects_1440_dark_mark.png #30</sub> | 加 :hover 背景（--c-hover） |
+| 21 | ●● | 缺悬停态 | projects（1440d） | `details.ns-old > summary`<br>「以前的稿子（5）」 | apps/web/src/v3/pages/NewScriptPage.tsx:145<br>apps/web/src/v3/pages/story.css:163 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/t0/projects_1440_dark_mark.png #31</sub> | 加 :hover 背景（--c-hover） |
+| 22 | ●● | 缺悬停态 | projects（1440d） | `div.ns-series-eps > button.ns-sep.on`<br>「第 1 集 入职日的一瞥」 | apps/web/src/v3/pages/NewScriptPage.tsx:977<br>apps/web/src/v3/pages/story.css:147 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/t0/projects_1440_dark_mark.png #32</sub> | 加 :hover 背景（--c-hover） |
+| 23 | ●● | 缺悬停态 | projects（1440d） | `div.ns-viewsw > button.on`<br>「每镜完整一行」 | apps/web/src/components/Dialogs.tsx:219<br>apps/web/src/canvas-v2.css:8 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/t0/projects_1440_dark_mark.png #33</sub> | 加 :hover 背景（--c-hover） |
+| 24 | ● | 间距不在刻度 | projects（1440d） | `div.v3-info > div.v3-people`<br>「林晚 A 景 sk_office_night 无」 | apps/web/src/v3/ReviewRow.tsx:417<br>apps/web/src/v3/pages/story.css:222 | paddingLeft:38 | paddingLeft 38px 不在间距刻度（4/8/12/16/24/32…）<br><sub>uipixel/t0/projects_1440_dark_mark.png #10</sub> | 改成 --sp-* token（4/8/12/16/24/32） |
+| 25 | ● | 可点区域过小 | projects（1440d） | `div.v3-popwrap.v3-ep-pick > button.v3-ep-name`<br>「第 1 集 · 入职日的一瞥 ▾」 | apps/web/src/v3/v3.css:72 | 168x26 | 可点区域 168×26px（<28）<br><sub>uipixel/t0/projects_1440_dark_mark.png #12</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 26 | ● | 可点区域过小 | projects（1440d） | `span.ns-run-del > button.ds-btn.danger`<br>「🗑」 | apps/web/src/ds/MediaPlayer.tsx:260<br>apps/web/src/ds/ds.css:11 | 34x24 | 可点区域 34×24px（<28）<br><sub>uipixel/t0/projects_1440_dark_mark.png #13</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 27 | ● | 可点区域过小 | projects（1440d） | `span.ed-tile-acts > button.ds-btn.xs`<br>「✎ 改」 | apps/web/src/ds/MediaPlayer.tsx:260<br>apps/web/src/ds/ds.css:11 | 46x24 | 可点区域 46×24px（<28）<br><sub>uipixel/t0/projects_1440_dark_mark.png #15</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 28 | ● | 可点区域过小 | projects（1440d） | `span.ed-tile-acts > button.ds-btn.danger`<br>「🗑」 | apps/web/src/ds/MediaPlayer.tsx:260<br>apps/web/src/ds/ds.css:11 | 34x24 | 可点区域 34×24px（<28）<br><sub>uipixel/t0/projects_1440_dark_mark.png #16</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 29 | ● | 可点区域过小 | projects（1440d） | `div.v3-popwrap > button.v3-status.s-yellow`<br>「待你审首帧，满意就定稿 ?」 | apps/web/src/v3/widgets.tsx:56<br>apps/web/src/v3/v3.css:52 | 181x24 | 可点区域 181×24px（<28）<br><sub>uipixel/t0/projects_1440_dark_mark.png #17</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 30 | ● | 可点区域过小 | projects（1440d） | `div.v3-field > button.mp-play.mp-xs`<br>「▶」 | apps/web/src/ds/MediaPlayer.tsx:108<br>apps/web/src/ds/media.css:4 | 30x24 | 可点区域 30×24px（<28）<br><sub>uipixel/t0/projects_1440_dark_mark.png #18</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 31 | ● | 可点区域过小 | projects（1440d） | `div.v3-ptog > button.sb-toggle`<br>「分镜详情 ▸」 | apps/web/src/v3/ReviewRow.tsx:447<br>apps/web/src/v3/storyboard.css:6 | 80x26 | 可点区域 80×26px（<28）<br><sub>uipixel/t0/projects_1440_dark_mark.png #19</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 32 | ● | 可点区域过小 | projects（1440d） | `div.v3-ptog > button`<br>「首帧提示词 ▸」 | apps/web/src/v3/ReviewRow.tsx:445<br>apps/web/src/v3/v3.css:332 | 92x26 | 可点区域 92×26px（<28）<br><sub>uipixel/t0/projects_1440_dark_mark.png #20</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 33 | ● | 可点区域过小 | projects（1440d） | `div.v3-popwrap > button.v3-status.s-gray`<br>「还没有首帧，出首帧 ?」 | apps/web/src/v3/widgets.tsx:56<br>apps/web/src/v3/v3.css:52 | 157x24 | 可点区域 157×24px（<28）<br><sub>uipixel/t0/projects_1440_dark_mark.png #21</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |

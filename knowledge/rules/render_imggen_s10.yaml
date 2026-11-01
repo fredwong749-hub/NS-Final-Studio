@@ -1,0 +1,183 @@
+# IMGGEN（2026-10-31，series10_v1 十集出图）：6 卡批量出设定图 / 首帧时学到的东西。
+# 工具：tools/series10_imggen/imggen.py（调度 + 自动质检 + 换 seed 重出），tools/series10_imggen/score_remote.py（出图机器上打分）。
+# 证据数字见 data/pipeline/runs/series10_v1/images/findings.json（由 imggen.py findings 生成）。
+rules:
+  - id: K-OPS-121
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: P5-P6
+    title: 多道批量出图：每道一个提交线程 + 一个取图线程，道深度按服务器队列里本工具的任务数算
+    when: 用 tools/series10_imggen/imggen.py（或任何多道批量出图工具）同时驱动 gpu33 / gpu36 的多个 ComfyUI
+    then: 每道独立线程，一条隧道慢只影响自己那道；每 4 s 读 /queue，本工具在服务器上的任务数（运行中 + 排队）< 2 就补交；取图（/history + /view）放到独立线程，不排在提交前面；暂停单道用 control.json 的 hold_lanes
+    params: {imggen.per_lane: 2, imggen.queue_poll_s: 4}
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/images/imggen.log, quote: "22:06 只有 3/6 张卡在出图", note: 旧版 6 道串行在一个循环里，笔记本 Wi-Fi 约 270 KB/s，一张 PNG 走 /view 要 7–35 s，一道卡住其他道全部空转；22:27 改成每道独立线程后 6 道都在出图}
+      - {src: tools/series10_imggen/imggen.py, note: lane_loop / fetch_loop}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-OPS-122
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: P5-P6
+    title: 出图质检在出图那台机器上原地读 ComfyUI 输出目录打分，不经笔记本回传
+    when: 对 gpu33 / gpu36 出的图做身份 / 景别 / 文字检测
+    then: 用 /history 拿到 subfolder + filename，拼上该道的 --output-directory，在那台机器上用 /root/work/fredw/venv_idm 跑 score_remote.py（清单走 ssh stdin，几 KB）；两台都已装 insightface buffalo_l 与 rapidocr-onnxruntime（只装在自己的 venv）
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/images/imggen.log, note: 旧做法下载到笔记本再 scp 上 gpu36：21 张 6.5 MB 传了 3 分钟以上还没完；原地打分一批 14 s（含载模型）}
+      - {src: tools/series10_imggen/score_remote.py}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-REV-121
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: review
+    link: P5-P6
+    title: 身份“不像他人”门槛随参考彼此的相似度抬高：max(0.40, 两人参考互相余弦 + 0.05)
+    when: 用 ArcFace（identity_metric 同模型）判定设定图 / 首帧里的角色身份
+    then: 本人 ≥0.50；对每个他人，余弦 < max(0.40, cos(本人参考, 他人参考) + 0.05)。顾沉与陈宇的脸部参考互相就有 0.429，固定 0.40 会让顾沉的每一张都判“像陈宇”
+    params: {identity.same: 0.5, identity.other_floor: 0.4, identity.other_margin: 0.05}
+    evidence:
+      - {src: data/assets/identity_refs/manifest.json, note: gu_chen vs chen_yu_sheet 0.369；脸部裁切之间实测 0.429}
+      - {src: data/pipeline/runs/series10_v1/images/findings.json, note: 顾沉 3 个造型暂定与陈宇 0.415–0.423，本人 0.92，按新门槛通过}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-REN-122
+    check: [tests/test_rsi_rule_checks.py]   # RSI 11-01 补引用（docs/rsi/UNCHECKED_AUDIT.md）
+    domain: render
+    link: P4-P6
+    title: 768×1344 竖构图首帧的景别自动判定：主角色脸框高 / 画面高 → 档位，允许差一档
+    when: 首帧自动质检判断景别是否符合 Shot Spec（K-REN-101 的景别）
+    then: 脸高 ≥0.45 大特写；0.27–0.45 特写；0.17–0.27 近景 / 中近景（同为“胸部以上”）；0.115–0.17 中景；0.095–0.115 中全景；0.05–0.095 全景；<0.05 远景。与要求差 ≥2 档判不合格；局部特写（首句写手 / 脚 / 鞋等且无脸）不判景别和身份
+    params: {framing.bands: [0.45, 0.27, 0.17, 0.115, 0.095, 0.05], framing.tolerance: 1}
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/images/findings.json, note: 首批 48 张人工对照：全身站姿脸高 0.088（ep03-S5），膝上 0.14，胸部以上 0.17–0.27，特写 0.27–0.35；旧档位把全身判成中景}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-REN-123
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: P4-P6
+    title: Qwen-Image 2.1 首帧：要“特写”时常出成中景 / 中全景，换 seed 只救回一部分，根治要在提示词侧
+    when: 编译器出的首帧提示词（首句“特写构图。”）+ lin_wan_qi_v1 0.8，768×1344
+    then: 质检按 K-REN-122 判，不合格自动换 seed（≤3 次）；仍不合格的镜交 PROMPT 在编译器里加强特写描述（例如“脸占画面大半、头顶到下巴入画、背景只剩虚化”），出图端不改提示词（K-REN-103）
+    writer_text: 特写镜的首帧画面描述只写脸和手边一件小物，不要同时写全身动作、鞋或整个房间——写了全身动作的特写镜，出图会退成中景。
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/images/findings.json, note: 80 镜首次景别不合格 14 镜，换 seed 救回 6；最终 8 镜仍不合格，其中 6 镜是“要特写得中景 / 中全景”（ep02-S1、ep03-S1、ep06-S1、ep07-S3、ep08-S1、ep09-S1）}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-REV-122
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: review
+    link: P5-P6
+    title: 双人镜只差“第二个人没出脸”时，换 seed 1 次后就停，标“待人工看”
+    when: 首帧自动质检，在画角色 ≥2，在画的人身份都过、景别和文字都过，只是另一位没检测到脸（背对 / 出画 / 被遮）
+    then: 最多重出 1 次；两次都只差这一项 → 取最好的一张，标“第二人未出脸，待人工看”，不再占卡（imggen.decide 已实现）
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/images/findings.json, note: 25 镜尽力版里有 10 镜在 3 次换 seed 后仍是“第二人无脸”（ep02-S4/S7、ep05-S3/S5/S6、ep06-S5、ep08-S3、ep09-S8、ep10-S3 等），每镜白跑 3 张}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-AST-223
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: P5-P6
+    title: 男主（顾沉 / 陈宇）首帧身份明显弱于林晚——只靠脸部裁切参考不够，需要出图 LoRA 或更强参考
+    when: 首帧里出现顾沉 / 陈宇（作业只挂 face_ref2va 裁切，没有角色出图 LoRA）
+    then: 先按 K-REV-121 判、换 seed 补救；根治候选（待验）：给顾沉 / 陈宇训练出图 LoRA（同 lin_wan_qi_v1 的做法），或中景以上加挂造型版设定图正面全身作第二参考
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/images/findings.json, note: 80 镜暂定版身份中位数：林晚 0.835（73 次检出，有 lin_wan_qi_v1 0.8），顾沉 / 陈宇 0.567（36 次）；尽力版中 7 镜是男主 <0.5}
+    confidence: medium
+    status: 待验
+    date: 2026-10-31
+  - id: K-AST-221
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: P5-P6
+    title: 新角色（没有身份参考）的设定图：先出 A 造型定脸，再用 A 的脸约束 B / C
+    when: 新人物只有文字描述，要出多套造型设定图（例：阿岚）
+    then: A 造型两 seed 纯文字出图；判定 = 左栏特写脸与第二栏正面全身脸的余弦（自洽）≥0.50 且与已有角色都 < K-REV-121 门槛；选中后按 identity_refs 的裁法（上扩 0.75×脸高、下到 1.0×脸高、宽 = 高×1.05）裁左栏脸作身份参考；B / C 改判“与 A 的余弦 ≥0.50”，不过就以 A 脸为 image1、姿势模板为 image2 重出；首帧作业由 tools/pipeline/image_jobs.py 补参考
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/images/findings.json, note: 阿岚 A s1108 自洽 0.58、与他人最高 0.32；B / C 纯文字出图与 A 的余弦 0.57–0.61，都判同一人；B / C 起初按自洽度判、A 定后未重判（已修：A 定后清掉 B / C 的判定再按与 A 的余弦重判）}
+      - {src: tools/series10_imggen/imggen.py, note: make_alan_ref / sheet_graph variant=alanref}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-AST-222
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: P5-P6
+    title: 纯文字出的新女性角色（短黑发、圆脸）在 ArcFace 上容易接近已定男主——设定图必须做“与他人”检查
+    when: 新角色设定图没有参考图，只靠文字
+    then: 每张都对所有已定角色算余弦；≥门槛的自动换 seed（阿岚 A 前两 seed 与陈宇 0.61、与顾沉 0.46，第三个 seed 降到 0.32）
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/images/findings.json, note: sheets 段 ch_a_lan_lookA 三次出图的 others}
+    confidence: medium
+    status: 确认
+    date: 2026-10-31
+  - id: K-REN-124
+    check: [tests/test_leica_sstar_lca.py]   # RSI 11-01 补引用（docs/rsi/UNCHECKED_AUDIT.md）
+    domain: render
+    link: P5-P6
+    title: Qwen-Image 2.1 首帧走徕卡 S★ 出图路径（Turbo 8 步 + krea2 胶片质感 + 1.5× 出图缩回 + USM），不用 Base 25 步 cfg1 的 plan_c 图
+    when: series10 起所有首帧 / 尾帧作业（作业图必须由系统出图路径 W.qwen_edit + image_params.apply(leica_sstar) 生成）
+    then: 作业图用 ns_render.workflows.qwen_edit（参考 ref_resolution 0 / 不裁）+ image_params.apply(resolve("leica_sstar"))；出图后 image_params.post_file 缩回 768×1344 + USM；cfg 保持 1（Base cfg 2.5 让林晚身份掉到 0.45–0.72）
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/images/imgfix/results.json, note: 4 镜同 seed：S★ 系列 Laplacian 方差为 Base 系列 2–4 倍（ep01-S5 218 vs 63–95），脸部高频 +40–90%，油光 ≈0；v4 cfg2.5 林晚 0.45–0.72}
+      - {src: data/pipeline/runs/series10_v1/images/imgfix/contact_sheet.jpg}
+    confidence: medium
+    status: 建议
+    date: 2026-11-01
+  - id: K-AST-251
+    check: [tests/test_gen_contract.py]   # RSI 11-01 补引用（docs/rsi/UNCHECKED_AUDIT.md）
+    domain: asset
+    link: P5-P6
+    title: 造型参考图必须去头（只留服装 / 鞋 / 饰品），脸只由身份参考提供——同一场景服装漂移由此修好
+    when: 首帧挂造型设定图作服装参考（GEN_CONTRACT I3）
+    then: 用设定图正面全身栏（景别 ≤近景用上 58% 半身）去掉头部后的裁切；提示词写“图N是<角色>本镜造型X的服装参考（只有服装、鞋与饰品，必须一致）”；双人镜第二人只给去头造型图不给脸（I9）
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/images/imgfix/contact_sheet.jpg, note: ep01-S5（造型 A 米白衬衫）只有挂了去头造型图的 v10 系列穿对衣服，其余变体露肩 / 吊带；林晚身份 v10L 0.87/0.94/0.90}
+      - {src: tools/series10_imggen/refkit.py, note: look_ref_nohead；REFLOCK asset_refs 已同步改为去头版}
+    confidence: medium
+    status: 建议
+    date: 2026-11-01
+  - id: K-REV-124
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: review
+    link: P5-P6
+    title: 写实强度三档（krea2 胶片质感 0.3 / 0.5 / 0.8）与身份是此消彼长，供项目方挑；脸型五官不动
+    when: 项目方要“更真实”但林晚的长相以其参考图为准（只在质感上加写实）
+    then: 轻 0.3（身份最稳）/ 中 0.5（S★ 默认）/ 重 0.8；glamour_realism 已在 visual_bible 禁用（AI 图训练，加重 AI 味）
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/images/imgfix/results.json, note: 林晚 ep01-S5 / ep05-S7：轻 0.87/0.90，中 0.77/0.91，重 0.72/0.78；顾沉 ep09-S2：0.80 / 0.78 / 0.66}
+    confidence: medium
+    status: 待验
+    date: 2026-11-01
+  - id: K-REN-125
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: P4-P6
+    title: 局部大特写（手 / 针 / 指甲为主体）挂了脸参考时，模型仍会把整张脸拍进画面
+    when: 首帧主体是局部（framing_subject=part），同时有在画角色的脸参考
+    then: 待定（总调度 / 项目方选）：A 接受带脸大特写；B 局部特写不挂脸参考、只挂单品图（REFLOCK vR 不挂脸时林晚身份掉到 0.47，说明脸仍会出现）
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/images/imgfix/contact_sheet.jpg, note: ep05-S5 全部 12 个变体都出林晚正脸}
+    confidence: medium
+    status: 待验
+    date: 2026-11-01
+  - id: K-AST-252
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: P5-P6
+    title: 每个主场景出空镜参考底图（S★ 预设、竖构图、同光线基线），登记为场景资产 role=space 后首帧才过 I5
+    when: 新剧场景库里的场景没有参考底图
+    then: tools/series10_imggen/scene_plates.py：场景表原文 + “空镜、无人物、竖构图”包装句；每场景 2 seed，原地检脸 / 查字，自动选暂定；POST /api/assets/<sid>/refs role=space；config/scene_aliases.json asset_dir 指同名目录
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/images/scenes/scenes.json, note: 6 场景 12 张全部 0 人脸 0 文字；image_jobs 预演 I5 阻断 66→0}
+      - {src: data/pipeline/runs/series10_v1/images/scenes/contact_sheet.jpg}
+    confidence: high
+    status: 确认
+    date: 2026-11-01

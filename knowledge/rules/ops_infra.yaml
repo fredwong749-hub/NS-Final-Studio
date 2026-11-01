@@ -1,0 +1,103 @@
+# 运行层 / 服务器资源（INFRA，2026-10-31）。domain=ops，id 前缀 K-OPS-I。细节与数字见 docs/infra/utilization.md。
+rules:
+  - id: K-OPS-I01
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: [P5-P6, P7-P8]
+    title: ComfyUI 一律用 --cache-ram（门槛 = 剩余内存 GB），不用 --cache-none
+    when: 启动 / 重启任何一道 ComfyUI（gpu33 ns-comfy@、gpu36 comfy.sh、lane.sh normal）
+    then: gpu33 用 --cache-ram 64 96（systemd drop-in 10-infra-ram.conf）；gpu36 用 --cache-ram 56 88。两个数是“系统剩余可用内存”的门槛，不是缓存大小（140 200 等于只用一半内存）。缓存上限约 80–87%，由 memguard 兜底
+    params: {gpu33.cache_ram: [64, 96], gpu36.cache_ram: [56, 88]}
+    evidence:
+      - {src: docs/infra/utilization.md §2 改动, quote: "A、B 不是缓存大小"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-OPS-I02
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: [P5-P6, P7-P8]
+    title: 出图和出片的热权重常驻锁在内存（pagelock），切换不再冷读盘
+    when: 服务器开机后，或热权重清单变化（新底模 / 新文本编码器 / 新 LoRA）
+    then: 运行 /root/work/fredw/ns-infra/pagelock.py lock hot33.txt（gpu33）或 hot36.txt（gpu36），nohup，PID 记 lock.pid；新权重要加进清单后重锁。锁住的 21 GB DiT 读一遍 2 s，冷盘约 15 s
+    evidence:
+      - {src: docs/infra/utilization.md §3 前后对比, quote: "已锁：21 GB 只要 2.0–2.2 s"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-OPS-I03
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: [P5-P6, P7-P8]
+    title: gpu36:2 平时跑 normal 模式；出 >260 帧长镜头前切 long（--novram）
+    when: 视频派单里出现 >260 帧的镜头（K-OPS-001 的长镜头道）
+    then: gpu36:2 队列为空且未取回为 0 时，执行 /root/work/fredw/longshot/lane.sh restart long，长镜头出完后 restart normal。--novram 时首帧慢 2.4 倍、设定图慢 4 倍，所以不出长镜头时不要开。--lowvram 能否代替 --novram 待验（E-INF-1）
+    evidence:
+      - {src: docs/infra/utilization.md §1 测量, quote: "gpu36:2（--novram）"}
+    confidence: high
+    status: 确认
+    experiment: E-INF-1
+    date: 2026-10-31
+  - id: K-OPS-I04
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: [P5-P6, P7-P8]
+    title: 重启 ComfyUI 前要“队列空 + 提交方未取回为 0”，不能只看队列
+    when: 改启动参数 / 滚动重启某一道
+    then: 用 control.json 的 hold_lanes 挂住这一道，等 /queue 清空，并且提交方没有已完成但未取回的任务（/history 只存在进程内存里，重启就丢），然后重启；一次只动一道，恢复后再解除挂起
+    evidence:
+      - {src: docs/infra/utilization.md §2 滚动重启, quote: "“队列空”不等于“结果已取回”"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-OPS-I05
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: [P5-P6, P6-P7, P7-P8]
+    title: 编排、取图、质检都在服务器本机跑；笔记本只拉缩略图和清单
+    when: 批量出图 / 出片（尤其是视频阶段）
+    then: 笔记本 Wi-Fi 约 270 KB/s，一张 PNG 走隧道要 7–37 s，所以编排器和质检都在服务器本机跑（server_deploy.py 部署到 /root/work/fredw/imggen_srv，两台各管本机 3 道）；笔记本用 sync_thumbs.py 每 60 s 拉 state 和缩略图，原图要用时再单独拉
+    evidence:
+      - {src: docs/infra/utilization.md §1 测量, quote: "主要是笔记本链路，不是 GPU"}
+      - {src: tools/series10_imggen/server_deploy.py}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-OPS-I06
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: [P5-P6, P7-P8]
+    title: 提交方的道深度按服务器队列算，取回放独立线程
+    when: 写或改任何往 ComfyUI 提交作业的调度器
+    then: 道深度只算服务器队列里还没跑完的任务（每道 ≥2）；一张出完立刻补交；取回和质检放独立线程，不排在提交前面；state 写入要带重试（Windows os.replace 会撞上读者）
+    evidence:
+      - {src: docs/infra/utilization.md §1 测量, quote: "道深度按“还没取回的任务”计算"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-OPS-I07
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: [P7-P8]
+    title: 两台的视频权重必须对齐；补权重从原始来源下载，sha256 三方核对
+    when: 视频阶段派单；或任何一台缺权重要补
+    then: 每台各自从原始来源下载（代理只写在下载命令前，固定 HF 版本号），不经笔记本中转；sha256 必须同时等于 HF LFS oid 和另一台现有文件，三方一致才放进 models 目录；来源和 sha 登记到 workflow_library.md 许可登记，然后重锁 pagelock。2026-10-31 已补齐：gpu36 补 ref2va pruned int8 和 Motion_Repair_V2，gpu33 补 latent upscaler fp16，两台的 Ref2VA / PDD 都可以任意派
+    evidence:
+      - {src: docs/ep02_iter/workflow_library.md 许可登记, quote: "三方一致"}
+      - {src: docs/infra/utilization.md §3 前后对比}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-OPS-L01
+    domain: ops
+    check: [tests/test_localgpu_lane.py, tools/localgpu/check_lane.py]
+    link: [P5-P6]
+    title: 本机出图道（laptop:0）参数必须与 leica_sstar 完全一致，只出图、并发 1、开派由总调度定
+    when: 新增或改动本机 / 任何非服务器出图道；改 render_endpoints.json lanes；改 frame_v9 / leica_sstar
+    then: 道记录只许 url / label / image_only / concurrency / hold / preset_lock 等调度字段，不许带任何出图参数；生产预设（frame_redo_preset）与 leica_sstar 出图参数逐项相同；道上 ComfyUI 版本与服务器相同（0.42.0）、节点和模型文件齐全、模型 sha256 等于 HF 官方 LFS oid / 服务器记录；image_only 道 max_frames=0，任何视频都不派；hold=true 时只能手动点名，不自动派。check：tools/localgpu/check_lane.py [--live] [--sha] + tests/test_localgpu_lane.py
+    evidence:
+      - {src: data/ab/localgpu_verify/repro_S4_vN, note: "同工作流复现服务器 ep01-S4_vN s20261311/12（RSI 代修：src 只写路径，说明移到 note，原写法让 compile 全库失败）", quote: "原图 MAE 1.96 / 2.00（0–255），PSNR 32.1 / 32.2 dB；同一输入后处理逐像素一致"}
+      - {src: data/ab/localgpu_verify/ep01-S1/ep01-S1_local_s20261201.json, quote: "graph_diffs_vs_job_record: []"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01

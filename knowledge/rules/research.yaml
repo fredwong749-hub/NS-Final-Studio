@@ -1,0 +1,1098 @@
+# 研究文档蒸馏（R = research 编号，避免和 ARCH 主编号冲突）。来源：docs/ep02_iter/ 下
+# lab_recipes / consistency_research / runninghub_study / civitai_study / competitor_flows /
+# v2a_review / writer_requests / LEARNING_BACKLOG / RSI_PLAN / workflow_library（只取总表与结论节）。
+# 只收有证据、可执行的结论；不改 config / 代码 / 剧本；不评价剧本内容。
+# 本文件不写 loop 域，不写 targets kind=recipe / render_quality / loop_rule（由 ARCH 接）。
+rules:
+
+  # ───────────────────────── render ─────────────────────────
+
+  - id: K-REN-R01
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: [P7-P8]
+    title: "静止情绪镜在 FL2VA / I2VA 上换配方、换 seed、去 Picture 2 分句都救不了"
+    when: "首尾帧几乎一样的静态情绪镜（ep02 S6、S10、S7 类），FL2VA 或只给首帧（I2VA）"
+    then: "不要在 FL2VA/I2VA 内继续换 Turbo / 基模 24 / 基模 32 / Pika / seed 重试；直接升级到 Ref2VA 路线（见 K-REN-R02），或交项目方改首尾帧"
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §批 2 补充（18:40）"
+        quote: "S6 / S10 在 FL2VA / I2VA 的所有配方下……都是 fail 或 warn"
+      - src: "docs/ep02_iter/lab_recipes.md §批 3（19:10，收尾）"
+        quote: "S10 静止镜：Ref2VA 通过（1.35，FL2VA 所有配方 ≤ 0.49）"
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+
+  - id: K-REN-R02
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: [P7-P8]
+    title: "Ref2VA 两段式配方（20 步 euler/simple，第 10 步切，544×960 → 3D latent 放大 → 768×1344）"
+    when: "静态情绪镜、对白近景、人物走动镜需要动作量 / 身份 / 不泛红时（接受构图不受定稿首帧约束）"
+    then: "unet minimax_h3_ref2va_pruned_int8_convrot；clip qwen3vl_32b_minimax_h3_nvfp4_awq；视频 VAE fp16、音频 VAE fp32；20 步 euler/simple，SplitSigmas@10；前段 544×960，conv_v1 3D 放大到 768×1344 align 32 跑后 10 步；SigmaShift 12/3；BasicGuider cfg 1；ref_image_size match；提示词 ref-en 六段。实测 S6 mean 0.31→1.28、S2 SFace 0.34→0.75、cheek_red 0.52→0.10"
+    params:
+      ref2va_2pass.steps: 20
+      ref2va_2pass.split_step: 10
+      ref2va_2pass.lowres: [544, 960]
+      ref2va_2pass.target: [768, 1344]
+      ref2va_2pass.sampler: euler
+      ref2va_2pass.scheduler: simple
+      ref2va_2pass.shift: [12, 3]
+      ref2va_2pass.cfg: 1
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §批 2：Ref2VA 设置"
+        quote: "ref2va int8，20 步 euler/simple，SplitSigmas@10"
+      - src: "docs/ep02_iter/lab_recipes.md §每类镜头的最佳配方"
+        quote: "静态情绪……推荐配方 Ref2VA"
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-REN-R03
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: [P6-P7]
+    title: "Ref2VA 不给首帧时构图来自提示词，与定稿首帧不同"
+    when: "用纯 Ref2VA（不带定稿首帧锚点）出片"
+    then: "预期机位 / 姿态 / 服装 / 光线可能和定稿首帧不同（S6 坐姿变站姿、无外套、无台灯）；出片后必须做构图对照审（见 K-REV-R07），是否接受由项目方定"
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §批 2 观察 2"
+        quote: "代价是构图不受定稿首帧约束"
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+
+  - id: K-REN-R04
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: [P6-P7, P7-P8]
+    title: "Ref2VA multiframe（定稿首帧作 <Picture 1> + AddGuide 0）保构图但身份退回首帧水平"
+    when: "想同时保留定稿首帧构图和 Ref2VA 身份时"
+    then: "首帧锚点会压过脸部参考（SFace S6 0.70→0.49、S2 0.81→0.35，S6 又几乎不动）；只有不泛红的优势保留。要两者兼得，必须先用身份参考重出首帧（K-AST-R01），再走 multiframe 或 FL2VA。修正 K-REN-011 对 E5 的预期"
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §批 4 E5 multiframe"
+        quote: "E5 保住了构图，但身份和动作都回到首帧的水平"
+    confidence: medium
+    status: 确认
+    experiment: E5
+    date: 2026-10-31
+
+  - id: K-REN-R05
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: [P7-P8]
+    title: "AddGuide 不能接两段式；multiframe 用单段 20 步全尺寸"
+    when: "Ref2VA / FL2VA 图里用 MiniMaxH3AddGuide 钉帧"
+    then: "不要和 SplitSigmas + 3D 放大两段式同时用（第二段尺寸对不上）；改单段 20 步全尺寸，3090 约 23 min/镜"
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §批 4 E5 multiframe"
+        quote: "AddGuide 接两段式时，第二段尺寸会对不上"
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+
+  - id: K-REN-R06
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: [P7-P8]
+    title: "脸部泛红不是 Pika 独有：所有配方在写了脸红的镜头都会泛红，Pika 最重"
+    when: "提示词（视频或首帧图）含 flush / blush / 绯红 / 泛红类描述的脸部近景"
+    then: "Pika 不用（cheek_red 0.5–0.67，三配方两 seed 都 +14 a*）；改基模 24 步并跑 2 个 seed 按 cheek_red 挑低的，或走 Ref2VA（cheek_red ≤0.10）。修正 LEARNED_SPECS「Pika 用在哪些镜」：基模 / Turbo 同样会泛红（0.41–0.52），只是更依赖 seed"
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §批 1 结论 1–2"
+        quote: "泛红不是 Pika 独有的。所有配方都会泛红"
+      - src: "docs/ep02_iter/lab_recipes.md §批 1 分组表"
+        quote: "提示词没有……cheek_red ≤ 0.08，所有配方都是"
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+
+  - id: K-REN-R07
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: [P6-P7]
+    title: "只给首帧时泛红随时间加重，首尾帧版本较轻"
+    when: "脸红类镜头选择 FL2VA 还是 I2VA"
+    then: "只给首帧没有尾帧把颜色拉回（S2：I2VA 0.41–0.67，首尾帧 t4 0.16）；这类镜头若走 FL2VA 线，优先首尾帧而不是只给首帧"
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §批 1 结论 3"
+        quote: "只给首帧时没有尾帧把颜色拉回来"
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-REN-R08
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: [P7-P8]
+    title: "realism-people 1.0 是 FL2VA/I2VA 线上唯一测到有效的泛红对策（代价动作量下降）"
+    when: "FL2VA/I2VA 路线的脸红近景"
+    then: "挂 realism-people 1.0：同 seed cheek_a95 漂移 +7.1→+0.3、cheek_red 0.28→0.08；但 mean 0.90→0.64。只测 1 个 seed，下一批 0.4 / 1.0 × 2 seed 在 FL2VA 和 Ref2VA 两线确认后再进配方"
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §批 3（19:10，收尾）"
+        quote: "realism-people 1.0 能压住泛红"
+      - src: "docs/ep02_iter/lab_recipes.md §下一批建议 2"
+        quote: "realism-people 0.4 / 1.0 × 2 seed"
+    confidence: medium
+    status: 待验
+    date: 2026-10-31
+
+  - id: K-REN-R09
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: [P7-P8]
+    title: "antiburn 0.7 和 lin_wan_h3_v1 0.8 压不住泛红，不用于此目的"
+    when: "想用 LoRA 压脸部泛红"
+    then: "不挂 antiburn / lin_wan_h3_v1 作泛红对策（R3 0.65、R6 0.67，和不挂 0.61 持平）"
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §批 1 结论 4"
+        quote: "antiburn 0.7 和 lin_wan LoRA 0.8 都压不住"
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+
+  - id: K-REN-R10
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: [P7-P8]
+    title: "基模 32 步对 24 步没有收益，official_base 保持 24"
+    when: "考虑加步数提升动作 / 压泛红"
+    then: "不加到 32 步（S2 mean 0.67 对 0.75–0.90，泛红 0.29 对 0.28–0.52）"
+    params:
+      official_base.steps: 24
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §批 2 补充（18:40）"
+        quote: "多出的步数不值得"
+    confidence: medium
+    status: 确认
+    date: 2026-10-31
+
+  - id: K-REN-R11
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: [P7-P8]
+    title: "Motion Repair V2 不超过 0.4；0.9 把 4 帧一顿带回来"
+    when: "走动 / 慢动作镜头挂 Motion_Repair_V2"
+    then: "强度 ≤0.4（社区中位数 V2 0.4、v1 0.25）；0.9 实测 J4 1.14→1.35 且动作量不增。0.25–0.4 档待测。修正 h3_comfy_expert 的 0.9（K-REN-012 已同步为 0.4）"
+    params:
+      motion_repair_v2.max_strength: 0.4
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §批 2 补充（18:40）"
+        quote: "Motion Repair V2 0.9 有害。J4 从 1.14 升到 1.35"
+      - src: "docs/ep02_iter/civitai_study.md §3 H3 LoRA 实际用到的强度"
+        quote: "Motion Repair v1 0.25、V2 0.4"
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+
+  - id: K-REN-R12
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: [P7-P8]
+    title: "comfy kitchen INT8 注意力无可测画质损失，可以保留"
+    when: "Ref2VA / 基模选择注意力后端"
+    then: "kitchen 和 pytorch 同 seed 对照：mean 1.28/1.30、J4 1.38/1.40、cheek_red 0.09/0.08、SFace 0.70/0.71 一样；kitchen 可用。只 1 镜（Ref2VA）对照、FL2VA 线未测，所以配方默认仍按 K-REN-005 用 pytorch，再测 2 镜后改默认"
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §批 4 E3 注意力"
+        quote: "kitchen INT8 attention 没有可测到的画质损失，保留"
+    confidence: medium
+    status: 建议
+    experiment: E3
+    date: 2026-10-31
+
+  - id: K-REN-R13
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: [P7-P8]
+    title: "长镜头（≥10 s）用基模 24 + 只给首帧 + I2VA 正文修正，走长道"
+    when: "单镜 ≥10 s（ep02 S8、S11 类）"
+    then: "基模 24 步 + 只给首帧 + I2VA 正文修正，派 gpu36:2 长道；S11 实测 pass（mean 2.74、J4 1.01、0 硬切）。Ref2VA 长镜头未测，3090 上 10 s 以上两段式需先算显存"
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §每类镜头的最佳配方 长镜头"
+        quote: "R9 S11：pass，mean 2.74，J4 1.01，0 硬切"
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-REN-R14
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: [P7-P8]
+    title: "Ref2VA 不用 Turbo 少步数：参考图几乎不起作用"
+    when: "Ref2VA 需要锁身份"
+    then: "用 20 步以上基模；Turbo 8 步时身份 0.32，20 步 0.42（同镜对照），社区原话少步数时参考 hardly applied"
+    evidence:
+      - src: "docs/ep02_iter/consistency_research.md §2 R8"
+        quote: "Ref2VA 试过一次，但用的是 Turbo 8 步……没有效果"
+      - src: "docs/ep02_iter/consistency_research.md §1.1 H3 Ref2VA 多参考图"
+        quote: "the references may hardly be applied"
+    confidence: medium
+    status: 确认
+    date: 2026-10-31
+
+  - id: K-REN-R15
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: [P7-P8]
+    title: "ref_image_size max 对身份是否有益证据冲突，只做 A/B"
+    when: "身份分低的 Ref2VA 镜头"
+    then: "默认 match 不变；max（短边 2048，慢数倍）只在 E12 A/B 中测，比较 ArcFace 中位和耗时。社区多说 max 更像，但 MiniMaxAI HF #91 实测没救回身份"
+    evidence:
+      - src: "docs/ep02_iter/runninghub_study.md §2.3 I1"
+        quote: "max 保留短边最高 2048 px，身份更稳但慢"
+      - src: "docs/ep02_iter/civitai_study.md §5 身份一致"
+        quote: "max（短边 2048）更像但慢数倍"
+    confidence: low
+    status: 待验
+    experiment: E12
+    date: 2026-10-31
+
+  - id: K-REN-R16
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: [P7-P8]
+    title: "H3 角色替换 LoRA 暂不进生产"
+    when: "考虑用 h3_character_swap v1.5 / pro4500 做视频后处理换脸"
+    then: "不采用：3090 上 768×1344×192 OOM，只能 544×960×124；整栏参考连服装一起换，只给头部又换不进身份（+0.08 / 无提升）。等造型版设定图或更大显存再试（B5）"
+    evidence:
+      - src: "docs/ep02_iter/consistency_research.md §5.3 结论"
+        quote: "现在不作为生产手段"
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+
+  - id: K-REN-R17
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: [P7-P8]
+    title: "Sage 注意力和 comfy kitchen 不能同时开"
+    when: "导入社区工作流或给图加注意力补丁"
+    then: "Sage 与 kitchen 二选一；Sol 的 int8_qk 噪点多时关掉"
+    evidence:
+      - src: "docs/ep02_iter/civitai_study.md §5 迭代速度"
+        quote: "Sage 和 kitchen 不能同时开（2862009 作者说明）"
+    confidence: low
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-REN-R18
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: [P7-P8]
+    title: "同场 2–3 镜一次 H3 生成（合镜）未验证，只做 A/B"
+    when: "想借 Seedance 系片段式渲染单元"
+    then: "默认渲染单元保持单镜；同场连续 2–3 镜标 clip 一次生成只作 A/B（H3 是否会切镜未知）"
+    evidence:
+      - src: "docs/ep02_iter/competitor_flows.md §4 建议 1"
+        quote: "允许把同场连续 2–3 镜标成 clip 用一次 H3 生成"
+      - src: "docs/ep02_iter/competitor_flows.md §3"
+        quote: "未验证 H3 是否会切镜，需 A/B"
+    confidence: low
+    status: 待验
+    date: 2026-10-31
+
+  - id: K-REN-R19
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: [P7-P8]
+    title: "H3 原生修脸参数共识（裁脸 → 低 denoise 重绘 → 贴回，音频锁定）"
+    when: "中景 / 全身小脸、身份分低、局部泛红的镜头，节点包 H3-FaceRefine 装好后"
+    then: "H3FaceTrackCrop face_yolov8m conf 0.35、crop 2.0–2.5、512–768 画布、高斯平滑 21/51；第二遍 4–8 步 denoise 0.40–0.45；PerFrameDenoise 按脸大小 0.35–0.9；FaceStitch face_only 羽化 24、colour_match 1；NativeAudioLock 锁音频。需装节点包（总调度批准）"
+    params:
+      face_refine.crop: 2.5
+      face_refine.canvas: 768
+      face_refine.denoise: 0.4
+      face_refine.steps: 8
+      face_refine.feather: 24
+    evidence:
+      - src: "docs/ep02_iter/runninghub_study.md §2.4 结论"
+        quote: "denoise 0.40–0.45，4–8 步……24 帧羽化贴回，音频锁定"
+      - src: "docs/ep02_iter/workflow_library.md §按我们的问题归类的推荐 脸部细节"
+        quote: "作者连发 3 个版本（09-11、09-22、10-23）"
+    confidence: medium
+    status: 待验
+    date: 2026-10-31
+
+  - id: K-REN-R20
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: [P8-P9]
+    title: "TTS 锁音轨对口型（AudioConditioningT8 lock_source）"
+    when: "需要外部音轨（TTS / 配音）和嘴型对齐的镜头"
+    then: "先定音轨，作为 drive_audio、音频 latent 遮罩 0，H3 跟着演；和 H3 原声版 A/B 比嘴部相关和句内外比。需装 T8mars 节点包；作者注明不保证身份或口型完全准确"
+    evidence:
+      - src: "docs/ep02_iter/runninghub_study.md §2.6 L1"
+        quote: "锁音频不保证人物身份或口型完全准确"
+      - src: "docs/ep02_iter/civitai_study.md §5 口型"
+        quote: "自定义音频直接替换音频 latent，迫使画面对口型"
+    confidence: medium
+    status: 待验
+    date: 2026-10-31
+
+  - id: K-REN-R21
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: [P7-P8]
+    title: "长镜续接用 latent 级续接，不靠解码后的尾帧"
+    when: "单镜需拆段续写或无缝接续"
+    then: "上一段尾部视频+音频 latent 拷入下一段并保护不去噪（Masked AV Latent Continuation），或 Motion Context 22 帧上下文、latent 级拼接；避免解码再编码。需节点包，A/B 看段间 ΔE 与接缝帧差"
+    evidence:
+      - src: "docs/ep02_iter/civitai_study.md §0 结论 4"
+        quote: "作者说明显减少段间亮度/色彩跳变"
+    confidence: low
+    status: 待验
+    date: 2026-10-31
+
+  # ───────────────────────── prompt ─────────────────────────
+
+  - id: K-PRM-R01
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: prompt
+    link: [P4-P7]
+    title: "Ref2VA 正文须带画面信息（姿态 / 服装 / 光线），不能只搬英文动作字段"
+    when: "编译 Ref2VA ref-en 六段提示词且不给首帧"
+    then: "把定稿首帧对应的姿态、服装、光线信息编进英文正文（现在只搬剧本英文字段，中文 image_body 没进去，导致 S6 坐姿变站姿、无外套无台灯）；仍需对照审"
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §批 2 观察 2"
+        quote: "中文 image_body 没有放进去"
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-PRM-R02
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: prompt
+    link: [P4-P7]
+    title: "<Subject N> 标签本身不带身份，需和 <Picture N> 一一绑定并逐项写可见外貌"
+    when: "Ref2VA / 多人镜编译 subject 定义"
+    then: "每个 <Subject N> 写成「the <角色类型> in <Picture N>, preserving facial identity, 发型、服装逐项、配饰」，顺序与参考图连接顺序一致；是否提升身份待 B7 A/B"
+    evidence:
+      - src: "docs/ep02_iter/consistency_research.md §1.1 H3 Ref2VA 多参考图"
+        quote: "a `<Subject 1>` label carries no identity"
+      - src: "docs/ep02_iter/runninghub_study.md §7 第 1 条"
+        quote: "参考图顺序和 `<Picture N>` 一一对应"
+    confidence: medium
+    status: 待验
+    date: 2026-10-31
+
+  - id: K-PRM-R03
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: prompt
+    link: [P4-P7]
+    title: "续接段提示词开头先复述上段结尾，变化放在 1.5–2 s 之后"
+    when: "Motion Context / 续接段编译"
+    then: "每段正文开头复述上一段结尾的画面状态，再写新动作，且新变化在 1.5–2 s 之后发生；否则模型两种都渲染，多出人"
+    evidence:
+      - src: "docs/ep02_iter/workflow_library.md §按我们的问题归类的推荐 多腿 / 鬼影"
+        quote: "提示词开头先复述上段结尾"
+      - src: "docs/ep02_iter/workflow_library.md §按我们的问题归类的推荐 长镜头"
+        quote: "变化放在 1.5–2 s 之后"
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+
+  # ───────────────────────── writer ─────────────────────────
+
+  - id: K-WRT-R01
+    domain: writer
+    link: [P3-P4]
+    title: "脸红类描述会被视频模型放大成大面积腮红并随时间加重（可实现性提示）"
+    when: "img 或 H3 正文里写 flush / blush / 绯红 / 泛红"
+    then: "把证据交写作方：有这类词的 6 镜首帧 cheek_a95 29–34（没有的 16–23），视频 cheek_red 最高 0.67；没写的 5 镜所有配方 ≤0.08。系统不改原文"
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: "画面描述里的脸红 / 绯红类词，在当前首帧与视频模型上会稳定渲染成脸颊大片红斑且随时间加重，会触发泛红质检；如需写，请在 img 与 H3 正文保持一致并接受质检复看。"
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §批 1 分组表"
+        quote: "首帧 cheek_a95 29–34（S8 20）"
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+
+  - id: K-WRT-R02
+    domain: writer
+    link: [P3-P4]
+    title: "H3 英文正文要自带姿态、服装、光线（Ref2VA 不给首帧时构图只来自正文）"
+    when: "镜头可能走 Ref2VA 路线"
+    then: "写作方在 H3 英文正文里写出人物姿态（坐/站）、本镜可见服装、主光源；只写在中文 image_body 里的信息不会进视频"
+    targets: [{kind: writer_prompt, section: H3 正文}]
+    writer_text: "H3 英文正文须自含本镜人物姿态、可见服装和主光源；只写在中文 img 字段的画面信息在参考生视频模式下不会生效。"
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §批 2 观察 2"
+        quote: "剧本 image_body 写的是坐姿、外套披肩、台灯暖光"
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-WRT-R03
+    domain: writer
+    link: [P3-P4, P4-P5]
+    title: "人物表服装字段要逐项具体（品类 + 颜色 + 材质），按集按造型给"
+    when: "人物表 / 造型表的服装字段"
+    then: "笼统服装词（如「休闲装」）在设定图流程里不生效，人台模板的灰白皮肤和内衣会渗进来；造型版设定图需要具体服装描述"
+    targets: [{kind: writer_prompt, section: 身份锚点}]
+    writer_text: "人物表每个造型的服装字段须逐项写品类、颜色、材质（上衣 / 下装 / 鞋 / 配饰），按集按造型分别给；笼统词如「休闲装」系统无法渲染成确定造型。"
+    evidence:
+      - src: "docs/ep02_iter/consistency_research.md §5.1 陈宇"
+        quote: "\"休闲装\"没生效"
+      - src: "docs/ep02_iter/LEARNING_BACKLOG.md §B3"
+        quote: "\"休闲装\"太笼统"
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-WRT-R04
+    domain: writer
+    link: [P3-P4, P4-P5]
+    title: "同性别角色外貌字段区分度不够，系统无法分开（项目方 / 写作方闸门）"
+    when: "两个同性别角色的人物表外貌描述只差年龄、体型"
+    then: "待写作方 / 项目方补可区分的具体脸部特征字段；Claude 不自创外貌。现状：顾沉、陈宇两张设定图互相余弦 0.55，随机男性脸对陈宇设定图也有 0.47–0.50"
+    targets: [{kind: writer_prompt, section: 身份锚点}]
+    writer_text: "人物表外貌字段须让同性别角色可区分：至少写出族裔、年龄、脸型、发型、一项显著脸部特征；两角色不得只差年龄或体型。"
+    evidence:
+      - src: "docs/ep02_iter/consistency_research.md §2 R9"
+        quote: "两人只差年龄和\"宽肩 / 精瘦\""
+      - src: "docs/ep02_iter/consistency_research.md §5.2 观感 5"
+        quote: "顾沉和陈宇两张设定图互相余弦 0.55"
+    confidence: high
+    status: 项目方闸门
+    date: 2026-10-31
+
+  - id: K-WRT-R05
+    domain: writer
+    link: [P3-P4]
+    title: "每个角色 3 个不可变视觉锚点（脸 / 着装 / 道具），用具体几何词"
+    when: "人物表锚点字段"
+    then: "锚点按脸部、着装、道具各一条，具体可见（形状、位置、颜色），不用模糊形容词；在画时每镜提示词重复。补充 LEARNED_SPECS D「在画角色锚点必须在」的字段结构"
+    targets: [{kind: writer_prompt, section: 身份锚点}]
+    writer_text: "每个角色给 3 个不可变视觉锚点（脸部 / 着装 / 道具各一），写具体可见的形状、位置、颜色，不用模糊形容词；角色在画的每镜都原样带上。"
+    evidence:
+      - src: "docs/ep02_iter/runninghub_study.md §7 第 2 条"
+        quote: "3 个不可变视觉锚点（面部 / 着装 / 道具）"
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-WRT-R06
+    domain: writer
+    link: [P3-P4]
+    title: "镜间衔接字段：接力类型（物理 / 视线 / 环境）+ 接力元素"
+    when: "Shot Spec continuity 字段（refactor §7.1 已提列，此处补枚举）"
+    then: "continuity_in / continuity_out 填接力类型 physical / gaze / environment / none 与具体元素；调度器只对 continuous 的边用尾帧接续，其余回锚场景母版"
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: "**衔接** 行的“承：”和 **下镜** 行写明接力类型（动作 / 视线 / 环境 / 无）和具体接力元素（哪个动作、看向什么、哪件环境物），例：承：视线｜看向门口。"
+    evidence:
+      - src: "docs/ep02_iter/runninghub_study.md §8.2"
+        quote: "continuity_in / continuity_out：接力类型（物理/视线/环境）"
+      - src: "docs/ep02_iter/competitor_flows.md §4 建议 6"
+        quote: "continuous 的边才用尾帧接续"
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-WRT-R07
+    domain: writer
+    link: [P3-P4]
+    title: "长镜拆段格式：段号、等长、与上一段的重叠帧"
+    when: "单镜需要拆成多段续写"
+    then: "同一场续写段时长相同，标第几段；每段开头复述上一段结尾（K-PRM-R03）"
+    targets: [{kind: writer_prompt, section: 分拍与动作}]
+    writer_text: "一个连续动作需要拆成多镜时，用 **衔接**：接力 并把各镜时长写成相同；后一镜 H3 正文开头先复述上一镜结尾画面，新动作在 1.5–2 秒之后才开始。"
+    evidence:
+      - src: "docs/ep02_iter/runninghub_study.md §7 第 6 条"
+        quote: "同一场的续写段时长相同，标注\"第几段\""
+    confidence: low
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-WRT-R08
+    domain: writer
+    link: [P3-P4]
+    title: "分镜结构模板（五段式 / 9 镜焦点接力 / Next Scene）是否采用待项目方定"
+    when: "写作方拆镜的结构模板"
+    then: "社区模板属于风格与叙事结构选择，不由系统定；项目方决定前不进写作知识包"
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: "（待项目方决定，未生效）镜头描述可按 主体 / 场景 / 运动 / 美学控制 / 风格化 五段组织，「同前」表示继承上一镜只写变化。"
+    evidence:
+      - src: "docs/ep02_iter/runninghub_study.md §7 第 3–5 条"
+        quote: "主体/场景/运动/美学控制/风格化"
+    confidence: low
+    status: 项目方闸门
+    date: 2026-10-31
+
+  # ───────────────────────── asset ─────────────────────────
+
+  - id: K-AST-R01
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: [P5-P6]
+    title: "首帧改用设定图参考出图（R 方式），不再纯文字出图"
+    when: "出定稿首帧（尤其林晚、顾沉、陈宇在画）"
+    then: "Qwen-Image 2.1 + AnyAngle 0.6，25 步 cfg 1 euler/simple，768×1344，参考分辨率 1024，<imageN> 只给设定图，场景文字用剧本原文。实测林晚 S1 0.575→0.706、S2 0.422→0.579；顾沉 0.43/0.57，陈宇 0.56。设定图由项目方挑；必须用造型版设定图防服装渗漏"
+    params:
+      qi21_sheet_ref.steps: 25
+      qi21_sheet_ref.cfg: 1.0
+      qi21_sheet_ref.ref_resolution: 1024
+      qi21_sheet_ref.anyangle_strength: 0.6
+      qi21_sheet_ref.identity_lora: null
+    evidence:
+      - src: "docs/ep02_iter/consistency_research.md §5.2 结果"
+        quote: "R 身份最好"
+      - src: "docs/ep02_iter/consistency_research.md §2 R1"
+        quote: "首帧是纯文字出图，没有任何参考图"
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-AST-R02
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: [P5-P6]
+    title: "用设定图「改定稿首帧、构图不动只换身份」（E 方式）基本换不动身份"
+    when: "想保留定稿首帧构图、只修身份"
+    then: "不用 E 方式：林晚只 +0.05～+0.10，男角基本没换（顾沉 0.28 / 0.32）"
+    evidence:
+      - src: "docs/ep02_iter/consistency_research.md §5.2 观感 1"
+        quote: "E 太保守"
+    confidence: medium
+    status: 确认
+    date: 2026-10-31
+
+  - id: K-AST-R03
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: [P4-P5, P5-P6]
+    title: "整张定妆图 / 设定图做参考会把服装配饰带进画面；用脸部裁切或造型版设定图"
+    when: "Ref2VA 参考图、设定图参考出首帧、角色替换"
+    then: "参考槽给只含脸的裁切图（X4：SFace 0.75→0.81、服装恢复本集白衬衫、cheek_red 0.08），或每集每造型单独出造型版设定图（角色 + 姿势 + 服装图模板）；提示词写「不要复制服装」无效"
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §批 3（19:10，收尾）"
+        quote: "脸部裁切参考解决了服装渗漏"
+      - src: "docs/ep02_iter/consistency_research.md §5.2 观感 3"
+        quote: "提示词写了\"不要复制服装\"，没用"
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+
+  - id: K-AST-R04
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: [P5-P6]
+    title: "设定图流程不叠林晚出图 LoRA lin_wan_qi_v1"
+    when: "Qwen-Image 2.1 设定图或设定图参考出首帧"
+    then: "不挂 lin_wan_qi_v1（同流程 0.926→0.823，把脸往外拉）；等用设定图数据集重训（B9）后再 A/B"
+    evidence:
+      - src: "docs/ep02_iter/consistency_research.md §2 R2"
+        quote: "不挂 LoRA，设定图对定妆脸 0.926；挂 lin_wan_qi_v1 0.6 后降到 0.823"
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+
+  - id: K-AST-R05
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: [P4-P5]
+    title: "角色设定图配方（项目方 Qwen-Image 2.1 四栏流程）"
+    when: "为角色出定妆设定图候选"
+    then: "qwen_image_2.1_int8_convrot + QI2.1_AnyAngle 0.6；qwen3vl_8b_int8_convrot；TextEncodeQwenImage21 参考分辨率 2048；qwen_image_2.1_vae_bf16；25 步 cfg 1 euler/simple；1984×1120；<image1>=定妆脸，<image2>=四栏姿势模板。林晚左栏对定妆 0.926。挑哪张设为定妆归项目方"
+    evidence:
+      - src: "docs/ep02_iter/consistency_research.md §5.1 设定图候选"
+        quote: "照项目方工作流……25 步，cfg 1，euler / simple，1984×1120"
+      - src: "docs/ep02_iter/LEARNING_BACKLOG.md §B1"
+        quote: "脸对定妆 0.926"
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+
+  - id: K-AST-R06
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: [P4-P5]
+    title: "男角先出正脸肖像再走设定图流程（纯文字直出设定图身体会被人台污染）"
+    when: "无参考图的角色（顾沉、陈宇）出设定图"
+    then: "两步：先按 registry 原文出正脸肖像，再走「角色图 + 姿势模板」流程；或用第三种模板给一张服装图"
+    evidence:
+      - src: "docs/ep02_iter/LEARNING_BACKLOG.md §B3"
+        quote: "先出正脸肖像（registry 原文），再走\"角色图 + 姿势模板\"流程"
+    confidence: low
+    status: 待验
+    date: 2026-10-31
+
+  - id: K-AST-R07
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: [P7-P8]
+    title: "视频身份 LoRA lin_wan_h3_v1 无增益，保持不挂"
+    when: "考虑开 video_identity_enabled"
+    then: "保持关：tf_lw 无 LoRA 0.677，step250/500/750 0.663/0.674/0.660；重训须多角度多表情数据集（用设定图批量出），评测必须对比无 LoRA"
+    evidence:
+      - src: "docs/ep02_iter/consistency_research.md §2 R7"
+        quote: "训了，但对身份没有增益"
+      - src: "docs/ep02_iter/LEARNING_BACKLOG.md §B8"
+        quote: "评测必须对比无 LoRA"
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+
+  - id: K-AST-R08
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: [P6-P7]
+    title: "同一角色的多张参考必须是同一人；一个角色 1–3 张不同角度"
+    when: "组织 Ref2VA 参考槽"
+    then: "每个角色 1–3 张同一人不同角度；混入两个人会得到「第三个人」；参考槽顺序与 <Picture N> 一致"
+    evidence:
+      - src: "docs/ep02_iter/civitai_study.md §5 身份一致"
+        quote: "1–3 张同一人的不同角度；混两个人会得到\"第三个人\""
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-AST-R09
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: [P4-P5, P8-P9]
+    title: "每个说话角色注册音色参考（约 4 s 单人干净 H3 原声），Ref2VA 用 <Audio N>"
+    when: "对白镜走 Ref2VA"
+    then: "资产里给每角色加 voice_ref，取该角色 H3 原声约 4 s；X3 S2 带 <Audio 1> 后 ASR 全对、SFace 0.75。注意开口偏晚（4.6 s），见 K-REV-R08"
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §批 2 ASR 回听"
+        quote: "X3 S2：……字全对，但 4.6 s 才开口"
+      - src: "docs/ep02_iter/competitor_flows.md §0 结论 6"
+        quote: "我们目前没有用 H3 `ref_audios`"
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-AST-R10
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: [P4-P5]
+    title: "角色 LoRA 数据集规格"
+    when: "重训林晚出图 LoRA（B9）或训男角 LoRA"
+    then: "30–60 张（社区 20–200），覆盖角度、光照、表情，去近似重复；少见触发词；想固化的特征不写进 caption；Qwen-Image 在 24 GB 上用 musubi fp8 + blocks_to_swap 16。训练属长任务，先问总调度"
+    evidence:
+      - src: "docs/ep02_iter/consistency_research.md §1.2 角色 LoRA 数据集"
+        quote: "variety of poses, angles, and lighting"
+      - src: "docs/ep02_iter/LEARNING_BACKLOG.md §B9"
+        quote: "数据集 30–60 张，去近似重复，用少见的触发词"
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-AST-R11
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: [P7-P8]
+    title: "ReActor 不用于写实成片"
+    when: "考虑逐帧换脸后处理"
+    then: "不用：inswapper 128 px、逐帧闪烁、内置裸露检测会拦成人镜头、inswapper 非商用；只作兜底对照"
+    evidence:
+      - src: "docs/ep02_iter/consistency_research.md §1.3 ReActor"
+        quote: "内置裸露检测，成人镜头会被拦"
+      - src: "docs/ep02_iter/runninghub_study.md §2.4 F6"
+        quote: "不推荐用在写实成片"
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+
+  # ───────────────────────── review ─────────────────────────
+
+  - id: K-REV-R01
+    domain: review
+    link: [P10-P11]
+    title: "身份度量换 ArcFace，并按参考归属判人（不按发色）"
+    when: "审片人物身份维度"
+    then: "用 tools/identity_metric.py（insightface buffalo_l，w600k_r50），每张脸归给余弦最高的角色参考；暂定分档 ≥0.50 同人、0.30–0.50 人工复核、<0.30 不是（阈值待 B15 用本角色同人/异人对 ROC 标定）。修正 LEARNED_SPECS A 的 SFace Q-D1：按发色归人导致 S9/S10 实际比的是陈宇，数字无效"
+    targets: [{kind: director_prompt, section: 判定标准}]
+    director_text: "在画角色 ArcFace 中位 ≥0.50 → pass；0.30–0.50 → owner 复看；<0.30 → reseed，连续失败转 recipe（Ref2VA / 设定图参考重出首帧）。"
+    params:
+      identity_qc.pass_median: 0.5
+      identity_qc.warn_median: 0.4
+      identity_qc.fail_median: 0.3
+      identity_qc.min_face_px: 48
+      identity_qc.fps: 4
+    evidence:
+      - src: "docs/ep02_iter/consistency_research.md §2 R6"
+        quote: "S9/S10 实际是陈宇 → 这个数无效"
+      - src: "docs/ep02_iter/consistency_research.md §1.4 我们的分档"
+        quote: "≥0.50 当同一人……<0.30 判不是"
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-REV-R02
+    domain: review
+    link: [P10-P11]
+    title: "男角身份须比另一男角高 0.10 才算锁住"
+    when: "两个同性别角色都有设定图时判男角身份"
+    then: "对自己设定图余弦须 > 对另一男角 + 0.10，否则判「分不清」，不自动放行"
+    targets: [{kind: director_prompt, section: 判定标准}]
+    director_text: "男角对自己参考的余弦未比另一男角高出 0.10 → 判分不清 → reseed 或 recipe（Ref2VA），不 pass。"
+    params:
+      identity_qc.male_margin: 0.1
+    evidence:
+      - src: "docs/ep02_iter/consistency_research.md §6 第 3 层 identity_qc"
+        quote: "男角对自己设定图的余弦须比对另一男角高 0.10"
+    confidence: low
+    status: 待验
+    date: 2026-10-31
+
+  - id: K-REV-R03
+    domain: review
+    link: [P10-P11]
+    title: "侧脸 / 背面 / 小脸覆盖率低时身份分不作判定"
+    when: "ArcFace 覆盖率低、脸 <48 px、侧脸或背对"
+    then: "不据此判失败；ArcFace 对侧脸天然偏低，计划只用 |yaw|<45° 的帧算中位（B16）；有无参考的人在画时 <0.3 的归属不可靠"
+    targets: [{kind: director_prompt, section: 判定标准}]
+    director_text: "身份覆盖率低（侧脸、背对、脸 <48 px）或画面里有无参考的人 → 不按分数判，转 owner 肉眼复看。"
+    evidence:
+      - src: "docs/ep02_iter/consistency_research.md §3 局限"
+        quote: "背面、侧脸和小于 48 px 的脸检测不到"
+      - src: "docs/ep02_iter/LEARNING_BACKLOG.md §B16"
+        quote: "只用 |yaw|<45° 的帧算中位"
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-REV-R04
+    domain: review
+    link: [P10-P11, P11-RETRY]
+    title: "泛红超线的处置：不用 Pika，基模 2 seed 挑 cheek_red 低的，或走 Ref2VA"
+    when: "cheek_red（脸颊 a*≥25 占比）≥0.25"
+    then: "动作阶梯：换非 Pika 配方 → 基模 24 跑 2 seed 取 cheek_red 低者 → Ref2VA（脸部裁切参考）；skin guard 只压峰值不降面积，不能算修好"
+    targets: [{kind: director_prompt, section: 判定标准}]
+    director_text: "cheek_red ≥0.25：若是 Pika → recipe 换基模 24；基模 → reseed 跑 2 个取低者；仍超线 → recipe 换 Ref2VA。skin guard 后面积不降仍判未修好。"
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §批 1 系统侧建议"
+        quote: "跑 2 个 seed，用 cheek_red 挑红得少的那版"
+      - src: "docs/ep02_iter/v2a_review.md §2 ⑦ 调色"
+        quote: "但泛红面积不降"
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-REV-R05
+    domain: review
+    link: [P11-RETRY]
+    title: "镜内硬切检测 → 自动换 seed 重出"
+    when: "出片后质检"
+    then: "HSV 直方图 Bhattacharyya > 0.35 且帧差 > max(8, 6×中位) 判镜内硬切；检出即换 seed 重出（现有两例换 seed 后消失，新出 14 条 0 处）"
+    targets: [{kind: director_prompt, section: 判定标准}]
+    director_text: "镜内检出硬切（直方图 Bhattacharyya >0.35 且帧差 >max(8, 6×中位)）→ reseed。"
+    params:
+      cut_detect.bhattacharyya: 0.35
+      cut_detect.diff_floor: 8
+      cut_detect.diff_median_x: 6
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §每类镜头的最佳配方 通用"
+        quote: "检出硬切就自动换 seed 重出"
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-REV-R06
+    domain: review
+    link: [P11-RETRY]
+    title: "基模 24 的「不卡顿」随 seed 变，每条都要测 J4"
+    when: "基模 24 / 32 出片后"
+    then: "不能假定基模平滑：同镜两 seed J4 1.12 和 1.39。每条测 J4，>1.3 接 dejudder 或换 seed。补充 LEARNED_SPECS A 的 J4 判定"
+    targets: [{kind: director_prompt, section: 判定标准}]
+    director_text: "J4 >1.3（任何配方，含基模 24）→ 先 dejudder 复测，仍高 → reseed。"
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §批 4 R8"
+        quote: "基模 24 \"没有 4 帧一顿\"取决于 seed，不是稳定性质"
+    confidence: medium
+    status: 确认
+    date: 2026-10-31
+
+  - id: K-REV-R07
+    domain: review
+    link: [P10-P11]
+    title: "Ref2VA 成片要对照剧本 img 做构图审（姿态、服装、光线）"
+    when: "不给首帧的 Ref2VA 版本"
+    then: "对照 image_body 检查姿态、服装、主光；不一致标出交项目方决定，不自动 pass"
+    targets: [{kind: director_prompt, section: 判定标准}]
+    director_text: "Ref2VA 版本的姿态 / 服装 / 主光与剧本 img 不符 → owner（交项目方取舍），不自动 pass；出现参考图里的服装配饰 → recipe 换脸部裁切参考。"
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §批 2 观察 2"
+        quote: "S2 林晚穿上了 lin_wan.png 里的项链和粉色上衣"
+    confidence: high
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-REV-R08
+    domain: review
+    link: [P8-P9, P10-P11]
+    title: "检查对白开口时间（Ref2VA + <Audio> 会开口偏晚）"
+    when: "对白镜，尤其 Ref2VA 带音色参考"
+    then: "用 ASR 时间戳测首字开口；X3 S2 4.6 s 才开口、6.5 s 结束贴到片尾。对策待验：EXPERT 音频三规则或截短 <Audio 1>"
+    targets: [{kind: director_prompt, section: 判定标准}]
+    director_text: "台词首字开口晚于镜长 60% 或结束距片尾 <0.3 s → reseed；连续两次 → recipe（截短音色参考）。"
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §批 2 ASR 回听"
+        quote: "4.6 s 才开口，6.5 s 结束，几乎贴到片尾"
+    confidence: low
+    status: 待验
+    date: 2026-10-31
+
+  - id: K-REV-R09
+    domain: review
+    link: [P10-P11]
+    title: "修脸后身份不得低于修脸前，否则丢弃修脸结果"
+    when: "H3 FaceRefine / 任何脸部重绘后"
+    then: "修脸前后各测一次身份分，修脸后 < 修脸前 → 丢弃修脸版（作者也注明输出只是 review candidate）"
+    targets: [{kind: director_prompt, section: 判定标准}]
+    director_text: "修脸版身份中位低于原版 → 丢弃修脸版，用原版。"
+    evidence:
+      - src: "docs/ep02_iter/runninghub_study.md §8.3"
+        quote: "修脸后余弦必须 ≥ 修脸前，否则丢弃修脸结果"
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-REV-R10
+    domain: review
+    link: [P10-P11]
+    title: "best-of-k 自动挑选：质检从闸门改成排序器"
+    when: "首帧和草稿视频并行出 k 个（默认 k=2）"
+    then: "按身份、泛红、静止、近黑、VLM 符合 Spec 打分，自动选最高的给项目方，其余保留可换；k 过大反降一致性"
+    targets: [{kind: director_prompt, section: 打分}]
+    director_text: "同镜多候选时按 身份 > 泛红 > 静止 > 符合 Spec 排序，只把第一名交项目方，其余留作可换。"
+    evidence:
+      - src: "docs/ep02_iter/competitor_flows.md §4 建议 5"
+        quote: "ViMax k=2 VLM 挑选（且 k 过大反降一致性）"
+    confidence: low
+    status: 建议
+    date: 2026-10-31
+
+  # ───────────────────────── edit ─────────────────────────
+
+  - id: K-EDT-R01
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: edit
+    link: [P9-P10]
+    title: "分段 / 续接颜色向参考帧做 MKL-LAB 迁移（ColorTransfer 0.75）"
+    when: "长镜拆段、段间色漂或泛红漂移"
+    then: "每段生成后 ColorTransfer(mkl_lab, target_frame, 0.75) 对齐参考帧（核心节点已有）；和现行 skin guard 对照看 a*p95 漂移能否压到 <6"
+    evidence:
+      - src: "docs/ep02_iter/runninghub_study.md §2.5 C1"
+        quote: "ColorTransfer(mkl_lab, target_frame, 0, 0.75)"
+    confidence: low
+    status: 待验
+    date: 2026-10-31
+
+  - id: K-EDT-R02
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: edit
+    link: [P9-P10]
+    title: "插帧（GIMM-VFI ×2）只放在 dejudder 之后，它掩盖不了真静止"
+    when: "成片顺滑度精修"
+    then: "顺序：dejudder → 插帧；插帧会把 4 帧一顿平滑掉但不解决静止，不得用插帧代替运动质检"
+    evidence:
+      - src: "docs/ep02_iter/runninghub_study.md §2.8 U3"
+        quote: "掩盖不了真正的静止。应放在 dejudder 之后"
+    confidence: low
+    status: 待验
+    date: 2026-10-31
+
+  # ───────────────────────── ops ─────────────────────────
+
+  - id: K-OPS-R01
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: [P7-P8]
+    title: "Ref2VA 权重只在 gpu33；gpu36 缺 ref2va unet 和 fp16 视频 VAE"
+    when: "派 Ref2VA 作业"
+    then: "只派 gpu33；要在 gpu36 跑须先拷权重，gpu33→gpu36 ssh 报 host key verification failed，需运维配 known_hosts"
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §建议写进 config 第 1 条"
+        quote: "只在 gpu33 有权重；gpu36 缺 ref2va unet 和 fp16 VAE"
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+
+  - id: K-OPS-R02
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: [P7-P8]
+    title: "Ref2VA 在 3090 上的耗时与显存"
+    when: "排期 Ref2VA 作业"
+    then: "两段式 6 s 镜约 16 min；单段 20 步全尺寸 multiframe 约 23 min；峰值约 22.7 GB；角色替换 768p×192 帧 OOM"
+    params:
+      ref2va.minutes_per_6s_2pass: 16
+      ref2va.minutes_single_pass_full: 23
+      ref2va.peak_vram_gb: 22.7
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §批 2：Ref2VA 设置"
+        quote: "6 s 的镜头约 16 min（S6）"
+      - src: "docs/ep02_iter/consistency_research.md §1.1 H3 Ref2VA 多参考图"
+        quote: "X4 实测峰值 22.7 GB"
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+
+  - id: K-OPS-R03
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: [P7-P8]
+    title: "隧道断开时作业不丢，按 prompt_id 取回"
+    when: "gpu 隧道中断"
+    then: "不要重提交；用 tools/lab_ep02/fetch_prompt.py <comfy_url> <prompt_id> <out> 取回"
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §批 2 观察 3"
+        quote: "任务在服务器上没丢，已改用 tools/lab_ep02/fetch_prompt.py"
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+
+  - id: K-OPS-R04
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: [P11-P12]
+    title: "MiniMax H3 Community License 地区与规模限制须确认"
+    when: "使用 / 分发 H3 及其衍生权重（含 Singularity v2、Comfy-Org turbo LoRA）"
+    then: "许可排除欧盟、英国、韩国、美国；商用年收入 >2000 万美元需书面授权，产品界面须显著标注 MiniMax H3；gpu36 时区美东，机器与发行地区是否在排除范围由总调度 / 项目方确认"
+    evidence:
+      - src: "docs/ep02_iter/workflow_library.md §许可登记"
+        quote: "排除 欧盟、英国、韩国、美国"
+    confidence: high
+    status: 项目方闸门
+    date: 2026-10-31
+
+  - id: K-OPS-R05
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: [P11-P12]
+    title: "Civitai 权重许可：没有 Image 商用标记的产出禁商用，只能内部对比"
+    when: "使用 Civitai 下载或转载的 LoRA / 工作流"
+    then: "allowCommercialUse 不含 Image 的标「产出禁商用/未授权」：FastH3、character-sheet edit LoRA、zjourney 已下；realism-people（转载页只写 Rent，以 fal HF 原版许可为准）、AusBoss Qwen Restore / Outfit Swap / Consistency 需人工确认；上线前登记或替换"
+    evidence:
+      - src: "docs/ep02_iter/civitai_study.md §9 许可提醒"
+        quote: "只能内部对比，上线前要换或找原作者授权"
+      - src: "docs/ep02_iter/civitai_study.md §1 方法与落盘"
+        quote: "没有 `Image` 的一律标\"产出禁商用/未授权\""
+    confidence: high
+    status: 待许可登记
+    date: 2026-10-31
+
+  - id: K-OPS-R06
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: [P10-P11]
+    title: "insightface 权重非商用：身份度量只做内部 QC"
+    when: "identity_metric.py / ReActor / antelopev2 相关"
+    then: "buffalo_l、inswapper、antelopev2 均为 non-commercial research；只在内部质检用，交付链路不依赖"
+    evidence:
+      - src: "docs/ep02_iter/consistency_research.md §1.4 许可证提醒"
+        quote: "都是\"non-commercial research\""
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+
+  - id: K-OPS-R07
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: [P7-P8]
+    title: "RunningHub 云端通道只限非成人镜头，开通属项目方闸门"
+    when: "考虑用云端加速 / 对口型 / 2K 再生成"
+    then: "成人镜头只本地；Model API 需 Enterprise Key（花钱，项目方定）；结果 URL 只留 24 h 须及时下载；Workflow API 每次调用重置 seed，须在 nodeInfoList 显式写 seed；Regeneration 要求 24fps、宽高 /32、≤768×1344、107–362 帧、prompt 与原生成一致"
+    evidence:
+      - src: "docs/ep02_iter/runninghub_study.md §6.3 判断"
+        quote: "可行，但只限非成人镜头"
+      - src: "docs/ep02_iter/runninghub_study.md §6.2 注意事项"
+        quote: "API 每次调用都会重置 seed"
+    confidence: high
+    status: 项目方闸门
+    date: 2026-10-31
+
+  - id: K-OPS-R08
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: [P7-P8]
+    title: "预览档 → 选定档 → 精修档三级，缓存一采 latent，选定后固定 seed"
+    when: "作业编排 / RenderPlan"
+    then: "预览档 0.4 MP 低步数并行 3–4 take 挑 seed 与动作；选定档同 seed 两段式到 768P；精修档可选修脸 / 调色 / 去抖 / 插帧 / 2K。一采 latent 落盘，二采与修脸从缓存起跑；seed 选定后写进 takes.json；RenderPlan 记 tier 和父草稿 id"
+    evidence:
+      - src: "docs/ep02_iter/runninghub_study.md §8.1 流程"
+        quote: "应该支持把一采 latent 落盘，二采和修脸从缓存起跑"
+      - src: "docs/ep02_iter/competitor_flows.md §4 建议 4"
+        quote: "胜者才跑第二段 3D latent 上采样"
+      - src: "docs/ep02_iter/civitai_study.md §5 迭代速度"
+        quote: "一次出 3 条低分辨率预览挑种"
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-OPS-R09
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: [P7-P8]
+    title: "每场先跑最难的一镜做金丝雀"
+    when: "按场派发出片作业"
+    then: "先出风险最高的镜（双人、全身行走、远景、对白），过 QC 再放其余；失败整场先停，提示改锚点或资产"
+    evidence:
+      - src: "docs/ep02_iter/competitor_flows.md §4 建议 7"
+        quote: "每场先跑风险最高的镜"
+    confidence: low
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-OPS-R10
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: [P3-P4]
+    title: "写作拆镜规则文件带 rev 记进每个 Spec 的 source"
+    when: "写作方产出 Shot Spec"
+    then: "config/script_chat_rules*.md 等规则文件版本号写入 Spec provenance，规则改动后可查哪些集按旧规则拆；Claude 只管版本与校验，不评价规则内容"
+    evidence:
+      - src: "docs/ep02_iter/competitor_flows.md §4 建议 15"
+        quote: "带 rev 写进每个 Spec 的 source"
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-OPS-R11
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: [P7-P8]
+    title: "缺失节点包一次批量安装、一次重启（需总调度批准）"
+    when: "要跑修脸 / PDD-Acc / Motion Context / T8 音频锁 / VOSR2 / 插帧"
+    then: "H3-FaceRefine（或 fearnworks）、PDD-Acc、Motion Context、T8 audio、VOSR2、GIMM-VFI、VHS 合并成一次安装 + 一次 ComfyUI 重启；装包、补模型、改配置先经总调度"
+    evidence:
+      - src: "docs/ep02_iter/workflow_library.md §ep02 实测前 10 排序理由"
+        quote: "一次重启可同时装 PDD-Acc、H3-FaceRefine、VOSR2、Motion Context、VHS"
+      - src: "docs/ep02_iter/runninghub_study.md §3"
+        quote: "安装节点包、补模型、改配置都要经过总调度和 LAB"
+    confidence: high
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-OPS-R12
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: [P7-P8]
+    title: "导入社区工作流前先核对节点包，并锁定 ComfyUI 版本"
+    when: "导入 Civitai / RunningHub 工作流"
+    then: "先对照本机 /object_info 确认缺失节点（VHS、Spectrum、rgthree、RTX VSR、RIFE、SolAttn、H3SigmaRefiner 等常缺）；不随手升级 ComfyUI（作者提醒 0.40 会弄坏很多工作流）"
+    evidence:
+      - src: "docs/ep02_iter/civitai_study.md §4 SEED HUNTER"
+        quote: "作者提醒 ComfyUI 0.40 会弄坏很多工作流"
+      - src: "docs/ep02_iter/civitai_study.md §3 我们机器上缺的节点"
+        quote: "导入社区工作流前要先确认这些节点包"
+    confidence: low
+    status: 建议
+    date: 2026-10-31
+
+  - id: K-OPS-R13
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: [P7-P8]
+    title: "LAB 产物不定稿：出片后撤回“当前版本”，结论只进库不进 takes"
+    when: "LAB / 对照实验经 :8800 提交"
+    then: "请求带 by: LAB，记 data/ab/lab/manifest.json；出完立即撤回到出片前的当前版本；不直连 ComfyUI 的产物不写 takes。避免实验版本被当成生产当前版"
+    evidence:
+      - src: "docs/ep02_iter/lab_recipes.md §开头 LAB 说明"
+        quote: "LAB 不定稿，不审片通过"
+    confidence: high
+    status: 确认
+    date: 2026-10-31

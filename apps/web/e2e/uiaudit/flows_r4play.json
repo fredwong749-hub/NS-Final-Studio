@@ -1,0 +1,28 @@
+[
+  {
+    "title": "未看完→串播",
+    "path": "/#ep02",
+    "id": "R4_play",
+    "steps": [
+      {
+        "after": 2000,
+        "click": "=审片"
+      },
+      {
+        "after": 1500,
+        "click": "全选本集"
+      },
+      {
+        "after": 2500,
+        "click": "=通过"
+      },
+      {
+        "js": "const t=document.body.innerText; const v=[...document.querySelectorAll('video')].filter(x=>x.getBoundingClientRect().width>0); return {hash:location.hash, reviewMode:!!document.querySelector('[class*=review-mode],[class*=reviewmode],[class*=rm-]'), videos:v.length, playing:v.filter(x=>!x.paused).length, shotLabel:(t.match(/S3[^\\n]{0,30}/)||[null])[0]}"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "wait": 8000
+  }
+]

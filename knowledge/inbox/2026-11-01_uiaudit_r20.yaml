@@ -1,0 +1,38 @@
+# 规则草案（UIAUDIT r19g/r20g，2026-11-01）。status 待确认：总调度 / 对应 owner 确认后移到 knowledge/rules/ 并改 status。
+# 进 inbox 的原因：① 第一条属 ops 域（不归 UIAUDIT 写 ui.yaml）；② 第二条还没有能强制它的检查。
+rules:
+- id: K-OPS-Q20
+  domain: ops
+  link: [P7-P8]
+  title: 离线并回（merge_pull）与往服务器推文件，都要先核完整性；截断文件不得按“新者为准”覆盖笔记本好文件
+  when: ops/offline/resume_from_gpu33.sh → merge_pull.py 把服务器文件并回笔记本；或冻结前把笔记本文件推到服务器
+  then: 并回前对每个 png/jpg/webp 完整解码、mp4 查 moov、json 能解析；不过的文件不覆盖、记入清单报总调度；推送后核 sha256（与 K-OPS-302 同一类问题，第二次出现，按 GEN_CONTRACT §5 视为系统缺陷）
+  check: apps/web/e2e/uiaudit/trunc_scan.py（只读扫描；建议 OPS 把同一判据接进 merge_pull.py 合并前）
+  evidence:
+    - {src: apps/web/e2e/uiaudit/r19_trunc_scan.json, note: "7 个设定图被截断（大小都是 512 的整数倍，是笔记本备份的字节前缀）：lin_wan lookA_s101 / lookB_s101 / lookC_s202、ch_a_lan lookB/C_v2、gu_chen lookC_v2、chen_yu lookB_v2；data/_offline_pull/_backup/ 下的原件完整"}
+    - {src: ops/logs/resume_from_gpu33.log, note: "15:28 并回：tar Unexpected EOF；merge newer 590；data_parity 当时 :8800 未起，UNTESTED"}
+    - {src: apps/web/e2e/uiaudit/r19t_detect.json, note: "GET /api/shots/{id}/refs 74/80 镜 500（asset_refs.sheet_crop → PIL OSError: image file is truncated）；画布场景小卡因此显示“无底图”"}
+    - {src: apps/web/e2e/uiaudit/r20_trunc_scan.json, note: "16:19 前已有人把 7 个文件隔离到 data/_quarantine/prod_20261101_truncated_sheets/ 并还原；生产路径 0 坏"}
+  confidence: high
+  status: 待确认
+  date: '2026-11-01'
+  attribution:
+    owner: OPS（离线恢复，fredw-04 → fredw-2b）
+    root_cause: 冻结时推到服务器的文件传输中断留下半截文件（mtime 比笔记本新）；merge_pull.py 只比 mtime，不验完整性，于是半截文件覆盖了好文件
+    known_rule: K-OPS-302（推完核 sha，enforced:false）
+- id: K-UI-D01
+  domain: ui
+  link: [P5-P6]
+  title: 取数失败不能显示成“没有”——接口报错时格子写“读不到 + 重试”，不能写“无底图 / 未出 / 0 版”
+  when: 界面按某个接口的结果显示“有 / 没有”（场景底图、参考图、候选、视频）
+  then: 区分“后端说没有”和“请求失败 / 超时”。失败时显示“暂时读不到”和重试，不能落到“无底图”这类数据结论；否则内容断言会把接口故障误看成数据缺失
+  check: （待补）建议：parity2_check.mjs 增加场景小卡断言——小卡写“无底图”时，/api/assets/scenes 里该场景必须真的没有 plate；detect.mjs apiErrors 里有 5xx 的页面，该页“无 / 未出”类结论记“未测”
+  evidence:
+    - {src: apps/web/src/v3/ReviewRow.tsx, note: "plateUrl()：apiV1.shotRefs 失败 → () => null → 小卡显示“无底图”（第 273–279 行）"}
+    - {src: apps/web/e2e/uiaudit/r19g_RG_canvas_a.png, note: "ep02 S1–S3 场景小卡“电梯与楼道 无底图”，而 /api/assets/scenes 的 sk_elevator 有 plate.png"}
+    - {src: apps/web/e2e/uiaudit/r20v_V2_candlabel_a.png, note: "/refs 恢复后同一位置显示底图缩略图"}
+  confidence: high
+  status: 待确认
+  date: '2026-11-01'
+  attribution:
+    owner: UIRSI（ReviewRow.tsx）

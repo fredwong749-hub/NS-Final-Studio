@@ -1,0 +1,237 @@
+# 镜头语言（PROMPT 2026-10-31，项目方原话：“提示词里面关于镜头描写（特写、拉长、转换、切场）这些东西学会了没有？”）
+# 只讲格式与可实现性：系统怎么把镜头设计写成 H3 能执行的字段；不规定哪一镜该用什么镜头（那是写作方 / 导演的内容）。
+# 详解与证据全文：docs/ep02_iter/camera_language.md。domain 分三块：writer（P3-P4 镜头设计字段）、prompt（P4-P7 运镜写法）、edit（P4-P10 转场）。
+rules:
+  - id: K-WRT-101
+    domain: writer
+    link: P3-P4
+    title: 一镜 = 一次 H3 生成 = 一个连续镜头；景别变化用运镜，不在一段提示词里切镜
+    when: 写分镜（P4）
+    then: 每镜只有一个 [Shot 1]；需要换景别 / 换机位就拆成下一镜，镜内景别变化写成推 / 拉 / 摇 / 跟的连续运镜
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: 一镜只拍一个连续镜头（H3 里只有一个 [Shot 1]）；镜内要从特写到近景，写成推 / 拉 / 摇的连续运镜；要换机位或换景别跳档，就拆成下一镜。
+    evidence:
+      - {src: data/ab/owner_workflows/minimax_h3_official_skills/h3-prompt-writing/references/base-en.txt §4.2, quote: "If only the distance or a slight angle needs to change, prefer camera motion"}
+      - {src: data/ab/owner_workflows/community/binwu1__drama-series-agent/skills/drama-series-h3-r2v-prompts/references/ref2va-en-official.md, quote: "Prefer a single [Shot 1]"}
+      - {src: docs/ep02_iter/competitor_flows.md 第368行, note: 一段提示词内多镜切换对身份的影响未验证}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-WRT-102
+    domain: writer
+    link: P3-P4
+    title: 镜内多镜切换（[Shot N] At MM:SS.mmm, the camera cuts to…）只作实验，不进生产
+    when: 想在一次生成里完成正反打或多景别
+    then: 官方格式允许；我们镜头独立生成 + 剪辑，镜内多镜对身份 / 嘴型的影响未测，待 A/B
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: 不在一镜的 H3 里写 [Shot 2] / cuts to；正反打、切景别都拆成相邻两镜（剪辑时切）。
+    evidence:
+      - {src: data/ab/owner_workflows/minimax_h3_official_skills/h3-prompt-writing/references/base-en.txt §4.2, quote: "[Shot 2] At 00:03.500, the camera cuts to..."}
+      - {src: data/ab/owner_workflows/civitai/2734359__Better_Human_Motion_Minimax_H3, quote: "[Shot 4] At 00:06.000, the camera cuts to"}
+    confidence: medium
+    status: 待验
+    date: 2026-10-31
+  - id: K-WRT-103
+    domain: writer
+    link: P3-P4
+    title: 每镜写景别 + 机位 + 运镜三项，景别用词表，运镜用官方动词
+    when: 每镜 img / **镜头运动** / H3
+    then: img 第②项景别 + 机位（低机位 / 过肩 / 主观 / 侧面 / 车窗外）；**镜头运动** 写官方运镜词｜幅度｜速度；H3 第二句起写运镜句
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: 每镜都写清 景别（词表）+ 机位（低机位 / 平视 / 俯拍 / 过肩 / 主观视角 / 侧面）+ 一个运镜；**镜头运动** 行写 官方运镜词｜幅度=小/中/大｜速度=慢/正常/快，与 H3 运镜句一致。
+    evidence:
+      - {src: data/ab/owner_workflows/minimax_h3_official_skills/h3-prompt-writing/references/base-en.txt §4.3, quote: "motion type + amplitude + speed"}
+      - {src: docs/ep02_iter/camera_language.md §3, note: "项目方工作流 Realistic AI Video MiniMax H3.json 节点85 CAMERA 段", quote: "A continuous medium shot … slowly pushes forward by a small distance"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-WRT-104
+    domain: writer
+    link: P3-P4
+    title: 对白双人：过肩 / 侧 3/4 / 能读到两人视线的双人中景；正反打不越轴
+    when: 两人对话的相邻镜
+    then: 说话人朝向对方、视线落在对方；相邻正反打两镜里两人左右位置不变（180° 轴线，人物行 左/右 逐镜一致）
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: 两人对话优先写 过肩 / 侧 3/4 / 双人中景，不写两张正脸对镜头；正反打的相邻镜里两人在画面左右的位置不变（**人物** 行左右逐镜一致），越轴就在 **衔接** 里写“越轴”或 HARD CUT 并写清原因。
+    director_text: 正反打相邻两镜里同一人的视线方向反了（上一镜看画右、这一镜还看画右）→ 记 issue“越轴（K-WRT-104）”，verdict 按其他维度判。
+    lint: [QW-AX1]
+    check: [tools/qa/acting_lints.py, tests/test_acting_lints.py]
+    evidence:
+      - {src: data/ab/owner_workflows/community/binwu1__drama-series-agent/skills/drama-series-h3-r2v-prompts/references/dialogue-facing-bind.md, quote: "Prefer over-shoulder, profile / 3/4"}
+      - {src: docs/ep02_iter/camera_language.md §2, note: "https://www.studiobinder.com/blog/what-is-the-180-degree-rule/", quote: "sets an imaginary axis, or eye line, between two characters"}
+      - {src: docs/ep02_iter/camera_language.md §2, note: "https://en.wikipedia.org/wiki/Shot_reverse_shot", quote: "It is an example of an eyeline match."}
+      - {src: tools/qa/acting_lints.py, note: "SCRIPT-RSI 11-01（D-SCR-07）：此前只有写法、没有机检，补 QW-AX1（同场景相邻两镜同两人左右互换且衔接没写越轴）"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-WRT-105
+    domain: writer
+    link: P3-P4
+    title: 情绪推近：情绪高点用推近 / 景别逐镜递进，特写和大特写留给高点
+    when: 一场戏的节拍递进
+    then: 景别随情绪由远及近（全景 → 中景 → 近景 → 特写）；特写 / 大特写只给反应高点、关键物件（手、外套、眼睛）
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: 同一场戏里景别随情绪递进（建立 → 互动 → 高点特写），特写 / 大特写留给反应高点和关键物件；相邻同景别的镜头连续不超过两镜。
+    evidence:
+      - {src: docs/ep02_iter/runninghub_study.md 第287行, quote: "全景入画 → 推进聚焦 → 触发/诱因 → 反应/互动 → 过程 → 高点特写"}
+      - {src: docs/ep02_iter/v0_baseline_review.md, note: v0 有 8/10 相邻镜同景别}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-WRT-106
+    domain: writer
+    link: P3-P4
+    title: 开场 3 秒内第一刀 + 钩子构图
+    when: 每集镜1
+    then: 镜1 ≤4 秒，起手就是特写或动作中段，3 秒内出现视线 / 声音引向下一镜
+    targets: [{kind: writer_prompt, section: 时长与节奏}]
+    writer_text: 镜1 写 4 秒左右，从动作中段的特写起手（手、眼、关键物件），3 秒内用视线或画外声把观众引到镜2。
+    evidence:
+      - {src: data/ab/director/v1/review.md 开场 3 s, quote: "first_shot_dur_s 8.0 … speech_starts_s 9.14"}
+      - {src: docs/ep02_iter/camera_language.md 钩子行, quote: "开场 3 秒内必须有第一刀", note: "原证据 data/pipeline/runs/ep02_claude_director_v1/ep02_director_cut.md 已被项目方 11-01 01:51 删入回收站 tr-96029798c9；ITERAUDIT 改指向留存文档"}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-WRT-107
+    domain: writer
+    link: P3-P4
+    title: 竖屏 9:16 构图：景别偏近、主体在上 1/3、视线方向留空，画幅不写进提示词
+    when: 每镜 img / H3
+    then: 人物至少中景、脸占足画面；主体放上 1/3；人物看向哪边就在哪边留空；9:16 只由工作流设定
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: 竖屏构图：人物至少中景、脸占足画面，主体放在上 1/3，人物视线方向留出空间；不在 H3 里写 9:16 或分辨率（工作流设定）。
+    evidence:
+      - {src: config/script_chat_rules.md §6A 景别词表, quote: "人物至少中景、脸占足画面"}
+      - {src: data/ab/owner_workflows/community/binwu1__drama-series-agent/skills/drama-series-h3-r2v-prompts/references/timed-motion-template.md 第226行, quote: "画幅由工作流决定"}
+      - {src: docs/ep02_iter/h3_comfy_expert.md 第231行, note: H3 小脸画不好，头占画面太小时脸崩}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-WRT-108
+    check: [tests/test_llm_config_w1.py]   # RSI 11-01 补引用（docs/rsi/UNCHECKED_AUDIT.md）
+    domain: writer
+    link: P3-P4
+    title: 写作模型调用默认关推理
+    when: 链条 P3-P4 及所有分镜 / 提示词转写调用（abliteration large-flash）
+    then: reasoning_effort=none；推理 token 会吃光输出上限导致截断
+    params: {llm.reasoning: false}
+    evidence:
+      - {src: docs/ep02_iter/LEARNED_SPECS.md 写作模型调用关推理, note: "3 次 24000 token 全部 finish=length，推理 19–24k token；关推理后 11k token 一次输出完整 9 镜（原证据 ep02_claude_director_v1/ledger.json 已被项目方 11-01 删入回收站 tr-96029798c9）"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-PRM-101
+    domain: prompt
+    link: P4-P7
+    title: 运镜写成句中动作：类型 + 幅度 + 速度，一镜一个运镜，中等和正常不写
+    when: H3 正文
+    then: The camera <push in / pull out / pan / truck / tilt / pedestal / arc / tracking / static> with small|large amplitude at slow|fast speed as …；不叠加两种运镜
+    targets: [{kind: writer_prompt, section: H3 正文}]
+    writer_text: H3 运镜写成一句动作：The camera pushes in with small amplitude as …；一镜只用一种运镜（不叠推 + 摇 + 跟），中等幅度、正常速度不写，需要快写 at fast speed。
+    evidence:
+      - {src: data/ab/owner_workflows/minimax_h3_official_skills/h3-prompt-writing/references/base-en.txt §4.3, quote: "medium amplitude and normal speed are usually omitted"}
+      - {src: data/ab/owner_workflows/community/binwu1__drama-series-agent/skills/drama-series-h3-r2v-prompts/references/dialogue-facing-bind.md, quote: "don't stack orbit + track + push"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-PRM-102
+    domain: prompt
+    link: P4-P7
+    title: 焦点转移 / 倒影 / 主观视角写成可见的画面变化，不用 focus pull、POV 等本项目禁用词
+    when: 导演设计里有拉焦、玻璃倒影、主观镜头
+    then: 写“the focus shifts from the reflection to her face”这种可见变化；主观视角写成“from behind her shoulder, the camera holds a static shot as he walks away”
+    targets: [{kind: writer_prompt, section: H3 正文}]
+    writer_text: 拉焦写成看得见的变化（the reflection blurs as her face sharpens in the foreground）；主观视角写成机位位置（from behind her shoulder …），不写 focus pull / POV。
+    evidence:
+      - {src: config/script_chat_rules.md §7 H3-A10, quote: "不写 focus pull、follows、tracks right"}
+      - {src: config/script_chat_rules.md §5 运镜, quote: "官方的 Shake、POV、Roll 本项目有意不用"}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-PRM-103
+    domain: prompt
+    link: P4-P7
+    title: Ref2VA 不给首帧时，正文不写“established by Picture 1”
+    when: 纯 Ref2VA（参考图只是脸部身份）
+    then: 编译器删掉首帧锚定子句；构图由正文的景别 / 机位句决定，所以景别、机位、站位必须写在第一句
+    targets: [{kind: writer_prompt, section: H3 正文}]
+    writer_text: 第一句写清景别、机位、谁在画面哪一侧、光从哪来——纯 Ref2VA 没有首帧，构图全靠这一句。
+    evidence:
+      - {src: data/ab/owner_workflows/minimax_h3_official_skills/h3-prompt-writing/references/ref-en.txt §2.2, quote: "If an image is used only to define a character … do not create a standalone picture entry"}
+      - {src: docs/ep02_iter/lab_recipes.md 批 2, quote: "构图不受定稿首帧约束"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-EDT-101
+    domain: edit
+    link: [P3-P4, P8-P10]   # 转场在 P4 设计、P10 剪辑执行（chain.yaml 没有 P4-P10 连接）
+    title: 转场由剪辑做，分镜在 **下镜** 行写转场类型
+    when: 每镜结尾
+    then: 转场类型只用 动作匹配切 / 视线匹配切 / 硬切 / 叠化 N 秒 / 声音先行 N 秒（J-cut）；H3 里不写 dissolve / fade
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: 每镜 **下镜** 行写转场：动作匹配切 / 视线匹配切 / 硬切 / 叠化 N 秒 / 声音先行 N 秒，外加结尾仍在进行的动作；H3 里不写 dissolve、fade（单镜生成，转场由剪辑完成）。
+    evidence:
+      - {src: data/ab/owner_workflows/minimax_h3_official_skills/h3-prompt-writing/references/base-en.txt §4.2, quote: "When explicitly requested … cross-dissolve, fade, or wipe"}
+      - {src: data/ab/owner_workflows/community/binwu1__drama-series-agent/README.md 第227行, quote: "shots concat with a short head trim"}
+      - {src: docs/ep02_iter/camera_language.md §2, note: "https://www.studiobinder.com/blog/types-of-editing-transitions-in-film/", quote: "A film dissolve transition is a gradual transition"}
+    confidence: high
+    status: 建议
+    date: 2026-10-31
+  - id: K-EDT-102
+    domain: edit
+    link: [P3-P4, P8-P10]   # 转场在 P4 设计、P10 剪辑执行（chain.yaml 没有 P4-P10 连接）
+    title: 同场用动作匹配切 / 视线匹配切；换场用声音先行；时间过渡用短叠化
+    when: 相邻两镜的关系
+    then: 同场 = 下一镜从上一镜动作中段进入（match on action）或从视线落点进入（eyeline match）；换场 = 下一场环境声提前 0.3–0.5 s；时间跳 = 叠化 0.3–0.5 s
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: 同场相邻镜用动作匹配（下一镜从上一镜动作中段进）或视线匹配（上一镜看向哪，下一镜就是哪）；换场用声音先行 0.3–0.5 秒；时间过渡才用叠化 0.3–0.5 秒。
+    evidence:
+      - {src: docs/ep02_iter/camera_language.md §2, note: "https://www.studiobinder.com/blog/types-of-editing-transitions-in-film/", quote: "the action of one shot matches the continuation of a similar action"}
+      - {src: docs/ep02_iter/runninghub_study.md 第287行, quote: "物理接力 / 视线接力 / 环境接力"}
+      - {src: data/ab/director/v1/review.md 切点表, note: v1 硬切 ΔE 13–25（S1→S2 13.2、S10→S11 24.9）}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-REN-101
+    domain: render
+    link: P4-P6
+    title: 出图提示词按景别只写看得见的造型部件，首句先写景别构图
+    when: 首帧 / 尾帧 / 分镜预览出图（Qwen-Image 2.1）
+    then: 特写/大特写/近景/中近景 去掉下装、腿、鞋、脚（含角色锁里的“长腿”、鞋跟 / 脚趾 / 漆皮材质条目）；中景去掉鞋、脚；中全景及更远保留全套；提示词首句“<景别>构图”
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: img 只写这个景别下画面里看得见的造型部件（特写 / 近景不写裙长、鞋、腿；中景不写鞋）；系统会按景别删掉看不见的部件并在首句写景别构图。
+    evidence:
+      - {src: knowledge/RSI_LEDGER.md G5, note: "导演稿镜1 手部特写起手；提示词含整套造型（12cm 细跟、漆皮短裙）→ Qwen-Image 出成全身坐姿（原证据 ep02_claude_director_v1/preview/_wrong_framing 已被项目方 11-01 删入回收站 tr-96029798c9）"}
+      - {src: services/agent/ns_agent/framing.py, note: 实现；开关 config/recipes/image_framing.json（生产默认关，方案 C 预览始终开）}
+      - {src: tests/test_image_framing.py}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-REN-102
+    check: [tests/test_image_framing.py]   # RSI 11-01 补引用（docs/rsi/UNCHECKED_AUDIT.md）
+    domain: render
+    link: P4-P6
+    title: 景别取舍开关按项目 / 集生效：新剧默认开，ep02 关，已定稿首帧的镜保持旧提示词
+    when: 生产首帧 / 尾帧编译（ns_agent.compiler.compile_shot）
+    then: config/recipes/image_framing.json：default=true；per_project.__default__（为他而骚）off_episodes=[2]、keep_locked_shots=true；鞋 / 脚为主体的镜（hh12 触发词或景别后第一分句写下半身）不删下半身
+    params: {image_framing.default: true, image_framing.per_project.__default__.off_episodes: [2], image_framing.per_project.__default__.keep_locked_shots: true}
+    evidence:
+      - {src: config/recipes/image_framing.json, note: 总调度 2026-10-31 决定：方案 A/B 正用已定稿首帧跑片，不能触发重出；新剧（series10 起）默认开}
+      - {src: tests/test_image_framing.py, note: 按项目 / 集 / 已定稿镜的开关测试，下半身主体例外}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-REN-103
+    check: [tests/test_image_jobs.py]   # RSI 11-01 补引用（docs/rsi/UNCHECKED_AUDIT.md）
+    domain: render
+    link: P4-P6
+    title: 所有出图作业的提示词必须经系统编译器（ns_agent.compiler），流水线 / IMGGEN 不得自己拼
+    when: 任何首帧 / 尾帧 / 分镜预览出图作业（生产 :8800、流水线 tools/pipeline、IMGGEN、实验工具）
+    then: 用 tools/pipeline/image_jobs.frame_prompt（= 参考说明 + compile_shot.image_prompt，含触发词 / LoRA 规则、角色锁、造型注入、K-REN-101 景别取舍、材质与纠正器条目、统一后缀）；编译器选中的出图 LoRA 挂进作业图；submit_jobs 对 first_frame 作业做“提示词 == 编译器输出”闸门，不一致拒交
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/assets/first_frame_jobs.before_K-REN-103.json, note: SERIES 自拼的 80 条作业：视频触发词 lnwan01 曾混入 16 条（SERIES 事后手工剥掉触发词，同时也剥掉了应保留的出图触发词 lnwan_qi 与 LoRA）；没有角色锁、场景段、材质与纠正器条目}
+      - {src: data/pipeline/runs/series10_v1/assets/framing_audit.json, note: 经编译器重建后 80/80 = 编译器输出，首句景别构图合规，0 处视频触发词}
+      - {src: tests/test_image_jobs.py}
+    confidence: high
+    status: 确认
+    date: 2026-10-31

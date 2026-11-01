@@ -1,0 +1,27 @@
+[
+  {
+    "path": "/#/assets?type=character&char=lin_wan",
+    "steps": [
+      {
+        "js": "const d=[...document.querySelectorAll('button:disabled,[aria-disabled=true]')].filter(e=>e.getBoundingClientRect().width>0); return {disabled:d.length, noReason:d.filter(e=>!(e.title||e.closest('[title]')?.title||'').trim()).map(e=>e.innerText.trim().slice(0,14)).slice(0,6), sample:d.slice(0,4).map(e=>e.innerText.trim().slice(0,10)+' → '+(e.title||e.closest('[title]')?.title||'').slice(0,40))};"
+      },
+      {
+        "after": 1500,
+        "click": [
+          "换单品",
+          "换",
+          "部件"
+        ]
+      },
+      {
+        "js": "const d=[...document.querySelectorAll('button:disabled,[aria-disabled=true]')].filter(e=>e.getBoundingClientRect().width>0); return {disabled:d.length, noReason:d.filter(e=>!(e.title||e.closest('[title]')?.title||'').trim()).map(e=>e.innerText.trim().slice(0,14)).slice(0,6), sample:d.slice(0,4).map(e=>e.innerText.trim().slice(0,10)+' → '+(e.title||e.closest('[title]')?.title||'').slice(0,40))};"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "wait": 10000,
+    "title": "人物页灰按钮",
+    "id": "A_dis"
+  }
+]

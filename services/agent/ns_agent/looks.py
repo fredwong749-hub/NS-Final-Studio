@@ -75,7 +75,8 @@ LOCK_ITEMS = [
 CHARACTER_REFS = {"gu_chen": "REF-GC-01", "chen_yu": "REF-CY-01"}
 PRESENCE_HINTS = {
     "lin_wan": ("林晚", "蓝发"), "gu_chen": ("顾沉",), "chen_yu": ("陈宇",),
-    "alex": ("Alex",), "ryan": ("Ryan",), "kai": ("Kai",), "leo": ("Leo",),
+    # RECALL 2026-11-01：旧 60 集 Alex/Ryan/Kai/Leo 撤下；其余登记角色（如 series10 阿岚）按中文名判在画
+    **{cid: (name,) for cid, name in CHARACTERS.items() if cid not in ("lin_wan", "gu_chen", "chen_yu")},
 }
 SHOT_ID_RE = re.compile(r"^ep(\d+)-S(\d+)$")
 # 参与解析的 LookPatch 字段（其余是审核元数据）

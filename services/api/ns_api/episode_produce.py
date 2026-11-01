@@ -13,9 +13,19 @@ POST /api/episodes/{n}/produce  {stages:["first","last","video"], mode:"auto_loc
   所以 N 个镜头自然铺满 N 条道。出图优先 image 道（render_endpoints.json image.gpu），任何空闲道也可接；视频任何空闲道。
   视频帧数 > 道的 max_frames（h3_video，LS 长镜头方案落地前 192）→ 该镜等待并写明原因，绝不截短。
   失败：隧道超时 / 连不上 / API 重启中断 等可恢复错误最多重试 2 次；OOM → 标记等待（等 LS 方案），不截短不重试。
+POST /api/episodes/{n}/produce/plan  （同上的 body，不开始）→ 开始前的影响面：多少镜 × 哪些阶段要出、跳过几步、
+                                 预计时长（与 view 同口径：近期实际耗时中位数，按可用道并行）、用哪些道（fredw-92/UXF2）
 GET  /api/episodes/{n}/produce   → 每镜每阶段进度、所在道、预计剩余（jobs.estimate 同口径的历史中位数）、失败
 POST /api/episodes/{n}/produce/cancel
 
+运动质检（fredw-92/QCV）：每版视频出完带 take.qc.motion。auto_lock 下运动质检不合格（“静止·不合格”）的视频
+  不自动定稿，该格记 failed + 原因“需重出或项目方审片”（qc_fail）；auto_lock 遇到“以前出的、不合格且项目方没审过”的
+  当前视频 → 重出一次。review 模式只标出来不重出。
+  last_frame_mode?: "use" | "none" | "auto" → 原样传给 video-jobs（见 video_jobs 说明）；不传 = 基底默认
+  （RR 2026-10-31：默认基底 official_base = "none" 只给首帧）。
+资料闸门（PREP，ns_api/material_readiness.py）：开始时逐镜查出片前资料（人物表 / 族裔 / 造型行 / 场景行 + 定稿底图 / 身份参考 /
+  衔接 / 时长 / H3 …），缺资料的镜头所有阶段记 blocked（gate="materials"，原因写明缺什么），整次出片都不出它；提交前再查一次。
+  项目方在画布单镜手动出不受此限（frame-jobs / video-jobs 只带提醒）。plan 返回 not_ready。
 状态落盘 data/jobs/episodes/epNN.json；API 重启后（startup）自动接着跑（被重启打断的任务按可恢复错误重试）。
 不做内容检测；提示词原样（出图 / 视频都走现有 frame-jobs / video-jobs 的同一函数）。
 """
@@ -50,7 +60,7 @@ ACTIVE = ("pending", "ready", "queued", "running", "review")
 TERMINAL = ("done", "skipped", "failed", "blocked", "cancelled")
 TRANSIENT = ("超时", "timeout", "timed out", "连不上", "unavailable", "connection", "api 重启中断", "隧道",
              "502", "503", "504", "remote end closed", "reset by peer", "urlerror", "broken pipe", "任务记录丢失",
-             "temporarily", "eof")
+             "temporarily", "eof", "训练锁")    # fredw-92：出发前撞上训练锁 → 退回重派（选道时锁道已不 ok）
 OOM = ("outofmemory", "out of memory", "显存不足", "oom：", "oom:")
 ETA_DEFAULT = {"gen": 70.0, "final": 280.0, "video": 840.0}
 
@@ -115,19 +125,35 @@ class Hooks:
         except Exception:  # noqa: BLE001
             return False
 
+    # ---- 资料闸门（PREP）
+    def materials(self, n: int, shots: list[str]) -> dict[str, list[str]]:
+        """→ {镜头: [缺什么（中文）]}，只列资料不全的镜头"""
+        from ns_api import app as A
+        from ns_api import material_readiness as MR
+        r = MR.episode_check(A._script, n)
+        epi = [f"{i['label']}：{i['reason']}" for i in r["episode_items"]]
+        return {x["id"]: epi + [f"{i['label']}：{i['reason']}" for i in x["missing"]]
+                for x in r["shots"] if x["id"] in set(shots) and not x["ready"]}
+
     # ---- 任务
-    def submit(self, shot_id: str, stage: str, step: str, gpu, parent: int | None = None) -> dict:
-        """→ job dict；不能提交（409 等）抛 Blocked(原因)"""
+    def submit(self, shot_id: str, stage: str, step: str, gpu, parent: int | None = None,
+               last_frame_mode: str | None = None) -> dict:
+        """→ job dict；不能提交（409 等）抛 Blocked(原因)；资料不全抛 NotReady"""
         from fastapi.responses import JSONResponse
+        from ns_api import app as A
         from ns_api import frame_jobs as FJ
+        from ns_api import material_readiness as MR
         from ns_api import video_jobs as VJ
+        gate = MR.shot_gate(A._script, shot_id)
+        if not gate["ready"]:
+            raise NotReady(MR.refuse_text(shot_id, gate["reasons"]))
         try:
             if stage == "video":
-                out = VJ.create_video_job(shot_id, VJ.VideoJobRequest(gpu=gpu))
+                out = VJ.create_video_job(shot_id, VJ.VideoJobRequest(gpu=gpu, last_frame_mode=last_frame_mode, by="episode_produce"))
             elif step == "final":
                 out = FJ.submit_final(shot_id, ST[stage], parent=parent, gpu=gpu)
             else:
-                out = FJ.create_frame_job(shot_id, FJ.FrameJobBody(stage=stage, mode="regen", gpu=gpu))
+                out = FJ.create_frame_job(shot_id, FJ.FrameJobBody(stage=stage, mode="regen", gpu=gpu, by="episode_produce"))
         except HTTPException as e:
             raise Blocked(str(e.detail))
         if isinstance(out, JSONResponse):
@@ -136,6 +162,17 @@ class Hooks:
             except ValueError:
                 raise Blocked("不能提交")
         return out
+
+    def pick(self, kind: str, frames: int | None, candidates: list[dict]):
+        """在候选（都空闲、放得下）的道里选一条：G36 的 jobs.pick_lane（出图偏好 image 道；视频偏好非出图道）"""
+        f = getattr(J, "pick_lane", None)
+        if callable(f):
+            try:
+                return f(kind, frames, lane_list=candidates)
+            except Exception:  # noqa: BLE001
+                pass
+        pref = [ln for ln in candidates if bool(ln.get("image_pref")) == (kind == "image")]
+        return (pref or candidates)[0]["gpu"]
 
     def job(self, job_id: str) -> dict | None:
         return J.get(job_id)
@@ -177,7 +214,14 @@ class Hooks:
         vn = act.get("video")
         vt = next((x for x in takes if x["stage"] == "video" and x["n"] == vn), None) if vn is not None else None
         vok = ok("video", vn) and bool((vt.get("params") or {}).get("first")) and not HV.stale_reasons(vt, P.load_takes(shot_id))
-        return {"image": ok("image", lk.get("image")), "last": ok("last", lk.get("last")), "video": vok}
+        # fredw-92/UXF4（审查 N1）：自动测试定稿（locked_by.by == "auto"）不算项目方定稿 / 通过——视频经项目方“通过”后才算
+        sm_ = d.get("summary") or {}
+        auto = dict(sm_.get("auto_locked") or {})
+        if "video" in auto and (sm_.get("review") or {}).get("state") == "passed":
+            auto.pop("video")
+        return {"image": ok("image", lk.get("image")), "last": ok("last", lk.get("last")), "video": vok,
+                "auto": {st: st in auto for st in ("image", "last", "video")},
+                "video_passed": (sm_.get("review") or {}).get("state") == "passed"}
 
     def video_frames(self, shot_id: str) -> int:
         from ns_api import app as A
@@ -237,6 +281,30 @@ def mark_locked_by(shot_id: str, stage: str, n: int, by: str, run_id: str | None
 
 class Blocked(Exception):
     pass
+
+
+class NotReady(Blocked):
+    """资料闸门：本镜资料不全，整集出片 / 自动提交不出"""
+
+
+def lane_allowed(ln: dict, allowed) -> bool:
+    """PREP：整集出片只用指定的道（["gpu33:0", "gpu33:3", "gpu36:0", …]；gpu33 的道也认 0 / "0"）。不给 = 全部道"""
+    if not allowed:
+        return True
+    names = {str(ln.get("gpu")), str(ln.get("id") or "")}
+    names |= {f"gpu33:{x}" for x in list(names) if x.isdigit()}
+    return bool(names & {str(a) for a in allowed})
+
+
+def _refuse(shot_id: str, why: list[str]) -> str:
+    from ns_api import material_readiness as MR
+    return MR.refuse_text(shot_id, why)
+
+
+def free_lanes(lanes: list[dict]) -> list[dict]:
+    """现在能马上接活的道：可达、没有训练锁、没有活（load_s == 0：本 API 没任务且 ComfyUI 队列空，含别人的外部任务）"""
+    return [ln for ln in lanes if ln.get("ok") and not ln.get("train_locked") and not ln.get("load_s")
+            and ln.get("activity") in (None, "idle")]
 
 
 # ------------------------------------------------------------------ 调度器
@@ -304,7 +372,7 @@ class Producer:
         return out
 
     # ---- 启动 / 取消
-    def start(self, n: int, *, stages, mode: str, shots=None, tier_first=None, force=False, by=None) -> dict:
+    def _check(self, n: int, stages, mode: str, shots, tier_first):
         if not stages or any(s not in STAGES for s in stages):
             raise HTTPException(422, "stages 只能是 first | last | video")
         stages = [s for s in STAGES if s in set(stages)]
@@ -320,17 +388,94 @@ class Producer:
             if bad:
                 raise HTTPException(422, f"不是第 {n} 集的镜头：{', '.join(bad)}")
             all_shots = [s for s in all_shots if s in set(shots)]
+        return stages, all_shots
+
+    def _materials(self, n: int, shots: list[str]) -> dict[str, list[str]]:
+        """资料闸门 → {镜头: [缺什么]}。闸门自己出错时一律按“不全”处理（项目方：不具备资料的不要 render）"""
+        try:
+            return dict(self.h.materials(n, shots) or {})
+        except Exception as e:  # noqa: BLE001
+            return {sid: [f"资料闸门没跑成：{type(e).__name__}: {str(e)[:120]}"] for sid in shots}
+
+    def plan(self, n: int, *, stages, mode: str = "review", shots=None, tier_first=None, force=False,
+             lanes_only=None) -> dict:
+        """开始前的影响面（不改任何状态、不提交任务）：每阶段要出几镜 / 跳过几镜、预计时长、可用道、放不下的长镜头"""
+        stages, all_shots = self._check(n, stages, mode, shots, tier_first)
+        gate = self._materials(n, all_shots)
+        try:
+            lanes = [ln for ln in self.h.lanes() if lane_allowed(ln, lanes_only)]
+        except Exception:  # noqa: BLE001
+            lanes = []
+        per = self._durations(lanes)
+        final = bool(self.h.final_wanted(tier_first))
+        ok_lanes = [ln for ln in lanes if ln.get("ok")]
+        free = free_lanes(lanes)
+        # fredw-92/UXF4（审查 N6）：超长镜头 = 超过所有道的单卡上限 → 没有能出的卡，不计入步数和时间
+        max_frames = max([int(ln.get("max_frames") or 0) for ln in (ok_lanes or lanes)] or [0])
+        steps = {st: {"run": 0, "skip": 0, "review": 0} for st in stages}
+        total, chain, too_long = 0.0, 0.0, []
+        for sid in all_shots:
+            if sid in gate:                     # 资料不全：不出，不计步数和时间
+                continue
+            fr = {"image": False, "last": False, "video": False} if force else self._fresh_of(sid)
+            auto = (fr.get("auto") or {}) if not force else {}
+            srem = 0.0
+            for st in stages:
+                if fr.get(ST[st]):
+                    # 自动测试定稿：不跳过也不重出——“每步等我定稿”时等项目方复审（审查 N1）
+                    if auto.get(ST[st]) and mode == "review":
+                        steps[st]["review"] += 1
+                    else:
+                        steps[st]["skip"] += 1
+                    continue
+                if st == "video" and max_frames:
+                    try:
+                        f = int(self.h.video_frames(sid))
+                    except Exception:  # noqa: BLE001
+                        f = 0
+                    if f > max_frames:
+                        too_long.append({"shot_id": sid, "frames": f})
+                        continue
+                steps[st]["run"] += 1
+                srem += per["video"] if st == "video" else per["gen"] + (per["final"] if final else 0.0)
+            total += srem
+            chain = max(chain, srem)
+        # 预计只按现在真空闲的卡算（训练锁 / 外部任务 / 已在跑的卡不算）；一张都不空 → 按 1 张算并标出来
+        n_free = max(1, len(free))
+        return {"episode": n, "stages": stages, "mode": mode, "shots": len(all_shots), "shot_ids": all_shots,
+                "steps": steps, "jobs": sum(v["run"] for v in steps.values()), "final_frames": final,
+                "eta_s": round(max(chain, total / n_free), 1), "work_s": round(total, 1),
+                "durations": {k: round(v, 1) for k, v in per.items()}, "max_frames": max_frames,
+                "too_long": too_long, "free_lanes": [ln.get("gpu") for ln in free],
+                "not_ready": [{"shot_id": sid, "missing": why} for sid, why in gate.items()],
+                "lanes": [{**{k: ln.get(k) for k in ("gpu", "id", "label", "image_pref", "max_frames", "ok",
+                                                    "train_locked", "activity", "load_s")},
+                           "free": ln in free} for ln in lanes]}
+
+    def start(self, n: int, *, stages, mode: str, shots=None, tier_first=None, force=False, by=None,
+              last_frame_mode: str | None = None, lanes_only=None) -> dict:
+        stages, all_shots = self._check(n, stages, mode, shots, tier_first)
+        if last_frame_mode is not None and last_frame_mode not in ("use", "none", "auto"):
+            raise HTTPException(422, "last_frame_mode 只能是 use | none | auto")
+        gate = self._materials(n, all_shots)     # 资料闸门（PREP）：在锁外算（读剧本 / 资产几百毫秒）
         with self.guard:
             cur = self.runs.get(n)
             if cur and cur.get("state") in ("running", "waiting"):
                 raise HTTPException(409, f"第 {n} 集已有整集出片在跑（{cur['id']}），先取消再重新开始")
             run = {"schema": SCHEMA, "id": uuid.uuid4().hex[:10], "episode": n, "stages": stages, "mode": mode,
                    "tier_first": tier_first, "final_frames": self.h.final_wanted(tier_first), "force": bool(force),
+                   "last_frame_mode": last_frame_mode, "lanes_only": list(lanes_only) if lanes_only else None,
                    "by": by or "canvas", "state": "running", "created_at": P.now(), "finished_at": None,
                    "shots": all_shots, "items": {s: {st: {**_rec(), "force": bool(force)} for st in stages}
                                                   for s in all_shots}, "events": []}
+            for sid, why in gate.items():
+                reason = _refuse(sid, why)
+                for st in stages:
+                    run["items"][sid][st].update(state="blocked", reason=reason[:300], gate="materials", missing=why)
+            run["not_ready"] = [{"shot_id": sid, "missing": why} for sid, why in gate.items()]
             self.runs[n] = run
-            self._event(run, None, None, "start", stages=stages, mode=mode, shots=len(all_shots))
+            self._event(run, None, None, "start", stages=stages, mode=mode, shots=len(all_shots),
+                        not_ready=len(gate))
             self.save(run)
         self.ensure_thread()
         return self.view(n)
@@ -462,6 +607,8 @@ class Producer:
         rec = run["items"][sid][st]
         if rec["state"] in ("done", "skipped", "failed", "cancelled"):
             return None
+        if rec.get("gate") == "materials":      # 资料闸门：本次出片不出这镜（补齐资料后重新开始整集出片）
+            return None
         if rec.get("job_id"):
             j = self.h.job(rec["job_id"])
             state = (j or {}).get("state")
@@ -473,6 +620,8 @@ class Producer:
                 return None
             if state == "done":
                 self._on_done(run, sid, st, rec, j)
+                if rec["state"] == "failed":
+                    return None
             else:
                 self._on_fail(run, sid, st, rec, j, lanes)
                 if rec["state"] in ("failed", "waiting"):
@@ -497,6 +646,9 @@ class Producer:
                 rec.update(state="review", reason=f"等项目方在画布定稿{LABEL[st]}（v{rec.get('take')}）")
                 return None
         if not rec.get("force") and self._is_fresh(run, sid, st):
+            if run["mode"] == "review" and self._auto_pending(run, sid, st):
+                rec.update(state="review", reason=f"v{n} 是自动测试定稿：等项目方在画布复审定稿{LABEL[st]}")
+                return None
             if run["final_frames"] and t is not None and t.get("mode") != "final" \
                     and t.get("workflow") not in ("upload", "video_last_frame"):
                 if self.h.pending(sid, "frame"):
@@ -516,11 +668,43 @@ class Producer:
         rec.update(state="ready", step="gen", reason=None)
         return {"step": "gen"}
 
+    def _auto_pending(self, run, sid, st) -> bool:
+        """这一格是以前的自动测试定稿（不是本次出的），项目方还没复审"""
+        rec = run["items"][sid].get(st) or {}
+        if rec.get("history"):
+            return False
+        return bool((self._fresh_of(sid).get("auto") or {}).get(ST[st]))
+
+    def _video_qc_fail(self, sid: str, n=None) -> str | None:
+        """当前（或第 n 版）视频运动质检不合格且项目方没审片通过 → 标签文字；否则 None（fredw-92/QCV）"""
+        from ns_render import motion_qc as MQ
+        tk = self.h.takes(sid)
+        n = (tk.get("active") or {}).get("video") if n is None else n
+        t = next((x for x in tk.get("takes") or [] if x.get("stage") == "video" and x.get("n") == n), None)
+        if not MQ.failed(t) or self._fresh_of(sid).get("video_passed"):
+            return None
+        return MQ.summary(t) or "静止·不合格"
+
     def _decide_video(self, run, sid, rec, lanes) -> dict | None:
-        if not rec.get("force") and self._is_fresh(run, sid, "video"):
+        fresh = not rec.get("force") and self._is_fresh(run, sid, "video")
+        bad = self._video_qc_fail(sid) if fresh else None
+        if bad:
             act = (self.h.takes(sid).get("active") or {}).get("video")
+            if rec["history"] or rec.get("qc_retry") or run["mode"] != "auto_lock":
+                done = "failed" if run["mode"] == "auto_lock" else "done"
+                rec.update(state=done if rec["history"] else "skipped", step=None, take=act, qc_fail=bad,
+                           reason=f"视频 v{act} 运动质检不合格（{bad}）：未自动定稿，需重出（改尾帧 / 只用首帧）或项目方审片")
+                return None
+            rec["qc_retry"] = True                 # auto_lock：以前出的不合格视频 → 重出一次
+            self._event(run, sid, "video", "qc_rerender", take=act, qc=bad)
+            fresh = False
+        if fresh:
+            act = (self.h.takes(sid).get("active") or {}).get("video")
+            auto = run["mode"] == "review" and self._auto_pending(run, sid, "video")
             rec.update(state="done" if rec["history"] else "skipped", step=None, take=act,
-                       reason=None if rec["history"] else "视频已是当前定稿首尾帧出的，跳过")
+                       reason=None if rec["history"] else
+                       ("视频是自动测试定稿：不重出，等项目方审片通过" if auto else "视频已是当前定稿首尾帧出的，跳过"),
+                       auto_review=auto)
             return None
         if self.h.pending(sid, "video"):
             rec.update(state="pending", reason="本镜已有视频任务在跑")
@@ -536,8 +720,10 @@ class Producer:
             rec.update(state="waiting", reason=f"显存不足（OOM，{need} 帧）：等 LS 长镜头方案，不截短")
             return None
         if need > top:
-            rec.update(state="waiting", reason=f"需 {need} 帧，所有道上限 {top} 帧：等 LS 长镜头方案，不截短")
+            rec.update(state="waiting", no_lane=True,
+                       reason=f"无卡可出（需 {need} 帧，超出单卡 {top} 帧）：要拆镜或等长镜头方案，不截短")
             return None
+        rec["no_lane"] = False
         rec.update(state="ready", step="video", reason=None, oom=False)
         return {"step": "video", "frames": need}
 
@@ -557,6 +743,12 @@ class Producer:
         self._event(run, sid, st, "done", step=step, take=take, gpu=rec["gpu"], wall_s=j.get("wall_s"))
         if take is None:
             return
+        if run["mode"] == "auto_lock" and st == "video":
+            bad = self._video_qc_fail(sid, int(take))
+            if bad:                                # fredw-92/QCV：运动质检不合格的视频不自动定稿
+                rec["qc_fail"] = bad
+                self._event(run, sid, st, "qc_fail", take=take, qc=bad)
+                return
         if run["mode"] == "auto_lock":
             if step == "final":
                 n, _, _ = self._locked_take(sid, st)
@@ -594,30 +786,28 @@ class Producer:
         rec.update(state="failed", reason=f"失败：{str(err)[:200]}")
 
     def _dispatch(self, ready, lanes):
-        idle = [ln for ln in lanes if ln.get("ok") and not self.h.busy(ln["gpu"])]
+        """空闲道（G36 道表 load_s == 0，即本 API 无任务且 ComfyUI 队列空；没有 load_s 时问 hooks.busy）逐个派活：
+        出图在前（短、解锁后面的视频），视频按帧数从长到短；每件活在“空闲且放得下”的道里由 G36 的 jobs.pick_lane 选"""
+        def is_idle(ln):
+            return not ln["load_s"] if ln.get("load_s") is not None else not self.h.busy(ln["gpu"])
+        idle = [ln for ln in lanes if ln.get("ok") and is_idle(ln)]
         if not ready or not idle:
             return
         frames = [x for x in ready if x[3]["step"] != "video"]
-        videos = [x for x in ready if x[3]["step"] == "video"]
-
-        def fits(item, ln):
-            return item[3]["step"] != "video" or int(item[3].get("frames") or 0) <= int(ln.get("max_frames") or 0)
-
-        def give(pool, lns):
-            for ln in list(lns):
-                item = next((x for x in pool if fits(x, ln)), None)
-                if item is None:
-                    continue
-                pool.remove(item)
-                if self._submit(item, ln):
-                    idle.remove(ln)
-                    lns.remove(ln)
-        # 1. 出图 → image 道；2. 视频 → 其余道（上限最大的道留给最长的镜头）；3. 剩下的空闲道谁都接
-        give(frames, [ln for ln in idle if ln.get("image_pref")])
-        videos.sort(key=lambda x: -int(x[3].get("frames") or 0))
-        give(videos, sorted([ln for ln in idle if not ln.get("image_pref")], key=lambda ln: -int(ln.get("max_frames") or 0)))
-        give(frames, list(idle))
-        give(videos, list(idle))
+        videos = sorted([x for x in ready if x[3]["step"] == "video"], key=lambda x: -int(x[3].get("frames") or 0))
+        for item in frames + videos:
+            if not idle:
+                break
+            video = item[3]["step"] == "video"
+            need = int(item[3].get("frames") or 0) if video else 0
+            cand = [ln for ln in idle if (not video or int(ln.get("max_frames") or 0) >= need)
+                    and lane_allowed(ln, item[0].get("lanes_only"))]
+            if not cand:
+                continue
+            gpu = self.h.pick("video" if video else "image", need or None, cand)
+            ln = next((x for x in cand if x["gpu"] == gpu), cand[0])
+            if self._submit(item, ln):
+                idle.remove(ln)
 
     def _submit(self, item, ln) -> bool:
         run, sid, st, r = item
@@ -625,7 +815,12 @@ class Producer:
         step = r["step"]
         before, _, _ = self._locked_take(sid, st) if st != "video" else (None, None, None)
         try:
-            j = self.h.submit(sid, st, step, ln["gpu"], parent=r.get("parent"))
+            kw = {"last_frame_mode": run["last_frame_mode"]} if st == "video" and run.get("last_frame_mode") else {}
+            j = self.h.submit(sid, st, step, ln["gpu"], parent=r.get("parent"), **kw)
+        except NotReady as e:
+            rec.update(state="blocked", reason=str(e)[:300], gate="materials")
+            self._event(run, sid, st, "blocked", reason=str(e)[:300])
+            return False
         except Blocked as e:
             rec.update(state="blocked", reason=str(e)[:300])
             self._event(run, sid, st, "blocked", reason=str(e)[:300])
@@ -711,7 +906,7 @@ class Producer:
                 srem += rem
                 row["stages"][st] = {k: rec.get(k) for k in (
                     "state", "step", "job_id", "gpu", "lane", "take", "reason", "error", "attempts", "frames",
-                    "locked_by", "started_at")}
+                    "locked_by", "started_at", "no_lane", "auto_review", "qc_fail")}
                 row["stages"][st]["eta_s"] = round(rem, 1)
                 if rec["state"] in ("queued", "running") and rec.get("gpu") is not None:
                     lane_use.setdefault(rec["gpu"], []).append({"shot_id": sid, "stage": st, "state": rec["state"],
@@ -723,7 +918,10 @@ class Producer:
             shots.append(row)
             total += srem
             chain = max(chain, srem)
-        n_ok = max(1, sum(1 for ln in lanes if ln.get("ok")))
+        # 在跑时：空闲的道 + 本次自己占着的道；外部任务 / 训练锁的不算（审查 N6）
+        free = free_lanes(lanes)
+        n_ok = max(1, sum(1 for ln in lanes if ln in free or (ln.get("ok") and not ln.get("train_locked")
+                                                               and ln.get("gpu") in lane_use)))
         eta = max(chain, total / n_ok) if run["state"] in ("running", "waiting") else 0.0
         counts: dict = {}
         for s in shots:
@@ -731,11 +929,13 @@ class Producer:
                 counts[v["state"]] = counts.get(v["state"], 0) + 1
         return {"episode": n, "id": run["id"], "state": run["state"], "mode": run["mode"], "stages": run["stages"],
                 "tier_first": run.get("tier_first"), "final_frames": run.get("final_frames"), "force": run.get("force"),
+                "last_frame_mode": run.get("last_frame_mode"), "lanes_only": run.get("lanes_only"),
                 "by": run.get("by"), "created_at": run.get("created_at"), "finished_at": run.get("finished_at"),
                 "updated_at": run.get("updated_at"), "eta_s": round(eta, 1), "counts": counts,
-                "lanes": [{**{k: ln.get(k) for k in ("gpu", "label", "url", "image_pref", "max_frames", "ok")},
+                "lanes": [{**{k: ln.get(k) for k in ("gpu", "id", "label", "url", "image_pref", "max_frames", "ok")},
                            "busy_with": lane_use.get(ln.get("gpu"), [])} for ln in lanes],
                 "shots": shots, "failures": failures, "events": run.get("events", [])[-30:],
+                "not_ready": run.get("not_ready", []),
                 "durations": {k: round(v, 1) for k, v in per.items()}}
 
 
@@ -744,18 +944,27 @@ PRODUCER = Producer()
 
 class ProduceBody(BaseModel):
     stages: list[str] = list(STAGES)
-    mode: str = "auto_lock"
+    mode: str = "review"     # fredw-92/UXF2（审查 #44）：默认每步等项目方定稿；自动测试定稿要显式选
     shots: list[str] | None = None
     tier_first: str | None = None
     force: bool = False
     by: str | None = None
+    last_frame_mode: str | None = None    # fredw-92/QCV：use | none | auto，传给 video-jobs；不传 = 基底默认（official_base = none）
+    lanes: list[str] | None = None        # PREP：只用这些道（如 ["gpu33:0","gpu33:3","gpu36:0","gpu36:1","gpu36:2"]）；不给 = 全部
 
 
 @router.post("/api/episodes/{n}/produce")
 def produce(n: int, body: ProduceBody | None = None):
     b = body or ProduceBody()
     return PRODUCER.start(n, stages=b.stages, mode=b.mode, shots=b.shots, tier_first=b.tier_first,
-                          force=b.force, by=b.by)
+                          force=b.force, by=b.by, last_frame_mode=b.last_frame_mode, lanes_only=b.lanes)
+
+
+@router.post("/api/episodes/{n}/produce/plan")
+def produce_plan(n: int, body: ProduceBody | None = None):
+    b = body or ProduceBody()
+    return PRODUCER.plan(n, stages=b.stages, mode=b.mode, shots=b.shots, tier_first=b.tier_first, force=b.force,
+                         lanes_only=b.lanes)
 
 
 @router.get("/api/episodes/{n}/produce")

@@ -3,7 +3,7 @@
 The importer keeps the script's notes verbatim (DialogueLine.speaker_note: "顾沉低声", "她，很小声", "他",
 "合上盒子" ...). This module turns them into speaker ids (config/voices.json "characters"):
 
-- a named character anywhere in the note wins by position ("画外，店员的招呼声" → clerk);
+- a named character anywhere in the note wins by position ("画外，陈宇的招呼声" → chen_yu);
 - 她 / 自言自语 / 自答 / 对镜 → lin_wan;
 - 他 → the male in the shot: a named male in the same shot's notes, else in its prompts
   (img/motion/raw dialogue), else the last male of the episode, else 顾沉;
@@ -13,30 +13,38 @@ The importer keeps the script's notes verbatim (DialogueLine.speaker_note: "顾�
 - notes the importer left inside the text ("（她，一口气）“……") are pulled out; pure stage text
   ("（沉默三秒）", "—", "（无——全镜无对白…）") is not spoken.
 
-Voiceover (🎙) is always 林晚's inner voice in this script.
+Voiceover (🎙): spoken by config/voices.json "voiceover_speaker" (VOICE 2026-10-31, owner chose the QAg narrator
+voice; was 林晚's own voice before). line_overrides still win per line.
 """
 
 import re
 from dataclasses import asdict, dataclass
+
+from .tts import default_voiceover_speaker
 
 LEAD_NOTE = re.compile(r"^\s*[（(]([^（）()]*)[）)]\s*")
 PAREN = re.compile(r"[（(][^（）()]*[）)]")
 SPLIT_INLINE = re.compile(r"[（(]([^（）()]*)[）)]")
 
 NAMED = (  # (token, speaker id); searched by position in the note
+    ("顾沉", "gu_chen"), ("陈宇", "chen_yu"), ("林晚", "lin_wan"), ("阿岚", "ch_a_lan"),
+    # RECALL 2026-11-01：旧 60 集 Alex/Ryan/Kai/Leo/四声齐 已撤下（config/voices.json 同步删除）
+    # VOICE10 2026-11-01（G9 / R3，K-EDT-020）：旧剧称呼（穿孔师 / 纹身师 / 同事 / 店员）已隔离到下面的
+    # LEGACY_60EP_TITLES，不再参与解析——voices.json 早已没有 piercer / tattooist / coworker / clerk，
+    # 留在这里只会让写到这些称呼的句子报 TtsError。series10 剧本里这些称呼出现 0 次（script_v2.json 实测）。
+)
+# 隔离不删（G0：被取代的旧口径标明取代者）：旧 60 集配角称呼 → 旧音色 id。不被任何代码读取；
+# 新剧要加配角，先在 config/voices.json 加音色条目，再把称呼加进 NAMED（tests/test_voice10_fix.py 校验 NAMED ⊆ voices.json）。
+LEGACY_60EP_TITLES = (
     ("女穿孔师", "piercer"), ("穿孔师", "piercer"), ("纹身师", "tattooist"),
     ("男同事", "male_coworker"), ("同事", "coworker"), ("店员", "clerk"),
-    ("顾沉", "gu_chen"), ("陈宇", "chen_yu"), ("林晚", "lin_wan"),
-    ("Alex", "alex"), ("Ryan", "ryan"), ("Kai", "kai"), ("Leo", "leo"),
-    ("四声齐", "chorus_men"), ("四个男人齐", "chorus_men"),
-)
+)  # ⤴ 被 series10 演员表（林晚 / 顾沉 / 陈宇 / 阿岚）取代
 HER = ("她", "自言自语", "自答", "对镜")
 HIM = ("他",)
-MALES = {"gu_chen", "chen_yu", "tattooist", "male_coworker", "alex", "ryan", "kai", "leo"}
-MALE_NAMES = (("顾沉", "gu_chen"), ("陈宇", "chen_yu"), ("纹身师", "tattooist"), ("男同事", "male_coworker"),
-              ("Alex", "alex"), ("Ryan", "ryan"), ("Kai", "kai"), ("Leo", "leo"))
+MALES = {"gu_chen", "chen_yu"}
+MALE_NAMES = (("顾沉", "gu_chen"), ("陈宇", "chen_yu"))
 DEFAULT_MALE = "gu_chen"
-NARRATOR = "lin_wan"
+LEAD = "lin_wan"  # female lead: 她 / unnamed turns in dialogue
 SILENT_MARKERS = ("留白", "无对白", "无——")
 
 
@@ -93,7 +101,7 @@ def speaker_from_note(note: str | None) -> tuple[str | None, str]:
     for token in HER:
         i = note.find(token)
         if i >= 0:
-            hits.append((i, -len(token), NARRATOR, "her"))
+            hits.append((i, -len(token), LEAD, "her"))
     for token in HIM:
         i = note.find(token)
         if i >= 0:
@@ -142,9 +150,12 @@ def _segments(line: dict) -> list[tuple[str | None, str, str]]:
     return out
 
 
-def resolve_episode(episode: dict, overrides: dict[str, str] | None = None) -> list[SpokenLine]:
-    """All spoken lines of an episode in script order (per shot: dialogue lines, then the voiceover)."""
+def resolve_episode(episode: dict, overrides: dict[str, str] | None = None,
+                    narrator: str | None = None) -> list[SpokenLine]:
+    """All spoken lines of an episode in script order (per shot: dialogue lines, then the voiceover).
+    narrator: voiceover speaker; None = config/voices.json "voiceover_speaker" (fallback lin_wan)."""
     overrides = overrides or {}
+    narrator = narrator or default_voiceover_speaker()
     ep = int(episode.get("number", 0))
     last_male = None
     lines: list[SpokenLine] = []
@@ -177,10 +188,10 @@ def resolve_episode(episode: dict, overrides: dict[str, str] | None = None) -> l
                 elif len(speakers) >= 2 and speakers[-1] != speakers[-2]:
                     sid, how = speakers[-2], "alternating turns"
                 elif speakers:
-                    sid = shot_male if speakers[-1] == NARRATOR else NARRATOR
+                    sid = shot_male if speakers[-1] == LEAD else LEAD
                     how = "alternating turns"
                 else:
-                    sid, how = NARRATOR, "no note: 林晚"
+                    sid, how = LEAD, "no note: 林晚"
                 key = f"ep{ep:02d}-S{idx}#{n}"
                 if key in overrides:
                     sid, how = overrides[key], "config line_overrides"
@@ -192,8 +203,8 @@ def resolve_episode(episode: dict, overrides: dict[str, str] | None = None) -> l
         vo = shot.get("voiceover")
         if vo and speakable(vo.get("text") or ""):
             key = f"ep{ep:02d}-S{idx}#vo"
-            sid = overrides.get(key, NARRATOR)
+            sid = overrides.get(key, narrator)
             lines.append(SpokenLine("voiceover", idx, 0, sid, tts_text(vo["text"]), vo.get("note") or "",
-                                    vo["text"], "voiceover = 林晚 inner voice" if key not in overrides
+                                    vo["text"], f"voiceover = {narrator} (voiceover_speaker)" if key not in overrides
                                     else "config line_overrides"))
     return lines

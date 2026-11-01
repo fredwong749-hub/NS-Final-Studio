@@ -1,0 +1,67 @@
+[
+  {
+    "wait": 8000,
+    "path": "/#ep02",
+    "title": "精修 1280",
+    "id": "PB_1280",
+    "steps": [
+      {
+        "after": 6000,
+        "click": "精修"
+      },
+      {
+        "js": "const els=[...document.querySelectorAll('label, span, div')].filter(e=>/^\\s*用卡/.test(e.innerText||'') && e.querySelector('select')); const e=els.sort((a,b)=>a.innerText.length-b.innerText.length)[0]; if(!e) return 'none'; const sel=e.querySelector('select'); const w=document.createTreeWalker(e,NodeFilter.SHOW_TEXT); let tn; while((tn=w.nextNode())){ if(tn.textContent.includes('用卡')) break; } const r=document.createRange(); r.selectNodeContents(tn); const tr=r.getBoundingClientRect(); const s=sel.getBoundingClientRect(); const hint=e.querySelector('.v3e-lanehint')||e.parentElement.querySelector('.v3e-lanehint'); const h=hint?.getBoundingClientRect(); return {labelMid:+(tr.top+tr.height/2).toFixed(1), selectMid:+(s.top+s.height/2).toFixed(1), selectH:Math.round(s.height), labelLeft:Math.round(tr.left), hintLeft:h?Math.round(h.left):null, hintText:hint?.innerText.slice(0,30)};"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "size": [
+      1280,
+      720
+    ]
+  },
+  {
+    "wait": 8000,
+    "path": "/#ep02",
+    "title": "精修 1440",
+    "id": "PB_1440",
+    "steps": [
+      {
+        "after": 6000,
+        "click": "精修"
+      },
+      {
+        "js": "const els=[...document.querySelectorAll('label, span, div')].filter(e=>/^\\s*用卡/.test(e.innerText||'') && e.querySelector('select')); const e=els.sort((a,b)=>a.innerText.length-b.innerText.length)[0]; if(!e) return 'none'; const sel=e.querySelector('select'); const w=document.createTreeWalker(e,NodeFilter.SHOW_TEXT); let tn; while((tn=w.nextNode())){ if(tn.textContent.includes('用卡')) break; } const r=document.createRange(); r.selectNodeContents(tn); const tr=r.getBoundingClientRect(); const s=sel.getBoundingClientRect(); const hint=e.querySelector('.v3e-lanehint')||e.parentElement.querySelector('.v3e-lanehint'); const h=hint?.getBoundingClientRect(); return {labelMid:+(tr.top+tr.height/2).toFixed(1), selectMid:+(s.top+s.height/2).toFixed(1), selectH:Math.round(s.height), labelLeft:Math.round(tr.left), hintLeft:h?Math.round(h.left):null, hintText:hint?.innerText.slice(0,30)};"
+      }
+    ],
+    "size": [
+      1440,
+      900
+    ]
+  },
+  {
+    "wait": 8000,
+    "path": "/#ep02",
+    "title": "本集配乐浮层",
+    "id": "PM_music",
+    "steps": [
+      {
+        "after": 2000,
+        "click": "本集配乐"
+      },
+      {
+        "scroll": "music",
+        "y": 0.3,
+        "x": 0.3
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "size": [
+      1440,
+      900
+    ]
+  }
+]

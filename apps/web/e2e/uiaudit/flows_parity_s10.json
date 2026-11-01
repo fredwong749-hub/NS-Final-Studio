@@ -1,0 +1,142 @@
+[
+  {
+    "id": "P2_ep01",
+    "title": "画布 ep01 逐格内容",
+    "path": "/#ep01",
+    "wait": 9000,
+    "steps": [
+      {
+        "parity2": "canvas_ep01"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "id": "P2_ep02",
+    "title": "画布 ep02 逐格内容",
+    "path": "/#ep02",
+    "wait": 9000,
+    "steps": [
+      {
+        "parity2": "canvas_ep02"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "id": "P2_ep03",
+    "title": "画布 ep03 逐格内容",
+    "path": "/#ep03",
+    "wait": 9000,
+    "steps": [
+      {
+        "parity2": "canvas_ep03"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "id": "P2_ep04",
+    "title": "画布 ep04 逐格内容",
+    "path": "/#ep04",
+    "wait": 9000,
+    "steps": [
+      {
+        "parity2": "canvas_ep04"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "id": "P2_ep05",
+    "title": "画布 ep05 逐格内容",
+    "path": "/#ep05",
+    "wait": 9000,
+    "steps": [
+      {
+        "parity2": "canvas_ep05"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "id": "P2_ep06",
+    "title": "画布 ep06 逐格内容",
+    "path": "/#ep06",
+    "wait": 9000,
+    "steps": [
+      {
+        "parity2": "canvas_ep06"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "id": "P2_ep07",
+    "title": "画布 ep07 逐格内容",
+    "path": "/#ep07",
+    "wait": 9000,
+    "steps": [
+      {
+        "parity2": "canvas_ep07"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "id": "P2_ep08",
+    "title": "画布 ep08 逐格内容",
+    "path": "/#ep08",
+    "wait": 9000,
+    "steps": [
+      {
+        "parity2": "canvas_ep08"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "id": "P2_ep09",
+    "title": "画布 ep09 逐格内容",
+    "path": "/#ep09",
+    "wait": 9000,
+    "steps": [
+      {
+        "parity2": "canvas_ep09"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "id": "P2_ep10",
+    "title": "画布 ep10 逐格内容",
+    "path": "/#ep10",
+    "wait": 9000,
+    "steps": [
+      {
+        "parity2": "canvas_ep10"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  }
+]

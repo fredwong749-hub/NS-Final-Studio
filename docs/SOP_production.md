@@ -138,7 +138,7 @@ projects/<剧名>/
 ## 3. 风格 SOP（视觉圣经）
 
 - 从 `templates/visual_bible.template.toml` 生成 `config/visual_bible.toml`（界面表单填写）：
-  - 画面：镜头感（例：徕卡锐利度、85mm f/1.2、奶油虚化、浓郁暖色）、色调参考图、无字幕、干净。
+  - 画面：镜头感（现行 徕卡 S★：50mm f/2、焦点锐利、暖调通透（项目方 11-01 L-087 选 R0 不变）；契约 I7 禁柔焦 / 奶油虚化 / 浓郁饱和）、色调参考图、无字幕、干净。
   - 写实：research v8（Base 35 步真 CFG、krea2 胶片质感 0.5、1.5MP + 0.30 二次、不用“精致/娃娃感”）；**写实只作质感，不改项目方认可的人物长相**。
   - 材质规则：如“漆皮 = 镜面湿亮”“高跟 = 12cm 针形细跟”——出现关键词自动追加。
   - 镜头类型规则（纠正器）、安全镜规则、成人镜规则、欲望强度默认档（`docs/desire_amplification.md`）。
@@ -207,6 +207,9 @@ gpu3 渲染字段（T08）：`focus_part`/`focus_label`（焦点部位）、每�
 - 分工（封板修复 2026-10-30，现行）：成人判定 = 集标题 🔴 整集每镜都算成人（`config/adult_overrides.json` "per_shot": false）；本剧全部首尾帧由 gpu3 出（`config/shot_ownership.json`），笔记本不出本剧的帧；成人镜头由项目方本人启动（`TASKS.md` 规则 7）。
 - 每镜：清单（`checklist.json`）→ 每轮 2–4 张候选 → VLM 逐项打分 + 人脸相似度/背景虚化/色彩/文字检测 → 定点修（局部重绘、ControlNet、Blender 难镜头）→ 最多约 4 轮。
 - 尾帧以首帧为参考编辑出动作终态；两者都存为版本，画布显示。
+- **本地看图复核（契约 Q9，VQA 2026-11-01，项目方 R11-4 / R11-5 / R11-10；规则 K-REV-V01…V04、K-REN-V05、K-WRT-V06）**：每张首帧 / 尾帧出完都交 gpu36 本地 Qwen3-VL-8B（`ns_agent.vqa.client.inspect_image`，参考 = 本镜身份脸 + 造型设定图 + 参考板 + 场景 / 鞋参考）逐项查 22 类缺陷：多 / 少手、手指畸形、身体结构、多人 / 重复人、身份漂、发型发色、服装、鞋、指甲首饰、穿着状态、场景、时段光线、景别、文字水印、看镜头、多人无表情、塑料感、五官畸形、坏块、拼图 / 照搬参考板、低清、未成年外观。清单与契约映射见 `config/vqa.json`。**图片只进本地模型，绝不发外部 API。**
+  - 闭环（R11-10）：本地模型写的文字描述 + 缺陷清单 + 镜头原文 + Q1–Q8 数字 → 写作网关（只收文字）判 pass / fail，并给 prompt_delta → PRODUCER 用改过的提示词重出（每轮只改一个维度，最多 3 轮，第 3 轮仍不过交总调度）；每轮写进 take.params.vqa_rounds。
+  - 已转拦截（项目方 11-01 16:10 原话，D-VQA-01：gate.enforce=true、judge.enforce=true）：blocking 项判 defect = Q9 不过 → 不设为当前、PRODUCER 套 prompt_delta 自动重出（≤3 次）；unsure 只记录；没看图 = untested（不算通过）。跨镜连贯（continuity_break，同场上一镜首帧作参考）、摆拍（posed_stiff）同属 Q9。图片闸门先于视频：build_jobs 只给 Q9 通过的首帧派视频。驳回替换版过闸门自动换上，总调度改为交项目方前抽查（G0）。未成年外观任何时候都阻断。
 - 色调轻度匹配到项目色调参考图。
 - **为 H3 准备首尾帧（S3 闸门必查；`S3-K1`–`S3-K3`、`P-B2`）**：
   - 首帧和尾帧来自同一 take 链，同一布景、同一光线、同一服装和发妆；姿势变化可达；景别、机位在一个运镜范围内（§6 H3 上游写法第 5 条）。
@@ -220,6 +223,7 @@ gpu3 渲染字段（T08）：`focus_part`/`focus_label`（焦点部位）、每�
 - 首帧 + 尾帧锁定；帧数按 `**时长**` 整数秒向上取 17k+5 网格（≥107 帧 = 4 s，≤362 帧，见 §6 表）。实际片长以 H3 输出为准（对齐句 `S.SS` = 帧数/24，243 帧 → 10.12 s），不再按剧本秒数后期裁切（项目方 2026-10-30，h3_sound G13）。
 - 提示词、帧数、分辨率、采样参数全部按 **§9A H3 视频规范（官方）**；参数值以 `docs/SOP_parameters.md` 的 S4 表为准。
 - 视频去重键：sha256(首帧)+sha256(尾帧)+提示词哈希+参数；同键不重渲。
+- **视频看图复核（契约 V9，VQA）**：`score_clip` 每条片抽 6 帧（含第 1 帧与第 1 秒）交本地模型，查片内换脸、服装 / 鞋变了、肢体 / 物体变形、开头盯镜头（R11-8）、跳场景，外加出图那 22 项；只记录，标定后再转阻断。
 - 重渲队列：画布 → `data/renders_gpu3/rerender_queue.jsonl` → gpu3 处理 → `rerender_events.jsonl`。
 
 ## 9A. H3 视频规范（官方）
@@ -378,6 +382,10 @@ non_diegetic_music: <1–3 句英文，乐器 / 速度 / 节奏 / 强弱；没�
 ## 12. 4K 放大（成集 QA 通过后）
 
 - gpu3：每镜放大到 2160×3840（时序一致的视频超分，复用 research v5/v8），轻锐化 + 颗粒，不改调色；输出 `takes/video_NNN_4k.mp4` + 对比图与闪烁指标。
+- **只对已批准的片做（项目方 R11-7，K-EDT-V07）**：总调度亲审通过 / 项目方通过的预览片，或定稿合成用的镜头，才进 4K。这是后处理一步，不进出片和重试循环。
+- 引擎：gpu33 SeedVR2 3B（`scripts/upscale_4k.py shot|episode`；本机 `tools/assemble_episode.py --upscale-4k run` → `services/post/ns_post/upscale4k.py`）。只用借给 upscale-4k 的卡或真正空闲的卡（GPU3 / GPU0），**绝不用 gpu33 GPU2**。ComfyUI 队列空 60 s 后才 /free 接手，一镜一锁。
+- 质检：身份 ≥0.75、静区闪烁 ≤1.6×、色差 ΔE ≤4。不过就用 Lanczos 回退，并标 fallback。时间太长时先改 `--set sr_short=1440`（1440 + Lanczos）。实测数字见 `docs/vqa/STATE.md`。
+- **预览成片也要放大到 1080（项目方 2026-11-01 原话：“s5等视频出来很糊”“估计你的参数坏了”；K-EDT-V10）**：上面“只对已批准片做 4K”仍然有效，只管 4K；预览成片（night.py 整集合成）一律用原片（`video/clips/`，768×1344 级）合成，540×960 代理只给审片页、禁止进成片。合成前 `tools/series10_video/upscale_preview.py epNN` 把原片放到 1080 宽（`<名>_sr1080.mp4`）：GPU 空闲时用 SeedVR2（`upscale_4k.py shot --set sr_short=1080`，取回后 `upscale_preview.py --clip … --seedvr2-result …`），否则 lanczos + 亮度 unsharp 0.6、CRF 16 兜底。⤴ 取代“预览成片用 540×960 代理合成”的旧做法（night.py 11-01 前）。
 
 ## 13. 成片装配与导出
 

@@ -1,0 +1,5 @@
+{
+ "_doc": "PROMPT 2026-10-31：sysimpl-v2 时间轴 lint（RL-T1–T7）与 Shot Spec 分拍槽位（SS-M1/M5/M6，v2 起）的级别开关。timing_lint_level=warn（默认）：全部只提示，不拦渲染；=error：写作规则 ≥ sysimpl-v2 的镜头缺项即 block。episodes_error：只对这些集按 error（导入了 sysimpl-v2 产出的集再加进来）。",
+ "timing_lint_level": "warn",
+ "episodes_error": []
+}

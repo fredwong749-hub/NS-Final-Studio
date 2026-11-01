@@ -1,0 +1,15 @@
+/* UIMASTER G11：全站小图放大（ZoomLayer） */
+.zl-mag { position: fixed; z-index: 1200; width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 1px solid var(--c-line, rgba(255,255,255,.2)); border-radius: var(--r-pill, 999px); background: var(--c-raise, #222); color: var(--c-text, #fff); box-shadow: var(--sh-1, 0 1px 4px rgba(0,0,0,.4)); cursor: zoom-in; }
+.zl-mag:hover, .zl-mag:focus-visible { background: var(--c-accent, #5b6cff); color: var(--c-on-accent, #fff); outline: none; }
+img[tabindex="0"]:not([data-nozoom]) { cursor: zoom-in; }
+img[tabindex="0"]:focus-visible { outline: 2px solid var(--c-accent, #5b6cff); outline-offset: 2px; }
+.zl-box { position: fixed; inset: 0; z-index: 1300; display: grid; grid-template-rows: 1fr auto; background: var(--c-scrim, rgba(0,0,0,.82)); backdrop-filter: blur(4px); outline: none; }
+.zl-stage { position: relative; overflow: hidden; display: grid; place-items: center; min-height: 0; padding: var(--sp-4, 16px); }
+.zl-stage img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: var(--r-m, 8px); transform-origin: center; transition: transform .08s ease-out; cursor: zoom-in; user-select: none; }
+.zl-stage img.zoomed { cursor: grab; transition: none; }
+.zl-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4, 16px); padding: var(--sp-2, 8px) var(--sp-4, 16px); background: var(--c-surface, #111); border-top: 1px solid var(--c-line, rgba(255,255,255,.12)); }
+.zl-cap { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.zl-cap b { font-size: var(--fs-m, 14px); color: var(--c-text, #fff); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zl-cap span { font-size: var(--fs-xs, 12px); color: var(--c-text-2, #aaa); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zl-btns { display: flex; gap: var(--sp-2, 8px); flex-shrink: 0; }
+.zl-btns .ds-btn { min-width: var(--h-s); min-height: var(--h-s); }

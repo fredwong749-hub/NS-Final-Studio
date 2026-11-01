@@ -1,25 +1,27 @@
 // fredw-92/W4b：精修模式右栏内容（外壳画标签条）——提示词 | 版本 | 规则 | 高级
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { EditButton } from "../../ds/editdel";
 import type { H3Blocks, ShotSummary, SopShot } from "../../types";
 import { api } from "../../api";
 import { useStudio } from "../../store";
-import { useUi } from "../ui";
+import { useUi } from "../ui.helpers";
 import type { Slot } from "../api_v1";
 import { currentTake, fmtSec, focusSlot, gateOf, gpuLabel, isStale, lockedTake, setEdit, setShotUi, takesOf, useEdit } from "./state";
+import { LaneSelect } from "./LaneSelect";
 import { ImageParamsPanel } from "./ImageParams";
 import { SLOT_NAME, submitFrame, submitVideo } from "./actions";
 import { VersionChain, TakeMeta } from "./VersionChain";
-import { LlmOverride, useLlmOverride } from "../pages/LlmOverride";
-import { missingOf, StoryboardGrid, storyboardOf } from "../StoryboardDetails";
+import { ShotAssetsTab } from "./ShotAssetsTab";
+import { ShotLinesList } from "../sound/ShotLines";
+import { LlmOverride } from "../pages/LlmOverride";
+import { useLlmOverride } from "../pages/LlmOverride.helpers";
+import { StoryboardGrid } from "../StoryboardDetails";
+import { missingOf, storyboardOf } from "../StoryboardDetails.helpers";
 import "./edit.css";
+import { AUTO_SHORT, STALE_SHORT } from "../words";
 
-export type RightTab = "prompt" | "versions" | "rules" | "advanced";
-export const RIGHT_TABS: [RightTab, string][] = [
-  ["prompt", "提示词"],
-  ["versions", "版本"],
-  ["rules", "规则"],
-  ["advanced", "高级"],
-];
+import { isMine, plain, type RightTab } from "./rightTabs.helpers";
+export type { RightTab };
 
 export interface RightTabsProps {
   shot: ShotSummary;
@@ -35,8 +37,24 @@ export function RightTabs({ shot, tab }: RightTabsProps) {
     <div className="v3e-rt">
       {tab === "prompt" && <PromptTab key={shot.id} shot={shot} />}
       {tab === "versions" && <VersionChain shot={shot} />}
+      {tab === "assets" && <ShotAssetsTab shot={shot} />}
+      {tab === "sound" && <SoundTab shot={shot} />}
       {tab === "rules" && <RulesTab shot={shot} />}
       {tab === "advanced" && <AdvancedTab shot={shot} />}
+    </div>
+  );
+}
+
+// ---------- 声音（UIRSI B4）：这一镜的台词逐句 ▶、整镜连播；配乐 / 全集台词去声音页 ----------
+function SoundTab({ shot }: { shot: ShotSummary }) {
+  const ep = Number(shot.id.match(/^ep(\d+)/)?.[1]) || 1;
+  return (
+    <div className="v3e-sound">
+      <ShotLinesList shot={shot.id} compact />
+      <p className="v3e-note">
+        <a className="v3p-link" href={`#/sound?tab=bgm&ep=${ep}&shot=${shot.id}`}>这一镜的配乐 →</a>{" "}
+        <a className="v3p-link" href={`#/sound?tab=lines&ep=${ep}&shot=${shot.id}`}>整集台词 →</a>
+      </p>
     </div>
   );
 }
@@ -80,11 +98,12 @@ function GrowText({ value, onChange, dirty, small, readOnly }: { value: string; 
   );
 }
 
+// UXF2 #26：只写中文名，不再露出英文字段名
 const H3_FIELDS: [keyof H3Blocks, string, string][] = [
-  ["alignment", "对齐句", "系统按时长生成"],
-  ["body", "画面", "integrated_multimodal_description"],
-  ["soundscape", "环境声", "overall_soundscape"],
-  ["music", "配乐", "non_diegetic_music"],
+  ["alignment", "对齐句", "系统按时长生成，不能改"],
+  ["body", "画面", ""],
+  ["soundscape", "环境声", ""],
+  ["music", "配乐", ""],
 ];
 
 function PromptTab({ shot }: { shot: ShotSummary }) {
@@ -168,7 +187,7 @@ function PromptTab({ shot }: { shot: ShotSummary }) {
     setBusy(true);
     try {
       const cv = currentTake(es, d, shot.id, "video");
-      await submitVideo(shot.id, { gpu: es.gpu as 3 | 0, prompt_override: h3Joined, ...(cv ? { parent: cv.n } : {}) }, studio.notify, studio.refreshAfter);
+      await submitVideo(shot.id, { gpu: es.gpu, prompt_override: h3Joined, ...(cv ? { parent: cv.n } : {}) }, studio.notify, studio.refreshAfter);
     } finally {
       setBusy(false);
     }
@@ -183,6 +202,7 @@ function PromptTab({ shot }: { shot: ShotSummary }) {
         首帧提示词<small>{d.edit.image_prompt != null ? "人工改过" : "编译结果"} · 原样发给 Image 2.1</small>
       </span>
       <GrowText value={first} onChange={setFirst} dirty={firstDirty} small={!open} />
+      <EditButton type="prompt" id={`shot:${shot.id}/image_prompt`} size="xs" label="说哪里不对，让系统改" onChanged={() => void studio.refreshAfter([shot.id])} />
       {d.edit.image_prompt != null && (
         <button className="v3e-link" onClick={() => setFirst(firstC)}>
           丢掉人工修改，回到编译结果
@@ -196,6 +216,7 @@ function PromptTab({ shot }: { shot: ShotSummary }) {
         尾帧提示词<small>由定稿首帧编辑而来 · 原样发给 Image 2.1</small>
       </span>
       <GrowText value={last} onChange={setLast} dirty={lastDirty} small={!open} />
+      <EditButton type="prompt" id={`shot:${shot.id}/last_prompt`} size="xs" label="说哪里不对，让系统改" onChanged={() => void studio.refreshAfter([shot.id])} />
       {d.edit.last_prompt != null && (
         <button className="v3e-link" onClick={() => setLast(lastC)}>
           丢掉人工修改，回到编译结果
@@ -212,7 +233,7 @@ function PromptTab({ shot }: { shot: ShotSummary }) {
           <label key={k} className="v3e-fld">
             <span className="k">
               {label}
-              <code>{hint}</code>
+              {hint && <small>{hint}</small>}
             </span>
             <GrowText
               value={h3[k] ?? ""}
@@ -229,7 +250,44 @@ function PromptTab({ shot }: { shot: ShotSummary }) {
           <GrowText value={h3Full} readOnly />
         </label>
       )}
-      <div className="v3e-note">下一次出视频原样用上面这段；这里的改动只用于“按改后的提示词重渲视频”这一次，不改剧本。长期修改走审片里的 H3 面板（项目方确认）。</div>
+      <div className="v3e-note">下一次出视频原样用上面这段。“按改后的提示词重渲视频”只用这一次；要以后一直用，点“保存为长期修改”（登录即本人确认，可撤销）。</div>
+      {/* 回退补回（旧检查器 H3Panel）：视频提示词长期修改（画面 / 环境声），撤销 = 回到剧本编译结果 */}
+      {h3 && (
+        <div className="v3e-row-btns">
+          <button
+            className="v3e-btn sm primary"
+            disabled={!h3B || (h3.body === h3B.body && h3.soundscape === h3B.soundscape)}
+            onClick={async () => {
+              try {
+                const r = await api.putH3Override(shot.id, { body: h3.body ?? null, soundscape: h3.soundscape ?? null, base_sha: shot.h3_prompt_sha256 ?? null, note: "登录点选：保存视频提示词长期修改" });
+                studio.notify(r.status === "draft" ? `已保存为草稿：${(r.failed ?? []).join("、") || "规则检查没过"}` : "视频提示词已保存为长期修改，之后出视频都用它");
+                void studio.refreshAfter([shot.id]);
+              } catch (err) {
+                studio.notify(`没保存上：${(err as Error).message}`, "err");
+              }
+            }}
+            title="把画面 / 环境声的修改存为这一镜的长期视频提示词"
+          >
+            保存为长期修改
+          </button>
+          {d.edit.h3_prompt_override && (
+            <button
+              className="v3e-btn sm"
+              onClick={async () => {
+                try {
+                  await api.putH3Override(shot.id, { clear: true, note: "登录点选：撤销视频提示词长期修改" });
+                  studio.notify("已撤销长期修改，回到剧本编译结果");
+                  void studio.refreshAfter([shot.id]);
+                } catch (err) {
+                  studio.notify(`没撤销成：${(err as Error).message}`, "err");
+                }
+              }}
+            >
+              撤销长期修改
+            </button>
+          )}
+        </div>
+      )}
       <div className="v3e-fld">
         <span>
           视频参数{vt ? <small>当前视频 #{vt.n}</small> : <small>还没有视频</small>}
@@ -274,7 +332,7 @@ function PromptTab({ shot }: { shot: ShotSummary }) {
   );
 
   const others: Slot[] = (["first", "last", "video"] as Slot[]).filter((s) => s !== focus);
-  const NAME: Record<Slot, string> = { first: "首帧提示词", last: "尾帧提示词", video: "视频提示词（H3 四块）" };
+  const NAME: Record<Slot, string> = { first: "首帧提示词", last: "尾帧提示词", video: "视频提示词" }; // UX4（审查 #26）：不写“H3 四块”
 
   return (
     <>
@@ -352,12 +410,12 @@ function PromptTab({ shot }: { shot: ShotSummary }) {
       </div>
       {focus === "video" ? (
         <div className="v3e-foot">
-          <span className="hint">{vGate ?? (h3Dirty ? (h3Joined ? "改动只用于这一次重渲" : "原文里找不到改动的块，不能拼回") : "改了块可只为这一次重渲")}</span>
-          <button className="v3e-btn sm" disabled={!h3Dirty || busy} onClick={() => setH3(h3B)}>
+          <span className="hint">{vGate ?? (h3Dirty ? (h3Joined ? "只这一次用改过的提示词重出视频" : "原文里找不到改动的块，不能拼回") : "先改上面任一块")}</span>
+          <button className="v3e-btn sm" disabled={!h3Dirty || busy} title={h3Dirty ? "放弃这次改动，回到剧本原文" : "还没改过，不用还原"} onClick={() => setH3(h3B)}>
             还原
           </button>
           <button className="v3e-btn primary sm" disabled={!h3Joined || busy || !!vGate} title={vGate ?? undefined} onClick={() => void rerenderVideo()}>
-            按改后的提示词重渲视频
+            只这一次用改后的提示词重出
           </button>
         </div>
       ) : (
@@ -380,7 +438,8 @@ function PromptTab({ shot }: { shot: ShotSummary }) {
   );
 }
 
-// ---------- 规则：关口 + 机检 + 定稿关口 ----------
+// ---------- 规则（UXF2 #28）：分成“需要你处理”（红，只有这一类算数）和“系统提示”（灰，默认折叠） ----------
+
 function RulesTab({ shot }: { shot: ShotSummary }) {
   const studio = useStudio();
   const d = studio.details[shot.id]!;
@@ -399,80 +458,223 @@ function RulesTab({ shot }: { shot: ShotSummary }) {
   const ll = lockedTake(d, "last");
   const stale = Object.entries(shot.stale ?? {}).filter(([, v]) => v && v.length);
   const rd = shot.readiness;
+  const STG: Record<string, string> = { image: "首帧", last: "尾帧", video: "视频" };
+
+  const mine: { text: string; cls: string }[] = [];
+  const info: { text: string; who?: string; cls?: string }[] = [];
+  for (const b of sop.s?.blockers ?? []) (isMine(b) ? mine.push({ text: plain(b.text), cls: "bad" }) : info.push({ text: plain(b.text), who: b.actor_label }));
+  for (const it of rd?.items ?? []) {
+    const t = `${it.label}${it.reason ? `：${it.reason}` : ""}`;
+    // 就绪检查没过的是流程状态（缺尾帧、剧本缺字段等），由出图 / 写作那边补，不算“要你处理”
+    if (it.level === "fail" || it.level === "warn") info.push({ text: plain(t), cls: it.level === "fail" ? "warn" : undefined });
+  }
+  for (const [k, v] of stale) mine.push({ text: `${STG[k] ?? k}已过期：${v!.join("；")}，需重出`, cls: "warn" });
+  for (const w of Object.values(sop.s?.stages ?? {}).flatMap((st) => st.warnings ?? [])) info.push({ text: plain(w.text) });
+  const seen = new Set<string>();
+  const infoU = info.filter((x) => (seen.has(x.text) ? false : (seen.add(x.text), true)));
 
   return (
     <div className="v3e-scroll">
       <div className="v3e-fld">
-        <span>定稿关口</span>
+        <span>定稿进度</span>
         <ol className="v3e-gates">
-          <li className={lf ? (isStale(lf) ? "warn" : "ok") : "todo"}>首帧{lf ? (isStale(lf) ? ` #${lf.n} 过期·需重出` : ` 已定稿 #${lf.n}`) : " 未定稿"}</li>
-          <li className={ll ? (isStale(ll) ? "warn" : "ok") : lf ? "todo" : "wait"}>
-            尾帧{ll ? (isStale(ll) ? ` #${ll.n} 过期·需重出` : ` 已定稿 #${ll.n}`) : lf ? " 未定稿" : "（等首帧定稿）"}
+          {/* UXF4（审查 N1）：自动测试定稿写明待复审，不算“已定稿” */}
+          <li className={lf ? (isStale(lf) || lf.auto ? "warn" : "ok") : "todo"}>首帧{lf ? (isStale(lf) ? ` #${lf.n} ${STALE_SHORT}` : lf.auto ? ` #${lf.n} ${AUTO_SHORT}` : ` 已定稿 #${lf.n}`) : " 未定稿"}</li>
+          <li className={ll ? (isStale(ll) || ll.auto ? "warn" : "ok") : lf ? "todo" : "wait"}>
+            尾帧{ll ? (isStale(ll) ? ` #${ll.n} ${STALE_SHORT}` : ll.auto ? ` #${ll.n} ${AUTO_SHORT}` : ` 已定稿 #${ll.n}`) : lf ? " 未定稿" : "（等首帧定稿）"}
           </li>
           <li className={gateOf(d, "video") ? "wait" : "todo"}>视频{gateOf(d, "video") ? `：${gateOf(d, "video")}` : " 可以出"}</li>
         </ol>
       </div>
-      <div className="v3e-fld">
-        <span>SOP 关口</span>
-        {sop.err ? (
-          <div className="v3e-note warn">{sop.err}</div>
-        ) : !sop.s ? (
-          <div className="v3e-note">读取中…</div>
-        ) : (
-          <>
-            <div className="v3e-ro">
-              现在停在 <b>{sop.s.stage} {sop.s.stage_label}</b>
-            </div>
-            <ul className="v3e-list">
-              {sop.s.blockers.map((b, i) => (
-                <li key={i}>
-                  {b.text} <small>{b.actor_label}</small>
-                </li>
-              ))}
-              {Object.values(sop.s.stages).flatMap((st) => st.warnings ?? []).map((w, i) => (
-                <li key={`w${i}`} className="warn">
-                  提醒：{w.text}
-                </li>
-              ))}
-              {!sop.s.blockers.length && <li>无卡点</li>}
-            </ul>
-          </>
-        )}
-      </div>
-      {rd && (
-        <div className="v3e-fld">
-          <span>就绪检查</span>
+      {/* 回退补回（旧检查器 H3Panel）：视频提示词规则逐条检查（§9A）+ 缺的字段 */}
+      {(shot.h3_lint?.length || shot.h3_missing?.length) ? (
+        <details className="v3e-fld" open={shot.h3_lint_ok === false || !!shot.h3_missing?.length}>
+          <summary>
+            视频提示词规则检查<small>{shot.h3_lint_ok === false ? `没过 ${(shot.h3_lint ?? []).filter((x) => !x.ok && !x.overridden).length} 条` : "都过了"}{shot.h3_missing?.length ? ` · 缺 ${shot.h3_missing.join("、")}` : ""}</small>
+          </summary>
           <ul className="v3e-list">
-            {rd.items.map((it, i) => (
-              <li key={i} className={it.level === "fail" ? "bad" : it.level === "warn" ? "warn" : ""}>
-                {it.label}
-                {it.reason ? `：${it.reason}` : ""}
+            {(shot.h3_lint ?? []).map((x) => (
+              <li key={x.rule_id} className={x.ok ? "ok" : x.overridden ? "warn" : "bad"} title={x.sop_ref ?? ""}>
+                {x.ok ? "✓" : x.overridden ? "△" : "✗"} {x.msg ?? x.detail}
+                {x.overridden ? "（已豁免）" : ""}
               </li>
             ))}
           </ul>
-        </div>
-      )}
+        </details>
+      ) : null}
       <div className="v3e-fld">
-        <span>过期原因</span>
-        {stale.length ? (
+        <span>
+          需要你处理<small>{mine.length ? `${mine.length} 项` : ""}</small>
+        </span>
+        {sop.err && <div className="v3e-note warn">流程关口读不到：{sop.err}</div>}
+        {mine.length ? (
           <ul className="v3e-list">
-            {stale.map(([k, v]) => (
-              <li key={k} className="warn">
-                {k === "image" ? "首帧" : k === "last" ? "尾帧" : "视频"}：{v!.join("；")}
+            {mine.map((m, i) => (
+              <li key={i} className={m.cls}>
+                {m.text}
               </li>
             ))}
           </ul>
         ) : (
-          <div className="v3e-ro">无</div>
+          <div className="v3e-ro">没有要你处理的</div>
         )}
       </div>
-      {d.compiled.dropped_triggers.length > 0 && (
-        <div className="v3e-fld">
-          <span>编译器丢掉的触发词</span>
-          <div className="v3e-ro mono">{d.compiled.dropped_triggers.join(", ")}</div>
-        </div>
-      )}
+      <details className="v3e-fold">
+        <summary>
+          系统提示（{infoU.length + (sop.s ? 1 : 0) + (d.compiled.dropped_triggers.length ? 1 : 0)} 条，不用你处理）
+        </summary>
+        <ul className="v3e-list dim">
+          {sop.s && <li>流程进度：{sop.s.stage_label}</li>}
+          {infoU.map((x, i) => (
+            <li key={i} className={x.cls}>
+              {x.text}
+              {x.who ? <small> · {x.who}</small> : null}
+            </li>
+          ))}
+          {d.compiled.dropped_triggers.length > 0 && <li>出图时自动去掉的 LoRA 触发词：{d.compiled.dropped_triggers.join("、")}（不影响画面）</li>}
+          {rd?.items.filter((it) => it.level !== "fail" && it.level !== "warn").length ? (
+            <li>就绪检查通过 {rd.items.filter((it) => it.level !== "fail" && it.level !== "warn").length} 项</li>
+          ) : null}
+        </ul>
+      </details>
     </div>
+  );
+}
+
+// ---------- 本镜长期设置（存进 ShotEdit，之后每次出图都用）：负面词、锁种、尾帧来源、上传尾帧、配乐、备注 ----------
+const LAST_SRC: [string, string][] = [
+  ["gen", "生成（由首帧编辑出尾帧）"],
+  ["next", "用下一镜首帧（衔接）"],
+  ["upload", "上传的图"],
+  ["video", "视频末帧抽帧"],
+];
+function PersistPanel({ shot }: { shot: ShotSummary }) {
+  const studio = useStudio();
+  const es = useEdit();
+  const d = studio.details[shot.id]!;
+  const e = d.edit;
+  const [neg, setNeg] = useState(e.image_negative ?? "");
+  const [music, setMusic] = useState(e.music ?? "");
+  const [note, setNote] = useState(e.note ?? "");
+  useEffect(() => {
+    setNeg(e.image_negative ?? "");
+    setMusic(e.music ?? "");
+    setNote(e.note ?? "");
+  }, [shot.id, e.image_negative, e.music, e.note]);
+  const save = (patch: Partial<typeof e>, ok: string) => void studio.saveEdit(shot.id, { ...e, ...patch }, { quiet: true }).then((r) => r && studio.notify(ok));
+  const take = (slot: Slot) => currentTake(es, d, shot.id, slot);
+  const seedRow = (label: string, key: "image_seed" | "last_seed" | "video_seed", slot: Slot) => {
+    const cur = e[key] ?? null;
+    const t = take(slot);
+    return (
+      <div className="v3e-kv-row" key={key}>
+        <dt>{label}</dt>
+        <dd>
+          {cur != null ? <b>锁定 {cur}</b> : "随机"}{" "}
+          {t && t.seed != null && cur !== t.seed && (
+            <button className="v3e-link" onClick={() => save({ [key]: t.seed } as Partial<typeof e>, `已锁种：${label}之后都用 #${t.n} 的种子 ${t.seed}`)} title={`把当前 #${t.n} 的种子写进本镜，之后每次出${label}都用它`}>
+              锁定 #{t.n} 的种子
+            </button>
+          )}{" "}
+          {cur != null && (
+            <button className="v3e-link" onClick={() => save({ [key]: null } as Partial<typeof e>, `已解锁：${label}种子改回随机`)}>
+              解锁
+            </button>
+          )}
+        </dd>
+      </div>
+    );
+  };
+  const negBase = d.compiled.image_negative ?? "";
+  return (
+    <>
+      <div className="v3e-fld">
+        <span>
+          负面词<small>{e.image_negative != null ? "本镜改过" : "用的是编译结果"}</small>
+        </span>
+        <textarea className="v3e-ta mono" rows={3} value={neg} placeholder={negBase} onChange={(ev) => setNeg(ev.target.value)} />
+        <div className="v3e-row-btns">
+          <button className="v3e-btn sm" disabled={neg === (e.image_negative ?? "")} onClick={() => save({ image_negative: neg.trim() ? neg : null }, "负面词已保存，下一次出图起用")}>
+            保存负面词
+          </button>
+          {e.image_negative != null && (
+            <button className="v3e-btn sm" onClick={() => save({ image_negative: null }, "负面词已恢复成编译结果")}>
+              恢复默认
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="v3e-fld">
+        <span>
+          种子<small>锁种 = 之后每次出这一格都用同一个种子</small>
+        </span>
+        <dl className="v3e-kv">
+          {seedRow("首帧", "image_seed", "first")}
+          {seedRow("尾帧", "last_seed", "last")}
+          {seedRow("视频", "video_seed", "video")}
+        </dl>
+      </div>
+      <div className="v3e-fld">
+        <span>尾帧从哪来</span>
+        <select className="v3e-sel" value={e.last_source ?? "gen"} onChange={(ev) => save({ last_source: ev.target.value as typeof e.last_source, last_frame: ev.target.value === "next" ? "next" : e.last_frame }, "尾帧来源已改")}>
+          {LAST_SRC.map(([k, l]) => (
+            <option key={k} value={k}>
+              {l}
+            </option>
+          ))}
+        </select>
+        <div className="v3e-row-btns">
+          <button className="v3e-btn sm" disabled={!shot.next_shot || e.last_source === "next"} onClick={() => save({ last_source: "next", last_frame: "next" }, "已设：尾帧 = 下一镜首帧")} title="一键衔接：这一镜的尾帧直接用下一镜的首帧">
+            ⛓ 尾帧 = 下一镜首帧
+          </button>
+          <label className="v3e-btn sm" title="上传一张图作为尾帧的新版本（旧版本都保留）">
+            上传尾帧…
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              hidden
+              onChange={async (ev) => {
+                const f = ev.target.files?.[0];
+                ev.target.value = "";
+                if (!f) return;
+                try {
+                  await api.uploadLastFrame(shot.id, f);
+                  studio.notify("已上传为尾帧（旧版本都在）");
+                  void studio.refreshShots([shot.id]);
+                } catch (err) {
+                  studio.notify(`上传尾帧失败：${(err as Error).message}`, "err");
+                }
+              }}
+            />
+          </label>
+        </div>
+      </div>
+      <div className="v3e-fld">
+        <span>
+          本镜配乐提示<small>{e.music ? "本镜改过" : "没写就用本集配乐"}</small>
+        </span>
+        <textarea className="v3e-ta" rows={2} value={music} onChange={(ev) => setMusic(ev.target.value)} />
+        <div className="v3e-row-btns">
+          <button className="v3e-btn sm" disabled={music === (e.music ?? "")} onClick={() => save({ music: music.trim() ? music : null }, "本镜配乐提示已保存")}>
+            保存配乐提示
+          </button>
+          {e.music && (
+            <button className="v3e-btn sm" onClick={() => save({ music: null }, "已恢复：用本集配乐")}>
+              恢复默认
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="v3e-fld">
+        <span>本镜备注</span>
+        <textarea className="v3e-ta" rows={2} value={note} placeholder="写给自己 / 团队的备注" onChange={(ev) => setNote(ev.target.value)} />
+        <div className="v3e-row-btns">
+          <button className="v3e-btn sm" disabled={note === (e.note ?? "")} onClick={() => save({ note }, "备注已保存")}>
+            保存备注
+          </button>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -484,9 +686,43 @@ function AdvancedTab({ shot }: { shot: ShotSummary }) {
   const slot = focusSlot(es, d, shot.id);
   const t = currentTake(es, d, shot.id, slot);
   const ui = useUi();
+  const vt = currentTake(es, d, shot.id, "video");
+  const vp = (vt?.params ?? {}) as Record<string, unknown>;
+  const open = (mode: "regen" | "video") =>
+    setEdit(() => ({ loop: { shot: shot.id, slot: mode === "video" ? "video" : slot === "video" ? "first" : slot, mode, parent: mode === "video" ? vt?.n ?? null : null } }));
   return (
-    <div className="v3e-scroll">
-      {/* fredw-92/PX：出图参数（下一次出首帧 / 尾帧用） */}
+    <div className="v3e-scroll v3e-params">
+      {/* UIRSI r11：一处看全、一处改；改完直接从这里出新版 */}
+      <div className="v3e-params-go">
+        <button className="v3e-btn primary sm" onClick={() => open("regen")} title="用下面的出图参数出新的一版（提示词在「提示词」页签改）">
+          按这些参数出新的{slot === "video" ? "首帧" : SLOT_NAME[slot]}…
+        </button>
+        <button className="v3e-btn sm" onClick={() => open("video")} title="视频：种子 / 底模 / 尾帧给法 / 附加 LoRA 在弹窗里逐次选">
+          改视频参数重渲…
+        </button>
+        {/* UIDEBUG #4：旧检查器下线后“上传自己的首帧”没入口了——放回这里（存为新的一版，不覆盖旧版） */}
+        <label className="v3e-btn sm" title="上传一张图作为首帧的新版本（旧版本都保留）">
+          上传首帧…
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            hidden
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (!f) return;
+              try {
+                const r = await api.uploadFirstFrame(shot.id, f);
+                studio.notify(`已上传为首帧 #${r.n}（旧版本都在）`);
+                void studio.refreshShots([shot.id]);
+              } catch (err) {
+                studio.notify(`上传首帧失败：${(err as Error).message}`, "err");
+              }
+            }}
+          />
+        </label>
+      </div>
+      {/* fredw-92/PX：出图参数（下一次出首帧 / 尾帧用；修改诉求面板不再重复放一份） */}
       <div className="v3e-fld">
         <span>
           出图参数<small>下一次出首帧 / 尾帧用 · Image 2.1</small>
@@ -494,9 +730,27 @@ function AdvancedTab({ shot }: { shot: ShotSummary }) {
         <ImageParamsPanel gpu={es.gpu} />
       </div>
       <div className="v3e-fld">
-        <span>负面词</span>
-        <div className="v3e-ro mono">{d.edit.image_negative ?? d.compiled.image_negative ?? "—"}</div>
+        <span>
+          视频参数<small>{vt ? `当前视频 #${vt.n} 用的；改了要重渲` : "还没有视频"}</small>
+        </span>
+        {vt ? (
+          <dl className="v3e-kv">
+            {Object.entries(vp)
+              .filter(([, v]) => v != null && typeof v !== "object")
+              .slice(0, 12)
+              .map(([k, v]) => (
+                <div key={k} className="v3e-kv-row">
+                  <dt>{k}</dt>
+                  <dd>{String(v)}</dd>
+                </div>
+              ))}
+          </dl>
+        ) : (
+          <div className="v3e-ro">—</div>
+        )}
       </div>
+      {/* 回退补回（regress_r1 #2 / #10 + 旧检查器）：负面词可改、锁种、尾帧来源、上传尾帧、本镜配乐、本镜备注——都存进本镜修改（ShotEdit），之后每次出图都用 */}
+      <PersistPanel shot={shot} />
       <div className="v3e-fld">
         <span>
           {SLOT_NAME[slot]}当前版本{t ? ` #${t.n}` : ""}
@@ -510,26 +764,14 @@ function AdvancedTab({ shot }: { shot: ShotSummary }) {
         </div>
       ) : null}
       <div className="v3e-fld">
-        <span>本镜种子设置</span>
-        <dl className="v3e-kv">
-          <dt>首帧</dt>
-          <dd>{d.edit.image_seed ?? "随机"}</dd>
-          <dt>尾帧</dt>
-          <dd>{d.edit.last_seed ?? "随机"}</dd>
-          <dt>视频</dt>
-          <dd>{d.edit.video_seed ?? "随机"}</dd>
-        </dl>
-      </div>
-      <div className="v3e-fld">
         <span>工作流</span>
         <div className="v3e-ro mono">{t?.workflow ?? "—"}</div>
       </div>
       <div className="v3e-fld">
-        <span>默认用卡</span>
-        <select value={es.gpu} onChange={(e) => setEdit(() => ({ gpu: Number(e.target.value) as 0 | 3 }))}>
-          <option value={3}>{gpuLabel(3)}</option>
-          <option value={0}>{gpuLabel(0)}</option>
-        </select>
+        <span>
+          默认用卡<small>“自动”= 出图优先用出图道、出视频挑空闲的卡</small>
+        </span>
+        <LaneSelect value={es.gpu} onChange={(g) => setEdit(() => ({ gpu: g }))} kind={slot === "video" ? "video" : "image"} />
       </div>
       <button className="v3e-btn sm" onClick={() => ui.openRefSwitch(shot.id, shot.characters[0] ? { kind: "character", id: shot.characters[0].character } : { kind: "scene" })}>
         切换本镜参考…

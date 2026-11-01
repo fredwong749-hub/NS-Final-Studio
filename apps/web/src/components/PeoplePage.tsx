@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { thumb } from "../thumb";
 import { manageApi } from "../api";
 import { useStudio } from "../store";
 import type { PeopleList, Person } from "../types";
@@ -161,7 +162,7 @@ function PersonCard({
   return (
     <article className={`pp-card${p.archived ? " archived" : ""}`}>
       <button className="pp-hero" onClick={() => hero && setFull(hero)} title={hero ? "点开大图" : "还没有图：用下面的上传"}>
-        {hero ? <img src={hero} alt={p.name} loading="lazy" /> : <span className="muted">无图</span>}
+        {hero ? <img src={thumb(hero, 360) ?? hero} alt={p.name} loading="lazy" /> : <span className="muted">无图</span>}
       </button>
       <div className="pp-body">
         <header>
@@ -211,7 +212,7 @@ function PersonCard({
         <div className="pp-plates">
           {views.map((v) => (
             <button key={v} className={`pp-plate${p.plates[v] ? "" : " empty"}`} onClick={() => p.plates[v] && setFull(p.plates[v])}>
-              {p.plates[v] ? <img src={p.plates[v]!} alt={v} loading="lazy" /> : <span>缺</span>}
+              {p.plates[v] ? <img src={thumb(p.plates[v]!, 240) ?? p.plates[v]!} alt={v} loading="lazy" /> : <span>缺</span>}
               <i>{PLATE_LABEL[v] ?? v}</i>
             </button>
           ))}

@@ -1,0 +1,156 @@
+# VQA 本地看图复核（VQA 2026-11-01；项目方 R11-4 / R11-5 / R11-7 / R11-10，11-01 定“判定大脑必须是本地视觉模型、成人内容不出本地”）。
+# check = 强制这条规则的测试 / 校验器。参数 config/vqa.json；提示词 config/prompts/vqa_inspect.md、vqa_judge.md；代码 services/agent/ns_agent/vqa/。
+rules:
+  - id: K-REV-V01
+    domain: review
+    link: [P10-P11]
+    title: 图片 / 视频帧只进本地视觉模型（gpu36 自建服务），绝不发任何外部 API；写作网关只收文字
+    when: 任何出图 / 出片质检、R11-10 判定闭环、缺陷猎捕要“看图”
+    then: 看图只调 ns_agent.vqa.client（只认 127.0.0.1 或 ssh 到 config model.host）；给写作网关的只有本地模型写的描述 + 缺陷清单 + 镜头原文 + 契约数字，发出前过 judge.text_only_guard（含图片字节 / data URL / 图片或视频文件名一律拒发）
+    check: [tests/test_vqa.py]
+    evidence:
+      - {src: docs/vqa/STATE.md, note: "总调度 11-01 转项目方决定", quote: "the judging brain must be a local vision model, NOT an external API … adult material stays local"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REV-V02
+    domain: review
+    link: [P10-P11, P11-RETRY]
+    title: 每张出图 / 每条视频都过本地看图复核（契约 Q9 / V9）；没跑 = untested，不算通过
+    when: postflight（REFLOCK）与 VIDEO10 score_clip
+    then: 出图调 client.inspect_image（参考 = 本镜 references：身份脸、造型设定图、参考板 + 场景 / 鞋参考），视频调 client.inspect_video（抽 6 帧，含第 1 帧与第 1 秒）；结果经 contract.q9 / v9 变成契约项：已转拦截（项目方 11-01 16:10，D-VQA-01，enforce=true）——blocking 项 defect = fail、没看图 = untested（都挡），非 blocking 项与 unsure 写进证据、不挡；检查项清单与判定口径 = config/vqa.json checks（24 项）+ video_checks（5 项）
+    check: [tests/test_vqa.py, tools/vqa/calibrate.py]
+    evidence:
+      - {src: docs/REQUIREMENTS.md R11-4, quote: "鞋子不一致性,在不同的镜头鞋子就错了;人物的一致性也是不行;有些地方生图发生了多一只手"}
+      - {src: docs/REQUIREMENTS.md R11-5, quote: "code个出图,出视频等检测规则……写入到系统去"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REV-V03
+    domain: review
+    link: [P10-P11]
+    title: 转拦截后哪些检查项 blocking=true 由标定定：误报高的项不挡、写进证据（项目方 11-01 16:10 原话已取代旧的标定门槛加批准前提）
+    when: 想把 config/vqa.json 某检查项的 blocking 改成 true
+    then: 项目方 11-01 16:10 原话（D-VQA-01）转拦截，不再等总调度批准；每项 blocking 按 tools/vqa/gate_scan.py + calibrate.py 的标定（正例 = 总调度点名镜，反例 = 已通过正常镜）定：召回够、误报低的设 true，误报高的保持 false 只记录（docs/vqa/GATE_CALIBRATION.md）；只拦 defect，不拦 unsure；underage_look（HC-07）任何时候都阻断
+    check: [tests/test_vqa.py]
+    evidence:
+      - {src: docs/vqa/STATE.md, note: "总调度任务书 11-01：Turn on blocking only where agreement is ≥0.85, after master approval"}
+      - {src: data/review_pages/asset_reflock/heldout_bakeoff.json, note: "像素阈值留出复核：Q4 0.50、鞋 0.714、手 0.611，都没过线，所以看图模型要单独标定"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REV-V04
+    domain: review
+    link: [P10-P11]
+    title: 每个看图检查项都对应一条 GEN_CONTRACT 项（Q1–Q9 / I10 / V1–V9），新增检查项必须写 contract 映射
+    when: 改 config/vqa.json checks / video_checks
+    then: 每项要有 zh、contract（出图）或 video（视频）、severity（hard / soft）、blocking；映射到不存在的契约项 = 测试失败
+    check: [tests/test_vqa.py]
+    evidence:
+      - {src: config/vqa.json, note: "总调度任务书 11-01：Each verdict item maps to a GEN_CONTRACT item"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REN-V05
+    domain: render
+    link: [P10-P11, P11-RETRY]
+    title: R11-10 闭环：本地看图写文字 → 写作网关判 → 不合格按 prompt_delta 改提示词重跑，每轮只改一个维度、最多 3 轮，每轮写进 take 记录
+    when: PRODUCER 出完一张首帧 / 尾帧
+    then: 调 ns_agent.vqa.judge.review_round → {vlm_text, vlm_defects, judge, prompt_delta, next_prompt, outcome}，追加到 take.params.vqa_rounds[]；已转拦截（enforce=true，D-VQA-01）：PRODUCER _postflight 先过 vqa_gate（Q9 不过 = 不设为当前），outcome = rerun 时下一版用 prompt_delta 重出（producer.vqa_delta）；第 3 轮仍不合格 = owner（交总调度）；网关不可用 → judge.rule_fallback（hard 缺陷 = fail，固定修正句）
+    check: [tests/test_vqa.py]
+    evidence:
+      - {src: docs/REQUIREMENTS.md R11-10, quote: "每次出图本地视觉大模型自己判断是否正确,把图片信息返回给api llm做判断;失败了,把反馈错误的信息以及更新提示词重跑,写入规则"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-WRT-V06
+    domain: writer
+    link: [P3-P4]
+    title: 同一类缺陷反复出现、且根子在剧本原文的，回写剧本规则（写作方文字 + lint）
+    when: data/vqa/script_feedback.jsonl 有新行，或同一集同一检查项 ≥3 张图不合格（tools/vqa/recurring.py）
+    then: tools/vqa/recurring.py 汇总 → data/vqa/recurring.json（每条带剧本侧 lint 和出图链 owner）；下面 writer_text 交写作方进剧本规则；已有 lint 的复用（多人表情视线 QW-A5、看镜头 ACTING K-REN-G01、局部露脸 QW-CH6、外层 / 下装 QW-W1 / QW-W4），新补 VQ-W1“看得见脚的景别必须把鞋写进 img”（tools/vqa/script_lint.py，签名同 writer_lints.check_shot）
+    writer_text: |
+      1. 画面里出现两个人及以上时，每个人都要写表情和视线落点（看谁 / 看什么），不能只写主角。
+      2. 局部 / 手部 / 脚部特写只写这个部位和动作，不写五官、发型、表情（不然出图会出成带脸的中近景）。
+      3. 不写“看镜头 / 望向观众 / 对视镜头”，视线一律落在场景里的人或物上（项目方 R11-2 / R11-8）。
+      4. 每镜写清每个在画角色本镜穿什么，特别是外层（外套）、下装类型（铅笔裙 / 西裤）和鞋，不要只写“同上”。
+    check: [tools/vqa/script_lint.py, tests/test_vqa.py]
+    evidence:
+      - {src: data/renders/ep05/S3/takes.json, note: "ep05-S3 / ep05-S5 / ep10-S8：要手部大特写，出成带脸的中近景"}
+      - {src: docs/REQUIREMENTS.md R11-9, quote: "当画面出现超过一个人,第二个等,他们面部表情,眼神是没有"}
+    confidence: medium
+    status: 建议
+    date: 2026-11-01
+  - id: K-EDT-V07
+    domain: edit
+    link: [P11-P12]
+    title: 4K 放大是“已批准片”的后处理一步：只对总调度 / 项目方批准的预览或定稿片做，不进出片循环
+    when: 片子被批准（master_review ok / 项目方通过 / 定稿合成）
+    then: 走 gpu33 SeedVR2 3B（scripts/upscale_4k.py shot；本机入口 services/post/ns_post/upscale4k.py，tools/assemble_episode.py --upscale-4k run）；只用 lend / 空闲卡，绝不用 gpu33 GPU2；交付 2160×3840 HEVC10 + QC（身份 ≥0.75、静区闪烁 ≤1.6×、色差 ΔE ≤4）；QC 不过 → Lanczos 回退并标注
+    check: [tests/test_vqa.py]
+    evidence:
+      - {src: docs/REQUIREMENTS.md R11-7, quote: "像素很低,后期可以用scale视频高清放大模型放到4k,这个写到sop去"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REV-V08
+    domain: review
+    link: [P10-P11, P11-P12]
+    title: 图片闸门先于视频：首帧 / 尾帧先过本地看图闸门（Q9），不过不能设为当前、自动重出；视频只派 Q9 通过的首帧，没看图 = 未通过
+    when: PRODUCER 出完首帧 / 尾帧；build_jobs 编视频作业；回扫现行首帧
+    then: producer._postflight → vqa_gate（contract.inspect_for + contract.apply）；build_jobs.passed_frames 要求 contract.q9_passed（gate.video_requires_q9）；回扫 tools/vqa/gate_scan.py scan → apply（写回带 rescored.was_ok，PRODUCER reconcile_demoted 清次数重出）；看图服务没跑成而不过 = score_infra（只重打分不重出）
+    check: [tests/test_vqagate.py]
+    evidence:
+      - {src: docs/vqa/STATE.md, quote: "我觉得第一步最最快的方式是image做出来后,用本地图像模型去检测图片是否达标,是否在我们的约定规则里面.然后再跑视频rendering"}
+      - {src: docs/vqa/STATE.md, quote: "启动图像识别模型,然后自动检测,一旦发现不对,叫系统重写做"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REV-V09
+    domain: review
+    link: [P10-P11]
+    title: 跨镜连贯进同一套看图 rubric：同场（scene_id 相同）上一镜当前首帧作参考，判 continuity_break（外套有无 / 服装 / 发色发型 / 场景 / 光线）；尾帧对本镜首帧
+    when: 任何首帧 / 尾帧看图复核
+    then: ns_agent.vqa.continuity.refs_for(sid, kind) 给 extra_refs + spec“跨镜连贯”一行；原文写了换装换场的除外（decor_state 变化写进 spec）；不另写检测器
+    check: [tests/test_vqagate.py]
+    evidence:
+      - {src: data/episodes/series10/ep01_v2.mp4, note: "总调度亲审：S1 白衬衫无外套 → S2 黑西装外套；S5 / S7 发色蓝 → 近黑"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-01
+  - id: K-REV-V10
+    domain: review
+    link: [P10-P11]
+    title: 看图输出被截断不能当“没缺陷”：紧凑 JSON + max_new_tokens 1800，解析失败按项抢救（rubric._salvage），抢不到 = 看图失败（untested）
+    when: 本地看图模型回复
+    then: client 把 config model.max_new_tokens 发给服务；rubric.parse 合法 JSON 优先，否则逐项正则抢 "id":{"s","e"}；没输出的项不算 ok；verdict.salvaged=true 记录
+    check: [tests/test_vqagate.py]
+    evidence:
+      - {src: data/vqa/gate_scan/latest.json, note: "ep01 首扫 7 张里 3 张在 continuity_break 处被 900 token 截断，“看图模型输出不是 JSON”"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-V11
+    domain: ops
+    link: [P10-P11]
+    title: 驳回重出的替换版由本地看图闸门自动复核（G0）：过了直接 master_approve 换上，不过原因写进 master_rejects auto_reviews、按计划接着重出；总调度改为交项目方前抽查
+    when: PRODUCER 驳回重出（rung.redo）的替换版过了契约
+    then: producer.auto_review_redo（gate.auto_review_redo=true 且 Q9 通过 → master_approve(by=gate.auto_review_by)）；不过 → note_auto_reject；存量等复核的用 tools/vqa/gate_scan.py redo 处理
+    check: [tests/test_vqagate.py]
+    evidence:
+      - {src: docs/vqa/STATE.md, note: "总调度 11-01 16:19：redo_candidate 等总调度复核让整条链停住（G0），ep05-S3 / S5 又出成肩颈近景、林晚黑发"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REV-V12
+    domain: review
+    link: [P11-P12]
+    title: V6 多手阈值写进 config/gen_contract.json video_thresholds.V6、不留空；阈值落定前多肢一律判不过：任一帧手数 > 2×人数 = 不过，看图 extra_limbs defect = 不过
+    when: score_clip 跑 v6_limbs / V9 看图
+    then: v6_limbs.TH 从 gen_contract.json 读（hands_max_per_person=2、bad_finger_frac=0.85 高置信线）；config/vqa.json extra_limbs blocking=true（自相矛盾的“各5指 / 被遮挡”降为拿不准）；标定方案与数据 docs/vqa/V6_HANDCOUNT_PLAN.md、data/vqa/gate_calib/v6_metrics_local.json
+    check: [tests/test_vqagate.py]
+    evidence:
+      - {src: data/vqa/gate_calib/v6_metrics_local.json, note: "ep01-S2 mot 3 手 / 1 人、ep01-S4 s2 5 手 / 2 人原 gate 都 pass；bad_finger_frac 原为 None，done 43 条里 26 条 > 0.2"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-01

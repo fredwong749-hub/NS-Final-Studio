@@ -41,6 +41,7 @@ RANGES = {
     "two_stage_denoise": (0.05, 0.8), "two_stage_steps": (1, 60), "seed": (0, 2 ** 53),
     "sharpen_radius": (0.1, 10.0), "sharpen_amount": (0.0, 3.0), "render_scale": (0.5, 2.0),
     "detail_denoise": (0.05, 0.6), "detail_scale": (1.0, 2.0), "scaled_max": 3072,
+    "sharpen_threshold": (0, 255), "style_suffix_max": 500,
 }
 # 旧现状（2026-10-31 前的预览档：Turbo 单遍、画布 1088×1920、LoRA 按剧本自动、调色按现状、带系统规格词）。
 # 字段基准；画布默认用的是 config default_preset（项目方选定 C）
@@ -52,19 +53,32 @@ DEFAULTS: dict = {
     "width": P.IMAGE_SIZE[0], "height": P.IMAGE_SIZE[1], "seed": None, "strength": None,
     "grade": {"enabled": None, "strength": 0.6}, "spec_words": True,
     # 锐度后处理（项目方 2026-10-31：C 仍有磨皮感，要徕卡式锐利 → 锐度对比轮的候选项）
-    "sharpen": {"enabled": False, "radius": 1.0, "amount": 0.5},   # 出图后 USM 锐化（PIL UnsharpMask，amount 1 = 100%）
-    "render_scale": 1.0,                                            # 先按 ×倍尺寸出，再 lanczos 缩回 宽×高
+    # 出图后 USM 锐化（PIL UnsharpMask，amount 1 = 100%；threshold 同 PIL，0 = 全部像素）
+    "sharpen": {"enabled": False, "radius": 1.0, "amount": 0.5, "threshold": 0},
+    "render_scale": 1.0,                                            # 先按 ×倍尺寸出（= gen_scale），再 lanczos 缩回 宽×高
     "detail_pass": {"enabled": False, "denoise": 0.25, "scale": 1.5},  # 细节重绘：放大 ×scale 低重绘一遍再缩回
+    # LCA：风格后缀（项目方选定的写作模型原文）。非空 = 前加“，”原样接在送进 Image 2.1 的提示词末尾，不改一个字
+    "style_suffix": "",
 }
+STYLE_SEP = "，"
 FIELD_LABEL = {
     "unet": "模型", "steps": "步数", "cfg": "cfg", "sampler": "采样器", "scheduler": "调度器", "shift": "shift",
     "vae": "VAE", "loras": "LoRA", "two_stage": "两段式", "width": "宽", "height": "高", "seed": "种子",
     "strength": "重绘幅度", "grade": "调色", "spec_words": "系统规格词", "sharpen": "锐化",
-    "render_scale": "放大出图再缩回", "detail_pass": "细节重绘",
+    "render_scale": "放大出图再缩回", "detail_pass": "细节重绘", "style_suffix": "风格后缀",
 }
-DEFAULT_PRESET = "c_turbo_texture"     # config 里没写 default_preset 时
-# config 被覆盖丢了 image_presets 时的兜底（只有画布默认 C、旧 A、定稿档）
+DEFAULT_PRESET = "leica_sstar"         # config 里没写 default_preset 时（项目方 2026-10-31 选定 S★）
+# 项目方 2026-10-31 选定的后缀 = data/ab/leica_sharp/style_suffix_candidates.md 候选1（写作模型原文，不改字）
+LEICA_SUFFIX = "专业电影画面，徕卡M 50mm f/2镜头，焦点锐利，微反差强，皮肤纹理清晰，自然高光，暖调通透，干净真实"
+# config 被覆盖丢了 image_presets 时的兜底（画布默认 S★、C、旧 A、定稿档）
 BUILTIN_FALLBACK = [
+    {"id": "leica_sstar", "label": "徕卡 S★", "tier": "preview",
+     "params": {"unet": "turbo", "sampler": "euler", "vae": "texture_fix", "width": 768, "height": 1344,
+                "spec_words": True, "loras": [{"name": "krea2_film_texture_qwen21.safetensors", "strength": 0.5},
+                                              {"name": "@identity", "strength": 0.6}],
+                "render_scale": 1.5, "sharpen": {"enabled": True, "radius": 1.2, "amount": 0.6, "threshold": 2},
+                "style_suffix": LEICA_SUFFIX},
+     "note": "项目方 2026-10-31 选定（代码兜底）"},
     {"id": "c_turbo_texture", "label": "C·Turbo 质感（项目方选定）", "tier": "preview",
      "params": {"unet": "turbo", "sampler": "euler", "vae": "texture_fix", "width": 768, "height": 1344,
                 "spec_words": True, "loras": [{"name": "krea2_film_texture_qwen21.safetensors", "strength": 0.5},
@@ -84,10 +98,12 @@ NOTES = {
     "spec_words": "系统规格词 = 编译器自动追加的镜头句（Leica）、风格后缀、纠正器条目；关掉只删这些固定句，作者原文不动",
     "loras": "不填 = 按剧本自动（身份 LoRA）；@identity = 本镜自动带的身份 LoRA，强度用这一行的",
     "two_stage": "两段式：第一遍 first_size 出图 → lanczos 放大到 upscale_size → 低重绘第二遍（噪声种子 +1）",
-    "sharpen": "锐化：出图（和调色）之后做 USM（PIL UnsharpMask，amount 1 = 100%，threshold 0），另存 *_post.png，原图保留",
-    "render_scale": "放大出图再缩回：按 宽×高×倍数（取 16 的倍数）出图，再 lanczos 缩回 宽×高",
+    "sharpen": "锐化：出图（和调色、缩回）之后做 USM（PIL UnsharpMask，amount 1 = 100%，threshold 同 PIL），另存 *_post.png，原图保留",
+    "render_scale": "放大出图再缩回（gen_scale）：按 宽×高×倍数（取 16 的倍数）出图，再 PIL lanczos 缩回 宽×高，放大原图保留。"
+                    "带底图的改图（指令改图 / 换参考的底图重绘）不放大：底图就是交付尺寸的父版本，按交付尺寸出（后缀、锐化照做）",
+    "style_suffix": "风格后缀：项目方选定的写作模型原文，前加“，”原样接在提示词末尾（首帧 / 尾帧 / 改图 / 资产 / 场景图都接），不改字",
     "detail_pass": "细节重绘：第一遍后 lanczos 放大 ×scale、低重绘 denoise 一遍（步数用两段式的第二遍步数；Turbo 用官方 sigma 截断），再缩回 宽×高；与两段式二选一",
-    "default": "画布出图默认 = config default_preset（项目方 2026-10-31 选定 C·Turbo 质感）；定稿档不受影响",
+    "default": "画布出图默认 = config default_preset（项目方 2026-10-31 选定 徕卡 S★：C + 1.5 倍出图缩回 + USM 1.2/60/2 + 风格后缀）；定稿档不受影响",
 }
 _io_lock = threading.Lock()
 
@@ -315,7 +331,15 @@ def resolve(preset: str | None, overrides: dict | None, *, tier: str | None = No
     else:
         _num(errs, "锐化半径 sharpen.radius", sh.get("radius"), *RANGES["sharpen_radius"])
         _num(errs, "锐化强度 sharpen.amount", sh.get("amount"), *RANGES["sharpen_amount"])
-    rs = _num(errs, "放大出图倍数 render_scale", eff["render_scale"], *RANGES["render_scale"])
+        _num(errs, "锐化阈值 sharpen.threshold", sh.get("threshold", 0), *RANGES["sharpen_threshold"], integer=True)
+    suf = eff["style_suffix"]
+    if suf is None:
+        eff["style_suffix"] = ""
+    elif not isinstance(suf, str):
+        errs.append("风格后缀 style_suffix 要是文字（空 = 不加）")
+    elif len(suf) > RANGES["style_suffix_max"]:
+        errs.append(f"风格后缀最多 {RANGES['style_suffix_max']} 个字")
+    rs =_num(errs, "放大出图倍数 render_scale", eff["render_scale"], *RANGES["render_scale"])
     dp = eff["detail_pass"]
     if not isinstance(dp, dict) or not isinstance(dp.get("enabled"), bool):
         errs.append("细节重绘 detail_pass 要写成 {enabled: true/false, denoise, scale}")
@@ -464,12 +488,34 @@ def _denoise_of(node: dict) -> float:
     return float((node.get("inputs") or {}).get("denoise", 1.0))
 
 
+def append_style_suffix(wf: dict, suffix: str | None) -> bool:
+    """LCA：风格后缀原样接在 TextEncodeQwenImage21 提示词末尾（前加“，”，同 tools/ab/leica_sharp.py variant_prompt）。
+    已经以它结尾（同一张图重试）就不再接。返回是否接上"""
+    enc = (wf.get("20") or {}).get("inputs") or {}
+    p = enc.get("prompt")
+    if not suffix or not isinstance(p, str):
+        return False
+    if p.endswith(STYLE_SEP + suffix) or p == suffix:
+        return True
+    enc["prompt"] = p + STYLE_SEP + suffix if p else suffix
+    return True
+
+
+def scale_for(wf: dict, eff: dict) -> float:
+    """实际生效的放大出图倍数：带底图（节点 112，改图底图重绘）的图不放大——底图是交付尺寸的父版本，
+    放大后低重绘只会更软、更慢；按交付尺寸出（后缀、锐化照做）"""
+    if "112" in wf:
+        return 1.0
+    return float(eff.get("render_scale") or 1.0)
+
+
 def apply(wf: dict, eff: dict | None, identity_files: set[str] | None = None) -> dict:
     """按有效参数改工作流（就地改并返回）。eff=None 或不是 Image 2.1 出图图 → 原样。
     定稿档图（有 50–55 第二遍、tier=final）只改 UNET / VAE / LoRA / 采样器 / 调度器 / shift / cfg，
     尺寸、步数、两段式由 final_tier 按 cfg 覆盖出图。"""
     if not eff or not is_image_graph(wf):
         return wf
+    append_style_suffix(wf, eff.get("style_suffix"))
     final = eff.get("tier") == "final" and "53" in wf
     turbo = eff["unet"] == "turbo"
     wf["10"]["inputs"]["unet_name"] = UNETS[eff["unet"]]
@@ -507,7 +553,7 @@ def apply(wf: dict, eff: dict | None, identity_files: set[str] | None = None) ->
     wf["37"] = _sigma_node(turbo, eff, eff["steps"], denoise)
     # 尺寸（两段式时第一遍用 first_size）
     ts = eff["two_stage"]
-    rs = float(eff.get("render_scale") or 1.0)
+    rs = scale_for(wf, eff)
     w, h = (ts["first_size"] if ts["enabled"] else (_r16(eff["width"] * rs), _r16(eff["height"] * rs)))
     dp = eff.get("detail_pass") or {}
     if dp.get("enabled") and not ts["enabled"]:   # 细节重绘 = 放大 ×scale 的低重绘第二遍（finish 再缩回宽×高）
@@ -574,6 +620,7 @@ def describe(wf: dict | None) -> dict | None:
     else:
         out["two_stage"] = {"enabled": False}
     out["refs"] = sum(1 for k in (wf.get("20") or {}).get("inputs", {}) if k.startswith("images.image_"))
+    out["prompt"] = (wf.get("20") or {}).get("inputs", {}).get("prompt")   # 实际送进编码器的提示词（含风格后缀）
     return out
 
 
@@ -602,6 +649,19 @@ def strip_spec(text: str, terms: list[str]) -> str:
 
 # ------------------------------------------------------------------ 记录
 
+def _stamp_preset(t: dict, pid: str | None) -> None:
+    """UX5-B P0：本版所用预设内容的 rev 记进 take.deps（预设内容之后被改 → “依赖已更新”）；信息用，失败静默"""
+    try:
+        from ns_agent.asset_revs import preset_rev
+        deps = {k: v for k, v in (t.get("deps") or {}).items() if not k.startswith("preset:")}
+        rev = preset_rev(P.ROOT, pid) if pid else None
+        if rev:
+            deps[f"preset:{pid}"] = rev
+        t["deps"] = deps or None
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def summary(eff: dict | None, graph: dict | None, take: dict) -> dict:
     """take.params.effective：实际生效的参数（以提交的工作流为准；调色、种子以这一版为准）"""
     g = dict(graph or {})
@@ -614,10 +674,19 @@ def summary(eff: dict | None, graph: dict | None, take: dict) -> dict:
         "strength": g.get("denoise") if g.get("init_image") else None,
         "grade": {"enabled": bool(gr), "strength": (gr or {}).get("strength")},
         "spec_words": (eff or {}).get("spec_words", True),
-        "sharpen": (eff or {}).get("sharpen") or DEFAULTS["sharpen"],
+        "sharpen": {**DEFAULTS["sharpen"], **((eff or {}).get("sharpen") or {})},
         "render_scale": (eff or {}).get("render_scale", 1.0),
         "detail_pass": (eff or {}).get("detail_pass") or DEFAULTS["detail_pass"],
     }
+    # LCA：放大出图在带底图的改图上不生效（scale_for）；记实际值
+    if g.get("init_image") and float(out["render_scale"] or 1.0) != 1.0 and out["tier"] != "final":
+        out["render_scale_requested"] = out["render_scale"]
+        out["render_scale"] = 1.0
+        out["render_scale_note"] = "带底图的改图按交付尺寸出，不放大（底图就是交付尺寸的父版本）"
+    suf = (eff or {}).get("style_suffix") or ""
+    sent = g.get("prompt")
+    out["style_suffix"] = suf or None
+    out["style_suffix_applied"] = bool(suf and isinstance(sent, str) and sent.endswith(suf))
     if (eff or {}).get("detail_pass", {}).get("enabled") and g.get("two_stage", {}).get("enabled"):
         out["two_stage"] = {"enabled": False, "as_detail_pass": g["two_stage"]}
     if g.get("sigmas_note"):
@@ -634,25 +703,49 @@ def _dark(shot_id: str) -> bool:
 
 def postprocess(rel: str, eff: dict | None) -> dict | None:
     """出图后（调色之后）：缩回目标尺寸（render_scale / 细节重绘，lanczos）→ USM 锐化。另存 *_post.png，原图保留"""
+    post = post_file(P.DATA / rel, eff)
+    if not post:
+        return None
+    stem = Path(rel).with_suffix("").as_posix()
+    return {**{k: v for k, v in post.items() if k != "path"}, "file": f"{stem}_post.png", "from": rel}
+
+
+def post_effective(eff: dict | None, graph: dict | None, post: dict | None) -> dict:
+    """资产 / 场景图生成（asset_edit.run_gen）的 effective 补充：锐化、放大出图、风格后缀的实际值（字段同 summary）"""
+    s = summary(eff, graph, {})
+    out = {k: s[k] for k in ("sharpen", "render_scale", "style_suffix", "style_suffix_applied") if k in s}
+    for k in ("render_scale_requested", "render_scale_note"):
+        if k in s:
+            out[k] = s[k]
+    if post:
+        out.update(width=post["size"][0], height=post["size"][1], rendered_size=post["rendered_size"],
+                   post_steps=post["steps"])
+    return out
+
+
+def post_file(src: Path, eff: dict | None) -> dict | None:
+    """缩回 + 锐化（同 tools/ab/leica_sharp.py down / usm：PIL lanczos → PIL UnsharpMask），写 <stem>_post.png。
+    不需要后处理 → None。返回 {path, steps, rendered_size, size, sharpen}"""
     size = target_size(eff)
     sh = (eff or {}).get("sharpen") or {}
     if not size and not sh.get("enabled"):
         return None
     from PIL import Image, ImageFilter
-    src = P.DATA / rel
+    src = Path(src)
     im = Image.open(src).convert("RGB")
     steps, before = [], list(im.size)
     if size and tuple(im.size) != size:
         im = im.resize(size, Image.LANCZOS)
         steps.append(f"lanczos {before[0]}×{before[1]} → {size[0]}×{size[1]}")
+    usm = None
     if sh.get("enabled"):
-        im = im.filter(ImageFilter.UnsharpMask(radius=float(sh["radius"]), percent=int(round(float(sh["amount"]) * 100)),
-                                               threshold=0))
-        steps.append(f"USM radius {sh['radius']} amount {sh['amount']}")
-    stem = Path(rel).with_suffix("").as_posix()
-    out = f"{stem}_post.png"
-    im.save(P.DATA / out)
-    return {"file": out, "from": rel, "steps": steps, "rendered_size": before, "size": list(im.size)}
+        usm = {"radius": float(sh["radius"]), "percent": int(round(float(sh["amount"]) * 100)),
+               "threshold": int(sh.get("threshold") or 0)}
+        im = im.filter(ImageFilter.UnsharpMask(**usm))
+        steps.append(f"USM radius {usm['radius']} percent {usm['percent']} threshold {usm['threshold']}")
+    dst = src.with_name(src.stem + "_post.png")
+    im.save(dst)
+    return {"path": str(dst), "steps": steps, "rendered_size": before, "size": list(im.size), "unsharp": usm}
 
 
 def finish(shot_id: str, stage: str, n: int, eff: dict | None, wf: dict | None, *, overrides: dict | None = None,
@@ -697,7 +790,10 @@ def finish(shot_id: str, stage: str, n: int, eff: dict | None, wf: dict | None, 
                                        rendered_size=post["rendered_size"])
         if spec_removed:
             params["spec_removed"] = spec_removed
+        if (graph or {}).get("prompt") is not None and params["effective"].get("style_suffix"):
+            params["prompt_sent"] = graph["prompt"]       # LCA：送进 Image 2.1 的提示词（作者原文 + “，” + 风格后缀）
         t["params"] = params
+        _stamp_preset(t, params.get("preset"))
         P._save_takes(shot_id, data)
         if changed and (data.get("active") or {}).get(stage) == n:
             P.set_active(shot_id, stage, n)

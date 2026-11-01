@@ -1,0 +1,80 @@
+[
+  {
+    "title": "操作记录",
+    "id": "PD_audit",
+    "steps": [
+      {
+        "js": "const tb=document.querySelector('table'); const t=(tb||document.body).innerText; return {rows:tb?tb.querySelectorAll('tbody tr').length:0, rawPaths:(t.match(/\\/api\\/[\\w\\/{}-]+/g)||[]).slice(0,5), rawMethods:(t.match(/\\b(POST|PUT|DELETE)\\b/g)||[]).length, other:(t.match(/其他操作/g)||[]).length, sample:[...(tb?.querySelectorAll('tbody tr')||[])].slice(0,4).map(r=>r.innerText.replace(/\\s+/g,' ').slice(0,80)), titleHasPath:[...(tb?.querySelectorAll('[title]')||[])].some(e=>/\\/api\\//.test(e.title)), techDetails:/技术详情/.test(t)};"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "wait": 9000,
+    "path": "/#/audit"
+  },
+  {
+    "title": "资产侧栏",
+    "id": "PD_assets",
+    "steps": [
+      {
+        "js": "const vis=(e)=>{const r=e.getBoundingClientRect(); const s=getComputedStyle(e); return r.width>1&&r.height>1&&s.visibility!=='hidden'&&s.display!=='none'&&r.top<innerHeight&&r.bottom>0;}; const els=[...document.querySelectorAll('button,a[href],[role=button],summary,[role=tab],label')].filter(vis); const small=[]; for(const e of els){ const r=e.getBoundingClientRect(); const b=getComputedStyle(e,'::before'); let w=r.width,h=r.height; if(b.content!=='none'&&b.position==='absolute'){ const ins=['top','right','bottom','left'].map(k=>parseFloat(b[k])||0); w=Math.max(w,r.width-ins[1]-ins[3]); h=Math.max(h,r.height-ins[0]-ins[2]); } if(Math.min(w,h)<24) small.push((e.innerText||e.title||e.className).toString().replace(/\\s+/g,' ').slice(0,16)+' '+Math.round(w)+'x'+Math.round(h)); } return {n:els.length, under24:small.length, sample:small.slice(0,6)};"
+      }
+    ],
+    "wait": 9000,
+    "path": "/#/assets"
+  },
+  {
+    "title": "声音",
+    "id": "PD_sound",
+    "steps": [
+      {
+        "js": "const vis=(e)=>{const r=e.getBoundingClientRect(); const s=getComputedStyle(e); return r.width>1&&r.height>1&&s.visibility!=='hidden'&&s.display!=='none'&&r.top<innerHeight&&r.bottom>0;}; const els=[...document.querySelectorAll('button,a[href],[role=button],summary,[role=tab],label')].filter(vis); const small=[]; for(const e of els){ const r=e.getBoundingClientRect(); const b=getComputedStyle(e,'::before'); let w=r.width,h=r.height; if(b.content!=='none'&&b.position==='absolute'){ const ins=['top','right','bottom','left'].map(k=>parseFloat(b[k])||0); w=Math.max(w,r.width-ins[1]-ins[3]); h=Math.max(h,r.height-ins[0]-ins[2]); } if(Math.min(w,h)<24) small.push((e.innerText||e.title||e.className).toString().replace(/\\s+/g,' ').slice(0,16)+' '+Math.round(w)+'x'+Math.round(h)); } return {n:els.length, under24:small.length, sample:small.slice(0,6)};"
+      }
+    ],
+    "wait": 9000,
+    "path": "/#/sound"
+  },
+  {
+    "title": "设置",
+    "id": "PD_settings",
+    "steps": [
+      {
+        "wait": 3000
+      },
+      {
+        "js": "const vis=(e)=>{const r=e.getBoundingClientRect(); const s=getComputedStyle(e); return r.width>1&&r.height>1&&s.visibility!=='hidden'&&s.display!=='none'&&r.top<innerHeight&&r.bottom>0;}; const els=[...document.querySelectorAll('button,a[href],[role=button],summary,[role=tab],label')].filter(vis); const small=[]; for(const e of els){ const r=e.getBoundingClientRect(); const b=getComputedStyle(e,'::before'); let w=r.width,h=r.height; if(b.content!=='none'&&b.position==='absolute'){ const ins=['top','right','bottom','left'].map(k=>parseFloat(b[k])||0); w=Math.max(w,r.width-ins[1]-ins[3]); h=Math.max(h,r.height-ins[0]-ins[2]); } if(Math.min(w,h)<24) small.push((e.innerText||e.title||e.className).toString().replace(/\\s+/g,' ').slice(0,16)+' '+Math.round(w)+'x'+Math.round(h)); } return {n:els.length, under24:small.length, sample:small.slice(0,6)};"
+      }
+    ],
+    "wait": 9000,
+    "path": "/#/settings"
+  },
+  {
+    "title": "模型",
+    "id": "PD_models",
+    "steps": [
+      {
+        "js": "const vis=(e)=>{const r=e.getBoundingClientRect(); const s=getComputedStyle(e); return r.width>1&&r.height>1&&s.visibility!=='hidden'&&s.display!=='none'&&r.top<innerHeight&&r.bottom>0;}; const els=[...document.querySelectorAll('button,a[href],[role=button],summary,[role=tab],label')].filter(vis); const small=[]; for(const e of els){ const r=e.getBoundingClientRect(); const b=getComputedStyle(e,'::before'); let w=r.width,h=r.height; if(b.content!=='none'&&b.position==='absolute'){ const ins=['top','right','bottom','left'].map(k=>parseFloat(b[k])||0); w=Math.max(w,r.width-ins[1]-ins[3]); h=Math.max(h,r.height-ins[0]-ins[2]); } if(Math.min(w,h)<24) small.push((e.innerText||e.title||e.className).toString().replace(/\\s+/g,' ').slice(0,16)+' '+Math.round(w)+'x'+Math.round(h)); } return {n:els.length, under24:small.length, sample:small.slice(0,6)};"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "wait": 9000,
+    "path": "/#/models"
+  },
+  {
+    "title": "剧本页展开",
+    "id": "PE_script",
+    "steps": [
+      {
+        "js": "const btn=[...document.querySelectorAll('.ns-prod-ep, .ns-prod-ep button, [class*=prod-ep]')].find(e=>e.getBoundingClientRect().width>0); if(!btn) return 'no ns-prod-ep'; const before=btn.getBoundingClientRect(); btn.click(); await new Promise(r=>setTimeout(r,800)); const after=btn.getBoundingClientRect(); return {dx:Math.round(after.x-before.x), dy:Math.round(after.y-before.y)};"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "wait": 9000,
+    "path": "/#/script-create"
+  }
+]

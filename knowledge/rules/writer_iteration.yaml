@@ -1,0 +1,276 @@
+# 写作方规则回写（ITERAUDIT 2026-11-01）。项目方原话：“记得每一次发现bugs,找到solution后,把规则写到系统code去,这样,剧本llm更好去自动改进”。
+# 今晚在出图 / 出片里发现、系统层已修的问题，凡是“剧本 / 分镜本来就该这样写”的，在这里同时给：
+#   writer_text（compile.py → config/recipes/writer_knowledge.md，写作模型 system_parts 里）+ lint（P4 校验规则号，写作链路里是 block，进返修环）。
+# 只讲格式与可实现性，不涉及剧情。
+rules:
+  - id: K-WRT-Q01
+    domain: writer
+    link: P3-P4
+    title: 在画角色本镜造型里的外层衣物（西装外套 / 风衣 / 开衫…）写进 img
+    when: 镜头 img 行；在画角色的本镜造型（造型行 服装=）含外层衣物，景别不是大特写
+    then: img 写出外层衣物品名（穿着 / 敞开 / 脱下搭在手臂上都写明）；不写 = 出图丢外层（ep01 S1–S5 首帧没有西装外套，系统事后补丁）
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: 在画角色的造型里有外层衣物（西装外套、风衣、大衣、开衫、披肩等）时，img 里写出这件外层的品名和状态（穿着 / 敞开 / 脱下搭在手臂上）；外层不写进 img，出图会把它丢掉。
+    lint: [QW-W1]
+    check: [tools/qa/writer_lints.py, tests/test_writer_lints.py]
+    evidence:
+      - {src: knowledge/RSI_LEDGER.md V14, quote: "S1–S5 的 img 行没写外套 → 首帧丢单品"}
+      - {src: data/pipeline/runs/series10_v1/ep01/P4_ep01.md, note: 造型 A 含短款西装外套}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-WRT-Q02
+    domain: writer
+    link: P3-P4
+    title: 人物行写“局部”的角色，img 不写他的脸 / 五官 / 头发
+    when: 镜头 **人物** 行有角色标“局部”（只入画手 / 背 / 肩等部位）
+    then: img 只写入画的部位；要写脸或头发，就把人物行改成“在画”（系统据此挂身份脸参考、按身份阈值质检）
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: 人物行标“局部”的角色，img 只写入画的部位（手、背、肩），不写他的脸、五官、头发；脸或头发要入画，就在人物行写“在画”。
+    lint: [QW-CH6]
+    check: [tools/validate_qwen_script.py, tests/test_partial_face_described.py]
+    evidence:
+      - {src: knowledge/rules/gen_contract.yaml K-AST-236, note: "总调度 11-01 决定 1（ep03-S6）：cast=局部但 img 写到脸 / 头发"}
+      - {src: tests/test_partial_face_described.py}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-WRT-Q03
+    domain: writer
+    link: P3-P4
+    title: 分拍里至少写一个看得见的身体动作，不能每拍都是“保持 / 定住”
+    when: 时长 ≥3 秒的镜头的 **分拍**
+    then: 至少一拍写看得见的身体动作（抬手、转头、视线移向某物、呼吸起伏、起身）；全是保持 / 定住 / 静止的镜头出片会静止（ep01-S2 四个 seed 动作量 0.34–0.44 < 0.5）
+    targets: [{kind: writer_prompt, section: 分拍与动作}]
+    writer_text: 每镜分拍里至少有一拍写看得见的身体动作（抬手、转头、视线移向某物、胸口起伏、起身）；“保持 / 定住 / 静止 / 凝固”不算动作，整镜都这样写会出成静止画面。
+    lint: [QW-W2]
+    check: [tools/qa/writer_lints.py, tests/test_writer_lints.py]
+    evidence:
+      - {src: docs/series10_video/ep01_review.md, note: "ep01-S2 固定机位微表演 4 个 seed mean 0.34–0.44（门槛 0.5）"}
+      - {src: knowledge/rules/render_video_s10.yaml K-REN-302, note: 系统层最低动作提示是兜底，写作方先写出动作}
+    confidence: medium
+    status: 确认
+    date: 2026-11-01
+  - id: K-WRT-Q04
+    domain: writer
+    link: P3-P4
+    title: 只有 🎙（没有台词）的镜，在画说话人嘴是闭着的
+    when: 镜头有 🎙 独白、没有对白，独白说话人在画
+    then: 分拍 / motion 不写开口、张嘴、说话、嘴唇动；**嘴型** 写 <角色>=闭合；H3 里 </d> 后紧跟 lips remain completely closed
+    targets: [{kind: writer_prompt, section: 声音}]
+    writer_text: 只有 🎙 独白、没有台词的镜头，说话人在画时嘴是闭着的：分拍和 motion 不写开口、张嘴、说话、嘴唇动，**嘴型** 写 <角色名>=闭合。
+    lint: [QW-W3, H3-D5]
+    check: [tools/qa/writer_lints.py, tests/test_writer_lints.py]
+    evidence:
+      - {src: knowledge/rules/prompt.yaml, note: "画外音官方写法 + lips completely closed 紧跟 </d>"}
+      - {src: knowledge/rules/render_video_s10.yaml, note: V7 口型检测只测画内对白；独白镜嘴动只能靠写法避免}
+    confidence: medium
+    status: 确认
+    date: 2026-11-01
+  - id: K-WRT-Q05
+    domain: writer
+    link: P3-P4
+    title: 下装写明具体品类和长度，不用“西装裙 / 套裙 / 职业裙”
+    when: 造型行 服装= 与镜头 img 写下装
+    then: 写铅笔裙 / 包臀裙 / A字裙 / 百褶裙 / 直筒西裤 / 阔腿裤等具体品类（加长度：及膝 / 过膝 / 短款）；“西装裙”会被出图模型画成西裤（ep01 设定图是深灰铅笔裙，首帧出成黑长裤）
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: 下装写具体品类和长度（铅笔裙、包臀裙、A字裙、百褶裙、直筒西裤、阔腿裤；及膝 / 过膝 / 短款），不写“西装裙 / 套裙 / 职业裙”这类泛称——出图会把“西装裙”画成西裤。
+    lint: [QW-W4]
+    check: [tools/qa/writer_lints.py, tests/test_writer_lints.py]
+    evidence:
+      - {src: knowledge/RSI_LEDGER.md V14, quote: "设定图是灰短外套 + 深灰铅笔裙"}
+      - {src: data/pipeline/runs/series10_v1/ep01/P4_ep01.md, note: 造型 A 服装写“深灰西装裙”}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-WRT-Q06
+    domain: writer
+    link: P3-P4
+    title: 接力镜“承：动作｜<动作>”要在本镜 img 或第一拍接上同一个动作 / 物件
+    when: 衔接行写“接力｜承：动作｜…”
+    then: 本镜 img 或分拍第一拍写出被承接的那个动作 / 物件（同一只手、同一件物件、同一个姿势），否则相邻两镜动作断开
+    targets: [{kind: writer_prompt, section: 分拍与动作}]
+    writer_text: 衔接写“接力｜承：动作｜<动作>”时，本镜 img 或分拍第一拍要写出被承接的同一个动作或物件（例如上一镜“指尖停在耳侧”，本镜第一拍从指尖在耳侧开始）。
+    lint: [QW-W5]
+    check: [tools/qa/writer_lints.py, tests/test_writer_lints.py, tools/qa/defect_hunt.py]
+    evidence:
+      - {src: docs/rsi/DEFECT_HUNT.md, note: "DH-S17 首轮 9 镜：ep01-S5、ep02-S3、ep02-S8、ep03-S3、ep03-S5 等承接动作在下一镜没写"}
+    confidence: medium
+    status: 建议
+    date: 2026-11-01
+  # ---- ACTING 11-01（项目方 R11-2 / R11-3 / R11-6 / R11-8 / R11-9；出处与原文 docs/acting/PERFORMANCE_RULES.md）
+  - id: K-WRT-A01
+    domain: writer
+    link: P3-P4
+    title: 每一拍写视线落点（看谁 / 看什么），不空着、不写“前方 / 远处”
+    when: 有在画角色的镜头的分拍行
+    then: 每拍 视线= 写画内的人（名字或部位）、物件，或画外有名有姓的声源；视线变化写成动作（从 A 移到 B）。没有落点，出图 / 出片默认对着镜头（项目方 R11-2、R11-8）
+    targets: [{kind: writer_prompt, section: 分拍与动作}, {kind: director_prompt, section: 判定标准}]
+    writer_text: 每一拍的 视线= 都写具体落点——画内的人（名字或部位，如“顾沉的手”）、物件（“汤碗边缘”），或画外有名有姓的声源；视线变化写成动作（“视线从手机移到他脸上”）。不写“看着前方 / 远处 / 虚空”，也不只写方向（“对面 / 画外 / 一旁 / 上方”要写成“对面的陈宇 / 画外门口的顾沉”）；跨镜视线方向保持一致，翻转要写明。
+    director_text: 演员视线没有落点（空看、对着镜头）→ fail，action=reseed，issues 写“视线无落点 / 看镜头（R11-2）”。
+    lint: [QW-A1]
+    check: [tools/qa/acting_lints.py, tests/test_acting_lints.py]
+    evidence:
+      - {src: docs/acting/PERFORMANCE_RULES.md, url: "https://github.com/Ironieser/CineCrew/blob/main/src/agents/technical_director/technical_director.yaml", quote: "t2i_template MUST describe: - Who looks at whom (eyelines)"}
+      - {src: docs/acting/PERFORMANCE_RULES.md, url: "https://github.com/MiniMax-AI/MiniMax-H3/blob/main/skills/h3-prompt-writing/references/base-en.txt", quote: "she lifts her gaze from the folded letter toward the passing city lights"}
+      - {src: data/acting/calib_results.json, note: "现有 72 张首帧中 36 张检测器暂定判疑似看镜头（未标定）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-WRT-A02
+    domain: writer
+    link: P3-P4
+    title: 不写看镜头 / 直视镜头 / 看观众
+    when: 分拍、img、motion、H3 任一处
+    then: 不写“看向镜头 / 直视镜头 / 对着镜头笑 / 视线越过镜头 / 看着观众”，H3 不写 looks into the camera / at the lens / at the viewer；直视镜头是打破第四面墙的手法，本剧不用（项目方 R11-2）
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: 任何字段都不写演员看镜头——不写“看向镜头、直视镜头、对着镜头笑、视线越过镜头、看着观众”，H3 也不写 looks into the camera / at the lens / at the viewer。近景要“看向镜头一侧”时，写成看向画外具体的人（“看向画外左侧的顾沉”）。
+    lint: [QW-A2, RL-E2]
+    check: [tools/qa/acting_lints.py, services/recipes/ns_recipes/lint.py, tests/test_acting_lints.py, tests/test_acting_system.py]
+    evidence:
+      - {src: docs/acting/PERFORMANCE_RULES.md, url: "https://en.wikipedia.org/wiki/Fourth_wall", quote: "usually I have my actors, in a single, look direct into the camera at least once in a film, if a point is to be served."}
+      - {src: data/pipeline/runs/series10_v1/ep08/P4_ep08.md, note: "ep08-S1 img 写“视线越过镜头”"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-WRT-A03
+    domain: writer
+    link: P3-P4
+    title: 节奏：第一拍就在动；每拍 ≤2.5 秒；不连着两拍静止
+    when: 镜头的分拍行
+    then: 第一拍（0 秒起）的动作已经在进行（首帧是动作发生前一刹那，视频从第 0 帧起就动）；每拍 1.5–2.5 秒、一拍一个主动作；不连着两拍写保持 / 定住 / 一动不动（项目方 R11-2“剧情镜头还是很慢”、R11-8“停顿 1 秒多”）
+    targets: [{kind: writer_prompt, section: 时长与节奏}]
+    writer_text: 镜头一开始动作就已经在进行——第一拍（0 秒起）写一个正在发生的动作（“她把杯子推过去”），不写先定住再开始；每拍 1.5–2.5 秒，一拍一个主动作，次要动作稍后跟上；不连着两拍写“保持 / 定住 / 一动不动”。对白镜一般 2–6 秒，晚进早出。
+    lint: [QW-A3]
+    check: [tools/qa/acting_lints.py, tests/test_acting_lints.py]
+    evidence:
+      - {src: docs/acting/PERFORMANCE_RULES.md, url: "https://github.com/Ironieser/CineCrew/blob/main/src/agents/technical_director/technical_director.yaml", quote: "Describe the scene at the SPLIT SECOND BEFORE the main action occurs."}
+      - {src: docs/acting/PERFORMANCE_RULES.md, url: "https://github.com/MiniMax-AI/MiniMax-H3/blob/main/skills/minimalist-product-ad-generator/SKILL.md", quote: "Keep one main action per beat; secondary layers appear with slight delay."}
+      - {src: data/acting/calib_results.json, note: "现有片段首秒定格（从第 0 帧起静止 ≥0.5 s）检出若干，暂定阈值"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-WRT-A04
+    domain: writer
+    link: P3-P4
+    title: 每一拍写具体表情（面部动作），不写空词
+    when: 有在画角色的镜头的分拍行
+    then: 每拍 表情= 写眉、眼睑、嘴角、下颌、呼吸的具体变化，情绪相邻拍连续过渡；台词语气（音高、语速、腔调）写在 <d> 外（项目方 R11-6）
+    targets: [{kind: writer_prompt, section: 分拍与动作}, {kind: writer_prompt, section: 声音}]
+    writer_text: 每一拍的 表情= 写看得见的面部动作（眉梢压低、眼睑垂下、嘴角牵起、下颌绷紧、呼吸一滞），用可演的动词，不写“情绪复杂 / 很激动 / 很有张力”；相邻拍的情绪连续变化、不跳；台词的语气（音高、语速、腔调）写在对白括号或 H3 的 <d> 外面。
+    lint: [QW-A4]
+    check: [tools/qa/acting_lints.py, tests/test_acting_lints.py]
+    evidence:
+      - {src: docs/acting/PERFORMANCE_RULES.md, url: "https://github.com/Ironieser/CineCrew/blob/main/src/agents/vo_director/emotion_inference.yaml", quote: "Use descriptive cinematic labels (e.g., 'restrained rage', 'melancholic hope', 'cold determination')."}
+      - {src: docs/acting/PERFORMANCE_RULES.md, url: "https://www.backstage.com/magazine/article/4-ways-to-act-with-your-eyes-in-a-close-up-65653/", quote: "with just the smallest amount of tension, the lifting or relaxing of your eyelids can speak volumes to the viewer."}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-WRT-A05
+    domain: writer
+    link: P3-P4
+    title: 多人镜里每个在画的人都写视线和表情（反应= 写“名字：视线 + 表情”；H3 每人一句）
+    when: 人物行 ≥2 人“在画”
+    then: 每拍除主角外，每个在画的人在 反应= 里写“名字：视线落点 + 表情”（多人用；分隔）；H3 正文按官方多人写法，每个在画的人各一句，主语是这个人，跟视线和表情（项目方 R11-9）
+    targets: [{kind: writer_prompt, section: 分拍与动作}, {kind: writer_prompt, section: H3 正文}, {kind: director_prompt, section: 判定标准}]
+    writer_text: 画面里有两个及以上在画的人时，每一拍除了主角，其他每个人都在 反应= 里写“名字：视线落点 + 表情”（例：反应=顾沉：视线落在她手上，下颌绷紧；三人时用“；”接着写下一个人）；H3 正文里每个在画的人各写一句，主语是这个人，写他看向谁 / 什么和脸上的变化（例：“He glances at her hand, his jaw tightening.”）。
+    director_text: 多人镜里有在画的人没有视线或表情（脸空、眼神空）→ fail，action=reseed，issues 写“第二人无表情 / 视线（R11-9）”。
+    lint: [QW-A5, RL-E1]
+    check: [tools/qa/acting_lints.py, services/recipes/ns_recipes/lint.py, tests/test_acting_lints.py, tests/test_acting_system.py]
+    evidence:
+      - {src: docs/acting/PERFORMANCE_RULES.md, url: "https://github.com/MiniMax-AI/MiniMax-H3/blob/main/skills/h3-prompt-writing/references/ref-en.txt", quote: "Her annoyance softens as she looks toward the Samoyed."}
+      - {src: docs/acting/PERFORMANCE_RULES.md, url: "https://github.com/Ironieser/CineCrew/blob/main/src/agents/technical_director/technical_director.yaml", quote: "Each visible character's action and reaction to others"}
+      - {src: data/pipeline/runs/series10_v1, note: "series10 现稿 QW-A5 共 103 处（反应只写一个身体动作，没有视线 / 表情）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  # ---- SCRIPT-RSI（总调度 fredw-2b 派，2026-11-01 晚，D-SCR-07）：项目方 18:2x“所有图片不要看镜头，不要看镜头！……你把演员的演戏规则、导演的规则、镜头的规则都做上去，把剧本改一下”
+  - id: K-WRT-A06
+    domain: writer
+    link: P3-P4
+    title: 脸 / 身体朝向不写“正面朝镜头 / 面向镜头 / 正对镜头”，写成朝向画里的人或物
+    when: img、分拍、motion、H3 任一处写人物朝向
+    then: 朝向写相对画里的人或物（“四分之三侧脸朝向顾沉”“身体朝向窗边”），不写正面朝镜头 / 面向镜头 / 正对镜头 / 朝着镜头，H3 不写 facing the camera / toward the camera / front view；“侧面朝向镜头 / 背对镜头”是侧面和背面，不算（项目方 11-01 18:2x“所有图片不要看镜头”）
+    targets: [{kind: writer_prompt, section: 镜头字段}, {kind: director_prompt, section: 判定标准}]
+    writer_text: 写人物朝向时，朝向画里的人或物（“四分之三侧脸朝向顾沉”“身体朝向窗边的灯”），不写“正面朝镜头 / 面向镜头 / 正对镜头 / 朝着镜头”——出图模型会把“正面朝镜头”画成直视镜头；H3 同样不写 facing the camera / toward the camera / front view。
+    director_text: 首帧或印样里在画的人正脸直视镜头（眼睛对着镜头）→ fail，action=reseed，issues 写“看镜头（D-SCR-07）”；第 2 次仍看镜头 → action=owner（回剧本查 img 是否写了朝向镜头 / 没写视线落点）。
+    lint: [QW-A6, RL-E3]
+    check: [tools/qa/acting_lints.py, tests/test_acting_lints.py, services/recipes/ns_recipes/lint.py]
+    evidence:
+      - {src: tools/video_rca/rates.py, note: "VIDEO-RCA：首帧看镜头 → 片头看镜头 49/54（91%）；首帧没看 → 4/10"}
+      - {src: data/script_rsi, note: "series10 现稿 img / motion / H3 写“正面朝镜头 / 面孔正对镜头 / facing the camera”5 处（QW-A6 首扫）"}
+      - {src: docs/video_rca/research_r1.md, note: "Q1：Qwen-Image 会把参考头像的头部角度和视线一起贴上（中）"}
+      - {src: docs/acting/PERFORMANCE_RULES.md, url: "https://en.wikipedia.org/wiki/Fourth_wall", quote: "usually I have my actors, in a single, look direct into the camera at least once in a film, if a point is to be served."}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-WRT-A07
+    domain: writer
+    link: P3-P4
+    title: img（首帧唯一来源）里每个在画的人都写视线落点
+    when: 人物行有“在画”的人的镜头的 img
+    then: img 里每个在画的人各写一句视线落点（看画里的谁或什么）；闭眼、背对写明即可；不写“看着前方 / 远处”。首帧看镜头时片头 91% 看镜头（视频继承首帧视线），所以首帧这句最要紧
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: img 是首帧的唯一来源，每个在画的人都写一句视线落点——看画里的谁或什么（“林晚的视线落在顾沉的手上；顾沉垂眼看着文件”）；闭眼、背对写明即可；不写“看着前方 / 远处”。首帧里谁没写视线，出图就默认让他看镜头，视频会接着看镜头。落点在画外时，img 写方位 + 物（“视线投向画面右侧的门口”），不写画外角色的名字（人物行标画外的人不能出现在 img 和结束状态（motion 里 —— 之后那段），QW-CH4）；分拍 视线= 可以写“画外门口的顾沉”。
+    lint: [QW-A7, QW-CH4]
+    check: [tools/qa/acting_lints.py, tests/test_acting_lints.py]
+    evidence:
+      - {src: tools/video_rca/rates.py, note: "首帧看镜头 → 片头看镜头 49/54；首帧没看 → 4/10（视频继承首帧视线）"}
+      - {src: docs/acting/PERFORMANCE_RULES.md, url: "https://github.com/Ironieser/CineCrew/blob/main/src/agents/technical_director/technical_director.yaml", quote: "t2i_template MUST describe: - Who looks at whom (eyelines)"}
+      - {src: data/script_rsi, note: "series10 现稿 img 里在画的人没写视线 28 处（QW-A7 首扫，多为双人镜的第二个人）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-WRT-A08
+    domain: writer
+    link: P3-P4
+    title: H3 正文第一个时间码之前写出开场时每个在画的人的视线落点
+    when: 有在画的人的镜头的 H3 提示词
+    then: 官方 I2VA 顺序“首帧锚点 → 动作起势 → 连续发展”：第一个 At 时间码之前的首帧锚点句里写清每个在画的人眼睛落在哪里（her eyes resting on …）；单人镜正文也至少一处视线短语。H3 不认否定，只写正向落点
+    targets: [{kind: writer_prompt, section: H3 正文}]
+    writer_text: H3 正文第一个时间码（At 00:0x）之前，写出开场那一刻每个在画的人眼睛落在哪里（例：her eyes resting on the bowl in her hands; his gaze fixed on her hand）；单人镜正文里也至少写一处视线。只写正向落点，不写 not looking at the camera（H3 不认否定）。
+    lint: [QW-A8, RL-E1]
+    check: [tools/qa/acting_lints.py, tests/test_acting_lints.py]
+    evidence:
+      - {src: docs/acting/PERFORMANCE_RULES.md, url: "https://github.com/MiniMax-AI/MiniMax-H3/blob/main/skills/h3-prompt-writing/SKILL.md", quote: "first-frame anchor → action onset → continuous development → result or reaction"}
+      - {src: docs/rsi/DEFECT_HUNT.md, note: "看镜头：首帧 71/100、片头 56/72；剧本侧 DH-S01/S02（写了看镜头）为 0——主要是模型默认行为，靠写出落点压住"}
+      - {src: data/script_rsi, note: "series10 现稿 H3 首帧锚点没写视线 26 处（QW-A8 首扫）"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-01
+  - id: K-WRT-T03
+    domain: writer
+    link: P3-P4
+    title: 返修重切：系统按 QW-T1 上限和 D-SCR-06 镜数上限算出每镜新时长和插镜位置，写作方按数字改写（台词逐字、集总时长不变）
+    when: 现稿有 QW-T1（单镜超过上限）且镜数未到 D-SCR-06 上限；tools/script_rsi/full_repair.py 返修
+    then: 系统只做算术：超长镜让出的秒数按相邻分组凑成 3–6 秒，在组里让出最多的镜后面插一个无台词新镜（内容由写作方定：承接 / 反应 / 局部）；被让出的镜按新时长重排分拍和 H3 时间码；对白 / 🎙 逐字、同顺序，集总时长不变，P4 阻断不增加；装不下的组整组不动并在报告里列出。⤴ 取代 K-WRT-Q07“QW-T1 / T2 只在写初稿时生效、逐镜返修不能改镜数 / 时长”
+    targets: [{kind: writer_prompt, section: 时长与节奏}]
+    writer_text: 返修时系统可能要求你“把镜N 改成 X 秒，并在后面插入一个 Y 秒的新镜”：台词和 🎙 逐字保留在镜N；新镜没有台词，承接镜N 的动作或给在画的人一个反应 / 局部特写，场景和人物沿用镜N；两镜的分拍、motion、H3 时间码都按新时长重写。
+    lint: [QW-T1, QW-E2, QW-E3]
+    check: [tools/script_rsi/full_repair.py, tests/test_script_rsi_full_repair.py]
+    evidence:
+      - {src: docs/REQUIREMENTS.md, note: "R11-2 / R11-3“剧情镜头还是很慢”“通过修改时间轴的提示词”"}
+      - {src: config/owner_decisions.yaml, note: "D-SCR-06：镜数上限 max(8, 轮次 + 独白, ⌈秒数 ÷ 6⌉)"}
+      - {src: tools/qa/writer_lints.py, note: "现稿 QW-T1 37 处；镜数上限只比现镜数多 1–2 镜，所以插镜 + 压时长一起做"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-01
+  # ---- RSI r3（fredw-2b 派，2026-11-01 晚；R11-2 / R11-3 节奏慢）
+  - id: K-WRT-Q07
+    domain: writer
+    link: P3-P4
+    title: 节奏慢的根子在镜长：单镜按台词需要写时长（无台词 ≤6 秒），目标总时长靠加镜凑，不靠拉长单镜
+    when: P4 写各镜 **时长**、定本集镜数时
+    then: 无台词 / 独白的镜 ≤6 秒；有台词的镜 ≤ max(6, 字数 ÷ 4.5 + 1.5) 秒；本集平均镜长 >6.5 秒且镜数未到上限 → 先加镜。QW-T1 / QW-T2 固定 warn（导入关口只提示）；⤴ 返修时由 K-WRT-T03 重切（系统算时长和插镜位置，写作方改写，D-SCR-07）。原冲突（镜数上限 8 × 6 秒 = 48 秒 < 总时长下限 50 秒）已按总调度 11-01 定的 G29 方案 A 解决：镜数上限 = max(8, 轮次 + 独白, ⌈总时长 ÷ 6⌉)（importer shot_cap / writer_prompt.shot_cap / QW-E2，D-SCR-06）；已出片的镜不动
+    targets: [{kind: writer_prompt, section: 时长与节奏}]
+    writer_text: 单镜时长按需要写，不要为了凑总时长把每镜拉长：没有台词或独白的镜写 4–6 秒；有台词的镜，时长 ≈ 台词字数 ÷ 4.5 + 1.5 秒，最少 4 秒，一般不超过 6 秒。总时长不够时加镜（反应镜、局部特写、过渡镜），先把镜数写到上限，再考虑把台词镜放长。
+    lint: [QW-T1, QW-T2]
+    check: [tools/qa/writer_lints.py, tests/test_writer_lints.py, tools/qa/defect_hunt.py]
+    evidence:
+      - {src: data/qa/defect_hunt/state.json, note: "DH-S05：ep03 平均镜长 7.7 秒、ep04 7.6 秒；80 镜 时长 全部来自剧本（duration_source=script），H3 帧数 = h3_lint.frames_for_seconds(时长) 直接换算，系统不改长短"}
+      - {src: data/pipeline/runs/series10_v1/ep01/P3_ep01_screenplay.json, note: "target_duration_s 60（ep02 65）；writer_prompt.py:109 给写作模型“总时长目标 60 ±5、镜数 6–上限”，上限 = importer shot_cap = max(8, 轮次+独白)"}
+      - {src: knowledge/rules/writer_series10.yaml, note: "K-WRT-203 writer_text“其余相应加长，7–9 秒常见”与 K-WRT-005“单镜建议 ≤6 秒”互相矛盾"}
+      - {src: tools/qa/writer_lints.py, note: "现稿 QW-T1 37 处、QW-T2 3 集（ep01 / 03 / 04，7 镜未到上限 8）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01

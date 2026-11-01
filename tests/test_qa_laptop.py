@@ -2,7 +2,7 @@
 
 - 合成用例：锁定已发现的编译器 / 导入器 / Frame Spec 缺陷。未修复的用 xfail(strict=True) 标出 QA 编号，
   修好后会变成 XPASS → 失败，提醒把 xfail 去掉（让它变成普通回归测试）。
-- 真实剧本用例（data/import/script_v2.json 存在时）：60 集 × 6 镜、每镜 img/motion/sound、未成年人护栏、
+- 真实剧本用例（默认现行 series10_v1 data/import/script_v2.json，10 集；NS_QA_GOLDEN=1 用旧 60 集夹具）：每集镜号连续、每镜 img/motion/sound、未成年人护栏、
   风格后缀、禁用词、成人判定一致。
 - 渲染数据完整性（data/renders）：其它 agent 渲染时文件会并发变化，默认跳过；设 NS_QA_DATA=1 运行。
 """
@@ -21,9 +21,12 @@ from ns_agent.importer import script_md as IM
 from ns_schema.script import CharacterLock, Episode, LoraTrigger, ScriptGlobals, ScriptImport, Shot
 
 ROOT = Path(__file__).resolve().parent.parent
-# 默认用固定测试剧本（t06 金标准同一份）；NS_QA_DATA=1 时检查真实导入数据 data/import/script_v2.json
-SCRIPT_JSON = (ROOT / "data" / "import" / "script_v2.json" if os.environ.get("NS_QA_DATA") == "1" else
-               ROOT / "tests" / "fixtures" / "t06_golden" / "data" / "import" / "script_v2.json")
+# ITERAUDIT 11-01（总调度：断言 60 集旧数据的改成 series10）：默认检查现行剧本 series10_v1（data/import/script_v2.json，10 集，
+# 只读）；NS_QA_GOLDEN=1 时用旧的 60 集金标准夹具（t06_golden，编译器改了成人判定后 ep40-S2 已与夹具不一致，夹具不再代表现行剧本）
+_REAL_SCRIPT = ROOT / "data" / "import" / "script_v2.json"
+_GOLDEN_SCRIPT = ROOT / "tests" / "fixtures" / "t06_golden" / "data" / "import" / "script_v2.json"
+SCRIPT_JSON = _GOLDEN_SCRIPT if os.environ.get("NS_QA_GOLDEN") == "1" or not _REAL_SCRIPT.exists() else _REAL_SCRIPT
+SCRIPT_EPISODES = 60 if SCRIPT_JSON == _GOLDEN_SCRIPT else 10   # series10_v1 = 10 集
 RENDERS = ROOT / "data" / "renders"
 VB = tomllib.loads((ROOT / "config" / "visual_bible.toml").read_text(encoding="utf-8"))
 BANNED = VB["realism"]["banned_words"]
@@ -124,7 +127,7 @@ def _shots(script):
 
 
 def test_real_script_shape(script):
-    assert len(script.episodes) == 60
+    assert len(script.episodes) == SCRIPT_EPISODES
     # v2 每集 6 镜；新剧本（如 rules_v2 的 ep01 七镜）镜数可变：只要求镜号从 1 连续
     bad = [f"ep{e.number:02d}:{[s.index for s in e.shots]}" for e in script.episodes
            if not e.shots or [s.index for s in e.shots] != list(range(1, len(e.shots) + 1))]

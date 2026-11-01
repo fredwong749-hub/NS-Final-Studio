@@ -1,0 +1,44 @@
+[
+  {"id": "T1_new_script", "title": "新建剧本", "path": "/#ep02", "steps": [
+    {"click": "新建剧本"}, {"shot": "a"}, {"probe": "a"}]},
+  {"id": "T2_read_10ep", "title": "看 10 集", "path": "/#ep02", "steps": [
+    {"click": "新建剧本"}, {"click": "漆皮之下"}, {"click": "故障电梯"}, {"shot": "a"}, {"probe": "a"},
+    {"js": "window.scrollTo(0, 1400); return document.body.innerText.length"}, {"shot": "b"}]},
+  {"id": "T3_pick_sheet", "title": "挑设定图", "path": "/#ep02", "steps": [
+    {"click": ["待挑图", "资产"]}, {"shot": "a"}, {"click": "挑设定图"}, {"shot": "b"}, {"probe": "b"},
+    {"click": "选这张"}, {"shot": "c"}, {"probe": "c"},
+    {"js": "const i=[...document.querySelectorAll('img')].find(x=>x.getBoundingClientRect().width>60); if(!i) return 'noimg'; i.click(); return i.src.slice(-60)"}, {"shot": "d"}, {"probe": "d"}]},
+  {"id": "T4_first_frame", "title": "看首帧", "path": "/#ep02", "steps": [
+    {"js": "const i=document.querySelector('img'); i.scrollIntoView(); const r=i.getBoundingClientRect(); return [r.width, r.height]"},
+    {"click": "首帧"}, {"shot": "a"}, {"probe": "a"}, {"key": "Escape"},
+    {"js": "const i=[...document.querySelectorAll('img')].find(x=>x.getBoundingClientRect().width>40); i.dispatchEvent(new MouseEvent('dblclick',{bubbles:true})); return 'dbl'"}, {"shot": "b"}, {"probe": "b"}]},
+  {"id": "T5_make_video", "title": "出视频", "path": "/#ep02", "steps": [
+    {"click": "精修"}, {"shot": "a"}, {"probe": "a"}, {"click": ["出视频", "生成视频", "视频"]}, {"shot": "b"}, {"probe": "b"}]},
+  {"id": "T6_review_reject", "title": "审片打回", "path": "/#ep02", "steps": [
+    {"click": "=审片"}, {"click": "视频"}, {"shot": "a"}, {"probe": "a"}, {"click": ["打回", "不通过", "退回"]}, {"shot": "b"}, {"probe": "b"}]},
+  {"id": "T7_cut_compare", "title": "成片对比", "path": "/#ep02", "steps": [
+    {"click": "成片"}, {"shot": "a"}, {"probe": "a"}, {"click": "显示旧剧本"}, {"click": "两版对比"}, {"shot": "b"}, {"probe": "b"}]},
+  {"id": "T8_voice_listen", "title": "试听并更换旁白音色", "path": "/#ep02", "steps": [
+    {"click": "=资产"}, {"click": "声音"}, {"shot": "a"}, {"probe": "a"}, {"click": ["试听", "播放", "旁白"]}, {"shot": "b"}, {"probe": "b"},
+    {"click": "提议修改"}, {"shot": "c"}, {"probe": "c"}]},
+  {"id": "T9_upload_shoes", "title": "上传一双鞋并挂到造型", "path": "/#ep02", "steps": [
+    {"click": "=资产"}, {"click": "衣橱"}, {"shot": "a"}, {"probe": "a"}, {"click": ["上传", "新增", "＋", "新建"]}, {"shot": "b"}, {"probe": "b"},
+    {"key": "Escape"}, {"click": "形象"}, {"click": "林晚"}, {"shot": "c"}, {"probe": "c"}]},
+  {"id": "T10_delete_script", "title": "删掉一个旧剧本", "path": "/#ep02", "steps": [
+    {"click": "新建剧本"}, {"click": "以前的稿子"}, {"shot": "a"}, {"probe": "a"}, {"click": ["删除", "移到回收站", "🗑"]}, {"shot": "b"}, {"probe": "b"}]},
+  {"id": "O_character", "title": "角色详情", "path": "/#/assets?type=character", "steps": [
+    {"click": "林晚"}, {"shot": "a"}, {"probe": "a"}, {"js": "window.scrollTo(0,900);document.querySelector('.v3-page')?.scrollTo?.(0,900);return 1"}, {"shot": "b"}]},
+  {"id": "O_look", "title": "造型", "path": "/#/assets?type=look", "steps": [{"shot": "a"}, {"click": "林晚"}, {"shot": "b"}, {"probe": "b"}]},
+  {"id": "O_item", "title": "单品", "path": "/#/assets?type=item", "steps": [{"click": "蓝发"}, {"shot": "a"}, {"probe": "a"}]},
+  {"id": "O_scene", "title": "场景", "path": "/#/assets?type=scene", "steps": [{"shot": "a"}, {"click": "电梯"}, {"shot": "b"}, {"probe": "b"}]},
+  {"id": "O_preset", "title": "出图预设", "path": "/#/assets?type=preset", "steps": [{"shot": "a"}, {"probe": "a"}]},
+  {"id": "O_vbase", "title": "视频配方", "path": "/#/assets?type=vbase", "steps": [{"shot": "a"}, {"probe": "a"}]},
+  {"id": "O_lora", "title": "LoRA", "path": "/#/assets?type=loras", "steps": [{"shot": "a"}, {"probe": "a"}]},
+  {"id": "O_template", "title": "提示词模板", "path": "/#/assets?type=template", "steps": [{"shot": "a"}, {"probe": "a"}]},
+  {"id": "O_bgm", "title": "配乐 BGM", "path": "/#ep02", "steps": [{"click": "本集配乐"}, {"shot": "a"}, {"probe": "a"}]},
+  {"id": "O_shot_detail", "title": "镜头详情/提示词", "path": "/#ep02", "steps": [{"click": "分镜详情"}, {"shot": "a"}, {"probe": "a"}, {"key": "Escape"}, {"click": "首帧提示词"}, {"shot": "b"}, {"probe": "b"}]},
+  {"id": "O_more_menu", "title": "镜头 … 菜单", "path": "/#ep02", "steps": [{"click": "=…"}, {"shot": "a"}, {"probe": "a"}]},
+  {"id": "O_tools_menu", "title": "工具菜单", "path": "/#ep02", "steps": [{"click": "工具"}, {"shot": "a"}, {"probe": "a"}]},
+  {"id": "O_light", "title": "浅色主题 · 资产音色", "path": "/#/assets?type=voice", "theme": "light", "steps": [{"shot": "a"}]},
+  {"id": "O_narrow", "title": "1280 画布", "path": "/#ep02", "size": [1280, 800], "steps": [{"shot": "a"}]}
+]

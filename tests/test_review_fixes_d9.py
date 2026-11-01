@@ -60,7 +60,21 @@ def _plan(store, ep, char="lin_wan"):
 
 # ------------------------------------------------------------------ H1 造型确认只能由 CLI 写、内容变了作废
 
-def test_h1_http_put_routes_strip_owner_confirmation(store):
+def _clear_real_confirmations(proj, eps, char="lin_wan"):
+    """G23（CODE-RSI 11-01）：fixture 复制的是真实 data/looks，真实排期里 ep04/05 已有项目方确认（range PUT 内容不变时
+    正确保留）。本测试要证明“HTTP 写入口不接受伪造确认”，先把这几集的真实确认清掉，起点与真实数据无关。只改临时副本。"""
+    f = proj / "data" / "looks" / "schedule.json"
+    d = json.loads(f.read_text(encoding="utf-8"))
+    for e in eps:
+        plan = (d.get("episodes") or {}).get(str(e), {}).get(char)
+        if isinstance(plan, dict):
+            for k in ("owner_confirmed_at", "owner_confirmed_ref", "owner_confirmed_hash"):
+                plan[k] = None
+    f.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def test_h1_http_put_routes_strip_owner_confirmation(proj, store):
+    _clear_real_confirmations(proj, (3, 4, 5, 6))
     api.put_episode_look(3, "lin_wan", LookPatch(notes=["x"], **OWNER), store)
     p = _plan(store, 3)
     assert p.owner_confirmed_at is None and p.owner_confirmed_ref is None and p.owner_confirmed_hash is None

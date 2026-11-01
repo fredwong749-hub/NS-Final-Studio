@@ -1,0 +1,94 @@
+[
+  {
+    "size": [
+      1440,
+      900
+    ],
+    "steps": [
+      {
+        "click": "精修",
+        "after": 5000
+      },
+      {
+        "click": "版本",
+        "after": 1500
+      },
+      {
+        "js": "const c=document.querySelector('.v3e-ver .v3e-chain'); const s=c?getComputedStyle(c):null; return c?{maxH:s.maxHeight, ov:s.overflowY, h:Math.round(c.getBoundingClientRect().height)}:'no chain'"
+      },
+      {
+        "y": 0.6,
+        "scroll": "ver",
+        "x": 0.88
+      }
+    ],
+    "wait": 8000,
+    "title": "精修版本",
+    "id": "H_ver_900",
+    "path": "/#ep02-S1"
+  },
+  {
+    "size": [
+      1440,
+      900
+    ],
+    "steps": [
+      {
+        "js": "const p=[...document.querySelectorAll('button')].find(b=>/暂停/.test(b.innerText)); const n=document.querySelector('nav.sf-steps'); if(!p) return {pause:'none', stickyH:n?Math.round(n.getBoundingClientRect().height):null}; p.scrollIntoView({block:'center'}); const r=p.getBoundingClientRect(); const h=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2); return {pauseHit:p.contains(h), stickyH:n?Math.round(n.getBoundingClientRect().height):null}"
+      },
+      {
+        "scroll": "main"
+      }
+    ],
+    "wait": 9000,
+    "title": "剧本页",
+    "id": "H_script_900",
+    "path": "/#/script-create"
+  },
+  {
+    "size": [
+      1280,
+      720
+    ],
+    "steps": [
+      {
+        "click": "精修",
+        "after": 5000
+      },
+      {
+        "click": "版本",
+        "after": 1500
+      },
+      {
+        "js": "const c=document.querySelector('.v3e-ver .v3e-chain'); const s=c?getComputedStyle(c):null; return c?{maxH:s.maxHeight, ov:s.overflowY, h:Math.round(c.getBoundingClientRect().height)}:'no chain'"
+      },
+      {
+        "y": 0.6,
+        "scroll": "ver",
+        "x": 0.88
+      }
+    ],
+    "wait": 8000,
+    "title": "精修版本",
+    "id": "H_ver_720",
+    "path": "/#ep02-S1"
+  },
+  {
+    "size": [
+      1280,
+      720
+    ],
+    "steps": [
+      {
+        "js": "const p=[...document.querySelectorAll('button')].find(b=>/暂停/.test(b.innerText)); const n=document.querySelector('nav.sf-steps'); if(!p) return {pause:'none', stickyH:n?Math.round(n.getBoundingClientRect().height):null}; p.scrollIntoView({block:'center'}); const r=p.getBoundingClientRect(); const h=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2); return {pauseHit:p.contains(h), stickyH:n?Math.round(n.getBoundingClientRect().height):null}"
+      },
+      {
+        "scroll": "main"
+      }
+    ],
+    "wait": 9000,
+    "title": "剧本页",
+    "id": "H_script_720",
+    "path": "/#/script-create"
+  }
+]

@@ -44,6 +44,8 @@ from ns_schema import h3_lint as L  # noqa: E402
 _spec = importlib.util.spec_from_file_location("validate_qwen_script", ROOT / "tools" / "validate_qwen_script.py")
 V = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(V)
+if hasattr(V, "WL"):
+    V.WL.WRITER_LINT_LEVEL = "block"   # ITERAUDIT 11-01：返修环里 QW-W1–W4 当阻断，写作方自己改
 
 DEFAULT_IN = ROOT / "data" / "staging_v3" / "为他而骚 （剧本和镜头）v3.md"
 SYSTEM_PROMPT = ROOT / "config" / "qwen_writer_system_prompt.txt"
@@ -212,6 +214,15 @@ class Checker:
                 shot_issues[k].append(i)
             else:
                 head_issues.append(i)
+        # --force-shot（PRODUCER 11-01）：校验没标出、但契约方判定的同类格式冲突，按单镜发返修请求；该镜原文改过即视为已处理
+        for k, (idx, a, b, _raw) in enumerate(seg["shots"]):
+            key = (ep_no, idx)
+            if key in FORCE and k < len(shot_issues):
+                blk = "".join(seg["lines"][a:b])
+                ORIG.setdefault(key, blk)
+                if blk == ORIG[key]:
+                    code, detail = FORCE[key]
+                    shot_issues[k].append({"rule_id": code, "level": "warn", "detail": detail, "field": "img"})
         return {"ep": ep_rep, "obj": ep_obj, "shot_issues": shot_issues, "head_issues": head_issues,
                 "seg": seg}
 
@@ -220,13 +231,22 @@ def score(issues: list[dict]) -> tuple[int, int]:
     return (sum(i["level"] == "block" for i in issues), sum(i["level"] != "block" for i in issues))
 
 
+FORCE: dict = {}           # (集, 镜) → (规则号, 说明)：--force-shot ep03-S1=QW-SZ1:说明
+ORIG: dict = {}
+ONLY_CODES: set = set()     # --only-codes（PRODUCER 11-01）：只返修这些规则号，别的问题不发给写作方、不算“要返修”
+
+
+def only(issues: list[dict]) -> list[dict]:
+    return [i for i in issues if i.get("rule_id") in ONLY_CODES] if ONLY_CODES else issues
+
+
 def failing(issues: list[dict], fix_warn: bool) -> bool:
-    b, w = score(issues)
+    b, w = score(only(issues))
     return bool(b or (fix_warn and w))
 
 
 def head_fixable(issues: list[dict]) -> list[dict]:
-    return [i for i in issues if i["level"] == "block" and i["rule_id"] in HEAD_RULES and "写在了镜" not in i["detail"]]
+    return only([i for i in issues if i["level"] == "block" and i["rule_id"] in HEAD_RULES and "写在了镜" not in i["detail"]])
 
 
 # ------------------------------------------------------------------ 不变量：镜号 / 对白逐字 / 🎙 / 时长
@@ -453,6 +473,11 @@ class Repairer:
         (self.rdir / "requests").mkdir(parents=True, exist_ok=True)
         self.state_path = self.rdir / "state.json"
         self.system = SYSTEM_PROMPT.read_text(encoding="utf-8")
+        # ITERAUDIT 11-01：返修也带系统知识包（config/recipes/writer_knowledge.md，compile.py 生成，含 QW-W* 对应写法），
+        # 和 script_chat / run_chain P3-P4 的 system_parts 一致；返修消息里的规则号在这里能查到怎么写
+        wk = ROOT / "config" / "recipes" / "writer_knowledge.md"
+        if wk.exists():
+            self.system += "\n\n========\n\n" + wk.read_text(encoding="utf-8")
         self.ask = ask
         self.names = [n.strip() for n in (a.names or "").split(",") if n.strip()]
 
@@ -594,7 +619,7 @@ class Repairer:
             if not failing(cur_issues, a.fix_warn):
                 break
             unit["rounds"] = rnd
-            req = V.repair_request(ep_no, idx, cur_issues)
+            req = V.repair_request(ep_no, idx, only(cur_issues))
             raw, dt = self._qwen(uid, rnd, shot_user_msg(ep_no, idx, head, cur_block, req, note))
             unit["qwen_seconds"].append(round(dt, 1))
             cand, err = parse_shot_reply(raw, idx)
@@ -752,6 +777,8 @@ def build_args(argv=None):
     ap.add_argument("--dry-run", action="store_true", help="只校验并列出要返修的单元，不调 Qwen、不写文件")
     ap.add_argument("--resume", action="store_true", help="从输出文件和 state.json 续跑")
     ap.add_argument("--fix-warn", action="store_true", help="warn 级问题也返修")
+    ap.add_argument("--only-codes", default="", help="只返修这些规则号（逗号分隔，如 QW-CH6）；其余问题不动")
+    ap.add_argument("--force-shot", action="append", default=[], help="单镜返修：epNN-SK=规则号:说明（校验没标出、契约方判定的同类格式冲突）")
     ap.add_argument("--think", action="store_true", help="让 Qwen 先思考（更慢）；默认关闭")
     ap.add_argument("--temperature", type=float, default=0.3)
     ap.add_argument("--timeout", type=int, default=600)
@@ -766,6 +793,12 @@ def build_args(argv=None):
     ap.add_argument("--repair-dir", help="state/回复目录（默认 <输出目录>/repair）")
     ap.add_argument("--names", default="", help="H3 里禁止出现的人名，逗号分隔（传给校验器）")
     a = ap.parse_args(argv)
+    ONLY_CODES.update(x.strip() for x in (a.only_codes or "").split(",") if x.strip())
+    for fs in a.force_shot:
+        sid, _, rest = fs.partition("=")
+        code, _, detail = rest.partition(":")
+        e_, s_ = sid.lower().replace("ep", "").split("-s")
+        FORCE[(int(e_), int(s_))] = (code.strip(), detail.strip())
     src = Path(a.script)
     if not a.out:
         stem = src.stem

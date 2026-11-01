@@ -1,0 +1,187 @@
+[
+  {
+    "id": "M3_shot_900",
+    "size": [
+      1440,
+      900
+    ],
+    "title": "精修 900",
+    "wait": 8000,
+    "path": "/#ep02-S1",
+    "steps": [
+      {
+        "click": "精修",
+        "after": 4000
+      },
+      {
+        "js": "for (let i=0;i<120;i++){ if (!/正在读取/.test(document.body.innerText) && /首帧/.test(document.body.innerText)) return 'ok '+i; await new Promise(r=>setTimeout(r,500)); } return 'timeout'"
+      },
+      {
+        "js": "const t=document.body.innerText; const vis=(re)=>[...document.querySelectorAll('button,summary,div,span,h3,h4')].some(e=>re.test((e.innerText||'').trim()) && (e.innerText||'').length<60 && e.getBoundingClientRect().top>=0 && e.getBoundingClientRect().bottom<=innerHeight && e.getBoundingClientRect().width>0); return {F05_fullscreen_abovefold:vis(/全屏看首尾帧/), F09_videoPrompt_abovefold:vis(/视频提示词（完整）/), F11_negSeed_abovefold:vis(/负面词/) && /种子/.test(t), F31_refs:/将使用的参考图/.test(t)};"
+      },
+      {
+        "shot": "a"
+      },
+      {
+        "x": 0.88,
+        "scroll": "right",
+        "y": 0.5
+      },
+      {
+        "x": 0.45,
+        "scroll": "main",
+        "y": 0.6
+      }
+    ]
+  },
+  {
+    "id": "M3_shot_720",
+    "size": [
+      1280,
+      720
+    ],
+    "title": "精修 720",
+    "wait": 8000,
+    "path": "/#ep02-S1",
+    "steps": [
+      {
+        "click": "精修",
+        "after": 4000
+      },
+      {
+        "js": "for (let i=0;i<120;i++){ if (!/正在读取/.test(document.body.innerText) && /首帧/.test(document.body.innerText)) return 'ok '+i; await new Promise(r=>setTimeout(r,500)); } return 'timeout'"
+      },
+      {
+        "js": "const t=document.body.innerText; const vis=(re)=>[...document.querySelectorAll('button,summary,div,span,h3,h4')].some(e=>re.test((e.innerText||'').trim()) && (e.innerText||'').length<60 && e.getBoundingClientRect().top>=0 && e.getBoundingClientRect().bottom<=innerHeight && e.getBoundingClientRect().width>0); return {F05_fullscreen_abovefold:vis(/全屏看首尾帧/), F09_videoPrompt_abovefold:vis(/视频提示词（完整）/), F11_negSeed_abovefold:vis(/负面词/) && /种子/.test(t), F31_refs:/将使用的参考图/.test(t)};"
+      },
+      {
+        "shot": "a"
+      },
+      {
+        "x": 0.88,
+        "scroll": "right",
+        "y": 0.5
+      },
+      {
+        "x": 0.45,
+        "scroll": "main",
+        "y": 0.6
+      }
+    ]
+  },
+  {
+    "id": "M3_trash",
+    "size": [
+      1440,
+      900
+    ],
+    "title": "精修 🗑 焦点",
+    "wait": 8000,
+    "path": "/#ep02-S1",
+    "steps": [
+      {
+        "click": "精修",
+        "after": 4000
+      },
+      {
+        "js": "for (let i=0;i<120;i++){ if (!/正在读取/.test(document.body.innerText)) break; await new Promise(r=>setTimeout(r,500)); } return 1"
+      },
+      {
+        "within": ".v3e-stage, .v3e",
+        "click": "🗑",
+        "after": 2000
+      },
+      {
+        "tabtrap": ".ds-modal",
+        "n": 4
+      }
+    ]
+  },
+  {
+    "id": "M3_edit",
+    "size": [
+      1440,
+      900
+    ],
+    "title": "精修 ✎ 改 焦点",
+    "wait": 8000,
+    "path": "/#ep02-S1",
+    "steps": [
+      {
+        "click": "精修",
+        "after": 4000
+      },
+      {
+        "js": "for (let i=0;i<120;i++){ if (!/正在读取/.test(document.body.innerText)) break; await new Promise(r=>setTimeout(r,500)); } return 1"
+      },
+      {
+        "within": ".v3e",
+        "click": "✎ 改",
+        "after": 2000
+      },
+      {
+        "tabtrap": ".ds-drawer",
+        "n": 4
+      }
+    ]
+  },
+  {
+    "id": "M3_reject",
+    "size": [
+      1440,
+      900
+    ],
+    "title": "✗ 不要 小框",
+    "wait": 8000,
+    "path": "/#ep02-S1",
+    "steps": [
+      {
+        "click": "精修",
+        "after": 4000
+      },
+      {
+        "js": "for (let i=0;i<120;i++){ if (!/正在读取/.test(document.body.innerText)) break; await new Promise(r=>setTimeout(r,500)); } return 1"
+      },
+      {
+        "after": 1500,
+        "click": "✗ 不要"
+      },
+      {
+        "js": "const p=document.querySelector('[role=dialog], .v3-pop, .ds-pop'); return p? (p.className+' | '+p.innerText.slice(0,60)) : 'none'"
+      },
+      {
+        "tabtrap": "[role=dialog], .v3-pop, .ds-pop",
+        "n": 4
+      }
+    ]
+  },
+  {
+    "id": "M3_rules",
+    "size": [
+      1440,
+      900
+    ],
+    "title": "规则页签用语",
+    "wait": 8000,
+    "path": "/#ep02-S1",
+    "steps": [
+      {
+        "click": "精修",
+        "after": 4000
+      },
+      {
+        "js": "for (let i=0;i<120;i++){ if (!/正在读取/.test(document.body.innerText)) break; await new Promise(r=>setTimeout(r,500)); } return 1"
+      },
+      {
+        "after": 2000,
+        "click": "规则"
+      },
+      {
+        "js": "const t=document.body.innerText; const i=t.indexOf('需要你处理'); const seg=i>=0?t.slice(i,i+600):''; return {found:i>=0, internal:(seg.match(/G3|采纳|须为 ?0|校验器|K-[A-Z]+-\\d+/g)||[])};"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  }
+]

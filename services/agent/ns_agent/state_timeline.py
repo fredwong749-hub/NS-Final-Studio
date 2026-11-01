@@ -126,7 +126,7 @@ def shot_transition(text: str) -> str:
     return m.group(1) if m else ""
 
 
-GU_CHEN_SIDE = {"gu_chen", "alex", "ryan", "kai", "leo"}
+GU_CHEN_SIDE = {"gu_chen"}   # RECALL 2026-11-01：旧 60 集 Alex/Ryan/Kai/Leo 已撤下
 
 
 def _owner_hint(chars: set[str]) -> str | None:

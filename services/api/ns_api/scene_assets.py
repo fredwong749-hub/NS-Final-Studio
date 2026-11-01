@@ -87,10 +87,23 @@ def usage(store: LookStore | None = None) -> dict[str, list[str]]:
     hit = _USAGE.get(id(res.script))
     if hit and hit[0] is res.script:
         return hit[1]
-    from ns_api.ref_switch import scene_map
+    # DATAALIGN（K-UI-D01）：与出图同源——剧本本镜 **场景**（shot.scene_id，unified_frame / asset_refs.scene_ref 用的就是它）；
+    # 剧本没写场景的镜才退回 ref_switch.scene_map 推断（旧 Resolver 人物分组）
     out: dict[str, list[str]] = {}
-    for shot_id, sid in scene_map(res).items():
-        out.setdefault(sid, []).append(shot_id)
+    missing = False
+    for ep in res.script.episodes:
+        for sh in ep.shots:
+            sid = getattr(sh, "scene_id", None)
+            if sid:
+                out.setdefault(sid, []).append(sh.id)
+            else:
+                missing = True
+    if missing:
+        from ns_api.ref_switch import scene_map
+        have = {x for v in out.values() for x in v}
+        for shot_id, sid in scene_map(res).items():
+            if shot_id not in have:
+                out.setdefault(sid, []).append(shot_id)
     _USAGE.clear()
     _USAGE[id(res.script)] = (res.script, out)
     return out
@@ -168,6 +181,43 @@ def variants(scene_id: str) -> list[dict]:
     return out
 
 
+def space_refs(scene_id: str) -> list[dict]:
+    """登记为“取空间”（role=space）的场景参考图，最新在前（IMGGEN 用 POST /api/assets/<sid>/refs 登记的暂定底图在这里）"""
+    from ns_api import asset_edit as AE
+    out = []
+    for r in reversed(AE._read("asset_refs").get(scene_id, []) or []):
+        if isinstance(r, dict) and r.get("role") == "space" and not r.get("void") and r.get("file") and (root() / r["file"]).is_file():
+            out.append({"file": r["file"], "url": A.file_url(r["file"]), "ref_id": r.get("ref_id"), "source": "ref",
+                        "note": r.get("note") or "", "at": r.get("created_at")})
+    return out
+
+
+def run_candidates(scene_id: str) -> list[dict]:
+    """出图线（IMGGEN）在 runs/<剧>/images/scenes/<sid>/ 出的底图候选（*_post.png 优先；没登记也列出来，选定时再登记）"""
+    out = []
+    runs = P.DATA / "pipeline" / "runs"
+    for d in sorted(runs.glob(f"*/images/scenes/{scene_id}"), key=lambda x: -x.stat().st_mtime) if runs.is_dir() else []:
+        files = sorted(d.glob("*_post.png")) or sorted(f for f in d.glob("*.png") if not f.stem.endswith("_raw"))
+        for f in files:
+            rel = "data/" + f.relative_to(P.DATA).as_posix()
+            out.append({"file": rel, "url": f"/files/{f.relative_to(P.DATA).as_posix()}?v={int(f.stat().st_mtime)}",
+                        "source": "run", "note": f.stem, "sha256": SP.sha_file(f)})
+        break
+    return out
+
+
+def plate_candidates(scene_id: str) -> list[dict]:
+    """场景卡 / 详情里“底图候选”：登记的 space 参考 + 出图线候选（按内容去重），标出哪张是现在显示的"""
+    seen, out = set(), []
+    for c in space_refs(scene_id) + run_candidates(scene_id):
+        sha = c.get("sha256") or SP.sha_file(root() / c["file"]) if (root() / c["file"]).is_file() else None
+        if sha in seen:
+            continue
+        seen.add(sha)
+        out.append({**c, "sha256": sha})
+    return out
+
+
 def plate_view(scene_id: str) -> dict:
     g = _gate(scene_id)
     lock = SP.lock_record(root(), scene_id)
@@ -175,7 +225,17 @@ def plate_view(scene_id: str) -> dict:
     label = {"owner_confirmed": "项目方已确认", "missing": "没有底图"}.get(status) or \
         ("画布已定稿（待项目方确认）" if lock else "候选（未定稿）")
     cur = current_plate(scene_id)
-    return {"file": cur, "url": A.file_url(cur), "plate_status": status, "status_label": label,
+    if not cur:
+        # 数据对不上（11-01）：IMGGEN 把暂定底图登记成 role=space 参考，没走“定稿”，场景卡一直写“没有底图”。
+        # 没有定稿底图时，显示最新的 space 参考（标“暂定”，不冒充定稿，S2 闸门照旧看 gate_status）。
+        sp = space_refs(scene_id)
+        if sp:
+            return {"file": sp[0]["file"], "url": sp[0]["url"], "plate_status": "candidate", "gate_status": status,
+                    "status_label": "暂定底图（参考图，未定稿）", "provisional": True, "locked": False, "locked_by": None,
+                    "locked_at": None, "version": None, "sha256": None, "owner_confirmed_at": g["owner_confirmed_at"],
+                    "s2_gate_ok": False}
+    return {"file": cur, "url": A.file_url(cur), "plate_status": status, "status_label": label, "gate_status": status,
+            "provisional": False,
             "locked": bool(lock), "locked_by": (lock or {}).get("by"), "locked_at": (lock or {}).get("at"),
             "version": (lock or {}).get("version"), "sha256": g["plate_sha256"],
             "owner_confirmed_at": g["owner_confirmed_at"], "s2_gate_ok": status == "owner_confirmed"}
@@ -191,6 +251,7 @@ def scene_card(scene_id: str, store: LookStore, use: dict[str, list[str]]) -> di
     vers = AE._read("asset_versions").get(scene_id, [])
     return {"scene_id": scene_id, "asset_id": scene_id, "kind": "scene", "name": scene_name(scene_id, store),
             "description": describe(scene_id, store), "plate": plate_view(scene_id), "variants": variants(scene_id),
+            "plate_candidates": plate_candidates(scene_id),
             "episodes": _episodes(shots), "episode_count": len(_episodes(shots)), "shot_count": len(shots),
             "versions": len(vers), "refs": len(AE._read("asset_refs").get(scene_id, []))}
 
@@ -357,6 +418,38 @@ def lock_plate(scene_id: str, body: PlateLockBody, store: LookStore = Depends(ge
     return {"scene_id": scene_id, "variant": variant, "plate_id": f"{scene_id}/{dest.name}",
             "file": dest.relative_to(root()).as_posix(), "url": A.file_url(dest.relative_to(root()).as_posix()),
             "plate": plate_view(scene_id), "stale_shots": stale, "stale_reason": SP.STALE_REASON if stale else None}
+
+
+class PlatePickBody(BaseModel):
+    file: str
+
+
+@router.post("/api/assets/scenes/{scene_id}/plate-pick")
+def pick_plate(scene_id: str, body: PlatePickBody, store: LookStore = Depends(get_store)):
+    """点一下设为当前底图（ASSETUX 11-01）：file 必须是这个场景的底图候选（space 参考 / 出图线候选 / 已有版本）。
+    已有版本直接定稿；候选先存成底图新版本再定稿。by=canvas（画布定稿），S2 项目方确认照旧另走。返回 prev_version 供撤销。"""
+    from ns_api import asset_edit as AE
+    if not scene_exists(scene_id, store):
+        raise HTTPException(404, f"没有这个场景：{scene_id}")
+    prev = (SP.lock_record(root(), scene_id) or {}).get("version")
+    vers = AE._read("asset_versions").get(scene_id, [])
+    rec = next((v for v in vers if v.get("file") == body.file), None)
+    if rec is None:
+        if body.file not in {c["file"] for c in plate_candidates(scene_id)}:
+            raise HTTPException(422, "这张图不是这个场景的底图候选")
+        src = root() / body.file
+        if not src.is_file():
+            raise HTTPException(404, f"文件不在：{body.file}")
+        with AE._lock:
+            allv = AE._read("asset_versions")
+            lst = allv.setdefault(scene_id, [])
+            v = 1 + max((int(x.get("version") or 0) for x in lst), default=0)
+            rec = {"asset_id": scene_id, "version": v, "file": body.file, "variant": SP.MAIN, "label": "从底图候选选定",
+                   "origin": {"pick": body.file}, "created_at": SP.now()}
+            lst.append(rec)
+            AE._write("asset_versions", allv)
+    out = lock_plate(scene_id, PlateLockBody(version=int(rec["version"]), by="canvas"), store)
+    return {**out, "prev_version": prev}
 
 
 @router.delete("/api/assets/scenes/{scene_id}/plate")

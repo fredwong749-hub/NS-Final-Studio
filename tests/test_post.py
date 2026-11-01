@@ -49,7 +49,7 @@ def test_resolve_named_he_action_continuation_and_alternation():
     assert got == [
         ("S1#0", "gu_chen"), ("S1#1", "lin_wan"), ("S1#2", "gu_chen"), ("S1#3", "gu_chen"),
         ("S2#0", "lin_wan"), ("S2#1", "lin_wan"), ("S2#2", "chen_yu"), ("S2#3", "lin_wan"), ("S2#4", "chen_yu"),
-        ("S2#vo", "lin_wan"),
+        ("S2#vo", "narrator"),  # VOICE 2026-10-31：项目方选定 QAg 旁白音色，voiceover_speaker = narrator
         ("S3#0", "chen_yu"),
         ("S4#0", "lin_wan"), ("S4#1", "chen_yu"),  # 他 → last male of the episode
     ]
@@ -68,12 +68,18 @@ def test_resolve_overrides_and_every_script_speaker_has_a_voice():
 
 def test_voice_config_is_fixed_and_distinct():
     cfg = load_voice_config()
-    sids = [c["sid"] for c in cfg["characters"].values()]
+    sids = [c["sid"] for c in cfg["characters"].values() if "sid" in c]  # narrator 走克隆引擎，没有 Kokoro sid
     assert len(sids) == len(set(sids))
     lw = voice_for(cfg, "lin_wan")[0]
-    assert lw.sid == cfg["characters"]["lin_wan"]["sid"] and lw.speed < 1.0  # slow per the 声音规则
-    assert voice_for(cfg, "lin_wan", voiceover=True)[0].speed <= lw.speed
-    assert len(voice_for(cfg, "chorus_men")) == 4
+    # 项目方 2026-10-31 原话“改成正常节奏”：林晚 TTS 语速 0.9 / 独白 0.86 → 1.0（原断言“放慢”已作废）
+    assert lw.speed == 1.0 and voice_for(cfg, "lin_wan", voiceover=True)[0].speed == 1.0
+    # VOICE10 2026-11-01 原话“音色问题,采取qad类似模型给林晚,和其他男人的,我来不及筛选”：series10 人物全走 QAg 同法克隆音色
+    assert cfg.get("series") == "series10_v1"
+    for cid in ("lin_wan", "gu_chen", "chen_yu", "ch_a_lan"):
+        v = voice_for(cfg, cid)[0]
+        assert v.engine == "cosyvoice3_zs" and v.name.startswith(f"{cid}_cand/"), cid
+        assert cfg["characters"][cid]["series"] == "series10_v1"
+    assert voice_for(cfg, "narrator")[0].name == "narrator_qag"
 
 
 # ---------------- timeline ----------------
@@ -101,7 +107,8 @@ def test_dialogue_too_long_is_sped_up_then_cut():
 
 def test_voiceover_spans_shot_boundary_and_moves_next_dialogue():
     vo, d2 = _p("voiceover", 1, 10.0), _p("dialogue", 2, 3.0)
-    _, tail, warns = plan_timeline([10, 10], [vo, d2])
+    # 旧行为（overflow_policy="spill"）：独白跨镜、挪后下一镜对白。默认 fail 见 tests/test_fix_ep02_assemble.py
+    _, tail, warns = plan_timeline([10, 10], [vo, d2], Settings(overflow_policy="spill"))
     assert vo.end_s > 10.0  # spans into S2
     assert d2.start_s >= vo.end_s + 0.2 - 1e-6 and d2.end_s <= 20.0
     assert any("into S2" in w for w in warns) and any("moved" in w for w in warns)
@@ -109,7 +116,7 @@ def test_voiceover_spans_shot_boundary_and_moves_next_dialogue():
 
 def test_voiceover_past_episode_end_holds_last_frame():
     vo = _p("voiceover", 1, 12.0)
-    _, tail, warns = plan_timeline([10], [vo])
+    _, tail, warns = plan_timeline([10], [vo], Settings(overflow_policy="spill"))
     assert vo.end_s + 0.6 - 10 <= tail < vo.end_s + 0.6 - 10 + 1 / 24 + 1e-9
     assert (tail * 24) == pytest.approx(round(tail * 24)) and any("held" in w for w in warns)
 
@@ -206,13 +213,16 @@ def synthetic(tmp_path):
                "ultrafast", "-pix_fmt", "yuv420p", str(g / "S1" / "takes" / "video_002_4k.mp4")])
     (g / "S1" / "takes.json").write_text(json.dumps({"takes": [
         {"n": 2, "stage": "video", "file": "renders_gpu3/ep99/S1/takes/video_002.mp4"}],
-        "active": {"video": 2}}), encoding="utf-8")
+        "active": {"video": 2}, "locked": {"video": 2}}), encoding="utf-8")   # FIX P0 ①：成片只用定稿版本
     # S2: no video anywhere → placeholder still from the laptop's first frame
     _make(ff, ["-f", "lavfi", "-i", "color=c=blue:s=1080x1920", "-frames:v", "1",
                str(data / "renders" / "ep99" / "S2" / "frame.png")])
     # S3: a clip without audio + gpu3 stems
     _make(ff, ["-f", "lavfi", "-i", "testsrc=s=768x1344:r=24:d=2", "-c:v", "libx264", "-preset", "ultrafast",
                "-pix_fmt", "yuv420p", str(g / "S3" / "video.mp4")])
+    (g / "S3" / "takes.json").write_text(json.dumps({"takes": [   # FIX P0 ①：定稿 + 运动质检 pass
+        {"n": 1, "stage": "video", "file": "renders_gpu3/ep99/S3/video.mp4", "qc": {"motion": {"verdict": "pass"}}}],
+        "active": {"video": 1}, "locked": {"video": 1}}), encoding="utf-8")
     (g / "S3" / "audio").mkdir()
     for name, f in (("h3_vocals", 300), ("h3_rest", 80), ("foley", 1000)):
         _make(ff, ["-f", "lavfi", "-i", f"sine=f={f}:r=48000:d=3", "-ac", "2", str(g / "S3" / "audio" / f"{name}.wav")])
@@ -237,7 +247,9 @@ def test_assemble_episode_end_to_end(synthetic):
     ff, data, episode, tmp = synthetic
     out = tmp / "episodes"
     tl = assemble_episode(episode, out, tts=FakeTts(), asr=FakeAsr(), ff=ff, data=data,
-                          cache_dir=tmp / "cache" / "tts", settings=Settings(preset="ultrafast", deliver_4k="auto"),
+                          cache_dir=tmp / "cache" / "tts",
+                          # 剪定住段另测（tests/test_fix_ep02_assemble.py）；这里断言“视频时长 = 源片时长”
+                          settings=Settings(preset="ultrafast", deliver_4k="auto", trim_frozen=False, pace_tighten=False),
                           log=lambda *_: None)
     # S2 是占位静帧 → 只能是预览：不叫 final、没有 epXX 别名
     mp4 = out / "ep99_PREVIEW_未完成.mp4"
@@ -263,12 +275,15 @@ def test_assemble_episode_end_to_end(synthetic):
     assert {s["name"] for s in tl["shots"][2]["stems"]} == {"h3_vocals", "h3_rest", "foley"}
     assert tl["bgm"]["used"] and tl["bgm"]["looped"] and [c["action"] for c in tl["bgm"]["cues"]] == ["enter", "swell"]
     sp = tl["speech"]
-    assert [x["speaker"] for x in sp] == ["gu_chen", "lin_wan", "lin_wan", "chen_yu"]
+    assert [x["speaker"] for x in sp] == ["gu_chen", "lin_wan", "narrator", "chen_yu"]  # VOICE 2026-10-31：独白 = narrator
     for x in sp:
         if x["kind"] == "dialogue":
             shot = tl["shots"][x["shot"] - 1]
             assert shot["start_s"] <= x["start_s"] and x["end_s"] <= shot["start_s"] + shot["duration_s"] + 1e-6
-    assert any("placeholder" in w for w in tl["warnings"])
+    # FIX P0 ①：S2 没有任何视频版本 → 缺镜（占位静帧），时间线标缺、合成判不通过
+    assert any("缺镜" in w and w.startswith("S2") for w in tl["warnings"])
+    assert [m["shot"] for m in tl["gates"]["missing_shots"]] == ["S2"] and tl["gates"]["verdict"] == "fail"
+    assert tl["shots"][1]["missing"] is True and tl["shots"][0]["take"]["n"] == 2
     # 4K delivery: S1 from its 4K clip, the others upscaled
     k4 = tl["deliveries"]["4k"]
     assert k4["size"] == [2160, 3840] and k4["frames"] == tl["frames"]

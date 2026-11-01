@@ -1,0 +1,310 @@
+# 剪辑 / 合成 / 声音（P9 声音、P10 剪辑）。render_quality 目标只读校验（该文件由 FIX 维护）。
+rules:
+  - id: K-EDT-001
+    domain: edit
+    link: P8-P9
+    title: 对白默认用 H3 原声（嘴型同步），TTS 只做独白和回听不合格的兜底
+    when: 合成
+    then: dialogue_source = h3
+    targets:
+      - {kind: render_quality, path: post.dialogue_source.default, value: h3}
+    evidence:
+      - {src: docs/ep02_iter/LEARNED_SPECS.md §B 对白来源, quote: "TTS 版…偏差约 2.5 s"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-EDT-002
+    domain: edit
+    link: P8-P9
+    title: 整集一条 BGM，H3 自带配乐压到对白下
+    when: 合成
+    then: h3_music = duck_under_bgm；不逐镜生成 BGM
+    targets:
+      - {kind: render_quality, path: post.h3_music.default, value: duck_under_bgm}
+    evidence:
+      - {src: docs/ep02_iter/refactor_proposal.md §7.3, quote: "不要逐镜生成 BGM"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-EDT-003
+    domain: edit
+    link: P9-P10
+    title: 自动剪掉开头 / 结尾定住段
+    when: 镜头开头或结尾帧差 <0.35 连续 ≥0.3 s
+    then: 剪掉，单镜最少留 1.5 s
+    targets:
+      - {kind: recipe, id: _base, path: post.trim_frozen.diff, value: 0.35}
+      - {kind: recipe, id: _base, path: post.trim_frozen.min_run_s, value: 0.3}
+      - {kind: recipe, id: _base, path: post.trim_frozen.min_keep_s, value: 1.5}
+    evidence:
+      - {src: docs/ep02_iter/LEARNED_SPECS.md §C 自动剪定住段, quote: "v0 10/11 镜结尾定住 0.67–6.5 s"}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-EDT-004
+    domain: edit
+    link: P9-P10
+    title: 平均每刀 ≤4.5 s，单镜 >6 s 拆刀（同素材 1.15× 推近）
+    when: 剪辑节奏
+    then: 平均每刀 ≤4.5 s（及格 ≤5 s）；单镜上限 6 s
+    targets:
+      - {kind: recipe, id: long_take, path: guidance.max_shot_s_suggest, value: 6}
+      - {kind: recipe, id: long_take, path: guidance.cut_split_zoom, value: 1.15}
+    evidence:
+      - {src: docs/ep02_iter/LEARNED_SPECS.md §C 平均每刀, quote: "v0 平均 7.81 s"}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-EDT-005
+    check: [tests/test_fix_ep02_assemble.py]   # RSI 11-01 补引用（docs/rsi/UNCHECKED_AUDIT.md）
+    domain: edit
+    link: P9-P10
+    title: 切点音频跳变 ≤10 dB、无数字静音、边缘淡化 0.12 s
+    when: 每个切点
+    then: 100 ms 窗口跳变 ≤10 dB；不允许低于 −60 dBFS；edge_fade 0.05→0.12
+    evidence:
+      - {src: docs/ep02_iter/LEARNED_SPECS.md §C 切点音频, quote: "S10→S11 −53 dB（−86 dBFS）"}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-EDT-006
+    check: [tests/test_fix_ep02_assemble.py]   # RSI 11-01 补引用（docs/rsi/UNCHECKED_AUDIT.md）
+    domain: edit
+    link: P9-P10
+    title: 独白 / 对白溢出到后面镜头 → 判不通过
+    when: 合成时间线 warnings 出现 voiceover runs / overlaps
+    then: 该镜 needs_writer（Loop 收版时自动处理）
+    evidence:
+      - {src: docs/ep02_iter/LEARNED_SPECS.md §C 独白溢出, quote: "现在只是 warning"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-EDT-007
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: edit
+    link: P11-P12
+    title: 整集 −14 LUFS ±1，真峰值 ≤−1 dBTP
+    when: 成片
+    then: 响度归一
+    evidence:
+      - {src: docs/ep02_iter/LEARNED_SPECS.md §C 整集响度, quote: "−14.0 / −14.2、TP −1.4 / −1.3，合格"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-EDT-008
+    domain: edit
+    link: P9-P10
+    title: 去抖输出必须 bt709 矩阵并带标记；成片分段统一 bt709
+    when: dejudder / 合成编码
+    then: 显式 out_color_matrix=bt709 + colorspace 标记；不插帧到 30/60 交付
+    targets:
+      - {kind: recipe, id: _base, path: post.dejudder_encode, value: bt709}
+    evidence:
+      - {src: docs/ep02_iter/LEARNED_SPECS.md §B dejudder 色彩, quote: "脸颊 a*p95 −1.7"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-EDT-009
+    check: [tests/test_iterate_loop.py, tools/qa/defect_hunt.py]   # RSI 11-01 补引用（docs/rsi/UNCHECKED_AUDIT.md）
+    domain: edit
+    link: P9-P10
+    title: 合成只取 QC 通过 / 定稿的版本，时间线记 take 和 plan_hash
+    when: 合成
+    then: iterate_loop 写 sources timeline（每镜 plan_hash），不混用新旧素材
+    evidence:
+      - {src: docs/ep02_iter/refactor_proposal.md §7.3, quote: "不能悄悄混用新旧素材"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-EDT-010
+    domain: edit
+    link: P9-P10
+    title: 节奏收紧——单镜 ≤4.5 s 拆刀，对白前空档 ≤0.3 s，句后 0.5 s，无对白镜 ≤4 s 取运动量最大段，每镜至少 3 s
+    when: 合成
+    then: "post.edit_rules max_shot_s 4.5、pace_tighten true（ns_post.assemble.pace_trims）；目标整集比 v1 短 20–30%"
+    targets:
+      - {kind: render_quality, path: post.edit_rules.max_shot_s, value: 4.5}
+      - {kind: render_quality, path: post.edit_rules.pace_tighten, value: true}
+      - {kind: render_quality, path: post.edit_rules.pace_lead_s, value: 0.3}
+    evidence:
+      - {src: config/render_quality.json post.edit_rules.learned_from（项目方看 v1 原话，总调度转述 2026-10-31）, quote: "节奏有点慢，慢溜溜的……整个片子里的节奏很慢，画面也很慢，很不 smooth"}
+      - {src: data/ab/v2_iter/pace_test/ep02.timeline.json, quote: "v1 同一批 take 试合成 81.4 s → 52.5 s（尾留 0.4 s、无每镜下限，偏狠 → 加 3 s 下限、尾留 0.5 s）"}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-EDT-011
+    domain: edit
+    link: P9-P10
+    title: 切点 J-cut——下一镜原声提前 0.3 s 淡入（上一镜结尾 0.3 s 内有话时不做）
+    when: 合成切点
+    then: post.edit_rules.jl_cut_s = 0.3
+    targets:
+      - {kind: render_quality, path: post.edit_rules.jl_cut_s, value: 0.3}
+    evidence:
+      - {src: config/render_quality.json post.edit_rules.learned_from（项目方看 v1 原话，总调度转述 2026-10-31）, quote: "镜头 1 和镜头 2 之间的 transition 非常生硬，不连贯"}
+    confidence: medium
+    status: 待验
+    date: 2026-10-31
+  - id: K-EDT-012
+    domain: edit
+    link: [P4-P9]
+    title: 内心独白可选；ep02 去掉 S8 / S11 独白（画面 + 环境声 + 配乐承载）；写独白时 ≤10 字且读完不超过镜长
+    when: 合成 / 写作
+    then: "post.voiceover_drop.per_episode {\"2\": [8, 11]}；独白溢出仍判不通过"
+    targets:
+      - {kind: render_quality, path: post.voiceover_drop.per_episode.2, value: [8, 11]}
+    evidence:
+      - {src: config/render_quality.json post.voiceover_drop.src（项目方决定，总调度转述 2026-10-31）, quote: "选项 \"A. 去掉\""}
+      - {src: data/episodes/ep02_v1.timeline.json gates.overflow, quote: "S8 独白溢出 13.89 s"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-EDT-013
+    domain: edit
+    link: [P4-P9]
+    title: 旁白 / 独白默认说话人 = narrator（QAg 深夜电台·温柔，项目方选定）；角色对白音色见 K-EDT-016（series10 cosyvoice3 候选，L-078 系统自动选；⤴ 原“对白兜底仍用 Kokoro”已被取代，CLEANUP 11-01）
+    when: 合成任一集的 🎙 旁白 / 内心独白
+    then: config/voices.json voiceover_speaker = narrator（ns_post.speakers 读配置，不再写死 lin_wan）；narrator = Qwen3-TTS VoiceDesign 文字设计的合成声（不克隆真人），参考音频固定在 data/assets/voices/narrator_qag/；换音色仍属项目方闸门
+    director_text: 旁白听感应为二十多岁、温暖的电台主播式女声；听到旧的 Kokoro 林晚音色读旁白，记到 P4-P9
+    targets:
+      - {kind: director_prompt, section: 判定标准}
+    evidence:
+      - {src: config/voices.json characters.narrator.owner_decision, quote: "oag音色；QAg（深夜电台·温柔）；采取"}
+      - {src: data/review_pages/narrator_pick/index.html, note: 两轮挑选页（第一轮 Kokoro 16 条、第二轮 Qwen3/CosyVoice3 17 条）}
+      - {src: docs/ep02_iter/writer_requests.md W6, quote: 旁白的声音一定要更加年轻}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+    supersedes: K-EDT-I02
+  - id: K-EDT-014
+    check: [tests/test_narrator_voice.py, tests/test_voice10_s10.py]   # RSI 11-01 补引用（docs/rsi/UNCHECKED_AUDIT.md）
+    domain: edit
+    link: [P4-P9]
+    title: 设计出来的音色要先固定成一段参考音频（sha256 锁定），之后每句都零样本复刻；不要每句重新按描述设计
+    when: 用“音色设计”（文字描述）类 TTS 给系列剧配固定声线
+    then: 参考 8–15 s、剧本已有旁白原文；复刻用 Fun-CosyVoice3 zero-shot（实测说话人相似度 0.951–0.957，均值 0.954）；Qwen3-TTS-Base 克隆均值 0.934 作备选；每句重新 VoiceDesign 只有 0.73，同一描述换语气也只有 0.75；缓存键带参考 sha，换参考自动重合成
+    evidence:
+      - {src: data/assets/voices/narrator_qag/voice.json consistency_test, note: CAM++ 余弦，3 句剧本旁白原文}
+      - {src: data/assets/voices/narrator_qag/voice.json pipeline_verify, note: ep01-S7 经管线合成：相似度 0.954、CER 0.057、−15.9 LUFS}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-EDT-015
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: edit
+    link: [P4-P9]
+    title: 旁白克隆引擎的运行要点：gpu36 venv_tts 远程批处理、CosyVoice3 配 transformers 4.51.3、只错峰用 GPU2
+    when: RemoteCloneBackend 合成旁白（ns_post.tts，services/post/ns_post/remote/）
+    then: CosyVoice3 运行时 PYTHONPATH 指向 venv_tts/cosy_overlay（transformers 4.51.3；用 4.57.3 出乱码，ASR 回听全错）；instruct2 只认官方内置指令（common.py instruct_list），自由描述的语气指令会失控（0.56 s 或 30 s）；按字数判时长不合理就换种子；只在 GPU2 已用 <13.5 GB 且本卡锁空闲时用 GPU，否则 CPU（GPU0/1 是 H3 出片道）；远端失败直接报错，不悄悄退回旧音色
+    evidence:
+      - {src: data/review_pages/narrator_pick/_tools/r2/cosy_log.json, note: 第二轮 CosyVoice3 产出与重试种子}
+      - {src: config/voices.json remote_tts, note: "gpus = 2、max_used_mb 13500（PLANB 同意的并存条件）"}
+      - {src: tests/test_narrator_voice.py, note: mock 后端测路由、上传、缓存、失败报错}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-EDT-016
+    check: [tests/test_voice10_s10.py]   # RSI 11-01 补引用（docs/rsi/UNCHECKED_AUDIT.md）
+    domain: edit
+    link: [P4-P9]
+    title: series10 角色音色只来自 <char>_cand，选定写 voices.json
+    when: 给 series10（data/pipeline/runs/series10_v1）有台词的人物配对白音色、或在声音页（#/sound 角色音色·旁白）换音色
+    then: 候选只来自 data/assets/voices/<char_id>_cand/<cN>/（tools/voice10/voice10.py：Qwen3-TTS VoiceDesign 按 P1 gender/age/voice_phrase 原样拼成的描述设计 ref.wav → Fun-CosyVoice3 zero-shot 念该人物 P3 最长两句 → sample.wav；自动检查 SenseVoice CER ≤0.2、f0 在性别范围、HNR ≥3 dB、时长 >1.5 s、不削波，过了才列出）；不给这些人列 Kokoro 附近音色；项目方 2026-11-01 原话“音色问题,采取qad类似模型给林晚,和其他男人的,我来不及筛选”→ voice10.py autopick 按 CER 最低 → 削波最少 → 复刻音高最贴近 ref 自动选一个（界面标“按检查自动选”，其余候选留着）；之后项目方点“用 B”经 POST /api/voices/{cid}/pick 换（与 autopick 同一 apply_pick 写入路径）写 config/voices.json 这一个人物（series=series10_v1）（engine=cosyvoice3_zs、asset/ref_wav/ref_sha256 指向该候选，改前整份备份、10 秒可撤销、auth 中间件记审计）；A 必须是现在配置的音色念同样两句、时长由后端量
+    director_text: series10 成片里对白听到的是旧 60 集 Kokoro 音色（林晚 zf_067、顾沉 zm_029、陈宇 zm_050），而 voices.json 已写了候选 → 记到 P4-P9
+    evidence:
+      - {src: tools/voice10/voice10.py, note: 生成 + 自动检查（checks 写进每个候选 meta.json）}
+      - {src: services/api/ns_api/voice_preview.py, note: "GET /api/voices/s10、POST /api/voices/{cid}/pick、/api/voices/pick-undo/{undo_id}"}
+      - {src: apps/web/src/v3/assets/VoiceStudio.tsx, note: S10Row（待你挑 / 已选、A/B、用 B、撤销）}
+      - {src: data/pipeline/runs/series10_v1/P1_storyline.json, note: "characters[].voice_phrase（写作模型原文，不改写）"}
+      - {src: data/pipeline/runs/series10_v1/owner_decisions.json, quote: "我来不及筛选"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-EDT-017
+    check: [tests/test_voice10_s10.py]   # RSI 11-01 补引用（docs/rsi/UNCHECKED_AUDIT.md）
+    domain: edit
+    link: [P4-P9]
+    title: ASR 回听算字错率前先把数字写法统一成中文读法（9→九、12%→百分之十二、两→二）
+    when: 用 SenseVoice 等 ASR 回听配音 / 对白算 CER（ns_post.tts.char_error_rate，配音候选检查、成片对白闸门）
+    then: char_error_rate 先过 canon_numerals：阿拉伯数字（含全角）转中文读法、% 转“百分之”、两→二，再比；只影响 CER 比对，normalize 本身不变（h3_dialogue 按字数对齐时间不受影响）；真错字照样算
+    evidence:
+      - {src: services/post/ns_post/tts.py, note: "canon_numerals / _int_zh / char_error_rate"}
+      - {src: data/assets/voices/lin_wan_cand/c1/meta.json, note: "改前 4 个林晚候选 CER 都是 0.182（ASR 写成“9个点…12%”），改后 0.0"}
+      - {src: tests/test_voice10_s10.py, note: test_cer_canonicalises_numerals}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-EDT-018
+    check: [tests/test_rsi_rule_checks.py]   # RSI 11-01 补引用（docs/rsi/UNCHECKED_AUDIT.md）
+    domain: edit
+    link: [P4-P9]
+    title: 音色 HNR 要做窗自相关校正（Boersma），否则低音男声被系统性低估
+    when: 用自相关 HNR 给配音候选做自动检查（tools/voice10/voice10.py check）
+    then: 用 hnr_corrected：Hann 窗自相关除以窗自身自相关、窗长 60 ms、音高下限 60 Hz；旁白挑选用的 common.metrics 版本（40 ms、90 Hz、不校正）只作 raw 记录，不作门槛——它把干净的旧 Kokoro zm_029（f0 110 Hz）读成 2.4 dB、顾沉 4 个候选读成 0.7–2.4 dB，校正后 3.1–7.2 dB
+    evidence:
+      - {src: tools/voice10/voice10.py, note: hnr_corrected；meta.json checks.items.hnr_db 同时记 value 与 raw_uncorrected}
+      - {src: data/assets/voices/gu_chen_cand/c4/meta.json, note: "hnr 3.1（raw 0.7）"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-01
+  - id: K-EDT-019
+    check: [tests/test_voice10_fix.py]
+    domain: edit
+    link: [P4-P9]
+    title: 配音缓存按最终 .wav 路径去重：同一集同一角色同一句只合成一次
+    when: ns_post.tts.synthesize_cached 收到一集的全部 (台词, 音色) 请求（合成成片、--tts-only、声音页试听）
+    then: 用已入队的最终路径集合去重（同一 clip_key 只进 todo 一次），不能拿 .wav 和 .tmp.wav 比；否则两个相同请求共用一个 tmp，第一次改名后第二次报“TTS did not write …tmp.wav”，整集合成失败、白耗自动重试
+    director_text: 合成报 TtsError “TTS did not write xxx.tmp.wav”，而 data/cache/tts/xxx.wav 同一时刻已经写出 → 是重复台词去重问题，不是 TTS 坏了 → 记到 P4-P9
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/video/night.log, note: "11-01 16:09:39 assemble ep04 1 … TTS did not write fd441690cd7ba6f9ba1037f4.tmp.wav"}
+      - {src: data/cache/tts/fd441690cd7ba6f9ba1037f4.wav, note: "16:09 已写出（第一份改名成功，第二份找不到 tmp）"}
+      - {src: tools/assemble_episode.py ep04 --lines-only, note: "ep04-S1#0 与 ep04-S2#0 都是陈宇“今天特意早点回来。”"}
+      - {src: tests/test_voice10_fix.py, note: test_duplicate_line_same_voice_synthesized_once}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-EDT-020
+    check: [tests/test_voice10_fix.py, tests/test_post.py]
+    domain: edit
+    link: [P4-P9]
+    title: 说话人解析表只放 voices.json 里有音色的人物；旧剧称呼隔离不参与解析
+    when: 改 services/post/ns_post/speakers.py 的 NAMED / MALES / MALE_NAMES，或换剧 / 加配角
+    then: NAMED 映射到的 id 必须都在 config/voices.json characters 里（MALES 都是 gender=male）；先加音色条目再加称呼；旧 60 集配角称呼（穿孔师 / 纹身师 / 同事 / 店员）放在 LEGACY_60EP_TITLES 隔离（⤴ 被 series10 演员表取代），不删也不被读取
+    director_text: 台词合成报 “no voice for speaker 'piercer'/'clerk'” → speakers.py 还映射着 voices.json 已没有的旧角色 → 记到 P4-P9
+    evidence:
+      - {src: docs/master/MASTER_PICTURE.md, note: "§残留 R3、§4 G9：speakers.py:30-31 仍映射穿孔师 / 纹身师 / 同事 / 店员"}
+      - {src: data/import/script_v2.json, note: "这四个称呼出现 0 次；阿岚 37 次"}
+      - {src: tests/test_voice10_fix.py, note: "test_named_speakers_all_have_voices / test_legacy_60ep_titles_quarantined / test_every_series10_line_resolves_to_a_voice"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-EDT-021
+    check: [tests/test_voice10_fix.py, tests/test_video10_resilience.py]
+    domain: edit
+    link: [P4-P9]
+    title: 合成前一次查完配音前提（解释器、模型目录、每个角色的音色 / 参考音频 / ref_text / 远端模型）
+    when: night.py finalize 合成一集前（tts_missing）、或别的入口要调合成器前
+    then: 调 ns_post.tts.tts_preflight：缺任何一项 → hold_tts（不耗版本号、不耗 3 次自动重试），原因逐项写进 hold_why；齐了才合成。不查网络（gpu36 ssh 断由隧道看门狗管）
+    director_text: 合成在跑到一半才报 TtsUnavailable / 缺参考音频，白耗一次版本号或自动重试 → 前置检查没查全 → 记到 P4-P9
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/video/night.log, note: "11-01 11:11:15 assemble ep04 1 … TtsUnavailable: no speech interpreter（服务器副本）"}
+      - {src: tools/series10_video/night.py, note: tts_missing() 改调 tts_preflight（K-OPS-309 的扩展）}
+      - {src: tests/test_voice10_fix.py, note: "test_tts_preflight_reports_each_missing_piece / test_tts_preflight_on_this_project_config"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-EDT-022
+    check: [tests/test_voice10_fix.py]
+    domain: edit
+    link: [P4-P9]
+    title: 服务器常驻合成：两台服务器都要能配音，克隆音色在 remote_tts.host 本机直跑
+    when: 成片合成在 gpu33 / gpu36 的常驻副本上跑（原片不拉回笔记本，跳板约 17 KB/s）
+    then: 每台服务器跑 tools/voice10/speech_setup.sh（独立解释器只装 sherpa-onnx==1.13.8 + Kokoro v1.1 + SenseVoice int8，装在 /root/work/fredw/speech），路径写在 config/voices.json 的 *_posix 键，ns_post.tts._setting 在 Linux 上自动取，不在 start.sh 另设环境变量；音色参考音频与 voices.json 跟 WORKFLOW 的 resident_sync push 走（data/、config/ 都在清单里），不另起一套推送；RemoteCloneBackend 在 OFFLINE_SELF == remote_tts.host（或 NS_TTS_REMOTE_LOCAL=1）时把 ssh / scp 改成本机 bash / cp，不再 ssh 自己
+    director_text: 服务器上合成报 TtsUnavailable（没有 NS_TTS_PYTHON）或 ssh gpu36 自连失败 → 服务器没装配音环境 / 克隆后端没走本机 → 记到 P4-P9
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/video/night.log, note: "11-01 11:11:15 assemble ep04 1 … /root/work/fredw/offline_20261101/repo/… TtsUnavailable"}
+      - {src: data/pipeline/runs/series10_v1/video/night.log, note: "11-01 16:54:15 ASSEMBLE_WAIT ep04 等原片：原片不在本机（PROD 改用原片后笔记本无法合成）"}
+      - {src: tests/test_voice10_fix.py, note: "test_remote_clone_runs_locally_on_its_own_host / test_setting_falls_back_to_posix_default / test_voices_json_has_server_paths_matching_setup_script"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01

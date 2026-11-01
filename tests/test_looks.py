@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from ns_agent.looks import (LookStore, Resolver, compute_look_prompt, effective_look_prompt,
                             parse_continuity_tables, parse_episode_list, resolve_character, seed)
 from ns_api import looks as api
-from ns_schema.looks import Look, LookPatch, WardrobeItem
+from ns_schema.looks import CHARACTERS, Look, LookPatch, WardrobeItem
 from ns_schema.script import ScriptImport
 
 # 固定测试数据（与 t06 金标准同一份 60 集 v2 剧本）：data/import 里导入了什么都不影响这些测试
@@ -69,8 +69,8 @@ def test_seed_decor_states(script):
 def test_seed_layers(script):
     _, book, sched = seed(script)
     assert sched.character_defaults["lin_wan"] == "lin_wan-default"
-    assert {lk.id for lk in book.looks} == {f"{c}-default" for c in
-                                           ("lin_wan", "gu_chen", "chen_yu", "alex", "ryan", "kai", "leo")}
+    # RECALL 2026-11-01：演员表 = 当前正式剧本登记表（series10：林晚 / 顾沉 / 陈宇 / 阿岚），旧 Alex/Ryan/Kai/Leo 已撤
+    assert {lk.id for lk in book.looks} == {f"{c}-default" for c in CHARACTERS}
     ep1 = sched.episodes["1"]["lin_wan"]
     assert ep1.slots == {"makeup": ["lw-makeup-bare"]} and ep1.d_state == "D0"
     assert "lora-hh12clear" in ep1.candidate_items["shoes"]   # 只作候选，不进 slots
@@ -79,7 +79,6 @@ def test_seed_layers(script):
     ep30 = sched.episodes["30"]["lin_wan"]
     assert ep30.slots == {"makeup": ["lw-makeup-heavy"]} and ep30.needs_review
     assert "REF-LW-03" in ep30.candidate_references
-    assert next(lk for lk in book.looks if lk.id == "alex-default").needs_review
     assert sched.shot_overrides == {}
 
 
@@ -93,7 +92,7 @@ def test_parsers():
             parse_episode_list(bad)
     with pytest.raises(ValueError):
         parse_episode_list("59-61", set(range(1, 61)))
-    assert resolve_character("林晚") == "lin_wan" and resolve_character("Alex") == "alex"
+    assert resolve_character("林晚") == "lin_wan" and resolve_character("阿岚") == "ch_a_lan"
     with pytest.raises(KeyError):
         resolve_character("nobody")
 

@@ -20,6 +20,7 @@ POST /api/render/image-presets（存为我的预设）、DELETE /api/render/imag
 """
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
 
@@ -62,6 +63,16 @@ class FrameJobBody(BaseModel):
     # params = 覆盖（ns_render.image_params.DEFAULTS 的字段）。都不给 = default_preset（项目方 2026-10-31 选定 C）
     preset: str | None = None
     params: dict | None = None
+    # PREP 资料闸门：auto / episode_produce / night / sop = 自动提交，资料不全 409；不给 = 项目方在画布点的，照出 + materials_warnings
+    by: str | None = None
+    # scope=ab（RESEARCH 11-01，总调度 fredw-2b 方案 ②）：实验图。不写 takes.json、不进 auto_current / rescore / 契约账本，
+    # 产物在 data/ab/<experiment>/<shot>/ + takes.jsonl；只支持 stage=first、mode=regen（唯一出图路径）。
+    # yield_lane（默认 true）：这条道的 ComfyUI 有任务（生产在用）就 409 让道，不排队抢卡
+    scope: str | None = None
+    experiment: str | None = None
+    ab_tier: str | None = None
+    prompt_edits: list[list[str]] | None = None
+    yield_lane: bool = True
 
 
 def _app():
@@ -115,6 +126,19 @@ class _Cancellable:
     def __getattr__(self, name):
         return getattr(self._c, name)
 
+    # IMGPERF（11-01）：上传 / 下载也记进任务的 progress·timing（出图路径自己不用改就有分段计时）
+    def upload_image(self, *a, **k):
+        n = int((self._job.get("progress") or {}).get("step") or 0) + 1 \
+            if (self._job.get("progress") or {}).get("stage") == "upload" else 1
+        J.progress(self._job, "upload", step=n, label=f"上传参考图 {n}", save=False)
+        return self._c.upload_image(*a, **k)
+
+    def download(self, *a, **k):
+        J.progress(self._job, "download")
+        out = self._c.download(*a, **k)
+        J.progress(self._job, "post")      # 下载之后到任务结束：后处理（缩回 / 锐化）、契约质检、写版本
+        return out
+
     def run(self, workflow: dict, timeout_s: float):
         if J.cancelled(self._job):
             raise J.Cancelled()
@@ -155,11 +179,26 @@ _ALLOWED: dict[int, tuple[float, dict]] = {}
 ALLOWED_TTL_S = 600
 
 
+ALLOWED_STALE_S = 6 * 3600           # 过期但不到这么旧：先给旧值，后台刷新（UIDEBUG W-08）
+_allowed_threads: dict = {}
+_allowed_guard = threading.Lock()
+
+
 def lane_allowed(gpu: int, refresh: bool = False) -> dict:
     now = time.time()
     hit = _ALLOWED.get(gpu)
     if hit and not refresh and now - hit[0] < ALLOWED_TTL_S:
         return {**hit[1], "source": "cache", "age_s": round(now - hit[0])}
+    # UIDEBUG（docs/uirsi/debug_wiring.md W-08）：缓存过期后现取 object_info 经隧道要 30–40 s（卡在出视频时），
+    # 精修页打开就卡住出图参数面板。过期不久 → 先给旧值并在后台刷新；点“刷新”（refresh=true）或从没取过才同步现取。
+    if hit and not refresh and now - hit[0] < ALLOWED_STALE_S:
+        with _allowed_guard:
+            t = _allowed_threads.get(gpu)
+            if t is None or not t.is_alive():
+                t = _allowed_threads[gpu] = threading.Thread(target=lane_allowed, args=(gpu, True), daemon=True,
+                                                             name=f"ns-allowed-{gpu}")
+                t.start()
+        return {**hit[1], "source": "cache", "age_s": round(now - hit[0]), "refreshing": True}
     try:
         cl = J.client_factory(gpu)
         if getattr(cl, "timeout", None):
@@ -186,6 +225,7 @@ def image_presets(gpu: int | str | None = None, refresh: bool = False):
             "unets": IP.UNETS, "vaes": IP.VAES, "identity": IP.IDENTITY,
             "identity_loras": sorted(FE.identity_lora_files()), "banned_loras": fin.get("banned_loras") or [],
             "realism_loras": fin.get("realism_loras") or [], "final_preset": IP.FINAL_PRESET, "default_preset": IP.default_preset(),
+            "auto_final_on_lock": FT.auto_final_on_lock(),   # fredw-92/UXF2：前端按实际配置写“定稿后是否自动出定稿档”
             "notes": IP.NOTES, "allowed": lane_allowed(g, refresh)}
 
 
@@ -229,8 +269,19 @@ def _eta(mode: str, gpu) -> float:
 @router.post("/api/shots/{shot_id}/frame-jobs")
 def create_frame_job(shot_id: str, body: FrameJobBody):
     _shot(shot_id)
+    from ns_api import material_readiness as MR
+    mat_warn = MR.job_gate(_app()._script, shot_id, body.by)   # PREP：自动提交资料不全 → 409
+    out = _create_frame_job(shot_id, body)
+    if mat_warn and isinstance(out, dict):
+        out = {**out, "materials_warnings": mat_warn}
+    return out
+
+
+def _create_frame_job(shot_id: str, body: FrameJobBody):
     if body.stage not in FE.STAGE_OF:
         raise HTTPException(400, "stage 只能是 first | last")
+    if body.scope is not None:
+        return _create_ab_job(shot_id, body)
     if body.tier not in FT.TIERS:
         raise HTTPException(400, f"tier 只能是 {' | '.join(FT.TIERS)}")
     eff = resolve_params(body)
@@ -267,13 +318,17 @@ def create_frame_job(shot_id: str, body: FrameJobBody):
     strength = body.strength or ("medium" if eff and eff.get("strength") is not None and body.mode == "refs" else None)
 
     def run(client, job):
-        c = _Cancellable(client, job, eff)
         script = _app()._script
+        # K-REN-134：资产项目的整张重出走唯一出图路径（ns_render.unified_frame，自带 frame_v9 预设与后处理）——
+        # 这里不再叠加请求的出图参数 / 后处理，避免二次锐化、后缀重复
+        from ns_render import unified_frame as UF
+        unified = body.mode == "regen" and bool(UF.project_for(script))
+        c = _Cancellable(client, job, None if unified else eff)
         spec_removed = None
         try:
             if body.mode == "regen":
                 prompt = body.prompt
-                if eff and not eff["spec_words"]:   # 去掉系统追加的规格句（作者原文不动）
+                if eff and not eff["spec_words"] and not unified:   # 去掉系统追加的规格句（作者原文不动）
                     comp = P.compile_with_edits(script, shot_id, P.available_loras(c))
                     src = prompt or ((comp.image_prompt if stage == "image" else comp.last_prompt) or "")
                     terms = IP.spec_terms(script, comp, stage)
@@ -285,9 +340,12 @@ def create_frame_job(shot_id: str, body: FrameJobBody):
                 take = FE.edit_frame(c, script, shot_id, stage, mode=body.mode, parent=body.parent,
                                      instruction=body.instruction or "", strength=strength, refs=refs,
                                      seed=seed, job=job)
+            J.progress(job, "finish")
             t = take if isinstance(take, dict) else take.model_dump()
-            take = IP.finish(shot_id, stage, t["n"], eff, c.last_image_wf, overrides=body.params,
+            take = IP.finish(shot_id, stage, t["n"], None if unified else eff, c.last_image_wf, overrides=body.params,
                              spec_removed=spec_removed)
+            if unified:                                  # frame_v9 的交付尺寸 / 后处理写进 params，过坏图检查才设为当前
+                take = UF.record_params(shot_id, stage, t["n"])
         except J.Cancelled:
             raise
         except Exception as e:
@@ -301,6 +359,56 @@ def create_frame_job(shot_id: str, body: FrameJobBody):
     job = J.submit("frame", shot_id, gpu, run, params=params, eta_s=_eta(body.mode, gpu),
                    stage=body.stage, mode=body.mode, url=EP.url_for_gpu(gpu))
     return job
+
+
+def lane_busy(gpu) -> bool:
+    """这条道的 ComfyUI 正在跑或排着任务（生产 / 别的 agent 在用）→ True；连不上也当忙（不冒险抢卡）"""
+    import json as _json
+    import urllib.request
+    try:
+        with urllib.request.urlopen(EP.url_for_gpu(gpu).rstrip("/") + "/queue", timeout=8) as r:
+            q = _json.loads(r.read())
+        return bool(q.get("queue_running") or q.get("queue_pending"))
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def _create_ab_job(shot_id: str, body: FrameJobBody):
+    """scope=ab：见 FrameJobBody 注释。结果只在 data/ab/<experiment>/，GET /api/jobs/{id} 的 take 字段是实验记录"""
+    from ns_render import unified_frame as UF
+    if body.scope != "ab":
+        raise HTTPException(400, "scope 只能是 ab（或不传 = 生产）")
+    if body.stage != "first" or body.mode != "regen" or body.tier != "preview":
+        raise HTTPException(400, "scope=ab 只支持 stage=first、mode=regen、tier=preview")
+    try:
+        UF.ab_dir(body.experiment or "")
+        if not UF.AB_ID.match(body.ab_tier or ""):
+            raise ValueError("ab_tier 只能用小写字母、数字、下划线")
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    if any(not isinstance(x, list) or len(x) != 2 for x in body.prompt_edits or []):
+        raise HTTPException(422, "prompt_edits 要写成 [[原文, 替换], …]")
+    overrides = dict(body.params or {})
+    if overrides:
+        try:
+            IP.resolve(body.preset or UF.preset_id(), {"style_suffix": "", **overrides})
+        except IP.ParamError as e:
+            raise HTTPException(422, "；".join(e.errors) if hasattr(e, "errors") else str(e))
+    gpu = _lane(body.gpu)
+    if body.yield_lane and lane_busy(gpu):
+        raise HTTPException(409, f"道 {gpu} 正在忙（生产优先），实验让道，稍后再交")
+
+    def run(client, job):
+        from ns_agent import comfy_tag as CT
+        ep_s, _, sh_s = shot_id.partition("-")
+        tag = CT.make("RESEARCH", "bakeoff", episode=int(ep_s[2:]) if ep_s[2:].isdigit() else None, shot=sh_s or shot_id,
+                      label=f"实验 {body.experiment}/{body.ab_tier}")
+        return UF.render_ab(client, _app()._script, shot_id, experiment=body.experiment, tier=body.ab_tier,
+                            seed=body.seed, prompt_edits=body.prompt_edits, overrides=overrides or None,
+                            preset=body.preset, tag=tag)
+
+    return J.submit("frame_ab", shot_id, gpu, run, params=body.model_dump(exclude_none=True), eta_s=_eta("regen", gpu),
+                    stage=body.stage, mode="ab", url=EP.url_for_gpu(gpu))
 
 
 def _result(shot_id: str, stage: str, take) -> dict:
@@ -379,6 +487,19 @@ def _lock_view(out: dict) -> dict:
             "stale": out.get("stale") or {}, "active": out.get("active") or {}}
 
 
+def _clear_auto_mark(shot_id: str, st: str) -> dict | None:
+    """fredw-92/UXF4（审查 N1）：项目方在画布上定稿（含对同一版“确认定稿”）→ 去掉整集出片的“自动测试定稿”标记，
+    这一格从“自动定稿·待复审”变成项目方定稿。没有标记时不写盘，返回 None"""
+    with P.shot_lock(shot_id):
+        data = P.load_takes(shot_id)
+        rec = (data.get("locked_by") or {}).get(st)
+        if not isinstance(rec, dict) or rec.get("by") != "auto":
+            return None
+        data["locked_by"].pop(st, None)
+        P._save_takes(shot_id, data)
+        return data
+
+
 @router.post("/api/shots/{shot_id}/takes/{stage}/{n}/lock")
 def lock_take(shot_id: str, stage: str, n: int, body: LockBody | None = None):
     """定稿。stage 接受 first|image（存为 takes.json locked.image）、last、video；顶层 locked 按 stage 分别记"""
@@ -395,8 +516,11 @@ def lock_take(shot_id: str, stage: str, n: int, body: LockBody | None = None):
                 if st == "last" and (P.load_takes(shot_id).get("locked") or {}).get("image") is None:
                     raise HTTPException(409, "首帧还没定稿，不能定稿尾帧")
                 out = FE.lock(shot_id, st, n)
+        out = _clear_auto_mark(shot_id, st) or out
     except KeyError as e:
         raise HTTPException(404, str(e).strip("'"))
+    except P.BadImage as e:   # fredw-92/UXF1：坏图不能定稿
+        raise HTTPException(409, str(e))
     _invalidate()
     view = _lock_view(out)
     want = body.final if body.final is not None else FT.auto_final_on_lock()
@@ -426,3 +550,17 @@ def unlock_take(shot_id: str, stage: str, n: int):
     out = FE.unlock(shot_id, _stage(stage))
     _invalidate()
     return _lock_view(out)
+
+
+# REFLOCK 11-01（总调度）：postflight 持久化——API 启动时（导入本模块）起一个后台扫描：唯一出图路径版本里 postflight 还是
+# pending / 缺失的（例如进程在算的中途被重启杀掉）接着算，之后每 10 分钟扫一次；测试进程不起
+def _start_postflight_sweeper():
+    import os
+    import sys as _sys
+    if "pytest" in _sys.modules or os.environ.get("NS_POSTFLIGHT_SWEEP") == "0":
+        return
+    from ns_render import unified_frame as _UF
+    _UF.start_sweeper()
+
+
+_start_postflight_sweeper()

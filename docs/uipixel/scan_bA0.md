@@ -1,0 +1,132 @@
+# UIPIXEL 扫描 bA0
+
+生成：2026-10-31T17:46:54.600Z · 脚本 apps/web/e2e/uipixel/scan.mjs（检测逻辑 check.js）
+
+- 状态 31 个 × 尺寸 1440×900 × 主题 dark = 截图 31 张（目录 apps/web/e2e/uipixel/bA0/，主尺寸另有 _mark 标注图）
+- **去重后问题 84 条**：严重 17 · 一般 45 · 轻微 22
+- 分类：可点区域过小 39 · 缺悬停态 37 · 无手型指针 8
+
+## 每页问题数
+
+| 状态 | 1440 深 |
+|---|---|
+| projects 项目首页 | 21 |
+| script_new 新建剧本 | 21 |
+| script_read 剧本阅读模式 | 18 |
+| overview 全剧总览 | 9 |
+| review 画布·审片 | 17 |
+| review_ep01 画布·审片（第 1 集，有图） | 20 |
+| review_ep01_scroll 画布·审片（第 1 集，往下滚） | 19 |
+| edit_ep01 画布·精修（第 1 集） | 17 |
+| edit 画布·精修（提示词） | 16 |
+| edit_params 精修·参数 | 25 |
+| edit_versions 精修·版本 | 25 |
+| edit_assets 精修·资产 | 20 |
+| edit_sound 精修·声音 | 12 |
+| edit_rules 精修·规则 | 12 |
+| assets 资产中心 | 6 |
+| a_character 资产·人物 | 4 |
+| a_linwan 资产·人物页（林晚） | 4 |
+| a_look 资产·形象 | 3 |
+| a_item 资产·单品 | 5 |
+| a_scene 资产·场景 | 3 |
+| a_scene_open 资产·场景弹框 | 8 |
+| a_voice 资产·音色 | 8 |
+| a_sheets 资产·设定图 | 4 |
+| a_preset 资产·预设 | 4 |
+| a_loras 资产·LoRA | 3 |
+| a_template 资产·模板 | 3 |
+| sound 声音页 | 4 |
+| cut 成片页 | 3 |
+| trash 回收站 | 4 |
+| audit 操作记录 | 3 |
+| models 设置 / 模型 | 4 |
+
+## 问题清单（按严重度）
+
+| # | 级 | 类别 | 页面（尺寸/主题） | 组件 | 源码 | 量化值 | 说明 | 修法 |
+|---|---|---|---|---|---|---|---|---|
+| 1 | ●●● | 可点区域过小 | projects, script_new, script_read（1440d） | `div.ns-prod-ep > button.ns-prod-ep-h`<br>「第 1 集 首帧 0/0 · 尾帧 0/0 · 」 | apps/web/src/v3/ProducerPanel.tsx:185 | 340x22 | 可点区域只有 340×22px（<24 难点中）<br><sub>uipixel/bA0/projects_1440_dark_mark.png #4</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 2 | ●●● | 可点区域过小 | edit_params, edit_versions（1440d） | `div.v3e-seg.sm > button`<br>「Turbo（快）」 | apps/web/src/components/Dialogs.tsx:219<br>apps/web/src/canvas-v2.css:8 | 104x23 | 可点区域只有 104×23px（<24 难点中）<br><sub>uipixel/bA0/edit_params_1440_dark_mark.png #7</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 3 | ●●● | 可点区域过小 | edit_params, edit_versions（1440d） | `div.v3e-seg.sm > button`<br>「普通」 | apps/web/src/v3/edit/AssetDrawer.tsx:832<br>apps/web/src/v3/edit/edit.css:116 | 57x23 | 可点区域只有 57×23px（<24 难点中）<br><sub>uipixel/bA0/edit_params_1440_dark_mark.png #9</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 4 | ●●● | 可点区域过小 | projects, script_new, script_read（1440d） | `details.ns-old > summary`<br>「以前的稿子（1）」 | apps/web/src/v3/pages/NewScriptPage.tsx:150<br>apps/web/src/v3/pages/story.css:163 | 247x23 | 可点区域只有 247×23px（<24 难点中）<br><sub>uipixel/bA0/projects_1440_dark_mark.png #3</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 5 | ●●● | 可点区域过小 | projects, script_new, script_read（1440d） | `details.ns-prod-log > summary.ds-small`<br>「自动修复记录（最近 1 条）」 | apps/web/src/ds/MediaPlayer.tsx:159<br>apps/web/src/ds/ds.css:122 | 1120x15 | 可点区域只有 1120×15px（<24 难点中）<br><sub>uipixel/bA0/projects_1440_dark_mark.png #8</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 6 | ●●● | 可点区域过小 | assets, a_character, a_linwan（1440d） | `details > summary`<br>「技术细节」 | apps/web/src/ds/index.tsx:106<br>apps/web/src/ds/ds.css:84 | 1160x15 | 可点区域只有 1160×15px（<24 难点中）<br><sub>uipixel/bA0/assets_1440_dark_mark.png #2</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 7 | ●●● | 可点区域过小 | assets, a_character, a_linwan（1440d） | `details > summary`<br>「技术细节」 | apps/web/src/ds/index.tsx:106<br>apps/web/src/ds/ds.css:84 | 1160x15 | 可点区域只有 1160×15px（<24 难点中）<br><sub>uipixel/bA0/assets_1440_dark_mark.png #3</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 8 | ●●● | 可点区域过小 | a_character, a_linwan, a_look（1440d） | `details.boot-tech > summary`<br>「技术细节」 | apps/web/src/App.tsx:59<br>apps/web/src/styles.css:35 | 61x15 | 可点区域只有 61×15px（<24 难点中）<br><sub>uipixel/bA0/a_character_1440_dark_mark.png #1</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 9 | ●●● | 可点区域过小 | edit_params, edit_versions（1440d） | `details.px-note.px-notefold > summary`<br>「项目方 选定（展开看细节）」 | apps/web/src/v3/edit/ImageParams.tsx:256<br>apps/web/src/v3/edit/edit.css:361 | 331x17 | 可点区域只有 331×17px（<24 难点中）<br><sub>uipixel/bA0/edit_params_1440_dark_mark.png #6</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 10 | ●●● | 可点区域过小 | edit_params, edit_versions（1440d） | `div.px-lora > button.v3e-x.sm`<br>「×」 | apps/web/src/v3/edit/AssetDrawer.tsx:501<br>apps/web/src/v3/edit/edit.css:18 | 22x22 | 可点区域只有 22×22px（<24 难点中）<br><sub>uipixel/bA0/edit_params_1440_dark_mark.png #12</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 11 | ●●● | 可点区域过小 | edit_params, edit_versions（1440d） | `div.px-loras > button.v3e-link`<br>「+ 加一个 LoRA」 | apps/web/src/v3/edit/EditLoop.tsx:260<br>apps/web/src/v3/edit/edit.css:21 | 82x15 | 可点区域只有 82×15px（<24 难点中）<br><sub>uipixel/bA0/edit_params_1440_dark_mark.png #13</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 12 | ●●● | 可点区域过小 | overview（1440d） | `div.sea-eph > a.sea-epn`<br>「第 1 集」 | apps/web/src/v3/pages/SeasonPage.tsx:154<br>apps/web/src/v3/pages/season.css:13 | 42x16 | 可点区域只有 42×16px（<24 难点中）<br><sub>uipixel/bA0/overview_1440_dark_mark.png #3</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 13 | ●●● | 可点区域过小 | overview（1440d） | `div.sea-eph > button.v3p-link.sea-selall`<br>「选中整集」 | apps/web/src/v3/edit/RightTabs.tsx:61<br>apps/web/src/v3/pages/pages.css:32 | 52x16 | 可点区域只有 52×16px（<24 难点中）<br><sub>uipixel/bA0/overview_1440_dark_mark.png #4</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 14 | ●●● | 可点区域过小 | overview（1440d） | `div.sea-eph > a.sea-epn`<br>「第 2 集」 | apps/web/src/v3/pages/SeasonPage.tsx:154<br>apps/web/src/v3/pages/season.css:13 | 42x16 | 可点区域只有 42×16px（<24 难点中）<br><sub>uipixel/bA0/overview_1440_dark_mark.png #5</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 15 | ●●● | 可点区域过小 | overview（1440d） | `div.sea-eph > button.v3p-link.sea-selall`<br>「选中整集」 | apps/web/src/v3/edit/RightTabs.tsx:61<br>apps/web/src/v3/pages/pages.css:32 | 52x16 | 可点区域只有 52×16px（<24 难点中）<br><sub>uipixel/bA0/overview_1440_dark_mark.png #6</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 16 | ●●● | 可点区域过小 | edit_assets（1440d） | `details.ar-note > summary`<br>「其他说明（1）」 | apps/web/src/v3/edit/AssetRefs.tsx:50<br>apps/web/src/v3/edit/edit.css:502 | 331x15 | 可点区域只有 331×15px（<24 难点中）<br><sub>uipixel/bA0/edit_assets_1440_dark_mark.png #6</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 17 | ●●● | 可点区域过小 | edit_assets（1440d） | `li > a`<br>「↗」 | apps/web/src/v3/edit/ShotAssetsTab.tsx:128<br>apps/web/src/v3/edit/edit.css:477 | 18x15 | 可点区域只有 18×15px（<24 难点中）<br><sub>uipixel/bA0/edit_assets_1440_dark_mark.png #10</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 18 | ●● | 缺悬停态 | projects, script_new, script_read, overview …（1440d） | `div.v3-top-l > a.v3-brand`<br>「momoso Agentic Drama Stu」 | apps/web/src/v3/TopBarV3.tsx:313<br>apps/web/src/ds/ds.css:287 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/projects_1440_dark_mark.png #12</sub> | 加 :hover 背景（--c-hover） |
+| 19 | ●● | 缺悬停态 | projects, script_new, script_read, overview …（1440d） | `div.v3-popwrap.v3-ep-pick > button.v3-ep-name`<br>「第 1 集 · 入职日的一瞥 ▾」 | apps/web/src/v3/v3.css:72 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/projects_1440_dark_mark.png #14</sub> | 加 :hover 背景（--c-hover） |
+| 20 | ●● | 缺悬停态 | review, review_ep01_scroll, edit_ep01, edit …（1440d） | `div.sb-ephead > button.sb-chip.bad`<br>「8 镜待补：亲密镜头缺亲密声 · 另有系统检查 」 | apps/web/src/v3/StoryboardTable.tsx:67<br>apps/web/src/ds/ds.css:262 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/review_1440_dark_mark.png #13</sub> | 加 :hover 背景（--c-hover） |
+| 21 | ●● | 缺悬停态 | edit_ep01, edit, edit_params, edit_versions …（1440d） | `div.v3-seg > button`<br>「审片」 | apps/web/src/v3/Canvas.tsx:66<br>apps/web/src/v3/v3.css:258 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/edit_ep01_1440_dark_mark.png #13</sub> | 加 :hover 背景（--c-hover） |
+| 22 | ●● | 缺悬停态 | edit_ep01, edit, edit_params, edit_versions …（1440d） | `div.row > button.v3e-cand.sel`<br>「#7」 | apps/web/src/v3/edit/EditCenter.tsx:419<br>apps/web/src/ds/ds.css:278 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/edit_ep01_1440_dark_mark.png #14</sub> | 加 :hover 背景（--c-hover） |
+| 23 | ●● | 缺悬停态 | edit_ep01, edit, edit_params, edit_versions …（1440d） | `span.v3e-lane > select`<br>「自动（gpu33·卡0） gpu33·卡0 · 」 | apps/web/src/v3/edit/LaneSelect.tsx:37<br>apps/web/src/v3/edit/edit.css:429 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/edit_ep01_1440_dark_mark.png #15</sub> | 加 :hover 背景（--c-hover） |
+| 24 | ●● | 缺悬停态 | edit_ep01, edit, edit_params, edit_versions …（1440d） | `div.v3-clips > button.v3-clip.sel`<br>「S1 4s」 | apps/web/src/v3/Canvas.tsx:228<br>apps/web/src/v3/v3.css:373 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/edit_ep01_1440_dark_mark.png #17</sub> | 加 :hover 背景（--c-hover） |
+| 25 | ●● | 缺悬停态 | a_item, a_scene_open, a_voice, a_preset（1440d） | `li > button.v3-step.on`<br>「2 资产 造型已确认」 | apps/web/src/v3/TopBarV3.tsx:342<br>apps/web/src/v3/v3.css:75 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/a_item_1440_dark_mark.png #4</sub> | 加 :hover 背景（--c-hover） |
+| 26 | ●● | 无手型指针 | projects, script_new, script_read（1440d） | `div.ns-prod-ep > button.ns-prod-ep-h`<br>「第 1 集 首帧 0/0 · 尾帧 0/0 · 」 | apps/web/src/v3/ProducerPanel.tsx:185 | default | 可点元素鼠标不是手型（cursor:default）<br><sub>uipixel/bA0/projects_1440_dark_mark.png #5</sub> | cursor:pointer（全局 ds.css 规则） |
+| 27 | ●● | 无手型指针 | projects, script_new, script_read（1440d） | `details.ns-prod-log > summary.ds-small`<br>「自动修复记录（最近 1 条）」 | apps/web/src/ds/MediaPlayer.tsx:159<br>apps/web/src/ds/ds.css:122 | auto | 可点元素鼠标不是手型（cursor:auto）<br><sub>uipixel/bA0/projects_1440_dark_mark.png #9</sub> | cursor:pointer（全局 ds.css 规则） |
+| 28 | ●● | 缺悬停态 | projects, script_new, script_read（1440d） | `div.v3-top-l > a.v3-new.on`<br>「＋ 新建剧本」 | apps/web/src/v3/TopBarV3.tsx:318<br>apps/web/src/v3/v3.css:510 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/projects_1440_dark_mark.png #13</sub> | 加 :hover 背景（--c-hover） |
+| 29 | ●● | 缺悬停态 | projects, script_new, script_read（1440d） | `span.sf-step-wrap > button.sf-step.on`<br>「① 新建剧本 故事提纲 → 自动写故事线 · 大」 | apps/web/src/v3/pages/ScriptFlowPage.tsx:36<br>apps/web/src/v3/pages/script_flow.css:7 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/projects_1440_dark_mark.png #15</sub> | 加 :hover 背景（--c-hover） |
+| 30 | ●● | 缺悬停态 | projects, script_new, script_read（1440d） | `div.ns-run-wrap > button.ns-run.on`<br>「漆皮之下·十日 · 10 集 写完了 11-01」 | apps/web/src/v3/pages/NewScriptPage.tsx:189<br>apps/web/src/ds/ds.css:266 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/projects_1440_dark_mark.png #16</sub> | 加 :hover 背景（--c-hover） |
+| 31 | ●● | 缺悬停态 | projects, script_new, script_read（1440d） | `details.ns-old > summary`<br>「以前的稿子（1）」 | apps/web/src/v3/pages/NewScriptPage.tsx:150<br>apps/web/src/v3/pages/story.css:163 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/projects_1440_dark_mark.png #17</sub> | 加 :hover 背景（--c-hover） |
+| 32 | ●● | 缺悬停态 | projects, script_new, script_read（1440d） | `div.ns-prod-ep > button.ns-prod-ep-h`<br>「第 1 集 首帧 0/0 · 尾帧 0/0 · 」 | apps/web/src/v3/ProducerPanel.tsx:185 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/projects_1440_dark_mark.png #18</sub> | 加 :hover 背景（--c-hover） |
+| 33 | ●● | 缺悬停态 | projects, script_new, script_read（1440d） | `details.ns-prod-log > summary.ds-small`<br>「自动修复记录（最近 1 条）」 | apps/web/src/ds/MediaPlayer.tsx:159<br>apps/web/src/ds/ds.css:122 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/projects_1440_dark_mark.png #19</sub> | 加 :hover 背景（--c-hover） |
+| 34 | ●● | 缺悬停态 | projects, script_new, script_read（1440d） | `div.ns-viewsw > button.on`<br>「每镜完整一行」 | apps/web/src/components/Dialogs.tsx:219<br>apps/web/src/canvas-v2.css:8 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/projects_1440_dark_mark.png #21</sub> | 加 :hover 背景（--c-hover） |
+| 35 | ●● | 无手型指针 | review, review_ep01, review_ep01_scroll（1440d） | `details.ds-tilebar-more > summary`<br>「⋯」 | apps/web/src/ds/TileBar.tsx:65<br>apps/web/src/ds/ds.css:220 | zoom-in | 可点元素鼠标不是手型（cursor:zoom-in）<br><sub>uipixel/bA0/review_1440_dark_mark.png #4</sub> | cursor:pointer（全局 ds.css 规则） |
+| 36 | ●● | 缺悬停态 | review, review_ep01, review_ep01_scroll（1440d） | `div.v3-seg > button.on`<br>「审片」 | apps/web/src/components/Dialogs.tsx:219<br>apps/web/src/canvas-v2.css:8 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/review_1440_dark_mark.png #14</sub> | 加 :hover 背景（--c-hover） |
+| 37 | ●● | 缺悬停态 | review, review_ep01, review_ep01_scroll（1440d） | `details.ds-tilebar-more > summary`<br>「⋯」 | apps/web/src/ds/TileBar.tsx:65<br>apps/web/src/ds/ds.css:220 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/review_1440_dark_mark.png #15</sub> | 加 :hover 背景（--c-hover） |
+| 38 | ●● | 缺悬停态 | review, review_ep01, review_ep01_scroll（1440d） | `div.v3-rows > button.v3-seam.none`<br>「未检查」 | apps/web/src/v3/Canvas.tsx:86<br>apps/web/src/ds/ds.css:291 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/review_1440_dark_mark.png #16</sub> | 加 :hover 背景（--c-hover） |
+| 39 | ●● | 缺悬停态 | review, review_ep01, review_ep01_scroll（1440d） | `div.v3-clips > button.v3-clip.sel`<br>「S1 5s」 | apps/web/src/v3/Canvas.tsx:228<br>apps/web/src/v3/v3.css:373 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/review_1440_dark_mark.png #17</sub> | 加 :hover 背景（--c-hover） |
+| 40 | ●● | 缺悬停态 | a_character, a_linwan, a_look（1440d） | `details.boot-tech > summary`<br>「技术细节」 | apps/web/src/App.tsx:59<br>apps/web/src/styles.css:35 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/a_character_1440_dark_mark.png #4</sub> | 加 :hover 背景（--c-hover） |
+| 41 | ●● | 缺悬停态 | a_look, a_item, a_sheets（1440d） | `div.hub-nav > button.hub-nav-p.on`<br>「林晚 3/3 套造型 · 14 件单品」 | apps/web/src/v3/assets/PeopleHub.tsx:50<br>apps/web/src/v3/assets/people_hub.css:9 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/a_look_1440_dark_mark.png #3</sub> | 加 :hover 背景（--c-hover） |
+| 42 | ●● | 缺悬停态 | projects, script_new（1440d） | `div.ns-series-eps > button.ns-sep.on`<br>「第 1 集 入职日的一瞥」 | apps/web/src/v3/pages/NewScriptPage.tsx:1011<br>apps/web/src/ds/ds.css:285 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/projects_1440_dark_mark.png #20</sub> | 加 :hover 背景（--c-hover） |
+| 43 | ●● | 缺悬停态 | review_ep01, review_ep01_scroll（1440d） | `aside.v3-rail.mini > button.v3-scene-mini.none`<br>「场景 1 无底图」 | apps/web/src/v3/LeftRail.tsx:127<br>apps/web/src/v3/v3.css:244 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/review_ep01_1440_dark_mark.png #15</sub> | 加 :hover 背景（--c-hover） |
+| 44 | ●● | 缺悬停态 | edit_ep01, edit（1440d） | `details.v3e-fold > summary`<br>「本镜分镜（剧本原文，只读）」 | apps/web/src/v3/edit/EditLoop.tsx:352<br>apps/web/src/ds/ds.css:290 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/edit_ep01_1440_dark_mark.png #16</sub> | 加 :hover 背景（--c-hover） |
+| 45 | ●● | 无手型指针 | edit_params, edit_versions（1440d） | `label.px-tg.sm > input` | apps/web/src/v3/edit/ImageParams.tsx:120<br>apps/web/src/v3/edit/edit.css:364 | default | 可点元素鼠标不是手型（cursor:default）<br><sub>uipixel/bA0/edit_params_1440_dark_mark.png #11</sub> | cursor:pointer（全局 ds.css 规则） |
+| 46 | ●● | 无手型指针 | edit_params, edit_versions（1440d） | `label.px-tg > input` | apps/web/src/v3/edit/ImageParams.tsx:120<br>apps/web/src/v3/edit/edit.css:364 | default | 可点元素鼠标不是手型（cursor:default）<br><sub>uipixel/bA0/edit_params_1440_dark_mark.png #14</sub> | cursor:pointer（全局 ds.css 规则） |
+| 47 | ●● | 缺悬停态 | edit_params, edit_versions（1440d） | `div.px-top > select.px-preset`<br>「徕卡 S★（默认） C·Turbo 质感（S★ 」 | apps/web/src/v3/edit/ImageParams.tsx:230<br>apps/web/src/v3/edit/edit.css:358 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/edit_params_1440_dark_mark.png #21</sub> | 加 :hover 背景（--c-hover） |
+| 48 | ●● | 缺悬停态 | edit_params, edit_versions（1440d） | `details.px-note.px-notefold > summary`<br>「项目方 选定（展开看细节）」 | apps/web/src/v3/edit/ImageParams.tsx:256<br>apps/web/src/v3/edit/edit.css:361 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/edit_params_1440_dark_mark.png #22</sub> | 加 :hover 背景（--c-hover） |
+| 49 | ●● | 缺悬停态 | edit_params, edit_versions（1440d） | `div.px-lora > select.px-lora-sel`<br>「本镜身份 QI2.1_AnyAngle krea」 | apps/web/src/v3/edit/ImageParams.tsx:317<br>apps/web/src/v3/edit/edit.css:457 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/edit_params_1440_dark_mark.png #23</sub> | 加 :hover 背景（--c-hover） |
+| 50 | ●● | 缺悬停态 | edit_params, edit_versions（1440d） | `div.px-loras > button.v3e-link`<br>「+ 加一个 LoRA」 | apps/web/src/v3/edit/EditLoop.tsx:260<br>apps/web/src/v3/edit/edit.css:21 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/edit_params_1440_dark_mark.png #24</sub> | 加 :hover 背景（--c-hover） |
+| 51 | ●● | 缺悬停态 | a_scene_open, a_voice（1440d） | `div.ds-seg > button.on`<br>「当前剧本」 | apps/web/src/components/Dialogs.tsx:219<br>apps/web/src/canvas-v2.css:8 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/a_scene_open_1440_dark_mark.png #8</sub> | 加 :hover 背景（--c-hover） |
+| 52 | ●● | 无手型指针 | overview（1440d） | `label.sea-tog > input` | apps/web/src/v3/pages/SeasonPage.tsx:122<br>apps/web/src/v3/pages/season.css:4 | default | 可点元素鼠标不是手型（cursor:default）<br><sub>uipixel/bA0/overview_1440_dark_mark.png #2</sub> | cursor:pointer（全局 ds.css 规则） |
+| 53 | ●● | 缺悬停态 | overview（1440d） | `li.sea-cell.sel > button.sea-card`<br>「S1 特写 · 4s ● · · ·」 | apps/web/src/v3/pages/SeasonPage.tsx:186<br>apps/web/src/v3/pages/season.css:28 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/overview_1440_dark_mark.png #9</sub> | 加 :hover 背景（--c-hover） |
+| 54 | ●● | 缺悬停态 | review_ep01（1440d） | `div.v3-people > button.v3-look.scene`<br>「景 场景未标」 | apps/web/src/v3/ReviewRow.tsx:447<br>apps/web/src/v3/v3.css:320 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/review_ep01_1440_dark_mark.png #19</sub> | 加 :hover 背景（--c-hover） |
+| 55 | ●● | 缺悬停态 | edit_ep01（1440d） | `aside.v3-rail.mini > button.v3-scene-mini.none`<br>「场景 1 无底图」 | apps/web/src/v3/LeftRail.tsx:127<br>apps/web/src/v3/v3.css:244 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/edit_ep01_1440_dark_mark.png #11</sub> | 加 :hover 背景（--c-hover） |
+| 56 | ●● | 无手型指针 | edit_assets（1440d） | `details.ar-note > summary`<br>「其他说明（1）」 | apps/web/src/v3/edit/AssetRefs.tsx:50<br>apps/web/src/v3/edit/edit.css:502 | auto | 可点元素鼠标不是手型（cursor:auto）<br><sub>uipixel/bA0/edit_assets_1440_dark_mark.png #7</sub> | cursor:pointer（全局 ds.css 规则） |
+| 57 | ●● | 缺悬停态 | edit_assets（1440d） | `li.ar-slot > a.ar-img`<br>「图1」 | apps/web/src/v3/edit/AssetRefs.tsx:38<br>apps/web/src/v3/edit/edit.css:498 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/edit_assets_1440_dark_mark.png #17</sub> | 加 :hover 背景（--c-hover） |
+| 58 | ●● | 缺悬停态 | edit_assets（1440d） | `details.ar-note > summary`<br>「其他说明（1）」 | apps/web/src/v3/edit/AssetRefs.tsx:50<br>apps/web/src/v3/edit/edit.css:502 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/edit_assets_1440_dark_mark.png #18</sub> | 加 :hover 背景（--c-hover） |
+| 59 | ●● | 缺悬停态 | edit_assets（1440d） | `li > a`<br>「↗」 | apps/web/src/v3/edit/ShotAssetsTab.tsx:128<br>apps/web/src/v3/edit/edit.css:477 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/edit_assets_1440_dark_mark.png #19</sub> | 加 :hover 背景（--c-hover） |
+| 60 | ●● | 缺悬停态 | assets（1440d） | `details > summary`<br>「技术细节」 | apps/web/src/ds/index.tsx:106<br>apps/web/src/ds/ds.css:84 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/assets_1440_dark_mark.png #6</sub> | 加 :hover 背景（--c-hover） |
+| 61 | ●● | 缺悬停态 | sound（1440d） | `div.v3-top-l > a.v3-new.v3-sound`<br>「♪ 声音」 | apps/web/src/v3/TopBarV3.tsx:318<br>apps/web/src/v3/v3.css:510 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/bA0/sound_1440_dark_mark.png #3</sub> | 加 :hover 背景（--c-hover） |
+| 62 | ●● | 无手型指针 | trash（1440d） | `label.ds-muted > input` | apps/web/src/ds/editdel.tsx:181<br>apps/web/src/ds/ds.css:121 | default | 可点元素鼠标不是手型（cursor:default）<br><sub>uipixel/bA0/trash_1440_dark_mark.png #2</sub> | cursor:pointer（全局 ds.css 规则） |
+| 63 | ● | 可点区域过小 | projects, script_new, script_read, overview …（1440d） | `div.v3-popwrap.v3-ep-pick > button.v3-ep-name`<br>「第 1 集 · 入职日的一瞥 ▾」 | apps/web/src/v3/v3.css:72 | 168x26 | 可点区域 168×26px（<28）<br><sub>uipixel/bA0/projects_1440_dark_mark.png #1</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 64 | ● | 可点区域过小 | review, review_ep01, review_ep01_scroll, edit_ep01 …（1440d） | `div.v3-seg > button`<br>「审片」 | apps/web/src/components/Dialogs.tsx:219<br>apps/web/src/canvas-v2.css:8 | 60x26 | 可点区域 60×26px（<28）<br><sub>uipixel/bA0/review_1440_dark_mark.png #2</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 65 | ● | 可点区域过小 | edit_ep01, edit, edit_params, edit_versions …（1440d） | `div.v3-popwrap > button.v3-status.s-yellow`<br>「首帧待你看：用这张，或不要 ?」 | apps/web/src/v3/widgets.tsx:56<br>apps/web/src/v3/v3.css:52 | 205x24 | 可点区域 205×24px（<28）<br><sub>uipixel/bA0/edit_ep01_1440_dark_mark.png #3</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 66 | ● | 可点区域过小 | edit_ep01, edit, edit_params, edit_versions …（1440d） | `span.ds-tilebar-acts > button.ds-btn.xs`<br>「✎ 改」 | apps/web/src/ds/MediaPlayer.tsx:260<br>apps/web/src/ds/ds.css:11 | 46x24 | 可点区域 46×24px（<28）<br><sub>uipixel/bA0/edit_ep01_1440_dark_mark.png #4</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 67 | ● | 可点区域过小 | edit_ep01, edit, edit_params, edit_versions …（1440d） | `span.ds-tilebar-acts > button.ds-btn.danger`<br>「🗑」 | apps/web/src/ds/MediaPlayer.tsx:260<br>apps/web/src/ds/ds.css:11 | 34x24 | 可点区域 34×24px（<28）<br><sub>uipixel/bA0/edit_ep01_1440_dark_mark.png #5</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 68 | ● | 可点区域过小 | a_scene_open, a_voice（1440d） | `div.ds-seg > button`<br>「当前剧本」 | apps/web/src/components/Dialogs.tsx:219<br>apps/web/src/canvas-v2.css:8 | 76x26 | 可点区域 76×26px（<28）<br><sub>uipixel/bA0/a_scene_open_1440_dark_mark.png #2</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 69 | ● | 可点区域过小 | projects, script_new, review, review_ep01 …（1440d） | `div.v3-popwrap > button.v3-status.s-yellow`<br>「首帧待你看：用这张，或不要 ?」 | apps/web/src/v3/widgets.tsx:56<br>apps/web/src/v3/v3.css:52 | 205x24 | 可点区域 205×24px（<28）<br><sub>uipixel/bA0/projects_1440_dark_mark.png #10</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 70 | ● | 可点区域过小 | projects, script_new, review_ep01, review_ep01_scroll（1440d） | `div.v3-field > button.mp-play.mp-xs`<br>「▶」 | apps/web/src/ds/MediaPlayer.tsx:108<br>apps/web/src/ds/media.css:4 | 30x24 | 可点区域 30×24px（<28）<br><sub>uipixel/bA0/projects_1440_dark_mark.png #11</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 71 | ● | 可点区域过小 | projects, script_new, script_read（1440d） | `span.ns-run-del > button.ds-btn.danger`<br>「🗑」 | apps/web/src/ds/MediaPlayer.tsx:260<br>apps/web/src/ds/ds.css:11 | 34x24 | 可点区域 34×24px（<28）<br><sub>uipixel/bA0/projects_1440_dark_mark.png #2</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 72 | ● | 可点区域过小 | review, review_ep01, review_ep01_scroll（1440d） | `details.ds-tilebar-more > summary`<br>「⋯」 | apps/web/src/ds/TileBar.tsx:65<br>apps/web/src/ds/ds.css:220 | 24x28 | 可点区域 24×28px（<28）<br><sub>uipixel/bA0/review_1440_dark_mark.png #3</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 73 | ● | 可点区域过小 | review, review_ep01, review_ep01_scroll（1440d） | `div.v3-ptog > button.sb-toggle`<br>「分镜详情 ▸」 | apps/web/src/v3/ReviewRow.tsx:473<br>apps/web/src/v3/storyboard.css:6 | 80x26 | 可点区域 80×26px（<28）<br><sub>uipixel/bA0/review_1440_dark_mark.png #6</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 74 | ● | 可点区域过小 | review, review_ep01, review_ep01_scroll（1440d） | `div.v3-ptog > button`<br>「首帧提示词 ▸」 | apps/web/src/v3/ReviewRow.tsx:471<br>apps/web/src/v3/v3.css:332 | 92x26 | 可点区域 92×26px（<28）<br><sub>uipixel/bA0/review_1440_dark_mark.png #7</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 75 | ● | 可点区域过小 | review, review_ep01, review_ep01_scroll（1440d） | `div.v3-rows > button.v3-seam.none`<br>「未检查」 | apps/web/src/v3/Canvas.tsx:86<br>apps/web/src/ds/ds.css:291 | 350x24 | 可点区域 350×24px（<28）<br><sub>uipixel/bA0/review_1440_dark_mark.png #8</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 76 | ● | 可点区域过小 | review, review_ep01, review_ep01_scroll（1440d） | `span.ds-tilebar-st > button.v3-cand-old`<br>「旧图 ×1」 | apps/web/src/v3/ReviewRow.tsx:138<br>apps/web/src/ds/ds.css:235 | 54x24 | 可点区域 54×24px（<28）<br><sub>uipixel/bA0/review_1440_dark_mark.png #9</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 77 | ● | 可点区域过小 | review, review_ep01, review_ep01_scroll（1440d） | `div.v3-popwrap > button.v3-status.s-gray`<br>「还没有首帧，出首帧 ?」 | apps/web/src/v3/widgets.tsx:56<br>apps/web/src/v3/v3.css:52 | 157x24 | 可点区域 157×24px（<28）<br><sub>uipixel/bA0/review_1440_dark_mark.png #10</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 78 | ● | 可点区域过小 | edit_ep01, edit（1440d） | `div.v3e-ptabs > button`<br>「首帧」 | apps/web/src/components/Dialogs.tsx:219<br>apps/web/src/canvas-v2.css:8 | 42x26 | 可点区域 42×26px（<28）<br><sub>uipixel/bA0/edit_ep01_1440_dark_mark.png #6</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 79 | ● | 可点区域过小 | edit_ep01, edit（1440d） | `label.v3e-fld > button.ds-btn.xs`<br>「✎ 说哪里不对，让系统改」 | apps/web/src/ds/MediaPlayer.tsx:260<br>apps/web/src/ds/ds.css:11 | 331x24 | 可点区域 331×24px（<28）<br><sub>uipixel/bA0/edit_ep01_1440_dark_mark.png #7</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 80 | ● | 可点区域过小 | edit_ep01, edit（1440d） | `details.v3e-fold > summary`<br>「本镜分镜（剧本原文，只读）」 | apps/web/src/v3/edit/EditLoop.tsx:352<br>apps/web/src/ds/ds.css:290 | 331x24 | 可点区域 331×24px（<28）<br><sub>uipixel/bA0/edit_ep01_1440_dark_mark.png #8</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 81 | ● | 可点区域过小 | review_ep01（1440d） | `div.v3-popwrap > button.v3-status.s-red`<br>「首帧没出成，需重出 ?」 | apps/web/src/v3/widgets.tsx:56<br>apps/web/src/v3/v3.css:52 | 157x24 | 可点区域 157×24px（<28）<br><sub>uipixel/bA0/review_ep01_1440_dark_mark.png #11</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 82 | ● | 可点区域过小 | edit_assets（1440d） | `li > button.ds-btn.xs`<br>「替换…」 | apps/web/src/ds/MediaPlayer.tsx:260<br>apps/web/src/ds/ds.css:11 | 52x24 | 可点区域 52×24px（<28）<br><sub>uipixel/bA0/edit_assets_1440_dark_mark.png #8</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 83 | ● | 可点区域过小 | edit_assets（1440d） | `li > a.ds-btn.xs`<br>「打开 ↗」 | apps/web/src/ds/MediaPlayer.tsx:260<br>apps/web/src/ds/ds.css:11 | 58x24 | 可点区域 58×24px（<28）<br><sub>uipixel/bA0/edit_assets_1440_dark_mark.png #9</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 84 | ● | 可点区域过小 | models（1440d） | `div.v3p-card-head > button.btn-mini`<br>「刷新」 | apps/web/src/components/Dialogs.tsx:11<br>apps/web/src/canvas-v2.css:50 | 40x24 | 可点区域 40×24px（<28）<br><sub>uipixel/bA0/models_1440_dark_mark.png #2</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |

@@ -17,6 +17,7 @@ from pathlib import Path
 
 from ns_schema.script import Episode, ScriptGlobals, Shot
 
+from . import framing as FR
 from . import h3_prompt as H3
 from .bible import Bible, load_bible
 from .bible import bible_version as _bible_version
@@ -171,13 +172,164 @@ def end_state(motion_body: str) -> str:
     return tail
 
 
+# FIX（ep02_iter P0，chain_audit A2/A3/C9）：系统后缀不得覆盖本镜原文的明确要求；cfg=1 不往正向词里塞否定句。
+# 参数在 config/render_quality.json "prompt_guard"（缺键用这里的兜底值，值与配置一致）。
+DEFAULT_PROMPT_GUARD = {
+    # 本镜原文写了“脸被遮住” → 后缀里带“面部 / 五官”的子句不加（S11：蓝发遮住部分脸部，后缀却补“面部清晰对焦、面部可辨”）
+    "face_hidden_words": ["遮住部分脸", "遮住脸", "遮住面部", "遮住她的脸", "遮住他的脸", "挡住脸", "挡住面部",
+                          "遮脸", "不露脸", "看不到脸", "看不见脸", "只露出下巴"],
+    "face_terms_drop": ["面部", "五官"],
+    # 本镜原文 / 结束状态写了“全黑” → 后缀里的“非纯黑 / 面部可辨”不加（S11 尾帧“画面陷入全黑”，C9 视频变黑又被拉回）
+    "black_words": ["全黑", "陷入黑暗", "一片漆黑", "漆黑一片", "黑屏", "纯黑"],
+    "black_terms_drop": ["非纯黑", "面部可辨"],
+    # cfg=1（Qwen-Image Turbo / H3 全部是 cfg 1）：负面词无效，正向词里的“无 X / 不 X / 非 X”反而把 X 注入画面
+    # （S5 视频出现“冷”字）→ 系统后缀只保留正面子句；有改写的按 negation_rewrites 换成正面说法
+    "cfg_one_positive_only": True,
+    "negation_prefixes": ["无", "不", "非", "没有", "勿", "禁止", "避免"],
+    "negation_rewrites": {"非纯黑": "暗部仍有可见层次"},
+    # 所有格：“X 的 Y”里 Y 是身体部位 / 背影 → X 在画；其他（西装衣领、外套、家、声音…）只是提到（S8 顾沉的西装衣领）
+    "possessive_body_words": ["手", "指", "脸", "面", "眼", "睫", "眉", "唇", "嘴", "鼻", "耳", "颈", "脖", "肩", "胸",
+                              "背影", "背", "腰", "腿", "膝", "脚", "足", "臂", "胳膊", "掌", "怀", "身", "头", "额",
+                              "下巴", "侧脸", "侧影", "剪影", "轮廓", "身影", "吻", "目光", "视线", "呼吸", "体温", "气息"],
+    # 视频身份 LoRA（C2/E3）：按“在画角色”确定性挂载，不看编译时 GPU 道上有没有该文件（缺了在派单 / 出片时拒绝）。
+    # 触发词 → 角色；角色在画且不是背对 → 挂；背对 / 不在画 → 不挂（S9/S10 陈宇主镜挂了林晚 LoRA）
+    "video_identity_triggers": {"lnwan01": "林晚"},
+    # 视频身份 LoRA 总开关：lin_wan_h3_v1（lnwan01）在 comfy/models.lock 仍是 status=training、gpu36 三条道都没有
+    # （RR 10-31 因此整批不挂）。关 = 全部镜头确定性不挂（记原因）；开 = 在画且不背对的镜头必挂，道上没有就不派
+    "video_identity_enabled": False,
+    # 出图身份 LoRA（lin_wan_qi，config/auto_lora_triggers.json）同样按“在画”挂：不在画 → 不挂（剧本 img 触发词里写了也去掉）；
+    # 背对（S9/S10 林晚背对、主体是陈宇）→ 不挂（model-only LoRA 整张图生效，会把她的脸套到主体上）
+    "image_identity_skip_back_facing": True,
+    "identity_skip_back_facing": True,
+    "back_facing_patterns": ["{name}[^，。；,]{{0,4}}背对", "{name}的背影"],
+}
+_GUARD_CACHE: dict = {}
+
+
+def prompt_guard(root=None) -> dict:
+    """config/render_quality.json "prompt_guard"（按 mtime 缓存）合并到 DEFAULT_PROMPT_GUARD 上；读不到 → 兜底值"""
+    from .bible import project_root
+    p = project_root(root) / "config" / "render_quality.json"
+    try:
+        key = (str(p), p.stat().st_mtime_ns)
+    except OSError:
+        return dict(DEFAULT_PROMPT_GUARD)
+    hit = _GUARD_CACHE.get(key)
+    if hit is None:
+        try:
+            cfg = json.loads(p.read_text(encoding="utf-8")).get("prompt_guard") or {}
+        except (OSError, ValueError, AttributeError):
+            cfg = {}
+        hit = {**DEFAULT_PROMPT_GUARD, **{k: v for k, v in cfg.items() if k in DEFAULT_PROMPT_GUARD}}
+        _GUARD_CACHE.clear()
+        _GUARD_CACHE[key] = hit
+    return hit
+
+
+def _split_clauses(term: str) -> list[tuple[str, str]]:
+    """后缀条目 → [(子句, 后面的分隔符)]（按 ，/、 切）"""
+    parts = re.split(r"([，、])", term)
+    return [(parts[i], parts[i + 1] if i + 1 < len(parts) else "") for i in range(0, len(parts), 2)]
+
+
+def guard_term(term: str, text: str, guard: dict | None = None) -> str:
+    """一条系统后缀按本镜原文条件化：原文遮脸 → 去掉面部子句；原文全黑 → 去掉“非纯黑 / 面部可辨”；
+    cfg=1 正向只留正面子句（否定子句按 negation_rewrites 改写，没有改写就去掉）。返回 "" = 整条不加"""
+    g = guard or DEFAULT_PROMPT_GUARD
+    face_hidden = any(w in text for w in g["face_hidden_words"])
+    black = any(w in text for w in g["black_words"])
+    keep: list[tuple[str, str]] = []
+    for clause, sep in _split_clauses(term):
+        c = clause.strip()
+        if not c:
+            continue
+        if face_hidden and any(w in c for w in g["face_terms_drop"]):
+            continue
+        if black and any(w in c for w in g["black_terms_drop"]):
+            continue
+        if g.get("cfg_one_positive_only") and any(c.startswith(n) for n in g["negation_prefixes"]):
+            c = (g.get("negation_rewrites") or {}).get(c, "")
+            if not c:
+                continue
+        keep.append((c, sep or "，"))
+    # 保留原分隔符（没有改动的条目原样返回）
+    return "".join(c + (sep if i < len(keep) - 1 else "") for i, (c, sep) in enumerate(keep))
+
+
 def corrector_terms(img_body: str, adult: bool, bible: Bible | None = None) -> list[str]:
-    """visual_bible [[shot_rules]]（按顺序）+ 非成人镜头的 [shot_rules_safe].term"""
+    """visual_bible [[shot_rules]]（按顺序）+ 非成人镜头的 [shot_rules_safe].term。
+    FIX（P0）：每条按本镜原文条件化（guard_term）——原文遮脸 / 全黑时不再补“面部可辨 / 非纯黑”，cfg=1 不加否定子句"""
     b = bible or load_bible()
     terms = [r.term for r in b.shot_rules if any(w in img_body for w in r.match)]
     if not adult:
         terms.append(b.safe_term)
-    return terms
+    g = prompt_guard(getattr(b, "root", None))
+    out = []
+    for t in terms:
+        gt = guard_term(t, img_body, g)
+        if gt and gt not in out:
+            out.append(gt)
+    return out
+
+
+# 编译后静态校验（refactor_proposal §3.1）：互斥词对、正向否定式、未在画角色的角色锁
+CONFLICT_PAIRS = (("face_hidden_words", ("面部可辨", "面部清晰对焦", "五官锐利")), ("black_words", ("非纯黑",)))
+
+
+def back_facing(name: str, text: str, guard: dict | None = None) -> bool:
+    g = guard or DEFAULT_PROMPT_GUARD
+    return any(re.search(p.format(name=re.escape(name)), text) for p in g["back_facing_patterns"])
+
+
+def video_loras_for(motion_triggers: list[str], present: list[str], img_body: str, registry: dict,
+                    guard: dict | None = None) -> tuple[list[tuple[str, float]], list[str], list[str]]:
+    """FIX（P0，C2/E3）：视频 LoRA 是 (剧本触发词, 在画角色) 的纯函数，与 GPU 道无关。
+    registry = {触发词: globals.lora_triggers 条目}。→ (loras, 用到的触发词, 去掉的触发词及原因)"""
+    g = guard or DEFAULT_PROMPT_GUARD
+    ident = dict(g.get("video_identity_triggers") or {})
+    loras: list[tuple[str, float]] = []
+    kept, dropped = [], []
+
+    def add(t, info):
+        strength = info.strength[1] if info.strength else 0.8
+        if (info.file, strength) not in loras:
+            loras.append((info.file, strength))
+        kept.append(t)
+    wanted = list(motion_triggers)
+    for t, who in ident.items():   # 在画角色的身份触发词：剧本 motion 没写也补上（按角色确定）
+        if who in present and t in registry and t not in wanted and getattr(registry[t], "kind", "video") == "video":
+            wanted.append(t)
+    for t in wanted:
+        info = registry.get(t)
+        if info is None:
+            dropped.append(f"{t}（剧本 LoRA 表里没有）")
+            continue
+        who = ident.get(t)
+        if who is not None:
+            if not g.get("video_identity_enabled"):
+                dropped.append(f"{t}（视频身份 LoRA 未启用：config prompt_guard.video_identity_enabled）")
+                continue
+            if who not in present:
+                dropped.append(f"{t}（{who}不在画）")
+                continue
+            if g.get("identity_skip_back_facing") and back_facing(who, img_body, g):
+                dropped.append(f"{t}（{who}背对镜头）")
+                continue
+        add(t, info)
+    return loras, kept, dropped
+
+
+def lint_prompt(prompt: str, own_text: str, guard: dict | None = None) -> list[str]:
+    """own_text = 本镜原文（img / img+结束状态）。返回问题列表（空 = 通过）。只查系统该负责的部分：
+    原文要求遮脸 / 全黑而提示词里仍有对立的系统词"""
+    g = guard or DEFAULT_PROMPT_GUARD
+    out = []
+    for key, bad in CONFLICT_PAIRS:
+        if any(w in own_text for w in g[key]):
+            hit = [w for w in bad if w in prompt and w not in own_text]
+            if hit:
+                out.append(f"原文含「{next(w for w in g[key] if w in own_text)}」，提示词里却有系统词「{'、'.join(hit)}」")
+    return out
 
 
 def is_dark(img_body: str, bible: Bible | None = None) -> bool:
@@ -205,6 +357,29 @@ def without_possessive_places(text: str, bible: Bible | None = None) -> tuple[st
     rx = possessive_re(bible)
     names = [m.group(1) for m in rx.finditer(text)]
     return rx.sub("", text), names
+
+
+POSSESSIVE_NOT_BODY = ("手机", "手表", "手提", "手帕", "手套", "身份", "面试", "头像", "背包", "脚本")
+
+
+def without_possessive_mentions(text: str, bible: Bible | None = None) -> tuple[str, list[str], list[str]]:
+    """FIX（P0 ⑦，chain_audit A4）：“提到名字” ≠ “人在画面”。去掉所有格地点（同 without_possessive_places），
+    再去掉“X 的 <物件>”里的人名（“顾沉的西装衣领”只是道具归属）；“X 的 <身体部位 / 背影>”保留（人在画）。
+    → (文本, 地点所有格的人名, 物件所有格的人名)"""
+    b = bible or load_bible()
+    text, places = without_possessive_places(text, b)
+    names = tuple(c.name for c in b.characters) or ("林晚", "顾沉", "陈宇")
+    body = tuple(prompt_guard(getattr(b, "root", None))["possessive_body_words"])
+    rx = re.compile("(" + "|".join(map(re.escape, names)) + ")的")
+    objects: list[str] = []
+
+    def sub(m: re.Match) -> str:
+        rest = text[m.end():m.end() + 6]
+        if rest.startswith(body) and not rest.startswith(POSSESSIVE_NOT_BODY):
+            return m.group(0)
+        objects.append(m.group(1))
+        return ""
+    return rx.sub(sub, text), places, objects
 
 
 @dataclass
@@ -245,6 +420,16 @@ class CompiledShot:
     h3_missing: list[str] = field(default_factory=list)   # 笔记本草稿缺英文的块：body / soundscape
     h3_base_prompt: str = ""         # 覆盖前的 H3 提示词（剧本 / 笔记本草稿），项目方修改的起点
     h3_override: dict | None = None  # 项目方覆盖（ShotEdit.h3_prompt_override + 元数据），apply_edit 填写
+    # FIX（ep02_iter P0）：视频 LoRA 按在画角色确定（与 GPU 道无关）；去掉的触发词及原因；只被提到（物件所有格）的角色；
+    # 编译后静态校验（原文遮脸 / 全黑却仍有对立系统词）
+    video_loras_dropped: list[str] = field(default_factory=list)
+    image_loras_dropped: list[str] = field(default_factory=list)   # 出图身份 LoRA 没挂的原因（不在画 / 背对）
+    # CHAIN F8：H3 全是 cfg 1（BasicGuider），video_negative 不参与采样、提交时 negative=""；只留作记录，不生效
+    video_negative_status: str = "ignored_cfg1"
+    video_music_warn: list[str] = field(default_factory=list)
+    h3_lips_closed_added: bool = False   # 纯独白镜由编译器补了嘴唇闭合句（项目方 2026-10-31“加”）   # CHAIN F5：配乐过 H3-S3 的提示（warn，不改剧本）
+    mentioned_only: list[str] = field(default_factory=list)
+    prompt_lint: list[str] = field(default_factory=list)
 
 
 def _strip_triggers(text: str, triggers: list[str]) -> str:
@@ -280,7 +465,20 @@ def auto_lora_triggers(root=None) -> dict[str, list[dict]]:
         d = json.loads((project_root(root) / "config" / "auto_lora_triggers.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    return d.get("characters") or {}
+    banned = banned_image_loras(root)
+    return {name: [e for e in es if str(e.get("file") or "") not in banned and e.get("status") != "banned"]
+            for name, es in (d.get("characters") or {}).items()}
+
+
+def banned_image_loras(root=None) -> set[str]:
+    """契约 I8（config/gen_contract.json lora_banned）：已证伪 / 项目方去掉的出图 LoRA，编译器一律不挂、触发词剥掉。
+    lin_wan_qi_v1：同流程身份 0.926→0.823（RSI B6）+ 项目方 2026-10-31 决定“A. 去掉”"""
+    from .bible import project_root
+    try:
+        p = project_root(root) / "config" / "gen_contract.json"
+        return set((json.loads(p.read_text(encoding="utf-8")).get("lora_banned") or {}))
+    except (OSError, ValueError):
+        return set()
 
 
 def identity_triggers(names, existing, bible: Bible | None = None) -> list[tuple[str, str, float]]:
@@ -444,8 +642,10 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
                  image_style: str | None = None, boost_first: str = "", boost_last: str = "",
                  soundscape: str | None = None, music: str | None = None, episode_music: str | None = None,
                  bible: Bible | None = None, inject_looks: bool | None = None,
-                 inject_confirmed_only: bool = True) -> CompiledShot:
-    """boost_first / boost_last：项目方的“导演加强”（整集 + 镜头，已按顺序拼好），原样放在镜头内容之后、风格后缀之前。
+                 inject_confirmed_only: bool = True, framing_project: str | None = None) -> CompiledShot:
+    """framing_project：景别取舍开关按哪个项目键查（config/recipes/image_framing.json per_project；不给 = 按 bible.root 推断。
+    流水线跑出来、尚未成为独立项目的新剧（如 series10_v1）用它，避免被当成本仓库默认项目的同号集）。
+    boost_first / boost_last：项目方的“导演加强”（整集 + 镜头，已按顺序拼好），原样放在镜头内容之后、风格后缀之前。
     bible：规则（默认读当前项目 config/visual_bible.toml）；inject_looks：None = 按 [looks] inject；
     inject_confirmed_only=False 只给 bible_diff --inject-preview 预览用（正式编译只注入项目方确认过的集）"""
     b = bible or load_bible()
@@ -453,6 +653,7 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
     if image_style is None:
         image_style = g.image_suffix or b.scrub(b.image_style_fallback)
     by_trigger = {t.trigger: t for t in g.lora_triggers}
+    available_loras = set(available_loras) - banned_image_loras(b.root)     # 契约 I8：禁用 LoRA 不挂、触发词剥掉
 
     def loras_for(triggers: list[str], dropped: list[str]) -> tuple[list[str], list[tuple[str, float]]]:
         kept, loras = [], []
@@ -469,12 +670,17 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
 
     dropped: list[str] = []
     img_kept, img_loras = loras_for(shot.img_triggers, dropped)
-    vid_kept, vid_loras = loras_for(shot.motion_triggers, dropped)
+    # 只给 legacy_video_prompt（死字段，不进 H3）用，保持旧口径
+    vid_kept = [t for t in shot.motion_triggers if t in by_trigger and by_trigger[t].file in available_loras]
 
     img_body = _strip_triggers(shot.img_prompt, shot.img_triggers)
     reasons = classify_adult(ep, shot, b)
     lock_names = [c.name for c in g.character_locks]
     names = present_characters(shot, img_body, lock_names + [c.name for c in b.characters if c.name not in lock_names], b)
+    guard = prompt_guard(b.root)
+    # FIX P0（C2/E3）：视频 LoRA 只看剧本触发词 + 在画角色（+ 是否背对），不看 available_loras
+    vid_loras, _vid_used, vid_dropped = video_loras_for(shot.motion_triggers, names, img_body, by_trigger, guard)
+    mentioned = sorted({n for n in without_possessive_mentions(img_body, b)[2] if n not in names})
     rules = {c.name: c for c in b.characters}
     # 出图身份 LoRA 触发词放在所有触发词最前（M10：pose_* 仍在其它触发词之后）。触发词总是保留（gpu3 按
     # LORA_REGISTRY accepted + 触发词加载）；本机有该文件时才进 image_loras
@@ -485,6 +691,21 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
     files = {f for _t, f, _s in ident}
     img_loras = [(f, s) for _t, f, s in ident if f and f in available_loras] + \
         [x for x in img_loras if x[0] not in files]
+    # FIX（ep02_iter，chain_audit C2）：出图身份 LoRA 按“在画且不背对”挂（触发词也一并去掉）
+    img_id_dropped = []
+    id_trig = {str(e.get("trigger")): (name, str(e.get("file") or "")) for name, es in auto_lora_triggers(b.root).items()
+               for e in es if e.get("trigger") and e.get("kind", "image") == "image"}
+    for t in list(img_kept):
+        if t not in id_trig:
+            continue
+        who, f = id_trig[t]
+        why = (f"{who}不在画" if who not in names else
+               f"{who}背对镜头" if guard.get("image_identity_skip_back_facing") and back_facing(who, img_body, guard)
+               else None)
+        if why:
+            img_kept.remove(t)
+            img_loras = [x for x in img_loras if x[0] != f]
+            img_id_dropped.append(f"{t}（{why}）")
 
     def lock(c) -> str:
         extra = b.scrub(rules[c.name].identity_extra) if c.name in rules and rules[c.name].identity_extra else ""
@@ -499,11 +720,38 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
     material_text = shot.img_prompt + ("，" + "，".join(frags) if frags else "")
     materials = [m for m in material_terms(material_text, present=set(names), bible=b)
                  if not any(m in lk for lk in locks)]   # 锁里已有（旧剧本）就不重复
+    # K-REN-101（PROMPT 2026-10-31）：按景别只写画面里看得见的造型部件，首句先写景别构图（config/recipes/image_framing.json 开关）
+    frame_size = FR.size_of(img_body) if FR.enabled(shot.episode, shot.index, b.root, project=framing_project) else None
+    framing_lead = FR.lead(frame_size)
+    subject = None
+    two_shot = ""
+    if FR.hidden_words(frame_size) and not FR.lower_focus(shot.img_prompt, kept_triggers=img_kept):
+        locks = [FR.filter_parts(lk, frame_size) for lk in locks]
+        frags = [FR.filter_parts(fg, frame_size) for fg in frags]
+        img_body = FR.filter_parts(img_body, frame_size)
+    if frame_size:
+        # K-REN-123（IMGGEN 第二轮）：特写按主体（脸 / 局部）写构图约束；脸部特写去掉站姿 / 全身分句
+        subject = FR.closeup_subject(img_body, frame_size)
+        if subject == "face":
+            img_body = FR.strip_fullbody(img_body)
+        if subject in ("part", "object"):
+            # REFLOCK 11-01（ep05-S3/S5、ep10-S8 局部大特写出成带脸的中景）：角色锁里的脸 / 发型 / 身材描写会把模型拉回人像，
+            # 局部特写只留锁里与这个局部相关的分句（例：指甲）；锁一句都不剩就整条不放
+            locks = [x for x in (FR.part_lock(lk, FR.part_name(img_body)) for lk in locks) if x]
+        framing_lead = FR.closeup_lead(frame_size, subject, img_body)
+        two_shot = FR.two_shot_clause(len(names), subject)
+        if two_shot:
+            framing_lead = framing_lead + "，" + two_shot
+        # 材质条目按“过滤后”的可见文字重新匹配（漆皮短裙不在画面里就不补漆皮条目）
+        material_text = img_body + ("，" + "，".join(frags) if frags else "")
+        materials = [m for m in material_terms(material_text, present=set(names), bible=b)
+                     if not any(m in lk for lk in locks) and FR.visible(m, frame_size)]
     # 项目方 2026-10-30：规格词由系统自动补；写作者原文里已有同一条目就不再追加（去重）
     scene_seg = scene_segment(shot, g)      # S3：【场景】段（场景表 + 本镜场景细节原文；旧剧本为空）
     first_own = "，".join([*locks, *frags, img_body, scene_seg])
-    image_prompt = _join("，".join(img_kept), *locks, *frags, img_body, scene_seg,
-                         *(t for t in corrector_terms(img_body, adult=bool(reasons), bible=b) if t not in first_own),
+    image_prompt = _join("，".join(img_kept), framing_lead, *locks, *frags, img_body, scene_seg,
+                         *(t for t in corrector_terms(img_body, adult=bool(reasons), bible=b)
+                           if t not in first_own and not (subject in ("part", "object") and FR.FACE_TERM_RE.search(t))),
                          *materials, boost_first, lens_term(image_style, b), image_style)
 
     motion_body = _strip_triggers(shot.motion_prompt, shot.motion_triggers)
@@ -533,6 +781,12 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
     v_music, v_music_src = H3.resolve_music(music, H3.parse_h3(shot.h3_prompt)["fields"].get(H3.FIELDS[2])
                                             if getattr(shot, "h3_prompt", "") else None, ep_music_default,
                                             getattr(shot, "music_cue", "") or "")
+    h3_text = h3.text
+    # 项目方 2026-10-31（独白镜加嘴唇闭合）“加”：纯独白镜、人在画 → 正文第一句补官方嘴唇闭合句（剧本文字不改）
+    lips_added = False
+    if names and H3.monologue_only(shot) and h3_text.startswith(H3.ALIGN_PREFIX):
+        new = H3.add_lips_closed(h3_text)
+        lips_added, h3_text = new != h3_text, new
     legacy_video_prompt = _join("，".join(vid_kept), motion_body, g.motion_suffix, video_style, b.video_tail) \
         + soundscape_block(v_sound, v_music)
 
@@ -543,10 +797,11 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
     last_own = "，".join([end, *locks, *frags])
     last_materials = [m for m in material_terms(material_text + "，" + end, present=set(names), bible=b,
                                                 already=last_own)
-                      if not any(m in lk for lk in locks)]
+                      if not any(m in lk for lk in locks)
+                      and (FR.lower_focus(shot.img_prompt) or FR.visible(m, frame_size))]
     last_prompt = _join("，".join(img_kept), b.last_frame_keep + end, *locks, *frags,
                         *(t for t in corrector_terms(img_body + "，" + end, adult=bool(reasons), bible=b)
-                          if t not in last_own),
+                          if t not in last_own and not (subject in ("part", "object") and FR.FACE_TERM_RE.search(t))),
                         *last_materials, boost_last, lens_term(image_style, b), image_style) \
         if end or boost_last else ""
 
@@ -556,7 +811,8 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
         image_prompt=image_prompt,
         image_negative=_negative(g.base_negative, ep.negative_extra, b.style_negative, safe_negative, bible=b),
         image_loras=img_loras,
-        video_prompt=h3.text, legacy_video_prompt=legacy_video_prompt, h3_prompt_source=h3.source,
+        video_prompt=h3_text, legacy_video_prompt=legacy_video_prompt, h3_prompt_source=h3.source,
+        h3_lips_closed_added=lips_added,
         h3_frames=h3.frames, h3_missing=h3.missing,
         video_negative=_negative(b.video_negative, g.base_negative, b.style_negative, bible=b),
         video_loras=vid_loras, dropped_triggers=dropped,
@@ -565,6 +821,9 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
         video_soundscape=v_sound or "N/A", video_soundscape_source=v_sound_src, video_music=v_music,
         video_music_source=v_music_src, post_music=post_music,
         bible_version=b.version, look_fragments=frags, banned_hits=b.banned_hits(shot.img_prompt),
+        video_loras_dropped=vid_dropped, image_loras_dropped=img_id_dropped, mentioned_only=mentioned, video_music_warn=H3.music_warnings(v_music),
+        prompt_lint=[f"首帧：{x}" for x in lint_prompt(image_prompt, img_body, guard)] +
+        ([f"尾帧：{x}" for x in lint_prompt(last_prompt, img_body + "，" + end, guard)] if last_prompt else []),
     )
 
 
@@ -577,7 +836,8 @@ def present_characters(shot: Shot, img_body: str, names: list[str], bible: Bible
         vis = {c.name for c in cast if c.visible}
         return [n for n in names if n in vis]
     b = bible or load_bible()
-    people_text, possessive = without_possessive_places(img_body, b)
+    people_text, possessive, objects = without_possessive_mentions(img_body, b)   # FIX P0 ⑦：物件所有格只是提到
+    possessive = possessive + objects    # 所有格的主人又以“他”出现在画面里 → 在画（同地点所有格规则）
     rules = {c.name: c for c in b.characters}
 
     def present(name: str) -> bool:

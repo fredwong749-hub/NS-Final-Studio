@@ -1,0 +1,110 @@
+[
+ {
+  "id": "V1_count_ep02",
+  "title": "r35#1 ↻ 再生成 覆盖 ep02",
+  "path": "/#ep02",
+  "wait": 9000,
+  "steps": [
+   {
+    "click": "=审片",
+    "after": 2500
+   },
+   {
+    "js": "const rows=[...document.querySelectorAll('.v3-row[data-shot]')]; let ver=0, draft=0, verBtn=0, draftBtn=0, btnW=[], overFace=0; for (const r of rows) { for (const t of [...r.querySelectorAll('.v3-frames .v3-frame')]) { const tag=(t.querySelector('.v3-tag')?.innerText||''); const hasNum=/#\\s*\\d+/.test(tag); const b=[...t.querySelectorAll('button')].find(b=>/再生成/.test(b.innerText+(b.title||'')+(b.getAttribute('aria-label')||''))); if (hasNum) { ver++; if (b) verBtn++; } else { draft++; if (b) draftBtn++; } if (b) { const br=b.getBoundingClientRect(), tr=t.getBoundingClientRect(); btnW.push(Math.round(br.width)); if (br.top - tr.top > tr.height*0.12) overFace++; } } } const all=[...document.querySelectorAll('button')].filter(b=>/↻ 再生成/.test(b.innerText)).length; return {rows:rows.length, versionedTiles:ver, versionedWithBtn:verBtn, otherTiles:draft, otherWithBtn:draftBtn, findByText_innerText:all, btnWidths:[...new Set(btnW)], btnBelowTopBand:overFace};"
+   },
+   {
+    "shot": "a"
+   }
+  ]
+ },
+ {
+  "id": "V1_count_ep01",
+  "title": "r35#1 ↻ 再生成 覆盖 ep01",
+  "path": "/#ep01",
+  "wait": 9000,
+  "steps": [
+   {
+    "click": "=审片",
+    "after": 2500
+   },
+   {
+    "js": "const rows=[...document.querySelectorAll('.v3-row[data-shot]')]; let ver=0, draft=0, verBtn=0, draftBtn=0; for (const r of rows) { for (const t of [...r.querySelectorAll('.v3-frames .v3-frame')]) { const tag=(t.querySelector('.v3-tag')?.innerText||''); const hasNum=/#\\s*\\d+/.test(tag); const b=[...t.querySelectorAll('button')].find(b=>/再生成/.test(b.innerText+(b.title||'')+(b.getAttribute('aria-label')||''))); if (hasNum) { ver++; if (b) verBtn++; } else { draft++; if (b) draftBtn++; } } } const all=[...document.querySelectorAll('button')].filter(b=>/↻ 再生成/.test(b.innerText)).length; return {rows:rows.length, versionedTiles:ver, versionedWithBtn:verBtn, otherTiles:draft, otherWithBtn:draftBtn, findByText_innerText:all};"
+   },
+   {
+    "shot": "a"
+   }
+  ]
+ },
+ {
+  "id": "V1_dialog",
+  "title": "r35#1 弹窗焦点 + Esc 回焦点",
+  "path": "/#ep02",
+  "wait": 9000,
+  "steps": [
+   {
+    "click": "=审片",
+    "after": 2500
+   },
+   {
+    "click": "再生成",
+    "after": 1500
+   },
+   {
+    "js": "const m=document.querySelector('.ds-modal'); const a=document.activeElement; return {modal:!!m, role:m?.getAttribute('role'), title:m?.querySelector('h2,h3,header')?.innerText, focusIsTextarea:a?.tagName==='TEXTAREA', mode:document.querySelector('.regen-mode')?.innerText};"
+   },
+   {
+    "shot": "a"
+   },
+   {
+    "tabtrap": ".ds-modal",
+    "n": 6
+   }
+  ]
+ },
+ {
+  "id": "V2_candlabel",
+  "title": "r35#2 ep02 S1 尾帧候选标签 + 候选弹窗",
+  "path": "/#ep02",
+  "wait": 9000,
+  "steps": [
+   {
+    "click": "=审片",
+    "after": 2500
+   },
+   {
+    "js": "const r=document.querySelector('.v3-row[data-shot=\"ep02-S1\"]'); const tiles=[...r.querySelectorAll('.v3-frames .v3-frame')]; const txt=tiles.map(t=>t.innerText.replace(/\\s+/g,' ')); const lbls=tiles.map(t=>[...t.querySelectorAll('.v3-cand-lbl')].map(x=>x.innerText+' | title='+(x.title||''))); const rowAll=r.innerText+' '+[...r.querySelectorAll('[title]')].map(e=>e.title).join(' '); return {tiles:txt, candLabels:lbls, internalInRow:(rowAll.match(/ASSETMASTER|PRODUCER|接手登记/g)||[]), pageInternal:(document.body.innerText.match(/ASSETMASTER|PRODUCER|接手登记/g)||[]).length};"
+   },
+   {
+    "shot": "a"
+   },
+   {
+    "clickAt": "(() => { const r=document.querySelector('.v3-row[data-shot=\"ep02-S1\"]'); const t=[...r.querySelectorAll('.v3-frames .v3-frame')][1]; t.scrollIntoView({block:'center'}); const img=t.querySelector('img')||t; const b=img.getBoundingClientRect(); return [b.x+b.width/2, b.y+b.height*0.8]; })()",
+    "after": 2500
+   },
+   {
+    "js": "const m=document.querySelector('.ds-modal, [role=dialog]'); if(!m) return {modal:false}; const txt=m.innerText; const titles=[...m.querySelectorAll('[title],[alt],[data-zoom-label]')].map(e=>(e.title||'')+' '+(e.alt||'')+' '+(e.getAttribute('data-zoom-label')||'')).join(' '); return {modal:true, head:txt.slice(0,200).replace(/\\s+/g,' '), internal:((txt+' '+titles).match(/ASSETMASTER|PRODUCER|接手登记/g)||[]), hasRecipeLabel:/新配方|旧配方/.test(txt+titles), labels:[...new Set((txt).match(/暂定|新配方|旧配方|候选 ?#\\d+/g)||[])]};"
+   },
+   {
+    "shot": "b"
+   }
+  ]
+ },
+ {
+  "id": "V2_candlabel_ep01",
+  "title": "r35#2 全站候选标签扫 ep01/ep03",
+  "path": "/#ep03",
+  "wait": 9000,
+  "steps": [
+   {
+    "click": "=审片",
+    "after": 2500
+   },
+   {
+    "js": "const all=document.body.innerText+' '+[...document.querySelectorAll('[title]')].map(e=>e.title).join(' '); return {internal:(all.match(/ASSETMASTER|PRODUCER|接手登记/g)||[]).length, labels:[...new Set([...document.querySelectorAll('.v3-cand-lbl')].map(x=>x.innerText))]};"
+   },
+   {
+    "shot": "a"
+   }
+  ]
+ }
+]

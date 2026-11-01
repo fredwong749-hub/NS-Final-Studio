@@ -22,7 +22,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -33,6 +33,9 @@ from ns_render.comfy_client import ComfyClient, ComfyError
 from ns_schema.edits import AuditOverrideRequest, Delivery, H3PromptOverride, ShotEdit, Take
 from ns_api import assets as A
 from ns_api import shotinfo as SI
+from ns_api import api_snapshot as API_SNAP  # DATAALIGN P2：/api/episodes、集摘要的磁盘快照（预热期间用）
+from ns_api import unified_stale as UST  # DATAALIGN：unified 出图版本的过期基准
+from ns_api import shot_cast as SCAST  # DATAALIGN：镜头卡人物 / 造型 / 脸与出图同源（docs/DATA_MAP.md）
 from ns_api import readiness as RD  # 就绪闸门 + 一条链（docs/audit/shot_readiness_and_continuity.md §4）
 from ns_api.looks import router as looks_router
 from ns_api import projects as PJ  # T42 项目 / 新建剧向导 / 编排 / 看板
@@ -40,6 +43,7 @@ from ns_api import project_ctx as PJC
 from ns_api import sop as SOP  # SOP 阶段 S1–S5 / 关口 G1–G5（只读）
 from ns_api import h3view as H3V  # H3 提示词（SOP §9A）：来源选择 + 四块 + lint
 from ns_api import explicit as EX  # 露骨红标：项目方自行处理，不做任何自动动作
+from ns_api import owner_gates as OG  # fredw-92/UXF1：项目方在画布里拍板（同命令行记录逻辑）
 from ns_api import gpu3_bridge as GB  # gpu3 桥：H3 修改 / 审计豁免 / 出视频闸门（docs/canvas.md §7.6）
 
 from ns_render import endpoints as RENDER_EP  # noqa: E402  W2：出图地址按卡解析（config/render_endpoints.json + 环境变量）
@@ -51,7 +55,7 @@ BOOST_LLM_CONFIG = P.ROOT / "config" / "director_boost_llm.json"
 CAMERA_RE = re.compile(r"^((?:extreme )?slow motion|camera [^，]+|static camera[^，]*|handheld[^，]*|"
                        r"orbit[^，]*|push in[^，]*|tracking[^，]*)", re.I)
 
-app = FastAPI(title="NS-Final Studio 画布")
+app = FastAPI(title="momoso Agentic Drama Studio API")
 app.add_middleware(GZipMiddleware, minimum_size=1024)  # T60：集数据 JSON 压缩（SSE 流 Starlette 默认不压）
 app.include_router(A.router)
 app.include_router(looks_router)
@@ -96,6 +100,48 @@ from ns_api import asset_edit as AED  # noqa: E402  §E 资产参考图组 / ima
 app.include_router(AED.router)
 from ns_api import episode_produce as EPROD  # noqa: E402  fredw-92/EB 整集出片：按镜头铺到所有渲染道（/api/episodes/{n}/produce）
 app.include_router(EPROD.router)
+from ns_api import material_readiness as MRD  # noqa: E402  PREP 出片前资料闸门（/api/episodes/{ep}/readiness）
+app.include_router(MRD.router)
+from ns_api import post_settings as PST  # noqa: E402  UX4：成片对白来源只读（/api/post/dialogue-source）
+app.include_router(PST.router)
+from ns_api import revisions as REV  # noqa: E402  UX5-B P0 资产版本 / 依赖已更新 / 影响面（只读）
+app.include_router(REV.router)
+from ns_api import cuts as CUTS  # noqa: E402  UX5 成片页：成片列表 / 落后于定稿的镜头 / 合成新对照版（不覆盖）
+app.include_router(CUTS.router)
+from ns_api import revisions_p1 as REV1  # noqa: E402  UX6 资产二次修改 P1：set-current / 回滚 / 快照 / 保留旧版 / 成片过期 / LoRA 总表
+app.include_router(REV1.router)
+from ns_api import asset_center_p1 as ACP1  # noqa: E402  UX6 资产中心 B6–B10：版本链 / 另存 / 道具 / 音色提议 / 提示词模板
+app.include_router(ACP1.router)
+from ns_api import story_runs as STORY  # noqa: E402  UIRSI 新建剧本：提纲 → 写作链 P0→P4（异步、逐段可看可改、返修、送导入）
+app.include_router(STORY.router)
+from ns_api import thumbs as THUMBS  # noqa: E402  UIRSI 缩略图（/api/thumb，缓存 data/_cache/thumbs）
+app.include_router(THUMBS.router)
+from ns_api import auth as AUTH  # noqa: E402  UIRSI 账户登录：项目方闸门从登录会话取身份（不再要原话）+ 写操作审计 data/audit/
+AUTH.install(app)
+from ns_api import voice_preview as VPREV  # noqa: E402  UIRSI 音色试听（本机 Kokoro）/ 一键换音色 / 旁白样本
+app.include_router(VPREV.router)
+from ns_api import shot_audio as SHAUD  # noqa: E402  UIRSI 对白逐句试听 / 配乐（B4）
+app.include_router(SHAUD.router)
+from ns_api import takes_ui as TAKESUI  # noqa: E402  UIRSI 画布候选版本（BE-5 配套）/ 撤销“用这张”
+app.include_router(TAKESUI.router)
+from ns_api import season as SEASON  # noqa: E402  UIRSI 全剧总览（集 × 镜结构 + 衔接）
+app.include_router(SEASON.router)
+from ns_api import project_settings as PSET  # noqa: E402  回退补回：项目设置页（旧项目向导 44 项）
+app.include_router(PSET.router)
+from ns_api import live as LIVE  # noqa: E402  UIRSI 实时推送 /api/events（SSE）+ 分段进度 /api/progress
+app.include_router(LIVE.router)
+from ns_api import gpu_live as GPULIVE  # noqa: E402  GPUVIEW 每张卡在做什么（comfy_tag）/ 进度 / 队列 / 温度功耗 /api/gpu/live
+app.include_router(GPULIVE.router)
+from ns_api import render_tasks as RTASKS  # noqa: E402  GPUVIEW 渲染任务中心 /api/render-tasks（顶栏 + 画布底栏同一份）
+app.include_router(RTASKS.router)
+from ns_api import edits as EDITS  # noqa: E402  EDITDEL 处处可编辑：反馈 → 逻辑模型修改计划 → 出图 / 视频 / 写作改写，进版本链
+app.include_router(EDITS.router)
+from ns_api import trash as TRASH  # noqa: E402  EDITDEL 删除 → 回收站 data/_trash（可还原；永久删除要 by=owner + 确认短语 + 名称）
+app.include_router(TRASH.router)
+from ns_api import character_hub as CHUB  # noqa: E402  ASSETUX 人物资产页：一人一页、点选即生效（身份脸 / 设定图 / 单品挂造型 / 上传单品）
+app.include_router(CHUB.router)
+from ns_api import producer as PRODUCER  # noqa: E402  PRODUCER 制作监督：/api/producer/status、pause / resume / gate（读 data/producer/registry.json）
+app.include_router(PRODUCER.router)
 app.router.on_startup.append(EPROD.resume_on_startup)   # 在 JOBS.restore 之后：被重启打断的任务按可恢复错误重试
 VJ.get_script = lambda: _script
 
@@ -106,6 +152,7 @@ def _video_done(shot_id: str, take):
 
 
 VJ.on_done = _video_done
+VJ.on_qc_changed = lambda: _summary_cache.invalidate()
 PJ.resume_on_startup()
 _script = P.load_script()
 
@@ -173,6 +220,19 @@ def _camera(motion: str) -> str:
     body = re.sub(r"^[a-z0-9_]+，", "", motion)
     m = CAMERA_RE.match(body)
     return m.group(1).strip() if m else ""
+
+
+def _auto_locked(takes: dict, act: dict) -> dict:
+    """takes.json locked_by[stage] = {by:"auto", n}（episode_produce 自动测试定稿）且 n 仍是定稿版 / 当前视频 → {stage: n}"""
+    out = {}
+    lk = takes.get("locked") or {}
+    for st, rec in (takes.get("locked_by") or {}).items():
+        if not isinstance(rec, dict) or rec.get("by") != "auto" or rec.get("n") is None:
+            continue
+        cur = (act.get(st) or {}).get("n") if st == "video" else lk.get(st)
+        if cur == rec["n"]:
+            out[st] = rec["n"]
+    return out
 
 
 def _review(shot_id: str, act: dict) -> dict:
@@ -303,20 +363,35 @@ def _stale_split(shot_id: str, take: dict, s, compiled, edit: ShotEdit, act: dic
         prompt = _strip_plate(prompt)            # 尾帧渲染时在第一句后插了身份底板说明（不是编译器输出）
     if take.get("workflow") in FE.NO_PROMPT_WORKFLOWS or take.get("source") in FE.NO_PROMPT_SOURCES:
         target = ""                              # 上传 / 引用的版本没有提示词可比
+    # DATAALIGN（UIPIXEL P1）：唯一出图路径（unified_frame）的版本和“同一条路径现在拼出的正文”比，不和旧编译器比
+    # （旧比较对 unified 版本必然失败 → 一出来就“剧本已改”）；见 ns_api/unified_stale.py
+    unified = UST.is_unified(take) and stage in ("image", "last") and take.get("basis_prompt") is None         and take.get("mode") not in FE.EDIT_MODES
+    if unified and target:
+        try:
+            ub = UST.unified_bodies(_script, P.find_shot(_script, shot_id)[0], s)
+        except Exception:  # noqa: BLE001
+            ub = None
+        if ub and ub.get(stage):
+            target = UST.match_target(prompt, ub[stage]) if stage == "image" else ub[stage]
+    if UST.is_video10(take):
+        target = ""                              # VIDEO10 片子：不和画布 H3 视图比提示词，只按 from_first 判首帧已换
     v1_video = stage == "video" and bool((take.get("params") or {}).get("first"))   # §D 视频任务出的版本（W3）
     if v1_video:
         vp = take["params"]
         # 项目方给的提示词（请求覆盖 / 画布覆盖）不和剧本比；剧本版按本版帧数重算对齐句后再比
         target = "" if vp.get("prompt_source") in ("request", "owner_edit") else \
             HV.realign(target, vp.get("frames") or take.get("frames") or 0) if target else target
+        if target and vp.get("last_frame_used") is False:   # RR：只给首帧时系统对齐句是 I2VA 句，基准同样换
+            old_style = HV.align_first_only(target)      # FIX P0 ③ 之前出的版本：正文仍带 Picture 2 句
+            target = old_style if prompt.endswith(old_style) else HV.i2v_prompt(target)[0]
     edited_after = bool(edit.updated_at and edit.updated_at > created)
     # 锁脸前缀（"图1是林晚的面部参考：…按以下描述。"）等由渲染器加在最前，比较时只看结尾
     if target and not prompt.endswith(target):
         raw = SI.strip_triggers(s.img_prompt if stage != "video" else s.motion_prompt)
         if edited_after and any(getattr(edit, f, None) for f in STAGE_EDIT_FIELDS.get(stage, EDIT_PROMPT_FIELDS)):
             local.append("提示词已改")
-        elif stage != "last" and raw and raw[:12] not in prompt and SI.action_text(raw)[:12] not in prompt:
-            local.append("剧本已改")
+        elif not unified and stage != "last" and raw and raw[:12] not in prompt and SI.action_text(raw)[:12] not in prompt:
+            local.append("剧本已改")                 # 旧路径的猜法；unified 版本按 inputs_sha 判（下一分支）
         elif why := _inputs_changed(shot_id, take, look_hash):
             if why == "inputs":                  # F4：造型 / 参考覆盖 / 时间线变了（不是编译器升级）
                 local.append("本镜输入已改")      # why == "look" → 下面记「造型已改」
@@ -363,6 +438,28 @@ def _stale_split(shot_id: str, take: dict, s, compiled, edit: ShotEdit, act: dic
     return local, glob
 
 
+def _dep_stale(shot_id: str, take: dict, local: list[str] | None = None, ledger: dict | None = None) -> list[dict]:
+    """UX5-B P0：“依赖已更新”（docs/ux_round5/B_revision.md §2.4）。只标记：不并入 stale（整集出片 EB 按 stale 判断要不要重出），
+    卡片显示单独的角标。来源：take.deps 里的资产版本 ≠ 当前；G1：首帧 / 尾帧 inputs_sha ≠ 当前（与提示词是否变无关，
+    已报「本镜输入已改」「造型已改」的不重复）；旧视频：基底配方原样字段 ≠ 当前配置"""
+    try:
+        from ns_agent import asset_revs as AR
+        out = AR.stale_deps(take, P.ROOT, ledger)
+        stage = take.get("stage")
+        if stage in ("image", "last") and not ({"本镜输入已改", "造型已改"} & set(local or [])):
+            from ns_agent.state_timeline import shot_inputs_sha
+            d = AR.inputs_dep(take, shot_inputs_sha(shot_id, P.ROOT))
+            if d:
+                out.append(d)
+        if stage == "video":
+            d = AR.vbase_drift(take, P.ROOT)
+            if d and not any(x["key"] == d["key"] for x in out):
+                out.append(d)
+        return out
+    except Exception:  # noqa: BLE001 — 算不出不影响画布
+        return []
+
+
 def _stale(shot_id: str, take: dict, compiled, act: dict) -> list[str]:
     """兼容旧调用：只返回本镜原因"""
     _, s = P.find_shot(_script, shot_id)
@@ -396,6 +493,7 @@ class Ctx:
         self.looks_by_id = {lk.id: lk for lk in store.lookbook().looks}
         self._ep: dict[int, dict] = {}
         self.slug = RD.current_slug()
+        self.cast = SCAST.CastCtx(_script)   # DATAALIGN：剧本 **人物** 行 + shot_looks 登记（与 asset_refs.resolve_shot 同口径）
         self._chains: dict[str, dict] = {}
 
     def chain(self, shot_id: str) -> dict:
@@ -413,6 +511,16 @@ class Ctx:
         if n not in self._ep:
             self._ep[n] = load_episode_edit(n)
         return self._ep[n]
+
+    def rev_ledger(self) -> dict:
+        """UX5-B：资产版本账本（vN 文案用），一次请求读一次"""
+        if not hasattr(self, "_ledger"):
+            try:
+                from ns_agent.asset_revs import read_ledger
+                self._ledger = read_ledger(P.ROOT)
+            except Exception:  # noqa: BLE001
+                self._ledger = {}
+        return self._ledger
 
 
 def _last_frame_info(shot_id: str, edit: ShotEdit, act: dict) -> dict:
@@ -432,6 +540,8 @@ def _last_frame_info(shot_id: str, edit: ShotEdit, act: dict) -> dict:
             src = "upload"
         elif lt:
             src = lt.get("source") or "gen"
+            if src not in ("gen", "upload", "next", "video"):
+                src = "gen"   # DATAALIGN（PW-011）：出图线登记的版本（source=pipeline）就是生成的独立尾帧，前端只认这四种
         elif actual:
             src = "video"
     target = None
@@ -440,10 +550,12 @@ def _last_frame_info(shot_id: str, edit: ShotEdit, act: dict) -> dict:
     elif src == "upload":
         target = _url(edit.last_frame) if edit.last_frame and edit.last_frame != "next" else (
             _url(lt["file"]) if lt else None)
-    elif src == "gen":
-        target = _url(lt["file"]) if lt else None
     elif src == "video":
         target = actual
+    else:
+        # gen，以及登记进来的出图线版本（source=pipeline 等）：当前尾帧就是这一版。
+        # DATAALIGN（PW-011）：以前只认 "gen"，pipeline 版本的 last_frame_target 恒为 null，监督面板 / 进度都当“没有尾帧”
+        target = _url(lt["file"]) if lt else None
     return {"last_frame_source": src, "last_frame_target": target, "last_frame_actual": actual,
             "last_frame_take": lt["n"] if lt else None, "next_shot": nxt, "next_first_frame": next_first,
             "last_supported": last_supported()}
@@ -522,10 +634,12 @@ def _shot_summary(ep, s, ctx: Ctx | None = None) -> dict:
     last_prompt, last_prompt_src = _last_prompt(compiled, edit, s)
     sl = ctx.shot_looks(s)
     look_hash = sl.look_hash if sl else None
-    stale, stale_global = {}, {}
+    stale, stale_global, stale_deps = {}, {}, {}
     for k, v in act.items():
         if v:
             stale[k], stale_global[k] = _stale_split(s.id, v, s, compiled, edit, act, look_hash, last_prompt, ep_edit)
+            if deps := _dep_stale(s.id, v, stale[k], ctx.rev_ledger()):
+                stale_deps[k] = deps
     pending = [j for j in _jobs.values() if j.get("shot_id") == s.id and j["state"] in ("queued", "running")]
     lf = _last_frame_info(s.id, edit, act)
     count = {st: sum(1 for t in takes["takes"] if t["stage"] == st) for st in STAGES}
@@ -535,13 +649,15 @@ def _shot_summary(ep, s, ctx: Ctx | None = None) -> dict:
     hold = EX.hold(s, ctx.slug)
     return {
         "review": _review(s.id, act),
-        "stale": stale, "stale_global": stale_global,
+        "stale": stale, "stale_global": stale_global, "stale_deps": stale_deps,
         "id": s.id, "index": s.index, "adult": c.adult, "edited": bool(edit.updated_at),
         "camera": SI.camera_info(edit.camera, s.img_prompt, s.motion_prompt),
         "expression": SI.expression_info(edit.expression, s.img_prompt, s.motion_prompt),
         "img_summary": s.img_prompt[:60],
         "script_text": SI.script_text(s.img_note, s.motion_prompt),
-        "duration": {"seconds": getattr(s, "duration", 10), "source": getattr(s, "duration_source", "default")},
+        # DATAALIGN：剧本没写时长（None / 缺）= 10 秒兜底、标 default；/api/season 同一规则（两页总秒数一致）
+        "duration": {"seconds": getattr(s, "duration", None) if getattr(s, "duration", None) is not None else 10,
+                     "source": getattr(s, "duration_source", None) or ("script" if getattr(s, "duration", None) is not None else "default")},
         "image_prompt": compiled.image_prompt, "image_prompt_edited": bool(edit.image_prompt),
         # 视频提示词 = H3 官方四块提示词（gpu3 最终 > 剧本 **H3提示词** > 笔记本草稿）；旧版中文拼接只作历史
         "video_prompt": h3v["h3_prompt"],
@@ -559,7 +675,15 @@ def _shot_summary(ep, s, ctx: Ctx | None = None) -> dict:
         "storyboard": _storyboard(s),   # fredw-92/U4：剧本分镜字段原文（摘要缓存的 light_shot 不带）
         "first_frame": _url(act["image"]["file"]) if act["image"] else None,
         "first_frame_take": act["image"]["n"] if act["image"] else None,
+        # fredw-92/UXF1：当前首帧 / 尾帧是不是坏图（ns_render.image_check）；定稿版本号（与当前不同 = 当前是草稿）
+        "bad": {st: (P.bad_reason(act[st]) if act[st] else None) for st in ("image", "last")},
+        "locked_take": {st: (takes.get("locked") or {}).get(st) for st in ("image", "last")},
+        # fredw-92/UXF4（审查 N1）：整集出片“自动测试定稿”的阶段 → 版本号（仍是那一版定稿 / 当前视频才算）；
+        # 画布上标“自动定稿·待复审”，不算项目方定稿 / 通过
+        "auto_locked": _auto_locked(takes, act),
         "video": _url(act["video"]["file"]) if act["video"] else None,
+        # fredw-92/QCV：当前视频的运动量质检（ns_render.motion_qc；画布视频格角标“静止·不合格”/“结尾定住 Ns”）
+        "video_qc": _video_qc(act["video"]),
         "last_frame": lf["last_frame_actual"],       # 兼容 v1：= 视频实际尾帧
         **lf,
         "takes_count": count,
@@ -571,12 +695,24 @@ def _shot_summary(ep, s, ctx: Ctx | None = None) -> dict:
         "voiceover": s.voiceover.model_dump() if s.voiceover else None,
         "decor_state": s.decor_state,
         "look_hash": look_hash,
-        "characters": [A.character_brief(r, ctx.idx, ctx.looks_by_id) for r in sl.characters] if sl else [],
+        # DATAALIGN K-DATA-001：人选 = 剧本本镜 **人物** 行（在画 / 局部），造型字母 = 出图登记（A/B/C），脸 = 出图身份脸；
+        # 旧造型库只补插槽 / 冲突 / 本镜覆盖。剧本不属于登记了资产的项目 → 旧库原样
+        "characters": SCAST.merge(SCAST.shot_cast(ctx.cast, ep, s),
+                                  [A.character_brief(r, ctx.idx, ctx.looks_by_id) for r in sl.characters] if sl else []),
         "job": pending[0]["state"] if pending else None,
         "job_stage": pending[0]["stage"] if pending else None,
         "queue_pos": _queue_pos(pending[0]["id"]) if pending else None,
         **chain_info,
     }
+
+
+def _video_qc(take: dict | None) -> dict | None:
+    """take.qc.motion 的精简版 {verdict, labels, reasons, metrics}；没质检过 → None"""
+    mo = ((take or {}).get("qc") or {}).get("motion")
+    if not mo:
+        return None
+    return {"verdict": mo.get("verdict"), "labels": mo.get("labels") or [], "reasons": mo.get("reasons") or [],
+            "metrics": mo.get("metrics") or {}, "take": (take or {}).get("n")}
 
 
 def _chain_fields(ep, s, c, edit: ShotEdit, ep_edit: dict, act: dict, lf: dict, ctx: Ctx) -> dict:
@@ -608,10 +744,10 @@ def _chain_fields(ep, s, c, edit: ShotEdit, ep_edit: dict, act: dict, lf: dict, 
     if use_gpu3:   # 行内显示 = 出视频实际用的那一对；笔记本的版本号 / 过期 / 新版本提示都不属于这条链
         out.update({
             "first_frame": chain["first_frame"], "first_frame_take": chain["image_take"],
-            "video": chain["video"], "last_frame": chain["last_frame"],
+            "video": chain["video"], "video_qc": None, "last_frame": chain["last_frame"],
             "last_frame_target": chain["last_frame"], "last_frame_actual": chain["last_frame"],
             "last_frame_source": "gpu3" if chain["last_frame"] else None, "last_frame_take": None,
-            "stale": {}, "stale_global": {}, "score": {},
+            "stale": {}, "stale_global": {}, "stale_deps": {}, "score": {}, "bad": {}, "locked_take": {}, "auto_locked": {},
             "latest_take": {st: None for st in STAGES},
         })
         if lf.get("next_shot"):
@@ -634,9 +770,63 @@ def _episode_readiness(ep, shots: list[dict], ctx: Ctx) -> dict:
             "owner": RD.project_owner(ctx.slug)[0], **RD.episode_extras(ep.number, ctx.slug)}
 
 
+from ns_api import shot_cache as SCACHE  # noqa: E402  DATAALIGN（P1）：镜头卡摘要按镜输入签名缓存，返回内容不变
+
+_shot_cache = SCACHE.ShotCache()
+
+
+def _cache_global_sig(ctx) -> tuple:
+    """全局输入签名（见 shot_cache 文档）：剧本对象 + 造型 / 配置 / 本剧资产登记 / 版本账本 / 顶层状态文件"""
+    root = Path(P.ROOT)
+    dirs = [root / "data" / "looks", root / "config", root / "config" / "recipes"]
+    pj = ctx.cast.project
+    files = [root / "data" / "scenes.json", root / "data" / "state_timeline.json", root / SOP.OWNER_GATES]
+    if pj:   # 本剧资产登记只看镜头卡真正读的两份（出图作业表等频繁写的文件不进签名）
+        files += [root / "data" / "pipeline" / "runs" / pj / "assets" / f for f in ("shot_looks.json", "sheets_chosen.json")]
+    try:
+        from ns_agent.asset_revs import ledger_path
+        files.append(ledger_path(P.ROOT))
+    except Exception:  # noqa: BLE001
+        pass
+    # 剧本用文件 (mtime, 大小) 而不是 id(_script)：签名要能跨进程（按镜缓存的磁盘快照，重启后复用）
+    return SCACHE.ShotCache.global_sig(dirs, files, (tuple(API_SNAP.script_key(P.SCRIPT_JSON) or ()), ctx.slug, str(P.DATA),
+                                                      _CODE_KEY))
+
+
+def _cached_shots(ep, ctx) -> list[dict]:
+    """每镜 _shot_summary 走按镜缓存（签名含本镜 + 前后镜 + 本集加强 + 全局）；任务字段每次现算"""
+    g = _cache_global_sig(ctx)
+    ep_sig = SCACHE._mt(episode_edit_path(ep.number))
+    ids = [s.id for s in ep.shots]
+    own = {sid: SCACHE.ShotCache.shot_sig(P.shot_dir(sid), RD.shot_gpu3_dir(sid, ctx.slug)) for sid in ids}
+
+    def near(sid: str):
+        try:
+            nx = P.next_shot_id(_script, sid)
+        except Exception:  # noqa: BLE001
+            nx = None
+        out = [own.get(nx) if nx in own else (SCACHE.ShotCache.shot_sig(P.shot_dir(nx), RD.shot_gpu3_dir(nx, ctx.slug)) if nx else None)]
+        i = ids.index(sid)
+        out.append(own[ids[i - 1]] if i > 0 else None)
+        return tuple(out)
+
+    shots = []
+    for s in ep.shots:
+        sig = (g, ep_sig, own[s.id], near(s.id))
+        ctx.__dict__.setdefault("_sigs", {})[s.id] = sig
+        v = _shot_cache.get(s.id, sig, lambda s=s: _shot_summary(ep, s, ctx), lambda s=s: _shot_summary(ep, s, Ctx()))
+        ctx.__dict__.setdefault("_base_objs", []).append(v)   # HTTP 出口按“同一批缓存对象”复用已编码的字节
+        pending = [j for j in _jobs.values() if j.get("shot_id") == s.id and j["state"] in ("queued", "running")]
+        shots.append({**v, "job": pending[0]["state"] if pending else None,
+                      "job_stage": pending[0]["stage"] if pending else None,
+                      "queue_pos": _queue_pos(pending[0]["id"]) if pending else None})
+    _shot_cache.kick()
+    return shots
+
+
 def _episode_payload(ep, ctx) -> dict:
     """一集的完整数据（旧 /api/episodes 每一项；/api/episodes/{n} 也用它，逐字相同）"""
-    shots = [_shot_summary(ep, s, ctx) for s in ep.shots]
+    shots = _cached_shots(ep, ctx)
     return {"number": ep.number, "title": ep.title, "high_intensity": ep.high_intensity, "tag": ep.tag,
             "synopsis": ep.synopsis, "edit": ctx.ep_edit(ep.number),
             "music": episode_music(ep, ctx.ep_edit(ep.number)), "audio_supported": audio_supported(),
@@ -646,23 +836,140 @@ def _episode_payload(ep, ctx) -> dict:
 
 
 @app.get("/api/episodes")
+def episodes_http():
+    """HTTP 出口：内容 = episodes()（集摘要后台重算也直接调 episodes()）。
+    DATAALIGN（P1）：每镜都命中同一批缓存对象、集层字段和任务字段都没变 → 直接复用上次编码好的字节（2.5 MB 编码约 0.1–0.4 s）。
+    单飞：并发请求排队，前一个算完 / 编码完，后面的直接拿缓存字节（重启后并发冷请求曾 10 / 18 / 6 s）"""
+    if not _WARM["done"] and not _EPISODES_BYTES.get("v"):
+        # P2：启动预热还没完成 → 上次完好结果的磁盘快照（剧本没变才用；响应头标快照时间），不排队等现算
+        snap = API_SNAP.load(P.DATA, "episodes", P.SCRIPT_JSON)
+        if snap:
+            return Response(content=snap[0], media_type="application/json", headers={"x-ns-snapshot": str(int(snap[1]))})
+    with _EPISODES_LOCK:
+        return _episodes_http()
+
+
+_EPISODES_LOCK = threading.Lock()
+_WARM = {"done": False}
+
+
+def _episodes_http():
+    ctx = Ctx()
+    data = [_episode_payload(ep, ctx) for ep in _script.episodes]
+    objs = ctx.__dict__.get("_base_objs", [])
+    key = (json.dumps([{k: v for k, v in e.items() if k != "shots"} for e in data], ensure_ascii=False, default=str),
+           tuple((x.get("job"), x.get("job_stage"), x.get("queue_pos")) for e in data for x in e["shots"]))
+    hit = _EPISODES_BYTES.get("v")       # (objs, key, bytes)：objs 持有引用，按 is 比较（不用 id，防止地址复用）
+    if hit and hit[1] == key and len(hit[0]) == len(objs) and all(a is b for a, b in zip(hit[0], objs)):
+        return Response(content=hit[2], media_type="application/json")
+    r = _fast_json(data)
+    _EPISODES_BYTES["v"] = (objs, key, r.body)
+    API_SNAP.save(P.DATA, "episodes", r.body, P.SCRIPT_JSON)     # 下次重启预热期间用
+    _dump_shot_cache()
+    return r
+
+
+def _code_key() -> tuple:
+    """本进程加载的代码版本：services/ 与 packages/ 下 .py 的 (文件数, 最大 mtime)。换了代码重启 → 磁盘快照里的按镜摘要全部作废重算"""
+    root = Path(P.ROOT)
+    n, mx = 0, 0
+    for base in ("services", "packages"):
+        for dp, _dn, fn in os.walk(root / base):
+            if "__pycache__" in dp:
+                continue
+            for f in fn:
+                if f.endswith(".py"):
+                    n += 1
+                    try:
+                        mx = max(mx, os.stat(os.path.join(dp, f)).st_mtime_ns)
+                    except OSError:
+                        pass
+    return (n, mx)
+
+
+_CODE_KEY = _code_key()
+_SHOT_DUMP = {"at": 0.0}
+def shot_cache_file() -> Path:
+    """按镜缓存快照路径：跟着 P.DATA 走（测试把 P.DATA 换成临时目录时也跟着换；ITERAUDIT 真实数据写保护 11-01）"""
+    return P.DATA / "cache" / "api_snapshots" / "shot_cache.pkl"
+
+
+def _dump_shot_cache():
+    """按镜缓存写磁盘（60 s 内最多一次，后台线程）：重启后预热只核签名、不重算（总调度 11-01 P1）。
+    测试里（PYTEST_CURRENT_TEST）不写：后台线程会活过测试结束，写到真实 data/"""
+    if API_SNAP.in_tests():
+        return
+    now = time.time()
+    if now - _SHOT_DUMP["at"] < 60:
+        return
+    _SHOT_DUMP["at"] = now
+    path = shot_cache_file()
+    dpath = path.with_name("shot_detail.pkl")
+
+    def run():
+        _shot_cache.dump(path)
+        _shot_detail_cache.dump(dpath)        # 镜头详情也写盘：重启后画布一次拉全部详情不再整轮现算
+    threading.Thread(target=run, name="shot-cache-dump", daemon=True).start()
+
+
+_EPISODES_BYTES: dict = {}
+
+
 def episodes():
     """全部集完整数据（旧接口，保留兼容；画布首屏改用 /api/episodes/summary + /api/episodes/{n}）"""
     ctx = Ctx()
     return [_episode_payload(ep, ctx) for ep in _script.episodes]
 
 
-_summary_cache = EF.SummaryCache(episodes, ttl_s=60.0)  # 60 s：后台全量重算约 2.6 s CPU，过频会和当前集详情抢 CPU；换剧本时立即失效
+def _fast_json(data) -> Response:
+    """DATAALIGN（P1）：跳过 jsonable_encoder（2.5 MB 约 0.7 s）；数据本身全是 JSON 原生类型，
+    输出与 FastAPI JSONResponse 逐字节相同（ensure_ascii=False、紧凑分隔符，已核对）"""
+    return Response(content=json.dumps(data, ensure_ascii=False, allow_nan=False, separators=(",", ":")),
+                    media_type="application/json")
+
+
+def _summary_build():
+    """集摘要重算：先记下这一代的逐镜输入签名（请求时签名变了 → 同步重算，见 episodes_summary）"""
+    sig = _summary_inputs_sig()
+    data = episodes()
+    _SUMMARY_SIG["built"] = sig
+    return data
+
+
+_summary_cache = EF.SummaryCache(_summary_build, ttl_s=60.0)  # 60 s：后台全量重算约 2.6 s CPU，过频会和当前集详情抢 CPU；换剧本时立即失效
+
+
+_SUMMARY_SIG: dict = {}
+
+
+def _summary_inputs_sig() -> tuple:
+    """集摘要的逐镜输入签名（与按镜缓存同一套：渲染目录 + takes / edits / review + gpu3 镜像 + 本集加强），约 80×9 次 stat"""
+    slug = RD.current_slug()
+    out = [id(_script)]
+    for ep in _script.episodes:
+        out.append(SCACHE._mt(episode_edit_path(ep.number)))
+        out += [SCACHE.ShotCache.shot_sig(P.shot_dir(s.id), RD.shot_gpu3_dir(s.id, slug)) for s in ep.shots]
+    return tuple(out)
 
 
 @app.get("/api/episodes/summary")
 def episodes_summary():
-    """T60：集列表 + 每集摘要 + 每镜轻字段（后台缓存，超过 15 s 后台重算；as_of = 这份数据算完的时间）"""
+    """T60：集列表 + 每集摘要 + 每镜轻字段（后台缓存，超过 15 s 后台重算；as_of = 这份数据算完的时间）
+    DATAALIGN：每镜渲染目录 / gpu3 镜像 / 本集加强的签名变了（出了新版本、设了当前、审过）→ 同步重算再返回，计数不再滞后 60 s"""
+    if _SUMMARY_SIG.get("built") is not None and _SUMMARY_SIG["built"] != _summary_inputs_sig():
+        _summary_cache.refresh_now()
     data, at = _summary_cache.get()
+    if at > 0:   # 现算的一代才写快照（快照装进来的 as_of=0）
+        API_SNAP.save(P.DATA, "summary", json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode(), P.SCRIPT_JSON)
     return {"as_of": at, "build_s": _summary_cache.last_build_s, "episodes": data}
 
 
 @app.get("/api/episodes/{n}")
+def episode_detail_http(n: int):
+    """HTTP 出口：内容 = episode_detail(n)，跳过 jsonable_encoder（逐字节相同）"""
+    return _fast_json(episode_detail(n))
+
+
 def episode_detail(n: int):
     """T60：单集完整数据（现算，只算这一集；与 /api/episodes 里这一集逐字相同）"""
     ep = next((e for e in _script.episodes if e.number == n), None)
@@ -754,11 +1061,12 @@ def _sop_eval(ep_filter: int | None = None):
     for e in _script.episodes:
         if ep_filter is not None and e.number not in (ep_filter, first):
             continue
-        for s in e.shots:
-            x = _shot_summary(e, s, ctx)
+        # DATAALIGN（UM-0276 / UM-0326 首屏慢）：走按镜缓存（与 /api/episodes 同一份，签名变了才重算），不再每次现算本集 + 首集
+        cached = _cached_shots(e, ctx) if SOP_ROOT is None else [_shot_summary(e, s_, ctx) for s_ in e.shots]
+        for s, x in zip(e.shots, cached):
             rows.append({"id": s.id, "episode": e.number, "index": s.index, "readiness": x.get("readiness"),
                          "owner": x.get("owner"), "has_first": bool(x.get("first_frame")),
-                         "has_last": bool(x.get("last_frame")), "has_video": bool(x.get("video")),
+                         "has_last": bool(x.get("last_frame_target")), "has_video": bool(x.get("video")),   # DATAALIGN：当前尾帧 = last_frame_target（last_frame 是视频抽帧）
                          "gpu3_status": (x.get("gpu3") or {}).get("status"),
                          "h3_failed": x.get("h3_failed"), "h3_source": x.get("h3_prompt_source"),
                          "h3_override_stale": x.get("h3_override_stale")})
@@ -818,6 +1126,22 @@ def sop_episode(n: int):
 
 
 
+@app.post("/api/sop/owner-decision")
+def sop_owner_decision(body: OG.OwnerDecision):
+    """fredw-92/UXF1：项目方在画布「待你决定」确认框里亲自拍板（造型确认 / G3 / G4 / G5 / 底板）。
+    必须 by="owner" + 非空原话；记录逻辑与命令行同一份（ns_api.owner_gates）。agent 不得调用。"""
+    _require_owner(body.by, body.quote, "项目方决定")
+    if body.gate not in OG.GATES:
+        raise HTTPException(400, f"gate 只能是 {'、'.join(OG.GATES)}")
+    proj = _sop_project(Ctx().slug)
+    root = SOP_ROOT if SOP_ROOT is not None else (proj.root if proj is not None else P.ROOT)
+    from ns_api.looks import get_store as _look_store
+    out = OG.decide(body, root=Path(root), gpu3_root=RD.gpu3_root(Ctx().slug), look_store=_look_store())
+    OG.log(Path(root), body, out)
+    _summary_cache.invalidate()
+    return {"ok": True, **out}
+
+
 def _compile_for_display(ep, s, edit):
     """画布显示用的编译结果：与渲染路径（pipeline.compile_with_edits）一致地带上导演加强、环境声、配乐，
     但不写 compiled.json、不需要 LoRA 列表。"""
@@ -829,8 +1153,28 @@ def _compile_for_display(ep, s, edit):
                      soundscape=edit.soundscape, music=edit.music, episode_music=ee.music)
     return P.apply_edit(c, edit)
 
+_shot_detail_cache = SCACHE.ShotCache()
+_DETAIL_FILES = ("errors.json", "compiled.json", "visual_spec.json")
+
+
 @app.get("/api/shots/{shot_id}")
 def shot(shot_id: str):
+    """DATAALIGN（总调度 P1：整体卡 15–17 s）：镜头详情按镜缓存。复现：80 个 /api/shots 并发 → 18.9 s 才全回来，
+    期间最轻的 /api/comfy-lock 也排到 6.8 s（同步线程池 40 个名额全被详情占住、GIL 串行）。
+    签名 = 与 /api/episodes 同一套按镜签名 + 本镜 errors / compiled / visual_spec 文件；摘要（含任务字段）每次取最新"""
+    ep, s = _find(shot_id)
+    ctx = Ctx()
+    summary = next((x for x in _cached_shots(ep, ctx) if x["id"] == s.id), None)
+    sig = (ctx.__dict__.get("_sigs") or {}).get(s.id)
+    if summary is None or sig is None:
+        return _shot_detail(shot_id)
+    sig = (sig, tuple(SCACHE._mt(P.shot_dir(shot_id) / f) for f in _DETAIL_FILES))
+    v = _shot_detail_cache.get(shot_id, sig, lambda: _shot_detail(shot_id, summary), lambda: _shot_detail(shot_id))
+    _shot_detail_cache.kick()
+    return {**v, "summary": summary}
+
+
+def _shot_detail(shot_id: str, summary: dict | None = None):
     ep, s = _find(shot_id)
     edit = P.load_edit(shot_id)
     compiled = _compile_for_display(ep, s, edit)
@@ -838,14 +1182,18 @@ def shot(shot_id: str):
     act = _active(shot_id, takes)
     ctx = Ctx()
     ep_edit = ctx.ep_edit(ep.number)
-    summary = _shot_summary(ep, s, ctx)
+    # DATAALIGN（UIAUDIT r14g 首屏慢）：摘要走按镜缓存（与 /api/episodes 同一份、同一签名），不再每次现算全部版本的过期判定
+    if summary is None:
+        summary = next((x for x in _cached_shots(ep, ctx) if x["id"] == s.id), None) or _shot_summary(ep, s, ctx)
     last_prompt = summary["last_prompt"]
     for t in takes["takes"]:
         t["url"] = _url(t["file"])
         t["last_url"] = _url(t.get("last_frame"))
         t["raw_url"] = _url(t.get("raw_file"))
+        t["bad"] = P.bad_reason(t)   # fredw-92/UXF1：坏图角标
         t["stale"], t["stale_global"] = _stale_split(shot_id, t, s, compiled, edit, act, summary["look_hash"],
                                                      last_prompt, ep_edit)
+        t["stale_deps"] = _dep_stale(shot_id, t, t["stale"], ctx.rev_ledger())
     boost = summary["boost"]
 
     def landed(text: str | None, prompt: str):
@@ -853,6 +1201,11 @@ def shot(shot_id: str):
 
     return {
         "summary": summary,
+        # DATAALIGN（PW-011）：当前帧一处说清——与集摘要 / /api/progress 同一口径（summary.first_frame / last_frame_target / video）
+        "frames": {"first": summary.get("first_frame"), "first_take": summary.get("first_frame_take"),
+                   "last": summary.get("last_frame_target"), "last_take": summary.get("last_frame_take"),
+                   "last_source": summary.get("last_frame_source"), "video": summary.get("video"),
+                   "video_tail": summary.get("last_frame_actual")},
         "episode": {"number": ep.number, "title": ep.title, "synopsis": ep.synopsis, "edit": ep_edit},
         "script": s.model_dump(),
         # video_negative 不再显示（H3 cfg 1 没有负向分支；数据里仍保留）；video_prompt = 画布显示的 H3 提示词
@@ -1559,7 +1912,23 @@ def render_backend():
         url = LLMC.render_endpoints()["image"]["url"]
     except Exception:  # noqa: BLE001 — 配置文件坏了按默认出图地址
         url = COMFY_URL
-    return RENDER_EP.probe(url)
+    # GPUVIEW 11-01（PAGEWATCH PW-013：每秒探 9 分钟有 10 次 2–10 s）：经隧道现探 /system_stats 1–5 s，
+    # 缓存一过期就卡住请求。展示接口改成“先给上次结果、后台刷新”；从没探过才同步探一次
+    hit = RENDER_EP.peek(url)
+    if hit is None:
+        return RENDER_EP.probe(url)
+    age = time.monotonic() - hit[0]
+    if age >= RENDER_EP.PROBE_TTL_S:
+        with _rb_guard:
+            t = _rb_thread.get(url)
+            if t is None or not t.is_alive():
+                t = _rb_thread[url] = threading.Thread(target=RENDER_EP.probe, args=(url,), daemon=True, name="ns-render-backend-probe")
+                t.start()
+    return {**hit[1], "cached": True, "age_s": round(age, 1)}
+
+
+_rb_guard = threading.Lock()
+_rb_thread: dict = {}
 
 
 def _worker():
@@ -1615,7 +1984,48 @@ def comfy_lock():
 
 
 threading.Thread(target=_worker, daemon=True).start()
+_shot_cache.load(shot_cache_file())
+_shot_detail_cache.load(shot_cache_file().with_name("shot_detail.pkl"))   # DATAALIGN（P1）：上次进程的按镜摘要，签名一致的直接复用，预热只需核签名
+_snap = API_SNAP.load(P.DATA, "summary", P.SCRIPT_JSON)   # DATAALIGN P2：预热期间先给上次的摘要（as_of=0 → 立即后台重算）
+if _snap:
+    try:
+        _summary_cache._data, _summary_cache._at = json.loads(_snap[0]), 0.0
+    except ValueError:
+        pass
 _summary_cache.warm()  # T60：模块定义完后再预热集摘要，首个画布请求直接命中缓存
+
+
+def _warm_episodes_bytes():
+    """DATAALIGN（P1 重启后冷请求）：集摘要预热把每镜摘要算进按镜缓存后，再把 /api/episodes 整份编码好；
+    启动后第一个请求直接拿字节。失败不影响服务"""
+    try:
+        _summary_cache.get()
+        episodes_summary()          # 顺带写摘要快照
+        with _EPISODES_LOCK:
+            _episodes_http()
+    except Exception:  # noqa: BLE001
+        pass
+    finally:
+        _WARM["done"] = True
+
+
+threading.Thread(target=_warm_episodes_bytes, name="episodes-warm", daemon=True).start()
+
+
+async def _start_loop_watchdog():
+    """DATAALIGN（总调度 P1：整体卡 15–17 s）：事件循环延迟 / 线程池占满看门狗 → data/qa/loop_lag.jsonl（含卡住时各线程调用栈）"""
+    from ns_api import loop_watchdog as LW
+    # 同步接口线程池 40 → 100：按镜缓存单飞时，等别人算完的请求也占着线程池名额；几个慢请求叠在一起就会把 40 个占满，
+    # 连最轻的接口也排队（疑似 15–17 s 整体卡顿的放大器，看门狗的 threadpool 字段会证实 / 否定）。NS_THREADPOOL 可调
+    try:
+        import anyio.to_thread
+        anyio.to_thread.current_default_thread_limiter().total_tokens = int(os.environ.get("NS_THREADPOOL") or 100)
+    except Exception:  # noqa: BLE001
+        pass
+    LW.start(P.ROOT / "data" / "qa" / "loop_lag.jsonl")
+
+
+app.router.on_startup.append(_start_loop_watchdog)
 
 app.mount("/files", StaticFiles(directory=P.DATA), name="files")
 if WEB_DIST.exists():

@@ -1,0 +1,157 @@
+[
+  {
+    "path": "/#ep02-S1",
+    "id": "M5_params",
+    "title": "精修 参数",
+    "steps": [
+      {
+        "click": "精修",
+        "after": 4000
+      },
+      {
+        "js": "for (let i=0;i<120;i++){ if (!/正在读取/.test(document.body.innerText)) break; await new Promise(r=>setTimeout(r,500)); } return 1"
+      },
+      {
+        "after": 1500,
+        "clickAt": "(() => { const e=[...document.querySelectorAll('button,[role=tab]')].find(b=>/^参数/.test(b.innerText.trim()) && b.getBoundingClientRect().x>innerWidth*0.7 && b.getBoundingClientRect().y<120); const r=e?.getBoundingClientRect(); return r?[r.x+r.width/2,r.y+r.height/2]:[null,null]; })()"
+      },
+      {
+        "js": "const t=document.body.innerText; return {neg:/负面词/.test(t), seed:/种子/.test(t), lockSeed:/锁定 #\\d+ 的种子|锁种/.test(t), selects:[...document.querySelectorAll('select')].filter(s=>s.getBoundingClientRect().width>0).map(s=>s.options[s.selectedIndex]?.text.slice(0,20)), videoBase:/底模|出片方式|视频底模/.test(t), lane:/用卡|自动（gpu/.test(t)}"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "wait": 8000
+  },
+  {
+    "path": "/#ep02-S1",
+    "id": "M5_ver",
+    "title": "精修 版本",
+    "steps": [
+      {
+        "click": "精修",
+        "after": 4000
+      },
+      {
+        "js": "for (let i=0;i<120;i++){ if (!/正在读取/.test(document.body.innerText)) break; await new Promise(r=>setTimeout(r,500)); } return 1"
+      },
+      {
+        "after": 1500,
+        "clickAt": "(() => { const e=[...document.querySelectorAll('button,[role=tab]')].find(b=>/^版本/.test(b.innerText.trim()) && b.getBoundingClientRect().x>innerWidth*0.7 && b.getBoundingClientRect().y<120); const r=e?.getBoundingClientRect(); return r?[r.x+r.width/2,r.y+r.height/2]:[null,null]; })()"
+      },
+      {
+        "js": "return {chain:!!document.querySelector('.v3e-ver .v3e-chain'), items:document.querySelectorAll('.v3e-ver .v3e-chain img').length}"
+      }
+    ],
+    "wait": 8000
+  },
+  {
+    "path": "/#ep02-S1",
+    "id": "M5_ref",
+    "title": "参考条",
+    "steps": [
+      {
+        "click": "精修",
+        "after": 4000
+      },
+      {
+        "js": "for (let i=0;i<120;i++){ if (!/正在读取/.test(document.body.innerText)) break; await new Promise(r=>setTimeout(r,500)); } return 1"
+      },
+      {
+        "after": 1500,
+        "click": "场景",
+        "within": ".v3e"
+      },
+      {
+        "js": "const p=document.querySelector('.v3-pop, [role=dialog], [class*=refswitch], [class*=RefSwitch]'); return p? p.innerText.replace(/\\s+/g,' ').slice(0,120) : 'no panel'"
+      },
+      {
+        "key": "Escape"
+      }
+    ],
+    "wait": 8000
+  },
+  {
+    "path": "/#ep02-S1",
+    "id": "M5_viewer",
+    "title": "全屏看首尾帧",
+    "steps": [
+      {
+        "click": "精修",
+        "after": 4000
+      },
+      {
+        "js": "for (let i=0;i<120;i++){ if (!/正在读取/.test(document.body.innerText)) break; await new Promise(r=>setTimeout(r,500)); } return 1"
+      },
+      {
+        "click": "全屏看首尾帧",
+        "after": 2000
+      },
+      {
+        "js": "const d=document.querySelector('[role=dialog]'); return d?{role:d.getAttribute('role'), modal:d.getAttribute('aria-modal'), text:d.innerText.slice(0,40)}:'no dialog'"
+      },
+      {
+        "n": 6,
+        "tabtrap": "[role=dialog]"
+      }
+    ],
+    "wait": 8000
+  },
+  {
+    "path": "/#ep02",
+    "id": "M5_search",
+    "title": "搜索框",
+    "steps": [
+      {
+        "after": 1200,
+        "click": "第 2 集",
+        "within": "header"
+      },
+      {
+        "click": "搜索",
+        "after": 1200
+      },
+      {
+        "js": "const a=document.activeElement; return {active:a?.tagName+' '+(a?.placeholder||'')}"
+      },
+      {
+        "key": "Escape"
+      },
+      {
+        "js": "await new Promise(r=>setTimeout(r,400)); const a=document.activeElement; return {focusAfter:a?a.tagName+' '+(a.innerText||'').replace(/\\s+/g,' ').slice(0,30):null}"
+      }
+    ],
+    "wait": 8000
+  },
+  {
+    "path": "/#ep02",
+    "id": "M5_canvas",
+    "title": "画布 进度/评分/衔接",
+    "steps": [
+      {
+        "js": "const t=document.body.innerText; return {progressBars:document.querySelectorAll('[class*=progress], [class*=stepbar], [class*=prog]').length, score:/分|评分|契约/.test(t), seam:[...document.querySelectorAll('button,[title]')].filter(e=>/衔接|接缝/.test(e.innerText+(e.title||''))).length}"
+      }
+    ],
+    "wait": 8000
+  },
+  {
+    "path": "/#ep02",
+    "id": "M5_sound",
+    "title": "声音播放器",
+    "steps": [
+      {
+        "js": "location.hash='#/sound'; return 1",
+        "after": 5000
+      },
+      {
+        "click": "配乐",
+        "after": 3000
+      },
+      {
+        "js": "return {players:document.querySelectorAll('.mp-audio,.mp-play,audio').length, wave:document.querySelectorAll('canvas, .mp-wave i, svg path, [class*=wave]').length}"
+      }
+    ],
+    "wait": 8000
+  }
+]

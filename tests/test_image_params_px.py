@@ -21,11 +21,12 @@ def _loras(wf):
 
 # ---------------------------------------------------------------- 配置 / 校验
 
-def test_config_default_is_owner_choice_c():
+def test_config_c_still_available():
+    # LCA：默认已改为 徕卡 S★（见 tests/test_leica_sstar_lca.py）；C 仍可选
     q = IP.quality()
-    assert q["default_preset"] == "c_turbo_texture" == IP.default_preset()
+    assert q["default_preset"] == "leica_sstar" == IP.default_preset()
     c = IP.find_preset("c_turbo_texture")
-    assert c["label"] == "C·Turbo 质感（项目方选定）" and "2026-10-31" in c["note"]
+    assert c["label"].startswith("C·Turbo 质感") and "2026-10-31" in c["note"]
     assert IP.find_preset("preview_turbo")["label"] == "预览·Turbo（旧 A）"
     ab = json.loads((P.DATA / "ab" / "texture_ep02_S4" / "settings.json").read_text(encoding="utf-8"))["variants"]["C"] \
         if (P.DATA / "ab" / "texture_ep02_S4" / "settings.json").exists() else None
@@ -132,9 +133,9 @@ from tests.test_frame_jobs_w2 import SHOT, _job, _wait, env  # noqa: E402,F401
 
 
 @pytest.mark.skipif(not P.SCRIPT_JSON.exists(), reason="data/import/script_v2.json missing")
-def test_default_frame_job_uses_c_and_records_params(env):
+def test_c_frame_job_records_params(env):
     c, data, clients = env
-    t = _job(c, {"stage": "first", "mode": "regen", "seed": 11})["take"]
+    t = _job(c, {"stage": "first", "mode": "regen", "seed": 11, "preset": "c_turbo_texture"})["take"]
     wf = clients[0][-1].workflows[-1]
     assert wf["10"]["inputs"]["unet_name"] == IP.UNETS["turbo"] and wf["12"]["inputs"]["vae_name"] == TEXTURE_VAE
     assert wf["37"]["inputs"]["sigmas"] == W.TURBO_SIGMAS and wf["38"]["inputs"]["cfg"] == 1.0
@@ -150,8 +151,8 @@ def test_default_frame_job_uses_c_and_records_params(env):
     wf = clients[0][-1].workflows[-1]
     assert wf["12"]["inputs"]["vae_name"] == IP.VAES["plain"] and (wf["34"]["inputs"]["width"], wf["34"]["inputs"]["height"]) == (1088, 1920)
     assert all("krea2" not in f for f, _ in _loras(wf)) and t2["params"]["preset"] == "preview_turbo"
-    # 指令改图同样默认 C（尾帧 / 改图都走 frame-jobs 预览档）
-    _job(c, {"stage": "first", "mode": "instruct", "instruction": "换个表情", "parent": t["n"]})
+    # 指令改图同样可用 C（尾帧 / 改图都走 frame-jobs 预览档）
+    _job(c, {"stage": "first", "mode": "instruct", "instruction": "换个表情", "parent": t["n"], "preset": "c_turbo_texture"})
     wf = clients[0][-1].workflows[-1]
     assert wf["12"]["inputs"]["vae_name"] == TEXTURE_VAE and wf["37"]["inputs"]["sigmas"].startswith("0.55")
 
@@ -211,9 +212,10 @@ def test_presets_endpoint_and_user_presets(env, tmp_path, monkeypatch):
     monkeypatch.setattr(FJ, "_ALLOWED", {})
     r = c.get("/api/render/image-presets?gpu=0").json()
     ids = [p["id"] for p in r["presets"]]
-    assert {"c_turbo_texture", "preview_turbo", "final_base_2pass"} <= set(ids) and r["default_preset"] == "c_turbo_texture"
+    assert {"leica_sstar", "c_turbo_texture", "preview_turbo", "final_base_2pass"} <= set(ids) and r["default_preset"] == "leica_sstar"
     assert r["allowed"]["source"] == "live" and "lin_wan_qi_v1.safetensors" in r["allowed"]["loras"]
-    assert r["defaults"]["sharpen"] == {"enabled": False, "radius": 1.0, "amount": 0.5} and "turbo" in r["notes"]
+    assert r["defaults"]["sharpen"] == {"enabled": False, "radius": 1.0, "amount": 0.5, "threshold": 0} and "turbo" in r["notes"]
+    assert r["defaults"]["style_suffix"] == ""
     assert c.get("/api/render/image-presets?gpu=0").json()["allowed"]["source"] == "cache"
     # 缓存了 LoRA 列表 → 提交时按它核对
     bad = c.post(f"/api/shots/{SHOT}/frame-jobs", json={"stage": "first", "gpu": 0,

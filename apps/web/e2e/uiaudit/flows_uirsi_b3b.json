@@ -1,0 +1,47 @@
+[
+  {
+    "size": [
+      1920,
+      1080
+    ],
+    "path": "/#/script-ab",
+    "wait": 9000,
+    "title": "剧本AB 1080",
+    "steps": [
+      {
+        "tabwalk": "ab",
+        "n": 40
+      }
+    ],
+    "id": "B3_ab1080"
+  },
+  {
+    "path": "/#/assets?type=character&char=lin_wan",
+    "steps": [
+      {
+        "js": "for (let i=0;i<60;i++){ if (document.querySelector('.hub-anchors-st')) break; await new Promise(r=>setTimeout(r,500)); } return 1"
+      },
+      {
+        "after": 200,
+        "click": "选这张"
+      },
+      {
+        "js": "await new Promise(r=>setTimeout(r,200)); const t=[...document.querySelectorAll('.toasts > .toast, [class*=toast]')].filter(e=>e.getBoundingClientRect().width>0); const btn=t.flatMap(e=>[...e.querySelectorAll('button')]).find(b=>/撤销/.test(b.innerText)); if(!btn) return {toasts:t.map(e=>e.innerText.replace(/\\s+/g,' ').slice(0,60))}; const r=btn.getBoundingClientRect(); const h=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2); return {undoBtn:btn.innerText.trim(), clickable:btn.contains(h)};"
+      }
+    ],
+    "title": "设定图撤销",
+    "id": "B3_undo2",
+    "wait": 10000
+  },
+  {
+    "path": "/#ep01",
+    "steps": [
+      {
+        "js": "const out={}; for (const ep of ['01','02','03','04','05']) { location.hash='#ep'+ep; await new Promise(r=>setTimeout(r,2500)); out[ep]=[...document.querySelectorAll('button,summary,a')].filter(x=>/待你决定/.test(x.innerText)).map(x=>x.innerText.replace(/\\s+/g,' ').trim().slice(0,30)); } return out;"
+      }
+    ],
+    "title": "待你决定 各集",
+    "id": "B3_decide",
+    "wait": 8000
+  }
+]

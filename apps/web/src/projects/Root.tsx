@@ -1,27 +1,22 @@
-// T42：顶层路由。#/projects…、#/inbox → 项目 / 新建剧向导 / 待办 / 看板（按需加载）；其余 → 原画布 App。
-import { lazy, Suspense } from "react";
+// 顶层路由（UIRSI 重构 2026-10-31：只保留一个外壳）。
+// 旧的 #/projects…（项目 / 新建剧向导 / 看板）、#/inbox（待办）已下线（代码归档到 data/_archive/20261031/code），打开这些旧地址一律跳到 ① 新建剧本。
+// #/script-chat（写作对话：新对话 / 继续下一集）11-01 按项目方要求恢复（UIAUDIT F23），不再重定向。
+import { useEffect } from "react";
 import App from "../App";
-import { ErrorBoundary } from "../components/ErrorBoundary";
-import { isProjectsRoute, useHash } from "./route";
+import { useHash } from "./route";
+import { AuthGate } from "./AuthGate";
 
-const ProjectsApp = lazy(() => import("./ProjectsApp"));
-const ChatApp = lazy(() => import("../chat/ChatApp")); // T58 剧本创作对话框 #/script-chat
+const RETIRED = /^#\/(projects|inbox)(\/|\?|$)/;
 
 export default function Root() {
   const hash = useHash();
-  if (hash.startsWith("#/script-chat"))
-    return (
-      <Suspense fallback={<div className="boot">加载中…</div>}>
-        <ErrorBoundary name="剧本创作">
-          <ChatApp hash={hash} />
-        </ErrorBoundary>
-      </Suspense>
-    );
-  if (isProjectsRoute(hash))
-    return (
-      <Suspense fallback={<div className="boot">加载中…</div>}>
-        <ProjectsApp />
-      </Suspense>
-    );
-  return <App />;
+  const retired = RETIRED.test(hash);
+  useEffect(() => {
+    if (retired) history.replaceState(null, "", `${location.pathname}${location.search}#/script-create`), window.dispatchEvent(new HashChangeEvent("hashchange"));
+  }, [retired]);
+  return (
+    <AuthGate>
+      <App />
+    </AuthGate>
+  );
 }

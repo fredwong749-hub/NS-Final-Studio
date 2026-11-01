@@ -1,0 +1,146 @@
+[
+  {
+    "wait": 9000,
+    "path": "/#/script-ab",
+    "id": "G4_ab_1080_light",
+    "title": "剧本AB",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "theme": "light",
+    "size": [
+      1920,
+      1080
+    ]
+  },
+  {
+    "wait": 9000,
+    "path": "/#/script-create",
+    "id": "G4_script_1080_light",
+    "title": "剧本页",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "theme": "light",
+    "size": [
+      1920,
+      1080
+    ]
+  },
+  {
+    "wait": 10000,
+    "path": "/#/assets?type=character&char=lin_wan",
+    "id": "G4_char_1080_light",
+    "title": "林晚页",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "theme": "light",
+    "size": [
+      1920,
+      1080
+    ]
+  },
+  {
+    "wait": 9000,
+    "path": "/#/script-ab",
+    "id": "G4_ab_900_dark",
+    "title": "剧本AB",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "theme": "dark",
+    "size": [
+      1440,
+      900
+    ]
+  },
+  {
+    "wait": 9000,
+    "path": "/#/script-create",
+    "id": "G4_script_900_dark",
+    "title": "剧本页",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "theme": "dark",
+    "size": [
+      1440,
+      900
+    ]
+  },
+  {
+    "wait": 10000,
+    "path": "/#/assets?type=character&char=lin_wan",
+    "id": "G4_char_900_dark",
+    "title": "林晚页",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "theme": "dark",
+    "size": [
+      1440,
+      900
+    ]
+  },
+  {
+    "wait": 9000,
+    "path": "/#/script-ab",
+    "id": "G4_ab_720_dark",
+    "title": "剧本AB",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "theme": "dark",
+    "size": [
+      1280,
+      720
+    ]
+  },
+  {
+    "wait": 9000,
+    "path": "/#/script-create",
+    "id": "G4_script_720_dark",
+    "title": "剧本页",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "theme": "dark",
+    "size": [
+      1280,
+      720
+    ]
+  },
+  {
+    "wait": 10000,
+    "path": "/#/assets?type=character&char=lin_wan",
+    "id": "G4_char_720_dark",
+    "title": "林晚页",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "theme": "dark",
+    "size": [
+      1280,
+      720
+    ]
+  }
+]

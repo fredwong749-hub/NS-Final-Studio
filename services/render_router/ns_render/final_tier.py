@@ -138,7 +138,7 @@ def render_final(client, script, shot_id: str, stage: str, *, parent: int | None
         from . import image_params as IP
         body = IP.strip_spec(body, IP.spec_terms(script, c, stage))
     prompt = FINAL_ROLE + body
-    negative = P.image_negative(c)
+    negative = P.image_negative(c, final_model(cfg))   # FIX P0 ⑥：cfg ≤ 1 不送 / 不记负面词
     loras = final_loras(c.image_loras, avail, cfg)
     src = P.DATA / (src_take.get("raw_file") or src_take["file"])
     ref = FE._input(client, src, FE.EDIT_REF_SIZE)
@@ -180,6 +180,7 @@ def render_final(client, script, shot_id: str, stage: str, *, parent: int | None
                   source="gen" if stage == "last" else None, remote=remote_info(client, P.DATA / raw),
                   basis_prompt=FE.chain_basis(data, src_take), look_hash=src_take.get("look_hash"),
                   inputs_sha=src_take.get("inputs_sha"), bible_version=src_take.get("bible_version"),
+                  deps={k: v for k, v in (src_take.get("deps") or {}).items() if not k.startswith("preset:")} or None,
                   scene_plate=src_take.get("scene_plate") if stage == "image" else None)
     P._add_take(shot_id, take, activate=False)
     was_locked = (P.load_takes(shot_id).get("locked") or {}).get(stage) == src_take["n"]

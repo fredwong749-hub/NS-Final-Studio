@@ -1,0 +1,27 @@
+# 知识库全局设置（compile.py 读）。改这里 = 改 tools/iterate_loop/rules.yaml 的 settings / writeback（生成）。
+schema: nsfs.knowledge_settings/1
+kb_name: ns-final-studio
+loop_settings:
+  max_renders_per_shot: 3
+  max_lost_resubmits: 3
+  skip_api_incompatible: true
+  api_graph_passthrough: false
+  allow_license_pending: false
+  allow_experimental_fallback: true
+loop_writeback:
+  suggest_after: 3
+  confirm_after: 5
+  confirm_rate: 0.8
+writer_selfcheck:
+  max_rounds: 2              # 写作模型输出 → 校验 → 带错误重写，最多 2 轮
+director:
+  verdict_schema: nsfs.director_verdict/1
+  min_confidence_to_act: 0.6  # 审片模型置信度低于此 → 只记录，不触发重出
+generated:
+  loop_rules: tools/iterate_loop/rules.yaml
+  writer_pack: config/recipes/writer_knowledge.md
+  director_prompt: config/recipes/director_system_prompt.md
+  index: knowledge/generated/index.json
+provenance:
+  loop_settings.max_renders_per_shot: "总调度任务 2026-10-31：每镜最多 3 次；官方 fallback 三次失败后暂停"
+  writer_selfcheck.max_rounds: "总调度任务 2026-10-31（Autopilot）：失败自动带错误回给写作模型重写，最多 2 轮"

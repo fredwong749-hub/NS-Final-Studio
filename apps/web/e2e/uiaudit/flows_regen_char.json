@@ -1,0 +1,16 @@
+[
+  {"id": "RC_char", "title": "人物页再生成", "path": "/#/assets?type=character&char=lin_wan", "wait": 10000, "steps": [
+    {"js": "for (let i=0;i<80;i++){ if (document.querySelector('.hub-anchors-st')) break; await new Promise(r=>setTimeout(r,500)); } const bs=[...document.querySelectorAll('button')].filter(b=>/再生成/.test(b.innerText+(b.title||''))); const where=bs.map(b=>{ const sec=b.closest('section, [class*=hub-look], [class*=hub-face], [class*=hub-item], [class*=card]'); return (sec?.className||'').toString().split(' ')[0]; }); const count={}; where.forEach(w=>count[w]=(count[w]||0)+1); return {total:bs.length, byContainer:count, sampleTitles:bs.slice(0,3).map(b=>(b.title||'').slice(0,40))};"},
+    {"clickAt": "(() => { const b=[...document.querySelectorAll('button')].find(b=>/再生成/.test(b.innerText+(b.title||'')) && b.getBoundingClientRect().width>0); if(!b) return [null,null]; b.scrollIntoView({block:'center'}); const r=b.getBoundingClientRect(); return [r.x+r.width/2,r.y+r.height/2]; })()", "after": 1500},
+    {"js": "const m=document.querySelector('.ds-modal'); return {title:m?.innerText.slice(0,40), width:Math.round(m?.getBoundingClientRect().width||0), videoNote:/视频去视频格|只收图片/.test(m?.innerText||''), focus:document.activeElement?.tagName}"},
+    {"shot": "a"},
+    {"tabtrap": ".ds-modal", "n": 6},
+    {"clickAt": "(() => { const b=[...document.querySelectorAll('button')].find(b=>/再生成/.test(b.innerText+(b.title||'')) && b.getBoundingClientRect().width>0); if(!b) return [null,null]; b.scrollIntoView({block:'center'}); const r=b.getBoundingClientRect(); return [r.x+r.width/2,r.y+r.height/2]; })()", "after": 1500},
+    {"typeText": "换成侧脸"},
+    {"click": "=生成", "within": ".ds-modal", "after": 2500}]},
+  {"id": "RC_mobile", "title": "手机宽弹窗", "path": "/#ep02", "size": [390, 844], "wait": 9000, "steps": [
+    {"clickAt": "(() => { const b=[...document.querySelectorAll('button')].find(b=>/再生成/.test(b.innerText+(b.title||'')) && b.getBoundingClientRect().width>0); if(!b) return [null,null]; b.scrollIntoView({block:'center'}); const r=b.getBoundingClientRect(); return [r.x+r.width/2,r.y+r.height/2]; })()", "after": 1500},
+    {"click": "加一张装备图", "after": 600}, {"click": "加一张装备图", "after": 600},
+    {"js": "const m=document.querySelector('.ds-modal'); if(!m) return 'no modal'; const r=m.getBoundingClientRect(); const over=[...m.querySelectorAll('*')].filter(e=>e.getBoundingClientRect().right>r.right+1 && e.getBoundingClientRect().width>0).length; return {width:Math.round(r.width), overflowingChildren:over, hscroll:document.documentElement.scrollWidth>innerWidth+1, videoNote:/视频去视频格|只收图片/.test(m.innerText)}"},
+    {"shot": "a"}]}
+]

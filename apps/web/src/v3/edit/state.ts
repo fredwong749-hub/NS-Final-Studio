@@ -2,8 +2,15 @@
 import { useSyncExternalStore } from "react";
 import type { ShotDetail, Take } from "../../types";
 import { apiV1, isNotReady, slotToStage, type JobV1, type Slot, type TakeV1Fields, type EditMode, type JobStateV1 } from "../api_v1";
+import { laneEta, laneName, type LanePick } from "./lanes";
+import { AUTO_SHORT, AUTO_TIP, DEP_UPDATED, STALE_SHORT } from "../words";
 
-export type TakeX = Take & TakeV1Fields;
+export type TakeX = Take & TakeV1Fields & {
+  /** fredw-92/UXF4（审查 N1）：整集出片自动测试定稿的那一版（待项目方复审，不算定稿 / 通过） */
+  auto?: boolean;
+  /** 视频：项目方已通过的当前版 */
+  passed?: boolean;
+};
 
 export interface TrackedJob {
   id: string;
@@ -51,10 +58,11 @@ interface EditState {
   loop: (LoopOpen & { shot: string }) | null;
   drawer: DrawerOpen | null;
   jobs: TrackedJob[];
-  gpu: 0 | 3;
+  /** fredw-92/UXF2：用哪条道；默认 "auto"（后端按任务类型挑空闲的卡：出图偏好出图道，视频偏好其他道） */
+  gpu: LanePick;
 }
 
-let state: EditState = { ui: {}, compare: null, loop: null, drawer: null, jobs: [], gpu: 3 };
+let state: EditState = { ui: {}, compare: null, loop: null, drawer: null, jobs: [], gpu: "auto" };
 const subs = new Set<() => void>();
 const emit = () => subs.forEach((f) => f());
 export const setEdit = (fn: (s: EditState) => Partial<EditState>) => {
@@ -89,7 +97,17 @@ export function takesOf(d: ShotDetail | undefined, slot: Slot): TakeX[] {
   const st = slotToStage(slot);
   let list = (d.takes?.takes ?? []).filter((t) => t.stage === st) as TakeX[];
   if (!list.length && d.gpu3_takes) list = (d.gpu3_takes.takes ?? []).filter((t) => t.stage === st) as TakeX[];
-  return [...list].sort((a, b) => a.n - b.n);
+  // fredw-92/UXF4（审查 N1）：整集出片“自动测试定稿”的那一版标 auto；视频的“定稿”不给项目方看，只看“通过”（passed）
+  const lb = (d.takes as { locked_by?: Record<string, { by?: string; n?: number } | null> } | undefined)?.locked_by?.[st];
+  const act = activeN(d, slot);
+  const passed = st === "video" && d.summary?.review?.state === "passed";
+  return [...list]
+    .map((t) => {
+      const auto = lb?.by === "auto" && lb.n === t.n && (st === "video" ? t.n === act && !passed : !!t.locked);
+      const pass = passed && t.n === act;
+      return auto || pass ? { ...t, auto, passed: pass } : t;
+    })
+    .sort((a, b) => a.n - b.n);
 }
 export function activeN(d: ShotDetail | undefined, slot: Slot): number | null {
   if (!d) return null;
@@ -110,9 +128,10 @@ export const takeUrl = (t: TakeX | null | undefined) => (t ? (t.stage === "video
 
 // ---------- 预计时长 ----------
 
-/** fredw-92/U2：卡的显示名（项目方口径：GPU0 = 出图卡、GPU3 = 视频卡；不出现服务器名） */
-export const GPU_LABEL: Record<string, string> = { "0": "出图卡 GPU0", "3": "视频卡 GPU3" };
-export const gpuLabel = (g: number | string | null | undefined) => (g == null ? "卡未定" : GPU_LABEL[String(g)] ?? `GPU${g}`);
+/** fredw-92/U2：卡的旧显示名（资产抽屉还在用）。UXF2：卡不再固定用途（G36），精修 / 任务条一律写真实道名 */
+export const GPU_LABEL: Record<string, string> = { "0": laneName(0), "3": laneName(3) };
+/** 卡名（UXF4 / 审查 N7：全站唯一写法 lanes.cardName，“gpu33·卡0”）；"auto" → 自动分配 */
+export const gpuLabel = (g: number | string | null | undefined) => laneName(g);
 
 /** 后端任务记录里的实际耗时（wall_s，F4 也用它算 eta_s）。键 = 阶段:卡 */
 const hist = new Map<string, { at: string; s: number }[]>();
@@ -139,12 +158,18 @@ export function noteJobHistory(jobs: HistJob[]) {
 
 /** 预计（秒）：优先用后端任务记录里最近 5 次实际耗时的平均；没有记录才用粗估。排队按同卡在途任务数累加。
  *  任务提交后显示后端返回的 eta_s（GET /api/jobs/{id}）。 */
-export function etaFor(slot: Slot | "asset", gpu: 0 | 3, seconds?: number | null): { eta: number; queue: number; n: number } {
-  const h = (hist.get(`${slot}:${gpu}`) ?? []).slice(0, 5);
-  const guess = slot === "video" ? Math.max(4, seconds ?? 6) * 120 : 60;
-  const one = h.length ? h.reduce((a, x) => a + x.s, 0) / h.length : gpu === 3 || slot === "video" ? guess : guess * 1.5;
-  const queue = state.jobs.filter((j) => (j.state === "queued" || j.state === "running") && String(j.gpu) === String(gpu)).length;
-  return { eta: one * (queue + 1), queue, n: h.length };
+export function etaFor(slot: Slot | "asset", gpu: LanePick, seconds?: number | null): { eta: number; queue: number; n: number; one: number } {
+  // fredw-92/UXF4（审查 N5）：先用后端 jobs.estimate 同口径的表（同类同卡最近 5 次中位数，没有样本 = 出图 70 s / 视频 840 s；
+  // 自动 = 后端 pick_lane 会落到的那张卡）。本页记录只作后备，而且秒退的假任务（出图 < 5 s、视频 < 60 s）不算样本——以前出首帧写“约 1 秒”
+  const be = laneEta(slot === "video" ? "video" : slot === "asset" ? "asset_gen" : "frame", gpu);
+  const minS = slot === "video" ? 60 : 5;
+  const h = (gpu === "auto" ? [...hist.entries()].filter(([k]) => k.startsWith(`${slot}:`)).flatMap(([, v]) => v) : hist.get(`${slot}:${gpu}`) ?? [])
+    .filter((x) => x.s >= minS)
+    .slice(0, 5);
+  const guess = slot === "video" ? Math.max(840, Math.max(4, seconds ?? 6) * 120) : 70;
+  const one = be ? be.per : h.length ? [...h].sort((a, b) => a.s - b.s)[Math.floor(h.length / 2)].s : guess;
+  const queue = gpu === "auto" ? 0 : state.jobs.filter((j) => (j.state === "queued" || j.state === "running") && String(j.gpu) === String(gpu)).length;
+  return { eta: one * (queue + 1), queue, n: be ? be.samples : h.length, one };
 }
 export const fmtSec = (s: number | null | undefined) =>
   s == null ? "—" : s < 90 ? `${Math.round(s)} 秒` : `${Math.round(s / 60)} 分钟`;
@@ -159,10 +184,16 @@ export function focusSlot(s: EditState, d: ShotDetail | undefined, shot: string)
 }
 
 /** 一版的状态角标——只有一个：已定稿且过期 → “过期·需重出”（不再同时显示“已定稿”） */
-export function takeBadge(t: TakeX | null | undefined): { text: string; cls: "ok" | "warn"; why?: string } | null {
+export function takeBadge(t: TakeX | null | undefined): { text: string; cls: "ok" | "warn" | "auto" | "bad" | "dep"; why?: string } | null {
   if (!t) return null;
+  if (t.bad) return { text: "坏图", cls: "bad", why: `${t.bad}：不能定稿、不能设为当前` }; // UXF1 #6：坏图优先（不能定稿 / 设为当前）
   const why = [...(t.stale ?? []), ...(t.stale_global ?? [])].join("；");
-  if (isStale(t)) return { text: t.locked ? "过期·需重出" : "过期", cls: "warn", why };
+  if (isStale(t)) return { text: STALE_SHORT, cls: "warn", why }; // UXF5（R4）：过期只有一种写法
+  // UX5-B：所用资产出了新版本 → 单独角标（不算过期；悬停列出哪项 vA→vB）
+  if (t.stale_deps?.length) return { text: DEP_UPDATED, cls: "dep", why: t.stale_deps.map((d) => d.text).join("；") };
+  // UXF4（审查 N1）：自动测试定稿单独标出，不和项目方定稿同色；视频只显示“通过”，不显示“定稿”
+  if (t.auto) return { text: AUTO_SHORT, cls: "auto", why: AUTO_TIP };
+  if (t.stage === "video") return t.passed ? { text: "已通过", cls: "ok" } : null;
   if (t.locked) return { text: "已定稿", cls: "ok" };
   return null;
 }

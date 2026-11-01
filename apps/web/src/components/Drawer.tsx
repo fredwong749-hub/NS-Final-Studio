@@ -1,9 +1,13 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStudio, type DrawerTab } from "../store";
-import { fmtTime, JOB_LABEL, segDiff, STAGE_LABEL } from "../util";
+import { Tabs } from "../ds";
+import { TaskList } from "./RenderTasks";
+import { countRows, filterRows, useRenderTasks, type RTFilter } from "./RenderTasks.helpers";
+import { fmtTime, isInterrupted, JOB_LABEL, segDiff, STAGE_LABEL } from "../util";
 import { PersonRow } from "./ShotCard";
 import type { Job, Stage } from "../types";
-import { seamState } from "./Seam";
+import { seamState } from "./Seam.helpers";
+import { errSummary, takeLabel } from "./Drawer.helpers";
 
 const TABS: [DrawerTab, string][] = [
   ["jobs", "任务队列"],
@@ -22,13 +26,13 @@ function FailedRetry() {
   const { jobs, requestBatch } = useStudio();
   const newest = new Map<string, Job>();
   for (const j of jobs) {
-    if (j.stage === "asset" || j.shot_id.startsWith("asset:")) continue;
+    if (j.stage === "asset" || !j.shot_id || j.shot_id.startsWith("asset:")) continue;
     const k = `${j.shot_id}|${j.stage}`;
     const o = newest.get(k);
     if (!o || j.created_at > o.created_at) newest.set(k, j);
   }
   const failed = new Map<Stage, string[]>();
-  for (const j of newest.values()) if (j.state === "failed" && j.stage !== "asset") failed.set(j.stage, [...(failed.get(j.stage) ?? []), j.shot_id]);
+  for (const j of newest.values()) if (j.state === "failed" && !isInterrupted(j) && j.stage !== "asset") failed.set(j.stage, [...(failed.get(j.stage) ?? []), j.shot_id]);
   if (!failed.size) return null;
   return (
     <div className="batch-retry">
@@ -42,12 +46,47 @@ function FailedRetry() {
   );
 }
 
-function Jobs() {
-  const { jobs, select } = useStudio();
-  if (!jobs.length) return <div className="muted pad">本次服务启动后还没有任务（命令行批跑不经过此队列）。</div>;
+const isAssetJob = (j: Job) => !j.shot_id || j.shot_id.startsWith("asset:") || j.stage === "asset" || (j.stage as string) === "asset_gen";
+
+/** GPUVIEW 11-01（项目方：“这里uiux设计头不喜欢,展示内容也很快,你思考重构”）：任务队列 = 顶栏“渲染任务”同一份数据、同一个行组件
+ *  （components/RenderTasks.tsx）；默认筛到当前集。原来的表格（任务 id / 种子 / 提交时间原样）收在“原始表”里，不删功能（G10）。 */
+function Jobs({ filter, onFilter }: { filter?: RTFilter; onFilter?: (f: RTFilter) => void }) {
+  const { epNum, select } = useStudio();
+  const { data, err } = useRenderTasks();
+  const [raw, setRaw] = useState(false);
+  return (
+    <>
+      <FailedRetry />
+      <div className="rt-tools">
+        <span className="grow" />
+        <label className="jobs-filter" title="画布任务队列的原始表格（任务 id、种子、提交时间）">
+          <input type="checkbox" checked={raw} onChange={(e) => setRaw(e.target.checked)} /> 原始表
+        </label>
+      </div>
+      {raw ? (
+        <LegacyJobs />
+      ) : (
+        <TaskList key={epNum} data={data} err={err} defaultEp={epNum} compact={false} filter={filter} onFilter={onFilter} onOpen={(r) => (r.shot && r.episode ? select(`ep${String(r.episode).padStart(2, "0")}-${r.shot}`) : r.link ? (location.hash = r.link) : undefined)} />
+      )}
+    </>
+  );
+}
+
+function LegacyJobs() {
+  const { jobs: all, select } = useStudio();
+  // fredw-92/UXF5（审查 N10）：资产生成任务默认收起，只看镜头任务（一键切换）
+  const [shotsOnly, setShotsOnly] = useState(true);
+  if (!all.length) return <div className="muted pad">现在没有出图 / 出视频任务。</div>;
+  const assetN = all.filter(isAssetJob).length;
+  const jobs = shotsOnly ? all.filter((j) => !isAssetJob(j)) : all;
   return (
     <>
     <FailedRetry />
+    {assetN > 0 && (
+      <label className="jobs-filter">
+        <input type="checkbox" checked={shotsOnly} onChange={(e) => setShotsOnly(e.target.checked)} /> 只看镜头任务（隐藏资产生成 {assetN} 条）
+      </label>
+    )}
     <table className="jobs">
       <thead>
         <tr>
@@ -62,20 +101,20 @@ function Jobs() {
       </thead>
       <tbody>
         {jobs.map((j) => (
-          <tr key={j.id} className={`job-${j.state}`}>
+          <tr key={j.id} className={`job-${isInterrupted(j) ? "interrupted" : j.state}`}>
             <td className="tnum">{j.id}</td>
             <td>
-              {j.shot_id.startsWith("asset:") ? j.shot_id : <a onClick={() => select(j.shot_id)}>{j.shot_id}</a>}
+              {!j.shot_id ? "资产" : j.shot_id.startsWith("asset:") ? j.shot_id : <a onClick={() => select(j.shot_id)}>{j.shot_id}</a>}
             </td>
-            <td>{STAGE_LABEL[j.stage]}</td>
+            <td>{STAGE_LABEL[j.stage] ?? j.stage}</td>
             <td className="tnum">{j.seed ?? "—"}</td>
             <td>
-              {JOB_LABEL[j.state]}
-              {j.take != null && ` → #${j.take}`}
+              {JOB_LABEL[isInterrupted(j) ? "interrupted" : j.state]}
+              {takeLabel(j.take) && ` → ${takeLabel(j.take)}`}
             </td>
             <td className="tnum">{fmtTime(j.created_at)}</td>
             <td className="err-cell" title={j.error ?? j.comfy_wait?.error ?? ""}>
-              {j.error ?? (j.comfy_wait ? waitText(j.comfy_wait) : "")}
+              {j.error ? errSummary(j.error) : j.comfy_wait ? waitText(j.comfy_wait) : ""}
             </td>
           </tr>
         ))}
@@ -231,23 +270,32 @@ function SeamCompare() {
 }
 
 export function Drawer() {
-  const { drawer, setDrawer } = useStudio();
+  const { drawer } = useStudio();
   if (!drawer.open) return null;
+  return <DrawerOpen />;
+}
+
+function DrawerOpen() {
+  const { drawer, setDrawer, epNum } = useStudio();
+  const { data } = useRenderTasks();
+  // UIAUDIT verify_gpuview_r1 P2：标签上的数字和列表用同一个筛选（默认当前集），换集时筛选跟着换
+  const [filter, setFilter] = useState<RTFilter>({ ep: String(epNum), type: "" });
+  useEffect(() => setFilter((f) => ({ ...f, ep: String(epNum) })), [epNum]);
+  const c = data ? countRows(filterRows(data.rows, filter)) : null;
+  const scope = filter.ep === "" ? "全剧" : filter.ep === "none" ? "非分集" : `第${filter.ep}集`;
+  const badge = !c ? undefined : c.failed ? `${scope}失败 ${c.failed}` : c.rendering ? `${scope}渲染中 ${c.rendering}` : undefined;
   return (
     <section className="drawer">
-      <div className="drawer-tabs">
-        {TABS.map(([t, l]) => (
-          <button key={t} className={drawer.tab === t ? "on" : ""} onClick={() => setDrawer({ open: true, tab: t })}>
-            {l}
-          </button>
-        ))}
+      <div className="drawer-tabs ds-tabs-host">
+        {/* GPUVIEW：标签头改用设计系统 Tabs（与渲染任务中心同一套）；任务队列标签带“渲染中”数 */}
+        <Tabs value={drawer.tab} onChange={(t) => setDrawer({ open: true, tab: t })} options={TABS.map(([t, l]) => [t, l, t === "jobs" ? badge : undefined] as [DrawerTab, string, string | undefined])} />
         <span className="grow" />
         <button className="btn-mini" onClick={() => setDrawer({ ...drawer, open: false })}>
           收起
         </button>
       </div>
       <div className="drawer-body">
-        {drawer.tab === "jobs" && <Jobs />}
+        {drawer.tab === "jobs" && <Jobs filter={filter} onFilter={setFilter} />}
         {drawer.tab === "batch" && <Batch />}
         {drawer.tab === "compare" && <Compare />}
         {drawer.tab === "seam" && <SeamCompare />}

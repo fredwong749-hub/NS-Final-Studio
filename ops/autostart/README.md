@@ -13,4 +13,4 @@ register_owner.ps1 依次：删掉指向不存在路径的旧任务 NS-Studio-Au
 （封板修复：原先这里抄的 schtasks 命令用 `\"` 转义，在 PowerShell 里不生效，路径带空格会注册坏；请只用 register_owner.ps1，它用的是 PowerShell 的反引号转义。）
 
 撤销：`schtasks /Delete /TN <任务名> /F`。日志：`ops\logs\*.log`（autostart.log、tunnel.log、sync_laptop.log …）。
-ops/_old_laptop_copy_20261030/ 是分叉的旧拷贝，不要用（现行版是 ops/sync/）。
+ops/_old_laptop_copy_20261030/（分叉的旧拷贝）已于 11-01 移入 data/_quarantine_20261101b/（CLEANUP，K-OPS-Q30）；现行版是 ops/sync/。

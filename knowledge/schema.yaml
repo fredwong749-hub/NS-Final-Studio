@@ -1,0 +1,44 @@
+# 知识库（系统 memory）条目格式 —— tools/knowledge/compile.py 按此校验。
+# 单一事实来源：配方参数（services/recipes/recipes/*.yaml）、自动迭代规则表（tools/iterate_loop/rules.yaml，由本库生成）、
+# 写作模型知识包（config/recipes/writer_knowledge.md，生成）、导演 / 审片提示词（config/recipes/director_system_prompt.md，生成）
+# 都从 knowledge/rules/*.yaml 生成或校验。新学到的东西 = 在对应文件加一条规则，然后跑 compile.py。
+schema: nsfs.knowledge/1
+file_layout:
+  rules: "knowledge/rules/<domain>*.yaml，顶层 {rules: [条目…]}"
+  prompts: "knowledge/prompts/<writer|director>/*.md，提示词骨架（{{占位符}} 由 compile 填）"
+  settings: "knowledge/settings.yaml，Loop 设置 / 写回门槛 / 版本"
+domains:
+  render: 生成参数（模型、采样、分辨率、关键帧、LoRA）
+  prompt: H3 提示词格式（官方 base-en / ref-en）
+  writer: 写作方格式与可实现性（只讲格式，不讲剧情）
+  edit: 剪辑 / 合成 / 音频
+  review: 审片指标、阈值、rubric
+  loop: 自动迭代规则（指标 → 动作阶梯）
+  asset: 角色 / 场景 / 一致性资产
+  ops: 道、显存、作业、许可
+  ui: 界面 / 交互规则（UIRSI，knowledge/rules/ui.yaml；每轮 RSI 的有效做法写回这里）
+entry:
+  id: "K-<域缩写>-<三位数>（REN/PRM/WRT/EDT/REV/LOOP/AST/OPS/UI），全库唯一"
+  domain: 上面之一
+  link: "必填。连接 id（\"Pa-Pb\"，与 config/pipeline/chain.yaml 的 links 对齐；chain.yaml 落地前以 knowledge/links.yaml connections 为准），可写列表"
+  inbox: "knowledge/inbox/*.yaml 是规则草案（CHAINSPEC attribute_bug 产出，status 待确认），compile 不当正式规则读；确认后移到 knowledge/rules/"
+  title: 一句中文
+  when: 触发条件（中文；适用范围）
+  then: 动作 / 参数（中文）
+  params: "可选：{点路径: 值}（机器可读）"
+  targets: |
+    可选，下游落点（compile 检查一致性或据此生成）：
+      {kind: recipe, id: <配方 id>, path: <点路径>, value: <值>}       配方参数必须等于 value
+      {kind: render_quality, path: <JSON 点路径>, value: <值>}         config/render_quality.json（只读校验）
+      {kind: loop_rule}                                                 本条的 loop 块生成 rules.yaml 一条
+      {kind: writer_prompt, section: <节名>}                            writer_text 进写作模型知识包
+      {kind: director_prompt, section: <节名>}                          director_text 进审片提示词
+  loop: "domain=loop 时必填：{rule_id, stage?, when?, spec_rules?, note, ladder: [...]}（同 rules.yaml 条目）"
+  writer_text: "进写作知识包的一句话（只讲格式 / 可实现性；不写剧情、不评价内容）"
+  director_text: "进审片提示词的一句话（判定标准或判定 → 动作）"
+  evidence: "[{src: 文件路径[ §节], quote: ≤30 字原文（可选）, note: 可选}]，至少一条"
+  confidence: high | medium | low
+  status: 确认 | 建议 | 待验 | 待许可登记 | 项目方闸门
+  date: YYYY-MM-DD
+  experiment: 可选，实验号（E1…）
+  supersedes: 可选，被替代的条目 id

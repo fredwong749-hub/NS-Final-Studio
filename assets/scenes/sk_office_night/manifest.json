@@ -1,0 +1,23 @@
+{
+  "plate": "plate.png",
+  "scene_id": "sk_office_night",
+  "locked": {
+    "by": "canvas",
+    "at": "2026-11-01T00:57:28",
+    "sha256": "8200625883ff0909485a7aa5a34e74b177c8b4fd0dc324dcde7c948cf0c16ffe",
+    "version": 1,
+    "variant": "main",
+    "file": "plate.png",
+    "source_file": "data/pipeline/runs/series10_v1/images/scenes/sk_office_night/plate_s701_post.png"
+  },
+  "variants": {
+    "plate": {
+      "file": "plate.png",
+      "sha256": "8200625883ff0909485a7aa5a34e74b177c8b4fd0dc324dcde7c948cf0c16ffe",
+      "version": 1,
+      "locked_by": "canvas",
+      "locked_at": "2026-11-01T00:57:28",
+      "source": "canvas"
+    }
+  }
+}

@@ -1,0 +1,128 @@
+[
+ {
+  "id": "W1_ep01",
+  "title": "r36#1/#2 ↻ 位置 + 候选标签 ep01",
+  "path": "/#ep01",
+  "wait": 9000,
+  "steps": [
+   {
+    "click": "=审片",
+    "after": 2500
+   },
+   {
+    "wait": 12000
+   },
+   {
+    "js": "const out=[]; for (const r of [...document.querySelectorAll('[data-shot]')]) { for (const t of [...r.querySelectorAll('.v3-frame')]) { const tagEl=t.querySelector('.v3-tag'); const tag=(tagEl?.innerText||'').split(String.fromCharCode(10)).join(' '); const hasNum=/#[0-9]+/.test(tag); const b=[...t.querySelectorAll('button')].find(x=>/再生成/.test(x.textContent)); const tr=t.getBoundingClientRect(); let pos=null, overLabel=false; if (b) { const br=b.getBoundingClientRect(); pos={right:Math.round(tr.right-br.right), top:Math.round(br.top-tr.top), w:Math.round(br.width), h:Math.round(br.height)}; if (tagEl) { const lr=tagEl.getBoundingClientRect(); overLabel = !(br.left>=lr.right-2 || br.right<=lr.left+2 || br.top>=lr.bottom-2 || br.bottom<=lr.top+2); } } out.push({shot:r.getAttribute('data-shot'), tag, hasNum, btn:!!b, btnText:b?.textContent, tileW:Math.round(tr.width), pos, overLabel, cand:t.classList.contains('cand'), title:t.title.slice(0,60), candBar:t.querySelector('.v3-cand-bar')?.innerText.split(String.fromCharCode(10)).join(' ')||null}); } } const ver=out.filter(x=>x.hasNum), oth=out.filter(x=>!x.hasNum); return {tiles:out.length, versioned:ver.length, versionedWithBtn:ver.filter(x=>x.btn).length, otherWithBtn:oth.filter(x=>x.btn).length, overLabel:out.filter(x=>x.overLabel).length, posSet:[...new Set(out.filter(x=>x.pos).map(x=>JSON.stringify(x.pos)))], btnTexts:[...new Set(out.filter(x=>x.btn).map(x=>x.btnText))], candTiles:out.filter(x=>x.cand).map(x=>({shot:x.shot, tag:x.tag, title:x.title, candBar:x.candBar})).slice(0,12), tileW:[...new Set(out.map(x=>x.tileW))]};"
+   },
+   {
+    "shot": "a"
+   }
+  ]
+ },
+ {
+  "id": "W1_ep02",
+  "title": "r36#1/#2 ↻ 位置 + 候选标签 ep02",
+  "path": "/#ep02",
+  "wait": 9000,
+  "steps": [
+   {
+    "click": "=审片",
+    "after": 2500
+   },
+   {
+    "wait": 12000
+   },
+   {
+    "js": "const out=[]; for (const r of [...document.querySelectorAll('[data-shot]')]) { for (const t of [...r.querySelectorAll('.v3-frame')]) { const tagEl=t.querySelector('.v3-tag'); const tag=(tagEl?.innerText||'').split(String.fromCharCode(10)).join(' '); const hasNum=/#[0-9]+/.test(tag); const b=[...t.querySelectorAll('button')].find(x=>/再生成/.test(x.textContent)); const tr=t.getBoundingClientRect(); let pos=null, overLabel=false; if (b) { const br=b.getBoundingClientRect(); pos={right:Math.round(tr.right-br.right), top:Math.round(br.top-tr.top), w:Math.round(br.width), h:Math.round(br.height)}; if (tagEl) { const lr=tagEl.getBoundingClientRect(); overLabel = !(br.left>=lr.right-2 || br.right<=lr.left+2 || br.top>=lr.bottom-2 || br.bottom<=lr.top+2); } } out.push({shot:r.getAttribute('data-shot'), tag, hasNum, btn:!!b, btnText:b?.textContent, tileW:Math.round(tr.width), pos, overLabel, cand:t.classList.contains('cand'), title:t.title.slice(0,60), candBar:t.querySelector('.v3-cand-bar')?.innerText.split(String.fromCharCode(10)).join(' ')||null}); } } const ver=out.filter(x=>x.hasNum), oth=out.filter(x=>!x.hasNum); return {tiles:out.length, versioned:ver.length, versionedWithBtn:ver.filter(x=>x.btn).length, otherWithBtn:oth.filter(x=>x.btn).length, overLabel:out.filter(x=>x.overLabel).length, posSet:[...new Set(out.filter(x=>x.pos).map(x=>JSON.stringify(x.pos)))], btnTexts:[...new Set(out.filter(x=>x.btn).map(x=>x.btnText))], candTiles:out.filter(x=>x.cand).map(x=>({shot:x.shot, tag:x.tag, title:x.title, candBar:x.candBar})).slice(0,12), tileW:[...new Set(out.map(x=>x.tileW))]};"
+   },
+   {
+    "shot": "a"
+   }
+  ]
+ },
+ {
+  "id": "W1_script",
+  "title": "r36#1 ↻ 剧本页",
+  "path": "/#/script-create",
+  "wait": 9000,
+  "steps": [
+   {
+    "wait": 12000
+   },
+   {
+    "js": "const out=[]; for (const r of [...document.querySelectorAll('[data-shot]')]) { for (const t of [...r.querySelectorAll('.v3-frame')]) { const tagEl=t.querySelector('.v3-tag'); const tag=(tagEl?.innerText||'').split(String.fromCharCode(10)).join(' '); const hasNum=/#[0-9]+/.test(tag); const b=[...t.querySelectorAll('button')].find(x=>/再生成/.test(x.textContent)); const tr=t.getBoundingClientRect(); let pos=null, overLabel=false; if (b) { const br=b.getBoundingClientRect(); pos={right:Math.round(tr.right-br.right), top:Math.round(br.top-tr.top), w:Math.round(br.width), h:Math.round(br.height)}; if (tagEl) { const lr=tagEl.getBoundingClientRect(); overLabel = !(br.left>=lr.right-2 || br.right<=lr.left+2 || br.top>=lr.bottom-2 || br.bottom<=lr.top+2); } } out.push({shot:r.getAttribute('data-shot'), tag, hasNum, btn:!!b, btnText:b?.textContent, tileW:Math.round(tr.width), pos, overLabel, cand:t.classList.contains('cand'), title:t.title.slice(0,60), candBar:t.querySelector('.v3-cand-bar')?.innerText.split(String.fromCharCode(10)).join(' ')||null}); } } const ver=out.filter(x=>x.hasNum), oth=out.filter(x=>!x.hasNum); return {tiles:out.length, versioned:ver.length, versionedWithBtn:ver.filter(x=>x.btn).length, otherWithBtn:oth.filter(x=>x.btn).length, overLabel:out.filter(x=>x.overLabel).length, posSet:[...new Set(out.filter(x=>x.pos).map(x=>JSON.stringify(x.pos)))], btnTexts:[...new Set(out.filter(x=>x.btn).map(x=>x.btnText))], candTiles:out.filter(x=>x.cand).map(x=>({shot:x.shot, tag:x.tag, title:x.title, candBar:x.candBar})).slice(0,12), tileW:[...new Set(out.map(x=>x.tileW))]};"
+   },
+   {
+    "shot": "a"
+   }
+  ]
+ },
+ {
+  "id": "W1_hover",
+  "title": "r36#1 悬停出放大镜时 ↻ 仍点得到",
+  "path": "/#ep02",
+  "wait": 9000,
+  "steps": [
+   {
+    "click": "=审片",
+    "after": 2500
+   },
+   {
+    "wait": 10000
+   },
+   {
+    "js": "const r=document.querySelector('[data-shot=\"ep02-S1\"]'); [...r.querySelectorAll('.v3-frame')][0].scrollIntoView({block:'center'}); return 1;",
+    "after": 800
+   },
+   {
+    "js": "return 0;"
+   },
+   {
+    "hoverAt": "(() => { const r=document.querySelector('[data-shot=\"ep02-S1\"]'); const t=[...r.querySelectorAll('.v3-frame')][0]; const i=t.querySelector('img'); const b=(i||t).getBoundingClientRect(); return [b.x+b.width/2, b.y+b.height/2]; })()"
+   },
+   {
+    "js": "const m=document.querySelector('.zl-mag'); const r=document.querySelector('[data-shot=\"ep02-S1\"]'); const t=[...r.querySelectorAll('.v3-frame')][0]; const b=[...t.querySelectorAll('button')].find(x=>/再生成/.test(x.textContent)); const br=b.getBoundingClientRect(); const mr=m?.getBoundingClientRect(); const hit=document.elementFromPoint(br.x+br.width/2, br.y+br.height/2); return {mag:!!m, magBox:mr?[Math.round(mr.x),Math.round(mr.y),Math.round(mr.width),Math.round(mr.height)]:null, btnBox:[Math.round(br.x),Math.round(br.y),Math.round(br.width),Math.round(br.height)], centerHitsBtn: !!hit && (b===hit||b.contains(hit)), hit:hit?.className?.toString().slice(0,40)};"
+   },
+   {
+    "shot": "a"
+   },
+   {
+    "clickAt": "(() => { const r=document.querySelector('.v3-row[data-shot=\"ep02-S1\"], [data-shot=\"ep02-S1\"]'); const t=[...r.querySelectorAll('.v3-frame')][0]; t.scrollIntoView({block:'center'}); const b=[...t.querySelectorAll('button')].find(x=>/再生成/.test(x.textContent)); const br=b.getBoundingClientRect(); return [br.x+br.width/2, br.y+br.height/2]; })()",
+    "after": 1500
+   },
+   {
+    "js": "const m=document.querySelector('.ds-modal'); return {modal:!!m, title:m?.querySelector('h2,h3,header')?.innerText?.split(String.fromCharCode(10))[0], focusTextarea:document.activeElement?.tagName==='TEXTAREA'};"
+   },
+   {
+    "tabtrap": ".ds-modal",
+    "n": 6
+   }
+  ]
+ },
+ {
+  "id": "W2_use",
+  "title": "r36#2 候选“用这张”（写请求被拦）",
+  "path": "/#ep02",
+  "wait": 9000,
+  "steps": [
+   {
+    "click": "=审片",
+    "after": 2500
+   },
+   {
+    "wait": 10000
+   },
+   {
+    "clickAt": "(() => { const r=document.querySelector('[data-shot=\"ep02-S1\"]'); const t=[...r.querySelectorAll('.v3-frame')][0]; const b=t.querySelector('.v3-cand-use'); if(!b) return [null,null]; b.scrollIntoView({block:'center'}); const x=b.getBoundingClientRect(); return [x.x+x.width/2, x.y+x.height/2]; })()",
+    "after": 2500
+   },
+   {
+    "js": "return {toasts:[...document.querySelectorAll('.toast, .toasts > *, [class*=undo]')].map(e=>e.innerText.split(String.fromCharCode(10)).join(' ').slice(0,80)).slice(0,4)};"
+   },
+   {
+    "shot": "a"
+   }
+  ]
+ }
+]

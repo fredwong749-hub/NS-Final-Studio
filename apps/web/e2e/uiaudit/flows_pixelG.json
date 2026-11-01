@@ -1,0 +1,105 @@
+[
+  {
+    "steps": [
+      {
+        "js": "await new Promise(r=>setTimeout(r,1500)); document.querySelectorAll('details:not([open])').forEach(d=>{}); const vis=(e)=>{const r=e.getBoundingClientRect(); const s=getComputedStyle(e); return r.width>1&&r.height>1&&s.visibility!=='hidden'&&s.display!=='none'&&r.top<innerHeight&&r.bottom>0;}; const els=[...document.querySelectorAll('button,a[href],[role=button],summary,[role=tab]')].filter(vis).filter(e=>!e.disabled); const small=[]; for(const e of els){ const r=e.getBoundingClientRect(); const b=getComputedStyle(e,'::before'); let w=r.width,h=r.height; if(b.content!=='none'&&b.position==='absolute'){ const ins=['top','right','bottom','left'].map(k=>parseFloat(b[k])||0); w=Math.max(w,r.width-ins[1]-ins[3]); h=Math.max(h,r.height-ins[0]-ins[2]); } if(Math.min(w,h)<28) small.push((e.innerText||e.getAttribute('aria-label')||e.className).toString().replace(/\\s+/g,' ').slice(0,14)+' '+Math.round(w)+'x'+Math.round(h)); } return {n:els.length, under28:small.length, sample:small.slice(0,8)};"
+      }
+    ],
+    "path": "/#ep02",
+    "id": "G_canvas",
+    "title": "G_canvas",
+    "wait": 9000
+  },
+  {
+    "steps": [
+      {
+        "js": "await new Promise(r=>setTimeout(r,1500)); document.querySelectorAll('details:not([open])').forEach(d=>{}); const vis=(e)=>{const r=e.getBoundingClientRect(); const s=getComputedStyle(e); return r.width>1&&r.height>1&&s.visibility!=='hidden'&&s.display!=='none'&&r.top<innerHeight&&r.bottom>0;}; const els=[...document.querySelectorAll('button,a[href],[role=button],summary,[role=tab]')].filter(vis).filter(e=>!e.disabled); const small=[]; for(const e of els){ const r=e.getBoundingClientRect(); const b=getComputedStyle(e,'::before'); let w=r.width,h=r.height; if(b.content!=='none'&&b.position==='absolute'){ const ins=['top','right','bottom','left'].map(k=>parseFloat(b[k])||0); w=Math.max(w,r.width-ins[1]-ins[3]); h=Math.max(h,r.height-ins[0]-ins[2]); } if(Math.min(w,h)<28) small.push((e.innerText||e.getAttribute('aria-label')||e.className).toString().replace(/\\s+/g,' ').slice(0,14)+' '+Math.round(w)+'x'+Math.round(h)); } return {n:els.length, under28:small.length, sample:small.slice(0,8)};"
+      }
+    ],
+    "path": "/#/audit",
+    "id": "G_audit",
+    "title": "G_audit",
+    "wait": 9000
+  },
+  {
+    "steps": [
+      {
+        "js": "await new Promise(r=>setTimeout(r,1500)); document.querySelectorAll('details:not([open])').forEach(d=>{}); const vis=(e)=>{const r=e.getBoundingClientRect(); const s=getComputedStyle(e); return r.width>1&&r.height>1&&s.visibility!=='hidden'&&s.display!=='none'&&r.top<innerHeight&&r.bottom>0;}; const els=[...document.querySelectorAll('button,a[href],[role=button],summary,[role=tab]')].filter(vis).filter(e=>!e.disabled); const small=[]; for(const e of els){ const r=e.getBoundingClientRect(); const b=getComputedStyle(e,'::before'); let w=r.width,h=r.height; if(b.content!=='none'&&b.position==='absolute'){ const ins=['top','right','bottom','left'].map(k=>parseFloat(b[k])||0); w=Math.max(w,r.width-ins[1]-ins[3]); h=Math.max(h,r.height-ins[0]-ins[2]); } if(Math.min(w,h)<28) small.push((e.innerText||e.getAttribute('aria-label')||e.className).toString().replace(/\\s+/g,' ').slice(0,14)+' '+Math.round(w)+'x'+Math.round(h)); } return {n:els.length, under28:small.length, sample:small.slice(0,8)};"
+      }
+    ],
+    "path": "/#/script-create",
+    "id": "G_script",
+    "title": "G_script",
+    "wait": 9000
+  },
+  {
+    "steps": [
+      {
+        "js": "await new Promise(r=>setTimeout(r,1500)); document.querySelectorAll('details:not([open])').forEach(d=>{}); const vis=(e)=>{const r=e.getBoundingClientRect(); const s=getComputedStyle(e); return r.width>1&&r.height>1&&s.visibility!=='hidden'&&s.display!=='none'&&r.top<innerHeight&&r.bottom>0;}; const els=[...document.querySelectorAll('button,a[href],[role=button],summary,[role=tab]')].filter(vis).filter(e=>!e.disabled); const small=[]; for(const e of els){ const r=e.getBoundingClientRect(); const b=getComputedStyle(e,'::before'); let w=r.width,h=r.height; if(b.content!=='none'&&b.position==='absolute'){ const ins=['top','right','bottom','left'].map(k=>parseFloat(b[k])||0); w=Math.max(w,r.width-ins[1]-ins[3]); h=Math.max(h,r.height-ins[0]-ins[2]); } if(Math.min(w,h)<28) small.push((e.innerText||e.getAttribute('aria-label')||e.className).toString().replace(/\\s+/g,' ').slice(0,14)+' '+Math.round(w)+'x'+Math.round(h)); } return {n:els.length, under28:small.length, sample:small.slice(0,8)};"
+      }
+    ],
+    "path": "/#/assets",
+    "id": "G_assets",
+    "title": "G_assets",
+    "wait": 9000
+  },
+  {
+    "steps": [
+      {
+        "js": "await new Promise(r=>setTimeout(r,1500)); document.querySelectorAll('details:not([open])').forEach(d=>{}); const vis=(e)=>{const r=e.getBoundingClientRect(); const s=getComputedStyle(e); return r.width>1&&r.height>1&&s.visibility!=='hidden'&&s.display!=='none'&&r.top<innerHeight&&r.bottom>0;}; const els=[...document.querySelectorAll('button,a[href],[role=button],summary,[role=tab]')].filter(vis).filter(e=>!e.disabled); const small=[]; for(const e of els){ const r=e.getBoundingClientRect(); const b=getComputedStyle(e,'::before'); let w=r.width,h=r.height; if(b.content!=='none'&&b.position==='absolute'){ const ins=['top','right','bottom','left'].map(k=>parseFloat(b[k])||0); w=Math.max(w,r.width-ins[1]-ins[3]); h=Math.max(h,r.height-ins[0]-ins[2]); } if(Math.min(w,h)<28) small.push((e.innerText||e.getAttribute('aria-label')||e.className).toString().replace(/\\s+/g,' ').slice(0,14)+' '+Math.round(w)+'x'+Math.round(h)); } return {n:els.length, under28:small.length, sample:small.slice(0,8)};"
+      }
+    ],
+    "path": "/#/assets?type=character&char=lin_wan",
+    "id": "G_char",
+    "title": "G_char",
+    "wait": 9000
+  },
+  {
+    "steps": [
+      {
+        "js": "await new Promise(r=>setTimeout(r,1500)); document.querySelectorAll('details:not([open])').forEach(d=>{}); const vis=(e)=>{const r=e.getBoundingClientRect(); const s=getComputedStyle(e); return r.width>1&&r.height>1&&s.visibility!=='hidden'&&s.display!=='none'&&r.top<innerHeight&&r.bottom>0;}; const els=[...document.querySelectorAll('button,a[href],[role=button],summary,[role=tab]')].filter(vis).filter(e=>!e.disabled); const small=[]; for(const e of els){ const r=e.getBoundingClientRect(); const b=getComputedStyle(e,'::before'); let w=r.width,h=r.height; if(b.content!=='none'&&b.position==='absolute'){ const ins=['top','right','bottom','left'].map(k=>parseFloat(b[k])||0); w=Math.max(w,r.width-ins[1]-ins[3]); h=Math.max(h,r.height-ins[0]-ins[2]); } if(Math.min(w,h)<28) small.push((e.innerText||e.getAttribute('aria-label')||e.className).toString().replace(/\\s+/g,' ').slice(0,14)+' '+Math.round(w)+'x'+Math.round(h)); } return {n:els.length, under28:small.length, sample:small.slice(0,8)};"
+      }
+    ],
+    "path": "/#/models",
+    "id": "G_models",
+    "title": "G_models",
+    "wait": 9000
+  },
+  {
+    "steps": [
+      {
+        "click": "精修",
+        "after": 5000
+      },
+      {
+        "js": "await new Promise(r=>setTimeout(r,1500)); document.querySelectorAll('details:not([open])').forEach(d=>{}); const vis=(e)=>{const r=e.getBoundingClientRect(); const s=getComputedStyle(e); return r.width>1&&r.height>1&&s.visibility!=='hidden'&&s.display!=='none'&&r.top<innerHeight&&r.bottom>0;}; const els=[...document.querySelectorAll('button,a[href],[role=button],summary,[role=tab]')].filter(vis).filter(e=>!e.disabled); const small=[]; for(const e of els){ const r=e.getBoundingClientRect(); const b=getComputedStyle(e,'::before'); let w=r.width,h=r.height; if(b.content!=='none'&&b.position==='absolute'){ const ins=['top','right','bottom','left'].map(k=>parseFloat(b[k])||0); w=Math.max(w,r.width-ins[1]-ins[3]); h=Math.max(h,r.height-ins[0]-ins[2]); } if(Math.min(w,h)<28) small.push((e.innerText||e.getAttribute('aria-label')||e.className).toString().replace(/\\s+/g,' ').slice(0,14)+' '+Math.round(w)+'x'+Math.round(h)); } return {n:els.length, under28:small.length, sample:small.slice(0,8)};"
+      }
+    ],
+    "path": "/#ep02-S1",
+    "id": "G_shot",
+    "title": "精修",
+    "wait": 8000
+  },
+  {
+    "path": "/#ep02",
+    "title": "状态牌 1280",
+    "steps": [
+      {
+        "click": "=审片",
+        "after": 2500
+      },
+      {
+        "js": "return [...document.querySelectorAll('[data-shot] [title]')].filter(e=>/作废|过期/.test(e.title) && e.getBoundingClientRect().width>0).slice(0,6).map(e=>({text:e.innerText.trim(), title:e.title.slice(0,30), w:Math.round(e.closest('[class*=tile],[class*=frame]')?.getBoundingClientRect().width||0)}))"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "id": "G_tag1280",
+    "size": [
+      1280,
+      720
+    ],
+    "wait": 8000
+  }
+]

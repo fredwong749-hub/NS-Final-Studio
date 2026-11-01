@@ -1,0 +1,54 @@
+# UIPIXEL 扫描 t1
+
+生成：2026-10-31T16:20:41.137Z · 脚本 apps/web/e2e/uipixel/scan.mjs（检测逻辑 check.js）
+
+- 状态 2 个 × 尺寸 1440×900 × 主题 dark = 截图 2 张（目录 apps/web/e2e/uipixel/t1/，主尺寸另有 _mark 标注图）
+- **去重后问题 35 条**：严重 9 · 一般 14 · 轻微 12
+- 分类：可点区域过小 15 · 缺悬停态 9 · 左对齐 4 · 内部词/路径 3 · 间距不在刻度 3 · 无手型指针 1
+
+## 每页问题数
+
+| 状态 | 1440 深 |
+|---|---|
+| projects 项目首页 | 23 |
+| overview 全剧总览 | 16 |
+
+## 问题清单（按严重度）
+
+| # | 级 | 类别 | 页面（尺寸/主题） | 组件 | 源码 | 量化值 | 说明 | 修法 |
+|---|---|---|---|---|---|---|---|---|
+| 1 | ●●● | 可点区域过小 | projects, overview（1440d） | `div.v3-top-l > a.v3-brand`<br>「momoso Agentic Drama Stu」 | apps/web/src/v3/TopBarV3.tsx:311<br>apps/web/src/v3/ux4.css:6 | 22x22 | 可点区域只有 22×22px（<24 难点中）<br><sub>uipixel/t1/projects_1440_dark_mark.png #2</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 2 | ●●● | 可点区域过小 | projects（1440d） | `details.ns-old > summary`<br>「以前的稿子（5）」 | apps/web/src/v3/pages/NewScriptPage.tsx:145<br>apps/web/src/v3/pages/story.css:163 | 247x23 | 可点区域只有 247×23px（<24 难点中）<br><sub>uipixel/t1/projects_1440_dark_mark.png #5</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 3 | ●●● | 内部词/路径 | projects（1440d） | `div.ns-kv > dd` | apps/web/src/v3/pages/NewScriptPage.tsx:938<br>apps/web/src/v3/pages/story.css:133 | sk_office_night | 界面出现内部词「sk_office_night」<br><sub>uipixel/t1/projects_1440_dark_mark.png #13</sub> | 显示人话（场景名 / 资产名），路径放 title 或隐藏 |
+| 4 | ●●● | 内部词/路径 | projects（1440d） | `div.ns-kv.raw > dd` | apps/web/src/v3/pages/NewScriptPage.tsx:938<br>apps/web/src/v3/pages/story.css:133 | integrated_multimodal_description | 界面出现内部词「integrated_multimodal_description」<br><sub>uipixel/t1/projects_1440_dark_mark.png #14</sub> | 显示人话（场景名 / 资产名），路径放 title 或隐藏 |
+| 5 | ●●● | 内部词/路径 | projects（1440d） | `div.ns-kv.raw > dd` | apps/web/src/v3/pages/NewScriptPage.tsx:938<br>apps/web/src/v3/pages/story.css:133 | non_diegetic_music | 界面出现内部词「non_diegetic_music」<br><sub>uipixel/t1/projects_1440_dark_mark.png #15</sub> | 显示人话（场景名 / 资产名），路径放 title 或隐藏 |
+| 6 | ●●● | 可点区域过小 | overview（1440d） | `div.sea-eph > a.sea-epn`<br>「第 1 集」 | apps/web/src/v3/pages/SeasonPage.tsx:149<br>apps/web/src/v3/pages/season.css:13 | 42x16 | 可点区域只有 42×16px（<24 难点中）<br><sub>uipixel/t1/overview_1440_dark_mark.png #10</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 7 | ●●● | 可点区域过小 | overview（1440d） | `div.sea-eph > button.v3p-link.sea-selall`<br>「选中整集」 | apps/web/src/v3/edit/RightTabs.tsx:61<br>apps/web/src/v3/pages/pages.css:32 | 52x16 | 可点区域只有 52×16px（<24 难点中）<br><sub>uipixel/t1/overview_1440_dark_mark.png #11</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 8 | ●●● | 可点区域过小 | overview（1440d） | `div.sea-eph > a.sea-epn`<br>「第 2 集」 | apps/web/src/v3/pages/SeasonPage.tsx:149<br>apps/web/src/v3/pages/season.css:13 | 42x16 | 可点区域只有 42×16px（<24 难点中）<br><sub>uipixel/t1/overview_1440_dark_mark.png #12</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 9 | ●●● | 可点区域过小 | overview（1440d） | `div.sea-eph > button.v3p-link.sea-selall`<br>「选中整集」 | apps/web/src/v3/edit/RightTabs.tsx:61<br>apps/web/src/v3/pages/pages.css:32 | 52x16 | 可点区域只有 52×16px（<24 难点中）<br><sub>uipixel/t1/overview_1440_dark_mark.png #13</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 10 | ●● | 缺悬停态 | projects, overview（1440d） | `div.v3-top-l > a.v3-brand`<br>「momoso Agentic Drama Stu」 | apps/web/src/v3/TopBarV3.tsx:311<br>apps/web/src/v3/ux4.css:6 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/t1/projects_1440_dark_mark.png #16</sub> | 加 :hover 背景（--c-hover） |
+| 11 | ●● | 缺悬停态 | projects, overview（1440d） | `div.v3-popwrap.v3-ep-pick > button.v3-ep-name`<br>「第 1 集 · 入职日的一瞥 ▾」 | apps/web/src/v3/v3.css:72 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/t1/projects_1440_dark_mark.png #18</sub> | 加 :hover 背景（--c-hover） |
+| 12 | ●● | 缺悬停态 | projects（1440d） | `div.v3-top-l > a.v3-new.on`<br>「＋ 新建剧本」 | apps/web/src/v3/TopBarV3.tsx:316<br>apps/web/src/v3/v3.css:510 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/t1/projects_1440_dark_mark.png #17</sub> | 加 :hover 背景（--c-hover） |
+| 13 | ●● | 缺悬停态 | projects（1440d） | `span.sf-step-wrap > button.sf-step.on`<br>「① 新建剧本 故事提纲 → 自动写故事线 · 大」 | apps/web/src/v3/pages/ScriptFlowPage.tsx:36<br>apps/web/src/v3/pages/script_flow.css:7 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/t1/projects_1440_dark_mark.png #19</sub> | 加 :hover 背景（--c-hover） |
+| 14 | ●● | 缺悬停态 | projects（1440d） | `div.ns-run-wrap > button.ns-run.on`<br>「漆皮之下·十日 · 10 集 写完了 10-31」 | apps/web/src/v3/pages/NewScriptPage.tsx:184<br>apps/web/src/v3/pages/story.css:8 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/t1/projects_1440_dark_mark.png #20</sub> | 加 :hover 背景（--c-hover） |
+| 15 | ●● | 缺悬停态 | projects（1440d） | `details.ns-old > summary`<br>「以前的稿子（5）」 | apps/web/src/v3/pages/NewScriptPage.tsx:145<br>apps/web/src/v3/pages/story.css:163 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/t1/projects_1440_dark_mark.png #21</sub> | 加 :hover 背景（--c-hover） |
+| 16 | ●● | 缺悬停态 | projects（1440d） | `div.ns-series-eps > button.ns-sep.on`<br>「第 1 集 入职日的一瞥」 | apps/web/src/v3/pages/NewScriptPage.tsx:977<br>apps/web/src/v3/pages/story.css:147 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/t1/projects_1440_dark_mark.png #22</sub> | 加 :hover 背景（--c-hover） |
+| 17 | ●● | 缺悬停态 | projects（1440d） | `div.ns-viewsw > button.on`<br>「每镜完整一行」 | apps/web/src/components/Dialogs.tsx:219<br>apps/web/src/canvas-v2.css:8 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/t1/projects_1440_dark_mark.png #23</sub> | 加 :hover 背景（--c-hover） |
+| 18 | ●● | 左对齐 | overview（1440d） | `button.sea-card > span.sea-segs`<br>「首帧 · 尾帧 · 视频 · 通过」 | apps/web/src/v3/pages/SeasonPage.tsx:190<br>apps/web/src/v3/pages/season.css:42 | 4px | 和同组兄弟左边缘差 4px（同组应左对齐）<br><sub>uipixel/t1/overview_1440_dark_mark.png #1</sub> | 同组表单项共用一条左对齐线：去掉单独的 margin-left / padding-left，提示文字放进控件列 |
+| 19 | ●● | 左对齐 | overview（1440d） | `button.sea-card > span.sea-meta`<br>「特写 · 4s」 | apps/web/src/v3/pages/SeasonPage.tsx:195<br>apps/web/src/v3/pages/season.css:50 | 4px | 和同组兄弟左边缘差 4px（同组应左对齐）<br><sub>uipixel/t1/overview_1440_dark_mark.png #2</sub> | 同组表单项共用一条左对齐线：去掉单独的 margin-left / padding-left，提示文字放进控件列 |
+| 20 | ●● | 左对齐 | overview（1440d） | `button.sea-card > span.sea-band`<br>「林晚与陈宇的家」 | apps/web/src/v3/pages/SeasonPage.tsx:181<br>apps/web/src/v3/pages/season.css:32 | -4px | 和同组兄弟左边缘差 -4px（同组应左对齐）<br><sub>uipixel/t1/overview_1440_dark_mark.png #3</sub> | 同组表单项共用一条左对齐线：去掉单独的 margin-left / padding-left，提示文字放进控件列 |
+| 21 | ●● | 左对齐 | overview（1440d） | `button.sea-card > span.sea-pic.none`<br>「未出 S6 本地」 | apps/web/src/v3/pages/SeasonPage.tsx:182<br>apps/web/src/v3/pages/season.css:33 | -4px | 和同组兄弟左边缘差 -4px（同组应左对齐）<br><sub>uipixel/t1/overview_1440_dark_mark.png #4</sub> | 同组表单项共用一条左对齐线：去掉单独的 margin-left / padding-left，提示文字放进控件列 |
+| 22 | ●● | 无手型指针 | overview（1440d） | `label.sea-tog > input` | apps/web/src/v3/pages/SeasonPage.tsx:118<br>apps/web/src/v3/pages/season.css:4 | default | 可点元素鼠标不是手型（cursor:default）<br><sub>uipixel/t1/overview_1440_dark_mark.png #9</sub> | cursor:pointer（全局 ds.css 规则） |
+| 23 | ●● | 缺悬停态 | overview（1440d） | `li.sea-cell.sel > button.sea-card`<br>「S1 特写 · 4s ● · · ·」 | apps/web/src/v3/pages/SeasonPage.tsx:180<br>apps/web/src/v3/pages/season.css:28 | hover+active | 缺少 悬停态、按下（点击反馈）<br><sub>uipixel/t1/overview_1440_dark_mark.png #16</sub> | 加 :hover 背景（--c-hover） |
+| 24 | ● | 可点区域过小 | projects, overview（1440d） | `div.v3-popwrap.v3-ep-pick > button.v3-ep-name`<br>「第 1 集 · 入职日的一瞥 ▾」 | apps/web/src/v3/v3.css:72 | 168x26 | 可点区域 168×26px（<28）<br><sub>uipixel/t1/projects_1440_dark_mark.png #3</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 25 | ● | 间距不在刻度 | projects（1440d） | `div.v3-info > div.v3-people`<br>「林晚 A 景 办公室夜 无底图 分镜详情 ▸ 首」 | apps/web/src/v3/ReviewRow.tsx:418<br>apps/web/src/v3/pages/story.css:222 | paddingLeft:38 | paddingLeft 38px 不在间距刻度（4/8/12/16/24/32…）<br><sub>uipixel/t1/projects_1440_dark_mark.png #1</sub> | 改成 --sp-* token（4/8/12/16/24/32） |
+| 26 | ● | 可点区域过小 | projects（1440d） | `span.ns-run-del > button.ds-btn.danger`<br>「🗑」 | apps/web/src/ds/MediaPlayer.tsx:260<br>apps/web/src/ds/ds.css:11 | 34x24 | 可点区域 34×24px（<28）<br><sub>uipixel/t1/projects_1440_dark_mark.png #4</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 27 | ● | 可点区域过小 | projects（1440d） | `span.ed-tile-acts > button.ds-btn.xs`<br>「✎ 改」 | apps/web/src/ds/MediaPlayer.tsx:260<br>apps/web/src/ds/ds.css:11 | 46x24 | 可点区域 46×24px（<28）<br><sub>uipixel/t1/projects_1440_dark_mark.png #6</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 28 | ● | 可点区域过小 | projects（1440d） | `span.ed-tile-acts > button.ds-btn.danger`<br>「🗑」 | apps/web/src/ds/MediaPlayer.tsx:260<br>apps/web/src/ds/ds.css:11 | 34x24 | 可点区域 34×24px（<28）<br><sub>uipixel/t1/projects_1440_dark_mark.png #7</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 29 | ● | 可点区域过小 | projects（1440d） | `div.v3-popwrap > button.v3-status.s-yellow`<br>「待你审首帧，满意就定稿 ?」 | apps/web/src/v3/widgets.tsx:56<br>apps/web/src/v3/v3.css:52 | 181x24 | 可点区域 181×24px（<28）<br><sub>uipixel/t1/projects_1440_dark_mark.png #8</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 30 | ● | 可点区域过小 | projects（1440d） | `div.v3-field > button.mp-play.mp-xs`<br>「▶」 | apps/web/src/ds/MediaPlayer.tsx:108<br>apps/web/src/ds/media.css:4 | 30x24 | 可点区域 30×24px（<28）<br><sub>uipixel/t1/projects_1440_dark_mark.png #9</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 31 | ● | 可点区域过小 | projects（1440d） | `div.v3-ptog > button.sb-toggle`<br>「分镜详情 ▸」 | apps/web/src/v3/ReviewRow.tsx:448<br>apps/web/src/v3/storyboard.css:6 | 80x26 | 可点区域 80×26px（<28）<br><sub>uipixel/t1/projects_1440_dark_mark.png #10</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 32 | ● | 可点区域过小 | projects（1440d） | `div.v3-ptog > button`<br>「首帧提示词 ▸」 | apps/web/src/v3/ReviewRow.tsx:446<br>apps/web/src/v3/v3.css:332 | 92x26 | 可点区域 92×26px（<28）<br><sub>uipixel/t1/projects_1440_dark_mark.png #11</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 33 | ● | 可点区域过小 | projects（1440d） | `div.v3-popwrap > button.v3-status.s-gray`<br>「还没有首帧，出首帧 ?」 | apps/web/src/v3/widgets.tsx:56<br>apps/web/src/v3/v3.css:52 | 157x24 | 可点区域 157×24px（<28）<br><sub>uipixel/t1/projects_1440_dark_mark.png #12</sub> | 最小 28px 高（主要按钮 32px），或用 ::after 扩点击区 |
+| 34 | ● | 间距不在刻度 | overview（1440d） | `li.sea-cell > button.sea-card`<br>「S1 特写 · 4s ● · · ·」 | apps/web/src/v3/pages/SeasonPage.tsx:180<br>apps/web/src/v3/pages/season.css:28 | rowGap:3 | rowGap 3px 不在间距刻度（4/8/12/16/24/32…）<br><sub>uipixel/t1/overview_1440_dark_mark.png #5</sub> | 改成 --sp-* token（4/8/12/16/24/32） |
+| 35 | ● | 间距不在刻度 | overview（1440d） | `li.sea-cell > button.sea-card`<br>「S1 特写 · 4s ● · · ·」 | apps/web/src/v3/pages/SeasonPage.tsx:180<br>apps/web/src/v3/pages/season.css:28 | columnGap:3 | columnGap 3px 不在间距刻度（4/8/12/16/24/32…）<br><sub>uipixel/t1/overview_1440_dark_mark.png #6</sub> | 改成 --sp-* token（4/8/12/16/24/32） |

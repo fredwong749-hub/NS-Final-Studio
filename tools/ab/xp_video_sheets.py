@@ -29,7 +29,7 @@ def frames_at(mp4: Path, idx: list[int], tmp: Path) -> list[Path]:
     sel = "+".join(f"eq(n\\,{i})" for i in idx)
     for f in tmp.glob(f"{mp4.stem}_*.png"):
         f.unlink()
-    FF.run(["-i", mp4, "-vf", f"select='{sel}'", "-vsync", "0", tmp / f"{mp4.stem}_%02d.png"])
+    FF.run(["-i", mp4, "-vf", f"select='{sel}'", "-fps_mode", "passthrough", tmp / f"{mp4.stem}_%02d.png"])
     return sorted(tmp.glob(f"{mp4.stem}_*.png"))
 
 
@@ -58,7 +58,7 @@ def build(exp_dirs: list[str], extra: list[tuple[str, str]], out_name: str):
     tiles += [(Image.new("RGB", (768, 1344), (24, 24, 24)), "", "")] * 3
     rows_md = []
     for i, (exp, r) in enumerate(recs):
-        tag = chr(ord("A") + i) if i < 26 else str(i)
+        tag = r['id'].split('_')[0]
         mp4 = X.AB / exp / r["file"]
         n = nframes(mp4)
         idx = [0, n // 4, n // 2, 3 * n // 4, n - 1]
@@ -92,10 +92,10 @@ def build(exp_dirs: list[str], extra: list[tuple[str, str]], out_name: str):
           f"- 首帧 {fr['first']['file']}（sha {fr['first']['sha']}），尾帧 {fr['last']['file']}（sha {fr['last']['sha']}）",
           f"- 提示词：剧本 H3 提示词原样（来源 {recs[0][1]['params']['prompt_source']}），所有变体同一份；X4 也用同一份（未改写为 Ref2VA 六段式——内容由写作模型负责）",
           f"- 文本编码器 {recs[0][1]['params']['clip']}；视频 VAE {recs[0][1]['params']['video_vae']}；音频 VAE {recs[0][1]['params']['audio_vae']}；euler / simple；BasicGuider（cfg 1）",
-          "- 材料：`*_side_by_side.mp4`（无声，左上角字母对应下表）、`*_frame_sheet.jpg`、各变体原 mp4（含声）",
+          "- 材料：`*_side_by_side.mp4`（无声，左上角编号对应下表）、`*_frame_sheet.jpg`、各变体原 mp4（含声）",
           "- PSNR = 片子第 0 帧 / 末帧 对 锁定首/尾帧（同样 center-crop 到 768×1344）的 PSNR(dB)，只是客观数",
           "",
-          "| 字母 | 文件 | 说明 | DiT | LoRA | 步数 | shift 视/音 | 条件 | 角色卡 | 种子 | 帧 | GPU 秒 | 显存峰值 GB | 道 | PSNR 首 | PSNR 尾 |",
+          "| 编号 | 文件 | 说明 | DiT | LoRA | 步数 | shift 视/音 | 条件 | 角色卡 | 种子 | 帧 | GPU 秒 | 显存峰值 GB | 道 | PSNR 首 | PSNR 尾 |",
           "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|", *rows_md]
     for exp in exp_dirs:
         d = json.loads((X.AB / exp / "results.json").read_text(encoding="utf-8"))

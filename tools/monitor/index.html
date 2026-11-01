@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NS 实时监控</title>
+<style>
+:root{
+  --bg:#f6f7f9;--panel:#fff;--ink:#16181d;--mute:#667085;--line:#e4e7ec;
+  --run:#12b76a;--warn:#f79009;--bad:#f04438;--idle:#98a2b3;--acc:#2e6be6;--acc2:#9e77ed;--soft:#eef2f8;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0c0d10;--panel:#15171c;--ink:#e6e8ec;--mute:#8a93a3;--line:#262a33;--soft:#1c2029;
+  --acc:#5b8cff;--acc2:#b692f6;}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding:10px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+h1{font-size:17px;margin:0}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;background:var(--run);margin-right:6px}
+.dot.stale{background:var(--bad)}
+.mute{color:var(--mute)}
+main{padding:16px 20px;max-width:1600px;margin:auto;display:grid;gap:16px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.kpi b{display:block;font-size:24px;font-variant-numeric:tabular-nums}
+.kpi span{color:var(--mute);font-size:12px}
+section{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0}
+section h2{font-size:15px;margin:0 0 10px;display:flex;gap:10px;align-items:baseline}
+section h2 small{font-weight:400;color:var(--mute);font-size:12px}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--mute);font-weight:500;font-size:12px;white-space:nowrap}
+td.n,th.n{text-align:right;white-space:nowrap}
+.scroll{overflow-x:auto}
+.tag{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;white-space:nowrap;border:1px solid currentColor}
+.s-run{color:var(--run)}.s-stale{color:var(--warn)}.s-done{color:var(--idle)}
+.act{color:var(--mute);font-size:12px;max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.map{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+.mach{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--soft)}
+.mach h3{margin:0 0 8px;font-size:14px;display:flex;justify-content:space-between}
+.gpu{display:grid;grid-template-columns:44px 1fr;gap:4px 8px;align-items:center;margin:6px 0;padding:6px 8px;border-radius:8px;background:var(--panel);border:1px solid var(--line)}
+.gpu .id{font-weight:600}
+.bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--acc)}
+.bar.mem i{background:var(--acc2)}
+.gpu .meta{font-size:12px;color:var(--mute)}
+.gpu.idle{opacity:.6}
+.proc{font-size:12px;color:var(--mute);margin-top:6px;word-break:break-all}
+.proc b{color:var(--ink);font-weight:500}
+.tree td:first-child{white-space:nowrap}
+.sess{background:var(--soft)}
+.sess td{font-weight:600}
+.indent{display:inline-block;width:18px}
+.chart{display:flex;align-items:flex-end;gap:3px;height:120px;border-bottom:1px solid var(--line);padding-top:6px}
+.chart div{flex:1;display:flex;flex-direction:column-reverse;min-width:6px;position:relative}
+.chart div i{display:block}
+.chart .lbl{font-size:10px;color:var(--mute);display:flex;gap:3px}
+.chart .lbl span{flex:1;text-align:center;min-width:6px}
+.legend{font-size:12px;color:var(--mute);display:flex;gap:14px;margin:6px 0}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.media{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.mc{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--soft);display:flex;flex-direction:column}
+.mc .th{aspect-ratio:16/10;background:#0003;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.mc .th img{width:100%;height:100%;object-fit:cover}
+.mc .bd{padding:8px 10px;font-size:12px}
+.mc .bd b{font-size:13px;word-break:break-all;display:block}
+.mc button,.btn{font:inherit;font-size:12px;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:6px;padding:2px 8px;cursor:pointer}
+.new{color:var(--run);font-weight:600}
+.cols{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:16px}
+@media (max-width:1000px){.cols{grid-template-columns:1fr}main{padding:12px 16px}}
+.filter{display:flex;gap:8px;align-items:center}
+</style>
+</head>
+<body>
+<header>
+  <h1>NS-Final Studio 实时监控</h1>
+  <span class="mute" id="stamp"><span class="dot"></span>连接中…</span>
+  <span class="mute" style="margin-left:auto;font-size:12px">每 5 秒刷新 · GPU 每 10 秒采集 · 图片目录每 60 秒扫描 · 只读</span>
+</header>
+<main>
+  <div class="kpis" id="kpis"></div>
+
+  <section id="alertsBox">
+    <h2>报警 <small>基础设施看门狗：隧道 / 渲染道空转 / night 卡住 / producer 心跳（data/qa/alerts.jsonl）</small></h2>
+    <div id="alerts" class="mute">无</div>
+  </section>
+
+  <section>
+    <h2>全局图 <small>三台机器 · 每张卡在跑什么</small></h2>
+    <div class="map" id="map"></div>
+  </section>
+
+  <div class="cols">
+    <section>
+      <h2>Agent <small>本机 Claude 会话 + 子 agent + DeepSeek Harness（36 小时内）</small>
+        <span class="filter" style="margin-left:auto"><label class="mute" style="font-size:12px"><input type="checkbox" id="showDone"> 显示已完成</label></span></h2>
+      <div class="scroll"><table class="tree" id="agents"></table></div>
+    </section>
+    <section>
+      <h2>Token 消耗 <small>每小时，所有在线会话 + 子 agent 合计</small></h2>
+      <div class="legend"><span><i style="background:var(--acc)"></i>新输入（含写缓存）</span><span><i style="background:var(--acc2)"></i>输出</span><span id="cacheNote"></span></div>
+      <div id="chart"></div>
+      <h2 style="margin-top:18px">写作模型 API 花费 <small>data/**/ledger.json(l) 里已经记账的调用</small></h2>
+      <div class="scroll"><table id="ledger"></table></div>
+      <h2 style="margin-top:18px">后台进程 <small>本机 + 远端 GPU 机上的非 ComfyUI 进程</small></h2>
+      <div class="scroll"><table id="procs"></table></div>
+    </section>
+  </div>
+
+  <section>
+    <h2>图都在哪里 <small>本机目录（按最近更新排序，缩略图是该目录最新一张）</small>
+      <span class="filter" style="margin-left:auto"><input id="q" placeholder="过滤目录…" style="font:inherit;font-size:12px;padding:3px 8px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink)"></span></h2>
+    <div class="media" id="media"></div>
+    <h2 style="margin-top:18px">远端输出目录 <small>gpu33 / gpu36 上的 ComfyUI 与渲染输出</small></h2>
+    <div class="scroll"><table id="remote"></table></div>
+  </section>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt=n=>{n=+n||0;if(n>=1e9)return(n/1e9).toFixed(2)+'B';if(n>=1e6)return(n/1e6).toFixed(1)+'M';if(n>=1e3)return(n/1e3).toFixed(1)+'K';return String(n)};
+const bytes=n=>{n=+n||0;if(n>=1e9)return(n/1e9).toFixed(1)+' GB';if(n>=1e6)return(n/1e6).toFixed(0)+' MB';return(n/1e3).toFixed(0)+' KB'};
+const ago=(t,now)=>{if(!t)return'—';let s=Math.max(0,now-t);if(s<60)return Math.round(s)+' 秒前';if(s<3600)return Math.round(s/60)+' 分前';if(s<86400)return(s/3600).toFixed(1)+' 小时前';return(s/86400).toFixed(1)+' 天前'};
+const dur=s=>{s=+s||0;if(s<3600)return Math.round(s/60)+' 分';if(s<86400)return(s/3600).toFixed(1)+' 小时';return(s/86400).toFixed(1)+' 天'};
+let showDone=false;try{showDone=localStorage.getItem('nsmon_done')==='1'}catch(e){}
+$('showDone').checked=showDone;
+$('showDone').onchange=e=>{showDone=e.target.checked;try{localStorage.setItem('nsmon_done',showDone?'1':'0')}catch(_){};render(last)};
+$('q').oninput=()=>render(last);
+let last=null;
+
+function stateTag(s){const c=s==='运行中'?'s-run':s==='已完成'?'s-done':'s-stale';return `<span class="tag ${c}">${s}</span>`}
+
+function render(d){
+  if(!d)return;const now=d.now;
+  const ses=d.agents.sessions;const subs=ses.flatMap(s=>s.subagents);
+  const running=subs.filter(a=>a.state==='运行中').length;
+  const busy=ses.filter(s=>s.status==='busy').length;
+  const today=new Date().toISOString().slice(0,10);
+  const hrs=d.agents.hourly;const todayH=hrs.filter(h=>h.h.startsWith(new Date(now*1000).toLocaleDateString('sv')));
+  const tokToday=todayH.reduce((a,h)=>a+h.fresh+h.out+h.cache,0);
+  const outToday=todayH.reduce((a,h)=>a+h.out,0);
+  let gu=0,gt=0;Object.values(d.gpu).forEach(m=>(m.gpus||[]).forEach(g=>{gt++;if(g.util>5||g.mem>1000)gu++}));
+  $('kpis').innerHTML=[
+    [running,'运行中的子 agent'],[`${busy}/${ses.length}`,'会话 忙/在线（Claude + dsh）'],
+    [fmt(tokToday),`今日 token（其中输出 ${fmt(outToday)}）`],
+    ['$'+d.ledger.today_usd.toFixed(2),`写作 API 今日 · 累计 $${d.ledger.total_usd.toFixed(2)}`],
+    [`${gu}/${gt}`,'GPU 在用 / 总数'],
+  ].map(([b,s])=>`<div class="kpi"><b>${b}</b><span>${s}</span></div>`).join('');
+
+  // ---- 报警（WORKFLOW W7b）
+  const al=d.alerts||{open:[],recent:[]};
+  const esc=t=>String(t??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  $('alerts').innerHTML=(al.open.length?al.open.map(a=>`<div style="color:${a.level==='crit'?'#d33':'#c80'}">● ${esc(a.id)} · ${esc(a.msg)} <span class="mute">（${esc(a.ts)} 起）</span></div>`).join(''):'<div class="mute">当前无报警</div>')
+    +(al.recent.length?`<details><summary class="mute">最近 ${al.recent.length} 条</summary>${al.recent.map(a=>`<div class="mute">${esc(a.ts)} ${esc(a.id)} ${esc(a.state)} ${esc(a.msg)}</div>`).join('')}</details>`:'')
+    +`<div class="mute" style="font-size:12px">看门狗最近一拍：${esc(al.at||'未运行')}${al.down&&al.down.length?' · 不通：'+al.down.join(','):''}</div>`;
+
+  // ---- 全局图
+  const order=['gpu33','gpu36','本机'];
+  $('map').innerHTML=order.filter(h=>d.gpu[h]).map(h=>{
+    const m=d.gpu[h];const procs=m.procs||[];
+    const gp=(m.gpus||[]).map(g=>{
+      const ps=procs.filter(p=>String(p.gpu)===String(g.idx));
+      const idle=g.util<5&&g.mem<1000;
+      return `<div class="gpu ${idle?'idle':''}"><span class="id">GPU${g.idx}</span><div>
+        <div class="bar"><i style="width:${g.util}%"></i></div>
+        <div class="bar mem" style="margin-top:3px"><i style="width:${g.memt?g.mem/g.memt*100:0}%"></i></div>
+        <div class="meta">${g.util}% · ${(g.mem/1024).toFixed(1)}/${(g.memt/1024).toFixed(0)} GB · ${g.pw} W · ${g.temp}°C ${idle?'· <b>空闲</b>':''}</div>
+        ${ps.map(p=>`<div class="proc"><b>${p.kind}${p.port?' :'+p.port:''}</b> · pid ${p.pid} · 已跑 ${dur(p.secs)}</div>`).join('')}
+      </div></div>`}).join('');
+    return `<div class="mach"><h3><span>${h}</span><span class="mute" style="font-weight:400;font-size:12px">${m.ok?'':'⚠ 连不上'}</span></h3>${gp||'<div class="mute">无数据</div>'}</div>`}).join('');
+
+  // ---- agents
+  let rows=`<tr><th>名称</th><th>状态</th><th class="n">总 token</th><th class="n">输出</th><th class="n">调用</th><th>最近活动</th><th>最近动作</th></tr>`;
+  ses.forEach(s=>{
+    const t=s.tokens||{};
+    rows+=`<tr class="sess"><td>${esc(s.name)} <span class="mute" style="font-weight:400">会话</span></td><td>${s.status==='busy'?'<span class="tag s-run">忙</span>':'<span class="tag s-done">空闲</span>'}</td>
+      <td class="n">${fmt(t.total)}</td><td class="n">${fmt(t.out)}</td><td class="n">${t.calls||0}</td><td>${ago(s.updated,now)}</td><td class="act" title="${esc(s.action)}">${esc(s.action)}</td></tr>`;
+    const list=s.subagents.filter(a=>showDone||a.state!=='已完成');
+    list.forEach(a=>{
+      const tt=a.tokens;
+      rows+=`<tr><td><span class="indent"></span>${a.depth>1?'<span class="indent"></span>':''}${esc(a.desc)}<div class="mute" style="font-size:11px">${esc(a.type)} · ${a.id.slice(0,8)} · 跑了 ${dur((a.last-a.started)||0)}</div></td>
+        <td>${stateTag(a.state)}</td><td class="n">${fmt(tt.total)}</td><td class="n">${fmt(tt.out)}</td><td class="n">${tt.calls}</td><td>${ago(a.last,now)}</td>
+        <td class="act" title="${esc(a.action)}">${esc(a.action)}</td></tr>`});
+    const hidden=s.subagents.length-list.length;
+    if(hidden)rows+=`<tr><td colspan="7" class="mute" style="font-size:12px"><span class="indent"></span>另有 ${hidden} 个已完成（勾选右上角查看）</td></tr>`;
+  });
+  $('agents').innerHTML=rows;
+
+  // ---- chart
+  const mx=Math.max(1,...hrs.map(h=>h.fresh+h.out));
+  $('chart').innerHTML=`<div class="chart">${hrs.map(h=>`<div title="${h.h}:00  新输入 ${fmt(h.fresh)} · 输出 ${fmt(h.out)} · 读缓存 ${fmt(h.cache)}"><i style="height:${h.fresh/mx*110}px;background:var(--acc)"></i><i style="height:${h.out/mx*110}px;background:var(--acc2)"></i></div>`).join('')}</div>
+    <div class="chart lbl" style="height:auto;border:0">${hrs.map(h=>`<span>${h.h.slice(11)}</span>`).join('')}</div>`;
+  const cacheAll=hrs.reduce((a,h)=>a+h.cache,0);
+  $('cacheNote').textContent=`读缓存（不画，量太大）24h 合计 ${fmt(cacheAll)}`;
+
+  // ---- ledger
+  const L=d.ledger;
+  $('ledger').innerHTML=`<tr><th>任务/标签</th><th class="n">调用</th><th class="n">输入</th><th class="n">输出</th><th class="n">花费</th><th>最近</th></tr>`+
+    (L.by_tag.map(e=>`<tr><td>${esc(e.tag)}</td><td class="n">${e.calls}</td><td class="n">${fmt(e.pt)}</td><td class="n">${fmt(e.ct)}</td><td class="n">$${e.usd.toFixed(3)}</td><td class="mute">${esc(e.last)}</td></tr>`).join('')||'<tr><td colspan="6" class="mute">暂无记账</td></tr>')+
+    `<tr><td><b>合计</b></td><td class="n">${L.calls}</td><td></td><td></td><td class="n"><b>$${L.total_usd.toFixed(3)}</b></td><td class="mute">预算参考：已充值 $50</td></tr>`;
+
+  // ---- procs
+  let pr=`<tr><th>机器</th><th>进程</th><th>已跑</th></tr>`;
+  (d.local_procs||[]).forEach(p=>{const m=/Date\((\d+)\)/.exec(p.created||'');pr+=`<tr><td>本机</td><td class="act" style="max-width:560px" title="${esc(p.args)}">${esc(p.args)}</td><td>${m?dur(now-m[1]/1000):'—'}</td></tr>`});
+  ['gpu33','gpu36'].forEach(h=>((d.gpu[h]||{}).procs||[]).filter(p=>p.kind!=='ComfyUI').forEach(p=>{pr+=`<tr><td>${h}</td><td class="act" style="max-width:560px" title="${esc(p.args)}">${esc(p.args)}</td><td>${dur(p.secs)}</td></tr>`}));
+  $('procs').innerHTML=pr;
+
+  // ---- media
+  const q=$('q').value.trim().toLowerCase();
+  const lm=(d.local_media||[]).filter(g=>!q||g.dir.toLowerCase().includes(q)).slice(0,q?200:48);
+  $('media').innerHTML=lm.map(g=>`<div class="mc">
+      <div class="th">${g.latest_img?`<img loading="lazy" src="/file?p=${encodeURIComponent(g.latest_img)}&t=${Math.floor(g.latest_img_t)}" alt="">`:'<span class="mute">只有视频</span>'}</div>
+      <div class="bd"><b>${esc(g.dir)}</b>
+        <div class="mute">${g.img} 图 · ${g.vid} 视频 · ${bytes(g.bytes)}</div>
+        <div>${g.today?`<span class="new">24h 新增 ${g.today}</span> · `:''}<span class="mute">${ago(g.last,now)}</span></div>
+        <div style="margin-top:6px;display:flex;gap:6px"><button onclick="fetch('/open?p='+encodeURIComponent('${esc(g.dir)}'))">打开文件夹</button>
+        ${g.latest?`<button onclick="window.open('/file?p='+encodeURIComponent('${esc(g.latest)}'))">看最新</button>`:''}</div>
+      </div></div>`).join('')||'<div class="mute">扫描中…（首次约 1 分钟）</div>';
+
+  let rr=`<tr><th>机器</th><th>目录</th><th class="n">图</th><th class="n">视频</th><th class="n">24h 新增</th><th class="n">大小</th><th>最新文件</th></tr>`;
+  Object.entries(d.remote_outputs||{}).forEach(([h,rows])=>rows.forEach(r=>{rr+=`<tr><td>${h}</td><td>${esc(r.dir)}</td><td class="n">${r.img}</td><td class="n">${r.vid}</td><td class="n">${r.today?`<span class="new">${r.today}</span>`:0}</td><td class="n">${bytes(r.bytes)}</td><td><span class="act" style="display:inline-block;max-width:360px" title="${esc(r.latest)}">${esc(r.latest)}</span> <span class="mute">${ago(r.last,now)}</span></td></tr>`}));
+  $('remote').innerHTML=rr;
+}
+
+async function tick(){
+  try{
+    const r=await fetch('/api/status',{cache:'no-store'});last=await r.json();render(last);
+    $('stamp').innerHTML=`<span class="dot"></span>${new Date().toLocaleTimeString()} 更新 · GPU 采集 ${ago(last.updated.gpu,last.now)}`;
+  }catch(e){$('stamp').innerHTML=`<span class="dot stale"></span>服务断开：${esc(e.message)}`}
+}
+tick();setInterval(tick,5000);
+</script>
+</body>
+</html>

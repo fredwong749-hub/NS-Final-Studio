@@ -1,0 +1,71 @@
+/* UIAUDIT 统一媒体播放器（ds/MediaPlayer.tsx）。只用 theme.css 的 token，深浅主题自动跟随。 */
+
+/* ▶ 小按钮 */
+.mp-play { position: relative; display: inline-flex; align-items: center; gap: var(--sp-1); height: 28px; padding: 0 var(--sp-3); border: 1px solid var(--c-line-2); border-radius: var(--r-pill); background: var(--c-raise); color: var(--c-text); font-size: var(--fs-sm); cursor: pointer; overflow: hidden; white-space: nowrap; }
+.mp-play.mp-xs { height: 24px; padding: 0 var(--sp-2); font-size: var(--fs-xs); }
+.mp-play.mp-md { height: 34px; padding: 0 var(--sp-4); font-size: var(--fs-m); }
+.mp-play:hover { background: var(--c-hover); }
+.mp-play.on { border-color: var(--c-accent); color: var(--c-accent-text); }
+.mp-play.bad { border-color: var(--c-bad); color: var(--c-bad-text); }
+.mp-play .mp-ico { font-size: var(--fs-xs); width: 12px; text-align: center; }
+.mp-play .mp-time { color: var(--c-text-2); font-variant-numeric: tabular-nums; font-size: var(--fs-xs); }
+.mp-play .mp-bar { position: absolute; left: 0; bottom: 0; height: 2px; background: var(--c-accent); transition: width .2s linear; }
+
+/* 音频播放器 */
+.mp-audio { display: flex; gap: var(--sp-3); align-items: center; padding: var(--sp-3); border: 1px solid var(--c-line-2); border-radius: var(--r-l); background: var(--c-raise); min-width: 0; }
+.mp-audio.compact { padding: var(--sp-2); gap: var(--sp-2); }
+.mp-audio.bad { border-color: var(--c-bad); }
+.mp-big { flex: none; width: 40px; height: 40px; border-radius: var(--r-pill); border: 0; background: var(--c-accent); color: var(--c-on-accent); font-size: var(--fs-m); cursor: pointer; }
+.mp-audio.compact .mp-big { width: 32px; height: 32px; font-size: var(--fs-sm); }
+.mp-big:hover { filter: brightness(1.1); }
+.mp-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
+.mp-head { display: flex; gap: var(--sp-2); align-items: baseline; font-size: var(--fs-m); min-width: 0; }
+.mp-head b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-wave { display: flex; align-items: center; gap: 1px; height: 40px; cursor: pointer; outline: none; }
+.mp-wave:focus-visible { box-shadow: 0 0 0 2px var(--c-accent); border-radius: var(--r-s); }
+.mp-wave i { flex: 1; min-width: 1px; background: var(--c-line-2); border-radius: var(--r-pill); }
+.mp-wave i.on { background: var(--c-accent); }
+.mp-line { position: relative; flex: 1; height: 4px; border-radius: var(--r-pill); background: var(--c-line-2); }
+.mp-line > span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: var(--r-pill); background: var(--c-accent); }
+.mp-line-only { height: 16px; }
+.mp-foot { display: flex; gap: var(--sp-3); align-items: center; font-size: var(--fs-xs); color: var(--c-text-2); }
+.mp-foot .mp-time { font-variant-numeric: tabular-nums; }
+.mp-err { color: var(--c-bad-text); }
+
+/* A/B */
+.mp-ab { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--c-line-2); border-radius: var(--r-l); background: var(--c-raise); }
+.mp-ab-row { display: flex; gap: var(--sp-2); align-items: stretch; }
+.mp-ab-side { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--c-line-2); border-radius: var(--r-m); background: var(--c-sunken); color: var(--c-text); font-size: var(--fs-sm); cursor: pointer; text-align: left; }
+.mp-ab-side.on { border-color: var(--c-accent); background: color-mix(in srgb, var(--c-accent) var(--soft-mix), var(--c-raise)); }
+.mp-ab-side.picked::after { content: "✓ 当前"; margin-left: auto; color: var(--c-ok-text); font-size: var(--fs-xs); }
+.mp-ab-k { flex: none; width: 24px; height: 24px; border-radius: var(--r-pill); display: grid; place-items: center; background: var(--c-hover); font-weight: 700; font-size: var(--fs-xs); }
+.mp-ab-side.on .mp-ab-k { background: var(--c-accent); color: var(--c-on-accent); }
+.mp-ab-l { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-ab-pick { margin-left: auto; display: flex; gap: var(--sp-2); }
+
+/* 图 / 视频 */
+.mp-fig { margin: 0; display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
+.mp-fig.picked .mp-img, .mp-fig.picked .mp-video { box-shadow: 0 0 0 2px var(--c-ok); }
+.mp-fig figcaption { font-size: var(--fs-sm); color: var(--c-text); }
+.mp-img { display: block; width: 100%; max-height: 72vh; border-radius: var(--r-m); background: var(--c-sunken); cursor: zoom-in; }
+.mp-img.contain { object-fit: contain; }
+.mp-img.cover { object-fit: cover; }
+.mp-video { display: block; width: 100%; max-height: 72vh; border-radius: var(--r-m); background: var(--c-viewer); }
+.mp-lightbox { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; background: var(--c-scrim); backdrop-filter: blur(4px); }
+.mp-lightbox img { max-width: 96vw; max-height: 94vh; object-fit: contain; border-radius: var(--r-m); }
+.mp-close { position: fixed; top: var(--sp-4); right: var(--sp-4); }
+
+/* 对比 */
+.mp-cmp { display: flex; flex-direction: column; gap: var(--sp-2); }
+.mp-cmp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+.mp-cmp-pick { display: flex; gap: var(--sp-2); justify-content: center; }
+.mp-modes { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--r-pill); background: var(--c-sunken); align-self: flex-start; }
+.mp-modes button { border: 0; background: none; color: var(--c-text-2); font-size: var(--fs-sm); padding: var(--sp-1) var(--sp-3); border-radius: var(--r-pill); cursor: pointer; }
+.mp-modes button.on { background: var(--c-raise); color: var(--c-text); }
+.mp-slide { position: relative; display: grid; border-radius: var(--r-m); overflow: hidden; cursor: ew-resize; background: var(--c-sunken); }
+.mp-slide img { grid-area: 1 / 1; width: 100%; max-height: 72vh; object-fit: contain; }
+.mp-slide-bar { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--c-on-accent); box-shadow: 0 0 0 1px var(--c-accent); pointer-events: none; }
+.mp-tag { position: absolute; top: var(--sp-2); padding: 2px var(--sp-2); border-radius: var(--r-s); background: var(--c-scrim); color: var(--c-on-accent); font-size: var(--fs-xs); }
+.mp-tag.l { left: var(--sp-2); }
+.mp-tag.r { right: var(--sp-2); }
+@media (max-width: 900px) { .mp-cmp-grid { grid-template-columns: 1fr; } }

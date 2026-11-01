@@ -1,0 +1,38 @@
+[
+  {
+    "title": "设置",
+    "path": "/#/settings",
+    "wait": 9000,
+    "steps": [
+      {
+        "js": "for (let i=0;i<80;i++){ if (!/全部 0\\b/.test(document.body.innerText)) break; await new Promise(r=>setTimeout(r,500)); } const t=document.body.innerText; return {dirs:(t.match(/(services|tools|packages|data|config|knowledge)\\/[\\w\\/.-]*/g)||[]), compiler:/出图编译器/.test(t), files:(t.match(/[\\w\\/\\\\-]+\\.(json|toml|yaml|yml|py)\\b/g)||[]).slice(0,5)}"
+      }
+    ],
+    "id": "B1r_settings"
+  },
+  {
+    "title": "导入",
+    "path": "/#/script-create?tab=import",
+    "wait": 9000,
+    "steps": [
+      {
+        "js": "const t=document.body.innerText; return {mdNames:(t.match(/[\\w\\-]+\\.md\\b/g)||[]).slice(0,6), human:(t.match(/第 ?[\\d–-]+ ?集 · [^\\n]{0,20}/g)||[]).slice(0,6), titleHasFile:[...document.querySelectorAll('[title]')].some(e=>/\\.md/.test(e.title))}"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "id": "B1r_import"
+  },
+  {
+    "title": "写作过程目标",
+    "path": "/#/script-create?run=series10_v1",
+    "wait": 9000,
+    "steps": [
+      {
+        "js": "return {hash:location.hash, has404:/404|Not Found|读不到/.test(document.body.innerText), title:(document.querySelector('h1,h2')?.innerText||'').slice(0,40), len:document.body.innerText.length}"
+      }
+    ],
+    "id": "B1r_run"
+  }
+]

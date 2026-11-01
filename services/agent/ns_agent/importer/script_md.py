@@ -34,7 +34,7 @@ SHOT_EXTRA_LABELS = {"对白屏幕上", "motion补充", "口型", "口型内容"
 # v3 每镜的 **H3提示词**：SOP §9A.1 官方 FL2VA 全文，多行（含空行），原样保留到下一个 **字段** / 镜头 / 集标题
 H3_LABELS = {"H3提示词", "H3 提示词"}
 H3_CHECK_LABELS = {"H3校验", "H3 校验"}   # 如 **H3校验**：暂缓（露骨内容）→ Shot.h3_check（原文）
-SHOTS_PER_EPISODE = (6, 8)                   # 一般 6–8 镜；K1：上限放宽到 max(8, 说话轮次 + 独白段数)（shot_cap）
+SHOTS_PER_EPISODE = (6, 8)                   # 下限 6；上限 = shot_cap：max(8, 说话轮次 + 独白段数, ⌈总时长 ÷ 6⌉)（K1 + G29）
 MIN_SHOT_SECONDS, MAX_SHOT_SECONDS = 4, 15   # 镜头时长（**时长**：N秒；K4：MiniMax-H3 官方 4–15 整数）
 EPISODE_SECONDS = (50, 75)                   # 一集总时长通过范围（K1：75–90 只提示，>90 / <50 不过）
 EPISODE_SECONDS_WARN = 90
@@ -717,8 +717,13 @@ def _sound_blocks(sound: str) -> tuple[str, str]:
     return _block(sound, "亲密声"), _block(sound, "H3 audio")
 
 
-def shot_cap(ep: Episode) -> int:
-    """K1：本集镜数上限 = max(8, 说话轮次 + 独白段数)；同一说话人连续开口算一轮"""
+PACE_SHOT_S = 6     # K-WRT-005 / K-WRT-Q07：单镜 ≤6 秒；镜数上限至少要装得下 总时长 ÷ 6（总调度 11-01 定 G29 方案 A）
+
+
+def shot_cap(ep: Episode, target_s: float | None = None) -> int:
+    """K1 + G29：本集镜数上限 = max(8, 说话轮次 + 独白段数, ⌈总时长 ÷ 6⌉)；同一说话人连续开口算一轮。
+    总时长 = target_s（写作前，P3 的 target_duration_s），没给就用本集各镜 **时长** 之和。
+    ⤴ 旧口径 max(8, 轮次 + 独白) 与总时长 50–75 秒放在一起时平均镜长下限 7.5 秒（ep03 / ep04 节奏慢的结构原因），已被取代"""
     turns, last = 0, None
     for s in ep.shots:
         for d in s.dialogue:
@@ -726,7 +731,8 @@ def shot_cap(ep: Episode) -> int:
             if sp != last:
                 turns, last = turns + 1, sp
     monologues = sum(1 for s in ep.shots if s.voiceover and s.voiceover.text)
-    return max(SHOTS_PER_EPISODE[1], turns + monologues)
+    total = target_s if target_s else sum((s.duration or 0) for s in ep.shots)
+    return max(SHOTS_PER_EPISODE[1], turns + monologues, -(-int(total) // PACE_SHOT_S))
 
 
 def _validate(episodes: list[Episode], warnings: list[str]):

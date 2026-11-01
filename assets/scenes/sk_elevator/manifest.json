@@ -1,0 +1,23 @@
+{
+  "plate": "plate.png",
+  "scene_id": "sk_elevator",
+  "locked": {
+    "by": "canvas",
+    "at": "2026-11-01T00:58:00",
+    "sha256": "299ead778f3ad19ba5bf7353ed0e8a3442f23f16b58d139588c03d4a802c50d9",
+    "version": 1,
+    "variant": "main",
+    "file": "plate.png",
+    "source_file": "assets/scenes/sk_elevator/refs/ar-c32afa4a51.png"
+  },
+  "variants": {
+    "plate": {
+      "file": "plate.png",
+      "sha256": "299ead778f3ad19ba5bf7353ed0e8a3442f23f16b58d139588c03d4a802c50d9",
+      "version": 1,
+      "locked_by": "canvas",
+      "locked_at": "2026-11-01T00:58:00",
+      "source": "canvas"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+- id: K-OPS-Q24
+  domain: ops
+  link: [P9-P10]
+  title: 出片配方政策改了以后，已经编好的作业清单要作废或在派单时重查政策；不能只在编译时查
+  when: config/pipeline/video_policy.json、recipe_choice.json 或 overlays 改动（例 L-088 全部 Pika），而 data/pipeline/runs/<项目>/video/jobs.json 是改动之前编的
+  then: 派单方（vidgen / 服务器常驻）每次派单前对变体再调一次 ns_recipes.compiler.hold_reason；或者 jobs.json 记下编译时的政策文件 sha，政策 sha 变了就拒绝派单、要求重编
+  check: （待补）建议：tests/test_recipe_pika_default.py 加用例——用旧 jobs.json（含 two_person_ref2va）+ pika_only 政策调用 vidgen 派单函数，必须 hold
+  evidence:
+    - {src: data/pipeline/runs/series10_v1/video/jobs.json, note: "16:56:26 编译，L-088（18:0x）之后没重编：420 变体里 two_person_ref2va 108、establishing 7，全部 ready"}
+    - {src: services/recipes/ns_recipes/compiler.py, note: "hold_reason 只在编译时调用（第 187、223 行）；tools/series10_video/*.py 不引用 hold_reason / video_policy"}
+  confidence: high
+  status: 待确认
+  date: '2026-11-01'
+  attribution:
+    owner: WORKFLOW（video_policy / compiler）+ VIDEO10（vidgen 派单）

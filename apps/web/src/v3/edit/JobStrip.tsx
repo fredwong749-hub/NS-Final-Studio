@@ -30,8 +30,13 @@ export function JobStrip({ shot }: { shot: string }) {
             <span className="st">{j.notReady ? "后端未就绪" : ST[j.state] ?? j.state}</span>
             <span className="gp">{gpuLabel(j.gpu)}</span>
             {live && (
-              <span className="tm">
-                已 {fmtSec(el)} / 预计约 {fmtSec(j.eta_s)}
+              <span className="tm" title={j.eta_s ? `预计约 ${fmtSec(j.eta_s)}（按这张卡最近的实际耗时估）` : undefined}>
+                {/* UIPIXEL：用时超过预计后不再并列“已 4 分钟 / 预计约 51 秒”（自相矛盾），改说比预计慢 */}
+                {j.eta_s && el > j.eta_s
+                  ? `已 ${fmtSec(el)}，比预计（约 ${fmtSec(j.eta_s)}）慢`
+                  : j.eta_s
+                    ? `已 ${fmtSec(el)} / 预计约 ${fmtSec(j.eta_s)}`
+                    : `已 ${fmtSec(el)}`}
               </span>
             )}
             <span className="bar">

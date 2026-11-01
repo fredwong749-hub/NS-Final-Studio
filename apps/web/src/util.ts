@@ -16,8 +16,11 @@ export function latestJobs(jobs: Job[]): Map<string, Job> {
 
 export const isActiveJob = (j: Job) => j.state === "queued" || j.state === "running";
 
-export const JOB_LABEL: Record<string, string> = { queued: "排队", running: "渲染中", done: "完成", failed: "失败" };
-export const STAGE_LABEL: Record<string, string> = { image: "首帧", last: "尾帧", video: "视频", asset: "资产出图" };
+export const JOB_LABEL: Record<string, string> = { queued: "排队", running: "渲染中", done: "完成", failed: "失败", interrupted: "中断" };
+// fredw-92/UXF5（审查 N10）：v1 任务的阶段是 frame / first / asset_gen，以前原样显示英文
+export const STAGE_LABEL: Record<string, string> = { image: "首帧", frame: "首帧", first: "首帧", last: "尾帧", video: "视频", asset: "资产出图", asset_gen: "资产生成" };
+/** fredw-92/UXF5（审查 #5 / N10）：被 API 重启打断的任务不是画面问题，单独算“中断”，不计入失败、不标红 */
+export const isInterrupted = (j: { state: string; error?: string | null }) => j.state === "failed" && /API 重启/.test(j.error ?? "");
 export const LAST_SOURCE_LABEL: Record<string, string> = { gen: "生成", next: "next", upload: "上传", video: "视频抽帧", gpu3: "gpu3" };
 export const SLOT_LABEL: Record<string, string> = { outfit: "衣", shoes: "鞋", nails: "甲", hair: "发", makeup: "妆", accessory: "饰", other: "他" };
 export const SLOT_NAME: Record<string, string> = { outfit: "服装", shoes: "鞋", nails: "美甲", hair: "发型", makeup: "妆容", accessory: "饰品", other: "其他" };
@@ -135,8 +138,12 @@ export function isTypingTarget(t: EventTarget | null): boolean {
 }
 
 /** 某阶段的版本链：gpu3 负责的镜头看 gpu3 版本链（只读；gpu3 的尾帧 = 视频版本的尾帧 last_url），否则看笔记本 takes */
+/** fredw-92/UXF1（审查 #6）：这一镜的帧走哪条链——与后端 _chain_fields 一致：摘要 frames_source = laptop（画布负责、画布有版本）
+ *  时只看画布链；gpu3_takes 存在但不是出片用的那条链时只是历史。以前查看器只要有 gpu3_takes 就读 gpu3 链 → 两个“当前首帧” */
+export const usesGpu3Chain = (d: ShotDetail | undefined): boolean => !!d?.gpu3_takes && d.summary?.frames_source !== "laptop";
+
 export function stageTakes(d: ShotDetail | undefined, stage: Stage): Take[] {
-  if (d?.gpu3_takes) {
+  if (d?.gpu3_takes && usesGpu3Chain(d)) {
     const want = stage === "image" ? "image" : "video";
     return d.gpu3_takes.takes
       .filter((t) => t.stage === want)
@@ -148,7 +155,7 @@ export function stageTakes(d: ShotDetail | undefined, stage: Stage): Take[] {
 
 /** 某阶段的当前版本号（gpu3：尾帧跟随当前视频版本） */
 export function stageActive(d: ShotDetail | undefined, stage: Stage): number | undefined {
-  if (d?.gpu3_takes) {
+  if (d?.gpu3_takes && usesGpu3Chain(d)) {
     const a = d.gpu3_takes.active as Record<string, number | undefined>;
     return stage === "image" ? a.image : a.video;
   }

@@ -148,13 +148,17 @@ def input_image(client, path: Path, subfolder: str = "ns_final/refs", *, size: t
 
 
 class ComfyClient:
+    # GPU 任务归属标签（K-OPS-G01，ns_agent.comfy_tag.make 的结果）：调用方设了就随 POST /prompt 放进 extra_data.ns_tag
+    # （GPU 面板读它显示“谁在做什么”）；None = 不带。client_id 不变。
+    ns_tag: dict | None = None
+
     def __init__(self, base_url: str = "http://127.0.0.1:8188", timeout: float = 60, gpu: int | None = None,
                  upload_timeout: float = UPLOAD_TIMEOUT_S):
         self.base = base_url.rstrip("/")
         self.timeout = timeout
         self.upload_timeout = upload_timeout
         self.gpu = gpu
-        self.server: str | None = None         # G36：非 gpu33 的服务器名（实例标识带上它，输出目录不跨服务器互通）
+        self.server_tag: str | None = None         # G36：非 gpu33 的服务器名（实例标识带上它，输出目录不跨服务器互通）
         self.client_id = uuid.uuid4().hex
         self._object_info: dict | None = None
         self._instance: str | None = None
@@ -223,7 +227,7 @@ class ComfyClient:
                     key = "out-default:" + self.base
             except (ComfyError, ValueError, IndexError, AttributeError, TypeError):
                 pass
-            pre = f"{self.server}|" if getattr(self, "server", None) else ""
+            pre = f"{self.server_tag}|" if getattr(self, "server_tag", None) else ""
             if key is None:
                 return pre + "url:" + self.base      # 暂时连不上：不缓存，下次再问
             self._instance = pre + key
@@ -324,9 +328,30 @@ class ComfyClient:
                 out.append(name)
         return out
 
-    def _post_prompt(self, wf: dict) -> dict:
+    def _yield_peer(self) -> None:
+        """LOCALGPU（11-01）：同卡轮流用的道（render_endpoints lanes 里配了 yield_url，如 laptop:0 → 本机看图服务 /yield）：
+        交图之前先请对方卸载（推理中则等这条推理完，≤ yield_timeout_s），否则 ComfyUI 一加载模型就 OOM 崩（11-01 18:28 实测）。
+        对方没起 / 连不上 → 照常提交（对方没占卡）"""
         try:
-            return self._json("/prompt", {"prompt": wf, "client_id": self.client_id})
+            from . import endpoints as EP
+            rec = next((v for v in EP._extra_lanes().values() if str(v.get("url", "")).rstrip("/") == self.base), None)
+            url = (rec or {}).get("yield_url")
+            if not url:
+                return
+            req = urllib.request.Request(url, data=json.dumps({"by": "ComfyClient " + self.base}).encode(),
+                                         headers={"Content-Type": "application/json"}, method="POST")
+            urllib.request.urlopen(req, timeout=float(rec.get("yield_timeout_s") or 300)).read()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _post_prompt(self, wf: dict) -> dict:
+        self._yield_peer()
+        try:
+            body = {"prompt": wf, "client_id": self.client_id}
+            tag = getattr(self, "ns_tag", None)
+            if isinstance(tag, dict) and tag:
+                body["extra_data"] = {"ns_tag": dict(tag)}
+            return self._json("/prompt", body)
         except ComfyUnavailable:
             raise
         except ComfyError as e:

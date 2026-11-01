@@ -1,0 +1,80 @@
+# 整集配乐 BGM 链接（BGM10 2026-11-01；chain.yaml links.P4-P9.bgm，docs/BGM.md）。check = 强制这条规则的测试 / 校验器。
+rules:
+  - id: K-EDT-B01
+    domain: edit
+    link: [P4-P9]
+    title: 整集配乐由写作模型按 P3 / P4 出 brief（nsfs.bgm_brief/1），一集一条，段落换气不换曲
+    when: 新剧本 / 新集要配乐（tools/bgm/agent.py）
+    then: 用途 music_brief（没配回退 script_write）读 config/prompts/bgm_brief.writer.md；brief 过 tools/bgm/brief_schema.py（BGM-B01…B14）才往下走，不过带错误重写 ≤2 轮；情绪 / 乐器 / 速度由写作模型判断，系统和 Claude 不判断内容；风格只写描述词，不写具名歌曲 / 艺人 / 作品
+    check: tools/bgm/brief_schema.py
+    evidence:
+      - {src: docs/master/owner_messages_extracted.md, quote: "ep02 的配乐用哪种？… 整集统一 BGM (Recommended)"}
+      - {src: config/prompts/bgm_brief.writer.md, quote: "本集只铺一条统一配乐"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-EDT-B02
+    domain: edit
+    link: [P4-P9]
+    title: 配乐只用本地开源、许可允许的音乐模型（ACE-Step 1.5，MIT），纯器乐，不用外部生成 API
+    when: 生成配乐候选
+    then: config/bgm.json generation.tiers 只放 acestep-* 档位（XL-SFT 50 步 int8+offload ≥12.5 GB 空闲 > turbo 8 步 > CPU turbo）；instrumental=True、结构标签全是 [Instrumental]、caption 以 "Instrumental only, no vocals." 结尾；MusicGen（CC-BY-NC）和 Stable Audio Open（社区许可、≤47 s）不用
+    check: tests/test_bgm.py
+    evidence:
+      - {src: docs/BGM.md §1, quote: "ACE-Step/acestep-v15-xl-sft: mit"}
+      - {src: docs/music.md §1, quote: "MusicGen (Meta) | code MIT, **weights CC-BY-NC-4.0**"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-EDT-B03
+    domain: edit
+    link: [P4-P9]
+    title: 候选先过系统闸门（人声 / 削波 / 静音 / 时长 / CLAP 下限 / 能量反向），没过的不能被选、不给项目方看
+    when: 每条候选打分后、审听模型挑选前
+    then: 阈值读 config/bgm.json gates（vocal_rel_db > −20 或 > −24 且 p_vocal > 0.5 → 淘汰；最长静音 > 3.0 s；比时间轴短 > 1 s）；审听模型只能在 gate_pass 里选，选了不在里面的要重答；界面 /api/music/{ep}/candidates 只列通过的，没过的只给个数
+    check: tests/test_bgm.py
+    evidence:
+      - {src: config/bgm.json, quote: "\"vocal_rel_db_max\": -20.0"}
+      - {src: docs/music.md §7, quote: "two were drum-led … one had vocals at −19 dB"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-EDT-B04
+    domain: edit
+    link: [P9-P10]
+    title: series10 合成用 data/music/series10 的配乐，人声处压 10–14 dB 带淡入淡出；旧剧 data/music/epNN 不得用于 series10
+    when: 合成 series10 一集（tools/assemble_episode.py）
+    then: 有 data/music/series10/epNN.wav 就加 --music-dir data/music/series10（没有就 --no-bgm）；epNN.json 的 duck.dialogue_db 12 / vo_db 11 由 assemble 按逐句 placement 压低（gate_fade_s 斜坡）；配乐交付前统一 −16 LUFS、真峰 ≤ −1 dBTP
+    check: tests/test_bgm.py
+    evidence:
+      - {src: tools/series10_video/night.py, quote: "data/music/epNN.wav 是旧剧（《为他而骚》）的 BGM，不能用在 series10"}
+      - {src: config/bgm.json, quote: "\"duck_dialogue_db\": 12.0"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-EDT-B05
+    domain: edit
+    link: [P4-P9]
+    title: 配乐 GPU 作业让道出图 / 视频：gpu33 只用卡 0/1/3，队列空且利用率 ≤10% 连续 180 秒才占，生成中有人投任务就停
+    when: tools/bgm 远端作业选卡
+    then: config/bgm.json generation：allowed_gpus 不含 2、yield_s ≥ 180、每条候选之间查该卡 ComfyUI 队列，有别人的任务就把剩下的候选记 yielded 稍后再投；等卡超过 wait_gpu_min 回退 CPU turbo；worker nice 15；CPU 打分放 score_host（gpu36，gpu33 负载高时打分会饿死）；生成失败按基础设施重投、不占审听轮次；自己的 venv（/root/work/fredw/bgm/venv，不往共享环境装包）；心跳写远端 /root/work/fredw/gpu_heartbeats 并由笔记本镜像到 data/gpu_heartbeats（agent=BGM10）；不改功耗墙
+    check: tests/test_bgm.py
+    evidence:
+      - {src: tools/series10_video/vidgen.py, quote: "shared_lanes 里的道只有连续 yield_s 秒没有别人的任务才提交"}
+      - {src: services/agent/ns_agent/comfy_tag.py, quote: "不经 ComfyUI 的 GPU 任务（TTS、训练…）写心跳"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-EDT-B06
+    domain: edit
+    link: [P4-P9]
+    title: 每轮决定都留记录；不选就按审听模型的 retry + 闸门失败项调整重出，≤3 轮；仍无通过的不交付
+    when: 审听模型挑选后
+    then: data/music/series10/epNN/meta.json 记 brief、全部候选（种子、参数、度量、闸门结果、文件）、每轮审听原文与决定；审听不选 → 下一轮用其 caption_en / bpm_target / negative_add（格式校验过的）+ 人声→加 negative、静音→要求连续铺底、速度偏→固定 bpm；3 轮审听都不选但有通过闸门的 → 按度量兜底交付并标 needs_owner_listen；一条都没通过 → needs_owner，合成 --no-bgm；界面换用写 data/audit
+    check: tests/test_bgm.py
+    evidence:
+      - {src: config/prompts/bgm_brief.review.md, quote: "pick 只能是度量表里 gate_pass = true 的候选 id"}
+      - {src: tools/bgm/agent.py, quote: "审听模型 {gen['max_rounds']} 轮都没有选"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01

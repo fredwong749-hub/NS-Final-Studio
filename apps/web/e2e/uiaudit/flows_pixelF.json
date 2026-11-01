@@ -1,0 +1,82 @@
+[
+  {
+    "wait": 8000,
+    "path": "/#ep02",
+    "steps": [
+      {
+        "after": 2500,
+        "click": "=审片"
+      },
+      {
+        "js": "const lum=(c)=>{const m=c.match(/[\\d.]+/g).map(Number); const f=v=>{v/=255; return v<=0.03928?v/12.92:((v+0.055)/1.055)**2.4}; return 0.2126*f(m[0])+0.7152*f(m[1])+0.0722*f(m[2]);}; const b=[...document.querySelectorAll('.vd-yes')].filter(e=>e.getBoundingClientRect().width>0 && !e.disabled); if(!b.length) return 'no .vd-yes'; const s=getComputedStyle(b[0]); const L1=lum(s.color), L2=lum(s.backgroundColor); return {n:b.length, color:s.color, bg:s.backgroundColor, ratio:+((Math.max(L1,L2)+0.05)/(Math.min(L1,L2)+0.05)).toFixed(2)};"
+      }
+    ],
+    "id": "F_dark",
+    "title": "对比度深",
+    "theme": "dark"
+  },
+  {
+    "wait": 8000,
+    "path": "/#ep02",
+    "steps": [
+      {
+        "after": 2500,
+        "click": "=审片"
+      },
+      {
+        "js": "const lum=(c)=>{const m=c.match(/[\\d.]+/g).map(Number); const f=v=>{v/=255; return v<=0.03928?v/12.92:((v+0.055)/1.055)**2.4}; return 0.2126*f(m[0])+0.7152*f(m[1])+0.0722*f(m[2]);}; const b=[...document.querySelectorAll('.vd-yes')].filter(e=>e.getBoundingClientRect().width>0 && !e.disabled); if(!b.length) return 'no .vd-yes'; const s=getComputedStyle(b[0]); const L1=lum(s.color), L2=lum(s.backgroundColor); return {n:b.length, color:s.color, bg:s.backgroundColor, ratio:+((Math.max(L1,L2)+0.05)/(Math.min(L1,L2)+0.05)).toFixed(2)};"
+      }
+    ],
+    "id": "F_light",
+    "title": "对比度浅",
+    "theme": "light"
+  },
+  {
+    "wait": 8000,
+    "path": "/#ep02",
+    "steps": [
+      {
+        "after": 2500,
+        "click": "=审片"
+      },
+      {
+        "js": "const tiles=[...document.querySelectorAll('[data-shot] [class*=tile], [data-shot] [class*=frame], [data-shot] [class*=cand]')].filter(e=>e.getBoundingClientRect().width>40); let bad=[]; for(const t of tiles){ const kids=[...t.querySelectorAll('span,button,summary,label,b,em,small')].filter(e=>{const r=e.getBoundingClientRect(); return r.width>2&&r.height>2&&(e.innerText||'').trim()&&getComputedStyle(e).visibility!=='hidden';}); for(let i=0;i<kids.length;i++) for(let j=i+1;j<kids.length;j++){ const a=kids[i],c=kids[j]; if(a.contains(c)||c.contains(a)) continue; const r1=a.getBoundingClientRect(), r2=c.getBoundingClientRect(); const ox=Math.min(r1.right,r2.right)-Math.max(r1.left,r2.left), oy=Math.min(r1.bottom,r2.bottom)-Math.max(r1.top,r2.top); if(ox>2&&oy>2) bad.push((a.innerText||'').trim().slice(0,8)+' × '+(c.innerText||'').trim().slice(0,8)); } } return {tiles:tiles.length, overlaps:[...new Set(bad)].length, sample:[...new Set(bad)].slice(0,6)};"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "id": "F_ov1280",
+    "title": "格子重叠 1280",
+    "size": [
+      1280,
+      720
+    ]
+  },
+  {
+    "steps": [
+      {
+        "after": 2500,
+        "click": "=审片"
+      },
+      {
+        "js": "const tiles=[...document.querySelectorAll('[data-shot] [class*=tile], [data-shot] [class*=frame], [data-shot] [class*=cand]')].filter(e=>e.getBoundingClientRect().width>40); let bad=[]; for(const t of tiles){ const kids=[...t.querySelectorAll('span,button,summary,label,b,em,small')].filter(e=>{const r=e.getBoundingClientRect(); return r.width>2&&r.height>2&&(e.innerText||'').trim()&&getComputedStyle(e).visibility!=='hidden';}); for(let i=0;i<kids.length;i++) for(let j=i+1;j<kids.length;j++){ const a=kids[i],c=kids[j]; if(a.contains(c)||c.contains(a)) continue; const r1=a.getBoundingClientRect(), r2=c.getBoundingClientRect(); const ox=Math.min(r1.right,r2.right)-Math.max(r1.left,r2.left), oy=Math.min(r1.bottom,r2.bottom)-Math.max(r1.top,r2.top); if(ox>2&&oy>2) bad.push((a.innerText||'').trim().slice(0,8)+' × '+(c.innerText||'').trim().slice(0,8)); } } return {tiles:tiles.length, overlaps:[...new Set(bad)].length, sample:[...new Set(bad)].slice(0,6)};"
+      }
+    ],
+    "title": "格子重叠 1440",
+    "id": "F_ov1440",
+    "path": "/#ep02",
+    "wait": 8000
+  },
+  {
+    "steps": [
+      {
+        "js": "const s=[...document.querySelectorAll('summary,button')].find(e=>/技术详情/.test(e.innerText)); if(!s) return 'none'; const b=s.getBoundingClientRect(); s.click(); await new Promise(r=>setTimeout(r,500)); const a=s.getBoundingClientRect(); return {dx:Math.round(a.x-b.x), dy:Math.round(a.y-b.y)};"
+      }
+    ],
+    "title": "技术详情不跳",
+    "id": "F_audit",
+    "path": "/#/audit",
+    "wait": 9000
+  }
+]

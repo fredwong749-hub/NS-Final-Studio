@@ -29,9 +29,15 @@ def test_compiler_last_prompt_carries_first_frame_specs():
                      "她抬眼看向门外——转身走出门")
     c = C.compile_shot(ep, s, g, {t.file for t in g.lora_triggers}, bible=b)
     assert c.last_prompt
-    for term in _material_terms(b, s.img_prompt):           # 漆皮句、6mm 鞋跟句
+    # K-REN-123（2026-10-31）：hh12clear 的 LoRA 不可用被剥掉后不再当“鞋是主体”，极近特写按景别删下半身 →
+    # 规格词按编译后可见的正文比（本测试要的是首帧 / 尾帧同一套规格词）
+    for term in _material_terms(b, c.image_body):           # 漆皮句、6mm 鞋跟句（可见的那些）
         assert term in c.image_prompt and term in c.last_prompt
+    from ns_agent import framing as FR
     for term in C.corrector_terms(c.image_body, adult=c.adult, bible=b):   # 特写、暗场、安全镜
+        if FR.FACE_TERM_RE.search(term) and "画面里只有" in c.image_prompt:   # 局部 / 物件特写不加写脸的条目（REFLOCK 11-01）
+            assert term not in c.image_prompt and term not in c.last_prompt
+            continue
         assert term in c.image_prompt and term in c.last_prompt
 
 

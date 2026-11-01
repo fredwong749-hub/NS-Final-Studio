@@ -1,0 +1,97 @@
+[
+  {
+    "id": "BGM3_ep1",
+    "path": "/#ep01",
+    "title": "配乐 ep1",
+    "wait": 8000,
+    "steps": [
+      {
+        "js": "location.hash='#/sound'; return 1",
+        "after": 5000
+      },
+      {
+        "after": 3000,
+        "click": "配乐"
+      },
+      {
+        "js": "const t=(document.querySelector('.v3-page')||document.body).innerText; return {internal:(t.match(/\\b(energy_r|clap|vocal_rel_db|p_vocal|longest_gap_s|onset_rate|tempo_off|tempo_ok|energy_weak|brief|tags|BPM|target)\\b|（r）|-?0\\.\\d{3}/gi)||[]).slice(0,10), sample:(t.match(/[^\\n]*(现在用|提示)[^\\n]*/g)||[]).slice(0,3).map(s=>s.slice(0,140))};"
+      }
+    ]
+  },
+  {
+    "id": "BGM3_ep2",
+    "path": "/#ep02",
+    "title": "配乐 ep2",
+    "wait": 8000,
+    "steps": [
+      {
+        "js": "location.hash='#/sound'; return 1",
+        "after": 5000
+      },
+      {
+        "after": 3000,
+        "click": "配乐"
+      },
+      {
+        "js": "const t=(document.querySelector('.v3-page')||document.body).innerText; return {internal:(t.match(/\\b(energy_r|clap|vocal_rel_db|p_vocal|longest_gap_s|onset_rate|tempo_off|tempo_ok|energy_weak|brief|tags|BPM|target)\\b|（r）|-?0\\.\\d{3}/gi)||[]).slice(0,10), sample:(t.match(/[^\\n]*(现在用|提示)[^\\n]*/g)||[]).slice(0,3).map(s=>s.slice(0,140))};"
+      }
+    ]
+  },
+  {
+    "id": "BGM3_ep4",
+    "path": "/#ep04",
+    "title": "配乐 ep4",
+    "wait": 8000,
+    "steps": [
+      {
+        "js": "location.hash='#/sound'; return 1",
+        "after": 5000
+      },
+      {
+        "after": 3000,
+        "click": "配乐"
+      },
+      {
+        "js": "const t=(document.querySelector('.v3-page')||document.body).innerText; return {internal:(t.match(/\\b(energy_r|clap|vocal_rel_db|p_vocal|longest_gap_s|onset_rate|tempo_off|tempo_ok|energy_weak|brief|tags|BPM|target)\\b|（r）|-?0\\.\\d{3}/gi)||[]).slice(0,10), sample:(t.match(/[^\\n]*(现在用|提示)[^\\n]*/g)||[]).slice(0,3).map(s=>s.slice(0,140))};"
+      }
+    ]
+  },
+  {
+    "id": "BGM3_ep7",
+    "path": "/#ep07",
+    "title": "配乐 ep7",
+    "wait": 8000,
+    "steps": [
+      {
+        "js": "location.hash='#/sound'; return 1",
+        "after": 5000
+      },
+      {
+        "after": 3000,
+        "click": "配乐"
+      },
+      {
+        "js": "const t=(document.querySelector('.v3-page')||document.body).innerText; return {internal:(t.match(/\\b(energy_r|clap|vocal_rel_db|p_vocal|longest_gap_s|onset_rate|tempo_off|tempo_ok|energy_weak|brief|tags|BPM|target)\\b|（r）|-?0\\.\\d{3}/gi)||[]).slice(0,10), sample:(t.match(/[^\\n]*(现在用|提示)[^\\n]*/g)||[]).slice(0,3).map(s=>s.slice(0,140))};"
+      }
+    ]
+  },
+  {
+    "id": "BGM3_ep9",
+    "path": "/#ep09",
+    "title": "配乐 ep9",
+    "wait": 8000,
+    "steps": [
+      {
+        "js": "location.hash='#/sound'; return 1",
+        "after": 5000
+      },
+      {
+        "after": 3000,
+        "click": "配乐"
+      },
+      {
+        "js": "const t=(document.querySelector('.v3-page')||document.body).innerText; return {internal:(t.match(/\\b(energy_r|clap|vocal_rel_db|p_vocal|longest_gap_s|onset_rate|tempo_off|tempo_ok|energy_weak|brief|tags|BPM|target)\\b|（r）|-?0\\.\\d{3}/gi)||[]).slice(0,10), sample:(t.match(/[^\\n]*(现在用|提示)[^\\n]*/g)||[]).slice(0,3).map(s=>s.slice(0,140))};"
+      }
+    ]
+  }
+]

@@ -1,0 +1,19 @@
+{
+ "_doc": "视频配方政策（WORKFLOW，ns_recipes.compiler.hold_reason 读）。项目方 2026-11-01 约 18:0x 原话（总调度转，L-088，取代 L-082 的“已通过的镜头不动”）：“现在基本上要把图片和视频全部重做一次：1. 图片：全部重新勾一次，用最新的瑞丽 R0 方案。2. 视频：全部用皮卡来做。如果皮卡做不了，就等皮卡安装完再做。”",
+ "decision": "L-088",
+ "pika_only": {
+  "enabled": true,
+  "allowed": [
+   "i2va_pika_flex"
+  ],
+  "reason_not_pika": "等 Pika 方案：L-088 视频全部用 Pika，配方 {recipe} 不是 Pika，不回退旧配方",
+  "reason_overlay": {
+   "flush_risk": "等 Pika 方案（泛红防护）：提示词有脸红类描述，Pika 会放大泛红（LEARNED_SPECS B），不回退 i2va_pdd2"
+  }
+ },
+ "ref2va_fallback": false,
+ "ref2va_note": "Ref2VA 兜底取消：没有通过首帧的镜等图片重做出首帧后再走 Pika（build_jobs route waiting_frame）",
+ "revert": "pika_only.enabled 改 false 即恢复按配方 id 编译（仍保留 flush_risk 的 hold）",
+ "scope_source_contains": "series10_v1",
+ "_scope": "只对剧本来源路径含 series10_v1 的镜生效（ShotSpec.source.script_file）；旧 60 集项目与测试夹具按配方 id 照常编译"
+}

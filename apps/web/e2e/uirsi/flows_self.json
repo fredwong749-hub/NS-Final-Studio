@@ -1,0 +1,7 @@
+[
+ {"id":"script_read","title":"剧本阅读","path":"/#/script-create","wait":6000,"size":[1440,900],"steps":[{"wait":2500},{"probe":"page"},{"shot":"top"}]},
+ {"id":"script_read_720","title":"剧本阅读 720","path":"/#/script-create","wait":6000,"size":[1280,720],"steps":[{"wait":2500},{"probe":"page"},{"shot":"top"}]},
+ {"id":"voice","title":"音色","path":"/#/assets?type=voice","wait":6000,"size":[1440,900],"steps":[{"wait":2000},{"probe":"page"},{"shot":"top"}]},
+ {"id":"trash","title":"回收站","path":"/#/trash","wait":5000,"size":[1440,900],"steps":[{"probe":"page"},{"shot":"top"}]},
+ {"id":"audit","title":"操作记录","path":"/#/audit","wait":5000,"size":[1440,900],"steps":[{"probe":"page"},{"shot":"top"}]}
+]

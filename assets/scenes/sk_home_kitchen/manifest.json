@@ -1,0 +1,23 @@
+{
+  "plate": "plate.png",
+  "scene_id": "sk_home_kitchen",
+  "locked": {
+    "by": "canvas",
+    "at": "2026-11-01T00:57:44",
+    "sha256": "dbc57798e16f0be44c912be0f1a05b0a6af05b199326574e537a29a92266a0c3",
+    "version": 1,
+    "variant": "main",
+    "file": "plate.png",
+    "source_file": "data/pipeline/runs/series10_v1/images/scenes/sk_home_kitchen/plate_s701_post.png"
+  },
+  "variants": {
+    "plate": {
+      "file": "plate.png",
+      "sha256": "dbc57798e16f0be44c912be0f1a05b0a6af05b199326574e537a29a92266a0c3",
+      "version": 1,
+      "locked_by": "canvas",
+      "locked_at": "2026-11-01T00:57:44",
+      "source": "canvas"
+    }
+  }
+}

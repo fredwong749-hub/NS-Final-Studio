@@ -13,10 +13,12 @@ import {
   type Purpose,
   type RenderEndpoint,
 } from "../api_v1_pages";
-import { KeyBadge, useProviders } from "./LlmOverride";
+import { KeyBadge } from "./LlmOverride";
+import { useProviders } from "./LlmOverride.helpers";
+import { LoadError } from "../../ds"; // UX5（D4）：读不到写人话 + 重试 + 折叠技术细节
 import "./pages.css";
 
-export { LlmOverride, LlmFields, useLlmOverride, useProviders } from "./LlmOverride";
+export { LlmOverride, LlmFields } from "./LlmOverride";
 
 const PURPOSE_ORDER = ["script_write", "script_repair", "director_boost", "lora_llm", "prompt_rewrite"];
 const EP_LABEL: Record<string, string> = { image: "图像（Image 2.1 / ComfyUI）", video: "视频（H3）" };
@@ -28,7 +30,7 @@ export default function ModelsPage() {
       <header className="v3p-head">
         <h1>模型与 API 配置</h1>
         <span className="v3p-muted">
-          服务商清单存 config/llm_providers.json（不含密钥）；密钥只写进 config/llm_providers.local.json，页面只显示“已配置 / 未配置”。
+          在这里改写作 / 改写用的文本模型和出图 / 视频的地址。密钥只写不显示，页面上只看得到“已配置 / 未配置”。
         </span>
       </header>
 
@@ -36,13 +38,13 @@ export default function ModelsPage() {
         <div className="v3p-card-head">
           <h2>服务商</h2>
           <span className="grow" />
-          <span className="v3p-muted">文本模型 · 经 GPU3 上的文本网关转发</span>
+          <span className="v3p-muted" title="请求经 gpu3 上的文本网关转发到各家服务商">文本模型（写剧本、改写、导演加强）</span>
           <button className="btn-mini" onClick={() => void prov.reload()}>刷新</button>
         </div>
         {prov.notReady ? (
           <NotReady what="/api/llm/providers" />
         ) : prov.err ? (
-          <p className="v3p-err">{prov.err}</p>
+          <LoadError what="写作模型清单" err={prov.err} retry={() => void prov.reload()} />
         ) : !prov.data ? (
           <p className="v3p-muted">加载中…</p>
         ) : prov.data.providers.length === 0 ? (
@@ -82,7 +84,7 @@ export default function ModelsPage() {
 function NotReady({ what }: { what: string }) {
   return (
     <div className="v3p-notready">
-      <b>后端未就绪</b>：{what} 还没上线（W1 实现中）。上线后这里自动可用，刷新即可。
+      <b>这一块暂时读不到</b>：后台还没提供这项功能（{what}）。上线后刷新即可，页面其他部分不受影响。
     </div>
   );
 }
@@ -95,9 +97,10 @@ function ProviderCard({ p, onSaved, reload }: { p: Provider; onSaved: (p: Provid
   const [test, setTest] = useState<{ ok: boolean; text: string } | null>(null);
   useEffect(() => setF(toForm(p)), [p]);
   const models = f.models.split(/[\n,，]/).map((s) => s.trim()).filter(Boolean);
-  const dirty = JSON.stringify(f) !== JSON.stringify(toForm(p));
+  // UX4（审查 #40）：每张卡只有一个“保存”——新密钥和其他字段一起保存
+  const dirty = JSON.stringify(f) !== JSON.stringify(toForm(p)) || !!key.trim();
 
-  async function save(patch: ProviderPatch, okText: string) {
+  async function save(patch: ProviderPatch, okText: string): Promise<boolean> {
     setBusy(true);
     setMsg(null);
     try {
@@ -105,8 +108,10 @@ function ProviderCard({ p, onSaved, reload }: { p: Provider; onSaved: (p: Provid
       if (r && typeof r === "object" && "id" in r) onSaved(r as Provider);
       else await reload();
       setMsg({ ok: true, text: okText });
+      return true;
     } catch (e) {
       setMsg({ ok: false, text: errText(e) });
+      return false;
     } finally {
       setBusy(false);
     }
@@ -158,10 +163,7 @@ function ProviderCard({ p, onSaved, reload }: { p: Provider; onSaved: (p: Provid
         <label>密钥</label>
         <form
           className="v3p-inline"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (key.trim()) void save({ api_key: key.trim() }, "密钥已保存（不回显）").then(() => setKey(""));
-          }}
+          onSubmit={(e) => e.preventDefault()}
         >
           <input
             type="password"
@@ -170,19 +172,19 @@ function ProviderCard({ p, onSaved, reload }: { p: Provider; onSaved: (p: Provid
             onChange={(e) => setKey(e.target.value)}
             placeholder={p.has_key ? "已配置（不回显）· 输入新值可覆盖" : "未配置 · 只写不读"}
           />
-          <button className="btn-mini" type="submit" disabled={!key.trim() || busy}>保存</button>
         </form>
         <label>费用档</label>
         <span title={p.estimate?.label}>{p.estimate?.label || p.estimate?.tier || <span className="v3p-muted">未知</span>}</span>
       </div>
       <div className="v3p-prov-foot">
-        <button className="btn-mini" onClick={() => void runTest()}>测试连接</button>
+        <button className="btn" onClick={() => void runTest()}>测试连接</button>
         {test && <span className={test.ok ? "v3p-okline" : "v3p-errline"}><span className={`v3p-dot ${test.ok ? "ok" : "bad"}`} /> {test.text}</span>}
         <span className="grow" />
-        {dirty && <button className="btn-mini" onClick={() => setF(toForm(p))}>撤销</button>}
+        {dirty && <button className="btn" onClick={() => (setF(toForm(p)), setKey(""))}>撤销</button>}
         <button
           className="btn primary"
           disabled={!dirty || busy}
+          title={busy ? "正在保存" : !dirty ? "还没改：改了上面的内容才能保存" : "保存这个服务商的设置"}
           onClick={() =>
             void save(
               {
@@ -192,9 +194,10 @@ function ProviderCard({ p, onSaved, reload }: { p: Provider; onSaved: (p: Provid
                 default_model: f.default_model,
                 timeout_s: num(f.timeout_s) ?? p.timeout_s,
                 params: { temperature: num(f.temperature), max_tokens: num(f.max_tokens), reasoning: f.reasoning } as LlmParams,
+                ...(key.trim() ? { api_key: key.trim() } : {}),
               },
-              "已保存",
-            )
+              key.trim() ? "已保存（密钥不回显）" : "已保存",
+            ).then((ok) => ok && setKey(""))
           }
         >
           保存
@@ -309,12 +312,12 @@ function EndpointsCard() {
         <h2>图像 / 视频端点</h2>
         <span className="grow" />
         <span className="v3p-muted">Image 2.1、H3 的地址与连通状态</span>
-        <button className="btn-mini" disabled={busy} onClick={() => void load()}>{busy ? "检测中…" : "测试连接"}</button>
+        <button className="btn" disabled={busy} onClick={() => void load()}>{busy ? "检测中…" : "测试连接"}</button>
       </div>
       {notReady ? (
         <NotReady what="/api/render/endpoints" />
       ) : err ? (
-        <p className="v3p-err">{err}</p>
+        <LoadError what="出图 / 视频节点" err={err} retry={() => void load()} />
       ) : !eps ? (
         <p className="v3p-muted">检测中…</p>
       ) : (
@@ -365,7 +368,7 @@ function EndpointRow({ e, onSaved }: { e: RenderEndpoint; onSaved: (e: RenderEnd
         {e.detail && <span className="v3p-muted v3p-small"> · {e.detail}</span>}
       </td>
       <td>
-        <button className="btn-mini" disabled={url.trim() === e.url} onClick={() => void save()}>保存</button>
+        <button className="btn-mini" disabled={url.trim() === e.url} title={url.trim() === e.url ? "还没改：改了地址才能保存" : "保存这个地址"} onClick={() => void save()}>保存</button>
         {msg && <span className={msg.ok ? "v3p-okline" : "v3p-errline"}> {msg.text}</span>}
       </td>
     </tr>

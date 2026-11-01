@@ -1,0 +1,67 @@
+# ep02 v1 项目方审片 5 条 bug → 规则（CHAINSPEC tools/pipeline/attribute_bug.py 草案，总调度 2026-10-31 确认，ARCH 移入）。
+# 原草案（含 attribution 归因记录）留在 knowledge/inbox/2026-10-31_*.yaml。
+rules:
+  - id: K-WRT-I01
+    domain: writer
+    link: [P3-P4, P5-P6]
+    title: 接力 / 同场换机位镜头必写“下镜”，下一镜开头接同一个动作
+    when: 镜头 **衔接** = 接力 或 同场换机位
+    then: SS-M7（缺 **下镜**）对这类镜头为 block（写作规则 ≥ sysimpl-v2 且该集按 error 校验时）；RL-T5 开头衔接句须引用上一镜 **下镜** 的同一动作；接不上标 HARD CUT 或打回写作方
+    targets: [{kind: writer_prompt, section: 镜头字段}, {kind: director_prompt, section: 判定标准}]
+    writer_text: 接力 / 同场换机位镜头必写 **下镜**（结尾仍在进行、留给下一镜的动作）；下一镜 H3 第一句用 already / still / mid- 接上同一个动作。
+    director_text: 相邻镜接缝：上一镜最后 0.5 秒和下一镜开头 0.5 秒的人物位置、视线、手持物要一致；不一致 → fail，action=owner，issues 写“接缝不一致（P3-P4）”。
+    evidence:
+      - {src: docs/ep02_iter/prompt_bug_v1.md, quote: "镜头 1 和镜头 2 之间的 transition 非常生硬"}
+      - {src: config/pipeline/attribution.yaml, note: "症状 cut_harsh；ep02 现行校验 RL-T5 11 次、RL-T6 11 次"}
+    confidence: medium
+    status: 确认
+    date: 2026-10-31
+  - id: K-WRT-I02
+    domain: writer
+    link: [P3-P4, P4-P7]
+    title: 分拍写视线 / 表情；双人镜写对方反应
+    when: 有露脸角色的镜头的每一拍
+    then: SS-M5 / SS-M6 槽位（视线=、表情=、反应=）；旧稿按稿件自带的规则版本判断（spec_import.manuscript_rules_version），没盖章的旧稿记为 unknown、列为“需按 v2 重写”，不当作已满足
+    targets: [{kind: writer_prompt, section: 分拍与动作}, {kind: director_prompt, section: 判定标准}]
+    writer_text: 分拍每拍写 视线=、表情=；双人镜每拍再写 反应=（另一人的眼睛 / 嘴 / 手 / 肩的可见变化）。
+    director_text: 双人镜里听者全程没有可见反应（眼、嘴、肩都不动），或说话人视线始终空洞 → fail，action=reseed，issues 写“缺眼神 / 反应（P3-P4）”。
+    evidence:
+      - {src: docs/ep02_iter/prompt_bug_v1.md, quote: "眼神互动、表情互动都没有描写好"}
+      - {src: config/pipeline/attribution.yaml, note: "症状 gaze_expression_stiff"}
+    confidence: medium
+    status: 确认
+    date: 2026-10-31
+  - id: K-PRM-I01
+    domain: prompt
+    link: [P3-P4, P4-P7]
+    title: H3 正文按秒分拍（At 00:SS.mmm），时间轴不过不派单
+    when: 编译 H3 提示词（写作规则 ≥ sysimpl-v2 的集）
+    then: RL-T1 / RL-T2（时间码从 0 后严格递增、每 1.5–2.5 秒一拍、覆盖到镜尾）不过的镜头不派单，交写作方；开关 config/recipes/timing_lint.json（episodes_error 列入该集即生效；Autopilot 对盖了 sysimpl-v2 章的新稿自动列入）
+    targets: [{kind: writer_prompt, section: H3 正文}, {kind: director_prompt, section: 判定标准}]
+    writer_text: H3 正文从第二拍起，每拍以 `At 00:SS.mmm,` 开头（时间 = 该拍起点，严格递增，每 1.5–2 秒一拍，写到镜尾）。
+    director_text: 印样里动作发生的时间和分拍时间轴偏差超过 1 秒 → 只记 issue“时间轴偏差（P4-P7）”，verdict 按其他维度判。
+    evidence:
+      - {src: docs/ep02_iter/prompt_bug_v1.md, quote: "官方说明是按秒来计算动作的"}
+      - {src: config/pipeline/attribution.yaml, note: "症状 timeline_coarse；v1 稿 11/11 镜没有时间码"}
+      - {src: data/ab/v2_iter/cut_check.json, note: "硬切风险（官方 At MM:SS 是切镜标记）：新提示词 Ref2VA S4/S6/S10 共 3 镜 0 处硬切（V2）；旧组无时间码反而 S3 1 处、S4 3 处"}
+      - {src: data/ab/planB/ep02/scores/scores.md, note: "I2VA PDD 两段式 S2 新提示词 0 处硬切（PLANB）"}
+    confidence: medium
+    status: 确认
+    date: 2026-10-31
+  - id: K-EDT-I01
+    domain: edit
+    link: [P3-P4, P9-P10]
+    title: 节奏改快：写作动作量（P3-P4）与剪辑每刀时长（P9-P10）分别度量
+    when: 审片判“节奏慢”，以及所有新稿
+    then: 剪辑：平均每刀 ≤4.5 s、剪定住段（K-EDT-003/004）；写作：每拍至少一个完整可见动作，H3 正文每秒约 18–25 个英文词（RL-T7）；两边分别记账
+    targets: [{kind: writer_prompt, section: 时长与节奏}, {kind: director_prompt, section: 判定标准}]
+    writer_text: 节奏按项目方要求“稍微快一点”：每拍至少一个完整的可见动作，H3 正文每秒约 18–25 个英文词，不写 slowly / at slow speed / gently 这类拖慢的词（需要慢镜头时在 **镜头运动** 行写 速度=慢）。
+    director_text: 平均每刀 >4.5 秒记 issue“剪辑节奏慢（P9-P10）”；镜内整整一拍（约 2 秒）人物不动 → fail，action=reseed，issues 写“动作量不足（P3-P4 / P7-P8）”。
+    evidence:
+      - {src: docs/ep02_iter/prompt_bug_v1.md, quote: "整个片子里的节奏很慢，画面也很慢"}
+      - {src: docs/ep02_iter/prompt_bug_v1.md, note: "项目方原话（总调度 2026-10-31 转）：把节奏改得稍微快一点"}
+      - {src: config/pipeline/attribution.yaml, note: "症状 pace_slow；ep02 现行 RL-T7 7 次、SS-M1 11 次"}
+    confidence: medium
+    status: 确认
+    date: 2026-10-31
+    supersedes: K-WRT-008

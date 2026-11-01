@@ -1,0 +1,21 @@
+[
+  {
+    "id": "probe_tile",
+    "path": "/#ep02",
+    "wait": 8000,
+    "size": [
+      1280,
+      720
+    ],
+    "steps": [
+      {
+        "click": "=审片",
+        "after": 2500
+      },
+      {
+        "js": "const e=document.elementFromPoint(142,217); const out=[]; for(let x=e,i=0;x&&i<4;x=x.parentElement,i++) out.push(x.tagName+'.'+String(x.className).slice(0,40)+' txt='+JSON.stringify((x.innerText||'').slice(0,10))+' aria='+x.getAttribute('aria-label')); return out;"
+      }
+    ],
+    "title": "tile"
+  }
+]

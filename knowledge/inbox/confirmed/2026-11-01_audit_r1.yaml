@@ -1,0 +1,33 @@
+# 规则草案（AUDIT r1，2026-11-01，fredw-2b 派的独立复核 loop）。status 待确认：总调度 / owner 确认后移到 knowledge/rules/ 并改 status。
+# 进 inbox 的原因：AUDIT 不写 knowledge/rules；两条都还没有能强制它的检查（只给了建议做法）。
+rules:
+- id: K-OPS-D03
+  domain: ops
+  link: [P0-P1, P11-RETRY]
+  title: 决策同步清单里的每个文件都必须有 owner；“未指派”的残留等于没人会改，决策永远同步不完
+  when: config/owner_decisions.yaml 的 propagate / stale_terms 命中的文件，在 tools/qa/ownership.yaml 里查不到 owner
+  then: decision_propagation 遇到“未指派”的文件要单列为一类不过（不是只在表里写“未指派”）；总调度要么在 ownership.yaml 给它指派 owner，要么在决策条目里写明由谁同步。共享文档（REQUIREMENTS.md、各 STATE.md、SOP）也要写清楚由谁来改
+  check: （待补）建议：tests/test_decision_propagation.py 增加断言——真实 owner_decisions.yaml 的 propagate 文件全部能在 ownership.yaml 解析到 owner
+  evidence:
+    - {src: tools/qa/decision_propagation.py, note: "16:3x AUDIT 用 --dry 重跑，退出码 1：D-VQA-01 有 22 处残留，其中 docs/REQUIREMENTS.md、docs/vqa/STATE.md、docs/acting/STATE.md、docs/acting/CALIBRATION.md、docs/acting/PERFORMANCE_RULES.md、docs/SOP_production.md 的 owner 都是“未指派”（第 98 行的兜底值）"}
+    - {src: tools/qa/ownership.yaml, note: "里面没有 docs/REQUIREMENTS.md、docs/vqa/**、docs/acting/**、docs/SOP_production.md 的条目"}
+  confidence: high
+  status: 待确认
+  date: '2026-11-01'
+  attribution:
+    owner: ITERAUDIT / RSI（decision_propagation.py、ownership.yaml）+ 总调度（指派）
+- id: K-OPS-D04
+  domain: ops
+  link: [P0-P1]
+  title: 由程序自动生成的文件不能作为决策同步的对象；要同步的是生成它的程序或模板
+  when: owner_decisions.yaml 的 propagate 里列了一个由程序自动写出的文件（比如 night.py 每轮重写的 docs/series10_video/STATUS.md）
+  then: 把同步对象改成生成它的程序（例如 night.py 写 STATUS 时带上当前配方），或者把这个文件从 propagate 里拿掉；手改生成物下一轮会被覆盖掉，这一项永远是 ❌，或者靠手改临时变成 ✅ 冒充已同步
+  check: （待补）建议：decision_propagation 读文件头，含“自动写”/“auto-generated”字样的文件出现在 propagate 里就报配置错误
+  evidence:
+    - {src: docs/series10_video/STATUS.md, note: "第 1 行“series10 视频 · 夜间进度（night.py 自动写；交总调度）”，16:25:04 由 night.py 重写；内容只有集 / 主机 / 状态表，不含配方"}
+    - {src: tools/qa/decision_propagation.py, note: "D-VID-01 ❌ 唯一残留就是这个文件：没有新口径 i2va_pika_flex"}
+  confidence: medium
+  status: 待确认
+  date: '2026-11-01'
+  attribution:
+    owner: RSI（config/owner_decisions.yaml 的 D-VID-01 同步字段）/ VIDEO10（night.py 模板）

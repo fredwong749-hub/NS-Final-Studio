@@ -1,0 +1,188 @@
+# 自动生成，勿手改：改 knowledge/ 后运行 tools/knowledge/compile.py
+# 来源：knowledge/rules/loop.yaml + knowledge/settings.yaml（kb-20261101-b5d99fe8）
+schema: nsfs.iterate_rules/1
+kb_version: kb-20261101-b5d99fe8
+settings:
+  max_renders_per_shot: 3
+  max_lost_resubmits: 3
+  skip_api_incompatible: true
+  api_graph_passthrough: false
+  allow_license_pending: false
+  allow_experimental_fallback: true
+writeback:
+  suggest_after: 3
+  confirm_after: 5
+  confirm_rate: 0.8
+rules:
+- id: R-OVERFLOW
+  kid: K-LOOP-001
+  stage: pre
+  spec_rules:
+  - SS-A3
+  - SS-A4
+  note: 对白 / 独白溢出镜长（LEARNED_SPECS C：溢出直接判不通过）
+  ladder:
+  - action: fail
+    owner: writer
+- id: R-NEEDS-WRITER
+  kid: K-LOOP-002
+  stage: pre
+  spec_rules:
+  - SS-H1
+  - SS-D1
+  note: 缺 H3 正文 / 时长
+  ladder:
+  - action: fail
+    owner: writer
+- id: R-RED
+  kid: K-LOOP-003
+  when:
+    any:
+    - cheek_a_drift:
+        ge: 6.0
+    - cheek_red_max:
+        ge: 0.25
+    - red_blob_max:
+        ge: 0.01
+  note: 脸颊泛红（LEARNED_SPECS A 泛红闸门）
+  ladder:
+  - action: post
+    set:
+      post.skin_guard: true
+    note: 肤色限幅（ns_post.skin_guard，嘴唇排除）
+  - action: reseed
+  - action: recipe
+    to: fallback
+    note: 换回退配方（two_person → Ref2VA；LAB X3 S2 Ref2VA 脸颊 a*≥25 占比 0.10 vs 基模 24 步 0.52；需 --graph-passthrough，否则跳过）
+  - action: keyframe
+    note: 关键帧 krea2 降到 0.25 / 提示词 flush 描述（交出图链路与写作方；antiburn 类 LoRA 未登记）
+- id: R-J4
+  kid: K-LOOP-004
+  when:
+    all:
+    - J4:
+        gt: 1.25
+    - J4_z:
+        ge: 3.0
+  note: 4 帧一顿（任务规则 J4>1.25）
+  ladder:
+  - action: post
+    set:
+      post.dejudder: true
+    note: 去抖（tools/dejudder.py）
+  - action: recipe
+    to: fallback
+    note: 换配方
+- id: R-STILL
+  kid: K-LOOP-005
+  when:
+    any:
+    - still_frac:
+        ge: 0.5
+    - frozen_tail_s:
+        ge: 0.5
+  note: 静止 / 结尾定住（rubric ④）
+  ladder:
+  - action: reseed
+  - action: override
+    set:
+      keyframes.last_frame_mode: none
+    note: 只给首帧（已是 none 时跳过）
+  - action: override
+    set:
+      loras.motion_repair:
+        file: Motion_Repair_V2.safetensors
+        strength: 0.4
+        enabled: true
+    note: 加 Motion Repair 0.4（0.9 有害：lab_recipes.md D1 S1 J4 1.14→1.35；0.4 = 社区中位，未测）
+  - action: recipe
+    to: fallback
+- id: R-ID
+  kid: K-LOOP-006
+  when:
+    any:
+    - sface_ref_min:
+        lt: 0.3
+    - sface_self_min:
+        lt: 0.6
+  note: 身份相似度低（Q-D1）
+  ladder:
+  - action: reseed
+    note: 第 2 次起自动带锚点句
+  - action: recipe
+    to: two_person_ref2va
+    note: Ref2VA 锁身份（E5，需 API 接入点）
+  - action: owner
+    note: 换身份参考图 / 补男角参考（资产，项目方定）
+- id: R-DARK
+  kid: K-LOOP-007
+  when:
+    dark_run_s:
+      ge: 1.0
+  note: 中途近黑（HF Comfy
+  ladder:
+  - action: reseed
+  - action: owner
+- id: R-LIPSYNC
+  kid: K-LOOP-008
+  when:
+    lipsync_corr:
+      lt: 0.3
+  note: 嘴型与语音相关低（rubric ⑥）
+  ladder:
+  - action: reseed
+  - action: owner
+- id: R-DEFAULT
+  kid: K-LOOP-009
+  when:
+    acceptance_failed: true
+  note: 其他验收失败
+  ladder:
+  - action: reseed
+  - action: owner
+provenance:
+  R-OVERFLOW:
+    kid: K-LOOP-001
+    src: docs/ep02_iter/LEARNED_SPECS.md §C 独白溢出; docs/ep02_iter/v0_baseline_review.md §1 ⑥声画
+    status: 确认
+    date: '2026-10-31'
+  R-NEEDS-WRITER:
+    kid: K-LOOP-002
+    src: docs/ep02_iter/refactor_proposal.md §3.2
+    status: 确认
+    date: '2026-10-31'
+  R-RED:
+    kid: K-LOOP-003
+    src: docs/ep02_iter/LEARNED_SPECS.md §A 泛红闸门; docs/ep02_iter/LEARNED_SPECS.md §B skin guard; docs/ep02_iter/lab_recipes.md 推荐表 对白近景
+    status: 建议
+    date: '2026-10-31'
+  R-J4:
+    kid: K-LOOP-004
+    src: docs/ep02_iter/LEARNED_SPECS.md §B 后期去抖
+    status: 确认
+    date: '2026-10-31'
+  R-STILL:
+    kid: K-LOOP-005
+    src: docs/ep02_iter/h3_comfy_expert.md §5 静止不动; docs/ep02_iter/v0_baseline_review.md §1 ④运动
+    status: 建议
+    date: '2026-10-31'
+  R-ID:
+    kid: K-LOOP-006
+    src: packages/qc/ns_qc/thresholds.py Q-D1; docs/ep02_iter/h3_comfy_expert.md §5 身份不一致
+    status: 建议
+    date: '2026-10-31'
+  R-DARK:
+    kid: K-LOOP-007
+    src: docs/ep02_iter/h3_comfy_expert.md §5 中途全黑
+    status: 建议
+    date: '2026-10-31'
+  R-LIPSYNC:
+    kid: K-LOOP-008
+    src: tools/ep02_director/rubric.md ⑥
+    status: 建议
+    date: '2026-10-31'
+  R-DEFAULT:
+    kid: K-LOOP-009
+    src: docs/ep02_iter/refactor_proposal.md §7.4
+    status: 确认
+    date: '2026-10-31'

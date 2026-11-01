@@ -1,0 +1,92 @@
+[
+  {
+    "path": "/#ep02",
+    "id": "B3_undo",
+    "title": "撤销提示条",
+    "steps": [
+      {
+        "after": 2000,
+        "click": "=审片"
+      },
+      {
+        "after": 200,
+        "click": "✓ 用这张"
+      },
+      {
+        "js": "await new Promise(r=>setTimeout(r,300)); const t=[...document.querySelectorAll('.toasts > .toast, [class*=undo]')].filter(e=>e.getBoundingClientRect().width>0); const btn=t.flatMap(e=>[...e.querySelectorAll('button')]).find(b=>/撤销/.test(b.innerText)); if(!btn) return {toasts:t.map(e=>e.innerText.replace(/\\s+/g,' ').slice(0,50))}; const r=btn.getBoundingClientRect(); const h=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2); return {toast:t.map(e=>e.innerText.replace(/\\s+/g,' ').slice(0,50)), undoBtn:btn.innerText.trim(), clickable:btn.contains(h)};"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "wait": 8000
+  },
+  {
+    "path": "/#ep02",
+    "id": "B3_auth",
+    "title": "账户菜单",
+    "steps": [
+      {
+        "after": 1200,
+        "click": "工具"
+      },
+      {
+        "js": "const t=document.body.innerText; return {logout:/登出|退出登录/.test(t), account:(t.match(/[^\\n]*(查看者|项目方|账户)[^\\n]*/g)||[]).slice(0,3)}"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "wait": 8000
+  },
+  {
+    "path": "/#ep03",
+    "id": "B3_decide",
+    "title": "待你决定",
+    "steps": [
+      {
+        "js": "const b=[...document.querySelectorAll('button,summary')].filter(x=>/待你决定/.test(x.innerText)); return b.map(x=>x.innerText.replace(/\\s+/g,' ').trim().slice(0,30))"
+      },
+      {
+        "after": 1500,
+        "click": "待你决定"
+      },
+      {
+        "js": "const p=document.querySelector('.v3-pop, [role=menu], [role=dialog]'); return p? p.innerText.replace(/\\s+/g,' ').slice(0,200) : 'no popup'"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "wait": 8000
+  },
+  {
+    "steps": [
+      {
+        "js": "const m=document.querySelector('main.v3-page')||document.scrollingElement; const sp=getComputedStyle(m).scrollPaddingTop; const sticky=[...document.querySelectorAll('*')].filter(e=>getComputedStyle(e).position==='sticky' && e.getBoundingClientRect().height>0 && e.getBoundingClientRect().width>innerWidth*0.3); const hs=sticky.map(e=>Math.round(e.getBoundingClientRect().height)); const btns=[...m.querySelectorAll('button')].filter(b=>b.offsetParent && b.innerText.trim() && b.getBoundingClientRect().top>innerHeight+100); const out=[]; for(const b of btns.slice(0,3)){ m.scrollTop=m.scrollHeight; await new Promise(r=>setTimeout(r,200)); b.focus(); await new Promise(r=>setTimeout(r,300)); const r=b.getBoundingClientRect(); const h=document.elementFromPoint(r.x+r.width/2,r.y+Math.min(8,r.height/2)); out.push({t:b.innerText.trim().slice(0,8), top:Math.round(r.top), hitSelf:b.contains(h)}); } return {scrollPaddingTop:sp, stickyHeights:hs, focus:out};"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "id": "B3_ab1080",
+    "title": "剧本AB 1080",
+    "wait": 9000,
+    "size": [
+      1920,
+      1080
+    ],
+    "path": "/#/script-ab"
+  },
+  {
+    "path": "/#ep02",
+    "id": "B3_progress",
+    "title": "进度条回退",
+    "steps": [
+      {
+        "js": "const segs=[...document.querySelectorAll('[class*=prog] [class*=back], [class*=regress], [class*=rollback]')].filter(e=>e.getBoundingClientRect().width>0); return {n:segs.length, outline:segs.slice(0,3).map(e=>getComputedStyle(e).outline+' | '+getComputedStyle(e).boxShadow.slice(0,40))}"
+      }
+    ],
+    "wait": 8000
+  }
+]

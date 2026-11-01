@@ -1,0 +1,23 @@
+{
+  "plate": "plate.png",
+  "scene_id": "sk_studio",
+  "locked": {
+    "by": "canvas",
+    "at": "2026-11-01T00:57:54",
+    "sha256": "8049568640ef9186aa2c697a95fbd39e85b83d87b0dbb6f9a73b34194cf16c95",
+    "version": 1,
+    "variant": "main",
+    "file": "plate.png",
+    "source_file": "assets/scenes/sk_studio/refs/ar-4f353a0071.png"
+  },
+  "variants": {
+    "plate": {
+      "file": "plate.png",
+      "sha256": "8049568640ef9186aa2c697a95fbd39e85b83d87b0dbb6f9a73b34194cf16c95",
+      "version": 1,
+      "locked_by": "canvas",
+      "locked_at": "2026-11-01T00:57:54",
+      "source": "canvas"
+    }
+  }
+}

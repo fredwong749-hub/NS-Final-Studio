@@ -18,6 +18,15 @@ from ns_schema.script import CharacterLock, Episode, ScriptGlobals, Shot
 FIX = Path(__file__).parent / "fixtures" / "t06_golden"
 
 
+@pytest.fixture(autouse=True)
+def _framing_off(monkeypatch):
+    """金标准是 T06 之前的编译结果，测的是“规则搬进 visual_bible.toml 后逐字不变”。景别取舍（K-REN-101，PROMPT 2026-10-31，
+    ns_agent.framing，按 config/recipes/image_framing.json 对新项目 / 未定稿镜默认开）是之后新加的、有意的行为，
+    不属于 T06 的等价性检查，这里关掉以隔离；它自己的行为由 tests/test_image_framing.py 覆盖。"""
+    from ns_agent import framing as FR
+    monkeypatch.setattr(FR, "enabled", lambda *a, **k: False)
+
+
 def _snapshot_mod():
     spec = importlib.util.spec_from_file_location("t06_snapshot", FIX / "snapshot.py")
     mod = importlib.util.module_from_spec(spec)
@@ -38,6 +47,8 @@ def test_golden_360_shots_identical_after_t06():
 
 def test_missing_bible_falls_back_to_constants(tmp_path):
     (tmp_path / "config").mkdir()
+    # FIX：prompt_guard 读项目根 config/render_quality.json；与金标准根用同一份（条件化规则关闭），只比 bible 兜底
+    (tmp_path / "config" / "render_quality.json").write_bytes((FIX / "config" / "render_quality.json").read_bytes())
     b = B.load_bible(root=tmp_path)
     assert not b.exists
     assert b.materials[0].term == C.TOENAIL_TERM and b.materials[1].term == C.PATENT_TERM

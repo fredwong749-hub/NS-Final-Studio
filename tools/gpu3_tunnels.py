@@ -21,7 +21,7 @@ from datetime import datetime
 TUNNELS = [
     ("bridge", 15180, 5180, "/api/gpu3/health"),
     ("mailbox", 18099, 8099, "/health"),
-    ("qwen-llm", 18098, 8098, "/health"),
+    # ("qwen-llm", 18098, 8098, "/health"),  # INFRA 2026-10-31 停用：10-30 千问已撤下，gpu33 :8098 不再有服务，守护每分钟重开这条隧道是空转
 ]
 INTERVAL_S, FAILS_BEFORE_RESTART = 30, 2
 

@@ -60,6 +60,10 @@ export interface CharacterBrief {
   changed_fields: string[];
   slots: SlotThumb[];
   conflicts: LookConflict[];
+  /** DATAALIGN（K-DATA-001）：剧本本镜 **人物** 行的出镜方式（在画 / 局部）；有 = 人选 / 造型字母 / 脸与出图同源（ns_api.shot_cast） */
+  presence?: string;
+  look_how?: string | null;
+  cast_source?: "script_cast";
 }
 
 export interface Boost {
@@ -156,6 +160,12 @@ export interface ShotSummary {
   has_boost: boolean;
   first_frame: string | null;
   first_frame_take: number | null;
+  /** fredw-92/UXF1：当前首帧 / 尾帧是不是坏图（原因）；后端上线前缺省 */
+  bad?: Partial<Record<"image" | "last", string | null>>;
+  /** fredw-92/UXF1：定稿版本号（与当前版本号不同 = 当前看的是草稿） */
+  locked_take?: Partial<Record<"image" | "last", number | null>>;
+  /** fredw-92/UXF4（审查 N1）：整集出片“自动测试定稿”且仍有效的阶段 → 版本号（待项目方复审，不算定稿 / 通过） */
+  auto_locked?: Partial<Record<"image" | "last" | "video", number>>;
   /** 视频实际尾帧（= last_frame_actual，兼容 v1） */
   last_frame: string | null;
   last_frame_source: LastSource | null;
@@ -176,6 +186,8 @@ export interface ShotSummary {
   /** 渲染器标记需要人工复核的阶段（takes.json review） */
   needs_review: Partial<Record<Stage, unknown>>;
   video: string | null;
+  /** fredw-92/QCV：当前视频运动量质检（没质检过 / gpu3 链 → null） */
+  video_qc?: import("./v3/MotionQc").MotionQc | null;
   dialogue: DialogueLine[];
   voiceover: Voiceover | null;
   decor_state: string | null;
@@ -189,6 +201,8 @@ export interface ShotSummary {
   stale: Partial<Record<Stage, string[]>>;
   /** 全局编译器升级（只在检查器 / 版本里显示） */
   stale_global: Partial<Record<Stage, string[]>>;
+  /** UX5-B：所用资产版本已更新（“依赖已更新”角标；不算过期） */
+  stale_deps?: Partial<Record<Stage, DepStale[]>>;
   /** 一条链（§4）：谁负责出首尾帧+视频；行内显示的帧来自哪条链 */
   owner?: "gpu3" | "laptop";
   owner_reason?: string;
@@ -410,6 +424,10 @@ export interface Take {
   last_url: string | null;
   stale?: string[];
   stale_global?: string[];
+  /** UX5-B：所用资产版本已更新（只标记，不算过期） */
+  stale_deps?: DepStale[];
+  /** UX5-B：出图 / 出视频时所用资产版本 {依赖键: rev} */
+  deps?: Record<string, string> | null;
   workflow?: string | null;
   source?: string | null;
   reference?: string | null;
@@ -419,7 +437,10 @@ export interface Take {
   score?: TakeScore | null;
   round?: number | null;
   references?: string[] | null;
-  qc?: { nudity?: boolean } | null;
+  qc?: { nudity?: boolean; motion?: import("./v3/MotionQc").MotionQc } | null;
+  /** fredw-92/UXF1：坏图原因（短边 < 256 px / 文件 < 10 KB / 尺寸与请求不符）；坏图不设为当前、不能定稿 */
+  bad?: string | null;
+  quarantined?: string | null;
 }
 
 export interface Takes {
@@ -769,6 +790,13 @@ export interface SopOwnerAction {
   cli: string | null;
   cli_all?: string;
   cli_rework?: string;
+  /** fredw-92/UXF1：确认造型的角色 id / 中文名 / 未确认的集；G4 / G5 的集号；底板的场景 */
+  character?: string;
+  character_name?: string;
+  episodes?: number[];
+  episode?: number;
+  plate?: string | null;
+  scene_id?: string;
   actionable: boolean;
   waiting_on: string[];
 }
@@ -873,6 +901,20 @@ export interface Job {
   comfy_wait?: ComfyLock["holder"] & { error?: string };
 }
 
+/** IMGPERF（11-01）：ns_api.jobs 写的当前阶段（stage 固定：queued / lane_check / prepare / upload / comfy_queue /
+ *  comfy_run / download / post / finish，结束后 done / failed / cancelled）。label 是可直接显示的中文；
+ *  step = 上传第几张 / ComfyUI 前面还有几个；since = 本阶段开始时间（本段用时 = 现在 − since） */
+export interface JobProgress {
+  stage: string;
+  label: string;
+  step?: number | null;
+  total?: number | null;
+  since?: string | null;
+}
+export interface Job {
+  progress?: JobProgress | null;
+}
+
 /** GET /api/render-backend：本机出图后端（ComfyUI）状态 */
 export interface RenderBackend {
   url: string;
@@ -927,4 +969,15 @@ export interface PeopleList {
   plate_views: string[];
   item_categories: string[];
   people: Person[];
+}
+
+/** UX5-B（docs/ux_round5/B_revision.md）：一条“依赖已更新” */
+export interface DepStale {
+  key: string;
+  label: string;
+  from: string | null;
+  to: string | null;
+  from_v: string;
+  to_v: string;
+  text: string;
 }

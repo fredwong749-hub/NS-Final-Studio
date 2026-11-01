@@ -1,10 +1,16 @@
 // fredw-92/W4b：版本 = 修改链（parent 连成树）；选中一版 → 和上一版并排、回退、从这里继续改
+import { thumb } from "../../thumb";
 import type { ShotSummary } from "../../types";
 import { useStudio } from "../../store";
 import { MODE_LABEL, ROLE_LABEL, STRENGTH_LABEL, slotToStage, type Slot } from "../api_v1";
 import { activeN, currentTake, focusSlot, pickTake, takeBadge, setEdit, setShotUi, takeUrl, takesOf, useEdit, type TakeX } from "./state";
 import { SLOT_NAME } from "./actions";
 import { TakeParams } from "./ImageParams";
+import { VideoBaseChip } from "./VideoBase";
+import { MotionQcBadge } from "../MotionQc";
+import { motionOf } from "../MotionQc.helpers";
+import { AUTO_SHORT, STALE_SHORT } from "../words";
+import { RegenButton } from "../RegenButton";
 
 /** parent：对比用的上一版（出图参数里和它不同的项高亮；fredw-92/PX） */
 export function TakeMeta({ t, parent }: { t: TakeX; parent?: TakeX | null }) {
@@ -15,7 +21,7 @@ export function TakeMeta({ t, parent }: { t: TakeX; parent?: TakeX | null }) {
     <dl className="v3e-kv">
       <dt>改法</dt>
       <dd>{t.mode ? MODE_LABEL[t.mode] ?? t.mode : t.parent != null ? "—" : "生成"}</dd>
-      <dt>原话</dt>
+      <dt>备注</dt>
       <dd className="quote">{t.instruction || "—"}</dd>
       <dt>幅度</dt>
       <dd>{t.strength ? STRENGTH_LABEL[t.strength] : "—"}</dd>
@@ -35,6 +41,10 @@ export function TakeMeta({ t, parent }: { t: TakeX; parent?: TakeX | null }) {
       <dd>{t.seed ?? "—"}</dd>
       {p && !image && (
         <>
+          <dt>视频基底</dt>
+          <dd>
+            <VideoBaseChip p={p} />
+          </dd>
           <dt>视频参数</dt>
           <dd>
             {[p.steps != null && `步数 ${p.steps}`, p.seconds != null && `${p.seconds} 秒`, p.lora_strength != null && `LoRA ${p.lora_strength}`, p.prompt_override && "提示词已覆盖"]
@@ -108,8 +118,14 @@ export function VersionChain({ shot }: { shot: ShotSummary }) {
           {SLOT_NAME[slot]} · {list.length} 版{cur ? ` · 选中 #${cur.n}` : ""}
         </b>
         <span>{(() => {
+          // UXF4（审查 N1）：视频只说“通过”；自动测试定稿写明待复审
+          if (slot === "video") {
+            const p = list.find((t) => t.passed);
+            const a = list.find((t) => t.auto);
+            return p ? `已通过 #${p.n}` : a ? `#${a.n} ${AUTO_SHORT}` : "未通过";
+          }
           const lk = list.find((t) => t.locked);
-          return lk ? (takeBadge(lk)?.cls === "warn" ? `定稿 #${lk.n} 过期·需重出` : `已定稿 #${lk.n}`) : "未定稿";
+          return lk ? (takeBadge(lk)?.cls === "warn" ? `定稿 #${lk.n} ${STALE_SHORT}` : lk.auto ? `#${lk.n} ${AUTO_SHORT}` : `已定稿 #${lk.n}`) : "未定稿";
         })()}</span>
       </div>
       {!list.length ? (
@@ -125,9 +141,11 @@ export function VersionChain({ shot }: { shot: ShotSummary }) {
               onDoubleClick={() => t.parent != null && setEdit(() => ({ compare: { shot: id, slot, a: t.n, b: t.parent! } }))}
             >
               {depth > 0 && <span className="tw">└</span>}
-              {takeUrl(t) ? <img src={takeUrl(t)!} alt="" loading="lazy" /> : <span className="th e" />}
+              {takeUrl(t) ? <img src={thumb(takeUrl(t)!, 240) ?? takeUrl(t)!} alt="" loading="lazy" /> : <span className="th e" />}
               <b>#{t.n}</b>
               <span className="v3e-chip">{t.mode ? MODE_LABEL[t.mode] ?? t.mode : "生成"}</span>
+              {t.stage === "video" && <VideoBaseChip p={t.params} />}
+              {t.stage === "video" && <MotionQcBadge q={motionOf(t)} className="tag" />}
               <span className="ins">{t.instruction ?? ""}</span>
               {t.n === act && <span className="tag cur">当前</span>}
               {takeBadge(t) && <span className={`tag ${takeBadge(t)!.cls}`} title={takeBadge(t)!.why || undefined}>{takeBadge(t)!.text}</span>}
@@ -166,8 +184,8 @@ export function VersionChain({ shot }: { shot: ShotSummary }) {
             ))}
           </div>
           <div className="v3e-veracts">
-            <button className="v3e-btn primary sm" disabled={cur.n === act} onClick={() => void studio.activate(id, slotToStage(slot), cur.n)}>
-              {cur.n === act ? `#${cur.n} 是当前` : `设 #${cur.n} 为当前（回退）`}
+            <button className="v3e-btn primary sm" disabled={cur.n === act || !!cur.bad} title={cur.bad ? `#${cur.n} 是${cur.bad}，不能设为当前` : undefined} onClick={() => void studio.activate(id, slotToStage(slot), cur.n)}>
+              {cur.n === act ? `#${cur.n} 是当前` : cur.bad ? `#${cur.n} 是坏图` : `设 #${cur.n} 为当前（回退）`}
             </button>
             <button className="v3e-btn sm" disabled={!parent} onClick={() => parent && setEdit(() => ({ compare: { shot: id, slot, a: cur.n, b: parent.n } }))}>
               全屏对比
@@ -176,6 +194,21 @@ export function VersionChain({ shot }: { shot: ShotSummary }) {
               <button className="v3e-btn sm" onClick={() => setEdit(() => ({ loop: { shot: id, slot, mode: "instruct", parent: cur.n } }))}>
                 从 #{cur.n} 继续改
               </button>
+            )}
+            {/* 项目方 11-01：“基于现在再生成一个新的图”——基于选中的这一版（版本节点本身是按钮，不能再套按钮，所以放在这一排） */}
+            {slot !== "video" && takeUrl(cur) && (
+              <RegenButton
+                shot={id}
+                stage={slotToStage(slot) as "image" | "last"}
+                n={cur.n}
+                label={SLOT_NAME[slot]}
+                chars={shot.characters.map((c) => ({ id: c.character, name: c.name }))}
+                size="sm"
+                onDone={(m, k) => {
+                  studio.notify(m, k ?? "ok");
+                  void studio.refreshAfter([id]);
+                }}
+              />
             )}
           </div>
           <TakeMeta t={cur} parent={parent} />

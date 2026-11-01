@@ -1,0 +1,7 @@
+{
+ "_doc": "PROMPT 2026-10-31（knowledge K-REN-101 / K-REN-102）：出图提示词按景别取舍造型部件、首句写景别构图（services/agent/ns_agent/framing.py）。总调度 2026-10-31 定：新剧本 / 新集默认开；默认项目（为他而骚，本仓库根）ep02 整集关（方案 A/B 正用已定稿首帧跑片，不触发重出），现有各集已定稿首帧的镜保持旧提示词（keep_locked_shots）。其它项目按项目根目录名在 per_project 里另配。",
+ "default": true,
+ "per_project": {
+  "__default__": {"off_episodes": [2], "keep_locked_shots": true}
+ }
+}

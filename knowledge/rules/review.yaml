@@ -1,0 +1,144 @@
+# 审片（P11）：机器阈值（targets → 配方 acceptance）+ 导演 / 审片模型的判定标准（director_text）。
+rules:
+  - id: K-REV-001
+    domain: review
+    link: P10-P11
+    title: ④ 运动：静止占比 <50%，结尾 / 开头定住 <0.5 s
+    when: 每镜
+    then: 96×168 灰度相邻帧差 <0.35 算静止
+    targets:
+      - {kind: recipe, id: _base, path: acceptance.still_frac_max, value: 0.5}
+      - {kind: recipe, id: _base, path: acceptance.frozen_tail_s_max, value: 0.5}
+      - {kind: director_prompt, section: 判定标准}
+    director_text: "④运动：画面要有与景别相称的连续运动；看印样首/中/尾三帧几乎一样、或结尾 0.5 秒以上不动 → fail，action=reseed（第 3 次起 owner）。"
+    evidence:
+      - {src: tools/ep02_director/rubric.md ④, quote: "静止占比（96×168 帧差 <0.35）<50%"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-REV-002
+    domain: review
+    link: P10-P11
+    title: ④ 顿挫：J4 ≥1.2 且 z ≥3 = 4 帧一顿
+    when: 每镜
+    then: 去抖后复测
+    targets:
+      - {kind: recipe, id: _base, path: acceptance.j4_max, value: 1.2}
+      - {kind: recipe, id: _base, path: acceptance.j4_z_max, value: 3.0}
+    evidence:
+      - {src: docs/ep02_iter/LEARNED_SPECS.md §A 4 帧一顿判定, quote: "J4 ≥1.2 且 z ≥3"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-REV-003
+    domain: review
+    link: P10-P11
+    title: ⑦ 泛红：脸颊 a*p95 漂移 <6、a*≥25 占比 <25%、红块 <1%
+    when: 有脸的镜头
+    then: 超过 → R-RED 阶梯
+    targets:
+      - {kind: recipe, id: _base, path: acceptance.cheek_a_drift_max, value: 6.0}
+      - {kind: recipe, id: _base, path: acceptance.cheek_red_max, value: 0.25}
+      - {kind: recipe, id: _base, path: acceptance.red_blob_max, value: 0.01}
+      - {kind: director_prompt, section: 判定标准}
+    director_text: "⑦调色：印样里脸颊出现饱和圆形红斑、或同一人跨镜脸色明显不同 → fail，action=reseed；红斑出现在首帧本身 → action=owner（回关键帧）。"
+    evidence:
+      - {src: docs/ep02_iter/LEARNED_SPECS.md §A 泛红闸门, quote: "脸颊 a*≥25 占比 ≥25% → 标记"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-REV-004
+    domain: review
+    link: P10-P11
+    title: ① 人物：SFace 参考余弦中位 ≥0.30，镜内最低 ≥0.60
+    when: 有脸的镜头
+    then: 低于 → R-ID 阶梯；夜景侧脸天然低 0.05–0.1，低于阈值一定回看印样
+    targets:
+      - {kind: recipe, id: _base, path: acceptance.sface_ref_min, value: 0.30}
+      - {kind: recipe, id: _base, path: acceptance.sface_self_min, value: 0.60}
+      - {kind: director_prompt, section: 判定标准}
+    director_text: "①人物一致：同一角色在镜内中途“换脸”、发色跳变、或和参考图明显不是同一人 → fail，action=reseed；第 2 次仍不像 → action=owner（换参考图）。"
+    evidence:
+      - {src: tools/ep02_director/rubric.md ①, quote: "每镜参考余弦中位 ≥0.30"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-REV-005
+    domain: review
+    link: P10-P11
+    title: ② 鬼影 / 多肢只能看图判
+    when: 腿 / 手入画、快动作的镜头
+    then: 机器指标区分力弱；交审片模型看印样
+    targets: [{kind: director_prompt, section: 判定标准}]
+    director_text: "②连贯：看到两只脚叠成多只、多手、手指融合、物体凭空出现或消失 → fail，action=reseed；走路镜头第 2 次仍叠影 → action=recipe（换配方）。"
+    evidence:
+      - {src: tools/ep02_director/rubric.md ②, quote: "自动指标（下半身鬼影比）区分力弱，必须看图"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-REV-006
+    domain: review
+    link: P10-P11
+    title: ③ 质感：脸糊 / 磨皮塑料感 / 锐化白边
+    when: 有脸的镜头
+    then: 交审片模型判；远景小脸多半偏软，属已知局限
+    targets: [{kind: director_prompt, section: 判定标准}]
+    director_text: "③质感：近景脸部明显糊、蜡像磨皮、AI 油光或锐化白边 → fail，action=reseed；远景小脸偏软只记 issue、verdict 仍可 pass。"
+    evidence:
+      - {src: tools/ep02_director/rubric.md ③, quote: "无蜡像磨皮、无 AI 油光、无过锐白边"}
+    confidence: medium
+    status: 确认
+    date: 2026-10-31
+  - id: K-REV-007
+    domain: review
+    link: P10-P11
+    title: ⑥ 声画：画内对白嘴部相关 ≥0.3；没人说话时嘴不能乱动
+    when: 有画内对白的镜头
+    then: 低于 → R-LIPSYNC
+    targets:
+      - {kind: recipe, id: _base, path: acceptance.lipsync_corr_min, value: 0.3}
+      - {kind: director_prompt, section: 判定标准}
+    director_text: "⑥声画：印样里画外音 / 独白期间人物嘴在动、或对白镜说话人嘴一直闭着 → fail，action=reseed。"
+    evidence:
+      - {src: tools/ep02_director/rubric.md ⑥, quote: "嘴部相关 ≥0.3"}
+    confidence: medium
+    status: 确认
+    date: 2026-10-31
+  - id: K-REV-008
+    domain: review
+    link: P10-P11
+    title: 每一维 ≥7 才给项目方看；任一维 <5 不出门
+    when: 整集
+    then: 7 维打分（rubric v1）
+    targets: [{kind: director_prompt, section: 打分}]
+    director_text: "按 7 维（①人物一致 ②连贯无鬼影 ③细节质感 ④运动 ⑤短剧观感（只评剪辑）⑥声画 ⑦调色）各打 0–10 分；任一维 <5 → verdict=fail；全部 ≥7 → pass；只评技术与剪辑，不评剧本内容、台词和表演意图。"
+    evidence:
+      - {src: tools/ep02_director/rubric.md 开头, quote: "每一维 ≥7 才算可以给项目方看"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-REV-009
+    domain: review
+    link: P10-P11
+    title: 近黑画面连续 ≥1 s 标记（曝光意图为暗时不判）
+    when: 每镜
+    then: R-DARK
+    targets:
+      - {kind: recipe, id: _base, path: acceptance.dark_run_s_max, value: 1.0}
+    evidence:
+      - {src: docs/ep02_iter/LEARNED_SPECS.md §A 近黑画面, quote: "v0 S11 中段 1.83 s"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-REV-010
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: review
+    link: P10-P11
+    title: 接触印样末帧取 dur − 1.5 帧
+    when: 出印样
+    then: 避免取到下一镜第一帧
+    evidence:
+      - {src: docs/ep02_iter/LEARNED_SPECS.md §A 接触印样末帧, quote: "v0 第一版印样踩过"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31

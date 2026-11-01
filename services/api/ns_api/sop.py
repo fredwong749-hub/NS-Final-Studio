@@ -29,6 +29,15 @@ CLI_S1_ERRORS = "uv run python tools/s1_gate.py --validator-errors <校验器错
 CLI_TIMELINE = "uv run python tools/build_state_timeline.py"
 
 
+def char_name(char: str) -> str:
+    """角色 id → 中文名（lin_wan → 林晚）；不认识的原样"""
+    try:
+        from ns_schema.looks import CHARACTERS
+        return CHARACTERS.get(char, char)
+    except Exception:  # noqa: BLE001
+        return char
+
+
 def cli_look(eps: str, char: str) -> str:
     return f'uv run python -m ns_agent.looks confirm {eps} {char} "{QUOTE}"'
 
@@ -317,6 +326,15 @@ def episode_unconfirmed(inp: Inputs) -> dict[int, list[str]]:
         lst = present.setdefault(ep, [])
         lst += [c for c, v in (s.get("characters") or {}).items() if isinstance(v, dict) and v.get("present")
                 and c not in lst]
+    # DATAALIGN（K-UI-D01）：登记了资产的剧（series10），须确认的人物 = 剧本 **人物** 行在画 / 局部的人（与出图、
+    # /api/looks/episodes/{n} 同口径）；旧口径（状态表关键词入镜 + 集计划）会多出 / 漏掉人（ep05：多顾沉、漏阿岚）
+    ec = None
+    try:
+        if inp.root.resolve() == Path(__file__).resolve().parents[3].resolve():
+            from ns_api.shot_cast import episode_cast_ids
+            ec = episode_cast_ids()
+    except Exception:  # noqa: BLE001
+        ec = None
     out: dict[int, list[str]] = {}
     for k, e in ((inp.timeline or {}).get("episodes") or {}).items():
         if not isinstance(e, dict):
@@ -324,8 +342,11 @@ def episode_unconfirmed(inp: Inputs) -> dict[int, list[str]]:
         n = int(k)
         ep_plans = plans.get(str(k)) or {}
         required = list(dict.fromkeys(present.get(n, []) + list(e.get("characters") or []) + list(ep_plans)))
+        if ec is not None and n in ec:
+            required = list(ec[n])
         chars = [c for c in required if not _plan_confirmed(ep_plans.get(c))]
-        chars += [c for c in e.get("unconfirmed_characters") or [] if c not in chars]
+        chars += [c for c in e.get("unconfirmed_characters") or [] if c not in chars
+                  and (ec is None or n not in ec or c in required)]   # 状态表的旧口径人物不在剧本人物行里 → 不算
         if not e.get("look_confirmed") and not chars:
             chars = ["<角色>"]
         if chars:
@@ -581,34 +602,37 @@ def owner_actions(inp: Inputs, s1: dict, gate_list: list[dict], ep_states: dict[
     if not s1.get("g3_accepted") and s1.get("known"):
         upstream = [b["text"] for b in s1["blockers"] if b["code"] in ("timeline_stale", "script_not_v3", "validator_errors",
                                                                          "validator_unrecorded")]
-        acts.append({"gate": "G3", "stage": "S1", "title": "采纳 v3 剧本加强（G3）",
+        acts.append({"gate": "G3", "stage": "S1", "title": "采纳 v3 剧本加强",
                      "why": "S1 出口闸门：没有项目方采纳，全部镜头停在 S1",
                      "cli": CLI_S1_ACCEPT, "actionable": not upstream, "waiting_on": upstream})
     for char, eps in sorted(unconfirmed_looks(inp).items()):
-        acts.append({"gate": "look", "stage": "S2", "title": f"确认造型：{char}（{len(eps)} 集）",
-                     "why": "S2：本集造型没有项目方确认，镜头不进 S3。可只确认看过的集，例如先确认第 "
+        name = char_name(char)
+        acts.append({"gate": "look", "stage": "S2", "title": f"确认造型：{name}（{len(eps)} 集）",
+                     "character_name": name,
+                     "why": "S2：本集造型没有项目方确认，镜头不进入第 3 阶段（出图）。可只确认看过的集，例如先确认第 "
                             f"{eps[0]} 集", "episodes": eps, "character": char,
                      "cli": cli_look(str(eps[0]), char), "cli_all": cli_look(ep_ranges(eps), char),
                      "actionable": True, "waiting_on": []})
     for sc in (inp.scenes or {}).get("scenes") or []:
         if sc.get("plate_status") == "candidate":
             acts.append({"gate": "plate", "stage": "S2", "title": f"确认场景底板 {sc.get('scene_id')}（{sc.get('place') or ''}）",
-                         "why": f"S3 只能用项目方确认的底板；用到它的镜头 {len(sc.get('shots') or [])} 个",
-                         "plate": sc.get("plate"), "cli": cli_plate(sc["scene_id"]),
+                         "why": f"第 3 阶段（出图）只能用项目方确认的底板；用到它的镜头 {len(sc.get('shots') or [])} 个",
+                         "plate": sc.get("plate"), "scene_id": sc["scene_id"], "cli": cli_plate(sc["scene_id"]),
                          "actionable": not (inp.scenes or {}).get("provisional", True) and not inp.stale,
                          "waiting_on": (["scenes.json 仍是临时分组（S1 未过）"] if (inp.scenes or {}).get("provisional", True) else [])
                          + (["状态表过期，先重建"] if inp.stale else [])})
     g4 = next(g for g in gate_list if g["id"] == "G4")
     if g4["status"] != "passed":
         b = g4["blockers"][0]
-        acts.append({"gate": "G4", "stage": "S3", "title": f"锁定第 {g4['sample_episode']} 集样片参数（G4）",
-                     "why": "首集即 G4：锁定前其余各集不放量出视频", "cli": b.get("cli"),
+        acts.append({"gate": "G4", "stage": "S3", "title": f"锁定第 {g4['sample_episode']} 集样片的出图参数",
+                     "episode": g4["sample_episode"],
+                     "why": "第一集是样片：锁定它的出图参数之前，其余各集不放量出视频", "cli": b.get("cli"),
                      "actionable": bool(b.get("actionable")),
                      "waiting_on": [] if b.get("actionable") else [g4["detail"]]})
     for n, e in sorted(ep_states.items()):
         for b in e["episode_blockers"]:
             if b["code"] == "g5_pending":
-                acts.append({"gate": "G5", "stage": "S5", "title": f"验收 ep{n:02d} 成片（G5）", "why": e["final"] or "",
+                acts.append({"gate": "G5", "stage": "S5", "title": f"验收第 {n} 集成片", "why": e["final"] or "",
                              "episode": n,
                              "cli": b["cli"], "cli_rework": f'uv run python tools/sop_owner.py g5 {n} --rework "{QUOTE}"',
                              "actionable": True, "waiting_on": []})

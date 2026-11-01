@@ -3,20 +3,24 @@
   "max_tokens": 32000,
   "system_parts": [
     "config/script_chat_rules.md",
-    "config/qwen_writer_system_prompt.txt"
+    "config/qwen_writer_system_prompt.txt",
+    "config/recipes/writer_knowledge.md"
   ],
   "default_rules": "rules_v2",
   "rules_versions": {
     "rules_v2": [
       "config/script_chat_rules.md",
-      "config/qwen_writer_system_prompt.txt"
+      "config/qwen_writer_system_prompt.txt",
+      "config/recipes/writer_knowledge.md"
     ]
   },
+  "_writer_knowledge_doc": "ARCH 2026-10-31（Autopilot）：config/recipes/writer_knowledge.md 由 knowledge/ 自动生成（tools/knowledge/compile.py），带 writer_knowledge_version；删掉这一项 = 写作模型不带系统知识包",
   "appendix": "config/script_chat_rules_appendix.md",
   "header_sources": [
-    "data/staging_v3/为他而骚 （剧本和镜头）v3.1.md",
-    "script play lib/为他而骚 （剧本和镜头）v2.md"
+    "data/staging_v3/merged/漆皮之下·十日_series10_v1_rsiD07_ep01_ep02_ep03_ep04_ep05_ep06_ep07_ep08_ep09_ep10_v3.md"
   ],
   "header_mode": "compact",
-  "_header_doc": "compact：全局头只带角色锁、触发词表、姿势表（名字+短描述）；材质/声音/规格长段已在 rules_v2 核心与附录（总调度 2026-10-30 要求留 3k 余量）"
+  "_header_doc": "compact：全局头只带角色锁、触发词表、姿势表（名字+短描述）；材质/声音/规格长段已在 rules_v2 核心与附录（总调度 2026-10-30 要求留 3k 余量）",
+  "_header_sources_doc": "K-OPS-Q31（CLEANUP 11-01，总调度按 G0 定）：全局头来源默认从 data/import/script_v2.json 的现行导入来源自动推导（ns_api.import_sources.header_source：sha 一致、带全局头的最新一份），每次导入后自动跟上；header_sources 只是推导不出来时的回退值。header_sources_mode 改 \"config\" = 只用这里写的路径。⤴ 原指 60 集旧稿 v3.1 / script play lib v2，已取代。",
+  "header_sources_mode": "import"
 }

@@ -57,14 +57,17 @@ def _ep(n_shots, speakers=(), secs=8, mono=0, idx=None):
 
 
 def test_episode_shot_count_k1():
-    """K1（production_rules_v3 §0）：镜数 6..max(8, 说话轮次+独白段数) block；总时长 50–75 通过、75–90 warn、>90 block；
-    严格与导入关口同一判定"""
+    """K1（production_rules_v3 §0）+ G29（总调度 11-01 方案 A）：镜数 6..max(8, 说话轮次+独白段数, ⌈总时长÷6⌉) block；
+    总时长 50–75 通过、75–90 warn、>90 block；严格与导入关口同一判定"""
     talk = ["顾沉", "她", "顾沉", "她", "顾沉", "陈宇", "她", "顾沉"]
-    assert VS.shot_cap(_ep(10, talk, mono=2)) == 10
+    assert VS.shot_cap(_ep(10, talk, secs=6, mono=2)) == 10                       # 60 秒 → ⌈60/6⌉ = 10 = 轮次+独白
+    assert VS.shot_cap(_ep(10, talk, mono=2)) == 14                                # 80 秒 → ⌈80/6⌉ = 14（G29）
     assert VS.strict_check_episode(_ep(10, talk, secs=7, mono=2)) == []             # 10 镜 70 秒
     got = VS.strict_check_episode(_ep(10, talk, secs=8, mono=2))                    # 80 秒：只提示
     assert [(i["rule_id"], i["level"]) for i in got] == [("QW-E3", "warn")]
-    got = VS.strict_check_episode(_ep(11, talk, secs=9, mono=2))                    # 11 镜 99 秒：都 block
+    got = VS.strict_check_episode(_ep(11, talk, secs=9, mono=2))                    # 11 镜 99 秒：上限 ⌈99/6⌉=17，只有总时长 block
+    assert {(i["rule_id"], i["level"]) for i in got} == {("QW-E3", "block")}
+    got = VS.strict_check_episode(_ep(19, talk, secs=5, mono=2))                    # 19 镜 95 秒：上限 16，镜数和总时长都 block
     assert {(i["rule_id"], i["level"]) for i in got} == {("QW-E2", "block"), ("QW-E3", "block")}
     bad = VS.strict_check_episode(_ep(6, idx=[1, 2, 4, 5, 6, 7], secs=10))
     assert any(i["rule_id"] == "QW-E2" and i["level"] == "block" for i in bad)

@@ -23,7 +23,7 @@
 | GPU 2 | 永不使用 | TASKS 规则 5；PL；SOP ★2 | 2026-10-30 | 全部 |
 | 成人内容 | 只用虚构成年人（≥22 岁），且双方自愿；所有负面词必须包含 `未成年人外观`（VB classification.minor_guard） | 项目方硬规则；VB | 2026-10-30 | 全部 |
 | 真人肖像 | 不得出现真人长相；不得用真人私密图训练；参考图须登记为 AI 生成或虚构（config/face_reference.json） | 项目方硬规则；REQ B3 | 2026-10-30 | 全部 |
-| 项目方画面风格 | 无字幕、无文字、无水印；徕卡级锐利；85mm f/1.2 奶油焦外；浓郁暖色调 | VB [look]；REQ A2–A6 | 2026-10-30 | 全部（风格参数可按剧在 G1 换） |
+| 项目方画面风格 | 无字幕、无文字、无水印；现行出图预设 徕卡 S★：50mm f/2、焦点锐利、暖调通透（项目方 11-01 L-087 选 R0 不变）（L-018 / L-087；⤴ 10-30 原写 85mm 大光圈焦外、浓郁暖色，已被 S★ 与契约 I7 取代） | render_quality leica_sstar；REQ A2–A6 | 2026-11-01 | 全部（风格参数可按剧在 G1 换） |
 | 林晚身份 | 以 CM_s1 母版为准：`assets/characters/lin_wan/plates/master.png`，gpu3 侧为 `refs/LW_master.face.png`（sha b8e7b00b…，只用脸部裁切） | TASKS T09（项目方 2026-10-30 选定）；WR `LW_IDENTITY` | 2026-10-30 | 为他而骚 |
 | 出图链 | 每镜只有一条 take 链：首帧、尾帧、视频同源；《为他而骚》全部归 gpu3 | SOP ★3；config/shot_ownership.json；CP 二.2 | 2026-10-30 | 为他而骚 |
 

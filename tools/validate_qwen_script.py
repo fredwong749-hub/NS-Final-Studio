@@ -32,6 +32,23 @@ from ns_agent.importer.script_md import (  # noqa: E402
     shot_cap,
 )
 from ns_schema import h3_lint as L  # noqa: E402
+from ns_schema import llm_output_check as LOC  # noqa: E402
+import importlib.util as _ilu  # noqa: E402
+
+# ITERAUDIT 11-01（项目方：“发现 bug、找到 solution 后把规则写到系统 code，剧本 LLM 好自动改进”）：写作方 QW-W* 机检。
+# 级别 WL.WRITER_LINT_LEVEL：默认 warn（导入关口）；写作链路（p4_adapter / qwen_repair_loop）设 block → 进返修环
+_wl_spec = _ilu.spec_from_file_location("ns_writer_lints", ROOT / "tools" / "qa" / "writer_lints.py")
+WL = _ilu.module_from_spec(_wl_spec)
+_wl_spec.loader.exec_module(WL)
+# ACTING 11-01（R11-2/3/6/8/9）：表演 / 视线 / 节奏 / 多人 QW-A1–A5（tools/qa/acting_lints.py）；级别跟 WL.WRITER_LINT_LEVEL
+_al_spec = _ilu.spec_from_file_location("ns_acting_lints", ROOT / "tools" / "qa" / "acting_lints.py")
+AL = _ilu.module_from_spec(_al_spec)
+_al_spec.loader.exec_module(AL)
+# RSI 11-01（R11-4 鞋不一致；缺陷猎捕 DH-S20）：VQA 的 VQ-W1（看得见脚的景别鞋写进 img，K-WRT-V06）原来只在 tools/vqa 里定义、
+# 写作链路从没跑过 → 接进来；级别跟 WL.WRITER_LINT_LEVEL（导入关口 warn / 返修环 block）
+_vq_spec = _ilu.spec_from_file_location("ns_vqa_script_lint", ROOT / "tools" / "vqa" / "script_lint.py")
+VQL = _ilu.module_from_spec(_vq_spec)
+_vq_spec.loader.exec_module(VQL)
 
 try:   # 剧本对白 → lint 参数（seconds / dialogue / offscreen / monologue），与出视频流水线同一映射
     from ns_agent.h3_prompt import lint_inputs as _lint_inputs
@@ -61,7 +78,7 @@ def lint_inputs(shot) -> dict:
 # ------------------------------------------------------------------ 规则原文（返修请求引用；格式规则，不含内容）
 RULES: dict[str, tuple[str, str]] = {
     "QW-E1": ("block", "集标题行写成 `## ep<数字>《<标题>》`，紧接一行非空的 `**剧情**：`"),
-    "QW-E2": ("block", "镜号从 1 连续递增；镜数 6 ≤ n ≤ max(8, 说话轮次 + 独白段数)（K1）"),
+    "QW-E2": ("block", "镜号从 1 连续递增；镜数 6 ≤ n ≤ max(8, 说话轮次 + 独白段数, ⌈各镜时长之和 ÷ 6⌉)（K1 + G29：单镜 ≤6 秒要装得下总时长）"),
     "QW-E3": ("block", "各镜 `**时长**` 之和 50–75 秒；75–90 秒只提示；>90 或 <50 不过（K1）"),
     "QW-F0": ("block", "每行都要属于一个字段：`**标签**：值` 一行写完，不要写无标签的散行"),
     "QW-C1": ("warn", "motion 在触发词之后以英文运镜指令开头，只从 camera push in / pull out / zoom in / zoom out / "
@@ -99,7 +116,7 @@ RULES: dict[str, tuple[str, str]] = {
                       "trigger 只用英文字母、数字、下划线"),
     "QW-P1": ("block", "人物表写成 `**全剧人物表**：` / `**本集人物表**：` + 表头 `| 角色 | 角色id | 中文外貌句 | EN外貌短语 | "
                        "VOICE声线短语 |` + 分隔行 + 每人一行 5 格（格内不用 |）"),
-    "QW-P2": ("block", "角色名全剧唯一；角色id 用已有 slug（lin_wan、gu_chen、chen_yu、alex、ryan、kai、leo）或 "
+    "QW-P2": ("block", "角色名全剧唯一；角色id 用已有 slug（lin_wan、gu_chen、chen_yu、ch_a_lan）或 "
                        "`ch_<小写英文数字下划线>`，一个 id 只对应一个角色名"),
     "QW-P3": ("block", "EN外貌短语：一条英文名词短语，只写身份（年龄、性别、发色长度与刘海、脸 / 肤色 / 体型），不写服装；"
                        "无中文、无否定词、无双引号、不含人名和触发词"),
@@ -123,6 +140,9 @@ RULES: dict[str, tuple[str, str]] = {
                         "<角色名>（局部｜<部位>｜<左/中/右>）、<角色名>（画外）`；只列入镜或发声的人；不写“她 / 他”"),
     "QW-CH2": ("block", "`**人物**` 行的名字都已登记（人物表或角色锁）"),
     "QW-CH3": ("block", "每镜 在画 + 局部 的角色不超过 3 人"),
+    "QW-SZ2": ("warn", "局部特写（手 / 脚 / 腰…）只写这个局部：不写靠近脸的部位（肩头 / 锁骨 / 颈 / 下颌 / 胸口）和脸部写实套话（眼睛为真实人眼大小）；要写就写清画面上沿停在哪里（例：画面上沿在锁骨以下，不出现脸）"),
+    "QW-SZ1": ("warn", "特写 / 大特写只容一张脸为主体：两人都在画写近景或中近景；脸部特写不同时写鞋踩地 / 鞋尖鞋跟（要拍鞋就写鞋的特写，不写脸）"),
+    "QW-CH6": ("warn", "人物行写“局部”的角色，img 里不写他的脸 / 五官 / 头发；脸或头发入画的角色在人物行写“在画”"),
     "QW-CH4": ("block", "img 与结束状态里出现的角色名都在 `**人物**` 行（在画或局部）；人物行在画的人在 img 里写出名字"),
     "QW-CH5": ("block", "对白和 🎙 的说话人都在 `**人物**` 行；人物行标“画外”的人，对白括号里带画外标记（画外/电话/语音/OS/VO）"),
     "QW-LK1": ("block", "每镜在 `**人物**` 下一行写 `**衔接**：<接力 / 同场换机位 / 换场 / 接上一集>｜承：<延续项>`；"
@@ -141,6 +161,9 @@ RULES: dict[str, tuple[str, str]] = {
     "QW-D2": ("block", "🎙 写成 `**🎙（<角色名>，<说明>）**：`，角色名已登记且人物表里有 VOICE声线短语"),
     "IMG-C2": ("warn", "img 长度只统计（上限待 A/B 实测，C2），暂不提示"),
 }
+RULES.update(WL.RULES)   # QW-W1–W4（tools/qa/writer_lints.py）
+RULES.update(AL.RULES)   # QW-A1–A8 / QW-AX1（tools/qa/acting_lints.py，ACTING 11-01；A6–A8、AX1 SCRIPT-RSI 11-01；AX1 原名 QW-D1，与对白说话人规则撞号，RSI 改名）
+RULES.update(VQL.RULES)  # VQ-W1（tools/vqa/script_lint.py，VQA K-WRT-V06；RSI 11-01 接线）
 # h3_lint 规则的原文摘要（docs/audit/rule_ids.md）
 LINT_RULE_TEXT = {
     "H3-A1": "第一行是官方对齐句，逐字；Picture 2 (from Shot 1)；S.SS = 按 **时长** 查表的帧数/24（两位小数）",
@@ -153,7 +176,7 @@ LINT_RULE_TEXT = {
     "H3-A8": "[Shot 1] 后以 “Live-action, cinematic, shallow depth of field,” 开场；不写图像风格/画质词",
     "H3-A9": "只写看得见、听得见的内容；不写剧情概述和抽象情绪词",
     "H3-A10": "运镜写成句中自然动作，官方词汇与幅度/速度词，每镜一个运镜",
-    "H3-A11": "时长 4–15 s（K4）",
+    "H3-A11": "时长 4–15 s（K4）；动作量按正常速度在 N 秒内做完，并留出最后约 1 秒仍在进行的动作（项目方 2026-10-31“改成正常节奏”）",
     "H3-A12": "全文 ≤7000 字符（官方 API 硬上限）",
     "H3-D1": "台词写成 <d>[Chinese] 原文</d>，<d> 里只有语言标签和原文",
     "H3-D2": "每个 <d> 前写 (S1)/(S2) 编号，按首次开口顺序；音色语气写在 <d> 外",
@@ -170,6 +193,9 @@ LINT_RULE_TEXT = {
     "H3-X1": "锚点句（integrated_multimodal_description 第一句）逐字包含每个在画角色的 EN外貌短语（人物表）与本集造型 EN（造型行）",
     "H3-X2": "首句与末句不放 <d>（台词放在中间的句子）",
     "H3-X3": "每个说话人第一次出现的那一句逐字包含其 VOICE声线短语（人物表）",
+    "H3-X4": "人物行里不在画（画外 / 只被提到）的角色，其 EN外貌短语不得出现在 H3 正文（写进去 = 让他在场）",
+    "H3-X5": "<d> 外不写角色名（中文名 / 拼音）；H3 不认识名字，用 EN外貌短语指代",
+    "H3-X6": "<d> 里只写台词原文：不带说话人、语气、舞台提示（说话人和语气写在 <d> 前）",
 }
 
 # 抽象情绪 / 情绪功能词（官方 §4.7：“do not use abstract mood words or explain the emotional function of the score”）
@@ -347,7 +373,7 @@ def check_episode(ep) -> list[dict]:
     idx = [s.index for s in ep.shots]
     if idx != list(range(1, len(idx) + 1)):
         out.append(_issue("QW-E2", f"镜号 {idx}（应为 1..N 连续）"))
-    cap = shot_cap(ep)          # K1：max(8, 说话轮次 + 独白段数)
+    cap = shot_cap(ep)          # K1 + G29：max(8, 说话轮次 + 独白段数, ⌈各镜时长之和 ÷ 6⌉)
     if not 6 <= len(idx) <= cap:
         out.append(_issue("QW-E2", f"镜数 {len(idx)}（本集应为 6–{cap}）"))
     if ep.shots and all(s.duration_source == "script" for s in ep.shots):
@@ -604,8 +630,10 @@ def check_v3(imp, text: str, require: bool) -> tuple[list[dict], dict[int, list[
             at(first, _issue("QW-SC8", f"场景 {e.scene_id}：{'；'.join(probs)}", field="场景表"))
 
     wardrobe = None
+    _wl_fields = WL.scan_fields(text)              # **分拍** / **嘴型** 等增补字段（导入器不挂到镜头上）
     for ep in imp.episodes:
         ep_out = eps.setdefault(ep.number, [])
+        ep_out.extend(WL.check_episode(ep, _wl_fields))          # QW-W4 造型行下装品类（ITERAUDIT 11-01）
         idx = {s.index for s in ep.shots}
         all_cast = [c for s in ep.shots for c in (s.cast or [])]
         cast_names = list(dict.fromkeys(c.name for c in all_cast))
@@ -702,6 +730,9 @@ def check_v3(imp, text: str, require: bool) -> tuple[list[dict], dict[int, list[
                 # fredw-92/D2：所有格地点（“顾沉家餐厅”“林晚的公寓”）不算人物入镜（与 compiler.without_possessive_places 同口径）
                 img_np, end_np = (re.sub("(" + "|".join(re.escape(n) for n in known if n) + ")" + POSSESSIVE_PLACES, "", t)
                                   if any(known) else t for t in (img, end))
+                # FIX（ep02_iter P0 ⑦）：“顾沉的西装衣领”是物件所有格，只是提到，不算入镜（与 compiler 同口径）
+                from ns_agent.compiler import without_possessive_mentions
+                img_np, end_np = (without_possessive_mentions(t)[0] for t in (img_np, end_np))
                 stray = sorted({n for n in known if n and (n in img_np or n in end_np) and n not in vis})
                 if stray:
                     out.append(_issue("QW-CH4", f"img / 结束状态里出现了人物行没有（在画 / 局部）的角色：{'、'.join(stray)}",
@@ -710,6 +741,27 @@ def check_v3(imp, text: str, require: bool) -> tuple[list[dict], dict[int, list[
                 if unnamed:
                     out.append(_issue("QW-CH4", f"人物行在画的角色没在 img 里写出名字：{'、'.join(unnamed)}", level="warn",
                                       field="img"))
+                # 总调度 11-01 决定 1(b)（ep03-S6）：cast=局部但 img 写到他的脸 / 头发——与 asset_refs.face_described 同一判定
+                from ns_agent.asset_refs import face_described
+                on_names = [c.name for c in sh.cast if c.presence in ("在画", "局部")]
+                pf = [c.name for c in sh.cast if c.presence == "局部" and face_described(c.name, img, on_names)]
+                if pf:
+                    out.append(_issue("QW-CH6", f"人物行写“局部”，img 却写到了脸 / 头发：{'、'.join(pf)}", level="warn", field="人物"))
+                # REFLOCK 11-01（PRODUCER 尽力清单 ep02-S1/S2、ep06-S8 等 Q3 连续不过：出图退成中近景）：特写写了两人在画 / 脸与鞋踩地并存
+                from ns_agent import framing as _FR
+                _sz = _FR.size_of(img)
+                if _sz in _FR.CLOSE and _FR.closeup_subject(img, _sz) == "face":
+                    _two = [c.name for c in sh.cast if c.presence == "在画"]
+                    _feet = [w for w in ("踩", "鞋尖", "鞋跟") if w in img]
+                    if len(_two) >= 2:
+                        out.append(_issue("QW-SZ1", f"{_sz}却有两人在画：{'、'.join(_two)}", level="warn", field="img"))
+                    elif _feet:
+                        out.append(_issue("QW-SZ1", f"脸部{_sz}同时写了{'、'.join(_feet)}", level="warn", field="img"))
+                # REFLOCK 11-01（ep05-S3/S5、ep10-S8 局部大特写出成带脸的中景，总调度驳回）
+                if _sz in _FR.CLOSE and _FR.closeup_subject(img, _sz) in ("part", "object"):
+                    _near = [w for w in ("肩头", "肩膀", "锁骨", "颈", "下颌", "胸口", "眼睛为真实人眼大小") if w in img]
+                    if _near and "不出现脸" not in img and "上沿" not in img:
+                        out.append(_issue("QW-SZ2", f"局部{_sz}写到了靠近脸的部位 / 脸部套话：{'、'.join(_near)}", level="warn", field="img"))
                 names_here = {c.name for c in sh.cast}
                 spk = [d.speaker for d in sh.dialogue if d.speaker] + \
                     ([sh.voiceover.speaker] if sh.voiceover and sh.voiceover.speaker else [])
@@ -721,6 +773,14 @@ def check_v3(imp, text: str, require: bool) -> tuple[list[dict], dict[int, list[
                     note = f"{d.speaker_note or ''}{d.stage or ''}"
                     if d.speaker in off and not any(m in note for m in OFFSCREEN_OK):
                         out.append(_issue("QW-CH5", f"{d.speaker} 标为画外，台词括号里没有画外标记：{d.text[:16]}", field="对白"))
+            # ---- 写作方机检 QW-W1–W4（ITERAUDIT 11-01；tools/qa/writer_lints.py）
+            out.extend(WL.check_shot(sh, ep, img, size_of(img), _wl_fields.get((ep.number, sh.index))))
+            out.extend(AL.check_shot(sh, ep, img, size_of(img), _wl_fields.get((ep.number, sh.index)),
+                                     level=WL.WRITER_LINT_LEVEL))   # ACTING 11-01 QW-A1–A5；SCRIPT-RSI 11-01 QW-A6–A8
+            # SCRIPT-RSI 11-01（D-SCR-07）：QW-AX1 轴线是相邻两镜的关系，记在后一镜上，返修环按单镜发
+            out.extend(i for i in AL.check_episode(ep, _wl_fields) if i.get("shot") == sh.index)
+            out.extend(VQL.check_shot(sh, ep, img, size_of(img), _wl_fields.get((ep.number, sh.index)),
+                                      level=WL.WRITER_LINT_LEVEL))  # VQ-W1 鞋（RSI 11-01 接线）
             # ---- 衔接行
             if sh.link is None:
                 out.append(_issue("QW-LK1", "缺少 `**衔接**：<接力/同场换机位/换场/接上一集>｜承：<延续项>`", field="衔接"))
@@ -818,6 +878,15 @@ def check_v3(imp, text: str, require: bool) -> tuple[list[dict], dict[int, list[
                 for r in L.lint_h3_registry(sh.h3_prompt, anchors=anchors, voices=voices if order else None):
                     if not r["ok"]:
                         out.append(_issue(r["rule_id"], r["detail"], level=r["level"], field="H3提示词"))
+                # FIX（ep02_iter P0，B4）：写作模型输出的确定性校验（ns_schema.llm_output_check）
+                on = {c.name for c in sh.cast if c.presence == "在画"}
+                absent = {n: [reg[n].en] for n in known if n and n not in on and reg.get(n) and reg[n].en}
+                res = LOC.check_writer_output(sh.h3_prompt, dialogue=[d.text for d in sh.dialogue],
+                                              names={n: [n] for n in known if n}, absent_phrases=absent)
+                for e in res.errors:
+                    rid = {"P1": "H3-X4", "N1": "H3-X5", "D1": "H3-X6"}.get(e["rule"])
+                    if rid:
+                        out.append(_issue(rid, e["detail"], level="block", field="H3提示词"))
             prev = sh
     return glob, eps, shots, True
 

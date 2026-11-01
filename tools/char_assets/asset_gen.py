@@ -131,6 +131,18 @@ def eligible(g, gpus):
         return False
 
 
+def _ns_tag(job: dict) -> dict:
+    """GPU 面板标签；服务器上单独跑（没有 ns_agent）时用同格式的普通 dict"""
+    try:
+        sp = str(Path(__file__).resolve().parents[2] / "services" / "agent")
+        if sp not in sys.path:
+            sys.path.append(sp)
+        from ns_agent import comfy_tag as CT
+        return CT.make("CHARASSET", "sheet", obj=job.get("id"), job=job.get("id"))
+    except Exception:  # noqa: BLE001
+        return {"agent": "CHARASSET", "kind": "sheet", "v": 1, "t": round(time.time(), 1), "obj": job.get("id"), "job": job.get("id")}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("jobs")
@@ -170,7 +182,12 @@ def main():
             t0 = time.time()
             try:
                 refs = [upload(port, Path(r)) for r in job.get("refs", [])]
-                body = json.dumps({"prompt": graph(job, refs), "client_id": cid}).encode()
+                body_d = {"prompt": graph(job, refs), "client_id": cid}
+                try:   # GPU 任务归属标签（K-OPS-G01，extra_data.ns_tag）；出错就不带标签
+                    body_d["extra_data"] = {"ns_tag": _ns_tag(job)}
+                except Exception:  # noqa: BLE001
+                    body_d.pop("extra_data", None)
+                body = json.dumps(body_d).encode()
                 pid = json.loads(http(port, "/prompt", body))["prompt_id"]
                 while True:
                     time.sleep(3)

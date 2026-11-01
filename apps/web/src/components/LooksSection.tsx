@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useStudio } from "../store";
 import type { LookLayer, LookPatch, ResolvedLook, ShotLooks, Visibility } from "../types";
-import { FIELD_LABEL } from "./LookStrip";
+import { FIELD_LABEL } from "./LookStrip.helpers";
 
 const LAYER_LABEL: Record<LookLayer, string> = { default: "默认", episode: "集计划", shot: "本镜覆盖" };
 const VIS_LABEL: Record<Visibility, string> = { visible: "可见", hidden: "隐藏", in_box: "在匣" };

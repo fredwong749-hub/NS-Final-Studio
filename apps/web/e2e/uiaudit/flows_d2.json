@@ -1,0 +1,34 @@
+[
+  {
+    "steps": [
+      {
+        "js": "await new Promise(r=>setTimeout(r,3000)); return [...document.querySelectorAll('[data-shot]')].map(r=>({id:r.getAttribute('data-shot'), chips:[...r.querySelectorAll('[class*=chip],[class*=char],[class*=cast],[class*=person]')].map(c=>c.innerText.replace(/\\s+/g,' ').trim()).filter(t=>t && t.length<20).slice(0,6)}))"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "id": "D2_ep03",
+    "title": "ep03 人物",
+    "path": "/#ep03",
+    "wait": 8000
+  },
+  {
+    "steps": [
+      {
+        "after": 5000,
+        "click": "精修"
+      },
+      {
+        "js": "const t=document.body.innerText; return {stale:(t.match(/[^\\n]{0,20}过期·需重出[^\\n]{0,20}/g)||[]).slice(0,5), cur:(t.match(/当前 #\\d+/g)||[]).slice(0,3)}"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "id": "D2_ep01s1",
+    "title": "ep01-S1 take#7",
+    "path": "/#ep01-S1",
+    "wait": 8000
+  }
+]

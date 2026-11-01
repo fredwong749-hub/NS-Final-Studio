@@ -27,4 +27,8 @@ packages = ["packages/schema/ns_schema", "services/agent/ns_agent", "services/re
 [tool.pytest.ini_options]
 # services/canvas_api（gpu3 渲染桥）的测试也从根目录跑（封板 T-1）；它的包 ns_canvas 不在本仓库 wheel 里，用 pythonpath 导入
 testpaths = ["tests", "services/canvas_api/tests"]
-pythonpath = ["services/canvas_api"]
+# ITERAUDIT 11-01：importlib 导入模式——测试文件不再按文件名进 sys.modules（tests/ 与 services/canvas_api/tests 里同名测试文件不会互相顶掉）；
+# tests 放进 pythonpath，保留“测试文件互相 import 夹具”（test_frame_jobs_w2 等）。tools/ 下同名脚本（run.py ×2 等）的裸 import 由
+# tests/conftest.py 的歧义守卫拦截（tools/qa/script_name_guard.py）。
+addopts = "--import-mode=importlib"
+pythonpath = ["services/canvas_api", "tests"]

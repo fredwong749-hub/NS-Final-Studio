@@ -20,6 +20,13 @@ REPO = Path(__file__).resolve().parents[1]
 FIX = Path(__file__).parent / "fixtures" / "t06_golden"
 
 
+@pytest.fixture(autouse=True)
+def _framing_off(monkeypatch):
+    """本文件测时间线 / 造型注入 / bible_diff 的既有行为；景别取舍（K-REN-101，ns_agent.framing）对新项目默认开，这里关掉以隔离"""
+    from ns_agent import framing as FR
+    monkeypatch.setattr(FR, "enabled", lambda *a, **k: False)
+
+
 @pytest.fixture
 def proj(tmp_path):
     root = tmp_path / "proj"
@@ -27,8 +34,20 @@ def proj(tmp_path):
     shutil.copytree(FIX / "data", root / "data")
     shutil.copytree(REPO / "data" / "looks", root / "data" / "looks",
                     ignore=shutil.ignore_patterns("*.tmp", "*.bak*"))
+    _pin_schedule(root)
     (root / "config" / "shot_ownership.json").write_text("{}", encoding="utf-8")
     return root
+
+
+def _pin_schedule(root: Path):
+    """DATAALIGN 11-01：data/looks 不进 git，是项目方实时在改的数据——series10 导入后集计划只剩 10 集（没有本夹具的
+    ep20 D5 计划），11-01 01:07 项目方又登录点选确认了 ep01（auth.py 自动记原话“（fred 登录点选）”，confirm_episodes
+    还给没计划的角色建了空计划壳）。本文件测的是夹具剧本（t06_golden）上“还没确认 → 确认后”的行为，所以集计划
+    （schedule.json）一律按夹具剧本确定性种子重建（ns_agent.looks.seed，与首次导入同一函数）；衣橱 / 造型库仍用仓库副本"""
+    from ns_agent.looks import seed
+    script = ScriptImport.model_validate_json((root / "data" / "import" / "script_v2.json").read_text(encoding="utf-8"))
+    _w, _b, sched = seed(script)
+    (root / "data" / "looks" / "schedule.json").write_text(sched.model_dump_json(indent=1), encoding="utf-8")
 
 
 def _rows(tl, ep):

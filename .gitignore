@@ -30,3 +30,63 @@ gpu.lock.*
 /p.out
 /ops/logs/
 *.lock
+
+# 测试数据沙盒（tests/conftest.py，ITERAUDIT K-OPS-Q03）
+.pytest_sandbox/
+
+# ---- 只跟踪代码（CODE-RSI 11-01，总调度 fredw-2b 定）：代码 / 测试 / 配置 / 规则 / 文档进 git；截图、证据、生成物、模型、运行日志不进 ----
+# 媒体一律不进（已跟踪的不受影响）；前端自带的图标 / 静态资源例外
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.mp4
+*.webm
+*.mov
+*.wav
+*.mp3
+*.flac
+!apps/web/public/**
+!apps/web/src/**
+# 运行产物
+*.out
+*.log
+*.pid
+*.err
+*.tmp
+# 模型权重
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.gguf
+*.bin
+# e2e：只留脚本与输入（流程 flows_*.json、基线 baseline*.json、README），爬虫截图 / 探测结果 / 证据 JSON / 报告 / 构建快照都不进
+/apps/web/e2e/**/*
+!/apps/web/e2e/**/
+!/apps/web/e2e/**/*.mjs
+!/apps/web/e2e/**/*.js
+!/apps/web/e2e/**/*.ts
+!/apps/web/e2e/**/*.ps1
+!/apps/web/e2e/**/*.sh
+!/apps/web/e2e/**/*.py
+!/apps/web/e2e/**/flows_*.json
+!/apps/web/e2e/**/*baseline*.json
+!/apps/web/e2e/**/scroll_all.json
+!/apps/web/e2e/assetux/scenes.json
+!/apps/web/e2e/**/README*.md
+/apps/web/e2e/uimaster/stable/builds/
+/apps/web/e2e/uipixel/batches/
+# 文档目录下的运行记录 / 证据（报告 .md 保留）
+/docs/uimaster/shots/
+/docs/uimaster/runs/
+/docs/uimaster/log/
+/docs/**/*.json
+/docs/**/*.jsonl
+/docs/**/*.txt
+/docs/dataalign/stalls/
+# 资产上传清单（界面上传时生成，属数据）
+/assets/**/uploads/
+# 会话记录自动提取（tools/qa/extract_owner_messages.py 生成，含项目方原话全文 = 会话记录，按 10-30 封板规则不入库）
+/docs/master/owner_messages_extracted.md

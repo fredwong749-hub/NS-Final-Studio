@@ -21,7 +21,7 @@
 
 | 字段 | 内容 | 来源 |
 |---|---|---|
-| shot_size / angle / lens | 景别、机位、焦段光圈 | img/motion 原文 + 全局风格（85mm f/1.2） |
+| shot_size / angle / lens | 景别、机位、焦段光圈 | img/motion 原文 + 全局风格（徕卡 S★：50mm f/2、焦点锐利、暖调通透（项目方 11-01 L-087 选 R0 不变）） |
 | first_frame | 动作起点：人物、姿态、手的位置、表情、视线 | motion 起点 + img |
 | last_frame | 动作终点（同场景同人物同服装） | motion 终点 |
 | characters | 出场角色及各自造型（脸底板、服装、鞋、美甲、妆容、D 状态） | 角色锁 + data/looks |

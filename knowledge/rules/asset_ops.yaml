@@ -1,0 +1,249 @@
+# 资产（P5）与运维（道 / 作业 / 许可）。
+rules:
+  - id: K-AST-001
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: P4-P5
+    title: 每个在画露脸角色都要有已定稿的身份参考图
+    when: 新角色出场 / 新剧本冷启动
+    then: assets/characters/<id>/<id>.png（+ provenance）；缺了 Shot Spec 报 SS-P5（asset），Autopilot 在 P5 闸门停下等项目方选
+    evidence:
+      - {src: docs/ep02_iter/chain_audit.md §2 C1, quote: "男角色没有任何参考"}
+      - {src: docs/ep02_iter/v0_baseline_review.md §1 ①人物一致, quote: "顾沉没有身份锚"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-AST-002
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: P4-P5
+    title: 角色设定图用 Qwen-Image 2.1 四栏模板出候选，项目方挑
+    when: P5 冷启动
+    then: Autopilot 为缺身份参考的角色提交 4 张候选（POST /api/assets/{id}/gen-jobs），停在闸门；选中的写入 assets/characters/<id>/<id>.png
+    evidence:
+      - {src: services/api/ns_api/asset_edit.py gen-jobs, quote: "/api/assets/{asset_id}/gen-jobs"}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-AST-003
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: [P4-P5, P5-P6]
+    title: 同场景用同一张场景底图 + 同一组光线词；地标逐字继承
+    when: 同一场景连续 ≥2 镜
+    then: scene plate + 光线基线写进 Shot Spec；不一致时 SS-X1/X2 提示
+    evidence:
+      - {src: docs/ep02_iter/refactor_proposal.md §7.1, quote: "办公室布局每镜都变"}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-OPS-001
+    domain: ops
+    link: P7-P8
+    title: 6 道分配；>260 帧只派 gpu36:2；每道同时只放 1 个 loop 作业
+    when: 出片派单
+    then: gpu33:0/1/3、gpu36:0/1 跑普通镜；gpu36:2 只接长镜头
+    targets:
+      - {kind: recipe, id: _base, path: frames.long_lane, value: "gpu36:2"}
+    evidence:
+      - {src: config/render_endpoints.json lanes, quote: "gpu36:2 长镜头道"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-OPS-002
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: P7-P8
+    title: 作业结果与 API 进程解耦；丢失按 plan_hash / seed 找回
+    when: API 重启 / 作业 404
+    then: iterate_loop 先存结果原件再改索引；丢失重交不计次数
+    evidence:
+      - {src: docs/ep02_iter/chain_audit.md §2 E6, quote: "API 重启中断"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-OPS-003
+    domain: ops
+    link: P7-P8
+    title: 社区微调权重许可未登记前不设默认
+    when: Singularity / Hybrid / PDD / LBH 放大器
+    then: 配方 status 待许可登记、selectable false；登记后改状态并补 provenance
+    targets:
+      - {kind: recipe, id: long_take_two_stage, path: status, value: 待许可登记}
+    evidence:
+      - {src: services/recipes/recipes/community_pending.yaml, quote: "只登记不使用"}
+    confidence: high
+    status: 待许可登记
+    date: 2026-10-31
+  - id: K-AST-004
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: [P4-P5, P6-P7]
+    title: ep02 身份参考与造型参考已由项目方选定：Ref2VA 用脸部裁切锁身份，中景及更远加造型参考
+    when: ep02 出首帧 / Ref2VA 视频（林晚、顾沉、陈宇在画）
+    then: 身份 <Picture N> 用 data/assets/identity_refs/<角色>/<角色>_face_ref2va.png（林晚 A-s202、顾沉 s101、陈宇 s202 脸）；中景及更远另加 data/assets/identity_refs/<角色>/ep02_outfit/<角色>_ep02_outfit_full.png（中近景用 _half）作造型参考；资产参考图组 role=item：林晚 ar-ac4bcb9fd1（O1 黑长袖+漆皮超短裙+透明细跟）、陈宇 ar-907a5f8c53（O1 W7 休闲装）、顾沉 ar-2aba2488fa（沿用 s101）。定妆脸 lin_wan.png 不变；外套披肩版仅候选（data/ab/char_sheets/outfit/lin_wan_ep02_L1office_jacket_img1sheetA202_ref1024_s301.png）
+    params:
+      ep02.identity_ref.lin_wan: data/assets/identity_refs/lin_wan/lin_wan_face_ref2va.png
+      ep02.identity_ref.gu_chen: data/assets/identity_refs/gu_chen/gu_chen_face_ref2va.png
+      ep02.identity_ref.chen_yu: data/assets/identity_refs/chen_yu/chen_yu_face_ref2va.png
+      ep02.outfit_ref.min_shot_size: 中景
+    evidence:
+      - {src: data/assets/identity_refs/manifest.json, quote: "林晚A-s202 顾沉s101 陈宇s202脸", note: 项目方原话（经总调度）；裁切 vs 设定图 ArcFace 0.883 / 0.822 / 0.843}
+      - {src: data/assets/identity_refs/manifest.json ep02_outfit, quote: "a", note: 项目方原话（经总调度）= 林晚-O1 + 陈宇-O1，顾沉沿用 s101}
+      - {src: docs/ep02_iter/consistency_research.md §7, note: 造型版对定妆 0.867（林晚）、陈宇大脸对裁切 0.863、对顾沉 0.366}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-OPS-A01
+    domain: ops
+    link: [P4-P5, P5-P6, P7-P8, P8-P10]
+    title: 制作自动推进；人类只处理闸门
+    when: 一季剧本已导入、要从资产 / 首帧一路做到成片（series10_v1 起所有整季运行）
+    then: 由常驻制作监督 tools/autopilot/producer.py 按依赖自动派活（首帧 → 尾帧 → 视频 → 声音 / 配乐 → 合成 → 审片页），状态从真实记录现推、登记表 data/producer/registry.json 唯一一份；内容失败按阶梯自修（换 seed → 换参考 → ≤3 次后标尽力、不进合成、写人话原因），基础设施错误退避换道不计次；每个对象有租约，不重复提交；只有项目方闸门（删除 / 花钱 / 推翻旧决定 / 挑身份参考）才停下，写进 docs/overnight/morning_decisions.md 与界面“要你处理”卡片；页面上的手动按钮收进“⋯ 手动插队 / 重做”，不删
+    check: tests/test_producer.py
+    evidence:
+      - {src: docs/AUTOPILOT.md §7, quote: "人类不应该点,坏了,系统自动做", note: 项目方 11-01 原话（经总调度），选方案 A}
+      - {src: data/producer/dryrun_inject.json, note: 演练：首帧 → 尾帧 → 视频零点击；注入 502 不计次、3 次不过标尽力}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-A02
+    domain: ops
+    link: [P5-P6, P7-P8]
+    title: 制作监督派单前必须查训练锁；锁没读到过也不派
+    when: tools/autopilot/producer.py（或任何直接往 ComfyUI 投活的调度器）选道 / 提交前
+    then: 选道读 ns_api.jobs.train_locks(server, wait=False)（与 pick_lane 同一来源，30 s 缓存、后台 ssh）；这台服务器的锁从没读到过 → 当作锁着、先不派；提交前在派单线程里再现读一次 ns_api.jobs.lane_train_locked_now，锁着 → 不提交、不算内容尝试、该道冷却、换道
+    check: tests/test_producer.py
+    evidence:
+      - {src: services/api/ns_api/jobs.py lane_train_locked_now, quote: "出发前这一读是最后一道闸", note: 10-31 往训练中的 gpu33:1 派活导致训练 OOM}
+      - {src: tests/test_producer.py test_train_lock_blocks_dispatch}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-W01
+    domain: ops
+    link: [P5-P6, P6-P7]
+    title: 登记了资产的项目不许走旧出图路径（两段式换脸 qwen_two_stage / 母版脸缓存 master_face）；旧代码只隔离、不删
+    when: 任何调用 ns_render.pipeline.render_image / render_last_frame 的入口（旧 /api/render 任务、tools/render_batch.py、A/B 脚本），剧本属于 config/recipes/asset_refs.json 登记的项目
+    then: pipeline.check_not_legacy_project 抛 LegacyPathBlocked（ComfyError 子类，按普通出图失败处理、写人话原因），首尾帧只走 ns_render.unified_frame（K-REN-134）；没登记的旧项目行为不变；唯一出图路径的身份脸配置与首帧作业清单里不得出现 master_face_* / plates/master.png / lin_wan_qi_v1
+    check: tests/test_workflow_legacy_paths.py
+    evidence:
+      - {src: docs/master/MASTER_PICTURE.md §4 G18, note: "旧代码路径 qwen_two_stage（R7）、master_face 缓存（R8），pipeline.py:867"}
+      - {src: services/agent/ns_agent/frame_job.py, note: "11-01 01:13 项目方截图：画布重出走旧换脸两步，图2 = data/cache/refs/master_face_b8e7b00b6756"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-W02
+    domain: ops
+    link: [P5-P6, P8-P10]
+    title: 离线 / 远端运行前先跑依赖自检；拉回合并前先验文件完整，截断文件不得覆盖本地
+    when: 把生产交给服务器离线跑之前（在服务器副本上）、离线结束并回笔记本时、整集合成前
+    then: tools/pipeline/remote_preflight.py（服务器上用 --root <副本根> --deep）查 A1 选定设定图 / 身份脸 / 单品图存在且 PIL 完整解码、A2 首帧作业参考图、T1 配音解释器（NS_TTS_PYTHON 或 voices.json default，--deep 实跑 import sherpa_onnx）、T2 voices.json series = 项目；任何 fail 先修再交接。ops/offline/merge_pull.py 覆盖前调 pulled_problem：图片 / JSON 读不全或是本地文件的截断前缀 → 跳过并报 corrupt_skipped；resume 脚本合并后自动跑自检
+    check: tests/test_remote_preflight.py
+    evidence:
+      - {src: data/_offline_pull/gpu36/data/pipeline/runs/series10_v1/images/sheets/lin_wan/lin_wan_lookA_s101.png, note: "11-01 并回：7 张设定图在服务器副本上是笔记本原图的字节前缀（例 2035200 / 2857960 字节），按新者为准覆盖笔记本；asset_refs.sheet_crop 抛 OSError: image file is truncated，tests/test_gen_contract.py 5 例失败；已由他人从 data/_offline_pull/_backup 恢复"}
+      - {src: data/pipeline/runs/series10_v1/video/night.log, note: "11-01 11:11:15 assemble ep04：TtsUnavailable no speech interpreter: set NS_TTS_PYTHON（服务器副本）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-W03
+    domain: ops
+    link: [P8-P10, P11-RETRY]
+    title: 常驻循环（night.py / producer）卡住要能被发现：以状态文件更新时间为心跳，超线即报警
+    when: night.py / producer serve 应在运行的任何时候（总调度巡检、监控看板、离线恢复后）
+    then: remote_preflight.py --runtime：H1 night_state.json 超过 --stall-min（默认 30 分钟）没更新 = 卡住或已退出（fail，不依赖 night.pid，11-01 实测 night.pid 停在旧进程 18588）；H2 data/producer/heartbeat.json 的 t 超线或进程不在 = fail；暂停中只记 warn
+    check: tests/test_remote_preflight.py::test_night_stall_detected
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/video/night.pid, note: "内容 18588（05:43 写），实际 night.py 16:04 重启为新进程；离线期间 night.py 卡住无任何报警（总调度 11-01 派单）"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-W04
+    domain: ops
+    link: [P4-P5, P11-RETRY]
+    title: 写作返修（R11-3 QW-A1..A5）的输入按集取现行来源，只含目标集；导入走 staging + 总调度批准
+    when: 对已导入的剧本做格式返修再合并导入（qwen_repair_loop --fix-warn --only-codes …）
+    then: 用 tools/pipeline/repair_chain.py：每集取 data/import/script_v2.json sources[].episodes 登记的那份 md 里的该集（sha256 必须一致，不一致拒拼），拼成只含目标集的输入；返修后核对能导入解析、集 / 镜数不变、对白 / 🎙 / 时长逐字不变，跑导入同一校验器；真跑通过才复制到 data/staging_v3/merged/<剧名>_series10_v1_qwA_epXX…_v3.md（导入接口只收 staging 目录），写 import_plan.json（merge 模式）等总调度批准，不自动导入；--stub 桩写作方只验链路、不花钱
+    check: tests/test_repair_chain.py
+    evidence:
+      - {src: data/import/script_v2.json, note: "11-01：各集来自 6 份 md（ep1–2 底稿、ep7 lookfix_ep04_ep07、ep9 lookfix_ep09_10、ep4–6 lookfix_ep03_04_05_06、ep3/8/10 qwch6）；拿 10-31 23:14 底稿返修再 merge 导入会把这些修改整集覆盖回旧版"}
+      - {src: data/autopilot/repair_chain/20261101-162428/verify.json, note: "ep07–10 桩自检：35 镜进出一致、对白 / 时长不变；QW-A 计数（循环内校验）A2 1 / A3 3 / A5 32"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-W05
+    domain: ops
+    link: [P6-P7, P7-P8]
+    title: 渲染道隧道要有看门狗：探测失败自动重建，跳板不通时不乱杀
+    when: 笔记本经 ssh -L 隧道（18188/18189/18191 → gpu33，18288/18289/18290 → gpu36）访问 ComfyUI 的任何时候
+    then: tools/autopilot/infra_watchdog.py serve（laptop_autostart.ps1 拉起）30 s 一拍并行探测 /system_stats；连续 2 拍不通 → 杀持有该 -L 的 ssh，交 tunnel.sh / tunnel_gpu36.sh 原有循环重连，之后每 4 拍再试一次；循环不在就按原脚本拉起；跳板 TCP 不通 → 不杀、开 A-RELAY 报警；重建后 3 拍仍不通开 A-TUNNEL-<端口>；注入测试 tools/autopilot/infra_inject_test.py（freeze = 进程活着转发卡死，kill = 断线），恢复须 ≤ 120 s
+    check: tests/test_infra_resident.py
+    evidence:
+      - {src: data/qa/infra_inject.jsonl, note: "11-01 16:42 freeze 18288 → 109.4 s 恢复（看门狗 16:41:17 杀 ssh 35824）；16:43 kill 18288 → 42.6 s 恢复；首轮串行探测 138.5 s 超线 → 改并行"}
+      - {src: ops/logs/tunnel.log, note: "16:18 总调度实测 18188 卡死、18189 断开无自动重连：tunnel.sh 只在 ssh 退出时重连，ssh 活着但转发卡死永不恢复"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-W06
+    domain: ops
+    link: [P8-P10, P11-RETRY]
+    title: GPU 空转 / 循环卡住必须报警，写 data/qa/alerts.jsonl 并在监控看板显示
+    when: 有待派的活（vidgen 可派镜、producer 在途）而渲染卡空闲；night / producer 心跳停
+    then: A-IDLE（笔记本侧道全空 ≥ 10 分钟且有可派镜）、A-IDLE-<host>（服务器侧每张卡利用率 < 5% 且队列空 ≥ 10 分钟且有活，resident_sync health 5 分钟一测）、A-NIGHT / A-RESIDENT-NIGHT-<host>（night.log / night_state.json ≥ 20 分钟不动）、A-PROD / A-RESIDENT-PROD-<host>（producer 心跳 ≥ 10 分钟）；报警只在开 / 关时各记一行；tools/monitor/server.py /api/status 带 alerts，看板“报警”区显示
+    check: tests/test_infra_resident.py::test_idle_alert_opens_once_and_closes
+    evidence:
+      - {src: docs/master/NIGHT_PLAN_20261101.md, note: "W7：gpu33 4 小时没出片也没人报警；总调度 16:55 把空转线定为 10 分钟"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-W07
+    domain: ops
+    link: [P5-P6, P7-P8, P8-P10]
+    title: 生产默认在服务器常驻跑（各跑本机负责集的 producer + night，直调本机 ComfyUI）；笔记本只做控制面
+    when: series10 起所有整季生产；跳板 194relay 握手 6–7 s 且反复断连，经隧道派单不可靠
+    then: 复用 offline_20261101 目录（repo/ venv/ bin/ fwd.py start.sh）；tools/autopilot/resident_sync.py push（清单比对、分批 ≤ 24 MB、临时目录解包再搬入、失败退避重试、发完复核补发）→ ops/offline/resident_prep.py（幂等补丁：night/sync 只管本机集、control.json only/hold、作废笔记本租约）→ ops/offline/resident_restart.sh（只重启 producer / night）；笔记本 producer pause --by SERVER_RESIDENT、night.py 停；resident_sync loop：5 分钟 health、20 分钟 pull + merge_pull（截断不覆盖），代码改动自动推 + 热重启；分集 gpu33 = ep01/03/05、gpu36 = 其余，gpu33 GPU2 坏卡永不用；两台同时派同一集禁止（control.only + night OFFLINE_SELF）；⤴ 总调度 18:4x 修订分工：出图统一由笔记本 producer 派（道 = laptop:0 + 跳板通时经隧道的服务器出图道，同一 producer 的租约天然不重复），服务器 producer 不起（control paused_by=LAPTOP_IMAGES）、只跑 night / vidgen：resident_sync video_up = 第一级推送 → push_frames（只推改过的 takes.json + 当前版本图，小文件优先）→ 服务器本机 build_jobs 重编并核非 Pika ready = 0 → resident_restart night-only
+    check: tests/test_infra_resident.py::test_resident_push_diff_and_skip
+    evidence:
+      - {src: docs/overnight/OFFLINE_20261101.md, note: "11:23–15:28 离线 4 小时：gpu36 照常产出（同一套目录与分集）"}
+      - {src: data/producer/log.jsonl, note: "总调度 16:55：producer 日志全是 WinError 10054 / ComfyUnavailable / Connection reset，7 张卡只有 1–2 张在跑"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-Q20
+    domain: ops
+    link: [P7-P8]
+    title: 离线并回（merge_pull）与往服务器推文件，都要先核完整性；截断文件不得按“新者为准”覆盖；多集共享的对象表按对象合并
+    when: ops/offline/merge_pull.py 把服务器文件并回笔记本（resume_from_gpu33.sh / tools/autopilot/resident_sync.py pull）；或把笔记本文件推到服务器（resident_sync push）
+    then: 并回前每个 png/jpg/webp 完整解码、mp4 查 moov、json 能解析，且不是本地文件的字节前缀（merge_pull.pulled_problem，判据同 apps/web/e2e/uiaudit/trunc_scan.py）——不过的不覆盖、记 corrupt_skipped；data/producer/ 下的 JSON（master_rejects.json 等）按对象合并：别的集留笔记本、本机集按对象内 *at 新者为准、keys 列表并集（merge_pull.merge_objects）；推送先解到临时目录再搬入、发完复核清单补发（resident_sync push）。收编自 knowledge/inbox/2026-11-01_uiaudit_r20.yaml（UIAUDIT 草案，总调度 17:4x 指派 WORKFLOW）
+    check: tests/test_remote_preflight.py
+    evidence:
+      - {src: apps/web/e2e/uiaudit/r19_trunc_scan.json, note: "7 个设定图被截断（大小 512 整数倍，是笔记本备份的字节前缀），与 K-OPS-302 同类，第二次出现 → 系统缺陷"}
+      - {src: data/producer/master_rejects.json, note: "PROD / UIAUDIT 11-01 查到：多集共享表按整文件 mtime 合并，丢掉了 unwait"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-W08
+    domain: ops
+    link: [P5-P6, P6-P7, P7-P8, P8-P10]
+    title: 全量重做按前置闸门顺序执行：身份脸重裁 → 剧本返修导入 → 作业重编 → 编译器修复 → Pika 冒烟亲审，闸门没全过不派图；视频只用 Pika，做不了就 hold
+    when: 项目方要求图片 / 视频全部重做（L-088，11-01 ~18:0x）或以后同类整季重做
+    then: tools/autopilot/full_redo.py：gate G20 / SCRIPT / G21（自动核 first_frame_jobs.json 晚于 script_v2.json）/ W5 / PIKA_SMOKE 全 ok 才 apply；apply 在负责该集的服务器上逐镜 producer.py reject（frame_v9×2，原因“L-088 全量重做（R0）”，不计 3 次上限，旧版保留），替换版过契约 + 看图闸门由 auto_review_redo 换上；逐镜记 state.json 可续跑、pause/resume 走 producer；视频由 config/pipeline/video_policy.json pika_only 约束（只管 series10_v1 来源的镜），非 Pika 配方与 flush_risk 命中一律编译成 hold:<原因>，不回退旧配方；首帧换版 → vidgen.check_stale 作废旧片（不删）
+    check: tests/test_full_redo.py
+    evidence:
+      - {src: data/autopilot/full_redo/plan.json, note: "80 镜；视频 hold 1 镜（ep05-S4 泛红防护）；估算 图片 4.6 + 视频 19.5 = 24.1 GPU 时，满载墙钟约 4.2 小时"}
+      - {src: data/pipeline/runs/series10_v1/video/recipe_choice.json, note: "项目方原话：视频全部用皮卡来做，如果皮卡做不了，就等皮卡安装完再做"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-W09
+    domain: ops
+    link: [P7-P8, P8-P10]
+    title: 远端推送按体积分级、代码优先；单次推送超过 20 MB 必须先报估计耗时
+    when: 笔记本往服务器推代码 / 数据（resident_sync push），尤其跳板带宽只有 17–20 KB/s 时
+    then: tier1 = 代码目录里 ≤2 MB 的 .py/.yaml/.json/.md/.sh + first_frame_jobs.json / recipe_choice.json / sheets_chosen.json / shot_looks.json + 身份脸，推完立刻起常驻；tier2 = 大文件与生产数据，后台低优先级续推（缺哪张 preflight 挡哪一镜，不挡全局）；每次先算差异和预计分钟数写日志，超过 20 MB 不带 --yes 只报不推；每批 ≤2 MB，断了下次按清单差异续推；推完第一级逐个核 sha256（resident_sync.verify_sha：本地 vs 服务器 sha256sum，不一致 / 缺失强制重推再核，仍不一致不起常驻；结果 data/autopilot/resident/sha_<host>.json，总调度 18:5x）
+    check: tests/test_infra_resident.py
+    evidence:
+      - {src: ops/logs/resident_sync.log, note: "11-01 17:56 一轮差异 1260 个文件 256.6 MB、10 分钟一批都没推完，7 张卡全 0%；改分级后 18:07 tier1 差异 gpu33 4.78 MB / gpu36 4.7 MB（预计 4.4 分钟）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01

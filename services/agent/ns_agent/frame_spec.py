@@ -28,7 +28,7 @@ from . import gpu3_fields as G3
 from .bible import Bible, load_bible
 from .compiler import (DARK_WORDS, LAST_FRAME_KEEP, _strip_triggers, classify_adult, corrector_terms, end_state,  # noqa: F401
                        identity_triggers, is_dark, lens_term, material_terms, split_camera, split_dash,
-                       without_possessive_places)
+                       without_possessive_mentions, without_possessive_places)
 
 # ------------------------------------------------------------------ 词表（确定性解析）
 
@@ -250,15 +250,16 @@ def resolve_characters(img: str, motion: str, prev_male: str | None = None,
                        bible: Bible | None = None) -> dict[str, list[str]]:
     """原文代称 → 角色；返回 {角色: [原文里指代他/她的词]}。'他' 指本镜出现的男性，否则沿用本集上一个男性（默认顾沉）"""
     found: dict[str, list[str]] = {}
-    img, _ = without_possessive_places(img, bible)        # QA-03：“顾沉家客厅”是地点
-    motion, _ = without_possessive_places(motion, bible)
+    img, _pl, obj_i = without_possessive_mentions(img, bible)      # QA-03 + FIX P0 ⑦：地点 / 物件所有格不算入镜
+    motion, _pm, obj_m = without_possessive_mentions(motion, bible)
     text = img + "，" + motion
     for name, words in mentions(bible).items():
         hits = [w for w in words if w in text]
         if hits:
             found[name] = hits
     if "他" in text.replace("其他", ""):
-        male = next((m for m in ("陈宇", "顾沉") if m in found), prev_male or "顾沉")
+        # “她与陈宇的日常：他递给她…”：物件所有格的主人又以“他”出现 → 就是他（不落到默认顾沉）
+        male = next((m for m in ("陈宇", "顾沉") if m in found), None) or             next((m for m in ("陈宇", "顾沉") if m in obj_i + obj_m), prev_male or "顾沉")
         found.setdefault(male, []).append("他")
     return found
 
@@ -724,6 +725,14 @@ def _style_with_text_exception(style: str, texts: list[str]) -> str:
     return out if out != style else f"{style}，除屏幕上的{allowed}外无其他文字"
 
 
+def _drop_terms(text: str, terms: list[str]) -> str:
+    for t in terms:
+        if t and t in text:
+            text = text.replace(f"（{t}）", "").replace(f"({t})", "").replace(t, "")
+    text = re.sub(r"[，,]{2,}", "，", text).strip("，, ")
+    return re.sub(r"（[，,\s]*）", "", text)
+
+
 def assemble(spec: FrameSpec, shot: Shot, g: ScriptGlobals, available_triggers: set[str] | None = None,
              bible: Bible | None = None) -> ModelPrompt:
     """顺序：触发词 → 角色 DNA → 景别机位 → 人物造型 → 姿态表情 → 场景 → 光线 → 镜头焦外 → 色调 → 画质"""
@@ -750,6 +759,11 @@ def assemble(spec: FrameSpec, shot: Shot, g: ScriptGlobals, available_triggers: 
         wear += [f"{a.item}{a.count or ''}枚（{a.placement}）" if a.count else a.item for a in c.adornment]
         if c.clarity == "bokeh":
             wear.append(f"{c.name}在焦外虚化")
+    # QA（ITERAUDIT 11-01 ep02-S1）：系统补的穿戴描述（例“12cm透明细高跟（鞋跟直径约6毫米…）”）里的材质条目，
+    # 剧本原文自己已经写了 → 从系统那一份里删掉（原文一字不动；材质条目整句只保留一次）
+    script_text = "，".join(facts_first)
+    wear = [_drop_terms(w, [m.term for m in b.materials if m.term in script_text]) for w in wear]
+    wear = [w for w in wear if w]
     pose = join(*by["pose"])
     img_body = _strip_triggers(shot.img_prompt, shot.img_triggers)
     corr = corrector_terms(img_body, adult=spec.adult, bible=b)

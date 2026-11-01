@@ -62,17 +62,20 @@ export function StatusLine({ st, why = true, align = "right" }: { st: ShotStatus
 }
 
 function WhyList({ items }: { items: ShotStatus["why"] }) {
+  // UM-P0-01：只列你能处理的事；系统自己在处理的检查合成一行灰字
+  const mine = items.filter((w) => !w.sys);
+  const sys = items.length - mine.length;
   return (
     <div className="v3-why-pop">
-      <b>为什么卡住</b>
-      <ul>
-        {items.map((w, i) => (
-          <li key={i}>
-            {w.text}
-            {w.who && <span className="v3-who">{w.who}</span>}
-          </li>
-        ))}
-      </ul>
+      <b>{mine.length ? "要你处理" : "不用你处理"}</b>
+      {mine.length > 0 && (
+        <ul>
+          {mine.map((w, i) => (
+            <li key={i}>{w.text}</li>
+          ))}
+        </ul>
+      )}
+      {sys > 0 && <p className="v3-why-sys">系统检查中（{sys} 项，系统自己处理）</p>}
     </div>
   );
 }

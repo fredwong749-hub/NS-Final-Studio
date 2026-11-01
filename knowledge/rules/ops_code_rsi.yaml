@@ -1,0 +1,79 @@
+# 代码体检规则（CODE-RSI 2026-11-01，总调度 fredw-2b 派：“把全部代码 RSI 一遍.一旦 OK,你就把代码 push 到最新版本”）。
+# check 字段 = 强制这条规则的测试 / 校验器 / 闸门（iter_gate RL 要求新规则都带 check）。
+rules:
+  - id: K-OPS-C01
+    domain: ops
+    link: [P11-RETRY]
+    title: 任何 loop 收轮前，全仓 Python 必须能编译、无未定义名、项目内导入都解析得到（iter_gate Y1 = tools/qa/syntax_guard.py）
+    when: 任何 agent 改了 .py（尤其是用脚本 / sed / 字符串拼接批量改代码），或宣布“本轮完成”之前；推代码到服务器之前
+    then: 跑 .venv/Scripts/python.exe tools/qa/syntax_guard.py（多进程，全仓约 2 秒）：E1 非 UTF-8、E2 语法错误 / 写断的字符串 / 空字节 / 非法转义（SyntaxWarning 也算）、E3 pyflakes 未定义名、E4 ns_* 包内导入的模块或名字不存在。退出码 1 不得收轮、不得推送；iter_gate Y1 自动调用。改代码别用 sed 替换带反斜杠 / 引号的片段，用文件编辑工具或脚本文件
+    check: [tools/qa/syntax_guard.py, tests/test_syntax_guard.py, tools/qa/iter_gate.py]
+    evidence:
+      - {src: docs/CHANGELOG_AGENTS.md, note: "11-01 三次“别的 loop 把字符串写断 → 全部测试起不来”：unified_frame.py 16:55、pipeline.py 17:48 等（总调度派单原话）"}
+      - {src: tests/test_owner_headers.py, note: "CODE-RSI 体检查出 2 处非法转义（services/canvas_api/ns_canvas/rules.py:39 \"\\|\"、tests/test_owner_headers.py:9 \"\\*\"），3.14 起是语法错误；已改成 \"\\\\|\" / \"\\\\*\"，值不变"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-C02
+    domain: ops
+    link: [P11-RETRY]
+    title: 测试不能假设真实数据的当前状态；断言跟着已定的决定走（决定改了措辞，测试同步改断言，不删测试）
+    when: 测试复制 / 读取真实 data/（looks、takes.json、剧本），或断言某句编译器输出的原文
+    then: 不写死真实剧本的镜号（按镜头性质选镜：景别 / 在画人物 / 造型）；复制真实数据的测试先把与本测试无关的项目方状态（owner_confirmed_* 等）在临时副本里清掉，让起点与真实数据无关；编译器措辞按决定改过（例：framing.closeup_lead 11:10 起“画面里只有手这一局部”），断言改成新句并注明取代的旧句。只读真实生产数据做审计的用例标 @pytest.mark.real_data，不当单元测试
+    check: [tests/test_review_fixes_d9.py, tests/test_image_framing.py, tests/test_gen_contract.py, tests/test_video_jobs_v1.py, tests/test_fix_ep02_round2.py]
+    evidence:
+      - {src: docs/master/MASTER_PICTURE.md §4, note: "G22（只拍手 → 画面里只有手）、G23（range PUT 真实排期 ep04/05 已有项目方确认，测试却断言为空）"}
+      - {src: tests/test_gen_contract.py, note: "18:24 返修稿（93 镜）重排后写死的 ep01-S3（原中全景，现近景）/ ep01-S4（原双人，现单人）失去前提，3 条红；改成按镜头性质选 FULL / TWO。config/gen_contract.json 与 02:27 副本比只有新增键、无删改"}
+      - {src: tests/test_video_jobs_v1.py, note: "夹具把时长改 8 s 却不改剧本 H3 原文；返修稿 ep01-S2 带 6 s 对齐句，提交时 final_prompt 按帧数重算 → 期望值改为 realign(编译器输出, 帧数)"}
+      - {src: tests/test_fix_ep02_round2.py, note: "G24：data/renders/ep02 已是 series10 ep02，VIDEO10 登记的配方引擎片（workflow=video10）走 ns_recipes.lint，不属 h3_video.submit_lint 范围 → 过滤掉"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-C03
+    domain: ops
+    link: [P11-RETRY]
+    title: 推代码 / 数据到服务器之前，先在本地用临时目录当服务器模拟一次 push（tools/qa/push_check.py），PASS 才推
+    when: resident_sync.py push / switch / recover / loop 推送之前；改了 resident_sync 的清单、过滤、分层或打包逻辑之后
+    then: 已代码化（总调度 11-01 定）：resident_sync.push 先调 push_gate（同档 15 分钟内过过且代码没改则复用），不过抛 PushGateFailed——push / video_up / bringup / switch / loop 都不推，recover 整个停下；目录计算只在 resident_sync.push_dirs 一处，push_check 直接驱动 push()。手动也可跑 .venv/Scripts/python.exe tools/qa/push_check.py --tier 1（及默认 tier 2）。它原样调用 resident_sync 的 local_manifest / diff_push / wanted / tier_of / batches / tar_bytes，按服务器端同样“先解到临时目录再搬进 repo”，核对 P0 语法守卫、P1 每批 tar 完整且成员 = 本地字节、P2 推过去的文件都能解码（py / json / jsonl / yaml / 图片 / mp4 moov）、P3 代码文件全部到达且字节相同 + 第二轮清单差异为 0、P4 不推模型权重 / 超大文件 / .git / node_modules / 隔离区 / 审片页 / A/B / 缓存。FAIL 不推
+    check: [tools/qa/push_check.py, tests/test_push_check.py, tools/autopilot/resident_sync.py]
+    evidence:
+      - {src: ops/logs/resident_sync.log, note: "17:56:38 push gpu33 round 1 差异 1260 个文件 256.6 MB——跳板恢复前后推送已在跑，此前只做过单元测试"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-C04
+    domain: ops
+    link: [P11-RETRY]
+    title: 打包推送的文件先整份读进内存、按实际字节数写 tar 成员；不能按 stat 写头再边读边写，也不能吞掉中途的 OSError
+    when: 任何把正在被别的 loop 改写的目录打成 tar 发出去的代码（resident_sync.tar_bytes、deploy、离线包）
+    then: data = p.read_bytes(); TarInfo.size = len(data); mtime 取读之前的 stat（读之后又改 → 本地更新，下一轮补发）。tarfile.add 在文件被截短时先写了头、再抛 OSError，吞掉之后整包错位：服务器上这个文件变成“原文 + 下一个成员的头 + 0”，下一个文件丢失
+    check: [tests/test_push_check.py]
+    evidence:
+      - {src: tools/autopilot/resident_sync.py, note: "tar_bytes 原实现 tf.add + except OSError: pass；tests/test_push_check.py::test_tar_bytes_member_matches_bytes_even_if_stat_is_stale 对旧实现红、新实现绿"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-C05
+    domain: ops
+    link: [P11-RETRY]
+    title: 推送清单必须收敛：远端清单要覆盖本轮会推的所有目录，否则服务器已有的文件每轮都被当成“缺”整批重发
+    when: 改 resident_sync.push 的目录 / 分层（tier）/ 远端清单范围
+    then: rem_dirs 只在 tier 1 时省掉整个 data/（改列 identity_refs、series10 assets、video 三处）；tier 2 必须列 data/。push_check 的 P3 检查第二轮差异 = 0，不收敛 = FAIL
+    check: [tools/qa/push_check.py, tests/test_push_check.py]
+    evidence:
+      - {src: tools/autopilot/resident_sync.py, note: "18:06 新加分层后 rem_dirs = [d for d in dirs if d != \"data\"] 对 tier 2 也生效；push_check 模拟轮次差异 [1665, 932, 932]，修后 [1665, 0]"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-C06
+    domain: ops
+    link: [P11-RETRY]
+    title: LOCKS.md 的 CONSENT 行，路径后紧跟的括号说明不算路径；iter_gate O1 只拿路径本身去匹配
+    when: 写 CONSENT 行（常见写法“xx.py（只改 …） | 原话”），或改 iter_gate 的授权解析
+    then: parse_consents 在第一个中文 / 英文左括号处截断 glob；测试覆盖“路径（说明）”“路径(说明)”“路径 | 原话”三种写法
+    check: [tests/test_syntax_guard.py, tools/qa/iter_gate.py]
+    evidence:
+      - {src: docs/uimaster/LOCKS.md, note: "CONSENT: BAKEOFF -> RESEARCH : knowledge/rules/render_qwen21.yaml（只改 K-WRT-Q29…） 等多行路径后直接跟括号，CONSENT_RE 的路径分组（遇空白 / 竖线才停） 把说明一起吞进 glob，O1 永远判越界（CODE-RSI c1 实测：4 个有授权的文件判越界）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01

@@ -1,0 +1,11 @@
+[
+  {"id": "MP_demo", "title": "MediaPlayer 自测", "path": "/e2e/uiaudit/mp_demo.html", "wait": 6000, "steps": [
+    {"shot": "a"},
+    {"click": "旁白 试听"}, {"wait": 2500},
+    {"js": "const a=[...document.querySelectorAll('audio')]; return a.map(x=>({src:x.src.slice(-30), t:+x.currentTime.toFixed(2), paused:x.paused, dur:+(x.duration||0).toFixed(1), err:x.error&&x.error.code}))"},
+    {"js": "const m=document.querySelectorAll('.mp-audio .mp-big'); m[0].click(); return 'big'"}, {"wait": 2500},
+    {"js": "const a=[...document.querySelectorAll('audio')]; return {playing:a.filter(x=>!x.paused).length, waveBins:document.querySelectorAll('.mp-wave i').length}"},
+    {"js": "document.querySelector('.mp-ab .mp-big').click(); return 1"}, {"wait": 1500}, {"key": "b"},
+    {"js": "await new Promise(r=>setTimeout(r,1500)); const a=[...document.querySelectorAll('.mp-ab audio')]; return a.map(x=>({t:+x.currentTime.toFixed(2), paused:x.paused})).concat([{side:document.querySelector('.mp-ab-side.on')?.innerText}])"},
+    {"shot": "b"}, {"probe": "b"}]}
+]

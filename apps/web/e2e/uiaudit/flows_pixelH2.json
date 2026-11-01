@@ -1,0 +1,66 @@
+[
+  {
+    "size": [
+      1440,
+      900
+    ],
+    "steps": [
+      {
+        "click": "精修",
+        "after": 5000
+      },
+      {
+        "click": "版本",
+        "after": 2000,
+        "within": "aside.v3e-side"
+      },
+      {
+        "js": "const c=document.querySelector('.v3e-ver .v3e-chain'); const s=c?getComputedStyle(c):null; const v=document.querySelector('.v3e-ver'); return c?{chainMaxH:s.maxHeight, chainOv:s.overflowY, chainH:Math.round(c.getBoundingClientRect().height), verOv:v?getComputedStyle(v).overflowY:null}:'no chain'"
+      },
+      {
+        "shot": "a"
+      },
+      {
+        "x": 0.88,
+        "scroll": "ver",
+        "y": 0.6
+      }
+    ],
+    "title": "精修版本",
+    "wait": 8000,
+    "path": "/#ep02-S1",
+    "id": "H_ver_900"
+  },
+  {
+    "size": [
+      1280,
+      720
+    ],
+    "steps": [
+      {
+        "click": "精修",
+        "after": 5000
+      },
+      {
+        "click": "版本",
+        "after": 2000,
+        "within": "aside.v3e-side"
+      },
+      {
+        "js": "const c=document.querySelector('.v3e-ver .v3e-chain'); const s=c?getComputedStyle(c):null; const v=document.querySelector('.v3e-ver'); return c?{chainMaxH:s.maxHeight, chainOv:s.overflowY, chainH:Math.round(c.getBoundingClientRect().height), verOv:v?getComputedStyle(v).overflowY:null}:'no chain'"
+      },
+      {
+        "shot": "a"
+      },
+      {
+        "x": 0.88,
+        "scroll": "ver",
+        "y": 0.6
+      }
+    ],
+    "title": "精修版本",
+    "wait": 8000,
+    "path": "/#ep02-S1",
+    "id": "H_ver_720"
+  }
+]

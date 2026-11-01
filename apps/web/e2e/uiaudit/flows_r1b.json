@@ -1,0 +1,18 @@
+[
+  {"id": "T8_voice_listen", "title": "试听并更换旁白音色", "path": "/#ep02", "steps": [
+    {"click": "资产"}, {"wait": 6000}, {"click": "声音"}, {"wait": 3000}, {"shot": "a"}, {"probe": "a"},
+    {"js": "const s=document.querySelector('main, .v3-page'); (s||document.scrollingElement).scrollTo(0, 99999); window.scrollTo(0,99999); return 1"}, {"shot": "a2"},
+    {"click": ["试听", "播放", "▶"]}, {"click": "旁白 音色"}, {"shot": "b"}, {"probe": "b"},
+    {"key": "Escape"}, {"click": "提议修改"}, {"shot": "c"}, {"probe": "c"}]},
+  {"id": "T9_upload_shoes", "title": "上传一双鞋并挂到造型", "path": "/#ep02", "steps": [
+    {"click": "资产"}, {"wait": 6000}, {"click": "衣橱"}, {"wait": 3000}, {"shot": "a"}, {"probe": "a"}, {"click": ["上传", "新增", "新建单品", "＋"]}, {"shot": "b"}, {"probe": "b"},
+    {"key": "Escape"}, {"click": "形象"}, {"click": "林晚"}, {"shot": "c"}, {"probe": "c"}]},
+  {"id": "O_more_menu", "title": "镜头 … 菜单", "path": "/#ep02", "steps": [
+    {"js": "const b=[...document.querySelectorAll('button')].find(x=>/^[.…⋯]+$/.test(x.innerText.trim()) && x.getBoundingClientRect().x>1300); if(!b) return 'none'; b.click(); return b.innerText"}, {"shot": "a"}, {"probe": "a"}]},
+  {"id": "O_look_card", "title": "形象卡 → 检查器", "path": "/#/assets?type=look", "wait": 8000, "steps": [ {"js": "const c=document.querySelector('[class*=card]'); if(!c) return 'none'; c.click(); return c.innerText.slice(0,40)"}, {"shot": "a"}, {"probe": "a"}]},
+  {"id": "O_item_card", "title": "单品卡 → 检查器", "path": "/#/assets?type=item", "wait": 8000, "steps": [ {"js": "const c=[...document.querySelectorAll('[class*=card]')][1]; if(!c) return 'none'; c.click(); return c.innerText.slice(0,40)"}, {"shot": "a"}, {"probe": "a"}]},
+  {"id": "O_scene_card", "title": "场景卡", "path": "/#/assets?type=scene", "wait": 8000, "steps": [ {"js": "const c=document.querySelector('[class*=card], [class*=scene]'); if(!c) return 'none'; c.click(); return c.innerText.slice(0,40)"}, {"shot": "a"}, {"probe": "a"}]},
+  {"id": "O_ep01_frame", "title": "第1集 首帧大图（有图的集）", "path": "/#ep01", "steps": [
+    {"shot": "list"}, {"click": "首帧"}, {"shot": "a"}, {"probe": "a"}]}
+]
+

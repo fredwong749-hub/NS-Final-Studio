@@ -1,0 +1,60 @@
+[
+  {
+    "id": "R6_versions",
+    "title": "版本页签 再生成",
+    "path": "/#ep01-S1",
+    "wait": 8000,
+    "steps": [
+      {
+        "click": "精修",
+        "after": 5000
+      },
+      {
+        "clickAt": "(() => { const e=[...document.querySelectorAll('*')].find(x=>/^首帧 · #\\d+/.test((x.innerText||'').trim()) && x.getBoundingClientRect().x>500 && x.getBoundingClientRect().x<1000 && x.getBoundingClientRect().height<40); const r=e?.closest('button, [role=button], [class*=thumb], [class*=tile], [class*=mini]')?.getBoundingClientRect() || e?.getBoundingClientRect(); return r?[r.x+r.width/2,r.y+Math.min(r.height/2,60)]:[null,null]; })()",
+        "after": 2000
+      },
+      {
+        "clickAt": "(() => { const e=[...document.querySelectorAll('button,[role=tab]')].find(b=>/^版本/.test(b.innerText.trim()) && b.getBoundingClientRect().x>innerWidth*0.7 && b.getBoundingClientRect().y<120); const r=e?.getBoundingClientRect(); return r?[r.x+r.width/2,r.y+r.height/2]:[null,null]; })()",
+        "after": 1500
+      },
+      {
+        "js": "const items=[...document.querySelectorAll('.v3e-ver .v3e-chain [class*=node], .v3e-ver .v3e-chain button')].filter(e=>e.getBoundingClientRect().width>0); return {chainItems:items.length, labels:items.slice(0,4).map(e=>e.innerText.replace(/\\s+/g,' ').slice(0,10)), regenInVer:[...document.querySelectorAll('.v3e-ver button')].filter(b=>/再生成/.test(b.innerText+(b.title||''))).map(b=>b.innerText.trim()+'|'+(b.title||'').slice(0,30))}"
+      },
+      {
+        "clickAt": "(() => { const items=[...document.querySelectorAll('.v3e-ver .v3e-chain [class*=node], .v3e-ver .v3e-chain button')].filter(e=>e.getBoundingClientRect().width>0); const e=items[2]||items[items.length-1]; e?.scrollIntoView({block:'center'}); const r=e?.getBoundingClientRect(); return r?[r.x+r.width/2,r.y+Math.min(r.height/2,10)]:[null,null]; })()",
+        "after": 1200
+      },
+      {
+        "js": "const b=[...document.querySelectorAll('.v3e-ver button')].find(b=>/再生成/.test(b.innerText+(b.title||''))); return {selected:(document.querySelector('.v3e-ver')?.innerText.match(/选中 #\\\\d+/)||[null])[0], btnTitle:(b?.title||'').slice(0,30)}"
+      },
+      {
+        "clickAt": "(() => { const b=[...document.querySelectorAll('.v3e-ver button')].find(b=>/再生成/.test(b.innerText+(b.title||''))); if(!b) return [null,null]; b.scrollIntoView({block:'center'}); const r=b.getBoundingClientRect(); return [r.x+r.width/2,r.y+r.height/2]; })()",
+        "after": 1500
+      },
+      {
+        "click": "=生成",
+        "within": ".ds-modal",
+        "after": 2500
+      },
+      {
+        "clickAt": "(() => { const items=[...document.querySelectorAll('.v3e-ver .v3e-chain [class*=node], .v3e-ver .v3e-chain button')].filter(e=>e.getBoundingClientRect().width>0); const e=items[0]; e?.scrollIntoView({block:'center'}); const r=e?.getBoundingClientRect(); return r?[r.x+r.width/2,r.y+Math.min(r.height/2,10)]:[null,null]; })()",
+        "after": 1200
+      },
+      {
+        "js": "const b=[...document.querySelectorAll('.v3e-ver button')].find(b=>/再生成/.test(b.innerText+(b.title||''))); return {selected:(document.querySelector('.v3e-ver')?.innerText.match(/选中 #\\\\d+/)||[null])[0], btnTitle:(b?.title||'').slice(0,30)}"
+      },
+      {
+        "clickAt": "(() => { const b=[...document.querySelectorAll('.v3e-ver button')].find(b=>/再生成/.test(b.innerText+(b.title||''))); if(!b) return [null,null]; b.scrollIntoView({block:'center'}); const r=b.getBoundingClientRect(); return [r.x+r.width/2,r.y+r.height/2]; })()",
+        "after": 1500
+      },
+      {
+        "click": "=生成",
+        "within": ".ds-modal",
+        "after": 2500
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  }
+]

@@ -1,0 +1,667 @@
+# 界面 / 交互规则（UIRSI，P0→P12 各节点在 apps/web 上的做法）。每轮 RSI 把被证实有效的做法写回这里（docs/uirsi/rounds/rN.md）。
+# 只讲界面怎么呈现、怎么确认；不写剧情、不评价内容；不进写作 / 审片提示词（没有 writer_text / director_text）。
+rules:
+  - id: K-UI-001
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: P0-P1
+    title: “新建剧本”入口常驻顶栏，不能只藏在菜单里
+    when: 任何页面（画布、资产、成片、项目页）
+    then: 顶栏左侧常驻“＋ 新建剧本”链接按钮（快捷键 N），去 #/script-create；工具菜单剧本组第一项也是它；项目页主按钮“＋ 新建剧本（从提纲）”
+    evidence:
+      - {src: docs/uirsi/STATE.md §2, quote: "入口没被删，是被两次改动藏起来了"}
+      - {src: docs/ux_round5/IMPL_LOG.md §2, quote: "①“N 镜待补”去了写新剧本"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-UI-002
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P0-P1, P1-P2, P2-P3, P3-P4]
+    title: 写作链每段产物都在界面上可看、可改原文、可返修
+    when: 新建剧本运行（/api/story-runs）每段 P1–P4
+    then: 链条卡显示状态 / 轮数 / 花费 / 阻塞数；点开看排版内容、原文、校验问题（规则号 + 原话 + 字段）；“改原文”原样保存后只重新校验；“返修这一段”让写作模型重写；两者都把下游旧产物挪到 superseded/（不删）
+    evidence:
+      - {src: services/api/ns_api/story_runs.py, note: 接口}
+      - {src: tests/test_story_runs_uirsi.py, note: 返修 / 改原文 / 下游挪开}
+      - {src: docs/PIPELINE_CHAIN.md §6, quote: "P1/P2/P3 的查看、编辑卡"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-UI-003
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: P3-P4
+    title: 自动写出的剧本只存为导入候选，进生产必须经项目方在导入页勾选确认
+    when: P4 剧本分镜通过校验后
+    then: 只有 P4 通过才亮“送去导入（你确认）”，动作 = 存为 data/staging_input 草稿；之后按钮变“去导入页确认 ›”；界面不提供一键导入
+    evidence:
+      - {src: services/api/ns_api/story_runs.py, note: send-to-import 只写草稿}
+      - {src: docs/AUTOPILOT.md §3, quote: "你要点确认的地方"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-UI-004
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P0-P1, P3-P4]
+    title: 后台写作 / 生成的状态随时可见，打断不算失败
+    when: 有后台任务（写作链、出图、出片）
+    then: 页面每 2–3 s 轮询，写明当前段、第几轮、已花 / 上限；API 重启打断的标“中断”（灰）并给“继续写”（已通过的段复用）；真失败写原因 + 下一步，红色只给失败
+    evidence:
+      - {src: apps/web/src/v3/pages/NewScriptPage.tsx, note: RunView 轮询与按钮}
+      - {src: docs/ux_round5/C_research.md, quote: "失败按单元隔离"}
+    confidence: medium
+    status: 确认
+    date: 2026-10-31
+  - id: K-UI-005
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P0-P1, P10-P11]
+    title: 每轮 UI 改动按 RUBRIC 截图验收，截图不得发出写请求
+    when: 改 apps/web 后
+    then: tsc --noEmit + vite build（输出到 scratchpad）+ ds:stats 不超基线；shoot.mjs 1280/1440/1920 × 深浅，CDP 拦下全部非 GET；新接口没上线时 GET 转只读旁路 :8803；横向滚动 0、控制台错误 0
+    evidence:
+      - {src: docs/uirsi/RUBRIC.md, note: 打分标准}
+      - {src: apps/web/e2e/uirsi/shoot.mjs, note: 截图工具}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-UI-006
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P0-P1, P11-P12]
+    title: 产品名 momoso Agentic Drama Studio，标识用候选 2「双环」，界面一律经 ds/Brand 组件
+    when: 任何面向用户的品牌位置（顶栏、启动 / 断线页、项目页、标题、favicon）
+    then: 用 apps/web/src/ds/Brand.tsx（CANDIDATE=2）；≥1761 宽全称 + AGENTIC DRAMA STUDIO，≤1760 图形 + momoso 字标，≤1440 只图形，悬停都是全称；字标是原创几何字形（brand_logo.py 生成），不用字体文件；不在别处手写品牌名
+    evidence:
+      - {src: docs/uirsi/STATE.md, note: "项目方 2026-10-31 原话：“NS · 分集编辑器改名为momoso Agentic Drama Studio”"}
+      - {src: data/review_pages/brand_logo/index.html, quote: "候选 2 · 双环"}
+      - {src: apps/web/src/ds/Brand.tsx, note: 组件}
+    confidence: high
+    status: 项目方闸门
+    date: 2026-10-31
+  - id: K-UI-007
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P0-P1, P11-P12]
+    title: 前端每个 /api 调用都必须在后端路由表里（路径、方法、必填字段），CI 静态检查
+    when: 改 apps/web/src 的接口封装或 services/api/ns_api 的路由 / 请求模型
+    then: 跑 tools/uirsi/check_wiring.py（对 ns_api.app 现算的 OpenAPI，不对正在跑的 :8800）；E-ROUTE / E-METHOD / E-REQUIRED / E-BODYKIND 一律修掉或写进 tools/uirsi/wiring_baseline.json 交给负责方；tests/test_uirsi_check_wiring.py 在 pytest 里卡住新增
+    evidence:
+      - {src: tools/uirsi/check_wiring.py, note: 静态比对脚本}
+      - {src: tests/test_uirsi_check_wiring.py, note: 全仓检查 + 解析器自测}
+      - {src: docs/uirsi/debug_wiring.md, note: 第 1 / 2 轮 159 处调用 0 个 E 级}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-UI-008
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P0-P1, P11-P12]
+    title: 代码里有的路由不等于运行中的 API 有；新路由交付要写“待重启生效”，界面对框架 404 显示“等 API 重启”
+    when: 新增或改动 ns_api 路由、但 :8800 还在跑旧进程（有任务在出片时不重启）
+    then: 用 check_wiring.py --openapi http://127.0.0.1:8800/openapi.json 对比代码，列出只在代码里的路由写进交付说明；前端遇到 404 且 detail 是 Not Found → 显示“后台还没有这项功能（等 API 重启）”，不当成失败
+    evidence:
+      - {src: docs/uirsi/debug_wiring.md, note: "W-01：/api/story-runs 8 条路由运行中的 :8800 没有"}
+      - {src: apps/web/src/v3/pages/story_api.ts, quote: "后台还没有这项功能（等 API 重启后出现）"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-UI-009
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P5-P6, P6-P7]
+    title: 被页面轮询的展示接口不同步等远端（隧道探测 / ssh / object_info），先给上次结果、后台刷新；提交任务的路径照旧现取
+    when: 写 / 改 GET 接口，里面要连 gpu33 / gpu36 隧道、ssh 或 ComfyUI object_info
+    then: 展示路径用 stale-while-revalidate（带 age_s / refreshing 字段），只在从没取过或太旧时同步；选卡 / 参数校验等会影响出片的路径不读展示缓存
+    evidence:
+      - {src: services/api/ns_api/jobs.py, note: "_probe_for_view；/api/render/lanes 页面加载时 4–10 s"}
+      - {src: services/api/ns_api/frame_jobs.py, note: "lane_allowed；精修页 image-presets 实测 36–40 s"}
+      - {src: tests/test_uidebug_lanes_swr.py, note: 旧值立即返回 + 后台刷新 + 选卡仍现探}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-UI-010
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P0-P1, P11-P12]
+    title: 同一接口一个页面只拉一份（共享 hook / 模块级缓存），不在几个组件里各自 fetch
+    when: 新组件要读已有页面已经在轮询的数据（整集出片、渲染道、集摘要）
+    then: 复用已有的共享读取（useProduceView、lanes.ts、store），别再自己 fetch；运行时排错脚本按“同页同 URL 并发 >2 次”报出来
+    evidence:
+      - {src: docs/uirsi/debug_wiring.md, note: "W-09：ep02 加载时 /api/episodes/2/produce 并发 4 次（ProduceHistory 另起一份）"}
+      - {src: apps/web/src/v3/ProduceHistory.tsx, note: useRun}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-UI-011
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P0-P1, P11-P12]
+    title: 只保留一个外壳；下线的页面按可达性归档，不真删
+    when: 重构或下线界面
+    then: 路由只剩 新建剧本 / 导入 / 资产中心 / 画布 / 成片 / 模型；scripts/unreachable.mjs 列出构建不到的源文件，移到 data/_archive/<日期>/code/apps_web/（保持相对路径，MANIFEST.tsv 记 sha256 与原因）；旧地址一律跳到新页面，不留 ?legacy=1；只被旧页面用的后端接口列清单交总调度，不删
+    evidence:
+      - {src: docs/uirsi/rounds/r5-r7.md, quote: "构建不到 31 → 0"}
+      - {src: apps/web/scripts/unreachable.mjs, note: 可达性检查}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-UI-012
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P10-P11, P0-P1]
+    title: 排版用自动审计打分（R14–R17），间距 / 字号只用 token
+    when: 每轮截图
+    then: shoot.mjs 每张图跑 audit.js（非 token 字号 / 阴影 / 间距 / 颜色、溢出、无悬停截断、单字成行、对比度），score.mjs 换算分数写进轮记录与进展页；新 CSS 的 padding/margin/gap 只用 --sp-*、font-size 只用 --fs-*（snap_tokens.py 可批量吸附）
+    evidence:
+      - {src: docs/uirsi/rounds/r5-r7.md, quote: "间距不在 4px 网格 1753 → 116"}
+      - {src: apps/web/e2e/uirsi/audit.js, note: 审计脚本}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-UI-013
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P10-P11]
+    title: 强调色实底上的白字必须 ≥4.5:1；状态色文字一律用 *-text 档
+    when: 主按钮 / 步骤号 / 角标等强调色实底；.bad/.warn/.good 文字
+    then: --c-accent 深色 #3f6fe6（4.54:1）、浅色 #2a62f0（5.12:1）；文字用 --c-*-text；不合格角标底色 color-mix 压深
+    evidence:
+      - {src: docs/uirsi/rounds/r5-r7.md, quote: "对比度不达标 197 → 21"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-UI-014
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P5-P6, P6-P7]
+    title: 窄格里的角标按语义分段换行，不拆字、不截断编号
+    when: 帧格 / 视频格角标（首帧 #4、过期·需重出）在 1280 宽变窄
+    then: 角标拆成 nowrap 的几段（label | #n；按“·”分段），容器 inline-flex + flex-wrap；不用整体 nowrap（会截掉 #n），也不让中文自由断行（会单字成行）
+    evidence:
+      - {src: apps/web/src/v3/ReviewRow.tsx, note: Wrap / v3-tag-n}
+      - {src: docs/uirsi/rounds/r5-r7.md, quote: "单字成行 16 → 2"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-UI-015
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P4-P5, P11-P12]
+    title: 页面展示最新成果：挑定的设定图 / 身份参考、整季写作、方案成片自动出现
+    when: 资产中心角色卡、新建剧本运行列表、成片页
+    then: 角色卡缩略图 = identity_refs/manifest.json 的 source_sheet，角标 = 身份参考脸，悬停写项目方原话；整季运行（runs/<id>/epNN/）按集看、只读、可按集送导入；成片页同时列 data/ab/plan<X>/epNN/*.mp4 等方案成片（标“方案 X”，逐镜试验片不算）
+    evidence:
+      - {src: tests/test_story_runs_uirsi.py, note: test_series_layout_readonly_per_episode}
+      - {src: tests/test_cuts_plans_uirsi.py, note: 方案成片}
+      - {src: data/assets/identity_refs/manifest.json, quote: "林晚A-s202 顾沉s101 陈宇s202脸"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-UI-016
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P4-P5, P10-P11]
+    title: 界面默认只显示当前剧本的东西，旧数据留库不显示；新图未登记前先显示并标明
+    when: 剧本整份替换导入后；出图线产出新图但还没登记成 take
+    then: 资产中心范围默认“当前剧本”（当前剧本 0 集用到的角色 / 形象 / 单品 / 道具 / 场景不显示，“全部（含旧 N）”可看）；成片页把最近一次 replace 导入之前合成的成片默认折叠（merge 导入不算）；/api/story-images 的新首帧 / 设定图先上画布与资产卡，标“新图·未登记”，项目方挑定的身份参考优先
+    evidence:
+      - {src: docs/uirsi/rounds/r8-r10.md, quote: "这次隐藏 87 个"}
+      - {src: tests/test_cuts_plans_uirsi.py, note: test_old_script_cuts_flagged}
+      - {src: tests/test_story_runs_uirsi.py, note: test_story_images_grouped}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-UI-017
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P0-P1, P5-P6, P11-P12]
+    title: UI 打分以项目方真实任务走查为主（任务分 T1–T7 + 技术分 K1–K5），静态排版分降权
+    when: 每轮 RSI
+    then: tasks.mjs 在真界面按 7 个任务逐步点击（只读，提交那一下记“到达提交点 / 闸门”），记点击数、每步等待、首屏、卡住处、报错空白，深色 1440 + 浅色 1280 各跑一遍取平均；score.mjs --tech 由 Resource Timing 算 K1 首屏 / K2 首屏请求 / K3 慢请求 / K4 重复 / K5 图片体积；进展页最上面放 T 和 K
+    evidence:
+      - {src: docs/uirsi/RUBRIC.md, note: 任务分 / 技术分}
+      - {src: docs/uirsi/rounds/r14-r18.md, quote: "界面上没有挑设定图的地方"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-UI-018
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P5-P6, P6-P7, P10-P11]
+    title: 列表 / 格子里的图一律走缩略图，原图只在看大图时取；首屏只取画面要用的数据
+    when: 任何显示多张图的地方（画布格子、片段条、版本链、头像、设定图候选、新首帧）；页面首屏
+    then: 用 thumb(url, w)（/api/thumb 按宽度 120 的倍数生成 JPEG 并缓存，data/ 与 assets/ 下都支持）；首屏外的数据（SOP、整集进度、出图探测、卡状态、场景底图、前后集造型、对白来源）晚 0.7–3 s 再取；同一 GET 正在飞时合并（netDedupe）
+    evidence:
+      - {src: docs/uirsi/rounds/r14-r18.md, quote: "最大一页 41 MB → 2.6 MB"}
+      - {src: tests/test_thumbs_uirsi.py, note: 缓存 / 越界}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-UI-020
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P0-P1, P3-P4, P4-P5, P5-P6, P11-P12]
+    title: 账户登录即本人：项目方闸门一律点选即生效，不再要求原话 / 勾选本人；写操作自动审计
+    when: 任何项目方闸门（挑设定图、定妆、定稿、导入、交付、回滚、保留旧版、LoRA 采用…）
+    then: 界面先登录（data/auth，第一个账户 = 项目方）；后端 AuthMiddleware 按会话认定 by=owner（未登录 / 非项目方声称 by=owner → 403），原话字段没填自动记“<账户> 登录点选”；确认类操作单按钮或点选即生效，可撤销的给 10 秒撤销（showUndo），只有不可逆的点两下但不打字；全部写请求记 data/audit/<日期>.jsonl（用户 / 时间 / 方法 / 路径 / 对象 / 状态），GET /api/audit 可看
+    supersedes: K-UI-019
+    evidence:
+      - {src: services/api/ns_api/auth.py, note: "项目方 2026-10-31 原话：“整一个剧本里面几百个镜头需要我确认，那岂不是我敲几百次字？……我选这个图按一下就可以了……系统是在我 login 的”"}
+      - {src: tests/test_auth_uirsi.py, note: 未登录 403 / 登录通过 / 审计}
+    confidence: high
+    status: 项目方闸门
+    date: 2026-10-31
+  - id: K-UI-021
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P0-P1, P4-P5, P5-P6, P11-P12]
+    title: 界面契约：每类对象都要有 查看 / 预览播放 / 对比 / 一键选定+撤销 / 编辑 / 新增上传 / 删除到回收站 / 版本回滚 / 批量 / 状态 / 出错提示
+    when: 新做或重做任何页面、任何对象卡
+    then: 按 docs/uiaudit/UI_CONTRACT.md 的对象 × 操作矩阵逐格实现；验收只认真实界面点出来（apps/web/e2e/uiaudit/detect.mjs），不认报告；缺后端接口的格子写进契约 §2 由总调度派
+    evidence:
+      - {src: docs/uiaudit/detect_r1.md, note: r1 实测契约覆盖率与缺口}
+      - {src: docs/uiaudit/UI_CONTRACT.md, quote: "需要把 edit 和 delete 的功能全部加上去"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-022
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P4-P5, P11-P12]
+    title: 每页一层主滚动，1280×720 下也能用滚轮滚到底；不许把内容锁在定高卡片里再套滚动
+    when: 任何页面布局（尤其资产中心 / 角色详情 / 画布 / 检查器）
+    then: 页面主体唯一滚动区；侧栏、弹层可各自一层；吸顶 / 固定条合计 ≤ 视口高 15%；无 overflow:hidden 裁掉的正文；detect 的 scroll 步骤（真实滚轮 25×600px）后 lastInView=true、nested=0、lockedCards=[]
+    evidence:
+      - {src: docs/uiaudit/detect_r1.md §滚动, note: 1440×900 与 1280×720 逐页实测}
+      - {src: docs/uiaudit/UI_CONTRACT.md, note: "项目方截图 Screenshot 2026-10-31 234810.png（资产中心林晚页）", quote: "这个交互反人类啊！我连向下滑拖都不太行，我怎么用啊？"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-023
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P5-P6, P8-P9, P11-P12]
+    title: 能听的东西都有 ▶：音色 / 旁白 / 对白 / 配乐统一用 ds/MediaPlayer（PlayButton、AudioPlayer、AudioAB）
+    when: 界面上出现任何声音对象（音色卡、旁白、每句对白、整集 BGM）
+    then: 对象卡上直接 ▶ 试听（全站同一时间只响一个）；换音色用 A/B 同位置切换后"用 A / 用 B"一键生效 + 撤销；sid / voice id 只进详情；文件经 /files/…（data/ 静态挂载，支持 Range）播放
+    evidence:
+      - {src: docs/uiaudit/detect_r1.md, note: "r1 全站 0 个 <audio>；/files/music/ep02.wav、/files/assets/voices/narrator_qag/ref.wav 实测 200"}
+      - {src: docs/uiaudit/UI_CONTRACT.md, quote: "声音模型那边，我需要监听它的播放……我连播放按钮都没有"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-024
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P5-P6, P11-P12]
+    title: 默认显示最新 / 当前版本；流水线新出的图必须作为版本出现在详情里
+    when: 分镜卡缩略图、镜头大图、资产设定图
+    then: 列表和详情读同一个"当前版"来源；不允许列表显示新图、详情却写"还没有首帧 / 0 版"；新出的带"新"角标
+    evidence:
+      - {src: docs/uiaudit/detect_r1.md, note: "ep02 卡片显示“新图·未登记”，点开看大图显示“还没有首帧”，首帧版本 0"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-025
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P5-P6]
+    title: 资产选择一律"点一下即生效 + 10 秒撤销"，不弹原话框；谁、何时、做了什么由系统按登录账户记
+    when: 选身份脸、选造型设定图、单品挂到 / 拿下造型、改单品名、删除单品（进回收站）
+    then: 点候选图 = 立即设为当前；底部提示条带"撤销"（10 秒，倒计时条）；接口返回 prev，撤销 = 用 prev 再调一次；删除走 EDITDEL 回收站，撤销 = restore；操作人取登录会话，写 data/looks/character_hub_log.jsonl 并在人物页"最近操作"显示
+    evidence:
+      - {src: docs/assetux/compare.md §2, quote: "很多事情只有一个确认按钮就可以，甚至不用确认按钮就行了，就是我选这个图按一下就可以了"}
+      - {src: apps/web/e2e/assetux/before_sheet_pick_modal_1440_dark.png, note: "旧版“选这张…”→ 两步确认 + 必填项目方原话"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-026
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P5-P6]
+    title: 资产按"人"组织：一个人一页看全（身份脸 → 3 套造型 → 衣橱单品 → 声音 → 出场 → 记录），左栏只列当前剧的人
+    when: 资产中心默认页、从画布 / 审片跳去看某个角色
+    then: "#/assets 默认打开当前剧第一个人物；造型行 = 当前设定图大图 + 候选 + 部件清单（每个部件标 单品图 / 仅设定图 / 缺图，状态取出图解析器 look_inventory，同一口径）；单品卡上 A/B/C 直接点挂造型；场景 / 风格 / 声音收进左栏下半“其他资产”"
+    evidence:
+      - {src: docs/assetux/compare.md §1, note: "项目方认为更好的旧资产库：左栏人物 + 大图 + 造型槽位"}
+      - {src: docs/assetux/rounds.md r1–r3}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-027
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P5-P6]
+    title: 上传即参考资产：拖拽 / 粘贴 / 选文件三种入口，选类别 + 名称（+ 可选挂造型）一个“添加”按钮完成
+    when: 项目方要把一张图（鞋、衣、饰品、包、身体饰品）加成某个人的资产
+    then: 人物页右上“＋ 添加单品”、衣橱末尾的添加卡、整页拖放、Ctrl+V 粘贴都打开同一个对话框；图存 assets/characters/<cid>/wardrobe/、登记 wardrobe.json（images[0] = 出图用的主参考图）、asset_versions 记 v1；挂造型写 data/looks/item_map_overrides.json，解析器下一次出图即用，不用重启
+    evidence:
+      - {src: docs/assetux/rounds.md r1, quote: "我要添加这个鞋子进去作为资产，我怎么做呀？"}
+      - {src: tests/test_character_hub_assetux.py, note: "上传后 look_inventory 里该部件 status=wardrobe、item_id=新单品"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-028
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P5-P6]
+    title: 新组件的 CSS 前缀先全仓 grep，撞名会把整页裁成小滚动框
+    when: 新建页面 / 组件、起 class 前缀
+    then: 前缀起之前 grep apps/web/src/**/*.css；本次 ph- 和 v3.css 旧弹层 .ph{max-height:70vh;overflow:auto} 撞名，人物页整页被裁成 70vh 内滚动（项目方截图 23:48“我连向下滑拖都不太行”），改成 hub- 后 nested=0
+    evidence:
+      - {src: docs/assetux/rounds.md r2, note: "1280×720 / 1440×900 / 1920×1080 真实滚轮：lastInView=true、notBottom=[]、nested=0"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-029
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P5-P6]
+    title: 提示不只报错：一句人话说明 + 一键解决（主按钮）+ 替代路径（次按钮）
+    when: 任何失败 / 冲突 / 重复 / 被拦的提示（弹框、提示条、表单下方）
+    then: 先说清楚现在是什么情况（不是“错误”就不要用红色）；主按钮直接把事办成（例：图已在库里 → “用这件，挂到造型 B”，旧单品自动进当前衣橱）；次按钮给另一条路（“仍作为新单品添加（另起名）”）；网络 / 接口失败至少带“再试一次”并说明“数据没改动”；名称等字段不用文件名填，用已有名字或看图起的人话名（可改）
+    evidence:
+      - {src: docs/assetux/error_ways_out.md, quote: "这里的报错，我不知道怎么样修改呀？这个是逻辑上的问题吗？我想添加一些衣服到我的库里面去。"}
+      - {src: tests/test_character_hub_assetux.py, note: "test_duplicate_image_is_not_an_error_use_existing_or_force"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-030
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P5-P6]
+    title: 改版前先列“旧版功能清单”，新版逐项对照；不许静默删除功能
+    when: 任何页面 / 组件改版、换视图、归档旧代码、把内容收进折叠
+    then: 动手前把旧版逐项列出（看得到的字段、按钮 / 操作、视图、对比、过滤、批量、快捷键、提示），写进本轮 rounds 文档；新版逐项标“保留（新位置）/ 换位置 / 收起（怎么打开）/ 删除（谁同意的）”；删除必须有项目方或总调度原话，否则只能新增视图、不能替换；旧的完整视图保留为默认或一键可切；交付前对比上一轮同页截图，少了的东西要能说出去哪了
+    evidence:
+      - {src: apps/web/src/v3/pages/ScriptFullRows.tsx, note: "项目方 2026-11-01 原话（总调度转）：“剧本的页面你改坏了！之前还有很多细节的，现在你都把它给删了。之前起码有前后帧，还有视频，这样一大堆的逻辑都在，现在你又把它给搞没了。”——剧本页恢复为默认“每镜完整一行”（与画布同一 ReviewRow），阅读模式改为第二视图"}
+      - {src: docs/uiaudit/UI_CONTRACT.md, note: "全站必检项 G10 功能不回退"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-031
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P5-P6]
+    title: 前端改动不得让开发服务器出现报错层：先建文件、tsc 通过，再改路由 / 引用
+    when: 新增页面 / 组件、改 import、改路由表（App.tsx、TopBarV3）
+    then: 顺序固定——先写被引用的文件，跑 npx tsc -b --noEmit 通过，最后才改引用它的路由 / import；每次保存前跑 tsc；交付前 detect 里查“vite 报错层 / 白屏”=0
+    evidence:
+      - {src: apps/web/src/v3/pages/SeasonPage.tsx, note: "2026-11-01 先在 App.tsx 加了 #/overview 路由、几分钟后才建 SeasonPage.tsx，开发服务器整站被 vite 报错层盖住，项目方截图发现（总调度临时放了占位文件）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-032
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P5-P6]
+    title: 新页依赖的后端接口先上线、再放出前端入口；接口还没启用时页面写人话并自动重试
+    when: 新页面 / 新功能要用新的后端接口（需要重启 :8800 才生效）
+    then: 先写接口 + pytest，等 /api/jobs 空闲按标准命令重启 :8800，确认接口 200，再加路由 / 菜单入口；万一接口 404，页面不显示“HTTP 404 / 技术细节”，写“XX 正在启用，约 1 分钟”，15 秒自动再试
+    evidence:
+      - {src: apps/web/src/v3/pages/SeasonPage.tsx, note: "2026-11-01 项目方截图：#/overview 显示“后台还没有这项功能 HTTP 404”（/api/season 写好了但 :8800 有项目方的重出首帧任务在跑、没能重启）"}
+      - {src: tests/test_season_uirsi.py, note: 接口测试}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+
+  - id: K-UI-P10
+    check: apps/web/e2e/uipixel/scan.mjs
+    domain: ui
+    link: [P5-P6]
+    title: 图 / 视频格子上的多个标签放进同一条 flex 底栏，不许各自 absolute 叠放
+    when: 任何图 / 视频 / 卡片格子要在图上叠状态牌、任务进度、提示、操作按钮（审片行首帧 / 尾帧 / 视频格、精修大格、候选格等）
+    then: 一个角落只放一个定位容器——底边用 ds/TileBar（job 一行在上；状态牌 + 操作一行，flex + gap），左上角用 ds/TileTop（一列）；状态牌单行省略号 + title 看全文；格子 < 180px 宽时操作收进 ⋯ 菜单（按钮一个不删）；右上角留给放大镜（ds/ZoomLayer）；交付前 scan.mjs --kinds=overlap 三种宽度 overlap=0（⤴ r36 补充，K-UI-037：审片帧格的“↻ 再生成”不另起定位容器，放在 TileTop 这一行的右端 = 帧格右上角、下移 10px 让开悬停放大镜；放大镜仍挂在图右上角外沿）
+    evidence:
+      - {src: apps/web/e2e/uipixel/tilebar/before_ep01_first4.png, note: "项目方 11-01 截图同款：78px 宽的首帧格底边“渲染中 / 过期·需重出 / ✎ 改 / 🗑”四个 absolute 元素压在一起"}
+      - {src: apps/web/e2e/uipixel/tilebar/after_ep01_first4.png, note: "改用 TileBar 后：任务条一行、状态牌省略号、操作收进 ⋯，无重叠"}
+      - {src: apps/web/e2e/uipixel/check.js, note: "§11 重叠检测：文字字形盒 / 控件盒相交 >2px 记 overlap"}
+      - {src: docs/uiaudit/UI_CONTRACT.md, note: "全站必检项 G12"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-D01
+    domain: ui
+    link: [P4-P5, P4-P6, P5-P6]
+    title: 镜头卡上的每个字段必须等于后端源数据；人物 / 造型 / 脸与出图同源，不得用关键词猜、不得兜底编值
+    when: 任何页面显示逐镜字段（人物头像、造型字母 A/B/C、场景、剧本 / 对白、时长、首尾帧 / 视频、计数），或新增 / 改动这些字段的接口与绑定
+    then: 逐镜人选 = 剧本本镜 **人物** 行（在画 / 局部）；造型字母 = 资产中心整集排期 > <run>/assets/shot_looks.json 登记（ns_api.shot_cast，与 asset_refs.resolve_shot 同口径）；脸 = asset_refs.face_of；数据缺失时显示“?”/“未登记”，不兜底成 A；字段→接口→源文件写进 docs/DATA_MAP.md；改动前端或接口后跑 tools/qa/data_parity.py（iter_gate D1），退出码 0 才算完成；源里各镜不同的字段，界面不得整集一样（D-VARY）
+    check: tools/qa/data_parity.py
+    evidence:
+      - {src: docs/DATA_MAP.md, note: 对齐契约（字段 → 接口 → 源文件）}
+      - {src: services/api/ns_api/shot_cast.py, note: 人物 / 造型 / 脸与出图同源}
+      - {src: apps/web/src/v3/LeftRail.tsx, quote: "c.look_label || \"A\""}
+      - {src: docs/DATA_MAP.md §1, quote: "S1、S2、S3、S4 … 你都是一模一样"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-033
+    domain: ui
+    link: [P5-P6]
+    title: 资产中心不列、不链接隔离区的东西；人物只认当前剧演员表
+    when: 资产中心任何视图（人物列表、卡片总览、场景、LoRA 总表、音色）在 RECALL 把旧剧资产移进 data/_quarantine_<日期>/ 之后
+    then: 前端读 GET /api/asset-quarantine（moves.jsonl 里 status=moved 的文件名 / 目录名）过滤卡片和 LoRA 行；人物相关卡片只认人物资产页的演员表（series10 P1：林晚、顾沉、陈宇、阿岚），旧接口还列着的旧演员也不显示；“全部”选项不再写“含旧”
+    check: tests/test_character_hub_assetux.py
+    evidence:
+      - {src: data/_quarantine_20261101/MANIFEST.md, note: "旧 60 集场景 7 个、外国演员音色快照 4 个、lin_wan_qi LoRA 已移入隔离区；/api/assets/characters 仍列 alex/ryan/kai/leo（11-01 实测；⤴ 已由 RECALL 改 ns_schema/looks.py 读 series10 演员表修正）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-M01
+    domain: ui
+    link: [P5-P6]
+    title: 全站每张小于 160px 的图都能点开看原图大图（G11；项目方 11-01："我点这个小图标可以放大……把全部类似的地方都改一下"）
+    when: 任何页面出现 < 160px 的 img（人物 / 场景小卡、衣橱单品格、设定图槽、参考槽、资产卡、候选条、总览镜头格、回收站、音色头像）
+    then: 统一走 apps/web/src/ds/ZoomLayer.tsx（main.tsx 挂一次），不在各组件自写放大框；小图本身不可点 → 直接点开；原来点了有别的作用 → 原作用不变，悬停出放大镜 / Alt+点 / 焦点上按 Z；大图显示原图（不是 /api/thumb 缩略图）、这是什么（data-zoom-label，如“林晚 · 造型A · 鞋”）和文件名；Esc 关、←/→ 翻同组、滚轮缩放、拖动平移；不需要放大的图加 data-nozoom
+    check: apps/web/e2e/uimaster/crawl.mjs
+    evidence:
+      - {src: docs/uimaster/shots/g11/canvas_chip_zoom_1440_dark.jpg, note: 人物小卡打开大图（1440 深色）}
+      - {src: docs/uimaster/shots/g11/assets_wardrobe_zoom_1440_dark.jpg, note: 衣橱格打开大图（1440 深色）}
+      - {src: apps/web/e2e/uimaster/crawl.mjs, note: "zoomCheck：每页抽 10 张小图悬停必须出放大镜，Alt+点必须打开 .zl-box、原图 naturalWidth>0、不是 /api/thumb、Esc 关闭；否则记 g11_* 问题"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-034
+    domain: ui
+    link: [P5-P6]
+    title: 前端文件一律经 safe_write 写回：语法检查过了才原子替换，半成品不落盘（不许出 vite 报错层）
+    when: 改 apps/web/src 下任何 .ts / .tsx / .css（尤其是脚本里拼字符串、分几步替换的改法）
+    then: 新内容先写到临时文件，python apps/web/e2e/uirsi/safe_write.py <目标> <新内容>（vite 自带 oxc 转换器查语法，过了才 os.replace）；不要在目标文件上分几次 Edit / 字符串替换；改完再跑 npx tsc -b --noEmit
+    check: apps/web/e2e/uirsi/safe_write.py
+    evidence:
+      - {src: docs/uimaster/shots/iter002/shell_1440_dark.jpg, note: "UM-0001：StageProgress.tsx 第 81 行字符串没闭合，全站报错层 / 白屏约 30 秒（11-01 02:2x）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-035
+    domain: ui
+    link: [P5-P6]
+    title: 实时刷新只对真变了的最小一块做渐变提示：按值比较、3 秒合并、首次 / 占位不提示、淡色渐入渐出不改布局
+    when: 任何板块订阅实时事件（/api/events SSE，ns_api/live.py）后重取数据
+    then: 用 apps/web/src/v3/live.ts 的 useLiveEvent 只重取自己这一块（不整页刷新、不清空旧内容、不换 key）；提示用 useFlash（值的 JSON 比较，null / 占位 → 首次数据只算初始化；同一块 3 秒内只放一次）+ ds/live.css 的 live-flash（约 10% 强调色，0.4 秒渐入、约 1.8 秒渐出，只用 inset box-shadow）；加在单镜卡 / 单个进度段 / 单行，不加在整集或整页；进度数字统一来自 GET /api/progress（与集摘要同一口径）
+    check: apps/web/e2e/uirsi/live_demo.mjs
+    evidence:
+      - {src: apps/web/e2e/uirsi/livecard_log_dark.json, note: "临时目录改第 2 集第 3 镜首帧：只有这 1 格 + 2 个“首帧”进度段渐变，邻居不动；之后 live-flash=0"}
+      - {src: tests/test_live_uirsi.py, note: 扫描器事件分类 + 进度计数}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-P11
+    check: apps/web/e2e/uipixel/scan.mjs
+    domain: ui
+    link: [P5-P6]
+    title: 所有可点元素都有手型、悬停、按下反馈和键盘焦点环；全局兜底用 :where()，不抢组件自己的样式
+    when: 新增或改动按钮、链接、页签、summary、下拉、勾选框
+    then: 全局兜底在 ds/ds.css（批次 A）——cursor:pointer（看大图允许 zoom-in）、悬停 currentColor 7% 内阴影、按下 14% + 下沉 1px、:focus-visible 焦点环；选中态自带阴影的用亮度变化；交付前 scan.mjs --kinds=hover,active,focus,cursor 只剩组件自己的例外
+    evidence:
+      - {src: apps/web/e2e/uipixel/bA0/scan.json, note: "改前：缺悬停 37 种、无手型 8 种（CSS.forcePseudoState 量 computed style）"}
+      - {src: apps/web/e2e/uipixel/bA1/scan.json, note: "改后：缺悬停 4、无手型 3（剩资产中心，交 ASSETUX 已改）"}
+      - {src: docs/uiaudit/verify_uipixel_bA.md, note: "UIAUDIT 复核：4 页 181 个可点元素 cursor 非 pointer 0"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-P12
+    check: apps/web/e2e/uipixel/scan.mjs
+    domain: ui
+    link: [P5-P6]
+    title: 可点区域至少 24px（目标 28px）；小控件用 ::before 外扩点击区，不改外观
+    when: 按钮 / 链接 / summary / 行间分隔按钮高度或宽度不足 24px
+    then: 高度只用 token（--h-xs 24 / --h-s 28 / --h-m 34），26 / 23 这类刻度外高度统一；视觉上必须小的（xs 按钮、logo、⋯、文字链接）加 position:relative + ::before{inset:负值} 扩到 ≥28；summary 至少 24px；scan.mjs 的 hit 严重级（<24）= 0
+    evidence:
+      - {src: apps/web/e2e/uipixel/bA1/scan.json, note: "点击区 <24 的严重项 17 → 3（剩 2 个已交 ASSETUX / PW-006 修好）"}
+      - {src: docs/uimaster/LOCKS.md, note: "UIMASTER crawl px_hit 4 处（logo 22×22、旧图 22、summary 23、未检查 14）已修"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-P13
+    check: apps/web/e2e/uipixel/scan.mjs
+    domain: ui
+    link: [P5-P6]
+    title: 表单项“标签 | 控件”同一条中线，说明文字和标签同一条左边线
+    when: 一行里有文字标签 + 下拉 / 输入框，下面还有一行说明（如精修“用卡”）
+    then: 用两列网格（max-content | 1fr，align-items:center），控件外包一层时用 display:contents 展开；说明 grid-column:1/-1；控件不另加 margin-left；scan.mjs vcenter / align 在这些表单项上 = 0
+    evidence:
+      - {src: apps/web/e2e/uipixel/batches/bB_before_edit_1280.png, note: "项目方截图同款：用卡文字中线比下拉低 17.2px，说明比标签缩进 28px"}
+      - {src: apps/web/e2e/uipixel/batches/bB_after_edit_1280.png, note: "改后中线差 0、左边线差 0"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-P14
+    check: apps/web/e2e/uipixel/scan.mjs
+    domain: ui
+    link: [P5-P6]
+    title: 同一行卡片等高、顶对齐；卡片之间的连接符对准图片中线
+    when: 横排卡片（全剧总览每集一行、分镜条等），个别卡多一个标签（如“换装”）
+    then: 行容器 align-items:stretch，卡内可变内容（标签、人物行）margin-top:auto 贴底，不撑高单张卡；连接符固定行高并按图片中线算 margin-top；scan.mjs rowcard = 0（顶边 / 高度差 ≤0.5px）
+    evidence:
+      - {src: apps/web/e2e/uipixel/batches/bC_before_overview_1440.png, note: "总调度审 r31：ep02 S6 高 2px、顶边差 0.9px，“┃”偏 8.7px"}
+      - {src: apps/web/e2e/uipixel/batches/bC_after_overview_1440.png, note: "改后 rowcard 5 → 0"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-P15
+    check: apps/web/e2e/uipixel/scan.mjs
+    domain: ui
+    link: [P5-P6]
+    title: 界面不显示文件路径 / 内部 id / 内部词；进度时间不自相矛盾
+    when: 显示场景、资产、卡的状态、任务用时
+    then: 场景显示场景名（v3/sceneLabel.ts，资产库名字优先，没名字按词拼中文），路径只放 title；“外部任务”写“其他任务占用”；用时超过预计时写“已 X，比预计（约 Y）慢”，不并列“已 4 分钟 / 预计约 51 秒”；scan.mjs copy / logic = 0
+    evidence:
+      - {src: apps/web/src/v3/edit/RefBar.tsx, note: "项目方截图：场景卡显示 sk_office_night/plate.png"}
+      - {src: apps/web/src/v3/edit/JobStrip.tsx, note: "项目方截图：已 4 分钟 / 预计约 51 秒"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-M02
+    domain: ui
+    link: [P5-P6]
+    title: 前端文件写回要“语法 + 类型”双检，不过就自动回滚（防 vite 报错层和运行时 ReferenceError）
+    when: 任何 agent 改 apps/web/src 下的 .ts / .tsx
+    then: 用 apps/web/e2e/uimaster/safe_edit.sh 写回（先 safe_write.py 用 vite oxc 查语法，再 npx tsc --noEmit；任一不过就恢复原文件）；不许分几次 Edit 让半成品落盘
+    check: apps/web/e2e/uimaster/safe_edit.sh
+    evidence:
+      - {src: docs/uimaster/rounds/r2.md, note: "UM-0001：StageProgress.tsx 半成品存盘，全站 vite 报错层"}
+      - {src: docs/uimaster/rounds/r3.md, note: "safe_write 只查语法，漏 import 只有 tsc 能抓到（TS2304）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-P16
+    check: apps/web/e2e/uipixel/scan.mjs
+    domain: ui
+    link: [P5-P6]
+    title: 吸顶条所在的滚动区要留出 scroll-padding-top，键盘聚焦 / 跳转的控件不能落在吸顶条下面
+    when: 页面里有 position:sticky; top≈0 的横向吸顶条（步骤条、页内锚点条、表头）
+    then: 滚动容器 scroll-padding-top ≥ 吸顶条露出的高度（实测各宽度取最大，+8px）；吸顶条不透明底 + z-index:var(--z-sticky)，滚到下面的正文看不见也点不到；scan.mjs 的 sticky = 0
+    evidence:
+      - {src: apps/web/e2e/uipixel/batches/sticky_focus.js, note: "剧本页“暂停”：scroll-padding-top 72px 后，聚焦落在步骤条下面，elementFromPoint 命中自己（1280 / 1440）"}
+      - {src: docs/uiaudit/verify_uipixel_bH.md, note: "总调度 11-01 判定吸顶条盖住可滚到的控件属于 G4"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-036
+    check: apps/web/src/v3/status.ts
+    check_note: isSysText / gapText；docs/uimaster/issues.json 的 sys_text 类问题 = 0
+    domain: ui
+    link: [P5-P6]
+    title: 后端阻塞原因进正文前先过人话层——文件路径、内部文件名、规则代号一律不进正文，放技术细节
+    when: 集头 / 顶栏 / 状态胶囊显示后端给的阻塞原因（SOP blockers、readiness、状态表过期等），且后端可能新增原因类别
+    then: gapText 把已知类别改写成人话（例：状态表过期 → “人物造型 / 单品对照表有更新，系统正在刷新”）；isSysText 的兜底正则覆盖文件路径与文件名（.json/.yaml/.py/.md、xxx_overrides、a/b.ext），没改写到的新类别归“系统检查中”，不原样显示；正则里不许出现不可见控制字符（曾有 0x08 混进 \b，使“G3”过滤失效）
+    evidence:
+      - {src: docs/uimaster/issues.json, note: "UM-0585…0588、0591、0592：“8 镜待补：状态表过期（looks/face_overrides.json、…item_map_overrides…）”"}
+      - {src: apps/web/src/v3/status.ts, note: "SYS_RE 里 G 前面是 0x08 字节（本该是单词边界），G3 字样从未被拦；11-01 修正"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-037
+    check: tests/test_ui_copy_uirsi.py
+    domain: ui
+    link: [P5-P6]
+    title: 后端给的标签 / 提示先过人话层再进正文——流水线内部记录（agent 名、登记过程、文件名）、接口路径、端口一律不显示；窄格里的操作按钮不压人物脸
+    when: 画布格子显示后端 takes 的 params.label（流水线登记时写的，例如“ASSETMASTER 已出（PRODUCER 接手登记）”），或页面加载失败时给提示，或在约 78px 宽的帧格顶部放常驻按钮
+    then: 候选标签统一经 candidates.ts plainLabel（按“·”拆段，含 ≥5 连续大写字母的内部代号、“接手 / 登记”、文件名的段丢掉），candLabel 和候选弹窗缩略条都用它；LoadError 的 hint 只写“后台恢复后会怎样 / 现在能做什么”，不写 /api/…、:8800、data/…；列表读不到时主区不放一直转的骨架，改成一句话 + 能做的按钮；画布帧格里的“↻ 再生成”只露“↻”（文字视觉隐藏，读屏和文字查找仍是“↻ 再生成”），位置（总调度 11-01 r36 定，⤴ 取代“交 UIPIXEL”）：TileTop 在审片帧格里改一行，标签只写“首帧 / 尾帧 #n”（“候选”写进候选条和悬停提示），↻ 靠右 = 帧格右上角、下移 10px 让开放大镜；帧格 78px 宽不动；全站 LoadError 的 hint / 按钮 why 也不写接口路径、端口、“等 API 重启”；r37（总调度选 A，⤴ 补充 r36）：画布审片行窄帧格（.v3-rows:not(.sf-fullrows)）的标签和 ↻ 平时不显示（opacity 0、点不到），鼠标悬停或键盘聚焦到格子才出现；剧本页宽格和触屏照常常显示；↻ 位置仍是右上角
+    evidence:
+      - {src: apps/web/e2e/uirsi/r36d_crop_frames.png, note: "r36：↻ 在帧格右上角（右 5px、上 15px），ep01 / ep02 / 剧本页各 14 个，压标签 0（probe 实测）"}
+      - {src: apps/web/e2e/uirsi/r35a_canvas2_1440_dark.png, note: "改前：ep02 S1 尾帧格底下“暂定 · ASS…”（全文“暂定 · ASSETMASTER 已出（PRODUCER 接手登记）”，/api/candidates?ep=2 有 17 张这样的标签）；“↻ 再生成”整条压在首帧人物脸上"}
+      - {src: apps/web/e2e/uirsi/r35b_crop_frames.png, note: "改后：只显示“暂定”；↻ 22px 宽，按钮文字仍是“↻ 再生成”"}
+      - {src: apps/web/e2e/uirsi/r35_down_cut.png, note: "后端连不上时成片页提示“成片文件在 data/episodes/”"}
+      - {src: apps/web/e2e/uirsi/r35b_down_script.png, note: "后端连不上时剧本页主区一直是骨架"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-038
+    check: apps/web/e2e/uiaudit/parity2_check.mjs
+    check_note: detect.mjs 步骤 {parity2:"名"}；flows_parity_s10_slow.json 跑全部 10 集（UIRSI r37 按总调度授权代改：check 只留路径）
+    domain: ui
+    link: [P5-P6]
+    title: 画布逐格内容断言：每镜 首帧 / 尾帧 / 视频 格显示的文件和版号 = 后端这一镜的当前版本（没有当前时 = 最新合格候选，且标“候选”）
+    when: 任何改动画布 / 剧本页镜头行（ReviewRow、candidates、帧格标签）或改 takes / candidates 接口之后；离线并回数据之后
+    then: 逐格比对文件路径（去 ?v=）与版号，后端没有而界面有图、后端有而界面写“未出”、版号不同、候选没标、两镜同一文件都算不一致；只测首帧格“是不是这一镜的图”（旧 parity_check.mjs）不够——候选 / 当前 / 版号错了也能过。页面要等候选接口返回后再取样（实测 9 s 时 ep04–ep10 有 14 格还写“未出”，25 s 后 180/181 一致）
+    evidence:
+      - {src: apps/web/e2e/uiaudit/r20_parity2.md, note: "9 s 取样：一致 211 / 不一致 14（全是候选还没显示，界面写“未出”）"}
+      - {src: apps/web/e2e/uiaudit/r20q_parity2.md, note: "25 s 取样：一致 180 / 不一致 1（ep05-S5 取样后 16:46:13 后端换了当前版本，属竞态，非界面错）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-039
+    check: tests/test_ui_copy_uirsi.py
+    domain: ui
+    link: [P5-P6]
+    title: 取数还没回来或请求失败，不能显示成“没有”——读取中写“读取中”，失败写“读不到 + 重试”，只有后端说没有才写“未出 / 无底图”
+    when: 界面按某个接口结果显示“有 / 没有”（画布候选首尾帧、场景底图、参考图、视频、计数）
+    then: 状态分三态：undefined / null 前端在读 → “读取中…”；请求失败 → “读不到”（失败不缓存，下次再取）；后端明确返回空 → “未出 / 无底图”。画布 ReviewRow：candLoading（useCandidates 还是 null）→“读取中…”；plateUrl 失败返回 false →“读不到”，不再落到“无底图”。（UIRSI r37 收编 UIAUDIT inbox 草案 K-UI-D01；原 id 已被 DATAALIGN 的数据对齐规则占用，改号 K-UI-039）
+    evidence:
+      - {src: docs/uiaudit/verify_uirsi_r35_r36.md, note: "P1-2：ep04–ep10 9 s 取样 14 格写“首帧未出”，后端有合格候选；P0-A：/refs 500 时场景小卡写“无底图”"}
+      - {src: knowledge/inbox/2026-11-01_uiaudit_r20.yaml, note: "UIAUDIT 草案 K-UI-D01（本条收编）"}
+      - {src: docs/uirsi/rounds/r37.md, note: "改后 ep08 8 s 取样：底图 7 格 data-plate=loading、0 格误写“无底图”"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-040
+    check: tests/test_ui_copy_uirsi.py
+    domain: ui
+    link: [P5-P6]
+    title: 格子自己有点击动作时显式标 data-zoom-own，全站放大层不再靠 cursor 猜“可不可点”
+    when: 图 / 视频格子用 React onClick 处理点击（打开候选对比、全屏对比、看版本），而格子的 cursor 是 zoom-in（K-UI-P 允许）
+    then: 格子根元素加 data-zoom-own；ds/ZoomLayer 把它算作“有自己的点击”：鼠标点 = 格子的动作，悬停右上角放大镜 / Alt+点 / Tab 到小图 Enter 或 Z 仍开大图（G11 不变）；不要用 data-nozoom（那会连放大镜一起关掉）
+    evidence:
+      - {src: docs/uiaudit/verify_uirsi_r35_r36.md, note: "P1-1：真实鼠标点候选格出来的是放大框，候选对比弹窗打不开；合成 click 能打开"}
+      - {src: apps/web/e2e/uiaudit/uirsi37_detect.json, note: "r37 改后：flows_r37 R37_candbox_real 真实鼠标 → cand=true、zoom=false；click.mjs Alt+点 → 大图框“S1 · 尾帧 #4 · 候选”；悬停 → 放大镜出现"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-UI-041
+    check: tests/test_ui_copy_uirsi.py
+    domain: ui
+    link: [P5-P6]
+    title: 人物中心“设为身份脸”只接受脸部裁切——前端先认出明显不是脸部裁切的候选，点了只给说明不调接口；后端 422 是最后一道
+    when: 人物中心身份脸候选里有整张设定图 / 半身图（项目方 11-01 17:2x：“只是嫌画质差”，L-086；后端 character_hub.face_crop_check）
+    then: PeopleHub 的 setFace（候选图点击和 Verdict“用这张”共用）先过 cropWhy：后端候选带 crop_ok / crop_why 就以后端为准，否则按图的宽高比（0.6–1.6，与后端 FACE_CROP_ASPECT 同口径）判；不是脸部裁切 → 悬停写“不是脸部裁切”、点了提示原因和“整张设定图先裁出脸部”，不发请求；按钮、放大镜、↻ 再生成都保留
+    evidence:
+      - {src: services/api/ns_api/character_hub.py, note: "set_face：face_crop_check 不过 → 422“身份脸只接受脸部裁切”"}
+      - {src: docs/uirsi/rounds/r37.md, note: "林晚 4 个候选：ar-f9519334bc（宽高比 1.77）标“不是脸部裁切”，真实鼠标点了只出提示、拦截写请求 0"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01

@@ -1,0 +1,161 @@
+# H3 提示词格式（官方 base-en / ref-en + 社区硬规则）。writer_text 进写作知识包；编译器 ns_recipes.prompt / lint 实现。
+rules:
+  - id: K-PRM-001
+    domain: prompt
+    link: P4-P7
+    title: I2VA 第一行逐字官方句，正文用 <Picture 1>，不得出现 Picture 2
+    when: 只给首帧（默认）
+    then: 编译器自动换第一行、删 Picture 2 收尾子句、Picture 1 → <Picture 1>；lint RL-A1/A4/A5
+    targets: [{kind: writer_prompt, section: H3 正文}]
+    writer_text: 照旧写 FL2VA 四块；“… settles into … established by Picture 2 at the end of the shot.” 单独成一个子句，前面的动作句写完整（系统只给首帧时会删掉这个子句，其余一字不改）。
+    evidence:
+      - {src: docs/ep02_iter/h3_official_conformance.md §1 B3, quote: "引用了一张没有送进去的图"}
+      - {src: data/ab/owner_workflows/minimax_h3_official_skills/h3-prompt-writing/references/base-en.txt §2.1, quote: "<Picture 1> (from [Shot 1]) is fully referenced."}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-PRM-002
+    domain: prompt
+    link: P4-P7
+    title: overall_soundscape 必写（H3 不会处理静音）
+    when: 所有 H3 提示词
+    then: 1–4 句英文环境 / 动作 / 非语言人声；不写 N/A；lint RL-S1 block
+    targets: [{kind: writer_prompt, section: 声音}]
+    writer_text: 【H3 audio】和 overall_soundscape 每镜必写 1–4 句英文，即使安静也写出环境底噪（空调声、远处车流等），不写 N/A。
+    evidence:
+      - {src: docs/ep02_iter/h3_comfy_expert.md §0 第 10 条, quote: "It does NOT do silence well"}
+    confidence: medium
+    status: 确认
+    date: 2026-10-31
+  - id: K-PRM-003
+    domain: prompt
+    link: P4-P7
+    title: </d> 前要有句末标点
+    when: 每句台词
+    then: 台词原文以句末标点结尾；缺了 lint RL-D1 提示，不改台词
+    targets: [{kind: writer_prompt, section: 声音}]
+    writer_text: 每句台词（**对白** 与 <d> 内）以句末标点结尾（。！？…），否则 H3 开头容易出乱语。
+    evidence:
+      - {src: docs/ep02_iter/h3_comfy_expert.md §0 第 10 条, quote: "</d> 前一定要有句号"}
+    confidence: medium
+    status: 建议
+    experiment: E10
+    date: 2026-10-31
+  - id: K-PRM-004
+    domain: prompt
+    link: P4-P7
+    title: 在画但不说话的人写 silently
+    when: 对话镜里有不发声的在画角色
+    then: 正文里给不说话的人加 silently，减少嘴乱动
+    targets: [{kind: writer_prompt, section: 声音}]
+    writer_text: 同一镜里在画但不说话的人，在 H3 正文里写他 / 她 silently 做什么（例：listens silently），不给编号。
+    evidence:
+      - {src: docs/ep02_iter/h3_comfy_expert.md §0 第 10 条, quote: "不说话的人写 silently"}
+    confidence: medium
+    status: 建议
+    experiment: E10
+    date: 2026-10-31
+  - id: K-PRM-005
+    domain: prompt
+    link: P4-P7
+    title: 画外音官方写法 + lips completely closed 紧跟 </d>
+    when: 画外台词（不是 🎙 独白）
+    then: (S1) says in an off-screen voiceover <d>…</d> while her/his lips remain completely closed.
+    targets: [{kind: writer_prompt, section: 声音}]
+    writer_text: '画外台词写成 `(S1) says in an off-screen voiceover: <d>[Chinese] …</d> while her lips remain completely closed.`（他用 his），不再单独另起一句。'
+    evidence:
+      - {src: docs/ep02_iter/h3_official_conformance.md §1 B13, quote: "紧跟在 </d> 后"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-PRM-006
+    domain: prompt
+    link: P4-P7
+    title: 画面可见文字用英文双引号原样写
+    when: 招牌、屏幕、霓虹等真实可见文字
+    then: 正文里 `A red neon sign reading "营业中" glows…`；<d> 内台词不加引号
+    targets: [{kind: writer_prompt, section: H3 正文}]
+    writer_text: 画面里真实可见的文字（招牌、屏幕字、霓虹）在 H3 正文里用英文双引号原样写一次；没有可见文字就别写引号。
+    evidence:
+      - {src: docs/ep02_iter/h3_official_conformance.md §1 B15, quote: "可见文字按官方格式用引号"}
+    confidence: high
+    status: 建议
+    date: 2026-10-31
+  - id: K-PRM-007
+    domain: prompt
+    link: P4-P7
+    title: 不写否定 / 禁止清单（cfg 1，否定会把概念写进去）
+    when: 所有 H3 提示词
+    then: <d> 外不出现 no/not/without/avoid…；lint RL-N1
+    targets: [{kind: writer_prompt, section: H3 正文}]
+    writer_text: H3 正文只写画面里有什么，不写 Avoid / no / without 清单（模型 cfg=1，否定词会把被否定的东西画出来）。
+    evidence:
+      - {src: docs/ep02_iter/h3_comfy_expert.md §6, quote: "Ban lists add the unwanted concepts"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-PRM-008
+    domain: prompt
+    link: P4-P7
+    title: 配乐只写乐器 / 速度 / 节奏 / 强弱，不解释作用
+    when: non_diegetic_music
+    then: 不写 providing … layer、restrained、atmosphere 等作用 / 情绪词
+    targets: [{kind: writer_prompt, section: 声音}]
+    writer_text: non_diegetic_music 只写乐器、速度、节奏、强弱变化；不写 “providing a … background layer”、restrained、atmosphere 这类解释作用或情绪的词。
+    evidence:
+      - {src: docs/ep02_iter/h3_official_conformance.md §1 B17, quote: "10/11 镜都是 …providing a restrained…"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-PRM-009
+    domain: prompt
+    link: P4-P7
+    title: FL2VA / I2VA 正文写动作路径，不复述静帧
+    when: H3 正文
+    then: 首帧状态 → 动作起点 → 中间变化 → 结果；动作带力度（turns sharply / at fast speed）
+    targets: [{kind: writer_prompt, section: H3 正文}]
+    writer_text: H3 正文写“从首帧开始发生了什么”：至少 2 个看得见的身体动作或表情变化，按时间顺序；需要快时直接写力度（sharply、at fast speed），不要只写 maintain / remain 之类的保持状态。
+    evidence:
+      - {src: docs/ep02_iter/h3_official_conformance.md §1 B8, quote: "这 5 镜都是静止镜头"}
+      - {src: docs/ep02_iter/h3_comfy_expert.md §5 动作慢 / 漂浮, quote: "energetic and rapid jump"}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-PRM-010
+    domain: prompt
+    link: [P3-P4, P4-P7]
+    title: 锚点句逐字包含人物表 EN外貌短语（含族裔），说话人首现逐字包含 VOICE（含 Mandarin）
+    when: 所有在画角色 / 说话人
+    then: lint RL-X1；Ref2VA 靠找到 EN 短语挂 <Subject N>；重试锚点句复用
+    targets: [{kind: writer_prompt, section: 身份锚点}]
+    writer_text: 锚点句（第一句）逐字包含每个在画角色的人物表 EN外貌短语（含族裔、年龄、发型）；说话人第一次开口的那句逐字包含其 VOICE 短语，VOICE 必须写明 Mandarin。
+    evidence:
+      - {src: docs/ep02_iter/h3_official_conformance.md §1 B10/B18, quote: "男声…没有语种 / 口音"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-PRM-011
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: prompt
+    link: P4-P7
+    title: Ref2VA 用官方六段，detailed_description 350–500 词
+    when: Ref2VA 配方
+    then: subject_definitions / summary / retention_analysis / detailed_description / overall_soundscape / non_diegetic_music；编译器确定性生成结构句
+    evidence:
+      - {src: docs/ep02_iter/h3_official_conformance.md §2 R1/R8, quote: "换成官方六段"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-PRM-012
+    domain: prompt
+    link: P4-P7
+    title: 不写人名、触发词；一镜一个官方运镜词
+    when: H3 正文
+    then: 人物用 (S1)+外貌指代；运镜用官方词表写成句中动作
+    targets: [{kind: writer_prompt, section: H3 正文}]
+    writer_text: H3 正文不写人名和触发词（lnwan01 等）；每镜一个官方运镜，写成句中动作（The camera pushes in with small amplitude at slow speed as …）。
+    evidence:
+      - {src: docs/ep02_iter/refactor_proposal.md §3.2, quote: "不出现人名（H3 不认识名字）"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31

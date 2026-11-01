@@ -1,0 +1,1 @@
+[{"id":"D2b_ep01s1","title":"ep01-S1","path":"/#ep01-S1","wait":8000,"steps":[{"click":"精修","after":5000},{"js":"const t=document.body.innerText; return {stale:(t.match(/[^\\n]{0,20}过期·需重出[^\\n]{0,20}/g)||[]).slice(0,5), cur:(t.match(/当前 #\\d+/g)||[]).slice(0,3)}"},{"shot":"a"}]}]

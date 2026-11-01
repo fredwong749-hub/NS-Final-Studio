@@ -1,0 +1,185 @@
+# 自动迭代规则（生成 tools/iterate_loop/rules.yaml）。顺序 = 匹配优先级。阶梯动作见 tools/iterate_loop/rules.py。
+rules:
+  - id: K-LOOP-001
+    domain: loop
+    link: [P3-P4, P4-P7]
+    title: 对白 / 独白溢出镜长 → 不出片，交写作方
+    when: Shot Spec 校验 SS-A3 / SS-A4 为 block（剧本写明的时段超过镜长 − 0.3 s）
+    then: 判失败，交写作方拆镜或缩短
+    targets: [{kind: loop_rule}]
+    loop:
+      rule_id: R-OVERFLOW
+      stage: pre
+      spec_rules: [SS-A3, SS-A4]
+      note: 对白 / 独白溢出镜长（LEARNED_SPECS C：溢出直接判不通过）
+      ladder:
+        - {action: fail, owner: writer}
+    evidence:
+      - {src: docs/ep02_iter/LEARNED_SPECS.md §C 独白溢出, quote: "溢出镜头直接判不通过"}
+      - {src: docs/ep02_iter/v0_baseline_review.md §1 ⑥声画, quote: "S8 的独白 25.6 s，塞进 12.25 s 的镜头"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-LOOP-002
+    domain: loop
+    link: [P3-P4, P4-P7]
+    title: 缺 H3 正文 / 时长 → 交写作方
+    when: Shot Spec 校验 SS-H1 / SS-D1 为 block
+    then: 不编译、不出片，交写作方补
+    targets: [{kind: loop_rule}]
+    loop:
+      rule_id: R-NEEDS-WRITER
+      stage: pre
+      spec_rules: [SS-H1, SS-D1]
+      note: 缺 H3 正文 / 时长
+      ladder:
+        - {action: fail, owner: writer}
+    evidence:
+      - {src: docs/ep02_iter/refactor_proposal.md §3.2, quote: "仍失败就标 needs_writer，不进渲染"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-LOOP-003
+    domain: loop
+    link: P11-RETRY
+    title: 脸颊泛红 → 肤色限幅 → 换种子 → 回关键帧
+    when: 脸颊 a*p95 漂移 ≥6，或脸颊 a*≥25 像素占比 ≥25%，或整帧红块 ≥1%
+    then: 第 1 次打开 skin_guard（后处理，不重出）；第 2 次换种子；第 3 次交出图链路（krea2 降 0.25 / flush 描述交写作方）
+    targets: [{kind: loop_rule}]
+    loop:
+      rule_id: R-RED
+      when: {any: [{cheek_a_drift: {ge: 6.0}}, {cheek_red_max: {ge: 0.25}}, {red_blob_max: {ge: 0.01}}]}
+      note: 脸颊泛红（LEARNED_SPECS A 泛红闸门）
+      ladder:
+        - {action: post, set: {post.skin_guard: true}, note: 肤色限幅（ns_post.skin_guard，嘴唇排除）}
+        - {action: reseed}
+        - {action: recipe, to: fallback, note: 换回退配方（two_person → Ref2VA；LAB X3 S2 Ref2VA 脸颊 a*≥25 占比 0.10 vs 基模 24 步 0.52；需 --graph-passthrough，否则跳过）}
+        - {action: keyframe, note: 关键帧 krea2 降到 0.25 / 提示词 flush 描述（交出图链路与写作方；antiburn 类 LoRA 未登记）}
+    evidence:
+      - {src: docs/ep02_iter/LEARNED_SPECS.md §A 泛红闸门, quote: "a*p95 相对开头 0.5 s 漂移 ≥6 警告"}
+      - {src: docs/ep02_iter/LEARNED_SPECS.md §B skin guard, quote: "a*p95 中位 40.2→27.7"}
+      - {src: docs/ep02_iter/lab_recipes.md 推荐表 对白近景, quote: "Ref2VA 脸稳、不随时间变红"}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-LOOP-004
+    domain: loop
+    link: P11-RETRY
+    title: 4 帧一顿 → 去抖 → 换配方
+    when: J4 > 1.25 且 z ≥ 3
+    then: 先确认去抖已开（后处理）；仍不过换回退配方
+    targets: [{kind: loop_rule}]
+    loop:
+      rule_id: R-J4
+      when: {all: [{J4: {gt: 1.25}}, {J4_z: {ge: 3.0}}]}
+      note: 4 帧一顿（任务规则 J4>1.25）
+      ladder:
+        - {action: post, set: {post.dejudder: true}, note: 去抖（tools/dejudder.py）}
+        - {action: recipe, to: fallback, note: 换配方}
+    evidence:
+      - {src: docs/ep02_iter/LEARNED_SPECS.md §B 后期去抖, quote: "J4 1.34–1.52 → 1.08–1.09"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-LOOP-005
+    domain: loop
+    link: P11-RETRY
+    title: 静止 / 结尾定住 → 换种子 → 只给首帧 → Motion Repair → 换配方
+    when: 静止占比 ≥50% 或结尾定住 ≥0.5 s
+    then: 按阶梯逐步升级，一次只改一个维度
+    targets: [{kind: loop_rule}]
+    loop:
+      rule_id: R-STILL
+      when: {any: [{still_frac: {ge: 0.5}}, {frozen_tail_s: {ge: 0.5}}]}
+      note: 静止 / 结尾定住（rubric ④）
+      ladder:
+        - {action: reseed}
+        - {action: override, set: {keyframes.last_frame_mode: none}, note: 只给首帧（已是 none 时跳过）}
+        - {action: override, set: {loras.motion_repair: {file: Motion_Repair_V2.safetensors, strength: 0.4, enabled: true}}, note: 加 Motion Repair 0.4（0.9 有害：lab_recipes.md D1 S1 J4 1.14→1.35；0.4 = 社区中位，未测）}
+        - {action: recipe, to: fallback}
+    evidence:
+      - {src: docs/ep02_iter/h3_comfy_expert.md §5 静止不动, quote: "首尾帧几乎一样，硬钉（源码）"}
+      - {src: docs/ep02_iter/v0_baseline_review.md §1 ④运动, quote: "11 镜里有 7 镜静止占比 ≥50%"}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+    experiment: E6
+  - id: K-LOOP-006
+    domain: loop
+    link: P11-RETRY
+    title: 身份相似度低 → 换种子（带锚点）→ Ref2VA → 待项目方换参考
+    when: 任一在画人物 SFace 参考余弦中位 <0.30，或镜内最低 <0.60
+    then: 换种子（第 2 次起编译器自动加锚点句）；再换 Ref2VA（需 API 图透传）；再交项目方
+    targets: [{kind: loop_rule}]
+    loop:
+      rule_id: R-ID
+      when: {any: [{sface_ref_min: {lt: 0.30}}, {sface_self_min: {lt: 0.60}}]}
+      note: 身份相似度低（Q-D1）
+      ladder:
+        - {action: reseed, note: 第 2 次起自动带锚点句}
+        - {action: recipe, to: two_person_ref2va, note: Ref2VA 锁身份（E5，需 API 接入点）}
+        - {action: owner, note: 换身份参考图 / 补男角参考（资产，项目方定）}
+    evidence:
+      - {src: packages/qc/ns_qc/thresholds.py Q-D1, quote: "sface_median ≥0.30"}
+      - {src: docs/ep02_iter/h3_comfy_expert.md §5 身份不一致, quote: "每个角色都要有参考图"}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+    experiment: E5
+  - id: K-LOOP-007
+    domain: loop
+    link: P11-RETRY
+    title: 中途近黑 → 换种子 → 待项目方
+    when: 近黑连续 ≥1 s（尾帧曝光意图为暗 / 全黑的镜头不判）
+    then: 换种子；再不过交项目方
+    targets: [{kind: loop_rule}]
+    loop:
+      rule_id: R-DARK
+      when: {dark_run_s: {ge: 1.0}}
+      note: 中途近黑（HF Comfy #67：与 seed、分辨率有关）
+      ladder:
+        - {action: reseed}
+        - {action: owner}
+    evidence:
+      - {src: docs/ep02_iter/h3_comfy_expert.md §5 中途全黑, quote: "1.3 MP 时 4/12 个 seed 出现"}
+    confidence: low
+    status: 建议
+    date: 2026-10-31
+  - id: K-LOOP-008
+    domain: loop
+    link: P11-RETRY
+    title: 嘴型相关低 → 换种子 → 待项目方
+    when: 画内对白嘴部能量与语音包络相关 <0.3
+    then: 换种子；再不过交项目方
+    targets: [{kind: loop_rule}]
+    loop:
+      rule_id: R-LIPSYNC
+      when: {lipsync_corr: {lt: 0.3}}
+      note: 嘴型与语音相关低（rubric ⑥）
+      ladder:
+        - {action: reseed}
+        - {action: owner}
+    evidence:
+      - {src: tools/ep02_director/rubric.md ⑥, quote: "≥70% 句子嘴部相关 ≥0.3"}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-LOOP-009
+    domain: loop
+    link: P11-RETRY
+    title: 其他验收失败 → 换种子 → 待项目方
+    when: 验收阈值有未过项，但没有更具体的规则命中
+    then: 换种子；再不过交项目方
+    targets: [{kind: loop_rule}]
+    loop:
+      rule_id: R-DEFAULT
+      when: {acceptance_failed: true}
+      note: 其他验收失败
+      ladder:
+        - {action: reseed}
+        - {action: owner}
+    evidence:
+      - {src: docs/ep02_iter/refactor_proposal.md §7.4, quote: "三次失败后暂停，让用户选"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31

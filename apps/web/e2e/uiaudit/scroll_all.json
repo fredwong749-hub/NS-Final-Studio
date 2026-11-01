@@ -1,0 +1,592 @@
+[
+  {
+    "title": "canvas_ep02",
+    "id": "S900_canvas_ep02",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#ep02",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "canvas_ep01",
+    "id": "S900_canvas_ep01",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#ep01",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "script_new",
+    "id": "S900_script_new",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/script-create?new=1",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "script_import",
+    "id": "S900_script_import",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/script-create?tab=import",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "script_read",
+    "id": "S900_script_read",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/script-create",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "assets_all",
+    "id": "S900_assets_all",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/assets",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_linwan",
+    "id": "S900_a_linwan",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/assets?type=character&char=lin_wan",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_item",
+    "id": "S900_a_item",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/assets?type=item",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_scene",
+    "id": "S900_a_scene",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/assets?type=scene",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_preset",
+    "id": "S900_a_preset",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/assets?type=preset",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_loras",
+    "id": "S900_a_loras",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/assets?type=loras",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_voice",
+    "id": "S900_a_voice",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/assets?type=voice",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_template",
+    "id": "S900_a_template",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/assets?type=template",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "sound",
+    "id": "S900_sound",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/sound",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "models",
+    "id": "S900_models",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/models",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "trash",
+    "id": "S900_trash",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/trash",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "audit",
+    "id": "S900_audit",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/audit",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "cut_ep02",
+    "id": "S900_cut_ep02",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#ep02",
+    "steps": [
+      {
+        "js": "location.hash='#/cut'; return 1",
+        "after": 5000
+      },
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "shot_ep02",
+    "id": "S900_shot_ep02",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#ep02",
+    "steps": [
+      {
+        "click": "精修"
+      },
+      {
+        "wait": 3000
+      },
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "canvas_ep02",
+    "id": "S720_canvas_ep02",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#ep02",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "canvas_ep01",
+    "id": "S720_canvas_ep01",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#ep01",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "script_new",
+    "id": "S720_script_new",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/script-create?new=1",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "script_import",
+    "id": "S720_script_import",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/script-create?tab=import",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "script_read",
+    "id": "S720_script_read",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/script-create",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "assets_all",
+    "id": "S720_assets_all",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/assets",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_linwan",
+    "id": "S720_a_linwan",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/assets?type=character&char=lin_wan",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_item",
+    "id": "S720_a_item",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/assets?type=item",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_scene",
+    "id": "S720_a_scene",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/assets?type=scene",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_preset",
+    "id": "S720_a_preset",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/assets?type=preset",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_loras",
+    "id": "S720_a_loras",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/assets?type=loras",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_voice",
+    "id": "S720_a_voice",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/assets?type=voice",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_template",
+    "id": "S720_a_template",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/assets?type=template",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "sound",
+    "id": "S720_sound",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/sound",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "models",
+    "id": "S720_models",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/models",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "trash",
+    "id": "S720_trash",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/trash",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "audit",
+    "id": "S720_audit",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/audit",
+    "steps": [
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "cut_ep02",
+    "id": "S720_cut_ep02",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#ep02",
+    "steps": [
+      {
+        "js": "location.hash='#/cut'; return 1",
+        "after": 5000
+      },
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "shot_ep02",
+    "id": "S720_shot_ep02",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#ep02",
+    "steps": [
+      {
+        "click": "精修"
+      },
+      {
+        "wait": 3000
+      },
+      {
+        "scrollEach": "main"
+      }
+    ],
+    "wait": 7000
+  }
+]

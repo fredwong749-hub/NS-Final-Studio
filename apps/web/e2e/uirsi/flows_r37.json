@@ -1,0 +1,19 @@
+[
+  {"id": "R37_hover_reveal", "title": "r37 P1-3：画布窄帧格平时不显示标签和 ↻，悬停才显示；剧本页宽格常显示", "path": "/#ep02", "wait": 9000, "steps": [
+    {"click": "=审片", "after": 2500},
+    {"wait": 15000},
+    {"js": "const f=[...document.querySelector('.v3-row[data-shot=\"ep02-S1\"]').querySelectorAll('.v3-frames > .v3-frame')]; return {idle:f.map(x=>getComputedStyle(x.querySelector('.ds-tiletop')).opacity), regenPE:f.map(x=>{const b=x.querySelector('.regen-btn');return b?getComputedStyle(b).pointerEvents:null})};"},
+    {"hoverAt": "(() => { const t=[...document.querySelector('.v3-row[data-shot=\"ep02-S1\"]').querySelectorAll('.v3-frames > .v3-frame')][0]; const b=t.getBoundingClientRect(); return [b.x+b.width/2, b.y+b.height*0.6]; })()", "after": 600},
+    {"js": "const t=[...document.querySelector('.v3-row[data-shot=\"ep02-S1\"]').querySelectorAll('.v3-frames > .v3-frame')][0]; return {hover:getComputedStyle(t.querySelector('.ds-tiletop')).opacity, mag:!!document.querySelector('.zl-mag')};"},
+    {"shot": "a"}]},
+  {"id": "R37_candbox_real", "title": "r37 P1-1：真实鼠标点候选格的图 → 候选对比弹窗（不是放大框）；Alt+点 → 放大框（G11）", "path": "/#ep02", "wait": 9000, "steps": [
+    {"click": "=审片", "after": 2500},
+    {"wait": 15000},
+    {"clickAt": "(() => { const t=[...document.querySelector('.v3-row[data-shot=\"ep02-S1\"]').querySelectorAll('.v3-frames > .v3-frame')][1]; const i=t.querySelector('img'); const b=(i||t).getBoundingClientRect(); return [b.x+b.width/2, b.y+b.height*0.6]; })()", "after": 1500},
+    {"js": "return {cand:!!document.querySelector('.cb-scrim'), zoom:!!document.querySelector('.zl-box')};"},
+    {"shot": "a"},
+    {"key": "Escape"}]},
+  {"id": "R37_script_wide", "title": "r37：剧本页宽格（约 142px）标签和 ↻ 常显示", "path": "/#/script-create", "wait": 9000, "steps": [
+    {"wait": 20000},
+    {"js": "return {op:[...new Set([...document.querySelectorAll('.v3-frames > .v3-frame > .ds-tiletop')].map(x=>getComputedStyle(x).opacity))], w:[...new Set([...document.querySelectorAll('.v3-frames > .v3-frame')].map(x=>Math.round(x.getBoundingClientRect().width)))]};"}]}
+]

@@ -1,0 +1,34 @@
+# 真人写实调参（RESEARCH，R11-12 / R11-13，2026-11-01，总调度 fredw-2b 派）。
+# 调研：docs/research/realism_tuning_20261101.md（在 docs/qwen21/RESEARCH.md、COMMUNITY_PHOTOREAL.md 基础上补；每条带原文和链接）。
+# A/B：tools/research/realism_ab.py（CPU 锐化三档，已跑，data/ab/realism_ab/metrics.json，审片页 data/review_pages/realism_ab/）；
+#      GPU 档方案 data/ab/realism_ab/gpu_plan.json（未跑）。
+# 检查：tools/research/realism_lint.py（RL01–RL03，tests/test_realism_lint.py）；写作方 QW-W9（tools/qa/writer_lints.py）。
+# 不改生产默认预设：改 leica_sstar / frame_v9 的锐化或后缀属推翻项目方 10-31 的选择，交总调度。
+# L-087（项目方 11-01 17:5x 选“R0 现在这样”）：徕卡 S★ 锐化 / 后缀 / 契约 Q4 不改；不采纳的 K-REV-X01 / K-REN-X02 / K-PRM-X04
+# 已移到 knowledge/archive/superseded_20261101.yaml（CLEANUP 11-01，原文保留可追溯）；RL01–RL03 只记录。
+rules:
+  - id: K-WRT-X05
+    lint: [QW-W9]   # 总调度 11-01 晚：补 lint（tools/qa/writer_lints.py QW-W9）
+    domain: writer
+    link: P4-P6
+    title: img 的光线写成“光源 + 方向或落点”，不只写光的形容词
+    when: 写作模型写人物在画的特写 / 近景 / 中景 img 句
+    then: >-
+      每个人物镜写清主光从哪边来、落在脸或身体哪里（例：台灯暖光从右侧逆光勾出发丝与颈线；屏幕冷白光从正面打在脸上）。
+      只写“暖黄居家灯光”“光线柔和”这类没有方向的光，模型会画成均匀平光，脸更像磨皮。
+      依据：官方提示词改写器把光线单独写一句并写清光源和方向；Krea 2 Identity Edit 作者 “Describe light by where it lands”；Canon UltraReal 作者要求描述焦外物体。
+      回查：series10 + ep02 共 63 条人物镜 img，62 条已经这样写，1 条（ep02 r3 镜8“暖黄居家灯光”）没有方向。对“去塑料感”的效果没有单独测过。
+      这是格式和可实现性要求，不评价剧情。
+    writer_text: >-
+      人物在画的特写 / 近景 / 中景，img 的光线写成“光源 + 方向或落点”（例：台灯暖光从右侧逆光勾出发丝与颈线；屏幕冷白光从正面打在脸上）；
+      只写“暖黄居家灯光 / 光线柔和”这类没有方向的光，出图会落成均匀平光，脸更像磨皮。
+    targets:
+      - {kind: writer_prompt, section: 镜头字段}
+    evidence:
+      - {src: docs/qwen21/RESEARCH.md, note: 结论 17（官方 T2I 结构）}
+      - {src: docs/qwen21/COMMUNITY_PHOTOREAL.md, note: O25 Krea2 Identity Edit 提示词写法}
+      - {src: docs/research/realism_tuning_20261101.md}
+    check: tests/test_writer_lints.py::test_w9_light_needs_direction
+    confidence: medium
+    status: 建议
+    date: 2026-11-01

@@ -1,0 +1,23 @@
+[
+  {
+    "id": "B2_undo",
+    "path": "/#/assets?type=character&char=lin_wan",
+    "title": "撤销提示条",
+    "steps": [
+      {
+        "js": "for (let i=0;i<60;i++){ if (document.querySelector('.hub-anchors-st')) break; await new Promise(r=>setTimeout(r,500)); } return 1"
+      },
+      {
+        "after": 300,
+        "click": "✓ 用这张"
+      },
+      {
+        "js": "await new Promise(r=>setTimeout(r,200)); const all=[...document.querySelectorAll('[class*=toast], [class*=undo]')].filter(e=>e.getBoundingClientRect().width>0 && e.querySelector('button')); if(!all.length) return {none:true, toasts:[...document.querySelectorAll('[class*=toast]')].map(e=>e.innerText.slice(0,40))}; const box=all[all.length-1]; const btn=box.querySelector('button'); const b=btn.getBoundingClientRect(); const h=document.elementFromPoint(b.x+b.width/2,b.y+b.height/2); return {text:box.innerText.replace(/\\s+/g,' ').slice(0,50), btn:btn.innerText.trim(), btnPE:getComputedStyle(btn).pointerEvents, hitIsButton:h===btn||btn.contains(h), hit:h?h.tagName+'.'+String(h.className).slice(0,30):null};"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "wait": 10000
+  }
+]

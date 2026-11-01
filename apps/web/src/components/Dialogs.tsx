@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStudio } from "../store";
 import { epCode, joinReason, REJECT_CODES } from "../util";
+import { useEsc, useFocusTrap } from "../ds/helpers";
 
 function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) {
+  // UIMASTER（批量打回框等）：和 ds 弹框同一套键盘行为——Esc 关、Tab 留在框里、关掉后焦点回到打开它的按钮
+  useEsc(onClose);
+  const box = useRef<HTMLDivElement>(null);
+  useFocusTrap(box);
   return (
     <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={`modal${wide ? " wide" : ""}`} role="dialog" aria-label={title}>
+      <div ref={box} tabIndex={-1} className={`modal${wide ? " wide" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal-head">
           <b>{title}</b>
           <button className="btn-mini" onClick={onClose}>
@@ -123,24 +128,23 @@ export function RejectDialog({ onDone }: { onDone?: () => void }) {
 }
 
 const KEYS: [string, string][] = [
-  ["← / →", "上一镜 / 下一镜（跨集自动换集）"],
-  ["↑ / ↓ · PgUp / PgDn", "上一集 / 下一集"],
+  // fredw-92/UXF1：与 keymap.ts 同步（审查 #14 / #15）
+  ["↑ / ↓ · ← / →", "上一镜 / 下一镜（跨集自动换集）"],
+  ["[ / ] · PgUp / PgDn", "上一集 / 下一集"],
   ["G · Ctrl+K", "跳转到集或镜头"],
   ["1 / 2", "总览 / 集视图"],
-  ["Enter", "聚焦检查器"],
-  ["Esc", "返回 / 取消 / 清除多选"],
+  ["Enter · 双击行", "进精修"],
+  ["L", "审片 / 精修切换"],
+  ["Esc", "只关最上面的菜单 / 弹窗；什么都没开时清除多选，再按回审片"],
   ["空格", "播放 / 暂停（松开时触发）"],
-  ["I / V", "渲染首帧 / 渲染视频（需确认）"],
-  ["Shift+V", "沿链重渲"],
-  ["[ / ]", "上一个 / 下一个版本（只预览）"],
-  ["Shift+Enter", "把预览的版本设为当前"],
+  ["I / E / V", "出首帧 / 出尾帧 / 出视频（需确认）"],
   ["F · 点图片", "全屏查看首帧 | 尾帧（←/→ 翻版本，Tab 切首/尾，Enter 设为当前，↑/↓ 换镜）"],
   ["C", "全屏 A/B 对比（当前 vs 候选版本）"],
-  ["4", "资产页"],
-  ["A / X", "通过 / 打回"],
-  ["L", "锁定（待后端）"],
-  ["R", "审片模式（J / K 移动，A 通过，X 打回）"],
-  ["Ctrl+S", "保存检查器里的修改"],
+  ["4 / 5", "资产中心 / 成片"],
+  ["1 / G", "换集 / 搜索镜头"],
+  ["N", "新建剧本（故事提纲 → 自动写）"],
+  ["A / X", "通过 / 打回（审片行和精修里一样）"],
+  ["R", "串播审片（J / K 移动，A 通过，X 打回）"],
   ["Ctrl+C / Ctrl+V", "复制 / 粘贴编辑字段（运镜、表情、负面词、种子）"],
   ["Ctrl+Z / Ctrl+Shift+Z", "撤销 / 重做编辑"],
   ["Ctrl/Shift+点击", "多选 / 连续选择"],
@@ -229,9 +233,11 @@ export function Palette() {
 export function Toasts() {
   const { toasts } = useStudio();
   return (
-    <div className="toasts">
+    // 总调度 11-01：提示条只是告诉你一句话、没有可点的东西——整层不接鼠标（pointer-events: none），
+    // 盖在按钮上也不挡点击（以前右下角的“通过 / 打回 / ×”被提示条挡住点不到）；读屏照常读（role=status）
+    <div className="toasts" style={{ pointerEvents: "none" }} role="status" aria-live="polite">
       {toasts.map((t) => (
-        <div key={t.id} className={`toast ${t.kind}`}>
+        <div key={t.id} className={`toast ${t.kind}`} style={{ pointerEvents: "none" }}>
           {t.msg}
         </div>
       ))}

@@ -1,0 +1,71 @@
+[
+  {
+    "id": "RG5_gear",
+    "title": "传了装备图",
+    "path": "/#ep02",
+    "wait": 8000,
+    "steps": [
+      {
+        "click": "=审片",
+        "after": 2500
+      },
+      {
+        "click": "再生成",
+        "after": 1500
+      },
+      {
+        "typeText": "鞋换成上传的这双"
+      },
+      {
+        "click": "加一张装备图",
+        "after": 1000
+      },
+      {
+        "js": "return {rows:document.querySelectorAll('.ds-modal select[aria-label=类别]').length, fileInputs:document.querySelectorAll('.ds-modal input[type=file]').length, selects:[...document.querySelectorAll('.ds-modal select')].map(s=>s.getAttribute('aria-label')+'='+(s.options[s.selectedIndex]?.text||''))}"
+      },
+      {
+        "upload": "D:\\NS-Final Studio\\assets\\characters\\ch_a_lan\\items\\accessory\\uploads\\am-ch_a_lan-495710cc_clean_v1.png",
+        "selector": ".ds-modal input[type=file]",
+        "after": 2000
+      },
+      {
+        "js": "const sel=[...document.querySelectorAll('.ds-modal select')]; const who=sel.find(s=>s.getAttribute('aria-label')==='谁的装备'); if (who && !who.value && who.options.length>1) { who.value=who.options[1].value; who.dispatchEvent(new Event('change',{bubbles:true})); } return {mode:document.querySelector('.regen-mode')?.innerText, selects:sel.map(s=>s.getAttribute('aria-label')+'='+(s.options[s.selectedIndex]?.text||'')), submitDisabled:[...document.querySelectorAll('.ds-modal button')].find(b=>b.innerText.trim()==='生成')?.disabled}"
+      },
+      {
+        "shot": "a"
+      },
+      {
+        "click": "=生成",
+        "within": ".ds-modal",
+        "after": 3000
+      },
+      {
+        "js": "return {err:document.querySelector('.regen-err')?.innerText||null}"
+      }
+    ]
+  },
+  {
+    "id": "RG6_last",
+    "title": "尾帧再生成",
+    "path": "/#ep02",
+    "wait": 8000,
+    "steps": [
+      {
+        "click": "=审片",
+        "after": 2500
+      },
+      {
+        "clickAt": "(() => { const b=[...document.querySelectorAll('button')].find(b=>/再生成/.test(b.innerText) && /尾帧/.test(b.title) && b.getBoundingClientRect().width>0); const r=b?.getBoundingClientRect(); return r?[r.x+r.width/2,r.y+r.height/2]:[null,null]; })()",
+        "after": 1500
+      },
+      {
+        "js": "return {title:document.querySelector('.ds-modal')?.innerText.slice(0,30), mode:document.querySelector('.regen-mode')?.innerText}"
+      },
+      {
+        "click": "=生成",
+        "within": ".ds-modal",
+        "after": 2500
+      }
+    ]
+  }
+]

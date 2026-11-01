@@ -1,0 +1,64 @@
+[
+  {
+    "path": "/#ep02-S1",
+    "size": [
+      1440,
+      900
+    ],
+    "title": "精修版本",
+    "id": "H_ver_900",
+    "wait": 8000,
+    "steps": [
+      {
+        "after": 5000,
+        "click": "精修"
+      },
+      {
+        "after": 2000,
+        "clickAt": "(() => { const e=[...document.querySelectorAll('button,[role=tab]')].find(b=>/^版本/.test(b.innerText.trim()) && b.getBoundingClientRect().x>innerWidth*0.7 && b.getBoundingClientRect().y<120); const r=e?.getBoundingClientRect(); return r?[r.x+r.width/2,r.y+r.height/2]:[null,null]; })()"
+      },
+      {
+        "js": "const c=document.querySelector('.v3e-ver .v3e-chain'); const v=document.querySelector('.v3e-ver'); if(!c) return {chain:false, verExists:!!v, tabs:[...document.querySelectorAll('[role=tab][aria-selected=true], .on')].map(e=>e.innerText.trim().slice(0,8)).slice(0,5)}; const s=getComputedStyle(c); return {chainMaxH:s.maxHeight, chainOv:s.overflowY, chainH:Math.round(c.getBoundingClientRect().height), verOv:v?getComputedStyle(v).overflowY:null}"
+      },
+      {
+        "shot": "a"
+      },
+      {
+        "scroll": "ver",
+        "y": 0.6,
+        "x": 0.88
+      }
+    ]
+  },
+  {
+    "path": "/#ep02-S1",
+    "size": [
+      1280,
+      720
+    ],
+    "title": "精修版本",
+    "id": "H_ver_720",
+    "wait": 8000,
+    "steps": [
+      {
+        "after": 5000,
+        "click": "精修"
+      },
+      {
+        "after": 2000,
+        "clickAt": "(() => { const e=[...document.querySelectorAll('button,[role=tab]')].find(b=>/^版本/.test(b.innerText.trim()) && b.getBoundingClientRect().x>innerWidth*0.7 && b.getBoundingClientRect().y<120); const r=e?.getBoundingClientRect(); return r?[r.x+r.width/2,r.y+r.height/2]:[null,null]; })()"
+      },
+      {
+        "js": "const c=document.querySelector('.v3e-ver .v3e-chain'); const v=document.querySelector('.v3e-ver'); if(!c) return {chain:false, verExists:!!v, tabs:[...document.querySelectorAll('[role=tab][aria-selected=true], .on')].map(e=>e.innerText.trim().slice(0,8)).slice(0,5)}; const s=getComputedStyle(c); return {chainMaxH:s.maxHeight, chainOv:s.overflowY, chainH:Math.round(c.getBoundingClientRect().height), verOv:v?getComputedStyle(v).overflowY:null}"
+      },
+      {
+        "shot": "a"
+      },
+      {
+        "scroll": "ver",
+        "y": 0.6,
+        "x": 0.88
+      }
+    ]
+  }
+]

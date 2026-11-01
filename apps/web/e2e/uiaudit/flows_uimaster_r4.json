@@ -1,0 +1,166 @@
+[
+  {
+    "path": "/#ep02",
+    "id": "R4_reject_900",
+    "size": [
+      1440,
+      900
+    ],
+    "title": "打回 900",
+    "wait": 8000,
+    "steps": [
+      {
+        "after": 2000,
+        "click": "=审片"
+      },
+      {
+        "js": "for (let i=0;i<60;i++){ if ([...document.querySelectorAll('button')].some(b=>/全选本集/.test(b.innerText))) break; await new Promise(r=>setTimeout(r,500)); } return 1"
+      },
+      {
+        "after": 1500,
+        "click": "全选本集"
+      },
+      {
+        "shot": "bar"
+      },
+      {
+        "after": 1500,
+        "click": "=打回"
+      },
+      {
+        "js": "const m=document.querySelector('[aria-modal=true]'); return m? {title:(m.querySelector('h1,h2,h3,header,[class*=title]')?.innerText||m.innerText).slice(0,30), chips:[...m.querySelectorAll('button')].filter(b=>/^\\s*[1-7]\\b|[1-7]\\s/.test(b.innerText)||b.className.includes('chip')).length, buttons:[...m.querySelectorAll('button')].map(b=>b.innerText.trim().slice(0,10)).slice(0,12)} : 'no modal'"
+      },
+      {
+        "shot": "modal"
+      },
+      {
+        "tabtrap": "[aria-modal=true]",
+        "n": 6
+      }
+    ]
+  },
+  {
+    "path": "/#ep02",
+    "id": "R4_pass_900",
+    "size": [
+      1440,
+      900
+    ],
+    "title": "通过 900",
+    "wait": 8000,
+    "steps": [
+      {
+        "after": 2000,
+        "click": "=审片"
+      },
+      {
+        "js": "for (let i=0;i<60;i++){ if ([...document.querySelectorAll('button')].some(b=>/全选本集/.test(b.innerText))) break; await new Promise(r=>setTimeout(r,500)); } return 1"
+      },
+      {
+        "after": 1500,
+        "click": "全选本集"
+      },
+      {
+        "after": 300,
+        "click": "=通过"
+      },
+      {
+        "js": "await new Promise(r=>setTimeout(r,400)); return [...document.querySelectorAll('[class*=toast]')].map(e=>e.innerText.replace(/\\s+/g,' ').trim()).filter(Boolean).slice(-3)"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "path": "/#ep02",
+    "id": "R4_reject_720",
+    "size": [
+      1280,
+      720
+    ],
+    "title": "打回 720",
+    "wait": 8000,
+    "steps": [
+      {
+        "after": 2000,
+        "click": "=审片"
+      },
+      {
+        "js": "for (let i=0;i<60;i++){ if ([...document.querySelectorAll('button')].some(b=>/全选本集/.test(b.innerText))) break; await new Promise(r=>setTimeout(r,500)); } return 1"
+      },
+      {
+        "after": 1500,
+        "click": "全选本集"
+      },
+      {
+        "shot": "bar"
+      },
+      {
+        "after": 1500,
+        "click": "=打回"
+      },
+      {
+        "js": "const m=document.querySelector('[aria-modal=true]'); return m? {title:(m.querySelector('h1,h2,h3,header,[class*=title]')?.innerText||m.innerText).slice(0,30), chips:[...m.querySelectorAll('button')].filter(b=>/^\\s*[1-7]\\b|[1-7]\\s/.test(b.innerText)||b.className.includes('chip')).length, buttons:[...m.querySelectorAll('button')].map(b=>b.innerText.trim().slice(0,10)).slice(0,12)} : 'no modal'"
+      },
+      {
+        "shot": "modal"
+      },
+      {
+        "tabtrap": "[aria-modal=true]",
+        "n": 6
+      }
+    ]
+  },
+  {
+    "path": "/#ep02",
+    "id": "R4_pass_720",
+    "size": [
+      1280,
+      720
+    ],
+    "title": "通过 720",
+    "wait": 8000,
+    "steps": [
+      {
+        "after": 2000,
+        "click": "=审片"
+      },
+      {
+        "js": "for (let i=0;i<60;i++){ if ([...document.querySelectorAll('button')].some(b=>/全选本集/.test(b.innerText))) break; await new Promise(r=>setTimeout(r,500)); } return 1"
+      },
+      {
+        "after": 1500,
+        "click": "全选本集"
+      },
+      {
+        "after": 300,
+        "click": "=通过"
+      },
+      {
+        "js": "await new Promise(r=>setTimeout(r,400)); return [...document.querySelectorAll('[class*=toast]')].map(e=>e.innerText.replace(/\\s+/g,' ').trim()).filter(Boolean).slice(-3)"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "steps": [
+      {
+        "after": 2000,
+        "click": "=审片"
+      },
+      {
+        "key": "a"
+      },
+      {
+        "js": "await new Promise(r=>setTimeout(r,400)); return [...document.querySelectorAll('[class*=toast]')].map(e=>e.innerText.replace(/\\s+/g,' ').trim()).filter(Boolean).slice(-3)"
+      }
+    ],
+    "title": "A 快捷键",
+    "path": "/#ep02-S1",
+    "id": "R4_keyA",
+    "wait": 8000
+  }
+]

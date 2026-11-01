@@ -1,0 +1,23 @@
+{
+  "plate": "plate.png",
+  "scene_id": "sk_alley_ballroom",
+  "locked": {
+    "by": "canvas",
+    "at": "2026-11-01T00:56:57",
+    "sha256": "6ff6d3d460babe0c6480252851306cb9486decbf3a4caa0f91575eed1513ecd6",
+    "version": 2,
+    "variant": "main",
+    "file": "plate.png",
+    "source_file": "assets/scenes/sk_alley_ballroom/refs/ar-cc0a903037.png"
+  },
+  "variants": {
+    "plate": {
+      "file": "plate.png",
+      "sha256": "6ff6d3d460babe0c6480252851306cb9486decbf3a4caa0f91575eed1513ecd6",
+      "version": 2,
+      "locked_by": "canvas",
+      "locked_at": "2026-11-01T00:56:57",
+      "source": "canvas"
+    }
+  }
+}

@@ -28,6 +28,28 @@ export type View = "overview" | "episode" | "nodes" | "assets" | "import" | "peo
 export type Density = "compact" | "standard" | "detail";
 export type CanvasMode = "review" | "edit";
 export const VIEWS_ALL: View[] = ["overview", "episode", "nodes", "assets", "import", "people", "ab"];
+/** UX6：旧整页 → 新页面（只改入口，旧组件不删；地址栏带 ?legacy=1 仍走旧页） */
+export const LEGACY_REDIRECT: Partial<Record<View, string>> = {
+  assets: "#/assets",
+  people: "#/assets?type=people",
+  import: "#/script-create?tab=import",
+  ab: "#/script-create?tab=import",
+  overview: "#/script-create",
+  nodes: "#/script-create",
+};
+const legacyOn = () => false; // UIRSI 重构：旧页面已下线，?legacy=1 不再有效
+function redirectLegacy(v: View) {
+  const to = LEGACY_REDIRECT[v];
+  if (!to) return;
+  try {
+    const u = new URL(location.href);
+    u.searchParams.delete("view");
+    history.replaceState(null, "", u.pathname + (u.search || "") + to);
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  } catch {
+    location.hash = to;
+  }
+}
 /** 资产页定位：从镜头卡点脸图跳过来时带上角色和造型 */
 export interface AssetFocus {
   character: string;
@@ -160,7 +182,20 @@ function useStudioState() {
   const initial = parseHash();
   const [view, setViewState] = useState<View>(() => {
     const q = new URLSearchParams(location.search).get("view") as View | null; // ?view=overview 便于直接打开
-    return q && VIEWS_ALL.includes(q) ? q : loadPref<View>("ns.view", "episode", VIEWS_ALL);
+    // UX6（A / D5）：旧资产库、人物管理、剧本导入整页 → 跳到新页面（旧代码保留，?legacy=1 仍能打开）
+    if (q && LEGACY_REDIRECT[q] && !legacyOn()) {
+      redirectLegacy(q);
+      return "episode";
+    }
+    if (q && VIEWS_ALL.includes(q)) return q;
+    // UXF1（审查 #51）：深链接 #epNN / #epNN-Sx 一定落在集视图，不被上次停留的页面（人物管理等）覆盖
+    if (initial.ep != null) return "episode";
+    const saved = loadPref<View>("ns.view", "episode", VIEWS_ALL);
+    if (LEGACY_REDIRECT[saved] && !legacyOn() && !location.hash.startsWith("#/")) {
+      redirectLegacy(saved);
+      return "episode";
+    }
+    return LEGACY_REDIRECT[saved] && !legacyOn() ? "episode" : saved;
   });
   const [density, setDensityState] = useState<Density>(() => {
     const q = new URLSearchParams(location.search).get("density") as Density | null;
@@ -199,7 +234,10 @@ function useStudioState() {
   const [reviewMode, setReviewMode] = useState(false);
   /** fredw-92/W4a 画布 v3：审片（一镜一行）/ 精修（单镜三区）；?mode=edit 便于截图 */
   const [canvasMode, setCanvasModeState] = useState<CanvasMode>(() =>
-    new URLSearchParams(location.search).get("mode") === "edit" ? "edit" : loadPref<CanvasMode>("ns.canvasMode", "review", ["review", "edit"]),
+    {
+      const m = new URLSearchParams(location.search).get("mode"); // UXF1 #51：?mode=review 与 ?mode=edit 都认
+      return m === "edit" || m === "review" ? m : loadPref<CanvasMode>("ns.canvasMode", "review", ["review", "edit"]);
+    },
   );
   const setCanvasMode = useCallback((m: CanvasMode) => {
     setCanvasModeState(m);
@@ -245,8 +283,22 @@ function useStudioState() {
   }, []);
 
   const setView = useCallback((v: View) => {
+    if (LEGACY_REDIRECT[v] && !legacyOn()) {
+      redirectLegacy(v);
+      return;
+    }
     setViewState(v);
     savePref("ns.view", v);
+    // UX5（D5）：?view=… 只在首次打开时生效；切走以后从地址栏去掉，免得之后每次刷新都停在那一页
+    try {
+      const u = new URL(location.href);
+      if (u.searchParams.get("view") && u.searchParams.get("view") !== v) {
+        u.searchParams.delete("view");
+        history.replaceState(null, "", u.pathname + (u.search || "") + u.hash);
+      }
+    } catch {
+      /* 无 URL：忽略 */
+    }
   }, []);
   const setDensity = useCallback((d: Density) => {
     setDensityState(d);
@@ -280,10 +332,15 @@ function useStudioState() {
   }, []);
   const openAssets = useCallback(
     (f: AssetFocus) => {
+      // UX5（A2）：画布里双击人物 / 点人脸，一律去资产中心的角色详情（以前跳旧资产库 view=assets），并记下从哪一镜来
       setAssetFocus(f);
-      setView("assets");
+      const from = /^#ep\d+/.test(location.hash) ? location.hash.slice(1) : "";
+      const q = new URLSearchParams({ char: f.character });
+      if (f.lookId) q.set("look", f.lookId);
+      if (from) q.set("from", from);
+      location.hash = `#/assets?${q}`;
     },
-    [setView],
+    [],
   );
 
   const shots = useMemo(() => (episodes ? flatShots(episodes) : []), [episodes]);
@@ -445,13 +502,26 @@ function useStudioState() {
   // 当前集：加载 6 镜详情 + 本集和上一集造型
   const epShotIds = useMemo(() => episode?.shots.map((s) => s.id) ?? [], [episode]);
   const epKey = epShotIds.join(",");
+  // UIRSI r12（W-02）：不在画布上（#/新建剧本、#/资产…）时不预取本集每镜详情（以前一开页面就多 14+ 个请求），回到画布再取
+  const [onCanvas, setOnCanvas] = useState(() => !location.hash.startsWith("#/"));
   useEffect(() => {
-    if (!epKey) return;
-    void refreshShots(epKey.split(","));
+    const on = () => setOnCanvas(!location.hash.startsWith("#/"));
+    window.addEventListener("hashchange", on);
+    return () => window.removeEventListener("hashchange", on);
+  }, []);
+  useEffect(() => {
+    if (!epKey || !onCanvas) return;
+    // UIRSI r12（W-02）：首屏只取前 4 镜详情，其余 1.8 s 后再取（浏览器每个域名同时只有 6 条连接）
+    const ids = epKey.split(",");
+    void refreshShots(ids.slice(0, 4));
+    const later = ids.length > 4 ? window.setTimeout(() => void refreshShots(ids.slice(4)), 3000) : 0;
     const maxEp = Math.max(0, ...(episodes ?? []).map((e) => e.number)); // 末集不请求 ep61（404）
-    void refreshLooks([epNum - 1, epNum, epNum + 1].filter((n) => !maxEp || n <= maxEp));
+    // UIRSI r12：本集造型先取，前后两集（只在衔接提示里用）晚 2 s
+    void refreshLooks([epNum]);
+    const nb = window.setTimeout(() => void refreshLooks([epNum - 1, epNum + 1].filter((n) => n >= 1 && (!maxEp || n <= maxEp))), 3200);
+    return () => (window.clearTimeout(later), window.clearTimeout(nb));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [epKey]);
+  }, [epKey, onCanvas]);
 
   // 默认选中本集第一镜
   useEffect(() => {
@@ -945,10 +1015,17 @@ function useStudioState() {
     async (ids: string[], state: ReviewState, reason = "") => {
       const ok: string[] = [];
       const bad: string[] = [];
+      const unwatched: string[] = [];
+      const noVideo: string[] = [];
       for (const id of ids) {
         const s = summaryById.get(id);
+        // 审片“通过”针对视频：还没有视频的镜头不标通过（按钮说明写的就是“只对视频已完整播放过的镜头生效”）
+        if (state === "passed" && s && !s.video) {
+          noVideo.push(id);
+          continue;
+        }
         if (state === "passed" && !canPass(s)) {
-          bad.push(`${id}：视频未完整播放`);
+          unwatched.push(id);
           continue;
         }
         try {
@@ -960,11 +1037,26 @@ function useStudioState() {
       }
       const label = { passed: "通过", rejected: "打回", unreviewed: "未审" }[state];
       if (ok.length) notify(ids.length === 1 ? `${ok[0]} 已标为${label}` : `${ok.length} 镜已标为${label}`);
-      if (bad.length) notify(`未能标记：${bad.join("；")}`, "err");
+      // UIMASTER（批量通过条，项目方动作）：视频没完整看过的镜头不能通过——不只报错，直接打开串播审片停在第一镜，看完按 A 就通过（说明 + 一键解决）
+      if (unwatched.length) {
+        notify(`${unwatched.length} 镜视频还没完整看过，先看再通过（${unwatched.map((x) => x.replace(/^ep\d+-/, "")).join("、")}）。已为你打开串播审片，看完按 A 通过`, "err");
+        if (!reviewMode) {
+          select(unwatched[0]);
+          setReviewMode(true);
+        }
+      }
+      const short = (xs: string[]) => xs.map((x) => x.replace(/^ep\d+-/, "")).join("、");
+      if (noVideo.length) notify(`${noVideo.length} 镜还没有视频，不能通过（${short(noVideo)}）：先在这一行点「出视频」`, "err");
+      if (bad.length) {
+        // 同一个原因合成一条，不逐镜重复
+        const by = new Map<string, string[]>();
+        for (const b of bad) { const i = b.indexOf("："); const k = i > 0 ? b.slice(i + 1) : b; by.set(k, [...(by.get(k) ?? []), i > 0 ? b.slice(0, i) : ""]); }
+        for (const [why, xs] of by) notify(`${xs.length} 镜没标上（${short(xs.filter(Boolean))}）：${why}。可以再点一次`, "err");
+      }
       await refreshAfter(ok.filter((id) => detailsRef.current[id]));
       return ok.length > 0;
     },
-    [summaryById, canPass, notify, refreshAfter],
+    [summaryById, canPass, notify, refreshAfter, reviewMode, select],
   );
 
   const copyEdit = useCallback(() => {

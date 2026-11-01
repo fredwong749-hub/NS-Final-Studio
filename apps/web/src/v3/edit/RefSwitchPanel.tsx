@@ -1,14 +1,18 @@
 // fredw-92/W4b：本镜参考切换面板 + 应用前看影响面（spec §6.2 / §6.3）。外壳（Canvas.tsx）提供浮层容器并负责打开 / 关闭。
 // 只能选资产库里已有的资产；改集默认需项目方本人勾选（by=owner）。不做成人 / 内容限制。
 // 入口：审片行的小造型卡 / 场景小卡、精修左栏的角色卡 / 场景卡、精修参考条。
+import { thumb } from "../../thumb";
 import { useEffect, useMemo, useState } from "react";
+import { slotName } from "../words"; // UX5（A4）：槽位英文键 → 中文
 import type { ShotSummary } from "../../types";
 import { useStudio } from "../../store";
 import {
   apiV1, errText, opt, PART_KEYS, PART_LABEL,
   type PartKey, type RefChange, type RefOption, type RefPreview, type RefScope,
 } from "../api_v1";
-import { bumpShotRefs, imgOf, lookName, sceneEff, useShotRefs } from "./RefBar";
+import { bumpShotRefs, imgOf, sceneEff, useRefLook, useShotRefs } from "./RefBar.helpers";
+import { resolveLook, useCharAssets } from "../looks";
+import { frameState } from "../status";
 import { AssetDrawer } from "./AssetDrawer";
 import { etaFor, trackJob, type DrawerOpen } from "./state";
 import "./edit.css";
@@ -21,15 +25,54 @@ export interface RefSwitchPanelProps {
   onClose: () => void;
 }
 
-function Tile({ o, on, eff, onClick }: { o: RefOption; on: boolean; eff: boolean; onClick: () => void }) {
-  const url = o.thumb_url ?? o.url;
+/** fredw-92/UXF2（审查 #31）：同名单品合并（“黑色漆皮束腰（产品）”和“黑色漆皮束腰”算一件），优先留有图的；
+ *  无图的排到最后。当前生效 / 已选中的那件一定保留。 */
+const baseName = (o: RefOption) => (o.name ?? o.label ?? o.id).replace(/[（(][^）)]*[）)]\s*$/, "").trim();
+const hasImg = (o: RefOption) => !!(o.thumb_url ?? o.url);
+function tidyOptions(list: RefOption[], keep: (string | null | undefined)[]): RefOption[] {
+  const must = new Set(keep.filter(Boolean) as string[]);
+  const groups = new Map<string, RefOption[]>();
+  for (const o of list) {
+    const k = baseName(o);
+    groups.set(k, [...(groups.get(k) ?? []), o]);
+  }
+  const out: RefOption[] = [];
+  for (const g of groups.values()) {
+    const withImg = g.filter(hasImg);
+    out.push(...g.filter((o) => must.has(o.id) || o.current || (withImg.length ? hasImg(o) && o === withImg[0] : o === g[0]) ));
+  }
+  return [...out.filter(hasImg), ...out.filter((o) => !hasImg(o))];
+}
+
+/** 衔接风险 / 影响面文案：部件英文 key → 中文；同集镜号只写 S1 */
+const humanWarn = (t: string) =>
+  t
+    .replace(/\b(outfit|shoes|makeup|nails|hair|accessory)\b/g, (k) => PART_LABEL[k as PartKey] ?? k)
+    .replace(/\s*的\s*/g, "的")
+    .replace(/\bep\d+-(S\d+)/g, "$1");
+
+/** UX4（审查 #31）：单品名和资产页一致——“黑色漆皮束腰（产品）”显示成“黑色漆皮束腰” + 小标签“产品图” */
+const NAME_TAG: Record<string, string> = { 产品: "产品图", 上身: "上身图" };
+const NAMETAG_STYLE = { display: "inline-block", marginLeft: 4, padding: "0 4px", fontStyle: "normal", fontSize: 12, lineHeight: "16px", borderRadius: 4, border: "1px solid var(--c-line-2)", color: "var(--c-text-2, inherit)" } as const;
+function partName(n: string): { base: string; tag: string | null } {
+  const m = n.match(/\s*[（(]([^（）()]*)[）)]\s*$/);
+  if (!m || !m.index) return { base: n, tag: null };
+  return { base: n.slice(0, m.index).trim() || n, tag: NAME_TAG[m[1].trim()] ?? m[1].trim() };
+}
+
+/** look = 整套形象：图和名字由 v3/looks.ts 解析（与资产页同一份，审查 #31），没有自己的图时显示角色主图并标出来 */
+function Tile({ o, on, eff, onClick, look }: { o: RefOption; on: boolean; eff: boolean; onClick: () => void; look?: { url: string | null; own: boolean; title: string } }) {
+  const url = look ? look.url ?? o.thumb_url ?? o.url : o.thumb_url ?? o.url;
+  const pn = look ? null : partName(o.name ?? o.label ?? o.id);
+  const name = look ? look.title : `${o.letter ? `${o.letter} ` : ""}${pn!.base}`;
   return (
-    <button className={`v3e-tile ${on ? "on" : ""} ${eff ? "eff" : ""}`} onClick={onClick} title={o.name ?? o.id}>
-      {url ? <img src={url} alt="" loading="lazy" /> : <span className="e">{o.letter ?? "无图"}</span>}
+    <button className={`v3e-tile ${on ? "on" : ""} ${eff ? "eff" : ""}`} onClick={onClick} title={name}>
+      {url ? <img src={thumb(url, 240) ?? url} alt="" loading="lazy" /> : <span className="e">{o.letter ?? "无图"}{!o.letter && <small>去资产页补图</small>}</span>}
+      {look && url && !look.own && <i className="v3e-tile-fb">角色主图</i>}
       {o.is_default && <i className="def">集默认</i>}
       <span className="nm">
-        {o.letter ? `${o.letter} ` : ""}
-        {o.name ?? o.label ?? o.id}
+        {name}
+        {pn?.tag && <em className="v3e-nametag" style={NAMETAG_STYLE}>{pn.tag}</em>}
       </span>
     </button>
   );
@@ -45,6 +88,10 @@ export function RefSwitchPanel({ shot, target: tgt, onClose }: RefSwitchPanelPro
   const c = r.data?.characters.find((x) => x.id === target) ?? null;
   const brief = shot.characters.find((x) => x.character === target);
   const title = isScene ? "场景" : c?.name ?? brief?.name ?? target;
+  const curLook = useRefLook(c);
+  const charAssets = useCharAssets(isScene ? null : target);
+  const lookOf = (id: string) => (charAssets ? resolveLook(charAssets, id) : undefined);
+  const [pq, setPq] = useState("");
 
   const [look, setLook] = useState<string | null>(null);
   const [parts, setParts] = useState<Partial<Record<PartKey, string | null>>>({});
@@ -75,7 +122,7 @@ export function RefSwitchPanel({ shot, target: tgt, onClose }: RefSwitchPanelPro
     if (copyFrom) return `整套参考借用 ${copyFrom}`;
     const out: string[] = [];
     if (isScene && scene) out.push(`场景 → ${scene === "none" ? "不用底图" : (r.data?.scene?.options ?? []).map(opt).find((o) => o.id === scene)?.name ?? scene}`);
-    if (look) out.push(`整套形象 → ${(c?.options?.looks ?? []).map(opt).find((o) => o.id === look)?.name ?? look}`);
+    if (look) out.push(`整套形象 → ${lookOf(look)?.title ?? (c?.options?.looks ?? []).map(opt).find((o) => o.id === look)?.name ?? look}`);
     for (const [p, v] of Object.entries(parts)) {
       const o = (c?.options?.parts?.[p as PartKey] ?? []).map(opt).find((x) => x.id === v);
       out.push(`${PART_LABEL[p as PartKey]} → ${v == null ? "不指定" : o?.name ?? v}`);
@@ -134,6 +181,17 @@ export function RefSwitchPanel({ shot, target: tgt, onClose }: RefSwitchPanelPro
   };
 
   const otherShots = (studio.episode?.shots ?? []).filter((s) => s.id !== shot.id);
+  /** UXF5（流程 b）：过期不只首帧——首帧重出后，这镜现有的尾帧和视频都不再由新首帧而来，一起作废 */
+  const downstream = (id: string) => {
+    const x = id === shot.id ? shot : studio.episode?.shots.find((y) => y.id === id);
+    if (!x) return [] as string[];
+    return [x.last_frame_target && frameState(x, studio.details[x.id], "last") !== "orphan" ? "尾帧" : "", x.video ? "视频" : ""].filter(Boolean);
+  };
+  const staleText = (id: string) => {
+    const d = downstream(id);
+    return `首帧过期 → 重出首帧${d.length ? `；现有${d.join("和")}也随之作废，要重出` : ""}`;
+  };
+  const thisDown = downstream(shot.id);
   const editAsset = (a: string, kind: "look" | PartKey, label: string) =>
     setAsset({ shot: shot.id, asset: a, character: isScene ? "" : target, label, kind });
 
@@ -143,16 +201,16 @@ export function RefSwitchPanel({ shot, target: tgt, onClose }: RefSwitchPanelPro
   return (
     <div className="v3e-dlg refs embed" aria-label="切换本镜参考">
         <header>
-          {!isScene && (c ? imgOf(c) : brief?.face_url) ? <img className="v3e-dthumb" src={(c ? imgOf(c) : brief?.face_url)!} alt="" /> : <span className="v3e-dthumb e" />}
+          {!isScene && (c ? curLook.url ?? imgOf(c) : brief?.face_url) ? <img className="v3e-dthumb" src={(c ? curLook.url ?? imgOf(c) : brief?.face_url)!} alt="" /> : <span className="v3e-dthumb e" />}
           <div>
             <h3>
               {shot.id} · {title}
-              {c ? ` · ${lookName(c)}` : ""}
+              {c ? ` · ${curLook.title}` : ""}
             </h3>
             <div className="sub">{step === 1 ? "本镜参考：只能选资产库里已有的资产" : "第 2 步：选范围、看影响"}</div>
           </div>
           {step === 1 && !isScene && c && (
-            <button className="v3e-btn sm" onClick={() => editAsset(c.effective?.look ?? target, "look", `${c.name} · ${lookName(c)}`)}>
+            <button className="v3e-btn sm" onClick={() => editAsset(c.effective?.look ?? target, "look", `${c.name} · ${curLook.title}`)}>
               编辑这个资产
             </button>
           )}
@@ -173,11 +231,14 @@ export function RefSwitchPanel({ shot, target: tgt, onClose }: RefSwitchPanelPro
               <div className="v3e-slots">
                 {brief.slots.map((s) => (
                   <div key={s.slot} className="row">
-                    <span className="k">{s.slot}</span>
+                    <span className="k">{slotName(s.slot)}</span>
                     {s.items.map((it) => (
                       <span key={it.id} className="v3e-tile ro">
-                        {it.thumb_url ? <img src={it.thumb_url} alt="" /> : <span className="e">无图</span>}
-                        <span className="nm">{it.name}</span>
+                        {it.thumb_url ? <img src={thumb(it.thumb_url, 240) ?? it.thumb_url} alt="" /> : <span className="e">无图</span>}
+                        <span className="nm">
+                          {partName(it.name).base}
+                          {partName(it.name).tag && <em className="v3e-nametag" style={NAMETAG_STYLE}>{partName(it.name).tag}</em>}
+                        </span>
                       </span>
                     ))}
                   </div>
@@ -192,19 +253,24 @@ export function RefSwitchPanel({ shot, target: tgt, onClose }: RefSwitchPanelPro
                     ① 整套形象<span>点一下整套换掉 · 绿框 = 当前生效 · 蓝框 = 你选的</span>
                   </h4>
                   <div className="v3e-tiles big">
-                    {(c.options?.looks ?? []).map(opt).map((o) => (
-                      <Tile key={o.id} o={o} eff={o.current ?? o.id === c.effective?.look} on={look === o.id} onClick={() => { setReset(false); setCopyFrom(""); setLook(look === o.id ? null : o.id); }} />
+                    {tidyOptions((c.options?.looks ?? []).map(opt), [c.effective?.look, look]).map((o) => (
+                      <Tile key={o.id} o={o} look={lookOf(o.id)} eff={o.current ?? o.id === c.effective?.look} on={look === o.id} onClick={() => { setReset(false); setCopyFrom(""); setLook(look === o.id ? null : o.id); }} />
                     ))}
                   </div>
                 </section>
                 <section>
-                  <h4>
+                  <h4 className="v3e-parthead">
                     ② 单件替换<span>只换这一件，其余保持当前形象</span>
+                    {/* UXF5（流程 b）：单品 25 件以上，按名字搜；当前生效 / 已选的那件始终保留 */}
+                    <input className="v3e-partsearch" type="search" value={pq} placeholder="搜单品名字…" onChange={(e) => setPq(e.target.value)} aria-label="搜单品" />
                   </h4>
                   {PART_KEYS.map((p) => {
-                    const opts = (c.options?.parts?.[p] ?? []).map(opt);
-                    if (!opts.length) return null;
                     const eff = c.effective?.parts?.[p];
+                    const q = pq.trim().toLowerCase();
+                    const opts = tidyOptions((c.options?.parts?.[p] ?? []).map(opt), [eff, parts[p]]).filter(
+                      (o) => !q || o.id === eff || o.id === parts[p] || `${o.name ?? ""} ${o.label ?? ""} ${o.id}`.toLowerCase().includes(q),
+                    );
+                    if (!opts.length) return null;
                     return (
                       <div key={p} className="v3e-partrow">
                         <span className="k">
@@ -296,7 +362,7 @@ export function RefSwitchPanel({ shot, target: tgt, onClose }: RefSwitchPanelPro
                   [
                     ["shot", "只这一镜", shot.id],
                     ["scene", "本场景（同场几镜一起改）", ""],
-                    ["episode", "本集默认（等于改造型确认）", ""],
+                    ["episode", "本集默认（等于改造型确认）", "要项目方本人勾选确认"],
                   ] as [RefScope, string, string][]
                 ).map(([k, t, n]) => (
                   <label key={k} className={`v3e-radio ${scope === k ? "on" : ""}`}>
@@ -315,6 +381,11 @@ export function RefSwitchPanel({ shot, target: tgt, onClose }: RefSwitchPanelPro
                 <h4>
                   影响面<span>已出过图的镜头会标为过期，需要重出</span>
                 </h4>
+                {thisDown.length > 0 && !!pv.data?.stale.includes(shot.id) && (
+                  <div className="v3e-note warn v3e-downstream">
+                    {shot.id} 现有的{thisDown.join("和")}是由旧首帧出的：应用后首帧过期，{thisDown.join("和")}也会一起作废，需要按新首帧重出（首帧 → 尾帧 → 视频）。
+                  </div>
+                )}
                 {pv.busy ? (
                   <div className="v3e-note">计算影响面…</div>
                 ) : pv.err ? (
@@ -331,8 +402,8 @@ export function RefSwitchPanel({ shot, target: tgt, onClose }: RefSwitchPanelPro
                       <tbody>
                         {pv.data.affected.map((s) => (
                           <tr key={s}>
-                            <td>{s}</td>
-                            <td>{pv.data!.stale.includes(s) ? <span className="warn">过期 → 重出首帧</span> : "未出图，无需重出"}</td>
+                            <td>{humanWarn(s)}</td>
+                            <td>{pv.data!.stale.includes(s) ? <span className="warn">{staleText(s)}</span> : "未出图，无需重出"}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -342,7 +413,7 @@ export function RefSwitchPanel({ shot, target: tgt, onClose }: RefSwitchPanelPro
                         <b>衔接风险</b>
                         <ul>
                           {pv.data.continuity_warnings.map((w, i) => (
-                            <li key={i}>{typeof w === "string" ? w : `${w.shot_id ? `${w.shot_id}：` : ""}${w.message ?? JSON.stringify(w)}`}</li>
+                            <li key={i}>{humanWarn(typeof w === "string" ? w : `${w.shot_id ? `${w.shot_id}：` : ""}${w.message ?? JSON.stringify(w)}`)}</li>
                           ))}
                         </ul>
                       </div>
@@ -368,7 +439,9 @@ export function RefSwitchPanel({ shot, target: tgt, onClose }: RefSwitchPanelPro
             </>
           ) : (
             <>
-              <span className="eta">{pv.data ? `${pv.data.stale.length} 镜会过期` : ""}</span>
+              <span className="eta">
+                {scope === "episode" && !owner ? "改本集默认要项目方本人勾选上面的确认，才能应用" : pv.data ? `${pv.data.stale.length} 镜会过期${thisDown.length && pv.data.stale.includes(shot.id) ? `（本镜${thisDown.join("和")}一起作废）` : ""}` : ""}
+              </span>
               <span className="sp" />
               <button className="v3e-btn" onClick={() => setStep(1)}>
                 ← 返回

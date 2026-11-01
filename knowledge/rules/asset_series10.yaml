@@ -1,0 +1,38 @@
+# 项目方决定（SERIES / series10_v1，2026-10-31，经总调度转达；原话见 data/pipeline/runs/series10_v1/owner_decisions.json）。
+rules:
+  - id: K-AST-201
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: P4-P5
+    title: 10 集新剧人物方案已认可：顾沉、陈宇沿用，新增阿岚；阿岚设定图第一优先
+    when: series10 资产准备
+    then: 阿岚（ch_a_lan）3 套造型 × 2 种子四栏设定图在 GPU 释放后第一个出（assets/char_sheet_jobs.json priority P1），出图后由项目方挑定再登记身份参考
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/owner_decisions.json, quote: "A. 认可（推荐）：接着出阿岚的设定图"}
+    confidence: high
+    status: 项目方闸门
+    date: 2026-10-31
+  - id: K-AST-202
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: [P0-P1, P4-P5]
+    title: 林晚标志物 = 钻石水晶甲（5 厘米超长透明水晶甲镶钻，与已确认定妆一致），不加“左耳后小痣”
+    when: 林晚的人物表 / 造型登记 / 出图提示词
+    then: 标志物只用钻石水晶甲；“痣 / mole”出现即 HC-07 block
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/owner_decisions.json, quote: "保持和已确认定妆一致，标志物改用她已有的东西，比如钻石水晶甲"}
+    confidence: high
+    status: 项目方闸门
+    date: 2026-10-31
+  - id: K-AST-203
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: P3-P4
+    title: 10 集新剧导入时机：格式 block 清零 + 阿岚设定图出来后，replace 模式整份替换（自动备份旧 60 集）
+    when: series10 导入生产剧本
+    then: /api/script-inbox/import replace 模式，by=owner，note 带项目方原话；导入前告诉总调度，导入后通知 UIRSI、IMGGEN
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/owner_decisions.json, quote: "等格式问题清完、设定图出来后再导入（推荐）"}
+    confidence: high
+    status: 项目方闸门
+    date: 2026-10-31

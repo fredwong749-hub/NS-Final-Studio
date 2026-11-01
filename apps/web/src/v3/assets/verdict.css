@@ -1,0 +1,14 @@
+/* UM-P0-02：“✓ 用这张 / ✗ 不要”按钮对（只用 theme token） */
+.vd { display: flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap; }
+.vd-use, .vd-no, .vd-cur { height: var(--h-s); display: inline-flex; align-items: center; padding: 0 var(--sp-3); border-radius: var(--r-m); font: inherit; font-size: var(--fs-sm); font-weight: var(--fw-strong); white-space: nowrap; }
+.vd-use { border: 0; background: var(--c-accent); color: var(--c-on-accent); cursor: pointer; }
+.vd-use:not(:disabled):hover { background: color-mix(in srgb, var(--c-accent) 86%, var(--c-on-accent)); }
+.vd-cur { background: var(--c-ok-soft); color: var(--c-ok-text); }
+.vd-no { border: 1px solid var(--c-line-2); background: transparent; color: var(--c-text-2); cursor: pointer; }
+.vd-no:not(:disabled):hover { border-color: var(--c-bad); color: var(--c-bad-text); background: var(--c-bad-soft); }
+.vd-no.on { border-color: transparent; background: var(--c-bad-soft); color: var(--c-bad-text); }
+.vd-use:disabled, .vd-no:disabled { opacity: .5; cursor: default; }
+.vd-chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-3); }
+.vd-chips button { height: var(--h-s); padding: 0 var(--sp-3); border: 1px solid var(--c-line-2); border-radius: var(--r-pill); background: transparent; color: var(--c-text); font: inherit; font-size: var(--fs-sm); cursor: pointer; }
+.vd-chips button.on { background: var(--c-bad-soft); border-color: var(--c-bad); color: var(--c-bad-text); font-weight: var(--fw-strong); }
+.vd-note { width: 100%; }

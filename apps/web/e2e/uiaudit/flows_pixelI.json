@@ -1,0 +1,32 @@
+[
+  {
+    "title": "吸顶聚焦",
+    "id": "I_900",
+    "steps": [
+      {
+        "js": "const m=document.querySelector('main.v3-page')||document.scrollingElement; const sp=getComputedStyle(m).scrollPaddingTop; const p=[...document.querySelectorAll('button')].find(b=>/暂停/.test(b.innerText)); const bar=document.querySelector('nav.sf-steps'); if(!p) return {sp, pause:'none'}; const br=bar?bar.getBoundingClientRect():{bottom:0}; m.scrollTop += (p.getBoundingClientRect().top - br.bottom + 30); await new Promise(r=>setTimeout(r,300)); p.focus(); p.scrollIntoView({block:'nearest'}); await new Promise(r=>setTimeout(r,300)); const r=p.getBoundingClientRect(); const bb=bar?bar.getBoundingClientRect():{bottom:0}; const h=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2); return {scrollPaddingTop:sp, barBottom:Math.round(bb.bottom), pauseTop:Math.round(r.top), belowBar:r.top>=bb.bottom-1, hitSelf:p.contains(h), barBg:bar?getComputedStyle(bar).backgroundColor:null};"
+      }
+    ],
+    "size": [
+      1440,
+      900
+    ],
+    "wait": 9000,
+    "path": "/#/script-create"
+  },
+  {
+    "title": "吸顶聚焦",
+    "id": "I_720",
+    "steps": [
+      {
+        "js": "const m=document.querySelector('main.v3-page')||document.scrollingElement; const sp=getComputedStyle(m).scrollPaddingTop; const p=[...document.querySelectorAll('button')].find(b=>/暂停/.test(b.innerText)); const bar=document.querySelector('nav.sf-steps'); if(!p) return {sp, pause:'none'}; const br=bar?bar.getBoundingClientRect():{bottom:0}; m.scrollTop += (p.getBoundingClientRect().top - br.bottom + 30); await new Promise(r=>setTimeout(r,300)); p.focus(); p.scrollIntoView({block:'nearest'}); await new Promise(r=>setTimeout(r,300)); const r=p.getBoundingClientRect(); const bb=bar?bar.getBoundingClientRect():{bottom:0}; const h=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2); return {scrollPaddingTop:sp, barBottom:Math.round(bb.bottom), pauseTop:Math.round(r.top), belowBar:r.top>=bb.bottom-1, hitSelf:p.contains(h), barBg:bar?getComputedStyle(bar).backgroundColor:null};"
+      }
+    ],
+    "size": [
+      1280,
+      720
+    ],
+    "wait": 9000,
+    "path": "/#/script-create"
+  }
+]

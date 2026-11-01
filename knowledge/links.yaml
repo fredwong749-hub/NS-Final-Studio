@@ -1,0 +1,36 @@
+# 流水线段（临时命名表；CHAINSPEC 的 config/pipeline/chain.yaml 落地后以它为准，compile.py 优先读 chain.yaml 的段 id）
+# 上游 P0–P4 = 写作 LLM 段（CHAINSPEC 负责）；下游 P5–P12 = 本知识库 + Autopilot（ARCH 负责）
+schema: nsfs.knowledge_links/1
+links:
+  P0: {name: 故事提纲, owner: CHAINSPEC}
+  P1: {name: storyline, owner: CHAINSPEC}
+  P2: {name: 单集大纲, owner: CHAINSPEC}
+  P3: {name: 剧本, owner: CHAINSPEC}
+  P4: {name: 分镜 / Shot Spec, owner: CHAINSPEC}
+  P5: {name: 资产（角色设定图 / 身份参考 / 场景底图）, owner: ARCH}
+  P6: {name: 首帧 / 关键帧, owner: ARCH}
+  P7: {name: 视频提示词 / 配方编译, owner: ARCH}
+  P8: {name: 视频生成, owner: ARCH}
+  P9: {name: 声音（对白 / 独白 / 配乐）, owner: ARCH}
+  P10: {name: 剪辑 / 合成, owner: ARCH}
+  P11: {name: 审片, owner: ARCH}
+  P12: {name: 成片交付, owner: ARCH}
+# 连接 id（CHAINSPEC 2026-10-31 定稿，格式 "Pa-Pb"）——knowledge 条目的 link 字段取这些值
+connections:
+  P0-P1: 提纲 → storyline
+  P1-P2: storyline → 单集大纲
+  P2-P3: 大纲 → 剧本
+  P3-P4: 剧本 → 分镜 / Shot Spec
+  P4-P5: Spec → 资产
+  P5-P6: 资产 → 首帧 / 尾帧
+  P4-P6: Spec → 出图提示词
+  P6-P7: 首帧 → 视频提示词 / 配方
+  P4-P7: Spec → H3 提示词编译
+  P7-P8: 配方 → 视频片段
+  P4-P9: Spec 音频字段 → 声音
+  P8-P9: H3 原声 → 声音
+  P8-P10: 片段 → 剪辑
+  P9-P10: 声音 → 剪辑
+  P10-P11: 合成 → 审片
+  P11-P12: 审片 → 交付
+  P11-RETRY: 审片 → 重出（回到某段，由 attribute_bug 归因）

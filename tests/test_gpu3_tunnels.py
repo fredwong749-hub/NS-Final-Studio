@@ -96,12 +96,12 @@ def test_recovery_resets_counter(env):
 
 
 def test_own_process_terminated_before_respawn(env):
-    env["health"] = lambda port, path, it: port != 18098
+    env["health"] = lambda port, path, it: port != 18099   # qwen-llm 隧道 10-31 停用，改用 mailbox 验证
     env["max_iters"] = 4              # spawn at iter 2, again at iter 4
     T.main()
     ev = [e for e in env["events"] if e[0] in ("spawn", "terminate")]
     p1, p2 = env["procs"]
-    assert ev[:3] == [("spawn", "qwen-llm", p1.pid), ("terminate", p1.pid), ("spawn", "qwen-llm", p2.pid)]
+    assert ev[:3] == [("spawn", "mailbox", p1.pid), ("terminate", p1.pid), ("spawn", "mailbox", p2.pid)]
 
 
 def test_terminate_timeout_then_kill(env):
@@ -118,7 +118,7 @@ def test_keyboard_interrupt_cleans_up_only_live_own(env):
     env["health"] = lambda port, path, it: False
     env["max_iters"] = 2
     assert T.main() == 0
-    assert sorted(spawns(env)) == ["bridge", "mailbox", "qwen-llm"]
+    assert sorted(spawns(env)) == ["bridge", "mailbox"]   # qwen-llm 10-31 停用（千问已撤下）
     assert sorted(e[1] for e in env["events"] if e[0] == "terminate") == sorted(p.pid for p in env["procs"])
     assert all(not p.alive for p in env["procs"])
 

@@ -196,7 +196,14 @@ def script_header(cfg: dict | None = None, registry: dict | None = None) -> tupl
     后面原样并入继承的全剧人物表 / 全剧场景表（registry_tables；全局头原文已有的角色 / 场景不重复）"""
     cfg = cfg or load_config()
     registry = registry if registry is not None else cfg.get("registry")
-    for rel in cfg.get("header_sources", []):
+    # K-OPS-Q31（CLEANUP 11-01）：全局头来源先从现行导入记录推导（PRODUCTION_SCRIPT 的 sources，sha 一致、带全局头的最新一份），
+    # 导入新稿后自动跟上；推导不出来（或 header_sources_mode = "config"）才回退到配置 header_sources
+    derived = []
+    if cfg.get("header_sources_mode", "import") == "import":
+        from ns_api import import_sources as IS  # noqa: PLC0415
+        hs = IS.header_source(PRODUCTION_SCRIPT, REPO)
+        derived = [hs] if hs else []
+    for rel in derived + list(cfg.get("header_sources", [])):
         p = REPO / rel
         if p.exists():
             text = p.read_text(encoding="utf-8")
@@ -276,12 +283,11 @@ def compact_header(header: str) -> str:
             s = re.split(r"[（(]", s, 1)[0].rstrip()
             lines.append(re.sub(r"\s{2,}", " ", s))
         out.append(f"{title}\n" + "\n".join(lines))
-    scenes = SCENE_TABLE_RE.search(header)   # S1（fredw-92/S-back）：全剧场景表原样保留（写作模型要照用场景 id）
-    if out and scenes:
-        out.append(scenes.group(0).strip())
-    people = CHARACTER_TABLE_RE.search(header)   # R3：全剧人物表原样保留（EN / VOICE 要逐字照抄进 H3）
-    if out and people:
-        out.append(people.group(0).strip())
+    # S1（fredw-92/S-back）：全剧场景表原样保留（写作模型要照用场景 id）；R3：全剧人物表原样保留（EN / VOICE 要逐字照抄进 H3）。
+    # CLEANUP 11-01（R15）：全局头来源自带全剧表时，registry_block 继承的新角色 / 场景是第二张同名表——每张都保留，不能只取第一张
+    if out:
+        out += [m.group(0).strip() for m in SCENE_TABLE_RE.finditer(header)]
+        out += [m.group(0).strip() for m in CHARACTER_TABLE_RE.finditer(header)]
     return "\n\n".join(out) + "\n" if out else header
 
 

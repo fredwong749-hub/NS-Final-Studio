@@ -2,6 +2,7 @@
 // GET /api/assets/scenes、GET /api/assets/scenes/{id}、POST / DELETE /api/assets/scenes/{id}/plate。
 // 接口未上线（路由 404 / 405）→ 页面显示“后端未就绪”，不再逐集读 SOP 兜底。
 import type { AssetRef, AssetVersion } from "../api_v1";
+import { cardName } from "../edit/lanes";
 
 export interface ScenePlate {
   file?: string | null;
@@ -105,3 +106,74 @@ export const timeLabel = (t: string) => TIME[t] ?? t;
 const VARIANT: Record<string, string> = { main: "主底图", low: "低机位", top: "俯拍", high: "高机位", wide: "全景", close: "近景", night: "夜" };
 export const variantLabel = (v: string) => VARIANT[v] ?? v;
 export const sceneName = (s: SceneView) => s.name || s.description?.name || s.scene_id.replace(/^sk_/, "").replace(/_/g, " ");
+
+// ---------------------------------------------------------------- fredw-92/UXF3（UX 审查 #38）：上传底图 / 批量生成候选
+// 全部用已有接口（不改 API 形状）：上传 = POST /api/assets/{id}/refs（暂存）→ POST /api/assets/{id}/versions {file, variant}
+// → DELETE 暂存参考；批量 = 每个场景 POST /api/assets/{id}/gen-jobs，提示词 = 剧本场景表原文（不改写、不补全）。
+
+/** 上传一张图，存为场景底图新版本（不定稿；定稿在抽屉“底图版本”里点） */
+export async function uploadPlate(id: string, file: File, variant = "main"): Promise<SceneVersion> {
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("role", "space");
+  fd.append("note", "上传底图（暂存，存成底图版本后去掉）");
+  const ref = await call<{ ref_id: string; file: string }>(`/api/assets/${sid(id)}/refs`, { method: "POST", body: fd });
+  const v = await call<SceneVersion>(`/api/assets/${sid(id)}/versions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ file: ref.file, variant, label: `上传 · ${file.name}` }),
+  });
+  await call<unknown>(`/api/assets/${sid(id)}/refs/${sid(ref.ref_id)}`, { method: "DELETE" }).catch(() => undefined);
+  return v;
+}
+
+/** GET /api/render/lanes 的一道 */
+export interface Lane {
+  gpu: number | string;
+  id: string;
+  reachable?: boolean;
+  ok?: boolean;
+  activity?: "image" | "video" | "external" | "idle";
+  queued?: number;
+  load_s?: number;
+  image_pref?: boolean;
+}
+export const loadLanes = () => call<{ lanes: Lane[] }>("/api/render/lanes").then((d) => d.lanes ?? []);
+const ACT: Record<string, string> = { image: "正在出图", video: "出视频", external: "被其他任务占用", idle: "空闲" };
+// fredw-92/UXF4（审查 N7）：卡名统一 lanes.cardName（以前 gpu33:0 和 gpu36:0 都写成“GPU0”）
+export const laneText = (l: Lane) => `${cardName(l.gpu)} · ${l.ok === false ? "连不上" : ACT[l.activity ?? "idle"] ?? l.activity}${l.queued ? ` · 排队 ${l.queued}` : ""}`;
+
+/** 出图默认预设（项目方选定的预览档）；读不到就不带预设（后端旧默认） */
+export async function defaultImagePreset(): Promise<{ id: string; label: string } | null> {
+  try {
+    const d = await call<{ default_preset?: string; presets?: { id: string; label: string; tier?: string }[] }>("/api/render/image-presets?gpu=0");
+    const p = d.presets?.find((x) => x.id === d.default_preset);
+    return p && p.tier !== "final" ? { id: p.id, label: p.label } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 剧本场景表原文（只有 source = script 才有；scenes.json 推断的不算原文）。字段原样拼，不改写 */
+export function sceneTableText(s: SceneView): string | null {
+  const d = s.description as (SceneView["description"] & { light?: unknown; fixtures?: string | null }) | null | undefined;
+  if (!d || d.source !== "script") return null;
+  const light = typeof d.light === "string" ? d.light : "";
+  const lines = [
+    d.name && `场景：${d.name}`,
+    d.space && `空间：${d.space}`,
+    d.time_of_day && `时段：${d.time_of_day}`,
+    light && `光线：${light}`,
+    d.fixtures && `陈设：${d.fixtures}`,
+  ].filter(Boolean) as string[];
+  // 只有名字、没有空间 / 光线 / 陈设的描述 = 没有可用的原文
+  return d.space || light || d.fixtures ? lines.join("\n") : null;
+}
+
+/** 提交一个场景的底图候选生成（自动分道；结果进该场景的修改链，存版本 / 定稿由项目方在抽屉里点） */
+export const submitSceneGen = (id: string, prompt: string, preset?: string) =>
+  call<{ job_id: string }>(`/api/assets/${sid(id)}/gen-jobs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt, refs: [], strength: "medium", label: "候选·待复审 · 批量底图", ...(preset ? { preset } : {}) }),
+  });

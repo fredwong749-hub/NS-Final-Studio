@@ -360,8 +360,45 @@ def character_assets(store: LookStore, cid: str, idx: AssetIndex, usage: dict) -
     }
 
 
+_CHARS_CACHE = None
+
+
+def _chars_sig() -> tuple:
+    """/api/assets/characters 的输入签名：assets/characters 下每个文件 (路径, mtime, 大小) + 造型库 / 剧本文件"""
+    import os
+    out = []
+    base = chars_dir()
+    for dp, _dn, fn in os.walk(base):
+        for f in fn:
+            try:
+                st = os.stat(os.path.join(dp, f))
+                out.append((dp, f, st.st_mtime_ns, st.st_size))
+            except OSError:
+                pass
+    extra = []
+    for f in (ROOT / "data" / "looks").glob("*.json"):
+        try:
+            extra.append((f.name, f.stat().st_mtime_ns))
+        except OSError:
+            pass
+    try:
+        extra.append(("script", (ROOT / "data" / "import" / "script_v2.json").stat().st_mtime_ns))
+    except OSError:
+        pass
+    return (str(base), tuple(sorted(out)), tuple(sorted(extra)))
+
+
 @router.get("/api/assets/characters")
 def list_characters(store: LookStore = Depends(get_store)):
+    """DATAALIGN（总调度 P1，在线 5.4 s）：整份结果按输入签名缓存（返回内容不变）；签名管不到的输入最多旧 10 s"""
+    global _CHARS_CACHE
+    from ns_api.episodes_fast import KeyedCache
+    if _CHARS_CACHE is None:
+        _CHARS_CACHE = KeyedCache(ttl_s=10.0, max_items=4)
+    return _CHARS_CACHE.get(("chars", id(store)), _chars_sig(), lambda: _list_characters(store))
+
+
+def _list_characters(store: LookStore):
     idx = AssetIndex(store)
     usage = item_usage(store)
     return {"slots": list(SLOTS), "item_categories": list(ITEM_CATS), "plate_views": list(PLATE_VIEWS),

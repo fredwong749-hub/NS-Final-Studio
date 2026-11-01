@@ -21,7 +21,13 @@ from ns_schema.h3_lint import ALIGN_PREFIX, FIELDS, VO_PHRASE, alignment_line, f
 MUSIC = "N/A"
 # 剧本说话人括号里表示“人不在画面里出声”的写法（H3-D5）
 OFFSCREEN_MARKS = ("画外", "电话", "语音", "OS", "V.O", "VO")
-LIPS_CLOSED = "The on-screen character's lips remain closed."
+# FIX（CHAIN F7，官方 base-en §4.4 Case）：画外台词的嘴唇句紧跟 </d>：“… <d>…</d> while her/his lips remain
+# completely closed.”。画面里的人是谁、男女，兜底构建器不知道 → 默认用中性主语；调用方给 on_screen_pronoun 时用 her/his
+LIPS_CLOSED = "while the on-screen character's lips remain completely closed."
+
+
+def lips_closed(pronoun: str | None = None) -> str:
+    return f"while {pronoun} lips remain completely closed." if pronoun in ("her", "his") else LIPS_CLOSED
 
 
 @dataclass
@@ -69,6 +75,43 @@ def episode_music_ok(text: str) -> tuple[bool, str]:
     if moods:
         return False, f"有抽象情绪词 {'、'.join(moods)}（H3-S3）"
     return True, ""
+
+
+LIPS_RE = re.compile(r"\blips\b[^.]*\b(?:closed|sealed)\b", re.I)
+
+
+def add_lips_closed(prompt: str) -> str:
+    """项目方 2026-10-31 原话（独白镜加嘴唇闭合）“加”：纯独白镜（人在画、声音只有画外独白）在 H3 正文第一句末尾补
+    官方写法 “, while the on-screen character's lips remain completely closed.”（编译器加，剧本文字不改）。
+    放在第一句（锚定 Picture 1 的那句）而不是末句：只给首帧时末句的 Picture 2 分句会被去掉。已有嘴唇闭合句 → 原样"""
+    p = parse_h3(prompt or "")
+    body = p["fields"].get(FIELDS[0])
+    if not body or LIPS_RE.search(re.sub(r"<d>.*?</d>", " ", body, flags=re.S)):
+        return prompt
+    masked = re.sub(r"<d>.*?</d>", lambda m: "x" * len(m.group(0)), body, flags=re.S)
+    m = re.search(r"[.!?](?=\s|$)", masked)
+    if not m:
+        return prompt
+    i = m.start()
+    new_body = body[:i].rstrip(" ,") + ", " + LIPS_CLOSED + body[i + 1:]
+    return replace_field(prompt, FIELDS[0], new_body)
+
+
+def monologue_only(shot) -> bool:
+    """纯独白镜：有 🎙 独白、没有台词"""
+    vo = getattr(shot, "voiceover", None)
+    has_vo = bool(vo is not None and (getattr(vo, "text", "") or "").strip())
+    has_d = any((getattr(d, "text", "") or "").strip() for d in getattr(shot, "dialogue", None) or [])
+    return has_vo and not has_d
+
+
+def music_warnings(text: str | None) -> list[str]:
+    """FIX（CHAIN F5）：剧本自带 / 人工写的配乐也过 H3-S3（只报 warn，不改文字）"""
+    t = (text or "").strip()
+    if not t or t == "N/A":
+        return []
+    ok, why = episode_music_ok(t)
+    return [] if ok else [f"H3-S3：{why}"]
 
 
 def resolve_music(shot_edit: str | None = None, script_music: str | None = None,
@@ -126,8 +169,11 @@ def is_offscreen(note: str | None, stage: str | None = None) -> bool:
     return any(m in t for m in OFFSCREEN_MARKS)
 
 
-def dialogue_sentences(dialogue, names: tuple[str, ...] = ()) -> tuple[list[str], dict[str, str], list[str]]:
-    """剧本对白 → H3 句子（说话人说明用剧本括号原文，在 <d> 外；<d> 内只放 [Chinese] + 原文）"""
+def dialogue_sentences(dialogue, names: tuple[str, ...] = (), voices: dict[str, str] | None = None,
+                       on_screen_pronoun: str | None = None) -> tuple[list[str], dict[str, str], list[str]]:
+    """剧本对白 → H3 句子（<d> 内只放 [Chinese] + 原文）。
+    FIX（CHAIN F6，官方 §4.4）：<d> 外不再放剧本括号原文（中文舞台提示，“她慌 (S1) says:” 过不了 H3-A7）；
+    说话人短语用人物表 VOICE 英文（voices = {角色名: VOICE短语}），查不到就只写 “(Sx) says:”，由 lint 报缺 VOICE"""
     ids: dict[str, str] = {}
     out, offscreen = [], []
     for d in dialogue or []:
@@ -138,11 +184,11 @@ def dialogue_sentences(dialogue, names: tuple[str, ...] = ()) -> tuple[list[str]
         stage = getattr(d, "stage", None) if not isinstance(d, dict) else d.get("stage")
         key = speaker_key(note, names)
         sid = ids.setdefault(key, f"S{len(ids) + 1}")
-        who = (note or "").strip()
-        lead = f"{who} " if who else ""
+        voice = (voices or {}).get(key, "").strip()
+        lead = f"{voice} " if voice and not _CJK.search(voice) else ""
         if is_offscreen(note, stage):
             offscreen.append(text)
-            out.append(f"{lead}({sid}) {VO_PHRASE}: <d>[Chinese] {text}</d> {LIPS_CLOSED}")
+            out.append(f"{lead}({sid}) {VO_PHRASE}: <d>[Chinese] {text}</d> {lips_closed(on_screen_pronoun)}")
         else:
             out.append(f"{lead}({sid}) says: <d>[Chinese] {text}</d>")
     return out, ids, offscreen
@@ -162,10 +208,10 @@ def strip_triggers(text: str, triggers: list[str]) -> str:
 
 
 def build(shot, soundscape: str, *, frames: int | None = None, body_en: str | None = None,
-          names: tuple[str, ...] = (), music: str = MUSIC) -> H3Draft:
-    """笔记本构建器。shot：ns_schema.script.Shot（或同名属性的对象）。"""
+          names: tuple[str, ...] = (), music: str = MUSIC, voices: dict[str, str] | None = None) -> H3Draft:
+    """笔记本构建器。shot：ns_schema.script.Shot（或同名属性的对象）。voices：人物表 VOICE 英文短语（CHAIN F6）"""
     frames = frames or frames_for_seconds(getattr(shot, "duration", 10) or 10)
-    sents, ids, offscreen = dialogue_sentences(getattr(shot, "dialogue", None), names)
+    sents, ids, offscreen = dialogue_sentences(getattr(shot, "dialogue", None), names, voices)
     if body_en and body_en.strip():
         body = body_en.strip()
     else:

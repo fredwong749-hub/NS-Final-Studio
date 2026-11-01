@@ -1,0 +1,94 @@
+[
+  {
+    "steps": [
+      {
+        "after": 5000,
+        "click": "精修"
+      },
+      {
+        "js": "const out=[]; const all=[...document.querySelectorAll('body *')].filter(e=>[...e.childNodes].some(n=>n.nodeType===3&&n.textContent.trim()==='用卡')); for(const e of all){ const box=e.closest('label,div'); const sel=(box&&box.querySelector('select'))||e.parentElement?.querySelector('select'); if(!sel) continue; const tn=[...e.childNodes].find(n=>n.nodeType===3&&n.textContent.trim()==='用卡'); const r=document.createRange(); r.selectNodeContents(tn); const tr=r.getBoundingClientRect(); const s=sel.getBoundingClientRect(); const hint=(box.querySelector('.v3e-lanehint')||box.parentElement?.querySelector('.v3e-lanehint'))?.getBoundingClientRect(); out.push({labelMid:+(tr.top+tr.height/2).toFixed(1), selectMid:+(s.top+s.height/2).toFixed(1), diff:+Math.abs((tr.top+tr.height/2)-(s.top+s.height/2)).toFixed(1), selectH:Math.round(s.height), labelLeft:Math.round(tr.left), hintLeft:hint?Math.round(hint.left):null}); } return out;"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "title": "精修 1280",
+    "id": "PB_1280",
+    "wait": 8000,
+    "path": "/#ep02",
+    "size": [
+      1280,
+      720
+    ]
+  },
+  {
+    "steps": [
+      {
+        "after": 5000,
+        "click": "精修"
+      },
+      {
+        "js": "const out=[]; const all=[...document.querySelectorAll('body *')].filter(e=>[...e.childNodes].some(n=>n.nodeType===3&&n.textContent.trim()==='用卡')); for(const e of all){ const box=e.closest('label,div'); const sel=(box&&box.querySelector('select'))||e.parentElement?.querySelector('select'); if(!sel) continue; const tn=[...e.childNodes].find(n=>n.nodeType===3&&n.textContent.trim()==='用卡'); const r=document.createRange(); r.selectNodeContents(tn); const tr=r.getBoundingClientRect(); const s=sel.getBoundingClientRect(); const hint=(box.querySelector('.v3e-lanehint')||box.parentElement?.querySelector('.v3e-lanehint'))?.getBoundingClientRect(); out.push({labelMid:+(tr.top+tr.height/2).toFixed(1), selectMid:+(s.top+s.height/2).toFixed(1), diff:+Math.abs((tr.top+tr.height/2)-(s.top+s.height/2)).toFixed(1), selectH:Math.round(s.height), labelLeft:Math.round(tr.left), hintLeft:hint?Math.round(hint.left):null}); } return out;"
+      }
+    ],
+    "title": "精修 1440",
+    "id": "PB_1440",
+    "wait": 8000,
+    "path": "/#ep02",
+    "size": [
+      1440,
+      900
+    ]
+  },
+  {
+    "steps": [
+      {
+        "js": "const rows=[...document.querySelectorAll('.sea-row')]; let bad=[]; for(const row of rows){ const cells=[...row.querySelectorAll(':scope > .sea-cell, .sea-cell')].filter(c=>c.parentElement===row); if(cells.length<2) continue; const tops=cells.map(c=>c.getBoundingClientRect().top), hs=cells.map(c=>c.getBoundingClientRect().height); const dt=Math.max(...tops)-Math.min(...tops), dh=Math.max(...hs)-Math.min(...hs); if(dt>0.5||dh>0.5) bad.push({dt:+dt.toFixed(1),dh:+dh.toFixed(1)}); } const links=[...document.querySelectorAll('.sea-link')].map(l=>Math.round(l.getBoundingClientRect().height)); return {rows:rows.length, misaligned:bad.length, sample:bad.slice(0,5), linkHeights:[...new Set(links)]};"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "title": "总览 1280",
+    "id": "PC_1280",
+    "wait": 9000,
+    "path": "/#/overview",
+    "size": [
+      1280,
+      720
+    ]
+  },
+  {
+    "steps": [
+      {
+        "js": "const rows=[...document.querySelectorAll('.sea-row')]; let bad=[]; for(const row of rows){ const cells=[...row.querySelectorAll(':scope > .sea-cell, .sea-cell')].filter(c=>c.parentElement===row); if(cells.length<2) continue; const tops=cells.map(c=>c.getBoundingClientRect().top), hs=cells.map(c=>c.getBoundingClientRect().height); const dt=Math.max(...tops)-Math.min(...tops), dh=Math.max(...hs)-Math.min(...hs); if(dt>0.5||dh>0.5) bad.push({dt:+dt.toFixed(1),dh:+dh.toFixed(1)}); } const links=[...document.querySelectorAll('.sea-link')].map(l=>Math.round(l.getBoundingClientRect().height)); return {rows:rows.length, misaligned:bad.length, sample:bad.slice(0,5), linkHeights:[...new Set(links)]};"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "title": "总览 1440",
+    "id": "PC_1440",
+    "wait": 9000,
+    "path": "/#/overview",
+    "size": [
+      1440,
+      900
+    ]
+  },
+  {
+    "steps": [
+      {
+        "js": "const rows=[...document.querySelectorAll('.sea-row')]; let bad=[]; for(const row of rows){ const cells=[...row.querySelectorAll(':scope > .sea-cell, .sea-cell')].filter(c=>c.parentElement===row); if(cells.length<2) continue; const tops=cells.map(c=>c.getBoundingClientRect().top), hs=cells.map(c=>c.getBoundingClientRect().height); const dt=Math.max(...tops)-Math.min(...tops), dh=Math.max(...hs)-Math.min(...hs); if(dt>0.5||dh>0.5) bad.push({dt:+dt.toFixed(1),dh:+dh.toFixed(1)}); } const links=[...document.querySelectorAll('.sea-link')].map(l=>Math.round(l.getBoundingClientRect().height)); return {rows:rows.length, misaligned:bad.length, sample:bad.slice(0,5), linkHeights:[...new Set(links)]};"
+      }
+    ],
+    "title": "总览 1920",
+    "id": "PC_1920",
+    "wait": 9000,
+    "path": "/#/overview",
+    "size": [
+      1920,
+      1080
+    ]
+  }
+]

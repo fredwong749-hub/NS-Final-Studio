@@ -1,0 +1,50 @@
+/* 项目设置页（ProjectSettingsPage）。只用 --c-* / --sp-* / --fs-* / --r-* 变量，深浅主题自动跟随。前缀 pset- */
+
+.pset-bar { gap: var(--sp-2); }
+.pset-intro { margin: 0; }
+.v3p-page input.pset-search { flex: 0 1 280px; }
+.pset-skel { display: flex; flex-direction: column; gap: var(--sp-3); }
+
+.pset-group { gap: var(--sp-3); }
+.pset-rows { display: flex; flex-direction: column; }
+
+.pset-row {
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  padding: var(--sp-3) 0; border-top: 1px solid var(--c-line); min-width: 0;
+}
+.pset-row:first-child { border-top: 0; padding-top: 0; }
+.pset-row-head { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.pset-row-head .grow { flex: 1; }
+.pset-label { font-weight: 600; font-size: var(--fs-m); color: var(--c-text); }
+
+/* 已并入：整体灰显，但值和去向照样能读 */
+.pset-row.merged .pset-label,
+.pset-row.merged .pset-val { color: var(--c-text-3); }
+.pset-row.merged .pset-val { opacity: 0.85; }
+
+.pset-val,
+.pset-also { overflow-wrap: anywhere; line-height: 1.6; }
+.pset-also { display: flex; gap: var(--sp-1); align-items: baseline; flex-wrap: wrap; }
+.pset-pre { white-space: pre-wrap; }
+.pset-list { margin: 0; padding-left: var(--sp-4); }
+.pset-list li + li { margin-top: var(--sp-1); }
+
+.pset-edit { display: flex; flex-direction: column; gap: var(--sp-2); max-width: 880px; }
+.pset-edit textarea,
+.pset-edit input:not([type="checkbox"]):not([type="range"]),
+.pset-edit select { width: 100%; }
+.pset-edit textarea { resize: vertical; line-height: 1.6; }
+.pset-num { display: flex; align-items: center; gap: var(--sp-2); }
+.pset-num input[type="range"] { flex: 1; max-width: 320px; accent-color: var(--c-accent); }
+.v3p-page .pset-num input[type="number"] { width: 96px; flex: none; }
+
+.pset-hint { margin: 0; color: var(--c-text-2); font-size: var(--fs-xs); }
+.pset-note {
+  margin: 0; padding: var(--sp-1) var(--sp-2); border-radius: var(--r-m); font-size: var(--fs-xs);
+  background: var(--c-info-soft); color: var(--c-info-text);
+}
+.pset-note.merged { background: var(--c-sunken); color: var(--c-text-2); border: 1px dashed var(--c-line-2); }
+.pset-src {
+  font-size: var(--fs-xs); color: var(--c-text-2); background: var(--c-sunken);
+  padding: 0 var(--sp-1); border-radius: var(--r-s); overflow-wrap: anywhere;
+}

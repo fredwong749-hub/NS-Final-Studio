@@ -18,10 +18,10 @@
   /* 正文 2 色（--c-text-3 只给禁用 / 占位） */
   --c-text: #e8eaee;
   --c-text-2: #8b919c;
-  --c-text-3: #5f6570;
+  --c-text-3: #737985;   /* UIRSI：再提亮到 ≈4.1–4.4:1（排版审查：次要字 ≥3:1 有余量）；UX5：从 #5f6570 提亮，深底上 ≈ 3.7–4.0:1（以前 3.2:1，有 60 多处拿它写说明文字） */
 
   /* 强调色 1 个 */
-  --c-accent: #5b8cff;
+  --c-accent: #3f6fe6;   /* UIRSI：白字在强调色实底上 ≥4.5:1（以前 #5b8cff 只有 3.16:1）；强调色文字用 --c-accent-text */
   --c-on-accent: #ffffff;
 
   /* 状态色：只给状态标签 / 状态点 / 状态描边 */
@@ -31,13 +31,17 @@
   --c-busy: #a78bfa;          /* 渲染中 / gpu3 */
   --c-info: #4aa8e0;
   --c-adult: #e07bb5;
+  --c-stale: #ff8a4c;          /* UX5：依赖已更新（橙），和“候选”黄、“失败”红分开 */
+  --c-stale-text: #ffb38a;
   /* 状态色上的文字（深底上用浅一档） */
   --c-ok-text: #7fe0ae;
-  --c-warn-text: #f6c46e;
+  --c-warn-text: #f8d08a;   /* UIRSI r12：深色 warn-soft 底上 ≥4.5:1 */
   --c-bad-text: #ff9a92;
   --c-busy-text: #cdb4ff;
   --c-accent-text: #9cbcff;
   --c-info-text: #8fd3ff;
+  --c-ok-solid: #3ccf91;  /* UIPIXEL：实底“通过 / 用这张”按钮；深色上配深字（7.8:1） */
+  --c-on-ok: #062a1b;
 
   /* 图上与看图器：两套主题都是深色 */
   --c-scrim: rgba(0, 0, 0, .6);
@@ -45,6 +49,11 @@
 
   --sh-float: 0 16px 48px rgba(0, 0, 0, .5);
   --sh-soft: none;
+  /* UX5：卡片阴影（深色靠表面亮度分层，不加阴影）/ 弹层阴影 */
+  --sh-1: none;
+  --sh-pop: 0 16px 48px rgba(0, 0, 0, .55), 0 0 0 1px rgba(255, 255, 255, .06);
+  /* UX5：状态色浅底（Tag、提示条、角标底色；替代散落的 color-mix 写法） */
+  --soft-mix: 16%;
 }
 
 :root[data-theme="light"] {
@@ -59,9 +68,9 @@
 
   --c-text: #17181c;
   --c-text-2: #6f727a;
-  --c-text-3: #a4a7ae;
+  --c-text-3: #80848c;   /* UIRSI：≈3.5–3.75:1；UX5：从 #a4a7ae 压暗，浅底上 ≈ 3.2–3.4:1（以前 2.3:1，“中断”等字看不清） */
 
-  --c-accent: #2f6bff;
+  --c-accent: #2a62f0;   /* UIRSI：白字 5.1:1（以前 4.50 卡线）*/
   --c-on-accent: #ffffff;
 
   --c-ok: #149a62;
@@ -70,33 +79,69 @@
   --c-busy: #7c3aed;
   --c-info: #0f7fbf;
   --c-adult: #c2338a;
-  --c-ok-text: #0f7a4d;
-  --c-warn-text: #a35f00;
-  --c-bad-text: #c0352c;
+  --c-stale: #d9620a;
+  --c-stale-text: #b04d00;
+  --c-ok-text: #0a6440;   /* UIRSI r12：浅色 *-soft 底上 ≥4.5:1 */
+  --c-warn-text: #8a5000;   /* UIRSI：浅底 + warn-soft 上 ≥4.5:1（以前 4.35）*/
+  --c-bad-text: #a82b23;
   --c-busy-text: #6d28d9;
-  --c-accent-text: #2456d6;
-  --c-info-text: #0b6aa0;
+  --c-accent-text: #1f4bc0;
+  --c-info-text: #095a88;
+  --c-ok-solid: #0b7a4e;  /* UIPIXEL：浅色上白字 5.4:1（--c-ok 只有 3.6:1） */
+  --c-on-ok: #ffffff;
 
   --c-scrim: rgba(0, 0, 0, .55);
   --c-viewer: #0b0c0f;
 
   --sh-float: 0 20px 56px rgba(20, 20, 30, .16);
   --sh-soft: 0 1px 2px rgba(20, 20, 30, .04), 0 8px 24px rgba(20, 20, 30, .06);
+  --sh-1: 0 1px 2px rgba(20, 20, 30, .05), 0 4px 14px rgba(20, 20, 30, .05);
+  --sh-pop: 0 20px 56px rgba(20, 20, 30, .18), 0 0 0 1px rgba(20, 20, 30, .06);
+  --soft-mix: 12%;
 }
 
 :root {
-  /* 字号 3 级 */
+  /* 字号（UX5 统一成 5 级：xs 12 · sm 13 · m 14 · lg 16 · xl 20；旧名 --fs-s=12、--fs-l=20 保留） */
+  --fs-xs: 12px;
+  --fs-sm: 13px;
   --fs-s: 12px;
   --fs-m: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
   --fs-l: 20px;
   --fw-strong: 600;
 
   /* 间距：8 的网格 */
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-6: 24px; --sp-8: 32px;
 
-  /* 圆角 2 档 */
-  --r-1: 6px;
-  --r-2: 10px;
+  /* 圆角（UX5：两套主题一致）s 4 · m 8 · l 12 · pill；旧名 --r-1 = m、--r-2 = l */
+  --r-s: 4px;
+  --r-m: 8px;
+  --r-l: 12px;
+  --r-pill: 999px;
+  --r-1: var(--r-m);
+  --r-2: var(--r-l);
+
+  /* 层级 6 层（UX5） */
+  --z-base: 0; --z-sticky: 10; --z-drawer: 40; --z-pop: 60; --z-modal: 80; --z-toast: 100;
+
+  /* 控件高度 3 档（UX4 规范：24 / 28 / 34）+ 输入 32 */
+  --h-xs: 24px; --h-s: 28px; --h-m: 34px;
+
+  /* 图上文字 / 媒体底（两套主题都一样） */
+  --c-on-media: #fff;
+  --c-media-bg: #000;
+  --c-on-warn: #1b1300;
+
+  /* 状态色浅底 */
+  --c-ok-soft: color-mix(in srgb, var(--c-ok) var(--soft-mix), transparent);
+  --c-warn-soft: color-mix(in srgb, var(--c-warn) var(--soft-mix), transparent);
+  --c-bad-soft: color-mix(in srgb, var(--c-bad) var(--soft-mix), transparent);
+  --c-busy-soft: color-mix(in srgb, var(--c-busy) var(--soft-mix), transparent);
+  --c-info-soft: color-mix(in srgb, var(--c-info) var(--soft-mix), transparent);
+  --c-stale-soft: color-mix(in srgb, var(--c-stale) var(--soft-mix), transparent);
+  --c-accent-soft: color-mix(in srgb, var(--c-accent) var(--soft-mix), transparent);
+  --c-focus: color-mix(in srgb, var(--c-accent) 70%, transparent);
 
   --f-sans: "Inter", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
   --f-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
@@ -109,6 +154,7 @@
   --line: var(--c-line);
   --line-2: var(--c-line-2);
   --fg: var(--c-text);
+  --fg-1: var(--c-text); /* UX5（D3）：styles.css 用到但从没定义过 */
   --fg-2: var(--c-text-2);
   --fg-3: var(--c-text-2);
   --accent: var(--c-accent);
@@ -128,7 +174,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-:root[data-theme="light"] { --r-1: 8px; --r-2: 14px; }
+/* UX5：浅色主题不再改圆角（以前 r-1 / r-2 = 8 / 14，两套主题形状不同） */
 
 /* 主题切换按钮 */
 .theme-toggle { width: 30px; height: 30px; border-radius: var(--r-1); display: inline-grid; place-items: center; border: 0; background: transparent; color: var(--c-text-2); cursor: pointer; }

@@ -1,0 +1,24 @@
+[
+  {
+    "title": "设置 dir",
+    "path": "/#/settings",
+    "id": "B1_s2",
+    "steps": [
+      {
+        "js": "for (let i=0;i<80;i++){ if (!/全部 0\\b/.test(document.body.innerText)) break; await new Promise(r=>setTimeout(r,500)); } const t=document.body.innerText; const i=t.indexOf('services/agent'); return t.slice(Math.max(0,i-120), i+60)"
+      }
+    ],
+    "wait": 9000
+  },
+  {
+    "title": "导入 写作过程",
+    "path": "/#/script-create?tab=import",
+    "id": "B1_i2",
+    "steps": [
+      {
+        "js": "return [...document.querySelectorAll('a,button')].filter(x=>/写作过程/.test(x.innerText)).map(x=>x.tagName+' '+(x.getAttribute('href')||'')+' '+x.innerText.trim().slice(0,20))"
+      }
+    ],
+    "wait": 9000
+  }
+]

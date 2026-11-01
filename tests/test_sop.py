@@ -136,9 +136,19 @@ def gate(p, gid):
 
 
 def test_no_endpoint_accepts_for_owner():
+    """系统从不替项目方接受关口：/api/sop 下只有 GET，唯一例外是 fredw-92/UXF1 的 /api/sop/owner-decision——
+    项目方本人在画布确认框里点（必须 by=owner + 原话，否则 403 / 400；见 tests/test_bad_image_uxf1.py）"""
     for r in app_mod.app.routes:
         if getattr(r, "path", "").startswith("/api/sop"):
+            if r.path == "/api/sop/owner-decision":
+                assert r.methods == {"POST"}
+                continue
             assert r.methods == {"GET"}, r.path
+    from fastapi.testclient import TestClient
+    c = TestClient(app_mod.app)
+    assert c.post("/api/sop/owner-decision", json={"gate": "G4", "quote": "x"}).status_code == 403
+    # UIRSI 2026-10-31：登录的项目方不再因为没填原话被拦（G4 本身的前置条件不满足 → 409）
+    assert c.post("/api/sop/owner-decision", json={"gate": "G4", "by": "owner", "quote": ""}).status_code != 400
 
 
 def test_s1_blocked_shows_owner_cli(env, script):

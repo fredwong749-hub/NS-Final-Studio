@@ -143,6 +143,9 @@ class Take(BaseModel):
     source: str | None = None           # 尾帧来源 gen | next | upload | video；首帧上传为 upload
     bible_version: str | None = None    # T06：出图时的规则版本（ns_agent.compiler.bible_version），信息用
     inputs_sha: str | None = None       # T51：出图时本镜输入哈希（state_timeline.json），与当前不同 = 过期
+    # UX5-B P0（docs/ux_round5/B_revision.md）：出图 / 出视频时所用资产版本 {依赖键: rev}，如 identity:lin_wan、
+    # preset:leica_sstar、vbase:official_base；当前 rev 不同 → “依赖已更新”（只标记，不进 stale，不触发整集重出）
+    deps: dict[str, str] | None = None
     # fredw-92/F4：过期判定的提示词基准（出图时编译器给的本镜提示词）。prompt 不是编译提示词时才记：
     # 指令改图 / 换参考（prompt = 原话，继承父版本的基准）、画布一次性整段替换；"" = 无可比（父版本是上传 / 引用）
     basis_prompt: str | None = None
@@ -154,7 +157,7 @@ class Take(BaseModel):
     refs: list[dict] | None = None      # [{asset_id|path, role, file}]，按 图2、图3… 顺序（图1 = 父版本）
     locked: bool | None = None          # 定稿（takes.json locked[stage] == n；GET 时由 API 补全）
     from_first: int | None = None       # 尾帧 / 视频：由哪一版首帧得到（定稿首帧变了 → 过期）
-    gpu: int | None = None              # 出图用的卡（gpu3 上的 GPU 编号）
+    gpu: int | str | None = None        # 出图 / 视频用的道：gpu33 的卡号 int；其他服务器 "gpu36:2"（fredw-92/LS）
     job_id: str | None = None
     # 视频（api_v1_contract §D，W3）：本版渲染参数 {seed, steps, seconds, frames, lora_strength, prompt_source,
     # prompt_override, first:{n,sha}, last:{n,sha}, model:{…}}；首尾帧 n/sha 与当前定稿不同 = 过期
@@ -165,3 +168,7 @@ class Take(BaseModel):
     # fredw-92/S-back（S3）：首帧带上的场景底图 {scene_id, plate_id, path, sha256, source, slot}；
     # 底图文件换了版本（sha 不同）→ 本版过期「场景底图已改」
     scene_plate: dict | None = None
+    # fredw-92/UXF1：坏图（ns_render.image_check：短边 < 256 px、文件 < 10 KB、尺寸与请求差 > 10 %）→ 原因；
+    # 坏图不设为当前、不能定稿
+    bad: str | None = None
+    quarantined: str | None = None      # 已挪进 takes/_quarantine/ 的时间（tools/quarantine_bad_takes.py）

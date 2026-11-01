@@ -13,6 +13,8 @@
                                                       → job（ns_api.jobs 按卡队列，gpu3 Image 2.1；提示词原样传）
     POST   /api/assets/{asset_id}/versions            {job_id | gen_id | file | take:{shot,stage,n}, label}
                                                       → 存为资产新版本（单品 = 新图片版本；造型 = 新预览图）
+    POST   /api/assets/{asset_id}/void                {gen_ids?, ref_ids?, by, owner_quote, reason}
+                                                      → 标“作废候选”（文件保留；作废参考不能再用作生成参考）
 GET /api/assets/characters/{cid} 里并入本模块的 asset_refs / asset_versions / asset_gens / episodes（assets.py）。
 
 数据：data/assets/asset_refs.json、asset_gens.json、asset_versions.json；图片在 assets/characters/<cid>/refs/<asset_id>/。
@@ -371,6 +373,12 @@ class GenBody(BaseModel):
     width: int | None = None
     height: int | None = None
     parent: str | None = None        # 修改链：上一次生成的 gen_id
+    # fredw-92/ND（只增不改）：出图参数同 frame-jobs（ns_render.image_params）。preset = render_quality.json 预设 id，
+    # params = 覆盖；都不给 = 旧行为（Turbo 默认图，无 LoRA）。预设里的 "@identity" = 本资产所属人物的身份 LoRA
+    # （config/auto_lora_triggers.json，如林晚 lin_wan_qi_v1），加载时触发词放在提示词最前（同编译器）。
+    preset: str | None = None
+    params: dict | None = None
+    label: str = ""                  # 写进生成记录（如“候选·待复审”）
 
 
 def _path_ok(rel: str) -> Path:
@@ -422,6 +430,8 @@ def plan_gen(store: LookStore, asset_id: str, body: GenBody) -> dict:
         role = norm_role(g.role) or hit[1].get("role") or ("space" if asset["kind"] == "scene" else "item")
         if role not in roles_for(asset):
             raise HTTPException(422, f"role 只能是 {roles_for(asset)}")
+        if hit[1].get("void"):
+            raise HTTPException(422, f"参考图 {g.ref_id} 已作废（{hit[1]['void'].get('reason') or '作废候选'}），不能再用作参考")
         p = _path_ok(hit[1]["file"])
         refs.append({"ref_id": g.ref_id, "role": role, "path": hit[1]["file"], "abs": str(p), "k": k})
     order = SCENE_ROLE_ORDER if asset["kind"] == "scene" else ROLE_ORDER
@@ -437,10 +447,39 @@ def plan_gen(store: LookStore, asset_id: str, body: GenBody) -> dict:
     images = ([{"slot": 1, "role": "base", "path": base["path"]}] if base else []) + \
         [{"slot": i, "role": r["role"], "ref_id": r["ref_id"], "path": r["path"]}
          for i, r in enumerate(refs, start=2 if base else 1)]
+    eff, ident = None, []
+    if body.preset or body.params:
+        from ns_render import image_params as IP
+        over = dict(body.params or {})
+        if body.width:
+            over.setdefault("width", body.width)
+        if body.height:
+            over.setdefault("height", body.height)
+        try:
+            eff = IP.resolve(body.preset, over)
+        except IP.ParamError as e:
+            raise HTTPException(422, str(e)) from e
+        if eff.get("tier") == "final":
+            raise HTTPException(422, "资产生成只支持预览档预设（定稿档走镜头 frame-jobs）")
+        ident = identity_loras(asset)
     return {"asset": asset, "base": base, "refs": refs, "images": images, "denoise": denoise if base else 1.0,
             "gpu": gpu, "prompt": body.prompt, "negative": body.negative, "seed": body.seed,
             "strength": body.strength, "size": (body.width or GEN_SIZE[0], body.height or GEN_SIZE[1]),
-            "parent": body.parent}
+            "parent": body.parent, "eff": eff, "identity": ident, "label": body.label}
+
+
+def identity_loras(asset: dict) -> list[dict]:
+    """本资产所属人物的出图身份 LoRA（config/auto_lora_triggers.json，按中文名）→ [{file, strength, trigger}]"""
+    cid = asset.get("character")
+    if not cid:
+        return []
+    try:
+        from ns_agent.compiler import auto_lora_triggers
+        es = auto_lora_triggers().get(CHARACTERS.get(cid, cid)) or []
+    except Exception:  # noqa: BLE001
+        return []
+    return [{"file": str(e["file"]), "strength": float(e.get("strength") or 0.8), "trigger": e.get("trigger") or ""}
+            for e in es if e.get("file") and (e.get("kind") or "image") == "image"]
 
 
 def _fit32(w: int, h: int, area: int) -> tuple[int, int]:
@@ -465,13 +504,32 @@ def run_gen(client, job: dict, plan: dict) -> dict:
              for x in ([plan["base"]["abs"]] if plan["base"] else []) + [r["abs"] for r in plan["refs"]]]
     seed = plan["seed"] if plan["seed"] is not None else P.seed_for(f"asset-gen/{asset['id']}", int(time.time()))
     prefix = f"ns_final/assets/{_safe(asset['id'])}"
+    eff = plan.get("eff")
+    prompt, loras, trig = plan["prompt"], [], []
+    if eff is not None:
+        if eff.get("seed") is not None and plan["seed"] is None:
+            seed = int(eff["seed"])
+        # 身份 LoRA 先按配置强度挂上，再由 image_params.apply 按预设的 "@identity" 行改强度 / 去掉
+        loras = [(x["file"], x["strength"]) for x in plan.get("identity") or []]
+        uses_ident = any(x.get("name") == "@identity" for x in (eff.get("loras") or [])) or eff.get("loras") is None
+        trig = [x["trigger"] for x in plan.get("identity") or [] if x.get("trigger") and uses_ident]
+        if trig:
+            prompt = ", ".join(trig) + ", " + prompt
     if plan["base"]:
-        wf = W.qwen_edit(plan["prompt"], plan["negative"], names, w, h, seed, prefix,
-                         init_image=names[0], denoise=plan["denoise"])
+        wf = W.qwen_edit(prompt, plan["negative"], names, w, h, seed, prefix,
+                         init_image=names[0], denoise=plan["denoise"], loras=loras)
     elif names:
-        wf = W.qwen_edit(plan["prompt"], plan["negative"], names, w, h, seed, prefix, crop=False)
+        wf = W.qwen_edit(prompt, plan["negative"], names, w, h, seed, prefix, crop=False, loras=loras)
     else:
-        wf = W.qwen_t2i(plan["prompt"], plan["negative"], w, h, seed, prefix)
+        wf = W.qwen_t2i(prompt, plan["negative"], w, h, seed, prefix, loras=loras)
+    effective = None
+    if eff is not None:
+        from ns_render import image_params as IP
+        from ns_render import frame_edit as FE
+        IP.apply(wf, eff, FE.identity_lora_files() | {x["file"] for x in plan.get("identity") or []})
+        effective = IP.describe(wf)
+        if effective is not None:
+            effective["seed"] = seed
     if J.cancelled(job):
         raise J.Cancelled()
     t0 = time.monotonic()
@@ -485,6 +543,18 @@ def run_gen(client, job: dict, plan: dict) -> dict:
            "strength": plan["strength"], "denoise": plan["denoise"], "images": plan["images"],
            "workflow": "qwen_edit_init" if plan["base"] else ("qwen_edit_multi" if names else "qwen_t2i"),
            "size": [w, h], "gpu": plan["gpu"], "seconds": round(time.monotonic() - t0, 1), "created_at": _now()}
+    if eff is not None:
+        rec.update(preset=eff.get("preset"), effective=effective, triggers=trig,
+                   size=[int(effective["width"]), int(effective["height"])] if effective and effective.get("width") else [w, h])
+        # LCA：预设的后处理（放大出图缩回 + 锐化）同 frame-jobs；原图保留为 raw_file，effective 记实际值
+        from ns_render import image_params as IP
+        post = IP.post_file(dest, eff)
+        if effective is not None:
+            effective.update(IP.post_effective(eff, effective, post))
+        if post:
+            rec.update(raw_file=rec["file"], file=A.rel(Path(post["path"])), size=post["size"])
+    if plan.get("label"):
+        rec["label"] = plan["label"]
     with _lock:
         allg = _read("asset_gens")
         allg.setdefault(asset["id"], []).append(rec)
@@ -500,6 +570,65 @@ def create_gen_job(asset_id: str, body: GenBody, store: LookStore = Depends(get_
     params = {**body.model_dump(exclude_none=True), "images": plan["images"], "denoise": plan["denoise"]}
     return J.submit("asset_gen", None, plan["gpu"], lambda client, job: run_gen(client, job, plan),
                     params=params, eta_s=60.0, asset_id=asset_id, url=EP.url_for_gpu(plan["gpu"]))
+
+
+# ---------------------------------------------------------------- 作废候选（fredw-92/CHR）
+# 生成记录 / 参考图加 void = {by, owner_quote, reason, at}，label 改为“作废候选 · …”（原 label 存 label_before）。
+# 只改记录，不删文件；作废的参考图不能再用作生成参考（plan_gen 422）。项目方作废须带原话。
+
+VOID_LABEL = "作废候选"
+
+
+class VoidBody(BaseModel):
+    gen_ids: list[str] = Field(default_factory=list)
+    ref_ids: list[str] = Field(default_factory=list)
+    by: str                           # owner | agent:<名>
+    owner_quote: str = ""             # by=owner 时必填：项目方原话
+    reason: str = ""
+
+
+def _void_label(old: str) -> str:
+    if old.startswith(VOID_LABEL):
+        return old
+    rest = old.replace("候选·待复审", "").strip(" ·")
+    return f"{VOID_LABEL} · {rest}" if rest else VOID_LABEL
+
+
+def void_records(asset_id: str, body: VoidBody) -> dict:
+    if not body.gen_ids and not body.ref_ids:
+        raise HTTPException(422, "需要 gen_ids 或 ref_ids")
+    if not body.by.strip():
+        raise HTTPException(422, "by 不能为空")
+    if body.by == "owner" and not body.owner_quote.strip():
+        raise HTTPException(422, "项目方作废须带原话（owner_quote）")
+    mark = {"by": body.by, "owner_quote": body.owner_quote, "reason": body.reason, "at": _now()}
+    with _lock:
+        allg, allr = _read("asset_gens"), _read("asset_refs")
+        gl, rl = allg.get(asset_id, []), allr.get(asset_id, [])
+        miss = [g for g in body.gen_ids if not any(x.get("gen_id") == g for x in gl)] + \
+            [r for r in body.ref_ids if not any(x.get("ref_id") == r for x in rl)]
+        if miss:
+            raise HTTPException(404, f"{asset_id} 没有这些记录：{'、'.join(miss)}")
+        for lst, ids, key in ((gl, set(body.gen_ids), "gen_id"), (rl, set(body.ref_ids), "ref_id")):
+            for x in lst:
+                if x.get(key) in ids:
+                    if "label_before" not in x:
+                        x["label_before"] = x.get("label", "")
+                    x["label"] = _void_label(x.get("label") or x.get("note") or "")
+                    x["void"] = mark
+        if body.gen_ids:
+            _write("asset_gens", allg)
+        if body.ref_ids:
+            _write("asset_refs", allr)
+    return {"asset_id": asset_id, "gens": [_gen_view(g) for g in gl if g.get("gen_id") in set(body.gen_ids)],
+            "refs": [_with_url(r) for r in rl if r.get("ref_id") in set(body.ref_ids)]}
+
+
+@router.post("/api/assets/{asset_id}/void")
+def post_void(asset_id: str, body: VoidBody, store: LookStore = Depends(get_store)):
+    """把生成记录 / 参考图标为“作废候选”（文件保留）"""
+    resolve_asset(store, asset_id)
+    return void_records(asset_id, body)
 
 
 # ---------------------------------------------------------------- 存为资产新版本
@@ -519,6 +648,9 @@ class VersionBody(BaseModel):
     variant: str = "clean"          # 单品图片的 variant（clean | worn | front | 3q | side | back）
     in_place: bool = False          # False（默认）= 资产库新增一个资产（<id>-vN，原资产不动、不让任何镜头过期）；
                                     # True = 原资产上加新图片 / 新预览（用到它的镜头全部过期）
+    # UX6（A_assets_ia B6）：把“新版本”和“另存为新资产”分开。mode=version → 进同一资产的版本链（= in_place），
+    # mode=save_as → 另存为新资产（= 旧默认，也可走 POST /api/assets/{id}/fork）；不填 = 按 in_place（兼容旧调用）
+    mode: str | None = None
 
 
 def _version_source(asset_id: str, body: VersionBody) -> tuple[Path, dict]:
@@ -532,6 +664,8 @@ def _version_source(asset_id: str, body: VersionBody) -> tuple[Path, dict]:
         g = next((g for g in _read("asset_gens").get(asset_id, []) if g.get("gen_id") == body.gen_id), None)
         if not g:
             raise HTTPException(404, f"{asset_id} 没有生成记录 {body.gen_id}")
+        if g.get("void"):
+            raise HTTPException(409, f"生成记录 {body.gen_id} 已作废（{VOID_LABEL}），不能存为版本")
         return _path_ok(g["file"]), {"gen_id": body.gen_id}
     if body.take:
         stage = STAGE_ALIASES.get(body.take.stage)
@@ -561,6 +695,10 @@ def save_version(asset_id: str, body: VersionBody, store: LookStore = Depends(ge
     asset = resolve_asset(store, asset_id)
     if asset["kind"] == "character":
         raise HTTPException(422, "人物身份底图（plates/master）不在这里改版本；请存到具体形象或单品上")
+    if body.mode is not None:
+        if body.mode not in ("version", "save_as"):
+            raise HTTPException(422, "mode 只能是 version（进版本链）| save_as（另存为新资产）")
+        body.in_place = body.mode == "version"
     src, origin = _version_source(asset_id, body)
     if asset["kind"] == "scene":   # S2：场景底图版本链（定稿另走 POST /api/assets/scenes/{id}/plate）
         from ns_api import scene_assets as SA

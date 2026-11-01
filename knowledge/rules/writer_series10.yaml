@@ -1,0 +1,148 @@
+# 规模化写作约束（SERIES 2026-10-31，10 集新剧 series10_v1 实跑）。项目方原话：“记得每样做得好的都记录下来。”
+# 只讲格式与可实现性：人物 / 造型登记、时长分配、返修写法、系统硬约束机检。不规定剧情，不评价内容。
+# 证据全在 data/pipeline/runs/series10_v1/（各段 *.report.json、v1_snapshot/、drive_log.jsonl）。
+rules:
+  - id: K-WRT-201
+    domain: writer
+    link: P0-P1
+    title: 剧情里出现的人都要在人物表里；表外的人只能画外 / 不露脸、不点名
+    when: 写 / 修订 storyline（人物表、各集 logline）
+    then: logline 里出现的每个人名必须是人物表里的角色；需要路人、陌生人、其他参与者时，写成画外 / 不露脸、不点名，或先加进人物表（含 EN / VOICE / 造型）
+    targets: [{kind: writer_prompt, section: 身份锚点}]
+    writer_text: 各集 logline 里出现的每个人都必须在人物表里（有 EN 外貌短语、VOICE、固定造型）；不想加进人物表的人写成画外 / 不露脸、不点名。
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/P1_rev2.report.json, note: "第 0 轮 HC-05：ep8 logline 出现表外人名 Alex；第 1 轮按此规则改后通过"}
+      - {src: data/pipeline/runs/series10_v1/v1_snapshot/ep08/attempt2/P4_ep08.md.report.json, note: "v1 没有这条：P4 镜6 人物 Alex 不在剧本里（LK34-04），一直修不掉"}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-WRT-202
+    domain: writer
+    link: [P0-P1, P3-P4]
+    title: 每个角色登记 2–3 套固定造型（含标志物），P4 造型行只从登记里选、逐字照抄
+    when: storyline 定稿时；P3-P4 写每集 **造型｜<角色>** 行
+    then: P1 另出造型登记（P1_looks.json：每人 marker + 2–3 套 {id, use, zh 服装/鞋/饰品, en}）；P3-P4 输入附本集人物的登记造型，造型行服装 / 鞋 / 饰品与 EN 逐字照抄其中一套；系统机检 HC-06（造型 EN 不在登记里 → warn）
+    targets: [{kind: writer_prompt, section: 身份锚点}]
+    writer_text: 每个 **造型｜<角色>** 行从输入给的登记造型里选一套，服装 / 鞋 / 饰品和 EN 逐字照抄；全剧不另起新造型（规模化：一套造型一张设定图，跨集复用）。
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/v1_snapshot/ep01/attempt2/P4_ep01.md, note: "v1 没有登记造型：林晚 10 集写了 10 套不同服装，顾沉 7 套，设定图无法复用"}
+      - {src: data/pipeline/runs/series10_v1/P1_looks.json, note: "v2 登记：4 人各 3 套 + 标志物"}
+    confidence: medium
+    status: 待验
+    date: 2026-10-31
+  - id: K-WRT-203
+    domain: writer
+    link: P3-P4
+    title: 系统把“镜数 → 平均每镜秒数”算好写进输入，避免每镜默认 6 秒导致总时长不足
+    when: P3-P4 写作输入
+    then: 用户消息附表：目标总时长 T、镜数 6…上限 时每镜平均秒数（T/n），允许区间 max(50,T−5)–min(75,T+5)；明说“每镜都写 6 秒、8 镜只有 48 秒不过”；要求写完自己相加核对
+    targets: [{kind: writer_prompt, section: 时长与节奏}]
+    writer_text: 先定镜数，再按输入给的“镜数 → 平均每镜秒数”表分配 **时长**（镜1 约 4 秒；总时长不够时先加镜，单镜按台词需要写，见 K-WRT-Q07），各镜相加必须落在输入给的区间。
+    # ⤴ RSI r3（11-01，G0 同步）：原 writer_text“其余相应加长，7–9 秒常见；不要每镜都写 6 秒”被 K-WRT-Q07 取代——它和 K-WRT-005（单镜 ≤6 秒）矛盾，是 ep03 / ep04 平均镜长 7.6–7.7 秒的直接原因之一
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/v1_snapshot/ep07/attempt1/P4_ep07.md.report.json, note: "第 1 次（无此表）：10 集里 7 集终稿 QW-E3 总时长 36–49 秒；写作模型几乎每镜 6 秒"}
+      - {src: data/pipeline/runs/series10_v1/v1_snapshot/ep07/attempt2/P4_ep07.md.report.json, note: "第 2 次（加表）：QW-E3 降到 3/10 集"}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-WRT-204
+    domain: writer
+    link: P3-P4
+    title: 返修改镜长时，同镜分拍 / H3 时间轴 / 对齐句 / 台词时段要一起改到新镜长
+    when: P3-P4 返修消息里有 QW-E3 或 SS-M2
+    then: 返修消息追加一句：改任何一镜的 **时长**，同镜 **分拍** 续写到新镜长（最后一拍止 = 新镜长）、H3 At 时间轴、Picture 2 对齐秒数、**台词时段** 一起改，改完相加核对 50–75
+    targets: [{kind: writer_prompt, section: 时长与节奏}]
+    writer_text: 改某一镜的 **时长** 时，同一镜的 **分拍** 必须续写到新镜长（最后一拍的止 = 新镜长），H3 正文的分拍时间、Picture 2 对齐秒数、**台词时段** 一起按新镜长改。
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/v1_snapshot/ep05/attempt1/P4_ep05.md.report.json, note: "第 1 次：返修为凑总时长把镜长改成 9 秒、分拍仍停在 6 秒；终稿 SS-M2 出现在 5/10 集"}
+      - {src: data/pipeline/runs/series10_v1/v1_snapshot/ep05/attempt2/P4_ep05.md.report.json, note: "第 2 次（返修消息加这句）：终稿 SS-M2 0/10 集"}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-WRT-205
+    domain: writer
+    link: [P0-P1, P2-P3, P3-P4]
+    title: 成年硬约束写进写作输入并由系统机检；禁词表不查英文 minor（配乐调式误报）
+    when: 所有写作段（storyline / 剧本 / 分镜）
+    then: 输入附硬约束（全部角色 ≥22 岁、无未成年化词、成年人之间自愿、不涉及真实人物、亲密集标 🔴 只本地生成）；系统机检 HC-01 年龄 ≥22、HC-02 禁词（中文：未成年 / 儿童 / 校服 / 萝莉 …；英文：underage / teen / child / schoolgirl …）。英文 minor 不进禁词表：配乐写 “A minor / minor key”，两次误报白白吃掉返修轮次
+    targets: [{kind: writer_prompt, section: 身份锚点}]
+    writer_text: 全部角色是 22 岁以上的成年人；外貌、动作、服装描述不写任何儿童化 / 未成年化的词（学生、校服、幼态、teen、child、schoolgirl 之类）；亲密内容只发生在成年人之间、出于自愿。
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/hard_constraints.md}
+      - {src: data/pipeline/runs/series10_v1/ep04/v2_hc_false_positive/P4_ep04.md.report.json, note: "“68 BPM, A minor,” 被误判 HC-02，3 轮返修都在改它"}
+      - {src: data/pipeline/runs/series10_v1/ep01/v2_hc_false_positive/P4_ep01.md.report.json, note: "“minor key” 再次误判；之后英文 minor 移出禁词表"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-WRT-206
+    domain: writer
+    link: P3-P4
+    title: 逐字锚点 / 说话人 / 画外三类由系统预拼句子片段，写作模型照抄；返修消息必须带镜号并点明原因
+    when: P3-P4 写作输入与返修（总调度 2026-10-31 定：确定性优先，适合规模化）
+    then: tools/pipeline/p4_fragments.py 按人物表 + 造型登记拼好：锚点句片段“<EN外貌短语> in <造型 EN>”、在画说话“the on-screen <年龄>-year-old <woman/man> with <VOICE> (S1) says”、画外说话“an off-screen … (S1) says in an off-screen voiceover:”，写进用户消息；返修时把 H3-X1 / X3 / X4 换成“镜N 逐字插入 / 删除哪个片段”，P4-SPEC 带镜号，LK34-01/03 点明同镜两条 🎙 / 跨镜重复 / 整句缺失；writer_prompt.repair_message 带上 field（镜号）
+    targets: [{kind: writer_prompt, section: 身份锚点}]
+    writer_text: H3 锚点句、说话人第一次开口的句子、画外说话人，都逐字照抄输入【系统预拼片段】里的对应片段（含开头的 a，不改成 one / the；VOICE 不意译）；画外 / 局部的角色在 H3 正文里不写 EN 外貌短语；一镜最多一条 🎙。
+    evidence:
+      - {src: tests/test_p4_fragments.py, note: "预拼片段经真实 lint 校验同时满足 H3-X1 / X3 / X4 / D8"}
+      - {src: data/pipeline/runs/series10_v1/ep09/v2_pre_fixpass/P4_ep09.md, note: "根因：“one 22-year-old …”（a 被改）、“a warm bright tone”（VOICE 意译）、画外说话人写全外貌（为满足 D8）"}
+      - {src: data/pipeline/runs/series10_v1/ep02/P4_ep02.md.report.json, note: "返修消息带镜号 + 预拼片段后，ep01/02/04/06/08 一轮清零（之前 2 轮修不好）；ep03 一轮清零"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-WRT-207
+    domain: writer
+    link: [P1-P2, P2-P3, P3-P4]
+    title: 剧情不得改变已锁定角色的外貌锚点（发色、发型、标志物），系统机检 HC-07
+    when: 写大纲 / 剧本 / 分镜；修订 storyline
+    then: tools/pipeline/hard_constraints.check_look_lock：改 / 换 / 剪 / 染 + 头发 / 发色 / 发型、dye / cut her hair、new hair color 等改变动作 → block；已作废的标志物写法（林晚：痣 / mole）→ block；描述锁定发色本身的“真实染发色”不算
+    targets: [{kind: writer_prompt, section: 身份锚点}]
+    writer_text: 剧情不改变已锁定角色的外貌锚点：不改发色、不剪发、不换发型、不改标志物（林晚的标志物是钻石水晶甲）；需要“为他改变”的情节点，换成不改变外貌的等效动作。
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/owner_decisions.json, quote: "让写作模型改掉这段剧情（推荐）：保证 10 集里林晚的形象一致"}
+      - {src: data/pipeline/runs/series10_v1/P1_hairfix.report.json, note: "第 0 轮 HC-07 拦下 owner_line 里的“改发色”（来自 P0 Brief），先改 Brief 再改 storyline 后通过"}
+      - {src: tests/test_hard_constraints.py}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-WRT-208
+    domain: writer
+    link: P3-P4
+    title: 返修指引必须确定性点名（镜号 + 原文 + 目标位置 + 枚举值）；点名后 1 轮仍不过就不再找写作模型
+    when: P3-P4 任何返修
+    then: 返修消息逐条写“镜N：把「原文」插入 / 删除 / 整条移到镜M / 【配乐】避让写成「对白避让，独白避让」”这类可直接执行的指令（tools/pipeline/p4_fragments.py：repair_lines / speech_lines / spec_lines，run_chain 自动附上），不只转述规则号；点名后再返修 1 轮仍不过 → 枚举 / 槽位类由系统确定性修正并留痕（fix_cue_avoid 等，只改格式槽位），台词放哪一镜、拆镜这类内容决定标“待人工”
+    targets: [{kind: writer_prompt, section: 分拍与动作}]
+    writer_text: 返修时只照“镜N：…”逐条执行系统给出的插入 / 删除 / 移动指令，未被点名的镜逐字不动；一镜最多一条 🎙；同一镜既有台词又有 🎙 时【配乐】写“对白避让，独白避让”。
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/ep05/P4_ep05.md.report.json, note: "只说“移到相邻空镜”时写作模型挪到了也有 🎙 的镜8；改为系统指名目标镜后定位正确；【配乐】三选一歧义两轮来回改，最终由系统确定性修正"}
+      - {src: data/pipeline/runs/series10_v1/ep07/P4_ep07.md.report.json, note: "点名“两个避让都写”后一轮清零"}
+      - {src: tests/test_p4_fragments.py}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-WRT-209
+    domain: writer
+    link: P3-P4
+    title: 写作模型返修用完后，系统自有片段 / 枚举槽位由系统自动补全（不需要人点头）
+    when: P3-P4 写作模型返修轮次用完仍有 block
+    then: run_chain.run_link 自动调用 p4_fragments.auto_fix：H3-X1 预拼锚点片段缺失 → 逐字补进第一句（紧跟登记外貌短语插入 “in <造型 EN>”，缺外貌短语则补 “, with <外貌短语> in <造型 EN>”）；锚点句写了同一角色的另一套登记造型 → 若本镜 img 写明“镜n起换装”而造型切换行镜号是镜号顺延前的旧号，就改切换行镜号，否则把造型 EN 换成本镜造型；QW-M1 配乐避让枚举 → 按本镜有无台词 / 🎙 改写（只改被点名的镜）。只在 block 变少时采用；台词、画面描述不动；改动写进报告 system_fix 和稿件头注释
+    targets: [{kind: writer_prompt, section: 身份锚点}]
+    writer_text: 锚点句里每个在画角色写一次“<外貌短语> in <本镜造型 EN>”，造型 EN 与本镜生效的造型行一致；合并 / 拆镜后镜号顺延时，造型切换行“镜N起”的镜号一起改。
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/ep09/P4_ep09.md.report.json, note: "合并镜3+4 后造型切换行仍写旧号“镜5起”，锚点句按 img 写了造型 C → H3-X1；auto_fix 把切换行改为“镜4起”（改 1 行），0 block"}
+      - {src: data/pipeline/runs/series10_v1/ep05/P4_ep05.md.report.json, note: "配乐避让枚举由系统修正"}
+      - {src: tests/test_p4_fragments.py}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-WRT-210
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: writer
+    link: P4-P6
+    title: 不加载 LoRA 的出图作业，提示词里去掉全部 LoRA 触发词
+    when: 系统自己拼的出图作业（不走 ns_agent.compiler），graph 里没有 LoRA 节点
+    then: 去掉登记过的触发词（script_v2 globals.lora_triggers + lnwan01 / lnwan_qi / pose_），逐条记 triggers_removed；走生产编译器时由编译器处理
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/assets/first_frame_jobs.json, note: "PROMPT 审核：16 条混入视频触发词 lnwan01；同批还有 hh12clear 6、ptxcorset 2、pose_ 1"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31

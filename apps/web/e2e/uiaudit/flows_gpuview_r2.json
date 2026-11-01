@@ -1,0 +1,46 @@
+[
+  {
+    "title": "队列徽标 vs 列表",
+    "path": "/#ep02",
+    "wait": 8000,
+    "steps": [
+      {
+        "click": "渲染任务",
+        "after": 3000
+      },
+      {
+        "click": "任务队列页",
+        "after": 3000
+      },
+      {
+        "js": "const d=document.querySelector('.drawer'); const tab=[...document.querySelectorAll('.drawer-tabs button')][0]?.innerText.replace(/\\s+/g,' ').trim(); const t=(d||document.body).innerText; const m=t.match(/失败\\s*(\\d+)/g); const sel=[...(d?.querySelectorAll('select')||[])].map(s=>s.options[s.selectedIndex]?.text); return {tab, failedInList:m?m.slice(0,3):null, filters:sel};"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "id": "GV2_queue"
+  },
+  {
+    "title": "队列徽标 ep01",
+    "path": "/#ep01",
+    "wait": 8000,
+    "steps": [
+      {
+        "click": "渲染任务",
+        "after": 3000
+      },
+      {
+        "click": "任务队列页",
+        "after": 3000
+      },
+      {
+        "js": "const d=document.querySelector('.drawer'); const tab=[...document.querySelectorAll('.drawer-tabs button')][0]?.innerText.replace(/\\s+/g,' ').trim(); const t=(d||document.body).innerText; const m=t.match(/失败\\s*(\\d+)/g); const sel=[...(d?.querySelectorAll('select')||[])].map(s=>s.options[s.selectedIndex]?.text); return {tab, failedInList:m?m.slice(0,3):null, filters:sel};"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "id": "GV2_queue_ep01"
+  }
+]

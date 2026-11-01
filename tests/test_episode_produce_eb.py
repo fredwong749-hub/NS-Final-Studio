@@ -76,6 +76,10 @@ class FakeHooks(EPR.Hooks):
     def episode_shots(self, n):
         return self.shot_ids if n == 9 else None
 
+    def materials(self, n, shots):
+        """PREP 资料闸门：测试里默认全部资料齐；not_ready = {镜头: [缺什么]}"""
+        return {s: w for s, w in getattr(self, "not_ready", {}).items() if s in shots}
+
     def recent(self, kind, gpus):
         return []
 
@@ -111,7 +115,9 @@ class FakeHooks(EPR.Hooks):
 def mk(tmp_path):
     def make(**kw):
         h = FakeHooks(**kw)
-        return h, EPR.Producer(hooks=h, root=tmp_path / "episodes")
+        pr = EPR.Producer(hooks=h, root=tmp_path / "episodes")
+        pr.ensure_thread = lambda: None      # 测试里手动 tick，不起后台线程
+        return h, pr
     return make
 
 
@@ -331,3 +337,95 @@ def test_routes_registered(mk, monkeypatch):
     assert r.status_code == 200 and r.json()["mode"] == "review"
     assert c.post("/api/episodes/9/produce", json={"stages": ["first"]}).status_code == 409
     assert c.post("/api/episodes/9/produce/cancel").json()["state"] == "cancelled"
+
+
+def test_fake_picker_and_gpu36_lane_ids(mk):
+    lanes = [{"gpu": 0, "label": "gpu33 GPU0", "image_pref": True, "max_frames": 192, "ok": True, "load_s": 0},
+             {"gpu": "gpu36:0", "label": "gpu36 GPU0", "image_pref": False, "max_frames": 192, "ok": True, "load_s": 0},
+             {"gpu": "gpu36:1", "label": "gpu36 GPU1", "image_pref": False, "max_frames": 192, "ok": True, "load_s": 300},
+             {"gpu": "gpu36:2", "label": "gpu36 GPU2", "image_pref": False, "max_frames": 362, "ok": False}]
+    h, pr = mk(shots=("ep09-S1", "ep09-S2", "ep09-S3"), lanes=lanes)
+    picks = []
+
+    def pick(kind, frames, cands):
+        picks.append((kind, [c["gpu"] for c in cands]))
+        return cands[-1]["gpu"]
+    h.pick = pick
+    for s in h.shot_ids:
+        h.fresh_map[s] = {"image": True, "last": True, "video": False}
+        h.data[s]["locked"] = {"image": 1, "last": 1}
+        h.data[s]["takes"] = [{"stage": "image", "n": 1, "file": "a"}, {"stage": "last", "n": 1, "file": "b"}]
+    pr.start(9, stages=["video"], mode="auto_lock")
+    pr.tick()
+    # gpu36:1 有外部任务（load_s>0）、gpu36:2 不可达 → 只用两条空闲道；第三镜等
+    assert sorted(map(str, (o[3] for o in h.order))) == ["0", "gpu36:0"]
+    assert picks[0] == ("video", [0, "gpu36:0"]) and picks[1] == ("video", [0])
+    v = pr.view(9)
+    assert sum(1 for s in v["shots"] if s["stages"]["video"]["state"] == "ready") == 1
+
+
+def test_plan_is_dry_run_and_counts(mk, tmp_path):
+    """fredw-92/UXF2：开始前的影响面——不提交任务、不落盘；跳过已定稿不过期的阶段；长镜头单列"""
+    h, pr = mk(frames={"ep09-S3": 400})
+    h.fresh_map["ep09-S1"] = {"image": True, "last": False, "video": False}
+    p = pr.plan(9, stages=["first", "last", "video"])
+    assert p["shots"] == 3 and p["mode"] == "review"
+    assert p["steps"]["first"] == {"run": 2, "skip": 1, "review": 0}
+    # fredw-92/UXF4（审查 N6）：没有能出的卡的长镜头不计入步数 / 时间
+    assert p["steps"]["last"]["run"] == 3 and p["steps"]["video"]["run"] == 2 and p["jobs"] == 7
+    assert p["too_long"] == [{"shot_id": "ep09-S3", "frames": 400}]
+    # 3 条道并行：最长的一条链 = 首帧 + 尾帧 + 视频
+    d = p["durations"]
+    assert p["eta_s"] == round(max(d["gen"] * 2 + d["video"], p["work_s"] / 3), 1)
+    assert not h.jobs and not (tmp_path / "episodes").exists()
+    assert pr.plan(9, stages=["first"], force=True)["steps"]["first"] == {"run": 3, "skip": 0, "review": 0}
+    with pytest.raises(HTTPException):
+        pr.plan(8, stages=["first"])
+
+
+def test_plan_eta_uses_only_free_lanes(mk):
+    """fredw-92/UXF4（审查 N6）：预计只按真空闲的卡算——外部任务 / 训练锁 / 连不上的不算"""
+    lanes = [{"gpu": 0, "image_pref": True, "max_frames": 192, "ok": True, "load_s": 0, "activity": "idle"},
+             {"gpu": 1, "image_pref": False, "max_frames": 192, "ok": True, "load_s": 600, "activity": "external"},
+             {"gpu": 3, "image_pref": False, "max_frames": 192, "ok": False, "train_locked": True, "load_s": 0},
+             {"gpu": "gpu36:0", "image_pref": False, "max_frames": 192, "ok": False, "load_s": 0}]
+    h, pr = mk(lanes=lanes)
+    p = pr.plan(9, stages=["first"])
+    assert p["free_lanes"] == [0]
+    assert p["eta_s"] == round(p["work_s"], 1)          # 1 张空闲卡：全部工作串行
+
+
+def test_auto_locked_needs_owner_review(mk):
+    """fredw-92/UXF4（审查 N1）：以前自动测试定稿的阶段不算“已定稿跳过”：每步等我定稿时等项目方复审，不重出"""
+    h, pr = mk(shots=("ep09-S1",))
+    h.fresh_map["ep09-S1"] = {"image": True, "last": True, "video": True,
+                              "auto": {"image": True, "last": False, "video": True}}
+    h.data["ep09-S1"]["locked"] = {"image": 2, "last": 1}
+    p = pr.plan(9, stages=["first", "last", "video"])
+    assert p["steps"]["first"] == {"run": 0, "skip": 0, "review": 1}
+    assert p["steps"]["last"] == {"run": 0, "skip": 1, "review": 0}
+    assert p["steps"]["video"]["review"] == 1 and p["jobs"] == 0
+    # 自动测试定稿模式：照旧跳过
+    assert pr.plan(9, stages=["first"], mode="auto_lock")["steps"]["first"]["skip"] == 1
+    pr.start(9, stages=["first"], mode="review")
+    pr.tick()
+    st = pr.view(9)["shots"][0]["stages"]["first"]
+    assert st["state"] == "review" and "自动测试定稿" in st["reason"] and not h.order
+    # 项目方在画布确认定稿（后端去掉 auto 标记）→ 接着走（已定稿不过期 → 跳过）
+    h.fresh_map["ep09-S1"]["auto"] = {"image": False, "last": False, "video": False}
+    pr._fresh.clear()
+    pr.tick()
+    assert pr.view(9)["shots"][0]["stages"]["first"]["state"] == "skipped"
+
+
+def test_plan_route_and_review_default(mk, monkeypatch):
+    from fastapi.testclient import TestClient
+    from ns_api import app as A
+    h, pr = mk()
+    monkeypatch.setattr(EPR, "PRODUCER", pr)
+    c = TestClient(A.app)
+    r = c.post("/api/episodes/9/produce/plan", json={"stages": ["first", "last"]})
+    assert r.status_code == 200 and r.json()["jobs"] == 6
+    assert c.get("/api/episodes/9/produce").json()["state"] == "none"
+    assert c.post("/api/episodes/9/produce", json={"stages": ["first"]}).json()["mode"] == "review"
+    c.post("/api/episodes/9/produce/cancel")

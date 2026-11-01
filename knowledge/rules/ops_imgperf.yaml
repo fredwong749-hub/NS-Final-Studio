@@ -1,0 +1,55 @@
+# 出图任务性能（IMGPERF，2026-11-01）：项目方“image rendering 肯定有 bugs，怎么这么慢”。domain=ops，id 前缀 K-OPS-P。
+rules:
+  - id: K-OPS-P01
+    domain: ops
+    link: [P5-P6]
+    title: 画布出图任务墙钟 ≤ 2 × GPU 执行时间；超出就按 timing 最慢段查
+    when: 任何 frame 任务（ns_api.jobs，画布重出 / 改图 / 定稿档）
+    then: 任务记录必须有 timing（stages 每段秒数、gpu_s = ComfyUI execution_start→success、total_s）和 progress（当前阶段 + step）。total_s > 2 × gpu_s + 5 s 即违规，看 timing.stages 最慢段定位。契约 postflight、远端打分、调色等非出图必需的工作不得占出图道（放后台线程，版本上标“契约质检中”）
+    params: {ratio: 2.0, slack_s: 5}
+    evidence:
+      - {src: data/jobs/v1/655a3f4c9079.json, quote: "wall 1243.4 s，ComfyUI 约 35 s", note: "11-01 01:50 ep01-S1；take 01:51:29 已写盘，其余 1180 s 是同步 postflight"}
+      - {src: data/jobs/v1/d1669a7b6e0c.json, quote: "total 57.2 s / gpu 31.3 s", note: "postflight 移到后台后（REFLOCK）"}
+    check: tools/perf/frame_timing_check.py
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-P02
+    domain: ops
+    link: [P5-P6]
+    title: 经跳板的远端调用合并成一次 ssh；出发前训练锁读取与准备阶段并行
+    when: 出图 / 契约流程里要连 gpu33 / gpu36（远端打分、训练锁、传图）
+    then: 每次 ssh 经跳板握手约 10–13 s，不要一条命令一次 ssh。remote_score.score_local_files 用一次 ssh（图 base64 走 stdin，远端落盘→打分→手→删目录）；任务出发前的训练锁现读放后台，第一次向 ComfyUI 投图前再等结果（jobs._gate_submit），锁着照样不投图
+    params: {ssh_handshake_s: 11, remote_score_before_s: 129.5, remote_score_after_s: 60.0, lane_check_before_s: 10.4}
+    evidence:
+      - {src: tests/test_imgperf_lanes.py, quote: "test_remote_score_single_ssh"}
+      - {src: data/jobs/v1/d1669a7b6e0c.json, quote: "lane_check 10.4 s"}
+    check: tests/test_imgperf_lanes.py
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-P03
+    domain: ops
+    link: [P5-P6]
+    title: 自动选道 = 最空的道（真实 /queue 深度 + 实测耗时），不为“模型常驻”排队
+    when: 出图任务 gpu 不给或 "auto"（ns_api.jobs.pick_lane）
+    then: 有空闲道 → 空闲道（出图卡 gpu33:0 优先）；都忙 → 预计等待最短（本 API 的任务 × 同类最近 5 次实测中位数 + ComfyUI /queue 里外部任务 × 300 s）。不派：训练锁道、gpu33 GPU2（NEVER_LANES，配置里有也不派）、long_only 的 gpu36:2（视频长镜头道）。所有道都有 qwen_image_2.1_turbo 与 krea2，冷道换模型约 1 分钟，远小于排在一张图后面
+    evidence:
+      - {src: data/jobs/v1/9141d249027c.json, quote: "gpu 0，req auto", note: "S1/S2/S3 三张全排 gpu33:0，gpu33:1/:3、gpu36:0 空闲；旧规则按每张 70 s 算，实测 300–860 s"}
+    check: tests/test_imgperf_lanes.py
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-P04
+    domain: ops
+    link: [P5-P6]
+    title: 展示接口（道表 / 后端状态）永远先回缓存、后台刷新，请求里不现探 ComfyUI
+    when: GET /api/render/lanes 等前端轮询的展示接口要用 ComfyUI 探测结果或训练锁
+    then: 过了 PROBE_TTL_S 就起后台探测（每地址 single-flight、单地址超时 3 s），立即回上次结果并标 stale；从没探过最多等 3 s，各道并行；训练锁从没读到过也不等 ssh。只有提交任务时的选道（pick_lane / lanes() 不带 view）现探
+    params: {view_probe_timeout_s: 3, view_first_wait_s: 3}
+    evidence:
+      - {src: tests/test_uidebug_lanes_swr.py, quote: "test_view_probe_cold_slow_lane_does_not_block_and_single_flight", note: "PAGEWATCH 11-01 实测 10–14 s；改后冷启动 3.12 s、热 0.05 s"}
+    check: tests/test_uidebug_lanes_swr.py
+    confidence: high
+    status: 确认
+    date: 2026-11-01

@@ -1,0 +1,121 @@
+[
+  {
+    "id": "RG1_count",
+    "title": "按钮覆盖",
+    "path": "/#ep02",
+    "wait": 8000,
+    "steps": [
+      {
+        "click": "=审片",
+        "after": 2500
+      },
+      {
+        "js": "const rows=[...document.querySelectorAll('[data-shot]')]; let ver=0, draft=0, verBtn=0, draftBtn=0, inMenu=0; for (const r of rows) { const tiles=[...r.querySelectorAll('[class*=tile], [class*=frame]')].filter(t=>t.getBoundingClientRect().width>40 && /首帧|尾帧/.test(t.innerText) && !/视频/.test(t.innerText.slice(0,6))); for (const t of tiles) { const hasNum=/#\\s*\\d+/.test(t.innerText); const isDraft=/草图|渲染中|未出/.test(t.innerText) && !hasNum; const btn=[...t.querySelectorAll('button')].some(b=>/再生成/.test(b.innerText+b.title)); if (hasNum) { ver++; if (btn) verBtn++; } else if (isDraft) { draft++; if (btn) draftBtn++; } } } inMenu=[...document.querySelectorAll('details.ds-tilebar-more button, .v3-menu button')].filter(b=>/再生成/.test(b.innerText)).length; return {rows:rows.length, versionedTiles:ver, versionedWithBtn:verBtn, draftOrRendering:draft, draftWithBtn:draftBtn, regenInsideMenus:inMenu};"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "id": "RG2_dialog",
+    "title": "弹窗焦点",
+    "path": "/#ep02",
+    "wait": 8000,
+    "steps": [
+      {
+        "click": "=审片",
+        "after": 2500
+      },
+      {
+        "click": "再生成",
+        "after": 1500
+      },
+      {
+        "js": "const m=document.querySelector('.ds-modal'); const a=document.activeElement; return {modal:!!m, role:m?.getAttribute('role'), focusIsTextarea:a?.tagName==='TEXTAREA', mode:document.querySelector('.regen-mode')?.innerText};"
+      },
+      {
+        "shot": "a"
+      },
+      {
+        "tabtrap": ".ds-modal",
+        "n": 6
+      }
+    ]
+  },
+  {
+    "id": "RG3_empty",
+    "title": "空提交",
+    "path": "/#ep02",
+    "wait": 8000,
+    "steps": [
+      {
+        "click": "=审片",
+        "after": 2500
+      },
+      {
+        "click": "再生成",
+        "after": 1500
+      },
+      {
+        "click": "=生成",
+        "within": ".ds-modal",
+        "after": 2500
+      },
+      {
+        "js": "return {err:document.querySelector('.regen-err')?.innerText||null, toasts:[...document.querySelectorAll('.toasts > .toast')].map(e=>e.innerText.slice(0,50))}"
+      }
+    ]
+  },
+  {
+    "id": "RG4_text",
+    "title": "写了要求",
+    "path": "/#ep02",
+    "wait": 8000,
+    "steps": [
+      {
+        "click": "=审片",
+        "after": 2500
+      },
+      {
+        "click": "再生成",
+        "after": 1500
+      },
+      {
+        "typeText": "换成侧脸"
+      },
+      {
+        "js": "return {mode:document.querySelector('.regen-mode')?.innerText}"
+      },
+      {
+        "click": "=生成",
+        "within": ".ds-modal",
+        "after": 2500
+      }
+    ]
+  },
+  {
+    "id": "RG6_last",
+    "title": "尾帧再生成",
+    "path": "/#ep02",
+    "wait": 8000,
+    "steps": [
+      {
+        "click": "=审片",
+        "after": 2500
+      },
+      {
+        "clickAt": "(() => { const t=[...document.querySelectorAll('[data-shot] [class*=tile], [data-shot] [class*=frame]')].find(x=>/尾帧/.test(x.innerText) && /#\\s*\\d+/.test(x.innerText) && [...x.querySelectorAll('button')].some(b=>/再生成/.test(b.innerText+b.title))); const b=t && [...t.querySelectorAll('button')].find(b=>/再生成/.test(b.innerText+b.title)); const r=b?.getBoundingClientRect(); return r?[r.x+r.width/2,r.y+r.height/2]:[null,null]; })()",
+        "after": 1500
+      },
+      {
+        "js": "return {mode:document.querySelector('.regen-mode')?.innerText, title:document.querySelector('.ds-modal')?.innerText.slice(0,30)}"
+      },
+      {
+        "click": "=生成",
+        "within": ".ds-modal",
+        "after": 2500
+      }
+    ]
+  }
+]

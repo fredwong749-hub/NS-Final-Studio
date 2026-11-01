@@ -1,0 +1,370 @@
+[
+  {
+    "id": "RG_canvas",
+    "title": "画布（审片）",
+    "path": "/#ep02",
+    "wait": 8000,
+    "steps": [
+      {
+        "collect": "canvas"
+      },
+      {
+        "parity": "canvas_ep02"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "id": "RG_canvas1",
+    "title": "画布 ep01",
+    "path": "/#ep01",
+    "wait": 8000,
+    "steps": [
+      {
+        "parity": "canvas_ep01"
+      }
+    ]
+  },
+  {
+    "id": "RG_canvas5",
+    "title": "画布 ep05",
+    "path": "/#ep05",
+    "wait": 8000,
+    "steps": [
+      {
+        "parity": "canvas_ep05"
+      }
+    ]
+  },
+  {
+    "wait": 8000,
+    "title": "审片行 ⋯ 菜单",
+    "steps": [
+      {
+        "click": "=审片",
+        "after": 2500
+      },
+      {
+        "js": "const b=[...document.querySelectorAll('button')].filter(x=>/^[.…⋯]+$/.test(x.innerText.trim()) && x.getBoundingClientRect().width>0 && x.getBoundingClientRect().x>1300); if(!b[0]) return 'none'; b[0].click(); return b.length",
+        "after": 1500
+      },
+      {
+        "collect": "rowmenu"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "path": "/#ep02",
+    "id": "RG_rowmenu"
+  },
+  {
+    "wait": 8000,
+    "title": "精修 ⋯ 菜单",
+    "steps": [
+      {
+        "click": "精修",
+        "after": 3000
+      },
+      {
+        "js": "for (let i=0;i<120;i++){ if (!/正在读取/.test(document.body.innerText) && [...document.querySelectorAll('button')].some(b=>/重出首帧|出首帧/.test(b.innerText))) return 'ok '+i; await new Promise(r=>setTimeout(r,500)); } return 'timeout'"
+      },
+      {
+        "wait": 5000
+      },
+      {
+        "js": "const b=[...document.querySelectorAll('button')].filter(x=>/^[.…⋯]+$/.test(x.innerText.trim()) && x.getBoundingClientRect().width>0 && x.getBoundingClientRect().x>500 && x.getBoundingClientRect().x<1080 && x.getBoundingClientRect().y>200); if(!b[0]) return 'none'; b[0].click(); return b.length",
+        "after": 1500
+      },
+      {
+        "collect": "shotmenu"
+      },
+      {
+        "click": "参数",
+        "after": 1500
+      },
+      {
+        "collect": "shotparams2"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "path": "/#ep02",
+    "id": "RG_shotmenu"
+  },
+  {
+    "id": "RG_shot",
+    "title": "镜头精修",
+    "path": "/#ep02",
+    "wait": 8000,
+    "steps": [
+      {
+        "click": "精修"
+      },
+      {
+        "wait": 5000
+      },
+      {
+        "wait": 3000
+      },
+      {
+        "collect": "shot"
+      },
+      {
+        "shot": "a"
+      },
+      {
+        "click": "参数"
+      },
+      {
+        "wait": 1500
+      },
+      {
+        "collect": "shot_params"
+      },
+      {
+        "click": "版本"
+      },
+      {
+        "wait": 1500
+      },
+      {
+        "collect": "shot_ver"
+      },
+      {
+        "click": "视频"
+      },
+      {
+        "wait": 1500
+      },
+      {
+        "collect": "shot_video"
+      }
+    ]
+  },
+  {
+    "id": "RG_tools",
+    "title": "工具菜单",
+    "path": "/#ep02",
+    "wait": 7000,
+    "steps": [
+      {
+        "click": "工具"
+      },
+      {
+        "wait": 1000
+      },
+      {
+        "collect": "tools"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "id": "RG_storyboard",
+    "title": "分镜表",
+    "path": "/#ep02",
+    "wait": 7000,
+    "steps": [
+      {
+        "click": "工具"
+      },
+      {
+        "wait": 800
+      },
+      {
+        "click": "分镜表"
+      },
+      {
+        "wait": 3000
+      },
+      {
+        "collect": "storyboard"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "id": "RG_table",
+    "title": "表格视图",
+    "path": "/#ep02",
+    "wait": 7000,
+    "steps": [
+      {
+        "click": "工具"
+      },
+      {
+        "wait": 800
+      },
+      {
+        "click": "表格视图"
+      },
+      {
+        "wait": 3000
+      },
+      {
+        "collect": "table"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "id": "RG_materials",
+    "title": "剧本步骤（资料清单）",
+    "path": "/#ep02",
+    "wait": 7000,
+    "steps": [
+      {
+        "click": "剧本"
+      },
+      {
+        "wait": 2500
+      },
+      {
+        "collect": "materials"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "id": "RG_script",
+    "title": "剧本页",
+    "path": "/#/script-create",
+    "wait": 9000,
+    "steps": [
+      {
+        "collect": "script"
+      },
+      {
+        "parity": "script"
+      },
+      {
+        "shot": "a"
+      },
+      {
+        "js": "window.scrollTo(0,1200);document.querySelector('.v3-page')?.scrollTo(0,1200);return 1"
+      },
+      {
+        "shot": "b"
+      }
+    ]
+  },
+  {
+    "id": "RG_overview",
+    "title": "全剧总览",
+    "path": "/#/overview",
+    "wait": 9000,
+    "steps": [
+      {
+        "collect": "overview"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "id": "RG_scriptab",
+    "title": "剧本 A/B",
+    "path": "/#/script-ab",
+    "wait": 9000,
+    "steps": [
+      {
+        "collect": "scriptab"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "id": "RG_settings",
+    "title": "项目设置",
+    "path": "/#/settings",
+    "wait": 9000,
+    "steps": [
+      {
+        "js": "for (let i=0;i<80;i++){ if (!/全部 0\\b/.test(document.body.innerText)) return 'ok '+i; await new Promise(r=>setTimeout(r,500)); } return 'timeout: still 全部 0'"
+      },
+      {
+        "collect": "settings"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "id": "RG_chat",
+    "title": "写作对话",
+    "path": "/#/script-chat",
+    "wait": 9000,
+    "steps": [
+      {
+        "collect": "chat"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "id": "RG_sound",
+    "title": "声音",
+    "path": "/#/sound",
+    "wait": 9000,
+    "steps": [
+      {
+        "collect": "sound"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "id": "RG_char",
+    "title": "人物页",
+    "path": "/#/assets?type=character&char=lin_wan",
+    "wait": 10000,
+    "steps": [
+      {
+        "js": "for (let i=0;i<80;i++){ if (document.querySelector('.hub-anchors-st')) return 'ok '+i; await new Promise(r=>setTimeout(r,500)); } return 'timeout'"
+      },
+      {
+        "collect": "char"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "id": "RG_cut",
+    "title": "成片",
+    "path": "/#ep02",
+    "wait": 7000,
+    "steps": [
+      {
+        "click": "成片"
+      },
+      {
+        "wait": 4000
+      },
+      {
+        "collect": "cut"
+      }
+    ]
+  }
+]

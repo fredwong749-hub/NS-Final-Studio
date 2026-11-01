@@ -1,18 +1,26 @@
 // fredw-92/W4b：图片精修循环（§7.1 四种改法）+ 视频改参数重渲（§D）。
-// 提示词 / 修改要求是项目方原话：原样发送，不预填、不改写、不检测。
+// 提示词 / 修改要求是项目方原话：原样发送，不改写、不检测。
+// fredw-92/UXF2（审查 #23 / #24 / #29）：不再是盖住大图的模态框，改成停靠在大格右边的面板（大图一直看得见）；
+//   局部重绘标“即将支持”；视频“提示词覆盖”预填当前提示词（没改就不发），试验选项收进“更多”；用卡写真实道名。
+import { thumb } from "../../thumb";
 import { useEffect, useMemo, useState } from "react";
 import type { ShotSummary } from "../../types";
 import { api } from "../../api";
 import { useStudio } from "../../store";
-import { useUi } from "../ui";
+import { useUi } from "../ui.helpers";
 import {
   apiV1, isNotReady, opt, MODE_LABEL, ROLE_LABEL, STRENGTH_LABEL,
   type EditMode, type FrameSlot, type RefRole, type RefSpec, type Strength, type VideoJobBody,
 } from "../api_v1";
-import { currentTake, etaFor, fmtSec, gpuLabel, setEdit, takeUrl, takesOf, useEdit } from "./state";
+import { currentTake, etaFor, fmtSec, setEdit, takeUrl, takesOf, useEdit } from "./state";
+import { LaneSelect } from "./LaneSelect";
+import { laneWait } from "./LaneSelect.helpers";
+import { useLanes, type LanePick } from "./lanes";
 import { SLOT_NAME, submitFrame, submitVideo } from "./actions";
 import { ExtraVideoLoras, type ExtraLoraPick } from "./ExtraVideoLoras";
-import { ImageParamsPanel, paramBody, useParamChoice } from "./ImageParams";
+import { VideoBasePicker } from "./VideoBase";
+import { baseFixed, initialBase, useVideoBases } from "./VideoBase.helpers";
+import { paramBody, presetLabelOf, useParamChoice } from "./ImageParams.helpers";
 
 type LoopMode = EditMode | "inpaint" | "video";
 const MODES: [LoopMode, string][] = [
@@ -94,25 +102,38 @@ export function EditLoop({ shot }: { shot: ShotSummary }) {
   const [instruction, setInstruction] = useState("");
   const [strength, setStrength] = useState<Strength>("medium");
   const [seed, setSeed] = useState("");
-  const [gpu, setGpu] = useState<0 | 3>(es.gpu);
+  const [gpu, setGpu] = useState<LanePick>(es.gpu);
+  const { lanes } = useLanes();
   const [busy, setBusy] = useState(false);
   const refs = useRefChoices(id);
   useParamChoice();   // 面板改了 → 重新算摘要
   const pb = paramBody(mode);
-  const paramSummary = pb.preset ? ` · ${pb.preset}${pb.params ? ` 改 ${Object.keys(pb.params).length} 项` : ""}` : " · 默认（项目方选定 C）";
+  // UX4：摘要写预设名字（“徕卡 S★（默认）”），不写 id，也不再写过时的“项目方选定 C”
+  const pLabel = presetLabelOf(pb.preset);
+  const paramSummary = ` · ${pLabel}${!pb.preset && pLabel !== "默认预设" ? "（默认）" : ""}${pb.params ? ` 改 ${Object.keys(pb.params).length} 项` : ""}`;
   const ui = useUi();
 
   // 视频参数
   const vt = slot === "video" ? currentTake(es, d, id, "video") : null;
   const vp = vt?.params ?? {};
+  // 视频提示词：预填（这一版用过的覆盖 > 当前 H3 原文）；和 H3 原文一样就不发（= 用剧本原文）
+  const h3Base = shot.h3_prompt ?? d?.compiled.video_prompt ?? "";
+  const vpo = (vp as { prompt_override?: string | null }).prompt_override;
   const [v, setV] = useState({
-    prompt_override: "",
+    prompt_override: vpo || h3Base,
     seed: vp.seed != null ? String(vp.seed) : "",
     steps: vp.steps != null ? String(vp.steps) : "",
     seconds: vp.seconds != null ? String(vp.seconds) : shot.duration?.seconds ? String(shot.duration.seconds) : "",
     lora_strength: vp.lora_strength != null ? String(vp.lora_strength) : "",
   });
   const [xLora, setXLora] = useState<ExtraLoraPick | null>(vp.loras?.[0] ?? null);   // fredw-92/VB
+  const [vBase, setVBase] = useState<string>(initialBase(vp, !!vt));   // fredw-92/PF：沿用这一版的；没有视频版本 → 配置默认
+  const vBases = useVideoBases();
+  const vFixed = baseFixed(vBases, vBase);   // Pika Flex：步数 / LoRA 强度固定，不发
+  // UX4：尾帧怎么用（video-jobs 的 last_frame_mode，fredw-92/QCV）。默认沿用这一版；老版本没记 = “首尾帧都用”
+  const [lfm, setLfm] = useState<"use" | "none" | "auto">(((vp as { last_frame_mode?: string }).last_frame_mode as "use" | "none" | "auto") || "use");
+  const vqc = (shot as { video_qc?: { verdict?: string | null; labels?: string[] | null; metrics?: { frozen_tail_s?: number } | null } | null }).video_qc;
+  const frozenTail = !!vqc && vqc.verdict !== "pass" && ((vqc.metrics?.frozen_tail_s ?? 0) >= 0.8 || (vqc.labels ?? []).some((l) => l.includes("定住") || l.includes("静止")));
 
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === "Escape" && close();
@@ -120,7 +141,9 @@ export function EditLoop({ shot }: { shot: ShotSummary }) {
     return () => window.removeEventListener("keydown", k);
   }, []);
 
-  const eta = etaFor(slot, gpu, Number(v.seconds) || shot.duration?.seconds);
+  const eta0 = etaFor(slot, gpu, Number(v.seconds) || shot.duration?.seconds);
+  const eta = { ...eta0, eta: eta0.eta + laneWait(gpu, slot === "video" ? "video" : "image", lanes) };
+  const poDirty = v.prompt_override !== h3Base;
   const pickedRefs = (refs.list ?? []).filter((r) => r.on);
   const num = (s: string) => (s.trim() === "" ? undefined : Number(s));
 
@@ -135,14 +158,17 @@ export function EditLoop({ shot }: { shot: ShotSummary }) {
     setBusy(true);
     let ok = false;
     if (mode === "video") {
-      const body: VideoJobBody = { gpu: gpu as 3 | 0 };
+      const body: VideoJobBody = { gpu };
       if (vt) body.parent = vt.n;
-      if (v.prompt_override.trim()) body.prompt_override = v.prompt_override;
+      if (v.prompt_override.trim() && poDirty) body.prompt_override = v.prompt_override;
+      body.base = vBase;
       for (const k of ["seed", "steps", "seconds", "lora_strength"] as const) {
+        if (vFixed && (k === "steps" || k === "lora_strength")) continue;
         const n = num(v[k]);
         if (n !== undefined && !Number.isNaN(n)) body[k] = n;
       }
       if (xLora) body.loras = [xLora];
+      body.last_frame_mode = lfm;   // RR：后端默认随基底（official_base = 只给首帧），界面选什么就明确发什么
       ok = await submitVideo(id, body, studio.notify, studio.refreshAfter);
     } else if (mode !== "inpaint") {
       const fs = slot as FrameSlot;
@@ -164,10 +190,10 @@ export function EditLoop({ shot }: { shot: ShotSummary }) {
   }
 
   return (
-    <div className="v3e-modal" onMouseDown={(e) => e.target === e.currentTarget && close()}>
-      <div className="v3e-dlg loop" role="dialog" aria-label="修改诉求">
+    <aside className="v3e-dock" data-overlay="edit-loop">
+      <div className="v3e-dlg loop docked" role="region" aria-label="修改诉求">
         <header>
-          {parentTake && takeUrl(parentTake) ? <img className="v3e-dthumb" src={takeUrl(parentTake)!} alt="" /> : <span className="v3e-dthumb e" />}
+          {parentTake && takeUrl(parentTake) ? <img className="v3e-dthumb" src={thumb(takeUrl(parentTake)!, 240) ?? takeUrl(parentTake)!} alt="" /> : <span className="v3e-dthumb e" />}
           <div>
             <h3>
               {mode === "video" ? `改参数重渲 · ${id} 视频` : `修改诉求 · ${id} ${SLOT_NAME[slot]}`}
@@ -192,11 +218,11 @@ export function EditLoop({ shot }: { shot: ShotSummary }) {
                 key={m}
                 className={mode === m ? "on" : ""}
                 disabled={m === "inpaint" || (m !== "regen" && !parentTake)}
-                title={m === "inpaint" ? "需要新增蒙版流程（视频卡 GPU3 上的蒙版工作流，封板后做）" : undefined}
+                title={m === "inpaint" ? "局部重绘（画蒙版只改一块）即将支持" : undefined}
                 onClick={() => setMode(m)}
               >
                 {t}
-                {m === "inpaint" && <small>需要新增蒙版流程</small>}
+                {m === "inpaint" && <small>即将支持</small>}
               </button>
             ))}
           </div>
@@ -251,7 +277,7 @@ export function EditLoop({ shot }: { shot: ShotSummary }) {
                         onClick={() => refs.setList((l) => l!.map((x) => (x.key === r.key ? { ...x, on: !x.on } : x)))}
                         title={r.label}
                       >
-                        {r.url ? <img src={r.url} alt="" loading="lazy" /> : <span className="e">无图</span>}
+                        {r.url ? <img src={thumb(r.url, 240) ?? r.url} alt="" loading="lazy" /> : <span className="e">无图</span>}
                         {r.on && <i>图{pickedRefs.findIndex((p) => p.key === r.key) + 2}</i>}
                       </button>
                       <div className="nm">{r.label}</div>
@@ -268,12 +294,20 @@ export function EditLoop({ shot }: { shot: ShotSummary }) {
               )}
             </div>
           )}
-          {mode === "inpaint" && <div className="v3e-note">局部重绘需要新增蒙版流程（视频卡 GPU3），封板后做。</div>}
+          {mode === "inpaint" && <div className="v3e-note">局部重绘即将支持。</div>}
           {mode === "video" && (
             <div className="v3e-vform">
               <label className="v3e-fld wide">
-                <span>提示词覆盖（不填 = 用当前 H3 提示词原样；填了这一次原样替换）</span>
-                <textarea rows={5} value={v.prompt_override} onChange={(e) => setV({ ...v, prompt_override: e.target.value })} />
+                <span>
+                  视频提示词（这一次原样发送；不改 = 用剧本原文）
+                  {poDirty && (
+                    <button className="v3e-link" onClick={() => setV({ ...v, prompt_override: h3Base })}>
+                      还原成剧本原文
+                    </button>
+                  )}
+                </span>
+                <textarea rows={8} className={poDirty ? "dirty" : ""} value={v.prompt_override} onChange={(e) => setV({ ...v, prompt_override: e.target.value })} />
+                <small>{poDirty ? "已改动：只这一次用改过的提示词，不改剧本" : "没改动：按剧本原文出"}</small>
               </label>
               {(
                 [
@@ -285,10 +319,42 @@ export function EditLoop({ shot }: { shot: ShotSummary }) {
               ).map(([k, t, ph]) => (
                 <label key={k} className="v3e-fld">
                   <span>{t}</span>
-                  <input inputMode="decimal" value={v[k]} placeholder={ph} onChange={(e) => setV({ ...v, [k]: e.target.value })} />
+                  {vFixed && (k === "steps" || k === "lora_strength") ? (
+                    <input disabled value="" placeholder="这个出片方式不用填" />
+                  ) : (
+                    <input inputMode="decimal" value={v[k]} placeholder={ph} onChange={(e) => setV({ ...v, [k]: e.target.value })} />
+                  )}
                 </label>
               ))}
-              <ExtraVideoLoras value={xLora} onChange={setXLora} />
+              {/* UX4：尾帧用法放在主表单（和“静止·不合格 / 结尾定住”质检角标对上），出片方式（视频基底）也提出来，人话写清楚 */}
+              <div className="v3e-fld wide">
+                <span>
+                  <b style={{ whiteSpace: "nowrap", fontWeight: "inherit", flex: "none" }}>尾帧怎么用</b>
+                  <small className={frozenTail ? "warn" : undefined}>
+                    {frozenTail
+                      ? `这一版质检：${(vqc?.labels ?? []).join("、") || "结尾定住"}。可以试“只用首帧”或“自动”，让结尾不被尾帧拉住`
+                      : "默认首尾帧都给：视频从首帧走到尾帧"}
+                  </small>
+                </span>
+                <div className="v3e-seg sm">
+                  {(
+                    [
+                      ["use", "首尾帧都用", "视频从定稿首帧走到定稿尾帧（默认）"],
+                      ["none", "只用首帧", "不给尾帧：动作更自由，结尾不会被拉回尾帧定住；画面终点不保证和尾帧一样"],
+                      ["auto", "自动", "首尾帧几乎一样时只给首帧（避免整段定住），不一样时首尾帧都给"],
+                    ] as const
+                  ).map(([k, t, tip]) => (
+                    <button key={k} className={lfm === k ? "on" : ""} onClick={() => setLfm(k)} title={tip}>
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <VideoBasePicker value={vBase} onChange={setVBase} />
+              <details className="v3e-fold wide" open={!!xLora || undefined}>
+                <summary>更多（试验选项：附加 LoRA）</summary>
+                <ExtraVideoLoras value={xLora} onChange={setXLora} />
+              </details>
             </div>
           )}
           {mode !== "video" && mode !== "inpaint" && (
@@ -297,22 +363,24 @@ export function EditLoop({ shot }: { shot: ShotSummary }) {
               <input inputMode="numeric" value={seed} onChange={(e) => setSeed(e.target.value)} placeholder={parentTake ? `上一版 ${parentTake.seed}` : "随机"} />
             </label>
           )}
-          {/* fredw-92/PX：出图参数（与右栏「高级」共用同一份选择） */}
+          {/* UIRSI r11（D12）：出图参数只在右栏「参数」一处改；这里写这次会用的参数摘要 */}
           {mode !== "video" && mode !== "inpaint" && (
-            <details className="v3e-fold wide">
-              <summary>出图参数{paramSummary}</summary>
-              <ImageParamsPanel gpu={gpu} mode={mode} />
-            </details>
+            <div className="v3e-fld wide">
+              <span>出图参数</span>
+              <div className="v3e-ro">
+                这次用{paramSummary.replace(/^ · /, "：")}
+                <button className="v3e-link" onClick={() => ui.setRightTab("advanced")} title="在右栏「参数」里改（和这里同一份）">
+                  去「参数」改 ›
+                </button>
+              </div>
+            </div>
           )}
         </div>
 
         <footer>
           <label className="v3e-gpu">
             用卡
-            <select value={gpu} onChange={(e) => setGpu(Number(e.target.value) as 0 | 3)}>
-              <option value={3}>{gpuLabel(3)}</option>
-              <option value={0}>{gpuLabel(0)}</option>
-            </select>
+            <LaneSelect value={gpu} onChange={setGpu} kind={slot === "video" ? "video" : "image"} frames={shot.h3_frames} />
           </label>
           <span className="eta">
             预计约 {fmtSec(eta.eta)}
@@ -327,6 +395,6 @@ export function EditLoop({ shot }: { shot: ShotSummary }) {
           </button>
         </footer>
       </div>
-    </div>
+    </aside>
   );
 }

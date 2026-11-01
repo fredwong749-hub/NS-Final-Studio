@@ -1,0 +1,71 @@
+[
+  {
+    "path": "/#/assets?type=character&char=lin_wan",
+    "steps": [
+      {
+        "js": "await new Promise(r=>setTimeout(r,150)); const sk=[...document.querySelectorAll('.ds-skel')].filter(e=>e.getBoundingClientRect().width>0); const rows={}; sk.forEach(e=>{const r=e.getBoundingClientRect(); const k=Math.round(r.top); (rows[k]??=[]).push(Math.round(r.height));}); return {skels:sk.length, rowsWithMixedHeights:Object.values(rows).filter(h=>new Set(h).size>1).length};"
+      }
+    ],
+    "wait": 100,
+    "title": "人物页首屏",
+    "id": "A_boot_char1"
+  },
+  {
+    "path": "/#/assets?type=character&char=lin_wan",
+    "steps": [],
+    "wait": 100,
+    "title": "人物页首屏2",
+    "id": "A_boot_char2"
+  },
+  {
+    "path": "/#/assets?type=people",
+    "steps": [],
+    "wait": 100,
+    "title": "人物登记首屏",
+    "id": "A_boot_people1"
+  },
+  {
+    "path": "/#/assets?type=people",
+    "steps": [],
+    "wait": 100,
+    "title": "人物登记首屏2",
+    "id": "A_boot_people2"
+  },
+  {
+    "path": "/#/assets?type=character&char=lin_wan",
+    "steps": [
+      {
+        "js": "const m=document.querySelector('.ac-main'); return {scrollPaddingTop:m?getComputedStyle(m).scrollPaddingTop:null};"
+      },
+      {
+        "tabwalk": "char",
+        "n": 40
+      },
+      {
+        "scrollEach": "m"
+      }
+    ],
+    "wait": 10000,
+    "title": "人物页 Tab",
+    "id": "A_char_tab"
+  },
+  {
+    "path": "/#/assets?type=people",
+    "title": "人物登记 Tab",
+    "id": "A_people_tab",
+    "wait": 10000,
+    "size": [
+      1280,
+      720
+    ],
+    "steps": [
+      {
+        "js": "const m=document.querySelector('.ac-main'); return {scrollPaddingTop:m?getComputedStyle(m).scrollPaddingTop:null};"
+      },
+      {
+        "tabwalk": "people",
+        "n": 40
+      }
+    ]
+  }
+]

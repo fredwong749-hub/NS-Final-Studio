@@ -18,9 +18,10 @@ LIGHT_SHOT_KEYS = (
     "id", "index", "review", "stale", "job", "job_stage", "queue_pos", "explicit_hold", "adult", "edited", "owner",
     "first_frame", "first_frame_take", "last_frame_target", "last_frame_take", "last_frame_source", "video",
     "img_summary", "duration", "latest_take", "takes_count", "frames_source", "gpu3", "next_shot", "prev_shot",
-    "needs_review",
+    "needs_review", "bad", "locked_take", "stale_global", "video_qc", "stale_deps",
 )
 LIGHT_CHAR_KEYS = ("character", "name", "face_url", "look_id", "look_label", "look_name", "d_state")
+LIGHT_CHAR_OPT = ("cast_source", "presence")   # DATAALIGN：与出图同源的标记，有才带（资产中心按它判 series10 造型字母）
 EPISODE_KEYS = ("number", "title", "high_intensity", "tag", "synopsis", "edit", "music", "audio_supported",
                 "readiness", "explicit_hold_count")
 
@@ -30,7 +31,8 @@ def light_shot(s: dict) -> dict:
     exp = s.get("expression")
     if isinstance(exp, dict):
         out["expression"] = {"source": exp.get("source")}
-    out["characters"] = [{k: c.get(k) for k in LIGHT_CHAR_KEYS} for c in s.get("characters") or []]
+    out["characters"] = [{**{k: c.get(k) for k in LIGHT_CHAR_KEYS}, **{k: c[k] for k in LIGHT_CHAR_OPT if k in c}}
+                         for c in s.get("characters") or []]
     return out
 
 
@@ -102,6 +104,23 @@ class SummaryCache:
         with self._lock:
             self._at = 0.0
             self._gen += 1
+
+    def refresh_now(self, timeout_s: float = 60.0) -> None:
+        """DATAALIGN（D-COUNT 滞后）：已知输入变了（takes.json 等）→ 同步重算到最新一代再返回；并发调用者共用同一次重算。
+        build() 走按镜缓存，只有变了的镜头真算，通常 0.1–0.3 s"""
+        self.invalidate()
+        t0 = time.time()
+        while time.time() - t0 < timeout_s:
+            with self._lock:
+                if self._at > 0:                 # invalidate 之后已有一代按新输入算完
+                    return
+                busy = self._refreshing
+                if not busy:
+                    self._refreshing = True
+            if not busy:
+                self._run()
+            else:
+                time.sleep(0.02)
 
     def get(self) -> tuple[list[dict], float]:
         with self._lock:

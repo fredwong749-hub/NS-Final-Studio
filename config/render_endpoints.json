@@ -12,5 +12,38 @@
     "0": "http://127.0.0.1:18188",
     "1": "http://127.0.0.1:18189",
     "3": "http://127.0.0.1:18191"
-  }
+  },
+  "lanes": {
+    "gpu36:0": {
+      "url": "http://127.0.0.1:18288",
+      "label": "gpu36:0（3090，隧道 18288 → gpu36 :8188）"
+    },
+    "gpu36:1": {
+      "url": "http://127.0.0.1:18289",
+      "label": "gpu36:1 (3090, tunnel 18289 -> gpu36 :8189)"
+    },
+    "gpu36:2": {
+      "url": "http://127.0.0.1:18290",
+      "max_frames": 362,
+      "long_only": true,
+      "label": "gpu36:2 长镜头道（3090 --novram，隧道 18290 → gpu36 :8190；>260 帧的镜头派到这里）"
+    },
+    "laptop:0": {
+      "url": "http://127.0.0.1:18388",
+      "image_only": true,
+      "concurrency": 1,
+      "hold": true,
+      "preset_lock": "leica_sstar",
+      "yield_url": "http://127.0.0.1:8870/yield",
+      "yield_timeout_s": 300,
+      "label": "laptop:0 本机出图道（RTX 4080 Laptop 12 GB，D:\\ns_comfy ComfyUI 0.42.0，只出图、并发 1；hold=true 时不自动派，等总调度开派）",
+      "_comment": "LOCALGPU 11-01（总调度 fredw-2b 派）：启动 D:\\ns_comfy\\start.ps1；模型 sha256 与 HF 官方 / 服务器记录一致（D:\\ns_comfy\\MODELS.sha256）；参数与 leica_sstar 一致由 tools/localgpu/check_lane.py + tests/test_localgpu_lane.py 自动比对（knowledge K-OPS-L01）。开派 = 把 hold 改成 false"
+    }
+  },
+  "max_frames": {
+    "0": 260,
+    "1": 260,
+    "3": 260
+  },
+  "_max_frames_comment": "fredw-92/LS 2026-10-31 实测（ep02-S8，768x1344，docs/e2e_iteration_log.md 第 4 轮）：gpu33 3090 + --reserve-vram 1：243/260 过、277/294 在 SamplerCustomAdvanced OOM（--cache-ram 常驻与出片前 POST /free 结果相同）。超过上限的镜头由 video_jobs.route_long 改派长镜头道，不截短。"
 }

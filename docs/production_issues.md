@@ -322,6 +322,15 @@
 - **建议的自动化检查**：R-C3（已有）；渲染器启动时打印并记录所用剧本的 sha，和 s1_gate 不一致 → 拒绝启动。
 - **负责方**：gpu3。
 
+### PI-31 声音页“角色音色”放的是旧 60 集音色、A 轨只有 0:01
+- **现象**：#/sound 角色音色·旁白 里林晚 / 顾沉 / 陈宇点 ▶ 或 A/B，A 播的是旧 60 集 Kokoro 音色（林晚 zf_067 = sid 36、顾沉 zm_029、陈宇 zm_050），A 轨显示 0:01；“候选 1..8”也全是 Kokoro 编号；阿岚没有任何音色。
+- **项目方原话**：经总调度转述“页面放的是旧音色”（2026-11-01）；随后决定“重做候选我来挑”，再改为“音色问题,采取qad类似模型给林晚,和其他男人的,我来不及筛选”。
+- **根因（VOICE10 2026-11-01 实测）**：①页面只认 Kokoro：`apps/web/src/v3/assets/VoiceStudio.tsx`（改前）第 41 行只列有 `sid` 的人物，第 115 / 146 行 A 一律 `POST /api/voices/preview` 用 Kokoro 按 sid 当场合成；`services/api/ns_api/voice_preview.py` 第 97–110 行“候选”= 当前 sid 前后 ±4 个 Kokoro 编号。series10 换剧本后 config/voices.json 的 lin_wan / gu_chen / chen_yu 仍是旧 60 集 Kokoro 条目，页面没有任何别的音色来源，所以 A、B 都只能是旧音色。②A 只念一句短台词：`voice_preview.py` 第 50–59 行 `_first_line` 取剧本里这个人物第一句 ≥4 字的台词（林晚 = “想尽快跟上。”），第 82 行用它合成，实测 1.597 s → 播放器显示 0:01（不是播放器 bug，是真的只有 1.6 s）。
+- **修复**：series10 有台词的人物改走 `GET /api/voices/s10`（voice_preview.py VOICE10 段）：候选只来自 data/assets/voices/<cid>_cand/（tools/voice10/voice10.py 生成并自动检查，过检才列）；A = 现在配置的音色念和候选同样的两句（Kokoro 当场合成；已选候选的就是该候选 sample.wav），时长由后端量好返回；“用 B” = `POST /api/voices/{cid}/pick`（apply_pick：改前重读、整份备份、10 秒撤销 `/api/voices/pick-undo/{id}`、auth 中间件记审计）；旧剧本人物的 Kokoro 行收进“旧剧本里的人物”。前端 S10Row（VoiceStudio.tsx）。规则 K-EDT-016。
+- **当前状态**：🟡 代码 + 测试（tests/test_voice10_s10.py）已过；:8800 需重启才有新接口。
+- **建议的自动化检查**：/api/voices/s10 每个 series10 人物 current.seconds > 1.5 且 current.kind ≠ kokoro（选定后）；voices.json 里 series10 人物的 engine 不是 kokoro。
+- **负责方**：laptop（VOICE10）。
+
 ---
 
 ## 六、Top-10（按影响 × 复发次数排序）

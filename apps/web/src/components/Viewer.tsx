@@ -1,8 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { thumb } from "../thumb";
 import { useStudio, type FrameStage } from "../store";
 import type { ShotDetail, Take } from "../types";
-import { fmtTime, LAST_SOURCE_LABEL, segDiff, stageActive, stageTakes } from "../util";
+import { fmtTime, LAST_SOURCE_LABEL, segDiff, stageActive, stageTakes, usesGpu3Chain } from "../util";
 import { JobBar, Score } from "./frames";
+import { useFocusTrap } from "../ds/helpers";
+
+/** UIMASTER（UM-0531）：全屏看图是弹框——role=dialog + 焦点陷阱，关掉后焦点回到“看大图”按钮（和其它弹框同一套） */
+function TrapDiv(props: React.HTMLAttributes<HTMLDivElement>) {
+  const ref = useRef<HTMLDivElement>(null);
+  useFocusTrap(ref);
+  return <div ref={ref} role="dialog" aria-modal="true" aria-label="全屏看图" tabIndex={-1} {...props} />;
+}
 
 const LABEL: Record<FrameStage, string> = { image: "首帧", last: "尾帧" };
 
@@ -41,7 +50,7 @@ export function Viewer() {
   const takes = useMemo(() => ({ image: takesOf(d, "image"), last: takesOf(d, "last") }), [d]);
   const active = useMemo(() => activeOf(d), [d]);
   // gpu3 的当前版本由 gpu3 决定：画布只看 / 对比
-  const readOnly = !!d?.gpu3_takes;
+  const readOnly = usesGpu3Chain(d); // UXF1：只有出片用 gpu3 链时才只读
 
   // 打开 / 切镜 / 切模式时重置选择
   useEffect(() => {
@@ -136,7 +145,7 @@ export function Viewer() {
   const pb = viewer.mode === "ab" ? panels[1].shown.take : undefined;
 
   return (
-    <div className="viewer" onClick={() => setViewer(null)}>
+    <TrapDiv className="viewer" onClick={() => setViewer(null)}>
       <div className="vw-top" onClick={(e) => e.stopPropagation()}>
         <b className="vw-id">{id}</b>
         <span className="muted">{s ? `${s.camera.size || ""} ${s.camera.move || ""}`.trim() : ""}</span>
@@ -165,7 +174,7 @@ export function Viewer() {
             onClick={() => st.requestGpu3(id, viewer.stage === "image" ? "image" : "last")}
             title="gpu3 负责此镜：写进 gpu3 重渲队列；新 take 到了会出现在下面的版本条（虚线格 = 等待中）"
           >
-            请 gpu3 重出{LABEL[viewer.stage]}
+            请视频卡重出{LABEL[viewer.stage]}
           </button>
         )}
         <span className="vw-keys muted">
@@ -192,9 +201,19 @@ export function Viewer() {
               >
                 <figcaption>
                   <b>{p.role}</b>
-                  {t && <span className="chip chip-dark">v{t.n}</span>}
+                  {t && <span className="chip chip-dark">#{t.n}</span>}
                   {p.shown.srcLabel && <span className="chip chip-dark">{p.shown.srcLabel}</span>}
                   {isActive ? <span className="chip chip-ok">当前</span> : t && <span className="chip chip-accent">候选</span>}
+                  {/* UXF1 #6：定稿 / 坏图与审片行同一份数据（takes.json locked + take.bad） */}
+                  {/* UXF4（审查 N1）：自动测试定稿单独标（查看器只看首帧 / 尾帧） */}
+                  {t && (t as { locked?: boolean | null }).locked &&
+                    ((d.takes as { locked_by?: Record<string, { by?: string; n?: number } | null> }).locked_by?.[p.stage]?.by === "auto" &&
+                    (d.takes as { locked_by?: Record<string, { by?: string; n?: number } | null> }).locked_by?.[p.stage]?.n === t.n ? (
+                      <span className="chip chip-warn" title="整集出片“自动测试定稿”出的，你还没复审：不算已定稿">自动定稿·待复审</span>
+                    ) : (
+                      <span className="chip chip-ok">已定稿</span>
+                    ))}
+                  {t?.bad && <span className="chip chip-bad" style={{ background: "var(--c-bad)", color: "#fff" }} title={t.bad}>坏图</span>}
                   <Score sc={t?.score} />
                   {t?.stale && t.stale.length > 0 && <span className="chip chip-warn" title={t.stale.join("、")}>过期</span>}
                   <span className="grow" />
@@ -206,8 +225,8 @@ export function Viewer() {
                   {t && !isActive && !readOnly && (
                     <button
                       className="btn primary"
-                      disabled={!!t.qc?.nudity}
-                      title={t.qc?.nudity ? "裸露质检未过，不能设为当前" : "Enter"}
+                      disabled={!!t.qc?.nudity || !!t.bad}
+                      title={t.bad ? `${t.bad}，不能设为当前` : t.qc?.nudity ? "裸露质检未过，不能设为当前" : "Enter"}
                       onClick={(e) => {
                         e.stopPropagation();
                         void activate(id, p.stage, t.n);
@@ -249,10 +268,10 @@ export function Viewer() {
               if (viewer.mode === "ab") setAb(e.shiftKey ? { ...ab, a: t.n } : { ...ab, b: t.n });
               else setPick({ ...pick, [stripStage]: t.n });
             }}
-            title={`v${t.n}${active[stripStage] === t.n ? "（当前）" : ""}`}
+            title={`#${t.n}${active[stripStage] === t.n ? "（当前）" : ""}${t.bad ? `（${t.bad}）` : ""}`}
           >
-            {t.url ? <img src={t.url} alt="" /> : <span>缺</span>}
-            <i>v{t.n}</i>
+            {t.url ? <img src={thumb(t.url, 240) ?? t.url} alt="" /> : <span>缺</span>}
+            <i>#{t.n}{t.bad ? " 坏图" : ""}</i>
           </button>
         ))}
         {live && (
@@ -279,6 +298,6 @@ export function Viewer() {
           )}
         </div>
       )}
-    </div>
+    </TrapDiv>
   );
 }

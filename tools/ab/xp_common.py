@@ -60,6 +60,8 @@ def comfy_idle(url: str) -> bool:
 
 
 def lane_free(key: str, url: str) -> bool:
+    if (AB / f"lane_block_{key}").exists():      # 借出的卡（如 GPU1 训练 LoRA）：不提交
+        return False
     act = api_active_gpus()
     if "any" in act or key in act:
         return False

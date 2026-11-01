@@ -1,0 +1,30 @@
+# 规则草案（tools/pipeline/attribute_bug.py 生成，CHAINSPEC）。status 待确认：总调度 / ARCH 确认后移到 knowledge/rules/ 并改 status。
+# attribution 字段是归因记录，移入正式规则时可删。
+rules:
+- id: K-EDT-I02
+  domain: edit
+  link:
+  - P4-P9
+  - P0-P1
+  title: 独白 / 旁白 TTS 音色须与人物表年龄和 VOICE 短语一致，切换属项目方闸门
+  when: 合成独白（🎙）或旁白音轨（P4-P9）
+  then: config/voices.json 每个说话角色加 vo_voice（独白专用音色）与 age_match 校验：音色候选的感知年龄段须覆盖人物表 age ±5；候选由系统出试听页，项目方选定后写入（不自动切换）
+  writer_text: VOICE 声线短语写明年龄段（例 a young woman in her early twenties）与语速；不写 slow pace 这类会把声音拖老的词
+  director_text: 旁白 / 独白听感年龄与人物表 age 差 >10 岁记到 P4-P9
+  evidence:
+  - src: config/pipeline/attribution.yaml
+    note: 症状 narrator_voice_old；项目方 v1 审片：旁白声音老
+  - src: docs/ep02_iter/writer_requests.md
+    quote: 旁白的声音很难听，是一个老女人的声音……这是一部 fashi
+  confidence: low
+  status: 待确认
+  date: '2026-10-31'
+  attribution:
+    bug: 旁白声音老
+    primary_link: P4-P9
+    verdict: 归因 P4-P9：这一段没有对应规则（缺规则）→ 草案进 knowledge/inbox/
+    existing_rules:
+    - SL-05
+    - K-EDT-001
+    - K-AST-R09
+    - K-REN-R20

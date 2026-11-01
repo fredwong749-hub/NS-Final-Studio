@@ -21,6 +21,21 @@ class FFmpegError(RuntimeError):
     pass
 
 
+# ACTING 11-01（项目方 R11-8 原话：“字幕不是要求不加么?你忘记了?”；此前多次要求不加字幕）：成片永不加字幕 / 烧字。
+# 硬默认，不给开关：合成链路里的 ffmpeg 调用都经过 FFmpeg.run，这里拦下字幕滤镜、drawtext、字幕流（tests/test_acting_no_subtitles.py）
+NO_SUBTITLES = True
+SUBTITLE_ARG_RE = re.compile(r"(?:^|[,;\[\]\s])(?:subtitles|ass|drawtext)\s*[=,;]|(?:^|[,;\]\s])drawtext$|\.(?:srt|ass|vtt|ssa)$|"
+                             r"^mov_text$|^-c:s$|^-scodec$", re.I)
+
+
+def assert_no_subtitles(args) -> None:
+    if not NO_SUBTITLES:
+        return
+    for a in args:
+        if SUBTITLE_ARG_RE.search(str(a)):
+            raise FFmpegError(f"成片不加字幕（项目方硬规则，R11-8）：ffmpeg 参数里出现字幕 / 文字：{str(a)[:120]}")
+
+
 def find_tools() -> tuple[str, str]:
     dirs: list[Path] = []
     override = os.environ.get("NS_FFMPEG")
@@ -51,6 +66,7 @@ class FFmpeg:
         return cls(*find_tools())
 
     def run(self, args: list[str]) -> subprocess.CompletedProcess:
+        assert_no_subtitles(args)
         cmd = [self.ffmpeg, "-hide_banner", "-nostdin", "-y", *[str(a) for a in args]]
         proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
                               timeout=self.timeout_s, stdin=subprocess.DEVNULL)

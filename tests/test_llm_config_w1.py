@@ -203,7 +203,8 @@ def test_to_inbox_registers_candidate(cfg, monkeypatch):
 
 def test_render_endpoints(cfg, monkeypatch):
     monkeypatch.setattr(LC, "_probe", lambda url: (url.endswith("18188"), "ok" if url.endswith("18188") else "连不上"))
-    r = {x["id"]: x for x in c.get("/api/render/endpoints").json()}
+    # G36：image / video 两行之后是各渲染道（kind="lane"），这里只看旧的两行
+    r = {x["id"]: x for x in c.get("/api/render/endpoints").json() if x.get("kind") != "lane"}
     assert set(r) == {"image", "video"} and r["video"]["url"].endswith("18191") and r["video"]["gpu"] == 3
     r = c.put("/api/render/endpoints/video", json={"url": "http://127.0.0.1:18188/"})
     assert r.status_code == 200 and r.json()["reachable"] is True

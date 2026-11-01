@@ -1,0 +1,12 @@
+/* 画布集头“本集设置”（回退补回）。前缀 es- */
+.es-box { width: min(520px, calc(100vw - 32px)); max-height: 70vh; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-4); padding: var(--sp-3); }
+.es-box section { display: flex; flex-direction: column; gap: var(--sp-2); }
+.es-box h4 { margin: 0; font-size: var(--fs-sm); display: flex; gap: var(--sp-2); align-items: baseline; }
+.es-box h4 small { color: var(--c-text-2); font-weight: 400; font-size: var(--fs-xs); }
+.es-box label { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-xs); color: var(--c-text-2); }
+.es-box textarea { width: 100%; box-sizing: border-box; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--c-line-2); border-radius: var(--r-s); background: var(--c-sunken); color: var(--c-text); font-size: var(--fs-sm); line-height: 1.5; resize: vertical; }
+.es-hint { margin: 0; font-size: var(--fs-xs); color: var(--c-text-2); line-height: 1.5; }
+.es-btns { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.es-btns a { text-decoration: none; }
+.es-sheet img { max-width: 100%; border-radius: var(--r-s); border: 1px solid var(--c-line); }
+.es-hold { font-size: var(--fs-xs); padding: 0 var(--sp-2); line-height: 22px; border-radius: var(--r-pill); background: var(--c-bad-soft); color: var(--c-bad-text); white-space: nowrap; }

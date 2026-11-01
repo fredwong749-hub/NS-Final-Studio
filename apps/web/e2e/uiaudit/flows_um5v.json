@@ -1,0 +1,53 @@
+[
+  {
+    "title": "看图器",
+    "path": "/#ep02-S1",
+    "steps": [
+      {
+        "click": "精修",
+        "after": 4000
+      },
+      {
+        "js": "for (let i=0;i<120;i++){ if (!/正在读取/.test(document.body.innerText)) break; await new Promise(r=>setTimeout(r,500)); } const b=[...document.querySelectorAll('button')].find(b=>/全屏看首尾帧/.test(b.innerText)); return b?{disabled:b.disabled,title:b.title}:'none'"
+      },
+      {
+        "clickAt": "(() => { const e=[...document.querySelectorAll('button')].find(b=>/全屏看首尾帧/.test(b.innerText) && b.getBoundingClientRect().width>0); const r=e?.getBoundingClientRect(); return r?[r.x+r.width/2,r.y+r.height/2]:[null,null]; })()",
+        "after": 2000
+      },
+      {
+        "js": "const d=document.querySelector('[role=dialog]'); const v=document.querySelector('[class*=viewer], .vw, [class*=Viewer]'); return {dialog:d?{modal:d.getAttribute('aria-modal'),cls:d.className.slice(0,30),text:d.innerText.slice(0,30)}:null, viewer:v?v.className.slice(0,40):null, active:document.activeElement?.innerText?.slice(0,20)}"
+      },
+      {
+        "shot": "a"
+      },
+      {
+        "n": 6,
+        "tabtrap": "[role=dialog]"
+      }
+    ],
+    "id": "M5_viewer2",
+    "wait": 8000
+  },
+  {
+    "title": "总览看图器",
+    "path": "/#/overview",
+    "steps": [
+      {
+        "js": "const i=[...document.querySelectorAll('img')].find(x=>x.getBoundingClientRect().width>40); if(!i) return 'noimg'; const r=i.getBoundingClientRect(); return [r.x+r.width/2,r.y+r.height/2]"
+      },
+      {
+        "clickAt": "(() => { const i=[...document.querySelectorAll('img')].find(x=>x.getBoundingClientRect().width>40); const r=i.getBoundingClientRect(); return [r.x+r.width/2,r.y+r.height/2]; })()",
+        "after": 2000
+      },
+      {
+        "js": "const d=document.querySelector('[role=dialog]'); return d?{modal:d.getAttribute('aria-modal'),text:d.innerText.slice(0,40)}:{hash:location.hash}"
+      },
+      {
+        "n": 6,
+        "tabtrap": "[role=dialog]"
+      }
+    ],
+    "id": "M5_overview",
+    "wait": 9000
+  }
+]

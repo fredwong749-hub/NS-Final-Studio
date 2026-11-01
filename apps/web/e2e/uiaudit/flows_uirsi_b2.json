@@ -1,0 +1,75 @@
+[
+  {
+    "wait": 8000,
+    "title": "提示条穿透",
+    "id": "B2_toast",
+    "steps": [
+      {
+        "click": "=审片",
+        "after": 2000
+      },
+      {
+        "click": "用这张",
+        "after": 600
+      },
+      {
+        "js": "await new Promise(r=>setTimeout(r,300)); const t=[...document.querySelectorAll('[class*=toast]')].filter(e=>e.getBoundingClientRect().width>0 && e.innerText.trim()); if(!t.length) return 'no toast'; const box=t[t.length-1]; const r=box.getBoundingClientRect(); const hit=document.elementFromPoint(r.x+8, r.y+r.height/2); const btn=box.querySelector('button'); let btnHit=null; if(btn){const b=btn.getBoundingClientRect(); const h=document.elementFromPoint(b.x+b.width/2,b.y+b.height/2); btnHit={text:btn.innerText.trim(), hitIsButton:h===btn||btn.contains(h), pe:getComputedStyle(btn).pointerEvents};} return {toastText:box.innerText.replace(/\\s+/g,' ').slice(0,50), toastPE:getComputedStyle(box).pointerEvents, underToastHit:hit?hit.tagName+'.'+String(hit.className).slice(0,30):null, hitIsToast:box.contains(hit), button:btnHit};"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "path": "/#ep02"
+  },
+  {
+    "wait": 8000,
+    "title": "本集设置",
+    "id": "B2_epset",
+    "steps": [
+      {
+        "click": "本集设置",
+        "after": 1500
+      },
+      {
+        "js": "const d=[...document.querySelectorAll('button:disabled,[aria-disabled=true]')].filter(e=>e.getBoundingClientRect().width>0); return {disabled:d.length, noReason:d.filter(e=>!(e.title||e.closest('[title]')?.title||'').trim()).map(e=>e.innerText.trim().slice(0,12)).slice(0,8), sample:d.slice(0,5).map(e=>e.innerText.trim().slice(0,10)+' → '+(e.title||e.closest('[title]')?.title||'').slice(0,40))};"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "path": "/#ep02"
+  },
+  {
+    "wait": 9000,
+    "title": "模型页",
+    "id": "B2_models",
+    "steps": [
+      {
+        "js": "const d=[...document.querySelectorAll('button:disabled,[aria-disabled=true]')].filter(e=>e.getBoundingClientRect().width>0); return {disabled:d.length, noReason:d.filter(e=>!(e.title||e.closest('[title]')?.title||'').trim()).map(e=>e.innerText.trim().slice(0,12)).slice(0,8), sample:d.slice(0,5).map(e=>e.innerText.trim().slice(0,10)+' → '+(e.title||e.closest('[title]')?.title||'').slice(0,40))};"
+      }
+    ],
+    "path": "/#/models"
+  },
+  {
+    "wait": 9000,
+    "title": "导入页",
+    "id": "B2_import",
+    "steps": [
+      {
+        "js": "const d=[...document.querySelectorAll('button:disabled,[aria-disabled=true]')].filter(e=>e.getBoundingClientRect().width>0); return {disabled:d.length, noReason:d.filter(e=>!(e.title||e.closest('[title]')?.title||'').trim()).map(e=>e.innerText.trim().slice(0,12)).slice(0,8), sample:d.slice(0,5).map(e=>e.innerText.trim().slice(0,10)+' → '+(e.title||e.closest('[title]')?.title||'').slice(0,40))};"
+      }
+    ],
+    "path": "/#/script-create?tab=import"
+  },
+  {
+    "wait": 9000,
+    "title": "写作对话",
+    "id": "B2_chat",
+    "steps": [
+      {
+        "js": "const d=[...document.querySelectorAll('button:disabled,[aria-disabled=true]')].filter(e=>e.getBoundingClientRect().width>0); return {disabled:d.length, noReason:d.filter(e=>!(e.title||e.closest('[title]')?.title||'').trim()).map(e=>e.innerText.trim().slice(0,12)).slice(0,8), sample:d.slice(0,5).map(e=>e.innerText.trim().slice(0,10)+' → '+(e.title||e.closest('[title]')?.title||'').slice(0,40))};"
+      }
+    ],
+    "path": "/#/script-chat"
+  }
+]

@@ -1,0 +1,116 @@
+[
+  {
+    "id": "BGM4_ep01",
+    "wait": 8000,
+    "steps": [
+      {
+        "after": 5000,
+        "js": "location.hash='#/sound'; return 1"
+      },
+      {
+        "click": "配乐",
+        "after": 3000
+      },
+      {
+        "js": "const root=document.querySelector('.v3-page')||document.body; const t=root.innerText; const sent=(t.match(/现在用[^\\n]*/)||[''])[0]; const holes=(sent.match(/[\\u4e00-\\u9fa5] (的|相当|落在|是|远好于|缓升到|再回落|倍)/g)||[]).length + (sent.match(/(的|是|与|比|到) [，、。；）]/g)||[]).length; const tips=[...root.querySelectorAll('[title]')].map(e=>e.title).filter(x=>/依据/.test(x)); return {internal:(t.match(/\\b(energy_r|clap|vocal_rel_db|p_vocal|longest_gap_s|onset_rate|tempo_off|tempo_ok|energy_weak|brief|tags|BPM|target)\\b|（r）|-?\\d\\.\\d{2,}/gi)||[]).slice(0,8), holeHits:holes, reason:sent.slice(0,220), hints:(t.match(/提示：[^\\n]*/g)||[]).slice(0,4), tooltipWithBasis:tips.length, tipSample:tips[0]?tips[0].slice(0,160):null};"
+      }
+    ],
+    "path": "/#ep01",
+    "title": "配乐 ep01"
+  },
+  {
+    "id": "BGM4_ep02",
+    "wait": 8000,
+    "steps": [
+      {
+        "after": 5000,
+        "js": "location.hash='#/sound'; return 1"
+      },
+      {
+        "click": "配乐",
+        "after": 3000
+      },
+      {
+        "js": "const root=document.querySelector('.v3-page')||document.body; const t=root.innerText; const sent=(t.match(/现在用[^\\n]*/)||[''])[0]; const holes=(sent.match(/[\\u4e00-\\u9fa5] (的|相当|落在|是|远好于|缓升到|再回落|倍)/g)||[]).length + (sent.match(/(的|是|与|比|到) [，、。；）]/g)||[]).length; const tips=[...root.querySelectorAll('[title]')].map(e=>e.title).filter(x=>/依据/.test(x)); return {internal:(t.match(/\\b(energy_r|clap|vocal_rel_db|p_vocal|longest_gap_s|onset_rate|tempo_off|tempo_ok|energy_weak|brief|tags|BPM|target)\\b|（r）|-?\\d\\.\\d{2,}/gi)||[]).slice(0,8), holeHits:holes, reason:sent.slice(0,220), hints:(t.match(/提示：[^\\n]*/g)||[]).slice(0,4), tooltipWithBasis:tips.length, tipSample:tips[0]?tips[0].slice(0,160):null};"
+      }
+    ],
+    "path": "/#ep02",
+    "title": "配乐 ep02"
+  },
+  {
+    "id": "BGM4_ep04",
+    "wait": 8000,
+    "steps": [
+      {
+        "after": 5000,
+        "js": "location.hash='#/sound'; return 1"
+      },
+      {
+        "click": "配乐",
+        "after": 3000
+      },
+      {
+        "js": "const root=document.querySelector('.v3-page')||document.body; const t=root.innerText; const sent=(t.match(/现在用[^\\n]*/)||[''])[0]; const holes=(sent.match(/[\\u4e00-\\u9fa5] (的|相当|落在|是|远好于|缓升到|再回落|倍)/g)||[]).length + (sent.match(/(的|是|与|比|到) [，、。；）]/g)||[]).length; const tips=[...root.querySelectorAll('[title]')].map(e=>e.title).filter(x=>/依据/.test(x)); return {internal:(t.match(/\\b(energy_r|clap|vocal_rel_db|p_vocal|longest_gap_s|onset_rate|tempo_off|tempo_ok|energy_weak|brief|tags|BPM|target)\\b|（r）|-?\\d\\.\\d{2,}/gi)||[]).slice(0,8), holeHits:holes, reason:sent.slice(0,220), hints:(t.match(/提示：[^\\n]*/g)||[]).slice(0,4), tooltipWithBasis:tips.length, tipSample:tips[0]?tips[0].slice(0,160):null};"
+      }
+    ],
+    "path": "/#ep04",
+    "title": "配乐 ep04"
+  },
+  {
+    "id": "BGM4_ep06",
+    "wait": 8000,
+    "steps": [
+      {
+        "after": 5000,
+        "js": "location.hash='#/sound'; return 1"
+      },
+      {
+        "click": "配乐",
+        "after": 3000
+      },
+      {
+        "js": "const root=document.querySelector('.v3-page')||document.body; const t=root.innerText; const sent=(t.match(/现在用[^\\n]*/)||[''])[0]; const holes=(sent.match(/[\\u4e00-\\u9fa5] (的|相当|落在|是|远好于|缓升到|再回落|倍)/g)||[]).length + (sent.match(/(的|是|与|比|到) [，、。；）]/g)||[]).length; const tips=[...root.querySelectorAll('[title]')].map(e=>e.title).filter(x=>/依据/.test(x)); return {internal:(t.match(/\\b(energy_r|clap|vocal_rel_db|p_vocal|longest_gap_s|onset_rate|tempo_off|tempo_ok|energy_weak|brief|tags|BPM|target)\\b|（r）|-?\\d\\.\\d{2,}/gi)||[]).slice(0,8), holeHits:holes, reason:sent.slice(0,220), hints:(t.match(/提示：[^\\n]*/g)||[]).slice(0,4), tooltipWithBasis:tips.length, tipSample:tips[0]?tips[0].slice(0,160):null};"
+      }
+    ],
+    "path": "/#ep06",
+    "title": "配乐 ep06"
+  },
+  {
+    "id": "BGM4_ep07",
+    "wait": 8000,
+    "steps": [
+      {
+        "after": 5000,
+        "js": "location.hash='#/sound'; return 1"
+      },
+      {
+        "click": "配乐",
+        "after": 3000
+      },
+      {
+        "js": "const root=document.querySelector('.v3-page')||document.body; const t=root.innerText; const sent=(t.match(/现在用[^\\n]*/)||[''])[0]; const holes=(sent.match(/[\\u4e00-\\u9fa5] (的|相当|落在|是|远好于|缓升到|再回落|倍)/g)||[]).length + (sent.match(/(的|是|与|比|到) [，、。；）]/g)||[]).length; const tips=[...root.querySelectorAll('[title]')].map(e=>e.title).filter(x=>/依据/.test(x)); return {internal:(t.match(/\\b(energy_r|clap|vocal_rel_db|p_vocal|longest_gap_s|onset_rate|tempo_off|tempo_ok|energy_weak|brief|tags|BPM|target)\\b|（r）|-?\\d\\.\\d{2,}/gi)||[]).slice(0,8), holeHits:holes, reason:sent.slice(0,220), hints:(t.match(/提示：[^\\n]*/g)||[]).slice(0,4), tooltipWithBasis:tips.length, tipSample:tips[0]?tips[0].slice(0,160):null};"
+      }
+    ],
+    "path": "/#ep07",
+    "title": "配乐 ep07"
+  },
+  {
+    "id": "BGM4_ep10",
+    "wait": 8000,
+    "steps": [
+      {
+        "after": 5000,
+        "js": "location.hash='#/sound'; return 1"
+      },
+      {
+        "click": "配乐",
+        "after": 3000
+      },
+      {
+        "js": "const root=document.querySelector('.v3-page')||document.body; const t=root.innerText; const sent=(t.match(/现在用[^\\n]*/)||[''])[0]; const holes=(sent.match(/[\\u4e00-\\u9fa5] (的|相当|落在|是|远好于|缓升到|再回落|倍)/g)||[]).length + (sent.match(/(的|是|与|比|到) [，、。；）]/g)||[]).length; const tips=[...root.querySelectorAll('[title]')].map(e=>e.title).filter(x=>/依据/.test(x)); return {internal:(t.match(/\\b(energy_r|clap|vocal_rel_db|p_vocal|longest_gap_s|onset_rate|tempo_off|tempo_ok|energy_weak|brief|tags|BPM|target)\\b|（r）|-?\\d\\.\\d{2,}/gi)||[]).slice(0,8), holeHits:holes, reason:sent.slice(0,220), hints:(t.match(/提示：[^\\n]*/g)||[]).slice(0,4), tooltipWithBasis:tips.length, tipSample:tips[0]?tips[0].slice(0,160):null};"
+      }
+    ],
+    "path": "/#ep10",
+    "title": "配乐 ep10"
+  }
+]

@@ -76,7 +76,9 @@ def lock(shot_id: str, stage: str, n: int) -> dict:
     """定稿某一版（同时设为当前）。首帧定稿换了版本 → 尾帧、视频过期（由旧首帧得到的）"""
     with P.shot_lock(shot_id):
         data = P.load_takes(shot_id)
-        _find(data, stage, n)
+        why = P.bad_reason(_find(data, stage, n))
+        if why:   # fredw-92/UXF1：坏图不能定稿
+            raise P.BadImage(f"{stage} v{n} 是{why}，不能定稿")
         prev = (data.get("locked") or {}).get(stage)
         data.setdefault("locked", {})[stage] = n
         data.setdefault("locked_src", {})[stage] = {"stage": stage, "n": n, "chain": "canvas"}
@@ -266,8 +268,12 @@ def edit_frame(client, script, shot_id: str, stage: str, *, mode: str, parent: i
     src_take = _parent(shot_id, stage, parent)
     basis = chain_basis(P.load_takes(shot_id), src_take)   # F4：内容来自父版本 → 过期基准、造型、输入哈希都随父版本
     c = P.compile_with_edits(script, shot_id, P.available_loras(client))
-    negative = P.image_negative(c)
-    src = P.DATA / (src_take.get("raw_file") or src_take["file"])
+    negative = P.image_negative(c, P.QWEN_TURBO)   # FIX P0 ⑥：Turbo cfg 1 → 不记负面词
+    # LCA：父版本有后处理（缩回 / 锐化，image_params.postprocess）时用后处理前的原图，免得锐化在改图链上叠加
+    post_from = ((src_take.get("params") or {}).get("post") or {}).get("from")
+    src = P.DATA / (src_take.get("raw_file") or post_from or src_take["file"])
+    if not src.is_file():
+        src = P.DATA / src_take["file"]
     names = [_input(client, src, EDIT_REF_SIZE)]
     ref_rec = []
     for r in refs or []:
@@ -304,24 +310,63 @@ def edit_frame(client, script, shot_id: str, stage: str, *, mode: str, parent: i
                   gpu=(job or {}).get("gpu"), job_id=(job or {}).get("id"),
                   source="gen" if stage == "last" else None, remote=remote_info(client, P.DATA / rel),
                   basis_prompt=basis, look_hash=src_take.get("look_hash"),
-                  inputs_sha=src_take.get("inputs_sha"), bible_version=src_take.get("bible_version"))
-    P._add_take(shot_id, take, activate=True)
+                  inputs_sha=src_take.get("inputs_sha"), bible_version=src_take.get("bible_version"),
+                  deps={k: v for k, v in (src_take.get("deps") or {}).items() if not k.startswith("preset:")} or None)
+    # G3（项目方 11-01）：编辑链的新版本也先不设当前，过了契约才由 auto_current.on_contract 设（契约参考沿用父版本的槽位）
+    P._add_take(shot_id, take, activate=False)
     if stage == "last":
         annotate(shot_id, stage, take.n)
+    try:
+        from . import unified_frame as UF
+        parent_c = src_take.get("contract") or {}
+        annotate(shot_id, stage, take.n, contract={"asset_refs": parent_c.get("asset_refs") or {}})
+        UF.postflight_async(shot_id, stage, take.n, take.file, {"cast": (parent_c.get("pf_ctx") or {}).get("cast")},
+                            _host_of(client), {"contract": {"asset_refs": parent_c.get("asset_refs") or {}}})
+    except Exception:  # noqa: BLE001  契约起不来：版本留着可手动采用，但不会自动设为当前
+        pass
     P._clear_error(shot_id)
     return take
 
 
 def canvas_face_lock(c) -> bool | None:
-    """画布首帧：已带出图身份 LoRA（如 lnwan_qi → lin_wan_qi_v1）时由 LoRA 管身份，单张文生图，不再两段换脸；
-    否则沿用 pipeline 默认（身份底板两段式）"""
-    files = identity_lora_files()
-    return False if any(f in files for f, _w in (c.image_loras or [])) else None
+    """画布首帧：单张出图，不走旧的“身份底板两段式换脸”（qwen_two_stage）。
+    RECALL 2026-11-01：原逻辑“带身份 LoRA 才单张、否则两段换脸”依赖 lin_wan_qi_v1；该 LoRA 已按项目方决定撤下并隔离，
+    且 K-REN-134 定“不再用旧首帧作图1换脸”。登记了资产的项目（series10_v1）本来就走 unified_frame，不经这里。"""
+    return False
+
+
+def _host_of(client) -> str | None:
+    """出图道 → 机器（postflight 原地打分用）：隧道端口 181xx = gpu33、182xx = gpu36"""
+    u = str(getattr(client, "base", None) or getattr(client, "url", None) or getattr(client, "server", None) or "")
+    return "gpu36" if ":182" in u else ("gpu33" if ":181" in u else None)
 
 
 def regen(client, script, shot_id: str, stage: str, *, prompt: str | None = None, parent: int | None = None,
           seed: int | None = None, job: dict | None = None):
-    """整张重出：1 张、不评分、不看图判定、不否决。尾帧须由定稿首帧做（C3）"""
+    """整张重出：1 张、不评分、不看图判定、不否决。尾帧须由定稿首帧做（C3）。
+    K-REN-134（总调度 11-01 P0）：剧本属于登记了资产的项目（config/recipes/asset_refs.json，例 series10_v1）时，
+    首帧 / 尾帧一律走唯一出图路径 ns_render.unified_frame（frame_v9 + asset_refs 槽位 + 生成契约），不再用旧首帧作图1换脸"""
+    from . import unified_frame as UF
+    if UF.project_for(script):
+        host = _host_of(client)
+        if stage == "image":
+            take, meta, ujob = UF.render_first(client, script, shot_id, seed=seed, prompt_override=prompt, host=host,
+                                               postflight=False)
+            out = annotate(shot_id, "image", take["n"], parent=parent, mode="regen", gpu=(job or {}).get("gpu"),
+                           job_id=(job or {}).get("id"), basis_prompt=None, path="unified_frame（K-REN-134）", **meta)
+            UF.postflight_async(shot_id, "image", take["n"], take["file"], ujob, host, meta)   # 不占出图任务时长（IMGPERF）
+            return UF.record_params(shot_id, "image", take["n"])            # 交付尺寸 + 坏图检查后才设当前
+        first = locks(shot_id).get("image")
+        if first is None:
+            raise ComfyError(f"{shot_id} 首帧还没定稿，不能做尾帧")
+        ft = _find(P.load_takes(shot_id), "image", first)
+        take, meta, ujob = UF.render_last(client, script, shot_id, ft["file"], seed=seed, prompt_override=prompt, host=host,
+                                          postflight=False)
+        out = annotate(shot_id, "last", take["n"], parent=parent, mode="regen", from_first=first,
+                       gpu=(job or {}).get("gpu"), job_id=(job or {}).get("id"), source="gen",
+                       path="unified_frame（K-REN-134）", **meta)
+        UF.postflight_async(shot_id, "last", take["n"], take["file"], {**ujob, "asset_refs": meta["contract"]["asset_refs"]}, host, meta)
+        return UF.record_params(shot_id, "last", take["n"])
     if stage == "image":
         c = P.compile_with_edits(script, shot_id, P.available_loras(client))
         take = P.render_image(client, script, shot_id, seed=seed, candidates=1, rounds=1, score_fn=None,

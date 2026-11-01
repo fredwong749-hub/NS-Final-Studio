@@ -97,7 +97,7 @@ def strict_check_shot(shot, ep, triggers, names):
 _base_check_episode = V.check_episode
 
 
-shot_cap = V.shot_cap   # 本集镜数上限 = max(8, 说话轮次 + 独白段数)（K1，导入器 ns_agent.importer.script_md.shot_cap）
+shot_cap = V.shot_cap   # 本集镜数上限 = max(8, 说话轮次 + 独白段数, ⌈总时长 ÷ 6⌉)（K1 + G29，导入器 ns_agent.importer.script_md.shot_cap）
 
 
 def strict_check_episode(ep) -> list[dict]:

@@ -1,0 +1,12 @@
+[
+  {"id": "V2d_candbox_js", "title": "r35#2 候选弹窗（合成 click 打开，只为读缩略条标签）", "path": "/#ep02", "wait": 9000, "steps": [
+    {"click": "=审片", "after": 2500},
+    {"wait": 10000},
+    {"js": "const r=document.querySelector('.v3-row[data-shot=\"ep02-S1\"]'); const t=[...r.querySelectorAll('.v3-frames .v3-frame')][0]; t.click(); return {clicked:true};", "after": 3000},
+    {"js": "const m=document.querySelector('.cb-scrim, [role=dialog]'); if(!m) return {modal:false}; const txt=m.innerText; const titles=[...m.querySelectorAll('[title],[alt],[data-zoom-label]')].map(e=>(e.title||'')+' '+(e.alt||'')+' '+(e.getAttribute('data-zoom-label')||'')).join(' '); return {modal:true, aria:m.getAttribute('aria-label'), head:txt.slice(0,400).split(String.fromCharCode(10)).join(' '), internal:((txt+' '+titles).match(/ASSETMASTER|PRODUCER|接手登记/g)||[]), recipe:((txt+' '+titles).match(/新配方|旧配方/g)||[]).length, labels:[...new Set((txt+' '+titles).match(/暂定|新配方|旧配方|候选 ?#[0-9]+/g)||[])].slice(0,30)};"},
+    {"shot": "a"},
+    {"key": "Escape"},
+    {"js": "const r=document.querySelector('.v3-row[data-shot=\"ep02-S1\"]'); const t=[...r.querySelectorAll('.v3-frames .v3-frame')][1]; t.click(); return {clicked:true};", "after": 3000},
+    {"js": "const m=document.querySelector('.cb-scrim, [role=dialog]'); if(!m) return {modal:false}; const txt=m.innerText; const titles=[...m.querySelectorAll('[title],[alt],[data-zoom-label]')].map(e=>(e.title||'')+' '+(e.alt||'')+' '+(e.getAttribute('data-zoom-label')||'')).join(' '); return {modal:true, aria:m.getAttribute('aria-label'), head:txt.slice(0,400).split(String.fromCharCode(10)).join(' '), internal:((txt+' '+titles).match(/ASSETMASTER|PRODUCER|接手登记/g)||[]), labels:[...new Set((txt+' '+titles).match(/暂定|新配方|旧配方|候选 ?#[0-9]+/g)||[])].slice(0,30)};"},
+    {"shot": "b"}]}
+]

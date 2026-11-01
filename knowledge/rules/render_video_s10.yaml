@@ -1,0 +1,339 @@
+# VIDEO10（2026-10-31，series10_v1 十集出片）：视频侧的配方 / 提示词 / 运行规则。
+# 工具：tools/series10_video/（build_jobs.py 编译、vidgen.py 服务器端编排 + 规则阶梯、score_clip.py 原地打分、deploy.py 部署）。
+# 对照数据：服务器 /root/work/fredw/video10_srv/data/pipeline/runs/series10_v1/video/（scores/、_thumbs/），
+# 笔记本同步副本 data/pipeline/runs/series10_v1/video/validate/。
+rules:
+  - id: K-PRM-301
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: prompt
+    link: [P6-P7, P7-P8]
+    title: H3 视频提示词只由系统编译器生成（Shot Spec → ns_recipes.compiler），不手拼
+    when: 任何 series10（及以后）视频作业
+    then: Shot Spec 取自已导入剧本（data/import/script_v2.json，spec_import.specs_from_import）；没导入时用 p4_adapter.check_p4 从 runs 目录生成；提示词 = compile_shot(...).prompt.text（Ref2VA 为官方 ref-en 六段），作业里记 plan_hash 和 compiler_version
+    evidence:
+      - {src: tools/series10_video/build_jobs.py, note: compile_variant 只调用 ns_recipes.compiler.compile_shot}
+      - {src: docs/GEN_CONTRACT.md §3, quote: "系统编译的官方格式提示词"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-PRM-302
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: prompt
+    link: [P7-P8]
+    title: 视频侧不挂会拉偏脸的身份 / 出图 LoRA；系统风格句不得带“奶油柔焦 / f/1.x / 浓郁饱和 / 油光”类词
+    when: 编译视频作业（build_jobs.compile_variant 的阻断检查）
+    then: 图里出现 LoraLoader 且名字匹配 lin_wan / lnwan / _qi_ / identity → 阻断（bad_lora）；配方 prompt.style_lead 匹配 creamy / f/1.x / oily / greasy / richly saturated / 奶油 / 油光 / 浓郁饱和 → 阻断（bad_style_lead）。剧本正文里写的服装材质（如 glossy patent leather）属于内容，不改
+    evidence:
+      - {src: docs/GEN_CONTRACT.md §1 I7/I8, quote: "禁止旧头里的柔焦/奶油虚化/浓郁饱和/油光落皮肤"}
+      - {src: knowledge/rules K-AST-R04, quote: "身份把脸拉偏：0.926 → 0.823"}
+      - {src: data/pipeline/runs/series10_v1/ep03/P4_ep03.md, note: 10 集 H3 字段扫描：没有 creamy / f/1.x / saturated / oily；glossy 只出现在漆皮服装和物件描述（8 处，内容）}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-OPS-301
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: [P7-P8]
+    title: 视频编排在服务器本机跑、整集分机；打分在出片机器原地做，只回传 ≤2 MB 预览
+    when: series10 视频出片
+    then: tools/series10_video/deploy.py push/start；每台只出分到本机的集（HOST_OF_EP，ep09 长镜头 → gpu36），成片在本机合成；每道总负载 ≤2（含别的会话）；打分 = score_clip.py（venv_idm），预览 360×640 crf30 ≤1.5 Mbps
+    evidence:
+      - {src: docs/infra/utilization.md §1, quote: "主要是笔记本链路，不是 GPU"}
+      - {src: tools/series10_video/vidgen.py}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-OPS-302
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: [P7-P8]
+    title: 往服务器推模型 / onnx 后要核 sha256；gpu36 没有 ffprobe 要用 shim
+    when: deploy.py 推 YuNet / SFace onnx，或在 gpu36 跑任何调用 ffprobe 的打分器
+    then: 推完对比 sha256（gpu33 一次推送的 SFace onnx 损坏：OpenCV 报 Failed to parse ONNX，sha 994aa8… ≠ 0ba9fb…，gpu33 上可直接从 /root/claude-kimi-ns-studio-v1/ns-studio/models/vision 复制）；笔记本上传实测约 17 KB/s（38 MB 要 30+ 分钟），能在服务器本机找到的文件不要从笔记本推。gpu36 用 imageio_ffmpeg 静态 ffmpeg + tools/series10_video/ffprobe_shim.py（/root/work/fredw/tools_bin）
+    evidence:
+      - {src: tools/series10_video/deploy.py, note: "服务器 video10_srv/…/scores/ep01-S5__pdd_s1.json 第一版：Failed to parse ONNX model"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-OPS-303
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ops
+    link: [P7-P8]
+    title: 服务器端用 motion_qc 时显式传 config/render_quality.json 路径
+    when: 在只推了部分代码的镜像目录里调用 ns_render.motion_qc.video_motion
+    then: 传 MQ.thresholds(ROOT / "config/render_quality.json")；默认路径走 ns_render.pipeline，会连带 import ns_agent（镜像里没有）而崩
+    evidence:
+      - {src: tools/series10_video/score_clip.py, note: "第一版打分 traceback：No module named 'ns_agent'"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-REN-301
+    domain: render
+    link: [P6-P7, P7-P8]
+    title: series10 视频全部用 Pika H3 Flex（i2va_pika_flex）：首帧过闸门才出；Pika 做不了一律 hold 等待、不回退旧配方（L-088，项目方 11-01 18:0x；⤴ 取代 16:2x 的 L-082 与更早的 I2VA + FL2VA-Acc PDD 两段式 / Ref2VA 兜底）
+    when: 给露脸镜头选视频配方（tools/series10_video/build_jobs.py → recipe_choice.json）
+    then: 有过契约 + 看图闸门并设为当前的首帧 → i2va_pika_flex（6 步 lcm 官方 7 值 sigma，有尾帧就首尾帧都给；v1、s2–s4、mot、r24、alt 都编成 Pika、只换 seed / 提示）；提示词命中 overlays/flush_risk → hold“等 Pika 方案（泛红防护）”；任何非 Pika 配方（establishing、two_person_ref2va、i2va_pdd2）由 config/pipeline/video_policy.json pika_only 编译成 hold:<原因>，vidgen 派单前再按政策查一次（K-OPS-Q24）；没有通过首帧的镜等图片重做出首帧（route waiting_frame），不走 Ref2VA；已有视频不删，首帧换版后 check_stale 作废、新 Pika 版替换
+    check: tests/test_recipe_pika_default.py
+    evidence:
+      - {src: docs/series10_video/S10V1_report.md, note: "ep01-S5 seed 20261102：纯 Ref2VA 24 步 脸高 0.22（近景，符合）SFace 0.609 / PDD 两段式 脸高 0.093（全景，不符）SFace 0.742；PDD 5 条里 4 条景别不符（要近景 / 中近景，出全景 / 中全景，脸高 0.09–0.10）"}
+      - {src: docs/series10_video/S10V1_report.md, note: "ep10-S5 seed 20261102 陈宇 SFace：24 步 0.439 / PDD 0.292；顾沉 PDD 0.467 / 0.289"}
+      - {src: docs/series10_video/S10V1_report.md, note: "耗时：PDD 两段式 495–579 s / 条，纯 Ref2VA 24 步 1980 s（3090 满功率）"}
+      - {src: docs/ep02_iter/planB_report.md, quote: "构图 | **保住定稿首帧**（硬钉）"}
+      - {src: data/pipeline/runs/series10_v1/video/recipe_choice.json, quote: "视频：全部用皮卡来做。如果皮卡做不了，就等皮卡安装完再做。", note: "L-088（11-01 18:0x，总调度转）取代 16:2x 的 L-082（⤴ 原口径：重出镜走 Pika、已通过镜保留、Ref2VA 兜底保留、flush 换回旧配方——均作废）；测试 tests/test_recipe_pika_default.py"}
+    confidence: medium
+    status: 确认
+    experiment: S10V-1
+    date: 2026-11-01
+  - id: K-REV-301
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: review
+    link: [P7-P8, P11-RETRY]
+    title: 视频出片后按 K-REN-122 档位测景别（主脸框高中位），与剧本差 ≥2 档判“景别不符”
+    when: series10 视频 postflight（score_clip.py；GEN_CONTRACT V8 的景别部分）
+    then: 每 3 帧取最大脸框高 / 画面高的中位数 → 档位；与 Shot Spec 景别差 ≥2 档 → 不通过，规则阶梯走 i2v（只给首帧）或换 seed；无脸镜不判
+    evidence:
+      - {src: tools/series10_video/score_clip.py, note: "size_wanted / size_measured / face_h_med；S10V-1 中发现 PDD Ref2VA 的景别问题，原 LAB 闸门没有这一项"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REV-302
+    domain: review
+    link: [P8-P10, P11-P12]
+    title: 预览 ≠ 成片；成片要 V6 多肢 / V7 口型检测器接上并通过
+    when: series10（及以后）视频进合成、上审阅页
+    then: 我方闸门（动作 / J4 / 泛红 / 硬切 / 身份 / 景别）全过的镜只能进“预览”合成，审阅页标“预览·V6/V7 未测”，不得写“契约通过”；尽力版不进合成，归“未达契约”组；成片（final）必须等 V6 / V7 检测器接上且通过（GEN_CONTRACT §3，ITERATION_PROTOCOL §3“未测 ≠ 通过”）
+    check: tools/series10_video/episode_report.py
+    evidence:
+      - {src: docs/ITERATION_PROTOCOL.md, quote: "测不到的项记“未测”，不是“通过”"}
+      - {src: docs/GEN_CONTRACT.md, quote: "多肢、口型（有对白时）"}
+      - {src: tools/series10_video/vidgen.py, note: "proxies()：status != done（尽力）不出合成代理"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REV-303
+    domain: review
+    link: [P5-P6, P7-P8]
+    title: 视频打分记录发色（蓝色发丝 HSV）对首帧、对身份参考的差，以及第 0 帧整体偏色；先记录、阈值后标定
+    when: series10 视频 postflight（score_clip.hair_and_colour）
+    then: 记 hair_first_hsv / hair_clip_hsv / hair_head_hsv / hair_tail_hsv、hair_dH/dS/dV（片子 − 首帧）、hair_first_vs_idref_dS/dV（首帧 − 林晚身份参考）、frame0_dE（整帧 Lab）。片子对首帧的差大 → 视频侧问题（查 PDD / 放大器，加校色）；首帧对身份参考的差大 → 出图侧问题（交 ASSETMASTER）。阈值待标定（至少 10 镜），现在只记录不判
+    check: tools/series10_video/score_clip.py
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/video/scores/ep01-S5__v1.json, note: "hair_dV +2（视频不改色），hair_first_vs_idref_dV −97（首帧本身暗）；frame0_dE 1.74"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-01
+  - id: K-REV-304
+    domain: review
+    link: [P7-P8, P11-RETRY]
+    title: V6 多肢检测器——MediaPipe 手 / 骨架逐帧计数（多手、同侧重复手、闪变）；手指 2D 骨长只记录不判；没有手和身体入画 = 未测
+    when: series10 视频 postflight（score_clip → v6_limbs.py，venv_hand，nice 15）
+    then: 每 2 帧测手数、左右手、骨架数；多手帧占比 > 0.05、单人同侧重复手 > 0.15、闪变 > 10 次 → 不通过（阶梯换 seed）；空帧占比 ≥ 0.80 → 未测。阈值只用 10 条印样看无多肢的片子（负例）标定，还没有正例，置信低
+    check: tools/series10_video/v6_limbs.py
+    evidence:
+      - {src: tools/series10_video/calibrate_v67.py, note: "10 条：extra_hand 0–0.031、dup_side 0–0.034、flicker 0–8、bad_finger 0–0.80（ep10-S5 背身远景 0.68–0.80 → 手指投影不可靠，不判）"}
+    confidence: low
+    status: 待验
+    date: 2026-11-01
+  - id: K-REV-305
+    domain: review
+    link: [P7-P8, P11-RETRY]
+    title: V7 口型检测器——画内对白测“内唇开合 vs 声音 RMS”相关 ≥0.30；只有独白 / 画外音时测嘴唇闭着（张嘴帧 ≤25%）；说话人脸认不出或太小 = 未测
+    when: series10 视频 postflight（score_clip → v7_lipsync.py，insightface buffalo_l 106 点 + 识别）
+    then: 开合 = 106 点 62–60 内唇间距 / 脸高；说话人按身份参考挑脸（余弦 <0.20 或脸高 <90 px 的帧不算）；±3 帧滑动取最大 Pearson ≥ 0.30 通过；独白镜张嘴（≥0.035）帧占比 ≤ 0.25（项目方：嘴唇闭着）；脸检出 <30% 帧 → 未测。服务器无 SyncNet 权重，用相关代理
+    check: tools/series10_video/v7_lipsync.py
+    evidence:
+      - {src: tools/series10_video/calibrate_v67.py, note: "正对镜头的对白镜 corr 0.33–0.80；ep01-S6 b24（顾沉说话、嘴几乎不动，开合 p90 0.0135）0.156 不通过；远景小脸 0.21 → 加 90 px 下限"}
+      - {src: config/voices.json, note: "voiceover_lips：while lips remain completely closed（官方 base-en §4.4）"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-01
+  - id: K-OPS-304
+    domain: ops
+    link: [P6-P7, P7-P8]
+    title: 镜头视频必须跟“当前过契约且未被总调度打回的首帧”；首帧换版、被撤或带 master_reject，旧视频自动作废、该镜回到待出 / 等首帧
+    when: 编排器每一轮（vidgen.check_stale）；登记进 takes.json 时（register_takes from_first）
+    then: build_jobs.passed_frames 只认 active.image 且 postflight.ok 且没有 master_reject（PRODUCER 写，总调度亲审打回）的首帧；每次出片记 first_frame（输入 JPEG，名里 sha8 = 源 PNG sha256 前 8 位）与 first_frame_take；当前 jobs 的 first_frame 与出片所用不同，或该镜首帧已不再过契约（无变体）→ 旧出片挪进 superseded、chosen 清空；DATAALIGN 按 from_first 撤当前
+    check: tools/series10_video/vidgen.py
+    evidence:
+      - {src: data/renders/ep03/S6/takes.json, note: "image #2（sha fb45bb72）派单时 postflight.ok=true，之后改为 false 且 active 无 image；ep03-S6 v1/s2 视频已出并被登记为当前 → 11-01 15:55（服务器时间）STALE 作废"}
+      - {src: data/renders/ep03/S7/takes.json, note: "image #2 postflight.ok=true 但带 master_reject（总调度：特写塑料感）；ep03-S7 v1 用的就是 #2 → 作废；同批 ep02-S1 v2、ep03-S6 v2/v3 也被打回"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-305
+    domain: ops
+    link: [P5-P6, P7-P8]
+    title: 首帧 / 尾帧还有在排或在跑时，视频只用 gpu36:2；图片道全部挂住，等首帧出完才恢复让道模式
+    when: night.py 每一轮（apply_lane_policy 读 data/producer/registry.json 里 kind=first/last 且 status 在排 / 在跑的数量）
+    then: 数量 > 0 → 两台 control 的 hold_lanes = gpu33:0/1/3、gpu36:0/1，并撤回本工具在这些道上排队未跑的任务（在跑的跑完）；= 0 → 恢复让道模式（别人空 3 分钟才交、每道 ≤1）。登记表读不到按“忙”算
+    check: tools/series10_video/night.py
+    evidence:
+      - {src: data/producer/registry.json, note: "总调度 11-01：ep06-S1 首帧在 gpu36:1 排了 911 s、GPU 只用 65 s；BAKEOFF 最多占约 4 分钟，其余是视频（约 9 分钟一条）让道模式插在图片道上，首帧刚到就得等整条视频"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REN-302
+    domain: render
+    link: [P7-P8, P11-RETRY]
+    title: “动作不足”的阶梯第一步是系统最低动作提示（只写物理，不写剧情），再换 seed
+    when: 镜头出片判“动作不足”（固定机位微表演镜头最常见）
+    then: 编译器 prompt.min_motion_cue（build_jobs 的 mot 变体）在第一个分拍时间码前插一句物理提示：呼吸、重心、眨眼、动作做完整、不定格；不改写作方正文、不改机位；不过再换 seed。已打完 4 次的镜可由 force_next 指定再试一次 mot（系统修复验证）
+    check: tools/series10_video/vidgen.py
+    evidence:
+      - {src: docs/series10_video/ep01_review.md, note: "ep01-S2（Static Shot、坐姿、视线 / 指尖 / 肩部微动作）4 个 seed mean 0.34–0.44（门槛 0.5），静止占比 0.35–0.55；同集其他镜 0.94–2.8"}
+    confidence: low
+    status: 待验
+    date: 2026-11-01
+  - id: K-REN-303
+    domain: render
+    link: [P6-P7, P7-P8]
+    title: Ref2VA 每个在画露脸角色带一张造型参考（设定图正面去头裁切），造型 id 与首帧同源
+    when: 配方 ref2va.look_refs = true（series10 的 r24 / alt 变体；双人对白镜首帧路线不过时的兜底）
+    then: compiler.look_slots：造型 id 取本镜当前首帧 contract.asset_refs.characters[].look，没有则 asset_refs.resolve_shot；设定图 = sheets_chosen.json 已选定的那张，裁 front_nohead；解不出记 missing 交 preflight（I3 不过），不悄悄跳过；提示词 subject 行写“exactly as shown in <Picture m> (outfit reference only)”，retention 写“ignoring its pose, its background and its missing head”；图里占位符 @look:<角色>
+    check: services/agent/ns_agent/gen_contract/preflight.py
+    evidence:
+      - {src: docs/series10_video/patches/ref2va_look_slot.patch, note: "REFLOCK 11-01 审：造型 id 不得用 EN 短语精确匹配（脆、绕开资产中心排期），改与首帧同源；preflight 加 registered_sheet_files / look_file_registered，测试 test_ref2va_outfit_slot_registration"}
+      - {src: data/pipeline/runs/series10_v1/video/jobs.json, note: "ep01-S6 r24：I2 / I3 通过（顾沉 / 林晚 lookA 设定图去头裁切）"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-01
+  - id: K-OPS-306
+    domain: ops
+    link: [P6-P7, P7-P8]
+    title: 首帧图读不全（截断 / 还在写）只让这一镜本轮不就绪，不让整轮编排崩掉
+    when: build_jobs.passed_frames 把过契约的首帧转成 video/inputs/*.jpg
+    then: Image.open + load 失败（OSError / ValueError）→ 该镜本轮从就绪表里去掉、删半截 JPEG、stderr 报出，下一轮重读；不开 LOAD_TRUNCATED_IMAGES（半张图不许当首帧出片）
+    check: tests/test_video10_resilience.py::test_passed_frames_skips_truncated_png
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/video/night.log, note: "11-01 10:44:23 / 10:50:44 / 10:52:45 LOOP_ERR OSError('image file is truncated')（离线服务器副本，图片拷了一半），整轮 night.py 中断"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-307
+    domain: ops
+    link: [P6-P7]
+    title: build_jobs 找不到人脸模型时，已有的 Ref2VA 头脸裁切照用，缺的跳过并报出，不让编译整体失败
+    when: build_jobs.alt_crops（设定图左栏最大脸 → refs_alt/*_face_alt.png）
+    then: 人脸模型只在确实要新裁时才加载；ns_qc.face.find_models 返回 None → 不再调 FaceModels(*None)，已有裁切照常返回，缺的那几张跳过（stderr 报出）
+    check: tests/test_video10_resilience.py::test_alt_crops_without_face_models_keeps_cached
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/video/night.log, note: "11-01 10:46:24 / 10:48:26 build_jobs 1 TypeError: FaceModels() argument after * must be an iterable, not NoneType → 这一轮所有集派不出"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-308
+    domain: ops
+    link: [P7-P8]
+    title: 笔记本同步服务器 state / 打分 JSON 必须原子写；拉回来的 JSON 解析不了就不覆盖本地
+    when: tools/series10_video/sync.py 每轮从 gpu33 / gpu36 拉文件
+    then: 先写 <名>.part 再 os.replace；.json 先 json.loads 验一遍，坏了跳过（skip_bad_json），等下一轮；读方（register_takes、episode_report、API）因此不会读到半截文件
+    check: tests/test_video10_resilience.py::test_sync_write_atomic_rejects_bad_json
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/video/night.log, note: "11-01 10:54:53 register_takes 1 JSONDecodeError: Expecting property name enclosed in double quotes: line 280 column 4"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-309
+    domain: ops
+    link: [P8-P9]
+    title: 整集合成前先查本机配音解释器；合成失败不是终态，20 分钟后自动重试（最多 3 次），失败时不认旧残片
+    when: night.py finalize / 每轮 retry_assembly
+    then: config/voices.json speech_python（NS_TTS_PYTHON 或 default）不在 → 状态 hold_tts、不出代理、不耗版本号，到位后自动回 rendering；assemble_failed 距上次 ≥1200 s 且 assemble_retries < 3 → 回 rendering 走同一条 EP_RESOLVED → finalize；合成器 rc≠0 时不拿 _work 里同版本号的文件、只认本次时间之后生成的；失败尾巴记 assemble_err
+    check: tests/test_video10_resilience.py::test_tts_missing_and_retry_assembly
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/video/night.log, note: "11-01 11:11:15 assemble ep04 1 TtsUnavailable: no speech interpreter（离线时 night.py 跑在 gpu36 副本，没有 sherpa-onnx 解释器），之后 ep04 一直停在 assemble_failed"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-310
+    domain: ops
+    link: [P7-P8, P11-RETRY]
+    title: ComfyUI 出片记 error 却没有 execution_error 时，写明 interrupted（被中断 / 撤回 / 重启），不留 "[]"
+    when: vidgen.Lane.result 读 /history
+    then: status_str=error 且无 execution_error → error = "interrupted（…停在 <node_type>）"，interrupted=true；有 execution_error 照旧记原文
+    check: tests/test_video10_resilience.py::test_vidgen_interrupted_is_labelled
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/video/state_gpu33.json, note: "ep03-S3 s3 state=error error='[]'（gpu_s 313）；state_gpu36.json ep04-S4 v1 error='[]'（gpu_s 986）；两镜后续变体已出、镜头已定，不需重出"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-311
+    domain: ops
+    link: [P6-P7, P7-P8]
+    title: 推给服务器的参考 / 首帧图必须完整解码；截断图不推（服务器上留坏图会被离线合并带回笔记本）
+    when: tools/series10_video/deploy.py push（build_tar 打包 jobs 的 inputs / score_refs）
+    then: 推送前先探测 ssh，探测失败（have 不是数字）这轮不推、不打包视觉模型；png / jpg / webp 先 PIL 完整 load，失败 → 跳过并打印“图读不全（跳过，不推坏图）”；离线合并回来的图同样要逐张解码核对（交 ops/offline/merge_pull.py 的 owner：按内容而非 mtime 合并、坏图不覆盖好图）
+    check: tests/test_video10_resilience.py::test_deploy_build_tar_skips_truncated_images
+    evidence:
+      - {src: data/_quarantine/prod_20261101_truncated_sheets/, note: "16:14 发现 7 张笔记本设定图是截断 PNG（lin_wan_lookA_s101 / lookB_s101 / lookC_s202、chen_yu_lookB_v2_s101、gu_chen_lookC_v2_s101、ch_a_lan_lookB_v2_s101 / lookC_v2_s101），mtime 13:23–13:34，与 data/_offline_pull/gpu3x 副本相同；已从 data/_offline_pull/_backup 恢复（解码通过），坏图隔离在此目录"}
+      - {src: tests/test_image_jobs.py, note: "test_series_jobs_prompt_equals_compiler_output 恢复前因 asset_refs.sheet_crop 读截断设定图 OSError 失败"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-EDT-V10
+    domain: edit
+    link: [P8-P9]
+    title: 成片只用原片（或原片的放大版）合成；540×960 代理只给审片页，禁止进成片；每条输入分辨率必须 ≥ 原片
+    when: night.py finalize 组合成时间线（assembly_sources）；sync.py 每轮拉入选原片（pull_clips）
+    then: sync.py 把每镜 status=done 的 chosen 原片（state 的 file，video/clips/…）拉回本机，按集 / 镜号顺序、每轮每台 ≤4 条（跳板慢）；finalize 先跑 upscale_preview.py（SeedVR2 结果优先，兜底 lanczos 到 1080 宽 + 亮度 unsharp 0.6、CRF 16，产出 <名>_sr1080.mp4），时间线 file = 放大版（宽高 ≥ 原片）或原片；原片不在本机、或原片像素数不高于代理 → ASSEMBLE_BLOCKED，不合成。STATUS.md 每轮写出当前配方（读 recipe_choice.json）
+    check: tests/test_video10_resilience.py::test_assembly_never_uses_proxy
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/video/episodes/ep01/manifest.json, note: "ep01_v2 合成输入是 proxy：episodes/ep01/ep01-S5.mp4 540×960、313 kbps；原片 768×1344、2.36 Mbps（总调度 16:25 核实）"}
+      - {src: docs/SOP_production.md, note: "§12 原口径“4K 只对已批准片”；项目方 11-01 原话“s5等视频出来很糊”“估计你的参数坏了” → 预览成片也至少过一遍放大"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-AST-V10
+    domain: asset
+    link: [P5-P6]
+    title: 局部特写的手部参考只取两只手；躯干占宽度 > 0.35 的手部参考不送
+    when: asset_refs.sheet_crop(zone=hand)（衣橱没有单品图、用设定图裁切代替手套 / 手饰时）
+    then: 手部带（人物外框 0.38–0.62）里找包含中线的连续实心列（= 躯干 / 围裙），取左右两侧（各让 4% 外框宽），白底拼成“两只手”（文件名 *_hand2.png）；torso_share（包含中线的实心列宽 / 图宽）> HAND_TORSO_MAX=0.35 → 不作参考、记 warning“手部参考含躯干”
+    check: tests/test_video10_resilience.py::test_w5_hand_crop_excludes_torso
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/images/refcrops/ch_a_lan_lookA_v2_s101_front_hand.png, note: "旧裁切以围裙 / 躯干为主，torso_share 0.499；重裁 ch_a_lan_lookA_v2_s101_front_hand2.png 为 0.0；AUDIT P2 拼缝：每半边只留最大连通块（手臂 + 手），躯干斜边细缝涂白"}
+      - {src: docs/uimaster/LOCKS.md, note: "CONSENT REFLOCK -> VIDEO10（总调度 fredw-2b 代录，W5）"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-01
+  - id: K-REN-V11
+    domain: render
+    link: [P5-P6]
+    title: 手部局部特写的动作句写到肩 / 颈 / 锁骨 / 胸 → 局部范围为“手与肩颈”，构图句随之改；肩颈入画时角色锁保留发色句
+    when: framing.part_name / closeup_lead / part_lock（compiler 局部特写分支）
+    then: 正文最先写到的局部是手（手 / 指 / 甲 / 腕），且同一正文写到 锁骨 / 颈 / 肩 / 胸 → part = “手与肩颈”，首句“画面里只有手与肩颈这一局部…（hands and the shoulder-collarbone area）”；part_lock 保留手部 + 肩颈分句，并保留发色句（HAIR_COLOR_RE）；纯手 / 脚局部不加发色句（总调度 fredw-2b 11-01 认可：“纯手 / 纯脚局部镜头不加发色句……头发不入画，加了反而把构图拉回人像”，偏离 W5 原话 b 的理由成立）。参考槽不随之扩大（仍只送手部单品：试编译并上 neck/upper 会多送内衣平铺 + 两张造型板）
+    check: tests/test_video10_resilience.py::test_w5_scope_expands_to_hand_and_neck_and_keeps_hair
+    evidence:
+      - {src: data/renders/ep05/S3/takes.json, note: "v9 提示词：构图句“只有手”，正文写胸口 / 肩头 / 锁骨；林晚锁只剩年龄 + 指甲（无发色）；总调度：驳回 8 次都出成带肩颈 / 脸的近景，脸被裁掉后发色变黑"}
+      - {src: data/renders/ep10/S8/takes.json, note: "成功的 v8：正文只写手，只送 1 张指甲参考"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-01
+  - id: K-WRT-V10
+    domain: writer
+    link: P3-P4
+    title: 局部 / 大特写写的是手时，同一 img 不写肩 / 颈 / 锁骨 / 胸口；要肩颈入画就把景别写成近景
+    when: P4 镜头 img 行，景别为 局部 / 特写 / 大特写 / 极近特写，且不写脸
+    then: 最先写到的局部是手，后面又写到 肩 / 颈 / 锁骨 / 胸 → QW-W10 提示（warn）：只要手就把肩颈部位挪到下一镜；肩颈也要入画就写“近景（手与肩颈）”。只查可实现性，不评价内容
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: 写手部局部 / 大特写时，img 里不要同时写肩头、颈、锁骨或胸口；模型会把这种镜画成带肩颈甚至带脸的近景。只要手，就把肩颈的动作放到下一镜；肩颈也要入画，就把景别写成“近景（手与肩颈）”。
+    lint: [QW-W10]
+    check: [tools/qa/writer_lints.py, tests/test_video10_resilience.py]
+    evidence:
+      - {src: data/renders/ep05/S3/takes.json, note: "img：阿岚戴皮手套的手……笔尖点在林晚胸口偏左……另一只手套按在林晚肩头……锁骨入画（大特写）"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-01
+  - id: K-OPS-V12
+    domain: ops
+    link: [P5-P6, P7-P8]
+    title: 总调度驳回（master_reject）即撤下当前版本；账本不把带驳回的当前版本记成通过；producer 改当前只走 set_active / clear_active
+    when: tools/autopilot/producer.py master_reject / master_approve / reconcile_demoted（ledger_sync）
+    then: master_reject 被驳回版本是当前 → P.clear_active（actor = producer.master_reject（by）），这一镜暂无当前，等替换版（⤴ 取代“驳回版保留为当前直到替换版通过”）；master_approve 用 P.set_active(reason, actor) 设当前、首帧换版时 P.clear_active 撤旧尾帧，不再另记 AC.audit_change（每次变化只一条审计）；reconcile_demoted 遇到当前版本带 master_reject 跳过，不同步为通过
+    check: tests/test_producer.py::test_master_reject_clears_current_immediately_and_approve_audits_once
+    evidence:
+      - {src: tests/test_active_audit.py, note: "K-OPS-Q23（RSI r5，ep01-S5 事故）；producer 已从 KNOWN_DIRECT 白名单移除"}
+      - {src: tests/test_producer.py, note: "test_ledger_never_syncs_master_rejected_current"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01

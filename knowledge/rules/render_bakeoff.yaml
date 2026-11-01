@@ -1,0 +1,154 @@
+# BAKEOFF（2026-11-01 第 1 轮）：换出图模型的真人质感对决学到的东西。
+# 工具：tools/bakeoff/（run.py 协议与出图、score_srv.py 打分、post_local.py / REFLOCK remote_score 契约 postflight、page.py 对照页、heldout.py 留出复核）。
+# 数据：data/ab/image_bakeoff/summary.json（排名，契约 Q1–Q7 取 all_pf33.json / heldout_pf33.json）、results.json；
+#       留出复核：data/review_pages/asset_reflock/heldout_bakeoff.json（标签 = 总调度 11-01）。报告：docs/ep02_iter/image_bakeoff.md
+rules:
+  - id: K-REN-B01
+    domain: render
+    link: P5-P6
+    title: 写实底模（Klein 4B / Z-Image / Krea 2）质感更好，但带参考图也保不住林晚的脸；首帧主模型先留在 Qwen 系
+    when: 想把首帧出图模型从 Qwen-Image 2.1 换成更“真人”的底模
+    then: >-
+      先按 tools/bakeoff 协议同镜对比，并且身份（契约 Q1，对项目方母版或 ref2va 取较高者）和质感一起看。
+      第 1 轮数字：Klein 4B 契约组的质感综合分 +0.58，Q1 过线率 12%（林晚余弦约 0.43）；Z-Image Turbo 只能纯文字，+0.11 / 0%；
+      Krea2 Identity Edit +0.25 / 0%（0.51）；Qwen 2.1 S★ 只挂脸 −0.20 / 73%（0.72），契约组 −0.39 / 46%；2511 契约组 −0.35 / 50%；
+      现行出图 −0.61 / 86%（带已禁用的 lin_wan_qi）。
+      没有哪个模型同时赢两项，所以不切主模型。下一轮假设：保留 Qwen 系做身份和构图，写实底模只做第二段质感加工，
+      先测 Klein 4B 低去噪重绘，脸部用掩码保护。
+    params: {texture_composite: "z(脸部肤色区高频)+z(纹理标准差)+z(log 脸部 Laplacian)−z(油光) 的平均"}
+    evidence:
+      - {src: data/ab/image_bakeoff/summary.json, note: 第 1 轮第 1 个 seed，各模型 1–16 张；FireRed 契约组只出了 1 张（GPU 让道）}
+    check: tools/bakeoff/run.py
+    confidence: medium
+    status: 待验
+    date: 2026-11-01
+  - id: K-REV-B02
+    domain: review
+    link: P5-P6
+    title: 契约 Q4 的整图 Laplacian 线（≥175）留出复核不成立，只能记录，不能作阻断
+    when: 用 postflight Q4 判首帧“塑料、糊”
+    then: >-
+      在留出集上（46 张，标签由总调度给出），lap+sat 口径判对率 0.587，config 现行口径 0.500，lap_full 的 AUC 0.41。
+      问题出在两类图：ep05-S5 那种大特写里，娃娃脸、过度磨皮，但针和漆皮边缘很锐，lap 有 177–688，被判过；
+      暗场景或中景男主的图实际可接受，lap 只有 45–148，被判不过。
+      所以 Q4 改成在脸部区域测量。同一留出集里 BAKEOFF 的脸部 Laplacian AUC 0.93、高频 0.83，但只有 2 个反例；REFLOCK 用全集复核得到 face_hf 的 AUC 只有 0.58（data/review_pages/image_bakeoff/verify_reflock_r1.md），所以脸部指标目前也只能作参考，要扩充反例后再定线。
+    evidence:
+      - {src: data/review_pages/asset_reflock/heldout_bakeoff.json, note: Q4 / Q4_lap_sat_only 的 wrong 列表}
+    check: tools/bakeoff/heldout.py score
+    confidence: medium
+    status: 确认
+    date: 2026-11-01
+  - id: K-REV-B03
+    domain: review
+    link: P5-P6
+    title: 契约 Q2 鞋线 0.775 落在正反例重叠区；Q5 的“肢体比例”规则在坐姿近景误报多
+    when: 用 postflight 判鞋是否穿对、手和肢体是否可疑
+    then: >-
+      Q2 鞋（B4 中全景，14 张）判对率 0.714：对的那双 clip 在 0.710–0.861，错的在 0.641–0.780，有装饰的变体 0.780 被判过。
+      要扩充留出集，或者再加一条形状、材质的判别，不能只调线。
+      Q5（18 张）判对率 0.611：7 张误报全是“肢体比例可疑”，“手型”规则（含林晚指长比 ≤4.6 豁免）没有误报。
+      留出集里没有一张坏手，所以测不了漏检，不给召回率。
+    evidence:
+      - {src: data/review_pages/asset_reflock/heldout_bakeoff.json, note: Q2_shoe / Q5_hand}
+    check: tools/bakeoff/heldout.py score
+    confidence: medium
+    status: 确认
+    date: 2026-11-01
+  - id: K-REN-B04
+    domain: render
+    link: P4-P6
+    title: 只给文字出首帧，任何模型都出不了林晚；身份参考是必要条件，质感代价可以接受
+    when: 首帧作业的身份参考缺失或被跳过
+    then: >-
+      第 1 轮同镜同提示词，林晚余弦（ref2va）：Qwen 2.1 只给文字 0.19，只挂脸 0.72，契约（脸加造型、单品、场景）0.66；
+      Klein 4B 三组分别是 0.16 / 0.43 / 0.43。挂了参考后，质感综合分只掉 0.03–0.2。
+      preflight 的 I2 继续阻断；对照组只作实验用，不交付。
+    evidence:
+      - {src: data/ab/image_bakeoff/summary.json}
+    check: tests/test_bakeoff.py::test_submittable_blocks_unlisted_lora_and_failed_preflight
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REN-B05
+    domain: render
+    link: P5-P6
+    title: 指令改图：换脸用 Qwen 2.1 edit，去油加毛孔用 Klein 4B，但 Klein 会把脸改掉，要过身份闸门
+    when: 对不合格首帧做“换成林晚的脸”或“去油光、加真实毛孔”的编辑（ep05-S5 实测）
+    then: >-
+      E1 换脸后的林晚余弦：Qwen 2.1 0.753，FireRed 0.711，Klein 4B 0.682，Krea2 Identity Edit 0.628，2511 0.564，Krea2 ref 0.571（还改了构图）；源图 0.534。
+      E2 去油：Klein 4B 脸部高频 2.12，其他模型 1.35–1.65，但林晚余弦掉到 0.39，所以编辑后必须过 Q1 才能放行。
+      E3 换背景：Qwen 2.1 场景相似度最高，但构图被重排；FireRed 和 Krea2 Identity Edit 基本没换背景。
+    evidence:
+      - {src: data/ab/image_bakeoff/results.json, note: E1_* / E2_* / E3_*，seed 20261031}
+      - {src: data/review_pages/image_bakeoff/contact_edit.jpg}
+    check: tools/bakeoff/run.py
+    confidence: medium
+    status: 待验
+    date: 2026-11-01
+  - id: K-OPS-B06
+    domain: ops
+    link: P5-P6
+    title: 低优先级的对比实验必须让道：hold 文件 + 道上 3 分钟没有别人任务 + 每道最多 1 个任务 + comfy_tag
+    when: BAKEOFF 或任何非出片的实验要占 gpu36 / gpu33 的出图道
+    then: >-
+      跑在 run.py 的 wait_yield 里。/root/work/fredw/bakeoff/srv/run/hold 列出的端口不提交；
+      别人的任务结束后要空闲满 180 秒才提交。
+      出帧方是“等道空了才交”，不会用 front 插队，所以只看队列里有没有别人的任务不够。11-01 02:27 就因此占满了两道。
+    evidence:
+      - {src: docs/ep02_iter/image_bakeoff.md, note: §6 让道事故——总调度 11-01 转 GPUVIEW 02:27 看到 BAKEOFF 占 gpu36:0/1 100%，出帧在等}
+    check: tests/test_bakeoff.py::test_wait_yield_respects_hold_and_foreign_jobs
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REV-B07
+    domain: review
+    link: P5-P6
+    title: 输出等于参考板拼图的要单独判掉，不计分（白色栅格 / 格子≈参考 / 文字框 ≥5 / 同一人两次）
+    when: 模型拿到多张参考图（尤其参考板）时出首帧
+    then: >-
+      第 1 轮 Krea 2 ref 契约组（ganloss 写法，原生 EditPlus 编码）6 张全部把参考板原样拼成多格图（总调度 11-01 亲审 #05）。
+      score_srv 的 ref_copy 检查（tools/bakeoff/refcopy.py）抓到其中 4 张，在其余 182 张上 0 误报（data/ab/image_bakeoff/results.json）。
+      “笔直断层”检测会把顾沉衣帽间门框误报成拼图，所以只记录、不判。
+      第 2 轮的第一段首帧和掩码不能放进参考库，否则第二段的输出会被判成照抄。
+      被判照抄的图，和总调度亲审定为照抄的整组，在排名里单列为“输出=参考板”，不计分。
+    evidence:
+      - {src: data/review_pages/image_bakeoff/master_review.md}
+      - {src: data/ab/image_bakeoff/results.json, note: ref_copy 字段}
+    check: tests/test_bakeoff.py::test_refcopy_flags_board_collage_not_natural_frame
+    confidence: low   # REFLOCK r2 复核：同一批图定线又验证，等新图再验
+    status: 建议
+    date: 2026-11-01
+  - id: K-REN-B08
+    domain: render
+    link: P5-P6
+    title: 阿岚的脸在各模型间不一致，是因为各模型保身份的能力不同，参考图本身没有问题
+    when: 配角（阿岚）单人特写各列长得不一样，甚至出成男性
+    then: >-
+      两张阿岚参考图的 sha256 完全相同（REFLOCK 11-01 核查：都是 ar-32fa1335b3）。
+      B6 对阿岚的余弦：Qwen 2.1 契约组 0.94、只挂脸组 0.91、现行出图 0.90；Krea2 IdEdit 0.66、2511 契约组 0.60、Klein 4B 契约组 0.57、只挂脸组 0.46；
+      只给文字的各组 0.00–0.37，Z-Image Turbo 那张 0.13 还出成了男性（data/ab/image_bakeoff/results.json B6_*）。
+      结论：配角同样必须挂身份参考，并且要按 Q1 判；模型保身份能力的排序和林晚一致（Qwen 系 > Krea2 IdEdit > 2511 ≈ Klein）。
+    evidence:
+      - {src: data/ab/image_bakeoff/results.json}
+    check: tools/bakeoff/score_srv.py
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REN-B09
+    domain: render
+    link: P5-P6
+    title: Qwen 首帧再过一遍 Klein 4B 低去噪加工（脸部掩码保护）解决不了塑料脸：脸没变，整图还略微变软
+    when: 想用“写实底模第二段加工”同时保住身份、提升质感
+    then: >-
+      第 2 轮共 24 张，基线是 Qwen 2.1 S★ 契约组的首帧（data/ab/image_bakeoff/summary.json r2_*）。
+      去噪 0.30（8 步里实际只跑 2 步）和 0.45 加掩码时，脸部被保护，没有重绘，脸部质感没有提升；
+      整图 Laplacian 反而下降（B1 从 121 降到 91，B8 从 235 降到 186），饱和度略升；身份变化在 ±0.01 以内。
+      不加掩码、去噪 0.30 时，脸也几乎不变。
+      要提升脸部质感就必须重绘脸，而 E2 已经证明重绘脸会让林晚的余弦掉到 0.39。
+      所以这条路线不再加步数试。下一步要找一种能在脸部加质感、又不改五官的方法，比如由身份引导的脸部细节重绘，并以 Q1 作闸门。
+    evidence:
+      - {src: data/ab/image_bakeoff/results.json, note: r2_* 与对应的 qwen21_sstar_contract_20261031}
+    check: tools/bakeoff/run.py
+    confidence: medium
+    status: 确认
+    date: 2026-11-01

@@ -38,8 +38,11 @@ export const isNotReady = (e: unknown) => {
   return s === 404 || s === 405 || s === 501;
 };
 /** 错误 → 一句话；未上线的统一说“后端未就绪” */
-export const errText = (e: unknown, what = "") =>
-  isNotReady(e) ? `后端未就绪${what ? `（${what}）` : ""}` : (e as Error)?.message ?? String(e);
+// UIMASTER：调用方传进来的 what 常是开发用的接口代号（“W5 /assets/{id}/gen-jobs”），界面不得出现路径 / 开发细节——带斜杠或 Wn 编号的一律不显示
+export const errText = (e: unknown, what = "") => {
+  const label = what && !/\/|^W\d/.test(what) ? `（${what}）` : "";
+  return isNotReady(e) ? `这个功能后台还没准备好${label}，稍后再试（后台重启后就能用）` : (e as Error)?.message ?? String(e);
+};
 
 // ---------------- §C 出图与精修循环（W2） ----------------
 
@@ -81,7 +84,8 @@ export interface FrameJobBody {
   strength?: Strength;
   refs?: RefSpec[];
   seed?: number;
-  gpu?: 0 | 3;
+  /** 道：0 / 3 / "gpu36:1" / "auto"（后端 jobs.pick_lane 按任务类型挑空闲的卡） */
+  gpu?: number | string;
   llm?: { provider: string; model: string; params?: Record<string, unknown> };
   /** fredw-92/Q1：preview | final（定稿档） */
   tier?: "preview" | "final";
@@ -114,9 +118,12 @@ export interface ImageParams {
   strength: number | null;
   grade: { enabled: boolean | null; strength: number };
   spec_words: boolean;
-  sharpen: { enabled: boolean; radius: number; amount: number };
+  /** threshold：PIL UnsharpMask 阈值（LCA；旧 API 没有 = 0） */
+  sharpen: { enabled: boolean; radius: number; amount: number; threshold?: number };
   render_scale: number;
   detail_pass: { enabled: boolean; denoise: number; scale: number };
+  /** LCA：风格后缀（项目方选定的写作模型原文，前加“，”原样接在提示词末尾；"" = 不加；旧 API 没有） */
+  style_suffix?: string;
 }
 export interface ImagePreset {
   id: string;
@@ -132,6 +139,8 @@ export interface ImagePresetsResp {
   defaults: ImageParams;
   default_preset: string;
   final_preset: string;
+  /** fredw-92/UXF2：render_quality.json auto_final_on_lock（旧 API 没有这个字段） */
+  auto_final_on_lock?: boolean;
   ranges: Record<string, number | [number, number]>;
   labels: Record<string, string>;
   unets: Record<string, string>;
@@ -155,8 +164,10 @@ export interface ImagePresetsResp {
 export interface ImageTakeParams {
   preset?: string | null;
   overrides?: Partial<ImageParams> | null;
-  effective?: (Partial<Omit<ImageParams, "loras">> & { loras?: LoraRow[]; unet_file?: string; vae_file?: string; sigmas?: string | null; tier?: string; denoise?: number; note?: string; rendered_size?: [number, number] }) | null;
+  effective?: (Partial<Omit<ImageParams, "loras" | "style_suffix">> & { loras?: LoraRow[]; unet_file?: string; vae_file?: string; sigmas?: string | null; tier?: string; denoise?: number; note?: string; rendered_size?: [number, number]; style_suffix?: string | null; style_suffix_applied?: boolean; render_scale_requested?: number; render_scale_note?: string }) | null;
   post?: { steps?: string[] } | null;
+  /** LCA：送进 Image 2.1 的提示词（原文 + “，” + 风格后缀） */
+  prompt_sent?: string | null;
   spec_removed?: string[] | null;
   tier?: string;
 }
@@ -202,9 +213,27 @@ export interface VideoJobBody {
   steps?: number;
   seconds?: number;
   lora_strength?: number;
-  gpu?: 3 | 0;
+  /** 道：3 / "gpu36:1" / "auto" */
+  gpu?: number | string;
   /** fredw-92/VB：附加 H3 LoRA（串在 Turbo 之后），强度 0–1.5 */
   loras?: { name: string; strength: number }[];
+  /** fredw-92/PF：视频基底 official_turbo（默认）| pika_flex；take.params.base 记这一版用的 */
+  base?: string;
+  /** fredw-92/QCV：use（默认，首尾帧都给）| none（只给首帧）| auto（首尾帧几乎一样时只给首帧） */
+  last_frame_mode?: "use" | "none" | "auto";
+}
+
+/** GET /api/video-bases：config/render_quality.json video_bases（fredw-92/PF） */
+export interface VideoBaseInfo {
+  id: string;
+  label?: string;
+  short?: string;
+  steps?: number;
+  steps_adjustable?: boolean;
+  experimental?: boolean;
+  hint?: string;
+  license?: string;
+  source_url?: string;
 }
 
 /** GET /api/video-loras：config/render_quality.json 的可选视频 LoRA（fredw-92/VB） */
@@ -292,6 +321,8 @@ export interface AssetRef {
   role?: RefRole;
   label?: string;
   source?: string;
+  /** fredw-92/CHR：作废候选（文件保留，不能再用作生成参考） */
+  void?: { by: string; owner_quote?: string; reason?: string; at?: string } | null;
 }
 export interface AssetVersion {
   n?: number;
@@ -311,10 +342,18 @@ export interface CharacterAssetsV1 {
   episodes?: number[];
 }
 
+/** 查询串：跳过空值，没有参数就不带 ? */
+const qs = (o: Record<string, string | undefined>) => {
+  const u = new URLSearchParams(Object.entries(o).filter((e): e is [string, string] => e[1] != null));
+  const t = u.toString();
+  return t ? `?${t}` : "";
+};
+
 export const apiV1 = {
   // §C
   frameJob: (shot: string, body: FrameJobBody) => req<{ job_id: string }>(`/api/shots/${sid(shot)}/frame-jobs`, json("POST", body)),
-  imagePresets: (gpu: 0 | 3, refresh = false) => req<ImagePresetsResp>(`/api/render/image-presets?gpu=${gpu}${refresh ? "&refresh=true" : ""}`),
+  imagePresets: (gpu: number | string, refresh = false) =>
+    req<ImagePresetsResp>(`/api/render/image-presets${qs({ gpu: gpu === "auto" ? undefined : String(gpu), refresh: refresh ? "true" : undefined })}`), // UIDEBUG #2
   saveImagePreset: (b: { label: string; params: Partial<ImageParams>; tier?: "preview" | "final"; base?: string; note?: string }) =>
     req<ImagePreset>(`/api/render/image-presets`, json("POST", b)),
   deleteImagePreset: (id: string) => req<{ deleted: string }>(`/api/render/image-presets/${sid(id)}`, { method: "DELETE" }),
@@ -327,7 +366,8 @@ export const apiV1 = {
   frameJobs: (shot: string) => req<ShotJobV1[]>(`/api/shots/${sid(shot)}/frame-jobs`),
   // §D
   videoTakes: (shot: string) => req<{ jobs?: ShotJobV1[] }>(`/api/shots/${sid(shot)}/video-takes`),
-  videoJob: (shot: string, body: VideoJobBody) => req<{ job_id: string }>(`/api/shots/${sid(shot)}/video-jobs`, json("POST", body)),
+  videoJob: (shot: string, body: VideoJobBody) => req<{ job_id: string; warnings?: string[]; keyframe_check?: { first_last_diff?: number; warn?: boolean; message?: string | null } }>(`/api/shots/${sid(shot)}/video-jobs`, json("POST", body)),
+  videoBases: () => req<{ default: string; bases: VideoBaseInfo[] }>(`/api/video-bases`),
   videoLoras: () => req<{ loras: OptionalVideoLora[]; strength_range: [number, number] }>(`/api/video-loras`),
   // §E
   shotRefs: (shot: string) => req<ShotRefsV1>(`/api/shots/${sid(shot)}/refs`),
@@ -352,6 +392,17 @@ export const apiV1 = {
   /** 后端字段名是 job_id（F2 修：原来发 job，后端 422） */
   assetVersion: (asset: string, b: { job_id?: string; label: string }) =>
     req<AssetVersion & { asset_id?: string }>(`/api/assets/${sid(asset)}/versions`, json("POST", b)),
+  /** UX6（A B6）：另存为新资产（POST /fork）；旧后端没有 /fork（404/405）→ 退回 versions 的旧默认（同样是另存） */
+  assetFork: async (asset: string, b: { job_id?: string; label: string }) => {
+    try {
+      return await req<AssetVersion & { asset_id?: string }>(`/api/assets/${sid(asset)}/fork`, json("POST", b));
+    } catch (e) {
+      const st = (e as { status?: number })?.status;
+      if (st === 405 || (st === 404 && /^(404 )?Not Found$/.test(String((e as Error)?.message))))
+        return req<AssetVersion & { asset_id?: string }>(`/api/assets/${sid(asset)}/versions`, json("POST", b));
+      throw e;
+    }
+  },
   /** 从其他资产复制一张参考图 */
   assetRefCopy: (asset: string, b: { from_asset: string; ref_id: string; role?: RefRole }) =>
     req<AssetRef>(`/api/assets/${sid(asset)}/refs/copy`, json("POST", b)),

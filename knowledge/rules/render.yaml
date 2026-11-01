@@ -1,0 +1,279 @@
+# 生成参数（H3 视频 / 关键帧）。targets kind=recipe 的值由 compile.py 对照 services/recipes/recipes/*.yaml 校验。
+rules:
+  - id: K-REN-001
+    domain: render
+    link: P7-P8
+    title: H3 底模用 pruned int8（FL2VA / Ref2VA 各一）
+    when: 所有 H3 视频
+    then: FL2VA 用 minimax_h3_fl2va_pruned_int8_convrot；Ref2VA 用 minimax_h3_ref2va_pruned_int8_convrot；不用 w4a8 + LoRA
+    targets:
+      - {kind: recipe, id: _base, path: model.unet, value: minimax_h3_fl2va_pruned_int8_convrot.safetensors}
+      - {kind: recipe, id: two_person_ref2va, path: model.unet, value: minimax_h3_ref2va_pruned_int8_convrot.safetensors}
+    evidence:
+      - {src: docs/ep02_iter/h3_comfy_expert.md §2 UNETLoader, quote: "pruned INT8 clean"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-REN-002
+    domain: render
+    link: P7-P8
+    title: 成片默认基模 24 步、euler / simple、shift 12/3、BasicGuider cfg 1
+    when: 成片（非预览）视频
+    then: 不挂 Turbo；24 步；euler + simple；shift 12/3（等于 ComfyUI 默认）；BasicGuider cfg 1，负面词无效
+    targets:
+      - {kind: recipe, id: _base, path: sampling.steps, value: 24}
+      - {kind: recipe, id: _base, path: sampling.sampler, value: euler}
+      - {kind: recipe, id: _base, path: sampling.scheduler, value: simple}
+      - {kind: recipe, id: _base, path: sampling.shift, value: [12.0, 3.0]}
+      - {kind: recipe, id: _base, path: sampling.guider, value: BasicGuider}
+      - {kind: recipe, id: _base, path: sampling.cfg, value: 1.0}
+      # 画布 video-jobs 默认基底不再归这条管：项目方 2026-11-01 原话“把 Flex 设成默认基底” → config video_bases.default = pika_flex
+      # （fredw-92/PF，video_bases.default_change_pf）；本条只约束 recipe _base（H3 配方公共基底）
+      # series10 重出默认 ⤴ 已由 i2va_pika_flex 取代（项目方 2026-11-01 ~16:20 原话“改用 Pika Flex (Recommended)”——“之后重出的镜头都走 Pika，已经通过的镜头不动”，见 K-REN-301 修订、recipe_choice.json）；_base 24 步仍是非 Pika 配方的基底与 flush 镜的回退
+    evidence:
+      - {src: docs/ep02_iter/LEARNED_SPECS.md §B 视频默认配方, quote: "official_base 24 步 + 只给首帧"}
+      - {src: docs/ep02_iter/h3_comfy_expert.md §0 第 1 条, quote: "shift 12/3 就是 ComfyUI 对 H3 的默认值"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-REN-003
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: P7-P8
+    title: 采样器 res_multistep 对照 euler 待测
+    when: 想换采样器时
+    then: 官方模板默认 res_multistep；euler 让 I2V 变暗约减半——先做 E4 再改
+    evidence:
+      - {src: docs/ep02_iter/h3_comfy_expert.md §0 第 2 条, quote: "这是一个待测项，不是我们错了"}
+    confidence: medium
+    status: 待验
+    experiment: E4
+    date: 2026-10-31
+  - id: K-REN-004
+    domain: render
+    link: [P6-P7, P7-P8]
+    title: 默认只给首帧（I2VA）
+    when: 所有视频，除非写作方尾帧是“动作进行中”且首尾差 ≥10
+    then: last_frame_mode = none；尾帧每步硬注入，首尾太像必静止、结尾必冻结
+    targets:
+      - {kind: recipe, id: _base, path: keyframes.last_frame_mode, value: none}
+      - {kind: recipe, id: _base, path: keyframes.min_first_last_diff, value: 10.0}
+      - {kind: render_quality, path: motion_qc.keyframe_warn, value: 10.0}
+    evidence:
+      - {src: docs/ep02_iter/h3_comfy_expert.md §0 第 3 条, quote: "re-injected every step (never denoised)"}
+      - {src: docs/ep02_iter/LEARNED_SPECS.md §B 视频默认配方, quote: "静止镜头 7/11 → 2/11"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-REN-005
+    domain: render
+    link: P7-P8
+    title: 注意力后端用 pytorch，comfy kitchen（INT8）待测
+    when: 成片
+    then: attention = pytorch；kitchen 只在 E3 证明无损后才用
+    targets:
+      - {kind: recipe, id: _base, path: sampling.attention, value: pytorch}
+    evidence:
+      - {src: docs/ep02_iter/h3_comfy_expert.md §0 第 7 条, quote: "uses quantized INT8 attention"}
+    confidence: high
+    status: 确认
+    experiment: E3
+    date: 2026-10-31
+  - id: K-REN-006
+    domain: render
+    link: P7-P8
+    title: 分辨率 768×1344；736×1312 待测顿挫
+    when: 9:16 视频
+    then: 768×1344（3090 上限附近）；E2 测 736×1312（宽高 ≡32 mod 64）是否减轻平移顿挫
+    targets:
+      - {kind: recipe, id: _base, path: resolution.width, value: 768}
+      - {kind: recipe, id: _base, path: resolution.height, value: 1344}
+    evidence:
+      - {src: docs/ep02_iter/h3_comfy_expert.md §0 第 5 条, quote: "宽高都 ≡32 (mod 64) 时干净"}
+    confidence: medium
+    status: 确认
+    experiment: E2
+    date: 2026-10-31
+  - id: K-REN-007
+    domain: render
+    link: P7-P8
+    title: 缓存 / 加速节点一律不进 H3 图
+    when: 构建 H3 图
+    then: 禁用 EasyCache、TeaCache、MiniMaxH3Cache、Spectrum 等（改长相、背景杂音）
+    targets:
+      - {kind: recipe, id: _base, path: sampling.banned_nodes, value: [EasyCache, LazyCache, MiniMaxH3Cache, SpectrumPatch, Spectrum, TeaCache, CacheDiT, SolAttention, TorchCompileModel, ModelPatchTorchSettings]}
+    evidence:
+      - {src: docs/ep02_iter/h3_comfy_expert.md §2 缓存 / 加速节点, quote: "会改变人物长相和画面质感"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-REN-008
+    domain: render
+    link: P7-P8
+    title: 帧数 17k+5，107–362；单道上限 260，超过派长镜头道
+    when: 秒数换帧数
+    then: 官方公式 max(5,round(s×24)) 补到 17k+5；>260 帧只派 gpu36:2；不截短
+    targets:
+      - {kind: recipe, id: _base, path: frames.max, value: 362}
+      - {kind: recipe, id: _base, path: frames.lane_max_default, value: 260}
+      - {kind: recipe, id: _base, path: frames.long_lane, value: "gpu36:2"}
+    evidence:
+      - {src: docs/ep02_iter/h3_comfy_expert.md §1 帧网格, quote: "帧数只能取 124/141/…/243/…/362"}
+      - {src: config/render_endpoints.json _max_frames_comment, quote: "243/260 过、277/294 在 SamplerCustomAdvanced OOM"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-REN-009
+    domain: render
+    link: P7-P8
+    title: 每镜每次不同种子；换关键帧后同种子不可比
+    when: 出片 / A/B
+    then: 种子 = hash(镜, spec, 配方, 第几次)；A/B 固定关键帧或每组多种子
+    targets:
+      - {kind: recipe, id: _base, path: seed.policy, value: hash}
+    evidence:
+      - {src: "docs/ep02_iter/h3_comfy_expert.md §10 #13", quote: "换了关键帧之后，同一个 seed 不保证可比"}
+    confidence: medium
+    status: 确认
+    date: 2026-10-31
+  - id: K-REN-010
+    domain: render
+    link: P7-P8
+    title: 两段式（0.52 MP → 3D latent 放大 → 低 σ 段）待测、放大器待许可登记
+    when: 独立镜头（非尾帧续接链）想提速或补细节
+    then: 24 步第 12 步切（σ≈0.923）；第一段 544×960；第二段 ≤1.03 MP（3090）；不设默认
+    targets:
+      - {kind: recipe, id: long_take_two_stage, path: two_stage.split_step, value: 12}
+      - {kind: recipe, id: long_take_two_stage, path: two_stage.pass1, value: [544, 960]}
+      - {kind: recipe, id: _base, path: resolution.max_megapixels_3090, value: 1.033}
+    evidence:
+      - {src: docs/ep02_iter/h3_comfy_expert.md §0 第 6 条, quote: "第二段起点放在 σ 0.90–0.92"}
+      - {src: docs/ep02_iter/h3_comfy_expert.md §0 第 11 条, quote: "latent upscale or a second sampling stage both shift pixels"}
+    confidence: medium
+    status: 待许可登记
+    experiment: E1
+    date: 2026-10-31
+  - id: K-REN-011
+    domain: render
+    link: P7-P8
+    title: 双人 / 静态情绪 / 对白近景用纯 Ref2VA + 脸部裁切身份图（不钉首帧）
+    when: ≥2 个在画露脸角色，或 FL2VA/I2VA 下静止、泛红、身份三项不过的镜头
+    then: Ref2VA（ref2va int8、match、六段提示词）；身份图用项目方定的脸部裁切；不放定稿首帧（multiframe 会把身份拉回首帧水平、S6 又不动）；代价是构图不跟首帧
+    targets:
+      - {kind: recipe, id: two_person_ref2va, path: ref2va.ref_image_size, value: match}
+      - {kind: recipe, id: two_person_ref2va, path: ref2va.add_guide_first_frame, value: false}
+      - {kind: recipe, id: two_person_ref2va, path: ref2va.first_frame_slot0, value: false}
+    evidence:
+      - {src: docs/ep02_iter/lab_recipes.md 批 2 结论 1, quote: "Ref2VA 在三个问题镜上的动作量、身份、泛红全面领先"}
+      - {src: docs/ep02_iter/lab_recipes.md 推荐表 对白近景, quote: "X4：SFace 0.81，cheek_red 0.08"}
+      - {src: docs/ep02_iter/h3_official_conformance.md §2 R2, quote: "林晚、顾沉、陈宇各自是一个 <Subject N>"}
+    confidence: medium
+    status: 建议
+    experiment: E5
+    date: 2026-10-31
+  - id: K-REN-012
+    domain: render
+    link: P7-P8
+    title: Motion Repair 0.9 让顿挫变差，降到 0.4 待测
+    when: 走动全身镜头静止或慢动作
+    then: 不挂 0.9（D1：J4 1.14→1.35、动作量不增）；0.4（社区中位）待 E6；走动镜头首选 Ref2VA 两段式
+    targets:
+      - {kind: recipe, id: walk_fullbody, path: loras.motion_repair.strength, value: 0.4}
+    evidence:
+      - {src: docs/ep02_iter/lab_recipes.md 推荐表 人物走动, quote: "不要加 Motion Repair 0.9（J4 1.35）"}
+      - {src: docs/ep02_iter/h3_comfy_expert.md §2 LoRA（Motion Repair）, quote: "单段约 0.9"}
+    confidence: medium
+    status: 待验
+    experiment: E6
+    date: 2026-10-31
+  - id: K-REN-013
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: P7-P8
+    title: 有脸红类描述的镜头不用 Pika
+    when: 提示词含 flush / blush / 潮红 / 绯红等
+    then: 回退链去掉 Pika 配方（overlays/flush_risk.block_recipes）
+    evidence:
+      - {src: docs/ep02_iter/LEARNED_SPECS.md §B Pika 用在哪些镜, quote: "提示词含 flush/blush 描述的镜头不用 Pika"}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-REN-014
+    domain: render
+    link: P7-P8
+    title: Pika Flex 参数固定（lcm、7 值 sigma、不叠 Turbo）
+    when: 用 Pika 回退
+    then: 6 步 lcm、官方 sigma 表、LoRA 1.0、无 SigmaShift 节点
+    targets:
+      - {kind: recipe, id: dialogue_closeup_pika, path: sampling.sampler, value: lcm}
+      - {kind: recipe, id: dialogue_closeup_pika, path: sampling.sigmas, value: "1.0, 0.972973, 0.923077, 0.8, 0.571429, 0.333333, 0.0"}
+    evidence:
+      - {src: docs/ep02_iter/LEARNED_SPECS.md §B Pika Flex 参数, quote: "lcm、ManualSigmas 7 值（6 步）"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-REN-015
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: P5-P6
+    title: 关键帧 krea2 胶片质感 LoRA 有脸近景降到 0.25
+    when: 有脸的近景 / 特写关键帧
+    then: krea2 0.5 → 0.25（降低首帧本身偏红）；质感不能丢，A/B 定
+    evidence:
+      - {src: docs/ep02_iter/LEARNED_SPECS.md §B 关键帧 krea2, quote: "C0 39.7 vs C2（去 krea2）29.7"}
+    confidence: medium
+    status: 待验
+    date: 2026-10-31
+  - id: K-REN-016
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: P7-P8
+    title: Turbo 只做预览；768p Turbo 必须 shift 6/3
+    when: 预览档
+    then: lightx2v FL2V 8step v1.1 768p @1.0、6/3、8 步；不用 4step / v1.3；Turbo 强制慢动作
+    evidence:
+      - {src: docs/ep02_iter/h3_comfy_expert.md §0 第 8 条, quote: "force slow motion on everything"}
+    confidence: medium
+    status: 确认
+    date: 2026-10-31
+  - id: K-REN-017
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: P7-P8
+    title: 夜景用 euler（变暗少），按锚帧校色
+    when: 场景时段含“夜”
+    then: 叠加 overlays/night：euler、按通道 gain/bias 校色；暗 / 全黑意图的镜头不判近黑
+    evidence:
+      - {src: docs/ep02_iter/h3_comfy_expert.md §5 发暗, quote: "euler 代替 res_multistep"}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-REN-018
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: P11-RETRY
+    title: 派单运行规则——每道总负载 ≤2（含别的会话 / 直连 ComfyUI）；API 提交超时 180 s，超时后按 seed 找回作业再决定重交
+    when: iterate_loop / fanout 提交到 :8800
+    then: "LaneAllocator.lane_cap = 2（ApiSubmitter.lane_load = ComfyUI /queue + API queued）；ApiSubmitter timeout 180 s；fanout 超时按 shot+seed 在 /api/jobs 找回，找不到下一轮再交，不重复提交；只改后处理的步骤记 post_only_of，不算新出片"
+    evidence:
+      - {src: tools/iterate_loop/submitter.py, quote: "lane_load / timeout 180"}
+      - {src: tools/ep02_iter/fanout.py, quote: "_recover_submit"}
+      - {src: docs/CHANGELOG_AGENTS.md, quote: "V2"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+
+  - id: K-REN-019
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: P7-P8
+    title: 保构图路线的快档——FL2VA int8 + PDD-Acc 8NFE 两段式（544×960 前 4 步 → 3D 放大 → 768×1344 后 4 步）
+    when: 只给定稿首帧（I2VA）出独立镜头、要多 seed 暴力筛选时
+    then: "PDDAccApply(FL2VA-Acc-8Step, nfe 8, 1.0/1.0) → SigmaShift 12/3 → euler；SplitSigmas(PDD sigmas, 4)（σ .923）；第二段用 768×1344 重新编码首帧条件；不叠 turbo；生成约 9 min/158 帧（3090 限 200 W），基模 24 单段 44 min"
+    evidence:
+      - {src: docs/ep02_iter/planB_report.md §1, quote: "PDD 两段式·生成 … 约 8–10 min/镜"}
+      - {src: data/ab/planB/ep02/scores/scores.md, quote: "B2_S2 mean 0.86 J4 1.058 cheek_red 0.09 SFace 0.331；R0_S2_b24_s1 0.873 / 1.132 / 0.08 / 0.35"}
+    confidence: medium
+    status: 待验
+    experiment: PLANB-B2
+    date: 2026-10-31

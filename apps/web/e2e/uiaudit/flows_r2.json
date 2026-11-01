@@ -1,0 +1,24 @@
+[
+  {"id": "S900_script_read", "title": "剧本阅读 900", "path": "/#/projects", "size": [1440, 900], "wait": 7000, "steps": [{"shot": "top"}, {"probe": "top"}, {"scroll": "main"}]},
+  {"id": "S720_script_read", "title": "剧本阅读 720", "path": "/#/projects", "size": [1280, 720], "wait": 7000, "steps": [{"shot": "top"}, {"scroll": "main"}]},
+  {"id": "S720_a_sheets", "title": "挑设定图 720", "path": "/#/assets?type=sheets", "size": [1280, 720], "wait": 8000, "steps": [{"scroll": "main"}]},
+  {"id": "T10_delete_script", "title": "删掉一个旧剧本", "path": "/#ep02", "wait": 6000, "steps": [
+    {"click": "新建剧本"}, {"wait": 3000}, {"click": "以前的稿子"}, {"shot": "a"}, {"probe": "a"},
+    {"click": ["🗑", "删除"]}, {"wait": 1500}, {"shot": "b"}, {"probe": "b"}]},
+  {"id": "O_trash", "title": "回收站页", "path": "/#/trash", "wait": 7000, "steps": [{"shot": "a"}, {"probe": "a"}, {"scroll": "main"}]},
+  {"id": "O_audit", "title": "记录页", "path": "/#/audit", "wait": 7000, "steps": [{"shot": "a"}, {"probe": "a"}, {"scroll": "main"}]},
+  {"id": "T8_voice_listen", "title": "试听并更换旁白音色", "path": "/#/assets?type=voice", "wait": 9000, "steps": [
+    {"shot": "a"}, {"probe": "a"},
+    {"js": "return {audio: document.querySelectorAll('audio').length, waveBars: document.querySelectorAll('.mp-wave i').length, ab: document.querySelectorAll('.mp-ab').length, players: document.querySelectorAll('.mp-audio').length}"},
+    {"js": "const b=document.querySelector('.mp-audio .mp-big'); if(!b) return 'no player'; b.click(); return 'clicked'"}, {"wait": 2500},
+    {"js": "return [...document.querySelectorAll('audio')].filter(a=>!a.paused).map(a=>({src:a.src.slice(-40), t:+a.currentTime.toFixed(2)}))"},
+    {"scroll": "main"}, {"shot": "b"}]},
+  {"id": "T4_first_frame", "title": "看首帧（草图）", "path": "/#ep02", "wait": 7000, "steps": [
+    {"js": "const i=[...document.querySelectorAll('img')].find(x=>x.getBoundingClientRect().width>40 && x.getBoundingClientRect().x<400); if(!i) return 'noimg'; i.click(); return i.src.slice(-50)"}, {"wait": 2000},
+    {"shot": "a"}, {"probe": "a"},
+    {"js": "const lb=document.querySelector('.mp-lightbox img'); if(!lb) return 'no lightbox'; const r=lb.getBoundingClientRect(); return {w:Math.round(r.width), h:Math.round(r.height), vh: innerHeight}"}]},
+  {"id": "T7_cut_delete", "title": "成片版本删除", "path": "/#ep02", "wait": 6000, "steps": [
+    {"click": "成片"}, {"wait": 4000}, {"shot": "a"}, {"probe": "a"}]},
+  {"id": "T2_edit_script", "title": "剧本段编辑按钮", "path": "/#/script-create", "wait": 7000, "steps": [
+    {"click": "漆皮之下"}, {"wait": 3000}, {"probe": "a"}, {"shot": "a"}]}
+]

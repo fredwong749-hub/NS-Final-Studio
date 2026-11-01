@@ -1,0 +1,39 @@
+[
+  {
+    "steps": [
+      {
+        "click": "=审片",
+        "after": 2500
+      },
+      {
+        "after": 1200,
+        "clickAt": "(() => { const b=[...document.querySelectorAll('button, summary')].filter(x=>/^[.…⋯·•]+$/.test(x.innerText.trim()) && x.getBoundingClientRect().width>0 && x.getBoundingClientRect().x<300 && x.getBoundingClientRect().y>100); const r=b[0]?.getBoundingClientRect(); return r?[r.x+r.width/2, r.y+r.height/2]:[null,null]; })()"
+      },
+      {
+        "shot": "menu"
+      },
+      {
+        "js": "return [...document.querySelectorAll('button,[role=menuitem]')].filter(x=>x.getBoundingClientRect().width>0 && x.getBoundingClientRect().x<400 && x.getBoundingClientRect().y>100 && x.getBoundingClientRect().y<330).map(x=>x.innerText.trim()).slice(0,10)"
+      },
+      {
+        "after": 2000,
+        "clickAt": "(() => { const b=[...document.querySelectorAll('.ds-tilebar-more[open] button, .ds-tilebar-more[open] [role=menuitem]')].filter(x=>/🗑|删除/.test(x.innerText) && x.getBoundingClientRect().width>0 && x.getBoundingClientRect().x<400); const r=b[0]?.getBoundingClientRect(); return r?[r.x+r.width/2, r.y+r.height/2]:[null,null]; })()"
+      },
+      {
+        "shot": "a"
+      },
+      {
+        "n": 4,
+        "tabtrap": ".ds-modal"
+      }
+    ],
+    "id": "R3b_rowtrash",
+    "path": "/#ep02",
+    "size": [
+      1280,
+      720
+    ],
+    "wait": 8000,
+    "title": "审片行 🗑 1280"
+  }
+]

@@ -61,6 +61,7 @@ LABELS = {
     "C2": "C · 不加 krea2（lin_wan 0.6）",
     "C3": "C · 1152×2016 出图（Turbo 8步）→ lanczos 缩回 768×1344",
     "C4": "C → lanczos 放大 1152×2016 → Turbo 重绘 denoise 0.25（sigmas \"0.25, 0\"，1 步，种子+1）→ lanczos 缩回",
+    "C4b": "C0 → lanczos 放大 1152×2016 → Base 模型重绘（euler/simple 14 步 cfg3，denoise 0.25，种子+1，同 LoRA）→ lanczos 缩回",
     "C5": "C0 + unsharp mask（PIL：半径 1.2、强度 0.6、阈值 2）",
     "C6": "C3 + C5 锐化",
     "C7": "C1 + C4 重绘 + C5 锐化",
@@ -180,7 +181,8 @@ def render():
         SETTINGS.write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
-ORDER = ["C0", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "S1", "S2", "S3", "S4", "S5", "Sstar"]
+BOX_GROUP = {"C4b": "C0", "C5": "C0", "C6": "C3", "C7": "C7g", "Sstar": "Sstar_g"}  # 锐化版与源图同构图
+ORDER = ["C0", "C1", "C2", "C3", "C4", "C4b", "C5", "C6", "C7", "S1", "S2", "S3", "S4", "S5", "Sstar"]
 
 
 def sheets(crops_path=None):
@@ -202,17 +204,17 @@ def sheets(crops_path=None):
             if name in ("C5", "C6", "C7"):
                 t += "（GPU 部分）+ CPU 锐化"
             tiles.append((im, name, t))
-            for ck, box in (crops.get(shot) or {}).items():
-                x0, y0, s = box
-                cp.append((ck, im.crop((x0, y0, x0 + s, y0 + s)), name))
+            for ck, spec in (crops.get(shot) or {}).items():
+                x0, y0, s = spec.get(name) or spec.get(BOX_GROUP.get(name, "")) or spec["default"]
+                cp.append((ck, im.crop((x0, y0, x0 + s, y0 + s)), name, [x0, y0, s]))
         X.sheet(tiles, sd / "contact_sheet.jpg", 432, 756, cols=4, label_h=160, max_lines=7,
                 title=f"{shot} 首帧 · C 系列锐度对比 · 种子 {rec['seed']} · 提示词逐字相同（{rec['prompt_note']}）")
         for ck in (crops.get(shot) or {}):
-            items = [(im, n, f"{ck} 1:1 原尺寸裁切 {crops[shot][ck]}（x0,y0,边长，768×1344 交付图）")
-                     for k, im, n in cp if k == ck]
-            s = crops[shot][ck][2]
+            items = [(im, n, f"框 x0,y0,边={b}")
+                     for k, im, n, b in cp if k == ck]
+            s = items[0][0].size[0]
             X.sheet(items, sd / f"crop_{ck}_1to1.png", s, s, cols=4, label_h=70, max_lines=3,
-                    title=f"{shot} {ck} 局部 1:1（未缩放）")
+                    title=f"{shot} {ck} 局部 1:1 原尺寸（768×1344 交付图上裁，框按各图构图定位）")
 
 
 

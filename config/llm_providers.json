@@ -56,6 +56,7 @@
     "script_repair": {"provider": "abliteration", "model": "abliterated-model-large-flash"},
     "director_boost": {"provider": "abliteration", "model": "abliterated-model-large-flash"},
     "lora_llm": {"provider": "abliteration", "model": "abliterated-model-large-flash"},
-    "prompt_rewrite": {"provider": "abliteration", "model": "abliterated-model-large-flash"}
+    "prompt_rewrite": {"provider": "abliteration", "model": "abliterated-model-large-flash"},
+    "edit_plan": {"provider": "abliteration", "model": "abliterated-model-large-flash"}
   }
 }

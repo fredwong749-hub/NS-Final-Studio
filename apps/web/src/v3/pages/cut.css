@@ -1,0 +1,46 @@
+/* UX5 成片页（#/cut） */
+.cut-page { gap: var(--sp-4); font-size: var(--fs-sm); }
+.cut-head { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.cut-head h1 { margin: 0; font-size: var(--fs-xl); font-weight: var(--fw-strong); }
+.cut-body { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
+.cut-list { display: flex; flex-direction: column; gap: var(--sp-1); }
+.cut-item { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); padding: var(--sp-2) var(--sp-3); border: 0; border-radius: var(--r-m); background: var(--c-raise); box-shadow: var(--sh-1); outline: 1px solid var(--c-line); outline-offset: -1px; color: var(--c-text); font: inherit; text-align: left; cursor: pointer; }
+.cut-item:hover { outline-color: var(--c-line-2); }
+.cut-item.on { outline: 2px solid var(--c-accent); outline-offset: -2px; }
+.cut-item.cmp { outline: 2px solid var(--c-stale); outline-offset: -2px; }
+.cut-item-t { display: flex; align-items: center; gap: var(--sp-1); width: 100%; min-width: 0; }
+.cut-item-t b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); }
+.cut-main { min-width: 0; }
+.cut-one { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
+.cut-video { display: block; height: min(72vh, 760px); aspect-ratio: 9 / 16; max-width: 100%; border-radius: var(--r-l); background: var(--c-media-bg); }
+.cut-info { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+.cut-changed { padding: var(--sp-3); border-radius: var(--r-m); background: var(--c-stale-soft); }
+.cut-changed b { font-size: var(--fs-sm); }
+.cut-warn summary { cursor: pointer; color: var(--c-text-2); }
+.cut-warn ul { margin: var(--sp-1) 0 0; padding-left: var(--sp-4); color: var(--c-text-2); font-size: var(--fs-xs); line-height: 1.6; }
+.cut-cmp { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); }
+.cut-cmp figure { margin: 0; display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.cut-cmp figcaption { font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cut-cmp .cut-video { height: min(60vh, 640px); }
+.cut-cmp figure.l .cut-video { outline: 2px solid var(--c-accent); }
+.cut-cmp figure.r .cut-video { outline: 2px solid var(--c-stale); }
+@media (max-width: 1360px) {
+  .cut-body { grid-template-columns: 240px minmax(0, 1fr); }
+  .cut-video { height: min(66vh, 640px); }
+}
+
+/* UIRSI r3：成片交付闸门（P12） */
+.cut-gate { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-l); border: 1px dashed var(--c-line-2); background: var(--c-raise); }
+.cut-gate.accent { border-style: solid; border-color: var(--c-accent); background: var(--c-accent-soft); }
+.cut-gate.ok { border-style: solid; border-color: color-mix(in srgb, var(--c-ok) 50%, transparent); }
+.cut-gate-n { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: var(--r-m); background: var(--c-sunken); color: var(--c-text-2); font-size: var(--fs-xs); font-weight: 650; flex: none; }
+.cut-gate.accent .cut-gate-n { background: var(--c-accent); color: var(--c-on-accent); }
+.cut-gate.ok .cut-gate-n { background: var(--c-ok-soft); color: var(--c-ok-text); }
+.cut-gate-t { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+
+/* UIRSI r14（成品级）：竖屏 9:16 画框，对比时两个画框等高居中，不再被拉成横的黑框；没播时显示第一帧（#t=0.1） */
+.cut-cmp figure { align-items: center; }
+.cut-cmp .cut-video { width: auto; height: min(68vh, 720px); max-width: 100%; }
+.cut-video { box-shadow: var(--sh-pop); }
+.cut-item b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cut-del { display: flex; justify-content: flex-end; margin-bottom: var(--sp-2); }

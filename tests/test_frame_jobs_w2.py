@@ -83,6 +83,16 @@ class FakeComfy:
 def env(tmp_path, monkeypatch):
     data = tmp_path / "data"
     (data / "renders").mkdir(parents=True)
+    # 机制测试（画布出图链路 + 出图身份 LoRA 编进首帧）：lin_wan_qi_v1 已按契约 I8 / 项目方 2026-10-31“A. 去掉”禁用，
+    # 禁用本身由 tests/test_gen_contract.py 覆盖；这里关掉禁用表只为测链路（REFLOCK）
+    from ns_agent import compiler as _C
+    monkeypatch.setattr(_C, "banned_image_loras", lambda root=None: set())
+    # RECALL 2026-11-01：生产 config/auto_lora_triggers.json 已撤 lnwan_qi（项目方“A. 去掉”），这里注入假身份 LoRA 只为测链路
+    monkeypatch.setattr(_C, "auto_lora_triggers", lambda root=None: {
+        "林晚": [{"trigger": "lnwan_qi", "kind": "image", "file": LORA, "strength": 0.8}]})
+    # 旧画布链路的机制测试（非资产项目仍走它）；资产项目（series10）的画布重出走唯一出图路径，见 tests/test_unified_frame.py
+    from ns_render import unified_frame as _UF
+    monkeypatch.setattr(_UF, "project_for", lambda script: None)
     monkeypatch.setattr(P, "DATA", data)
     monkeypatch.setattr(P, "RENDERS", data / "renders")
     own = tmp_path / "shot_ownership.json"
@@ -159,7 +169,8 @@ def test_chain_regen_instruct_lock_last_stale(env):
     fake = clients[0][-1]
     assert len(fake.workflows) == 1
     wf = fake.workflows[0]
-    assert any(n["class_type"] == "LoraLoaderModelOnly" and n["inputs"]["lora_name"] == LORA for n in wf.values())
+    # 默认出图预设徕卡 S★ 不挂身份 LoRA（项目方 2026-10-31 “A. 去掉”；RECALL 11-01 改断言）
+    assert not any(n["class_type"] == "LoraLoaderModelOnly" and n["inputs"]["lora_name"] == LORA for n in wf.values())
     assert "lnwan_qi" in next(n for n in wf.values() if n["class_type"] == "TextEncodeQwenImage21")["inputs"]["prompt"]
     # 2) 指令改图：父版本 = 图1 + 底图，denoise 小
     j2 = _job(c, {"stage": "first", "mode": "instruct", "instruction": "保持构图，提高画面清晰度", "strength": "small"})
@@ -170,9 +181,13 @@ def test_chain_regen_instruct_lock_last_stale(env):
     wf2 = clients[0][-1].workflows[-1]
     assert wf2["37"]["inputs"]["sigmas"] == "0.35, 0" and "110" in wf2
     enc = next(n for n in wf2.values() if n["class_type"] == "TextEncodeQwenImage21")["inputs"]
-    assert enc["prompt"] == "保持构图，提高画面清晰度" and "images.image_1" in enc
+    # LCA：默认预设（徕卡 S★）的风格后缀前加“，”原样接在修改原话后面；原话本身不动
+    from ns_render import image_params as IP
+    suf = IP.resolve(IP.default_preset(), None).get("style_suffix") or ""
+    assert enc["prompt"] == "保持构图，提高画面清晰度" + ("，" + suf if suf else "") and "images.image_1" in enc
     takes = P.load_takes(SHOT)
-    assert takes["active"]["image"] == t2["n"]
+    # G3（项目方 11-01，PRODUCER）：编辑链新版本先不设当前，契约（postflight）过了才由 auto_current.on_contract 设
+    assert takes["active"]["image"] == t1["n"]
     # 3) 尾帧：首帧没定稿 → 409
     assert c.post(f"/api/shots/{SHOT}/frame-jobs", json={"stage": "last", "mode": "regen"}).status_code == 409
     # 4) 定稿 v1（不是当前 v2）→ 设为当前；尾帧由定稿首帧得到

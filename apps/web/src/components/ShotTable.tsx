@@ -3,7 +3,7 @@ import { api } from "../api";
 import { useStudio } from "../store";
 import type { Episode, ShotSummary } from "../types";
 import { matchFilter, shotLine } from "../util";
-import { mediaChain } from "./ShotCard";
+import { mediaChain } from "./ShotCard.helpers";
 
 type Col = "first" | "last" | "people" | "expr" | "size" | "angle" | "move" | "lens" | "line" | "img" | "vid" | "status";
 const COLS: [Col, string][] = [

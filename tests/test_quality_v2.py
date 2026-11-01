@@ -380,7 +380,8 @@ def test_patent_and_heel_rules_appended_once_before_style():
 
 def test_safe_shot_term_is_not_conservative():
     c = C.compile_shot(*_shot("写字楼工位，林晚低头"), G0, set())
-    assert "衣装完整、无裸露" in c.image_prompt
+    # FIX（ep02_iter P0，cfg=1）：正向词不再带否定子句“无裸露”（cfg 1 下否定词反而注入），只留正面“衣装完整”
+    assert "衣装完整" in c.image_prompt and "无裸露" not in c.image_prompt
     assert "保守" not in c.image_prompt and "职业装" not in c.image_prompt
     assert "暴露" not in c.image_negative.replace("裸露", "") and "裸露、走光、低俗姿势" in c.image_negative
 

@@ -1,0 +1,37 @@
+[
+  {
+    "wait": 8000,
+    "title": "精修 ⋯ 菜单",
+    "steps": [
+      {
+        "click": "精修",
+        "after": 3000
+      },
+      {
+        "js": "for (let i=0;i<120;i++){ if (!/正在读取/.test(document.body.innerText) && [...document.querySelectorAll('button')].some(b=>/重出首帧|出首帧/.test(b.innerText))) return 'ok '+i; await new Promise(r=>setTimeout(r,500)); } return 'timeout'"
+      },
+      {
+        "wait": 5000
+      },
+      {
+        "js": "const b=[...document.querySelectorAll('button')].filter(x=>/^[.…⋯]+$/.test(x.innerText.trim()) && x.getBoundingClientRect().width>0 && x.getBoundingClientRect().x>500 && x.getBoundingClientRect().x<1080 && x.getBoundingClientRect().y>200); if(!b[0]) return 'none'; b[0].click(); return b.length",
+        "after": 1500
+      },
+      {
+        "collect": "shotmenu"
+      },
+      {
+        "click": "参数",
+        "after": 1500
+      },
+      {
+        "collect": "shotparams2"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "path": "/#ep02",
+    "id": "RG_shotmenu"
+  }
+]

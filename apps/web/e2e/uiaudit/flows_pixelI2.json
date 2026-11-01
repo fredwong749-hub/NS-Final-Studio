@@ -1,0 +1,32 @@
+[
+  {
+    "steps": [
+      {
+        "js": "const m=document.querySelector('main.v3-page'); const bar=document.querySelector('nav.sf-steps'); const bb=bar.getBoundingClientRect(); const btns=[...m.querySelectorAll('button')].filter(b=>b.offsetParent && b.innerText.trim() && b.getBoundingClientRect().top>innerHeight+100 && !b.closest('details:not([open])')); const out=[]; for (const b of btns.slice(0,4)) { m.scrollTop=m.scrollHeight; await new Promise(r=>setTimeout(r,200)); b.focus(); await new Promise(r=>setTimeout(r,300)); const r=b.getBoundingClientRect(); const h=document.elementFromPoint(r.x+r.width/2, r.y+Math.min(r.height/2,8)); out.push({t:b.innerText.trim().slice(0,8), top:Math.round(r.top), belowBar:r.top>=bb.bottom-1, hitSelf:b.contains(h)}); } return {barBottom:Math.round(bb.bottom), n:btns.length, out};"
+      }
+    ],
+    "wait": 9000,
+    "path": "/#/script-create",
+    "size": [
+      1440,
+      900
+    ],
+    "title": "吸顶聚焦",
+    "id": "I_900"
+  },
+  {
+    "steps": [
+      {
+        "js": "const m=document.querySelector('main.v3-page'); const bar=document.querySelector('nav.sf-steps'); const bb=bar.getBoundingClientRect(); const btns=[...m.querySelectorAll('button')].filter(b=>b.offsetParent && b.innerText.trim() && b.getBoundingClientRect().top>innerHeight+100 && !b.closest('details:not([open])')); const out=[]; for (const b of btns.slice(0,4)) { m.scrollTop=m.scrollHeight; await new Promise(r=>setTimeout(r,200)); b.focus(); await new Promise(r=>setTimeout(r,300)); const r=b.getBoundingClientRect(); const h=document.elementFromPoint(r.x+r.width/2, r.y+Math.min(r.height/2,8)); out.push({t:b.innerText.trim().slice(0,8), top:Math.round(r.top), belowBar:r.top>=bb.bottom-1, hitSelf:b.contains(h)}); } return {barBottom:Math.round(bb.bottom), n:btns.length, out};"
+      }
+    ],
+    "wait": 9000,
+    "path": "/#/script-create",
+    "size": [
+      1280,
+      720
+    ],
+    "title": "吸顶聚焦",
+    "id": "I_720"
+  }
+]

@@ -1,0 +1,306 @@
+# REFLOCK（2026-10-31 ~ 11-01）：资产参考锁定 + 生成契约（docs/GEN_CONTRACT.md）的代码化规则与阈值。
+# 代码：services/agent/ns_agent/asset_refs.py、services/agent/ns_agent/gen_contract/、tools/gen_contract/*。
+# 起因（项目方原话）：“关于女主角鞋子的一致性也全部错了，不同地方的鞋子都不一样，说明你没有做到 reference 的做法……
+# 你要在 image 里面让它知道，这个女孩要穿这个鞋子、穿这个衣服、戴这个饰品等等，然后才能锁定一致性。”
+rules:
+  - id: K-AST-230
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: P5-P6
+    title: 出图必须引用造型与单品资产图——服装 / 鞋 / 饰品不得只靠文字
+    when: 任何首帧 / 尾帧 / 改图出图（Qwen-Image 2.1、Qwen-Image-Edit 2511、Klein / FLUX.2），镜头里有已登记造型的角色
+    then: 参考图由 ns_agent.asset_refs.resolve_shot 解析——身份脸（脸可见时）+ 本镜造型设定图（特写 / 近景半身栏、中景及更远正面全身栏）+ 景别可见单品（K-REN-101；鞋可见时鞋最先；局部特写只取该局部）+ 场景；单品图来源 = 衣橱产品图 > 设定图裁切（标“仅设定图”）> 都没有 = 资产缺图，阻断出图并在资产中心提示；提示词逐张写“图N是她这一镜穿的X，必须完全一致（款式、颜色、材质、细节）”
+    writer_text: 每镜的服装、鞋、饰品写法要和本集“造型｜角色”行一致；手里拿着的道具写清“拎着 / 捧着”，不要写成穿在身上。
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/assets/first_frame_jobs.json, note: "改前 80 条首帧作业只挂脸部裁切（refs 只有 face_ref2va / sheet2），服装 / 鞋 / 饰品全靠文字；项目方：“不同地方的鞋子都不一样”"}
+      - {src: data/review_pages/asset_reflock/index.html, note: 3 镜 × 2 seed 有 / 无资产参考对照（gpu33:1），Q2 数字见 contract_table.md}
+      - {src: tests/test_gen_contract.py, note: 缺鞋资产图被阻断 / 全身镜鞋锁 LW-S01 / 特写不带鞋}
+    check: tests/test_gen_contract.py::test_full_shot_shoes_locked_by_wardrobe_image
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REN-130
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: P5-P6
+    title: 参考槽位规划：身份脸 > 造型设定图 > 景别关键单品 > 场景；超槽拼参考板；双人镜两张脸各占一槽（11-01 起默认，绝不同槽）
+    when: 出图模型参考槽有限（Qwen-Image 2.1 TextEncodeQwenImage21 image1–3、Qwen-Image-Edit 2511 image1–3、Klein 多参考按 4 用）
+    then: ns_agent.asset_refs.plan_slots——先让场景让位（走文字 +【场景】段），再把同一角色的设定图 + 单品合成参考板（≤6 格固定网格，①② 编号标注），仍不够才丢第二人的单品 / 设定图（记 dropped，改走文字）；脸永不进板、主体角色资产永不丢；双人镜第二人只用其造型设定图（去头），两张脸不得同槽（preflight I9）
+    params: {slots.qwen_image_2.1: 3, slots.qwen_image_edit_2511: 3, slots.flux2_klein: 4, board.max_tiles: 6}
+    evidence:
+      - {src: config/recipes/asset_refs.json, note: models 槽位表（总调度：image1–3）}
+      - {src: data/review_pages/asset_reflock/look_audit.json, note: 80 镜规划无一超槽；双人镜脸参考槽数恒为 1}
+      - {src: docs/GEN_CONTRACT.md, quote: "双人镜两张脸不得同时进同一参考槽（主体脸参考 + 第二人用两步法或其造型图）"}
+    check: tests/test_gen_contract.py::test_two_person_primary_face_only_and_board_single_face
+    confidence: medium
+    status: 建议
+    date: 2026-11-01
+  - id: K-AST-231
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: P4-P5
+    title: 剧本 / 造型审计：每镜造型 id 与 P1 登记一致、正文不写其它造型的部件、鞋类不相反；系统登记 shot_looks.json
+    when: 剧本导入后、出图作业重建前（tools/gen_contract/look_audit.py --write）
+    then: 造型行逐字对 P1（服装 + 鞋）→ 对不上 = 造型未登记（阻断）；img 正文写了同角色其它造型的部件 = 单品与造型冲突（“拎 / 捧 / 拿着”判为道具，只记 info）；同场景换造型记“场内换装”；系统可定的（每镜造型 id、自镜 N 起的镜号）写 <run>/assets/shot_looks.json（解析器优先读）；内容层的交写作模型（关推理，台词不动）出提案（tools/gen_contract/look_revise.py），导入走正式流程
+    evidence:
+      - {src: data/import/script_v2.json, note: "首次审计（导入版 23:15）：ep04 林晚造型 C 配“透明12cm细高跟”（登记白球鞋）；ep07 镜1–6 林晚造型不在 P1 登记（score 0.26）——已由 ASSETMASTER 写作模型返修导入"}
+      - {src: data/pipeline/runs/series10_v1/assets/look_revisions.json, note: "ep03-S3 林晚登记 A、正文“黑色漆皮束腰勒在腰上”→ 写作模型 choice=registry（$0.0018）→ 造型行改“镜3起”导入"}
+      - {src: data/review_pages/asset_reflock/look_audit.json, note: 现状 block 只剩 2 条资产缺图（短款西装外套、腰侧九环）}
+    check: tests/test_gen_contract.py::test_unregistered_look_blocks
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-AST-232
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: P4-P6
+    title: 角色锁（身份描述）不写服装；资产模式下编译前去掉角色锁里的服装分句
+    when: 系统角色锁（production globals character_locks）里带服装词（顾沉“黑色高定衬衫”、陈宇“休闲装”）
+    then: ns_agent.asset_refs.locks_without_wardrobe 在资产模式（项目登记了造型）下去掉含服装词的分句，服装只由本镜造型锁定；角色锁只留年龄、外貌、标志物
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/assets/first_frame_jobs.json, note: "ep01-S4 首帧提示词：“【顾沉】34岁成年男性CEO，黑色高定衬衫”与本镜造型 A“黑色高领毛衣配深灰西装”同时出现"}
+    check: tests/test_gen_contract.py::test_locks_without_wardrobe_strips_clothing
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-AST-233
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: asset
+    link: P5-P6
+    title: 造型设定图进参考槽一律去头（脸只由身份参考提供）
+    when: 造型设定图（四栏设定图的半身栏 / 正面全身栏）作服装参考
+    then: 全身栏去掉人物框顶往下身高的 15%（头 + 颈），半身栏去掉上部 45%；文件 images/refcrops/<char>_look<X>_s<seed>_{front,half}_nohead.png；提示词写“设定图（已去头，只看服装）”
+    evidence:
+      - {src: tools/series10_imggen/refkit.py, note: "IMGGEN imgfix v10：设定图的脸偏娃娃感，带脸进槽位会和身份脸抢、把脸拉回动漫"}
+      - {src: docs/GEN_CONTRACT.md, note: "总调度 23:5x 转项目方长期方向：脸只由身份参考提供，写实只加在质感上"}
+    check: tests/test_gen_contract.py::test_sheet_refs_are_headless
+    confidence: medium
+    status: 确认
+    date: 2026-11-01
+  - id: K-REV-230
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: review
+    link: P5-P6
+    title: 生成契约 preflight（I1–I10）是唯一提交闸：不过就拒交，没有绕过开关
+    when: 任何出图 / 出片提交（tools/pipeline/submit_jobs.py、image_jobs.py、imggen、bakeoff、EDITDEL 编辑执行、VIDEO10 视频提交）
+    then: from ns_agent.gen_contract import preflight; preflight(kind, payload) → {ok, items, blocking, reasons}；ok=False 拒交并列出缺什么；出图后 postflight(kind, payload)，没测到的项 = untested，不算通过
+    evidence:
+      - {src: tests/test_gen_contract.py, note: 缺鞋资产图 / 用 lin_wan_qi / 旧柔焦后缀 / 双人两脸同槽 四条必挡用例全过}
+      - {src: data/pipeline/runs/series10_v1/assets/first_frame_jobs.json, note: "预演重建（REFLOCK 11-01 00:xx）：80 镜 14 过、66 镜卡 I5 场景缺图；IMGGEN 补 6 个场景底图后 80/80 过"}
+    check: tests/test_gen_contract.py::test_missing_shoe_asset_blocked
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REV-231
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: review
+    link: P5-P6
+    title: Q2 造型一致：鞋分三段（<0.70 挡、0.70–0.78 只记录“鞋待目检”、≥0.78 过）+ 加装饰探针（>0.7 挡）；下装 ≥0.83、设定图 ≥0.74；手 / 颈 / 上身区只记录
+    when: 首帧 postflight 比对本镜参考里的单品 / 设定图（ns_agent.gen_contract.postflight.region_match）
+    then: 单品按所在区域（鞋：画面下半）滑窗；鞋可见时鞋单独判；直方图对透明鞋无效（正例 -0.006 / -0.004），不作判据
+    params: {Q2.clip_item.feet: 0.775, Q2.clip_item.lower: 0.83, Q2.clip_item: 0.80}
+    evidence:
+      - {src: data/review_pages/asset_reflock/calibration.json, note: "鞋参考 LW-S01：正例 设定图 A 0.782 / B 0.807 / S01 上脚图 0.896；反例 黑短靴 0.762、白球鞋 0.720、黑皮鞋 0.703、帆布鞋 0.670"}
+      - {src: data/review_pages/asset_reflock/calibration.json, note: "短裙参考 LW-O09：正例 设定图 B 0.874 / O09 上脚 0.906；反例 深灰西装裙 0.795、雾蓝长裙 0.792、阔腿裤 0.785"}
+      - {src: data/review_pages/asset_reflock/heldout_bakeoff.json, note: "留出 14 张鞋：单线 0.775 判对 0.714，对 0.710–0.861 与错 0.641–0.780 重叠 → 改三段；加装饰款 B4_qedit2511 clip 0.780 判过（误放）"}
+      - {src: data/review_pages/asset_reflock/q4_face_calibration.json, note: "三段 + 加装饰探针（S07 0.978 / 对鞋最高 0.660）在 14 张上 0 误挡 0 误放，5 张进鞋待目检；鞋 CLIP AUC 0.898、探针 AUC 0.796；加装饰样本只有 1 个"}
+    check: tests/test_gen_contract.py::test_q2_shoe_band_and_embellished_probe
+    confidence: medium
+    status: 建议
+    date: 2026-11-01
+  - id: K-REN-131
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: P5-P6
+    title: 出图 LoRA 白名单 / 禁用表（契约 I8）：lin_wan_qi_v1 禁用；白名单暂只有 krea2_film_texture 0.5
+    when: 任何出图作业挂 LoRA、提示词带触发词
+    then: config/gen_contract.json lora_banned / lora_allow / trigger_banned_in_image；ns_agent.compiler.banned_image_loras 在编译时剔除（触发词 lnwan_qi 一并剥掉）；徕卡 S★ 预设删 @identity
+    evidence:
+      - {src: knowledge/RSI_LEDGER.md, note: "B6：同流程挂 lin_wan_qi_v1 0.6 身份 0.926 → 0.823"}
+      - {src: config/render_quality.json, quote: "默认出图预设‘徕卡 S★’里的林晚出图 LoRA（0.6）还要不要用？- A. 去掉"}
+    check: tests/test_gen_contract.py::test_lin_wan_qi_blocked
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REV-232
+    domain: review
+    link: P5-P6
+    title: Q4 质感只记录不阻断——整图 Laplacian 被留出复核推翻（AUC 0.41），脸部度量与 CLIP 塑料探针也未达可靠阻断
+    when: 首帧 / 尾帧 postflight Q4
+    then: config Q4_texture.record_only=true：越线只记 na + would_fail，不挡、不触发重出；同时记录脸部度量（metrics.face_texture：脸框归一高频能量 / Laplacian / 脸部油光 / CLIP“塑料娃娃脸 vs 真人照片”）。重开阻断的条件：独立留出 AUC ≥0.8 且分数不饱和、不被镜头 / 角色混杂
+    params: {Q4.record_only: true}
+    check: tests/test_gen_contract.py::test_q4_record_only_and_q5_limb_rule_disabled
+    evidence:
+      - {src: data/review_pages/asset_reflock/heldout_bakeoff.json, note: "BAKEOFF 留出 46 张（总调度亲标）：lap_full ≥175 判对 0.59、AUC 0.41；挡 11 张可接受的暗场 / 中景，放 8 张娃娃脸（ep05-S5 大特写针、手套、漆皮锐边把 lap 拉高）"}
+      - {src: data/review_pages/asset_reflock/q4_face_calibration.json, note: "留一 CV（44 张有脸）：face_hf 0.581、face_lap 0.511、face_oil 0.493、p_plastic 0.847（LOO 判对 0.841，但概率饱和 0.99–1.0、最佳线 0.9999，区分来自 ep09-S2 / B5 两组）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REN-134
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: render
+    link: P5-P6
+    title: 全系统只有一条出图路径：首帧 / 尾帧（画布重出、三档重出、编辑整图重出、IMGGEN、ASSETMASTER）都经 ns_agent.frame_job + ns_render.unified_frame
+    when: 资产项目（config/recipes/asset_refs.json 登记，如 series10_v1）的任何首帧 / 尾帧出图
+    then: 作业 = ns_agent.frame_job.build_first / build_last（编译器输出 + asset_refs 槽位：项目方挑定的身份脸 face_ref2va > 去头造型图 > 景别单品 / 参考板 > 场景底图）；图 = ns_render.unified_frame.build_graph（frame_redo_preset = frame_v9）；提交前 preflight、出图后 postflight；不再用旧首帧作图1“换脸”、不再用旧母版裁切 master_face_*；新入口必须调这两个函数，测试锁“画布提交的图 = 构建函数输出（逐字段）”
+    evidence:
+      - {src: tests/test_unified_frame.py, note: 画布 FE.regen 提交的 ComfyUI 图与唯一构建函数输出逐字段一致；图1 = lin_wan_face_ref2va，不含 master_face / lin_wan_qi / “本镜头的画面构图”}
+      - {src: config/recipes/asset_refs.json, note: "项目方原话（11-01 截图）“你现在生成的人物不是林晚真实的形象……肯定有 bug”：画布作业 ab6a65ccd8f5 走 qwen_two_stage，图1 = 旧首帧、参考 = data/cache/refs/master_face_b8e7b00b6756（= ar-c2351c9dcf 旧母版，sha 2c4cd64c1ce7）；项目方挑定为 A-s202（identity_refs manifest owner_quote “林晚A-s202 顾沉s101 陈宇s202脸”）"}
+    check: tests/test_unified_frame.py::test_canvas_regen_graph_equals_unified_builder
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-AST-234
+    domain: asset
+    link: P5-P6
+    title: 画布“切换本镜参考”必须写进出图实际读的来源（资产项目：shot_looks.json / hub_episode_looks.json），切换后下一次出图挂的参考随之改变
+    when: 资产项目（config/recipes/asset_refs.json 登记）在编辑模式 RefBar / RefSwitchPanel 切换造型、单件或场景底图
+    then: ns_api.ref_switch 对资产项目走 ns_api.ref_switch_assets——镜头 / 场景范围写 shot_looks.json overrides / scene_overrides，整集范围（仅 by=owner）写 hub_episode_looks.json；优先级 整集排期 > 逐镜切换 > 逐镜系统登记 > 剧本造型行；返回结构不变（G10 不回退）；look_audit 重写登记时保留这些覆盖
+    check: tests/test_ref_switch_assets.py::test_switch_look_changes_next_render_refs
+    evidence:
+      - {src: docs/DATA_MAP.md, note: "§6 第 1 条：切换本镜参考还在用旧造型库，series10 出图走 asset_refs.resolve_shot，切换不影响出图"}
+      - {src: tests/test_ref_switch_assets.py, note: 切到造型 B → 下一次出图参考变成 lookB、look_how=shot_override；reset 后参考恢复}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REN-135
+    domain: render
+    link: P5-P6
+    title: 唯一出图路径的版本登记交付尺寸（post 后 768×1344），过坏图检查才设为当前
+    when: ns_render.unified_frame 出图（frame_v9：1.5× 出图 1152×2016 → lanczos 缩回 → USM）
+    then: UF.record_params 把 params.post（file / from / size / rendered_size / steps）与 effective 交付尺寸写进版本，再跑 image_check.check_take，不坏才 set_active；_add_take 一律先不设当前；存量用 tools/gen_contract/backfill_v9_params.py 补
+    check: tests/test_unified_frame.py::test_registered_size_equals_requested_size
+    evidence:
+      - {src: tests/test_unified_frame.py, note: "11-01 项目方遇到：ep01-S1 take 7 判“坏图：尺寸 768×1344 与请求的 1152×2016 不符”——图对、记录错；修后 v5–v7 坏图判定清除"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REV-233
+    domain: review
+    link: P5-P6
+    title: Q8 林晚发色——按同帧肤色亮度归一的相对亮度与身份参考比；11-01 起只记录不阻断（record_only），待留出复核与项目方答复后再开
+    when: 首帧 / 尾帧 postflight，林晚在画且脸可见
+    then: 发丝区（头顶带 + 脸两侧，OpenCV H 85–130、S≥30、V≥30，同 VIDEO10 score_clip）HSV 中位；rel_v = 发 V / 脸中部肤色 V；与 face_ref2va（0.712、S 96）比——rel_v < 参考 0.48 倍或 S 低于参考 45 以上判不过；发丝像素 <200 记未测（不算通过）
+    params: {Q8.rel_v_ratio_min: 0.48, Q8.ds_min: -45}
+    check: tests/test_gen_contract.py::test_q8_hair_relative_luminance
+    evidence:
+      - {src: data/review_pages/asset_reflock/q8_calibration.json, note: "ep01-S5 v2（总调度判暗灰）0.299 → 0.42 倍不过；ep01-S1 v7（总调度亲审签字）0.376 → 0.53 倍过；余量小，待 BAKEOFF 留出复核"}
+    confidence: low
+    status: 建议
+    date: 2026-11-01
+  - id: K-REV-234
+    domain: review
+    link: P5-P6
+    title: Q1 每张脸都要认得出——画面里任何一张够大的脸必须像本镜 cast（在画 / 局部）里某个有身份脸的角色
+    when: 首帧 / 尾帧 postflight Q1（脸可见、有在画角色）
+    then: 在画角色照旧按各自阈值（林晚 0.70 / 其他 0.60）；其余每张脸高 ≥ min_face_ratio 的脸，像在画者（过其阈值）或局部者（≥ recognize_floor）才算认出；认不出 → Q1 不过（“画面里多了不该有的人 / 认不出是谁”）；cast 里没有身份脸参考的角色（路人）每人可抵一张；在画但无参考的角色不判“未出脸”
+    params: {Q1.recognize_floor: 0.45, Q1.min_face_ratio: 0.04}
+    check: tests/test_gen_contract.py::test_q1_every_face_must_be_recognised
+    evidence:
+      - {src: data/renders/ep03/S6/takes.json, note: "总调度 11-01 目检：v2 首帧 / v3 尾帧林晚 + 一个不像顾沉的“外国脸”男人，旧 Q1 只算林晚（0.832 / 0.753）就过了；cast 里顾沉是“局部｜左手”（不挂身份脸），img 原文却写“顾沉在前景虚化，黑色短发向后梳”"}
+      - {src: data/qa/rescore_q1_allfaces_20261101.log, note: 当前已通过的 43 个版本按新 Q1 重打分（只打分不重出）}
+    confidence: medium
+    status: 确认
+    date: 2026-11-01
+  - id: K-AST-235
+    domain: asset
+    link: P4-P5
+    title: 每个角色只有一张身份脸——出图挂的和契约打分对的是同一个文件
+    when: 任何出图入口挂身份脸 / postflight 远端打分
+    then: 身份脸一律由 ns_agent.asset_refs.face_of 解析（资产中心“设为当前身份脸”> config faces）；remote_score.face_refs 用同一函数取文件、按内容哈希放到 gpu33 refs/id_<sha16>.png；不许再手写机器路径表；旧母版 lin_wan@master 不再参与打分；imggen 不覆盖已登记身份脸
+    check: tests/test_single_identity_face.py
+    evidence:
+      - {src: tools/gen_contract/remote_score.py, note: "BAKEOFF P1 11-01：旧 REFS 里阿岚指向 gpu33 上不存在的 refs/ch_a_lan_face_ref.png（阿岚从未被打分，ep05-S2 v2 Q1“ch_a_lan 未出脸”是假不过）；林晚对 face_ref2va 与旧母版取高者"}
+      - {src: data/assets/identity_refs/manifest.json, note: "两份阿岚脸文件 sha256 相同（207463ca…），出图没有用错脸，无需重出"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-Q04
+    domain: ops
+    link: P5-P6
+    title: 测试里出图后契约不连机器、不起后台线程、不加载真 CLIP
+    when: pytest
+    then: tests/conftest.py：remote_score.ssh 抛错；unified_frame._postflight 默认返回“测试跳过”；unified_frame._spawn 同步执行；metrics.embed / embed_text / probe 换确定性假向量（要真 CLIP 标 real_clip）；remote_score 已知清单路径跟 P.DATA 走
+    check: tests/test_unified_frame.py tests/test_editdel.py
+    evidence:
+      - {src: data/qa/test_guard_last.json, note: "ITERAUDIT 11-01 守卫：postflight 后台线程在用例结束后写 data/cache/reflock_remote_refs_gpu33.json，并真的 ssh gpu33（与 03:15 事故同型）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REV-235
+    domain: review
+    link: P5-P6
+    title: 重打分两步走——先只打分出计划、审过翻转清单再 --apply 写回；rescore_history 只追加
+    when: tools/gen_contract/rescore_takes.py 任何可能改变“当前版本”的重打分
+    then: 不带 --apply 只打分，结果存 data/qa/rescore_plans/<时间>.json 并打印翻转清单，不写版本、不调 auto_current；审过后 --apply <计划> 写回（计划之后版本被改过的跳过），每次追加一条 rescore_history（was_ok / now_ok / plan），旧的单条 rescored 并进历史
+    check: tests/test_rescore_takes.py
+    evidence:
+      - {src: data/qa/rescore_q1_allfaces_20261101.log, note: "DATAALIGN 11-01：04:49 第一遍把同一角色的镜像脸判成“多了一个人”直接写回，挤掉 4 个当前版本；第二遍覆盖 rescored 后 was_ok 记成 False，“04:49 前曾通过”丢失（已按日志补回 43 条历史）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REN-136
+    domain: render
+    link: P5-P6
+    title: frame_v9 正文里系统加的固定句，改动必须同时让过期判定认得出
+    when: 改 / 新增 frame_v9 提示词正文里的系统固定句（如 asset_refs.TEXT_FALLBACK_NOTE 槽位不足说明，经 frame_job.with_note 放进正文）
+    then: 系统插进 frame_v9 正文的全部固定句只在 asset_refs.TEXT_NOTE_RES 定义（按拼接顺序；含槽位不足说明与外层单品说明），ns_api.unified_stale.match_target 直接引用；改动同一次带 tests/test_outer_items.py、tests/test_unified_stale.py、tests/test_frame_note_not_stale.py；同一次改动里更新 match_target 并补测试，或先通知 DATAALIGN（a3e7a8925382f5e8b）
+    check: tests/test_frame_note_not_stale.py
+    evidence:
+      - {src: services/api/ns_api/unified_stale.py, note: "DATAALIGN 11-01：with_note 的“…按文字描述（参考槽不足）”让刚出的图被标“编译器升级”（ep06-S7 #2），DATAALIGN 用 match_target 修；REFLOCK 把句子与正则收成一份常量"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-AST-236
+    domain: asset
+    link: P4-P5
+    title: cast 写“局部”但 img 原文写到这个人的脸 / 头发——系统按脸可见处理，P4 校验同时警告
+    when: asset_refs.resolve_shot 规划参考 / postflight Q1 / validate_qwen_script 校验 P4
+    then: asset_refs.face_described（名字后紧跟 3 句内、到下一个角色名 / 代词 / 句末为止，出现脸 / 五官 / 头发词；名字当地点用不算）为真 → 给该局部角色挂身份脸、角色记 face_described；Q1 里他的脸要过他自己的身份阈值（不只 recognize_floor），只写到头发、脸没入画不要求出脸；P4 校验 QW-CH6（warn）提示写作模型把人物行改成“在画”或不写脸，系统不改剧本原文
+    check: tests/test_partial_face_described.py
+    evidence:
+      - {src: data/renders/ep03/S6/takes.json, note: "总调度 11-01 决定 1：ep03-S6 顾沉“局部｜左手”，原文写“顾沉在前景虚化，黑色短发向后梳”→ 没挂脸，模型编出外国脸男人"}
+      - {src: data/import/script_v2.json, note: "现行剧本命中 3 镜：ep03-S6 顾沉、ep08-S4 林晚（直发入画）、ep10-S3 陈宇（嘴唇）；代词 / 地点 / 句尾写实套话的误命中已排除（测试覆盖）"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-01
+  - id: K-REV-236
+    domain: review
+    link: P5-P6
+    title: Q2 外层单品存在性——造型里的外层服装（西装外套 / 风衣 / 大衣…）上身可见时必须穿着，没穿就不过
+    when: 首帧 / 尾帧 postflight，林晚在画、上身或全身区可见、本镜造型含外层单品
+    then: 林晚脸框下躯干（左右各 1.8 脸宽、下 3 脸高）CLIP 零样本句对“穿着 <单品> / 只穿内搭”（按单品登记在 Q2_outfit.outer_probes，不是颜色直方图），穿着概率 < outer_min 0.3 → Q2 不过（不受上身区 record_only 影响）；没脸框记未测
+    params: {Q2.outer_min: 0.3}
+    check: tests/test_gen_contract.py::test_q2_outer_item_presence_blocks tests/test_gen_contract.py::test_q2_outer_per_character_faces_and_record_only tests/test_gen_contract.py::test_review_flags_on_contact_sheet_caption
+    note: 只记录的项（未校准外层单品如顾沉深灰西装、外层未测、鞋待目检、同一角色第二张脸）由 report.review_flags 汇总，印样标注（q4_caption / contact_sheet）红字前缀“待目检：…”，供总调度目检；顾沉留出反例等首帧全部出完后由 BAKEOFF 在 gpu36 出约 6 张
+    evidence:
+      - {src: config/gen_contract.json, note: "11-01 扩到全部在画角色：远端按角色配脸框（像该角色 ≥0.3 的最像那张）；只有校准能分开的单品（outer_block_keys：林晚短款西装外套）阻断。顾沉深灰西装 20 张穿着 0.016–0.994 与造型 B 0.000–0.072 重叠（黑外套叠黑高领），只记录；阿岚围裙 3 张 0.98，无同角色反例，只记录；陈宇无外层单品"}
+      - {src: data/qa/rescore_plans/rescore_20261101_075337.json, note: "gpu33 打分：没穿 ep01 S1v7/S2v3/S3v3、ep02 S1v6/S3v2 = 0.043/0.024/0.031/0.087/0.003；穿了 ep01 S4v5/S6v2/S7v2 = 0.426/0.738/0.855。通用句对分不开 ep02-S1v6（0.16）与 S6（0.27–0.47），改按单品句对"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-01
+  - id: K-REN-137
+    domain: render
+    link: P4-P6
+    title: 局部 / 物件特写不出脸——提示词不给脸的线索，出了脸 Q3 判不过
+    when: 景别为特写 / 大特写 / 极近特写且主体是局部（手 / 脚 / 腰…）或物件（framing.closeup_subject）
+    then: 编译器首句写肯定句“画面里只有<局部>…画框紧贴<局部>裁切（tight close-up crop on the <part> only）”（cfg=1 下否定句不生效，BAKEOFF R11-12 A3）；角色锁只留与该局部相关的分句（例：指甲）和成年句（HC-07），脸 / 发型 / 身材描写不放；纠正器里写脸的条目（面部清晰对焦，五官锐利）不加；资产规划不挂身份脸（原文写到这个人的脸 face_described 例外）。postflight Q3：画面里检出脸高 ≥ min_face_ratio 的脸且不是 face_described → 不过“局部特写出了脸”；没打分记未测
+    writer_text: 局部特写（手 / 脚 / 腰…）只写这个局部，不写肩头、锁骨、颈、下颌、胸口这类靠近脸的部位，也不写“眼睛为真实人眼大小”这类脸部写实套话；确实要带到，就写清“画面上沿在锁骨以下，不出现脸”。
+    check: tests/test_gen_contract.py::test_q3_part_closeup_with_face_fails tests/test_gen_contract.py::test_part_closeup_prompt_has_no_face_cues
+    evidence:
+      - {src: data/review_pages/contract_labels_r1/hand_closeups_current.jpg, note: "总调度 11-01 目检驳回 ep05-S3/S5、ep10-S8：写的是局部大特写，出成带脸的近景 / 中景；ep10-S1（陈宇的手）合格。原因：角色锁的蓝发齐刘海 G 罩杯 + “面部清晰对焦，五官锐利”进了局部特写提示词；ep05 原文还写了肩头 / 锁骨 / 胸口（P4 校验 QW-SZ2 warn）"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-01
+  - id: K-REV-237
+    domain: review
+    link: P5-P6
+    title: 总调度标注集 contract_labels_r1（76/76 ok）——Q7 整图场景线、Q5“手型可疑”、Q6 纯数字框改只记录，印样标待目检
+    when: 首帧 / 尾帧 postflight Q5 / Q6 / Q7
+    then: Q7_scene.record_only（不过 → na + would_fail，印样“待目检：场景相似度低”）；Q5 record_only_flags 加“手型可疑”（长甲把指长比推到 4.3–33），“多手可疑”照挡；Q6 只读出纯数字 / 标点（ignore_pattern）的框不算多余文字，有字母 / 汉字照挡。放宽不放过真问题：Q1 另加“同一角色两张脸且原文没写镜子 / 倒影 → 不过”“cast 局部的人出了脸 → 不过”
+    check: tests/test_gen_contract.py::test_labels_r1_record_only_q5_q6_q7 tests/test_gen_contract.py::test_q1_duplicate_face_and_partial_face
+    evidence:
+      - {src: data/review_pages/contract_labels_r1/labels_master.json, note: "总调度 11-01 亲标：Q7 59/59 场景对（0.314–0.46）、Q5 13/13 手正常、Q6 4/4 无多余文字（0002 / 0.030 / 888888888）；Q7 候选里点名的 Q1 真问题：顾沉长发 Q7-26/32/34/40/46、双林晚 Q7-36/56、光膀子男人 Q7-31、背景陌生人 Q7-06/47/52"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-01

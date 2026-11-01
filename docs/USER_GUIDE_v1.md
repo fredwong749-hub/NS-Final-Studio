@@ -21,6 +21,25 @@
 - H3 视频（6 s）：每版约 12–14 min（GPU3 的 ComfyUI 以 `--cache-none` 启动，每版都重新加载模型；去掉该参数需重启 gpu3 上该进程，待项目方同意）。
 - 写作：large-flash 写 1 集（7 镜）约 43 s，约 $0.04。
 
+## 本地实现：渲染道（gpu33 + gpu36，fredw-92/G36，2026-10-31）
+- **道（lane）**：一张卡 = 一个 ComfyUI = 一条道，同一条道一次只跑一个任务（ns_api.jobs 按道串行）。gpu33 的道仍写数字 `0 / 1 / 3`（GPU2 故障，排除）；其他服务器写 `服务器:卡号`，如 `gpu36:0 / gpu36:1 / gpu36:2`（`gpu33:0` 等同 `0`）。frame-jobs / video-jobs / 资产生成的 `gpu` 字段两种都收；不填或填 `"auto"` 就自动分配。
+- **自动分配**（项目方：“当 gpu 不做 image 的时候也可以转成 rendering video 啊”）：卡不再固定成“出图卡 / 视频卡”。出图任务先找空闲道，偏好 gpu33:0，没有就用任意空闲道（包括 gpu36）；都忙时排到最短的队（按预计秒数算，视频约 840 s、出图约 70 s）。视频任务任何空闲道都能接，gpu33:0 只在没有排队的出图任务时才接视频；gpu33:0 在出视频时，新的出图任务自动改派到别的空闲道。ComfyUI 自己队列里有别人直接投的任务，也算忙。连不上的道跳过。
+- **配置**：`config/render_endpoints.json` 里的 `lanes` 表，写法 `{"gpu36:0": "http://127.0.0.1:18288"}`，也可以写成 `{url, max_frames, label}`。改这个文件只做局部插入，不要整份覆盖。`GET /api/render/lanes` 返回每条道的可达性和当前在做什么（`status_text` 如“gpu36:1 · 出视频”）；`GET /api/render/endpoints` 在 image / video 两行后面列出每条道（`kind:"lane"`），`PUT /api/render/endpoints/gpu36:1 {url}` 可以改某条道的地址。顶栏 GPU 胶囊显示成“33:0 出图 · 33:1 出视频 · 36:0 空闲 …”。
+- **gpu36**（3×RTX 3090，共用机器；用户 flab / loki / tom / yuheng 也在用）：所有文件都在 `/root/work/fredw/`。ComfyUI 0.42.0 和 custom_nodes（KJNodes、SelfLift、Minimax_h3_latent_Upscaler）从 gpu33 原样复制，节点表与 gpu33 一致（1262 个）。Python 3.12.16（uv 管理，装在 `/root/work/fredw/python`），私有 venv 在 `/root/work/fredw/venv`，包版本与 gpu33 的 env/comfy 相同（torch 2.11.0+cu128、comfy-kitchen 0.2.39 等；sageattention 没装，启动参数里也不用）。公共 py311 是 3.11，装不上 gpu33 那套版本（av 19 要求 3.12），所以没用它。模型从 gpu33 走机房局域网复制（gpu33 上跑 rsync 到 10.0.0.36，笔记本 ssh-agent 转发登录，主机指纹已核对），每个文件两端各算一次 sha256 比对。
+  - 启停：`ssh gpu36 '/root/work/fredw/comfy/comfy.sh start|stop|restart|status [0 1 2]'`。GPU0→:8188、GPU1→:8189、GPU2→:8190，只绑 127.0.0.1。输出目录 `/root/work/fredw/comfy/output/gpuN`，PID 文件在 `comfy/run/`，日志在 `comfy/logs/`。启动参数和 gpu33 GPU0 相同：`--reserve-vram 1 --cache-none --preview-method none`。没有用 gpu33 视频卡的 `--cache-ram 140 200`，原因是 gpu36 是共用机器，内存 440 GB 要分给三个实例和其他用户。
+  - **GPU2 = 长镜头道 gpu36:2**（fredw-92/LS，2026-10-31）：镜头长度由剧本决定，系统不截短。gpu33 的视频卡用默认参数一次最多出 260 帧（10.8 s），再长就 OOM；GPU2 用 `--novram` 起（权重留在内存逐层上卡），实测 294 帧 32 min、362 帧（15 s）53 min 都能出。超过所选道上限的镜头由 video_jobs 自动改派到 gpu36:2（任务 params.route 写 rerouted_from）；出图和短视频不会派过去（lanes 记录 `long_only: true`）。启停：`ssh gpu36 '/root/work/fredw/longshot/lane.sh start|stop|restart|status'`（:8190，PID 文件 longshot/run/lane.pid，不用 comfy.sh 起 gpu2）。长镜头道没起时，超过 260 帧的镜头提交会返回 409 说明原因。
+  - 笔记本隧道：`ops/autostart/tunnel_gpu36.sh`，把 18288→gpu36:8188、18289→:8189、18290→:8190。由 tunnel.sh 顺带拉起，laptop_autostart.ps1 也会检查这三个端口。
+  - 注意：三张卡同时满载 15–20 分钟后，机器会自动把功耗压到 200 W，降温后恢复，属于正常现象，不要处理。禁止执行 `nvidia-smi -pl`。gpu36 网口只协商到 100 Mb/s，跨机复制约 11 MB/s。
+- **gpu36 实测**（2026-10-31，冷加载）：Turbo 首帧 21 s（ComfyUI 执行 18 s）；H3 5 s 视频（124 帧）545 s，约 4.4 s/帧，和 gpu33 的视频卡差不多（约 4.7–5.5 s/帧）。验证产物在 data/ab/gpu36_check/。
+- **跨服务器的帧**：每个 ComfyUI 的输出目录各自独立，实例标识里带服务器名（`gpu36|out:…`）。所以 gpu33 出的定稿帧交给 gpu36 出视频时要上传一次（经跳板，上行慢），同一实例内的帧直接引用、不上传。
+
+## 出图预设（LCA，2026-10-31）
+- **默认 = 徕卡 S★**（项目方原话：“leica_sharp效果最好，用他”，选“S★ 全套组合”）。画布出图参数下拉里显示为“徕卡 S★（默认）”；不选预设出的首帧 / 尾帧 / 指令改图 / 换参考都用它。
+- S★ = C（Turbo 8 步、cfg 1、texture_fix VAE、krea2 0.5 + 林晚 lin_wan_qi_v1 0.6）+ 1.5 倍出图 1152×2016 → lanczos 缩回 768×1344 + USM 锐化（半径 1.2、强度 60%、阈值 2）+ 风格后缀（写作模型候选1 原样，前加“，”接在提示词末尾）。
+- 每一版另存放大原图（take.params.post.from），交付图是 *_post.png；版本参数里能看到“放大出图 / 锐化 / 风格后缀”的实际值。
+- 带底图的改图（指令改图、换参考的底图重绘）不放大，按 768×1344 出，后缀和锐化照做；改图底图用父版本锐化前的原图。资产 / 场景图生成选了预设时同样处理。
+- 旧默认“C·Turbo 质感”仍可在下拉里选；改回默认 = config/render_quality.json 的 default_preset 设成 c_turbo_texture。定稿档不受影响。
+
 ## 规则
 - 不做内容检测、不做成人拦截（项目方 2026-10-30 夜决定，暂时）；露骨红标的人工标记维持原处理。
 - 系统不写、不改、不评剧本和提示词；你写的修改要求原样交给 Image 2.1 / H3。

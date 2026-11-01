@@ -1,0 +1,37 @@
+[
+ {
+  "id": "T3_slow",
+  "title": "挑设定图（等 30 s）",
+  "path": "/#ep02",
+  "wait": 7000,
+  "steps": [
+   {
+    "click": "资产"
+   },
+   {
+    "wait": 30000
+   },
+   {
+    "js": "return {loading:/加载中/.test(document.querySelector('main, #root').innerText.slice(0,2000)), len:document.body.innerText.length}"
+   },
+   {
+    "js": "return {pick:[...document.querySelectorAll('button,span')].filter(b=>/选这张|设为当前/.test(b.innerText)).length}"
+   },
+   {
+    "click": [
+     "选这张",
+     "设为当前"
+    ]
+   },
+   {
+    "wait": 1500
+   },
+   {
+    "js": "return {undo:/撤销/.test(document.body.innerText)}"
+   },
+   {
+    "shot": "a"
+   }
+  ]
+ }
+]

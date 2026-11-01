@@ -1,0 +1,55 @@
+# 项目方决策账本与机检（RECALL 2026-11-01）。起因（项目方原话）：“你现在东修一下、西修一下是不行的啊！你需要有一个 master full picture 来修整个 system……把 memory 对齐”。
+rules:
+  - id: K-OPS-D02
+    domain: ops
+    link: [P0-P1, P11-RETRY]
+    title: 全局决策原则——先全局扫描 md 判断最优方案、不补补修修；决定后所有相关文档 / 配置 / loop 子任务全量同步，旧口径不得残留
+    when: 任何决策、派活、修复之前；项目方给出新决定之后
+    then: ①扫描 docs/ knowledge/ config/ 各 STATE.md、REQUIREMENTS.md，回答“已有部件？旧决定？谁在做？”，检索词和命中文件写进决策记录；②优先打开 / 复用已有系统，不另造平行实现；补丁须说明为何不改根因；③列受影响清单并逐项同步（含正在跑的 loop 派单），被取代口径标 ⤴；④决定入 MASTER_PICTURE §1 + owner_decisions.yaml，旧口径关键词登记为过期词供检查扫描残留
+    check: tools/qa/decision_propagation.py
+    evidence:
+      - {src: docs/ITERATION_PROTOCOL.md, note: "§G0，项目方 11-01 原话“千万不要补补修修,我们要全局思维……一旦决定了,其它sub-tasks related都要改一下”"}
+      - {src: config/vqa.json, note: "首例：看图闭环已存在（enforce=false），差点被新派 loop 重造一套"}
+    confidence: high
+    status: 确认   # 检查脚本 tools/qa/decision_propagation.py 已由 RSI 11-01 交付（tests/test_decision_propagation.py）
+    date: 2026-11-01
+  - id: K-OPS-D01
+    domain: ops
+    link: [P0-P1, P11-RETRY]
+    title: 项目方每条决策先进账本、能断言的进 decision_check；每轮迭代收轮前跑 decision_check，❌ 不得宣布完成
+    when: 项目方给出任何新决定（对话原话、AskUserQuestion 选项、界面一键确认），或任何 agent 改动配置 / 资产 / 演员表 / 配方 / 声音之后
+    then: ①在 docs/master/MASTER_PICTURE.md §1 账本加一行（原话、决定、范围、被谁取代、期望状态、实测状态）；②能机检的在 config/owner_decisions.yaml 加一条检查；③运行 .venv/Scripts/python.exe -X utf8 tools/qa/decision_check.py，新增 ❌ 必须归到缺口表并派负责方；④旧剧 / 预 series10 内容一律“隔离”到 data/_quarantine_<日期>/ 并写 MANIFEST，最终删除只由项目方本人运行 ops/cleanup 脚本
+    check: tools/qa/decision_check.py
+    evidence:
+      - {src: config/owner_decisions.yaml, note: 34 条断言（剧本 / 清理 / LoRA / 出图 / 声音 / UI）}
+      - {src: docs/master/MASTER_PICTURE.md, note: 决策账本 + 残留清单 + 系统图 + 缺口表}
+      - {src: data/_quarantine_20261101/MANIFEST.md, note: "11-01 隔离 76 项 23.0G；项目方一键：“先隔离，验证后你删”"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  # ---- AUDIT r1 草案（knowledge/inbox/2026-11-01_audit_r1.yaml），RSI r3 补检查后收编（总调度 11-01 晚指派）
+  - id: K-OPS-D03
+    domain: ops
+    link: [P11-RETRY]
+    title: 决策同步清单里的每个文件都必须有 owner；“未指派”的残留没人会改，决策永远同步不完
+    when: config/owner_decisions.yaml 的 propagate / stale_terms 命中的文件，在 tools/qa/ownership.yaml 里查不到 owner
+    then: decision_propagation 把这类文件单列成“没有 owner”，单独算不通过；总调度在 ownership.yaml 指派 owner（共享文档写清写入口）；测试逐个检查真实 propagate 里的文件都能查到 owner
+    check: [tools/qa/decision_propagation.py, tests/test_decision_propagation.py]
+    evidence:
+      - {src: docs/audit/RSI_r01.md, note: "AUDIT r01：D-VQA-01 有 22 处残留，其中 6 个文件 owner = 未指派"}
+      - {src: tests/test_decision_propagation.py, note: "test_real_propagate_files_all_have_owner 首跑查出 config/vqa.json 无主，已归 VQAGATE"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-D04
+    domain: ops
+    link: [P11-RETRY]
+    title: 程序自动生成的文件不能当决策同步对象；要同步的是生成它的程序或模板
+    when: owner_decisions.yaml 的 propagate 里列了文件头写着“自动写 / 自动生成 / 勿手改 / auto-generated”的文件
+    then: decision_propagation 把它报成配置错误（“这是程序自动生成的文件，改同步它的生成程序”），不检查内容；同步对象改成生成程序（D-VID-01：STATUS.md → tools/series10_video/night.py 生成 STATUS 的那段）
+    check: [tools/qa/decision_propagation.py, tests/test_decision_propagation.py]
+    evidence:
+      - {src: docs/series10_video/STATUS.md, note: "第 1 行“night.py 自动写”，每轮重写、没有配方栏（AUDIT r01 §2）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01

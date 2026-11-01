@@ -62,17 +62,8 @@ def test_api_jobs_lists_v1_jobs(monkeypatch):
     assert [j["id"] for j in out][:2] == ["v1b", "v1a"]
 
 
-def test_h3_frames_capped_to_vram_limit(monkeypatch):
-    """3090 上 768×1344 的 H3 超过 192 帧必 OOM：按上限出、记下剧本要的帧数（oom.lower_cost）"""
+def test_h3_frames_not_capped():
+    """fredw-92/LS 取代 D1 的 192 帧上限：帧数按剧本时长，超道上限的改派长镜头道（tests/test_longshot_ls.py）"""
     from ns_render import h3_video as HV
     from ns_schema.h3_lint import frames_for_seconds
-    monkeypatch.delenv("NS_H3_MAX_FRAMES", raising=False)
-    assert HV.safe_max_frames() == 192
-    assert HV.frames_for(6) == (158, 158) and HV.frames_for(8) == (192, 192)
-    assert HV.frames_for(12) == (192, frames_for_seconds(12)) == (192, 294)
-    monkeypatch.setenv("NS_H3_MAX_FRAMES", "250")          # 不在网格上 → 向下对齐到 243
-    assert HV.safe_max_frames() == 243 and HV.frames_for(10) == (243, 243) and HV.frames_for(12)[0] == 243
-    monkeypatch.setenv("NS_H3_MAX_FRAMES", "999")
-    assert HV.safe_max_frames() == 362
-    monkeypatch.setenv("NS_H3_MAX_FRAMES", "x")
-    assert HV.safe_max_frames() == 192
+    assert HV.frames_for(12) == (frames_for_seconds(12), frames_for_seconds(12)) == (294, 294)

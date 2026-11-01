@@ -1,0 +1,127 @@
+# ASSETMASTER（资产补全 + 图片重做，2026-11-01）。证据见 data/assetmaster/inventory.json、look_fix_log.jsonl。
+rules:
+  - id: K-AST-224
+    check: tests/test_assetmaster_scan.py
+    domain: asset
+    link: [P3-P4, P4-P5]
+    title: 剧本导入后必须做"角色×造型×单品"盘点，缺图单品进待补队列
+    when: 新剧本（或单集）导入正式剧本后；autopilot P4-P5 段
+    then: 跑 tools/assetmaster/scan.py（autopilot stage_assets 自动调用）→ data/assetmaster/todo.json；缺图 / 待确认单品先补产品参考图（tools/assetmaster/gen_items.py），出首帧前 GEN_CONTRACT I4 才能过
+    evidence:
+      - {src: data/assetmaster/inventory.json, note: "series10 首次盘点：已登记单品 48 件缺产品图，只有 13 件有图；男角色与阿岚的全部单品都只有设定图"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-AST-225
+    check: tools/assetmaster/look_fix.py
+    domain: asset
+    link: [P3-P4, P4-P6]
+    title: 写作稿里同一造型的鞋 / 饰品必须与 P1 登记逐字一致；换装镜头之后不得出现上一造型的单品
+    when: P4 分镜稿写造型表头与镜头 img 时；scan.py 判"同造型不同鞋 / 镜头混入其他造型单品 / 未登记单品"
+    then: 内容层交写作模型（abliteration，关推理）按登记返修，系统核对对白 / 独白 / 时长逐字不变、镜数不变、check_chain block=0 才落盘；导入走单集 merge（tools/assetmaster/merge_import.py），导入前备份
+    writer_text: 每个镜头里写到的衣服、鞋、饰品必须与该镜所用登记造型逐字一致；同集换装后不要再写上一套造型的单品
+    evidence:
+      - {src: data/assetmaster/look_fix_log.jsonl, note: "ep04 造型C 写了透明细高跟（登记白球鞋）；ep07 镜1-6 用了未登记造型；ep09 换C后镜7/8 仍写B的九串铁珠；ep10 B 镜写细银链 / 红绳。4 集返修后造型问题 0（ep03 换装过渡除外）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-AST-226
+    check: tools/assetmaster/scan.py
+    domain: asset
+    link: P4-P5
+    title: 剧情依赖的单品（剧名 / 动作以它为前提）不能删，只能暂定登记为造型外搭或身体装饰
+    when: scan 报"未登记单品"且该单品是本集剧情前提（ep08 黑色漆皮长风衣、ep07 腰侧九枚细金属环）
+    then: 写进 data/assetmaster/look_extras.json（暂定，记批准人），不改 P1 造型原文；REFLOCK 解析器与 scan 都按登记读
+    evidence:
+      - {src: data/assetmaster/look_extras.json, note: "总调度 2026-11-01 批：长风衣作造型B外搭（LW-O08），九枚细金属环作林晚装饰"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-AST-227
+    check: tools/assetmaster/look_fix.py
+    domain: asset
+    link: P4-P5
+    title: 造型返修的核对只锁对白 / 独白 / 时长 / 镜数；sound 里的拟音允许随造型改，但必须进日志给总调度看
+    when: tools/assetmaster/look_fix.py 核对写作模型返修稿
+    then: 第一次把 sound 行也锁成逐字，ep09 连续 3 轮不过（写作模型把"衣料摩擦"改成"漆皮摩擦"以配合造型）；改为只锁台词类，拟音改动列给总调度
+    evidence:
+      - {src: data/assetmaster/look_fix_log.jsonl, note: "ep09 第一次 3 轮都因 sound 不一致失败；放开后 1 轮通过，总调度认可拟音改动"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-01
+  - id: K-AST-228
+    check: tests/test_assetmaster_scan.py
+    domain: asset
+    link: P4-P5
+    title: 库里的"近似品"不能顶替登记单品：颜色 / 材质词不一致就算缺图，只差形制词才算待确认
+    when: scan.py 把登记单品对照衣橱
+    then: 颜色或材质（漆皮 / 针织 / 真丝 / 皮）差一个就判缺图；只有上身图没有产品图判待确认；跨角色的近似品（林晚短款西装外套 ≠ 顾沉男式西装外套 LW-O21）用 data/assetmaster/lib_map.json 人工覆盖
+    evidence:
+      - {src: data/assetmaster/inventory.json, note: "细银链曾被匹配到草莓水晶项链、林晚 A 的鞋曾被匹配到美甲图 T1（名字里有\"透明高跟\"）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REN-132
+    check: config/render_quality.json
+    domain: render
+    link: P4-P6
+    title: series10 首帧全量重出默认配方 = v9（v10 写实·中 + 场景底图 + 身份脸 + 去头造型图）；写实"重"档为备选
+    when: series10 首帧全量重出（ASSETMASTER 第 3 步）及之后的首帧默认重出
+    then: 预设 frame_v9（config/render_quality.json，frame_redo_preset）：S★、不挂 lin_wan_qi、参考 = 身份脸 > 去头造型图 > 场景底图、cfg 1、krea2_film_texture 0.5；备选 frame_v9_heavy（krea2 0.8）；林晚 Q1 ≥0.70，不过自动换 seed ≤3 次，仍不过标不合格交总调度；只把契约通过的图登记为候选
+    params: {preset: frame_v9, krea2_film_texture: 0.5, cfg: 1, lin_wan_qi: false, alt_preset: frame_v9_heavy}
+    evidence:
+      - {src: data/review_pages/series10_imgfix, quote: "v10H 同上（写实·重）", note: "项目方原话①（总调度转）；重档林晚身份约 0.72–0.78"}
+      - {src: data/review_pages/series10_imgfix, quote: "v9 v10+场景底图这个还可以", note: "项目方原话②，较新，以此为准"}
+    confidence: high
+    status: 项目方闸门
+    date: 2026-11-01
+  - id: K-AST-229
+    check: tools/assetmaster/gen_items.py
+    domain: asset
+    link: P4-P5
+    title: 单品产品图 postflight 要查"画面里没有人体"：人脸之外再查肤色像素占比
+    when: tools/assetmaster/gen_items.py 自动选暂定
+    then: YCrCb 肤色像素 ≥3% 判不过（米色 / 卡其 / 棕 / 透明 / 裸色系单品除外，改人工目检）；首饰圈环被 OCR 读成"0000000"不算文字（≥2 种字符才算）；透明人台的头会被检成人脸，正面候选多为 1 张脸，按"无脸候选优先"选
+    evidence:
+      - {src: data/assetmaster/items.json, note: "陈宇红绳原暂定图是手腕上身照（人脸 0，自动质检放行）；肤色检查后改选平放款。九环 3 张 OCR 全是 0000000"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-01
+  - id: K-REN-133
+    check: tools/assetmaster/review_page.py
+    domain: render
+    link: [P4-P6, P10-P11]
+    title: 局部动作大特写可以带出主角脸，但脸必须是本人：同样过 Q1 身份闸门（林晚 ≥0.70）+ 总调度目检；候选页只放通过契约的图
+    when: 剧本写局部动作的大特写 / 特写而构图带进主角脸（如 ep05-S5）；以及任何给项目方挑的候选页
+    then: 身份参考照挂；带脸即执行 Q1（林晚 ≥0.70），不过自动换 seed 重出 ≤3 次，仍不过标不合格交总调度；总调度目检脸是否本人；给项目方的候选页只放契约通过的图，不合格的折叠在"未通过"里供查，不进候选
+    evidence:
+      - {src: docs/GEN_CONTRACT.md, quote: "这里有些地方的脸不是他的脸呢……我接受不了……就是部分的，我觉得还行", note: "项目方原话（总调度 2026-11-01 转，更正上一条“带脸的大特写”可直接接受）"}
+    confidence: high
+    status: 项目方闸门
+    date: 2026-11-01
+  - id: K-AST-260
+    check: tests/test_assetmaster_sheets.py
+    domain: asset
+    link: [P4-P5, P4-P6]
+    title: 造型设定图选暂定 = Q1 身份通过 且 单品一致性检查通过（Q2 自动或目检记录）；只看 Q1 会选错衣服
+    when: 造型版设定图（四栏）自动选暂定、adopt 进 sheets_chosen.json 之前（tools/assetmaster/choose.py enforce_item_check）
+    then: 每套造型在 data/assetmaster/sheet_item_checks.json 记一条 {seed, verdict, how(Q2|目检), by, at, note}，seed 必须等于选中的那张；没有记录或不过 → 不 adopt；目检覆盖另记 sheet_overrides.json
+    evidence:
+      - {src: data/assetmaster/sheet_overrides.json, note: "林晚 B：Q1 最高的 s303（0.927）束腰画成开胸挂带款，v2 第一版 s101/s202（0.96）画成抹胸，都违反项目方 LW-O10；目检改选 s505"}
+      - {src: tests/test_assetmaster_sheets.py}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-AST-261
+    check: tests/test_assetmaster_sheets.py
+    domain: asset
+    link: [P4-P5, P4-P6]
+    title: 换设定图 = 带版本新文件名 + 先预热裁切再原子切指针（registered_refs 与 sheets_chosen 两处），不删任何旧裁切
+    when: 造型设定图 adopt / 替换（tools/assetmaster/gen_look_sheets.py adopt）
+    then: 选中图复制为 sheets_v2/adopted/<key>_v2_s<seed>.png（裁切缓存名不和旧图撞）；为新文件名先生成全部裁切（prewarm）；再 tmp+replace 原子改写 registered_refs.json 与 assets/sheets_chosen.json（REFLOCK 解析器读后者，旧值留 file_v1 / sheets_v1_src）；不删除 images/refs、images/refcrops 下任何文件——排队中的作业还在引用
+    evidence:
+      - {src: services/agent/ns_agent/asset_refs.py, note: "sheet_of 读 config/recipes/asset_refs.json sheets_file = assets/sheets_chosen.json"}
+      - {src: tests/test_assetmaster_sheets.py, note: "总调度 11-01：job b30ec4a4e11e 01:29 Errno 2 refcrops/lin_wan_lookA_s202_half_nohead.png——旧 adopt 删缓存时作业还在读"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01

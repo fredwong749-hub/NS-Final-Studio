@@ -1,0 +1,137 @@
+# 迭代协议规则（ITERAUDIT 2026-11-01）。check 字段 = 强制这条规则的代码 / 闸门；iter_gate.py RL 项要求新规则都带 check。
+rules:
+  - id: K-OPS-Q01
+    domain: ops
+    link: [P11-RETRY, P10-P11]
+    title: 每个迭代 loop 收轮前必须跑 iter_gate，退出码 0 才算本轮完成；未测 ≠ 通过
+    when: 任何 agent 的 round / iteration（UI 点击扫描、排版、复测、资产重出、参考锁定、出片、模型对比、autopilot）宣布“本轮完成 / 已修 / 已验证”之前
+    then: 按 docs/ITERATION_PROTOCOL.md 7 步走（项目方任务 → 先测正确性 → 改 → 他人复核 → 回归：G10 + data_parity + 契约 → 带证据入账 → 规则带 check）；运行 tools/qa/iter_gate.py --loop <名> --round <轮> --task OTn --changed … --verifier … --verify-evidence … --report …；FAIL 回滚或继续修，INCOMPLETE 补测；只改 tools/qa/ownership.yaml 里属于自己的文件，共享文件只走规定写入口
+    check: tools/qa/iter_gate.py
+    evidence:
+      - {src: docs/ITERATION_PROTOCOL.md §0 审计结论, quote: "只量排版 / 间距，没量内容是否等于后端"}
+      - {src: docs/uirsi/rounds/r19-r25.md, quote: "T4–T7 卡在生产状态闸门……不扣界面分"}
+      - {src: knowledge/RSI_LEDGER.md UIA5, quote: "r1–r3 的 detect 一条都没抓到"}
+      - {src: tools/iterate_loop/reviewer.py failures(), quote: "thr is None or v is None: continue"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-Q02
+    domain: ops
+    link: [P11-RETRY]
+    title: 新写进知识库的规则必须带 check 字段（强制它的闸门 / 测试 / 校验器路径），否则不算学会
+    when: 任何 loop 把教训写进 knowledge/rules/*.yaml
+    then: 同一轮里给出强制检查（测试、校验器、gate 脚本或 detect 流程），在条目里写 check：路径；没有检查的新教训只能进 knowledge/inbox 当草案；11-01 之前已有的无检查规则标 enforced=false 继续作为指引生效（清单 docs/master/unchecked_rules.md，owner 在 sweep 里补 check 后删标记）；iter_gate RL 项只对没标 enforced=false 的缺检查规则判不通过，并核对所有 check 路径存在
+    check: tools/qa/iter_gate.py
+    evidence:
+      - {src: docs/ITERATION_PROTOCOL.md §0 审计结论, quote: "260 条规则里 155 条没有任何下游落点"}
+      - {src: docs/GEN_CONTRACT.md §0, quote: "签字（写入 data/review_pages/<批次>/master_review.md）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-Q03
+    domain: ops
+    link: [P11-RETRY, P5-P6]
+    title: 测试永远不写真实 data/：数据根默认指向临时目录，写真实数据即抛错，会话结束查遗留线程和哨兵文件
+    when: 任何 pytest 运行（含 iter_gate T1）；写会起后台线程 / 定时器的代码或测试
+    then: tests/conftest.py 会话开始装 tools/qa/real_data_guard.py（open / Path.write_* / os.replace 等写真实 data/ 一律抛 RealDataWriteError 并记账），P.DATA、P.RENDERS 等数据根指到临时目录；确需真实数据的用例标 @pytest.mark.real_data；测试起的后台线程必须在用例里 join（不能活过夹具，否则 monkeypatch 还原后会写到别处）；会话结束有违规、遗留非守护线程或真实 takes.json 等哨兵文件 mtime 变化 → 退出码 1；iter_gate T1 读 data/qa/test_guard_last.json，没有本次报告即判不通过
+    check: [tests/test_real_data_guard.py, tools/qa/real_data_guard.py, tools/qa/iter_gate.py]
+    evidence:
+      - {src: tests/conftest.py, note: "11-01 03:15 tests/test_unified_frame.py 后台 postflight 线程在 monkeypatch 还原 P.RENDERS 后写坏真实 data/renders/ep01/S1/takes.json（REFLOCK 报，总调度转）；10-31 03:02 同形事故（_drain_jobs_before_unpatch 注释）"}
+      - {src: tests/test_real_data_guard.py, note: 守卫跳闸自测（含后台线程吞异常的情形）}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-Q11
+    domain: ops
+    link: [P11-RETRY]
+    title: 测试按独立模块名加载 tools/ 脚本；同名脚本（run.py 等）裸 import 有歧义时直接报错，不许拿错模块
+    when: 测试或脚本要 import tools/ 下的脚本；tools/ 里出现同名文件（现有 run.py、report.py、build_jobs.py 各 2 个）
+    then: pytest 用 --import-mode=importlib（pyproject addopts，tests 在 pythonpath 里保留测试间 import）；tests/conftest.py 装 tools/qa/script_name_guard.py：同名脚本的目录同时在 sys.path 上时 import 抛 AmbiguousScriptImport，只有一个时导入那一个并换掉缓存里的另一个；测试加载 tools 脚本用 importlib.util.spec_from_file_location("<唯一名>", 路径)；不改 owner 的脚本名
+    check: [tests/test_script_name_guard.py, tools/qa/script_name_guard.py]
+    evidence:
+      - {src: tests/test_bakeoff.py, note: "REFLOCK 11-01 全量测试：tools/autopilot/run.py 与 tools/bakeoff/run.py 同名，按名字 import 撞车，2 个收集错误（no attribute 'BASE'）"}
+      - {src: tests/test_script_name_guard.py}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-Q12
+    domain: ops
+    link: [P11-RETRY, P3-P4]
+    title: 影响剧本 / 分镜写法的教训，规则必须同时进写作方知识包（writer_text）和 P4 校验（lint），写作模型返修环自己改
+    when: 任何 loop 发现 bug、找到解决办法、写规则时，教训涉及剧本 / 分镜该怎么写（domain=writer 或 link 在 P0–P4）
+    then: 规则带 targets writer_prompt + writer_text（compile.py → config/recipes/writer_knowledge.md）+ lint（P4 校验器里有定义的规则号；新机检加在 tools/qa/writer_lints.py，写作链路为 block）；iter_gate RL 对本轮新规则缺任一项判不通过
+    check: [tools/qa/iter_gate.py, tests/test_iter_gate.py, tests/test_writer_lints.py]
+    evidence:
+      - {src: knowledge/rules/writer_iteration.yaml, note: "项目方 11-01 原话：记得每一次发现bugs,找到solution后,把规则写到系统code去,这样,剧本llm更好去自动改进"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  # ---- RSI 第 2 轮（fredw-2b 派，2026-11-01 下午；R11-11 续）
+  - id: K-OPS-Q14
+    domain: ops
+    link: [P10-P11]
+    title: 总调度 / 项目方的人工标注是缺陷真值：检测器还没标定过关时，缺陷猎捕直接按标签计数，不能报 0
+    when: 某类缺陷已有人工标注集（如 data/acting/gaze_labels.json 看镜头标签），而自动检测器召回 / 误报未过线
+    then: defect_hunt 加“人工标签”类（DH-F18 首帧看镜头、DH-V21 片头看镜头 / 定格）按标签计数；检测器只在标定过线后接替；标签扩到新产出前，新产出的这一类记“未测”
+    check: [tools/qa/defect_hunt.py, tests/test_defect_hunt.py]
+    evidence:
+      - {src: data/acting/gaze_labels.json, note: "首帧 100 张有效标签里 71 张看镜头；片头 72 条里 56 条看镜头（10 条还带定格）"}
+      - {src: data/acting/calib_score.json, note: "检测器首帧召回 0.423 / 误报 0.207，片头召回 0.607，均不可分"}
+      - {src: data/qa/defect_hunt/state.json, note: "同时 DH-S01 / DH-S02 = 0：剧本没写看镜头、80 镜首拍都有视线落点 → 看镜头是出图 / 出片模型默认行为，修法在渲染侧（K-REN-G01 / G02）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-Q15
+    domain: ops
+    link: [P11-RETRY]
+    title: 规则里写的写作 lint 号必须在写作链路的校验器里真的会跑（validate_qwen_script.RULES 或编译器 lint），只在别处定义 = 写作模型永远看不到
+    when: 任何规则带 lint:（写作方机检号），或新增一套 lint 文件
+    then: 新 lint 文件要在 tools/validate_qwen_script.py 里加载并 RULES.update + check_shot 调用（级别跟 WL.WRITER_LINT_LEVEL）；测试逐条核对规则 lint 号 ∈ validate_qwen_script.RULES ∪ h3_lint / ns_recipes.lint；iter_gate LINT_SOURCES 同步
+    check: [tests/test_defect_hunt.py, tools/qa/iter_gate.py]
+    evidence:
+      - {src: tools/vqa/script_lint.py, note: "VQ-W1（看得见脚的景别鞋写进 img，K-WRT-V06，R11-4）只在这里定义；validate_qwen_script / qwen_repair_loop / p4_adapter 都没加载，11-01 RSI 接上"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  # ---- AUDIT 草案收编（knowledge/inbox/confirmed/2026-11-01_audit_r1b_q22.yaml；总调度 11-01 晚指派 RSI 补检查）
+  - id: K-OPS-Q22
+    domain: ops
+    link: [P11-RETRY]
+    title: 新派的 loop 开工前，总调度先在 ownership.yaml 给它登记文件；要改别人的文件先写 CONSENT，不能边做边越界
+    when: 总调度新派一个 loop（如 RESEARCH、VIDEO-RCA），或派单里写了要改别的 loop 的文件
+    then: 派单的同时在 tools/qa/ownership.yaml 加这个 loop 的条目（工具目录、规则文件、数据目录）；跨 owner 的文件先在 docs/uimaster/LOCKS.md 写 CONSENT 行。iter_gate O1：--loop 在 ownership.yaml 里没有条目 → 直接不通过；改了别人的文件又没有 CONSENT → 越界不通过
+    check: [tools/qa/iter_gate.py, tests/test_iter_gate.py]
+    evidence:
+      - {src: docs/audit/RESEARCH_r01.md, note: "RESEARCH 改了 ITERAUDIT 的 tools/qa/writer_lints.py，没有 CONSENT；tools/research/**、research_realism.yaml 都没有 owner"}
+      - {src: tests/test_iter_gate.py, note: "test_c1_not_applicable_for_rule_loop_and_o1_needs_registration：未登记 loop → O1 fail"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  # ---- RSI r5（总调度 11-01 晚指派；VQAGATE 报 ep01-S5 当前首帧被设回驳回过的 v3 且无审计）
+  - id: K-OPS-Q23
+    domain: ops
+    link: [P10-P11, P11-RETRY]
+    title: 改“当前版本”只走 ns_render.pipeline 的 set_active / clear_active / deactivate；被驳回（总调度 master_reject、项目方 / 界面标不要）的版本不能当当前——驳回后立即撤下当前版本（总调度 11-01 r6 定，PROD 改 master_reject 流程；⤴ 取代旧的“驳回版留作当前直到替换版通过”）；每次变化都写 current_changes.jsonl
+    when: 任何代码要改 takes.json 的 active（API activate / 不要 / 撤销、producer、auto_current、回收站、批量脚本、离线并回）
+    then: set_active 拒绝坏图 / 已标不要 / 总调度驳回过的版本（BadImage），并记审计（actor 默认取调用方模块.函数）；退回旧版的逻辑只退到可用版本（pipeline.deactivate、takes_ui.reject）；清空当前用 clear_active。静态测试禁止新增直接写 active 的代码；tools/qa/active_audit.py 扫全部镜头：当前指向驳回版 = 违规，当前和审计日志对不上 = 有路径绕过入口（缺陷猎捕 DH-F19 / DH-F20）
+    check: [tests/test_active_audit.py, tools/qa/active_audit.py, tools/qa/defect_hunt.py]
+    evidence:
+      - {src: data/audit/20261101.jsonl, note: "17:39:39 fred 在 ep01-S5 image v4 点“不要”（第 388 行）；takes_ui.reject 退回 clean[-1] = v3，v3 有 master_reject（07:41 总调度驳回），set_active 不查驳回、也不写审计"}
+      - {src: data/producer/current_changes.jsonl, note: "ep01-S5 image：17:01 auto_current 清空 → 17:43 记录的 from 已经是 3，中间没有任何一行"}
+      - {src: data/qa/active_audit/report.md, note: "17:50 扫 80 镜：ep05-S3 当前 v7 是 10:21 总调度驳回过的（已用 clear_active 清空，带审计）；ep01-S2 当前 v6 是项目方 17:43:02 API activate 设的，当时 activate 不写审计"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-Q24
+    domain: ops
+    link: [P4-P5, P6-P7]
+    title: 出图作业的镜头集合和提示词来源只认导入稿 data/import/script_v2.json；P4 写作中间稿不能当生产来源；G21 核对镜头集合 + 每条作业的来源 sha，不比修改时间
+    when: 剧本导入（script_v2.json 变了）之后重编 first_frame_jobs.json；full_redo 检查 G21；任何生产代码要拿镜头文字出图
+    then: image_jobs.rebuild_first_frame_jobs 用 ns_render.pipeline.load_script()（与 build_jobs.load_specs(source="import") 同一口径）；sync_job_set 跟着导入稿增删作业（新增镜按 seed / out 约定建作业，被删的镜标 stale:removed_from_import，不删文件）；每条作业记 prompt_source.sha256；jobs_vs_import 缺镜 / 多镜 / sha 过期都算不通过；IJ.load_episode(P4) 默认抛 LegacySourceError（写作 / 调研工具要读须设 NS_ALLOW_P4_SOURCE=1）；还在直接读 P4 的代码列在 docs/rsi/p4_legacy_readers.md，交 CLEANUP / owner
+    check: [tests/test_image_jobs_import.py, tests/test_image_jobs.py, tests/test_full_redo.py, tools/pipeline/image_jobs.py]
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/assets/first_frame_jobs.json, note: "重编前 jobs_vs_import：缺 13 镜、来源 sha 过期 80 条；重编后 93 镜、0 缺 0 多 0 过期、preflight 阻断 0、在画人物视线补句全覆盖（84 镜，另有 9 镜是局部 / 物件或无人）"}
+      - {src: tools/autopilot/full_redo.py, note: "原 G21 只比修改时间：作业比剧本新就判通过，哪怕是用旧 P4 稿编的"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01

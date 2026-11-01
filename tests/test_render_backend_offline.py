@@ -25,10 +25,11 @@ def test_render_backend_and_endpoints_share_one_cached_probe(monkeypatch):
         calls.append((url, timeout))
         return {"url": url, "reachable": len(calls) == 1, "detail": "HTTP 200" if len(calls) == 1 else "x"}
     monkeypatch.setattr(EP, "_probe_now", fake)
+    monkeypatch.setattr(APP.JOBS, "lanes", lambda probe=True: [])     # G36：道行另有测试（test_lanes_g36）
     monkeypatch.setattr(APP.LLMC, "render_endpoints",
                         lambda: {"image": {"url": "http://h:1", "gpu": 0}, "video": {"url": "http://h:1", "gpu": 3}})
     a = APP.render_backend()
-    eps = APP.LLMC.get_render_endpoints()
+    eps = [e for e in APP.LLMC.get_render_endpoints() if e.get("kind") != "lane"]   # G36：道行另测
     assert a["reachable"] is True and all(e["reachable"] is True for e in eps)   # 第 2、3 次读缓存：不会“抖”成不可达
     assert calls == [("http://h:1", EP.PROBE_TIMEOUT_S)] and EP.PROBE_TIMEOUT_S >= 8 and EP.PROBE_TTL_S >= 15
     assert EP.probe("http://h:1")["cached"] is True

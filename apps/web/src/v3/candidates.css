@@ -1,0 +1,33 @@
+/* UIRSI（BE-5 配套）：候选版本看图器 + 格子上的候选角标。前缀 cb- */
+.cb-scrim { position: fixed; inset: 0; z-index: 900; display: grid; place-items: center; background: var(--c-scrim); backdrop-filter: blur(4px); }
+.cb-box { width: min(1100px, calc(100vw - 32px)); max-height: calc(100vh - 32px); display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); border-radius: var(--r-l); background: var(--c-surface, var(--c-raise)); border: 1px solid var(--c-line); color: var(--c-text); }
+.cb-head { display: flex; align-items: center; gap: var(--sp-2); }
+.cb-head b { font-size: var(--fs-m); }
+.cb-sub { color: var(--c-text-2); font-size: var(--fs-sm); }
+.cb-grow { flex: 1; }
+.cb-stage { flex: 1; min-height: 0; overflow: auto; display: flex; justify-content: center; }
+.cb-stage .mp-cmp { width: 100%; }
+.cb-stage .mp-cmp img { max-height: calc(100vh - 300px); object-fit: contain; }
+.cb-fig { margin: 0; display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); }
+.cb-fig img { max-height: calc(100vh - 300px); max-width: 100%; border-radius: var(--r-m); background: var(--c-media-bg); }
+.cb-fig figcaption { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); }
+.cb-badge { font-size: var(--fs-xs); padding: 0 var(--sp-2); line-height: 20px; border-radius: var(--r-pill); background: var(--c-info-soft); color: var(--c-info-text); white-space: nowrap; }
+.cb-badge.warn { background: var(--c-warn-soft); color: var(--c-warn-text); }
+.cb-badge.bad { background: var(--c-bad-soft); color: var(--c-bad-text); }
+.cb-badge.ok { background: var(--c-ok-soft); color: var(--c-ok-text); }
+.cb-foot { display: flex; align-items: center; gap: var(--sp-3); }
+.cb-thumbs { list-style: none; margin: 0; padding: 0; display: flex; gap: var(--sp-2); overflow-x: auto; flex: 1; }
+.cb-th { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 2px; border: 2px solid transparent; border-radius: var(--r-s); background: none; color: var(--c-text-2); font-size: var(--fs-xs); cursor: pointer; }
+.cb-th img { width: 54px; height: 96px; object-fit: cover; border-radius: var(--r-1); }
+.cb-th.on { border-color: var(--c-accent); color: var(--c-text); }
+.cb-th.act span::after { content: " · 当前"; color: var(--c-ok-text); }
+
+/* 画布格子上的候选：标签和按钮放在图下方，不压图（总调度 11-01） */
+.v3-frame.cand { display: flex; flex-direction: column; }
+.v3-frame.cand > img { flex: 1; min-height: 0; height: auto; }
+.v3-cand-bar { flex: none; display: flex; flex-direction: column; gap: 2px; padding: var(--sp-1); background: var(--c-raise); border-top: 1px solid var(--c-line); cursor: default; }
+.v3-cand-lbl { font-size: var(--fs-xs); line-height: 16px; color: var(--c-text-2); text-align: center; }
+.v3-cand-use { height: 24px; padding: 0 var(--sp-2); border: 0; border-radius: var(--r-pill); background: var(--c-accent); color: var(--c-on-accent); font-size: var(--fs-xs); font-weight: 600; cursor: pointer; white-space: nowrap; }
+.v3-cand-use:hover { filter: brightness(1.08); }
+.v3-cand-old { position: absolute; left: var(--sp-1); right: var(--sp-1); bottom: var(--sp-1); height: 22px; border: 1px dashed var(--c-line-2); border-radius: var(--r-pill); background: none; color: var(--c-text-2); font-size: var(--fs-xs); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v3-cand-old:hover { color: var(--c-text); border-color: var(--c-accent); }

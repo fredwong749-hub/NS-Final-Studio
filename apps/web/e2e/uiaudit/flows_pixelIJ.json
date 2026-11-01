@@ -1,0 +1,43 @@
+[
+  {
+    "steps": [
+      {
+        "js": "const m=document.querySelector('main.v3-page'); const bar=document.querySelector('nav.sf-steps'); const bb=bar?bar.getBoundingClientRect():null; const btns=[...m.querySelectorAll('button')].filter(b=>b.getBoundingClientRect().top>innerHeight+200); if(!btns.length) return 'none below'; m.scrollTop=m.scrollHeight; await new Promise(r=>setTimeout(r,300)); const out=[]; for (const b of btns.slice(0,3)) { m.scrollTop=m.scrollHeight; await new Promise(r=>setTimeout(r,200)); b.focus(); await new Promise(r=>setTimeout(r,300)); const r=b.getBoundingClientRect(); const h=document.elementFromPoint(r.x+r.width/2, r.y+Math.min(r.height/2,8)); out.push({t:b.innerText.trim().slice(0,8), top:Math.round(r.top), hitSelf:b.contains(h)}); } return {barBottom:bb?Math.round(bb.bottom):null, barBg:bar?getComputedStyle(bar).backgroundColor:null, out};"
+      }
+    ],
+    "title": "吸顶聚焦",
+    "id": "I_900",
+    "size": [
+      1440,
+      900
+    ],
+    "wait": 9000,
+    "path": "/#/script-create"
+  },
+  {
+    "steps": [
+      {
+        "js": "const m=document.querySelector('main.v3-page'); const bar=document.querySelector('nav.sf-steps'); const bb=bar?bar.getBoundingClientRect():null; const btns=[...m.querySelectorAll('button')].filter(b=>b.getBoundingClientRect().top>innerHeight+200); if(!btns.length) return 'none below'; m.scrollTop=m.scrollHeight; await new Promise(r=>setTimeout(r,300)); const out=[]; for (const b of btns.slice(0,3)) { m.scrollTop=m.scrollHeight; await new Promise(r=>setTimeout(r,200)); b.focus(); await new Promise(r=>setTimeout(r,300)); const r=b.getBoundingClientRect(); const h=document.elementFromPoint(r.x+r.width/2, r.y+Math.min(r.height/2,8)); out.push({t:b.innerText.trim().slice(0,8), top:Math.round(r.top), hitSelf:b.contains(h)}); } return {barBottom:bb?Math.round(bb.bottom):null, barBg:bar?getComputedStyle(bar).backgroundColor:null, out};"
+      }
+    ],
+    "title": "吸顶聚焦",
+    "id": "I_720",
+    "size": [
+      1280,
+      720
+    ],
+    "wait": 9000,
+    "path": "/#/script-create"
+  },
+  {
+    "id": "J_canvas",
+    "title": "间距",
+    "path": "/#ep02",
+    "steps": [
+      {
+        "js": "const segs=[...document.querySelectorAll('[class*=prog] *, [class*=progress] *')].filter(e=>e.getBoundingClientRect().width>0); const gaps=new Set(segs.map(e=>getComputedStyle(e.parentElement).columnGap).filter(g=>g&&g!=='normal')); const ps=new Set([...document.querySelectorAll('p')].filter(e=>e.getBoundingClientRect().width>0).map(e=>getComputedStyle(e).marginTop+'/'+getComputedStyle(e).marginBottom)); return {progressGaps:[...gaps], pMargins:[...ps].slice(0,6)};"
+      }
+    ],
+    "wait": 8000
+  }
+]

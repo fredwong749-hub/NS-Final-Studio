@@ -64,10 +64,15 @@ def test_builder_fallback_keeps_structure_and_flags_a7():
     assert p["layout_ok"] and p["align"].endswith("aligns with the 10.12-second mark of the target video.")
     body = p["fields"]["integrated_multimodal_description"]
     assert body.startswith("[Shot 1] camera tilt up") and "lnwan01" not in body
-    # (S1)/(S2) 按首次开口；说话人说明在 <d> 外；<d> 里只有 [Chinese] + 逐字原文；同一人复用编号
-    assert "顾沉低声 (S1) says: <d>[Chinese] 蓝头发，很大胆。</d>" in body
-    assert "她小声 (S2) says: <d>[Chinese] 染了三年了……总经理。</d>" in body
-    assert "(S1) says in an off-screen voiceover: <d>[Chinese] 进来。</d> The on-screen character's lips remain closed." in body
+    # (S1)/(S2) 按首次开口；<d> 里只有 [Chinese] + 逐字原文；同一人复用编号。
+    # FIX（CHAIN F6，官方 §4.4）：<d> 外不再放剧本括号里的中文舞台提示（“顾沉低声 (S1)”过不了 H3-A7）；
+    # 没给人物表 VOICE 时只写 “(Sx) says:”；F7：画外台词的嘴唇句紧跟 </d>，官方句式 “while … lips remain completely closed.”
+    assert " (S1) says: <d>[Chinese] 蓝头发，很大胆。</d>" in body and "顾沉低声" not in body
+    assert " (S2) says: <d>[Chinese] 染了三年了……总经理。</d>" in body and "她小声" not in body
+    assert ("(S1) says in an off-screen voiceover: <d>[Chinese] 进来。</d> while the on-screen character's lips "
+            "remain completely closed.") in body
+    v = H3.build(s, "电梯低鸣", names=("林晚", "顾沉"), voices={"顾沉": "The on-screen adult man with a low, calm voice"})
+    assert "The on-screen adult man with a low, calm voice (S1) says: <d>[Chinese] 蓝头发，很大胆。</d>" in v.text
     assert "实习生" not in d.text                                    # 🎙 独白不进 H3（H3-D6）
     assert '"' not in d.text and "“" not in d.text                    # 不加引号
     assert p["fields"]["non_diegetic_music"] == "N/A" and d.missing == ["body", "soundscape"]
@@ -406,7 +411,8 @@ def test_audit_panel_override_requests_and_video_gate(api, bridge):
     # 审计豁免请求：只接受项目方原话，存本地 + 按契约发到 gpu3（{rule_id, owner_quote, by}）
     u = "/api/shots/ep01-S2/audit-override"
     assert c.put(u, json={"rule_id": "S1-W7", "owner_quote": "可以", "by": "agent"}).status_code == 403
-    assert c.put(u, json={"rule_id": "S1-W7", "owner_quote": "", "by": "owner"}).status_code == 400
+    # UIRSI 2026-10-31：身份来自登录会话；不是项目方（by≠owner）→ 403（以前测“缺原话 400”，现在登录即本人、不要原话）
+    assert c.put(u, json={"rule_id": "S1-W7", "owner_quote": "", "by": "agent"}).status_code == 403
     r = c.put(u, json={"rule_id": "S1-W7", "owner_quote": "这一镜说话人描述按现状出", "by": "owner"})
     assert r.status_code == 200 and r.json()["delivered"]
     assert bridge.calls[-1][2] == {"rule_id": "S1-W7", "owner_quote": "这一镜说话人描述按现状出", "by": "owner"}

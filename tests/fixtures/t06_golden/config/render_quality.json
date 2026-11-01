@@ -1,0 +1,8 @@
+{
+  "note": "FIX（ep02_iter P0）：t06 金标准是 prompt_guard 之前的编译结果。这里把三条条件化规则关掉，金标准测试即证明“规则关闭时编译结果逐字不变”；规则打开后的行为由 tests/test_fix_ep02_p0.py 单独测。",
+  "prompt_guard": {
+    "face_hidden_words": [],
+    "black_words": [],
+    "cfg_one_positive_only": false
+  }
+}

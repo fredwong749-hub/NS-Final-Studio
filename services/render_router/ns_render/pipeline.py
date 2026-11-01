@@ -141,9 +141,10 @@ def image_model(c: CompiledShot) -> W.QwenModel:
     return QWEN_BASE if not c.adult and NON_ADULT_USE_BASE else QWEN_TURBO
 
 
-def image_negative(c: CompiledShot) -> str:
-    """所有镜头同一负面词：2026-10-30 项目方取消成人过滤器后不再给非成人镜头追加防裸露词。"""
-    return c.image_negative
+def image_negative(c: CompiledShot, model: "W.QwenModel | None" = None) -> str:
+    """所有镜头同一负面词：2026-10-30 项目方取消成人过滤器后不再给非成人镜头追加防裸露词。
+    FIX（ep02_iter P0 ⑥）：给了 model 且实际 cfg ≤ 1（Turbo）→ ""：负面词不生效，也不写进 take.negative"""
+    return W.negative_for(model, c.image_negative) if model is not None else c.image_negative
 
 
 def qc_with_vlm(client):
@@ -324,6 +325,25 @@ def check_not_gpu3(shot_id: str):
         raise Gpu3Owned(f"{shot_id}：{why}")
 
 
+class LegacyPathBlocked(ComfyError):
+    """G18（MASTER_PICTURE §4；WORKFLOW 11-01）：登记了资产的项目不许走旧出图路径"""
+
+
+def check_not_legacy_project(script, shot_id: str, fn: str = "render_image"):
+    """G18 堵旧路径（只隔离，不删）：剧本属于 config/recipes/asset_refs.json 登记的项目（例 series10_v1）时，
+    旧的 render_image（身份底板两段式换脸 qwen_two_stage + plates/master.png 母版脸裁切 = data/cache/refs/master_face_*）
+    和 render_last_frame 一律拒绝——首尾帧只走唯一出图路径 ns_render.unified_frame（K-REN-134、K-OPS-W01）。
+    没登记的旧项目（60 集旧剧、A/B 沙箱）行为不变。无绕过开关"""
+    try:
+        from .unified_frame import project_for
+        proj = project_for(script)
+    except Exception:  # noqa: BLE001  判定失败不挡旧项目
+        return
+    if proj:
+        raise LegacyPathBlocked(f"{shot_id}：项目 {proj} 已登记资产参考，旧出图路径 pipeline.{fn}"
+                                f"（两段式换脸 / 母版脸缓存）已停用；请走 ns_render.unified_frame（画布重出 / frame-jobs / image_jobs）")
+
+
 EXTERNAL_SOURCES = ("gpu3", "owner", "upload")   # 不是本机出的版本（gpu3 / 项目方上传）
 
 
@@ -344,12 +364,77 @@ def shot_is_adult(shot_id: str) -> bool:
     return shot_id in _ADULT_CACHE["adult"]
 
 
-def set_active(shot_id: str, stage: str, n: int):
+class BadImage(ValueError):
+    """fredw-92/UXF1：坏图不能设为当前 / 定稿（ns_render.image_check）"""
+
+
+def bad_reason(take: dict) -> str | None:
+    from . import image_check as IC
+    return take.get("bad") or IC.check_take(take, DATA)
+
+
+def ineligible_reason(take: dict) -> str | None:
+    """K-OPS-Q23（RSI 11-01，ep01-S5 v3 事故）：不能设为当前的版本——坏图 / 已标“不要” / 总调度驳回过。
+    驳回要先撤销（unreject 去掉 params.rejected；master_reject 由总调度清掉）才能再设为当前"""
+    why = bad_reason(take)
+    if why:
+        return why
+    if (take.get("params") or {}).get("rejected") if isinstance(take.get("params"), dict) else None:
+        return "已标“不要”的版本"
+    if take.get("master_reject"):
+        return "总调度驳回过的版本"
+    return None
+
+
+def _caller() -> str:
+    import inspect
+    for fr in inspect.stack()[2:6]:
+        mod = fr.frame.f_globals.get("__name__", "?")
+        if not mod.endswith("ns_render.pipeline"):
+            return f"{mod}.{fr.function}"
+    return "?"
+
+
+def audit_active(shot_id: str, stage: str, frm, to, reason: str, actor: str | None = None) -> None:
+    """K-OPS-Q23：当前版本的每一次变化都记 data/producer/current_changes.jsonl（与 auto_current.audit_change 同格式）"""
+    if frm == to:
+        return
+    try:
+        f = DATA / "producer" / "current_changes.jsonl"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "shot": shot_id, "stage": stage, "from": frm, "to": to,
+               "reason": reason, "actor": actor or _caller(), "trigger_take": to}
+        with f.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def clear_active(shot_id: str, stage: str, reason: str, actor: str | None = None) -> None:
+    """撤掉当前版本（不退回旧版），带审计"""
+    with shot_lock(shot_id):
+        data = load_takes(shot_id)
+        before = (data.get("active") or {}).pop(stage, None)
+        _save_takes(shot_id, data)
+    audit_active(shot_id, stage, before, None, reason, actor or _caller())
+
+
+def set_active(shot_id: str, stage: str, n: int, reason: str = "", actor: str | None = None):
+    """唯一改“当前版本”的入口（K-OPS-Q23）：拒绝坏图 / 已标不要 / 总调度驳回过的版本；每次变化都记审计。
+    auto_current.on_contract 自己写带原因的审计，这里对它不重复记"""
+    who = actor or _caller()
     with shot_lock(shot_id):   # 封板修复：每镜锁
         data = load_takes(shot_id)
         take = next(t for t in data["takes"] if t["stage"] == stage and t["n"] == n)
+        why = ineligible_reason(take)
+        if why:
+            raise BadImage(f"{shot_id} {stage} v{n} 是{why}，不能设为当前")
+        before = (data.get("active") or {}).get(stage)
         data["active"][stage] = n
         _save_takes(shot_id, data)
+    if "auto_current" not in who:
+        audit_active(shot_id, stage, before, n, reason or "设为当前", who)
+    with shot_lock(shot_id):
         d = shot_dir(shot_id)
         if stage == "image":
             shutil.copyfile(DATA / take["file"], d / "frame.png")
@@ -374,12 +459,22 @@ def stamp_versions(shot_id: str, take: Take) -> Take:
             take.inputs_sha = shot_inputs_sha(shot_id, ROOT)
     except Exception:  # noqa: BLE001 — 盖章失败不影响存版本
         pass
+    try:   # UX5-B P0：所用资产版本（定妆 / 身份 LoRA / 视频基底 / 附加视频 LoRA）；预设在 image_params 补
+        from ns_agent.asset_revs import stamp
+        stamp(shot_id, take, ROOT)
+    except Exception:  # noqa: BLE001
+        pass
     return take
 
 
 def _add_take(shot_id: str, take: Take, activate: bool = True):
+    from . import image_check as IC
     with shot_lock(shot_id):   # 封板修复：每镜锁
         stamp_versions(shot_id, take)
+        if take.bad is None:   # fredw-92/UXF1：坏图（太小 / 尺寸不符）只记版本，不设为当前
+            take.bad = IC.check_take(take.model_dump(), DATA)
+        if take.bad:
+            activate = False
         data = load_takes(shot_id)
         used = {t["n"] for t in data["takes"] if t["stage"] == take.stage}
         if take.n in used:   # 封板修复：渲染线程开工时取的号在出图期间被上传占了 → 顺延（文件名不变，只改版本号）
@@ -391,15 +486,15 @@ def _add_take(shot_id: str, take: Take, activate: bool = True):
 
 
 def deactivate(shot_id: str, stage: str):
-    """撤掉当前版本：有旧版本就退回到最新的那个，否则清空（批量脚本会重新出）"""
+    """撤掉当前版本：有旧版本就退回到最新的那个（不退到坏图 / 已标不要 / 总调度驳回过的，K-OPS-Q23），否则清空（批量脚本会重新出）"""
     with shot_lock(shot_id):   # 封板修复：每镜锁
         data = load_takes(shot_id)
         clean = [t for t in data["takes"] if t["stage"] == stage
-                 and t["n"] != data["active"].get(stage)]
+                 and t["n"] != data["active"].get(stage) and not ineligible_reason(t)]
         if clean:
-            set_active(shot_id, stage, clean[-1]["n"])
+            set_active(shot_id, stage, clean[-1]["n"], reason="撤掉当前，退回最新一张可用的旧版")
             return clean[-1]["n"]
-        data["active"].pop(stage, None)
+        before = data["active"].pop(stage, None)
         _save_takes(shot_id, data)
         d = shot_dir(shot_id)
         files = {"image": ("frame.png",), "last": ("last.png",), "video": ("video.mp4", "video_last.png")}[stage]
@@ -407,7 +502,8 @@ def deactivate(shot_id: str, stage: str):
             files += ("last.png",)
         for f in files:
             (d / f).unlink(missing_ok=True)
-        return None
+    audit_active(shot_id, stage, before, None, "撤掉当前，没有可用的旧版，清空")
+    return None
 
 
 def qc_sweep(shot_id: str, adult: bool, qc_fn=None, recheck: bool = False, only_active: bool = False
@@ -707,6 +803,7 @@ def render_image(client: ComfyClient, script: ScriptImport, shot_id: str, *, see
     ref_mode: plate（身份底板 + 作用说明，默认）| portrait（旧：成品定妆图裁成画布比例，只做 A/B 对照）。
     参考编辑对所有镜头开放；裸露质检只记录，不否决（2026-10-30 取消成人过滤器）。
     score_fn=None 关闭评分（每轮第一张即当前）；grade=False 不调色。"""
+    check_not_legacy_project(script, shot_id, "render_image")
     check_not_gpu3(shot_id)
     c = compile_with_edits(script, shot_id, available_loras(client), **({"method": method} if method else {}))
     if prompt_override:
@@ -731,7 +828,7 @@ def render_image(client: ComfyClient, script: ScriptImport, shot_id: str, *, see
         if scene_plate:
             plan = plan.with_scene(ROOT / scene_plate["path"])
     model = image_model(c)
-    negative = image_negative(c)
+    negative = image_negative(c, model)
     qc_fn = qc_fn or qc_with_vlm(client)
     if score_fn is _DEFAULT:
         score_fn = _default_score(client, c, plan.face.path if plan.face else
@@ -921,7 +1018,7 @@ def refine_image(client: ComfyClient, script: ScriptImport, shot_id: str, *, see
     names = _upload_refs(client, plan, 1.0) if plan.refs else []
     src = DATA / (src_take.get("raw_file") or src_take["file"])
     init = client.upload_image(src, subfolder="ns_final/refs")
-    negative = image_negative(c)
+    negative = image_negative(c, REFINE_MODEL)
     prompt = (plan.role_lines() if names else "") + REFINE_PREFIX + c.image_prompt
     qc_fn = qc_fn or qc_with_vlm(client)
     if score_fn is _DEFAULT:
@@ -989,6 +1086,7 @@ def render_last_frame(client: ComfyClient, script: ScriptImport, shot_id: str, s
     """尾帧（C3，research v6 §5）：以当前首帧为图1做 Qwen 2.1 编辑，画面改为 motion 的结束状态
     （同一场景同一人物同一服装）；图2 = 该镜的身份底板（补身份）。调色以首帧为参考，避免首尾闪色。
     存为 takes/last_NNN.png（stage "last"），当前版本复制为 last.png；render_video 用它作 H3 尾帧。"""
+    check_not_legacy_project(script, shot_id, "render_last_frame")
     check_not_gpu3(shot_id)
     d = shot_dir(shot_id)
     if not (d / "frame.png").exists():
@@ -1003,7 +1101,7 @@ def render_last_frame(client: ComfyClient, script: ScriptImport, shot_id: str, s
     if plate:
         check_face_lock_allowed(c)
     m = model or LAST_MODEL
-    negative = image_negative(c)
+    negative = image_negative(c, m)
     qc_fn = qc_fn or qc_with_vlm(client)
     first_png = d / "frame.png"
     # 首帧参考：同比例预缩放（控制编码 token），本镜固定这一份

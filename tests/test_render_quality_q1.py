@@ -31,7 +31,7 @@ def test_final_tier_values_match_gpu3_production():
     assert FT.pass2_steps(FINAL) == 14                        # WR max(8, int(35 × 0.4))
     assert FINAL["realism_loras"] == [["krea2_film_texture_qwen21.safetensors", 0.5]]
     assert "glamour_realism_qwen21.safetensors" in FINAL["banned_loras"]
-    assert FINAL["identity_loras"] == {"lin_wan_qi_v1.safetensors": 0.8} and FINAL["lora_cap"] == 1.6
+    assert FINAL["identity_loras"] == {} and FINAL["lora_cap"] == 1.6
     assert FINAL["grade"]["strength"] == 0.6 and FINAL["grain"] is False
     assert CFG["default_tier"] == "preview" and CFG["post"]["color_match"]["default"] is True
     for k in ("unet_src", "steps_src", "pass1_src", "pass2_src", "realism_src", "lora_cap_src", "grade_src"):
@@ -39,19 +39,20 @@ def test_final_tier_values_match_gpu3_production():
 
 
 def test_final_loras_set_and_cap():
-    avail = {"krea2_film_texture_qwen21.safetensors", "lin_wan_qi_v1.safetensors", "a.safetensors"}
-    shot = [("lin_wan_qi_v1.safetensors", 0.6), ("glamour_realism_qwen21.safetensors", 0.5),
+    avail = {"krea2_film_texture_qwen21.safetensors", "id_x.safetensors", "a.safetensors"}
+    shot = [("id_x.safetensors", 0.6), ("glamour_realism_qwen21.safetensors", 0.5),
             ("a.safetensors", 1.2), ("krea2_film_texture_qwen21.safetensors", 0.9)]
-    out = FT.final_loras(shot, avail, FINAL)
+    cfg = {**FINAL, "identity_loras": {"id_x.safetensors": 0.8}}   # RECALL 11-01：生产已撤 lin_wan_qi，这里用假身份 LoRA 测机制
+    out = FT.final_loras(shot, avail, cfg)
     assert out[0] == ("krea2_film_texture_qwen21.safetensors", 0.5)      # 写实 LoRA 前置、配置强度
     names = [f for f, _ in out]
     assert "glamour_realism_qwen21.safetensors" not in names and names.count("krea2_film_texture_qwen21.safetensors") == 1
     rest = dict(out[1:])
     assert abs(sum(rest.values()) - 1.6) < 0.01                          # 0.8 + 1.2 = 2.0 → 按比例到 1.6
-    assert abs(rest["lin_wan_qi_v1.safetensors"] / rest["a.safetensors"] - 0.8 / 1.2) < 0.01
+    assert abs(rest["id_x.safetensors"] / rest["a.safetensors"] - 0.8 / 1.2) < 0.01
     # ComfyUI 没有 krea2 → 不加；身份 LoRA 单独时 0.8 不缩
-    assert FT.final_loras([("lin_wan_qi_v1.safetensors", 0.6)], {"lin_wan_qi_v1.safetensors"}, FINAL) == \
-        [("lin_wan_qi_v1.safetensors", 0.8)]
+    assert FT.final_loras([("id_x.safetensors", 0.6)], {"id_x.safetensors"}, cfg) == \
+        [("id_x.safetensors", 0.8)]
 
 
 def test_qwen_final_graph_two_stage_nodes():
@@ -142,7 +143,7 @@ def test_tier_routing_and_final_replaces_lock(env, monkeypatch):
     loras = [(n["inputs"]["lora_name"], n["inputs"]["strength_model"]) for n in wf.values()
              if n["class_type"] == "LoraLoaderModelOnly"]
     assert loras[0] == ("krea2_film_texture_qwen21.safetensors", 0.5)
-    assert ("lin_wan_qi_v1.safetensors", 0.8) in loras
+    assert ("lin_wan_qi_v1.safetensors", 0.8) in loras   # 夹具 env 注入的假身份 LoRA（生产已撤，见 test_frame_jobs_w2.env）
     assert all("glamour" not in f for f, _ in loras) and sum(s for f, s in loras[1:]) <= 1.6 + 1e-6
     enc = wf["20"]["inputs"]
     assert enc["prompt"].startswith(FT.FINAL_ROLE) and "images.image_1" in enc
@@ -197,6 +198,7 @@ def test_assembly_calls_colormatch_by_default(monkeypatch, tmp_path):
     import ns_post.assemble as A
     called = []
     monkeypatch.setattr(A, "_color_match_source", lambda ff, src, idx, w, log: called.append(idx))
+    monkeypatch.setattr(A, "dialogue_source_for", lambda *a, **k: "tts")   # 本测试只管校色（真配置默认已改 h3）
 
     class Stop(Exception):
         pass

@@ -31,10 +31,25 @@ Visibility = Literal["visible", "hidden", "in_box"]
 # 何时把单品写进提示词：always=只要生效就写；when_in_shot=该镜 img 触发词/关键词命中时才写（身体装饰）
 PromptPolicy = Literal["always", "when_in_shot"]
 
-CHARACTERS: dict[str, str] = {
-    "lin_wan": "林晚", "gu_chen": "顾沉", "chen_yu": "陈宇",
-    "alex": "Alex", "ryan": "Ryan", "kai": "Kai", "leo": "Leo",
-}
+def _load_cast() -> dict[str, str]:
+    """演员表 = 当前正式剧本的人物登记表（data/import/script_v2.json globals.character_registry，
+    由写作链 P1_storyline 导入）。读不到时用 series10_v1 的 4 人兜底。
+    RECALL 2026-11-01：旧 60 集的 Alex / Ryan / Kai / Leo 已撤下（项目方要求删掉外国人等旧内容）。"""
+    import json
+    import os
+    from pathlib import Path
+    fallback = {"lin_wan": "林晚", "gu_chen": "顾沉", "chen_yu": "陈宇", "ch_a_lan": "阿岚"}
+    root = Path(os.environ.get("NS_ROOT") or Path(__file__).resolve().parents[3])
+    try:
+        g = json.loads((root / "data" / "import" / "script_v2.json").read_text(encoding="utf-8")).get("globals") or {}
+        cast = {str(c["char_id"]): str(c["name"]) for c in g.get("character_registry") or []
+                if isinstance(c, dict) and c.get("char_id") and c.get("name")}
+    except (OSError, ValueError, TypeError):
+        cast = {}
+    return cast or fallback
+
+
+CHARACTERS: dict[str, str] = _load_cast()
 CHARACTER_SLUG: dict[str, str] = {v: k for k, v in CHARACTERS.items()}
 
 

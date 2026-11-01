@@ -1,0 +1,25 @@
+[
+  {
+    "steps": [
+      {
+        "click": "=审片",
+        "after": 2000
+      },
+      {
+        "click": "全选本集",
+        "after": 1500
+      },
+      {
+        "click": "=通过",
+        "after": 400
+      },
+      {
+        "js": "const t=[...document.querySelectorAll('.toasts > .toast')]; return {count:t.length, texts:t.map(e=>e.innerText.replace(/\\s+/g,' ').slice(0,40)), containers:document.querySelectorAll('.toasts').length}"
+      }
+    ],
+    "wait": 8000,
+    "path": "/#ep02",
+    "id": "R4_toastcount",
+    "title": "提示条计数"
+  }
+]

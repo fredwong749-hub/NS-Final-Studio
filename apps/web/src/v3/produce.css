@@ -1,16 +1,16 @@
 /* fredw-92/EB 整集出片 */
-.v3-prod { display: flex; align-items: center; gap: 6px; min-width: 0; flex: none; }
-.v3-prod .v3-btn { height: 30px; padding: 0 10px; }
-.v3-prod-dlg { display: flex; flex-direction: column; gap: 10px; width: 280px; padding: 4px; }
-.v3-prod-dlg fieldset { border: 1px solid var(--c-line-2); border-radius: var(--r-1); padding: 6px 10px; display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; }
-.v3-prod-dlg legend { font-size: var(--fs-s); color: var(--c-text-2); padding: 0 4px; }
-.v3-prod-dlg label { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-s); cursor: pointer; }
+.v3-prod { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; flex: none; }
+.v3-prod .v3-btn { height: 30px; padding: 0 var(--sp-2); }
+.v3-prod-dlg { display: flex; flex-direction: column; gap: var(--sp-2); width: 280px; padding: var(--sp-1); }
+.v3-prod-dlg fieldset { border: 1px solid var(--c-line-2); border-radius: var(--r-1); padding: var(--sp-1) var(--sp-2); display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-4); margin: 0; }
+.v3-prod-dlg legend { font-size: var(--fs-s); color: var(--c-text-2); padding: 0 var(--sp-1); }
+.v3-prod-dlg label { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-s); cursor: pointer; }
 .v3-prod-dlg select { width: 100%; }
-.v3-prod-hint { margin: 0; font-size: 12px; color: var(--c-text-2); }
-.v3-prod-stripbtn { border: 1px solid var(--c-line-2); border-radius: var(--r-1); background: var(--c-sunken); color: var(--c-text-2); padding: 3px 8px; cursor: pointer; max-width: 320px; overflow: hidden; }
-.v3-prod-strip { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
-.v3-prod-strip small { margin-left: 4px; font-size: 12px; }
-.v3-prod-shot { display: inline-flex; gap: 1px; padding: 2px; border-radius: 3px; background: color-mix(in srgb, var(--c-text-3) 12%, transparent); }
+.v3-prod-hint { margin: 0; font-size: var(--fs-xs); color: var(--c-text-2); }
+.v3-prod-stripbtn { border: 1px solid var(--c-line-2); border-radius: var(--r-1); background: var(--c-sunken); color: var(--c-text-2); padding: var(--sp-1) var(--sp-2); cursor: pointer; max-width: 320px; overflow: hidden; }
+.v3-prod-strip { display: inline-flex; align-items: center; gap: var(--sp-1); white-space: nowrap; }
+.v3-prod-strip small { margin-left: var(--sp-1); font-size: var(--fs-xs); }
+.v3-prod-shot { display: inline-flex; gap: 1px; padding: 2px; border-radius: var(--r-s); background: color-mix(in srgb, var(--c-text-3) 12%, transparent); }
 .v3-prod-shot i, .v3-prod-clip i, .v3-prod-detail i { display: inline-block; width: 5px; height: 9px; border-radius: 1px; background: var(--c-text-3); }
 .v3-prod-detail i { width: 7px; height: 7px; border-radius: 50%; }
 .p-gray { background: var(--c-text-3) !important; opacity: .55; }
@@ -18,16 +18,37 @@
 .p-yellow { background: var(--c-warn) !important; }
 .p-green { background: var(--c-ok) !important; }
 .p-red { background: var(--c-bad) !important; }
-.p-none { background: transparent !important; outline: 1px dashed color-mix(in srgb, #fff 40%, transparent); }
+.p-none { background: transparent !important; outline: 1px dashed color-mix(in srgb, var(--c-on-media) 40%, transparent); }
 .live { animation: v3-prod-pulse 1.2s ease-in-out infinite; }
 @keyframes v3-prod-pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .live { animation: none; } }
 .v3-prod-clip { position: absolute; z-index: 1; top: 4px; right: 3px; display: flex; gap: 1px; padding: 1px; border-radius: 2px; background: rgba(0, 0, 0, .45); }
-.v3-prod-detail { width: min(560px, 90vw); max-height: 70vh; overflow: auto; display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-s); }
-.v3-prod-detail h4 { margin: 6px 0 0; font-size: 12px; color: var(--c-text-2); }
-.v3-prod-detail ul { margin: 0; padding-left: 16px; }
-.v3-prod-detail li { display: flex; gap: 8px; justify-content: space-between; }
+.v3-prod-detail { width: min(560px, 90vw); max-height: 70vh; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-s); }
+.v3-prod-detail h4 { margin: var(--sp-1) 0 0; font-size: var(--fs-xs); color: var(--c-text-2); }
+.v3-prod-detail ul { margin: 0; padding-left: var(--sp-4); }
+.v3-prod-detail li { display: flex; gap: var(--sp-2); justify-content: space-between; }
 .v3-prod-detail li small { color: var(--c-text-2); }
 .v3-prod-detail table { border-collapse: collapse; }
-.v3-prod-detail th { text-align: left; padding: 2px 8px 2px 0; font-weight: var(--fw-strong); }
-.v3-prod-detail td { padding: 2px 10px 2px 0; white-space: nowrap; }
+.v3-prod-detail th { text-align: left; padding: 2px var(--sp-2) 2px 0; font-weight: var(--fw-strong); }
+.v3-prod-detail td { padding: 2px var(--sp-2) 2px 0; white-space: nowrap; }
+
+/* fredw-92/UXF2：开始前确认（影响面） */
+.v3-prod-dlg:has(.v3-prod-sum) { width: 380px; }
+.v3-prod-sum { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-2) var(--sp-2); border-radius: var(--r-1); background: var(--c-sunken); font-size: var(--fs-s); }
+.v3-prod-sum p { margin: 0; line-height: 1.45; }
+.v3-prod-sum .k { display: inline-block; min-width: 3em; margin-right: var(--sp-1); color: var(--c-text-2); }
+.v3-prod-sum small { color: var(--c-text-2); }
+.v3-prod-lanes { margin: 2px 0 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.v3-prod-lanes li { display: flex; gap: var(--sp-2); align-items: baseline; }
+.v3-prod-lanes li small { color: var(--c-text-2); }
+.v3-prod-lanes li.warn small, .v3-prod-warn { color: var(--c-warn-text); }
+.v3-prod-warn { font-size: var(--fs-s); }
+.v3-prod-act { display: flex; justify-content: flex-end; gap: var(--sp-2); }
+
+/* fredw-92/UXF4（审查 N6）：开始前没过的关口 */
+.v3-prod-gates { padding: var(--sp-1) var(--sp-2); border-radius: var(--r-1); border: 1px solid color-mix(in srgb, var(--c-warn) 55%, transparent); background: color-mix(in srgb, var(--c-warn) 10%, transparent); color: var(--c-text); font-size: var(--fs-s); }
+.v3-prod-gates b { color: var(--c-warn-text); }
+.v3-prod-gates ul { margin: var(--sp-1) 0 0; padding-left: var(--sp-4); }
+.v3-prod-gates li { line-height: 1.45; }
+/* 进度弹层的道表：卡名 | 在做什么 两列对齐（以前“空闲”飘到右边） */
+.v3-prod-detail ul:first-of-type li { display: grid; grid-template-columns: 9em minmax(0, 1fr); justify-content: start; gap: var(--sp-2); }

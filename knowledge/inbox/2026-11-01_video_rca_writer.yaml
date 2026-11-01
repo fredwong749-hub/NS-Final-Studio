@@ -1,0 +1,16 @@
+# VIDEO-RCA（fredw-2b 派）11-01 草案：影响分拍写法的教训，证据还只有单镜，先进 inbox；第 2 轮多镜复测后，交 SCRIPT-RSI / ITERAUDIT 补 QW lint 再收编。
+# Claude 不写剧本正文，这里只写格式规则。
+rules:
+  - id: K-WRT-701
+    domain: writer
+    link: P3-P4
+    title: 分拍里的视线落点写画内的人或物；落点在画外时写成画面方向，不写画外的身体部位 / 物件名
+    when: 写 H3 正文的分拍（At 00:0X）里有“看向 / 目光落在”某个对象
+    then: 对象在首帧画面里（对手、桌上的文件）→ 直接写对象；不在画面里 → 写方向（toward frame-left / down toward the desk edge），不写画外的鞋、走廊、门等名词——模型会拉远或下摇去把它画出来，或者干脆看回镜头
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/video/_thumbs/ep01-S4__v1.jpg, note: "“his eyes drop to the tips of her transparent heels”：v1 拉成全景、s2 下摇到鞋（PDD 两个 seed）"}
+      - {src: data/ab/video_rca/r1_base_cue/faces_vid.jpg, note: "S4 Pika：写了“eyes lifting to hers”，女主从看镜头转为看男主；S3 / S5 落点是画外（corridor / right of frame），Pika 片里仍看镜头"}
+    check: 未定（候选 QW lint：分拍视线对象 ∉ 首帧出图提示词名词 → warn），交 ITERAUDIT tools/qa/writer_lints.py
+    confidence: low
+    status: 草案
+    date: 2026-11-01

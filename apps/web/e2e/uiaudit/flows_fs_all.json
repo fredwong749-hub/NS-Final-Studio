@@ -1,0 +1,79 @@
+[
+  {
+    "title": "canvas",
+    "path": "/#ep02",
+    "id": "FS_canvas",
+    "steps": [],
+    "wait": 200
+  },
+  {
+    "title": "script",
+    "path": "/#/script-create",
+    "id": "FS_script",
+    "steps": [],
+    "wait": 200
+  },
+  {
+    "title": "scriptab",
+    "path": "/#/script-ab",
+    "id": "FS_scriptab",
+    "steps": [],
+    "wait": 200
+  },
+  {
+    "title": "sound",
+    "path": "/#/sound",
+    "id": "FS_sound",
+    "steps": [],
+    "wait": 200
+  },
+  {
+    "title": "overview",
+    "path": "/#/overview",
+    "id": "FS_overview",
+    "steps": [],
+    "wait": 200
+  },
+  {
+    "title": "char",
+    "path": "/#/assets?type=character&char=lin_wan",
+    "id": "FS_char",
+    "steps": [],
+    "wait": 200
+  },
+  {
+    "title": "assets",
+    "path": "/#/assets",
+    "id": "FS_assets",
+    "steps": [],
+    "wait": 200
+  },
+  {
+    "title": "models",
+    "path": "/#/models",
+    "id": "FS_models",
+    "steps": [],
+    "wait": 200
+  },
+  {
+    "title": "settings",
+    "path": "/#/settings",
+    "id": "FS_settings",
+    "steps": [],
+    "wait": 200
+  },
+  {
+    "title": "audit",
+    "path": "/#/audit",
+    "id": "FS_audit",
+    "steps": [],
+    "wait": 200
+  },
+  {
+    "title": "trash",
+    "path": "/#/trash",
+    "id": "FS_trash",
+    "steps": [],
+    "wait": 200
+  }
+]

@@ -1,0 +1,23 @@
+[
+  {
+    "path": "/#/sound",
+    "id": "FS_sound",
+    "steps": [],
+    "title": "声音首屏",
+    "wait": 300
+  },
+  {
+    "path": "/#/script-ab",
+    "id": "FS_ab",
+    "steps": [],
+    "title": "剧本AB首屏",
+    "wait": 300
+  },
+  {
+    "path": "/#ep02",
+    "id": "FS_canvas",
+    "steps": [],
+    "title": "画布首屏",
+    "wait": 300
+  }
+]

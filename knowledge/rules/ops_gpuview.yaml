@@ -1,0 +1,29 @@
+# GPU 实时面板 / 渲染任务中心（GPUVIEW 2026-11-01）。check = 强制这条规则的测试 / 校验器。
+rules:
+  - id: K-OPS-G01
+    domain: ops
+    link: [P11-RETRY]
+    title: 每个 GPU 任务都要带 comfy_tag（谁 · 做什么 · 第几集哪一镜 · 第几次），不经 ComfyUI 的写心跳
+    when: 任何 agent / 工具往 ComfyUI POST /prompt，或在 GPU 上跑 TTS / 训练等非 ComfyUI 任务
+    then: 用 services/agent/ns_agent/comfy_tag.py——CT.attach(body, CT.make(agent, kind, episode=, shot=, label=, attempt=, max_attempts=, idx=, total=, obj=, job=))，标签落在 extra_data.ns_tag，client_id 不改；非 ComfyUI 的 GPU 任务用 CT.heartbeat(...) 写 data/gpu_heartbeats/（gpu36 远端写 /root/work/fredw/gpu_heartbeats/），结束 CT.heartbeat_done；没标签的任务面板只能写“未标记任务 · 按输出推断”。说明见 docs/GPU_STATUS.md
+    check: tests/test_gpuview.py
+    evidence:
+      - {src: apps/web/e2e/gpuview/before_gpu_1440_dark.json, quote: "gpu36·卡1 其他任务占用 温度 / 显存读不到"}
+      - {src: docs/GPU_STATUS.md, quote: "实时展示gpu显卡做什么任务细节"}
+      - {src: docs/GPU_STATUS.md §1, quote: "各 agent 直接往 ComfyUI 投任务，ns_api 分不清是谁的"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-G02
+    domain: ops
+    link: [P11-RETRY]
+    title: 渲染任务只有一份登记表（/api/render-tasks），顶栏与画布底栏同一行组件；数字必须与源头对得上
+    when: 改顶栏“渲染任务”、画布底栏“任务队列”、GPU 面板，或改 ns_api/render_tasks.py / gpu_live.py
+    then: 不另起任务界面，复用 apps/web/src/components/RenderTasks.tsx 的 TaskRow / TaskList；all = 等待 + 渲染中 + 失败 + 已完成；改完跑 tools/qa/render_tasks_parity.py（P1 分桶、P2 各 ComfyUI 道队列 = 界面、P3 画布任务数 = /api/jobs），退出码 0 才算对
+    check: tools/qa/render_tasks_parity.py
+    evidence:
+      - {src: apps/web/e2e/gpuview/crosscheck.json, quote: "全系统渲染任务与 /api/jobs 只数画布队列不同"}
+      - {src: docs/GPU_STATUS.md, quote: "这里uiux设计头不喜欢,展示内容也很快,你思考重构"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01

@@ -1,0 +1,37 @@
+# 规则草案（tools/pipeline/attribute_bug.py 生成，CHAINSPEC）。status 待确认：总调度 / ARCH 确认后移到 knowledge/rules/ 并改 status。
+# attribution 字段是归因记录，移入正式规则时可删。
+rules:
+- id: K-WRT-I01
+  domain: writer
+  link:
+  - P3-P4
+  - P5-P6
+  title: 接力 / 同场换机位镜头的“下镜”与开头衔接句升为必填（block）
+  when: 镜头 **衔接** = 接力 或 同场换机位
+  then: SS-M7（缺 **下镜**）从 warn 升为 block；RL-T5 开头衔接句须引用上一镜 **下镜** 的同一动作；导入时比对两者，接不上标 HARD CUT 或打回写作方
+  writer_text: 接力 / 同场换机位镜头必写 **下镜**；下一镜 H3 第一句用 already / still / mid- 写同一个动作接上
+  director_text: 审片对相邻镜做接缝检查：上一镜末 0.5 s 与下一镜首 0.5 s 的人物位置 / 视线 / 手持物一致，不一致记到 P3-P4
+  evidence:
+  - src: config/pipeline/attribution.yaml
+    note: 症状 cut_harsh；项目方 v1 审片：镜头切换生硬
+  - src: data/import/script_v2.json
+    note: 'ep02 现行校验违规 {''RL-T5'': 11, ''RL-T6'': 11}（tools/pipeline/attribute_bug.py）'
+  confidence: medium
+  status: 待确认
+  date: '2026-10-31'
+  attribution:
+    bug: 镜头切换生硬
+    primary_link: P3-P4
+    verdict: 归因 P3-P4：现行规则已覆盖（RL-T5, RL-T6），但这一集产物是旧规则写的 / 规则没执行（违规 22 次 / 11 镜）→ 按现行规则重写该段，并把规则从提示升为闸门
+    existing_rules:
+    - SS-M7
+    - RL-T5
+    - RL-T6
+    - SS-X1
+    - SS-X4
+    - SS-L1
+    - SS-L2
+    - K-WRT-R06
+    - K-AST-003
+    - K-EDT-003
+    - K-EDT-005

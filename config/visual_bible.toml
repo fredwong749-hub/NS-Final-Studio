@@ -19,7 +19,7 @@ pipeline = "image_to_video"   # 图生视频：首尾帧决定画质（A6）
 [look]
 # 剧本里的“每条img统一后缀”优先；剧本没有时用 fallback_suffix（避免重复）
 use_script_suffix = true
-fallback_suffix = "专业电影镜头画面感，画面干净，85mm人像镜头f/1.2大光圈，主体锐利对焦，前景与背景奶油般柔焦虚化、柔和圆形光斑，浓郁饱和的暖色调电影调色，色彩丰富艳丽、通透明亮，柔和的大面积光源与暖调轮廓光、高光柔和不过曝，皮肤通透有真实质感，无字幕、无文字、无水印"   # A3 A4 A5 A6
+fallback_suffix = "专业电影画面，徕卡M 50mm f/2镜头，焦点锐利，微反差强，皮肤纹理清晰，自然高光，暖调通透，干净真实"   # CLEANUP 11-01（总调度 R17，L-087 项目方选 R0）：= render_quality leica_sstar style_suffix 原文；⤴ 10-30 旧后缀（85mm 大光圈 / 柔焦虚化 / 浓郁饱和暖调）已被 L-018 S★ 与契约 I7 取代
 lens = "Leica Summilux-SL 85mm f/1.2 级别的锐利解析力与微反差"           # A2：后缀没写 Leica 时补
 lens_video = "Leica 镜头质感，高清锐利"                                  # A2
 # T06：编译器实际追加的 Leica 句（焦段/光圈取自风格后缀，后缀没写时用 lens_default；后缀已有 lens_skip_if 任一词时不加）

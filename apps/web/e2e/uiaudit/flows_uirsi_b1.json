@@ -1,0 +1,42 @@
+[
+  {
+    "steps": [
+      {
+        "js": "for (let i=0;i<80;i++){ if (!/全部 0\\b/.test(document.body.innerText)) return 'ok '+i; await new Promise(r=>setTimeout(r,500)); } return 'timeout'"
+      },
+      {
+        "js": "const t=document.body.innerText; return {paths:(t.match(/[\\w\\/\\\\-]+\\.(json|toml|yaml|yml|md|py|txt)\\b/g)||[]).slice(0,8), kids:(t.match(/\\bK-[A-Z]+-[\\w]+/g)||[]).slice(0,5), raw:(t.match(/\\b(script_chat_rules|toenails_\\w+|zf_\\d+|zm_\\d+|lin_wan|gu_chen|sk_\\w+)\\b/g)||[]).slice(0,8), dirs:(t.match(/(data|config|knowledge|services)\\/[\\w\\/.-]+/g)||[]).slice(0,5)};"
+      },
+      {
+        "js": "const labels=[...document.querySelectorAll('label')].filter(l=>l.getBoundingClientRect().width>0); const dead=labels.filter(l=>{const c=l.control||l.querySelector('input,select,textarea'); return !c;}).map(l=>l.innerText.trim().slice(0,12)); const dis=[...document.querySelectorAll('input:disabled,select:disabled,textarea:disabled')].filter(e=>e.getBoundingClientRect().width>0); const noWhy=dis.filter(e=>!(e.title||e.closest('[title]')?.title||'').trim()).length; return {labels:labels.length, labelNoControl:dead.length, sample:dead.slice(0,5), disabled:dis.length, disabledNoReason:noWhy};"
+      },
+      {
+        "shot": "a"
+      },
+      {
+        "scroll": "main"
+      }
+    ],
+    "path": "/#/settings",
+    "id": "B1_settings",
+    "title": "项目设置",
+    "wait": 9000
+  },
+  {
+    "steps": [
+      {
+        "js": "const t=document.body.innerText; return {paths:(t.match(/[\\w\\/\\\\-]+\\.(json|toml|yaml|yml|md|py|txt)\\b/g)||[]).slice(0,8), kids:(t.match(/\\bK-[A-Z]+-[\\w]+/g)||[]).slice(0,5), raw:(t.match(/\\b(script_chat_rules|toenails_\\w+|zf_\\d+|zm_\\d+|lin_wan|gu_chen|sk_\\w+)\\b/g)||[]).slice(0,8), dirs:(t.match(/(data|config|knowledge|services)\\/[\\w\\/.-]+/g)||[]).slice(0,5)};"
+      },
+      {
+        "js": "const a=[...document.querySelectorAll('a')].filter(x=>/写作过程/.test(x.innerText)); return a.map(x=>x.getAttribute('href'))"
+      },
+      {
+        "shot": "a"
+      }
+    ],
+    "path": "/#/script-create?tab=import",
+    "id": "B1_import",
+    "title": "剧本导入",
+    "wait": 9000
+  }
+]

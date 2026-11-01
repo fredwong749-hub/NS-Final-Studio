@@ -1,36 +1,48 @@
 /* GPU 实时面板：只用 theme.css 变量（--c-* / --sh-*），独立文件，不动现有布局 */
-.gpu-btn { border: 1px solid var(--c-line-2); background: var(--c-raise); color: var(--c-text-2); border-radius: 14px; padding: 2px 10px; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.gpu-btn { border: 1px solid var(--c-line-2); background: var(--c-raise); color: var(--c-text-2); border-radius: var(--r-l); padding: 2px var(--sp-2); font: inherit; font-size: var(--fs-xs); cursor: pointer; white-space: nowrap; }
 .gpu-btn.warn { border-color: var(--c-warn); color: var(--c-warn-text); }
 .gpu-drawer { position: fixed; top: 52px; right: 12px; bottom: 12px; width: min(520px, calc(100vw - 24px)); z-index: 90; overflow: auto;
-  background: var(--c-raise); color: var(--c-text); border: 1px solid var(--c-line); border-radius: 12px; box-shadow: var(--sh-float); padding: 12px; display: flex; flex-direction: column; gap: 10px; }
-.gpu-drawer-head { display: flex; align-items: center; gap: 10px; }
+  background: var(--c-raise); color: var(--c-text); border: 1px solid var(--c-line); border-radius: var(--r-l); box-shadow: var(--sh-float); padding: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-2); }
+.gpu-drawer-head { display: flex; align-items: center; gap: var(--sp-2); }
 .gpu-drawer .grow, .gpu-row .grow { flex: 1; }
-.gpu-muted { color: var(--c-text-3); font-size: 12px; }
-.gpu-err { color: var(--c-warn-text); font-size: 13px; }
-.gpu-row { border: 1px solid var(--c-line); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 6px; background: var(--c-sunken); }
+.gpu-muted { color: var(--c-text-3); font-size: var(--fs-xs); }
+.gpu-err { color: var(--c-warn-text); font-size: var(--fs-sm); }
+.gpu-row { border: 1px solid var(--c-line); border-radius: var(--r-l); padding: var(--sp-2); display: flex; flex-direction: column; gap: var(--sp-1); background: var(--c-sunken); }
 .gpu-row.warn { border-color: var(--c-warn); }
 .gpu-row.faulty { opacity: .6; }
-.gpu-row > header { display: flex; align-items: center; gap: 8px; }
-.gpu-state { font-size: 12px; padding: 0 8px; border-radius: 10px; border: 1px solid var(--c-line-2); }
+.gpu-row > header { display: flex; align-items: center; gap: var(--sp-2); }
+.gpu-state { font-size: var(--fs-xs); padding: 0 var(--sp-2); border-radius: var(--r-l); border: 1px solid var(--c-line-2); }
 .gpu-state.busy { border-color: var(--c-ok); color: var(--c-ok-text); }
 .gpu-state.idle { color: var(--c-text-3); }
 .gpu-state.warn { border-color: var(--c-warn); color: var(--c-warn-text); }
 .gpu-state.paused { border-color: var(--c-info); color: var(--c-info-text); }
 .gpu-state.faulty { border-color: var(--c-bad); color: var(--c-bad-text); }
-.gpu-metric { display: grid; grid-template-columns: 150px 1fr; align-items: center; gap: 8px; font-size: 13px; }
-.gpu-bar { height: 8px; border-radius: 4px; background: var(--c-line); overflow: hidden; }
+.gpu-metric { display: grid; grid-template-columns: 150px 1fr; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); }
+.gpu-bar { height: 8px; border-radius: var(--r-s); background: var(--c-line); overflow: hidden; }
 .gpu-bar i { display: block; height: 100%; background: var(--c-text-3); }
 .gpu-bar i.busy { background: var(--c-ok); }
 .gpu-bar i.warn { background: var(--c-warn); }
 .gpu-bar i.mem { background: var(--c-accent); }
-.gpu-kv { display: grid; grid-template-columns: 64px 1fr; gap: 3px 8px; margin: 0; font-size: 13px; }
+.gpu-kv { display: grid; grid-template-columns: 64px 1fr; gap: var(--sp-1) var(--sp-2); margin: 0; font-size: var(--fs-sm); }
 .gpu-kv dt { color: var(--c-text-3); }
 .gpu-kv dd { margin: 0; word-break: break-all; }
-.gpu-task { font-size: 13px; }
+.gpu-task { font-size: var(--fs-sm); }
 /* 按集渲染（项目方本人） */
-.owner-run .or-form, .owner-run .or-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 13px; }
+.owner-run .or-form, .owner-run .or-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; font-size: var(--fs-sm); }
 .owner-run .or-form input[type="number"] { width: 56px; }
 .owner-run .or-note { width: 100%; }
-.owner-run .or-preview { display: flex; flex-direction: column; gap: 6px; font-size: 13px; border-top: 1px dashed var(--c-line-2); padding-top: 6px; }
-.owner-run .or-preview ul { margin: 0; padding-left: 16px; }
-.owner-run .or-confirm { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.owner-run .or-preview { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-sm); border-top: 1px dashed var(--c-line-2); padding-top: var(--sp-1); }
+.owner-run .or-preview ul { margin: 0; padding-left: var(--sp-4); }
+.owner-run .or-confirm { display: inline-flex; gap: var(--sp-1); align-items: center; cursor: pointer; }
+
+/* fredw-92/UXF2：每张卡先一句人话，细节折叠；整集出片入口说明 */
+.gpu-who { font-size: var(--fs-sm); color: var(--c-text); }
+.gpu-tech > summary { cursor: pointer; font-size: var(--fs-xs); color: var(--c-text-2); margin: 2px 0; }
+.gpu-note { margin: var(--sp-2) var(--sp-3); padding: var(--sp-2) var(--sp-2); border-radius: var(--r-m); background: var(--c-sunken); color: var(--c-text-2); font-size: var(--fs-sm); }
+
+/* fredw-92/UXF5（审查 R2 / #3）：面板按机器分组列出全部渲染道；顶栏胶囊首屏骨架 */
+.gpu-group { display: flex; flex-direction: column; gap: var(--sp-2); }
+.gpu-group-head { font-size: var(--fs-xs); color: var(--c-text-2); font-weight: 600; }
+.gpu-skel { display: inline-block; width: 5.5em; height: 10px; border-radius: var(--r-s); vertical-align: middle; background: var(--c-line); animation: gpu-skel 1.2s ease-in-out infinite alternate; }
+@keyframes gpu-skel { from { opacity: .45; } to { opacity: 1; } }
+.v3-gpu.stale { opacity: .75; }

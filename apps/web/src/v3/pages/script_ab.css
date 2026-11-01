@@ -1,0 +1,94 @@
+/* 剧本 A/B 对比页（ScriptABPage）。只用 --c-* / --sp-* / --fs-* / --r-* 变量，深浅主题自动跟随。前缀 sab- */
+
+.sab-bar { gap: var(--sp-3); }
+.sab-src { flex: 1 1 280px; }
+.sab-src select { max-width: 100%; }
+.sab-sess { flex: 1 1 240px; }
+.sab-k {
+  display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: var(--r-m);
+  font-weight: 700; font-size: var(--fs-sm); flex: none;
+  background: var(--c-accent-soft); color: var(--c-accent-text);
+}
+.sab-k-b { background: var(--c-info-soft); color: var(--c-info-text); }
+
+.sab-banner,
+.sab-err {
+  display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
+  padding: var(--sp-2) var(--sp-3); border-radius: var(--r-m);
+}
+.sab-banner { background: var(--c-ok-soft); color: var(--c-ok-text); border: 1px solid var(--c-ok); }
+.sab-err { background: var(--c-bad-soft); color: var(--c-bad-text); border: 1px solid var(--c-bad); }
+.sab-banner .grow, .sab-err .grow { flex: 1; }
+
+.sab-skel { display: flex; flex-direction: column; gap: var(--sp-3); }
+
+.sab-pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+.sab-col {
+  border: 1px solid var(--c-line); border-radius: var(--r-l); padding: var(--sp-3);
+  display: flex; flex-direction: column; gap: var(--sp-2); background: var(--c-raise); min-width: 0;
+}
+.sab-col.picked { border-color: var(--c-accent); box-shadow: 0 0 0 1px var(--c-accent), var(--sh-soft); }
+.sab-col-head { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.sab-name { font-size: var(--fs-m); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+.sab-shot { display: flex; flex-direction: column; gap: var(--sp-2); scroll-margin-top: var(--sp-6); }
+.sab-shot-head {
+  display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
+  background: var(--c-bg); padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--c-line);
+}
+/* UM-0448（G4：吸顶 / 固定条合计 ≤ 视口 15%）：镜头标题行只在够高的屏上吸顶，而且压成一行；矮屏上随内容滚走 */
+@media (min-height: 1000px) {
+  .sab-shot-head { position: sticky; top: 0; z-index: 2; flex-wrap: nowrap; overflow: hidden; padding: var(--sp-1) 0; }
+  /* UM-0512（G4）：吸顶标题行约 40px，滚动区要留出同样的 scroll-padding，Tab 聚焦 / 跳到某镜时控件不被盖住 */
+  main.v3-page:has(.sab-shot-head) { scroll-padding-top: 48px; }
+  /* UM-0512 复爬：.v3p-page 自带 overflow:auto，成了吸顶的“最近滚动祖先”却从不滚动——标题行其实从没吸住，
+     检测器也去它身上找 scroll-padding（0）。本页让它不当滚动框，吸顶和 scroll-padding 都落到真正滚动的 main 上 */
+  .v3p-page:has(> .sab-shot, .sab-shot-head) { overflow: visible; }
+}
+.sab-shot-head .grow { flex: 1; }
+.sab-seg { display: inline-flex; gap: var(--sp-1); }
+
+.sab-media { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-2); }
+.sab-media figure { margin: 0; display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
+.sab-media img,
+.sab-media video {
+  width: 100%; aspect-ratio: 9 / 16; object-fit: cover; border-radius: var(--r-m); background: var(--c-sunken); display: block;
+}
+.sab-thumb { padding: 0; border: 0; background: none; cursor: zoom-in; border-radius: var(--r-m); }
+.sab-thumb:focus-visible { outline: 2px solid var(--c-focus); outline-offset: 2px; }
+.sab-media figcaption { font-size: var(--fs-xs); color: var(--c-text-3); text-align: center; }
+.sab-empty {
+  aspect-ratio: 9 / 16; display: grid; place-items: center; text-align: center; padding: var(--sp-1);
+  border: 1px dashed var(--c-line-2); border-radius: var(--r-m); color: var(--c-text-3); font-size: var(--fs-xs);
+}
+.sab-none {
+  padding: var(--sp-2) var(--sp-3); border: 1px dashed var(--c-line-2); border-radius: var(--r-m);
+  color: var(--c-text-3); font-size: var(--fs-xs);
+}
+
+.sab-text {
+  display: grid; grid-template-columns: 84px 1fr; gap: var(--sp-1) var(--sp-2); margin: 0;
+  font-size: var(--fs-sm); line-height: 1.6;
+}
+.sab-text dt { color: var(--c-text-3); }
+.sab-text dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.sab-h3 { grid-column: 1 / -1; }
+.sab-h3 summary { cursor: pointer; color: var(--c-text-2); }
+.sab-h3 pre {
+  white-space: pre-wrap; font-size: var(--fs-xs); background: var(--c-sunken); color: var(--c-text);
+  padding: var(--sp-2); border-radius: var(--r-m); margin: var(--sp-1) 0 0;
+}
+
+.sab-reel {
+  border: 1px solid var(--c-line); border-radius: var(--r-l); padding: var(--sp-3);
+  background: var(--c-viewer); display: flex; flex-direction: column; align-items: center; gap: var(--sp-2);
+}
+.sab-reel-head { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; width: 100%; color: var(--c-on-media); }
+.sab-reel-head .v3p-muted { color: var(--c-on-media); opacity: 0.75; }
+.sab-reel-head .grow { flex: 1; }
+.sab-reel video { max-height: 70vh; aspect-ratio: 9 / 16; border-radius: var(--r-m); background: var(--c-media-bg); }
+
+@media (max-width: 900px) {
+  .sab-pair { grid-template-columns: 1fr; }
+}

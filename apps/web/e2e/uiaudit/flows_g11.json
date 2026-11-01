@@ -1,0 +1,1 @@
+[{"id":"G11_canvas","title":"G11 画布","path":"/#ep02","wait":8000,"steps":[{"realzoom":"canvas","max":8},{"shot":"a"}]},{"id":"G11_linwan","title":"G11 林晚页","path":"/#/assets?type=character&char=lin_wan","wait":10000,"steps":[{"realzoom":"linwan","max":8},{"shot":"a"}]}]

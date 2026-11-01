@@ -36,7 +36,7 @@ def split_row(line: str) -> list[str]:
     cells, cur, code = [], [], False
     body = line.strip()
     body = body[1:] if body.startswith("|") else body
-    body = body[:-1] if body.endswith("|") and not body.endswith("\|") else body
+    body = body[:-1] if body.endswith("|") and not body.endswith("\\|") else body
     for ch in body:
         if ch == "`":
             code = not code

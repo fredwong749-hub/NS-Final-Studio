@@ -1,0 +1,31 @@
+[
+  {"id": "T1", "title": "新建剧本", "path": "/#ep02", "wait": 7000, "steps": [{"click": "新建剧本"}, {"wait": 3000},
+    {"js": "return {textarea: document.querySelectorAll('textarea').length, file: document.querySelectorAll('input[type=file]').length, start: [...document.querySelectorAll('button')].some(b=>/开始/.test(b.innerText))}"}, {"shot": "a"}]},
+  {"id": "T2", "title": "看 10 集", "path": "/#ep02", "wait": 7000, "steps": [{"click": "新建剧本"}, {"wait": 3000}, {"click": "漆皮之下", "within": ".v3-page"}, {"wait": 2500}, {"click": "故障电梯", "within": ".v3-page"}, {"wait": 2500},
+    {"js": "const p=document.querySelector('.v3-page'); return {imgs:[...p.querySelectorAll('img')].filter(i=>i.getBoundingClientRect().width>60).length, 首帧:/首帧/.test(p.innerText), 尾帧:/尾帧/.test(p.innerText), 视频:/视频/.test(p.innerText), 详情:/分镜详情|配乐|环境/.test(p.innerText), eps:(p.innerText.match(/第 \\d+ 集/g)||[]).length}"}, {"shot": "a"}]},
+  {"id": "T3", "title": "挑设定图", "path": "/#ep02", "wait": 7000, "steps": [{"click": "资产"}, {"wait": 6000},
+    {"js": "return {pick:[...document.querySelectorAll('button,span')].filter(b=>/选这张|设为当前/.test(b.innerText)).length}"}, {"click": ["选这张", "设为当前"]}, {"wait": 1500},
+    {"js": "return {undo:/撤销/.test(document.body.innerText)}"}, {"shot": "a"}]},
+  {"id": "T4", "title": "看首帧", "path": "/#ep02", "wait": 8000, "steps": [
+    {"js": "const p=document.body.innerText; return {cand:(p.match(/首帧候选[^\\n]{0,20}/g)||[]).slice(0,3), draft:/草图·还没进版本|新图·未登记/.test(p), none:/还没有首帧/.test(p)}"},
+    {"js": "const i=[...document.querySelectorAll('img')].find(x=>x.getBoundingClientRect().width>40 && x.getBoundingClientRect().x<400); i.click(); return 1"}, {"wait": 2500},
+    {"js": "const big=[...document.querySelectorAll('img')].map(i=>i.getBoundingClientRect()).filter(r=>r.height>innerHeight*0.6).length; return {big, use:[...document.querySelectorAll('button')].map(b=>b.innerText.trim()).filter(t=>/用这张|设为当前/.test(t)).slice(0,3), cmp:/对比/.test(document.body.innerText), none:/还没有首帧/.test(document.body.innerText)}"}, {"shot": "a"}]},
+  {"id": "T5", "title": "出视频", "path": "/#ep02", "wait": 8000, "steps": [{"click": "精修"}, {"wait": 3000},
+    {"js": "return {btn:[...document.querySelectorAll('button')].map(b=>b.innerText.trim()).filter(t=>/出视频|生成视频/.test(t)).slice(0,3), gate:(document.body.innerText.match(/[^\\n]*才能出视频[^\\n]*/)||[null])[0]}"}, {"shot": "a"}]},
+  {"id": "T6", "title": "审片打回", "path": "/#ep01", "wait": 8000, "steps": [{"click": "视频"}, {"wait": 2500},
+    {"js": "return {reject:[...document.querySelectorAll('button')].filter(b=>/打回/.test(b.innerText+b.title)).length, videos:document.querySelectorAll('video').length}"}, {"shot": "a"}]},
+  {"id": "T7", "title": "成片对比", "path": "/#ep02", "wait": 6000, "steps": [{"click": "成片"}, {"wait": 4000}, {"click": "显示旧剧本的成片"}, {"wait": 1500}, {"click": "两版对比"}, {"wait": 2000},
+    {"js": "return {videos:document.querySelectorAll('video').length, del:[...document.querySelectorAll('button')].filter(b=>/删除这一版/.test(b.innerText)).length}"}, {"shot": "a"}]},
+  {"id": "T8", "title": "试听并更换旁白音色", "path": "/#/sound", "wait": 8000, "steps": [{"wait": 3000},
+    {"js": "return {hash:location.hash, players:document.querySelectorAll('.mp-audio,.mp-ab,.mp-play').length, inUse:/现在在用/.test(document.body.innerText), raw:/zf_\\d|QAb|sid/.test(document.body.innerText)}"}, {"shot": "a"},
+    {"js": "const b=document.querySelector('.mp-big,.mp-play'); if(!b) return 'no'; b.click(); return 'clicked'"}, {"wait": 2500},
+    {"js": "return [...document.querySelectorAll('audio')].filter(a=>!a.paused).map(a=>a.src.slice(-40)+'@'+a.currentTime.toFixed(1))"}]},
+  {"id": "T9", "title": "上传一双鞋并挂到造型", "path": "/#/assets?type=character&char=lin_wan", "wait": 9000, "steps": [
+    {"js": "return {add:[...document.querySelectorAll('button')].some(b=>/添加单品|上传/.test(b.innerText)), file:document.querySelectorAll('input[type=file]').length, hang:document.querySelectorAll('.hub-item-looks button').length, paste:/拖进来|Ctrl\\+V/.test(document.body.innerText)}"}, {"shot": "a"}]},
+  {"id": "T10", "title": "删掉一个旧剧本", "path": "/#ep02", "wait": 6000, "steps": [{"click": "新建剧本"}, {"wait": 3000}, {"click": "以前的稿子"}, {"wait": 800}, {"click": ["🗑", "删除"]}, {"wait": 1500},
+    {"js": "return {confirm:/确认删除/.test(document.body.innerText), trash:/回收站/.test(document.body.innerText)}"}, {"shot": "a"}]},
+  {"id": "B4_sound", "title": "声音页（配乐 / 对白）", "path": "/#/sound", "wait": 9000, "steps": [
+    {"js": "const t=document.body.innerText; return {crash:/页面出错/.test(t), tabs:['音色','旁白','对白','配乐'].filter(x=>t.includes(x)), players:document.querySelectorAll('.mp-audio,.mp-ab,.mp-play').length, waveBars:document.querySelectorAll('.mp-wave i').length, audio:document.querySelectorAll('audio').length}"}, {"shot": "a"},
+    {"click": "配乐"}, {"wait": 3000}, {"js": "return {players:document.querySelectorAll('.mp-audio').length, cues:(document.body.innerText.match(/镜 ?\\d+|S\\d+/g)||[]).length}"}, {"shot": "b"},
+    {"click": "对白"}, {"wait": 3000}, {"js": "return {lineplays:document.querySelectorAll('.mp-play').length}"}, {"shot": "c"}]}
+]

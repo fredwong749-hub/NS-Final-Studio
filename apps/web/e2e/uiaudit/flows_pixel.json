@@ -1,0 +1,4 @@
+[{"id":"PX_review","title":"审片（UIPIXEL 常规检查）","path":"/#ep01","wait":7000,"steps":[{"pixel":"main","kinds":["overlap","clip","zindex","hit","copy","logic","rowcard"]},{"shot":"a"}]},
+ {"id":"PX_edit","title":"精修（UIPIXEL 常规检查）","path":"/#ep01","wait":7000,"steps":[{"click":"精修"},{"wait":2500},{"pixel":"main","kinds":["overlap","clip","zindex","hit","copy","logic","vcenter"]},{"shot":"a"}]},
+ {"id":"PX_overview","title":"全剧总览（UIPIXEL 常规检查）","path":"/#/overview","wait":6000,"steps":[{"pixel":"main","kinds":["overlap","rowcard","clip"]},{"shot":"a"}]},
+ {"id":"PX_script","title":"剧本每镜一行（UIPIXEL 常规检查）","path":"/#/script-create?run=series10_v1","wait":6000,"steps":[{"pixel":"main","kinds":["overlap","clip","hit","copy"]},{"shot":"a"}]}]

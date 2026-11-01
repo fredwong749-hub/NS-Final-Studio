@@ -1,0 +1,59 @@
+# VIDEO-RCA（总调度 fredw-2b 派，2026-11-01，W11）：视频问题逐类根因 → 系统修复。报告 docs/video_rca/RCA_r1.md；实验 data/ab/video_rca/；
+# 审片页 data/review_pages/video_rca/index.html；研究出处 docs/video_rca/research_r1.md。Claude 不写不评剧本内容，这里只管格式 / 系统层。
+rules:
+  - id: K-REN-701
+    domain: render
+    link: [P7-P8]
+    title: H3 正文第一句按景别删掉看不见的下半身造型分句（同出图 K-REN-101 的取舍表）
+    when: services/recipes build_base，配方 prompt.hide_offframe_parts = true；景别 特写 / 近景 / 中近景（删下装、腿、鞋、脚）或 中景（只删鞋、脚）
+    then: 只动正文第一句（构图 + 人物外貌造型）里以逗号 / with / and 分隔的造型单品，不动分拍动作句，不改写作方用词；删了什么写进 prompt_notes
+    check: [tests/test_video_rca.py]
+    evidence:
+      - {src: tools/video_rca/size_vs_prompt.py, note: "近景~中景要求的镜头：描述句带鞋 / 高跟 / 腿 62/111 条退档，不带 0/7（对照组小）"}
+      - {src: tools/video_rca/ff_size.py, note: "现行 55 条：视频比自己的首帧再远 ≥1 档 11 条；退档 21 条里 17 条首帧本就退档"}
+      - {src: data/pipeline/runs/series10_v1/video/_thumbs/ep01-S4__v1.jpg, note: "S4 两个 seed 都为画出高跟拉远 / 下摇（v1 拉成全景，s2 下摇到鞋）"}
+    confidence: medium
+    status: 待验
+    experiment: VRCA-E3（data/ab/video_rca/r3_hide_offframe.json）
+    date: 2026-11-01
+  - id: K-REN-702
+    domain: render
+    link: [P7-P8]
+    title: 系统编译句（重试锚点句 / 站位词表 / 系统提示句）永不写 facing / toward the camera
+    when: ns_recipes.prompt.anchor_sentence（attempt ≥2 插入）、FACING_EN 词表、prompt.*_cue
+    then: “朝镜头”译成 “with the body turned toward the front of the frame and the gaze angled off to one side”；lint RL-E3（error）扫系统句，写作方正文仍由 RL-E2 管
+    check: [tests/test_video_rca.py]
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/video/prompts/, note: "11-01 编译稿 538 条里 127 条（全是 s2/s3/s4/alt 重试稿）锚点句带 facing the camera——第 2 次起越修越对镜头"}
+      - {src: data/acting/gaze_labels.json, note: "片头看镜头 56/72（人工）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REN-703
+    domain: render
+    link: [P6-P7]
+    title: 首帧出图的系统句不得要求人脸“朝向镜头”；看镜头的根在首帧（视频继承首帧视线）
+    when: ns_agent.framing.two_shot_clause（双人镜出图系统句）、asset_refs 视线句；frame_v9 唯一出图路径
+    then: 双人句改成正向视线落点；⤴ SCRIPT-RSI 11-01 已落实（D-SCR-07，总调度派）：“侧脸到四分之三侧脸，各自的视线落在画面里的人或物上（… each gaze resting on a person or object in the scene）”——没用“眼睛不看镜头 / eyes off the lens”，因为 cfg 1 负面不生效且会把 lens 概念写进去；具体落点由剧本 img 写（QW-A7），见 K-REN-G06；VQAGATE 的 Q9 看镜头闸门是拦截层
+    check: [tests/test_video_rca.py, tests/test_script_rsi_eyeline.py]   # test_v03 的 xfail 已去掉（SCRIPT-RSI 11-01）
+    evidence:
+      - {src: tools/video_rca/rates.py, note: "首帧看镜头 → 片头看镜头 49/54（91%）；首帧没看 → 片头看镜头 4/10（40%）；不给首帧的 Ref2VA 3/10"}
+      - {src: services/agent/ns_agent/framing.py, note: "two_shot_clause 原文：各自至少四分之三侧脸朝向镜头（each at least three-quarter view toward the camera）"}
+      - {src: docs/video_rca/research_r1.md, note: "Q1：MiniMax Hailuo 指南“master image … already looking toward the camera”；Qwen-Image 会把参考头像的头部角度和视线一起贴上（BFS LoRA 作者、myaiforce，中）"}
+      - {src: data/ab/video_rca/r1_img_gaze/, note: "同 seed 新旧系统句 A/B（结果见 RCA_r1.md G6/G7）"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-01
+  - id: K-REV-704
+    domain: review
+    link: [P8-P9]
+    title: 视频缺陷先查首帧再归因：看镜头 / 景别退档 / 跨镜服装发色，先量首帧，再量“视频相对首帧”的变化
+    when: VIDEO10 / VQAGATE / DEFECT_HUNT 统计视频类缺陷、决定重出阶梯时
+    then: 看镜头按“首帧看镜头 × 片头看镜头”交叉表算；景别按首帧档位 vs 视频档位分开记（首帧已退档 → 重出图，不是换 seed 重出视频）；tools/video_rca/rates.py、ff_size.py 是口径实现
+    check: [tests/test_video_rca.py]
+    evidence:
+      - {src: data/ab/video_rca/ff_size.json, note: "现行版景别退档 21/55，其中 17 条首帧本就退档"}
+      - {src: data/acting/gaze_labels.json, note: "49/54 vs 4/10"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01

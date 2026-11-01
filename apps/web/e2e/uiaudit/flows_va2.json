@@ -1,0 +1,62 @@
+[
+  {
+    "title": "a_linwan",
+    "id": "S900_a_linwan",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/assets?type=character&char=lin_wan",
+    "steps": [
+      {
+        "scroll": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_item",
+    "id": "S900_a_item",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/assets?type=item",
+    "steps": [
+      {
+        "scroll": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "assets_all",
+    "id": "S720_assets_all",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/assets",
+    "steps": [
+      {
+        "scroll": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_item",
+    "id": "S720_a_item",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/assets?type=item",
+    "steps": [
+      {
+        "scroll": "main"
+      }
+    ],
+    "wait": 7000
+  }
+]

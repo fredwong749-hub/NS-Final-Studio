@@ -88,14 +88,38 @@ def gpu_ids(path: Path | None = None) -> tuple:
 
 
 # fredw-92/LS：每条视频道实测能一次出的 H3 最大帧数（768×1344）。config 的 "max_frames": {"<gpu>": n}；
-# 没写的道按 DEFAULT_MAX_FRAMES（gpu3 的 3090、ComfyUI --reserve-vram 1 实测 192 帧可过、294 帧 OOM）。
-# 超过本道上限的镜头不截短（项目方：“长镜头长度模型决定，不限定时长”）→ 改走能出这么长的道（long-capable）；
-# 一条都没有时才分段接力（h3_video.render，method=segmented）。
+# 没写的道按 DEFAULT_MAX_FRAMES 192（保守值）。实测（ep02-S8，docs/e2e_iteration_log.md 第 4 轮）：3090 + 默认
+# 动态显存 + --reserve-vram 1：243 过、277/294 在 MLP fc1 OOM（--reserve-vram 4/7、--disable-pinned-memory、
+# --lowvram 都不行）；--novram（权重全放内存、逐层上卡）294/362 都能过 → gpu36:2 长镜头道。
+# 超过本道上限的镜头不截短（项目方：“长镜头长度模型决定，不限定时长”）→ video_jobs.route_long 改派长镜头道。
 DEFAULT_MAX_FRAMES = 192
+
+
+def image_only(lane, path: Path | None = None) -> bool:
+    """LOCALGPU（11-01）：lanes 记录 "image_only": true 的道（laptop:0 笔记本 12 GB）只出图，任何视频都不派过去"""
+    try:
+        return bool((_extra_lanes(path).get(norm_lane(lane)) or {}).get("image_only"))
+    except ValueError:
+        return False
+
+
+def held(lane, path: Path | None = None) -> bool:
+    """LOCALGPU：lanes 记录 "hold": true 的道 = 道就绪但不自动派单（等总调度开派；手动指定这条道仍可用）"""
+    try:
+        return bool((_extra_lanes(path).get(norm_lane(lane)) or {}).get("hold"))
+    except ValueError:
+        return False
+
+
+def image_lanes(path: Path | None = None) -> dict:
+    """image_only 道 {显示名: url}（producer 出图道表并入用）"""
+    return {lane_name(k): str(v["url"]).rstrip("/") for k, v in _extra_lanes(path).items() if v.get("image_only")}
 
 
 def max_frames(gpu, path: Path | None = None) -> int:
     mf = _load(path).get("max_frames")
+    if image_only(gpu, path):          # LOCALGPU：只出图的道一帧视频都不接（long_lanes / episode_produce / pick_lane 都按它筛）
+        return 0
     try:
         lane = norm_lane(gpu)
         key = str(lane)
@@ -107,6 +131,14 @@ def max_frames(gpu, path: Path | None = None) -> int:
         return int(rec["max_frames"]) if rec.get("max_frames") else DEFAULT_MAX_FRAMES
     except (TypeError, ValueError):
         return DEFAULT_MAX_FRAMES
+
+
+def long_only(lane, path: Path | None = None) -> bool:
+    """lanes 记录 "long_only": true 的道（gpu36:2 --novram 长镜头道：每步慢，只接超过其他道上限的视频，不接出图）"""
+    try:
+        return bool((_extra_lanes(path).get(norm_lane(lane)) or {}).get("long_only"))
+    except ValueError:
+        return False
 
 
 def long_lanes(frames: int, path: Path | None = None) -> list:
@@ -209,6 +241,12 @@ def _probe_now(url: str, timeout: float) -> dict:
     except (urllib.error.URLError, OSError, ValueError):
         pass
     return out
+
+
+def peek(url: str) -> tuple[float, dict] | None:
+    """上次探测结果 (monotonic 时间, 结果)；没探过 → None。只读，不发请求（UIDEBUG：道表展示先用旧值，后台刷新）"""
+    with _probe_guard:
+        return _probe_cache.get(str(url).rstrip("/"))
 
 
 def probe(url: str, *, timeout: float | None = None, ttl: float | None = None) -> dict:

@@ -1,0 +1,248 @@
+[
+ {
+  "id": "X1_click",
+  "title": "r37#1 真实鼠标点候选图",
+  "path": "/#ep02",
+  "wait": 9000,
+  "steps": [
+   {
+    "click": "=审片",
+    "after": 2500
+   },
+   {
+    "wait": 12000
+   },
+   {
+    "clickAt": "(() => { const t=[...document.querySelector('.v3-row[data-shot=\"ep02-S1\"]').querySelectorAll('.v3-frames > .v3-frame')][1]; t.scrollIntoView({block:'center'}); const im=t.querySelector('img')||t; const b=im.getBoundingClientRect(); return [b.x+b.width/2, b.y+b.height*0.6]; })()",
+    "after": 2000
+   },
+   {
+    "js": "return {cand:!!document.querySelector('.cb-scrim'), candAria:document.querySelector('.cb-scrim')?.getAttribute('aria-label'), zoom:!!document.querySelector('.zl-box'), zoomCap:document.querySelector('.zl-box')?.innerText.split(String.fromCharCode(10)).slice(-3).join(' | ').slice(0,120), mag:!!document.querySelector('.zl-mag'), active:(document.activeElement?.tagName||'')+' '+(document.activeElement?.className||'').toString().slice(0,30)};"
+   },
+   {
+    "shot": "a"
+   },
+   {
+    "key": "Escape"
+   },
+   {
+    "clickAt": "(() => { const t=[...document.querySelector('.v3-row[data-shot=\"ep02-S1\"]').querySelectorAll('.v3-frames > .v3-frame')][0]; t.scrollIntoView({block:'center'}); const im=t.querySelector('img')||t; const b=im.getBoundingClientRect(); return [b.x+b.width/2, b.y+b.height*0.6]; })()",
+    "after": 2000
+   },
+   {
+    "js": "return {cand:!!document.querySelector('.cb-scrim'), candAria:document.querySelector('.cb-scrim')?.getAttribute('aria-label'), zoom:!!document.querySelector('.zl-box'), zoomCap:document.querySelector('.zl-box')?.innerText.split(String.fromCharCode(10)).slice(-3).join(' | ').slice(0,120), mag:!!document.querySelector('.zl-mag'), active:(document.activeElement?.tagName||'')+' '+(document.activeElement?.className||'').toString().slice(0,30)};"
+   },
+   {
+    "key": "Escape"
+   }
+  ]
+ },
+ {
+  "id": "X1_alt",
+  "title": "r37#1 Alt+点 → 大图框",
+  "path": "/#ep02",
+  "wait": 9000,
+  "steps": [
+   {
+    "click": "=审片",
+    "after": 2500
+   },
+   {
+    "wait": 12000
+   },
+   {
+    "clickAt": "(() => { const t=[...document.querySelector('.v3-row[data-shot=\"ep02-S1\"]').querySelectorAll('.v3-frames > .v3-frame')][1]; t.scrollIntoView({block:'center'}); const im=t.querySelector('img')||t; const b=im.getBoundingClientRect(); return [b.x+b.width/2, b.y+b.height*0.6]; })()",
+    "alt": true,
+    "after": 2000
+   },
+   {
+    "js": "return {cand:!!document.querySelector('.cb-scrim'), candAria:document.querySelector('.cb-scrim')?.getAttribute('aria-label'), zoom:!!document.querySelector('.zl-box'), zoomCap:document.querySelector('.zl-box')?.innerText.split(String.fromCharCode(10)).slice(-3).join(' | ').slice(0,120), mag:!!document.querySelector('.zl-mag'), active:(document.activeElement?.tagName||'')+' '+(document.activeElement?.className||'').toString().slice(0,30)};"
+   },
+   {
+    "shot": "a"
+   },
+   {
+    "key": "Escape"
+   }
+  ]
+ },
+ {
+  "id": "X1_hover",
+  "title": "r37#1 悬停 → 放大镜",
+  "path": "/#ep02",
+  "wait": 9000,
+  "steps": [
+   {
+    "click": "=审片",
+    "after": 2500
+   },
+   {
+    "wait": 12000
+   },
+   {
+    "hoverAt": "(() => { const t=[...document.querySelector('.v3-row[data-shot=\"ep02-S1\"]').querySelectorAll('.v3-frames > .v3-frame')][1]; t.scrollIntoView({block:'center'}); const im=t.querySelector('img')||t; const b=im.getBoundingClientRect(); return [b.x+b.width/2, b.y+b.height*0.6]; })()",
+    "after": 900
+   },
+   {
+    "js": "return {cand:!!document.querySelector('.cb-scrim'), candAria:document.querySelector('.cb-scrim')?.getAttribute('aria-label'), zoom:!!document.querySelector('.zl-box'), zoomCap:document.querySelector('.zl-box')?.innerText.split(String.fromCharCode(10)).slice(-3).join(' | ').slice(0,120), mag:!!document.querySelector('.zl-mag'), active:(document.activeElement?.tagName||'')+' '+(document.activeElement?.className||'').toString().slice(0,30)};"
+   }
+  ]
+ },
+ {
+  "id": "X1_key",
+  "title": "r37#1 焦点到小图按 Z / Enter",
+  "path": "/#ep02",
+  "wait": 9000,
+  "steps": [
+   {
+    "click": "=审片",
+    "after": 2500
+   },
+   {
+    "wait": 12000
+   },
+   {
+    "js": "const t=[...document.querySelector('.v3-row[data-shot=\"ep02-S1\"]').querySelectorAll('.v3-frames > .v3-frame')][1]; const im=t.querySelector('img'); return {imgTab:im?.tabIndex, frameTab:t.tabIndex, frameRole:t.getAttribute('role')};"
+   },
+   {
+    "js": "const t=[...document.querySelector('.v3-row[data-shot=\"ep02-S1\"]').querySelectorAll('.v3-frames > .v3-frame')][1]; const im=t.querySelector('img'); (im.tabIndex>=0?im:t).focus(); return {focused:document.activeElement===im?'img':document.activeElement===t?'frame':(document.activeElement?.tagName)};"
+   },
+   {
+    "key": "z"
+   },
+   {
+    "js": "return {cand:!!document.querySelector('.cb-scrim'), candAria:document.querySelector('.cb-scrim')?.getAttribute('aria-label'), zoom:!!document.querySelector('.zl-box'), zoomCap:document.querySelector('.zl-box')?.innerText.split(String.fromCharCode(10)).slice(-3).join(' | ').slice(0,120), mag:!!document.querySelector('.zl-mag'), active:(document.activeElement?.tagName||'')+' '+(document.activeElement?.className||'').toString().slice(0,30)};"
+   },
+   {
+    "key": "Escape"
+   },
+   {
+    "js": "const t=[...document.querySelector('.v3-row[data-shot=\"ep02-S1\"]').querySelectorAll('.v3-frames > .v3-frame')][1]; const im=t.querySelector('img'); (im.tabIndex>=0?im:t).focus(); return 1;"
+   },
+   {
+    "key": "Enter"
+   },
+   {
+    "js": "return {cand:!!document.querySelector('.cb-scrim'), candAria:document.querySelector('.cb-scrim')?.getAttribute('aria-label'), zoom:!!document.querySelector('.zl-box'), zoomCap:document.querySelector('.zl-box')?.innerText.split(String.fromCharCode(10)).slice(-3).join(' | ').slice(0,120), mag:!!document.querySelector('.zl-mag'), active:(document.activeElement?.tagName||'')+' '+(document.activeElement?.className||'').toString().slice(0,30)};"
+   },
+   {
+    "key": "Escape"
+   },
+   {
+    "tabwalk": "ep02",
+    "n": 25
+   }
+  ]
+ },
+ {
+  "id": "X2_reveal",
+  "title": "r37#2 窄格平时隐藏、悬停 / Tab 到 ↻ 出现",
+  "path": "/#ep02",
+  "wait": 9000,
+  "steps": [
+   {
+    "click": "=审片",
+    "after": 2500
+   },
+   {
+    "wait": 12000
+   },
+   {
+    "hoverAt": "[700,880]",
+    "after": 600
+   },
+   {
+    "js": "const f=[...document.querySelector('.v3-row[data-shot=\"ep02-S1\"]').querySelectorAll('.v3-frames > .v3-frame')]; return {op:f.map(x=>getComputedStyle(x.querySelector('.ds-tiletop')).opacity), pe:f.map(x=>{const b=x.querySelector('.regen-btn');return b?getComputedStyle(b).pointerEvents:null}), hitTopRight:f.map(x=>{const r=x.getBoundingClientRect(); const h=document.elementFromPoint(r.right-16, r.top+26); return (h?.className||h?.tagName||'').toString().slice(0,30)})};"
+   },
+   {
+    "shot": "idle"
+   },
+   {
+    "hoverAt": "(() => { const t=[...document.querySelector('.v3-row[data-shot=\"ep02-S1\"]').querySelectorAll('.v3-frames > .v3-frame')][0]; t.scrollIntoView({block:'center'}); const im=t.querySelector('img')||t; const b=im.getBoundingClientRect(); return [b.x+b.width/2, b.y+b.height*0.6]; })()",
+    "after": 700
+   },
+   {
+    "js": "const f=[...document.querySelector('.v3-row[data-shot=\"ep02-S1\"]').querySelectorAll('.v3-frames > .v3-frame')]; return {op:f.map(x=>getComputedStyle(x.querySelector('.ds-tiletop')).opacity), pe:f.map(x=>{const b=x.querySelector('.regen-btn');return b?getComputedStyle(b).pointerEvents:null}), hitTopRight:f.map(x=>{const r=x.getBoundingClientRect(); const h=document.elementFromPoint(r.right-16, r.top+26); return (h?.className||h?.tagName||'').toString().slice(0,30)})};"
+   },
+   {
+    "shot": "hover"
+   },
+   {
+    "hoverAt": "[700,880]",
+    "after": 600
+   },
+   {
+    "js": "const b=[...document.querySelector('.v3-row[data-shot=\"ep02-S1\"]').querySelectorAll('.v3-frames > .v3-frame')][1].querySelector('.regen-btn'); b.focus(); return {focused:document.activeElement===b, vis:document.activeElement===b && document.activeElement.matches(':focus-visible')};",
+    "after": 600
+   },
+   {
+    "js": "const f=[...document.querySelector('.v3-row[data-shot=\"ep02-S1\"]').querySelectorAll('.v3-frames > .v3-frame')]; return {op:f.map(x=>getComputedStyle(x.querySelector('.ds-tiletop')).opacity), pe:f.map(x=>{const b=x.querySelector('.regen-btn');return b?getComputedStyle(b).pointerEvents:null}), hitTopRight:f.map(x=>{const r=x.getBoundingClientRect(); const h=document.elementFromPoint(r.right-16, r.top+26); return (h?.className||h?.tagName||'').toString().slice(0,30)})};"
+   }
+  ]
+ },
+ {
+  "id": "X2_wide",
+  "title": "r37#2 剧本页宽格常显示",
+  "path": "/#/script-create",
+  "wait": 9000,
+  "steps": [
+   {
+    "wait": 15000
+   },
+   {
+    "js": "return {op:[...new Set([...document.querySelectorAll('.v3-frames > .v3-frame > .ds-tiletop')].map(x=>getComputedStyle(x).opacity))], w:[...new Set([...document.querySelectorAll('.v3-frames > .v3-frame')].map(x=>Math.round(x.getBoundingClientRect().width)))], n:document.querySelectorAll('.v3-frames > .v3-frame').length};"
+   },
+   {
+    "shot": "a"
+   }
+  ]
+ },
+ {
+  "id": "X4_video",
+  "title": "r37#4 视频 N 版待选 → 精修",
+  "path": "/#ep02",
+  "wait": 9000,
+  "steps": [
+   {
+    "click": "=审片",
+    "after": 2500
+   },
+   {
+    "wait": 12000
+   },
+   {
+    "js": "const out={}; for (const r of [...document.querySelectorAll('.v3-row[data-shot]')]) { const v=r.querySelector('.v3-vid'); out[r.getAttribute('data-shot')]=(v?.innerText||'').split(String.fromCharCode(10)).join(' ').slice(0,40); } return out;"
+   },
+   {
+    "shot": "a"
+   },
+   {
+    "clickAt": "(() => { const v=document.querySelector('.v3-row[data-shot=\"ep02-S1\"]').querySelector('.v3-vid'); v.scrollIntoView({block:'center'}); const b=v.getBoundingClientRect(); return [b.x+b.width/2, b.y+b.height/2]; })()",
+    "after": 4000
+   },
+   {
+    "js": "return {hash:location.hash, refine:/精修/.test(document.querySelector('.v3-seg .on, [aria-pressed=true], .on')?.innerText||''), vidLabel:(document.body.innerText.match(/视频 · #[0-9]+|视频 [0-9]+ 版待选|视频未出/g)||[]).slice(0,4), video:!!document.querySelector('video')};"
+   },
+   {
+    "shot": "b"
+   }
+  ]
+ },
+ {
+  "id": "X4_overview",
+  "title": "r37#4 总览 N 张候选",
+  "path": "/#/overview",
+  "wait": 9000,
+  "steps": [
+   {
+    "wait": 6000
+   },
+   {
+    "js": "const t=document.body.innerText; return {nCand:(t.match(/[0-9]+ 张候选/g)||[]).slice(0,6), oldStyle:(t.match(/候选 [0-9]+(?! 张)/g)||[]).slice(0,6)};"
+   },
+   {
+    "shot": "a"
+   }
+  ]
+ }
+]

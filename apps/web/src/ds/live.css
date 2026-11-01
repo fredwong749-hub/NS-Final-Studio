@@ -1,0 +1,59 @@
+/* 实时刷新：更新闪烁 + 分段进度条（UIRSI 11-01 新建，已登记 LOCKS；样式之后归 UIPIXEL 接管）。只用主题变量。 */
+
+/* 区域更新提示（项目方 11-01：“刷新 flash 闪的好难受，渐进 flash，而且只对更新板块进行渐进的 flash”）：
+   只在数据真变了的那一小块上，用很淡的强调色（约 10%）在 0.4 秒里渐渐浮出、停一下、再用约 1.8 秒缓缓退掉；
+   只用内阴影上色——不改边框粗细、不挪位置、不整页闪 */
+@keyframes live-flash {
+  0% { box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--c-accent) 0%, transparent); }
+  18% { box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--c-accent) 10%, transparent); }
+  30% { box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--c-accent) 10%, transparent); }
+  100% { box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--c-accent) 0%, transparent); }
+}
+.live-flash { animation: live-flash 2.2s cubic-bezier(.22, .61, .36, 1) 1; }
+/* 新图淡入（img 用 key={url} 换图时重放） */
+@keyframes live-in { from { opacity: 0; } to { opacity: 1; } }
+.live-img { animation: live-in .6s ease-out 1; }
+
+/* 连接状态小标 */
+.live-ind { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-xs); color: var(--c-text-2); white-space: nowrap; }
+.live-ind i { width: 7px; height: 7px; border-radius: 50%; background: var(--c-ok); }
+.live-ind.poll { color: var(--c-warn-text); }
+.live-ind.poll i { background: var(--c-warn); }
+.live-ind.connecting i { background: var(--c-text-3); }
+
+/* 分段进度条 */
+.sp { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; border-radius: var(--r-m); }
+.sp-head { display: flex; align-items: baseline; gap: var(--sp-2); font-size: var(--fs-sm); }
+.sp-eta { font-size: var(--fs-xs); color: var(--c-text-2); white-space: nowrap; }
+.sp-row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.sp-seg { display: flex; flex-direction: column; gap: 3px; min-width: 0; cursor: default; }
+.sp-track { position: relative; height: 8px; border-radius: var(--r-pill); background: var(--c-sunken); overflow: hidden; box-shadow: inset 0 0 0 1px var(--c-line); }
+.sp-compact .sp-track { height: 6px; }
+.sp-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: var(--r-pill); background: linear-gradient(90deg, color-mix(in srgb, var(--c-accent) 80%, var(--c-ok)), var(--c-accent)); transition: width .6s cubic-bezier(.2, .8, .2, 1); }
+.sp-seg.full .sp-fill { background: linear-gradient(90deg, color-mix(in srgb, var(--c-ok) 85%, var(--c-accent)), var(--c-ok)); }
+.sp-run { position: absolute; top: 0; bottom: 0; border-radius: var(--r-pill); background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--c-accent) 55%, transparent), transparent); background-size: 200% 100%; animation: sp-shimmer 1.4s linear infinite; transition: left .6s cubic-bezier(.2, .8, .2, 1), width .6s cubic-bezier(.2, .8, .2, 1); }
+@keyframes sp-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.sp-bad { position: absolute; right: 0; top: 0; bottom: 0; width: 6px; background: var(--c-bad); }
+.sp-lbl { font-size: var(--fs-xs); color: var(--c-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-lbl b { color: var(--c-text); font-weight: 650; font-variant-numeric: tabular-nums; }
+.sp-fail { font-style: normal; color: var(--c-bad-text); }
+.sp-compact { flex-direction: row; align-items: center; gap: var(--sp-2); }
+.sp-compact .sp-row { flex: 1; gap: 2px; }
+.sp-skel { height: 8px; background: var(--c-sunken); border-radius: var(--r-pill); }
+.sp-skel:not(.sp-compact) { height: 34px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .live-flash { animation: none; box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--c-accent) 8%, transparent); }
+  .live-img { animation: none; }
+  .sp-run { animation: none; }
+  .sp-fill, .sp-run { transition: none; }
+}
+/* 用在各页的位置 */
+.sea-epbar { flex: 1 1 220px; min-width: 180px; max-width: 360px; }
+.v3-head-progress { flex: none; padding: 0 var(--sp-6) var(--sp-1); }
+.ns-progress { margin: var(--sp-2) 0; }
+.ns-sep .sp { margin-top: 4px; }
+.sp-down { font-style: normal; color: var(--c-warn-text); }
+.boot-bar { display: block; width: 240px; margin: var(--sp-2) auto; }
+.v3-status-wrap { display: inline-flex; border-radius: var(--r-pill); }
+.sp-seg.is-down .sp-track { box-shadow: inset 0 0 0 1px var(--c-warn); }

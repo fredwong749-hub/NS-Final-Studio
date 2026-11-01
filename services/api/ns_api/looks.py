@@ -152,6 +152,15 @@ def put_episode_range(character: str, body: RangePatch, store: LookStore = Depen
 
 # ---------------------------------------------------------------- episodes / shots
 
+def _cast_name(cid: str) -> str:
+    """旧角色表里没有的人（例：阿岚 ch_a_lan）→ 出图资产表的中文名"""
+    try:
+        from ns_agent.asset_refs import ID_NAME
+        return ID_NAME.get(cid, cid)
+    except Exception:  # noqa: BLE001
+        return cid
+
+
 @router.get("/api/looks/episodes/{n}")
 def get_episode(n: int, store: LookStore = Depends(get_store)):
     ep = _call(store.episode, n)
@@ -160,11 +169,20 @@ def get_episode(n: int, store: LookStore = Depends(get_store)):
     shots = [res.shot_looks(s) for s in ep.shots]
     chars = list(dict.fromkeys([c for sl in shots for c in (r.character for r in sl.characters)]
                                + list(sched.episodes.get(str(n), {}))))
+    # DATAALIGN（K-UI-D01）：登记了资产的剧（series10）本集要确认造型的人物 = 剧本 **人物** 行里在画 / 局部的人
+    # （与出图同口径）；旧口径是正文关键词猜（ep05 曾多出顾沉、漏掉阿岚）。确认记录仍是 schedule 的 owner_confirmed_*
+    try:
+        from ns_api.shot_cast import episode_cast_ids
+        ec = episode_cast_ids()
+    except Exception:  # noqa: BLE001
+        ec = None
+    if ec is not None and n in ec:
+        chars = list(ec[n])
     plan = sched.episodes.get(str(n), {})
     return {
         "episode": n, "title": ep.title,
         "characters": {
-            c: {"name": CHARACTERS.get(c, c), "default_look_id": sched.character_defaults.get(c),
+            c: {"name": CHARACTERS.get(c) or _cast_name(c), "default_look_id": sched.character_defaults.get(c),
                 "plan": plan[c].model_dump() if c in plan else None,
                 "resolved": res.core(c, n).model_dump()}      # 集层解析（不含本镜覆盖）
             for c in chars

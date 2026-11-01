@@ -1,62 +1,65 @@
 // fredw-92/W4a：分镜画布 v3 外壳——左栏｜集头（待你决定 + 审片/精修）｜审片列表 或 精修三区｜底部片段条
-import { Fragment, useEffect, useMemo } from "react";
+import { thumb } from "../thumb";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { ShotTable } from "../components/ShotTable";
-import { seamCheck, seamState } from "../components/Seam";
+import { seamCheck, seamState } from "../components/Seam.helpers";
 import { useStudio } from "../store";
-import type { Episode, ShotSummary } from "../types";
+import type { Episode, ShotSummary, SopOwnerAction } from "../types";
 import { EditCenter } from "./edit/EditCenter";
-import { getEdit, useEdit } from "./edit/state";
-import { submitFrame, submitVideo } from "./edit/actions";
+import { getEdit, takesOf, useEdit } from "./edit/state";
+import { lockAndNext, submitFrame, submitVideo } from "./edit/actions";
 import { RefSwitchPanel } from "./edit/RefSwitchPanel";
-import { RIGHT_TABS, RightTabs } from "./edit/RightTabs";
+import { RightTabs } from "./edit/RightTabs";
+import { RIGHT_TABS, rulesNeedYou } from "./edit/rightTabs.helpers";
 import { LeftRail } from "./LeftRail";
-import { ReviewRow, rowDim } from "./ReviewRow";
-import { useSop } from "./sop";
-import { DOT_LABEL, episodeCounts, frameState, sceneOf, shotMeta, shotStatus, videoBlock } from "./status";
-import { useUi } from "./ui";
+import { ReviewRow } from "./ReviewRow";
+import { rowDim } from "./ReviewRow.helpers";
+import { EpisodeSettings } from "./EpisodeSettings";
+import { LiveProgress } from "../ds/StageProgress";
+import { useSop } from "./sop.helpers";
+import { DOT_LABEL, episodeCounts, frameState, sceneOf, scriptGaps, shotMeta, shotStatus, videoBlock } from "./status";
+import { OwnerDecisionDialog } from "./OwnerDecision";
+import { actionTitle } from "./OwnerDecision.helpers";
+import { useUi } from "./ui.helpers";
 import { Pop, StatusDot, StatusLine } from "./widgets";
-import { episodeMissing, useSbUi } from "./StoryboardDetails";
+import { useSbUi } from "./StoryboardDetails.helpers";
 import { SbEpisodeBar, StoryboardTable } from "./StoryboardTable";
 import { ProduceClipDots } from "./EpisodeProduce"; // fredw-92/EB 整集出片进度点
+import { stageWords } from "./words"; // UXF5（R5）
 
 const short = (id: string) => id.split("-")[1];
 
 /** 集头“待你决定”条（规格 §3）：只列项目方本人要拍板的事；没有就不显示 */
+// fredw-92/UXF1（审查 #8 / #9）：芯片用中文名、不写关口代号；点开就是确认框（勾“我是项目方本人”+ 原话），
+// 不再显示命令行。窄屏（≤1440）收成一个“待你决定 N ▾”下拉，不挤工具栏。
 function DecideBar() {
   const { sop } = useSop();
+  const [open, setOpen] = useState<SopOwnerAction | null>(null);
   const acts = sop?.owner_actions ?? [];
   const now = acts.filter((a) => a.actionable).length;
   if (!now) return null; // 规格 §3：没有要你拍板的事就不显示（未到的关口在“为什么卡住”里看）
+  const chip = (a: SopOwnerAction, i: number, close?: () => void) => (
+    <button
+      key={i}
+      className={`v3-decide-chip${a.actionable ? "" : " wait"}`}
+      title={`${stageWords(a.why)}${a.actionable ? "\n点开确认" : `\n还不能做：${a.waiting_on.join("；")}`}`}
+      onClick={() => (close?.(), setOpen(a))}
+    >
+      {actionTitle(a)}
+      {a.actionable ? <i className="v3-badge">!</i> : <small>未到</small>}
+    </button>
+  );
   return (
-    <div className="v3-decide">
-      <b>待你决定 {now}</b>
-      {acts.map((a, i) => (
-        <Pop key={i} label={<>{a.title}{a.actionable ? <i className="v3-badge">!</i> : <small>未到</small>}</>} btnClass={`v3-decide-chip${a.actionable ? "" : " wait"}`} title={a.why}>
-          {() => (
-            <div className="v3-why-pop">
-              <b>{a.title}</b>
-              <p>{a.why}</p>
-              {a.waiting_on.length > 0 && (
-                <>
-                  <b>还在等</b>
-                  <ul>
-                    {a.waiting_on.map((w, j) => (
-                      <li key={j}>{w}</li>
-                    ))}
-                  </ul>
-                </>
-              )}
-              {a.cli && (
-                <>
-                  <b>你本人执行</b>
-                  <code>{a.cli}</code>
-                </>
-              )}
-            </div>
-          )}
+    <>
+      <div className="v3-decide">
+        <b>待你决定 {now}</b>
+        <span className="v3-decide-chips">{acts.map((a, i) => chip(a, i))}</span>
+        <Pop label={<>查看 ▾</>} btnClass="v3-decide-chip v3-decide-more" title="全部待你决定的事">
+          {(close) => <div className="v3-decide-list">{acts.map((a, i) => chip(a, i, close))}</div>}
         </Pop>
-      ))}
-    </div>
+      </div>
+      {open && <OwnerDecisionDialog a={open} onClose={() => setOpen(null)} />}
+    </>
   );
 }
 
@@ -104,7 +107,8 @@ function ReviewList({ ep }: { ep: Episode }) {
   }, [sel, ep.number]);
   // U4：集头“N 镜缺分镜字段”点开 = 只列这些镜头（不显示衔接线）
   const sbui = useSbUi();
-  const miss = useMemo(() => (sbui.onlyMissing ? episodeMissing(ep, st.details) : null), [sbui.onlyMissing, ep, st.details]);
+  // UXF1 #4：“只看待补”与集头 / 步骤条同一份判定（分镜字段 ∪ SOP 剧本阻塞）
+  const miss = useMemo(() => (sbui.onlyMissing ? scriptGaps(ep, st.details, sop) : null), [sbui.onlyMissing, ep, st.details, sop]);
   if (st.listMode) return <ShotTable ep={ep} />;
   const shots = miss ? ep.shots.filter((s) => miss.get(s.id)?.length) : ep.shots;
   return (
@@ -142,8 +146,10 @@ function RightPanel({ s }: { s: ShotSummary }) {
   const ui = useUi();
   const { sop } = useSop();
   const d = useStudio().details[s.id];
-  const nVer = (d?.takes.takes.length ?? 0) + (d?.gpu3_takes?.takes.length ?? 0);
-  const nRule = (sop?.shots.find((x) => x.id === s.id)?.blockers.length ?? 0) + (s.h3_lint?.filter((l) => !l.ok && !l.overridden).length ?? 0);
+  // UXF5（审查 N11）：标签数字 = 版本页里实际列出的条数（首帧 + 尾帧 + 视频，与 VersionChain 同一个 takesOf）
+  const nVer = (["first", "last", "video"] as const).reduce((n, sl) => n + takesOf(d, sl).length, 0);
+  // UXF1：规则标签的数字只数“需要你处理”的（UXF2 的 rulesNeedYou），系统提示不再显示成红色错误数
+  const nRule = rulesNeedYou(s, sop?.shots.find((x) => x.id === s.id));
   const badge: Record<string, number> = { versions: nVer, rules: nRule };
   return (
     <aside className="v3-right">
@@ -189,23 +195,45 @@ function ClipStrip({ ep }: { ep: Episode }) {
     }
   };
   const ids = pick.map((s) => s.id);
+  // XYQ（小云雀走查 #2 / #3）：片段条上有明确的“多选”开关（开着时单击 = 加选 / 去选，不用按 Ctrl），
+  // “选中待审” = 一次选上所有待你定稿首帧 / 尾帧的镜头；批量“定稿并出下一步”与审片行主按钮同一个 lockAndNext
+  const [pickMode, setPickMode] = useState(false);
+  const keyOf = (s: ShotSummary) => c.status.get(s.id)?.key;
+  const lockFirstList = pick.filter((s) => s.first_frame_take != null && (keyOf(s) === "review_first" || keyOf(s) === "auto_first"));
+  const lockLastList = pick.filter((s) => s.last_frame_take != null && (keyOf(s) === "review_last" || keyOf(s) === "auto_last"));
+  const toReview = ep.shots.filter((s) => ["review_first", "auto_first", "review_last", "auto_last"].includes(keyOf(s) ?? ""));
+  const batchLock = async (slot: "first" | "last") => {
+    const gpu = getEdit().gpu;
+    for (const s of slot === "first" ? lockFirstList : lockLastList) {
+      const n = slot === "first" ? s.first_frame_take! : s.last_frame_take!;
+      await lockAndNext(s.id, slot, n, gpu, st.notify, st.refreshAfter, slot === "first" ? !s.last_frame_target : !s.video);
+    }
+  };
   useEffect(() => {
     if (!sel) return;
     document.querySelector(`.v3-clip[data-shot="${sel}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [sel]);
   return (
-    <footer className="v3-strip">
+    <footer className={`v3-strip${pickMode ? " picking" : ""}`}>
+      <div className="v3-strip-pick" role="group" aria-label="多选">
+        <button className={`v3-btn${pickMode ? " on" : ""}`} aria-pressed={pickMode} onClick={() => setPickMode((v) => !v)} title="开着时单击片段 = 加选 / 去选（不用按 Ctrl）">
+          多选
+        </button>
+        <button className="v3-btn" disabled={!toReview.length} onClick={() => (setPickMode(true), st.setMulti(new Set(toReview.map((s) => s.id))))} title={toReview.length ? `选上待你定稿首帧 / 尾帧的镜头：${toReview.map((s) => short(s.id)).join("、")}` : "没有待你定稿首帧 / 尾帧的镜头"}>
+          选中待审{toReview.length ? ` ${toReview.length}` : ""}
+        </button>
+      </div>
       <div className="v3-clips">
         {ep.shots.map((s) => [s, c.status.get(s.id)!] as const).map(([s, x]) => (
           <button
             key={s.id}
             data-shot={s.id}
             className={`v3-clip${s.id === sel ? " sel" : ""}${multi.has(s.id) ? " multi" : ""}`}
-            onClick={(e) => st.select(s.id, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey })}
+            onClick={(e) => st.select(s.id, { shift: e.shiftKey, ctrl: pickMode || e.ctrlKey || e.metaKey })}
             onDoubleClick={() => (st.select(s.id), st.setCanvasMode("edit"))}
-            title={`${short(s.id)} · ${s.duration.seconds}s · ${x.text}\nCtrl / Shift 点击多选；双击精修`}
+            title={`${short(s.id)} · ${s.duration.seconds}s · ${x.text}\nCtrl / Shift 点击多选（或打开左边的“多选”）；双击精修`}
           >
-            {s.first_frame ? <img src={s.first_frame} alt="" loading="lazy" draggable={false} /> : null}
+            {s.first_frame ? <img src={thumb(s.first_frame, 120) ?? s.first_frame} alt="" loading="lazy" draggable={false} /> : null}
             <b>{short(s.id)}</b>
             <small>{s.duration.seconds}s</small>
             <StatusDot dot={x.dot} title={`${DOT_LABEL[x.dot]}：${x.text}`} />
@@ -234,7 +262,7 @@ function ClipStrip({ ep }: { ep: Episode }) {
           )}
           {c.dots.red > 0 && (
             <span className="s-red">
-              <StatusDot dot="red" /> 失败 {c.dots.red}
+              <StatusDot dot="red" /> 出错 {c.dots.red}
             </span>
           )}
           <span>
@@ -244,6 +272,16 @@ function ClipStrip({ ep }: { ep: Episode }) {
         {pick.length > 0 ? (
           <div className="v3-strip-batch">
             <b>对已选 {pick.length} 镜：</b>
+            {lockFirstList.length > 0 && (
+              <button className="v3-btn primary" onClick={() => void batchLock("first")} title={`定稿当前这一版首帧并由它出尾帧：${lockFirstList.map((s) => `${short(s.id)} #${s.first_frame_take}`).join("、")}`}>
+                定稿首帧 → 出尾帧（{lockFirstList.length}）
+              </button>
+            )}
+            {lockLastList.length > 0 && (
+              <button className="v3-btn primary" onClick={() => void batchLock("last")} title={`定稿当前这一版尾帧并出视频：${lockLastList.map((s) => `${short(s.id)} #${s.last_frame_take}`).join("、")}`}>
+                定稿尾帧 → 出视频（{lockLastList.length}）
+              </button>
+            )}
             <button
               className="v3-btn"
               disabled={!frameList.length}
@@ -310,8 +348,17 @@ export function CanvasV3() {
           <DecideBar />
           <SbEpisodeBar ep={episode} />
           <span className="v3-grow" />
+          <EpisodeSettings ep={episode} />
+          {/* 回退补回（regress_r1 #11）：串播审片按钮（以前只剩快捷键 R） */}
+          <button className="v3-btn sm" onClick={() => st.setReviewMode(true)} title="按顺序连播本集视频，边看边通过 / 打回（R）">
+            ▶ 串播审片
+          </button>
           <ModeSwitch />
         </header>
+        {/* 实时分段进度（剧本 → 分镜 → 首帧 → 尾帧 → 视频 → 声音 → 成片）单独一行：集头按钮多时不再把“串播审片”挤出屏（UIAUDIT F19） */}
+        <div className="v3-head-progress">
+          <LiveProgress run={null} episode={episode.number} compact />
+        </div>
         {edit ? (
           <div className="v3-edit">
             <EditHead s={cur} />

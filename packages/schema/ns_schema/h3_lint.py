@@ -24,6 +24,11 @@ STYLE_OPENING = "Live-action, cinematic, shallow depth of field,"
 OPEN_PHRASE = "established by Picture 1"
 CLOSE_PHRASE = "established by Picture 2 at the end of the shot"
 VO_PHRASE = "says in an off-screen voiceover"
+# FIX（CHAIN F2，官方 base-en §2.1 / §3.1）：只给首帧（I2VA）的指令行（逐字，含尖括号 / 方括号）；
+# 与 ns_render.h3_video.I2V_ALIGN_LINE 相同。I2VA 正文第一句锚定 <Picture 1>，全文不得出现 Picture 2
+I2V_ALIGN_LINE = "For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced."
+OPEN_PHRASE_I2V = "established by <Picture 1>"
+MODES = ("fl2va", "i2va")
 MAX_CHARS = 7000
 
 ALIGN_RE = re.compile(
@@ -39,7 +44,9 @@ NEG_ZH_RE = re.compile(r"[不无没别勿禁]")
 # 配乐里的抽象情绪 / 情绪功能词（指南 §4.7：只写乐器、速度、节奏、强弱）
 MOOD_EN_RE = re.compile(r"\b(sad|happy|romantic|tense|tension|emotional|melancholy|melancholic|uplifting|mood|moody|"
                         r"atmosphere|atmospheric|feeling|feelings|evokes?|conveys?|heartfelt|dramatic|mysterious|"
-                        r"suspenseful|joyful|sorrowful|nostalgic|ominous|hopeful|sentimental|passionate|sensual)\b",
+                        r"suspenseful|joyful|sorrowful|nostalgic|ominous|hopeful|sentimental|passionate|sensual|"
+                        # FIX（CHAIN F5，官方 §4.7）：解释配乐“作用”的写法（ep02 10 镜 “…providing a restrained background layer”）
+                        r"restrained|background layer|providing\b[^.]*?\blayer|underscor\w*|supporting the scene)\b",
                         re.I)
 # 图像风格后缀 / 画质词（不属于 H3 正文；风格只写 STYLE_OPENING）
 STYLE_TERM_RE = re.compile(
@@ -126,8 +133,12 @@ def _r(rule_id: str, ok: bool, detail: str, level: str = "block", sop_ref: str =
 
 def lint_h3(prompt: str, frames: int | None = None, intimate: bool = False, *, seconds: float | None = None,
             dialogue: list[str] | None = None, offscreen: list[str] | None = None,
-            monologue: list[str] | None = None) -> list[dict]:
-    """返回 [{rule_id, sop_ref, ok, detail, msg, level}]；level = block | warn（同 rule_ids.md 的级别）"""
+            monologue: list[str] | None = None, mode: str = "fl2va") -> list[dict]:
+    """返回 [{rule_id, sop_ref, ok, detail, msg, level}]；level = block | warn（同 rule_ids.md 的级别）。
+    mode（FIX / CHAIN F2）：fl2va = 首尾帧（默认，原规则）；i2va = 只给首帧（官方 I2VA 指令行、<Picture 1> 锚定、
+    全文不得出现 Picture 2）"""
+    if mode not in MODES:
+        raise ValueError(f"mode 只能是 {MODES}")
     out: list[dict] = []
     text = (prompt or "").replace("\r\n", "\n").strip("\n")
     p = parse_h3(text)
@@ -136,9 +147,12 @@ def lint_h3(prompt: str, frames: int | None = None, intimate: bool = False, *, s
     sound = f.get(FIELDS[1], "")
     music = f.get(FIELDS[2], "")
 
-    # H3-A1 对齐句
-    m = ALIGN_RE.match(p["align"])
-    if not m:
+    # H3-A1 对齐句（I2VA：官方指令行逐字）
+    m = ALIGN_RE.match(p["align"]) if mode == "fl2va" else None
+    if mode == "i2va":
+        ok = p["align"] == I2V_ALIGN_LINE
+        out.append(_r("H3-A1", ok, "I2VA 指令行正确" if ok else f"只给首帧时第一行必须逐字是 “{I2V_ALIGN_LINE}”"))
+    elif not m:
         det = "第一行不是官方对齐句（逐字，包括破折号 —）" if p["align"].startswith(ALIGN_PREFIX) else \
             "第一行必须是对齐句 “How the reference pictures align with the target video — …”"
         out.append(_r("H3-A1", False, det))
@@ -163,15 +177,22 @@ def lint_h3(prompt: str, frames: int | None = None, intimate: bool = False, *, s
         probs.append("[Shot 1] 后面不写时间戳")
     out.append(_r("H3-A3", not probs, "；".join(probs) or "单镜头 [Shot 1]"))
 
-    # H3-A4 开头 Picture 1 / 结尾收在 Picture 2
+    # H3-A4 开头 Picture 1 / 结尾收在 Picture 2（I2VA：第一句锚定 <Picture 1>，全文不得出现 Picture 2）
     sents = _sentences(_outside_d(body))
     probs = []
-    if not sents or OPEN_PHRASE not in sents[0]:
+    if mode == "i2va":
+        if not sents or not (OPEN_PHRASE_I2V in sents[0] or OPEN_PHRASE in sents[0]):
+            probs.append(f"第一句要写 “…{OPEN_PHRASE_I2V}”")
+        if "Picture 2" in text:
+            probs.append("只给首帧（I2VA）时全文不得出现 Picture 2（没有这张图）")
+        out.append(_r("H3-A4", not probs, "；".join(probs) or "首帧锚定、无 Picture 2"))
+    elif not sents or OPEN_PHRASE not in sents[0]:
         probs.append(f"第一句要写 “…{OPEN_PHRASE}”")
-    last = sents[-1] if sents else ""
-    if CLOSE_PHRASE not in last or not re.search(r"\bsettles? into\b", last):
-        probs.append(f"最后一句要写 “settles into … {CLOSE_PHRASE}.”")
-    out.append(_r("H3-A4", not probs, "；".join(probs) or "首帧起、尾帧收"))
+    if mode == "fl2va":
+        last = sents[-1] if sents else ""
+        if CLOSE_PHRASE not in last or not re.search(r"\bsettles? into\b", last):
+            probs.append(f"最后一句要写 “settles into … {CLOSE_PHRASE}.”")
+        out.append(_r("H3-A4", not probs, "；".join(probs) or "首帧起、尾帧收"))
 
     # H3-A5 否定句 / 禁用清单（<d> 外；N/A 除外）
     if FIELDS[0] in f:
@@ -202,11 +223,12 @@ def lint_h3(prompt: str, frames: int | None = None, intimate: bool = False, *, s
     out.append(_r("H3-A8", not probs, "；".join(probs) or "风格开场正确"))
 
     # H3-A11 时长 4–15 s
-    eff = frames / FPS if frames is not None else (float(m.group(2)) if m else None)
+    eff = frames / FPS if frames is not None else (float(m.group(2)) if m else None)   # I2VA 没有 S.SS：要给 frames
     if eff is None:
         out.append(_r("H3-A11", False, "无法得到时长（缺帧数且对齐句无 S.SS）"))
     else:
-        out.append(_r("H3-A11", 4 <= eff <= 15.1, f"时长 {eff:.2f} s（应在 4–15 s）"))
+        # 项目方 2026-10-31“改成正常节奏”：动作量按正常速度在 N 秒内做完、最后约 1 秒仍在动（写作规则，机器只查时长）
+        out.append(_r("H3-A11", 4 <= eff <= 15.1, f"时长 {eff:.2f} s（应在 4–15 s；动作量按正常速度做完，最后约 1 秒仍在动）"))
 
     # H3-A12 长度（K：官方 API 硬上限 “maximum of 7000 characters per text” → block，production_rules_v3 §1.5）
     out.append(_r("H3-A12", len(text) <= MAX_CHARS, f"{len(text)} 字符（上限 {MAX_CHARS}）"))
@@ -257,9 +279,14 @@ def lint_h3(prompt: str, frames: int | None = None, intimate: bool = False, *, s
                 "条数或顺序不一致")
         out.append(_r("H3-D3", ok, det))
 
-    # H3-D4 不用双引号包台词
-    q = len(re.findall(r"[\"“”]", text))
-    out.append(_r("H3-D4", q == 0, f"出现 {q} 个双引号（会被烧成字幕）" if q else "没有双引号"))
+    # H3-D4 不用双引号包台词。FIX（CHAIN F4，官方 §4.5）：<d> 外表示画面里可见文字的英文双引号放行
+    # （A red neon sign reading "营业中" glows…）；只拦 <d> 里的引号、贴着 <d> / </d> 的引号（= 给台词加引号）
+    q_in = sum(len(re.findall(r"[\"“”]", b)) for b in D_BLOCK_RE.findall(text))
+    q_wrap = len(re.findall(r"[\"“”]\s*<d>|</d>\s*[\"“”]", text))
+    # 没写 <d>、直接用引号写台词（“… says: "台词"”）同样拦
+    q_said = len(re.findall(r"\b(?:says?|said|asks?|whispers?|replies|voiceover)\b(?:\s+\w+ly)?\s*:?\s*[\"“]", text, re.I))
+    q = q_in + q_wrap + q_said
+    out.append(_r("H3-D4", q == 0, f"台词带了 {q} 个双引号（会被烧成字幕）" if q else "台词没有双引号"))
 
     # H3-D5 画外音
     # 每个 <d> 的引导段 = 上一个 </d> 之后到本 <d> 之前（不跨到前一句台词）

@@ -48,6 +48,8 @@ PURPOSES = {
     "director_boost": "导演加强",
     "lora_llm": "LoRA 训练用 LLM（打标 / 规划）",
     "prompt_rewrite": "首帧提示词改写",
+    "edit_plan": "编辑计划（项目方反馈 → 修改计划，EDITDEL）",
+    "music_brief": "整集配乐 brief / 审听挑选（BGM 链接）",
 }
 EDITABLE = ("name", "base_url", "models", "default_model", "timeout_s", "params", "enabled", "ctx", "extra_body")
 
@@ -388,8 +390,13 @@ def saved_render_url(gpu: int) -> str | None:
         return None
     for eid, d in RENDER_DEFAULTS.items():
         e = saved.get(eid)
-        if isinstance(e, dict) and e.get("url") and int(e.get("gpu", d["gpu"])) == int(gpu):
-            return str(e["url"]).rstrip("/")
+        if isinstance(e, dict) and e.get("url"):
+            from ns_render import endpoints as EP
+            try:
+                if EP.norm_lane(e.get("gpu", d["gpu"])) == EP.norm_lane(gpu):
+                    return str(e["url"]).rstrip("/")
+            except ValueError:
+                continue
     return None
 
 
@@ -477,11 +484,23 @@ def post_test(pid: str, body: TestBody | None = None):
 
 @router.get("/api/render/endpoints")
 def get_render_endpoints():
+    """image / video 两个端点在前（旧形状不变），后面每条渲染道一行（G36：gpu33 + gpu36，id = "gpu33:0" / "gpu36:1"，
+    kind="lane"，含 activity / status_text / queued）"""
     out = []
     for k, v in render_endpoints().items():
         ok, detail = _probe(v["url"])
         out.append({"id": k, "url": v["url"], "gpu": v.get("gpu"), "label": v.get("label"),
                     "reachable": ok, "detail": detail})
+    from ns_api import jobs as J
+    try:
+        lanes = J.lanes()
+    except Exception:  # noqa: BLE001  道表读不到不挡旧的两行
+        lanes = []
+    for ln in lanes:
+        out.append({"id": ln["id"], "kind": "lane", "url": ln["url"], "gpu": ln["gpu"], "server": ln["server"],
+                    "label": ln["status_text"], "reachable": ln["reachable"], "detail": ln.get("detail") or "",
+                    "activity": ln["activity"], "queued": ln["queued"], "max_frames": ln["max_frames"],
+                    "image_pref": ln["image_pref"]})
     return out
 
 
@@ -492,7 +511,7 @@ class EndpointBody(BaseModel):
 @router.put("/api/render/endpoints/{eid}")
 def put_render_endpoint(eid: str, body: EndpointBody):
     if eid not in RENDER_DEFAULTS:
-        raise HTTPException(404, "端点只有 image | video")
+        return _put_lane(eid, body)
     if not body.url.startswith(("http://", "https://")):
         raise HTTPException(400, "地址要以 http:// 或 https:// 开头")
     with _io_lock:
@@ -504,3 +523,28 @@ def put_render_endpoint(eid: str, body: EndpointBody):
     EP.forget(v["url"])                     # 地址刚改：不用缓存，立即重新探测
     ok, detail = _probe(v["url"])
     return {"id": eid, "url": v["url"], "gpu": v.get("gpu"), "reachable": ok, "detail": detail}
+
+
+def _put_lane(eid: str, body: EndpointBody):
+    """G36：PUT /api/render/endpoints/gpu36:1 → 改这条道的地址（gpu33 的写进 gpus 表，其他服务器写进 lanes 表）"""
+    from ns_render import endpoints as EP
+    try:
+        lane = EP.norm_lane(eid)
+    except ValueError:
+        raise HTTPException(404, "端点只有 image | video 或道 id（gpu33:0 / gpu36:1）")
+    if lane not in EP.gpu_ids(RENDER_FILE):
+        raise HTTPException(404, f"没有这条道：{eid}")
+    if not body.url.startswith(("http://", "https://")):
+        raise HTTPException(400, "地址要以 http:// 或 https:// 开头")
+    url = body.url.rstrip("/")
+    with _io_lock:
+        saved = _read_json(RENDER_FILE)
+        if isinstance(lane, int):
+            saved.setdefault("gpus", {})[str(lane)] = url
+        else:
+            cur = saved.setdefault("lanes", {}).get(lane)
+            saved["lanes"][lane] = {**cur, "url": url} if isinstance(cur, dict) else url
+        _write_json(RENDER_FILE, saved)
+    EP.forget(url)
+    ok, detail = _probe(url)
+    return {"id": EP.lane_name(lane), "kind": "lane", "url": url, "gpu": lane, "reachable": ok, "detail": detail}

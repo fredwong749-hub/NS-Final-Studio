@@ -1,0 +1,281 @@
+[
+  {
+    "title": "assets_all",
+    "id": "S900_assets_all",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/assets",
+    "steps": [
+      {
+        "scroll": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_linwan",
+    "id": "S900_a_linwan",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/assets?type=character&char=lin_wan",
+    "steps": [
+      {
+        "scroll": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_item",
+    "id": "S900_a_item",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/assets?type=item",
+    "steps": [
+      {
+        "scroll": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_scene",
+    "id": "S900_a_scene",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/assets?type=scene",
+    "steps": [
+      {
+        "scroll": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_preset",
+    "id": "S900_a_preset",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/assets?type=preset",
+    "steps": [
+      {
+        "scroll": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_loras",
+    "id": "S900_a_loras",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/assets?type=loras",
+    "steps": [
+      {
+        "scroll": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_voice",
+    "id": "S900_a_voice",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/assets?type=voice",
+    "steps": [
+      {
+        "scroll": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_template",
+    "id": "S900_a_template",
+    "size": [
+      1440,
+      900
+    ],
+    "path": "/#/assets?type=template",
+    "steps": [
+      {
+        "scroll": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "assets_all",
+    "id": "S720_assets_all",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/assets",
+    "steps": [
+      {
+        "scroll": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_linwan",
+    "id": "S720_a_linwan",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/assets?type=character&char=lin_wan",
+    "steps": [
+      {
+        "scroll": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_item",
+    "id": "S720_a_item",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/assets?type=item",
+    "steps": [
+      {
+        "scroll": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_scene",
+    "id": "S720_a_scene",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/assets?type=scene",
+    "steps": [
+      {
+        "scroll": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_preset",
+    "id": "S720_a_preset",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/assets?type=preset",
+    "steps": [
+      {
+        "scroll": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_loras",
+    "id": "S720_a_loras",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/assets?type=loras",
+    "steps": [
+      {
+        "scroll": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_voice",
+    "id": "S720_a_voice",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/assets?type=voice",
+    "steps": [
+      {
+        "scroll": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "title": "a_template",
+    "id": "S720_a_template",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#/assets?type=template",
+    "steps": [
+      {
+        "scroll": "main"
+      }
+    ],
+    "wait": 7000
+  },
+  {
+    "wait": 10000,
+    "path": "/#/assets?type=character&char=lin_wan",
+    "id": "VA_char",
+    "title": "人物页 G10+G11+非GET",
+    "steps": [
+      {
+        "wait": 4000
+      },
+      {
+        "collect": "char"
+      },
+      {
+        "realzoom": "linwan",
+        "max": 6
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "id": "VA_item_late",
+    "path": "/#/assets?type=item",
+    "steps": [
+      {
+        "wait": 8000
+      },
+      {
+        "scroll": "main"
+      }
+    ],
+    "title": "衣橱 等图加载后再滚",
+    "wait": 10000,
+    "size": [
+      1440,
+      900
+    ]
+  }
+]

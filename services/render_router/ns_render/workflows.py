@@ -50,6 +50,9 @@ class H3Model:
     fps: int = 24
     shift: tuple[float, float] = SHIFT_768P_TURBO   # (video, audio) → MiniMaxH3SigmaShift
     keyframe_crop: bool = True  # P-B2：首尾帧在图里用同一种 center-crop+lanczos 到画布（节点对首帧拉伸、尾帧裁切）
+    # fredw-92/PF：手写 sigma（Pika H3 Flex 官方模板 ManualSigmas）。设了就用 ManualSigmas 代替 BasicScheduler，
+    # 且不加 MiniMaxH3SigmaShift（与官方模板 video_pika_h3_flex_fl2va.json 相同：shift 12 已算进 sigma 表）
+    sigmas: str | None = None
 
 
 # 升级/重试档：基模 20 步、无 LoRA、shift 12/3（SOP S4 P-A3/P-A5 锁定）
@@ -74,6 +77,10 @@ def check_h3_model(m: H3Model) -> None:
         errs.append(f"shift {tuple(m.shift)} 与 LoRA {turbo or '无'} 不配对，应为 {expected_shift(m.loras)}")
     if turbo and m.steps < H3_MIN_TURBO_STEPS:
         errs.append(f"Turbo 步数 {m.steps} < {H3_MIN_TURBO_STEPS}")
+    if turbo and any("pika_h3_flex" in n.lower() for n, _ in m.loras):
+        errs.append("Pika H3 Flex 已蒸馏，不能再叠 Turbo LoRA（官方：do not stack a turbo or Lightning LoRA）")
+    if m.sigmas and len([x for x in m.sigmas.split(",") if x.strip()]) < 7:
+        errs.append("手写 sigma 少于 7 个值（Pika Flex 官方：sigma 表少于 7 个值会破坏调度）")
     if any(k in m.sampler.lower() for k in ("ancestral", "sde")):
         errs.append(f"采样器 {m.sampler}：H3 不用 ancestral/SDE")
     if errs:
@@ -100,6 +107,16 @@ def _lora_chain(wf: dict, model: list, loras, first_id: int) -> list:
     return model
 
 
+def effective_cfg(m: QwenModel) -> float:
+    """送进 CFGGuider 的实际 cfg（Turbo 一律 1.0）"""
+    return 1.0 if m.turbo else float(m.cfg)
+
+
+def negative_for(m: QwenModel, negative: str) -> str:
+    """FIX（ep02_iter P0 ⑥，chain_audit A3）：cfg ≤ 1 时负面分支不参与采样 → 不送、不记录负面词（记了只会误导）"""
+    return "" if effective_cfg(m) <= 1.0 else (negative or "")
+
+
 def _qwen_graph(prompt: str, negative: str, width: int, height: int, seed: int, prefix: str,
                 m: QwenModel, loras, reference: str | list[str] | None = None, ref_resolution: int = 1024,
                 crop: bool = True, init_image: str | None = None, denoise: float = 1.0) -> dict:
@@ -109,7 +126,7 @@ def _qwen_graph(prompt: str, negative: str, width: int, height: int, seed: int, 
         "12": {"class_type": "VAELoader", "inputs": {"vae_name": m.vae}},
     }
     model = _lora_chain(wf, ["10", 0], loras, 60)
-    enc = {"clip": ["11", 0], "prompt": prompt, "negative_prompt": negative, "resolution": 1024}
+    enc = {"clip": ["11", 0], "prompt": prompt, "negative_prompt": negative_for(m, negative), "resolution": 1024}
     refs = [reference] if isinstance(reference, str) else list(reference or [])
     if refs:
         enc.update({"resolution": ref_resolution, "vae": ["12", 0]})
@@ -132,7 +149,7 @@ def _qwen_graph(prompt: str, negative: str, width: int, height: int, seed: int, 
         "35": {"class_type": "RandomNoise", "inputs": {"noise_seed": seed}},
         "36": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": m.sampler}},
         "38": {"class_type": "CFGGuider", "inputs": {"model": ["13", 0], "positive": ["20", 0], "negative": ["20", 1],
-                                                     "cfg": 1.0 if m.turbo else m.cfg}},
+                                                     "cfg": effective_cfg(m)}},
         "40": {"class_type": "SamplerCustomAdvanced",
                "inputs": {"noise": ["35", 0], "guider": ["38", 0], "sampler": ["36", 0], "sigmas": ["37", 0],
                           "latent_image": ["34", 0]}},
@@ -234,11 +251,12 @@ def h3_fl2va(prompt: str, first_frame: str, width: int, height: int, frames: int
     }
     all_loras = [*m.loras, *loras]
     model = _lora_chain(wf, ["127", 0], all_loras, 140)
-    shift = expected_shift(all_loras) if loras else tuple(m.shift)   # 额外 LoRA 也按配对规则
-    # 采样模型和调度器都要经过 shift 节点（sigma 由调度器的 model 算出；与 gpu3 h3_graph 相同）
-    wf["150"] = {"class_type": "MiniMaxH3SigmaShift",
-                 "inputs": {"model": model, "shift_video": float(shift[0]), "shift_audio": float(shift[1])}}
-    model = ["150", 0]
+    if not m.sigmas:
+        shift = expected_shift(all_loras) if loras else tuple(m.shift)   # 额外 LoRA 也按配对规则
+        # 采样模型和调度器都要经过 shift 节点（sigma 由调度器的 model 算出；与 gpu3 h3_graph 相同）
+        wf["150"] = {"class_type": "MiniMaxH3SigmaShift",
+                     "inputs": {"model": model, "shift_video": float(shift[0]), "shift_audio": float(shift[1])}}
+        model = ["150", 0]
 
     def keyframe(load_id: str, scale_id: str) -> list:
         if not m.keyframe_crop:
@@ -259,8 +277,9 @@ def h3_fl2va(prompt: str, first_frame: str, width: int, height: int, frames: int
         "126": {"class_type": "BasicGuider", "inputs": {"model": model, "conditioning": ["131", 0]}},
         "129": {"class_type": "RandomNoise", "inputs": {"noise_seed": seed}},
         "123": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": m.sampler}},
-        "124": {"class_type": "BasicScheduler",
-                "inputs": {"model": model, "scheduler": m.scheduler, "steps": m.steps, "denoise": 1.0}},
+        "124": ({"class_type": "ManualSigmas", "inputs": {"sigmas": m.sigmas}} if m.sigmas else
+                {"class_type": "BasicScheduler",
+                 "inputs": {"model": model, "scheduler": m.scheduler, "steps": m.steps, "denoise": 1.0}}),
         "125": {"class_type": "SamplerCustomAdvanced",
                 "inputs": {"noise": ["129", 0], "guider": ["126", 0], "sampler": ["123", 0], "sigmas": ["124", 0],
                            "latent_image": ["131", 1]}},

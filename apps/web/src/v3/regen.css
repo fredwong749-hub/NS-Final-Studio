@@ -1,0 +1,45 @@
+/* UIRSI 11-01：↻ 再生成 按钮与弹窗。只用 --c-* / --sp-* 变量（深浅主题自动跟随） */
+.regen-btn {
+  display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; cursor: pointer;
+  border: 1px solid var(--c-accent); background: var(--c-accent-soft); color: var(--c-accent-text);
+  border-radius: var(--r-pill); font: inherit; font-weight: 600;
+}
+.regen-btn.regen-xs { height: 22px; padding: 0 var(--sp-2); font-size: var(--fs-xs); }
+.regen-btn.regen-sm { height: 28px; padding: 0 var(--sp-3); font-size: var(--fs-sm); }
+.regen-btn:hover { background: var(--c-accent); color: var(--c-on-accent, #fff); }
+.regen-btn:focus-visible { outline: 2px solid var(--c-focus); outline-offset: 1px; }
+/* ASSETUX 11-01：1440 下弹窗比 520px 窄，原来的 min-width 把输入框和说明顶出弹窗右边 → 弹窗本身定宽，里面随它 */
+.ds-modal:has(.regen-body) { width: min(560px, calc(100vw - 32px)); max-width: calc(100vw - 32px); }
+.regen-body { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; width: 100%; }
+.regen-l { overflow-wrap: anywhere; }
+.regen-l { font-size: var(--fs-sm); font-weight: 600; color: var(--c-text); }
+.regen-l small { font-weight: 400; color: var(--c-text-2); margin-left: var(--sp-1); }
+.regen-ta { width: 100%; box-sizing: border-box; min-height: 72px; resize: vertical; padding: var(--sp-2); border-radius: var(--r-m); border: 1px solid var(--c-line-2); background: var(--c-sunken); color: var(--c-text); font: inherit; font-size: var(--fs-sm); }
+.regen-ta:focus { outline: 2px solid var(--c-focus); outline-offset: 0; border-color: transparent; }
+.regen-row select { min-width: 0; width: 100%; }
+.regen-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) minmax(0, 1fr) 28px; gap: var(--sp-2); align-items: center; }
+.regen-drop { position: relative; width: 64px; height: 64px; border: 1px dashed var(--c-line-2); border-radius: var(--r-m); display: grid; place-items: center; overflow: hidden; cursor: pointer; color: var(--c-text-2); font-size: var(--fs-xs); background: var(--c-sunken); }
+.regen-drop img { width: 100%; height: 100%; object-fit: cover; }
+.regen-drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.regen-drop:focus-within { outline: 2px solid var(--c-focus); }
+.regen-x { width: 28px; height: 28px; border-radius: var(--r-m); border: 1px solid var(--c-line-2); background: transparent; color: var(--c-text-2); cursor: pointer; font: inherit; }
+.regen-add { align-self: flex-start; height: 28px; padding: 0 var(--sp-3); border-radius: var(--r-pill); border: 1px dashed var(--c-line-2); background: transparent; color: var(--c-text); cursor: pointer; font: inherit; font-size: var(--fs-sm); }
+.regen-add:disabled { opacity: .5; cursor: not-allowed; }
+.regen-note { margin: 0; font-size: var(--fs-xs); color: var(--c-text-2); }
+.regen-err { margin: 0; font-size: var(--fs-sm); color: var(--c-bad-text); }
+.regen-mode { margin-right: auto; font-size: var(--fs-xs); color: var(--c-text-2); }
+/* UIRSI r36（总调度 11-01 定：画布帧格只露“↻”、挪到右上角、不压人脸；帧格 78px 宽不动，K-UI-037）：
+   不另起 absolute 容器（K-UI-P10：一个角落只放一个定位容器）——TileTop 在审片帧格里改成一行：标签靠左可折行，↻ 靠右 = 帧格右上角；
+   放大镜（ZoomLayer .zl-mag，悬停时挂在图右上角外沿，下探约 14px）→ ↻ 下移 10px 让开 */
+:root .v3-frame > .ds-tiletop:has(> .regen-btn) { flex-direction: row; align-items: flex-start; flex-wrap: nowrap; }
+:root .v3-frame > .ds-tiletop:has(> .regen-btn) > .v3-tag { flex: 0 1 auto; min-width: 0; }
+:root .v3-frame > .ds-tiletop > .regen-btn { flex: none; margin-left: auto; margin-top: 10px; width: 22px; padding: 0; justify-content: center; }
+/* UIRSI r37（总调度 11-01 定，UIAUDIT P1-3）：画布审片行的窄帧格（约 78px）里，左上“首帧 #n”标签和右上 ↻ 平时不显示，
+   鼠标悬停或键盘聚焦到格子时才出现，不盖人脸；位置仍按 r36（↻ 在右上角）。剧本页的宽格（.sf-fullrows，约 142px）照常常显示；
+   触屏（没有悬停）照常常显示。隐藏时 pointer-events: none，免得点到看不见的按钮；仍在可访问树里，Tab 能聚焦到 ↻ 并让它出现 */
+@media (hover: hover) {
+  :root .v3-rows:not(.sf-fullrows) .v3-frames > .v3-frame > .ds-tiletop { opacity: 0; pointer-events: none; transition: opacity .12s; }
+  :root .v3-rows:not(.sf-fullrows) .v3-frames > .v3-frame > .ds-tiletop > * { pointer-events: none; } /* ds.css 给子元素 auto，父级 none 拦不住 */
+  :root .v3-rows:not(.sf-fullrows) .v3-frames > .v3-frame:is(:hover, :focus-within) > .ds-tiletop { opacity: 1; }
+  :root .v3-rows:not(.sf-fullrows) .v3-frames > .v3-frame:is(:hover, :focus-within) > .ds-tiletop > * { pointer-events: auto; }
+}

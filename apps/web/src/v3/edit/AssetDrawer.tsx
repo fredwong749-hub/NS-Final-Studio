@@ -3,21 +3,31 @@
 // fredw-92/U3（v3.1 §3）：参考图组 = 每个用途一格缩略图网格，空格可拖图；先选图（上传 / 拖放 / 从版本或其他资产）再选用途；
 // 底图选项带预览；生成结果直接进抽屉里的修改链（按 parent 连起来），选中一版与上一版并排对比，满意再保存。
 // 提示词由项目方或写作方写，原样发送，不预填；不做内容检测。
+import { thumb } from "../../thumb";
 import { useEffect, useRef, useState, type DragEvent } from "react";
-import type { ShotSummary } from "../../types";
+import type { LookView, ShotSummary, WardrobeItemView } from "../../types";
 import { useStudio } from "../../store";
 import {
   apiV1, errText, isNotReady, ROLE_LABEL, STRENGTH_LABEL, slotToStage,
   type AssetRef, type CharacterAssetsV1, type RefRole, type Strength,
 } from "../api_v1";
 import { currentTake, etaFor, fmtSec, setEdit, takeUrl, trackJob, useEdit, type DrawerOpen } from "./state";
+import { cardName } from "./lanes";
 import { SLOT_NAME } from "./actions";
-import { bumpShotRefs } from "./RefBar";
+import { bumpShotRefs } from "./RefBar.helpers";
 import { loadScene, lockPlate, plateUrl, sceneName, sceneNotReady, unlockPlate, variantLabel, type SceneDetail, type SceneVersion } from "../pages/scenes_api";
 import "./AssetDrawer.css";
 
-type Save = "shot" | "version" | "episode";
-type Base = "none" | "asset" | "take" | "gen";
+type Save = "shot" | "version" | "episode" | "inplace";
+/** img = 这个资产现有的某一张图（单品的产品图 / 上身图…、形象的预览 / 参考图），按路径作底图 */
+type Base = "none" | "asset" | "take" | "gen" | "img";
+/** 这个资产自己现有的图（fredw-92/UXF3，审查 #33） */
+interface OwnImg {
+  url: string;
+  file: string | null;
+  label: string;
+}
+const VARIANT_LABEL: Record<string, string> = { clean: "产品图", worn: "上身图", front: "正面", "3q": "3/4 侧", side: "侧面", back: "背面" };
 /** 后端 asset_gens 记录（GET /api/assets/characters/{cid} 的 assets[].gens） */
 interface Gen {
   gen_id: string;
@@ -30,7 +40,13 @@ interface Gen {
   strength?: string | number;
   gpu?: number;
   created_at?: string;
+  label?: string;
+  /** fredw-92/CHR：作废候选（文件保留） */
+  void?: { by: string; owner_quote?: string; reason?: string; at?: string } | null;
 }
+/** fredw-92/CHR：作废候选的说明（谁作废、原话；文件保留） */
+const voidTitle = (label: string | undefined, v: NonNullable<Gen["void"]>) =>
+  `${label || "作废候选"}：${v.owner_quote ? `项目方原话“${v.owner_quote}”` : v.reason || v.by}（文件保留）`;
 /** 选中、还没定用途的图 */
 type Pending =
   | { src: "file"; file: File; url: string; name: string }
@@ -39,7 +55,8 @@ type Pending =
   | { src: "url"; url: string; name: string };
 
 const ROLES = Object.keys(ROLE_LABEL) as RefRole[];
-const GPU_LABEL: Record<0 | 3, string> = { 0: "出图卡 GPU0", 3: "视频卡 GPU3" };
+// fredw-92/UXF4（审查 N7）：卡名统一 lanes.cardName（“gpu33·卡0”）
+const GPU_LABEL: Record<0 | 3, string> = { 0: `出图卡 ${cardName(0)}`, 3: cardName(3) };
 const SRC_MIME = "application/x-ns-src";
 const REF_MIME = "application/x-ns-ref";
 
@@ -49,7 +66,13 @@ const SCENE_ROLE_LABEL: Record<RefRole, string> = { identity: "空间", style: "
 const SCENE_WIRE: Partial<Record<RefRole, string>> = { identity: "space", item: "prop" };
 const SCENE_FROM_WIRE: Record<string, RefRole> = { space: "identity", prop: "item", 空间: "identity", 道具: "item", 风格: "style", 色彩: "color" };
 /** DrawerOpen 加上场景资产（kind = "scene"，asset = scene_id，character 留空） */
-export type DrawerTarget = Omit<DrawerOpen, "kind"> & { kind: DrawerOpen["kind"] | "scene" };
+export type DrawerTarget = Omit<DrawerOpen, "kind"> & {
+  kind: DrawerOpen["kind"] | "scene";
+  /** fredw-92/UXF3（审查 #34）：assets = 从资产页打开，没有镜头上下文：不出现“本镜首帧”“只这一镜用”“本集默认” */
+  context?: "assets" | "shot";
+  /** 打开时已知的资产图（资产页卡片上的那张），抽屉数据回来前先显示 */
+  img?: string | null;
+};
 type AssetData = { id: string; name?: string; url?: string | null; refs?: AssetRef[]; versions?: import("../api_v1").AssetVersion[]; gens?: Gen[] };
 /** /api/assets/file?path=… → 相对项目根的路径（底图要发路径） */
 const pathOf = (url: string | null | undefined) => {
@@ -111,6 +134,7 @@ export function AssetDrawer({ shot, open, onClose, embedded }: AssetDrawerProps)
   const [picker, setPicker] = useState(false);
   const [dropOn, setDropOn] = useState<RefRole | "any" | null>(null);
   const [base, setBase] = useState<Base>("asset");
+  const [baseIdx, setBaseIdx] = useState(0);
   const [baseGen, setBaseGen] = useState<Gen | null>(null);
   const [prompt, setPrompt] = useState("");
   const [strength, setStrength] = useState<Strength>("medium");
@@ -118,15 +142,18 @@ export function AssetDrawer({ shot, open, onClose, embedded }: AssetDrawerProps)
   const [lastJob, setLastJob] = useState<string | null>(null);
   const [selGen, setSelGen] = useState<string | null>(null);
   const [full, setFull] = useState(false);
-  const [save, setSave] = useState<Save>("version");
+  const [save, setSave] = useState<Save>(dr.context === "assets" && dr.kind !== "scene" ? "inplace" : "version");
   const [label, setLabel] = useState("");
   const [owner, setOwner] = useState(false);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const d = studio.details[shot.id];
+  /** 资产页打开（没有镜头上下文）：不给“本镜”相关的选项（审查 #34 / #38） */
+  const noShot = dr.context === "assets" || !shot.id;
   const fromSlot = dr.fromTake?.slot ?? "first";
-  const take = dr.fromTake ? currentTake(es, d, shot.id, fromSlot) : currentTake(es, d, shot.id, "first");
+  const take = noShot ? null : dr.fromTake ? currentTake(es, d, shot.id, fromSlot) : currentTake(es, d, shot.id, "first");
   const takeImg = takeUrl(take);
+  const loading = isScene ? !sc.data && !sc.err : !!dr.character && !ca.data && !ca.err;
 
   useEffect(() => {
     if (!isScene) return;
@@ -150,9 +177,17 @@ export function AssetDrawer({ shot, open, onClose, embedded }: AssetDrawerProps)
       dead = true;
     };
   }, [dr.character, reload]);
-  // 资产自己没有图、也没有角色主图可用：默认改成“不选底图”
+  // 数据回来后定默认底图：资产自己有图 → 当前那张（审查 #33：在现有图上改）；没有图也没有角色主图 → “不选底图”
   useEffect(() => {
-    if ((ca.data || sc.data || sc.err) && base === "asset" && !baseImg) setBase("none");
+    if (!(ca.data || sc.data || sc.err) || base !== "asset") return;
+    if (ownImgs.length) {
+      const cur = pathOf(assetImg);
+      const i = ownImgs.findIndex((x) => x.file && x.file === cur);
+      setBaseIdx(i >= 0 ? i : 0);
+      setBase("img");
+    } else if (!baseImg) setBase("none");
+    // 无图单品（“生成单品图”）：默认把结果加到这件单品上，不另建一件同名单品（审查 #36）
+    if (item && !ownImgs.length) setSave("inplace");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ca.data, sc.data, sc.err]);
   useEffect(() => {
@@ -185,7 +220,9 @@ export function AssetDrawer({ shot, open, onClose, embedded }: AssetDrawerProps)
   const roleOf = (r: AssetRef): RefRole => roles[r.ref_id] ?? r.role ?? "style";
   /** 发给后端的用途 id（场景：空间 / 道具 用 space / prop） */
   const wire = (k: RefRole) => (isScene ? SCENE_WIRE[k] ?? k : k) as RefRole;
-  const used = refs.filter((r) => !off[r.ref_id]);
+  /** fredw-92/CHR：作废的参考图一律不用（后端也拒绝） */
+  const isOff = (r: AssetRef) => !!r.void || !!off[r.ref_id];
+  const used = refs.filter((r) => !isOff(r));
   /** 生成时的顺序：底图第一，其余按用途 人物 → 单件 → 风格 → 色彩（与后端 plan_gen 一致） */
   const ORDER: RefRole[] = ["identity", "item", "style", "color"];
   const ordered = [...used].sort((a, b) => ORDER.indexOf(roleOf(a)) - ORDER.indexOf(roleOf(b)));
@@ -197,7 +234,35 @@ export function AssetDrawer({ shot, open, onClose, embedded }: AssetDrawerProps)
   const mainUrl = isScene ? null : hero?.url ?? ca.data?.face_url ?? null;
   const mainFile = isScene ? null : hero?.file ?? pathOf(mainUrl);
   const baseImg = assetImg ?? (mainFile ? mainUrl : null);
-  const heroUrl = assetImg ?? mainUrl;
+  /** 单品在衣橱里的登记（文字 + 全部图片）；GET /api/assets/characters/{cid} 的 wardrobe[] */
+  const item = isScene
+    ? undefined
+    : ((ca.data as { wardrobe?: WardrobeItemView[] } | null)?.wardrobe ?? []).find((w) => w.id === dr.asset);
+  const lookFull = isScene ? undefined : ((ca.data as { looks?: LookView[] } | null)?.looks ?? []).find((l) => l.id === dr.asset);
+  /** 这个资产自己现有的图（单品：每个变体 / 版本一张；形象：预览图 + 参考图），新的在前 */
+  const ownImgs: OwnImg[] = [];
+  {
+    const seen = new Set<string>();
+    const push = (url: string | null | undefined, file: string | null | undefined, label: string) => {
+      if (!url) return;
+      const k = file ?? url;
+      if (seen.has(k)) return;
+      seen.add(k);
+      ownImgs.push({ url, file: file ?? pathOf(url), label });
+    };
+    if (item) {
+      for (const im of [...(item.image_urls?.length ? item.image_urls : item.images ?? [])].sort((a, b) => (b.version ?? 0) - (a.version ?? 0)))
+        push(im.url ?? null, im.file, `${VARIANT_LABEL[im.variant] ?? im.variant} v${im.version}`);
+      item.reference_urls?.forEach((u, i) => push(u, item.reference_images?.[i] ?? null, "参考图"));
+    }
+    if (lookFull) {
+      push(lookFull.preview_url, lookFull.preview_image ?? null, "形象预览");
+      lookFull.reference_urls?.forEach((u, i) => push(u, lookFull.reference_images?.[i] ?? null, "形象参考"));
+    }
+  }
+  const heroUrl = assetImg ?? ownImgs[0]?.url ?? mainUrl ?? dr.img ?? null;
+  /** 这件单品 / 形象登记的文字（只给人看；不会自动填进提示词） */
+  const itemText = item ? [item.name, item.description && item.description !== item.name ? item.description : ""].filter(Boolean).join("：") : "";
   const gens: Gen[] = (asset?.gens ?? []).filter((g) => g.gen_id);
   const gen = gens.find((g) => g.gen_id === selGen) ?? null;
   const genParent = gen?.parent ? gens.find((g) => g.gen_id === gen.parent) ?? null : null;
@@ -209,6 +274,7 @@ export function AssetDrawer({ shot, open, onClose, embedded }: AssetDrawerProps)
 
   /** 可选的图源：本资产的生成 / 版本、同一人物其他资产的参考图与主图 */
   const sources: { key: string; p: Pending; group: string }[] = [];
+  ownImgs.forEach((o, i) => sources.push({ key: `o:${i}`, group: isScene ? "这个场景现有的图" : "这个资产现有的图", p: { src: "url", url: o.url, name: o.label } }));
   for (const g of [...gens].reverse()) if (g.url) sources.push({ key: `g:${g.gen_id}`, group: "这个资产的生成", p: { src: "url", url: g.url, name: `生成 ${hhmm(g.created_at)}` } });
   for (const v of asset?.versions ?? []) if (v.url) sources.push({ key: `v:${v.id ?? v.n}`, group: "这个资产的版本", p: { src: "url", url: v.url, name: v.label ?? `v${v.n ?? ""}` } });
   for (const a of isScene ? [] : ca.data?.assets ?? []) {
@@ -292,6 +358,11 @@ export function AssetDrawer({ shot, open, onClose, embedded }: AssetDrawerProps)
       const b: Parameters<typeof apiV1.assetGenJob>[1] & { parent?: string } = { refs: used.map((r) => ({ ref_id: r.ref_id, role: wire(roleOf(r)) })), prompt, strength, gpu };
       if (base === "asset" && assetImg) b.base = "current"; // 后端只认 "current" | ref_id | 路径
       else if (base === "asset" && mainFile) b.base = mainFile; // 资产自己没图：用角色主图
+      if (base === "img") {
+        const o = ownImgs[baseIdx];
+        if (o?.file) b.base = o.file;
+        else if (o) b.base = "current";
+      }
       if (base === "take" && take) b.base = take.file;
       if (base === "gen" && baseGen?.file) {
         b.base = baseGen.file;
@@ -357,7 +428,14 @@ export function AssetDrawer({ shot, open, onClose, embedded }: AssetDrawerProps)
     if (save === "episode" && !owner) return studio.notify("设为本集默认需要项目方本人勾选确认", "err");
     setBusy(true);
     try {
-      const v = await apiV1.assetVersion(dr.asset, { ...saveFrom, label: label || dr.label, ...(isScene ? { variant } : {}) } as { job_id?: string; label: string });
+      // UX6（A B6）：“新版本”= mode=version（同一资产版本链）；“另存为新…”/“只这一镜” = 另存为新资产（POST /fork，
+      // 旧后端没有 /fork 时退回 versions 的旧默认，行为相同）
+      const body = { ...saveFrom, label: label || dr.label, ...(isScene ? { variant } : {}) } as { job_id?: string; label: string };
+      const v = isScene
+        ? await apiV1.assetVersion(dr.asset, body)
+        : save === "inplace"
+          ? await apiV1.assetVersion(dr.asset, { ...body, in_place: true, mode: "version" } as typeof body)
+          : await apiV1.assetFork(dr.asset, body);
       if (isScene) {
         // 场景 = 底图版本链：存完留在抽屉里，在“底图版本”里定稿
         studio.notify(`已存为底图版本 v${(v as SceneVersion).version ?? ""}（${variantLabel(variant)}）；需要时点“定稿为底图”`);
@@ -365,13 +443,18 @@ export function AssetDrawer({ shot, open, onClose, embedded }: AssetDrawerProps)
         return;
       }
       const newId = v.asset_id ?? v.id ?? dr.asset;
-      if (save !== "version" && dr.character) {
+      if ((save === "shot" || save === "episode") && dr.character && !noShot) {
         const ch = dr.kind === "look" ? { look: newId } : { parts: { [dr.kind]: newId } };
         await apiV1.refsApply(shot.id, save === "shot" ? "shot" : "episode", { characters: { [dr.character]: ch } }, false, save === "episode" ? "owner" : undefined);
       }
       bumpShotRefs();
-      studio.notify(save === "shot" ? "已存为只这一镜用" : save === "episode" ? "已设为本集默认（造型确认需重做）" : "已存为资产新版本");
-      await studio.refreshAfter([shot.id]);
+      studio.notify(
+        save === "shot" ? "已存为只这一镜用"
+          : save === "episode" ? "已设为本集默认（造型确认需重做）"
+            : save === "inplace" ? "已加到这个资产上（用到它的镜头会标为过期）"
+              : "已存为资产新版本",
+      );
+      if (!noShot) await studio.refreshAfter([shot.id]);
       close();
     } catch (e) {
       studio.notify(`保存：${errText(e, "W5 /assets/{id}/versions")}`, "err");
@@ -380,14 +463,30 @@ export function AssetDrawer({ shot, open, onClose, embedded }: AssetDrawerProps)
     }
   }
 
-  const baseOpts: { k: Base; t: string; url: string | null; ok: boolean }[] = [
-    assetImg
-      ? { k: "asset", t: isScene ? "当前底图" : "当前资产图", url: assetImg, ok: true }
-      : { k: "asset", t: isScene ? "当前底图（还没有）" : mainFile ? "角色主图" : "当前资产图（还没有）", url: mainFile ? mainUrl : null, ok: !!mainFile },
-    { k: "take", t: `本镜${SLOT_NAME[fromSlot]}${take ? ` #${take.n}` : ""}`, url: takeImg, ok: !!take },
+  const curPath = pathOf(assetImg);
+  const baseOpts: { k: Base; i?: number; t: string; url: string | null; ok: boolean }[] = [
+    ...(ownImgs.length
+      ? ownImgs.slice(0, 6).map((o, i) => ({ k: "img" as Base, i, t: `${o.file && o.file === curPath ? "当前 · " : "现有 · "}${o.label}`, url: o.url, ok: true }))
+      : loading
+        ? [{ k: "asset" as Base, t: "读取这个资产的图…", url: dr.img ?? null, ok: false }]
+        : [
+          assetImg
+            ? { k: "asset" as Base, t: isScene ? "当前底图" : "当前资产图", url: assetImg, ok: true }
+            : { k: "asset" as Base, t: isScene ? "当前底图（还没有）" : mainFile ? "角色主图" : "当前资产图（还没有）", url: mainFile ? mainUrl : null, ok: !!mainFile },
+        ]),
+    ...(noShot ? [] : [{ k: "take" as Base, t: `本镜${SLOT_NAME[fromSlot]}${take ? ` #${take.n}` : ""}`, url: takeImg, ok: !!take }]),
     ...(baseGen ? [{ k: "gen" as Base, t: "选中的生成版", url: baseGen.url ?? null, ok: !!baseGen.file }] : []),
     { k: "none", t: "不选底图（只用参考图）", url: null, ok: true },
   ];
+  const saveOpts: [Save, string][] = isScene
+    ? [["version", "存为场景新底图版本（原底图不动）"]]
+    : [
+      ...(noShot ? [] : ([["shot", "只这一镜用（存为镜头覆盖）"]] as [Save, string][])),
+      // UX5（A6 / A §3.4）：名字直接写结果——“新版本”= 同一个资产升版；“另存为新…”= 多出一个资产（只改文案，不改保存逻辑）
+      ["inplace", `存为这个${dr.kind === "look" ? "形象" : "单品"}的新版本（进版本链，资产不变）${item?.used_by_shots ? `：用到它的 ${item.used_by_shots} 镜只标为过期，不自动重出` : "：用到它的镜头只标为过期，不自动重出"}`],
+      ["version", dr.kind === "look" ? "另存为新形象（多一套形象，原形象不动）" : "另存为新单品（多一件单品，原单品不动）"],
+      ...(noShot ? [] : ([["episode", "设为本集默认（造型确认需重做）"]] as [Save, string][])),
+    ];
   const cmpLeft = genParent?.url ?? null;
   const cmpLeftLabel = genParent ? `上一版 · ${hhmm(genParent.created_at)}` : "这是链的起点";
 
@@ -396,7 +495,7 @@ export function AssetDrawer({ shot, open, onClose, embedded }: AssetDrawerProps)
       <header>
         {heroUrl ? <img className="v3e-dthumb" src={heroUrl} alt="" /> : <span className="v3e-dthumb e" />}
         <div>
-          <h3>编辑资产 · {dr.label}</h3>
+          <h3>{noShot ? "编辑资产本身" : `编辑 · 从 ${dr.shot} 打开`} · {dr.label}</h3>
           <div className="sub">① 选图并定用途 → ② 选底图、写提示词 → ③ 出图卡生成，结果进修改链 → ④ 满意再保存</div>
         </div>
         <button className="v3e-x" onClick={close} aria-label={embedded ? "返回" : "关闭"}>
@@ -447,7 +546,7 @@ export function AssetDrawer({ shot, open, onClose, embedded }: AssetDrawerProps)
                 <button className="v3e-btn sm" onClick={() => fileRef.current?.click()}>
                   上传图片…
                 </button>
-                <button
+                {!noShot && <button
                   className="v3e-btn sm v3a-takebtn"
                   disabled={!take}
                   draggable={!!take}
@@ -458,7 +557,7 @@ export function AssetDrawer({ shot, open, onClose, embedded }: AssetDrawerProps)
                   {takeImg && <img src={takeImg} alt="" />}
                   本镜{SLOT_NAME[fromSlot]}
                   {take ? ` #${take.n}` : "（还没有图）"}
-                </button>
+                </button>}
                 <button className={`v3e-btn sm${picker ? " on" : ""}`} disabled={!sources.length} onClick={() => setPicker(!picker)}>
                   从版本 / 其他资产选{sources.length ? `（${sources.length}）` : ""} {picker ? "▴" : "▾"}
                 </button>
@@ -494,7 +593,7 @@ export function AssetDrawer({ shot, open, onClose, embedded }: AssetDrawerProps)
                             onDragStart={(e) => e.dataTransfer.setData(SRC_MIME, s.key)}
                             onClick={() => choose(s.p)}
                           >
-                            {s.p.url ? <img src={s.p.url} alt="" loading="lazy" /> : <span className="e">无图</span>}
+                            {s.p.url ? <img src={thumb(s.p.url, 240) ?? s.p.url} alt="" loading="lazy" /> : <span className="e">无图</span>}
                             <span className="nm">{s.p.name}</span>
                           </button>
                         ))}
@@ -524,25 +623,26 @@ export function AssetDrawer({ shot, open, onClose, embedded }: AssetDrawerProps)
                 >
                   <div className="v3a-grp-h">
                     <b>取{RL[role]}</b>
-                    <span>{g.length ? `${g.filter((r) => !off[r.ref_id]).length}/${g.length} 张在用` : "拖图到这里"}</span>
+                    <span>{g.length ? `${g.filter((r) => !isOff(r)).length}/${g.length} 张在用` : "拖图到这里"}</span>
                   </div>
                   {g.length > 0 && (
                     <div className="v3a-grid">
                       {g.map((r) => (
                         <div
                           key={r.ref_id}
-                          className={`v3a-th ref${off[r.ref_id] ? " off" : ""}`}
+                          className={`v3a-th ref${isOff(r) ? " off" : ""}`}
                           draggable
                           onDragStart={(e) => e.dataTransfer.setData(REF_MIME, r.ref_id)}
                         >
                           <button
                             className="im"
-                            onClick={() => setOff((m) => ({ ...m, [r.ref_id]: !m[r.ref_id] }))}
-                            title={off[r.ref_id] ? "没在用 · 点一下用这张" : "在用 · 点一下不用这张；拖到别的组换用途"}
+                            onClick={() => !r.void && setOff((m) => ({ ...m, [r.ref_id]: !m[r.ref_id] }))}
+                            title={r.void ? "已作废，不能用作参考" : off[r.ref_id] ? "没在用 · 点一下用这张" : "在用 · 点一下不用这张；拖到别的组换用途"}
                           >
                             {r.url ? <img src={r.url} alt="" /> : <span className="e">无图</span>}
                           </button>
-                          {!off[r.ref_id] && <i className="no">图{imgNo(r)}</i>}
+                          {!isOff(r) && <i className="no">图{imgNo(r)}</i>}
+                          {r.void && <i className="void" title={voidTitle(r.label, r.void) + "；不能再用作参考"}>作废</i>}
                           <button className="x" onClick={() => void dropRef(r)} title="从这个资产上去掉这张参考" aria-label="去掉这张参考">
                             ×
                           </button>
@@ -565,12 +665,27 @@ export function AssetDrawer({ shot, open, onClose, embedded }: AssetDrawerProps)
           </h4>
           <div className="v3a-bases">
             {baseOpts.map((o) => (
-              <button key={o.k} className={`v3a-base${base === o.k ? " on" : ""}`} disabled={!o.ok} onClick={() => setBase(o.k)} title={o.ok ? o.t : `${o.t}（没有图，不能选）`}>
+              <button
+                key={`${o.k}:${o.i ?? ""}`}
+                className={`v3a-base${base === o.k && (o.i == null || o.i === baseIdx) ? " on" : ""}`}
+                disabled={!o.ok}
+                onClick={() => {
+                  setBase(o.k);
+                  if (o.i != null) setBaseIdx(o.i);
+                }}
+                title={o.ok ? o.t : `${o.t}（没有图，不能选）`}
+              >
                 <span className="pv">{o.url ? <img src={o.url} alt="" /> : <span className="e">{o.k === "none" ? "无底图" : "没有图"}</span>}</span>
                 <span className="t">{o.t}</span>
               </button>
             ))}
           </div>
+          {itemText && (
+            <div className="v3a-ctx" title="衣橱里登记的文字，只给你参考；不会自动填进提示词">
+              <b>这件单品登记的文字</b>
+              <span>{itemText}</span>
+            </div>
+          )}
           <label className="v3e-fld">
             <span>提示词（原样发送，不改写；写明图1、图2…各自的用途）</span>
             <textarea rows={5} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
@@ -589,10 +704,11 @@ export function AssetDrawer({ shot, open, onClose, embedded }: AssetDrawerProps)
           ) : (
             <div className="v3a-chain">
               {chainOrder(gens).map(({ g, depth }) => (
-                <button key={g.gen_id} className={`v3a-node${selGen === g.gen_id ? " sel" : ""}`} style={{ paddingLeft: 6 + Math.min(depth, 5) * 14 }} onClick={() => setSelGen(g.gen_id)} title={g.prompt}>
+                <button key={g.gen_id} className={`v3a-node${selGen === g.gen_id ? " sel" : ""}${g.void ? " void" : ""}`} style={{ paddingLeft: 6 + Math.min(depth, 5) * 14 }} onClick={() => setSelGen(g.gen_id)} title={g.void ? voidTitle(g.label, g.void) + "\n" + (g.prompt ?? "") : g.prompt}>
                   {depth > 0 && <span className="tw">└</span>}
-                  {g.url ? <img src={g.url} alt="" loading="lazy" /> : <span className="th e" />}
+                  {g.url ? <img src={thumb(g.url, 240) ?? g.url} alt="" loading="lazy" /> : <span className="th e" />}
                   <span className="when">{hhmm(g.created_at)}</span>
+                  {g.void && <span className="tag void">作废候选</span>}
                   <span className="ins">{g.prompt ?? ""}</span>
                   {baseGen?.gen_id === g.gen_id && base === "gen" && <span className="tag">底图</span>}
                 </button>
@@ -645,7 +761,7 @@ export function AssetDrawer({ shot, open, onClose, embedded }: AssetDrawerProps)
                   const isLocked = !!cur?.locked && cur.version === v.version;
                   return (
                     <div key={v.id ?? v.version ?? i} className={`v3a-plate${isLocked ? " on" : ""}`}>
-                      {v.url ? <img src={v.url} alt="" loading="lazy" /> : <span className="e">v{v.version ?? i + 1}</span>}
+                      {v.url ? <img src={thumb(v.url, 240) ?? v.url} alt="" loading="lazy" /> : <span className="e">v{v.version ?? i + 1}</span>}
                       <div className="nm">
                         v{v.version ?? i + 1} · {variantLabel(vv)}
                         {v.label ? ` · ${v.label}` : ""}
@@ -670,7 +786,7 @@ export function AssetDrawer({ shot, open, onClose, embedded }: AssetDrawerProps)
               <div className="v3a-grid">
                 {asset.versions.map((v, i) => (
                   <span key={v.id ?? i} className="v3a-th ro" title={v.label ?? `v${v.n ?? i + 1}`}>
-                    {v.url ? <img src={v.url} alt="" loading="lazy" /> : <span className="e">v{v.n ?? i + 1}</span>}
+                    {v.url ? <img src={thumb(v.url, 240) ?? v.url} alt="" loading="lazy" /> : <span className="e">v{v.n ?? i + 1}</span>}
                     <span className="nm">{v.label ?? `v${v.n ?? i + 1}`}</span>
                   </span>
                 ))}
@@ -681,14 +797,7 @@ export function AssetDrawer({ shot, open, onClose, embedded }: AssetDrawerProps)
 
         <section>
           <h4>④ 满意后保存{gen ? <span>保存选中的这一版（{hhmm(gen.created_at)}）</span> : null}</h4>
-          {(isScene
-            ? ([["version", "存为场景新底图版本（原底图不动）"]] as [Save, string][])
-            : [
-              ["shot", "只这一镜用（存为镜头覆盖）"],
-              ["version", "存为资产新版本（形象数 +1）"],
-              ["episode", "设为本集默认（造型确认需重做）"],
-            ] as [Save, string][]
-          ).map(([k, t]) => (
+          {saveOpts.map(([k, t]) => (
             <label key={k} className={`v3e-radio ${save === k ? "on" : ""}`}>
               <input type="radio" checked={save === k} onChange={() => setSave(k)} /> {t}
             </label>

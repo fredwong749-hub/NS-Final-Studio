@@ -1,0 +1,72 @@
+[
+  {
+    "id": "GV_rt",
+    "wait": 8000,
+    "title": "渲染任务中心",
+    "steps": [
+      {
+        "after": 3000,
+        "click": "渲染任务"
+      },
+      {
+        "shot": "a"
+      },
+      {
+        "js": "const d=document.querySelector('[class*=rt-],[class*=render-task],[role=dialog],aside'); const t=(d||document.body).innerText; return {counts:(t.match(/(渲染中|排队|等待|失败|完成|全部)\\s*\\d+/g)||[]).slice(0,10), rows:(t.match(/(首帧|尾帧|视频|配音|合成)\\s*·\\s*第\\d+集\\s*S\\d+/g)||[]).length, rawIds:(t.match(/[0-9a-f]{8}-[0-9a-f]{4}|prompt_id|client_id|Traceback|Exception|HTTP \\d{3}|None|null/g)||[]).slice(0,10), errs:(t.match(/[^\\n]*(失败|出错|错误)[^\\n]*/g)||[]).slice(0,8)}"
+      },
+      {
+        "after": 2000,
+        "click": "失败"
+      },
+      {
+        "shot": "b"
+      },
+      {
+        "js": "const t=document.body.innerText; return {errs:(t.match(/[^\\n]*(失败|出错|错误|原因)[^\\n]*/g)||[]).slice(0,10), tech:(t.match(/Traceback|Exception|KeyError|HTTP \\d{3}|OOM|CUDA|prompt_id/g)||[]).slice(0,10)}"
+      }
+    ],
+    "path": "/#ep02"
+  },
+  {
+    "id": "GV_gpu",
+    "wait": 8000,
+    "title": "GPU 面板",
+    "steps": [
+      {
+        "after": 3000,
+        "click": "卡 "
+      },
+      {
+        "shot": "a"
+      },
+      {
+        "js": "return document.body.innerText.match(/gpu\\d+[^\\n]{0,60}/gi)?.slice(0,10) ?? null"
+      }
+    ],
+    "path": "/#ep02"
+  },
+  {
+    "id": "GV_queue",
+    "wait": 8000,
+    "title": "底部任务队列",
+    "steps": [
+      {
+        "js": "const st=[...document.querySelectorAll('button')].find(b=>/队列|任务/.test(b.innerText) && b.getBoundingClientRect().y<60); return st?st.innerText:null"
+      },
+      {
+        "after": 2500,
+        "click": [
+          "队列",
+          "任务队列"
+        ]
+      },
+      {
+        "shot": "a"
+      },
+      {
+        "js": "const t=document.body.innerText; return {tableToggle:[...document.querySelectorAll('button,[role=tab]')].map(b=>b.innerText.trim()).filter(x=>/表格|列表|卡片/.test(x)).slice(0,5), retryFailed:[...document.querySelectorAll('button')].some(b=>/重试失败|重试全部失败/.test(b.innerText)), tabs:[...document.querySelectorAll('.drawer-tabs button')].map(b=>b.innerText.trim())}"
+      }
+    ],
+    "path": "/#ep02"
+  }
+]

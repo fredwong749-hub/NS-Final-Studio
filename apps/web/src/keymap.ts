@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { LOCK_SUPPORTED } from "./api";
 import { PASTE_FIELDS, type Studio } from "./store";
 import type { Stage } from "./types";
-import { isTypingTarget, stageActive, stageTakes } from "./util";
+import { isTypingTarget, stageActive, stageTakes, usesGpu3Chain } from "./util";
 
 /** W4a：v3 画布（镜头视图、非旧版镜头行、不在 #/ 页面）才响应 L / Enter / Esc 的模式切换 */
 const v3On = (s: Studio) => s.view === "episode" && !s.classic && !location.hash.startsWith("#/");
@@ -16,6 +16,16 @@ export function nextUnreviewed(st: Studio): string | null {
     if (s.review.state === "unreviewed") return s.id;
   }
   return null;
+}
+
+/** fredw-92/UXF1（审查 #15）：页面上有没有开着的浮层（菜单 / 弹窗 / 抽屉）。有就 Esc 只关它，不退出精修 */
+const OVERLAY_SEL = [
+  "[role=\"dialog\"]", "[role=\"menu\"]", "[aria-modal=\"true\"]", ".v3-pop", ".v3e-menu", ".v3e-modal", ".v3e-drawer-wrap",
+  ".v3-overlay", ".v3-vbox", ".v3p-modal-wrap", ".modal-back", "[data-overlay]",
+].join(",");
+export function openOverlay(): HTMLElement | null {
+  const all = [...document.querySelectorAll<HTMLElement>(OVERLAY_SEL)].filter((el) => el.getClientRects().length > 0);
+  return all.length ? all[all.length - 1] : null;
 }
 
 function togglePlayer() {
@@ -45,11 +55,16 @@ export function useKeymap(st: Studio) {
       if (e.repeat) return;
       const modal = s.confirmReq || s.rejectFor || s.helpOpen || s.paletteOpen || s.viewer;
       if (e.key === "Escape") {
+        // UXF1 #15：Esc 只关最上面那一层；什么都没开时才离开精修
+        if (e.defaultPrevented) return;
         if (s.confirmReq) s.setConfirmReq(null);
         else if (s.rejectFor) s.setRejectFor(null);
         else if (s.helpOpen) s.setHelpOpen(false);
         else if (s.paletteOpen) s.setPaletteOpen(false);
-        else if (s.reviewMode) s.setReviewMode(false);
+        else if (openOverlay()) {
+          // 浮层自己有 Esc 处理的（弹窗 / 抽屉）由它关；只认“点外面关”的菜单，补一次点外面
+          document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+        } else if (s.reviewMode) s.setReviewMode(false);
         else if (s.preview) s.setPreview(null);
         else if (s.multi.size) s.setMulti(new Set());
         else if (s.drawer.open) s.setDrawer({ ...s.drawer, open: false });
@@ -84,20 +99,36 @@ export function useKeymap(st: Studio) {
           return handled(), s.stepShot(-1);
         case "ArrowRight":
           return handled(), s.stepShot(1);
+        // UXF1 #14：↑/↓ = 上一镜 / 下一镜（一镜一行的竖向列表），不再整集跳走；切集只用 PageUp / PageDown（v3 画布里 [ / ] 也行）
         case "ArrowUp":
+          return handled(), s.stepShot(-1);
+        case "ArrowDown":
+          return handled(), s.stepShot(1);
         case "PageUp":
           return handled(), s.gotoEpisode(s.epNum - 1);
-        case "ArrowDown":
         case "PageDown":
           return handled(), s.gotoEpisode(s.epNum + 1);
         case "g":
           return handled(), s.setPaletteOpen(true);
         case "1":
-          return s.setView("overview");
+          // 项目方 11-01：全剧总览恢复（10 集 × 每镜，衔接 / 场景 / 换装 / 人物时间线）
+          location.hash = "#/overview";
+          return handled();
         case "2":
+          // 2 = 回本集画布
+          if (location.hash.startsWith("#/")) location.hash = `#ep${String(s.epNum).padStart(2, "0")}`;
           return s.setView("episode");
         case "4":
-          return s.setView("assets");
+          // UX5（D7）：4 = 资产中心（以前进旧资产库 view=assets）；5 = 成片
+          location.hash = "#/assets";
+          return;
+        case "5":
+          location.hash = "#/cut";
+          return;
+        case "n":
+          // UIRSI：N = 新建剧本（故事提纲 → 自动写）
+          location.hash = "#/script-create?new=1";
+          return;
         case "d":
           return handled(), s.cycleDensity();
         case "t":
@@ -112,7 +143,7 @@ export function useKeymap(st: Studio) {
           if (onButton) return;
           if (e.shiftKey && s.preview && s.preview.shotId === sel) {
             // gpu3 版本链只读：不能用笔记本的 activate 设 gpu3 的版本号
-            if (s.details[sel]?.gpu3_takes) return handled(), s.notify("gpu3 负责此镜：当前版本由 gpu3 决定（画布只看 / 对比）", "err");
+            if (usesGpu3Chain(s.details[sel])) return handled(), s.notify("gpu3 负责此镜：当前版本由 gpu3 决定（画布只看 / 对比）", "err");
             return handled(), void s.activate(s.preview.shotId, s.preview.stage, s.preview.n);
           }
           if (v3On(s)) return handled(), s.setCanvasMode("edit"); // W4a：Enter 进精修
@@ -146,6 +177,7 @@ export function useKeymap(st: Studio) {
           return;
         case "[":
         case "]": {
+          if (v3On(s)) return handled(), s.gotoEpisode(s.epNum + (k === "]" ? 1 : -1)); // UXF1 #14：v3 画布 [ / ] = 上一集 / 下一集
           if (!d) return;
           const stage: Stage = s.inspTab === "last" ? "last" : s.inspTab === "video" ? "video" : "image";
           // 与检查器对比位同一条版本链（gpu3 负责的镜头 = gpu3 链）

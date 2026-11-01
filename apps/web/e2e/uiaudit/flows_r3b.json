@@ -1,0 +1,118 @@
+[
+  {
+    "wait": 8000,
+    "path": "/#ep02",
+    "id": "PW16",
+    "title": "画布 90 秒",
+    "steps": [
+      {
+        "wait": 90000
+      },
+      {
+        "js": "const a=performance.getEntriesByType('resource').filter(e=>e.name.includes('/api/')); const shots=a.filter(e=>/\\/api\\/shots\\/ep\\d+-S\\d+(\\?|$)/.test(e.name)); const eps=[...new Set(shots.map(e=>(e.name.match(/ep\\d+/)||[''])[0]))]; let maxConc=0; for(const s of shots){ const c=shots.filter(o=>o.startTime<s.startTime+s.duration && o.startTime+o.duration>s.startTime).length; maxConc=Math.max(maxConc,c);} return {apiTotal:a.length, shotFetches:shots.length, shotEpisodes:eps, maxConcurrentShotFetch:maxConc, slowOver5s:a.filter(e=>e.duration>5000).map(e=>new URL(e.name).pathname+' '+Math.round(e.duration)).slice(0,5), summaryFetches:a.filter(e=>/episodes\\/summary/.test(e.name)).length};"
+      }
+    ]
+  },
+  {
+    "wait": 8000,
+    "path": "/#ep02-S1",
+    "id": "R3b_trash",
+    "title": "🗑 删除框",
+    "steps": [
+      {
+        "after": 4000,
+        "click": "精修"
+      },
+      {
+        "js": "for (let i=0;i<120;i++){ if (!/正在读取/.test(document.body.innerText)) break; await new Promise(r=>setTimeout(r,500)); } return 1"
+      },
+      {
+        "click": "🗑",
+        "after": 2000,
+        "within": ".v3e-stage, .v3e"
+      },
+      {
+        "tabtrap": ".ds-modal",
+        "n": 4
+      }
+    ]
+  },
+  {
+    "wait": 8000,
+    "path": "/#ep02-S1",
+    "id": "R3b_edit",
+    "title": "✎ 改",
+    "steps": [
+      {
+        "after": 4000,
+        "click": "精修"
+      },
+      {
+        "js": "for (let i=0;i<120;i++){ if (!/正在读取/.test(document.body.innerText)) break; await new Promise(r=>setTimeout(r,500)); } return 1"
+      },
+      {
+        "click": "✎ 改",
+        "after": 2000,
+        "within": ".v3e"
+      },
+      {
+        "tabtrap": ".ds-drawer",
+        "n": 4
+      }
+    ]
+  },
+  {
+    "wait": 8000,
+    "path": "/#ep02-S1",
+    "id": "R3b_reject",
+    "title": "✗ 不要",
+    "steps": [
+      {
+        "after": 4000,
+        "click": "精修"
+      },
+      {
+        "js": "for (let i=0;i<120;i++){ if (!/正在读取/.test(document.body.innerText)) break; await new Promise(r=>setTimeout(r,500)); } return 1"
+      },
+      {
+        "after": 1500,
+        "click": "✗ 不要"
+      },
+      {
+        "tabtrap": "[role=dialog], .v3-pop, .ds-pop",
+        "n": 4
+      }
+    ]
+  },
+  {
+    "title": "审片行 🗑 1280",
+    "steps": [
+      {
+        "after": 2500,
+        "click": "=审片"
+      },
+      {
+        "js": "const tile=document.querySelector('[data-shot] [class*=tile], [data-shot] [class*=frame]'); const b=[...document.querySelectorAll('[data-shot] button')].filter(x=>/^[.…⋯]+$/.test(x.innerText.trim()) && x.getBoundingClientRect().width>0 && x.getBoundingClientRect().x<400); if(!b[0]) return 'no tile menu'; b[0].click(); return b.length",
+        "after": 1200
+      },
+      {
+        "after": 2000,
+        "click": "🗑"
+      },
+      {
+        "shot": "a"
+      },
+      {
+        "tabtrap": ".ds-modal",
+        "n": 4
+      }
+    ],
+    "wait": 8000,
+    "id": "R3b_rowtrash",
+    "size": [
+      1280,
+      720
+    ],
+    "path": "/#ep02"
+  }
+]

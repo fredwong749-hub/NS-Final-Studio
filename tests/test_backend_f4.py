@@ -36,6 +36,8 @@ def test_fresh_canvas_takes_not_stale_and_script_change_still_stales(env, monkey
     # 指令改图链上再改一次：仍沿链取最早整张出图的基准
     t3 = _job(c, {"stage": "first", "mode": "instruct", "instruction": "再亮一点"})["take"]
     assert t3["basis_prompt"] == t1["prompt"] and _stale(c, "image", t3["n"])[:2] == ([], [])
+    # G3（项目方 11-01，PRODUCER）：契约没有结果（测试里 postflight 默认 ok=None）的编辑版本不设为当前
+    assert P.load_takes(SHOT)["active"]["image"] not in (t2["n"], t3["n"])
     # 定稿 v2 → 由定稿首帧做尾帧（渲染时在第一句后插了身份底板说明）→ 不过期
     assert c.post(f"/api/shots/{SHOT}/takes/first/{t2['n']}/lock").status_code == 200
     l1 = _job(c, {"stage": "last", "mode": "regen"})["take"]
@@ -46,8 +48,13 @@ def test_fresh_canvas_takes_not_stale_and_script_change_still_stales(env, monkey
     l2 = _job(c, {"stage": "last", "mode": "instruct", "instruction": "表情更慌乱"})["take"]
     assert _stale(c, "last", l2["n"])[:2] == ([], [])
     # 定稿后又在首帧上改了一版（当前 ≠ 定稿）：尾帧由定稿首帧得到 → 不算「首帧已换」
+    # G3：t4 过了契约，但 v2 是项目方定稿 → 不被自动挤掉，当前仍是 v2；尾帧由定稿首帧得到 → 不算「首帧已换」
+    from ns_render import unified_frame as UF
+    monkeypatch.setattr(UF, "_postflight", lambda final_rel, job, host: {"ok": True, "items": [], "blocking": []})
     t4 = _job(c, {"stage": "first", "mode": "instruct", "instruction": "换个角度", "parent": t2["n"]})["take"]
-    assert P.load_takes(SHOT)["active"]["image"] == t4["n"] and _stale(c, "last", l2["n"])[0] == []
+    t4d = next(t for t in P.load_takes(SHOT)["takes"] if t["stage"] == "image" and t["n"] == t4["n"])
+    assert (t4d.get("contract") or {}).get("postflight", {}).get("ok") is True          # 编辑链的契约真的跑了
+    assert P.load_takes(SHOT)["active"]["image"] == t2["n"] and _stale(c, "last", l2["n"])[0] == []
     # 换定稿首帧 → 尾帧过期（本镜原因）
     c.post(f"/api/shots/{SHOT}/takes/first/{t4['n']}/lock")
     assert "首帧已换" in _stale(c, "last", l2["n"])[0]
@@ -63,6 +70,13 @@ def test_fresh_canvas_takes_not_stale_and_script_change_still_stales(env, monkey
         assert "剧本已改" in _stale(c, "image", n)[0], n
     for n in (l1["n"], l2["n"]):
         assert "本镜输入已改" in _stale(c, "last", n)[0], n
+    # G3 正向：解除定稿后，过了契约的编辑版本自动成为当前；契约不过的不设
+    c.post(f"/api/shots/{SHOT}/takes/first/{t2['n']}/unlock")
+    t5 = _job(c, {"stage": "first", "mode": "instruct", "instruction": "再暖一点", "parent": t2["n"]})["take"]
+    assert P.load_takes(SHOT)["active"]["image"] == t5["n"]
+    monkeypatch.setattr(UF, "_postflight", lambda final_rel, job, host: {"ok": False, "items": [], "blocking": ["Q1"]})
+    t6 = _job(c, {"stage": "first", "mode": "instruct", "instruction": "再冷一点", "parent": t2["n"]})["take"]
+    assert P.load_takes(SHOT)["active"]["image"] == t5["n"] != t6["n"]
 
 
 def test_upload_parent_has_no_basis():
@@ -121,7 +135,8 @@ def test_video_job_eta_uses_history(env, monkeypatch):
     monkeypatch.setattr(J, "submit", lambda kind, shot_id, gpu, run, params=None, eta_s=None, **m:
                         started.append(eta_s) or {"eta_s": eta_s})
     c, data, clients = env
-    r = c.post(f"/api/shots/{SHOT}/video-jobs", json={})
+    # base 写明：本测只管 eta；默认基底（2026-11-01 起 pika_flex）要求道上有 LoRA，这里的假道没有 LoRA 列表
+    r = c.post(f"/api/shots/{SHOT}/video-jobs", json={"base": "official_base"})
     assert r.status_code == 200, r.text
     assert started == [777.0] and r.json()["eta_s"] == 777.0
     time.sleep(0)

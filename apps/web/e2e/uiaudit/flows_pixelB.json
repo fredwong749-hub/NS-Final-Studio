@@ -1,0 +1,46 @@
+[
+  {
+    "size": [
+      1280,
+      720
+    ],
+    "id": "PB_1280",
+    "title": "精修 1280",
+    "path": "/#ep02",
+    "wait": 8000,
+    "steps": [
+      {
+        "after": 5000,
+        "click": "精修"
+      },
+      {
+        "js": "const out=[]; for (const lb of [...document.querySelectorAll('label.v3e-cost, label.v3e-gpu, .v3e-cost')]) { const sel=lb.querySelector('select'); if(!sel) continue; const txt=[...lb.childNodes].find(n=>n.nodeType===3&&n.textContent.trim()) ; let tr=null; if(txt){const r=document.createRange(); r.selectNodeContents(txt); tr=r.getBoundingClientRect();} const span=tr||lb.querySelector('span')?.getBoundingClientRect(); const s=sel.getBoundingClientRect(); const hint=lb.querySelector('.v3e-lanehint')?.getBoundingClientRect()||lb.parentElement?.querySelector('.v3e-lanehint')?.getBoundingClientRect(); out.push({labelMid: span? Math.round(span.top+span.height/2):null, selectMid: Math.round(s.top+s.height/2), selectH: Math.round(s.height), labelLeft: span?Math.round(span.left):null, hintLeft: hint?Math.round(hint.left):null}); } return out;"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  },
+  {
+    "size": [
+      1440,
+      900
+    ],
+    "id": "PB_1440",
+    "title": "精修 1440",
+    "path": "/#ep02",
+    "wait": 8000,
+    "steps": [
+      {
+        "after": 5000,
+        "click": "精修"
+      },
+      {
+        "js": "const out=[]; for (const lb of [...document.querySelectorAll('label.v3e-cost, label.v3e-gpu, .v3e-cost')]) { const sel=lb.querySelector('select'); if(!sel) continue; const txt=[...lb.childNodes].find(n=>n.nodeType===3&&n.textContent.trim()) ; let tr=null; if(txt){const r=document.createRange(); r.selectNodeContents(txt); tr=r.getBoundingClientRect();} const span=tr||lb.querySelector('span')?.getBoundingClientRect(); const s=sel.getBoundingClientRect(); const hint=lb.querySelector('.v3e-lanehint')?.getBoundingClientRect()||lb.parentElement?.querySelector('.v3e-lanehint')?.getBoundingClientRect(); out.push({labelMid: span? Math.round(span.top+span.height/2):null, selectMid: Math.round(s.top+s.height/2), selectH: Math.round(s.height), labelLeft: span?Math.round(span.left):null, hintLeft: hint?Math.round(hint.left):null}); } return out;"
+      },
+      {
+        "shot": "a"
+      }
+    ]
+  }
+]

@@ -1,0 +1,40 @@
+[
+ {
+  "id": "V3_down_cut",
+  "title": "r35#3 后端连不上：成片页",
+  "path": "/#/cut",
+  "wait": 9000,
+  "steps": [
+   {
+    "js": "const t=document.body.innerText; return {hasDataPath:/data\\/episodes\\//.test(t), sysText:(t.match(/data\\/[\\w\\/.-]+|\\/api\\/[\\w\\/-]+|:8800|\\.json|Traceback|Failed to fetch/g)||[]).slice(0,10), skeletons:document.querySelectorAll('[class*=skeleton],[class*=skel]').length, text:t.slice(0,400).replace(/\\s+/g,' ')};"
+   },
+   {
+    "shot": "a"
+   }
+  ]
+ },
+ {
+  "id": "V3_down_script",
+  "title": "r35#3 后端连不上：剧本页",
+  "path": "/#/script-create",
+  "wait": 9000,
+  "steps": [
+   {
+    "js": "const t=document.body.innerText; const btns=[...document.querySelectorAll('main button, [class*=main] button, button')].filter(b=>/新建剧本/.test(b.innerText)).map(b=>b.innerText.trim()); return {readFail:/写作记录暂时读不到/.test(t), newBtns:btns, skeletons:document.querySelectorAll('[class*=skeleton],[class*=skel]').length, sysText:(t.match(/data\\/[\\w\\/.-]+|\\/api\\/[\\w\\/-]+|:8800|Traceback|Failed to fetch/g)||[]).slice(0,10), text:t.slice(0,500).replace(/\\s+/g,' ')};"
+   },
+   {
+    "shot": "a"
+   },
+   {
+    "clickAt": "(() => { const cand=[...document.querySelectorAll('button')].filter(b=>/新建剧本/.test(b.innerText)); const inMain=cand.filter(b=>!b.closest('header,nav,.v3-top,[class*=topbar]')); const b=inMain[inMain.length-1]; if(!b) return [null,null]; b.scrollIntoView({block:'center'}); const r=b.getBoundingClientRect(); return [r.x+r.width/2, r.y+r.height/2]; })()",
+    "after": 2000
+   },
+   {
+    "js": "const t=document.body.innerText; return {textareas:document.querySelectorAll('textarea').length, hint:(t.match(/提纲[^\n]{0,30}/g)||[]).slice(0,3), readFail:/写作记录暂时读不到/.test(t)};"
+   },
+   {
+    "shot": "b"
+   }
+  ]
+ }
+]

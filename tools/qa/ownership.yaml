@@ -1,0 +1,159 @@
+# 派单名别名（iter_gate LOOP_ALIASES / LOOP_GROUPS）：RSI→ITERAUDIT、WORKFLOW→AUTOPILOT、PROD→VIDEO10+PRODUCER、VIDEO-RCA→VIDEO_RCA、SCRIPT-RSI→SCRIPT_RSI
+# 迭代所有权表 + 项目方任务表（ITERAUDIT 2026-11-01；docs/ITERATION_PROTOCOL.md §4 §2）
+# iter_gate.py 读这份表：本轮声明改动的文件必须属于本 loop，或属于 shared 且走了规定的写入口。
+# 规则：一个文件只有一个 owner；匹配取“最长前缀 / 最具体的 glob”。改 owner = 发消息给总调度，由总调度改这里。
+schema: nsfs.iter_ownership/1
+
+owners:
+  UIMASTER:  ["apps/web/e2e/uimaster/**", "docs/uimaster/**"]
+  UIRSI:     ["apps/web/src/App.tsx", "apps/web/src/v3/TopBarV3.tsx", "apps/web/src/v3/Canvas.tsx",
+              "apps/web/src/v3/ReviewRow.tsx", "apps/web/src/v3/status.ts", "apps/web/src/v3/widgets.tsx",
+              "apps/web/src/v3/pages/**", "apps/web/e2e/uirsi/**", "docs/uirsi/**",
+              "services/api/ns_api/takes_ui.py", "services/api/ns_api/shot_audio.py", "services/api/ns_api/story_runs.py",
+              "tools/uirsi/**", "tests/test_ui_copy_uirsi.py", "tests/test_takes_ui_uirsi.py",
+              "tests/test_owner_headers.py", "services/canvas_api/**"]   # 总调度 fredw-2b 11-01 18:5x 定（CODE-RSI 查出无主）   # 测试归 UIRSI：总调度 11-01（UIRSI r35 报 iter_gate 判“无主”）
+  ASSETUX:   ["apps/web/src/v3/assets/**", "apps/web/src/v3/pages/AssetsPage.tsx", "apps/web/src/v3/pages/ScenesTab.tsx",
+              "apps/web/e2e/assetux/**", "docs/assetux/**", "services/api/ns_api/character_hub.py",
+              "tests/test_character_hub_assetux.py"]   # 测试归 ASSETUX：总调度 11-01 定
+  EDITDEL:   ["apps/web/src/v3/edit/**", "apps/web/src/ds/editdel.tsx", "apps/web/src/v3/pages/TrashRoute.tsx",
+              "apps/web/src/v3/pages/AuditRoute.tsx", "apps/web/e2e/editdel/**", "services/api/ns_api/edits.py"]
+  UIPIXEL:   ["apps/web/src/**/*.css", "apps/web/src/ds/ZoomLayer.tsx", "apps/web/e2e/uipixel/**", "docs/uipixel/**"]
+  UIAUDIT:   ["apps/web/e2e/uiaudit/**", "docs/uiaudit/**"]
+  ASSETMASTER: ["tools/assetmaster/**", "data/assetmaster/**", "docs/assetmaster/**", "data/review_pages/series10_assets_v2/**"]
+  REFLOCK:   ["tools/gen_contract/**", "services/agent/ns_agent/gen_contract/**", "services/agent/ns_agent/asset_refs.py",
+              "config/gen_contract.json", "data/review_pages/asset_reflock/**", "docs/GEN_CONTRACT.md",
+              # 总调度 11-01：唯一出图路径归 REFLOCK（IMGGEN 已不活跃，imggen.py 交给 REFLOCK）
+              "tools/series10_imggen/imggen.py", "services/agent/ns_agent/frame_job.py",
+              "services/render_router/ns_render/unified_frame.py", "services/render_router/ns_render/frame_edit.py",
+              "config/recipes/asset_refs.json", "tests/test_ref_switch_assets.py", "tests/test_unified_frame.py",
+              "tests/test_image_framing.py"]   # 总调度 fredw-2b 11-01 18:5x 定（CODE-RSI 查出无主）   # 测试归 REFLOCK：总调度 11-01 晚
+  IMGGEN:    ["tools/series10_imggen/**", "data/pipeline/runs/series10_v1/images/**", "data/review_pages/series10_images/**",
+              "data/review_pages/series10_imgfix/**"]
+  VIDEO10:   ["tools/series10_video/**", "docs/series10_video/**", "data/pipeline/runs/series10_v1/video/**", "tests/test_video10_resilience.py",
+              "data/review_pages/series10_video/**", "tests/test_fix_ep02_round2.py"]   # 总调度 fredw-2b 11-01 18:5x 定（CODE-RSI 查出无主）
+  BAKEOFF:   ["tools/bakeoff/**", "data/ab/image_bakeoff/**", "data/review_pages/image_bakeoff/**", "docs/ep02_iter/image_bakeoff.md"]
+  AUTOPILOT: ["ops/offline/merge_pull.py", "tools/autopilot/**", "tools/iterate_loop/**", "tools/pipeline/**", "services/recipes/**",
+              "data/autopilot/**", "docs/AUTOPILOT.md", "docs/PIPELINE_CHAIN.md", "config/pipeline/**",
+              "ops/offline/**"]  # 总调度 11-01 18:5x：服务器常驻 / 离线并回脚本归 AUTOPILOT（WORKFLOW）
+  DATAALIGN: ["tools/qa/data_parity.py", "tools/qa/data_parity/**", "docs/dataalign/**",
+              "services/api/ns_api/shot_cast.py", "services/api/ns_api/shot_cache.py", "docs/DATA_MAP.md", "apps/web/e2e/dataalign/**",
+              "services/api/ns_api/unified_stale.py", "services/api/ns_api/api_snapshot.py",
+              "tests/test_unified_stale.py", "tests/test_summary_fresh.py", "tests/test_video10_register.py",
+              "tests/test_state_timeline.py", "tests/test_review_fixes_d9.py"]   # 总调度 fredw-2b 11-01 18:5x 定（CODE-RSI 查出无主）
+  # 总调度 11-01 晚：D-VQA-01 同步的文档归 VQAGATE（K-OPS-D03：同步清单里的文件必须有 owner）
+  VQAGATE:   ["services/agent/ns_agent/vqa/**", "tools/vqa/**", "docs/vqa/STATE.md", "docs/acting/STATE.md", "docs/acting/CALIBRATION.md",
+              "docs/acting/PERFORMANCE_RULES.md", "config/vqa.json"]   # config/vqa.json：K-OPS-D03 测试查出无主，归 VQAGATE（它在改 enforce）
+  SCRIPT_RSI: ["tools/script_rsi/**", "data/script_rsi/**", "tests/test_script_rsi_*"]   # 派单名 SCRIPT-RSI（iter_gate 别名）；总调度 11-01 晚
+  AUDIT:     ["docs/audit/**", "data/qa/audit/**"]                          # 总调度 11-01 晚：独立复核 loop
+  VIDEO_RCA: ["tools/video_rca/**", "data/ab/video_rca/**", "data/review_pages/video_rca/**"]   # 派单名 VIDEO-RCA（iter_gate 别名）
+  RESEARCH:  ["tools/research/**", "data/ab/realism_ab/**", "tests/test_realism_lint.py", "knowledge/rules/research_realism.yaml"]   # 总调度 11-01 晚登记（K-OPS-Q22）
+  # 总调度 11-01：新 agent 归属
+  GPUVIEW:   ["services/api/ns_api/gpu_live.py", "services/api/ns_api/render_tasks.py", "services/agent/ns_agent/gpu_smi.py",
+              "services/agent/ns_agent/comfy_tag.py", "apps/web/src/components/RenderTasks.tsx",
+              "apps/web/src/components/RenderTasks.helpers.ts", "tools/qa/render_tasks_parity.py", "docs/gpuview/**",
+              "apps/web/e2e/gpuview/**", "docs/GPU_STATUS.md", "knowledge/rules/ops_gpuview.yaml",
+              "tests/test_gpuview.py", "tests/test_comfy_tag.py", "tests/test_gpu_monitor.py"]
+  PRODUCER:  ["tools/autopilot/producer.py", "data/producer/**", "tests/test_producer.py",
+              "services/api/ns_api/producer.py", "apps/web/src/v3/ProducerPanel.tsx"]
+  IMGPERF:   ["tools/perf/**", "tests/test_imgperf_lanes.py", "knowledge/rules/ops_imgperf.yaml", "data/qa/imgperf/**", "docs/imgperf/**"]
+  VOICE10:   ["data/assets/voices/*_cand/**", "tools/voice10/**"]
+  BGM10:     ["data/music/series10/**", "tools/bgm10/**", "config/prompts/bgm_brief.*", "config/prompts/bgm_reason_plain.md", "tools/bgm/**", "config/bgm.json",
+              "docs/bgm/**", "docs/BGM.md", "services/api/ns_api/bgm_api.py", "apps/web/src/v3/sound/BgmCandidates.tsx",
+              "knowledge/rules/edit_bgm.yaml", "tests/test_bgm.py"]
+  PAGEWATCH: ["apps/web/e2e/pagewatch/**", "docs/pagewatch/**"]
+  CODERSI:  ["tools/qa/syntax_guard.py", "tests/test_syntax_guard.py", "tools/qa/push_check.py", "tests/test_push_check.py", "knowledge/rules/ops_code_rsi.yaml", "data/qa/syntax_guard/**", "data/qa/push_check/**"]   # 总调度 fredw-2b 11-01 18:1x 派 CODE-RSI（全仓体检；授权见 docs/uimaster/LOCKS.md CONSENT）
+  RECALL:    ["docs/master/**", "config/owner_decisions.yaml", "tools/qa/decision_check.py", "ops/cleanup/**"]   # 总调度 11-01 晚认领（RECALL 不在跑）；ITERAUDIT / RSI 为协作者，授权见 docs/uimaster/LOCKS.md CONSENT
+  CLEANUP:   ["tools/qa/quarantine_refcheck.py", "tools/qa/quarantine_safe_move.py", "tests/test_quarantine_refcheck.py", "tests/test_import_sources.py", "services/api/ns_api/import_sources.py", "knowledge/rules/ops_cleanup.yaml", "knowledge/archive/**", "data/_quarantine_20261101b/**"]   # 总调度 fredw-2b 11-01 18:3x 派 CLEANUP（L-091）；写作附录 / owner_requirements 按总调度 r2 决定 8 归 ITERAUDIT，CLEANUP 协作
+  # 写作合同文件（script_chat_rules / production_rules_v3 / qwen_writer_system_prompt / qwen_writing_contract / importer script_md / validate_script_strict）：RSI 11-01 暂登记给 ITERAUDIT（K-OPS-D03 测试查出无主），待总调度确认
+  ITERAUDIT: ["tools/qa/iter_gate.py", "tests/test_iter_gate.py", "tools/qa/real_data_guard.py", "tools/qa/script_name_guard.py", "tests/test_script_name_guard.py", "tests/test_real_data_guard.py", "tools/qa/graph_schema_check.py", "tools/qa/ownership.yaml", "docs/ITERATION_PROTOCOL.md",
+              "knowledge/rules/ops_iteration.yaml", "knowledge/rules/writer_iteration.yaml", "tools/qa/writer_lints.py", "tools/qa/acting_lints.py", "tools/prompt_v2/audit_framing.py", "tests/test_image_jobs_import.py", "tools/validate_qwen_script.py", "tools/validate_script_strict.py", "tests/test_validate_script_strict.py", "config/script_chat_rules.md", "config/script_chat_rules_appendix.md", "docs/owner_requirements_for_writer.md", "docs/production_rules_v3.md", "config/qwen_writer_system_prompt.txt", "docs/qwen_writing_contract.md", "services/agent/ns_agent/importer/script_md.py", "tools/qa/defect_hunt.py", "tools/qa/defect_vlm.py", "tools/qa/active_audit.py", "tests/test_active_audit.py", "data/qa/active_audit/**", "docs/rsi/**", "data/qa/defect_hunt/**", "knowledge/rules/review_defect_hunt.yaml", "tests/test_defect_hunt.py", "tests/test_rsi_rule_checks.py", "tools/qa/decision_propagation.py", "tests/test_decision_propagation.py", "data/qa/decision_propagation/**", "tests/test_writer_lints.py", "data/qa/iter_gate/**"]
+
+# 优先于 owners 的归属（总调度 11-01：ds/zoom.css、ZoomLayer.tsx 和全部 CSS 归 UIPIXEL，包括资产 / 编辑目录下的 .css）
+override:
+  # 总调度 11-01 定：只给资产页用的 CSS 归 ASSETUX（全局 token 与 ds/*.css 仍归 UIPIXEL；改共享 token 走 UIPIXEL）。放在通配之前，先匹配
+  - {glob: "apps/web/src/v3/assets/people_hub.css", owner: ASSETUX}
+  - {glob: "apps/web/src/v3/assets/verdict.css", owner: ASSETUX}
+  - {glob: "apps/web/src/v3/assets/center.css", owner: ASSETUX}
+  - {glob: "apps/web/src/**/*.css", owner: UIPIXEL}
+  - {glob: "apps/web/src/ds/ZoomLayer.tsx", owner: UIPIXEL}
+
+# 共享文件：任何 loop 都可能要写，但只能走“写入口”（单一写者）。直接手改 = 越界。
+shared:
+  - {glob: "data/renders/**/takes.json",           via: "API /api/shots/{id}/takes/* 或 tools/pipeline/register_takes.py（pipeline._add_take）"}
+  - {glob: "data/pipeline/runs/series10_v1/assets/first_frame_jobs.json", via: "tools/pipeline/image_jobs.py rebuild_first_frame_jobs（编译器输出）"}
+  - {glob: "data/assets/identity_refs/**",        via: "项目方闸门（界面一键定脸）；agent 不得直接改"}
+  - {glob: "config/recipes/learned.yaml",          via: "tools/iterate_loop/writeback.py"}
+  - {glob: "tools/iterate_loop/rules.yaml",        via: "tools/knowledge/compile.py（生成物，勿手改）"}
+  - {glob: "config/recipes/writer_knowledge.md",   via: "tools/knowledge/compile.py（生成物）"}
+  - {glob: "config/recipes/director_system_prompt.md", via: "tools/knowledge/compile.py（生成物）"}
+  - {glob: "knowledge/generated/**",               via: "tools/knowledge/compile.py（生成物）"}
+  - {glob: "tests/conftest.py",                   via: "只追加自己的夹具；真实数据写保护那一节归 ITERAUDIT（K-OPS-Q03），不得删除或放宽"}
+  - {glob: "knowledge/rules/**",                   via: "只追加本 loop 的条目 + compile.py --check 通过"}
+  - {glob: "knowledge/RSI_LEDGER.md",              via: "只在本 loop 的节追加行"}
+  - {glob: "docs/SOP_production.md",              via: "总调度派单（总调度 11-01 晚：共享，按派单改对应章节）"}
+  - {glob: "services/render_router/ns_render/pipeline.py", via: "REFLOCK 与 ITERAUDIT 共享（总调度 11-01 r6）；改“当前版本”只经 set_active / clear_active / deactivate（K-OPS-Q23）"}
+  - {glob: "services/render_router/ns_render/auto_current.py", via: "VQAGATE 与 PRODUCER 共享（总调度 11-01 晚）；改“当前版本”只经 ns_render.pipeline.set_active（K-OPS-Q23）"}
+  - {glob: "docs/REQUIREMENTS.md",                via: "总调度派单（总调度 11-01 晚：改为共享，不再只归 VQAGATE）"}
+  - {glob: "docs/uimaster/LOCKS.md",               via: "加 / 删自己的临时锁行"}
+  - {glob: "services/api/ns_api/**",               via: "先在 docs/uimaster/LOCKS.md 临时锁表登记，改完删锁；改完必须跑 data_parity"}
+  - {glob: "apps/web/src/main.tsx",                via: "共享（总调度 11-01）：先在 docs/uimaster/LOCKS.md 登记临时锁"}
+  - {glob: "apps/web/src/v3/candidates.ts",        via: "共享（总调度 11-01）：先在 docs/uimaster/LOCKS.md 登记临时锁"}
+  - {glob: "apps/web/src/**",                      via: "未在 owners 里列出的前端文件：先在 LOCKS.md 登记临时锁"}
+
+# 项目方任务（每轮第 1 步必须选至少一个；验收以“任务做成 + 内容正确”为准，不以分数为准）
+owner_tasks:
+  OT1: {name: 审一集的镜头行, done_when: "每镜的首帧 / 尾帧 / 视频 / 台词 = 后端该镜的当前版本；不同镜内容不同（data_parity）"}
+  OT2: {name: 接受 / 打回一个候选, done_when: "一键生效、后端 current 真的变了、10 秒内撤销后后端恢复"}
+  OT3: {name: 试听一句对白 / 音色 / 配乐, done_when: "▶ 播出的是这一镜这一句的音频文件（URL 与 /api/shots/{id}/audio 一致），能停、能 A/B"}
+  OT4: {name: 放大看图, done_when: "大图是原图（不是缩略图）、是这一镜这一版，Esc 可关"}
+  OT5: {name: 对照剧本看一镜, done_when: "界面显示的剧本原文 / 对白 / 造型 = 导入后的 Shot Spec 该镜字段（逐字）"}
+  OT6: {name: 挑设定图 / 定脸, done_when: "候选并排、点选后资产库当前版本变化，下游解析器读到新图"}
+  OT7: {name: 看成片 / 对比两版, done_when: "播放的是最新一版合成文件，两版同步播放"}
+  OT8: {name: 新建剧本走到导入, done_when: "提纲 → P1–P4 可看可改，导入后画布出现新集且镜数一致"}
+  OT9: {name: 看一镜生成结果是否合格, done_when: "GEN_CONTRACT 逐项结果表（未测 ≠ 通过）+ 总调度 master_review.md 签字后才给项目方"}
+
+# 规则 owner（docs/master/unchecked_rules.md 按它分组）：by_id 正则优先，其次按文件
+rule_owners:
+  by_id:
+    "K-UI-02[1-4]": UIAUDIT
+    "K-UI-02[5-9]": ASSETUX
+  by_file:
+    ui.yaml: UIRSI
+    asset_assetmaster.yaml: ASSETMASTER
+    gen_contract.yaml: REFLOCK
+    render_imggen_s10.yaml: IMGGEN
+    render_video_s10.yaml: VIDEO10
+    ops_infra.yaml: INFRA
+    asset_series10.yaml: SERIES
+    writer_series10.yaml: SERIES
+    writer.yaml: CHAINSPEC
+    chain_v1.yaml: CHAINSPEC
+    writer_camera.yaml: PROMPT
+    prompt.yaml: PROMPT
+    edit.yaml: AUTOPILOT（剪辑 / FIX）
+    review.yaml: AUTOPILOT（审片 / DIR）
+    render.yaml: AUTOPILOT（ARCH）
+    asset_ops.yaml: AUTOPILOT（ARCH）
+    loop.yaml: AUTOPILOT
+    research.yaml: AUTOPILOT（ARCH，研究蒸馏）
+    ops_iteration.yaml: ITERAUDIT
+
+# 测试归属（总调度 11-01 分派全量测试的失败项；按被测代码定 owner，失败就转给这里的 owner）
+test_owners:
+  tests/test_uirsi_check_wiring.py: UIRSI
+  tests/test_ui_copy_uirsi.py: UIRSI
+  tests/test_image_jobs.py: AUTOPILOT          # tools/pipeline/image_jobs.py（tools/pipeline/** 归 AUTOPILOT）
+  tests/test_state_timeline.py: AUTOPILOT      # ns_agent/state_timeline.py（ARCH 段 P5–P12）；confirmed_ref 多出的“（fred 登录点选）”来自 UIRSI 登录改动，需两边对齐
+  tests/test_backend_f4.py: REFLOCK            # 失败点在出首帧 / 改图链 active 版本：services/api/ns_api/frame_jobs.py（REFLOCK 临时锁）
+  tests/test_qa_laptop.py: PROMPT              # 剩余失败是 ns_agent 编译器 / frame_spec 的材质词重复（K-REN-103 编译器，PROMPT 域）
+  tests/test_editdel.py: REFLOCK               # postflight 后台线程写真实 data/cache（remote_score._known_path）
+  tests/test_video_jobs_v1.py: REFLOCK         # 同上
+  tests/test_partial_face_described.py: REFLOCK   # K-AST-236 局部写到脸；原文断言用夹具 tests/fixtures/reflock/，现行稿只断言校验与判定一致
+  tests/test_single_identity_face.py: REFLOCK     # K-AST-235 一角色一张身份脸
+  tests/test_rescore_takes.py: REFLOCK            # K-REV-235 重打分两步走
+  tests/test_frame_note_not_stale.py: REFLOCK     # K-REN-136 固定句与过期判定
+  tests/test_unified_frame.py: REFLOCK
+  tests/test_gen_contract.py: REFLOCK
+  tests/test_real_data_guard.py: ITERAUDIT
+  tests/test_iter_gate.py: ITERAUDIT
+  tests/test_script_name_guard.py: ITERAUDIT

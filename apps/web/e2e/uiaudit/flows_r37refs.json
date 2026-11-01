@@ -1,0 +1,19 @@
+[
+ {
+  "id": "Y3_refsfail",
+  "title": "r37#3 /refs 失败时场景小卡",
+  "path": "/#ep02",
+  "wait": 9000,
+  "steps": [
+   {
+    "wait": 9000
+   },
+   {
+    "js": "const p=[...document.querySelectorAll('[data-plate]')].map(e=>e.getAttribute('data-plate')+':'+e.innerText.split(String.fromCharCode(10)).join(' ').slice(-8)); const tiles=[...document.querySelectorAll('.v3-frames > .v3-frame')].map(t=>(t.querySelector('.v3-frame-none')?.innerText||'')).filter(Boolean); const c={}; for(const x of tiles) c[x]=(c[x]||0)+1; return {plates:p, tileNone:c};"
+   },
+   {
+    "shot": "a"
+   }
+  ]
+ }
+]

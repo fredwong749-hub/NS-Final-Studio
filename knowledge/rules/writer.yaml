@@ -1,0 +1,114 @@
+# 写作方格式 / 可实现性（P4 分镜 → Shot Spec）。covered_by: script_chat_rules = 已在写作模型每次加载的
+# config/script_chat_rules.md 附录（sysimpl-vN）里，知识包不重复输出，compile 只校验附录里有对应标签。
+rules:
+  - id: K-WRT-001
+    domain: writer
+    link: P3-P4
+    title: 新增镜头标签行（站位 / 地标 / 光线 / 分拍 / 台词时段 / 独白时段 / 嘴型 / 下镜 / 出画 / 镜型 / 尾帧曝光）
+    when: 每镜 **衔接** 行之后、**motion** 之前
+    then: 按 writer_rules_addendum §3–§11 的格式写；系统 spec_import 解析
+    covered_by: script_chat_rules
+    covers_labels: [站位, 地标, 光线, 分拍, 台词时段, 独白时段, 嘴型, 下镜, 出画, 镜型, 尾帧曝光]
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    evidence:
+      - {src: docs/ep02_iter/writer_rules_addendum.md §1–§11}
+      - {src: docs/ep02_iter/refactor_proposal.md §7.1, quote: "Shot Spec 对齐官方“标准镜头信息表”"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-WRT-002
+    domain: writer
+    link: P3-P4
+    title: 约 2 秒一拍，每拍至少一个看得见的动作或表情 / 视线变化
+    when: 时长 ≥6 秒的镜头
+    then: 分拍从 0 覆盖到镜长；每拍一个可见变化（视线移动、眨眼、呼吸起伏、手部动作、转头）
+    targets: [{kind: writer_prompt, section: 分拍与动作}]
+    writer_text: 分拍每 2 秒至少一个看得见的变化（视线移向某物、表情变化、手部动作、转头、起身）；“保持 / 定住 / 凝固”不算变化——ep02 有 7/11 镜因为只写状态而成了静止画面。
+    evidence:
+      - {src: docs/ep02_iter/v0_baseline_review.md §1 ④运动, quote: "一半以上镜头“画面定住等台词或等切点”"}
+      - {src: data/ab/owner_workflows/minimax_h3_official_skills/3d-animation-short-generator/references/shot-table-spec.md Per-Second Directives, quote: "avoid vague timing such as “continues moving”"}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-WRT-003
+    domain: writer
+    link: P3-P4
+    title: 对白镜写听者反应和说话人视线
+    when: 有对白的镜头
+    then: 分拍里写说话时的视线方向和听者的反应（点头、移开视线、呼吸变化）
+    targets: [{kind: writer_prompt, section: 分拍与动作}]
+    writer_text: 对白镜在分拍里写清说话人看向哪里（看对方 / 看屏幕 / 低头），以及在画听者的一个反应动作；官方表格要求每句台词都有具体的视线和身体动作变化。
+    evidence:
+      - {src: data/ab/owner_workflows/minimax_h3_official_skills/3d-animation-short-generator/references/shot-table-spec.md Audio & Dialogue Track, quote: "describe concrete eye-line and body-action changes"}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-WRT-004
+    domain: writer
+    link: P3-P4
+    title: 结尾留“动作仍在进行”的瞬间，不写落定静止
+    when: motion 最后一个“——”之后的结束状态
+    then: 写进行中的动作（正要转身、手还在移动），避免结尾冻结
+    targets: [{kind: writer_prompt, section: 分拍与动作}]
+    writer_text: motion 的结束状态写成“动作仍在进行中”的瞬间（例如正抬起手、正转过头），不要写成完全停住的姿势——v0 有 10/11 镜结尾定住。
+    evidence:
+      - {src: docs/ep02_iter/h3_comfy_expert.md §5 结尾冻结, quote: "尾帧取“动作仍在进行”的瞬间"}
+      - {src: docs/ep02_iter/v0_baseline_review.md §1 ④运动, quote: "10/11 镜结尾定住 ≥0.67 s"}
+    confidence: medium
+    status: 建议
+    experiment: E8
+    date: 2026-10-31
+  - id: K-WRT-005
+    domain: writer
+    link: [P3-P4, P8-P10]
+    title: 单镜建议 ≤6 秒；远景 / 全身 5–6 秒且不说话
+    when: 规划镜长
+    then: 超过 6 秒的镜头剪辑会拆刀；>10.8 秒只能走长镜头道
+    targets: [{kind: writer_prompt, section: 时长与节奏}]
+    writer_text: 单镜时长建议 ≤6 秒（剪辑会把更长的拆成两刀）；远景 / 全身镜头 5–6 秒且尽量不说话（脸小时 H3 容易画崩）；>10 秒的镜头只能排一条长镜头道，最慢。
+    evidence:
+      - {src: docs/ep02_iter/LEARNED_SPECS.md §C 单镜上限, quote: "6 s；超过就拆刀"}
+      - {src: docs/ep02_iter/h3_comfy_expert.md §5 脸漂移, quote: "远景写 5–6 s、不说话"}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-WRT-006
+    domain: writer
+    link: [P3-P4, P8-P10]
+    title: 开场 3 秒内要有切点或明显动作
+    when: 每集第 1 镜
+    then: 第一镜 ≤3 秒，或前 3 秒有明显动作 / 运镜
+    targets: [{kind: writer_prompt, section: 时长与节奏}]
+    writer_text: 每集第 1 镜 ≤3–4 秒，或在前 3 秒内有明显动作 / 运镜（v0 前 3 秒无切点，第一句对白在 8 秒后）。
+    evidence:
+      - {src: docs/ep02_iter/LEARNED_SPECS.md §C 开场, quote: "第一刀 ≤3 s，或前 3 s 内节奏 ≥1 px/帧"}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-WRT-007
+    domain: writer
+    link: P3-P4
+    title: 相邻镜景别交替
+    when: 排镜
+    then: 相邻同景别 ≤30%（特写 / 近景 / 中景交替）
+    targets: [{kind: writer_prompt, section: 时长与节奏}]
+    writer_text: 相邻镜头景别尽量交替（特写 / 近景 / 中景），连续同景别不超过 2 镜（v0 相邻同景别 8/10）。
+    evidence:
+      - {src: tools/ep02_director/rubric.md ⑤, quote: "相邻同景别切 ≤30%"}
+    confidence: medium
+    status: 建议
+    date: 2026-10-31
+  - id: K-WRT-009
+    domain: writer
+    link: P3-P4
+    title: 每个开口角色、每个在画角色都要在人物表登记 EN / VOICE；男角也要有身份参考
+    when: 新角色出场
+    then: 人物表行齐全；资产侧补身份参考图（P5）
+    targets: [{kind: writer_prompt, section: 身份锚点}]
+    writer_text: 每个在画角色在人物表里都要有 EN外貌短语（族裔、年龄、发型、脸型），每个开口角色都要有 VOICE（含 Mandarin、音色、音区）；新角色第一次出场前先登记。
+    evidence:
+      - {src: docs/ep02_iter/chain_audit.md §2 A1, quote: "族裔"}
+      - {src: docs/ep02_iter/v0_baseline_review.md §1 ①人物一致, quote: "顾沉没有身份锚"}
+    confidence: high
+    status: 确认
+    date: 2026-10-31

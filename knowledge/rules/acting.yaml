@@ -1,0 +1,81 @@
+# ACTING（2026-11-01）系统层规则：演员不看镜头、开头即动、多人视线、永不加字幕。看镜头已转拦截（项目方 11-01 16:10，D-VQA-01）：由本地看图闸门 Q9 拦，像素检测器只作旁证。
+# 项目方原话见 docs/REQUIREMENTS.md R11-2 / R11-3 / R11-6 / R11-8 / R11-9；出处与原文 docs/acting/PERFORMANCE_RULES.md。
+# 写作方规则（writer_text + QW-A*）在 knowledge/rules/writer_iteration.yaml K-WRT-A01–A05。
+rules:
+  - id: K-REN-G01
+    domain: render
+    link: [P6-P7]
+    title: 出图正文没写视线时，系统补一句固定的正向视线落点（不写否定、不提镜头）（⤴ 逐人覆盖见 K-REN-G06，SCRIPT-RSI 11-01）
+    when: frame_v9 唯一出图路径（frame_job.compile_frame / build_first），正文里没有任何视线词，且不是局部 / 物件特写
+    then: 插入 asset_refs.EYELINE_NOTE（“<名字>的视线落在<落点>上（看画内的人或物，眼神有落点）”），落点取本镜第一拍 视线=，没有就取 motion 行第一处视线落点，再没有写“画面里的人或物”；句式进 TEXT_NOTE_RES，unified_stale.match_target 自动认，旧版本不误标过期。Qwen Image cfg 1，负面词不生效，所以只能写正向句
+    check: [tests/test_acting_system.py]
+    evidence:
+      - {src: docs/acting/PERFORMANCE_RULES.md, note: "E1 / E5 / E6；72 张首帧里 16/80 镜 img 没写视线"}
+      - {src: services/render_router/ns_render/workflows.py, note: "negative_for：cfg ≤ 1 时负面分支不参与采样"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-01
+  - id: K-REN-G02
+    domain: render
+    link: [P7-P8]
+    title: H3 正文在第一个分拍时间码前固定插两句：开头即动、视线落在场景里的人或物上（正向写法）
+    when: services/recipes build_base（I2VA / FL2VA / Ref2VA 都经过），配方 prompt.open_motion_cue / eyeline_cue 非空（_base.yaml 默认开）
+    then: 两句只写物理和视线方向、不含否定词、不提 camera / lens（H3 不认否定，RL-N1）；写作方正文不改。VIDEO10 下次 build_jobs 重编时对未出片的镜生效
+    check: [tests/test_acting_system.py, tests/test_recipes_engine.py]
+    evidence:
+      - {src: docs/acting/PERFORMANCE_RULES.md, note: "P1 / P2 / E1；H3 SKILL.md：first-frame anchor → action onset → continuous development"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-01
+  - id: K-REN-G03
+    domain: render
+    link: [P9-P10]
+    title: 成片永不加字幕：ffmpeg 调用前硬拦字幕滤镜 / drawtext / 字幕流
+    when: ns_post.ffmpeg.FFmpeg.run（合成链路所有 ffmpeg 调用）
+    then: NO_SUBTITLES = True 写死、不给开关；参数里出现 subtitles= / ass= / drawtext / .srt/.ass/.vtt / -c:s → FFmpegError；时间线 JSON 记 subtitles=false
+    check: [tests/test_acting_system.py]
+    evidence:
+      - {src: docs/REQUIREMENTS.md, note: "R11-8：“字幕不是要求不加么?你忘记了?”"}
+      - {src: services/post/ns_post/assemble.py, note: "此前已不加字幕（manifest subtitles: False）；本条把它变成硬拦截 + 测试"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REV-G04
+    domain: review
+    link: [P7-P8, P8-P9]
+    title: 看镜头转拦截走本地看图闸门（Q9 eye_contact，enforce=true）；像素检测（G1 / acting）分不开好坏，只作旁证
+    when: 出图 postflight G1；VIDEO10 score_clip 的 acting 字段（first_sec、camera_gaze、caption）
+    then: 项目方 11-01 16:10 原话（D-VQA-01）转拦截：看镜头由 config/vqa.json checks.eye_contact（Q9）拦，命中就重出；ns_qc.gaze 像素检测召回 / 误报分不开（CALIBRATION.md），BLOCK 保持 False，只进 evidence / soft 作旁证；没检出脸 = 未测
+    check: [tools/acting/calibrate_gaze.py, tests/test_acting_system.py]
+    evidence:
+      - {src: data/acting/calib_results.json, note: "首帧 72 张 + 预览片段：暂定阈值下的分布，未标定"}
+    confidence: low
+    status: 待验
+    date: 2026-11-01
+  # ---- SCRIPT-RSI（总调度 fredw-2b 派，2026-11-01 晚，D-SCR-07）：项目方 18:2x“所有图片不要看镜头，不要看镜头！”
+  - id: K-REN-G05
+    domain: render
+    link: [P7-P8]
+    title: 所有视频配方（含 Pika i2va_pika_flex / dialogue_closeup_pika / static_emotion_pika）都继承 _base 的视线句和开头即动句
+    when: services/recipes 任一可用配方经 build_base / build_ref2va 编译（I2VA / FL2VA / Ref2VA）
+    then: prompt.eyeline_cue / open_motion_cue 非空、正向、不提 camera / lens；任何配方把它们覆盖成空即测试失败。11-01 实查 jobs.json 已编译的 420 个变体（Pika 305、Ref2VA 108、establishing 7）全部带这两句；“facing the camera”只出现在 16:56 前编译的 alt 重试稿锚点句里（K-REN-702 已修，WORKFLOW 重编即清）
+    check: [tests/test_script_rsi_eyeline.py, tests/test_acting_system.py]
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/video/jobs.json, note: "built_at 16:56：420/420 变体含 eyeline_cue 与 open_motion_cue；19 镜无变体（hold）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REN-G06
+    domain: render
+    link: [P6-P7]
+    title: 出图视线补句逐人覆盖；双人系统句只写朝向和“视线有落点”，不写朝向镜头（⤴ 取代 K-REN-G01“正文有任何视线词就不补、只补第一个人”，落实 K-REN-703）
+    when: frame_v9 唯一出图路径 frame_job.eyeline_note；compiler 双人镜 framing.two_shot_clause
+    then: 在画的人按名字切段，谁那一段没写视线（背对除外）就给谁补 asset_refs.EYELINE_NOTE；落点 = 第一拍主角取 视线=，其他人取第一拍 反应= 里自己的视线，都没有时多人镜看另一个在画的人。two_shot_clause 改为“侧脸到四分之三侧脸，各自的视线落在画面里的人或物上”（正向，cfg 1 负面不生效）
+    check: [tests/test_script_rsi_eyeline.py, tests/test_video_rca.py, tests/test_acting_system.py]
+    evidence:
+      - {src: tools/video_rca/rates.py, note: "首帧看镜头 → 片头看镜头 49/54；看镜头的根在首帧"}
+      - {src: services/agent/ns_agent/framing.py, note: "⤴ 已取代的原句“各自至少四分之三侧脸朝向镜头（… toward the camera）”"}
+      - {src: data/script_rsi, note: "series10 现稿双人镜 img 第二个人没写视线 28 处（QW-A7 首扫）——旧补句只给第一个人"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-01

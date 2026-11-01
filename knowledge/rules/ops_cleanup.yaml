@@ -1,0 +1,40 @@
+# 清理 / 隔离（CLEANUP，2026-11-01，总调度 fredw-2b 派；项目方 11-01 18:3x：“把旧的东西全部移出，因为我很怕你的记忆里面混入太多旧的素材了”）。
+# 旧决定 L-079：“先隔离，验证后你删”——AI 只移动，最终删除只能由项目方本人运行 ops/cleanup/delete_quarantine_*.ps1。
+rules:
+  - id: K-OPS-Q30
+    domain: ops
+    link: [P0-P1, P11-RETRY]
+    title: 隔离前必须先做引用检查——生产代码 / 测试 / 前端 / 配置 / 运维 / 知识库证据链里有引用的不移；只移动不删除，删除留给项目方本人
+    when: 任何 loop 要把文件 / 目录移出生产视野（隔离旧剧素材、旧会话报告、一次性产物、截断件、并回副本等）
+    then: >-
+      ① 用 tools/qa/quarantine_refcheck.py 查每一项（相对路径、“父目录/名字”、足够独特的名字；范围 services packages tools tests apps/web config ops infra comfy
+      + knowledge/rules、RSI_LEDGER、knowledge/archive 的证据链；日志和 e2e 扫描输出不算读取者）；② 有引用就不移，写进报告交总调度——引用方只是写入者 / 注释 / “不要用”说明时，
+      在计划里写 ref_override 说明理由才允许移；③ 移动只走 tools/qa/quarantine_safe_move.py（保持原相对路径、每项写 moves.jsonl 与 MANIFEST 原因和恢复方法），不手工 mv；
+      ④ 移完跑 compile.py --check、decision_check、全量 pytest、API 起得来、vite build，不过就 --restore 对应项；⑤ 删除脚本只生成不运行（项目方本人运行）。
+      知识库规则被取代 / 不采纳时移到 knowledge/archive/（compile.py 的 archived_ids 让 supersedes 和 RSI_LEDGER 仍能指到它），不直接删条目。
+    check: [tests/test_quarantine_refcheck.py, tools/qa/quarantine_refcheck.py]
+    evidence:
+      - {src: data/_quarantine_20261101b/MANIFEST.md, note: "CLEANUP 11-01：每项移动前都跑了引用检查；有引用而没移的列在“有引用、没有移动的候选”"}
+      - {src: knowledge/archive/superseded_20261101.yaml, note: "6 条已被取代 / 不采纳的规则归档，compile.py --check 通过"}
+      - {src: data/_quarantine_20261101b/moves.jsonl, note: "第一版检查范围漏了知识库证据链：移走 data/_quarantine/prod_20261101_truncated_sheets 和 _offline_pull/gpu36 后 compile.py --check 报 K-OPS-W02 / K-OPS-311 证据文件不存在 → --restore 恢复，并把 knowledge/rules、RSI_LEDGER 加进阻断范围"}
+      - {src: docs/master/MASTER_PICTURE.md, note: "§1 L-079 / L-091；§2 残留清单"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-Q31
+    domain: ops
+    link: [P3-P4, P11-RETRY]
+    title: 剧本全局头来源和剧本主线从现行导入记录自动推导，不写死路径；导入后出图未跟上的镜在 data_parity 里记 pending_redo、列镜号，不算不一致
+    when: script_chat 拼写作模型的“剧本全局头”、剧本导入页标“主线”；data_parity 比人选 / 造型字母
+    then: >-
+      ① ns_api.import_sources 读 data/import/script_v2.json 的 sources，倒着找文件存在、sha256 与导入记录一致、导入过集的来源；
+      全局头 = 最新一份带全局头的来源（script_chat.script_header 先用它，推导不出来或 header_sources_mode = "config" 才用配置 header_sources）；
+      主线 = 覆盖集数最多的现行来源 ∪ config/script_mainline.json 里项目方指定的。② data_parity：当前首帧早于现行导入时刻（import_log 最后一条 at）或没有首帧、
+      且人选 / 造型字母与导入稿对不上的镜 = pending_redo（打印镜号，JSON 带 pending_redo），不计不一致；该镜导入之后出的新首帧设为当前后自动转回比对。
+    check: [tests/test_import_sources.py]
+    evidence:
+      - {src: config/script_chat.json, note: "11-01 前 header_sources 写死 60 集旧稿 v3.1；R15 人工改指 series10 后总调度按 G0 要求改根因：导入一次就要人工改一次"}
+      - {src: docs/master/MASTER_PICTURE.md, note: "§2.3 R15；L-088 全量重做期间 18:24 导入 D-SCR-07 后 data_parity 报 24 镜 D-CAST / D-VARY（出图未跟上）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01

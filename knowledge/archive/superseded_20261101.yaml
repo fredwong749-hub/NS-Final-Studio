@@ -1,0 +1,114 @@
+# 知识库归档（CLEANUP 2026-11-01，总调度 fredw-2b 派）——已被取代 / 项目方不采纳的规则，保留原文可追溯。
+# 项目方 11-01 18:3x：“把旧的东西全部移出……把规则跟最新的讨论内容 update 一次”。
+# tools/knowledge/compile.py 不把本目录当现行规则读（不进写作知识包 / 导演提示词 / iterate_loop 规则表）；
+# 只用于校验现行规则的 supersedes 指向（被取代的 id 必须能在这里找到）。恢复：把条目原样剪回 _from 所示文件。
+archived_at: 2026-11-01
+archived_by: CLEANUP（总调度 fredw-2b 派）
+rules:
+  - id: K-EDT-I02
+    _from: knowledge/rules/chain_v1.yaml
+    _archived_reason: "被 K-EDT-013 取代（edit.yaml supersedes: K-EDT-I02）；“待项目方挑音色”口径已被 L-078（系统按 QAg 方法自动选）取代"
+    domain: edit
+    link: [P4-P9, P8-P9]
+    title: 旁白 / 独白要有独立 narrator 音色：年轻都市感、语速自然、时长不超过所在镜
+    when: 合成独白（🎙）或旁白音轨
+    then: 每个有独白的角色要有独立的 narrator 音色（不复用对白音色、不放慢）；听感年龄与人物表 age 一致、年轻都市感、自然语速；独白时长 ≤ 所在镜长 − 0.3 s（SS-A4）。具体音色由项目方在试听候选里挑定后再写入 config/voices.json（未挑定前这一项是项目方闸门）
+    targets: [{kind: writer_prompt, section: 身份锚点}, {kind: director_prompt, section: 判定标准}]
+    writer_text: 有独白的角色，人物表 VOICE 短语写明年龄段（例 a young woman in her early twenties）、都市感和自然语速；独白长度放得进所在镜头（≤ 镜长 − 0.3 秒，放不下就拆镜）。
+    director_text: 旁白 / 独白听感明显比人物老（差 10 岁以上）、或语速拖沓 → fail，action=owner，issues 写“旁白音色（P4-P9，待项目方挑音色）”。
+    evidence:
+      - {src: docs/ep02_iter/writer_requests.md, quote: "旁白的声音很难听，是一个老女人的声音"}
+      - {src: config/pipeline/attribution.yaml, note: "症状 narrator_voice_old"}
+    confidence: low
+    status: 确认
+    date: 2026-10-31
+  - id: K-WRT-008
+    _from: knowledge/rules/writer.yaml
+    _archived_reason: "被 K-EDT-I01 取代（chain_v1.yaml supersedes: K-WRT-008）；项目方 10-31 原话“改成正常节奏”"
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: writer
+    link: P3-P4
+    title: 偏慢速度 / 语速偏慢等节奏风格规则——项目方决定
+    when: 写作规则里的“正常或偏慢速度”“语速偏慢”“slow pace”
+    then: 不由系统改；列在 writer_rules_addendum §12，待项目方定
+    evidence:
+      - {src: docs/ep02_iter/writer_rules_addendum.md §12}
+    confidence: low
+    status: 项目方闸门
+    date: 2026-10-31
+  - id: K-UI-019
+    _from: knowledge/rules/ui.yaml
+    _archived_reason: "被 K-UI-020 取代（ui.yaml supersedes: K-UI-019；docs/uirsi/rounds/r19-r25.md）"
+    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
+    domain: ui
+    link: [P4-P5]
+    title: 设定图候选在资产中心并排挑选，选择是项目方闸门，只记录不改登记
+    when: 出图线出了角色 × 造型 × 种子的设定图候选
+    then: 资产中心“挑设定图”页（角色详情顶部也有）按角色 × 造型并排、点图看大图；“选这张…”要项目方本人 + 原话（POST /api/story-images/pick，缺原话 403），写 runs/<id>/ui_sheet_picks.json；登记身份参考由总调度 / CONSIST 按记录做
+    evidence:
+      - {src: tests/test_story_runs_uirsi.py, note: test_sheet_pick_owner_gate_and_thumbs}
+    confidence: high
+    status: 确认
+    date: 2026-10-31
+  - id: K-REV-X01
+    _from: knowledge/rules/research_realism.yaml
+    _archived_reason: "⤴ 不采纳：L-087 项目方选 R0（11-01 17:5x“……都非常满意……很棒哎!”），MASTER_PICTURE §1 L-087"
+    domain: review
+    link: P5-P6
+    title: ⤴（项目方选 R0，不采纳）契约 Q4 的整图 Laplacian 在锐化后的交付图上测，测到的主要是 USM，不是皮肤质感
+    when: 用 lap_full（或任何整图 / 区域 Laplacian、高频能量）判首帧“塑料 / 糊”，而交付图做过 UnsharpMask
+    then: >-
+      ⤴ 项目方 11-01 确认现行 S★（选 R0），本条建议不采纳（L-087）。项目方原话（11-01 17:5x，总调度转）：“realism_ab……这个版本出来的东西,无论是画面效果还是颜色,都非常满意……很棒哎!”，随后 AskUserQuestion 选“R0 现在这样”（保持现行强锐化）。现行 USM 1.2/60/2、S★ 后缀（含“焦点锐利 / 暖调”）、系统规格句、契约 Q4 口径全部不改；本条只作研究记录，不作为改动依据。
+      同一张生产原图只去掉 frame_v9 的 USM（1.2 / 60% / 2），lap_full 降到原来的 48–49%：ep01-S1 235.7→112.4、S2 187.2→90.6、S5 200.0→98.8，
+      3/3 从过线（≥175）变成不过线；“塑料娃娃脸”探针 p_plastic 三档都是 0.999 以上，没有变化。leica_sharp 旧图（ep02 三镜）Sstar_g→Sstar 同样 ×2.05–2.14。
+      所以 Q4 线 175 实际在判“有没有锐化”，这也解释了 K-REV-B02 留出集 AUC 只有 0.41。
+      做法：质感指标在未锐化的图上测（raw 缩回、不做 USM），或者只看脸部指标；任何新的质感阈值，标定集和被测图必须是同一条后处理。
+      改契约口径归 REFLOCK / 总调度。
+    evidence:
+      - {src: data/ab/realism_ab/metrics.json, note: R0 / R1 / R2 三档 lap_full、halo、face_hf、p_plastic}
+      - {src: docs/research/realism_tuning_20261101.md, note: §三}
+      - {src: config/gen_contract.json, note: image_thresholds.Q4_texture lap_full_min 175}
+    check: tests/test_realism_lint.py::test_usm_alone_inflates_q4_laplacian
+    confidence: high
+    status: 项目方闸门
+    date: 2026-11-01
+  - id: K-REN-X02
+    _from: knowledge/rules/research_realism.yaml
+    _archived_reason: "⤴ 不采纳：L-087 项目方选 R0"
+    domain: render
+    link: P5-P6
+    title: ⤴（项目方选 R0，不采纳）塑料感不是锐度问题：不要再加锐化或锐度词来救“塑料脸”，现在已经是三重锐化
+    when: 首帧被说塑料 / 娃娃脸 / 不像真人，想通过加锐化、加“焦点锐利 / 五官锐利 / 皮肤纹理清晰”解决
+    then: >-
+      ⤴ 项目方 11-01 确认现行 S★（选 R0），本条建议不采纳（L-087）。项目方原话（11-01 17:5x，总调度转）：“realism_ab……这个版本出来的东西,无论是画面效果还是颜色,都非常满意……很棒哎!”，随后 AskUserQuestion 选“R0 现在这样”（保持现行强锐化）。现行 USM 1.2/60/2、S★ 后缀（含“焦点锐利 / 暖调”）、系统规格句、契约 Q4 口径全部不改；本条只作研究记录，不作为改动依据。
+      实测 USM 让边缘过冲（halo）增加 53–71%，发丝和下颌出现白边，但塑料脸探针不变；社区对重度 USM 的评价是“sharpened to death”“even more fake”。
+      现行链已经叠了三层锐化：系统规格句“面部清晰对焦，五官锐利”、风格后缀“焦点锐利，微反差强，皮肤纹理清晰”、后处理 USM（RL01：80/80 条首帧作业命中）。
+      不再往上加。要改善真人感，从生成端下手：写实 LoRA 的数据来源（真实照片 vs 生成图）、提示词去助推词并把光写具体、参考写法（K-PRM-Q26）、出图尺寸（K-REN-Q27），每项先 A/B。
+      USM 本身是项目方 10-31 选定的 S★（“leica_sharp 效果最好”），减弱或关掉要项目方看 R0 / R1 / R2 后决定。
+    evidence:
+      - {src: data/ab/realism_ab/metrics.json, note: halo R0 2.83–3.45，R1 1.66–2.26}
+      - {src: docs/research/realism_tuning_20261101.md, note: N8、N9}
+      - {src: data/ab/realism_ab/lint_scan.json, note: RL01 80/80}
+    check: tools/research/realism_lint.py
+    confidence: medium
+    status: 项目方闸门
+    date: 2026-11-01
+  - id: K-PRM-X04
+    _from: knowledge/rules/research_realism.yaml
+    _archived_reason: "⤴ 不采纳：L-087 项目方选 R0"
+    domain: prompt
+    link: P4-P6
+    title: ⤴（项目方选 R0，不采纳）风格后缀固定写“暖调”，和本镜正文的冷色主光打架（35/80 条）
+    when: 编译首帧提示词时接风格后缀（S★ 后缀“…暖调通透…”）
+    then: >-
+      ⤴ 项目方 11-01 确认现行 S★（选 R0），本条建议不采纳（L-087）。项目方原话（11-01 17:5x，总调度转）：“realism_ab……这个版本出来的东西,无论是画面效果还是颜色,都非常满意……很棒哎!”，随后 AskUserQuestion 选“R0 现在这样”（保持现行强锐化）。现行 USM 1.2/60/2、S★ 后缀（含“焦点锐利 / 暖调”）、系统规格句、契约 Q4 口径全部不改；本条只作研究记录，不作为改动依据。
+      series10 80 条首帧作业里 35 条正文写了冷白顶光 / 冷光 / 偏冷，后缀却固定“暖调”。官方改写器的结构是“单独一句写光线”，同一句里不出现两套色温。
+      建议：后缀不写色温，色温只由本镜光线句决定；或者编译器检测到正文冷色主光时去掉后缀里的“暖调”。
+      后缀是项目方选定的 S★ 原文，改动交总调度；改前先跑 A/B（gpu_plan.json G1 或 BAKEOFF qa_suffix）。
+    evidence:
+      - {src: data/ab/realism_ab/lint_scan.json, note: RL02 35/80}
+      - {src: docs/qwen21/RESEARCH.md, note: 结论 17}
+    check: tools/research/realism_lint.py
+    confidence: low
+    status: 项目方闸门
+    date: 2026-11-01

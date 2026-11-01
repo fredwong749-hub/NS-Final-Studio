@@ -1,0 +1,6 @@
+[
+  {"id": "ST", "title": "settings", "path": "/#/settings", "wait": 200, "steps": [
+    {"js": "for(let i=0;i<120;i++){ const t=document.body.innerText; if(!/全部 0\\b/.test(t) && t.length>300) return {ms:Math.round(performance.now()), head:t.replace(/\\s+/g,' ').slice(0,160)}; await new Promise(r=>setTimeout(r,200)); } return {timeout:true, head:document.body.innerText.replace(/\\s+/g,' ').slice(0,300)}"},
+    {"js": "return performance.getEntriesByType('resource').filter(e=>e.name.includes('/api/')).map(e=>new URL(e.name).pathname+' '+Math.round(e.duration)+'ms').slice(0,12)"}
+  ]}
+]

@@ -1,0 +1,64 @@
+[
+ {
+  "id": "X5_noncrop",
+  "title": "r37#5 林晚非脸部裁切候选：只给说明",
+  "path": "/#/assets?type=character&char=lin_wan",
+  "wait": 9000,
+  "steps": [
+   {
+    "wait": 12000
+   },
+   {
+    "click": "=身份脸",
+    "after": 2500
+   },
+   {
+    "wait": 3000
+   },
+   {
+    "js": "const b=[...document.querySelectorAll('button.hub-face-img')]; return b.map(x=>({cur:!!x.querySelector('.hub-badge.ok'), crop:x.getAttribute('data-crop'), title:x.title.slice(0,50), img:(x.querySelector('img')?.getAttribute('src')||'').split('path=').pop().slice(-40), w:x.querySelector('img')?.naturalWidth, h:x.querySelector('img')?.naturalHeight}));"
+   },
+   {
+    "shot": "a"
+   },
+   {
+    "clickAt": "(() => { const b=[...document.querySelectorAll('button.hub-face-img')].find(x=>x.getAttribute('data-crop')==='no' && !x.querySelector('.hub-badge.ok')); if(!b) return [null,null]; b.scrollIntoView({block:'center'}); const r=b.getBoundingClientRect(); return [r.x+r.width/2, r.y+r.height/2]; })()",
+    "after": 2500
+   },
+   {
+    "js": "const t=document.body.innerText; return {dialog:!!document.querySelector('[role=dialog], .ds-modal'), dlgText:(document.querySelector('[role=dialog], .ds-modal')?.innerText||'').split(String.fromCharCode(10)).join(' ').slice(0,160), toasts:[...document.querySelectorAll('.toast, .toasts > *')].map(e=>e.innerText.split(String.fromCharCode(10)).join(' ').slice(0,100)).slice(0,3), cropMsg:(t.match(/[^。\n]{0,20}脸部裁切[^。\n]{0,40}/g)||[]).slice(0,4)};"
+   },
+   {
+    "shot": "b"
+   }
+  ]
+ },
+ {
+  "id": "X5_crop",
+  "title": "r37#5 林晚脸部裁切候选：照常提交（写请求被拦）",
+  "path": "/#/assets?type=character&char=lin_wan",
+  "wait": 9000,
+  "steps": [
+   {
+    "wait": 12000
+   },
+   {
+    "click": "=身份脸",
+    "after": 2500
+   },
+   {
+    "wait": 3000
+   },
+   {
+    "clickAt": "(() => { const b=[...document.querySelectorAll('button.hub-face-img')].find(x=>x.getAttribute('data-crop')!=='no' && !x.querySelector('.hub-badge.ok')); if(!b) return [null,null]; b.scrollIntoView({block:'center'}); const r=b.getBoundingClientRect(); return [r.x+r.width/2, r.y+r.height/2]; })()",
+    "after": 2500
+   },
+   {
+    "js": "const t=document.body.innerText; return {dialog:!!document.querySelector('[role=dialog], .ds-modal'), dlgText:(document.querySelector('[role=dialog], .ds-modal')?.innerText||'').split(String.fromCharCode(10)).join(' ').slice(0,160), toasts:[...document.querySelectorAll('.toast, .toasts > *')].map(e=>e.innerText.split(String.fromCharCode(10)).join(' ').slice(0,100)).slice(0,3), cropMsg:(t.match(/[^。\n]{0,20}脸部裁切[^。\n]{0,40}/g)||[]).slice(0,4)};"
+   },
+   {
+    "shot": "a"
+   }
+  ]
+ }
+]

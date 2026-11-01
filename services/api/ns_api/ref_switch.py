@@ -169,8 +169,26 @@ def shot_refs_view(store: LookStore, shot_id: str) -> dict:
     }
 
 
+def _asset_script():
+    """资产项目（series10 等）→ 当前系统剧本；否则 None（走旧造型库）。DATA_MAP §6-1：切换必须写进出图实际读的来源"""
+    try:
+        from ns_api import ref_switch_assets as RA
+        from ns_schema.script import ScriptImport
+        f = P.DATA / "import" / "script_v2.json"            # 当前项目数据目录里的剧本（测试的临时项目没有 → 旧造型库）
+        if not f.exists():
+            return None
+        script = ScriptImport.model_validate_json(f.read_text(encoding="utf-8"))
+        return script if RA.project_of(script) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 @router.get("/api/shots/{shot_id}/refs")
 def get_shot_refs(shot_id: str, store: LookStore = Depends(get_store)):
+    script = _asset_script()
+    if script is not None:
+        from ns_api import ref_switch_assets as RA
+        return RA.view(script, shot_id)
     return shot_refs_view(store, shot_id)
 
 
@@ -409,6 +427,10 @@ def preview(store: LookStore, shot_id: str, body: RefsBody) -> tuple[Plan, dict]
 
 @router.post("/api/shots/{shot_id}/refs/preview")
 def post_preview(shot_id: str, body: RefsBody, store: LookStore = Depends(get_store)):
+    script = _asset_script()
+    if script is not None:
+        from ns_api import ref_switch_assets as RA
+        return RA.preview(script, shot_id, body)
     return preview(store, shot_id, body)[1]
 
 
@@ -485,4 +507,11 @@ def apply(store: LookStore, shot_id: str, body: RefsBody) -> dict:
 
 @router.post("/api/shots/{shot_id}/refs/apply")
 def post_apply(shot_id: str, body: RefsBody, store: LookStore = Depends(get_store)):
+    script = _asset_script()
+    if script is not None:
+        from ns_api import ref_switch_assets as RA
+        out = RA.apply(script, shot_id, body)
+        _after_write(store)
+        out["rerender"] = _rerender(list(out["affected"]) if body.rerender_first else [])
+        return out
     return apply(store, shot_id, body)

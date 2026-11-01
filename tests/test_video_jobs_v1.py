@@ -18,6 +18,7 @@ from ns_schema.h3_lint import ALIGN_PREFIX, frames_for_seconds
 from test_readiness import PNG, env, script  # noqa: F401  复用夹具
 
 SHOT = "ep01-S2"
+FLEX = "pika_h3_flex_fl2va_comfy_bf16.safetensors"
 
 
 def png(color=(120, 90, 60), size=(109, 192)) -> bytes:
@@ -35,7 +36,8 @@ class FakeComfy:
         self.interrupted = False
 
     def object_info(self):
-        return {"LoraLoaderModelOnly": {"input": {"required": {"lora_name": [[W.H3_TURBO_8STEP_768P]]}}}}
+        # gpu33 三条道都有 Turbo 和 Pika Flex（fredw-92/PF；项目方 2026-11-01 起默认基底 = pika_flex）
+        return {"LoraLoaderModelOnly": {"input": {"required": {"lora_name": [[W.H3_TURBO_8STEP_768P, FLEX]]}}}}
 
     def check(self, wf):
         return []
@@ -149,7 +151,7 @@ def test_render_chain_params_and_stale(fake):
     c, data, fc = fake
     _frame(data, SHOT, "image", 1)
     _frame(data, SHOT, "last", 1)
-    r = c.post(f"/api/shots/{SHOT}/video-jobs", json={})
+    r = c.post(f"/api/shots/{SHOT}/video-jobs", json={"base": "official_turbo"})   # RR：旧配方（Turbo + 首尾帧）仍可选
     assert r.status_code == 200 and r.json()["gpu"] == 3
     j = _wait(c, r.json()["job_id"])
     assert j["state"] == "done", j
@@ -164,13 +166,16 @@ def test_render_chain_params_and_stale(fake):
     assert wf["131"]["inputs"]["length"] == fr
     # 提示词原样 = 编译器的剧本 H3 四块
     c1 = P.compile_with_edits(VJ.get_script(), SHOT, set())
-    assert wf["131"]["inputs"]["prompt"] == c1.video_prompt
+    # CODE-RSI 11-01：剧本自带 **H3提示词** 时编译器原样用（含按剧本时长写的对齐句）；夹具 _v3 把时长改成 8 s 却没改剧本 H3，
+    # 18:24 返修稿起 ep01-S2 带 H3 原文（6 s → 6.58 秒对齐句）。提交时 h3_video.final_prompt 按实际帧数重算对齐句（现行设计），
+    # 所以期望值 = 编译器输出按本次帧数 realign，不依赖真实剧本里这一镜写了多少秒
+    assert wf["131"]["inputs"]["prompt"] == HV.realign(c1.video_prompt, fr)
     t1 = next(t for t in P.load_takes(SHOT)["takes"] if t["stage"] == "video")
     assert t1["params"]["first"]["n"] == 1 and t1["params"]["last"]["n"] == 1 and t1["parent"] is None
     assert t1["params"]["vram_peak_gb"] == 20.0 and t1["params"]["model"]["shift"] == [6.0, 3.0]
 
     # 改参数重渲：新种子、步数、时长、LoRA 强度、提示词覆盖 → 第 2 版挂在第 1 版下
-    r = c.post(f"/api/shots/{SHOT}/video-jobs", json={"seed": 42, "steps": 10, "seconds": 7, "lora_strength": 0.8,
+    r = c.post(f"/api/shots/{SHOT}/video-jobs", json={"base": "official_turbo", "seed": 42, "steps": 10, "seconds": 7, "lora_strength": 0.8,
                                                       "prompt_override": "OWNER TEXT"})
     j = _wait(c, r.json()["job_id"])
     assert j["state"] == "done", j
@@ -295,7 +300,7 @@ VBVR = "H3-Licon-VBVR-I2V.safetensors"
 
 def _with_loras(fc, *names):
     fc.object_info = lambda: {"LoraLoaderModelOnly": {"input": {"required": {
-        "lora_name": [[W.H3_TURBO_8STEP_768P, *names]]}}}}
+        "lora_name": [[W.H3_TURBO_8STEP_768P, FLEX, *names]]}}}}
 
 
 def test_extra_lora_validation(fake):
@@ -319,7 +324,7 @@ def test_extra_lora_chained_after_turbo(fake):
     _frame(data, SHOT, "image", 1)
     _frame(data, SHOT, "last", 1)
     _with_loras(fc, VBVR)
-    r = c.post(f"/api/shots/{SHOT}/video-jobs", json={"seed": 7, "loras": [{"name": VBVR, "strength": 0.7}]})
+    r = c.post(f"/api/shots/{SHOT}/video-jobs", json={"base": "official_turbo", "seed": 7, "loras": [{"name": VBVR, "strength": 0.7}]})
     assert r.status_code == 200, r.text
     assert r.json()["params"]["loras"] == [{"name": VBVR, "strength": 0.7}]
     j = _wait(c, r.json()["job_id"])

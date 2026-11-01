@@ -1,0 +1,94 @@
+# 内容缺陷猎捕（ITERAUDIT 2026-11-01，项目方 R11-11）。审片 / 质检侧的规则；检测器在 tools/qa/defect_hunt.py，清单 docs/rsi/DEFECT_HUNT.md。
+rules:
+  - id: K-REV-Q01
+    domain: review
+    link: [P10-P11, P11-RETRY]
+    title: 视频里任何一帧手数超过 2×人数就记缺陷，不能因为占比小被闸门放过
+    when: 视频质检 V6（score_clip.py）
+    then: hands_max > 2×人数 或 extra_hand_frac > 0 → 记“多一只手”缺陷，抽出该帧交 VLM 复核；复核确认即不合格（现闸门 extra_hand_frac 0.05 才不过，首轮 21 条放过）
+    check: [tools/qa/defect_hunt.py]
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/video/scores/ep01-S2__mot.json, note: "v6.hands_max 3 / people 1，extra_hand_frac 0.01，V6 通过"}
+      - {src: docs/rsi/DEFECT_HUNT.md, note: DH-V07 首轮 21 条}
+    confidence: medium
+    status: 建议
+    date: 2026-11-01
+  - id: K-REV-Q02
+    domain: review
+    link: [P10-P11, P11-P12]
+    title: 交付链必须有高清档：单镜 540×960 预览不能当成片；成片要有 4K 放大档（项目方 R11-7）
+    when: 合成交付（assemble_episode）
+    then: timeline deliveries 里没有 4K 档 → 记缺陷；放大模型写进 SOP（VIDEO10 / FIX 落实）
+    check: [tools/qa/defect_hunt.py]
+    evidence:
+      - {src: docs/REQUIREMENTS.md, quote: "后期可以用scale视频高清放大模型放到4k,这个写到sop去"}
+      - {src: data/episodes/series10/ep01_v2.timeline.json, note: deliveries 只有 1080p}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-Q13
+    domain: ops
+    link: [P10-P11, P11-RETRY]
+    title: 每出一集新内容就跑内容缺陷猎捕；没跑或有未分派的命中，生成类 loop 不能收轮
+    when: 任何生成类 loop（出图 / 出片 / 合成 / 写作）本轮产出了新集或新镜
+    then: 运行 tools/qa/defect_hunt.py（断点续跑，state 在 data/qa/defect_hunt/state.json），把新命中按 owner 分派、写进 docs/rsi/DEFECT_HUNT.md；看图类交 VQA 的本地 VLM rubric；iter_gate H1 检查 state 比本轮产出新
+    check: [tools/qa/defect_hunt.py, tools/qa/iter_gate.py, tests/test_defect_hunt.py]
+    evidence:
+      - {src: docs/REQUIREMENTS.md, quote: "以上很多基础的bugs,rsi agent应该可以发现的"}
+      - {src: docs/rsi/DEFECT_HUNT.md, note: 漏检根因与首轮结果}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  # ---- RSI 第 2 轮（fredw-2b 派，2026-11-01 下午；R11-11 续）
+  - id: K-REV-Q03
+    domain: review
+    link: [P10-P11, P11-P12]
+    title: 视频缺陷按“现行版本”计数（manifest chosen；没 manifest 的镜取最新评分），全部尝试的数只作参考
+    when: 缺陷猎捕 / 任何视频质量统计
+    then: defect_hunt 对视频类同时记 hits（全部尝试）与 hits_current（现行版）；分派与收轮只看现行版；报告里两个数并列写“全部 / 现行”
+    check: [tools/qa/defect_hunt.py, tests/test_defect_hunt.py]
+    evidence:
+      - {src: data/qa/defect_hunt/state.json, note: "11-01 16:24 state.json counts：视频评分 160 条、现行 62 条（出片还在进行，数字会变）；DH-V12 景别退档 106 / 38，DH-V06 身份 82 / 24，DH-V07 多手 45 / 14"}
+      - {src: docs/rsi/DEFECT_HUNT.md, note: "首轮 §3 注：按全部尝试统计，含已淘汰 seed"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REV-Q04
+    domain: review
+    link: [P10-P11]
+    title: 视频契约项“未测”单独记一类，不算缺陷也不算通过（V7 口型未测不能记成口型不同步）
+    when: 统计 V6 / V7 等视频契约项
+    then: status=未测 → DH-V19（未测清单，交 VIDEO10 补测或标明原因）；只有 status=不通过 才进 DH-V10 等缺陷类
+    check: [tools/qa/defect_hunt.py, tests/test_defect_hunt.py]
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/video/scores/ep10-S5__s4.json, note: "v7.status 未测（说话人脸只在 20% 帧检出）；首轮 DH-V10 判据 status not in (通过, 不适用) 把它记成口型缺陷，32→26"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REV-Q05
+    domain: review
+    link: [P10-P11, P11-RETRY]
+    title: 闸门项阈值为空 = 测了但永远不拦，必须作为缺陷暴露，由 owner 定阈值或写明“只记录”的理由
+    when: score_clip 的 v6.th / 其它闸门 th 里有 None，而该项每条都有实测值
+    then: defect_hunt DH-V20 列出（项名、测了多少条、超 0.2 的条数）；owner（VIDEO10）给阈值或在规则里写只记录理由；不能静默放行
+    check: [tools/qa/defect_hunt.py, tests/test_defect_hunt.py]
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/video/scores/ep10-S5__s4.json, note: "v6.th.bad_finger_frac = null；v6.bad_finger_frac 0.441，V6 通过"}
+      - {src: data/qa/defect_hunt/state.json, note: "DH-V20：bad_finger_frac 150 条都测了，91 条 >0.2，全部放行"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-REV-Q06
+    domain: review
+    link: [P11-P12]
+    title: 进了成片的视频版本要按现在的评分复核：闸门不过 / 手数超 2×人数 / V7 不通过 / 分身 → 记缺陷并交剪辑换版
+    when: data/episodes/series10/*.timeline.json 每镜 origin（VIDEO10 epNN-SN <版本>）
+    then: defect_hunt DH-X03 对照 scores/<镜>__<版本>.json；命中交 FIX + VIDEO10（换版或重出），抽帧交 VQA 本地看图确认（tools/qa/defect_vlm.py）
+    check: [tools/qa/defect_hunt.py, tools/qa/defect_vlm.py, tests/test_defect_hunt.py]
+    evidence:
+      - {src: data/episodes/series10/ep01_v2.timeline.json, note: "最新一版 ep01：S2 用 mot（手最多 3 只 / 1 人，V6 通过）、S4 用 s2（5 只 / 2 人）"}
+      - {src: data/pipeline/runs/series10_v1/video/scores/ep01-S2__mot.json}
+      - {src: docs/REQUIREMENTS.md, quote: "有些地方生图发生了多一只手"}
+    confidence: medium
+    status: 建议
+    date: 2026-11-01

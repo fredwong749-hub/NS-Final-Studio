@@ -1,0 +1,23 @@
+{
+  "plate": "plate.png",
+  "scene_id": "sk_gu_apartment",
+  "locked": {
+    "by": "canvas",
+    "at": "2026-11-01T00:57:39",
+    "sha256": "3651127ba8e9d7f9bb78ae8a9c2e4118cc4e06f737b29077f4fb277b6ab92183",
+    "version": 1,
+    "variant": "main",
+    "file": "plate.png",
+    "source_file": "assets/scenes/sk_gu_apartment/refs/ar-c16546d59f.png"
+  },
+  "variants": {
+    "plate": {
+      "file": "plate.png",
+      "sha256": "3651127ba8e9d7f9bb78ae8a9c2e4118cc4e06f737b29077f4fb277b6ab92183",
+      "version": 1,
+      "locked_by": "canvas",
+      "locked_at": "2026-11-01T00:57:39",
+      "source": "canvas"
+    }
+  }
+}

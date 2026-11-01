@@ -1,0 +1,26 @@
+/* UX6（D5）：剧本 ① 创作 → ② 导入 合成一页 */
+.sf-page { display: flex; flex-direction: column; min-height: 0; }
+.sf-steps { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; padding: var(--sp-2) var(--sp-4); border-bottom: 1px solid var(--c-line); background: var(--c-surface, var(--c-bg)); position: sticky; top: 0; z-index: var(--z-sticky); }
+.sf-title { font-size: var(--fs-lg); margin-right: var(--sp-2); }
+.sf-step-wrap { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.sf-arrow { color: var(--c-text-3); }
+.sf-step { display: grid; grid-template-columns: auto auto; grid-template-rows: auto auto; column-gap: var(--sp-1); align-items: center; text-align: left; padding: var(--sp-1) var(--sp-3); border-radius: var(--r-m); border: 1px solid var(--c-line); background: transparent; color: var(--c-text-2); cursor: pointer; font: inherit; max-width: 360px; }
+.sf-step .sf-n { grid-row: 1 / span 2; font-size: var(--fs-lg); }
+.sf-step .sf-l { font-weight: 600; color: var(--c-text); }
+.sf-step small { font-size: var(--fs-xs); color: var(--c-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sf-step:hover { border-color: var(--c-line-2); }
+.sf-step.on { border-color: var(--c-accent); background: var(--c-accent-soft); }
+.sf-step:focus-visible { outline: 2px solid var(--c-focus); outline-offset: 1px; }
+.sf-import { padding: var(--sp-3) var(--sp-4); }
+@media (max-width: 1360px) { .sf-step small { display: none; } }
+/* UIRSI：① 新建剧本页撑满剩余高度；“单集对话写作”是旁路入口，不占步骤 */
+/* UIAUDIT 11-01：原来是 height:100%，内容比它高时步骤条（sticky）只在这 1 屏高的盒子里吸，滚过一屏就跟着走了；改 min-height，盒子随内容长高，步骤条一直吸在 main 顶上 */
+.sf-page { min-height: 100%; }
+.sf-side { height: var(--h-s); padding: 0 var(--sp-3); border-radius: var(--r-pill); border: 1px solid var(--c-line-2); background: transparent; color: var(--c-text-2); font: inherit; font-size: var(--fs-xs); cursor: pointer; }
+.sf-side:hover { color: var(--c-text); }
+.sf-side.on { border-color: var(--c-accent); color: var(--c-accent-text); }
+@media (max-width: 1500px) { .sf-note { display: none; } }
+/* UIRSI r2（D13）：导入页定位到“新建剧本”送来的那一份；更早的稿件折叠 */
+.imp-row.imp-focus { border-color: var(--c-accent); box-shadow: 0 0 0 2px var(--c-accent-soft); }
+.imp-more { align-self: flex-start; }
+.sf-retired { margin: var(--sp-2) var(--sp-4) 0; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-m); background: var(--c-info-soft); color: var(--c-info-text); }
