@@ -1,0 +1,18 @@
+# FACTORY（总调度 11-02 04:0x，VQAGATE 查出 gaze_mp 在生产静默失效）：服务器工厂运行依赖清单。
+# deploy 前在目标机核对（tools/factory/server_deps.py，system_version.deploy_host 调用）：缺包 / 版本不符 / 模型 sha 不符 → 拒绝部署、不排重启。
+# 改依赖 = 改这里 + 随 sv 发版；装包仍需人工 / FACTORY 执行（免费包），清单只核对不自动安装。
+venvs:
+  /root/work/fredw/offline_20261101/venv:          # producer / night 用的解释器
+    imports:                                        # 必须能 import（模块名）
+      - numpy
+      - cv2
+      - mediapipe
+      - mediapipe.tasks.python.vision
+      - matplotlib
+      - PIL
+      - yaml
+    versions:                                       # pip 包名: 期望版本（只核对写了的）
+      mediapipe: "1.2.0"
+models:                                             # 相对 producer 仓库根目录
+  models_cache/vision/face_landmarker.task: 64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff
+  models_cache/vision/selfie_multiclass_256x256.tflite: c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0

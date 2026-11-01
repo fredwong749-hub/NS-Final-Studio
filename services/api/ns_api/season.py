@@ -24,7 +24,7 @@ def _script() -> tuple[dict, float]:
     p = REPO / "data" / "import" / "script_v2.json"
     try:
         return json.loads(p.read_text(encoding="utf-8")), p.stat().st_mtime
-    except (OSError, ValueError):
+    except (OSError, ValueError):  # arch-ok: 导入稿不存在 = 还没导入剧本，空总览是真实状态（前端写“还没有剧本”）
         return {}, 0.0
 
 
@@ -44,6 +44,70 @@ def _img_line(t: str) -> str:
                      or CAM_RE.fullmatch(parts[0].strip())):
         parts.pop(0)
     return "，".join(x.strip() for x in parts)[:200]
+
+
+LENS_RE = re.compile(r"(\d{2,3})\s*mm[^，,。]*?(f/?\s*\d+(?:\.\d+)?)?")
+
+
+def lens_of_text(txt: str) -> str | None:
+    """从提示词里解析镜头：“徕卡M 50mm f/2镜头”→“50mm f/2”；“85mm人像镜头f/1.2”→“85mm f/1.2”"""
+    mm = LENS_RE.search(txt or "")
+    if not mm:
+        return None
+    fa = re.search(r"f/\s*\d+(?:\.\d+)?", txt[mm.end(1): mm.end(1) + 16])
+    return f"{mm.group(1)}mm{(' ' + fa.group(0).replace(' ', '')) if fa else ''}"
+
+
+def _norm_lens(v) -> str | None:
+    if not v:
+        return None
+    return lens_of_text(str(v)) or str(v)[:40]
+
+
+def _style_suffix_lens() -> str | None:
+    """还没出过图的镜：出图链统一加的 style_suffix 里的镜头（config/render_quality.json，现行“徕卡M 50mm f/2”）"""
+    try:
+        txt = (REPO / "config" / "render_quality.json").read_text(encoding="utf-8")
+    except OSError:  # arch-ok: 配置读不到就只用计划值
+        return None
+    m = re.search(r'"style_suffix"\s*:\s*"([^"]*)"', txt)
+    return lens_of_text(m.group(1)) if m else None
+
+
+def lens_info(sid: str) -> dict:
+    """一镜的镜头（总调度 r45：永远不显示“未标”）：
+    实拍 = 本版 take 实际编译提示词（含 style_suffix）里解析出的镜头；没出过图 = 出图链 style_suffix 的镜头；
+    计划 = takes.lens / visual_spec.lens / 作业提示词镜头句。显示：一致只写一个；不一致写“实拍 50mm f/2 · 计划 85mm f/1.2”。"""
+    m = re.fullmatch(r"ep(\d+)-S(\d+)", sid)
+    d = REPO / "data" / "renders" / f"ep{int(m.group(1)):02d}" / f"S{int(m.group(2))}" if m else None
+    actual = plan = None
+    tk = {}
+    if d:
+        try:
+            tk = json.loads((d / "takes.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):  # arch-ok: 这镜还没出过图，实拍按 style_suffix
+            tk = {}
+    act = (tk.get("active") or {}).get("image")
+    ts = [t for t in tk.get("takes") or [] if t.get("stage") == "image"]
+    t = next((x for x in ts if x.get("n") == act), ts[-1] if ts else None) or {}
+    actual = lens_of_text(t.get("prompt") or "") or lens_of_text(str((t.get("params") or {}).get("prompt") or ""))
+    plan = _norm_lens(t.get("lens") or (t.get("params") or {}).get("lens"))
+    if not plan and d:
+        try:
+            cp = json.loads((d / "compiled.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):  # arch-ok: 没有编译稿就没有计划值
+            cp = {}
+        vs = cp.get("visual_spec") if isinstance(cp.get("visual_spec"), dict) else {}
+        plan = _norm_lens(vs.get("lens")) or lens_of_text(cp.get("image_prompt") or "")
+    source = "take" if actual else None
+    if not actual:
+        actual = _style_suffix_lens()
+        source = "style_suffix" if actual else None
+    if actual and plan and actual != plan:
+        text = f"实拍 {actual} · 计划 {plan}"
+    else:
+        text = actual or plan or "镜头未标"
+    return {"text": text, "actual": actual, "plan": plan, "actual_source": source}
 
 
 def _faces(sc: dict) -> dict[str, str]:
@@ -111,6 +175,9 @@ def season():
             # UIRSI r40：旧剧本版本的图（剧本更新前出的）不作候选；有它们而没有新图时，格子写“未出（剧本已更新）”
             s["old_script_n"] = sum(1 for t in st.get("takes") or [] if t.get("script") == "old")
             s["status"] = (c.get(s["id"]) or {}).get("status") or {"main": None, "tags": []}
+            # r45 胶卷片边下边码：镜头参数 takes.lens → compiled visual_spec.lens → 作业提示词里的镜头句（DIRECTOR 在给 takes 加 lens）
+            li = lens_info(s["id"])
+            s["lens"], s["lens_actual"], s["lens_plan"] = li["text"], li["actual"], li["plan"]
             # 当前版本本身是旧剧本出的（全量重做没撤掉的尾帧等）：前端不显示这张、按“未出（剧本已更新）”处理
             for stg, key in (("image", "first_old"), ("last", "last_old")):
                 x = (c.get(s["id"]) or {}).get(stg) or {}
@@ -145,3 +212,28 @@ def season_sheets(pairs: str = ""):
             f = None
         out[pr] = ("/files/" + (f[len("data/"):] if f.startswith("data/") else f)) if f else None
     return {"sheets": out}
+
+
+@router.get("/api/ui/version")
+def ui_version():
+    """UIRSI r45（L-103：“页面停在旧状态”不能靠项目方自己按刷新）：前端页面过期检测用。
+    src_at = apps/web/src（+ index.html）最新改动时间；dist_at = :8800 挂的 apps/web/dist/index.html 打包时间（秒级时间戳）。
+    前端（v3/StaleBanner.tsx）定时比对：开发版（:5173）src 比本页最后一次加载 / 热更新新、且热更新没跟上 → 顶部提示“已更新，点此刷新”；
+    打包版（:8800）dist 换了新的 → 同样提示；空闲 2 分钟自动刷新。"""
+    web = REPO / "apps" / "web"
+    src = 0.0
+    for p in (web / "src").rglob("*"):
+        if p.suffix in (".ts", ".tsx", ".css"):
+            try:
+                src = max(src, p.stat().st_mtime)
+            except OSError:  # arch-ok: 单个文件读不到不影响整体版本号
+                pass
+    try:
+        src = max(src, (web / "index.html").stat().st_mtime)
+    except OSError:  # arch-ok: index.html 不存在时只看 src
+        pass
+    try:
+        dist = (web / "dist" / "index.html").stat().st_mtime
+    except OSError:  # arch-ok: dist 不存在 = 0，前端按“没有打包版”处理
+        dist = 0.0
+    return {"src_at": round(src, 1), "dist_at": round(dist, 1)}

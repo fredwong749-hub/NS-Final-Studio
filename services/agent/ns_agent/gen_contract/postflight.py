@@ -21,7 +21,7 @@ import numpy as np
 
 from . import ROOT, ContractResult, Item, cfg
 
-TITLES = {"Q8": "林晚发色（相对身份参考与同帧肤色亮度）", "Q1": "身份余弦（ArcFace）", "Q2": "造型一致（服装 / 鞋 / 饰品区域相似度 + 颜色直方图）", "Q3": "景别符合度（脸高档位）",
+TITLES = {"Q8": "林晚发色（相对身份参考与同帧肤色亮度）", "Q1": "身份余弦（ArcFace）", "Q1a": "逐人头发属性（发色 / 发长，对人物卡）", "Q2": "造型一致（服装 / 鞋 / 饰品区域相似度 + 颜色直方图）", "Q3": "景别符合度（脸高档位）",
           "Q4": "真人质感 / 油光", "Q5": "坏手 / 多肢 / 多人", "Q6": "文字 / 水印", "Q7": "场景一致",
           "G1": "演员看镜头（只记录，ACTING R11-2）"}
 
@@ -54,6 +54,31 @@ SIZE_BAND = {"极近特写": 0, "大特写": 0, "特写": 1, "近景": 2, "中�
 NAME_ID = {"林晚": "lin_wan", "顾沉": "gu_chen", "陈宇": "chen_yu", "阿岚": "ch_a_lan"}
 from .metrics import (ZONE_REGION, _clip, _ref_crop, embed, hist_corr, hs_hist, measure, region_match,  # noqa: E402,F401
                       texture, windows)
+
+
+def q1a_item(image, boxes: dict, all_boxes: list, t1a: dict) -> tuple[str, str, dict]:
+    """Q1a：每个在画角色那张脸的头发（分割 + 头顶连通域）对人物卡（Q1a_attr.cards）。→ (status, detail, evidence)
+    分割不可用 → untested（q1a_mode=unavailable，producer 记 score_infra 只重打分；SENTINEL 探针读 q1a_mode），不静默放过"""
+    cards = t1a.get("cards") or {}
+    todo = {c: b for c, b in boxes.items() if c in cards and b}
+    if not todo:
+        return "na", "没有要核对头发的在画角色脸", {"q1a_mode": "na"}
+    if not Path(str(image)).exists():
+        # 只给了打分元数据、没有图像文件（单测 / 旧调用）：判不了，明写 no_image（生产 producer 一定传真实文件）
+        return "na", "没有图像文件，头发属性未判", {"q1a_mode": "no_image"}
+    from ..vqa import hair_attr as HA
+    others = [b for b in all_boxes if b not in todo.values()]
+    order = list(todo.values()) + others
+    try:
+        fs = HA.measure(image, order)
+    except HA.Unavailable as e:
+        return "untested", f"头发分割不可用：{e}", {"q1a_mode": "unavailable", "why": str(e)[:200]}
+    bad, per = [], {}
+    for (c, _b), f in zip(todo.items(), fs):
+        per[c] = f
+        bad += HA.judge(c, f, cards[c])
+    ok_txt = "头发符合人物卡（" + "、".join(f"{cards[c].get('name', c)} 蓝 {f['hair_blue']:.2f} / 下长 {f['below']:.2f}" for c, f in per.items()) + "）"
+    return ("fail" if bad else "pass"), ("；".join(bad) if bad else ok_txt), {"per_person": per, "q1a_mode": "seg", "boxes": todo}
 
 
 def apply_bank(sims: dict, t1: dict) -> dict:
@@ -297,6 +322,7 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
                  for f in remote.get("faces") or []]
         bad, got, via, used = [], {}, {}, set()
         q1_band = []                                  # K-REV-V18 修订：落在复核带的角色（交本地看图左右并排复核）
+        q1_boxes = {}                                 # Q1a：每个在画角色认到的那张脸（ArcFace 最像的一张）
         refd = {k for f in faces for k in f["sims"]}
         for cid in expect:
             if faces and cid not in refd:                 # 没有身份脸参考的角色（路人）：不判，下面按“可抵一张认不出的脸”算
@@ -308,6 +334,7 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
                 bad.append(f"{cid} 未出脸")
             else:
                 used.add(k_best)
+                q1_boxes[cid] = faces[k_best].get("bbox")
                 h = float(faces[k_best].get("h_ratio") or 0)
                 need, lo, tname = band_lines(cid, h, t1)
                 if best < lo:
@@ -375,7 +402,13 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
             "身份过线（" + "、".join(f"{c} {got[c]:.3f} 对 {via[c]}" for c in got) + "）" +
             (f"；其他脸：{'、'.join(extra_ok)}" if extra_ok else ""),
             sims=got, ref=via, faces=len(faces), strangers=strangers, others=extra_ok, stranger_boxes=stranger_boxes, review_band=q1_band,
-            partial_cast=any(c.get("presence") in ("局部", "背影") for c in req.get("cast") or []))
+            partial_cast=any(c.get("presence") in ("局部", "背影") for c in req.get("cast") or []), boxes=q1_boxes,
+            q1_mode=(remote or {}).get("q1_mode"))
+        # Q1a（VQAGATE 11-02 P0，ep06-S2 v6 顾沉长出林晚的蓝色长发）：逐人头发属性，确定性分割判；上线即阻断
+        t1a = th.get("Q1a_attr") or {}
+        if t1a.get("enabled"):
+            st, d, ev = q1a_item(image, q1_boxes, [f.get("bbox") for f in faces if f.get("bbox")], t1a)
+            add("Q1a", st, d, **ev)
     # Q2
     t2 = th.get("Q2_outfit") or {}
     q2 = (local or {}).get("Q2")

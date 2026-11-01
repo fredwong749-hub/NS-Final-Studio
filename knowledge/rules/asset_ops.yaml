@@ -392,3 +392,27 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-W22
+    domain: ops
+    link: [P5-P6]
+    title: 编排器每拍（tools/autopilot/run.py tick）挂在笔记本 resident_sync loop 的独立守护线程里，60 s 一拍、上一拍没完不开下一拍、超时杀进程树
+    when: DISTILL 编排器（status / coverage / 写作交稿即推进 / :8800 空闲重启守护）需要周期驱动
+    then: resident_sync.loop 启动时起 autoflow_thread（daemon）；每拍 autoflow_tick_once 用子进程跑 run.py tick，输出写 ops/logs/autoflow_tick.out（防管道卡死），超时 AUTOFLOW_TIMEOUT_S=900 s 用 taskkill /T 杀整棵进程树；同一线程串行 = 上一拍没完自动跳过；失败 / 超时 / 输出变化每次记日志，正常拍每 30 拍记一行；不拖住推送 / 健康循环；:8800 重启请求走 restart_queue host=laptop-api，由 api_restart_guard 执行
+    check: tests/test_autoflow_tick_hook.py
+    evidence:
+      - {src: tools/autopilot/run.py, note: "DISTILL 11-02：run.py tick 做好（decider=code），dry-run 识别第二季 3 集该推进；WORKFLOW 挂进 loop 前 dry-run 一拍 rc=0、1.8 s"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-W23
+    domain: ops
+    link: [P5-P6]
+    title: 重启队列排空只看 ComfyUI 执行中 + 排队的渲染单，打分积压不算；前 60 s 等全空，之后只等当前单，90 s 上限照常重启
+    when: restart_queue.process 执行服务器渲染进程重启前的排空
+    then: restart_queue.drain 每 10 s 经 ssh 取各渲染道 ComfyUI /queue（queue_running / queue_pending）；running+pending=0 → drain_mode=full；≥ DRAIN_FULL_S=60 s 且 running=0 → current_only；≥ DRAIN_MAX_S=90 s 仍不空 → timeout 照常重启；不读 producer heartbeat inflight（打分在 VLM 卡上，重启渲染进程不影响）；drain_mode / drain_s / drain_last 写进 restart_done.jsonl
+    check: tests/test_infra_resident.py
+    evidence:
+      - {src: data/autopilot/restart_done.jsonl, note: "总调度 11-02 04:1x：排空把打分积压算进 inflight（gpu33 当时 42），干等满 15 分钟才重启，gpu36 一直没处理，GPU 白闲"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

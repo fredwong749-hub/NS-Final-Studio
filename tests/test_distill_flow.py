@@ -357,3 +357,135 @@ def test_snapshot_runs_from_registry(tmp_path):
     assert SS.run_id(root) == "demo_run" and SS.run_ids(root) == ["demo_run", "s2"]
     files = SS.decision_files(root)
     assert "data/pipeline/runs/s2/video/recipe_choice.json" in files and "data/pipeline/runs/demo_run/video/recipe_choice.json" in files
+
+
+
+# ---------------------------------------------------------------- r3：L-109 测试期口径 + canary + 写作交稿即推进
+def test_canary_is_explicit_pause():
+    t0 = time.time()
+    iso = lambda dt: time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t0 - dt))  # noqa: E731
+    assert POL.pause_decision({"paused": True, "paused_by": "VQAGATE", "reason_kind": "canary", "paused_at": iso(60), "expires_at": iso(-60)}, t0) is None
+    d = POL.pause_decision({"paused": True, "paused_by": "VQAGATE", "reason_kind": "canary", "paused_at": iso(400), "expires_at": iso(-60)}, t0)
+    assert d["action"] == "alert"                                            # 不自动恢复
+
+
+def test_writer_points_testphase_vs_launch():
+    wp = [p for s in FL.STAGES for p in s["points"] if p.get("writer")]
+    assert len(wp) == 3
+    assert all(FL.now_of(p, "claude_agent") == FL.TESTPHASE for p in wp)
+    assert all(FL.now_of(p, "api") == "api_model" for p in wp)
+    c = FL.coverage(ROOT, write=False)
+    assert c["deciders_now_launch"].get(FL.TESTPHASE, 0) == 0                # 上线配置下没有 testphase
+    assert "claude_share_launch" in c
+
+
+def test_autoflow_due_and_memo(tmp_path):
+    root = _fake_root(tmp_path)
+    d = root / "data/pipeline/runs/s2"
+    (d / "writer_tasks").mkdir(parents=True)
+    (d / "writer_out").mkdir()
+    for name, ep in (("P2_ep06_a1.json", 6), ("P2_ep06_a2.json", 6), ("patch_ep02_a1.json", 2)):
+        (d / "writer_tasks" / name).write_text(json.dumps({"episode": ep, "advance_cmd": "echo hi",
+            "output": {"done_marker": f"data/pipeline/runs/s2/writer_out/{name}.done"}}), encoding="utf-8")
+    assert FL.autoflow_due(root) == []
+    (d / "writer_out/P2_ep06_a1.json.done").write_text("", encoding="utf-8")       # 旧包交稿不算（取 a 最大的包）
+    assert FL.autoflow_due(root) == []
+    (d / "writer_out/P2_ep06_a2.json.done").write_text("", encoding="utf-8")
+    (d / "writer_out/P4_ep03_r1.md.done").write_text("", encoding="utf-8")         # 整集重写稿交稿
+    due = {(x["episode"], x["package"]) for x in FL.autoflow_due(root)}
+    assert due == {(6, "P2_ep06_a2.json"), (3, "P4_ep03_r1.md")}
+    (d / "autoflow_ep03.json").write_text(json.dumps({"agent": {"full_p4_done": ["P4_ep03_r1.md"]}}), encoding="utf-8")
+    assert {x["episode"] for x in FL.autoflow_due(root)} == {6}
+    r = FL.autoflow_tick(root, apply=False)
+    assert r["ran"] and r["ran"][0]["dry"]
+
+
+
+def test_master_review_autosign_gate():
+    """总调度 04:0x：一致率 ≥95% 且漏放 0 才切换；切换后抽检 10%，不一致即退回人工"""
+    ok = [{"auto": "pass", "human": "pass"}] * 19 + [{"auto": "fail", "human": "fail"}]
+    assert POL.autosign_switch_ok(ok)["ok"] is True
+    one_fp = ok[:-1] + [{"auto": "pass", "human": "fail"}]                    # 一致率 95% 但有 1 条漏放
+    r = POL.autosign_switch_ok(one_fp)
+    assert r["ok"] is False and r["false_pass"] == 1
+    strict = ok[:-2] + [{"auto": "fail", "human": "pass"}] * 2                 # 误挡 2 条 → 90%
+    assert POL.autosign_switch_ok(strict)["ok"] is False
+    assert POL.autosign_switch_ok([])["ok"] is False                           # 没测到 ≠ 通过
+    assert POL.autosign_spot_check([{"auto": "pass", "human": "pass"}] * 3, 30)["action"] == "keep"
+    assert POL.autosign_spot_check([{"auto": "pass", "human": "pass"}] * 2, 30)["action"] == "wait"
+    assert POL.autosign_spot_check([{"auto": "pass", "human": "fail"}], 30)["action"] == "revert"
+
+
+
+# ---------------------------------------------------------------- K-OPS-X08 min_code_sv
+def test_code_sv_problem_fail_closed(tmp_path):
+    root = _fake_root(tmp_path)
+    (root / "data").mkdir(exist_ok=True)
+    assert "失败关闭" in POL.code_sv_problem(root, want="sv-20261102-03")              # 没有版本文件
+    vf = root / "data/system_version.txt"
+    vf.write_text(json.dumps({"id": "sv-20261101-01"}), encoding="utf-8")
+    assert "低于" in POL.code_sv_problem(root, want="sv-20261102-03")
+    vf.write_text(json.dumps({"id": "sv-20261102-10"}), encoding="utf-8")              # 10 > 03（数值比较，不是字符串）
+    assert POL.code_sv_problem(root, want="sv-20261102-03") is None
+    vf.write_text("garbage", encoding="utf-8")
+    assert "格式不对" in POL.code_sv_problem(root, want="sv-20261102-03")
+    assert POL._sv_key("sv-20261102-10") > POL._sv_key("sv-20261102-9")
+    vf.write_text(json.dumps({"id": "sv-20261102-10"}), encoding="utf-8")
+    assert "未配置" in POL.code_sv_problem(root, want="bogus")                        # min_code_sv 配坏了也拒派（失败关闭）
+
+
+def test_deployed_sv_and_handback(tmp_path):
+    root = _fake_root(tmp_path)
+    p = root / "data/system_versions/index.json"
+    p.parent.mkdir(parents=True)
+    p.write_text(json.dumps({"versions": [{"id": "sv-20261102-01", "deployed": {"gpu36": {"ok": True}}},
+                                          {"id": "sv-20261102-02", "deployed": {"gpu36": {"ok": False}, "gpu33": {"ok": True}}}]}), encoding="utf-8")
+    assert POL.deployed_sv("gpu36", root) == "sv-20261102-01" and POL.deployed_sv("gpu33", root) == "sv-20261102-02"
+    good = {"preflight_dryrun_ok": True, "preflight_dryrun_shots": 5, "refs_match": True, "refs_mismatch": 0,
+            "ready": True, "preflight_dryrun_by": "FACTORY"}
+    ok, why = POL.handback_ok(good, server_sv=POL.deployed_sv("gpu36", root))
+    assert not ok and any("min_code_sv" in w for w in why)                              # sv-01 < sv-03
+
+
+
+def test_line3_tick_keeps_dirty_on_failure(tmp_path):
+    root = _fake_root(tmp_path)
+    d = root / "data/pipeline/runs/s2"
+    d.mkdir(parents=True)
+    f = d / "line3_dirty.json"
+    f.write_text(json.dumps({"episodes": {"2": {"why": "x"}}, "cmd": sys.executable + " -c raise SystemExit(3)"}), encoding="utf-8")
+    assert FL.line3_tick(root, apply=False)["ran"][0]["dry"] is True and f.exists()
+    r = FL.line3_tick(root, apply=True)
+    assert r["ran"][0]["rc"] != 0 and f.exists()                                   # 失败保留，下一拍重试
+    f.write_text(json.dumps({"episodes": {"2": {}}, "cmd": sys.executable + " -c pass"}), encoding="utf-8")
+    assert FL.line3_tick(root, apply=True)["ran"][0]["rc"] == 0 and not f.exists()  # 成功才删
+
+
+
+def test_tick_writes_last_tick(tmp_path):
+    root = _fake_root(tmp_path)
+    _fixture_world(root)
+    FL.tick(root, apply=False)
+    st = json.loads((root / "data/autopilot/flow/status.json").read_text(encoding="utf-8"))
+    assert st["global"]["last_tick"]["dry"] is True and not (root / "data/autopilot/flow/last_tick.json").exists()
+    FL.tick(root, apply=True)
+    lt = json.loads((root / "data/autopilot/flow/last_tick.json").read_text(encoding="utf-8"))
+    assert lt["dry"] is False and time.time() - lt["t"] < 60
+
+
+
+def test_tick_parts_independent(tmp_path):
+    """三条线互不依赖：core 在另两条线没跑过时也能写 status / last_tick；之后并入两线结果"""
+    root = _fake_root(tmp_path)
+    _fixture_world(root)
+    r = FL.tick_part("core", root, apply=True)
+    st = json.loads((root / "data/autopilot/flow/status.json").read_text(encoding="utf-8"))
+    assert r["part"] == "core" and st["global"]["api_restart"]["status"] == "pending"
+    assert json.loads((root / "data/autopilot/flow/last_tick.json").read_text(encoding="utf-8"))["mode"] == "parts"
+    FL.tick_part("api", root, apply=False)
+    FL.tick_part("line3", root, apply=False)
+    FL.tick_part("core", root, apply=True)
+    st = json.loads((root / "data/autopilot/flow/status.json").read_text(encoding="utf-8"))
+    assert st["global"]["api_restart_at"] and st["global"]["line3_tick_at"]
+    with pytest.raises(ValueError):
+        FL.tick_part("nope", root)

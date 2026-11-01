@@ -182,3 +182,27 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-E17
+    domain: ops
+    link: [P5-P6]
+    title: 每条出图道的 ComfyUI 队列保持“1 单在跑 + 1 单排队”（预取深度可配置），派单 / 传图和渲染并行；打分积压上限按打分实测吞吐定，压线开 SENTINEL S3 工单，不悄悄停派
+    when: producer.probe_lanes / dispatch_frames
+    then: prefetch_depth()（NS_PRODUCER_PREFETCH > resources.prefetch_depth > 2）；lane_busy 每道一个列表，队列里只有自己的单（或至多 1 个让道任务）且数量 < 深度就能再交；dynamic_backlog = max(道数 × 深度, 最近 15 分钟打分完成数折成每分钟 × 15)，NS_PRODUCER_SCORE_BACKLOG 可强制；达到上限写 data/sentinel/tickets.jsonl（score_backlog，30 分钟一张）
+    check: tests/test_debug_rsi.py::test_e17_prefetch_and_dynamic_backlog, tests/test_debug_rsi.py::test_e17_backlog_gate_opens_s3_ticket
+    evidence:
+      - {src: docs/debug/DEBUG_r1.md, note: "11-02 04:0x gpu33 每单 35–40 s、两单之间空 5–40 s；inflight 42 接近写死的 48"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-E18
+    domain: ops
+    link: [P7-P8]
+    title: 项目时间一律 Asia/Tokyo——服务器上任何写时间戳的进程（含经 ssh 调的 CLI）都要在进程内设 TZ=Asia/Tokyo，不能依赖服务器默认 EST
+    when: producer.py 及任何在 gpu33 / gpu36 上经 ssh / rsh 调用、会写 log / control / master_rejects 时间戳的脚本
+    then: producer.py 模块加载时强制 TZ=Asia/Tokyo + tzset；其它工具（restart_queue 的排空暂停、dispatch server-control、resident 脚本）同样处理，或调用时前缀 TZ=Asia/Tokyo
+    check: tests/test_debug_rsi.py::test_e18_producer_forces_tokyo_tz
+    evidence:
+      - {src: docs/debug/DEBUG_r1.md, note: "11-02 04:3x：服务器 RESTART_QUEUE 暂停 paused_at=11-01T13:52（EST）、恢复记 11-02T03:52（东京）→ 被算成 840 分钟；DEBUG-RSI 经 ssh 写的 reject at=EST，被 push_control 当成更旧的条目，03:13 放出的 32 镜被笔记本旧值盖回"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

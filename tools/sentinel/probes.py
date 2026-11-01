@@ -23,6 +23,7 @@ NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "BELOW_
 HOSTS = ("gpu33", "gpu36")
 IMAGE_GPUS = {"gpu33": [0, 1, 3], "gpu36": [0, 1]}      # = lane_util.DEFAULT_LANES（gpu36 GPU2 专用 vLLM，L-100）
 VQA_HOST = "gpu36"
+COMFY_PORTS = {"gpu33:0": 8188, "gpu33:1": 8189, "gpu33:3": 8191, "gpu36:0": 8188, "gpu36:1": 8189}   # = lane_util.DEFAULT_LANES
 
 
 UNKNOWN: dict[str, str] = {}     # 本拍读不到 / 解析失败的输入 → tick 写进 open.json 的 unknown（探针“未测”，不当正常、不关单）
@@ -78,7 +79,8 @@ class Ctx:
 def remote_batch(host: str, parity: dict, timeout: float, vqa: bool) -> dict | None:
     from tools.netfix import rssh
     files = ",".join(parity_files(parity))
-    cmd = f"timeout {int(timeout) - 8} nice -n 19 python3 - {parity['server_root']} {files} {1 if vqa else 0}"
+    ports = ",".join(str(p) for ln, p in COMFY_PORTS.items() if ln.startswith(host))
+    cmd = f"timeout {int(timeout) - 8} nice -n 19 python3 - {parity['server_root']} {files} {1 if vqa else 0} {ports}"
     try:
         r = rssh.run(host, cmd, input=(ROOT / "tools/sentinel/remote_probe.py").read_bytes(), timeout=timeout)
     except subprocess.TimeoutExpired:  # arch-ok: None = 远程未测，Ctx.remote 记 errors[host]，依赖它的探针本拍不出 finding
@@ -126,11 +128,15 @@ def p_s2(ctx: Ctx) -> list[dict]:
     c = ctx.c("S2_gpu_all_idle_s")
     lr = laptop_registry()
     out = []
+    loc = local_smi()
+    if loc:
+        append_sample("laptop", ctx.now, loc)
     for h in HOSTS:
         r = ctx.remote(h)
         if not r or not r.get("smi"):
             continue
         utils = [u for i, u, _m in r["smi"] if i in IMAGE_GPUS[h]]
+        append_sample(h, ctx.now, r["smi"])
         hist = ctx.mem.setdefault("gpu_hist", {}).setdefault(h, [])
         hist.append([ctx.now, utils])
         del hist[:-30]
@@ -138,7 +144,34 @@ def p_s2(ctx: Ctx) -> list[dict]:
         ready = {"server": (reg.get("counts") or {}).get("ready", 0), "laptop_partition": (lr["by_host"].get(h) or {}).get("ready", 0)}
         paused = bool((r.get("control") or {}).get("paused") or (r.get("heartbeat") or {}).get("paused"))
         out += J.j_gpu_idle(h, [tuple(x) for x in hist], ready, paused, ctx.now, c)
+        for ln, port in COMFY_PORTS.items():
+            if ln.startswith(h) and str(port) in (r.get("comfy") or {}):
+                v = r["comfy"][str(port)]
+                out.append(J.F("S2", f"comfy:{ln}", v is not True, f"出图道 {ln} 的 ComfyUI :{port} 不通（{v}）——这条道出不了图", port=port, reply=str(v)[:120]))
     return out
+
+
+def local_smi() -> list | None:
+    """笔记本本机 nvidia-smi（4080 VLM 专用卡，L-100）→ [[index, util, mem]]；取不到返回 None 并记 UNKNOWN"""
+    try:
+        r = subprocess.run(["nvidia-smi", "--query-gpu=index,utilization.gpu,memory.used", "--format=csv,noheader,nounits"],
+                           capture_output=True, text=True, timeout=15, creationflags=NOWIN)
+    except (OSError, subprocess.TimeoutExpired) as e:  # arch-ok: 记 UNKNOWN（S0 工单），VLM 卡该时段记无数据
+        UNKNOWN["laptop:nvidia-smi"] = repr(e)[:80]
+        return None
+    out = []
+    for ln in r.stdout.splitlines():
+        p = [x.strip() for x in ln.split(",")]
+        if len(p) == 3 and p[0].isdigit():
+            out.append([int(p[0]), int(p[1]) if p[1].isdigit() else -1, int(p[2]) if p[2].isdigit() else -1])
+    return out or None
+
+
+def append_sample(host: str, t: float, smi: list) -> None:
+    """全部卡（含 VLM 卡 gpu36:2）的 nvidia-smi 采样落盘，给 GPU 24 小时统计用（以后 VLM 卡按采样算，不再“无数据”）"""
+    p = ROOT / "data/sentinel/gpu_samples.jsonl"
+    with p.open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"t": round(t), "host": host, "smi": smi}) + chr(10))
 
 
 # ================================================================== S3
@@ -196,6 +229,12 @@ def p_s3(ctx: Ctx) -> list[dict]:
             UNKNOWN[f"{h}:data/producer/log.jsonl"] = r["log_err"]
         s, b = _score_events(r.get("events") or [])
         out += J.j_score(h, s, b, ctx.now, c)
+        evs = r.get("events") or []
+        mx = next((e.get("max") for e in sorted(evs, key=lambda x: -(x.get("t") or 0)) if e.get("ev") == "score_backlog" and e.get("max")), None)
+        if mx is None:            # 还没顶过：按策略公式（本机道数 × 看图实例，K-OPS-E05 / resources.score_backlog）
+            from tools.autopilot import policy
+            mx = policy.score_backlog_max(len(IMAGE_GPUS[h]), int(((jl("config/vqa.json", {}) or {}).get("model") or {}).get("instances") or 1))
+        out += J.j_backlog_near(h, J.scoring_backlog(evs, ctx.now), mx, c)
         if h == VQA_HOST:
             k = J.vqa_kind(r.get("vqa_health"), r.get("vqa_models"))
             out += J.j_vqa_endpoint(h, 8870, k, vqa_expected(c).get(h), r.get("vqa_listener") or "")
@@ -559,8 +598,126 @@ def backfill_wait_since(events: list[dict], k: int = 2) -> dict[str, float]:
     return out
 
 
+# ================================================================== S14
+def p_s14(ctx: Ctx) -> list[dict]:
+    """五条 RSI 线：读 data/rsi/scores.jsonl → 判 2 小时无新分 / 连续 3 轮不升（派牵头人）→ 重写晚报 data/review_pages/rsi/index.html"""
+    from tools.sentinel import rsi
+    c = ctx.c("S14_rsi_lines")
+    recs, bad = rsi.load(c)
+    if bad:
+        UNKNOWN[c["scores_file"]] = f"{len(bad)} 行读不懂（{bad[0][:60]}）"
+    sm = rsi.summary(c, recs, ctx.now)
+    ctx.mem["rsi_summary"] = sm
+    try:
+        rsi.report(ctx.now, c)
+    except OSError as e:  # arch-ok: 报告写失败记 UNKNOWN（S0 工单），不影响判定
+        UNKNOWN[c["report"]] = repr(e)[:120]
+    return J.j_rsi(sm, ctx.now, c)
+
+
+# ================================================================== GPU 24 小时（项目方 04:0x）
+def p_gpu24(ctx: Ctx) -> list[dict]:
+    """每小时重算 data/rsi/gpu_24h.json（tools/sentinel/gpu_hours.py；服务器本机压缩 /history 后回传，每台一次 rssh）。只产数据，不开单"""
+    from tools.sentinel import gpu_hours as G
+    res = G.build(ctx.now)
+    G.write(res)
+    for k, v in (res.get("errors") or {}).items():
+        UNKNOWN[f"gpu_24h:{k}"] = v[:80]
+    ctx.mem["gpu24_productive_pct"] = res["for_rsi_line5"]["productive_pct"]
+    return J.j_wait_top(res, ctx.c("GPU24_alloc").get("top_n", 2))
+
+
+# ================================================================== S15 / S16（总调度 04:2x）
+def p_s15(ctx: Ctx) -> list[dict]:
+    c = ctx.c("S15_flow_tick")
+    p = ROOT / c["file"]
+    rec = jl(c["file"]) if p.exists() else None
+    return J.j_flow_tick(rec, p.stat().st_mtime if p.exists() else None, ctx.now, c)
+
+
+def laptop_cmdlines() -> list[str] | None:
+    """一次 PowerShell CIM 查询拿 python / pythonw / node 进程命令行（BELOW_NORMAL、30 s 超时）；取不到返回 None 并记 UNKNOWN"""
+    ps = ("Get-CimInstance Win32_Process -Filter \"Name='python.exe' OR Name='pythonw.exe' OR Name='node.exe'\" | "
+          "ForEach-Object { $_.CommandLine } | ConvertTo-Json -Compress")
+    try:
+        r = subprocess.run(["powershell.exe", "-NoProfile", "-Command", ps], capture_output=True, timeout=30, creationflags=NOWIN)
+        d = json.loads(r.stdout.decode("utf-8", "replace") or "[]")
+    except (OSError, subprocess.TimeoutExpired, ValueError) as e:  # arch-ok: 记 UNKNOWN（S0 工单），本拍 S16 不判
+        UNKNOWN["laptop:process_list"] = repr(e)[:80]
+        return None
+    return [x for x in ([d] if isinstance(d, str) else d or []) if x]
+
+
+def p_s16(ctx: Ctx) -> list[dict]:
+    return J.j_procs(laptop_cmdlines(), ctx.c("S16_laptop_procs")["procs"])
+
+
+# ================================================================== S17 / S18 / control 历史（总调度 08:0x）
+def p_s17(ctx: Ctx) -> list[dict]:
+    """单镜出图速率：笔记本日志 + 两台服务器日志（remote_probe 已回传最近 3 小时 rendered）"""
+    ev = [e for e in laptop_rendered()]
+    for h in HOSTS:
+        r = ctx.remote(h)
+        if r:
+            ev += [e for e in r.get("events") or [] if e.get("ev") == "rendered"]
+    return J.j_shot_rate(ev, ctx.now, ctx.c("S17_shot_render_rate"))
+
+
+def laptop_rendered(since_s: float = 3600) -> list[dict]:
+    p = ROOT / "data/producer/log.jsonl"
+    out = []
+    with p.open("rb") as fh:
+        fh.seek(max(0, p.stat().st_size - 1_500_000))
+        for ln in fh.read().decode("utf-8", "replace").splitlines():
+            if '"rendered"' in ln:
+                try:
+                    d = json.loads(ln)
+                except ValueError:  # arch-ok: 半行跳过
+                    continue
+                if d.get("ev") == "rendered" and d.get("t", 0) >= time.time() - since_s:
+                    out.append(d)
+    return out
+
+
+def p_s18(ctx: Ctx) -> list[dict]:
+    c = ctx.c("S18_temp_holds")
+    d = jl(c["file"], {}) or {}
+    return J.j_temp_holds(d.get(c["key"]) or {}, ctx.now, c)
+
+
+CTRL_KEYS = ("paused", "paused_by", "paused_at", "reason_kind", "expires_at", "note", "only", "hold_lanes")
+
+
+def p_ctrl_history(ctx: Ctx) -> list[dict]:
+    """control.json 变更历史（唯一写入方）：笔记本 + 两台服务器的 control.json（关键字段）和 partition.json _temp_holds，
+    跟上一拍比，有变化追加一行到 data/sentinel/control_history.jsonl。GPU 24 小时按它归 pause / hold，不再“原因不明”"""
+    c = ctx.c("CTRL_history")
+    snaps = {"laptop": jl("data/producer/control.json")}
+    for h in HOSTS:
+        r = ctx.remote(h)
+        if r and r.get("control") is not None:
+            snaps[h] = r["control"]
+    snaps["temp_holds"] = (jl("config/netfix/partition.json", {}) or {}).get("_temp_holds") or {}
+    last = ctx.mem.setdefault("ctrl_last", {})
+    p = ROOT / c["out"]
+    for src, v in snaps.items():
+        if v is None:
+            continue
+        cur = {k: v.get(k) for k in CTRL_KEYS} if src != "temp_holds" else v
+        if last.get(src) != cur:
+            with p.open("a", encoding="utf-8") as f:
+                f.write(json.dumps({"t": round(ctx.now), "at": J.iso(ctx.now), "src": src, "state": cur, "prev": last.get(src)},
+                                   ensure_ascii=False) + chr(10))
+            last[src] = cur
+    return []
+
+
 PROBES = {"S1": p_s1, "S2": p_s2, "S3": p_s3, "S4": p_s4, "S5": p_s5, "S6": p_s6, "S7": p_s7, "S8": p_s8, "S9": p_s9,
-          "S10": p_s10, "S11": p_s11, "S12": p_s12, "S13": p_s13}
+          "S10": p_s10, "S11": p_s11, "S12": p_s12, "S13": p_s13, "S14": p_s14, "GPU24": p_gpu24, "S15": p_s15, "S16": p_s16, "S17": p_s17, "S18": p_s18,
+          "CTRL": p_ctrl_history}
 CFG_OF = {"S1": "S1_lane_util_min", "S2": "S2_gpu_all_idle_s", "S3": "S3_score_p50_s", "S4": "S4_recover_s", "S5": "S5_release",
           "S6": "S6_config_parity", "S7": "S7_pause_max_s", "S8": "S8_vlm_sample", "S9": "S9_ui_rules", "S10": "S10_rules_green",
-          "S11": "S11_stage_stuck_s", "S12": "S12_script_ruler", "S13": "S13_human_wait"}
+          "S11": "S11_stage_stuck_s", "S12": "S12_script_ruler", "S13": "S13_human_wait",
+          "S14": "S14_rsi_lines", "GPU24": "GPU24_alloc",
+          "S15": "S15_flow_tick", "S16": "S16_laptop_procs", "S17": "S17_shot_render_rate", "S18": "S18_temp_holds",
+          "CTRL": "CTRL_history"}

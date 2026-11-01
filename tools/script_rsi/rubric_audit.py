@@ -137,7 +137,13 @@ def gate(path: Path, eps: list[int] | None = None) -> dict:
         if eps and ep not in eps:
             continue
         r = episode_eval(pre, ch, ep, wd, False)
-        res["eps"][ep] = {"met": r["met"], "total": r["total"], "fails": [f"{f['item']} {f['detail'][:120]}" for f in r["fails"]]}
+        fails = [f"{f['item']} {f['detail'][:120]}" for f in r["fails"]]
+        # K-WRT-H13（总调度 11-02）：编译后 0 孤儿描述、特写 0 双人露脸——和 RSI 线 3 打分器同一来源 tools/script_rsi/shootable.py
+        SH = _load("shootable", "tools/script_rsi/shootable.py")
+        bad = [x for x in SH.shootable_rows(pre + ch, ep) if not x["ok"]]
+        fails += [f"shootable#镜{x['shot']} {SH.why(x)[:160]}" for x in bad]
+        res["eps"][ep] = {"met": r["met"], "total": r["total"], "fails": fails, "unshootable": [x["shot"] for x in bad]}
+        res["ok"] &= not bad
         res["ok"] &= not r["fails"]
     return res
 

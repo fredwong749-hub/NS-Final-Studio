@@ -4,7 +4,7 @@
 # 用在镜头语言模板 v2（config/director/shot_spec_v2.yaml）的第 ④ 段“灯光设计”，首帧出图和 Pika 视频共用同一句；
 # 和 IMGFIX 的融合契约句配合（同一主光方向 → 接触阴影方向一致）。写作方【灯光】字段只写这里的方案名，或写“动机光源 + 布光比 + 色温”三要素（K-WRT-806）。
 schema: nsfs.lighting/1
-version: lt-v1.1-2026-11-02   # +studio_day_cold / elevator_night（SCRIPTWRITER S2 ep02 需要）
+version: lt-v1.2-2026-11-02   # +studio_day_cold / elevator_night / apartment_night_wall_lamp + wall_lamp / mirror_bounce（SCRIPTWRITER S2 需要）
 principles:
   - 动机光源：光必须来自画面里存在的光源（窗 / 台灯 / 顶灯 / 霓虹 / 屏幕 / 烛光），写明在画面哪一侧（frame-left / frame-right / above / behind）
   - 布光：主光 key / 辅光 fill / 轮廓光 rim 三者的方向与强弱比；柔光 soft（大面积、阴影边缘柔和）或硬光 hard
@@ -20,6 +20,8 @@ sources:   # 动机光源 → 英文名 + 默认色温
   ceiling_lamp: {zh: [顶灯, 吊灯, 灯泡, 顶光, 轿厢顶灯], en: "the ceiling lamp", kelvin: 3200, tone: warm}
   cold_lamp: {zh: [冷光灯, 灯架, 侧灯, 器械台灯], en: "the cold work lamp", kelvin: 5000, tone: cool}
   door_gap: {zh: [门缝, 楼道灯], en: "the corridor light through the door gap", kelvin: 2700, tone: warm}
+  wall_lamp: {zh: [壁灯, 暖黄壁灯], en: "the wall lamp", kelvin: 3000, tone: warm}
+  mirror_bounce: {zh: [镜面反射, 全身镜反射, 镜子反光], en: "light bounced off the full-length mirror", kelvin: null, tone: neutral}
   window_day: {zh: [窗光, 日光, 阳光], en: "the daylight window", kelvin: 5600, tone: neutral}
   window_city_night: {zh: [霓虹, 城市, 窗外夜色, 窗外], en: "the city glow through the window", kelvin: 6500, tone: cool}
   monitor: {zh: [屏幕, 显示器, 电脑屏], en: "the monitor screen", kelvin: 7000, tone: cool}
@@ -115,6 +117,19 @@ schemes:
       Lit by the cool elevator ceiling light from {key_side} as the key light (about 4500K) with {ratio_en},
       cool light bouncing off the steel walls as weak fill, and warm corridor light leaking through the door gap
       as a thin warm edge on one side, the shadows hard in the small space.
+  - id: apartment_night_wall_lamp
+    zh: 顾沉公寓·壁灯暗场
+    zh_text: 暖黄壁灯从身后侧后方作柔和主光（约3000K，主辅光比5:1），全身镜反射从正面弱补光，背景落入柔和阴影，深色木地板映出倒影
+    when: {scene: [apartment, 公寓, 顾沉家], time: night}
+    moods: [暧昧, 克制, 紧张]
+    key: {source: wall_lamp, side: behind, quality: soft}
+    fill: {source: mirror_bounce, side: front, level: low}
+    rim: null
+    ratio: moody
+    en: >-
+      Lit by the warm wall lamp from {key_side} as a soft key light (about 3000K) with {ratio_en},
+      light bounced off the full-length mirror as a weak front fill, the background falling into soft shadow
+      and the dark wood floor holding faint reflections.
   - id: night_interior_dim
     zh_text: 室内暖色灯作柔和主光（约3000K，主辅光比5:1），身后窗外冷光勾出轮廓，背景落入柔和阴影
     zh: 夜间室内·暗场（兜底）

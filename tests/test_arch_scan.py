@@ -207,3 +207,51 @@ def test_tests_only_gate_no_timeout():
                         "services/canvas_api/tests/test_y.py": {"silent_read": 1}}}
     assert AS.compare(cur, base) == ["no_timeout: tests/test_x.py 0→1"]
     assert AS.is_test("tests/a.py") and AS.is_test("services/canvas_api/tests/b.py") and not AS.is_test("tools/a.py")
+
+
+def test_imported_untracked_resolves_paths_not_stems():
+    unt = {"tools/imglab/score.py", "tools/autopilot/runs.py", "services/api/ns_api/current_run.py"}
+    # 相对导入 ns_render.score 不是 tools/imglab/score.py
+    assert AS.imported_untracked("services/render_router/ns_render/pipeline.py", "from . import score as S\n", unt) == set()
+    # 包内相对导入命中
+    assert AS.imported_untracked("services/api/ns_api/live.py", "from .current_run import primary_run\n", unt) == {"services/api/ns_api/current_run.py"}
+    # 绝对导入按包根解析
+    assert AS.imported_untracked("tests/test_x.py", "from ns_api import current_run\n", unt) == {"services/api/ns_api/current_run.py"}
+    # 裸名导入：源码里插了目标目录才算
+    src = "import sys\nsys.path.insert(0, str(ROOT / 'tools/autopilot'))\nimport runs\n"
+    assert AS.imported_untracked("services/canvas_api/ns_canvas/app.py", src, unt) == {"tools/autopilot/runs.py"}
+    assert AS.imported_untracked("tools/other/x.py", "import score\n", unt) == set()
+
+
+def test_def_ssh_wrapper_via_loader_not_counted():
+    s = "def ssh(cmd, timeout=600):\n    return _rssh().run_retry('gpu36', cmd, timeout=timeout)\n"
+    assert AS.scan_source("tools/x.py", s)["def_ssh"] == 0
+
+
+def test_iter_gate_runs_a2_new_files():
+    src = (ROOT / "tools/qa/iter_gate.py").read_text(encoding="utf-8")
+    assert "def a2_new_files" in src and "self.a2_new_files()" in src and '"--new", "--owner"' in src
+
+
+def test_new_files_owner_filter(monkeypatch):
+    monkeypatch.setattr(AS, "git_lines", lambda *a: ["tools/imglab/a.py", "tools/vidlab/b.py", "tools/x/__pycache__/c.py", "docs/x.md"])
+    monkeypatch.setattr(AS, "load_owner_fn", lambda: (lambda f: "IMGLAB" if f.startswith("tools/imglab/") else "VIDLAB"))
+    assert AS.new_files() == ["tools/imglab/a.py", "tools/vidlab/b.py"]
+    assert AS.new_files("IMGLAB") == ["tools/imglab/a.py"]
+
+
+def test_knowledge_dup_ids_blocks(tmp_path):
+    (tmp_path / "a.yaml").write_text("rules:\n  - id: K-OPS-S03\n    title: x\n", encoding="utf-8")
+    (tmp_path / "b.yaml").write_text("rules:\n  - id: K-OPS-S03\n  - id: K-OPS-Y01\n", encoding="utf-8")
+    f = AS.knowledge_dup_ids(tmp_path)
+    assert f == ["规则 id 重复：K-OPS-S03（a.yaml 和 b.yaml）"]
+    assert AS.compare({"per_file": {}, "knowledge_dup_ids": f, "partial": True}, {"per_file": {}}) == ["knowledge: " + f[0]]
+
+
+def test_real_knowledge_has_no_dup_ids():
+    assert AS.knowledge_dup_ids() == []
+
+
+def test_iter_gate_runs_q2_vqa_regression_only_when_vqa_touched():
+    src = (ROOT / "tools/qa/iter_gate.py").read_text(encoding="utf-8")
+    assert "def q2_vqa_regression" in src and "self.q2_vqa_regression()" in src and "tools/vqa/regression_check.py" in src

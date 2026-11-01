@@ -228,3 +228,15 @@ rules:
     confidence: medium
     status: 确认
     date: 2026-11-02
+  - id: K-REV-V19
+    domain: review
+    link: [P10-P11]
+    title: 逐人头发属性（Q1a）：每个在画角色认到的那张脸，头发必须符合人物卡——短发角色不许长发、非蓝发角色不许蓝发、林晚必须雾霾蓝；属性串到别人身上零容忍，上线即拦
+    when: postflight Q1 之后（契约已用 ArcFace 把每张脸认到角色，证据 boxes）；producer.vqa_gate 里再做本地看图逐人问答
+    then: 确定性：MediaPipe selfie_multiclass 头发分割 + 只认与这张脸头顶连通的头发，below ≥0.15 = 长发、hair_blue ≥0.45 = 蓝发、林晚 hair_blue <0.20 = 发色不对；看图逐人问性别 / 发色 / 发长与人物卡不符 = 不过（指甲记日志、不拦）；分割不可用 → q1a_mode=unavailable，看图逐人全部相符才放行（vlm_only + 报警 data/vqa/alerts.jsonl），看图也没跑成 = untested（score_infra）
+    check: [tests/test_vqagate.py]
+    evidence:
+      - {src: docs/vqa/GATE_CALIBRATION.md §18, note: "106 张带顾沉 / 陈宇首帧逐张亲看：串属性 6 张（ep06-S2 v5/v6、ep06-S9 v1/v2、ep07-S1 v4、ep04-S3 v8 灰银发）全拦，184 张正常脸零误拦（样本内）；ep06-S1 v8 分割漏（长发与头顶隔 0.4 脸宽）由看图逐人问答拦住"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-02

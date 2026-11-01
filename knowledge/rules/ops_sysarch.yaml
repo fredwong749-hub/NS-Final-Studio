@@ -6,11 +6,24 @@ rules:
     link: [P5-P6]
     title: 结构退化只许减不许增——tools/qa/arch_scan.py 棘轮（没 timeout 的子进程、直接起 ssh、自写 def ssh、写死 series10_v1 / 服务器路径、读文件失败静默放行、非原子写 JSON、未入版代码被已入版代码 import、无主文件）
     when: 任何 loop 交 cut 之前；SYSARCH 每 30–60 分钟巡检
-    then: 跑 python tools/qa/arch_scan.py --check（或 --files <本轮改动> --check）；任一文件某项计数比 data/sysarch/baseline.json 大、或新冒出未入版却被 import 的模块 = 不过，回负责方修；失败静默放行确属调用方显式处理的，在 except 行写 arch-ok 标记（井号 + arch-ok + 冒号 + 理由）豁免；基线只由 SYSARCH 在关单后收紧（--write-baseline）
-    check: tests/test_arch_scan.py::test_ratchet_only_flags_regressions, tests/test_arch_scan.py::test_no_timeout_counts_only_missing_timeout, tests/test_arch_scan.py::test_silent_read_fail_open
+    then: 跑 python tools/qa/arch_scan.py --check（或 --files <本轮改动> --check）；任一文件某项计数比 data/sysarch/baseline.json 大、或新冒出未入版却被 import 的模块 = 不过，回负责方修；失败静默放行确属调用方显式处理的，在 except 行写 arch-ok 标记（井号 + arch-ok + 冒号 + 理由）豁免；基线只由 SYSARCH 在关单后收紧（--tighten）；新写的未入版 .py 一律零退化：iter_gate A2 对本 loop 名下全部未入版文件跑 arch_scan --new --owner <loop> --check（不限 --changed），不过不许交 cut（总调度 11-02 05:4x）
+    check: tests/test_arch_scan.py::test_iter_gate_runs_a2_new_files, tests/test_arch_scan.py::test_new_files_owner_filter, tests/test_arch_scan.py::test_ratchet_only_flags_regressions, tests/test_arch_scan.py::test_no_timeout_counts_only_missing_timeout, tests/test_arch_scan.py::test_silent_read_fail_open
     evidence:
       - {src: docs/master/ARCH_MAP.md, note: "§9 Top 15：运行中的代码不在版本里、决策文件失败开放、70 处 subprocess 无 timeout、41 个文件直接起 ssh、series10_v1 写死 97 个文件——都是项目方或事故先发现，不是系统先发现"}
       - {src: data/sysarch/scan_latest.json, note: "11-02 02:42 首扫 10 分钟内就抓到 2 个新退化：tools/factory/decisions_guard.py 未入版却被 producer.py import；tools/sentinel/probes.py 写死 series10_v1 帧目录"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-Y01
+    domain: ops
+    link: [P5-P6]
+    title: 线 5（系统代码）RSI 分数只由代码算——tools/rsi/system_score.py 读 coverage.json、SENTINEL 探针、cut / 部署记录、arch_scan、规则索引，写 data/rsi/scores.jsonl（line=system）；来源缺失记 null，不当 0 也不当满分
+    when: SYSARCH 每轮巡检结束；任何 loop 声称“系统更能自己跑了”时
+    then: 跑 python tools/rsi/system_score.py；报分数轨迹和最低分项，最低分项就是下一轮的整改对象（RSI_PROGRAM 共同规则：分数不升不算完成）；结构健康只和首扫锚点同口径的 10 项比，后加的检查项不进锚点
+    check: tests/test_rsi_system_score.py::test_parts_and_weights, tests/test_rsi_system_score.py::test_missing_source_is_null_not_zero, tests/test_rsi_system_score.py::test_first_attempt_failure_counts
+    evidence:
+      - {src: docs/master/RSI_PROGRAM.md, note: "线 5 五个分项与权重（无 Claude 30 / 自运行 20 / 发版 15 / 结构健康 20 / 规则覆盖 15），总调度 11-02 03:5x 定"}
+      - {src: data/rsi/cut_seen.jsonl, note: "sv-04 前三次 cut 失败（02:17 xdist、02:48 test_vqagate、02:53 棘轮）03:06 才过，只看 last_cut 会把一次通过率算成 100%"}
     confidence: high
     status: 确认
     date: 2026-11-02

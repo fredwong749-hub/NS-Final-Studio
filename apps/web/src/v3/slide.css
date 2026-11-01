@@ -1,0 +1,65 @@
+/* 【开关】总调度 04:3x 暂停正片 B 上线（项目方 04:2x“电影胶片效果，现在 uiux 不好看，重做”，另派设计 agent 出高保真方案）：
+   本文件全部规则只在 <html class="ui-slide"> 时生效；默认不加这个类 = 不上线。预览：控制台执行 document.documentElement.classList.add('ui-slide')。
+   ---------- UIRSI r45 · L-113 正片 B「深色桌面 + 灰纸框」（项目方 AskUserQuestion 点选 B；取代胶卷条，胶卷条样式隔离在 src/_quarantine/r45_filmstrip.css）
+   规则 K-UI-051：
+   · 全剧总览（.sea-page.slide，不管“显示细节”开不开都生效）：每集一块深色看片台，镜头 = 灰色纸质幻灯片框（纸纹、圆角片窗、窗边暗角），
+     框上印“S1 · 特写 · 6s”，框下印“镜头（D-LENS：实拍 / 计划）· 场景”，下面一排身份脸，框角印 E-6；状态只用片窗角上一个圆点；
+     没出图 = 深灰空片窗“未曝光”。1440 宽每行 7 框、1920 宽 9 框。
+   · 审片页（画布每镜一行）：首帧 / 尾帧大图装进同款灰纸框，行里加“镜头”字段（同 D-LENS 口径）。
+   · 图片本身不加任何滤镜 / 遮罩（审片工具要保持原图色准）；暗角只压在片窗边缘 6% 以内。 ---------- */
+html.ui-slide .sea-page.slide { --desk: #121213; --sheet: #19191b; --mount-a: #d9d4c8; --mount-b: #cfc9bc; --mount-c: #c4beb0; --mount-ink: #5a554c; --mount-ink2: #8a8273; }
+:root[data-theme="light"] .sea-page.slide.slide { --desk: #2a2a2c; --sheet: #303033; }
+/* 卡片级杂讯一律收进抽屉 */
+html.ui-slide .sea-page.slide :is(.sea-segs, .sea-meta, .sea-sw, .sea-cast, .sea-band, .sea-link, .sea-info, .sea-hover) { display: none !important; }
+html.ui-slide .sea-page.slide .sea-pic :is(.stag, .sea-busy, .sea-cand, .sea-adult, .sea-last, .sea-no) { display: none !important; }
+html.ui-slide .sea-page.slide .sea-legend[aria-label="图例"] { display: none !important; }
+/* 看片台 */
+html.ui-slide .sea-page.slide { background: var(--desk); }
+html.ui-slide .sea-page.slide .sea-ep, html.ui-slide .sea-page.slide .sea-ep.blk, html.ui-slide .sea-page.slide .sea-ep.cur { padding: 16px 18px 20px; border: 0; border-radius: 4px; background: linear-gradient(180deg, var(--sheet), #161618); box-shadow: 0 0 0 1px #2a2a2d; }
+html.ui-slide .sea-page.slide .sea-ep.cur { box-shadow: 0 0 0 1px #4a4a50; }
+html.ui-slide .sea-page.slide .sea-ep > .sea-eph { margin: 0 0 14px; display: flex; align-items: baseline; gap: 10px; }
+html.ui-slide .sea-page.slide .sea-ep > .sea-eph > :is(.blk-badge, .stag-counts, .blk-stages, .sea-epbar, .sea-scn, .sea-xep, .sea-epm:not(.sea-prog)) { display: none !important; }
+html.ui-slide .sea-page.slide .sea-epn, html.ui-slide .sea-page.slide .sea-ept { color: #e9e5dc; font-size: 15px; font-weight: 600; }
+html.ui-slide .sea-page.slide .sea-ept::before { content: "· "; color: #8f8b83; font-weight: 400; }
+html.ui-slide .sea-page.slide .sea-prog { font: 11.5px/1.3 ui-monospace, "SFMono-Regular", Consolas, monospace; color: #8f8b83; }
+html.ui-slide .sea-page.slide :is(.sea-more, .sea-selall) { font-size: 11.5px; color: #8f8b83; background: none; border: 0; }
+html.ui-slide .sea-page.slide .sea-need { color: #c9c4b9; }
+/* 纸框网格 */
+html.ui-slide .sea-page.slide .sea-row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 18px; overflow: visible; padding: 0; }
+@media (min-width: 1800px) { .sea-page.slide .sea-row { grid-template-columns: repeat(9, minmax(0, 1fr)); } }
+@media (max-width: 1100px) { .sea-page.slide .sea-row { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .sea-page.slide .sea-row { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+html.ui-slide .sea-page.slide .sea-cell { display: block; min-width: 0; }
+html.ui-slide .sea-page.slide .sea-card, html.ui-slide .sea-page.slide .sea-card[class*="k-"] { position: relative; width: 100%; display: flex; flex-direction: column; gap: 0; padding: 12px 12px 9px; border: 0; border-radius: 3px; color: var(--mount-ink);
+  background: linear-gradient(135deg, var(--mount-a), var(--mount-b) 55%, var(--mount-c)); box-shadow: 0 1px 0 #ffffff55 inset, 0 3px 8px #000a, 0 0 0 1px #00000040; overflow: visible; text-align: left; }
+html.ui-slide .sea-page.slide .sea-card::before { content: ""; position: absolute; inset: 0; border-radius: 3px; pointer-events: none; opacity: .09;
+  background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='80' height='80'><filter id='n'><feTurbulence baseFrequency='.9' numOctaves='2'/></filter><rect width='80' height='80' filter='url(%23n)'/></svg>"); }
+html.ui-slide .sea-page.slide .sea-card::after { content: "E-6"; position: absolute; right: 8px; bottom: 6px; font: 8px/1 ui-monospace, Consolas, monospace; letter-spacing: .1em; color: var(--mount-ink2); }
+html.ui-slide .sea-page.slide .sea-card:hover { box-shadow: 0 1px 0 #ffffff55 inset, 0 6px 14px #000c, 0 0 0 1px #00000060; }
+html.ui-slide .sea-page.slide .sea-cell.sel .sea-card { box-shadow: 0 0 0 2px #e9e5dc, 0 3px 8px #000a; }
+html.ui-slide .sea-page.slide .sea-cell.multi .sea-card { outline: 2px dashed #e9e5dc; outline-offset: 2px; }
+/* 框上 / 框下印字 */
+.film-edge, .film-cast { display: none; }
+html.ui-slide .sea-page.slide .film-edge { display: block; font: 9.5px/1.5 ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .06em; color: var(--mount-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.ui-slide .sea-page.slide .film-edge.top { padding-bottom: 5px; }
+html.ui-slide .sea-page.slide .film-edge.bot { padding-top: 5px; }
+/* 片窗 */
+html.ui-slide .sea-page.slide .sea-pic { position: relative; width: 100%; aspect-ratio: 9 / 16; border-radius: 7px; overflow: hidden; background: #0a0a0a; box-shadow: 0 0 0 2px #a9a294, 0 0 0 3px #00000030; }
+html.ui-slide .sea-page.slide .sea-pic > img:first-child { width: 100%; height: 100%; object-fit: cover; display: block; }
+html.ui-slide .sea-page.slide .sea-pic::after { content: ""; position: absolute; inset: 0; border-radius: 7px; box-shadow: inset 0 0 10px #000b; pointer-events: none; }
+html.ui-slide .sea-page.slide .sea-pic.none { display: grid; place-items: center; align-content: center; background: #1c1b19; }
+html.ui-slide .sea-page.slide .sea-pic.none > span { display: flex; flex-direction: column; align-items: center; gap: 4px; color: #6e6a63 !important; font: 11px/1.3 ui-monospace, Consolas, monospace !important; letter-spacing: .2em; }
+.film-why { font: 10.5px/1.2 system-ui, sans-serif; letter-spacing: 0; opacity: .8; }
+html.ui-slide .sea-page.slide .sea-pic > .sea-dot { display: block !important; top: 6px; right: 6px; z-index: 2; box-shadow: 0 0 0 2px #0007; }
+/* 身份脸 */
+html.ui-slide .sea-page.slide .film-cast { display: flex; gap: 3px; min-height: 18px; padding-top: 5px; }
+html.ui-slide .sea-page.slide .film-cast img, html.ui-slide .sea-page.slide .film-cast i { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; background: #b6af9f; box-shadow: 0 0 0 1px #0004; }
+html.ui-slide .sea-page.slide .film-cast i { display: inline-grid; place-items: center; font-style: normal; font-size: 10px; color: #3e3a33; }
+html.ui-slide .sea-page.slide .sea-tot-t { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: #8f8b83; }
+
+/* ---------- 审片页：首帧 / 尾帧装进同款灰纸框 + 镜头字段 ---------- */
+html.ui-slide .v3-row .v3-frames .v3-frame { padding: 6px; border-radius: 3px; background: linear-gradient(135deg, #d9d4c8, #cfc9bc 55%, #c4beb0); box-shadow: 0 1px 0 #ffffff55 inset, 0 2px 6px #0008, 0 0 0 1px #00000040; }
+html.ui-slide .v3-row .v3-frames .v3-frame > img { border-radius: 6px; box-shadow: 0 0 0 1.5px #a9a294; }
+html.ui-slide .v3-row .v3-frames .v3-frame.empty { background: linear-gradient(135deg, #3a3833, #34322e); }
+html.ui-slide .v3-row .v3-frames .v3-frame .v3-frame-none { color: #8f8b83; font-family: ui-monospace, Consolas, monospace; letter-spacing: .12em; }
+.v3-lens { font: 12px/1.4 ui-monospace, "SFMono-Regular", Consolas, monospace; color: var(--c-text-2); white-space: nowrap; }

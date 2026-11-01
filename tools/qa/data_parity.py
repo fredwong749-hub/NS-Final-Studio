@@ -593,6 +593,54 @@ def main() -> int:
                         eq("D-CANDVER", sid, "总览候选数 = 现行剧本版本的合格候选数", season_n[sid], len(shown) - len(old))
     except Exception as ex:  # noqa: BLE001
         warns.append(f"D-CANDVER 取不到：{ex}")
+    # D-LENS（UIRSI r45，总调度：项目方“之前缺乏镜头数据”）：总览 / 抽屉显示的“实拍镜头” = 这一镜当前（或最新）首帧出图提示词里的镜头
+    try:
+        import re as _re2
+        _lr = _re2.compile(r"(\d{2,3})\s*mm")
+
+        def _lens_txt(t_: str) -> str | None:
+            m_ = _lr.search(t_ or "")
+            if not m_:
+                return None
+            f_ = _re2.search(r"f/\s*\d+(?:\.\d+)?", t_[m_.end(1): m_.end(1) + 16])
+            return f"{m_.group(1)}mm{(' ' + f_.group(0).replace(' ', '')) if f_ else ''}"
+        for se_ in api.get("/api/season").get("episodes") or []:
+            if want_eps and se_.get("number") not in want_eps:
+                continue
+            for x in se_.get("shots") or []:
+                m3 = _re2.fullmatch(r"ep(\d+)-S(\d+)", x.get("id") or "")
+                if not m3 or "lens_actual" not in x:
+                    continue
+                tj = rj(ROOT / "data" / "renders" / f"ep{int(m3.group(1)):02d}" / f"S{int(m3.group(2))}" / "takes.json", {}) or {}
+                ts_ = [t for t in tj.get("takes") or [] if t.get("stage") == "image"]
+                if not ts_:
+                    continue
+                a_ = (tj.get("active") or {}).get("image")
+                t_ = next((t for t in ts_ if t.get("n") == a_), ts_[-1])
+                want_ = _lens_txt(t_.get("prompt") or "")
+                if want_:
+                    eq("D-LENS", x["id"], "页面实拍镜头 = 出图提示词里的镜头", x.get("lens_actual"), want_)
+    except Exception as ex:  # noqa: BLE001
+        warns.append(f"D-LENS 取不到：{ex}")
+    # D-STATUS（UIRSI r45，FILMUI 查出：ep01-S1 首帧已定稿，状态却写“首帧未开始”）：有定稿（当前）首帧 / 尾帧的镜，主状态不得说该步“未开始 / 还没排上”
+    try:
+        import re as _re3
+        for se_ in api.get("/api/season").get("episodes") or []:
+            if want_eps and se_.get("number") not in want_eps:
+                continue
+            for x in se_.get("shots") or []:
+                m4 = _re3.fullmatch(r"ep(\d+)-S(\d+)", x.get("id") or "")
+                if not m4:
+                    continue
+                tj = rj(ROOT / "data" / "renders" / f"ep{int(m4.group(1)):02d}" / f"S{int(m4.group(2))}" / "takes.json", {}) or {}
+                act_ = tj.get("active") or {}
+                why_ = str((x.get("status") or {}).get("why") or "")
+                for stg_, word_ in (("image", "首帧"), ("last", "尾帧")):
+                    if act_.get(stg_) is not None:
+                        bad_ = why_.startswith(f"{word_}未开始") or why_.startswith(f"{word_}还没排上")
+                        eq("D-STATUS", x["id"], f"有定稿{word_}时状态不说“{word_}未开始”", "矛盾：" + why_ if bad_ else "一致", "一致")
+    except Exception as ex:  # noqa: BLE001
+        warns.append(f"D-STATUS 取不到：{ex}")
     # D-LOOKGATE：顶栏 ② 造型确认的人物 = 剧本本集在画 / 局部的人
     if project:
         for e in eps:

@@ -49,7 +49,10 @@ def test_quarantine_tool_marks_only_and_restorable():
 
 def test_simplified_ui_keeps_features():
     sp = (ROOT / "apps/web/src/v3/pages/SeasonPage.tsx").read_text(encoding="utf-8")
-    assert 'sea-page${detail ? "" : " simple"}' in sp and "显示细节" in sp and "细节 {openEp.has(e.number)" in sp
+    # r45：页面类名加了样式类（slide 等），断言功能本身——“显示细节”开关仍控制 simple 简化态，不断言整串字面量
+    import re
+    assert re.search(r'sea-page[^`]*\$\{detail \? "" : " simple"\}', sp), "全剧总览的 简化 / 详细 切换不见了"
+    assert "显示细节" in sp and "setDetail(e.target.checked)" in sp and "细节 {openEp.has(e.number)" in sp
     css = (ROOT / "apps/web/src/v3/shotstatus.css").read_text(encoding="utf-8")
     assert ".sea-page.simple .sea-segs" in css and "display: none" in css
     rr = (ROOT / "apps/web/src/v3/ReviewRow.tsx").read_text(encoding="utf-8")

@@ -114,6 +114,53 @@ def run(host: str, cmd: str, input: bytes | None = None, timeout: float = 900, c
     return subprocess.run(argv, input=input, capture_output=True, timeout=timeout, check=check, creationflags=NOWIN)
 
 
+def _local_self(host: str) -> str | None:
+    """服务器上（OFFLINE_SELF 有值）：目标是本机 → 'self'；是另一台 → 'other'（两台之间按设计不配 ssh 互信）；笔记本上 → None"""
+    me = os.environ.get("OFFLINE_SELF")
+    if not me:
+        return None
+    h = host.split("@", 1)[-1]
+    return "self" if h in (me, f"{me}-t", f"{me}-tb", "localhost", "127.0.0.1") else "other"
+
+
+def run_retry(host: str, cmd: str, input: bytes | str | None = None, timeout: float = 900, tries: int = 4,
+              backoff_s: float = 10, text: bool = False, retries: int | None = None) -> subprocess.CompletedProcess:
+    """统一远程命令接口（SYSARCH 4-1：各文件的 def ssh 换成一行调用这个；K-OPS-N07）。
+    · 笔记本：经监管进程托管的常驻主连接（rssh.run，不新建跳板握手）；
+    · 服务器（OFFLINE_SELF）：目标是本机 → 本机 bash -c 直接执行；目标是另一台 → 立刻返回 rc=255（服务器之间无互信，设计如此）。
+    重试：rc == 255（连接层失败）或超时 → 等 backoff_s × 第几次 再试，最多 tries 次（retries=N 等价 tries=N+1）；
+    其它非零退出码 = 远端命令自己的结果，直接返回不重试。退避下限 10 s（不许更快：快速重连在跳板看来像暴力破解）。
+    超时用尽 → 返回 rc=124、stderr 写明超时。text=True → stdout / stderr 按 utf-8（replace）解码成 str。"""
+    if retries is not None:
+        tries = int(retries) + 1
+    tries, backoff_s = max(1, int(tries)), max(10.0, float(backoff_s))
+    data = input.encode("utf-8") if isinstance(input, str) else input
+    where = _local_self(host)
+    res = None
+    for k in range(1, tries + 1):
+        try:
+            if where == "other":
+                res = subprocess.CompletedProcess(["ssh", host, cmd], 255, b"",
+                                                  "服务器之间无 ssh 互信（设计如此），跨机请走 HTTP（如 10.0.0.36:8870）".encode("utf-8"))
+                break
+            if where == "self":
+                res = subprocess.run(["bash", "-c", cmd], input=data, capture_output=True, timeout=timeout)
+            else:
+                res = run(host, cmd, input=data, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            res = subprocess.CompletedProcess(["ssh", host, cmd], 124, b"", f"rssh.run_retry: 超时 {timeout}s（第 {k}/{tries} 次）".encode("utf-8"))
+            if k < tries:
+                time.sleep(backoff_s * k)
+            continue
+        if res.returncode != 255 or k == tries:
+            break
+        time.sleep(backoff_s * k)
+    if text:
+        res = subprocess.CompletedProcess(res.args, res.returncode, (res.stdout or b"").decode("utf-8", "replace"),
+                                          (res.stderr or b"").decode("utf-8", "replace"))
+    return res
+
+
 def status() -> dict:
     try:
         d = json.loads(STATUS.read_text(encoding="utf-8"))

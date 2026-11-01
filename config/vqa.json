@@ -2,6 +2,7 @@
  "_doc": "VQA 本地看图复核（契约 Q9 / 视频 V9；R11-4 / R11-5 / R11-7 / R11-10）。owner = VQA。硬规则 K-REV-V01：图片 / 视频帧只进本地视觉模型（gpu36 自建服务），绝不发外部 API；写作网关只收文字（本地模型写的描述 + 缺陷清单 + 镜头文字 + 契约结果）。每个检查项映射到一条 GEN_CONTRACT 项（contract）；blocking 只在留出一致率 ≥ calibration.min_agreement 且总调度批准后由总调度改成 true。",
  "version": "vqa-v2-gate-2026-11-01",
  "model": {
+  "vram_budget": {"gpu36:2": {"total_mib": 24576, "residents": [{"name": "vqa_nf4 实例（server.py VQA_DEDICATED=1）", "count_from": "model.instances", "peak_mib": 7400}]}, "_doc": "总调度 11-02（S3 根因：3×7.3 GB 看图 + 常驻 CLIP 2.5 GB 超出 24 GB → OOM 死锁）：同卡常驻进程峰值和 ≤ 0.9×显存，部署前 tools/vqa/vram_budget.py 拦；峰值取实例 /health 的 peak_mib 实测上限（7206–7386）。CLIP 已由 FACTORY 改 CPU，不占这张卡；以后谁要在这张卡上常驻，先登记到 residents"},
   "backends": {"gpu36": "router_nf4", "laptop": "nf4", "_doc": "SENTINEL S3 读（VQAGATE 11-02）：gpu36 = GPU2 上 3 个 nf4 实例（8876/8878/8879）由 vqa_router 占 8870 分发；laptop = 本机单实例 nf4（tools/vqa/server.py）"},
   "name": "Qwen3-VL-8B-Instruct",
   "hf": "Qwen/Qwen3-VL-8B-Instruct",
@@ -27,7 +28,7 @@
   "subject_max_pixels": 600000,
   "ref_max_pixels": 150000,
   "video_frames": 6,
-  "instances": 4,
+  "instances": 3,
   "_instances": "L-100（11-02 02:1x 起）：gpu36 GPU2 专用卡上 3 个 nf4 实例（:8876/:8878/:8879，tools/vqa/vqa_router.py 占 :8870 按排队最少分发）+ 笔记本 4080 专用 1 个 = 4。vLLM fp8 版 A/B 判定一致率 0.909 < 0.95 没上（GATE_CALIBRATION §14）。producer 打分积压上限按它算（K-OPS-E05）",
   "_caliber": "口径 B（VQAGATE 11-01 22:5x 切，本机 4080 与 gpu36 同一套）：主图 0.6 MP、参考图 0.15 MP、输出 1000 token。gpu36 同一批 29 条对照原口径（1.3 MP / 0.36 MP / 1800）：阻断项逐项一致率 eye_contact 0.931、continuity_break 1.0、hair_mismatch 1.0、framing_mismatch 0.931、extra_person 0.966、underage_look 1.0、extra_limbs 0.828（两种口径下都不稳）；eye_contact 对人工标签召回 8/10 两边相同，误报 3/10 → 2/10。数据 data/vqa/vram_bench/compare_g36_orig_g36_Bfull.json；本机峰值 10.8–11.3 GB（GATE_CALIBRATION §7–8）",
   "instances_note": "总调度 01:5x L-100：gpu36 GPU2 vLLM 并发 4（:8870 已切到 vllm_proxy）；笔记本 4080 专用实例另计给笔记本 producer"

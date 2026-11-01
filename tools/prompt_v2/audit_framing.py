@@ -48,7 +48,8 @@ def audit(run_dir: Path) -> dict:
             from ns_agent.asset_refs import SINGLE_TURN_RE   # IMGFIX K-REN-704：身份脸句后的单人朝向句也属参考说明段
             head = re.sub(r"^(图\d+是[^。]*。)*", "", SINGLE_TURN_RE.sub("", p, count=1))
             head = re.sub(r"^((?:[a-z][a-z0-9_]*|pose_[^，]*)，)*", "", head)
-            if not head.startswith(F.lead(size)):
+            # K-REN-902（IMGLAB 11-02）：脸部特写 + ≥2 人露脸 → 首句是双人近景构图
+            if not head.startswith(F.lead(size)) and not head.startswith(F.TWO_FACE_CLOSE_LEAD):
                 issues.append(f"首句不是“{F.lead(size)}”")
         if VIDEO_TRIGGERS.search(p):
             issues.append("图像提示词里有视频触发词 lnwan01")

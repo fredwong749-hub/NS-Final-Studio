@@ -663,3 +663,147 @@ def test_identity_bank_admission_and_eviction(monkeypatch, tmp_path):
     (d / "takes.json").write_text(json.dumps({"takes": tk}), encoding="utf-8")
     os.utime(d / "takes.json", (time.time() + 5, time.time() + 5))
     assert B.bank_files("lin_wan") == ["data/renders/ep01/S1/takes/i6.png"]
+
+
+def test_q1a_hair_feats_crown_connectivity_and_judge():
+    """K-REV-V19：只认与这张脸头顶相连的头发（旁边背对镜头的人的长发不算）；短发角色下巴以下有头发 = 长发不过；蓝色占比判发色"""
+    import numpy as np
+    from ns_agent.vqa import hair_attr as HA
+    H, W = 400, 300
+    rgb = np.zeros((H, W, 3), np.uint8)
+    rgb[...] = (40, 40, 40)
+    box = [100, 100, 160, 170]                      # 脸 60×70
+    m = np.zeros((H, W), np.uint8)
+    m[60:110, 95:165] = 1                           # 头顶短发
+    m[0:400, 0:40] = 1                              # 左边旁人的长发（不连）
+    rgb[0:400, 0:40] = (70, 110, 170)               # 蓝
+    f = HA.hair_mask_feats(rgb, [box], 0, m, (0, 0))
+    assert f["below"] == 0 and f["hair_blue"] == 0
+    card = {"name": "顾沉", "hair_short": True, "below_max": 0.15, "blue_max": 0.45}
+    assert HA.judge("gu_chen", f, card) == []
+    m[110:330, 160:200] = 1                         # 连着头顶垂到肩下的长发
+    rgb[60:330, 95:200] = (70, 110, 170)
+    f2 = HA.hair_mask_feats(rgb, [box], 0, m, (0, 0))
+    bad = HA.judge("gu_chen", f2, card)
+    assert f2["below"] >= 0.15 and len(bad) == 2      # 长发 + 蓝发
+    lw = {"name": "林晚", "blue_min": 0.20, "min_hair_px": 0.15}
+    assert HA.judge("lin_wan", f2, lw) == [] and HA.judge("lin_wan", f, lw)   # 林晚黑发 → 发色不对
+
+
+def test_q1a_item_unavailable_is_untested_not_silent(monkeypatch, tmp_path):
+    """SYSARCH 11-02：分割不可用 → Q1a untested + q1a_mode=unavailable（producer 记 score_infra 只重打分），不静默放过"""
+    from PIL import Image
+    from ns_agent.gen_contract import postflight as PO
+    from ns_agent.vqa import hair_attr as HA
+    img = tmp_path / "x.png"
+    Image.new("RGB", (64, 64)).save(img)
+
+    def boom(*a, **k):
+        raise HA.Unavailable("没有 mediapipe")
+    monkeypatch.setattr(HA, "measure", boom)
+    t1a = {"enabled": True, "cards": {"gu_chen": {"name": "顾沉", "hair_short": True}}}
+    st, d, ev = PO.q1a_item(str(img), {"gu_chen": [1, 2, 3, 4]}, [[1, 2, 3, 4]], t1a)
+    assert st == "untested" and ev["q1a_mode"] == "unavailable"
+    assert PO.q1a_item(str(img), {}, [], t1a)[0] == "na"
+    assert PO.q1a_item(str(tmp_path / "nope.png"), {"gu_chen": [1, 2, 3, 4]}, [], t1a)[2]["q1a_mode"] == "no_image"
+    monkeypatch.setattr(HA, "measure", lambda img, boxes: [{"hair_px": 0.5, "hair_blue": 0.85, "below": 0.49}])
+    st, d, ev = PO.q1a_item(str(img), {"gu_chen": [1, 2, 3, 4]}, [[1, 2, 3, 4]], t1a)
+    assert st == "fail" and "长发" in d                 # ep06-S2 v6 实测值
+
+
+def test_q1a_vlm_overrides_pass_and_tolerates_outage(monkeypatch, tmp_path):
+    """K-REV-V19：确定性过、看图说顾沉是长发 → Q1a fail；看图没跑成 → 只记录不改判"""
+    from ns_agent.vqa import hair_attr as HA
+    def pf():
+        return {"ok": True, "blocking": [], "reasons": [], "items": [{"id": "Q1a", "status": "pass", "detail": "",
+                "evidence": {"boxes": {"gu_chen": [1, 2, 3, 4]}}}]}
+    monkeypatch.setattr(HA, "vlm_ask", lambda img, box: {"gender": "男", "hair_color": "蓝", "hair_length": "长"})
+    p = pf()
+    assert VQ.q1a_vlm(p, "x.png") and p["ok"] is False and "Q1a" in p["blocking"]
+    monkeypatch.setattr(HA, "vlm_ask", lambda img, box: None)
+    p = pf()
+    assert VQ.q1a_vlm(p, "x.png") is None and p["ok"] is True and p["items"][0]["evidence"]["vlm"]["gu_chen"] == {"vlm": "untested"}
+    monkeypatch.setattr(VQ, "ROOT", tmp_path)
+
+    def off():
+        return {"ok": False, "blocking": ["Q1a"], "reasons": ["Q1a x"], "items": [{"id": "Q1a", "status": "untested", "detail": "",
+                "evidence": {"q1a_mode": "unavailable", "boxes": {"gu_chen": [1, 2, 3, 4]}}}]}
+    p = off()                                          # 分割不可用 + 看图也没跑成 → 维持 untested（fail-closed）
+    assert VQ.q1a_vlm(p, "x.png") is None and p["ok"] is False
+    monkeypatch.setattr(HA, "vlm_ask", lambda img, box: {"gender": "男", "hair_color": "黑", "hair_length": "短", "nails": "普通"})
+    p = off()                                          # 看图逐人相符 → vlm_only 放行 + 报警
+    assert VQ.q1a_vlm(p, "x.png") and p["ok"] is True and p["items"][0]["evidence"]["q1a_mode"] == "vlm_only"
+    assert (tmp_path / "data/vqa/alerts.jsonl").exists()
+    monkeypatch.setattr(HA, "vlm_ask", lambda img, box: {"gender": "男", "hair_color": "黑", "hair_length": "短", "nails": "长美甲"})
+    p = off()                                          # 男性长美甲只记录（ep06-S8 看图把旁边林晚的手算给顾沉）
+    assert VQ.q1a_vlm(p, "x.png") and p["ok"] is True
+    monkeypatch.setattr(HA, "vlm_ask", lambda img, box: {"gender": "男", "hair_color": "蓝", "hair_length": "长", "nails": "长美甲"})
+    p = off()                                          # ep06-S1 v8 实测回答：顾沉蓝色长发 → 拦（确定性分割漏了这张，缺口 0.4 脸宽）
+    assert VQ.q1a_vlm(p, "x.png") and p["ok"] is False
+
+
+def test_regression_check_broken_case_is_reported(monkeypatch, tmp_path):
+    """DISTILL missed_defect_to_regression：坏的回归用例要显式记 broken（漏跑 = 假全过），整体退出 1"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ns_vqa_regcheck", ROOT / "tools/vqa/regression_check.py")
+    RC = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(RC)
+    (tmp_path / "bad.json").write_text("{坏", encoding="utf-8")
+    monkeypatch.setattr(RC, "REG", tmp_path)
+    assert RC.cases()[0]["kind"] == "broken"
+    assert RC.main([]) == 1
+
+
+def test_autosign_gate_sign_and_spot_revert(monkeypatch, tmp_path):
+    """master_review 机签（总调度 11-02）：门槛没过 = manual 不签；切换后抽检有一条不一致 → 自动退回 manual + 报警"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ns_vqa_autosign", ROOT / "tools/vqa/autosign.py")
+    A = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(A)
+    for k in ("STATE", "SPOT", "SIGNED", "ALERTS"):
+        monkeypatch.setattr(A, k, tmp_path / f"{k}.json")
+    monkeypatch.setattr(A, "regression", lambda: {"ok": True, "pairs": [{"auto": "fail", "human": "fail"}] * 19})
+    monkeypatch.setattr(A, "history_pairs", lambda root=None: [{"auto": "pass", "human": "fail", "file": "x", "why": "下装错"}])
+    st = A.check()
+    assert st["mode"] == "manual" and st["false_pass"] == 1        # 漏放 1 条就不能切
+    monkeypatch.setattr(A, "history_pairs", lambda root=None: [{"auto": "pass", "human": "pass", "file": "x", "why": ""}])
+    assert A.check()["mode"] == "auto"
+    monkeypatch.setattr(A, "take_ok", lambda sid, stage, n: (True, f"renders/{sid}.png"))
+    man = tmp_path / "m.json"
+    man.write_text(json.dumps([{"sid": "ep01-S1", "stage": "image", "n": 1}]), encoding="utf-8")
+    (tmp_path / "page").mkdir()
+    assert A.sign(str(tmp_path / "page"), str(man)) == 0 and (tmp_path / "page/master_review_auto.md").exists()
+    sid = A._rows(A.SPOT)[0]["id"]                                 # 第 1 条必抽
+    assert A.spot(sid, "fail")["action"] == "revert"
+    assert A.state()["mode"] == "manual" and A._rows(A.ALERTS)[0]["kind"] == "autosign_revert"
+    assert A.check()["mode"] == "manual"                           # 退回过：要总调度确认才重新切
+
+
+def test_canary_after_redo_pauses_on_shared_failure(monkeypatch, tmp_path):
+    """canary_after_redo：换版后前 6 个不同镜头里同一阻断项 > 34% → 触发暂停；同镜重复不计；版本变了从头数"""
+    from ns_agent.vqa import canary as CN
+    monkeypatch.setattr(CN, "STATE", tmp_path / "s.json")
+    monkeypatch.setattr(CN, "ALERTS", tmp_path / "a.jsonl")
+    bad, ok = {"ok": False, "blocking": ["Q1a"]}, {"ok": True, "blocking": []}
+    for i in range(5):
+        assert CN.observe("ep05-S3", "image", bad, key="v1") is None      # 同镜重复只算 1 个样本
+    hits = [CN.observe(f"ep01-S{i}", "image", bad if i < 2 else ok, key="v1") for i in range(5)]
+    assert hits[-1] and hits[-1]["item"] == "Q1a" and hits[-1]["frac"] == 0.5 and (tmp_path / "a.jsonl").exists()
+    assert CN.observe("ep02-S1", "image", bad, key="v1") is None           # 本版已判过
+    for i in range(6):                                                     # 新版本：6 镜只 2 镜不过（33%）→ 不触发
+        h = CN.observe(f"ep03-S{i}", "image", bad if i < 2 else ok, key="v2")
+    assert h is None and CN._load()["decided"]["action"] == "ok"
+    assert CN.observe("ep04-S1", "image", {"ok": False, "blocking": ["Q1"], "score_infra": True}, key="v3") is None
+
+
+def test_vram_budget_static_blocks_overcommit():
+    """总调度 11-02（S3 根因）：同卡常驻峰值和 > 0.9×显存（24576 → 22118 MiB）→ 部署前拦。2×7400 过；4 实例拦；3 实例 + CLIP 2.5 GB（13:17 OOM 组合）拦"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ns_vqa_vram", ROOT / "tools/vqa/vram_budget.py")
+    V = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(V)
+    b = {"gpu36:2": {"total_mib": 24576, "residents": [{"count_from": "model.instances", "peak_mib": 7400}]}}
+    assert V.static_check({"model": {"instances": 2, "vram_budget": b}}) == []
+    assert V.static_check({"model": {"instances": 4, "vram_budget": b}})
+    b["gpu36:2"]["residents"].append({"name": "clip", "count": 1, "peak_mib": 2500})
+    assert V.static_check({"model": {"instances": 3, "vram_budget": b}})     # 11-02 13:17 的 OOM 组合

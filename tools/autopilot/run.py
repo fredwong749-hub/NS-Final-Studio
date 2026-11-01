@@ -25,6 +25,7 @@ iterate_loop 路径（那条路径保留作 P0-P3 写作 + 旧 60 集回放）�
   run.py policy-check                   config/policies 漂移 + 引用检查
   run.py guard [--apply]                策略守卫（暂停超时 resources.pause_max_s）
   run.py approve-delivery --episode 4   项目方确认交付
+  run.py tick [--dry-run]               每拍（60 s，resident_sync loop 调）：status.json + coverage + 写作交稿即推进 + :8800 空闲重启守护
 
 用法（项目根目录）：
   .venv/Scripts/python.exe tools/autopilot/run.py start --episode 3 --from P3 --dry-run --auto-approve   # 全链路演练（不出片、不调付费 API）
@@ -475,7 +476,7 @@ def drive(ctx: Ctx) -> int:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=("start", "run", "status", "approve", "roles", "report-bug", "learn-workflows",
-                                    "flow", "coverage", "policy-check", "guard", "approve-delivery", "flow-start"))
+                                    "flow", "coverage", "policy-check", "guard", "approve-delivery", "flow-start", "tick"))
     ap.add_argument("--all", action="store_true", help="status --all：统一编排器全局进度（flow.py）")
     ap.add_argument("--apply", action="store_true", help="guard：真的执行恢复（默认只检测 + 报警）")
     ap.add_argument("--with-producer-dryrun", action="store_true", help="flow --dry-run：顺带跑 producer.py dryrun（临时目录，不碰 GPU）")
@@ -498,7 +499,7 @@ def main(argv=None) -> int:
     if a.cmd == "roles":
         print(RL.table_md())
         return 0
-    if a.cmd in ("flow", "coverage", "policy-check", "guard", "approve-delivery", "flow-start") or (a.cmd == "status" and a.all):
+    if a.cmd in ("flow", "coverage", "policy-check", "guard", "approve-delivery", "flow-start", "tick") or (a.cmd == "status" and a.all):
         return flow_cli(a)
     if a.cmd == "learn-workflows":
         if not a.dir:
@@ -558,6 +559,9 @@ def flow_cli(a) -> int:
         return 0
     if a.cmd == "policy-check":
         return POL.check()
+    if a.cmd == "tick":             # 编排器每拍：状态 + 覆盖率 + 写作交稿即推进 + :8800 守护（--dry-run 只看不做）
+        print(json.dumps(FL.tick(apply=not a.dry_run), ensure_ascii=False))
+        return 0
     if a.cmd == "guard":
         r = FL.guard(apply=a.apply)
         print(json.dumps(r, ensure_ascii=False))

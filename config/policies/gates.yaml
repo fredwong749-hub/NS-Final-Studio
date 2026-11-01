@@ -73,19 +73,18 @@ items:
     owner: IMGFIX
     plan: sleeve_check / sheet 候选检查输出 check.json 后，policy.py:pick_asset 选一张、走中枢 set_sheet（审计 by=POLICY），不推翻已定审美决定（S★ R0、look A 脸身）
   canary_after_redo:
-    value: {first_n: 6, max_fail_ratio: 0.34, action: pause_dispatch}
-    source: 19:41 总调度亲审全量重做首批（ep01-S1 v15 / S2 v7 单人看镜头 + 缺外套）→ 暂停 producer 派 IMGFIX；23:4x / 00:2x 首批复核
-    enforced_by: （待落）producer 首批复核由总调度目检
-    status: pending
-    owner: VQAGATE / DEBUG-RSI
-    plan: 全量重做 / 规则或资产换版后，前 first_n 张过看图闸门的结果按检查项统计；同一 blocking 项失败比例 > max_fail_ratio → 该批次暂停派单 + 报警（根因不在单张，换 seed 无用）
+    value: {first_n: 6, max_fail_ratio: 0.34, action: pause_dispatch, reason_kind: canary, version_key: [config/gen_contract.json, config/vqa.json, config/recipes/asset_refs.json]}
+    source: 19:41 总调度亲审全量重做首批（ep01-S1 v15 / S2 v7 单人看镜头 + 缺外套）→ 暂停 producer 派 IMGFIX；VQAGATE 11-02 08:0x 落地
+    enforced_by: services/agent/ns_agent/vqa/canary.py（producer 每张打完分调用；三份配置内容哈希判换版；前 6 个不同镜头同一阻断项 >34% → set_paused(kind=canary, by=POLICY_CANARY)，不自动恢复）
+    status: drift_checked
+    owner: VQAGATE
+    drift: {kind: grep, file: services/agent/ns_agent/vqa/canary.py, pattern: "canary"}
   missed_defect_to_regression:
     value: true
     source: 01:3x s20261304 顾沉看镜头被总调度目检发现、自动检查漏检 → 交 VQAGATE 加回归
-    enforced_by: （待落）
-    status: pending
+    enforced_by: tools/vqa/regression_check.py + data/vqa/regression/（VQAGATE；12/12 PASS）；iter_gate Q2 项（SYSARCH）；cut 闸门待 FACTORY 接
+    status: code_reads
     owner: VQAGATE
-    plan: 人（项目方 / 总调度）指出的漏检 → data/vqa/regression/<case>.json（图 + 应判项），VQA 改口径前必须全过回归
   only_show_passing:
     value: true
     source: 记忆 feedback-only-show-passing；ITERATION_PROTOCOL OT9（契约逐项 + master_review 签字后才给项目方）

@@ -46,6 +46,18 @@ def run_id(root: Path) -> str | None:
         return None
 
 
+def _code_sv(root: Path) -> list[str]:
+    import importlib.util
+    try:
+        spec = importlib.util.spec_from_file_location("ns_policy_dg", root / "tools/autopilot/policy.py")
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        pb = m.code_sv_problem(root)
+    except Exception as e:  # noqa: BLE001  校验器自身出错也算问题（失败关闭）
+        return [f"代码版本校验出错（K-OPS-X08）：{e!r}"[:200]]
+    return [pb] if pb else []
+
+
 def problems(root: Path | None = None, server: bool | None = None) -> list[str]:
     root = Path(root or ROOT)
     server = is_server() if server is None else server
@@ -65,6 +77,8 @@ def problems(root: Path | None = None, server: bool | None = None) -> list[str]:
         p = root / rel
         if p.is_file() and (why := _bad_json(p)):
             out.append(f"覆盖文件读不出 {rel}（{why}）")
+    if server:              # K-OPS-X08（DISTILL policy.code_sv_problem）：本机代码版本低于 handback.min_code_sv / 读不到 → 拒派
+        out += _code_sv(root)
     for p in sorted(root.glob(HOLD_GLOB)):
         if (why := _bad_json(p)):
             out.append(f"hold 文件读不出 {p.relative_to(root).as_posix()}（{why}；不知道该挡谁 → 全部拒派）")

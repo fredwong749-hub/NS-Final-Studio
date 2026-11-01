@@ -52,6 +52,12 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+# K-OPS-E18（DEBUG-RSI 11-02 04:3x）：项目时间一律 Asia/Tokyo。服务器常驻 producer 由 resident_restart.sh 设了 TZ，
+# 但经 ssh 调的 CLI（restart_queue 排空 pause、reject、server-control…）没设 → 写出 EST 时间戳（早 14 h）：
+# 暂停时长算错（SENTINEL“pause 占 54.5%”大半是假象）、master_rejects 按时间合并时新条目被笔记本旧值盖回。这里在进程内强制统一
+if os.environ.get("TZ") != "Asia/Tokyo" and hasattr(time, "tzset"):
+    os.environ["TZ"] = "Asia/Tokyo"
+    time.tzset()
 for _p in ("services/render_router", "services/agent", "packages/schema", "tools/pipeline", "tools/gen_contract",
            "tools/series10_video", "services/api", "services/recipes"):
     if str(ROOT / _p) not in sys.path:
@@ -257,6 +263,28 @@ def run_env(run: str, root: Path = ROOT) -> dict:
             "NS_SCRIPT_JSON": str(root / "data" / "import" / "runs" / run / "script_v2.json")}
 
 
+def prefetch_depth() -> int:
+    """K-OPS-E17：每道 ComfyUI 队列保持“1 单在跑 + (depth-1) 单排队”，派单 / 传图和渲染并行。
+    NS_PRODUCER_PREFETCH 优先，其次 config/policies/resources.yaml resources.prefetch_depth，默认 2"""
+    try:
+        v = os.environ.get("NS_PRODUCER_PREFETCH")
+        if not v:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            import policy as POL
+            v = POL.item("resources.prefetch_depth", ROOT).get("value")
+        return max(1, min(4, int(v or 2)))
+    except Exception:  # noqa: BLE001
+        return 2
+
+
+def dynamic_backlog(done_times: list, t: float, lanes: int, depth: int, window_s: float = 900, horizon_min: float = 15) -> int:
+    """K-OPS-E17：积压上限按打分（契约 + 看图）实测吞吐定——最近 window_s 完成数折算每分钟，允许积压约 horizon_min 分钟的打分量；
+    下限 = 道数 × 预取深度（保证每道至少能把预取填满）。不再写死 2×道数×实例数"""
+    recent = [x for x in done_times if t - x <= window_s]
+    rate = len(recent) / (window_s / 60.0)
+    return max(lanes * depth, int(round(rate * horizon_min)))
+
+
 def asset_hold_objects(data: Path) -> set:
     """IMGFIX r5（总调度 fredw-2b 11-02）：data/autopilot/*_hold.json（active=true）列出的首帧 / 尾帧对象暂缓派单——
     资产（例：林晚造型 A 设定图缺袖）修复后等项目方点选，点选前不出图。不在 = 没有 hold；
@@ -268,7 +296,9 @@ def asset_hold_objects(data: Path) -> set:
         except (OSError, ValueError):
             continue
         if d.get("active"):
-            out |= {o for it in d.get("shots") or [] for o in it.get("objects") or []}
+            t_now = time.strftime("%Y-%m-%dT%H:%M:%S")
+            out |= {o for it in d.get("shots") or [] if not (it.get("expires_at") and str(it["expires_at"])[:19] < t_now)
+                    for o in it.get("objects") or []}           # K-OPS-E19：带 expires_at 的条目到期自动失效
     return out
 
 
@@ -575,6 +605,9 @@ def vqa_gate(sid: str, stage: str, file_rel: str, job: dict, pf: dict) -> dict |
         if not VQ.enforced():
             return None
         other = [b for b in (pf.get("blocking") or []) if b not in ("Q9", "Q1")]
+        q1a = next((i for i in pf.get("items") or [] if i.get("id") == "Q1a"), None)
+        if q1a and q1a.get("status") == "untested" and (q1a.get("evidence") or {}).get("q1a_mode") == "unavailable":
+            other = [b for b in other if b != "Q1a"]   # K-REV-V19：分割不可用的 Q1a 要靠看图逐人问答判，不能因此跳过看图
         if pf.get("ok") is False and "Q1" in (pf.get("blocking") or []) and not VQ.q1_needs_vlm(pf):
             other.append("Q1")                   # Q1 不过、又不是转角放宽 / 后脑复核能救的（11-02 服务器上大头是“身份”不过）→ 也不排队看图
         if pf.get("ok") is False and other:
@@ -588,6 +621,7 @@ def vqa_gate(sid: str, stage: str, file_rel: str, job: dict, pf: dict) -> dict |
                            refs, wait_s=1200)
         VQ.recheck_strangers(pf, str(P.DATA / file_rel))   # K-REV-V14：背影人物的后脑被认成“多出的脸” → 本地看图复核
         VQ.q1_band_review(pf, str(P.DATA / file_rel))      # K-REV-V18 修订：Q1 复核带 → 和 L-086 左右并排的本地看图复核
+        VQ.q1a_vlm(pf, str(P.DATA / file_rel))             # K-REV-V19：Q1a 逐人头发——确定性过了再由本地看图逐人问答复核
         VQ.apply(pf, v)
         if v.get("error") and pf.get("ok") is False and pf.get("blocking") == ["Q9"]:
             pf["score_infra"] = True
@@ -1335,6 +1369,14 @@ class FrameExec:
             pf["score_infra"] = True
         pf.setdefault("reasons", [])
         vlm = vqa_gate(sid, stage, file_rel, job, pf)   # VQAGATE：本地看图闸门（enforce 期不过 = 不设为当前、自动重出）
+        try:                                     # canary_after_redo：换版后前 6 镜同一阻断项失败 > 34% → 暂停派单（kind=canary，不自动恢复）
+            from ns_agent.vqa import canary as CN
+            hit = CN.observe(sid, stage, pf)
+            if hit:
+                set_paused(Paths(), True, by="POLICY_CANARY", kind="canary",
+                           note=f"换版首批复核：前 {hit['n']} 镜 {hit['item']} 不过占 {hit['frac']:.0%}（{'、'.join(hit['shots'])}），版本 {hit['version']}")
+        except Exception as e:  # noqa: BLE001 — canary 出错不挡出图，但要记
+            log_event(Paths(), "canary_err", obj=f"{stage}:{sid}", error=repr(e)[:200])
         try:
             FE.annotate(sid, stage, n, postflight=pf)
             from ns_render import auto_current as AC
@@ -1480,17 +1522,20 @@ class Producer:
         self._dispatch_only = only
         self.run_summary_fn = run_summary_fn or self._run_summary
         self.inflight: dict[str, dict] = {}        # 对象 → {lane, future}
-        self.lane_busy: dict[str, str] = {}        # 道 → 对象
+        self.lane_busy: dict[str, list] = {}       # 道 → 在这条道上的对象（预取：最多 prefetch_depth 个）
+        self.depth = prefetch_depth()
+        self.score_done: list = []                 # 打分完成时刻（动态积压上限用）
         self.lane_cool: dict[str, float] = {}      # 道 → 冷却到
         # DEBUG-RSI K-OPS-E05（11-02）：出完图后 _run_one 还要在本线程里等契约打分 + 看图（实测 8–25 分钟）。
         # 原来线程数 = 道数 → 6 张图都在等打分时，新派的单只能在线程池里排队，道被标“在做”、GPU 实际空着
         # （00:46 派出的 ep01-S10 / ep02-S1 / S2 / S3 到 01:03 一直没交给 ComfyUI，四个队列都是空的）。
         # 线程数放大到道数 × 3；同时用 SCORE_BACKLOG 限制“出好但还没打完分”的数量，打分跟不上时停派（背压），不堆积。
         self.scoring: set[str] = set()             # 出好、正在等契约打分 / 看图的对象
-        self.score_backlog_max = int(os.environ.get("NS_PRODUCER_SCORE_BACKLOG", "0")) or 2 * (len(self.lanes) or 1) * vlm_instances()
+        self._backlog_env = int(os.environ.get("NS_PRODUCER_SCORE_BACKLOG", "0"))
+        self.score_backlog_max = self._backlog_env or 2 * (len(self.lanes) or 1) * vlm_instances()     # 启动值；之后按实测吞吐动态更新
         # 11-02 02:2x 复核：gpu33 线程池 18 < 积压上限 48，等打分的线程占满后新单在池里排 50–100 s 才开始（dispatch 02:08:30 → rendered
         # 02:10:04，render_s 只记 39.9）。线程数必须 ≥ 积压上限 + 道数，让积压闸而不是线程池来限流
-        self.pool = cf.ThreadPoolExecutor(max_workers=max(8, self.score_backlog_max + 2 * (len(self.lanes) or 1)),
+        self.pool = cf.ThreadPoolExecutor(max_workers=max(8, max(self.score_backlog_max, 96) + 2 * self.depth * (len(self.lanes) or 1)),
                                           thread_name_prefix="producer-lane")
         self.mu = threading.RLock()
         self.last_sig = None
@@ -1698,7 +1743,7 @@ class Producer:
         out = {}
         for ln, url in self.lanes.items():
             q = self.lane_probe(url)
-            mine = self.lane_busy.get(ln)
+            mine = list(self.lane_busy.get(ln) or [])
             cool = self.lane_cool.get(ln, 0)
             srv, idx = lane_split(ln)
             locks = self.train_locks_fn(srv)          # None = 这台的锁还没读到过 → 当作不可用（宁可不派）
@@ -1706,9 +1751,11 @@ class Producer:
             # 道上只有“让道模式”的任务（VIDEO10 视频、BAKEOFF 对比；夜间道归属：gpu33 三道出图优先、gpu36:0/1 BAKEOFF 让道）
             # → 出图照样排进去（队列深度 ≤ 1 个别人的任务，K-OPS-I06），对方按让道规则停交新活
             agents = [str(x) for x in q.get("agents") or []]
-            yielding_only = bool(agents) and all(a.upper().startswith(YIELDING_AGENTS) for a in agents) and (q.get("n") or 0) <= 1
-            qfree = q.get("ok") and (q.get("n") == 0 or yielding_only)
-            free = qfree and not mine and ln not in hold and cool <= now() and not locked
+            foreign = [a for a in agents if not a.upper().startswith(AGENT.upper())]
+            yielding_only = bool(foreign) and all(a.upper().startswith(YIELDING_AGENTS) for a in foreign) and len(foreign) <= 1
+            # K-OPS-E17 预取：队列里只有自己的单（或至多 1 个让道任务）且总数 < 预取深度 → 还能再交一单
+            qfree = q.get("ok") and (not foreign or yielding_only) and (q.get("n") or 0) < self.depth + (1 if yielding_only else 0)
+            free = qfree and len(mine) < self.depth and ln not in hold and cool <= now() and not locked
             why = None
             if free and yielding_only:
                 why = "排在让道任务后面（出图优先）：" + "、".join(sorted(set(agents)))
@@ -1720,13 +1767,14 @@ class Producer:
                 why = "render_endpoints hold（道就绪，等总调度开派）" if lane_held(ln) else "control.json hold_lanes"
             elif not q.get("ok"):
                 why = "连不上（隧道 / 服务）"
-            elif mine:
-                why = f"PRODUCER 在做 {mine}"
-            elif q.get("n") and not yielding_only:
+            elif len(mine) >= self.depth:
+                why = f"PRODUCER 在做 {'、'.join(mine)}"
+            elif foreign and not yielding_only:
                 why = "让道：" + "、".join(sorted(set(q.get("agents") or [])))[:80]
             elif cool > now():
                 why = f"出错冷却到 {iso(cool)[11:]}"
-            out[ln] = {"free": bool(free), "why": why, "queue": q.get("n"), "agents": q.get("agents")}
+            out[ln] = {"free": bool(free), "why": why, "queue": q.get("n"), "agents": q.get("agents"), "mine": mine,
+                       "prefetch": self.depth}
         return out
 
     # -- 派单 --
@@ -1748,7 +1796,14 @@ class Producer:
             return
         with self.mu:
             backlog = len(self.scoring)
-        if backlog >= self.score_backlog_max:     # K-OPS-E05：打分积压到上限就先不派（GPU 出得再快也只是排队等打分）
+            if not self._backlog_env and len(self.score_done) >= 3:
+                self.score_backlog_max = dynamic_backlog(self.score_done, now(), len(self.lanes) or 1, self.depth)
+        if backlog >= self.score_backlog_max:
+            if getattr(self, "_last_s3_ticket", 0) < now() - 1800:       # K-OPS-E17：压到上限不悄悄停派——给 SENTINEL 开 S3 工单（30 分钟一张）
+                self._last_s3_ticket = now()
+                sentinel_ticket(self.p, "score_backlog", f"打分积压 {backlog} 达到上限 {self.score_backlog_max}（按最近 15 分钟打分吞吐算），出图停派等打分",
+                                {"backlog": backlog, "max": self.score_backlog_max, "done_15min": len([x for x in self.score_done if now() - x <= 900])},
+                                {"redo_history": []})     # K-OPS-E05：打分积压到上限就先不派（GPU 出得再快也只是排队等打分）
             if getattr(self, "_last_backlog_log", 0) < now() - 300:
                 self._last_backlog_log = now()
                 self.logf("score_backlog", n=backlog, max=self.score_backlog_max, counted=False,
@@ -1803,7 +1858,7 @@ class Producer:
                               shot=o["shot"].split("-")[1], label=rung["name"], attempt=k + 1, max_attempts=len(plan),
                               obj=o["id"], job=o["id"])
                 with self.mu:
-                    self.lane_busy[lane] = o["id"]
+                    self.lane_busy.setdefault(lane, []).append(o["id"])
                     self.inflight[o["id"]] = {"lane": lane, "since": now()}
                 self.logf("dispatch", obj=o["id"], lane=lane, attempt=k + 1, rung=rung["name"], preset=rung.get("preset"),
                           seed=rung["seed"], redo=True, counted=False, comfy_tag=tag)
@@ -1822,7 +1877,7 @@ class Producer:
                           shot=o["shot"].split("-")[1], label=f"自动制作 {rung['name']}", attempt=attempt, max_attempts=MAX_TRIES,
                           obj=o["id"], job=o["id"])
             with self.mu:
-                self.lane_busy[lane] = o["id"]
+                self.lane_busy.setdefault(lane, []).append(o["id"])
                 self.inflight[o["id"]] = {"lane": lane, "since": now()}
             self.logf("dispatch", obj=o["id"], lane=lane, attempt=attempt, rung=rung["name"], variant=rung.get("variant"),
                       strategy=rung.get("strategy"),
@@ -1898,8 +1953,8 @@ class Producer:
                 self.logf("na", obj=oid)
                 return
             with self.mu:
-                if self.lane_busy.get(lane) == oid:     # 出图完成即放道；契约在 CPU 池里算（只放自己占的，别把后来者的标记删了）
-                    self.lane_busy.pop(lane, None)
+                if oid in (self.lane_busy.get(lane) or []):     # 出图完成即放道（只放自己这一单，别动同道预取的后来者）
+                    self.lane_busy[lane].remove(oid)
             render_s = round(now() - t0, 1)
             self.logf("rendered", obj=oid, lane=lane, take=res["take"], secs=render_s, render_s=render_s, gpu_s=res.get("gpu_s"))
             with self.mu:
@@ -1988,9 +2043,12 @@ class Producer:
                 self.logf("content_error", obj=oid, attempt=attempt, error=err[:300], tb=traceback.format_exc()[-300:])
         finally:
             with self.mu:
-                if self.lane_busy.get(lane) == oid:     # 11-01 08:38：原来无条件删，把同道后派的任务标记删掉 → 一条道被派两个
-                    self.lane_busy.pop(lane, None)
+                if oid in (self.lane_busy.get(lane) or []):     # 11-01 08:38：只放自己这一单
+                    self.lane_busy[lane].remove(oid)
                 self.inflight.pop(oid, None)
+                if oid in self.scoring:
+                    self.score_done.append(now())
+                    self.score_done = self.score_done[-500:]
                 self.scoring.discard(oid)
             self.leases.release(oid)
 
@@ -2444,11 +2502,37 @@ def set_paused(paths: Paths, paused: bool, by: str = "owner", note: str = "", ki
     return c
 
 
+def pause_shots(paths: Paths, shots: list, by: str, note: str, minutes: float = 60) -> dict:
+    """K-OPS-E19：按镜暂停（默认做法）——写 data/autopilot/pause_hold.json（*_hold.json 机制，producer 每拍跳过），
+    不停整条道；带 expires_at（默认 60 分钟）和 release_when，到期自动失效"""
+    f = paths.data / "autopilot" / "pause_hold.json"
+    d = jl(f, {}) or {}
+    items = {it["shot"]: it for it in d.get("shots") or [] if it.get("shot")}
+    exp = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(now() + minutes * 60))
+    for sid in shots:
+        items[sid] = {"shot": sid, "objects": [f"first:{sid}", f"last:{sid}"], "by": by, "note": note, "at": iso(), "expires_at": exp}
+    d.update(active=True, rule="K-OPS-E19 按镜暂停；到期（expires_at）自动失效", shots=list(items.values()))
+    f.parent.mkdir(parents=True, exist_ok=True)
+    js(f, d)
+    log_event(paths, "pause_shots", shots=shots, by=by, note=note, expires_at=exp, counted=False)
+    return d
+
+
 def pause_tick(paths: Paths, t: float | None = None, apply: bool = True, alerts: Path | None = None) -> dict:
     """按 policy.pause_decision 执行（幂等）→ {"action": None|resume|alert, ...}"""
     t = now() if t is None else t
     c = jl(paths.ctrl, {}) or {}
     d = _pol().pause_decision(c, t, ROOT)
+    try:                                       # K-OPS-E19：全道暂停超过 30 分钟 → 给 SENTINEL 开工单（每次暂停一张）
+        t0 = time.mktime(time.strptime(str(c.get("paused_at"))[:19], "%Y-%m-%dT%H:%M:%S")) if c.get("paused") else None
+        if apply and t0 and t - t0 > 1800 and c.get("ticket_for") != c.get("paused_at"):
+            sentinel_ticket(paths, "global_pause", f"整条道全局暂停已 {round((t - t0) / 60)} 分钟（{c.get('paused_by')}，"
+                            f"{c.get('reason_kind') or '没写类型'}）：能不能改成只停受影响的镜（producer.py pause --shots）",
+                            {"paused_s": round(t - t0), "by": c.get("paused_by"), "kind": c.get("reason_kind")}, {"redo_history": []})
+            c["ticket_for"] = c.get("paused_at")
+            js(paths.ctrl, c)
+    except (TypeError, ValueError):
+        pass
     if not d:
         return {"action": None}
     if d["action"] == "resume" and apply:
@@ -2762,6 +2846,8 @@ def main(argv=None) -> int:
     ap.add_argument("--no-dispatch", action="store_true")
     ap.add_argument("--by", default="owner")
     ap.add_argument("--note", default="")
+    ap.add_argument("--shots", default="", help="pause：只停这些镜（逗号分隔，默认做法）；不写 = 整条道全局暂停（必须带 --kind）")
+    ap.add_argument("--minutes", type=float, default=60, help="pause --shots：多少分钟后自动失效")
     ap.add_argument("--run", default="", help="import-staged：目标剧（config/pipeline/runs.json）；不写 / 主剧 = 合并进主导入稿，其它 = data/import/runs/<run>/")
     ap.add_argument("--kind", default="", choices=["", "ops", "line_switch", "restart", "deploy", "master", "owner"],
                     help="pause 的 reason_kind：line_switch / restart / deploy = 运维暂停（≤180 s 到点恢复）；master / owner = 显式暂停（不自动恢复，超 180 s 报警）；不写按 --by 推断")
@@ -2794,6 +2880,9 @@ def main(argv=None) -> int:
         return rescore(paths, set(a.items.split(",")))
     if a.cmd == "dryrun":
         return dryrun(a.inject_fail, a.keep)
+    if a.cmd == "pause" and a.shots:            # K-OPS-E19：默认按镜暂停，不停整条道
+        print(json.dumps(pause_shots(paths, [x for x in a.shots.split(",") if x], a.by, a.note, a.minutes), ensure_ascii=False)[:500])
+        return 0
     if a.cmd in ("pause", "resume"):
         print(json.dumps(set_paused(paths, a.cmd == "pause", a.by, a.note, kind=a.kind or None, expires_s=a.expires_s or None),
                          ensure_ascii=False))

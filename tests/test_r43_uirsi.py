@@ -140,3 +140,47 @@ def test_overview_three_dots_only():
     assert 'export type SeaDot = "run" | "need" | "ok";' in ts
     css = (ROOT / "apps/web/src/v3/shotstatus.css").read_text(encoding="utf-8")
     assert ".sea-dot { display: inline-block; width: 8px; height: 8px;" in css
+
+
+# ---------------- r44 / r45：:8800 守护重启（G1：把“空闲才重启”从 claude 判断改成代码）----------------
+def _guard(monkeypatch, tmp_path):
+    sys.path.insert(0, str(ROOT / "tools" / "uirsi"))
+    import importlib
+
+    import api_restart_guard as G
+    importlib.reload(G)
+    monkeypatch.setattr(G.RQ, "REQ", tmp_path / "req.jsonl")
+    monkeypatch.setattr(G.RQ, "DONE", tmp_path / "done.jsonl")
+    monkeypatch.setattr(G, "refresh_dist", lambda dry=False: {"stale": False})
+    monkeypatch.setattr(G, "_marker", lambda: {"up_at": "2026-11-02T00:00:00"})
+    return G
+
+
+def test_guard_waits_when_busy_and_dedupes(monkeypatch, tmp_path):
+    G = _guard(monkeypatch, tmp_path)
+    monkeypatch.setattr(G, "changed_since_up", lambda: ["services/api/ns_api/season.py"])
+    monkeypatch.setattr(G, "busy", lambda: 2)
+    a = G.tick()
+    assert "后端改动合入" in a["requested"] and "等空闲" in a["skip"]
+    b = G.tick()                                  # 同一批改动不重复排
+    assert "requested" not in b and len(G.RQ.pending(G.HOST)) == 1
+    monkeypatch.setattr(G, "busy", lambda: None)
+    assert "不重启" in G.tick()["skip"]             # 读不到 /api/jobs 按不确定处理
+
+
+def test_guard_restarts_when_idle(monkeypatch, tmp_path):
+    G = _guard(monkeypatch, tmp_path)
+    monkeypatch.setattr(G, "changed_since_up", lambda: [])
+    G.RQ.request(G.HOST, "test", by="UIRSI")
+    monkeypatch.setattr(G, "busy", lambda: 0)
+
+    class R:
+        returncode = 0
+        stdout = b"stopped x  up y"
+        stderr = b""
+    calls = []
+    monkeypatch.setattr(G.subprocess, "run", lambda *a, **k: calls.append(a) or R())
+    a = G.tick()
+    assert a["restart"]["ok"] and calls and "restart_api.ps1" in " ".join(calls[0][0])
+    assert G.RQ.pending(G.HOST) == []             # 写进 done
+    assert G.tick()["skip"] == "没有待办"

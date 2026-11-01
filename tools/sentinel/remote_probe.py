@@ -18,8 +18,10 @@ import urllib.request  # noqa: E402
 R = sys.argv[1]
 FILES = [f for f in (sys.argv[2] if len(sys.argv) > 2 else "").split(",") if f]
 VQA = len(sys.argv) > 3 and sys.argv[3] == "1"
+COMFY = [int(x) for x in (sys.argv[4] if len(sys.argv) > 4 else "").split(",") if x.strip().isdigit()]
 HUMAN = ("等总调度", "等项目方", "总调度复核", "项目方点选", "总调度定")
-EVS = ('"contract_s"', '"score_backlog"', '"redo_fail"', '"pause"', '"resume"', '"dispatch"', '"rendered"')
+EVS = ('"contract_s"', '"score_backlog"', '"redo_fail"', '"pause"', '"resume"', '"dispatch"', '"rendered"', '"passed"', '"content_fail"',
+       '"redo_auto_approved"', '"redo_candidate"', '"score_infra"', '"content_error"', '"best_effort"')
 out = {"t": time.time()}
 
 
@@ -79,10 +81,18 @@ try:
                 except ValueError:  # arch-ok: 坏行跳过
                     continue
                 if d.get("t", 0) >= time.time() - 3 * 3600:
-                    ev.append({k: d.get(k) for k in ("t", "ev", "obj", "lane", "contract_s", "by", "n", "max")})
+                    ev.append({k: d.get(k) for k in ("t", "ev", "obj", "lane", "take", "contract_s", "by", "n", "max")})
 except OSError as e:  # arch-ok: 回传 log_err，笔记本记未测
     out["log_err"] = repr(e)[:120]
 out["events"] = ev[-600:]
+comfy = {}
+for port in COMFY:
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:%d/system_stats" % port, timeout=4) as r:
+            comfy[str(port)] = r.status == 200
+    except Exception as e:  # noqa: BLE001  # arch-ok: 回传 False + 原因，笔记本开 S2 comfy 工单
+        comfy[str(port)] = "ERR " + repr(e)[:80]
+out["comfy"] = comfy
 if VQA:
     try:
         with urllib.request.urlopen("http://127.0.0.1:8870/v1/models", timeout=4) as r:

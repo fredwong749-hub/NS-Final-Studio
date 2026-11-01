@@ -110,6 +110,15 @@
 | 02:44 | knowledge 编译失败：K-WRT-705（knowledge/rules/writer_camera.yaml:238）section “人物字段” 不在允许列表 → compile.py 不出生成物，所有 loop 的 K1 检查都会挂 | compile.py --check |
 | 02:5x | 基线写下后约 10 分钟，棘轮又抓到 6 处新退化：tools/sentinel/{sentinel,build_ui_flows}.py 新文件未入版，probes.py 静默读取 7→8，build_ui_flows 非原子写 JSON；tools/qa/identity_face_check.py 新增 1 处静默读取 | arch_scan --check |
 | 03:1x | sv-04 后：新未入版被 import 的 current_run.py（WORKFLOW）；tools/sentinel/replay.py 非原子写；tools/qa/lock_guard.py 无主 + 子进程无 timeout（DEBUG-RSI 将加 --timeout）；sv-04 前例外收进基线 3 处（identity_face_check、sentinel.py:103、build_ui_flows）记债 | arch_scan --check |
+| 03:5x | IMGLAB 的文件落在 tools/imgfix/（归 IMGFIX），IMGLAB 当时不在 loops 登记表 → 总调度选 B：sv-05 后 IMGLAB 挪到 tools/imglab/（git mv，同步改 test import 和 orphan_hold.json 的 release_when，先通知 DEBUG-RSI）；loops 已加 IMGLAB、SCRIPTWRITER；ownership 检查 0 条 | 总调度 03:5x |
+
+## 7. 线 5 RSI 分数（RSI_PROGRAM.md；tools/rsi/system_score.py，K-OPS-Y01）
+
+| 时间 | 总分 | 无 Claude | 自运行 | 发版 | 结构健康 | 规则覆盖 | 最低分项 → 下一步 |
+|---|---|---|---|---|---|---|---|
+| 05:0x | 41.6 | 12.5（claude 点 7） | 50.0（SLO 80%；GPU 道达标 20%） | 75.0（一次通过 50%：sv-04 三败一过；落后 0） | 8.8（1155 / 锚点 1266） | 99.1（K-WRT-705 缺 check） | 结构健康 → 4-1 / 4-5 / 4-6 继续降；无 Claude → DISTILL 7 个 claude 点 |
+| 05:3x | 45.6 | 25.0（claude 点 6） | 49.2（SLO 87%；GPU 真正在跑 9.1%，来源 gpu_24h） | 75.0 | 10.6（1132，本轮 −23：隔离 18 个一次性脚本、4-1 bgm / voice10 改 run_retry、修两处误报） | 100（K-WRT-705 补 check） | 自运行 GPU → DEBUG-RSI / SENTINEL 工单；无 Claude → DISTILL 前 3 项（min_code_sv、:8800 空闲重启、master_review 机签） |
+| 06:0x | 52.7 | 37.5（claude 点 5） | 47.1（GPU 真正在跑 10.0%） | 75.0 | 28.8（902，本轮 −218：217 个无主文件按总调度批的表登记；4-1 resident_sync / night / imggen / remote_score / server_deploy / series10_video/deploy 改 run_retry，def_ssh 9→6、direct_ssh 31→29） | 100 | GPU 利用率（DEBUG-RSI 预取深度 2）；claude 点（VQAGATE 回归集 → 机签） |
 
 ## 进度
 

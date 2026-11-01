@@ -143,6 +143,7 @@
     "_note": "发型锁（只记录，待校准）：裁脸框上 0.8 / 下 1.8 脸高、左右 1.6 脸宽，CLIP 句对"
    }
   },
+  "Q1a_attr": {"enabled": true, "cards": {"lin_wan": {"name": "林晚", "blue_min": 0.2, "min_hair_px": 0.15, "gender": "女", "hair_colors": ["蓝", "灰银"], "hair_lengths": ["长", "及肩"]}, "gu_chen": {"name": "顾沉", "hair_short": true, "below_max": 0.15, "blue_max": 0.45, "gender": "男", "hair_colors": ["黑", "棕"], "hair_lengths": ["短"]}, "chen_yu": {"name": "陈宇", "hair_short": true, "below_max": 0.15, "blue_max": 0.45, "gender": "男", "hair_colors": ["黑", "棕"], "hair_lengths": ["短"]}}, "_doc": "VQAGATE 11-02 P0（K-REV-V19）：逐人头发属性。确定性：MediaPipe selfie_multiclass 分割 + 头顶连通域，hair_blue = 头发蓝色占比、below = 下巴以下头发面积 / 脸框面积。标定 106 张（GATE_CALIBRATION §18）：男性 below 正常最高 0.026 / 长发最低 0.266 → 0.15；男性 hair_blue 正常最高 0.266（冷光黑发）/ 蓝发最低 0.577 → 0.45；林晚 hair_blue 正常最低 0.317 / 灰银发 0.052 → 0.20。6 错例全拦、184 张正常零误拦（样本内）。VLM 逐人问答见 hair_colors / hair_lengths / gender / nails_ok（雾霾蓝看图可能答灰银，林晚两种都收；林晚指甲看图误报多（ep06-S8 长透明甲答成短闪片甲），不判；男性长美甲记日志、不拦：ep06-S8 看图把旁边林晚的手算到顾沉身上（误报），ep06-S1 v8 靠发色 / 发长已拦）。分割不可用（gpu33 未装 mediapipe）时由看图逐人问答单独判，q1a_mode=vlm_only 并报警"},
   "Q3_framing": {
    "bands": [
     0.45,

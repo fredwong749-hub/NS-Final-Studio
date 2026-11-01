@@ -287,3 +287,55 @@ def test_camera_ab_judge_and_writeback(tmp_path):   # K-REV-806：A/B 判定（d
     a = next(m for m in yaml.safe_load(new)["moves"] if m["id"] == "arc")
     assert a["enabled"] is False and a["ab"]["status"] == "fail" and a["reason"] == "Pika 环绕易分身"
     assert len(new.splitlines()) == len(txt.splitlines())
+
+
+def test_ab_runner_single_lane_config(tmp_path):   # D9：A/B 执行器读配置的单道版本，借用名单外的道拒绝启动
+    import ab_runner as AR
+    import pytest
+    c = {"lane": "gpu36:1", "port": 8189, "out": "/x/gpu1", "client_prefix": "director-", "dedicated": True, "borrowed_lanes": ["gpu36:1"]}
+    p = tmp_path / "c.json"
+    p.write_text(json.dumps(c), encoding="utf-8")
+    assert AR.load_cfg(p)["port"] == 8189
+    p.write_text(json.dumps({**c, "lane": "gpu36:0"}), encoding="utf-8")
+    with pytest.raises(SystemExit):
+        AR.load_cfg(p)
+    sr = type("SR", (), {"PORT": 8190, "OUT": "", "LANES": [(8188, "a")], "CLIENT": "videorca-", "prod_ready": staticmethod(lambda: True)})()
+    AR.configure(sr, c)
+    assert sr.PORT == 8189 and sr.LANES == [] and sr.CLIENT == "director-" and sr.prod_ready() is False
+    sr2 = type("SR", (), {"prod_ready": staticmethod(lambda: True)})()
+    AR.configure(sr2, {**c, "dedicated": False})
+    assert sr2.prod_ready() is True
+
+
+# ---- K-EDT-818 / K-REN-802 / 803 / K-WRT-806：镜头语言 v2 编译（合成夹具）
+def _v2_shot(img, size="中景", cast=None, dialogue=None, cue="强度1", h3=""):
+    return {"index": 1, "img_prompt": f"lnwan01，{size}，平视，{img}", "music_cue": cue, "scene_id": "sk_x",
+            "cast": cast or [{"name": "林晚", "presence": "在画", "x": "右", "depth": "中"}], "dialogue": dialogue or [],
+            "motion_prompt": "x，static shot，她看着桌面——中景", "h3_prompt": h3}
+
+
+def test_v2_lighting_motivated_source_and_lens():
+    import shot_v2 as V
+    home = V.image_clauses_zh(_v2_shot("暖黄顶灯从上方打来，小餐桌"))
+    assert home["scheme"] == "home_dinner_warm" and home["key_side"] == "上方" and home["decider"] == "code"
+    office = V.image_clauses_zh(_v2_shot("深夜写字楼，暖黄台灯从右侧逆光", size="近景"))
+    assert office["scheme"] == "office_night_lamp" and "画面右侧" in office["lighting_zh"] and office["lens_id"] == "summilux_50_f14"
+    peak = V.image_clauses_zh(_v2_shot("深夜写字楼，暖黄台灯从右侧逆光", cue="推到高点，强度3"))
+    assert peak["scheme"] == "office_night_tense"
+    assert "雾霾天蓝色发丝" in office["lighting_zh"]                       # 人物适配
+    assert V.pick_lens(_v2_shot("x", size="特写"))["focal_mm"] == 75     # 按景别
+    assert V.pick_lens(_v2_shot("x", size="特写"), "summicron_35_f2")["id"] == "summicron_35_f2"   # 剧本【镜头】覆盖
+
+
+def test_v2_compile_order_constraints_and_speaker():
+    import shot_v2 as V
+    h3 = ("integrated_multimodal_description: [Shot 1] Live-action, a medium shot begins, featuring a 22-year-old Chinese woman "
+          "with misty sky-blue hair, seated at a table in a small home kitchen, lit by a warm ceiling lamp, her eyes resting on the form. "
+          "The camera holds a static shot as her finger rests on the paper. At 00:02.000, she looks up. At 00:04.000, she speaks.\n"
+          "overall_soundscape: A fridge hums.")
+    r = V.compile_v2(_v2_shot("暖黄顶灯从上方打来", dialogue=[{"speaker": "林晚", "text": "x"}], h3=h3), None)
+    nos = [s[0] for s in r["segments"]]
+    assert nos == ["①", "②", "③", "④", "⑤", "⑥", "⑦"]
+    assert r["video"].endswith(V.SPEC["constraints_en"])
+    assert "Shot on a Leica" in r["video"] and "clear, visible mouth movement" in r["video"]
+    assert "⑤" not in "".join(s[0] for s in r["segments"] if s[2] in r["image"]) and "Lit by" in r["image"]

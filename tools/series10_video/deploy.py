@@ -32,7 +32,16 @@ VISION = ["models_cache/vision/face_detection_yunet_2023mar.onnx", "models_cache
 
 
 def ssh(host, cmd, data: bytes | None = None, timeout=900):
-    return subprocess.run(["ssh", "-o", "BatchMode=yes", host, cmd], input=data, capture_output=True, timeout=timeout)
+    return _rssh().run_retry(host, cmd, input=data, timeout=timeout, tries=1)   # 原来不重试：tries=1；bytes 进出不变
+
+def _rssh():
+    """K-OPS-N07 / SYSARCH 4-1：远程命令统一走 tools/netfix/rssh.run_retry（笔记本走常驻主连接；服务器上 OFFLINE_SELF 调本机 = 本机执行）"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_rssh_41", Path(__file__).resolve().parents[2] / "tools/netfix/rssh.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
 
 
 def inputs_for(host: str, jobs_file: str) -> list[str]:

@@ -49,6 +49,8 @@
 
 `CONSENT: <文件 owner> -> <被授权 agent> : <路径或 glob> | <原话 / 日期>`
 
+- CONSENT: UIRSI -> SYSARCH : services/api/ns_api/gpu_monitor.py | UIRSI 11-02 06:1x 回复：“gpu_monitor._ssh() 按你说的改，同意。只换起 ssh 那一行”（SYSARCH 4-1，rssh.run_retry）
+- CONSENT: ITERAUDIT -> SYSARCH : tools/qa/ownership.yaml | 总调度 fredw-2b 11-02 04:3x：“owner 登记表同意，按你的表改 ownership.yaml，CONSENT 记在总调度名下……tools/acting 交给 VIDLAB”（无主 217 个生产文件按目录分配；备份 data/_quarantine/ownership.yaml.bak_sysarch_assign_0435）
 - CONSENT: ITERAUDIT -> SYSARCH : tools/qa/ownership.yaml | 总调度 fredw-2b 11-02 03:2x 代录：“这两项授权你直接改 ownership.yaml（CONSENT 记我名下）”（只加 loops: 登记表 + 旧负责方 CHAINSPEC/PROMPT→HOLLYWOOD、INFRA→NETFIX、SERIES→AUTOPILOT 转交；备份 data/_quarantine/ownership.yaml.bak_sysarch_0320）
 - CONSENT: ITERAUDIT -> SYSARCH : tools/qa/iter_gate.py | 总调度 fredw-2b 11-02 03:1x 代录（ITERAUDIT 不在岗）：“iter_gate 的 A1 检查项也由你直接加，CONSENT 记我名下。”（只加 A1 一项）
 - CONSENT: 总调度 -> RESEARCH : docs/master/MASTER_PICTURE.md（只加 L-087 一行）, config/owner_decisions.yaml（只加 D-IMG-87a/b/c） | 总调度 fredw-2b 11-01 17:5x：“这两个文件总调度授权你改，写 CONSENT。”
@@ -240,3 +242,8 @@ s_vqastart.ps1 归 LOCALGPU（已收工），CONSENT 写 LOCALGPU → VQAGATE”
 - CONSENT: ITERAUDIT -> DIRECTOR : tools/qa/ownership.yaml（owners.DIRECTOR 只加 config/director/**、data/ab/camera_moves/**） | by 总调度 fredw-2b 11-02 DIRECTOR r3（L-107）派单：“运镜词表 config/director/camera_moves.yaml（单一事实来源）”
 - CONSENT: REFLOCK -> DEBUG_RSI : services/render_router/ns_render/pipeline.py（只改 RENDERS / SCRIPT_JSON 可由 NS_RENDERS_DIR / NS_SCRIPT_JSON 覆盖，多剧并行 K-OPS-E15） | by 总调度 fredw-2b 11-02 02:4x：“总调度批准：producer 多 run 按 DISTILL 的接口说明实施……渲染目录分开”
 - CONSENT: REFLOCK -> IMGLAB : services/agent/ns_agent/framing.py（strip_fullbody / filter_parts 删句保主语 F1、特写 + ≥2 人露脸冲突 F3）、services/agent/ns_agent/compiler.py（compile_shot 正文删句处）、services/agent/ns_agent/frame_job.py（只在需要接 F3 冲突判定处）、tests/test_subject_binding.py（新建，102 镜主语保留回归）；备份 data/_quarantine/imglab_20261102/ | by 总调度 fredw-2b 11-02 04:3x：“F1–F3 由 IMGLAB 直接改（framing.py / compiler.py / frame_job）……写进 LOCKS，并告知 IMGFIX”；冻结期（lock_guard rc≠0）不改
+- CONSENT: REFLOCK -> IMGLAB : services/agent/ns_agent/gen_contract/preflight.py（只在 I6 加 3 行：framing.framing_clash 构图矛盾判 fail，K-REN-902） | by 总调度 fredw-2b 11-02 批准（04:5x 批复第 3 条：“preflight.py I6 那 3 行、audit_framing.py 那 1 行，我以总调度身份批准越界修改”）
+- CONSENT: ITERAUDIT -> IMGLAB : tools/prompt_v2/audit_framing.py（只改首句检查 1 行：TWO_FACE_CLOSE_LEAD 也算合格，K-REN-902 配套） | by 总调度 fredw-2b 11-02 批准（同上）
+- CONSENT: 共享 -> UIRSI : tools/qa/iter_gate.py | by 总调度 fredw-2b 11-02 04:5x：“topbar_check.mjs 接进 G10 / iter_gate”（只在 R1 里加一段调用 topbar_check.mjs）
+- CONSENT: UIPIXEL -> UIRSI : apps/web/src/v3/slide.css | by 总调度 fredw-2b 11-02 04:3x：“请按 B 落地到总览和审片页”（新建样式，现在开关后）
+- CONSENT: UIPIXEL -> UIRSI : apps/web/src/_quarantine/r45_filmstrip.css | by 总调度 fredw-2b 11-02 04:3x：“.film 开关的旧胶卷条代码不再用，隔离进 _quarantine，不要删”

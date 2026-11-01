@@ -1,0 +1,59 @@
+/* 隔离（不加载、不删）：UIRSI r45 胶卷条样式（.film）。项目方 04:2x 改选“正片 B 深色桌面 + 灰纸框”（L-113）取代；
+   原样保留在这里，可回退：把本段贴回 v3/shotstatus.css 末尾，并在 SeasonPage 的 sea-page 上加回 film 类。 */
+/* ---------- r45 胶卷样式（项目方 04:3x：“这里的 UI/UX 不好看……改成像胶卷那种模式吧，就像传统胶卷那样”；总调度 r45 规格；K-UI-051）
+   不管“显示细节”开不开都生效（.film 永远在）；旧的彩色标签 / 候选数 / 本地角标 / 四段条 / 底部小点都收进详情抽屉（只隐藏不删）。
+   每集一条横向胶卷：深色片基、上下两排齿孔、片框间细分隔、横向滚动；左侧片头标签（集号 · 集名 · 一句进度）。
+   片框：图片填满；上边码“S1 · 特写 · 6s”、下边码“镜头参数 · 场景”，等宽小字；角上一个状态点；下面一排身份脸；没出图 = 深灰底片“未曝光”。 ---------- */
+.sea-page.film { --film-base: #141210; --film-edge: #1d1a17; --film-ink: #c9bfae; --film-hole: #0a0908; font-variant-numeric: tabular-nums; }
+:root[data-theme="light"] .sea-page.film { --film-base: #2a2622; --film-edge: #332e29; --film-ink: #e4dccd; --film-hole: #f2efe9; }
+/* 卡片级杂讯：一律收起 */
+.sea-page.film :is(.sea-segs, .sea-meta, .sea-sw, .sea-cast, .sea-band, .sea-link, .sea-info, .sea-hover) { display: none !important; }
+.sea-page.film .sea-pic :is(.stag, .sea-busy, .sea-cand, .sea-adult, .sea-last, .sea-no) { display: none !important; }
+.sea-page.film .sea-legend[aria-label="图例"], .sea-page.film .sea-ep > .sea-eph > :is(.blk-badge, .stag-counts, .blk-stages, .sea-epbar) { display: none !important; }
+/* 一集一条胶卷 */
+.sea-page.film .sea-ep, .sea-page.film .sea-ep.blk, .sea-page.film .sea-ep.cur { display: grid; grid-template-columns: 148px minmax(0, 1fr); align-items: stretch; padding: 0; border: 0; border-radius: 6px; overflow: hidden; background: var(--film-base); box-shadow: 0 1px 0 rgba(255, 255, 255, .03) inset; }
+.sea-page.film .sea-ep.cur { outline: 1px solid color-mix(in srgb, var(--film-ink) 35%, transparent); }
+/* 片头标签 */
+.sea-page.film .sea-ep > .sea-eph { margin: 0; padding: 14px 12px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 4px; background: var(--film-edge); border-right: 1px dashed color-mix(in srgb, var(--film-ink) 25%, transparent); color: var(--film-ink); }
+.sea-page.film .sea-ep > .sea-eph > * { display: none !important; }
+.sea-page.film .sea-ep > .sea-eph > :is(.sea-epn, .sea-ept, .sea-prog, .sea-need, .sea-more, .sea-selall) { display: inline-flex !important; }
+.sea-page.film .sea-epn { font: 600 15px/1.2 ui-monospace, "SFMono-Regular", Consolas, monospace; color: var(--film-ink); letter-spacing: .04em; }
+.sea-page.film .sea-ept { font-size: 13px; font-weight: 600; color: #f1ece3; white-space: normal; line-height: 1.35; }
+.sea-page.film .sea-ept::before { content: none !important; }
+.sea-page.film .sea-prog { font: 11px/1.3 ui-monospace, Consolas, monospace; color: color-mix(in srgb, var(--film-ink) 80%, transparent); }
+.sea-page.film .sea-need { color: var(--film-ink); }
+.sea-page.film :is(.sea-more, .sea-selall) { margin: 0; padding: 0; font-size: 11px; color: color-mix(in srgb, var(--film-ink) 65%, transparent); background: none; border: 0; }
+/* 胶片带：上下两排齿孔 + 横向滚动 */
+.sea-page.film .sea-row, .sea-page.simple.film .sea-row { display: flex; gap: 0; overflow-x: auto; overflow-y: hidden; padding: 22px 0; scroll-snap-type: x proximity;
+  background:
+    radial-gradient(circle at 50% 50%, var(--film-hole) 0 3.4px, transparent 3.6px) 0 6px / 18px 10px repeat-x,
+    radial-gradient(circle at 50% 50%, var(--film-hole) 0 3.4px, transparent 3.6px) 0 calc(100% - 6px) / 18px 10px repeat-x,
+    var(--film-base); }
+.sea-page.film .sea-row::-webkit-scrollbar { height: 8px; }
+.sea-page.film .sea-row::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--film-ink) 30%, transparent); border-radius: 4px; }
+.sea-page.film .sea-cell { display: block; flex: none; width: 168px; scroll-snap-align: start; border-right: 1px solid rgba(0, 0, 0, .55); box-shadow: 1px 0 0 rgba(255, 255, 255, .04); }
+@media (min-width: 1800px) { .sea-page.film .sea-cell { width: 186px; } }
+.sea-page.film .sea-card, .sea-page.film .sea-card[class*="k-"] { width: 100%; display: flex; flex-direction: column; gap: 0; padding: 0 8px; border: 0; border-radius: 0; background: transparent; box-shadow: none; overflow: visible; }
+.sea-page.film .sea-card:hover .sea-pic { outline: 1px solid color-mix(in srgb, var(--film-ink) 55%, transparent); }
+.sea-page.film .sea-cell.sel .sea-pic { outline: 2px solid #f1ece3; outline-offset: 1px; }
+.sea-page.film .sea-cell.multi .sea-pic { outline: 2px dashed #f1ece3; outline-offset: 1px; }
+/* 片边码 */
+.film-edge { display: none; }
+.sea-page.film .film-edge { display: block; font: 10.5px/1.6 ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .03em; color: var(--film-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: none; opacity: .9; }
+.sea-page.film .film-edge.top { padding-bottom: 3px; }
+.sea-page.film .film-edge.bot { padding-top: 3px; }
+/* 片框 */
+.sea-page.film .sea-pic { width: 100%; aspect-ratio: 9 / 16; border-radius: 2px; overflow: hidden; background: #26231f; }
+.sea-page.film .sea-pic > img:first-child { width: 100%; height: 100%; object-fit: cover; }
+.sea-page.film .sea-pic.none { display: grid; place-items: center; align-content: center; gap: 4px; color: color-mix(in srgb, var(--film-ink) 70%, transparent); font: 12px/1.3 ui-monospace, Consolas, monospace; letter-spacing: .15em;
+  background: repeating-linear-gradient(135deg, #24211d 0 6px, #211e1a 6px 12px); }
+.sea-page.film .sea-pic.none > span { display: flex; flex-direction: column; align-items: center; gap: 4px; color: inherit !important; font: inherit !important; }
+.film-why { font: 10.5px/1.2 system-ui, sans-serif; letter-spacing: 0; color: color-mix(in srgb, var(--film-ink) 55%, transparent); }
+.sea-page.film .sea-pic > .sea-dot { display: block !important; top: 6px; right: 6px; box-shadow: 0 0 0 2px rgba(0, 0, 0, .45); }
+/* 出场人物一排身份脸 */
+.film-cast { display: none; }
+.sea-page.film .film-cast { display: flex; gap: 4px; min-height: 18px; padding-top: 4px; }
+.sea-page.film .film-cast img, .sea-page.film .film-cast i { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; background: #2c2824; box-shadow: 0 0 0 1px rgba(0, 0, 0, .5); }
+.sea-page.film .film-cast i { display: inline-grid; place-items: center; font-style: normal; font-size: 10px; color: var(--film-ink); }
+/* 进度行改等宽灰字 */
+.sea-page.film .sea-tot-t { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }

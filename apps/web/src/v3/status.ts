@@ -1,5 +1,6 @@
 // fredw-92/W4a：画布 v3 统一状态词表（规格 §5）——一个圆点 + 一句“下一步”，不写系统内部状态。
 // 灰 未出 · 蓝 生成中 · 黄 待你审 · 绿 已定 · 红 失败。成人镜不加锁（项目方 2026-10-30：不做成人拦截）。
+import { useEffect, useState } from "react";
 import type { Studio } from "../store";
 import type { Episode, ShotDetail, ShotSummary, SopEpisode, SopShot, Stage, Take } from "../types";
 import { isFailed, STAGE_LABEL } from "../util";
@@ -415,4 +416,40 @@ export function breatheDelay(key: string | number | null | undefined): Record<st
   let h = 0;
   for (const ch of s.replace(/^.*?(\d+)\D*$/, "$1") || s) h = (h * 31 + ch.charCodeAt(0)) % 997;
   return { "--breathe-delay": `-${((h * 0.37) % 2.7).toFixed(2)}s` };
+}
+
+/** UIRSI r45（L-113 / D-LENS）：审片页每镜一行的“镜头”字段——读 /api/season 的 lens（实拍取本版出图提示词、计划取作业；不一致写“实拍 … · 计划 …”）。
+ *  全页一份缓存（60 秒内不重取），各行订阅。 */
+let lensMap: Record<string, string> | null = null;
+let lensAt = 0;
+let lensP: Promise<void> | null = null;
+const lensSubs = new Set<() => void>();
+function loadLens() {
+  if (lensP || (lensMap && Date.now() - lensAt < 60000)) return;
+  lensP = fetch("/api/season")
+    .then((r) => (r.ok ? r.json() : null))
+    .then((d: { episodes?: { shots?: { id: string; lens?: string | null }[] }[] } | null) => {
+      if (!d) return;
+      const m: Record<string, string> = {};
+      for (const e of d.episodes ?? []) for (const x of e.shots ?? []) if (x.lens) m[x.id] = x.lens;
+      lensMap = m;
+      lensAt = Date.now();
+    })
+    .catch(() => {})
+    .finally(() => {
+      lensP = null;
+      lensSubs.forEach((f) => f());
+    });
+}
+export function useLens(id: string): string | null {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const f = () => tick((n) => n + 1);
+    lensSubs.add(f);
+    loadLens();
+    return () => {
+      lensSubs.delete(f);
+    };
+  }, []);
+  return lensMap?.[id] ?? null;
 }

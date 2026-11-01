@@ -152,3 +152,134 @@ rules:
     confidence: medium
     status: 待验
     date: 2026-11-02
+  - id: K-WRT-H12
+    check: [tests/test_line3_score.py]
+    domain: writer
+    link: P3-P4
+    title: RSI 线 3 打分（提纲 → 镜头剧本 → 分镜，L-112）：剧本 35 + 镜头块 20 + 可拍性 20 + 结构 15 + 自动化 10，纯代码，每轮写 data/rsi/scores.jsonl（line=script）
+    when: 每轮第二季（及以后新剧）写作推进后；SENTINEL 看板读同一份
+    then: tools/script_rsi/line3_score.py --run-dir <run>；剧本分测试期只用 rubric_code 27 条（L-109，判断条目缓）；镜头块 = v2 五段 + 【灯光】合规 + 镜头在 lenses.yaml；可拍性 = 编译后 0 孤儿 / 0 特写双人露脸（同 tools/imglab/orphan_check）；结构 = 钩子 / 结尾钩子 / 镜数 / 时长；自动化 = 无人干预到可导入 / 10；整季另报“按 10 集算”防虚高；每轮找最低项改系统，分数不升不算完成
+    evidence:
+      - {src: docs/hollywood/rsi_line3.md, note: "第 0 轮：ep01–05 均值 76.7（按 10 集约 38）；最低项自动化 1/10、镜头块 8/20"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02
+  - id: K-WRT-H13
+    check: [tests/test_line3_score.py]
+    domain: writer
+    link: P3-P4
+    title: 导入闸门加“可拍性”：编译后 0 孤儿描述（K-REN-901）、特写 0 双人露脸（K-REN-902），和 RSI 线 3 打分器同一来源
+    when: 剧本导入前（rubric_audit.gate → producer import-staged / autoflow）、线 3 打分、autoflow 补丁环
+    then: tools/script_rsi/shootable.shootable_rows 按生产同一编译入口逐镜判；不可拍的镜进补丁目标（shoot#镜号），原因写明（描写分句写人名主语 / 特写只许一人露脸）；已判“可导入”的集被打回时 hollywood/epNN.json 候选清空、状态“待修”
+    writer_text: 描写外貌 / 动作 / 服装的每个分句都写人名主语（编译器按景别删句时，没主语的描写会归给别人）；特写只许一人露脸，另一人写背影 / 局部，要两人都露脸就写中景。
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    evidence:
+      - {src: data/pipeline/runs/series10_s2/writer_tasks/patch_ep02_a2.json, note: "ep02 镜3 / 镜7 编译后丢了人名“阿岚”（孤儿描述），原先过了闸门，现退回待修"}
+      - {src: tools/imglab/orphan_check.py, note: IMGLAB K-REN-901 / 902 判法}
+    confidence: high
+    status: 待验
+    date: 2026-11-02
+  - id: K-WRT-N01
+    check: [tests/test_narrative_code.py]
+    domain: writer
+    link: P3-P4
+    title: 叙事质量代码判定 N01：不空镜：每镜要有动作或信息变化（有台词 / 独白，或分拍里至少一段看得见的变化动作）
+    when: RSI 线 3 打分（line3_score narrative 字段）、写作自检；阈值按第一季 / 第二季分布定（data/rsi/narrative_dist.json）
+    then: tools/script_rsi/narrative_code.episode_checks 的 N01（只量结构信号，不评价品味）；先记录、阈值经总调度定后再进分数
+    targets: [{kind: writer_prompt, section: 分拍与动作}]
+    writer_text: 每镜都要发生点什么：有台词，或分拍里写一个看得见的变化动作（推门、抬手、手机亮起）；不写整镜“保持 / 静止 / 凝视”。
+    evidence:
+      - {src: data/rsi/narrative_dist.json, note: "分布：S1 8/10、S2 5/5 集全过"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02
+  - id: K-WRT-N02
+    check: [tests/test_narrative_code.py]
+    domain: writer
+    link: P3-P4
+    title: 叙事质量代码判定 N02：潜台词承载：台词镜有并行的视线 / 表情 / 手部信号，且台词不直说情绪（≥ 80% 台词镜）
+    when: RSI 线 3 打分（line3_score narrative 字段）、写作自检；阈值按第一季 / 第二季分布定（data/rsi/narrative_dist.json）
+    then: tools/script_rsi/narrative_code.episode_checks 的 N02（只量结构信号，不评价品味）；先记录、阈值经总调度定后再进分数
+    evidence:
+      - {src: data/rsi/narrative_dist.json, note: "分布：S1 7/10、S2 5/5"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02
+  - id: K-WRT-N03
+    check: [tests/test_narrative_code.py]
+    domain: writer
+    link: P3-P4
+    title: 叙事质量代码判定 N03：钩子前 5 秒：镜1 前 5 秒有台词或变化类动作
+    when: RSI 线 3 打分（line3_score narrative 字段）、写作自检；阈值按第一季 / 第二季分布定（data/rsi/narrative_dist.json）
+    then: tools/script_rsi/narrative_code.episode_checks 的 N03（只量结构信号，不评价品味）；先记录、阈值经总调度定后再进分数
+    evidence:
+      - {src: data/rsi/narrative_dist.json, note: "分布：S1 7/10、S2 5/5"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02
+  - id: K-WRT-N04
+    check: [tests/test_narrative_code.py]
+    domain: writer
+    link: P3-P4
+    title: 叙事质量代码判定 N04：转折位：全集 35%–75% 区间有新人物入画或揭示类动作
+    when: RSI 线 3 打分（line3_score narrative 字段）、写作自检；阈值按第一季 / 第二季分布定（data/rsi/narrative_dist.json）
+    then: tools/script_rsi/narrative_code.episode_checks 的 N04（只量结构信号，不评价品味）；先记录、阈值经总调度定后再进分数
+    targets: [{kind: writer_prompt, section: 分拍与动作}]
+    writer_text: 转折放在全集中段（约 35%–75% 的时间位置）：让一个人入画，或让一件东西被看见 / 打开 / 亮起，用画面交代变化。
+    evidence:
+      - {src: data/rsi/narrative_dist.json, note: "分布：S1 6/10、S2 1/5（最低）"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02
+  - id: K-WRT-N05
+    check: [tests/test_narrative_code.py]
+    domain: writer
+    link: P3-P4
+    title: 叙事质量代码判定 N05：结尾悬念类型相邻 3 集不重复（问句 / 揭示 / 中断 / 视线外指）
+    when: RSI 线 3 打分（line3_score narrative 字段）、写作自检；阈值按第一季 / 第二季分布定（data/rsi/narrative_dist.json）
+    then: tools/script_rsi/narrative_code.episode_checks 的 N05（只量结构信号，不评价品味）；先记录、阈值经总调度定后再进分数
+    targets: [{kind: writer_prompt, section: 分拍与动作}]
+    writer_text: 每集结尾的悬念换着用：问句、揭示一件东西、动作中断、视线看向画外；相邻三集不要用同一种。
+    evidence:
+      - {src: data/rsi/narrative_dist.json, note: "分布：S1 无重复；S2 ep02–04 连续三集“中断”"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02
+  - id: K-WRT-N06
+    check: [tests/test_narrative_code.py]
+    domain: writer
+    link: P3-P4
+    title: 叙事质量代码判定 N06：景别节奏：不连续 3 镜同一景别
+    when: RSI 线 3 打分（line3_score narrative 字段）、写作自检；阈值按第一季 / 第二季分布定（data/rsi/narrative_dist.json）
+    then: tools/script_rsi/narrative_code.episode_checks 的 N06（只量结构信号，不评价品味）；先记录、阈值经总调度定后再进分数
+    evidence:
+      - {src: data/rsi/narrative_dist.json, note: "分布：S1 3/10、S2 5/5"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02
+  - id: K-WRT-N07
+    check: [tests/test_narrative_code.py]
+    domain: writer
+    link: P3-P4
+    title: 叙事质量代码判定 N07：表演节拍到秒：每镜分拍按 ≤2 秒切段且覆盖到镜长
+    when: RSI 线 3 打分（line3_score narrative 字段）、写作自检；阈值按第一季 / 第二季分布定（data/rsi/narrative_dist.json）
+    then: tools/script_rsi/narrative_code.episode_checks 的 N07（只量结构信号，不评价品味）；先记录、阈值经总调度定后再进分数
+    evidence:
+      - {src: data/rsi/narrative_dist.json, note: "分布：S1 4/10、S2 5/5"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02
+  - id: K-WRT-H14
+    check: [tests/test_narrative_code.py]
+    domain: writer
+    link: P3-P4
+    title: 独角戏集（全集只有一个人在画）conflict#1 改判“内在冲突”：外部压力源入画 + 主角在压力下做出可见选择
+    when: rubric_code conflict#1（总调度 11-02 定；S2 ep06 林晚独角戏，顾沉只以文字消息出现）
+    then: is_solo = 全集“在画 / 局部”人物名恰好 1 个；solo_conflict ① 某镜出现画外具名人物（人物行写 画外）或手机消息 / 来电 / 门铃 / 敲门 / 屏幕文字，② 之后某镜分拍有选择动作（放下 / 拿起 / 回复 / 删掉 / 关掉 / 扣下 / 走向 / 推开 / 按下 / 拒接 / 点开 / 离开…）；非独角戏集仍判同框或 ≥2 说话人。第一季 10 集 + 第二季 ep01–05 回归：无一集被判为独角戏，判定不变
+    targets: [{kind: writer_prompt, section: 分拍与动作}]
+    writer_text: 整集只有一个人出镜的独角戏：要让外部压力进画面——对方以画外人物、手机消息、来电、门铃、敲门或屏幕文字出现（人物行写“<名>（画外）”）；压力出现之后，主角要做一个看得见的选择动作（扣下手机、删掉、拒接、拿起、推门离开…），不能只写凝视和停顿。
+    evidence:
+      - {src: data/pipeline/runs/series10_s2/writer_out/P4_ep06_a1.md, note: "ep06：压力源镜1（手机）→ 选择镜3；原 conflict#1 口径下“同框 0 / 说话人 1”必失败"}
+    confidence: high
+    status: 待验
+    date: 2026-11-02

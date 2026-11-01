@@ -149,7 +149,7 @@ def _delegates_to_rssh(fn: ast.AST) -> bool:
     for m in ast.walk(fn):
         if isinstance(m, ast.Call):
             b, nm = _call_name(m)
-            if b == "rssh":
+            if b == "rssh" or nm == "run_retry":   # rssh.run(...) / _rssh().run_retry(...)
                 uses_rssh = True
             if b == "subprocess" and nm in SUBPROC_FUNCS | {"Popen"}:
                 exe = _first_arg_exe(m)
@@ -233,6 +233,60 @@ def scan_source(path: str, src: str) -> dict[str, int]:
     return c
 
 
+PKG_ROOTS = ("", "services/agent", "services/api", "services/render_router", "services/post", "services/orchestrator",
+             "services/recipes", "services/canvas_api", "packages/schema", "packages/qc")
+
+
+def imported_untracked(importer: str, src: str, untracked: set[str]) -> set[str]:
+    """importer 可能 import 到的未跟踪 .py（按真实解析路径，不按文件名撞名）：
+    相对导入按 importer 目录解析；绝对导入按仓库根 + 各包根解析；裸名导入（sys.path 插目录后 import x）
+    只在 importer 和目标同目录、或 importer 源码里写了目标目录路径时才算"""
+    try:
+        tree = ast.parse(src)
+    except (SyntaxError, ValueError):
+        return set()
+    here = importer.rsplit("/", 1)[0] if "/" in importer else ""
+    by_stem: dict[str, list[str]] = {}
+    for u in untracked:
+        by_stem.setdefault(u.rsplit("/", 1)[-1][:-3], []).append(u)
+    cands: set[str] = set()
+
+    def mod_files(base: str, parts: list[str]) -> list[str]:
+        b = "/".join(x for x in [base, *parts] if x)
+        return [b + ".py", b + "/__init__.py"]
+
+    def bare(name: str) -> None:
+        for u in by_stem.get(name, []):
+            d = u.rsplit("/", 1)[0]
+            if d == here or d in src:
+                cands.add(u)
+
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ImportFrom):
+            parts = (n.module or "").split(".") if n.module else []
+            if n.level:
+                base = here
+                for _ in range(n.level - 1):
+                    base = base.rsplit("/", 1)[0] if "/" in base else ""
+                bases = [base]
+            else:
+                bases = list(PKG_ROOTS)
+                if len(parts) == 1:
+                    bare(parts[0])
+            for b in bases:
+                cands.update(mod_files(b, parts))
+                for a in n.names:
+                    cands.update(mod_files(b, parts + [a.name]))
+        elif isinstance(n, ast.Import):
+            for a in n.names:
+                parts = a.name.split(".")
+                for b in PKG_ROOTS:
+                    cands.update(mod_files(b, parts))
+                if len(parts) == 1:
+                    bare(parts[0])
+    return cands & untracked
+
+
 def import_names(src: str) -> set[str]:
     """文件里 import 到的所有名字分量（from a.b import c → {a, b, c}）"""
     try:
@@ -303,20 +357,41 @@ def scan(only: list[str] | None = None) -> dict:
             per.setdefault(r, {})["pipe_gate"] = n
     # 未跟踪模块是否被已跟踪代码 import（=sv tag 回滚即坏）
     imported: dict[str, list[str]] = {}
-    if stems:
+    unt_py = {u for u in untracked if u.endswith(".py")}
+    if unt_py:
         for r, src in texts.items():
             if r in untracked:
                 continue
-            for s in import_names(src) & stems.keys():
-                if stems[s] != r:
-                    imported.setdefault(stems[s], []).append(r)
+            for u in imported_untracked(r, src, unt_py):
+                imported.setdefault(u, []).append(r)
     totals = {m: sum(v.get(m, 0) for f, v in per.items() if not is_test(f)) for m in METRICS}
     totals_tests = {m: sum(v.get(m, 0) for f, v in per.items() if is_test(f)) for m in METRICS}
     totals["parse_error"] = sum(v.get("parse_error", 0) for v in per.values())
     return {"schema": "nsfs.arch_scan/1", "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "files_scanned": len(files),
             "partial": bool(only), "totals": totals, "totals_tests": totals_tests, "per_file": per,
             "untracked_imported": {k: sorted(set(v))[:10] for k, v in sorted(imported.items())},
-            "ownership_findings": ownership_findings()}
+            "ownership_findings": ownership_findings(), "knowledge_dup_ids": knowledge_dup_ids()}
+
+
+RULE_ID_RE = re.compile(r"^\s*-\s*id:\s*([A-Z][A-Z0-9]*-[A-Z0-9-]+)\s*$", re.M)
+
+
+def knowledge_dup_ids(rules_dir: Path | None = None) -> list[str]:
+    """knowledge/rules/*.yaml 里同一个规则 id 出现两次（总调度 11-02 05:5x：写入时就拦，不等 cut）。纯文本扫，毫秒级"""
+    seen: dict[str, str] = {}
+    out = []
+    for f in sorted((rules_dir or ROOT / "knowledge/rules").glob("*.yaml")):
+        try:
+            txt = f.read_text(encoding="utf-8")
+        except OSError as e:
+            out.append(f"读不到 {f.name}：{e}")
+            continue
+        for rid in RULE_ID_RE.findall(txt):
+            if rid in seen:
+                out.append(f"规则 id 重复：{rid}（{seen[rid]} 和 {f.name}）")
+            else:
+                seen[rid] = f.name
+    return out
 
 
 def ownership_findings(own: dict | None = None) -> list[str]:
@@ -365,6 +440,16 @@ def ownership_findings(own: dict | None = None) -> list[str]:
     return out
 
 
+def new_files(owner: str | None = None) -> list[str]:
+    """git 未跟踪的代码 / 测试 .py；owner 给了就只留归它的（ownership.yaml 最具体匹配）"""
+    fs = [f for f in git_lines("ls-files", "--others", "--exclude-standard", "--", *CODE_DIRS, *TEST_DIRS)
+          if f.endswith(".py") and not SKIP_PARTS.intersection(f.split("/"))]
+    if owner:
+        own_fn = load_owner_fn()
+        fs = [f for f in fs if own_fn(f) == owner]
+    return sorted(fs)
+
+
 def compare(cur: dict, base: dict) -> list[str]:
     """棘轮：只报变坏的（文件级计数变大，或新文件冒出非 0）"""
     bad = []
@@ -380,6 +465,7 @@ def compare(cur: dict, base: dict) -> list[str]:
             old = bp.get(f, {}).get(m, 0)
             if v > old:
                 bad.append(f"{m}: {f} {old}→{v}")
+    bad += [f"knowledge: {x}" for x in cur.get("knowledge_dup_ids") or []]   # 不进基线，一条都不许有（部分扫描也判）
     known = set(base.get("ownership_findings") or [])
     bad += [f"ownership: {x}" for x in cur.get("ownership_findings") or [] if x not in known]   # 只许减不增
     if not cur.get("partial"):
@@ -401,7 +487,7 @@ def tighten(base: dict, cur: dict) -> dict:
         if nc:
             per[f] = nc
     ui = {k: v for k, v in (base.get("untracked_imported") or {}).items() if k in (cur.get("untracked_imported") or {})}
-    totals = {m: sum(v.get(m, 0) for v in per.values()) for m in METRICS}
+    totals = {m: sum(v.get(m, 0) for f, v in per.items() if not is_test(f)) for m in METRICS}
     of = [x for x in base.get("ownership_findings") or [] if x in (cur.get("ownership_findings") or [])]
     return {**base, "at": cur.get("at"), "per_file": per, "untracked_imported": ui, "totals": totals, "ownership_findings": of}
 
@@ -412,12 +498,21 @@ def main() -> int:
     ap.add_argument("--write-baseline", action="store_true")
     ap.add_argument("--tighten", action="store_true", help="只收紧：每个文件每项取 min(基线, 现值)，新退化不吸收")
     ap.add_argument("--files", nargs="*")
+    ap.add_argument("--new", action="store_true",
+                    help="只查未入版的新代码文件（git 未跟踪的 .py）：新文件不许带任何退化入版（总调度 11-02 05:4x）")
+    ap.add_argument("--owner", help="配合 --new：只查 ownership.yaml 里归这个负责方的新文件（iter_gate A2 用）")
     a = ap.parse_args()
     for st in (sys.stdout, sys.stderr):
         try:
             st.reconfigure(encoding="utf-8")
         except (AttributeError, ValueError):
             pass
+    if a.new:
+        a.files = new_files(a.owner)
+        if not a.files:
+            print("ARCH_SCAN PASS（没有未入版的新代码文件）")
+            return 0
+        print("新文件：", " ".join(a.files))
     cur = scan(a.files)
     OUT.mkdir(parents=True, exist_ok=True)
     if not a.files:

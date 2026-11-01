@@ -766,3 +766,27 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-UI-050
+    check: tests/test_r43_uirsi.py
+    domain: ui
+    link: [P5-P6]
+    title: 页面停在旧状态由系统发现——页面过期检测 + :8800 打包版随收轮刷新 + 顶栏不回退检查
+    when: 前端改动后项目方的标签页没跟上（热更新报错 / 断开重连 / 改动没热更新到），或有人从 :8800 打开旧打包版
+    then: App 顶部挂 v3/StaleBanner.tsx（vite:error、ws 断开后重连、/api/ui/version 的 src_at 比本页加载 / 最后热更新新且 90 秒没跟上、打包版 dist_at 变化 → 中性提示“点此刷新”，空闲 2 分钟且没开抽屉 / 对话框 / 输入框时自动刷新）；tools/uirsi/api_restart_guard.py 每拍先在 dist 比 src 旧时 vite build 刷新 dist；iter_gate R1 跑 apps/web/e2e/uirsi/topbar_check.mjs（7 页 × 1280/1440/1920：顶栏、momoso 标识、“＋ 新建剧本”、换集下拉），缺一项 = 不通过
+    evidence:
+      - {src: docs/uirsi/rounds/r45.md, note: "项目方 04:4x：“我的猫猫车 logo 呢？还有剧本的那些选择呢？为什么顶部都没有了呀？”；实测 5173 现码 7 页 × 7 宽度顶栏齐全，判为标签页停在旧状态；:8800 的 dist 是 10-31 14:03 打包"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-UI-051
+    check: tests/test_r43_uirsi.py
+    domain: ui
+    link: [P5-P6]
+    title: 与样式无关的数据口径——镜头按 D-LENS（实拍 / 计划）永不“未标”；候选判定算上出图后检；界面样式走开关、定稿前不上线
+    when: 任何显示镜头、候选、每镜一行字段的页面，或尝试新视觉方向（胶卷 / 正片 / 待定的电影胶片稿）
+    then: /api/season 每镜 lens / lens_actual / lens_plan（season.lens_info：实拍 = 本版 take 实际编译提示词含 style_suffix 解析出的“焦段mm f/光圈”，没出过图取 render_quality style_suffix；计划 = takes.lens → visual_spec.lens → 作业镜头句；不一致写“实拍 … · 计划 …”），data_parity D-LENS 校验 = 出图提示词；takes_ui._verdict 把 postflight 任一 fail 判为不合格并写“未通过：Q… 原因”，抽屉默认当前 → 最近通过 → 都没过才显示最新失败（图上写原因 + 灰遮罩）；新视觉方向只放在开关后（正片 B = html.ui-slide，v3/slide.css；胶卷条隔离在 src/_quarantine/r45_filmstrip.css），总调度亲审 + 项目方定稿后才去掉开关
+    evidence:
+      - {src: docs/uirsi/rounds/r45.md, note: "项目方：“之前缺乏镜头数据”；ep06-S2 第 6 版 Q1 顾沉 0.544 < 0.6 被当最新候选；04:2x 选正片 B 后又说“电影胶片效果，现在 uiux 不好看，重做”→ 总调度暂停 B 上线（L-113 记录选择，开关保留）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

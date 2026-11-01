@@ -50,6 +50,9 @@ print("ok")
 '''
 
 
+Q1_MODE: dict = {"mode": "anchor_only", "why": "face_refs 还没跑"}   # 身份库 top-k 是否生效（随打分结果下发到 Q1 证据）
+
+
 def face_refs(host: str, project: str = FACE_PROJECT) -> dict[str, str]:
     """{角色 id: 机器上的身份脸路径}；机器上没有的先传上去（一次 ssh，之后按哈希记在本机已知清单里不再传）"""
     import base64
@@ -65,8 +68,18 @@ def face_refs(host: str, project: str = FACE_PROJECT) -> dict[str, str]:
         for cid in list(faces):
             for i, bf in enumerate(_bank.bank_files(cid)):
                 faces[f"{cid}@b{i}"] = (bf, _sha16(root / bf))
-    except Exception as e:  # noqa: BLE001 — 身份库读不到就只用锚（和改前一样），记一行
+        Q1_MODE.update(mode="bank", why="")
+    except Exception as e:  # noqa: BLE001 — 身份库读不到就只用锚，但要可见（SYSARCH 11-02：降级也要有 decider 和 check）
+        Q1_MODE.update(mode="anchor_only", why=repr(e)[:200])
         print(f"[face_refs] 身份库没读到，只用锚：{e!r}"[:200], file=__import__("sys").stderr)
+        try:
+            ap = root / "data" / "vqa" / "alerts.jsonl"
+            ap.parent.mkdir(parents=True, exist_ok=True)
+            with ap.open("a", encoding="utf-8") as f:
+                f.write(json.dumps({"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "kind": "q1_anchor_only", "host": host,
+                                    "why": repr(e)[:200]}, ensure_ascii=False) + chr(10))
+        except OSError as e2:
+            print(f"[face_refs] 报警写不进 alerts.jsonl：{e2!r}", file=__import__("sys").stderr)
     kp = _known_path(host)
     try:
         known = set(json.loads(kp.read_text(encoding="utf-8")))
@@ -86,8 +99,16 @@ def face_refs(host: str, project: str = FACE_PROJECT) -> dict[str, str]:
 
 
 def ssh(host, cmd, stdin=None, timeout=900):
-    return subprocess.run(["ssh", "-o", "BatchMode=yes", host, cmd], capture_output=True, text=True, timeout=timeout,
-                          encoding="utf-8", errors="replace", input=stdin)
+    return _rssh().run_retry(host, cmd, input=stdin, timeout=timeout, tries=1, text=True)   # 原来不重试：tries=1；长会话由调用方给足 timeout
+
+def _rssh():
+    """K-OPS-N07 / SYSARCH 4-1：远程命令统一走 tools/netfix/rssh.run_retry（笔记本走常驻主连接；服务器上 OFFLINE_SELF 调本机 = 本机执行）"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_rssh_41", Path(__file__).resolve().parents[2] / "tools/netfix/rssh.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
 
 
 def score(host: str, paths: dict[str, str]) -> dict:
@@ -335,6 +356,10 @@ def full_score(host: str, items: list[dict], timeout: float = 900, label: str | 
     known = d.pop("_known", known)
     kp.parent.mkdir(parents=True, exist_ok=True)
     kp.write_text(json.dumps(sorted(known)), encoding="utf-8")
+    d["q1_mode"] = dict(Q1_MODE)
+    for v in (d.get("items") or {}).values():
+        if isinstance(v, dict):
+            v["q1_mode"] = Q1_MODE["mode"]
     for k, v in (d.get("local") or {}).items():          # Q7 的 file 字段补回本机路径
         it = next(x for x in items if x["id"] == k)
         if isinstance(v, dict) and v.get("Q7"):

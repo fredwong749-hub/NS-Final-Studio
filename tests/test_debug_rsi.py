@@ -136,10 +136,10 @@ def test_r04_dispatch_consults_hold_before_rescore_and_dispatch():
 
 
 # ---- K-OPS-E05：打分等待不许占住派单线程；打分积压到上限停派 ----
-def test_e05_pool_larger_than_lanes_and_backlog_blocks_dispatch():
+def test_e05_pool_larger_than_lanes_and_backlog_blocks_dispatch(tmp_path):
     PR = _producer()
     src = (ROOT / "tools/autopilot/producer.py").read_text(encoding="utf-8")
-    assert "max_workers=max(8, self.score_backlog_max + 2 * (len(self.lanes) or 1))" in src
+    assert "max_workers=max(8, max(self.score_backlog_max, 96)" in src
     import threading
 
     class P:
@@ -148,7 +148,8 @@ def test_e05_pool_larger_than_lanes_and_backlog_blocks_dispatch():
     p.mu = threading.RLock()
     p.scoring = {"first:ep01-S1", "first:ep01-S2"}
     p.score_backlog_max = 2
-    p.p = PR.Paths()                       # 主剧：没有更高优先级的剧
+    p._backlog_env = 2; p.score_done = []; p.lanes = {"gpu33:0": "u"}; p.depth = 2
+    p.p = PR.Paths(root=tmp_path)          # 临时目录：主剧、没有更高优先级的剧；S3 工单写到临时目录
     logs = []
     p.logf = lambda ev, **kw: logs.append(ev)
     # 有空道，但积压已满 → 不碰候选（reg 是空壳；若往下走会 KeyError）
@@ -481,3 +482,75 @@ def test_e15_multi_run_paths_and_priority(tmp_path):
 def test_e15_pipeline_renders_env():
     src = (ROOT / "services/render_router/ns_render/pipeline.py").read_text(encoding="utf-8")
     assert 'os.environ.get("NS_RENDERS_DIR")' in src and 'os.environ.get("NS_SCRIPT_JSON")' in src
+
+
+# ---- K-OPS-E17：预取深度（每道 1 跑 + 1 排队）+ 积压上限按打分吞吐定 + 压线开 S3 工单 ----
+def test_e17_prefetch_and_dynamic_backlog(monkeypatch, tmp_path):
+    PR = _producer()
+    monkeypatch.setenv("NS_PRODUCER_PREFETCH", "2")
+    assert PR.prefetch_depth() == 2
+    t = 10_000.0
+    assert PR.dynamic_backlog([], t, 3, 2) == 6                                   # 下限 = 道数 × 深度
+    assert PR.dynamic_backlog([t - i * 20 for i in range(45)], t, 3, 2) == 45      # 15 分钟 45 张 = 3/分 × 15
+    import threading
+    pr = object.__new__(PR.Producer)
+    pr.p = PR.Paths(root=tmp_path); pr.p.pd.mkdir(parents=True, exist_ok=True)
+    pr.mu = threading.RLock(); pr.depth = 2; pr.lanes = {"gpu33:0": "u"}; pr.lane_cool = {}
+    pr.lane_busy = {"gpu33:0": ["first:ep01-S1"]}
+    pr.train_locks_fn = lambda srv: set()
+    pr.lane_probe = lambda url: {"ok": True, "n": 1, "agents": ["PRODUCER"]}
+    monkeypatch.setattr(PR, "lane_held", lambda ln: False)
+    assert pr.probe_lanes({})["gpu33:0"]["free"] is True                          # 1 在跑 → 还能预取 1 单
+    pr.lane_busy = {"gpu33:0": ["a", "b"]}
+    pr.lane_probe = lambda url: {"ok": True, "n": 2, "agents": ["PRODUCER", "PRODUCER"]}
+    assert pr.probe_lanes({})["gpu33:0"]["free"] is False                         # 深度满
+    pr.lane_busy = {}
+    pr.lane_probe = lambda url: {"ok": True, "n": 1, "agents": ["IMGLAB"]}
+    assert pr.probe_lanes({})["gpu33:0"]["free"] is False                         # 别人的非让道任务 → 不挤
+
+
+def test_e17_backlog_gate_opens_s3_ticket(tmp_path):
+    src = (ROOT / "tools/autopilot/producer.py").read_text(encoding="utf-8")
+    body = src.split("def dispatch_frames(", 1)[1].split(chr(10) + "    def ", 1)[0]
+    assert 'sentinel_ticket(self.p, "score_backlog"' in body and "dynamic_backlog(" in body
+
+
+# ---- K-OPS-E18：producer 进程内时间统一 Asia/Tokyo（经 ssh 调的 CLI 也一样） ----
+def test_e18_producer_forces_tokyo_tz():
+    src = (ROOT / "tools/autopilot/producer.py").read_text(encoding="utf-8")
+    head = src.split("def ", 1)[0]
+    assert 'os.environ["TZ"] = "Asia/Tokyo"' in head and "time.tzset()" in head
+
+
+# ---- K-OPS-E18 数据层：控制文件时间戳必须带偏移 ----
+def test_e18_tz_check_flags_naive_timestamps(tmp_path):
+    sys.path.insert(0, str(ROOT / "tools" / "debug"))
+    import tz_check as TC
+    f = tmp_path / "c.json"
+    f.write_text(json.dumps({"paused_at": "2026-11-01T13:52:00", "ok": "2026-11-02T03:52:00+09:00", "z": "2026-11-02T00:00:00Z",
+                             "n": [{"at": "2026-11-02T04:00"}], "text": "not a ts"}), encoding="utf-8")
+    bad = TC.scan(json.loads(f.read_text(encoding="utf-8")))
+    assert sorted(p for p, _ in bad) == ["$.n[0].at", "$.paused_at"]
+    assert TC.main(["--strict", str(f)]) == 1 and TC.main([str(f)]) == 0
+
+
+# ---- K-OPS-E19：按镜暂停 + 到期失效；全道暂停超 30 分钟开工单 ----
+def test_e19_pause_shots_and_expiry(tmp_path):
+    PR = _producer()
+    p = PR.Paths(root=tmp_path); p.pd.mkdir(parents=True, exist_ok=True)
+    PR.pause_shots(p, ["ep01-S1"], "总调度", "试", minutes=30)
+    assert "first:ep01-S1" in PR.asset_hold_objects(p.data)
+    d = json.loads((p.data / "autopilot/pause_hold.json").read_text(encoding="utf-8"))
+    d["shots"][0]["expires_at"] = "2000-01-01T00:00:00"
+    (p.data / "autopilot/pause_hold.json").write_text(json.dumps(d), encoding="utf-8")
+    assert "first:ep01-S1" not in PR.asset_hold_objects(p.data)              # 到期自动失效
+
+
+def test_e19_global_pause_over_30min_opens_ticket(tmp_path):
+    PR = _producer()
+    p = PR.Paths(root=tmp_path); p.pd.mkdir(parents=True, exist_ok=True)
+    PR.set_paused(p, True, by="总调度", note="P0")
+    PR.pause_tick(p, t=time.time() + 1900, alerts=tmp_path / "a.jsonl")
+    PR.pause_tick(p, t=time.time() + 2000, alerts=tmp_path / "a.jsonl")
+    lines = (tmp_path / "data/sentinel/tickets.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1 and json.loads(lines[0])["obj"] == "global_pause"

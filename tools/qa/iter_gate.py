@@ -28,6 +28,8 @@ BAKEOFF / AUTOPILOT）在宣布“本轮完成”之前必须跑它；退出码 
   L1 账本 / 报告    --report 存在；7 步关键词齐；引用的路径都存在；带数字的结论行同一行要有出处
   RL 规则有检查     --rules 每条在 knowledge 里且有 check 字段（指向存在的文件 / 测试）；或 --no-lesson "<理由>"
   H1 内容缺陷猎捕   生成类 loop：tools/qa/defect_hunt.py 的 state 必须比最新首帧 / 视频评分 / 成片新（K-OPS-Q13）
+  Q2 VQA 回归集      本轮改到 tools/vqa、ns_agent/vqa、gen_contract、config/vqa.json 等口径文件时：tools/vqa/regression_check.py 必须全过（总调度批，VQAGATE 提）
+  A2 新文件零退化   本 loop 名下全部未入版 .py（不限 --changed）：arch_scan --new --owner <loop> --check 必须 0 退化（K-OPS-S01）
   A1 结构棘轮       tools/qa/arch_scan.py --files <本轮 .py> --check：任一文件结构退化计数比 data/sysarch/baseline.json 多 = fail（K-OPS-S01，SYSARCH）
   V2 系统版本       本轮 --changed 是否已进系统版本（git tag sv-*，tools/qa/system_version.py cut）；没进只提示（K-OPS-V01）
   Y1 语法守卫       tools/qa/syntax_guard.py 全仓：写断的字符串 / 语法错误 / 非法转义 / 未定义名 / 项目内导入失效（K-OPS-C01，CODE-RSI）
@@ -383,6 +385,12 @@ class Gate:
             return self.add("R1", "功能不回退 G10", "fail", det + "；G0 白屏 / 报错层，结果作废")
         if code != 0:
             return self.add("R1", "功能不回退 G10", "fail", det)
+        # UIRSI r45（总调度：项目方 04:4x“顶部都没有了”）：顶栏不回退——每个主要页面 × 1280 / 1440 / 1920 都要看得见
+        # 顶栏、momoso 标识、“＋ 新建剧本”、换集下拉（apps/web/e2e/uirsi/topbar_check.mjs，退出码 1 = 有缺）
+        tcode, tout = sh(["node", "apps/web/e2e/uirsi/topbar_check.mjs"], 1500)
+        det += "；" + tail(tout, 1)
+        if tcode != 0:
+            return self.add("R1", "功能不回退 G10", "fail", det + "（顶栏回退，见 topbar_check 逐页结果）")
         if not age_ok:
             return self.add("R1", "功能不回退 G10", "untested", det + "；但这份 detect 比本轮改动旧 → 改完要重跑 detect（pwsh run_round.ps1 rN）")
         self.add("R1", "功能不回退 G10", "pass", det)
@@ -595,6 +603,35 @@ class Gate:
         bad = [ln.strip() for ln in out.splitlines() if ln.strip().startswith("退化")]
         self.add("A1", "结构退化棘轮（K-OPS-S01）", st, (" ⏎ ".join(bad[:6]) if bad else tail(out, 2)))
 
+    def a2_new_files(self):
+        # K-OPS-S01（总调度 11-02 05:4x）：本 loop 名下所有未入版的新 .py（不管 --changed 有没有声明）都必须零退化才能交 cut
+        if not (ROOT / "tools/qa/arch_scan.py").exists():
+            return self.add("A2", "新文件零退化（K-OPS-S01）", "untested", "没有 tools/qa/arch_scan.py")
+        bad_all, outs = [], []
+        for lp in sorted(self.loops):
+            code, out = sh([PY, "tools/qa/arch_scan.py", "--new", "--owner", lp, "--check"], 300)
+            outs.append(out)
+            if code not in (0, 1):
+                return self.add("A2", "新文件零退化（K-OPS-S01）", "untested", tail(out, 2))
+            bad_all += [ln.strip() for ln in out.splitlines() if ln.strip().startswith("退化")]
+        self.add("A2", "新文件零退化（K-OPS-S01）", "fail" if bad_all else "pass",
+                 " ⏎ ".join(bad_all[:6]) if bad_all else tail(outs[-1] if outs else "", 1))
+
+    VQA_PATHS = ("tools/vqa/", "services/agent/ns_agent/vqa/", "config/vqa.json", "services/agent/ns_agent/gen_contract/",
+                 "config/gen_contract.json", "tools/gen_contract/")
+
+    def q2_vqa_regression(self):
+        # 总调度 11-02 06:xx 批（VQAGATE 提，SYSARCH 代管 ITERAUDIT 接入）：改看图 / 契约口径前，VQA 回归集必须全过
+        #（data/vqa/regression/；tools/vqa/regression_check.py 退出码 1 = 退化或坏用例）；master_review 机签读同一份 --json
+        touched = [c for c in self.changed if c.startswith(self.VQA_PATHS)]
+        if not touched:
+            return self.add("Q2", "VQA 回归集", "na", "本轮没改看图 / 契约口径", False)
+        if not (ROOT / "tools/vqa/regression_check.py").exists():
+            return self.add("Q2", "VQA 回归集", "untested", "没有 tools/vqa/regression_check.py")
+        code, out = sh([PY, "tools/vqa/regression_check.py"], 900)
+        st = {0: "pass", 1: "fail"}.get(code, "untested")
+        self.add("Q2", "VQA 回归集", st, f"改动涉及 {len(touched)} 个口径文件 ⏎ " + tail(out, 3))
+
     def v2_version(self):
         # K-OPS-V01（CODE-RSI r3，项目方 11-01 22:5x“每一次迭代都是用 override system,然后用 create a new version”）：
         # 本轮改动是否已进某个系统版本（git tag sv-*）；没进只提示，由总调度巡检时 tools/qa/system_version.py cut
@@ -645,6 +682,8 @@ class Gate:
         self.g0_propagation()
         self.y1_syntax()
         self.a1_arch()
+        self.a2_new_files()
+        self.q2_vqa_regression()
         self.v2_version()
         self.t1_tests()
         fail = [r for r in self.rows if r["status"] == "fail"]

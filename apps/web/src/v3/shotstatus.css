@@ -207,3 +207,8 @@ html .stag[data-dot="ok"]::before { background: var(--c-ok); }
 html .blk-chip, html .blk-badge, html .blk-stage { background: transparent; border-color: var(--c-line-2); color: var(--c-text-2); border-style: solid; }
 html .sea-card[class*="k-"] { box-shadow: none; }
 @media (prefers-reduced-motion: reduce) { html .stag[data-dot="run"]::before { animation: none; } }
+/* r45 抽屉：没通过的版本——大图上方写“未通过：原因”，图本身灰色遮罩（中性色 + 琥珀小圆点，不用红） */
+.sd-fail { display: flex; align-items: baseline; gap: 6px; margin: 0 0 8px; padding: 6px 10px; border: 1px solid var(--c-line-2); border-radius: 6px; font-size: 12px; color: var(--c-text); }
+.sd-fail::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--c-warn); flex: none; align-self: center; }
+.sd-big.failed { filter: grayscale(.85) brightness(.6); }
+/* r45 胶卷条样式（.film）已隔离到 apps/web/src/_quarantine/r45_filmstrip.css（L-113：正片 B 取代），见 v3/slide.css */

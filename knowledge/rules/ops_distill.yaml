@@ -86,3 +86,15 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-X08
+    domain: ops
+    link: [P5-P6]
+    title: 服务器代码版本低于 min_code_sv 就只报不派——版本号按 sv-YYYYMMDD-NN 数值比较，读不到 / 格式错一律当不满足（失败关闭）
+    when: 服务器 producer 每拍派单前；笔记本判断某台服务器能否交还
+    then: 服务器侧 decisions_guard.problems() 调 policy.code_sv_problem（本机 data/system_version.txt vs config/policies/handback.yaml min_code_sv）；笔记本侧 handback_ok 用 policy.deployed_sv（index.json deploy 记录）比较；需要新代码的功能上线时，加功能的 loop 抬 min_code_sv
+    check: tests/test_distill_flow.py::test_code_sv_problem_fail_closed, tests/test_distill_flow.py::test_deployed_sv_and_handback
+    evidence:
+      - {src: docs/overnight/morning_20261102.md, note: "11-02 01:2x gpu36 deploy 被推送闸拦、仍跑 sv-01，不认 lookA_hold，派出了 hold 内的 ep02-S1/S2"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

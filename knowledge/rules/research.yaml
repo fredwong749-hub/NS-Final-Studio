@@ -604,18 +604,22 @@ rules:
     date: 2026-10-31
 
   - id: K-AST-R06
-    enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）
     domain: asset
     link: [P4-P5]
-    title: "男角先出正脸肖像再走设定图流程（纯文字直出设定图身体会被人台污染）"
-    when: "无参考图的角色（顾沉、陈宇）出设定图"
-    then: "两步：先按 registry 原文出正脸肖像，再走「角色图 + 姿势模板」流程；或用第三种模板给一张服装图"
+    title: "身份脸 = 单独的正脸裁切（每个角色一张，asset_refs.face_of 解析）；设定图只管服装 / 体型，不再“先出肖像再走设定图”"
+    when: "出图挂身份参考、打分对身份（Q1）时；新角色定妆"
+    then: "每个露脸角色只挂一张正脸裁切作身份脸（资产中心“设为当前身份脸”覆盖 > asset_refs.json faces），与打分用同一张；造型设定图另占槽、只取服装（已去头）。原写法“男角先出正脸肖像再走设定图流程”由此流程覆盖（IMGLAB 11-02 改写，总调度确认）"
+    check: [tests/test_single_identity_face.py]
     evidence:
       - src: "docs/ep02_iter/LEARNING_BACKLOG.md §B3"
         quote: "先出正脸肖像（registry 原文），再走\"角色图 + 姿势模板\"流程"
-    confidence: low
-    status: 待验
-    date: 2026-10-31
+      - src: "services/agent/ns_agent/asset_refs.py face_of；data/assets/identity_refs/<cid>/*_face_*.png（L-086 林晚 hd_A_s202）"
+        quote: "身份脸：资产中心“设为当前身份脸”（data/looks/face_overrides.json）> config faces 列表"
+      - src: "docs/research/imglab/TRACK.md §C"
+        quote: "现行身份脸已改成按角色裁脸（L-086、K-AST-263），“先肖像”已被现行流程覆盖"
+    confidence: high
+    status: 确认
+    date: 2026-11-02
 
   - id: K-AST-R07
     enforced: false   # 还没有强制检查（ITERAUDIT 11-01 盘点；补 check 后删这行）

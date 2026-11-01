@@ -644,6 +644,32 @@ def collect_sentinel() -> dict:
     return d
 
 
+def collect_rsi() -> dict:
+    """五条 RSI 线（L-112，tools/sentinel/rsi.py）：当前分、目标、轨迹；有没有 S14 工单由 open.json 判"""
+    try:
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+        from tools.sentinel import rsi
+        c = rsi.cfg()
+        recs, bad = rsi.load(c)
+        sm = rsi.summary(c, recs, time.time())
+        return {"ok": True, "lines": sm, "bad": len(bad), "report": c["report"], "stale_h": c["stale_s"] / 3600, "flat_rounds": c["flat_rounds"]}
+    except Exception as e:  # noqa: BLE001  # arch-ok: 看板只展示，失败显示原因
+        return {"ok": False, "why": repr(e)[:160], "lines": {}}
+
+
+def collect_gpu24() -> dict:
+    """GPU 24 小时时间分配（tools/sentinel/gpu_hours.py → data/rsi/gpu_24h.json，SENTINEL 每小时刷新）"""
+    p = ROOT / "data/rsi/gpu_24h.json"
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:  # arch-ok: 看板只展示，读不到显示原因
+        return {"ok": False, "why": type(e).__name__}
+    d["ok"] = True
+    d["age_s"] = round(time.time() - p.stat().st_mtime)
+    return d
+
+
 def snapshot() -> dict:
     agents = collect_agents()
     if time.time() - LOCAL_PROCS["t"] > 20:
@@ -651,7 +677,7 @@ def snapshot() -> dict:
     with LOCK:
         st = json.loads(json.dumps(STATE))
     return {"now": time.time(), "agents": agents, "ledger": collect_ledgers(), "local_procs": LOCAL_PROCS["rows"],
-            "alerts": collect_alerts(), "sentinel": collect_sentinel(), **st}
+            "alerts": collect_alerts(), "sentinel": collect_sentinel(), "rsi": collect_rsi(), "gpu24": collect_gpu24(), **st}
 
 
 SNAP_CACHE = {"t": 0.0, "data": None}

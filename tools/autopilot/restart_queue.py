@@ -58,6 +58,54 @@ def pending(host: str | None = None) -> list[dict]:
     return [r for r in _lines(REQ) if r.get("id") not in done_ids and (host is None or r.get("host") == host)]
 
 
+# ---------------------------------------------------------------- 排空（总调度 11-02 04:1x 派，K-OPS-W23）
+# 只看 ComfyUI 正在执行 + 已排队的渲染单；打分积压（producer heartbeat inflight，VLM 卡上）不算——重启渲染进程不影响打分。
+# 前 DRAIN_FULL_S 秒等“执行中 + 排队”都为 0；之后到 DRAIN_MAX_S 只等当前执行中的单；到上限仍不空也照常重启（记 drain_mode）。
+DRAIN_FULL_S = 60
+DRAIN_MAX_S = 90
+DRAIN_POLL_S = 10
+COMFY_Q = r"""
+import json, urllib.request
+out = {}
+for g, port in json.loads('__LANES__').items():
+    try:
+        q = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/queue", timeout=5).read())
+        out[g] = [len(q.get("queue_running") or []), len(q.get("queue_pending") or [])]
+    except Exception:
+        out[g] = None
+print(json.dumps(out))
+"""
+
+
+def comfy_queue(host: str, rs) -> dict:
+    """{lane: [running, pending] | None}；整台取不到抛异常"""
+    raw = rs.ssh(host, "python3 -", data=COMFY_Q.replace("__LANES__", json.dumps(rs.LANES[host])).encode(), timeout=60, tries=2)
+    txt = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw)
+    return json.loads([ln for ln in txt.splitlines() if ln.startswith("{")][-1])
+
+
+def drain(host: str, rs, sleep=time.sleep, clock=time.time) -> dict:
+    t0 = clock()
+    last = None
+    while True:
+        el = clock() - t0
+        try:
+            q = comfy_queue(host, rs)
+            run = sum(v[0] for v in q.values() if v)
+            pend = sum(v[1] for v in q.values() if v)
+            last = {"running": run, "pending": pend}
+        except Exception as e:  # noqa: BLE001
+            last = {"error": repr(e)[:120]}
+            run = pend = None
+        if run == 0 and pend == 0:
+            return {"drained": True, "drain_mode": "full", "drain_s": round(el, 1), "drain_last": last}
+        if el >= DRAIN_FULL_S and run == 0:
+            return {"drained": True, "drain_mode": "current_only", "drain_s": round(el, 1), "drain_last": last}
+        if el >= DRAIN_MAX_S:
+            return {"drained": False, "drain_mode": "timeout", "drain_s": round(el, 1), "drain_last": last}
+        sleep(DRAIN_POLL_S)
+
+
 def process(host: str, rs=None, now: float | None = None) -> dict | None:
     """resident_sync 每拍调用：有待办就按规则合并执行一次；返回执行记录或 None（没执行）"""
     if rs is None:
@@ -81,17 +129,7 @@ def process(host: str, rs=None, now: float | None = None) -> dict | None:
     try:
         rs.ssh(host, f"cd {rs.R} && {rs.OFF}/venv/bin/python tools/autopilot/producer.py pause --by RESTART_QUEUE --note '重启前排空'",
                timeout=120, tries=3)
-        drained = False
-        while time.time() - t0 < 900:
-            try:
-                hb = json.loads(rs.ssh(host, f"cat {rs.R}/data/producer/heartbeat.json", timeout=60, tries=2) or b"{}")
-            except Exception:  # noqa: BLE001
-                hb = {}
-            if int(hb.get("inflight") or 0) == 0:
-                drained = True
-                break
-            time.sleep(20)
-        rec["drained"] = drained
+        rec.update(drain(host, rs))
         rec["restart_out"] = str(rs.restart(host)).strip()[-300:]
         rs.ssh(host, f"cd {rs.R} && {rs.OFF}/venv/bin/python tools/autopilot/producer.py resume --by RESTART_QUEUE --note '重启完成'",
                timeout=120, tries=3)

@@ -68,9 +68,17 @@ def run(args, timeout=3600):
 
 
 def ssh(host, cmd, timeout=600):
-    r = subprocess.run(["ssh", "-o", "BatchMode=yes", host, cmd], capture_output=True, text=True, timeout=timeout,
-                       encoding="utf-8", errors="replace")
-    return r.stdout + r.stderr
+    r = _rssh().run_retry(host, cmd, timeout=timeout, tries=1, text=True)   # 原来不重试：tries=1；返回 stdout + stderr 文本
+    return (r.stdout or "") + (r.stderr or "")
+
+def _rssh():
+    """K-OPS-N07 / SYSARCH 4-1：远程命令统一走 tools/netfix/rssh.run_retry（笔记本走常驻主连接；服务器上 OFFLINE_SELF 调本机 = 本机执行）"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_rssh_41", Path(__file__).resolve().parents[2] / "tools/netfix/rssh.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
 
 
 def lane_load(host) -> dict:

@@ -74,3 +74,51 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-S08
+    domain: ops
+    link: [P5-P6, P11-P12]
+    title: 五条 RSI 线的分数只经 data/rsi/scores.jsonl（时间、line、score、分项、版本号）；某线 2 小时没有新分数或连续 3 轮不升，SENTINEL S14 开工单派牵头人
+    when: RSI 线牵头人每轮量完分（docs/master/RSI_PROGRAM.md，L-112）
+    then: 追加一行到 data/rsi/scores.jsonl（line 用 sentinel.yaml S14_rsi_lines.lines 的 id 或 aliases）；SENTINEL 每 5 分钟读、判 stale / flat、重写晚报 data/review_pages/rsi/index.html；8810“RSI 分数”区显示当前分 / 目标 / 轨迹
+    check: tests/test_sentinel.py::test_rsi_stale_and_flat, tests/test_sentinel.py::test_rsi_load_normalizes_aliases
+    evidence:
+      - {src: docs/master/RSI_PROGRAM.md, note: "总调度 11-02 03:5x：项目方要求五条 RSI 线（出图 / 视频 / 剧本分镜 / UI / 系统代码），分数不升不算完成"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-S09
+    domain: ops
+    link: [P5-P6]
+    title: 每张生产 GPU 最近 24 小时按“真正在跑 / 空跑 / 借道实验 / 等待任务 / 无数据”归类、合计 24 h；拿不到证据的时段只许记无数据，不许猜；“真正在跑”占比接 RSI 线 5 自运行
+    when: 评估 GPU 利用、排查空转、给线 5 打分
+    then: 只用 tools/sentinel/gpu_hours.py（ComfyUI /history 在服务器本机压缩后经 rssh 回传 + producer 日志）；口径以 docs/master/SLO.md“GPU 24 小时”为准；回滚作废的 take（void_words）算空跑
+    check: tests/test_sentinel.py::test_gpu24_classify_sums_to_window, tests/test_sentinel.py::test_gpu24_no_history_is_no_data
+    evidence:
+      - {src: docs/master/SLO.md, note: "11-02 04:0x 首次统计：生产 5 卡 24 小时真正在跑 9.1%、空跑 16.8%、借道实验 18.2%、等待任务 55.9%、无数据 0%"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-S10
+    domain: ops
+    link: [P5-P6]
+    title: 笔记本上每个常驻进程都登记在 sentinel.yaml S16_laptop_procs（命令行正则 + 负责方），缺一个开一张单；编排器 tick（last_tick.json）超过 5 分钟没更新或 dry=true 开单派 WORKFLOW
+    when: 新增 / 下线笔记本常驻进程，或改编排器 tick
+    then: 先改 S16_laptop_procs 清单（与 docs/master/ARCH_MAP.md §1.2 进程表一致）；SENTINEL S16 每 60 s 用一次 CIM 查询核对；S15 读 data/autopilot/flow/last_tick.json 的 t / dry
+    check: tests/test_sentinel.py::test_laptop_procs_missing_resident_sync, tests/test_sentinel.py::test_flow_tick_stale_or_dry
+    evidence:
+      - {src: docs/master/ARCH_MAP.md, note: "11-02 resident_sync loop 一直没在跑却没人发现（L-103 探针缺口），总调度 04:2x 要求补进程清单探针"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-S11
+    domain: ops
+    link: [P5-P6, P7-P8]
+    title: 同一镜每小时出图 > 8 次开单（无限重出）；临时挂道（partition.json _temp_holds）过了 expires_at 或没写 expires_at 超过 15 分钟开单；control.json 的 hold / pause / 恢复只由 SENTINEL 记变更历史（一处写）
+    when: producer 重出 / 驳回循环、任何 loop 临时挂道或改 control.json
+    then: 挂道必须写 expires_at（S18 判）；control.json 由写入方带 reason_kind / expires_at，历史由 SENTINEL 每拍比对后追加 data/sentinel/control_history.jsonl，各 loop 不另写；GPU 24 小时按它归 pause / hold；事件时刻以 epoch t 为准（与时区无关），只有 ts 没有 t 的才记“时区存疑”（K-OPS-E18）
+    check: tests/test_sentinel.py::test_shot_render_rate, tests/test_sentinel.py::test_temp_holds_expiry, tests/test_sentinel.py::test_tz_suspect_only_without_epoch, tests/test_sentinel.py::test_ctrl_history_gives_hold
+    evidence:
+      - {src: config/netfix/partition.json, note: "11-02 ep05-S3 无限重出到第 82 版、gpu36:0 被临时挂道 3.5 小时都是人先发现；GPU 24 小时的 pause 一半来自 EST 时间戳假象"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

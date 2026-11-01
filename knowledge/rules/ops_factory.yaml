@@ -113,3 +113,15 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-F11
+    domain: ops
+    link: [P5-P6]
+    title: 服务器运行依赖入库并在部署前核对：config/deploy/server_deps.yaml 列各 venv 必须能 import 的包（含版本）和模型文件 sha；deploy_host 排重启前在目标机跑 tools/factory/server_deps.py，缺项 / 版本不符 / sha 不符 → 不排重启、老进程继续，并报出缺什么
+    when: 新增服务器端依赖（pip 包、模型文件）、部署、换服务器
+    then: 先改 server_deps.yaml（随 sv 发版）再装包（免费包由 FACTORY 装，不带入会冲突的传递依赖，例：mediapipe 用 --no-deps，避免 opencv-contrib 与 headless 抢 cv2）；功能代码遇依赖不可用要记 *_mode=unavailable 并报警，不许静默降级
+    check: tests/test_system_version.py::test_deploy_refuses_restart_when_server_deps_missing
+    evidence:
+      - {src: docs/master/FRAMEWORK_REFRAME.md, note: "11-02 04:0x VQAGATE：gpu33 / gpu36 offline venv 没装 mediapipe，gaze_mp 在生产静默返回 None（当天 112 条带看图结果的 take 无一有 gaze_mp 证据）；FACTORY 04:1x 装 mediapipe 1.2.0（--no-deps）+ absl / flatbuffers / matplotlib，两台 FaceLandmarker / ImageSegmenter 加载通过，server_deps.py 两台 problems=[]"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

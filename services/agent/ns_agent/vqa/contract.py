@@ -507,6 +507,63 @@ def q1_band_review(pf: dict, image) -> str | None:
     return None
 
 
+def q1a_vlm(pf: dict, image) -> str | None:
+    """Q1a 的看图部分（decider=local_model，K-REV-V01）：确定性已过的，逐人裁头肩问性别 / 发色 / 发长，与人物卡不符 → Q1a 改 fail。
+    看图没跑成 → 证据记 vlm=untested，不改判（确定性分割已判过；零容忍靠分割兜底）。→ 改判说明或 None"""
+    it = next((i for i in pf.get("items") or [] if i.get("id") == "Q1a"), None)
+    if not it:
+        return None
+    ev = it.get("evidence") or {}
+    seg_off = it.get("status") == "untested" and ev.get("q1a_mode") == "unavailable"
+    if it.get("status") != "pass" and not seg_off:
+        return None
+    from ns_agent.gen_contract import cfg as GC
+    from . import hair_attr as HA
+    cards = ((GC().get("image_thresholds") or {}).get("Q1a_attr") or {}).get("cards") or {}
+    bad, asked = [], {}
+    for cid, box in (ev.get("boxes") or {}).items():
+        try:
+            ans = HA.vlm_ask(image, box)
+        except Exception as e:  # noqa: BLE001 — 看图失败只记录，不改判
+            ans = None
+            asked[cid] = {"error": str(e)[:120]}
+        if ans is None:
+            asked.setdefault(cid, {"vlm": "untested"})
+            continue
+        asked[cid] = ans
+        bad += HA.vlm_judge(cid, ans, cards.get(cid) or {})
+    it["evidence"] = {**ev, "vlm": asked}
+    if not bad and seg_off:
+        # 分割不可用（服务器没装 mediapipe）：看图逐人全部答了且相符才放行（fail-closed），记 vlm_only 并报警，不静默
+        if not (ev.get("boxes") or {}) or any("vlm" in x or "error" in x for x in asked.values()):
+            return None
+        it.update(status="pass", detail="Q1a 分割不可用，看图逐人核对相符（vlm_only）")
+        it["evidence"]["q1a_mode"] = "vlm_only"
+        _q1a_alert(str(image), ev.get("why") or "")
+        pf["blocking"] = [x for x in pf.get("blocking") or [] if x != "Q1a"]
+        pf["reasons"] = [r for r in pf.get("reasons") or [] if not str(r).startswith("Q1a")]
+        if not pf["blocking"]:
+            pf["ok"] = True
+        return "Q1a vlm_only 放行"
+    if not bad:
+        return None
+    note = "Q1a 看图逐人核对不符：" + "；".join(bad)
+    it.update(status="fail", detail=note)
+    pf["ok"] = False
+    pf["blocking"] = sorted(set(pf.get("blocking") or []) | {"Q1a"})
+    pf.setdefault("reasons", []).append("Q1a " + note)
+    return note
+
+
+def _q1a_alert(image: str, why: str) -> None:
+    """Q1a 降级（分割不可用）报警：写 data/vqa/alerts.jsonl（SENTINEL 探针读）"""
+    p = ROOT / "data" / "vqa" / "alerts.jsonl"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with p.open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "kind": "q1a_vlm_only", "image": image,
+                            "why": why[:200]}, ensure_ascii=False) + chr(10))
+
+
 def q1_needs_vlm(pf: dict) -> bool:
     """Q1 不过时，看图结果还能不能把它救回来（决定要不要排队看图，K-OPS-V15）：
     单脸、分数落在转角放宽最低档以上（q1_yaw_relax 的候选），或者只因“认不出的脸”且 cast 有背影 / 局部人物（recheck_strangers 的候选）"""

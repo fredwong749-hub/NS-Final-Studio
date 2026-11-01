@@ -36,9 +36,27 @@ def _health(p: int) -> dict | None:
         return None
 
 
+_hcache: dict = {"at": 0.0, "ok": set(BACKENDS)}
+
+
+def healthy() -> set:
+    """VQAGATE 11-02 S3：只派给活着且没在等卡的实例（死实例照派 → 单子排到超时才失败，gpu33 p50 1417 s 的放大器）。
+    10 s 刷新一次；全都不健康时退回全部（让实例自己等卡 / 报错）"""
+    now = time.time()
+    if now - _hcache["at"] > 10:
+        ok = set()
+        for p in BACKENDS:
+            h = _health(p)
+            if h and not h.get("why_waiting"):         # 没加载但也没在等卡 = 懒加载，来单就加载，照派
+                ok.add(p)
+        _hcache.update(at=now, ok=ok or set(BACKENDS))
+    return _hcache["ok"]
+
+
 def pick(exclude=()) -> int | None:
+    up = healthy()
     with _lock:
-        cands = [p for p in BACKENDS if p not in exclude]
+        cands = [p for p in BACKENDS if p not in exclude and p in up] or [p for p in BACKENDS if p not in exclude]
         if not cands:
             return None
         p = min(cands, key=lambda q: _inflight[q])
@@ -97,7 +115,7 @@ class H(BaseHTTPRequestHandler):
                 except ValueError:
                     res = {"error": f"HTTP {e.code}"}
                 last = res.get("error")
-                if "OutOfMemory" not in str(last) and "等不到" not in str(last):
+                if "OutOfMemory" not in str(last) and "out of memory" not in str(last).lower() and "等不到" not in str(last):
                     return self._send(503, {**res, "instance": p})
             except Exception as e:  # noqa: BLE001
                 last = repr(e)[:200]

@@ -96,11 +96,20 @@ def _bridge() -> list[dict] | None:
 
 def _ssh() -> dict | None:
     try:
-        p = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "gpu33", "python3", "-"],
-                           input=SSH_SCRIPT, capture_output=True, text=True, timeout=12)
+        p = _rssh().run_retry("gpu33", "python3 -", input=SSH_SCRIPT, timeout=12, tries=1, text=True)   # SYSARCH 4-1：走常驻主连接
         return json.loads(p.stdout) if p.returncode == 0 and p.stdout.strip() else None
-    except (OSError, subprocess.SubprocessError, ValueError):
+    except (OSError, subprocess.SubprocessError, ValueError, ImportError, AttributeError):   # rssh 加载失败也按“读不到”
         return None
+
+
+def _rssh():
+    """K-OPS-N07 / SYSARCH 4-1：远程命令统一走 tools/netfix/rssh.run_retry（笔记本走常驻主连接；服务器上 OFFLINE_SELF 调本机 = 本机执行）"""
+    import importlib.util
+    from pathlib import Path as _P
+    spec = importlib.util.spec_from_file_location("_rssh_41", _P(__file__).resolve().parents[3] / "tools/netfix/rssh.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def _qwen() -> dict:

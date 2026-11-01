@@ -44,6 +44,20 @@ CONTENT_RULES = ("全部人物成年（≥22 岁）、一切亲密情节双方�
 EXT = {"json": "json", "markdown_episode": "md", "patches_json": "json", "facts_json": "json", "factcheck_json": "json"}
 
 
+SCORE_DIRTY = "line3_dirty.json"     # 稿子变了 → 要重打线 3 分；编排器 tick 看到就跑 line3_score 再删掉（总调度：自动打分，不要人工接力）
+
+
+def mark_dirty(run_dir: Path, ep: int, why: str) -> None:
+    p = run_dir / SCORE_DIRTY
+    try:
+        d = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except (OSError, ValueError):     # 标记文件坏了：重写一份（宁可多打一次分），不吞掉这次变化
+        d = {}
+    d.setdefault("episodes", {})[str(ep)] = {"why": why, "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    d["cmd"] = f".venv/Scripts/python.exe tools/script_rsi/line3_score.py --run-dir {H.RC._rel(run_dir)}"
+    AF.write_json(p, d)
+
+
 def backend() -> str:
     try:
         return json.loads((ROOT / "config/llm_providers.json").read_text(encoding="utf-8")).get("writer_backend") or "claude_agent"
@@ -81,7 +95,8 @@ def packet(run_dir: Path, st, step: str, role: str, ep: int, link: str, system: 
                          f"--backend claude_agent --import dry", **(extra or {})}
     AF.write_json(run_dir / WT / f"{step}_a{attempt}.json", pk)
     st.set(awaiting={"step": step, "role": role, "attempt": attempt, "packet": H.RC._rel(run_dir / WT / f"{step}_a{attempt}.json"),
-                     "output": pk["output"]["path"]}, verdict="awaiting_" + role)
+                     "output": pk["output"]["path"]}, verdict="awaiting_" + role,
+           next_action=f"等{'写手' if role == 'writer' else '评审'}交 {step}（第 {attempt} 次）")
     return pk
 
 
@@ -225,6 +240,13 @@ def post_step(run_dir: Path, ep: int, st, import_mode: str) -> dict:
              detail=[f"{d}#{u['id']} {u['why'][:120]}" for d, u in fails])
     # 还有失败项 → 出下一个补丁包
     if fails:
+        # 之前判过“可导入”的集被新闸门项（如 K-WRT-H13 可拍性）打回：DISTILL 契约里的候选清空，状态退回“待修”
+        AF.write_json(run_dir / "hollywood" / f"ep{ep:02d}.json", {
+            "candidates": [], "code_fails": code_n, "fails": [f"{d}#{u['id']}" for d, u in fails], "spent_usd": float(st.d.get("usd_total") or 0),
+            "rounds_left": 0, "staged_path": None, "sha256": None, "writer_backend": "claude_agent", "status": "待修"})
+        for sid in ("gate", "import", "decide"):
+            if any(x["id"] == sid for x in st.d.get("stages", [])):
+                st.stage(sid, {"gate": "导入闸门", "import": "导入", "decide": "导入决定"}[sid], "reopened", "code", detail="有新失败项，退回待修")
         if k >= PATCH_MAX:
             st.set(verdict="not_importable", next_action=f"补丁已出 {k} 次仍有失败项，交总调度")
             return st.d
@@ -288,6 +310,7 @@ def post_step(run_dir: Path, ep: int, st, import_mode: str) -> dict:
         return st.d
     st.stage("import", "导入", "dry_run_ok" if import_mode == "dry" else "awaiting_owner", "code" if import_mode == "dry" else "owner")
     st.set(verdict="importable", awaiting=None, next_action="项目方点“导入”（导入目标待 import-staged --run）")
+    mark_dirty(run_dir, ep, "过导入闸门")
     return st.d
 
 
@@ -321,8 +344,11 @@ def intake_full_p4(RCH, run_dir: Path, ep: int, st, ctx: dict) -> None:
         AF.write_json(run_dir / f"P4_ep{ep:02d}.md.report.json", {"link": "P3-P4", "status": "ok" if rep.ok else "needs_writer",
                                                                   "report": rep.as_dict(), "writer": "claude_agent", "source": H.RC._rel(q)})
         (run_dir / f"P4_ep{ep:02d}.md.v2").write_text("shot_spec_v2\n", encoding="utf-8")   # 这一集按 v2 判（K-WRT-805 / 806）
-        st.d["agent"] = {"processed": [], "used": {}, "fact_devs": None, "full_p4_done": done}
+        # 整集稿替换了旧稿：旧稿上出的补丁包全部作废（记为已处理），否则补丁环会一直等一个不会再来的产物
+        stale = [q2.stem for q2 in (run_dir / WT).glob(f"patch_ep{ep:02d}_a*.json")]
+        st.d["agent"] = {"processed": stale, "used": {}, "fact_devs": None, "full_p4_done": done}
         st.d.setdefault("agent_history", []).append({"step": q.name, "accepted": True, "note": f"整集稿收为正式 P4（阻断 {blocking}）"})
+        mark_dirty(run_dir, ep, f"收整集稿 {q.name}")
         st.save()
 
 

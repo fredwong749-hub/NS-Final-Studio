@@ -17,11 +17,15 @@ let bad = 0;
 for (const p of PAGES)
   for (const s of SIZES) {
     let r;
-    try {
-      const out = execFileSync("node", [join(HERE, "probe.mjs"), p, EXPR, "12000", s], { encoding: "utf8", timeout: 120000 }).trim().split("\n").pop();
-      r = JSON.parse(JSON.parse(out));
-    } catch (e) {
-      r = { error: String(e.message || e).slice(0, 120) };
+    // 探针本身起不来（无头 Chrome 启动偶发失败）只重试一次；两次都起不来才记缺——这是工具问题，不掩盖顶栏回退
+    for (let k = 0; k < 2; k++) {
+      try {
+        const out = execFileSync("node", [join(HERE, "probe.mjs"), p, EXPR, "12000", s], { encoding: "utf8", timeout: 120000, stdio: ["ignore", "pipe", "ignore"] }).trim().split("\n").pop();
+        r = JSON.parse(JSON.parse(out));
+        break;
+      } catch (e) {
+        r = { error: `探针没起来：${String(e.message || e).split("\n")[0].slice(0, 80)}` };
+      }
     }
     const miss = r.error ? [r.error] : Object.entries(r).filter(([, v]) => !v).map(([k]) => k);
     if (miss.length) bad++;

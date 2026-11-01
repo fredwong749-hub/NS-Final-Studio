@@ -8,7 +8,7 @@ rules:
     title: 按景别删句时保住主语——被删分句以人名开头，名字补到下一个保留分句前；视线句不删；回归 0 孤儿
     when: ns_agent.framing.strip_fullbody（脸部特写删站姿 / 全身句，K-REN-123）、framing.filter_parts（按景别删看不见的部件，K-REN-101 / 707），compiler.compile_shot 对正文调用时传 subjects=在画角色
     then: 被删分句以在画角色名开头 → 名字作为单独一句插到下一个保留分句前（下一句本身以人名开头或是通用质感句时不插）；名字在宾语位置（“站在林晚侧后方”）不当主语；含“视线 / 目光 + 落在 / 看向…”的视线句不因部件词被删。没有删到带主语分句的镜头提示词逐字不变。开关 config/recipes/image_framing.json keep_subject（false = 旧行为）
-    check: [tests/test_subject_binding.py, tools/imgfix/orphan_check.py]
+    check: [tests/test_imglab_subject_binding.py, tools/imglab/orphan_check.py]
     evidence:
       - {src: data/renders/ep06/S2/takes.json 第 6 版, note: "剧本“林晚跪坐…雾霾天蓝色及腰直发…；顾沉站在画面右侧，白衬衫…”；strip_fullbody 删掉“林晚跪坐…”“顾沉站在…”两句（主语跟着丢），无主语描写紧跟【顾沉】锁 → 顾沉长出蓝色长直发和水晶甲；Q2 外层探针顾沉短发概率 0.0049"}
       - {src: docs/research/imglab/05_ep06S2_bleeding_rca.md, note: "102 镜旧编译：小句归属与剧本不一致 23 镜 236 句（orphan_check misowned）；新编译 0；提示词改动 29 镜，其余 73 镜逐字不变（docs/research/imglab/data/prompt_diff_F1F3.json）"}
@@ -22,7 +22,7 @@ rules:
     title: 脸部特写 + ≥2 人露脸 = 构图自相矛盾；编译改双人近景首句，preflight I6 拦“脸占六成 + 两张脸都入画”，写作 lint 阻断
     when: compiler.compile_shot（framing.two_face_close_conflict）；gen_contract.preflight I6（framing.framing_clash）；写作 lint（HOLLYWOOD 接 framing.two_face_close_conflict）
     then: 特写类 + 脸部主体 + 露脸人数 ≥2 → 首句用 TWO_FACE_CLOSE_LEAD（双人近景：两张脸各约三成，Q3 档差 1 在容差内）；提示词同时含“脸部占画面约六成”与“两张脸都清晰入画”→ I6 fail；写作侧：特写只放一个露脸人物，双人露脸至少写近景（或焦点人物特写 + 对方局部 / 背影）。开关 image_framing.json two_face_close（off = 旧行为）
-    check: [tests/test_subject_binding.py, tools/imgfix/orphan_check.py]
+    check: [tests/test_imglab_subject_binding.py, tools/imglab/orphan_check.py]
     evidence:
       - {src: data/renders/ep06/S2/takes.json 第 6 版, note: "要特写（档 1），出双人中景，脸高 0.185（档 2）；同类 ep04-S1、ep06-S1/S9、ep07-S1 共 5 镜"}
     confidence: high

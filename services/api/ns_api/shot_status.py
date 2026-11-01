@@ -254,12 +254,18 @@ def _reviewed(shot: str, takes: dict | None) -> str | None:
 
 def main5(shot: str, objs: dict, cand_row: dict | None = None, takes: dict | None = None) -> dict:
     """→ {main5: need|stale|doing|todo|done, why: 一句大白话, running: bool, step}"""
+    act = (takes or {}).get("active") or {}
     for step in ("first", "last", "video"):
         o = objs.get(step)
+        # r45（FILMUI 查出 /api/season 自相矛盾：ep01-S1 首帧已定稿 active image=19，状态却写“首帧未开始（等上一步）”）：
+        # 这一步已经有定稿（当前）版本、登记表又没有在重出（没在跑 / 排队），就算这一步已确认，往下一步看
+        has_cur = act.get({"first": "image", "last": "last", "video": "video"}[step]) is not None
         if not isinstance(o, dict):
+            if has_cur:
+                continue
             return {"main5": "todo", "why": f"{STEP_WORD[step]}还没排上", "running": False, "step": step}
         st = o.get("status")
-        if st == "passed":
+        if st == "passed" or (has_cur and st in (None, "pending") and not o.get("stale")):
             continue
         name = STEP_WORD[step]
         a, mx = int(o.get("attempts") or 0), o.get("max_attempts")
@@ -283,6 +289,9 @@ def main5(shot: str, objs: dict, cand_row: dict | None = None, takes: dict | Non
         wf = str(o.get("waiting_for") or "")
         if st == "pending":
             up = "首帧" if "首帧" in wf else "尾帧" if "尾帧" in wf else "上一步"
+            prev = {"last": "image", "video": "last"}.get(step)
+            if prev and act.get(prev) is not None:      # 上一步已有定稿：不再说“等上一步”，说清是还没排上
+                return {"main5": "todo", "why": f"{name}还没排上（{'首帧' if prev == 'image' else '尾帧'}已定稿）", "running": False, "step": step}
             return {"main5": "todo", "why": f"{name}未开始（等{up}）", "running": False, "step": step}
         return {"main5": "doing", "why": f"{name}{st or '处理中'}", "running": False, "step": step}
     rv = _reviewed(shot, takes)

@@ -84,6 +84,14 @@ td.n,th.n{text-align:right;white-space:nowrap}
     <h2>工单 <small>SENTINEL 探针自动开单（data/sentinel/open.json）· 每条 SLO 一个探针 · 负责方 · 持续时长 · 颜色只表示状态</small></h2>
     <div id="issues" class="mute">无</div>
   </section>
+  <section id="gpu24Box">
+    <h2>GPU 24 小时 <small>每张卡最近 24 小时：真正在跑 / 空跑 / 借道实验 / 等待任务 / 无数据（合计 24 h；口径 docs/master/SLO.md）· data/rsi/gpu_24h.json 每小时刷新</small></h2>
+    <div id="gpu24" class="mute">无</div>
+  </section>
+  <section id="rsiBox">
+    <h2>RSI 分数 <small>五条线 · 当前分 / 目标 / 轨迹（0–100）· data/rsi/scores.jsonl · 晚报 data/review_pages/rsi/index.html · 圆点颜色只表示状态</small></h2>
+    <div id="rsi" class="mute">无</div>
+  </section>
   <section id="alertsBox">
     <h2>报警 <small>基础设施看门狗：隧道 / 渲染道空转 / night 卡住 / producer 心跳（data/qa/alerts.jsonl）</small></h2>
     <div id="alerts" class="mute">无</div>
@@ -167,6 +175,33 @@ function render(d){
       sn.issues.map(r=>`<tr><td style="color:${SC[r.severity]||'#c80'}">●</td><td class="mute">${esc(r.id)}</td><td>${esc(r.slo)}</td><td>${esc(r.owner_loop)}</td><td>${dur(r.duration_s||0)}</td><td title="${esc(JSON.stringify(r.evidence||{}))}">${esc(r.title)}</td></tr>`).join('')+'</table>'
       :'<div class="mute">当前无未关闭工单</div>')
     +`<div class="mute" style="font-size:12px">探针最近一拍：${esc(sn.at||'—')}（${sn.age_s??'—'} s 前）· 未关闭 ${sn.n_open??0} · decider=code · 派单：总调度读工单（现行）→ 编排器自动通知（待接）</div>`;
+
+  // ---- GPU 24 小时（表格，数字用中性色；不上色）
+  const g=d.gpu24||{ok:false};
+  const B=['productive','idle_burn','borrowed','waiting','no_data'];
+  const cell=(c,b)=>`<td style="text-align:right">${(c[b]/3600).toFixed(1)} h <span class="mute">${c.pct?c.pct[b]:''}%</span></td>`;
+  $('gpu24').innerHTML=!g.ok?`<div class="mute">● 还没有统计（${esc(g.why||'')}）</div>`:
+    `<table style="width:100%;border-collapse:collapse;font-size:13px"><tr class="mute"><td>卡</td>${B.map(b=>`<td style="text-align:right">${esc(g.zh[b])}</td>`).join('')}<td>历史起点</td></tr>`+
+    Object.entries(g.cards).map(([k,c])=>`<tr><td>${esc(k)}</td>${B.map(b=>cell(c,b)).join('')}<td class="mute">${esc(c.history_from||c.note||'')}</td></tr>`).join('')+
+    `<tr style="border-top:1px solid #2a2f38"><td><b>合计（生产 5 卡）</b></td>${B.map(b=>`<td style="text-align:right"><b>${(g.totals[b]/3600).toFixed(1)} h</b> <span class="mute">${g.totals.pct[b]}%</span></td>`).join('')}<td></td></tr></table>`
+    +(g.waiting_reasons?(()=>{const w=g.waiting_reasons,R=Object.keys(w.seconds).sort((a,b)=>w.seconds[b]-w.seconds[a]);
+      return `<details open style="margin-top:8px"><summary>等待任务按原因拆开（生产 5 卡合计 ${(g.totals.waiting/3600).toFixed(1)} h；10 秒一格；最大两项已开工单）</summary>`+
+        `<table style="width:100%;border-collapse:collapse;font-size:13px"><tr class="mute"><td>原因</td><td style="text-align:right">时长</td><td style="text-align:right">占等待</td><td>负责方</td>${Object.keys(g.cards).filter(k=>(g.cards[k].waiting_reasons||{})[R[0]]!==undefined&&!k.includes('4080')&&k!=='gpu36:2').map(k=>`<td style="text-align:right">${esc(k)}</td>`).join('')}</tr>`+
+        R.map(r=>`<tr><td>${esc(w.zh[r])}</td><td style="text-align:right">${(w.seconds[r]/3600).toFixed(1)} h</td><td style="text-align:right">${w.pct_of_waiting[r]}%</td><td class="mute">${esc(w.owner[r])}</td>${Object.keys(g.cards).filter(k=>!k.includes('4080')&&k!=='gpu36:2').map(k=>`<td style="text-align:right" class="mute">${((g.cards[k].waiting_reasons||{})[r]/3600||0).toFixed(1)} h</td>`).join('')}</tr>`).join('')+
+        `</table><div class="mute" style="font-size:12px">${esc(w.note||'')}</div></details>`;})():'')
+    +`<div class="mute" style="font-size:12px">窗口 ${esc(g.window[0])} → ${esc(g.window[1])} · ${g.age_s} s 前刷新 · 线 5“自运行”取 真正在跑 ${g.for_rsi_line5.productive_pct}%${Object.keys(g.errors||{}).length?' · 取数问题：'+esc(Object.values(g.errors).join('；')):''}</div>`;
+
+  // ---- RSI 分数（L-112）：轨迹是单序列小图，中性灰线；圆点：灰 = 未开始，橙 = 有 S14 工单，绿 = 正常
+  const rs=d.rsi||{ok:false,lines:{}};
+  const openKeys=new Set((sn.issues||[]).map(r=>r.key));
+  const spark=(tr)=>{ if(!tr||!tr.length) return '<span class="mute">还没有分数</span>';
+    const w=220,h=44,t0=tr[0][0],t1=Math.max(tr[tr.length-1][0],t0+1),X=t=>4+(w-8)*(t-t0)/(t1-t0),Y=s=>h-4-(h-8)*Math.max(0,Math.min(100,s))/100;
+    return `<svg width="${w}" height="${h}">${[0,50,100].map(v=>`<line x1="4" x2="${w-4}" y1="${Y(v)}" y2="${Y(v)}" stroke="#2a2f38"/>`).join('')}<polyline points="${tr.map(([t,s])=>X(t)+','+Y(s)).join(' ')}" fill="none" stroke="#c9ced6" stroke-width="2"/>${tr.map(([t,s],i)=>`<circle cx="${X(t)}" cy="${Y(s)}" r="${i===tr.length-1?4:2.5}" fill="#c9ced6"><title>${new Date(t*1000).toLocaleString()}  ${s}</title></circle>`).join('')}</svg>`;};
+  $('rsi').innerHTML=!rs.ok?`<div class="mute">● RSI 分数读不到（${esc(rs.why||'')}）</div>`:
+    `<table style="width:100%;border-collapse:collapse;font-size:13px"><tr class="mute"><td></td><td>线</td><td>牵头</td><td style="text-align:right">当前分</td><td style="text-align:right">目标</td><td>轨迹</td><td>最近一轮</td></tr>`+
+    Object.entries(rs.lines).map(([id,l])=>{const tk=[...openKeys].some(k=>k.startsWith('S14:'+id+':'));const st=l.score==null?['#8b919c','未开始']:tk?['#d98a1c','有工单']:['#3fae6a','正常'];
+      return `<tr><td style="color:${st[0]}" title="${st[1]}">●</td><td>${esc(l.name)}</td><td>${esc(l.lead)}</td><td style="text-align:right">${l.score??'—'}</td><td style="text-align:right">${l.target??'未定'}</td><td>${spark(l.track)}</td><td class="mute">${esc(l.at||'—')} ${esc(l.sv||'')} · ${l.n} 轮</td></tr>`}).join('')+'</table>'
+    +`<div class="mute" style="font-size:12px">${rs.stale_h??2} 小时没有新分数或连续 ${rs.flat_rounds??3} 轮不升 → SENTINEL S14 开工单派牵头人${rs.bad?' · 读不懂的行 '+rs.bad:''}</div>`;
 
   // ---- 全局图
   const order=['gpu33','gpu36','本机'];

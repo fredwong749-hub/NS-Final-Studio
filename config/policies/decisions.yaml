@@ -34,11 +34,10 @@ decisions:
     decision: 全量重做首批单人看镜头 + 缺外套 → 暂停 producer、派 IMGFIX 修根因（19:41）
     trigger: 规则 / 资产换版后的第一批出图
     basis: 同一缺陷在首批多张出现 = 根因在提示词或资产，换 seed 无用
-    coded: "no"
-    where: gates.canary_after_redo
-    decider_now: claude
+    coded: "yes"
+    where: services/agent/ns_agent/vqa/canary.py（tests/test_vqagate.py::test_canary_after_redo_pauses_on_shared_failure）；gates.canary_after_redo
+    decider_now: code
     decider_target: code
-    plan: gates.canary_after_redo（首批 6 张同一 blocking 项失败 >34% → 暂停该批派单 + 报警）；VQA 结果已有，只缺统计 + 暂停这一步（owner VQAGATE / PRODUCER）
   - id: DJ-04
     cat: 选图
     decision: 双人句切回实测句（ep01-S5 v5 两人看镜头）；单人侧脸句采用（0/8 看镜头）
@@ -91,11 +90,10 @@ decisions:
     decision: s20261304 顾沉看镜头被总调度目检发现、自动检查漏检 → 加回归
     trigger: 人工抽看发现漏检
     basis: 漏检 = 检测器缺陷
-    coded: "no"
-    where: gates.missed_defect_to_regression
-    decider_now: claude
+    coded: "yes"
+    where: tools/vqa/regression_check.py + data/vqa/regression/（12/12）；iter_gate Q2；gates.missed_defect_to_regression
+    decider_now: code
     decider_target: code
-    plan: data/vqa/regression/<case>.json（图 + 应判项），VQA 改口径前必须全过；人 / 项目方指出的漏检由界面一键入回归集
   - id: DJ-10
     cat: 选图
     decision: 总览上看镜头的图 = 旧剧本候选挂在新镜号下，非新出 → 按剧本版本过滤 + 旧版隔离
@@ -232,11 +230,10 @@ decisions:
     decision: 服务器代码低于 min_code_sv（sv-01 不读 lookA_hold）→ 不许交还 / 不许派
     trigger: gpu36 派了 hold 内 ep02-S1/S2
     basis: L-099b D9
-    coded: partial
-    where: handback.min_code_sv（policy.py handback_ok 已比较；服务器侧拦截待落）
-    decider_now: claude
+    coded: "yes"
+    where: tools/autopilot/policy.py code_sv_problem ← tools/factory/decisions_guard.py（服务器每拍，F09 拒派）；policy.deployed_sv / handback_ok（交还）；K-OPS-X08
+    decider_now: code
     decider_target: code
-    plan: FACTORY inbox 带 min_code_sv，服务器 producer 低于就只报不派
   - id: DJ-25
     cat: 交还
     decision: refs 不一致期间出的 take 驳回；暂停两台 → 补齐 → 恢复
@@ -346,11 +343,10 @@ decisions:
     decision: :8800 只在 /api/jobs 空闲时重启
     trigger: API 改动需要重启
     basis: 不打断在跑任务
-    coded: partial
-    where: ops/restart_api.ps1；deploy.restart_api_when_idle
-    decider_now: claude
+    coded: "yes"
+    where: tools/uirsi/api_restart_guard.py tick ← tools/autopilot/flow.py tick（每拍，接重启队列）；deploy.restart_api_when_idle
+    decider_now: code
     decider_target: code
-    plan: restart_api.ps1 先查 /api/jobs，非空闲拒绝（-Force 才重启）
   # ---------------- 看图口径
   - id: DJ-37
     cat: 看图口径

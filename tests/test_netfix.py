@@ -363,3 +363,37 @@ def test_new_run_shots_prefixed_primary_unchanged():
                                              ready_by_run={"s11_v1": {"episodes": {"2": {"shots": ["ep02-S1"]}}}})["only"]
     assert D.control_for(h, {}, READY, ph={h: "laptop"}, runs=[("s11_v1", 10)],
                          ready_by_run={"s11_v1": {"episodes": {"1": {"shots": ["ep01-S1"]}}}})["only"] == [D.NONE]   # 覆盖期照样不派
+
+
+# ---------------------------------------------------------------- rssh.run_retry（SYSARCH 4-1 统一接口）
+def test_run_retry_retries_only_on_255_and_timeout(monkeypatch):
+    import subprocess as sp
+    calls, sleeps = [], []
+    monkeypatch.delenv("OFFLINE_SELF", raising=False)
+    monkeypatch.setattr(RS.time, "sleep", lambda s: sleeps.append(s))
+    seq = [sp.CompletedProcess([], 255, b"", b"conn"), sp.TimeoutExpired("ssh", 5), sp.CompletedProcess([], 0, "好".encode(), b"")]
+
+    def fake_run(host, cmd, input=None, timeout=900):
+        calls.append((host, cmd, input))
+        x = seq.pop(0)
+        if isinstance(x, Exception):
+            raise x
+        return x
+    monkeypatch.setattr(RS, "run", fake_run)
+    r = RS.run_retry("gpu33", "echo", input="x", tries=4, backoff_s=1, text=True)
+    assert r.returncode == 0 and r.stdout == "好" and len(calls) == 3 and calls[0][2] == b"x"
+    assert sleeps == [10, 20]                                            # 退避下限 10 s，按次数递增
+    seq[:] = [sp.CompletedProcess([], 2, b"", b"no such file")]
+    assert RS.run_retry("gpu33", "ls x", retries=3).returncode == 2       # 远端命令自己的错误不重试
+    seq[:] = [sp.TimeoutExpired("ssh", 5)] * 2
+    assert RS.run_retry("gpu33", "sleep 99", timeout=5, retries=1).returncode == 124
+
+
+def test_run_retry_on_server_local_and_cross_host(monkeypatch):
+    monkeypatch.setenv("OFFLINE_SELF", "gpu33")
+    monkeypatch.setattr(RS, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError("服务器上不该走主连接")))
+    assert RS.run_retry("gpu36", "hostname").returncode == 255           # 跨机：无互信，立刻失败、不重试
+    import shutil
+    if shutil.which("bash"):
+        r = RS.run_retry("gpu33", "echo local", text=True)               # 本机：bash -c 直接执行
+        assert r.returncode == 0 and "local" in r.stdout

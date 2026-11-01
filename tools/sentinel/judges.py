@@ -18,6 +18,10 @@ SLO_TITLE = {
     "S5": "发版 cut / 服务器版本", "S6": "服务器配置与笔记本一致", "S7": "无主暂停时长", "S8": "内容抽检（看镜头 / 身份 / 缺件）",
     "S9": "界面彩色元素 / 裂图 / 口径矛盾", "S10": "决策与规则全绿", "S11": "编排器同段卡住", "S12": "剧本代码判定 / 尺子",
     "S13": "等人决定 / 流水线断档",
+    "S14": "RSI 线分数（2 小时无新分 / 连续不升）",
+    "GPU24": "GPU 24 小时等待任务原因",
+    "S15": "编排器 tick 存活", "S16": "笔记本常驻进程清单",
+    "S17": "单镜出图速率", "S18": "临时挂道到期",
 }
 
 
@@ -102,6 +106,31 @@ def vqa_kind(health: str | None, models: str | None) -> str | None:
     if '"loaded"' in h:
         return "nf4"
     return "down"
+
+
+SCORE_DONE = ("passed", "content_fail", "redo_fail", "redo_auto_approved", "redo_candidate", "score_infra", "content_error", "best_effort")
+
+
+def scoring_backlog(events: list[dict], now: float, horizon_s: float = 7200) -> int:
+    """日志推算“出好、还在等契约打分 / 看图”的数量：最近 horizon_s 内 rendered 之后还没有打分结论事件的对象（producer 心跳没暴露 scoring 数）"""
+    last = {}
+    for e in sorted(events, key=lambda x: x.get("t") or 0):
+        if e.get("obj") and now - (e.get("t") or 0) <= horizon_s:
+            if e.get("ev") == "rendered":
+                last[e["obj"]] = "rendered"
+            elif e.get("ev") in SCORE_DONE:
+                last[e["obj"]] = "done"
+    return sum(1 for v in last.values() if v == "rendered")
+
+
+def j_backlog_near(where: str, n: int | None, mx: int | None, cfg: dict) -> list[dict]:
+    """到顶前预警（总调度 04:1x）：打分积压 ≥ warn_ratio × 上限即开单（K-OPS-E05 的闸真顶满停派另有 backlog 单）"""
+    if n is None or not mx:
+        return []
+    ratio = n / mx
+    return [F("S3", f"backlog_near:{where}", ratio >= cfg.get("backlog_warn_ratio", 0.8),
+              f"{where} 打分积压 {n}/{mx}（{ratio:.0%}）≥ {cfg.get('backlog_warn_ratio', 0.8):.0%}，快到积压闸上限，到顶就停派",
+              n=n, max=mx, ratio=round(ratio, 2))]
 
 
 def j_vqa_endpoint(host: str, port: int, kind: str | None, expected: str | None, listener: str = "") -> list[dict]:
@@ -307,6 +336,115 @@ def j_pipeline_gap(where: str, gpu_idle_s: float | None, ready: int | None, pend
     bad = gpu_idle_s >= cfg["gap_idle_s"] and ready == 0 and pending >= cfg["gap_pending_min"]
     return [F("S13", f"gap:{where}", bad, f"{where} 流水线断档：GPU 空闲 {gpu_idle_s / 60:.1f} 分钟、ready 0、pending {pending}（其中等人决定 {waiting_human}）",
               gpu_idle_s=round(gpu_idle_s), ready=ready, pending=pending, waiting_human=waiting_human)]
+
+
+# ------------------------------------------------------------------ S14 五条 RSI 线（总调度 03:5x，L-112）
+def j_rsi(summary: dict, now: float, cfg: dict) -> list[dict]:
+    """summary = tools/sentinel/rsi.summary()。每线两张单：
+      stale = 距最近一轮（没有任何分数时从 program_start 算）超过 stale_s
+      flat  = 最近 flat_rounds 轮都没超过它们之前那一轮（连续 N 轮不升）"""
+    out = []
+    t_start = ts(cfg.get("program_start")) or now
+    n = int(cfg["flat_rounds"])
+    for lid, s in summary.items():
+        track = s.get("track") or []
+        last_t = track[-1][0] if track else None
+        age = now - (last_t if last_t is not None else t_start)
+        f = F("S14", f"{lid}:stale", age > cfg["stale_s"], f"RSI {s['name']} {age / 3600:.1f} 小时没有新分数（上限 {cfg['stale_s'] / 3600:g} 小时）",
+              line=lid, last=iso(last_t), score=s.get("score"), target=s.get("target"))
+        f["owner_loop"] = s["lead"]
+        out.append(f)
+        if len(track) > n:
+            base = track[-n - 1][1]
+            flat = all(sc <= base for _t, sc in track[-n:])
+            f = F("S14", f"{lid}:flat", flat, f"RSI {s['name']} 连续 {n} 轮不升（{base:g} → {' / '.join(f'{sc:g}' for _t, sc in track[-n:])}）",
+                  line=lid, base=base, recent=[sc for _t, sc in track[-n:]], target=s.get("target"))
+            f["owner_loop"] = s["lead"]
+            out.append(f)
+    return out
+
+
+# ------------------------------------------------------------------ GPU 24 小时：等待任务的最大原因（总调度 04:1x）
+def j_wait_top(res: dict, top_n: int = 2) -> list[dict]:
+    """gpu_24h.json 的 waiting_reasons：按秒数排序，最大的 top_n 项（不含“原因不明”、秒数 > 0）各开一张单，派给该原因的负责方
+    （运行期 DEBUG-RSI：服务停 / 断连 / pause / 积压闸；供单 FACTORY：队列没单 / hold）；其余原因测到即“正常”，掉出前 top_n 自动关单。
+    “原因不明”超过等待任务的 20% 另开一张派 SENTINEL（探针缺口：缺证据源）"""
+    wr = res.get("waiting_reasons") or {}
+    sec, zh, own, pct = wr.get("seconds") or {}, wr.get("zh") or {}, wr.get("owner") or {}, wr.get("pct_of_waiting") or {}
+    ranked = [r for r in sorted(sec, key=lambda r: -sec[r]) if r != "unknown" and sec[r] > 0]
+    top = set(ranked[:top_n])
+    out = []
+    for r, s in sec.items():
+        if r == "unknown":
+            bad = (pct.get(r) or 0) > 20
+        else:
+            bad = r in top
+        f = F("GPU24", f"wait:{r}", bad, f"GPU 24 小时“等待任务”{'第 ' + str(ranked.index(r) + 1) + ' 大' if r in top else ''}原因：{zh.get(r, r)} "
+              f"{s / 3600:.1f} h（占等待 {pct.get(r)}%，生产 5 卡合计）", reason=r, hours=round(s / 3600, 1), pct_of_waiting=pct.get(r),
+              window=res.get("window"))
+        f["owner_loop"] = own.get(r, "总调度")
+        out.append(f)
+    return out
+
+
+# ------------------------------------------------------------------ S15 / S16（总调度 04:2x）
+def j_flow_tick(rec: dict | None, mtime: float | None, now: float, cfg: dict) -> list[dict]:
+    """编排器 tick：last_tick.json 超过 stale_s 没更新（取文件里的 t，缺则文件修改时间），或 dry=true → 违约。文件不存在 = 违约（tick 从没跑）"""
+    if rec is None and mtime is None:
+        return [F("S15", "flow_tick", True, f"编排器 tick 文件 {cfg['file']} 不存在（tick 没在跑）", file=cfg["file"])]
+    t = ts((rec or {}).get("t") or (rec or {}).get("at")) or mtime
+    age = now - (t or 0)
+    dry = bool((rec or {}).get("dry"))
+    why = "；".join(x for x in (f"{age / 60:.1f} 分钟没更新" if age > cfg["stale_s"] else "", "dry=true（只演练不推进）" if dry else "") if x)
+    return [F("S15", "flow_tick", age > cfg["stale_s"] or dry, f"编排器 tick 异常：{why}", age_s=round(age), dry=dry, pid=(rec or {}).get("pid"),
+              at=(rec or {}).get("at"))]
+
+
+def j_procs(cmdlines: list[str] | None, procs: dict) -> list[dict]:
+    """笔记本常驻进程：清单里每一项按命令行正则找，缺一个开一张单派该进程的负责方；cmdlines=None（取不到进程表）不判"""
+    import re
+    if cmdlines is None:
+        return []
+    out = []
+    for name, p in procs.items():
+        rx = re.compile(p["match"], re.I)
+        hit = [c for c in cmdlines if rx.search(c)]
+        f = F("S16", name, not hit, f"笔记本常驻进程 {name} 没在跑（匹配 {p['match']}）", n=len(hit), sample=(hit[0][:160] if hit else None))
+        f["owner_loop"] = p.get("owner") or "总调度"
+        out.append(f)
+    return out
+
+
+# ------------------------------------------------------------------ S17 / S18（总调度 08:0x）
+def j_shot_rate(rendered: list[dict], now: float, cfg: dict) -> list[dict]:
+    """同一镜（obj）最近 1 小时 rendered 次数 > max_per_hour → 违约（无限重出）；本小时出过图的镜都给 finding（低于线 = 正常，用来关单）"""
+    cnt: dict[str, list] = {}
+    for e in rendered:
+        if e.get("obj") and now - (e.get("t") or 0) <= 3600:
+            cnt.setdefault(e["obj"], []).append(e)
+    out = []
+    for obj, es in cnt.items():
+        n = len(es)
+        out.append(F("S17", obj, n > cfg["max_per_hour"], f"{obj} 最近 1 小时出图 {n} 次 > {cfg['max_per_hour']}（疑似无限重出）",
+                     n=n, lanes=sorted({str(x.get("lane")) for x in es}), last_take=max((x.get("take") or 0) for x in es)))
+    return out
+
+
+def j_temp_holds(holds: dict | None, now: float, cfg: dict) -> list[dict]:
+    """partition.json _temp_holds：过了 expires_at，或没写 expires_at 且挂了 > no_expiry_max_s → 违约，派挂道的人（by）"""
+    out = []
+    for lane, h in (holds or {}).items():
+        if not isinstance(h, dict):
+            continue
+        t0, exp = ts(h.get("at")), ts(h.get("expires_at"))
+        age = now - (t0 or now)
+        bad = (exp is not None and now > exp) or (exp is None and age > cfg["no_expiry_max_s"])
+        why = f"已过期 {(now - exp) / 60:.0f} 分钟" if exp is not None and now > exp else f"没写 expires_at，已挂 {age / 60:.0f} 分钟"
+        f = F("S18", lane, bad, f"临时挂道 {lane} {why}（{str(h.get('why') or '')[:60]}）", at=h.get("at"), expires_at=h.get("expires_at"),
+              by=h.get("by"), why=h.get("why"), age_s=round(age))
+        f["owner_loop"] = h.get("by") or cfg.get("owner_loop")
+        out.append(f)
+    return out
 
 
 def now() -> float:

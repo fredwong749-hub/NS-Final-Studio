@@ -243,6 +243,8 @@ rules:
     then: 特写 / 近景 / 中近景里正文写到某人的眼睛、视线、嘴唇、表情、脸 → 这人写“在画”；只有真的只露手、背影、下半身时才写“局部｜<部位>”
     targets: [{kind: writer_prompt, section: 镜头字段}]
     writer_text: “人物”行和画面要对得上：正文写到谁的眼睛 / 视线 / 嘴唇 / 表情 / 脸，谁就写“在画”；“局部｜<部位>”只用于真的只露手、背影或下半身的人。特写、近景、中近景里只有一个人且写了视线，就一定是“在画”。
+    check: tests/test_imgfix.py::test_k708_partial_but_face_visible, tests/test_imgfix.py::test_k708_preflight_blocks_contradiction, tests/test_partial_face_described.py::test_p4_lint_warns_partial_face   # SYSARCH 11-02 05:1x 补（总调度令：规则覆盖到 100%）；系统侧 K-REN-708 判露脸 + preflight 挡矛盾，写作侧 QW-CH6
+    lint: [QW-CH6]
     evidence:
       - {src: data/import/script_v2.json, note: "ep02-S10“林晚（局部｜双手）”却写“视线落在汤面，嘴唇轻抿”（特写）；ep04-S7、ep08-S8 同类——编译层按局部处理丢了身份脸，出图换脸（项目方 11-02 发现）"}
     confidence: high

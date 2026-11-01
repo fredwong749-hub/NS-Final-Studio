@@ -44,7 +44,7 @@ items:
   restart_api_when_idle:
     value: true
     source: 01:23 UIRSI（/api/jobs queued/running 0 时才用 ops/restart_api.ps1 重启 :8800）
-    enforced_by: ops/restart_api.ps1（人工判断空闲）
-    status: pending
+    enforced_by: tools/uirsi/api_restart_guard.py tick（/api/jobs 空闲 + 距上次 ≥10 分钟 + 接重启队列）← tools/autopilot/flow.py tick
+    status: code_reads
     owner: UIRSI
     plan: restart_api.ps1 先查 /api/jobs，非空闲拒绝（加 -Force 才重启）

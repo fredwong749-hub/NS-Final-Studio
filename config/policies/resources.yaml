@@ -24,8 +24,8 @@ items:
     owner: NETFIX / VQAGATE
     drift: {kind: json, file: config/netfix/override.json, path: [laptop_hold], view: sorted}
   vlm_instances:
-    value: 4
-    source: K-OPS-E05（config/vqa.json model.instances；VQAGATE 11-02 vLLM 专卡上线后 1→4，DISTILL drift_check 发现后同步）
+    value: 3
+    source: K-OPS-E05（config/vqa.json model.instances；VQAGATE 11-02 vLLM 专卡上线后 1→4；11-02 08:0x config/vqa.json 改为 3（服务器 3 个看图实例），DISTILL drift_check 发现后同步）
     enforced_by: tools/autopilot/producer.py:vlm_instances()
     status: drift_checked
     owner: VQAGATE
@@ -38,6 +38,12 @@ items:
     owner: PRODUCER（不在岗，经总调度派；DEBUG-RSI 只有 K-OPS-E05 授权）
     drift: {kind: grep, file: tools/autopilot/producer.py, pattern: "2 \\* \\(len\\(self\\.lanes\\) or 1\\) \\* vlm_instances\\(\\)"}
     note: lanes_scope=local 的含义——服务器 producer 的 self.lanes 只能是本机道（FACTORY 方案 C 本机道表）；笔记本代派时按笔记本实际派的道数
+  prefetch_depth:
+    value: 2
+    source: 总调度 11-02 04:2x（单与单之间空 5–40 s 靠预取解决）；K-OPS-E17
+    enforced_by: tools/autopilot/producer.py:prefetch_depth
+    status: code_reads
+    owner: DEBUG_RSI
   pause_max_s:
     value: 180
     source: 总调度 11-02 01:04（NETFIX 切线路全局 pause 12 分钟未恢复导致 GPU 空转）；总调度批复 DISTILL r1（D5 口径）
@@ -46,7 +52,7 @@ items:
     owner: DISTILL（判定函数）/ DEBUG-RSI（producer 每拍执行，已接手 producer 所有权）
     require_fields: [reason_kind, expires_at]
     ops_kinds: [line_switch, restart, deploy]
-    explicit_kinds: [master, owner]
+    explicit_kinds: [master, owner, canary]   # canary = VQAGATE 换版首批复核暂停（DEBUG-RSI 已对齐：显式，不自动恢复，>180 s 报警）
     exempt_paused_by: [owner, OWNER, fred]
     note: 每次 pause 必须带 reason_kind 和 expires_at。运维暂停（ops_kinds）最多 paused_at+180 s，到 expires_at 自动恢复；总调度 / 项目方显式暂停（explicit_kinds）不自动恢复，超过 180 s 只告警；缺字段 = 超过 180 s 只告警并记违规
   rolling_restart:
@@ -97,3 +103,22 @@ items:
     status: pending
     owner: DEBUG-RSI / FACTORY
     plan: producer 选对象时按 (run.priority, 原排序) 排；低优先级 run 不抢占在跑的作业，只在下一次派单时让位（primary_preempt = 新单优先、不打断在途）
+  lent_lanes_expiry:
+    value: {field: "config/netfix/partition.json:_lent_lanes[*].expires_at", action: auto_remove_on_expiry, per_host: [laptop, gpu36]}
+    source: 总调度 11-02 03:5x（借道 / 临时 hold 到期自动收回；_lent_lanes 与 retired_lanes 并列，DEBUG-RSI 写的审计字段）
+    enforced_by: NETFIX:tools/netfix/dispatch.py（每拍检查、过期自动移除——解冻后实现）；过渡期 DEBUG-RSI 临时兜底进程收回
+    status: pending
+    owner: NETFIX（正式）/ DEBUG-RSI（过渡兜底）
+    plan: dispatch 每拍读 _lent_lanes，now ≥ expires_at 的条目移出借道、恢复原分区，写审计；落地后改 code_reads 并加 drift（grep dispatch.py 的 _lent_lanes）
+  master_review_autosign:
+    value:
+      switch_min_agreement: 0.95      # 回归集上机签与总调度历史亲审结论一致率
+      switch_max_false_pass: 0        # 漏放（亲审驳回、机签放行）必须为 0
+      testphase_spot_check_ratio: 0.10   # 切换后测试期总调度每轮抽检比例
+      on_spot_mismatch: revert_to_manual_and_ticket   # 抽检不一致 → 自动退回人工复核 + 开工单
+      sign_conditions: [contract_all_pass, vqa_all_pass, regression_all_pass]
+    source: 总调度 11-02 04:0x（同意 master_review 改机签，附条件）；gates.only_show_passing；判断清单 DJ-11
+    enforced_by: tools/vqa/autosign.py check / sign / spot（VQAGATE，判定调 policy.autosign_switch_ok / autosign_spot_check）；iter_gate C2 认 master_review_auto.md
+    status: implemented_gate_closed
+    owner: VQAGATE / ITERAUDIT（实现）/ DISTILL（判定函数）
+    plan: 代码已就位、门槛未过（11-02 08:0x：一致率 0.796、漏放 8，mode=manual，仍人工签）；VQAGATE 用现行契约重打这 8 张，看新闸门能否拦住（塑料感 Q4 目前记日志、不拦，可能仍漏放）；一致率 ≥0.95 且漏放 0 才切换

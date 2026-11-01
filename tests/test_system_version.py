@@ -75,9 +75,12 @@ class _FakeRS:
         return {"checked": len(files), "mismatch": [], "fixed": []}
 
     guard_rc = 0
+    deps_rc = 0
     OFF = "/srv/off"
 
     def ssh(self, h, cmd, data=None, tries=3):
+        if "server_deps" in cmd:
+            return ('{"problems": []}' + chr(10) + f'rc={self.deps_rc}').encode()
         if "decisions_guard" in cmd:
             return ('{"problems": []}' + chr(10) + f'rc={self.guard_rc}').encode()
         return b"ok"
@@ -228,3 +231,13 @@ def test_deploy_does_not_queue_restart_when_server_decision_files_missing(tmp_pa
     rs.guard_rc = 1
     r = SV.deploy_host(rs, "gpu36", tmp_path, [], [], "sv-x", "c", restart=True, pc=pc, rq=rq)
     assert r["ok"] is False and "决策文件不齐" in r["error"] and rq.reqs == []
+
+
+
+def test_deploy_refuses_restart_when_server_deps_missing(tmp_path):
+    """服务器 venv 缺 mediapipe / 模型 sha 不符 → 不排重启（config/deploy/server_deps.yaml）"""
+    rs, pc, rq = _FakeRS(tmp_path), _FakePC(), _FakeRQ()
+    (tmp_path / "tools").mkdir()
+    rs.deps_rc = 1
+    r = SV.deploy_host(rs, "gpu33", tmp_path, [], [], "sv-x", "c", restart=True, pc=pc, rq=rq)
+    assert r["ok"] is False and "运行依赖不齐" in r["error"] and rq.reqs == []

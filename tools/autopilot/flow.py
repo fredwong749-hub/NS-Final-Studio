@@ -39,6 +39,24 @@ import policy as POL  # noqa: E402
 
 PY = ".venv/Scripts/python.exe"
 DECIDERS = ("code", "local_model", "api_model", "owner", "claude")
+# L-109（项目方 11-02 03:3x）：测试期剧本写 / 评交 Claude agent（config/llm_providers.json writer_backend=claude_agent），上线切回 api。
+# 这类判断点标 writer=True：测试期记 claude_testphase（单列，不进 claude 计数），上线配置记 api_model（总调度 11-02 口径）
+TESTPHASE = "claude_testphase"
+
+
+def writer_backend(root: Path = ROOT) -> str:
+    """config/llm_providers.json writer_backend；文件缺失 = 未配置测试期后端 → api（上线默认）；文件坏了直接抛出（不静默当 api）"""
+    p = root / "config/llm_providers.json"
+    if not p.exists():
+        return "api"
+    return json.loads(p.read_text(encoding="utf-8")).get("writer_backend") or "api"
+
+
+def now_of(p: dict, backend: str | None = None, root: Path = ROOT) -> str:
+    """判断点的现行 decider：writer 点按 writer_backend 现算"""
+    if p.get("writer"):
+        return TESTPHASE if (backend or writer_backend(root)) == "claude_agent" else "api_model"
+    return p["now"]
 
 # ---------------------------------------------------------------------------------------------- 段 + 判断点
 # 每个判断点：what / now（现在实际由谁判）/ target（目标）/ ref（执行它的代码 / 规则 / 策略 / 判断清单号）/ plan（now=claude 时必填）
@@ -51,14 +69,14 @@ STAGES: list[dict] = [
      ]},
     {"id": "chain", "name": "写作链 P1–P4", "exec": "tools/pipeline/run_chain.py（services/api/ns_api/story_runs.py 后台线程）", "auto": True,
      "points": [
-         {"what": "storyline → 单集大纲 → 剧本 → 分镜（逐段写 + 校验 + 返修 ≤2 轮）", "now": "api_model", "target": "api_model", "ref": "config/pipeline/chain.yaml"},
+         {"what": "storyline → 单集大纲 → 剧本 → 分镜（逐段写 + 校验 + 返修 ≤2 轮）", "now": "api_model", "writer": True, "target": "api_model", "ref": "config/pipeline/chain.yaml"},
          {"what": "每段格式 / 字段校验", "now": "code", "target": "code", "ref": "tools/pipeline/run_chain.py"},
          {"what": "写作预算", "now": "code", "target": "code", "ref": "budget.writing_episode_cap_usd"},
      ]},
     {"id": "script", "name": "好莱坞返修 + 评分", "exec": "tools/script_rsi/autoflow.py run --run-dir <run> --episode N（HOLLYWOOD r8）", "auto": True,
      "points": [
-         {"what": "写 / 返修剧本（逐行补丁 + 事实表）", "now": "api_model", "target": "api_model", "ref": "config/prompts/hollywood_writer.md"},
-         {"what": "三评审按可核对清单打分", "now": "api_model", "target": "api_model", "ref": "config/prompts/hollywood_judge.md"},
+         {"what": "写 / 返修剧本（逐行补丁 + 事实表）", "now": "api_model", "writer": True, "target": "api_model", "ref": "config/prompts/hollywood_writer.md"},
+         {"what": "三评审按可核对清单打分", "now": "api_model", "writer": True, "target": "api_model", "ref": "config/prompts/hollywood_judge.md"},
          {"what": "事实核对（说话人顺序 F1 代码 + F2 独立核对）", "now": "code", "target": "code", "ref": "tools/script_rsi/hollywood_r5.py gate5"},
          {"what": "预算 / 1 轮不涨即停", "now": "code", "target": "code", "ref": "budget.writing_total_cap_usd / no_gain_stop_rounds（DJ-26）"},
          {"what": "评审噪声大时先修尺子", "now": "code", "target": "code", "ref": "tools/script_rsi/autoflow.py（score_r6 + policy.noise_stop，HOLLYWOOD r8；DJ-29）"},
@@ -100,8 +118,8 @@ STAGES: list[dict] = [
          {"what": "尽力版挡住下游时重置（规则 / 资产版本变 → 自动 reset）", "now": "code", "target": "code", "ref": "tools/autopilot/producer.py K-OPS-E11（gates.best_effort_policy；DJ-12）",
           "plan": "producer 每拍比对尽力版的规则 / 资产版本，变了自动 reset（不计次）", "who": "DEBUG-RSI（口径待总调度定）"},
          {"what": "服务器交还（preflight 0 挡 + refs sha 一致）", "now": "code", "target": "code", "ref": "policy.handback_ok（DJ-21–23）"},
-         {"what": "服务器代码版本 ≥ min_code_sv", "now": "claude", "target": "code", "ref": "handback.min_code_sv（DJ-24）",
-          "plan": "FACTORY inbox 带 min_code_sv，服务器低于就只报不派", "who": "FACTORY"},
+         {"what": "服务器代码版本 ≥ min_code_sv（低于只报不派）", "now": "code", "target": "code",
+          "ref": "policy.code_sv_problem ← tools/factory/decisions_guard.py（服务器每拍 F09 拒派）+ policy.deployed_sv / handback_ok（交还）；K-OPS-X08（DJ-24）"},
      ]},
     {"id": "last", "name": "尾帧", "exec": "producer 常驻", "auto": True,
      "points": [
@@ -112,12 +130,10 @@ STAGES: list[dict] = [
          {"what": "生成契约 Q1–Q8", "now": "code", "target": "code", "ref": "services/agent/ns_agent/gen_contract/postflight.py"},
          {"what": "本地看图 Q9（不看镜头 / 景别 / 发色 / 多人 …）", "now": "local_model", "target": "local_model", "ref": "config/prompts/vqa_inspect.md；gates.blocking_checks"},
          {"what": "背影后脑误判复核", "now": "local_model", "target": "local_model", "ref": "gates.back_view_stranger_recheck（DJ-08）"},
-         {"what": "换版后首批复核（批量同错 → 停派）", "now": "claude", "target": "code", "ref": "gates.canary_after_redo（DJ-03）",
-          "plan": "统计首批 6 张看图结果，同一 blocking 项 >34% → 暂停该批 + 报警", "who": "VQAGATE"},
-         {"what": "人指出的漏检入回归集", "now": "claude", "target": "code", "ref": "gates.missed_defect_to_regression（DJ-09）",
-          "plan": "data/vqa/regression/ + VQA 改口径前全过", "who": "VQAGATE"},
+         {"what": "换版后首批复核（批量同错 → 停派，canary 暂停不自动恢复）", "now": "code", "target": "code", "ref": "services/agent/ns_agent/vqa/canary.py（DJ-03）"},
+         {"what": "人指出的漏检入回归集（改口径前回归必须全过）", "now": "code", "target": "code", "ref": "tools/vqa/regression_check.py + data/vqa/regression/；iter_gate Q2（DJ-09）"},
          {"what": "给项目方看之前签 master_review", "now": "claude", "target": "code", "ref": "gates.only_show_passing（DJ-11）",
-          "plan": "契约全过 + VQA 全过 + 回归集全过即机签（by=POLICY）", "who": "ITERAUDIT / VQAGATE"},
+          "plan": "tools/vqa/autosign.py 已就位（门槛未过：一致率 0.796、漏放 8 → 维持人工签）；VQAGATE 用现行契约重打 8 张漏放后再判，过 ≥0.95 且漏放 0 才切换", "who": "VQAGATE / ITERAUDIT"},
      ]},
     {"id": "video", "name": "视频", "exec": "night 常驻（Pika）", "auto": True,
      "points": [
@@ -156,12 +172,24 @@ OPS_POINTS = [
     {"what": "只推 tag 内文件；cut 失败不许 deploy", "now": "code", "target": "code", "ref": "deploy.push_tag_files_only / cut_failed_no_deploy（K-OPS-F06 / F07，DJ-35）"},
     {"what": "多个重启请求合并、按道排空", "now": "code", "target": "code", "ref": "tools/autopilot/restart_queue.py（K-OPS-W16，DJ-20）"},
     {"what": "决策 / 配置类数据随版本快照、回滚恢复", "now": "code", "target": "code", "ref": "tools/autopilot/state_snapshot.py（K-OPS-X06，DJ-53；cut 接入待 FACTORY）"},
-    {"what": ":8800 空闲才重启", "now": "claude", "target": "code", "ref": "deploy.restart_api_when_idle（DJ-36）", "plan": "restart_api.ps1 先查 /api/jobs", "who": "UIRSI"},
+    {"what": ":8800 空闲才重启（接重启队列，编排器每拍调）", "now": "code", "target": "code", "ref": "tools/uirsi/api_restart_guard.py tick ← flow.tick（DJ-36）"},
+    {"what": "写作交稿即推进（writer_tasks done_marker → advance_cmd）", "now": "code", "target": "code", "ref": "flow.autoflow_tick ← run.py tick（HOLLYWOOD autoflow，总调度 11-02）"},
+    {"what": "交稿 / 过导入闸门后自动打线 3 分（line3_dirty.json → line3_score.py）", "now": "code", "target": "code", "ref": "flow.line3_tick ← run.py tick（HOLLYWOOD，总调度 11-02）"},
     {"what": "连接 / 隧道恢复", "now": "code", "target": "code", "ref": "tools/netfix/tunnel_supervisor.py（DJ-18）"},
 ]
 
 
 # ---------------------------------------------------------------------------------------------- 世界（真实记录）
+def _wj(p: Path, obj, indent: int | None = 1) -> None:
+    """原子写 JSON（tmp + os.replace；UIRSI / 看板会在任意时刻读 status.json 等文件）"""
+    import os
+    p = Path(p)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=indent), encoding="utf-8")
+    os.replace(tmp, p)
+
+
 def _jl(p: Path, d=None):
     try:
         return json.loads(Path(p).read_text(encoding="utf-8"))
@@ -440,7 +468,7 @@ def start(brief: Path, ep: int, run_id: str | None = None, root: Path = ROOT, dr
     rec = {"run_id": run_id, "episode": ep, "dir": _rel(root, d), "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "dry_run": dry}
     idx.setdefault("runs", {})[run_id] = rec
     idx_p.parent.mkdir(parents=True, exist_ok=True)
-    idx_p.write_text(json.dumps(idx, ensure_ascii=False, indent=1), encoding="utf-8")
+    _wj(idx_p, idx)
     if launch:
         budget = str(POL.get("budget.writing_episode_cap_usd", 3.0, root))
         cmd = [str(root / PY), "-X", "utf8", "tools/pipeline/run_chain.py", "--brief", str(d / "P0_brief.json"), "--episode", str(ep),
@@ -508,7 +536,8 @@ def global_status(w: World) -> dict:
     elif c.get("ready") and not c.get("running") and not w.ctrl.get("paused"):
         g["producer"]["idle_with_work"] = f"{c.get('ready')} 个对象可派但 0 在跑（resources.gpu_idle_alert_s）"
     for h, rec in w.assets_ready.items():
-        ok, why = POL.handback_ok(rec)
+        sv = POL.deployed_sv(h, w.root)                          # 该机最近一次 deploy 成功的版本（min_code_sv，K-OPS-X08）
+        ok, why = POL.handback_ok(rec, server_sv=sv or "（无 deploy 记录）")
         g["handback"][h] = {"ok": ok, "why": why}
     dr = POL.drift_check(w.root)
     g["policy"] = {"drift_bad": [d["item"] for d in dr if not d["ok"]], "drift_checked": len(dr)}
@@ -541,7 +570,7 @@ def status_all(root: Path = ROOT, write: bool = True) -> dict:
     if write:
         p = root / "data/autopilot/flow/status.json"
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+        _wj(p, out)
     return out
 
 
@@ -578,7 +607,7 @@ def render_ep(r: dict) -> str:
     lines = [f"ep{r['ep']:02d} {r.get('title') or ''}（{r['shots']} 镜）当前：{r['current']}"]
     for s in STAGES:
         v = r["stages"][s["id"]]
-        deciders = "/".join(sorted({p["now"] for p in s["points"]}))
+        deciders = "/".join(sorted({now_of(p) for p in s["points"]}))
         lines.append(f"  {MARK.get(v['status'], '?')} {s['name']:<8} [{deciders}] {v['detail']}" + (f"\n      下一步：{v['cmd']}" if v.get("cmd") else "")
                      + (f"\n      卡点：{v['blocker']}" if v.get("blocker") else ""))
     return "\n".join(lines)
@@ -666,9 +695,10 @@ def drill(ep: int, root: Path = ROOT, run_producer_dryrun: bool = False, write: 
     for s in STAGES:
         pts = []
         for p in s["points"]:
-            pts.append({"what": p["what"], "decider": p["now"], "target": p["target"], "ref": p["ref"]})
-            if p["now"] in ("claude", "owner"):
-                breaks.append({"stage": s["id"], "what": p["what"], "needs": p["now"], "target": p["target"], "ref": p["ref"],
+            dn = now_of(p, root=root)
+            pts.append({"what": p["what"], "decider": dn, "target": p["target"], "ref": p["ref"]})
+            if dn in ("claude", "owner"):
+                breaks.append({"stage": s["id"], "what": p["what"], "needs": dn, "target": p["target"], "ref": p["ref"],
                                "who": p.get("who", ""),
                                "fix": p.get("plan") or ("项目方保留闸门（L-098 委托范围外）" if p["now"] == "owner" else "")})
         steps.append({"stage": s["id"], "name": s["name"], "executor": s["exec"], "auto": s["auto"], "points": pts,
@@ -698,7 +728,7 @@ def drill(ep: int, root: Path = ROOT, run_producer_dryrun: bool = False, write: 
     if write:
         p = root / f"data/autopilot/flow/drill_ep{ep:02d}.json"
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+        _wj(p, out)
     return out
 
 
@@ -706,11 +736,13 @@ def drill(ep: int, root: Path = ROOT, run_producer_dryrun: bool = False, write: 
 def coverage(root: Path = ROOT, drill_ep: int | None = None, write: bool = True) -> dict:
     import yaml
     pts = [dict(p, stage=s["id"]) for s in STAGES for p in s["points"]] + [dict(p, stage="ops") for p in OPS_POINTS]
-    now = Counter(p["now"] for p in pts)
+    backend = writer_backend(root)
+    now = Counter(now_of(p, backend) for p in pts)               # 测试期实际值（L-109：writer 点 = claude_testphase）
+    launch = Counter(now_of(p, "api") for p in pts)              # 上线配置值（writer_backend=api）——L-102 目标看这个
     tgt = Counter(p["target"] for p in pts)
     per_stage = {}
     for s in STAGES + [{"id": "ops", "points": OPS_POINTS}]:
-        c = Counter(p["now"] for p in s["points"])
+        c = Counter(now_of(p, backend) for p in s["points"])
         per_stage[s["id"]] = {"points": len(s["points"]), "now": dict(c),
                               "stage_decider": "claude" if c.get("claude") else ("owner" if c.get("owner") else
                                                 ("api_model" if c.get("api_model") else ("local_model" if c.get("local_model") else "code")))}
@@ -718,7 +750,7 @@ def coverage(root: Path = ROOT, drill_ep: int | None = None, write: bool = True)
     dcoded = Counter(d.get("coded") for d in dec)
     pol = POL.load(root)
     pst = Counter(it.get("status") for items in pol.values() for it in items.values())
-    claude_pts = [dict(stage=p["stage"], what=p["what"], ref=p["ref"], plan=p.get("plan", "")) for p in pts if p["now"] == "claude"]
+    claude_pts = [dict(stage=p["stage"], what=p["what"], ref=p["ref"], plan=p.get("plan", ""), who=p.get("who", "")) for p in pts if now_of(p, backend) == "claude"]
     dr = None
     dp = root / f"data/autopilot/flow/drill_ep{drill_ep:02d}.json" if drill_ep else None
     if dp and dp.exists():
@@ -729,7 +761,8 @@ def coverage(root: Path = ROOT, drill_ep: int | None = None, write: bool = True)
         if r.get("dry_run"):
             continue
         for b in r["blockers"]:
-            live.append({"run": r["run_id"], "episode": r["episode"], "stage": b["stage"], "needs": b["needs"], "what": b["blocker"]})
+            live.append({"run": r["run_id"], "episode": r["episode"], "stage": b["stage"], "needs": b["needs"], "what": b["blocker"],
+                         "testphase": b["stage"] in ("chain", "script") and backend == "claude_agent"})
     log_p = root / "data/autopilot/flow/live_breaks.jsonl"
     seen = set()
     for x in _jsonl(log_p):
@@ -744,8 +777,12 @@ def coverage(root: Path = ROOT, drill_ep: int | None = None, write: bool = True)
            "live_runs": {"now": live, "history_file": "data/autopilot/flow/live_breaks.jsonl",
                          "history": len(seen) + len(new_live)},
            "goal": "新剧本从剧本导入到成片，decider 里没有 claude（L-102 / §G1-2）",
-           "decision_points": len(pts), "deciders_now": dict(now), "deciders_target": dict(tgt),
-           "claude_share_now": round(now.get("claude", 0) / len(pts), 3), "claude_share_target": round(tgt.get("claude", 0) / len(pts), 3),
+           "decision_points": len(pts), "writer_backend": backend,
+           "deciders_now": dict(now), "deciders_now_testphase": dict(now), "deciders_now_launch": dict(launch), "deciders_target": dict(tgt),
+           "claude_share_now": round(now.get("claude", 0) / len(pts), 3), "claude_share_launch": round(launch.get("claude", 0) / len(pts), 3),
+           "claude_testphase_points": now.get(TESTPHASE, 0),
+           "testphase_note": "L-109 测试期：剧本写 / 评由 Claude agent 执行（项目方为省钱明确选择，不算回退），上线 writer_backend=api 后这些点即 api_model；L-102 目标看 claude_share_launch",
+           "claude_share_target": round(tgt.get("claude", 0) / len(pts), 3),
            "per_stage": per_stage, "claude_points": claude_pts,
            "decisions_inventory": {"total": len(dec), "coded": dict(dcoded),
                                    "coded_ratio": round(dcoded.get("yes", 0) / len(dec), 3) if dec else None,
@@ -755,7 +792,7 @@ def coverage(root: Path = ROOT, drill_ep: int | None = None, write: bool = True)
     if write:
         p = root / "data/autopilot/coverage.json"
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+        _wj(p, out)
     return out
 
 
@@ -784,5 +821,175 @@ def guard(root: Path = ROOT, apply: bool = False) -> dict:
 def approve_delivery(ep: int, by: str = "owner", note: str = "", root: Path = ROOT) -> Path:
     p = root / f"data/autopilot/flow/gates/ep{ep:02d}_delivery.json"
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({"approved": True, "by": by, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "note": note}, ensure_ascii=False), encoding="utf-8")
+    _wj(p, {"approved": True, "by": by, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "note": note}, indent=None)
     return p
+
+
+# ---------------------------------------------------------------------------------------------- 每拍（run.py tick）
+def autoflow_due(root: Path = ROOT) -> list[dict]:
+    """HOLLYWOOD autoflow 的“交稿即推进”（总调度 11-02，decider=code）：每个 run 的 writer_tasks/*.json，每集取 _a<k> 最大（同 k 取最新）
+    的包，done_marker 已存在 → 该推进；或 writer_out/P4_epNN_{r,a}<k>.md.done 不在 autoflow_epNN.json agent.full_p4_done 里 → 该推进"""
+    import re as _re
+    due = []
+    for d in sorted((root / "data/pipeline/runs").glob("*/writer_tasks")):
+        run_dir = d.parent
+        best: dict[int, tuple] = {}
+        for f in d.glob("*.json"):
+            pk = _jl(f, {}) or {}
+            ep = pk.get("episode")
+            m = _re.search(r"_a(\d+)\.json$", f.name)
+            if ep is None or not m:
+                continue
+            key = (int(m.group(1)), f.stat().st_mtime)
+            if int(ep) not in best or key > best[int(ep)][0]:
+                best[int(ep)] = (key, f, pk)
+        for ep, (_, f, pk) in best.items():
+            mk = (pk.get("output") or {}).get("done_marker")
+            if mk and (root / mk).exists():
+                due.append({"run": run_dir.name, "episode": ep, "package": f.name, "marker": mk, "cmd": pk.get("advance_cmd"),
+                            "sig": f"{f.name}@{(root / mk).stat().st_mtime:.0f}"})
+        for f in (run_dir / "writer_out").glob("P4_ep*_*.md.done") if (run_dir / "writer_out").exists() else []:
+            m = _re.match(r"P4_ep(\d+)_[ra]\d+\.md\.done$", f.name)
+            if not m:
+                continue
+            ep = int(m.group(1))
+            done = ((_jl(run_dir / f"autoflow_ep{ep:02d}.json", {}) or {}).get("agent") or {}).get("full_p4_done") or []
+            name = f.name[: -len(".done")]
+            if name not in done and not any(x["run"] == run_dir.name and x["episode"] == ep for x in due):
+                due.append({"run": run_dir.name, "episode": ep, "package": name, "marker": _rel(root, f),
+                            "cmd": f"{PY} tools/script_rsi/autoflow.py run --run-dir {_rel(root, run_dir)} --episode {ep} --backend {writer_backend(root)} --import dry",
+                            "sig": f"{name}@{f.stat().st_mtime:.0f}"})
+    return due
+
+
+def autoflow_tick(root: Path = ROOT, apply: bool = True, timeout_s: int = 120) -> dict:
+    """按集串行推进；同一个包 + 交稿时刻只推一次（data/autopilot/flow/autoflow_tick.json 记账）；每集 work_epNN/flow_tick.lock 防并发"""
+    memo_p = root / "data/autopilot/flow/autoflow_tick.json"
+    memo = _jl(memo_p, {}) or {}
+    ran = []
+    for x in autoflow_due(root):
+        k = f"{x['run']}/ep{x['episode']:02d}"
+        if memo.get(k) == x["sig"] or not x.get("cmd"):
+            continue
+        lock = root / "data/pipeline/runs" / x["run"] / f"work_ep{x['episode']:02d}" / "flow_tick.lock"
+        if lock.exists() and time.time() - lock.stat().st_mtime < timeout_s * 2:
+            ran.append(dict(x, skipped="locked"))
+            continue
+        if not apply:
+            ran.append(dict(x, dry=True))
+            continue
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text(time.strftime("%Y-%m-%dT%H:%M:%S"), encoding="utf-8")
+        try:
+            argv = x["cmd"].split()
+            if argv and argv[0].endswith("python.exe"):
+                argv[0] = str(root / argv[0]) if not Path(argv[0]).is_absolute() else argv[0]
+            r = subprocess.run(argv, cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout_s)
+            ran.append(dict(x, rc=r.returncode, tail=(r.stdout or r.stderr)[-300:]))
+            if r.returncode == 0:
+                memo[k] = x["sig"]
+        except subprocess.TimeoutExpired:
+            ran.append(dict(x, rc=None, error=f"超时 {timeout_s} s"))
+        finally:
+            lock.unlink(missing_ok=True)
+    if apply:
+        memo_p.parent.mkdir(parents=True, exist_ok=True)
+        _wj(memo_p, memo)
+    return {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "ran": ran, "backend": writer_backend(root)}
+
+
+def line3_tick(root: Path = ROOT, apply: bool = True, timeout_s: int = 600) -> dict:
+    """写手交稿 / 过导入闸门后自动打线 3（剧本）分（HOLLYWOOD，总调度 11-02，decider=code，不调外部 API）：
+    data/pipeline/runs/<run>/line3_dirty.json 存在 → 执行其中 cmd（line3_score.py，往 data/rsi/scores.jsonl 追加 line=script）；
+    退出码 0 才删 dirty 文件，失败保留、下一拍重试。放在本拍所有推进之后串行跑。"""
+    ran = []
+    for f in sorted((root / "data/pipeline/runs").glob("*/line3_dirty.json")):
+        d = _jl(f, None)
+        if not isinstance(d, dict) or not d.get("cmd"):
+            ran.append({"run": f.parent.name, "error": "line3_dirty.json 坏了或没有 cmd（保留，等 HOLLYWOOD 修）"})
+            continue
+        rec = {"run": f.parent.name, "episodes": sorted((d.get("episodes") or {}).keys())}
+        if not apply:
+            ran.append(dict(rec, dry=True))
+            continue
+        argv = str(d["cmd"]).split()
+        if argv and argv[0].endswith("python.exe") and not Path(argv[0]).is_absolute():
+            argv[0] = str(root / argv[0])
+        try:
+            r = subprocess.run(argv, cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout_s)
+            rec.update(rc=r.returncode, tail=(r.stdout or r.stderr)[-300:])
+            if r.returncode == 0:
+                f.unlink(missing_ok=True)
+        except subprocess.TimeoutExpired:
+            rec.update(rc=None, error=f"超时 {timeout_s} s（保留，下一拍重试）")
+        ran.append(rec)
+    return {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "ran": ran}
+
+
+def api_restart_tick(root: Path = ROOT, dry: bool = False, timeout_s: int = 360) -> dict:
+    """UIRSI 的 :8800 空闲才重启守护（tools/uirsi/api_restart_guard.py tick；接 WORKFLOW 重启队列，decider=code）——子进程跑，慢也不拖住状态刷新"""
+    g = root / "tools/uirsi/api_restart_guard.py"
+    if not g.exists():
+        return {"status": "未交付", "why": "tools/uirsi/api_restart_guard.py 不存在"}
+    try:
+        r = subprocess.run([str(root / PY), "-X", "utf8", str(g), "tick"] + (["--dry"] if dry else []), cwd=str(root),
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        return {"status": "超时", "why": f"{timeout_s} s"}
+    out = (r.stdout or "").strip()
+    try:
+        res = json.loads(out[out.index("{"):]) if "{" in out else None      # 守护把整段 JSON 打到 stdout（可能多行）
+        return {"status": "ok" if r.returncode == 0 else f"rc={r.returncode}", "result": res}
+    except ValueError:
+        return {"status": f"rc={r.returncode}", "tail": (r.stdout or r.stderr or "")[-300:]}
+
+
+PART_FILES = {"line3": "data/autopilot/flow/line3_tick.json", "api": "data/autopilot/flow/api_restart_tick.json"}
+
+
+def _merge_parts(root: Path, st: dict) -> None:
+    """把 line3 / api 两条线最近一次的结果并进 status.global（线还没跑完第一次 = pending）"""
+    l3 = _jl(root / PART_FILES["line3"], {}) or {}
+    api = _jl(root / PART_FILES["api"], {}) or {}
+    st["global"]["line3_tick"] = l3.get("result") or {"ran": [], "note": "line3 线还没跑完第一次"}
+    st["global"]["line3_tick_at"] = l3.get("at")
+    st["global"]["api_restart"] = api.get("result") or {"status": "pending", "note": ":8800 守护线还没跑完第一次"}
+    st["global"]["api_restart_at"] = api.get("at")
+
+
+def tick_part(part: str, root: Path = ROOT, apply: bool = True, mode: str = "parts") -> dict:
+    """编排器每拍的三条线（唯一实现；WORKFLOW 04:2x 拆线：:8800 守护慢时不拖住 status / last_tick）：
+      core   status_all + coverage + 写作交稿即推进（autoflow_tick）→ 并入另两条线最近结果 → 写 status.json + last_tick.json
+      line3  line3_tick → data/autopilot/flow/line3_tick.json
+      api    api_restart_tick → data/autopilot/flow/api_restart_tick.json
+    resident_sync 每条线一个线程、互不等待（tools/autopilot/tick_parts.py 只转调本函数）。"""
+    if part in PART_FILES:
+        r = line3_tick(root, apply=apply) if part == "line3" else api_restart_tick(root, dry=not apply)
+        _wj(root / PART_FILES[part], {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "t": time.time(), "dry": not apply, "result": r})
+        return {"part": part, "ran": len(r.get("ran") or []) if part == "line3" else None, "status": r.get("status")}
+    if part != "core":
+        raise ValueError(f"未知的线：{part}（core / line3 / api）")
+    st = status_all(root, write=True)
+    coverage(root, write=True)
+    af = autoflow_tick(root, apply=apply)
+    st["global"]["autoflow_tick"] = af
+    _merge_parts(root, st)
+    # SENTINEL 探针读 last_tick.json：超过 5 分钟没有真跑（dry=false）的 core 线就开工单
+    st["global"]["last_tick"] = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "t": time.time(), "dry": not apply,
+                                 "pid": __import__("os").getpid(), "mode": mode}
+    if apply:
+        _wj(root / "data/autopilot/flow/last_tick.json", st["global"]["last_tick"])
+    _wj(root / "data/autopilot/flow/status.json", st)
+    return {"part": "core", "at": st["at"], "blockers": len(st["blockers"]), "autoflow": len(af["ran"])}
+
+
+def tick(root: Path = ROOT, apply: bool = True) -> dict:
+    """整拍串行（手动 / 备用；常驻用 tick_part 三线并行）：core → line3 → api → 再把两线结果并进 status"""
+    c = tick_part("core", root, apply, mode="serial")
+    l3 = tick_part("line3", root, apply)
+    api = tick_part("api", root, apply)
+    st = _jl(root / "data/autopilot/flow/status.json", {}) or {}
+    if st.get("global") is not None:
+        _merge_parts(root, st)
+        _wj(root / "data/autopilot/flow/status.json", st)
+    return {"at": c["at"], "blockers": c["blockers"], "autoflow": c["autoflow"], "line3": l3["ran"], "api_restart": api["status"]}

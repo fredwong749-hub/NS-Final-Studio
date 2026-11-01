@@ -27,7 +27,7 @@ import { dotOf, statusWord, DOT_TITLE, type MainStatus } from "./seasonDot";
 import { Pop } from "../widgets";
 import { countKinds, hasKind, tagsTitle, type ShotStatusTags, type TagKind } from "../StatusTags.helpers";
 
-type SShot = { id: string; index: number; size: string | null; scene_id: string | null; scene: string | null; link: string | null; carry: string | null; cast: { name: string; presence: string }[]; switch: string[]; seconds: number | null; adult: boolean; img?: string; cand_url: string | null; cand_n: number; old_script_n?: number; first_old?: boolean; last_old?: boolean; status?: ShotStatusTags };
+type SShot = { id: string; index: number; size: string | null; scene_id: string | null; scene: string | null; link: string | null; carry: string | null; cast: { name: string; presence: string }[]; switch: string[]; seconds: number | null; adult: boolean; img?: string; lens?: string | null; cand_url: string | null; cand_n: number; old_script_n?: number; first_old?: boolean; last_old?: boolean; status?: ShotStatusTags };
 /** UIRSI r40：板块状态（后端 ns_api/shot_status.episode_blocks；口径同镜头格标签） */
 type BlockState = "stale" | "doing" | "done" | "todo";
 type SBlocks = { state: BlockState; text: string; stages: { key: string; label: string; state: BlockState; counts: Record<BlockState, number>; text: string }[] };
@@ -187,7 +187,7 @@ export default function SeasonPage() {
   const nFilter = (blockF ? 1 : 0) + (tagF ? 1 : 0);
   const peekShot = peek ? all.find((x) => x.id === peek) : undefined;
   return (
-    <div className={`v3p-page sea-page${detail ? "" : " simple"}`}>
+    <div className={`v3p-page sea-page slide${detail ? "" : " simple"}`}>{/* r45 · L-113：正片 B（深色桌面 + 灰纸框，v3/slide.css），不管“显示细节”开不开都生效；胶卷条已隔离 */}
       <header className="v3p-head sea-head">
         <h1>全剧总览</h1>
         <span className="v3p-muted">
@@ -335,9 +335,11 @@ export default function SeasonPage() {
                       )}
                       <button type="button" className={`sea-card k-${x.status?.main ?? "none"}`} onClick={(ev) => go(ev, x.id)} onDoubleClick={() => goCanvas(x.id)} title={`${x.id} · ${x.size ?? ""} · ${x.scene ?? ""} · ${x.seconds ?? "?"} 秒${x.cand_n ? ` · ${x.cand_n} 张候选` : ""}${x.adult ? " · 成人镜头（只在本机生成）" : ""}\n${tagsTitle(x.status)}\n${s?.img_summary ?? ""}\n${statusWord(x.status as MainStatus)}${(x.status as MainStatus | undefined)?.why ? `：${(x.status as MainStatus).why}` : ""}
 单击：右侧看详情；双击：进画布这一镜；Ctrl / Shift 点：多选`}>
+                        {/* r45 胶卷（项目方 04:3x：“改成像胶卷那种模式吧，就像传统胶卷那样”）：片框上边码 S1 · 景别 · 时长，下边码 镜头参数 · 场景，片框下一排身份脸 */}
+                        <span className="film-edge top">{`S${x.index} · ${x.size ?? "景别未标"} · ${x.seconds ? `${x.seconds}s` : "?"}`}</span>
                         <span className="sea-band" style={{ background: x.scene_id ? bandOf.get(x.scene_id) : undefined }} title={x.scene ?? "场景未标"} />
                         <span className={`sea-pic${img ? "" : " none"}`} style={breatheDelay(x.id)} data-zoom-label={`${x.id.split("-")[1]} · ${s?.first_frame ? `首帧 #${s.first_frame_take ?? "?"}` : x.cand_n ? "首帧候选" : "首帧"}`}>
-                          {img ? <img key={img} className="live-img" src={thumb(img, 120) ?? img} alt="" loading="lazy" decoding="async" draggable={false} /> : <span title={x.old_script_n ? `有 ${x.old_script_n} 张是剧本更新前出的旧图，不再作候选（在这一镜的“旧图”里能看）` : undefined}>{detail ? (x.old_script_n || x.first_old ? <>未出<br />（剧本已更新）</> : "未出") : s?.job === "running" || (x.status as MainStatus | undefined)?.running ? "正在出" : s?.job === "queued" || (x.status as MainStatus | undefined)?.main5 === "doing" ? "排队中" : "未开始"}</span>}
+                          {img ? <img key={img} className="live-img" src={thumb(img, 120) ?? img} alt="" loading="lazy" decoding="async" draggable={false} /> : <span title={x.old_script_n ? `有 ${x.old_script_n} 张是剧本更新前出的旧图，不再作候选（在这一镜的“旧图”里能看）` : undefined}>{"未曝光"}<small className="film-why">{s?.job === "running" || (x.status as MainStatus | undefined)?.running ? "正在出" : s?.job === "queued" || (x.status as MainStatus | undefined)?.main5 === "doing" ? "排队中" : x.old_script_n || x.first_old ? "剧本已更新" : "未开始"}</small></span>}
                           {(() => { const dt = dotOf(x.status as MainStatus); return dt ? <i className={`sea-dot d-${dt}${dt === "run" ? " is-rendering" : ""}`} title={DOT_TITLE[dt]} /> : null; })()}
                           {lastImg && <img className="sea-last" src={thumb(lastImg, 120) ?? lastImg} alt="" loading="lazy" />}
                           <b className="sea-no">S{x.index}</b>
@@ -352,6 +354,10 @@ export default function SeasonPage() {
                           {sg.map((g, k) => (
                             <i key={k} className={`sea-seg s-${g}`} />
                           ))}
+                        </span>
+                        <span className="film-edge bot" title={`镜头（D-LENS：实拍取本版出图提示词，计划取作业）：${x.lens ?? "读取中"}`}>{[x.lens ?? "…", x.scene].filter(Boolean).join(" · ")}</span>
+                        <span className="film-cast" title={x.cast.map((c) => `${c.name}（${c.presence}）`).join("、") || "这一镜没有人物"}>
+                          {x.cast.filter((c) => c.presence !== "画外").map((c) => (faces[c.name] ? <img key={c.name} src={thumb(faces[c.name], 64) ?? faces[c.name]} alt={c.name} title={c.name} loading="lazy" /> : <i key={c.name} title={c.name}>{c.name.slice(0, 1)}</i>))}
                         </span>
                         {/* r43（项目方 02:4x：“缺乏很多细节，比如人物什么的……信息也不够”）：图下固定 3 行——人物 / 景别 · 时长 · 场景 / 一句话内容 + 阶段 */}
                         <span className="sea-info">

@@ -141,11 +141,19 @@ def plan(extra: dict[str, int]) -> None:
 
 
 def ssh(cmd: str, timeout=7200) -> str:
-    p = subprocess.run(["ssh", "-o", "BatchMode=yes", "gpu36", cmd], capture_output=True, text=True,
-                       encoding="utf-8", errors="replace", timeout=timeout)
+    p = _rssh().run_retry("gpu36", cmd, timeout=timeout, tries=1, text=True)   # 原来不重试：tries=1 保持一致
     if p.returncode:
         raise RuntimeError(f"ssh {cmd[:80]}… rc={p.returncode}\n{p.stderr[-1500:]}")
     return p.stdout
+
+
+def _rssh():
+    """K-OPS-N07 / SYSARCH 4-1：远程命令统一走 tools/netfix/rssh.run_retry（常驻主连接；服务器上 OFFLINE_SELF 调本机 = 本机执行）"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_rssh_41", Path(__file__).resolve().parents[2] / "tools/netfix/rssh.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def scp(src: str, dst: str) -> None:

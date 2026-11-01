@@ -339,9 +339,19 @@ import urllib.parse  # noqa: E402
 
 
 def ssh(cmd, timeout=600, host="gpu36", stdin=None):
-    argv = ["bash", "-c", cmd] if host == LOCAL_HOST else ["ssh", "-o", "BatchMode=yes", host, cmd]
-    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, encoding="utf-8", errors="replace",
-                          input=stdin)
+    if host == LOCAL_HOST:
+        return subprocess.run(["bash", "-c", cmd], capture_output=True, text=True, timeout=timeout, encoding="utf-8",
+                              errors="replace", input=stdin)
+    return _rssh().run_retry(host, cmd, input=stdin, timeout=timeout, tries=1, text=True)   # 原来不重试：tries=1
+
+def _rssh():
+    """K-OPS-N07 / SYSARCH 4-1：远程命令统一走 tools/netfix/rssh.run_retry（笔记本走常驻主连接；服务器上 OFFLINE_SELF 调本机 = 本机执行）"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_rssh_41", Path(__file__).resolve().parents[2] / "tools/netfix/rssh.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
 
 
 def scp(srcs, dst, timeout=900):

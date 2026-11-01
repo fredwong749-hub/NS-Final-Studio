@@ -30,7 +30,7 @@ items:
     status: code_reads
     owner: SENTINEL
   S3_score_p50_s:
-    value: {p50_max_s: 120, window_min: 30, min_samples: 2, backlog_window_min: 10, every_s: 60, owner_loop: VQAGATE,
+    value: {p50_max_s: 120, window_min: 30, min_samples: 2, backlog_window_min: 10, every_s: 60, owner_loop: VQAGATE, backlog_warn_ratio: 0.8,
             vqa_backends: {gpu36: router_nf4, laptop: nf4}}
     note: vqa_backends 是兜底声明（L-100：gpu36 GPU2 三个 nf4 实例由 vqa_router 占 :8870；笔记本 4080 nf4 专用实例，总调度 03:1x 确认）；config/vqa.json 有 model.backends 时以它为准（已请 VQAGATE 加该字段）
     source: SLO.md S3；23:50 起契约打分 506–1483 s、积压闸 K-OPS-E05 顶满；01:5x :8870 被 13 小时前旧 server.py 占着
@@ -109,3 +109,76 @@ items:
     enforced_by: tools/sentinel/probes.py:p_s13
     status: code_reads
     owner: DEBUG_RSI
+  S14_rsi_lines:
+    value:
+      stale_s: 7200
+      flat_rounds: 3
+      every_s: 300
+      owner_loop: 各线牵头人
+      program_start: "2026-11-02T03:50:00"
+      scores_file: data/rsi/scores.jsonl
+      report: data/review_pages/rsi/index.html
+      lines:
+        image:  {name: 出图, lead: IMGLAB, aliases: ["1", 线1, img, image, 出图], target: 75}
+        video:  {name: 视频, lead: VIDLAB, aliases: ["2", 线2, vid, video, 视频], target: 60}
+        script: {name: 提纲→剧本→分镜, lead: HOLLYWOOD, aliases: ["3", 线3, script, 剧本, hollywood], target: 70}
+        ui:     {name: UI, lead: UIRSI, aliases: ["4", 线4, ui, UI], target: 90}
+        system: {name: 系统代码, lead: SYSARCH, aliases: ["5", 线5, system, code, 系统, sysarch], target: 60}
+    source: 总调度 11-02 03:5x（L-112，docs/master/RSI_PROGRAM.md）：五条 RSI 线，牵头人每轮写 data/rsi/scores.jsonl（时间、line、score、分项、版本号）；某线 2 小时没有新分数或连续 3 轮不升 → 工单派牵头人
+    note: target = 今晚目标折算成的总分（总调度 11-02 04:1x 按 docs/master/RSI_PROGRAM.md 定：出图 75、视频 60、剧本 70、UI 90、系统代码 60）；scores.jsonl 记录里带 target 时以最新一条为准
+    enforced_by: tools/sentinel/probes.py:p_s14
+    status: code_reads
+    owner: SENTINEL
+  GPU24_alloc:
+    value: {every_s: 3600, step_s: 10, out: data/rsi/gpu_24h.json, owner_loop: DEBUG-RSI, top_n: 2,
+            void_words: [身份脸用错, 覆盖配置缺失, 作废, 回滚, 孤儿, 重复, 全量重做]}
+    source: 项目方 11-02 04:0x（总调度派 SENTINEL）：每张生产 GPU 最近 24 小时“真正在跑 / 空跑 / 等待任务”三项合计 24 h，拿不到的单列无数据；接进 RSI 线 5“自运行”
+    note: 口径见 docs/master/SLO.md“GPU 24 小时”；void_words 与 tools/sentinel/gpu_hours.py VOID_WORDS 一致（回滚作废的 take 算空跑）
+    enforced_by: tools/sentinel/gpu_hours.py:classify
+    status: code_reads
+    owner: SENTINEL
+  S15_flow_tick:
+    value: {stale_s: 300, file: data/autopilot/flow/last_tick.json, every_s: 60, owner_loop: WORKFLOW}
+    source: 总调度 11-02 04:2x：编排器 tick 存活——last_tick.json 超过 5 分钟没更新，或 dry=true，开单派 WORKFLOW
+    enforced_by: tools/sentinel/probes.py:p_s15
+    status: code_reads
+    owner: SENTINEL
+  S16_laptop_procs:
+    value:
+      every_s: 60
+      owner_loop: 各进程负责方
+      procs:
+        tunnel_supervisor: {match: "tools[\\\\/]netfix[\\\\/]tunnel_supervisor\\.py.*serve", owner: NETFIX}
+        puller: {match: "tools[\\\\/]netfix[\\\\/]puller\\.py.*serve", owner: NETFIX}
+        ns_api: {match: "uvicorn ns_api\\.app:app", owner: WORKFLOW}
+        vite: {match: "vite[\\\\/]bin[\\\\/]vite\\.js", owner: UIRSI}
+        producer: {match: "tools[\\\\/]autopilot[\\\\/]producer\\.py.*serve", owner: DEBUG-RSI}
+        infra_watchdog: {match: "infra_watchdog\\.py.*serve", owner: WORKFLOW}
+        resident_sync: {match: "resident_sync\\.py.*loop", owner: WORKFLOW}
+        episode_pipeline: {match: "episode_pipeline\\.py.*watch", owner: WORKFLOW}
+        monitor_8810: {match: "tools[\\\\/]monitor[\\\\/]server\\.py", owner: SENTINEL}
+        vqa_4080: {match: "ns_vqa[\\\\/]server\\.py", owner: VQAGATE}
+    source: 总调度 11-02 04:2x（L-103 探针缺口：resident_sync 一直没在跑却没人发现）；清单按 docs/master/ARCH_MAP.md §1.2 笔记本进程表
+    note: match = 进程命令行正则（python / pythonw / node）；新增常驻进程先登记到这里（K-OPS-S10）
+    enforced_by: tools/sentinel/probes.py:p_s16
+    status: code_reads
+    owner: SENTINEL
+  S17_shot_render_rate:
+    value: {max_per_hour: 8, every_s: 300, owner_loop: DEBUG-RSI}
+    source: 总调度 11-02 08:0x：同一镜每小时出图超过 8 次即开单（ep05-S3 无限重出到第 82 版的探针缺口）
+    enforced_by: tools/sentinel/probes.py:p_s17
+    status: code_reads
+    owner: SENTINEL
+  S18_temp_holds:
+    value: {no_expiry_max_s: 900, file: config/netfix/partition.json, key: _temp_holds, every_s: 60, owner_loop: DEBUG-RSI}
+    source: 总调度 11-02 08:0x：临时挂道超过 expires_at，或没写 expires_at 超过 15 分钟即开单（gpu36:0 被挂 3.5 小时的探针缺口）
+    enforced_by: tools/sentinel/probes.py:p_s18
+    status: code_reads
+    owner: SENTINEL
+  CTRL_history:
+    value: {every_s: 60, out: data/sentinel/control_history.jsonl, owner_loop: SENTINEL}
+    source: 总调度 11-02 04:2x / 08:0x：control.json 变更历史（hold / pause / 恢复，带 reason_kind、expires_at），GPU 24 小时“原因不明”要靠它消掉；只写一处
+    note: 唯一写入方 = SENTINEL（每拍比对笔记本 + 两台服务器 control.json 和 partition.json _temp_holds，有变化追加一行），各 loop 不另写历史；reason_kind / expires_at 由写 control.json 的一方写进 control.json 本身
+    enforced_by: tools/sentinel/probes.py:p_ctrl_history
+    status: code_reads
+    owner: SENTINEL

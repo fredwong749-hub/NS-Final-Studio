@@ -16,7 +16,7 @@ case "$CMD" in
   stop) alive && { pkill -TERM -P "$(cat $PIDF)"; kill -TERM "$(cat $PIDF)"; echo stopped; } || echo "not running"; exit 0;;
 esac
 case $SELF in
-  gpu36) GPU=2; PY=/root/work/fredw/venv/bin/python;;
+  gpu36) GPU=""; PY=/root/work/fredw/venv/bin/python;;   # 总调度 11-02 07:5x：改 CPU 常驻，GPU2 显存全部让给看图（VQAGATE 3 实例）
   *) echo "clip_resident: $SELF 暂不起（只在 gpu36 GPU2）"; exit 0;;
 esac
 alive && { echo "clip_resident already alive pid $(cat $PIDF)"; exit 0; }
@@ -24,10 +24,10 @@ alive && { echo "clip_resident already alive pid $(cat $PIDF)"; exit 0; }
 setsid nohup bash -c "
   why=boot
   while true; do
-    echo \"{\\\"kind\\\": \\\"clip_resident\\\", \\\"host\\\": \\\"$SELF\\\", \\\"at\\\": \\\"\$(date -Iseconds)\\\", \\\"reason\\\": \\\"\$why\\\", \\\"gpu\\\": $GPU, \\\"port\\\": $PORT}\" >> $EV
+    echo \"{\\\"kind\\\": \\\"clip_resident\\\", \\\"host\\\": \\\"$SELF\\\", \\\"at\\\": \\\"\$(date -Iseconds)\\\", \\\"reason\\\": \\\"\$why\\\", \\\"gpu\\\": \\\"cpu$GPU\\\", \\\"port\\\": $PORT}\" >> $EV
     cp -a $PROD/tools/gen_contract/clip_srv.py $RL/clip_srv.py
     cp -a $PROD/services/agent/ns_agent/gen_contract/metrics.py $RL/metrics.py
-    cd $RL && CUDA_VISIBLE_DEVICES=$GPU NS_CLIP_DEVICE=cuda NS_CLIP_PATH=$RL/clip-vit-large-patch14 \
+    cd $RL && CUDA_VISIBLE_DEVICES=$GPU NS_CLIP_DEVICE=cpu NS_CLIP_PATH=$RL/clip-vit-large-patch14 \
       OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 NUMEXPR_NUM_THREADS=4 TZ=Asia/Tokyo \
       nice -n 5 $PY -u clip_srv.py --serve $PORT
     rc=\$?; echo \"\$(date -Is) clip_srv exited rc=\$rc，3 s 后重启\"; why=\"exit_rc_\$rc\"; sleep 3

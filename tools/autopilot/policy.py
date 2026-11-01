@@ -227,9 +227,50 @@ def handback_ok(rec: dict | None, server_sv: str | None = None, root: Path = ROO
     if rec.get("ready") and not any(w in str(rec.get("preflight_dryrun_by") or "") for w in writers):
         why.append(f"ready=true 不是 {writers} 写的")
     want = P["min_code_sv"]["value"]
-    if server_sv is not None and want and str(server_sv) < str(want):
+    if server_sv is not None and want and _sv_key(server_sv) < _sv_key(want):
         why.append(f"服务器代码 {server_sv} 低于 min_code_sv {want}")
     return (not why, why)
+
+
+def _sv_key(sv: str | None) -> tuple:
+    """sv-YYYYMMDD-NN → (YYYYMMDD, NN)；格式不对 = (0, 0)（比任何正式版本都低）"""
+    import re as _re
+    m = _re.fullmatch(r"sv-(\d{8})-(\d+)", str(sv or "").strip())
+    return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+
+def code_sv_problem(root: Path = ROOT, want: str | None = None) -> str | None:
+    """本机代码版本 vs handback.min_code_sv（L-099b D9，K-OPS-X08）：本机 data/system_version.txt 低于要求 / 读不到 / 格式不对 → 返回问题描述
+    （服务器 producer 每拍经 tools/factory/decisions_guard.problems() 调用：非 None = 这一拍一单不派 + 报警）；满足 = None"""
+    want = want or get("handback.min_code_sv", None, root)
+    if not want or _sv_key(want) == (0, 0):            # 失败关闭：没配置 / 配坏了也拒派（FACTORY 11-02 提醒）
+        return f"handback.min_code_sv 未配置或格式不对（{want!r}），无法判断代码版本（失败关闭）"
+    vf = root / "data/system_version.txt"
+    if not vf.exists():
+        return f"本机没有 data/system_version.txt，无法确认代码版本 ≥ {want}（失败关闭）"
+    txt = vf.read_text(encoding="utf-8").strip()
+    try:
+        got = json.loads(txt).get("id") if txt.startswith("{") else txt
+    except ValueError:
+        return f"data/system_version.txt 解析失败，无法确认代码版本 ≥ {want}（失败关闭）"
+    if _sv_key(got) == (0, 0):
+        return f"本机代码版本号 {got!r} 格式不对，无法确认 ≥ {want}（失败关闭）"
+    if _sv_key(got) < _sv_key(want):
+        return f"本机代码 {got} 低于 min_code_sv {want}：只报不派（K-OPS-X08 / L-099b D9）"
+    return None
+
+
+def deployed_sv(host: str, root: Path = ROOT) -> str | None:
+    """笔记本侧：data/system_versions/index.json 里该机最近一次 deploy 成功（ok=true）的版本号；没有记录 = None"""
+    p = root / "data/system_versions/index.json"
+    if not p.exists():
+        return None
+    best = None
+    for v in json.loads(p.read_text(encoding="utf-8")).get("versions") or []:
+        rec = (v.get("deployed") or {}).get(host) or {}
+        if rec.get("ok") and (best is None or _sv_key(v.get("id")) > _sv_key(best)):
+            best = v.get("id")
+    return best
 
 
 def score_backlog_max(lanes: int, vlm_instances: int = 1) -> int:
@@ -308,6 +349,36 @@ def run_writing_cap(run_id: str, root: Path = ROOT) -> float:
     """某部剧的整部写作上限：budget.writing_per_run.overrides[run_id] 优先，否则 run_cap_usd"""
     v = get("budget.writing_per_run", {}, root) or {}
     return float((v.get("overrides") or {}).get(run_id, v.get("run_cap_usd", 15.0)))
+
+
+def autosign_switch_ok(pairs: list[dict], root: Path = ROOT) -> dict:
+    """master_review 机签能否切换（resources.master_review_autosign）：pairs = 回归集上逐条 {auto: pass|fail, human: pass|fail}
+    → {ok, agreement, false_pass, n, why}；空样本 = 不能切（没测到 ≠ 通过）"""
+    v = get("resources.master_review_autosign", {}, root) or {}
+    n = len(pairs)
+    if not n:
+        return {"ok": False, "agreement": None, "false_pass": None, "n": 0, "why": "回归集为空，不能切换"}
+    agree = sum(1 for x in pairs if x.get("auto") == x.get("human")) / n
+    fp = sum(1 for x in pairs if x.get("auto") == "pass" and x.get("human") == "fail")
+    why = []
+    if agree < float(v.get("switch_min_agreement", 0.95)):
+        why.append(f"一致率 {agree:.3f} < {v.get('switch_min_agreement', 0.95)}")
+    if fp > int(v.get("switch_max_false_pass", 0)):
+        why.append(f"漏放 {fp} 条（要求 ≤{v.get('switch_max_false_pass', 0)}）")
+    return {"ok": not why, "agreement": round(agree, 4), "false_pass": fp, "n": n, "why": why}
+
+
+def autosign_spot_check(samples: list[dict], total_signed: int, root: Path = ROOT) -> dict:
+    """切换后每轮抽检：samples = 总调度抽检的 {auto, human}；样本数不足抽检比例或有任一不一致 → revert（退回人工 + 开工单）"""
+    v = get("resources.master_review_autosign", {}, root) or {}
+    need = max(1, -(-int(total_signed) * float(v.get("testphase_spot_check_ratio", 0.10)) // 1)) if total_signed else 0
+    need = int(need)
+    mism = [x for x in samples if x.get("auto") != x.get("human")]
+    if mism:
+        return {"action": "revert", "why": f"抽检不一致 {len(mism)} 条 → 退回人工复核并开工单", "need": need, "got": len(samples)}
+    if len(samples) < need:
+        return {"action": "wait", "why": f"抽检 {len(samples)} / 需 {need}（{v.get('testphase_spot_check_ratio', 0.10):.0%}）", "need": need, "got": len(samples)}
+    return {"action": "keep", "why": "抽检全一致", "need": need, "got": len(samples)}
 
 
 def post_better(base: dict | None, post: dict | None) -> bool | None:

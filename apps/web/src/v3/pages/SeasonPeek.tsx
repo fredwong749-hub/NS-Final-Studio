@@ -109,7 +109,9 @@ export function SeasonDrawer({ shot, sum, status, meta, onClose }: { shot: strin
   }, [onClose]);
   const img = cands?.[shot]?.image;
   const takes = [...(img?.takes ?? [])].sort((a: Cand, b: Cand) => b.n - a.n);
-  const curN = img?.active ?? takes[0]?.n ?? null;
+  // r45（项目方截图 ep06-S2 第 6 版）：默认当前版本 → 最近一张通过的 → 都没过才显示最新失败的，并在图上写清“未通过：原因”
+  const okTake = takes.find((t) => t.ok !== false && !t.bad && !t.rejected);
+  const curN = img?.active ?? okTake?.n ?? takes[0]?.n ?? null;
   const cur = takes.find((t) => t.n === curN) ?? null;
   const big = sum?.first_frame ?? cur?.url ?? null;
   useEffect(() => {
@@ -170,9 +172,10 @@ export function SeasonDrawer({ shot, sum, status, meta, onClose }: { shot: strin
               <p className="sd-muted">这一镜没有登记人物</p>
             )}
           </Section>
-          <Section title={sum?.first_frame || img?.active != null ? "当前首帧" : cur ? `最新候选（首帧第 ${cur.n} 版，还没定为当前）` : "当前首帧"}>
+          <Section title={sum?.first_frame || img?.active != null ? "当前首帧" : cur ? (cur.ok === false || cur.bad ? `最新一版（首帧第 ${cur.n} 版，没通过，所有版本都没过）` : `最近通过的候选（首帧第 ${cur.n} 版，还没定为当前）`) : "当前首帧"}>
+            {cur && !sum?.first_frame && (cur.ok === false || cur.bad) && <p className="sd-fail">未通过：{(cur.why_not ?? cur.bad ?? "").replace(/^未通过：/, "") || "检查没过"}</p>}
             {big ? (
-              <img className="sd-big" src={thumb(big, 720) ?? big} alt="" data-zoom-label={`${shot} · 首帧${curN != null ? ` 第 ${curN} 版` : ""}`} />
+              <img className={`sd-big${cur && !sum?.first_frame && (cur.ok === false || cur.bad) ? " failed" : ""}`} src={thumb(big, 720) ?? big} alt="" data-zoom-label={`${shot} · 首帧${curN != null ? ` 第 ${curN} 版` : ""}`} />
             ) : (
               <div className="sd-big sd-none">{status?.main5 === "doing" && !status.running ? "排队中" : status?.running ? "正在出" : "未开始"}</div>
             )}

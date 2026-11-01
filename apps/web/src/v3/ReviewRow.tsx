@@ -15,7 +15,7 @@ import { useStudio, type Studio } from "../store";
 import type { ShotSummary, SopShot } from "../types";
 import { expectedLast, shotLine } from "../util";
 import { letterOf } from "./LeftRail.helpers";
-import { badOf, camRaw, frameState, shotMeta, shotStatus, staleOf, videoBlock, breatheDelay } from "./status";
+import { badOf, camRaw, frameState, shotMeta, shotStatus, staleOf, videoBlock, breatheDelay, useLens } from "./status";
 import { useUi } from "./ui.helpers";
 import { useEdit } from "./edit/state";
 import { Pop, StatusLine } from "./widgets";
@@ -378,6 +378,7 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
   // PW-017：整行不闪；状态胶囊自己闪（文字真变了才闪）
   const statusFlash = useFlash([s.review?.state, status.text]);
   const meta = shotMeta(s); // 场景名只在人物行的场景小卡里出现一次
+  const lens = useLens(s.id); // r45 · L-113：每镜一行加“镜头”字段
   const line = shotLine(s);
   const dlg = s.dialogue.length ? s.dialogue : [];
   const hl = st.hlChar && s.characters.some((c) => c.character === st.hlChar);
@@ -417,6 +418,7 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
           <MissBadge miss={miss} onJump={() => (st.select(s.id), sbUi.openTableAt(s.id))} />
           <MaterialsBadge shotId={s.id} />
           <span className="v3-meta" title={camRaw(s) ? `剧本原文：${camRaw(s)}` : undefined}>{meta.join(" · ")}</span>
+          {lens && <span className="v3-lens" title="镜头（D-LENS：实拍取本版出图提示词；和计划不一致时两个都写）">{lens}</span>}
           {/* r42（总调度定 A：行高不变，只收文字区留白）：“详情 ▸”挪到镜号这一行，不再单占一行；收起时剧本多显示一行 */}
           {!more && (
             <button

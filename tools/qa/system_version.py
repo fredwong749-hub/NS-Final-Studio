@@ -783,6 +783,11 @@ def deploy_host(rs, h: str, snap: Path, names: list[str], tracked_code: list[str
         rs.ssh(h, f"cd {rs.R} && mkdir -p data && cat > data/system_version.txt && cat data/system_version.txt",
                data=(stamp + "\n").encode(), tries=3)
         r["version_file"] = "data/system_version.txt"
+        # 服务器运行依赖（config/deploy/server_deps.yaml：venv 能 import 的包 / 版本、模型文件 sha）——缺了不排重启（总调度 04:0x）
+        sd = rs.ssh(h, f"cd {rs.R} && {rs.OFF}/venv/bin/python tools/factory/server_deps.py; echo rc=$?", tries=3).decode("utf-8", "replace")
+        r["server_deps"] = sd.strip()[-400:]
+        if "rc=0" not in sd:
+            raise RuntimeError("服务器运行依赖不齐（config/deploy/server_deps.yaml），不排重启，老进程继续：" + sd.strip()[-300:])
         # K-OPS-F09：新代码会对缺失 / 损坏的决策文件拒派——重启前先在服务器上用新代码查一遍，不过就不排重启（老进程继续生产）
         dg = rs.ssh(h, f"cd {rs.R} && OFFLINE_SELF={h} NS_FACTORY_HOST={h} {rs.OFF}/venv/bin/python tools/factory/decisions_guard.py; echo rc=$?",
                     tries=3).decode("utf-8", "replace")

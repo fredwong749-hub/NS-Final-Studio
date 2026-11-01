@@ -141,6 +141,12 @@ def _verdict(t: dict, bad: str | None) -> tuple[bool, str | None]:
     qc = org.get("qc") if isinstance(org.get("qc"), dict) else {}
     if qc.get("ok") is False or qc.get("pass") is False or qc.get("passed") is False:
         return False, "质检没通过"
+    # UIRSI r45（项目方截图：ep06-S2 首帧第 6 版 Q1 顾沉身份 0.544 < 0.6 没过，却被当“最新候选”大图、没写原因）：
+    # 出图后检（GEN_CONTRACT postflight）任何一项 fail = 不合格，原因逐项写出（只记录的 na / 未测 untested 不算没过）
+    pf = t.get("postflight") if isinstance(t.get("postflight"), dict) else {}
+    fails = [it for it in pf.get("items") or [] if isinstance(it, dict) and str(it.get("status") or "").lower() == "fail"]
+    if fails:
+        return False, "未通过：" + "；".join(f"{it.get('id')} {str(it.get('detail') or it.get('title') or '').strip()[:60]}" for it in fails[:3])
     return True, None
 
 

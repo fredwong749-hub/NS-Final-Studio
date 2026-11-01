@@ -68,7 +68,14 @@ LOG = ROOT / "ops/logs/resident_sync.log"
 
 def log(*a):
     line = time.strftime("%F %T ") + " ".join(str(x) for x in a)
-    print(line, flush=True)
+    try:                                   # 04:12 实测：Start-Process 拉起时 stdout 是 cp1252，中文 print 抛错把整个 loop 带崩
+        print(line, flush=True)
+    except (UnicodeEncodeError, OSError, ValueError):
+        try:
+            sys.stdout.buffer.write((line + "\n").encode("utf-8", "replace"))
+            sys.stdout.flush()
+        except Exception:  # noqa: BLE001
+            pass
     LOG.parent.mkdir(parents=True, exist_ok=True)
     with open(LOG, "a", encoding="utf-8") as f:
         f.write(line + "\n")
@@ -90,30 +97,23 @@ def js(p, d):
 
 
 def ssh(host: str, cmd: str, data: bytes | None = None, timeout: int = 900, tries: int = 5) -> bytes:
-    """带重试的 ssh（跳板断连 = 退避重来）；最后一次仍失败抛 RuntimeError"""
-    err = ""
-    for i in range(tries):
-        try:
-            # Windows：超时后要连同 ProxyJump 的 ssh -W 子进程一起杀（taskkill /T），否则子进程攥着管道，communicate 永远等不到 EOF
-            pr = subprocess.Popen(SSH + [host, cmd], stdin=subprocess.PIPE if data is not None else subprocess.DEVNULL,
-                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            try:
-                out, er = pr.communicate(input=data, timeout=timeout)
-            except subprocess.TimeoutExpired:
-                subprocess.run(["taskkill", "/PID", str(pr.pid), "/T", "/F"], capture_output=True, timeout=30)
-                try:
-                    pr.communicate(timeout=20)
-                except subprocess.TimeoutExpired:
-                    pass
-                raise
-            if pr.returncode == 0:
-                return out
-            err = er.decode("utf-8", "replace")[-300:]
-        except subprocess.TimeoutExpired:
-            err = f"timeout {timeout}s（已杀进程树，重连）"
-        log("ssh retry", host, i + 1, err.strip().replace("\n", " ")[:200])
-        time.sleep(min(60, 5 * 2 ** i))
-    raise RuntimeError(f"ssh {host} 失败 {tries} 次：{err}")
+    """带重试的远程命令（SYSARCH 4-1，WORKFLOW 同意）：rssh.run_retry 走常驻主连接；rc=255（连接层）或超时按 10/20/30/40 s 退避重试，
+    远端命令自己的非 0 不重试（35 个调用方核过无依赖）；超时杀进程由 rssh 负责。最后仍失败抛 RuntimeError"""
+    r = _rssh().run_retry(host, cmd, input=data, timeout=timeout, tries=tries, backoff_s=10)
+    if r.returncode == 0:
+        return r.stdout
+    err = (r.stderr or b"").decode("utf-8", "replace")[-300:]
+    log("ssh fail", host, f"rc={r.returncode}", err.strip().replace("\n", " ")[:200])
+    raise RuntimeError(f"ssh {host} 失败（rc={r.returncode}，tries={tries}）：{err}")
+
+
+def _rssh():
+    """K-OPS-N07 / SYSARCH 4-1：远程命令统一走 tools/netfix/rssh.run_retry（笔记本走常驻主连接；服务器上 OFFLINE_SELF 调本机 = 本机执行）"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_rssh_41", Path(__file__).resolve().parents[2] / "tools/netfix/rssh.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def skipped(rel: str) -> bool:
@@ -643,15 +643,9 @@ def restart_guarded(host: str, drain_timeout_s: int = 900) -> str | None:
         log("restart_guarded", host, "常驻加载的文件没变，不重启")
         return None
     ssh(host, f"cd {R} && {OFF}/venv/bin/python tools/autopilot/producer.py pause --by RESTART_DRAIN --note '重启前排空'", timeout=120, tries=3)
-    t0 = time.time()
-    while time.time() - t0 < drain_timeout_s:
-        try:
-            hb = json.loads(ssh(host, f"cat {R}/data/producer/heartbeat.json", timeout=60, tries=2) or b"{}")
-        except Exception:  # noqa: BLE001
-            hb = {}
-        if int(hb.get("inflight") or 0) == 0:
-            break
-        time.sleep(20)
+    import restart_queue as RQ                 # K-OPS-W23：与重启队列同一排空口径（只看 ComfyUI 执行中 + 排队，≤ 90 s；打分积压不算）
+    dr = RQ.drain(host, sys.modules[__name__])
+    log("restart_guarded", host, "排空", json.dumps(dr, ensure_ascii=False))
     txt = restart(host)
     ssh(host, f"cd {R} && {OFF}/venv/bin/python tools/autopilot/producer.py resume --by RESTART_DRAIN --note '重启完成'", timeout=120, tries=3)
     hs["last_restart"] = time.time()
@@ -682,9 +676,70 @@ def puller_took_over(host: str) -> bool:
     return False
 
 
+# ---------------------------------------------------------------- DISTILL 编排器每拍（K-OPS-W22，DISTILL 11-02 / 总调度定 decider=code）
+AUTOFLOW_TICK = True
+AUTOFLOW_EVERY_S = 60
+AUTOFLOW_TIMEOUT_S = 1200         # 最长一拍约 2 + 10 + 6 分钟（交稿推进 + line3 打分 600 s + :8800 守护 360 s；总调度 04:1x 定 20 分钟），超时连子进程树一起杀
+AUTOFLOW_LOG_EVERY = 30           # 正常拍每 30 拍记一行日志；失败 / 超时 / 输出变化每次都记
+# 04:2x 总调度：一拍串行会被 :8800 守护 / line3 打分拖住（04:17:49 那拍卡在 api_restart_guard，last_tick 停 4 分钟）
+# → 拆成三条线各自线程 + 子进程（tools/autopilot/tick_parts.py），core 每 60 s 必写 last_tick，line3 / api 上一次没完就跳过
+AUTOFLOW_PARTS = {"core": 1200, "line3": 900, "api": 600}      # 线 → 子进程超时（s）
+
+
+def autoflow_tick_once(timeout_s: int = AUTOFLOW_TIMEOUT_S, dry: bool = False, part: str | None = None) -> dict:
+    """跑一拍：part=None → tools/autopilot/run.py tick（整拍串行，备用）；part=core|line3|api → tick_parts.py 的那一条线。
+    子进程，输出写文件防管道卡死；超时 taskkill /T"""
+    out_p = ROOT / f"ops/logs/autoflow_tick{'_' + part if part else ''}.out"
+    out_p.parent.mkdir(parents=True, exist_ok=True)
+    if part:
+        cmd = [sys.executable, "-X", "utf8", str(ROOT / "tools/autopilot/tick_parts.py"), part] + (["--dry-run"] if dry else [])
+    else:
+        cmd = [sys.executable, "-X", "utf8", str(ROOT / "tools/autopilot/run.py"), "tick"] + (["--dry-run"] if dry else [])
+    t0 = time.time()
+    with open(out_p, "wb") as f:
+        pr = subprocess.Popen(cmd, cwd=ROOT, stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT,
+                              env={**os.environ, "PYTHONUTF8": "1"})
+        try:
+            rc = pr.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/PID", str(pr.pid), "/T", "/F"], capture_output=True, timeout=30)
+            else:
+                pr.kill()
+            rc = "timeout"
+    try:
+        tail = out_p.read_bytes()[-400:].decode("utf-8", "replace").strip()
+    except OSError:
+        tail = ""
+    return {"rc": rc, "secs": round(time.time() - t0, 1), "tail": tail}
+
+
+def autoflow_thread(every_s: int = AUTOFLOW_EVERY_S, part: str | None = None) -> None:
+    """独立线程：每 every_s 秒一拍；上一拍没完不会开下一拍（同一线程串行），不拖住推送循环。part=一条线（见 AUTOFLOW_PARTS）"""
+    n, last_tail = 0, None
+    tmo = AUTOFLOW_PARTS.get(part, AUTOFLOW_TIMEOUT_S) if part else AUTOFLOW_TIMEOUT_S
+    while True:
+        t0 = time.time()
+        try:
+            r = autoflow_tick_once(timeout_s=tmo, part=part)
+            n += 1
+            bad = r["rc"] != 0
+            if bad or r["tail"][-200:] != last_tail or n % AUTOFLOW_LOG_EVERY == 1:
+                log("autoflow_tick", part or "all", json.dumps({"n": n, **r, "tail": r["tail"][-200:]}, ensure_ascii=False))
+            last_tail = r["tail"][-200:]
+        except Exception as e:  # noqa: BLE001
+            log("autoflow_tick error", repr(e)[:300])
+        time.sleep(max(1.0, every_s - (time.time() - t0)))
+
+
 def loop(pull_every_s: int = 1200, health_every_s: int = 300):
     """5 分钟一次健康 / 报警；20 分钟一次并回；代码有改动 → 推代码 + 服务器热重启（每台独立，一台断连不影响另一台）"""
     last_pull = {h: 0.0 for h in HOSTS}
+    if AUTOFLOW_TICK:                    # DISTILL 编排器每拍：独立守护线程，60 s 一拍（K-OPS-W22）
+        import threading
+        for part in AUTOFLOW_PARTS:
+            threading.Thread(target=autoflow_thread, kwargs={"part": part}, name=f"autoflow_{part}", daemon=True).start()
+        log("autoflow_tick", "三条线线程已启动", list(AUTOFLOW_PARTS), AUTOFLOW_EVERY_S, "s 一拍")
     while True:
         for h in HOSTS:
             try:

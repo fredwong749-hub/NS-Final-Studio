@@ -18,6 +18,8 @@ import { Brand } from "./ds/Brand";
 import { UndoHost } from "./ds/Undo";
 import "./ds/live.css";
 import "./v3/breathe.css"; // UIRSI r43 K-UI-048：全站“正在渲染”呼吸灯
+import { StaleBanner } from "./v3/StaleBanner"; // UIRSI r45 页面过期检测（L-103）
+import "./v3/slide.css"; // UIRSI r45 · L-113 正片 B（总览纸框 + 审片页纸框）
 import { LiveBridge } from "./v3/LiveBridge";
 
 // fredw-92/W4a：v3 新页面（W4c），挂在 #/script-create、#/models、#/assets
@@ -141,6 +143,7 @@ function Shell() {
 
   return (
     <div className="app v3-app">
+      <StaleBanner />
       <TopBarV3 page={page} />
       {body}
       <ErrorBoundary name="底部抽屉">

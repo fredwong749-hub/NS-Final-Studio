@@ -3,7 +3,7 @@
 否则 enabled: false 并写原因；把结果写回词表（只改该运镜的 enabled / ab / reason 三行），结果表写 data/ab/camera_moves/cm_r1_verdict.json。
 decider = code。
 
-  python tools/director/camera_ab.py [--pull] [--dry]
+  python tools/director/camera_ab.py [--exp cm_r2] [--pull] [--dry]
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 VOCAB = ROOT / "config" / "director" / "camera_moves.yaml"
-EXP = "cm_r1"
+EXP = "cm_r2"
 RES = ROOT / "data" / "ab" / "video_rca" / EXP / "results.json"
 OUT = ROOT / "data" / "ab" / "camera_moves" / f"{EXP}_verdict.json"
 SIZES = ["大特写", "特写", "近景", "中近景", "中景", "中全景", "全景", "远景"]
@@ -105,6 +105,11 @@ def update_writer_rule(vocab_text: str) -> bool:
 
 
 def main(argv):
+    global EXP, RES, OUT
+    if "--exp" in argv:   # 实验名（cm_r1 / cm_r2 …），默认 cm_r2（r4 gpu36:1 专用道那一轮）
+        EXP = argv[argv.index("--exp") + 1]
+    RES = ROOT / "data" / "ab" / "video_rca" / EXP / "results.json"
+    OUT = ROOT / "data" / "ab" / "camera_moves" / f"{EXP}_verdict.json"
     if "--pull" in argv:
         subprocess.run([sys.executable, str(ROOT / "tools/video_rca/lab.py"), "pull", EXP], cwd=ROOT, check=False, timeout=3600)
     rows = json.loads(RES.read_text(encoding="utf-8")) if RES.exists() else []

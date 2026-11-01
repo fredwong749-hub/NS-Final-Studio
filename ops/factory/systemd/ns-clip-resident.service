@@ -1,4 +1,4 @@
-# FACTORY L-105（K-OPS-F04 / F10）：本机常驻 CLIP 打分（127.0.0.1:8872），只在 gpu36 起，钉 GPU2（L-100 看图卡）
+# FACTORY L-105（K-OPS-F04 / F10）：本机常驻 CLIP 打分（127.0.0.1:8872），只在 gpu36 起，CPU 常驻（11-02 07:5x 起；GPU2 全给看图）
 [Unit]
 Description=NS-Final Studio resident CLIP scorer (FACTORY)
 StartLimitIntervalSec=600
@@ -7,7 +7,7 @@ StartLimitBurst=5
 [Service]
 Type=simple
 EnvironmentFile=%h/work/fredw/ns_factory_systemd/host.env
-Environment=CUDA_VISIBLE_DEVICES=2 NS_CLIP_DEVICE=cuda NS_CLIP_PATH=/root/work/fredw/reflock/clip-vit-large-patch14
+Environment=CUDA_VISIBLE_DEVICES= NS_CLIP_DEVICE=cpu NS_CLIP_PATH=/root/work/fredw/reflock/clip-vit-large-patch14
 WorkingDirectory=/root/work/fredw/reflock
 ExecStartPre=/bin/cp -a /root/work/fredw/offline_20261101/repo/tools/gen_contract/clip_srv.py /root/work/fredw/reflock/clip_srv.py
 ExecStartPre=/bin/cp -a /root/work/fredw/offline_20261101/repo/services/agent/ns_agent/gen_contract/metrics.py /root/work/fredw/reflock/metrics.py

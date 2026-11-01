@@ -194,7 +194,7 @@ def test_restart_queue_merges_gaps_and_urgent(monkeypatch, tmp_path):
     monkeypatch.setattr(RS, "STATE", tmp_path / "st.json")
     monkeypatch.setattr(RS, "log", lambda *a: None)
     calls = []
-    monkeypatch.setattr(RS, "ssh", lambda h, cmd, **k: calls.append(cmd) or (b'{"inflight": 0}' if "heartbeat" in cmd else b"ok"))
+    monkeypatch.setattr(RS, "ssh", lambda h, cmd, **k: calls.append(cmd) or (b'{"0": [0, 0], "1": [0, 0]}' if cmd == "python3 -" else b"ok"))
     monkeypatch.setattr(RS, "restart", lambda h, mode=None: calls.append("RESTART") or "started")
     RQ.request("gpu36", "deploy sv-1", "FACTORY")
     RQ.request("gpu36", "代码推送", "WORKFLOW")
@@ -206,3 +206,29 @@ def test_restart_queue_merges_gaps_and_urgent(monkeypatch, tmp_path):
     r3 = RQ.process("gpu36")
     assert r3["urgent_jump"] is True and calls.count("RESTART") == 2 and len(r3["request_ids"]) == 2
     assert RQ.pending("gpu36") == []
+
+
+def test_restart_drain_ignores_scoring_backlog_and_caps(monkeypatch):
+    """总调度 04:1x（K-OPS-W23）：排空只看 ComfyUI 执行中 + 排队；打分积压不算；前 60 s 等全空，之后只等当前单，90 s 上限照常重启"""
+    import restart_queue as RQ
+    t = {"now": 0.0}
+    clock = lambda: t["now"]                                  # noqa: E731
+    def sleep(s):
+        t["now"] += s
+    seq = []
+    monkeypatch.setattr(RQ, "comfy_queue", lambda h, rs: seq.pop(0) if seq else {"0": [1, 3]})
+    # ① 立刻全空（打分积压 42 与此无关，根本不读 heartbeat）
+    seq[:] = [{"0": [0, 0], "1": [0, 0]}]
+    r = RQ.drain("gpu33", RS, sleep=sleep, clock=clock)
+    assert r["drained"] and r["drain_mode"] == "full" and r["drain_s"] == 0
+    # ② 一直有排队、执行中在 60 s 后清零 → current_only
+    t["now"] = 0.0
+    seq[:] = [{"0": [1, 2]}] * 6 + [{"0": [0, 2]}]
+    r = RQ.drain("gpu33", RS, sleep=sleep, clock=clock)
+    assert r["drained"] and r["drain_mode"] == "current_only" and 60 <= r["drain_s"] <= 90
+    # ③ 一直在执行 → 90 s 上限，照常往下走
+    t["now"] = 0.0
+    seq[:] = []
+    r = RQ.drain("gpu33", RS, sleep=sleep, clock=clock)
+    assert r["drained"] is False and r["drain_mode"] == "timeout" and r["drain_s"] <= RQ.DRAIN_MAX_S + RQ.DRAIN_POLL_S
+    assert "heartbeat" not in RQ.process.__code__.co_consts.__repr__()

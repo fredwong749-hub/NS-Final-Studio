@@ -17,8 +17,40 @@
 | S10 | 决策与规则：decision_check / propagation / compile | 0 ❌ | 每拍 | 规则 owner |
 | S11 | 编排器：每集卡在同一段的时长 | 同段 > 2 小时无进展即违约 | flow status | DISTILL |
 | S12 | 剧本：代码判定失败项、尺子标准差 | 新稿 0 失败；σ ≤ 1 | rubric_code / ruler | HOLLYWOOD |
+| S15 | 编排器 tick 存活：data/autopilot/flow/last_tick.json | ≤ 5 分钟更新且 dry=false | tick 文件（总调度 04:2x） | WORKFLOW |
+| S16 | 笔记本常驻进程清单（tunnel_supervisor / puller / ns_api / vite / producer / infra_watchdog / resident_sync / episode_pipeline / 8810 看板 / 4080 看图） | 缺 0 | 进程命令行（清单在 sentinel.yaml S16_laptop_procs；L-103 缺口：resident_sync 没在跑无人发现） | 各进程负责方 |
+| S17 | 单镜出图速率 | 同一镜每小时 ≤ 8 次 | producer rendered（笔记本 + 服务器；ep05-S3 重出到第 82 版的缺口） | DEBUG-RSI |
+| S18 | 临时挂道到期（partition.json _temp_holds） | 不过 expires_at；没写 expires_at ≤ 15 分钟 | partition.json（gpu36:0 挂 3.5 小时的缺口） | 挂道的 loop |
 | S13 | 等人决定：任何对象等总调度 / 项目方定；流水线断档（GPU 空、ready 0、pending 多） | 等人 ≤ 10 分钟；断档 0 | 登记表 waiting_for + nvidia-smi（总调度 02:4x 追加：02:22 gpu33 全 0% 根因 = 77 个首帧“等总调度定”） | DEBUG-RSI |
 
 探针实现：tools/sentinel/（K-OPS-S02…S07；阈值 config/policies/sentinel.yaml）；工单 data/sentinel/issues.jsonl，未关闭快照 data/sentinel/open.json，看板 :8810“工单”区。
 
 总调度每拍只做三件事：看工单 → 按 G0 派单 → 核对上一批工单是否真的关闭（看探针数据，不看报告）。
+
+## GPU 24 小时时间分配（项目方 11-02 04:0x；SENTINEL，tools/sentinel/gpu_hours.py → data/rsi/gpu_24h.json 每小时刷新，8810“GPU 24 小时”表）
+
+对象：生产出图卡 gpu33:0/1/3、gpu36:0/1；VLM 卡 gpu36:2、笔记本 4080 单列。窗口 = 最近 24 小时，按 10 s 一格归类，每格只归一类（优先级 真正在跑 > 空跑 > 借道实验 > 等待任务 > 无数据），各项合计 = 24 h。
+
+| 项 | 口径 | 证据 |
+|---|---|---|
+| 真正在跑 | 生产任务（ComfyUI 执行带 ns_tag.agent=PRODUCER）执行成功，且 producer 日志在执行结束后 15 分钟内有同镜 `rendered`（take 入库），该 take 没被回滚作废；不论之后契约过没过 | 服务器 ComfyUI /history 执行区间 + producer `rendered`；/history 覆盖之前用 `rendered.gpu_s` |
+| 空跑 | 卡被占着或在跑但没有有效产出：执行报错 / 中断；执行成功但没收下（孤儿）；产出被回滚作废（`master_reject` 原因含 身份脸用错 / 覆盖配置缺失 / 作废 / 回滚 / 孤儿 / 重复 / 全量重做，例：01:24–01:32 错脸 31 张）；派单后到取回 / 报错之间卡没在执行（加载、传输、等结果） | /history + producer `dispatch` / `rendered` / `infra_error` / `master_reject` |
+| 借道实验 | 别的 loop 占卡（ns_tag.agent≠PRODUCER 或未标：A/B、标定、冒烟）。不是生产也不是空转，单列；需要时并入“空跑”由总调度定 | /history 的 ns_tag |
+| 等待任务 | 有证据卡上没有任何执行、也没有派给它的单（pause / hold / 断连 / 服务停 / 没有 ready 单） | /history 覆盖时段内的空白 |
+| 无数据 | 拿不到证据的时段：/history 覆盖不到（ComfyUI 重启前）且日志里没有这张卡的派单；远程取数失败的整机；VLM 卡（没有 ComfyUI 历史，等 data/sentinel/gpu_samples.jsonl 的 nvidia-smi 采样攒满 24 h） | — 不猜 |
+
+RSI 线 5“自运行”分项取 `for_rsi_line5.productive_pct`（生产 5 卡“真正在跑”占 5×24 h 的百分比，无数据时段留在分母里）。
+
+“等待任务”再按原因拆（总调度 04:1x；同样 10 秒一格，优先级自上而下，写进 gpu_24h.json waiting_reasons，看板展开行）：
+| 原因 | 口径 | 负责方 |
+|---|---|---|
+| 服务停 | 这条道 infra_error 之后到下一次 rendered（最多 30 分钟） | DEBUG-RSI |
+| 断连 | supervisor.log 该道隧道 PROBE fail / KILL / EXIT → UP 之间，且当时由笔记本经隧道派单 | DEBUG-RSI |
+| 时区存疑 | 只有 ts 字符串、没有 epoch t 的 pause（ts 可能是服务器 EST 写的，K-OPS-E18）；带 t 的事件一律以 t 为准（11-02 08:1x 核对：EST 写的 pause 的 t 与东京时间一致） | DEBUG-RSI |
+| 暂停（pause） | 该道当时的派单方（最近一次派单来自笔记本还是服务器 producer）处于 pause / resume 之间（没有 resume 时以同一派单方下一次派单为结束；SENTINEL control 历史开始记录后以历史为准） | DEBUG-RSI |
+| 打分积压闸顶满 | 派单方记 score_backlog 后 300 s 内 | DEBUG-RSI |
+| hold（让道） | SENTINEL control 历史（data/sentinel/control_history.jsonl，11-02 08:1x 起）里该道在 hold_lanes 或 partition.json _temp_holds；之前没有历史的时段计入“原因不明” | FACTORY |
+| 队列没单（缺资产 / 缺稿） | 派单方这一分钟有 preflight_block | FACTORY |
+| 原因不明 | 以上都没有证据 | SENTINEL（探针缺口） |
+最大两项（不含原因不明）各开一张 GPU24 工单；原因不明超过等待任务的 20% 另开一张派 SENTINEL。
+ComfyUI 重启会清空 /history：空历史不算“没执行”（记无数据），SENTINEL 每小时把取到的执行区间存档到 data/sentinel/comfy_hist/，重启后用存档补。VLM 卡按 data/sentinel/gpu_samples.jsonl 的 nvidia-smi 采样算（利用率 ≥ 5% = 在跑），没有采样的时段 = 无数据，攒满 24 小时自动全覆盖。

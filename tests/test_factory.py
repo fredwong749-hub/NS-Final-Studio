@@ -89,7 +89,7 @@ def test_full_score_tries_resident_clip_first():
 
 def test_clip_resident_script_pins_gpu2_on_gpu36_only():
     t = (ROOT / "ops/factory/clip_resident.sh").read_text(encoding="utf-8")
-    assert "gpu36) GPU=2" in t and "127.0.0.1" in t or "8872" in t
+    assert "NS_CLIP_DEVICE=cpu" in t and "8872" in t        # 07:5x 起 CPU 常驻，不占 GPU2
     assert "rm -" not in t                               # 不删文件
 
 
@@ -200,3 +200,21 @@ def test_producer_dispatch_checks_decision_files_first():
 
 def test_refs_table_missing_shot_blocks(tmp_path):
     assert IB.check_refs("ep09-S9", ["a.png"], expected={"shots": {"ep01-S1": []}}, root=tmp_path)
+
+
+def test_decisions_guard_checks_code_sv_on_server(tmp_path):
+    """K-OPS-X08 接 F09：服务器上本机代码版本低于 min_code_sv / 读不到 → 拒派；笔记本不查"""
+    import shutil
+    DG = _decision_root(tmp_path)
+    (tmp_path / "tools/autopilot").mkdir(parents=True, exist_ok=True)
+    shutil.copy(ROOT / "tools/autopilot/policy.py", tmp_path / "tools/autopilot/policy.py")
+    (tmp_path / "config/policies").mkdir(parents=True, exist_ok=True)
+    shutil.copy(ROOT / "config/policies/handback.yaml", tmp_path / "config/policies/handback.yaml")
+    (tmp_path / "data/factory/inbox").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "data/factory/inbox/expected_refs.json").write_text("{}", encoding="utf-8")
+    assert any("system_version" in x for x in DG.problems(tmp_path, server=True))       # 没有版本文件 → 失败关闭
+    (tmp_path / "data/system_version.txt").write_text('{"id": "sv-20000101-01"}', encoding="utf-8")
+    assert any("低于" in x for x in DG.problems(tmp_path, server=True))
+    (tmp_path / "data/system_version.txt").write_text('{"id": "sv-20991231-99"}', encoding="utf-8")
+    assert DG.problems(tmp_path, server=True) == []
+    assert DG.problems(tmp_path, server=False) == []

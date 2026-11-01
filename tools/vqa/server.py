@@ -174,8 +174,17 @@ def maybe_open_window() -> bool:
     return True
 
 
+def own_reserved_mib(g: int) -> int:
+    """本进程在这张卡上已占的显存（卸载后 torch 缓存 / 上下文没还干净时也算自己的，不能当成别人占的）"""
+    try:
+        import torch
+        return int(torch.cuda.memory_reserved(g) / 2**20) if torch.cuda.is_available() else 0
+    except Exception:  # noqa: BLE001 — 没 torch / 没初始化 CUDA = 0
+        return 0
+
+
 def pick_gpu() -> tuple[int | None, str]:
-    fm = free_mib()
+    fm = {g: v + own_reserved_mib(g) for g, v in free_mib().items()}
     now = time.time()
     cands = [int(FORCE_GPU)] if FORCE_GPU else GPUS
     why = []
@@ -363,7 +372,17 @@ def worker():
             STATE["last_error"] = f"{type(e).__name__}: {e}"
             log("job failed", traceback.format_exc())
             if "out of memory" in str(e).lower() and DEVICE != "cpu":
-                unload("显存不够（OOM），让道")
+                if DEDICATED:
+                    # VQAGATE 11-02 S3 根因：专用卡 OOM（同卡多实例峰值叠加 / 常驻 CLIP）后卸模型，进程仍攥着显存，
+                    # pick_gpu 又把自己攥的当成别人的 → 永远等不到 6000 MiB（8878/8879 13:17 起全部超时）。
+                    # 专用卡不卸：只放掉这一单的激活，单子报错由分发器换实例重试
+                    import gc
+                    import torch
+                    gc.collect()
+                    torch.cuda.empty_cache()
+                    STATE["oom"] = STATE.get("oom", 0) + 1
+                else:
+                    unload("显存不够（OOM），让道")
             box.put({"error": STATE["last_error"]})
         last = time.time()
         if DEVICE != "cpu" and _model is not None and comfy_busy(STATE["gpu"]):

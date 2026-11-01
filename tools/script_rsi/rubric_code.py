@@ -202,6 +202,36 @@ def camera_problem(mv: str, cam_line: str, motion: str, vocab: set[str] | None) 
     return ""
 
 
+# K-WRT-H14（总调度 11-02 定，S2 ep06 林晚独角戏）：全集只有一个人在画的集 = 独角戏（solo），conflict#1 不判“同框 / 多说话人”，
+# 改判“内在冲突”：① 画面里出现外部压力源（画外具名人物、手机消息 / 来电 / 门铃 / 敲门 / 屏幕文字），② 之后主角做出一个可见的选择动作。
+PRESSURE = re.compile(r"手机|消息|短信|来电|电话|铃|门铃|敲门|屏幕|通知|弹出|震动|提示音")
+CHOICE = re.compile(r"放下|拿起|回复|删掉|删除|关掉|扣下|扣在|走向|推开|按下|不接|拒接|点开|拉黑|打开|合上|转身|离开|站起|坐下|锁上|挂断|接起|写下|撕|扔")
+
+
+def is_solo(shots: list) -> set[str]:
+    """→ 唯一在画人物名的集合（恰好 1 个名字时为独角戏），否则空集"""
+    names = {c.name for s in shots for c in (s.cast or []) if c.presence in ("在画", "局部")}
+    return names if len(names) == 1 else set()
+
+
+def solo_conflict(shots: list, blocks: list[str]) -> tuple[bool, str]:
+    press_at, choice_at = None, None
+    for k, (s, b) in enumerate(zip(shots, blocks)):
+        txt = _img(b) + " " + _field(b, "分拍") + " " + _field(b, "表演节拍")
+        offscreen = any(c.presence == "画外" for c in (s.cast or []))
+        if press_at is None and (offscreen or PRESSURE.search(txt)):
+            press_at = k
+            continue
+        if press_at is not None and CHOICE.search(_field(b, "分拍") + " " + _field(b, "表演节拍")):
+            choice_at = k
+            break
+    if press_at is None:
+        return False, "没有外部压力源入画（画外具名人物 / 手机消息 / 来电 / 门铃 / 敲门 / 屏幕文字）"
+    if choice_at is None:
+        return False, f"镜{shots[press_at].index} 出现压力源，之后没有可见的选择动作"
+    return True, f"压力源镜{shots[press_at].index} → 选择镜{shots[choice_at].index}"
+
+
 def code_checks(chunk: str, shots: list, blocks: list[str], head: str, lint_codes: dict, imgs: list[str] | None = None) -> dict:
     """→ {dim: {id: (met: bool, 说明)}}，只含 CODE_ITEMS 与 MIXED_ITEMS 的条目。shots = 导入器解析的 Shot（按镜号排序），blocks = 对应镜头块原文"""
     R: dict = {d: {} for d in DIMS}
@@ -226,7 +256,12 @@ def code_checks(chunk: str, shots: list, blocks: list[str], head: str, lint_code
         f"镜1 脸红词 {BLUSH.findall(b1)}；QW-W11 {w11}")
     two = any(len(v) >= 2 for v in vis)
     spk = [str(d.speaker) for s in shots for d in s.dialogue]
-    put("conflict", 1, two or len(set(spk)) >= 2, f"同框镜 {sum(len(v) >= 2 for v in vis)}；说话人 {sorted(set(spk))}")
+    solo = is_solo(shots)
+    if solo:      # K-WRT-H14：独角戏集 conflict#1 改判“内在冲突”
+        ok, why_ = solo_conflict(shots, blocks)
+        put("conflict", 1, ok, f"独角戏集（在画只有 {sorted(solo)}）：{why_}")
+    else:
+        put("conflict", 1, two or len(set(spk)) >= 2, f"同框镜 {sum(len(v) >= 2 for v in vis)}；说话人 {sorted(set(spk))}")
     put("turns", 1, 10 <= n <= 20 and [s.index for s in shots] == list(range(1, n + 1)), f"{n} 镜")
     bad = [s.index for s, b in zip(shots, blocks) if s.voiceover and s.voiceover.text and not re.search(r"视线=[^｜；]{2,}", _field(b, "分拍"))]
     put("show", 1, not bad, f"有 🎙 但分拍没写视线落点的镜：{bad or '无'}")

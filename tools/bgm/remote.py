@@ -20,23 +20,20 @@ class RemoteError(RuntimeError):
 
 
 def ssh(host: str, cmd: str, timeout: int = 120, retries: int = 6) -> str:
-    """rc=255（跳板 / 连接被重置）或超时 → 退避重试；其他非零退出码直接报错"""
-    last = ""
-    for k in range(retries):
-        try:
-            r = subprocess.run(["ssh", *SSH_OPTS, host, cmd], capture_output=True, text=True, timeout=timeout,
-                               encoding="utf-8", errors="replace")
-        except subprocess.TimeoutExpired:
-            last = f"超时 {timeout}s"
-            time.sleep(10 * (k + 1))
-            continue
-        if r.returncode == 0:
-            return r.stdout
-        last = f"rc={r.returncode}: {(r.stderr or r.stdout)[-400:]}"
-        if r.returncode != 255:
-            break
-        time.sleep(10 * (k + 1))
-    raise RemoteError(f"ssh {host} {last}")
+    """rc=255（跳板 / 连接被重置）或超时 → 退避重试（rssh.run_retry，退避 10 s × 次）；其他非零退出码直接报错"""
+    r = _rssh().run_retry(host, cmd, timeout=timeout, tries=retries, backoff_s=10, text=True)
+    if r.returncode == 0:
+        return r.stdout
+    raise RemoteError(f"ssh {host} rc={r.returncode}: {(r.stderr or r.stdout)[-400:]}")
+
+def _rssh():
+    """K-OPS-N07 / SYSARCH 4-1：远程命令统一走 tools/netfix/rssh.run_retry（常驻主连接；服务器上 OFFLINE_SELF 调本机 = 本机执行）"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_rssh_41", Path(__file__).resolve().parents[2] / "tools/netfix/rssh.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
 
 
 def _scp(args: list[str], what: str, timeout: int, retries: int = 5) -> None:

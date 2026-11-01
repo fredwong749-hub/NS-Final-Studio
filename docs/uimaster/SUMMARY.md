@@ -27,3 +27,8 @@
 - 新做的：↻ 再生成挂在精修 Stage 和 VersionChain 上；ErrorBoundary；看图器焦点陷阱。r6 证据还在等 UIAUDIT。
 - 已派出：UIPIXEL（↻ 按钮 22px、和"⋯"重叠）；UIRSI（集头露出内部文件名）；DATAALIGN（后端间歇性卡顿 15–17 秒）。
 - 接着做：等笔记本恢复（resume_from_gpu33.sh）后，开新会话从 `node apps/web/e2e/uimaster/crawl.mjs --iter=31` 起，先收 r6。
+
+## L-113（11-02 04:3x）UI 正片 B → 暂停
+- 项目方 AskUserQuestion 点选“B 深色桌面 + 灰纸框”，取代 r45 胶卷条（胶卷条样式隔离在 apps/web/src/_quarantine/r45_filmstrip.css，不删）。
+- UIRSI 已实现 B（apps/web/src/v3/slide.css），但项目方 04:2x 又说“电影胶片效果，现在 uiux 不好看，重做”：总调度暂停 B 上线，B 只在 `<html class="ui-slide">` 时生效（默认关）。另派设计 agent 出高保真稿，定稿后由 UIRSI 实现。
+- 与样式无关、已上线的部分：镜头 D-LENS（实拍 / 计划）、候选“未通过：原因”、页面过期检测、:8800 守护重启、每镜一行镜头字段（规则 K-UI-050 / K-UI-051，报告 docs/uirsi/rounds/r45.md）。

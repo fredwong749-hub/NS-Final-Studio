@@ -283,7 +283,10 @@ def all_fails(pre: str, chunk: str, ep: int, wd: Path) -> list[tuple[str, dict]]
     out = [("p4", {"id": (re.match(r"[^：]*：\[([A-Za-z0-9-]+)\]", x) or re.match(r"(.)", x)).group(1), "why": x[:300],
                    "shots": [int(m) for m in re.findall(r"S(\d+)", x.split("：")[0])]})
            for x in H.lint(chunk, ep)["shot_block"]]
-    return out + code_fails(pre, chunk, ep, wd)
+    SH = _load("shootable", "tools/script_rsi/shootable.py")      # K-WRT-H13：编译后孤儿描述 / 特写双人露脸
+    shoot = [("shoot", {"id": x["shot"], "shots": [x["shot"]], "why": f"镜{x['shot']}：{SH.why(x)}"})
+             for x in SH.shootable_rows(pre + chunk, ep) if not x["ok"]]
+    return out + shoot + code_fails(pre, chunk, ep, wd)
 
 
 def patch_user(ep, pre, chunk, facts, targets, note="") -> str:
