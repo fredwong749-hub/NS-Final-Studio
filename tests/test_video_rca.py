@@ -76,3 +76,12 @@ def test_v05_dejudder_threshold_covers_pika_lowmotion():
     d = json.loads((ROOT / "config/pipeline/video_policy.json").read_text(encoding="utf-8"))["dejudder"]
     assert d["enabled"] and "i2va_pika_flex" in d["recipes"]
     assert float(d["j4_gt"]) <= 1.2 and float(d["j4_z_ge"]) <= 3.0
+
+
+def test_v06_compile_flags_pose_change_in_outerwear():
+    """K-WRT-704 编译层 RL-P1：穿外套 + 坐→站 → warn（不改镜头结构）"""
+    txt = ("integrated_multimodal_description: [Shot 1] Live-action, a medium full shot, featuring a woman wearing an ivory blouse "
+           "and a cropped blazer, at a desk. At 00:02.000, she rises from the chair.\n\noverall_soundscape: x")
+    assert any(i["code"] == "RL-P1" for i in lint_people_eyeline(txt, None, {}))
+    assert not any(i["code"] == "RL-P1" for i in lint_people_eyeline(txt.replace("she rises from the chair", "she shifts her weight"), None, {}))
+    assert not any(i["code"] == "RL-P1" for i in lint_people_eyeline(txt.replace("and a cropped blazer", "and a pencil skirt"), None, {}))

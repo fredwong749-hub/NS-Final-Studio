@@ -42,7 +42,7 @@ def arm_apply(job: dict, arm: str) -> dict:
     p, refs = job["prompt"], list(job["refs"])
     name = "林晚"
     t = _target(job)
-    if arm in ("A0", "ACC", "ACC2", "ACC3", "ACC4", "ACC5", "K705", "K705b", "K705c"):        # ACC = 验收（朝向句在身份脸句后，作废）；ACC2 = 验收（朝向句在最前），都是重编后的生产作业原样
+    if arm in ("A0", "ACC", "ACC2", "ACC3", "ACC4", "ACC5", "K705", "K705b", "K705c", "SLV"):        # ACC = 验收（朝向句在身份脸句后，作废）；ACC2 = 验收（朝向句在最前），都是重编后的生产作业原样
         pass
     elif arm == "P1":                       # “平视”（机位词）→ 明确是机位高度，不是人物眼睛平视前方
         p = re.sub(r"平视(?!机位)", "平视机位（镜头与眼睛同高）", p)

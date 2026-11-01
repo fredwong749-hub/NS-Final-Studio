@@ -432,3 +432,14 @@ def test_identity_drift_per_person():
     v = {"checks": {}, "defects": [], "people": [{"who": "林晚", "identity": "像"}, {"who": "顾沉", "identity": "na"}]}
     VQ.sanitize(v)
     assert v["defects"] == []
+
+
+def test_deploy_push_refuses_without_thread_guard(monkeypatch):
+    """K-OPS-V13 硬检查：thread_guard 不过，deploy.push 不推"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("s10v_deploy_tg", ROOT / "tools/series10_video/deploy.py")
+    D = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(D)
+    monkeypatch.setattr(D, "thread_guard_ok", lambda: False)
+    monkeypatch.setattr(D, "ssh", lambda *a, **k: (_ for _ in ()).throw(AssertionError("不该连服务器")))
+    assert D.push("gpu33") is False

@@ -168,3 +168,25 @@ def test_e05_backlog_scales_with_vlm_instances(monkeypatch):
     assert PR.vlm_instances() == 3
     monkeypatch.setenv("NS_VQA_INSTANCES", "junk")
     assert PR.vlm_instances() == 1
+
+
+# ---- r2：出图道占用率实测工具 ----
+def test_lane_util_union_and_agents():
+    sys.path.insert(0, str(ROOT / "tools" / "debug"))
+    import lane_util as LU
+    t1 = 10_000.0
+    def ent(s, e, agent):
+        return {"status": {"messages": [["execution_start", {"timestamp": s * 1000}], ["execution_success", {"timestamp": e * 1000}]]},
+                "prompt": [0, "x", {}, {"ns_tag": {"agent": agent}}]}
+    hist = {"a": ent(t1 - 600, t1 - 300, "PRODUCER"), "b": ent(t1 - 400, t1 - 200, "IMGFIX"), "c": ent(t1 - 9000, t1 - 8000, "OLD")}
+    res = LU.measure(minutes=10, lanes={"gpu33:0": 8188}, fetch=lambda h, ps: {8188: hist})
+    r = res["lanes"]["gpu33:0"]
+    assert r["jobs"] == 2 and abs(r["util"] - 400 / 600) < 0.02
+    assert set(r["by_agent"]) == {"PRODUCER", "IMGFIX"}
+
+
+def test_lane_util_parse():
+    sys.path.insert(0, str(ROOT / "tools" / "debug"))
+    import lane_util as LU
+    out = LU.parse('##PORT 8188\n{"x": {}}\n##PORT 8189\n\n##PORT 8191\nnot json\n')
+    assert out[8188] == {"x": {}} and out[8189] == {} and out[8191] is None

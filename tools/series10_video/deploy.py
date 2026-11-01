@@ -79,7 +79,18 @@ def build_tar(files, dirs) -> bytes:
     return buf.getvalue()
 
 
+def thread_guard_ok() -> bool:
+    """K-OPS-V13 硬检查（总调度 L-100 第 5 条：线程问题第二次）：服务器打分 / 检测脚本没过 tools/qa/thread_guard.py 不许推、不许跑"""
+    r = subprocess.run([sys.executable, str(ROOT / "tools/qa/thread_guard.py")], capture_output=True, text=True,
+                       env={**__import__("os").environ, "PYTHONUTF8": "1"})
+    if r.returncode != 0:
+        print("拒绝推送：" + (r.stdout or r.stderr).strip()[-600:])
+    return r.returncode == 0
+
+
 def push(host, jobs_file="jobs.json", with_vision=None):
+    if not thread_guard_ok():
+        return False
     chk = ssh(host, f"cd {DEST} 2>/dev/null && ls {' '.join(VISION)} 2>/dev/null | wc -l")
     have = chk.stdout.decode().strip()
     if not have.isdigit():

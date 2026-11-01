@@ -398,7 +398,7 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
   const miss = missingOf(s, storyboardOf(s, d));
   return (
     <article
-      className={`v3-row${selected ? " sel" : ""}${inMulti ? " multi" : ""}${dim ? " dim" : ""}${hl ? " hl" : ""}${s.video ? " has-vid" : ""}`}
+      className={`v3-row${more ? "" : " lean"}${selected ? " sel" : ""}${inMulti ? " multi" : ""}${dim ? " dim" : ""}${hl ? " hl" : ""}${s.video ? " has-vid" : ""}`}
       data-shot={s.id}
       onClick={(e) => st.select(s.id, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey })}
       onDoubleClick={() => (st.select(s.id), st.setCanvasMode("edit"))}
@@ -416,6 +416,18 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
           <MissBadge miss={miss} onJump={() => (st.select(s.id), sbUi.openTableAt(s.id))} />
           <MaterialsBadge shotId={s.id} />
           <span className="v3-meta" title={camRaw(s) ? `剧本原文：${camRaw(s)}` : undefined}>{meta.join(" · ")}</span>
+          {/* r42（总调度定 A：行高不变，只收文字区留白）：“详情 ▸”挪到镜号这一行，不再单占一行；收起时剧本多显示一行 */}
+          {!more && (
+            <button
+              type="button"
+              className="v3-more"
+              onClick={(e) => (e.stopPropagation(), setMoreOwn(true))}
+              title="详情：本镜配乐 / 环境声 · 人物造型（本镜造型角标）与场景参考 · 分镜详情 · 首帧提示词 · 视频提示词"
+            >
+              详情 ▸
+            </button>
+          )}
+          {!more && s.characters.some((c) => c.has_override) && <small className="v3-look-ovr">本镜造型</small>}
           <span className="v3-grow" />
           <span className={`v3-status-wrap${statusFlash ? " live-flash" : ""}`}>
             <StatusLine st={pend?.auto ? { ...status, dot: "green", text: `${pend.stage === "first" ? "首帧" : "尾帧"} #${pend.n} 已自动采用（可改）` } : status} />
@@ -460,19 +472,6 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
           {(dlg.length > 0 || s.voiceover) && <PlayShotLines shot={s.id} />}
         </div>
         {/* UX4（项目方：分镜字段缺“配乐提示词”等）：声音一行——环境声 + 配乐提示，剧本原文只读；没写就写“剧本没写”，悬停看全文 */}
-        {!more && (
-          <div className="v3-more-row">
-            <button
-              type="button"
-              className="v3-more"
-              onClick={(e) => (e.stopPropagation(), setMoreOwn(true))}
-              title="详情：本镜配乐 / 环境声 · 人物造型（本镜造型角标）与场景参考 · 分镜详情 · 首帧提示词 · 视频提示词"
-            >
-              详情 ▸
-            </button>
-            {s.characters.some((c) => c.has_override) && <small className="v3-look-ovr">本镜造型</small>}
-          </div>
-        )}
         {more && (() => {
           const sb = storyboardOf(s, d);
           const amb = sb ? sb.sound_h3 || sb.sound : "";

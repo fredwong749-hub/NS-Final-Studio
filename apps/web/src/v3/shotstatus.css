@@ -76,3 +76,6 @@ button.stag.on { outline: 2px solid var(--k); outline-offset: 1px; }
 .hist-none { display: grid; place-items: center; aspect-ratio: 9 / 16; border-radius: var(--r-m); background: var(--c-sunken); color: var(--c-text-2); font-size: var(--fs-xs); }
 /* 中性色：总览集名不再用彩色，状态只看色块 */
 .sea-page.simple .sea-ept { color: var(--c-text); }
+/* r42（总调度定 A）：行高不变；收起时剧本多显示一行，用掉原来“详情”那一行的留白 */
+.v3-row.lean .v3-script:not(.full) { -webkit-line-clamp: 3; height: 4.5em; }
+.v3-l1 .v3-more { margin-left: var(--sp-2); }

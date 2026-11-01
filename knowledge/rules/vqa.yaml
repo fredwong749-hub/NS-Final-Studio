@@ -160,7 +160,8 @@ rules:
     title: 服务器上按片子反复起的打分 / 检测脚本必须限线程（OMP/MKL/OPENBLAS/NUMEXPR=4、onnxruntime intra_op=4、cv2.setNumThreads(4)，调用方 nice）
     when: 写或改 score_clip / v6_limbs / v7_lipsync / calibrate_v67 等服务器打分脚本，或新增服务器端检测器
     then: 在第一个重型 import 之前设线程环境变量（K-OPS-V13 标记块，NS_SCORE_THREADS 可调）；用 onnxruntime / insightface 的给 InferenceSession 默认会话加 intra_op_num_threads；tools/qa/thread_guard.py 静态检查必须 PASS
-    check: [tools/qa/thread_guard.py, tests/test_vqagate.py]
+    check: [tools/qa/thread_guard.py, tools/series10_video/deploy.py, tests/test_vqagate.py]
+    enforce: 硬检查（总调度 L-100 第 5 条，11-02 线程问题第二次）——deploy.py push / after_network.py push 先跑 thread_guard，不过就拒绝推送；没过 guard 的脚本不许上服务器跑
     evidence:
       - {src: docs/CHANGELOG_AGENTS.md, note: "11-02 00:3x：v7_lipsync 一个进程 gpu33 7432% / gpu36 9052% CPU，两台负载 250 / 160，拖慢 sshd 与 ComfyUI；限线程后同一片子 CPU 620%、38.6 s"}
     confidence: high

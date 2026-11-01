@@ -163,21 +163,43 @@ def test_ssh_cmd_has_keepalive_and_tag():
     s.c = json.loads(TS.CONF.read_text(encoding="utf-8"))
     s.tag, s.route_bad_until = "nsnetfix", {}
     s.relay = {"routes": {"hk": {"up": True}, "direct": {"up": True}}}
+    base = " ".join(s.ssh_cmd("base"))                                   # r2 底座：只转发两台 sshd，连跳板本身
+    assert "127.0.0.1:22360:10.0.0.36:22" in base and "127.0.0.1:22330:10.0.0.33:22" in base and base.endswith(" 194relay-hk")
     cmd = " ".join(s.ssh_cmd("gpu36-l0"))
     for k in ("-F config/netfix/ssh_config", "ExitOnForwardFailure=yes", "Tag=nsnetfix-gpu36-l0",
               "127.0.0.1:18288:127.0.0.1:8188", "127.0.0.1:8871:127.0.0.1:8870"):
         assert k in cmd
-    assert cmd.endswith(" gpu36-hk")                                     # K-OPS-N08 主路香港
+    assert cmd.endswith(" gpu36-t")                                      # 内层连接在底座里直连 sshd，不在跳板握手
     assert "18290" in " ".join(s.ssh_cmd("gpu36-l2")) and "18288" not in " ".join(s.ssh_cmd("gpu36-l2"))   # 按道一条连接
-    s.relay["routes"]["hk"]["up"] = False                               # 香港入口不通 → 直连
-    assert s.ssh_cmd("gpu36-l0")[-1] == "gpu36"
+    assert s.ssh_cmd("gpu33-cmd")[-1] == "gpu33-t" and "ssh_config.wsl" in " ".join(s.ssh_cmd("gpu33-cmd"))
+    s.relay["routes"]["hk"]["up"] = False                               # 香港入口不通 → 底座走直连
+    assert s.ssh_cmd("base")[-1] == "194relay"
     s.relay["routes"]["hk"]["up"], s.route_bad_until["hk"] = True, TS.now() + 600   # 判坏期内也走直连
-    assert s.ssh_cmd("gpu33-cmd")[-1] == "gpu33" and "ssh_config.wsl" in " ".join(s.ssh_cmd("gpu33-cmd"))
+    assert s.ssh_cmd("base")[-1] == "194relay"
     cfg = (ROOT / "config/netfix/ssh_config").read_text(encoding="utf-8")
-    for k in ("ServerAliveInterval 10", "ConnectTimeout 20", "HostName sz194.instameta.org", "ProxyJump hkjump", "47.243.63.181"):
+    for k in ("ServerAliveInterval 10", "HostName sz194.instameta.org", "ProxyJump hkjump", "47.243.63.181", "Host gpu36-t", "Port 22360"):
         assert k in cfg
     kh = (ROOT / "config/netfix/known_hosts").read_text(encoding="utf-8")
     assert "47.243.63.181 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILK2j0d1APVCsA/83SyC14RShKARYBGvBDLCRqdoOHqC" in kh   # 指纹 SHA256:IrIRIa+uc…（keyscan 核对）
+
+
+def test_base_backoff_follows_ops_rule(tmp_path):
+    """运维 FONG-QUICK：底座快速失败 15 s 起翻倍、最多 300 s；跑够 60 s 再断重置 15 s"""
+    s = TS.Supervisor.__new__(TS.Supervisor)
+    s.c = json.loads(TS.CONF.read_text(encoding="utf-8"))
+    s.route_fails, s.route_bad_until, s.dir = {}, {}, tmp_path
+    st = {"fails": 0, "route": "hk"}
+    s.hosts = {"base": st}
+    s.log = lambda *a: None
+    waits = []
+    for _ in range(7):
+        st["_last_up_s"] = 5
+        s.schedule("base")
+        waits.append(st["_wait"])
+    assert waits == [15, 30, 60, 120, 240, 300, 300]
+    st["_last_up_s"] = 3600
+    s.schedule("base")
+    assert st["_wait"] == 15
 
 
 def test_all_render_ports_supervised_once():

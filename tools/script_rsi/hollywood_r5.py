@@ -126,6 +126,31 @@ def check_facts(client, facts: dict, chunk: str, ep: int) -> tuple[bool, list, s
     return False, [], f"事实核对回复格式不对：{err}"
 
 
+QUOTE_RE = re.compile(r"[“「『\"]([^”」』\"]{2,40})[”」』\"]")
+TIME_RE = re.compile(r"(?:明晚|明早|明天|后天|今晚|下周[一二三四五六日]?|周[一二三四五六日]|[0-9一二三四五六七八九十两]+点(?:半|[0-9一二三四五六七八九十]+分)?)")
+SPEECH_PREFIX = ("**对白**", "**🎙")
+
+
+def fact_drift_lint(orig: str, cand: str) -> list[str]:
+    """HW-F1（K-WRT-H06，bug→规则：r5 实测被事实核对拦下的写法里，最常见、能机检的两类）：
+    镜头描述（img / 分拍 / motion / H3 / sound，不含台词行）里出现原稿全集没有的引号文字（手机屏幕 / 纸面新内容）或新的时间说法
+    （例：镜8 屏幕“预约单·明晚八点”、镜10“明晚八点，别迟到”）→ 新信息，代码直接拦，不花事实核对的钱"""
+    def desc(chunk):
+        seg = RL.segment(chunk)
+        start = seg["shots"][0][1] if seg["shots"] else len(seg["lines"])
+        return "\n".join(ln for ln in seg["lines"][start:] if not ln.startswith(SPEECH_PREFIX))
+    full_o = orig
+    d_c = desc(cand)
+    out = []
+    for q in sorted(set(QUOTE_RE.findall(d_c))):
+        if q not in full_o and not re.fullmatch(r"[A-Za-z ,.'-]+", q):
+            out.append(f"新引号文字“{q}”")
+    for t in sorted(set(TIME_RE.findall(d_c))):
+        if t not in full_o:
+            out.append(f"新时间说法“{t}”")
+    return out
+
+
 def gate5(pre, orig, cand, ep, base_lint, wd, facts=None, fact_client=None) -> dict:
     g = H.gate(pre, orig, cand, ep, base_lint, wd)
     A = H.episode_obj(pre, orig, ep, wd)
@@ -137,6 +162,9 @@ def gate5(pre, orig, cand, ep, base_lint, wd, facts=None, fact_client=None) -> d
                                "detail": "一致" if sa == sb else f"原 {sa} → 新 {sb}"[:500]})
         zero = (g.get("lint") or {}).get("codes", {}).get("QW-W11", 0)
         g["checks"].append({"id": "W11", "name": "QW-W11 = 0", "ok": not zero, "detail": str(zero)})
+        drift = fact_drift_lint(orig, cand)
+        g["checks"].append({"id": "F0", "name": "HW-F1 新屏幕文字 / 新时间信息（代码预检，K-WRT-H06）", "ok": not drift,
+                            "detail": "无" if not drift else "；".join(drift)[:500]})
     g["ok"] = all(c["ok"] for c in g["checks"])
     if g["ok"] and facts is not None and fact_client is not None:
         ok, dev, err = check_facts(fact_client, facts, cand, ep)
@@ -486,6 +514,195 @@ def cmd_ab(a) -> int:
     return 0
 
 
+# ------------------------------------------------------------------ 逐行补丁模式（总调度 11-02 01:2x G0）
+# 原因（实测）：整稿重写过了事实核对后普遍 40–42；写作方往高分写就加新情节（invented）被拦，且整稿核对又贵又噪。
+# 改法：事实表原样作硬约束，只允许改表达（台词措辞 / 潜台词 / 节奏 / 镜头描述）；写作方只回“行号 + 新文本”；
+# 事实核对只核改动的行（hollywood_facts.md 任务 C）；每次只修清单里没满足的 1–2 条，修完立刻局部核对再整集打分。
+
+PATCH_RULE = ("只允许改表达：台词措辞、潜台词、节奏、镜头描述（img / 分拍 / motion / H3 的写法）；"
+              "不得新增冲突、决定、身体接触、信息、物件；不得改说话人、台词条数、镜数、时长、场景 id、人物行、衔接、集头。")
+
+
+def numbered_lines(chunk: str) -> list[tuple[int, int, str]]:
+    """镜头区每个非空行 → (行号, 在 chunk 里的下标, 原文)。集头不编号（集头不许改）"""
+    seg = RL.segment(chunk)
+    start = seg["shots"][0][1] if seg["shots"] else len(seg["lines"])
+    out, n = [], 0
+    for i in range(start, len(seg["lines"])):
+        t = seg["lines"][i].rstrip("\n")
+        if t.strip() and t.strip() != "---":
+            n += 1
+            out.append((n, i, t))
+    return out
+
+
+def apply_patches(chunk: str, patches: list, nl) -> tuple[str | None, list, str]:
+    by = {n: (i, t) for n, i, t in nl}
+    lines = RL.segment(chunk)["lines"]
+    changed = []
+    if not patches or len(patches) > 14:
+        return None, [], f"补丁条数 {len(patches or [])}（应为 1–14）"
+    for pch in patches:
+        try:
+            n, new = int(pch.get("line")), str(pch.get("new"))
+        except (TypeError, ValueError):
+            return None, [], f"补丁格式不对：{pch}"
+        if n not in by:
+            return None, [], f"行号 {n} 不存在"
+        if "\n" in new or not new.strip():
+            return None, [], f"行 {n} 的新文本不能为空或含换行"
+        i, old = by[n]
+        if old.startswith("**镜") and new.split("｜")[0] != old.split("｜")[0]:
+            return None, [], f"行 {n} 是镜头标题行，镜号不能改"
+        lines[i] = new + "\n"
+        changed.append({"line": n, "old": old, "new": new})
+    return "".join(lines), changed, ""
+
+
+def shot_of_line(chunk: str, idx: int) -> int | None:
+    for k, a_, b_, _ in [(s[0], s[1], s[2], s[3]) for s in RL.segment(chunk)["shots"]]:
+        if a_ <= idx < b_ + 1:
+            return k
+    return None
+
+
+def check_patch_facts(client, facts, chunk, changed) -> tuple[bool, list, str]:
+    nl = {n: i for n, i, _ in numbered_lines(chunk)}
+    items = [f"- 镜{shot_of_line(chunk, nl.get(c['line'], 0)) or '?'} 行{c['line']}：原文：{c['old']}\n  新文：{c['new']}" for c in changed]
+    user = (f"【任务 C：核对补丁】\n【事实表】\n{json.dumps(facts, ensure_ascii=False, indent=1)}\n\n【改动的行】\n" + "\n".join(items))
+    for _ in range(2):
+        d, err = H._json_block(client(facts_system(), user))
+        if d is not None and "deviations" in d:
+            dev = d.get("deviations") or []
+            return (bool(d.get("ok")) and not dev), dev, ""
+    return False, [], f"补丁核对回复格式不对：{err}"
+
+
+def pick_targets(scores: dict, used: set, k: int = 2) -> list[tuple[str, dict]]:
+    """清单里还没满足的具体条目：按维度分数从低到高，取前 k 条没试过的（同维度多条先取编号小的）"""
+    out = []
+    for dim in sorted((d for d, _ in H.DIMS), key=lambda d: scores[d]["score"]):
+        for u in scores[dim].get("unmet") or []:
+            key = f"{dim}#{u.get('id')}"
+            if key not in used and len(out) < k:
+                out.append((dim, u))
+    return out
+
+
+def user_patch(ep, pre, chunk, facts, targets, note="") -> str:
+    rubric = json.loads(RUBRIC_JSON.read_text(encoding="utf-8"))
+    nl = numbered_lines(chunk)
+    tg = [f"- {dict(H.DIMS)[d]} 第 {u.get('id')} 条：{rubric[d][int(u.get('id')) - 1] if str(u.get('id')).isdigit() and 1 <= int(u.get('id')) <= 5 else ''}\n"
+          f"  评审说没满足：镜 {u.get('shots') or '未指出'}；{u.get('why', '')}" for d, u in targets]
+    parts = ["【剧情事实表（硬约束，原样遵守）】", json.dumps(facts, ensure_ascii=False, indent=1), "",
+             f"【改写边界】{PATCH_RULE}", "",
+             f"【ep{ep:02d} 集头（只读，不许改）】", RL.block_text(chunk, "head"), "",
+             "【镜头区，逐行编号（L 行号｜原文）】", *[f"L{n}｜{t}" for n, _, t in nl], "",
+             "【本次只修这 1–2 条清单条目】", *tg, "",
+             "只输出一个 ```json：{\"patches\": [{\"line\": 行号, \"new\": \"这一行的完整新文本\"}]}；只改为满足上面条目所必需的行（1–14 行），"
+             "每行整行替换、保留原来的字段标签（如 **分拍**：、**对白**：、H3 里的 At 00:0X 时间码）；台词说话人和条数不变。"]
+    if note:
+        parts += ["", f"上一次的补丁没有被采用：{note}"]
+    return "\n".join(parts)
+
+
+def cmd_patch(a) -> int:
+    ep = a.episode
+    od = Path(a.root) / f"ep{ep:02d}_{a.tag}"
+    od.mkdir(parents=True, exist_ok=True)
+    wd, calls = od / "work", od / "calls"
+    wd.mkdir(exist_ok=True)
+    calls.mkdir(exist_ok=True)
+
+    def log(m):
+        H._log(od, m)
+    text, rec = RC.assemble(RL, [ep], RC.episode_sources())
+    pre, chunks = RL.split_doc(text)
+    orig, _ = H.apply_head_exceptions(chunks[0], ep)
+    H.ZERO_CODES[:] = ["QW-W11"]
+    facts = json.loads(Path(a.facts).read_text(encoding="utf-8"))
+    (od / "facts.json").write_text(json.dumps(facts, ensure_ascii=False, indent=1), encoding="utf-8")
+    base_lint = H.lint(orig, ep)
+    writer = make_writer(a.writer, temperature=0.5)
+    fact_cl = make_fact_client()
+    judges = [FR.Writer(temperature=0.2, max_tokens=8000), FR.Writer(temperature=0.7, max_tokens=8000), FR.Writer(temperature=0.2, max_tokens=8000)]
+    budget = Budget(a.budget, [writer, fact_cl] + judges)
+    cur = RL.split_doc(Path(a.base).read_text(encoding="utf-8"))[1][0]
+    g0 = gate5(pre, orig, cur, ep, base_lint, wd)
+    sc = score5(judges, cur, None, ep, pre, calls, "p0")
+    (od / "p0.md").write_text(pre + cur, encoding="utf-8")
+    hist = [{"step": 0, "sum": H._sum(sc), "judges": sc and sc["judge_sums"], "gate": H._gate_brief(g0)}]
+    log(f"p0 基线 {H._sum(sc)}（{sc and sc['judge_sums']}）；代码不变量 {H._gate_brief(g0)}；补丁模式，写作 {a.writer}，预算 ${a.budget}")
+    best_sum, used, step, rnd_gain, attempts_in_round = H._sum(sc), set(), 0, False, 0
+    try:
+        while True:
+            if budget.left() < 0.15:
+                log(f"预算将尽 ${budget.usage()['usd']}，收尾")
+                break
+            targets = pick_targets(sc["scores"], used)
+            if not targets:
+                log("没有可修的清单条目了")
+                break
+            step += 1
+            used |= {f"{d}#{u.get('id')}" for d, u in targets}
+            note, ok_c = "", None
+            for att in range(2):
+                u_ = user_patch(ep, pre, cur, facts, targets, note)
+                (calls / f"p{step}-a{att}.req.txt").write_text(u_, encoding="utf-8")
+                raw = writer(r5_writer_system(), u_)
+                (calls / f"p{step}-a{att}.reply.txt").write_text(raw, encoding="utf-8")
+                d, err = H._json_block(raw)
+                c, changed, err2 = apply_patches(cur, (d or {}).get("patches") or [], numbered_lines(cur)) if d else (None, [], err)
+                if c is None:
+                    note = err2 or err
+                    continue
+                c = H.mech_align_all(pre, c, ep, wd)
+                g = gate5(pre, orig, c, ep, base_lint, wd)
+                if not g["ok"]:
+                    note = H.gate_note(g)
+                    continue
+                okf, dev, errf = check_patch_facts(fact_cl, facts, cur, changed)
+                if not okf:
+                    note = errf or ("改动触碰了剧情事实：" + json.dumps(dev, ensure_ascii=False)[:800])
+                    continue
+                ok_c = (c, changed)
+                break
+            tg_txt = "、".join(f"{d}#{u.get('id')}" for d, u in targets)
+            if not ok_c:
+                hist.append({"step": step, "targets": tg_txt, "rejected": note[:300]})
+                log(f"p{step} 目标 {tg_txt}：补丁没过核对（{note[:160]}）")
+            else:
+                c, changed = ok_c
+                sc2 = score5(judges, c, None, ep, pre, calls, f"p{step}")
+                s2 = H._sum(sc2) if sc2 else -1
+                hist.append({"step": step, "targets": tg_txt, "lines": len(changed), "sum": s2, "judges": sc2 and sc2["judge_sums"],
+                             "accepted": s2 > best_sum})
+                log(f"p{step} 目标 {tg_txt}：改 {len(changed)} 行 → {s2}（此前 {best_sum}）{'采用' if s2 > best_sum else '不采用'}")
+                if s2 > best_sum:
+                    cur, sc, best_sum, rnd_gain = c, sc2, s2, True
+                    (od / f"p{step}.md").write_text(pre + cur, encoding="utf-8")
+                    (od / "best.md").write_text(pre + cur, encoding="utf-8")
+            attempts_in_round += 1
+            if best_sum >= TARGET_FULL:
+                break
+            if attempts_in_round >= 3:          # 一“轮” = 3 次补丁尝试；L-098 连续 1 轮不涨即停
+                if not rnd_gain:
+                    log("本轮 3 次补丁都没涨分，停（L-098）")
+                    break
+                attempts_in_round, rnd_gain = 0, False
+    except RuntimeError as e:
+        log(f"中止：{e}")
+    if not (od / "best.md").exists():
+        (od / "best.md").write_text(pre + cur, encoding="utf-8")
+    gf = gate5(pre, orig, cur, ep, base_lint, wd, facts, fact_cl)           # 收尾：选中稿再做一次整集事实核对
+    rep = {"schema": "nsfs.hollywood_r5_patch/1", "episode": ep, "base": a.base, "writer": a.writer, "history": hist,
+           "best_sum": best_sum, "final_gate": gf, "usage": budget.usage(),
+           "gaps": {n: sc["scores"][k]["why"] for k, n in H.DIMS if sc["scores"][k]["score"] < 5}, "scores": sc}
+    (od / "report.json").write_text(json.dumps(rep, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+    log(f"完成：最好 {best_sum}；整集核对 {H._gate_brief(gf)}；费用 {rep['usage']}")
+    return 0
+
+
 def main(argv=None) -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -504,8 +721,16 @@ def main(argv=None) -> int:
     b.add_argument("--episode", type=int, required=True)
     b.add_argument("--root", required=True)
     b.add_argument("--kinds", default="flash-high,v2")
+    pt = sub.add_parser("patch", help="逐行补丁模式（总调度 01:2x G0）：只修清单里没满足的 1–2 条，只核改动的行")
+    pt.add_argument("--episode", type=int, required=True)
+    pt.add_argument("--root", required=True)
+    pt.add_argument("--base", required=True)
+    pt.add_argument("--facts", required=True)
+    pt.add_argument("--writer", default="flash-high", choices=["flash-high", "flash-medium", "flash-low", "flash"])
+    pt.add_argument("--budget", type=float, default=1.0)
+    pt.add_argument("--tag", default="patch")
     a = ap.parse_args(argv)
-    return {"run": run_episode, "ab": cmd_ab}[a.cmd](a)
+    return {"run": run_episode, "ab": cmd_ab, "patch": cmd_patch}[a.cmd](a)
 
 
 if __name__ == "__main__":

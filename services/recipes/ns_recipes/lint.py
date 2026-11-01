@@ -250,6 +250,10 @@ def system_facing_camera(text: str) -> str | None:
     m = SYS_CAMERA_FACING_RE.search(sys_txt)
     return m.group(0) if m else None
 
+POSE_CHANGE_RE = re.compile(r"\b(rises?|rising|rose|stands? up|standing up|stood up|gets? up|getting up|got up|sits? down|sitting down|sat down)\b", re.I)
+OUTER_EN_RE = re.compile(r"\b(blazer|jacket|coat|overcoat|trench|cardigan|suit jacket)\b", re.I)
+
+
 def lint_people_eyeline(text: str, spec, p: dict) -> list[dict]:
     out = []
     m = re.search(r"^(?:integrated_multimodal_description|detailed_description):(.*?)(?=^overall_soundscape:)", text or "", re.M | re.S)
@@ -265,6 +269,12 @@ def lint_people_eyeline(text: str, spec, p: dict) -> list[dict]:
     fc = SYS_CAMERA_FACING_RE.search(sys_txt)
     if fc:
         out.append(_issue("error", "RL-E3", f"编译稿含朝向镜头的系统句：“{fc.group(0)}”（K-REN-702：首帧 / 正文朝镜头 → 片头看镜头 49/54）"))
+    # VIDEO-RCA r4（K-WRT-704 编译层）：在画人物穿外层衣物 + 分拍里有全身姿态切换（坐→站…）→ warn RL-P1，
+    # 计划里标“建议拆镜”：这一镜停在准备起身，下一镜从站定开始（编译器不改镜头结构，交写作方 / DIRECTOR cut_plan）
+    beats_txt = body[body.find("At 00:"):] if "At 00:" in body else ""
+    if POSE_CHANGE_RE.search(beats_txt) and OUTER_EN_RE.search(body.split(". ", 1)[0]):
+        out.append(_issue("warn", "RL-P1", f"穿外层衣物的人在本镜做“{POSE_CHANGE_RE.search(beats_txt).group(0)}”：外套会变形（VIDEO-RCA 10/10），"
+                                           "建议拆成站定起始的下一镜（K-WRT-704 / QW-W12）"))
     cg = CAMERA_GAZE_RE.search(body)
     if cg:
         out.append(_issue("warn", "RL-E2", f"H3 正文写了看镜头：“{cg.group(0)}”（项目方 R11-2：演员不看镜头；交写作方）"))

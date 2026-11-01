@@ -36,15 +36,26 @@
 | 12 | full_redo reject-old-jobs 调用参数错误 | ops/logs/reject_old_jobs.err.log 00:28：“unrecognized arguments: 脸部词、不挂身份脸（IMGFIX 00:3x…”——--note 后的文字带空格没加引号 | 调用方拼命令行 | IMGFIX / WORKFLOW | **已交** | — |
 | 13 | 本机出图道 laptop:0 偶发 VRAM grow failed / Fault failed | D:\ns_comfy\logs\comfy_20261101_183640.err：VRAM grow failed 1、Fault failed 1（aimdo cuMemSetAccess）；118 单 p50 59.3 s、p90 66.1 s、最大 487 s | 和看图争 12 GB 显存 | VQAGATE / LOCALGPU | 已交（同 #10） | — |
 | 14 | 看门狗、监管进程反复起 | data/netfix/supervisor.log 22:30–00:33 共 12 次 START；infra_watchdog.log 21:52–22:28 杀 ssh 52 次（22:34 改成只探测之后为 0） | 监管进程被 ensure / 重载反复拉起 | NETFIX | 已交（报告给 NETFIX），22:34 之后看门狗不再杀 | — |
-| 15 | 孤儿 / 闲置进程 | gpu33：bench2.py h3（2 天 4 小时，0 CPU，父进程 35779）；gpu36：bakeoff run.py gen（13 小时，futex 等待，0 CPU）；两台 pagelock.py 锁 148 / 122 GB 页缓存（有意为之） | 旧实验没收尾 | BAKEOFF / 总调度 | **待批**（不占 GPU，没 kill；kill 前要负责方确认） | — |
+| 15 | 孤儿 / 闲置进程 | gpu33：bench2.py h3（2 天 4 小时，0 CPU，父进程 35779）；gpu36：bakeoff run.py gen（13 小时，futex 等待，0 CPU）；两台 pagelock.py 锁 148 / 122 GB 页缓存（有意为之） | 旧实验没收尾 | 总调度 | **登记不处理**（总调度 01:2x 定：bench2.py 在 /root/claude-kimi-ns-studio-v1 下，不是本项目；bakeoff 负责方不确定；都不 kill） | — |
 | 16 | ComfyUI 常驻内存大 | RSS：gpu33 51 / 84 / 49 GB，gpu36 89 / 70 / 84 GB（--cache-ram 64 96 / 56 88）；gpu36 可用内存 90 GB、free 13 GB；两次采样（00:33 / 00:54）gpu36 没涨 | --cache-ram 第二个值 = 非活动缓存上限（cli_args.py:141），RSS 落在设定范围内 | — | 记录：未见泄漏趋势，gpu36 余量偏紧，建议观察 | — |
 | 17 | 服务器负载 | gpu33 load 229（00:3x 的 5 分钟均值）→ 7.9（01:00）；gpu36 98 → 19.7 | v7_lipsync 吃满 96 核（VQAGATE 已修线程限制） | VQAGATE | 已消退 | — |
 
 | 18 | gpu36 两条出图道 01:09 起没人派单（P0） | 笔记本 override_state.json gpu36=server（01:09:07）→ 笔记本 hold 了 gpu36:0/1；gpu36 本机 control.json（01:09:34 推）override_phases gpu36='draining'、only=__none__；gpu36 :8188 / :8189 最近 15 分钟 0 单，GPU 0% | server-control 推到 gpu36 的是切换前算出的 phase，翻成 server 后没有重推 | NETFIX | **已交**（01:14） | — |
-| 19 | 香港线路下 gpu33 道仍然每单多 100 s | ep03-S5：01:09:12 派，01:09:14 开始执行，35 s 执行完，01:11:37 才 rendered（render_s 145.1）；ep03-S4 render_s 157.5 / gpu_s 39.8；supervisor.log 01:08–01:11 gpu33-l0 / l1 / l3 一直报 “PROBE slow… timeout” | gpu33 的转发看起来还没走香港线路，或者这条线下行慢 | NETFIX | **已交** | — |
+| 19 | 香港线路下服务器道（gpu33 和 gpu36）仍然每单多约 100 s，全花在下载 PNG 上 | ep03-S5：01:09:12 派，01:09:14 开始执行，35 s 执行完，01:11:37 才 rendered（render_s 145.1）；ep03-S4 render_s 157.5 / gpu_s 39.8；supervisor.log 01:08–01:11 gpu33-l0 / l1 / l3 一直报 “PROBE slow… timeout” | gpu33 的转发看起来还没走香港线路，或者这条线下行慢 | NETFIX | **已交** | — |
+| 19b | （补充证据）| ep02-S9：gpu36:1 01:16:07 执行完，3.1 MB 原图 01:17:43 才写进 data/renders/ep02/S9/takes/image_001_21ed6840_raw.png，约 33 KB/s；ep02-S8 01:16:21 → 01:17:58 同样慢。派单到开始执行只要 2–17 s（上传已经快了），下载没变快 | ComfyUI 端口转发（l0/l1/l3）可能没走香港线路，或者这条线下行就是封顶 | NETFIX | **已交** | — |
 | 20 | 本机看图被校准脚本长时间占用，laptop:0 出图道饿死 | 01:15：4080 显存 11.7 GB、利用率 100%，18388 队列为空；看图 heartbeat state=running；8870 的客户端包括 tools/vqa/v6_calib.py（pid 19784，00:19:34 起）；producer 01:09:41 派到 laptop:0 的 ep10-S3 01:15 仍没出图 | 实验脚本和生产共用同一个看图实例，没有让卡 | VQAGATE | **已交** | — |
 | 21 | producer.err 里 cv2 在笔记本上读服务器路径 | “imread_('/root/claude-kimi-ns-studio-v1/ComfyUI/output/gpu3/ns_final/ep01-S3_image_v9_00002_.png'): can't open/read file”（2 次，cv2 进程启动后 0.03 s 和 34 s）——这是 host_path 被拿到本机读 | 来源没定位到（producer._postflight 只把 host_path 交给 remote_score；本机 gaze_mp / postflight 读到会静默返回 None → 这一项等于没测） | REFLOCK / VQAGATE | **已交**（附带：未测项要确认没有被当成通过） | — |
 | 22 | 待重启才生效的改动在堆积 | VQAGATE K-OPS-V15（Q2–Q8 已经不过的图不送看图；11-01 08–16 点 214 张里有 151 张属于这种）01:1x 落地，producer 01:08 重启之后才加的 | — | 总调度安排 | **待批**：下一次 producer 重启（按 E05 的方式不 pause，一分钟内完成） | — |
+
+| 23 | ~~服务器 ComfyUI 没有日志文件~~（初判错误，01:2x 更正） | gpu33 三个 ComfyUI 是 systemd 单元 ns-comfy@{0-8188,1-8189,3-8191}，stdout 那个 socket 是 journald，日志一直在（journal 共 1.1 GB；近 3 小时 error 0 条）；gpu36 的 :8188 / :8189 写 /root/work/fredw/comfy/logs/gpu{0,1}.log，:8190 写 longshot/logs/lane.log，都不到 1 MB，之前没有轮转 | — | DEBUG-RSI | **已修**：gpu36 加 /etc/logrotate.d/ns-comfy-gpu36（50 MB 轮转、留 7 份、copytruncate，**不用重启 ComfyUI**，logrotate -d 验证通过）；gpu33 本来就由 journald 管 | K-OPS-E07 |
+| 24 | gpu36 日志里有 LoRA 文件损坏、cuDNN 报错、OOM | gpu0.log：“h3-realism-people-t2v-i2v-r2v.safetensors … Tensor extends past the end of the file”（文件不完整）、cuDNN “No valid execution plans” 1 次、OOM 1 次；gpu1.log：OOM 3 次、VRAM grow failed 2 次；lane.log OOM 2 次；三个日志一共 7 次 Processing interrupted | 这个 LoRA 现在两台服务器的 loras 目录里都找不到，应该已被替换或移走，属于旧问题；OOM 同第 9 条（看图和出图同卡，L-100 已改为看图专用卡）；interrupted 和第 4 条全局打断有关（E03 已修） | VIDEO-RCA / VQAGATE | 记录 | — |
+
+## 重启后 10 分钟（01:08:55–01:19:25，笔记本 producer 44720）
+
+- 派单：gpu33:1 1 单、gpu33:3 1 单（之后 gpu33 进入 draining，交给服务器）、gpu36:0 2 单、gpu36:1 2 单（01:09–01:15 因问题 18 空了 6 分钟）、laptop:0 2 单，两单都没出（问题 20：01:14:41 infra_error “同卡看图服务 300s 内没让出”）、gpu33:0 被 IMGFIX 的实验占着、gpu36:2 被 VIDEO-RCA 占着。
+- E05 生效：gpu36:1 01:17:44 出完 ep02-S9，01:17:55 就派了 ep04-S1，不再等打分。
+- 每单：派单 → 开始执行 2–17 s；GPU 35–40 s；执行完 → rendered 97–108 s（下载，问题 19）；render_s 137–158 s。
+- 打分：10 分钟内这 4 单一个都没打完（contract_s 还没出），打分 p50 > 8 分钟，和问题 6 一致。
 
 ## 修了什么
 
@@ -57,3 +68,8 @@
 
 现状：gpu33 道 → remote_score.postflight_full 一次 ssh 在 gpu33 GPU 上读原始输出、复现后处理再打分；gpu36 道 → 交付图上传到 gpu33 打分；看图 Q9 走笔记本 8870 或 gpu36 8870（内网代理）。每单要经跳板 1–2 次 ssh，还要传参考图。
 改法：服务器常驻 producer 本来就在本机跑契约打分（OFFLINE_SELF）。把“出图 + 打分”整段交给出图那台服务器的常驻 producer（K-OPS-N06 的分区交还），笔记本只收结果 json + 缩略图（NETFIX outbox 回传）。前提是服务器资产补推完（assets_ready.json）。笔记本这边不必新写打分代码，等 NETFIX 交还分区即可。耗时实测待交还后做。
+
+## 操作记录
+
+- 01:0x 我在 gpu33 上 kill 了 pid 1531364（`bash -s`，已挂约 15 分钟，没有子进程，阻塞在 do_wait）。**推断是我自己的探测进程**：它的启动时间和我那次超时的探测吻合。kill 之后没看到别的会话报错。
+- 从此以后：探测命令在服务器上一律套 `timeout`，退出时清理自己留下的临时文件和进程（K-OPS-E06）。

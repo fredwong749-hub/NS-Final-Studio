@@ -201,10 +201,10 @@ LIVE_PREFIX = ("data/renders/", "data/producer/", "data/pipeline/runs/series10_v
 def required_data() -> set[str]:
     """生产必需、服务器副本可能缺的数据：remote_preflight 的资产图清单（选定设定图 / 身份脸 / 单品图）+ 首帧作业参考图"""
     sys.path.insert(0, str(ROOT / "tools/pipeline"))
-    import remote_preflight as RP
-    out = set()
-    for paths in list(RP.asset_paths(ROOT).values()) + list(RP.job_ref_paths(ROOT).values()):
-        out |= {p.replace("\\", "/") for p in paths if not Path(p).is_absolute()}
+    # 总调度 01:2x（K-OPS-W13）：清单 = producer preflight（I1–I9）实际用到的文件——直接复用 frame_job.build_first 的作业依赖
+    # （tools/pipeline/preflight_deps.py），不再自己另列一份（01:14 场景底图漏列，服务器 I5 每单挡）
+    import preflight_deps as PD
+    out = set(PD.preflight_deps()["files"])
     # VOICE10 11-01（K-EDT-022，总调度授权对接）：成片在服务器合成 → 每个说话人的参考音频 / 音色元数据也是生产必需
     # （config/voices.json characters[].ref_wav / asset；缺了 ns_post.tts.tts_preflight 会 hold_tts）
     try:
@@ -816,8 +816,10 @@ def push_required(host: str, batch_mb: float = 2.0) -> dict:
     # NETFIX 交接（总调度 23:3x）：资产到位后它自动把笔记本的临时出图覆盖切回服务器——在这里留标记
     mk = ROOT / "data/autopilot/assets_ready.json"
     d = jl(mk, {}) or {}
-    d[host] = {"ready": not left, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "sent": sent, "missing": left[:50],
-               "checked": len(loc), "by": "WORKFLOW resident_sync.push_required"}
+    # 总调度 01:2x：推送方不写 ready——推完只记 pushed；由 FACTORY 在服务器上跑 dryrun preflight，0 挡后才写 ready=true
+    d[host] = {**(d.get(host) or {}), "ready": False, "pushed": not left, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "sent": sent,
+               "missing": left[:50], "checked": len(loc), "by": "WORKFLOW resident_sync.push_required",
+               "awaiting": "FACTORY 服务器 dryrun preflight 0 挡后写 ready"}
     js(mk, d)
     return {"host": host, "sent": sent, "estimate": est, "missing": len(left)}
 

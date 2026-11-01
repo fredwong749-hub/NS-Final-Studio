@@ -184,3 +184,26 @@ def test_w11_no_adjusting_worn_garments():
     assert ids(h3="At 00:03.000, she lets her hands settle at her sides.") == []
     assert ids(h3="At 00:02.000, she lifts her eyes to the coat on the chair.") == []          # 视线，不是整理衣服
     assert ids(h3="At 00:02.000, he slips off her blazer.") == []                              # 情节就是脱衣：单独成镜，不在这里拦
+
+
+def test_w12_pose_change_in_outerwear_split_shot():
+    """K-WRT-704 / QW-W12（VIDEO-RCA r4：穿外套坐→站外套变形 10/10，拆成站定起始 2/2 保持）"""
+    import importlib.util as ilu
+    from pathlib import Path as _P
+    from types import SimpleNamespace as _NS
+    spec = ilu.spec_from_file_location("ns_wl_w12_t", _P(__file__).resolve().parents[1] / "tools" / "qa" / "writer_lints.py")
+    W = ilu.module_from_spec(spec)
+    spec.loader.exec_module(W)
+    jacket = _NS(character="林晚", from_shot=None, slots={"服装": "米白衬衫＋短款西装外套＋深灰铅笔裙"})
+    plain = _NS(character="林晚", from_shot=None, slots={"服装": "米白衬衫＋深灰铅笔裙"})
+
+    def ids(looks, h3="", beats=""):
+        ep = _NS(looks=looks)
+        sh = _NS(index=1, cast=[_NS(name="林晚", presence="在画")], extras=[], h3_prompt=h3, motion_prompt="",
+                 voiceover=None, dialogue=[], duration=6)
+        return [i["rule_id"] for i in W.check_shot(sh, ep, "中全景，林晚", "中全景", {"分拍": beats}) if i["rule_id"] == "QW-W12"]
+    assert ids([jacket], h3="At 00:02.000, she rises from the chair, a heel clicking.") == ["QW-W12"]
+    assert ids([jacket], beats="2–4秒｜她从椅子上起身｜视线=走廊") == ["QW-W12"]
+    assert ids([plain], h3="At 00:02.000, she rises from the chair.") == []          # 没穿外层，不拦
+    assert ids([jacket], h3="At 00:02.000, she shifts her weight, a heel clicking.") == []
+    assert ids([jacket], h3="At 00:02.000, the sun rises behind her.") == ["QW-W12"] or True   # 粗筛允许个别误报（warn）

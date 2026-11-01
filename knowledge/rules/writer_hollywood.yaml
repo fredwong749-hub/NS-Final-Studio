@@ -68,3 +68,20 @@ rules:
     confidence: medium
     status: 待验
     date: 2026-11-02
+  - id: K-WRT-H06
+    check: [tests/test_hollywood_r5.py]
+    domain: writer
+    link: P3-P4
+    title: 改写时会被剧情事实核对拦下的写法（r5 实测，bug→规则）：结尾 / 屏幕上加新信息、给台词加一层新意思、加新的道具交互动作、把后面的事件提前
+    when: 在不改剧情的前提下改写台词 / 镜头描述（HOLLYWOOD r5 及以后任何“只改表达”的返修）
+    then: 只改表达不加事实。机检 HW-F1（hollywood_r5.fact_drift_lint）：镜头描述里出现原稿全集没有的引号文字或时间说法 → 直接作废；其余几类由事实核对调用拦
+    targets: [{kind: writer_prompt, section: 分拍与动作}]
+    writer_text: 只改表达、不加事实：结尾钩子用原稿已有的事来做，不在最后几秒加新消息、新时间（如“明晚八点”）、新人物入画、新痕迹或让睡着的人醒来；手机屏幕 / 纸面上不写原稿没有的文字；改台词时不要多加一层意思（如“签不签，我说了算”）；不要为了动作感新增道具交互（按按钮、勺子掉落溅汤、起身又坐回）；不要把后面才发生的事提前到镜1 当钩子；原稿写“两人对视”就保留对视，不改成看镜子里的自己。
+    evidence:
+      - {src: data/review_pages/hollywood_r5/ep04_seg1/log.txt, note: "镜8 屏幕“预约单·明晚八点”、镜10“明晚八点，别迟到”、倒影颈侧新痕迹、陈宇睁眼 → invented"}
+      - {src: data/review_pages/hollywood_r5/ep02_seg1/log.txt, note: "镜1 新增按楼层按钮 ×5 稿；镜2 对视改成看镜面墙里的自己 ×5 稿 → event 偏差"}
+      - {src: data/review_pages/hollywood_r5/ep06_try1_facts_v1/log.txt, note: "台词多出信息“签不签，我说了算”“这一眼，算数”→ line 偏差"}
+      - {src: data/review_pages/hollywood_r5/ep04_seg1/r1.md, note: "这一版曾通过整稿事实核对（40.7）但含“明晚八点”，续跑时被同一核对拦下 → 整稿核对有漏，HW-F1 代码预检补上"}
+    confidence: high
+    status: 待验
+    date: 2026-11-02

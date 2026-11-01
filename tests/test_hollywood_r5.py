@@ -72,3 +72,21 @@ def test_d_scr_09_recorded():
     mp = (ROOT / "docs/master/MASTER_PICTURE.md").read_text(encoding="utf-8")
     assert "id: D-SCR-09" in od and "| L-096 |" in mp and "| L-097 |" in mp
     assert "50 over 50" in mp
+
+
+def test_k_wrt_h06_fact_drift_lint(R, ep04):
+    pre, orig = ep04
+    assert R.fact_drift_lint(orig, orig) == []
+    blk = R.RL.block_text(orig, 0)
+    bad = orig.replace(blk, blk + "\n**分拍**：0–2秒｜手机屏幕亮起“明晚八点，别迟到”｜视线=屏幕", 1)
+    hits = R.fact_drift_lint(orig, bad)
+    assert any("明晚八点" in h for h in hits) and any("明晚" in h for h in hits)
+
+
+def test_patch_mode_line_patches(R, ep04):
+    pre, orig = ep04
+    nl = R.numbered_lines(orig)
+    c, ch, err = R.apply_patches(orig, [{"line": 3, "new": nl[2][2] + "（改）"}], nl)
+    assert not err and len(ch) == 1 and c.count("（改）") == orig.count("（改）") + 1
+    assert R.apply_patches(orig, [{"line": 1, "new": "**镜9｜img**：x"}], nl)[2]          # 镜号不能改
+    assert R.apply_patches(orig, [{"line": 99999, "new": "x"}], nl)[2]

@@ -93,6 +93,9 @@ def open_video_gate(miss: list[str]) -> None:
 
 
 def push() -> None:
+    if subprocess.run([PY, str(ROOT / "tools/qa/thread_guard.py")]).returncode != 0:
+        say("thread_guard 没过（K-OPS-V13），不推")
+        return
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as t:
         for f in PUSH:

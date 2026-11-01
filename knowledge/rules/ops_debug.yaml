@@ -49,3 +49,27 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-E06
+    domain: ops
+    link: [P7-P8]
+    title: 在服务器上跑的探测 / 分析命令一律套 timeout，加 nice、限线程；退出时清理自己留下的进程和临时文件
+    when: 任何 loop 经 ssh / rssh 在 gpu33 / gpu36 上跑一次性探测或分析脚本
+    then: 远端命令写成 timeout <秒> nice -n 19 env OMP_NUM_THREADS=1 ...；本地超时也要能保证远端会自己退出（不能只靠本地 subprocess 超时）；临时文件放 /tmp/dbg_*，脚本末尾删掉
+    check: 人工（DEBUG-RSI 探测脚本模板）
+    evidence:
+      - {src: docs/debug/DEBUG_r1.md, note: "11-02 00:4x 本地超时后，gpu33 上 bash -s（pid 1531364）留了约 15 分钟，最后手动 kill；11-01 晚 v7_lipsync 吃满 96 核，负载 250"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-E07
+    domain: ops
+    link: [P7-P8]
+    title: 服务器 ComfyUI 日志必须有落点并轮转；轮转用 copytruncate，不为轮转重启 ComfyUI
+    when: 新起或改造服务器上的 ComfyUI 实例
+    then: gpu33 走 systemd ns-comfy@<gpu>-<port>（journald 管）；gpu36 用 nohup 重定向到文件的，在 /etc/logrotate.d/ns-comfy-gpu36 登记（size 50M、rotate 7、copytruncate）；查错先看日志，/history 只做补充
+    check: 人工（logrotate -d /etc/logrotate.d/ns-comfy-gpu36）
+    evidence:
+      - {src: docs/debug/DEBUG_r1.md, note: "11-02 01:2x：gpu36 gpu0.log 713 KB、gpu1.log 835 KB、lane.log 524 KB，之前没有轮转；gpu33 journal 1.1 GB"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

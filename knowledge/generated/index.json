@@ -1,15 +1,15 @@
 {
- "kb_version": "kb-20261102-f5305971",
- "n": 476,
+ "kb_version": "kb-20261102-5e907d0b",
+ "n": 479,
  "by_domain": {
   "render": 77,
   "prompt": 27,
-  "writer": 62,
+  "writer": 63,
   "edit": 45,
   "review": 61,
   "loop": 9,
   "asset": 41,
-  "ops": 99,
+  "ops": 101,
   "ui": 55
  },
  "by_link": {
@@ -19,14 +19,14 @@
   "P11-P12": 23,
   "P11-RETRY": 47,
   "P2-P3": 3,
-  "P3-P4": 77,
+  "P3-P4": 78,
   "P4-P5": 33,
   "P4-P6": 24,
   "P4-P7": 22,
   "P4-P9": 16,
   "P5-P6": 120,
   "P6-P7": 26,
-  "P7-P8": 97,
+  "P7-P8": 99,
   "P8-P10": 16,
   "P8-P9": 12,
   "P9-P10": 18
@@ -3820,6 +3820,48 @@
     {
      "src": "data/autopilot/lookA_hold.json",
      "note": "IMGFIX r5 00:57：林晚造型 A 设定图缺左臂外套袖，20 镜暂缓"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_debug.yaml"
+  },
+  {
+   "id": "K-OPS-E06",
+   "domain": "ops",
+   "link": [
+    "P7-P8"
+   ],
+   "title": "在服务器上跑的探测 / 分析命令一律套 timeout，加 nice、限线程；退出时清理自己留下的进程和临时文件",
+   "when": "任何 loop 经 ssh / rssh 在 gpu33 / gpu36 上跑一次性探测或分析脚本",
+   "then": "远端命令写成 timeout <秒> nice -n 19 env OMP_NUM_THREADS=1 ...；本地超时也要能保证远端会自己退出（不能只靠本地 subprocess 超时）；临时文件放 /tmp/dbg_*，脚本末尾删掉",
+   "check": "人工（DEBUG-RSI 探测脚本模板）",
+   "evidence": [
+    {
+     "src": "docs/debug/DEBUG_r1.md",
+     "note": "11-02 00:4x 本地超时后，gpu33 上 bash -s（pid 1531364）留了约 15 分钟，最后手动 kill；11-01 晚 v7_lipsync 吃满 96 核，负载 250"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_debug.yaml"
+  },
+  {
+   "id": "K-OPS-E07",
+   "domain": "ops",
+   "link": [
+    "P7-P8"
+   ],
+   "title": "服务器 ComfyUI 日志必须有落点并轮转；轮转用 copytruncate，不为轮转重启 ComfyUI",
+   "when": "新起或改造服务器上的 ComfyUI 实例",
+   "then": "gpu33 走 systemd ns-comfy@<gpu>-<port>（journald 管）；gpu36 用 nohup 重定向到文件的，在 /etc/logrotate.d/ns-comfy-gpu36 登记（size 50M、rotate 7、copytruncate）；查错先看日志，/history 只做补充",
+   "check": "人工（logrotate -d /etc/logrotate.d/ns-comfy-gpu36）",
+   "evidence": [
+    {
+     "src": "docs/debug/DEBUG_r1.md",
+     "note": "11-02 01:2x：gpu36 gpu0.log 713 KB、gpu1.log 835 KB、lane.log 524 KB，之前没有轮转；gpu33 journal 1.1 GB"
     }
    ],
    "confidence": "high",
@@ -11157,8 +11199,10 @@
    "then": "在第一个重型 import 之前设线程环境变量（K-OPS-V13 标记块，NS_SCORE_THREADS 可调）；用 onnxruntime / insightface 的给 InferenceSession 默认会话加 intra_op_num_threads；tools/qa/thread_guard.py 静态检查必须 PASS",
    "check": [
     "tools/qa/thread_guard.py",
+    "tools/series10_video/deploy.py",
     "tests/test_vqagate.py"
    ],
+   "enforce": "硬检查（总调度 L-100 第 5 条，11-02 线程问题第二次）——deploy.py push / after_network.py push 先跑 thread_guard，不过就拒绝推送；没过 guard 的脚本不许上服务器跑",
    "evidence": [
     {
      "src": "docs/CHANGELOG_AGENTS.md",
@@ -12107,6 +12151,46 @@
     }
    ],
    "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/writer_hollywood.yaml"
+  },
+  {
+   "id": "K-WRT-H06",
+   "check": [
+    "tests/test_hollywood_r5.py"
+   ],
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "改写时会被剧情事实核对拦下的写法（r5 实测，bug→规则）：结尾 / 屏幕上加新信息、给台词加一层新意思、加新的道具交互动作、把后面的事件提前",
+   "when": "在不改剧情的前提下改写台词 / 镜头描述（HOLLYWOOD r5 及以后任何“只改表达”的返修）",
+   "then": "只改表达不加事实。机检 HW-F1（hollywood_r5.fact_drift_lint）：镜头描述里出现原稿全集没有的引号文字或时间说法 → 直接作废；其余几类由事实核对调用拦",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "分拍与动作"
+    }
+   ],
+   "writer_text": "只改表达、不加事实：结尾钩子用原稿已有的事来做，不在最后几秒加新消息、新时间（如“明晚八点”）、新人物入画、新痕迹或让睡着的人醒来；手机屏幕 / 纸面上不写原稿没有的文字；改台词时不要多加一层意思（如“签不签，我说了算”）；不要为了动作感新增道具交互（按按钮、勺子掉落溅汤、起身又坐回）；不要把后面才发生的事提前到镜1 当钩子；原稿写“两人对视”就保留对视，不改成看镜子里的自己。",
+   "evidence": [
+    {
+     "src": "data/review_pages/hollywood_r5/ep04_seg1/log.txt",
+     "note": "镜8 屏幕“预约单·明晚八点”、镜10“明晚八点，别迟到”、倒影颈侧新痕迹、陈宇睁眼 → invented"
+    },
+    {
+     "src": "data/review_pages/hollywood_r5/ep02_seg1/log.txt",
+     "note": "镜1 新增按楼层按钮 ×5 稿；镜2 对视改成看镜面墙里的自己 ×5 稿 → event 偏差"
+    },
+    {
+     "src": "data/review_pages/hollywood_r5/ep06_try1_facts_v1/log.txt",
+     "note": "台词多出信息“签不签，我说了算”“这一眼，算数”→ line 偏差"
+    },
+    {
+     "src": "data/review_pages/hollywood_r5/ep04_seg1/r1.md",
+     "note": "这一版曾通过整稿事实核对（40.7）但含“明晚八点”，续跑时被同一核对拦下 → 整稿核对有漏，HW-F1 代码预检补上"
+    }
+   ],
+   "confidence": "high",
    "status": "待验",
    "date": "2026-11-02",
    "_file": "knowledge/rules/writer_hollywood.yaml"

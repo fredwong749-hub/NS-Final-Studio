@@ -11,6 +11,7 @@ P4 校验能拦（这里的 QW-W*，接进 tools/validate_qwen_script.py）的�
   QW-W9  人物在画的特写 / 近景 / 中景：img 光线写“光源 + 方向 / 落点”（RESEARCH 真人写实调研）             K-WRT-X05
   QW-W10 局部特写写的是手，动作句又写到肩 / 颈 / 锁骨 / 胸口（ep05-S3/S5 驳回 8 次，VIDEO10 W5）            K-WRT-V10
   QW-W11 分拍写了对身上正穿着的衣服的整理动作（抚平外套下摆…）：视频把外套先脱再穿（VIDEO-RCA 8/8）       K-WRT-702
+  QW-W12 穿外套的人在一镜里做坐→站 / 站→坐 / 起身离开等大幅姿态变化：外套会变形，拆成“站定起始”的下一镜（VIDEO-RCA r4） K-WRT-704
   （QW-CH6 局部角色不写脸 / 头发：已在 validate_qwen_script 里，规则 K-WRT-Q02 补写作方说明）
 
 级别：WRITER_LINT_LEVEL（默认 "warn"，导入关口不因旧稿拦死）；写作链路（tools/pipeline/p4_adapter.py、
@@ -41,7 +42,14 @@ RULES: dict[str, tuple[str, str]] = {
     # RSI r7（VIDEO-RCA r2 实测，K-WRT-702）：分拍写了对身上正穿着的衣服的整理动作 → 8/8 外套先消失再穿回；去掉这一拍 0/2
     "QW-W11": ("warn", "分拍动作不要写对身上正穿着的衣服的整理动作（抚平外套下摆、拉衣角、收紧衣领 / smooths the hem of her blazer…）："
                        "视频模型会把外套先脱掉再穿回。想表达整理 / 镇定，写不碰衣服的动作：手放回身侧、深吸一口气、肩膀放松"),
+    # VIDEO-RCA r4（总调度 11-02 定 K-WRT-704 转正，CONSENT ITERAUDIT -> VIDEO_RCA）：ep01-S3 坐→站外套变形 10/10，
+    # 拆成“镜 B 从站定开始”2/2 外套保持；与 DIRECTOR K-EDT-811（大动作不叠运镜）/ K-EDT-812（动作匹配切）对齐
+    "QW-W12": ("warn", "穿外套 / 西装 / 大衣的人，不在一镜里做完坐→站、站→坐、起身离开这类大幅姿态变化：视频里外套会变形或消失。"
+                       "拆成两镜：这一镜停在准备起身，下一镜从已经站好开始（衔接写“接力｜承：动作｜起身”，剪辑用动作匹配切）"),
 }
+# QW-W12：全身姿态切换词（中文分拍 / H3 英文分拍）
+POSE_CHANGE_ZH = re.compile(r"起身|站起|站了起来|坐下|坐回|落座|从椅子上站|离开座位|起立")
+POSE_CHANGE_EN = re.compile(r"\b(rises?|rising|rose|stands? up|standing up|stood up|gets? up|getting up|got up|sits? down|sitting down|sat down)\b", re.I)
 # QW-W11：动作词 + 衣物词（同一拍 / 同一英文分句里）。中文分拍和 H3 英文分拍都查
 GARMENT_ACT_ZH = re.compile(r"(整理|抚平|抹平|理了理|理一理|拉了拉|拉一拉|拉紧|拉直|拽|扯|收紧|掀起|撩起|扣上|系紧|拢了拢|拢紧|捋平)"
                             r"[^，。；｜]{0,8}(外套|西装|西服|大衣|风衣|夹克|开衫|裙摆|裙子|裙|衣摆|衣角|衣领|领口|袖口|下摆|衬衫)")
@@ -182,6 +190,13 @@ def check_shot(sh, ep, img: str, size: str | None, fields: dict | None = None) -
     beats_zh = ex.get("分拍", "")
     h3 = getattr(sh, "h3_prompt", None) or ""
     h3_beats = h3[h3.find("At 00:"):] if "At 00:" in h3 else ""
+    # QW-W12 穿外层衣物的在画人物 + 全身姿态切换（K-WRT-704）
+    outer_on = [n for n in on if OUTER_RE.search(look_slots_at(ep.looks or [], n, sh.index).get("服装", ""))]
+    pz = POSE_CHANGE_ZH.search(beats_zh + "；" + (getattr(sh, "motion_prompt", None) or ""))
+    pe = POSE_CHANGE_EN.search(h3_beats)
+    if outer_on and (pz or pe):
+        out.append(_issue("QW-W12", f"{'、'.join(outer_on)} 穿着外层衣物，分拍里有「{(pz or pe).group(0)}」：拆成“站定起始”的下一镜",
+                          "分拍" if pz else "H3提示词"))
     # 情节本身就是穿脱（脱下 / 解开 / take off / slips off…）不算：K-WRT-702 要求这类单独成镜、首尾帧画出前后，不在这里拦
     if GARMENT_OFF.search(beats_zh + " " + h3_beats):
         return out

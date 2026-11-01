@@ -26,6 +26,20 @@
   "IPQoS=throughput"
  ],
  "hosts": {
+  "base": {
+   "kind": "base",
+   "forwards": [
+    [
+     22360,
+     "10.0.0.36:22"
+    ],
+    [
+     22330,
+     "10.0.0.33:22"
+    ]
+   ],
+   "probe_http": []
+  },
   "gpu33-l0": {
    "ssh_host": "gpu33",
    "forwards": [
@@ -48,7 +62,8 @@
    ],
    "probe_http": [
     18188
-   ]
+   ],
+   "via": "t"
   },
   "gpu33-l1": {
    "ssh_host": "gpu33",
@@ -60,7 +75,8 @@
    ],
    "probe_http": [
     18189
-   ]
+   ],
+   "via": "t"
   },
   "gpu33-l3": {
    "ssh_host": "gpu33",
@@ -72,7 +88,8 @@
    ],
    "probe_http": [
     18191
-   ]
+   ],
+   "via": "t"
   },
   "gpu36-l0": {
    "ssh_host": "gpu36",
@@ -88,7 +105,8 @@
    ],
    "probe_http": [
     18288
-   ]
+   ],
+   "via": "t"
   },
   "gpu36-l1": {
    "ssh_host": "gpu36",
@@ -100,7 +118,8 @@
    ],
    "probe_http": [
     18289
-   ]
+   ],
+   "via": "t"
   },
   "gpu36-l2": {
    "ssh_host": "gpu36",
@@ -112,63 +131,72 @@
    ],
    "probe_http": [
     18290
-   ]
+   ],
+   "via": "t"
   },
   "gpu33-cmd": {
    "kind": "wsl_mux",
    "ssh_host": "gpu33",
    "sock": "/home/fredw/.ssh/nsnf/gpu33-cmd.sock",
    "forwards": [],
-   "probe_http": []
+   "probe_http": [],
+   "via": "t"
   },
   "gpu36-cmd": {
    "kind": "wsl_mux",
    "ssh_host": "gpu36",
    "sock": "/home/fredw/.ssh/nsnf/gpu36-cmd.sock",
    "forwards": [],
-   "probe_http": []
+   "probe_http": [],
+   "via": "t"
   },
   "gpu33-cmd2": {
    "kind": "wsl_mux",
    "ssh_host": "gpu33",
    "sock": "/home/fredw/.ssh/nsnf/gpu33-cmd2.sock",
    "forwards": [],
-   "probe_http": []
+   "probe_http": [],
+   "via": "t"
   },
   "gpu36-cmd2": {
    "kind": "wsl_mux",
    "ssh_host": "gpu36",
    "sock": "/home/fredw/.ssh/nsnf/gpu36-cmd2.sock",
    "forwards": [],
-   "probe_http": []
+   "probe_http": [],
+   "via": "t"
   },
   "gpu33-cmd3": {
    "kind": "wsl_mux",
    "ssh_host": "gpu33",
    "sock": "/home/fredw/.ssh/nsnf/gpu33-cmd3.sock",
    "forwards": [],
-   "probe_http": []
+   "probe_http": [],
+   "via": "t"
   },
   "gpu33-cmd4": {
    "kind": "wsl_mux",
    "ssh_host": "gpu33",
    "sock": "/home/fredw/.ssh/nsnf/gpu33-cmd4.sock",
    "forwards": [],
-   "probe_http": []
+   "probe_http": [],
+   "via": "t"
   },
   "gpu36-cmd3": {
    "kind": "wsl_mux",
    "ssh_host": "gpu36",
    "sock": "/home/fredw/.ssh/nsnf/gpu36-cmd3.sock",
    "forwards": [],
-   "probe_http": []
+   "probe_http": [],
+   "via": "t"
   },
   "gpu36-cmd4": {
    "kind": "wsl_mux",
    "ssh_host": "gpu36",
    "sock": "/home/fredw/.ssh/nsnf/gpu36-cmd4.sock",
    "forwards": [],
-   "probe_http": []
+   "probe_http": [],
+   "via": "t"
   }
  },
  "tick_s": 5,
@@ -199,14 +227,16 @@
     "47.243.63.181",
     22
    ],
-   "suffix": "-hk"
+   "suffix": "-hk",
+   "relay": "194relay-hk"
   },
   "direct": {
    "check": [
     "sz194.instameta.org",
     19422
    ],
-   "suffix": ""
+   "suffix": "",
+   "relay": "194relay"
   }
  },
  "route_order": [
@@ -216,5 +246,6 @@
  "route_fail_max": 4,
  "route_bad_s": 600,
  "migrate_after_s": 120,
- "_route_note": "K-OPS-N08（总调度 00:5x）：主路香港中转 hkjump→194relay（实测上传 1 条 2.9 MB/s、4 条合计 5.5 MB/s；下载 1 条 1.5 MB/s、4 条 1.55 MB/s，data/netfix/bw_test.jsonl）；hk 入口不通或连续 4 次连不上 → 10 分钟走直连；主路恢复稳定 120 s 后逐条迁回。"
+ "_route_note": "K-OPS-N08（总调度 00:5x）：主路香港中转 hkjump→194relay（实测上传 1 条 2.9 MB/s、4 条合计 5.5 MB/s；下载 1 条 1.5 MB/s、4 条 1.55 MB/s，data/netfix/bw_test.jsonl）；hk 入口不通或连续 4 次连不上 → 10 分钟走直连；主路恢复稳定 120 s 后逐条迁回。",
+ "_r2_note": "r2（总调度 11-02，运维 FONG-QUICK.md）：底座 = 一条香港常驻隧道（base），只转发 127.0.0.1:22360→10.0.0.36:22、22330→10.0.0.33:22；6 条道隧道 + 8 条 WSL 命令主连接全部 via=t 连 gpu36-t / gpu33-t，在底座里直连服务器 sshd，不在跳板上握手。底座退避 15 s 翻倍、最多 300 s（运维要求不许更快）；出现 REMOTE HOST IDENTIFICATION HAS CHANGED 就停止、报 A-HOSTKEY。目标：跳板每小时新建 < 50。"
 }

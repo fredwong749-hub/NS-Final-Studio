@@ -549,7 +549,7 @@ checks:
   # ---------------- 林晚造型 A 设定图换回 v2_s202（RSI 入账，IMGFIX 执行；L-093）
   - id: D-AST-93
     decision: L-093（项目方 11-01 21:4x AskUserQuestion：林晚造型 A 设定图“换回 v2_s202 (Recommended)”；取代 11-01 10:57 的 s101 挑选——当时 v2 不在候选里）
-    title: 林晚造型 A 当前设定图 = adopted/lin_wan_lookA_v2_s202.png
+    title: 林晚造型 A 当前设定图 = adopted/lin_wan_lookA_v2_s202_sleevefix.png（L-101：v2_s202 正面栏补左臂外套袖，总调度按 L-098 代为点选）
     type: grep_present
-    pattern: 'lin_wan_lookA_v2_s202'
+    pattern: 'adopted/lin_wan_lookA_v2_s202_sleevefix\.png'
     paths: [data/pipeline/runs/series10_v1/assets/sheets_chosen.json]
