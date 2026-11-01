@@ -3,7 +3,8 @@
 import { Lightbox } from "../ds/MediaPlayer";
 import { thumb } from "../thumb";
 import { storyFrame, useStoryImages } from "./storyImages";
-import { candidateFor, candLabel, epOf, pickTake, rejectedFor, useCandidates } from "./candidates";
+import { candidateFor, candLabel, epOf, passed, pickTake, rejectedFor, useCandidates } from "./candidates";
+import { MainTag } from "./StatusTags";
 import { CandidateBox } from "./CandidateBox";
 import { Verdict, type VStage } from "./Verdict";
 import { memo, useEffect, useRef, useState, type MouseEvent } from "react";
@@ -70,8 +71,14 @@ function Frame({ s, stage, st }: { s: ShotSummary; stage: "image" | "last"; st: 
   const cands = useCandidates(epOf(s.id));
   const cstage = cands?.[s.id]?.[stage];
   // UIRSI r37（UIAUDIT P1-2，K-UI-D01）：候选还没读回来时说“读取中”，不能说“未出”（把“还在读”说成“没有”）
+  // UIRSI r40（项目方 11-02 00:0x：“我…看到很多错误的图”）：剧本 23:21 逐集重导、镜头重新编号后，旧剧本出的图还挂在新镜号下
+  // （有的甚至还是“当前”尾帧）。/api/candidates 给每版标 script（current / old）：当前版本是旧剧本出的 → 不显示、按“未出（剧本已更新）”处理；
+  // 旧版本不作候选、不计数，只在“旧图”历史入口里能看
+  const oldCur = cstage?.active != null && cstage.takes.find((t) => t.n === cstage.active)?.script === "old";
+  if (oldCur && !hint) url = null;
+  const oldN = cstage?.takes.filter((t) => t.script === "old").length ?? 0;
   const candLoading = cands === null && !url;
-  const cand = !url || hint ? candidateFor(cands, s.id, stage) : null;
+  const cand = !url || hint ? (oldCur ? ([...cstage!.takes].reverse().find(passed) ?? null) : candidateFor(cands, s.id, stage)) : null;
   if (cand) {
     url = cand.url;
     hint = "";
@@ -83,8 +90,8 @@ function Frame({ s, stage, st }: { s: ShotSummary; stage: "image" | "last"; st: 
     hint = "草图·还没进版本";
   }
   const [box, setBox] = useState(false);
-  const rejected = !url ? rejectedFor(cands, s.id, stage) : [];
-  const take = cand ? cand.n : first ? s.first_frame_take : s.last_frame_take;
+  const rejected = !url ? (oldCur ? cstage!.takes.filter((t) => !passed(t)) : rejectedFor(cands, s.id, stage)) : [];
+  const take = cand ? cand.n : oldCur ? null : first ? s.first_frame_take : s.last_frame_take;
   const label = first ? "首帧" : "尾帧";
   const fs = frameState(s, d, stage);
   // UIAUDIT P0-1：列表、大图、剧本阅读页看同一张——还没登记成版本的草图点开就是这张草图（不去版本看图器里显示“0 版”）
@@ -104,7 +111,7 @@ function Frame({ s, stage, st }: { s: ShotSummary; stage: "image" | "last"; st: 
     {big && <Lightbox src={big} onClose={() => setBig(null)} />}
     {box && cstage && <CandidateBox shot={s.id} stage={stage} data={cstage} start={cand?.n ?? rejected[rejected.length - 1]?.n} stale={s.stale_global?.[stage]} onClose={() => setBox(false)} />}
     <div className={`v3-frame${url ? "" : " empty"}${cand ? " cand" : ""}${fs === "stale" ? " stale" : ""}${fs === "bad" ? " bad" : ""}${fs === "orphan" ? " orphan" : ""}${tileFlash ? " live-flash" : ""}`} onClick={open} data-zoom-own title={url ? (cand ? `${label}候选：点开看全部候选、对比（悬停右上角放大镜看原图）` : `${label}：点开全屏对比（首帧 | 尾帧）`) : candLoading ? `正在读取${label}候选` : `还没有${label}`}>
-      {url ? <img key={url} className="live-img" src={thumb(url, 360) ?? url} alt={label} loading="lazy" decoding="async" draggable={false} data-zoom-label={`${short(s.id)} · ${label}${take != null ? ` #${take}` : ""}${cand ? " · 候选" : ""}`} /> : <span className="v3-frame-none">{candLoading ? "读取中…" : `${label}未出`}</span>}
+      {url ? <img key={url} className="live-img" src={thumb(url, 360) ?? url} alt={label} loading="lazy" decoding="async" draggable={false} data-zoom-label={`${short(s.id)} · ${label}${take != null ? ` #${take}` : ""}${cand ? " · 候选" : ""}`} /> : <span className="v3-frame-none">{candLoading ? "读取中…" : oldN ? `${label}未出（剧本已更新）` : `${label}未出`}</span>}
       <TileTop>
         {/* UIRSI r36：78px 窄格里“首帧候选”四个字会把右上角的 ↻ 挤到标签上 → 标签只写“首帧 #n”，“候选”写进底下的候选条（和“用这张”在一起） */}
         <b className="v3-tag" title={cand ? `${label}候选 #${take}：还没设为当前，点“用这张”才用它` : undefined}>
@@ -212,7 +219,11 @@ function VideoTile({ s, st }: { s: ShotSummary; st: Studio }) {
   const fs = frameState(s, d, "video");
   const blk = s.video ? null : videoBlock(s, d);
   // UIRSI r37（UIAUDIT P2）：精修页会播最新一版，画布却写“视频未出”——有版本没设当前时两边都说“有 N 版，还没设为当前”
-  const vPending = !s.video && (s.takes_count?.video ?? 0) > 0;
+  // r40：只数现行剧本出的视频版本（旧剧本的视频不算“待选”）
+  const vc = useCandidates(epOf(s.id))?.[s.id]?.video;
+  const vNew = vc ? vc.takes.filter((t) => t.script !== "old").length : (s.takes_count?.video ?? 0);
+  const vOld = vc ? vc.takes.length - vNew : 0;
+  const vPending = !s.video && vNew > 0;
   const vtake = d?.takes?.active?.video ?? s.latest_take?.video ?? null;
   const vidFlash = useFlash([s.video, vtake]); // PW-017：只闪视频格
   const play = () => void ref.current?.play().catch(() => undefined);
@@ -233,7 +244,7 @@ function VideoTile({ s, st }: { s: ShotSummary; st: Studio }) {
         if (s.video) setBig(true);
         else if (vPending) st.setCanvasMode("edit");
       }}
-      title={s.video ? "悬停预览，点击放大播放" : vPending ? `有 ${s.takes_count.video} 版视频，还没设为当前：点进精修挑一版` : blk ? `还没有视频：${blk}` : "还没有视频"}
+      title={s.video ? "悬停预览，点击放大播放" : vPending ? `有 ${vNew} 版视频，还没设为当前：点进精修挑一版` : vOld ? `有 ${vOld} 版是剧本更新前出的旧视频，不作候选` : blk ? `还没有视频：${blk}` : "还没有视频"}
     >
       {s.video ? (
         <>
@@ -242,7 +253,7 @@ function VideoTile({ s, st }: { s: ShotSummary; st: Studio }) {
         </>
       ) : (
         <span className="v3-frame-none">
-          {vPending ? `视频 ${s.takes_count.video} 版待选` : "视频未出"}
+          {vPending ? `视频 ${vNew} 版待选` : vOld ? "视频未出（剧本已更新）" : "视频未出"}
           {!vPending && blk && blk !== "还没有首帧" && <small>{blk}</small>}
         </span>
       )}
@@ -337,6 +348,7 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
   const [open, setOpen] = useState<null | "first" | "h3">(null);
   const [full, setFull] = useState(false);
   const status0 = shotStatus(s, st, sop);
+  const rowCands = useCandidates(epOf(s.id));
   // UIRSI（BE-5）：没有当前首帧、但有登记好的候选 → 不说“还没有首帧”，主按钮 = 一键用最新候选（10 秒撤销）
   const cands = useCandidates(epOf(s.id));
   const cfirst = !s.first_frame ? candidateFor(cands, s.id, "image") : null;
@@ -393,6 +405,8 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
       <div className="v3-info">
         <div className="v3-l1">
           <b className="v3-sid">{short(s.id)}</b>
+          {/* UIRSI r40：和全剧总览同一套彩色状态标签（最严重的一个；悬停看全部） */}
+          <MainTag st={rowCands?.[s.id]?.status} />
           <MissBadge miss={miss} onJump={() => (st.select(s.id), sbUi.openTableAt(s.id))} />
           <MaterialsBadge shotId={s.id} />
           <span className="v3-meta" title={camRaw(s) ? `剧本原文：${camRaw(s)}` : undefined}>{meta.join(" · ")}</span>

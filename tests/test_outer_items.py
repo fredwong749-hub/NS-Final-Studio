@@ -26,8 +26,15 @@ def _job(sid, img=None):
     return FJ.build_first(UF.project_for(s), ep, sh, s.globals), sh
 
 
+def _without_blazer(img: str) -> str:
+    """CODE-RSI 11-02（K-OPS-C02）：HOLLYWOOD 导入后 ep01-S1 原文已写“外罩短款西装外套敞开”，本测试的前提（正文没写外套）
+    改由夹具造出：去掉写到外套的分句，不依赖现行剧本"""
+    return "，".join(x for x in (img or "").split("，") if "西装外套" not in x)
+
+
 def test_blazer_named_when_img_omits_it():
-    j, sh = _job("ep01-S1")
+    sh0 = P.find_shot(P.load_script(), "ep01-S1")[1]
+    j, sh = _job("ep01-S1", img=_without_blazer(sh0.img_prompt))
     assert "短款西装外套" not in (sh.img_prompt or "")                       # 剧本原文确实没写
     notes = FJ.OUTER_NOTE_RE.findall(j["prompt"])
     assert notes and "短款西装外套" in notes[0] and notes[0].startswith("林晚本镜造型A")

@@ -218,7 +218,8 @@ def part_lock(lock: str, part: str) -> str:
         words = PART_LOCK_WORDS["手"] + PART_LOCK_WORDS["肩"] + PART_LOCK_WORDS["锁骨"] + PART_LOCK_WORDS["胸"]
     else:
         words = next((v for k, v in PART_LOCK_WORDS.items() if k in part), ("甲",))
-    cl = [c for c in re.split(r"[，,；;]", m.group(2)) if c.strip()]
+    # IMGFIX 11-02（K-REN-705 b）：人物卡用顿号串外貌（“蓝发及腰、齐刘海、冷白皮肤”），按顿号也切开，发色句不再连带刘海 / 肤色
+    cl = [c for c in re.split(r"[，,；;、]", m.group(2)) if c.strip()]
     keep = [c for c in cl if any(w in c for w in words)]
     # W5 b（总调度 11-01）：局部范围到了肩 / 颈 / 锁骨 / 胸（头发会入画）→ 保留发色句；
     # ep05-S3/S5 去掉发色句后林晚的发梢被画成黑色。纯手 / 脚局部头发不入画，不加（加了会把构图拉回人像）
@@ -226,6 +227,39 @@ def part_lock(lock: str, part: str) -> str:
         keep += [c for c in cl if HAIR_COLOR_RE.search(c) and c not in keep]
     adult = [c for c in cl if "成年" in c and c not in keep]   # 成年人锁定（HC-07）永远保留（局部里没有这个人的部件时也留年龄句）
     return (m.group(1) + "，".join(adult + keep)) if keep or adult else ""
+
+
+def faced_people(shot, names: list[str]) -> tuple[list[str], list[tuple[str, str]]]:
+    """K-REN-705：→（露脸的人, [(局部的人, 部位原文)]）。露脸 = cast 在画，或局部但 img 原文写到这个人的脸 / 头发
+    （asset_refs.face_described，与挂身份脸同一判断）。没有 cast 行的旧剧本：names 全算露脸"""
+    cast = getattr(shot, "cast", None) if not isinstance(shot, dict) else shot.get("cast")
+    if cast is None:
+        return list(names), []
+    from ns_agent import asset_refs as _AR
+    img = (getattr(shot, "img_prompt", None) if not isinstance(shot, dict) else shot.get("img_prompt")) or ""
+    gv = (lambda c, k: c.get(k) if isinstance(c, dict) else getattr(c, k, None))
+    faced, partial = [], []
+    for c in cast:
+        n, pr = gv(c, "name"), gv(c, "presence")
+        if n not in names:
+            continue
+        if pr == "在画" or (pr == "局部" and _AR.face_described(n, img, names)):
+            faced.append(n)
+        elif pr == "局部":
+            partial.append((n, (gv(c, "part") or "").strip()))
+    return faced, partial
+
+
+PARTIAL_CLAUSE = "{name}只露出{part}，不露脸"
+PARTIAL_RE = re.compile(r"[^，。、；]{1,12}只露出[^，。]{1,30}，不露脸")
+
+
+def partial_clause(partial: list[tuple[str, str]], subject: str | None) -> str:
+    """局部的人（剧本 cast：局部｜部位）：写清只露出该部位、不露脸；部位没写就只写“不露脸”。局部 / 物件特写不加（构图句已限定局部）"""
+    if subject in ("part", "object"):
+        return ""
+    out = [PARTIAL_CLAUSE.format(name=n, part=p) if p else f"{n}不露脸" for n, p in partial]
+    return "，".join(out)
 
 
 def two_shot_clause(n_people: int, subject: str | None) -> str:

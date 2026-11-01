@@ -11,7 +11,11 @@ tentative / stale 只做角标，不藏候选；但项目方判过不合格的�
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import re
+import time
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -21,6 +25,89 @@ STAGES = ("image", "last")
 # 项目方判过不合格的配方（总调度 11-01：“旧配方（v1）首帧是项目方判过不合格的，不应作为‘挑一张用’的候选……只给他看通过的”）
 REJECTED_LABELS = {"旧配方": "旧配方 · 项目方判过不合格"}
 BAD_STATUS = {"failed", "rejected", "error", "fail"}
+
+
+# ---------------------------------------------------------------- 剧本版本（UIRSI r40，项目方 11-02 00:0x：“图片生成错误,你刷新了图片库没有?”）
+# 23:21 HOLLYWOOD 逐集导入后镜头重新编号，新 S1 已不是旧 S1；候选按 epNN/SN 存放，旧剧本出的图还挂在新镜号底下。
+# 口径：take 带 prompt_source.sha256 且等于现行剧本 sha → 现行；否则按出图时间——早于本集最后一次导入（data/import/import_log.jsonl）= 旧剧本版本。
+# 旧版本不删、不改 takes.json，只在接口里标 ok=false / script="old"，不作候选、不计候选数；历史区仍可查看。
+REPO = Path(__file__).resolve().parents[3]
+IMPORT_LOG = REPO / "data" / "import" / "import_log.jsonl"
+SCRIPT = REPO / "data" / "import" / "script_v2.json"
+_EP_RE = re.compile(r"_ep(\d{2})_")
+_imp_cache: dict = {"mt": None, "val": ({}, None)}
+_sha_cache: dict = {"mt": None, "val": None}
+
+
+def import_cutoffs() -> tuple[dict[int, str], str | None]:
+    """→ ({集号: 本集最后一次导入时间 ISO}, 整本导入的最后时间)。逐集合并导入按路径里的 _epNN_ 或 episodes 字段归集；
+    认不出集号的导入算整本（对所有集生效）"""
+    try:
+        mt = IMPORT_LOG.stat().st_mtime
+    except OSError:
+        return {}, None
+    if _imp_cache["mt"] == mt:
+        return _imp_cache["val"]
+    per: dict[int, str] = {}
+    whole: str | None = None
+    for ln in IMPORT_LOG.read_text(encoding="utf-8").splitlines():
+        try:
+            e = json.loads(ln)
+        except ValueError:
+            continue
+        if e.get("rc") not in (0, None) or not e.get("at"):
+            continue
+        eps = {int(x) for x in (e.get("episodes") or []) if str(x).isdigit()}
+        if not eps:
+            m = _EP_RE.search(str(e.get("path") or ""))
+            eps = {int(m.group(1))} if m else set()
+        if eps:
+            for n in eps:
+                per[n] = max(per.get(n, ""), e["at"])
+        else:
+            whole = max(whole or "", e["at"])
+    _imp_cache.update(mt=mt, val=(per, whole))
+    return per, whole
+
+
+def script_sha() -> str | None:
+    try:
+        mt = SCRIPT.stat().st_mtime
+    except OSError:
+        return None
+    if _sha_cache["mt"] != mt:
+        _sha_cache.update(mt=mt, val=hashlib.sha256(SCRIPT.read_bytes()).hexdigest())
+    return _sha_cache["val"]
+
+
+def cutoff_for(ep: int) -> str | None:
+    per, whole = import_cutoffs()
+    c = [x for x in (per.get(ep), whole) if x]
+    return max(c) if c else None
+
+
+def _prompt_sha(t: dict) -> str | None:
+    for src in (t, t.get("params") or {}, t.get("producer") if isinstance(t.get("producer"), dict) else {}):
+        ps = src.get("prompt_source") if isinstance(src, dict) else None
+        if isinstance(ps, dict) and ps.get("sha256"):
+            return ps["sha256"]
+    return None
+
+
+def script_version(t: dict, ep: int) -> str:
+    """'current' / 'old'（旧剧本版本）/ 'unknown'（没有导入记录）"""
+    sha = _prompt_sha(t)
+    if sha and sha == script_sha():
+        return "current"
+    cut = cutoff_for(ep)
+    if not cut or not t.get("created_at"):     # 没有导入记录 / 这一版没记出图时间：判不了，不藏
+        return "unknown"
+    return "current" if t["created_at"] >= cut else "old"
+
+
+def cutoff_label(ep: int) -> str:
+    cut = cutoff_for(ep)
+    return f"{cut[5:10].replace('-', '/')} {cut[11:16]}" if cut else "?"
 
 
 def _verdict(t: dict, bad: str | None) -> tuple[bool, str | None]:
@@ -84,17 +171,32 @@ def candidates(ep: int):
                 prm = t.get("params") or {}
                 bad = P.bad_reason(t) if hasattr(P, "bad_reason") else None
                 ok, why = _verdict(t, bad)
+                ver = script_version(t, ep)
+                if ver == "old":     # 旧剧本版本：不作候选（不管它过没过契约）；历史区仍可看。原来的“不合格 / 脸不像”等原因保留在前面
+                    old_why = f"旧剧本版本（剧本 {cutoff_label(ep)} 更新前出的，镜头可能已重新编号）"
+                    ok, why = False, f"{why}；{old_why}" if why else old_why
                 post = ((t.get("gen_contract") or {}).get("post") or {}) if isinstance(t.get("gen_contract"), dict) else {}
                 items.append({"n": t["n"], "url": _url(P, t.get("file")), "label": prm.get("label"),
                               "tentative": bool(prm.get("tentative")), "source": t.get("source"),
                               "bad": bad, "ok": ok, "why_not": why, "created_at": t.get("created_at"),
                               # 出图契约（GEN_CONTRACT postflight）结论：pass = 项目方授权“通过契约即自动采用”
                               "contract": post.get("status") if isinstance(post, dict) else None,
-                              "rejected": bool(prm.get("rejected"))})
+                              "rejected": bool(prm.get("rejected")), "script": ver})
             row[st] = {"active": (data.get("active") or {}).get(st), "takes": [x for x in items if x["url"]]}
+        # UIRSI r40：视频版本也标剧本版本（画布“视频 N 版待选”只数现行剧本出的）
+        vt = [x for x in data.get("takes") or [] if x.get("stage") == "video"]
+        if vt:
+            row["video"] = {"active": (data.get("active") or {}).get("video"),
+                            "takes": [{"n": x["n"], "script": script_version(x, ep), "created_at": x.get("created_at")} for x in vt]}
+        # UIRSI r40（项目方：“哪些是重置的,过期的,就给它用不同的颜色 label 一下”）：状态标签，汇总 producer 登记 / 剧本版本 / 看图判定
+        try:
+            from ns_api import shot_status  # noqa: PLC0415
+            row["status"] = shot_status.tags_for(sid, row, data)
+        except Exception:  # noqa: BLE001 — 标签读坏不影响候选
+            pass
         if row:
             out[sid] = row
-    return {"episode": ep, "shots": out}
+    return {"episode": ep, "shots": out, "script_cutoff": cutoff_for(ep)}
 
 
 class UnsetBody(BaseModel):

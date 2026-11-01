@@ -329,3 +329,39 @@ def test_multi_limb_needs_both_v6_and_vlm():
     assert "多肢" not in g["fails"] and any("多肢" in x for x in g["soft"])
     g = SC.gate({**base, "v6": {"status": "通过"}, "vlm": {"defects": ["extra_limbs"]}}, {})
     assert "多肢" not in g["fails"] and any("多肢" in x for x in g["soft"])
+
+
+def test_v7_dialogue_windows_from_stamps():
+    """V7 只在台词时段算（VIDEO-RCA r3）：从编译稿分拍取 “At mm:ss, … says: <d>…</d>” → [起点−0.5, min(下一拍, 起点+字数×0.3+0.6)+0.5]"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("s10v_score_clip_v7", ROOT / "tools/series10_video/score_clip.py")
+    SC = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(SC)
+    except Exception as e:  # noqa: BLE001
+        pytest.skip(f"score_clip 依赖不全：{e}")
+    p = ("At 00:02.000, his eyes drop to her heels. At 00:04.000, a man with a low voice (S1) says: <d>[Chinese] 第一天就加班。</d> "
+         "his eyes lifting. At 00:06.000, the shot ends.")
+    assert SC.dialogue_windows(p) == [[3.5, 6.5]]
+    assert SC.dialogue_windows("no dialogue here") == []
+
+
+def test_v7_masked_corr_ignores_noise_outside_window():
+    import importlib.util
+    import numpy as np
+    spec = importlib.util.spec_from_file_location("s10v_v7", ROOT / "tools/series10_video/v7_lipsync.py")
+    V = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(V)
+    except Exception as e:  # noqa: BLE001
+        pytest.skip(f"v7_lipsync 依赖不全：{e}")
+    n = 120
+    rng = np.random.default_rng(0)
+    mouth = np.zeros(n)
+    audio = np.zeros(n)
+    audio[:60] = np.sin(np.arange(60) / 3) + 1          # 台词外：脚步 / 配乐（嘴不动）
+    mouth[60:100] = rng.random(40)
+    audio[60:100] = mouth[60:100]                       # 台词时段：嘴和声同步
+    m = V.window_mask([[60 / 24, 100 / 24]], n)
+    assert V.best_corr_masked(mouth, audio, 3, m) > 0.9
+    assert V.best_corr(mouth, audio, 3) < V.best_corr_masked(mouth, audio, 3, m)

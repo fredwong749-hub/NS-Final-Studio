@@ -130,6 +130,17 @@ export function PeopleHub({ cid, onListChanged }: { cid: string; onListChanged?:
   // UIRSI r37（项目方 11-01 17:2x，L-086：身份脸只接受脸部裁切；后端 set_face 已 422 拦）：前端先按图的宽高比认出明显不是脸部裁切的候选
   // （后端以后若在候选里给 crop_ok / crop_why 就以后端为准），点了不调接口、直接说明；按钮和看大图、再生成都保留
   const [notCrop, setNotCrop] = useState<Record<string, string>>({});
+  // UIRSI r40（项目方 23:57:52–23:58:01 九秒内连点三次，把已定的林晚造型 A 设定图换掉了；事后说“只是点着看”）：
+  // ① 点图本身只看大图，必须点“用这张”才换；② 换掉项目方已定的图（owner_decisions 的锁）先一键确认“换 / 不换”；③ 换完 10 秒内可撤销（act 已有）
+  type DLock = { id: string; decision: string | null; when: string | null; title: string; kind: "sheet" | "face"; match: string; cid?: string };
+  const [locks, setLocks] = useState<DLock[]>([]);
+  const [ask, setAsk] = useState<{ text: string; run: () => void } | null>(null);
+  useEffect(() => {
+    fetch("/api/decision-locks")
+      .then((r) => (r.ok ? r.json() : { locks: [] }))
+      .then((x: { locks?: DLock[] }) => setLocks(x.locks ?? []))
+      .catch(() => setLocks([]));
+  }, []);
   const [regenFor, setRegenFor] = useState<{ kind: "sheet" | "face" | "item"; file: string; title: string; base: string; look?: string; item_id?: string } | null>(null);
   const [askPart, setAskPart] = useState<{ it: HubItem; lk: HubLook; options: string[]; others: string[] } | null>(null);
   const { push, view: toasts } = useToasts();
@@ -204,12 +215,23 @@ export function PeopleHub({ cid, onListChanged }: { cid: string; onListChanged?:
       return;
     }
     const prev = d.face?.file ?? null;
-    void act(`face:${file}`, () => hubApi.face(cid, file), `${d.name}：身份脸已换成这张`, prev ? () => hubApi.face(cid, prev) : undefined);
+    const run = () => void act(`face:${file}`, () => hubApi.face(cid, file), `${d.name}：身份脸已换成这张`, prev ? () => hubApi.face(cid, prev) : undefined);
+    guardLock("face", prev, file, run);
   };
   const setSheet = (lk: HubLook, file: string) => {
     const prev = lk.sheet?.file ?? null;
-    void act(`sheet:${lk.look}:${file}`, () => hubApi.sheet(cid, lk.look, file), `造型 ${lk.look}：设定图已选定`, prev ? () => hubApi.sheet(cid, lk.look, prev) : undefined);
+    const run = () => void act(`sheet:${lk.look}:${file}`, () => hubApi.sheet(cid, lk.look, file), `造型 ${lk.look}：设定图已选定`, prev ? () => hubApi.sheet(cid, lk.look, prev) : undefined);
+    guardLock("sheet", prev, file, run, `造型 ${lk.look} 设定图`);
   };
+  /** 当前这张受项目方已定决策锁着、而要换成别的 → 先一键确认；否则直接换 */
+  function guardLock(kind: "sheet" | "face", cur: string | null, next: string, run: () => void, what = "身份脸") {
+    const lk = cur
+      ? locks.find((l) => l.kind === kind && (kind === "face" ? l.cid === cid && cur === l.match && next !== l.match : cur.includes(l.match) && !next.includes(l.match)))
+      : undefined;
+    if (!lk) return run();
+    const name = lk.match.split("/").pop()?.replace(/\.(png|jpe?g|webp)$/i, "") ?? lk.match;
+    setAsk({ text: `这张${what}已按你 ${lk.when ?? "之前"} 的决定定为 ${name}${lk.decision ? `（${lk.decision}）` : ""}，确定要换吗？`, run });
+  }
   const setPart = (lk: HubLook, part: Part, item: HubItem | null) => {
     const prev = part.item_id;
     void act(
@@ -322,7 +344,7 @@ export function PeopleHub({ cid, onListChanged }: { cid: string; onListChanged?:
         <div className="hub-faces">
           {(d.faces ?? []).map((f) => (
             <figure key={f.file} className={`hub-face${f.current ? " on" : ""}`}>
-              <button className="hub-face-img" onClick={() => (f.current ? setBig({ src: f.url, alt: `${d.name} 身份脸` }) : setFace(f.file))} disabled={!!busy} title={f.current ? "当前身份脸 · 点开看大图" : cropWhy(f.file) ? `不能设为身份脸：${cropWhy(f.file)}（点一下看说明）` : "点一下设为当前身份脸"} data-crop={cropWhy(f.file) ? "no" : undefined}>
+              <button className="hub-face-img" onClick={() => setBig({ src: f.url, alt: `${d.name} 身份脸${f.current ? "" : "候选"}` })} disabled={!!busy} title={f.current ? "当前身份脸 · 点开看大图" : cropWhy(f.file) ? `不能设为身份脸：${cropWhy(f.file)}（点开看大图）` : "点开看大图；要换成这张，点下面的“用这张”"} data-crop={cropWhy(f.file) ? "no" : undefined}>
                 <img
                   src={thumb(f.url, 360) ?? f.url}
                   alt={`${d.name} 身份脸候选`}
@@ -333,7 +355,7 @@ export function PeopleHub({ cid, onListChanged }: { cid: string; onListChanged?:
                     if (r < 0.6 || r > 1.6) setNotCrop((m) => (m[f.file] ? m : { ...m, [f.file]: `宽高比 ${r.toFixed(2)}，不像脸部裁切` }));
                   }}
                 />
-                {f.current ? <span className="hub-badge ok">当前</span> : <span className="hub-hover">{cropWhy(f.file) ? "不是脸部裁切" : "设为当前"}</span>}
+                {f.current ? <span className="hub-badge ok">当前</span> : <span className="hub-hover">{cropWhy(f.file) ? "不是脸部裁切" : "看大图"}</span>}
               </button>
               <figcaption>
                 {humanNote(f.note) || fileLabel(f.file)}
@@ -573,6 +595,23 @@ export function PeopleHub({ cid, onListChanged }: { cid: string; onListChanged?:
         />
       )}
       {big && <Lightbox src={big.src} alt={big.alt} onClose={() => setBig(null)} />}
+      {ask && (
+        <Modal
+          title="换掉已定的图？"
+          sub={ask.text}
+          onClose={() => setAsk(null)}
+          foot={
+            <>
+              <Button variant="secondary" onClick={() => setAsk(null)} autoFocus>
+                不换
+              </Button>
+              <Button variant="primary" onClick={() => (ask.run(), setAsk(null))}>
+                换
+              </Button>
+            </>
+          }
+        />
+      )}
       {toasts}
     </div>
   );
@@ -927,11 +966,11 @@ function LookSection({
                 <button
                   className={`hub-cand${c.current ? " on" : ""}`}
                   disabled={!!busy}
-                  onClick={() => (c.current ? onBig({ src: c.url, alt: `造型 ${lk.look} 种子 ${c.seed}` }) : onSheet(lk, c.file))}
-                  title={c.current ? "当前设定图" : "点一下选定这张"}
+                  onClick={() => onBig({ src: c.url, alt: `造型 ${lk.look} 种子 ${c.seed}` })}
+                  title={c.current ? "当前设定图 · 点开看大图" : "点开看大图；要换成这张，点下面的“用这张”（UIRSI r40：点图本身不再直接换）"}
                 >
                   <img src={c.thumb ?? thumb(c.url, 360) ?? c.url} alt={`造型 ${lk.look} 候选 种子 ${c.seed ?? ""}`} loading="lazy" data-zoom-label={`${name} · 造型${lk.look} · 设定图候选${c.seed ? ` · 种子 ${c.seed}` : ""}${c.current ? " · 当前" : ""}`} />
-                  <span>{c.current ? "✓ 当前" : `种子 ${c.seed ?? "—"} · 选这张`}</span>
+                  <span>{c.current ? "✓ 当前" : `种子 ${c.seed ?? "—"} · 看大图`}</span>
                 </button>
                 <Verdict
                   kind="sheet"

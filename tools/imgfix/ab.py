@@ -42,7 +42,7 @@ def arm_apply(job: dict, arm: str) -> dict:
     p, refs = job["prompt"], list(job["refs"])
     name = "林晚"
     t = _target(job)
-    if arm in ("A0", "ACC", "ACC2", "ACC3", "ACC4", "ACC5"):        # ACC = 验收（朝向句在身份脸句后，作废）；ACC2 = 验收（朝向句在最前），都是重编后的生产作业原样
+    if arm in ("A0", "ACC", "ACC2", "ACC3", "ACC4", "ACC5", "K705"):        # ACC = 验收（朝向句在身份脸句后，作废）；ACC2 = 验收（朝向句在最前），都是重编后的生产作业原样
         pass
     elif arm == "P1":                       # “平视”（机位词）→ 明确是机位高度，不是人物眼睛平视前方
         p = re.sub(r"平视(?!机位)", "平视机位（镜头与眼睛同高）", p)
@@ -82,6 +82,19 @@ def arm_apply(job: dict, arm: str) -> dict:
     else:
         raise SystemExit(f"未知臂 {arm}")
     return {**job, "prompt": p, "refs": refs}
+
+
+def load_job(sid: str) -> dict:
+    """同 IG.load_job，但不要求图1是林晚（多人镜 / 顾沉主镜，总调度 11-02 指定 ep02-S4 / S1 验证）。
+    集级 intimate_ep 标记不挡：只出总调度点名的镜头，镜头本身不是亲密内容（电梯里按按钮 / 特写侧脸）"""
+    jobs = json.loads(IG.JOBS.read_text(encoding="utf-8"))["jobs"]
+    j = next(x for x in jobs if x["shot"] == sid)
+    if j.get("intimate_ep") and sid not in ALLOW_INTIMATE_EP:
+        raise SystemExit(f"{sid} 是亲密集镜头，不出")
+    return j
+
+
+ALLOW_INTIMATE_EP = {"ep02-S4", "ep02-S1"}
 
 
 def lane_idle() -> bool:
@@ -141,7 +154,7 @@ def run(shots: list[str], arms: list[str], seed_spec: str, tag: str) -> None:
             r = json.loads(ln)
             done.add((r["shot"], r["arm"], r["seed"]))
     for sid in shots:
-        base = IG.load_job(sid)
+        base = load_job(sid)
         for seed in IG.seeds_for(base, seed_spec):
             for arm in arms:
                 if (sid, arm, seed) in done:
@@ -189,6 +202,8 @@ if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8")
     a = sys.argv
     if a[1] == "run":
+        if "--url" in a:                     # 服务器道（生产优先时实验改走服务器，scope=ab）
+            IG.URL = a[a.index("--url") + 1]
         if "--jobs" in a:                    # 预览作业（未写回 first_frame_jobs.json，总调度 21:5x：导入新剧本后再统一重编）
             IG.JOBS = ROOT / a[a.index("--jobs") + 1]
         run(a[2].split(","), a[a.index("--arms") + 1].split(","), a[a.index("--seeds") + 1] if "--seeds" in a else "job",

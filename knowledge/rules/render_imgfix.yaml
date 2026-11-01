@@ -31,3 +31,28 @@ rules:
     confidence: medium
     status: 待验     # ep01-S1 s20261301 仍正对镜头，见 IMGFIX 报告
     date: 2026-11-01
+  - id: K-REN-705
+    domain: render
+    link: [P6-P7]
+    title: 双人句只按露脸的人数触发；局部的人写“只露出<部位>，不露脸”，角色锁只留看得到的部位和成年句；局部且原文没写脸的人（主角也一样）不挂身份脸
+    when: ns_agent.compiler（framing_lead / locks）、framing.faced_people / partial_clause / part_lock、asset_refs.resolve_shot（身份脸槽）
+    then: 露脸 = cast 在画，或局部但 img 原文写到脸（asset_refs.face_described）；露脸人数 ≥2 才写 TWO_SHOT_TESTED；局部的人按 cast 的部位原文写 PARTIAL_CLAUSE；part_lock 按“，；、”切分句；preflight I2（K-AST-263）挡“露脸的人没有身份脸”和“写了两张脸但身份脸不足 2 张”
+    check: [tests/test_imgfix.py]
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/assets/first_frame_jobs.before_imgfix_k705_20261102.json, note: "102 条作业里 21 条第二个人是局部（ep02-S4 林晚“背影肩线”、ep02-S1 顾沉“西装下摆与皮鞋”…），却写了“两人同框，两张脸都清晰入画，互相看着对方”，只有 1 张身份脸 → 模型画出一张没有身份参考的脸（项目方 11-02 00:05 ep02-S4 截图）"}
+      - {src: data/pipeline/runs/series10_v1/assets/first_frame_jobs.json, note: "重编后：写两张脸但身份脸不足 2 张的作业 0 条，preflight 0 挡"}
+    confidence: high
+    status: 待验     # ep02-S4 / S1 验证图在 data/ab/imgfix/（gpu33:0，scope=ab）
+    date: 2026-11-02
+  - id: K-AST-263
+    domain: asset
+    link: [P5-P6]
+    title: 每个露脸的人都要有自己的身份脸（独占一槽；露脸 ≥3 且槽位不够时拼成脸板，每格标名字），不能丢脸
+    when: ns_agent.asset_refs.plan_slots（faceboard）；gen_contract.preflight I2
+    then: 身份脸永不进参考板、永不丢；≥3 张脸且组数超过槽位 → 全部身份脸合成一张 faceboard 槽（_line 写“脸部参考板：①名②名…”）；preflight I2 按 rec.characters 逐人核对
+    check: [tests/test_imgfix.py]
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/assets/first_frame_jobs.json, note: "11-02 00:1x 逐条扫描：没有“在画却缺身份脸槽”的镜头；事故根因是 K-REN-705 的双人句，本条是防线"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02

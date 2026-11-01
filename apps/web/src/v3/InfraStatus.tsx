@@ -53,15 +53,16 @@ export function InfraPanel({ d, compact = false }: { d: InfraStatus | null; comp
           ))}
         </ul>
       )}
+      {/* r39：派图模式（NETFIX）——GPU 面板顶部的简版也显示，看卡时知道现在是谁在派 */}
+      {d.dispatch && (
+        <div className="infra-row">
+          <span className="infra-k">派图</span>
+          <i className={`infra-dot ${d.dispatch.override ? "warn" : "ok"}`} aria-hidden="true" />
+          <span>{d.dispatch.text}</span>
+        </div>
+      )}
       {!compact && (
         <>
-          {d.dispatch && (
-            <div className="infra-row">
-              <span className="infra-k">派图</span>
-              <i className={`infra-dot ${d.dispatch.override ? "warn" : "ok"}`} aria-hidden="true" />
-              <span>{d.dispatch.text}</span>
-            </div>
-          )}
           <div className="infra-row">
             <span className="infra-k">跳板</span>
             <i className={`infra-dot ${dotOf(d.relay.ok)}`} aria-hidden="true" />

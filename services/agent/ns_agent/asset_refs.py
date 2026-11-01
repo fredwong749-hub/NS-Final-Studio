@@ -813,7 +813,8 @@ def resolve_shot(project: str, ep, shot, *, kept_triggers=None, looks=None, two_
         chars.append(info)
         # 身份脸（I2）
         # 局部 / 物件特写不挂身份脸（挂了模型就会画出脸，总调度 11-01）；原文写到这个人的脸（face_described）例外
-        if (face_visible or partial_face) and (pr == "在画" or is_primary or partial_face) and (is_primary or (two_person or _cfg().get("two_person")) == "both_faces"):
+        # K-AST-263（IMGFIX 11-02）：局部且原文没写脸的人不挂身份脸——主角也一样（ep05-S3 林晚“只露出肩头”挂了脸，模型画出了脸）
+        if (face_visible or partial_face) and (pr == "在画" or partial_face) and (is_primary or (two_person or _cfg().get("two_person")) == "both_faces"):
             f = face_of(project, cid)
             if f:
                 refs.append(Ref("face", cid, f, f"{name}的脸部参考", 0 if is_primary else 0.5, "face", "identity", has_face=True))
@@ -1004,6 +1005,9 @@ def _line(project: str, s: Slot) -> str:
     name = ID_NAME.get(s.character or "", s.character or "")
     pron = _pron(project, s.character)
     n = s.index
+    if s.kind == "faceboard":
+        parts = "".join(f"{CIRCLED[i]}{lab}" for i, lab in enumerate(s.labels))
+        return f"图{n}是脸部参考板：{parts}——每一格是对应人物的脸（只取脸和发型），每个人的长相必须与自己那一格一致。"
     if s.kind == "face":
         return f"图{n}是{name}的脸部参考（只取脸和发型）。"
     if s.kind == "scene":
@@ -1046,6 +1050,10 @@ def plan_slots(sr: ShotRefs, model: str = "qwen_image_2.1", capacity: int | None
     N = capacity or model_slots(model)
     max_tiles = int((_cfg().get("board") or {}).get("max_tiles", 6))
     groups: list[list[Ref]] = [[r] for r in sr.refs]           # 已按 prio 排好
+    # K-AST-263（IMGFIX 11-02）：身份脸不丢——露脸的人 ≥3 且槽位不够时，全部身份脸拼成一张脸板（每格标名字），占第 1 槽
+    fg = [g0 for g0 in groups if g0[0].role == "face"]
+    if len(fg) >= 3 and len(groups) > N:
+        groups = [[r for g0 in fg for r in g0]] + [g0 for g0 in groups if g0[0].role != "face"]
     dropped: list[dict] = []
 
     def mergeable(a: list[Ref], b: list[Ref]) -> bool:
@@ -1093,6 +1101,10 @@ def plan_slots(sr: ShotRefs, model: str = "qwen_image_2.1", capacity: int | None
                     "secondary": bool(r.character and r.character != sr.primary)} for r in gr]
         if len(gr) == 1:
             s = Slot(n, r0.role, r0.file, r0.character, [r0.label], members, faces=int(r0.has_face))
+        elif all(r.role == "face" for r in gr):
+            names = [ID_NAME.get(r.character or "", r.character or "") for r in gr]
+            s = Slot(n, "faceboard", make_board(sr.project, [(r.file, nm) for r, nm in zip(gr, names)]), r0.character,
+                     names, members, faces=len(gr))
         else:
             labels = [("造型" + (r.look_id or "") + "设定图") if r.role == "sheet" else r.label for r in gr]
             s = Slot(n, "board", make_board(sr.project, [(r.file, lab) for r, lab in zip(gr, labels)]), r0.character,

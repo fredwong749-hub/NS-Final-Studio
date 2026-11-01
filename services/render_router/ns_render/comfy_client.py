@@ -35,6 +35,19 @@ class ComfyUnavailable(ComfyError):
 UPLOAD_TIMEOUT_S = 900          # 上传超时下限（上行 8–25 KB/s 时 3 MB 要 2–6 分钟）
 UPLOAD_JPEG_QUALITY = 95
 OUTPUT_TAG = " [output]"        # LoadImage 注解：从该实例的输出目录读
+# NETFIX 11-02 00:0x（总调度派“显卡使用率太低”根因；CONSENT REFLOCK → NETFIX）：/object_info 2,683,903 字节（gpu36 实测），
+# producer 每单新建 ComfyClient → 每单经跳板（单连接 36–53 KB/s）重拉一次 = 每单 1–3 分钟只在传节点表，GPU 空等。
+# 改为进程级 + 磁盘缓存（按地址，TTL 6 小时）；检查发现缺节点 / 缺模型时先强制重拉一次再报，避免旧缓存误报。
+OBJECT_INFO_TTL_S = 6 * 3600
+_OBJECT_INFO_MEM: dict[str, tuple[float, dict]] = {}
+_OBJECT_INFO_LOCK = threading.Lock()
+
+
+def _object_info_disk(base: str) -> Path:
+    root = Path(__file__).resolve().parents[3]
+    return root / "data" / "cache" / "comfy_object_info" / (hashlib.sha256(base.encode()).hexdigest()[:16] + ".json")
+
+
 _SCALE_SEP = " @"               # 本地占位：注解名 + " @WxH:crop"，submit 时换成 LoadImage + ImageScale
 
 
@@ -189,14 +202,48 @@ class ComfyClient:
     def system_stats(self) -> dict:
         return self._json("/system_stats")
 
-    def object_info(self) -> dict:
-        if self._object_info is None:
-            self._object_info = self._json("/object_info")
-        return self._object_info
+    def object_info(self, fresh: bool = False) -> dict:
+        if self._object_info is not None and not fresh:
+            return self._object_info
+        now = time.time()
+        with _OBJECT_INFO_LOCK:
+            hit = _OBJECT_INFO_MEM.get(self.base)
+            if hit and not fresh and now - hit[0] < OBJECT_INFO_TTL_S:
+                self._object_info = hit[1]
+                return self._object_info
+            disk = _object_info_disk(self.base)
+            if not fresh:
+                try:
+                    if now - disk.stat().st_mtime < OBJECT_INFO_TTL_S:
+                        info = json.loads(disk.read_text(encoding="utf-8"))
+                        _OBJECT_INFO_MEM[self.base] = (disk.stat().st_mtime, info)
+                        self._object_info = info
+                        return info
+                except (OSError, ValueError):
+                    pass
+        info = self._json("/object_info")
+        with _OBJECT_INFO_LOCK:
+            _OBJECT_INFO_MEM[self.base] = (time.time(), info)
+            try:
+                disk = _object_info_disk(self.base)
+                disk.parent.mkdir(parents=True, exist_ok=True)
+                tmp = disk.with_suffix(f".{os.getpid()}.tmp")
+                tmp.write_text(json.dumps(info), encoding="utf-8")
+                os.replace(tmp, disk)
+            except OSError:
+                pass
+        self._object_info = info
+        return info
 
     def check(self, workflow: dict) -> list[str]:
         """提交前检查：节点是否存在、模型文件是否在 ComfyUI 的列表里"""
-        info = self.object_info()
+        problems = self._check_with(self.object_info(), workflow)
+        if problems:
+            fresh = self.object_info(fresh=True)        # 缓存可能旧（新装节点 / 模型）：重拉一次再判
+            problems = self._check_with(fresh, workflow)
+        return problems
+
+    def _check_with(self, info: dict, workflow: dict) -> list[str]:
         problems = []
         for nid, node in workflow.items():
             cls = node["class_type"]

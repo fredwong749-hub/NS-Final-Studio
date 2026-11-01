@@ -89,12 +89,23 @@ def ssh(host: str, cmd: str, data: bytes | None = None, timeout: int = 900, trie
     err = ""
     for i in range(tries):
         try:
-            r = subprocess.run(SSH + [host, cmd], input=data, capture_output=True, timeout=timeout)
-            if r.returncode == 0:
-                return r.stdout
-            err = r.stderr.decode("utf-8", "replace")[-300:]
+            # Windows：超时后要连同 ProxyJump 的 ssh -W 子进程一起杀（taskkill /T），否则子进程攥着管道，communicate 永远等不到 EOF
+            pr = subprocess.Popen(SSH + [host, cmd], stdin=subprocess.PIPE if data is not None else subprocess.DEVNULL,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            try:
+                out, er = pr.communicate(input=data, timeout=timeout)
+            except subprocess.TimeoutExpired:
+                subprocess.run(["taskkill", "/PID", str(pr.pid), "/T", "/F"], capture_output=True, timeout=30)
+                try:
+                    pr.communicate(timeout=20)
+                except subprocess.TimeoutExpired:
+                    pass
+                raise
+            if pr.returncode == 0:
+                return out
+            err = er.decode("utf-8", "replace")[-300:]
         except subprocess.TimeoutExpired:
-            err = "timeout"
+            err = f"timeout {timeout}s（已杀进程树，重连）"
         log("ssh retry", host, i + 1, err.strip().replace("\n", " ")[:200])
         time.sleep(min(60, 5 * 2 ** i))
     raise RuntimeError(f"ssh {host} 失败 {tries} 次：{err}")
@@ -218,6 +229,7 @@ TIER1_DATA = ("data/import/script_v2.json",   # master_rejects / ready_episodes 
               "data/pipeline/runs/series10_v1/assets/sheets_chosen.json", "data/pipeline/runs/series10_v1/assets/shot_looks.json")
 TIER1_DATA_PREFIX = ("data/assets/identity_refs/",)          # 身份脸（项目方挑定，小图）
 TIER1_SMALL = 2 * 1024 * 1024
+BATCH_TIMEOUT_S = 300                                          # 总调度 00:01：单批卡住超过 5 分钟就杀掉 ssh 重连（2 MB 批在 15 KB/s 下约 140 s）
 WARN_MB = 20                                                   # K-OPS-W09：单次推送超过 20 MB 必须先报估计耗时
 LINK_KBPS = 18                                                 # 跳板实测 17–20 KB/s（总调度 18:03；16:24 推 11.8 MB 约 10 分钟）
 
@@ -308,7 +320,7 @@ def push(host: str, code_only: bool = False, tier: int = 2, yes: bool = False, b
             blob = tar_bytes(b)
             # 先解到临时目录再搬进 repo：一批传到一半断了不会留下截断文件（K-OPS-W02）
             ssh(host, f"set -e; T=$(mktemp -d {OFF}/.push.XXXXXX); tar xf - -C $T; cp -a $T/. {R}/; rm -rf $T; echo ok",
-                data=blob, timeout=1800)
+                data=blob, timeout=BATCH_TIMEOUT_S)
             sent_total += len(b)
             log("push", host, f"tier{tier} batch {i + 1}", len(b), "files", f"{len(blob) / 1e6:.2f} MB")
         loc = local_manifest(dirs)
@@ -659,7 +671,7 @@ def push_frames(host: str, batch_mb: float = 2.0) -> dict:
     sent = 0
     for b in batches(todo, loc):
         ssh(host, f"set -e; T=$(mktemp -d {OFF}/.push.XXXXXX); tar xf - -C $T; cp -a $T/. {R}/; rm -rf $T; echo ok",
-            data=tar_bytes(b), timeout=1800)
+            data=tar_bytes(b), timeout=BATCH_TIMEOUT_S)
         sent += len(b)
     st = jl(STATE, {}) or {}
     st.setdefault(host, {})["last_frames_push"] = t0
@@ -761,7 +773,7 @@ def verify_sha(host: str, files: list[str] | None = None, fix: bool = True) -> d
         loc = {f: ((ROOT / f).stat().st_size, (ROOT / f).stat().st_mtime) for f in bad}
         for b in batches(bad, loc):
             ssh(host, f"set -e; T=$(mktemp -d {OFF}/.push.XXXXXX); tar xf - -C $T; cp -a $T/. {R}/; rm -rf $T; echo ok",
-                data=tar_bytes(b), timeout=1800)
+                data=tar_bytes(b), timeout=BATCH_TIMEOUT_S)
         again = verify_sha(host, bad, fix=False)
         fixed = [f for f in bad if f not in again["mismatch"]]
         bad = again["mismatch"]
@@ -791,10 +803,13 @@ def push_required(host: str, batch_mb: float = 2.0) -> dict:
     global BATCH
     BATCH = int(batch_mb * 1024 * 1024)
     sent = 0
-    for b in batches(todo, loc):
+    bl = batches(todo, loc)
+    for i, b in enumerate(bl):
+        log("push_required", host, f"batch {i + 1}/{len(bl)} 开始", len(b), "files", f"{sum(loc[f][0] for f in b) / 1e6:.2f} MB")   # 心跳
         ssh(host, f"set -e; T=$(mktemp -d {OFF}/.push.XXXXXX); tar xf - -C $T; cp -a $T/. {R}/; rm -rf $T; echo ok",
-            data=tar_bytes(b), timeout=1800)
+            data=tar_bytes(b), timeout=BATCH_TIMEOUT_S)
         sent += len(b)
+        log("push_required", host, f"batch {i + 1}/{len(bl)} 完成，累计 {sent} 个")
     rem2 = remote_manifest(host, rem_dirs) if rem_dirs else {}
     left = diff_push(loc, rem2)
     log("push_required", host, "推完", sent, "；复核仍缺", len(left))

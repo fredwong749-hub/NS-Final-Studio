@@ -207,10 +207,28 @@ def shot_meta_for(path: Path) -> dict:
     return {}
 
 
-def v67(path: Path) -> dict:
+SAYS = re.compile(r"At (\d{2}):(\d{2}(?:\.\d+)?),(?:(?!At \d{2}:)[^<])*?says:\s*<d>(?:\[[^\]]*\]\s*)?([^<]*)</d>")
+
+
+def dialogue_windows(prompt: str, pad: float = 0.5, per_char: float = 0.3) -> list:
+    """VQAGATE 11-02（VIDEO-RCA r3）：从编译稿的分拍时间码取台词时段——“At mm:ss.sss, … says: <d>…</d>”起点 −pad，
+    到 min(下一拍时间码, 起点 + 字数 × per_char + 0.6) + pad。V7 只在这些时段算嘴部开合与声音的相关"""
+    stamps = sorted(int(m.group(1)) * 60 + float(m.group(2)) for m in STAMP.finditer(prompt or ""))
+    out = []
+    for m in SAYS.finditer(prompt or ""):
+        t = int(m.group(1)) * 60 + float(m.group(2))
+        nxt = next((x for x in stamps if x > t + 1e-3), None)
+        end = t + per_char * len(re.sub(r"\W", "", m.group(3))) + 0.6
+        out.append([max(0.0, t - pad), (min(end, nxt) if nxt else end) + pad])
+    return out
+
+
+def v67(path: Path, prompt: str = "") -> dict:
     """GEN_CONTRACT V6（v6_limbs.py，venv_hand）/ V7（v7_lipsync.py，venv_idm），低优先级子进程；跑不了记“未测”"""
     import subprocess
     m = shot_meta_for(path)
+    if prompt:
+        m["dialogue_windows"] = dialogue_windows(prompt)
     out = {}
     for key, py, script in (("v6", HAND_PY, "v6_limbs.py"), ("v7", IDM_PY, "v7_lipsync.py")):
         try:
@@ -345,7 +363,7 @@ def main(argv):
          "jump_cut_s": mm.get("cut_s"), "J4": round(jm["J4"], 3), "J4_z": round(jm["J4_z"], 2),
          "pace": jm["pace_px_per_frame"], "cuts": hc,
          "cuts_near_stamps": [c for c in hc if any(abs(c - t) <= 0.5 for t in stamps)], "stamps": stamps,
-         "size_wanted": meta.get("size"), **ir, **hc_, **v67(path), "acting": acting}
+         "size_wanted": meta.get("size"), **ir, **hc_, **v67(path, meta.get("prompt") or ""), "acting": acting}
     s["vlm"] = v9_vlm(path, meta)          # VQAGATE：先看图，再算 gate（blocking 缺陷进 fails，D-VQA-01）
     g = gate(s, refs)
     s["gate"] = g

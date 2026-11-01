@@ -41,6 +41,8 @@ ws.onmessage = async (ev) => {
       blocked.push({ method: request.method, url: request.url.replace(/^https?:\/\/[^/]+/, ""), body: (request.postData ?? "").slice(0, 600) });
       send("Fetch.failRequest", { requestId, errorReason: "BlockedByClient" });
     }
+    else if (process.env.SIDE_URL && process.env.SIDE_GET_RE && new RegExp(process.env.SIDE_GET_RE).test(new URL(request.url).pathname))
+      send("Fetch.continueRequest", { requestId, url: process.env.SIDE_URL + new URL(request.url).pathname + new URL(request.url).search }); // r40：只读旁路
     else send("Fetch.continueRequest", { requestId });
   }
 };

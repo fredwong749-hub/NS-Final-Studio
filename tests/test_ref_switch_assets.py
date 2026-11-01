@@ -37,7 +37,10 @@ def _pick_full_shot(default="ep01-S3"):
     return default
 
 
-SHOT = _pick_full_shot()
+# CODE-RSI 11-02（K-OPS-C02，AUDIT 00:23）：HOLLYWOOD 导入后按性质也选不到“造型 A、脚可见”的镜（选到的是造型 B 的镜）→ 改成夹具：
+# ep01-S1（林晚单人）+ 固定全身 img，临时登记里钉死造型 A。_pick_full_shot 保留不用
+SHOT = "ep01-S1"
+FULL_IMG = "全景，平视，林晚站在办公桌前，米白衬衫与深灰铅笔裙，透明12cm细高跟踩在地毯上，细银链贴在锁骨上，雾霾天蓝色及腰直发，齐刘海"
 
 
 @pytest.fixture
@@ -54,7 +57,14 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(AR, "_cfg", lambda: cfg)
     monkeypatch.setattr(AR, "HUB_EP_LOOKS", tmp_path / "hub_episode_looks.json")
     monkeypatch.setattr(P, "RENDERS", tmp_path / "renders")
-    return ScriptImport.model_validate(json.loads(SCRIPT.read_text(encoding="utf-8")))
+    d = json.loads(tmp_reg.read_text(encoding="utf-8")) if tmp_reg.exists() else {}
+    d.setdefault("shots", {})[SHOT] = {"lin_wan": "A"}
+    (d.get("overrides") or {}).pop(SHOT, None)
+    (d.get("scene_overrides") or {}).pop(SHOT, None)
+    tmp_reg.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    script = ScriptImport.model_validate(json.loads(SCRIPT.read_text(encoding="utf-8")))
+    P.find_shot(script, SHOT)[1].img_prompt = FULL_IMG
+    return script
 
 
 def _body(**kw):

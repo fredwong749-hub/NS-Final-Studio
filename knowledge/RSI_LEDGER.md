@@ -397,4 +397,8 @@
 | VR13 | 正脸 + 侧脸双参考能去掉单人看镜头 | 单人 3 镜 × 2 seed（本机道） | 看镜头 3–4/6 → 3/6；sface 0.885 → 0.843；1 张多半个头 | ❌ | — | data/ab/video_rca/r2_dualref/ |
 | VR14 | 删画外造型分句能防 Pika 拉远 | 复用 r1 原编译稿同 seed，S4/S5/S6 | 脸高几乎不变，印样一致 | ❌ Pika 本来不拉远 | K-REN-701 | data/ab/video_rca/r3_hide_offframe/ |
 | VR15 | Pika 没有 4 帧一顿 | judder.py 量 r1 七条 + 冒烟 | 慢动作镜 J4 1.24–1.35（z 3.9–10.8，第 3 相位跳）；大动作镜 2 帧交替；去抖慢动作镜代价 ≤3%，快动作 −25% | ❌ 有，门槛 1.2 去抖 | K-REV-705 | data/ab/video_rca/r6_dejudder/ |
+| VR16 | Pika 口型不过是随机的 | 3 seed × 6 组（复用 r1 原编译稿，V7 用旧镜头信息重跑） | 林晚说话 3/3 过（开合 0.016–0.020）；顾沉说话 6/15 过（开合 0.006–0.011，张嘴帧 0） | ❌ 是男主说话时嘴几乎不动 | 写作草案（knowledge/inbox/2026-11-01_video_rca_writer.yaml，台词那拍别低头） | docs/video_rca/RCA_r3.md §1.1 |
+| VR17 | 改 VOICE 短语 / 补系统口型句 / 台词那拍不低头能救口型 | 各 3 seed | 0/3、1/3、2/3（corr 均值 0.24 → 0.41） | ◐ 只有“不低头”有方向性改善 | 写作草案（同上 inbox） | data/ab/video_rca/r14a_voiceword、r14b_lipcue、r15_headup_* |
+| VR18 | 去掉整理动作外套就完整 | r8 2.4–4.0 s 逐帧（AUDIT 限定） | 不整件消失，但成无袖短马甲 2/2 | ◐ 第二根因：坐→站大幅姿态 | K-WRT-702 限定（交 ITERAUDIT） | data/ab/video_rca/r8_outfit_action/*_kf.jpg |
+| VR19 | 去抖要按动作幅度分档 | 全分辨率 4 条 | 4 帧型 −1.5 ~ −3.7%（含大动作 S6）；2 帧交替 −25.6%（门槛自然排除） | ❌ 不分档 | K-REV-705 | docs/video_rca/RCA_r3.md §1.3 |
 

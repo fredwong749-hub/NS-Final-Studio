@@ -46,7 +46,7 @@ STATUS_DOC = {
     "at / t": "本拍写入时间（ISO / epoch 秒）；t 超过 90 s 没更新 = 监管进程不在（一拍探测最长约 25 s）",
     "supervisor": "{pid, started_t, conf}",
     "relay": "{up, checked_t, last_ok_t, down_since_t（不通时）, last_change_t}",
-    "hosts.<h>": "{state: up|connecting|backoff|relay_down|stopped, pid, since_t（本条 ssh 起的时间）, up_since_t（端口全部通的时间）, "
+    "hosts.<连接名>": "每条 ssh 一项（00:0x 起按道分连接：gpu33-l0 / gpu33-l1 / gpu33-l3 / gpu36-l0 / gpu36-l1 / gpu36-l2；server 字段 = 所属服务器）{state: up|connecting|backoff|relay_down|stopped, pid, since_t（本条 ssh 起的时间）, up_since_t（端口全部通的时间）, "
                  "restarts, last_restart: {t, reason}, next_try_t, ports: {<本机口>: {remote, ok, why: ok|timeout|refused|remote_down, checked_t}}}",
     "dispatch_mode": "派单模式（K-OPS-N06）：{override_active: 临时覆盖是否生效, phases: {gpu33|gpu36: laptop=该台分区由笔记本经隧道代派 | draining=正在交还 | server=服务器自己派}, checked_t}",
     "tunnels_up / tunnels_total": "出图 / 视频道（probe_http）通的条数 / 总数",
@@ -130,7 +130,19 @@ def kill(pid: int) -> None:
     subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, timeout=30, creationflags=NOWIN)
 
 
-def list_procs(names=("ssh.exe", "bash.exe")) -> list[tuple[int, str, str]]:
+WSL = ["C:/Windows/System32/wsl.exe", "-d", "Ubuntu-24.04", "--exec"]
+
+
+def mux_check(sock: str, host: str, timeout: float = 20) -> bool:
+    """WSL 命令主连接活着（ssh -O check，只问本机 master，不走网络）"""
+    try:
+        r = subprocess.run(WSL + ["ssh", "-S", sock, "-O", "check", host], capture_output=True, timeout=timeout, creationflags=NOWIN)
+        return r.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def list_procs(names=("ssh.exe", "bash.exe", "wsl.exe")) -> list[tuple[int, str, str]]:
     """[(pid, name, cmdline)]；PowerShell CIM（约 1–2 s，只在接管时用）"""
     flt = " or ".join(f"Name='{n}'" for n in names)
     cmd = (f"Get-CimInstance Win32_Process -Filter \"{flt}\" | ForEach-Object {{ \"$($_.ProcessId)`t$($_.Name)`t$($_.CommandLine)\" }}")
@@ -211,6 +223,9 @@ class Supervisor:
 
     def ssh_cmd(self, h: str) -> list[str]:
         hc = self.c["hosts"][h]
+        if hc.get("kind") == "wsl_mux":            # P0 11-02：WSL OpenSSH 命令主连接（ControlMaster），远程命令 / 文件都复用它
+            return WSL + ["ssh", "-o", "BatchMode=yes", "-M", "-S", hc["sock"], "-o", "ControlPersist=no", "-N",
+                          "-o", f"Tag={self.host_tag(h)}", hc.get("ssh_host", h)]
         cmd = [self.c["ssh_exe"], *self.c["ssh_opts"], "-o", f"Tag={self.host_tag(h)}",
                "-o", "ProxyCommand=" + self.c["relay"]["proxy_cmd"].replace("Tag=nsnetfix-proxy", f"Tag={self.tag}-proxy-{h}")]
         for lp, rp in hc["forwards"]:
@@ -233,8 +248,18 @@ class Supervisor:
         for hh in hosts:
             mine = f"Tag={self.host_tag(hh)}"
             st = self.hosts[hh]
+            mux = self.c["hosts"][hh].get("kind") == "wsl_mux"
             for pid, name, cmd in procs:
-                if name.lower() != "ssh.exe":
+                if name.lower() != ("wsl.exe" if mux else "ssh.exe"):
+                    continue
+                if mux:
+                    if mine in cmd and cmd.rstrip().endswith(self.c["hosts"][hh].get("ssh_host", hh)):
+                        if st["pid"] is None and pid_alive(pid):
+                            st.update(pid=pid, since_t=now() - 60, state="up", up_since_t=now())
+                            self.log("ADOPT own mux", hh, pid)
+                        elif st["pid"] != pid:
+                            kill(pid)
+                            self.log("ADOPT kill duplicate mux", hh, pid)
                     continue
                 if mine in cmd:
                     want = [f"127.0.0.1:{lp}:127.0.0.1:{rp}" for lp, rp in self.c["hosts"][hh]["forwards"]]
@@ -264,6 +289,9 @@ class Supervisor:
             self.log("adopt error", h, repr(e)[:200])
         if st["pid"] and pid_alive(st["pid"]):
             return
+        hc = self.c["hosts"][h]
+        if hc.get("kind") == "wsl_mux":            # 上次残留的 socket 会让新 master 起不来
+            subprocess.run(WSL + ["rm", "-f", hc["sock"]], capture_output=True, timeout=30, creationflags=NOWIN)
         p = subprocess.Popen(self.ssh_cmd(h), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                              stderr=open(self.dir / f"ssh_{h}.err.log", "ab"), creationflags=NOWIN)
         st.update(pid=p.pid, since_t=now(), up_since_t=None, state="connecting", hang=0, probe_t=0.0, _io=None)
@@ -307,6 +335,21 @@ class Supervisor:
     def probe_round(self, h: str) -> None:
         st = self.hosts[h]
         hc = self.c["hosts"][h]
+        if hc.get("kind") == "wsl_mux":
+            ok = mux_check(hc["sock"], hc.get("ssh_host", h))
+            t = now()
+            st["probe_t"] = t
+            st["ports"] = {"mux": {"remote": None, "ok": ok, "why": "ok" if ok else "no_master", "checked_t": t}}
+            age = t - (st["since_t"] or t)
+            if ok:
+                st["hang"], st["fails"] = 0, 0
+                if st["state"] != "up":
+                    st["up_since_t"] = t
+                    self.log("UP", h, st["pid"], "mux", f"{age:.0f}s after spawn")
+                st["state"] = "up"
+            elif age >= self.c.get("listen_grace_s", 45):
+                self.stop_host(h, f"WSL 主连接 {age:.0f}s 仍不可用")
+            return
         pp = hc.get("probe_http") or self.ports(h)
         to = self.c.get("probe_timeout_s", 8)
         with ThreadPoolExecutor(len(pp)) as ex:
@@ -359,8 +402,11 @@ class Supervisor:
                     st["ports"] = {str(p): {"remote": r, "ok": False, "why": "relay_down", "checked_t": t}
                                    for p, r in self.c["hosts"][h]["forwards"] if p in (self.c["hosts"][h].get("probe_http") or [])}
                     continue
-                if t >= st["next_try_t"]:
+                connecting = sum(1 for x in self.hosts.values() if x["state"] == "connecting" and x["pid"])
+                if t >= st["next_try_t"] and connecting < self.c.get("max_connecting", 2):   # 新建连接全局串行：同时握手 ≤2（跳板 MaxStartups 10:30:100）
                     self.spawn(h, "跳板通、ssh 不在")
+                elif t >= st["next_try_t"]:
+                    st["state"] = "queued"
                 else:
                     st["state"] = "backoff"
                 continue
@@ -391,7 +437,7 @@ class Supervisor:
         """服务器自主生产视图（取自 resident_sync.json；跳板断时这些值停在最后一次同步）"""
         rs = jl(RESIDENT, {}) or {}
         out = {}
-        for h in self.hosts:
+        for h in sorted({self.c["hosts"][c].get("ssh_host", c) for c in self.hosts}):
             d = rs.get(h) or {}
             hl = d.get("health") or {}
             try:
@@ -407,10 +453,10 @@ class Supervisor:
         return out
 
     def write_status(self) -> None:
-        pub = {h: {k: v for k, v in st.items() if not k.startswith("_") and k not in ("fails", "hang", "probe_t")}
-               for h, st in self.hosts.items()}
+        pub = {h: {**{k: v for k, v in st.items() if not k.startswith("_") and k not in ("fails", "hang", "probe_t")},
+                   "server": self.c["hosts"][h].get("ssh_host", h)} for h, st in self.hosts.items()}
         total = sum(len(self.c["hosts"][h].get("probe_http") or []) for h in self.hosts)
-        up = sum(1 for st in self.hosts.values() for p in st["ports"].values() if p.get("ok"))
+        up = sum(1 for st in self.hosts.values() for k, p in st["ports"].items() if p.get("ok") and k != "mux")
         js(self.status_p, {"schema": STATUS_DOC["schema"], "at": iso(), "t": now(),
                            "supervisor": {"pid": os.getpid(), "started_t": self.started, "conf": str(self.conf_path)},
                            "relay": self.relay, "hosts": pub, "tunnels_up": up, "tunnels_total": total,

@@ -169,3 +169,37 @@ def test_regen_with_requirement_and_gear(tmp_path, monkeypatch):
     assert "鞋（图2）" in p["instruction"] and p["refs"][0]["path"].endswith("lw-shoes-1_v1.png")
     c.post("/api/shots/ep03-S2/takes/image/2/regen", json={"instruction": "手里换成咖啡杯"})
     assert seen["params"]["mode"] == "instruct" and seen["params"]["instruction"] == "手里换成咖啡杯" and seen["params"]["parent"] == 2
+
+
+def test_old_script_versions_are_history_not_candidates(tmp_path, monkeypatch):
+    """UIRSI r40（项目方 11-02 00:0x：“我…看到很多错误的图”）：本集最后一次导入之前出的版本 = 旧剧本版本，不作候选；
+    原来的“不合格 / 脸不像”原因仍在 why_not 里；没有出图时间的不藏；现行剧本 sha 的照常是候选"""
+    monkeypatch.setattr(P, "DATA", tmp_path)
+    monkeypatch.setattr(P, "RENDERS", tmp_path / "renders")
+    monkeypatch.setattr(P, "bad_reason", lambda t: None)
+    log = tmp_path / "import_log.jsonl"
+    log.write_text(json.dumps({"at": "2026-11-01T23:21:45", "rc": 0, "path": "data/staging_v3/merged/x_series10_v1_hwd_ep06_v3.md"}) + "\n", encoding="utf-8")
+    script = tmp_path / "script_v2.json"
+    script.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(T, "IMPORT_LOG", log)
+    monkeypatch.setattr(T, "SCRIPT", script)
+    T._imp_cache.update(mt=None)
+    T._sha_cache.update(mt=None)
+    import hashlib
+    sha = hashlib.sha256(b"{}").hexdigest()
+    d = tmp_path / "renders" / "ep06" / "S1"
+    (d / "takes").mkdir(parents=True)
+    takes = []
+    for n, ca, prm in ((1, "2026-11-01T08:00:00", {"rejected": {"reason": "脸不像"}}), (2, "2026-11-01T09:00:00", {}),
+                       (3, None, {}), (4, "2026-11-01T23:40:00", {}), (5, "2026-11-01T10:00:00", {"prompt_source": {"sha256": sha}})):
+        (d / "takes" / f"image_00{n}.png").write_bytes(b"x")
+        takes.append({"n": n, "stage": "image", "file": f"renders/ep06/S1/takes/image_00{n}.png", "created_at": ca, "params": prm})
+    (d / "takes.json").write_text(json.dumps({"takes": takes, "active": {}}), encoding="utf-8")
+    r = T.candidates(6)["shots"]["ep06-S1"]["image"]["takes"]
+    by = {x["n"]: x for x in r}
+    assert by[1]["script"] == "old" and by[1]["ok"] is False and "脸不像" in by[1]["why_not"] and "旧剧本版本" in by[1]["why_not"]
+    assert by[2]["script"] == "old" and by[2]["ok"] is False and by[2]["why_not"].startswith("旧剧本版本")
+    assert by[3]["script"] == "unknown" and by[3]["ok"] is True
+    assert by[4]["script"] == "current" and by[4]["ok"] is True
+    assert by[5]["script"] == "current" and by[5]["ok"] is True       # 带现行剧本 sha 的以 sha 为准
+    assert T.cutoff_for(6) == "2026-11-01T23:21:45" and T.cutoff_for(5) is None

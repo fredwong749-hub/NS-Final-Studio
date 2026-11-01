@@ -713,6 +713,14 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
 
     # 《image提示词》§1.2：触发词最前，角色 DNA 锁紧随其后（纠正器 1.1：DNA 段提到最前）
     locks = [lock(c) for c in g.character_locks if c.name in names]
+    # K-REN-705 b（IMGFIX 11-02，AUDIT P2）：局部出场的人（剧本 cast：局部｜部位，原文没写他的脸）角色锁只留看得到的部位 + 成年句
+    # （framing.part_lock，与局部特写同一套），去掉脸 / 五官 / 刘海等外貌词，免得模型又画出一张没有身份参考的脸
+    _pmap = dict(FR.faced_people(shot, names)[1])
+    if _pmap:
+        def _pl(lk):
+            m = re.match(r"【([^】]+)】", lk)
+            return FR.part_lock(lk, _pmap[m.group(1)]) if m and m.group(1) in _pmap else lk
+        locks = [x for x in map(_pl, locks) if x]
     inject = b.looks_inject if inject_looks is None else inject_looks
     # [looks] inject 关闭时仍注入画布参考覆盖换过的槽位（W5：项目方在画布上选的资产，canvas_only）
     frags = look_fragments(shot, [c.name for c in g.character_locks if c.name in names], shot.img_prompt, locks, b,
@@ -739,9 +747,16 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
             # 局部特写只留锁里与这个局部相关的分句（例：指甲）；锁一句都不剩就整条不放
             locks = [x for x in (FR.part_lock(lk, FR.part_name(img_body)) for lk in locks) if x]
         framing_lead = FR.closeup_lead(frame_size, subject, img_body)
-        two_shot = FR.two_shot_clause(len(names), subject)
+        # K-REN-705（IMGFIX 11-02，项目方 00:05“很多人物face都出了问题”，ep02-S4）：双人句按“露脸的人数”触发——
+        # 原先按 names（在画 + 局部）计数，21 镜第二个人是局部（背影肩线 / 西装下摆）也被写了“两张脸都清晰入画、互相看着”，
+        # 模型画出一张没有身份参考的脸。局部的人按剧本 cast 的部位写“只露出 X，不露脸”（剧本原文）
+        faced, partial = FR.faced_people(shot, names)
+        two_shot = FR.two_shot_clause(len(faced), subject)
         if two_shot:
             framing_lead = framing_lead + "，" + two_shot
+        hide = FR.partial_clause(partial, subject)
+        if hide:
+            framing_lead = framing_lead + "，" + hide
         # 材质条目按“过滤后”的可见文字重新匹配（漆皮短裙不在画面里就不补漆皮条目）
         material_text = img_body + ("，" + "，".join(frags) if frags else "")
         materials = [m for m in material_terms(material_text, present=set(names), bible=b)

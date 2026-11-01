@@ -108,18 +108,25 @@ def _from_netfix(ns: dict, now: float) -> tuple[dict, list[dict], list[str], dic
              "down_s": round(now - ds) if ds else None}
     relay["text"] = "通" if up else f"不通，已断 {_ago(relay['down_s'])}"
     hosts = ns.get("hosts") or {}
+    # AUDIT 00:23 P1：NETFIX 00:0x 起按道分连接，hosts 的键是“gpu33-l0 … gpu36-l2”（server 字段 = 所属服务器），
+    # 不再是主机名——按端口找它所在的那条连接（旧格式按主机名的也照样找得到）
+    by_port: dict[str, tuple[str, dict]] = {}
+    for hk, hv in hosts.items():
+        for pk in (hv.get("ports") or {}):
+            by_port[str(pk)] = (hk, hv)
     tunnels, reconnect = [], []
     for port, (host, card) in TUNNEL_CARDS.items():
-        h = hosts.get(host) or {}
+        hk, h = by_port.get(str(port), (host, hosts.get(host) or {}))
         st = h.get("state") or "stopped"
         pp = (h.get("ports") or {}).get(str(port)) or {}
-        ok = bool(pp.get("ok"))
+        busy = pp.get("why") == "busy"          # 连接通，只是卡在忙、探测超时（NETFIX 记 why=busy）：不算断
+        ok = bool(pp.get("ok")) or (busy and st == "up")
         name = f"{HOST_NAME[host]}·卡{card}"
         since = float(h.get("since_t") or 0) or None
         down_s = 0 if ok else (round(now - since) if since and st != "up" else None)
         rebuilding = (not ok) and st in ("connecting", "backoff")
         if ok:
-            text = "通"
+            text = "通（卡在忙）" if busy else "通"
         elif st == "relay_down" or not up:
             text = "断了（跳板断了，等跳板恢复后自动重连）"
         elif st == "up" and pp.get("why") == "remote_down":
@@ -136,16 +143,19 @@ def _from_netfix(ns: dict, now: float) -> tuple[dict, list[dict], list[str], dic
         tunnels.append({"port": port, "host": host, "card": card, "name": name, "lane": f"{host}:{card}", "ok": ok,
                         "fails": 0 if ok else 1, "down_s": down_s or 0, "rebuilding": rebuilding,
                         "last_rebuild_at": _hm((h.get("last_restart") or {}).get("t")), "alert": False, "text": text,
-                        "tech": f"本机 {port} → {host}:{pp.get('remote', '?')}（{pp.get('why', '?')}）；ssh 状态 {st}，重连 {h.get('restarts', 0)} 次"})
-    for host, h in hosts.items():
+                        "tech": f"本机 {port} → {host}:{pp.get('remote', '?')}（{pp.get('why', '?')}）；连接 {hk} 状态 {st}，重连 {h.get('restarts', 0)} 次"})
+    port_name = {str(p): f"{HOST_NAME[hh]}·卡{cc}" for p, (hh, cc) in TUNNEL_CARDS.items()}
+    for hk, h in hosts.items():
         st = h.get("state")
+        names = [port_name[str(p)] for p in (h.get("ports") or {}) if str(p) in port_name]
+        who = "、".join(names) or HOST_NAME.get(h.get("server") or hk, h.get("server") or hk)
         if st == "connecting":
-            reconnect.append(f"正在重连到 {HOST_NAME.get(host, host)} 的连接（已重连 {h.get('restarts', 0)} 次）")
+            reconnect.append(f"正在重连 {who} 的连接（已重连 {h.get('restarts', 0)} 次）")
         elif st == "backoff":
             nt = float(h.get("next_try_t") or 0)
-            reconnect.append(f"到 {HOST_NAME.get(host, host)} 的连接{_ago(nt - now) + '后' if nt > now else '马上'}再试一次")
+            reconnect.append(f"{who} 的连接{_ago(nt - now) + '后' if nt > now else '马上'}再试一次")
         elif st == "stopped":
-            reconnect.append(f"到 {HOST_NAME.get(host, host)} 的连接没人在管（自动重连没在运行）")
+            reconnect.append(f"{who} 的连接没人在管（自动重连没在运行）")
     if not up:
         reconnect.insert(0, "跳板断了：先等跳板恢复，再自动重连各条连接（这时不反复重连，免得加重跳板负担）")
     dm = ns.get("dispatch_mode") or {}

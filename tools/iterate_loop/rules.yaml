@@ -1,7 +1,7 @@
 # 自动生成，勿手改：改 knowledge/ 后运行 tools/knowledge/compile.py
-# 来源：knowledge/rules/loop.yaml + knowledge/settings.yaml（kb-20261101-acf10d70）
+# 来源：knowledge/rules/loop.yaml + knowledge/settings.yaml（kb-20261102-17723931）
 schema: nsfs.iterate_rules/1
-kb_version: kb-20261101-acf10d70
+kb_version: kb-20261102-17723931
 settings:
   max_renders_per_shot: 3
   max_lost_resubmits: 3

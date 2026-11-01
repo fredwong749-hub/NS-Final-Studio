@@ -65,6 +65,26 @@ def best_corr(x, y, lag):
     return best
 
 
+def best_corr_masked(x, y, lag, mask):
+    """只在台词时段（mask=True 的帧）算相关，±lag 帧滑动取最大（VQAGATE 11-02：整轨 RMS 混着脚步 / 配乐，2–5 字短台词被淹没）"""
+    idx = np.flatnonzero(mask)
+    best = -1.0
+    for d in range(-lag, lag + 1):
+        j = idx + d
+        ok = (j >= 0) & (j < len(y))
+        a, b = x[idx[ok]], y[j[ok]]
+        if len(a) > 12 and np.std(a) > 1e-6 and np.std(b) > 1e-6:
+            best = max(best, float(np.corrcoef(a, b)[0, 1]))
+    return best
+
+
+def window_mask(windows, n, fps=24.0):
+    m = np.zeros(n, bool)
+    for t0, t1 in windows or []:
+        m[max(0, int(t0 * fps)):min(n, int(np.ceil(t1 * fps)))] = True
+    return m
+
+
 def main(argv):
     path, meta = argv[0], json.loads(argv[1]) if len(argv) > 1 else {}
     visible = set(meta.get("visible") or [])
@@ -126,9 +146,18 @@ def main(argv):
         st, why = ("通过", "") if ok else ("不通过", f"独白 / 画外音镜头张嘴帧占 {open_frac:.0%}（项目方：嘴唇闭着）")
     else:
         env = audio_env(path, n)
-        c = best_corr(smooth(np.nan_to_num(ap, nan=np.nanmedian(ap))), smooth(env), TH["max_lag"])
+        xs, ys = smooth(np.nan_to_num(ap, nan=np.nanmedian(ap))), smooth(env)
+        c_full = best_corr(xs, ys, TH["max_lag"])
+        c = c_full
+        wins = meta.get("dialogue_windows") or []
+        wm = window_mask(wins, n)
+        if wins and wm.sum() > 12:                     # 有台词时间码：只在台词时段（时间码 ±0.5 s）算，整轨的只记录
+            c = best_corr_masked(xs, ys, TH["max_lag"], wm)
+            m.update(corr_scope="台词时段", window_frames=int(wm.sum()), windows=[[round(a, 2), round(b, 2)] for a, b in wins])
+        else:
+            m.update(corr_scope="整轨" + ("（台词时段帧太少）" if wins else "（没有台词时间码）"))
         voiced = env > 3.0
-        m.update(corr=round(c, 3), voiced_frac=round(float(voiced.mean()), 3),
+        m.update(corr=round(c, 3), corr_full=round(c_full, 3), voiced_frac=round(float(voiced.mean()), 3),
                  open_in_voiced=round(float(np.nanmean(ap[voiced] >= TH["open_thr"])), 3) if voiced.any() else None)
         ok = c >= TH["corr_min"]
         st, why = ("通过", "") if ok else ("不通过", f"嘴部开合与声音相关 {c:.2f} < {TH['corr_min']}")

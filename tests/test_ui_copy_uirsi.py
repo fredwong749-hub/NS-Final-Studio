@@ -101,7 +101,7 @@ def test_frame_owns_click_but_zoom_still_works():
 def test_loading_is_not_shown_as_missing():
     """P1-2 / K-UI-D01：候选还没读回来写“读取中…”；底图请求失败写“读不到”，不写“无底图”"""
     rr = (WEB / "v3" / "ReviewRow.tsx").read_text(encoding="utf-8")
-    assert "const candLoading = cands === null && !url;" in rr and '{candLoading ? "读取中…" : `${label}未出`}' in rr
+    assert "const candLoading = cands === null && !url;" in rr and '{candLoading ? "读取中…" : oldN ? `${label}未出（剧本已更新）` : `${label}未出`}' in rr   # r40：旧剧本图另说
     assert "return false as const;" in rr and "plateCache.delete(shot);" in rr
     assert '{sc.plate === null && sc.name && <small className="v3-look-np">无底图</small>}' in rr
     assert "!sc.plate && sc.name" not in rr
@@ -118,7 +118,7 @@ def test_narrow_frame_tiletop_hover_reveal():
 
 def test_video_pending_and_season_wording():
     rr = (WEB / "v3" / "ReviewRow.tsx").read_text(encoding="utf-8")
-    assert "const vPending = !s.video && (s.takes_count?.video ?? 0) > 0;" in rr and "版待选" in rr
+    assert "const vPending = !s.video && vNew > 0;" in rr and "版待选" in rr and "视频未出（剧本已更新）" in rr   # r40：只数现行剧本的视频版本
     sea = (WEB / "v3" / "pages" / "SeasonPage.tsx").read_text(encoding="utf-8")
     assert "张候选</span>" in sea and ">候选 {x.cand_n}<" not in sea
 

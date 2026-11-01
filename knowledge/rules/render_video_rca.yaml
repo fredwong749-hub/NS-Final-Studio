@@ -69,6 +69,7 @@ rules:
     check: [tests/test_video_rca.py]   # test_v05 现为 xfail(strict)：PROD 改门槛后自动转红，届时去掉 xfail
     evidence:
       - {src: data/ab/video_rca/r1_base_cue/, note: "Pika 同首帧：S2 J4 1.347 z 3.9、S4 1.352 z 7.4、S5 1.237 z 10.8（慢动作，第 3 相位跳 1.24–1.34×）；S3 大动作 J4 1.155 z 0.9、J2_z 3.3（2 帧交替，PDD 同镜也有）"}
+      - {src: docs/video_rca/RCA_r3.md, note: "⤴ r3 全分辨率（gpu36）：4 帧型去抖代价 S6 大动作 −1.9%、S4 −1.5%、S5 −3.7%；2 帧交替型 S3 −25.6%（J4 1.16 z 1.0，门槛自然排除）→ 代价看顿挫类型、不看动作幅度，不分档"}
       - {src: data/ab/video_rca/r6_dejudder/, note: "去抖后 S5 J4 1.237 → 1.092、S4 1.352 → 1.096（360p 预览测）；冒烟 S3 全分辨率 jerk 0.662 → 0.213、拉普拉斯 −25%"}
     confidence: medium
     status: 待验

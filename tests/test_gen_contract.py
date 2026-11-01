@@ -24,10 +24,18 @@ PROJECT = "series10_v1"
 need_data = pytest.mark.skipif(not SCRIPT.exists() or not AR.project_cfg(PROJECT), reason="series10 数据缺")
 
 
-def _shot(ep_n, idx):
+def _shot(ep_n, idx, img=None):
     d = json.loads(SCRIPT.read_text(encoding="utf-8"))
     ep = next(e for e in d["episodes"] if e["number"] == ep_n)
-    return ep, next(s for s in ep["shots"] if s["index"] == idx)
+    s = next(s for s in ep["shots"] if s["index"] == idx)
+    if img is not None:                       # 夹具镜：沿用这一镜的 cast / 造型行 / 镜号，img 换成固定原文（不依赖现行剧本写了什么）
+        s = {**s, "img_prompt": img}
+    return ep, s
+
+
+# CODE-RSI 11-02（K-OPS-C02，AUDIT 00:23）：23:22 HOLLYWOOD 导入后剧本里已没有“林晚单人、造型 A、脚可见”的镜，
+# 按性质选镜退回近景 → 鞋锁定 / 缺鞋 2 条红。改成夹具镜：ep01-S1（造型 A、林晚单人）+ 固定的全身 img
+FULL_IMG = "全景，平视，林晚站在办公桌前，米白衬衫与深灰铅笔裙，透明12cm细高跟踩在地毯上，细银链贴在锁骨上，雾霾天蓝色及腰直发，齐刘海"
 
 
 def _pick(pred, default):
@@ -47,14 +55,13 @@ def _in_frame(sh):
 
 
 # 林晚造型 A（米白衬衫）单人、脚可见的全身 / 中全景镜：鞋必须由衣橱单品图锁定
-FULL = _pick(lambda sh: _in_frame(sh) == ["林晚"] and "米白衬衫" in (sh.get("img_prompt") or "")
-             and "feet" in AR.visible_zones(sh.get("img_prompt") or "")[2], (1, 3))
+FULL = (1, 1, FULL_IMG)                      # 夹具镜（见 _shot 上方说明）
 # 林晚 + 顾沉两人都在画的镜：两张身份脸各占一槽
 TWO = _pick(lambda sh: sorted(_in_frame(sh)) == sorted(["林晚", "顾沉"]), (1, 4))
 
 
-def _req(ep_n, idx, model="qwen_image_2.1"):
-    ep, s = _shot(ep_n, idx)
+def _req(ep_n, idx, img=None, model="qwen_image_2.1"):
+    ep, s = _shot(ep_n, idx, img)
     sr, plan = AR.plan_for(PROJECT, ep, s, model)
     prompt = plan.prompt_prefix + "中全景构图，林晚站在办公桌前，" + ST.image_suffix()
     return {"kind": "image", "model": model, "project": PROJECT, "shot_id": sr.shot_id,
@@ -81,8 +88,17 @@ def test_visible_zones_by_size():
     assert subj == "part" and zones == {"feet"}
 
 
+@pytest.fixture
+def look_a(monkeypatch):
+    """夹具：林晚 ep01 钉死造型 A（临时登记），不受资产中心排期 / 逐镜切换 / 现行登记变化影响"""
+    orig = AR.registry_looks
+    monkeypatch.setattr(AR, "registry_looks", lambda project: {**orig(project), "ep01-S1": {"lin_wan": "A"}})
+    monkeypatch.setattr(AR, "episode_look_override", lambda project, cid, ep_n: None)
+    monkeypatch.setattr(AR, "shot_overrides", lambda project: ({}, {}))
+
+
 @need_data
-def test_full_shot_shoes_locked_by_wardrobe_image():
+def test_full_shot_shoes_locked_by_wardrobe_image(look_a):
     """全身镜鞋可见：参考里必须有鞋的单品图（衣橱 LW-S01），且提示词写明“必须完全一致”"""
     ep, s = _shot(*FULL)                                           # 林晚造型 A 单人、脚可见（FULL）
     sr, plan = AR.plan_for(PROJECT, ep, s)
@@ -138,7 +154,7 @@ def test_item_map_overrides_merge(tmp_path, monkeypatch):
 
 # ---------------------------------------------------------------- preflight：四个必挡的场景
 @need_data
-def test_missing_shoe_asset_blocked(monkeypatch):
+def test_missing_shoe_asset_blocked(monkeypatch, look_a):
     """缺鞋资产图被阻断：鞋没有衣橱图、设定图也没有 → 资产缺图，I4 不通过，拒交"""
     monkeypatch.setattr(AR, "sheet_of", lambda project, cid, lid: None)
     monkeypatch.setattr(AR, "item_image", lambda iid: None)
@@ -310,8 +326,8 @@ def test_locks_without_wardrobe_strips_clothing():
 @need_data
 def test_sheet_refs_are_headless():
     """K-AST-233：造型设定图进槽位一律去头（脸只由身份参考提供）；身份脸 = 项目方挑定的 A-s202 face_ref2va"""
-    for ep_n, idx in ((1, 1), FULL, TWO):
-        ep, s = _shot(ep_n, idx)
+    for key in ((1, 1), FULL, TWO):
+        ep, s = _shot(*key)
         sr, plan = AR.plan_for(PROJECT, ep, s)
         for r in sr.refs:
             if r.role == "sheet":

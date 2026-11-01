@@ -144,3 +144,24 @@ def test_r39_topbar_short_texts():
     assert "prodOn || (offline && !infraOn)" in top
     gl = (ROOT / "services" / "api" / "ns_api" / "gpu_live.py").read_text(encoding="utf-8")
     assert "ComfyUI 离线（" not in gl and "这张卡的出图程序没响应" in gl
+
+
+def test_netfix_per_lane_hosts_real_structure():
+    """AUDIT 00:23 P1：NETFIX 00:0x 起每张卡一条 ssh，hosts 键是 gpu33-l0 … gpu36-l2（server 字段 = 服务器）；
+    按端口找连接，不能因为主机名对不上就全报“断了、自动重连没在运行”。why=busy = 连接通、卡在忙"""
+    lanes = {"gpu33-l0": ("gpu33", 18188), "gpu33-l1": ("gpu33", 18189), "gpu33-l3": ("gpu33", 18191),
+             "gpu36-l0": ("gpu36", 18288), "gpu36-l1": ("gpu36", 18289), "gpu36-l2": ("gpu36", 18290)}
+    hosts = {k: {"state": "up", "since_t": NOW - 600, "restarts": 0, "server": srv,
+                 "ports": {str(p): {"remote": 8188, "ok": True, "why": "ok", "checked_t": NOW - 5}}} for k, (srv, p) in lanes.items()}
+    hosts["gpu33-l0"]["ports"]["18188"].update(ok=False, why="busy")
+    hosts["gpu36-l1"].update(state="connecting", restarts=3)
+    hosts["gpu36-l1"]["ports"]["18289"].update(ok=False, why="timeout")
+    ns = _ns(hosts=hosts)
+    d = I.build(NOW, {}, RES, LOCAL, ns)
+    by = {t["port"]: t for t in d["tunnels"]}
+    assert sum(t["ok"] for t in d["tunnels"]) == 5 and not by[18289]["ok"]
+    assert by[18188]["ok"] and "卡在忙" in by[18188]["text"]
+    assert "正在自动重连" in by[18289]["text"] and by[18289]["rebuilding"]
+    assert d["level"] == "warn" and "全断" not in d["summary"] and "gpu36·卡1" in d["summary"]
+    assert any("gpu36·卡1" in r and "重连" in r for r in d["reconnect"])
+    assert not any("没人在管" in x or "没在运行" in x for x in [t["text"] for t in d["tunnels"]] + d["reconnect"])

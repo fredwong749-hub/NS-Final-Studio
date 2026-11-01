@@ -287,7 +287,8 @@ rules:
     check: [tools/qa/writer_lints.py, tests/test_writer_lints.py]
     evidence:
       - {src: data/ab/video_rca/r4_pika/, note: "ep01-S3 同首帧同提示词 “she smooths the hem of her blazer”：6/6 外套 3.3–3.9 s 消失再穿回"}
-      - {src: data/ab/video_rca/r8_outfit_action/, note: "只把这一拍换成 “she lets her hands settle at her sides”：2/2 外套全程穿着"}
+      - {src: data/ab/video_rca/r8_outfit_action/, note: "只把这一拍换成 “she lets her hands settle at her sides”：2/2 外套没有整件消失"}
+      - {src: docs/video_rca/RCA_r3.md, note: "⤴ 限定（VIDEO-RCA r3，AUDIT 复核 r8 第 2.4–4.0 s 逐帧）：本条只管“外套整件消失再穿回”；去掉动作后站起来外套仍变成无袖短马甲（2/2，data/ab/video_rca/r8_outfit_action/*_kf.jpg）——坐→站等大幅姿态变化的无袖 / 短款漂移是另一个根因（RCA_r3 §1.2），不归本条管"}
       - {src: data/ab/video_rca/r9_outfit_keep/, note: "保留动作、补 “the blazer staying on her shoulders”：2/2 仍消失；合计带动作 8/8 消失、去掉 0/2"}
       - {src: tools/qa/writer_lints.py, note: "现行导入稿（script_v2.json，93 镜）QW-W11 命中 9 镜（RSI r7 首扫；视线 / 明确脱衣不计）"}
     confidence: high

@@ -78,4 +78,18 @@ def season():
             ok = [t for t in st.get("takes") or [] if t.get("ok") is not False and not t.get("bad")]
             s["cand_url"] = ok[-1]["url"] if ok and st.get("active") is None else None
             s["cand_n"] = len(ok) if st.get("active") is None else 0
+            # UIRSI r40：旧剧本版本的图（剧本更新前出的）不作候选；有它们而没有新图时，格子写“未出（剧本已更新）”
+            s["old_script_n"] = sum(1 for t in st.get("takes") or [] if t.get("script") == "old")
+            s["status"] = (c.get(s["id"]) or {}).get("status") or {"main": None, "tags": []}
+            # 当前版本本身是旧剧本出的（全量重做没撤掉的尾帧等）：前端不显示这张、按“未出（剧本已更新）”处理
+            for stg, key in (("image", "first_old"), ("last", "last_old")):
+                x = (c.get(s["id"]) or {}).get(stg) or {}
+                a = x.get("active")
+                s[key] = a is not None and any(t.get("n") == a and t.get("script") == "old" for t in x.get("takes") or [])
+        # UIRSI r40：板块层面（集 + 各阶段）已确认 / 进行中 / 过期 / 未开始，口径同镜头格标签
+        try:
+            from ns_api import shot_status  # noqa: PLC0415
+            e["blocks"] = shot_status.episode_blocks(e["number"], e["shots"])
+        except Exception:  # noqa: BLE001
+            e["blocks"] = None
     return {"episodes": eps}

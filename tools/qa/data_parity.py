@@ -28,6 +28,9 @@
     D-DURSUM 每集总秒数：/api/season（全剧总览）= /api/episodes/{n}（画布 / 批量出视频）
     D-LOOKGATE 顶栏 ②“造型待确认”的人物（/api/looks/episodes/{n}）= 剧本本集在画 / 局部的人
     D-SCENEUSE 场景卡“使用镜头数 / 集”（/api/assets/scenes）= 剧本 scene_id 统计
+    D-CANDVER  UIRSI r40（项目方 11-02 00:0x：“我…看到很多错误的图”）：/api/candidates 当作可挑候选（ok 不是 false）的每一版，
+               必须是现行剧本版本——出图时间不早于本集最后一次导入（import_log.jsonl，按路径 _epNN_ 归集），或带的 prompt_source.sha256
+               = 现行剧本 sha；/api/season 的候选数 = 这样的版本数。独立按 takes.json + import_log 算，不调接口里的判定
   --ui EP：再用无头 Chrome（apps/web/e2e/dataalign/probe.mjs，只读查看令牌）打开剧本页第 EP 集，
            逐行比对页面上的人物小卡（名字 + 造型字母）= 接口。
   --inproc：不走 :8800，进程内调用 ns_api.app（:8800 还没重启时验证新代码；会 import 整个 API，较慢）
@@ -193,6 +196,10 @@ class Api:
             if path == "/api/story-images":
                 from ns_api.story_runs import story_images  # noqa: PLC0415
                 return story_images()
+            m = re.match(r"^/api/candidates\?ep=(\d+)$", path)   # UIRSI r40：D-CANDVER
+            if m:
+                from ns_api import takes_ui as TU  # noqa: PLC0415
+                return TU.candidates(int(m.group(1)))
             raise KeyError(path)
         req = urllib.request.Request(API + path, headers={"x-ns-viewer-token": self.tok} if self.tok else {})
         with urllib.request.urlopen(req, timeout=120) as r:
@@ -521,6 +528,64 @@ def main() -> int:
                sum(((x.get("duration") or {}).get("seconds") or 0) for x in ash))
     except Exception as ex:  # noqa: BLE001
         warns.append(f"D-DURSUM /api/season 取不到：{ex}")
+    # D-CANDVER（UIRSI r40）：界面显示的候选必须属于现行剧本版本（旧剧本候选不得进总览 / 挑选 / 候选数）
+    try:
+        import hashlib as _hl
+        import re as _re
+        cut_ep: dict[int, str] = {}
+        cut_all = ""
+        for ln in (IMPORT_LOG.read_text(encoding="utf-8").splitlines() if IMPORT_LOG.exists() else []):
+            try:
+                ie = json.loads(ln)
+            except ValueError:
+                continue
+            if ie.get("rc") not in (0, None) or not ie.get("at"):
+                continue
+            es = {int(x) for x in (ie.get("episodes") or []) if str(x).isdigit()}
+            m_ = _re.search(r"_ep(\d{2})_", str(ie.get("path") or ""))
+            es = es or ({int(m_.group(1))} if m_ else set())
+            if es:
+                for k in es:
+                    cut_ep[k] = max(cut_ep.get(k, ""), ie["at"])
+            else:
+                cut_all = max(cut_all, ie["at"])
+        cur_sha = _hl.sha256(SCRIPT.read_bytes()).hexdigest()
+
+        def _cur(tk: dict, n_: int) -> bool:
+            for src in (tk, tk.get("params") or {}):
+                ps = src.get("prompt_source") if isinstance(src, dict) else None
+                if isinstance(ps, dict) and ps.get("sha256") == cur_sha:
+                    return True
+            c_ = max(cut_ep.get(n_, ""), cut_all)
+            return not c_ or (tk.get("created_at") or "") >= c_
+
+        season_n: dict[str, int] = {}
+        try:
+            for se_ in api.get("/api/season").get("episodes") or []:
+                for x in se_.get("shots") or []:
+                    season_n[x["id"]] = x.get("cand_n") or 0
+        except Exception as ex:  # noqa: BLE001
+            warns.append(f"D-CANDVER /api/season 取不到：{ex}")
+        for e in eps:
+            n = e["number"]
+            if want_eps and n not in want_eps:
+                continue
+            cd = api.get(f"/api/candidates?ep={n}").get("shots") or {}
+            for sid, row in cd.items():
+                m2 = _re.fullmatch(r"ep\d{2}-S(\d+)", sid)
+                tj = rj(ROOT / "data" / "renders" / f"ep{n:02d}" / f"S{m2.group(1) if m2 else '0'}" / "takes.json", {}) or {}
+                by_n = {(x.get("stage"), x.get("n")): x for x in tj.get("takes") or []}
+                for stg in ("image", "last"):
+                    x = row.get(stg) or {}
+                    shown = [tk for tk in x.get("takes") or [] if tk.get("ok") is not False and not tk.get("bad")]
+                    old = [tk["n"] for tk in shown if not _cur(by_n.get((stg, tk.get("n"))) or {}, n)]
+                    checked["fields"] += 1
+                    if old:
+                        fails.append(f"D-CANDVER {sid} {stg}: 接口把旧剧本版本当候选 #{old}（出图早于本集最后一次导入 {max(cut_ep.get(n, ''), cut_all)}）")
+                    if stg == "image" and sid in season_n and x.get("active") is None:
+                        eq("D-CANDVER", sid, "总览候选数 = 现行剧本版本的合格候选数", season_n[sid], len(shown) - len(old))
+    except Exception as ex:  # noqa: BLE001
+        warns.append(f"D-CANDVER 取不到：{ex}")
     # D-LOOKGATE：顶栏 ② 造型确认的人物 = 剧本本集在画 / 局部的人
     if project:
         for e in eps:

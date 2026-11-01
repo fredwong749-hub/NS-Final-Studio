@@ -310,5 +310,83 @@
    }
   ],
   "verdict": "补“外套一直穿在肩上”无效：2/2 seed 仍在 3.3–3.9 s 消失再穿回。只有去掉对衣服的动作才行（G13 0/2）。"
+ },
+ {
+  "title": "G17 外套形变复核（AUDIT 限定）：去掉整理动作后 2.4–4.0 s 逐帧 · ep01-S3",
+  "arms": [
+   {
+    "exp": "r8",
+    "id": "a",
+    "label": "去动作 seed A",
+    "img": "data/ab/video_rca/r8_outfit_action/ep01-S3__rca_S3_noblazeract_kf.jpg"
+   },
+   {
+    "exp": "r8",
+    "id": "b",
+    "label": "去动作 seed B",
+    "img": "data/ab/video_rca/r8_outfit_action/ep01-S3__rca_S3_noblazeract_s2_kf.jpg"
+   },
+   {
+    "exp": "r1",
+    "id": "c",
+    "label": "原稿（带整理动作）",
+    "img": "data/ab/video_rca/r1_base_cue/ep01-S3__rca_S3_pika_kf.jpg"
+   }
+  ],
+  "verdict": "AUDIT 对：去掉动作后外套没整件消失，但站起后袖子变米白、外套成无袖短马甲（2/2）。两个根因：对衣服的动作 → 整件脱穿；坐→站大幅姿态 → 无袖漂移。"
+ },
+ {
+  "title": "G18 S4 外套长度：cropped 字样删 / 不删（行 1–2 原稿 seed A/B；行 3–5 删 cropped seed A/B/C）",
+  "arms": [
+   {
+    "exp": "r10c",
+    "id": "t",
+    "label": "第 0/60/100/140/190 帧林晚躯干",
+    "img": "data/ab/video_rca/r10c_shape/torso_compare.jpg"
+   }
+  ],
+  "verdict": "小动作镜看不出系统性变短；r2“S4 也变短”撤回为未证实。"
+ },
+ {
+  "title": "G19 口型：台词时说话人嘴部（S4 补口型句 / 改 VOICE 短语，第 100–118 帧）",
+  "arms": [
+   {
+    "exp": "r14",
+    "id": "m",
+    "label": "上 4 行补口型句 / 下 4 行 calm",
+    "img": "data/ab/video_rca/r14b_lipcue/mouth_14.jpg"
+   }
+  ],
+  "verdict": "男主台词时头低垂、嘴几乎不动；改 VOICE 0/3、补口型句 1/3、台词那拍改“看着她的脸”2/3。林晚说话 3/3 过。"
+ },
+ {
+  "title": "G20 双人第二人反应（R11-9）· 5 条 Pika 双人片，第 60/110/160 帧",
+  "arms": [
+   {
+    "exp": "r13",
+    "id": "1",
+    "label": "S6 有系统句",
+    "img": "data/ab/video_rca/r13_react/react_1.jpg"
+   },
+   {
+    "exp": "r13",
+    "id": "2",
+    "label": "S6 无系统句",
+    "img": "data/ab/video_rca/r13_react/react_2.jpg"
+   },
+   {
+    "exp": "r13",
+    "id": "4",
+    "label": "S4 原稿",
+    "img": "data/ab/video_rca/r13_react/react_4.jpg"
+   },
+   {
+    "exp": "r13",
+    "id": "5",
+    "label": "S4 删画外",
+    "img": "data/ab/video_rca/r13_react/react_5.jpg"
+   }
+  ],
+  "verdict": "非说话人 5/5 视线在对方身上，表情轻微；首帧看镜头的片前 2–3 s 仍看镜头。"
  }
 ]

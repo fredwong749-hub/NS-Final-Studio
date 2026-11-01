@@ -1,14 +1,14 @@
 {
- "kb_version": "kb-20261101-acf10d70",
- "n": 445,
+ "kb_version": "kb-20261102-17723931",
+ "n": 447,
  "by_domain": {
-  "render": 76,
+  "render": 77,
   "prompt": 27,
   "writer": 60,
   "edit": 35,
   "review": 56,
   "loop": 9,
-  "asset": 40,
+  "asset": 41,
   "ops": 91,
   "ui": 51
  },
@@ -24,8 +24,8 @@
   "P4-P6": 23,
   "P4-P7": 22,
   "P4-P9": 16,
-  "P5-P6": 110,
-  "P6-P7": 25,
+  "P5-P6": 111,
+  "P6-P7": 26,
   "P7-P8": 93,
   "P8-P10": 13,
   "P8-P9": 10,
@@ -5280,6 +5280,56 @@
    "_file": "knowledge/rules/render_imgfix.yaml"
   },
   {
+   "id": "K-REN-705",
+   "domain": "render",
+   "link": [
+    "P6-P7"
+   ],
+   "title": "双人句只按露脸的人数触发；局部的人写“只露出<部位>，不露脸”，角色锁只留看得到的部位和成年句；局部且原文没写脸的人（主角也一样）不挂身份脸",
+   "when": "ns_agent.compiler（framing_lead / locks）、framing.faced_people / partial_clause / part_lock、asset_refs.resolve_shot（身份脸槽）",
+   "then": "露脸 = cast 在画，或局部但 img 原文写到脸（asset_refs.face_described）；露脸人数 ≥2 才写 TWO_SHOT_TESTED；局部的人按 cast 的部位原文写 PARTIAL_CLAUSE；part_lock 按“，；、”切分句；preflight I2（K-AST-263）挡“露脸的人没有身份脸”和“写了两张脸但身份脸不足 2 张”",
+   "check": [
+    "tests/test_imgfix.py"
+   ],
+   "evidence": [
+    {
+     "src": "data/pipeline/runs/series10_v1/assets/first_frame_jobs.before_imgfix_k705_20261102.json",
+     "note": "102 条作业里 21 条第二个人是局部（ep02-S4 林晚“背影肩线”、ep02-S1 顾沉“西装下摆与皮鞋”…），却写了“两人同框，两张脸都清晰入画，互相看着对方”，只有 1 张身份脸 → 模型画出一张没有身份参考的脸（项目方 11-02 00:05 ep02-S4 截图）"
+    },
+    {
+     "src": "data/pipeline/runs/series10_v1/assets/first_frame_jobs.json",
+     "note": "重编后：写两张脸但身份脸不足 2 张的作业 0 条，preflight 0 挡"
+    }
+   ],
+   "confidence": "high",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/render_imgfix.yaml"
+  },
+  {
+   "id": "K-AST-263",
+   "domain": "asset",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "每个露脸的人都要有自己的身份脸（独占一槽；露脸 ≥3 且槽位不够时拼成脸板，每格标名字），不能丢脸",
+   "when": "ns_agent.asset_refs.plan_slots（faceboard）；gen_contract.preflight I2",
+   "then": "身份脸永不进参考板、永不丢；≥3 张脸且组数超过槽位 → 全部身份脸合成一张 faceboard 槽（_line 写“脸部参考板：①名②名…”）；preflight I2 按 rec.characters 逐人核对",
+   "check": [
+    "tests/test_imgfix.py"
+   ],
+   "evidence": [
+    {
+     "src": "data/pipeline/runs/series10_v1/assets/first_frame_jobs.json",
+     "note": "11-02 00:1x 逐条扫描：没有“在画却缺身份脸槽”的镜头；事故根因是 K-REN-705 的双人句，本条是防线"
+    }
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/render_imgfix.yaml"
+  },
+  {
    "id": "K-OPS-121",
    "enforced": false,
    "domain": "ops",
@@ -5949,6 +5999,10 @@
     {
      "src": "data/ab/video_rca/r1_base_cue/",
      "note": "Pika 同首帧：S2 J4 1.347 z 3.9、S4 1.352 z 7.4、S5 1.237 z 10.8（慢动作，第 3 相位跳 1.24–1.34×）；S3 大动作 J4 1.155 z 0.9、J2_z 3.3（2 帧交替，PDD 同镜也有）"
+    },
+    {
+     "src": "docs/video_rca/RCA_r3.md",
+     "note": "⤴ r3 全分辨率（gpu36）：4 帧型去抖代价 S6 大动作 −1.9%、S4 −1.5%、S5 −3.7%；2 帧交替型 S3 −25.6%（J4 1.16 z 1.0，门槛自然排除）→ 代价看顿挫类型、不看动作幅度，不分档"
     },
     {
      "src": "data/ab/video_rca/r6_dejudder/",
@@ -10204,7 +10258,7 @@
    ],
    "title": "连接状态要一眼看得到、断了要说原因——界面只读看门狗已经写好的状态，不在请求里连服务器；服务器上的图读不到时用笔记本上的同一张，没有就写占位字，不出裂图",
    "when": "界面显示渲染卡 / 隧道 / 跳板 / 常驻进程的连通情况，或显示要经隧道去服务器取的图（GPU 面板“最近出图”）",
-   "then": "汇总接口 /api/infra/status 只读 data/qa/infra_watchdog_state.json（跳板、6 条连接、重建记录）和 data/autopilot/resident_sync.json（服务器常驻心跳），本机两样探 127.0.0.1（1.5 s 超时、缓存 5 s）；顶栏胶囊（全部正常只留绿点，有断的写“连接 N/6”或“跳板断了”）+ GPU 面板顶部同一块明细；卡片“连不上”下面一行写原因（跳板断了 / 这条连接断了、正在自动重连），全部卡都断时只在面板顶部说一次；文案用卡名（gpu33·卡1），端口 / 地址只放技术细节。缩略图：先在本镜 takes.json 里找登记过的同名一版（笔记本文件），没有再经隧道取（8 s 超时、失败 1 分钟内不重试），前端 onError 写“图在服务器上，笔记本还没有”",
+   "then": "汇总接口 /api/infra/status 只读 data/qa/infra_watchdog_state.json（跳板、6 条连接、重建记录）和 data/autopilot/resident_sync.json（服务器常驻心跳），本机两样探 127.0.0.1（1.5 s 超时、缓存 5 s）；顶栏胶囊（全部正常只留绿点，有断的写“连接 N/6”或“跳板断了”）+ GPU 面板顶部同一块明细；卡片“连不上”下面一行写原因（跳板断了 / 这条连接断了、正在自动重连），全部卡都断时只在面板顶部说一次；文案用卡名（gpu33·卡1），端口 / 地址只放技术细节。缩略图：先在本镜 takes.json 里找登记过的同名一版（笔记本文件），没有再经隧道取（8 s 超时、失败 1 分钟内不重试），前端 onError 写“图在服务器上，笔记本还没有”；r39（⤴ 补充）：NETFIX 隧道监管的 data/netfix/net_status.json 90 s 内新鲜时，跳板 / 连接 / 重连 / 派单都以它为准（连接通但出图程序没响应单独说），不新鲜才退回看门狗；派单模式 dispatch_mode 写一行大白话（“现在由笔记本统一派图（服务器资产补推中），gpu33 / gpu36 推完后自动交还”），顶栏弹层和 GPU 面板简版都显示；顶栏挤时（总调度定 A + C）断线只写“3/6”“跳板断”，渲染任务按钮写“N 跑 · N 等”，“出图未连上”有连接胶囊时只留悬停；卡片离线写“这张卡的出图程序没响应”",
    "evidence": [
     {
      "src": "docs/uirsi/rounds/r38.md",
@@ -12044,7 +12098,11 @@
     },
     {
      "src": "data/ab/video_rca/r8_outfit_action/",
-     "note": "只把这一拍换成 “she lets her hands settle at her sides”：2/2 外套全程穿着"
+     "note": "只把这一拍换成 “she lets her hands settle at her sides”：2/2 外套没有整件消失"
+    },
+    {
+     "src": "docs/video_rca/RCA_r3.md",
+     "note": "⤴ 限定（VIDEO-RCA r3，AUDIT 复核 r8 第 2.4–4.0 s 逐帧）：本条只管“外套整件消失再穿回”；去掉动作后站起来外套仍变成无袖短马甲（2/2，data/ab/video_rca/r8_outfit_action/*_kf.jpg）——坐→站等大幅姿态变化的无袖 / 短款漂移是另一个根因（RCA_r3 §1.2），不归本条管"
     },
     {
      "src": "data/ab/video_rca/r9_outfit_keep/",

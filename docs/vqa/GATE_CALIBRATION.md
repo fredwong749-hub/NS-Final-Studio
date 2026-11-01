@@ -110,3 +110,9 @@
   - 改写句对（“open dark blazer … jacket visible at her shoulders and sides, long hair over it”）：imgfix 内零误报线 0.12 时召回 36/38；两折 19/20、误报 0/14，18/18、误报 1/16。但旧标定里没穿外套的 ep02-S1v6 也有 0.129，所以全集零误报线要 0.13（召回 38/41），余量只有 0.001。
   - 结论：两种句对都**不达标**，维持只记录。外套靠 v2 设定图（终版 7/8 穿上了）加看图 outfit 记录兜底。下一步：换区域（只裁肩膀和两侧上臂）或换判据（本地看图单独问“有没有穿外套”），再标定。
 - **多肢双条件（已实现）**：config/vqa.json extra_limbs blocking=false。score_clip.gate 里 V6 手数规则命中 且 看图 extra_limbs = defect 才判“多肢”；只有一方命中写进 soft。测试 test_multi_limb_needs_both_v6_and_vlm。
+
+## 10. V7 口型：成片里的声音到底是哪条（VIDEO-RCA r3 交办第 2 项，11-02 00:xx 查明）
+- 合成口径：night.py 调 assemble_episode.py 时固定传 `--dialogue-source h3`（tools/series10_video/night.py finalize），config/render_quality.json post.dialogue_source 也是 h3。ns_post.h3_dialogue 的规则：画内对白用视频原声（H3 / Pika 自己生成、和嘴型同步的那条），逐镜用 SenseVoice 回听，CER ≤ 上限才用；**只有两种情况换成 TTS**：(a) 独白 / 画外音（画面上没有嘴）；(b) 兜底——回听对不上剧本台词，或者根本没听到人声（每次兜底记一条 warning）。voice_conversion（换音色）默认关闭（render_quality.json post.voice_conversion.enabled=false）。
+- 实测成片（data/episodes/series10/ep01_v2.timeline.json speech）：画内对白 3 句，2 句用的是原声（S4 顾沉“第一天就加班。”CER 0.0、S5 林晚“想尽快跟上。”CER 0.0），1 句 TTS（S6“别洗。”——那一镜进成片的是静帧，没有视频原声，所以兜底）。ep01_v1 也一样（2 句原声 / 1 句 TTS）。
+- 结论：**V7 量的原声，就是成片里画内对白实际播放的那条**（回听通过的句子），检测对象没错。只有兜底成 TTS 的句子，口型对的是原声、成片播的是 TTS，会对不上。这种情况本身已经说明“原声没听清 / 没说对”，V7 应该照样判不过，或者整镜重出，不该用 TTS 盖过去。建议（交 VOICE10 / PROD）：画内对白被 TTS 兜底时，合成器把该镜标成“口型与成片声音不一致”，不进定稿，回到重出；独白 / 画外音不受影响（V7 用“嘴唇闭着”口径判）。
+- 另外发现：h3_dialogue 的回听结果带每句的时间戳（例：ep01_v2 S4 那句 t0 1.54 s – t1 2.69 s）。如果和编译稿的分拍时间码（同一镜写的是 00:04）不一致，说明片子没按分拍说台词。V7 的台词时段目前取分拍时间码 ±0.5 s（§11）；更准的做法是用回听时间戳，可是回听只在合成时跑。下一步：score_clip 打分时就跑一次 SenseVoice 拿时间戳（服务器上要有 SenseVoice，未核实）。

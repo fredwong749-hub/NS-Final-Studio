@@ -147,3 +147,36 @@ def test_closeup_outer_items_only_visible_zone():
     n = [x for _n, _l, xs in FJ.outer_items("series10_v1", ep, near, sr, body=near["img_prompt"]) for x in xs]
     assert not any("裙" in x for x in c), c
     assert any("裙" in x for x in n), n
+
+
+def test_k705_two_shot_counts_faced_people_and_partial_clause():
+    from ns_agent import framing as FR
+    shot = {"img_prompt": "中近景，过肩，顾沉侧身站在面板前，四分之三侧脸朝左；林晚穿米白衬衫，背影在前景虚化",
+            "cast": [{"name": "顾沉", "presence": "在画"}, {"name": "林晚", "presence": "局部", "part": "背影肩线"}]}
+    faced, partial = FR.faced_people(shot, ["顾沉", "林晚"])
+    assert faced == ["顾沉"] and partial == [("林晚", "背影肩线")]
+    assert FR.two_shot_clause(len(faced), None) == ""
+    assert FR.partial_clause(partial, None) == "林晚只露出背影肩线，不露脸"
+    assert FR.partial_clause(partial, "part") == ""
+    two = {"img_prompt": "近景，林晚与顾沉对视", "cast": [{"name": "林晚", "presence": "在画"}, {"name": "顾沉", "presence": "在画"}]}
+    assert FR.two_shot_clause(len(FR.faced_people(two, ["林晚", "顾沉"])[0]), None) == FR.TWO_SHOT_TESTED
+
+
+def test_k705_part_lock_splits_dun_hao():
+    from ns_agent import framing as FR
+    lk = "【林晚】22岁中国成年女性，蓝发及腰、齐刘海、冷白皮肤、G罩杯、长腿，真人写实；手指甲为5厘米超长透明水晶甲"
+    out = FR.part_lock(lk, "背影肩线")
+    assert out == "【林晚】22岁中国成年女性，蓝发及腰" and "刘海" not in out
+
+
+def test_k263_preflight_blocks_missing_face():
+    from ns_agent.gen_contract import preflight as PF
+    base = {"subject": None, "primary": "gu_chen", "slots": [{"kind": "face", "character": "gu_chen", "file": "f.png"}],
+            "characters": [{"character": "gu_chen", "name": "顾沉", "presence": "在画"}, {"character": "lin_wan", "name": "林晚", "presence": "在画"}]}
+    r = PF.check({"kind": "image", "model": "qwen_image_2.1", "asset_refs": base, "prompt": "x", "cast": []})
+    i2 = next(i for i in r.items if i.id == "I2")
+    assert i2.status == "fail" and "lin_wan" in i2.detail
+    ok = {**base, "characters": [{"character": "gu_chen", "name": "顾沉", "presence": "在画"}, {"character": "lin_wan", "name": "林晚", "presence": "局部"}]}
+    r = PF.check({"kind": "image", "model": "qwen_image_2.1", "asset_refs": ok, "prompt": "两张脸都清晰入画", "cast": []})
+    i2 = next(i for i in r.items if i.id == "I2")
+    assert i2.status == "fail" and "两张脸" in i2.detail

@@ -76,6 +76,8 @@ class FakeSup(TS.Supervisor):
     def __init__(self, tmp, relay=True):
         conf = json.loads(TS.CONF.read_text(encoding="utf-8"))
         conf["legacy_loops"] = []
+        conf["hosts"] = {"gpu33": {"forwards": [[18188, 8188], [18189, 8189], [18191, 8191]], "probe_http": [18188, 18189, 18191]},
+                         "gpu36": {"forwards": [[18288, 8188], [18289, 8189], [18290, 8190]], "probe_http": [18288, 18289, 18290]}}
         p = tmp / "conf.json"
         p.write_text(json.dumps(conf), encoding="utf-8")
         super().__init__(p, tmp)
@@ -160,10 +162,12 @@ def test_ssh_cmd_has_keepalive_and_tag():
     s = TS.Supervisor.__new__(TS.Supervisor)
     s.c = json.loads(TS.CONF.read_text(encoding="utf-8"))
     s.tag = "nsnetfix"
-    cmd = " ".join(s.ssh_cmd("gpu36"))
-    for k in ("ServerAliveInterval=10", "ConnectTimeout=20", "ExitOnForwardFailure=yes", "Tag=nsnetfix-gpu36",
-              "Tag=nsnetfix-proxy-gpu36", "127.0.0.1:18288:127.0.0.1:8188", "127.0.0.1:18290:127.0.0.1:8190"):
+    cmd = " ".join(s.ssh_cmd("gpu36-l0"))
+    for k in ("ServerAliveInterval=10", "ConnectTimeout=20", "ExitOnForwardFailure=yes", "Tag=nsnetfix-gpu36-l0",
+              "Tag=nsnetfix-proxy-gpu36-l0", "127.0.0.1:18288:127.0.0.1:8188", "127.0.0.1:8871:127.0.0.1:8870"):
         assert k in cmd
+    assert cmd.endswith(" gpu36")
+    assert "18290" in " ".join(s.ssh_cmd("gpu36-l2")) and "18288" not in " ".join(s.ssh_cmd("gpu36-l2"))   # 按道一条连接
     assert "ServerAliveInterval" in s.c["relay"]["proxy_cmd"]
 
 
@@ -195,7 +199,7 @@ def test_lan_proxy_binds_internal_only():
 
 # ---------------------------------------------------------------- K-OPS-N05 状态文件字段
 def test_status_doc_fields():
-    for k in ("relay", "hosts.<h>", "servers.<h>", "tunnels_up / tunnels_total"):
+    for k in ("relay", "hosts.<连接名>", "servers.<h>", "tunnels_up / tunnels_total", "dispatch_mode"):
         assert k in TS.STATUS_DOC
 
 
@@ -243,3 +247,41 @@ def test_timeouts_while_ssh_moves_data_is_not_hang(monkeypatch, tmp_path):
         s.hosts["gpu33"]["probe_t"] = 0
         s.tick()
     assert s.killed == [] and s.hosts["gpu33"]["ports"]["18188"]["why"] == "busy"
+
+
+# ---------------------------------------------------------------- K-OPS-N07 ssh 闸门（WSL 主连接复用）
+import rssh as RS  # noqa: E402
+
+
+def test_rssh_rewrites_only_command_calls_to_servers():
+    new = RS.rewrite(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-i", "C:/k", "gpu36", "nvidia-smi"])
+    assert new[:4] == RS.WSL[:4] and "/home/fredw/.ssh/nsnf/gpu36-cmd.sock" in new and "ProxyCommand=false" in new
+    assert new[-2:] == ["gpu36", "nvidia-smi"] and "C:/k" not in new
+    assert RS.rewrite(["ssh", "root@gpu33", "ls"])[-2:] == ["gpu33", "ls"]
+    for argv in (["ssh", "-N", "-L", "1:127.0.0.1:2", "gpu36"], ["ssh", "-M", "gpu36", "x"], ["ssh", "-O", "check", "gpu36"],
+                 ["ssh", "gpu99", "ls"], ["ssh", "194relay", "ls"], ["scp", "a", "gpu33:/b"], ["ssh", "gpu33"],
+                 ["ssh", "-o", "ProxyCommand=x", "-W", "h:22", "gpu33"], "ssh gpu33 ls", ["python", "gpu33"]):
+        assert RS.rewrite(argv) is None, argv
+
+
+def test_rssh_safety_valve(monkeypatch):
+    monkeypatch.setenv("NS_SSH_SHIM", "off")
+    assert RS.enabled() is False
+
+
+def test_no_new_direct_ssh_outside_allowlist():
+    """静态检查（K-OPS-N07）：直接 subprocess 起 ssh 的文件只能是下列已登记的（它们经 venv shim 自动复用主连接）；新增要么用 rssh.run，要么登记"""
+    import re
+    allow = set((ROOT / "config/netfix/ssh_callers.txt").read_text(encoding="utf-8").split())
+    pat = re.compile(r"""\[\s*["'](ssh|scp)(\.exe)?["']|ssh\.exe["']""")
+    found = set()
+    for base in ("tools", "services", "packages", "ops"):
+        for p in (ROOT / base).rglob("*.py"):
+            if "netfix" in p.parts or "__pycache__" in p.parts:
+                continue
+            try:
+                if pat.search(p.read_text(encoding="utf-8", errors="ignore")):
+                    found.add(p.relative_to(ROOT).as_posix())
+            except OSError:
+                pass
+    assert not (found - allow), f"新增直接调 ssh 的文件（改用 tools/netfix/rssh.run 或登记 config/netfix/ssh_callers.txt）：{sorted(found - allow)}"

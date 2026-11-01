@@ -243,7 +243,7 @@ def reset_redo(since: str | None = None, shots: list[str] | None = None, by: str
     return {"changed": len(changed), "objects": changed[:100], "dry": dry}
 
 
-def reject_stale_clause(pattern: str, since: str, reason: str, watch_min: int = 0, dry: bool = False) -> dict:
+def reject_stale_clause(pattern: str, since: str, reason: str, watch_min: int = 0, dry: bool = False, whole: bool = False) -> dict:
     """编译器改了某句（例 VIDEO-RCA 23:5x 双人句切回实测句）之后：since 之后出的首 / 尾帧版本里提示词还含旧句 pattern 的，
     逐个 producer reject（驳回重出 frame_v9×2，不计次，旧版保留）。watch_min > 0：每分钟再扫一次，接住还在出的单（在途的旧稿）"""
     import glob
@@ -257,7 +257,7 @@ def reject_stale_clause(pattern: str, since: str, reason: str, watch_min: int = 
             for t in d.get("takes") or []:
                 key = (sid, t.get("stage"), t.get("n"))
                 if (t.get("stage") not in ("image", "last") or key in done or str(t.get("created_at") or "") < since
-                        or pattern not in (t.get("prompt") or "") or t.get("master_reject")):
+                        or pattern not in (json.dumps(t, ensure_ascii=False) if whole else (t.get("prompt") or "")) or t.get("master_reject")):
                     continue
                 done.add(key)
                 oid = ("first:" if t["stage"] == "image" else "last:") + sid
@@ -274,12 +274,46 @@ def reject_stale_clause(pattern: str, since: str, reason: str, watch_min: int = 
     return {"rejected": sorted(done)}
 
 
+def reject_old_jobs(shots: list[str], since: str, reason: str, watch_min: int = 0, dry: bool = False) -> dict:
+    """作业重编后（例 IMGFIX 00:1x K-REN-705），这些镜 since 之后出的首帧若不是按现行作业出的（版本提示词 ≠ 现行作业提示词），
+    逐个 producer reject（frame_v9×2、不计次、旧版保留）；watch_min > 0 每分钟再扫，接住按旧作业派出、还在出的单"""
+    import subprocess
+    done = set()
+    t_end = time.time() + watch_min * 60
+    while True:
+        jobs = {j["shot"]: j for j in (jl(ROOT / "data/pipeline/runs/series10_v1/assets/first_frame_jobs.json", {}) or {}).get("jobs") or []
+                if not str(j.get("status", "")).startswith("stale:")}
+        for sid in shots:
+            ep, sn = sid.split("-")
+            d = jl(ROOT / "data/renders" / ep / sn / "takes.json", {}) or {}
+            cur = (jobs.get(sid) or {}).get("prompt") or ""
+            for t in d.get("takes") or []:
+                key = (sid, t.get("n"))
+                if (t.get("stage") != "image" or key in done or str(t.get("created_at") or "") < since or t.get("master_reject")
+                        or not cur or (t.get("prompt") or "").strip() == cur.strip() or cur.strip() in (t.get("prompt") or "")):
+                    continue
+                done.add(key)
+                if dry:
+                    print("would reject", sid, t["n"], t.get("created_at"))
+                    continue
+                subprocess.run([sys.executable, str(ROOT / "tools/autopilot/producer.py"), "reject", "--obj", f"first:{sid}",
+                                "--n", str(t["n"]), "--reason", reason, "--plan", PRESETS, "--by", "WORKFLOW"], cwd=ROOT,
+                               capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+                               env={**os.environ, "PYTHONUTF8": "1"})
+                print(time.strftime("%H:%M:%S"), "rejected", sid, t["n"], t.get("created_at"), flush=True)
+        if time.time() >= t_end:
+            break
+        time.sleep(60)
+    return {"rejected": sorted(done)}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("cmd", choices=["status", "gate", "plan", "apply", "pause", "resume", "reset-redo", "reject-stale-clause"])
+    ap.add_argument("cmd", choices=["status", "gate", "plan", "apply", "pause", "resume", "reset-redo", "reject-stale-clause", "reject-old-jobs"])
     ap.add_argument("--pattern", default="")
     ap.add_argument("--reason", default="")
     ap.add_argument("--watch-min", type=int, default=0)
+    ap.add_argument("--whole-take", action="store_true", help="在整条版本记录里找（参考图路径等），不只提示词")
     ap.add_argument("--since")
     ap.add_argument("--eps", default="")
     ap.add_argument("--shots", default="")
@@ -307,8 +341,11 @@ def main(argv=None) -> int:
     elif a.cmd == "apply":
         eps = {int(x) for x in a.eps.split(",") if x.strip()} if a.eps else None
         print(json.dumps(apply(a.host, a.dry, a.executor, eps), ensure_ascii=False, indent=1)[:3000])
+    elif a.cmd == "reject-old-jobs":
+        print(json.dumps(reject_old_jobs([x for x in a.shots.split(",") if x], a.since or "", a.reason or "作业已重编", a.watch_min, a.dry),
+                         ensure_ascii=False)[:3000])
     elif a.cmd == "reject-stale-clause":
-        print(json.dumps(reject_stale_clause(a.pattern, a.since or "", a.reason or "编译器旧句失效", a.watch_min, a.dry),
+        print(json.dumps(reject_stale_clause(a.pattern, a.since or "", a.reason or "编译器旧句失效", a.watch_min, a.dry, a.whole_take),
                          ensure_ascii=False)[:3000])
     elif a.cmd == "reset-redo":
         print(json.dumps(reset_redo(a.since, [x for x in a.shots.split(",") if x] or None, a.by or "WORKFLOW", a.dry),

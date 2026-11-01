@@ -26,8 +26,13 @@
   "IPQoS=throughput"
  ],
  "hosts": {
-  "gpu33": {
+  "gpu33-l0": {
+   "ssh_host": "gpu33",
    "forwards": [
+    [
+     18188,
+     8188
+    ],
     [
      15180,
      5180
@@ -39,39 +44,42 @@
     [
      18099,
      8099
-    ],
-    [
-     18188,
-     8188
-    ],
+    ]
+   ],
+   "probe_http": [
+    18188
+   ]
+  },
+  "gpu33-l1": {
+   "ssh_host": "gpu33",
+   "forwards": [
     [
      18189,
      8189
-    ],
+    ]
+   ],
+   "probe_http": [
+    18189
+   ]
+  },
+  "gpu33-l3": {
+   "ssh_host": "gpu33",
+   "forwards": [
     [
      18191,
      8191
     ]
    ],
    "probe_http": [
-    18188,
-    18189,
     18191
    ]
   },
-  "gpu36": {
+  "gpu36-l0": {
+   "ssh_host": "gpu36",
    "forwards": [
     [
      18288,
      8188
-    ],
-    [
-     18289,
-     8189
-    ],
-    [
-     18290,
-     8190
     ],
     [
      8871,
@@ -79,11 +87,46 @@
     ]
    ],
    "probe_http": [
-    18288,
-    18289,
-    18290
+    18288
+   ]
+  },
+  "gpu36-l1": {
+   "ssh_host": "gpu36",
+   "forwards": [
+    [
+     18289,
+     8189
+    ]
    ],
-   "_8871": "11-01 23:0x 总调度定：VQAGATE 的看图隧道（原 tools/vqa/tunnel.ps1 单独一条 ssh）收编进 gpu36 主连接；vqa client 本机 8870 不在时先试 8871。不进 probe_http（看图服务没有 /system_stats）"
+   "probe_http": [
+    18289
+   ]
+  },
+  "gpu36-l2": {
+   "ssh_host": "gpu36",
+   "forwards": [
+    [
+     18290,
+     8190
+    ]
+   ],
+   "probe_http": [
+    18290
+   ]
+  },
+  "gpu33-cmd": {
+   "kind": "wsl_mux",
+   "ssh_host": "gpu33",
+   "sock": "/home/fredw/.ssh/nsnf/gpu33-cmd.sock",
+   "forwards": [],
+   "probe_http": []
+  },
+  "gpu36-cmd": {
+   "kind": "wsl_mux",
+   "ssh_host": "gpu36",
+   "sock": "/home/fredw/.ssh/nsnf/gpu36-cmd.sock",
+   "forwards": [],
+   "probe_http": []
   }
  },
  "tick_s": 5,
@@ -102,5 +145,8 @@
   "tunnel.sh",
   "tunnel_gpu36.sh"
  ],
- "_probe_note": "22:33 实测：gpu36 卡满载 + 跳板 17–20 KB/s 时 /system_stats 要 6–8 s 才回，8 s 超时会误判卡死、把正在传图的隧道杀掉。改为 20 s 超时、连续 3 轮（第一轮失败后 5 s 复测）才判卡死；真断线主要靠 ssh 自己的 ServerAlive（10 s × 3）。"
+ "_probe_note": "22:33 实测：gpu36 卡满载 + 跳板 17–20 KB/s 时 /system_stats 要 6–8 s 才回，8 s 超时会误判卡死、把正在传图的隧道杀掉。改为 20 s 超时、连续 3 轮（第一轮失败后 5 s 复测）才判卡死；真断线主要靠 ssh 自己的 ServerAlive（10 s × 3）。",
+ "_per_lane_note": "00:0x 总调度派、实测（data/netfix/bw_test.jsonl）：跳板按单条连接限速——下载 1 条 53 KB/s、4 条合计 140 KB/s；上传 1 条 36 KB/s、8 条合计 139 KB/s。所以按道各开一条 ssh（6 条），不再一台一条。",
+ "max_connecting": 2,
+ "_pool_note": "P0 11-02（总调度 fredw-2b）：固定连接池 = 6 条道隧道（Windows Git ssh，长连接）+ 2 条 WSL 命令主连接（gpu33-cmd / gpu36-cmd，ControlMaster）；远程命令 / 文件经 tools/netfix/rssh.py 或 venv sitecustomize shim 复用主连接，主连接不在就立刻失败、不新握手；新建连接全局同时握手 ≤ max_connecting（跳板 sshd MaxStartups 默认 10:30:100）。"
 }

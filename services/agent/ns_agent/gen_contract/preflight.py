@@ -145,9 +145,23 @@ def check(req: dict) -> ContractResult:
             # I2
             m = _kinds(rec, "身份脸缺图")
             faces = [s for s in slots if s.get("kind") == "face"]
-            need_face = rec.get("subject") not in ("part", "object") and bool(rec.get("primary"))
+            need_face = rec.get("subject") not in ("part", "object") and bool(rec.get("primary")) and any(
+                c.get("character") == rec.get("primary") and (c.get("presence", "在画") == "在画" or c.get("face_described"))
+                for c in rec.get("characters") or [{"character": rec.get("primary")}])
+            # K-AST-263（IMGFIX 11-02，项目方 00:05“很多人物face都出了问题”）：每个露脸的人（在画，或局部但原文写到脸）都要有自己的
+            # 身份脸（单独的 face 槽，或脸板里标了名字的一格）；提示词写了“两张脸都清晰入画”，身份脸至少两张
+            face_ids = {s.get("character") for s in faces} | {mm.get("character") for s in slots if s.get("kind") == "faceboard"
+                                                             for mm in s.get("members") or [] if mm.get("role") == "face"}
+            faced = [c.get("character") for c in rec.get("characters") or []
+                     if c.get("presence") == "在画" or c.get("face_described")] if rec.get("subject") not in ("part", "object") else []
+            lack = [c for c in faced if c and c not in face_ids]
+            two = "两张脸都清晰入画" in str(req.get("prompt") or "")
             if m:
                 add("I2", "fail", "；".join(x["detail"] for x in m))
+            elif lack:
+                add("I2", "fail", f"露脸的人没有身份脸参考槽：{'、'.join(lack)}（K-AST-263）")
+            elif two and len(face_ids) < 2:
+                add("I2", "fail", f"提示词写了两张脸都入画，但身份脸参考只有 {len(face_ids)} 张（K-AST-263 / K-REN-705）")
             elif need_face and not faces:
                 add("I2", "fail", f"主体角色 {rec.get('primary')} 脸可见，但没有身份脸参考槽")
             else:

@@ -144,6 +144,8 @@ from ns_api import producer as PRODUCER  # noqa: E402  PRODUCER 制作监督：/
 app.include_router(PRODUCER.router)
 from ns_api import infra_status as INFRA  # noqa: E402  UIRSI r38 实时连接状态：/api/infra/status（只读看门狗 / 常驻健康状态文件，不在请求里 ssh）
 app.include_router(INFRA.router)
+from ns_api import decision_locks as DLOCKS  # noqa: E402  UIRSI r40 项目方已定决策锁：/api/decision-locks（换掉已定的图前一键确认）
+app.include_router(DLOCKS.router)
 app.router.on_startup.append(EPROD.resume_on_startup)   # 在 JOBS.restore 之后：被重启打断的任务按可恢复错误重试
 VJ.get_script = lambda: _script
 

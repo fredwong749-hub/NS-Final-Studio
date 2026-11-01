@@ -1,0 +1,52 @@
+/* UIRSI r40：镜头状态彩色标签（全剧总览 / 画布 / 审片同一套）。只用主题 token，深浅主题自动跟随；
+   颜色：看图没过=红、旧剧本版本=紫、待重出=琥珀、过期=橙（虚线边，与琥珀区分）、待补判=灰蓝、尽力版=粉、出图中=蓝、排队中=灰、通过=绿 */
+.stag { --k: var(--c-text-2); display: inline-flex; align-items: center; gap: 3px; border-radius: var(--r-pill); border: 1px solid color-mix(in srgb, var(--k) 70%, transparent);
+  background: color-mix(in srgb, var(--k) 18%, var(--c-raise)); color: var(--c-text); font: inherit; font-weight: var(--fw-strong); white-space: nowrap; line-height: 1; }
+.stag.sm { height: 20px; padding: 0 var(--sp-2); font-size: var(--fs-xs); }
+.stag.xs { height: 16px; padding: 0 5px; font-size: 10px; }
+.stag::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--k); flex: none; }
+.stag em { font-style: normal; font-weight: 400; color: var(--c-text-2); }
+.k-vqa_fail { --k: var(--c-bad); }
+.k-old { --k: var(--c-busy); }
+.k-redo { --k: var(--c-warn); }
+.k-stale { --k: var(--c-stale); }
+.stag.k-stale { border-style: dashed; }
+.k-judge { --k: var(--c-info); }
+.stag.k-judge { border-style: dotted; }
+.k-best { --k: var(--c-adult); }
+.k-busy { --k: var(--c-info); }
+.k-queued { --k: var(--c-text-2); }
+.k-ok { --k: var(--c-ok); }
+button.stag { cursor: pointer; }
+button.stag:hover { background: color-mix(in srgb, var(--k) 30%, var(--c-raise)); }
+button.stag.on { outline: 2px solid var(--k); outline-offset: 1px; }
+.stag-legend { display: flex; flex-wrap: wrap; gap: var(--sp-1); align-items: center; }
+.stag-counts { display: inline-flex; flex-wrap: wrap; gap: var(--sp-1); align-items: center; }
+.stag-n { --k: var(--c-text-2); border: 0; background: transparent; padding: 0 2px; font: inherit; font-size: var(--fs-xs); color: color-mix(in srgb, var(--k) 75%, var(--c-text)); cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.stag-n.on { font-weight: var(--fw-strong); text-decoration-style: solid; }
+/* 总览格子：主标签压在图左下角；筛选时不符合的格子变淡 */
+.sea-pic .stag { position: absolute; left: 4px; bottom: 4px; max-width: calc(100% - 8px); overflow: hidden; }
+.sea-cell.stag-dim { opacity: .28; }
+.sea-legend { margin: 0 0 var(--sp-2); }
+/* 画布行：镜号旁 */
+.v3-row .stag { flex: none; }
+/* r40 板块层面（项目方 00:3x：“哪个板块已经确认,哪个板块正在进行中,哪个板块是过期的”）：和镜头格标签共用色板
+   已确认=绿（同“通过”）、进行中=蓝（同“出图中”）、过期=橙（同“过期”）、未开始=灰 */
+.b-done { --b: var(--c-ok); }
+.b-doing { --b: var(--c-info); }
+.b-stale { --b: var(--c-stale); }
+.b-todo { --b: var(--c-text-2); }
+.sea-ep.blk { border-left: 4px solid var(--b); }
+.blk-badge { flex: none; display: inline-flex; align-items: center; height: 20px; padding: 0 var(--sp-2); border-radius: var(--r-m); background: var(--b); color: var(--c-on-ok, #fff); font-size: var(--fs-xs); font-weight: var(--fw-strong); }
+.blk-badge.b-todo { background: var(--c-sunken); color: var(--c-text-2); }
+.blk-stages { display: inline-flex; gap: 3px; flex-wrap: wrap; }
+.blk-stage { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: var(--r-pill); font-size: var(--fs-xs); color: var(--c-text);
+  background: color-mix(in srgb, var(--b) 22%, var(--c-raise)); border: 1px solid color-mix(in srgb, var(--b) 65%, transparent); white-space: nowrap; }
+.blk-stage.b-stale { border-style: dashed; }
+.blk-stage.b-todo { color: var(--c-text-2); }
+.blk-bar { display: flex; flex-wrap: wrap; gap: var(--sp-1); align-items: center; }
+.blk-lg-t { font-size: var(--fs-xs); color: var(--c-text-2); margin-right: var(--sp-1); }
+.blk-chip { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 var(--sp-2); border-radius: var(--r-pill); font: inherit; font-size: var(--fs-xs); font-weight: var(--fw-strong); cursor: pointer;
+  color: var(--c-text); background: color-mix(in srgb, var(--b) 20%, var(--c-raise)); border: 1px solid color-mix(in srgb, var(--b) 65%, transparent); }
+.blk-chip em { font-style: normal; font-weight: 400; color: var(--c-text-2); }
+.blk-chip.on { outline: 2px solid var(--b); outline-offset: 1px; }
