@@ -1,4 +1,4 @@
-"""SENTINEL 工单库（规则 K-OPS-S02）：data/sentinel/issues.jsonl 只追加；同一 key 只开一张；恢复自动 resolved。
+"""SENTINEL 工单库（规则 K-OPS-S03）：data/sentinel/issues.jsonl 只追加；同一 key 只开一张；恢复自动 resolved。
 
 记录（每次状态变化追加一行，同 id 以最后一行为准）：
   id, key, slo, slo_title, title, evidence, first_seen, last_seen, owner_loop, decider="code", status=open|resolved,

@@ -10,5 +10,9 @@
   }
  },
  "close_no_lower": true,
- "_close_no_lower_doc": "K-REN-707（IMGFIX 11-02，总调度 fredw-2b 定“现在就打开”）：特写 / 近景 / 中近景不注入看不见的下半身单品 / 描述（长腿、露出长腿、裙、鞋）；并列造型 / “穿…”首句不当下半身主体。回退 = 设 false"
+ "_close_no_lower_doc": "K-REN-707（IMGFIX 11-02，总调度 fredw-2b 定“现在就打开”）：特写 / 近景 / 中近景不注入看不见的下半身单品 / 描述（长腿、露出长腿、裙、鞋）；并列造型 / “穿…”首句不当下半身主体。回退 = 设 false",
+ "keep_subject": true,
+ "_keep_subject_doc": "K-REN-901（IMGLAB 11-02，总调度 04:3x 批）：按景别删句时保住主语（被删分句以人名开头 → 名字补到下一个保留分句前；视线句不删）。false = 回退旧行为。回归：tools/imgfix/orphan_check.py",
+ "two_face_close": "two_shot_mcu",
+ "_two_face_close_doc": "K-REN-902（IMGLAB 11-02）：脸部特写 + ≥2 人露脸 → 首句改双人近景构图（two_shot_mcu）；off = 旧行为（同时写“脸占六成”和“两张脸都入画”，preflight I6 会拦）"
 }

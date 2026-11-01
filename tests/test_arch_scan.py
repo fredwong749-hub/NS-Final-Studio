@@ -106,3 +106,104 @@ def test_repair_chain_prefix_uses_registered_runs():
 def test_parse_error_is_not_judged():
     assert AS.scan_source("tools/x.py", "def f(:\n") == {"parse_error": 1}
     assert AS.compare({"per_file": {"a.py": {"parse_error": 1}}}, {"per_file": {}}) == []
+
+
+def test_full_redo_run_dir_strict_on_server(monkeypatch, tmp_path):
+    import sys
+    sys.path.insert(0, str(ROOT / "tools/autopilot"))
+    import full_redo as FR
+    import runs as RUNS
+    seen = {}
+    monkeypatch.setattr(RUNS, "primary_run", lambda root=None, strict=False: seen.setdefault("strict", strict) and "r1" or "r1")
+    monkeypatch.delenv("NS_FACTORY_HOST", raising=False)
+    monkeypatch.delenv("OFFLINE_SELF", raising=False)
+    assert FR.run_dir().name == "r1" and seen["strict"] is False
+    seen.clear()
+    monkeypatch.setenv("OFFLINE_SELF", "gpu33")
+    FR.run_dir()
+    assert seen["strict"] is True
+
+
+def test_pipe_gate_e14_in_py_strings_not_docstrings():
+    s = ('"""例：lock-status | head -2 && 改文件"""\n'
+         'import subprocess\n'
+         'subprocess.run("python tools/qa/system_version.py lock-status | head -2 && echo ok", shell=True, timeout=5)\n'
+         'subprocess.run("set -o pipefail; pytest -q | tail -1", shell=True, timeout=5)\n')
+    assert AS.scan_source("tools/x.py", s)["pipe_gate"] == 1
+    assert AS.PIPE_GATE_RE.search("pytest -q tests | tail -3 && git commit")
+    assert not AS.PIPE_GATE_RE.search("pytest -q tests && git commit")
+
+
+def test_no_timeout_waiver_on_call_line():
+    s = "import subprocess\nsubprocess.call(cmd)  # arch-ok: 包装任意命令，由外层 --timeout 管\n"
+    assert AS.scan_source("tools/x.py", s)["no_timeout"] == 0
+
+
+def test_scanner_not_flagged_by_netfix_ssh_regex():
+    import re
+    pat = re.compile(r"""\[\s*["'](ssh|scp)(\.exe)?["']|ssh\.exe["']""")
+    assert not pat.search((ROOT / "tools/qa/arch_scan.py").read_text(encoding="utf-8"))
+
+
+def test_tighten_only_lowers():
+    base = {"per_file": {"a.py": {"no_timeout": 3, "hard_run": 2}, "b.py": {"def_ssh": 1}}, "untracked_imported": {"x.py": ["y"]}}
+    cur = {"per_file": {"a.py": {"no_timeout": 1, "hard_run": 5}, "c.py": {"def_ssh": 1}}, "untracked_imported": {}}
+    t = AS.tighten(base, cur)
+    assert t["per_file"] == {"a.py": {"no_timeout": 1, "hard_run": 2}} and t["untracked_imported"] == {}
+
+
+def test_mtime_run_guess_and_latest():
+    s = ("ds = sorted(RUNS.iterdir(), key=lambda p: p.stat().st_mtime)\n"
+         "def mt(p: str) -> float:\n    return 0.0\n"
+         "f = max(d.glob('*.mp4'), key=lambda q: q.stat().st_mtime)\n"
+         "g = max(d.glob('*.mp4'), key=lambda q: q.stat().st_mtime)  # arch-ok: 审片页展示新的在前\n")
+    c = AS.scan_source("tools/x.py", s)
+    assert c["mtime_run_guess"] == 2 and c["mtime_latest"] == 1
+
+
+def test_ownership_alias_and_unknown_keys():
+    own = {"owners": {"AUTOPILOT": ["a/**"], "AUTOPILOT_API": ["b.py"], "DEBUG_RSI": ["c.py"]}}
+    f = AS.ownership_findings(own)
+    assert f == ["别名 key：AUTOPILOT_API（应合进 AUTOPILOT）"]
+    own = {"owners": {"AUTOPILOT": ["a/**"]}, "loops": ["AUTOPILOT"], "rule_owners": {"by_file": {"x.yaml": "INFRA"}}}
+    assert AS.ownership_findings(own) == ["未知负责方 key：INFRA（不在已知 loop 里：ownership.yaml loops: 或 owners）"]
+    own = {"owners": {"AUTOPILOT": ["a/**"]}, "rule_owners": {"by_id": {"K-1": "AUTOPILOT（ARCH）", "K-2": "SERIES"}}}
+    assert AS.ownership_findings(own) == ["未知负责方 key：SERIES（不在已知 loop 里：ownership.yaml loops: 或 owners）"]
+    assert AS.compare({"per_file": {}, "ownership_findings": ["x"]}, {"per_file": {}, "ownership_findings": ["x"]}) == []
+    assert AS.compare({"per_file": {}, "ownership_findings": ["x"]}, {"per_file": {}}) == ["ownership: x"]
+
+
+def test_real_ownership_has_no_alias_keys():
+    assert not [x for x in AS.ownership_findings() if x.startswith("别名")]
+
+
+def test_loops_registry_custodian_rules():
+    own = {"owners": {"A": ["a"], "B": ["b"], "C": ["c"]},
+           "loops": {"A": {"status": "active"}, "B": {"status": "inactive", "custodian": "A"},
+                     "D": {"status": "inactive"}, "E": {"status": "inactive", "custodian": "B"}}}
+    f = AS.ownership_findings(own)
+    assert "loops 登记表：D 是 inactive 但没写 custodian" in f
+    assert "loops 登记表：E 的代管方 B 不在岗" in f
+    assert any("C（owners 里有、loops: 登记表里没有）" in x for x in f)
+    assert not any(x.startswith("loops 登记表：B") for x in f)
+
+
+def test_real_ownership_registry_clean():
+    assert AS.ownership_findings() == []
+
+
+def test_def_ssh_thin_wrapper_over_rssh_not_counted():
+    s = ("import rssh\n"
+         "def ssh(host, cmd, timeout=600):\n    return rssh.run_retry(host, cmd, timeout=timeout)\n")
+    assert AS.scan_source("tools/x.py", s)["def_ssh"] == 0
+    s2 = ("import rssh, subprocess\n"
+          "def ssh(host, cmd):\n    rssh.status()\n    return subprocess.run(['ssh', host, cmd], timeout=5)\n")
+    assert AS.scan_source("tools/x.py", s2)["def_ssh"] == 1
+
+
+def test_tests_only_gate_no_timeout():
+    base = {"per_file": {}}
+    cur = {"per_file": {"tests/test_x.py": {"nonatomic_json": 3, "hard_run": 2, "no_timeout": 1},
+                        "services/canvas_api/tests/test_y.py": {"silent_read": 1}}}
+    assert AS.compare(cur, base) == ["no_timeout: tests/test_x.py 0→1"]
+    assert AS.is_test("tests/a.py") and AS.is_test("services/canvas_api/tests/b.py") and not AS.is_test("tools/a.py")

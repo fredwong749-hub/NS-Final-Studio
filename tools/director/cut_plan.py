@@ -42,6 +42,27 @@ PACE = {0: (3.0, 4.5), 1: (3.0, 4.5), 2: (2.5, 3.5), 3: (1.5, 2.5)}
 J_CUT_S, L_CUT_S, DISSOLVE_S, SOUND_LEAD_S = 0.3, 0.4, 0.4, 0.4
 
 
+def _cn():
+    """运镜词表 + 规范化（services/agent/ns_agent/camera_norm.py，按文件路径载入）"""
+    import importlib.util
+    global _CN
+    if _CN is None:
+        sp = importlib.util.spec_from_file_location("nsfs_camera_norm", ROOT / "services/agent/ns_agent/camera_norm.py")
+        _CN = importlib.util.module_from_spec(sp)
+        sp.loader.exec_module(_CN)
+    return _CN
+
+
+_CN = None
+SIZES = ("大特写", "特写", "近景", "中近景", "中景", "中全景", "全景", "远景")
+
+
+def size_of(shot: dict) -> str | None:
+    """首帧提示词第一个景别词（“lnwan01，中景，侧面机位…”）"""
+    m = re.search("|".join(sorted(SIZES, key=len, reverse=True)), str(shot.get("img_prompt") or "")[:40])
+    return m.group(0) if m else None
+
+
 def _load_list(v):
     if isinstance(v, str):
         try:
@@ -85,23 +106,30 @@ def plan_episode(ep: dict) -> list[dict]:
         spk = speaking(s)
         big = bool(BIG_ACTION.search(motion))
         why = []
-        # ---- 运镜（K-EDT-811）
+        # ---- 运镜（K-EDT-811 / L-107）：只从运镜词表 config/director/camera_moves.yaml 里 enabled 的选，decider=code
+        CN = _cn()
+        size = size_of(s)
+        writer_mid = CN.match_zh(cam_src)
+        ok = lambda mid: CN.is_enabled(mid) and (not size or size in ((CN.move(mid) or {}).get("sizes") or []))   # noqa: E731
         if big:
             move, why_m = "static", "本镜有大动作：不叠运镜（Pika P10 大动作变软；一镜一个主动作）"
         elif spk:
-            move, why_m = ("push_small" if (lvl or 0) >= 2 else "static"), "对白镜：固定或小幅推近，保脸部清晰和口型（Pika P10）"
+            move, why_m = ("push_in" if (lvl or 0) >= 2 and ok("push_in") else "static"), "对白镜：固定或小幅推近，保脸部清晰和口型（Pika P10）"
         elif i == 0 or link == "换场":
             move, why_m = "static", "开场 / 换场第一镜：固定机位交代空间（景别由首帧定，Pika P3）"
         elif (lvl or 0) >= 3:
-            move, why_m = "push_small", "情绪高点：小幅推近（推近幅度只写小，Pika P16）"
+            peak = [m for m in ("push_in", "zoom_in", "slow_motion", "focus_pull", "arc") if ok(m)]
+            move, why_m = (peak[0] if peak else "static"), "情绪高点：词表里 enabled 且景别适用的第一个高点运镜"
+        elif writer_mid and ok(writer_mid):
+            move, why_m = writer_mid, "沿用写作方运镜（词表 enabled、景别适用）"
         else:
-            move, why_m = ("push_small" if re.search(r"push|推", cam_src) else "static"), "沿用写作方运镜，统一为小幅"
-        if re.search(r"truck|横移", cam_src) and not big:
-            move = "truck_small"
-        clause = MOVES[move].format(dir="right" if re.search(r"right|右", cam_src) else "left")
+            move, why_m = ("push_in" if writer_mid in ("push_in", "zoom_in", "arc") and ok("push_in") else "static"), "写作方运镜不可用 → 退回"
+        clause = CN.clause(move, "left" if re.search(r"left|左", cam_src) else "right")
         cam_flags = []
-        if BANNED_MOVES.search(cam_src):
-            cam_flags.append(f"写作方运镜“{cam_src}”超出 Pika 稳定范围（拉远 / 环绕 / 晃动），导演层改为 {move}")
+        if writer_mid and not CN.is_enabled(writer_mid):
+            cam_flags.append(f"写作方运镜“{cam_src}”= 词表 {writer_mid}（disabled：{(CN.move(writer_mid) or {}).get('reason')}）→ 导演层改为 {move}")
+        elif cam_src and not writer_mid:
+            cam_flags.append(f"写作方运镜“{cam_src}”不在词表里（K-WRT-804）→ 导演层定 {move}")
         if SLOW_WORDS.search(cam_src):
             cam_flags.append("运镜写了“缓慢”：去掉（节奏要求），幅度改写“小幅”")
         # ---- 转场（K-EDT-812）+ J/L-cut（K-EDT-814）
@@ -149,7 +177,8 @@ def plan_episode(ep: dict) -> list[dict]:
                 flags.append("越轴：同场相邻镜两人左右互换（K-WRT-104 / 180° 规则）→ 合成按硬切处理，写作方需标 HARD CUT 或改站位")
         out.append({"shot": f"ep{int(ep['number']):02d}-S{int(s['index'])}", "index": int(s["index"]),
                     "beat": {"link": link, "carry": carry_kind, "intensity": lvl, "speaking": spk, "big_action": big},
-                    "camera": {"move": move, "clause_en": clause, "source": cam_src, "why": why_m},
+                    "camera": {"move": move, "clause_en": clause, "source": cam_src, "writer_move": writer_mid, "why": why_m,
+                               "decider": "code", "vocab": CN.vocab().get("version"), "size": size},
                     "transition_in": tr, "j_cut_s": j, "l_cut_s": l,
                     "cut": {"target_s": [lo, hi], "out": cut_out},
                     "eyeline": eyeline, "flags": flags})
@@ -166,8 +195,8 @@ def lint_episode(ep: dict) -> list[dict]:
         cam = camera_of(str(s.get("motion_prompt") or ""))
         if not cam or not re.search(r"camera|static|tracking|shot|推|摇|移|跟", cam, re.I):
             res.append({"id": "K-WRT-801", "shot": sid, "msg": "motion 第一句没有运镜（一种运镜 + 幅度），例：camera push in 小幅推近"})
-        elif BANNED_MOVES.search(cam):
-            res.append({"id": "K-WRT-801", "shot": sid, "msg": f"运镜“{cam}”超出 Pika 稳定范围：不用拉远 / 环绕 / 晃动"})
+        elif not _cn().match_zh(cam):
+            res.append({"id": "K-WRT-804", "shot": sid, "msg": f"运镜“{cam}”不在运镜词表里：镜头运动只写词表名字（config/director/camera_moves.yaml）"})
         elif SLOW_WORDS.search(cam):
             res.append({"id": "K-WRT-801", "shot": sid, "msg": f"运镜“{cam}”写了缓慢：改写幅度（小幅 / 中幅），不写速度"})
         if str(s.get("link") or "") == "接力" and str(s.get("link_carry") or "").split("｜")[0] in ("", "无", "—"):

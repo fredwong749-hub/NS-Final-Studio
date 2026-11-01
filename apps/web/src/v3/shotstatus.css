@@ -192,3 +192,18 @@ button.stag.on { outline: 2px solid var(--k); outline-offset: 1px; }
 .sd-cast .sd-ph { display: grid; place-items: center; font-size: 11px; color: var(--c-text-3); cursor: default; }
 .sd-cast b { font-size: 13px; font-weight: 600; display: block; }
 .sd-cast small { font-size: 12px; color: var(--c-text-2); }
+/* ---------- r44 状态标签中性化（总调度 r44 第 3 条：SENTINEL S9 现网命中总览 / 审片页约 10 个彩色描边胶囊“待重出”“看图没过”）
+   .stag 一律中性灰边 / 透明底 / 灰字；只有圆点带颜色，且只三种：data-dot=run 蓝（呼吸）、need 琥珀、ok 绿；none 不画点。
+   筛选下拉里的图例按钮（button.stag）同样中性，靠文字区分 ---------- */
+html .stag { border-color: var(--c-line-2); border-style: solid; background: transparent; color: var(--c-text-2); font-weight: 400; }
+html button.stag:hover { background: var(--c-sunken); }
+html button.stag.on { outline: 1px solid var(--c-text-2); }
+html .stag::before { display: none; }
+html .stag[data-dot="run"]::before, html .stag[data-dot="need"]::before, html .stag[data-dot="ok"]::before { display: block; }
+html .stag[data-dot="run"]::before { background: var(--c-info); animation: ns-breathe var(--breathe-period, 2.7s) ease-in-out infinite; }
+html .stag[data-dot="need"]::before { background: var(--c-warn); }
+html .stag[data-dot="ok"]::before { background: var(--c-ok); }
+
+html .blk-chip, html .blk-badge, html .blk-stage { background: transparent; border-color: var(--c-line-2); color: var(--c-text-2); border-style: solid; }
+html .sea-card[class*="k-"] { box-shadow: none; }
+@media (prefers-reduced-motion: reduce) { html .stag[data-dot="run"]::before { animation: none; } }

@@ -89,5 +89,10 @@ if VQA:
             out["vqa_models"] = r.read(400).decode("utf-8", "replace")
     except Exception as e:  # noqa: BLE001
         out["vqa_models"] = "ERR " + repr(e)[:160]
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8870/health", timeout=4) as r:
+            out["vqa_health"] = r.read(600).decode("utf-8", "replace")
+    except Exception as e:  # noqa: BLE001
+        out["vqa_health"] = "ERR " + repr(e)[:160]
     out["vqa_listener"] = sh(["ss", "-ltnpH", "sport = :8870"], 8)[:400]
 print(json.dumps(out, ensure_ascii=False))

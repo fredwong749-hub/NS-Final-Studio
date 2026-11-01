@@ -83,6 +83,12 @@ ws.onmessage = (ev) => {
     if (VIEWER && u.pathname.startsWith("/api/")) {
       const headers = Object.entries(request.headers).map(([name, value]) => ({ name, value }));
       headers.push({ name: "x-ns-viewer-token", value: VIEWER });
+      // UIAUDIT（N1 未修期间）：只对 GET，路径命中 REWRITE_GET_RE 时补查询串 REWRITE_QS（如 project=series10_v1），不改方法、不改请求体
+      if (process.env.REWRITE_GET_RE && new RegExp(process.env.REWRITE_GET_RE).test(u.pathname) && request.method === "GET" && !u.searchParams.has("project")) {
+        const nu = new URL(request.url);
+        for (const [k, v] of new URLSearchParams(process.env.REWRITE_QS || "")) nu.searchParams.set(k, v);
+        return send("Fetch.continueRequest", { requestId, headers, url: nu.toString() }).catch(() => {});
+      }
       return send("Fetch.continueRequest", { requestId, headers }).catch(() => {});
     }
     return send("Fetch.continueRequest", { requestId }).catch(() => {});

@@ -324,3 +324,36 @@ def test_identity_face_check_catches_inherit_gap():
     res = IF.check(face_of=lambda r, c: faces[r][c], project_cfg=cfg, project_chain=chain,
                    run_ids=["series10_v1", "series10_s2"], pinned={"lin_wan": hd}, sha=lambda p: "x")
     assert [(b["run"], b["cid"]) for b in res["bad"]] == [("series10_s2", "gu_chen")]                   # 继承角色不一致
+
+
+
+# ---------------------------------------------------------------- sv-05：成片版本读交付记录（SYSARCH 11-02，不按 mtime 猜）
+def test_latest_cut_reads_delivery_record_not_mtime(tmp_path):
+    root = _fake_root(tmp_path)
+    _fixture_world(root)
+    eps = root / "data/episodes/series10"
+    eps.mkdir(parents=True)
+    for n in ("ep03_v1.mp4", "ep03_v2.mp4", "ep03_v9_backup.mp4"):
+        (eps / n).write_bytes(b"x")
+    w = FL.World(root)
+    assert w.latest_cut(3) is None                                   # 没有交付记录 = 未合成（不猜 v9_backup）
+    vid = root / "data/pipeline/runs/series10_v1/video"
+    vid.mkdir(parents=True)
+    (vid / "night_state.json").write_text(json.dumps({"eps": {"3": {"status": "assembled",
+        "final": "/root/work/ns/data/episodes/series10/ep03_v1.mp4"}}}), encoding="utf-8")   # 服务器绝对路径也认
+    w = FL.World(root)
+    assert w.latest_cut(3) == eps / "ep03_v1.mp4"
+    (eps / "ep03_v1_post.mp4").write_bytes(b"x")
+    (vid / "night_state.json").write_text(json.dumps({"eps": {"3": {"status": "assembled",
+        "final": "D:\\x\\data\\episodes\\series10\\ep03_v1_post.mp4"}}}), encoding="utf-8")
+    assert FL.World(root).latest_cut(3) == eps / "ep03_v1.mp4"       # 交付后期版 → 原合成版，后期由 post 段判
+
+
+def test_snapshot_runs_from_registry(tmp_path):
+    root = _snap_root(tmp_path)
+    (root / "config/pipeline/runs.json").write_text(json.dumps({"primary": "demo_run", "runs": {"demo_run": {}, "s2": {}}}), encoding="utf-8")
+    (root / "data/pipeline/runs/s2/video").mkdir(parents=True)
+    (root / "data/pipeline/runs/s2/video/recipe_choice.json").write_text("{}", encoding="utf-8")
+    assert SS.run_id(root) == "demo_run" and SS.run_ids(root) == ["demo_run", "s2"]
+    files = SS.decision_files(root)
+    assert "data/pipeline/runs/s2/video/recipe_choice.json" in files and "data/pipeline/runs/demo_run/video/recipe_choice.json" in files

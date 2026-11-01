@@ -30,11 +30,20 @@ ROOT = Path(__file__).resolve().parents[2]
 SPEC = "config/policies/state_files.yaml"
 
 
+def _runs_mod():
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import runs as RUNS        # WORKFLOW 的多剧登记表读取入口（K-OPS-W17）
+    return RUNS
+
+
 def run_id(root: Path = ROOT) -> str:
-    try:
-        return json.loads((root / "config/pipeline/run.json").read_text(encoding="utf-8"))["run_id"]
-    except (OSError, ValueError, KeyError):
-        return "series10_v1"
+    """primary run（runs.py；不再写死 series10_v1——SYSARCH 11-02）"""
+    return _runs_mod().primary_run(root)
+
+
+def run_ids(root: Path = ROOT) -> list[str]:
+    """多剧登记表里的全部 run（state_files.yaml 的 {run} 对每个 run 展开）"""
+    return list((_runs_mod().registry(root).get("runs") or {}).keys()) or [run_id(root)]
 
 
 def spec(root: Path = ROOT) -> dict:
@@ -50,10 +59,11 @@ def _expand(entry: dict, root: Path, run: str) -> list[str]:
 
 
 def decision_files(root: Path = ROOT, run: str | None = None) -> list[str]:
-    run = run or run_id(root)
+    rs = [run] if run else run_ids(root)
     out: list[str] = []
     for e in spec(root).get("decision") or []:
-        out += [r for r in _expand(e, root, run) if r not in out]
+        for r_ in rs:
+            out += [r for r in _expand(e, root, r_) if r not in out]
     return out
 
 
@@ -76,10 +86,10 @@ def _library():
 
 def snapshot(sv: str, root: Path = ROOT, dest: Path | None = None) -> dict:
     run = run_id(root)
-    files = decision_files(root, run)
+    files = decision_files(root)
     out = dest or (root / "data/system_versions" / sv)
     out.mkdir(parents=True, exist_ok=True)
-    man = {"schema": "nsfs.state_snapshot/1", "sv": sv, "run_id": run, "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    man = {"schema": "nsfs.state_snapshot/1", "sv": sv, "run_id": run, "runs": run_ids(root), "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
            "spec": SPEC, "files": {}}
     lib = _library() if root == ROOT else None
     buf = io.BytesIO()

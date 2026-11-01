@@ -126,3 +126,29 @@ rules:
     confidence: medium
     status: 待验
     date: 2026-11-02
+  - id: K-WRT-H10
+    check: [tests/test_hollywood_r5.py]
+    domain: writer
+    link: P3-P4
+    title: 剧情事实核对口径：每集服装 / 造型不是剧情事实；身份、名字、年龄、发色发型、脸（林晚 L-086）、水晶甲等固定特征、人物关系、已发生剧情是事实
+    when: HOLLYWOOD 事实表抽取 / 整集核对 / 补丁核对（hollywood_r5.check_facts / check_patch_facts，autoflow 续季）
+    then: 事实核对提示词（hollywood_facts.md）写明服装不进 settings；代码 drop_wardrobe 再滤掉只涉及服装的偏差，固定特征被改（同一分句有特征词 + 改 / 变 / 缺 / 未出现）照旧算偏差；同一集没写换装却变衣服由 rubric_code consistency#4 / #5 代码判定；新造型的设定图走 IMGFIX 资产流程，作业编译缺资产要拦下开工单
+    evidence:
+      - {src: data/pipeline/runs/series10_s2/autoflow_ep05.json, note: "S2 ep02 / ep03 / ep05 的事实偏差全是“第一季造型 vs 第二季换装”，补丁改不了（集头造型行冻结、改 img 让 H3-X1 / QW-W4 变多），两集各白花约 $0.5"}
+      - {src: docs/master/MASTER_PICTURE.md, note: "总调度 11-02 03:3x 定 A：第一季本就按集切换造型 A/B/C；项目方第二季原话“更加暴露点的版本”"}
+    confidence: high
+    status: 待验
+    date: 2026-11-02
+  - id: K-WRT-H11
+    check: [tests/test_autoflow.py]
+    domain: writer
+    link: P3-P4
+    title: 写作后端可切换（writer_backend：claude_agent | api，测试期默认 claude_agent）；claude_agent 模式出任务包、收产物，不调外部 API
+    when: autoflow 跑任何写作 / 评审步骤（L-109，项目方 11-02 03:3x “测试阶段都是用你的，之后上线再用外面的API”）
+    then: config/llm_providers.json writer_backend 决定后端；claude_agent：tools/script_rsi/autoflow_agent.py 写 writer_tasks/<step>_a<k>.json（system / user 已拼好 + 内容边界），产物 writer_out/<step>_a<k>.<ext> + .done 才读；写手整集重写稿 P4_epNN_rK.md 用导入关口同款校验收为正式 P4（旧稿改名留档）；评审包（事实表 / 事实核对）与写手分开；测试期打分只用代码判定；新写 / 重写的集按镜头块 v2 + 【灯光】判（rubric_code.v2_checks，K-WRT-805 / 806）
+    evidence:
+      - {src: docs/hollywood/writer_agent_interface.md, note: 写手 / 评审 agent 接口说明}
+      - {src: data/pipeline/runs/series10_s2/autoflow_ep02.json, note: "ep02 整集稿（SCRIPTWRITER）收为正式 P4：阻断 0，代码判定 27 / 27，剩 v2#2 一条"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02

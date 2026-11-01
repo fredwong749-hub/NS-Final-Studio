@@ -148,6 +148,7 @@ def test_e05_pool_larger_than_lanes_and_backlog_blocks_dispatch():
     p.mu = threading.RLock()
     p.scoring = {"first:ep01-S1", "first:ep01-S2"}
     p.score_backlog_max = 2
+    p.p = PR.Paths()                       # 主剧：没有更高优先级的剧
     logs = []
     p.logf = lambda ev, **kw: logs.append(ev)
     # 有空道，但积压已满 → 不碰候选（reg 是空壳；若往下走会 KeyError）
@@ -455,3 +456,28 @@ def test_e13_data_parity_regcons(tmp_path):
     fails, warns = [], []
     DP.regcons_check(f, fails, warns)
     assert len(fails) == 1 and "ep04-S1" in fails[0] and len(warns) == 1
+
+
+# ---- r3 ⑦ K-OPS-E15：多剧并行（一剧一进程；主剧路径不变；非主剧分文件 / 分渲染目录；按优先级派单） ----
+def test_e15_multi_run_paths_and_priority(tmp_path):
+    PR = _producer()
+    (tmp_path / "config/pipeline").mkdir(parents=True)
+    (tmp_path / "config/pipeline/runs.json").write_text(json.dumps({"primary": PR.RUN_ID, "runs": {
+        PR.RUN_ID: {"priority": 0, "status": "producing"}, "s2": {"priority": 10, "status": "producing"}}}), encoding="utf-8")
+    a, b = PR.Paths(root=tmp_path), PR.Paths(root=tmp_path, run_id="s2")
+    assert a.pd == tmp_path / "data/producer" and a.renders == tmp_path / "data/renders"          # 主剧旧路径兼容
+    assert b.pd == tmp_path / "data/producer/runs/s2" and b.renders == tmp_path / "data/renders/s2"
+    assert a.ledger != b.ledger and a.registry != b.registry                                      # 两部剧同镜号互不覆盖
+    env = PR.run_env("s2", tmp_path)
+    assert env["NS_RENDERS_DIR"].endswith(str(Path("data/renders/s2"))) and PR.run_env(PR.RUN_ID, tmp_path) == {}
+    a.pd.mkdir(parents=True)
+    a.registry.write_text(json.dumps({"episodes": [{"shots": [{"objects": {"first": {"status": "ready"}}}]}]}), encoding="utf-8")
+    assert PR.higher_priority_busy(b) == {PR.RUN_ID: 1}                                           # 主剧有活 → 第二季让
+    assert PR.higher_priority_busy(a) == {}                                                       # 主剧不让任何人
+    a.registry.write_text(json.dumps({"episodes": []}), encoding="utf-8")
+    assert PR.higher_priority_busy(b) == {}                                                       # 主剧没活 → 第二季用空档
+
+
+def test_e15_pipeline_renders_env():
+    src = (ROOT / "services/render_router/ns_render/pipeline.py").read_text(encoding="utf-8")
+    assert 'os.environ.get("NS_RENDERS_DIR")' in src and 'os.environ.get("NS_SCRIPT_JSON")' in src

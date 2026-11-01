@@ -263,7 +263,8 @@ export function RenderTasksButton({ className, onOpenJobsPage, extra, extraTitle
     return () => window.removeEventListener("keydown", h);
   }, [open]);
   const flash = useFlash(c ? [c.rendering, c.pending, c.failed] : null);
-  const tone = c?.failed || alert ? "bad" : c?.rendering ? "busy" : "ok";
+  // r44（总调度：顶栏红色“1 失败”收成中性色加小圆点，失败只数近 6 小时）：只有近期没解决的失败 / 后端连不上才挂琥珀点
+  const tone = (c?.failed_recent ?? c?.failed) || alert ? "bad" : c?.rendering ? "busy" : "ok";
   const tip = c ? `渲染任务：在跑 ${c.rendering} · 真在排队 ${c.queued ?? c.pending}${c.planned != null ? ` · 计划中 ${c.planned}（还没到能派的镜）` : ""} · 最近 ${c.recent_fail_h ?? "?"} 小时失败 ${c.failed_recent ?? c.failed}（历史累计失败 ${c.failed}）
 列表全部 ${c.all} = 等待 ${c.pending} + 渲染中 ${c.rendering} + 失败 ${c.failed} + 已完成 ${c.done}\n点击查看每个任务（剧本 / 分镜 / 首帧 / 尾帧 / 视频 / 音色 / 资产图）` : err ? `读不到：${err}` : "正在读渲染任务";
   return (
@@ -278,7 +279,7 @@ export function RenderTasksButton({ className, onOpenJobsPage, extra, extraTitle
             {/* UIRSI r39（总调度定 C，顶栏挤）：数字用短字“跑 / 等 / 失败”，完整说法在悬停提示里 */}
             {/* r42（总调度：口径要查清）：等 = 真在排队的（不含还没到能派的“计划”），失败 = 最近几小时的（更早的是历史，在列表里筛） */}
             在办 {c.rendering} · 排队 {c.queued ?? c.pending}
-            {(c.failed_recent ?? c.failed) ? <b> · {c.failed_recent ?? c.failed} 失败</b> : null}
+            {(c.failed_recent ?? c.failed) ? <b> · 近 {c.recent_fail_h ?? 6} 小时失败 {c.failed_recent ?? c.failed}</b> : null}
           </span>
         ) : null}
         {extra}

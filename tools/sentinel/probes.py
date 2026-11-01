@@ -1,4 +1,4 @@
-"""SENTINEL 探针（实时）：每条 SLO 一个 p_sN(ctx) → findings（判定都在 judges.py，回放共用）。规则 K-OPS-S01 / S03。
+"""SENTINEL 探针（实时）：每条 SLO 一个 p_sN(ctx) → findings（判定都在 judges.py，回放共用）。规则 K-OPS-S02 / S03。
 
 只读：读本机文件、经 rssh 常驻主连接每台每拍一次合并只读调用（remote_probe.py，timeout + nice + 限线程）、
 lane_util.measure（/history）、本机看图服务抽检、无头 Chrome（只读查看令牌，非 GET 全拦）。不改生产代码、不重启、不删文件。
@@ -115,7 +115,7 @@ def laptop_registry() -> dict:
 def p_s1(ctx: Ctx) -> list[dict]:
     from tools.debug import lane_util
     c = ctx.c("S1_lane_util_min")
-    lanes = jl("config/debug_lanes.json")
+    lanes = jl("config/debug_lanes.json") if (ROOT / "config/debug_lanes.json").exists() else None   # 可选：缺省 = lane_util.DEFAULT_LANES
     rec = lane_util.measure(c["window_min"], lanes)
     ctx.mem["lane_util_last"] = rec
     return J.j_lane_util(rec, c)
@@ -167,6 +167,22 @@ def laptop_events(since_s: float = 3 * 3600) -> list[dict]:
     return out
 
 
+def vqa_expected(c: dict) -> dict:
+    """声明的打分后端：config/vqa.json model.backends 优先（VQAGATE 维护），没有这个字段时用 sentinel.yaml S3 vqa_backends"""
+    decl = ((jl("config/vqa.json", {}) or {}).get("model") or {}).get("backends")
+    decl = {k: v for k, v in decl.items() if not str(k).startswith("_")} if isinstance(decl, dict) else {}   # 跳过 _doc 等注释键
+    return decl or dict(c.get("vqa_backends") or {})
+
+
+def _http(url: str) -> str | None:
+    import urllib.request
+    try:
+        with urllib.request.urlopen(url, timeout=4) as r:
+            return r.read(600).decode("utf-8", "replace")
+    except Exception as e:  # noqa: BLE001  # arch-ok: 连不上 → 文本 ERR，vqa_kind 判 down（会开单，不当正常）
+        return "ERR " + repr(e)[:120]
+
+
 def p_s3(ctx: Ctx) -> list[dict]:
     c = ctx.c("S3_score_p50_s")
     out = []
@@ -180,9 +196,11 @@ def p_s3(ctx: Ctx) -> list[dict]:
             UNKNOWN[f"{h}:data/producer/log.jsonl"] = r["log_err"]
         s, b = _score_events(r.get("events") or [])
         out += J.j_score(h, s, b, ctx.now, c)
-        if h == VQA_HOST and c.get("vqa_must_be_vllm") and "vqa_models" in r:
-            rep = r["vqa_models"]
-            out += J.j_vqa_endpoint(h, 8870, None if rep.startswith("ERR") and "refused" not in rep.lower() else rep, r.get("vqa_listener") or "")
+        if h == VQA_HOST:
+            k = J.vqa_kind(r.get("vqa_health"), r.get("vqa_models"))
+            out += J.j_vqa_endpoint(h, 8870, k, vqa_expected(c).get(h), r.get("vqa_listener") or "")
+    out += J.j_vqa_endpoint("laptop", 8870, J.vqa_kind(_http("http://127.0.0.1:8870/health"), _http("http://127.0.0.1:8870/v1/models")),
+                            vqa_expected(c).get("laptop"))
     return out
 
 
@@ -231,12 +249,14 @@ def relay_rate(ctx: Ctx) -> tuple[float | None, str]:
     m["prev"] = sorted(cur)
     m["new"] = [t for t in m["new"] if t >= ctx.now - 3600]
     span = min(3600.0, ctx.now - m["t0"])
-    if span >= 600:
-        return len(m["new"]) * 3600 / span, f"sentinel 每拍快照 {span / 60:.0f} 分钟"
+    own = (len(m["new"]) * 3600 / span, f"sentinel 每拍快照 {span / 60:.0f} 分钟（60 s 采样，只会少算）") if span >= 600 else None
     try:
         last = json.loads((ROOT / "data/netfix/conn_watch_rate.jsonl").read_text(encoding="utf-8").strip().splitlines()[-1])
-        if ctx.now - J.ts(last["at"]) < 7200:
-            return float(last["per_hour"]), f"conn_watch_rate.jsonl {last['at']} {last.get('tag', '')}"
+        if ctx.now - J.ts(last["at"]) < 7200:      # relay_rate.py 每 2 s 采样的实测（2 小时内）优先参与：取两者较大值，防止粗采样把违约“测没了”
+            ref = (float(last["per_hour"]), f"conn_watch_rate.jsonl {last['at']} {last.get('tag', '')}")
+            return max([x for x in (own, ref) if x], key=lambda x: x[0])
+        if own:
+            return own
     except (OSError, ValueError, IndexError, KeyError, TypeError) as e:  # arch-ok: 记 UNKNOWN；返回 None = 本拍不判跳板新建连接
         UNKNOWN["data/netfix/conn_watch_rate.jsonl"] = type(e).__name__
     return None, ""
@@ -249,12 +269,14 @@ def sv_ids() -> list[str]:
 
 
 def latest_deploy() -> dict | None:
-    fs = sorted(glob.glob(str(ROOT / "data/system_versions/deploy_*.json")), key=os.path.getmtime)
-    if not fs:
-        return None
-    d = jl(fs[-1]) or {}
-    ats = [h.get("at") for h in (d.get("hosts") or {}).values() if h.get("at")]
-    return {"id": d.get("id"), "at": max(ats) if ats else None, "file": os.path.basename(fs[-1])}
+    """最近一次部署 = 各 deploy 记录里主机 at 最大的那条（按记录内容，不按文件修改时间）"""
+    best = None
+    for f in glob.glob(str(ROOT / "data/system_versions/deploy_*.json")):
+        d = jl(f) or {}
+        ats = [h.get("at") for h in (d.get("hosts") or {}).values() if h.get("at")]
+        if ats and (best is None or max(ats) > best["at"]):
+            best = {"id": d.get("id"), "at": max(ats), "file": os.path.basename(f)}
+    return best
 
 
 def p_s5(ctx: Ctx) -> list[dict]:
@@ -345,26 +367,54 @@ def p_s7(ctx: Ctx) -> list[dict]:
 
 # ================================================================== S8
 def vlm_judge(path: Path, shot: str) -> dict:
-    """复用 tools/vqa/gaze_regression.judge（和生产同一套：本地看图整图 eye_contact → MediaPipe 旁证 → 拿不准裁脸复判；只调一次看图）。
-    身份 / 缺件（Q1 / Q2）：judge 不回 defects，契约项暂不判（contracts_failed 空），由 VQAGATE 把 defects 透出后接上"""
+    """复用 tools/vqa/gaze_regression.judge（和生产同一套：本地看图整图 → MediaPipe 旁证 → 拿不准裁脸复判；只调一次看图）。
+    VQAGATE 11-02 03:1x 起 judge 另回 defects / identity / missing_items / contract：
+      身份 = contract.Q1.status == fail（契约 ArcFace，只有 data/renders 下的生产图有）；identity.per_person 的“不像”只记交叉核对证据
+      缺件 = contract.Q2.status == fail，或 missing_items 里某项 s == defect"""
     sys.path[:0] = [str(ROOT / "services/agent"), str(ROOT / "packages/qc")]
     from tools.vqa import gaze_regression as GR
     r = GR.judge(path, shot)
-    r.setdefault("contracts_failed", [])
+    ct = r.get("contract") or {}
+    failed = set()
+    # 身份口径以契约 Q1.status 为准（VQAGATE 03:3x）：复核带 sharp_only / 发糊（band_review sharpness < 42.3）被拦不算“不像”；
+    # identity.per_person 的“不像”只作交叉核对证据，不单独判违约（没有 contract 的实验图不判身份）
+    if (ct.get("Q1") or {}).get("status") == "fail":
+        failed.add("Q1")
+    # 合成感（人物与背景不融合）：IMGFIX 指标 / VQAGATE 契约字段到位后生效；sentinel.yaml S8 composite_max 为 null 时不判
+    lim = (policy_item("S8_vlm_sample") or {}).get("composite_max")
+    comp = r.get("composite") or (ct.get("composite") if isinstance(ct.get("composite"), dict) else None)
+    if lim is not None and isinstance(comp, dict) and comp.get("score") is not None and float(comp["score"]) > float(lim):
+        failed.add("composite")
+    r["identity_crosscheck"] = [p for p in (r.get("identity") or {}).get("per_person") or [] if p.get("identity") == "不像"]
+    if (ct.get("Q2") or {}).get("status") == "fail" or any((v or {}).get("s") == "defect" for v in (r.get("missing_items") or {}).values()):
+        failed.add("Q2")
+    r["contracts_failed"] = sorted(failed)
     return r
+
+
+def policy_item(name: str) -> dict | None:
+    from tools.autopilot import policy
+    return (policy.load().get("sentinel") or {}).get(name, {}).get("value")
 
 
 def p_s8(ctx: Ctx) -> list[dict]:
     c = ctx.c("S8_vlm_sample")
     done = ctx.mem.setdefault("vlm_done", {})
-    from tools.autopilot import runs as RUNS
-    rr = list(dict.fromkeys([RUNS.primary_run(), *RUNS.list_runs()]))
-    fs = sorted((f for r in rr for f in glob.glob(str(RUNS.run_dir(r) / "images/frames/ep*/*.png"))), key=os.path.getmtime)
-    fresh = [f for f in fs if os.path.getmtime(f) >= ctx.now - 3600 and os.path.relpath(f, ROOT).replace("\\", "/") not in done]
+    # 抽样池 = takes.json 登记的首帧版本：1 小时内生成、契约 postflight 通过、没隔离、没抽过（按登记表，不按文件修改时间）
+    fresh = []
+    for tj in glob.glob(str(ROOT / "data/renders/ep*/S*/takes.json")):
+        for t in (jl(tj) or {}).get("takes") or []:
+            ts_ = J.ts(t.get("created_at"))
+            rel = "data/" + str(t.get("file") or "")
+            if (t.get("stage") == "image" and ts_ and ts_ >= ctx.now - 3600 and (t.get("postflight") or {}).get("ok") is True
+                    and not t.get("quarantined") and rel not in done and (ROOT / rel).exists()):
+                fresh.append((ts_, rel, Path(tj).parent))
+    fresh = [str(ROOT / r) for _t, r, _d in sorted(fresh)]
     out = []
     for f in fresh[-1:]:                     # 每 6 分钟 1 张 = 每小时 10 张
         rel = os.path.relpath(f, ROOT).replace("\\", "/")
-        shot = os.path.basename(f).split("_")[0]
+        pp = Path(f).parts
+        shot = f"{pp[-4]}-{pp[-3]}" if len(pp) >= 4 and pp[-2] == "takes" else os.path.basename(f).split("_")[0]   # data/renders/ep01/S1/takes/x.png → ep01-S1
         try:
             v = vlm_judge(Path(f), shot)
         except Exception as e:  # noqa: BLE001
@@ -440,7 +490,7 @@ def p_s11(ctx: Ctx) -> list[dict]:
 # ================================================================== S12
 def p_s12(ctx: Ctx) -> list[dict]:
     c = ctx.c("S12_script_ruler")
-    fs = sorted(glob.glob(str(ROOT / "data/review_pages/hollywood*/**/ruler*.json"), recursive=True), key=os.path.getmtime)
+    fs = [ROOT / c["ruler_file"]] if c.get("ruler_file") else []          # 尺子验收文件（同稿重复打分口径），在 sentinel.yaml 登记
     ruler = None
     if fs:
         d = jl(fs[-1]) or {}
@@ -449,15 +499,17 @@ def p_s12(ctx: Ctx) -> list[dict]:
             sds = [v.get("stdev") for v in d["files"].values() if v.get("stdev") is not None]
             sd = max(sds) if sds else None
         ruler = {"stdev": sd, "src": os.path.relpath(fs[-1], ROOT)}
-    fails = None
-    try:
-        rows = [json.loads(x) for x in (ROOT / "data/autopilot/imports.jsonl").read_text(encoding="utf-8").splitlines() if x.strip()]
-        rec = [r for r in rows if "rubric_code_fail" in r]
-        if rec:
-            fails = {f"ep{e:02d}": int(r["rubric_code_fail"].get(str(e), 0)) if isinstance(r["rubric_code_fail"], dict) else int(r["rubric_code_fail"])
-                     for r in rec[-1:] for e in r.get("episodes") or []}
-    except (OSError, ValueError) as e:  # arch-ok: 记 UNKNOWN；fails=None = 新稿代码判定本拍未测
-        UNKNOWN["data/autopilot/imports.jsonl"] = type(e).__name__
+    # 新稿代码判定：HOLLYWOOD autoflow 每集状态 data/pipeline/runs/<run>/autoflow_epNN.json 的 rubric_code_fail {n, ids}
+    # （只统计 rubric_code 27 条代码判定条目；没有该字段的旧稿不判）。σ 用尺子验收口径（同稿重复打分），不用 autoflow 的 ruler_sigma（评审间离散度，口径不同）
+    from tools.autopilot import runs as RUNS
+    fails = {}
+    for r in dict.fromkeys([RUNS.primary_run(), *RUNS.list_runs()]):
+        for f in sorted(glob.glob(str(RUNS.run_dir(r) / "autoflow_ep*.json"))):
+            d = jl(f) or {}
+            rc = d.get("rubric_code_fail")
+            if isinstance(rc, dict) and rc.get("n") is not None:
+                fails[f"{r}:{Path(f).stem.split('_')[-1]}"] = int(rc["n"])
+    fails = fails or None
     return J.j_script(fails, ruler, c)
 
 

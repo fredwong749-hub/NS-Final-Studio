@@ -80,8 +80,14 @@ STAGES: list[dict] = [
     {"id": "assets", "name": "资产就绪", "exec": "tools/factory/deps.py", "auto": True,
      "points": [
          {"what": "preflight 依赖闭包齐全", "now": "code", "target": "code", "ref": "tools/factory/deps.py（K-OPS-F02）"},
-         {"what": "新角色身份图 / 设定图候选挑选", "now": "claude", "target": "local_model", "ref": "gates.asset_auto_adopt；tools/assetmaster/choose.py",
-          "plan": "候选 → identity_rank（ArcFace）+ sheet_intake + asset_sheet_inspect（本地 VLM）+ 契约 → policy 自动选（by=POLICY），项目方可撤销", "who": "IMGFIX / ASSETMASTER（tools/assetmaster/choose.py 单品检查改 sheet_intake + Q2 自动）"},
+         {"what": "已有角色的新造型设定图首次挑选（第二季新造型，L-108）", "now": "claude", "target": "code",
+          "ref": "tools/assetmaster/choose.py enforce_item_check + services/agent/ns_agent/sheet_intake.py（K-AST-260 / 264）",
+          "plan": "choose.py 现在仍要求 data/assetmaster/sheet_item_checks.json 里有人工 / Q2 单品记录才 adopt；改为 sheet_intake（IN1 袖子镜像 / IN2 外层）+ 契约 Q2 自动判定直接写记录，Q1 对已定身份脸；全过取 Q1 最高（repair.py 同口径），by=POLICY 可撤销",
+          "who": "IMGFIX（choose.py 单品记录自动化）"},
+         {"what": "全新角色的身份脸 / 设定图首次挑选", "now": "claude", "target": "local_model",
+          "ref": "tools/assetmaster/choose.py（新角色没有身份脸可比，Q1 无从判）",
+          "plan": "候选 → ArcFace 跨栏 / 跨 seed 一致性排序（identity_rank）+ sheet_intake + asset_sheet_inspect（本地 VLM）+ VQA 无缺陷 → 取一致性最高的一张登记身份脸（脸部裁切规则 L-086）+ 设定图，by=POLICY、项目方可撤销",
+          "who": "IMGFIX / ASSETMASTER"},
          {"what": "设定图入库完整性（袖子镜像 / 外层存在）", "now": "code", "target": "code", "ref": "services/agent/ns_agent/sheet_intake.py（K-AST-264，DJ-06）"},
          {"what": "资产修复候选自动选（契约 R1–R7）", "now": "code", "target": "code", "ref": "tools/asset_repair/repair.py（K-AST-265 待验，DJ-07）"},
          {"what": "资产修复期间暂缓相关镜（*_hold.json）", "now": "code", "target": "code", "ref": "tools/autopilot/producer.py asset_hold_objects（K-OPS-E04）"},
@@ -90,9 +96,8 @@ STAGES: list[dict] = [
      "points": [
          {"what": "派单 / 道分配 / 积压闸", "now": "code", "target": "code", "ref": "resources.image_lanes / score_backlog（DJ-14 / DJ-16）"},
          {"what": "重试阶梯（换 seed → 换参考 → 尽力）", "now": "code", "target": "code", "ref": "retry.max_content_tries"},
-         {"what": "系统暂停超时恢复", "now": "claude", "target": "code", "ref": "resources.pause_max_s（DJ-15）",
-          "plan": "总调度 D5 已批：pause 必带 reason_kind / expires_at，运维暂停到点自动恢复、显式暂停只告警；判定 = policy.pause_decision，DEBUG-RSI 挂进 producer 每拍", "who": "DEBUG-RSI"},
-         {"what": "尽力版挡住下游时重置（规则 / 资产版本变 → 自动 reset）", "now": "code", "target": "code", "ref": "gates.best_effort_policy（总调度 02:2x 定，DEBUG-RSI 实现中；DJ-12）",
+         {"what": "系统暂停超时恢复（运维暂停到点恢复、显式暂停只告警）", "now": "code", "target": "code", "ref": "policy.pause_decision → producer 每拍（K-OPS-E08；DJ-15）"},
+         {"what": "尽力版挡住下游时重置（规则 / 资产版本变 → 自动 reset）", "now": "code", "target": "code", "ref": "tools/autopilot/producer.py K-OPS-E11（gates.best_effort_policy；DJ-12）",
           "plan": "producer 每拍比对尽力版的规则 / 资产版本，变了自动 reset（不计次）", "who": "DEBUG-RSI（口径待总调度定）"},
          {"what": "服务器交还（preflight 0 挡 + refs sha 一致）", "now": "code", "target": "code", "ref": "policy.handback_ok（DJ-21–23）"},
          {"what": "服务器代码版本 ≥ min_code_sv", "now": "claude", "target": "code", "ref": "handback.min_code_sv（DJ-24）",
@@ -187,6 +192,7 @@ class World:
         self.eps_dir = self.data / "episodes" / "series10"
         self.net = _jl(self.data / "netfix/net_status.json", {}) or {}
         self.night = {h: _jl(self.data / f"pipeline/runs/{run_id}/video/state_{h}.json", {}) or {} for h in ("gpu33", "gpu36")}
+        self.night_state = _jl(self.data / f"pipeline/runs/{run_id}/video/night_state.json", {}) or {}   # night.finalize 交付记录
 
     def imported(self) -> dict[int, dict]:
         return {int(e.get("number")): e for e in self.script.get("episodes") or [] if e.get("number") is not None}
@@ -199,13 +205,33 @@ class World:
         return sum(1 for j in self.jobs if str(j.get("shot") or j.get("shot_id") or j.get("id") or "").startswith(pre)
                    or str(j.get("shot_id", "")).startswith(pre))
 
-    def latest_cut(self, ep: int) -> Path | None:
-        if not self.eps_dir.exists():
+    def _repo_path(self, p: str | None) -> Path | None:
+        """交付记录里的路径（可能是服务器 / 笔记本绝对路径）→ 本仓库内的同名文件；不在 = None"""
+        if not p:
             return None
-        c = [p for p in self.eps_dir.glob(f"ep{ep:02d}_v*.mp4") if not p.stem.endswith("_post")]
-        return max(c, key=lambda p: p.stat().st_mtime) if c else None
+        q = str(p).replace("\\", "/")
+        i = q.find("data/")
+        cand = self.root / (q[i:] if i >= 0 else q)
+        return cand if cand.is_file() else None
+
+    def latest_cut(self, ep: int) -> Path | None:
+        """本集“现行成片”= night.finalize 的交付记录（night_state.json eps[ep].final，status=assembled）；
+        没有时退到 producer 登记表 assembly 对象记录的路径；都没有 = 未合成（失败关闭，不按 mtime 猜——SYSARCH 11-02）。
+        交付记录指向后期版（*_post.mp4）时返回它对应的原合成版，后期版由 post 段判断。"""
+        rec = (self.night_state.get("eps") or {}).get(str(ep)) or {}
+        f = self._repo_path(rec.get("final")) if rec.get("status") == "assembled" else None
+        if f is None:
+            ao = (self.reg_ep(ep).get("objects") or {}).get("assembly") or {}
+            f = self._repo_path(ao.get("reason")) if ao.get("status") == "passed" else None
+        if f is not None and f.stem.endswith("_post"):
+            raw = f.with_name(f.stem[: -len("_post")] + f.suffix)
+            return raw if raw.is_file() else f
+        return f
 
     def night_director(self, ep: int) -> dict | None:
+        d = ((self.night_state.get("eps") or {}).get(str(ep)) or {}).get("director")
+        if d:
+            return d
         for st in self.night.values():
             d = ((st.get("eps") or {}).get(str(ep)) or (st.get("eps") or {}).get(f"ep{ep:02d}") or {}).get("director")
             if d:
@@ -303,7 +329,9 @@ def episode_status(w: World, ep: int) -> dict:
     if lr:
         S["post"]["detail"] += f"；口型重出待处理 {len(lr)} 镜（K-EDT-805，vidgen 自动消费）"
     fs = _jl(w.data / f"film_score/ep{ep:02d}.json")
-    fresh = bool(fs and cut and upstream_ok and fs.get("at") and time.mktime(time.strptime(fs["at"][:19], "%Y-%m-%d %H:%M:%S")) >= cut.stat().st_mtime)
+    # 成片分是不是这一版的：比对成片分 JSON 记的 video 路径 = 现行成片（或其后期版），不比修改时间（SYSARCH 11-02）
+    cut_rels = {_rel(w.root, x) for x in (cut, post) if x is not None}
+    fresh = bool(fs and cut and upstream_ok and str(fs.get("video") or "").replace("\\", "/") in cut_rels)
     S["film_score"] = _st("done" if fresh else ("stale" if fs else "waiting"),
                           detail=f"{fs.get('total_50')}/50（测到 {fs.get('coverage')}，{fs.get('name')}）" if fs else "")
     gate = _jl(w.data / f"autopilot/flow/gates/ep{ep:02d}_delivery.json", {}) or {}
@@ -362,8 +390,10 @@ def writing_status(root: Path, run_dir: Path, ep: int) -> dict:
         pk = POL.pick_import(hw.get("candidates") or [], float(hw.get("spent_usd") or 0), int(hw.get("rounds_left") or 0), root)
         S["script"] = _st("done" if pk["pick"] else "running", detail=f"{pk['why']}（选 {pk['pick']}）", needs=None if pk["pick"] else "api_model")
         S["script"]["pick"] = pk
-        if hw.get("code_fails"):
-            S["script"]["detail"] += f"；代码判定失败 {len(hw['code_fails'])} 项（导入闸门要求 0）"
+        cf = hw.get("code_fails")
+        n_cf = len(cf) if isinstance(cf, (list, dict)) else int(cf or 0)     # r8 写整数或清单都认
+        if n_cf:
+            S["script"]["detail"] += f"；代码判定失败 {n_cf} 项（导入闸门要求 0）"
     elif af:
         S["script"] = _st("running", detail=f"autoflow：{af.get('verdict') or af.get('stage') or '进行中'}，已花 ${af.get('usd_total', 0)}")
     else:
@@ -373,7 +403,7 @@ def writing_status(root: Path, run_dir: Path, ep: int) -> dict:
     imp = [e for e in _jsonl(root / "data/autopilot/imports.jsonl") if run_dir.name in json.dumps(e, ensure_ascii=False)]
     S["import"] = _st("done", detail=f"导入事件 {len(imp)} 条") if imp else _st(
         "todo" if S["script"]["status"] == "done" else "waiting", needs="owner" if S["script"]["status"] == "done" else None,
-        blocker="导入仍要项目方在导入页勾选；且会替换正式剧本（单一 script_v2.json）" if S["script"]["status"] == "done" else None,
+        blocker="待导入：import-staged --run 已由 DEBUG-RSI 完成、随 sv-05 部署；导入后 WORKFLOW / FACTORY 加常驻 serve --run" if S["script"]["status"] == "done" else None,
         cmd=f"{PY} tools/autopilot/producer.py import-staged --obj <hollywood 选中稿> --reason <sha256>")
     return S
 
@@ -505,7 +535,7 @@ def status_all(root: Path = ROOT, write: bool = True) -> dict:
     new_runs = runs_status(root)
     for r in new_runs:
         if not r.get("dry_run"):          # 演练 run 只列状态，不进卡点
-            blockers += [dict(b, ep=None, run=r["run_id"]) for b in r["blockers"]]
+            blockers += [dict(b, ep=None, run=f"{r['run_id']} ep{int(r['episode']):02d}") for b in r["blockers"]]
     out = {"schema": "nsfs.autopilot.flow/1", "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "stages": STAGE_IDS, "new_runs": new_runs,
            "stage_names": {s["id"]: s["name"] for s in STAGES}, "episodes": rows, "global": g, "blockers": blockers}
     if write:
@@ -693,7 +723,26 @@ def coverage(root: Path = ROOT, drill_ep: int | None = None, write: bool = True)
     dp = root / f"data/autopilot/flow/drill_ep{drill_ep:02d}.json" if drill_ep else None
     if dp and dp.exists():
         dr = _jl(dp)
-    out = {"schema": "nsfs.autopilot.coverage/1", "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "round": "distill-r1",
+    # r3：第二季等真实新 run 就是冷启动演练的实战——沿途每个需要人 / Claude / 写作方的点都记进来
+    live = []
+    for r in runs_status(root):
+        if r.get("dry_run"):
+            continue
+        for b in r["blockers"]:
+            live.append({"run": r["run_id"], "episode": r["episode"], "stage": b["stage"], "needs": b["needs"], "what": b["blocker"]})
+    log_p = root / "data/autopilot/flow/live_breaks.jsonl"
+    seen = set()
+    for x in _jsonl(log_p):
+        seen.add((x.get("run"), x.get("episode"), x.get("stage"), x.get("what")))
+    new_live = [x for x in live if (x["run"], x["episode"], x["stage"], x["what"]) not in seen]
+    if write and new_live:
+        log_p.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_p, "a", encoding="utf-8") as f:
+            for x in new_live:
+                f.write(json.dumps(dict(x, first_seen=time.strftime("%Y-%m-%dT%H:%M:%S")), ensure_ascii=False) + "\n")
+    out = {"schema": "nsfs.autopilot.coverage/1", "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "round": "distill-r3",
+           "live_runs": {"now": live, "history_file": "data/autopilot/flow/live_breaks.jsonl",
+                         "history": len(seen) + len(new_live)},
            "goal": "新剧本从剧本导入到成片，decider 里没有 claude（L-102 / §G1-2）",
            "decision_points": len(pts), "deciders_now": dict(now), "deciders_target": dict(tgt),
            "claude_share_now": round(now.get("claude", 0) / len(pts), 3), "claude_share_target": round(tgt.get("claude", 0) / len(pts), 3),

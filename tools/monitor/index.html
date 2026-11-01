@@ -75,11 +75,15 @@ td.n,th.n{text-align:right;white-space:nowrap}
 <header>
   <h1>NS-Final Studio 实时监控</h1>
   <span class="mute" id="stamp"><span class="dot"></span>连接中…</span>
-  <span class="mute" style="margin-left:auto;font-size:12px">每 5 秒刷新 · GPU 每 10 秒采集 · 图片目录每 60 秒扫描 · 只读</span>
+  <span class="mute" style="margin-left:auto;font-size:12px">每 5 秒刷新 · GPU 每 30 秒采集（rssh 主连接） · 图片目录每 60 秒扫描 · 只读</span>
 </header>
 <main>
   <div class="kpis" id="kpis"></div>
 
+  <section id="issuesBox">
+    <h2>工单 <small>SENTINEL 探针自动开单（data/sentinel/open.json）· 每条 SLO 一个探针 · 负责方 · 持续时长 · 颜色只表示状态</small></h2>
+    <div id="issues" class="mute">无</div>
+  </section>
   <section id="alertsBox">
     <h2>报警 <small>基础设施看门狗：隧道 / 渲染道空转 / night 卡住 / producer 心跳（data/qa/alerts.jsonl）</small></h2>
     <div id="alerts" class="mute">无</div>
@@ -153,6 +157,16 @@ function render(d){
   $('alerts').innerHTML=(al.open.length?al.open.map(a=>`<div style="color:${a.level==='crit'?'#d33':'#c80'}">● ${esc(a.id)} · ${esc(a.msg)} <span class="mute">（${esc(a.ts)} 起）</span></div>`).join(''):'<div class="mute">当前无报警</div>')
     +(al.recent.length?`<details><summary class="mute">最近 ${al.recent.length} 条</summary>${al.recent.map(a=>`<div class="mute">${esc(a.ts)} ${esc(a.id)} ${esc(a.state)} ${esc(a.msg)}</div>`).join('')}</details>`:'')
     +`<div class="mute" style="font-size:12px">看门狗最近一拍：${esc(al.at||'未运行')}${al.down&&al.down.length?' · 不通：'+al.down.join(','):''}</div>`;
+
+  // ---- 工单（SENTINEL）：红 = 未关闭 P0，橙 = 未关闭，灰 = 探针未运行；其余文字一律中性色
+  const sn=d.sentinel||{ok:false,issues:[]};
+  const dur=s=>s>=3600?(s/3600).toFixed(1)+' 小时':Math.round(s/60)+' 分钟';
+  const SC={P0:'#d33',P1:'#c80'};
+  $('issues').innerHTML=!sn.ok?`<div class="mute">● SENTINEL 未运行 / 读不到（${esc(sn.why||'')}）</div>`:
+    (sn.issues.length?`<table style="width:100%;border-collapse:collapse;font-size:13px"><tr class="mute"><td></td><td>工单</td><td>SLO</td><td>负责方</td><td>持续</td><td>问题</td></tr>`+
+      sn.issues.map(r=>`<tr><td style="color:${SC[r.severity]||'#c80'}">●</td><td class="mute">${esc(r.id)}</td><td>${esc(r.slo)}</td><td>${esc(r.owner_loop)}</td><td>${dur(r.duration_s||0)}</td><td title="${esc(JSON.stringify(r.evidence||{}))}">${esc(r.title)}</td></tr>`).join('')+'</table>'
+      :'<div class="mute">当前无未关闭工单</div>')
+    +`<div class="mute" style="font-size:12px">探针最近一拍：${esc(sn.at||'—')}（${sn.age_s??'—'} s 前）· 未关闭 ${sn.n_open??0} · decider=code · 派单：总调度读工单（现行）→ 编排器自动通知（待接）</div>`;
 
   // ---- 全局图
   const order=['gpu33','gpu36','本机'];

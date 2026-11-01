@@ -55,6 +55,18 @@ def face_refs(host: str, project: str = FACE_PROJECT) -> dict[str, str]:
     import base64
     root = Path(__file__).resolve().parents[2]
     faces = {cid: (f, _sha16(root / f)) for cid, f in local_faces(project).items()}
+    # 身份库 top-k（VQAGATE 11-02，L-098，CONSENT REFLOCK→VQAGATE）：库里已通过的帧作为 "<cid>@bN" 参照一起打分；
+    # top-k 平均 + 对锚（L-086）≥ 复核下限的条件在 postflight Q1 里算（ns_agent.gen_contract.postflight.apply_bank）
+    try:
+        import sys as _s
+        if str(root / "tools" / "identity") not in _s.path:
+            _s.path.insert(0, str(root / "tools" / "identity"))
+        import bank as _bank
+        for cid in list(faces):
+            for i, bf in enumerate(_bank.bank_files(cid)):
+                faces[f"{cid}@b{i}"] = (bf, _sha16(root / bf))
+    except Exception as e:  # noqa: BLE001 — 身份库读不到就只用锚（和改前一样），记一行
+        print(f"[face_refs] 身份库没读到，只用锚：{e!r}"[:200], file=__import__("sys").stderr)
     kp = _known_path(host)
     try:
         known = set(json.loads(kp.read_text(encoding="utf-8")))

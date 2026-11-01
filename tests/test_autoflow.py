@@ -53,3 +53,36 @@ def test_api_router_guards(tmp_path, monkeypatch):
     assert c.get("/api/script-autoflow/r1").json()["verdict"] == "not_started"
     assert c.post("/api/script-autoflow/r1/import", json={"episode": 1}).status_code == 409    # 没到 importable 不许导入
     assert c.post("/api/script-autoflow/r1/start", json={"episode": 1, "import_mode": "bad"}).status_code == 400
+
+
+def test_l109_backend_default_claude_agent_and_packet(AF, tmp_path):
+    AG = AF._load("autoflow_agent_t", "tools/script_rsi/autoflow_agent.py")
+    assert AG.backend() == "claude_agent"                       # L-109：测试期默认不调外部 API
+    st = AF.Status(tmp_path, 6, 0.0)
+    pk = AG.packet(tmp_path, st, "P2_ep06", "writer", 6, "P1-P2", "SYS", "USER", "json", [], 1)
+    assert (tmp_path / "writer_tasks" / "P2_ep06_a1.json").exists()
+    assert "露骨的性描写不写" in pk["system"] and pk["output"]["path"].endswith("writer_out/P2_ep06_a1.json")
+    op = tmp_path / "writer_out" / "P2_ep06_a1.json"
+    op.parent.mkdir(parents=True, exist_ok=True)
+    op.write_text("{}", encoding="utf-8")
+    assert AG.ready(op) is None                                  # 没有 .done 不读
+    op.with_name(op.name + ".done").write_text("", encoding="utf-8")
+    assert AG.ready(op) == "{}"
+
+
+def test_v2_shot_block_and_lighting_checks():
+    import importlib.util as iu
+    spec = iu.spec_from_file_location("rubric_code_v2", ROOT / "tools" / "script_rsi" / "rubric_code.py")
+    RC = iu.module_from_spec(spec)
+    spec.loader.exec_module(RC)
+
+    class S:
+        index = 1
+    good = ("**镜1｜img**：近景，台灯在右侧亮着\n**机位与景别**：近景，平视，林晚\n**构图**：台灯在画面右侧\n"
+            "**灯光**：台灯在画面右侧作暖色主光，布光比 3:1，3000K\n**运镜**：推近，小幅\n**表演节拍**：0–2 秒……")
+    r = RC.v2_checks([S()], [good])
+    assert r[1][0] and r[2][0]
+    bad = good.replace("**构图**：台灯在画面右侧\n", "").replace("布光比 3:1，", "")
+    r2 = RC.v2_checks([S()], [bad])
+    assert not r2[1][0] and not r2[2][0]
+    assert RC.uses_v2([good]) and not RC.uses_v2(["**镜1｜img**：近景"])

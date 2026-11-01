@@ -60,14 +60,16 @@ def episode_eval(pre: str, chunk: str, ep: int, wd: Path, compiled: bool, si=Non
         if pe is not None and [s.index for s in pe.shots] == [s.index for s in shots]:
             imgs = [IJ.frame_prompt(pe, s, si.globals, [], "series10_v1")[0] for s in sorted(pe.shots, key=lambda s: s.index)]
     cc = RC6.code_checks(chunk, shots, blocks, RL.block_text(chunk, "head"), codes, imgs=imgs)
+    if RC6.uses_v2(blocks):        # 第二季起的镜头块 v2 + 【灯光】（K-WRT-805 / 806）
+        cc["v2"] = RC6.v2_checks(shots, blocks)
     fails = [{"item": f"{d}#{i}", "kind": "TECH" if (d, i) in TECH else "WRITING", "detail": why,
               "shots": sorted({int(x) for x in re.findall(r"镜(\d+)", why)} | {int(x) for x in re.findall(r"\[([\d, ]+)\]", why) for x in [x] if False}),
               "owner": OWNER_HINT.get((d, i), "写作规则 + lint（HOLLYWOOD）")}
-             for d in RC6.DIMS for i, (ok, why) in cc[d].items() if not ok]
+             for d in list(RC6.DIMS) + (["v2"] if "v2" in cc else []) for i, (ok, why) in cc[d].items() if not ok]
     for f in fails:     # 详情里“[1, 4]”形式的镜号也收进来
         for grp in re.findall(r"\[([\d, ]+)\]", f["detail"]):
             f["shots"] = sorted(set(f["shots"]) | {int(x) for x in grp.split(",") if x.strip().isdigit()})
-    met = sum(ok for d in RC6.DIMS for ok, _ in cc[d].values())
+    met = sum(ok for d in list(RC6.DIMS) + (["v2"] if "v2" in cc else []) for ok, _ in cc[d].values())
     return {"met": met, "total": sum(len(v) for v in cc.values()), "fails": fails, "compiled_used": imgs is not None, "shots": len(shots)}
 
 

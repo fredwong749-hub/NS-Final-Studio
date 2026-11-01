@@ -52,17 +52,17 @@ items:
   best_effort_to_assembly:
     value: false
     source: ITERATION_PROTOCOL §3（重出 3 次仍不过 → 不合格，不进合成、不给项目方）
-    enforced_by: （口径已定 02:2x，DEBUG-RSI 实现中）gates.best_effort_policy；旧冲突：producer DEFAULT_CTRL.auto_force_eps=True 含尽力镜
-    status: pending
+    enforced_by: tools/autopilot/producer.py（K-OPS-E12：含尽力镜的集不整集写 force_eps，过契约的镜逐镜出视频）
+    status: code_reads
     owner: DEBUG-RSI / WORKFLOW
-    plan: force_eps 只在该集 0 个尽力镜时写；有尽力镜 → 该集停在 image_gate，flow status 列为卡点（等资产 / 规则修复后 reset-best-effort）
+    plan: 已落地（K-OPS-E12）
   best_effort_auto_reset:
     value: {when: "规则或资产版本在尽力版之后变了", blocks_downstream_min: 1}
     source: 早报 16:46（59 项尽力版挡住下游 42 项 → 总调度手动 reset-best-effort 43 项）
-    enforced_by: tools/autopilot/producer.py:reset_best_effort（手动命令）
-    status: pending
+    enforced_by: tools/autopilot/producer.py（K-OPS-E11：规则或资产版本变化时尽力版自动重置，不计次；资产暂缓清单里的不动）
+    status: code_reads
     owner: PRODUCER（不在岗，经总调度派；DEBUG-RSI 只有 K-OPS-E05 授权）
-    plan: producer 每拍比对尽力版的 rules_version / 资产 sha 与现行，变了就自动 reset 该对象（不计次）
+    plan: 已落地（K-OPS-E11）
   per_shot_redo_on_asset_change:
     value: true
     source: L-101 / L-094（资产或造型改了 → 受影响作业重编 + 旧图驳回不计次）

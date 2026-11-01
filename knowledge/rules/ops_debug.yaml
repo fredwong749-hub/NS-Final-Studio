@@ -170,3 +170,15 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-E15
+    domain: ops
+    link: [P5-P6]
+    title: 多剧并行 = 一部剧一个 producer 进程（serve --run <run>）；主剧沿用旧路径；非主剧账本 / 租约 / 登记表放 data/producer/runs/<run>/、渲染放 data/renders/<run>/；低优先级剧在高优先级剧还有 ready 对象时不派
+    when: config/pipeline/runs.json 里有多部 status=producing 的剧
+    then: producer 进程启动时按 run_env 设 NS_RENDERS_DIR / NS_SCRIPT_JSON（ns_render.pipeline 读，takes.json 跨剧不共用）；Paths(run_id) 分目录；dispatch_frames 先查 higher_priority_busy（priority 数字小 = 优先），记 priority_yield；不打断在途
+    check: tests/test_debug_rsi.py::test_e15_multi_run_paths_and_priority, tests/test_debug_rsi.py::test_e15_pipeline_renders_env
+    evidence:
+      - {src: docs/AUTOPILOT.md, note: "§0.1 DISTILL 多剧接口；总调度 02:4x 批准；HOLLYWOOD 第二季 series10_s2 priority 10"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

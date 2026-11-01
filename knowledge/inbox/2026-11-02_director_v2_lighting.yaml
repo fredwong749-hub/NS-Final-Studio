@@ -1,0 +1,76 @@
+# DIRECTOR r4 规则草案（sv-05 冻结期写在 inbox；cut 完成后移进 knowledge/rules/director.yaml 并 compile）。
+# 来源：总调度 r4（项目方 03:4x “更有画面感 / 更清晰”）、L-111（项目方 04:0x 灯光）。
+rules:
+  - id: K-WRT-805
+    domain: writer
+    link: P3-P4
+    title: 镜头块按镜头语言模板 v2 写七段（机位景别 / 镜头参数 / 构图 / 灯光 / 运镜 / 表演节拍 / 声音），每段一句、顺序固定（第二季起）
+    when: 每镜镜头块
+    then: 字段与顺序见 config/director/shot_spec_v2.yaml；②镜头参数可省（按景别补）；⑤运镜只写 camera_moves.yaml enabled 的名字 + 起幅 → 落幅；⑥按 0–2 / 2–4 / 4–6 s 分段写动作、微表情、视线落点（画内）、呼吸、手部；⑦不写转场（导演层给）；HOLLYWOOD rubric_code 加七段齐全检查
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: 每镜镜头块按七段写，每段一句、顺序固定：①机位与景别（谁在画面、角度、景别档）②镜头参数（焦段 / 光圈 / 景深，可省）③构图（前景 / 中景 / 后景放什么、人物在哪个三分点、留白方向、视线方向）④灯光（见灯光规则）⑤运镜（运镜词表名 + 起幅 → 落幅 + 小幅）⑥表演节拍（0–2 / 2–4 / 4–6 秒各写动作、微表情、视线落点、呼吸、手部细节，视线落在画面里的人或物上）⑦声音。不堆形容词，一个名词前最多两个形容词。
+    evidence:
+      - {src: config/director/shot_spec_v2.yaml}
+      - {src: data/review_pages/shot_spec_v2/index.html, note: "ep01 S1 / S3 / S5 新旧对照（项目方亲审中）"}
+    confidence: medium
+    status: 建议
+    date: 2026-11-02
+  - id: K-WRT-806
+    domain: writer
+    link: P3-P4
+    title: 每镜写【灯光】：灯光词表方案名，或“动机光源（画面哪一侧）+ 布光比 + 色温”三要素（L-111，第二季起）
+    when: 每镜
+    then: 方案名见 config/director/lighting.yaml schemes；三要素写法：动机光源必须是画面里存在的光（窗 / 台灯 / 顶灯 / 霓虹 / 屏幕 / 烛光）并写方向；布光比 2:1 / 3:1 / 5:1 / 8:1；色温 K 值或暖 / 冷；HOLLYWOOD rubric_code 加字段齐全 + 动机光源在场景里存在的检查
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: 每镜写【灯光】：用灯光词表里的方案名（如“深夜办公室·台灯”），或写三要素——动机光源（画面里真实存在的光，写在画面哪一侧）、布光比（2:1 柔和到 8:1 戏剧）、色温（K 值或暖 / 冷）；可加人物适配（蓝发高光、皮肤质感、水晶甲反光点）。人物和背景用同一套光。
+    evidence:
+      - {src: config/director/lighting.yaml}
+    confidence: medium
+    status: 建议
+    date: 2026-11-02
+  - id: K-EDT-818
+    domain: edit
+    link: P3-P4
+    title: 镜头语言 v2 编译（首帧 ①–④、视频 ①–⑦ + 约束句，同一份模板）；第一季缺的段由代码按词表自动补并标 auto（decider=code）
+    when: 编译首帧 / Pika 提示词
+    then: 灯光缺省按场景时段 + 情绪从 lighting.yaml 选方案；镜头参数按景别 lens_by_size；运镜取 cut_plan（camera_moves enabled）；构图取 cast 站位 + 视线留白；表演节拍沿用写作方分拍；剧情和台词不改
+    evidence:
+      - {src: data/review_pages/shot_spec_v2/samples.json}
+    confidence: low
+    status: 待验
+    date: 2026-11-02
+  - id: K-REN-802
+    domain: render
+    link: P4-P6
+    title: 镜头句按景别 + 情绪从徕卡 M 镜头组选（config/director/lenses.yaml），编译后只留一条镜头句；剧本【镜头】> compiled visual_spec.lens（换算到最近焦段）> 景别默认
+    when: 首帧 / 视频编译（v2 第 ② 段）
+    then: style_suffix 预设“徕卡M 50mm f/2镜头”改为缺省值、被 ② 段替换（不再与 visual_spec.lens 同时出现、互相矛盾）；每张首帧把镜头写进 takes 记录 lens 字段，UI 胶卷边框显示；生效前与 IMGFIX 融合 / 灯光 A/B 合并对比“统一 50mm f/2”与“按景别”，S★ R0 观感不变（L-087）才上
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/assets/first_frame_jobs.json, note: "102 条作业 305 次“徕卡M 50mm f/2镜头”（总调度 11-02 实查）"}
+      - {src: config/render_quality.json, note: "style_suffix（S★ R0 预设，owner_decisions 锁）"}
+      - {src: data/ab/camera_moves/blend_lighting_lens_arms.json, note: "A/B C 臂镜头句"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02
+  - id: K-REN-803
+    domain: render
+    link: P4-P6
+    title: 说话人那一拍加“清晰的口型开合”表演句（v2 表演节拍段，代码按台词自动加），V7 验证
+    when: 本镜有画内对白
+    then: shot_spec_v2.yaml performance.speaker_clause_en；VQAGATE V7 口径（11-02）判前后
+    evidence:
+      - {src: docs/CHANGELOG_AGENTS.md, note: "VIDEO-RCA：顾沉口型 29 条只过 15，主因嘴张得太小"}
+    confidence: low
+    status: 待验
+    date: 2026-11-02
+  - id: K-EDT-819
+    domain: edit
+    link: P9-P10
+    title: TTS 对位和剪辑切点按回听时间戳（VQAGATE v7_asr / SenseVoice）走，不按提示词台词时间码（Pika 开口偏约 2 s）
+    when: ns_post.assemble 放句 / cut_plan 定 after_line 出刀点
+    then: 解冻后接：有 ASR 时间戳就用它，没有才退回分拍时间码，并在 timeline 记来源
+    evidence:
+      - {src: docs/CHANGELOG_AGENTS.md, note: "VIDEO-RCA 报：Pika 不按台词时间码开口，前后偏约 2 秒"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02

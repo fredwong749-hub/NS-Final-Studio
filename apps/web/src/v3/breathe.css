@@ -12,7 +12,6 @@
   50% { opacity: 1; filter: brightness(1); }
 }
 html .is-rendering,
-html .stag.k-busy,
 html .step-busy,
 html .b-running,
 html .sea-seg.s-busy,
@@ -27,7 +26,7 @@ html .is-queued,
 html .sea-seg.s-queued { animation: none; opacity: 1; filter: none; }
 html .sea-seg.s-queued { background: var(--c-text-3); }
 @media (prefers-reduced-motion: reduce) {
-  html .is-rendering, html .stag.k-busy, html .step-busy, html .b-running, html .sea-seg.s-busy, html .sea-busy, html .live, html .gpu-state.busy {
+  html .is-rendering, html .step-busy, html .b-running, html .sea-seg.s-busy, html .sea-busy, html .live, html .gpu-state.busy {
     animation: none; opacity: 1; filter: none;
   }
 }

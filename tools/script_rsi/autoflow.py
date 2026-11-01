@@ -52,7 +52,15 @@ def write_json(path: Path, obj) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + f".tmp{os.getpid()}")
     tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
-    os.replace(tmp, path)
+    # Windows：目标正被别的进程打开（API 在读、并行的集在写整季索引）时 os.replace 报 WinError 5 → 短暂重试（S2 ep03 实测崩在这里）
+    for i in range(40):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            time.sleep(0.05 * (i + 1))
+    tmp.unlink(missing_ok=True)
+    raise PermissionError(f"{path} 连续 40 次替换失败（被占用）")
 
 
 class SeasonBudgetUnknown(RuntimeError):
@@ -120,13 +128,32 @@ def extra_system() -> str:
 
 
 STRUCTURAL = {"turns#1"}
-ITEM_TRIES = 2         # 镜数等结构项：逐行补丁改不了（不能增删镜），只能在 P4 首稿写对
+ITEM_TRIES = 2
+SCORE_RESERVE = 0.2      # 总调度 03:0x 断点①：补丁 / 拆镜花钱前先给新尺子打分留出这笔（S2 ep01/04/05 实测补丁把钱用光、没打成分）
+
+
+def fact_items(devs: list) -> list[tuple[str, dict]]:
+    """断点③：整集事实核对的偏差也作为补丁目标（S2 ep05：P4 把林晚换成另一套造型，与上游事实表不符）"""
+    return [("fact", {"id": f"F{i + 1}", "why": f"{d.get('kind', '')}｜事实表：{d.get('ref', '')}｜改写稿里：{d.get('found', '')}"[:400]})
+            for i, d in enumerate(devs or [])]         # 镜数等结构项：逐行补丁改不了（不能增删镜），只能在 P4 首稿写对
+
+
+def camera_brief() -> str:
+    """L-107：运镜规则注入 P3 / P4（词表出来前按资料“避坑”三条）"""
+    vocab = R5.RC6.camera_vocab()
+    lines = ["【运镜（项目方 AI 运镜资料 docs/reference/camera_moves_20261102.md，L-107）】",
+             "- 避免“环绕 + 推拉”冲突组合；镜头运动写“匀速、无抖动”这类稳定约束。",
+             "- 复杂运动拆成两镜，每镜只写一种运镜（例：先推近一镜，再环绕一镜）。",
+             "- 慢镜头写“无渐变过渡”；甩镜写“运动模糊 + 瞬间清晰”。"]
+    if vocab:
+        lines.append("- **镜头运动** 字段只能写下面词表里的运镜名（DIRECTOR config/director/camera_moves.yaml，enabled）：" + "、".join(sorted(vocab)))
+    return "\n".join(lines)
 
 
 def rubric_code_brief() -> str:
     rub = json.loads(R5.RUBRIC_JSON.read_text(encoding="utf-8"))
     lines = ["【导入闸门的代码判定条目（rubric_code，写完系统逐条机检，失败项必须为 0 才能导入）】",
-             "- 镜数 10–20（每镜约 6 秒），镜号 1..N 连续。"]
+             "- 镜数 10–20（每镜约 6 秒），镜号 1..N 连续。", camera_brief()]
     for d in R5.RC6.DIMS:
         for i in R5.RC6.CODE_ITEMS.get(d, []):
             lines.append(f"- {d}#{i}：{rub[d][i - 1]}")
@@ -143,6 +170,8 @@ def patch_chain(RCH):
 
     def build(link, ctx):
         pr = orig_build(link, ctx)
+        if link == "P2-P3":     # L-107：P3 剧本阶段也带运镜规则
+            pr["system"] = pr["system"] + "\n\n========\n\n" + camera_brief()
         if link == "P3-P4":     # 一开始就把 27 条代码判定写给写作方（r8 测试实测：镜数 8 < 10、近景写下半身，补丁修不了镜数）
             pr["system"] = pr["system"] + "\n\n========\n\n" + rubric_code_brief()
         if "writer_knowledge_version" not in pr["system"]:
@@ -229,13 +258,18 @@ def facts_from_upstream(client, run_dir: Path, episode: int) -> dict:
     raise RuntimeError(f"事实表抽取失败：{err}")
 
 
+REQUIRE_V2 = {"on": False}      # claude_agent 写的新集（第二季 ep06 起）必须按 v2 写；旧稿只在已经用了 v2 标签时才判
+
+
 def code_fails(pre: str, chunk: str, ep: int, wd: Path) -> list[tuple[str, dict]]:
     obj = H.episode_obj(pre, chunk, ep, wd)
     shots = sorted(obj.shots, key=lambda s: s.index)
     blocks = [RL.block_text(chunk, k) for k in range(len(shots))]
     cc = R5.RC6.code_checks(chunk, shots, blocks, RL.block_text(chunk, "head"), H.lint(chunk, ep)["codes"])
+    if R5.RC6.uses_v2(blocks) or REQUIRE_V2.get("on"):      # K-WRT-805 / 806：第二季起的镜头块 v2 + 【灯光】
+        cc["v2"] = R5.RC6.v2_checks(shots, blocks)
     out = []
-    for d in R5.RC6.DIMS:
+    for d in list(R5.RC6.DIMS) + (["v2"] if "v2" in cc else []):
         for i, (ok, why) in cc[d].items():
             if not ok:
                 shots_ = sorted({int(x) for x in re.findall(r"镜(\d+)", why)} |
@@ -260,6 +294,10 @@ def patch_user(ep, pre, chunk, facts, targets, note="") -> str:
     for d, u in targets:
         if d == "p4":
             tg.append(f"- 导入校验阻断：{u['why']}")
+        elif d == "fact":
+            tg.append(f"- 剧情事实偏差（按事实表改回，只改表达相关的行）：{u['why']}")
+        elif d not in rub:          # v2 镜头块 / 灯光等非清单条目：给原因原文
+            tg.append(f"- {d}#{u.get('id')}：{u['why']}")
         else:
             i = int(u.get("id"))
             tg.append(f"- {dict(H.DIMS)[d]} 第 {i} 条：{rub[d][i - 1]}\n  没满足：镜 {u.get('shots') or '未指出'}；{u.get('why', '')}")
@@ -350,12 +388,19 @@ def run_post(run_dir: Path, episode: int, st: Status, budget: float, import_mode
     prev_final = run_dir / f"P4_ep{episode:02d}.final.md"
     cur = RL.split_doc(prev_final.read_text(encoding="utf-8"))[1][0] if prev_final.exists() else base   # 续跑：从上次的最好稿接着补
     used, hist = {}, []        # used：条目 → 已试次数（每条最多 ITEM_TRIES 次；r8 S2 实测一条要两次才修完）
-    fails = all_fails(pre, cur, episode, wd)
+    try:
+        guard(0.03 + SCORE_RESERVE)
+        okf0, devs, _e = R5.check_facts(fact_cl, facts, cur, episode)
+    except RuntimeError:
+        devs = []
+    fitems = fact_items(devs)
+    fails = fitems + all_fails(pre, cur, episode, wd)
     st.stage("code", "代码判定 + 补丁", "running", "code", fails=len(fails), detail=[f"{d}#{u['id']} {u['why'][:120]}" for d, u in fails])
     if any(f"{d}#{u['id']}" in STRUCTURAL for d, u in fails):
         try:
-            guard(0.2)
-            cur, fails, srec = structural_fix(writer, fact_cl, facts, pre, base, cur, fails, episode, base_lint, wd, calls)
+            guard(0.2 + SCORE_RESERVE)
+            cur, fails, srec = structural_fix(writer, fact_cl, facts, pre, base, cur, [f for f in fails if f[0] != "fact"], episode, base_lint, wd, calls)
+            fails = fitems + fails
             hist.append(srec)
             if srec.get("accepted"):
                 base, base_lint = cur, H.lint(cur, episode)     # 拆镜后的稿成为新基线（镜数变了，代码不变量对它比）
@@ -367,7 +412,7 @@ def run_post(run_dir: Path, episode: int, st: Status, budget: float, import_mode
         for rnd in range(1, CODE_ROUNDS + 1):
             if not fails:
                 break
-            guard(0.06)
+            guard(0.06 + SCORE_RESERVE)
             targets = [(d, u) for d, u in fails if used.get(f"{d}#{u['id']}", 0) < ITEM_TRIES and f"{d}#{u['id']}" not in STRUCTURAL][:2]
             if not targets:
                 break
@@ -390,17 +435,25 @@ def run_post(run_dir: Path, episode: int, st: Status, budget: float, import_mode
                 if hard:
                     note = "；".join(f"{x['id']} {x['name']} 不满足：{x['detail']}" for x in hard)[:1200]
                     continue
-                okf, devf, errf = R5.check_patch_facts(fact_cl, facts, cur, changed)
-                if not okf:
-                    note = errf or ("补丁触碰了剧情事实：" + json.dumps(devf, ensure_ascii=False)[:600])
-                    continue
-                f2 = all_fails(pre, c, episode, wd)
+                if any(d == "fact" for d, _ in targets):     # 修事实偏差：整集重核，偏差变少才算
+                    okf, devf, errf = R5.check_facts(fact_cl, facts, c, episode)
+                    if errf:
+                        note = errf
+                        continue
+                    f2 = fact_items(devf) + all_fails(pre, c, episode, wd)
+                else:
+                    okf, devf, errf = R5.check_patch_facts(fact_cl, facts, cur, changed)
+                    if not okf:
+                        note = errf or ("补丁触碰了剧情事实：" + json.dumps(devf, ensure_ascii=False)[:600])
+                        continue
+                    f2 = fitems + all_fails(pre, c, episode, wd)
                 if len(f2) < len(fails):
                     accepted = (c, f2, len(changed))
                     break
-                note = f"补丁后代码判定失败项没有变少（{len(fails)} → {len(f2)}）"
+                note = f"补丁后失败项没有变少（{len(fails)} → {len(f2)}）"
             if accepted:
                 cur, fails, n = accepted
+                fitems = [f for f in fails if f[0] == "fact"]
                 (run_dir / f"P4_ep{episode:02d}.code{rnd}.md").write_text(cur, encoding="utf-8")
             hist.append({"round": rnd, "targets": [f"{d}#{u['id']}" for d, u in targets], "accepted": bool(accepted),
                          "code_fails": len(fails), "note": "" if accepted else note[:300]})
@@ -410,6 +463,9 @@ def run_post(run_dir: Path, episode: int, st: Status, budget: float, import_mode
         hist.append({"stop": str(e)})
     st.stage("code", "代码判定 + 补丁", "ok" if not fails else "fails_left", "code", fails=len(fails), history=hist,
              detail=[f"{d}#{u['id']} {u['why'][:120]}" for d, u in fails])
+    # SENTINEL S12（总调度 03:1x）：新稿的代码判定失败数 + 条目 id；尺子离散度
+    rub_fail = [f"{d}#{u['id']}" for d, u in fails if d not in ("p4", "fact")]
+    st.set(rubric_code_fail={"n": len(rub_fail), "ids": rub_fail}, ruler_sigma=None)
     # 新尺子打分 + noise_stop
     sc, ns = None, {}
     try:
@@ -417,6 +473,10 @@ def run_post(run_dir: Path, episode: int, st: Status, budget: float, import_mode
         sc = R5.score_r6(judges, cur, episode, pre, calls, "final", wd)
         if sc:
             ns = POL.noise_stop([sc.get("judge_sums") or []])
+            js_ = [float(x) for x in (sc.get("judge_sums") or [])]
+            if len(js_) > 1:
+                import statistics
+                st.set(ruler_sigma=round(statistics.pstdev(js_), 3))     # 本次 7 个评审各自总分的标准差（单次打分内）
             st.d["score_trajectory"].append({"at": time.strftime("%F %T"), "sum": H._sum(sc), "judge_sums": sc.get("judge_sums"),
                                              "noise_stop": ns, "per_dim": {k: v["score"] for k, v in sc["scores"].items()}})
         st.stage("score", "新尺子打分", "ok" if sc else "error", "api_model", sum=H._sum(sc) if sc else None, noise_stop=ns,
@@ -487,6 +547,12 @@ def run_post(run_dir: Path, episode: int, st: Status, budget: float, import_mode
 
 def cmd_run(a) -> int:
     run_dir = Path(a.run_dir) if Path(a.run_dir).is_absolute() else ROOT / a.run_dir
+    AG = _load("autoflow_agent", "tools/script_rsi/autoflow_agent.py")
+    be = a.backend or AG.backend()
+    if be == "claude_agent":       # L-109：测试期写作 / 评审都交 agent，不调外部 API
+        d = AG.run(run_dir, a.episode, a.import_mode)
+        print(json.dumps({k: d.get(k) for k in ("verdict", "awaiting", "next_action")}, ensure_ascii=False, default=str))
+        return 0
     if a.season_cap:
         idx_p = run_dir / STATUS
         if not idx_p.exists():
@@ -501,7 +567,9 @@ def cmd_run(a) -> int:
                 print(json.dumps({"verdict": "season_budget_unknown", "why": "有集的状态文件读不到"}, ensure_ascii=False))
                 return 2
             season = float(sv)
-        if season + a.budget > a.season_cap:
+        ep_p = run_dir / f"autoflow_ep{a.episode:02d}.json"      # 续跑：本集已花的已经算在 season 里，--budget 是本集总额
+        prior_ep = float(json.loads(ep_p.read_text(encoding="utf-8")).get("usd_total") or 0) if ep_p.exists() else 0.0
+        if season - prior_ep + a.budget > a.season_cap:
             print(json.dumps({"verdict": "season_budget_stop", "season_usd": season, "cap": a.season_cap}, ensure_ascii=False))
             return 2
     st = Status(run_dir, a.episode, a.budget)
@@ -617,6 +685,8 @@ def main(argv=None) -> int:
     r.add_argument("--budget", type=float, default=None, help="默认 config/policies/budget.yaml writing_episode_cap_usd")
     r.add_argument("--import", dest="import_mode", choices=["dry", "live"], default="dry")
     r.add_argument("--owner-ok", action="store_true", help="项目方已在页面点选“导入”（L-098 闸门：只此一次点选）")
+    r.add_argument("--backend", choices=["claude_agent", "api"], default=None,
+                   help="写作后端；默认读 config/llm_providers.json writer_backend（L-109：测试期 claude_agent）")
     r.add_argument("--season-cap", type=float, default=None, help="整季写作上限（如 L-104 的 $8）；已花 + 本集预算超出就不开跑")
     q = sub.add_parser("sequel-brief", help="续季 Brief：项目方原话（owner_quote.txt）+ 上一季原文摘录 + 旧剧本素材 + 系统硬约束；并登记 run")
     q.add_argument("--run-dir", required=True)

@@ -115,14 +115,41 @@ def extract_facts(client, pre: str, chunk: str, ep: int) -> dict:
     raise RuntimeError(f"事实表抽取 3 次都不可信：{last}")
 
 
+# K-WRT-H10（总调度 11-02 03:3x 定 A）：每集服装 / 造型不是剧情事实（第一季本来按集切换造型 A / B / C；项目方第二季原话“更加暴露点的版本”）。
+# 是事实：身份、名字、年龄（≥22）、发色发型、脸（林晚 = L-086 身份脸）、水晶甲等标志性固定特征、人物关系、已发生的剧情。
+# 同一集里没写换装却变了衣服仍是缺陷——由代码判定 consistency#4 / #5（rubric_code）查，不归事实核对。
+WARDROBE = re.compile(r"造型|服装|穿着?|衣|裙|衫|裤|鞋|靴|高跟|外套|西装|束腰|风衣|毛衣|卫衣|内衣|围裙|手套|袜|配饰|首饰|项链|手链|耳环|乳贴")
+FIXED_TRAIT = re.compile(r"发色|发型|头发|蓝发|脸|身份脸|水晶甲|指甲|疤|年龄|岁|身高|名字|身份")
+
+
+CHANGE_WORD = re.compile(r"改|变|不是|换成|写成|缺|未出现|没有出现|消失|去掉")
+
+
+def _fixed_trait_changed(found: str) -> bool:
+    """改写稿描述里，同一分句同时出现固定特征词和“改 / 变 / 缺 / 未出现”→ 固定特征被动了"""
+    return any(FIXED_TRAIT.search(c) and CHANGE_WORD.search(c) for c in re.split(r"[，,；;。、]", found or ""))
+
+
+def drop_wardrobe(devs: list) -> list:
+    """去掉“只是服装 / 造型不同”的偏差；固定特征（发色、脸、水晶甲、年龄、身份）被改的照旧算偏差"""
+    out = []
+    for d in devs or []:
+        txt = f"{d.get('ref', '')} {d.get('found', '')}"
+        if d.get("kind") in ("setting", "event", "invented") and WARDROBE.search(txt) and not _fixed_trait_changed(d.get("found", "")):
+            continue
+        out.append(d)
+    return out
+
+
 def check_facts(client, facts: dict, chunk: str, ep: int) -> tuple[bool, list, str]:
     user = (f"【任务 B：核对改写稿】\n【事实表】\n{json.dumps(facts, ensure_ascii=False, indent=1)}\n\n"
             f"【ep{ep:02d} 改写稿】\n{H.shots_text(chunk)}")
     for _ in range(2):
         d, err = H._json_block(client(facts_system(), user))
         if d is not None and "deviations" in d:
-            dev = d.get("deviations") or []
-            return (bool(d.get("ok")) and not dev), dev, ""
+            raw_dev = d.get("deviations") or []
+            dev = drop_wardrobe(raw_dev)
+            return (not dev) and (bool(d.get("ok")) or len(dev) < len(raw_dev) or not raw_dev), dev, ""
     return False, [], f"事实核对回复格式不对：{err}"
 
 
@@ -786,8 +813,9 @@ def check_patch_facts(client, facts, chunk, changed) -> tuple[bool, list, str]:
     for _ in range(2):
         d, err = H._json_block(client(facts_system(), user))
         if d is not None and "deviations" in d:
-            dev = d.get("deviations") or []
-            return (bool(d.get("ok")) and not dev), dev, ""
+            raw_dev = d.get("deviations") or []
+            dev = drop_wardrobe(raw_dev)
+            return (not dev) and (bool(d.get("ok")) or len(dev) < len(raw_dev) or not raw_dev), dev, ""
     return False, [], f"补丁核对回复格式不对：{err}"
 
 

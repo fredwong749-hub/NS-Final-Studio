@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 DIMS = ["hook5s", "conflict", "turns", "gos", "show", "specificity", "pika", "consistency", "subtext", "endhook"]
 
@@ -104,6 +105,7 @@ COUNT = re.compile(r"\s*\d+\s*[件枚个条串只对副]\s*")
 def garment_tokens(kv: dict) -> list[str]:
     v = NEW_NOTE.sub("", kv.get("服装", ""))
     toks = [t.strip() for t in re.split(r"配|，|、|外罩|搭|,", _outer_strip(v)) if t.strip()]
+    toks = [re.sub(r"^新[：:]\s*", "", t) for t in toks]     # 断点④：不带括号的“新：<品名>”（S2 ep04）
     return [t for t in toks if GARMENT.search(t)]
 
 
@@ -155,11 +157,49 @@ def accessory_tokens(kv: dict) -> list[str]:
     items = _split_top(inner) if inner is not None else [x.split("，")[0] for x in re.split(r"、|；", _outer_strip(v))]
     out = []
     for it in items:
-        it = COUNT.sub("", ACC_PREFIX.sub("", re.sub(r"（.*", "", it.strip()))).strip()
+        it = COUNT.sub("", ACC_PREFIX.sub("", re.sub(r"（.*", "", re.sub(r"^新[：:]\s*", "", it.strip())))).strip()
         it = re.sub(r"(在颈间|在手上|在颈前)$", "", it)
         if len(it) >= 2 and not re.match(r"^(挂|在|戴|系|别)", it):
             out.append(it[-3:] if len(it) > 3 else it)
     return out
+
+
+# L-107（项目方 AI 运镜资料 docs/reference/camera_moves_20261102.md §四 避坑；DIRECTOR 词表 config/director/camera_moves.yaml）
+CAMERA_VOCAB = Path(__file__).resolve().parents[2] / "config" / "director" / "camera_moves.yaml"
+ORBIT = re.compile(r"Arc|Orbit|环绕|绕拍", re.I)
+DOLLY = re.compile(r"Push|Pull|Dolly|Zoom|推|拉", re.I)
+
+
+def camera_vocab() -> set[str] | None:
+    """词表里 enabled 的运镜名；词表还没出来 → None（只按避坑规则查）"""
+    if not CAMERA_VOCAB.exists():
+        return None
+    import yaml
+    d = yaml.safe_load(CAMERA_VOCAB.read_text(encoding="utf-8")) or {}
+    items = d.get("moves") or d.get("camera_moves") or d
+    out = set()
+    if isinstance(items, dict):
+        items = [{"name": k, **(v if isinstance(v, dict) else {})} for k, v in items.items()]
+    for it in items or []:
+        if isinstance(it, dict) and it.get("enabled", True) is not False:
+            for k in ("name", "en", "zh", "id"):
+                if it.get(k):
+                    out.add(str(it[k]).strip().lower())
+            out |= {str(x).strip().lower() for x in it.get("aliases") or []}     # 别名同样认（DIRECTOR 词表的 aliases）
+    return out
+
+
+def camera_problem(mv: str, cam_line: str, motion: str, vocab: set[str] | None) -> str:
+    """一镜的运镜问题（空 = 没问题）：多种运镜叠写；环绕 + 推拉冲突（避坑①）；Arc 幅度不是小；不在 enabled 词表里"""
+    if re.search(r"[+＋、/]|和|并|然后|先.*再", mv):
+        return "一镜写了两种以上运镜（复杂运动要拆成两镜，避坑③）"
+    if ORBIT.search(mv) and (DOLLY.search(mv) or DOLLY.search(motion.split("，")[0] if motion else "")):
+        return "环绕 + 推拉冲突（避坑①）"
+    if ORBIT.search(mv) and "幅度=小" not in cam_line:
+        return "环绕幅度不是小"
+    if vocab is not None and mv and mv.lower() not in vocab:
+        return f"运镜“{mv}”不在词表 enabled 里"
+    return ""
 
 
 def code_checks(chunk: str, shots: list, blocks: list[str], head: str, lint_codes: dict, imgs: list[str] | None = None) -> dict:
@@ -205,13 +245,14 @@ def code_checks(chunk: str, shots: list, blocks: list[str], head: str, lint_code
     seg_bad = [s.index for s, b in zip(shots, blocks) if len(_beats(b)) < 2 or abs(max(x[1] for x in _beats(b)) - int(s.duration or 0)) > 0.25]
     put("specificity", 2, not seg_bad, f"分拍没按秒切到镜长的镜：{seg_bad or '无'}")
     put("pika", 2, w11 == 0, f"QW-W11 {w11}")
-    cam_bad = []
+    cam_bad, vocab = [], camera_vocab()
     for s, b in zip(shots, blocks):
         cam = _field(b, "镜头运动")
-        mv = cam.split("｜")[0]
-        if not _size(_img(b)) or re.search(r"[+＋、/]|和|并", mv) or ("Arc" in mv and "幅度=小" not in cam):
-            cam_bad.append(s.index)
-    put("pika", 3, not cam_bad, f"景别缺失 / 多种运镜 / Arc 幅度不是小的镜：{cam_bad or '无'}")
+        mv = cam.split("｜")[0].strip()
+        why = camera_problem(mv, cam, _field(b, "motion"), vocab)
+        if not _size(_img(b)) or why:
+            cam_bad.append(f"{s.index}{('（' + why + '）') if why else '（景别缺失）'}")
+    put("pika", 3, not cam_bad, f"景别缺失 / 运镜问题的镜：{cam_bad or '无'}")
     lk = [s.index for s, b in zip(shots, blocks) if LOOK_CAMERA.search(b)]
     a5 = int(lint_codes.get("QW-A5", 0))
     put("pika", 4, not lk and a5 == 0 and not miss1, f"看镜头 / 回头写法的镜 {lk or '无'}；QW-A5 {a5}；img 视线缺失 {miss1 or '无'}")
@@ -333,3 +374,76 @@ def episode_issues(ep, text: str, lint_codes: dict | None = None) -> list[tuple[
         return [("structure", f"镜头块 {len(blocks)} 个与解析出的镜头 {len(shots)} 个对不上，无法逐条核对")]
     cc = code_checks(chunk, shots, blocks, head, lint_codes or {})
     return [(f"{d}#{i}", why) for d in DIMS for i, (ok, why) in cc[d].items() if not ok]
+
+
+# ------------------------------------------------------------------ 镜头块 v2 + 【灯光】（K-WRT-805 / 806，DIRECTOR r4 / L-111；第二季起）
+# 单一来源：config/director/shot_spec_v2.yaml（segments[].md_label、required）、config/director/lighting.yaml（schemes[].id / zh、sources.*.zh）、
+# config/director/lenses.yaml（lenses[].id / zh）。DIRECTOR 确认写法 (a)：每段单独一行、字段标签、顺序固定；**镜头** 与 **声音** 可缺。
+_DIR = Path(__file__).resolve().parents[2] / "config" / "director"
+SIDE_WORDS = re.compile(r"左侧|右侧|上方|身后|正面|左边|右边|头顶|背后|侧面|画面左|画面右")
+RATIO = re.compile(r"\d+\s*[:：]\s*\d+")
+KELVIN = re.compile(r"\d{4}\s*K|暖|冷")
+
+
+def _yaml(name: str):
+    import yaml
+    return yaml.safe_load((_DIR / name).read_text(encoding="utf-8")) or {}
+
+
+def v2_spec() -> tuple[list[tuple[str, str, bool]], dict]:
+    """→ ([(段 id, md_label, 必填)], 灯光词表)"""
+    spec = _yaml("shot_spec_v2.yaml")
+    segs = [(s["id"], s.get("md_label", ""), bool(s.get("required"))) for s in spec.get("segments") or []]
+    light = _yaml("lighting.yaml")
+    return segs, light
+
+
+def uses_v2(blocks: list[str]) -> bool:
+    """第二季起的写法：任一镜出现 **机位与景别**： 就按 v2 判（第一季稿不判，由导演层自动补，标 auto）"""
+    return any("**机位与景别**：" in b for b in blocks)
+
+
+def v2_checks(shots: list, blocks: list[str]) -> dict:
+    """→ {1: (ok, 说明), 2: (ok, 说明)}：① 七段（必填五段）齐全且顺序固定；② 【灯光】是方案名，或三要素（动机光源 + 方向、布光比、色温）齐全，
+    且动机光源词在本镜 **机位与景别** / **构图** / img / 场景细节里出现过"""
+    segs, light = v2_spec()
+    schemes = {str(s.get("zh", "")).strip() for s in light.get("schemes") or []} | {str(s.get("id", "")).strip() for s in light.get("schemes") or []}
+    src_words = [w for v in (light.get("sources") or {}).values() for w in (v.get("zh") or [])]
+    miss, order_bad, light_bad = [], [], []
+    for s, b in zip(shots, blocks):
+        lines = b.split("\n")
+        pos = {}
+        for sid, lab, req in segs:
+            idx = next((i for i, ln in enumerate(lines) if lab and ln.startswith(lab)), None)
+            if idx is None:
+                if req:
+                    miss.append(f"镜{s.index}缺{lab.strip('*：')}")
+            else:
+                pos[sid] = idx
+        got = [sid for sid, _lab, _r in segs if sid in pos]
+        if [pos[x] for x in got] != sorted(pos[x] for x in got):
+            order_bad.append(s.index)
+        lab_l = next((lab for sid, lab, _r in segs if sid == "lighting"), "**灯光**：")
+        lt = next((ln[len(lab_l):].strip() for ln in lines if ln.startswith(lab_l)), "")
+        if not lt:
+            light_bad.append(f"镜{s.index}没写灯光")
+            continue
+        if any(x and x in lt for x in schemes):
+            continue
+        ctx = " ".join(ln for ln in lines if ln.startswith(("**机位与景别**", "**构图**", "**场景**")) or SHOT_HEAD.match(ln))
+        srcs = [w for w in src_words if w in lt]
+        probs = []
+        if not srcs:
+            probs.append("没写动机光源（词表 lighting.yaml sources）")
+        elif not any(w in ctx for w in srcs):
+            probs.append(f"动机光源“{srcs[0]}”在本镜画面 / 场景里没出现")
+        if not SIDE_WORDS.search(lt):
+            probs.append("没写光源方向（左侧 / 右侧 / 上方 / 身后 / 正面）")
+        if not RATIO.search(lt):
+            probs.append("没写布光比（如 3:1）")
+        if not KELVIN.search(lt):
+            probs.append("没写色温（K 值或暖 / 冷）")
+        if probs:
+            light_bad.append(f"镜{s.index}：" + "、".join(probs))
+    return {1: (not miss and not order_bad, f"缺段：{miss[:8] or '无'}；段顺序不对的镜：{order_bad or '无'}"),
+            2: (not light_bad, f"灯光问题：{light_bad[:8] or '无'}")}

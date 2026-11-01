@@ -16,6 +16,8 @@ import glob
 import json
 import mimetypes
 import os
+import shlex
+import sys
 import subprocess
 import threading
 import time
@@ -458,6 +460,20 @@ _sys.path.insert(0, str(ROOT / "services" / "agent"))
 from ns_agent.gpu_smi import MONITOR_QUERY as GPU_Q, parse_monitor as parse_gpu  # noqa: E402,F401
 
 
+GPU_PERIOD_S = 30     # 总调度 11-02 03:1x：GPU 采集放宽到 30 s，每台每拍一次合并调用
+
+
+def remote(host: str, script: str, timeout: int = 40) -> str:
+    """远程只走 tools/netfix/rssh.py 的常驻主连接（K-OPS-N07 / N09）：主连接不在立刻失败，不新建 ssh 握手；服务器侧 timeout + nice"""
+    sys.path.insert(0, str(ROOT / "tools" / "netfix"))
+    import rssh
+    try:
+        r = rssh.run(host, f"timeout {timeout - 5} nice -n 19 bash -c {shlex.quote(script)}", timeout=timeout)
+        return r.stdout.decode("utf-8", "replace") or r.stderr.decode("utf-8", "replace")[-300:]
+    except subprocess.TimeoutExpired:  # arch-ok: 看板只展示，超时写进 err 显示
+        return "超时（rssh 主连接）"
+
+
 def gpu_loop() -> None:
     while True:
         local = parse_gpu(run(["nvidia-smi"] + GPU_Q.split()[1:], 15))
@@ -469,7 +485,7 @@ def gpu_loop() -> None:
                 " echo '##UUID'; nvidia-smi --query-gpu=index,uuid --format=csv,noheader;"
                 f" echo '##PS'; ps -eo pid=,etimes=,args= | grep -E '{cfg['proc_grep']}' | grep -v grep | cut -c1-220"
             )
-            out = run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", host, script], 45)
+            out = remote(host, script, 40)
             parts = {"gpu": out, "apps": "", "uuid": "", "ps": ""}
             if "##APPS" in out:
                 parts["gpu"], rest = out.split("##APPS", 1)
@@ -506,7 +522,11 @@ def gpu_loop() -> None:
                                       "err": "" if gpus else out[-300:]}
         with LOCK:
             STATE["updated"]["gpu"] = time.time()
-        time.sleep(10)
+        time.sleep(GPU_PERIOD_S)
+
+
+REMOTE_MEDIA_S = 300
+REMOTE_MEDIA_T: dict = {}
 
 
 def media_loop() -> None:
@@ -555,7 +575,10 @@ def media_loop() -> None:
                 f"|$(find $d -type f -printf '%T@ %P\\n' 2>/dev/null | sort -n | tail -1)\""
                 for d in cfg["outputs"]
             )
-            out = run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", host, sh], 90)
+            if time.time() - REMOTE_MEDIA_T.get(host, 0) < REMOTE_MEDIA_S:   # 远端 find / du 较重：5 分钟一次（总调度 03:1x：看板不给服务器加负载）
+                continue
+            REMOTE_MEDIA_T[host] = time.time()
+            out = remote(host, sh, 90)
             rows = []
             for ln in out.splitlines():
                 p = ln.split("|")
@@ -609,6 +632,18 @@ def collect_alerts() -> dict:
             "down": st.get("down") or []}
 
 
+def collect_sentinel() -> dict:
+    """SENTINEL 工单（tools/sentinel，K-OPS-S03）：data/sentinel/open.json = 未关闭工单 + 负责方 + 持续时长；读不到如实报“未运行”"""
+    p = ROOT / "data/sentinel/open.json"
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:  # arch-ok: 看板只展示，读不到显示“SENTINEL 未运行 / 读不到”
+        return {"ok": False, "why": f"{type(e).__name__}", "issues": []}
+    d["ok"] = True
+    d["age_s"] = round(time.time() - p.stat().st_mtime)
+    return d
+
+
 def snapshot() -> dict:
     agents = collect_agents()
     if time.time() - LOCAL_PROCS["t"] > 20:
@@ -616,7 +651,7 @@ def snapshot() -> dict:
     with LOCK:
         st = json.loads(json.dumps(STATE))
     return {"now": time.time(), "agents": agents, "ledger": collect_ledgers(), "local_procs": LOCAL_PROCS["rows"],
-            "alerts": collect_alerts(), **st}
+            "alerts": collect_alerts(), "sentinel": collect_sentinel(), **st}
 
 
 SNAP_CACHE = {"t": 0.0, "data": None}
@@ -674,4 +709,7 @@ if __name__ == "__main__":
     threading.Thread(target=gpu_loop, daemon=True).start()
     threading.Thread(target=media_loop, daemon=True).start()
     print(f"NS 监控看板: http://127.0.0.1:{PORT}")
+    # Windows 上 SO_REUSEADDR 允许两个进程同绑 8810（11-02 03:1x 实测：00:27 起的旧看板 GPU 采集卡死 2.9 小时，新看板起来后请求仍落到旧进程）
+    # → 关掉 reuse，端口被占时直接报错退出，不起第二份（NS-Monitor.vbs 与自启守护同时拉起也安全）
+    ThreadingHTTPServer.allow_reuse_address = False
     ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()

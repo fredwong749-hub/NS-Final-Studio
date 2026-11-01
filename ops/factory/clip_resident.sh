@@ -5,6 +5,7 @@
 # 幂等：已在跑就不动。保活：外层循环，409（代码换了）/ 崩溃后 3 s 按仓库最新代码重启。不删任何文件。
 # 用法（服务器上）：bash ops/factory/clip_resident.sh gpu36 [status|stop]
 set -u
+export TZ=Asia/Tokyo
 SELF=$1; CMD=${2:-start}
 OFF=/root/work/fredw/offline_20261101; PROD=$OFF/repo; RL=/root/work/fredw/reflock
 BASE=/root/work/fredw/factory; mkdir -p $BASE/run $BASE/logs

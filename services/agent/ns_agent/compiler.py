@@ -737,12 +737,12 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
     if FR.hidden_words(frame_size) and not FR.lower_focus(shot.img_prompt, kept_triggers=img_kept):
         locks = [FR.filter_parts(lk, frame_size) for lk in locks]
         frags = [FR.filter_parts(fg, frame_size) for fg in frags]
-        img_body = FR.filter_parts(img_body, frame_size)
+        img_body = FR.filter_parts(img_body, frame_size, subjects=names)   # K-REN-901：删句保主语
     if frame_size:
         # K-REN-123（IMGGEN 第二轮）：特写按主体（脸 / 局部）写构图约束；脸部特写去掉站姿 / 全身分句
         subject = FR.closeup_subject(img_body, frame_size)
         if subject == "face":
-            img_body = FR.strip_fullbody(img_body)
+            img_body = FR.strip_fullbody(img_body, subjects=names)          # K-REN-901：删句保主语
         if subject in ("part", "object"):
             # REFLOCK 11-01（ep05-S3/S5、ep10-S8 局部大特写出成带脸的中景）：角色锁里的脸 / 发型 / 身材描写会把模型拉回人像，
             # 局部特写只留锁里与这个局部相关的分句（例：指甲）；锁一句都不剩就整条不放
@@ -752,6 +752,9 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
         # 原先按 names（在画 + 局部）计数，21 镜第二个人是局部（背影肩线 / 西装下摆）也被写了“两张脸都清晰入画、互相看着”，
         # 模型画出一张没有身份参考的脸。局部的人按剧本 cast 的部位写“只露出 X，不露脸”（剧本原文）
         faced, partial = FR.faced_people(shot, names)
+        # K-REN-902（IMGLAB 11-02）：脸部特写 + ≥2 人露脸 → 首句改双人近景构图（不再同时写“脸占六成”和“两张脸都入画”）
+        if FR.two_face_close_conflict(frame_size, subject, len(faced)) and FR.two_face_close_mode() == "two_shot_mcu":
+            framing_lead = FR.TWO_FACE_CLOSE_LEAD
         two_shot = FR.two_shot_clause(len(faced), subject)
         if two_shot:
             framing_lead = framing_lead + "，" + two_shot

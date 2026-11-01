@@ -38,10 +38,14 @@ sys.path.insert(0, str(Path(__file__).parent))
 OUT = ROOT / "data/autopilot/full_redo"
 
 
-def run_dir() -> Path:
-    """现行主 run 的目录（tools/autopilot/runs.py；K-OPS-W17 / K-OPS-S01 不写死 run_id）"""
+def run_dir(strict: bool | None = None) -> Path:
+    """现行主 run 的目录（tools/autopilot/runs.py；K-OPS-W17 / K-OPS-S01 不写死 run_id）。
+    strict 默认：在服务器工厂上（NS_FACTORY_HOST / OFFLINE_SELF，例如 episode_pipeline.remote_reset_redo 经 ssh 跑本脚本）
+    = True，runs.json 缺失 / 损坏直接 raise（K-OPS-F09 失败关闭）；笔记本上 = False（回退 primary）"""
     import runs as RUNS
-    return ROOT / "data/pipeline/runs" / RUNS.primary_run()
+    if strict is None:
+        strict = bool(os.environ.get("NS_FACTORY_HOST") or os.environ.get("OFFLINE_SELF"))
+    return ROOT / "data/pipeline/runs" / RUNS.primary_run(strict=strict)
 GATES = OUT / "gates.json"
 STATE = OUT / "state.json"
 PLAN = OUT / "plan.json"

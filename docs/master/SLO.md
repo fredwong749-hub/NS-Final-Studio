@@ -19,6 +19,6 @@
 | S12 | 剧本：代码判定失败项、尺子标准差 | 新稿 0 失败；σ ≤ 1 | rubric_code / ruler | HOLLYWOOD |
 | S13 | 等人决定：任何对象等总调度 / 项目方定；流水线断档（GPU 空、ready 0、pending 多） | 等人 ≤ 10 分钟；断档 0 | 登记表 waiting_for + nvidia-smi（总调度 02:4x 追加：02:22 gpu33 全 0% 根因 = 77 个首帧“等总调度定”） | DEBUG-RSI |
 
-探针实现：tools/sentinel/（K-OPS-S01…S06；阈值 config/policies/sentinel.yaml）；工单 data/sentinel/issues.jsonl，未关闭快照 data/sentinel/open.json，看板 :8810“工单”区。
+探针实现：tools/sentinel/（K-OPS-S02…S07；阈值 config/policies/sentinel.yaml）；工单 data/sentinel/issues.jsonl，未关闭快照 data/sentinel/open.json，看板 :8810“工单”区。
 
 总调度每拍只做三件事：看工单 → 按 G0 派单 → 核对上一批工单是否真的关闭（看探针数据，不看报告）。

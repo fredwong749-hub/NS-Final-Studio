@@ -40,8 +40,10 @@ from .comfy_client import ComfyClient, ComfyError, ComfyUnavailable
 
 ROOT = Path(os.environ.get("NS_PROJECT_ROOT") or Path(__file__).resolve().parents[3])  # T42：子进程可指向 projects/<slug>
 DATA = ROOT / "data"
-RENDERS = DATA / "renders"
-SCRIPT_JSON = DATA / "import" / "script_v2.json"
+# 多剧并行（DISTILL §0.1，K-OPS-E15）：一部剧一个 producer 进程；非主剧进程设 NS_RENDERS_DIR / NS_SCRIPT_JSON，
+# 渲染目录 data/renders/<run>/、导入稿 data/import/runs/<run>/script_v2.json，takes.json 跨剧绝不共用。不设 = 主剧原路径
+RENDERS = Path(os.environ["NS_RENDERS_DIR"]) if os.environ.get("NS_RENDERS_DIR") else DATA / "renders"
+SCRIPT_JSON = Path(os.environ["NS_SCRIPT_JSON"]) if os.environ.get("NS_SCRIPT_JSON") else DATA / "import" / "script_v2.json"
 
 IMAGE_SIZE = (1088, 1920)
 VIDEO_SIZE = (768, 1344)   # SOP S4 P-B3 锁定（短边 768、面积 ≤768×1344、32 的倍数）；旧值 576×1024

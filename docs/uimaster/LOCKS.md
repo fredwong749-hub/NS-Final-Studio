@@ -49,6 +49,7 @@
 
 `CONSENT: <文件 owner> -> <被授权 agent> : <路径或 glob> | <原话 / 日期>`
 
+- CONSENT: ITERAUDIT -> SYSARCH : tools/qa/ownership.yaml | 总调度 fredw-2b 11-02 03:2x 代录：“这两项授权你直接改 ownership.yaml（CONSENT 记我名下）”（只加 loops: 登记表 + 旧负责方 CHAINSPEC/PROMPT→HOLLYWOOD、INFRA→NETFIX、SERIES→AUTOPILOT 转交；备份 data/_quarantine/ownership.yaml.bak_sysarch_0320）
 - CONSENT: ITERAUDIT -> SYSARCH : tools/qa/iter_gate.py | 总调度 fredw-2b 11-02 03:1x 代录（ITERAUDIT 不在岗）：“iter_gate 的 A1 检查项也由你直接加，CONSENT 记我名下。”（只加 A1 一项）
 - CONSENT: 总调度 -> RESEARCH : docs/master/MASTER_PICTURE.md（只加 L-087 一行）, config/owner_decisions.yaml（只加 D-IMG-87a/b/c） | 总调度 fredw-2b 11-01 17:5x：“这两个文件总调度授权你改，写 CONSENT。”
 - CONSENT: REFLOCK -> RESEARCH : services/render_router/ns_render/unified_frame.py | 总调度 fredw-2b 11-01 代录：“GPU A/B 走方案 ②：给 frame-jobs 加 scope=ab 标记，不进 auto_current，不进 rescore，不进契约账本，产物放在独立目录……改 services/api 的 frame_jobs 和 producer 时要写 CONSENT（by 总调度 fredw-2b），在 LOCKS 登记，补测试。”
@@ -232,3 +233,10 @@ s_vqastart.ps1 归 LOCALGPU（已收工），CONSENT 写 LOCALGPU → VQAGATE”
 - CONSENT: DATAALIGN -> UIRSI : services/api/ns_api/app.py | by 总调度 fredw-2b 11-02 UIAUDIT 复核派单：“P1-1 /api/episodes takes_count 含已隔离版本”（只改 count / latest_take 两处，is_quarantined 同口径）
 - CONSENT: UIPIXEL -> UIRSI : apps/web/src/v3/pages/story.css | by 总调度 fredw-2b 11-02 02:5x：“#/script-create 加一个‘全流程自动’入口……页面按 r44 的整洁规格做”（只追加 af-* 样式）
 - CONSENT: CLEANUP -> DEBUG_RSI : tools/qa/data_parity.py（只加 D-REGCONS：读 data/producer/consistency.json） | by 总调度 fredw-2b 11-02 03:2x：“授权 CONSENT CLEANUP → DEBUG_RSI（L-098），由你在 data_parity.py 里读 consistency.json”
+- CONSENT: ASSETUX -> AUTOPILOT : services/api/ns_api/character_hub.py（只改 current_project：当前剧读 runs.json primary）；tests/test_character_hub_assetux.py（夹具补 runs.json） | by 总调度 fredw-2b 11-02 P1（UIAUDIT N1）：“授权你改 character_hub.py（ASSETUX 不在岗，CONSENT 记我名下）……顺便全仓搜一遍按修改时间猜当前剧的写法，一起改”（WORKFLOW 代录）
+- CONSENT: UIRSI -> AUTOPILOT : services/api/ns_api/story_runs.py（只改 _story_images / shot_asset_refs 的 run 排序）、services/api/ns_api/live.py（只改 _live_run 的 run 排序）；scene_assets.py（只改 run_candidates 的 run 排序） | by 总调度 fredw-2b 11-02 P1 同上：“全仓搜一遍……一起改”（WORKFLOW 代录）
+- CONSENT: DISTILL -> AUTOPILOT : tools/autopilot/flow.py（只改 World.__init__ 默认 run_id：None → runs.primary_run，K-OPS-W17） | by 总调度 fredw-2b 11-02 03:1x：“flow.py 的改动补授权 CONSENT DISTILL→AUTOPILOT，请写进 LOCKS 并告知 DISTILL 复核”（WORKFLOW 代录）
+- CONSENT: REFLOCK -> VQAGATE : tools/gen_contract/remote_score.py | by 总调度 fredw-2b 11-02 04:0x（L-098）：身份库 top-k，只改 face_refs 加 "<cid>@bN" 身份库参照；随 sv-05
+- CONSENT: ITERAUDIT -> DIRECTOR : tools/qa/ownership.yaml（owners.DIRECTOR 只加 config/director/**、data/ab/camera_moves/**） | by 总调度 fredw-2b 11-02 DIRECTOR r3（L-107）派单：“运镜词表 config/director/camera_moves.yaml（单一事实来源）”
+- CONSENT: REFLOCK -> DEBUG_RSI : services/render_router/ns_render/pipeline.py（只改 RENDERS / SCRIPT_JSON 可由 NS_RENDERS_DIR / NS_SCRIPT_JSON 覆盖，多剧并行 K-OPS-E15） | by 总调度 fredw-2b 11-02 02:4x：“总调度批准：producer 多 run 按 DISTILL 的接口说明实施……渲染目录分开”
+- CONSENT: REFLOCK -> IMGLAB : services/agent/ns_agent/framing.py（strip_fullbody / filter_parts 删句保主语 F1、特写 + ≥2 人露脸冲突 F3）、services/agent/ns_agent/compiler.py（compile_shot 正文删句处）、services/agent/ns_agent/frame_job.py（只在需要接 F3 冲突判定处）、tests/test_subject_binding.py（新建，102 镜主语保留回归）；备份 data/_quarantine/imglab_20261102/ | by 总调度 fredw-2b 11-02 04:3x：“F1–F3 由 IMGLAB 直接改（framing.py / compiler.py / frame_job）……写进 LOCKS，并告知 IMGFIX”；冻结期（lock_guard rc≠0）不改

@@ -49,12 +49,12 @@ function history(c: CandShots | null, shot: string): Hist[] {
 type Check = { id: string; title: string; status: string | null; detail: string };
 type Checks = { items: Check[]; judge: { verdict: string | null; reasons: string[] } | null; identity?: Record<string, number> };
 // 出场人物（r43 项目方 02:4x“缺乏很多细节，比如人物什么的”）：身份脸 + 本镜造型设定图 + 这张图里的身份相似度（Q1）
-type Who = { id: string; name: string; face: string | null; sheet: string | null; look: string | null };
+type Who = { id: string; name: string; face: string | null; sheet: string | null; look: string | null; lookId: string | null };
 function castOf(d: ShotRefsV1 | null): Who[] {
   return (d?.characters ?? []).map((c) => {
     const imgs = ((c.effective?.images ?? []) as { file?: string; url?: string | null; kind?: string }[]).filter((i) => typeof i === "object");
     const pick = (k: string) => { const i = imgs.find((x) => x.kind === k); return i ? i.url ?? fileUrl(i.file) : null; };
-    return { id: c.id, name: c.name, face: pick("face"), sheet: pick("sheet"), look: c.effective?.look_name ?? null };
+    return { id: c.id, name: c.name, face: pick("face"), sheet: pick("sheet"), look: c.effective?.look_name ?? null, lookId: c.effective?.look ?? null };
   });
 }
 // 检查项大白话名（GEN_CONTRACT postflight 的 Q 编号）
@@ -83,7 +83,20 @@ export function SeasonDrawer({ shot, sum, status, meta, onClose }: { shot: strin
     setCands(null);
     setChecks(null);
     setCast(null);
-    apiV1.shotRefs(shot).then((d) => alive && (setRefs(refImgs(d)), setCast(castOf(d)))).catch(() => alive && (setRefs([]), setCast([])));
+    apiV1
+      .shotRefs(shot)
+      .then(async (d) => {
+        if (!alive) return;
+        setRefs(refImgs(d));
+        const ws = castOf(d);
+        setCast(ws);
+        // r44（总调度：林晚造型 A 明明有 sleevefix 设定图却显示“无设定图”）：本镜设定图按 asset_refs.sheet_of（继承链）取，与出图同一张
+        const pairs = ws.filter((w) => w.lookId).map((w) => `${w.id}:${w.lookId}`).join(",");
+        if (!pairs) return;
+        const r = await fetch(`/api/season/sheets?pairs=${encodeURIComponent(pairs)}`).then((x) => (x.ok ? (x.json() as Promise<{ sheets: Record<string, string | null> }>) : null)).catch(() => null);
+        if (alive && r) setCast(ws.map((w) => ({ ...w, sheet: (w.lookId ? r.sheets[`${w.id}:${w.lookId}`] : null) ?? w.sheet })));
+      })
+      .catch(() => alive && (setRefs([]), setCast([])));
     loadCandidates(epOf(shot)).then((c) => alive && setCands(c)).catch(() => alive && setCands({}));
     return () => {
       alive = false;

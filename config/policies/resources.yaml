@@ -41,7 +41,7 @@ items:
   pause_max_s:
     value: 180
     source: 总调度 11-02 01:04（NETFIX 切线路全局 pause 12 分钟未恢复导致 GPU 空转）；总调度批复 DISTILL r1（D5 口径）
-    enforced_by: tools/autopilot/policy.py:pause_decision（唯一实现；producer 每拍 + run.py guard 都调它）
+    enforced_by: tools/autopilot/policy.py:pause_decision（唯一实现）→ tools/autopilot/producer.py 每拍执行（K-OPS-E08，DEBUG-RSI）+ run.py guard
     status: code_reads
     owner: DISTILL（判定函数）/ DEBUG-RSI（producer 每拍执行，已接手 producer 所有权）
     require_fields: [reason_kind, expires_at]

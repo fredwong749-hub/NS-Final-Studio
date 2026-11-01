@@ -56,17 +56,36 @@ def test_lip_redo_flags_onscreen_tts_fallback_only():
 
 
 # ---- K-EDT-811：运镜在 Pika 范围内（一种、小幅、不拉远 / 环绕；大动作不叠运镜）
-def test_camera_never_banned_and_big_action_static():
+def test_camera_only_enabled_vocab_moves():   # K-EDT-811 / L-107：只从运镜词表 enabled 的选，decider=code
+    CN = CP._cn()
     ep = {"number": 1, "shots": [_shot(1, motion="x，camera pull out 缓慢拉远，她坐着"),
                                  _shot(2, motion="x，camera arc shot 小幅度环绕，她站起走向门口"),
                                  _shot(3, cue="推到高点，强度3", motion="x，static shot，她看着他")]}
+    for s in ep["shots"]:
+        s["img_prompt"] = "lnwan01，中景，侧面机位"
     p = CP.plan_episode(ep)
     for s in p:
-        assert not CP.BANNED_MOVES.search(s["camera"]["clause_en"])
+        assert CN.is_enabled(s["camera"]["move"]) and s["camera"]["decider"] == "code"
         assert "slow" not in s["camera"]["clause_en"].lower()
     assert p[1]["camera"]["move"] == "static"         # 大动作
-    assert p[2]["camera"]["move"] == "push_small"     # 高点小幅推近
-    assert any("超出 Pika" in f for f in p[0]["flags"])
+    if CN.is_enabled("push_in"):
+        assert p[2]["camera"]["move"] == "push_in"    # 高点：第一个 enabled 的高点运镜
+    if not CN.is_enabled("pull_out"):
+        assert any("disabled" in f for f in p[0]["flags"])
+
+
+def test_vocab_schema():   # 词表每条必有字段；enabled 的必须有模板和 A/B 结果（baseline / pass）
+    import yaml
+    v = yaml.safe_load((ROOT / "config/director/camera_moves.yaml").read_text(encoding="utf-8"))
+    ids = [m["id"] for m in v["moves"]]
+    assert len(ids) == len(set(ids)) and "static" in ids
+    for m in v["moves"]:
+        assert {"zh", "en", "aliases", "enabled", "reason", "ab", "conflicts", "split"} <= set(m), m["id"]
+        if m["enabled"]:
+            assert m["template"] and m["template"].startswith("The camera") and m["ab"]["status"] in ("baseline", "pass"), m["id"]
+            assert "slow" not in m["template"].lower()
+        for c in m["conflicts"]:
+            assert c in ids, (m["id"], c)
 
 
 # ---- K-EDT-812 / 814：转场按衔接字段；J / L-cut
@@ -172,18 +191,21 @@ def test_finish_disabled_is_noop(monkeypatch, capsys):
 
 
 # ---- K-REN-801（待总调度定接线）：运镜句规范化映射
-def test_camera_norm_mapping(monkeypatch):
+def test_camera_norm_mapping(monkeypatch):   # K-REN-801：按词表 enabled 判定（不写死）
     sys.path.insert(0, str(ROOT / "services" / "agent"))
     from ns_agent import camera_norm as CN
+    monkeypatch.setattr(CN, "is_enabled", lambda mid: mid in ("static", "push_in"))
     f = lambda c, big=False: CN.norm_clause(c, big)   # noqa: E731
     assert f("pulls out with small amplitude") == "holds a static shot"
     assert f("performs an arc shot with small amplitude") == "pushes in with small amplitude"
     assert f("performs an arc shot with small amplitude", True) == "holds a static shot"
     assert f("pushes in slowly with medium amplitude") == "pushes in with small amplitude"
-    assert f("holds a static shot") == "holds a static shot"
+    assert f("tilts up at slow speed") == "holds a static shot"            # tilt_up 未通过 A/B → 固定
+    monkeypatch.setattr(CN, "is_enabled", lambda mid: mid in ("static", "push_in", "tilt_up"))
+    assert f("tilts up at slow speed") == "tilts up with small amplitude"  # 通过后按模板
     monkeypatch.setattr(CN, "enabled", lambda: True)
     t, ch = CN.normalize_video_prompt("x. The camera pulls out with small amplitude as she sits. y", "")
-    assert "holds a static shot as she sits" in t and len(ch) == 1
+    assert "holds a static shot as she sits" in t and len(ch) == 1 and ch[0]["move"] == "static" and ch[0]["rule"] == "K-REN-801"
 
 
 # ---- K-EDT-817：交付闸门（decider = code）
@@ -246,3 +268,22 @@ def test_a3_v7_caliber_1102():   # 总调度 11-02 V7 口型口径：台词段�
     assert FS.v7_pass({"mode": "sync", "corr": 0.12, "open_frac": 0.1, "aperture_p90": 0.05, "th": th}) is False
     assert FS.v7_pass({"status": "未测"}) is None and FS.v7_pass({"mode": "closed", "status": "通过"}) is None
     assert FS.v7_pass({"caliber": "v7-1102", "status": "不通过", "corr": 0.9, "th": th}) is False   # VQAGATE 新版输出优先
+
+
+def test_camera_ab_judge_and_writeback(tmp_path):   # K-REV-806：A/B 判定（decider=code）与词表回写只动三行
+    import camera_ab as CA
+    good = {"score": {"mean": 0.9, "cuts": [], "identity": {"林晚": {"sface_med": 0.55, "sface_p10": 0.45}},
+                      "v6": {"dup_side_frac": 0.0, "extra_hand_frac": 0.0, "people": 1}, "J4": 1.1, "J4_z": 1.0, "size_measured": "中景"}}
+    assert CA.judge(good)["pass"] is True
+    bad = json.loads(json.dumps(good))
+    bad["score"]["v6"]["dup_side_frac"] = 0.4
+    bad["score"]["size_measured"] = "全景"
+    j = CA.judge(bad)
+    assert j["pass"] is False and any(f.startswith("AB3") for f in j["fails"]) and any(f.startswith("AB5") for f in j["fails"])
+    assert CA.judge({"score": {}})["pass"] is None
+    txt = (ROOT / "config/director/camera_moves.yaml").read_text(encoding="utf-8")
+    new = CA.set_move(txt, "arc", False, {"status": "fail"}, "Pika 环绕易分身")
+    import yaml
+    a = next(m for m in yaml.safe_load(new)["moves"] if m["id"] == "arc")
+    assert a["enabled"] is False and a["ab"]["status"] == "fail" and a["reason"] == "Pika 环绕易分身"
+    assert len(new.splitlines()) == len(txt.splitlines())

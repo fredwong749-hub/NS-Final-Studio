@@ -16,7 +16,7 @@
 
 **首扫基线（11-02 02:43，535 个代码文件）**：no_timeout 80、direct_ssh 35（未登记 1）、def_ssh 15、hard_run 157（只算代码里的字符串，注释 / docstring 不算；ARCH_MAP 的 476 处含文档和配置）、hard_path 137、silent_read 317、nonatomic_json 245、untracked_code 36、unowned 243、**未入版却被 import 12 个**。
 
-待办：把 `arch_scan --files --check` 接进 iter_gate（新检查项 A1）和 system_version cut 的闸门——iter_gate / system_version 分属 ITERAUDIT / FACTORY，需总调度定（见文末）。
+已接：system_version cut 闸门（FACTORY，sv-04 起生效）；iter_gate A1（SYSARCH，CONSENT 见 docs/uimaster/LOCKS.md，sv-05 生效）。新增：K-OPS-E14 pipe_gate 项（闸门命令接管道吃退出码；现 0 处）；`--tighten` 只收紧基线；`# arch-ok:` 豁免也适用于子进程 timeout；解析失败的文件本次不判。
 
 ---
 
@@ -24,7 +24,7 @@
 
 | # | 问题（ARCH_MAP §9） | 负责 | 验收标准 | 依赖 | 状态 |
 |---|---|---|---|---|---|
-| 1 | 运行中的代码不在版本里 | FACTORY（cut）+ 各 owner 入版 | `arch_scan` 的 untracked_imported = 0；git status 里代码目录 `??` 的 .py = 0；从 sv tag 干净检出能 import producer / ns_api / canvas | — | **恶化**：12 个（02:43），比审计时多 decisions_guard、sentinel/store、runs、script_autoflow、sheet_intake、camera_norm |
+| 1 | 运行中的代码不在版本里 | FACTORY（cut）+ 各 owner 入版 | `arch_scan` 的 untracked_imported = 0；git status 里代码目录 `??` 的 .py = 0；从 sv tag 干净检出能 import producer / ns_api / canvas | — | **待验（基本关闭）**：sv-04（03:06 cut 成功）后 untracked_imported 12 → 1；剩 services/api/ns_api/current_run.py（WORKFLOW 新文件，已派） |
 | 2 | 决策覆盖文件读不到静默放行 | FACTORY（F09 decisions_guard）+ REFLOCK（asset_refs 缺文件报错） | producer 派单前 problems() 非空即拒派；asset_refs 9 处覆盖读改成缺文件报错；服务器 run.json 存在 | #1（decisions_guard 未入版）；G20 | 进行中（F09 代码在笔记本工作树，服务器未部署；**服务器两台仍缺 config/pipeline/run.json、runs.json**，02:43 实测） |
 | 3 | 服务器常驻无本机守护 | FACTORY | producer / night / fwd 由 systemd 或 cron 拉起；kill -9 后 ≤60 s 自动恢复（实测） | G9 | 待办（02:43 实测 gpu33 无 crontab；gpu36 crontab 空；producer 仍 nohup） |
 | 4 | 跳板 + WSL 主连接单点 | NETFIX | 主连接断后 ≤30 s 自愈（S4）；rssh 失败有探针报警 | — | 待办 |
@@ -34,10 +34,10 @@
 | 8 | 配置声明 ≠ 实际进程 | VQAGATE + SENTINEL（G26 探针） | 声明 vs 实际探针 0 差异 | — | 待办 |
 | 9 | 生产仍走隧道派单 | FACTORY | IMAGE_LANES 从 hosts.json 读；服务器 fwd.py 停掉后照常出图 | G1 | 待办（02:43 两台 fwd.py 仍在跑） |
 | 10 | 笔记本开机靠人工拉起 | WORKFLOW + SENTINEL | 计划任务注册；重启笔记本后 ns_api / vite / supervisor 自动起 | — | 待办 |
-| 11 | 写死 run_id 和路径 | WORKFLOW（读者改走 runs.py）+ DISTILL（lint）；SYSARCH 做无主部分 | arch_scan hard_run 只降不升，目标 = 0（runs.py 除外） | runs.py 入版（#1） | 进行中（runs.py 已有，未入版；基线 157 处） |
+| 11 | 写死 run_id 和路径 | WORKFLOW（读者改走 runs.py）+ DISTILL（lint）；SYSARCH 做无主部分 | arch_scan hard_run 只降不升，目标 = 0（runs.py 除外） | runs.py 入版（#1） | 进行中：runs.py 已入 sv-04、加 strict；hard_run 157 → 125（WORKFLOW resident_sync 17 / image_jobs / register_takes / flow；SYSARCH full_redo / repair_chain / push_assets_json） |
 | 12 | 重启 / 修隧道多入口 | NETFIX（隧道）+ DEBUG-RSI（restart_queue） | infra_watchdog 无 taskkill / start_loop 段；gpu3_tunnels.py 隔离；重启只走 restart_queue | — | 待办；SYSARCH 可代做 §4-3 |
 | 13 | ssh 调用分散 | NETFIX；SYSARCH 做迁移 | arch_scan direct_ssh、def_ssh 降到只剩登记的必需项；ssh_unlisted = 0 | — | 进行中（基线 35 / 15；ssh_unlisted 1：apps/web/e2e/gpuview/crosscheck.py） |
-| 14 | 缺超时和回压 | DEBUG-RSI / DIRECTOR / UIRSI；SYSARCH 做无主部分 | arch_scan no_timeout = 0；ns_api 队列有上限 | — | 进行中（基线 80） |
+| 14 | 缺超时和回压 | DEBUG-RSI / DIRECTOR / UIRSI；SYSARCH 做无主部分 | arch_scan no_timeout = 0；ns_api 队列有上限 | — | 进行中：80 → 72（SYSARCH 补核心链 assemble / skin_guard / voice_convert / motion_qc / pipeline.extract_last_frame；剩余无主的多为待隔离的实验脚本） |
 | 15 | 所有权表脱节 | ITERAUDIT（总调度定） | arch_scan unowned = 0；HOLLYWOOD / IMGFIX / SENTINEL / SYSARCH / FACTORY 有条目；docs/AUTOPILOT.md 一个 owner | — | 待办（基线 243 个代码文件无主） |
 
 ## 2. 目标架构差距 G1–G26
@@ -87,12 +87,12 @@
 
 | # | 项 | 涉及 owner | 验收 | 状态 |
 |---|---|---|---|---|
-| 4-1 | ssh 统一到 rssh.run（13 个自写 def ssh 先改） | NETFIX + 各文件 owner | arch_scan def_ssh 15 → 0（rssh/rsh/shim/supervisor 外） | 待办 |
+| 4-1 | ssh 统一到 rssh（14 个自写 def ssh 改成一行调 rssh.run_retry） | NETFIX（接口）+ 各文件 owner | arch_scan def_ssh 14 → 0（薄包装不算；tunnel_supervisor / inject_test / bw_test 例外） | 接口已定（NETFIX 03:3x）：run_retry(host, cmd, input, timeout=900, tries=4, backoff_s≥10, text)；服务器上 OFFLINE_SELF 调本机退回 bash -c、跨机 rc=255（服务器间无互信，跨机只走 HTTP）；remote_score full_score 要显式给足 timeout。sv-05 解冻后 NETFIX 先加，SYSARCH 再逐文件替换 |
 | 4-2 | 车道表收成 config/factory/hosts.json | FACTORY（D1 主导） | 同 G1；SYSARCH 只做读者改造 | 等 FACTORY 定 schema |
-| 4-3 | 退役 tunnel*.sh / gpu3_tunnels.py / infra_watchdog 修隧道段 | NETFIX | K-OPS-N01；infra_watchdog 无 taskkill ssh | 待办 |
-| 4-4 | 删繁就简里能隔离的 → data/_quarantine | 各 owner | quarantine_refcheck 0 引用 | 待办 |
-| 4-5 | 80 处 subprocess 补 timeout（先无主文件，再核心链路 19 处由 owner） | DEBUG-RSI / DIRECTOR / UIRSI | arch_scan no_timeout 80 → 0 | 待办 |
-| 4-6 | series10_v1 写死 157 处改读 runs.py | WORKFLOW（runs.py） | arch_scan hard_run → 0 | 等 runs.py 入版 |
+| 4-3 | 退役 tunnel*.sh / gpu3_tunnels.py / infra_watchdog 修隧道段 | NETFIX | K-OPS-N01；infra_watchdog 无 taskkill ssh | 排期：sv-05 解冻后 NETFIX 与 run_retry 一起改（kill / start_loop 段 + :151 arch-ok） |
+| 4-4 | 删繁就简里能隔离的 → data/_quarantine | 各 owner | quarantine_refcheck 0 引用 | 进行中：push_assets_json.py 已隔离（WORKFLOW 同意） |
+| 4-5 | 80 处 subprocess 补 timeout（先无主文件，再核心链路 19 处由 owner） | DEBUG-RSI / DIRECTOR / UIRSI | arch_scan no_timeout 80 → 0 | 进行中 72 |
+| 4-6 | series10_v1 写死 157 处改读 runs.py | WORKFLOW（runs.py） | arch_scan hard_run → 0 | 进行中 125（WORKFLOW 复核通过；服务器侧 strict=True） |
 
 ## 5. 架构闸门审查记录（diff 级）
 
@@ -109,7 +109,8 @@
 | 02:43 | 新增直接起 ssh 却没登记：apps/web/e2e/gpuview/crosscheck.py | arch_scan ssh_unlisted |
 | 02:44 | knowledge 编译失败：K-WRT-705（knowledge/rules/writer_camera.yaml:238）section “人物字段” 不在允许列表 → compile.py 不出生成物，所有 loop 的 K1 检查都会挂 | compile.py --check |
 | 02:5x | 基线写下后约 10 分钟，棘轮又抓到 6 处新退化：tools/sentinel/{sentinel,build_ui_flows}.py 新文件未入版，probes.py 静默读取 7→8，build_ui_flows 非原子写 JSON；tools/qa/identity_face_check.py 新增 1 处静默读取 | arch_scan --check |
+| 03:1x | sv-04 后：新未入版被 import 的 current_run.py（WORKFLOW）；tools/sentinel/replay.py 非原子写；tools/qa/lock_guard.py 无主 + 子进程无 timeout（DEBUG-RSI 将加 --timeout）；sv-04 前例外收进基线 3 处（identity_face_check、sentinel.py:103、build_ui_flows）记债 | arch_scan --check |
 
 ## 进度
 
-关闭 0 / 47（0%）。进行中 8。机制（§0 巡检 + 棘轮）已落地：tools/qa/arch_scan.py、tests/test_arch_scan.py（10 过）、K-OPS-S01。
+关闭 0 / 47（0%）；待验 1（#1）；进行中 10。基线（03:1x 收紧后）：no_timeout 72、hard_run 125、untracked_code 0、untracked_imported 0（新 1 个已派）、pipe_gate 0。

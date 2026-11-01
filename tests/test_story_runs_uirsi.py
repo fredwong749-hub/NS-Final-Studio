@@ -90,6 +90,14 @@ def env(tmp_path, monkeypatch):
     SR._threads.clear()
 
 
+def _wjson(path, obj, **kw):
+    """原子写 JSON（先写临时文件再 os.replace；arch_scan nonatomic_json / K-OPS-S01）"""
+    import os
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(obj, **kw), encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def _start(c, SR, upto="P3"):
     r = c.post("/api/story-runs", json={"brief": BRIEF, "episode": 1, "upto": upto, "budget_usd": 1})
     assert r.status_code == 200, r.text
@@ -203,8 +211,8 @@ def test_lists_cli_runs_readonly(env):
     c, SR, fw, _ = env
     d = SR.RUNS / "ep02_cli"
     d.mkdir(parents=True)
-    (d / "P0_brief.json").write_text(json.dumps({"schema": "nsfs.brief/1", "title": "旧", "outline": "x",
-                                                 "episodes": {"from": 2, "to": 2}}), encoding="utf-8")
+    _wjson((d / "P0_brief.json"), {"schema": "nsfs.brief/1", "title": "旧", "outline": "x",
+                                                 "episodes": {"from": 2, "to": 2}})
     (d / "P2_ep02_outline.json").write_text("{}", encoding="utf-8")
     runs = c.get("/api/story-runs").json()["runs"]
     row = next(r for r in runs if r["id"] == "ep02_cli")
@@ -218,12 +226,12 @@ def test_series_layout_readonly_per_episode(env):
     d = SR.RUNS / "series_t"
     (d / "ep01").mkdir(parents=True)
     (d / "ep02").mkdir()
-    (d / "P0_brief.json").write_text(json.dumps({"schema": "nsfs.brief/1", "title": "季", "outline": "x",
-                                                 "episodes": {"from": 1, "to": 2}}), encoding="utf-8")
-    (d / "P1_storyline.json").write_text(json.dumps(STORYLINE, ensure_ascii=False), encoding="utf-8")
+    _wjson((d / "P0_brief.json"), {"schema": "nsfs.brief/1", "title": "季", "outline": "x",
+                                                 "episodes": {"from": 1, "to": 2}})
+    _wjson((d / "P1_storyline.json"), STORYLINE, ensure_ascii=False)
     (d / "ep01" / "P4_ep01.md").write_text("## ep01《一》\n", encoding="utf-8")
-    (d / "ep01" / "P4_ep01.md.report.json").write_text(json.dumps({"status": "ok", "report": {"ok": True}}), encoding="utf-8")
-    (d / "ep02" / "P4_ep02.md.report.json").write_text(json.dumps({"status": "needs_writer", "report": {"blocking": 2}}), encoding="utf-8")
+    _wjson((d / "ep01" / "P4_ep01.md.report.json"), {"status": "ok", "report": {"ok": True}})
+    _wjson((d / "ep02" / "P4_ep02.md.report.json"), {"status": "needs_writer", "report": {"blocking": 2}})
     j = c.get("/api/story-runs/series_t?ep=2").json()
     assert j["series"] and j["readonly"] and j["episode"] == 2 and j["status"] == "needs_writer"
     assert [x["stages"]["P4"] for x in j["series_eps"]] == ["ok", "needs_writer"]

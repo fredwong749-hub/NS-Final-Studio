@@ -1,0 +1,76 @@
+# SENTINEL 11-02（总调度 fredw-2b 派；docs/master/SLO.md；ITERATION_PROTOCOL §G1）：问题由系统先发现，不靠项目方指出
+# 项目方原话（11-02 02:3x）：“每次都是我指出来你才去修……这不是 RSI……你还没有具备 fully autopilot 的能力。”
+# 编号说明：K-OPS-S01 已被 SYSARCH 用于 arch_scan 棘轮，SENTINEL 从 S02 起
+rules:
+  - id: K-OPS-S02
+    domain: ops
+    link: [P5-P6, P10-P11]
+    title: 每条 SLO（docs/master/SLO.md S1–S13）必须有一个常驻探针（tools/sentinel/probes.py），阈值只从 config/policies/sentinel.yaml 读；新增 SLO 先加探针再算上线
+    when: 新增或修改一条 SLO，或项目方 / 总调度先于系统发现一个问题（记“探针缺口”）
+    then: 在 sentinel.yaml 加该 SLO 的阈值项（value / source / enforced_by / status / owner / owner_loop / every_s），probes.py 加 p_sN 并登记 PROBES / CFG_OF，judges.py 加纯函数判定；sentinel.py serve 每 60 s 一拍按 every_s 调度；回放补一条证明能比人早发现
+    check: tests/test_sentinel.py::test_gpu_idle_needs_ready_and_span, tests/test_sentinel.py::test_score_p50_and_backlog, tests/test_sentinel.py::test_human_wait_and_gap
+    evidence:
+      - {src: docs/overnight/morning_20261102.md, note: "11-02 夜间 9 次问题全由项目方 / 总调度目检先发现（暂停 12 分钟、gpu36 两边不派、打分积压、:8870 旧服务、refs 缺失、vqa.json 被还原、gpu33 全 0%、底座断、看镜头漏检）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-S03
+    domain: ops
+    link: [P5-P6, P10-P11]
+    title: 违约自动开工单到 data/sentinel/issues.jsonl（只追加；id / SLO / 证据 / 首次发现 / 负责 loop / 状态 / decider=code）；同一 key 只开一张；恢复后自动 resolved 并写恢复时间；没测到不算恢复
+    when: 任何探针返回 violated=true，或此前开着的 key 这一拍测到正常
+    then: 只经 tools/sentinel/store.py IssueStore.apply 写工单；data/sentinel/open.json 是看板 / 总调度 / 编排器读的未关闭快照；口径变了不再测的 key 用 sentinel.py retire（status=retired，写原因），不许手删
+    check: tests/test_sentinel.py::test_store_dedup_and_resolve, tests/test_sentinel.py::test_store_missing_data_does_not_resolve, tests/test_sentinel.py::test_store_severity_and_owner_override
+    evidence:
+      - {src: tools/sentinel/store.py, note: "11-02 02:48 首拍 15 张工单（S13 等总调度 42/39 个对象、S6 配置不一致、S5 cut 失败、S4 跳板 216/小时），无重复开单"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-S04
+    domain: ops
+    link: [P5-P6]
+    title: 探针只读且不加服务器负载——远程每台每拍只走一次 rssh 常驻主连接的合并只读调用（tools/sentinel/remote_probe.py，timeout + nice -n 19 + 线程=1），不新建 ssh、不改生产文件、不重启服务
+    when: 写或改任何 SENTINEL 探针 / 采样
+    then: 远程数据加进 remote_probe.py 这一次调用里（不要另起 rssh.run）；本机子进程用 BELOW_NORMAL 优先级 + timeout；界面探针复用 apps/web/e2e/uiaudit/detect.mjs（只读查看令牌，非 GET 全拦），不碰项目方账号
+    check: tools/qa/arch_scan.py, tests/test_netfix.py::test_no_new_direct_ssh_outside_allowlist
+    evidence:
+      - {src: tools/sentinel/remote_probe.py, note: "11-02 实测 gpu33 一次合并调用 39 s（跳板慢时），每拍每台 1 次；K-OPS-N09 / K-OPS-V13"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-S05
+    domain: ops
+    link: [P5-P6, P11-P12]
+    title: 每个“人先发现”的事件都要在回放里证明探针能更早发现（tools/sentinel/replay.py + 夹具 tests/fixtures/sentinel/replay_20261102.json），提前量 > 0 才算补上缺口
+    when: 项目方 / 总调度指出一个系统没发现的问题
+    then: 把当时的日志证据加进 replay.py extract（只读拉服务器日志用 fetch_replay_src.py），EV 表加事件 → 工单 key、HUMAN 表写人发现时间与出处，跑 replay.py run；test_replay_beats_humans 断言 lead_min > 0
+    check: tests/test_sentinel.py::test_replay_beats_humans
+    evidence:
+      - {src: data/sentinel/replay_20261102.json, note: "11-02 回放 9 个事件全部提前：打分积压 72 分钟、gpu33 全 0%（S13 等总调度）38 分钟、:8870 22 分钟、vqa.json 3–10 分钟、暂停 8 分钟、gpu36 9 分钟、refs 7 分钟、底座 5 分钟、看镜头 2.5 分钟"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-S06
+    domain: ops
+    link: [P5-P6]
+    title: 探针自己坏了必须开工单——探针抛异常记 {SLO}:probe_fault，输入读不到 / 远程采样失败记 S0，读失败一律不当“正常”、不关单
+    when: 探针读文件、解析 JSON、远程调用失败，或探针函数抛异常
+    then: probes.jl 等读入口失败写 probes.UNKNOWN；tick 把 UNKNOWN 和 ctx.errors 变成 S0 工单；except 里直接返回常量的地方必须写 # arch-ok 理由（arch_scan silent_read 棘轮）
+    check: tests/test_sentinel.py::test_probe_fault_is_ticket, tools/qa/arch_scan.py
+    evidence:
+      - {src: tools/qa/arch_scan.py, note: "11-02 sv-04 cut 被 arch_scan 棘轮挡：sentinel 探针 7 处读失败返回空值（失败开放），改为 UNKNOWN + S0 工单"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-S07
+    domain: ops
+    link: [P5-P6, P7-P8]
+    title: 任何对象等人决定（等总调度 / 等项目方）超过 10 分钟即违约（S13）；GPU 空 + ready 0 + pending 多单独报“流水线断档”
+    when: producer 登记表出现 waiting_for 含“等总调度 / 等项目方 / 总调度复核 / 总调度定”的对象，或 GPU 空闲时 ready=0
+    then: SENTINEL S13 开单派 DEBUG-RSI；生产侧不许新增“等人”出口（DEBUG-RSI 正在删“等总调度定”，只留尽力版 + 工单）
+    check: tests/test_sentinel.py::test_human_wait_and_gap
+    evidence:
+      - {src: data/sentinel/replay_src/gpu33_producer_log.jsonl.gz, note: "02:22 gpu33 全卡 0% 根因 = 77 个首帧“驳回重出 2 次都没换上，等总调度定”、ready=0；回放 01:44 已开 S13 工单（早 38 分钟）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

@@ -478,6 +478,7 @@ def _link(src: Path, dst: Path) -> None:
 
 
 HARDLINK_TOP = ("data", "assets", "golden")
+JUNCTION_OK = ("node_modules", "models_cache", "apps/web/dist")
 
 
 def _hardlink_tree(src: Path, dst: Path) -> int:
@@ -533,7 +534,7 @@ def build_snapshot(tree: str, dest: Path) -> dict:
         src = ROOT / rel
         if not src.exists() or (dest / rel).exists():
             continue
-        if src.is_dir() and rel.split("/")[0] in HARDLINK_TOP:
+        if src.is_dir() and not rel.endswith(JUNCTION_OK):    # 默认逐文件硬链接（resolve 不跳出快照）；只有超大且没人 resolve 的目录用联接
             linked += _hardlink_tree(src, dest / rel)       # 数据目录逐文件硬链接：路径 resolve 仍落在快照里（目录联接会跳回工作树）
         else:
             _link(src, dest / rel)
@@ -723,6 +724,9 @@ def load_push_check():
     return m
 
 
+_MISSING = object()
+
+
 class _Patched:
     """临时改 resident_sync 模块的全局（ROOT / CODE_DIRS），退出时还原"""
 
@@ -731,13 +735,16 @@ class _Patched:
 
     def __enter__(self):
         for k, v in self.kw.items():
-            self.old[k] = getattr(self.rs, k)
+            self.old[k] = getattr(self.rs, k, _MISSING)
             setattr(self.rs, k, v)
         return self.rs
 
     def __exit__(self, *a):
         for k, v in self.old.items():
-            setattr(self.rs, k, v)
+            if v is _MISSING:
+                delattr(self.rs, k)
+            else:
+                setattr(self.rs, k, v)
 
 
 def drift_files(sv: str, code_dirs: list[str]) -> list[str]:
@@ -757,7 +764,7 @@ def deploy_host(rs, h: str, snap: Path, names: list[str], tracked_code: list[str
     pc = pc or load_push_check()
     r = {"at": time.strftime("%Y-%m-%dT%H:%M:%S")}
     try:
-        with _Patched(rs, ROOT=snap):
+        with _Patched(rs, ROOT=snap, required_data=lambda: set()):   # 快照里没有 data/：代码推送不需要数据清单
             g = pc.run(code_only=True, tier=1, rs=rs, skip_guard=True)          # 快照在 cut 时已过 syntax_guard
             if g.get("verdict") != "PASS":
                 raise RuntimeError("快照推送前检查不通过：" + "；".join(f"[{x['kind']}] {x['file']}" for x in g["problems"][:5]))

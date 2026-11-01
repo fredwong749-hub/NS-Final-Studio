@@ -10,11 +10,23 @@ import tunnel_supervisor as TS  # noqa: E402
 import pytest  # noqa: E402
 
 
+FIXED_PARTITION = {   # 测试用固定分区（不读生产 config/netfix/partition.json：那里会临时借道 / 改分集，03:3x 借 gpu36:1 给 DIRECTOR 就把测试打红了）
+    "images": {"gpu33": [1, 3, 5, 7, 10], "gpu36": [2, 4, 6, 8, 9], "laptop": []},
+    "video": {"gpu33": [1, 3, 5, 7], "gpu36": [2, 4, 6, 8, 9, 10]},
+    "lanes": {"gpu33": ["gpu33:0", "gpu33:1", "gpu33:3"], "gpu36": ["gpu36:0", "gpu36:1"], "laptop": ["laptop:0"]},
+    "retired_lanes": ["gpu36:2"],
+    "global_pause_ignore_by": ["SERVER_RESIDENT", "OFFLINE", "LAPTOP_IMAGES"],
+    "work_stealing": False,
+}
+
+
 @pytest.fixture(autouse=True)
 def _no_real_override(monkeypatch, tmp_path):
-    """不读真机的临时覆盖状态（data/netfix/override_state.json）"""
+    """不读真机的临时覆盖状态（data/netfix/override_state.json）和生产分区 / run 登记表"""
     monkeypatch.setattr(D, "OVERRIDE_STATE", tmp_path / "_none_state.json")
     monkeypatch.setattr(D, "OVERRIDE", tmp_path / "_none_ov.json")
+    monkeypatch.setattr(D, "partition", lambda p=None: json.loads(json.dumps(FIXED_PARTITION)))
+    monkeypatch.setattr(D, "RUNS", tmp_path / "_none_runs.json")
 
 
 # ---------------------------------------------------------------- K-OPS-N04 分区
@@ -23,7 +35,7 @@ def test_partition_is_disjoint_and_complete():
 
 
 def test_partition_check_catches_overlap_and_laptop_video():
-    part = json.loads((ROOT / "config/netfix/partition.json").read_text(encoding="utf-8"))
+    part = json.loads(json.dumps(FIXED_PARTITION))
     part["images"]["gpu36"] = part["images"]["gpu36"] + [1]
     part["video"]["laptop"] = [10]
     errs = D.check_partition(part)
@@ -38,7 +50,7 @@ def test_control_only_is_partition_intersect_ready():
     f = D.control_for("gpu33", {"paused": False}, READY)
     want = sorted(x for e, x in ((1, "ep01-S1"), (1, "ep01-S2"), (10, "ep10-S1")) if e in part["images"]["gpu33"])
     assert f["only"] == want and f["paused"] is False
-    assert set(f["hold_lanes"]) == {"gpu36:0", "gpu36:1", "gpu36:2", "laptop:0"}
+    assert set(f["hold_lanes"]) == {"gpu36:0", "gpu36:1", "gpu36:2", "laptop:0"}   # gpu36:2 退役道也一律 hold
     lap = [x for e, x in ((10, "ep10-S1"),) if e in part["images"].get("laptop", [])] or [D.NONE]
     assert D.control_for("laptop", {}, READY)["only"] == lap      # 11-02 01:4x 起 ep10 归 gpu33（FACTORY / 总调度 L-100），笔记本分区为空
     assert "paused" not in D.control_for("laptop", {"paused": True, "paused_by": "x"}, READY)   # 笔记本的 paused 就是全局开关，不改
@@ -79,6 +91,7 @@ class FakeSup(TS.Supervisor):
     def __init__(self, tmp, relay=True):
         conf = json.loads(TS.CONF.read_text(encoding="utf-8"))
         conf["legacy_loops"] = []
+        conf.pop("routes", None)                 # 单路由旧语义：每拍按 tcp_ok 判跳板（r3 的“底座 up 即通、否则 60 s 探一次”另测）
         conf["hosts"] = {"gpu33": {"forwards": [[18188, 8188], [18189, 8189], [18191, 8191]], "probe_http": [18188, 18189, 18191]},
                          "gpu36": {"forwards": [[18288, 8188], [18289, 8189], [18290, 8190]], "probe_http": [18288, 18289, 18290]}}
         p = tmp / "conf.json"
@@ -178,7 +191,7 @@ def test_ssh_cmd_has_keepalive_and_tag():
               "127.0.0.1:18288:127.0.0.1:8188", "127.0.0.1:8871:127.0.0.1:8870"):
         assert k in cmd
     assert cmd.endswith(" gpu36-t")                                      # 内层连接在底座里直连 sshd，不在跳板握手
-    assert "18290" in " ".join(s.ssh_cmd("gpu36-l2")) and "18288" not in " ".join(s.ssh_cmd("gpu36-l2"))   # 按道一条连接
+    assert "18289" in " ".join(s.ssh_cmd("gpu36-l1")) and "18288" not in " ".join(s.ssh_cmd("gpu36-l1"))   # 按道一条连接
     assert s.ssh_cmd("gpu33-cmd")[-1] == "gpu33-t" and "ssh_config.wsl" in " ".join(s.ssh_cmd("gpu33-cmd"))
     cfg = (ROOT / "config/netfix/ssh_config").read_text(encoding="utf-8")
     for k in ("ServerAliveInterval 10", "HostName sz194.instameta.org", "ProxyJump hkjump", "47.243.63.181", "Host gpu36-t", "Port 22360"):
@@ -210,7 +223,8 @@ def test_all_render_ports_supervised_once():
     c = json.loads(TS.CONF.read_text(encoding="utf-8"))
     ports = [lp for h in c["hosts"].values() for lp, _ in h["forwards"]]
     assert len(ports) == len(set(ports))
-    assert {18188, 18189, 18191, 18288, 18289, 18290} <= set(ports)
+    assert {18188, 18189, 18191, 18288, 18289} <= set(ports)
+    assert "gpu36-l2" in c.get("_retired", {}) and 18290 not in ports      # L-100：gpu36 GPU2 改看图卡，l2 退役（隔离不删）
 
 
 # ---------------------------------------------------------------- K-OPS-N03 看图内网入口

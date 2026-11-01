@@ -163,9 +163,9 @@ def control_for(host: str, laptop_ctrl: dict | None, ready: dict | None, part: d
     only = only or [NONE]
     if host == "laptop":
         hold = sorted({ln for h, ls in (part.get("lanes") or {}).items() if h != "laptop" and ph.get(h, "server") != "laptop"
-                       for ln in ls} | set(ov.get("laptop_hold") or []))   # L-100（总调度 01:5x）：laptop_hold 无条件生效（笔记本 4080 / gpu36 GPU2 专做看图），不再只在代派阶段生效
+                       for ln in ls} | set(ov.get("laptop_hold") or []) | set(part.get("retired_lanes") or []))   # L-100（总调度 01:5x）：laptop_hold 无条件生效（笔记本 4080 / gpu36 GPU2 专做看图），不再只在代派阶段生效
     else:
-        hold = sorted({ln for h, ls in (part.get("lanes") or {}).items() if h != host for ln in ls})
+        hold = sorted({ln for h, ls in (part.get("lanes") or {}).items() if h != host for ln in ls} | set(part.get("retired_lanes") or []))
         if ph.get(host, "server") in ON_LAPTOP:  # 本机分区正由笔记本代派（或交还中）：一单都不派，防重复
             only = [NONE]
     gp, by = global_pause(laptop_ctrl, part)

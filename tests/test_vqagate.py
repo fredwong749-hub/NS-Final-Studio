@@ -548,6 +548,7 @@ def test_q1_band_review_fail_closed(monkeypatch, enf, tmp_path):
     img = tmp_path / "x.png"
     Image.new("RGB", (300, 400)).save(img)
     monkeypatch.setattr(VQ, "ROOT", tmp_path)
+    monkeypatch.setattr(VQ, "BAND_CALIB", tmp_path / "band_sharp_auto.jsonl")   # 不写真实标定集
     (tmp_path / "data/assets/identity_refs/lin_wan").mkdir(parents=True)
     Image.new("RGB", (64, 64)).save(tmp_path / VQ.L086)
 
@@ -565,5 +566,100 @@ def test_q1_band_review_fail_closed(monkeypatch, enf, tmp_path):
     p = pf()
     assert VQ.q1_band_review(p, img) is None and p["ok"] is False
     monkeypatch.setattr(C, "generate", lambda req, **k: {"text": '{"same_person": "是", "style_ok": "是", "sharp": "是", "e": ""}'})
+    monkeypatch.setattr(VQ, "face_sharpness", lambda fp: 200.0)
     p = pf()
     assert VQ.q1_band_review(p, img) and p["ok"] is True
+    monkeypatch.setattr(VQ, "face_sharpness", lambda fp: 23.9)     # 03-S2 v14：看图答“是”也拦（发糊）
+    p = pf()
+    assert VQ.q1_band_review(p, img) is None and p["ok"] is False
+
+
+def test_gaze_regression_judge_exposes_defects(monkeypatch, tmp_path):
+    """SENTINEL S8：judge 透出 defects / identity / missing_items / contract（Q1 / Q2 / Q9）"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("gaze_reg_t", ROOT / "tools/vqa/gaze_regression.py")
+    G = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(G)
+    from ns_agent.vqa import client as C
+    monkeypatch.setattr(C, "inspect_image", lambda *a, **k: {"defects": ["identity_drift", "outfit_mismatch"], "unsure": [],
+        "checks": {"identity_drift": {"s": "defect", "e": "不像"}, "outfit_mismatch": {"s": "defect", "e": "缺外套"}},
+        "people": [{"who": "林晚", "pos": "中", "identity": "不像"}]})
+    monkeypatch.setattr(VQ, "gaze_mp", lambda p: None)
+    r = G.judge(tmp_path / "x.png", "ep01-S1")
+    assert "identity_drift" in r["defects"] and r["identity"]["per_person"][0]["identity"] == "不像"
+    assert "outfit_mismatch" in r["missing_items"] and r["contract"] is None
+
+
+def test_identity_bank_topk_with_anchor():
+    """L-098 身份库 top-k：锚 ≥0.50 时有效分 = 锚 + 库帧前 k 平均（侧脸回升）；锚 <0.50 库不帮忙（S10 类反例照样拦）"""
+    from ns_agent.gen_contract import postflight as PO
+    t1 = {"bank": {"k": 3, "anchor_min": 0.50}}
+    side = PO.apply_bank({"lin_wan": 0.56, "lin_wan@b0": 0.80, "lin_wan@b1": 0.74, "lin_wan@b2": 0.40, "gu_chen": 0.05}, t1)
+    assert side["lin_wan"] == round((0.80 + 0.74 + 0.56) / 3, 4) and side["lin_wan@anchor"] == 0.56 and "lin_wan@b0" not in side
+    neg = PO.apply_bank({"lin_wan": 0.25, "lin_wan@b0": 0.70, "lin_wan@b1": 0.66}, t1)
+    assert neg["lin_wan"] == 0.25
+    assert PO.apply_bank({"lin_wan": 0.7}, t1) == {"lin_wan": 0.7}
+
+
+def test_q1_bank_topk_keeps_sharpness_check(monkeypatch, enf, tmp_path):
+    """L-098 A/B（11-02）：03-S2 v14 锚 0.573、身份库 top-k 0.650 —— top-k 过线也不直接放行，进复核带 sharp_only：
+    不调本地看图，确定性清晰度 ≥42.3 才过（23.9 拦）；S10 换人锚 0.24 库帧再像也不抬"""
+    from PIL import Image
+    from ns_agent.gen_contract import postflight as PO
+    from ns_agent.vqa import client as C
+    rec = {"size": "近景", "subject": None, "zones": ["face"], "primary": "lin_wan", "slots": [], "missing": []}
+    req = {"asset_refs": rec, "cast": [{"name": "林晚", "presence": "在画"}]}
+    loc = {"Q2": [], "Q4": None, "Q7": None}
+
+    def q1(sims):
+        return next(i for i in PO.evaluate("x.png", req, remote={"faces": [{"h_ratio": 0.2, "bbox": [50, 50, 120, 140], "sims": sims}]},
+                                           local=loc).items if i.id == "Q1")
+    it = q1({"lin_wan": 0.573, "lin_wan@b0": 0.70, "lin_wan@b1": 0.68})
+    band = it.evidence["review_band"]
+    assert it.status == "fail" and band[0]["mode"] == "sharp_only" and band[0]["sim"] == 0.573 and band[0]["topk"] >= 0.60
+    assert q1({"lin_wan": 0.24, "lin_wan@b0": 0.9, "lin_wan@b1": 0.9}).evidence["review_band"] == []
+    assert q1({"lin_wan": 0.65, "lin_wan@b0": 0.75}).status == "pass"
+    img = tmp_path / "x.png"
+    Image.new("RGB", (300, 400)).save(img)
+    monkeypatch.setattr(VQ, "ROOT", tmp_path)
+    monkeypatch.setattr(VQ, "BAND_CALIB", tmp_path / "band_sharp_auto.jsonl")   # 不写真实标定集
+    monkeypatch.setattr(C, "generate", lambda req, **k: (_ for _ in ()).throw(AssertionError("sharp_only 不该调看图")))
+
+    def pf():
+        return {"ok": False, "blocking": ["Q1"], "reasons": ["Q1 x"],
+                "items": [{"id": "Q1", "status": "fail", "detail": it.detail, "evidence": dict(it.evidence)}]}
+    monkeypatch.setattr(VQ, "face_sharpness", lambda fp: 23.9)
+    p = pf()
+    assert VQ.q1_band_review(p, img) is None and p["ok"] is False
+    monkeypatch.setattr(VQ, "face_sharpness", lambda fp: 120.0)
+    p = pf()
+    assert VQ.q1_band_review(p, img) and p["ok"] is True
+
+
+def test_identity_bank_admission_and_eviction(monkeypatch, tmp_path):
+    """L-098 入库条件：过契约 + 未驳回 + 单脸 + 对 L-086 ≥0.60；驳回后（takes.json 变新）下一次取库就出库"""
+    import importlib.util
+    import os
+    import time
+    spec = importlib.util.spec_from_file_location("ns_id_bank", ROOT / "tools/identity/bank.py")
+    B = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(B)
+    monkeypatch.setattr(B, "ROOT", tmp_path)
+    monkeypatch.setattr(B, "BANK", tmp_path / "data/identity/bank.json")
+    monkeypatch.setattr(B, "_yaw", lambda p: 0.1)
+    d = tmp_path / "data/renders/ep01/S1"
+    (d / "takes").mkdir(parents=True)
+
+    def take(n, sim, ok=True, rej=False, nsims=1):
+        (d / f"takes/i{n}.png").write_bytes(b"x")
+        sims = {"lin_wan": sim, "gu_chen": 0.1} if nsims == 2 else {"lin_wan": sim}
+        return {"stage": "image", "file": f"renders/ep01/S1/takes/i{n}.png", "master_reject": rej, "created_at": f"2026-11-02T0{n}",
+                "postflight": {"ok": ok, "items": [{"id": "Q1", "status": "pass", "evidence": {"sims": sims, "faces": nsims}}]}}
+    tk = [take(1, 0.8), take(2, 0.55), take(3, 0.9, ok=False), take(4, 0.9, rej=True), take(5, 0.9, nsims=2), take(6, 0.7)]
+    (d / "takes.json").write_text(json.dumps({"takes": tk}), encoding="utf-8")
+    assert sorted(B.bank_files("lin_wan")) == ["data/renders/ep01/S1/takes/i1.png", "data/renders/ep01/S1/takes/i6.png"]
+    tk[0]["master_reject"] = True
+    time.sleep(0.05)
+    (d / "takes.json").write_text(json.dumps({"takes": tk}), encoding="utf-8")
+    os.utime(d / "takes.json", (time.time() + 5, time.time() + 5))
+    assert B.bank_files("lin_wan") == ["data/renders/ep01/S1/takes/i6.png"]

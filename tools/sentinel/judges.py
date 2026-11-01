@@ -1,4 +1,4 @@
-"""SENTINEL 判定层（纯函数、可测、实时与回放共用；规则 K-OPS-S01）。
+"""SENTINEL 判定层（纯函数、可测、实时与回放共用；规则 K-OPS-S02）。
 
 每个 j_* 只吃“已经取到的数据”，返回 finding 列表：
   {"slo": "S2", "key": "S2:gpu33", "violated": bool, "title": "...", "evidence": {...}}
@@ -89,13 +89,28 @@ def j_score(where: str, samples: list[tuple[float, float]], backlog_ts: list[flo
     return out
 
 
-def j_vqa_endpoint(host: str, port: int, models_reply: str | None, listener: str) -> list[dict]:
-    """打分服务必须是 vLLM（/v1/models 有 data）；端口被别的进程（例：13 小时前的旧 server.py）占着 = 违约"""
-    if models_reply is None:
+def vqa_kind(health: str | None, models: str | None) -> str | None:
+    """:8870 实际是什么：router_nf4（tools/vqa/vqa_router.py，health 里 gpu=router）/ vllm（/v1/models 有模型列表）/
+    nf4（tools/vqa/server.py 单实例，health 有 loaded）/ down；两个都没取到 → None（未测）"""
+    if health is None and models is None:
+        return None
+    h, m = str(health or ""), str(models or "")
+    if '"gpu": "router"' in h or '"gpu":"router"' in h:
+        return "router_nf4"
+    if '"data"' in m and '"object"' in m:
+        return "vllm"
+    if '"loaded"' in h:
+        return "nf4"
+    return "down"
+
+
+def j_vqa_endpoint(host: str, port: int, kind: str | None, expected: str | None, listener: str = "") -> list[dict]:
+    """打分服务必须和声明的 backend 一致（config/vqa.json model.backends；未声明时用 sentinel.yaml S3 vqa_backends，出处 L-100）。
+    例：01:5x gpu36:8870 被 13 小时前的旧 server.py（nf4 单实例）占着，而声明是 router_nf4 → 违约"""
+    if kind is None or not expected:
         return []
-    ok = '"data"' in models_reply and '"object"' in models_reply
-    return [F("S3", f"vqa:{host}:{port}", not ok, f"{host}:{port} 打分服务不是 vLLM（/v1/models 无模型列表；监听进程：{listener[:80] or '未知'}）",
-              reply=models_reply[:200], listener=listener[:300])]
+    return [F("S3", f"vqa:{host}:{port}", kind != expected, f"{host}:{port} 打分服务实际是 {kind}，声明是 {expected}（监听：{listener[:80] or '未知'}）",
+              kind=kind, expected=expected, listener=listener[:300])]
 
 
 # ------------------------------------------------------------------ S4 连接

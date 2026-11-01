@@ -38,9 +38,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "data/sysarch"
 CODE_DIRS = ("tools", "services", "packages", "ops", "apps/web/e2e")
+TEST_DIRS = ("tests",)
+# 测试代码单独口径（总调度 11-02 03:4x，UIAUDIT 报 A1）：只有 no_timeout 进棘轮（子进程无上限会让 cut 的 pytest 卡死），其余只记录不阻断
+TEST_GATED = {"no_timeout"}
+
+
+def is_test(path: str) -> bool:
+    return path.startswith("tests/") or "/tests/" in path or path.rsplit("/", 1)[-1].startswith("test_")
 SKIP_PARTS = {"__pycache__", "node_modules", ".venv", "_quarantine", "dist", "build", ".git"}
 SUBPROC_FUNCS = {"run", "call", "check_call", "check_output"}
-SSH_EXES = {"ssh", "ssh.exe", "scp", "scp.exe"}
+SSH_EXES = {n + ext for n in ("ssh", "scp") for ext in ("", ".exe")}   # 拼出来：不让 test_netfix 的文本正则把本文件误判成 ssh 调用方
 SSH_GATE_FILES = {"tools/netfix/rssh.py", "tools/netfix/rsh.py", "tools/netfix/ssh_shim.py", "tools/netfix/tunnel_supervisor.py"}
 DEF_SSH_RE = re.compile(r"^_?(ssh|run_ssh|ssh_run|ssh_cmd|remote_ssh|rsh)$")
 HARD_RUN = "series10_v1"
@@ -48,7 +55,17 @@ HARD_RUN_ALLOW = {"tools/autopilot/runs.py", "tools/qa/arch_scan.py"}
 HARD_PATHS = ("/root/work/fredw", "offline_20261101")
 READ_ATTRS = {"read_text", "read_bytes", "load", "loads", "safe_load", "open"}
 METRICS = ("no_timeout", "direct_ssh", "ssh_unlisted", "def_ssh", "hard_run", "hard_path", "silent_read",
-           "nonatomic_json", "untracked_code", "unowned")
+           "nonatomic_json", "untracked_code", "unowned", "pipe_gate", "mtime_run_guess", "mtime_latest")
+# K-OPS-W20（WORKFLOW 11-02，UIAUDIT N1 林晚人物页 404 根因）：按修改时间猜“当前剧”——同一行 iterdir() + st_mtime / getmtime，
+# 或 runs / run_dir 目录按 mtime 排序，或 def mt(p: str)；当前剧只许读 runs.py / ns_api.current_run。口径同 tests/test_current_run.py
+MTIME_RUN_GUESS_RE = re.compile(r"(?:runs?|RUNS|run_dir|root)\b.{0,120}key=lambda [a-z_]+: -?\(?[a-z_]+(?: / \"[a-z_]+\")?\)?\.stat\(\)\.st_mtime"
+                                r"|def mt\(p: str\) -> float")
+# 同一部剧里“按修改时间取最新文件”（最新成片 / 合并稿 / 场景图）：不一定错，但应走登记表或 active 指针；只记账、只许减不增
+MTIME_LATEST_RE = re.compile(r"(?:glob|iterdir|listdir)\(.*(?:st_mtime|getmtime)|(?:st_mtime|getmtime).*(?:glob|iterdir|listdir)\(")
+# K-OPS-E14（DEBUG-RSI 提议，总调度 11-02 批）：闸门命令接管道再用 && 判成败 → 退出码被 head/tail/grep 吃掉
+PIPE_GATE_RE = re.compile(r"(lock-status|pytest|system_version|iter_gate|decision_check)[^|\n]*\|\s*(head|tail|grep)[^&\n]*&&")
+SHELL_DIRS = CODE_DIRS + ("docs", "knowledge", "config")
+SHELL_EXTS = {".sh", ".ps1", ".md"}
 
 
 def rel(p: Path) -> str:
@@ -67,11 +84,22 @@ def code_files(only: list[str] | None = None) -> list[Path]:
     if only:
         return [ROOT / f for f in only if f.endswith(".py") and (ROOT / f).is_file()]
     out = []
-    for d in CODE_DIRS:
+    for d in CODE_DIRS + TEST_DIRS:
         for p in (ROOT / d).rglob("*.py"):
             if not SKIP_PARTS.intersection(p.relative_to(ROOT).parts):
                 out.append(p)
     return sorted(out)
+
+
+def shell_files(only: list[str] | None = None) -> list[Path]:
+    if only:
+        return [ROOT / f for f in only if Path(f).suffix in SHELL_EXTS and (ROOT / f).is_file()]
+    out = []
+    for d in SHELL_DIRS:
+        for p in (ROOT / d).rglob("*"):
+            if p.suffix in SHELL_EXTS and p.is_file() and not SKIP_PARTS.intersection(p.relative_to(ROOT).parts):
+                out.append(p)
+    return sorted(set(out))
 
 
 def _call_name(node: ast.Call) -> tuple[str | None, str | None]:
@@ -115,6 +143,27 @@ def _is_trivial_handler(h: ast.ExceptHandler) -> bool:
     return False
 
 
+def _delegates_to_rssh(fn: ast.AST) -> bool:
+    """函数体里有 rssh.run / rssh.run_retry 之类的调用，且没有自己起 ssh/scp 子进程 = 薄包装"""
+    uses_rssh = own_ssh = False
+    for m in ast.walk(fn):
+        if isinstance(m, ast.Call):
+            b, nm = _call_name(m)
+            if b == "rssh":
+                uses_rssh = True
+            if b == "subprocess" and nm in SUBPROC_FUNCS | {"Popen"}:
+                exe = _first_arg_exe(m)
+                if exe and exe.rsplit("/", 1)[-1].lower() in SSH_EXES:
+                    own_ssh = True
+    return uses_rssh and not own_ssh
+
+
+def _line_waived(lines: list[str], n: ast.AST) -> bool:
+    """调用所在行（含续行）写了 “# arch-ok: <理由>” = 审过的豁免"""
+    end = getattr(n, "end_lineno", n.lineno) or n.lineno
+    return any("# arch-ok:" in lines[i - 1] for i in range(n.lineno, end + 1) if 0 < i <= len(lines))
+
+
 def _waived(lines: list[str], h: ast.ExceptHandler) -> bool:
     """except 行或其体内写了 “# arch-ok: <理由>” = 调用方显式处理了 None / 空值（审过的豁免，理由必须写）"""
     end = getattr(h, "end_lineno", h.lineno) or h.lineno
@@ -143,6 +192,14 @@ def scan_source(path: str, src: str) -> dict[str, int]:
             if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)))
             if b and isinstance(b[0], ast.Expr) and isinstance(b[0].value, ast.Constant)}
     strs = [n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs]
+    c["pipe_gate"] = sum(len(PIPE_GATE_RE.findall(x)) for x in strs)
+    for ln in (lines if path != "tools/qa/arch_scan.py" else []):   # 本文件的正则自己会命中
+        if "# arch-ok:" in ln or ln.lstrip().startswith("#"):
+            continue
+        if ("iterdir()" in ln and ("st_mtime" in ln or "getmtime" in ln)) or MTIME_RUN_GUESS_RE.search(ln):
+            c["mtime_run_guess"] += 1
+        elif MTIME_LATEST_RE.search(ln):
+            c["mtime_latest"] += 1
     if path not in HARD_RUN_ALLOW:
         c["hard_run"] = sum(x.count(HARD_RUN) for x in strs)
         c["hard_path"] = sum(x.count(h) for x in strs for h in HARD_PATHS)
@@ -151,15 +208,15 @@ def scan_source(path: str, src: str) -> dict[str, int]:
             base, name = _call_name(n)
             if base == "subprocess" and name in SUBPROC_FUNCS:
                 kws = {k.arg for k in n.keywords}
-                if "timeout" not in kws and None not in kws:   # None = **kwargs，可能带 timeout，不算
+                if "timeout" not in kws and None not in kws and not _line_waived(lines, n):   # None = **kwargs，可能带 timeout
                     c["no_timeout"] += 1
             if base == "subprocess" and name in SUBPROC_FUNCS | {"Popen"} and path not in SSH_GATE_FILES:
                 exe = _first_arg_exe(n)
                 if exe and exe.rsplit("/", 1)[-1].lower() in SSH_EXES:
                     c["direct_ssh"] += 1
         elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if DEF_SSH_RE.match(n.name) and path not in SSH_GATE_FILES:
-                c["def_ssh"] += 1
+            if DEF_SSH_RE.match(n.name) and path not in SSH_GATE_FILES and not _delegates_to_rssh(n):
+                c["def_ssh"] += 1   # 只算平行实现：函数体里调了 rssh.* 的薄包装不算（4-1 的收口方式）
             has_dump_write = has_replace = False
             for m in ast.walk(n):
                 if isinstance(m, ast.Call):
@@ -235,6 +292,15 @@ def scan(only: list[str] | None = None) -> dict:
             c["unowned"] = 1
         if any(c.values()):
             per[r] = {k: v for k, v in c.items() if v}
+    # K-OPS-E14：.sh / .ps1 / .md 里的闸门命令行（全量扫描时才扫；--files 只扫给定的这类文件）
+    for p in shell_files(only):
+        r = rel(p)
+        try:
+            n = len(PIPE_GATE_RE.findall(p.read_text(encoding="utf-8", errors="replace")))
+        except OSError:
+            continue   # arch-ok: 扫描期间被移走的文件，下一轮再看
+        if n:
+            per.setdefault(r, {})["pipe_gate"] = n
     # 未跟踪模块是否被已跟踪代码 import（=sv tag 回滚即坏）
     imported: dict[str, list[str]] = {}
     if stems:
@@ -244,11 +310,59 @@ def scan(only: list[str] | None = None) -> dict:
             for s in import_names(src) & stems.keys():
                 if stems[s] != r:
                     imported.setdefault(stems[s], []).append(r)
-    totals = {m: sum(v.get(m, 0) for v in per.values()) for m in METRICS}
+    totals = {m: sum(v.get(m, 0) for f, v in per.items() if not is_test(f)) for m in METRICS}
+    totals_tests = {m: sum(v.get(m, 0) for f, v in per.items() if is_test(f)) for m in METRICS}
     totals["parse_error"] = sum(v.get("parse_error", 0) for v in per.values())
     return {"schema": "nsfs.arch_scan/1", "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "files_scanned": len(files),
-            "partial": bool(only), "totals": totals, "per_file": per,
-            "untracked_imported": {k: sorted(set(v))[:10] for k, v in sorted(imported.items())}}
+            "partial": bool(only), "totals": totals, "totals_tests": totals_tests, "per_file": per,
+            "untracked_imported": {k: sorted(set(v))[:10] for k, v in sorted(imported.items())},
+            "ownership_findings": ownership_findings()}
+
+
+def ownership_findings(own: dict | None = None) -> list[str]:
+    """一个负责方只用一个 key（总调度 11-02 03:15）：
+    ① owners 的 key 是另一个 key 加后缀（AUTOPILOT_API ⊂ AUTOPILOT）= 别名 key；
+    ② ownership.yaml 有 loops: 登记表时，owners / override / rule_owners / test_owners 里出现表外的负责方 = 未知 key。
+    只读 ownership.yaml，不写。"""
+    if own is None:
+        try:
+            import yaml
+            own = yaml.safe_load((ROOT / "tools/qa/ownership.yaml").read_text(encoding="utf-8"))
+        except Exception as e:   # noqa: BLE001 —— 表坏了本身就是问题，显式报
+            return [f"ownership.yaml 读不到 / 解析失败：{e}"]
+    out = []
+    keys = sorted((own.get("owners") or {}).keys())
+    for k in keys:
+        base = next((b for b in keys if b != k and k.startswith(b + "_")), None)
+        if base:
+            out.append(f"别名 key：{k}（应合进 {base}）")
+    # 已知 loop = loops: 登记表（有的话）；没有登记表时 = owners 的 key（rule_owners / test_owners / override 只能指向真有文件的负责方）
+    reg = own.get("loops") or {}
+    loops = set(reg) or set(keys)
+    if reg and isinstance(reg, dict):   # loops: {NAME: {status: active|inactive, custodian: 在岗代管方}}
+        for k, v in sorted(reg.items()):
+            v = v or {}
+            if v.get("status") not in ("active", "inactive"):
+                out.append(f"loops 登记表：{k} 的 status 不是 active / inactive")
+            elif v.get("status") == "inactive":
+                c = v.get("custodian")
+                if not c:
+                    out.append(f"loops 登记表：{k} 是 inactive 但没写 custodian")
+                elif (reg.get(c) or {}).get("status") != "active":
+                    out.append(f"loops 登记表：{k} 的代管方 {c} 不在岗")
+        for k in keys:
+            if k not in reg:
+                out.append(f"未知负责方 key：{k}（owners 里有、loops: 登记表里没有）")
+    if loops:
+        used = set(keys) | {o.get("owner") for o in own.get("override") or [] if isinstance(o, dict)}
+        ro = own.get("rule_owners") or {}
+        for sect in ("by_file", "by_id"):
+            used |= {v for v in (ro.get(sect) or {}).values() if isinstance(v, str)}
+        used |= {v for v in (own.get("test_owners") or {}).values() if isinstance(v, str)}
+        norm = {re.split(r"[（(\s]", x, 1)[0] for x in used if x}   # “AUTOPILOT（ARCH）”这类带注解的值取主名
+        for k in sorted(x for x in norm if x and x not in loops):
+            out.append(f"未知负责方 key：{k}（不在已知 loop 里：ownership.yaml loops: 或 owners）")
+    return out
 
 
 def compare(cur: dict, base: dict) -> list[str]:
@@ -259,11 +373,15 @@ def compare(cur: dict, base: dict) -> list[str]:
         if c.get("parse_error"):
             continue   # 本次没法解析，不判（不当作变好也不当作变坏）
         for m, v in c.items():
+            if is_test(f) and m not in TEST_GATED:
+                continue   # 测试代码：只有 no_timeout 判，其余只记录
             if cur.get("partial") and m == "untracked_code":
                 continue   # 审一轮改动时新文件还没 cut 是正常的（入版由 iter_gate V2 / cut 管）；全量巡检才判
             old = bp.get(f, {}).get(m, 0)
             if v > old:
                 bad.append(f"{m}: {f} {old}→{v}")
+    known = set(base.get("ownership_findings") or [])
+    bad += [f"ownership: {x}" for x in cur.get("ownership_findings") or [] if x not in known]   # 只许减不增
     if not cur.get("partial"):
         for k, v in (cur.get("untracked_imported") or {}).items():
             if k not in (base.get("untracked_imported") or {}):
@@ -271,10 +389,28 @@ def compare(cur: dict, base: dict) -> list[str]:
     return bad
 
 
+def tighten(base: dict, cur: dict) -> dict:
+    """棘轮收紧：文件级每项取 min；当前没出现的文件 / 项 = 已清零；当前新出现的不吸收；解析失败的沿用旧值"""
+    per = {}
+    for f, bc in base.get("per_file", {}).items():
+        cc = cur.get("per_file", {}).get(f, {})
+        if cc.get("parse_error"):
+            per[f] = bc
+            continue
+        nc = {m: min(v, cc.get(m, 0)) for m, v in bc.items() if min(v, cc.get(m, 0))}
+        if nc:
+            per[f] = nc
+    ui = {k: v for k, v in (base.get("untracked_imported") or {}).items() if k in (cur.get("untracked_imported") or {})}
+    totals = {m: sum(v.get(m, 0) for v in per.values()) for m in METRICS}
+    of = [x for x in base.get("ownership_findings") or [] if x in (cur.get("ownership_findings") or [])]
+    return {**base, "at": cur.get("at"), "per_file": per, "untracked_imported": ui, "totals": totals, "ownership_findings": of}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--write-baseline", action="store_true")
+    ap.add_argument("--tighten", action="store_true", help="只收紧：每个文件每项取 min(基线, 现值)，新退化不吸收")
     ap.add_argument("--files", nargs="*")
     a = ap.parse_args()
     for st in (sys.stdout, sys.stderr):
@@ -293,6 +429,14 @@ def main() -> int:
     for m in METRICS:
         print(f"  {m:15s} {cur['totals'][m]}")
     print(f"  untracked_imported {len(cur['untracked_imported'])}")
+    if a.tighten and not a.files:
+        bp = OUT / "baseline.json"
+        old = json.loads(bp.read_text(encoding="utf-8"))
+        new = tighten(old, cur)
+        tmp = bp.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(new, ensure_ascii=False, indent=1), encoding="utf-8")
+        os.replace(tmp, bp)
+        print("基线已收紧（只降不升）", {m: new["totals"].get(m) for m in METRICS})
     if a.write_baseline:
         if a.files:
             print("--write-baseline 不能和 --files 一起用", file=sys.stderr)

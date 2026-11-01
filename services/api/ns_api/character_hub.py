@@ -157,14 +157,13 @@ def current_project(project: str | None = None) -> str:
         return project
     if not ps:
         raise HTTPException(404, "出图参考配置里还没有项目（config/recipes/asset_refs.json）")
-
-    def mt(p: str) -> float:
-        d = _root() / (R.project_cfg(p).get("run_dir") or "")
-        try:
-            return d.stat().st_mtime
-        except OSError:
-            return 0.0
-    return max(ps, key=mt)
+    # 总调度 P1 / UIAUDIT N1（K-OPS-W20）：当前剧一律读 runs.json 的 primary，不按 run 目录修改时间猜
+    # （series10_s2 目录一出现就被猜成当前剧，林晚人物页 404）。要看别的剧传 ?project=
+    from ns_api.current_run import primary_run
+    prim = primary_run(_root())
+    if prim not in ps:
+        raise HTTPException(404, f"当前剧 {prim}（config/pipeline/runs.json 的 primary）不在出图参考配置里（config/recipes/asset_refs.json）")
+    return prim
 
 
 def _run_dir(project: str) -> Path:
@@ -200,9 +199,31 @@ def _rel(p: Path) -> str:
 
 # ---------------------------------------------------------------- 读：人物
 def _p1(project: str) -> list[dict]:
-    p = _root() / (R.project_cfg(project).get("looks_file") or "")
-    d = _rjson(p, [])
-    return [c for c in d if isinstance(c, dict)]
+    """人物表按继承链合并（K-OPS-W18 / W19，WORKFLOW 11-02）：父季在前，子季同一人物的同 id 造型覆盖、新造型追加、新人物追加。
+    第一季（无 inherits）只有自己这一层，行为不变；子季没写 looks_file 也能看到父季人物（否则 ?project=series10_s2 林晚 404）"""
+    files = R.chain_files(project, "looks_file") or [_root() / (R.project_cfg(project).get("looks_file") or "")]
+    out: list[dict] = []
+    idx: dict[str, dict] = {}
+    for p in reversed(files):
+        for c in _rjson(p, []) or []:
+            if not isinstance(c, dict):
+                continue
+            k = c.get("char_id") or c.get("name")
+            if k not in idx:
+                idx[k] = dict(c)
+                out.append(idx[k])
+                continue
+            cur = idx[k]
+            ids = {lk.get("id"): i for i, lk in enumerate(cur.get("looks") or [])}
+            looks = list(cur.get("looks") or [])
+            for lk in c.get("looks") or []:
+                if lk.get("id") in ids:
+                    looks[ids[lk["id"]]] = lk
+                else:
+                    looks.append(lk)
+            cur.update({kk: v for kk, v in c.items() if kk != "looks"})
+            cur["looks"] = looks
+    return out
 
 
 def _cast(project: str) -> list[dict]:
@@ -445,7 +466,7 @@ def character(project: str, cid: str, store: LookStore, all_items: bool = False)
     looks_of: dict[str, list[dict]] = {}
     looks = []
     wd = {i.id for i in store.wardrobe().items}
-    quar = ((_rjson(_root() / "data" / "looks" / "item_map_quarantine.json", {}).get(project) or {}).get(cid) or {})
+    quar = (R.quarantine(project).get(cid) or {})          # 解析层按 run 继承（K-OPS-W19），与出图同一入口
     for lk in inv:
         parts = []
         for p in lk["parts"]:

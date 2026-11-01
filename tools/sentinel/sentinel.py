@@ -1,4 +1,4 @@
-"""SENTINEL 常驻（规则 K-OPS-S01…S06；docs/master/SLO.md）：每 60 s 一拍，到期的探针跑一遍 → data/sentinel/issues.jsonl 工单。
+"""SENTINEL 常驻（规则 K-OPS-S02…S07；docs/master/SLO.md）：每 60 s 一拍，到期的探针跑一遍 → data/sentinel/issues.jsonl 工单。
 
   .venv/Scripts/python.exe tools/sentinel/sentinel.py serve          # 常驻（单实例，pid 锁 data/sentinel/sentinel.pid）
   .venv/Scripts/python.exe tools/sentinel/sentinel.py once [--only S2,S7] [--all]   # 跑一拍（--all 忽略周期，全部探针都跑）

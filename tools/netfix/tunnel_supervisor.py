@@ -405,8 +405,16 @@ class Supervisor:
         if routes:                                  # K-OPS-N08：每条路的入口各测一次 TCP；任一条通 = “跳板通”
             info = self.relay.setdefault("routes", {})
             for r, rc in routes.items():
-                info.setdefault(r, {})["up"] = tcp_ok(*rc["check"], timeout=5)
-                info[r]["bad_until"] = self.route_bad_until.get(r, 0) or None
+                x = info.setdefault(r, {})
+                # r3：不再每拍 TCP 探跳板（03:2x 实测：监管进程 5 s 一次的裸 TCP 探测是跳板“新建连接”的主要来源，
+                # 跳板看来是只连不握手的可疑连接）。走这条路的底座 up = 这条路通；底座不在时才探，且每条路 ≥ 60 s 一次
+                bup = any(v.get("kind") == "base" and v.get("route") == r and (self.hosts.get(k) or {}).get("state") == "up"
+                          for k, v in self.c["hosts"].items())
+                if bup:
+                    x["up"], x["how"] = True, "base_up"
+                elif now() - x.get("probe_t", 0) >= self.c.get("relay_probe_min_s", 60) or "up" not in x:
+                    x["up"], x["how"], x["probe_t"] = tcp_ok(*rc["check"], timeout=5), "tcp", now()
+                x["bad_until"] = self.route_bad_until.get(r, 0) or None
             up = any(v["up"] for v in info.values())
             cur = self.pick_route()
             if cur != self.relay.get("route"):

@@ -2,6 +2,7 @@
  "_doc": "VQA 本地看图复核（契约 Q9 / 视频 V9；R11-4 / R11-5 / R11-7 / R11-10）。owner = VQA。硬规则 K-REV-V01：图片 / 视频帧只进本地视觉模型（gpu36 自建服务），绝不发外部 API；写作网关只收文字（本地模型写的描述 + 缺陷清单 + 镜头文字 + 契约结果）。每个检查项映射到一条 GEN_CONTRACT 项（contract）；blocking 只在留出一致率 ≥ calibration.min_agreement 且总调度批准后由总调度改成 true。",
  "version": "vqa-v2-gate-2026-11-01",
  "model": {
+  "backends": {"gpu36": "router_nf4", "laptop": "nf4", "_doc": "SENTINEL S3 读（VQAGATE 11-02）：gpu36 = GPU2 上 3 个 nf4 实例（8876/8878/8879）由 vqa_router 占 8870 分发；laptop = 本机单实例 nf4（tools/vqa/server.py）"},
   "name": "Qwen3-VL-8B-Instruct",
   "hf": "Qwen/Qwen3-VL-8B-Instruct",
   "license": "Apache-2.0",
@@ -267,6 +268,7 @@
   "_extra_limbs": "总调度 11-01 23:0x：extra_limbs 两口径一致率仅 0.828，单独拦会来回重出 → 看图这一项本身不拦；视频层改成 V6 手数规则命中且看图 extra_limbs = defect 两者同时成立才判多肢（score_clip.gate），只有一方命中只记录；等 V6 看图复核（多手 vs 衣物形变）做完再评估",
   "_blocking_v1": "16:5x 首版 blocking = eye_contact、continuity_break、hair_mismatch、framing_mismatch、extra_person（+ underage_look）：项目方点名的看镜头 / 不连贯 / 发色，总调度 G0 点名的景别，和极少误报的多人；outfit / accessory / plastic_doll / posed_stiff / extra_limbs 在 ep01–ep03 首扫命中率 30–60%、和总调度标签对不上，误报高，先写进证据不挡。18:1x 总调度定（和 WORKFLOW 对齐）：V6 阈值落定前多肢一律判不过 → extra_limbs 也拦（自相矛盾的“各5指 / 被遮挡”降为拿不准，contract.sanitize）。依据 data/vqa/gate_scan/rates.json、docs/vqa/GATE_CALIBRATION.md",
   "video_requires_q9": false,
+  "band_sharp": {"min": 42.3, "recalib_every_days": 7, "tool": "tools/vqa/band_recalib.py", "auto_log": "data/vqa/gate_calib/band_sharp_auto.jsonl", "_doc": "Q1 复核带确定性清晰度（总调度 11-02 批准）：被清晰度拦下的自动记入 auto_log，补标签后每周按标定集重算，提议写 data/vqa/gate_calib/band_recalib.json（当前提议 42.3；正例最低 60.6、反例 23.9）"},
   "gaze_mp": {
    "enabled": true,
    "A": 0.3,

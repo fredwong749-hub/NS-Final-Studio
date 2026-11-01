@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 
 from . import ROOT, cfg
@@ -410,6 +411,25 @@ BAND_Q = ("参考图是这个角色项目方认定的身份脸（L-086）；【�
           "sharp：脸部清晰，不糊。")
 
 
+BAND_SHARP_MIN = 42.3      # 总调度 11-02 04:0x 批准 band_recalib 提议（40 → 42.3，随 sv-05）     # 复核带确定性清晰度：脸部裁切缩到 240×280、取中间 160×180 的 Laplacian 方差（GATE_CALIBRATION §16）
+
+
+def face_sharpness(crop_path) -> float:
+    """脸部清晰度（确定性，和看图模型并用）：03-S2 v14（总调度判“发糊发平”）= 23.9，其余 19 张同一人 60.6–522"""
+    import cv2
+    g = cv2.cvtColor(cv2.resize(cv2.imread(str(crop_path)), (240, 280)), cv2.COLOR_BGR2GRAY)
+    return float(cv2.Laplacian(g[60:240, 40:200], cv2.CV_64F).var())
+
+
+BAND_CALIB = ROOT / "data" / "vqa" / "gate_calib" / "band_sharp_auto.jsonl"
+
+
+def band_calib_log(row: dict) -> None:
+    BAND_CALIB.parent.mkdir(parents=True, exist_ok=True)
+    with BAND_CALIB.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + chr(10))
+
+
 def band_ref(cid: str) -> str | None:
     """复核带并排复核的参照：林晚一律 L-086（总调度 11-02：ArcFace 分不开 ref2va 与 L-086，项目方认 L-086）；其他角色用 asset_refs.face_of。
     读不到运行登记表 / 资产 → 抛异常，由调用方记“复核失败”（不失败开放，arch_scan silent_read）"""
@@ -449,19 +469,35 @@ def q1_band_review(pf: dict, image) -> str | None:
             fp = out_dir / f"{Path(str(image)).stem}_band{k}.jpg"
             im.crop((int(max(0, x1 - 0.3 * w)), int(max(0, y1 - 0.3 * h)), int(min(im.width, x2 + 0.3 * w)),
                      int(min(im.height, y2 + 0.3 * h)))).save(fp, quality=92)
+            if b.get("mode") == "sharp_only":     # L-098：身份库 top-k 已过线、只差锚 → 只做确定性清晰度（decider=code，不调看图）
+                sharp_v = face_sharpness(fp)
+                results.append({"cid": b["cid"], "sim": b.get("sim"), "topk": b.get("topk"), "ok": sharp_v >= BAND_SHARP_MIN,
+                                "sharpness": round(sharp_v, 1), "mode": "sharp_only"})
+                if sharp_v < BAND_SHARP_MIN:
+                    band_calib_log({"image": str(image), "crop": str(fp), "cid": b["cid"], "sim": b.get("sim"), "topk": b.get("topk"),
+                                    "sharpness": round(sharp_v, 1), "mode": "sharp_only", "at": time.strftime("%Y-%m-%dT%H:%M:%S")})
+                continue
             res = client.generate({"system": "你是画面质检员，只看图、只报事实，只输出 JSON。", "text": BAND_Q,
                                    "images": [{"path": ref, "label": "参考图：身份脸（L-086）", "max_pixels": 150000},
                                               {"path": str(fp), "label": "【待检】", "max_pixels": 200000}]}, wait_s=900)
             d = rubric_loads(res.get("text", "")) if "error" not in res else None
             d = d or {}
-            ok = all(d.get(x) == "是" for x in ("same_person", "style_ok", "sharp"))
-            results.append({"cid": b["cid"], "sim": b.get("sim"), "ok": ok, **{x: d.get(x) for x in ("same_person", "style_ok", "sharp", "e")}})
+            sharp_v = face_sharpness(fp)
+            # 本地看图三项（同一人 / 画风 / 清晰）+ 确定性清晰度都过才放行：标定里看图模型对 20 张全答“是”（含 03-S2 v14 反例），
+            # 单靠它放不住发糊的脸，所以清晰度另用 Laplacian 方差把关
+            ok = all(d.get(x) == "是" for x in ("same_person", "style_ok", "sharp")) and sharp_v >= BAND_SHARP_MIN
+            results.append({"cid": b["cid"], "sim": b.get("sim"), "ok": ok, "sharpness": round(sharp_v, 1),
+                            **{x: d.get(x) for x in ("same_person", "style_ok", "sharp", "e")}})
+            if sharp_v < BAND_SHARP_MIN:      # 总调度 11-02：被清晰度拦下的自动进标定集，阈值每周按标定集重算（tools/vqa/band_recalib.py）
+                band_calib_log({"image": str(image), "crop": str(fp), "cid": b["cid"], "sim": b.get("sim"), "sharpness": round(sharp_v, 1),
+                                "vlm": {x: d.get(x) for x in ("same_person", "style_ok", "sharp")}, "at": time.strftime("%Y-%m-%dT%H:%M:%S")})
     except Exception as e:  # noqa: BLE001
         q1.setdefault("evidence", {})["band_review"] = f"复核失败：{e}"[:200]
         return None
     q1["evidence"] = {**ev, "band_review": results}
     if results and all(r["ok"] for r in results):
-        note = "Q1 复核带经本地看图并排复核通过（" + "、".join(f"{r['cid']} {r['sim']}" for r in results) + "：同一人 / 画风 / 清晰都是）"
+        note = "Q1 复核带复核通过（" + "、".join(f"{r['cid']} {r['sim']}" + (f" top-k {r['topk']} 清晰度 {r['sharpness']}" if r.get("mode") == "sharp_only"
+                                                   else "：同一人 / 画风 / 清晰都是") for r in results) + "）"
         q1.update(status="pass", detail=note + "；原判：" + str(q1.get("detail") or ""))
         pf["blocking"] = [x for x in pf.get("blocking") or [] if x != "Q1"]
         pf["reasons"] = [r for r in pf.get("reasons") or [] if not str(r).startswith("Q1")]

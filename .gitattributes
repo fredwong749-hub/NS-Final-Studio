@@ -11,3 +11,8 @@
 *.cmd text eol=crlf
 *.bat text eol=crlf
 *.ps1 text eol=crlf
+
+# K-OPS-F10（FACTORY 11-02）：服务器上执行的脚本 / systemd 单元一律 LF（CRLF 会让 bash 报 set: -: invalid option）
+*.sh text eol=lf
+*.service text eol=lf
+*.env text eol=lf

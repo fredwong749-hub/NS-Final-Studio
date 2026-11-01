@@ -44,7 +44,7 @@ def test_progress_infra_errors_and_quarantine():
 
 def test_counts_and_topbar_wording():
     rt = (ROOT / "services/api/ns_api/render_tasks.py").read_text(encoding="utf-8")
-    assert "RECENT_FAIL_H = 24" in rt and "ok_after" in rt          # K3：近 24 小时、后来没成功过的才算
+    assert "RECENT_FAIL_H = 6 " in rt and "ok_after" in rt          # K3 → r44：近 6 小时、后来没成功过的才算
     btn = (ROOT / "apps/web/src/components/RenderTasks.tsx").read_text(encoding="utf-8")
     assert "在办 {c.rendering} · 排队 {c.queued ?? c.pending}" in btn
     gp = (ROOT / "apps/web/src/components/GpuPanel.tsx").read_text(encoding="utf-8")

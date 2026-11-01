@@ -25,8 +25,37 @@ def judge(path: Path, shot: str) -> dict:
     faces = VQ.gaze_mp(path)
     VQ.merge_gaze(v, faces, prompt)
     VQ.recheck_gaze_band(v, faces, path, prompt)
-    return {"eye_contact": "eye_contact" in (v.get("defects") or []), "evidence": (v.get("checks") or {}).get("eye_contact"),
-            "gaze_mp": v.get("gaze_mp"), "gaze_recheck": v.get("gaze_recheck")}
+    VQ.sanitize(v)
+    checks = v.get("checks") or {}
+    return {"eye_contact": "eye_contact" in (v.get("defects") or []), "evidence": checks.get("eye_contact"),
+            "gaze_mp": v.get("gaze_mp"), "gaze_recheck": v.get("gaze_recheck"),
+            # SENTINEL S8 内容抽检（11-02）：一并透出看图缺陷与契约结果
+            "defects": v.get("defects") or [], "unsure": v.get("unsure") or [],
+            "identity": {"identity_drift": checks.get("identity_drift"), "per_person": [
+                {k: p_.get(k) for k in ("who", "pos", "identity")} for p_ in v.get("people") or [] if isinstance(p_, dict)]},
+            "missing_items": {k: checks.get(k) for k in ("outfit_mismatch", "accessory_mismatch", "shoe_mismatch", "item_on_wrong_person")
+                              if checks.get(k)},
+            "contract": contract_of(path)}
+
+
+def contract_of(path: Path) -> dict | None:
+    """这张图在 takes.json 里的契约结果（Q1 / Q2 / Q9 状态与说明）；不是生产版本的图（实验图）→ None"""
+    p = str(path).replace("\\", "/")
+    if "/data/renders/" not in p:
+        return None
+    rel = p.split("/data/", 1)[1]
+    parts = rel.split("/")
+    tj = ROOT / "data" / parts[0] / parts[1] / parts[2] / "takes.json"
+    if not tj.exists():
+        return None
+    d = json.loads(tj.read_text(encoding="utf-8"))
+    t = next((t for t in d.get("takes") or [] if t.get("file") == rel), None)
+    if not t:
+        return None
+    pf = t.get("postflight") or {}
+    return {"ok": pf.get("ok"), "blocking": pf.get("blocking"),
+            **{i["id"]: {"status": i.get("status"), "detail": str(i.get("detail") or "")[:200]}
+               for i in pf.get("items") or [] if i.get("id") in ("Q1", "Q2", "Q9")}}
 
 
 def main() -> int:

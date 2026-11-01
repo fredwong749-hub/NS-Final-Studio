@@ -1,13 +1,17 @@
 // UIRSI r40：镜头状态彩色标签（全剧总览每格、画布 / 审片每行同一口径）+ 图例。数据与口径见 StatusTags.helpers.ts。
 import "./shotstatus.css";
 import { TAG_HELP, TAG_ORDER, TAG_WORD, tagsTitle, type ShotStatusTags, type TagKind } from "./StatusTags.helpers";
+import { dotOf, statusWord, type MainStatus } from "./pages/seasonDot";
 
 /** 主标签（最严重的一个）；悬停列出全部状态 */
 export function MainTag({ st, size = "sm" }: { st: ShotStatusTags | null | undefined; size?: "xs" | "sm" }) {
   if (!st?.main) return null;
   const n = new Set(st.tags.map((t) => t.kind)).size;
   return (
-    <span className={`stag k-${st.main} ${size}`} title={tagsTitle(st)} data-stag={st.main}>
+    // r44（K-UI-049 / SENTINEL S9）：标签本身中性灰，状态只看前面的小圆点（在跑=蓝呼吸、需要人看=琥珀、已确认=绿，其他不画点）；
+    // 悬停写清主状态和原因（如“看图没过、自动重出第 n/3 次”由 main5.why 给出）
+    <span className={`stag k-${st.main} ${size}`} title={`${statusWord(st as MainStatus)}${(st as MainStatus).why ? `：${(st as MainStatus).why}` : ""}
+${tagsTitle(st)}`} data-stag={st.main} data-dot={dotOf(st as MainStatus) ?? "none"}>
       {TAG_WORD[st.main]}
       {n > 1 ? <em>+{n - 1}</em> : null}
     </span>

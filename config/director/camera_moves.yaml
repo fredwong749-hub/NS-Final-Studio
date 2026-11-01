@@ -1,0 +1,267 @@
+# 运镜词表（单一事实来源；DIRECTOR，总调度 fredw-2b 派 L-107，2026-11-02）
+# 项目方 11-02 03:1x 原话：“我发现了一些 AI 的运动镜头，需要你把这些内容放到镜头的提示词里面去……1. 让 Master Agent、剧本 Agent
+# 和导演 Agent 学会这个事情，并写到本地规则里。2. 在 Season 2 里面，可以把这些内容写进去。”
+# 资料：docs/reference/camera_moves_20261102.md（项目方粘贴的“AI 视频运镜指令大全”，适配 Runway / 可灵 / 剪映）。
+# 本项目视频模型是 Pika Flex：每种运镜在 Pika 上 A/B（data/ab/video_rca/cm_r1/，2 seed，判据见 ab_criteria），
+# 通过的才 enabled: true；没过 / 没测的 enabled: false 并写原因。K-REN-801 / K-EDT-811 / camera_norm / cut_plan 都读本文件，不再写死。
+# 读写：services/agent/ns_agent/camera_vocab.py（load / match / clause / enabled_ids）。改这里要同步跑 tests/test_director.py。
+schema: nsfs.camera_moves/1
+version: cm-v1-2026-11-02
+ab_criteria:
+  doc: 每种运镜在同一镜（ep10-S2 中景单人坐姿，S★ R0 首帧）上只换运镜句，2 seed；全部满足才 enabled
+  rules:
+    - {id: AB1, text: "成片运动项：score_clip mean ≥ 0.5（不站桩）且无镜内硬切（cuts = 0）"}
+    - {id: AB2, text: "面部稳定：林晚 SFace 中位 ≥ 0.30 且 p10 ≥ 0.25（与基线 static 同口径）"}
+    - {id: AB3, text: "无分身 / 多肢：V6 dup_side_frac ≤ 0.15 且 extra_hand_frac ≤ 0.05 且 people 与首帧一致"}
+    - {id: AB4, text: "J4 去抖后可用：J4 ≤ 1.3 或 J4_z < 3（> 则记‘4 帧一顿’软项，由 dejudder 处理，不单独否决）"}
+    - {id: AB5, text: "景别不跑档：size_measured 与首帧景别差 ≤ 1 档（Pika 本身会往远退，RCA_r1 C16）"}
+  seeds: [20261102, 20261103]
+  shot: ep10-S2
+constraints_en: >-
+  Her face stays stable and sharp throughout, with no clipping through objects, no duplicate people, and no on-screen text or watermark.
+constraints_zh: 人物面部稳定、无穿模卡顿、禁止分身、无字幕水印
+# amp：只用 small（K-PRM-101 / Pika P16）；speed 词一律不写（项目方：节奏慢）；dir 由导演层按视线 / 站位给 left|right
+moves:
+  - id: static
+    zh: 固定镜头
+    en: Static Shot
+    aliases: ["固定镜头", "固定机位", "static shot", "static camera", "static", "fixed camera", "机位固定"]
+    template: "The camera holds a static shot"
+    params: {lens: "35mm", aperture: "T1.4–T2.8"}
+    sizes: [特写, 近景, 中近景, 中景, 中全景, 全景]
+    moods: [对白, 克制, 停顿, 大动作]
+    conflicts: []
+    split: null
+    enabled: true
+    ab: {status: baseline}
+    reason: 基线（现行 25 镜用它）
+  - id: push_in
+    zh: 推近
+    en: Dolly In
+    aliases: ["推近", "推镜", "缓慢推近", "小幅推近", "镜头缓推", "缓缓推近", "push in", "push-in", "dolly in"]
+    template: "The camera pushes in with small amplitude"
+    params: {lens: "50mm"}
+    sizes: [近景, 中近景, 中景, 中全景]
+    moods: [情绪推高, 发现, 高点]
+    conflicts: [arc, zoom_in, pull_out]
+    split: null
+    enabled: true
+    ab: {status: baseline}
+    reason: 基线（现行 60 镜用它；Pika P16 推近只写小幅）
+  - id: pull_out
+    zh: 拉远
+    en: Dolly Out
+    aliases: ["拉远", "缓慢拉远", "后拉", "pull out", "pull-out", "dolly out", "pulls out"]
+    template: "The camera pulls out with small amplitude"
+    params: {lens: "35mm"}
+    sizes: [近景, 中景]
+    moods: [疏离, 收尾]
+    conflicts: [push_in, arc, zoom_in]
+    split: null
+    enabled: false
+    ab: {status: pending}
+    reason: 待 A/B；现行依据 RCA_r1 C16（视频比首帧再远 ≥1 档 11/55），拉远会叠加退档
+  - id: pan
+    zh: 摇镜（水平）
+    en: Pan
+    aliases: ["摇镜", "横摇", "左摇", "右摇", "pan left", "pan right", "pan"]
+    template: "The camera pans {dir} with small amplitude"
+    params: {}
+    sizes: [中景, 中全景, 全景]
+    moods: [交代空间, 视线引导]
+    conflicts: [truck, arc]
+    split: null
+    enabled: false
+    ab: {status: pending}
+    reason: 待 A/B
+  - id: tilt_up
+    zh: 上摇
+    en: Tilt Up
+    aliases: ["上摇", "缓慢上摇", "自下而上摇", "中幅上摇", "tilt up"]
+    template: "The camera tilts up with small amplitude"
+    params: {}
+    sizes: [近景, 中景, 中全景]
+    moods: [揭示, 从手到脸]
+    conflicts: [pedestal_up]
+    split: null
+    enabled: false
+    ab: {status: pending}
+    reason: 待 A/B（现行 5 镜用）
+  - id: tilt_down
+    zh: 下摇
+    en: Tilt Down
+    aliases: ["下摇", "缓慢下摇", "自上而下摇", "tilt down"]
+    template: "The camera tilts down with small amplitude"
+    params: {}
+    sizes: [近景, 中景, 中全景]
+    moods: [揭示, 从脸到手, 低落]
+    conflicts: [pedestal_up]
+    split: null
+    enabled: false
+    ab: {status: pending}
+    reason: 待 A/B（r4 加入：项目方要求更有画面感）
+  - id: truck
+    zh: 横移
+    en: Truck Left/Right
+    aliases: ["横移", "向右横移", "向左横移", "小幅横移", "侧移", "truck right", "truck left", "tracking shot", "横向跟拍", "跟拍"]
+    template: "The camera trucks {dir} with small amplitude"
+    params: {fps: "24"}
+    sizes: [中景, 中全景, 全景]
+    moods: [跟随, 行走]
+    conflicts: [pan, arc]
+    split: null
+    enabled: false
+    ab: {status: pending}
+    reason: 待 A/B（现行 4 镜用）
+  - id: pedestal_up
+    zh: 升镜
+    en: Pedestal Up
+    aliases: ["升镜", "上升", "镜头升起", "pedestal up", "crane up", "摇臂升起"]
+    template: "The camera pedestals up with small amplitude"
+    params: {}
+    sizes: [中景, 中全景, 全景]
+    moods: [抽离, 收尾]
+    conflicts: [tilt_up]
+    split: null
+    enabled: false
+    ab: {status: pending}
+    reason: 待 A/B
+  - id: zoom_in
+    zh: 变焦推近
+    en: Zoom In
+    aliases: ["变焦", "变焦推近", "极速变焦", "zoom in", "crash zoom"]
+    template: "The camera zooms in with small amplitude"
+    params: {}
+    sizes: [近景, 中近景, 中景]
+    moods: [震惊, 定格表情]
+    conflicts: [push_in, arc]
+    split: null
+    enabled: false
+    ab: {status: pending}
+    reason: 待 A/B
+  - id: arc
+    zh: 环绕
+    en: Orbit / Arc
+    aliases: ["环绕", "小幅度环绕", "匀速环绕", "orbit", "arc shot", "arc"]
+    template: "The camera arcs slowly around her with small amplitude"
+    params: {lens: "50mm"}
+    sizes: [近景, 中近景, 中景]
+    moods: [对峙, 心境转变]
+    conflicts: [push_in, pull_out, zoom_in, truck, pan]
+    split: "环绕 + 推拉 → 拆成两镜：先推近（push_in）、下一镜再环绕（资料 §4 避坑）"
+    enabled: false
+    ab: {status: pending}
+    reason: 待 A/B；资料 §4：环绕易与推拉冲突
+  - id: focus_pull
+    zh: 焦点转移
+    en: Focus Pull
+    aliases: ["焦点转移", "移焦", "转焦", "rack focus", "focus pull"]
+    template: "The camera holds a static shot while the focus pulls from the foreground to her face"
+    params: {aperture: "T1.4"}
+    sizes: [近景, 中近景, 中景]
+    moods: [注意力转移, 揭示]
+    conflicts: [push_in, arc, zoom_in]
+    split: null
+    enabled: false
+    ab: {status: pending}
+    reason: 待 A/B
+  - id: slow_motion
+    zh: 慢镜头
+    en: Slow Motion
+    aliases: ["慢镜头", "慢动作", "升格", "slow motion"]
+    template: "The camera holds a static shot as the moment plays in slow motion"
+    params: {fps: "240"}
+    sizes: [特写, 近景, 中景]
+    moods: [高点, 冲击]
+    conflicts: [whip_pan]
+    split: null
+    enabled: false
+    ab: {status: pending}
+    reason: 待 A/B；资料 §4：慢镜头加“无渐变过渡”
+  - id: foreground_pass
+    zh: 前景遮挡
+    en: Foreground Pass
+    aliases: ["前景遮挡", "前景擦镜", "foreground pass"]
+    template: "The camera trucks {dir} with small amplitude past a softly blurred foreground edge"
+    params: {lens: "40mm", aperture: "T1.4"}
+    sizes: [近景, 中近景, 中景]
+    moods: [窥视, 层次]
+    conflicts: [arc, pan]
+    split: null
+    enabled: false
+    ab: {status: pending}
+    reason: 待 A/B
+  - id: whip_pan
+    zh: 甩镜
+    en: Whip Pan
+    aliases: ["甩镜", "快速甩镜", "whip pan"]
+    template: "The camera whip-pans {dir} with motion blur, then settles sharply"
+    params: {}
+    sizes: [中景, 中全景]
+    moods: [转场, 惊吓]
+    conflicts: [slow_motion, arc]
+    split: null
+    enabled: false
+    ab: {status: pending}
+    reason: 待 A/B；资料 §4：甩镜强调“运动模糊 + 瞬间清晰”
+  # ---- 不测、直接 disabled（项目已有规则或模型做不到）
+  - id: crane_spiral
+    zh: 上升环绕
+    en: Crane + Orbit
+    aliases: ["上升环绕", "摇臂螺旋", "螺旋上升"]
+    template: null
+    sizes: []
+    moods: []
+    conflicts: [arc, pedestal_up]
+    split: "拆成两镜：先升镜（pedestal_up），下一镜再环绕（arc）；每镜一种运镜（K-PRM-101）"
+    enabled: false
+    ab: {status: not_tested}
+    reason: 复合运镜，一镜一种运镜（K-PRM-101），按 split 拆
+  - id: variable_speed
+    zh: 变速推近
+    en: Variable Speed
+    aliases: ["变速推近", "三段速度", "变速"]
+    template: null
+    sizes: []
+    moods: []
+    conflicts: []
+    split: "拆成：推近（push_in）一镜 + 剪辑里定格 / 变速（后期做，不进 Pika 提示词）"
+    enabled: false
+    ab: {status: not_tested}
+    reason: Pika 提示词不写速度（K-PRM-101、项目方节奏要求），速度变化交给剪辑
+  - id: pov
+    zh: 主观视角
+    en: POV
+    aliases: ["主观视角", "第一人称", "pov", "穿越机"]
+    template: null
+    sizes: []
+    moods: []
+    conflicts: []
+    split: "改写成机位位置（例：from just behind his shoulder），K-PRM-102"
+    enabled: false
+    ab: {status: not_tested}
+    reason: 项目规则不用 POV（docs/ep02_iter/camera_language.md §1；K-PRM-102 主观视角写成机位位置）
+  - id: handheld
+    zh: 手持晃动
+    en: Handheld / Shake
+    aliases: ["手持", "晃动", "手持晃", "shake", "handheld"]
+    template: null
+    sizes: []
+    moods: []
+    conflicts: []
+    split: null
+    enabled: false
+    ab: {status: not_tested}
+    reason: 项目规则不用 Shake（camera_language.md §1）；晃动叠加 Pika 4 帧一顿
+  - id: roll
+    zh: 旋转
+    en: Roll
+    aliases: ["旋转镜头", "roll", "地平线翻滚"]
+    template: null
+    sizes: []
+    moods: []
+    conflicts: []
+    split: null
+    enabled: false
+    ab: {status: not_tested}
+    reason: 项目规则不用 Roll（camera_language.md §1）

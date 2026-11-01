@@ -39,7 +39,7 @@ STAGE_TYPE = {"image": "首帧", "first": "首帧", "last": "尾帧", "video": "
               "frame": "首帧"}
 TYPE_FIELD = {"首帧": "first_frame", "尾帧": "last_frame_target", "视频": "video"}
 _cache: dict = {"at": 0.0, "key": None, "val": None}
-RECENT_FAIL_H = 24    # UIRSI r42 → r43（OVERVIEW_REDESIGN K3）：顶栏只挂最近 24 小时、且后来没成功过的失败
+RECENT_FAIL_H = 6     # UIRSI r42 → r43 → r44（总调度 r44：顶栏失败口径改成“近 6 小时”）：只挂最近 6 小时、且后来没成功过的失败
 
 
 # ---------------------------------------------------------------- 来源

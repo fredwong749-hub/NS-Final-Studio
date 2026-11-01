@@ -121,11 +121,10 @@ decisions:
     decision: 59 项尽力版挡住下游 42 项 → reset-best-effort 43 项
     trigger: GPU 空转、ready 对象为 0
     basis: 尽力版在规则 / 资产修好之前产生
-    coded: partial
-    where: tools/autopilot/producer.py reset_best_effort（手动命令）；retry.best_effort_auto_reset
+    coded: "yes"
+    where: tools/autopilot/producer.py（K-OPS-E11 自动重置 / K-OPS-E12 不进合成）；gates.best_effort_policy
     decider_now: code
     decider_target: code
-    plan: 总调度 02:2x 定口径（gates.best_effort_policy）：不进合成、auto_force 只对过契约的镜、规则 / 资产版本变 → 自动 reset；DEBUG-RSI 实现中
   - id: DJ-13
     cat: 资源
     decision: 跳板慢 → 生产改服务器常驻；代码分级推送（先 ≤10 MB 起卡）
@@ -149,11 +148,10 @@ decisions:
     decision: 切线路全局 pause 12 分钟未恢复 → 直接 resume；以后只许滚动切换、暂停 ≤3 分钟自动恢复
     trigger: 系统 / agent 暂停超时
     basis: GPU 空转
-    coded: partial
-    where: resources.pause_max_s → tools/autopilot/policy.py pause_decision（唯一实现；运维暂停到 expires_at 自动恢复，显式暂停只告警）
-    decider_now: claude
+    coded: "yes"
+    where: tools/autopilot/policy.py pause_decision → tools/autopilot/producer.py 每拍（K-OPS-E08）；resources.pause_max_s
+    decider_now: code
     decider_target: code
-    plan: DEBUG-RSI 把 pause_decision 挂进 producer 每拍 + set_paused 强制带 reason_kind / expires_at（总调度 D5 已批）
   - id: DJ-16
     cat: 资源
     decision: 打分积压闸 = 2 × 道数 × 看图实例数；顶满不派单

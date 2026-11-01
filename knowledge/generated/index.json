@@ -1,32 +1,32 @@
 {
- "kb_version": "kb-20261102-31f413be",
- "n": 536,
+ "kb_version": "kb-20261102-6d90d2e7",
+ "n": 551,
  "by_domain": {
-  "render": 81,
+  "render": 83,
   "prompt": 27,
-  "writer": 71,
+  "writer": 74,
   "edit": 47,
-  "review": 64,
+  "review": 65,
   "loop": 9,
   "asset": 43,
-  "ops": 136,
+  "ops": 145,
   "ui": 58
  },
  "by_link": {
   "P0-P1": 20,
   "P1-P2": 2,
-  "P10-P11": 56,
-  "P11-P12": 25,
+  "P10-P11": 58,
+  "P11-P12": 26,
   "P11-RETRY": 47,
   "P2-P3": 3,
-  "P3-P4": 86,
+  "P3-P4": 89,
   "P4-P5": 39,
-  "P4-P6": 25,
-  "P4-P7": 22,
+  "P4-P6": 26,
+  "P4-P7": 23,
   "P4-P9": 16,
-  "P5-P6": 154,
-  "P6-P7": 29,
-  "P7-P8": 105,
+  "P5-P6": 163,
+  "P6-P7": 30,
+  "P7-P8": 106,
   "P8-P10": 18,
   "P8-P9": 12,
   "P9-P10": 20
@@ -1116,6 +1116,48 @@
    "_file": "knowledge/rules/asset_ops.yaml"
   },
   {
+   "id": "K-OPS-W20",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "“当前剧”只有一个来源——config/pipeline/runs.json 的 primary；界面 / API 不准按目录或文件修改时间猜当前剧，切剧走明确的 run / project 参数",
+   "when": "任何代码要决定“当前是哪部剧（run / project）”，或在多部剧的目录里兜底遍历",
+   "then": "用 services/api/ns_api/current_run.py（primary_run / order_runs，内部读 tools/autopilot/runs.py）；多部剧遍历顺序 = primary 在前、其余按 runs.json priority、再按名字，不看 mtime；primary 不在该页面的项目表里就 404 说清楚，不退回猜测。只做列表展示的“新的在前”排序可以用 mtime，但须在测试 ALLOW 里登记",
+   "check": "tests/test_current_run.py",
+   "evidence": [
+    {
+     "src": "services/api/ns_api/character_hub.py",
+     "note": "UIAUDIT N1（总调度 11-02 P1）：current_project 按 run_dir 修改时间取最大，series10_s2 目录一出现，人物中心当前剧被猜成第二季，林晚人物页 404；同类写法另有 scene_assets.run_candidates、story_runs._story_images / shot_asset_refs、live._live_run 共 5 处，已全改"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/asset_ops.yaml"
+  },
+  {
+   "id": "K-OPS-W21",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "服务器侧（及驱动服务器的工具）读 run 登记表一律 strict：runs.json 缺失、损坏或没写 primary 就失败，不静默回退默认剧",
+   "when": "resident_sync、producer、canvas_api、full_redo reset-redo 等在服务器上跑或给服务器下指令的代码取主 run",
+   "then": "调 tools/autopilot/runs.py 的 primary_run(strict=True) / list_runs(strict=True)，缺登记抛 RunRegistryMissing（K-OPS-F09 失败关闭）；笔记本 UI / 测试用默认 strict=False 保持回退 DEFAULT_PRIMARY",
+   "check": "tests/test_current_run.py",
+   "evidence": [
+    {
+     "src": "tools/autopilot/runs.py",
+     "note": "SYSARCH 11-02 整合 4-6：runs.py 读不到 runs.json 静默回退 series10_v1，与 K-OPS-F09 冲突；resident_sync 已改 RUN_ID = primary_run(strict=True)"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/asset_ops.yaml"
+  },
+  {
    "id": "K-AST-201",
    "enforced": false,
    "domain": "asset",
@@ -1569,7 +1611,7 @@
    "id": "K-EDT-811",
    "domain": "edit",
    "link": "P3-P4",
-   "title": "导演层运镜：一种、小幅、Pika 做得到；大动作不叠运镜，不拉远 / 环绕",
+   "title": "导演层运镜：只从运镜词表 enabled 的运镜里按节拍 / 情绪 / 景别选（decider=code）；大动作不叠运镜",
    "when": "tools/director/cut_plan.py 给每镜定 camera",
    "then": "对白镜固定或小幅推近；开场 / 换场第一镜固定；情绪强度 3 小幅推近；有大动作固定；写作方写了拉远 / 环绕 / 晃动 / 缓慢 → 改写并标 flags",
    "evidence": [
@@ -1741,28 +1783,54 @@
    "id": "K-REN-801",
    "domain": "render",
    "link": "P4-P6",
-   "title": "编译层运镜句规范化到 Pika 稳定范围（拉远 / 晃动 → 固定；环绕 → 小幅推近或固定；中 / 大幅 → 小幅；去速度词），改动带规则号记录",
+   "title": "编译层运镜句按运镜词表规范化：enabled 的按模板写（小幅、无速度词），disabled / 词表外的退回固定（环绕无大动作退推近）",
    "when": "Pika 作业提示词（ns_recipes.prompt.build_base → jobs.json prompt_notes）与编译稿（ns_agent.compiler → CompiledShot.h3_norm）",
-   "then": "ns_agent.camera_norm.normalize_video_prompt；H3 正文不变量 = 只有项目方覆盖、或带规则号的编译层规范化能改（tests/test_h3_prompt.py::test_h3_norm_only_change 倒回规范化必须逐字等于原文）；开关 config/post/director.json camera_norm",
+   "then": "ns_agent.camera_norm.normalize_video_prompt 读 config/director/camera_moves.yaml 的 enabled 字段判定（不再写死“一种、小幅、不拉远、不环绕”）；每处改动记 {rule, from, to, move, why, vocab}；H3 正文不变量 = 只有项目方覆盖或带规则号的编译层规范化能改",
    "params": {
     "config/post/director.json.camera_norm": true
    },
    "evidence": [
     {
-     "src": "config/prompts/hollywood_pika_reference.md P3 P16"
+     "src": "config/director/camera_moves.yaml",
+     "note": "L-107 运镜词表（单一事实来源）；enabled 由 Pika A/B 定（K-REV-806）"
     },
     {
      "src": "docs/video_rca/RCA_r1.md §1 C16",
-     "note": "视频比首帧再远 ≥1 档 11/55"
+     "note": "视频比首帧再远 ≥1 档 11/55（拉远默认不放开的依据）"
     },
     {
      "src": "data/import/script_v2.json",
-     "note": "现行剧本 8 镜运镜句被规范化（拉远 2、环绕 1、中幅 5）；新剧本视频 0/102，不浪费已出视频（总调度 11-02 批复）"
+     "note": "按 cm-v1（enabled = 固定、推近）现行剧本 16 镜运镜句被规范化；新剧本视频 0/102"
     }
    ],
    "check": [
     "tests/test_director.py",
     "tests/test_h3_prompt.py"
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/director.yaml"
+  },
+  {
+   "id": "K-REV-806",
+   "domain": "review",
+   "link": "P4-P6",
+   "title": "运镜进词表 enabled 前必须过 Pika A/B（同镜同首帧只换运镜句，2 seed，AB1–AB5）",
+   "when": "新运镜 / 改模板",
+   "then": "tools/video_rca/lab.py export 在服务器道空档跑（生产优先）→ tools/director/camera_ab.py 按 ab_criteria 判（运动 mean ≥0.5 且无硬切、林晚 SFace 中位 ≥0.30 且 p10 ≥0.25、V6 无分身多肢、景别不跑档；J4 只记软项）→ 写回词表 enabled / ab / reason，并重生成 K-WRT-804 写作文本；decider=code",
+   "evidence": [
+    {
+     "src": "docs/reference/camera_moves_20261102.md",
+     "note": "项目方 11-02 03:1x 资料（适配 Runway / 可灵，非 Pika）"
+    },
+    {
+     "src": "data/ab/camera_moves/cm_r1.json",
+     "note": "13 种运镜 × 2 seed，ep10-S2 中景单人"
+    }
+   ],
+   "check": [
+    "tests/test_director.py"
    ],
    "confidence": "medium",
    "status": "确认",
@@ -1870,6 +1938,37 @@
     {
      "src": "data/film_score/ep01_v2.json A3.3",
      "note": "代理判 0/1 不过 → V7 口径 S4 / S5 2/2 过，ep01_v2 28.7/50"
+    }
+   ],
+   "check": [
+    "tests/test_director.py"
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/director.yaml"
+  },
+  {
+   "id": "K-WRT-804",
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "剧本分镜“镜头运动”只写运镜词表里的名字（第二季 P3 / P4 起执行；第一季不返修，编译层规范化）",
+   "when": "每镜 motion 第一句（镜头运动）",
+   "then": "只写 config/director/camera_moves.yaml 的中文名 / 别名，每镜一种；lint = tools/director/cut_plan.py lint（K-WRT-804 不在词表）；writer_text 由 tools/director/camera_ab.py 按词表 enabled 自动重生成",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "镜头字段"
+    }
+   ],
+   "writer_text": "镜头运动字段只写运镜词表里的名字，每镜一种，幅度写“小幅”，不写速度词。当前可用：固定镜头（对白、克制、停顿、大动作；特写/近景/中近景/中景/中全景/全景）；推近（情绪推高、发现、高点；近景/中近景/中景/中全景）。词表里其余（拉远、摇镜（水平）、上摇、横移、升镜、变焦推近、环绕、焦点转移、慢镜头、前景遮挡、甩镜、上升环绕、变速推近、主观视角、手持晃动、旋转）Pika 上没验证通过，写了会被编译层改成固定镜头；复合运镜按词表拆成两镜。",
+   "evidence": [
+    {
+     "src": "config/director/camera_moves.yaml"
+    },
+    {
+     "src": "docs/reference/camera_moves_20261102.md",
+     "note": "项目方 L-107：Season 2 写进去"
     }
    ],
    "check": [
@@ -4452,6 +4551,27 @@
    "_file": "knowledge/rules/ops_debug.yaml"
   },
   {
+   "id": "K-OPS-E15",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "多剧并行 = 一部剧一个 producer 进程（serve --run <run>）；主剧沿用旧路径；非主剧账本 / 租约 / 登记表放 data/producer/runs/<run>/、渲染放 data/renders/<run>/；低优先级剧在高优先级剧还有 ready 对象时不派",
+   "when": "config/pipeline/runs.json 里有多部 status=producing 的剧",
+   "then": "producer 进程启动时按 run_env 设 NS_RENDERS_DIR / NS_SCRIPT_JSON（ns_render.pipeline 读，takes.json 跨剧不共用）；Paths(run_id) 分目录；dispatch_frames 先查 higher_priority_busy（priority 数字小 = 优先），记 priority_yield；不打断在途",
+   "check": "tests/test_debug_rsi.py::test_e15_multi_run_paths_and_priority, tests/test_debug_rsi.py::test_e15_pipeline_renders_env",
+   "evidence": [
+    {
+     "src": "docs/AUTOPILOT.md",
+     "note": "§0.1 DISTILL 多剧接口；总调度 02:4x 批准；HOLLYWOOD 第二季 series10_s2 priority 10"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_debug.yaml"
+  },
+  {
    "id": "K-OPS-D02",
    "domain": "ops",
    "link": [
@@ -5579,6 +5699,136 @@
    "status": "确认",
    "date": "2026-11-01",
    "_file": "knowledge/rules/ops_iteration.yaml"
+  },
+  {
+   "id": "K-OPS-S02",
+   "domain": "ops",
+   "link": [
+    "P5-P6",
+    "P10-P11"
+   ],
+   "title": "每条 SLO（docs/master/SLO.md S1–S13）必须有一个常驻探针（tools/sentinel/probes.py），阈值只从 config/policies/sentinel.yaml 读；新增 SLO 先加探针再算上线",
+   "when": "新增或修改一条 SLO，或项目方 / 总调度先于系统发现一个问题（记“探针缺口”）",
+   "then": "在 sentinel.yaml 加该 SLO 的阈值项（value / source / enforced_by / status / owner / owner_loop / every_s），probes.py 加 p_sN 并登记 PROBES / CFG_OF，judges.py 加纯函数判定；sentinel.py serve 每 60 s 一拍按 every_s 调度；回放补一条证明能比人早发现",
+   "check": "tests/test_sentinel.py::test_gpu_idle_needs_ready_and_span, tests/test_sentinel.py::test_score_p50_and_backlog, tests/test_sentinel.py::test_human_wait_and_gap",
+   "evidence": [
+    {
+     "src": "docs/overnight/morning_20261102.md",
+     "note": "11-02 夜间 9 次问题全由项目方 / 总调度目检先发现（暂停 12 分钟、gpu36 两边不派、打分积压、:8870 旧服务、refs 缺失、vqa.json 被还原、gpu33 全 0%、底座断、看镜头漏检）"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_sentinel.yaml"
+  },
+  {
+   "id": "K-OPS-S03",
+   "domain": "ops",
+   "link": [
+    "P5-P6",
+    "P10-P11"
+   ],
+   "title": "违约自动开工单到 data/sentinel/issues.jsonl（只追加；id / SLO / 证据 / 首次发现 / 负责 loop / 状态 / decider=code）；同一 key 只开一张；恢复后自动 resolved 并写恢复时间；没测到不算恢复",
+   "when": "任何探针返回 violated=true，或此前开着的 key 这一拍测到正常",
+   "then": "只经 tools/sentinel/store.py IssueStore.apply 写工单；data/sentinel/open.json 是看板 / 总调度 / 编排器读的未关闭快照；口径变了不再测的 key 用 sentinel.py retire（status=retired，写原因），不许手删",
+   "check": "tests/test_sentinel.py::test_store_dedup_and_resolve, tests/test_sentinel.py::test_store_missing_data_does_not_resolve, tests/test_sentinel.py::test_store_severity_and_owner_override",
+   "evidence": [
+    {
+     "src": "tools/sentinel/store.py",
+     "note": "11-02 02:48 首拍 15 张工单（S13 等总调度 42/39 个对象、S6 配置不一致、S5 cut 失败、S4 跳板 216/小时），无重复开单"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_sentinel.yaml"
+  },
+  {
+   "id": "K-OPS-S04",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "探针只读且不加服务器负载——远程每台每拍只走一次 rssh 常驻主连接的合并只读调用（tools/sentinel/remote_probe.py，timeout + nice -n 19 + 线程=1），不新建 ssh、不改生产文件、不重启服务",
+   "when": "写或改任何 SENTINEL 探针 / 采样",
+   "then": "远程数据加进 remote_probe.py 这一次调用里（不要另起 rssh.run）；本机子进程用 BELOW_NORMAL 优先级 + timeout；界面探针复用 apps/web/e2e/uiaudit/detect.mjs（只读查看令牌，非 GET 全拦），不碰项目方账号",
+   "check": "tools/qa/arch_scan.py, tests/test_netfix.py::test_no_new_direct_ssh_outside_allowlist",
+   "evidence": [
+    {
+     "src": "tools/sentinel/remote_probe.py",
+     "note": "11-02 实测 gpu33 一次合并调用 39 s（跳板慢时），每拍每台 1 次；K-OPS-N09 / K-OPS-V13"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_sentinel.yaml"
+  },
+  {
+   "id": "K-OPS-S05",
+   "domain": "ops",
+   "link": [
+    "P5-P6",
+    "P11-P12"
+   ],
+   "title": "每个“人先发现”的事件都要在回放里证明探针能更早发现（tools/sentinel/replay.py + 夹具 tests/fixtures/sentinel/replay_20261102.json），提前量 > 0 才算补上缺口",
+   "when": "项目方 / 总调度指出一个系统没发现的问题",
+   "then": "把当时的日志证据加进 replay.py extract（只读拉服务器日志用 fetch_replay_src.py），EV 表加事件 → 工单 key、HUMAN 表写人发现时间与出处，跑 replay.py run；test_replay_beats_humans 断言 lead_min > 0",
+   "check": "tests/test_sentinel.py::test_replay_beats_humans",
+   "evidence": [
+    {
+     "src": "data/sentinel/replay_20261102.json",
+     "note": "11-02 回放 9 个事件全部提前：打分积压 72 分钟、gpu33 全 0%（S13 等总调度）38 分钟、:8870 22 分钟、vqa.json 3–10 分钟、暂停 8 分钟、gpu36 9 分钟、refs 7 分钟、底座 5 分钟、看镜头 2.5 分钟"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_sentinel.yaml"
+  },
+  {
+   "id": "K-OPS-S06",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "探针自己坏了必须开工单——探针抛异常记 {SLO}:probe_fault，输入读不到 / 远程采样失败记 S0，读失败一律不当“正常”、不关单",
+   "when": "探针读文件、解析 JSON、远程调用失败，或探针函数抛异常",
+   "then": "probes.jl 等读入口失败写 probes.UNKNOWN；tick 把 UNKNOWN 和 ctx.errors 变成 S0 工单；except 里直接返回常量的地方必须写",
+   "check": "tests/test_sentinel.py::test_probe_fault_is_ticket, tools/qa/arch_scan.py",
+   "evidence": [
+    {
+     "src": "tools/qa/arch_scan.py",
+     "note": "11-02 sv-04 cut 被 arch_scan 棘轮挡：sentinel 探针 7 处读失败返回空值（失败开放），改为 UNKNOWN + S0 工单"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_sentinel.yaml"
+  },
+  {
+   "id": "K-OPS-S07",
+   "domain": "ops",
+   "link": [
+    "P5-P6",
+    "P7-P8"
+   ],
+   "title": "任何对象等人决定（等总调度 / 等项目方）超过 10 分钟即违约（S13）；GPU 空 + ready 0 + pending 多单独报“流水线断档”",
+   "when": "producer 登记表出现 waiting_for 含“等总调度 / 等项目方 / 总调度复核 / 总调度定”的对象，或 GPU 空闲时 ready=0",
+   "then": "SENTINEL S13 开单派 DEBUG-RSI；生产侧不许新增“等人”出口（DEBUG-RSI 正在删“等总调度定”，只留尽力版 + 工单）",
+   "check": "tests/test_sentinel.py::test_human_wait_and_gap",
+   "evidence": [
+    {
+     "src": "data/sentinel/replay_src/gpu33_producer_log.jsonl.gz",
+     "note": "02:22 gpu33 全卡 0% 根因 = 77 个首帧“驳回重出 2 次都没换上，等总调度定”、ready=0；回放 01:44 已开 S13 工单（早 38 分钟）"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_sentinel.yaml"
   },
   {
    "id": "K-OPS-S01",
@@ -7239,6 +7489,58 @@
    "status": "确认",
    "date": "2026-11-01",
    "_file": "knowledge/rules/render_imggen_s10.yaml"
+  },
+  {
+   "id": "K-REN-901",
+   "domain": "render",
+   "link": [
+    "P6-P7"
+   ],
+   "title": "按景别删句时保住主语——被删分句以人名开头，名字补到下一个保留分句前；视线句不删；回归 0 孤儿",
+   "when": "ns_agent.framing.strip_fullbody（脸部特写删站姿 / 全身句，K-REN-123）、framing.filter_parts（按景别删看不见的部件，K-REN-101 / 707），compiler.compile_shot 对正文调用时传 subjects=在画角色",
+   "then": "被删分句以在画角色名开头 → 名字作为单独一句插到下一个保留分句前（下一句本身以人名开头或是通用质感句时不插）；名字在宾语位置（“站在林晚侧后方”）不当主语；含“视线 / 目光 + 落在 / 看向…”的视线句不因部件词被删。没有删到带主语分句的镜头提示词逐字不变。开关 config/recipes/image_framing.json keep_subject（false = 旧行为）",
+   "check": [
+    "tests/test_subject_binding.py",
+    "tools/imgfix/orphan_check.py"
+   ],
+   "evidence": [
+    {
+     "src": "data/renders/ep06/S2/takes.json 第 6 版",
+     "note": "剧本“林晚跪坐…雾霾天蓝色及腰直发…；顾沉站在画面右侧，白衬衫…”；strip_fullbody 删掉“林晚跪坐…”“顾沉站在…”两句（主语跟着丢），无主语描写紧跟【顾沉】锁 → 顾沉长出蓝色长直发和水晶甲；Q2 外层探针顾沉短发概率 0.0049"
+    },
+    {
+     "src": "docs/research/imglab/05_ep06S2_bleeding_rca.md",
+     "note": "102 镜旧编译：小句归属与剧本不一致 23 镜 236 句（orphan_check misowned）；新编译 0；提示词改动 29 镜，其余 73 镜逐字不变（docs/research/imglab/data/prompt_diff_F1F3.json）"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/render_imglab.yaml"
+  },
+  {
+   "id": "K-REN-902",
+   "domain": "render",
+   "link": [
+    "P4-P7"
+   ],
+   "title": "脸部特写 + ≥2 人露脸 = 构图自相矛盾；编译改双人近景首句，preflight I6 拦“脸占六成 + 两张脸都入画”，写作 lint 阻断",
+   "when": "compiler.compile_shot（framing.two_face_close_conflict）；gen_contract.preflight I6（framing.framing_clash）；写作 lint（HOLLYWOOD 接 framing.two_face_close_conflict）",
+   "then": "特写类 + 脸部主体 + 露脸人数 ≥2 → 首句用 TWO_FACE_CLOSE_LEAD（双人近景：两张脸各约三成，Q3 档差 1 在容差内）；提示词同时含“脸部占画面约六成”与“两张脸都清晰入画”→ I6 fail；写作侧：特写只放一个露脸人物，双人露脸至少写近景（或焦点人物特写 + 对方局部 / 背影）。开关 image_framing.json two_face_close（off = 旧行为）",
+   "check": [
+    "tests/test_subject_binding.py",
+    "tools/imgfix/orphan_check.py"
+   ],
+   "evidence": [
+    {
+     "src": "data/renders/ep06/S2/takes.json 第 6 版",
+     "note": "要特写（档 1），出双人中景，脸高 0.185（档 2）；同类 ep04-S1、ep06-S1/S9、ep07-S1 共 5 镜"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/render_imglab.yaml"
   },
   {
    "id": "K-REN-Q21",
@@ -12529,6 +12831,10 @@
     {
      "src": "data/vqa/idgate_calib/sims_L086.json",
      "note": "ep02-S10 换人 3 张 0.240–0.258 全拦；林晚正例 73 张最低 0.669；ep02-S9 v1/v2 0.807 身份分区分不出（ref2va 与 L-086 互相 0.986）"
+    },
+    {
+     "src": "docs/vqa/GATE_CALIBRATION.md §17",
+     "note": "L-098 身份库 top-k（随 sv-05）：有效分 = 锚 L-086 + 库帧前 3 平均，锚 < 0.50 时只用锚；锚本身没过线时即使 top-k 过线也进复核带 sharp_only（只查清晰度 ≥42.3，不调看图）——A/B 里 03-S2 v14 被 top-k 抬到 0.611/0.650，不加这条会漏放。入库：过契约 + 未驳回 + 单脸 + 对 L-086 ≥0.60，正 / 侧各 ≤8 张滚动，takes.json 变新即重建（tools/identity/bank.py）"
     }
    ],
    "confidence": "medium",
@@ -13574,6 +13880,56 @@
     {
      "src": "docs/master/HOLLYWOOD_PLAN.md",
      "note": "总调度 r8 派令；项目方 02:3x“以后我会在这里创建一个新剧本，走现在的流程”"
+    }
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/writer_hollywood.yaml"
+  },
+  {
+   "id": "K-WRT-H10",
+   "check": [
+    "tests/test_hollywood_r5.py"
+   ],
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "剧情事实核对口径：每集服装 / 造型不是剧情事实；身份、名字、年龄、发色发型、脸（林晚 L-086）、水晶甲等固定特征、人物关系、已发生剧情是事实",
+   "when": "HOLLYWOOD 事实表抽取 / 整集核对 / 补丁核对（hollywood_r5.check_facts / check_patch_facts，autoflow 续季）",
+   "then": "事实核对提示词（hollywood_facts.md）写明服装不进 settings；代码 drop_wardrobe 再滤掉只涉及服装的偏差，固定特征被改（同一分句有特征词 + 改 / 变 / 缺 / 未出现）照旧算偏差；同一集没写换装却变衣服由 rubric_code consistency#4 /",
+   "evidence": [
+    {
+     "src": "data/pipeline/runs/series10_s2/autoflow_ep05.json",
+     "note": "S2 ep02 / ep03 / ep05 的事实偏差全是“第一季造型 vs 第二季换装”，补丁改不了（集头造型行冻结、改 img 让 H3-X1 / QW-W4 变多），两集各白花约 $0.5"
+    },
+    {
+     "src": "docs/master/MASTER_PICTURE.md",
+     "note": "总调度 11-02 03:3x 定 A：第一季本就按集切换造型 A/B/C；项目方第二季原话“更加暴露点的版本”"
+    }
+   ],
+   "confidence": "high",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/writer_hollywood.yaml"
+  },
+  {
+   "id": "K-WRT-H11",
+   "check": [
+    "tests/test_autoflow.py"
+   ],
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "写作后端可切换（writer_backend：claude_agent | api，测试期默认 claude_agent）；claude_agent 模式出任务包、收产物，不调外部 API",
+   "when": "autoflow 跑任何写作 / 评审步骤（L-109，项目方 11-02 03:3x “测试阶段都是用你的，之后上线再用外面的API”）",
+   "then": "config/llm_providers.json writer_backend 决定后端；claude_agent：tools/script_rsi/autoflow_agent.py 写 writer_tasks/<step>_a<k>.json（system / user 已拼好 + 内容边界），产物 writer_out/<step>_a<k>.<ext> + .done 才读；写手整集重写稿 P4_epNN_rK.md 用导入关口同款校验收为正式 P4（旧稿改名留档）；评审包（事实表 / 事实核对）与写手分开；测试期打分只用代码判定；新写 / 重写的集按镜头块 v2 + 【灯光】判（rubric_code.v2_checks，K-WRT-805 / 806）",
+   "evidence": [
+    {
+     "src": "docs/hollywood/writer_agent_interface.md",
+     "note": "写手 / 评审 agent 接口说明"
+    },
+    {
+     "src": "data/pipeline/runs/series10_s2/autoflow_ep02.json",
+     "note": "ep02 整集稿（SCRIPTWRITER）收为正式 P4：阻断 0，代码判定 27 / 27，剩 v2#2 一条"
     }
    ],
    "confidence": "medium",

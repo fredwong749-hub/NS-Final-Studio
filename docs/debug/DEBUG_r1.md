@@ -119,3 +119,13 @@
 - r2-17：dryrun 修好。FakeFrameExec 补上 Q9 pass；原来看图闸门要求 Q9，演练里的图一直设不成当前，被 reconcile 撤回后无限循环、退出码还是 0。现在 S1 视频 passed 才算成功，否则返回 2 并报卡在哪一步；普通演练和注入演练都能走通。
 - r2-18（K-OPS-W15）：RUN_ID 改成读 config/pipeline/run.json；import_staged 成功后调 import_events.append_import。
 - 待做：(2) 登记表一致性检查进 data_parity + 修派生逻辑；(3) auto_force_eps 只对过了契约的镜生效；(4) 尽力版在规则 / 资产版本变化时自动 reset；多 run（DISTILL 接口）；import-staged --run（第二季）；Q1 和配饰误判抽样核对。
+
+## r3（02:5x–03:2x）
+
+- r3-1：03:13:20 经 tools/netfix/rsh.py（项目方 03:1x 放开权限）调用服务器上现有的 `producer.py reject --n 0 --plan frame_v9,frame_v9`，放出今晚输入已经变过的首帧：**gpu33 14 个、gpu36 18 个**（全部是提示词变了），counted=false，审计写“DEBUG-RSI（总调度 03:0x 授权，E09 部署前的过渡）”。sv-04 当时已部署（gpu33 03:10、gpu36 03:12），但 gpu33 的 producer 还是 02:59 起的进程，gpu36 是 03:09 起的，日志里都没有 E09 的事件，所以按总调度的令手动放。输入没变的 62 个（28 + 34）没动。
+- r3-2：放出后占用（03:13–03:18，5 分钟窗口）gpu33:0 0.52、gpu33:1 0.50、gpu33:3 0.78（未标 0.29）、gpu36:0 0.93（**其中 VIDEO-RCA 0.71**）、gpu36:1 0.41，平均 0.63。30 分钟窗口（02:48–03:18）平均 0.25。新问题：VIDEO-RCA 的实验占用了生产道 gpu36:0。
+- r3-3（⑦ 多剧并行，K-OPS-E15）：一部剧一个 producer 进程（`producer.py serve --run series10_s2`）。主剧不带 --run，路径不变，在途单和账本都不受影响。非主剧进程启动时设 NS_RENDERS_DIR=data/renders/<run>、NS_SCRIPT_JSON=data/import/runs/<run>/script_v2.json（ns_render.pipeline 读这两个变量），账本、租约、登记表放 data/producer/runs/<run>/。派单时先查 runs.json 里优先级更高（数字更小）、status=producing 的剧，登记表里还有 ready 对象就让路（记 priority_yield），不打断在途作业。对象 id 不加前缀：每部剧的文件是分开的，同镜号不会撞；跨剧的视图要显示时再加前缀。测试 test_e15_*，相关测试共 98 条全过。**第二季现在是 status=writing，进程不用起**；等导入后改成 producing，再由 WORKFLOW 加一条常驻进程。
+- r3-4：tools/qa/lock_guard.py 已有超时（环境变量 NS_LOCK_GUARD_TIMEOUT，默认 3600 s，是别人加的），我这次没改它。
+- r3-5（审计，借道）：03:26:59 gpu36:1 借给 DIRECTOR 做运镜 A/B（data/ab/camera_moves/cm_r2.json，7 种 × 2 seed）。**总调度 03:4x 批准，运镜 A/B 临时专用，最长 2 小时**，最晚 05:26:57 收回。做法：笔记本和 gpu36 两份 config/netfix/partition.json 的 retired_lanes 加 gpu36:1，并加 `_lent_lanes` 审计字段（dispatch 每拍重算 hold 时会带上，不会被覆盖）；同时经 rsh 立即写 gpu36 control.json hold_lanes。正在出的那单照常出完。原文件备份在笔记本 data/_quarantine/debug_rsi_20261102/partition.json.bak、gpu36 /root/work/fredw/debug_rsi_backup/partition.json.*。收回：`lend.py … remove`（scratchpad）。
+- r3-6（审计，暂停 18 镜）：04:3x 写 data/autopilot/orphan_hold.json（active=true，18 镜的首帧 + 尾帧，共 36 个对象），经 rsh 推到 gpu33 / gpu36，三份 sha 都是 ad82fb30…。原因：编译层删句时把人名主语删了，属性归错人（例 ep06-S2 顾沉长出林晚的蓝发），主语丢失 16 镜；另有“特写 + 双人露脸”冲突 5 镜，去重后共 18 镜。**总调度 04:3x，IMGLAB F1–F3 上线前暂停**。producer 每拍读 *_hold.json 跳过这些对象，在途的单出完即止，不计次。解除：IMGLAB 修复部署后把 active 改成 false（三处都改），并重编这 18 镜。
+- r3-7（待解冻后实现 K-OPS-E16）：通用的 *_hold.json release_when。producer 每拍检查；条件全部满足（server_sv_at_least / orphan_regression_zero 等）就自动把 active 改成 false，并触发重编，记审计 hold_release。orphan_hold.json 已先写上 release_when：sv 号等 IMGLAB 发版后填，回归检查入口由 IMGLAB 提供。（总调度 04:3x G1）

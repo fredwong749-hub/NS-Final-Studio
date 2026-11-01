@@ -368,3 +368,27 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-W20
+    domain: ops
+    link: [P5-P6]
+    title: “当前剧”只有一个来源——config/pipeline/runs.json 的 primary；界面 / API 不准按目录或文件修改时间猜当前剧，切剧走明确的 run / project 参数
+    when: 任何代码要决定“当前是哪部剧（run / project）”，或在多部剧的目录里兜底遍历
+    then: 用 services/api/ns_api/current_run.py（primary_run / order_runs，内部读 tools/autopilot/runs.py）；多部剧遍历顺序 = primary 在前、其余按 runs.json priority、再按名字，不看 mtime；primary 不在该页面的项目表里就 404 说清楚，不退回猜测。只做列表展示的“新的在前”排序可以用 mtime，但须在测试 ALLOW 里登记
+    check: tests/test_current_run.py
+    evidence:
+      - {src: services/api/ns_api/character_hub.py, note: "UIAUDIT N1（总调度 11-02 P1）：current_project 按 run_dir 修改时间取最大，series10_s2 目录一出现，人物中心当前剧被猜成第二季，林晚人物页 404；同类写法另有 scene_assets.run_candidates、story_runs._story_images / shot_asset_refs、live._live_run 共 5 处，已全改"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-W21
+    domain: ops
+    link: [P5-P6]
+    title: 服务器侧（及驱动服务器的工具）读 run 登记表一律 strict：runs.json 缺失、损坏或没写 primary 就失败，不静默回退默认剧
+    when: resident_sync、producer、canvas_api、full_redo reset-redo 等在服务器上跑或给服务器下指令的代码取主 run
+    then: 调 tools/autopilot/runs.py 的 primary_run(strict=True) / list_runs(strict=True)，缺登记抛 RunRegistryMissing（K-OPS-F09 失败关闭）；笔记本 UI / 测试用默认 strict=False 保持回退 DEFAULT_PRIMARY
+    check: tests/test_current_run.py
+    evidence:
+      - {src: tools/autopilot/runs.py, note: "SYSARCH 11-02 整合 4-6：runs.py 读不到 runs.json 静默回退 series10_v1，与 K-OPS-F09 冲突；resident_sync 已改 RUN_ID = primary_run(strict=True)"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

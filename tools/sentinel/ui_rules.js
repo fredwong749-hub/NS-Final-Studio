@@ -1,4 +1,4 @@
-// SENTINEL S9 界面 DOM 规则（K-OPS-S05）：由 tools/sentinel/build_ui_flows.py 嵌进 ui_flows.json 的 js 步骤，经 uiaudit/detect.mjs 执行（只读令牌、非 GET 全拦）。
+// SENTINEL S9 界面 DOM 规则（K-OPS-S02、S04）：由 tools/sentinel/build_ui_flows.py 嵌进 ui_flows.json 的 js 步骤，经 uiaudit/detect.mjs 执行（只读令牌、非 GET 全拦）。
 // 返回 {color_capsules, broken_imgs, contradictions}
 const rgba = (c) => { c = String(c); let m = c.match(/rgba?\(([^)]+)\)/); if (m) { const p = m[1].split(/[ ,\/]+/).filter(Boolean).map(Number); return [p[0] / 255, p[1] / 255, p[2] / 255, p.length > 3 ? p[3] : 1]; } m = c.match(/color\(srgb ([^)]+)\)/); if (m) { const p = m[1].split(/[ \/]+/).filter(Boolean).map(Number); return [p[0], p[1], p[2], p.length > 3 ? p[3] : 1]; } return null; };   // 兼容 color-mix 算出的 color(srgb …)
 const sat = (c) => { const v = rgba(c); if (!v) return 0; const [r, g, b, a] = v; if (a < 0.12) return 0; const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2; if (mx === mn) return 0; return (mx - mn) / (1 - Math.abs(2 * l - 1)); };

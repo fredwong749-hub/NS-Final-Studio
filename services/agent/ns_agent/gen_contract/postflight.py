@@ -56,6 +56,25 @@ from .metrics import (ZONE_REGION, _clip, _ref_crop, embed, hist_corr, hs_hist, 
                       texture, windows)
 
 
+def apply_bank(sims: dict, t1: dict) -> dict:
+    """身份库 top-k（VQAGATE 11-02，L-098）：sims 里 "<cid>@bN" 是库帧的相似度，"<cid>" 是锚（L-086）。
+    锚 ≥ 复核下限（三段线下限，默认 0.50）时，有效分 = 锚 + 库帧里前 k 个的平均；锚低于下限 → 有效分就是锚（库不帮忙，防带偏）。
+    返回去掉 @bN 键、cid 键换成有效分的新 dict；原始锚分留在 "<cid>@anchor"（只记录，_merge_refs 不会拿它取高）"""
+    k = int((t1.get("bank") or {}).get("k", 3))
+    lo = float((t1.get("bank") or {}).get("anchor_min", 0.50))
+    out = {key: v for key, v in sims.items() if "@b" not in key}
+    for cid in [c for c in out if "@" not in c]:
+        anchor = out.get(cid)
+        bank = sorted((v for key, v in sims.items() if key.startswith(cid + "@b") and v is not None), reverse=True)
+        if anchor is None or not bank:
+            continue
+        out[cid + "@anchor"] = anchor
+        if anchor >= lo:
+            top = sorted([anchor] + bank, reverse=True)[:k]
+            out[cid] = round(float(sum(top) / len(top)), 4)
+    return out
+
+
 def _merge_refs(sims: dict) -> dict:
     """{"lin_wan": .8, "lin_wan@master": .85, "gu_chen": .1} → {"lin_wan": (.85, "lin_wan@master"), "gu_chen": (.1, "gu_chen")}"""
     out: dict = {}
@@ -190,7 +209,8 @@ def identity_unexpected(faces: list[dict], req: dict, t1: dict) -> tuple:
     allowed = {NAME_ID.get(c.get("name"), c.get("name")) for c in req.get("cast") or []}
     rows, bad, boxes = [], [], []
     for f in faces:
-        sims = {k: v for k, v in _merge_refs(f.get("sims") or {}).items()}
+        sims = {k: v for k, v in _merge_refs({k2: v2 for k2, v2 in apply_bank(f.get("sims") or {}, t1).items()
+                                              if not k2.endswith("@anchor")}).items()}
         best = max(sims, key=lambda c: sims[c][0]) if sims else None
         sim = sims[best][0] if best else None
         tier, line = size_line(float(f.get("h_ratio") or 0), t1)
@@ -272,7 +292,9 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
     else:
         # Q1 口径（总调度 11-01）：对本镜实际挂的身份参考算；参考名“<角色>@<版本>”（例 lin_wan@master = 项目方母版裁切）
         # 与“<角色>”（face_ref2va）都给时取较高者，报告写明对哪张
-        faces = [{**f, "sims": _merge_refs(f.get("sims") or {})} for f in remote.get("faces") or []]
+        faces = [{**f, "sims": _merge_refs({k: v for k, v in apply_bank(f.get("sims") or {}, t1).items() if not k.endswith("@anchor")}),
+                  "anchor": {k[:-7]: v for k, v in apply_bank(f.get("sims") or {}, t1).items() if k.endswith("@anchor")}}
+                 for f in remote.get("faces") or []]
         bad, got, via, used = [], {}, {}, set()
         q1_band = []                                  # K-REV-V18 修订：落在复核带的角色（交本地看图左右并排复核）
         refd = {k for f in faces for k in f["sims"]}
@@ -294,6 +316,13 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
                     bad.append(f"{cid} {best:.3f}（对 {ref}）在复核带 {lo}–{need}（{tname}），待本地看图并排复核")
                     q1_band.append({"cid": cid, "sim": round(best, 3), "lo": lo, "need": need, "tier": tname,
                                  "bbox": faces[k_best].get("bbox"), "h_ratio": round(h, 3)})
+                elif (faces[k_best].get("anchor") or {}).get(cid) is not None and faces[k_best]["anchor"][cid] < need:
+                    # L-098 身份库 A/B（11-02）：top-k 把 03-S2 v14（脸圆发糊、亲审不合格，锚 0.573）抬到 0.611–0.650，
+                    # 会绕开复核带的清晰度把关 → 锚自己没过线时仍进复核带，只是免本地看图（top-k 已证明是同一人），清晰度照查
+                    a0 = faces[k_best]["anchor"][cid]
+                    bad.append(f"{cid} 锚 {a0:.3f}（对 L-086）在复核带 {lo}–{need}（{tname}），身份库 top-k {best:.3f} 过线，待清晰度复核")
+                    q1_band.append({"cid": cid, "sim": round(a0, 3), "topk": round(best, 3), "mode": "sharp_only", "lo": lo, "need": need,
+                                    "tier": tname, "bbox": faces[k_best].get("bbox"), "h_ratio": round(h, 3)})
         # 总调度 11-01 P1（ep03-S6 林晚 + 一个不像顾沉的“外国脸”男人，Q1 只算了林晚）：画面里每一张（够大的）脸都要认得出是谁——
         # 必须像本镜 cast（在画 / 局部）里的某个角色；认不出 → 不过（“画面里多了不该有的人 / 认不出是谁”）。
         # cast 里没有身份脸参考的角色（路人等）每人可抵一张认不出的脸，只记录。

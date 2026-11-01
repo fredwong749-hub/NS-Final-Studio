@@ -625,7 +625,9 @@ def _read_mtime(p: Path):
 
 
 def _story_images(run: str | None):
-    cands = [RUNS / run] if run else sorted((d for d in RUNS.iterdir() if (d / "images").is_dir()), key=lambda d: -(d / "images").stat().st_mtime) if RUNS.is_dir() else []
+    # K-OPS-W20：没传 run 时用当前主剧（runs.json primary）在前，不按 images 目录修改时间猜
+    from ns_api.current_run import order_runs
+    cands = [RUNS / run] if run else order_runs([d for d in RUNS.iterdir() if (d / "images").is_dir()]) if RUNS.is_dir() else []
     d = next((c for c in cands if (c / "images").is_dir()), None)
     if d is None:
         return {"run": None, "by_shot": {}, "chars": {}, "count": 0}
@@ -739,7 +741,8 @@ def shot_asset_refs(shot_id: str):
     m = re.fullmatch(r"ep(\d{2,3})-S(\d{1,3})", shot_id)
     if not m:
         raise HTTPException(404, f"镜头号不对：{shot_id}")
-    runs = sorted((d for d in RUNS.iterdir() if (d / "assets" / "first_frame_jobs.json").is_file()), key=lambda d: -d.stat().st_mtime) if RUNS.is_dir() else []
+    from ns_api.current_run import order_runs   # K-OPS-W20：主剧在前，不按修改时间
+    runs = order_runs([d for d in RUNS.iterdir() if (d / "assets" / "first_frame_jobs.json").is_file()]) if RUNS.is_dir() else []
     # DATAALIGN（K-UI-D01）：当前画布剧本自己的运行排第一（以前取最新一份作业表：别的剧同号镜头会串过来）
     try:
         from ns_api.shot_cast import import_project

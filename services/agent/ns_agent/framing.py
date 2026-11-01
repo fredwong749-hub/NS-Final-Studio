@@ -99,15 +99,50 @@ def visible(fragment: str, size: str | None) -> bool:
     return True
 
 
-def filter_parts(text: str, size: str | None, sep: str = "，") -> str:
-    """按分隔符切开，去掉看不见的部件分句（用于角色锁 / 造型段这类并列描述）"""
+def keep_subject_enabled() -> bool:
+    """K-REN-901（IMGLAB 11-02，ep06-S2 v6 顾沉长出林晚的蓝色长发）：删句保主语开关。
+    config/recipes/image_framing.json keep_subject（缺省 true；false = 回退旧行为：整句删，主语跟着丢）"""
+    return bool(_cfg().get("keep_subject", True))
+
+
+GAZE_CLAUSE_RE = re.compile(r"(?:视线|目光)(?:落在|停在|移向|转向|看向|投向|锁在|从)")
+GENERIC_CLAUSE = ("真实皮肤质感", "可见细小毛孔", "自然的轻微不对称", "眼睛为真实人眼大小", "细软绒毛")   # 写作方通用质感句，不需要主语
+
+
+def _keep_with_subject(parts: list[str], keep_pred, subjects=()) -> list[str]:
+    """按 keep_pred 留分句；被删的分句里有在画角色名 → 名字作为单独一句挪到下一个保留分句前面（K-REN-901）。
+    下一个保留分句本身以人名开头（主语已在）就不补；被删句之后再没有保留句就不补。
+    没有删掉带名字的分句时，结果与旧写法逐字相同（不改未受影响镜头的提示词，L-087）。"""
+    names = [n for n in (subjects or ()) if n] if keep_subject_enabled() else []
+    out, pending = [], None
+    for p in parts:
+        if names and GAZE_CLAUSE_RE.search(p) and not keep_pred(p):
+            keep_this = True       # “林晚的视线落在椅背的裙子上”：视线落点里的部件词不是画面可见部件，视线句不删（ep04-S6 / ep09-S7）
+        else:
+            keep_this = keep_pred(p)
+        if keep_this:
+            if pending and not any(p.lstrip().startswith(n) for n in names) and not any(w in p for w in GENERIC_CLAUSE):
+                out.append(pending)
+            pending = None
+            out.append(p)
+        elif names:
+            # 只认主语位置的名字（分句以人名开头）：“站在林晚侧后方半步”里的林晚是宾语，主语仍是前面的人（ep08-S2）
+            lead = next((n for n in names if p.lstrip().startswith(n)), None)
+            if lead:
+                pending = lead
+    return out
+
+
+def filter_parts(text: str, size: str | None, sep: str = "，", subjects=()) -> str:
+    """按分隔符切开，去掉看不见的部件分句（用于角色锁 / 造型段这类并列描述）。
+    subjects：在画角色名（用于正文；被删分句带走的主语按 K-REN-901 补回）"""
     if not hidden_words(size):
         return text
     m = re.match(r"^(【[^】]*】)", text or "")          # “【林晚造型】超短裙，…”：标签头保留
     head = m.group(1) if m else ""
     body = (text or "")[len(head):]
     parts = [p for p in re.split(r"[，,、；;]", body) if p.strip()]
-    keep = [p for p in parts if visible(p, size)]
+    keep = _keep_with_subject(parts, lambda p: visible(p, size), subjects)
     return head + sep.join(keep) if keep else ""
 
 
@@ -193,10 +228,10 @@ def part_name(img_body: str) -> str:
     return first
 
 
-def strip_fullbody(text: str) -> str:
-    """去掉写站姿 / 全身的分句（只用于脸部特写）"""
+def strip_fullbody(text: str, subjects=()) -> str:
+    """去掉写站姿 / 全身的分句（只用于脸部特写）。subjects：在画角色名，被删分句里的主语按 K-REN-901 补回"""
     parts = [p for p in re.split(r"[，,；;]", text or "") if p.strip()]
-    keep = [p for p in parts if not any(w in p for w in FULLBODY)]
+    keep = _keep_with_subject(parts, lambda p: not any(w in p for w in FULLBODY), subjects)
     return "，".join(keep)
 
 
@@ -213,6 +248,31 @@ def closeup_lead(size: str | None, subject: str | None, img_body: str = "") -> s
     # 肯定句写法（BAKEOFF R11-12 A3：cfg=1 下否定句不生效，“不出现脸”反而把“脸”写进了提示词）
     return (f"{size}构图：画面里只有{part}这一局部，{part}占画面大半，画框紧贴{part}裁切"
             f"（tight close-up crop on the {PART_EN.get(part, 'detail')} only, filling the frame）")
+
+
+def two_face_close_mode() -> str:
+    """K-REN-902（IMGLAB 11-02）：脸部特写 + ≥2 人露脸 = 构图自相矛盾（“脸占六成”与“两张脸都清晰入画”在 9:16 里不能同时成立，
+    ep06-S2 v6 退成双人中景）。config/recipes/image_framing.json two_face_close：
+    "two_shot_mcu"（缺省）= 首句改成双人近景构图（两张脸各约三成，景别档差 1 仍在 Q3 容差内）；"off" = 旧行为"""
+    v = str(_cfg().get("two_face_close", "two_shot_mcu"))
+    return v if v in ("two_shot_mcu", "off") else "two_shot_mcu"
+
+
+def two_face_close_conflict(size: str | None, subject: str | None, n_faced: int) -> bool:
+    """写作 lint / preflight 用：特写类 + 脸部主体 + 露脸人数 ≥2（K-REN-902）"""
+    return size in CLOSE and subject == "face" and n_faced >= 2
+
+
+TWO_FACE_CLOSE_LEAD = ("双人近景构图：两人头部与肩颈入画，两张脸各占画面约三成，胸口以下不入画"
+                       "（two-shot medium close-up, both heads and shoulders in frame, each face about a third of the frame height）")
+CLOSEUP_FACE_LEAD_MARK = "脸部占画面约六成"
+TWO_FACES_MARK = "两张脸都清晰入画"
+
+
+def framing_clash(prompt: str) -> bool:
+    """preflight I6（K-REN-902）：同一提示词里既写“脸占六成”又写“两张脸都清晰入画”= 构图矛盾"""
+    p = prompt or ""
+    return CLOSEUP_FACE_LEAD_MARK in p and TWO_FACES_MARK in p
 
 
 PART_EN = {"手与肩颈": "hands and the shoulder-collarbone area", "手": "hands", "脚": "feet", "鞋": "shoes", "腰": "waist", "腿": "legs", "胸": "chest", "肩": "shoulder",

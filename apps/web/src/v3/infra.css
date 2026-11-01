@@ -37,3 +37,13 @@
 @media (max-width: 1440px) { /* r41：画布页多了“整集出片”，1440 也会挤 → 1440 及以下都收起副标题（悬停提示里有） */
   :root .v3-top-grid .v3-step small, :root .v3-top-grid .v3-step.cur:not(.on) small { display: none; } /* 连 v3.css 给“本集停留步”留的副文字也收起（悬停提示里有） */
 }
+/* ---------- r44 顶栏颜色（总调度：红色“1 失败”和橙色“5/6”胶囊按 K-UI-049 收成中性色 + 小圆点）：
+   文字 / 边框一律中性灰；状态只看前面的小圆点（在跑=蓝点呼吸、需要人看=琥珀点、正常=绿点），红色不再用 ---------- */
+html .infra-chip.lv-warn, html .infra-chip.lv-bad { color: var(--c-text-2); border-color: var(--c-line-2); background: transparent; }
+html .infra-dot.bad { background: var(--c-warn); }
+html .v3-queue.q-bad, html .rt-btn.q-bad { color: var(--c-text-2); }
+html .v3-queue.q-bad i, html .rt-btn.q-bad > i { background: var(--c-warn); }
+html .rt-btn-n b { color: var(--c-text-2); font-weight: 400; }
+html .rt-btn.q-busy > i, html .v3-queue.q-busy i { background: var(--c-info); box-shadow: none; animation: ns-breathe var(--breathe-period, 2.7s) ease-in-out infinite; }
+html .v3-gpu.busy { color: var(--c-text-2); border-color: var(--c-line-2); }
+@media (prefers-reduced-motion: reduce) { html .rt-btn.q-busy > i, html .v3-queue.q-busy i { animation: none; } }

@@ -119,10 +119,10 @@ items:
   best_effort_policy:
     value: {to_assembly: false, auto_force_only_contract_passed: true, auto_reset_on_rule_or_asset_change: true, counted: false}
     source: 总调度 11-02 02:2x 定（发 DEBUG-RSI）；ITERATION_PROTOCOL §3（不合格不进合成、不给项目方）
-    enforced_by: （实现中）DEBUG-RSI tools/autopilot/producer.py：force_eps 只对过了契约的镜生效；尽力版的规则 / 资产版本与现行不同 → 自动 reset（不计次）
-    status: pending
+    enforced_by: tools/autopilot/producer.py（K-OPS-E11 尽力版按规则 / 资产版本自动重置；K-OPS-E12 含尽力镜的集不整集 force_eps、尽力镜不进视频 / 合成；DEBUG-RSI，随 sv-05 部署）
+    status: code_reads
     owner: DEBUG-RSI
-    plan: 口径已定、decider=code；DEBUG-RSI 落地后改 code_reads 并加 drift（retry.best_effort_to_assembly / best_effort_auto_reset 同步）
+    plan: 已落地（K-OPS-E11 / E12）；sv-05 部署后在服务器核一次
   identity_faces:
     value:
       pinned: {lin_wan: data/assets/identity_refs/lin_wan/lin_wan_face_hd_A_s202.png}

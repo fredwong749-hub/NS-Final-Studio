@@ -196,7 +196,10 @@ def run_candidates(scene_id: str) -> list[dict]:
     """出图线（IMGGEN）在 runs/<剧>/images/scenes/<sid>/ 出的底图候选（*_post.png 优先；没登记也列出来，选定时再登记）"""
     out = []
     runs = P.DATA / "pipeline" / "runs"
-    for d in sorted(runs.glob(f"*/images/scenes/{scene_id}"), key=lambda x: -x.stat().st_mtime) if runs.is_dir() else []:
+    # K-OPS-W20：不按修改时间猜剧——当前主剧（runs.json primary）在前，其余按登记优先级
+    from ns_api.current_run import order_runs
+    hits = order_runs([d.parents[2] for d in runs.glob(f"*/images/scenes/{scene_id}")]) if runs.is_dir() else []
+    for d in [h / "images" / "scenes" / scene_id for h in hits]:
         files = sorted(d.glob("*_post.png")) or sorted(f for f in d.glob("*.png") if not f.stem.endswith("_raw"))
         for f in files:
             rel = "data/" + f.relative_to(P.DATA).as_posix()

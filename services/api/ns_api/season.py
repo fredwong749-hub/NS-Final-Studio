@@ -123,3 +123,25 @@ def season():
         except Exception:  # noqa: BLE001
             e["blocks"] = None
     return {"episodes": eps, "faces": _faces(sc)}
+
+
+@router.get("/api/season/sheets")
+def season_sheets(pairs: str = ""):
+    """UIRSI r44（总调度：抽屉里林晚“本镜设定图”显示“无设定图”，可造型 A 明明有 sleevefix 那张）：
+    详情抽屉“出场人物”的本镜造型设定图按 asset_refs.sheet_of 取（继承链：子季选定表优先，没有回落父季），与出图用的同一张。
+    pairs = "lin_wan:A,gu_chen:A" → {"lin_wan:A": "/files/…png" | None}"""
+    out: dict[str, str | None] = {}
+    try:
+        from ns_agent import asset_refs as R  # noqa: PLC0415
+        from ns_api.character_hub import current_project  # noqa: PLC0415
+        proj = current_project()
+    except Exception:  # noqa: BLE001
+        return {"sheets": out}
+    for pr in [x.strip() for x in pairs.split(",") if ":" in x][:40]:
+        cid, look = pr.split(":", 1)
+        try:
+            f = R.sheet_of(proj, cid, look)
+        except Exception:  # noqa: BLE001
+            f = None
+        out[pr] = ("/files/" + (f[len("data/"):] if f.startswith("data/") else f)) if f else None
+    return {"sheets": out}

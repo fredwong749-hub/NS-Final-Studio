@@ -227,6 +227,36 @@ def sentinel_ticket(paths, oid: str, why: str, stats: dict, led: dict) -> None:
         fh.write(json.dumps(rec, ensure_ascii=False) + chr(10))
 
 
+def run_priority(run: str, root: Path = ROOT) -> int:
+    reg = jl(root / "config" / "pipeline" / "runs.json", {}) or {}
+    return int(((reg.get("runs") or {}).get(run) or {}).get("priority", 0 if run == RUN_ID else 10))
+
+
+def higher_priority_busy(paths) -> dict:
+    """K-OPS-E15：比本剧优先级高（数字小）且 producing 的剧，登记表里还有 ready 的首帧 / 尾帧 → {run: 个数}；没有 → {}"""
+    reg = jl(paths.root / "config" / "pipeline" / "runs.json", {}) or {}
+    mine = run_priority(paths.run_id, paths.root)
+    out = {}
+    for run, e in (reg.get("runs") or {}).items():
+        if run == paths.run_id or e.get("status", "producing") != "producing" or int(e.get("priority", 10)) >= mine:
+            continue
+        rp = Paths(root=paths.root, run_id=run)
+        r = jl(rp.registry, {}) or {}
+        n = sum(1 for E in r.get("episodes") or [] for S in E.get("shots") or []
+                for k in ("first", "last") if ((S.get("objects") or {}).get(k) or {}).get("status") == "ready")
+        if n:
+            out[run] = n
+    return out
+
+
+def run_env(run: str, root: Path = ROOT) -> dict:
+    """非主剧 producer 进程要设的环境变量（在 import ns_render 之前）"""
+    if run == RUN_ID:
+        return {}
+    return {"NS_RENDERS_DIR": str(root / "data" / "renders" / run),
+            "NS_SCRIPT_JSON": str(root / "data" / "import" / "runs" / run / "script_v2.json")}
+
+
 def asset_hold_objects(data: Path) -> set:
     """IMGFIX r5（总调度 fredw-2b 11-02）：data/autopilot/*_hold.json（active=true）列出的首帧 / 尾帧对象暂缓派单——
     资产（例：林晚造型 A 设定图缺袖）修复后等项目方点选，点选前不出图。不在 = 没有 hold；
@@ -248,10 +278,11 @@ class Paths:
     def __init__(self, root: Path = ROOT, pd: Path | None = None, run_id: str = RUN_ID):
         self.root = root
         self.data = root / "data"
-        self.pd = pd or (self.data / "producer")
         self.run_id = run_id
+        self.primary = run_id == RUN_ID                      # K-OPS-E15：主剧沿用旧路径（在途单 / 账本不失效）
+        self.pd = pd or (self.data / "producer" if self.primary else self.data / "producer" / "runs" / run_id)
         self.run = self.data / "pipeline" / "runs" / run_id
-        self.renders = self.data / "renders"
+        self.renders = self.data / "renders" if self.primary else self.data / "renders" / run_id
         self.vid = self.run / "video"
         self.frames_v2 = self.data / "assetmaster" / "frames_v2" / "state.json"
         self.voices = root / "config" / "voices.json"
@@ -1703,6 +1734,12 @@ class Producer:
         free = [ln for ln, s in lanes.items() if s["free"]]
         if not free:
             return
+        hi = higher_priority_busy(self.p)
+        if hi:                                     # K-OPS-E15：高优先级剧还有可派的活 → 低优先级剧不派（不打断在途）
+            if getattr(self, "_last_prio_log", 0) < now() - 300:
+                self._last_prio_log = now()
+                self.logf("priority_yield", run=self.p.run_id, to=hi, counted=False)
+            return
         dprobs = decision_file_problems()
         if dprobs:          # K-OPS-F09：决策 / 覆盖文件缺失或损坏 → 这一拍一单不派（失败关闭），5 分钟报一次警
             if getattr(self, "_last_dfb_log", 0) < now() - 300:
@@ -2733,7 +2770,9 @@ def main(argv=None) -> int:
     ap.add_argument("--keep", action="store_true")
     ap.add_argument("--skip-rubric-gate", action="store_true", help="import-staged：跳过 rubric 导入闸门（只有总调度能批，--by 须写总调度，记审计）")
     a = ap.parse_args(argv)
-    paths = Paths()
+    run = (a.run or "").strip() or RUN_ID
+    os.environ.update(run_env(run))                 # K-OPS-E15：非主剧进程的渲染 / 导入稿目录（ns_render 在函数里才 import）
+    paths = Paths(run_id=run) if a.cmd != "import-staged" else Paths()
     if a.cmd == "serve":
         return serve(paths)
     if a.cmd == "reject":

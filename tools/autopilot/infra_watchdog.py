@@ -141,6 +141,15 @@ def relay_down(st: dict) -> bool:
     """跳板本身 TCP 不通时不杀隧道（16:58 实测：跳板整体不可达，杀 / 重连只会加重跳板负担）；记 A-RELAY 报警。每拍最多测一次"""
     if st.get("_relay_t") == st.get("_tick"):
         return st.get("_relay_down", False)
+    if st.get("supervisor_fresh"):         # NETFIX r3：监管进程在岗时用它的跳板判断，不再自己裸 TCP 探跳板（那是跳板新建连接的主要来源之一）
+        try:
+            d = json.loads((ROOT / "data/netfix/net_status.json").read_text(encoding="utf-8"))
+            down = not bool((d.get("relay") or {}).get("up"))
+            st["_relay_t"], st["_relay_down"] = st.get("_tick"), down
+            alert(st, "A-RELAY", down, "crit", "跳板不通（监管进程判断）：笔记本到 gpu33 / gpu36 全断（服务器照常生产）")
+            return down
+        except (OSError, ValueError):   # arch-ok: 监管状态读不到 → 落到下面自己探跳板（显式回退，不是静默放行；FACTORY 代 NETFIX 标注，sv-05）
+            pass
     import socket
     try:
         socket.create_connection(RELAY, timeout=8).close()

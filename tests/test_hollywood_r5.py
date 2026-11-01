@@ -152,3 +152,12 @@ def test_r7_compiled_prompt_parsing():
     assert RC._size(comp) == "中景"
     assert not RC.LOOK_CAMERA.search("眼睛不看镜头，脸不正对镜头")
     assert RC.LOOK_CAMERA.search("她回头看向门口")
+
+
+def test_k_wrt_h10_wardrobe_not_fact(R):
+    keep = {"kind": "setting", "ref": "林晚发色雾霾天蓝", "found": "镜3 发色改为黑色"}
+    drop = {"kind": "setting", "ref": "林晚造型（漆皮束腰配短裙）", "found": "改为米白色针织上衣与铅笔裙，水晶甲保留"}
+    face = {"kind": "setting", "ref": "林晚造型与水晶甲", "found": "换成黑色长裙，水晶甲未出现"}
+    out = R.drop_wardrobe([keep, drop, face])
+    assert keep in out and drop not in out and face in out
+    assert "K-WRT-H10" in (ROOT / "config/prompts/hollywood_facts.md").read_text(encoding="utf-8")

@@ -493,7 +493,8 @@ def _live_run(summary_eps: list[dict]) -> str | None:
     titles = [str(e.get("title") or "") for e in sorted(summary_eps, key=lambda e: int(e.get("number") or 0))]
     best = None
     root = DATA / "pipeline" / "runs"
-    for d in sorted(root.iterdir(), key=lambda x: -x.stat().st_mtime) if root.is_dir() else []:
+    from ns_api.current_run import order_runs   # K-OPS-W20：主剧在前，不按修改时间猜
+    for d in order_runs([x for x in root.iterdir() if x.is_dir()]) if root.is_dir() else []:
         try:
             p1 = json.loads((d / "P1_storyline.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):

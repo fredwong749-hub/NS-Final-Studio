@@ -224,6 +224,7 @@ rules:
     check: [tests/test_vqagate.py]
     evidence:
       - {src: data/vqa/idgate_calib/sims_L086.json, note: "ep02-S10 换人 3 张 0.240–0.258 全拦；林晚正例 73 张最低 0.669；ep02-S9 v1/v2 0.807 身份分区分不出（ref2va 与 L-086 互相 0.986）"}
+      - {src: docs/vqa/GATE_CALIBRATION.md §17, note: "L-098 身份库 top-k（随 sv-05）：有效分 = 锚 L-086 + 库帧前 3 平均，锚 < 0.50 时只用锚；锚本身没过线时即使 top-k 过线也进复核带 sharp_only（只查清晰度 ≥42.3，不调看图）——A/B 里 03-S2 v14 被 top-k 抬到 0.611/0.650，不加这条会漏放。入库：过契约 + 未驳回 + 单脸 + 对 L-086 ≥0.60，正 / 侧各 ≤8 张滚动，takes.json 变新即重建（tools/identity/bank.py）"}
     confidence: medium
     status: 确认
     date: 2026-11-02

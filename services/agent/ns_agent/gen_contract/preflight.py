@@ -229,6 +229,9 @@ def check(req: dict) -> ContractResult:
             if s.get("kind") != "face" and line and line not in prompt and alt not in prompt:
                 bad.append(f"图{s.get('index')} 的“必须一致”标注不在提示词里")
                 break
+        from ns_agent import framing as _FR
+        if _FR.framing_clash(prompt):     # K-REN-902（IMGLAB 11-02）：特写“脸占六成”与“两张脸都入画”同时出现 = 构图矛盾
+            bad.append("构图矛盾：同时写了“脸部占画面约六成”和“两张脸都清晰入画”（特写 + ≥2 人露脸，K-REN-902）")
         add("I6", "fail" if bad else "pass", "；".join(bad) if bad else "编译器输出 + 参考逐一标注")
         # I7
         suf = ST.preset_suffix()
