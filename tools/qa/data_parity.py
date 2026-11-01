@@ -21,7 +21,7 @@
     D-IMG    /api/story-images 默认运行 = 当前剧本自己的运行
     D-FRESH  当前首帧 / 尾帧晚于剧本最后一次改动（data/import/script_v2.json mtime）→ 不得标“剧本已改”；frame_v9 版本
              还晚于拼提示词的代码 → 连“编译器升级”也不得有
-    D-CUR    takes.json 当前首帧 / 尾帧 = 接口 first_frame / last_frame_target（PW-011）
+    D-CUR    takes.json 当前首帧 / 尾帧 = 接口 first_frame / last_frame_target（PW-011）；当前版本已隔离（quarantined，UIRSI r41）→ 接口必须给空
              （UIPIXEL 11-01 P1：unified 出图版本一出来就被标过期）
     D-VIDEO  VIDEO10 过了片子门的选中片（runs/<剧>/video/state_<host>.json status=done）已登记成视频版本，
              接口 shots[].video 指向它（项目方定稿了别的视频除外）；集摘要视频数 = 详情里有视频的镜数
@@ -423,6 +423,11 @@ def main() -> int:
             for st, key, url_key, lab in (("image", "first_frame_take", "first_frame", "首帧"), ("last", "last_frame_take", "last_frame_target", "尾帧"),
                                        ("video", None, "video", "视频")):
                 t = next((t for t in tk.get("takes") or [] if t.get("stage") == st and t.get("n") == act.get(st)), None)
+                if t and t.get("quarantined"):   # UIRSI r41：当前版本已隔离（旧剧本版本）= 没有当前，接口必须给空
+                    checked["fields"] += 1
+                    if x.get(url_key):
+                        fails.append(f"D-CUR {x['id']} 当前{lab} #{t.get('n')} 已隔离，接口 {url_key} 仍给 {x.get(url_key)!r}")
+                    continue
                 if t and x.get("owner") != "gpu3" and x.get("frames_source") != "gpu3":
                     checked["fields"] += 1
                     u = urllib.parse.unquote((x.get(url_key) or "").split("?")[0])

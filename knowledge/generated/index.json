@@ -1,35 +1,35 @@
 {
- "kb_version": "kb-20261102-17723931",
- "n": 447,
+ "kb_version": "kb-20261102-f5305971",
+ "n": 476,
  "by_domain": {
   "render": 77,
   "prompt": 27,
-  "writer": 60,
-  "edit": 35,
-  "review": 56,
+  "writer": 62,
+  "edit": 45,
+  "review": 61,
   "loop": 9,
   "asset": 41,
-  "ops": 91,
-  "ui": 51
+  "ops": 99,
+  "ui": 55
  },
  "by_link": {
   "P0-P1": 20,
   "P1-P2": 2,
-  "P10-P11": 43,
-  "P11-P12": 22,
+  "P10-P11": 49,
+  "P11-P12": 23,
   "P11-RETRY": 47,
   "P2-P3": 3,
-  "P3-P4": 73,
+  "P3-P4": 77,
   "P4-P5": 33,
-  "P4-P6": 23,
+  "P4-P6": 24,
   "P4-P7": 22,
   "P4-P9": 16,
-  "P5-P6": 111,
+  "P5-P6": 120,
   "P6-P7": 26,
-  "P7-P8": 93,
-  "P8-P10": 13,
-  "P8-P9": 10,
-  "P9-P10": 15
+  "P7-P8": 97,
+  "P8-P10": 16,
+  "P8-P9": 12,
+  "P9-P10": 18
  },
  "rules": [
   {
@@ -682,7 +682,7 @@
    ],
    "title": "离线 / 远端运行前先跑依赖自检；拉回合并前先验文件完整，截断文件不得覆盖本地",
    "when": "把生产交给服务器离线跑之前（在服务器副本上）、离线结束并回笔记本时、整集合成前",
-   "then": "tools/pipeline/remote_preflight.py（服务器上用 --root <副本根> --deep）查 A1 选定设定图 / 身份脸 / 单品图存在且 PIL 完整解码、A2 首帧作业参考图、T1 配音解释器（NS_TTS_PYTHON 或 voices.json default，--deep 实跑 import sherpa_onnx）、T2 voices.json series = 项目；任何 fail 先修再交接。ops/offline/merge_pull.py 覆盖前调 pulled_problem：图片 / JSON 读不全或是本地文件的截断前缀 → 跳过并报 corrupt_skipped；resume 脚本合并后自动跑自检",
+   "then": "tools/pipeline/remote_preflight.py（服务器上用 --root <副本根> --deep）查 A1 选定设定图 / 身份脸 / 单品图 / 场景参考底图（assets/scenes 有效图 + scene_overrides，preflight I5；FACTORY 11-02 补）存在且 PIL 完整解码、A2 首帧作业参考图、T1 配音解释器（NS_TTS_PYTHON 或 voices.json default，--deep 实跑 import sherpa_onnx）、T2 voices.json series = 项目；任何 fail 先修再交接。ops/offline/merge_pull.py 覆盖前调 pulled_problem：图片 / JSON 读不全或是本地文件的截断前缀 → 跳过并报 corrupt_skipped；resume 脚本合并后自动跑自检",
    "check": "tests/test_remote_preflight.py",
    "evidence": [
     {
@@ -1186,6 +1186,341 @@
    "date": "2026-10-31",
    "supersedes": "K-WRT-008",
    "_file": "knowledge/rules/chain_v1.yaml"
+  },
+  {
+   "id": "K-REV-801",
+   "domain": "review",
+   "link": "P10-P11",
+   "title": "每集成片打“好莱坞观感分”：四大项 15 小项，每小项 5 条可核对条件",
+   "when": "每次整集合成（预览）之后、发版 / 给项目方看之前",
+   "then": "tools/director/film_score.py score <成片> → data/film_score/<名>.json（并更新 epNN.json）+ data/review_pages/film_score/index.html；小项分 = 5 × 通过 / 测到，整集 /50 = 小项平均 × 10；只评技术和观感，不评剧本内容",
+   "evidence": [
+    {
+     "src": "docs/master/HOLLYWOOD_PLAN.md §1D",
+     "quote": "每集成片跑“好莱坞观感分”"
+    },
+    {
+     "src": "data/film_score/ep01_v2.json",
+     "note": "基线 27.8/50（不含看图模型；测到 85% 条件）"
+    },
+    {
+     "src": "tools/ep02_director/rubric.md",
+     "note": "复用 DIR 7 维的测量和及格线"
+    }
+   ],
+   "check": [
+    "tests/test_director.py"
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/director.yaml"
+  },
+  {
+   "id": "K-REV-802",
+   "domain": "review",
+   "link": "P10-P11",
+   "title": "没测到的条件记“未测”，不计入分母；测到比例单独报",
+   "when": "成片评分",
+   "then": "条件 pass = True / False / None；coverage = 测到条数 / 总条数，和总分一起报；数字带出处（每条 src）",
+   "evidence": [
+    {
+     "src": "tools/director/film_score.py item_score"
+    }
+   ],
+   "check": [
+    "tests/test_director.py"
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/director.yaml"
+  },
+  {
+   "id": "K-REV-803",
+   "domain": "review",
+   "link": "P10-P11",
+   "title": "看图模型只在生产空档跑（--vlm），走缓存，图片只进自家模型",
+   "when": "成片评分需要视线 / 表情 / 坏块等看图项",
+   "then": "film_score --vlm 用 ns_agent.vqa（口径 B，K-REV-V01）；本机 8870 有生产任务时排队等，不抢出图道；没跑时相关条件记未测",
+   "evidence": [
+    {
+     "src": "config/vqa.json _caliber"
+    }
+   ],
+   "check": [
+    "tests/test_director.py"
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/director.yaml"
+  },
+  {
+   "id": "K-REV-804",
+   "domain": "review",
+   "link": "P10-P11",
+   "title": "RSI 每轮先修成片分全局最低的小项，A/B 在同一素材上前后对比",
+   "when": "DIRECTOR 每轮迭代",
+   "then": "film_score lowest → 根因 → 改系统 → 同一成片 / 素材出 A/B 两版各打一次分（总表里同一集多行）→ 过了再交总调度发版",
+   "evidence": [
+    {
+     "src": "docs/master/HOLLYWOOD_PLAN.md §2"
+    },
+    {
+     "src": "data/film_score/ep01_v2_post3.json",
+     "note": "后期层 A/B：27.8 → 31.2"
+    }
+   ],
+   "check": [
+    "tests/test_director.py"
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/director.yaml"
+  },
+  {
+   "id": "K-EDT-801",
+   "domain": "edit",
+   "link": "P9-P10",
+   "title": "整集统一调色：同场按同一角色肤色对齐（±8%），再按时段套统一 LUT",
+   "when": "整集合成之后（tools/director/post_pass.py）",
+   "then": "有脸的镜按同一角色（SFace 认人）脸部 RGB 对齐到本场该角色中位，没脸的镜按整帧对齐、强度减半；夜景 config/post/luts/night_v1.cube、日景 day_v1.cube（自产）；占位静帧不当参照",
+   "evidence": [
+    {
+     "src": "data/film_score/ep01_v2_lutonly.json",
+     "note": "只套 LUT：脸部跨镜 ΔE 6.7 → 7.07"
+    },
+    {
+     "src": "data/film_score/ep01_v2_post.json",
+     "note": "按整帧对齐：脸部 ΔE 6.7 → 8.88（变差，否决）"
+    },
+    {
+     "src": "data/film_score/ep01_v2_post3.json",
+     "note": "按同一角色肤色对齐：脸部 ΔE 6.7 → 4.06，P3.2 转通过"
+    }
+   ],
+   "check": [
+    "tests/test_director.py"
+   ],
+   "confidence": "medium",
+   "status": "建议",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/director.yaml"
+  },
+  {
+   "id": "K-EDT-802",
+   "domain": "edit",
+   "link": "P8-P9",
+   "title": "音效层按剧本【声音】字段挑免费可商用素材，许可证逐文件登记",
+   "when": "整集合成之后",
+   "then": "动作音效（脚步 / 门 / 衣料 / 椅子 / 键盘 / 纸 / 叮）用 Kenney CC0 包（data/sfx_lib/kenney_*，LICENSES.json 含 sha256）；每个场景一条程序合成声床（自产）；人声处音效压 8 dB、声床压 6 dB；匹配不上的写进 timeline.sfx.unmatched",
+   "evidence": [
+    {
+     "src": "data/sfx_lib/kenney_impact-sounds/License.txt",
+     "quote": "free to use in personal, educational and commercial projects"
+    },
+    {
+     "src": "data/film_score/ep01_v2_post3.json",
+     "note": "S4 音效 1.25 → 5.0（41 个事件、1 条声床）"
+    }
+   ],
+   "check": [
+    "tests/test_director.py"
+   ],
+   "confidence": "medium",
+   "status": "建议",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/director.yaml"
+  },
+  {
+   "id": "K-EDT-803",
+   "domain": "edit",
+   "link": "P9-P10",
+   "title": "加完音效后重新两遍响度归一到 −14 LUFS / −1.5 dBTP",
+   "when": "post_pass 混完音效",
+   "then": "复用 ns_post.assemble.loudnorm（必要时先限幅）；成片分 S2 复核",
+   "evidence": [
+    {
+     "src": "data/ab/director_post/ep01_v2_post3.timeline.json",
+     "note": "−14.01 LUFS、TP −1.76"
+    }
+   ],
+   "check": [
+    "tests/test_director.py"
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/director.yaml"
+  },
+  {
+   "id": "K-EDT-804",
+   "domain": "edit",
+   "link": "P8-P9",
+   "title": "配乐强度跟剧本情绪节拍：BGM 时间轴保留时间，强度用剧本【配乐】强度 0–3",
+   "when": "合成铺 BGM（ns_post.music.resolve_cues）",
+   "then": "tools/director/cut_plan.merge_music_intensity(json_cues, 剧本镜)；强度升 = swell、降到 0 = drop；合成接线待 CONSENT（VIDEO10 / WORKFLOW）",
+   "evidence": [
+    {
+     "src": "data/film_score/ep01_v2.json S3.4",
+     "note": "timeline bgm.cues 强度 2/2/2/2/2，剧本写 1/1/1/2/2/3/1"
+    },
+    {
+     "src": "data/music/series10/ep01.json",
+     "note": "bgm10 时间轴全部 intensity 2"
+    }
+   ],
+   "check": [
+    "tests/test_director.py"
+   ],
+   "confidence": "medium",
+   "status": "建议",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/director.yaml"
+  },
+  {
+   "id": "K-EDT-805",
+   "domain": "edit",
+   "link": "P9-P10",
+   "title": "画内对白被 TTS 兜底 = 口型与成片声音不一致：送回重出视频，不进定稿",
+   "when": "合成用 --dialogue-source h3，某镜 H3 原声回听不合格改用 TTS",
+   "then": "tools/director/lip_redo.blocking(timeline) 列出这些镜 → data/director/redo_requests.json；本集只出预览、不定稿；成片分 A3.1 不通过；night 接线待 CONSENT",
+   "evidence": [
+    {
+     "src": "docs/vqa/GATE_CALIBRATION.md §10–11",
+     "note": "总调度 11-02 转 VQAGATE 查证"
+    },
+    {
+     "src": "data/episodes/series10/ep01_v2.timeline.json h3_dialogue",
+     "note": "S6 tts_fallback（no H3 audio），该镜进成片的是静帧"
+    }
+   ],
+   "check": [
+    "tests/test_director.py"
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/director.yaml"
+  },
+  {
+   "id": "K-EDT-811",
+   "domain": "edit",
+   "link": "P3-P4",
+   "title": "导演层运镜：一种、小幅、Pika 做得到；大动作不叠运镜，不拉远 / 环绕",
+   "when": "tools/director/cut_plan.py 给每镜定 camera",
+   "then": "对白镜固定或小幅推近；开场 / 换场第一镜固定；情绪强度 3 小幅推近；有大动作固定；写作方写了拉远 / 环绕 / 晃动 / 缓慢 → 改写并标 flags",
+   "evidence": [
+    {
+     "src": "config/prompts/hollywood_pika_reference.md P3 P10 P16"
+    },
+    {
+     "src": "docs/video_rca/RCA_r1.md §1 C16",
+     "note": "视频比首帧再远 ≥1 档 11/55"
+    }
+   ],
+   "check": [
+    "tests/test_director.py"
+   ],
+   "confidence": "medium",
+   "status": "建议",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/director.yaml"
+  },
+  {
+   "id": "K-EDT-812",
+   "domain": "edit",
+   "link": "P8-P10",
+   "title": "转场按写作方衔接字段：动作→动作匹配切、视线→视线匹配切、换场→声音先行 0.4 s、时间跳→叠化 0.4 s",
+   "when": "cut_plan 定 transition_in",
+   "then": "link=换场 且有时间跳词 → 叠化；换场 → 声音先行；接力+动作 → 动作匹配切（上一镜在动作中段出刀）；视线 → 视线匹配切；其余硬切",
+   "evidence": [
+    {
+     "src": "knowledge/rules/writer_camera.yaml K-EDT-102"
+    }
+   ],
+   "check": [
+    "tests/test_director.py"
+   ],
+   "confidence": "medium",
+   "status": "建议",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/director.yaml"
+  },
+  {
+   "id": "K-EDT-813",
+   "domain": "edit",
+   "link": "P8-P10",
+   "title": "刀长随情绪强度变：强度 1 → 3–4.5 s、2 → 2.5–3.5 s、3 → 1.5–2.5 s；第一刀 ≤3 s",
+   "when": "cut_plan 定 cut.target_s，合成按它拆刀 / 收紧",
+   "then": "目标刀长写进导演规格；合成接线待 CONSENT（替代全集统一 max_shot_s 4.5）",
+   "evidence": [
+    {
+     "src": "data/film_score/ep01_v2.json E1",
+     "note": "平均每刀 4.11 s、最长 8 s（占位静帧）"
+    },
+    {
+     "src": "config/render_quality.json post.edit_rules.learned_from.max_shot_s_v2",
+     "quote": "节奏有点慢，慢溜溜的"
+    }
+   ],
+   "check": [
+    "tests/test_director.py"
+   ],
+   "confidence": "low",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/director.yaml"
+  },
+  {
+   "id": "K-EDT-814",
+   "domain": "edit",
+   "link": "P8-P10",
+   "title": "J-cut / L-cut：下一镜开口 → 声音先进 0.3 s；上一句的尾音盖到听者反应镜 0.4 s",
+   "when": "cut_plan 定 j_cut_s / l_cut_s",
+   "then": "换场的声音先行同时记 j_cut_s；叠化不做 J/L",
+   "evidence": [
+    {
+     "src": "config/render_quality.json post.edit_rules.jl_cut_s",
+     "quote": "transition 非常生硬，不连贯"
+    },
+    {
+     "src": "data/film_score/ep01_v2.json E3.2",
+     "note": "6 个切点只有 2 个有 J-cut"
+    }
+   ],
+   "check": [
+    "tests/test_director.py"
+   ],
+   "confidence": "medium",
+   "status": "建议",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/director.yaml"
+  },
+  {
+   "id": "K-EDT-815",
+   "domain": "edit",
+   "link": "P3-P4",
+   "title": "视线写画内方向；同场相邻镜两人左右互换 = 越轴，标出来",
+   "when": "cut_plan 读 cast 左右站位",
+   "then": "在左的人视线 toward frame-right，在右的人 toward frame-left；越轴 → flags（合成按硬切，写作方标 HARD CUT 或改站位）",
+   "evidence": [
+    {
+     "src": "config/prompts/hollywood_pika_reference.md P5"
+    },
+    {
+     "src": "knowledge/rules/writer_camera.yaml K-WRT-104"
+    }
+   ],
+   "check": [
+    "tests/test_director.py"
+   ],
+   "confidence": "medium",
+   "status": "建议",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/director.yaml"
   },
   {
    "id": "K-EDT-001",
@@ -3101,6 +3436,58 @@
    "_file": "knowledge/rules/netfix.yaml"
   },
   {
+   "id": "K-OPS-N07",
+   "domain": "ops",
+   "link": [
+    "P5-P6",
+    "P7-P8"
+   ],
+   "title": "到跳板只保持固定的常驻连接池（6 条道隧道 + 每台 2 条 WSL 命令主连接），远程命令只许复用、不许每次新建 ssh；新建握手全局同时 ≤2",
+   "when": "笔记本任何程序要对 gpu33 / gpu36 跑远程命令或传文件",
+   "then": "用 tools/netfix/rssh.run（或直接起 ssh——笔记本 venv 的 .pth 加载 tools/netfix/ssh_shim.py，自动改写为 wsl --exec ssh -S <主连接> -o ProxyCommand=false，主连接不在立刻失败、不新握手）；主连接由 tunnel_supervisor 托管（config/netfix/tunnels.json kind=wsl_mux，每台 2 条，服务器 sshd MaxSessions 10 → 随机分摊），新建连接 max_connecting=2（跳板 MaxStartups 10:30:100）；新增直接起 ssh 的文件必须登记 config/netfix/ssh_callers.txt；安全阀 NS_SSH_SHIM=off；服务器 venv 不装 shim；Windows→WSL 的 127.0.0.1 端口转发在 NAT 模式下不通（实测），所以道隧道仍走 Windows 侧常驻 ssh",
+   "check": "tests/test_netfix.py::test_no_new_direct_ssh_outside_allowlist",
+   "evidence": [
+    {
+     "src": "data/netfix/conn_watch.jsonl",
+     "note": "00:07 总调度实测：26 个 ssh.exe、到跳板 ESTABLISHED 13 / TIME_WAIT 12；改后见 conn_watch 30 分钟统计"
+    },
+    {
+     "src": "tools/netfix/rssh.py",
+     "note": "00:26 复用连接执行命令 0.9–2.0 s（原每次 6–7 s 握手）；00:31 单主连接并发 >10 会话报 Session open refused by peer → 每台 2 条"
+    }
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/netfix.yaml"
+  },
+  {
+   "id": "K-OPS-N08",
+   "domain": "ops",
+   "link": [
+    "P5-P6",
+    "P7-P8"
+   ],
+   "title": "到服务器主路走香港中转 hkjump → 194relay（域名）→ gpu，直连作备用；用项目 ssh 配置 config/netfix/ssh_config（-F，相对路径 + cwd=ROOT）和项目 known_hosts，不改用户 ~/.ssh/config",
+   "when": "监管进程起任何隧道 / 命令主连接",
+   "then": "routes = hk（入口 47.243.63.181:22，主机名加 -hk）/ direct；hk 入口不通或连续 4 次连不上 → 判坏 10 分钟走直连；主路稳定 120 s 后逐条迁回（每拍最多一条，不全局停）；hkjump 只认 id_ed25519_gpu36；194relay-hk 的 HostName 必须是域名 sz194.instameta.org（写 IP 会被拒绝转发）；hkjump 指纹 SHA256:IrIRIa+ucfx1CxhkWG4lEsDI58vb1EZ03/rOR7uPHtY（总调度 11-02 00:5x 用 ssh-keyscan 核对，与项目方文档一致，记入 config/netfix/known_hosts）；路径含空格，-F 一律用相对路径并设 cwd=ROOT",
+   "check": "tests/test_netfix.py::test_ssh_cmd_has_keepalive_and_tag",
+   "evidence": [
+    {
+     "src": "data/netfix/bw_test.jsonl",
+     "note": "gpu36-hk：上传 1 条 2.9 MB/s、4 条 5.5 MB/s；下载 1 条 1.5 MB/s、4 条 1.55 MB/s（直连：上传 1 条 36 KB/s、下载 53 KB/s）"
+    },
+    {
+     "src": "data/netfix/supervisor.log",
+     "note": "01:03–01:08 14 条常驻连接全部滚动迁到 hk，没有全局停产"
+    }
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/netfix.yaml"
+  },
+  {
    "id": "K-OPS-Q30",
    "domain": "ops",
    "link": [
@@ -3353,6 +3740,92 @@
    "status": "确认",
    "date": "2026-11-01",
    "_file": "knowledge/rules/ops_code_rsi.yaml"
+  },
+  {
+   "id": "K-OPS-E01",
+   "domain": "ops",
+   "link": [
+    "P5-P6",
+    "P7-P8"
+   ],
+   "title": "作业已经交给 ComfyUI 之后，/history 轮询偶尔超时或断连，不等于作业没了——在宽限期内继续按 prompt_id 等，不重派、不重渲染",
+   "when": "ComfyClient.wait() 轮询 /history/{prompt_id}，经跳板或隧道",
+   "then": "轮询抛 ComfyUnavailable 时，连续失败不超过 POLL_GRACE_S（默认 300 s，环境变量 NS_COMFY_POLL_GRACE_S）就继续等，超过宽限期或总超时才报错；执行报错（status_str=error）照常立即抛出",
+   "check": "tests/test_debug_rsi.py::test_r01_poll_timeout_keeps_waiting, tests/test_debug_rsi.py::test_r01_poll_gives_up_after_grace",
+   "evidence": [
+    {
+     "src": "data/producer/log.jsonl",
+     "note": "first:ep01-S8 gpu33:0：ComfyUI 00:22:53 开始执行、41 s 执行成功（gpu33 :8188 /history）；笔记本 00:24:33 记 infra_error /history timed out，00:25:35 重派 = 同一张图白做一遍、参考图重传一遍"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_debug.yaml"
+  },
+  {
+   "id": "K-OPS-E02",
+   "domain": "ops",
+   "link": [
+    "P5-P6",
+    "P7-P8"
+   ],
+   "title": "下载传到一半断开（IncompleteRead / RemoteDisconnected）属于连接问题，不是内容问题——重下，不重渲染、不计尝试次数",
+   "when": "ComfyClient._request / download() 取 /view",
+   "then": "http.client.HTTPException 归为 ComfyUnavailable（producer 按 infra 处理，counted=false）；download() 重试 DOWNLOAD_TRIES 次（默认 3，退避 5/10 s），单次 socket 超时 ≥ 300 s",
+   "check": "tests/test_debug_rsi.py::test_r02_incomplete_read_is_unavailable_and_retried",
+   "evidence": [
+    {
+     "src": "data/producer/log.jsonl",
+     "note": "first:ep01-S7 gpu36:0 00:20:47 出好；00:22:23 content_error IncompleteRead(65536 bytes read, 2868839 more expected)，attempts.json tries=1“第 1 次出错”——被误记一次内容失败，之后又重派"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_debug.yaml"
+  },
+  {
+   "id": "K-OPS-E03",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "取消作业只取消自己这一单（/queue delete + /interrupt 带 prompt_id），不许用全局 /interrupt 打断这张卡上别人正在跑的作业",
+   "when": "任何代码在超时、放弃、清理时要取消一个 ComfyUI 作业",
+   "then": "用 ComfyClient.cancel(prompt_id)；interrupt() 不带参数 = 全局打断，只给明确要清卡的调用方用（ComfyUI 0.42 /interrupt 收到 prompt_id 时只在它正在跑才打断）",
+   "check": "tests/test_debug_rsi.py::test_r03_timeout_cancels_only_own_prompt, tests/test_debug_rsi.py::test_r03_no_bare_interrupt_in_wait_source",
+   "evidence": [
+    {
+     "src": "services/render_router/ns_render/comfy_client.py",
+     "note": "原 wait() 超时调 self.interrupt() 发 {} = 全局打断；gpu33 :8188、gpu36 :8188 的 /history 各有 1 条 execution_interrupted（SamplerCustomAdvanced）"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_debug.yaml"
+  },
+  {
+   "id": "K-OPS-E04",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "资产暂缓清单（data/autopilot/*_hold.json，active=true）里的首帧、尾帧对象，producer 不派单、也不重打分",
+   "when": "producer.dispatch_frames 选候选",
+   "then": "asset_hold_objects() 每拍现读；清单坏了或不在 = 不挡；改了 producer 必须重启进程才生效（00:58 加的逻辑，00:44 起的进程没有，00:56 / 00:57 仍出了清单里的 ep01-S8 / S9）",
+   "check": "tests/test_debug_rsi.py::test_r04_asset_hold_objects, tests/test_debug_rsi.py::test_r04_dispatch_consults_hold_before_rescore_and_dispatch",
+   "evidence": [
+    {
+     "src": "data/autopilot/lookA_hold.json",
+     "note": "IMGFIX r5 00:57：林晚造型 A 设定图缺左臂外套袖，20 镜暂缓"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_debug.yaml"
   },
   {
    "id": "K-OPS-D02",
@@ -10275,6 +10748,106 @@
    "_file": "knowledge/rules/ui.yaml"
   },
   {
+   "id": "K-UI-043",
+   "check": "tests/test_takes_ui_uirsi.py",
+   "domain": "ui",
+   "link": [
+    "P4-P6"
+   ],
+   "title": "候选图跟剧本版本绑定——剧本重导（镜头可能重新编号）之前出的版本只进历史区，不作候选、不计候选数、不当“当前”显示",
+   "when": "剧本逐集 / 整本导入后（data/import/import_log.jsonl 新一条），按 epNN/SN 存放的旧版本还挂在新镜号底下",
+   "then": "takes_ui.script_version：take 带 prompt_source.sha256 且等于现行剧本 sha → 现行；否则出图时间早于本集最后一次导入（路径 _epNN_ 归集，认不出集号的算整本）= 旧剧本版本；没有出图时间 = 判不了、不藏。/api/candidates 每版标 script，旧版本 ok=false，why_not 保留原因（不合格 / 脸不像）再接“旧剧本版本…”；当前版本本身是旧剧本出的，画布 / 总览不显示、写“未出（剧本已更新）”；/api/season 候选数只数现行版本。不删文件、不改 takes.json；data_parity D-CANDVER 独立按 takes.json + import_log 复核（进 iter_gate D1）",
+   "evidence": [
+    {
+     "src": "docs/uirsi/rounds/r40.md",
+     "note": "项目方 11-02 00:0x 截图：ep06 表头“首帧 0/10”，S1–S8 却显示旧剧本的图和“N 张候选”；改前 data_parity D-CANDVER 在 :8800 上逐镜报错，改后进程内 PASS"
+    },
+    {
+     "src": "data/qa/uirsi/r40_parity_live_before.json",
+     "note": "改前（:8800 旧代码）D-CANDVER 报 ep06-S1 旧剧本候选 #2–5 等"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ui.yaml"
+  },
+  {
+   "id": "K-UI-044",
+   "check": "tests/test_r40_uirsi.py",
+   "domain": "ui",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "镜头 / 板块状态用彩色标签，状态全部来自后端真实数据，全剧总览、画布、审片同一口径",
+   "when": "项目方要在全剧总览一眼看到哪些镜 / 哪一集是过期、待重出、旧剧本、看图没过、进行中、已确认",
+   "then": "后端 ns_api/shot_status.py 汇总 producer registry（redo / master_reject / stale / status / last_error）+ 剧本版本 + 看图判定（vqa_rounds judge、Q9 未测）→ 每镜 tags + main（严重度：看图没过 > 旧剧本版本 > 待重出 > 过期 > 待补判 > 尽力版 > 出图中 > 排队中 > 通过），每集 blocks（剧本 / 资产 / 首帧 / 尾帧 / 视频 / 成片：过期 / 进行中 / 已确认 / 未开始；上游过期则下游已确认也算过期）；前端只上色：镜头格主标签 + 悬停列全部，集标题行左侧状态块、阶段胶囊、各色数量可点筛选，顶部图例和“板块”筛选；色板深浅主题共用 token，文案无内部代号（未知检查项写“N 项其他问题”）",
+   "evidence": [
+    {
+     "src": "docs/uirsi/rounds/r40.md",
+     "note": "项目方 00:1x：“在 UI 里面做一个错误标志吧”；00:3x：“用颜色区分一下：哪个板块已经确认,哪个板块正在进行中,哪个板块是过期的.layout一下”"
+    },
+    {
+     "src": "apps/web/e2e/uirsi/r40d_ov_top_1440_dark.png",
+     "note": "全剧总览图例 + 板块筛选 + 每格主标签"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ui.yaml"
+  },
+  {
+   "id": "K-UI-045",
+   "check": "tests/test_r40_uirsi.py",
+   "domain": "ui",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "点选即生效但要防误点——点图本身只看大图，明确点“用这张”才换；换掉项目方已定的图先一键确认“换 / 不换”；换完 10 秒可撤销",
+   "when": "人物中心身份脸 / 造型设定图等“设为当前”的地方，尤其对象受 owner_decisions 断言或 MASTER_PICTURE L-xxx 锁着",
+   "then": "候选图的 onClick = 看大图（不调接口）；“用这张”（Verdict）才调接口；GET /api/decision-locks 从 config/owner_decisions.yaml 解析锁（设定图：grep_present + sheets_chosen.json 的文件名片段；身份脸：face_overrides.json 的 eq 断言），当前图受锁而要换别的 → 弹 Modal“这张…已按你 11-01 21:4x 的决定定为 …（L-093），确定要换吗？”两个按钮；不打字、一次点击；换完沿用 act 的 10 秒撤销（同一审计接口）",
+   "evidence": [
+    {
+     "src": "docs/uirsi/rounds/r40.md",
+     "note": "11-01 23:57:52–23:58:01 九秒内连点三次，林晚造型 A 设定图 v2_s202 → s101，推翻 L-093；根因：点候选图本身就调 onSheet 直接换"
+    },
+    {
+     "src": "apps/web/e2e/uirsi/r40c_lockconfirm_1440_dark.png",
+     "note": "已定设定图换图前的一键确认"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ui.yaml"
+  },
+  {
+   "id": "K-UI-046",
+   "check": "tests/test_r41_uirsi.py",
+   "domain": "ui",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "网页默认只给最新、做减法——旧版本隔离出界面（文件移隔离区、takes.json 只追加 quarantined），次要信息收进“细节 / 详情 / 历史”，不删功能",
+   "when": "项目方觉得界面丑、数据太多，或旧剧本版本混进当前视野",
+   "then": "旧剧本版本走 tools/uirsi/quarantine_oldscript.py（mark 追加 quarantined + 备份 takes.json → quarantine_safe_move 移文件、MANIFEST、restore-all 一键恢复）；/api/candidates 默认不返回已隔离版本（history=true 才返回，图址指隔离区）；集摘要 _active 把已隔离的当前版本当“没有当前”，data_parity D-CUR 同口径；总览默认 .simple：每镜大图 + 状态色描边 + 镜号 + 一个状态词，景别 / 时长 / 候选数 / 四段 / 人物 / 换装 / 各色数量 / 阶段收进“显示细节”和每集“细节 ▸”（悬停提示里都有）；画布一行默认只留首尾帧 / 视频 / 剧本 / 表情 / 对白和一行状态，声音、人物与场景参考、分镜详情 / 提示词收进“详情 ▸”（按钮悬停提示列出收起的东西）；行尾 ⋯ 有“历史版本”；颜色只用状态色板；顶栏 ≤1440 宽收起步骤副标题",
+   "evidence": [
+    {
+     "src": "docs/uirsi/rounds/r41.md",
+     "note": "项目方 11-02 00:5x：“旧版本的东西就隔离开吧,然后在我的网页里面尽量给我看最新的.同时,现在 UI/UX 的设计有点丑,数据有点太多了,有点难受”"
+    },
+    {
+     "src": "data/_quarantine_20261102_oldscript/MANIFEST.md",
+     "note": "655 个旧剧本版本、1105 个文件（含 49 个当时还是当前的旧尾帧）"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ui.yaml"
+  },
+  {
    "id": "K-REV-V01",
    "domain": "review",
    "link": [
@@ -10571,6 +11144,76 @@
    "confidence": "medium",
    "status": "确认",
    "date": "2026-11-01",
+   "_file": "knowledge/rules/vqa.yaml"
+  },
+  {
+   "id": "K-OPS-V13",
+   "domain": "ops",
+   "link": [
+    "P11-P12"
+   ],
+   "title": "服务器上按片子反复起的打分 / 检测脚本必须限线程（OMP/MKL/OPENBLAS/NUMEXPR=4、onnxruntime intra_op=4、cv2.setNumThreads(4)，调用方 nice）",
+   "when": "写或改 score_clip / v6_limbs / v7_lipsync / calibrate_v67 等服务器打分脚本，或新增服务器端检测器",
+   "then": "在第一个重型 import 之前设线程环境变量（K-OPS-V13 标记块，NS_SCORE_THREADS 可调）；用 onnxruntime / insightface 的给 InferenceSession 默认会话加 intra_op_num_threads；tools/qa/thread_guard.py 静态检查必须 PASS",
+   "check": [
+    "tools/qa/thread_guard.py",
+    "tests/test_vqagate.py"
+   ],
+   "evidence": [
+    {
+     "src": "docs/CHANGELOG_AGENTS.md",
+     "note": "11-02 00:3x：v7_lipsync 一个进程 gpu33 7432% / gpu36 9052% CPU，两台负载 250 / 160，拖慢 sshd 与 ComfyUI；限线程后同一片子 CPU 620%、38.6 s"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/vqa.yaml"
+  },
+  {
+   "id": "K-REV-V14",
+   "domain": "review",
+   "link": [
+    "P10-P11"
+   ],
+   "title": "背影 / 局部人物的后脑被人脸检测当成“认不出的脸”时，先交本地看图复核这张裁切：确认是后脑 / 耳朵就不算多出的人，真脸照挡",
+   "when": "契约 Q1 只因“画面里多了不该有的人 / 认不出是谁”不过，且 cast 里有背影 / 局部人物",
+   "then": "postflight 把认不出的脸框写进 Q1 证据（stranger_boxes、partial_cast）；producer.vqa_gate 调 contract.recheck_strangers 逐张裁切问本地看图（正脸 / 侧脸 / 后脑或耳朵 / 不是人 / 拿不准），全部是后脑 / 不是人才改判 Q1 pass；只走本地服务（K-REV-V01）",
+   "check": [
+    "tests/test_vqagate.py"
+   ],
+   "evidence": [
+    {
+     "src": "data/ab/imgfix/k705c_304_face_118.jpg",
+     "note": "IMGFIX s20261304（ep02-S4）林晚后脑 + 耳朵被认成一张脸（脸高 0.12，对 4 个角色相似度 ≈ 0），Q1 判多人挡图"
+    }
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/vqa.yaml"
+  },
+  {
+   "id": "K-OPS-V15",
+   "domain": "ops",
+   "link": [
+    "P10-P11"
+   ],
+   "title": "看图是出图线的吞吐上限：Q2–Q8 已不过的图不排队看图（反正要重出），闸门期没看成的图也不在记录环节再看一次",
+   "when": "producer._postflight → vqa_gate / vqa_record",
+   "then": "pf.ok=False 且阻断项里有 Q1 / Q9 以外的项 → Q9 记 untested（“前置契约不过，未看图”），不调本地看图；vqa_record 在 vlm 为空时不再调 review_round 自己看图。Q1 例外（转角放宽 / 后脑复核要看图结果）",
+   "check": [
+    "tests/test_vqagate.py"
+   ],
+   "evidence": [
+    {
+     "src": "data/producer/log.jsonl",
+     "note": "11-01 08:00–16:00 契约结果 214 张里 151 张是 Q2–Q8 不过（看图前就注定重出）；闸门上线后契约打分 p50 29 s → 646 s（总调度 P0）"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
    "_file": "knowledge/rules/vqa.yaml"
   },
   {
@@ -11406,6 +12049,66 @@
    "confidence": "high",
    "status": "待验",
    "date": "2026-11-01",
+   "_file": "knowledge/rules/writer_hollywood.yaml"
+  },
+  {
+   "id": "K-WRT-H04",
+   "check": [
+    "tests/test_hollywood_r5.py"
+   ],
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "HOLLYWOOD r5 不变量：剧情事实不变（代码核对说话人逐条顺序 + 独立事实核对调用），台词措辞可为潜台词重写",
+   "when": "tools/script_rsi/hollywood_r5.py gate5（项目方 11-02 00:4x“允许，剧情和人物不变”，D-SCR-09 / L-096）",
+   "then": "F1 说话人逐条顺序（含 🎙）与原稿一致；F2 事实表（hollywood_facts.md 任务 A，large-flash reasoning medium，原稿自检 0 偏差才可用）核对改写稿 0 偏差；I2–I7 照旧；QW-W11 = 0 为硬条件；任何一项不满足整稿作废",
+   "params": {
+    "fact_reasoning": "medium",
+    "zero_codes": [
+     "QW-W11"
+    ]
+   },
+   "evidence": [
+    {
+     "src": "data/review_pages/hollywood_r5/ep04_try1_facts_v1/log.txt",
+     "note": "关推理的事实核对连 r4 基线和原稿自检都报 4–11 条假偏差（把视线 / 手部小动作当事件），4 集全部作废"
+    },
+    {
+     "src": "config/prompts/hollywood_facts.md",
+     "note": "粒度说明：情节节点是事实，表演 / 调度不是；新增冲突 / 决定 / 接触 / 信息 / 关键物件算 invented"
+    }
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/writer_hollywood.yaml"
+  },
+  {
+   "id": "K-WRT-H05",
+   "check": [
+    "tests/test_hollywood_r5.py"
+   ],
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "HOLLYWOOD r5 评审 = 可核对清单（每项 5 条，满足几条几分）× 三个独立评审（A / B / 刁钻 C）平均；写作 = large-flash reasoning high，best-of-3 + 单维度专项精修",
+   "when": "hollywood_r5.py run（项目方 00:4x“50 over 50”，预算 $50，L-097）",
+   "then": "清单原文由写作网关产出（hollywood_rubric_request.md → hollywood_rubric.json → hollywood_judge.md §三），不比原量表宽松；met/unmet 矛盾或缺项按不满足；精修顺序 5 秒钩子 → 转折 → 潜台词 → 结尾钩子 → 其余未满分项；写作输出上限 64000（推理吃输出）",
+   "params": {
+    "writer": "flash-high",
+    "best_of": 3,
+    "max_out": 64000,
+    "target_import": 48,
+    "target_full": 50,
+    "max_rounds": 8
+   },
+   "evidence": [
+    {
+     "src": "data/review_pages/hollywood_r5/ab_ep04/ab.json",
+     "note": "同请求：flash-high 46.6 / flash-medium 42.0（三评审平均）；32000 上限下 flash-high 截断、large-v2 无正文（推理吃满）"
+    }
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-02",
    "_file": "knowledge/rules/writer_hollywood.yaml"
   },
   {

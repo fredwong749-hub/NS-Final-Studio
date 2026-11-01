@@ -720,6 +720,49 @@ def visible_zones(img: str, kept_triggers=None) -> tuple[str | None, str | None,
     return size, subject, set(ZONES_BY_SIZE.get(size, ALL_ZONES))
 
 
+BACK_WORDS = ("背影", "背面", "背身", "背对", "后背", "背部")
+
+
+def back_part(shot, name: str) -> bool:
+    """cast 里这个人是局部、部位写的是背影 / 背面（剧本原文）"""
+    for c in g(shot, "cast") or []:
+        if g(c, "name") == name and g(c, "presence") == "局部":
+            return any(w in str(g(c, "part") or "") for w in BACK_WORDS)
+    return False
+
+
+def back_outer_items(project: str, cid: str, lid: str | None) -> list[str]:
+    """背影局部人物背面看得到的外层服装（本镜造型里的外层单品短名，造型登记原文）"""
+    L = (load_looks(project).get(cid) or {}).get(lid) if lid else None
+    return [_short(p.label) for p in (L.parts if L else []) if _outer_label(p)]
+
+
+def look_id_of(project: str, ep, shot, name: str) -> str | None:
+    """本镜某人的造型 id，与 resolve_shot 同一顺序：排期（整集）> 画布逐镜 > 系统登记 > 剧本造型行"""
+    cid = NAME_ID.get(name, name)
+    n_ep = int(g(ep, "number") or g(shot, "episode") or 0)
+    sid = f"ep{n_ep:02d}-S{int(g(shot, 'index'))}"
+    lid = episode_look_override(project, cid, n_ep)
+    if not lid:
+        lid = ((shot_overrides(project)[0].get(sid) or {}).get(cid) or {}).get("look")
+    if not lid:
+        r = registry_looks(project).get(sid, {}).get(cid)
+        lid = r.get("look") if isinstance(r, dict) else r
+    if not lid:
+        row = look_for(ep, name, int(g(shot, "index")))
+        if row is not None:
+            lid = match_look(load_looks(project).get(cid) or {}, g(row, "slots"), g(row, "raw") or "")[0]
+    return lid
+
+
+def back_outer_clause(project: str | None, ep, shot, name: str) -> str:
+    """K-REN-705 c（IMGFIX 11-02，总调度：背影局部人物要补外套）：cast 局部且部位是背影 → “背面也穿着<外层单品>”（造型登记原文）"""
+    if not project or not project_cfg(project) or not back_part(shot, name):
+        return ""
+    items = back_outer_items(project, NAME_ID.get(name, name), look_id_of(project, ep, shot, name))
+    return ("背面也穿着" + "、".join(items)) if items else ""
+
+
 def cast_on_screen(shot) -> list[tuple[str, str]]:
     """[(名字, presence)]：在画 / 局部（画外、声音不算）"""
     out = []
@@ -831,8 +874,11 @@ def resolve_shot(project: str, ep, shot, *, kept_triggers=None, looks=None, two_
         part_shot = subject == "part"
         if sheet and not part_shot and (zones - {"face"}):
             sp = (panel if is_primary else "front") + "_nohead"
+            # IMGFIX 11-02（总调度：背影局部人物要补外套）：局部且 cast 部位写背影 / 背面 → 送设定图背面栏裁切
+            if pr == "局部" and back_part(shot, name):
+                sp = "back_nohead"
             refs.append(Ref("sheet", cid, sheet_crop(project, sheet, sp),
-                            f"{name}本镜造型{lid}的设定图（{'半身' if sp.startswith('half') else '正面全身'}，去头）",
+                            f"{name}本镜造型{lid}的设定图（{'背面' if sp.startswith('back') else '半身' if sp.startswith('half') else '正面全身'}，去头）",
                             base + 1, None, "sheet", look_id=lid, has_face=False))
         # 景别可见的单品（I4）
         povs = {k: v for k, v in (ov.get("parts") or {}).items() if v}
@@ -936,7 +982,25 @@ OUTER_ITEMS_RE = re.compile(r"[^，。、；]{1,12}本镜造型[A-Za-z0-9]{0,3}�
 # frame_job.eyeline_note 用本镜第一拍的 视线= 补一句正向落点（Qwen Image cfg 1，负面词不生效，只能写正向；docs/acting/PERFORMANCE_RULES.md E1/E6）
 EYELINE_NOTE = "{name}的视线落在{target}上（看画内的人或物，眼神有落点）"
 EYELINE_RE = re.compile(r"[^，。、；]{1,12}的视线落在[^（。]{1,40}上（看画内的人或物，眼神有落点）")
-TEXT_NOTE_RES = (TEXT_FALLBACK_RE, OUTER_ITEMS_RE, EYELINE_RE)
+# IMGFIX r5（总调度 fredw-2b 11-02）：外层单品的登记描述（衣橱 description，例：短款西装外套“两只袖子都是深灰西装袖，露米白衬衫袖口”）
+# 作为技术契约句补进出图正文（正面、背影都适用）；句式唯一来源在这里，进 TEXT_NOTE_RES（unified_stale 自动认）
+GARMENT_DETAIL_NOTE = "{name}的{label}：{desc}"
+# 描述里不放逗号（逗号是正文分句符，识别式靠它定界）；袖口写在括号里
+GARMENT_DETAIL_RE = re.compile(r"[^，。、；：①-⑩]{1,12}的[^，。、；：①-⑩]{0,12}(?:外套|西装|风衣|大衣|皮衣|夹克|围裙|开衫|披肩)：[^，。；：]{1,60}")
+TEXT_NOTE_RES = (TEXT_FALLBACK_RE, OUTER_ITEMS_RE, EYELINE_RE, GARMENT_DETAIL_RE)
+
+
+def garment_details(project: str, cid: str, lid: str | None) -> list[tuple[str, str]]:
+    """本造型外层单品里，衣橱登记了 description 的 → [(短名, description)]"""
+    L = (load_looks(project).get(cid) or {}).get(lid) if lid else None
+    out = []
+    for p in (L.parts if L else []):
+        if not _outer_label(p) or not p.item_id:
+            continue
+        desc = ((wardrobe().get(p.item_id) or {}).get("description") or "").strip().rstrip("。")
+        if desc:
+            out.append((_short(p.label), desc))
+    return out
 
 
 @dataclass
@@ -1152,12 +1216,18 @@ def single_turn_line(sr: ShotRefs, shot) -> str:
     if sr.subject in ("part", "object"):
         return ""
     img = g(shot, "img_prompt") or ""
-    if any(w in img for w in ("背影", "背对", "背身")):
-        return ""                         # 剧本写了背对镜头，不加
     on = [c for c in sr.characters or [] if c.get("presence", "在画") == "在画"]
     if len(on) != 1:
         return ""
     name = on[0].get("name") or ID_NAME.get(on[0].get("character") or "", "")
+    # 剧本写了这个人背对镜头 → 不加。只看这个人自己的分句（名字后到下一个别的角色名 / 句号）：ep02-S4 背影是局部的林晚，
+    # 顾沉照样要朝向句（IMGFIX 11-02：原先整段找“背影”，顾沉 s20261304 没加句、正对镜头）
+    others = [c.get("name") for c in sr.characters or [] if c.get("name") and c.get("name") != name]
+    for m in re.finditer(re.escape(name or "__none__"), img):
+        seg = img[m.end():]
+        cut = min([i for i in (seg.find(o) for o in others) if i >= 0] + [i for i in (seg.find("。"), seg.find("；")) if i >= 0] + [len(seg)])
+        if any(w in seg[:cut] for w in ("背影", "背对", "背身")):
+            return ""
     return SINGLE_TURN_LEAD.format(name=name, target=gaze_target(shot)[:30]) if name else ""
 
 

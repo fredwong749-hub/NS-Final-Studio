@@ -678,3 +678,55 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-01
+  - id: K-UI-043
+    check: tests/test_takes_ui_uirsi.py
+    domain: ui
+    link: [P4-P6]
+    title: 候选图跟剧本版本绑定——剧本重导（镜头可能重新编号）之前出的版本只进历史区，不作候选、不计候选数、不当“当前”显示
+    when: 剧本逐集 / 整本导入后（data/import/import_log.jsonl 新一条），按 epNN/SN 存放的旧版本还挂在新镜号底下
+    then: takes_ui.script_version：take 带 prompt_source.sha256 且等于现行剧本 sha → 现行；否则出图时间早于本集最后一次导入（路径 _epNN_ 归集，认不出集号的算整本）= 旧剧本版本；没有出图时间 = 判不了、不藏。/api/candidates 每版标 script，旧版本 ok=false，why_not 保留原因（不合格 / 脸不像）再接“旧剧本版本…”；当前版本本身是旧剧本出的，画布 / 总览不显示、写“未出（剧本已更新）”；/api/season 候选数只数现行版本。不删文件、不改 takes.json；data_parity D-CANDVER 独立按 takes.json + import_log 复核（进 iter_gate D1）
+    evidence:
+      - {src: docs/uirsi/rounds/r40.md, note: "项目方 11-02 00:0x 截图：ep06 表头“首帧 0/10”，S1–S8 却显示旧剧本的图和“N 张候选”；改前 data_parity D-CANDVER 在 :8800 上逐镜报错，改后进程内 PASS"}
+      - {src: data/qa/uirsi/r40_parity_live_before.json, note: "改前（:8800 旧代码）D-CANDVER 报 ep06-S1 旧剧本候选 #2–5 等"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-UI-044
+    check: tests/test_r40_uirsi.py
+    domain: ui
+    link: [P5-P6]
+    title: 镜头 / 板块状态用彩色标签，状态全部来自后端真实数据，全剧总览、画布、审片同一口径
+    when: 项目方要在全剧总览一眼看到哪些镜 / 哪一集是过期、待重出、旧剧本、看图没过、进行中、已确认
+    then: 后端 ns_api/shot_status.py 汇总 producer registry（redo / master_reject / stale / status / last_error）+ 剧本版本 + 看图判定（vqa_rounds judge、Q9 未测）→ 每镜 tags + main（严重度：看图没过 > 旧剧本版本 > 待重出 > 过期 > 待补判 > 尽力版 > 出图中 > 排队中 > 通过），每集 blocks（剧本 / 资产 / 首帧 / 尾帧 / 视频 / 成片：过期 / 进行中 / 已确认 / 未开始；上游过期则下游已确认也算过期）；前端只上色：镜头格主标签 + 悬停列全部，集标题行左侧状态块、阶段胶囊、各色数量可点筛选，顶部图例和“板块”筛选；色板深浅主题共用 token，文案无内部代号（未知检查项写“N 项其他问题”）
+    evidence:
+      - {src: docs/uirsi/rounds/r40.md, note: "项目方 00:1x：“在 UI 里面做一个错误标志吧”；00:3x：“用颜色区分一下：哪个板块已经确认,哪个板块正在进行中,哪个板块是过期的.layout一下”"}
+      - {src: apps/web/e2e/uirsi/r40d_ov_top_1440_dark.png, note: 全剧总览图例 + 板块筛选 + 每格主标签}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-UI-045
+    check: tests/test_r40_uirsi.py
+    domain: ui
+    link: [P5-P6]
+    title: 点选即生效但要防误点——点图本身只看大图，明确点“用这张”才换；换掉项目方已定的图先一键确认“换 / 不换”；换完 10 秒可撤销
+    when: 人物中心身份脸 / 造型设定图等“设为当前”的地方，尤其对象受 owner_decisions 断言或 MASTER_PICTURE L-xxx 锁着
+    then: 候选图的 onClick = 看大图（不调接口）；“用这张”（Verdict）才调接口；GET /api/decision-locks 从 config/owner_decisions.yaml 解析锁（设定图：grep_present + sheets_chosen.json 的文件名片段；身份脸：face_overrides.json 的 eq 断言），当前图受锁而要换别的 → 弹 Modal“这张…已按你 11-01 21:4x 的决定定为 …（L-093），确定要换吗？”两个按钮；不打字、一次点击；换完沿用 act 的 10 秒撤销（同一审计接口）
+    evidence:
+      - {src: docs/uirsi/rounds/r40.md, note: "11-01 23:57:52–23:58:01 九秒内连点三次，林晚造型 A 设定图 v2_s202 → s101，推翻 L-093；根因：点候选图本身就调 onSheet 直接换"}
+      - {src: apps/web/e2e/uirsi/r40c_lockconfirm_1440_dark.png, note: 已定设定图换图前的一键确认}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-UI-046
+    check: tests/test_r41_uirsi.py
+    domain: ui
+    link: [P5-P6]
+    title: 网页默认只给最新、做减法——旧版本隔离出界面（文件移隔离区、takes.json 只追加 quarantined），次要信息收进“细节 / 详情 / 历史”，不删功能
+    when: 项目方觉得界面丑、数据太多，或旧剧本版本混进当前视野
+    then: 旧剧本版本走 tools/uirsi/quarantine_oldscript.py（mark 追加 quarantined + 备份 takes.json → quarantine_safe_move 移文件、MANIFEST、restore-all 一键恢复）；/api/candidates 默认不返回已隔离版本（history=true 才返回，图址指隔离区）；集摘要 _active 把已隔离的当前版本当“没有当前”，data_parity D-CUR 同口径；总览默认 .simple：每镜大图 + 状态色描边 + 镜号 + 一个状态词，景别 / 时长 / 候选数 / 四段 / 人物 / 换装 / 各色数量 / 阶段收进“显示细节”和每集“细节 ▸”（悬停提示里都有）；画布一行默认只留首尾帧 / 视频 / 剧本 / 表情 / 对白和一行状态，声音、人物与场景参考、分镜详情 / 提示词收进“详情 ▸”（按钮悬停提示列出收起的东西）；行尾 ⋯ 有“历史版本”；颜色只用状态色板；顶栏 ≤1440 宽收起步骤副标题
+    evidence:
+      - {src: docs/uirsi/rounds/r41.md, note: "项目方 11-02 00:5x：“旧版本的东西就隔离开吧,然后在我的网页里面尽量给我看最新的.同时,现在 UI/UX 的设计有点丑,数据有点太多了,有点难受”"}
+      - {src: data/_quarantine_20261102_oldscript/MANIFEST.md, note: "655 个旧剧本版本、1105 个文件（含 49 个当时还是当前的旧尾帧）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

@@ -150,97 +150,114 @@ def backup(rel: str):
             shutil.copy2(dst, b)
 
 
+def merge_file(host: str, rel: str, src: Path, att: dict | None = None, dry: bool = False) -> str:
+    """并回一个文件的唯一入口（NETFIX puller 与本脚本共用；总调度 01:0x 新架构：传图流水线由 puller 接管，规则仍在这里）。
+    host = 文件来自哪台服务器；rel = 仓库相对路径（data/…）；src = 拉回来的本地临时文件。
+    → 动作："skipped:<原因>" / "objects+N" / "append+N" / "night_state" / "attempts:N" / "corrupt:<原因>" /
+            "new" / "newer" / "older_kept"
+    规则（K-OPS-Q20 / W02 / N04）：
+      ① 名单外文件不收（SKIP_NAMES、leases、.tmp）；
+      ② 带集号的路径只收负责那台的：data/renders/**、data/producer/** 看 partition.images，其余看 partition.video（owns）；
+         文件名带 _gpu33 / _gpu36 的只收那台自己的；
+      ③ data/producer/attempts.json：负责集的对象收进 att（调用方最后统一写，见 flush_attempts）；
+      ④ data/producer/*.json 对象表（master_rejects 等）：按对象合并，对象内 *at 更晚者胜（merge_objects）；
+      ⑤ APPEND 日志：只追加本地没有的行，带集号的行只收负责那台的；
+      ⑥ night_state.json：按集合并；
+      ⑦ 其余：先验完整（图片解码、mp4 有 moov、json 能解析、不是本地文件的截断前缀，pulled_problem），再“新者为准”覆盖，
+         覆盖前备份到 data/_offline_pull/_backup/。永不删除本地文件"""
+    import re as _re
+    dst = ROOT / rel
+    if src.name in SKIP_NAMES or "/leases/" in rel or rel.endswith(".tmp"):
+        return "skipped:名单外"
+    m = _re.search(r"(?:^|/|_)ep(\d{2})(?:\b|-|_|/)", rel)
+    if m and not owns(host, rel, int(m.group(1))):
+        return "skipped:不归这台"
+    mh = _re.search(r"_(gpu33|gpu36)[._]", rel)
+    if mh and mh.group(1) != host:
+        return "skipped:另一台的文件"
+    if rel == "data/producer/attempts.json":
+        d = json.loads(src.read_text(encoding="utf-8"))
+        n = 0
+        for k, v in d.items():
+            if ep_of_obj(k) in OWN_IMG.get(host, set()) and att is not None:
+                att[k] = v
+                n += 1
+        return f"attempts:{n}"
+    if is_object_file(rel):
+        if dry:
+            return "objects(dry)"
+        try:
+            return f"objects+{merge_objects(rel, src, dst, host)}"
+        except (ValueError, OSError) as e:
+            return f"corrupt:{e!r}"[:200]
+    if rel in APPEND:
+        have = set(dst.read_text(encoding="utf-8").splitlines()) if dst.exists() else set()
+        new = [ln for ln in src.read_text(encoding="utf-8").splitlines() if ln and ln not in have]
+        own = OWN_IMG if rel.startswith("data/producer/") else OWN_VID
+        new = [ln for ln in new if not (mm := _re.search(r'"obj": "[a-z]+:ep(\d{2})', ln)) or int(mm.group(1)) in own.get(host, set())]
+        if new and not dry:
+            backup(rel)
+            with open(dst, "a", encoding="utf-8") as f:
+                f.write("\n".join(new) + "\n")
+        return f"append+{len(new)}"
+    if rel.endswith("video/night_state.json"):
+        s_ = json.loads(src.read_text(encoding="utf-8"))
+        l_ = json.loads(dst.read_text(encoding="utf-8")) if dst.exists() else {"eps": {}}
+        for e, x in (s_.get("eps") or {}).items():
+            if int(e) in OWN_VID.get(host, set()):
+                l_.setdefault("eps", {})[e] = x
+                if e in (s_.get("pending_shots") or {}):
+                    l_.setdefault("pending_shots", {})[e] = s_["pending_shots"][e]
+        if not dry:
+            backup(rel)
+            dst.write_text(json.dumps(l_, ensure_ascii=False, indent=1), encoding="utf-8")
+        return "night_state"
+    bad = pulled_problem(src, dst)
+    if bad:
+        return f"corrupt:{bad}"
+    if not dst.exists():
+        act = "new"
+    elif src.stat().st_mtime > dst.stat().st_mtime:
+        act = "newer"
+    else:
+        return "older_kept"
+    if not dry:
+        backup(rel)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+    return act
+
+
+def flush_attempts(att: dict, dry: bool = False) -> int:
+    """merge_file 收集的 attempts 对象统一写回 data/producer/attempts.json（按对象覆盖负责集的对象）"""
+    if not att:
+        return 0
+    p = ROOT / "data/producer/attempts.json"
+    cur = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    cur.update(att)
+    if not dry:
+        backup("data/producer/attempts.json")
+        p.write_text(json.dumps(cur, ensure_ascii=False, indent=1), encoding="utf-8")
+    return len(att)
+
+
 def main() -> int:
-    stats = {"new": 0, "newer": 0, "older_kept": 0, "merged": 0, "skipped": 0}
-    att = {}
+    stats: dict = {}
+    att: dict = {}
     for host in ("gpu33", "gpu36"):
         base = PULL / host
         if not base.exists():
             continue
         for src in sorted(p for p in base.rglob("*") if p.is_file()):
             rel = src.relative_to(base).as_posix()
-            dst = ROOT / rel
-            if src.name in SKIP_NAMES or "/leases/" in rel or rel.endswith(".tmp"):
-                stats["skipped"] += 1
-                continue
-            # 按集分工：路径里带集号的（renders/epNN、video 下的 epNN-*、episodes/epNN…）只收负责该集那台的；
-            # state_<host>.json / vidgen_<host>.log 只收那台自己的（另一台副本里缺文件时 reconcile 会误改别的集，不能并回）
-            import re as _re
-            m = _re.search(r"(?:^|/|_)ep(\d{2})(?:\b|-|_|/)", rel)
-            if m and not owns(host, rel, int(m.group(1))):
-                stats["skipped"] += 1
-                continue
-            mh = _re.search(r"_(gpu33|gpu36)[._]", rel)
-            if mh and mh.group(1) != host:
-                stats["skipped"] += 1
-                continue
-            if rel == "data/producer/attempts.json":
-                d = json.loads(src.read_text(encoding="utf-8"))
-                for k, v in d.items():
-                    e = ep_of_obj(k)
-                    if e in OWN_IMG.get(host, set()):
-                        att[k] = v
-                continue
-            if is_object_file(rel):                 # 多集共享的对象文件：按对象合并（K-OPS-Q20 / W02）
-                if not DRY:
-                    try:
-                        n = merge_objects(rel, src, dst, host)
-                    except (ValueError, OSError) as e:
-                        print(f"!! skip corrupt {host} {rel}: {e!r}"[:200])
-                        continue
-                    stats["merged"] += 1
-                    print(f"objects {host} {rel} +{n}")
-                continue
-            if rel in APPEND:
-                have = set(dst.read_text(encoding="utf-8").splitlines()) if dst.exists() else set()
-                import re as _re
-                new = [ln for ln in src.read_text(encoding="utf-8").splitlines() if ln and ln not in have]
-                # 带对象 / 集号的行只收负责那台的（另一台副本缺文件时的误判不并回）
-                new = [ln for ln in new if not (mm := _re.search(r'"obj": "[a-z]+:ep(\d{2})', ln)) or int(mm.group(1)) in (OWN_IMG if rel.startswith('data/producer/') else OWN_VID).get(host, set())]
-                if new and not DRY:
-                    backup(rel)
-                    with open(dst, "a", encoding="utf-8") as f:
-                        f.write("\n".join(new) + "\n")
-                stats["merged"] += 1
-                print(f"append {host} {rel} +{len(new)}")
-                continue
-            if rel.endswith("video/night_state.json"):
-                s = json.loads(src.read_text(encoding="utf-8"))
-                l = json.loads(dst.read_text(encoding="utf-8")) if dst.exists() else {"eps": {}}
-                for e, x in (s.get("eps") or {}).items():
-                    if int(e) in OWN_VID.get(host, set()):
-                        l.setdefault("eps", {})[e] = x
-                        if e in (s.get("pending_shots") or {}):
-                            l.setdefault("pending_shots", {})[e] = s["pending_shots"][e]
-                if not DRY:
-                    backup(rel)
-                    dst.write_text(json.dumps(l, ensure_ascii=False, indent=1), encoding="utf-8")
-                stats["merged"] += 1
-                continue
-            bad = pulled_problem(src, dst)          # K-OPS-W02：拉回的文件读不全 / 是本地文件的截断前缀 → 不覆盖
-            if bad:
-                stats["corrupt_skipped"] = stats.get("corrupt_skipped", 0) + 1
-                print(f"!! skip corrupt {host} {rel}: {bad}")
-                continue
-            if not dst.exists():
-                stats["new"] += 1
-            elif src.stat().st_mtime > dst.stat().st_mtime:
-                stats["newer"] += 1
-            else:
-                stats["older_kept"] += 1
-                continue
-            if not DRY:
-                backup(rel)
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src, dst)
-    if att:
-        p = ROOT / "data/producer/attempts.json"
-        cur = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
-        cur.update(att)
-        if not DRY:
-            backup("data/producer/attempts.json")
-            p.write_text(json.dumps(cur, ensure_ascii=False, indent=1), encoding="utf-8")
-        print("attempts.json merged objects:", len(att))
+            act = merge_file(host, rel, src, att, DRY)
+            k = act.split(":")[0].split("+")[0]
+            stats[k] = stats.get(k, 0) + 1
+            if act.startswith(("objects", "append", "corrupt")):
+                print(host, rel, act)
+    n = flush_attempts(att, DRY)
+    if n:
+        print("attempts.json merged objects:", n)
     print("merge", "(dry)" if DRY else "", stats)
     return 0
 

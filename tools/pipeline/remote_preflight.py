@@ -104,8 +104,29 @@ def asset_paths(root: Path) -> dict[str, list[str]]:
             else:
                 paths += list(_img_strings(_jl(sf, {})))
         paths += list(_img_strings(c.get("item_map") or {}))
+        paths += scene_paths(root, c)
         out[proj] = paths
     return out
+
+
+SCENE_TRASH = {"trash", "_trash", "rejected"}
+
+
+def scene_paths(root: Path, c: dict) -> list[str]:
+    """场景参考底图（preflight I5 读的；FACTORY 11-02 报：清单漏了 assets/scenes，ep02-S1/S2 在服务器上被 I5“sk_elevator 没有参考底图”挡）。
+    asset_refs.scene_ref 取 assets/scenes/<目录>/ 下“最新的一张”（不进 trash / rejected），所以把这些目录下的有效图都列上，
+    服务器与笔记本同一组图才会选中同一张；再加 shot_looks.json scene_overrides 指向的图、config/scene_aliases.json 指向的目录"""
+    base = root / "assets/scenes"
+    out = []
+    if base.is_dir():
+        for f in base.rglob("*"):
+            if f.is_file() and f.suffix.lower() in IMG_EXT and not (SCENE_TRASH & set(f.parts)):
+                out.append(f.relative_to(root).as_posix())
+    sl = _jl(_rp(root, c.get("shot_looks_file", "")), {}) if c.get("shot_looks_file") else {}
+    for v in ((sl or {}).get("scene_overrides") or {}).values():
+        if isinstance(v, str) and v.lower().endswith(IMG_EXT) and v != "none":
+            out.append(v if v.startswith("assets/") else f"assets/scenes/{v}")
+    return sorted(set(out))
 
 
 def job_ref_paths(root: Path) -> dict[str, list[str]]:

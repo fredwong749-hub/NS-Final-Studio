@@ -161,14 +161,23 @@ def test_hang_detected_and_killed_but_remote_down_is_not(monkeypatch, tmp_path):
 def test_ssh_cmd_has_keepalive_and_tag():
     s = TS.Supervisor.__new__(TS.Supervisor)
     s.c = json.loads(TS.CONF.read_text(encoding="utf-8"))
-    s.tag = "nsnetfix"
+    s.tag, s.route_bad_until = "nsnetfix", {}
+    s.relay = {"routes": {"hk": {"up": True}, "direct": {"up": True}}}
     cmd = " ".join(s.ssh_cmd("gpu36-l0"))
-    for k in ("ServerAliveInterval=10", "ConnectTimeout=20", "ExitOnForwardFailure=yes", "Tag=nsnetfix-gpu36-l0",
-              "Tag=nsnetfix-proxy-gpu36-l0", "127.0.0.1:18288:127.0.0.1:8188", "127.0.0.1:8871:127.0.0.1:8870"):
+    for k in ("-F config/netfix/ssh_config", "ExitOnForwardFailure=yes", "Tag=nsnetfix-gpu36-l0",
+              "127.0.0.1:18288:127.0.0.1:8188", "127.0.0.1:8871:127.0.0.1:8870"):
         assert k in cmd
-    assert cmd.endswith(" gpu36")
+    assert cmd.endswith(" gpu36-hk")                                     # K-OPS-N08 主路香港
     assert "18290" in " ".join(s.ssh_cmd("gpu36-l2")) and "18288" not in " ".join(s.ssh_cmd("gpu36-l2"))   # 按道一条连接
-    assert "ServerAliveInterval" in s.c["relay"]["proxy_cmd"]
+    s.relay["routes"]["hk"]["up"] = False                               # 香港入口不通 → 直连
+    assert s.ssh_cmd("gpu36-l0")[-1] == "gpu36"
+    s.relay["routes"]["hk"]["up"], s.route_bad_until["hk"] = True, TS.now() + 600   # 判坏期内也走直连
+    assert s.ssh_cmd("gpu33-cmd")[-1] == "gpu33" and "ssh_config.wsl" in " ".join(s.ssh_cmd("gpu33-cmd"))
+    cfg = (ROOT / "config/netfix/ssh_config").read_text(encoding="utf-8")
+    for k in ("ServerAliveInterval 10", "ConnectTimeout 20", "HostName sz194.instameta.org", "ProxyJump hkjump", "47.243.63.181"):
+        assert k in cfg
+    kh = (ROOT / "config/netfix/known_hosts").read_text(encoding="utf-8")
+    assert "47.243.63.181 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILK2j0d1APVCsA/83SyC14RShKARYBGvBDLCRqdoOHqC" in kh   # 指纹 SHA256:IrIRIa+uc…（keyscan 核对）
 
 
 def test_all_render_ports_supervised_once():
@@ -220,6 +229,8 @@ def test_reconcile_hands_back_only_after_assets_ready_and_leases_done(monkeypatc
     for name, val in (("OVERRIDE", tmp_path / "ov.json"), ("OVERRIDE_STATE", tmp_path / "st.json"), ("ASSETS_READY", tmp_path / "ar.json"),
                       ("LEASES", tmp_path / "leases"), ("CONTROL", tmp_path / "control.json"), ("READY", tmp_path / "ready.json")):
         monkeypatch.setattr(D, name, val)
+    pushed = []
+    monkeypatch.setattr(D, "push_server_control", lambda h: pushed.append(h) or {"rc": 0})   # 不碰真服务器
     D.js(D.OVERRIDE, {"active": True, "laptop_hold": ["gpu36:2"]})
     D.js(D.READY, READY)
     D.js(D.OVERRIDE_STATE, {"hosts": {"gpu33": {"phase": "laptop"}, "gpu36": {"phase": "laptop"}}})
@@ -231,6 +242,9 @@ def test_reconcile_hands_back_only_after_assets_ready_and_leases_done(monkeypatc
     assert "ep02-S1" not in D.jl(D.CONTROL)["only"]
     D.js(D.LEASES / "first_ep02-S1.json", {"until": 0})
     assert D.reconcile()["phases"] == {"gpu33": "laptop", "gpu36": "server"}
+    assert pushed.count("gpu36") >= 2                                    # draining 和 server 各推一次（服务器侧阶段跟上）
+    D.js(D.LEASES / "first_ep01-S1.json", {"until": 9e12, "pid": 999999})   # 持有者已死的租约不算在途
+    assert D.live_leases([1]) == []
 
 
 def test_timeouts_while_ssh_moves_data_is_not_hang(monkeypatch, tmp_path):
@@ -255,7 +269,7 @@ import rssh as RS  # noqa: E402
 
 def test_rssh_rewrites_only_command_calls_to_servers():
     new = RS.rewrite(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-i", "C:/k", "gpu36", "nvidia-smi"])
-    assert new[:4] == RS.WSL[:4] and "/home/fredw/.ssh/nsnf/gpu36-cmd.sock" in new and "ProxyCommand=false" in new
+    assert new[:4] == RS.WSL[:4] and any(x in new for x in RS.POOL["gpu36"]) and "ProxyCommand=false" in new
     assert new[-2:] == ["gpu36", "nvidia-smi"] and "C:/k" not in new
     assert RS.rewrite(["ssh", "root@gpu33", "ls"])[-2:] == ["gpu33", "ls"]
     for argv in (["ssh", "-N", "-L", "1:127.0.0.1:2", "gpu36"], ["ssh", "-M", "gpu36", "x"], ["ssh", "-O", "check", "gpu36"],

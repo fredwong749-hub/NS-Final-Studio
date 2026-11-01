@@ -25,6 +25,19 @@ ROOT = Path(__file__).resolve().parents[2]
 STATUS = ROOT / "data/netfix/net_status.json"
 WSL = ["C:/Windows/System32/wsl.exe", "-d", "Ubuntu-24.04", "--exec"]
 SOCK = {"gpu33": "/home/fredw/.ssh/nsnf/gpu33-cmd.sock", "gpu36": "/home/fredw/.ssh/nsnf/gpu36-cmd.sock"}
+POOL = {h: [f"/home/fredw/.ssh/nsnf/{h}-{k}.sock" for k in ("cmd", "cmd2", "cmd3", "cmd4")] for h in SOCK}   # 每台 4 条（服务器 MaxSessions 10）
+
+
+def pick_sock(host: str) -> str:
+    """在监管进程报“up”的主连接里随机挑一条分摊会话；读不到状态就用第一条"""
+    import random
+    try:
+        hs = json.loads(STATUS.read_text(encoding="utf-8")).get("hosts") or {}
+        up = [hs[k]["sock"] if "sock" in hs[k] else f"/home/fredw/.ssh/nsnf/{k}.sock" for k in hs
+              if k.startswith(host + "-cmd") and hs[k].get("state") == "up"]
+    except (OSError, ValueError, KeyError):
+        up = []
+    return random.choice(up) if up else SOCK[host]
 ARG_OPTS = set("bcDEeFIiJLlmOoPpQRSWwB")          # 带参数的 ssh 选项
 SKIP_OPTS = set("LRDWNMfSO")                        # 出现就不改写（转发 / 主连接 / 控制命令）
 DROP_O = ("controlmaster", "controlpath", "controlpersist", "proxyjump", "proxycommand", "identityfile", "identitiesonly",
@@ -90,7 +103,7 @@ def rewrite(argv) -> list[str] | None:
     rest = a[i:]
     if not rest:                                     # 交互式登录不拦
         return None
-    return WSL + ["ssh", "-S", SOCK[host], "-o", "ControlMaster=no", "-o", "ProxyCommand=false", "-o", "BatchMode=yes",
+    return WSL + ["ssh", "-S", pick_sock(host), "-o", "ControlMaster=no", "-o", "ProxyCommand=false", "-o", "BatchMode=yes",
                   *kept, host, *rest]
 
 

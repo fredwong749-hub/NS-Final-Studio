@@ -20,6 +20,8 @@
     "subject_max_pixels": 600000,
     "ref_max_pixels": 150000,
     "video_frames": 6,
+    "instances": 1,
+    "_instances": "VQAGATE 11-02（DEBUG-RSI K-OPS-E05）：同时能出结果的看图实例数，producer 用它算打分积压上限。现状 = 1：gpu36 只有一个实例且和 ComfyUI 同卡；笔记本实例归 IMGFIX，暂停中。加实例后改这里",
     "_caliber": "口径 B（VQAGATE 11-01 22:5x 切，本机 4080 与 gpu36 同一套）：主图 0.6 MP、参考图 0.15 MP、输出 1000 token。gpu36 同一批 29 条对照原口径（1.3 MP / 0.36 MP / 1800）：阻断项逐项一致率 eye_contact 0.931、continuity_break 1.0、hair_mismatch 1.0、framing_mismatch 0.931、extra_person 0.966、underage_look 1.0、extra_limbs 0.828（两种口径下都不稳）；eye_contact 对人工标签召回 8/10 两边相同，误报 3/10 → 2/10。数据 data/vqa/vram_bench/compare_g36_orig_g36_Bfull.json；本机峰值 10.8–11.3 GB（GATE_CALIBRATION §7–8）"
   },
   "checks": {

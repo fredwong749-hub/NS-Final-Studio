@@ -15,7 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "data/netfix/bw_test.jsonl"
-SSH = ["C:/Program Files/Git/usr/bin/ssh.exe", "-o", "BatchMode=yes", "-o", "ConnectTimeout=30"]
+SSH = ["C:/Program Files/Git/usr/bin/ssh.exe", "-F", "config/netfix/ssh_config", "-o", "BatchMode=yes", "-o", "ConnectTimeout=30"]
 
 
 def one(host: str, size: int, up: bool, res: list, i: int) -> None:

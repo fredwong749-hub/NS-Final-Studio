@@ -534,6 +534,12 @@ checks:
     type: grep_present
     pattern: 'HEAD_EXCEPTIONS: dict\[int, list\[tuple\[str, str, str\]\]\] = \{1: \[\("\*\*造型｜林晚\*\*", "深灰西装裙", "深灰铅笔裙"\)\]\}'
     paths: [tools/script_rsi/hollywood.py]
+  - id: D-SCR-09
+    decision: L-096（项目方 11-02 00:4x：“……我起码要达到 50 分，就是你给的那个分数，50 over 50。”；AskUserQuestion“允许，剧情和人物不变 (Recommended)”——台词可为潜台词重写，发生了什么、谁说的、人物关系和设定不变；L-097 预算“$50” ⤴ L-098 01:08“50 美金，尽量少收一点，太贵了”→ 总调度定 r5 总上限 $15、每集 ≤ $3）
+    title: HOLLYWOOD r5 不变量 = 剧情事实不变（说话人逐条顺序代码核对 + 独立事实核对调用），不再要求台词逐字
+    type: grep_present
+    pattern: '"id": "F2", "name": "剧情事实不变（独立事实核对调用）"'
+    paths: [tools/script_rsi/hollywood_r5.py]
   - id: D-WRT-702
     decision: 总调度 11-01 晚 r7：收编 VIDEO-RCA K-WRT-702（分拍不写对身上衣服的整理动作），lint 号 QW-W11
     title: 写作机检里有 QW-W11

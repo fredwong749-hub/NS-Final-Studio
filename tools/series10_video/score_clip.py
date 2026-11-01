@@ -16,6 +16,11 @@
 """
 from __future__ import annotations
 
+import os as _os   # K-OPS-V13（VQAGATE 11-02 00:3x）：服务器打分 / 检测脚本限线程——96 核机上 onnxruntime / OpenMP 默认吃满全部核心（gpu33 7432% CPU）
+for _k in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    _os.environ[_k] = _os.environ.get("NS_SCORE_THREADS", "4")
+NS_THREADS = int(_os.environ.get("NS_SCORE_THREADS", "4"))
+
 import json
 import re
 import sys
@@ -28,7 +33,7 @@ for p in ("tools", "tools/ep02_director", "tools/lab_ep02", "tools/ep02_iter", "
 import cv2  # noqa: E402
 import numpy as np  # noqa: E402
 
-cv2.setNumThreads(4)
+cv2.setNumThreads(NS_THREADS)
 import cut_check as CC  # noqa: E402
 import lab_score as LS  # noqa: E402
 import motion_judder as MJ  # noqa: E402
@@ -223,12 +228,32 @@ def dialogue_windows(prompt: str, pad: float = 0.5, per_char: float = 0.3) -> li
     return out
 
 
+SPEECH_PY = "/root/work/fredw/speech/venv/bin/python"
+
+
+def asr_windows(path: Path) -> list:
+    """SenseVoice 回听拿台词实际时段（tools/series10_video/v7_asr.py）；跑不了 / 没听到字 → []"""
+    import subprocess
+    try:
+        r = subprocess.run(["nice", "-n", "15", SPEECH_PY, str(ROOT / "tools/series10_video/v7_asr.py"), str(path)],
+                           capture_output=True, text=True, timeout=600)
+        ln = [x for x in r.stdout.splitlines() if x.startswith("{")]
+        return (json.loads(ln[-1]).get("windows") or []) if ln else []
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def v67(path: Path, prompt: str = "") -> dict:
     """GEN_CONTRACT V6（v6_limbs.py，venv_hand）/ V7（v7_lipsync.py，venv_idm），低优先级子进程；跑不了记“未测”"""
     import subprocess
     m = shot_meta_for(path)
-    if prompt:
-        m["dialogue_windows"] = dialogue_windows(prompt)
+    # 台词时段：先用回听时间戳（SenseVoice，speech venv），没听到 / 跑不了才用分拍时间码兜底（总调度 11-02）
+    if [d for d in m.get("dialogue") or [] if not d.get("off")]:
+        aw = asr_windows(path)
+        if aw:
+            m["dialogue_windows"], m["window_source"] = aw, "asr"
+    if prompt and not m.get("dialogue_windows"):
+        m["dialogue_windows"], m["window_source"] = dialogue_windows(prompt), "stamps"
     out = {}
     for key, py, script in (("v6", HAND_PY, "v6_limbs.py"), ("v7", IDM_PY, "v7_lipsync.py")):
         try:
@@ -246,6 +271,8 @@ def v9_vlm(path: Path, meta: dict) -> dict:
     只记录，不进闸门；帧图不出自家机器（K-VQA-001）。连不上 / 忙 → {"error"}，记“未测”"""
     try:
         sys.path.insert(0, str(ROOT / "services/agent"))
+        if _os.name != "nt":            # 服务器上：gpu36 本机 8870 不通时走 gpu36 内网入口（NETFIX K-OPS-N03，client._lan_url 要 VQA_LAN=1）
+            _os.environ.setdefault("VQA_LAN", "1")
         from ns_agent.vqa import client as VC
         refs = [p for p in [meta.get("first_frame"), *((meta.get("refs") or {}).values())] if p]
         refs = [str(ROOT / p) if not Path(p).is_absolute() else p for p in refs]

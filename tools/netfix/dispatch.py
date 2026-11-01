@@ -156,10 +156,49 @@ def live_leases(eps: list[int], now_t: float | None = None) -> list[str]:
         d = jl(f, {}) or {}
         if float(d.get("until") or 0) <= now_t:
             continue
+        if d.get("pid") and not _pid_alive(int(d["pid"])):     # 01:1x 实测：producer 重启后旧进程的租约 until 还远，但持有者已死 = 不在途
+            continue
         name = f.stem
         if any(f"ep{e:02d}-" in name for e in eps):
             out.append(name)
     return out
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        sys.path.insert(0, str(ROOT / "tools/netfix"))
+        import tunnel_supervisor as TS
+        return TS.pid_alive(pid)
+    except Exception:  # noqa: BLE001
+        return True
+
+
+PUSH_FILES = ["data/netfix/override_state.json", "data/netfix/laptop_ctrl.json", "data/autopilot/ready_episodes.json",
+              "tools/netfix/dispatch.py", "config/netfix/override.json", "config/netfix/partition.json"]
+
+
+def push_server_control(host: str) -> dict:
+    """阶段一变就把覆盖状态 + 派单输入推到该服务器并立刻重算 control（01:1x DEBUG-RSI 报：gpu36 已交还 server，
+    服务器上却还是切换前推上去的 draining → only=__none__，两条道空着）。走 rssh 主连接，失败返回错误（下一拍重试）"""
+    import io
+    import tarfile
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tf:
+        for rel in PUSH_FILES:
+            if (ROOT / rel).exists():
+                tf.add(str(ROOT / rel), arcname=rel)
+    sys.path.insert(0, str(ROOT / "tools/netfix"))
+    import rssh
+    off = "/root/work/fredw/offline_20261101"
+    r = rssh.run(host, f"cd {off}/repo && tar xf - && TZ=Asia/Tokyo {off}/venv/bin/python tools/netfix/dispatch.py server-control "
+                       f"{host} --laptop-ctrl data/netfix/laptop_ctrl.json --write", input=buf.getvalue(), timeout=180)
+    out = r.stdout.decode("utf-8", "replace")
+    try:
+        only = json.loads(out.strip().splitlines()[-1]).get("only")
+    except (ValueError, IndexError):
+        only = None
+    return {"rc": r.returncode, "only_n": len(only) if isinstance(only, list) else None,
+            "err": r.stderr.decode("utf-8", "replace")[-200:] if r.returncode else ""}
 
 
 def reconcile(now_t: float | None = None, write: bool = True) -> dict:
@@ -187,6 +226,17 @@ def reconcile(now_t: float | None = None, write: bool = True) -> dict:
             if not busy:
                 rec.update(phase="server", since=iso(), why="笔记本在途单已全部结束，交还服务器")
                 changed.append((h, "server"))
+    if write:
+        for h in ("gpu33", "gpu36"):
+            rec = hosts[h]
+            if any(c[0] == h for c in changed) or rec.get("pushed_phase") != rec.get("phase"):
+                try:
+                    pr = push_server_control(h)
+                except Exception as e:  # noqa: BLE001
+                    pr = {"rc": -1, "err": repr(e)[:200]}
+                rec["last_push"] = {**pr, "at": iso()}
+                if pr.get("rc") == 0:
+                    rec["pushed_phase"] = rec.get("phase")
     st["at"] = iso()
     st["active"] = bool(ov.get("active"))
     res = {"changed": changed, "phases": phases(st)}

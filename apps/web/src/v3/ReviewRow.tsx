@@ -5,6 +5,7 @@ import { thumb } from "../thumb";
 import { storyFrame, useStoryImages } from "./storyImages";
 import { candidateFor, candLabel, epOf, passed, pickTake, rejectedFor, useCandidates } from "./candidates";
 import { MainTag } from "./StatusTags";
+import { HistoryBox } from "./HistoryBox";
 import { CandidateBox } from "./CandidateBox";
 import { Verdict, type VStage } from "./Verdict";
 import { memo, useEffect, useRef, useState, type MouseEvent } from "react";
@@ -74,7 +75,7 @@ function Frame({ s, stage, st }: { s: ShotSummary; stage: "image" | "last"; st: 
   // UIRSI r40（项目方 11-02 00:0x：“我…看到很多错误的图”）：剧本 23:21 逐集重导、镜头重新编号后，旧剧本出的图还挂在新镜号下
   // （有的甚至还是“当前”尾帧）。/api/candidates 给每版标 script（current / old）：当前版本是旧剧本出的 → 不显示、按“未出（剧本已更新）”处理；
   // 旧版本不作候选、不计数，只在“旧图”历史入口里能看
-  const oldCur = cstage?.active != null && cstage.takes.find((t) => t.n === cstage.active)?.script === "old";
+  const oldCur = (cstage?.active != null && cstage.takes.find((t) => t.n === cstage.active)?.script === "old") || cstage?.active_quarantined != null; // r41：已隔离的当前版本也不显示
   if (oldCur && !hint) url = null;
   const oldN = cstage?.takes.filter((t) => t.script === "old").length ?? 0;
   const candLoading = cands === null && !url;
@@ -389,6 +390,11 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
   const [sbOwn, setSbOwn] = useState<boolean | null>(null);
   useEffect(() => setSbOwn(null), [sbui.rev]);
   const sbOpen = sbOwn ?? sbui.expandAll;
+  // UIRSI r41（项目方 00:5x：“数据有点太多了”）：一行默认只留首帧 / 尾帧 / 视频、剧本 / 表情 / 对白和一行状态；
+  // 声音、人物造型与场景参考、分镜详情 / 首帧提示词 / 视频提示词收进“详情 ▸”（“展开全部分镜详情”时一起展开）
+  const [moreOwn, setMoreOwn] = useState<boolean | null>(null);
+  const [hist, setHist] = useState(false);
+  const more = moreOwn ?? (sbOpen || !!open);
   const miss = missingOf(s, storyboardOf(s, d));
   return (
     <article
@@ -454,7 +460,20 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
           {(dlg.length > 0 || s.voiceover) && <PlayShotLines shot={s.id} />}
         </div>
         {/* UX4（项目方：分镜字段缺“配乐提示词”等）：声音一行——环境声 + 配乐提示，剧本原文只读；没写就写“剧本没写”，悬停看全文 */}
-        {(() => {
+        {!more && (
+          <div className="v3-more-row">
+            <button
+              type="button"
+              className="v3-more"
+              onClick={(e) => (e.stopPropagation(), setMoreOwn(true))}
+              title="详情：本镜配乐 / 环境声 · 人物造型（本镜造型角标）与场景参考 · 分镜详情 · 首帧提示词 · 视频提示词"
+            >
+              详情 ▸
+            </button>
+            {s.characters.some((c) => c.has_override) && <small className="v3-look-ovr">本镜造型</small>}
+          </div>
+        )}
+        {more && (() => {
           const sb = storyboardOf(s, d);
           const amb = sb ? sb.sound_h3 || sb.sound : "";
           const mus = sb?.music_cue ?? "";
@@ -480,7 +499,7 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
             </div>
           );
         })()}
-        <div className="v3-people">
+        {more && <div className="v3-people">
           {s.characters.map((c) => (
             <button
               key={c.character}
@@ -524,8 +543,12 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
             <button className={open === "h3" ? "on" : ""} onClick={(e) => (e.stopPropagation(), setOpen(open === "h3" ? null : "h3"))} title={`视频提示词（${srcLabel(s.h3_prompt_source_label ?? "剧本")}，原样，只读）`}>
               视频提示词 {open === "h3" ? "▾" : "▸"}
             </button>
+            <button type="button" onClick={(e) => (e.stopPropagation(), setMoreOwn(false), setOpen(null), setSbOwn(false))} title="收起详情，只留首帧 / 尾帧 / 视频和一行状态">
+              收起 ▴
+            </button>
           </div>
-        </div>
+        </div>}
+        {hist && <HistoryBox shot={s.id} onClose={() => setHist(false)} />}
         {open && (
           <pre className="v3-prompt" onClick={(e) => e.stopPropagation()}>
             {(open === "first" ? s.image_prompt : h3) || "（空）"}
@@ -547,6 +570,7 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
           {(close) => (
             <div className="v3-menu" onClick={close}>
               <button onClick={() => (st.select(s.id), st.setCanvasMode("edit"))}>进精修（对比版本 / 改图）</button>
+              <button onClick={() => setHist(true)} title="剧本更新前出的旧版本（已隔离，只看不挑）">历史版本</button>
               {pend && status0.action && <button onClick={status0.action.run} title={status0.action.title}>{status0.action.label.replace(/\n/g, " ")}</button>}
               {/* XYQ（小云雀走查 #1）：主按钮是“定稿并出下一步”；只想定稿、先不出卡，用这里 */}
               {(status.key === "review_first" || status.key === "auto_first") && s.first_frame_take != null && (

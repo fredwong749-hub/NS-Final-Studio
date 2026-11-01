@@ -766,7 +766,7 @@ def auto_scores(rep: dict) -> dict:
     cs = []
     for s in shots:
         idn = s["identity"]
-        if idn.get("who"):
+        if idn.get("who") and (idn.get("ref_cos_med") or {}).get(idn["who"]) is not None:   # DIRECTOR 11-02：静帧占位镜参考余弦为 None
             cs.append(idn["ref_cos_med"][idn["who"]])
     xs = [v for d in rep["cross"]["identity_cos_to_char_mean"].values() for v in d.values()]
     if cs:

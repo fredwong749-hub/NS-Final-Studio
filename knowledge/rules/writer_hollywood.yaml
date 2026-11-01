@@ -41,3 +41,30 @@ rules:
     confidence: high
     status: 待验
     date: 2026-11-01
+  - id: K-WRT-H04
+    check: [tests/test_hollywood_r5.py]
+    domain: writer
+    link: P3-P4
+    title: HOLLYWOOD r5 不变量：剧情事实不变（代码核对说话人逐条顺序 + 独立事实核对调用），台词措辞可为潜台词重写
+    when: tools/script_rsi/hollywood_r5.py gate5（项目方 11-02 00:4x“允许，剧情和人物不变”，D-SCR-09 / L-096）
+    then: F1 说话人逐条顺序（含 🎙）与原稿一致；F2 事实表（hollywood_facts.md 任务 A，large-flash reasoning medium，原稿自检 0 偏差才可用）核对改写稿 0 偏差；I2–I7 照旧；QW-W11 = 0 为硬条件；任何一项不满足整稿作废
+    params: {fact_reasoning: medium, zero_codes: [QW-W11]}
+    evidence:
+      - {src: data/review_pages/hollywood_r5/ep04_try1_facts_v1/log.txt, note: "关推理的事实核对连 r4 基线和原稿自检都报 4–11 条假偏差（把视线 / 手部小动作当事件），4 集全部作废"}
+      - {src: config/prompts/hollywood_facts.md, note: 粒度说明：情节节点是事实，表演 / 调度不是；新增冲突 / 决定 / 接触 / 信息 / 关键物件算 invented}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02
+  - id: K-WRT-H05
+    check: [tests/test_hollywood_r5.py]
+    domain: writer
+    link: P3-P4
+    title: HOLLYWOOD r5 评审 = 可核对清单（每项 5 条，满足几条几分）× 三个独立评审（A / B / 刁钻 C）平均；写作 = large-flash reasoning high，best-of-3 + 单维度专项精修
+    when: hollywood_r5.py run（项目方 00:4x“50 over 50”，预算 $50，L-097）
+    then: 清单原文由写作网关产出（hollywood_rubric_request.md → hollywood_rubric.json → hollywood_judge.md §三），不比原量表宽松；met/unmet 矛盾或缺项按不满足；精修顺序 5 秒钩子 → 转折 → 潜台词 → 结尾钩子 → 其余未满分项；写作输出上限 64000（推理吃输出）
+    params: {writer: flash-high, best_of: 3, max_out: 64000, target_import: 48, target_full: 50, max_rounds: 8}
+    evidence:
+      - {src: data/review_pages/hollywood_r5/ab_ep04/ab.json, note: "同请求：flash-high 46.6 / flash-medium 42.0（三评审平均）；32000 上限下 flash-high 截断、large-v2 无正文（推理吃满）"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02

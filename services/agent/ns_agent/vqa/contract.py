@@ -153,8 +153,21 @@ _NEG_EYE = ("非看镜头", "不是看镜头", "未看镜头", "没有看镜头"
 _NEG_LIMB = ("各5指", "各 5 指", "被遮挡", "遮挡", "数量正常", "无多余", "没有多余", "未见多余", "正常")
 
 
+def per_person_identity(v: dict) -> None:
+    """identity_drift 逐人判（IMGFIX 11-02：原来整张图判一次，多人镜第二人不像也放过）：people[].identity 有人“不像” → identity_drift = defect"""
+    bad = [p for p in v.get("people") or [] if isinstance(p, dict) and str(p.get("identity") or "").strip() == "不像"]
+    if not bad:
+        return
+    c = v.setdefault("checks", {})
+    if (c.get("identity_drift") or {}).get("s") != "defect":
+        c["identity_drift"] = {"s": "defect", "e": "逐人：" + "、".join(f"{p.get('who') or '?'}（{p.get('pos') or '?'}）不像身份参考" for p in bad)}
+        v["defects"] = sorted(set(v.get("defects") or []) | {"identity_drift"})
+        v["unsure"] = [u for u in v.get("unsure") or [] if u != "identity_drift"]
+
+
 def sanitize(v: dict) -> None:
     """自相矛盾的 defect 降成 unsure：多肢 / 手指（ep02-S8：判 extra_limbs defect、证据却写“双手各5指，但左手小指被遮挡”）"""
+    per_person_identity(v)
     for k in ("extra_limbs", "hand_malformed"):
         c = (v.get("checks") or {}).get(k) or {}
         e = str(c.get("e") or "")
@@ -276,6 +289,60 @@ def q1_yaw_relax(pf: dict, v: dict | None) -> str | None:
     pf["blocking"] = [b for b in pf.get("blocking") or [] if b != "Q1"]
     pf["reasons"] = [r for r in pf.get("reasons") or [] if not str(r).startswith("Q1")]
     return note
+
+
+BACK_Q = ("这是从一张图里裁出来的局部。请只判断这块区域是什么，输出 JSON："
+          '{"kind": "正脸|侧脸|后脑或耳朵|不是人|拿不准", "e": "依据，不超过 20 字"}。'
+          "看得见眼睛鼻子嘴的是正脸或侧脸；只有头发、后脑勺、耳朵、发际线、看不到五官的算“后脑或耳朵”。")
+
+
+def recheck_strangers(pf: dict, image, out_dir: Path | None = None) -> str | None:
+    """K-REV-V14（总调度 11-02，IMGFIX s20261304 / ep02-S4）：cast 里有背影 / 局部人物、Q1 只因“认不出的脸”不过时，
+    把每张认不出的脸裁出来交本地看图模型复核（K-REV-V01，只走本地服务）：全部确认是后脑 / 耳朵 / 不是人 → 不算多出的人，Q1 改判 pass；
+    有一张是正脸 / 侧脸 / 拿不准 → 照挡。→ 改判说明或 None（原地改 pf）"""
+    q1 = next((i for i in pf.get("items") or [] if i.get("id") == "Q1"), None)
+    if not q1 or q1.get("status") != "fail":
+        return None
+    ev = q1.get("evidence") or {}
+    boxes = [b for b in ev.get("stranger_boxes") or [] if b]
+    reasons = [r for r in str(q1.get("detail") or "").split("；") if r]
+    if not (ev.get("partial_cast") and boxes and reasons and all(r.startswith("画面里多了不该有的人") or r.startswith("本镜可出现")
+                                                                   or "无参考可抵" in r or r.startswith("脸高") for r in reasons)):
+        return None
+    try:
+        from PIL import Image
+        from . import client
+        im = Image.open(image).convert("RGB")
+        out_dir = out_dir or (ROOT / "data" / "vqa" / "crops")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        kinds = []
+        for k, (x1, y1, x2, y2) in enumerate(boxes):
+            w, h = x2 - x1, y2 - y1
+            c = im.crop((int(max(0, x1 - 0.3 * w)), int(max(0, y1 - 0.3 * h)), int(min(im.width, x2 + 0.3 * w)), int(min(im.height, y2 + 0.3 * h))))
+            f = out_dir / f"{Path(str(image)).stem}_stranger{k}.jpg"
+            c.save(f, quality=92)
+            res = client.generate({"system": "你是画面质检员，只看图、只报事实，只输出 JSON。", "text": BACK_Q,
+                                   "images": [{"path": str(f), "label": "【裁切】", "max_pixels": 200000}]}, wait_s=900)
+            d = rubric_loads(res.get("text", "")) if "error" not in res else None
+            kinds.append((d or {}).get("kind") or "拿不准")
+    except Exception as e:  # noqa: BLE001
+        q1.setdefault("evidence", {})["back_of_head_check"] = f"复核失败：{e}"[:200]
+        return None
+    q1["evidence"] = {**ev, "back_of_head_check": kinds}
+    if all(k in ("后脑或耳朵", "不是人") for k in kinds):
+        note = f"Q1 复核：认不出的 {len(kinds)} 张“脸”经本地看图确认是后脑 / 耳朵（{'、'.join(kinds)}），不算多出的人"
+        q1.update(status="pass", detail=note + "；原判：" + str(q1.get("detail") or ""))
+        pf["blocking"] = [b for b in pf.get("blocking") or [] if b != "Q1"]
+        pf["reasons"] = [r for r in pf.get("reasons") or [] if not str(r).startswith("Q1")]
+        if not pf["blocking"]:
+            pf["ok"] = True
+        return note
+    return None
+
+
+def rubric_loads(text: str) -> dict | None:
+    from . import rubric
+    return rubric._loads_loose(text or "")
 
 
 def q9_passed(pf: dict | None) -> bool:

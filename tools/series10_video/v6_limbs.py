@@ -13,11 +13,17 @@
 """
 from __future__ import annotations
 
+import os as _os   # K-OPS-V13（VQAGATE 11-02 00:3x）：服务器打分 / 检测脚本限线程——96 核机上 onnxruntime / OpenMP 默认吃满全部核心（gpu33 7432% CPU）
+for _k in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    _os.environ[_k] = _os.environ.get("NS_SCORE_THREADS", "4")
+NS_THREADS = int(_os.environ.get("NS_SCORE_THREADS", "4"))
+
 import json
 from pathlib import Path
 import sys
 
 import cv2
+cv2.setNumThreads(NS_THREADS)
 import numpy as np
 
 HAND_TASK = "/root/work/fredw/mp_models/hand_landmarker.task"

@@ -146,7 +146,9 @@ def _url(P, f: str | None) -> str | None:
 
 
 @router.get("/api/candidates")
-def candidates(ep: int):
+def candidates(ep: int, history: bool = False):
+    """history=false（默认）：已隔离的版本（UIRSI r41 旧剧本版本，文件已移进 data/_quarantine_20261102_oldscript）不返回；
+    history=true：连隔离的也返回（标 quarantined，给“历史”入口看）"""
     P = _P()
     root = P.RENDERS / f"ep{ep:02d}"
     out: dict[str, dict] = {}
@@ -163,7 +165,7 @@ def candidates(ep: int):
             continue
         row: dict[str, dict] = {}
         for st in STAGES:
-            ts = [t for t in data.get("takes") or [] if t.get("stage") == st]
+            ts = [t for t in data.get("takes") or [] if t.get("stage") == st and (history or not t.get("quarantined"))]
             if not ts:
                 continue
             items = []
@@ -176,15 +178,23 @@ def candidates(ep: int):
                     old_why = f"旧剧本版本（剧本 {cutoff_label(ep)} 更新前出的，镜头可能已重新编号）"
                     ok, why = False, f"{why}；{old_why}" if why else old_why
                 post = ((t.get("gen_contract") or {}).get("post") or {}) if isinstance(t.get("gen_contract"), dict) else {}
-                items.append({"n": t["n"], "url": _url(P, t.get("file")), "label": prm.get("label"),
+                q = t.get("quarantined") if isinstance(t.get("quarantined"), dict) else None
+                qf = ((q or {}).get("moved_to") or {}).get("file")
+                f_ = qf[len("data/"):] if qf and qf.startswith("data/") else t.get("file")   # r41：历史入口看隔离区里的原图
+                if q:
+                    ok, why = False, why or "已隔离（旧剧本版本）"
+                items.append({"n": t["n"], "url": _url(P, f_), "label": prm.get("label"), "quarantined": bool(q),
                               "tentative": bool(prm.get("tentative")), "source": t.get("source"),
                               "bad": bad, "ok": ok, "why_not": why, "created_at": t.get("created_at"),
                               # 出图契约（GEN_CONTRACT postflight）结论：pass = 项目方授权“通过契约即自动采用”
                               "contract": post.get("status") if isinstance(post, dict) else None,
                               "rejected": bool(prm.get("rejected")), "script": ver})
-            row[st] = {"active": (data.get("active") or {}).get(st), "takes": [x for x in items if x["url"]]}
+            a = (data.get("active") or {}).get(st)
+            aq = next((x for x in data.get("takes") or [] if x.get("stage") == st and x.get("n") == a and x.get("quarantined")), None)
+            # r41：当前版本已隔离 = 没有当前（和集摘要 _active 同口径）
+            row[st] = {"active": None if aq else a, "takes": [x for x in items if x["url"]], **({"active_quarantined": a} if aq else {})}
         # UIRSI r40：视频版本也标剧本版本（画布“视频 N 版待选”只数现行剧本出的）
-        vt = [x for x in data.get("takes") or [] if x.get("stage") == "video"]
+        vt = [x for x in data.get("takes") or [] if x.get("stage") == "video" and (history or not x.get("quarantined"))]
         if vt:
             row["video"] = {"active": (data.get("active") or {}).get("video"),
                             "takes": [{"n": x["n"], "script": script_version(x, ep), "created_at": x.get("created_at")} for x in vt]}

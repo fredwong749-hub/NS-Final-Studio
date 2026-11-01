@@ -365,3 +365,70 @@ def test_v7_masked_corr_ignores_noise_outside_window():
     m = V.window_mask([[60 / 24, 100 / 24]], n)
     assert V.best_corr_masked(mouth, audio, 3, m) > 0.9
     assert V.best_corr(mouth, audio, 3) < V.best_corr_masked(mouth, audio, 3, m)
+
+
+def test_thread_guard_server_scripts_capped(tmp_path, monkeypatch):
+    """K-OPS-V13：服务器打分脚本限线程（v7_lipsync 曾吃满 96 核）。现行脚本全过；缺标记块的会被查出"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("thread_guard_t", ROOT / "tools/qa/thread_guard.py")
+    TG = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(TG)
+    assert all(not TG.check(ROOT / f) for f in TG.SERVER_SCRIPTS)
+    monkeypatch.setattr(TG, "ROOT", tmp_path)
+    bad = tmp_path / "x.py"
+    bad.write_text("import json\nimport onnxruntime\n", encoding="utf-8")
+    assert len(TG.check(bad)) == 2
+
+
+def test_v7_asr_windows_from_tokens():
+    """V7 台词时段用回听时间戳：有字 token 连成段（停顿 >0.8 s 切开），两头各留 0.3 s"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("s10v_v7asr", ROOT / "tools/series10_video/v7_asr.py")
+    A = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(A)
+    w = A.windows_from_tokens(["第", "一", "天", "。", "好"], [1.54, 1.8, 2.1, 2.4, 4.0])
+    assert w == [[1.24, 2.65], [3.7, 4.55]]
+
+
+def test_vqa_gate_skips_vlm_when_contract_already_fails(monkeypatch, enf):
+    """P0 吞吐：Q2–Q8 已不过的图不排队看图（反正要重出）；Q1 不算（转角放宽 / 后脑复核要看图）"""
+    import producer as PR
+    calls = []
+    monkeypatch.setattr(VQ, "inspect_for", lambda *a, **k: calls.append(1) or {"defects": [], "checks": {}})
+    pf = {"ok": False, "blocking": ["Q2"], "items": [{"id": "Q2", "status": "fail"}], "reasons": []}
+    assert PR.vqa_gate("ep01-S1", "image", "renders/x.png", {"prompt": "p"}, pf) is None
+    assert not calls and next(i for i in pf["items"] if i["id"] == "Q9")["status"] == "untested"
+    pf = {"ok": False, "blocking": ["Q1"], "items": [{"id": "Q1", "status": "fail"}], "reasons": []}
+    PR.vqa_gate("ep01-S1", "image", "renders/x.png", {"prompt": "p"}, pf)
+    assert calls
+
+
+def test_back_of_head_recheck(monkeypatch, enf, tmp_path):
+    """K-REV-V14：背影人物的后脑被认成认不出的脸 → 本地看图确认是后脑就不挡；是真脸照挡；cast 没有背影 / 局部人物不复核"""
+    from PIL import Image
+    from ns_agent.vqa import client as C
+    img = tmp_path / "x.png"
+    Image.new("RGB", (200, 300)).save(img)
+    def pf(partial=True):
+        return {"ok": False, "blocking": ["Q1"], "reasons": ["Q1 x"], "items": [{"id": "Q1", "status": "fail",
+                "detail": "画面里多了不该有的人 / 认不出是谁：1 张脸不像本镜任何角色（脸高 0.12，最像 lin_wan 0.010；本镜可出现 lin_wan）",
+                "evidence": {"stranger_boxes": [[50, 50, 100, 110]], "partial_cast": partial}}]}
+    monkeypatch.setattr(C, "generate", lambda req, **k: {"text": '{"kind": "后脑或耳朵", "e": "只有头发和耳朵"}'})
+    p = pf()
+    assert VQ.recheck_strangers(p, img, tmp_path) and p["ok"] is True
+    p = pf(partial=False)
+    assert VQ.recheck_strangers(p, img, tmp_path) is None and p["ok"] is False
+    monkeypatch.setattr(C, "generate", lambda req, **k: {"text": '{"kind": "侧脸", "e": "看得见眼睛"}'})
+    p = pf()
+    assert VQ.recheck_strangers(p, img, tmp_path) is None and p["ok"] is False
+
+
+def test_identity_drift_per_person():
+    """IMGFIX 11-02：identity_drift 逐人判——任何一个露脸的人“不像”就记缺陷（不只看主角）"""
+    v = {"checks": {"identity_drift": {"s": "ok", "e": ""}}, "defects": [],
+         "people": [{"who": "林晚", "pos": "左", "identity": "像"}, {"who": "顾沉", "pos": "右", "identity": "不像"}]}
+    VQ.sanitize(v)
+    assert "identity_drift" in v["defects"] and "顾沉" in v["checks"]["identity_drift"]["e"]
+    v = {"checks": {}, "defects": [], "people": [{"who": "林晚", "identity": "像"}, {"who": "顾沉", "identity": "na"}]}
+    VQ.sanitize(v)
+    assert v["defects"] == []

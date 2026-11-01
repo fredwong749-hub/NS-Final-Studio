@@ -25,7 +25,8 @@
  "people_count": 整数（画面中可见的人数，含局部入画的手/腿属于谁要写进 people）,
  "people": [{{"who": "按参考判断是谁或'不认识'", "pos": "左/中/右", "hands_visible": 整数, "arms_visible": 整数, "legs_visible": 整数,
              "hair": "发色/长度/刘海", "outfit": "上装/下装/外套", "shoes": "看得见就写款式颜色跟高，看不见写'不可见'",
-             "gaze": "看镜头/看画面左/看画面右/看某人/闭眼", "expression": "表情"}}],
+             "gaze": "看镜头/看画面左/看画面右/看某人/闭眼", "expression": "表情",
+             "identity": "露脸时对照这个人自己的身份脸参考：像/不像/拿不准；不露脸写 na"}}],
  "scene": "一句话描述地点、陈设、时段光线",
  "framing": "景别（大特写/特写/近景/中景/全景）与是否有脸",
  "checks": {{
@@ -62,7 +63,7 @@
 - hand_malformed：手指数不是 5（看得见时）、手指粘连/融化/弯折反常、手腕断开 = defect。
 - body_anatomy：脖子扭曲、反关节、两个身体融在一起、头身比例离谱 = defect。
 - extra_person：人数多于在画角色；同一角色在画面出现两次（原文没写镜子 / 倒影）；原文写"局部"的人却露了脸 = defect。
-- identity_drift：对照身份脸参考，脸型、五官、年龄感明显不是同一个人 = defect；拿不准写 unsure。
+- identity_drift：**逐人判**——画面里每一个露脸的人都要对照他自己的身份脸参考（people[].identity），任何一个人脸型、五官、年龄感明显不是同一个人 = defect（证据写清是谁不像）；拿不准写 unsure。不能只看主角。
 - hair_mismatch：发色、长度、刘海与参考或原文不符（如该短发的男人长发、蓝发变黑发）= defect。
 - outfit_mismatch：对照造型设定图 / 参考板，少了外套等外层单品、下装换成别的（长裤 ≠ 铅笔裙）、颜色款式明显不同 = defect。
 - shoe_mismatch：鞋看得见时对照参考鞋（款式、颜色、透明度、跟高）；不可见 = na。

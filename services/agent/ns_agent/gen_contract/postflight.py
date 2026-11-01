@@ -241,7 +241,7 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
         no_ref = sorted(a for a in allowed if a not in with_ref)
         floor = t1.get("recognize_floor", 0.45)
         min_h = t1.get("min_face_ratio", 0.04)
-        strangers, extra_ok = [], []
+        strangers, extra_ok, stranger_boxes = [], [], []
         for k, f in enumerate(faces):
             if k in used or (f.get("h_ratio") is not None and f["h_ratio"] < min_h):
                 continue
@@ -262,6 +262,7 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
                 continue
             top = max(sims, key=sims.get) if sims else None
             strangers.append(f"脸高 {f.get('h_ratio', 0):.2f}" + (f"，最像 {top} {sims[top]:.3f}" if top else ""))
+            stranger_boxes.append(f.get("bbox"))
         if len(strangers) > len(no_ref):
             bad.append(f"画面里多了不该有的人 / 认不出是谁：{len(strangers)} 张脸不像本镜任何角色（" + "；".join(strangers) +
                        f"；本镜可出现 {'、'.join(sorted(allowed)) or '无'}" + (f"，无参考可抵 {len(no_ref)} 张" if no_ref else "") + "）")
@@ -282,7 +283,8 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
         add("Q1", "fail" if bad else "pass", "；".join(bad) if bad else
             "身份过线（" + "、".join(f"{c} {got[c]:.3f} 对 {via[c]}" for c in got) + "）" +
             (f"；其他脸：{'、'.join(extra_ok)}" if extra_ok else ""),
-            sims=got, ref=via, faces=len(faces), strangers=strangers, others=extra_ok)
+            sims=got, ref=via, faces=len(faces), strangers=strangers, others=extra_ok, stranger_boxes=stranger_boxes,
+            partial_cast=any(c.get("presence") in ("局部", "背影") for c in req.get("cast") or []))
     # Q2
     t2 = th.get("Q2_outfit") or {}
     q2 = (local or {}).get("Q2")

@@ -180,3 +180,59 @@ def test_k263_preflight_blocks_missing_face():
     r = PF.check({"kind": "image", "model": "qwen_image_2.1", "asset_refs": ok, "prompt": "两张脸都清晰入画", "cast": []})
     i2 = next(i for i in r.items if i.id == "I2")
     assert i2.status == "fail" and "两张脸" in i2.detail
+
+
+def test_back_partial_person_gets_back_outer_clause_and_back_crop():
+    """总调度 11-02：背影局部人物按本镜造型写“背面也穿着<外层单品>”，设定图送背面栏"""
+    from ns_agent import asset_refs as AR
+    from ns_agent import framing as FR
+    shot = {"index": 4, "img_prompt": "中近景，过肩，顾沉站在面板前；林晚背影在前景",
+            "cast": [{"name": "顾沉", "presence": "在画"}, {"name": "林晚", "presence": "局部", "part": "背影肩线"}]}
+    assert AR.back_part(shot, "林晚") and not AR.back_part(shot, "顾沉")
+    assert AR.back_outer_items("series10_v1", "lin_wan", "A") == ["短款西装外套"]
+    out = FR.partial_clause([("林晚", "背影肩线")], None, {"林晚": "背面也穿着短款西装外套"})
+    assert out == "林晚只露出背影肩线，不露脸，背面也穿着短款西装外套"
+
+
+def test_garment_detail_note_from_wardrobe_registry():
+    """IMGFIX r5：短款西装外套登记描述（两只袖子都是深灰西装袖）经编译器补进出图正文；句式能被 unified_stale 认出"""
+    from ns_agent import asset_refs as AR
+    from ns_api import unified_stale as US
+    det = AR.garment_details("series10_v1", "lin_wan", "A")
+    assert ("短款西装外套", "两只袖子都是深灰西装袖（露米白衬衫袖口）") in det
+    for _l, d in det:
+        assert "，" not in d and "。" not in d          # 逗号是分句符，识别式靠它定界
+    s = AR.GARMENT_DETAIL_NOTE.format(name="林晚", label="短款西装外套", desc=det[0][1])
+    assert AR.GARMENT_DETAIL_RE.fullmatch(s)
+    assert not AR.GARMENT_DETAIL_RE.search("图3是林晚本镜的参考板：①服装：短款西装外套②指甲")
+    body = "近景，林晚站着，专业电影画面"
+    from ns_agent import frame_job as FJ
+    prompt = FJ.with_note(body, s + "。")
+    assert US.match_target(prompt, body) == prompt
+
+
+def test_lint_lookA_jobs_carry_sleeve_detail():
+    """lint：现行作业里林晚造型 A 在画（或背影局部）且上身入画的，提示词必须带袖子登记句"""
+    import json as _j
+    from ns_agent import asset_refs as AR
+    jobs = _j.loads((ROOT / "data/pipeline/runs/series10_v1/assets/first_frame_jobs.json").read_text(encoding="utf-8"))["jobs"]
+    bad = []
+    for j in jobs:
+        ar = j.get("asset_refs") or {}
+        if ar.get("subject") in ("part", "object") or not set(ar.get("zones") or []) & {"upper", "body"}:
+            continue
+        if any(c.get("character") == "lin_wan" and c.get("look") == "A" and c.get("presence") == "在画" for c in ar.get("characters") or []):
+            if "两只袖子都是深灰西装袖" not in j["prompt"]:
+                bad.append(j["shot"])
+    assert not bad, bad
+
+
+def test_asset_hold_objects(tmp_path):
+    import importlib
+    import sys as _s
+    _s.path.insert(0, str(ROOT / "tools/autopilot"))
+    P = importlib.import_module("producer")
+    (tmp_path / "autopilot").mkdir()
+    (tmp_path / "autopilot/lookA_hold.json").write_text(json.dumps({"active": True, "shots": [{"objects": ["first:ep01-S1", "last:ep01-S1"]}]}), encoding="utf-8")
+    (tmp_path / "autopilot/x_hold.json").write_text(json.dumps({"active": False, "shots": [{"objects": ["first:ep09-S1"]}]}), encoding="utf-8")
+    assert P.asset_hold_objects(tmp_path) == {"first:ep01-S1", "last:ep01-S1"}

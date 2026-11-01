@@ -138,7 +138,7 @@ rules:
     link: [P5-P6, P8-P10]
     title: 离线 / 远端运行前先跑依赖自检；拉回合并前先验文件完整，截断文件不得覆盖本地
     when: 把生产交给服务器离线跑之前（在服务器副本上）、离线结束并回笔记本时、整集合成前
-    then: tools/pipeline/remote_preflight.py（服务器上用 --root <副本根> --deep）查 A1 选定设定图 / 身份脸 / 单品图存在且 PIL 完整解码、A2 首帧作业参考图、T1 配音解释器（NS_TTS_PYTHON 或 voices.json default，--deep 实跑 import sherpa_onnx）、T2 voices.json series = 项目；任何 fail 先修再交接。ops/offline/merge_pull.py 覆盖前调 pulled_problem：图片 / JSON 读不全或是本地文件的截断前缀 → 跳过并报 corrupt_skipped；resume 脚本合并后自动跑自检
+    then: tools/pipeline/remote_preflight.py（服务器上用 --root <副本根> --deep）查 A1 选定设定图 / 身份脸 / 单品图 / 场景参考底图（assets/scenes 有效图 + scene_overrides，preflight I5；FACTORY 11-02 补）存在且 PIL 完整解码、A2 首帧作业参考图、T1 配音解释器（NS_TTS_PYTHON 或 voices.json default，--deep 实跑 import sherpa_onnx）、T2 voices.json series = 项目；任何 fail 先修再交接。ops/offline/merge_pull.py 覆盖前调 pulled_problem：图片 / JSON 读不全或是本地文件的截断前缀 → 跳过并报 corrupt_skipped；resume 脚本合并后自动跑自检
     check: tests/test_remote_preflight.py
     evidence:
       - {src: data/_offline_pull/gpu36/data/pipeline/runs/series10_v1/images/sheets/lin_wan/lin_wan_lookA_s101.png, note: "11-01 并回：7 张设定图在服务器副本上是笔记本原图的字节前缀（例 2035200 / 2857960 字节），按新者为准覆盖笔记本；asset_refs.sheet_crop 抛 OSError: image file is truncated，tests/test_gen_contract.py 5 例失败；已由他人从 data/_offline_pull/_backup 恢复"}

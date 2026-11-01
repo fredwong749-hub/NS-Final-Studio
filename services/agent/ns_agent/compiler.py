@@ -754,7 +754,8 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
         two_shot = FR.two_shot_clause(len(faced), subject)
         if two_shot:
             framing_lead = framing_lead + "，" + two_shot
-        hide = FR.partial_clause(partial, subject)
+        from ns_agent import asset_refs as _AR
+        hide = FR.partial_clause(partial, subject, {n: _AR.back_outer_clause(framing_project, ep, shot, n) for n, _p in partial})
         if hide:
             framing_lead = framing_lead + "，" + hide
         # 材质条目按“过滤后”的可见文字重新匹配（漆皮短裙不在画面里就不补漆皮条目）

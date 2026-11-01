@@ -254,11 +254,13 @@ PARTIAL_CLAUSE = "{name}只露出{part}，不露脸"
 PARTIAL_RE = re.compile(r"[^，。、；]{1,12}只露出[^，。]{1,30}，不露脸")
 
 
-def partial_clause(partial: list[tuple[str, str]], subject: str | None) -> str:
-    """局部的人（剧本 cast：局部｜部位）：写清只露出该部位、不露脸；部位没写就只写“不露脸”。局部 / 物件特写不加（构图句已限定局部）"""
+def partial_clause(partial: list[tuple[str, str]], subject: str | None, extra: dict | None = None) -> str:
+    """局部的人（剧本 cast：局部｜部位）：写清只露出该部位、不露脸；部位没写就只写“不露脸”。局部 / 物件特写不加（构图句已限定局部）。
+    extra：{名字: 附加句}（背影局部人物“背面也穿着…”，asset_refs.back_outer_clause）"""
     if subject in ("part", "object"):
         return ""
-    out = [PARTIAL_CLAUSE.format(name=n, part=p) if p else f"{n}不露脸" for n, p in partial]
+    out = [(PARTIAL_CLAUSE.format(name=n, part=p) if p else f"{n}不露脸") + (f"，{(extra or {})[n]}" if (extra or {}).get(n) else "")
+           for n, p in partial]
     return "，".join(out)
 
 

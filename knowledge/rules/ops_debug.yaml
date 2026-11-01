@@ -1,0 +1,51 @@
+# DEBUG-RSI 11-02（总调度 fredw-2b 派；项目方 11-02 00:3x 原话：“整一套系统的代码还是蛮多问题的,那你再启动第二个 ISI,专门做 debug,找问题.然后 GPU 那边肯定有很多问题啊,还有这边的那个康也有很多问题”）
+# 运行期故障：日志报错、卡死、泄漏、资源争用、进程异常、ComfyUI。问题清单见 docs/debug/DEBUG_r1.md
+rules:
+  - id: K-OPS-E01
+    domain: ops
+    link: [P5-P6, P7-P8]
+    title: 作业已经交给 ComfyUI 之后，/history 轮询偶尔超时或断连，不等于作业没了——在宽限期内继续按 prompt_id 等，不重派、不重渲染
+    when: ComfyClient.wait() 轮询 /history/{prompt_id}，经跳板或隧道
+    then: 轮询抛 ComfyUnavailable 时，连续失败不超过 POLL_GRACE_S（默认 300 s，环境变量 NS_COMFY_POLL_GRACE_S）就继续等，超过宽限期或总超时才报错；执行报错（status_str=error）照常立即抛出
+    check: tests/test_debug_rsi.py::test_r01_poll_timeout_keeps_waiting, tests/test_debug_rsi.py::test_r01_poll_gives_up_after_grace
+    evidence:
+      - {src: data/producer/log.jsonl, note: "first:ep01-S8 gpu33:0：ComfyUI 00:22:53 开始执行、41 s 执行成功（gpu33 :8188 /history）；笔记本 00:24:33 记 infra_error /history timed out，00:25:35 重派 = 同一张图白做一遍、参考图重传一遍"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-E02
+    domain: ops
+    link: [P5-P6, P7-P8]
+    title: 下载传到一半断开（IncompleteRead / RemoteDisconnected）属于连接问题，不是内容问题——重下，不重渲染、不计尝试次数
+    when: ComfyClient._request / download() 取 /view
+    then: 'http.client.HTTPException 归为 ComfyUnavailable（producer 按 infra 处理，counted=false）；download() 重试 DOWNLOAD_TRIES 次（默认 3，退避 5/10 s），单次 socket 超时 ≥ 300 s'
+    check: tests/test_debug_rsi.py::test_r02_incomplete_read_is_unavailable_and_retried
+    evidence:
+      - {src: data/producer/log.jsonl, note: "first:ep01-S7 gpu36:0 00:20:47 出好；00:22:23 content_error IncompleteRead(65536 bytes read, 2868839 more expected)，attempts.json tries=1“第 1 次出错”——被误记一次内容失败，之后又重派"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-E03
+    domain: ops
+    link: [P5-P6]
+    title: 取消作业只取消自己这一单（/queue delete + /interrupt 带 prompt_id），不许用全局 /interrupt 打断这张卡上别人正在跑的作业
+    when: 任何代码在超时、放弃、清理时要取消一个 ComfyUI 作业
+    then: 用 ComfyClient.cancel(prompt_id)；interrupt() 不带参数 = 全局打断，只给明确要清卡的调用方用（ComfyUI 0.42 /interrupt 收到 prompt_id 时只在它正在跑才打断）
+    check: tests/test_debug_rsi.py::test_r03_timeout_cancels_only_own_prompt, tests/test_debug_rsi.py::test_r03_no_bare_interrupt_in_wait_source
+    evidence:
+      - {src: services/render_router/ns_render/comfy_client.py, note: "原 wait() 超时调 self.interrupt() 发 {} = 全局打断；gpu33 :8188、gpu36 :8188 的 /history 各有 1 条 execution_interrupted（SamplerCustomAdvanced）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-E04
+    domain: ops
+    link: [P5-P6]
+    title: 资产暂缓清单（data/autopilot/*_hold.json，active=true）里的首帧、尾帧对象，producer 不派单、也不重打分
+    when: producer.dispatch_frames 选候选
+    then: asset_hold_objects() 每拍现读；清单坏了或不在 = 不挡；改了 producer 必须重启进程才生效（00:58 加的逻辑，00:44 起的进程没有，00:56 / 00:57 仍出了清单里的 ep01-S8 / S9）
+    check: tests/test_debug_rsi.py::test_r04_asset_hold_objects, tests/test_debug_rsi.py::test_r04_dispatch_consults_hold_before_rescore_and_dispatch
+    evidence:
+      - {src: data/autopilot/lookA_hold.json, note: "IMGFIX r5 00:57：林晚造型 A 设定图缺左臂外套袖，20 镜暂缓"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

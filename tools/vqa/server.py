@@ -45,7 +45,8 @@ DEVICE = os.environ.get("VQA_DEVICE", "gpu")      # cpu = 只用 CPU（gpu33 出
 THREADS = int(os.environ.get("VQA_THREADS", 24))
 NEED_MIB = int(os.environ.get("VQA_NEED_MIB", M.get("need_free_mib", 7800)))
 IDLE_S = float(os.environ.get("VQA_IDLE_S", 20))
-IDLE_UNLOAD_S = float(os.environ.get("VQA_IDLE_UNLOAD_S", M.get("idle_unload_s", 90)))
+IDLE_UNLOAD_S = (float("inf") if os.environ.get("VQA_DEDICATED") == "1"
+                 else float(os.environ.get("VQA_IDLE_UNLOAD_S", M.get("idle_unload_s", 90))))
 # LOCALGPU（11-01，总调度 fredw-2b 批，CONSENT VQAGATE → LOCALGPU）：笔记本 12 GB 单卡和本机 ComfyUI（18388，我们自己的）轮流用。
 # VQA_FREE_COMFY=1 才生效（gpu36 不设 = 旧行为，绝不 /free 别人的 ComfyUI）：ComfyUI 队列空 ≥ IDLE_S 后，显存不够就先对本机
 # ComfyUI POST /free 再加载；出图方提交前 POST /yield → 立即（推理中则推理完）卸载并重置空闲计时；每次切换记 switch.jsonl
@@ -97,7 +98,9 @@ JOBS: "queue.Queue[tuple[dict, queue.Queue]]" = queue.Queue()
 # VQAGATE 11-01（总调度批）：让道模式下给看图留最短窗口——出图连续排队时看图会一直饿着（19:34–19:50 实测一条没跑成）。
 # 出图方每次 /yield 计一张；满足任一 → 开窗口：出图每满 WIN_N 张、最老看图请求等满 WIN_WAIT_S、积压 ≥ WIN_BACKLOG。
 # 窗口内 /yield 不立刻让，等窗口结束或积压清空（≤ WIN_MAX_S，小于出图方 yield_timeout_s 300 s）再卸载放行。WIN_N=0 关掉。
-WIN_N = int(os.environ.get("VQA_WIN_N", "6"))
+# L-100（总调度 11-02）：专用看图卡（笔记本 4080、gpu36 GPU2）——不看 ComfyUI、不让卡、不开窗口、不空闲卸载，常驻
+DEDICATED = os.environ.get("VQA_DEDICATED") == "1"
+WIN_N = 0 if DEDICATED else int(os.environ.get("VQA_WIN_N", "6"))
 WIN_WAIT_S = float(os.environ.get("VQA_WIN_WAIT_S", "480"))
 WIN_BACKLOG = int(os.environ.get("VQA_WIN_BACKLOG", "10"))
 WIN_PER_JOB_S = float(os.environ.get("VQA_WIN_PER_JOB_S", "50"))
@@ -132,6 +135,8 @@ def free_mib() -> dict[int, int]:
 
 
 def comfy_busy(gpu: int) -> bool:
+    if DEDICATED:
+        return False
     port = COMFY.get(gpu)
     if not port:
         return False
@@ -393,6 +398,8 @@ class H(BaseHTTPRequestHandler):
             unload("调用方要求")
             return self._send(200, {"ok": True})
         if self.path.startswith("/yield"):      # LOCALGPU：出图方提交前调用；推理中则等这条推理完再卸（≤ 推理时长）
+            if DEDICATED:                        # L-100 专用卡：这张卡不出图，不让
+                return self._send(200, {"ok": True, "was_loaded": _model is not None, "dedicated": True, "secs": 0})
             t0 = time.time()
             _win["yields"] += 1
             if window_active() or maybe_open_window():   # VQAGATE 最短看图窗口：等窗口结束或积压清空再让

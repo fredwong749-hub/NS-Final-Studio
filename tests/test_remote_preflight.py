@@ -137,3 +137,34 @@ def test_mp4_without_moov_is_truncated(tmp_path):
     p = tmp_path / "a.mp4"
     p.write_bytes(b"\x00\x00\x00\x18ftypisom" + b"\x00" * 100)
     assert "moov" in RP.file_problem(p)
+
+
+def test_merge_file_api_routes(tmp_path, monkeypatch):
+    """NETFIX puller 复用的单文件入口：归属过滤、对象表合并、整文件新者为准、截断不覆盖"""
+    MP = _mp()
+    monkeypatch.setattr(MP, "ROOT", tmp_path)
+    monkeypatch.setattr(MP, "backup", lambda rel: None)
+    monkeypatch.setattr(MP, "OWN_IMG", {"gpu36": {2}, "gpu33": {1}})
+    monkeypatch.setattr(MP, "OWN_VID", {"gpu36": {2, 10}, "gpu33": {1}})
+    src = tmp_path / "pull.png"
+    _png(src)
+    assert MP.merge_file("gpu36", "data/renders/ep01/S1/takes/image_001.png", src).startswith("skipped")   # ep01 归 gpu33
+    assert MP.merge_file("gpu36", "data/renders/ep10/S1/takes/image_001.png", src).startswith("skipped")   # ep10 图归笔记本
+    assert MP.merge_file("gpu36", "data/pipeline/runs/series10_v1/video/clips/ep10/x.png", src) == "new"   # ep10 视频归 gpu36
+    bad = tmp_path / "bad.png"
+    bad.write_bytes(src.read_bytes()[:50])
+    assert MP.merge_file("gpu36", "data/renders/ep02/S1/takes/image_002.png", bad).startswith("corrupt")
+    obj = tmp_path / "mr.json"
+    obj.write_text(json.dumps({"first:ep02-S1": {"at": "2026-11-02T01:00:00"}}), encoding="utf-8")
+    assert MP.merge_file("gpu36", "data/producer/master_rejects.json", obj) == "objects+1"
+
+
+def test_scene_plates_in_required_assets(tmp_path):
+    """FACTORY 11-02：服务器 preflight I5 要场景参考底图——assets/scenes 下的有效图（不含 trash / rejected）和 scene_overrides 都要进清单"""
+    _png(tmp_path / "assets/scenes/sk_elevator/plate.png")
+    _png(tmp_path / "assets/scenes/sk_elevator/trash/old.png")
+    (tmp_path / "run/assets").mkdir(parents=True)
+    (tmp_path / "run/assets/shot_looks.json").write_text(json.dumps({"scene_overrides": {"ep02-S3": "sk_studio/alt.png", "ep02-S4": "none"}}), encoding="utf-8")
+    got = RP.scene_paths(tmp_path, {"shot_looks_file": "run/assets/shot_looks.json"})
+    assert "assets/scenes/sk_elevator/plate.png" in got and "assets/scenes/sk_studio/alt.png" in got
+    assert not any("trash" in g for g in got)

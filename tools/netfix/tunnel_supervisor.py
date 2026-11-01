@@ -211,6 +211,8 @@ class Supervisor:
         self.relay = {"up": None, "checked_t": None, "last_ok_t": (old.get("relay") or {}).get("last_ok_t"),
                       "down_since_t": None, "last_change_t": None}
         self.legacy_done = False
+        self.route_bad_until: dict[str, float] = {}
+        self.route_fails: dict[str, int] = {}
 
     # ---- 日志
     def log(self, *a) -> None:
@@ -223,14 +225,29 @@ class Supervisor:
 
     def ssh_cmd(self, h: str) -> list[str]:
         hc = self.c["hosts"][h]
+        route = self.pick_route()
+        target = hc.get("ssh_host", h) + (self.c.get("routes") or {}).get(route, {}).get("suffix", "")
+        cfg = self.c.get("ssh_config")
         if hc.get("kind") == "wsl_mux":            # P0 11-02：WSL OpenSSH 命令主连接（ControlMaster），远程命令 / 文件都复用它
-            return WSL + ["ssh", "-o", "BatchMode=yes", "-M", "-S", hc["sock"], "-o", "ControlPersist=no", "-N",
-                          "-o", f"Tag={self.host_tag(h)}", hc.get("ssh_host", h)]
-        cmd = [self.c["ssh_exe"], *self.c["ssh_opts"], "-o", f"Tag={self.host_tag(h)}",
-               "-o", "ProxyCommand=" + self.c["relay"]["proxy_cmd"].replace("Tag=nsnetfix-proxy", f"Tag={self.tag}-proxy-{h}")]
+            return WSL + ["ssh", *(["-F", self.c["ssh_config_wsl"]] if cfg else []), "-o", "BatchMode=yes", "-M", "-S", hc["sock"],
+                          "-o", "ControlPersist=no", "-N", "-o", f"Tag={self.host_tag(h)}", target]
+        if cfg:                                     # K-OPS-N08：项目 ssh 配置（香港中转主路 / 直连备用），相对路径 + cwd=ROOT（路径有空格）
+            cmd = [self.c["ssh_exe"], "-F", cfg, *self.c["ssh_opts"], "-o", f"Tag={self.host_tag(h)}"]
+        else:
+            cmd = [self.c["ssh_exe"], *self.c["ssh_opts"], "-o", f"Tag={self.host_tag(h)}",
+                   "-o", "ProxyCommand=" + self.c["relay"]["proxy_cmd"].replace("Tag=nsnetfix-proxy", f"Tag={self.tag}-proxy-{h}")]
         for lp, rp in hc["forwards"]:
             cmd += ["-L", f"127.0.0.1:{lp}:127.0.0.1:{rp}"]
-        return cmd + [hc.get("ssh_host", h)]
+        return cmd + [target]
+
+    def pick_route(self) -> str:
+        """K-OPS-N08：按 route_order 选第一条“入口 TCP 通且没被判坏”的路；都不行用 direct"""
+        rs = self.c.get("routes") or {}
+        for r in self.c.get("route_order") or ["direct"]:
+            info = self.relay.get("routes", {}).get(r, {})
+            if r in rs and info.get("up") and now() >= self.route_bad_until.get(r, 0):
+                return r
+        return "direct"
 
     def ports(self, h: str) -> list[int]:
         return [lp for lp, _ in self.c["hosts"][h]["forwards"]]
@@ -253,13 +270,13 @@ class Supervisor:
                 if name.lower() != ("wsl.exe" if mux else "ssh.exe"):
                     continue
                 if mux:
-                    if mine in cmd and cmd.rstrip().endswith(self.c["hosts"][hh].get("ssh_host", hh)):
+                    tgt = self.c["hosts"][hh].get("ssh_host", hh)
+                    if cmd.rstrip().endswith(f'{mine} {tgt}') or cmd.rstrip().endswith(f'{mine} {tgt}-hk'):   # 精确匹配（-cmd 是 -cmd2 的前缀）
                         if st["pid"] is None and pid_alive(pid):
-                            st.update(pid=pid, since_t=now() - 60, state="up", up_since_t=now())
+                            st.update(pid=pid, since_t=now() - 60, state="up", up_since_t=now(),
+                                      route="hk" if cmd.rstrip().strip('"').endswith("-hk") else "direct")
                             self.log("ADOPT own mux", hh, pid)
-                        elif st["pid"] != pid:
-                            kill(pid)
-                            self.log("ADOPT kill duplicate mux", hh, pid)
+                        # 同一条 wsl.exe --exec 在 Windows 上是两个同命令行的进程（00:32 实测：杀“重复”的那个 = 杀掉主连接），不杀
                     continue
                 if mine in cmd:
                     want = [f"127.0.0.1:{lp}:127.0.0.1:{rp}" for lp, rp in self.c["hosts"][hh]["forwards"]]
@@ -268,7 +285,8 @@ class Supervisor:
                         self.log("ADOPT kill own ssh with stale forwards", hh, pid)
                         continue
                     if st["pid"] is None and pid_alive(pid):          # 上一个监管进程起的：认领，不打断
-                        st.update(pid=pid, since_t=now() - self.c.get("listen_grace_s", 45), state="up", up_since_t=now())   # 认领的按“通”算，卡死要连续 hang_rounds 轮（23:44 一轮就杀的教训）
+                        st.update(pid=pid, since_t=now() - self.c.get("listen_grace_s", 45), state="up", up_since_t=now(),
+                                  route="hk" if cmd.rstrip().strip('"').endswith("-hk") else "direct")   # 认领时按命令行目标认路   # 认领的按“通”算，卡死要连续 hang_rounds 轮（23:44 一轮就杀的教训）
                         self.log("ADOPT own ssh", hh, pid)
                     elif st["pid"] != pid:                            # 同 Tag 多出来的：杀
                         kill(pid)
@@ -292,8 +310,10 @@ class Supervisor:
         hc = self.c["hosts"][h]
         if hc.get("kind") == "wsl_mux":            # 上次残留的 socket 会让新 master 起不来
             subprocess.run(WSL + ["rm", "-f", hc["sock"]], capture_output=True, timeout=30, creationflags=NOWIN)
-        p = subprocess.Popen(self.ssh_cmd(h), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        cmd = self.ssh_cmd(h)
+        p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, cwd=str(ROOT),
                              stderr=open(self.dir / f"ssh_{h}.err.log", "ab"), creationflags=NOWIN)
+        st["route"] = self.pick_route()
         st.update(pid=p.pid, since_t=now(), up_since_t=None, state="connecting", hang=0, probe_t=0.0, _io=None)
         st["_popen"] = p
         self.log("SPAWN", h, p.pid, reason)
@@ -310,14 +330,34 @@ class Supervisor:
 
     def schedule(self, h: str) -> None:
         st = self.hosts[h]
+        r = st.get("route")
+        if r and r != "direct" and self.c.get("routes"):    # 主路上连续失败：计数，≥ route_fail_max 判坏 10 分钟，退回直连
+            self.route_fails[r] = self.route_fails.get(r, 0) + 1
+            if self.route_fails[r] >= self.c.get("route_fail_max", 4):
+                self.route_bad_until[r] = now() + self.c.get("route_bad_s", 600)
+                self.route_fails[r] = 0
+                self.log("ROUTE bad", r, f"连续失败 → {self.c.get('route_bad_s', 600)} s 内走备用")
         bo = self.c.get("backoff_s", [3, 6, 12, 24, 30])
         st["next_try_t"] = now() + bo[min(st["fails"], len(bo) - 1)]
         st["fails"] += 1
 
     # ---- 一拍
     def check_relay(self) -> bool:
-        rh, rp = self.c["relay"]["check"]
-        up = tcp_ok(rh, rp, timeout=5)
+        routes = self.c.get("routes")
+        if routes:                                  # K-OPS-N08：每条路的入口各测一次 TCP；任一条通 = “跳板通”
+            info = self.relay.setdefault("routes", {})
+            for r, rc in routes.items():
+                info.setdefault(r, {})["up"] = tcp_ok(*rc["check"], timeout=5)
+                info[r]["bad_until"] = self.route_bad_until.get(r, 0) or None
+            up = any(v["up"] for v in info.values())
+            cur = self.pick_route()
+            if cur != self.relay.get("route"):
+                self.log("ROUTE", self.relay.get("route"), "->", cur)
+                self.relay["route_changed_t"] = now()
+            self.relay["route"] = cur
+        else:
+            rh, rp = self.c["relay"]["check"]
+            up = tcp_ok(rh, rp, timeout=5)
         t = now()
         if up != self.relay["up"]:
             self.relay["last_change_t"] = t
@@ -365,6 +405,7 @@ class Supervisor:
         if any(r in ("ok", "remote_down") for r in res.values()):   # ssh 通（至少一条通道打得开）
             st["hang"] = 0
             st["fails"] = 0
+            self.route_fails[st.get("route") or "direct"] = 0
             if st["state"] != "up":
                 st["up_since_t"] = t
                 self.log("UP", h, st["pid"], {p: r for p, r in res.items()}, f"{age:.0f}s after spawn")
@@ -413,6 +454,13 @@ class Supervisor:
             every = self.c.get("probe_every_s", 15) if st["state"] == "up" and not st["hang"] else self.c.get("tick_s", 5)   # 一轮失败后改 5 s 复测
             if t - st["probe_t"] >= every:
                 due.append(h)
+        pref = self.pick_route()
+        if self.c.get("routes") and t - self.relay.get("route_changed_t", 0) > self.c.get("migrate_after_s", 120):
+            for h, st in self.hosts.items():         # 回到主路：每拍最多迁一条（逐条断开重连，不一次全断）
+                if st["pid"] and st["state"] == "up" and st.get("route", "direct") != pref:
+                    self.stop_host(h, f"迁回主路 {st.get('route', 'direct')} → {pref}")
+                    st["fails"], st["next_try_t"] = 0, 0.0
+                    break
         if due:                                     # 两台并行探测：一拍最长约一个探测超时（20 s），心跳不拖过 90 s 线
             with ThreadPoolExecutor(len(due)) as ex:
                 list(ex.map(self.probe_round, due))

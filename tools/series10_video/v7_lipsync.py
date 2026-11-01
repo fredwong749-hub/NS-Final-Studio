@@ -14,6 +14,11 @@
 """
 from __future__ import annotations
 
+import os as _os   # K-OPS-V13（VQAGATE 11-02 00:3x）：服务器打分 / 检测脚本限线程——96 核机上 onnxruntime / OpenMP 默认吃满全部核心（gpu33 7432% CPU）
+for _k in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    _os.environ[_k] = _os.environ.get("NS_SCORE_THREADS", "4")
+NS_THREADS = int(_os.environ.get("NS_SCORE_THREADS", "4"))
+
 import json
 import subprocess
 import sys
@@ -30,7 +35,26 @@ TH = {"corr_min": 0.30, "open_thr": 0.035, "closed_max": 0.25, "seen_min": 0.30,
 UP, LO = 62, 60          # 106 点：上内唇中点 / 下内唇中点（ep01-S5 首帧实测：71 上外唇、62 上内唇、60 下内唇、53 下外唇）
 
 
+def _cap_onnxruntime():
+    """insightface 建 InferenceSession 时不传 SessionOptions → ORT 默认 intra-op 线程 = 全部核心。这里给默认会话加上线程上限"""
+    import onnxruntime as ort
+    if getattr(ort, "_ns_capped", False):
+        return
+    _orig = ort.InferenceSession.__init__
+
+    def _init(self, path_or_bytes, sess_options=None, *a, **kw):
+        if sess_options is None:
+            sess_options = ort.SessionOptions()
+            sess_options.intra_op_num_threads = NS_THREADS
+            sess_options.inter_op_num_threads = 1
+        return _orig(self, path_or_bytes, sess_options, *a, **kw)
+    ort.InferenceSession.__init__ = _init
+    ort._ns_capped = True
+
+
 def app():
+    _cap_onnxruntime()
+    cv2.setNumThreads(NS_THREADS)
     from insightface.app import FaceAnalysis
     a = FaceAnalysis(name="buffalo_l", root="/root/work/fredw/idm_models",
                      allowed_modules=["detection", "recognition", "landmark_2d_106"], providers=["CPUExecutionProvider"])
@@ -153,7 +177,8 @@ def main(argv):
         wm = window_mask(wins, n)
         if wins and wm.sum() > 12:                     # 有台词时间码：只在台词时段（时间码 ±0.5 s）算，整轨的只记录
             c = best_corr_masked(xs, ys, TH["max_lag"], wm)
-            m.update(corr_scope="台词时段", window_frames=int(wm.sum()), windows=[[round(a, 2), round(b, 2)] for a, b in wins])
+            m.update(corr_scope="台词时段", window_source=meta.get("window_source") or "stamps", window_frames=int(wm.sum()),
+                     windows=[[round(a, 2), round(b, 2)] for a, b in wins])
         else:
             m.update(corr_scope="整轨" + ("（台词时段帧太少）" if wins else "（没有台词时间码）"))
         voiced = env > 3.0

@@ -15,7 +15,6 @@
 
 | 文件 | 谁 | 到什么时候 |
 |---|---|---|
-| services/api/ns_api/{takes_ui.py（候选按剧本版本标 script、状态标签）,season.py,shot_status.py（新建）,decision_locks.py（新建）,app.py（只加 include 两行）}、tools/qa/data_parity.py（只加 D-SCRIPT 一项）、apps/web/src/v3/{ReviewRow.tsx,candidates.ts,StatusTags.tsx（新）,StatusTags.helpers.ts（新）,shotstatus.css（新）,infra.css,pages/SeasonPage.tsx,assets/PeopleHub.tsx} | UIRSI（r40，总调度 11-02 00:0x 紧急派） | r40 收轮即释放 |
 | services/api/ns_api/live.py（新建：/api/events SSE + /api/progress） | UIRSI | 实时刷新做完（总调度 11-01 任务） |
 | services/api/ns_api/app.py（只加 include_router 两行） | UIRSI | 同上 |
 | apps/web/src/v3/live.ts、apps/web/src/ds/StageProgress.tsx、apps/web/src/v3/LiveBridge.tsx（新建） | UIRSI | 同上 |
@@ -116,6 +115,7 @@
 - CONSENT: UIRSI -> BGM10 : services/api/ns_api/shot_audio.py | 总调度 11-01（_music_dir 指向 series10、挂 bgm 路由）
 - CONSENT: AUTOPILOT -> DATAALIGN : tools/pipeline/register_takes.py | 总调度 11-01（AUTOPILOT 不活跃；--video10 视频登记 + retract_stale_video10，D-VIDEO 任务）
 - CONSENT: UIRSI -> UIMASTER : apps/web/src/v3/**（仅 PW-019 导入路径改写：只改 import 行的路径，不碰其他逻辑；每步先在沙盒跑 tsc） | UIRSI 11-01
+- CONSENT: DATAALIGN -> UIRSI : services/api/ns_api/app.py | by 总调度 fredw-2b 11-02 r41（项目方 00:5x：“旧版本的东西就隔离开吧,然后在我的网页里面尽量给我看最新的”）：“集摘要（/api/episodes）的计数口径一起改：那 50 个旧尾帧不能再算作有尾帧，CONSENT 写 DATAALIGN → UIRSI”（只改 _active 一处）
 - CONSENT: DATAALIGN -> UIRSI : tools/qa/data_parity.py | by 总调度 fredw-2b 11-02 r40 紧急派单（项目方 00:0x：“图片生成错误,你刷新了图片库没有?”；00:1x：“在 UI 里面做一个错误标志吧”；误点事故 23:57）：“data_parity 加一项检查：界面显示的候选必须属于现行剧本版本，加进 iter_gate”
 - CONSENT: UIPIXEL -> UIRSI : apps/web/src/v3/shotstatus.css | by 总调度 fredw-2b 11-02 r40 紧急派单（项目方 00:0x：“图片生成错误,你刷新了图片库没有?”；00:1x：“在 UI 里面做一个错误标志吧”；误点事故 23:57）（新建状态标签样式）
 - CONSENT: ASSETUX -> UIRSI : apps/web/src/v3/assets/PeopleHub.tsx | by 总调度 fredw-2b 11-02 r40 紧急派单（项目方 00:0x：“图片生成错误,你刷新了图片库没有?”；00:1x：“在 UI 里面做一个错误标志吧”；误点事故 23:57）：“对象如果有项目方已定的决策锁……点选时弹一个一键确认……悬停或者翻看候选时不触发更换，必须明确点‘用这张’才生效”
@@ -204,3 +204,8 @@ s_vqastart.ps1 归 LOCALGPU（已收工），CONSENT 写 LOCALGPU → VQAGATE”
 - CONSENT: VQAGATE -> NETFIX : tools/vqa/tunnel.ps1（退役为 ensure 监管进程；8871 → gpu36:8870 并入 tunnel_supervisor 的 gpu36 主连接） | by 总调度 fredw-2b 11-01 23:0x：“VQA 的 8871 隧道……现在就可以收编，收编前确认没有看图请求正在走这条隧道”
 - CONSENT: REFLOCK -> NETFIX : services/render_router/ns_render/comfy_client.py（object_info 进程级 + 磁盘缓存 data/cache/comfy_object_info/，TTL 6 h，检查有问题先重拉再判；原版备份 data/_quarantine/netfix_20261101/comfy_client.py.bak） | by 总调度 fredw-2b 11-01 23:50：“producer.py、comfy_client 归 PRODUCER / REFLOCK，CONSENT 写 → NETFIX，by 总调度”
 - CONSENT: 总调度 -> IMGFIX : docs/master/MASTER_PICTURE.md（只加 L-094 一行）、data/pipeline/runs/series10_v1/assets/shot_looks.json（旧镜号覆盖移入 _stale、L-094）、services/agent/ns_agent/compiler.py / framing.py / gen_contract/preflight.py（K-REN-705 / K-AST-263） | by 总调度 fredw-2b 11-02 00:2x：“MASTER_PICTURE §1 加 L-094，总调度授权你改，写 CONSENT”；“改 asset_refs / 编译器写 CONSENT（REFLOCK → IMGFIX，by 总调度）”
+- CONSENT: RECALL -> HOLLYWOOD : docs/master/MASTER_PICTURE.md（只加 L-096、L-097 两行）, config/owner_decisions.yaml（只加 D-SCR-09） | by 总调度 fredw-2b 11-02 r5：“把项目方原话记进 owner_decisions（D-SCR-09）和 MASTER_PICTURE（L-096、L-097），CONSENT 写 RECALL → HOLLYWOOD”
+- CONSENT: AUTOPILOT -> IMGFIX : tools/autopilot/producer.py（只加 asset_hold_objects + dispatch_frames 跳过 data/autopilot/*_hold.json 列出的对象）、data/autopilot/lookA_hold.json（新建） | by 总调度 fredw-2b 11-02 r5 派单：“WORKFLOW 和 producer 按这份清单暂缓派单”
+- CONSENT: ASSETMASTER -> IMGFIX : data/looks/wardrobe.json（只改 am-lin_wan-33599db7 description + notes；备份 wardrobe.before_imgfix_sleeve_20261102.json）、data/assetmaster/sheets_v2/candidates/lookA_sleeve_fix/**（新建候选，adopted 不动） | by 总调度 fredw-2b 11-02 r5 派单：“外套登记原文补一句明确的袖子描述”“新文件放 candidates 目录；adopted 和 refcrops 原文件不覆盖”
+- CONSENT: REFLOCK -> DEBUG_RSI : services/render_router/ns_render/comfy_client.py（K-OPS-E01 轮询宽限 / E02 IncompleteRead 归连接 + 下载重试 / E03 cancel(prompt_id)；备份 data/_quarantine/debug_rsi_20261102/comfy_client.py.bak） | by 总调度 fredw-2b 11-02 00:4x：“三项都认可，按你的方案修”
+- CONSENT: PRODUCER -> DEBUG_RSI : tools/autopilot/producer.py（K-OPS-E05 派单线程池 + 打分积压背压 + vlm_instances；备份 data/_quarantine/debug_rsi_20261102/producer.py.bak）、data/producer/attempts.json（只改 first:ep01-S7 tries 1→0，带 audit） | by 总调度 fredw-2b 11-02 01:0x：“按你的方案马上重启，由你执行”“first:ep01-S7 的 tries 退回 1 次……我授权你在重启窗口里改 PRODUCER 账本”

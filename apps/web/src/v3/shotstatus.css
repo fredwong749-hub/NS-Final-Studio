@@ -25,7 +25,7 @@ button.stag.on { outline: 2px solid var(--k); outline-offset: 1px; }
 .stag-n { --k: var(--c-text-2); border: 0; background: transparent; padding: 0 2px; font: inherit; font-size: var(--fs-xs); color: color-mix(in srgb, var(--k) 75%, var(--c-text)); cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
 .stag-n.on { font-weight: var(--fw-strong); text-decoration-style: solid; }
 /* 总览格子：主标签压在图左下角；筛选时不符合的格子变淡 */
-.sea-pic .stag { position: absolute; left: 4px; bottom: 4px; max-width: calc(100% - 8px); overflow: hidden; }
+.sea-pic .stag { position: absolute; left: 4px; bottom: 22px; max-width: calc(100% - 8px); overflow: hidden; z-index: 2; } /* 左下角“N 张候选”上面一行（上面有镜号和“生成中”），不叠在一起 */
 .sea-cell.stag-dim { opacity: .28; }
 .sea-legend { margin: 0 0 var(--sp-2); }
 /* 画布行：镜号旁 */
@@ -50,3 +50,29 @@ button.stag.on { outline: 2px solid var(--k); outline-offset: 1px; }
   color: var(--c-text); background: color-mix(in srgb, var(--b) 20%, var(--c-raise)); border: 1px solid color-mix(in srgb, var(--b) 65%, transparent); }
 .blk-chip em { font-style: normal; font-weight: 400; color: var(--c-text-2); }
 .blk-chip.on { outline: 2px solid var(--b); outline-offset: 1px; }
+/* ---------- r41 减法设计（项目方 00:5x：“现在 UI/UX 的设计有点丑,数据有点太多了,有点难受”）----------
+   全剧总览默认 .simple：每镜一张大图 + 状态色描边 + 镜号 + 一个状态词；其余收进“显示细节”和每集“细节 ▸”。只隐藏，不删（悬停提示里都有） */
+.sea-card.k-vqa_fail, .sea-card.k-old, .sea-card.k-redo, .sea-card.k-stale, .sea-card.k-judge, .sea-card.k-best, .sea-card.k-busy, .sea-card.k-queued, .sea-card.k-ok {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--k) 75%, transparent); }
+.sea-page.simple .sea-segs, .sea-page.simple .sea-meta, .sea-page.simple .sea-sw, .sea-page.simple .sea-cast, .sea-page.simple .sea-cand,
+.sea-page.simple .sea-adult, .sea-page.simple .sea-band, .sea-page.simple .sea-last { display: none; }
+.sea-page.simple .sea-legend[aria-label="图例"] { display: none; }
+.sea-page.simple .sea-ep:not(.open) .sea-eph :is(.sea-epm:not(.sea-prog), .stag-counts, .blk-stages, .sea-epbar) { display: none; }
+.sea-page.simple .sea-link { opacity: .35; }
+.sea-page.simple .sea-pic .stag { bottom: 6px; }
+.sea-page.simple .sea-pic > span:not(.stag):not(.sea-no):not(.sea-busy) { color: var(--c-text-2); font-size: var(--fs-xs); }
+.sea-more { border: 0; background: transparent; color: var(--c-text-2); font: inherit; font-size: var(--fs-xs); cursor: pointer; padding: 0 var(--sp-1); }
+.sea-more:hover { color: var(--c-text); }
+.sea-page.simple .sea-eph { gap: var(--sp-2); }
+.sea-page.simple .sea-row { gap: var(--sp-2); }
+/* r41 画布一行的“详情 ▸” + 历史版本 */
+.v3-more-row { display: flex; align-items: center; gap: var(--sp-2); }
+.v3-more { border: 0; background: transparent; padding: 0; font: inherit; font-size: var(--fs-xs); color: var(--c-text-2); cursor: pointer; }
+.v3-more:hover { color: var(--c-text); }
+.hist-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: var(--sp-2); }
+.hist-grid li { display: flex; flex-direction: column; gap: 4px; }
+.hist-grid img { width: 100%; aspect-ratio: 9 / 16; object-fit: cover; border-radius: var(--r-m); background: var(--c-sunken); }
+.hist-grid small { color: var(--c-text-2); font-size: var(--fs-xs); }
+.hist-none { display: grid; place-items: center; aspect-ratio: 9 / 16; border-radius: var(--r-m); background: var(--c-sunken); color: var(--c-text-2); font-size: var(--fs-xs); }
+/* 中性色：总览集名不再用彩色，状态只看色块 */
+.sea-page.simple .sea-ept { color: var(--c-text); }

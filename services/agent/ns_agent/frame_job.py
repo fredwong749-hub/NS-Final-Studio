@@ -48,7 +48,8 @@ def compile_frame(ep, shot, g, project: str | None, *, bible=None, available=Non
     # 资产规划用编译器真正保留的触发词判主体（LoRA 不可用被剥掉的鞋触发词不算证据），与编译器同口径（REFLOCK 11-01）
     plan_kw.setdefault("kept_triggers", [t for t in (AR.g(shot, "img_triggers") or []) if t not in (c.dropped_triggers or [])])
     sr, plan = AR.plan_for(project, ep, shot, model, **plan_kw)
-    note = plan.prompt_note + outer_items_note(project, ep, shot, sr, c.image_prompt) + eyeline_note(shot, sr, c.image_prompt)
+    note = (plan.prompt_note + outer_items_note(project, ep, shot, sr, c.image_prompt) + eyeline_note(shot, sr, c.image_prompt)
+            + garment_detail_note(project, ep, shot, sr, c.image_prompt))
     return plan.prompt_prefix + with_note(c.image_prompt, note), c, sr, plan
 
 
@@ -201,6 +202,28 @@ def eyeline_note(shot, sr, body: str) -> str:
     return "".join(out)
 
 
+def garment_detail_note(project: str, ep, shot, sr, body: str = "") -> str:
+    """IMGFIX r5（总调度 fredw-2b 11-02）：在画（或局部背影）且上身入画的人，本造型外层单品的衣橱登记描述补一句
+    （例：“林晚的短款西装外套：两只袖子都是深灰西装袖，露米白衬衫袖口”）。局部 / 物件特写、上身不入画不加；正文已有这句不重复"""
+    img = AR.g(shot, "img_prompt") or ""
+    _size, subject, zones = AR.visible_zones(img)
+    if subject in ("part", "object"):
+        return ""
+    out = []
+    for ch in (sr.characters if sr is not None else None) or []:
+        name, cid, lid, pr = ch.get("name"), ch.get("character"), ch.get("look"), ch.get("presence", "在画")
+        back = pr == "局部" and AR.back_part(shot, name)
+        if not (pr == "在画" or ch.get("face_described") or back):
+            continue
+        if not back and not (zones & {"upper", "body"}):
+            continue
+        for label, desc in AR.garment_details(project, cid, lid):
+            s = AR.GARMENT_DETAIL_NOTE.format(name=name, label=label, desc=desc)
+            if s not in (body or "") and desc not in (body or ""):
+                out.append(s + "。")
+    return "".join(out)
+
+
 def with_note(body: str, note: str) -> str:
     """槽位不足的文字说明放在正文末尾、系统风格后缀之前：景别句永远是参考标注之后的第一句（K-REN-101）"""
     if not note:
@@ -229,7 +252,8 @@ def build_first(project: str, ep, shot, g, *, bible=None, model: str = "qwen_ima
     body = full[len(plan.prompt_prefix):]
     if prompt_override:
         body = prompt_override if ST.preset_suffix() in prompt_override else f"{prompt_override}，{ST.image_suffix()}"
-        body = with_note(body, plan.prompt_note + outer_items_note(project, ep, shot, sr, body) + eyeline_note(shot, sr, body))
+        body = with_note(body, plan.prompt_note + outer_items_note(project, ep, shot, sr, body) + eyeline_note(shot, sr, body)
+                         + garment_detail_note(project, ep, shot, sr, body))
     return {"id": sid, "shot": sid, "ep": n, "index": AR.g(shot, "index"), "stage": "image", "model": model,
             "prompt": plan.prompt_prefix + body, "refs": plan.files, "asset_refs": AR.record(sr, plan), "cast": cast_of(shot),
             "loras": [["krea2_film_texture_qwen21.safetensors", 0.5]],

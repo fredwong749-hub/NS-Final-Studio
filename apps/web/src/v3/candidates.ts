@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { showUndo } from "../ds/Undo.helpers";
 
 export type Cand = { n: number; url: string; label: string | null; tentative: boolean; source: string | null; bad: string | null; ok?: boolean; why_not?: string | null; created_at: string | null; contract?: string | null; rejected?: boolean; /** UIRSI r40：current = 现行剧本版本；old = 剧本更新前出的（不作候选） */ script?: "current" | "old" | "unknown" };
-export type CandStage = { active: number | null; takes: Cand[] };
+/** active_quarantined：当前版本已隔离（UIRSI r41 旧剧本版本），接口把 active 当空，这里记原来是哪一版 */
+export type CandStage = { active: number | null; takes: Cand[]; active_quarantined?: number };
 /** UIRSI r40：每镜另带 video（视频各版的剧本版本）和 status（状态标签，后端 ns_api/shot_status.py） */
 export type CandShots = Record<string, Partial<Record<"image" | "last", CandStage>> & {
   video?: { active: number | null; takes: { n: number; script?: "current" | "old" | "unknown"; created_at?: string | null }[] };

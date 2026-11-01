@@ -127,6 +127,48 @@
    "sock": "/home/fredw/.ssh/nsnf/gpu36-cmd.sock",
    "forwards": [],
    "probe_http": []
+  },
+  "gpu33-cmd2": {
+   "kind": "wsl_mux",
+   "ssh_host": "gpu33",
+   "sock": "/home/fredw/.ssh/nsnf/gpu33-cmd2.sock",
+   "forwards": [],
+   "probe_http": []
+  },
+  "gpu36-cmd2": {
+   "kind": "wsl_mux",
+   "ssh_host": "gpu36",
+   "sock": "/home/fredw/.ssh/nsnf/gpu36-cmd2.sock",
+   "forwards": [],
+   "probe_http": []
+  },
+  "gpu33-cmd3": {
+   "kind": "wsl_mux",
+   "ssh_host": "gpu33",
+   "sock": "/home/fredw/.ssh/nsnf/gpu33-cmd3.sock",
+   "forwards": [],
+   "probe_http": []
+  },
+  "gpu33-cmd4": {
+   "kind": "wsl_mux",
+   "ssh_host": "gpu33",
+   "sock": "/home/fredw/.ssh/nsnf/gpu33-cmd4.sock",
+   "forwards": [],
+   "probe_http": []
+  },
+  "gpu36-cmd3": {
+   "kind": "wsl_mux",
+   "ssh_host": "gpu36",
+   "sock": "/home/fredw/.ssh/nsnf/gpu36-cmd3.sock",
+   "forwards": [],
+   "probe_http": []
+  },
+  "gpu36-cmd4": {
+   "kind": "wsl_mux",
+   "ssh_host": "gpu36",
+   "sock": "/home/fredw/.ssh/nsnf/gpu36-cmd4.sock",
+   "forwards": [],
+   "probe_http": []
   }
  },
  "tick_s": 5,
@@ -148,5 +190,31 @@
  "_probe_note": "22:33 实测：gpu36 卡满载 + 跳板 17–20 KB/s 时 /system_stats 要 6–8 s 才回，8 s 超时会误判卡死、把正在传图的隧道杀掉。改为 20 s 超时、连续 3 轮（第一轮失败后 5 s 复测）才判卡死；真断线主要靠 ssh 自己的 ServerAlive（10 s × 3）。",
  "_per_lane_note": "00:0x 总调度派、实测（data/netfix/bw_test.jsonl）：跳板按单条连接限速——下载 1 条 53 KB/s、4 条合计 140 KB/s；上传 1 条 36 KB/s、8 条合计 139 KB/s。所以按道各开一条 ssh（6 条），不再一台一条。",
  "max_connecting": 2,
- "_pool_note": "P0 11-02（总调度 fredw-2b）：固定连接池 = 6 条道隧道（Windows Git ssh，长连接）+ 2 条 WSL 命令主连接（gpu33-cmd / gpu36-cmd，ControlMaster）；远程命令 / 文件经 tools/netfix/rssh.py 或 venv sitecustomize shim 复用主连接，主连接不在就立刻失败、不新握手；新建连接全局同时握手 ≤ max_connecting（跳板 sshd MaxStartups 默认 10:30:100）。"
+ "_pool_note": "P0 11-02（总调度 fredw-2b）：固定连接池 = 6 条道隧道（Windows Git ssh，长连接）+ 2 条 WSL 命令主连接（gpu33-cmd / gpu36-cmd，ControlMaster）；远程命令 / 文件经 tools/netfix/rssh.py 或 venv sitecustomize shim 复用主连接，主连接不在就立刻失败、不新握手；新建连接全局同时握手 ≤ max_connecting（跳板 sshd MaxStartups 默认 10:30:100）。 00:31 实测服务器 sshd MaxSessions（默认 10）：一条主连接上并发会话超过 10 报 “Session open refused by peer” → 每台 2 条命令主连接，rssh 随机分摊。 00:59 full_score@gpu33 仍报 Session open refused（打分并发高）→ 每台 4 条命令主连接（会话容量 40）；根治 = 打分搬到服务器本机走 outbox。",
+ "ssh_config": "config/netfix/ssh_config",
+ "ssh_config_wsl": "config/netfix/ssh_config.wsl",
+ "routes": {
+  "hk": {
+   "check": [
+    "47.243.63.181",
+    22
+   ],
+   "suffix": "-hk"
+  },
+  "direct": {
+   "check": [
+    "sz194.instameta.org",
+    19422
+   ],
+   "suffix": ""
+  }
+ },
+ "route_order": [
+  "hk",
+  "direct"
+ ],
+ "route_fail_max": 4,
+ "route_bad_s": 600,
+ "migrate_after_s": 120,
+ "_route_note": "K-OPS-N08（总调度 00:5x）：主路香港中转 hkjump→194relay（实测上传 1 条 2.9 MB/s、4 条合计 5.5 MB/s；下载 1 条 1.5 MB/s、4 条 1.55 MB/s，data/netfix/bw_test.jsonl）；hk 入口不通或连续 4 次连不上 → 10 分钟走直连；主路恢复稳定 120 s 后逐条迁回。"
 }

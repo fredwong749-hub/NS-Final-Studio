@@ -85,7 +85,7 @@ def season():
             for stg, key in (("image", "first_old"), ("last", "last_old")):
                 x = (c.get(s["id"]) or {}).get(stg) or {}
                 a = x.get("active")
-                s[key] = a is not None and any(t.get("n") == a and t.get("script") == "old" for t in x.get("takes") or [])
+                s[key] = (a is not None and any(t.get("n") == a and t.get("script") == "old" for t in x.get("takes") or []))                     or x.get("active_quarantined") is not None   # r41：当前版本已隔离
         # UIRSI r40：板块层面（集 + 各阶段）已确认 / 进行中 / 过期 / 未开始，口径同镜头格标签
         try:
             from ns_api import shot_status  # noqa: PLC0415

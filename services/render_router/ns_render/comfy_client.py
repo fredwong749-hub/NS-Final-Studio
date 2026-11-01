@@ -9,6 +9,7 @@ fredw-92/F1：笔记本 → gpu3 上行经跳板只有 8–25 KB/s，重传帧�
 - 真要上传：不透明图转 JPEG q95、按原内容 sha 命名、先 HEAD 查输入目录（两实例共用）已有就跳过、超时 ≥ 900 s。
 """
 import hashlib
+import http.client
 import io
 import json
 import os
@@ -39,6 +40,11 @@ OUTPUT_TAG = " [output]"        # LoadImage 注解：从该实例的输出目录
 # producer 每单新建 ComfyClient → 每单经跳板（单连接 36–53 KB/s）重拉一次 = 每单 1–3 分钟只在传节点表，GPU 空等。
 # 改为进程级 + 磁盘缓存（按地址，TTL 6 小时）；检查发现缺节点 / 缺模型时先强制重拉一次再报，避免旧缓存误报。
 OBJECT_INFO_TTL_S = 6 * 3600
+# DEBUG-RSI 11-02（K-OPS-E01 / R02，总调度 fredw-2b 派）：经跳板时 /history 轮询偶发超时、/view 下载 IncompleteRead。
+# 原来一次就整单作废 → producer 当 infra / content 错重派 → 已在 GPU 上出好的图白做一遍（ep01-S8 00:22:53 出好、00:24:33 轮询超时重派；
+# ep01-S7 00:20:47 出好、00:22:23 下载 IncompleteRead 记一次内容失败）。现在：轮询连续失败 ≤ POLL_GRACE_S 内继续等；下载重试 DOWNLOAD_TRIES 次。
+POLL_GRACE_S = float(os.environ.get("NS_COMFY_POLL_GRACE_S", "300"))
+DOWNLOAD_TRIES = int(os.environ.get("NS_COMFY_DOWNLOAD_TRIES", "3"))
 _OBJECT_INFO_MEM: dict[str, tuple[float, dict]] = {}
 _OBJECT_INFO_LOCK = threading.Lock()
 
@@ -191,8 +197,9 @@ class ComfyClient:
             raise err from e
         except urllib.error.URLError as e:
             raise ComfyUnavailable(f"{path}: {e.reason}") from e
-        except (ConnectionError, TimeoutError) as e:
-            raise ComfyUnavailable(f"{path}: {e}") from e
+        except (ConnectionError, TimeoutError, http.client.HTTPException) as e:
+            # http.client.IncompleteRead / RemoteDisconnected = 传到一半连接断了，属于连接问题，不是图有问题（K-OPS-E02）
+            raise ComfyUnavailable(f"{path}: {type(e).__name__}: {e}") from e
 
     def _json(self, path: str, body=None):
         data = json.dumps(body).encode() if body is not None else None
@@ -448,8 +455,18 @@ class ComfyClient:
 
     def wait(self, prompt_id: str, timeout_s: float, poll_s: float = 3) -> dict:
         deadline = time.monotonic() + timeout_s
+        fail_since = None
         while time.monotonic() < deadline:
-            hist = self._json(f"/history/{prompt_id}")
+            try:
+                hist = self._json(f"/history/{prompt_id}")
+                fail_since = None
+            except ComfyUnavailable:
+                # K-OPS-E01：作业已经交上去了，一次轮询超时 / 断连不等于作业没了——在宽限期内继续等，不重派、不重渲染
+                fail_since = fail_since or time.monotonic()
+                if time.monotonic() - fail_since > POLL_GRACE_S:
+                    raise
+                time.sleep(min(15.0, max(poll_s, 5.0)))
+                continue
             entry = hist.get(prompt_id)
             if entry:
                 status = entry.get("status", {})
@@ -460,14 +477,25 @@ class ComfyClient:
                 if status.get("completed"):
                     return entry
             time.sleep(poll_s)
-        self.interrupt()
+        self.cancel(prompt_id)
         raise ComfyError(f"超时 {timeout_s}s")
 
-    def interrupt(self):
+    def interrupt(self, prompt_id: str | None = None):
+        """K-OPS-E03：给了 prompt_id 就只打断这一单（ComfyUI 0.42 /interrupt 支持 prompt_id，不是它在跑就不动）；
+        不带 = 全局打断，会打断这张卡上别人正在跑的作业，只给明确要清卡的调用方用"""
+        body = json.dumps({"prompt_id": prompt_id}).encode() if prompt_id else b"{}"
         try:
-            self._request("/interrupt", b"{}", {"Content-Type": "application/json"})
+            self._request("/interrupt", body, {"Content-Type": "application/json"})
         except ComfyError:
             pass
+
+    def cancel(self, prompt_id: str):
+        """只取消自己这一单：排队中 → 出队；正在跑 → 定向 interrupt。别人的作业不动"""
+        try:
+            self._json("/queue", {"delete": [prompt_id]})
+        except ComfyError:
+            pass
+        self.interrupt(prompt_id)
 
     def free(self, unload_models: bool = True):
         self._json("/free", {"unload_models": unload_models, "free_memory": True})
@@ -485,7 +513,14 @@ class ComfyClient:
         q = urllib.parse.urlencode({"filename": item["filename"], "subfolder": item.get("subfolder", ""),
                                     "type": item.get("type", "output")})
         dest.parent.mkdir(parents=True, exist_ok=True)
-        data = self._request(f"/view?{q}")
+        for k in range(max(1, DOWNLOAD_TRIES)):          # K-OPS-E02：传到一半断了就重下，图已经在服务器上，不重渲染
+            try:
+                data = self._request(f"/view?{q}", timeout=max(self.timeout, 300))
+                break
+            except ComfyUnavailable:
+                if k + 1 >= max(1, DOWNLOAD_TRIES):
+                    raise
+                time.sleep(5 * (k + 1))
         dest.write_bytes(data)
         if item.get("type", "output") == "output":
             # 记下 gpu3 上的名字：之后同实例要用这张图时直接 [output] 引用，不再上传

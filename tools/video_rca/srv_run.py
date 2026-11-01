@@ -27,6 +27,11 @@ PY = "/root/work/fredw/venv_idm/bin/python"
 FF = os.environ.get("VRCA_FF", "/root/work/fredw/tools_bin/ffmpeg")
 MODE = Path("/root/work/fredw/longshot/run/mode")
 CLIENT = "videorca-"
+# 总调度 11-02 00:3x：服务器上的分析一律限线程 + nice（v7_lipsync 曾占 74–90 核拖垮 sshd）→ 所有子进程绑 4 个核（taskset，子孙进程继承）
+CORES = os.environ.get("VRCA_CORES", "44-47")
+LIMIT = ["taskset", "-c", CORES, "nice", "-n", "15"]
+THREAD_ENV = {k: "4" for k in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS",
+                               "ORT_NUM_THREADS", "VECLIB_MAXIMUM_THREADS")}
 lock = threading.Lock()
 pool = cf.ThreadPoolExecutor(max_workers=2)
 
@@ -117,21 +122,20 @@ def score(d, j, src):
     stem = f"{j['shot']}__rca_{j['id']}"
     mp4 = d / f"{stem}.mp4"
     subprocess.run(["cp", src, str(mp4)])
-    env = dict(os.environ, PATH=str(Path(FF).parent) + ":" + os.environ.get("PATH", ""), OMP_NUM_THREADS="4",
-               OPENBLAS_NUM_THREADS="4", PYTHONUTF8="1")
-    r = subprocess.run(["nice", "-n", "10", PY, f"{REPO}/tools/series10_video/score_clip.py", str(mp4), str(d / f"{stem}_sheet.jpg"),
+    env = dict(os.environ, PATH=str(Path(FF).parent) + ":" + os.environ.get("PATH", ""), PYTHONUTF8="1", **THREAD_ENV)
+    r = subprocess.run([*LIMIT, PY, f"{REPO}/tools/series10_video/score_clip.py", str(mp4), str(d / f"{stem}_sheet.jpg"),
                         json.dumps(j["score_meta"], ensure_ascii=False)], capture_output=True, text=True, env=env, cwd=REPO,
                        timeout=2400)
     (d / f"{stem}.score.txt").write_text(r.stdout)
     (d / f"{stem}.score.err").write_text(r.stderr[-4000:])
     ff = d / "inputs" / j["inputs"].get("@first_frame", "none")
-    r2 = subprocess.run([PY, str(Path(__file__).parent / "sharp.py"), str(mp4)] + ([str(ff)] if ff.exists() else []),
+    r2 = subprocess.run([*LIMIT, PY, str(Path(__file__).parent / "sharp.py"), str(mp4)] + ([str(ff)] if ff.exists() else []),
                         capture_output=True, text=True, timeout=600)
     (d / f"{stem}.sharp.json").write_text(r2.stdout)
-    subprocess.run([FF, "-v", "error", "-y", "-i", str(mp4), "-vf", "scale=360:640", "-c:v", "libx264", "-crf", "28", "-c:a", "aac",
+    subprocess.run([*LIMIT, FF, "-v", "error", "-threads", "4", "-y", "-i", str(mp4), "-vf", "scale=360:640", "-c:v", "libx264", "-crf", "28", "-c:a", "aac",
                     "-b:a", "64k", str(d / f"{stem}_prev.mp4")])
     sel = "+".join(f"eq(n\\,{i})" for i in (0, 12, 48, 96, 150))
-    subprocess.run([FF, "-v", "error", "-y", "-i", str(mp4), "-vf", f"select='{sel}',scale=384:672,tile=5x1", "-frames:v", "1",
+    subprocess.run([*LIMIT, FF, "-v", "error", "-threads", "4", "-y", "-i", str(mp4), "-vf", f"select='{sel}',scale=384:672,tile=5x1", "-frames:v", "1",
                     str(d / f"{stem}_strip.jpg")])
     s = {}
     ln = [x for x in r.stdout.splitlines() if x.startswith("{")]
@@ -141,7 +145,7 @@ def score(d, j, src):
         # 用实验自带的旧镜头信息重跑 V6 / V7（同生产脚本、同阈值），并按新结果改 gate 的 多肢 / 口型 两项
         for key, py, script in (("v6", "/root/work/fredw/venv_hand/bin/python", "v6_limbs.py"),
                                 ("v7", PY, "v7_lipsync.py")):
-            rr = subprocess.run(["nice", "-n", "10", py, f"{REPO}/tools/series10_video/{script}", str(mp4),
+            rr = subprocess.run([*LIMIT, py, f"{REPO}/tools/series10_video/{script}", str(mp4),
                                  json.dumps(j["v67_meta"], ensure_ascii=False)], capture_output=True, text=True, env=env,
                                 cwd=REPO, timeout=1800)
             l2 = [x for x in rr.stdout.splitlines() if x.startswith("{")]

@@ -206,6 +206,9 @@
 | U12 | 后端 takes 的 label 是给人看的 | 读 /api/candidates?ep=2 全部标签 + 画布截图 | 50 张无标签；17 张标签是“ASSETMASTER 已出（PRODUCER 接手登记）”（流水线内部登记记录），画布直接显示“暂定 · ASS…”；改为按段过滤后只剩“暂定”，“新配方”照常 | ❌（label 是流水线记录，前端必须过人话层） | K-UI-037 | docs/uirsi/rounds/r35.md |
 | U13 | 全站放大层按 cursor 猜“可不可点”够用 | UIAUDIT 真实鼠标点候选格（verify_uirsi_r35_r36.md P1-1）；r37 加 data-zoom-own 后复测 | 改前：点图出放大框、候选对比弹窗打不开；改后：真实鼠标 → 候选弹窗、Alt+点 → 大图、悬停 → 放大镜 | ❌（格子有自己的点击要显式声明，不能靠 cursor 猜） | K-UI-040 | docs/uirsi/rounds/r37.md |
 | U14 | 服务器上的图每次经隧道现取就行 | /api/gpu/thumb 取 ep05-S3_image_v9_00002_：改前经隧道 vs 改后先找本镜 takes.json 里登记的同名一版 | 改前隧道断时 30 s 没回、前端裂图；改后 0.09 s 用笔记本文件；笔记本没有的写占位字 | ❌（先用本机已登记的副本，隧道只是兜底） | K-UI-042 | docs/uirsi/rounds/r38.md |
+| U15 | 全量重做撤了当前版本，界面就不会再显示旧图 | 读 /api/candidates + takes.json + import_log（ep06）；data_parity D-CANDVER 改前 / 改后 | 改前：旧剧本候选按 ep/S 号挂在新镜号下仍当候选显示（ep06-S1 #2–5 等），还有 50 个旧剧本尾帧仍是“当前”；改后接口标 script、旧版只进历史区，D-CANDVER 进程内 PASS | ❌（候选要跟剧本版本绑定；测试要独立复核界面显示的候选） | K-UI-043 | docs/uirsi/rounds/r40.md |
+| U16 | 点候选图就换是“一键生效”的好设计 | 项目方 23:57:52–23:58:01 九秒连点三次推翻 L-093 | 点图本身调 onSheet；改成点图看大图、“用这张”才换，受锁的先一键确认 | ❌（看和换要分开；已定决策要一键确认） | K-UI-045 | docs/uirsi/rounds/r40.md |
+| U17 | 把旧版本标出来（r40 标签）就够了 | 项目方 00:5x 看了 r40 后仍嫌“数据太多”“难受” | 改成隔离出界面（655 版 / 1105 文件移隔离区，接口默认不返回）+ 总览 / 画布默认简洁、细节收起 | ❌（给项目方看的默认视图要做减法，不是加标签） | K-UI-046 | docs/uirsi/rounds/r41.md |
 
 ## AM. 资产补全（ASSETMASTER，2026-11-01；证据 data/assetmaster/）
 

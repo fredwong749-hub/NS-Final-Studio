@@ -76,6 +76,7 @@ if (pt.hover) {
   await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: pt.x, y: pt.y, button: "left", clickCount: 1, modifiers: mods });
   await sleep(1500);
   const r = (await send("Runtime.evaluate", { expression: AFTER, returnByValue: true })).result?.value;
+  if (process.env.SHOT) { const sh = await send("Page.captureScreenshot", { format: "png" }); (await import("node:fs")).writeFileSync(process.env.SHOT, Buffer.from(sh.data, "base64")); }   // r40：可选截图
   console.log(JSON.stringify({ point: pt, after: r }));
 }
 if (blocked.length) console.log("BLOCKED " + JSON.stringify(blocked));

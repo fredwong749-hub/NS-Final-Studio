@@ -85,3 +85,9 @@ Claude 只读这些字段、检查文件与尺寸，原样用于 H3；不改提�
 - [ ] 采纳剧本稿（画布「导入」）
 - [ ] 林晚出图 / 视频 LoRA 样图验收
 - [ ] 第一集样片参数锁定
+
+## 远程命令统一入口（NETFIX 11-02，K-OPS-N07 / N08）
+- 跑远程命令：`.venv/Scripts/python.exe tools/netfix/rsh.py gpu33 "命令"`，stdin 二进制直通，退出码原样返回。它复用监管进程托管的常驻主连接（香港线路优先，直连备用），不新建握手。
+- 在 venv Python 里直接起的 `ssh gpu33 ...` / `ssh gpu36 ...` 会被 .pth 闸门自动改走主连接。新代码请直接用 rssh.run / rsh.py。新增直接起 ssh 的文件必须登记到 config/netfix/ssh_callers.txt（有测试检查）。
+- 不要用 Windows 自带 OpenSSH 加 `-F config/netfix/ssh_config`（会报 hostname contains invalid characters），那是 Git ssh / WSL 的语法。
+- 当前走哪条路、连接状态：`data/netfix/net_status.json`（relay.route、hosts.<连接>.route / state）。

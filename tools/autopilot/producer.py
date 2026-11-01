@@ -75,6 +75,30 @@ KIND_WORD = {"script": "剧本", "import": "导入", "assets": "资产", "first"
              "voice": "声音", "bgm": "配乐", "assembly": "合成", "preview": "审片页"}
 
 
+def vlm_instances() -> int:
+    """K-OPS-E05：看图（VLM）并发实例数——config/vqa.json model.instances（VQAGATE 加多实例时填），环境变量 NS_VQA_INSTANCES 优先；
+    打分积压上限 = 2 × 道数 × 实例数（总调度 01:0x：阈值跟着看图并发数自动算）"""
+    try:
+        v = os.environ.get("NS_VQA_INSTANCES") or (json.loads((ROOT / "config" / "vqa.json").read_text(encoding="utf-8")).get("model") or {}).get("instances")
+        return max(1, int(v or 1))
+    except (OSError, ValueError, TypeError):
+        return 1
+
+
+def asset_hold_objects(data: Path) -> set:
+    """IMGFIX r5（总调度 fredw-2b 11-02）：data/autopilot/*_hold.json（active=true）列出的首帧 / 尾帧对象暂缓派单——
+    资产（例：林晚造型 A 设定图缺袖）修复后等项目方点选，点选前不出图。文件坏 / 不在 = 不挡"""
+    out: set = set()
+    for f in (data / "autopilot").glob("*_hold.json"):
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if d.get("active"):
+            out |= {o for it in d.get("shots") or [] for o in it.get("objects") or []}
+    return out
+
+
 class Paths:
     """全部路径集中在这里；dryrun 指向临时目录"""
 
@@ -376,10 +400,17 @@ def vqa_gate(sid: str, stage: str, file_rel: str, job: dict, pf: dict) -> dict |
         from ns_render import pipeline as P
         if not VQ.enforced():
             return None
+        other = [b for b in (pf.get("blocking") or []) if b not in ("Q9", "Q1")]
+        if pf.get("ok") is False and other:
+            # 总调度 11-02 P0（看图是整条出图线的吞吐上限）：Q2–Q8 已经不过的图反正要重出，不再排队看图（11-01 08–16 时 214 张里 151 张
+            # 属于这种情况）。Q1 例外：Q1 的转角放宽 / 后脑复核要看图结果
+            VQ.apply(pf, {"error": "前置契约不过（" + "、".join(other) + "），未看图"})
+            return None
         refs = [str(ROOT / r) if not Path(r).is_absolute() else r for r in (job.get("refs") or [])] \
             or VQ.ref_files(job.get("asset_refs") or {})
         v = VQ.inspect_for(sid, "first" if stage == "image" else "last", str(P.DATA / file_rel), job.get("prompt") or "",
                            refs, wait_s=1200)
+        VQ.recheck_strangers(pf, str(P.DATA / file_rel))   # K-REV-V14：背影人物的后脑被认成“多出的脸” → 本地看图复核
         VQ.apply(pf, v)
         if v.get("error") and pf.get("ok") is False and pf.get("blocking") == ["Q9"]:
             pf["score_infra"] = True
@@ -416,6 +447,8 @@ def vqa_record(sid: str, stage: str, n: int, file_rel: str, job: dict, pf: dict,
         from ns_agent.vqa import judge as VJ
         from ns_render import pipeline as P
         from ns_render import frame_edit as FE
+        if vlm is None and (pf.get("vqa_gate") or {}).get("enforce"):
+            return                       # 闸门期没看图（前置契约不过 / 服务没跑成）：不在这里再排一次看图（P0 吞吐）
         t = next((x for x in P.load_takes(sid)["takes"] if x["stage"] == stage and x["n"] == n), None)
         if t is None:
             return
@@ -1213,7 +1246,13 @@ class Producer:
         self.inflight: dict[str, dict] = {}        # 对象 → {lane, future}
         self.lane_busy: dict[str, str] = {}        # 道 → 对象
         self.lane_cool: dict[str, float] = {}      # 道 → 冷却到
-        self.pool = cf.ThreadPoolExecutor(max_workers=len(self.lanes) or 1, thread_name_prefix="producer-lane")
+        # DEBUG-RSI K-OPS-E05（11-02）：出完图后 _run_one 还要在本线程里等契约打分 + 看图（实测 8–25 分钟）。
+        # 原来线程数 = 道数 → 6 张图都在等打分时，新派的单只能在线程池里排队，道被标“在做”、GPU 实际空着
+        # （00:46 派出的 ep01-S10 / ep02-S1 / S2 / S3 到 01:03 一直没交给 ComfyUI，四个队列都是空的）。
+        # 线程数放大到道数 × 3；同时用 SCORE_BACKLOG 限制“出好但还没打完分”的数量，打分跟不上时停派（背压），不堆积。
+        self.pool = cf.ThreadPoolExecutor(max_workers=max(8, 3 * (len(self.lanes) or 1)), thread_name_prefix="producer-lane")
+        self.scoring: set[str] = set()             # 出好、正在等契约打分 / 看图的对象
+        self.score_backlog_max = int(os.environ.get("NS_PRODUCER_SCORE_BACKLOG", "0")) or 2 * (len(self.lanes) or 1) * vlm_instances()
         self.mu = threading.RLock()
         self.last_sig = None
         self.reg: dict = {}
@@ -1360,6 +1399,14 @@ class Producer:
         free = [ln for ln, s in lanes.items() if s["free"]]
         if not free:
             return
+        with self.mu:
+            backlog = len(self.scoring)
+        if backlog >= self.score_backlog_max:     # K-OPS-E05：打分积压到上限就先不派（GPU 出得再快也只是排队等打分）
+            if getattr(self, "_last_backlog_log", 0) < now() - 300:
+                self._last_backlog_log = now()
+                self.logf("score_backlog", n=backlog, max=self.score_backlog_max, counted=False,
+                          note="出好的图在排队等契约打分 / 看图，先不派新单")
+            return
         cands = []
         for E in reg["episodes"]:
             for S in E["shots"]:
@@ -1368,8 +1415,11 @@ class Producer:
                     if o["status"] == "ready" and not str(o.get("waiting_for") or "").startswith("基础设施退避") and o["id"] not in self.inflight:
                         cands.append((E["ep"], 0 if k == "last" else 1, S["index"], o))
         cands.sort(key=lambda x: (0 if x[3].get("redo") else 1, *x[:3]))   # 总调度驳回 / 插队的先派
+        held = asset_hold_objects(self.p.data)
         for _ep, _k, _i, o in cands:
             if self._dispatch_only and o["shot"] not in self._dispatch_only:
+                continue
+            if o["id"] in held:                  # IMGFIX r5：资产修复待点选的造型（data/autopilot/*_hold.json）暂缓派单
                 continue
             if not free:
                 break
@@ -1505,6 +1555,8 @@ class Producer:
                     self.lane_busy.pop(lane, None)
             render_s = round(now() - t0, 1)
             self.logf("rendered", obj=oid, lane=lane, take=res["take"], secs=render_s, render_s=render_s, gpu_s=res.get("gpu_s"))
+            with self.mu:
+                self.scoring.add(oid)
             t1 = now()
             pf = res["pf_future"].result(timeout=1800)
             contract_s = round(now() - t1, 1)
@@ -1592,6 +1644,7 @@ class Producer:
                 if self.lane_busy.get(lane) == oid:     # 11-01 08:38：原来无条件删，把同道后派的任务标记删掉 → 一条道被派两个
                     self.lane_busy.pop(lane, None)
                 self.inflight.pop(oid, None)
+                self.scoring.discard(oid)
             self.leases.release(oid)
 
     def _rescore_one(self, o, n) -> None:

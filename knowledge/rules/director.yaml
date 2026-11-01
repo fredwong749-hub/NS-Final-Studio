@@ -1,0 +1,184 @@
+# DIRECTOR loop（总调度 fredw-2b 派，2026-11-02）：成片评分（review）+ 导演层 / 后期层（edit）。
+# 项目方 11-02 00:4x 原话：“我要全部系统化，出一个 Hollywood level 的、画面非常漂亮的短剧。”（docs/master/HOLLYWOOD_PLAN.md §1C §1D）
+# 写作方配合的格式规则（K-WRT-801–803）是草案，在 knowledge/inbox/2026-11-02_director_writer.yaml。
+rules:
+  - id: K-REV-801
+    domain: review
+    link: P10-P11
+    title: 每集成片打“好莱坞观感分”：四大项 15 小项，每小项 5 条可核对条件
+    when: 每次整集合成（预览）之后、发版 / 给项目方看之前
+    then: tools/director/film_score.py score <成片> → data/film_score/<名>.json（并更新 epNN.json）+ data/review_pages/film_score/index.html；小项分 = 5 × 通过 / 测到，整集 /50 = 小项平均 × 10；只评技术和观感，不评剧本内容
+    evidence:
+      - {src: docs/master/HOLLYWOOD_PLAN.md §1D, quote: "每集成片跑“好莱坞观感分”"}
+      - {src: data/film_score/ep01_v2.json, note: "基线 27.8/50（不含看图模型；测到 85% 条件）"}
+      - {src: tools/ep02_director/rubric.md, note: "复用 DIR 7 维的测量和及格线"}
+    check: [tests/test_director.py]
+    confidence: medium
+    status: 确认
+    date: 2026-11-02
+  - id: K-REV-802
+    domain: review
+    link: P10-P11
+    title: 没测到的条件记“未测”，不计入分母；测到比例单独报
+    when: 成片评分
+    then: 条件 pass = True / False / None；coverage = 测到条数 / 总条数，和总分一起报；数字带出处（每条 src）
+    evidence:
+      - {src: tools/director/film_score.py item_score}
+    check: [tests/test_director.py]
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-REV-803
+    domain: review
+    link: P10-P11
+    title: 看图模型只在生产空档跑（--vlm），走缓存，图片只进自家模型
+    when: 成片评分需要视线 / 表情 / 坏块等看图项
+    then: film_score --vlm 用 ns_agent.vqa（口径 B，K-REV-V01）；本机 8870 有生产任务时排队等，不抢出图道；没跑时相关条件记未测
+    evidence:
+      - {src: config/vqa.json _caliber}
+    check: [tests/test_director.py]
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-REV-804
+    domain: review
+    link: P10-P11
+    title: RSI 每轮先修成片分全局最低的小项，A/B 在同一素材上前后对比
+    when: DIRECTOR 每轮迭代
+    then: film_score lowest → 根因 → 改系统 → 同一成片 / 素材出 A/B 两版各打一次分（总表里同一集多行）→ 过了再交总调度发版
+    evidence:
+      - {src: docs/master/HOLLYWOOD_PLAN.md §2}
+      - {src: data/film_score/ep01_v2_post3.json, note: "后期层 A/B：27.8 → 31.2"}
+    check: [tests/test_director.py]
+    confidence: medium
+    status: 确认
+    date: 2026-11-02
+  - id: K-EDT-801
+    domain: edit
+    link: P9-P10
+    title: 整集统一调色：同场按同一角色肤色对齐（±8%），再按时段套统一 LUT
+    when: 整集合成之后（tools/director/post_pass.py）
+    then: 有脸的镜按同一角色（SFace 认人）脸部 RGB 对齐到本场该角色中位，没脸的镜按整帧对齐、强度减半；夜景 config/post/luts/night_v1.cube、日景 day_v1.cube（自产）；占位静帧不当参照
+    evidence:
+      - {src: data/film_score/ep01_v2_lutonly.json, note: "只套 LUT：脸部跨镜 ΔE 6.7 → 7.07"}
+      - {src: data/film_score/ep01_v2_post.json, note: "按整帧对齐：脸部 ΔE 6.7 → 8.88（变差，否决）"}
+      - {src: data/film_score/ep01_v2_post3.json, note: "按同一角色肤色对齐：脸部 ΔE 6.7 → 4.06，P3.2 转通过"}
+    check: [tests/test_director.py]
+    confidence: medium
+    status: 建议
+    date: 2026-11-02
+  - id: K-EDT-802
+    domain: edit
+    link: P8-P9
+    title: 音效层按剧本【声音】字段挑免费可商用素材，许可证逐文件登记
+    when: 整集合成之后
+    then: 动作音效（脚步 / 门 / 衣料 / 椅子 / 键盘 / 纸 / 叮）用 Kenney CC0 包（data/sfx_lib/kenney_*，LICENSES.json 含 sha256）；每个场景一条程序合成声床（自产）；人声处音效压 8 dB、声床压 6 dB；匹配不上的写进 timeline.sfx.unmatched
+    evidence:
+      - {src: data/sfx_lib/kenney_impact-sounds/License.txt, quote: "free to use in personal, educational and commercial projects"}
+      - {src: data/film_score/ep01_v2_post3.json, note: "S4 音效 1.25 → 5.0（41 个事件、1 条声床）"}
+    check: [tests/test_director.py]
+    confidence: medium
+    status: 建议
+    date: 2026-11-02
+  - id: K-EDT-803
+    domain: edit
+    link: P9-P10
+    title: 加完音效后重新两遍响度归一到 −14 LUFS / −1.5 dBTP
+    when: post_pass 混完音效
+    then: 复用 ns_post.assemble.loudnorm（必要时先限幅）；成片分 S2 复核
+    evidence:
+      - {src: data/ab/director_post/ep01_v2_post3.timeline.json, note: "−14.01 LUFS、TP −1.76"}
+    check: [tests/test_director.py]
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-EDT-804
+    domain: edit
+    link: P8-P9
+    title: 配乐强度跟剧本情绪节拍：BGM 时间轴保留时间，强度用剧本【配乐】强度 0–3
+    when: 合成铺 BGM（ns_post.music.resolve_cues）
+    then: tools/director/cut_plan.merge_music_intensity(json_cues, 剧本镜)；强度升 = swell、降到 0 = drop；合成接线待 CONSENT（VIDEO10 / WORKFLOW）
+    evidence:
+      - {src: data/film_score/ep01_v2.json S3.4, note: "timeline bgm.cues 强度 2/2/2/2/2，剧本写 1/1/1/2/2/3/1"}
+      - {src: data/music/series10/ep01.json, note: "bgm10 时间轴全部 intensity 2"}
+    check: [tests/test_director.py]
+    confidence: medium
+    status: 建议
+    date: 2026-11-02
+  - id: K-EDT-805
+    domain: edit
+    link: P9-P10
+    title: 画内对白被 TTS 兜底 = 口型与成片声音不一致：送回重出视频，不进定稿
+    when: 合成用 --dialogue-source h3，某镜 H3 原声回听不合格改用 TTS
+    then: tools/director/lip_redo.blocking(timeline) 列出这些镜 → data/director/redo_requests.json；本集只出预览、不定稿；成片分 A3.1 不通过；night 接线待 CONSENT
+    evidence:
+      - {src: docs/vqa/GATE_CALIBRATION.md §10–11, note: "总调度 11-02 转 VQAGATE 查证"}
+      - {src: data/episodes/series10/ep01_v2.timeline.json h3_dialogue, note: "S6 tts_fallback（no H3 audio），该镜进成片的是静帧"}
+    check: [tests/test_director.py]
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-EDT-811
+    domain: edit
+    link: P3-P4
+    title: 导演层运镜：一种、小幅、Pika 做得到；大动作不叠运镜，不拉远 / 环绕
+    when: tools/director/cut_plan.py 给每镜定 camera
+    then: 对白镜固定或小幅推近；开场 / 换场第一镜固定；情绪强度 3 小幅推近；有大动作固定；写作方写了拉远 / 环绕 / 晃动 / 缓慢 → 改写并标 flags
+    evidence:
+      - {src: config/prompts/hollywood_pika_reference.md P3 P10 P16}
+      - {src: docs/video_rca/RCA_r1.md §1 C16, note: "视频比首帧再远 ≥1 档 11/55"}
+    check: [tests/test_director.py]
+    confidence: medium
+    status: 建议
+    date: 2026-11-02
+  - id: K-EDT-812
+    domain: edit
+    link: P8-P10
+    title: 转场按写作方衔接字段：动作→动作匹配切、视线→视线匹配切、换场→声音先行 0.4 s、时间跳→叠化 0.4 s
+    when: cut_plan 定 transition_in
+    then: link=换场 且有时间跳词 → 叠化；换场 → 声音先行；接力+动作 → 动作匹配切（上一镜在动作中段出刀）；视线 → 视线匹配切；其余硬切
+    evidence:
+      - {src: knowledge/rules/writer_camera.yaml K-EDT-102}
+    check: [tests/test_director.py]
+    confidence: medium
+    status: 建议
+    date: 2026-11-02
+  - id: K-EDT-813
+    domain: edit
+    link: P8-P10
+    title: 刀长随情绪强度变：强度 1 → 3–4.5 s、2 → 2.5–3.5 s、3 → 1.5–2.5 s；第一刀 ≤3 s
+    when: cut_plan 定 cut.target_s，合成按它拆刀 / 收紧
+    then: 目标刀长写进导演规格；合成接线待 CONSENT（替代全集统一 max_shot_s 4.5）
+    evidence:
+      - {src: data/film_score/ep01_v2.json E1, note: "平均每刀 4.11 s、最长 8 s（占位静帧）"}
+      - {src: config/render_quality.json post.edit_rules.learned_from.max_shot_s_v2, quote: "节奏有点慢，慢溜溜的"}
+    check: [tests/test_director.py]
+    confidence: low
+    status: 待验
+    date: 2026-11-02
+  - id: K-EDT-814
+    domain: edit
+    link: P8-P10
+    title: J-cut / L-cut：下一镜开口 → 声音先进 0.3 s；上一句的尾音盖到听者反应镜 0.4 s
+    when: cut_plan 定 j_cut_s / l_cut_s
+    then: 换场的声音先行同时记 j_cut_s；叠化不做 J/L
+    evidence:
+      - {src: config/render_quality.json post.edit_rules.jl_cut_s, quote: "transition 非常生硬，不连贯"}
+      - {src: data/film_score/ep01_v2.json E3.2, note: "6 个切点只有 2 个有 J-cut"}
+    check: [tests/test_director.py]
+    confidence: medium
+    status: 建议
+    date: 2026-11-02
+  - id: K-EDT-815
+    domain: edit
+    link: P3-P4
+    title: 视线写画内方向；同场相邻镜两人左右互换 = 越轴，标出来
+    when: cut_plan 读 cast 左右站位
+    then: 在左的人视线 toward frame-right，在右的人 toward frame-left；越轴 → flags（合成按硬切，写作方标 HARD CUT 或改站位）
+    evidence:
+      - {src: config/prompts/hollywood_pika_reference.md P5}
+      - {src: knowledge/rules/writer_camera.yaml K-WRT-104}
+    check: [tests/test_director.py]
+    confidence: medium
+    status: 建议
+    date: 2026-11-02

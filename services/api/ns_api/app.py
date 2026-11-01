@@ -216,7 +216,10 @@ def _active(shot_id: str, data: dict | None = None) -> dict:
     out = {}
     for stage in STAGES:
         n = data["active"].get(stage)
-        out[stage] = next((t for t in data["takes"] if t["stage"] == stage and t["n"] == n), None)
+        t = next((t for t in data["takes"] if t["stage"] == stage and t["n"] == n), None)
+        # UIRSI r41（项目方 11-02 00:5x：“旧版本的东西就隔离开吧”）：当前版本已隔离（旧剧本版本，文件已移走）= 这一阶段没有当前版本，
+        # 集摘要 / 详情都不再把它算作“有”（CONSENT DATAALIGN → UIRSI）
+        out[stage] = None if (t and t.get("quarantined")) else t
     return out
 
 

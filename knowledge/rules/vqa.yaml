@@ -154,3 +154,39 @@ rules:
     confidence: medium
     status: 确认
     date: 2026-11-01
+  - id: K-OPS-V13
+    domain: ops
+    link: [P11-P12]
+    title: 服务器上按片子反复起的打分 / 检测脚本必须限线程（OMP/MKL/OPENBLAS/NUMEXPR=4、onnxruntime intra_op=4、cv2.setNumThreads(4)，调用方 nice）
+    when: 写或改 score_clip / v6_limbs / v7_lipsync / calibrate_v67 等服务器打分脚本，或新增服务器端检测器
+    then: 在第一个重型 import 之前设线程环境变量（K-OPS-V13 标记块，NS_SCORE_THREADS 可调）；用 onnxruntime / insightface 的给 InferenceSession 默认会话加 intra_op_num_threads；tools/qa/thread_guard.py 静态检查必须 PASS
+    check: [tools/qa/thread_guard.py, tests/test_vqagate.py]
+    evidence:
+      - {src: docs/CHANGELOG_AGENTS.md, note: "11-02 00:3x：v7_lipsync 一个进程 gpu33 7432% / gpu36 9052% CPU，两台负载 250 / 160，拖慢 sshd 与 ComfyUI；限线程后同一片子 CPU 620%、38.6 s"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-REV-V14
+    domain: review
+    link: [P10-P11]
+    title: 背影 / 局部人物的后脑被人脸检测当成“认不出的脸”时，先交本地看图复核这张裁切：确认是后脑 / 耳朵就不算多出的人，真脸照挡
+    when: 契约 Q1 只因“画面里多了不该有的人 / 认不出是谁”不过，且 cast 里有背影 / 局部人物
+    then: postflight 把认不出的脸框写进 Q1 证据（stranger_boxes、partial_cast）；producer.vqa_gate 调 contract.recheck_strangers 逐张裁切问本地看图（正脸 / 侧脸 / 后脑或耳朵 / 不是人 / 拿不准），全部是后脑 / 不是人才改判 Q1 pass；只走本地服务（K-REV-V01）
+    check: [tests/test_vqagate.py]
+    evidence:
+      - {src: data/ab/imgfix/k705c_304_face_118.jpg, note: "IMGFIX s20261304（ep02-S4）林晚后脑 + 耳朵被认成一张脸（脸高 0.12，对 4 个角色相似度 ≈ 0），Q1 判多人挡图"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-V15
+    domain: ops
+    link: [P10-P11]
+    title: 看图是出图线的吞吐上限：Q2–Q8 已不过的图不排队看图（反正要重出），闸门期没看成的图也不在记录环节再看一次
+    when: producer._postflight → vqa_gate / vqa_record
+    then: pf.ok=False 且阻断项里有 Q1 / Q9 以外的项 → Q9 记 untested（“前置契约不过，未看图”），不调本地看图；vqa_record 在 vlm 为空时不再调 review_round 自己看图。Q1 例外（转角放宽 / 后脑复核要看图结果）
+    check: [tests/test_vqagate.py]
+    evidence:
+      - {src: data/producer/log.jsonl, note: "11-01 08:00–16:00 契约结果 214 张里 151 张是 Q2–Q8 不过（看图前就注定重出）；闸门上线后契约打分 p50 29 s → 646 s（总调度 P0）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

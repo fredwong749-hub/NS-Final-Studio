@@ -34,6 +34,6 @@
 .infra-vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .infra-chip:has(.infra-vh) { padding: 0 var(--sp-2); }
 /* ≤1280 宽：顶栏步骤条收起副标题（总调度 r40 定；放这里是因为 infra.css 随顶栏常驻加载），步骤名不再被截成一个字 */
-@media (max-width: 1280px) {
+@media (max-width: 1440px) { /* r41：画布页多了“整集出片”，1440 也会挤 → 1440 及以下都收起副标题（悬停提示里有） */
   :root .v3-top-grid .v3-step small, :root .v3-top-grid .v3-step.cur:not(.on) small { display: none; } /* 连 v3.css 给“本集停留步”留的副文字也收起（悬停提示里有） */
 }

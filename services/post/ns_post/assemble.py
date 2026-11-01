@@ -33,6 +33,7 @@ from .ffmpeg import FFmpeg, parse_loudnorm
 from .music import (find_music, fit_length, h3_music_shots, ignored_edits, level_curve, load_stems, normalise_rms,
                     read_edit_music, resolve_cues, stale_timeline)
 from .speakers import SpokenLine, resolve_episode
+from . import director as DIRP   # DIRECTOR 11-02（总调度批准，CONSENT VIDEO10/WORKFLOW → DIRECTOR）：导演层落点，开关 config/post/director.json
 from .tts import (CACHE_DIR, AsrBackend, TtsBackend, Voice, asr_limit, char_error_rate, load_voice_config,
                   synthesize_cached, voice_for, wav_duration)
 
@@ -1022,6 +1023,7 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
     t_start = time.perf_counter()
     timings: dict[str, float] = {}
     shots = sorted(episode["shots"], key=lambda x: int(x["index"]))
+    dplan = DIRP.plan_for(episode) if DIRP.enabled() else {}   # K-EDT-813/814：导演规格（关 = 空，行为不变）
     script_durations = [float(x.get("duration") or 10) for x in shots]
     # G13 (owner 2026-10-30): the script writes whole seconds, H3 decides the real clip length. A shot with a
     # video is assembled at the video's own duration; only placeholder stills fall back to the script seconds.
@@ -1202,7 +1204,7 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
             # FIX（DIR：S8 12.25 s、S11 10.1 s 一刀到底）：单镜 > max_shot_s 拆刀，后一刀同素材推近换景别，切点避开对白句
             busy = [(max(0.0, p.start_s - starts[i]), p.end_s - starts[i]) for p in placements
                     if p.line.shot == i + 1 and p.line.kind == "dialogue"]
-            pieces = split_pieces(durations[i], max_s=float(_rule(s, "max_shot_s") or 0),
+            pieces = split_pieces(durations[i], max_s=DIRP.shot_max_s(dplan, idx, float(_rule(s, "max_shot_s") or 0)),
                                   min_piece_s=float(_rule(s, "split_min_piece_s")), zoom=float(_rule(s, "split_zoom")),
                                   busy=busy) if src["kind"] == "video" else [(0.0, durations[i], 1.0)]
             if i == 0 and src["kind"] == "video":   # FIX：开场第一刀 ≤ open_first_cut_s
@@ -1316,7 +1318,7 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
                 pre = min(xf / 2, head) if i > 0 else 0.0
                 # V2 J-cut（项目方“transition 非常生硬”）：下一镜的声音提前 jl_cut_s 进入（用剪掉的开头里的原声），
                 # 上一镜最后 jl_cut_s 内没有对白 / 独白时才做，不盖住上一镜的话
-                jl = float(_rule(s, "jl_cut_s") or 0)
+                jl = DIRP.jcut_s(dplan, int(row["index"]), float(_rule(s, "jl_cut_s") or 0))   # K-EDT-814
                 if i > 0 and jl > pre and head > pre:
                     cut_t = starts[i]
                     clash = any(p.start_s < cut_t and p.end_s > cut_t - jl for p in placements
@@ -1375,6 +1377,9 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
                 bgm_regen = []
                 if s.h3_music == "duck_under_bgm":   # 项目方 2026-10-31“整集统一 BGM”：按镜“撤到静默（H3 已带配乐）”不再生效
                     cues, bgm_regen = bgm_cues_for_duck_mode(cues, music_meta, starts, durations)
+                director_cues = []
+                if DIRP.enabled():   # K-EDT-804：配乐强度跟剧本情绪节拍（时间轴保留时间和描述）
+                    cues, director_cues = DIRP.merge_cues(cues, shots, starts)
                     for r in bgm_regen:
                         warnings.append(f"BGM 需要重新生成整集版（data/music/{name}.wav）：{r}")
                 stale = stale_timeline(music_meta, len(shots))
@@ -1424,7 +1429,7 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
                                      if k in music_meta},
                             "episode_edit_music": read_edit_music(data / "renders", ep),
                             "script_music": episode.get("music_bgm") or episode.get("music") or None,
-                            "cues": [c.to_dict() for c in cues], "looped": looped,
+                            "cues": [c.to_dict() for c in cues], "looped": looped, "director_cues": director_cues,
                             "cue_source": "music_json" if music_meta.get("cues") else
                             ("script/edit" if any(c.source in ("script", "edit") for c in cues) else "default"),
                             "duck_spans": len(h3_spans), "h3_music_mode": s.h3_music,
@@ -1540,6 +1545,7 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
         "gates": {"verdict": "fail" if (gate_missing or gate_overflow) else "pass",
                   "missing_shots": gate_missing, "overflow": gate_overflow},
         "room_tone": room_info, "color_tags": "bt709", "pace": pace_report, "voiceover_dropped": dropped,
+        "director": {"enabled": DIRP.enabled(), "cfg": "config/post/director.json", "plan": {str(k): {"transition_in": v["transition_in"], "j_cut_s": v["j_cut_s"], "l_cut_s": v["l_cut_s"], "cut_target_s": v["cut"]["target_s"], "camera": v["camera"]["move"]} for k, v in dplan.items()}},
     }
     if h3_report is not None:
         timeline["h3_dialogue"] = h3_report

@@ -70,4 +70,4 @@ def test_overview_and_canvas_use_backend_tags():
     rr = (ROOT / "apps/web/src/v3/ReviewRow.tsx").read_text(encoding="utf-8")
     assert "<MainTag st={rowCands?.[s.id]?.status} />" in rr
     css = (ROOT / "apps/web/src/v3/infra.css").read_text(encoding="utf-8")
-    assert "@media (max-width: 1280px)" in css and ".v3-step.cur:not(.on) small { display: none; }" in css
+    assert "@media (max-width: 1440px)" in css and ".v3-step.cur:not(.on) small { display: none; }" in css

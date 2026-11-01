@@ -1,0 +1,11 @@
+{
+  "_doc": "DIRECTOR 导演层 / 后期层开关（owner DIRECTOR；总调度 fredw-2b 11-02 批准接进 night 合成链）。enabled=false 时 ns_post.assemble 行为与改动前完全一致；先 ep01_v2 A/B（film_score 不降、合成不报错）通过后才改 true（K-EDT-816）。",
+  "enabled": false,
+  "music_intensity_from_script": true,
+  "music_min_intensity": 1,
+  "pace_from_plan": true,
+  "jcut_from_plan": true,
+  "post_pass": true,
+  "film_score": true,
+  "lip_redo": true
+}
