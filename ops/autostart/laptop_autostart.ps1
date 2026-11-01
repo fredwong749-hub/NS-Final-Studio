@@ -11,22 +11,14 @@ function Test-Port([int]$Port) {
 }
 function Log([string]$Msg) { Add-Content -Path (Join-Path $Logs "autostart.log") -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $Msg" -Encoding UTF8 }
 
-# 1) gpu3 隧道（15180 / 18098 / 18099）—— 自带锁，重复启动会自己退出
-# 封板修复：三个端口任一不在监听就拉起隧道（原先只看 15180，18098 Qwen / 18099 信箱掉了永远不会补）
-$TunnelDown = @(15180, 18098, 18099, 18188, 18189, 18191) | Where-Object { -not (Test-Port $_) }
-if ($TunnelDown) {
-  Start-Process -WindowStyle Hidden -FilePath $Bash -ArgumentList "`"$Root/ops/autostart/tunnel.sh`""
-  Log "tunnel started (not listening: $($TunnelDown -join ','))"
-} else { Log "tunnel already up" }
+# 1) NETFIX 11-01（K-OPS-N01）：全部端口转发（gpu33 六条 + gpu36 三条）由监管进程 tools/netfix/tunnel_supervisor.py 一家负责
+#    （每台服务器一条 ssh、指数退避、卡死检测、跳板恢复 60 s 内全部恢复、接管孤儿 ssh）。ensure = 不在就后台拉起，在就跳过。
+#    旧的 tunnel.sh / tunnel_gpu36.sh 循环已退役（调用它们也只会转去 ensure）。监管进程自身另有计划任务 NS-Studio-TunnelSupervisor 每 5 分钟 ensure。
+$env:PYTHONUTF8 = "1"
+$SupOut = & (Join-Path $Root ".venv\Scripts\python.exe") (Join-Path $Root "tools\netfix\tunnel_supervisor.py") ensure 2>&1
+Log "tunnel_supervisor ensure: $SupOut"
 
-# 1b) fredw-92/G36：gpu36 渲染道隧道（18288 → gpu36:0 / 18289 → gpu36:1 / 18290 → gpu36:2）——自带锁
-$G36Down = @(18288, 18289, 18290) | Where-Object { -not (Test-Port $_) }
-if ($G36Down) {
-  Start-Process -WindowStyle Hidden -FilePath $Bash -ArgumentList "`"$Root/ops/autostart/tunnel_gpu36.sh`""
-  Log "tunnel_gpu36 started (not listening: $($G36Down -join ','))"
-} else { Log "tunnel_gpu36 already up" }
-
-# 1c) WORKFLOW 11-01（NIGHT_PLAN W7，K-OPS-W05/W06）：基础设施看门狗——30 s 探测 6 条渲染道隧道，卡死就杀 ssh 让上面两个循环重连；
+# 1c) WORKFLOW 11-01（NIGHT_PLAN W7，K-OPS-W05/W06）：基础设施看门狗——30 s 探测 6 条渲染道隧道并报警；监管进程在岗时不修（NETFIX K-OPS-N01），监管进程心跳过期才兜底杀 ssh；
 #     空转 / night 卡住 / producer 心跳过期写 data\qa\alerts.jsonl（看板 :8810 显示）。serve 自己查 pid 防重复。
 $env:PYTHONUTF8 = "1"
 Start-Process -WindowStyle Hidden -WorkingDirectory $Root -FilePath (Join-Path $Root ".venv\Scripts\python.exe") `

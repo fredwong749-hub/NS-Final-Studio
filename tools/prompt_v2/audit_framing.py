@@ -45,7 +45,8 @@ def audit(run_dir: Path) -> dict:
             issues.append("提示词不是系统编译器输出（或作业图里的提示词与 prompt 字段不一致）")
         size = F.size_of(shot.img_prompt)
         if F.enabled(n, shot.index, None, project=project) and not F.lower_focus(shot.img_prompt) and F.lead(size):
-            head = re.sub(r"^(图\d+是[^。]*。)*", "", p)
+            from ns_agent.asset_refs import SINGLE_TURN_RE   # IMGFIX K-REN-704：身份脸句后的单人朝向句也属参考说明段
+            head = re.sub(r"^(图\d+是[^。]*。)*", "", SINGLE_TURN_RE.sub("", p, count=1))
             head = re.sub(r"^((?:[a-z][a-z0-9_]*|pose_[^，]*)，)*", "", head)
             if not head.startswith(F.lead(size)):
                 issues.append(f"首句不是“{F.lead(size)}”")

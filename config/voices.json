@@ -45,8 +45,14 @@
         "quote": "音色问题,采取qad类似模型给林晚,和其他男人的,我来不及筛选",
         "quote_date": "2026-11-01",
         "how": "tools/voice10/voice10.py autopick（项目方原话授权按检查自动选；声音页可一键换成其他候选）",
-        "reason": "4 个过检候选里按 回听字错率最低 → 削波最少 → 复刻音高最贴近设计 ref 选 c2：CER 0.182、时长 7.15 s、f0 230.8 Hz（150–400（female））、HNR 9.6 dB、峰值 0.4754；其余：c3 CER 0.182 f0 221.2；c4 CER 0.182 f0 200.0；c1 CER 0.182 f0 237.6",
-        "at": "2026-11-01T02:57:02"
+        "reason": "4 个过检候选里按 回听字错率最低 → 削波最少 → 复刻音高最贴近设计 ref 选 c2：CER 0.0、时长 7.15 s、f0 230.8 Hz（150–400（female））、HNR 9.6 dB、峰值 0.4754；其余：c3 CER 0.0 f0 221.2；c4 CER 0.0 f0 200.0；c1 CER 0.0 f0 237.6",
+        "at": "2026-11-01T02:57:02",
+        "reason_updated": {
+          "at": "2026-11-01",
+          "by": "VOICE10（总调度 fredw-2b 授权）",
+          "why": "CER 比对改为先统一数字写法（K-EDT-017，canon_numerals）后重跑 tools/voice10/voice10.py check + autopick --dry：4 个候选 CER 0.182 → 0.0，选择不变（仍 c2）",
+          "was": "4 个过检候选里按 回听字错率最低 → 削波最少 → 复刻音高最贴近设计 ref 选 c2：CER 0.182、时长 7.15 s、f0 230.8 Hz（150–400（female））、HNR 9.6 dB、峰值 0.4754；其余：c3 CER 0.182 f0 221.2；c4 CER 0.182 f0 200.0；c1 CER 0.182 f0 237.6"
+        }
       },
       "owner_selections": [
         {
@@ -262,7 +268,18 @@
       "qwen3_clone": "/root/work/fredw/hf/hub/models--Qwen--Qwen3-TTS-12Hz-1.7B-Base/snapshots/fd4b254389122332181a7c3db7f27e918eec64e3"
     },
     "timeout_s": 3600,
-    "seed": 20261031
+    "seed": 20261031,
+    "local_hosts": [
+      "gpu36",
+      "gpu33"
+    ],
+    "gpus_by_host": {
+      "gpu36": [
+        2
+      ],
+      "gpu33": []
+    },
+    "note_local": "VOICE10 11-01（总调度方案 b）：常驻合成时 OFFLINE_SELF 在 local_hosts 里就本机跑 venv_tts（gpu33 自装一套，tools/voice10/cosy_setup.sh；两台服务器刻意不互相登录）。gpus_by_host：gpu33 GPU2 坏卡、0/1/3 是出片道 → 空表 = CPU"
   },
   "groups": {},
   "line_overrides": {}

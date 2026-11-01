@@ -205,6 +205,7 @@
 | U11 | 闸门要“原话”才算项目方本人 | 项目方实际使用：几百个镜头逐个打字确认 | 项目方原话“那岂不是我敲几百次字？……系统是在我 login 的” → 改成登录会话认定身份、点选即生效 + 10 秒撤销 + 自动审计 | ❌（推翻 K-UI-019 的原话门） | K-UI-020 | tests/test_auth_uirsi.py |
 | U12 | 后端 takes 的 label 是给人看的 | 读 /api/candidates?ep=2 全部标签 + 画布截图 | 50 张无标签；17 张标签是“ASSETMASTER 已出（PRODUCER 接手登记）”（流水线内部登记记录），画布直接显示“暂定 · ASS…”；改为按段过滤后只剩“暂定”，“新配方”照常 | ❌（label 是流水线记录，前端必须过人话层） | K-UI-037 | docs/uirsi/rounds/r35.md |
 | U13 | 全站放大层按 cursor 猜“可不可点”够用 | UIAUDIT 真实鼠标点候选格（verify_uirsi_r35_r36.md P1-1）；r37 加 data-zoom-own 后复测 | 改前：点图出放大框、候选对比弹窗打不开；改后：真实鼠标 → 候选弹窗、Alt+点 → 大图、悬停 → 放大镜 | ❌（格子有自己的点击要显式声明，不能靠 cursor 猜） | K-UI-040 | docs/uirsi/rounds/r37.md |
+| U14 | 服务器上的图每次经隧道现取就行 | /api/gpu/thumb 取 ep05-S3_image_v9_00002_：改前经隧道 vs 改后先找本镜 takes.json 里登记的同名一版 | 改前隧道断时 30 s 没回、前端裂图；改后 0.09 s 用笔记本文件；笔记本没有的写占位字 | ❌（先用本机已登记的副本，隧道只是兜底） | K-UI-042 | docs/uirsi/rounds/r38.md |
 
 ## AM. 资产补全（ASSETMASTER，2026-11-01；证据 data/assetmaster/）
 
@@ -389,3 +390,11 @@
 | VR6 | Pika 没有 4 帧一顿 | 同上 J4 | Pika S2/S4/S5 J4 1.23–1.40、z 4.5–10.8；PDD z 0.35–1.35 | ❌ Pika 也有，靠后期去抖 | K-LOOP-004 | r1_base_cue/results.json |
 | VR7 | Pika 必然泛红 | ep01 五镜（无脸红词） | cheek_red 0.043–0.095 全过 | ❌ 无脸红词不泛红（与 C2 一致） | K-WRT-R01 | r1_base_cue/results.json |
 | VR8 | 景别退档出在视频 | 首帧脸高 vs 视频脸高 | 现行 55 条：比要求远 21，其中首帧本就远 17；视频比首帧再远 ≥1 档 11 | ◐ 主要在首帧 | K-REV-704、K-REN-701 | data/ab/video_rca/ff_size.json |
+| VR9 | 首帧不看镜头时 Pika 会转头看镜头 | ep01-S4 用“两人互看”首帧 A / B 出 Pika，抽 5 帧 × 2 脸 | 20 个样本 0 个看镜头 | ❌ 不会；开关在首帧 | K-REN-703 | data/ab/video_rca/r4_pika/faces_vid.jpg |
+| VR10 | 外套消失靠换 seed / 系统句 / 去 cropped 能消 | ep01-S3 同首帧，Pika ×5 + PDD ×1 | 6/6 消失再穿回 | ❌ | 写作草案（knowledge/inbox/2026-11-01_video_rca_writer.yaml，外套动作） | r1_base_cue、r4_pika、r7_outfit_text |
+| VR11 | 外套消失是“对衣服的动作”那一拍造成 | 只把“smooths the hem of her blazer”换成不碰衣服的动作 / 保留动作补 staying on | 换掉 0/2 消失；补 staying on 2/2 消失 | ✅ | 写作草案（knowledge/inbox/2026-11-01_video_rca_writer.yaml，外套动作） | r8_outfit_action、r9_outfit_keep |
+| VR12 | 正向双人句和实测句一样有效 | ep01-S5 / ep03-S4 × 3 seed（本机道） | 旧 8/10、正向 0–1/10、实测 0/12 | ✅ 改回正向句 | K-REN-703 | data/ab/video_rca/r5_img_twoshot/ |
+| VR13 | 正脸 + 侧脸双参考能去掉单人看镜头 | 单人 3 镜 × 2 seed（本机道） | 看镜头 3–4/6 → 3/6；sface 0.885 → 0.843；1 张多半个头 | ❌ | — | data/ab/video_rca/r2_dualref/ |
+| VR14 | 删画外造型分句能防 Pika 拉远 | 复用 r1 原编译稿同 seed，S4/S5/S6 | 脸高几乎不变，印样一致 | ❌ Pika 本来不拉远 | K-REN-701 | data/ab/video_rca/r3_hide_offframe/ |
+| VR15 | Pika 没有 4 帧一顿 | judder.py 量 r1 七条 + 冒烟 | 慢动作镜 J4 1.24–1.35（z 3.9–10.8，第 3 相位跳）；大动作镜 2 帧交替；去抖慢动作镜代价 ≤3%，快动作 −25% | ❌ 有，门槛 1.2 去抖 | K-REV-705 | data/ab/video_rca/r6_dejudder/ |
+

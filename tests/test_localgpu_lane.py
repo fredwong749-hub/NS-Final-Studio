@@ -125,6 +125,35 @@ def test_held_lane_is_not_auto_dispatched(cfg):
 
 
 # ---------------------------------------------------------------- ④ producer
+def test_yield_peer_raises_when_peer_does_not_yield(cfg, monkeypatch):
+    """轮流用卡：看图服务在但超时没让出 → 不提交（11-01 18:52 超时照交，两边挤进共享显存慢到不动）"""
+    from ns_render import comfy_client as CC
+    _set(cfg, yield_url="http://127.0.0.1:1/yield", yield_timeout_s=1)
+
+    def slow(*a, **k):
+        raise TimeoutError("timed out")
+    monkeypatch.setattr(CC.urllib.request, "urlopen", slow)
+    with pytest.raises(CC.ComfyUnavailable):
+        CC.ComfyClient("http://127.0.0.1:18388")._yield_peer()
+
+
+def test_yield_peer_passes_when_peer_not_running(cfg, monkeypatch):
+    import urllib.error
+    from ns_render import comfy_client as CC
+    _set(cfg, yield_url="http://127.0.0.1:1/yield")
+
+    def refused(*a, **k):
+        raise urllib.error.URLError(ConnectionRefusedError(10061, "refused"))
+    monkeypatch.setattr(CC.urllib.request, "urlopen", refused)
+    CC.ComfyClient("http://127.0.0.1:18388")._yield_peer()          # 看图服务没起 = 没占卡 → 照常提交
+    CC.ComfyClient("http://127.0.0.1:18188")._yield_peer()          # 没配 yield_url 的道不受影响
+
+
+def test_real_lane_has_yield_url():
+    real = json.loads((ROOT / "config/render_endpoints.json").read_text(encoding="utf-8"))
+    assert real["lanes"]["laptop:0"]["yield_url"].endswith("/yield")
+
+
 def test_producer_lane_table_includes_image_only_lanes(cfg, monkeypatch):
     sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
     import producer as PR

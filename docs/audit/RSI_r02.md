@@ -1,4 +1,4 @@
-# AUDIT · RSI r3 复核（AUDIT r02，2026-11-01 16:42–16:53，独立复核方 = AUDIT，交总调度 fredw-2b）
+# AUDIT · RSI r3 复核（AUDIT r02，2026-11-01 16:42–16:48，独立复核方 = AUDIT，交总调度 fredw-2b）
 
 复核对象：docs/rsi/r3_report.md（文件时间 16:41:28），以及 data/qa/iter_gate/ITERAUDIT_r3.md（16:42:04）。AUDIT 没有改产品文件。机读版：data/qa/audit/RSI_r02.json
 

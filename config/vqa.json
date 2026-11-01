@@ -10,17 +10,20 @@
     "host": "gpu36",
     "dir": "/root/work/fredw/vqa",
     "port": 8870,
+    "lan_url": "http://10.0.0.36:8870",
+    "_lan_url": "NETFIX 11-01（K-OPS-N03，总调度 fredw-2b 派）：gpu36 内网入口 tools/netfix/lan_proxy.py，只听 10.0.0.36、只认 10.0.0.33；gpu33 常驻 producer 用（client._lan_url）",
     "gpus": [0, 1],
     "comfy_ports": {"0": 8188, "1": 8189},
     "need_free_mib": 7000,
     "idle_unload_s": 90,
-    "max_new_tokens": 1800,
-    "subject_max_pixels": 1300000,
-    "ref_max_pixels": 360000,
-    "video_frames": 6
+    "max_new_tokens": 1000,
+    "subject_max_pixels": 600000,
+    "ref_max_pixels": 150000,
+    "video_frames": 6,
+    "_caliber": "口径 B（VQAGATE 11-01 22:5x 切，本机 4080 与 gpu36 同一套）：主图 0.6 MP、参考图 0.15 MP、输出 1000 token。gpu36 同一批 29 条对照原口径（1.3 MP / 0.36 MP / 1800）：阻断项逐项一致率 eye_contact 0.931、continuity_break 1.0、hair_mismatch 1.0、framing_mismatch 0.931、extra_person 0.966、underage_look 1.0、extra_limbs 0.828（两种口径下都不稳）；eye_contact 对人工标签召回 8/10 两边相同，误报 3/10 → 2/10。数据 data/vqa/vram_bench/compare_g36_orig_g36_Bfull.json；本机峰值 10.8–11.3 GB（GATE_CALIBRATION §7–8）"
   },
   "checks": {
-    "extra_limbs":        {"zh": "多 / 少手、手臂、腿（数量不对）",               "contract": "Q5", "video": "V6", "severity": "hard",  "blocking": true},
+    "extra_limbs":        {"zh": "多 / 少手、手臂、腿（数量不对）",               "contract": "Q5", "video": "V6", "severity": "hard",  "blocking": false},
     "hand_malformed":     {"zh": "手指畸形（多指、并指、断腕、手指融化）",         "contract": "Q5", "video": "V6", "severity": "hard",  "blocking": false},
     "body_anatomy":       {"zh": "身体结构错（扭颈、反关节、身体融合、比例离谱）", "contract": "Q5", "video": "V6", "severity": "hard",  "blocking": false},
     "extra_person":       {"zh": "多出人 / 同一角色出现两次（没写镜子倒影）/ 人数与镜头不符", "contract": "Q1", "video": "V1", "severity": "hard", "blocking": true},
@@ -43,7 +46,8 @@
     "low_resolution":     {"zh": "低清 / 糊 / 脸部不清（走 4K 放大或重出）",        "contract": "Q4", "video": "V9", "severity": "soft",  "blocking": false},
     "underage_look":      {"zh": "任何人物看起来未成年（HC-07）",                  "contract": "I10", "video": "V9", "severity": "hard", "blocking": true},
     "continuity_break":   {"zh": "跨镜不连贯：与同场上一镜首帧比，服装 / 外套有无 / 发色发型 / 场景 / 光线变了（原文没写换装换场）", "contract": "Q9", "video": "V8", "severity": "hard", "blocking": true},
-    "posed_stiff":        {"zh": "摆拍站桩：人物正对镜头站 / 坐着摆姿势，没有表演动作和交流对象", "contract": "Q9", "video": "V9", "severity": "soft", "blocking": false}
+    "posed_stiff":        {"zh": "摆拍站桩：人物正对镜头站 / 坐着摆姿势，没有表演动作和交流对象", "contract": "Q9", "video": "V9", "severity": "soft", "blocking": false},
+    "item_on_wrong_person": {"zh": "单品串人：一个角色的标志性单品（指甲 / 手套 / 首饰等，参考板或原文写明属于谁）出现在另一个角色身上", "contract": "Q2", "video": "V8", "severity": "hard", "blocking": false}
   },
   "video_checks": {
     "temporal_identity":  {"zh": "片内换脸 / 前后不像同一人",                       "contract": "V1", "severity": "hard", "blocking": false},
@@ -76,6 +80,7 @@
     "continuity_prev_shot": true,
     "auto_review_redo": true,
     "auto_review_by": "VQAGATE 本地看图闸门",
+    "_extra_limbs": "总调度 11-01 23:0x：extra_limbs 两口径一致率仅 0.828，单独拦会来回重出 → 看图这一项本身不拦；视频层改成 V6 手数规则命中且看图 extra_limbs = defect 两者同时成立才判多肢（score_clip.gate），只有一方命中只记录；等 V6 看图复核（多手 vs 衣物形变）做完再评估",
     "_blocking_v1": "16:5x 首版 blocking = eye_contact、continuity_break、hair_mismatch、framing_mismatch、extra_person（+ underage_look）：项目方点名的看镜头 / 不连贯 / 发色，总调度 G0 点名的景别，和极少误报的多人；outfit / accessory / plastic_doll / posed_stiff / extra_limbs 在 ep01–ep03 首扫命中率 30–60%、和总调度标签对不上，误报高，先写进证据不挡。18:1x 总调度定（和 WORKFLOW 对齐）：V6 阈值落定前多肢一律判不过 → extra_limbs 也拦（自相矛盾的“各5指 / 被遮挡”降为拿不准，contract.sanitize）。依据 data/vqa/gate_scan/rates.json、docs/vqa/GATE_CALIBRATION.md",
     "video_requires_q9": false,
     "gaze_mp": {"enabled": true, "A": 0.3, "T": 0.05, "P": 0.2, "down_max": 0.35, "blink_max": 0.6,

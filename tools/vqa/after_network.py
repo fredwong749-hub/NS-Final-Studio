@@ -119,7 +119,9 @@ def main(argv) -> int:
         say(f"第 {k + 1} 遍：看图没跑成 {len(err)} 镜", err[:10])
         if not err:
             break
-    run([PY, "tools/vqa/gate_scan.py", "apply"])
+    run([PY, "tools/vqa/gate_scan.py", "backfill"])      # 补判 Q9 untested 的新版本（含 laptop:0），通过的自动设为当前
+    if "--apply" in argv:                                  # 总调度 18:4x：现行旧首帧不 apply（新剧本全部重做），要时显式加 --apply
+        run([PY, "tools/vqa/gate_scan.py", "apply"])
     run([PY, "tools/vqa/gate_scan.py", "report"])
     open_video_gate(missing())
     if "--push" in argv:

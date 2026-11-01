@@ -256,8 +256,13 @@ def gate(s: dict, refs: dict) -> dict:
     want = SIZE_IDX.get(s.get("size_wanted") or "")
     if want is not None and s.get("face_h_med") is not None and abs(size_class(s["face_h_med"]) - want) >= 2:
         fails.append("景别不符")
-    if (s.get("v6") or {}).get("status") == "不通过":
+    # 总调度 11-01 23:0x：多肢要 V6 手数规则命中 + 看图 extra_limbs = defect 两者都成立才判不过；只有一方命中只记录
+    v6_hit = (s.get("v6") or {}).get("status") == "不通过"
+    vlm_limb = "extra_limbs" in ((s.get("vlm") or {}).get("defects") or [])
+    if v6_hit and vlm_limb:
         fails.append("多肢")
+    elif v6_hit or vlm_limb:
+        soft.append("多肢（只记录：" + ("V6 命中、看图没确认" if v6_hit else "看图命中、V6 没命中") + "）")
     if (s.get("v7") or {}).get("status") == "不通过":
         fails.append("口型不合")
     ac = s.get("acting") or {}
@@ -296,6 +301,8 @@ def vlm_fails(v: dict | None) -> tuple[list, list]:
         blk = (allc.get(d) or {}).get("blocking") and (enf or d == "underage_look")
         if d == "first_frame_stare":
             blk = enf and (allc.get("eye_contact") or {}).get("blocking")
+        if d == "extra_limbs":
+            continue                       # 多肢在 gate() 里和 V6 一起判（两者都命中才拦）
         (f if blk else so).append(lab if blk else f"看图：{lab}")
     return list(dict.fromkeys(f)), list(dict.fromkeys(so))
 

@@ -1,4 +1,4 @@
-"""VOICE10 试听页：series10 每位角色抽一句台词，用 config/voices.json 现配的音色合成，给总调度亲听。
+"""VOICE10 试听页：series10 每位角色抽一句台词，用 config/voices.json 现配的音色合成，供 AUDIT 技术复核（CER / 峰值 / 采样率 / 音色一致）和项目方自己选听。
 
 抽句规则（机械，不评价内容）：按剧本顺序，每个角色取第一句可读字数 ≥ 6 的对白（tts_text 清洗后），台词原文不改。
 合成走与成片同一条路径：ns_post.tts.voice_for + synthesize_cached（克隆音色经 RoutedTts → RemoteCloneBackend，gpu36）。
@@ -75,7 +75,7 @@ td,th{{border:1px solid #ccc;padding:6px;vertical-align:top}}small{{color:#666}}
 <h1>series10 音色试听（VOICE10）</h1>
 <p>每位角色按剧本顺序抽第一句可读字数 ≥ 6 的对白（机械规则，台词原文不改），用 config/voices.json 现配音色合成
 （与成片同一路径：synthesize_cached → gpu36 Fun-CosyVoice3 复刻）。回听 = 本机 SenseVoice。生成于 {meta['at']}，
-合成耗时 {synth_s} s（含缓存命中）。音色由系统按 L-078 自动选，本页只供亲听。</p>
+合成耗时 {synth_s} s（含缓存命中）。音色由系统按 L-078 自动选，本页供项目方选听；技术复核见 audition.json。</p>
 <table><tr><th>角色 / 音色</th><th>出处</th><th>台词（剧本原文清洗后）</th><th>试听</th><th>时长</th><th>回听 CER / ASR</th></tr>
 {tr}</table>"""
     (out / "index.html").write_text(page, encoding="utf-8")

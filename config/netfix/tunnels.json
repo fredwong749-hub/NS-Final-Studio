@@ -1,0 +1,106 @@
+{
+ "_doc": "NETFIX 11-01（总调度 fredw-2b 派）：笔记本端口转发统一由 tools/netfix/tunnel_supervisor.py 一个进程负责（规则 K-OPS-N01）。每台服务器一条 ssh，挂多个 -L；Git 自带的 ssh 用不了 ControlMaster（11-01 22:2x 实测 mux_client_request_session: Connection reset），所以不复用连接。跳板 TCP 不通时不起 ssh，跳板一恢复立刻重连（退避清零）。ops/autostart/tunnel.sh、tunnel_gpu36.sh 不再用（监管进程启动时会接管它们和孤儿 ssh）。",
+ "ssh_exe": "C:/Program Files/Git/usr/bin/ssh.exe",
+ "relay": {
+  "check": [
+   "sz194.instameta.org",
+   19422
+  ],
+  "proxy_cmd": "/usr/bin/ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -o Tag=nsnetfix-proxy -W %h:%p 194relay"
+ },
+ "ssh_opts": [
+  "-N",
+  "-o",
+  "BatchMode=yes",
+  "-o",
+  "ExitOnForwardFailure=yes",
+  "-o",
+  "ConnectTimeout=20",
+  "-o",
+  "ServerAliveInterval=10",
+  "-o",
+  "ServerAliveCountMax=3",
+  "-o",
+  "TCPKeepAlive=yes",
+  "-o",
+  "IPQoS=throughput"
+ ],
+ "hosts": {
+  "gpu33": {
+   "forwards": [
+    [
+     15180,
+     5180
+    ],
+    [
+     18098,
+     8098
+    ],
+    [
+     18099,
+     8099
+    ],
+    [
+     18188,
+     8188
+    ],
+    [
+     18189,
+     8189
+    ],
+    [
+     18191,
+     8191
+    ]
+   ],
+   "probe_http": [
+    18188,
+    18189,
+    18191
+   ]
+  },
+  "gpu36": {
+   "forwards": [
+    [
+     18288,
+     8188
+    ],
+    [
+     18289,
+     8189
+    ],
+    [
+     18290,
+     8190
+    ],
+    [
+     8871,
+     8870
+    ]
+   ],
+   "probe_http": [
+    18288,
+    18289,
+    18290
+   ],
+   "_8871": "11-01 23:0x 总调度定：VQAGATE 的看图隧道（原 tools/vqa/tunnel.ps1 单独一条 ssh）收编进 gpu36 主连接；vqa client 本机 8870 不在时先试 8871。不进 probe_http（看图服务没有 /system_stats）"
+  }
+ },
+ "tick_s": 5,
+ "probe_every_s": 15,
+ "probe_timeout_s": 20,
+ "hang_rounds": 3,
+ "listen_grace_s": 60,
+ "backoff_s": [
+  3,
+  6,
+  12,
+  24,
+  30
+ ],
+ "legacy_loops": [
+  "tunnel.sh",
+  "tunnel_gpu36.sh"
+ ],
+ "_probe_note": "22:33 实测：gpu36 卡满载 + 跳板 17–20 KB/s 时 /system_stats 要 6–8 s 才回，8 s 超时会误判卡死、把正在传图的隧道杀掉。改为 20 s 超时、连续 3 轮（第一轮失败后 5 s 复测）才判卡死；真断线主要靠 ssh 自己的 ServerAlive（10 s × 3）。"
+}

@@ -107,7 +107,7 @@ def user_for(link: str, inp: dict) -> str:
                 f"| 角色 | 角色id | 中文外貌句 | EN外貌短语 | VOICE声线短语 |\n{table_c}\n\n"
                 f"【本集场景（来自 storyline；全剧场景表里没有的，按 §2S 写进本集场景表，各格逐字照抄）】\n"
                 f"| 场景id | 名称 | 空间描述 | 时段 | 光线 | 固定陈设 |\n{table_s}\n\n"
-                f"【本集】intimate={o.intimate}；各镜时长之和目标 {sp.target_duration_s} 秒（±5，且 50–75，LK34-11）；镜数 6–{shot_cap(sp)}"
+                f"【本集】intimate={o.intimate}；各镜时长之和目标 {sp.target_duration_s} 秒（±5，且 60–120，LK34-11；D-SCR-08）；镜数 6–{shot_cap(sp)}"
                 f"（上限 = max(8, 说话轮次 {len(sp.speech('dialogue'))} + 独白段数 {len(sp.speech('voiceover'))})，LK34-09）。"
                 f"从 `## ep{sp.episode:02d}《{sp.title}》` 开始输出。"
                 + ("\n\n" + PF.block_for(chars, inp.get("looks")) if chars else ""))   # K-WRT-206 系统预拼片段

@@ -261,7 +261,7 @@ def test_image_jobs_dry_rebuild_uses_asset_plan():
     r = IJ.rebuild_first_frame_jobs(ROOT / "data/pipeline/runs/series10_v1", write=False)
     j = next(x for x in r["data"]["jobs"] if x["shot"] == "ep01-S3")
     assert j["refs"] == [s["file"] for s in j["asset_refs"]["slots"]]
-    assert j["prompt"].startswith("图1是林晚的脸部参考") and "lin_wan_qi_v1.safetensors" not in json.dumps(j["loras"])
+    assert __import__("ns_agent.asset_refs", fromlist=["x"]).SINGLE_TURN_RE.sub("", j["prompt"], count=1).startswith("图1是林晚的脸部参考")  # IMGFIX K-REN-704：单人朝向句在最前 and "lin_wan_qi_v1.safetensors" not in json.dumps(j["loras"])
     assert ST.preset_suffix() in j["prompt"] and not ST.banned_hits(j["prompt"])
     assert j["preflight"]["ok"], j["preflight"]
 
@@ -415,8 +415,14 @@ def test_ref2va_outfit_slot_registration():
     assert not preflight.look_file_registered({"path": crop, "sheet": "data/not_chosen.png"}, chosen)
 
 
-def test_q2_outer_item_presence_blocks():
-    """总调度 11-01：林晚造型 A 的短款西装外套没穿（外层探针 < outer_min）→ Q2 不过，不受上身区“只记录”影响"""
+def test_q2_outer_item_presence_blocks(monkeypatch):
+    """总调度 11-01：林晚造型 A 的短款西装外套没穿（外层探针 < outer_min）→ Q2 不过，不受上身区“只记录”影响。
+    23:0x 起外套探针临时只记录（outer_record_only=true，敞开外套 / 长发盖住误判，VQAGATE 重新标定中）：这里按“恢复阻断后”的口径测，
+    只记录口径另见 test_q2_outer_record_only_while_recalibrating"""
+    from ns_agent.gen_contract import postflight as _PF
+    real = _PF.cfg()
+    th = {**real.get("image_thresholds", {}), "Q2_outfit": {**real["image_thresholds"]["Q2_outfit"], "outer_record_only": False}}
+    monkeypatch.setattr(_PF, "cfg", lambda: {**real, "image_thresholds": th})
     rec = {"size": "中景", "subject": None, "zones": ["upper", "lower"], "primary": "lin_wan", "slots": [], "missing": [],
            "characters": [{"character": "lin_wan", "look": "A"}]}
     rows = postflight.outer_rows(rec)
@@ -431,6 +437,21 @@ def test_q2_outer_item_presence_blocks():
     assert q2(0.03).status == "fail" and "没穿" in q2(0.03).detail
     assert q2(0.80).status != "fail"
     assert "未测" in q2(None).detail
+
+
+def test_q2_outer_record_only_while_recalibrating():
+    """总调度 11-01 23:0x：外套探针重新标定期间只记录——低于线写进说明，不挡 Q2"""
+    rec = {"size": "中景", "subject": None, "zones": ["upper", "lower"], "primary": "lin_wan", "slots": [], "missing": [],
+           "characters": [{"character": "lin_wan", "look": "A"}]}
+    rows = postflight.outer_rows(rec)
+    if not rows:
+        pytest.skip("林晚造型 A 没登记外层单品")
+    if not postflight.cfg()["image_thresholds"]["Q2_outfit"].get("outer_record_only"):
+        pytest.skip("外套探针已恢复阻断")
+    req = {"asset_refs": rec, "cast": [{"name": "林晚", "presence": "在画"}]}
+    loc = {"Q2": [], "Q4": None, "Q7": None, "outer": [{**rows[0], "p": 0.03}]}
+    it = next(i for i in postflight.evaluate("x.png", req, local=loc).items if i.id == "Q2")
+    assert it.status != "fail"
 
 
 def test_q2_outer_per_character_faces_and_record_only():

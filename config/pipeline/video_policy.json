@@ -15,5 +15,16 @@
  "ref2va_note": "Ref2VA 兜底取消：没有通过首帧的镜等图片重做出首帧后再走 Pika（build_jobs route waiting_frame）",
  "revert": "pika_only.enabled 改 false 即恢复按配方 id 编译（仍保留 flush_risk 的 hold）",
  "scope_source_contains": "series10_v1",
- "_scope": "只对剧本来源路径含 series10_v1 的镜生效（ShotSpec.source.script_file）；旧 60 集项目与测试夹具按配方 id 照常编译"
+ "_scope": "只对剧本来源路径含 series10_v1 的镜生效（ShotSpec.source.script_file）；旧 60 集项目与测试夹具按配方 id 照常编译",
+ "dejudder": {
+  "enabled": true,
+  "recipes": [
+   "i2va_pika_flex"
+  ],
+  "j4_gt": 1.2,
+  "j4_z_ge": 3.0,
+  "always": false,
+  "_doc": "VIDEO-RCA r1（11-01 19:0x）：Pika 同首帧 4 条里 3 条 4 帧一顿（J4 1.23–1.40，z 4.5–10.8）→ 合成前按 K-LOOP-004 tools/dejudder.py 去抖；门槛缺省同 iterate_loop R-J4，VIDEO-RCA 量化后改这里。链路：原片 → _dj → _sr1080（tools/series10_video/upscale_preview.py），night.assembly_sources 优先放大版、其次去抖版",
+  "_j4_gt": "VIDEO-RCA r2（K-REV-705，11-01 20:3x）：1.25 → 1.2（S5 J4 1.237 原先漏掉）"
+ }
 }

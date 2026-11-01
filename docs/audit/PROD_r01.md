@@ -1,4 +1,4 @@
-# AUDIT · PROD 复核 r01（2026-11-01 16:46–16:50，独立复核方 = AUDIT，交总调度 fredw-2b）
+# AUDIT · PROD 复核 r01（2026-11-01 16:46–16:48，独立复核方 = AUDIT，交总调度 fredw-2b）
 
 复核对象：CHANGELOG 里 PROD 的交付记录（“16:0x–17:xx PROD fredw-2b 派”，按文件修改时间看，16:45 前后写入），NIGHT_PLAN W4 / W5。
 AUDIT 没有改产品文件，也没有点会改生产数据的操作。机读版：data/qa/audit/PROD_r01.json

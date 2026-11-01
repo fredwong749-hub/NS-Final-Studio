@@ -57,19 +57,19 @@ def _log(od: Path, msg: str):
 class Writer:
     """OpenAI 兼容；用途 script_write（K-WRT-108：默认关推理）。usage 累计到 self.usage"""
 
-    def __init__(self, timeout: int = 900, temperature: float = 0.3):
+    def __init__(self, timeout: int = 900, temperature: float = 0.3, max_tokens: int = 12000):
         from ns_api import llm_config
         rv = llm_config.resolve("script_write")
         self.model, self.key, self.base = rv["model"], rv["api_key"], rv["base_url"].rstrip("/")
         self.off = ((rv.get("reasoning_body") or {}).get("off") or {}) if (rv.get("reasoning_ok") or {}).get("off") else {}
-        self.timeout, self.temperature = timeout, temperature
+        self.timeout, self.temperature, self.max_tokens = timeout, temperature, max_tokens   # HOLLYWOOD：整集输出要 >12000
         self.usage = {"calls": 0, "failed": 0, "prompt_tokens": 0, "completion_tokens": 0, "model": self.model,
                       "provider": rv["id"], "purpose": "script_write"}
         if not self.key:
             raise SystemExit(f"缺少 {rv['name']} 的 API key")
 
     def __call__(self, system: str, user: str) -> str:
-        body = {"model": self.model, "temperature": self.temperature, "stream": False, "max_tokens": 12000,
+        body = {"model": self.model, "temperature": self.temperature, "stream": False, "max_tokens": self.max_tokens,
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}], **self.off}
         last = None
         for attempt in range(5):
@@ -82,6 +82,7 @@ class Writer:
                 u = data.get("usage") or {}
                 self.usage["prompt_tokens"] += int(u.get("prompt_tokens") or 0)
                 self.usage["completion_tokens"] += int(u.get("completion_tokens") or 0)
+                self.last_finish = data["choices"][0].get("finish_reason")
                 return data["choices"][0]["message"].get("content") or ""
             except (urllib.error.URLError, OSError, TimeoutError, KeyError, json.JSONDecodeError) as e:
                 last = e

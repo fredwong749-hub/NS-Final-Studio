@@ -62,7 +62,7 @@ prompt:
   # 系统层两句正向提示（H3 不认否定，RL-N1），放在第一个分拍时间码之前；只写物理 / 视线方向，不写剧情。出处 docs/acting/PERFORMANCE_RULES.md E1/E5/P1/P2
   open_motion_cue: "The movement is already under way in the very first frame and carries on continuously from the first second."
   eyeline_cue: "Each person's gaze rests on a scene partner or on an object within the scene, angled off to the side of the frame."
-  # VIDEO-RCA 11-01（K-REN-701）：描述句里删掉该景别看不见的下半身造型分句（同出图 framing.HIDE）；待 VRCA-E3 A/B 后定默认
+  # VIDEO-RCA 11-01（K-REN-701）：描述句里删掉该景别看不见的下半身造型分句（同出图 framing.HIDE）。VRCA-E3（r2）：Pika 下无效（S4/S5 同 seed 景别与印样不变），保持关
   hide_offframe_parts: false
 post:
   dejudder: true
@@ -128,7 +128,7 @@ provenance:
   seed: {src: "h3_comfy_expert §10 #13：换关键帧同 seed 不可比；joeygambino：每镜不同 seed", date: 2026-10-31, status: 确认}
   two_stage: {src: "两段式未实测（E1），默认关", date: 2026-10-31, status: 待验, experiment: E1}
   ref2va: {src: "Ref2VA 未实测（E5），默认关", date: 2026-10-31, status: 待验, experiment: E5}
-  prompt.hide_offframe_parts: {src: "VIDEO-RCA 11-01：近景 / 中景要求的镜头 62/111 条描述句带鞋 / 高跟 / 腿时退档，不带的 0/7（tools/video_rca/size_vs_prompt.py）；视频比首帧再远 ≥1 档 11/55（tools/video_rca/ff_size.py）；ep01-S4 两个 seed 都为“画出高跟”拉远 / 下摇（_thumbs/ep01-S4__v1/s2）", date: 2026-11-01, status: 待验, experiment: VRCA-E3}
+  prompt.hide_offframe_parts: {src: "VIDEO-RCA 11-01：近景 / 中景要求的镜头 62/111 条描述句带鞋 / 高跟 / 腿时退档，不带的 0/7（tools/video_rca/size_vs_prompt.py）；视频比首帧再远 ≥1 档 11/55（tools/video_rca/ff_size.py）；ep01-S4 两个 seed 都为“画出高跟”拉远 / 下摇（_thumbs/ep01-S4__v1/s2）", date: 2026-11-01, status: 待验, experiment: VRCA-E3, note: "r2 Pika 同 seed 删 / 不删：S4 脸高 0.122/0.124、S5 0.173/0.169，印样一致（data/ab/video_rca/r3_hide_offframe/）"}
   prompt.format: {src: "官方 base-en（h3-prompt-writing/references/base-en.txt）", date: 2026-10-31, status: 确认}
   prompt.style_lead: {src: "lint H3-A8；base-en §4.1", date: 2026-10-31, status: 确认}
   prompt.require_soundscape: {src: "MiniMax HF #76 'It does NOT do silence well'；base-en §4.6", date: 2026-10-31, status: 确认}

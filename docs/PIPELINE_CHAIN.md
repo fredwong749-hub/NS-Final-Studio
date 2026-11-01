@@ -113,7 +113,7 @@ ARCH 的 Autopilot（`tools/autopilot/run.py`）从 P0 开始跑，上游部分�
 - **必须**：
   - title、logline、intimate 逐字照抄 storyline（LK12-01）；
   - 不新增人物和场景（LK12-02）；
-  - 节拍秒数合计 = 目标时长 ±5，目标在 50–75 秒之间（EO-04）；
+  - 节拍秒数合计 = 目标时长 ±5，目标在 60–120 秒之间（EO-04；D-SCR-08，项目方 11-01）；
   - carry_in 接上一集的 carry_out（LK12-04，跨集衔接）。
 - **UI**：待建（节拍表）。
 - **状态：已定**。

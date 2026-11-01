@@ -1,0 +1,51 @@
+# NETFIX 11-01（总调度 fredw-2b 派；项目方 22:1x 原话：“gpu连接是大问题,现在全部修复连接问题”）
+rules:
+  - id: K-OPS-N01
+    domain: ops
+    link: [P5-P6, P7-P8]
+    title: 笔记本全部端口转发只由一个监管进程负责（每台服务器一条 ssh 挂多个 -L，指数退避，跳板恢复立刻重连）；看门狗只探测和报警
+    when: 笔记本经跳板 194relay 连 gpu33 / gpu36 的任何端口转发（ComfyUI 出图 / 视频道、画布桥、信箱）
+    then: tools/netfix/tunnel_supervisor.py（config/netfix/tunnels.json）单实例常驻；ssh 带 ConnectTimeout / ServerAlive（ProxyCommand 那一跳也带）和 Tag=nsnetfix-<host>，监管进程重启按 Tag 认领不打断；跳板 TCP 不通不起 ssh，恢复即退避清零；探测全部超时连续 3 轮（20 s 超时）才判卡死，个别口“对端拒绝”只记 remote_down 不杀；占口但不带 Tag 的 ssh、旧 tunnel*.sh 循环一律接管（杀掉）；不许再手动起 -L ssh、不许另写重连循环。保活 = 计划任务 NS-Studio-TunnelSupervisor 每 5 分钟 ensure + laptop_autostart.ps1 ensure。infra_watchdog 在监管心跳 ≤ 90 s 时不修，过期报 A-SUPERVISOR 并兜底。Git for Windows 的 ssh 不支持 ControlMaster（11-01 实测 mux reset），不要用
+    check: tests/test_netfix.py
+    evidence:
+      - {src: data/netfix/inject/20261101_224035.json, note: "注入（定稿参数 20 s×3 轮）：杀 ssh 18.4 s、挂起 ssh 98 s、孤儿占口 22.4 s、跳板断 90 s 期间不起 ssh、恢复后 14.0 s 6/6（验收 ≤ 60 s）；前一版参数 20261101_222625 同为 14 s"}
+      - {src: docs/overnight/OFFLINE_20261101.md, note: "22:08 gpu36 三条全断、跳板通：循环不在，看门狗只杀 ssh 永远修不好"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-N03
+    domain: ops
+    link: [P7-P8]
+    title: gpu33 看图走 gpu36 内网入口 10.0.0.36:8870（只听内网、只认 10.0.0.33），不经跳板、不配两台服务器 ssh 互信
+    when: 服务器常驻 producer 在 gpu33 上需要 Q9 本地看图
+    then: gpu36 上 /root/work/fredw/netfix/lan_proxy.py 只监听 10.0.0.36:8870、来源白名单 10.0.0.33、转 127.0.0.1:8870（看图服务本身仍只听 127.0.0.1，不重启）；ns_agent.vqa.client._lan_url 只在服务器（OFFLINE_SELF）上、只认 config/vqa.json model.lan_url 的 10. 内网地址；保活挂 resident_sync health 拍（bash lan_proxy.sh，幂等），不用 crontab；iptables 不加（gpu36 只有一块内网网卡 eno3 10.0.0.36/21，总调度 22:3x 定）
+    check: tests/test_netfix.py::test_vqa_lan_url_only_on_servers
+    evidence:
+      - {src: tools/netfix/lan_proxy.py, note: "11-01 22:2x gpu33 curl 10.0.0.36:8870/health HTTP 200 0.05 s；client 真实请求回 '1'（37.4 s）；gpu36 自己连内网地址被 DENY"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-N04
+    domain: ops
+    link: [P5-P6, P7-P8]
+    title: 每台机器只派本机的出图道；谁派哪些镜由 config/netfix/partition.json ∩ ready_episodes.json 算（tools/netfix/dispatch.py），不手写 control.only
+    when: 出图派单（服务器常驻 producer + 笔记本 producer）
+    then: only = partition.images[本机] ∩ data/autopilot/ready_episodes.json 的镜（交集空 = ["__none__"]，绝不留空——空 only 等于全派）；hold_lanes = 别机的道（服务器上也挂 laptop:0）；服务器 paused 跟随笔记本 control.json 全局暂停（快照 data/netfix/laptop_ctrl.json，缺快照按暂停）；分区按集互斥（dispatch.py check），视频 laptop 不分；跨机接手（work stealing）没有共享锁不做，见 dispatch.steal_plan
+    check: tests/test_netfix.py::test_no_two_producers_share_a_shot_or_lane
+    evidence:
+      - {src: config/netfix/partition.json, note: "总调度 22:2x：gpu33=[1,3,5,7]、gpu36=[2,4,6,8,9]、laptop=[10]（离线那次 3 对 7 不均；笔记本 4080 也要跑）"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-01
+  - id: K-OPS-N05
+    domain: ops
+    link: [P7-P8]
+    title: 连接 / 自主生产状态只有一个数据源 data/netfix/net_status.json（监管进程每 5 s 写），界面和看门狗读它，不在请求里 ssh
+    when: 界面显示跳板 / 隧道 / 服务器自主生产状态（UIRSI r38）
+    then: 字段见 tunnel_supervisor.STATUS_DOC（relay.up / down_since_t、hosts.<h>.state / ports / restarts、tunnels_up / total、servers.<h>.last_pull_t / autonomous）；t 超过 90 s 没更新 = 监管进程不在
+    check: tests/test_netfix.py::test_status_doc_fields
+    evidence:
+      - {src: tools/netfix/tunnel_supervisor.py, note: "STATUS_DOC"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-01

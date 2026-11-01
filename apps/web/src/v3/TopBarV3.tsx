@@ -19,6 +19,7 @@ import { openMaterials } from "./MaterialsDrawer.helpers";
 import { sbUi } from "./StoryboardDetails.helpers";
 import type { V3Page } from "./TopBarV3.helpers";
 import { LiveIndicator } from "./LiveBridge";
+import { InfraChip } from "./InfraStatus";
 import { ProduceButton } from "./EpisodeProduce"; // fredw-92/EB 整集出片
 import { useProduceView } from "./EpisodeProduce.helpers";
 import { Brand } from "../ds/Brand"; // momoso 标识（项目方挑定候选 2 · 双环）
@@ -353,6 +354,8 @@ export function TopBarV3({ page }: { page: V3Page | null }) {
       </ol>
       <div className="v3-top-r">
       <LiveIndicator />
+      {/* UIRSI r38（项目方 22:1x：“uiux加个实时连接状态”）：跳板 / 6 条连接 / 服务器常驻 / 本机 / 自动重连，一个胶囊点开看 */}
+      <InfraChip />
       <GpuButton labels="short" className="v3-gpu" />
       {/* GPUVIEW 11-01（项目方：“顶部我需要一个rendering任务tasks…”）：原“● 生成中 · 排队 · 失败”胶囊换成“渲染任务”中心
           （全系统：各 agent 的 ComfyUI 任务 + 画布任务 + 写作 + 计划中的镜头）；原胶囊的整集进度 / 出图未连上 / 中断写在按钮尾巴和悬停里，

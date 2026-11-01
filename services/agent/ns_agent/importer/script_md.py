@@ -36,8 +36,8 @@ H3_LABELS = {"H3提示词", "H3 提示词"}
 H3_CHECK_LABELS = {"H3校验", "H3 校验"}   # 如 **H3校验**：暂缓（露骨内容）→ Shot.h3_check（原文）
 SHOTS_PER_EPISODE = (6, 8)                   # 下限 6；上限 = shot_cap：max(8, 说话轮次 + 独白段数, ⌈总时长 ÷ 6⌉)（K1 + G29）
 MIN_SHOT_SECONDS, MAX_SHOT_SECONDS = 4, 15   # 镜头时长（**时长**：N秒；K4：MiniMax-H3 官方 4–15 整数）
-EPISODE_SECONDS = (50, 75)                   # 一集总时长通过范围（K1：75–90 只提示，>90 / <50 不过）
-EPISODE_SECONDS_WARN = 90
+EPISODE_SECONDS = (60, 120)                  # 一集总时长通过范围（项目方 11-01 21:4x：“改成 60–120 秒”，L-092 / D-SCR-08）；⤴ 取代 K1 的 50–75（75–90 只提示）
+EPISODE_SECONDS_WARN = 120                   # 不再有“只提示”带：60–120 之外一律不过
 POSE_TRIGGER_RE = re.compile(r"pose_[A-Za-z0-9_]+")
 EPISODE_COUNT = 60
 
@@ -759,7 +759,7 @@ def _validate(episodes: list[Episode], warnings: list[str]):
             total = sum(s.duration for s in ep.shots)
             if not EPISODE_SECONDS[0] <= total <= EPISODE_SECONDS[1]:
                 warnings.append(f"ep{ep.number:02d} 总时长 {total} 秒，超出 {EPISODE_SECONDS[0]}–{EPISODE_SECONDS[1]} 秒"
-                                + ("（≤90 只提示）" if EPISODE_SECONDS[1] < total <= EPISODE_SECONDS_WARN else ""))
+                                + ("（只提示）" if EPISODE_SECONDS[1] < total <= EPISODE_SECONDS_WARN else ""))
 
 
 def _scene_warnings(g: ScriptGlobals, episodes: list[Episode], problems: list[dict], warnings: list[str]) -> None:

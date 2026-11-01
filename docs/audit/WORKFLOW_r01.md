@@ -1,4 +1,4 @@
-# AUDIT · WORKFLOW 复核 r01（2026-11-01 18:06–18:18，独立复核方 = AUDIT，交总调度 fredw-2b）
+# AUDIT · WORKFLOW 复核 r01（2026-11-01 18:06–18:07，独立复核方 = AUDIT，交总调度 fredw-2b）
 
 复核对象：CHANGELOG “16:0x–17:xx WORKFLOW”（①–⑧）、data/pipeline/runs/series10_v1/video/recipe_choice.json（L-088）、config/pipeline/video_policy.json、data/qa/infra_inject.jsonl、data/qa/alerts.jsonl、data/autopilot/pika_smoke/、tools/autopilot/resident_sync.py（18:06 还在改）。对照 NIGHT_PLAN 的 W3 和 W7。机读版：data/qa/audit/WORKFLOW_r01.json
 

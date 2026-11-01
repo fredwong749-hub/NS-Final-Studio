@@ -183,3 +183,53 @@ def test_kokoro_model_only_needed_for_kokoro_speakers(tmp_path):
     import pytest
     with pytest.raises(TtsUnavailable):
         kb.synthesize([("你好", Voice("old", 3), tmp_path / "a.wav")])
+
+
+def test_local_hosts_and_gpus_by_host(monkeypatch):
+    """总调度方案 (b)：gpu33 自装 CosyVoice3、本机合成走 CPU（GPU2 坏卡、0/1/3 出片道）；gpu36 仍用 GPU2。"""
+    from ns_post import tts
+    rt = VOICES["remote_tts"]
+    assert set(rt["local_hosts"]) == {"gpu33", "gpu36"} and rt["gpus_by_host"]["gpu33"] == []
+    monkeypatch.delenv("NS_TTS_REMOTE_LOCAL", raising=False)
+    monkeypatch.setenv("OFFLINE_SELF", "gpu33")
+    assert tts.remote_is_local(rt) and tts.remote_gpus(rt) == []
+    monkeypatch.setenv("OFFLINE_SELF", "gpu36")
+    assert tts.remote_is_local(rt) and tts.remote_gpus(rt) == [2]
+    monkeypatch.delenv("OFFLINE_SELF")
+    assert not tts.remote_is_local(rt) and tts.remote_gpus(rt) == list(rt["gpus"])   # 笔记本：ssh gpu36
+
+
+def test_cosy_setup_dry_run(tmp_path):
+    """cosy_setup.sh install 按锁文件装、可重复执行；缺锁文件直接停（不瞎装）。"""
+    import os
+    import shutil
+    import subprocess
+    import pytest
+    bash = shutil.which("bash")
+    if not bash:
+        pytest.skip("no bash")
+    lock, binp = tmp_path / "lock", tmp_path / "bin"
+    lock.mkdir()
+    binp.mkdir()
+    (lock / "python_version.txt").write_text("3.12.4\n")
+    (lock / "venv_freeze.txt").write_text("torch==2.3.1+cu121\nfoo @ file:///x\nnumpy==1.26.4\n")
+    (lock / "overlay_freeze.txt").write_text("transformers==4.51.3\n")
+    (lock / "cosy_commit.txt").write_text("abc123\n")
+    stub = binp / "python3.12"
+    stub.write_text("#!/bin/sh\n")
+    stub.chmod(0o755)
+    script = (ROOT / "tools" / "voice10" / "cosy_setup.sh").as_posix()
+
+    def sh(lockdir):
+        env = {**os.environ, "DRY": "1", "COSY_BASE": (tmp_path / "base").as_posix(),
+               "PATH": binp.as_posix() + os.pathsep + os.environ.get("PATH", "")}
+        return subprocess.run([bash, script, "install", Path(lockdir).as_posix()], capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", env=env, timeout=60)
+    r = sh(lock)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = r.stdout
+    assert "whl/cu121" in out and "transformers==4.51.3" in out and "git checkout -q abc123" in out
+    assert "29e01c4e8d000f4bcd70751be16fa94bf3d85a18" in out and "hf-mirror.com" in out
+    assert "file:///x" not in out
+    r2 = sh(tmp_path / "nolock")
+    assert r2.returncode == 1 and "缺锁文件" in r2.stdout

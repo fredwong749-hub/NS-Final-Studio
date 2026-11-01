@@ -452,7 +452,7 @@ rules:
      writer_text: "提纲给了逐集一句话时，owner_line 逐字照抄那句；logline 在它基础上展开，不改变它说的事"}
   - {id: LK01-03, link: P0-P1, node: P1, level: warn, check: check_link_p0_p1, confidence: medium, evidence: "本契约",
      writer_text: "title 照抄提纲剧名"}
-  - {id: LK01-04, link: P0-P1, node: P1, level: warn, check: check_link_p0_p1, confidence: medium, evidence: "script_chat_rules.md §2 每集 50–75 秒",
+  - {id: LK01-04, link: P0-P1, node: P1, level: warn, check: check_link_p0_p1, confidence: medium, evidence: "script_chat_rules.md §2 每集 60–120 秒（D-SCR-08）",
      writer_text: "（系统用）提纲的每集秒数与写作规则不同时提示"}
   # P2 单集大纲
   - {id: EO-01, link: P1-P2, node: P2, level: block, check: check_outline, confidence: high, evidence: "本契约 nsfs.episode_outline/1",
@@ -461,7 +461,7 @@ rules:
      writer_text: "节拍 id 写 B1、B2…连续编号"}
   - {id: EO-03, link: P1-P2, node: P2, level: warn, check: check_outline, confidence: medium, evidence: "script_chat_rules.md §2 镜数 6–8+；官方 8-beat spine",
      writer_text: "一集 3–12 个节拍，每拍以后落成 1–3 个镜头"}
-  - {id: EO-04, link: P1-P2, node: P2, level: block, check: check_outline, confidence: high, evidence: "script_chat_rules.md §2 各镜 N 之和 50–75 秒",
+  - {id: EO-04, link: P1-P2, node: P2, level: block, check: check_outline, confidence: high, evidence: "script_chat_rules.md §2 各镜 N 之和 60–120 秒（D-SCR-08）",
      writer_text: "target_duration_s 在 50–75；各节拍 est_s 合计与它相差 ≤5 秒"}
   - {id: EO-05, link: P1-P2, node: P2, level: block, check: check_outline, confidence: high, evidence: "本契约",
      writer_text: "每拍 scene_id 在本集 scenes 里，characters 在本集 characters 里"}

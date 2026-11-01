@@ -1,0 +1,43 @@
+# HOLLYWOOD（总调度 fredw-2b 派，2026-11-01）：项目方 11-01 ~20:00 贴入“好莱坞编剧 + 短剧视频提示词工程师”模板，接进写作链路（试点 ep01，不导入）。
+# 只讲接入点、格式与不变量；重写和打分都由写作网关完成（Claude 不写、不评内容，L-009）。
+rules:
+  - id: K-WRT-H01
+    check: [tests/test_hollywood.py]
+    domain: writer
+    link: P3-P4
+    title: 好莱坞模板接入点：写作方提示词 = 模板原文 + 系统接入说明 + Pika 能力边界 + 现行写作规则
+    when: 用模板重写某集镜头提示词（tools/script_rsi/hollywood.py run）
+    then: 写作调用的 system = config/prompts/hollywood_writer.md（模板原文照抄、注明项目方 11-01）+ hollywood_pika_reference.md（VIDEO-RCA 实测）+ qwen_writer_system_prompt + writer_knowledge；输入 = config 盘点表（第一步，系统产出）+ 集头 + 人物卡 + 原稿镜头；视频提示词 = H3提示词（Pika），中文附后 = motion，图片 = img，人物一致性描述由系统按人物卡逐字附
+    evidence:
+      - {src: config/prompts/hollywood_writer.md, note: 项目方 11-01 ~20:00 模板原文（总调度 fredw-2b 转）}
+      - {src: docs/video_rca/RCA_r1.md §1, note: Pika 4 帧一顿 / 外套形变 / 景别由首帧决定}
+    confidence: high
+    status: 待验
+    date: 2026-11-01
+  - id: K-WRT-H02
+    check: [tests/test_hollywood.py]
+    domain: writer
+    link: P3-P4
+    title: 模板 RSI：两个独立评审调用逐项平均打分；目标百分制 ≥95（≥47.5/50 且无 <4 项），最多 8 轮，选总分最高且过不变量的版本，未达 95 不导入
+    when: hollywood.py 每轮生成后
+    then: 评审 system = config/prompts/hollywood_judge.md（量表原文）+ Pika 参考；第 2、3 轮只发不及格维度和涉及镜号，系统只替换被改的镜（≥4 分项原样保留）；⤴ r3（项目方 11-01 22:1x“rsi HOLLYWOOD 达到95分,继续迭代”取代“最多 3 轮”）：返修发 <5 分项（评审对每个 <5 项写镜号 + 改到 5 分的原因），允许拆 / 合镜；到 95 或连续两轮有分数的轮无提升即停（作废轮不计，连续 3 轮作废停）；选中 = 通过不变量的轮次里总分最高者；未达 95 不导入
+    params: {pass_score: 4, max_rounds: 8, target_sum: 47.5, fix_below: 5, judges_per_round: 2}
+    evidence:
+      - {src: config/prompts/hollywood_judge.md, note: 项目方 11-01 模板第三步原文}
+    confidence: high
+    status: 待验
+    date: 2026-11-01
+  - id: K-WRT-H03
+    check: [tests/test_hollywood.py]
+    domain: writer
+    link: P3-P4
+    title: 模板改写不变量（代码校验，不满足整轮作废）
+    when: hollywood.py gate()
+    then: I1 台词 / 🎙 逐字同序；I2 集头逐字（剧情 / 人物卡 / 造型）；I3 场景 id、出场人物不新增；I4 6 ≤ 镜数 ≤ shot_cap（D-SCR-06）；I5 集时长 60–120 秒（项目方 11-01 21:4x，D-SCR-08；⤴ 旧 60–75），系统按 6 秒一镜算好镜数与每镜秒数给写作方；I6 p4_adapter lint 每个码不比原稿多；I7 P4 阻断 = 0（集头“造型｜”行上的人物卡冻结项单列，不算）；I8 只报告：QW-W11（K-WRT-702）要求降到 0；人物卡唯一例外 ep01 林晚“深灰西装裙→深灰铅笔裙”（项目方 21:4x，D-SCR-08b，系统逐字替换）。SS-M2 分拍末段时间码机械补到镜长；集级 QW-W5 按镜号转 --force-shot。只差 I6 / I7 时先用 qwen_repair_loop 按变多的 QW 码逐镜返修再复检
+    params: {dur_window: [60, 120], shot_s: 6, zero_codes: [QW-W11]}
+    evidence:
+      - {src: tools/validate_qwen_script.py QW-E3, note: 现行集长 50–75 秒}
+      - {src: services/agent/ns_agent/importer/script_md.py shot_cap, note: D-SCR-06}
+    confidence: high
+    status: 待验
+    date: 2026-11-01

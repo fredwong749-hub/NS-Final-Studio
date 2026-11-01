@@ -83,3 +83,25 @@ def test_pending_redo_rule():
     new = {"active": {"image": 3}, "takes": [{"stage": "image", "n": 3, "created_at": "2026-11-01T19:00:00"}]}
     assert DP.pending_redo(old, at).startswith("当前首帧 #2")
     assert DP.pending_redo(new, at) is None                      # 新首帧设为当前 → 自动转回比对
+
+
+def test_pending_overdue_and_alert(tmp_path):
+    import time
+    import data_parity as DP
+    cfg = tmp_path / "dp.json"
+    cfg.write_text('{"pending_redo_max_hours": 12}', encoding="utf-8")
+    assert DP.pending_max_hours(cfg) == 12 and DP.pending_max_hours(tmp_path / "none.json") == 12
+    at = "2026-11-01T06:00:00"
+    t0 = time.mktime(time.strptime(at, "%Y-%m-%dT%H:%M:%S"))
+    pend = {"ep01-S5": "x", "ep02-S6": "y"}
+    assert DP.overdue_pending(pend, at, 12, now=t0 + 11 * 3600)[0] == []           # 未到 12 小时
+    over, age = DP.overdue_pending(pend, at, 12, now=t0 + 13 * 3600)
+    assert over == ["ep01-S5", "ep02-S6"] and age == 13.0
+    al = tmp_path / "alerts.jsonl"
+    assert DP.sync_pending_alert(over, age, 12, al) == "open"
+    assert DP.sync_pending_alert(over, age, 12, al) is None                          # 已开着不重复写
+    assert DP.sync_pending_alert([], 0, 12, al) == "closed"                           # 清零自动关
+    rows = [json.loads(x) for x in al.read_text(encoding="utf-8").splitlines()]
+    assert [r["state"] for r in rows] == ["open", "closed"]
+    assert rows[0]["id"] == DP.PENDING_ALERT_ID and rows[0]["by"] == "data_parity" and rows[0]["shots"] == over
+    assert {"ts", "t", "id", "state", "level", "msg", "by"} <= set(rows[0])        # 与 infra_watchdog 同格式

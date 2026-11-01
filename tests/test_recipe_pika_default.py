@@ -76,3 +76,43 @@ def test_vidgen_dispatch_rechecks_policy():
     assert "Pika" in VG.policy_hold(shot["variants"]["b24"])
     shot["variants"]["v1"]["recipe"] = "i2va_pika_flex"
     assert VG.next_variant(shot, rec) == "v1"
+
+
+def test_flush_words_cover_redden_and_cn_variants():
+    """VIDEO-RCA r1：ep05-S4 写 redden 原先拦不住；子串匹配，补 redden / reddening 与中文变体"""
+    reg = R.load()
+    words = reg.overlays["flush_risk"]["words"]
+    for w in ("redden", "reddening", "泛红", "脸红", "涨红", "羞红", "发红"):
+        assert w in words
+
+
+def test_pika_dejudder_wired_before_upscale(monkeypatch, tmp_path):
+    """VIDEO-RCA r1：Pika 片 J4 超门槛（或没打分）→ 合成前去抖（K-LOOP-004 tools/dejudder.py），放大版从去抖片做"""
+    sys.path.insert(0, str(ROOT / "tools/series10_video"))
+    import upscale_preview as U
+    monkeypatch.setattr(U, "VID", tmp_path)
+    (tmp_path / "scores").mkdir()
+    cfg = {"enabled": True, "recipes": ["i2va_pika_flex"], "j4_gt": 1.25, "j4_z_ge": 3.0, "always": False}
+    (tmp_path / "scores/ep01-S3__v1.json").write_text(json.dumps({"J4": 1.33, "J4_z": 6.2}), encoding="utf-8")
+    (tmp_path / "scores/ep01-S4__v1.json").write_text(json.dumps({"J4": 1.05, "J4_z": 0.4}), encoding="utf-8")
+    assert U.needs_dejudder({"shot": "ep01-S3", "chosen": "v1", "recipe": "i2va_pika_flex"}, cfg)[0] is True
+    assert U.needs_dejudder({"shot": "ep01-S4", "chosen": "v1", "recipe": "i2va_pika_flex"}, cfg)[0] is False
+    assert U.needs_dejudder({"shot": "ep01-S9", "chosen": "v1", "recipe": "i2va_pika_flex"}, cfg)[0] is True   # 未测 ≠ 通过
+    assert U.needs_dejudder({"shot": "ep01-S3", "chosen": "v1", "recipe": "i2va_pdd2"}, cfg)[0] is False
+    assert U.dejudder_cfg()["recipes"] == ["i2va_pika_flex"]
+
+
+def test_vidgen_holds_rl_e3_prompt_and_pattern_parity():
+    """AUDIT 20:15（K-OPS-Q24 扩到提示词）：16:56 旧编译稿里系统锚点句带 facing the camera 的 Pika 变体，派单时也要 hold"""
+    sys.path.insert(0, str(ROOT / "tools/series10_video"))
+    import vidgen as VG
+    from ns_recipes import lint as LN
+    assert VG.PROMPT_FACING_RE.pattern == LN.SYS_CAMERA_FACING_RE.pattern
+    bad = {"status": "ready", "recipe": "i2va_pika_flex", "variant": "v1",
+           "prompt": "x. The frame keeps 林晚 at center facing the camera. y"}
+    ok = dict(bad, prompt="x. The frame keeps 林晚 at center, angled off to the side. y", variant="s2")
+    assert "RL-E3" in VG.prompt_hold(bad) and VG.prompt_hold(ok) is None
+    assert LN.system_facing_camera(bad["prompt"]) and LN.system_facing_camera(ok["prompt"]) is None
+    shot = {"variants": {"v1": bad, "s2": ok}}
+    assert VG.next_variant(shot, {"renders": []}) is None or VG.next_variant(shot, {"renders": []}) == "s2"
+    assert VG.policy_ok(bad) is False and VG.policy_ok(ok) is True

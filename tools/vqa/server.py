@@ -84,11 +84,26 @@ SRC = BASE / "models" / "Qwen3-VL-8B-Instruct"
 QDIR = BASE / "models" / "Qwen3-VL-8B-Instruct-nf4"
 CACHE = BASE / "cache"
 HB = Path(os.environ.get("VQA_HB", "/root/work/fredw/gpu_heartbeats/VQA-server.json"))
-FORCE_GPU = os.environ.get("VQA_FORCE_GPU")      # 只给标定 / 测试：指定卡，仍然遵守队列空闲
+FORCE_GPU = os.environ.get("VQA_FORCE_GPU")
+ATTN = os.environ.get("VQA_ATTN", "")                    # VQAGATE 11-01：注意力实现（sdpa / eager / 空 = transformers 默认）
+# VQAGATE 11-01（本机 4080 12 GB）：服务端兜底上限——主图 / 参考图像素、输出 token 不超过这里（0 = 不限，按请求）
+CAP_SUBJECT = int(os.environ.get("VQA_CAP_SUBJECT_PX", "0") or 0)
+CAP_REF = int(os.environ.get("VQA_CAP_REF_PX", "0") or 0)
+CAP_TOKENS = int(os.environ.get("VQA_CAP_TOKENS", "0") or 0)      # 只给标定 / 测试：指定卡，仍然遵守队列空闲
 
 STATE = {"loaded": False, "gpu": None, "queue": 0, "served": 0, "last_error": None, "started": time.time(),
          "last_job": None, "load_s": None, "peak_mib": None, "waiting_since": None, "why_waiting": None}
 JOBS: "queue.Queue[tuple[dict, queue.Queue]]" = queue.Queue()
+# VQAGATE 11-01（总调度批）：让道模式下给看图留最短窗口——出图连续排队时看图会一直饿着（19:34–19:50 实测一条没跑成）。
+# 出图方每次 /yield 计一张；满足任一 → 开窗口：出图每满 WIN_N 张、最老看图请求等满 WIN_WAIT_S、积压 ≥ WIN_BACKLOG。
+# 窗口内 /yield 不立刻让，等窗口结束或积压清空（≤ WIN_MAX_S，小于出图方 yield_timeout_s 300 s）再卸载放行。WIN_N=0 关掉。
+WIN_N = int(os.environ.get("VQA_WIN_N", "6"))
+WIN_WAIT_S = float(os.environ.get("VQA_WIN_WAIT_S", "480"))
+WIN_BACKLOG = int(os.environ.get("VQA_WIN_BACKLOG", "10"))
+WIN_PER_JOB_S = float(os.environ.get("VQA_WIN_PER_JOB_S", "50"))
+WIN_MAX_S = float(os.environ.get("VQA_WIN_MAX_S", "270"))
+_win = {"until": 0.0, "yields": 0}
+_pending: dict[int, float] = {}                 # 排队中的看图请求：id(box) → 入队时间
 _model = _proc = None
 
 
@@ -131,6 +146,29 @@ def comfy_busy(gpu: int) -> bool:
 _idle_since: dict[int, float] = {}
 
 
+def window_active() -> bool:
+    return time.time() < _win["until"]
+
+
+def maybe_open_window() -> bool:
+    """/yield 时调用：有积压且满足任一条件 → 开窗口（记 switch.jsonl ev=vqa_window）"""
+    if WIN_N <= 0 or not _pending:
+        return False
+    now = time.time()
+    backlog, oldest = len(_pending), now - min(_pending.values())
+    why = [w for w, hit in ((f"出图满 {WIN_N} 张", _win["yields"] >= WIN_N), (f"最老请求等了 {oldest:.0f}s", oldest >= WIN_WAIT_S),
+                            (f"积压 {backlog} 条", backlog >= WIN_BACKLOG)) if hit]
+    if not why:
+        return False
+    dur = min(backlog * WIN_PER_JOB_S, WIN_MAX_S)
+    _win.update(until=now + dur, yields=0, opened=now, served0=STATE["served"])
+    for g in list(COMFY):
+        _idle_since[g] = now - IDLE_S - 1          # 窗口内不再等“空闲 IDLE_S 秒”
+    switch_log("vqa_window", phase="open", backlog=backlog, secs=round(dur), why="、".join(why))
+    log("看图窗口开：", "、".join(why), f"积压 {backlog}，最长 {dur:.0f}s")
+    return True
+
+
 def pick_gpu() -> tuple[int | None, str]:
     fm = free_mib()
     now = time.time()
@@ -142,7 +180,7 @@ def pick_gpu() -> tuple[int | None, str]:
             why.append(f"GPU{g} ComfyUI 有任务")
             continue
         _idle_since.setdefault(g, now)
-        if now - _idle_since[g] < IDLE_S:
+        if now - _idle_since[g] < IDLE_S and not window_active():
             why.append(f"GPU{g} 空闲才 {now - _idle_since[g]:.0f}s")
             continue
         if fm.get(g, 0) < NEED_MIB and FREE_COMFY:      # LOCALGPU：本机 ComfyUI 空闲时还占着模型 → 让它先释放
@@ -174,8 +212,9 @@ def load(gpu: int):
         log(f"loaded on CPU ({THREADS} threads) in {STATE['load_s']}s")
         return
     dev = {"": f"cuda:{gpu}"}
+    akw = {"attn_implementation": ATTN} if ATTN else {}     # VQAGATE 11-01 显存：VQA_ATTN=sdpa 等
     if (QDIR / "config.json").exists():
-        _model = AutoModelForImageTextToText.from_pretrained(QDIR, device_map=dev, dtype=torch.bfloat16)
+        _model = AutoModelForImageTextToText.from_pretrained(QDIR, device_map=dev, dtype=torch.bfloat16, **akw)
     else:
         q = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch.bfloat16,
                                bnb_4bit_use_double_quant=True, llm_int8_skip_modules=["visual", "lm_head"])
@@ -220,6 +259,9 @@ def _img(spec: dict):
         im = Image.open(spec["path"])
     im = im.convert("RGB")
     mp = int(spec.get("max_pixels") or M.get("ref_max_pixels", 360000))
+    cap = CAP_SUBJECT if spec.get("label") == "【待检图】" else CAP_REF
+    if cap:
+        mp = min(mp, cap)
     w, h = im.size
     if w * h > mp:
         s = (mp / (w * h)) ** 0.5
@@ -241,13 +283,29 @@ def infer(req: dict) -> str:
     msgs.append({"role": "user", "content": content})
     inputs = _proc.apply_chat_template(msgs, tokenize=True, add_generation_prompt=True, return_dict=True,
                                        return_tensors="pt").to(_model.device)
-    with torch.inference_mode():
-        out = _model.generate(**inputs, max_new_tokens=int(req.get("max_new_tokens") or M.get("max_new_tokens", 900)),
-                              do_sample=False)
+    mnt = int(req.get("max_new_tokens") or M.get("max_new_tokens", 900))
+    if CAP_TOKENS:
+        mnt = min(mnt, CAP_TOKENS)
+    if STATE["gpu"] != "cpu":
+        torch.cuda.reset_peak_memory_stats(STATE["gpu"])     # VQAGATE：按条记峰值（原来是加载以来的最大值）
+    import contextlib
+    ctx = contextlib.nullcontext()
+    if os.environ.get("VQA_SDPA_EFFICIENT") == "1" and STATE["gpu"] != "cpu":
+        # VQAGATE 11-01（未实测）：不让 sdpa 退回 math 内核（会整块物化注意力矩阵，长 prompt 预填充时显存峰值的主要来源）
+        from torch.nn.attention import SDPBackend, sdpa_kernel
+        ctx = sdpa_kernel([SDPBackend.EFFICIENT_ATTENTION, SDPBackend.FLASH_ATTENTION])
+    with torch.inference_mode(), ctx:
+        out = _model.generate(**inputs, max_new_tokens=mnt, do_sample=False)
     txt = _proc.batch_decode(out[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True)[0]
     if STATE["gpu"] != "cpu":
-        STATE["peak_mib"] = max(STATE["peak_mib"] or 0, int(torch.cuda.max_memory_allocated(STATE["gpu"]) / 2**20))
+        STATE["last_peak_mib"] = int(torch.cuda.max_memory_allocated(STATE["gpu"]) / 2**20)
+        STATE["last_reserved_mib"] = int(torch.cuda.max_memory_reserved(STATE["gpu"]) / 2**20)
+        STATE["peak_mib"] = max(STATE["peak_mib"] or 0, STATE["last_peak_mib"])
     STATE["last_tokens_in"] = int(inputs["input_ids"].shape[1])
+    STATE["last_tokens_out"] = int(out.shape[1] - inputs["input_ids"].shape[1])
+    del inputs, out
+    if STATE["gpu"] != "cpu":
+        torch.cuda.empty_cache()
     return txt
 
 
@@ -287,7 +345,9 @@ def worker():
                     txt = infer(req)
                 break
             res = {"text": txt, "seconds": round(time.time() - t0, 1), "gpu": STATE["gpu"], "cached": False,
-                   "tokens_in": STATE.get("last_tokens_in"), "model": M.get("name", "Qwen3-VL-8B-Instruct")}
+                   "tokens_in": STATE.get("last_tokens_in"), "tokens_out": STATE.get("last_tokens_out"),
+                   "peak_mib": STATE.get("last_peak_mib"), "reserved_mib": STATE.get("last_reserved_mib"),
+                   "model": M.get("name", "Qwen3-VL-8B-Instruct")}
             if req.get("key"):
                 CACHE.mkdir(parents=True, exist_ok=True)
                 (CACHE / f"{req['key']}.json").write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
@@ -334,6 +394,14 @@ class H(BaseHTTPRequestHandler):
             return self._send(200, {"ok": True})
         if self.path.startswith("/yield"):      # LOCALGPU：出图方提交前调用；推理中则等这条推理完再卸（≤ 推理时长）
             t0 = time.time()
+            _win["yields"] += 1
+            if window_active() or maybe_open_window():   # VQAGATE 最短看图窗口：等窗口结束或积压清空再让
+                while window_active() and _pending:
+                    time.sleep(1)
+                if _win.get("opened"):
+                    switch_log("vqa_window", phase="close", served=STATE["served"] - _win.get("served0", 0),
+                               draw_waited_s=round(time.time() - t0, 1), left=len(_pending))
+                    _win.update(until=0.0, opened=None)
             for g in list(COMFY):
                 _idle_since[g] = time.time()     # 重新计空闲：出图活交上去之前不会又加载
             was = _model is not None
@@ -352,8 +420,12 @@ class H(BaseHTTPRequestHandler):
         if req.get("wait_s"):
             req["deadline"] = time.time() + float(req["wait_s"])
         box: queue.Queue = queue.Queue()
+        _pending[id(box)] = time.time()
         JOBS.put((req, box))
-        res = box.get()
+        try:
+            res = box.get()
+        finally:
+            _pending.pop(id(box), None)
         self._send(200 if "error" not in res else 503, res)
 
 

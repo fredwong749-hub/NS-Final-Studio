@@ -66,8 +66,19 @@ def control():
         c.update(paused=True, paused_by="LAPTOP_IMAGES", note=f"SERVER_RESIDENT {SELF}：只跑视频（night / vidgen），出图归笔记本 producer",
                  only=shots, hold_lanes=other)
     else:
-        c.update(paused=False, paused_by=None, paused_at=None, note=f"SERVER_RESIDENT {SELF}：只派 ep{EPS} 的镜", only=shots,
-                 hold_lanes=other)
+        # NETFIX 11-01（K-OPS-N04，CONSENT AUTOPILOT → NETFIX）：出图回到服务器本机派单。only / hold / paused 一律由
+        # tools/netfix/dispatch.py 算：只派 config/netfix/partition.json 本机分区 ∩ data/autopilot/ready_episodes.json 的镜
+        # （没准备好的集不进 only；交集空 = ["__none__"]），hold 别机的道 + laptop:0，paused 跟随笔记本全局暂停（data/netfix/laptop_ctrl.json）
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("netfix_dispatch", R + "/tools/netfix/dispatch.py")
+        D = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(D)
+        lc = D.jl(R + "/data/netfix/laptop_ctrl.json", None)
+        if lc is None:   # 没有笔记本快照 = 不知道全局是否暂停 → 安全侧：暂停
+            lc = {"paused": True, "paused_by": "NETFIX：缺 data/netfix/laptop_ctrl.json 快照"}
+        f = D.control_for(SELF, lc, D.jl(R + "/data/autopilot/ready_episodes.json", {}))
+        c.update(paused_at=None, **f)
+        shots, other = f["only"], f["hold_lanes"]
     json.dump(c, open(cp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     n = 0
     for f in glob.glob(R + "/data/producer/leases/*.json"):

@@ -1,0 +1,35 @@
+/* UIRSI r38：实时连接状态（顶栏胶囊 + 明细；GPU 面板顶部同一块）。只用 --c-* / --sp-* / --fs-* 变量，深浅主题自动跟随 */
+.infra-chip { display: inline-flex; align-items: center; gap: var(--sp-1); height: 28px; padding: 0 var(--sp-2); border-radius: var(--r-pill); border: 1px solid var(--c-line-2); background: transparent; color: var(--c-text-2); font: inherit; font-size: var(--fs-s); white-space: nowrap; cursor: pointer; flex: none; }
+.infra-chip:hover, .infra-chip.open { background: var(--c-sunken); color: var(--c-text); }
+.infra-chip.lv-warn { color: var(--c-warn-text); border-color: color-mix(in srgb, var(--c-warn) 55%, transparent); }
+.infra-chip.lv-bad { color: var(--c-bad-text); border-color: color-mix(in srgb, var(--c-bad) 60%, transparent); background: var(--c-bad-soft); }
+.infra-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--c-text-3, var(--c-line-2)); }
+.infra-dot.ok { background: var(--c-ok); }
+.infra-dot.warn { background: var(--c-warn); }
+.infra-dot.bad { background: var(--c-bad); }
+.infra-pop .v3-pop { width: min(460px, calc(100vw - 32px)); padding: 0; }
+.infra-panel { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); font-size: var(--fs-s); color: var(--c-text); min-width: 0; }
+.infra-panel.compact { padding: var(--sp-2) var(--sp-3); border-radius: var(--r-m); border: 1px solid var(--c-line); background: var(--c-raise); }
+.infra-panel.compact.lv-bad { border-color: color-mix(in srgb, var(--c-bad) 55%, transparent); background: var(--c-bad-soft); }
+.infra-panel.compact.lv-warn { border-color: color-mix(in srgb, var(--c-warn) 55%, transparent); background: var(--c-warn-soft); }
+.infra-sum { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.infra-sum b { font-weight: var(--fw-strong); overflow-wrap: anywhere; }
+.infra-sum small, .infra-row small { color: var(--c-text-2); margin-left: auto; white-space: nowrap; }
+.infra-re { margin: 0; padding: 0; list-style: none; color: var(--c-info-text); display: flex; flex-direction: column; gap: 2px; }
+.infra-row { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.infra-row.top { align-items: flex-start; }
+.infra-row.warn { color: var(--c-warn-text); }
+.infra-k { flex: none; width: 72px; color: var(--c-text-2); }
+.infra-tl { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.infra-tl li { display: flex; align-items: baseline; gap: var(--sp-1); overflow-wrap: anywhere; }
+.infra-tl li .infra-dot { transform: translateY(-1px); }
+.infra-tl b { font-weight: var(--fw-strong); white-space: nowrap; }
+.infra-tech { color: var(--c-text-2); font-size: var(--fs-xs); }
+.infra-tech summary { cursor: pointer; }
+.infra-tech ul { margin: var(--sp-1) 0 0; padding-left: var(--sp-4); }
+/* GPU 卡片：连不上的原因一行；全部断了时卡片里不再逐张重复，只在面板顶部说一次 */
+.gl-why { display: block; font-size: var(--fs-xs); color: var(--c-warn-text); margin-top: 2px; }
+.gl-thumb-none { display: grid; place-items: center; width: 100%; height: 100%; min-height: 72px; padding: var(--sp-1); box-sizing: border-box; text-align: center; font-size: var(--fs-xs); color: var(--c-text-2); background: var(--c-sunken); border-radius: var(--r-s, 4px); }
+.gpu-drawer > .infra-panel { margin: 0 var(--sp-3) var(--sp-2); }
+.infra-vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.infra-chip:has(.infra-vh) { padding: 0 var(--sp-2); }

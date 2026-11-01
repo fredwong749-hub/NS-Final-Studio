@@ -29,7 +29,7 @@ for _p in (ROOT / "packages" / "schema", ROOT / "services" / "agent"):
 
 from ns_agent.importer.script_md import (  # noqa: E402
     CHARACTER_ID_RE, LINK_VALUES, SCENE_ID_RE, _code_block_after, character_tables, import_script, scene_tables,
-    shot_cap,
+    shot_cap, EPISODE_SECONDS,
 )
 from ns_schema import h3_lint as L  # noqa: E402
 from ns_schema import llm_output_check as LOC  # noqa: E402
@@ -79,7 +79,7 @@ def lint_inputs(shot) -> dict:
 RULES: dict[str, tuple[str, str]] = {
     "QW-E1": ("block", "集标题行写成 `## ep<数字>《<标题>》`，紧接一行非空的 `**剧情**：`"),
     "QW-E2": ("block", "镜号从 1 连续递增；镜数 6 ≤ n ≤ max(8, 说话轮次 + 独白段数, ⌈各镜时长之和 ÷ 6⌉)（K1 + G29：单镜 ≤6 秒要装得下总时长）"),
-    "QW-E3": ("block", "各镜 `**时长**` 之和 50–75 秒；75–90 秒只提示；>90 或 <50 不过（K1）"),
+    "QW-E3": ("block", "各镜 `**时长**` 之和 60–120 秒，超出不过（项目方 11-01 21:4x：“改成 60–120 秒”，L-092 / D-SCR-08）"),
     "QW-F0": ("block", "每行都要属于一个字段：`**标签**：值` 一行写完，不要写无标签的散行"),
     "QW-C1": ("warn", "motion 在触发词之后以英文运镜指令开头，只从 camera push in / pull out / zoom in / zoom out / "
                       "pan left / pan right / truck left / truck right / tilt up / tilt down / pedestal up / pedestal down / "
@@ -378,10 +378,9 @@ def check_episode(ep) -> list[dict]:
         out.append(_issue("QW-E2", f"镜数 {len(idx)}（本集应为 6–{cap}）"))
     if ep.shots and all(s.duration_source == "script" for s in ep.shots):
         total = sum(s.duration for s in ep.shots)
-        if 75 < total <= 90:
-            out.append(_issue("QW-E3", f"总时长 {total} 秒（75–90 只提示）", level="warn"))
-        elif not 50 <= total <= 75:
-            out.append(_issue("QW-E3", f"总时长 {total} 秒（应为 50–75，最多 90）"))
+        lo, hi = EPISODE_SECONDS            # D-SCR-08：60–120 秒（导入器同一常量）
+        if not lo <= total <= hi:
+            out.append(_issue("QW-E3", f"总时长 {total} 秒（应为 {lo}–{hi}）"))
     return out
 
 

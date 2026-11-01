@@ -164,3 +164,23 @@ def test_lint_ids_do_not_collide_across_lint_files():
     names = list(sets)
     clash = [(a, b, sorted(sets[a] & sets[b])) for i, a in enumerate(names) for b in names[i + 1:] if sets[a] & sets[b]]
     assert all(sets.values()) and not clash, clash
+
+
+def test_w11_no_adjusting_worn_garments():
+    """K-WRT-702 / QW-W11（VIDEO-RCA r2：分拍写对身上衣服的整理动作 8/8 外套消失再穿回）"""
+    import importlib.util as ilu
+    from pathlib import Path as _P
+    from types import SimpleNamespace as _NS
+    spec = ilu.spec_from_file_location("ns_wl_w11_t", _P(__file__).resolve().parents[1] / "tools" / "qa" / "writer_lints.py")
+    W = ilu.module_from_spec(spec)
+    spec.loader.exec_module(W)
+    ep = _NS(looks=[])
+
+    def ids(h3="", beats=""):
+        sh = _NS(index=1, cast=[], extras=[], h3_prompt=h3, motion_prompt="", voiceover=None, dialogue=[], duration=6)
+        return [i["rule_id"] for i in W.check_shot(sh, ep, "中景，林晚", "中景", {"分拍": beats}) if i["rule_id"] == "QW-W11"]
+    assert ids(h3="At 00:03.000, she smooths the hem of her blazer.") == ["QW-W11"]
+    assert ids(beats="2–4秒｜她抚平外套下摆｜视线=顾沉") == ["QW-W11"]
+    assert ids(h3="At 00:03.000, she lets her hands settle at her sides.") == []
+    assert ids(h3="At 00:02.000, she lifts her eyes to the coat on the chair.") == []          # 视线，不是整理衣服
+    assert ids(h3="At 00:02.000, he slips off her blazer.") == []                              # 情节就是脱衣：单独成镜，不在这里拦

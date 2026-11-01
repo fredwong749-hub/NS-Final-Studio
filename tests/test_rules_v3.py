@@ -264,9 +264,12 @@ def test_costume_change_qw_e7(tmp_path):
 
 
 def test_k1_shot_count_and_total(tmp_path):
-    rep = V.validate(write(tmp_path, head() + episode([shot(i, seconds=13) for i in range(1, 7)])))   # 78 秒
-    has(rep, "QW-E3", "warn")
+    # D-SCR-08（项目方 11-01 21:4x“改成 60–120 秒”）：60–120 通过，超出 block，不再有“只提示”带
+    rep = V.validate(write(tmp_path, head() + episode([shot(i, seconds=9) for i in range(1, 7)])))    # 54 秒
+    has(rep, "QW-E3", "block")
     rep = V.validate(write(tmp_path, head() + episode([shot(i, seconds=15) for i in range(1, 8)]), "b.md"))   # 105 秒
+    assert not [x for x in issues(rep) if x[0] == "QW-E3"], issues(rep)
+    rep = V.validate(write(tmp_path, head() + episode([shot(i, seconds=15) for i in range(1, 10)]), "d.md"))  # 135 秒
     has(rep, "QW-E3", "block")
     rep = V.validate(write(tmp_path, head() + episode([shot(i) for i in range(1, 6)]), "c.md"))     # 5 镜
     has(rep, "QW-E2", "block")

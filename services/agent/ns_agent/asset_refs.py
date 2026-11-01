@@ -378,6 +378,49 @@ def sheet_of(project: str, cid: str, look_id: str) -> str | None:
     return f if f and (ROOT / f).is_file() else None
 
 
+# K-AST-262（IMGFIX 11-01，总调度 fredw-2b 派）：设定图与造型单品不一致时，参考板上的外层单品赢。
+# 证据：ep01-S1/S2 林晚造型 A 一直没穿短款西装外套——sheets_chosen 现行设定图 lin_wan_lookA_s101（10-31 v1 候选，
+# 画外套之前生成）上没有外套，图2 句却写“服装必须与图2完全一致”，图3 参考板又要外套，模型照图2 出（Q2 外套 0.048 / 0.068）。
+# ASSETMASTER 单品一致性检查（K-AST-260，data/assetmaster/sheet_item_checks.json）只认 v2 那张；现行设定图没有检查记录 =
+# 不能保证画了外层单品 → 外层单品（outfit 槽、穿在别的衣服外面的）在设定图句里明说“图N上没有画 X，X 以图M为准”。
+SHEET_CHECKS = "data/assetmaster/sheet_item_checks.json"   # 相对仓库根（ROOT 运行时取，测试可替换）
+SHEET_GAP_CLAUSE = "；图{n}上没有画{items}——{items}以{src}为准，穿在最外层"
+
+
+def sheet_item_check(cid: str, look_id: str, file: str | None) -> dict | None:
+    """这张设定图有没有通过单品一致性检查（K-AST-260）。记录带 file 时按文件认；只带 seed 的老记录只认 v2 那张（文件名含 _v2_s<seed>）"""
+    if not file:
+        return None
+    try:
+        d = json.loads((ROOT / SHEET_CHECKS).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    r = d.get(f"{cid}_look{look_id}")
+    if not isinstance(r, dict) or r.get("verdict") != "pass":
+        return None
+    if r.get("file"):
+        return r if r["file"] == file else None
+    return r if r.get("seed") and f"_v2_s{r['seed']}" in Path(file).stem else None
+
+
+def _outer_label(p) -> bool:
+    if p.slot != "outfit" or p.extra:
+        return False
+    try:
+        from ns_agent.gen_contract.postflight import outer_en
+    except Exception:  # noqa: BLE001
+        return "外套" in p.label
+    return outer_en(p.label) is not None
+
+
+def sheet_outer_gaps(project: str, cid: str, look_id: str, file: str | None) -> list[str]:
+    """现行设定图没过单品一致性检查时，本造型的外层单品短名（这些可能没画在设定图上）；过了 → []"""
+    if not cid or not look_id or sheet_item_check(cid, look_id, file):
+        return []
+    L = (load_looks(project).get(cid) or {}).get(look_id)
+    return [_short(p.label) for p in (L.parts if L else []) if _outer_label(p)]
+
+
 def _person_box(im, x0: int, x1: int):
     """设定图某一栏里非白底像素的外框（白底 > 235）"""
     import numpy as np
@@ -978,6 +1021,25 @@ def _line(project: str, s: Slot) -> str:
             f"每一件都必须与板上对应格完全一致（款式、颜色、材质、细节）。")
 
 
+def _apply_sheet_gaps(project: str, slots: list) -> None:
+    """K-AST-262：主角设定图（单张 sheet 槽，非 secondary）没过单品一致性检查 → 外层单品让位给参考板 / 单品图（同一角色、标签里有它的槽）"""
+    for s in slots:
+        if s.kind != "sheet" or not s.members or s.members[0].get("secondary"):
+            continue
+        m = s.members[0]
+        lid = m.get("look_id")
+        gaps = sheet_outer_gaps(project, s.character, lid, sheet_of(project, s.character, lid) or s.file)
+        if not gaps:
+            continue
+        by_src: dict[str, list[str]] = {}
+        for it in gaps:
+            o = next((x for x in slots if x is not s and x.character == s.character and x.kind in ("board", "item")
+                      and any(it in str(lab) for lab in x.labels)), None)
+            by_src.setdefault(f"图{o.index}" if o else "文字", []).append(it)
+        add = "".join(SHEET_GAP_CLAUSE.format(n=s.index, items="、".join(v), src=k) for k, v in by_src.items())
+        s.line = s.line.rstrip("。") + add + "。"
+
+
 def plan_slots(sr: ShotRefs, model: str = "qwen_image_2.1", capacity: int | None = None) -> SlotPlan:
     """按模型槽位排参考图（I9）。规则：脸不进参考板；一块板只放同一角色、最多一张带脸的图（设定图）；
     超出时先合并同角色低优先级项为参考板，仍超出才丢（场景 → 第二人单品 → 第二人设定图），丢弃项记 dropped（走文字）"""
@@ -1037,6 +1099,7 @@ def plan_slots(sr: ShotRefs, model: str = "qwen_image_2.1", capacity: int | None
                      labels, members, faces=sum(r.has_face for r in gr))
         s.line = _line(sr.project, s)
         slots.append(s)
+    _apply_sheet_gaps(sr.project, slots)
     prefix = "".join(s.line for s in slots)
     if dropped:                                          # 槽位不够、改走文字的人物资产：每人一句
         names = []
@@ -1050,9 +1113,57 @@ def plan_slots(sr: ShotRefs, model: str = "qwen_image_2.1", capacity: int | None
     return SlotPlan(sr.shot_id, model, N, slots, dropped, prefix, sr.blocked, sr.missing, sr.warnings, prompt_note=note)
 
 
+# K-REN-704（IMGFIX 11-01，总调度 fredw-2b 派；项目方原话“所有图片不要看镜头，不要看镜头！”）：单人镜首帧的头部朝向句。
+# 证据（data/ab/imgfix/takes.jsonl，同镜同 seed 只改一句）：现行 / “平视”改“平视机位” / “图1 只取身份不取视线”三种写法
+# ep01-S1、S2 都正对镜头；只有“四分之三侧脸、脸转向<落点>一侧”这句让脸转开。图1 是正脸直视的身份脸（L-086 不改），
+# 正文里“视线落在屏幕下方”压不住（Qwen 连头部朝向一起抄参考）。句子放在提示词最前面（参考说明之前）；落点只取剧本原文。
+# ⤴ 21:3x：再加视线正向落点句在前（F2acc：ep01-S1 s20261301 只有朝向句时仍正对镜头，加上后 S1/S2 4/4 都转开；S3/S6 见 data/ab/imgfix）
+SINGLE_TURN_LEAD = "{name}的眼睛看着{target}，头和视线都朝向{target}，眼睛不看镜头。{name}四分之三侧脸，脸转向{target}一侧，脸和身体都不正对镜头。"
+SINGLE_TURN_RE = re.compile(r"[^，。、；]{1,12}的眼睛看着[^，。]{1,40}，头和视线都朝向[^，。]{1,40}，眼睛不看镜头。"
+                            r"[^，。、；]{1,12}四分之三侧脸，脸转向[^。]{1,40}一侧，脸和身体都不正对镜头。")
+_GAZE_TARGET_RE = re.compile(r"视线(?:落在|朝|看向|停在|转向|移向|投向)([^，。；（(]{1,20})")
+
+
+def gaze_target(shot) -> str:
+    """单人镜视线落点（剧本原文）：img 行“视线落在 / 朝 …”→ 第一拍 视线= / motion 行 → “画面里的人或物”"""
+    m = _GAZE_TARGET_RE.search(g(shot, "img_prompt") or "")
+    t = (m.group(1).strip() if m else "")
+    if not t or "镜头" in t:
+        from ns_agent import frame_job as _FJ
+        t = _FJ.first_beat_gaze(shot)
+    t = (t or "画面里的人或物").strip()
+    return t[:-1] if t.endswith("上") and len(t) > 1 else t
+
+
+def single_turn_line(sr: ShotRefs, shot) -> str:
+    """单人在画、主体是人（不是局部 / 物件特写）、有身份脸槽 → 朝向句；否则空"""
+    if sr.subject in ("part", "object"):
+        return ""
+    img = g(shot, "img_prompt") or ""
+    if any(w in img for w in ("背影", "背对", "背身")):
+        return ""                         # 剧本写了背对镜头，不加
+    on = [c for c in sr.characters or [] if c.get("presence", "在画") == "在画"]
+    if len(on) != 1:
+        return ""
+    name = on[0].get("name") or ID_NAME.get(on[0].get("character") or "", "")
+    return SINGLE_TURN_LEAD.format(name=name, target=gaze_target(shot)[:30]) if name else ""
+
+
+def _apply_single_turn(plan: SlotPlan, line: str) -> None:
+    if not line:
+        return
+    if not any(s.kind == "face" for s in plan.slots):
+        return
+    # 放在提示词最前面（参考说明之前）：验收时放在身份脸句之后 ep01-S1 仍正对镜头（data/ab/imgfix ACC s20261201），
+    # 放最前面 S1 / S2 各 2 seed 都转开（T3）。仍算参考说明段的一部分（prompt_prefix），正文切分不变
+    plan.prompt_prefix = line + plan.prompt_prefix
+
+
 def plan_for(project: str, ep, shot, model: str = "qwen_image_2.1", **kw) -> tuple[ShotRefs, SlotPlan]:
     sr = resolve_shot(project, ep, shot, kept_triggers=kw.get("kept_triggers"), two_person=kw.get("two_person"))
-    return sr, plan_slots(sr, model, kw.get("capacity"))
+    plan = plan_slots(sr, model, kw.get("capacity"))
+    _apply_single_turn(plan, single_turn_line(sr, shot))
+    return sr, plan
 
 
 WARDROBE_WORDS = ("衬衫", "休闲装", "西装", "裙", "裤", "鞋", "外套", "毛衣", "浴袍", "卫衣", "T恤", "针织衫", "束腰", "围裙", "工装", "吊带")

@@ -961,7 +961,7 @@ class FrameExec:
 
         client = _Cap(url)
         client.ns_tag = tag
-        host = "gpu36" if lane.startswith("gpu36") else "gpu33"
+        host = "gpu36" if lane.startswith("gpu36") else "local" if lane in render_image_only_lanes() else "gpu33"   # LOCALGPU：本机道 → 本机打分
         project = UF.project_for(self.script) or self.p.run_id
         ep, shot = P.find_shot(self.script, sid)
         first_job = FJ.build_first(project, ep, shot, self.script.globals, **(rung.get("plan_kw") or {}))
@@ -1996,7 +1996,10 @@ def master_reject(paths: Paths, oid: str, n: int, reason: str, presets: list, wa
                "plan": [plan_item(x) for x in presets if x]}
     js(paths.rejects, rj)
     L = jl(paths.ledger, {}) or {}
-    L.setdefault(oid, {}).update(redo_tries=0, redo_candidate=None)
+    rec = L.setdefault(oid, {})
+    rec.update(redo_tries=0, redo_candidate=None)
+    if rec.get("final") == "passed":   # 驳回即撤下（L-089）：账本同步成待重出，不留 passed（CLEANUP D-LEDGER 19:2x；WORKFLOW 改，CONSENT PRODUCER -> AUTOPILOT）
+        rec.update(final=None, demoted_at=iso(), reason=f"总调度驳回 v{n}：{reason}（驳回即撤下，等替换版）")
     js(paths.ledger, L)
     log_event(paths, "master_reject", obj=oid, take=n, reason=reason, plan=presets, wait=wait, by=by, counted=False)
     return 0

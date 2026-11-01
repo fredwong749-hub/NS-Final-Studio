@@ -1,7 +1,5 @@
-# VQAGATE 11-01：常驻 ssh 隧道 127.0.0.1:8871 → gpu36 127.0.0.1:8870（看图服务）。图片只走自家隧道（K-REV-V01）。
-# 断了自动重连；笔记本本机服务（8870）起来后 client 优先连 8870，这条隧道自然闲置。用 Git 自带 ssh（和 Bash 同一份 ~/.ssh/config、密钥）。
-$ssh = "C:\Program Files\Git\usr\bin\ssh.exe"
-while ($true) {
-  & $ssh -o BatchMode=yes -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -N -L 127.0.0.1:8871:127.0.0.1:8870 gpu36
-  Start-Sleep -Seconds 15
-}
+# VQAGATE 11-01 原为常驻 ssh 循环（127.0.0.1:8871 → gpu36 127.0.0.1:8870）。
+# NETFIX 11-01 23:0x（总调度定，K-OPS-N01）：退役，8871 已并入隧道监管进程 tools/netfix/tunnel_supervisor.py 的 gpu36 主连接（config/netfix/tunnels.json）。
+# 再运行本脚本只会确保监管进程在跑，不再自己起 ssh（会和监管进程抢端口）。旧版本在 data/_quarantine/netfix_20261101/vqa_tunnel.ps1。
+$env:PYTHONUTF8 = "1"
+& "D:\NS-Final Studio\.venv\Scripts\python.exe" "D:\NS-Final Studio\tools\netfix\tunnel_supervisor.py" ensure

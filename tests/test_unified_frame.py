@@ -80,7 +80,7 @@ def test_canvas_regen_graph_equals_unified_builder(env):
     assert fake.workflows[0] == want                         # 逐字段一致
     prompt = next(n["inputs"]["prompt"] for n in want.values() if "TextEncodeQwenImage" in n["class_type"])
     assert "本镜头的画面构图" not in prompt and "换成图2" not in prompt
-    assert prompt.startswith("图1是林晚的脸部参考")
+    assert __import__("ns_agent.asset_refs", fromlist=["x"]).SINGLE_TURN_RE.sub("", prompt, count=1).startswith("图1是林晚的脸部参考")  # IMGFIX K-REN-704
     assert [Path(u).name for u in fake.uploads] == [Path(r).name for r in job["refs"]]
     _man = json.loads((Path(__file__).resolve().parents[1] / "data/assets/identity_refs/manifest.json").read_text(encoding="utf-8"))
     assert Path(job["refs"][0]).name == Path(_man["chars"]["lin_wan"]["file"]).name   # 项目方登记的身份脸（L-086：A-s202 高清裁切），不是旧母版 master_face
@@ -92,7 +92,7 @@ def test_prompt_override_keeps_slot_lines(env):
     fake = Fake()
     FE.regen(fake, env, SHOT, "image", seed=1, prompt="特写，林晚抬眼")
     p = next(n["inputs"]["prompt"] for n in fake.workflows[0].values() if "TextEncodeQwenImage" in n["class_type"])
-    assert p.startswith("图1是林晚的脸部参考") and "特写，林晚抬眼" in p
+    assert __import__("ns_agent.asset_refs", fromlist=["x"]).SINGLE_TURN_RE.sub("", p, count=1).startswith("图1是林晚的脸部参考") and "特写，林晚抬眼" in p  # IMGFIX K-REN-704
 
 
 def test_registered_size_equals_requested_size(env):

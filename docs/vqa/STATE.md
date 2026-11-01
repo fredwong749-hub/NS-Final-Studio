@@ -63,3 +63,21 @@
 - 回扫：tools/vqa/gate_scan.py scan | apply | redo（写回走 rescore_takes.write_back，PRODUCER reconcile_demoted 自动重出）。
 - 截断修复：max_new_tokens 1800、紧凑 JSON、rubric._salvage 按项抢救（ep01 首扫 7 张 3 张截断）；ssh 管道先缩图再发（client._shrink）。
 - 服务：主力迁笔记本 RTX 4080 Laptop（D:\ns_vqa 独立 venv），client 先连本机 127.0.0.1:8870，连不上走 ssh gpu36。
+
+## VQAGATE 待办（VIDEO-RCA r1 发现，总调度 19:1x 转；必须在打开 gate.video_requires_q9 之前处理）
+1. 视频层判看镜头以看图模型为主。S5_pika 全程在看镜头，像素检测器（ns_qc.gaze / acting.camera_gaze）却报“视线离轴”。改法：score_clip 的看镜头结论按 V9 的 eye_contact / first_frame_stare 和 MediaPipe 高置信度命中取 OR；像素检测器报“离轴”不能作为放行依据，只写进证据。验收：S5_pika 被判看镜头；用 100 张标签加片头 72 条（data/acting/gaze_labels.json）量召回和误报。
+2. V6 命中后交看图模型复核，区分“多一只手”和“衣物形变”。VIDEO-RCA 报中全景单人镜 8/8 命中，其中一部分是 Pika 外套形变。改法：v6_limbs 判不过时，抽命中帧交本地看图（问题写成“这是多出来的手 / 手臂，还是衣服、外套的形变”）：是衣物形变 → V6 改判通过，另记 temporal_outfit（服装不连贯，进 V8）；是真多手 → 维持“多肢”。验收：拿 VIDEO-RCA 的 8 条片子人工对照，报改判前后的数字；ep01-S2 mot、S4 s2 两个正例仍然判不过。
+
+## 方案：让道模式下给看图留最短窗口（总调度 20:0x 要求，恢复全量重做时落地；实现交 LOCALGPU 或 VQAGATE）
+- 问题：19:34–19:50 实测，laptop:0 出图连续排队时，看图服务每次刚加载完就被 /yield 卸掉，排队的看图请求一条也跑不成；Q9 一直是未测，新图积压。
+- 规则（满足任一条就给看图开窗口）：
+  1. 每出 N=6 张图；
+  2. 看图队列里最老的请求等了 M=8 分钟以上；
+  3. 看图积压 ≥ 10 条。
+- 窗口内：出图方（ComfyClient）提交前，若看图在窗口期，就不发 /yield，而是等窗口结束；窗口长度 = min(积压条数 × 50 s, 6 分钟)。按口径 B 单条 42–53 s 估算，一个窗口能判 6–8 张。
+- 窗口开始时：先对本机 ComfyUI POST /free，再加载看图模型（不然残留显存会把第一次加载挤到共享内存，20:0x 实测出现过）；窗口结束时卸载并 empty_cache。
+- 记账：每个窗口写 D:
+s_vqa\logs\switch.jsonl（ev=vqa_window：开始 / 结束、判了几条、出图等了多少秒），总调度据此调 N / M。
+- 吞吐估算：出图约 60 s 一张时，N=6 意味着每 6 分钟让出约 5 分钟，出图吞吐约降一半。要是太慢，可以把看图放到 gpu36 备用道（隧道通的时候），本机只补判。
+- **已实现（20:3x，总调度批参数）**：tools/vqa/server.py 的 maybe_open_window / window_active 与 /yield 等窗口。参数用环境变量 VQA_WIN_N=6、VQA_WIN_WAIT_S=480、VQA_WIN_BACKLOG=10、VQA_WIN_PER_JOB_S=50、VQA_WIN_MAX_S=270（270 小于出图方 yield_timeout_s 300，出图方不会超时报错），VQA_WIN_N=0 关掉。窗口内跳过“空闲 IDLE_S 秒”的等待，显存不够照旧先 /free ComfyUI。开、关窗口都记 switch.jsonl（ev=vqa_window，含 served、draw_waited_s）。comfy_client._yield_peer 没改（CONSENT LOCALGPU → VQAGATE 已登记）。测试 tests/test_vqagate.py::test_vqa_min_window_opens_on_any_condition。
+- **吞吐实测：未测。** 要等全量重做恢复、laptop 道连续出图后，跑 `tools/vqa/window_report.py --since <启用时间> --before <启用前一段>`，结果写 data/vqa/window_report.json。现成的“启用前”基线只有 18:30–19:40 的 3 张（2.6 张 / 小时），太少，不能当基线。生效前提：本机看图服务要用新的 server.py 重启（start.ps1 -Restart 会把仓库里的 server.py 拷过去）。

@@ -102,7 +102,7 @@ shot_cap = V.shot_cap   # 本集镜数上限 = max(8, 说话轮次 + 独白段�
 
 def strict_check_episode(ep) -> list[dict]:
     """K1（fredw-92 2026-10-31，production_rules_v3 §0）：QW-E2 / QW-E3 与导入关口同一判定——
-    镜数 6..max(8, 说话轮次+独白段数) block；总时长 50–75 通过、75–90 warn、>90 或 <50 block；镜号不连续 block"""
+    镜数 6..max(8, 说话轮次+独白段数) block；总时长 60–120 通过、超出 block（D-SCR-08）；镜号不连续 block"""
     return _base_check_episode(ep)
 
 

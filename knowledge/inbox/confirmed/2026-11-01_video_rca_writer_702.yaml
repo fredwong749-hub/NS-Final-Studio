@@ -1,0 +1,20 @@
+# VIDEO-RCA 草案 K-WRT-702，RSI r7 收编（lint QW-W11）
+rules:
+  - id: K-WRT-702
+    domain: writer
+    link: P3-P4
+    title: 分拍里不写“对身上正穿着的衣服做动作”（整理 / 抚平 / 拉 / 收紧 / 掀起外套、衣摆、衣领）——视频模型会演成脱下再穿上
+    when: 写 H3 正文分拍（At 00:0X），在画人物穿着外套 / 西装 / 大衣 / 裙子等
+    then: 想表达“整理仪容 / 镇定下来”，写成不碰衣服的身体动作（手放下、深吸气、肩膀放松、看向某处）；确需穿脱衣物的情节单独成镜，并在首帧 / 尾帧里把穿脱前后都画出来（交写作方，系统不改正文）
+    writer_text: "分拍动作不要写对身上正穿着的衣服的整理动作（抚平外套下摆、拉衣角、收紧衣领等）：视频模型会把外套先脱掉再穿回。想表达整理 / 镇定，写不碰衣服的动作，例如手放回身侧、深吸一口气、肩膀放松。"
+    evidence:
+      - {src: data/ab/video_rca/r4_pika/, note: "ep01-S3 同首帧同提示词“she smooths the hem of her blazer”：Pika 换 seed / 加服装保持系统句、去掉 cropped、PDD——6/6 外套 3.3–3.9 s 消失再穿回"}
+      - {src: data/ab/video_rca/r8_outfit_action/, note: "只把这一拍换成 “she lets her hands settle at her sides”：2/2 seed 外套全程穿着"}
+      - {src: data/ab/video_rca/r9_outfit_keep/, note: "保留动作、同句补 “the blazer staying on her shoulders”：2/2 seed 仍消失再穿回（写法补救无效）；合计：带对衣服动作 8/8 消失，去掉动作 0/2"}
+      - {src: docs/video_rca/RCA_r2.md, note: "现剧本 93 镜里 16 镜分拍有这类动作（非亲密 5 镜，正则粗筛含误报）"}
+    lint_proposal: >-
+      QW-W?（交 ITERAUDIT / SCRIPT-RSI 定号，进 tools/qa/writer_lints.py）：分拍句（At 00:0X 之后）匹配 (smooth|adjust|tug|straighten|tighten|pull|draw|lift|tuck|button|zip)\w* … (blazer|jacket|coat|skirt|blouse|shirt|collar|cuff|hem|sleeve|lapel) → warn；中文分拍同理（整理|抚平|拉|收紧|掀起|扣)…(外套|西装|大衣|裙|衣摆|衣领|袖口)
+    check: 未定（等 QW lint 号；无检查不能收编）
+    confidence: high
+    status: 草案
+    date: 2026-11-01

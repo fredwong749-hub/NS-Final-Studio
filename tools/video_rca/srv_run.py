@@ -18,11 +18,13 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-PORT = 8190
-OUT = "/root/work/fredw/comfy/output/gpu2"
+# r3（总调度 22:05）：空档可用 gpu36 三道；VRCA_PORT / VRCA_OUT 指定道（默认 gpu36:2 长镜头道）
+PORT = int(os.environ.get("VRCA_PORT", "8190"))
+OUT = os.environ.get("VRCA_OUT", "/root/work/fredw/comfy/output/gpu2")
+PROD_JOBS = Path("/root/work/fredw/video10_srv/data/pipeline/runs/series10_v1/video/jobs.json")
 REPO = "/root/work/fredw/video10_srv"
 PY = "/root/work/fredw/venv_idm/bin/python"
-FF = "/root/work/fredw/tools_bin/ffmpeg"
+FF = os.environ.get("VRCA_FF", "/root/work/fredw/tools_bin/ffmpeg")
 MODE = Path("/root/work/fredw/longshot/run/mode")
 CLIENT = "videorca-"
 lock = threading.Lock()
@@ -42,7 +44,18 @@ def log(d, *a):
         f.write(line + "\n")
 
 
+def prod_ready() -> bool:
+    """生产有可派的 Pika 变体（jobs.json 任一镜 variants 里 status=ready）→ 非长镜头道立即退让（总调度 22:05 规则）"""
+    try:
+        d = json.loads(PROD_JOBS.read_text())
+        return any((v or {}).get("status") == "ready" for s in d.get("shots", []) for v in (s.get("variants") or {}).values())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def lane_free():
+    if PORT != 8190 and prod_ready():
+        return False, "生产有 ready 变体：非 gpu36:2 道退让"
     q = json.loads(api("/queue", timeout=20))
     n = len(q["queue_running"]) + len(q["queue_pending"])
     if n:
@@ -104,7 +117,7 @@ def score(d, j, src):
     stem = f"{j['shot']}__rca_{j['id']}"
     mp4 = d / f"{stem}.mp4"
     subprocess.run(["cp", src, str(mp4)])
-    env = dict(os.environ, PATH="/root/work/fredw/tools_bin:" + os.environ.get("PATH", ""), OMP_NUM_THREADS="4",
+    env = dict(os.environ, PATH=str(Path(FF).parent) + ":" + os.environ.get("PATH", ""), OMP_NUM_THREADS="4",
                OPENBLAS_NUM_THREADS="4", PYTHONUTF8="1")
     r = subprocess.run(["nice", "-n", "10", PY, f"{REPO}/tools/series10_video/score_clip.py", str(mp4), str(d / f"{stem}_sheet.jpg"),
                         json.dumps(j["score_meta"], ensure_ascii=False)], capture_output=True, text=True, env=env, cwd=REPO,
@@ -123,6 +136,24 @@ def score(d, j, src):
     s = {}
     ln = [x for x in r.stdout.splitlines() if x.startswith("{")]
     s = json.loads(ln[-1]) if ln else {"error": r.stderr[-500:]}
+    if j.get("v67_meta") and not s.get("error"):
+        # 剧本 18:24 重导入后镜号变了（旧 S4 = 新 S5…），score_clip 按镜号读 jobs.json 会拿错人数 / 对白 →
+        # 用实验自带的旧镜头信息重跑 V6 / V7（同生产脚本、同阈值），并按新结果改 gate 的 多肢 / 口型 两项
+        for key, py, script in (("v6", "/root/work/fredw/venv_hand/bin/python", "v6_limbs.py"),
+                                ("v7", PY, "v7_lipsync.py")):
+            rr = subprocess.run(["nice", "-n", "10", py, f"{REPO}/tools/series10_video/{script}", str(mp4),
+                                 json.dumps(j["v67_meta"], ensure_ascii=False)], capture_output=True, text=True, env=env,
+                                cwd=REPO, timeout=1800)
+            l2 = [x for x in rr.stdout.splitlines() if x.startswith("{")]
+            if l2:
+                s.update(json.loads(l2[-1]))
+        g = s.get("gate") or {}
+        f = [x for x in g.get("fails") or [] if x not in ("多肢", "口型不合")]
+        if (s.get("v6") or {}).get("status") == "不通过":
+            f.append("多肢")
+        if (s.get("v7") or {}).get("status") == "不通过":
+            f.append("口型不合")
+        s["gate"] = {**g, "fails": f, "pass": not f, "v67_meta": "实验自带（旧镜号）"}
     try:
         s["sharp"] = json.loads(r2.stdout)
     except ValueError:

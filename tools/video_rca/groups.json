@@ -1,33 +1,314 @@
 [
- {"title": "G1 基底：PDD 两段式（ep01_v2 所用）vs Pika Flex（新默认）· ep01-S3 中全景（多手 4/4 seed）",
+ {
+  "title": "G1 基底：PDD 两段式（ep01_v2 所用）vs Pika Flex（新默认）· ep01-S3 中全景（多手 4/4 seed）",
   "question": "多手 / 糊 / 动作是不是基底造成的？",
-  "arms": [{"exp": "r1_base_cue", "id": "S3_pdd2", "label": "i2va_pdd2", "shot": "ep01-S3"}, {"exp": "r1_base_cue", "id": "S3_pika", "label": "i2va_pika_flex", "shot": "ep01-S3"}]},
- {"title": "G2 基底 · ep01-S5 近景对白（项目方：很糊）",
-  "arms": [{"exp": "r1_base_cue", "id": "S5_pdd2", "label": "i2va_pdd2", "shot": "ep01-S5"}, {"exp": "r1_base_cue", "id": "S5_pika", "label": "i2va_pika_flex", "shot": "ep01-S5"}]},
- {"title": "G3 基底 · ep01-S4 双人中景（多手、发色、拉远）",
-  "arms": [{"exp": "r1_base_cue", "id": "S4_pdd2", "label": "i2va_pdd2", "shot": "ep01-S4"}, {"exp": "r1_base_cue", "id": "S4_pika", "label": "i2va_pika_flex", "shot": "ep01-S4"}]},
- {"title": "G4 视线系统句有 / 无（Pika）· ep01-S2（首帧看镜头）",
+  "arms": [
+   {
+    "exp": "r1_base_cue",
+    "id": "S3_pdd2",
+    "label": "i2va_pdd2",
+    "shot": "ep01-S3"
+   },
+   {
+    "exp": "r1_base_cue",
+    "id": "S3_pika",
+    "label": "i2va_pika_flex",
+    "shot": "ep01-S3"
+   }
+  ],
+  "verdict": "S3：两者都有外套形变 / 手检测 3；Pika 动作更大（mean 2.44 vs 1.77），清晰度比 0.469 vs 0.541。"
+ },
+ {
+  "title": "G2 基底 · ep01-S5 近景对白（项目方：很糊）",
+  "arms": [
+   {
+    "exp": "r1_base_cue",
+    "id": "S5_pdd2",
+    "label": "i2va_pdd2",
+    "shot": "ep01-S5"
+   },
+   {
+    "exp": "r1_base_cue",
+    "id": "S5_pika",
+    "label": "i2va_pika_flex",
+    "shot": "ep01-S5"
+   }
+  ],
+  "verdict": "S5：Pika 清晰度 0.784 vs PDD 0.658；Pika 保住近景（PDD 退到中景）；两者都全程看镜头（首帧就看镜头）。"
+ },
+ {
+  "title": "G3 基底 · ep01-S4 双人中景（多手、发色、拉远）",
+  "arms": [
+   {
+    "exp": "r1_base_cue",
+    "id": "S4_pdd2",
+    "label": "i2va_pdd2",
+    "shot": "ep01-S4"
+   },
+   {
+    "exp": "r1_base_cue",
+    "id": "S4_pika",
+    "label": "i2va_pika_flex",
+    "shot": "ep01-S4"
+   }
+  ],
+  "verdict": "S4：Pika 女主转向男主（分拍写了 eyes lifting to hers）；Pika 口型 V7 0.185 不过。PDD 臂被项目方决定撤销未出。"
+ },
+ {
+  "title": "G4 视线系统句有 / 无（Pika）· ep01-S2（首帧看镜头）",
   "question": "首帧已看镜头时，提示词能不能把视线拉走？",
-  "arms": [{"exp": "r1_base_cue", "id": "S2_pika_nocue", "label": "无系统句", "shot": "ep01-S2"}, {"exp": "r1_base_cue", "id": "S2_pika_cue", "label": "有 open_motion + eyeline", "shot": "ep01-S2"}]},
- {"title": "G5 视线系统句有 / 无（Pika）· ep01-S6 双人对白",
-  "arms": [{"exp": "r1_base_cue", "id": "S6_pika_nocue", "label": "无系统句", "shot": "ep01-S6"}, {"exp": "r1_base_cue", "id": "S6_pika_cue", "label": "有系统句", "shot": "ep01-S6"}]},
- {"title": "G6 首帧出图：双人系统句“朝向镜头”旧 vs “互相看着对方”新 · ep01-S4（2 seed）",
+  "arms": [
+   {
+    "exp": "r1_base_cue",
+    "id": "S2_pika_nocue",
+    "label": "无系统句",
+    "shot": "ep01-S2"
+   },
+   {
+    "exp": "r1_base_cue",
+    "id": "S2_pika_cue",
+    "label": "有 open_motion + eyeline",
+    "shot": "ep01-S2"
+   }
+  ],
+  "verdict": "首帧已看镜头。有系统句：1.4–4.3 s 视线落在桌面（12 帧印样里约 6 帧不看镜头），结尾又回看镜头；无系统句：约 4/12 帧不看镜头。系统句略有帮助但压不住首帧（单 seed，低置信）。"
+ },
+ {
+  "title": "G5 视线系统句有 / 无（Pika）· ep01-S6 双人对白",
+  "arms": [
+   {
+    "exp": "r1_base_cue",
+    "id": "S6_pika_nocue",
+    "label": "无系统句",
+    "shot": "ep01-S6"
+   },
+   {
+    "exp": "r1_base_cue",
+    "id": "S6_pika_cue",
+    "label": "有系统句",
+    "shot": "ep01-S6"
+   }
+  ]
+ },
+ {
+  "title": "G6 首帧出图：双人系统句“朝向镜头”旧 vs “互相看着对方”新 · ep01-S4（2 seed）",
   "question": "首帧看镜头是不是系统句写出来的？",
-  "arms": [{"exp": "r1_img_gaze", "id": "S4_old_a", "label": "旧 seed A"}, {"exp": "r1_img_gaze", "id": "S4_new_a", "label": "新 seed A"},
-           {"exp": "r1_img_gaze", "id": "S4_old_b", "label": "旧 seed B"}, {"exp": "r1_img_gaze", "id": "S4_new_b", "label": "新 seed B"}]},
- {"title": "G7 首帧出图：单人加“眼睛不看镜头”系统句 · ep01-S3（2 seed）",
-  "arms": [{"exp": "r1_img_gaze", "id": "S3_old_a", "label": "旧 seed A"}, {"exp": "r1_img_gaze", "id": "S3_new_a", "label": "新 seed A"},
-           {"exp": "r1_img_gaze", "id": "S3_old_b", "label": "旧 seed B"}, {"exp": "r1_img_gaze", "id": "S3_new_b", "label": "新 seed B"}]},
- {"title": "G8 PDD 第二段起点 σ（split 4≈0.92 现状 / 5 / 6）与单段 · ep01-S5",
-  "question": "“糊、表情被抹平”是不是两段式第二段起点太高？",
-  "arms": [{"exp": "r1_base_cue", "id": "S5_pdd2", "label": "split 4（现状）", "shot": "ep01-S5"}, {"exp": "r2_pdd_split", "id": "S5_split5", "label": "split 5", "shot": "ep01-S5"},
-           {"exp": "r2_pdd_split", "id": "S5_split6", "label": "split 6", "shot": "ep01-S5"}, {"exp": "r2_pdd_split", "id": "S5_single", "label": "单段 768", "shot": "ep01-S5"}]},
- {"title": "G9 PDD split / 单段 · ep01-S3",
-  "arms": [{"exp": "r1_base_cue", "id": "S3_pdd2", "label": "split 4（现状）", "shot": "ep01-S3"}, {"exp": "r2_pdd_split", "id": "S3_split6", "label": "split 6", "shot": "ep01-S3"},
-           {"exp": "r2_pdd_split", "id": "S3_single", "label": "单段 768", "shot": "ep01-S3"}]},
- {"title": "G10 景别外造型分句删 / 不删（Pika）· S5 近景 / S6 中近景 / S4 中景",
+  "arms": [
+   {
+    "exp": "r1_img_gaze",
+    "id": "sheet",
+    "label": "整图：上排 S4 旧A / 新A / 旧B / 新B；下排 S3 旧A / 新A / 旧B / 新B",
+    "img": "data/ab/video_rca/r1_img_gaze/sheet.jpg"
+   },
+   {
+    "exp": "r1_img_gaze",
+    "id": "faces",
+    "label": "人脸裁切（同顺序）",
+    "img": "data/ab/video_rca/r1_img_gaze/faces.jpg"
+   }
+  ],
+  "verdict": "双人：旧句（朝向镜头）4 张脸里 3 张看镜头；新句（互相看着对方、眼睛不看镜头）0/4。单人加“眼睛不看镜头”句：2/2 仍看镜头。"
+ },
+ {
+  "title": "G7 单人首帧：图1 角色句 / 角色 + 四分之三侧脸句 · ep01-S3、S5（各 2 seed）",
+  "arms": [
+   {
+    "exp": "r4_img_single",
+    "id": "sheet",
+    "label": "整图：上排 S3 角色A / 角色+侧脸A / 角色B / 角色+侧脸B；下排 S5 旧A / 角色+侧脸A / 旧B / 角色+侧脸B",
+    "img": "data/ab/video_rca/r4_img_single/sheet.jpg"
+   },
+   {
+    "exp": "r4_img_single",
+    "id": "faces",
+    "label": "人脸裁切（同顺序）",
+    "img": "data/ab/video_rca/r4_img_single/faces.jpg"
+   }
+  ],
+  "verdict": "只加角色句 2/2 仍看镜头；角色 + 四分之三侧脸句 4 张里 2 张不看镜头（S3-A、S5-A）。残余原因：图1 是正脸直视的大头照。"
+ },
+ {
+  "title": "G10 景别外造型分句删 / 不删（Pika）· S5 近景 / S6 中近景 / S4 中景",
   "question": "提示词里写了画外的高跟 / 裙子，模型会不会拉远或下摇去画它？",
-  "arms": [{"exp": "r1_base_cue", "id": "S5_pika", "label": "S5 原稿", "shot": "ep01-S5"}, {"exp": "r3_hide_offframe", "id": "S5_pika_hide", "label": "S5 删画外", "shot": "ep01-S5"},
-           {"exp": "r1_base_cue", "id": "S6_pika_cue", "label": "S6 原稿", "shot": "ep01-S6"}, {"exp": "r3_hide_offframe", "id": "S6_pika_hide", "label": "S6 删画外", "shot": "ep01-S6"},
-           {"exp": "r1_base_cue", "id": "S4_pika", "label": "S4 原稿", "shot": "ep01-S4"}, {"exp": "r3_hide_offframe", "id": "S4_pika_hide", "label": "S4 删画外", "shot": "ep01-S4"}]}
+  "arms": [
+   {
+    "exp": "r1_base_cue",
+    "id": "S5_pika",
+    "label": "S5 原稿",
+    "shot": "ep01-S5",
+    "img": "data/ab/video_rca/r1_base_cue/ep01-S5__rca_S5_pika_sheet.jpg"
+   },
+   {
+    "exp": "r3_hide_offframe",
+    "id": "S5_pika_hide",
+    "label": "S5 删画外",
+    "shot": "ep01-S5",
+    "img": "data/ab/video_rca/r3_hide_offframe/ep01-S5__rca_S5_pika_hide_sheet.jpg"
+   },
+   {
+    "exp": "r1_base_cue",
+    "id": "S6_pika_cue",
+    "label": "S6 原稿",
+    "shot": "ep01-S6",
+    "img": "data/ab/video_rca/r1_base_cue/ep01-S6__rca_S6_pika_cue_sheet.jpg"
+   },
+   {
+    "exp": "r3_hide_offframe",
+    "id": "S6_pika_hide",
+    "label": "S6 删画外",
+    "shot": "ep01-S6",
+    "img": "data/ab/video_rca/r3_hide_offframe/ep01-S6__rca_S6_pika_hide_sheet.jpg"
+   },
+   {
+    "exp": "r1_base_cue",
+    "id": "S4_pika",
+    "label": "S4 原稿",
+    "shot": "ep01-S4",
+    "img": "data/ab/video_rca/r1_base_cue/ep01-S4__rca_S4_pika_sheet.jpg"
+   },
+   {
+    "exp": "r3_hide_offframe",
+    "id": "S4_pika_hide",
+    "label": "S4 删画外",
+    "shot": "ep01-S4",
+    "img": "data/ab/video_rca/r3_hide_offframe/ep01-S4__rca_S4_pika_hide_sheet.jpg"
+   }
+  ],
+  "verdict": "Pika 下删 / 不删画外造型分句几乎没差别：S4 脸高 0.122 / 0.124、S5 0.173 / 0.169，印样一致。Pika 本来就不为画外的鞋拉远（PDD 才会）→ K-REN-701 开关保持关。"
+ },
+ {
+  "title": "G11 Pika 下首帧不看镜头时会不会转头看镜头 · ep01-S4（首帧 = G6 新句出图 A / B）",
+  "question": "总调度头号任务①",
+  "arms": [
+   {
+    "exp": "r1_base_cue",
+    "id": "S4_pika",
+    "label": "生产首帧（女主看镜头）",
+    "shot": "ep01-S4"
+   },
+   {
+    "exp": "r4_pika",
+    "id": "faces",
+    "label": "新首帧 A / B 的 Pika 片：第 0/48/96/150/188 帧人脸",
+    "img": "data/ab/video_rca/r4_pika/faces_vid.jpg"
+   },
+   {
+    "exp": "r4_pika",
+    "id": "S4_ffnew_sheet",
+    "label": "新首帧 A 印样",
+    "img": "data/ab/video_rca/r4_pika/ep01-S4__rca_S4_ffnew_sheet.jpg"
+   }
+  ],
+  "verdict": "首帧不看镜头 → Pika 全程不看镜头：2 条片 × 5 帧 × 2 张脸 = 20 个样本 0 个看镜头。看镜头的开关在首帧。"
+ },
+ {
+  "title": "G12 Pika 外套中途消失 · ep01-S3：原稿 / 换 seed / 加服装保持系统句",
+  "question": "总调度头号任务②",
+  "arms": [
+   {
+    "exp": "r1_base_cue",
+    "id": "S3_pika_sheet",
+    "label": "原稿 seed A",
+    "img": "data/ab/video_rca/r1_base_cue/ep01-S3__rca_S3_pika_sheet.jpg"
+   },
+   {
+    "exp": "r4_pika",
+    "id": "S3_seed2_sheet",
+    "label": "换 seed",
+    "img": "data/ab/video_rca/r4_pika/ep01-S3__rca_S3_seed2_sheet.jpg"
+   },
+   {
+    "exp": "r4_pika",
+    "id": "S3_outfitcue_sheet",
+    "label": "加服装保持系统句",
+    "img": "data/ab/video_rca/r4_pika/ep01-S3__rca_S3_outfitcue_sheet.jpg"
+   },
+   {
+    "exp": "r7_outfit_text",
+    "id": "S3_nocrop_sheet",
+    "label": "诊断：去掉 cropped",
+    "img": "data/ab/video_rca/r7_outfit_text/ep01-S3__rca_S3_nocrop_sheet.jpg"
+   },
+   {
+    "exp": "r1_base_cue",
+    "id": "S3_pdd2_sheet",
+    "label": "PDD 同条件",
+    "img": "data/ab/video_rca/r1_base_cue/ep01-S3__rca_S3_pdd2_sheet.jpg"
+   }
+  ],
+  "verdict": "外套在 3.3–3.9 s 消失、之后以短款 / 马甲回来：换 seed、加服装系统句、去掉 cropped、换 PDD 都复现（5/5）。下一组 G13 测“整理外套下摆”这一拍。"
+ },
+ {
+  "title": "G13 外套形变诊断：把“整理外套下摆”一拍换成不碰衣服的动作 · ep01-S3（2 seed）",
+  "question": "是不是“对衣服的动作”被演成脱下再穿上？",
+  "arms": [
+   {
+    "exp": "r8_outfit_action",
+    "id": "a",
+    "label": "seed A",
+    "img": "data/ab/video_rca/r8_outfit_action/ep01-S3__rca_S3_noblazeract_sheet.jpg"
+   },
+   {
+    "exp": "r8_outfit_action",
+    "id": "b",
+    "label": "seed B",
+    "img": "data/ab/video_rca/r8_outfit_action/ep01-S3__rca_S3_noblazeract_s2_sheet.jpg"
+   }
+  ],
+  "verdict": "去掉“整理外套下摆”这一拍：2/2 个 seed 外套全程穿着，不再“消失再穿回”（前面同条件 6/6 都消失）。剩余：外套下摆变短（形状漂移），S4 不碰衣服也有。"
+ },
+ {
+  "title": "G14 双人出图系统句 3-seed A/B：旧（朝向镜头）/ 正向句 / 实测句 · ep01-S5、ep03-S4（本机道）",
+  "arms": [
+   {
+    "exp": "r5_img_twoshot",
+    "id": "f1",
+    "label": "ep01-S5：每 seed 依次 旧 / 正向 / 实测（缺 1 张下载失败）",
+    "img": "data/ab/video_rca/r5_img_twoshot/faces_01S5.jpg"
+   },
+   {
+    "exp": "r5_img_twoshot",
+    "id": "f2",
+    "label": "ep03-S4：同上",
+    "img": "data/ab/video_rca/r5_img_twoshot/faces_03S4.jpg"
+   }
+  ],
+  "verdict": "看镜头的脸：旧句 8/10、正向句 0–1/10、实测句 0/12 → 两句同样有效，已改回正向句（总调度 r2 决定）。"
+ },
+ {
+  "title": "G15 单人：正脸单参考 vs 正脸 + 侧脸双参考（本机道，6 对同 seed）",
+  "arms": [
+   {
+    "exp": "r2_dualref",
+    "id": "f",
+    "label": "每镜 A（单）/ D（双）",
+    "img": "data/ab/video_rca/r2_dualref/faces.jpg"
+   },
+   {
+    "exp": "r2_dualref",
+    "id": "f6",
+    "label": "ep01-S6 补",
+    "img": "data/ab/video_rca/r2_dualref/faces_S6.jpg"
+   }
+  ],
+  "verdict": "看镜头：单参考 3–4/6、双参考 3/6；sface 0.885 → 0.843；双参考 1 张多半个人头。没有明显收益，不建议上生产。"
+ },
+ {
+  "title": "G16 外套形变修法候选：保留整理动作，同一拍补“外套一直穿在肩上” · ep01-S3（2 seed）",
+  "arms": [
+   {
+    "exp": "r9_outfit_keep",
+    "id": "a",
+    "label": "seed A",
+    "img": "data/ab/video_rca/r9_outfit_keep/ep01-S3__rca_S3_keepon_sheet.jpg"
+   },
+   {
+    "exp": "r9_outfit_keep",
+    "id": "b",
+    "label": "seed B",
+    "img": "data/ab/video_rca/r9_outfit_keep/ep01-S3__rca_S3_keepon_s2_sheet.jpg"
+   }
+  ],
+  "verdict": "补“外套一直穿在肩上”无效：2/2 seed 仍在 3.3–3.9 s 消失再穿回。只有去掉对衣服的动作才行（G13 0/2）。"
+ }
 ]

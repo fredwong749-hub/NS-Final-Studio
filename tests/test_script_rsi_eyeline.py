@@ -33,7 +33,12 @@ def test_every_video_recipe_inherits_eyeline_and_open_motion():
 def test_two_shot_clause_positive_gaze_no_camera():
     from ns_agent.framing import two_shot_clause
     s = two_shot_clause(2, None)
-    assert s and not re.search(r"镜头|camera|lens", s) and "视线" in s
+    # ⤴ VIDEO-RCA 11-01（总调度 r2 决定，K-REN-703 证据例外）：现行为实测句 TWO_SHOT_TESTED（看镜头 3/4 → 0/4），
+    # 只允许“不看镜头 / off the lens”这种否定式提到镜头；r2 A/B 后若正向句同样有效，改回 TWO_SHOT_POSITIVE
+    from ns_agent.framing import TWO_SHOT_POSITIVE, TWO_SHOT_TESTED
+    assert s in (TWO_SHOT_TESTED, TWO_SHOT_POSITIVE)
+    assert not re.search(r"朝向镜头|看着镜头|toward the camera|at the camera|into the lens", s)
+    assert not re.search(r"镜头|camera|lens", TWO_SHOT_POSITIVE) and "视线" in TWO_SHOT_POSITIVE
     assert two_shot_clause(2, "part") == "" and two_shot_clause(1, None) == ""
 
 

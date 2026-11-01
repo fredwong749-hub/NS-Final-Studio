@@ -233,11 +233,49 @@ def apply(pf: dict, v: dict | None) -> dict:
         blk.append("Q9")
         pf["reasons"] = [r for r in pf.get("reasons") or [] if not str(r).startswith("Q9")] + [f"Q9 {d}"]
     pf["blocking"] = blk
+    relaxed = q1_yaw_relax(pf, v)                       # Q1 按转角放宽（要看图身份 ok，所以在这里和 Q9 一起算）
+    if relaxed and not pf["blocking"]:
+        pf["ok"] = True
     if pf.get("ok") is not None or st in ("fail", "untested"):
         pf["ok"] = bool(pf.get("ok")) and st not in ("fail", "untested")
-    pf["vqa_gate"] = {"status": st, "defects": ev.get("defects") or [], "unsure": ev.get("unsure") or [],
+    pf["vqa_gate"] = {"q1_yaw_relax": relaxed, "status": st, "defects": ev.get("defects") or [], "unsure": ev.get("unsure") or [],
                       "key": ev.get("key"), "enforce": enforced(), "continuity_ref": (v or {}).get("continuity_ref")}
     return pf
+
+
+def q1_yaw_relax(pf: dict, v: dict | None) -> str | None:
+    """Q1 按转角放宽（总调度 11-01 23:0x 采纳 IMGFIX 方案；参数 config/gen_contract.json image_thresholds.Q1_identity.yaw_relax）：
+    单脸镜里林晚身份分只差在转角掉分（Q1 只因“lin_wan x < 0.70”不过），MediaPipe 测得 |yaw_n| 落在放宽档、分数达到该档线，
+    并且本地看图 identity_drift = ok → Q1 改判 pass（证据写明放宽档）。看图身份不是 ok（defect / unsure / 没测）→ 维持 0.70。
+    → 改判说明或 None（原地改 pf）"""
+    try:
+        from ns_agent.gen_contract import cfg as gcfg
+        yr = ((gcfg().get("image_thresholds") or {}).get("Q1_identity") or {}).get("yaw_relax") or {}
+    except Exception:  # noqa: BLE001
+        return None
+    q1 = next((i for i in pf.get("items") or [] if i.get("id") == "Q1"), None)
+    if not yr or not q1 or q1.get("status") != "fail" or not v or v.get("error"):
+        return None
+    ev = q1.get("evidence") or {}
+    sims = ev.get("sims") or {}
+    if len(sims) != 1 or ev.get("strangers") or "；" in str(q1.get("detail") or ""):
+        return None                                    # 只处理“单脸、唯一不过原因是分数线”的情形
+    cid, sim = next(iter(sims.items()))
+    faces = ((v.get("gaze_mp") or {}).get("faces")) or []
+    if cid not in (yr.get("characters") or []) or sim is None or len(faces) != 1:
+        return None
+    if yr.get("require_vlm_identity_ok", True) and ((v.get("checks") or {}).get("identity_drift") or {}).get("s") != "ok":
+        return None
+    yaw = abs(float(faces[0].get("yaw_n") or 0))
+    need = next((t for lim, t in yr.get("tiers") or [] if yaw < lim), None)
+    if need is None or sim < need:
+        return None
+    note = f"Q1 按转角放宽：{cid} {sim:.3f} ≥ {need}（|yaw_n| {yaw:.2f}；看图身份 ok；原线 0.70）"
+    q1.update(status="pass", detail=note + "；原判：" + str(q1.get("detail") or ""),
+              evidence={**ev, "yaw_relax": {"yaw": round(yaw, 3), "need": need}})
+    pf["blocking"] = [b for b in pf.get("blocking") or [] if b != "Q1"]
+    pf["reasons"] = [r for r in pf.get("reasons") or [] if not str(r).startswith("Q1")]
+    return note
 
 
 def q9_passed(pf: dict | None) -> bool:

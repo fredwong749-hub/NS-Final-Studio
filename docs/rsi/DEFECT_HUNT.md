@@ -85,6 +85,7 @@ owner 以 `tools/qa/ownership.yaml` 为准；剧本类改法只给写作方规�
 | DH-F14 跨镜鞋 / 饰品 | shoe_mismatch / accessory_mismatch | 同造型相邻镜不一致 → 拦 | VQA 标定集鞋 7 / 7 |
 | DH-F13 / V17 第二人没表情 | blank_expression | 多人镜 defect → 拦并回写剧本 QW-A5 | 多人镜现行首帧 22 张（defect_vlm --dry 列表），需标注 |
 | DH-V16 鬼影 / 穿模 | morphing | 视频 defect → 换 seed | 无，需标注 |
+| DH-F21（新，AUDIT 19:3x）单品串人：一个角色的标志性单品（指甲 / 手套 / 首饰）长在另一个角色身上 | item_on_wrong_person（VQAGATE 新加，从 outfit_mismatch 拆出来；只判两人及以上的镜头） | 先只记录；标定过了再拦 | 正例：reflock_val S4_vN，顾沉手上长着林晚的“冰川满钻尖甲”（data/ab/localgpu_verify/repro_S4_vN/，服务器原图也是这样）；反例：两人镜里已通过的首帧（ep01-S6、ep04-S1 等）；结果写 data/vqa/gate_calib/item_wrong_person.json。**22:5x 实测：看图模型做不成高置信拦截**（正例原口径判 na、口径 B 判 defect 但理由错），改法见 GATE_CALIBRATION §8：手部裁切后单独问 |
 
 VQAGATE 可以直接调 `tools/qa/defect_vlm.py`（不改它）；结果写 data/qa/defect_hunt/vlm_results.jsonl，首帧判定同时进 data/vqa/index.json（VQA 的缓存入口）。
 

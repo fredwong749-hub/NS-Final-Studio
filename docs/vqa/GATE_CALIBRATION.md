@@ -64,3 +64,49 @@
 - 在 100 张标签上加垂眼排除后扫 P = 0.12–0.25：两折留出召回 25/34、27/37，误报 0/16、0/13，全都不变（出处 data/acting/mp_features_v1.json）。原因是标签里落在视线带内的正例 pitch 都 ≤ 0.12；pitch 高的那个反例本来就被垂眼条件排除了。
 - 样本外 data/ab/identity_gaze_ab/：A_s20261201（pitch 0.129）改后命中；A_s20261301、ep01-S2 A（pitch 0.111 / 0.104，分数 0.014 / 0.01）照旧命中；两张 B 图视线离轴（分数 0.375 / 0.495 / −0.373），不命中。
 - 局限：标签集里 pitch 0.12–0.2 之间没有带内反例，误报不升只说明“没有反证”，不代表测过。新首帧过闸门后，按总调度抽查继续看。
+
+## 7. 本机 4080（12 GB）显存压测（20:0x–20:15 独占时段，data/vqa/vram_bench/b_600k_150k_1000.json）
+- 背景：LOCALGPU 实测原口径（主图 1.3 MP、参考图 0.36 MP、输出 1800 token，输入 4602 token）单条峰值 13293 MiB，超过 12282 MiB，溢出到共享内存，一条要 9 分钟以上。
+- 本次口径 B：主图 0.6 MP、参考图 0.15 MP、输出上限 1000 token、sdpa（服务端兜底上限：环境变量 VQA_CAP_SUBJECT_PX / VQA_CAP_REF_PX / VQA_CAP_TOKENS / VQA_ATTN）。
+  - 生产形态请求（ep01 当前首帧，带身份 / 造型 / 参考板 / 上一镜参考，输入 3655–3872 token）：峰值 10803–11320 MiB（reserved 11262–11896），单条 42–53 s。4 条（出处 data/vqa/vram_bench/b.log）。
+  - 单图请求（标签图，无参考图，输入 2575–2631 token）：峰值 8622–8717 MiB，单条 35–51 s。14 条。
+  - 目标“峰值 ≤ 11 GB、≤ 60 s”：耗时达标；峰值单图请求达标，生产形态 4 条里 3 条超出 0.1–0.3 GB，**还没达标**。
+- 读代码的判断：Qwen3-VL 视觉注意力按图分块算，generate 只保留最后一个 token 的 logits。剩下的大头是长 prompt（文字约 2000 token）预填充时的注意力，怀疑 Windows 上 sdpa 退回了 math 内核、整块物化注意力矩阵。已加开关 VQA_SDPA_EFFICIENT=1（强制用 efficient / flash 内核），**未实测**。
+- 准确率（同一独占时段）：
+  - ep01 当前首帧 S1–S4 和 gpu36 原口径（1.3 MP）比，阻断项判定：S1、S3 都无缺陷，一致；S4 都判看镜头，一致；S2 原口径的看镜头来自 MediaPipe 旁证（看图模型本身两边都判 ok），合并旁证后两边一致。全部 24 项逐项比：S1、S3 一致率 1.0，S2 0.97；S4 只有 0.37，原口径那条是截断抢救来的判定，项不全，不可比。
+  - eye_contact 在标签图上（14 条，10 正 4 反；新 rubric 写法“侧脸但瞳孔对镜也算”）：召回 8/10、误报 1/4（经 contract.sanitize 降级后；降级前 9/10、3/4）。反例只有 4 张，误报率不可信。这些单图请求没带参考图，发色 / 服装 / 多肢等项不可比，只看 eye_contact。
+  - 还没做：同一批图在本机原口径（1.3 MP）下的对照。原口径会溢出、一条 9 分钟，要等 SDPA 开关测完、或者到 gpu36 上跑同口径对照。
+- 没跑完的 6 条：ep01-S5 / S6 / S7 当前首帧、标签反例 3 张。下一个时段先测 VQA_SDPA_EFFICIENT=1 能否把生产形态压到 11 GB 以内，再补这 6 条和原口径对照。
+- 口径一致：本机口径 B 和 gpu36 原口径不同。建议本机达标后，gpu36 也改成同一口径（同一组 VQA_CAP_* 环境变量），避免两套标定；在那之前两边结果分别标注。
+
+## 8. 转脸让身份分掉分：SFace 与契约 Q1（ArcFace）都受头部转角影响（IMGFIX 11-01 22:2x，总调度 fredw-2b 派）
+- 对照（同一张设定图、同一个人，只有朝向不同；裁切 data/ab/imgfix/pose_ctrl/，分数对现行身份脸 lin_wan_face_hd_A_s202）：
+  | 设定图 | 正面特写栏 | 正面全身栏（小脸） | 侧面栏（约 90°） |
+  |---|---|---|---|
+  | lin_wan_lookA_v2_s202 | SFace 0.950 / Q1 0.961 | 0.863 / 0.773 | 0.410 / 0.284 |
+  | lin_wan_lookB_v2_s505 | 0.949 / 0.931 | 0.814 / 0.771 | 0.353 / 0.231 |
+  | lin_wan_lookC_v2_s202 | 0.951 / 0.960 | 0.855 / 0.802 | 0.435 / 0.377 |
+  出处：data/ab/imgfix/pose_ctrl/sface_sheets.json；Q1 = tools/gen_contract/local_score（buffalo_l w600k_r50，与 gpu33 同代码）→ data/ab/imgfix/q1_arcface_local.json。
+- 推测得到证实：同一身份，转到侧面后 SFace 掉到 0.35–0.44，Q1 掉到 0.23–0.38，所以掉分主要来自朝向，不是换了人。
+- 出图实测（data/ab/imgfix/takes.jsonl，54 张有 MediaPipe 转角）：SFace 和 |yaw_n| 的皮尔逊相关系数 −0.92。|yaw_n| 小于 0.2 时 SFace 均值 0.917（28 张）；大于等于 0.6 时均值 0.687（21 张）。
+- Q1 线是林晚 0.70。按 K-REN-704 终版（视线落点句 + 四分之三侧脸句）出的 8 张：Q1 在 0.699–0.868 之间，7/8 达到 0.70（ep01-S3 s20261203 为 0.699），转开的那几张余量只有 0.00–0.05。
+- 交总调度定的放宽方案（未实施）：林晚 Q1 按 gaze_mp 的 |yaw_n| 分档。小于 0.4 维持 0.70；0.4 到 0.8 用 0.65；0.8 及以上用 0.60。放宽的同时要求看图闸门身份项通过（不认作别人）。依据是同人侧面栏 Q1 只有 0.23–0.38，而三套设定图之间正面同人都在 0.93 以上。风险：放宽档里更难分开长得像的人；现有标签里没有转脸的“别人”样本，未测。
+
+## 8. gpu36 口径对照，切到口径 B（22:0x–22:5x，gpu36 3090，经隧道 8871 发请求）
+- 同一批 24 条标定请求（ep01 当前首帧 4 条 + 标签图 20 条）加 5 条单品串人请求，原口径（1.3 MP / 0.36 MP / 1800 token）和口径 B（0.6 MP / 0.15 MP / 1000 token）各跑一遍，共 29 对（出处 data/vqa/vram_bench/compare_g36_orig_g36_Bfull.json、compare_g36_orig_extra_g36_B_extra.json）。
+  - 阻断项逐项一致率：eye_contact 27/29（0.931）、continuity_break 29/29、hair_mismatch 29/29、framing_mismatch 27/29（0.931）、extra_person 28/29（0.966）、underage_look 29/29、extra_limbs 24/29（0.828）。
+  - 整组阻断项完全一致：24 条主样本里 15/24；不看 extra_limbs，29 对里 24/29。
+  - 全部检查项逐项一致率 0.866（24 条主样本）。
+  - eye_contact 对人工标签：原口径召回 8/10、误报 3/10；口径 B 召回 8/10、误报 2/10。
+  - 单条耗时：原口径 28.7–53.1 s，口径 B 29.3–63.7 s（3090）。
+- 结论：除 extra_limbs 外，阻断项逐项一致率都 ≥ 0.93，达到原 0.85 的线；extra_limbs 0.828，差一点。它不管换不换口径都不稳（两个方向都有翻转），主判据要靠 V6 的手数规则加看图复核（docs/vqa/V6_HANDCOUNT_PLAN.md）。**已切**：config/vqa.json model.subject_max_pixels / ref_max_pixels / max_new_tokens 改成 600000 / 150000 / 1000（局部修改，旁边写了 _caliber 说明）。client 每次请求都会把这三个值带过去，本机和 gpu36 从此只用口径 B 一套标定。要回退，把这三个值改回原值即可。
+- 单品串人（item_on_wrong_person，出处 data/vqa/gate_calib/item_wrong_person.json）：正例 S4_vN（顾沉右手满钻尖甲）在原口径下判 na（模型把两人镜当成单人镜），在口径 B 下判 defect，但证据写的是“顾沉戴戒指”，理由不对；3 张反例两种口径都判 na。**做不成高置信拦截，保持只记录。** 下一步改法：用 MediaPipe 检出每只手、按身体分给人，把非本人角色的手部裁切放大后单独问“这只手的指甲是什么样”，再和参考板上该单品的主人比对（DH-F21）。
+- 期间顺手修的 bug：client 走隧道 8871 时把本机文件路径直接发给 gpu36，gpu36 读不到，报 FileNotFoundError（从 20:1x 起，隧道上的回扫请求全部看图失败，记成未测）。已改为先缩图转字节再发，加了回归测试 test_tunnel_requests_send_bytes_not_local_paths。
+
+## 9. Q1 按转角放宽、Q2 外套探针重标、多肢双条件（23:0x–23:4x，总调度采纳 / 决定）
+- **Q1 按转角放宽（已实现）**：config/gen_contract.json Q1_identity.yaw_relax（局部插入）。林晚按 gaze_mp 的 |yaw_n| 分档：< 0.4 线 0.70；0.4–0.8 线 0.65；≥ 0.8 线 0.60。同时要求本地看图 identity_drift = ok，不是 ok（缺陷 / 拿不准 / 没测）就回到 0.70。只用于单脸镜：Q1 只有一个角色、唯一不过原因是分数线、MediaPipe 只测到一张脸。实现在 ns_agent.vqa.contract.q1_yaw_relax，要看图结果，所以在 Q9 并进契约时（contract.apply：producer 的 vqa_gate、gate_scan、backfill）一起算；笔记本走 UF._postflight 现场看图那条路（_q9_live）不放宽。测试 test_q1_yaw_relax_tiers（6 种情形）。档位来自 IMGFIX 的转角掉分同人对照，VQAGATE 没另做标定。
+- **Q2 外套探针（改为只记录，重标未达标）**：gen_contract outer_record_only=true（总调度 23:0x）。重标数据：data/ab/imgfix/ 68 张由 VQAGATE 目视标“有没有外套”（38 穿 / 30 没穿；2 张看不清剔除），加旧标定 8 张（5 没穿、3 穿），出处 data/vqa/gate_calib/jacket_probe.json、jacket_probe_old_takes.json。
+  - 现行句对：穿了外套的最低 0.059 / 0.074 / 0.107（外套敞开、长发盖住两侧），没穿的最高 0.164 → 分不开。重标后零误报线 0.17 时召回 35/38；两折留出 19/20、误报 1/14，16/18、误报 0/16。
+  - 改写句对（“open dark blazer … jacket visible at her shoulders and sides, long hair over it”）：imgfix 内零误报线 0.12 时召回 36/38；两折 19/20、误报 0/14，18/18、误报 1/16。但旧标定里没穿外套的 ep02-S1v6 也有 0.129，所以全集零误报线要 0.13（召回 38/41），余量只有 0.001。
+  - 结论：两种句对都**不达标**，维持只记录。外套靠 v2 设定图（终版 7/8 穿上了）加看图 outfit 记录兜底。下一步：换区域（只裁肩膀和两侧上臂）或换判据（本地看图单独问“有没有穿外套”），再标定。
+- **多肢双条件（已实现）**：config/vqa.json extra_limbs blocking=false。score_clip.gate 里 V6 手数规则命中 且 看图 extra_limbs = defect 才判“多肢”；只有一方命中写进 soft。测试 test_multi_limb_needs_both_v6_and_vlm。

@@ -142,6 +142,8 @@ from ns_api import character_hub as CHUB  # noqa: E402  ASSETUX 人物资产页�
 app.include_router(CHUB.router)
 from ns_api import producer as PRODUCER  # noqa: E402  PRODUCER 制作监督：/api/producer/status、pause / resume / gate（读 data/producer/registry.json）
 app.include_router(PRODUCER.router)
+from ns_api import infra_status as INFRA  # noqa: E402  UIRSI r38 实时连接状态：/api/infra/status（只读看门狗 / 常驻健康状态文件，不在请求里 ssh）
+app.include_router(INFRA.router)
 app.router.on_startup.append(EPROD.resume_on_startup)   # 在 JOBS.restore 之后：被重启打断的任务按可恢复错误重试
 VJ.get_script = lambda: _script
 

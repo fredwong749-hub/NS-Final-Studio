@@ -1,4 +1,4 @@
-# AUDIT · RESEARCH 收尾复核 r03（2026-11-01 18:10–18:18，独立复核方 = AUDIT，交总调度 fredw-2b）
+# AUDIT · RESEARCH 收尾复核 r03（2026-11-01 18:07–18:08，独立复核方 = AUDIT，交总调度 fredw-2b）
 
 复核对象：CHANGELOG “17:5x RESEARCH 收尾（L-087）”。机读版：data/qa/audit/RESEARCH_r03.json
 

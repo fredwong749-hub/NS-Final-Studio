@@ -4,6 +4,8 @@ import "./rendertasks.css";
 import { StepBar } from "./RenderTasks";
 import { fmtS, type RTRow } from "./RenderTasks.helpers";
 import { cardName, cardTip, laneState, lockWord, refreshLanes, useLanes as useLaneStore, type LaneInfo } from "../v3/edit/lanes";
+import { InfraPanel } from "../v3/InfraStatus";
+import { laneReason, useInfra, type InfraStatus } from "../v3/InfraStatus.helpers";
 
 /** fredw-92/UXF2（审查 #45 / #46 / #47）：去掉面板里的“按集渲染”（整集出片只留顶栏一个入口）；每张卡先一句人话，
  *  进程 / pid / ComfyUI 队列收进“技术细节”；道表接口 404 后不再轮询。
@@ -149,7 +151,9 @@ function useGpuLive(enabled: boolean) {
 const barRow = (progress: RTRow["progress"], eta: number | null | undefined, elapsed: number | null | undefined): RTRow =>
   ({ status: "rendering", progress, eta_s: eta ?? null, elapsed_s: elapsed ?? null }) as RTRow;
 
-function LiveCard({ c, lane }: { c: LiveCardData; lane?: LaneInfo }) {
+function LiveCard({ c, lane, infra, merged }: { c: LiveCardData; lane?: LaneInfo; infra?: InfraStatus | null; merged?: boolean }) {
+  // UIRSI r38：“最近出图”缩略图读不到（图在服务器上、笔记本没有且连接不通）→ 写占位字，不出裂图
+  const [thumbBad, setThumbBad] = useState<string | null>(null);
   const r0 = c.running[0];
   const hb = c.heartbeats[0];
   const hw = c.hw;
@@ -159,7 +163,9 @@ function LiveCard({ c, lane }: { c: LiveCardData; lane?: LaneInfo }) {
     : c.state === "offline"
       ? "离线"
       : c.link
-        ? `暂时连不上 ${c.link.down_s} 秒`
+        ? merged
+          ? "连不上"
+          : `暂时连不上 ${c.link.down_s} 秒`
         : c.state === "busy"
           ? "在跑"
           : c.state === "external"
@@ -181,6 +187,8 @@ function LiveCard({ c, lane }: { c: LiveCardData; lane?: LaneInfo }) {
         )}
         {!hw && <span className="gpu-muted">温度 / 显存读取中…</span>}
       </header>
+      {/* UIRSI r38：连不上时说原因（跳板断了 / 只是这条连接断了、正在自动重连）；全部卡都断时面板顶部已说一次，这里不重复 */}
+      {c.link && !c.faulty && !merged && <span className="gl-why">{laneReason(infra ?? null, c.lane, c.state === "offline" ? undefined : c.link.down_s)}</span>}
       {c.throttle && (
         <span className="gl-thr" title={c.throttle.text}>
           ⚠ {c.throttle.by_guard ? "温控守护限功耗" : "功耗墙"} {Math.round(c.throttle.limit_w)} W（默认 {Math.round(c.throttle.default_w)} W）
@@ -201,7 +209,11 @@ function LiveCard({ c, lane }: { c: LiveCardData; lane?: LaneInfo }) {
             <div className={`gl-run${c.thumb ? "" : " nothumb"}`}>
               {c.thumb && (
                 <div className="gl-thumb" data-zoom-label={`最近出图：${c.thumb.what}`}>
-                  <img src={c.thumb.src} data-full={c.thumb.full} alt={`最近出图：${c.thumb.what}`} title={`最近出图：${c.thumb.what}（${c.thumb.file}）`} loading="lazy" />
+                  {thumbBad === c.thumb.src ? (
+                    <span className="gl-thumb-none" title={`最近出图：${c.thumb.what}`}>图在服务器上，笔记本还没有</span>
+                  ) : (
+                    <img src={c.thumb.src} data-full={c.thumb.full} alt={`最近出图：${c.thumb.what}`} title={`最近出图：${c.thumb.what}（${c.thumb.file}）`} loading="lazy" onError={() => setThumbBad(c.thumb!.src)} />
+                  )}
                 </div>
               )}
               <div className="gl-card">
@@ -415,12 +427,14 @@ export function GpuButton({ labels, className }: { labels?: "cards" | "short"; c
     if (!open) refreshLanes();
     setOpen((o) => !o);
   };
+  const infraDead = useInfra().dead;
   if (labels === "short") {
     // fredw-92/UXF1：顶栏只放一个短胶囊“卡 3/5 忙”，每条道在干什么放进点开的 GPU 面板（悬停也能看）
     const n = lanes?.length ?? 0;
     const up = lanes?.filter((l) => l.reachable) ?? [];
     const busyN = (lanes ?? []).filter(laneBusy).length;
-    const text = !lanes ? (laneErr ? "卡状态读不到" : null) : !n ? "卡 —" : `卡 ${busyN}/${n} 忙${up.length < n ? ` · ${n - up.length} 离线` : ""}`;
+    // UIRSI r38：顶栏旁边有了“连接 N/6”胶囊，这里不再重复“· N 离线”（离线几张仍在悬停提示和面板里）
+    const text = !lanes ? (laneErr ? "卡状态读不到" : null) : !n ? "卡 —" : `卡 ${busyN}/${n} 忙${up.length < n && infraDead ? ` · ${n - up.length} 离线` : ""}`;
     return (
       <>
         <button className={`${className ?? "gpu-btn"}${busyN ? " busy" : ""}${stale ? " stale" : ""}`} onClick={toggle}
@@ -498,6 +512,10 @@ function LaneRow({ l, g }: { l: LaneInfo; g: Gpu | null }) {
 
 function GpuDrawer({ data, err, lanes, onClose }: { data: GpuData | null; err: string | null; lanes: LaneInfo[] | null; onClose: () => void }) {
   const live = useGpuLive(true);
+  // UIRSI r38（项目方：“uiux加个实时连接状态”）：面板顶部一块连接状态；卡片“连不上”带原因；全部卡都连不上时只在顶部说一次
+  const { data: infra } = useInfra();
+  const usableCards = live?.cards.filter((c) => !c.faulty) ?? [];
+  const allDown = usableCards.length > 0 && usableCards.every((c) => !!c.link && !c.link.offline);
   useEffect(() => {
     const h = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", h);
@@ -525,6 +543,12 @@ function GpuDrawer({ data, err, lanes, onClose }: { data: GpuData | null; err: s
           关闭 Esc
         </button>
       </header>
+      {infra && <InfraPanel d={infra} compact />}
+      {allDown && (
+        <div className="gpu-err">
+          全部卡都连不上：{infra ? (infra.relay.ok ? "到服务器的连接断了，正在自动重连" : "跳板断了，等跳板恢复后自动重连") : `已 ${Math.max(...usableCards.map((c) => c.link?.down_s ?? 0))} 秒`}（下面每张卡不再逐张重复）
+        </div>
+      )}
       {err && <div className="gpu-err">温度 / 显存读取失败：{err}</div>}
       {data && !live && (!data.sources.bridge || !data.sources.ssh) && (
         <div className="gpu-err">
@@ -549,7 +573,7 @@ function GpuDrawer({ data, err, lanes, onClose }: { data: GpuData | null; err: s
                 {h && !h.ok ? <span className="gpu-muted">（温度 / 显存读不到：{h.err ?? "连接中"}）</span> : null}
               </div>
               {cs.map((c) => (
-                <LiveCard key={c.id} c={c} lane={(lanes ?? []).find((l) => l.id === c.lane)} />
+                <LiveCard key={c.id} c={c} lane={(lanes ?? []).find((l) => l.id === c.lane)} infra={infra} merged={allDown} />
               ))}
             </div>
           );

@@ -27,6 +27,21 @@ def _url() -> str:
     return u
 
 
+def _lan_url() -> str | None:
+    """NETFIX 11-01（K-OPS-N03）：gpu36 看图服务的内网入口（tools/netfix/lan_proxy.py，只听 10.0.0.36、只认 gpu33 来源）。
+    只在服务器上用（OFFLINE_SELF 有值 = 常驻 producer；或 VQA_LAN=1）；地址只认 config model.lan_url，且必须是 10. 内网地址——
+    图片仍只在自家机器之间走（K-REV-V01）。笔记本上不试（10.0.0.36 不可达，白等超时）。"""
+    if not (os.environ.get("OFFLINE_SELF") or os.environ.get("VQA_LAN") == "1"):
+        return None
+    m = cfg().get("model") or {}
+    u = m.get("lan_url")
+    if not u or os.environ.get("OFFLINE_SELF") == m.get("host"):
+        return None
+    if not u.split("//", 1)[-1].split(":", 1)[0].startswith("10."):
+        return None
+    return u if _local_up(u) else None
+
+
 def _key(req: dict) -> str:
     h = hashlib.sha256()
     h.update((cfg().get("version", "") + req.get("system", "") + req["text"]).encode("utf-8"))
@@ -107,6 +122,13 @@ def generate(req: dict, *, wait_s: float = 1800, refresh: bool = False, label: s
         # 一条长连接，免得每张图都走一次跳板握手），再退回单次 ssh 管道
         alt = url.rsplit(":", 1)[0] + ":" + str(int(url.rsplit(":", 1)[1].split("/")[0]) + 1)
         url = alt if _local_up(alt) else None
+        if not url:                     # NETFIX 11-01（K-OPS-N03）：在服务器上跑（gpu33 常驻 producer）时走 gpu36 内网入口
+            url = _lan_url()
+        if url:                       # 隧道那头是 gpu36，读不到本机路径：和 ssh 管道一样先缩图转字节（20:xx gpu36 FileNotFoundError）
+            for im in body["images"]:
+                if "path" in im and Path(im["path"]).exists():
+                    im["b64"] = base64.b64encode(_shrink(Path(im["path"]), im.get("max_pixels"))).decode()
+                    im.pop("path")
     res = _post_local(url, body, wait_s + 120) if url else _post_ssh(body, wait_s + 120)
     if "error" not in res:
         res["key"] = key

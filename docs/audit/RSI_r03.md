@@ -1,4 +1,4 @@
-# AUDIT · RSI r4 + r5 复核（AUDIT r03，2026-11-01 18:03–18:22，独立复核方 = AUDIT，交总调度 fredw-2b）
+# AUDIT · RSI r4 + r5 复核（AUDIT r03，2026-11-01 18:03–18:10，独立复核方 = AUDIT，交总调度 fredw-2b）
 
 复核对象：docs/rsi/r4_report.md（17:16）、docs/rsi/r5_report.md（18:00）、data/qa/iter_gate/ITERAUDIT_r4.md（17:17）、ITERAUDIT_r5.md（18:01:53，INCOMPLETE，只差 V1）。机读版：data/qa/audit/RSI_r03.json。
 本文件就是 r5 收轮要用的 V1 证据（时间晚于 r5 的最后一次改动）。

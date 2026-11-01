@@ -279,6 +279,9 @@ def assembly_sources(man: dict) -> tuple[dict, list[str]]:
             continue
         sw, sh = clip_wh(src)
         use, tag = src, f"原片 {sw}×{sh}"
+        dj = src.with_name(src.stem + "_dj.mp4")          # VIDEO-RCA r1：Pika 去抖片（upscale_preview 产出，K-LOOP-004）
+        if dj.is_file():
+            use, tag = dj, f"去抖版 {sw}×{sh}"
         up = upscaled_for(src)
         if up:
             uw, uh = clip_wh(up)

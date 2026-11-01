@@ -21,7 +21,7 @@
 | ❌ 不在位 | 4 |
 | ⚠ 部分在位 / 未核实 / 待确认 | 18 |
 | ⤴ 已被后续决定取代（不再要求） | 11 |
-| decision_check（03:00） | 39 条：✅ 36，❌ 3（D-VOC-04/05/06，都等 VOICE10） |
+| decision_check（11-01 19:35，VOICE10 复跑） | 58 条：✅ 57，❌ 0，⏳ 1（tools/qa/decision_check.py；D-VOC-01…08 全 ✅） |
 
 ## 1. 项目方决策账本
 
@@ -108,7 +108,7 @@
 | L-075 | 10-31 13:09 | “两台服务器的内存条……1 TB，都要用完” | 内存用满（cache-ram） | 流程 | — | ComfyUI 带大 cache-ram | gpu33 `--cache-ram 64 96`，gpu36 `--cache-ram 56 88` | ✅ |
 | L-076 | 11-01（选方案 A） | “自动执行对应制作,人类不应该点,坏了,系统自动做” | 常驻制作监督 PRODUCER 自动推进各阶段和导入；项目方不再逐个点阶段推进 / 导入，只在删除、花钱、推翻旧决定、挑身份参考时被问 | 流程/规则 | — | K-OPS-A01 在；tools/autopilot/producer.py 在；docs/AUTOPILOT.md §7 在 | 三者都在（knowledge/rules/asset_ops.yaml:97；AUTOPILOT.md:123 “## 7. 制作监督（PRODUCER）”）；常驻是否在跑本轮未核实 | ⚠ |
 | L-077 | 11-01（方案 A 推论） | （同上，总调度转） | 导入可用系统身份 PRODUCER（带审计），前提是 P4 阻断数 = 0；replace 导入若会丢弃项目方锁定的成果，仍是项目方闸门 | 流程/剧本 | — | 导入接口认 PRODUCER 身份，校验 P4 阻断 = 0，replace 覆盖锁定成果时拦截 | 本轮只确认 producer.py 里 AGENT="PRODUCER"；导入闸门的代码未逐行核 | ⚠ 未核实 |
-| L-078 | 11-01 | “我来不及筛选” | 角色音色由系统按 QAg 方法（Qwen3-TTS VoiceDesign + CosyVoice3）自动选，不再让项目方逐个挑 | 声音 | 取代 L-057 | voices.json 4 位角色都是新音色（含阿岚），并标 series=series10_v1 | knowledge edit.yaml:212 规则在（证据引“我来不及筛选”）；voices.json 仍是林晚 zf_067、没有阿岚、没有 series（D-VOC-04/05/06 ❌，VOICE10 在做） | ❌ |
+| L-078 | 11-01 | “我来不及筛选” | 角色音色由系统按 QAg 方法（Qwen3-TTS VoiceDesign + CosyVoice3）自动选，不再让项目方逐个挑 | 声音 | 取代 L-057 | voices.json 4 位角色都是新音色（含阿岚），并标 series=series10_v1 | config/voices.json 实测：林晚 lin_wan_cand/c2、顾沉 gu_chen_cand/c4、陈宇 chen_yu_cand/c2、阿岚 ch_a_lan_cand/c1，顶层与各条 series=series10_v1（tools/voice10/voice10.py autopick，11-01 02:57）；数字口径统一后重检选择不变（VOICE10 11-01 17:0x，docs/voice10/r1.md §2）；tools/qa/decision_check.py 11-01 19:3x D-VOC-04/05/06 ✅（合计 58：✅ 57 ❌ 0） | ✅ |
 | L-079 | 11-01（一键） | “先隔离，验证后你删” | 旧材料先隔离、再验证，最后由项目方本人运行删除脚本 | 清理 | 细化 L-058 | 隔离区 + MANIFEST + 验证 + 删除脚本，AI 不删 | 隔离 76 项 23.0G；验证（API / build / compile / decision_check）通过；ops/cleanup/delete_quarantine_20261101.ps1 在，未运行 | ✅（删除待项目方） |
 | L-080 | 11-01 16:10 | “启动图像识别模型,然后自动检测,一旦发现不对,叫系统重写做” | 看图闭环（R11-4/5/10）由只记录转为拦截 + 自动重出（D-VQA-01） | 出图/视频 | 取代 R11-4 “标定过 0.85 并经总调度批准才转阻断”、acting“不开拦截” | config/vqa.json judge.enforce=true；命中自动重出；低置信只记录 | enforce=true（decision_check ✅）；22 处旧口径残留待 VQAGATE 同步（decision_propagation 16:37） | ⚠ |
 | L-081 | 11-01 16:15 | “image做出来后,用本地图像模型去检测图片是否达标……然后再跑视频rendering” | 图片闸门先于视频：视频只派过了看图检查的首帧；替换版由看图自动复核，代替总调度人工复核 | 出图/视频/流程 | 细化 L-080 | vqa.json gate.video_requires_q9=true；producer 不再停在“等总调度复核” | 16:37 video_requires_q9=false（AUDIT 读到），VQAGATE 在做 | ❌ |
@@ -122,6 +122,8 @@
 | L-089 | 11-01 18:05 | （总调度按 G0 定，RSI r5 设计冲突）—— | 驳回即撤下：master_reject 立即撤下被驳回的当前版本（P.clear_active），这一镜等替换版；改当前版本只走 pipeline.set_active 唯一入口并写审计（K-OPS-Q23 / K-OPS-V12） | 流程 | 取代 master_reject 旧口径“驳回版留作当前直到替换版通过” | producer.master_reject / ledger_sync / master_approve 已改；test_active_audit 白名单无 producer | PROD 18:10 落实，15 条测试过；随服务器推送生效 | ✅ |
 | L-090 | 11-01 18:2x | “演员表现：所有图片不要看镜头，不要看镜头！……把演员的演戏规则、导演的规则、镜头的规则都做上去，把剧本改一下，重新更新一下规则。” | 补全表演 / 导演 / 镜头三套规则；编译器对所有出图和 Pika 出片注入视线句；写作模型按新规则返修 10 集（台词不变）并导入；授权写作 API 费用 | 剧本/规则/出图/视频 | 细化 R11-2/6/8/9 | D-SCR-07；QW-A7 / QW-AX1 等 lint；视线句覆盖率 100% | SCRIPT-RSI 18:2x 落实（CONSENT 见 LOCKS）：规则三表 docs/acting/PERFORMANCE_RULES.md §3；新 lint QW-A6/A7/A8/AX1 + K-WRT-T03 返修重切；frame_job 视线补句逐人覆盖、framing 双人句去掉朝向镜头（K-REN-703）；全部视频配方（含 3 个 Pika）继承视线句（测试锁）；10 集返修稿 data/staging_v3/merged/漆皮之下·十日_series10_v1_rsiD07_ep01…ep10_v3.md：台词逐字、集总时长不变、P4 阻断 0、目标 lint 217→8、镜数 80→92；**未导入**：/api/script-inbox/import 只收 by=owner（画布勾选）或 PRODUCER 令牌，SCRIPT-RSI 不冒用身份，待总调度定导入方式（import_plan：data/script_rsi/d07_full/import_plan.json） | ⚠ |
 | L-091 | 11-01 18:3x | “把旧的东西全部移出……你要把规则跟最新的讨论内容 update 一次，然后再做一次全部。”；“我这台机器是能 run 一些图片的……部署一些图片模型” | 旧素材隔离到 _quarantine_20261101b（只隔离、删除由项目方运行脚本）；规则库刷新为现行口径；记忆清洗；笔记本部署本地出图道 laptop:0（D:\ns_comfy，参数与 S★ 一致） | 清理/流程 | 细化 L-079 | MANIFEST + 删除脚本；knowledge/archive；laptop:0 一致性验证 | CLEANUP / LOCALGPU 进行中；记忆已清洗（总调度） | ⚠ |
+| L-092 | 11-01 21:4x | AskUserQuestion：“10 集都用，改完再出图 (Recommended)”；“改成 60–120 秒”；“允许，改成铅笔裙 (Recommended)” | 10 集按 HOLLYWOOD 模板重写，改完再恢复出图；集时长 60–120 秒（取代 QW-E3 50–75 / 目标 60–65，镜数上限按 ⌈秒数÷6⌉ 跟着变）；ep01 林晚人物卡“深灰西装裙”→“深灰铅笔裙”（HOLLYWOOD 人物卡不变量唯一字面例外，造型不变） | 剧本 / 写作规则 | 取代 K1 / QW-E3 时长口径 | D-SCR-08 / 08b、K-WRT-702（QW-W11）、hollywood.HEAD_EXCEPTIONS | RSI r7：导入器 / 校验器 / 上游 schema / writer_prompt / 写作合同 4 份文档已同步，decision_propagation 校验；HOLLYWOOD 10 集待开跑 | ⚠ |
+| L-093 | 11-01 21:4x | AskUserQuestion：林晚造型 A 设定图“换回 v2_s202 (Recommended)” | 造型 A 当前设定图 = adopted/lin_wan_lookA_v2_s202.png | 资产 | 取代 11-01 10:57 人物中心挑的 lookA_s101（当时 v2 不在候选里） | D-AST-93（sheets_chosen.json） | IMGFIX 执行中；RSI 只入账 | ⚠ |
 
 ## 2. 残留清单
 
@@ -181,8 +183,8 @@
 |---|---|---|---|---|---|
 | R1 | `data/pipeline/runs/series10_v1/assets/first_frame_jobs.json`（80 条） | graph 里仍挂 `lin_wan_qi_v1.safetensors`（文件已隔离）；也不是 frame_v9 | `tools/pipeline/submit_jobs.py`（preflight I8 会拒） | **仍有活读者，不能隔离**：① services/api/ns_api/story_runs.py:677-691（/api/story-runs 从这里读 asset_refs，只读，读不到就现算）；② tools/series10_imggen/imggen.py:171（有 graph 就直接用 graph 出图）；③ tools/bakeoff/run.py:190、tools/gen_contract/calibrate_q.py:56、tools/series10_imggen/server_deploy.py:33。处理：用 tools/pipeline/image_jobs.py 重建，或让 imggen 改走 frame_job.build_first。RECALL 用同一函数重建到 `data/qa/recall_smoke/_recall_smoke_first_frame_jobs.json`，确认重建后没有 lin_wan_qi | SERIES / ASSETMASTER（总调度派） |
 | R2 | `data/import/script_v2.json:86 / :97 / :108`（globals.lora_triggers 的 starts） | `"ep09起"`、`"ep15起（逐步到9枚）"`、`"ep21起"` 是 60 集的起始集号 | 导入器把它当登记信息 | 属剧本数据，交写作方按 10 集改；文件名 jewellery_*_v1 / wardrobe_*_v1 在 gpu33 和 gpu36 的 loras 目录里都不存在 | 写作方（SERIES） |
-| R3 | `services/post/ns_post/speakers.py:30-31` | 仍把“穿孔师 / 纹身师 / 同事 / 男同事 / 店员”映射到 piercer 等 id，而 voices.json 已没有这些条目 | ns_post.speakers.resolve_episode → tts | series10 里只要出现这些称呼就会报 TtsError；按 series10 设定应归给阿岚或删掉 | VOICE10 |
-| R4 | `config/voices.json` | 林晚仍是 zf_067（60 集 Kokoro）；没有阿岚；没有 `"series":"series10_v1"` | night.py:166 放行条件；/api/voices | 项目方 L-057：重做候选让他点选。VOICE10 约 30–40 分钟内写入 | VOICE10 |
+| R3 | `services/post/ns_post/speakers.py` | 已清：旧 60 集称呼（穿孔师 / 纹身师 / 同事 / 男同事 / 店员）隔离到 LEGACY_60EP_TITLES，不再参与解析；NAMED 只含 voices.json 里有音色的人 | ns_post.speakers.resolve_episode → tts | series10 剧本里这些称呼 0 次（data/import/script_v2.json 实测）；tests/test_voice10_fix.py::test_legacy_60ep_titles_quarantined 通过（K-EDT-020） | VOICE10（已关） |
+| R4 | `config/voices.json` | 已清：林晚 lin_wan_cand/c2、顾沉 gu_chen_cand/c4、陈宇 chen_yu_cand/c2、阿岚 ch_a_lan_cand/c1（cosyvoice3_zs），顶层 series = series10_v1 | night.py voices_ok() 放行；/api/voices | 按 L-078 系统自动选（L-057 已被取代）；D-VOC-04/05/06 ✅（decision_check 11-01 19:35） | VOICE10（已关） |
 | R5 | `services/api/ns_api/voice_preview.py:5,29,87` 与 `/api/voices/candidates` | 候选音色仍是 Kokoro sid 3–57 | 声音页 | 换成 Qwen3-TTS / CosyVoice3 候选（和 QAg 同一套方法） | VOICE10 |
 | R6 | ✅ 已清（CLEANUP 11-01，§2.0）`config/script_chat_rules_appendix.md:20` | 写作规则触发词里仍列“Alex、Ryan、Kai、Leo” | 写作模型提示词 | 已删并换成阿岚；D-CLN-11 grep_absent 守住 | — |
 | R7 | `services/render_router/ns_render/pipeline.py:867`（qwen_two_stage / compose） | 旧“身份底板两段换脸”出图路径 | 未登记资产的项目会走 ns_render.pipeline 默认；series10 不走 | 确认无入口后整段删除 | ARCH |
@@ -222,15 +224,15 @@ DATAALIGN 的 `docs/DATA_MAP.md` 在 02:30 还不存在，下表由 RECALL 按�
 
 | # | 严重度 | 缺口 | 证据 | 负责 |
 |---|---|---|---|---|
-| G1 | P0 | 4 位角色没有新音色（L-078：系统按 QAg 方法自动选）：林晚仍是 Kokoro zf_067，阿岚没有音色，台词合成遇到阿岚直接报错 | D-VOC-04/05 ❌；tests/test_post.py::test_resolve_overrides_and_every_script_speaker_has_a_voice 报 `TtsError: no voice for speaker 'ch_a_lan'` | VOICE10 |
-| G2 | P0 | voices.json 没有 `"series":"series10_v1"`，VIDEO10 的 night.py 不会合成对白 | D-VOC-06 ❌；night.py:164-166 | VOICE10（约 30–40 分钟） |
+| G1 | 已关 | ~~4 位角色没有新音色~~ → 4 位角色都有 series10 克隆音色（含阿岚） | D-VOC-04/05 ✅（tools/qa/decision_check.py 11-01 19:3x）；tests/test_post.py::test_resolve_overrides_and_every_script_speaker_has_a_voice 通过（11-01 19:3x 实测）；tests/test_voice10_fix.py::test_every_series10_line_resolves_to_a_voice 通过 | VOICE10 |
+| G2 | 已关 | ~~voices.json 没有 series10_v1~~ → 顶层 `"series": "series10_v1"` 已写 | D-VOC-06 ✅（tools/qa/decision_check.py 11-01 19:3x）；night.py voices_ok() 放行。ep04 合成失败的真实根因另见 K-EDT-019（docs/voice10/r1.md §2） | VOICE10 |
 | G3 | P0 | 契约通过的图要在所有路径上自动设为当前（项目方：图片“全部默认同意”）。ASSETMASTER 的 register_takes 已做；画布重出（unified_frame.postflight_async）之后还没有 set_lock | unified_frame.py:156 起 | PRODUCER |
 | G4 | ✅ 已完成 | 首帧 postflight 交接：ASSETMASTER 写 takes.json 的 postflight 字段和 frames_ok.json，VIDEO10 两种都读；第一条片 ep01-S5 已按它派出 | 总调度 11-01 确认 | ASSETMASTER + VIDEO10 |
 | G5 | P1 | series10 BGM 只有 1 集（项目方定“整集统一 BGM”）；02:20 时 /api/music 还是空 | data/music/series10/ | VIDEO10 / 声音 |
 | G6 | P0 | 视频契约 V6 多肢、V7 口型检测器缺失，series10 视频只能出预览、不能出成片（K-REV-302） | 总调度转 | VIDEO10 |
 | G7 | P1 | SERIES 首帧作业清单 80 条仍挂 lin_wan_qi_v1、不是 frame_v9（R1） | first_frame_jobs.json | SERIES / ASSETMASTER |
 | G8 | P1 | 前后端数据不对齐（项目方：S1–S4 一模一样） | L-056；story-runs `?ep` 与 `?episode` 返回相同 | DATAALIGN |
-| G9 | P1 | speakers.py 仍映射穿孔师 / 纹身师 / 同事 / 店员，但已无对应音色（R3） | speakers.py:30-31 | VOICE10 |
+| G9 | 已关 | ~~speakers.py 仍映射旧称呼~~ → 旧 60 集称呼隔离到 LEGACY_60EP_TITLES（不删、不参与解析），NAMED 只含 voices.json 里有音色的人（K-EDT-020） | services/post/ns_post/speakers.py；tests/test_voice10_fix.py::test_named_speakers_all_have_voices / test_legacy_60ep_titles_quarantined 通过 | VOICE10 |
 | G10 | P1 | 阿岚没有 default look；schedule 的 ep1–10 是旧剧种子（R10、R11） | /api/looks 里 ch_a_lan default_look_id = None | ASSETMASTER |
 | G11 | P1 | 剧本 globals 的 60 集起始集号；饰品 / 衣橱 LoRA 文件在服务器上不存在（R2） | script_v2.json:86/97/108 | 写作方（SERIES） |
 | G12 | P1 | FLUX.2 Klein 9B、FLUX.3 Klein 没下载（只有 4B） | gpu36 diffusion_models | ASSETMASTER / BAKEOFF |
@@ -238,7 +240,7 @@ DATAALIGN 的 `docs/DATA_MAP.md` 在 02:30 还不存在，下表由 RECALL 按�
 | G14 | P2 | 资产页林晚 face_url 与项目方挑定的身份参考不一致（R9） | /api/assets/characters | DATAALIGN / ASSETUX |
 | G15 | 已关 | auto_final_on_lock 保持 false：总调度裁定 L-017 已被 frame_v9 取代 | L-017 | — |
 | G16 | P2 | 契约 I3/I4（造型、单品参考）的规则仍是 `enforced: false` | K-AST-230 | REFLOCK |
-| G17 | P2 | 仍红的测试：test_state_timeline 的 character_state_fields、owner_confirmation、inject_off 三个。用原件副本复跑同样失败；失败点是 auth.py 自动补“（fred 登录点选）”以及 60 集 golden 夹具，与清理无关。test_post::every_script_speaker_has_a_voice 是真实缺口 G1（阿岚无音色），不改测试。本轮已修好 frame_jobs_w2 / image_params_px / backend_f4 / leica_sstar / render_quality_q1 / looks 共 109 个用例 | pytest | ARCH（state_timeline）/ VOICE10（test_post） |
+| G17 | P2（test_post 部分已关） | 仍红的测试：test_state_timeline 的 character_state_fields、owner_confirmation、inject_off 三个。用原件副本复跑同样失败；失败点是 auth.py 自动补“（fred 登录点选）”以及 60 集 golden 夹具，与清理无关。~~test_post::every_script_speaker_has_a_voice~~ 已过（VOICE10 11-01 19:3x 实测 tests/test_post.py 1 passed；G1 已关）。本轮已修好 frame_jobs_w2 / image_params_px / backend_f4 / leica_sstar / render_quality_q1 / looks 共 109 个用例 | pytest | ARCH（state_timeline） |
 | G18 | P2 | 旧代码路径 qwen_two_stage（R7）、master_face 缓存（R8） | pipeline.py:867 | ARCH |
 | G19 | P3 | 未核实的决定：L-003/011/029/042/045/052/055/069/073，需各负责方回报实测 | §1 | 各负责方 |
 | G20 | ✅ 已关（L-086，RSI r5） | 林晚出图身份脸现在是**整张 4 栏设定图** A-s202（ar-f9519334bc），不是脸部裁切：11-01 10:58 fred（role owner）在人物中心点“设为身份脸”，10:58:37 又把 lin_wan_face_ref2va.png 驳回为“画质差”。asset_refs.face_of 读 face_overrides，所以之后所有出图挂的身份脸都是整张设定图（拼图 / 照搬参考板的风险）；identity_refs/manifest.json 仍登记旧裁切 → tests/test_single_identity_face.py、tests/test_unified_frame.py 红。待定：项目方是想换脸，还是只嫌裁切画质？要是想换，建议从 A-s202 重新高清裁脸再登记，而不是挂整张；人物中心 set_face 只该接受脸部裁切 | data/looks/face_overrides.json；data/looks/character_hub_log.jsonl 第 28–29 行；data/audit/20261101.jsonl | 总调度（问项目方）→ ASSETUX（set_face 限制）/ REFLOCK（重裁登记） |

@@ -13,7 +13,7 @@
 
 | 代号 | 决定 | 落到哪里 |
 |---|---|---|
-| K1 | 镜数和总时长按 R:44 机检：镜数 6 ≤ n ≤ max(8, 说话轮次 + 独白段数, ⌈总时长 ÷ 6⌉)；总时长 50–75 秒通过，75 < 总时长 ≤ 90 秒 warn，> 90 秒或 < 50 秒 block | QW-E2 / QW-E3（改），第五部分 3.1 |
+| K1 | 镜数和总时长按 R:44 机检：镜数 6 ≤ n ≤ max(8, 说话轮次 + 独白段数, ⌈总时长 ÷ 6⌉)；总时长 60–120 秒通过，超出 block（项目方 11-01 21:4x：“改成 60–120 秒”，L-092 / D-SCR-08） | QW-E2 / QW-E3（改），第五部分 3.1 |
 | K4 | 镜头时长统一为 **4–15 秒整数**（MiniMax 官方 H3：“`MiniMax-H3`: `4`–`15`”）；每镜必须写 `**时长**`，缺了 = block，系统不再默认 10 秒 | S1-W2（改）、H3-A11（改）、P-B1（改）；帧表加 4 秒 = 107 帧 |
 | K2 / K3 / K6 | 旧文档里的过时写法作废：【配乐】的“推高 / 点题”（K2）、模板里的 `**负面追加**`（K3）、“一镜最多两位说话人 / >1 人只报 warn”（K6）。需要改的文件和行见 §1.7 | 第五部分 2.x |
 | K10 | **保留有意偏离**：官方 G §4.5 让画面文字放进英文双引号，本项目 H3 全文禁止双引号（H3-D4，会被烧成字幕）。画面文字一律不写进 H3 | §1.5 H3-D4 注 |
@@ -149,7 +149,7 @@
 | QW-E6b **新**（GAP E3） | `新：` 以外的单品名能在 wardrobe.json 找到（字符串比对） | warn |
 | QW-E7 **新** | 换装行的 `镜<N>` 存在于本集；该镜 img 备注或 motion 写了换装（R §6A“动作接力”已要求） | block（镜号）/ warn（换装说明） |
 | QW-E2 **改**（K1） | 镜号从 1 连续；镜数 6 ≤ n ≤ max(8, 说话轮次 + 独白段数, ⌈总时长 ÷ 6⌉) | block |
-| QW-E3 **改**（K1） | 各镜时长之和 50–75 通过；75 < 和 ≤ 90 warn；> 90 或 < 50 block | block / warn |
+| QW-E3 **改**（K1 → D-SCR-08） | 各镜时长之和 60–120 通过，超出 block（项目方 11-01 21:4x：“改成 60–120 秒”，L-092 / D-SCR-08） | block |
 
 ## 1.3 每镜字段
 
@@ -268,7 +268,7 @@ non_diegetic_music: <1–3 句英文，或逐字 N/A>
 | K3 | docs/SOP_production.md:133 | 格式清单里有 `**负面追加**` | 删除（导入器仍认旧剧本的这个标签，services/agent/ns_agent/importer/script_md.py:510 保留） |
 | K6 | config/script_chat_rules_appendix.md:27 | “非亲密多人镜一镜最多两位说话人” | “普通对话镜每镜一个说话人（H3-D7 block），A→B→A 拆镜” |
 | K6 | config/script_chat_rules_appendix.md:69 | “非亲密镜一镜 ≤2 位说话人（机检对 >1 人只报 warn）” | 同上 |
-| K1 | docs/qwen_writing_contract.md:46、:60、:61；config/qwen_writer_system_prompt.txt:7 | 固定 6–8 镜、50–75 秒 | 按 R:44 与 §0 K1 |
+| K1 ⤴（时长已被 D-SCR-08 60–120 秒取代） | docs/qwen_writing_contract.md:46、:60、:61；config/qwen_writer_system_prompt.txt:7 | 固定 6–8 镜、50–75 秒 | 按 R:44 与 §0 K1 |
 | K4 | config/script_chat_rules.md:45（及帧表）；docs/qwen_writing_contract.md:125；config/qwen_writer_system_prompt.txt:13；docs/SOP_production.md:181（及 :185 表）、:220、:339 | 5–15 秒 / ≥124 帧 | 4–15 秒；帧表加 4 → 107 / 4.46 |
 | K7 | config/qwen_writer_system_prompt.txt:25；docs/qwen_writing_contract.md:145 | 说话人“角色名或 她/他” | 只写角色名（QW-D1） |
 | K8 | config/qwen_writer_system_prompt.txt:23；docs/qwen_writing_contract.md:120 | 表情“至少一个” | 1–2 个，首选 1 个 |

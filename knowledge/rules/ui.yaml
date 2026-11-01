@@ -665,3 +665,16 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-01
+  - id: K-UI-042
+    check: tests/test_infra_status_uirsi.py
+    domain: ui
+    link: [P5-P6]
+    title: 连接状态要一眼看得到、断了要说原因——界面只读看门狗已经写好的状态，不在请求里连服务器；服务器上的图读不到时用笔记本上的同一张，没有就写占位字，不出裂图
+    when: 界面显示渲染卡 / 隧道 / 跳板 / 常驻进程的连通情况，或显示要经隧道去服务器取的图（GPU 面板“最近出图”）
+    then: 汇总接口 /api/infra/status 只读 data/qa/infra_watchdog_state.json（跳板、6 条连接、重建记录）和 data/autopilot/resident_sync.json（服务器常驻心跳），本机两样探 127.0.0.1（1.5 s 超时、缓存 5 s）；顶栏胶囊（全部正常只留绿点，有断的写“连接 N/6”或“跳板断了”）+ GPU 面板顶部同一块明细；卡片“连不上”下面一行写原因（跳板断了 / 这条连接断了、正在自动重连），全部卡都断时只在面板顶部说一次；文案用卡名（gpu33·卡1），端口 / 地址只放技术细节。缩略图：先在本镜 takes.json 里找登记过的同名一版（笔记本文件），没有再经隧道取（8 s 超时、失败 1 分钟内不重试），前端 onError 写“图在服务器上，笔记本还没有”
+    evidence:
+      - {src: docs/uirsi/rounds/r38.md, note: "项目方 22:1x 截图：gpu36 三张卡都写“暂时连不上 93 秒”、最近出图裂图；/api/gpu/thumb 经隧道取 ComfyUI 输出，隧道断时 30 s 超时 502"}
+      - {src: apps/web/e2e/uirsi/r38b_gpu_drawer_1440_dark.png, note: "改后 GPU 面板顶部连接明细 + 卡片原因行 + 占位字"}
+    confidence: high
+    status: 确认
+    date: 2026-11-01

@@ -15,7 +15,6 @@
 
 | 文件 | 谁 | 到什么时候 |
 |---|---|---|
-| tools/series10_video/night.py（只改 tts_missing() 函数体：改调 ns_post.tts.tts_preflight；不碰 finalize 的代理 / 原片段落，那段归 PROD W4）、services/post/ns_post/tts.py、services/post/ns_post/speakers.py | VOICE10（总调度 fredw-2b 派，W6） | 本轮收轮即释放 |
 | services/api/ns_api/live.py（新建：/api/events SSE + /api/progress） | UIRSI | 实时刷新做完（总调度 11-01 任务） |
 | services/api/ns_api/app.py（只加 include_router 两行） | UIRSI | 同上 |
 | apps/web/src/v3/live.ts、apps/web/src/ds/StageProgress.tsx、apps/web/src/v3/LiveBridge.tsx（新建） | UIRSI | 同上 |
@@ -62,7 +61,10 @@
 - CONSENT: ITERAUDIT -> CODERSI : tools/qa/ownership.yaml（只加 CODERSI 条目） | by 总调度 fredw-2b 11-01 18:1x 派 CODE-RSI：“改别人拥有的文件之前，先在 docs/uimaster/LOCKS.md 写 CONSENT（by 总调度 fredw-2b），并且只做最小的局部改动”
 - CONSENT: REFLOCK -> CODERSI : tests/test_image_framing.py（只改 G22 一行断言：只拍手 → 画面里只有手） | by 总调度 fredw-2b 11-01 18:1x 派 CODE-RSI：“改别人拥有的文件之前，先在 docs/uimaster/LOCKS.md 写 CONSENT（by 总调度 fredw-2b），并且只做最小的局部改动”；“测试过期就按决定更新断言，不删测试”
 - CONSENT: 总调度 -> CODERSI : tests/test_review_fixes_d9.py（只改 G23：range PUT 断言伪造确认没写进去，不再假设真实排期无确认） | by 总调度 fredw-2b 11-01 18:1x 派 CODE-RSI：“改别人拥有的文件之前，先在 docs/uimaster/LOCKS.md 写 CONSENT（by 总调度 fredw-2b），并且只做最小的局部改动”
-- CONSENT: VIDEO10 -> VOICE10 : tools/series10_video/night.py（只改 tts_missing() 函数体）, tests/test_video10_resilience.py（只给 test_tts_missing_and_retry_assembly 夹具补模型目录） | by 总调度 fredw-2b 11-01 派 VOICE10：“让 night.py 的正常流程把 ep04 合成成功……改 night.py / assemble 前先看 docs/uimaster/LOCKS.md 并登记，不要和它冲突”
+- CONSENT: ITERAUDIT -> VOICE10 : tools/qa/ownership.yaml（只改 owners.VOICE10 一行：登记 tts.py / speakers.py / voices.json / test_voice10_fix.py / docs/voice10） | by 总调度 fredw-2b 11-01 晚：“归属你自己登记：services/post/ns_post/tts.py、speakers.py、config/voices.json、tests/test_voice10_fix.py 全部登记给 VOICE10”
+- CONSENT: RECALL -> VOICE10 : docs/master/MASTER_PICTURE.md（只改 §1 L-078、第 24 行 decision_check 汇总、残留表 R3 / R4、§4 G1 / G2 / G9 / G17，按实测改 ✅ / 已关并附出处） | by 总调度 fredw-2b 11-01 晚：“MASTER_PICTURE §1 L-078，以及 §4 的 G1 / G2 / G9 / G17，按实测改成 ✅ / 已关，附上出处。总调度授权，CONSENT 写 RECALL → VOICE10”；补授权 11-01 晚：“MASTER_PICTURE 第 24 行……以及残留表 R3 / R4 两行，授权你按实测更新（RECALL → VOICE10，在原有 CONSENT 基础上补）”
+- CONSENT: VIDEO10 -> VOICE10 : tools/series10_video/night.py | 只改 night.py 的 tts_missing() 函数体、test_tts_missing_and_retry_assembly 夹具补模型目录；by 总调度 fredw-2b 11-01 派 VOICE10：“让 night.py 的正常流程把 ep04 合成成功……改 night.py / assemble 前先看 docs/uimaster/LOCKS.md 并登记，不要和它冲突”
+- CONSENT: VIDEO10 -> VOICE10 : tests/test_video10_resilience.py | 只给 test_tts_missing_and_retry_assembly 夹具补模型目录（同上授权，总调度 fredw-2b 11-01）
 - CONSENT: AUTOPILOT -> VOICE10 : tools/autopilot/resident_sync.py（只改 required_data：加 config/voices.json 各说话人 ref_wav / asset，服务器合成必需） | by 总调度 fredw-2b 11-01 晚：“TTS 在两台服务器上都要能用……同步音色文件和 voices.json……和 WORKFLOW 的推送 / 启动脚本对接，别各装一套”
 - CONSENT: AUTOPILOT -> CODERSI : tools/autopilot/resident_sync.py（只改 tar_bytes 一个函数：整份读入再写成员，修打包途中文件被截短导致整包错位；push 里 rem_dirs 一行：tier 2 列回 data/） | by 总调度 fredw-2b 11-01 18:1x 派 CODE-RSI：“读 tools/autopilot/resident_sync.py……在本地模拟一次……确认会推的文件都是最新版、能完整解码、没有截断”；“改别人拥有的文件之前，先在 docs/uimaster/LOCKS.md 写 CONSENT（by 总调度 fredw-2b），并且只做最小的局部改动”
 - CONSENT: 总调度 -> CODERSI : tests/test_fix_ep02_round2.py（只改 G24 过滤条件：跳过 workflow=video10 的配方引擎片） | by 总调度 fredw-2b 11-01 18:1x 派 CODE-RSI：“测试过期（断言跟不上已定的决定）就按决定更新断言，不删测试”
@@ -70,6 +72,8 @@
 - CONSENT: REFLOCK -> CODERSI : tests/test_gen_contract.py（只改选镜：写死的 ep01-S3 / S4 换成按镜头性质选 FULL / TWO，断言不动） | by 总调度 fredw-2b 11-01 18:3x：“tests/test_gen_contract.py 新出现 3 条失败……请归因：是产品回退就修产品，是断言过期就按现行决定改断言”
 - CONSENT: REFLOCK -> CODERSI : tests/test_ref_switch_assets.py（只改选镜：写死的 ep01-S3 换成“林晚单人、脚可见”的第一镜） | by 总调度 fredw-2b 11-01 18:4x：“修法是让测试改用测试夹具，或者改成按导入稿找‘对应景别的镜’，不要写死镜号……CONSENT 写 REFLOCK → CODE-RSI，by 总调度”
 - CONSENT: AUTOPILOT -> CODERSI : tools/autopilot/resident_sync.py（push_dirs 抽函数 + push_gate：push / recover / video_up / bringup / switch / loop 推送前必须 push_check PASS，不过不推、不起常驻） | by 总调度 fredw-2b 11-01 18:5x：“push_check 做成 push / recover / video_up 的前置：不通过就不推、不起常驻。授权你改 resident_sync.py，CONSENT 写 AUTOPILOT → CODERSI……顺便按你的建议把 push 的目录计算抽成函数，push_check 直接调用”
+- CONSENT: ITERAUDIT -> CODERSI : tools/qa/iter_gate.py（只加 V2 系统版本提示一项） | by 总调度 fredw-2b 11-01 23:0x 派 CODE-RSI r3：“iter_gate 加一项：本轮改动是否已经进了某个版本，没进就提示”；项目方 22:5x“每一次迭代都是用 override system,然后用 create a new version 那个 system versions”
+- CONSENT: ITERAUDIT -> CODERSI : tools/qa/ownership.yaml（只在 CODERSI 条目加 system_version 文件） | by 总调度 fredw-2b 11-01 23:0x 派 CODE-RSI r3：“iter_gate 加一项：本轮改动是否已经进了某个版本，没进就提示”；项目方 22:5x“每一次迭代都是用 override system,然后用 create a new version 那个 system versions”
 
 - CONSENT: AUTOPILOT -> ITERAUDIT : tools/pipeline/writer_prompt.py | by 总调度 fredw-2b 11-01：“tools/pipeline/writer_prompt.py 归 WORKFLOW（它在做紧急任务），总调度授权你改，在 docs/uimaster/LOCKS.md 写 CONSENT”（G29 方案 A 镜数上限；RSI 代录）
 - CONSENT: RECALL -> ITERAUDIT : tools/qa/decision_check.py | by 总调度 fredw-2b 11-01：“RECALL 名下的 decision_check.py、owner_decisions.yaml、MASTER_PICTURE.md 由总调度认领……写 CONSENT”（RSI 代录）
@@ -86,6 +90,9 @@
 - CONSENT: AUTOPILOT -> ITERAUDIT : tools/pipeline/image_jobs.py | by 总调度 fredw-2b 11-01 晚：“image_jobs.py 归 AUTOPILOT（WORKFLOW 在忙服务器启动），这次授权你改，CONSENT 写 AUTOPILOT → ITERAUDIT”（K-OPS-Q24：作业来源改导入稿 + G21 核 sha；RSI 代录）
 - CONSENT: AUTOPILOT -> ITERAUDIT : tools/pipeline/submit_jobs.py | by 总调度 fredw-2b 11-01 晚：“image_jobs.py 归 AUTOPILOT（WORKFLOW 在忙服务器启动），这次授权你改，CONSENT 写 AUTOPILOT → ITERAUDIT”（K-OPS-Q24：作业来源改导入稿 + G21 核 sha；RSI 代录）
 - CONSENT: AUTOPILOT -> ITERAUDIT : tools/autopilot/full_redo.py | by 总调度 fredw-2b 11-01 晚：“image_jobs.py 归 AUTOPILOT（WORKFLOW 在忙服务器启动），这次授权你改，CONSENT 写 AUTOPILOT → ITERAUDIT”（K-OPS-Q24：作业来源改导入稿 + G21 核 sha；RSI 代录）
+- CONSENT: AUTOPILOT -> ITERAUDIT : config/pipeline/chain.yaml | by 总调度 fredw-2b 11-01 r7：“请按 G0 全量同步：时长……所有写着 50–75 / 60–65 的地方”（D-SCR-08；RSI 代录）
+- CONSENT: AUTOPILOT -> ITERAUDIT : docs/PIPELINE_CHAIN.md | by 总调度 fredw-2b 11-01 r7：“请按 G0 全量同步：时长……所有写着 50–75 / 60–65 的地方”（D-SCR-08；RSI 代录）
+- CONSENT: SCRIPT_RSI -> ITERAUDIT : tools/script_rsi/hollywood.py | by 总调度 fredw-2b 11-01 r7：“请按 G0 全量同步：时长……所有写着 50–75 / 60–65 的地方”（D-SCR-08；RSI 代录）
 - CONSENT: REFLOCK -> ITERAUDIT : tests/test_ref_switch_assets.py | by 总调度 fredw-2b 11-01：“test_ref_switch_assets 写真实数据，这是测试本身的 bug，改成用临时目录”（RSI r3 代录）
 - CONSENT: ITERAUDIT -> RESEARCH : tools/qa/writer_lints.py | by 总调度 fredw-2b 11-01：“RESEARCH 改 writer_lints.py 的越界由总调度认领”（QW-W9；RSI 代录）
 - CONSENT: EDITDEL -> UIMASTER : apps/web/src/ds/editdel.tsx | 总调度 11-01 代录（UIMASTER 转录）：“The 9 EDITDEL-owned open issues are yours, since EDITDEL is inactive. Register them in LOCKS.”
@@ -103,6 +110,8 @@
 - CONSENT: UIRSI -> BGM10 : services/api/ns_api/shot_audio.py | 总调度 11-01（_music_dir 指向 series10、挂 bgm 路由）
 - CONSENT: AUTOPILOT -> DATAALIGN : tools/pipeline/register_takes.py | 总调度 11-01（AUTOPILOT 不活跃；--video10 视频登记 + retract_stale_video10，D-VIDEO 任务）
 - CONSENT: UIRSI -> UIMASTER : apps/web/src/v3/**（仅 PW-019 导入路径改写：只改 import 行的路径，不碰其他逻辑；每步先在沙盒跑 tsc） | UIRSI 11-01
+- CONSENT: GPUVIEW -> UIRSI : services/api/ns_api/gpu_live.py | by 总调度 fredw-2b 11-01 r38 派单：“全局实时连接状态条……GPU 卡片里‘暂时连不上 N 秒’要说明原因……‘最近出图’缩略图裂图：查原因……修根因”
+- CONSENT: UIPIXEL -> UIRSI : apps/web/src/v3/infra.css | by 总调度 fredw-2b 11-01 r38 派单：“全局实时连接状态条……GPU 卡片里‘暂时连不上 N 秒’要说明原因……‘最近出图’缩略图裂图：查原因……修根因”（新建样式，UIPIXEL 不在岗）
 - CONSENT: UIPIXEL -> UIRSI : apps/web/src/ds/ZoomLayer.tsx | by 总调度 fredw-2b 11-01 r37：“P1-1 ZoomLayer：派给你，修法是让帧格自己处理点击，守住 G11 小图仍可放大”
 - CONSENT: ASSETUX -> UIRSI : apps/web/src/v3/assets/PeopleHub.tsx | by 总调度 fredw-2b 11-01 r37：“人物中心的‘设为身份脸’只允许脸部裁切……前端在非脸部裁切图上不显示这个按钮，或者点了给出说明；不许删功能”
 - CONSENT: UIPIXEL -> UIRSI : apps/web/src/v3/regen.css | 总调度 11-01 r36 代录：“UIPIXEL 现在没在跑，这项归你做：在 LOCKS 登记 ux4.css 等相关文件的临时锁，改完释放”
@@ -160,3 +169,25 @@ CONSENT: AUTOPILOT -> PRODUCER : tools/iterate_loop/submitter.py、services/api/
 - CONSENT: RECALL -> AUTOPILOT : docs/master/NIGHT_PLAN_20261101.md | 总调度 2026-11-01 18:0x（L-088 同步 / §4a）
 - CONSENT: RECALL -> AUTOPILOT : config/owner_decisions.yaml | 总调度 2026-11-01 18:0x（L-088 断言）
 - CONSENT: VIDEO10 -> AUTOPILOT : tools/series10_video/deploy.py | 总调度 2026-11-01 18:22（vidgen 派单政策文件随部署推送，K-OPS-Q24）
+- CONSENT: VIDEO10 -> AUTOPILOT : tools/series10_video/upscale_preview.py | 总调度 2026-11-01 19:0x（VIDEO-RCA r1：Pika 去抖接进合成链路，PROD 已收工）
+- CONSENT: VIDEO10 -> AUTOPILOT : tools/series10_video/night.py | 总调度 2026-11-01 19:0x（同上：assembly_sources 认去抖版）
+- CONSENT: PRODUCER -> AUTOPILOT : tools/autopilot/producer.py | 总调度 2026-11-01 19:3x（CLEANUP D-LEDGER：master_reject 驳回即撤下后账本同步待重出；PROD 已收工）
+- CONSENT: AUTOPILOT -> VIDEO_RCA : services/recipes/ns_recipes/prompt.py | by 总调度 fredw-2b 11-01 19:2x 派 r2：“O1：授权你改 services/recipes 的 prompt.py、lint.py、_base.yaml”
+- CONSENT: AUTOPILOT -> VIDEO_RCA : services/recipes/ns_recipes/lint.py | by 总调度 fredw-2b 11-01 19:2x 派 r2：“O1：授权你改 services/recipes 的 prompt.py、lint.py、_base.yaml”
+- CONSENT: AUTOPILOT -> VIDEO_RCA : services/recipes/recipes/_base.yaml | by 总调度 fredw-2b 11-01 19:2x 派 r2：“O1：授权你改 services/recipes 的 prompt.py、lint.py、_base.yaml”
+- CONSENT: REFLOCK -> VIDEO_RCA : services/agent/ns_agent/framing.py（只改 two_shot_clause 措辞） | by 总调度 fredw-2b 11-01 19:2x：“现在就把 framing.two_shot_clause 改成你实测有效的句子……CONSENT 写 REFLOCK → VIDEO_RCA”
+- CONSENT: SCRIPT_RSI -> VIDEO_RCA : tests/test_script_rsi_eyeline.py（只改 two_shot 一条断言，随 framing 证据例外） | by 总调度 fredw-2b 11-01 19:2x r2 决定 3（“它和 SCRIPT-RSI 的‘只写正向句’规则冲突，这里按证据例外处理”）
+- CONSENT: 总调度 -> VIDEO_RCA : tests/test_video_rca.py | by 总调度 fredw-2b 11-01 19:2x：“tests/test_video_rca.py 你自己补登”- CONSENT: DATAALIGN -> CLEANUP : tools/qa/data_parity.py（pending_redo 过期上限 + A-PARITY-PENDING 报警）、新 config/data_parity.json | by 总调度 fredw-2b 11-01 AUDIT P2：“pending_redo 超过 N 小时……单列为‘过期待重做’，并写一条 data/qa/alerts.jsonl 报警”
+- CONSENT: LOCALGPU -> VQAGATE : services/render_router/ns_render/comfy_client.py | by 总调度 fredw-2b 11-01 20:3x：“最短看图窗口由你实现：server.py 归你，comfy_client 的 _yield_peer 和 D:
+s_vqastart.ps1 归 LOCALGPU（已收工），CONSENT 写 LOCALGPU → VQAGATE”（本轮只改了 server.py；_yield_peer 没改）
+- CONSENT: LOCALGPU -> VQAGATE : D:/ns_vqa/start.ps1 | 同上，by 总调度 fredw-2b；补记 20:2x 插的两行：VQA_CAP_SUBJECT_PX/REF_PX/TOKENS + VQA_ATTN（口径 B）
+- CONSENT: REFLOCK -> IMGFIX : services/agent/ns_agent/asset_refs.py（K-AST-262 设定图单品检查缺口句）、services/agent/ns_agent/frame_job.py（单人视线修法） | by 总调度 fredw-2b 11-01 19:4x 派单：“改别人的文件写 CONSENT（REFLOCK / AUTOPILOT → IMGFIX，by 总调度 fredw-2b）”
+- CONSENT: ASSETUX -> IMGFIX : services/api/ns_api/character_hub.py（只改 _sheet_candidates：adopted v2 进候选、现行那张永远在候选、标单品检查） | by 总调度 fredw-2b 11-01 19:4x 同上派单
+- CONSENT: AUTOPILOT -> IMGFIX : data/pipeline/runs/series10_v1/assets/first_frame_jobs.json（tools/pipeline/image_jobs.py 重编） | by 总调度 fredw-2b 11-01 19:4x 同上派单：“重编 first_frame_jobs.json”
+- CONSENT: PROMPT -> IMGFIX : tools/prompt_v2/audit_framing.py（首句检查跳过 K-REN-704 单人朝向句） | by 总调度 fredw-2b 11-01 19:4x 派单（改别人的文件写 CONSENT）
+- CONSENT: REFLOCK -> IMGFIX : tests/test_gen_contract.py、tests/test_image_jobs.py、tests/test_unified_frame.py（“提示词以图1句开头”断言改为先去掉 K-REN-704 单人朝向句）；新建 tests/test_imgfix.py、tools/imgfix/** | by 总调度 fredw-2b 11-01 19:4x 派单
+- CONSENT: AUTOPILOT -> NETFIX : ops/offline/resident_prep.py（control() 非 video-only 时改调 tools/netfix/dispatch.py：only = 分区 ∩ ready_episodes、hold = 别机的道 + laptop:0、paused 跟随笔记本全局暂停）、tools/autopilot/infra_watchdog.py（监管进程心跳新鲜时只探测 / 报警，不杀 ssh、不拉循环）——只做局部改动，和 WORKFLOW 错开 | by 总调度 fredw-2b 11-01 22:1x NETFIX 派单：“WORKFLOW 拥有 resident_sync.py、full_redo.py、ops/offline/**；你要改它们，先在 LOCKS 写 CONSENT（AUTOPILOT → NETFIX，by 总调度 fredw-2b），只做局部改动”
+- CONSENT: PRODUCER -> NETFIX : data/producer/control.json（只经 tools/netfix/dispatch.py apply-laptop 写 only / hold_lanes / dispatch_by，不动 paused）；tools/autopilot/producer.py 本轮未改 | by 总调度 fredw-2b 11-01 22:1x NETFIX 派单：“producer.py 归 PRODUCER（不在岗），CONSENT 写 PRODUCER → NETFIX”
+- CONSENT: VQAGATE -> NETFIX : services/agent/ns_agent/vqa/client.py（加 _lan_url：服务器上走 gpu36 内网入口 10.0.0.36:8870）、config/vqa.json（model.lan_url） | by 总调度 fredw-2b 11-01 22:1x NETFIX 派单第 3 项：“gpu33 的 vqa client 先连 10.0.0.36:8870”
+- CONSENT: 无主 -> NETFIX : ops/autostart/**（tunnel.sh / tunnel_gpu36.sh 退役为调用监管进程、laptop_autostart.ps1 改 ensure 监管进程）；新 tools/netfix/**、config/netfix/**、data/netfix/**、tests/test_netfix.py | by 总调度 fredw-2b 11-01 22:1x NETFIX 派单第 1 项：“所有转发改成由一个监管进程统一负责”
+- CONSENT: VQAGATE -> NETFIX : tools/vqa/tunnel.ps1（退役为 ensure 监管进程；8871 → gpu36:8870 并入 tunnel_supervisor 的 gpu36 主连接） | by 总调度 fredw-2b 11-01 23:0x：“VQA 的 8871 隧道……现在就可以收编，收编前确认没有看图请求正在走这条隧道”

@@ -22,6 +22,7 @@
   plan                         写 data/autopilot/full_redo/plan.json（80 镜、负责机器、hold 清单、GPU 时长估算）
   apply [--host H] [--dry]     闸门全过才派；逐镜记 state.json，已派的跳过（可续跑）
   pause / resume               两台服务器 producer pause / resume（by FULL_REDO）
+  reset-redo [--since ISO] [--shots a,b] [--dry]   白出不占次数：L-088 驳回对象的 redo_tries 归零（历史保留）
 """
 from __future__ import annotations
 
@@ -92,8 +93,26 @@ def gates_status() -> dict:
     return out
 
 
-def gates_ok() -> bool:
-    return all(v.get("ok") for v in gates_status().values())
+def image_jobs_green() -> dict:
+    """AUDIT 22:13：作业清单必须和现行编译器一致（tests/test_image_jobs.py 绿）且 jobs_vs_import ok，否则一提交就被
+    compile_mismatch 拦下、白占次数。恢复 producer / apply 前的前置检查（不缓存，约 4 秒）"""
+    import subprocess
+    r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests/test_image_jobs.py"], cwd=ROOT,
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
+                       env={**os.environ, "PYTHONUTF8": "1"})
+    tail = [ln for ln in (r.stdout or "").splitlines() if ln.strip()][-3:]
+    try:
+        chk = g21_check(ROOT / "data/pipeline/runs/series10_v1")
+    except Exception as e:  # noqa: BLE001
+        chk = {"ok": False, "error": repr(e)[:200]}
+    return {"ok": r.returncode == 0 and bool(chk.get("ok")), "tests_rc": r.returncode, "tests": " | ".join(tail)[-300:],
+            "jobs_vs_import": {k: chk.get(k) for k in ("ok", "missing", "extra", "stale_sha", "error") if k in chk}}
+
+
+def gates_ok(check_jobs: bool = True) -> bool:
+    if not all(v.get("ok") for v in gates_status().values()):
+        return False
+    return image_jobs_green()["ok"] if check_jobs else True
 
 
 def owner_host(ep: int) -> str:
@@ -140,12 +159,19 @@ def make_plan() -> dict:
     return plan
 
 
-def apply(host: str | None = None, dry: bool = False, executor: str = "laptop") -> dict:
+def import_sha_now() -> str:
+    import hashlib
+    p = ROOT / "data/import/script_v2.json"
+    return hashlib.sha256(p.read_bytes()).hexdigest()[:16] if p.exists() else ""
+
+
+def apply(host: str | None = None, dry: bool = False, executor: str = "laptop", eps: set | None = None) -> dict:
     """executor=laptop（默认，总调度 18:4x 分工：出图由笔记本 producer 统一负责，道 = laptop:0 + 跳板通时的服务器出图道）：
     在笔记本本机调 producer.py reject；executor=server：在负责该集的服务器上调（服务器 producer 常驻时才用）。
     逐镜记 state.json，已标的跳过（可续跑）；能用几条道由 producer 的道表 / 退避决定（部分道可用就先跑几条）"""
     if not gates_ok():
-        return {"ok": False, "why": "前置闸门没全过（a/b 未完成前不开始全量出图）", "gates": gates_status()}
+        return {"ok": False, "why": "前置闸门没全过（a/b 未完成前不开始全量出图），或作业清单与编译器 / 导入稿不一致（AUDIT 22:13）",
+                "gates": gates_status(), "image_jobs": image_jobs_green()}
     import resident_sync as RS
     plan = jl(PLAN) or make_plan()
     st = jl(STATE, {"done": {}, "errors": {}}) or {"done": {}, "errors": {}}
@@ -153,8 +179,11 @@ def apply(host: str | None = None, dry: bool = False, executor: str = "laptop") 
     for row in plan["shots"]:
         if host and row["host"] != host:
             continue
+        if eps and int(row.get("ep") or 0) not in eps:
+            continue
         oid = f"first:{row['shot']}"
-        if oid in st["done"]:
+        # 逐集流水线（总调度 22:06）：同一镜号在新导入稿里可能是新内容——只有“同一份导入稿 sha 下已标过”才跳过
+        if (st["done"].get(oid) or {}).get("import_sha") == import_sha_now():
             continue
         args = ["reject", "--obj", oid, "--n", str(int(row.get("current_first") or 0)), "--reason", REASON, "--plan", PRESETS,
                 "--by", "WORKFLOW-L088"]
@@ -173,7 +202,8 @@ def apply(host: str | None = None, dry: bool = False, executor: str = "laptop") 
                 cmd = (f"cd {RS.R} && OFFLINE_SELF={row['host']} {RS.OFF}/venv/bin/python tools/autopilot/producer.py "
                        + " ".join(f"'{x}'" for x in args))
                 RS.ssh(row["host"], cmd, timeout=120, tries=4)
-            st["done"][oid] = {"at": time.strftime("%F %T"), "where": where, "reject_n": row.get("current_first")}
+            st["done"][oid] = {"at": time.strftime("%F %T"), "where": where, "reject_n": row.get("current_first"),
+                               "import_sha": import_sha_now()}
             st["errors"].pop(oid, None)
             sent += 1
         except Exception as e:  # noqa: BLE001
@@ -182,9 +212,43 @@ def apply(host: str | None = None, dry: bool = False, executor: str = "laptop") 
     return {"ok": True, "sent": sent, "done": len(st["done"]), "errors": len(st["errors"])}
 
 
+def reset_redo(since: str | None = None, shots: list[str] | None = None, by: str = "WORKFLOW", dry: bool = False) -> dict:
+    """总调度 19:41：IMGFIX 修根因期间白出的驳回重出不占次数——把 L-088 驳回对象的账本 redo_tries 归零、清 redo_candidate，
+    redo_history 保留并追加一条“次数恢复”记录（审计）。since：只恢复这之后出的（ISO）；shots：只恢复这些镜。
+    驳回计划（master_rejects.json，frame_v9×2）不动，恢复派单时直接接着用"""
+    led_p = ROOT / "data/producer/attempts.json"
+    rj = jl(ROOT / "data/producer/master_rejects.json", {}) or {}
+    L = jl(led_p, {}) or {}
+    changed = []
+    for oid, r in rj.items():
+        if "L-088" not in str(r.get("reason")):
+            continue
+        if shots and oid.split(":", 1)[1] not in shots:
+            continue
+        rec = L.get(oid) or {}
+        hist = rec.get("redo_history") or []
+        n_since = [h for h in hist if not since or str(h.get("at") or "") >= since]
+        if not int(rec.get("redo_tries") or 0) and not rec.get("redo_candidate"):
+            continue
+        if since and not n_since:
+            continue
+        changed.append({"obj": oid, "redo_tries_was": rec.get("redo_tries"), "candidate_was": rec.get("redo_candidate")})
+        if not dry:
+            rec["redo_history"] = hist + [{"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "note": "次数恢复：IMGFIX 修根因期间白出不占次数（总调度 19:41）",
+                                           "by": by, "redo_tries_was": rec.get("redo_tries")}]
+            rec.update(redo_tries=0, redo_candidate=None)
+            L[oid] = rec
+    if changed and not dry:
+        js(led_p, L)
+    return {"changed": len(changed), "objects": changed[:100], "dry": dry}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("cmd", choices=["status", "gate", "plan", "apply", "pause", "resume"])
+    ap.add_argument("cmd", choices=["status", "gate", "plan", "apply", "pause", "resume", "reset-redo"])
+    ap.add_argument("--since")
+    ap.add_argument("--eps", default="")
+    ap.add_argument("--shots", default="")
     ap.add_argument("gate_id", nargs="?")
     ap.add_argument("--by", default="")
     ap.add_argument("--note", default="")
@@ -193,7 +257,8 @@ def main(argv=None) -> int:
     ap.add_argument("--dry", action="store_true")
     a = ap.parse_args(argv)
     if a.cmd == "status":
-        print(json.dumps({"gates": gates_status(), "gates_ok": gates_ok(), "state": jl(STATE, {})}, ensure_ascii=False, indent=1)[:4000])
+        print(json.dumps({"gates": gates_status(), "image_jobs": image_jobs_green(), "gates_ok": gates_ok(),
+                          "state": jl(STATE, {})}, ensure_ascii=False, indent=1)[:4000])
     elif a.cmd == "gate":
         if a.gate_id not in GATE_IDS or not a.by:
             print("用法：gate <" + "|".join(GATE_IDS) + "> --by <谁> [--note 证据]")
@@ -206,7 +271,11 @@ def main(argv=None) -> int:
         p = make_plan()
         print(json.dumps({"shots": len(p["shots"]), "video_holds": p["video_holds"], "estimate": p["estimate"]}, ensure_ascii=False, indent=1))
     elif a.cmd == "apply":
-        print(json.dumps(apply(a.host, a.dry, a.executor), ensure_ascii=False, indent=1)[:3000])
+        eps = {int(x) for x in a.eps.split(",") if x.strip()} if a.eps else None
+        print(json.dumps(apply(a.host, a.dry, a.executor, eps), ensure_ascii=False, indent=1)[:3000])
+    elif a.cmd == "reset-redo":
+        print(json.dumps(reset_redo(a.since, [x for x in a.shots.split(",") if x] or None, a.by or "WORKFLOW", a.dry),
+                         ensure_ascii=False, indent=1)[:3000])
     elif a.cmd in ("pause", "resume"):
         import resident_sync as RS
         for h in RS.HOSTS:

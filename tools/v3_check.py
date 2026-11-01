@@ -392,7 +392,7 @@ def check(v3: dict, v2: dict | None, classes: dict[int, str]) -> tuple[list[dict
         live = [x for x in ests if not x["deferred"]]
         lw_shots = [x for x in live if x["lw"]]
         cls = classes.get(epn, "")
-        if not 50 <= total <= 75:
+        if not 60 <= total <= 120:   # D-SCR-08（项目方 11-01 21:4x）
             fail(fails, epn, None, "V3-T1", f"总时长 {total:g} 秒")
         ep_fail = [f for f in fails if f["ep"] == epn and f["level"] == "block"]
         table.append({

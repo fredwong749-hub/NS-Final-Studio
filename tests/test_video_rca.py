@@ -68,3 +68,11 @@ def test_rates_classes_untested_is_none():
     c = RT.classes({"mean": 0.3, "v6": {}, "identity": {}})
     assert c["动作不足/站桩(mean<0.5)"] is True
     assert c["多手(hands_max>2×人数)"] is None and c["身份漂移(p10<0.5)"] is None
+
+
+# K-REV-705：WORKFLOW 11-01 已把 dejudder.j4_gt 改 1.2（VIDEO-RCA r2），去掉 xfail
+def test_v05_dejudder_threshold_covers_pika_lowmotion():
+    import json
+    d = json.loads((ROOT / "config/pipeline/video_policy.json").read_text(encoding="utf-8"))["dejudder"]
+    assert d["enabled"] and "i2va_pika_flex" in d["recipes"]
+    assert float(d["j4_gt"]) <= 1.2 and float(d["j4_z_ge"]) <= 3.0

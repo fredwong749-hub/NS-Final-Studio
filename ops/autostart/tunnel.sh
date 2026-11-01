@@ -1,14 +1,8 @@
 #!/bin/bash
-# 笔记本 → gpu3 常驻 ssh 隧道（断线 30 s 重连）：15180 → 画布渲染桥 :5180；18098 → Qwen 写作模型 :8098；
-# 18099 → Qwen 信箱 :8099。由 ops/autostart/laptop_autostart.ps1 在登录时拉起；已在跑就不重复（ops/logs/tunnel.lock）。
-# 18188 → gpu3 GPU0 ComfyUI（Image 2.1 出图）；18191 → gpu3 GPU3 ComfyUI（MiniMax H3 视频）——项目方 2026-10-30 夜：画布改了就重出，直接走 gpu3。
-# 封板修复：去掉本文件自己的 trap 'rm -rf "$LOCK"'，改用 _common.sh 的 _release_lock（只删仍写着本进程 pid 的锁）
-source "$(dirname "$0")/../sync/_common.sh"
-# fredw-92/G36：gpu36 的三个渲染道隧道（18288/18289/18290）是单独的循环 tunnel_gpu36.sh（自己的锁，已在跑就退出）
-"$(dirname "$0")/tunnel_gpu36.sh" </dev/null >/dev/null 2>&1 &
-while true; do
-  ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=20 -o ServerAliveCountMax=3 \
-      -L 15180:127.0.0.1:5180 -L 18098:127.0.0.1:8098 -L 18099:127.0.0.1:8099 -L 18188:127.0.0.1:8188 -L 18189:127.0.0.1:8189 -L 18191:127.0.0.1:8191 gpu33
-  date "+%F %T tunnel exited ($?), reconnect in 30 s"
-  sleep 30
-done
+# NETFIX 11-01（K-OPS-N01，总调度 fredw-2b 派）：本脚本退役。原来是“ssh 断了 30 s 重连”的 bash 循环，22:08 循环不在时 gpu36 三条隧道
+# 永远修不好。现在全部转发（15180/18098/18099/18188/18189/18191 → gpu33，18288/18289/18290 → gpu36）由一个监管进程负责：
+#   tools/netfix/tunnel_supervisor.py（每台服务器一条 ssh、指数退避、卡死检测、跳板恢复立刻重连、接管孤儿 ssh）。
+# 任何地方还调用本脚本，都只会转去确保监管进程在跑，然后退出（不再自己起 ssh，避免和监管进程抢端口）。
+# 旧版本留在 data/_quarantine/netfix_20261101/。
+cd "/d/NS-Final Studio" || exit 1
+PYTHONUTF8=1 ./.venv/Scripts/python.exe tools/netfix/tunnel_supervisor.py ensure

@@ -35,7 +35,17 @@ def upload_png(rel: str) -> str:
     return (r.get("subfolder") + "/" if r.get("subfolder") else "") + r["name"]
 
 
-def main(p: Path):
+def _local_free():
+    """本机道 laptop:0（18388）：队列为空才交（生产优先）"""
+    d = json.loads(L.api("/queue", timeout=20))
+    n = len(d["queue_running"]) + len(d["queue_pending"])
+    return (n == 0), f"本机道队列 {n}"
+
+
+def main(p: Path, local: bool = False):
+    if local:            # 跳板慢 / 断时走笔记本本机道，不经网络（scope=ab，只写 data/ab/video_rca/）
+        L.PORT = 18388
+        L.lane_free = _local_free
     exp = json.loads(p.read_text(encoding="utf-8"))
     name = exp["name"]
     out = L.AB / name
@@ -75,7 +85,7 @@ def main(p: Path):
             if ok:
                 break
             print("让道：", why, flush=True)
-            time.sleep(60)
+            time.sleep(15)
         body = {"prompt": g, "client_id": L.CLIENT + uuid.uuid4().hex[:8],
                 "extra_data": {"ns_tag": {"agent": "VIDEO-RCA", "kind": "image", "v": 1, "label": f"实验 {name}/{a['id']}"}}}
         pid = json.loads(L.api("/prompt", json.dumps(body).encode(), timeout=120))["prompt_id"]
@@ -136,5 +146,7 @@ def export(p: Path):
 if __name__ == "__main__":
     if sys.argv[1] == "export":
         export(Path(sys.argv[2]))
+    elif sys.argv[1] == "local":
+        main(Path(sys.argv[2]), local=True)
     else:
         main(Path(sys.argv[1]))

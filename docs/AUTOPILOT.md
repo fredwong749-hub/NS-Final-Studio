@@ -148,3 +148,17 @@
 - 笔记本是控制面：改代码 → `tools/autopilot/resident_sync.py loop` 自动推到服务器并热重启；结果每 20 分钟并回，画布和审片页照常看。推送 / 拉回都按文件清单比对、分批、断连重试，截断文件不覆盖（K-OPS-W02）。
 - 报警（K-OPS-W06）：服务器上 GPU 空闲但有活超过 10 分钟、producer / night 心跳停，写 data/qa/alerts.jsonl，监控看板 :8810 的“报警”区显示；笔记本隧道由 infra_watchdog 看门狗自动重建（K-OPS-W05）。
 - 配方：series10 重出默认 Pika Flex（`i2va_pika_flex`，项目方 11-01 ~16:20“改用 Pika Flex”）；脸红类描述的镜由 flush_risk 换回 `i2va_pdd2`（K-REN-301）。
+
+## ⤴ 连接根治（NETFIX 2026-11-01 22:3x，总调度 fredw-2b 派；规则 K-OPS-N01 / N03 / N04 / N05）
+项目方原话：“gpu连接是大问题,现在全部修复连接问题”。
+- 隧道：tools/netfix/tunnel_supervisor.py 一个进程负责全部转发，每台服务器一条 ssh 挂多个 -L，指数退避；跳板不通时不起 ssh，恢复后立刻重连（注入实测恢复 14 s，验收线 60 s；日志在 data/netfix/inject/）。ops/autostart/tunnel*.sh 已退役，只调用 ensure。保活：计划任务 NS-Studio-TunnelSupervisor 每 5 分钟跑一次，登录时 laptop_autostart 也会拉起。看门狗在监管进程在岗时只报警、不修。
+- 派单：每台机器只派本机的出图道。分区写在 config/netfix/partition.json：gpu33=[1,3,5,7]、gpu36=[2,4,6,8,9]、laptop=[10]；视频 ep10 归 gpu36。control 由 tools/netfix/dispatch.py 计算：only = 分区 ∩ data/autopilot/ready_episodes.json，交集为空时设为 ["__none__"]；服务器的暂停状态跟随笔记本全局暂停，快照在 data/netfix/laptop_ctrl.json。
+- gpu33 看图：经 gpu36 内网入口 10.0.0.36:8870（tools/netfix/lan_proxy.py，只认 10.0.0.33），不经跳板。
+- 跳板断时：服务器上的 producer / night / 看图都不依赖跳板，照常生产。笔记本这边，监管进程状态变为 relay_down，界面显示“服务器在自主生产、最后一次同步 xx 分钟前”，数据取自 data/netfix/net_status.json 的 relay.down_since_t 和 servers.<h>.last_pull_t。跳板恢复后，隧道 60 s 内全部恢复，resident_sync loop 下一拍自动并回（只拉 json 和当前版本图，大文件按需拉）。
+- **跨机接手（work stealing）备用方案**：总调度 23:0x 决定先不做，`partition.json` 里 work_stealing 为 false。将来要做，只能按下面的两阶段交接，由笔记本居中协调。
+  1. 前提：笔记本同时连得上两台服务器，并且被接手的集里一个对象都还没开始（没有 attempts，也没有租约）。
+  2. 撤：把该集从 A 的分区里去掉，执行 `dispatch.py server-control A --write`。等 A 的 producer 下一拍心跳里 only 已不含该集，并确认 A 的 `data/producer/leases/` 里没有该集的对象。
+  3. 给：把该集写进 B 的分区，partition.json 记下依据和时间，然后执行 `server-control B --write`。
+  4. 并回：merge_pull 按新归属收文件。
+  任一步跳板断开，就停在“两边都不派”的安全侧，不会两边重复派单。粒度只能是整集，不能按对象拆。
+- **8871 收编**（23:0x）：VQAGATE 的看图隧道 8871 → gpu36:8870 已并入 gpu36 主连接，`tools/vqa/tunnel.ps1` 退役，现在只调用 ensure。收编前确认过：服务 queue=0，最后一次看图在 172 s 前，8871 上没有在途连接。

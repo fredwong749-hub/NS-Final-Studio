@@ -81,7 +81,11 @@ def outer_items(project: str, ep, shot, sr=None, body: str | None = None) -> lis
             continue
         # 服装件（outfit：上衣 / 外套 / 下装）不按景别裁：模型常把近景画宽，露出的下装若没被点名就会自己编（总调度 11-01：
         # ep01-S5 近景三次都画成黑长裤，造型 A 是深灰西装裙 / 铅笔裙）；鞋、饰品、指甲仍按景别可见区
-        vis = [x for x in L.parts if (x.zone in zones or x.slot == "outfit") and x.slot != "marker" and AR.part_active(x, n_ep, img)]
+        # ⤴ IMGFIX 11-01（总调度 fredw-2b 21:5x）：特写例外——特写只补景别内看得到的单品。ep01-S1 特写被补了“深灰铅笔裙——及膝裙”，
+        # 模型为画出裙子把特写拉成中景（data/ab/imgfix 全部 S1 出图都是坐姿中景）；近景及更远照旧补全部服装件
+        loose = _size != "特写"
+        vis = [x for x in L.parts if (x.zone in zones or (loose and x.slot == "outfit")) and x.slot != "marker"
+               and AR.part_active(x, n_ep, img)]
         if any(x.extra and x.slot == "shoes" for x in vis):
             vis = [x for x in vis if not (x.slot == "shoes" and not x.extra)]
         names = []

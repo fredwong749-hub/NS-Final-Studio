@@ -5,6 +5,7 @@ GET /api/gpu/live   每张卡（gpu33·卡0/1/3 + 坏卡 gpu33·卡2 + gpu36·�
     利用率 / 显存 / 温度 / 功耗与功耗墙（gpu36 温控守护压到 200 W 时标出）、最近一张出图（缩略图，可放大）、
     非 ComfyUI 的 GPU 进程（训练 / 其他用户）、心跳任务（TTS 等，docs/GPU_STATUS.md）。
 GET /api/gpu/thumb?lane=gpu36:1&filename=…&subfolder=…&type=output[&w=…]   ComfyUI 出图的缩略图（服务端缩放、缓存）
+    UIRSI r38：先在本镜 takes.json 里找登记过的同名一版（笔记本文件，不经隧道）；没有才经隧道取（8 s 超时，失败 1 分钟内不重试，404 带中文原因）
 
 数据（全部只读）：
   · ComfyUI（每条道，本机隧道）：/queue 每 4 s，/history?max_items=20 每 12 s；标签读 extra_data.ns_tag（ns_agent.comfy_tag）。
@@ -627,6 +628,30 @@ def gpu_live():
 
 
 # ---------------------------------------------------------------- 缩略图代理
+_SHOT_RE = re.compile(r"^(ep\d{2})-S(\d{1,3})_")
+
+
+def _local_copy(filename: str) -> Path | None:
+    """UIRSI r38（项目方截图“最近出图”裂图）：ComfyUI 输出名“ep05-S3_image_v9_00002_.png”在服务器上，
+    笔记本经隧道去取——隧道 / 跳板一断就 30 s 超时再 502，图就裂了。这张图登记进版本链时，takes.json 里记了
+    服务器原路径（gen_contract.postflight.subject / origin），所以先在本镜 takes.json 里找同名的一版，用笔记本上的文件。"""
+    m = _SHOT_RE.match(filename)
+    if not m:
+        return None
+    try:
+        from ns_render import pipeline as P  # noqa: PLC0415
+        tj = P.RENDERS / m.group(1) / f"S{int(m.group(2))}" / "takes.json"
+        data = json.loads(tj.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return None
+    for tk in reversed(data.get("takes") or []):
+        if tk.get("file") and filename in json.dumps(tk, ensure_ascii=False):
+            f = P.DATA / tk["file"]
+            if f.is_file():
+                return f
+    return None
+
+
 @router.get("/api/gpu/thumb")
 def gpu_thumb(lane: str, filename: str, subfolder: str = "", type: str = "output", w: int | None = None):  # noqa: A002
     from ns_render import endpoints as EP
@@ -639,15 +664,26 @@ def gpu_thumb(lane: str, filename: str, subfolder: str = "", type: str = "output
     key = (lane, filename, subfolder, type, w)
     with _lock:
         hit = _st["thumbs"].get(key)
+        miss = _st.setdefault("thumb_miss", {}).get(key)
     if hit:
         return Response(hit[1], media_type=hit[0], headers={"Cache-Control": "max-age=3600"})
-    q = urllib.parse.urlencode({"filename": filename, "subfolder": subfolder, "type": type})
-    try:
-        with urllib.request.urlopen(f"{url}/view?{q}", timeout=30) as r:
-            raw = r.read()
-            ctype = r.headers.get("content-type") or "image/png"
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"读不到 ComfyUI 输出：{e}")
+    raw, ctype = None, "image/png"
+    loc = _local_copy(filename)
+    if loc is not None:                      # 笔记本上有同一张（已登记进版本链）→ 不经隧道
+        raw = loc.read_bytes()
+        ctype = "image/jpeg" if loc.suffix.lower() in (".jpg", ".jpeg") else "image/png"
+    else:
+        if miss and time.time() - miss < 60:    # 刚读不到过：1 分钟内不再去等隧道（前端显示占位字）
+            raise HTTPException(404, "这张图在服务器上，笔记本上还没有，连接也暂时不通")
+        q = urllib.parse.urlencode({"filename": filename, "subfolder": subfolder, "type": type})
+        try:
+            with urllib.request.urlopen(f"{url}/view?{q}", timeout=8) as r:
+                raw = r.read()
+                ctype = r.headers.get("content-type") or "image/png"
+        except Exception:  # noqa: BLE001
+            with _lock:
+                _st["thumb_miss"][key] = time.time()
+            raise HTTPException(404, "这张图在服务器上，笔记本上还没有，连接也暂时不通")
     if w:
         try:
             from PIL import Image
@@ -662,6 +698,7 @@ def gpu_thumb(lane: str, filename: str, subfolder: str = "", type: str = "output
         if len(_st["thumbs"]) > 60:
             _st["thumbs"].clear()
         _st["thumbs"][key] = (ctype, raw)
+        _st["thumb_miss"].pop(key, None)
     return Response(raw, media_type=ctype, headers={"Cache-Control": "max-age=3600"})
 
 

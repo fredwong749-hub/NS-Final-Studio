@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import concurrent.futures as cf
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -98,8 +99,20 @@ def policy_hold(var: dict) -> str | None:
     return None
 
 
+# RL-E3（AUDIT 20:15，K-OPS-Q24 扩到提示词）：与 services/recipes/ns_recipes/lint.SYS_CAMERA_FACING_RE 同一模式（vidgen 部署在
+# video10_srv，不带 ns_recipes，所以抄一份；tests/test_recipe_pika_default.py 核对两边一致）
+PROMPT_FACING_RE = re.compile(r"\b(?:facing|faces|turned toward|turns toward|toward)\s+(?:the\s+)?(?:camera|lens|viewer)\b", re.I)
+
+
+def prompt_hold(var: dict) -> str | None:
+    """变体提示词的系统锚点句（The frame keeps …）里有朝向镜头 → hold（16:56 旧编译稿 538 个里 125 个带 facing the camera）"""
+    sys_txt = " ".join(re.findall(r"The frame keeps[^.]*\.", var.get("prompt") or ""))
+    m = PROMPT_FACING_RE.search(sys_txt)
+    return f"hold：编译稿含朝向镜头的系统句“{m.group(0)}”（RL-E3），等重编" if m else None
+
+
 def policy_ok(var: dict) -> bool:
-    why = policy_hold(var)
+    why = policy_hold(var) or prompt_hold(var)
     if why and not var.get("_policy_logged"):
         var["_policy_logged"] = True
         print(time.strftime("%m-%d %H:%M:%S"), "POLICY_HOLD", var.get("variant"), why, flush=True)

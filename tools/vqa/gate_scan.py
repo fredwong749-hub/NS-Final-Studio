@@ -122,6 +122,47 @@ def apply(eps) -> dict:
     return {"rows": out}
 
 
+def backfill(limit: int | None = None) -> list:
+    """补判（AUDIT 19:3x）：看图没跑成（Q9 untested）、其余阻断项都过了的首帧 / 尾帧版本（不论是不是当前，含本机 laptop:0 新出的）→
+    本地看图 → 并进 postflight（rescore_takes.write_back）→ auto_current.on_contract：补判通过就自动设为当前（唯一入口）"""
+    import glob as _g
+    from ns_agent.vqa import contract as VQ
+    from ns_render import auto_current as AC
+    import rescore_takes as RT
+    todo = []
+    for f in _g.glob(str(ROOT / "data/renders/ep*/S*/takes.json")):
+        sid = "-".join(Path(f).parent.parts[-2:])
+        try:
+            d = json.loads(Path(f).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for t in d.get("takes") or []:
+            pf = t.get("postflight") or {}
+            q9 = next((i for i in pf.get("items") or [] if i.get("id") == "Q9"), None)
+            if t.get("stage") in ("image", "last") and q9 and q9.get("status") == "untested"                     and set(pf.get("blocking") or []) <= {"Q9"} and not t.get("master_reject") and (ROOT / "data" / t["file"]).exists():
+                todo.append((t.get("created_at") or "", sid, t))
+    out = []
+    for _c, sid, t in sorted(todo, key=lambda x: x[0], reverse=True)[:limit]:
+        v = VQ.inspect_for(sid, "first" if t["stage"] == "image" else "last", ROOT / "data" / t["file"], t.get("prompt") or "",
+                           refs_of(sid, t), wait_s=1800)
+        if v.get("error"):
+            out.append({"shot": sid, "stage": t["stage"], "take": t["n"], "result": "仍未看成", "error": v["error"][:120]})
+            print(out[-1], flush=True)
+            continue
+        old = t.get("postflight") or {}
+        pf = VQ.apply({"ok": True, "items": [i for i in old.get("items") or [] if i.get("id") != "Q9"], "blocking": [],
+                       "reasons": [r for r in old.get("reasons") or [] if not str(r).startswith("Q9")],
+                       "measured_on": old.get("measured_on")}, v)
+        RT.write_back(sid, t["stage"], t["n"], pf, "VQAGATE 补判：看图没跑成（Q9 untested）的版本补看图", plan="tools/vqa/gate_scan.py backfill")
+        cur = AC.on_contract(sid, t["stage"], t["n"])
+        out.append({"shot": sid, "stage": t["stage"], "take": t["n"], "result": pf["vqa_gate"]["status"],
+                    "defects": pf["vqa_gate"]["defects"], "current": cur})
+        print(out[-1], flush=True)
+    (OUT / "backfill.json").write_text(json.dumps({"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "rows": out}, ensure_ascii=False, indent=1),
+                                       encoding="utf-8")
+    return out
+
+
 def preview() -> dict:
     """拦截预览（不写回、不撤当前）：按现行 blocking 算每镜会不会被拦、拦什么 → data/vqa/gate_scan/preview.json / preview.md，
     交总调度亲审；审完再 apply（总调度 18:0x，AUDIT 建议不全自动放量）"""
@@ -269,6 +310,8 @@ def main(argv):
         apply(eps)
     elif argv and argv[0] == "calib_gaze":
         calib_gaze(int(argv[argv.index("--limit") + 1]) if "--limit" in argv else None)
+    elif argv and argv[0] == "backfill":
+        backfill(int(argv[argv.index("--limit") + 1]) if "--limit" in argv else None)
     elif argv and argv[0] == "preview":
         preview()
     elif argv and argv[0] == "report":

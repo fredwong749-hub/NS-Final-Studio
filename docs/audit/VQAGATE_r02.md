@@ -1,4 +1,4 @@
-# AUDIT · VQAGATE 复核 r02（2026-11-01 18:03–18:15，独立复核方 = AUDIT，交总调度 fredw-2b）
+# AUDIT · VQAGATE 复核 r02（2026-11-01 18:03–18:06，独立复核方 = AUDIT，交总调度 fredw-2b）
 
 复核对象：CHANGELOG “17:4x VQAGATE（续，总调度 17:3x 决定）”、docs/vqa/GATE_CALIBRATION.md（17:44）、tools/vqa/after_network.py（17:42）、config/owner_decisions.yaml 里的 D-VQA-02，以及 r01 留下的 6 个未关闭问题。机读版：data/qa/audit/VQAGATE_r02.json
 

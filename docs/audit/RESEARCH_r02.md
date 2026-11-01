@@ -1,4 +1,4 @@
-# AUDIT · RESEARCH 续派复核 r02（2026-11-01 17:01–17:05，独立复核方 = AUDIT，交总调度 fredw-2b）
+# AUDIT · RESEARCH 续派复核 r02（2026-11-01 17:01–17:02，独立复核方 = AUDIT，交总调度 fredw-2b）
 
 复核对象：CHANGELOG“17:0x RESEARCH fredw-2b 派 续”，内容是 frame-jobs 新增 scope=ab，unified_frame.render_ab，tests/test_frame_ab_scope.py，K-WRT-Q29 两处标 ⤴，tools/research/realism_gpu_ab.py。
 AUDIT 没有改产品文件，没有提交任何作业。机读版：data/qa/audit/RESEARCH_r02.json

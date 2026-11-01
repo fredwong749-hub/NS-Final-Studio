@@ -32,7 +32,23 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 OFF = "/root/work/fredw/offline_20261101"
 R = OFF + "/repo"
-HOSTS = {"gpu33": [1, 3, 5], "gpu36": [2, 4, 6, 7, 8, 9, 10]}     # 与离线那次相同（gpu33 GPU2 坏卡永不用）
+def _partition_hosts() -> dict[str, list[int]]:
+    """NETFIX 22:2x：按集归属改读 config/netfix/partition.json（images ∪ video；laptop 不是服务器，不在内）；读不到用旧分集"""
+    try:
+        part = json.loads((ROOT / "config/netfix/partition.json").read_text(encoding="utf-8"))
+        out = {}
+        for kind in ("images", "video"):
+            for h, eps in (part.get(kind) or {}).items():
+                if h != "laptop":
+                    out.setdefault(h, set()).update(int(x) for x in eps)
+        if out:
+            return {h: sorted(v) for h, v in sorted(out.items())}
+    except (OSError, ValueError):
+        pass
+    return {"gpu33": [1, 3, 5], "gpu36": [2, 4, 6, 7, 8, 9, 10]}
+
+
+HOSTS = _partition_hosts()     # gpu33 GPU2 坏卡永不用（道表里本来就没有）
 CODE_DIRS = ["tools", "services", "packages", "config", "knowledge", "ops"]
 DATA_DIRS = ["data", "assets", "docs/series10_video"]
 SKIP_PARTS = {"node_modules", ".venv", "__pycache__", ".git", "_offline_pull", "leases", ".pytest_cache"}
@@ -197,7 +213,8 @@ def wanted(rel: str, rem: dict, loc: dict, freeze: float, need: set) -> bool:
 
 
 TIER1_EXT = (".py", ".yaml", ".yml", ".json", ".md", ".txt", ".sh", ".toml", ".cfg", ".ini")
-TIER1_DATA = ("data/import/script_v2.json", "data/autopilot/full_redo/plan.json", "data/pipeline/runs/series10_v1/assets/first_frame_jobs.json", "data/pipeline/runs/series10_v1/video/recipe_choice.json",
+TIER1_DATA = ("data/import/script_v2.json",   # master_rejects / ready_episodes 不走整文件覆盖，由 push_control 按对象合并推（K-OPS-Q20）
+              "data/pipeline/runs/series10_v1/assets/first_frame_jobs.json", "data/pipeline/runs/series10_v1/video/recipe_choice.json",
               "data/pipeline/runs/series10_v1/assets/sheets_chosen.json", "data/pipeline/runs/series10_v1/assets/shot_looks.json")
 TIER1_DATA_PREFIX = ("data/assets/identity_refs/",)          # 身份脸（项目方挑定，小图）
 TIER1_SMALL = 2 * 1024 * 1024
@@ -302,8 +319,12 @@ def push(host: str, code_only: bool = False, tier: int = 2, yes: bool = False, b
     return {"host": host, "sent": sent_total}
 
 
-def restart(host: str, mode: str = "all") -> str:
-    out = ssh(host, f"cd {R} && {OFF}/venv/bin/python ops/offline/resident_prep.py {host} && bash {R}/ops/offline/resident_restart.sh {host} {mode}",
+DEFAULT_MODE = "all"     # ⤴ 总调度 22:2x（NETFIX）：服务器 producer 和 night 都起（取代 18:4x 的 night-only）；producer 的 only 由 dispatch.py 算
+
+
+def restart(host: str, mode: str = DEFAULT_MODE) -> str:
+    prep_arg = "video-only" if mode == "night-only" else ""
+    out = ssh(host, f"cd {R} && {OFF}/venv/bin/python ops/offline/resident_prep.py {host} {prep_arg} && bash {R}/ops/offline/resident_restart.sh {host} {mode}",
               timeout=300)
     txt = out.decode("utf-8", "replace")
     log("restart", host, txt.strip().replace("\n", " | ")[-400:])
@@ -325,7 +346,23 @@ def pull(host: str) -> dict:
             pass
     dst = ROOT / "data/_offline_pull" / host
     got, bad = 0, []
-    names = sorted(files)
+    # NETFIX 22:2x：先拉 json 与图（小、画布 / 审片页要用），mp4 只拉“需要的”：成片（data/episodes/）和各集 manifest 入选的原片 / 放大版
+    small = [f for f in files if not f.lower().endswith(".mp4")]
+    need_mp4 = set()
+    for f in files:
+        if f.lower().endswith(".mp4") and (f.startswith("data/episodes/") or "_sr1080" in f or "/_preview/" in f):
+            need_mp4.add(f)
+    for mf in [f for f in small if f.endswith("/manifest.json")]:
+        try:
+            raw = ssh(host, f"cat {R}/{mf}", timeout=120, tries=2)
+            for sh in (json.loads(raw).get("shots") or []):
+                for k in ("source", "proxy"):
+                    if sh.get(k) and sh[k] in files:
+                        need_mp4.add(sh[k])
+        except Exception:  # noqa: BLE001
+            pass
+    names = sorted(small) + sorted(need_mp4)
+    skipped_mp4 = len([f for f in files if f.lower().endswith(".mp4")]) - len(need_mp4)
     for b in batches(names, {k: (v,) for k, v in files.items()}):
         lst = "\n".join(b).encode()
         blob = ssh(host, f"cd {R} && tar cf - -T - 2>/dev/null; true", data=lst, timeout=1200)
@@ -346,7 +383,7 @@ def pull(host: str) -> dict:
         except tarfile.TarError as e:
             log("pull", host, "批次 tar 读不全（断连）", repr(e)[:120], "→ 下次重拉")
             bad += b
-    log("pull", host, "since", since, "文件", len(files), "收", got, "不收", len(bad))
+    log("pull", host, "since", since, "文件", len(files), "收", got, "不收", len(bad), "按需跳过 mp4", skipped_mp4)
     r = subprocess.run([sys.executable, str(ROOT / "ops/offline/merge_pull.py")], capture_output=True, text=True,
                        encoding="utf-8", errors="replace", timeout=900, cwd=ROOT,
                        env={**os.environ, "PYTHONUTF8": "1", "MERGE_ONLY_HOST": host})
@@ -382,9 +419,22 @@ except OSError:
     out["ns"] = 0
 try:
     st = json.load(open(R + "/data/pipeline/runs/series10_v1/video/state___HOST__.json"))
-    out["disp"] = sum(1 for r in st["shots"].values() if r.get("status") not in ("done", "best_effort", "blocked", "waiting_frame"))
+    jobs = json.load(open(R + "/data/pipeline/runs/series10_v1/video/jobs.json"))
+    try:
+        allowed = set((json.load(open(R + "/config/pipeline/video_policy.json")).get("pika_only") or {}).get("allowed") or [])
+    except Exception:
+        allowed = set()
+    readyv = {m["shot"] for m in jobs.get("shots", []) for v in (m.get("variants") or {}).values()
+              if str(v.get("status")) in ("ready", "lint_error") and (not allowed or v.get("recipe") in allowed)}
+    # 可派 = vidgen 没收尾、且重编后的 jobs.json 里真有能派的 Pika 变体（旧 state 的 pending 但没变体 ≠ 有活）
+    out["disp"] = sum(1 for sid, r in st["shots"].items()
+                      if r.get("status") not in ("done", "best_effort", "blocked", "waiting_frame") and sid in readyv)
 except Exception:
     out["disp"] = 0
+try:
+    out["ctrl"] = json.load(open(R + "/data/producer/control.json"))
+except Exception:
+    out["ctrl"] = {}
 print(json.dumps(out))
 """
 IDLE_ALERT_MIN = 10        # 总调度 16:55：GPU 空闲但有待派任务超过 10 分钟要报警
@@ -403,7 +453,7 @@ def health(host: str) -> dict:
     hb = d.get("hb") or {}
     idle = all((x.get("util") or 0) < 5 and not x.get("queue") for x in lanes.values())
     disp = int(d.get("disp") or 0)
-    pending = disp > 0 or bool(hb.get("inflight"))
+    pending = disp > 0          # 总调度 22:09：只数真有可派的视频变体；producer 在途（暂停中）不算
     st = jl(STATE, {}) or {}
     hs = st.setdefault(host, {})
     hs["idle_since"] = (hs.get("idle_since") or time.time()) if (idle and pending) else None
@@ -419,7 +469,9 @@ def health(host: str) -> dict:
     ws = jl(W.STATE, {}) or {}
     W.alert(ws, f"A-IDLE-{host}", idle_min >= IDLE_ALERT_MIN, "crit",
             f"{host} 渲染卡全部空闲 {idle_min:.0f} 分钟，但还有活（可派视频 {disp} 镜 / producer 在途 {hb.get('inflight')}）")
-    W.alert(ws, f"A-RESIDENT-PROD-{host}", res["producer_hb_age_min"] is None or res["producer_hb_age_min"] >= 10, "crit",
+    prod_expected = (d.get("ctrl") or {}).get("paused_by") != "LAPTOP_IMAGES"   # 18:4x 分工：服务器 producer 不起，不报
+    res["producer_expected"] = prod_expected
+    W.alert(ws, f"A-RESIDENT-PROD-{host}", prod_expected and (res["producer_hb_age_min"] is None or res["producer_hb_age_min"] >= 10), "crit",
             f"{host} 常驻 producer 心跳 {res['producer_hb_age_min']} 分钟没更新")
     W.alert(ws, f"A-RESIDENT-NIGHT-{host}", res["night_state_age_min"] >= 20, "crit",
             f"{host} 常驻 night.py 的 night_state.json {res['night_state_age_min']} 分钟没更新（卡住或已退出）")
@@ -436,6 +488,109 @@ def code_changed_since(t: float) -> bool:
     return False
 
 
+CONTROL_FILES = ["data/producer/master_rejects.json", "data/autopilot/ready_episodes.json", "data/netfix/laptop_ctrl.json"]
+OVERWRITE_FILES = {"data/netfix/laptop_ctrl.json"}      # 笔记本 control 的快照：整文件覆盖
+REMOTE_MERGE = r"""
+import json, os, sys
+R = "__R__"; rel = sys.argv[1]; src = sys.argv[2]
+def ts(v):
+    best = ""
+    if isinstance(v, dict):
+        for k, x in v.items():
+            if str(k).endswith("at") and isinstance(x, str) and x[:2] == "20":
+                best = max(best, x)
+            elif isinstance(x, (dict, list)):
+                best = max(best, ts(x))
+    elif isinstance(v, list):
+        for x in v:
+            best = max(best, ts(x))
+    return best
+new = json.load(open(src, encoding="utf-8"))
+dst = os.path.join(R, rel)
+try:
+    cur = json.load(open(dst, encoding="utf-8"))
+except Exception:
+    cur = {}
+out = dict(cur)
+if rel in ("data/netfix/laptop_ctrl.json",):          # 快照：整文件覆盖
+    tmp = os.path.join(R, rel) + ".tmp"
+    os.makedirs(os.path.dirname(tmp), exist_ok=True)
+    json.dump(new, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    os.replace(tmp, os.path.join(R, rel))
+    print("overwrote", rel)
+    sys.exit(0)
+items = new.get("episodes") if rel.endswith("ready_episodes.json") else new
+tgt = out.setdefault("episodes", {}) if rel.endswith("ready_episodes.json") else out
+base = (cur.get("episodes") or {}) if rel.endswith("ready_episodes.json") else cur
+n = 0
+for k, v in (items or {}).items():
+    if k not in base or ts(v) >= ts(base.get(k)):     # 按对象：笔记本这边更晚（或一样）就用笔记本的；服务器上更晚的不盖
+        if base.get(k) != v:
+            tgt[k] = v; n += 1
+if rel.endswith("ready_episodes.json"):
+    out.update({k: v for k, v in new.items() if k != "episodes"})
+tmp = dst + ".tmp"
+os.makedirs(os.path.dirname(dst), exist_ok=True)
+json.dump(out, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+os.replace(tmp, dst)
+print("merged", rel, n)
+"""
+
+
+def push_control(host: str, force: bool = False) -> dict:
+    """NETFIX 接口（总调度 22:2x）：master_rejects.json、ready_episodes.json 变了才推；到服务器按对象合并（K-OPS-Q20），
+    服务器上更晚的对象不被笔记本旧值盖回去"""
+    import hashlib
+    st = jl(STATE, {}) or {}
+    hs = st.setdefault(host, {}).setdefault("control_sha", {})
+    done = {}
+    for rel in CONTROL_FILES:
+        f = ROOT / rel
+        if not f.is_file():
+            continue
+        sha = hashlib.sha256(f.read_bytes()).hexdigest()[:16]
+        if hs.get(rel) == sha and not force:
+            continue
+        ssh(host, f"cat > /tmp/ctl_{Path(rel).name}", data=f.read_bytes(), timeout=300, tries=4)
+        code = REMOTE_MERGE.replace("__R__", R)
+        ssh(host, f"cat > /tmp/ctl_merge.py", data=code.encode(), timeout=120, tries=4)
+        out = ssh(host, f"{OFF}/venv/bin/python /tmp/ctl_merge.py {rel} /tmp/ctl_{Path(rel).name}", timeout=120, tries=4)
+        hs[rel] = sha
+        done[rel] = out.decode("utf-8", "replace").strip()
+    js(STATE, st)
+    if done:
+        log("push_control", host, done)
+        try:      # NETFIX：推完在服务器上按分区 ∩ 已准备集 ∩ 笔记本全局暂停 重算本机 producer 的 control
+            out = ssh(host, f"cd {R} && {OFF}/venv/bin/python tools/netfix/dispatch.py server-control {host} "
+                            f"--laptop-ctrl data/netfix/laptop_ctrl.json --write", timeout=120, tries=3)
+            log("server-control", host, out.decode("utf-8", "replace").strip().replace(chr(10), " | ")[-300:])
+        except Exception as e:  # noqa: BLE001
+            log("server-control error", host, repr(e)[:200])
+    return done
+
+
+def lan_proxy_keepalive() -> str:
+    """NETFIX：gpu36 看图服务开放内网给 gpu33（/root/work/fredw/netfix/lan_proxy.sh 幂等保活），每个 health 拍调一次"""
+    out = ssh("gpu36", "bash /root/work/fredw/netfix/lan_proxy.sh", timeout=60, tries=2)
+    return out.decode("utf-8", "replace").strip()[-200:]
+
+
+def sync_pause(host: str) -> str | None:
+    """全局暂停 / 恢复只对笔记本 producer 执行；每拍把笔记本的暂停状态同步到服务器 producer（NETFIX 接口 5）"""
+    c = jl(ROOT / "data/producer/control.json", {}) or {}
+    want = "pause" if c.get("paused") else "resume"
+    st = jl(STATE, {}) or {}
+    hs = st.setdefault(host, {})
+    if hs.get("pause_synced") == want:
+        return None
+    ssh(host, f"cd {R} && {OFF}/venv/bin/python tools/autopilot/producer.py {want} --by SYNC_LAPTOP "
+              f"--note '笔记本 producer 全局{want}（{c.get('paused_by') or ''}）同步'", timeout=120, tries=3)
+    hs["pause_synced"] = want
+    js(STATE, st)
+    log("sync_pause", host, want, c.get("paused_by"))
+    return want
+
+
 def loop(pull_every_s: int = 1200, health_every_s: int = 300):
     """5 分钟一次健康 / 报警；20 分钟一次并回；代码有改动 → 推代码 + 服务器热重启（每台独立，一台断连不影响另一台）"""
     last_pull = {h: 0.0 for h in HOSTS}
@@ -445,6 +600,12 @@ def loop(pull_every_s: int = 1200, health_every_s: int = 300):
                 health(h)
             except Exception as e:  # noqa: BLE001
                 log("health error", h, repr(e)[:200])
+            try:                                 # NETFIX 接口：控制小文件变了就推（按对象合并 / 快照覆盖），推完 server-control
+                push_control(h)
+                if h == "gpu36":
+                    lan_proxy_keepalive()
+            except Exception as e:  # noqa: BLE001
+                log("control sync error", h, repr(e)[:200])
             if time.time() - last_pull[h] < pull_every_s:
                 continue
             try:
@@ -518,14 +679,26 @@ for m in d["shots"]:
     if not m.get("variants"):
         holds.append((m["shot"], "-", m.get("route")))
 non_pika_ready = sum(n for (r, st), n in c.items() if r != "i2va_pika_flex" and st == "ready")
+import re, glob
+FACE = re.compile(r"\b(?:facing|faces|turned toward|turns toward|toward)\s+(?:the\s+)?(?:camera|lens|viewer)\b", re.I)
+def _e3(t):
+    return bool(FACE.search(" ".join(re.findall(r"The frame keeps[^.]*\.", t or ""))))
+rl_e3 = [(m["shot"], k) for m in d["shots"] for k, v in (m.get("variants") or {}).items()
+         if str(v.get("status")).startswith("ready") and _e3(v.get("prompt"))]
+rl_e3_files = [f for f in glob.glob("data/pipeline/runs/series10_v1/video/prompts/*.txt") if _e3(open(f, encoding="utf-8").read())]
 print(json.dumps({"built_at": d.get("built_at"), "shots": len(d["shots"]), "dist": {f"{r}|{st}": n for (r, st), n in c.items()},
-                  "non_pika_ready": non_pika_ready, "holds": holds[:200]}, ensure_ascii=False))
+                  "non_pika_ready": non_pika_ready, "rl_e3_ready": len(rl_e3), "rl_e3_examples": rl_e3[:10],
+                  "rl_e3_prompt_files": len(rl_e3_files), "holds": holds[:200]}, ensure_ascii=False))
 """
 
 
 def rebuild_jobs(host: str) -> dict:
     """服务器本机按 L-088 重编 jobs.json（读服务器上的导入稿 + 首帧），核对非 Pika ready 变体 = 0"""
-    out = ssh(host, f"cd {R} && PYTHONUTF8=1 {OFF}/venv/bin/python tools/series10_video/build_jobs.py >/tmp/build_jobs.out 2>&1; "
+    # AUDIT 22:13：重编前把旧 prompts/ 整个挪进隔离区（不删），免得 16:56 的旧编译稿（含“朝向镜头”句）留着
+    q = f"data/_quarantine_20261101/prompts_{time.strftime('%Y%m%d-%H%M%S')}"
+    out = ssh(host, f"cd {R} && V=data/pipeline/runs/series10_v1/video && if [ -d $V/prompts ]; then mkdir -p {q} && mv $V/prompts {q}/ && "
+                    f"echo quarantined_prompts {q}; fi; mkdir -p $V/prompts; "
+                    f"PYTHONUTF8=1 {OFF}/venv/bin/python tools/series10_video/build_jobs.py >/tmp/build_jobs.out 2>&1; "
                     f"tail -c 300 /tmp/build_jobs.out; {OFF}/venv/bin/python -", data=REBUILD_CHECK.encode(), timeout=2400, tries=3)
     txt = out.decode("utf-8", "replace")
     res = json.loads([ln for ln in txt.splitlines() if ln.startswith("{")][-1])
@@ -543,9 +716,12 @@ def video_up(host: str) -> dict:
     if v["mismatch"]:
         raise RuntimeError(f"{host} 第一级 sha 仍有 {len(v['mismatch'])} 个不一致：{v['mismatch'][:5]}")
     push_frames(host)
+    push_control(host, force=True)            # master_rejects + ready_episodes 按对象合并（NETFIX 接口）
     res = rebuild_jobs(host)
     if res.get("non_pika_ready"):
         raise RuntimeError(f"{host} 重编后仍有 {res['non_pika_ready']} 个非 Pika ready 变体，不起 night")
+    if res.get("rl_e3_ready"):          # AUDIT 20:15：重编后 RL-E3（系统句朝向镜头）必须 0 命中才起 night
+        raise RuntimeError(f"{host} 重编后仍有 {res['rl_e3_ready']} 个 ready 变体带朝向镜头的系统句（RL-E3）：{res.get('rl_e3_examples')}")
     txt = ssh(host, f"cd {R} && {OFF}/venv/bin/python ops/offline/resident_prep.py {host} video-only && "
                     f"bash {R}/ops/offline/resident_restart.sh {host} night-only", timeout=300).decode("utf-8", "replace")
     log("video_up", host, txt.strip().replace(chr(10), " | ")[-400:])
@@ -727,7 +903,7 @@ def main(argv):
     elif cmd == "pull":
         print(pull(argv[1]))
     elif cmd == "restart":
-        print(restart(argv[1], "producer-only" if "--producer-only" in argv else "all"))
+        print(restart(argv[1], "producer-only" if "--producer-only" in argv else ("all" if "--all" in argv else DEFAULT_MODE)))
     elif cmd == "switch":        # 一条命令切到常驻：两台各 push（代码 + 数据）→ prep + 重启 → health；一台失败不影响另一台
         for h in (argv[1:] or list(HOSTS)):
             try:
@@ -781,6 +957,8 @@ def main(argv):
         log("bringup", "两台 producer 已起（night 等 jobs.json 按 L-088 重编后再起）")
     elif cmd == "verify_sha":
         print(json.dumps(verify_sha(argv[1]), ensure_ascii=False)[:1500])
+    elif cmd == "push_control":
+        print(push_control(argv[1], force="--force" in argv))
     elif cmd == "push_frames":
         print(push_frames(argv[1]))
     elif cmd == "rebuild_jobs":

@@ -37,7 +37,7 @@ def test_compiled_frame_prompt_has_no_video_trigger_and_leads_with_size():
         p, c, _sr, plan = IJ.frame_prompt_full(ep, s, g, ["data/assets/identity_refs/lin_wan/lin_wan_face_ref2va.png"], "series10_v1")
         assert not re.search(r"\blnwan01\b", p)
         # REFLOCK：资产模式下提示词 = 槽位标注（“图N是…必须完全一致”）+ 编译器输出；脸可见时图1 = 身份脸
-        assert p.startswith(plan.prompt_prefix) and "图1是" in p[:20]
+        assert p.startswith(plan.prompt_prefix) and "图1是" in __import__("ns_agent.asset_refs", fromlist=["x"]).SINGLE_TURN_RE.sub("", p, count=1)[:20]  # IMGFIX K-REN-704
         body = p[len(plan.prompt_prefix):]
         size = F.size_of(s.img_prompt)
         if size and not F.lower_focus(s.img_prompt):

@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/series10_video"))
 import build_jobs as BJ  # noqa: E402  （同生产编译：sys.path、KITCHEN、preflight）
 
+HOST = "gpu36"                        # r3：--host gpu33 时服务器端在 gpu33 本机跑
 PORT = 18290                         # gpu36:2
 SRV = "/root/work/fredw/video_rca"   # 服务器上本 loop 的目录
 SRV_REPO = "/root/work/fredw/video10_srv"
@@ -47,7 +48,7 @@ def api(path, data=None, ctype="application/json", timeout=60):
 
 def ssh(cmd, timeout=1800):
     for k in range(4):
-        r = subprocess.run(["ssh", "-o", "BatchMode=yes", "gpu36", cmd], capture_output=True, text=True, timeout=timeout,
+        r = subprocess.run(["ssh", "-o", "BatchMode=yes", HOST, cmd], capture_output=True, text=True, timeout=timeout,
                            encoding="utf-8", errors="replace")
         if r.returncode != 255:
             return r
@@ -59,7 +60,7 @@ def scp(src, dst, timeout=1800):
     """scp 带重试（跳板偶发 255）"""
     def loc(x):   # Windows 盘符 “D:” 会被 scp 当成主机名 → 本地路径一律改成相对 ROOT、正斜杠
         x = str(x)
-        if x.startswith("gpu36:"):
+        if x.startswith(("gpu36:", "gpu33:")):
             return x
         return os.path.relpath(x, ROOT).replace("\\", "/") if os.path.isabs(x) else x.replace("\\", "/")
     for k in range(6):
@@ -90,13 +91,48 @@ def plan(exp: dict) -> list[dict]:
     ffs = prod_first_frames()
     out = []
     for a in exp["arms"]:
-        spec = specs[a["shot"]]
-        ff = {a["shot"]: {"file": a.get("first_frame") or ffs[a["shot"]]["file"]}}
-        v = BJ.compile_variant(spec, reg, a["recipe"], a.get("attempt", 1), a["id"], ff, seed=a.get("seed"),
-                               extra=a.get("overrides") or {})
+        ff = {a["shot"]: {"file": a.get("first_frame") or (ffs.get(a["shot"]) or {}).get("file")}}
+        if a.get("from_job"):      # 复用旧实验的编译稿（剧本重导入后镜头文本变了，仍要和旧臂严格同条件）
+            src = next(x for x in json.loads((AB / a["from_job"][0] / "jobs_local.json").read_text(encoding="utf-8"))
+                       if x["id"] == a["from_job"][1])
+            v = json.loads(json.dumps({k: src[k] for k in ("graph", "prompt", "prompt_notes", "recipe", "seed")}))
+            v.update({"mode": "i2va", "frames": src["score_meta"]["frames"],
+                      "inputs": {"@first_frame": a["first_frame"]} if a.get("first_frame") else dict(src["inputs"]),
+                      "plan_hash": None, "arm": a})
+            if a.get("seed"):
+                for n in v["graph"].values():
+                    for k in ("noise_seed", "seed"):
+                        if k in (n.get("inputs") or {}) and isinstance(n["inputs"][k], int):
+                            n["inputs"][k] = int(a["seed"])
+                v["seed"] = int(a["seed"])
+        else:
+            spec = specs[a["shot"]]
+            v = BJ.compile_variant(spec, reg, a["recipe"], a.get("attempt", 1), a["id"], ff, seed=a.get("seed"),
+                                   extra=a.get("overrides") or {})
         if "graph" not in v:
             raise SystemExit(f"{a['id']} 编译失败：{v}")
-        meta = ffs[a["shot"]]["meta"]
+        if a.get("hide_size"):      # 对复用的旧编译稿按生产函数 hide_offframe_parts 处理正文（K-REN-701 的同条件 A/B）
+            from ns_recipes.prompt import hide_offframe_parts
+            head, _, rest = v["prompt"].partition("integrated_multimodal_description: ")
+            body, _, tail = rest.partition(chr(10) + chr(10) + "overall_soundscape:")
+            nb, gone = hide_offframe_parts(body, a["hide_size"])
+            a = {**a, "prompt_replace": [[body, nb]] + list(a.get("prompt_replace") or [])} if gone else a
+            v["arm"] = a
+            if not gone:
+                raise SystemExit(f"{a['id']}：hide_offframe_parts 没删任何分句")
+        for o, nw in a.get("prompt_replace") or []:      # 诊断用（只在 scope=ab 实验里）：证明机理，不进生产编译
+            if o not in v["prompt"]:
+                raise SystemExit(f"{a['id']}：提示词里没有 {o!r}")
+            v["prompt"] = v["prompt"].replace(o, nw)
+            for n in v["graph"].values():
+                if isinstance((n.get("inputs") or {}).get("prompt"), str):
+                    n["inputs"]["prompt"] = n["inputs"]["prompt"].replace(o, nw)
+            v["prompt_notes"] = v["prompt_notes"] + [f"诊断替换：{o} → {nw}"]
+        meta = (ffs.get(a["shot"]) or {}).get("meta") or {}
+        if a.get("from_job"):
+            v.update({"arm": a, "shot": a["shot"], "score_meta": {**src["score_meta"], "prompt": v["prompt"]}})
+            out.append(v)
+            continue
         v.update({"arm": a, "shot": a["shot"], "score_meta": {
             "refs": meta.get("score_refs") or {}, "prompt": v["prompt"], "frames": v["frames"], "size": meta.get("size"),
             "first_frame": ff[a["shot"]]["file"]}})
@@ -255,7 +291,7 @@ def run(exp_p: Path):
         res_p.write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
-def export(name: str, jobs: list[dict], adopt: list[str] | None = None):
+def export(name: str, jobs: list[dict], adopt: list[str] | None = None, lane: int | None = None):
     """服务器端执行（隧道不稳时的正路）：jobs → data/ab/video_rca/<exp>/srv/（jobs.json + inputs/）→ scp → nohup srv_run.py"""
     import shutil
     loc = AB / name / "srv"
@@ -276,16 +312,21 @@ def export(name: str, jobs: list[dict], adopt: list[str] | None = None):
     d = f"{SRV}/{name}"
     ssh(f"mkdir -p {d}/inputs", timeout=60)
     for f in (ROOT / "tools/video_rca/srv_run.py", ROOT / "tools/video_rca/sharp.py"):
-        scp(str(f), f"gpu36:{SRV}/{f.name}")
-    scp(str(loc / "jobs.json"), f"gpu36:{d}/jobs.json")
+        scp(str(f), f"{HOST}:{SRV}/{f.name}")
+    scp(str(loc / "jobs.json"), f"{HOST}:{d}/jobs.json")
     for src, nm in srv_cp:
         ssh(f"cp {src} {d}/inputs/{nm}", timeout=120)
     have = set((ssh(f"ls {d}/inputs", timeout=60).stdout or "").split())
     for f in (loc / "inputs").iterdir():
         if f.name not in have:
-            scp(str(f), f"gpu36:{d}/inputs/{f.name}")
+            scp(str(f), f"{HOST}:{d}/inputs/{f.name}")
     ad = " ".join(adopt or [])
-    r = ssh(f"cd {SRV} || exit 1; nohup {SRV_PY} {SRV}/srv_run.py {d} {ad} > {d}/nohup.out 2>&1 < /dev/null & echo $! > {d}/run.pid; cat {d}/run.pid",
+    if HOST == "gpu33":
+        envp = (f"VRCA_PORT={lane} VRCA_OUT=/root/claude-kimi-ns-studio-v1/ComfyUI/output/gpu{ {8188: 0, 8189: 1, 8191: 3}[lane] } "
+                "VRCA_FF=/root/claude-kimi-ns-studio-v1/env/ffmpeg/bin/ffmpeg ")
+    else:
+        envp = f"VRCA_PORT={lane} VRCA_OUT=/root/work/fredw/comfy/output/gpu{ {8188: 0, 8189: 1, 8190: 2}[lane] } " if lane else ""
+    r = ssh(f"cd {SRV} || exit 1; {envp}nohup {SRV_PY} {SRV}/srv_run.py {d} {ad} > {d}/nohup.out 2>&1 < /dev/null & echo $! > {d}/run.pid; cat {d}/run.pid",
             timeout=120)
     print("started pid", r.stdout.strip())
 
@@ -300,7 +341,7 @@ def pull(name: str):
             and (f not in have or f in ("results.json", "run.log"))]
     for f in want:
         try:
-            scp(f"gpu36:{d}/{f}", loc / f, timeout=900)
+            scp(f"{HOST}:{d}/{f}", loc / f, timeout=900)
         except RuntimeError as e:
             print(e)
     print(f"pulled {len(want)}")
@@ -311,16 +352,23 @@ SRV_PY = "/root/work/fredw/venv_idm/bin/python"
 
 if __name__ == "__main__":
     cmd, p = sys.argv[1], Path(sys.argv[2])
+    if "--host" in sys.argv:
+        HOST = sys.argv[sys.argv.index("--host") + 1]
+        k = sys.argv.index("--host")
+        del sys.argv[k:k + 2]
     if cmd == "export":
         e = json.loads(p.read_text(encoding="utf-8"))
         vs = plan(e)
         jobs = [{"id": v["arm"]["id"], "shot": v["shot"], "recipe": v["recipe"], "seed": v["seed"], "kind": "video",
+                 "v67_meta": v["arm"].get("v67_meta") or e.get("v67_meta", {}).get(v["shot"]),
                  "graph": v["graph"], "inputs": dict(v["inputs"]), "score_meta": {**v["score_meta"],
                  "first_frame": None}, "prompt": v["prompt"], "prompt_notes": v["prompt_notes"],
                  "overrides": v["arm"].get("overrides")} for v in vs]
         (AB / e["name"]).mkdir(parents=True, exist_ok=True)
         (AB / e["name"] / "jobs_local.json").write_text(json.dumps(jobs, ensure_ascii=False, indent=1), encoding="utf-8")
-        export(e["name"], jobs, sys.argv[3:])
+        lane = int(sys.argv[sys.argv.index("--lane") + 1]) if "--lane" in sys.argv else None
+        rest = [x for i, x in enumerate(sys.argv[3:]) if x != "--lane" and (i == 0 or sys.argv[3:][i - 1] != "--lane")]
+        export(e["name"], jobs, rest, lane)
         raise SystemExit(0)
     if cmd == "pull":
         pull(p.name if not p.suffix else json.loads(p.read_text(encoding="utf-8"))["name"])

@@ -508,4 +508,42 @@ checks:
     stale_allow: [docs/master/MASTER_PICTURE.md, docs/MORNING_DECISIONS.md, docs/script_chat_rules_audit.md, docs/parser_diff.md, 'docs/ux_round5/*', 'docs/audit/*',
                   docs/assetux/rounds.md, docs/rules_gap_analysis.md, docs/uimaster/LOCKS.md,
                   knowledge/rules/writer_series10.yaml]   # 决定记录 / 审计 / 解析器对照（test_parser_alignment 引用）/ UI 历史稿 / HC-05“不写表外人名”规则的证据
-
+  # ---------------- 好莱坞 10 集 + 集时长 60–120 + 铅笔裙（RSI r7 登记，L-092；项目方 11-01 21:4x AskUserQuestion）
+  - id: D-SCR-08
+    decision: L-092（项目方 11-01 21:4x：“改成 60–120 秒”，取代 QW-E3 的 50–75 秒 / 目标 60–65；镜数上限 D-SCR-06 跟着 ⌈秒数 ÷ 6⌉ 自动变）
+    title: 导入器 / 校验器的集时长通过范围 = 60–120 秒
+    type: grep_present
+    pattern: 'EPISODE_SECONDS = \(60, 120\)'
+    paths: [services/agent/ns_agent/importer/script_md.py]
+    stale_terms:
+      - '50\s*[–-]\s*75\s*秒'
+      - '各镜.{0,12}之和\s*50\s*[–-]\s*75'
+      - '75\s*[–-]\s*90\s*秒?\s*(只提示|warn)'
+      - 'EPISODE_S(ECONDS)?\s*=\s*\(50,\s*75\)'
+      - '且\s*50–75'
+    new_terms: ['60\s*[–-]\s*120', 'EPISODE_S(ECONDS)?\s*=\s*\(60,\s*120\)']
+    propagate: [services/agent/ns_agent/importer/script_md.py, tools/validate_qwen_script.py, packages/schema/ns_schema/upstream_common.py,
+                tools/pipeline/writer_prompt.py, config/script_chat_rules.md, config/qwen_writer_system_prompt.txt, docs/production_rules_v3.md,
+                docs/qwen_writing_contract.md, tools/validate_script_strict.py]
+    stale_allow: [docs/master/MASTER_PICTURE.md, 'docs/audit/*', 'docs/rsi/*', 'docs/video_rca/*', 'data/script_rsi/*', docs/rules_gap_analysis.md,
+                  'knowledge/rules/writer_iteration.yaml', 'knowledge/rules/writer_series10.yaml', docs/CORE_appendix.md, 'docs/release/*',
+                  docs/script_chat_rules_audit.md, knowledge/rules/writer_hollywood.yaml]   # 账本 / 报告 / 历史审计 / 规则 evidence 在叙述旧口径
+  - id: D-SCR-08b
+    decision: L-092（项目方 11-01 21:4x：ep01 林晚人物卡“允许，改成铅笔裙 (Recommended)”——“深灰西装裙”改成“深灰铅笔裙”，中英文一致，造型本身不变；HOLLYWOOD 人物卡不变量的唯一例外）
+    title: HOLLYWOOD 集头不变量只允许 ep01 林晚造型行这一处字面例外
+    type: grep_present
+    pattern: 'HEAD_EXCEPTIONS: dict\[int, list\[tuple\[str, str, str\]\]\] = \{1: \[\("\*\*造型｜林晚\*\*", "深灰西装裙", "深灰铅笔裙"\)\]\}'
+    paths: [tools/script_rsi/hollywood.py]
+  - id: D-WRT-702
+    decision: 总调度 11-01 晚 r7：收编 VIDEO-RCA K-WRT-702（分拍不写对身上衣服的整理动作），lint 号 QW-W11
+    title: 写作机检里有 QW-W11
+    type: grep_present
+    pattern: '"QW-W11"'
+    paths: [tools/qa/writer_lints.py]
+  # ---------------- 林晚造型 A 设定图换回 v2_s202（RSI 入账，IMGFIX 执行；L-093）
+  - id: D-AST-93
+    decision: L-093（项目方 11-01 21:4x AskUserQuestion：林晚造型 A 设定图“换回 v2_s202 (Recommended)”；取代 11-01 10:57 的 s101 挑选——当时 v2 不在候选里）
+    title: 林晚造型 A 当前设定图 = adopted/lin_wan_lookA_v2_s202.png
+    type: grep_present
+    pattern: 'lin_wan_lookA_v2_s202'
+    paths: [data/pipeline/runs/series10_v1/assets/sheets_chosen.json]

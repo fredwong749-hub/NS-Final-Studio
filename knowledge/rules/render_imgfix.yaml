@@ -1,0 +1,33 @@
+# IMGFIX（总调度 fredw-2b 派，2026-11-01 19:4x）：出图两个系统性根因（外套缺失、单人看镜头）。实验 data/ab/imgfix/takes.jsonl（tools/imgfix/ab.py，
+# 本机道 laptop:0，scope=ab，S★ / frame_v9 与身份脸不动）；审片页 data/review_pages/imgfix/index.html。Claude 不写不评剧本内容：落点只取剧本原文。
+rules:
+  - id: K-AST-262
+    domain: asset
+    link: [P5-P6]
+    title: 现行设定图没过单品一致性检查（K-AST-260）时，外层单品不能靠设定图——设定图句明说“图N上没有画 X，X 以参考板为准”；中枢候选必须含 ASSETMASTER adopted v2，且标单品检查状态
+    when: ns_agent.asset_refs.plan_slots（主角单张 sheet 槽）；ns_api.character_hub._sheet_candidates
+    then: sheet_item_check(cid, look, 设定图) 不过 → sheet_outer_gaps 列出本造型外层单品（outfit 槽、postflight.outer_en 认得的），设定图句末尾加 SHEET_GAP_CLAUSE；中枢 adopted v2 进候选、现行那张永远在候选、每张 item_check = pass / unchecked（附缺口说明）。根治 = 现行设定图换成过了检查的那张（项目方决定）
+    check: [tests/test_imgfix.py]
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/assets/sheets_chosen.json, note: "sheet:lin_wan_lookA = images/sheets/lin_wan/lin_wan_lookA_s101.png（10-31 v1 候选，没画外套），picked_by fred 11-01 10:57:54；之前是 data/assetmaster/sheets_v2/adopted/lin_wan_lookA_v2_s202.png（画了深灰短款西装外套，sheet_item_checks pass）"}
+      - {src: data/looks/character_hub_log.jsonl, note: "10:57:35 sheet A：prev = adopted v2_s202 → s101；中枢候选只列 images/sheets/ 下的 v1 两张，v2 换掉后点不回来"}
+      - {src: data/ab/imgfix/takes.jsonl, note: "ep01-S2 中景：现行 Q2 外套 0.065 / 0.024；O2（加缺口句）0.632 / 0.686；O1（换 v2 设定图）0.272 / 0.303；ep01-S1（特写作业、出成中景）O2 0.024 / 0.030 没穿，O1 0.059（目检穿了，敞开）/ 0.721"}
+    confidence: medium
+    status: 待验     # 中景有效、特写无效；换设定图更稳，待项目方定
+    date: 2026-11-01
+  - id: K-REN-704
+    domain: render
+    link: [P6-P7]
+    title: 单人镜首帧在提示词最前面加头部朝向句“<名字>四分之三侧脸，脸转向<剧本落点>一侧，脸和身体都不正对镜头。”
+    when: ns_agent.asset_refs.plan_for → single_turn_line（单人在画、主体是人、有身份脸槽、剧本没写背影）；放在 prompt_prefix 最前面
+    then: 落点 = img 行“视线落在 / 朝 …”原文 → 第一拍 视线= → “画面里的人或物”；不改身份脸、不改 S★；tools/prompt_v2/audit_framing 首句检查跳过这句
+    check: [tests/test_imgfix.py]
+    evidence:
+      - {src: data/ab/imgfix/takes.jsonl, note: "ep01-S1/S2 各 2 seed：现行 A0 gaze_mp 看镜头 4/4；“平视”→“平视机位” 4/4；“图1 只取身份不取视线”4/4；视线正向落点句放最前 gaze_mp 0/4（目检 S1 s201、S2 s302 仍偏正面）；四分之三侧脸句放最前 gaze_mp 0/4、目检 1/4（S1 s301）；终版 = 落点句 + 朝向句（F2acc / ACC3）ep01-S1、S2、S3、S6 各 2 seed：gaze_mp 0/8、目检 0/8"}
+      - {src: data/ab/imgfix/takes.jsonl, note: "同一句放在身份脸句后面（ACC，ep01-S1 s20261201）照样正对镜头 → 必须放最前面"}
+      - {src: data/ab/imgfix/takes.jsonl, note: "代价：转开后 sface（对正脸身份参考）降到 0.62–0.82，目检仍是林晚（蓝发齐刘海、五官一致）；SFace 对正脸参考随转角下降，验收线 0.8 对转开的脸不适用，另记对同人侧脸参考的 sface"}
+      - {src: data/ab/imgfix/q1_arcface_local.json, note: "契约 Q1（ArcFace，林晚线 0.70）：换回 v2_s202 后的终版 8 张（ACC4 S1×2、ACC5 S2/S3/S6×2）Q1 0.702–0.836，8/8 达线，gaze_mp 0/8、目检 0/8；折中写法“脸微微侧向”（M1）8 张 Q1 2 张 <0.70 且 S1 s301 看镜头，不采用；转角掉分的同人对照见 docs/vqa/GATE_CALIBRATION.md §8"}
+      - {src: data/ab/video_rca/r2_dualref/takes.jsonl, note: "VIDEO-RCA：正脸 + 侧脸双参考槽单独用效果不稳（S2 1/2、S3 1/2 转开），且需要 4 个参考槽（现 3 槽）"}
+    confidence: medium
+    status: 待验     # ep01-S1 s20261301 仍正对镜头，见 IMGFIX 报告
+    date: 2026-11-01

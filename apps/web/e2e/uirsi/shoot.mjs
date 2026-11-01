@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PORT = 9681;
 const BASE = "http://127.0.0.1:5173";
-const SIDE = "http://127.0.0.1:8803";
+const SIDE = process.env.SIDE_URL || "http://127.0.0.1:8803";  // r38：可用环境变量换旁路（infra_sidecar.py :8804）
 const CHROME = "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const [, , scenFile, prefix = "impl"] = process.argv;
 const scen = JSON.parse(readFileSync(scenFile, "utf8"));
@@ -40,7 +40,7 @@ async function targetWs() {
 
 let sideUp = false;
 try {
-  sideUp = (await fetch(`${SIDE}/api/story-runs`, { signal: AbortSignal.timeout(60000) })).ok;
+  sideUp = (await fetch(`${SIDE}${process.env.SIDE_HEALTH || "/api/story-runs"}`, { signal: AbortSignal.timeout(60000) })).ok;
 } catch {
   sideUp = false;
 }
@@ -57,7 +57,7 @@ function send(method, params = {}) {
   ws.send(JSON.stringify({ id: i, method, params }));
   return new Promise((res, rej) => pending.set(i, { res, rej }));
 }
-const SIDE_GET = /^\/api\/story-(runs|images)(\/|$)/;
+const SIDE_GET = process.env.SIDE_GET_RE ? new RegExp(process.env.SIDE_GET_RE) : /^\/api\/story-(runs|images)(\/|$)/;
 ws.onmessage = async (ev) => {
   const m = JSON.parse(ev.data);
   if (m.id && pending.has(m.id)) {

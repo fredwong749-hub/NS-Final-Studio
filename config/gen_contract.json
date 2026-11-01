@@ -53,7 +53,7 @@
    "other_margin": 0.05,
    "recognize_floor": 0.45,
    "min_face_ratio": 0.04,
-   "all_faces_note": "总调度 11-01 P1：每张脸高≥min_face_ratio 的脸都要像本镜 cast（在画/局部）里某个有身份脸的角色（在画者用其阈值，局部者≥recognize_floor）；认不出 → Q1 不过；无身份脸参考的 cast 每人抵一张"
+   "yaw_relax": {"characters": ["lin_wan"], "tiers": [[0.4, 0.70], [0.8, 0.65], [99, 0.60]], "require_vlm_identity_ok": true, "src": "总调度 11-01 23:0x 采纳 IMGFIX 方案：林晚 Q1 按 gaze_mp |yaw_n| 分档（<0.4 维持 0.70；0.4–0.8 用 0.65；≥0.8 用 0.60），同时要求本地看图 identity_drift = ok；看图身份不过 / 拿不准 / 没测 → 回到 0.70。只用于单脸镜（Q1 只有一个角色、MediaPipe 只测到一张脸）。实现 ns_agent.vqa.contract.q1_yaw_relax（在 Q9 并进契约时一起算）"}, "all_faces_note": "总调度 11-01 P1：每张脸高≥min_face_ratio 的脸都要像本镜 cast（在画/局部）里某个有身份脸的角色（在画者用其阈值，局部者≥recognize_floor）；认不出 → Q1 不过；无身份脸参考的 cast 每人抵一张"
   },
   "Q2_outfit": {
    "clip_item": 0.8,
@@ -78,7 +78,8 @@
    "embellished_max": 0.7,
    "feet_band_note": "总调度 11-01：留出复核（14 张）0.775 落在对 / 错重叠区（对 0.710–0.861、错 0.641–0.780）→ 三段：<0.70 挡；0.70–0.78 只记录并标“鞋待目检”（总调度看印样）；≥0.78 过。另加 CLIP“加装饰（水钻 / 脚踝带）vs 素款”探针，加装饰概率 > embellished_max 挡（线待 q4_face_calibration.json 标定）；加装饰探针标定（q4_face_calibration.json，14 张总调度标签）：加装饰款 S07 0.978；标对的鞋最高 0.660（S14）→ 线 0.7。三段 + 探针在这 14 张上：挡 7 张全是错鞋，过 2 张全是对鞋，5 张对鞋进“鞋待目检”，0 误挡 0 误放（只有 1 个加装饰样本，待更多留出）",
    "outer_min": 0.3,
-   "outer_record_only": false,
+   "outer_record_only": true,
+   "_outer_record_only": "总调度 11-01 23:0x（IMGFIX 发现）：外套敞开、长发盖住时探针误判没穿——穿了外套的 7 张里 4 张 <0.3（S1 0.074 / 0.237、S2 s302 0.257、S3 s303 0.208）→ 先只记录、重新标定（VQAGATE），达标再恢复阻断；外套靠 v2 设定图 + 看图 outfit 记录兜底",
    "outer_note": "总调度 11-01：外层单品存在性——林晚脸框下躯干（±1.8 脸宽、下 3 脸高）CLIP 零样本句对。校准 8 张（本机 YuNet 框）：没穿 ep01 S1v7/S2v3/S3v3、ep02 S3v2/S1v6 = 0.047/0.036/0.066/0.004/0.059；穿了 ep01 S4v5/S6v2/S7v2 = 0.859/0.757/0.797 → 线 0.3，阻断。通用句（base）分不开 ep02-S1v6（0.16）与 S6（0.27–0.48），已弃用于西装外套；n=8，待留出复核",
    "outer_probes": {
     "短款西装外套": [
@@ -102,7 +103,7 @@
     "ch_a_lan:黑色工作围裙": 0.75
    },
    "outer_calibration": {
-    "lin_wan:短款西装外套": "阻断：没穿 ≤0.087 / 穿了 ≥0.426（n=8，gpu33）",
+    "lin_wan:短款西装外套": "阻断：没穿 ≤0.087 / 穿了 ≥0.426（n=8，gpu33）。23:xx VQAGATE 重标（data/vqa/gate_calib/jacket_probe.json + jacket_probe_old_takes.json；imgfix 68 张目视标注 38 穿 / 30 没穿 + 旧标定 8 张）：现行句对在穿了外套的图上最低 0.059（外套敞开、长发盖住），没穿的最高 0.164，分不开；改写句对“open dark blazer … long hair over it”零误报线 0.13 时召回 38/41，但 ep02-S1v6 没穿也有 0.129，余量只有 0.001，不达标 → 维持只记录（outer_record_only=true）",
     "gu_chen:深灰西装": "只记录：20 张造型 A（目检全穿着黑西装外套）0.016–0.994，与造型 B 12 张 0.000–0.072 重叠；黑外套叠黑高领 CLIP 分不开，且库里没有“只穿高领”的反例（本机 YuNet 框，11-01）",
     "ch_a_lan:黑色工作围裙": "只记录：3 张穿着 0.977–0.992；反例只有别的角色 / 造型 5 张 0.008–0.504，不是阿岚不穿围裙，线 0.75 暂定",
     "lin_wan:黑色漆皮长风衣": "只记录：现行剧本没有可校准的版本",

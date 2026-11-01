@@ -244,3 +244,88 @@ def test_refresh_gaze_restores_vlm_verdict(enf, monkeypatch):
          "defects": ["eye_contact"], "gaze_mp": {"hits": 1}}
     VQ.refresh_gaze(v, "x.png", "中景")
     assert v["defects"] == [] and v["checks"]["eye_contact"]["s"] == "ok"
+
+
+def test_vqa_min_window_opens_on_any_condition(monkeypatch):
+    """最短看图窗口（总调度批：出图每满 6 张 / 最老请求等满 8 分钟 / 积压 ≥10，任一满足就开）"""
+    import importlib.util
+    import time as _t
+    spec = importlib.util.spec_from_file_location("vqa_server_vqagate", ROOT / "tools/vqa/server.py")
+    S = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(S)
+    monkeypatch.setattr(S, "switch_log", lambda *a, **k: None)
+    monkeypatch.setattr(S, "log", lambda *a, **k: None)
+    monkeypatch.setattr(S, "WIN_N", 6)
+    S._pending.clear()
+    S._win.update(until=0.0, yields=5)
+    assert not S.maybe_open_window()                   # 没积压：不开
+    S._pending[1] = _t.time()
+    assert not S.maybe_open_window()                   # 5 张、刚入队、积压 1：不开
+    S._win["yields"] = 6
+    assert S.maybe_open_window() and S.window_active() and S._win["yields"] == 0
+    S._win.update(until=0.0)
+    S._pending[1] = _t.time() - 500                    # 等了 500 s
+    assert S.maybe_open_window()
+    S._win.update(until=0.0)
+    S._pending.clear()
+    S._pending.update({i: _t.time() for i in range(10)})
+    assert S.maybe_open_window() and S._win["until"] - _t.time() <= S.WIN_MAX_S + 1
+
+
+def test_tunnel_requests_send_bytes_not_local_paths(monkeypatch, tmp_path):
+    """隧道 8871 → gpu36：服务读不到本机路径，必须转成字节（20:xx gpu36 报 FileNotFoundError 的回归）"""
+    from ns_agent.vqa import client as C
+    from PIL import Image
+    f = tmp_path / "a.png"
+    Image.new("RGB", (64, 64)).save(f)
+    sent = {}
+    monkeypatch.setattr(C, "_local_up", lambda u: u.endswith(":8871"))
+    monkeypatch.setattr(C, "_post_local", lambda u, body, t: sent.update(url=u, body=body) or {"text": "{}"})
+    monkeypatch.setattr(C, "CACHE", tmp_path / "cache")
+    C.generate({"system": "s", "text": "t", "images": [{"path": str(f), "max_pixels": 1000}]}, refresh=True)
+    assert sent["url"].endswith(":8871") and "b64" in sent["body"]["images"][0] and "path" not in sent["body"]["images"][0]
+
+
+def _pf_q1(sim, extra_detail=""):
+    return {"ok": False, "blocking": ["Q1"], "reasons": ["Q1 x"],
+            "items": [{"id": "Q1", "status": "fail", "detail": f"lin_wan {sim:.3f}（对 lin_wan）< 0.7" + extra_detail,
+                       "evidence": {"sims": {"lin_wan": sim}, "strangers": [], "faces": 1}}]}
+
+
+def _v(yaw, ident="ok"):
+    return {"defects": [], "checks": {"identity_drift": {"s": ident, "e": ""}}, "key": "k",
+            "gaze_mp": {"faces": [{"yaw_n": yaw, "pitch_n": 0.1, "eye_x": 0.3}], "hits": 0}}
+
+
+def test_q1_yaw_relax_tiers(enf):
+    """Q1 按转角放宽（总调度 23:0x）：|yaw|<0.4 → 0.70；0.4–0.8 → 0.65；≥0.8 → 0.60；看图身份不是 ok → 回 0.70"""
+    pf = VQ.apply(_pf_q1(0.66), _v(0.6))
+    assert pf["ok"] is True and next(i for i in pf["items"] if i["id"] == "Q1")["status"] == "pass"
+    pf = VQ.apply(_pf_q1(0.66), _v(0.2))               # 正脸：仍要 0.70
+    assert pf["ok"] is False
+    pf = VQ.apply(_pf_q1(0.61), _v(0.9))               # 大侧脸：0.60
+    assert pf["ok"] is True
+    pf = VQ.apply(_pf_q1(0.61), _v(0.6))               # 0.4–0.8 档要 0.65
+    assert pf["ok"] is False
+    pf = VQ.apply(_pf_q1(0.66), _v(0.6, ident="unsure"))   # 看图身份拿不准 → 回 0.70
+    assert pf["ok"] is False
+    pf = VQ.apply(_pf_q1(0.66, "；画面里多了不该有的人"), _v(0.6))   # 还有别的不过原因 → 不放宽
+    assert pf["ok"] is False
+
+
+def test_multi_limb_needs_both_v6_and_vlm():
+    """总调度 23:0x：多肢 = V6 手数规则命中 且 看图 extra_limbs defect；只有一方命中只记录"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("s10v_score_clip_limb", ROOT / "tools/series10_video/score_clip.py")
+    SC = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(SC)
+    except Exception as e:  # noqa: BLE001
+        pytest.skip(f"score_clip 依赖不全：{e}")
+    base = {"mean": 1.0, "cheek_red_max": 0.0, "cuts": [], "identity": {}}
+    g = SC.gate({**base, "v6": {"status": "不通过"}, "vlm": {"defects": ["extra_limbs"]}}, {})
+    assert "多肢" in g["fails"]
+    g = SC.gate({**base, "v6": {"status": "不通过"}, "vlm": {"defects": []}}, {})
+    assert "多肢" not in g["fails"] and any("多肢" in x for x in g["soft"])
+    g = SC.gate({**base, "v6": {"status": "通过"}, "vlm": {"defects": ["extra_limbs"]}}, {})
+    assert "多肢" not in g["fails"] and any("多肢" in x for x in g["soft"])

@@ -1,4 +1,4 @@
-# AUDIT · PROD 复核 r02（2026-11-01 18:06–18:16，独立复核方 = AUDIT，交总调度 fredw-2b）
+# AUDIT · PROD 复核 r02（2026-11-01 18:05–18:06，独立复核方 = AUDIT，交总调度 fredw-2b）
 
 复核对象：CHANGELOG “17:30 后（PROD，W5）”和“17:00 后（PROD，续）”两条记录，加上 r01 留下的未关闭问题。机读版：data/qa/audit/PROD_r02.json
 

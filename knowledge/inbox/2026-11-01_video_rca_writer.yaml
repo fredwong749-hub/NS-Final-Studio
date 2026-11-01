@@ -14,3 +14,4 @@ rules:
     confidence: low
     status: 草案
     date: 2026-11-01
+# K-WRT-702 已由 RSI r7 收编进 knowledge/rules/writer_iteration.yaml（lint QW-W11）；原草案见 knowledge/inbox/confirmed/2026-11-01_video_rca_writer_702.yaml

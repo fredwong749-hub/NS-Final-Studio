@@ -66,6 +66,64 @@ def from_seedvr2(clip: Path, result: Path, dst: Path) -> float:
     return round(time.time() - t, 1)
 
 
+POLICY = ROOT / "config/pipeline/video_policy.json"
+
+
+def dejudder_cfg() -> dict:
+    """VIDEO-RCA r1（11-01 19:0x）：Pika 也有 4 帧一顿（同首帧 4 条里 3 条 J4 1.23–1.40、z 4.5–10.8）→ 合成前复用 K-LOOP-004 的
+    tools/dejudder.py。参数在 config/pipeline/video_policy.json dejudder（VIDEO-RCA 量化后可改），缺省 = iterate_loop R-J4 的门槛"""
+    try:
+        d = json.loads(POLICY.read_text(encoding="utf-8")).get("dejudder") or {}
+    except (OSError, ValueError):
+        d = {}
+    return {"enabled": d.get("enabled", True), "recipes": d.get("recipes", ["i2va_pika_flex"]),
+            "j4_gt": float(d.get("j4_gt", 1.25)), "j4_z_ge": float(d.get("j4_z_ge", 3.0)), "always": bool(d.get("always", False))}
+
+
+def needs_dejudder(s: dict, cfg: dict | None = None) -> tuple[bool, str]:
+    """→ (要不要去抖, 原因)。只看这一镜入选版本的打分（video/scores/<镜>__<变体>.json 的 J4 / J4_z）"""
+    cfg = cfg or dejudder_cfg()
+    if not cfg["enabled"] or s.get("recipe") not in cfg["recipes"]:
+        return False, "不在去抖配方范围"
+    if cfg["always"]:
+        return True, "always"
+    sc = {}
+    try:
+        sc = json.loads((VID / "scores" / f"{s['shot']}__{s.get('chosen')}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return True, "没有打分（未测 ≠ 通过）→ 去抖"
+    j4, z = sc.get("J4"), sc.get("J4_z")
+    if j4 is None or z is None:
+        return True, "打分缺 J4 → 去抖"
+    hit = float(j4) > cfg["j4_gt"] and float(z) >= cfg["j4_z_ge"]
+    return hit, f"J4 {j4} z {z}（门槛 >{cfg['j4_gt']} 且 z≥{cfg['j4_z_ge']}）"
+
+
+def _ff_env() -> dict:
+    import os
+    ff = Path(ffmpeg())
+    return {**os.environ, "PATH": (str(ff.parent) + os.pathsep if ff.parent != Path(".") else "") + os.environ.get("PATH", "")}
+
+
+def dejudder_for(clip: Path) -> Path:
+    return clip.with_name(clip.stem + "_dj.mp4")
+
+
+def run_dejudder(clip: Path) -> Path:
+    """K-LOOP-004 原样：tools/dejudder.py in out（bt709、音轨原样）；先写 .part 再改名"""
+    dst = dejudder_for(clip)
+    if dst.is_file():
+        return dst
+    tmp = dst.with_name(dst.stem + ".part.mp4")
+    r = subprocess.run([sys.executable, str(ROOT / "tools/dejudder.py"), str(clip), str(tmp)], capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", cwd=str(ROOT), env=_ff_env())   # dejudder.py 调裸 ffmpeg：把找到的 ffmpeg 目录放进 PATH（服务器上不在默认 PATH）
+    if r.returncode or not tmp.is_file():
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError("dejudder 失败：" + (r.stderr or r.stdout)[-300:])
+    tmp.replace(dst)
+    return dst
+
+
 def episode(ep: int) -> list[dict]:
     man = json.loads((VID / "episodes" / f"ep{ep:02d}" / "manifest.json").read_text(encoding="utf-8"))
     rows = []
@@ -77,11 +135,20 @@ def episode(ep: int) -> list[dict]:
             rows.append({"shot": s["shot"], "status": "no_source"})
             continue
         dst = out_for(clip)
-        if dst.is_file():
-            rows.append({"shot": s["shot"], "status": "exists", "file": str(dst.relative_to(ROOT))})
+        dj, why = needs_dejudder(s)
+        if dst.is_file() and (not dj or dejudder_for(clip).is_file()):
+            rows.append({"shot": s["shot"], "status": "exists", "file": str(dst.relative_to(ROOT)), "dejudder": dj})
             continue
-        secs = lanczos(clip, dst)
-        rows.append({"shot": s["shot"], "status": "lanczos_unsharp", "secs": secs, "file": str(dst.relative_to(ROOT))})
+        src = clip
+        if dj:                              # 链路：原片 → 去抖（_dj）→ 放大（_sr1080）；放大版从去抖片做
+            try:
+                src = run_dejudder(clip)
+            except RuntimeError as e:
+                rows.append({"shot": s["shot"], "status": "dejudder_failed", "why": str(e)[:200]})
+                continue
+        secs = lanczos(src, dst)
+        rows.append({"shot": s["shot"], "status": "lanczos_unsharp", "secs": secs, "file": str(dst.relative_to(ROOT)),
+                     "dejudder": dj, "dejudder_why": why})
     return rows
 
 

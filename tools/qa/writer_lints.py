@@ -10,6 +10,7 @@ P4 校验能拦（这里的 QW-W*，接进 tools/validate_qwen_script.py）的�
   QW-T1 / P2  单镜时长按台词需要、总时长靠加镜不靠拉长（R11-2 / R11-3 节奏慢；固定 warn）           K-WRT-Q07
   QW-W9  人物在画的特写 / 近景 / 中景：img 光线写“光源 + 方向 / 落点”（RESEARCH 真人写实调研）             K-WRT-X05
   QW-W10 局部特写写的是手，动作句又写到肩 / 颈 / 锁骨 / 胸口（ep05-S3/S5 驳回 8 次，VIDEO10 W5）            K-WRT-V10
+  QW-W11 分拍写了对身上正穿着的衣服的整理动作（抚平外套下摆…）：视频把外套先脱再穿（VIDEO-RCA 8/8）       K-WRT-702
   （QW-CH6 局部角色不写脸 / 头发：已在 validate_qwen_script 里，规则 K-WRT-Q02 补写作方说明）
 
 级别：WRITER_LINT_LEVEL（默认 "warn"，导入关口不因旧稿拦死）；写作链路（tools/pipeline/p4_adapter.py、
@@ -37,7 +38,17 @@ RULES: dict[str, tuple[str, str]] = {
     "QW-W10": ("warn", "局部 / 大特写写的是手（手套、指尖、握笔…），同一句又写到肩、颈、锁骨或胸口：模型会出成带肩颈 / 脸的近景。"
                        "只要手，就把肩颈部位挪到下一镜；肩颈也要入画，就把景别写成“近景（手与肩颈）”"),
     "QW-T2": ("warn", "目标总时长用镜数凑，不用拉长单镜：本集平均镜长 >6.5 秒、而镜数还没到上限时，先加镜（无台词过渡 / 反应 / 局部特写镜）"),
+    # RSI r7（VIDEO-RCA r2 实测，K-WRT-702）：分拍写了对身上正穿着的衣服的整理动作 → 8/8 外套先消失再穿回；去掉这一拍 0/2
+    "QW-W11": ("warn", "分拍动作不要写对身上正穿着的衣服的整理动作（抚平外套下摆、拉衣角、收紧衣领 / smooths the hem of her blazer…）："
+                       "视频模型会把外套先脱掉再穿回。想表达整理 / 镇定，写不碰衣服的动作：手放回身侧、深吸一口气、肩膀放松"),
 }
+# QW-W11：动作词 + 衣物词（同一拍 / 同一英文分句里）。中文分拍和 H3 英文分拍都查
+GARMENT_ACT_ZH = re.compile(r"(整理|抚平|抹平|理了理|理一理|拉了拉|拉一拉|拉紧|拉直|拽|扯|收紧|掀起|撩起|扣上|系紧|拢了拢|拢紧|捋平)"
+                            r"[^，。；｜]{0,8}(外套|西装|西服|大衣|风衣|夹克|开衫|裙摆|裙子|裙|衣摆|衣角|衣领|领口|袖口|下摆|衬衫)")
+NOT_GARMENT_ACT = re.compile(r"\b(eyes|gaze|glance|head|chin|face)\b", re.I)     # “lifts her eyes to the coat”是视线，不是整理衣服
+GARMENT_OFF = re.compile(r"脱|解开|褪下|滑落|take[sn]? off|taking off|slips? off|slid off|remov(?:e|es|ed|ing)|unbutton|unzip|strip", re.I)
+GARMENT_ACT_EN = re.compile(r"\b(smooth|adjust|tug|straighten|tighten|pull|draw|lift|tuck|button|zip|fix|smooth)(?:s|es|ed|ing)?\b"
+                            r"[^.;]{0,40}?\b(blazer|jacket|coat|skirt|blouse|shirt|collar|cuff|hem|sleeve|lapel)s?\b", re.I)
 PACE_MAX_S = 6.0          # K-WRT-005：单镜 ≤6 秒（超过剪辑会拆刀）
 PACE_AVG_S = 6.5          # 本集平均镜长线（K-EDT-I01 剪辑每刀 ≤4.5 秒；单镜一刀时写作侧放宽到 6.5）
 SPEECH_CPS = 4.5          # 中文台词每秒字数（defect_hunt DH-S06 用 5 字 / 秒为“说不完”上限）
@@ -167,6 +178,20 @@ def check_shot(sh, ep, img: str, size: str | None, fields: dict | None = None) -
         hands = [(img.find(w), w) for w in W10_HAND if w in (img or "")]
         if hit and hands and min(hands)[0] < hit.start() and not re.search("|".join(W10_FACE), img or ""):
             out.append(_issue("QW-W10", f"局部写的是「{min(hands)[1]}」，又写到「{hit.group(0)}」", "img"))
+    # QW-W11 对身上正穿着的衣服做整理动作（K-WRT-702）：分拍字段 + H3 正文的分拍段（At 00:0x 之后）
+    beats_zh = ex.get("分拍", "")
+    h3 = getattr(sh, "h3_prompt", None) or ""
+    h3_beats = h3[h3.find("At 00:"):] if "At 00:" in h3 else ""
+    # 情节本身就是穿脱（脱下 / 解开 / take off / slips off…）不算：K-WRT-702 要求这类单独成镜、首尾帧画出前后，不在这里拦
+    if GARMENT_OFF.search(beats_zh + " " + h3_beats):
+        return out
+    m = GARMENT_ACT_ZH.search(beats_zh) or GARMENT_ACT_ZH.search(getattr(sh, "motion_prompt", None) or "")
+    if m:
+        out.append(_issue("QW-W11", f"分拍写了对身上衣服的整理动作「{m.group(0)}」（视频会把衣服先脱再穿）", "分拍"))
+    else:
+        m = next((x for x in GARMENT_ACT_EN.finditer(h3_beats) if not NOT_GARMENT_ACT.search(x.group(0))), None)
+        if m:
+            out.append(_issue("QW-W11", f"H3 分拍写了对身上衣服的整理动作“{m.group(0)}”（视频会把衣服先脱再穿）", "H3提示词"))
     return out
 
 

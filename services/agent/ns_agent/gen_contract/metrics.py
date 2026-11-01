@@ -12,12 +12,26 @@ ZONE_REGION = {"feet": (0.50, 1.0), "lower": (0.30, 0.95), "upper": (0.0, 0.75),
                "hand": (0.0, 1.0), "waist": (0.25, 0.8), None: (0.0, 1.0)}
 
 
+def _shares_gpu_with_local_lane() -> bool:
+    """LOCALGPU（11-01）：本机有启用的出图道（config/render_endpoints.json lanes 里 image_only 且没 disabled，如 laptop:0）
+    = 这张卡归出图用 → CLIP 不上卡。11-01 19:22 实测：契约 CLIP 在同卡上，ComfyUI 被挤进共享显存，每步 5 s → 40 s。
+    gpu33 上（remote_score 下发本文件）没有这份配置 → False，行为不变"""
+    try:
+        import json
+        from pathlib import Path
+        cfg = Path(__file__).resolve().parents[4] / "config" / "render_endpoints.json"
+        lanes = json.loads(cfg.read_text(encoding="utf-8")).get("lanes") or {}
+        return any(isinstance(v, dict) and v.get("image_only") and not v.get("disabled") for v in lanes.values())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 @lru_cache(maxsize=1)
 def _clip():
     import torch
     from transformers import CLIPModel, CLIPProcessor
     name = os.environ.get("NS_CLIP_PATH") or "openai/clip-vit-large-patch14"
-    dev = os.environ.get("NS_CLIP_DEVICE") or ("cuda" if torch.cuda.is_available() else "cpu")
+    dev = os.environ.get("NS_CLIP_DEVICE") or ("cuda" if torch.cuda.is_available() and not _shares_gpu_with_local_lane() else "cpu")
     m = CLIPModel.from_pretrained(name, local_files_only=True).to(dev).eval()
     p = CLIPProcessor.from_pretrained(name, local_files_only=True)
     return m, p, dev

@@ -22,7 +22,21 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PULL = ROOT / "data" / "_offline_pull"
-OWN = {"gpu33": {1, 3, 5}, "gpu36": {2, 4, 6, 7, 8, 9, 10}}
+OWN = {"gpu33": {1, 3, 5}, "gpu36": {2, 4, 6, 7, 8, 9, 10}}      # 旧分集（partition.json 读不到时用）
+OWN_IMG, OWN_VID = dict(OWN), dict(OWN)
+try:   # NETFIX 22:2x：按集归属改读 config/netfix/partition.json——图 / 账本按 images，视频按 video（ep10 图归笔记本、视频归 gpu36）
+    _part = json.loads((ROOT / "config/netfix/partition.json").read_text(encoding="utf-8"))
+    OWN_IMG = {h: {int(x) for x in v} for h, v in (_part.get("images") or {}).items() if h != "laptop"} or OWN_IMG
+    OWN_VID = {h: {int(x) for x in v} for h, v in (_part.get("video") or {}).items() if h != "laptop"} or OWN_VID
+    OWN = {h: OWN_IMG.get(h, set()) | OWN_VID.get(h, set()) for h in set(OWN_IMG) | set(OWN_VID)}
+except (OSError, ValueError):
+    pass
+
+
+def owns(host: str, rel: str, ep: int) -> bool:
+    """data/renders/**、data/producer/** 是出图侧 → images 归属；其余（video / episodes / music / review）→ video 归属"""
+    m = OWN_IMG if rel.startswith(("data/renders/", "data/producer/")) else OWN_VID
+    return ep in m.get(host, set())
 SKIP_NAMES = {"control.json", "heartbeat.json", "producer.pid", "registry.json", "night.pid"}
 APPEND = {"data/producer/log.jsonl", "data/producer/current_changes.jsonl",
           "data/pipeline/runs/series10_v1/video/night.log"}
@@ -70,7 +84,7 @@ def pick(local, remote, ep: int | None, host: str):
     """同一对象：不是这台负责的集 → 留笔记本；是 → 两边谁的 *at 更晚用谁（同样晚用服务器的）；只有一边有 → 用有的那边"""
     if remote is None:
         return local
-    if ep is None or ep not in OWN[host]:
+    if ep is None or ep not in OWN_IMG.get(host, set()):      # 对象表都是出图侧（producer）
         return local if local is not None else remote
     if local is None:
         return remote
@@ -89,7 +103,7 @@ def merge_objects(rel: str, src: Path, dst: Path, host: str) -> int:
         if isinstance(lv, list) or isinstance(rv, list):
             lv, rv = lv or [], rv or []
             if all(isinstance(x, str) for x in lv + rv):              # keys 列表：并集（只收这台负责集的新键）
-                add = [x for x in rv if x not in lv and (_ep(x) in OWN[host])]
+                add = [x for x in rv if x not in lv and (_ep(x) in OWN_IMG.get(host, set()))]
                 out[k], n = lv + add, n + len(add)
             elif all(isinstance(x, dict) and "obj" in x for x in lv + rv):
                 lm = {x["obj"]: x for x in lv}
@@ -153,7 +167,7 @@ def main() -> int:
             # state_<host>.json / vidgen_<host>.log 只收那台自己的（另一台副本里缺文件时 reconcile 会误改别的集，不能并回）
             import re as _re
             m = _re.search(r"(?:^|/|_)ep(\d{2})(?:\b|-|_|/)", rel)
-            if m and int(m.group(1)) not in OWN[host]:
+            if m and not owns(host, rel, int(m.group(1))):
                 stats["skipped"] += 1
                 continue
             mh = _re.search(r"_(gpu33|gpu36)[._]", rel)
@@ -164,7 +178,7 @@ def main() -> int:
                 d = json.loads(src.read_text(encoding="utf-8"))
                 for k, v in d.items():
                     e = ep_of_obj(k)
-                    if e in OWN[host]:
+                    if e in OWN_IMG.get(host, set()):
                         att[k] = v
                 continue
             if is_object_file(rel):                 # 多集共享的对象文件：按对象合并（K-OPS-Q20 / W02）
@@ -182,7 +196,7 @@ def main() -> int:
                 import re as _re
                 new = [ln for ln in src.read_text(encoding="utf-8").splitlines() if ln and ln not in have]
                 # 带对象 / 集号的行只收负责那台的（另一台副本缺文件时的误判不并回）
-                new = [ln for ln in new if not (mm := _re.search(r'"obj": "[a-z]+:ep(\d{2})', ln)) or int(mm.group(1)) in OWN[host]]
+                new = [ln for ln in new if not (mm := _re.search(r'"obj": "[a-z]+:ep(\d{2})', ln)) or int(mm.group(1)) in (OWN_IMG if rel.startswith('data/producer/') else OWN_VID).get(host, set())]
                 if new and not DRY:
                     backup(rel)
                     with open(dst, "a", encoding="utf-8") as f:
@@ -194,7 +208,7 @@ def main() -> int:
                 s = json.loads(src.read_text(encoding="utf-8"))
                 l = json.loads(dst.read_text(encoding="utf-8")) if dst.exists() else {"eps": {}}
                 for e, x in (s.get("eps") or {}).items():
-                    if int(e) in OWN[host]:
+                    if int(e) in OWN_VID.get(host, set()):
                         l.setdefault("eps", {})[e] = x
                         if e in (s.get("pending_shots") or {}):
                             l.setdefault("pending_shots", {})[e] = s["pending_shots"][e]

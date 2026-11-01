@@ -90,6 +90,62 @@ def pending_redo(takes: dict, import_at: str) -> str | None:
     return None
 
 
+PARITY_CFG = ROOT / "config" / "data_parity.json"
+ALERTS = ROOT / "data" / "qa" / "alerts.jsonl"
+PENDING_ALERT_ID = "A-PARITY-PENDING"
+
+
+def pending_max_hours(cfg: Path | None = None) -> float:
+    """pending_redo 的上限小时数（config/data_parity.json pending_redo_max_hours，缺省 12；AUDIT P2）"""
+    try:
+        return float(json.loads(Path(cfg or PARITY_CFG).read_text(encoding="utf-8")).get("pending_redo_max_hours", 12))
+    except (OSError, ValueError, TypeError):
+        return 12.0
+
+
+def overdue_pending(pending: dict, import_at: str, max_h: float, now: float | None = None) -> tuple[list[str], float]:
+    """待重做从现行导入时刻算起，超过 max_h 小时 = 过期待重做（全部 pending 镜一起过期）。→ (镜号, 已挂小时)"""
+    import time as _t
+    now = _t.time() if now is None else now
+    try:
+        t0 = _t.mktime(_t.strptime(import_at[:19], "%Y-%m-%dT%H:%M:%S"))
+    except (ValueError, TypeError):
+        return [], 0.0
+    age = (now - t0) / 3600
+    return (sorted(pending) if pending and age > max_h else []), round(age, 1)
+
+
+def sync_pending_alert(overdue: list[str], age_h: float, max_h: float, alerts: Path | None = None) -> str | None:
+    """复用 infra_watchdog 的报警格式（data/qa/alerts.jsonl，监控看板 :8810 显示）：有过期待重做且没开着 → 写 open；
+    清零且开着 → 写 closed。返回写入的 state（没写返回 None）"""
+    import time as _t
+    alerts = Path(alerts or ALERTS)
+    last = None
+    try:
+        for ln in alerts.read_text(encoding="utf-8").splitlines():
+            if ln.strip():
+                r = json.loads(ln)
+                if r.get("id") == PENDING_ALERT_ID:
+                    last = r
+    except (OSError, ValueError):
+        pass
+    is_open = bool(last and last.get("state") == "open")
+    rec = None
+    if overdue and not is_open:
+        rec = {"ts": _t.strftime("%Y-%m-%dT%H:%M:%S"), "t": _t.time(), "id": PENDING_ALERT_ID, "state": "open", "level": "warn",
+               "msg": f"data_parity：{len(overdue)} 镜导入后出图未跟上已 {age_h} 小时（上限 {max_h:g} 小时，L-088 全量重做）：{','.join(overdue[:30])}",
+               "by": "data_parity", "shots": overdue}
+    elif not overdue and is_open:
+        rec = {"ts": _t.strftime("%Y-%m-%dT%H:%M:%S"), "t": _t.time(), "id": PENDING_ALERT_ID, "state": "closed", "msg": "已恢复",
+               "by": "data_parity", "opened": last.get("ts")}
+    if rec:
+        alerts.parent.mkdir(parents=True, exist_ok=True)
+        with open(alerts, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        return rec["state"]
+    return None
+
+
 def rj(p: Path, d=None):
     try:
         return json.loads(p.read_text(encoding="utf-8"))
@@ -500,8 +556,14 @@ def main() -> int:
     if a.ui:
         ui_note = ui_check(a.ui, ui_api.get(a.ui), fails)
 
+    max_h = pending_max_hours()
+    overdue, age_h = overdue_pending(pending, import_at, max_h)
+    try:
+        sync_pending_alert(overdue, age_h, max_h)
+    except OSError as ex:
+        warns.append(f"D-PENDING 报警写不进 {ALERTS}：{ex}")
     res = {"project": project, "mode": "inproc" if a.inproc else API, "checked": checked, "fails": fails, "warns": warns, "ui": ui_note,
-           "pending_redo": pending, "import_at": import_at}
+           "pending_redo": pending, "import_at": import_at, "pending_overdue": overdue, "pending_age_h": age_h, "pending_max_h": max_h}
     if a.json:
         Path(a.json).write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
     for w in warns:
@@ -514,8 +576,11 @@ def main() -> int:
             by_ep.setdefault(sid.split("-")[0], []).append(sid.split("-")[1])
         print(f"PENDING_REDO {len(pending)} 镜（导入 {import_at} 后出图未跟上，L-088 全量重做补；新首帧设为当前后自动转回比对）：" +
               "；".join(f"{e} {','.join(v)}" for e, v in by_ep.items()))
+    if overdue:
+        print(f"PENDING_OVERDUE 过期待重做 {len(overdue)} 镜：导入后已 {age_h} 小时（上限 {max_h:g} 小时，config/data_parity.json），"
+              f"已写报警 {PENDING_ALERT_ID} → data/qa/alerts.jsonl：{','.join(overdue)}")
     print(f"{'PASS' if not fails else 'FAIL'} data_parity：项目 {project} · 抽查 {checked['shots']} 镜 · {checked['fields']} 项 · "
-          f"不一致 {len(fails)} · 待重做 {len(pending)} · 警告 {len(warns)}{' · ' + ui_note if ui_note else ''}")
+          f"不一致 {len(fails)} · 待重做 {len(pending)}（过期 {len(overdue)}） · 警告 {len(warns)}{' · ' + ui_note if ui_note else ''}")
     return 0 if not fails else 1
 
 

@@ -28,6 +28,7 @@ BAKEOFF / AUTOPILOT）在宣布“本轮完成”之前必须跑它；退出码 
   L1 账本 / 报告    --report 存在；7 步关键词齐；引用的路径都存在；带数字的结论行同一行要有出处
   RL 规则有检查     --rules 每条在 knowledge 里且有 check 字段（指向存在的文件 / 测试）；或 --no-lesson "<理由>"
   H1 内容缺陷猎捕   生成类 loop：tools/qa/defect_hunt.py 的 state 必须比最新首帧 / 视频评分 / 成片新（K-OPS-Q13）
+  V2 系统版本       本轮 --changed 是否已进系统版本（git tag sv-*，tools/qa/system_version.py cut）；没进只提示（K-OPS-V01）
   Y1 语法守卫       tools/qa/syntax_guard.py 全仓：写断的字符串 / 语法错误 / 非法转义 / 未定义名 / 项目内导入失效（K-OPS-C01，CODE-RSI）
   T1 测试           --tests 给的 pytest 路径；带真实数据写保护（tests/conftest.py + tools/qa/real_data_guard.py），写真实 data/ / 遗留线程 / 哨兵文件被改 = fail
 结果：pass / fail / untested / na / warn。任何 fail → 退出 1（FAIL）；必需项 untested → 退出 2（INCOMPLETE，不得宣布完成）。
@@ -580,6 +581,18 @@ class Gate:
         st = {0: "pass", 1: "fail"}.get(code, "untested")
         self.add("Y1", "全仓语法守卫（K-OPS-C01）", st, tail(out, 4))
 
+    def v2_version(self):
+        # K-OPS-V01（CODE-RSI r3，项目方 11-01 22:5x“每一次迭代都是用 override system,然后用 create a new version”）：
+        # 本轮改动是否已进某个系统版本（git tag sv-*）；没进只提示，由总调度巡检时 tools/qa/system_version.py cut
+        if not self.changed:
+            return self.add("V2", "已进系统版本（K-OPS-V01）", "na", "没有 --changed", False)
+        code, out = sh(["git", "status", "--porcelain=v1", "--", *self.changed], 120)
+        left = [ln[3:] for ln in out.splitlines() if len(ln) > 3]
+        if code != 0:
+            return self.add("V2", "已进系统版本（K-OPS-V01）", "warn", tail(out, 2), False)
+        self.add("V2", "已进系统版本（K-OPS-V01）", "warn" if left else "pass",
+                 (f"{len(left)} 个改动还没进系统版本（等总调度 cut）：" + "、".join(left[:8])) if left else "本轮改动都已在版本里", False)
+
     def t1_tests(self):
         if not self.a.tests:
             return self.add("T1", "pytest", "na", "未指定", False)
@@ -617,6 +630,7 @@ class Gate:
         self.h1_hunt()
         self.g0_propagation()
         self.y1_syntax()
+        self.v2_version()
         self.t1_tests()
         fail = [r for r in self.rows if r["status"] == "fail"]
         unt = [r for r in self.rows if r["status"] == "untested" and r["required"]]

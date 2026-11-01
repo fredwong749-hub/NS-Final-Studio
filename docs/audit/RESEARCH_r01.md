@@ -1,4 +1,4 @@
-# AUDIT · RESEARCH 复核 r01（2026-11-01 16:49–16:56，独立复核方 = AUDIT，交总调度 fredw-2b）
+# AUDIT · RESEARCH 复核 r01（2026-11-01 16:49–16:50，独立复核方 = AUDIT，交总调度 fredw-2b）
 
 复核对象：docs/research/realism_tuning_20261101.md（16:48:17）、data/ab/realism_ab/、data/review_pages/realism_ab/index.html（16:45:46）、tools/research/realism_ab.py / realism_lint.py、knowledge/rules/research_realism.yaml、tools/qa/writer_lints.py 新加的 QW-W9。对照 NIGHT_PLAN W9 的完成标准：研究报告要带出处和置信度；能落地的参数做小 A/B；规则进 knowledge。
 AUDIT 没有改产品文件。机读版：data/qa/audit/RESEARCH_r01.json

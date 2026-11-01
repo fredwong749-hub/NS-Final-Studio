@@ -242,6 +242,14 @@ CAMERA_GAZE_RE = re.compile(r"\b(?:look(?:s|ing)?|star(?:es|ing)|gaz(?:es|ing)|g
 SYS_CAMERA_FACING_RE = re.compile(r"\b(?:facing|faces|turned toward|turns toward|toward)\s+(?:the\s+)?(?:camera|lens|viewer)\b", re.I)
 
 
+
+def system_facing_camera(text: str) -> str | None:
+    """RL-E3 的派单期版本（K-OPS-Q24 扩展到提示词，AUDIT 20:15）：只看编译稿里的系统锚点句“The frame keeps …”，
+    命中朝向镜头 → 返回命中片段。vidgen.PROMPT_FACING_RE 与本模块 SYS_CAMERA_FACING_RE 必须同一模式（测试核对）"""
+    sys_txt = " ".join(re.findall(r"The frame keeps[^.]*\.", text or ""))
+    m = SYS_CAMERA_FACING_RE.search(sys_txt)
+    return m.group(0) if m else None
+
 def lint_people_eyeline(text: str, spec, p: dict) -> list[dict]:
     out = []
     m = re.search(r"^(?:integrated_multimodal_description|detailed_description):(.*?)(?=^overall_soundscape:)", text or "", re.M | re.S)

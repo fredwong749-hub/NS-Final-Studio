@@ -56,7 +56,14 @@ def main():
             rec = load(exp).get(aid) or {}
             label = html.escape(arm.get("label", aid))
             media = ""
-            if rec.get("kind") == "image" and rec.get("file"):
+            if arm.get("img"):                      # 直接展示本地拼图（出图 A/B 的整图 / 人脸裁切，原图留在服务器）
+                src = ROOT / arm["img"]
+                if src.exists():
+                    dst = OUT / "media" / f"{src.parent.name}__{src.name}"
+                    shutil.copy2(src, dst)
+                    media = f'<a href="media/{dst.name}"><img src="media/{dst.name}" style="max-width:740px;width:100%"></a>'
+                rec = {"kind": "image"}
+            elif rec.get("kind") == "image" and rec.get("file"):
                 src = AB / exp / rec["file"]
                 if src.exists():
                     dst = OUT / "media" / f"{exp}__{src.name}"

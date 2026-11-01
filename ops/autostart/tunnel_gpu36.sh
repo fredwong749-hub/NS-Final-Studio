@@ -1,12 +1,8 @@
 #!/bin/bash
-# fredw-92/G36：笔记本 → gpu36 常驻 ssh 隧道（断线 30 s 重连），gpu36 的三个 ComfyUI 渲染道：
-#   18288 → gpu36 :8188（GPU0，道 gpu36:0）  18289 → :8189（GPU1，gpu36:1）  18290 → :8190（GPU2，gpu36:2）
-# 由 tunnel.sh（gpu33 隧道）顺带拉起，也由 laptop_autostart.ps1 在三个端口任一不在监听时拉起；自带锁（ops/logs/tunnel_gpu36.lock），重复启动自己退出。
-# gpu36 上的实例：/root/work/fredw/comfy/comfy.sh start|stop|status（见 docs/USER_GUIDE_v1.md 本地实现 gpu36 一节）。
-source "$(dirname "$0")/../sync/_common.sh"
-while true; do
-  ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -o IPQoS=throughput \
-      -L 18288:127.0.0.1:8188 -L 18289:127.0.0.1:8189 -L 18290:127.0.0.1:8190 gpu36
-  date "+%F %T tunnel_gpu36 exited ($?), reconnect in 30 s"
-  sleep 30
-done
+# NETFIX 11-01（K-OPS-N01，总调度 fredw-2b 派）：本脚本退役。原来是“ssh 断了 30 s 重连”的 bash 循环，22:08 循环不在时 gpu36 三条隧道
+# 永远修不好。现在全部转发（15180/18098/18099/18188/18189/18191 → gpu33，18288/18289/18290 → gpu36）由一个监管进程负责：
+#   tools/netfix/tunnel_supervisor.py（每台服务器一条 ssh、指数退避、卡死检测、跳板恢复立刻重连、接管孤儿 ssh）。
+# 任何地方还调用本脚本，都只会转去确保监管进程在跑，然后退出（不再自己起 ssh，避免和监管进程抢端口）。
+# 旧版本留在 data/_quarantine/netfix_20261101/。
+cd "/d/NS-Final Studio" || exit 1
+PYTHONUTF8=1 ./.venv/Scripts/python.exe tools/netfix/tunnel_supervisor.py ensure

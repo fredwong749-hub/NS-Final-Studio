@@ -302,6 +302,24 @@ def _sheet_candidates(project: str, cid: str, look: str) -> list[dict]:
             th = _run_dir(project) / "images" / "_thumbs" / f"{f.stem}.jpg"
             out.append({**_img(_rel(f)), "seed": int(m.group(1)) if m else None,
                         "thumb": url(_rel(th)) if th.is_file() else None})
+    # IMGFIX 11-01（K-AST-262，总调度 fredw-2b 派）：ASSETMASTER 已过单品一致性检查的 v2 设定图（sheets_v2/adopted）原先不在候选里——
+    # 10:57 在中枢点了别的候选后就再也点不回来（林晚造型 A 从画了外套的 v2_s202 换成没画外套的 s101，ep01 首帧全丢外套）。
+    # 现在：adopted 进候选；现行那张永远在候选里；每张标出单品一致性检查（item_check：pass / 未检查）
+    ad = _root() / "data" / "assetmaster" / "sheets_v2" / "adopted"
+    for f in sorted(ad.glob(f"{cid}_look{look}_v2_s*")) if ad.is_dir() else []:
+        if f.suffix.lower() in IMAGE_EXT and _img(_rel(f)):
+            m = re.search(r"_s(\d+)$", f.stem)
+            out.append({**_img(_rel(f)), "seed": int(m.group(1)) if m else None, "thumb": None, "adopted": True})
+    cur = R.sheet_of(project, cid, look)
+    if cur and all(x["file"] != cur for x in out) and _img(cur):
+        out.append({**_img(cur), "seed": None, "thumb": None})
+    for x in out:
+        ck = R.sheet_item_check(cid, look, x["file"])
+        x["item_check"] = "pass" if ck else "unchecked"
+        if not ck:
+            gaps = R.sheet_outer_gaps(project, cid, look, x["file"])
+            if gaps:
+                x["item_check_note"] = "没有单品一致性检查记录，不能保证画了：" + "、".join(gaps)
     return out
 
 

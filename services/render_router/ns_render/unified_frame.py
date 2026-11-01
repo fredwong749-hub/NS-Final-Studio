@@ -103,9 +103,18 @@ def _postflight(final_rel: str, job: dict, host: str | None):
     from . import pipeline as P
     req = {k: job.get(k) for k in ("cast", "asset_refs")}
     img = P.DATA / final_rel
+    if host == "local":      # LOCALGPU（11-01）：本机道 laptop:* 出的图 → 本机 CPU 全测（Q1–Q8，与 gpu33 同代码同模型），断网也判全
+        try:
+            import local_score as LS
+            if LS.available():
+                d = LS.postflight_local([{"id": "x", "file": str(img), "request": req}])["x"]
+                if not d.get("measure_error"):
+                    return d
+        except Exception:  # noqa: BLE001  本机打分失败 → 照旧试 gpu33，再退回 CPU 部分测
+            pass
     try:
         import remote_score as RS
-        h = host if host in ("gpu33",) else "gpu33"          # CLIP 权重只在 gpu33（/root/work/fredw/reflock）
+        h = "gpu33"          # CLIP 权重只在 gpu33（/root/work/fredw/reflock）；host=local 本机打分失败时也退到这里
         d = RS.postflight_full(h, [{"id": "x", "file": str(img), "post": None, "request": req}])["x"]
         if not d.get("measure_error"):
             return d

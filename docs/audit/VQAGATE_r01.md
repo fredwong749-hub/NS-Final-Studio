@@ -1,4 +1,4 @@
-# AUDIT · VQAGATE 复核 r01（2026-11-01 16:52–16:58，独立复核方 = AUDIT，交总调度 fredw-2b）
+# AUDIT · VQAGATE 复核 r01（2026-11-01 16:52–16:53，独立复核方 = AUDIT，交总调度 fredw-2b）
 
 复核对象：CHANGELOG 里 VQAGATE 的交付记录（“16:5x VQAGATE fredw-2b 派”）、config/vqa.json、data/vqa/gate_scan/latest.json（16:50）、tests/test_vqagate.py。
 对照 NIGHT_PLAN W1 的完成标准：80 镜首帧全扫完；拦截项有召回 / 误报数；ep01 点名的镜头被拦并进入重出；producer 不再卡在“等总调度复核”。

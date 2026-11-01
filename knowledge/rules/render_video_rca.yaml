@@ -11,9 +11,10 @@ rules:
     evidence:
       - {src: tools/video_rca/size_vs_prompt.py, note: "近景~中景要求的镜头：描述句带鞋 / 高跟 / 腿 62/111 条退档，不带 0/7（对照组小）"}
       - {src: tools/video_rca/ff_size.py, note: "现行 55 条：视频比自己的首帧再远 ≥1 档 11 条；退档 21 条里 17 条首帧本就退档"}
+      - {src: data/ab/video_rca/r3_hide_offframe/, note: "⤴ r2（Pika，复用 r1 原编译稿同 seed）：删 / 不删画外造型分句，S4 脸高 0.122 vs 0.124、S5 0.173 vs 0.169，印样几乎一样；Pika 不会为画外鞋拉远 / 下摇（那是 PDD 的行为）→ 开关保持关，不上默认"}
       - {src: data/pipeline/runs/series10_v1/video/_thumbs/ep01-S4__v1.jpg, note: "S4 两个 seed 都为画出高跟拉远 / 下摇（v1 拉成全景，s2 下摇到鞋）"}
     confidence: medium
-    status: 待验
+    status: 待验   # r2：Pika 下无效（见 evidence ⤴），开关保持关；只在回到 PDD / H3 时才有意义
     experiment: VRCA-E3（data/ab/video_rca/r3_hide_offframe.json）
     date: 2026-11-01
   - id: K-REN-702
@@ -34,15 +35,16 @@ rules:
     link: [P6-P7]
     title: 首帧出图的系统句不得要求人脸“朝向镜头”；看镜头的根在首帧（视频继承首帧视线）
     when: ns_agent.framing.two_shot_clause（双人镜出图系统句）、asset_refs 视线句；frame_v9 唯一出图路径
-    then: 双人句改成正向视线落点；⤴ SCRIPT-RSI 11-01 已落实（D-SCR-07，总调度派）：“侧脸到四分之三侧脸，各自的视线落在画面里的人或物上（… each gaze resting on a person or object in the scene）”——没用“眼睛不看镜头 / eyes off the lens”，因为 cfg 1 负面不生效且会把 lens 概念写进去；具体落点由剧本 img 写（QW-A7），见 K-REN-G06；VQAGATE 的 Q9 看镜头闸门是拦截层
+    then: 双人句用正向句 framing.TWO_SHOT_POSITIVE“侧脸到四分之三侧脸，各自的视线落在画面里的人或物上（… each gaze resting on a person or object in the scene）”（SCRIPT-RSI D-SCR-07）。⤴ 11-01 19:2x 曾按证据例外换成实测句 TWO_SHOT_TESTED（“互相看着对方……眼睛不看镜头”，r1 2 seed 3/4 → 0/4）；r2 3-seed A/B（ep01-S5、ep03-S4）：旧句看镜头 8/10 张脸、正向句 0–1/10、实测句 0/12，两句同样有效 → 按总调度 r2 决定改回正向句。具体落点由剧本 img 写（QW-A7 / K-REN-G06）；VQAGATE Q9 看镜头闸门是拦截层
     check: [tests/test_video_rca.py, tests/test_script_rsi_eyeline.py]   # test_v03 的 xfail 已去掉（SCRIPT-RSI 11-01）
     evidence:
       - {src: tools/video_rca/rates.py, note: "首帧看镜头 → 片头看镜头 49/54（91%）；首帧没看 → 片头看镜头 4/10（40%）；不给首帧的 Ref2VA 3/10"}
       - {src: services/agent/ns_agent/framing.py, note: "two_shot_clause 原文：各自至少四分之三侧脸朝向镜头（each at least three-quarter view toward the camera）"}
       - {src: docs/video_rca/research_r1.md, note: "Q1：MiniMax Hailuo 指南“master image … already looking toward the camera”；Qwen-Image 会把参考头像的头部角度和视线一起贴上（BFS LoRA 作者、myaiforce，中）"}
       - {src: data/ab/video_rca/r1_img_gaze/, note: "同 seed 新旧系统句 A/B（结果见 RCA_r1.md G6/G7）"}
-    confidence: medium
-    status: 待验
+      - {src: data/ab/video_rca/r5_img_twoshot/, note: "r2：旧 8/10、正向 0–1/10、实测 0/12（3 seed × 2 镜，人工看脸）"}
+    confidence: high
+    status: 确认
     date: 2026-11-01
   - id: K-REV-704
     domain: review
@@ -57,3 +59,17 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-01
+  - id: K-REV-705
+    domain: review
+    link: [P9-P10]
+    title: Pika Flex 也有 4 帧一顿（慢动作镜最重），合成前按 J4>1.2 且 z≥3 去抖（复用 K-LOOP-004 tools/dejudder.py）
+    when: tools/series10_video/upscale_preview.needs_dejudder（config/pipeline/video_policy.json dejudder），配方 i2va_pika_flex
+    then: 门槛 j4_gt 1.25 → 1.2（与 LEARNED_SPECS A 的 4 帧一顿口径一致）；量化口径 tools/video_rca/judder.py（J4 + 2 帧相位 J2）。大动作镜的“2 帧交替”（J2_z≥3、J4_z<3）不去抖——去抖在快动作上清晰度掉 25%（拉普拉斯 103.8 → 77.8），慢动作镜只掉 1.5–3%
+    check: [tests/test_video_rca.py]   # test_v05 现为 xfail(strict)：PROD 改门槛后自动转红，届时去掉 xfail
+    evidence:
+      - {src: data/ab/video_rca/r1_base_cue/, note: "Pika 同首帧：S2 J4 1.347 z 3.9、S4 1.352 z 7.4、S5 1.237 z 10.8（慢动作，第 3 相位跳 1.24–1.34×）；S3 大动作 J4 1.155 z 0.9、J2_z 3.3（2 帧交替，PDD 同镜也有）"}
+      - {src: data/ab/video_rca/r6_dejudder/, note: "去抖后 S5 J4 1.237 → 1.092、S4 1.352 → 1.096（360p 预览测）；冒烟 S3 全分辨率 jerk 0.662 → 0.213、拉普拉斯 −25%"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-01
+

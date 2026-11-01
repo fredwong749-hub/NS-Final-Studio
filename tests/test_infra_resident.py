@@ -106,7 +106,7 @@ def test_push_tiers_and_warn(monkeypatch):
     monkeypatch.setattr(RS, "local_manifest", lambda dirs: {"tools/a.py": (25_000_000, 10.0)})
     monkeypatch.setattr(RS, "tier_of", lambda rel, size: 1)
     monkeypatch.setattr(RS, "remote_manifest", lambda h, d: {})
-    r = RS.push("gpu33", tier=1)
+    r = RS.push("gpu33", tier=1, gate=False)              # push_gate 另有 tools/qa/push_check.py 自己的测试
     assert r["blocked"] == "over_warn" and r["sent"] == 0
 
 
@@ -132,3 +132,38 @@ def test_verify_sha_detects_and_repushes(monkeypatch, tmp_path):
     monkeypatch.setattr(RS, "ssh", fake_ssh)
     r = RS.verify_sha("gpu33", ["tools/a.py", "tools/b.py"])
     assert r["mismatch"] == [] and r["fixed"] == ["tools/b.py"] and len(pushed) == 1
+
+
+def test_loop_ssh_signature_and_orphans():
+    """总调度 22:09：手动起的隧道 ssh（不归循环管）要被识别成孤儿接管；循环自己的 ssh 不能误杀"""
+    loop36 = '"ssh.exe" -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -o IPQoS=throughput -L 18288:127.0.0.1:8188'
+    manual = '"ssh.exe" -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ConnectTimeout=30 -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -L 18288:127.0.0.1:8188'
+    loop33 = '"ssh.exe" -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -L 15180:127.0.0.1:5180 -L 18188:127.0.0.1:8188'
+    assert W.is_loop_ssh("tunnel_gpu36.sh", loop36) and not W.is_loop_ssh("tunnel_gpu36.sh", manual)
+    assert W.is_loop_ssh("tunnel.sh", loop33) and not W.is_loop_ssh("tunnel.sh", loop36)
+
+
+def test_full_rebuild_after_six_fails(monkeypatch, tmp_path):
+    up = set(W.TUNNELS) - {18288}
+    killed, _ = _stub(monkeypatch, tmp_path, up)
+    started = []
+    monkeypatch.setattr(W, "loop_pids", lambda sc: [777])
+    monkeypatch.setattr(W, "start_loop", lambda sc: started.append(sc))
+    monkeypatch.setattr(W, "orphan_ssh", lambda sc: [])
+    st = {}
+    for i in range(7):
+        st = W.tick(st, now=9000.0 + 30 * i)
+    assert 777 in killed and started == ["tunnel_gpu36.sh"]           # 第 6 拍：连同循环整体重建
+
+
+def test_dead_loop_restarted_after_kill(monkeypatch, tmp_path):
+    up = set(W.TUNNELS) - {18288}
+    killed, _ = _stub(monkeypatch, tmp_path, up)
+    started = []
+    monkeypatch.setattr(W, "loop_running", lambda sc: sc != "tunnel_gpu36.sh")
+    monkeypatch.setattr(W, "start_loop", lambda sc: started.append(sc))
+    monkeypatch.setattr(W, "orphan_ssh", lambda sc: [])
+    st = {}
+    for i in range(2):
+        st = W.tick(st, now=9500.0 + 30 * i)
+    assert "tunnel_gpu36.sh" in started

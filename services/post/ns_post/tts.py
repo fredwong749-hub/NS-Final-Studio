@@ -214,7 +214,16 @@ def remote_is_local(rt: dict) -> bool:
     不能再 `ssh gpu36` 自己连自己。判定：NS_TTS_REMOTE_LOCAL=1，或 OFFLINE_SELF（WORKFLOW 常驻补丁设的本机名）== host"""
     if os.environ.get("NS_TTS_REMOTE_LOCAL") == "1":
         return True
-    return bool(rt.get("host")) and os.environ.get("OFFLINE_SELF") == str(rt.get("host"))
+    me = os.environ.get("OFFLINE_SELF")
+    # 总调度 11-01 方案 (b)：gpu33 自装一套 CosyVoice3（两台服务器之间刻意不互相登录），local_hosts 里的机器都本机合成
+    return bool(me) and (me == str(rt.get("host") or "") or me in (rt.get("local_hosts") or []))
+
+
+def remote_gpus(rt: dict) -> list:
+    """本机合成时按 OFFLINE_SELF 取 gpus_by_host（gpu33 的 GPU2 是坏卡、0/1/3 是出片道 → 配 [] 走 CPU）；否则 gpus"""
+    me = os.environ.get("OFFLINE_SELF")
+    by = rt.get("gpus_by_host") or {}
+    return list(by[me]) if me and me in by and remote_is_local(rt) else list(rt.get("gpus") or [])
 
 
 class _LocalRunner:
@@ -329,7 +338,7 @@ class RemoteCloneBackend:
                 lreq.write_text(json.dumps(req, ensure_ascii=False), encoding="utf-8")
                 self._ssh(f"mkdir -p {jdir}")
                 self._scp(str(lreq), f"{self.rt['host']}:{jdir}/request.json")
-                gpus = " ".join(str(g) for g in (self.rt.get("gpus") or []))
+                gpus = " ".join(str(g) for g in remote_gpus(self.rt))
                 p = self._ssh(f"cd {self._remote('')} || exit 1; sh run_narrator.sh {jdir}/request.json "
                               f"'{gpus}' {int(self.rt.get('max_used_mb', 13500))}", timeout=self.timeout)
                 try:
@@ -473,6 +482,12 @@ def tts_preflight(cfg: dict | None = None, *, speakers: "list[str] | None" = Non
             out.append(f"{s}：缺 ref_text（voices.json 或 {c.get('asset')}）")
         if not (rt.get("host") and rt.get("base_dir") and (rt.get("model_dirs") or {}).get(eng)):
             out.append(f"{s}：remote_tts 缺 host / base_dir / model_dirs.{eng}")
+        elif remote_is_local(rt) and os.name != "nt":   # 本机合成：venv_tts 和模型目录必须在本机（gpu33 方案 b）
+            vpy = Path(str(rt.get("venv") or "/root/work/fredw/venv_tts")) / "bin" / "python"
+            if not vpy.exists():
+                out.append(f"{s}：本机合成但没有 {vpy}（tools/voice10/cosy_setup.sh install）")
+            if not Path(str(rt["model_dirs"][eng])).is_dir():
+                out.append(f"{s}：本机合成但没有模型目录 {rt['model_dirs'][eng]}")
     return out
 
 

@@ -23,7 +23,7 @@ for _p in ("services/render_router", "services/agent", "packages/schema", "servi
 REF_PRESET = "leica_sstar"
 COMFY_VERSION = "0.42.0"            # 服务器 ComfyUI 版本（CHANGELOG fredw-92/F1“ComfyUI 0.42”；本机 D:\ns_comfy 同 tag v0.42.0）
 LANE_KEYS = {"url", "label", "image_only", "concurrency", "hold", "preset_lock", "disabled", "_comment",
-             "yield_url", "yield_timeout_s"}       # yield_url：同卡轮流的看图服务（交图前请它卸载），调度字段，不影响出图参数
+             "yield_url", "yield_timeout_s", "_hold_change"}       # yield_url：同卡轮流的看图服务（交图前请它卸载），调度字段，不影响出图参数
 # 预设里与出图结果有关的字段（style_suffix 在 unified 路径被置空不重复接，但两边必须一样，照比）
 GEN_KEYS = ("unet", "sampler", "vae", "width", "height", "spec_words", "loras", "render_scale", "sharpen", "style_suffix",
             "steps", "cfg", "scheduler", "shift", "two_stage", "detail_pass", "strength", "grade_strength")

@@ -331,18 +331,27 @@ class ComfyClient:
     def _yield_peer(self) -> None:
         """LOCALGPU（11-01）：同卡轮流用的道（render_endpoints lanes 里配了 yield_url，如 laptop:0 → 本机看图服务 /yield）：
         交图之前先请对方卸载（推理中则等这条推理完，≤ yield_timeout_s），否则 ComfyUI 一加载模型就 OOM 崩（11-01 18:28 实测）。
-        对方没起 / 连不上 → 照常提交（对方没占卡）"""
+        对方没起（连不上）→ 照常提交（对方没占卡）；对方在但超时没让出 → 不提交，抛 ComfyUnavailable（基础设施，调用方退避重试）
+        ——11-01 18:52 实测：超时后照交，两边同卡挤进共享显存，出图和看图都慢到不动"""
         try:
             from . import endpoints as EP
             rec = next((v for v in EP._extra_lanes().values() if str(v.get("url", "")).rstrip("/") == self.base), None)
-            url = (rec or {}).get("yield_url")
-            if not url:
-                return
-            req = urllib.request.Request(url, data=json.dumps({"by": "ComfyClient " + self.base}).encode(),
-                                         headers={"Content-Type": "application/json"}, method="POST")
-            urllib.request.urlopen(req, timeout=float(rec.get("yield_timeout_s") or 300)).read()
         except Exception:  # noqa: BLE001
-            pass
+            return
+        url = (rec or {}).get("yield_url")
+        if not url:
+            return
+        req = urllib.request.Request(url, data=json.dumps({"by": "ComfyClient " + self.base}).encode(),
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            urllib.request.urlopen(req, timeout=float(rec.get("yield_timeout_s") or 300)).read()
+        except urllib.error.URLError as e:
+            if isinstance(getattr(e, "reason", None), ConnectionRefusedError) or "refused" in str(e).lower() \
+                    or "10061" in str(e):
+                return                                   # 看图服务没起 = 没占卡
+            raise ComfyUnavailable(f"同卡看图服务没让出（{url}）：{e}，未提交，稍后重试") from e
+        except (TimeoutError, OSError) as e:
+            raise ComfyUnavailable(f"同卡看图服务 {rec.get('yield_timeout_s') or 300}s 内没让出（推理中），未提交，稍后重试：{e}") from e
 
     def _post_prompt(self, wf: dict) -> dict:
         self._yield_peer()

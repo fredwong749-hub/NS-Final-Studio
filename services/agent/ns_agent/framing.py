@@ -232,11 +232,21 @@ def two_shot_clause(n_people: int, subject: str | None) -> str:
     """K-REV-122 / 总调度第二轮：双人镜第二个人常不出脸 → 写清两人朝向（局部特写不加）。
     SCRIPT-RSI 11-01（K-REN-703 / D-SCR-07，项目方 18:2x“所有图片不要看镜头”）：原句“各自至少四分之三侧脸朝向镜头（… toward the camera）”
     让两人都对镜头（VIDEO-RCA：首帧看镜头 → 片头看镜头 49/54）。改成正向视线落点；Qwen Image cfg 1 负面不生效，不写“不看镜头”。
-    视线具体落在谁 / 什么上由剧本 img 写（QW-A7），这里只给朝向和“有落点”"""
+    视线具体落在谁 / 什么上由剧本 img 写（QW-A7），这里只给朝向和“有落点”。
+    ⤴ VIDEO-RCA 11-01 19:2x（总调度 r2 决定：按 G0 有实测证据的优先，“只写正向句”在此按证据例外）：换成实测句
+    “互相看着对方……眼睛不看镜头”——同参考同 seed 2 个 seed，4 张脸看镜头 3 → 0（data/ab/video_rca/r1_img_gaze/faces.jpg，
+    K-REN-703）。上面 SCRIPT-RSI 的正向句（TWO_SHOT_POSITIVE）还没实测；r2 做 3-seed A/B，若同样有效就改回正向句。
+    ⤴ VIDEO-RCA r2（11-01 20:5x）A/B 完成（data/ab/video_rca/r5_img_twoshot/faces_01S5.jpg、faces_03S4.jpg，ep01-S5 / ep03-S4 × 3 seed，人工看脸）：
+    旧句看镜头 8/10 张脸；正向句 0–1/10（1 张存疑）；实测句 0/12 → 两句同样有效，按总调度决定改回正向句（K-REN-703）。"""
     if n_people < 2 or subject in ("part", "object"):
         return ""
-    return ("两人同框，两张脸都清晰入画，侧脸到四分之三侧脸，各自的视线落在画面里的人或物上"
-            "（both faces visible in profile to three-quarter view, each gaze resting on a person or object in the scene）")
+    return TWO_SHOT_POSITIVE
+
+
+TWO_SHOT_TESTED = ("两人同框，两张脸都清晰入画，两人以侧脸到四分之三侧脸互相看着对方，目光落在对方脸上，眼睛不看镜头"
+                   "（both faces visible in profile to three-quarter view, each looking at the other person, eyes off the lens）")
+TWO_SHOT_POSITIVE = ("两人同框，两张脸都清晰入画，侧脸到四分之三侧脸，各自的视线落在画面里的人或物上"
+                     "（both faces visible in profile to three-quarter view, each gaze resting on a person or object in the scene）")
 
 
 def lead(size: str | None) -> str:

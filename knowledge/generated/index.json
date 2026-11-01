@@ -1,35 +1,35 @@
 {
- "kb_version": "kb-20261101-b5d99fe8",
- "n": 428,
+ "kb_version": "kb-20261101-0707fcf8",
+ "n": 444,
  "by_domain": {
-  "render": 75,
+  "render": 76,
   "prompt": 27,
-  "writer": 56,
+  "writer": 60,
   "edit": 35,
-  "review": 55,
+  "review": 56,
   "loop": 9,
-  "asset": 39,
-  "ops": 82,
-  "ui": 50
+  "asset": 40,
+  "ops": 90,
+  "ui": 51
  },
  "by_link": {
   "P0-P1": 20,
   "P1-P2": 2,
   "P10-P11": 43,
   "P11-P12": 22,
-  "P11-RETRY": 46,
+  "P11-RETRY": 47,
   "P2-P3": 3,
-  "P3-P4": 69,
-  "P4-P5": 32,
+  "P3-P4": 73,
+  "P4-P5": 33,
   "P4-P6": 23,
   "P4-P7": 22,
   "P4-P9": 16,
-  "P5-P6": 104,
-  "P6-P7": 24,
-  "P7-P8": 87,
-  "P8-P10": 12,
+  "P5-P6": 109,
+  "P6-P7": 25,
+  "P7-P8": 92,
+  "P8-P10": 13,
   "P8-P9": 10,
-  "P9-P10": 13
+  "P9-P10": 15
  },
  "rules": [
   {
@@ -805,7 +805,7 @@
    ],
    "title": "生产默认在服务器常驻跑（各跑本机负责集的 producer + night，直调本机 ComfyUI）；笔记本只做控制面",
    "when": "series10 起所有整季生产；跳板 194relay 握手 6–7 s 且反复断连，经隧道派单不可靠",
-   "then": "复用 offline_20261101 目录（repo/ venv/ bin/ fwd.py start.sh）；tools/autopilot/resident_sync.py push（清单比对、分批 ≤ 24 MB、临时目录解包再搬入、失败退避重试、发完复核补发）→ ops/offline/resident_prep.py（幂等补丁：night/sync 只管本机集、control.json only/hold、作废笔记本租约）→ ops/offline/resident_restart.sh（只重启 producer / night）；笔记本 producer pause --by SERVER_RESIDENT、night.py 停；resident_sync loop：5 分钟 health、20 分钟 pull + merge_pull（截断不覆盖），代码改动自动推 + 热重启；分集 gpu33 = ep01/03/05、gpu36 = 其余，gpu33 GPU2 坏卡永不用；两台同时派同一集禁止（control.only + night OFFLINE_SELF）；⤴ 总调度 18:4x 修订分工：出图统一由笔记本 producer 派（道 = laptop:0 + 跳板通时经隧道的服务器出图道，同一 producer 的租约天然不重复），服务器 producer 不起（control paused_by=LAPTOP_IMAGES）、只跑 night / vidgen：resident_sync video_up = 第一级推送 → push_frames（只推改过的 takes.json + 当前版本图，小文件优先）→ 服务器本机 build_jobs 重编并核非 Pika ready = 0 → resident_restart night-only",
+   "then": "复用 offline_20261101 目录（repo/ venv/ bin/ fwd.py start.sh）；tools/autopilot/resident_sync.py push（清单比对、分批 ≤ 24 MB、临时目录解包再搬入、失败退避重试、发完复核补发）→ ops/offline/resident_prep.py（幂等补丁：night/sync 只管本机集、control.json only/hold、作废笔记本租约）→ ops/offline/resident_restart.sh（只重启 producer / night）；笔记本 producer pause --by SERVER_RESIDENT、night.py 停；resident_sync loop：5 分钟 health、20 分钟 pull + merge_pull（截断不覆盖），代码改动自动推 + 热重启；分集 gpu33 = ep01/03/05、gpu36 = 其余，gpu33 GPU2 坏卡永不用；两台同时派同一集禁止（control.only + night OFFLINE_SELF）；⤴ 总调度 18:4x 修订分工：出图统一由笔记本 producer 派（道 = laptop:0 + 跳板通时经隧道的服务器出图道，同一 producer 的租约天然不重复），服务器 producer 不起（control paused_by=LAPTOP_IMAGES）、只跑 night / vidgen：resident_sync video_up = 第一级推送 → push_frames（只推改过的 takes.json + 当前版本图，小文件优先）→ 服务器本机 build_jobs 重编并核非 Pika ready = 0 → resident_restart night-only；控制小文件 data/producer/master_rejects.json、data/autopilot/ready_episodes.json 由 resident_sync.push_control 推送（变了才推，服务器上按对象合并：对象内 *at 更晚者胜，⤴ 取代“进第一级推送”的说法，总调度 22:2x 认可），已知限制：删除不传播（流程不删对象）",
    "check": "tests/test_infra_resident.py::test_resident_push_diff_and_skip",
    "evidence": [
     {
@@ -893,6 +893,75 @@
     }
    ],
    "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-01",
+   "_file": "knowledge/rules/asset_ops.yaml"
+  },
+  {
+   "id": "K-OPS-W10",
+   "domain": "ops",
+   "link": [
+    "P8-P10"
+   ],
+   "title": "Pika 片合成前按 K-LOOP-004 去抖（原片 → _dj → _sr1080），门槛在 video_policy.dejudder",
+   "when": "series10 整集合成（night.finalize → tools/series10_video/upscale_preview.py → assemble_episode）且入选版本是 i2va_pika_flex",
+   "then": "upscale_preview.needs_dejudder 读 video/scores/<镜>__<变体>.json：J4 > j4_gt 且 J4_z ≥ j4_z_ge（缺省 1.25 / 3.0 = iterate_loop R-J4）或没有打分 → tools/dejudder.py 出 <名>_dj.mp4（bt709、音轨原样），放大版从去抖片做；night.assembly_sources 优先放大版、其次去抖版、最后原片；参数由 VIDEO-RCA 量化后改 config/pipeline/video_policy.json dejudder",
+   "check": "tests/test_recipe_pika_default.py::test_pika_dejudder_wired_before_upscale",
+   "evidence": [
+    {
+     "src": "config/pipeline/video_policy.json",
+     "note": "VIDEO-RCA r1：Pika 同首帧 4 条里 3 条 4 帧一顿，J4 1.23–1.40，z 4.5–10.8；LEARNED_SPECS A3：dejudder 后 J4 1.34–1.52 → 1.08–1.09"
+    }
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-01",
+   "_file": "knowledge/rules/asset_ops.yaml"
+  },
+  {
+   "id": "K-OPS-W11",
+   "domain": "ops",
+   "link": [
+    "P7-P8",
+    "P9-P10"
+   ],
+   "title": "派单时提示词也要按现行 lint 重查（RL-E3 系统句朝向镜头 → hold）；服务器重编后 RL-E3 必须 0 命中才起 night；驳回撤下后账本同步待重出",
+   "when": "vidgen 派视频变体；resident_sync video_up 在服务器重编 jobs.json 之后；producer.master_reject（含 full_redo 的 L-088 驳回）",
+   "then": "vidgen.policy_ok = policy_hold（配方）+ prompt_hold（变体提示词的 “The frame keeps …” 锚点句命中朝向镜头 → hold，模式与 ns_recipes.lint.SYS_CAMERA_FACING_RE 一致）；rebuild_jobs 报 rl_e3_ready / rl_e3_prompt_files，video_up 见 rl_e3_ready > 0 不起 night；master_reject 把账本 final=passed 改成 None + demoted_at（不留窗口让 data_parity D-LEDGER 误报）",
+   "check": "tests/test_recipe_pika_default.py::test_vidgen_holds_rl_e3_prompt_and_pattern_parity",
+   "evidence": [
+    {
+     "src": "data/pipeline/runs/series10_v1/video/jobs.json",
+     "note": "16:56 旧稿：AUDIT 20:15 统计 538 个编译稿里 125 个带 facing the camera；笔记本副本 420 个变体里 105 个被 prompt_hold 拦下"
+    },
+    {
+     "src": "data/producer/attempts.json",
+     "note": "CLEANUP 19:2x：ep05-S8 / ep07-S2 / S4 / S5 驳回后账本仍 passed（producer 下一拍 19:28:24 才 demote）；测试 tests/test_full_redo.py::test_master_reject_demotes_passed_ledger"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-01",
+   "_file": "knowledge/rules/asset_ops.yaml"
+  },
+  {
+   "id": "K-OPS-W12",
+   "domain": "ops",
+   "link": [
+    "P4-P5",
+    "P5-P6"
+   ],
+   "title": "逐集导入逐集开工：每导入一集就重编作业、只对这一集全量重做并恢复次数、producer 只派已准备好的集",
+   "when": "写作方逐集导入新剧本（HOLLYWOOD，CHANGELOG 追加“HOLLYWOOD 导入 epNN”）",
+   "then": "tools/autopilot/episode_pipeline.py watch：认到新集 → image_jobs.rebuild_first_frame_jobs → jobs_vs_import 对这一集无 missing / extra / stale_sha（否则 jobs_mismatch 不派）→ full_redo.image_jobs_green（tests/test_image_jobs.py 绿 + jobs_vs_import ok，AUDIT 22:13；不过 = jobs_red 不派、不 resume，full_redo.apply 同样拒绝）→ full_redo make_plan + apply(eps={该集})（同一导入稿 sha 下标过的跳过）→ reset_redo(该集镜) → producer control.json only = 已准备各集的镜；这一集的内容哈希变了（重导）才重做，别的集导入不牵连；hold / release 可暂停某集；记时（导入 → 第一张图派出 / 出来 → 第一条视频提交 / 打分，附各卡利用率）写 data/autopilot/episode_pipeline/report.md",
+   "check": "tests/test_episode_pipeline.py",
+   "evidence": [
+    {
+     "src": "docs/master/NIGHT_PLAN_20261101.md",
+     "note": "总调度 22:06：项目方“跳板连上了吗,全部gpu跑起来”；10 集按好莱坞模板重写，逐集导入、逐集开工"
+    }
+   ],
+   "confidence": "medium",
    "status": "确认",
    "date": "2026-11-01",
    "_file": "knowledge/rules/asset_ops.yaml"
@@ -1749,7 +1818,7 @@
    ],
    "title": "服务器常驻合成：两台服务器都要能配音，克隆音色在 remote_tts.host 本机直跑",
    "when": "成片合成在 gpu33 / gpu36 的常驻副本上跑（原片不拉回笔记本，跳板约 17 KB/s）",
-   "then": "每台服务器跑 tools/voice10/speech_setup.sh（独立解释器只装 sherpa-onnx==1.13.8 + Kokoro v1.1 + SenseVoice int8，装在 /root/work/fredw/speech），路径写在 config/voices.json 的 *_posix 键，ns_post.tts._setting 在 Linux 上自动取，不在 start.sh 另设环境变量；音色参考音频与 voices.json 跟 WORKFLOW 的 resident_sync push 走（data/、config/ 都在清单里），不另起一套推送；RemoteCloneBackend 在 OFFLINE_SELF == remote_tts.host（或 NS_TTS_REMOTE_LOCAL=1）时把 ssh / scp 改成本机 bash / cp，不再 ssh 自己",
+   "then": "每台服务器跑 tools/voice10/speech_setup.sh（独立解释器只装 sherpa-onnx==1.13.8 + Kokoro v1.1 + SenseVoice int8，装在 /root/work/fredw/speech），路径写在 config/voices.json 的 *_posix 键，ns_post.tts._setting 在 Linux 上自动取，不在 start.sh 另设环境变量；音色参考音频与 voices.json 跟 WORKFLOW 的 resident_sync push 走（data/、config/ 都在清单里），不另起一套推送；RemoteCloneBackend 在 OFFLINE_SELF == remote_tts.host（或 NS_TTS_REMOTE_LOCAL=1）时把 ssh / scp 改成本机 bash / cp，不再 ssh 自己；两台服务器刻意不互相登录（总调度 11-01 定，不配互信密钥），所以 gpu33 按方案 (b) 自装一套 CosyVoice3：tools/voice10/cosy_setup.sh capture（gpu36 写锁文件）→ install（gpu33 按锁文件装同版本）→ verify，voices.json remote_tts.local_hosts 列出能本机合成的机器，gpus_by_host 给每台的卡（gpu33 = [] 走 CPU，GPU2 坏卡、0/1/3 是出片道）；本机合成时 tts_preflight 还查 venv_tts 和模型目录在不在",
    "director_text": "服务器上合成报 TtsUnavailable（没有 NS_TTS_PYTHON）或 ssh gpu36 自连失败 → 服务器没装配音环境 / 克隆后端没走本机 → 记到 P4-P9",
    "evidence": [
     {
@@ -2920,6 +2989,96 @@
    "_file": "knowledge/rules/loop.yaml"
   },
   {
+   "id": "K-OPS-N01",
+   "domain": "ops",
+   "link": [
+    "P5-P6",
+    "P7-P8"
+   ],
+   "title": "笔记本全部端口转发只由一个监管进程负责（每台服务器一条 ssh 挂多个 -L，指数退避，跳板恢复立刻重连）；看门狗只探测和报警",
+   "when": "笔记本经跳板 194relay 连 gpu33 / gpu36 的任何端口转发（ComfyUI 出图 / 视频道、画布桥、信箱）",
+   "then": "tools/netfix/tunnel_supervisor.py（config/netfix/tunnels.json）单实例常驻；ssh 带 ConnectTimeout / ServerAlive（ProxyCommand 那一跳也带）和 Tag=nsnetfix-<host>，监管进程重启按 Tag 认领不打断；跳板 TCP 不通不起 ssh，恢复即退避清零；探测全部超时连续 3 轮（20 s 超时）才判卡死，个别口“对端拒绝”只记 remote_down 不杀；占口但不带 Tag 的 ssh、旧 tunnel*.sh 循环一律接管（杀掉）；不许再手动起 -L ssh、不许另写重连循环。保活 = 计划任务 NS-Studio-TunnelSupervisor 每 5 分钟 ensure + laptop_autostart.ps1 ensure。infra_watchdog 在监管心跳 ≤ 90 s 时不修，过期报 A-SUPERVISOR 并兜底。Git for Windows 的 ssh 不支持 ControlMaster（11-01 实测 mux reset），不要用",
+   "check": "tests/test_netfix.py",
+   "evidence": [
+    {
+     "src": "data/netfix/inject/20261101_224035.json",
+     "note": "注入（定稿参数 20 s×3 轮）：杀 ssh 18.4 s、挂起 ssh 98 s、孤儿占口 22.4 s、跳板断 90 s 期间不起 ssh、恢复后 14.0 s 6/6（验收 ≤ 60 s）；前一版参数 20261101_222625 同为 14 s"
+    },
+    {
+     "src": "docs/overnight/OFFLINE_20261101.md",
+     "note": "22:08 gpu36 三条全断、跳板通：循环不在，看门狗只杀 ssh 永远修不好"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-01",
+   "_file": "knowledge/rules/netfix.yaml"
+  },
+  {
+   "id": "K-OPS-N03",
+   "domain": "ops",
+   "link": [
+    "P7-P8"
+   ],
+   "title": "gpu33 看图走 gpu36 内网入口 10.0.0.36:8870（只听内网、只认 10.0.0.33），不经跳板、不配两台服务器 ssh 互信",
+   "when": "服务器常驻 producer 在 gpu33 上需要 Q9 本地看图",
+   "then": "gpu36 上 /root/work/fredw/netfix/lan_proxy.py 只监听 10.0.0.36:8870、来源白名单 10.0.0.33、转 127.0.0.1:8870（看图服务本身仍只听 127.0.0.1，不重启）；ns_agent.vqa.client._lan_url 只在服务器（OFFLINE_SELF）上、只认 config/vqa.json model.lan_url 的 10. 内网地址；保活挂 resident_sync health 拍（bash lan_proxy.sh，幂等），不用 crontab；iptables 不加（gpu36 只有一块内网网卡 eno3 10.0.0.36/21，总调度 22:3x 定）",
+   "check": "tests/test_netfix.py::test_vqa_lan_url_only_on_servers",
+   "evidence": [
+    {
+     "src": "tools/netfix/lan_proxy.py",
+     "note": "11-01 22:2x gpu33 curl 10.0.0.36:8870/health HTTP 200 0.05 s；client 真实请求回 '1'（37.4 s）；gpu36 自己连内网地址被 DENY"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-01",
+   "_file": "knowledge/rules/netfix.yaml"
+  },
+  {
+   "id": "K-OPS-N04",
+   "domain": "ops",
+   "link": [
+    "P5-P6",
+    "P7-P8"
+   ],
+   "title": "每台机器只派本机的出图道；谁派哪些镜由 config/netfix/partition.json ∩ ready_episodes.json 算（tools/netfix/dispatch.py），不手写 control.only",
+   "when": "出图派单（服务器常驻 producer + 笔记本 producer）",
+   "then": "only = partition.images[本机] ∩ data/autopilot/ready_episodes.json 的镜（交集空 = [\"__none__\"]，绝不留空——空 only 等于全派）；hold_lanes = 别机的道（服务器上也挂 laptop:0）；服务器 paused 跟随笔记本 control.json 全局暂停（快照 data/netfix/laptop_ctrl.json，缺快照按暂停）；分区按集互斥（dispatch.py check），视频 laptop 不分；跨机接手（work stealing）没有共享锁不做，见 dispatch.steal_plan",
+   "check": "tests/test_netfix.py::test_no_two_producers_share_a_shot_or_lane",
+   "evidence": [
+    {
+     "src": "config/netfix/partition.json",
+     "note": "总调度 22:2x：gpu33=[1,3,5,7]、gpu36=[2,4,6,8,9]、laptop=[10]（离线那次 3 对 7 不均；笔记本 4080 也要跑）"
+    }
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-01",
+   "_file": "knowledge/rules/netfix.yaml"
+  },
+  {
+   "id": "K-OPS-N05",
+   "domain": "ops",
+   "link": [
+    "P7-P8"
+   ],
+   "title": "连接 / 自主生产状态只有一个数据源 data/netfix/net_status.json（监管进程每 5 s 写），界面和看门狗读它，不在请求里 ssh",
+   "when": "界面显示跳板 / 隧道 / 服务器自主生产状态（UIRSI r38）",
+   "then": "字段见 tunnel_supervisor.STATUS_DOC（relay.up / down_since_t、hosts.<h>.state / ports / restarts、tunnels_up / total、servers.<h>.last_pull_t / autonomous）；t 超过 90 s 没更新 = 监管进程不在",
+   "check": "tests/test_netfix.py::test_status_doc_fields",
+   "evidence": [
+    {
+     "src": "tools/netfix/tunnel_supervisor.py",
+     "note": "STATUS_DOC"
+    }
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-01",
+   "_file": "knowledge/rules/netfix.yaml"
+  },
+  {
    "id": "K-OPS-Q30",
    "domain": "ops",
    "link": [
@@ -3141,6 +3300,31 @@
     {
      "src": "docs/uimaster/LOCKS.md",
      "note": "CONSENT: BAKEOFF -> RESEARCH : knowledge/rules/render_qwen21.yaml（只改 K-WRT-Q29…） 等多行路径后直接跟括号，CONSENT_RE 的路径分组（遇空白 / 竖线才停） 把说明一起吞进 glob，O1 永远判越界（CODE-RSI c1 实测：4 个有授权的文件判越界）"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-01",
+   "_file": "knowledge/rules/ops_code_rsi.yaml"
+  },
+  {
+   "id": "K-OPS-V01",
+   "domain": "ops",
+   "link": [
+    "P11-RETRY"
+   ],
+   "title": "每次迭代收轮后发一个系统版本（规则 + 代码 + 配置 + 文档的 git 快照 sv-YYYYMMDD-NN），部署 = 用这一版覆盖服务器，回退 = 回到某一版",
+   "when": "任何 loop 收轮（iter_gate 通过或宣布完成）；总调度巡检时；并发的多个 loop 合并进同一个版本",
+   "then": "总调度跑 .venv/Scripts/python.exe tools/qa/system_version.py cut（闸门 syntax_guard / compile --check / decision_check 0 ❌ / decision_propagation / 定向 pytest，任一不过不发版；git 只提交 .gitignore 口径的代码 / 规则 / 配置 / 文档，commit 带 Co-Authored-By，打 tag；写 docs/system_versions/<sv>.md、INDEX.md、data/system_versions/index.json），再 deploy（resident_sync 第一级推送 + push_gate + 按该版本快照逐个核 sha + 服务器 data/system_version.txt + 热重启）。回退只用 rollback 生成命令和差异预览，执行要总调度确认。iter_gate V2：本轮改动没进任何版本 → 提示",
+   "check": [
+    "tools/qa/system_version.py",
+    "tests/test_system_version.py",
+    "tools/qa/iter_gate.py"
+   ],
+   "evidence": [
+    {
+     "src": "docs/CHANGELOG_AGENTS.md",
+     "note": "项目方 11-01 22:5x：“记得每一次 iterate 完把东西记录下来……每一次迭代都是用 override system,然后用 create a new version 那个 system versions”（总调度 fredw-2b 派 CODE-RSI r3）"
     }
    ],
    "confidence": "high",
@@ -5004,6 +5188,76 @@
    "_file": "knowledge/rules/render_bakeoff.yaml"
   },
   {
+   "id": "K-AST-262",
+   "domain": "asset",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "现行设定图没过单品一致性检查（K-AST-260）时，外层单品不能靠设定图——设定图句明说“图N上没有画 X，X 以参考板为准”；中枢候选必须含 ASSETMASTER adopted v2，且标单品检查状态",
+   "when": "ns_agent.asset_refs.plan_slots（主角单张 sheet 槽）；ns_api.character_hub._sheet_candidates",
+   "then": "sheet_item_check(cid, look, 设定图) 不过 → sheet_outer_gaps 列出本造型外层单品（outfit 槽、postflight.outer_en 认得的），设定图句末尾加 SHEET_GAP_CLAUSE；中枢 adopted v2 进候选、现行那张永远在候选、每张 item_check = pass / unchecked（附缺口说明）。根治 = 现行设定图换成过了检查的那张（项目方决定）",
+   "check": [
+    "tests/test_imgfix.py"
+   ],
+   "evidence": [
+    {
+     "src": "data/pipeline/runs/series10_v1/assets/sheets_chosen.json",
+     "note": "sheet:lin_wan_lookA = images/sheets/lin_wan/lin_wan_lookA_s101.png（10-31 v1 候选，没画外套），picked_by fred 11-01 10:57:54；之前是 data/assetmaster/sheets_v2/adopted/lin_wan_lookA_v2_s202.png（画了深灰短款西装外套，sheet_item_checks pass）"
+    },
+    {
+     "src": "data/looks/character_hub_log.jsonl",
+     "note": "10:57:35 sheet A：prev = adopted v2_s202 → s101；中枢候选只列 images/sheets/ 下的 v1 两张，v2 换掉后点不回来"
+    },
+    {
+     "src": "data/ab/imgfix/takes.jsonl",
+     "note": "ep01-S2 中景：现行 Q2 外套 0.065 / 0.024；O2（加缺口句）0.632 / 0.686；O1（换 v2 设定图）0.272 / 0.303；ep01-S1（特写作业、出成中景）O2 0.024 / 0.030 没穿，O1 0.059（目检穿了，敞开）/ 0.721"
+    }
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-01",
+   "_file": "knowledge/rules/render_imgfix.yaml"
+  },
+  {
+   "id": "K-REN-704",
+   "domain": "render",
+   "link": [
+    "P6-P7"
+   ],
+   "title": "单人镜首帧在提示词最前面加头部朝向句“<名字>四分之三侧脸，脸转向<剧本落点>一侧，脸和身体都不正对镜头。”",
+   "when": "ns_agent.asset_refs.plan_for → single_turn_line（单人在画、主体是人、有身份脸槽、剧本没写背影）；放在 prompt_prefix 最前面",
+   "then": "落点 = img 行“视线落在 / 朝 …”原文 → 第一拍 视线= → “画面里的人或物”；不改身份脸、不改 S★；tools/prompt_v2/audit_framing 首句检查跳过这句",
+   "check": [
+    "tests/test_imgfix.py"
+   ],
+   "evidence": [
+    {
+     "src": "data/ab/imgfix/takes.jsonl",
+     "note": "ep01-S1/S2 各 2 seed：现行 A0 gaze_mp 看镜头 4/4；“平视”→“平视机位” 4/4；“图1 只取身份不取视线”4/4；视线正向落点句放最前 gaze_mp 0/4（目检 S1 s201、S2 s302 仍偏正面）；四分之三侧脸句放最前 gaze_mp 0/4、目检 1/4（S1 s301）；终版 = 落点句 + 朝向句（F2acc / ACC3）ep01-S1、S2、S3、S6 各 2 seed：gaze_mp 0/8、目检 0/8"
+    },
+    {
+     "src": "data/ab/imgfix/takes.jsonl",
+     "note": "同一句放在身份脸句后面（ACC，ep01-S1 s20261201）照样正对镜头 → 必须放最前面"
+    },
+    {
+     "src": "data/ab/imgfix/takes.jsonl",
+     "note": "代价：转开后 sface（对正脸身份参考）降到 0.62–0.82，目检仍是林晚（蓝发齐刘海、五官一致）；SFace 对正脸参考随转角下降，验收线 0.8 对转开的脸不适用，另记对同人侧脸参考的 sface"
+    },
+    {
+     "src": "data/ab/imgfix/q1_arcface_local.json",
+     "note": "契约 Q1（ArcFace，林晚线 0.70）：换回 v2_s202 后的终版 8 张（ACC4 S1×2、ACC5 S2/S3/S6×2）Q1 0.702–0.836，8/8 达线，gaze_mp 0/8、目检 0/8；折中写法“脸微微侧向”（M1）8 张 Q1 2 张 <0.70 且 S1 s301 看镜头，不采用；转角掉分的同人对照见 docs/vqa/GATE_CALIBRATION.md §8"
+    },
+    {
+     "src": "data/ab/video_rca/r2_dualref/takes.jsonl",
+     "note": "VIDEO-RCA：正脸 + 侧脸双参考槽单独用效果不稳（S2 1/2、S3 1/2 转开），且需要 4 个参考槽（现 3 槽）"
+    }
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-01",
+   "_file": "knowledge/rules/render_imgfix.yaml"
+  },
+  {
    "id": "K-OPS-121",
    "enforced": false,
    "domain": "ops",
@@ -5545,6 +5799,10 @@
      "note": "现行 55 条：视频比自己的首帧再远 ≥1 档 11 条；退档 21 条里 17 条首帧本就退档"
     },
     {
+     "src": "data/ab/video_rca/r3_hide_offframe/",
+     "note": "⤴ r2（Pika，复用 r1 原编译稿同 seed）：删 / 不删画外造型分句，S4 脸高 0.122 vs 0.124、S5 0.173 vs 0.169，印样几乎一样；Pika 不会为画外鞋拉远 / 下摇（那是 PDD 的行为）→ 开关保持关，不上默认"
+    },
+    {
      "src": "data/pipeline/runs/series10_v1/video/_thumbs/ep01-S4__v1.jpg",
      "note": "S4 两个 seed 都为画出高跟拉远 / 下摇（v1 拉成全景，s2 下摇到鞋）"
     }
@@ -5590,7 +5848,7 @@
    ],
    "title": "首帧出图的系统句不得要求人脸“朝向镜头”；看镜头的根在首帧（视频继承首帧视线）",
    "when": "ns_agent.framing.two_shot_clause（双人镜出图系统句）、asset_refs 视线句；frame_v9 唯一出图路径",
-   "then": "双人句改成正向视线落点；⤴ SCRIPT-RSI 11-01 已落实（D-SCR-07，总调度派）：“侧脸到四分之三侧脸，各自的视线落在画面里的人或物上（… each gaze resting on a person or object in the scene）”——没用“眼睛不看镜头 / eyes off the lens”，因为 cfg 1 负面不生效且会把 lens 概念写进去；具体落点由剧本 img 写（QW-A7），见 K-REN-G06；VQAGATE 的 Q9 看镜头闸门是拦截层",
+   "then": "双人句用正向句 framing.TWO_SHOT_POSITIVE“侧脸到四分之三侧脸，各自的视线落在画面里的人或物上（… each gaze resting on a person or object in the scene）”（SCRIPT-RSI D-SCR-07）。⤴ 11-01 19:2x 曾按证据例外换成实测句 TWO_SHOT_TESTED（“互相看着对方……眼睛不看镜头”，r1 2 seed 3/4 → 0/4）；r2 3-seed A/B（ep01-S5、ep03-S4）：旧句看镜头 8/10 张脸、正向句 0–1/10、实测句 0/12，两句同样有效 → 按总调度 r2 决定改回正向句。具体落点由剧本 img 写（QW-A7 / K-REN-G06）；VQAGATE Q9 看镜头闸门是拦截层",
    "check": [
     "tests/test_video_rca.py",
     "tests/test_script_rsi_eyeline.py"
@@ -5611,10 +5869,14 @@
     {
      "src": "data/ab/video_rca/r1_img_gaze/",
      "note": "同 seed 新旧系统句 A/B（结果见 RCA_r1.md G6/G7）"
+    },
+    {
+     "src": "data/ab/video_rca/r5_img_twoshot/",
+     "note": "r2：旧 8/10、正向 0–1/10、实测 0/12（3 seed × 2 镜，人工看脸）"
     }
    ],
-   "confidence": "medium",
-   "status": "待验",
+   "confidence": "high",
+   "status": "确认",
    "date": "2026-11-01",
    "_file": "knowledge/rules/render_video_rca.yaml"
   },
@@ -5642,6 +5904,33 @@
    ],
    "confidence": "high",
    "status": "确认",
+   "date": "2026-11-01",
+   "_file": "knowledge/rules/render_video_rca.yaml"
+  },
+  {
+   "id": "K-REV-705",
+   "domain": "review",
+   "link": [
+    "P9-P10"
+   ],
+   "title": "Pika Flex 也有 4 帧一顿（慢动作镜最重），合成前按 J4>1.2 且 z≥3 去抖（复用 K-LOOP-004 tools/dejudder.py）",
+   "when": "tools/series10_video/upscale_preview.needs_dejudder（config/pipeline/video_policy.json dejudder），配方 i2va_pika_flex",
+   "then": "门槛 j4_gt 1.25 → 1.2（与 LEARNED_SPECS A 的 4 帧一顿口径一致）；量化口径 tools/video_rca/judder.py（J4 + 2 帧相位 J2）。大动作镜的“2 帧交替”（J2_z≥3、J4_z<3）不去抖——去抖在快动作上清晰度掉 25%（拉普拉斯 103.8 → 77.8），慢动作镜只掉 1.5–3%",
+   "check": [
+    "tests/test_video_rca.py"
+   ],
+   "evidence": [
+    {
+     "src": "data/ab/video_rca/r1_base_cue/",
+     "note": "Pika 同首帧：S2 J4 1.347 z 3.9、S4 1.352 z 7.4、S5 1.237 z 10.8（慢动作，第 3 相位跳 1.24–1.34×）；S3 大动作 J4 1.155 z 0.9、J2_z 3.3（2 帧交替，PDD 同镜也有）"
+    },
+    {
+     "src": "data/ab/video_rca/r6_dejudder/",
+     "note": "去抖后 S5 J4 1.237 → 1.092、S4 1.352 → 1.096（360p 预览测）；冒烟 S3 全分辨率 jerk 0.662 → 0.213、拉普拉斯 −25%"
+    }
+   ],
+   "confidence": "medium",
+   "status": "待验",
    "date": "2026-11-01",
    "_file": "knowledge/rules/render_video_rca.yaml"
   },
@@ -9881,6 +10170,31 @@
    "_file": "knowledge/rules/ui.yaml"
   },
   {
+   "id": "K-UI-042",
+   "check": "tests/test_infra_status_uirsi.py",
+   "domain": "ui",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "连接状态要一眼看得到、断了要说原因——界面只读看门狗已经写好的状态，不在请求里连服务器；服务器上的图读不到时用笔记本上的同一张，没有就写占位字，不出裂图",
+   "when": "界面显示渲染卡 / 隧道 / 跳板 / 常驻进程的连通情况，或显示要经隧道去服务器取的图（GPU 面板“最近出图”）",
+   "then": "汇总接口 /api/infra/status 只读 data/qa/infra_watchdog_state.json（跳板、6 条连接、重建记录）和 data/autopilot/resident_sync.json（服务器常驻心跳），本机两样探 127.0.0.1（1.5 s 超时、缓存 5 s）；顶栏胶囊（全部正常只留绿点，有断的写“连接 N/6”或“跳板断了”）+ GPU 面板顶部同一块明细；卡片“连不上”下面一行写原因（跳板断了 / 这条连接断了、正在自动重连），全部卡都断时只在面板顶部说一次；文案用卡名（gpu33·卡1），端口 / 地址只放技术细节。缩略图：先在本镜 takes.json 里找登记过的同名一版（笔记本文件），没有再经隧道取（8 s 超时、失败 1 分钟内不重试），前端 onError 写“图在服务器上，笔记本还没有”",
+   "evidence": [
+    {
+     "src": "docs/uirsi/rounds/r38.md",
+     "note": "项目方 22:1x 截图：gpu36 三张卡都写“暂时连不上 93 秒”、最近出图裂图；/api/gpu/thumb 经隧道取 ComfyUI 输出，隧道断时 30 s 超时 502"
+    },
+    {
+     "src": "apps/web/e2e/uirsi/r38b_gpu_drawer_1440_dark.png",
+     "note": "改后 GPU 面板顶部连接明细 + 卡片原因行 + 占位字"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-01",
+   "_file": "knowledge/rules/ui.yaml"
+  },
+  {
    "id": "K-REV-V01",
    "domain": "review",
    "link": [
@@ -10927,6 +11241,94 @@
    "_file": "knowledge/rules/writer_camera.yaml"
   },
   {
+   "id": "K-WRT-H01",
+   "check": [
+    "tests/test_hollywood.py"
+   ],
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "好莱坞模板接入点：写作方提示词 = 模板原文 + 系统接入说明 + Pika 能力边界 + 现行写作规则",
+   "when": "用模板重写某集镜头提示词（tools/script_rsi/hollywood.py run）",
+   "then": "写作调用的 system = config/prompts/hollywood_writer.md（模板原文照抄、注明项目方 11-01）+ hollywood_pika_reference.md（VIDEO-RCA 实测）+ qwen_writer_system_prompt + writer_knowledge；输入 = config 盘点表（第一步，系统产出）+ 集头 + 人物卡 + 原稿镜头；视频提示词 = H3提示词（Pika），中文附后 = motion，图片 = img，人物一致性描述由系统按人物卡逐字附",
+   "evidence": [
+    {
+     "src": "config/prompts/hollywood_writer.md",
+     "note": "项目方 11-01 ~20:00 模板原文（总调度 fredw-2b 转）"
+    },
+    {
+     "src": "docs/video_rca/RCA_r1.md §1",
+     "note": "Pika 4 帧一顿 / 外套形变 / 景别由首帧决定"
+    }
+   ],
+   "confidence": "high",
+   "status": "待验",
+   "date": "2026-11-01",
+   "_file": "knowledge/rules/writer_hollywood.yaml"
+  },
+  {
+   "id": "K-WRT-H02",
+   "check": [
+    "tests/test_hollywood.py"
+   ],
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "模板 RSI：两个独立评审调用逐项平均打分；目标百分制 ≥95（≥47.5/50 且无 <4 项），最多 8 轮，选总分最高且过不变量的版本，未达 95 不导入",
+   "when": "hollywood.py 每轮生成后",
+   "then": "评审 system = config/prompts/hollywood_judge.md（量表原文）+ Pika 参考；第 2、3 轮只发不及格维度和涉及镜号，系统只替换被改的镜（≥4 分项原样保留）；⤴ r3（项目方 11-01 22:1x“rsi HOLLYWOOD 达到95分,继续迭代”取代“最多 3 轮”）：返修发 <5 分项（评审对每个 <5 项写镜号 + 改到 5 分的原因），允许拆 / 合镜；到 95 或连续两轮有分数的轮无提升即停（作废轮不计，连续 3 轮作废停）；选中 = 通过不变量的轮次里总分最高者；未达 95 不导入",
+   "params": {
+    "pass_score": 4,
+    "max_rounds": 8,
+    "target_sum": 47.5,
+    "fix_below": 5,
+    "judges_per_round": 2
+   },
+   "evidence": [
+    {
+     "src": "config/prompts/hollywood_judge.md",
+     "note": "项目方 11-01 模板第三步原文"
+    }
+   ],
+   "confidence": "high",
+   "status": "待验",
+   "date": "2026-11-01",
+   "_file": "knowledge/rules/writer_hollywood.yaml"
+  },
+  {
+   "id": "K-WRT-H03",
+   "check": [
+    "tests/test_hollywood.py"
+   ],
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "模板改写不变量（代码校验，不满足整轮作废）",
+   "when": "hollywood.py gate()",
+   "then": "I1 台词 / 🎙 逐字同序；I2 集头逐字（剧情 / 人物卡 / 造型）；I3 场景 id、出场人物不新增；I4 6 ≤ 镜数 ≤ shot_cap（D-SCR-06）；I5 集时长 60–120 秒（项目方 11-01 21:4x，D-SCR-08；⤴ 旧 60–75），系统按 6 秒一镜算好镜数与每镜秒数给写作方；I6 p4_adapter lint 每个码不比原稿多；I7 P4 阻断 = 0（集头“造型｜”行上的人物卡冻结项单列，不算）；I8 只报告：QW-W11（K-WRT-702）要求降到 0；人物卡唯一例外 ep01 林晚“深灰西装裙→深灰铅笔裙”（项目方 21:4x，D-SCR-08b，系统逐字替换）。SS-M2 分拍末段时间码机械补到镜长；集级 QW-W5 按镜号转 --force-shot。只差 I6 / I7 时先用 qwen_repair_loop 按变多的 QW 码逐镜返修再复检",
+   "params": {
+    "dur_window": [
+     60,
+     120
+    ],
+    "shot_s": 6,
+    "zero_codes": [
+     "QW-W11"
+    ]
+   },
+   "evidence": [
+    {
+     "src": "tools/validate_qwen_script.py QW-E3",
+     "note": "现行集长 50–75 秒"
+    },
+    {
+     "src": "services/agent/ns_agent/importer/script_md.py shot_cap",
+     "note": "D-SCR-06"
+    }
+   ],
+   "confidence": "high",
+   "status": "待验",
+   "date": "2026-11-01",
+   "_file": "knowledge/rules/writer_hollywood.yaml"
+  },
+  {
    "id": "K-WRT-Q01",
    "domain": "writer",
    "link": "P3-P4",
@@ -11581,6 +11983,50 @@
     {
      "src": "tools/qa/writer_lints.py",
      "note": "现稿 QW-T1 37 处、QW-T2 3 集（ep01 / 03 / 04，7 镜未到上限 8）"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-01",
+   "_file": "knowledge/rules/writer_iteration.yaml"
+  },
+  {
+   "id": "K-WRT-702",
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "分拍里不写“对身上正穿着的衣服做动作”（整理 / 抚平 / 拉 / 收紧 / 掀起外套、衣摆、衣领）——视频模型会演成脱下再穿上",
+   "when": "写 **分拍** 和 H3 正文分拍（At 00:0X），在画人物穿着外套 / 西装 / 大衣 / 裙子等",
+   "then": "想表达“整理仪容 / 镇定下来”，写不碰衣服的身体动作（手放下、深吸气、肩膀放松、看向某处）；情节本身就是穿脱衣物的单独成镜，并在首帧 / 尾帧里画出穿脱前后（这类 QW-W11 不拦）",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "时长与节奏"
+    }
+   ],
+   "writer_text": "分拍动作不要写对身上正穿着的衣服的整理动作（抚平外套下摆、拉衣角、收紧衣领等）——视频模型会把外套先脱掉再穿回。想表达整理 / 镇定，写不碰衣服的动作，例如手放回身侧、深吸一口气、肩膀放松。情节本身就是穿脱衣物的，单独成一镜。",
+   "lint": [
+    "QW-W11"
+   ],
+   "check": [
+    "tools/qa/writer_lints.py",
+    "tests/test_writer_lints.py"
+   ],
+   "evidence": [
+    {
+     "src": "data/ab/video_rca/r4_pika/",
+     "note": "ep01-S3 同首帧同提示词 “she smooths the hem of her blazer”：6/6 外套 3.3–3.9 s 消失再穿回"
+    },
+    {
+     "src": "data/ab/video_rca/r8_outfit_action/",
+     "note": "只把这一拍换成 “she lets her hands settle at her sides”：2/2 外套全程穿着"
+    },
+    {
+     "src": "data/ab/video_rca/r9_outfit_keep/",
+     "note": "保留动作、补 “the blazer staying on her shoulders”：2/2 仍消失；合计带动作 8/8 消失、去掉 0/2"
+    },
+    {
+     "src": "tools/qa/writer_lints.py",
+     "note": "现行导入稿（script_v2.json，93 镜）QW-W11 命中 9 镜（RSI r7 首扫；视线 / 明确脱衣不计）"
     }
    ],
    "confidence": "high",
