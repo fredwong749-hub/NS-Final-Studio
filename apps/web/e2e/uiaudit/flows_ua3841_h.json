@@ -1,0 +1,20 @@
+[
+  {
+    "id": "f10_f13",
+    "title": "F10 / F13：精修 ⋯ 菜单（手动复核 G10 的 shotmenu）",
+    "path": "/#ep02",
+    "wait": 12000,
+    "steps": [
+      { "wait": 4000 },
+      { "js": "const b=[...document.querySelectorAll('button, [role=tab]')].filter(x=>x.innerText.trim()==='精修' && x.getBoundingClientRect().width>0); return b.map(x=>({tag:x.tagName, dis:x.disabled, r:JSON.stringify(x.getBoundingClientRect())}))" },
+      { "clickAt": "(()=>{const b=[...document.querySelectorAll('button, [role=tab]')].find(x=>x.innerText.trim()==='精修' && x.getBoundingClientRect().width>0); if(!b) return [null,null]; const r=b.getBoundingClientRect(); return [r.x+r.width/2, r.y+r.height/2]})()", "after": 4000 },
+      { "js": "for (let i=0;i<60;i++){ if ([...document.querySelectorAll('button')].some(b=>/重出首帧|出首帧/.test(b.innerText))) return 'ok '+i+' '+location.hash; await new Promise(r=>setTimeout(r,500)); } return 'timeout '+location.hash" },
+      { "wait": 3000 },
+      { "shot": "edit" },
+      { "js": "const b=[...document.querySelectorAll('button')].filter(x=>/^[.…⋯]+$/.test(x.innerText.trim()) && x.getBoundingClientRect().width>0).map(x=>{const r=x.getBoundingClientRect(); return [Math.round(r.x),Math.round(r.y)]}); return b" },
+      { "clickAt": "(()=>{const b=[...document.querySelectorAll('button')].filter(x=>/^[.…⋯]+$/.test(x.innerText.trim()) && x.getBoundingClientRect().width>0 && x.getBoundingClientRect().y>150 && x.getBoundingClientRect().x<1100); if(!b[0]) return [null,null]; const r=b[0].getBoundingClientRect(); return [r.x+r.width/2, r.y+r.height/2]})()", "after": 1500 },
+      { "js": "const t=document.body.innerText; return {f10: /与当前编译结果的差异|编译结果的差异|差异/.test(t), f13: /目标尾帧.*实际尾帧|视频实际尾帧|实际尾帧/.test(t), f10hit: (t.match(/.{0,20}差异.{0,20}/)||[''])[0], f13hit: (t.match(/.{0,20}实际尾帧.{0,20}/)||[''])[0]}" },
+      { "shot": "menu" }
+    ]
+  }
+]

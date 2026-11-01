@@ -1,0 +1,24 @@
+[
+  {
+    "id": "r42_top",
+    "title": "r42 顶栏 + 渲染任务悬停 + 总览板块",
+    "path": "/#/overview",
+    "wait": 10000,
+    "steps": [
+      { "wait": 4000 },
+      { "js": "const rt=document.querySelector('.rt-btn'); const gpu=document.querySelector('.v3-gpu'); const st=[...document.querySelectorAll('.sea-eph')].map(h=>{const t=h.querySelector('[class*=blk], [class*=stag], span'); const badge=[...h.querySelectorAll('[title]')].map(x=>x.innerText.trim()+' :: '+x.title.slice(0,160)).filter(x=>/过期|进行中|已确认|未开始/.test(x)); return h.innerText.split('\\n').slice(0,3).join(' ')+' || '+badge.slice(0,2).join(' ## ')}); return {rt: rt?.innerText, rtTitle: rt?.title, gpu: gpu?.innerText, gpuTitle: gpu?.title?.slice(0,300), chip: document.querySelector('.infra-pop button')?.innerText, board: document.body.innerText.match(/板块[\\s\\S]{0,160}/)?.[0], eps: st}" },
+      { "shot": "overview" }
+    ]
+  },
+  {
+    "id": "r42_canvas06",
+    "title": "r42 画布 ep06：行布局 / 草图兜底 / 视频待选",
+    "path": "/#ep06",
+    "wait": 10000,
+    "steps": [
+      { "wait": 6000 },
+      { "js": "const rows=[...document.querySelectorAll('img')].filter(i=>i.getBoundingClientRect().width>0).map(i=>decodeURIComponent(i.currentSrc||i.src).replace(/.*src=/,'').slice(0,110)); const draft=[...document.querySelectorAll('*')].filter(e=>e.children.length===0 && /草图/.test(e.innerText||'')).length; const vid=[...document.querySelectorAll('*')].filter(e=>e.children.length===0 && /视频 \\d+ 版待选/.test(e.innerText||'')).length; const det=[...document.querySelectorAll('button')].filter(b=>/^详情 ▸/.test(b.innerText.trim())).map(b=>{const r=b.getBoundingClientRect(); return Math.round(r.y)}); const rowH=[...document.querySelectorAll('[class*=v3-row], .rr, [class*=review-row]')].slice(0,3).map(r=>Math.round(r.getBoundingClientRect().height)); return {imgs: rows, draftLabels: draft, videoPendingLabels: vid, detailBtnY: det.slice(0,3), rowH}" },
+      { "shot": "top" }
+    ]
+  }
+]

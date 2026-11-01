@@ -132,7 +132,7 @@ export function PeopleHub({ cid, onListChanged }: { cid: string; onListChanged?:
   const [notCrop, setNotCrop] = useState<Record<string, string>>({});
   // UIRSI r40（项目方 23:57:52–23:58:01 九秒内连点三次，把已定的林晚造型 A 设定图换掉了；事后说“只是点着看”）：
   // ① 点图本身只看大图，必须点“用这张”才换；② 换掉项目方已定的图（owner_decisions 的锁）先一键确认“换 / 不换”；③ 换完 10 秒内可撤销（act 已有）
-  type DLock = { id: string; decision: string | null; when: string | null; title: string; kind: "sheet" | "face"; match: string; cid?: string };
+  type DLock = { id: string; decision: string | null; when: string | null; title: string; kind: "sheet" | "face"; match: string; regex?: string; cid?: string };
   const [locks, setLocks] = useState<DLock[]>([]);
   const [ask, setAsk] = useState<{ text: string; run: () => void } | null>(null);
   useEffect(() => {
@@ -224,9 +224,20 @@ export function PeopleHub({ cid, onListChanged }: { cid: string; onListChanged?:
     guardLock("sheet", prev, file, run, `造型 ${lk.look} 设定图`);
   };
   /** 当前这张受项目方已定决策锁着、而要换成别的 → 先一键确认；否则直接换 */
+  /** UIAUDIT P0-1（r43）：设定图锁的 pattern 是正则（带转义），按正则判；正则坏了才退回字面片段 */
+  function hit(l: DLock, file: string): boolean {
+    if (l.regex) {
+      try {
+        return new RegExp(l.regex).test(file);
+      } catch {
+        /* 正则写坏：退回字面 */
+      }
+    }
+    return file.includes(l.match);
+  }
   function guardLock(kind: "sheet" | "face", cur: string | null, next: string, run: () => void, what = "身份脸") {
     const lk = cur
-      ? locks.find((l) => l.kind === kind && (kind === "face" ? l.cid === cid && cur === l.match && next !== l.match : cur.includes(l.match) && !next.includes(l.match)))
+      ? locks.find((l) => l.kind === kind && (kind === "face" ? l.cid === cid && cur === l.match && next !== l.match : hit(l, cur) && !hit(l, next)))
       : undefined;
     if (!lk) return run();
     const name = lk.match.split("/").pop()?.replace(/\.(png|jpe?g|webp)$/i, "") ?? lk.match;

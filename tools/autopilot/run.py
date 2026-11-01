@@ -15,6 +15,17 @@
 每段：状态落盘（data/autopilot/<run>/state.json）、事件日志、超时；中断后 run 继续。闸门停下时进程退出（exit 3），
 项目方操作后再 run 即继续。
 
+⤴ 2026-11-02 DISTILL（L-102 / §G1，K-OPS-X02）：剧本导入之后的实际生产链路是 episode_pipeline → producer（首帧 / 尾帧 + 契约 + 看图闸门）
+→ night（Pika 视频 + score_clip）→ night.finalize 合成 → director/finish.py（后期 + 成片分）→ 交付闸门，不再走上面 P4-P5…P11-P12 的
+iterate_loop 路径（那条路径保留作 P0-P3 写作 + 旧 60 集回放）。这条实际链路由 tools/autopilot/flow.py 统一现推状态、标 decider、列卡点：
+  run.py status --all                   全局进度 + 卡点（写 data/autopilot/flow/status.json，UIRSI 读）
+  run.py flow --episode 4 [--dry-run [--brief P0.json]]   逐段状态；--dry-run = 冷启动演练：从 P0 Brief 起一部新剧本走到成片（不出图、不调付费 API）
+  run.py flow-start --brief P0.json --episode 1 [--run-id X] [--dry-run]   新剧本全流程启动（页面可调），status --all 里监控
+  run.py coverage [--episode 4]         无 Claude 覆盖率 → data/autopilot/coverage.json
+  run.py policy-check                   config/policies 漂移 + 引用检查
+  run.py guard [--apply]                策略守卫（暂停超时 resources.pause_max_s）
+  run.py approve-delivery --episode 4   项目方确认交付
+
 用法（项目根目录）：
   .venv/Scripts/python.exe tools/autopilot/run.py start --episode 3 --from P3 --dry-run --auto-approve   # 全链路演练（不出片、不调付费 API）
   .venv/Scripts/python.exe tools/autopilot/run.py start --episode 1 --brief config/pipeline/examples/P0_brief.json   # 从 P0 开始
@@ -463,7 +474,12 @@ def drive(ctx: Ctx) -> int:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=("start", "run", "status", "approve", "roles", "report-bug", "learn-workflows"))
+    ap.add_argument("cmd", choices=("start", "run", "status", "approve", "roles", "report-bug", "learn-workflows",
+                                    "flow", "coverage", "policy-check", "guard", "approve-delivery", "flow-start"))
+    ap.add_argument("--all", action="store_true", help="status --all：统一编排器全局进度（flow.py）")
+    ap.add_argument("--apply", action="store_true", help="guard：真的执行恢复（默认只检测 + 报警）")
+    ap.add_argument("--with-producer-dryrun", action="store_true", help="flow --dry-run：顺带跑 producer.py dryrun（临时目录，不碰 GPU）")
+    ap.add_argument("--json", action="store_true")
     ap.add_argument("--symptom", action="append", default=[], help="report-bug：审片 / 项目方反馈的问题（可多次）")
     ap.add_argument("--dir", help="learn-workflows：新工作流目录")
     ap.add_argument("--run-id")
@@ -482,6 +498,8 @@ def main(argv=None) -> int:
     if a.cmd == "roles":
         print(RL.table_md())
         return 0
+    if a.cmd in ("flow", "coverage", "policy-check", "guard", "approve-delivery", "flow-start") or (a.cmd == "status" and a.all):
+        return flow_cli(a)
     if a.cmd == "learn-workflows":
         if not a.dir:
             ap.error("learn-workflows 需要 --dir")
@@ -529,6 +547,54 @@ def main(argv=None) -> int:
     ctx = Ctx(store, state, dry=bool(state.get("dry_run")), auto_approve=a.auto_approve and bool(state.get("dry_run")),
               open_page=not a.no_open)
     return drive(ctx)
+
+
+def flow_cli(a) -> int:
+    import flow as FL
+    import policy as POL
+    if a.cmd == "status":
+        st = FL.status_all()
+        print(json.dumps(st, ensure_ascii=False, indent=1) if a.json else FL.render_all(st))
+        return 0
+    if a.cmd == "policy-check":
+        return POL.check()
+    if a.cmd == "guard":
+        r = FL.guard(apply=a.apply)
+        print(json.dumps(r, ensure_ascii=False))
+        return 0
+    if a.cmd == "coverage":
+        c = FL.coverage(drill_ep=a.episode)
+        print(json.dumps({k: c[k] for k in ("decision_points", "deciders_now", "deciders_target", "claude_share_now",
+                                            "decisions_inventory", "policies")}, ensure_ascii=False, indent=1))
+        return 0
+    if not a.episode:
+        raise SystemExit(f"{a.cmd} 需要 --episode")
+    if a.cmd == "approve-delivery":
+        print(f"已记录：{FL.approve_delivery(a.episode, note=a.note)}")
+        return 0
+    if a.cmd == "flow-start":       # 新剧本全流程：页面（或命令行）从 P0 Brief 启动；之后 status --all 里能看到这部剧
+        if not a.brief:
+            raise SystemExit("flow-start 需要 --brief <P0.json>")
+        print(json.dumps(FL.start(Path(a.brief), a.episode, run_id=a.run_id, dry=a.dry_run), ensure_ascii=False, indent=1))
+        return 0
+    if a.dry_run:
+        brief = Path(a.brief) if a.brief else ROOT / "config/pipeline/examples/P0_brief.json"
+        d = FL.drill(a.episode, run_producer_dryrun=a.with_producer_dryrun, brief=brief)
+        FL.coverage(drill_ep=a.episode)
+        if a.json:
+            print(json.dumps(d, ensure_ascii=False, indent=1))
+        else:
+            for s in d["steps"]:
+                print(f"{s['name']}（{s['executor']}）现状 {s['live_status']}：" + "；".join(f"{p['what']}[{p['decider']}]" for p in s["points"]))
+            print()
+            print(f"断点 {len(d['breakpoints'])} 个 {d['summary']}：")
+            for b in d["breakpoints"]:
+                print(f"  - {b['stage']} {b['what']}（需要 {b['needs']} → 目标 {b['target']}；负责 {b.get('who') or '?'}）{b.get('fix') or ''}")
+        return 0
+    w = FL.World()
+    r = FL.episode_status(w, a.episode)
+    print(json.dumps(r, ensure_ascii=False, indent=1) if a.json else FL.render_ep(r))
+    return 0
 
 
 if __name__ == "__main__":

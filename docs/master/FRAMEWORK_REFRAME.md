@@ -83,4 +83,15 @@ tools/autopilot/producer.py   只改接线：道表来自 host.py；打分调 sc
 
 ## 6. 验收（FACTORY_ARCH §3）+ 规则
 - 服务器 GPU 平均利用率 ≥ 80%（按小时）；每单出图 + 打分 p50 ≤ 2 分钟（服务器本机计时）；跳板断 30 分钟演练不丢单、不停产，恢复后 30 分钟内补传完。
-- 新规则从 K-OPS-F01 开始编号，每条都带 check：F01 生产路径不许有跨机同步调用（静态扫描 producer / scorer 有没有 ssh、隧道端口）；F02 交还前 preflight dryrun 挡 0；F03 资产按 sha 解析（scene_ref 等不许按 mtime 取）；F04 state 带 m
+- 新规则从 K-OPS-F01 开始编号，每条都带 check：F01 生产路径不许有跨机同步调用（静态扫描 producer / scorer 有没有 ssh、隧道端口）；F02 交还前 preflight dryrun 挡 0；F03 资产按 sha 解析（scene_ref 等不许按 mtime 取）；F04 state 带 min_code_sv，版本不够就拒派；F05 断网 ≠ 暂停，运维暂停必须带 expires_at（≤ 3 分钟）；F06 服务器代码树干净（git status）；F07 outbox 格式（manifest + .done 最后写）。
+
+## 7. 已做的验证 / 数据修复（不改代码）
+- 01:12 push_control gpu36：服务器 control 改为 server（50 镜）；01:13 起服务器 producer 派单，每单都被 I5 挡下（P9 实证）。
+- 01:15 把 sk_alley_ballroom / sk_elevator / sk_home_kitchen / sk_office_night 打成 tar 推到两台（sha256 6a43f2bf… 两端一致）；已告知 WORKFLOW，push 清单要补 assets/scenes。
+- 01:17 发现服务器代码不含 hold 逻辑，派出了被 hold 的 ep02-S1/S2（P10 实证）。已把 lookA_hold.json 推到两台（sha 6f35bb6b…），并报告总调度：需要 cut + deploy。01:2x 总调度已把两台收回 laptop 阶段。
+- 本方案在 gpu36 本机闭环 3 镜跑通之前，§1 的 P7、P5 还要再拿服务器本机的数字复核一遍。
+
+## 8. 需要总调度定
+1. 选 C 吗（还是 A / B）？
+2. 下一个 sv 的 cut + deploy（要包含 asset_hold_objects），这是交还 gpu36 的前提。
+3. B 那部分（服务器 GitHub 凭据 / 对象存储）以后要不要问项目方。

@@ -17,6 +17,7 @@ import "./v3/v3.css";
 import { Brand } from "./ds/Brand";
 import { UndoHost } from "./ds/Undo";
 import "./ds/live.css";
+import "./v3/breathe.css"; // UIRSI r43 K-UI-048：全站“正在渲染”呼吸灯
 import { LiveBridge } from "./v3/LiveBridge";
 
 // fredw-92/W4a：v3 新页面（W4c），挂在 #/script-create、#/models、#/assets

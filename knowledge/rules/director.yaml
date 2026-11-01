@@ -1,6 +1,6 @@
 # DIRECTOR loop（总调度 fredw-2b 派，2026-11-02）：成片评分（review）+ 导演层 / 后期层（edit）。
 # 项目方 11-02 00:4x 原话：“我要全部系统化，出一个 Hollywood level 的、画面非常漂亮的短剧。”（docs/master/HOLLYWOOD_PLAN.md §1C §1D）
-# 写作方配合的格式规则（K-WRT-801–803）是草案，在 knowledge/inbox/2026-11-02_director_writer.yaml。
+# 写作方配合的格式规则 K-WRT-801–803 已收编（总调度 11-02 回复 r1 第 3 条），进 writer_knowledge；lint = tools/director/cut_plan.py lint。
 rules:
   - id: K-REV-801
     domain: review
@@ -97,10 +97,13 @@ rules:
     link: P8-P9
     title: 配乐强度跟剧本情绪节拍：BGM 时间轴保留时间，强度用剧本【配乐】强度 0–3
     when: 合成铺 BGM（ns_post.music.resolve_cues）
-    then: tools/director/cut_plan.merge_music_intensity(json_cues, 剧本镜)；强度升 = swell、降到 0 = drop；合成接线待 CONSENT（VIDEO10 / WORKFLOW）
+    then: ns_post.director.merge_cues（合成里，config/post/director.json）；强度下限 music_min_intensity=2（时间轴作曲电平），导演层只往上推高点（升 = swell）
+    params: {config/post/director.json.music_min_intensity: 2}
     evidence:
       - {src: data/film_score/ep01_v2.json S3.4, note: "timeline bgm.cues 强度 2/2/2/2/2，剧本写 1/1/1/2/2/3/1"}
       - {src: data/music/series10/ep01.json, note: "bgm10 时间轴全部 intensity 2"}
+      - {src: data/film_score/ep01_r2_dir.json, note: "下限 1：S1→S2 切点跳变 −11.8 dB、逐镜响度差 8.4 LU，总分 27.8 → 27.0（否决）"}
+      - {src: data/film_score/ep01_r2_dir2.json, note: "下限 2：S3.4 转通过，总分 27.8 → 28.5"}
     check: [tests/test_director.py]
     confidence: medium
     status: 建议
@@ -110,7 +113,7 @@ rules:
     link: P9-P10
     title: 画内对白被 TTS 兜底 = 口型与成片声音不一致：送回重出视频，不进定稿
     when: 合成用 --dialogue-source h3，某镜 H3 原声回听不合格改用 TTS
-    then: tools/director/lip_redo.blocking(timeline) 列出这些镜 → data/director/redo_requests.json；本集只出预览、不定稿；成片分 A3.1 不通过；night 接线待 CONSENT
+    then: finish.py → lip_redo.record → data/director/redo_requests.json；vidgen.check_lip_redo 走“首帧换版”同一条作废路径（旧片挪进 superseded 带原因、状态回待出、变体从头算＝不计次、每条请求只用一次、发 lip_redo 事件）；交付闸门 final_ok=false；成片分 A3.1 不通过
     evidence:
       - {src: docs/vqa/GATE_CALIBRATION.md §10–11, note: "总调度 11-02 转 VQAGATE 查证"}
       - {src: data/episodes/series10/ep01_v2.timeline.json h3_dialogue, note: "S6 tts_fallback（no H3 audio），该镜进成片的是静帧"}
@@ -181,4 +184,102 @@ rules:
     check: [tests/test_director.py]
     confidence: medium
     status: 建议
+    date: 2026-11-02
+  - id: K-EDT-816
+    domain: edit
+    link: P9-P10
+    title: 导演层 / 后期层接进 night 合成链，总开关 config/post/director.json
+    when: night.finalize 合成（ns_post.assemble）与合成之后
+    then: 合成内：刀长上限 = 导演规格目标区间中点、J-cut 取导演规格、配乐强度跟剧本；合成后：tools/director/finish.py（lip_redo → post_pass → film_score → 交付闸门），每步 decider=code；关开关 = 行为与改动前一致
+    params: {config/post/director.json.enabled: true}
+    evidence:
+      - {src: data/film_score/ep01_r2_base.json, note: "同素材本地重合成（导演层关）27.8"}
+      - {src: data/film_score/ep01_r2_dir2.json, note: "导演层开 28.5（E1.2 平均每刀 4.11 → 3.43 s、S3.4 转通过；原合成 TP −0.7 由后期 loudnorm 收回）"}
+      - {src: data/film_score/ep01_r2_dir2_post.json, note: "导演层 + 后期 32.5（同素材 base + 后期 31.2）"}
+    check: [tests/test_director.py, tests/test_post.py, tests/test_v2_pace.py]
+    confidence: medium
+    status: 确认
+    date: 2026-11-02
+  - id: K-EDT-817
+    domain: edit
+    link: P10-P11
+    title: 交付闸门（decider=code）：后期版成片分不低于原合成版才交付后期版；有口型重出镜 / 报错 → 不算定稿
+    when: finish.py 收尾
+    then: delivery_gate → deliver=post|raw、final_ok、why；night 按 deliver 选交付文件，st.eps[ep].director 记录
+    evidence:
+      - {src: docs/ITERATION_PROTOCOL.md §G1, quote: "编排器给每个环节标 decider"}
+    check: [tests/test_director.py]
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-REN-801
+    domain: render
+    link: P4-P6
+    title: 编译层运镜句规范化到 Pika 稳定范围（拉远 / 晃动 → 固定；环绕 → 小幅推近或固定；中 / 大幅 → 小幅；去速度词），改动带规则号记录
+    when: Pika 作业提示词（ns_recipes.prompt.build_base → jobs.json prompt_notes）与编译稿（ns_agent.compiler → CompiledShot.h3_norm）
+    then: ns_agent.camera_norm.normalize_video_prompt；H3 正文不变量 = 只有项目方覆盖、或带规则号的编译层规范化能改（tests/test_h3_prompt.py::test_h3_norm_only_change 倒回规范化必须逐字等于原文）；开关 config/post/director.json camera_norm
+    params: {config/post/director.json.camera_norm: true}
+    evidence:
+      - {src: config/prompts/hollywood_pika_reference.md P3 P16}
+      - {src: docs/video_rca/RCA_r1.md §1 C16, note: "视频比首帧再远 ≥1 档 11/55"}
+      - {src: data/import/script_v2.json, note: "现行剧本 8 镜运镜句被规范化（拉远 2、环绕 1、中幅 5）；新剧本视频 0/102，不浪费已出视频（总调度 11-02 批复）"}
+    check: [tests/test_director.py, tests/test_h3_prompt.py]
+    confidence: medium
+    status: 确认
+    date: 2026-11-02
+  - id: K-WRT-801
+    domain: writer
+    link: P3-P4
+    title: motion 第一句写一种运镜 + 幅度，不写速度；不用拉远 / 环绕 / 晃动
+    when: 每镜 motion
+    then: 运镜只用 static / push in / truck / pan / tilt / pedestal，幅度写“小幅 / 中幅”；不写“缓慢 / 缓缓”；不用 pull out、arc、shake（lint：tools/director/cut_plan.py lint）
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: motion 第一句写一种运镜加幅度（例：camera push in 小幅推近），不写“缓慢”这类速度词；不用拉远、环绕、晃动——Pika 本来就会往远退，环绕和大动作叠在一起会变形。
+    evidence:
+      - {src: config/prompts/hollywood_pika_reference.md P3 P16}
+      - {src: tools/director/cut_plan.py lint, note: "现行剧本“缓慢推近”48 镜（已有稿不返修，L-098）"}
+    check: [tests/test_director.py]
+    confidence: medium
+    status: 确认
+    date: 2026-11-02
+  - id: K-WRT-802
+    domain: writer
+    link: P3-P4
+    title: 衔接写“接力”时必须写接什么（动作 / 视线 / 环境 / 位置）
+    when: 每镜衔接字段
+    then: link_carry = 动作｜… / 视线｜… / 环境｜… / 位置｜…；导演层据此定动作匹配切 / 视线匹配切（K-EDT-812）
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: 衔接写“接力”时，后面写清接的是什么：动作｜具体动作、视线｜看向哪、环境｜什么声音或光、位置｜站位；剪辑按它决定动作匹配切还是视线匹配切。
+    evidence:
+      - {src: knowledge/rules/writer_camera.yaml K-EDT-102}
+    check: [tests/test_director.py]
+    confidence: medium
+    status: 确认
+    date: 2026-11-02
+  - id: K-WRT-803
+    domain: writer
+    link: P3-P4
+    title: 每镜【配乐】写“强度 0–3”，整集至少两档，高点镜写 3
+    when: 每镜【配乐】
+    then: 导演层按强度定刀长（K-EDT-813），配乐按强度起伏（K-EDT-804）
+    targets: [{kind: writer_prompt, section: 声音}]
+    writer_text: 每镜【配乐】都写“强度 0–3”；一集里强度至少有两档，情绪最高的那一镜写 3——剪辑节奏和配乐起伏都按这个数走。
+    evidence:
+      - {src: data/film_score/ep01_v2.json S3.4, note: "BGM 时间轴强度全是 2"}
+    check: [tests/test_director.py]
+    confidence: medium
+    status: 确认
+    date: 2026-11-02
+  - id: K-REV-805
+    domain: review
+    link: P10-P11
+    title: 成片分 A3 口型按 11-02 V7 口径：台词段相关 ≥0.30，或张嘴帧占比 ≥0.3 且开合幅度达标
+    when: film_score A3.3（画内对白镜）
+    then: 读成片所用那一版视频的 V7（scores/<镜>__<变体>.json）；VQAGATE 新版输出带 caliber 时直接用其 status，旧输出按口径重算；没有 V7 才退回 DIR 嘴部相关代理并注明
+    evidence:
+      - {src: docs/CHANGELOG_AGENTS.md, note: "总调度 11-02 批复 V7 口径；人工标签 S4ffb s102 过、S4calm s101 过、r18 三条不过；已通知 VQAGATE"}
+      - {src: data/film_score/ep01_v2.json A3.3, note: "代理判 0/1 不过 → V7 口径 S4 / S5 2/2 过，ep01_v2 28.7/50"}
+    check: [tests/test_director.py]
+    confidence: medium
+    status: 确认
     date: 2026-11-02

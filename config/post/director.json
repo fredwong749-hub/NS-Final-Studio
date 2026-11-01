@@ -1,6 +1,7 @@
 {
   "_doc": "DIRECTOR 导演层 / 后期层开关（owner DIRECTOR；总调度 fredw-2b 11-02 批准接进 night 合成链）。enabled=false 时 ns_post.assemble 行为与改动前完全一致；先 ep01_v2 A/B（film_score 不降、合成不报错）通过后才改 true（K-EDT-816）。",
-  "enabled": false,
+  "enabled": true,
+  "_enabled": "11-02 r2 ep01_v2 同素材 A/B 通过后打开（总调度条件：film_score 不降、合成不报错）：本地重合成 base 27.8 → 导演层 28.5；加后期 31.2 → 32.5；合成 0 报错（data/film_score/ep01_r2_*.json）",
   "music_intensity_from_script": true,
   "music_min_intensity": 2,
   "_music_min_intensity": "r2 A/B（data/film_score/ep01_r2_dir.json）：剧本强度 1 直接用 → BGM 降到 −10 dB，旁白间隙和静帧镜只剩底噪，S1→S2 切点跳变 −11.8 dB、逐镜响度差 8.4 LU（E3.1 / S2.4 / S2.5 转不通过）→ 下限 2（时间轴作曲时的电平），导演层只往上推高点",
@@ -8,5 +9,7 @@
   "jcut_from_plan": true,
   "post_pass": true,
   "film_score": true,
-  "lip_redo": true
+  "lip_redo": true,
+  "camera_norm": true,
+  "_camera_norm": "11-02 总调度批复 r2 第 1 条：接（新剧本视频 0/102，改提示词不浪费已出视频）。改动记 CompiledShot.h3_norm（rule K-REN-801）；test_h3_prompt 不变量改为“只有项目方覆盖或带规则号的编译层规范化能改 H3 正文”"
 }

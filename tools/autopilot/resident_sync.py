@@ -30,6 +30,11 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools/autopilot"))
+import runs as _RUNS  # noqa: E402
+# K-OPS-W17 / SYSARCH 4-6：主 run 从 config/pipeline/runs.json 读，不写死；本工具驱动服务器 → strict（缺 runs.json 直接失败，K-OPS-F09）
+RUN_ID = _RUNS.primary_run(strict=True)
+RUN_REL = f"data/pipeline/runs/{RUN_ID}"
 OFF = "/root/work/fredw/offline_20261101"
 R = OFF + "/repo"
 def _partition_hosts() -> dict[str, list[int]]:
@@ -194,7 +199,7 @@ def tar_bytes(files: list[str]) -> bytes:
     return bio.getvalue()
 
 
-LIVE_PREFIX = ("data/renders/", "data/producer/", "data/pipeline/runs/series10_v1/", "data/import/", "data/assets/",
+LIVE_PREFIX = ("data/renders/", "data/producer/", f"{RUN_REL}/", "data/import/", "data/assets/",
                "data/looks/", "data/music/series10/", "data/episodes/series10/", "data/assetmaster/sheets_v2/adopted/")
 
 
@@ -225,8 +230,8 @@ def wanted(rel: str, rem: dict, loc: dict, freeze: float, need: set) -> bool:
 
 TIER1_EXT = (".py", ".yaml", ".yml", ".json", ".md", ".txt", ".sh", ".toml", ".cfg", ".ini")
 TIER1_DATA = ("data/import/script_v2.json",   # master_rejects / ready_episodes 不走整文件覆盖，由 push_control 按对象合并推（K-OPS-Q20）
-              "data/pipeline/runs/series10_v1/assets/first_frame_jobs.json", "data/pipeline/runs/series10_v1/video/recipe_choice.json",
-              "data/pipeline/runs/series10_v1/assets/sheets_chosen.json", "data/pipeline/runs/series10_v1/assets/shot_looks.json")
+              f"{RUN_REL}/assets/first_frame_jobs.json", f"{RUN_REL}/video/recipe_choice.json",
+              f"{RUN_REL}/assets/sheets_chosen.json", f"{RUN_REL}/assets/shot_looks.json")
 TIER1_DATA_PREFIX = ("data/assets/identity_refs/",)          # 身份脸（项目方挑定，小图）
 TIER1_SMALL = 2 * 1024 * 1024
 BATCH_TIMEOUT_S = 300                                          # 总调度 00:01：单批卡住超过 5 分钟就杀掉 ssh 重连（2 MB 批在 15 KB/s 下约 140 s）
@@ -248,8 +253,8 @@ def estimate(files: list[str], loc: dict) -> dict:
     return {"files": len(files), "mb": round(mb, 2), "eta_min": round(mb * 1000 / LINK_KBPS / 60, 1)}
 
 
-TIER1_REMOTE_DATA = ["data/import", "data/assets/identity_refs", "data/pipeline/runs/series10_v1/assets",
-                     "data/pipeline/runs/series10_v1/video"]
+TIER1_REMOTE_DATA = ["data/import", "data/assets/identity_refs", f"{RUN_REL}/assets",
+                     f"{RUN_REL}/video"]
 
 
 def push_dirs(code_only: bool = False, tier: int = 2) -> tuple[list[str], list[str]]:
@@ -426,12 +431,12 @@ try:
 except Exception:
     out["hb"] = None
 try:
-    out["ns"] = os.stat(R + "/data/pipeline/runs/series10_v1/video/night_state.json").st_mtime
+    out["ns"] = os.stat(R + "/data/pipeline/runs/__RUN__/video/night_state.json").st_mtime
 except OSError:
     out["ns"] = 0
 try:
-    st = json.load(open(R + "/data/pipeline/runs/series10_v1/video/state___HOST__.json"))
-    jobs = json.load(open(R + "/data/pipeline/runs/series10_v1/video/jobs.json"))
+    st = json.load(open(R + "/data/pipeline/runs/__RUN__/video/state___HOST__.json"))
+    jobs = json.load(open(R + "/data/pipeline/runs/__RUN__/video/jobs.json"))
     try:
         allowed = set((json.load(open(R + "/config/pipeline/video_policy.json")).get("pika_only") or {}).get("allowed") or [])
     except Exception:
@@ -456,7 +461,7 @@ LANES = {"gpu33": {"0": 8188, "1": 8189, "3": 8191}, "gpu36": {"0": 8188, "1": 8
 def health(host: str) -> dict:
     """服务器侧健康：每张卡利用率、本机 ComfyUI 队列、producer 心跳、night_state 更新时间、可派镜数；
     空闲但有活 ≥ 10 分钟 → data/qa/alerts.jsonl（与 infra_watchdog 同一报警文件 / 同一开关语义）"""
-    probe = REMOTE_HEALTH.replace("__R__", R).replace("__HOST__", host).replace("__LANES__", json.dumps(LANES[host]))
+    probe = REMOTE_HEALTH.replace("__RUN__", RUN_ID).replace("__R__", R).replace("__HOST__", host).replace("__LANES__", json.dumps(LANES[host]))
     raw = ssh(host, "python3 -", data=probe.encode(), timeout=120, tries=2).decode("utf-8", "replace")
     d = json.loads([ln for ln in raw.splitlines() if ln.startswith("{")][-1])
     gpus, kv = d["gpus"], d
@@ -604,6 +609,79 @@ def sync_pause(host: str) -> str | None:
     return want
 
 
+AUTO_CODE_PUSH = False             # ⤴ 取代“代码一变就推 + 重启”（K-OPS-W14）；要临时打开须总调度批准
+RESTART_MIN_GAP_S = 1800           # 30 分钟内最多重启一次
+RESIDENT_MODULE_DIRS = ("tools/autopilot/producer.py", "tools/series10_video/", "services/agent/ns_agent/", "services/render_router/ns_render/",
+                        "services/recipes/", "packages/", "tools/gen_contract/", "tools/netfix/", "config/")
+
+
+def resident_imports_changed(since: float) -> list[str]:
+    """常驻进程（producer / night / vidgen）实际会加载的文件里，since 之后改过的；改的是别的（测试、文档、前端、本工具）不算"""
+    out = []
+    for rel, (_s, mt) in local_manifest(CODE_DIRS).items():
+        if mt > since and rel.startswith(RESIDENT_MODULE_DIRS) and rel.endswith((".py", ".json", ".yaml", ".yml")):
+            out.append(rel)
+    return out
+
+
+def request_restart(host: str, reason: str, by: str = "WORKFLOW resident_sync", urgent: bool = False) -> dict:
+    """统一入口（DJ-20）：任何要重启服务器常驻的地方都只写请求，由 loop 每拍 restart_queue.process 合并执行"""
+    import restart_queue as RQ
+    return RQ.request(host, reason, by, urgent)
+
+
+def restart_guarded(host: str, drain_timeout_s: int = 900) -> str | None:
+    """只在常驻实际 import 的文件变了才重启；30 分钟内最多一次；重启前先排空（producer pause → 等心跳 inflight=0）"""
+    st = jl(STATE, {}) or {}
+    hs = st.setdefault(host, {})
+    last = float(hs.get("last_restart") or 0)
+    if time.time() - last < RESTART_MIN_GAP_S:
+        log("restart_guarded", host, "30 分钟内已重启过，跳过")
+        return None
+    changed = resident_imports_changed(last or float(hs.get("last_push") or 0))
+    if not changed:
+        log("restart_guarded", host, "常驻加载的文件没变，不重启")
+        return None
+    ssh(host, f"cd {R} && {OFF}/venv/bin/python tools/autopilot/producer.py pause --by RESTART_DRAIN --note '重启前排空'", timeout=120, tries=3)
+    t0 = time.time()
+    while time.time() - t0 < drain_timeout_s:
+        try:
+            hb = json.loads(ssh(host, f"cat {R}/data/producer/heartbeat.json", timeout=60, tries=2) or b"{}")
+        except Exception:  # noqa: BLE001
+            hb = {}
+        if int(hb.get("inflight") or 0) == 0:
+            break
+        time.sleep(20)
+    txt = restart(host)
+    ssh(host, f"cd {R} && {OFF}/venv/bin/python tools/autopilot/producer.py resume --by RESTART_DRAIN --note '重启完成'", timeout=120, tries=3)
+    hs["last_restart"] = time.time()
+    js(STATE, st)
+    log("restart_guarded", host, f"重启（常驻文件变了 {len(changed)} 个，例 {changed[:3]}）")
+    return txt
+
+
+def puller_took_over(host: str) -> bool:
+    """NETFIX 01:5x：puller 接管传图的判据——data/netfix/puller_status.json 里这台的 acked_total 比第一次看到时增长了
+    （说明 FACTORY 的 outbox 钩子在服务器上真写、puller 真在拉）。一旦成立就记进状态，此后这台不再做 20 分钟定时 pull"""
+    st = jl(STATE, {}) or {}
+    hs = st.setdefault(host, {})
+    if hs.get("pull_handed_to_puller"):
+        return True
+    ps = jl(ROOT / "data/netfix/puller_status.json", {}) or {}
+    cur = int(((ps.get("hosts") or {}).get(host) or {}).get("acked_total") or 0)
+    base = hs.get("puller_acked_base")
+    if base is None:
+        hs["puller_acked_base"] = cur
+        js(STATE, st)
+        return False
+    if cur > int(base):
+        hs["pull_handed_to_puller"] = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "acked_total": cur, "base": base}
+        js(STATE, st)
+        log("pull", host, f"puller 已接管（acked_total {base} → {cur}），停掉 20 分钟定时 pull")
+        return True
+    return False
+
+
 def loop(pull_every_s: int = 1200, health_every_s: int = 300):
     """5 分钟一次健康 / 报警；20 分钟一次并回；代码有改动 → 推代码 + 服务器热重启（每台独立，一台断连不影响另一台）"""
     last_pull = {h: 0.0 for h in HOSTS}
@@ -613,6 +691,11 @@ def loop(pull_every_s: int = 1200, health_every_s: int = 300):
                 health(h)
             except Exception as e:  # noqa: BLE001
                 log("health error", h, repr(e)[:200])
+            try:                                 # DJ-20 重启队列：合并各方请求，30 分钟一次、先排空，紧急插队记审计（K-OPS-W16）
+                import restart_queue as RQ
+                RQ.process(h)
+            except Exception as e:  # noqa: BLE001
+                log("restart_queue error", h, repr(e)[:200])
             try:                                 # NETFIX 接口：控制小文件变了就推（按对象合并 / 快照覆盖），推完 server-control
                 push_control(h)
                 if h == "gpu36":
@@ -622,18 +705,23 @@ def loop(pull_every_s: int = 1200, health_every_s: int = 300):
             if time.time() - last_pull[h] < pull_every_s:
                 continue
             try:
-                st = jl(STATE, {}) or {}
-                if code_changed_since((st.get(h) or {}).get("last_push") or 0):
-                    push(h, code_only=True)
-                    restart(h)
-                pull(h)
+                # 总调度 01:2x（DEBUG_r1：20:55–00:23 因“代码有变”重启服务器常驻 22 次，每次作废租约、不等在途）：
+                # loop 不再推代码、不再重启——版本统一走 system_version deploy（服务器运行时归 FACTORY）；这里只做 health / 控制文件 / 并回
+                if AUTO_CODE_PUSH:
+                    st = jl(STATE, {}) or {}
+                    if code_changed_since((st.get(h) or {}).get("last_push") or 0):
+                        push(h, code_only=True)
+                        if resident_imports_changed(float((st.get(h) or {}).get("last_restart") or 0)):
+                            request_restart(h, "代码推送：常驻加载的文件变了", "WORKFLOW resident_sync loop")
+                if not puller_took_over(h):          # NETFIX puller 真在拉（acked_total 增长）之后，这台不再定时 pull
+                    pull(h)
                 last_pull[h] = time.time()
             except Exception as e:  # noqa: BLE001
                 log("loop error", h, repr(e)[:300])
         time.sleep(health_every_s)
 
 
-FRAMES_PREFIX = ("data/renders/", "data/pipeline/runs/series10_v1/assets/", "data/producer/master_rejects.json")
+FRAMES_PREFIX = ("data/renders/", f"{RUN_REL}/assets/", "data/producer/master_rejects.json")
 
 
 def push_frames(host: str, batch_mb: float = 2.0) -> dict:
@@ -644,7 +732,7 @@ def push_frames(host: str, batch_mb: float = 2.0) -> dict:
     if not since:          # 第一次：从服务器副本冻结时刻起（不整盘推 3.9 GB 的 renders）
         since = float(ssh(host, f"cat {OFF}/FREEZE_TS 2>/dev/null || echo 0").strip() or 0)
     t0 = time.time() - 5
-    allm = local_manifest(["data/renders", "data/pipeline/runs/series10_v1/assets", "data/producer"])
+    allm = local_manifest(["data/renders", f"{RUN_REL}/assets", "data/producer"])
     loc = {}
     for k, v in allm.items():
         if not k.startswith(FRAMES_PREFIX) or v[1] <= since:
@@ -682,7 +770,7 @@ def push_frames(host: str, batch_mb: float = 2.0) -> dict:
 
 REBUILD_CHECK = r"""
 import json, collections
-d = json.load(open("data/pipeline/runs/series10_v1/video/jobs.json"))
+d = json.load(open("data/pipeline/runs/__RUN__/video/jobs.json"))
 c = collections.Counter(); holds = []
 for m in d["shots"]:
     for k, v in (m.get("variants") or {}).items():
@@ -698,7 +786,7 @@ def _e3(t):
     return bool(FACE.search(" ".join(re.findall(r"The frame keeps[^.]*\.", t or ""))))
 rl_e3 = [(m["shot"], k) for m in d["shots"] for k, v in (m.get("variants") or {}).items()
          if str(v.get("status")).startswith("ready") and _e3(v.get("prompt"))]
-rl_e3_files = [f for f in glob.glob("data/pipeline/runs/series10_v1/video/prompts/*.txt") if _e3(open(f, encoding="utf-8").read())]
+rl_e3_files = [f for f in glob.glob("data/pipeline/runs/__RUN__/video/prompts/*.txt") if _e3(open(f, encoding="utf-8").read())]
 print(json.dumps({"built_at": d.get("built_at"), "shots": len(d["shots"]), "dist": {f"{r}|{st}": n for (r, st), n in c.items()},
                   "non_pika_ready": non_pika_ready, "rl_e3_ready": len(rl_e3), "rl_e3_examples": rl_e3[:10],
                   "rl_e3_prompt_files": len(rl_e3_files), "holds": holds[:200]}, ensure_ascii=False))
@@ -709,10 +797,10 @@ def rebuild_jobs(host: str) -> dict:
     """服务器本机按 L-088 重编 jobs.json（读服务器上的导入稿 + 首帧），核对非 Pika ready 变体 = 0"""
     # AUDIT 22:13：重编前把旧 prompts/ 整个挪进隔离区（不删），免得 16:56 的旧编译稿（含“朝向镜头”句）留着
     q = f"data/_quarantine_20261101/prompts_{time.strftime('%Y%m%d-%H%M%S')}"
-    out = ssh(host, f"cd {R} && V=data/pipeline/runs/series10_v1/video && if [ -d $V/prompts ]; then mkdir -p {q} && mv $V/prompts {q}/ && "
+    out = ssh(host, f"cd {R} && V={RUN_REL}/video && if [ -d $V/prompts ]; then mkdir -p {q} && mv $V/prompts {q}/ && "
                     f"echo quarantined_prompts {q}; fi; mkdir -p $V/prompts; "
                     f"PYTHONUTF8=1 {OFF}/venv/bin/python tools/series10_video/build_jobs.py >/tmp/build_jobs.out 2>&1; "
-                    f"tail -c 300 /tmp/build_jobs.out; {OFF}/venv/bin/python -", data=REBUILD_CHECK.encode(), timeout=2400, tries=3)
+                    f"tail -c 300 /tmp/build_jobs.out; {OFF}/venv/bin/python -", data=REBUILD_CHECK.replace("__RUN__", RUN_ID).encode(), timeout=2400, tries=3)
     txt = out.decode("utf-8", "replace")
     res = json.loads([ln for ln in txt.splitlines() if ln.startswith("{")][-1])
     js(ROOT / f"data/autopilot/resident/jobs_rebuild_{host}.json", res)
@@ -783,7 +871,7 @@ def verify_sha(host: str, files: list[str] | None = None, fix: bool = True) -> d
     return res
 
 
-ASSET_DIRS = ["data/pipeline/runs/series10_v1/images/refcrops", "data/pipeline/runs/series10_v1/images/refboards"]
+ASSET_DIRS = [f"{RUN_REL}/images/refcrops", f"{RUN_REL}/images/refboards"]
 
 
 def push_required(host: str, batch_mb: float = 2.0) -> dict:

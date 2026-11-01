@@ -31,6 +31,8 @@ sys.path.insert(0, str(ROOT / "tools/series10_video"))
 import build_jobs as BJ  # noqa: E402  （同生产编译：sys.path、KITCHEN、preflight）
 
 HOST = "gpu36"                        # r3：--host gpu33 时服务器端在 gpu33 本机跑
+# r5：出图道由 producer 派单 → 默认“多道 + 连续空闲 ≥5 分钟才交”（srv_run VRCA_LANES / VRCA_IDLE_S）
+LANES_ENV = "VRCA_LANES=8188:/root/work/fredw/comfy/output/gpu0,8189:/root/work/fredw/comfy/output/gpu1 VRCA_IDLE_S=300 "
 PORT = 18290                         # gpu36:2
 SRV = "/root/work/fredw/video_rca"   # 服务器上本 loop 的目录
 SRV_REPO = "/root/work/fredw/video10_srv"
@@ -46,9 +48,12 @@ def api(path, data=None, ctype="application/json", timeout=60):
         return r.read()
 
 
+RSH = [sys.executable, str(ROOT / "tools/netfix/rsh.py")]   # NETFIX 11-02（K-OPS-N07/N08）：远程命令一律走常驻主连接
+
+
 def ssh(cmd, timeout=1800):
     for k in range(4):
-        r = subprocess.run(["ssh", "-o", "BatchMode=yes", HOST, cmd], capture_output=True, text=True, timeout=timeout,
+        r = subprocess.run([*RSH, HOST, cmd], capture_output=True, text=True, timeout=timeout,
                            encoding="utf-8", errors="replace")
         if r.returncode != 255:
             return r
@@ -57,19 +62,25 @@ def ssh(cmd, timeout=1800):
 
 
 def scp(src, dst, timeout=1800):
-    """scp 带重试（跳板偶发 255）"""
-    def loc(x):   # Windows 盘符 “D:” 会被 scp 当成主机名 → 本地路径一律改成相对 ROOT、正斜杠
-        x = str(x)
-        if x.startswith(("gpu36:", "gpu33:")):
-            return x
-        return os.path.relpath(x, ROOT).replace("\\", "/") if os.path.isabs(x) else x.replace("\\", "/")
+    """传文件（经 rsh.py 的 stdin / stdout 直通，不新开 scp 握手）：src 或 dst 之一写成 “gpu36:/path”"""
+    src, dst = str(src), str(dst)
     for k in range(6):
-        r = subprocess.run(["scp", "-q", "-o", "BatchMode=yes", loc(src), loc(dst)], capture_output=True, timeout=timeout,
-                           cwd=str(ROOT))
+        if dst.startswith(("gpu36:", "gpu33:")):
+            host, path = dst.split(":", 1)
+            with open(src if os.path.isabs(src) else ROOT / src, "rb") as f:
+                r = subprocess.run([*RSH, host, f"mkdir -p $(dirname {path}) && cat > {path}"], stdin=f,
+                                   capture_output=True, timeout=timeout)
+        else:
+            host, path = src.split(":", 1)
+            r = subprocess.run([*RSH, host, f"cat {path}"], capture_output=True, timeout=timeout)
+            if r.returncode == 0:
+                out = Path(dst if os.path.isabs(dst) else ROOT / dst)
+                out.parent.mkdir(parents=True, exist_ok=True)
+                out.write_bytes(r.stdout)
         if r.returncode == 0:
             return True
         time.sleep(10 * (k + 1))
-    raise RuntimeError(f"scp 失败 {src} -> {dst}: {r.stderr[-200:]}")
+    raise RuntimeError(f"传输失败 {src} -> {dst}: {r.stderr[-200:]}")
 
 
 def log(exp, *a):
@@ -321,12 +332,14 @@ def export(name: str, jobs: list[dict], adopt: list[str] | None = None, lane: in
         if f.name not in have:
             scp(str(f), f"{HOST}:{d}/inputs/{f.name}")
     ad = " ".join(adopt or [])
-    if HOST == "gpu33":
+    if lane is None and LANES_ENV:
+        envp = LANES_ENV
+    elif HOST == "gpu33":
         envp = (f"VRCA_PORT={lane} VRCA_OUT=/root/claude-kimi-ns-studio-v1/ComfyUI/output/gpu{ {8188: 0, 8189: 1, 8191: 3}[lane] } "
                 "VRCA_FF=/root/claude-kimi-ns-studio-v1/env/ffmpeg/bin/ffmpeg ")
     else:
         envp = f"VRCA_PORT={lane} VRCA_OUT=/root/work/fredw/comfy/output/gpu{ {8188: 0, 8189: 1, 8190: 2}[lane] } " if lane else ""
-    r = ssh(f"cd {SRV} || exit 1; {envp}nohup {SRV_PY} {SRV}/srv_run.py {d} {ad} > {d}/nohup.out 2>&1 < /dev/null & echo $! > {d}/run.pid; cat {d}/run.pid",
+    r = ssh(f"cd {SRV} || exit 1; {envp}setsid nohup {SRV_PY} {SRV}/srv_run.py {d} {ad} > {d}/nohup.out 2>&1 < /dev/null & echo $! > {d}/run.pid; cat {d}/run.pid",
             timeout=120)
     print("started pid", r.stdout.strip())
 

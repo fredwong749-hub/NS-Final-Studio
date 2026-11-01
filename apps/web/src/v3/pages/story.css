@@ -226,3 +226,26 @@ button.ns-node:not(:disabled):hover { border-color: var(--c-accent); }
 .er-fields dl > div { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: var(--sp-2); }
 .er-fields dt { color: var(--c-text-2); }
 .er-fields dd { margin: 0; white-space: pre-wrap; word-break: break-word; }
+/* UIRSI r43 全流程自动面板（K-UI-049 整洁规格：中性色，状态只用三种小圆点） */
+.af { border: 1px solid var(--c-line); border-radius: 8px; background: var(--c-raise); padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.af-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.af-title { font-size: 15px; font-weight: 600; }
+.af-sub, .af-muted { font-size: 12px; color: var(--c-text-2); }
+.af-run { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12px; color: var(--c-text-2); }
+.af-run select { font: inherit; font-size: 13px; color: var(--c-text); background: var(--c-bg); border: 1px solid var(--c-line); border-radius: 6px; padding: 3px 6px; }
+.af-verdict { display: flex; align-items: center; gap: 6px; margin: 0; flex-wrap: wrap; }
+.af-block > h5 { margin: 0 0 6px; font-size: 11px; font-weight: 600; letter-spacing: .08em; color: var(--c-text-2); }
+.af-stages { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--c-line); }
+.af-stages > li { border-bottom: 1px solid var(--c-line); }
+.af-row { width: 100%; display: grid; grid-template-columns: 16px 1fr 80px 110px 64px 16px; align-items: center; gap: 8px; padding: 7px 2px; border: 0; background: transparent; color: var(--c-text); font: inherit; text-align: left; cursor: pointer; }
+.af-row:disabled { cursor: default; }
+.af-row:not(:disabled):hover { background: var(--c-sunken); }
+.af-who, .af-usd, .af-more { font-size: 12px; color: var(--c-text-3); }
+.af-st { font-size: 12px; color: var(--c-text-2); }
+.af-usd { text-align: right; }
+.af-det { margin: 0 0 8px 24px; padding: 0 0 0 16px; font-size: 12px; color: var(--c-text-2); display: flex; flex-direction: column; gap: 3px; }
+.af-det li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.af-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.af-table th { text-align: left; font-size: 11px; font-weight: 600; color: var(--c-text-2); padding: 0 8px 5px 0; border-bottom: 1px solid var(--c-line); }
+.af-table td { padding: 6px 8px 6px 0; border-bottom: 1px solid color-mix(in srgb, var(--c-line) 60%, transparent); }
+.af-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

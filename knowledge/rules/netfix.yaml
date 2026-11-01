@@ -87,3 +87,29 @@ rules:
     confidence: medium
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-N09
+    domain: ops
+    link: [P5-P6, P7-P8]
+    title: 底座隧道（一条香港常驻，只转发两台 sshd 22360/22330）+ 内层连接在隧道里直连服务器；跳板每小时新建 < 50；结果经服务器 outbox → 笔记本 puller 持续回传
+    when: 笔记本与 gpu33 / gpu36 之间的任何连接、远程命令、结果回传
+    then: tunnel_supervisor 的 base 连接 = ssh -F config/netfix/ssh_config -L 127.0.0.1:22360:10.0.0.36:22 -L 127.0.0.1:22330:10.0.0.33:22 194relay-hk（直连备用 194relay），退避 15 s 翻倍最多 300 s，不许更快（运维 FONG-QUICK：快速重连像暴力破解）；道隧道 / WSL 命令主连接一律 via=t 连 gpu36-t / gpu33-t（WSL 侧经 tools/netfix/tcpbridge.py 走 interop），底座断 → 内层立刻清掉、底座一通并行重建（≤8 同时握手）；出现 REMOTE HOST IDENTIFICATION HAS CHANGED → 停止该连接、报 A-HOSTKEY，不删 known_hosts、不关校验；agent 临时命令一律 tools/netfix/rsh.py（不装用户级 ~/bin/ssh 包装，总调度 r2 定）；直接起 ssh 的文件只许 config/netfix/ssh_callers.txt；结果回传 = FACTORY 写 outbox/<id>/{files/,manifest.json,.done}，tools/netfix/puller.py 按 P0 json → P1 缩略图 → P2 原图（P3 视频按需 request）拉，sha 核对、原子落盘、merge_pull.merge_file 并回、建 .acked；交还服务器派单要 assets_ready.ready 且 preflight_dryrun_ok=true
+    check: tests/test_netfix.py::test_base_backoff_follows_ops_rule
+    evidence:
+      - {src: data/netfix/conn_watch_rate.jsonl, note: "跳板入口新建连接：改前 442/小时（并发 20–22）；改后见 after r2 clean 记录"}
+      - {src: data/netfix/puller_selftest.json, note: "puller 自检：2 个结果拉回 + ack、重跑 0 重复、P3 未请求不拉、模拟断开期间不丢、恢复后追上 4/4"}
+      - {src: data/netfix/supervisor.log, note: "01:43 杀底座：底座 49 s 恢复（含 15 s 退避），14 条内层全部恢复 118 s（改并行前 175 s）"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-N10
+    domain: ops
+    link: [P5-P6, P7-P8]
+    title: 底座隧道两条互为备份（base-a 香港 22360/22330、base-b 直连 22361/22331），内层按道分摊；一条断只重建其上内层并改挂另一条，≤ ~30 s；banner 读不到但隧道在搬数据或其上内层还通，不许杀底座
+    when: tunnel_supervisor 管理底座与内层连接
+    then: config/netfix/tunnels.json 两条 kind=base（route 固定 hk / direct，alias_suffix -t / -tb）；内层 base=首选底座（l1/cmd2/cmd4 挂 b，其余挂 a），pick_base 首选不通挂另一条；底座 EXIT → 只清挂在它上面的内层、立刻改挂（REHOME），不等底座 15 s 退避；首选底座稳定 120 s 后逐条迁回；底座带 LogLevel=VERBOSE（通道开关明细）+ 记 banner 耗时；adopt 对 “host:port” 转发规格要能匹配（r2 时每次重载都误杀底座）
+    check: tests/test_netfix.py::test_ssh_cmd_has_keepalive_and_tag
+    evidence:
+      - {src: data/netfix/supervisor.log, note: "02:24:40 单底座被“读不到 banner”判死（实际其上内层仍在传数据）→ 14 条全断；r3 后 02:31:24 杀 base-a：8 条内层改挂 base-b，32 s 全部可用，挂 b 的 6 条全程不断"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-02

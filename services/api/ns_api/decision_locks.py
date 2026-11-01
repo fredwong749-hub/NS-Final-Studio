@@ -34,7 +34,10 @@ def _locks_from(checks: list) -> list[dict]:
                 "title": c.get("title") or ""}
         paths = [str(p) for p in c.get("paths") or []]
         if c.get("type") == "grep_present" and any(p.endswith("sheets_chosen.json") for p in paths) and c.get("pattern"):
-            out.append({**base, "kind": "sheet", "match": str(c["pattern"]).strip("'\"")})
+            pat = str(c["pattern"]).strip("'\"")
+            # UIAUDIT P0-1（UIRSI r43）：owner_decisions 的 pattern 是正则（如 lin_wan_lookA_v2_s202_sleevefix\.png），
+            # 前端按字面比会永远匹配不上 → 同时给 regex（原样）和 match（去掉转义的字面片段）
+            out.append({**base, "kind": "sheet", "regex": pat, "match": re.sub(r"\\(.)", r"\1", pat)})
         elif c.get("type") == "json" and str(c.get("file") or "").endswith("face_overrides.json") and c.get("op") == "eq" \
                 and isinstance(c.get("value"), str) and len(c.get("path") or []) == 2:
             out.append({**base, "kind": "face", "cid": c["path"][1], "match": c["value"]})

@@ -423,7 +423,9 @@ def main() -> int:
             for st, key, url_key, lab in (("image", "first_frame_take", "first_frame", "首帧"), ("last", "last_frame_take", "last_frame_target", "尾帧"),
                                        ("video", None, "video", "视频")):
                 t = next((t for t in tk.get("takes") or [] if t.get("stage") == st and t.get("n") == act.get(st)), None)
-                if t and t.get("quarantined"):   # UIRSI r41：当前版本已隔离（旧剧本版本）= 没有当前，接口必须给空
+                qd = ROOT / "data" / "_quarantine_20261102_oldscript" / "data"
+                if t and (t.get("quarantined") or (t.get("file") and not (ROOT / "data" / t["file"]).exists() and (qd / t["file"]).exists())):
+                    # UIRSI r41 / r42：当前版本已隔离（标记在，或标记被并回冲掉但文件在隔离区）= 没有当前，接口必须给空
                     checked["fields"] += 1
                     if x.get(url_key):
                         fails.append(f"D-CUR {x['id']} 当前{lab} #{t.get('n')} 已隔离，接口 {url_key} 仍给 {x.get(url_key)!r}")
@@ -626,6 +628,7 @@ def main() -> int:
     if a.ui:
         ui_note = ui_check(a.ui, ui_api.get(a.ui), fails)
 
+    regcons_check(ROOT / "data/producer/consistency.json", fails, warns)
     max_h = pending_max_hours()
     overdue, age_h = overdue_pending(pending, import_at, max_h)
     try:
@@ -652,6 +655,25 @@ def main() -> int:
     print(f"{'PASS' if not fails else 'FAIL'} data_parity：项目 {project} · 抽查 {checked['shots']} 镜 · {checked['fields']} 项 · "
           f"不一致 {len(fails)} · 待重做 {len(pending)}（过期 {len(overdue)}） · 警告 {len(warns)}{' · ' + ui_note if ui_note else ''}")
     return 0 if not fails else 1
+
+
+def regcons_check(path: Path, fails: list[str], warns: list[str], now: float | None = None) -> None:
+    """D-REGCONS（DEBUG-RSI K-OPS-E13，CONSENT CLEANUP → DEBUG_RSI by 总调度 03:2x）：producer 每拍写的登记表自检。
+    首帧 / 尾帧矛盾（passed 没有当前版本、尾帧 passed 首帧没过）= 不一致；视频矛盾只警告；自检文件超过 10 分钟没更新 = 警告"""
+    import time as _t
+    d = rj(path, None)
+    if not d:
+        warns.append(f"D-REGCONS {path.name} 不在（producer 没在跑或旧版本）")
+        return
+    try:
+        age = (now or _t.time()) - _t.mktime(_t.strptime(str(d.get("at"))[:19], "%Y-%m-%dT%H:%M:%S"))
+    except (TypeError, ValueError):
+        age = None
+    if age is None or age > 600:
+        warns.append(f"D-REGCONS 自检 {d.get('at')} 已过期（> 10 分钟）")
+    for pr in d.get("problems") or []:
+        line = f"D-REGCONS {pr.get('shot')} {pr.get('kind')}：{pr.get('why')}"
+        (warns if pr.get("kind") == "video" else fails).append(line)
 
 
 def ui_check(ep: int, ash: list | None, fails: list[str]) -> str:

@@ -57,6 +57,11 @@ def arm_apply(job: dict, arm: str) -> dict:
         if not m:
             raise SystemExit(f"{job['shot']} 没有 K-REN-704 朝向句")
         p = p.replace(m.group(0), f"林晚的脸微微侧向{m.group(1)}，不正对镜头。")
+    elif arm in ("LEG0",):                  # 长腿 A/B 对照：现行作业原样
+        pass
+    elif arm == "LEG1":                     # 长腿 A/B：去掉角色锁 / 造型补句里的“长腿 / 露出长腿”（其余不动）
+        for o, nw in (("、露出长腿", ""), ("露出长腿、", ""), ("、长腿", ""), ("，长腿", ""), ("长腿、", "")):
+            p = p.replace(o, nw)
     elif arm == "R4":                       # 图1 只取身份
         p = p.replace(FACE_LINE_OLD, "图1是林晚的脸部参考（只取五官身份和发型，不取图1的视线、头部角度和朝向）")
     elif arm == "O1":                       # 造型图换成 ASSETMASTER 已通过单品一致性检查的 v2_s202（画了外套）
@@ -97,7 +102,52 @@ def load_job(sid: str) -> dict:
 ALLOW_INTIMATE_EP = {"ep02-S4", "ep02-S1"}
 
 
+IDLE_STRICT = {"on": False, "need_s": 300, "since": None}     # 服务器道空档：整条道连续空闲 ≥ need_s 才开始交（总调度 r7：不占生产道）
+
+
+LANES: list[str] = []          # --urls：多条服务器道，哪条先连续空闲够 need_s 就用哪条
+_since: dict = {}
+
+
+def pick_lane() -> bool:
+    now = time.time()
+    for u in LANES:
+        try:
+            q = json.loads(urllib.request.urlopen(u + "/queue", timeout=10).read())
+            busy = bool(q["queue_running"] or q["queue_pending"])
+        except Exception:  # noqa: BLE001
+            busy = True
+        if busy:
+            _since.pop(u, None)
+            continue
+        _since.setdefault(u, now)
+        if now - _since[u] >= IDLE_STRICT["need_s"]:
+            IG.URL = u
+            return True
+    return False
+
+
 def lane_idle() -> bool:
+    if LANES:
+        return pick_lane()
+    if IDLE_STRICT["on"]:
+        try:
+            q = json.loads(urllib.request.urlopen(IG.URL + "/queue", timeout=10).read())
+        except Exception:  # noqa: BLE001
+            return False
+        busy = bool(q["queue_running"] or q["queue_pending"])
+        now = time.time()
+        if busy:
+            if IDLE_STRICT.get("mine_until", 0) < now:
+                IDLE_STRICT["since"] = None
+            return False
+        if IDLE_STRICT["since"] is None:
+            IDLE_STRICT["since"] = now
+        return now - IDLE_STRICT["since"] >= IDLE_STRICT["need_s"] or IDLE_STRICT.get("warm")
+    return _lane_idle_loose()
+
+
+def _lane_idle_loose() -> bool:
     try:
         q = json.loads(urllib.request.urlopen(IG.URL + "/queue", timeout=10).read())
         # 本机道 19:4x 起归 IMGFIX（总调度派）；别的实验脚本跑完一张马上交下一张，“队列全空”永远等不到 →
@@ -164,6 +214,9 @@ def run(shots: list[str], arms: list[str], seed_spec: str, tag: str) -> None:
                     print("让道：本机道有任务", flush=True)
                     time.sleep(3)
                 r = render(j, arm.replace("+", "_"), seed)
+                IDLE_STRICT["warm"] = True          # 拿到空档后连着交（每张前仍要求整条道空着）
+                if LANES:                            # 刚跑完的是自己的图：这条道的空闲计时接着算，下一张不用再等满 5 分钟
+                    _since[IG.URL] = time.time() - IDLE_STRICT["need_s"]
                 met = IG.measure(ROOT / r["file"])
                 met["q2_jacket"] = outer_q2(ROOT / r["file"])
                 rec = {"scope": "ab", "experiment": "imgfix", "round": tag, "shot": sid, "arm": arm, "seed": seed, **r,
@@ -204,6 +257,10 @@ if __name__ == "__main__":
     if a[1] == "run":
         if "--url" in a:                     # 服务器道（生产优先时实验改走服务器，scope=ab）
             IG.URL = a[a.index("--url") + 1]
+        if "--urls" in a:
+            LANES[:] = a[a.index("--urls") + 1].split(",")
+        if "--idle-min" in a:                # 服务器道空档：连续空闲 N 分钟才开始；之后只在整条道空着时交下一张
+            IDLE_STRICT.update(on=True, need_s=int(float(a[a.index("--idle-min") + 1]) * 60))
         if "--jobs" in a:                    # 预览作业（未写回 first_frame_jobs.json，总调度 21:5x：导入新剧本后再统一重编）
             IG.JOBS = ROOT / a[a.index("--jobs") + 1]
         run(a[2].split(","), a[a.index("--arms") + 1].split(","), a[a.index("--seeds") + 1] if "--seeds" in a else "job",

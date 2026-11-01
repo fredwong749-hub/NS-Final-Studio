@@ -862,7 +862,9 @@ def lanes(probe: bool = True, view: bool = False) -> list[dict]:
                     "max_frames": EP.max_frames(g), "long_only": EP.long_only(g),
                     "activity": act, "status_text": f"{name} · {word}", "queued": len(mine),
                     "load_s": round(load, 1), "comfy_running": c_run, "comfy_pending": c_pend,
-                    "vram_total_mb": pr.get("vram_total_mb"), "gpu_name": pr.get("gpu")})
+                    "vram_total_mb": pr.get("vram_total_mb"), "gpu_name": pr.get("gpu"),
+                    # UIRSI r42（顶栏“卡 0/7 忙”误报）：:8800 刚起、还没探过时是“探测中”，不是空闲也不是连不上
+                    "probing": bool(pr.get("probing"))})
     return out
 
 

@@ -164,6 +164,54 @@ def _vqa():
         return None
 
 
+def band_lines(cid: str, h_ratio: float, t1: dict) -> tuple[float, float, str]:
+    """K-REV-V18 修订（总调度 11-02 亲审 q1_band：20 张里 19 张是同一林晚，低分来自侧脸；0.70 单线退役）→ (通过线, 复核下限, 档名)。
+    ≥ 通过线 = 过；复核下限 – 通过线 = 本地看图和 L-086 左右并排复核（同一人 + 画风 / 质感 + 清晰度三项全过才放行）；< 复核下限 = 直接不过。
+    config Q1_identity.bands = {"default": [[脸高下限, 档名, 通过线, 复核下限], …], 角色: […]}，从大到小"""
+    bands = (t1.get("bands") or {})
+    rows = bands.get(cid) or bands.get("default") or [[0.10, "近中景及以上", 0.60, 0.50], [0.0, "小脸", 0.50, 0.40]]
+    for h_min, name, need, lo in rows:
+        if h_ratio >= h_min:
+            return float(need), float(lo), name
+    h_min, name, need, lo = rows[-1]
+    return float(need), float(lo), name
+
+
+def size_line(h_ratio: float, t1: dict) -> tuple[str, float | None]:
+    """脸大小分档的身份线（特写最严）：config Q1_identity.size_tiers = [[脸高下限, 档名, 线], …] 从大到小"""
+    for h_min, name, line in t1.get("size_tiers") or [[0.27, "特写", 0.55], [0.10, "近中景", 0.50], [0.04, "小脸", 0.40]]:
+        if h_ratio >= h_min:
+            return name, float(line)
+    return "太小", None
+
+
+def identity_unexpected(faces: list[dict], req: dict, t1: dict) -> tuple:
+    """“不该露脸 / 没有在画角色”的镜头里出现的够大的脸：认得出是 cast 里的人且过分档线才过（K-REV-V18）。→ (status, detail, **evidence)"""
+    allowed = {NAME_ID.get(c.get("name"), c.get("name")) for c in req.get("cast") or []}
+    rows, bad, boxes = [], [], []
+    for f in faces:
+        sims = {k: v for k, v in _merge_refs(f.get("sims") or {}).items()}
+        best = max(sims, key=lambda c: sims[c][0]) if sims else None
+        sim = sims[best][0] if best else None
+        tier, line = size_line(float(f.get("h_ratio") or 0), t1)
+        if line is None:
+            continue
+        ok = best in allowed and sim is not None and sim >= line
+        rows.append({"best": best, "sim": None if sim is None else round(sim, 3), "tier": tier, "line": line, "h_ratio": f.get("h_ratio"), "ok": ok})
+        if not ok:
+            bad.append(f"脸高 {float(f.get('h_ratio') or 0):.2f}（{tier}，线 {line}）最像 {best} {0 if sim is None else sim:.3f}"
+                       + ("" if best in allowed else "，不在本镜 cast 里"))
+            boxes.append(f.get("bbox"))
+    if not rows:
+        return ("na", "局部 / 空镜：脸都太小，不判身份")
+    if bad:
+        return ("fail", "画面里多了不该有的人 / 认不出是谁：本镜 cast 写不露脸，但画面里出了脸且不像本人（" + "；".join(bad) + "）",
+                {"faces": rows, "strangers": bad, "stranger_boxes": boxes,
+                 "partial_cast": any(c.get("presence") in ("局部", "背影") for c in req.get("cast") or []), "unexpected_face": True})
+    return ("pass", "cast 写不露脸，但露了的脸认得出是本人（" + "、".join(f"{r['best']} {r['sim']}（{r['tier']}）" for r in rows) + "）",
+            {"faces": rows, "unexpected_face": True})
+
+
 def _q9_item(VQ, v):
     """VQAGATE 11-01（项目方原话转阻断，config/vqa.json gate.enforce）：没有看图结果 = untested（不算通过）；
     blocking 项 defect = fail（VQ 给）。enforce 关掉时回到只记录：没有结果 = 不适用；未成年外观（HC-07）任何时候都不过"""
@@ -209,7 +257,15 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
     described = {c["character"] for c in rec.get("characters") or [] if c.get("face_described")}
     # Q1
     t1 = th.get("Q1_identity") or {}
-    if not face_visible or not expect:
+    big_unexpected = [f for f in (remote or {}).get("faces") or []
+                      if (f.get("h_ratio") or 0) >= t1.get("min_face_ratio", 0.04)] if (not face_visible or not expect) else []
+    if (not face_visible or not expect) and big_unexpected:
+        # 人物一致性闸门（VQAGATE 11-02 P0，项目方 02:3x）：cast 写“局部 / 只露手 / 不露脸”或本镜没有在画角色，画面里却出了够大的脸
+        # （ep02-S10：林晚判“只露双手”，没挂身份脸，Q1 原来直接“不适用”，换了人的脸照样过）→ 这张脸也必须认得出是 cast 里的谁：
+        # 对每个角色的身份脸（score_remote 一直对 4 个主角都算）按脸大小分档比，像 cast 里的人且过线 = 过，否则拦
+        _st, _d, *_ev = identity_unexpected(big_unexpected, req, t1)
+        add("Q1", _st, _d, **(_ev[0] if _ev else {}))
+    elif not face_visible or not expect:
         add("Q1", "na", "局部 / 空镜：不判身份")
     elif remote is None:
         add("Q1", "untested", "没有出图机器的人脸打分（score_remote）")
@@ -218,20 +274,26 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
         # 与“<角色>”（face_ref2va）都给时取较高者，报告写明对哪张
         faces = [{**f, "sims": _merge_refs(f.get("sims") or {})} for f in remote.get("faces") or []]
         bad, got, via, used = [], {}, {}, set()
+        q1_band = []                                  # K-REV-V18 修订：落在复核带的角色（交本地看图左右并排复核）
         refd = {k for f in faces for k in f["sims"]}
         for cid in expect:
             if faces and cid not in refd:                 # 没有身份脸参考的角色（路人）：不判，下面按“可抵一张认不出的脸”算
                 continue
             cand = [(f["sims"].get(cid, (-1, "")), k) for k, f in enumerate(faces)]
             (best, ref), k_best = max(cand, default=((None, ""), None))
-            need = t1.get(cid, t1.get("default", 0.6))
             got[cid], via[cid] = best, ref
             if best is None or best < 0:
                 bad.append(f"{cid} 未出脸")
             else:
                 used.add(k_best)
-                if best < need:
-                    bad.append(f"{cid} {best:.3f}（对 {ref}）< {need}")
+                h = float(faces[k_best].get("h_ratio") or 0)
+                need, lo, tname = band_lines(cid, h, t1)
+                if best < lo:
+                    bad.append(f"{cid} {best:.3f}（对 {ref}）< {lo}（{tname}，直接不过）")
+                elif best < need:
+                    bad.append(f"{cid} {best:.3f}（对 {ref}）在复核带 {lo}–{need}（{tname}），待本地看图并排复核")
+                    q1_band.append({"cid": cid, "sim": round(best, 3), "lo": lo, "need": need, "tier": tname,
+                                 "bbox": faces[k_best].get("bbox"), "h_ratio": round(h, 3)})
         # 总调度 11-01 P1（ep03-S6 林晚 + 一个不像顾沉的“外国脸”男人，Q1 只算了林晚）：画面里每一张（够大的）脸都要认得出是谁——
         # 必须像本镜 cast（在画 / 局部）里的某个角色；认不出 → 不过（“画面里多了不该有的人 / 认不出是谁”）。
         # cast 里没有身份脸参考的角色（路人等）每人可抵一张认不出的脸，只记录。
@@ -283,7 +345,7 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
         add("Q1", "fail" if bad else "pass", "；".join(bad) if bad else
             "身份过线（" + "、".join(f"{c} {got[c]:.3f} 对 {via[c]}" for c in got) + "）" +
             (f"；其他脸：{'、'.join(extra_ok)}" if extra_ok else ""),
-            sims=got, ref=via, faces=len(faces), strangers=strangers, others=extra_ok, stranger_boxes=stranger_boxes,
+            sims=got, ref=via, faces=len(faces), strangers=strangers, others=extra_ok, stranger_boxes=stranger_boxes, review_band=q1_band,
             partial_cast=any(c.get("presence") in ("局部", "背影") for c in req.get("cast") or []))
     # Q2
     t2 = th.get("Q2_outfit") or {}

@@ -24,13 +24,17 @@ def main():
     ap.add_argument("--limit", type=int, default=999)
     ap.add_argument("--url", default="http://127.0.0.1:8870")
     ap.add_argument("--requests", default="requests.json")
+    ap.add_argument("--workers", type=int, default=1, help="并发请求数（测 vLLM 连续批处理吞吐）")
     ap.add_argument("--b64", action="store_true", help="服务在别的机器（隧道 8871 → gpu36）：本机先缩图转字节再发")
     a = ap.parse_args()
     reqs = json.loads((ROOT / "data/vqa/vram_bench" / a.requests).read_text(encoding="utf-8"))[:a.limit]
     from ns_agent.vqa import client as VC
     out = ROOT / "data/vqa/vram_bench" / f"{a.tag}.json"
     rows = []
-    for r in reqs:
+    import threading
+    lock = threading.Lock()
+
+    def one(r):
         q = r["req"]
         imgs = [{"path": im["path"], "label": im["label"], "max_pixels": a.subject if im["label"] == "【待检图】" else a.ref}
                 for im in q["images"]]
@@ -51,9 +55,15 @@ def main():
                      "peak_mib": res.get("peak_mib"), "reserved_mib": res.get("reserved_mib"), "tokens_in": res.get("tokens_in"),
                      "tokens_out": res.get("tokens_out"), "error": res.get("error"), "ok_parse": v.get("ok_parse"),
                      "salvaged": v.get("salvaged"), "defects": v.get("defects"), "checks": v.get("checks"), "people": v.get("people")})
-        print(a.tag, r["id"], rows[-1]["secs"], "s", rows[-1]["tokens_in"], "→", rows[-1]["tokens_out"], "tok",
-              rows[-1]["peak_mib"], "/", rows[-1]["reserved_mib"], "MiB", rows[-1]["defects"], rows[-1]["error"] or "", flush=True)
-        out.write_text(json.dumps({"cfg": vars(a), "rows": rows}, ensure_ascii=False, indent=1), encoding="utf-8")
+        with lock:
+            print(a.tag, r["id"], rows[-1]["secs"], "s", rows[-1]["tokens_in"], "→", rows[-1]["tokens_out"], "tok",
+                  rows[-1]["peak_mib"], "/", rows[-1]["reserved_mib"], "MiB", rows[-1]["defects"], rows[-1]["error"] or "", flush=True)
+            out.write_text(json.dumps({"cfg": vars(a), "rows": rows}, ensure_ascii=False, indent=1), encoding="utf-8")
+    t_all = time.time()
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=max(1, a.workers)) as ex:
+        list(ex.map(one, reqs))
+    print("WALL", round(time.time() - t_all, 1), "s for", len(reqs), "requests, workers", a.workers, flush=True)
 
 
 if __name__ == "__main__":

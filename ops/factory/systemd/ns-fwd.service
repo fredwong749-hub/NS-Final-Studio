@@ -1,0 +1,17 @@
+# FACTORY L-105（K-OPS-F10）：本机端口转发 fwd.py（代码里仍写着隧道端口 1818x → 本机 818x；D1 本机道表落地后退役）
+[Unit]
+Description=NS-Final Studio local port forward (FACTORY)
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+EnvironmentFile=%h/work/fredw/ns_factory_systemd/host.env
+ExecStart=/root/work/fredw/offline_20261101/venv/bin/python -u /root/work/fredw/offline_20261101/fwd.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/root/work/fredw/offline_20261101/logs/fwd.out
+StandardError=append:/root/work/fredw/offline_20261101/logs/fwd.out
+
+[Install]
+WantedBy=default.target

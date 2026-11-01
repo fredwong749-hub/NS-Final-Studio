@@ -16,6 +16,11 @@ from ns_schema.script import DialogueLine, Episode, ScriptGlobals, Shot, Voiceov
 FIX = Path(__file__).parent / "fixtures" / "h3"
 EX1 = (FIX / "sop_9a2_example1.txt").read_text(encoding="utf-8").strip("\n")
 EX2 = (FIX / "sop_9a2_example2.txt").read_text(encoding="utf-8").strip("\n")
+# DIRECTOR 11-02（总调度批复 r2 第 1 条，K-REN-801）：不变量 = H3 正文只有项目方覆盖、或带规则号的编译层运镜规范化能改。
+# EX1N = 编译层规范化后的 EX1（“tilts up at slow speed” → “tilts up with small amplitude”）；除此之外逐字不变（test_h3_norm_only_change）
+from ns_agent import camera_norm as _CN  # noqa: E402
+_CN.enabled = lambda: True
+EX1N, EX1_NORM = _CN.normalize_video_prompt(EX1)
 LEGACY = (FIX / "ep01_S1_legacy_gpu3_video_prompt.txt").read_text(encoding="utf-8")
 
 
@@ -196,7 +201,7 @@ def test_compiler_video_prompt_is_h3_without_style_or_negative():
     # 剧本带 **H3提示词** → 原样使用
     s2 = _shot(h3_prompt=EX1)
     c2 = C.compile_shot(_ep(s2), s2, g, set())
-    assert c2.video_prompt == EX1 and c2.h3_prompt_source == "script" and c2.h3_missing == []
+    assert c2.video_prompt == EX1N and c2.h3_prompt_source == "script" and c2.h3_missing == []
 
 
 def test_h3_only_changes_via_owner_override():
@@ -205,18 +210,18 @@ def test_h3_only_changes_via_owner_override():
     s = _shot(h3_prompt=EX1)
     # 普通画布修改（环境声 / 旧 h3_body / 运镜）不进 H3，只进旧版拼接
     c = C.compile_shot(_ep(s), s, ScriptGlobals(), set(), soundscape="Soft rain taps on the glass.")
-    assert c.video_prompt == EX1 and "Soft rain" in c.legacy_video_prompt
+    assert c.video_prompt == EX1N and "Soft rain" in c.legacy_video_prompt
     out = P.apply_edit(c, ShotEdit(h3_body="whatever", camera="camera push in"))
-    assert out.video_prompt == EX1 and out.legacy_video_prompt.startswith("camera push in")
+    assert out.video_prompt == EX1N and out.legacy_video_prompt.startswith("camera push in")
     # 项目方覆盖（edits.json 嵌套格式 {text, by, at, base_sha, note}）：renderable 才替换；draft 只记录
     ov = H3.replace_field(EX1, "overall_soundscape", "Soft rain taps on the glass.")
 
     def edit(status):
         return ShotEdit(h3_prompt_override=H3PromptOverride(text=ov, at="t", note="好", status=status))
     c2 = P.apply_edit(C.compile_shot(_ep(s), s, ScriptGlobals(), set()), edit("renderable"))
-    assert c2.video_prompt == ov and c2.h3_base_prompt == EX1 and c2.h3_override["note"] == "好"
+    assert c2.video_prompt == ov and c2.h3_base_prompt == EX1N and c2.h3_override["note"] == "好"
     c3 = P.apply_edit(C.compile_shot(_ep(s), s, ScriptGlobals(), set()), edit("draft"))
-    assert c3.video_prompt == EX1 and c3.h3_override["status"] == "draft"
+    assert c3.video_prompt == EX1N and c3.h3_override["status"] == "draft"
     assert set(edit("draft").model_dump()["h3_prompt_override"]) >= {"text", "by", "at", "base_sha", "note"}
 
 
@@ -256,7 +261,7 @@ def test_api_h3_sources_and_lint(api):
     assert sm["h3_blocks"]["music"] == "N/A"
     # 剧本 **H3提示词**
     sm2 = c.get("/api/shots/ep01-S2").json()["summary"]
-    assert sm2["h3_prompt_source"] == "script" and sm2["h3_prompt"] == EX1 and sm2["h3_lint_ok"]
+    assert sm2["h3_prompt_source"] == "script" and sm2["h3_prompt"] == EX1N and sm2["h3_lint_ok"]
     # gpu3 同步回来的 compiled.json h3_prompt 优先；takes.json 视频版本的 prompt / sha 一并给出
     g = data / "renders_gpu3" / "ep01" / "S1"
     g.mkdir(parents=True)
@@ -324,7 +329,7 @@ def test_api_owner_override(api, bridge, monkeypatch):
     url = "/api/shots/ep01-S2/h3-override"
     soft = "Soft rain taps on the glass behind her."
     shown = c.get("/api/shots/ep01-S2").json()["summary"]["h3_prompt_sha256"]
-    assert shown == hashlib.sha256(EX1.encode("utf-8")).hexdigest()       # sha256(UTF-8 原文)
+    assert shown == hashlib.sha256(EX1N.encode("utf-8")).hexdigest()       # sha256(UTF-8 原文)
     # 只接受项目方本人 + 非空确认原话
     assert c.put(url, json={"soundscape": soft, "note": "好", "by": "agent"}).status_code == 403
     assert c.put(url, json={"soundscape": soft, "note": "  ", "by": "owner"}).status_code == 400
@@ -549,3 +554,14 @@ def test_rule_explain_bridge_then_local(api, monkeypatch):
     r = c.get("/api/rules/H3-A5/explain").json()
     assert r["source"] == "gpu3" and r["example_fail"] == "f" and seen[-1].endswith("/api/gpu3/rules/H3-A5")
     assert r["sop_href"] == "/api/docs/SOP_production#sec-9A.1"
+
+
+def test_h3_norm_only_change():
+    """K-REN-801：编译后的 H3 正文 = 剧本原文 + 仅限 h3_norm 记录的规范化（每条带规则号）；倒回规范化必须逐字等于原文"""
+    s = _shot(h3_prompt=EX1)
+    c = C.compile_shot(_ep(s), s, ScriptGlobals(), set())
+    assert c.h3_norm and all(x["rule"] == "K-REN-801" for x in c.h3_norm)
+    assert _CN.denormalize(c.video_prompt, c.h3_norm) == EX1
+    s2 = _shot(h3_prompt=EX2)
+    c2 = C.compile_shot(_ep(s2), s2, ScriptGlobals(), set())
+    assert _CN.denormalize(c2.video_prompt, c2.h3_norm) == EX2

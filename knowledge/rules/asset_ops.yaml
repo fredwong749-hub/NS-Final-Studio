@@ -284,3 +284,87 @@ rules:
     confidence: medium
     status: 确认
     date: 2026-11-01
+  - id: K-OPS-W13
+    domain: ops
+    link: [P5-P6, P6-P7]
+    title: 推送资产清单 = producer preflight 的文件依赖（复用 frame_job.build_first，不另列）；推送方不写 ready，服务器 dryrun preflight 0 挡后才写
+    when: resident_sync push_required / required_data 计算要推到服务器的资产；临时覆盖交还服务器出图之前
+    then: tools/pipeline/preflight_deps.py 对现行导入稿每一镜调 ns_agent.frame_job.build_first（与 producer 同一入口），收集作业 refs / asset_refs 里的全部文件（身份脸、设定图与去头裁切、单品 / 参考板、场景底图），再加来源（选定设定图、单品图、assets/scenes 有效图、scene_overrides）；resident_sync.required_data 直接用它；push_required 推完只写 assets_ready.pushed，ready 一律 false，由 FACTORY 在服务器上跑 dryrun preflight 0 挡后写 ready
+    check: tests/test_push_preflight_deps.py
+    evidence:
+      - {src: data/autopilot/assets_ready.json, note: "11-02 01:14：清单漏 assets/scenes，gpu36 交还后 preflight I5（sk_elevator 没有参考底图）每单挡，清单却写 ready、缺 0；总调度收回并改规则"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-W14
+    domain: ops
+    link: [P8-P10]
+    title: 服务器常驻不因“代码有变”反复重启：只在常驻实际加载的文件变了才重启、30 分钟最多一次、先排空；版本统一走 system_version deploy
+    when: resident_sync loop / 任何推代码到服务器后要重启常驻 producer / night 的场合
+    then: resident_sync.AUTO_CODE_PUSH = False（loop 只做 health / push_control / 并回，不推代码、不重启）；需要时用 restart_guarded：resident_imports_changed 只认 producer / series10_video / ns_agent / ns_render / recipes / packages / gen_contract / netfix / config 下的 .py/.json/.yaml，30 分钟内跳过，重启前 producer pause 并等心跳 inflight=0（最多 15 分钟）再 restart、resume；正式发版走 system_version deploy（服务器运行时归 FACTORY）
+    check: tests/test_full_redo.py::test_restart_guarded_skips_without_resident_changes
+    evidence:
+      - {src: docs/debug/DEBUG_r1.md, note: "20:55–00:23 resident_sync 因代码有变重启服务器常驻 22 次，每次作废租约、不等在途作业"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-W15
+    domain: ops
+    link: [P4-P5]
+    title: 新集由导入事件触发（data/autopilot/imports.jsonl），不靠 CHANGELOG 的一行字；运行 ID 从 config/pipeline/run.json 读
+    when: 任何正式导入（producer import_staged 等）之后；episode_pipeline 判断要准备哪些集；换一部剧
+    then: 导入方成功后调 tools/autopilot/import_events.append_import(集号, by, source, note) 追加事件（集号、剧本 sha256、时间、by）；episode_pipeline.candidate_eps = 事件里的集 ∪ 导入稿全部集（按集内容哈希兜底），CHANGELOG 只给人看；run_dir 先读 config/pipeline/run.json 的 run_id，再按 asset_refs.json 项目匹配
+    check: tests/test_episode_pipeline.py::test_candidate_eps_from_events_and_import
+    evidence:
+      - {src: docs/CHANGELOG_AGENTS.md, note: "DISTILL 冷启动演练（run.py flow --episode 4 --dry-run）：不经 HOLLYWOOD 的导入不会被准备；RUN 写死 series10_v1"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-W16
+    domain: ops
+    link: [P8-P10]
+    title: 服务器常驻重启一律走队列：各方只写请求，resident_sync 合并执行（同一台 30 分钟一次、先排空、紧急插队记审计）
+    when: 任何 loop、system_version deploy、人工要重启 gpu33 / gpu36 的常驻 producer / night
+    then: 调 tools/autopilot/restart_queue.request(host, reason, by, urgent) 往 data/autopilot/restart_requests.jsonl 追加请求（不直接重启）；resident_sync loop 每拍 restart_queue.process(host)：同一台距上次重启 < 30 分钟且无紧急请求 → 留着；否则合并全部待办一次执行：producer pause → 等 inflight=0（≤15 分钟）→ resident_restart → resume，结果写 restart_done.jsonl（请求 id、请求方、原因、urgent_jump、drained、耗时），失败不记 done 下一拍再试
+    check: tests/test_infra_resident.py::test_restart_queue_merges_gaps_and_urgent
+    evidence:
+      - {src: docs/debug/DEBUG_r1.md, note: "20:55–00:23 重启 22 次；总调度 02:1x 批准 DJ-20：各 loop 写请求、resident_sync 合并"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-W17
+    domain: ops
+    link: [P4-P5, P5-P6]
+    title: 多剧并行：run 登记表 + 按 run 分开的导入稿 / 作业 / ready / 导入事件；primary 保持旧路径与无前缀镜号（过渡期）
+    when: 新剧本导入（不替换正式剧）；episode_pipeline 准备各 run 的集；任何读写导入稿 / 作业 / ready 的工具
+    then: config/pipeline/runs.json（primary + runs{priority, status, source}），run.json 保留为 primary 指针，读取统一用 tools/autopilot/runs.py；imports.jsonl 每条带 run_id（缺省 primary）；image_jobs.rebuild_first_frame_jobs / jobs_vs_import 按 run 读 data/import/runs/<run>/script_v2.json；episode_pipeline.watch_other_runs 对非 primary run 各自准备，作业写 data/pipeline/runs/<run>/，ready 写 data/autopilot/runs/<run>/ready_episodes.json 且镜号带 <run>/ 前缀；primary 的流程、路径、无前缀镜号不变，直到 producer / dispatch 认前缀
+    check: tests/test_episode_pipeline.py::test_second_run_prepares_separately_without_touching_primary
+    evidence:
+      - {src: docs/AUTOPILOT.md, note: "§0.1 多剧并行接口（总调度 11-02 02:4x 定、批准）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-W18
+    domain: ops
+    link: [P5-P6]
+    title: 新一季继承上一季的资产项目（asset_refs.json 的 inherits 键），不另造资产库；本季新增造型走 IMGFIX 资产流程写进本季文件
+    when: 第二季（series10_s2）及以后同一角色班底的新剧本登记资产项目
+    then: config/recipes/asset_refs.json 子项目写 inherits=<父项目>；ns_agent.asset_refs.project_cfg 从最上层父项目起逐层合并（faces / item_map 等字典深合并，子项目写的路径覆盖），project_chain 防环；sheet_of 按继承链子季优先、回落父季（沿用第一季现行设定图）；load_looks 父季造型在前、子季同 id 覆盖新 id 追加；shot_looks_file / run_dir 每季自己的；本季新增造型由 IMGFIX 出设定图候选 → sheet_intake 入库检查 → 自动选图（R1–R8 / VLM 平局裁决）写进本季 sheets_file / looks_file
+    check: tests/test_asset_refs_inherit.py
+    evidence:
+      - {src: config/recipes/asset_refs.json, note: "总调度 11-02：series10_s2 继承 series10_v1（角色、身份脸 L-086、现行造型设定图、单品）；series10_v1 合并后配置与原配置逐键相同"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-W19
+    domain: ops
+    link: [P5-P6]
+    title: 解析层（face_overrides / item_map_overrides / item_map_quarantine / hub_extra_looks）也按 run 继承，并统一登记，进 FACTORY 闭包和 SENTINEL S6
+    when: 新一季 inherits 父项目，或新增任何 {project:{...}} 形式、会改变参考图解析的覆盖文件
+    then: 参考图解析只走 ns_agent.asset_refs 同一入口（生产 / dryrun / 测试一致）；face_of 用 overlay_value 取继承链上第一个写了该角色的覆盖（子季设了用子季，否则父季），再落到合并后的 config faces；item_map 覆盖、quarantine、hub_extra_looks 用 overlay_layers 父先子后深合并；hub_episode_looks 按集排期每季自己的不继承；所有覆盖文件登记在 config/policies/resolution_layers.yaml，SENTINEL S6 files 必须覆盖全部登记文件；DISTILL decision_check 断言每个 run 每个角色身份脸 = MASTER_PICTURE 定的那张（D-AST-86 扩到所有 run）
+    check: tests/test_resolution_layers.py
+    evidence:
+      - {src: data/looks/face_overrides.json, note: "总调度 11-02 P0：第二季身份脸被解析成 lin_wan_face_ref2va.png（只合并了 asset_refs.json faces，漏 face_overrides），L-086 应为 lin_wan_face_hd_A_s202.png；修后两季均为 hd_A_s202，第一季 102 镜 preflight_deps per_shot refs 改前改后 0 差异"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

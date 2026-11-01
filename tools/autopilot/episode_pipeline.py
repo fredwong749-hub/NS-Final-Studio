@@ -31,7 +31,31 @@ sys.path.insert(0, str(Path(__file__).parent))
 OUT = ROOT / "data/autopilot/episode_pipeline"
 STATE = OUT / "state.json"
 CHANGELOG = ROOT / "docs/CHANGELOG_AGENTS.md"
-RUN = ROOT / "data/pipeline/runs/series10_v1"
+def run_dir() -> Path:
+    """现行剧本所属项目的运行目录（DISTILL 冷启动演练 ①：不写死 series10_v1）——config/recipes/asset_refs.json 里来源路径
+    命中的项目的 run_dir（与 ns_render.unified_frame.project_for 同一规则）；判不出时退回唯一登记的项目 / series10_v1"""
+    def _j(p):
+        try:
+            return json.loads(Path(p).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+    run = (_j(ROOT / "config/pipeline/run.json") or {}).get("run_id")     # 总调度 02:0x：RUN_ID 从配置读（和 producer 对齐）
+    if run:
+        return ROOT / "data/pipeline/runs" / run
+    cfg = _j(ROOT / "config/recipes/asset_refs.json") or {}
+    projects = cfg.get("projects") or {}
+    srcs = [str(x.get("path") or "") for x in ((_j(ROOT / "data/import/script_v2.json") or {}).get("sources") or [])]
+    for name, c in projects.items():
+        if any(name in sp for sp in srcs) and c.get("run_dir"):
+            return ROOT / c["run_dir"]
+    if len(projects) == 1:
+        only = next(iter(projects.values()))
+        if only.get("run_dir"):
+            return ROOT / only["run_dir"]
+    return ROOT / "data/pipeline/runs/series10_v1"
+
+
+RUN = run_dir()
 IMPORT_RE = re.compile(r"HOLLYWOOD\s*导入\s*ep\s*0*(\d+)", re.I)
 
 
@@ -66,6 +90,23 @@ def imported_eps(text: str | None = None) -> list[int]:
         if n not in seen:
             seen.append(n)
     return seen
+
+
+def import_eps() -> list[int]:
+    d = jl(ROOT / "data/import/script_v2.json", {}) or {}
+    return sorted(int(e.get("number") or 0) for e in d.get("episodes") or [] if e.get("number"))
+
+
+def candidate_eps() -> list[int]:
+    """要看的集（总调度 02:0x，K-OPS-W15）= data/autopilot/imports.jsonl 导入事件里的集（producer import_staged 成功后追加）
+    ∪ 导入稿里的全部集（按集内容哈希判断新导入 / 重导：兜底，事件漏写也不会漏准备）。
+    CHANGELOG 的“HOLLYWOOD 导入 epNN”只给人看，⤴ 不再作为触发"""
+    import import_events as IE
+    out = IE.episodes_imported()
+    for e in import_eps():
+        if e not in out:
+            out.append(e)
+    return out
 
 
 def _image_jobs():
@@ -221,6 +262,96 @@ def kickoff(st: dict) -> dict:
     return res
 
 
+# ---------------------------------------------------------------- 多剧并行（docs/AUTOPILOT.md §0.1，K-OPS-W17）
+# primary（series10_v1）走上面原来的路径，零变化；其它 run 走下面：自己的导入稿 / 作业 / ready / 状态，镜号带 run 前缀。
+
+def run_ep_shots(run: str, ep: int) -> list[str]:
+    import runs as RN
+    d = jl(RN.import_path(run, ROOT), {}) or {}
+    for e in d.get("episodes") or []:
+        if int(e.get("number") or 0) == ep:
+            return [f"ep{ep:02d}-S{int(s['index'])}" for s in e.get("shots") or [] if s.get("index") is not None]
+    return []
+
+
+def run_ep_hash(run: str, ep: int) -> str:
+    import hashlib
+    import runs as RN
+    d = jl(RN.import_path(run, ROOT), {}) or {}
+    e = next((x for x in d.get("episodes") or [] if int(x.get("number") or 0) == ep), None)
+    return hashlib.sha256(json.dumps(e, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:16] if e else ""
+
+
+def run_candidate_eps(run: str) -> list[int]:
+    import import_events as IE
+    import runs as RN
+    out = IE.episodes_imported(run_id=run)
+    d = jl(RN.import_path(run, ROOT), {}) or {}
+    for e in d.get("episodes") or []:
+        n = int(e.get("number") or 0)
+        if n and n not in out:
+            out.append(n)
+    return out
+
+
+def write_ready_run(run: str, ep: int, shots: list[str]) -> list[str]:
+    """ready 写 data/autopilot/runs/<run>/ready_episodes.json（primary 另有旧路径，见 write_ready）；
+    非 primary 的镜号带 run 前缀 <run>/<shot>（过渡期规则：producer / dispatch 认前缀之前 primary 不加）"""
+    import runs as RN
+    written = []
+    for path in RN.ready_paths(run, ROOT):
+        d = jl(path, {}) or {}
+        d.update(by="WORKFLOW episode_pipeline", at=time.strftime("%Y-%m-%dT%H:%M:%S"), run_id=run)
+        tag = (lambda x: x) if RN.is_primary(run, ROOT) else (lambda x: f"{run}/{x}")
+        d.setdefault("episodes", {})[str(ep)] = {"ready_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "shots": sorted(tag(x) for x in shots)}
+        js(path, d)
+        written.append(path.relative_to(ROOT).as_posix())
+    return written
+
+
+def prepare_run(run: str, ep: int, st: dict) -> dict:
+    """非 primary run 的一集：按该 run 的导入稿重编作业 → jobs_vs_import(该 run) 对这一集无缺 / 多 / 过期 → 写该 run 的 ready。
+    新剧本没有旧版本，不需要 full_redo / reset-redo；作业 / ready 都在该 run 自己的目录，与 primary 的同名镜（ep01-S1）互不覆盖"""
+    import runs as RN
+    rs = st.setdefault("runs", {}).setdefault(run, {"eps": {}})
+    rec = rs.setdefault("eps", {}).setdefault(str(ep), {})
+    IJ = _image_jobs()
+    rd = RN.run_dir(run, ROOT)
+    try:
+        IJ.rebuild_first_frame_jobs(rd, project=run, write=True, run=run)
+        chk = IJ.jobs_vs_import(rd, run=run)
+    except Exception as e:  # noqa: BLE001
+        rec.update(status="jobs_error", error=repr(e)[:300], at=time.strftime("%F %T"))
+        log("prepare_run", run, f"ep{ep:02d}", "作业重编失败：", repr(e)[:200])
+        return rec
+    mine = run_ep_shots(run, ep)
+    bad = {k: [x for x in chk.get(k) or [] if x in mine] for k in ("missing", "extra", "stale_sha")}
+    if any(bad.values()):
+        rec.update(status="jobs_mismatch", jobs_check=bad, at=time.strftime("%F %T"))
+        return rec
+    written = write_ready_run(run, ep, mine)
+    rec.update(status="prepared", shots=mine, prepared_at=time.time(), prepared_iso=time.strftime("%F %T"),
+               ep_hash=run_ep_hash(run, ep), ready_files=written)
+    log("prepare_run", run, f"ep{ep:02d}", f"{len(mine)} 镜 → {written}")
+    return rec
+
+
+def watch_other_runs(st: dict) -> None:
+    import runs as RN
+    for run in RN.list_runs(ROOT):
+        if RN.is_primary(run, ROOT):
+            continue
+        rs = st.setdefault("runs", {}).setdefault(run, {"eps": {}})
+        for ep in run_candidate_eps(run):
+            rec = rs["eps"].get(str(ep)) or {}
+            redo = rec.get("status") == "prepared" and rec.get("ep_hash") != run_ep_hash(run, ep)
+            if redo or rec.get("status") in (None, "jobs_mismatch", "jobs_error"):
+                try:
+                    prepare_run(run, ep, st)
+                except Exception as e:  # noqa: BLE001
+                    rs["eps"].setdefault(str(ep), {}).update(status="error", error=repr(e)[:300])
+
+
 def first_events(ep: int, since: float) -> dict:
     """producer log.jsonl：这一集首帧 / 尾帧第一次 dispatch / rendered；并回的 vidgen 状态：第一条视频提交 / 打分"""
     out = {}
@@ -295,7 +426,7 @@ def watch(interval: int = 60) -> None:
     while True:
         st = jl(STATE, {}) or {}
         try:
-            for ep in imported_eps():
+            for ep in candidate_eps():
                 rec = (st.get("eps") or {}).get(str(ep)) or {}
                 redo = rec.get("status") == "prepared" and rec.get("ep_hash") and rec["ep_hash"] != ep_hash(ep)   # 这一集又导入了新版
                 if (redo or rec.get("status") in (None, "hold", "jobs_mismatch", "jobs_red", "error")) and not (st.get("holds") or {}).get(str(ep)):
@@ -305,6 +436,7 @@ def watch(interval: int = 60) -> None:
                     except Exception as e:  # noqa: BLE001
                         st["eps"][str(ep)].update(status="error", error=repr(e)[:300])
                         log("prepare error", f"ep{ep:02d}", repr(e)[:300])
+            watch_other_runs(st)             # §0.1：非 primary 的 run 各自准备（primary 上面原样）
             refresh_timings(st)
             report(st)
         except Exception as e:  # noqa: BLE001

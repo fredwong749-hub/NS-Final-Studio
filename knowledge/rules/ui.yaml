@@ -730,3 +730,39 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-UI-047
+    check: tests/test_r40_uirsi.py
+    domain: ui
+    link: [P5-P6]
+    title: 顶栏和总览的状态口径只数“眼下真实的事”——探测中不算空闲、服务器派的活算在出、计划不算排队、旧失败不挂按钮、全量重做算进行中
+    when: 顶栏“卡 N/M 忙”、“渲染任务 N 跑 · N 等 · N 失败”、总览每集 / 每镜“过期”等状态显示
+    then: /api/render/lanes 透传 probing（:8800 刚起还没探过的道），前端探测中的道不进分母，全部在探测时写“卡 探测中…”；服务器自派的活（external）写“在出（服务器派单）”并算忙；render_tasks 的 counts 加 queued（真在排队，不含 plan 计划行）、planned、failed_recent（最近 RECENT_FAIL_H=6 小时），按钮用它们，历史累计放悬停；shot_status 里 L-088 全量重做挂的 redo / master_reject（含“全量重做 / L-088”）在出 = 出图中、没轮到 = 排队中，板块算进行中，只有真被驳回才算“待重出 / 过期”
+    evidence:
+      - {src: docs/uirsi/rounds/r42.md, note: "总调度 01:26 实测 5 条服务器道都在跑，顶栏写“卡 0/7 忙”（:8800 01:23 刚重启、道还在探测）；“30 失败”全是 7.8–47.5 小时前 jobs/v1 落盘的历史；“301 等”里 197 是计划行；10 集全挂“过期”全来自 L-088 全量重做的 redo 标记"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-UI-048
+    check: tests/test_r43_uirsi.py
+    domain: ui
+    link: [P5-P6]
+    title: 正在渲染一律用呼吸灯慢闪（全站一个共享类 .is-rendering），排队 / 未开始静止灰色
+    when: 任何“出图中 / 渲染中 / 正在出”的元素（镜头卡状态点、生产灯、道状态、整集出片点、画布步骤）
+    then: 用 apps/web/src/v3/breathe.css 的 ns-breathe：透明度 0.35 ↔ 1、亮度 0.75 ↔ 1，周期 --breathe-period 2.7 s（2.4–3 s），ease-in-out，不闪不跳；只有真的在跑才呼吸（总览按 job=running / main5 running），排队中用 .is-queued 静止灰色；同屏多个呼吸点父元素给 --breathe-delay（v3/status.ts breatheDelay 按镜号 / 卡号错开）；prefers-reduced-motion 时静止满亮度；旧的 pulse（step-busy / b-running / s-busy / .live / gpu-state.busy）由 breathe.css 统一接管，不各自写动画
+    evidence:
+      - {src: docs/uirsi/rounds/r43.md, note: "项目方 11-02 02:0x：“在 rendering 中，采取像呼吸灯一样一点一点慢慢闪烁会比较舒服，用这个逻辑来做。”"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-UI-049
+    check: tests/test_r43_uirsi.py
+    domain: ui
+    link: [P5-P6]
+    title: 总览整洁规则——全页中性色，状态只用三种 8px 小圆点；镜头卡图下固定 3 行（人物 / 景别·时长·场景 / 一句话内容 + 阶段）；单击开右侧详情抽屉、双击进画布
+    when: 全剧总览（#/overview）默认视图，或任何镜头网格
+    then: 背景 / 卡片 / 文字三档灰；状态色只有 渲染中=蓝点+呼吸灯、需要人看/失败=琥珀点、已确认=绿点（pages/seasonDot.ts dotOf，口径 shot_status.main5），其他状态不画点、只在悬停和抽屉里写字；板块胶囊、状态胶囊、显示细节收进“筛选 ▾”（功能保留）；进度=一行灰字 + 细单色线；卡片 1440 宽每行 7 张 / 1920 宽 9 张、间距 12px、圆角 8px、1px 中性灰边、悬停提亮并显示“查看详情”，不用彩色描边；图下 3 行：出场人物 18px 身份脸圆片（/api/season faces，asset_refs.face_of 同一张）+ 名字、景别 · 时长 · 场景、剧本 img 去触发词 / 机位后的前 20 字（悬停全文）+ 右侧灰字阶段（首帧 · 候选 N）；详情抽屉 520px、Esc 关，从上到下：出场人物（身份脸 + 本镜设定图 + Q1 身份相似度）/ 当前首帧（没当前时写“最新候选，还没定为当前”）+ 状态原因 / 参考图 4 列 / 出图历史新→旧（第几版 · 通过 / 没过 · 原因）/ 检查结果两列表（GET /api/shots/{id}/takes/{stage}/{n}/checks）/ 打开画布 · 重出 · 更多；不出 DaVinci 式改版
+    evidence:
+      - {src: docs/uirsi/rounds/r43.md, note: "项目方 02:1x：“颜色太错乱了，能不能再整洁一点？……参考过程我也觉得不好看，能给我更专业的 layout 吗？”；02:4x：“缺乏很多细节，比如人物什么的……下面黑的一坨东西也不知道是干嘛的……信息也不够”；02:1x 否决 DaVinci 稿"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

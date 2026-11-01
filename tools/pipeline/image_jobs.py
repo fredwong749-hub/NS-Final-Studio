@@ -146,15 +146,28 @@ class LegacySourceError(RuntimeError):
     """K-OPS-Q24：生产出图只认导入稿 data/import/script_v2.json；runs/epNN/P4_epNN.md 是写作中间稿，不能再当出图来源"""
 
 
-def import_sha() -> str:
+def import_json(run: str | None = None) -> Path:
+    """多剧并行（docs/AUTOPILOT.md §0.1）：primary 仍是 data/import/script_v2.json；新 run 是 data/import/runs/<run>/script_v2.json"""
+    if run is None:
+        return IMPORT_JSON
+    sys.path.insert(0, str(ROOT / "tools/autopilot"))
+    import runs as RN
+    return RN.import_path(run, ROOT)
+
+
+def import_sha(run: str | None = None) -> str:
     import hashlib
-    return hashlib.sha256(IMPORT_JSON.read_bytes()).hexdigest()
+    return hashlib.sha256(import_json(run).read_bytes()).hexdigest()
 
 
-def load_import():
-    """现行导入稿（与 build_jobs.load_specs(source="import")、ns_render.pipeline.load_script 同一口径）"""
-    from ns_render import pipeline as P
-    return P.load_script()
+def load_import(run: str | None = None):
+    """现行导入稿（与 build_jobs.load_specs(source="import")、ns_render.pipeline.load_script 同一口径）；run 给定且不是 primary 时读那部剧的导入稿"""
+    p = import_json(run)
+    if p == IMPORT_JSON:
+        from ns_render import pipeline as P
+        return P.load_script()
+    from ns_schema.script import ScriptImport
+    return ScriptImport.model_validate_json(p.read_text(encoding="utf-8"))
 
 
 def import_episode(n: int, si=None):
@@ -172,16 +185,17 @@ def load_episode(md: Path):
     return si, si.episodes[0]
 
 
-def rebuild_first_frame_jobs(run_dir: Path, project: str | None = None, write: bool = True, out: Path | None = None) -> dict:
+def rebuild_first_frame_jobs(run_dir: Path, project: str | None = None, write: bool = True, out: Path | None = None,
+                             run: str | None = None) -> dict:
     import plan_c_preview as PC
     run_dir = Path(run_dir)
     project = project or run_dir.name
     jp = run_dir / "assets" / "first_frame_jobs.json"
-    data = json.loads(jp.read_text(encoding="utf-8"))
+    data = json.loads(jp.read_text(encoding="utf-8")) if jp.exists() else {"jobs": []}     # 新 run 第一次：从空作业表开始
     bible = load_bible()
-    # K-OPS-Q24（RSI 11-01，总调度授权）：作业集合 = 导入稿的镜头集合；提示词唯一来源 = data/import/script_v2.json
-    si = load_import()
-    sha = import_sha()
+    # K-OPS-Q24（RSI 11-01，总调度授权）：作业集合 = 导入稿的镜头集合；提示词唯一来源 = 该 run 的导入稿
+    si = load_import(run)
+    sha = import_sha(run)
     g = si.globals
     sync = sync_job_set(data, si, run_dir)
     changed = []
@@ -192,7 +206,7 @@ def rebuild_first_frame_jobs(run_dir: Path, project: str | None = None, write: b
         n = int(j["ep"])
         ep = by_ep[n]
         shot = next(s for s in ep.shots if s.id == j["shot"])
-        j["prompt_source"] = {"file": "data/import/script_v2.json", "sha256": sha}
+        j["prompt_source"] = {"file": import_json(run).relative_to(ROOT).as_posix(), "sha256": sha}
         refs = list(j.get("refs") or [])
         for name, rel in EXTRA_FACES.items():          # 新角色脸部参考出来后由这里统一补进 refs（IMGGEN 不再自己改提示词）
             full = os.path.normpath(str((run_dir / rel).relative_to(ROOT))).replace("\\", "/")
@@ -310,12 +324,19 @@ def sync_job_set(data: dict, si, run_dir: Path) -> dict:
     return {"added": added, "removed": removed, "kept": len(want) - len(added)}
 
 
-def jobs_vs_import(run_dir: Path | None = None) -> dict:
+def _primary_run() -> str:
+    """K-OPS-W17：默认 run 从 config/pipeline/runs.json 读（笔记本侧，缺文件回退 DEFAULT_PRIMARY）"""
+    sys.path.insert(0, str(ROOT / "tools/autopilot"))
+    import runs as RUNS
+    return RUNS.primary_run()
+
+
+def jobs_vs_import(run_dir: Path | None = None, run: str | None = None) -> dict:
     """G21 / K-OPS-Q24 检查：作业的镜头集合 = 导入稿镜头集合；每条现行作业的 prompt_source.sha256 = 现行 script_v2.json。
     → {ok, missing, extra, stale_sha, import_sha, shots}"""
-    run_dir = Path(run_dir or ROOT / "data/pipeline/runs/series10_v1")
+    run_dir = Path(run_dir or ROOT / "data/pipeline/runs" / _primary_run())
     data = json.loads((run_dir / "assets" / "first_frame_jobs.json").read_text(encoding="utf-8"))
-    si, sha = load_import(), import_sha()
+    si, sha = load_import(run), import_sha(run)
     want = {s.id for e in si.episodes for s in e.shots}
     live = {j["shot"]: j for j in data.get("jobs") or [] if not str(j.get("status", "")).startswith("stale:")}
     missing = sorted(want - set(live))
@@ -327,7 +348,7 @@ def jobs_vs_import(run_dir: Path | None = None) -> dict:
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8")
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    run = Path(args[0]) if args else ROOT / "data/pipeline/runs/series10_v1"
+    run = Path(args[0]) if args else ROOT / "data/pipeline/runs" / _primary_run()
     if "--check" in sys.argv:
         r = jobs_vs_import(run if run.is_absolute() else ROOT / run)
         print(json.dumps(r, ensure_ascii=False, indent=1))

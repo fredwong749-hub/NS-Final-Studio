@@ -269,6 +269,13 @@ def tick(st: dict, now: float | None = None) -> dict:
             except Exception as e:  # noqa: BLE001
                 log("TUNNEL adopt error", script, repr(e)[:200])
     relay_down(st)                                 # 每拍都测一次跳板（A-RELAY 开 / 关）
+    try:                                           # K-OPS-E08（DEBUG-RSI，总调度 11-02 D5）：producer 不在跑时也要让运维暂停到点恢复、显式暂停超时报警
+        sys.path.insert(0, str(ROOT / "tools/autopilot"))
+        import producer as PR
+        if not os.environ.get("PYTEST_CURRENT_TEST"):     # 单元测试不碰真机 control.json
+            st["pause"] = PR.pause_tick(PR.Paths(), now)
+    except Exception as e:  # noqa: BLE001
+        log("pause_tick error", repr(e)[:200])
     # 常驻模式（K-OPS-W07）：笔记本 producer paused_by=SERVER_RESIDENT、night 不在笔记本跑 → 笔记本侧空转 / night / producer
     # 报警不适用（服务器侧由 resident_sync health 报 A-IDLE-<host> 等），这里关掉，免得误报
     resident = ((jl(ROOT / "data/producer/control.json", {}) or {}).get("paused_by") == "SERVER_RESIDENT"

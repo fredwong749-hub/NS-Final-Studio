@@ -168,3 +168,27 @@ def test_scene_plates_in_required_assets(tmp_path):
     got = RP.scene_paths(tmp_path, {"shot_looks_file": "run/assets/shot_looks.json"})
     assert "assets/scenes/sk_elevator/plate.png" in got and "assets/scenes/sk_studio/alt.png" in got
     assert not any("trash" in g for g in got)
+
+
+def test_merge_takes_keeps_local_quarantine(tmp_path, monkeypatch):
+    """UIRSI r42：takes.json 不能整份覆盖——按版本合并，本地“已隔离”永远保留，服务器 active 指向本地已隔离版本时不采用"""
+    MP = _mp()
+    monkeypatch.setattr(MP, "ROOT", tmp_path)
+    monkeypatch.setattr(MP, "backup", lambda rel: None)
+    dst = tmp_path / "data/renders/ep02/S1/takes.json"
+    dst.parent.mkdir(parents=True)
+    q = {"at": "2026-11-02T00:53:02", "by": "UIRSI r41"}
+    dst.write_text(json.dumps({"active": {"image": 2}, "restore_log": ["x"],
+                               "takes": [{"stage": "image", "n": 1, "quarantined": q}, {"stage": "image", "n": 2, "note": "local"}]}),
+                   encoding="utf-8")
+    src = tmp_path / "srv.json"
+    src.write_text(json.dumps({"active": {"image": 1},
+                               "takes": [{"stage": "image", "n": 1, "contract": {"ok": True}},
+                                         {"stage": "image", "n": 2, "contract": {"ok": True}},
+                                         {"stage": "image", "n": 3, "contract": {"ok": True}}]}), encoding="utf-8")
+    act = MP.merge_file("gpu36", "data/renders/ep02/S1/takes.json", src)
+    out = json.loads(dst.read_text(encoding="utf-8"))
+    t = {x["n"]: x for x in out["takes"]}
+    assert act.startswith("takes+1") and t[1]["quarantined"] == q and t[1]["contract"]["ok"]
+    assert t[2]["note"] == "local" and t[2]["contract"]["ok"] and 3 in t
+    assert out["active"]["image"] == 2 and out["restore_log"] == ["x"]      # 服务器 active 指向本地已隔离的 v1 → 保留本地

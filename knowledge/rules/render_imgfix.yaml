@@ -56,3 +56,54 @@ rules:
     confidence: medium
     status: 待验
     date: 2026-11-02
+  - id: K-AST-264
+    domain: asset
+    link: [P5-P6]
+    title: 设定图入库检查——采用前机检左右袖子一致（IN1）和外层单品完整（IN2），不过就不采用
+    when: ns_api.character_hub.set_sheet（换到别的设定图时）、tools/assetmaster/choose.enforce_item_check；实现 ns_agent.sheet_intake.check
+    then: IN1 正面栏人物外框两侧手臂带逐行镜像比颜色（平均 ΔE76 ≤18、一深一浅的行 ≤25%）；IN2 本造型外层单品用契约 Q2 同一探针在正面栏躯干上测存在性（≥0.3）；参数 config/gen_contract.json image_thresholds.sheet_intake
+    check: [tests/test_imgfix.py]
+    evidence:
+      - {src: data/ab/imgfix/sheet_intake_calibration.json, note: "v2_s202 缺袖：IN1 ΔE 33.9、一深一浅 62% → 挡；s101 没画外套：IN2 0.154 → 挡；sleevefix：ΔE 6.45 / 0% / 外套 0.83 → 过；其余 10 张 adopted 设定图全过（ΔE 1.5–5.2）"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-02
+  - id: K-AST-265
+    domain: asset
+    link: [P5-P6]
+    title: 资产缺陷局部修复走通用工具 tools/asset_repair/repair.py（spec 参数化），选候选用代码判据，不靠亲审
+    when: 设定图 / 单品图 / 身份脸外的资产图发现局部缺陷（缺件、颜色错、单侧缺失）
+    then: spec（config/asset_repair/*.json）→ 主色铺底 → Qwen-Image 2.1 潜空间遮罩重绘 → 只贴回遮罩（遮罩外逐像素不变）→ R1 缺陷区修好 / R2 ΔE / R3 遮罩外不变 / R4 Q1 不降 / R5 交界无残留 / R6 入库检查 K-AST-264 / R7 面料纹理（深色区内部高频比 0.85–1.18）→ 全过的按纹理比最接近 1、再按 ΔE 自动选；审片页 data/review_pages/asset_repair_<id>/
+    check: [tests/test_imgfix.py]
+    evidence:
+      - {src: data/assetmaster/sheets_v2/candidates/lookA_sleeve_fix/check.json, note: "24 张候选 2 张 R1–R7 全过（v4_d85_s1102 纹理比 0.978、v4_d92_s1102 0.914），自动选 d85_s1102；总调度 / IMGFIX 目检选的是 d92_s1102（d85 在头发边有一圈浅描边，R1–R7 测不到）→ 待补“轮廓光晕”判据或本地看图复核"}
+      - {src: tools/imgfix/sleeve_fix.py, note: "失败的两种做法：不加遮罩时模型照抄原袖（denoise 0.7、0.9 都不变）；镜像打底把缝线 / 翻领轮廓搬过来"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02
+  - id: K-REN-707
+    domain: render
+    link: [P6-P7]
+    title: 特写 / 近景 / 中近景不注入看不见的下半身描述（角色锁“长腿”、造型补句“露出长腿 / 裙 / 鞋”）；“穿…”/ 并列造型首句不当下半身主体
+    when: frame_job.outer_items（造型补句）、framing.lower_focus（决定编译器是否按景别过滤角色锁）；开关 config/recipes/image_framing.json close_no_lower（11-02 总调度定打开）
+    then: 景别 ∈ CLOSE_NO_LOWER 时造型补句只留 framing.visible 的单品；lower_focus 遇“穿 / 换上”或并列造型首句时只有每一项都看不见才算下半身主体；中景及以上照旧（看得到腿的镜头保留“大长腿”风格）
+    check: [tests/test_imgfix.py]
+    evidence:
+      - {src: data/ab/imgfix/k706_impact.json, note: "打开前近景 33 / 特写 12 / 中近景 9 条作业带“长腿”（造型 B“露出长腿”经造型补句注入 + lower_focus 误判让角色锁不过滤）；打开后 0；作业变 68 条，账本 passed 首帧 0 张受影响"}
+      - {src: docs/video_rca/RCA_r1.md, note: "C16：描述句带画外鞋 / 高跟 / 腿 62/111 退档 vs 不带 0/7（VIDEO-RCA P4）"}
+      - {src: data/ab/imgfix/leg_ab.json, note: "A/B（LEG0 有“长腿” / LEG1 去掉，ep03-S4/S9/S10、ep10-S5 × 2 seed，服务器空档）：景别档准确 3/8 vs 3/8，脸高均值 0.180 vs 0.186，Q1 均值 0.785 vs 0.764（逐对 −0.138…+0.042，n=8 噪声内），看镜头 0/8 vs 0/8 → 单去“长腿”看不出好坏；两组近景 / 中近景都有 5/8 退一档（问题在别处）"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02
+  - id: K-REN-708
+    domain: render
+    link: [P6-P7]
+    title: cast 写“局部”但其实露脸的人按露脸处理（挂身份脸、不写“不露脸”）；同一个人既“不露脸”又露脸 = 矛盾，preflight 挡
+    when: asset_refs.partial_face_visible（resolve_shot 身份脸槽、framing.faced_people、single_turn_line）；gen_contract.preflight I2
+    then: 露脸 = 名字后写到脸 / 头发（face_described）；或本镜只有这一个人且正文有眼 / 视线 / 唇 / 表情 / 脸等词，或景别是特写 / 近景 / 中近景且不是局部 / 物件特写。矛盾（同一人“不露脸”+ 露脸 / 单人脸部特写构图）→ I2 fail（写作 / 导入格式问题，报 WORKFLOW）
+    check: [tests/test_imgfix.py]
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/assets/first_frame_jobs.before_k708_20261102.json, note: "ep02-S10 cast“林晚（局部｜双手）”，正文“特写……视线落在汤面，嘴唇轻抿”：作业同时写“脸部占画面约六成”和“林晚只露出双手，不露脸”，没有林晚身份脸 → 项目方发现换脸；同类 ep04-S7、ep08-S8，共 3 镜"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

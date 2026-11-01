@@ -82,8 +82,14 @@ def _local(now: float) -> list[dict]:
     lane = (ep.get("lanes") or {}).get("laptop:0") or {}
     lane_url = lane.get("url") or "http://127.0.0.1:18388"
     vqa_port = (_jl(VQA_CFG, {}) or {}).get("port") or 8870
-    ok0, ms0 = _probe(lane_url.rstrip("/") + "/system_stats")
     ok1, ms1 = _probe(f"http://127.0.0.1:{vqa_port}/health")
+    if lane.get("disabled"):                 # L-100（11-02）：笔记本 4080 专做看图，本机出图道停用 → 只显示“看图卡”，不报“离线”
+        out = [{"id": "look", "label": "笔记本显卡：看图卡", "ok": ok1, "ms": ms1, "role": "vqa_only",
+                "text": ("看图在线" if ok1 else "看图没在运行") + "（专用看图，不出图）", "tech": f"127.0.0.1:{vqa_port}"}]
+        with _lock:
+            _cache.update(t=now, local=out)
+        return out
+    ok0, ms0 = _probe(lane_url.rstrip("/") + "/system_stats")
     out = [
         {"id": "laptop:0", "label": "笔记本显卡出图", "ok": ok0, "ms": ms0, "hold": bool(lane.get("hold")),
          "text": ("在线" if ok0 else "没在运行") + ("（暂停派活）" if lane.get("hold") else ""),
@@ -145,11 +151,24 @@ def _from_netfix(ns: dict, now: float) -> tuple[dict, list[dict], list[str], dic
                         "last_rebuild_at": _hm((h.get("last_restart") or {}).get("t")), "alert": False, "text": text,
                         "tech": f"本机 {port} → {host}:{pp.get('remote', '?')}（{pp.get('why', '?')}）；连接 {hk} 状态 {st}，重连 {h.get('restarts', 0)} 次"})
     port_name = {str(p): f"{HOST_NAME[hh]}·卡{cc}" for p, (hh, cc) in TUNNEL_CARDS.items()}
+    bad_ports = {str(x["port"]) for x in tunnels if not x["ok"]}
     for hk, h in hosts.items():
         st = h.get("state")
         names = [port_name[str(p)] for p in (h.get("ports") or {}) if str(p) in port_name]
+        # UIAUDIT P1-3（UIRSI r43）：只为“我们 6 条出图连接里真断了的”写重连行，跟连接表同一口径——
+        # 端口通着就不写“正在重连”；命令通道（*-cmd*）不给项目方看；主连接 base 写“主连接”，不漏内部名
+        if "cmd" in hk:
+            continue
+        if hk == "base":
+            if st in ("connecting", "backoff", "queued", "wait_base") and bad_ports:
+                reconnect.append("正在重连主连接（各条出图连接都走它）")
+            continue
+        if not any(str(p) in bad_ports for p in (h.get("ports") or {})):
+            continue
         who = "、".join(names) or HOST_NAME.get(h.get("server") or hk, h.get("server") or hk)
-        if st == "connecting":
+        if st in ("queued", "wait_base"):
+            reconnect.append(f"{who} 的连接在排队，等主连接通了再连")
+        elif st == "connecting":
             reconnect.append(f"正在重连 {who} 的连接（已重连 {h.get('restarts', 0)} 次）")
         elif st == "backoff":
             nt = float(h.get("next_try_t") or 0)

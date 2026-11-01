@@ -15,7 +15,7 @@ import { useStudio, type Studio } from "../store";
 import type { ShotSummary, SopShot } from "../types";
 import { expectedLast, shotLine } from "../util";
 import { letterOf } from "./LeftRail.helpers";
-import { badOf, camRaw, frameState, shotMeta, shotStatus, staleOf, videoBlock } from "./status";
+import { badOf, camRaw, frameState, shotMeta, shotStatus, staleOf, videoBlock, breatheDelay } from "./status";
 import { useUi } from "./ui.helpers";
 import { useEdit } from "./edit/state";
 import { Pop, StatusLine } from "./widgets";
@@ -400,6 +400,7 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
     <article
       className={`v3-row${more ? "" : " lean"}${selected ? " sel" : ""}${inMulti ? " multi" : ""}${dim ? " dim" : ""}${hl ? " hl" : ""}${s.video ? " has-vid" : ""}`}
       data-shot={s.id}
+      style={breatheDelay(s.id)}
       onClick={(e) => st.select(s.id, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey })}
       onDoubleClick={() => (st.select(s.id), st.setCanvasMode("edit"))}
     >

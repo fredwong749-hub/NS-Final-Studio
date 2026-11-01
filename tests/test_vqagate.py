@@ -297,8 +297,14 @@ def _v(yaw, ident="ok"):
             "gaze_mp": {"faces": [{"yaw_n": yaw, "pitch_n": 0.1, "eye_x": 0.3}], "hits": 0}}
 
 
-def test_q1_yaw_relax_tiers(enf):
-    """Q1 按转角放宽（总调度 23:0x）：|yaw|<0.4 → 0.70；0.4–0.8 → 0.65；≥0.8 → 0.60；看图身份不是 ok → 回 0.70"""
+def test_q1_yaw_relax_tiers(enf, monkeypatch):
+    """Q1 按转角放宽（总调度 23:0x）：|yaw|<0.4 → 0.70；0.4–0.8 → 0.65；≥0.8 → 0.60；看图身份不是 ok → 回 0.70。
+    11-02 K-REV-V18 修订后生产里已关（yaw_relax.enabled=false，由三段判定取代），这里显式打开只测函数本身"""
+    from ns_agent import gen_contract as GC
+    real = GC.cfg()
+    q1c = {**real["image_thresholds"]["Q1_identity"]}
+    q1c["yaw_relax"] = {**q1c["yaw_relax"], "enabled": True}
+    monkeypatch.setattr(GC, "cfg", lambda: {**real, "image_thresholds": {**real["image_thresholds"], "Q1_identity": q1c}})
     pf = VQ.apply(_pf_q1(0.66), _v(0.6))
     assert pf["ok"] is True and next(i for i in pf["items"] if i["id"] == "Q1")["status"] == "pass"
     pf = VQ.apply(_pf_q1(0.66), _v(0.2))               # 正脸：仍要 0.70
@@ -400,7 +406,11 @@ def test_vqa_gate_skips_vlm_when_contract_already_fails(monkeypatch, enf):
     assert not calls and next(i for i in pf["items"] if i["id"] == "Q9")["status"] == "untested"
     pf = {"ok": False, "blocking": ["Q1"], "items": [{"id": "Q1", "status": "fail"}], "reasons": []}
     PR.vqa_gate("ep01-S1", "image", "renders/x.png", {"prompt": "p"}, pf)
-    assert calls
+    assert not calls                                       # Q1 不过、看图也救不回 → 不看
+    pf = {"ok": False, "blocking": ["Q1"], "reasons": [], "items": [{"id": "Q1", "status": "fail",
+          "detail": "lin_wan 0.66（对 lin_wan）< 0.7", "evidence": {"sims": {"lin_wan": 0.66}, "strangers": []}}]}
+    PR.vqa_gate("ep01-S1", "image", "renders/x.png", {"prompt": "p"}, pf)
+    assert calls                                           # 转角放宽可能救回 → 看
 
 
 def test_back_of_head_recheck(monkeypatch, enf, tmp_path):
@@ -443,3 +453,117 @@ def test_deploy_push_refuses_without_thread_guard(monkeypatch):
     monkeypatch.setattr(D, "thread_guard_ok", lambda: False)
     monkeypatch.setattr(D, "ssh", lambda *a, **k: (_ for _ in ()).throw(AssertionError("不该连服务器")))
     assert D.push("gpu33") is False
+
+
+def test_gaze_band_recheck_catches_near_miss(monkeypatch, enf, tmp_path):
+    """L-102：s20261304 这类“差一点”（MediaPipe 0.065，线 0.05）由裁脸复判接住；回归集里登记了这张"""
+    from PIL import Image
+    from ns_agent.vqa import client as C
+    reg = json.loads((ROOT / "data/vqa/gate_calib/gaze_regression.json").read_text(encoding="utf-8"))
+    assert any("s20261304" in it["path"] and it["label"] == "看镜头" for it in reg["items"])
+    enf["gate"]["gaze_mp"] = {"enabled": True, "A": 0.3, "T": 0.05, "P": 0.2, "down_max": 0.35, "blink_max": 0.6, "band": 2.0}
+    img = tmp_path / "x.png"
+    Image.new("RGB", (300, 400)).save(img)
+    monkeypatch.setattr(VQ, "ROOT", tmp_path)
+    face = {"yaw_n": 0.1, "eye_x": 0.035, "pitch_n": 0.1, "bs_y": 0.0, "blink": 0.0, "ybox": [100, 100, 60, 70]}
+    monkeypatch.setattr(C, "generate", lambda req, **k: {"text": '{"gaze": "看镜头", "e": "瞳孔正对"}'})
+    v = {"checks": {"eye_contact": {"s": "ok", "e": ""}}, "defects": []}
+    VQ.recheck_gaze_band(v, [face], img, "中景")
+    assert v["defects"] == ["eye_contact"]
+    monkeypatch.setattr(C, "generate", lambda req, **k: {"text": '{"gaze": "看别处", "e": ""}'})
+    v = {"checks": {}, "defects": []}
+    VQ.recheck_gaze_band(v, [face], img, "中景")
+    assert v["defects"] == []
+    v = {"checks": {}, "defects": []}                      # 分数远离线（0.5）不复判
+    VQ.recheck_gaze_band(v, [{**face, "eye_x": 0.5}], img, "中景")
+    assert "gaze_recheck" not in v
+
+
+def test_v7_window_rule_matches_owner_labels():
+    """K-REV-V16：V7 台词段口径——幅度 ≥ win_amp_min 是前提，再“相关 ≥ 线 或 张嘴占比 ≥0.30”；对总调度标签 5/5"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("s10v_v7_rule", ROOT / "tools/series10_video/v7_lipsync.py")
+    V = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(V)
+    except Exception as e:  # noqa: BLE001
+        pytest.skip(f"v7_lipsync 依赖不全：{e}")
+    TH = V.TH
+    lab = json.loads((ROOT / "data/vqa/gate_calib/v7_labels.json").read_text(encoding="utf-8"))["items"]
+    for it in lab:
+        ok = it["win_amp"] >= TH["win_amp_min"] and (it["corr"] >= TH["corr_min"] or it["win_open_frac"] >= TH["win_open_frac_min"])
+        assert ok == (it["label"] == "过"), it["clip"]
+
+
+def test_q1_needs_vlm_only_when_rescuable():
+    def pf(sim, detail=None, ev=None):
+        return {"ok": False, "blocking": ["Q1"], "items": [{"id": "Q1", "status": "fail",
+                "detail": detail or f"lin_wan {sim}（对 lin_wan）< 0.7", "evidence": ev or {"sims": {"lin_wan": sim}, "strangers": []}}]}
+    assert VQ.q1_needs_vlm(pf(0.66))                       # 转角放宽可能救回
+    assert not VQ.q1_needs_vlm(pf(0.40))                   # 差太多：不看图
+    assert VQ.q1_needs_vlm(pf(0, "画面里多了不该有的人 / 认不出是谁：1 张脸",
+                              {"partial_cast": True, "stranger_boxes": [[1, 2, 3, 4]], "sims": {}}))
+
+
+def test_identity_gate_unexpected_face_blocks_stranger():
+    """K-REV-V18 人物一致性闸门：cast 写“局部 双手”，画面里却出了脸（ep02-S10 换人，ArcFace 对 L-086 0.24–0.26）→ Q1 拦；
+    露了脸但认得出是本人（正例最低 0.669）→ 过；脸太小不判"""
+    from ns_agent.gen_contract import postflight as PO
+    rec = {"size": "特写", "subject": "part", "zones": [], "primary": None, "slots": [], "missing": [], "characters": []}
+    req = {"asset_refs": rec, "cast": [{"name": "林晚", "presence": "局部"}]}
+    loc = {"Q2": [], "Q4": None, "Q7": None}
+    def q1(faces):
+        r = PO.evaluate("x.png", req, remote={"faces": faces}, local=loc)
+        return next(i for i in r.items if i.id == "Q1")
+    bad = q1([{"h_ratio": 0.2, "bbox": [1, 2, 3, 4], "sims": {"lin_wan": 0.24, "gu_chen": 0.05}}])
+    assert bad.status == "fail" and "不像" in bad.detail
+    good = q1([{"h_ratio": 0.2, "sims": {"lin_wan": 0.70, "gu_chen": 0.05}}])
+    assert good.status == "pass"
+    tiny = q1([{"h_ratio": 0.02, "sims": {"lin_wan": 0.1}}])
+    assert tiny.status == "na"
+    assert q1([]).status == "na"
+
+
+def test_q1_three_bands():
+    """K-REV-V18 修订：≥0.60 过；0.50–0.60 复核带（Q1 不过 + review_band 证据，交本地看图并排复核）；<0.50 直接不过；小脸下移 0.10"""
+    from ns_agent.gen_contract import postflight as PO
+    rec = {"size": "近景", "subject": None, "zones": ["face"], "primary": "lin_wan", "slots": [], "missing": []}
+    req = {"asset_refs": rec, "cast": [{"name": "林晚", "presence": "在画"}]}
+    loc = {"Q2": [], "Q4": None, "Q7": None}
+    def q1(sim, h=0.2):
+        return next(i for i in PO.evaluate("x.png", req, remote={"faces": [{"h_ratio": h, "bbox": [0, 0, 9, 9], "sims": {"lin_wan": sim}}]},
+                                           local=loc).items if i.id == "Q1")
+    assert q1(0.62).status == "pass"
+    b = q1(0.55)
+    assert b.status == "fail" and b.evidence["review_band"][0]["cid"] == "lin_wan"
+    c = q1(0.45)
+    assert c.status == "fail" and not c.evidence["review_band"]
+    assert q1(0.52, h=0.06).status == "pass"            # 小脸档 ≥0.50
+
+
+def test_q1_band_review_fail_closed(monkeypatch, enf, tmp_path):
+    """K-REV-V18 修订：复核带（0.50–0.60）看图没跑成 / 报错 / 有一项不是“是” → Q1 维持不过（fail-closed）；三项全是 → 改判过"""
+    from PIL import Image
+    from ns_agent.vqa import client as C
+    img = tmp_path / "x.png"
+    Image.new("RGB", (300, 400)).save(img)
+    monkeypatch.setattr(VQ, "ROOT", tmp_path)
+    (tmp_path / "data/assets/identity_refs/lin_wan").mkdir(parents=True)
+    Image.new("RGB", (64, 64)).save(tmp_path / VQ.L086)
+
+    def pf():
+        return {"ok": False, "blocking": ["Q1"], "reasons": ["Q1 x"], "items": [{"id": "Q1", "status": "fail",
+                "detail": "lin_wan 0.550（对 lin_wan）在复核带 0.5–0.6（近中景及以上），待本地看图并排复核",
+                "evidence": {"review_band": [{"cid": "lin_wan", "sim": 0.55, "lo": 0.5, "need": 0.6, "bbox": [50, 50, 120, 140]}]}}]}
+    monkeypatch.setattr(C, "generate", lambda req, **k: {"error": "服务没起"})
+    p = pf()
+    assert VQ.q1_band_review(p, img) is None and p["ok"] is False
+    monkeypatch.setattr(C, "generate", lambda req, **k: (_ for _ in ()).throw(RuntimeError("连接断")))
+    p = pf()
+    assert VQ.q1_band_review(p, img) is None and p["ok"] is False
+    monkeypatch.setattr(C, "generate", lambda req, **k: {"text": '{"same_person": "是", "style_ok": "否", "sharp": "是", "e": "发平"}'})
+    p = pf()
+    assert VQ.q1_band_review(p, img) is None and p["ok"] is False
+    monkeypatch.setattr(C, "generate", lambda req, **k: {"text": '{"same_person": "是", "style_ok": "是", "sharp": "是", "e": ""}'})
+    p = pf()
+    assert VQ.q1_band_review(p, img) and p["ok"] is True

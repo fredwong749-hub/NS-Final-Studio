@@ -52,6 +52,7 @@ Host gpu36
     HostKeyAlias gpu36
     IdentityFile ~/.ssh/id_ed25519_gpu36
     ProxyJump 194relay
+# ---- r3：-tb = 经 base-b（直连跳板）的第二条底座，端口 22361 / 22331
 # ---- r2：底座隧道端口经 Windows 侧 stdio 桥（WSL NAT 访问不到 Windows 127.0.0.1）
 Host gpu36-t
     HostName 127.0.0.1
@@ -68,3 +69,18 @@ Host gpu33-t
     IdentityFile ~/.ssh/id_ed25519_gpu36
     ConnectTimeout 15
     ProxyCommand "/mnt/d/NS-Final Studio/.venv/Scripts/python.exe" -u "D:/NS-Final Studio/tools/netfix/tcpbridge.py" 127.0.0.1 22330
+Host gpu36-tb
+    HostName 127.0.0.1
+    User root
+    HostKeyAlias gpu36
+    IdentityFile ~/.ssh/id_ed25519_gpu36
+    ConnectTimeout 15
+    ProxyCommand "/mnt/d/NS-Final Studio/.venv/Scripts/python.exe" -u "D:/NS-Final Studio/tools/netfix/tcpbridge.py" 127.0.0.1 22361
+Host gpu33-tb
+    HostName 127.0.0.1
+    User root
+    HostKeyAlias gpu33
+    IdentityFile ~/.ssh/id_rsa_gpu33
+    IdentityFile ~/.ssh/id_ed25519_gpu36
+    ConnectTimeout 15
+    ProxyCommand "/mnt/d/NS-Final Studio/.venv/Scripts/python.exe" -u "D:/NS-Final Studio/tools/netfix/tcpbridge.py" 127.0.0.1 22331

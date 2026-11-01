@@ -86,6 +86,21 @@ def cutoff_for(ep: int) -> str | None:
     return max(c) if c else None
 
 
+QDIR_NAME = "_quarantine_20261102_oldscript"
+
+
+def is_quarantined(t: dict) -> bool:
+    """已隔离：takes.json 里有 quarantined 标记；或者标记被别的进程整份重写冲掉了（r42 实测：服务器并回 takes.json“新者为准”覆盖，
+    72 个标记丢了），但文件已不在 data/、在隔离区里——照样算已隔离，不显示、不当当前"""
+    if t.get("quarantined"):
+        return True
+    f = t.get("file")
+    if not f:
+        return False
+    data = _P().DATA                     # 跟 pipeline 的数据根走（测试会换成临时目录）
+    return not (data / f).exists() and (data / QDIR_NAME / "data" / f).exists()
+
+
 def _prompt_sha(t: dict) -> str | None:
     for src in (t, t.get("params") or {}, t.get("producer") if isinstance(t.get("producer"), dict) else {}):
         ps = src.get("prompt_source") if isinstance(src, dict) else None
@@ -165,7 +180,7 @@ def candidates(ep: int, history: bool = False):
             continue
         row: dict[str, dict] = {}
         for st in STAGES:
-            ts = [t for t in data.get("takes") or [] if t.get("stage") == st and (history or not t.get("quarantined"))]
+            ts = [t for t in data.get("takes") or [] if t.get("stage") == st and (history or not is_quarantined(t))]
             if not ts:
                 continue
             items = []
@@ -178,7 +193,7 @@ def candidates(ep: int, history: bool = False):
                     old_why = f"旧剧本版本（剧本 {cutoff_label(ep)} 更新前出的，镜头可能已重新编号）"
                     ok, why = False, f"{why}；{old_why}" if why else old_why
                 post = ((t.get("gen_contract") or {}).get("post") or {}) if isinstance(t.get("gen_contract"), dict) else {}
-                q = t.get("quarantined") if isinstance(t.get("quarantined"), dict) else None
+                q = t.get("quarantined") if isinstance(t.get("quarantined"), dict) else ({"moved_to": {"file": f"data/_quarantine_20261102_oldscript/data/{t.get('file')}"}} if is_quarantined(t) else None)
                 qf = ((q or {}).get("moved_to") or {}).get("file")
                 f_ = qf[len("data/"):] if qf and qf.startswith("data/") else t.get("file")   # r41：历史入口看隔离区里的原图
                 if q:
@@ -190,11 +205,11 @@ def candidates(ep: int, history: bool = False):
                               "contract": post.get("status") if isinstance(post, dict) else None,
                               "rejected": bool(prm.get("rejected")), "script": ver})
             a = (data.get("active") or {}).get(st)
-            aq = next((x for x in data.get("takes") or [] if x.get("stage") == st and x.get("n") == a and x.get("quarantined")), None)
+            aq = next((x for x in data.get("takes") or [] if x.get("stage") == st and x.get("n") == a and is_quarantined(x)), None)
             # r41：当前版本已隔离 = 没有当前（和集摘要 _active 同口径）
             row[st] = {"active": None if aq else a, "takes": [x for x in items if x["url"]], **({"active_quarantined": a} if aq else {})}
         # UIRSI r40：视频版本也标剧本版本（画布“视频 N 版待选”只数现行剧本出的）
-        vt = [x for x in data.get("takes") or [] if x.get("stage") == "video" and (history or not x.get("quarantined"))]
+        vt = [x for x in data.get("takes") or [] if x.get("stage") == "video" and (history or not is_quarantined(x))]
         if vt:
             row["video"] = {"active": (data.get("active") or {}).get("video"),
                             "takes": [{"n": x["n"], "script": script_version(x, ep), "created_at": x.get("created_at")} for x in vt]}
@@ -381,3 +396,28 @@ def regen(shot_id: str, stage: str, n: int, body: RegenBody):
         b["by"] = body.by
     out = FJ.create_frame_job(shot_id, FJ.FrameJobBody(**b))
     return {**(out if isinstance(out, dict) else {"job": out}), "regen_of": n, "mode": b["mode"], "seed": seed}
+
+
+@router.get("/api/shots/{shot_id}/takes/{stage}/{n}/checks")
+def take_checks(shot_id: str, stage: str, n: int):
+    """UIRSI r43（总调度 02:2x 详情抽屉“检查结果”两列表）：这一版的出图检查逐项结论，只读。
+    来源：takes.json 这一版的 postflight.items（Q1 身份 / Q2 造型 / Q3 景别 …，GEN_CONTRACT 后检）+ 最后一轮看图判定 params.vqa_rounds[-1].judge。
+    → {items: [{id, title, status: pass|fail|warn|untested|…, detail}], judge: {verdict, reasons[]} | None}"""
+    if stage not in STAGES:
+        raise HTTPException(400, "只有首帧 / 尾帧有检查结果")
+    P = _P()
+    t = next((x for x in P.load_takes(shot_id).get("takes") or [] if x.get("stage") == stage and x.get("n") == n), None)
+    if not t:
+        raise HTTPException(404, "没有这个版本")
+    pf = t.get("postflight") if isinstance(t.get("postflight"), dict) else {}
+    items = [{"id": it.get("id"), "title": it.get("title") or it.get("id"), "status": it.get("status"), "detail": it.get("detail") or ""}
+             for it in pf.get("items") or [] if isinstance(it, dict)]
+    rounds = (t.get("params") or {}).get("vqa_rounds") if isinstance(t.get("params"), dict) else None
+    j = ((rounds[-1] or {}).get("judge") or {}) if rounds else {}
+    judge = {"verdict": j.get("verdict"), "reasons": [str(x) for x in (j.get("reasons") or [])][:4],
+             "failed": [str(x) for x in (j.get("failed_checks") or [])]} if j else None
+    # 出场人物的身份相似度（Q1 ArcFace 余弦，cid → 值），详情抽屉“出场人物”一栏用
+    q1 = next((it for it in pf.get("items") or [] if isinstance(it, dict) and it.get("id") == "Q1"), None)
+    sims = ((q1 or {}).get("evidence") or {}).get("sims") if isinstance((q1 or {}).get("evidence"), dict) else None
+    return {"shot": shot_id, "stage": stage, "n": n, "items": items, "judge": judge,
+            "identity": {str(k): v for k, v in sims.items() if isinstance(v, (int, float))} if isinstance(sims, dict) else {}}

@@ -46,6 +46,14 @@
     }
    },
    "item_map_note": "系统提议（REFLOCK 2026-10-31，按单品名与产品图人工比对）：S01 = 唯一的 12cm 透明细高跟；O09 = 黑色镜面漆皮超短裙；N1 = 冰川满钻尖甲（透明长甲满钻）。未映射：B 的“黑色漆皮束腰”——衣橱 LW-O10 带肩带 / 开窗，与造型 B 设定图（抹胸束腰）不一致，待项目方定以哪个为准，暂以设定图为准；细银链 / 红绳 / 九串铁珠 / 白球鞋 / 雾蓝针织长裙 / 米白衬衫 / 深灰西装裙在衣橱里没有对应产品图 → 用设定图裁切；短款西装外套 = \"__missing__\"（ASSETMASTER lib_map：库里只有顾沉男式外套 LW-O21，设定图 A 也没画外套，判缺图）；11-01 ASSETMASTER：短款西装外套 → am-lin_wan-33599db7（产品图暂定 2 张）、B 九串铁珠 → lw-accessory-lw-a03（9 颗 5mm 不锈钢本色钢珠产品图）"
+  },
+  "series10_s2": {
+   "inherits": "series10_v1",
+   "_doc": "第二季（总调度 11-02）：继承第一季资产项目（角色、身份脸 L-086、现行造型设定图、单品映射）；本季新增造型 / 角色走 IMGFIX 资产流程（设定图候选 → sheet_intake 入库检查 → 自动选图 R1–R8 / VLM 平局裁决），写进本季自己的 looks_file / sheets_file，没写的回落第一季。不另造资产库",
+   "run_dir": "data/pipeline/runs/series10_s2",
+   "looks_file": "data/pipeline/runs/series10_s2/P1_looks.json",
+   "sheets_file": "data/pipeline/runs/series10_s2/assets/sheets_chosen.json",
+   "shot_looks_file": "data/pipeline/runs/series10_s2/assets/shot_looks.json"
   }
  },
  "models": {

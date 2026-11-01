@@ -235,3 +235,16 @@ rules:
     confidence: high
     status: 确认
     date: 2026-10-31
+  - id: K-WRT-705
+    domain: writer
+    link: P3-P4
+    title: “人物”行的在画 / 局部要和景别、正文一致：写了脸、视线、嘴唇、表情的人就是“在画”，不能写“局部”
+    when: 每镜 **人物** 行（cast）与 img 正文
+    then: 特写 / 近景 / 中近景里正文写到某人的眼睛、视线、嘴唇、表情、脸 → 这人写“在画”；只有真的只露手、背影、下半身时才写“局部｜<部位>”
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: “人物”行和画面要对得上：正文写到谁的眼睛 / 视线 / 嘴唇 / 表情 / 脸，谁就写“在画”；“局部｜<部位>”只用于真的只露手、背影或下半身的人。特写、近景、中近景里只有一个人且写了视线，就一定是“在画”。
+    evidence:
+      - {src: data/import/script_v2.json, note: "ep02-S10“林晚（局部｜双手）”却写“视线落在汤面，嘴唇轻抿”（特写）；ep04-S7、ep08-S8 同类——编译层按局部处理丢了身份脸，出图换脸（项目方 11-02 发现）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

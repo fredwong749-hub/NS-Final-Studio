@@ -633,6 +633,7 @@ def check_v3(imp, text: str, require: bool) -> tuple[list[dict], dict[int, list[
     for ep in imp.episodes:
         ep_out = eps.setdefault(ep.number, [])
         ep_out.extend(WL.check_episode(ep, _wl_fields))          # QW-W4 造型行下装品类（ITERAUDIT 11-01）
+        ep_out.extend(WL.check_rubric(ep, text))                 # QW-RB1 清单代码判定（HOLLYWOOD r7，CONSENT 总调度 -> HOLLYWOOD）
         idx = {s.index for s in ep.shots}
         all_cast = [c for s in ep.shots for c in (s.cast or [])]
         cast_names = list(dict.fromkeys(c.name for c in all_cast))
@@ -1003,6 +1004,7 @@ def main(argv=None) -> int:
     ap.add_argument("script")
     ap.add_argument("--episode", type=int)
     ap.add_argument("--json", action="store_true", help="输出 JSON 报告")
+    ap.add_argument("--rubric-gate", action="store_true", help="导入闸门：QW-RB1（rubric_code 代码判定）升为阻断（HOLLYWOOD r7）")
     ap.add_argument("--repair-dir", help="把每个失败镜头的返修请求写成 txt 文件")
     ap.add_argument("--names", default="", help="H3 里禁止出现的人名（英文/拼音），逗号分隔")
     ap.add_argument("--require-scenes", action="store_true",
@@ -1010,6 +1012,8 @@ def main(argv=None) -> int:
     ap.add_argument("--require-v3", action="store_true",
                     help="按 v3 字段规则查（人物表 / 出场人物 / 用到的场景 / 造型 / 人物 / 衔接；不给时：一个 v3 字段都没写的旧剧本不查）")
     a = ap.parse_args(argv)
+    if a.rubric_gate and hasattr(WL, "RUBRIC_LEVEL"):
+        WL.RUBRIC_LEVEL = "block"
     rep = validate(Path(a.script), a.episode, [n.strip() for n in a.names.split(",") if n.strip()],
                    require_scenes=a.require_scenes or REQUIRE_SCENES, require_v3=a.require_v3 or REQUIRE_V3)
     if not rep["episodes_found"]:

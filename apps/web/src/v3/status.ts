@@ -407,3 +407,12 @@ export const gapText = (t: string) =>
     .replace(/（本镜 ?cue）/gi, "")
     .replace(/H3 ?audio/gi, "环境声")
     .trim();
+
+/** UIRSI r43（K-UI-048 呼吸灯）：同屏多个“正在渲染”呼吸点按镜号 / 卡号错开相位，避免整屏齐闪。
+ *  返回给父元素的 style（CSS 变量会继承给里面的 .is-rendering / .stag.k-busy 等）；负延迟 = 从周期中段开始。 */
+export function breatheDelay(key: string | number | null | undefined): Record<string, string> {
+  const s = String(key ?? "");
+  let h = 0;
+  for (const ch of s.replace(/^.*?(\d+)\D*$/, "$1") || s) h = (h * 31 + ch.charCodeAt(0)) % 997;
+  return { "--breathe-delay": `-${((h * 0.37) % 2.7).toFixed(2)}s` };
+}

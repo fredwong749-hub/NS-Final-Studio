@@ -1,0 +1,132 @@
+[
+  {
+    "id": "ov_default",
+    "title": "总览默认（简洁）1440",
+    "path": "/#/overview",
+    "wait": 10000,
+    "steps": [
+      { "wait": 2500 },
+      { "js": "const cb=[...document.querySelectorAll('label')].find(l=>/显示细节/.test(l.innerText)); const inp=cb?.querySelector('input'); const ep=[...document.querySelectorAll('*')].filter(e=>e.children.length<6 && /^第 ?\\d+ ?集/.test((e.innerText||'').trim())).length; return {detailChecked: inp?.checked, legend: [...document.querySelectorAll('[class*=legend] button, [class*=legend] span, [class*=sst-leg] *')].map(x=>x.innerText).filter(Boolean).slice(0,30), boardText: document.body.innerText.match(/板块[\\s\\S]{0,80}/)?.[0], ls: Object.fromEntries(Object.keys(localStorage).filter(k=>/season|detail|overview|ov/i.test(k)).map(k=>[k,localStorage.getItem(k)]))}" },
+      { "shot": "main" }
+    ]
+  },
+  {
+    "id": "ov_ep06",
+    "title": "总览第 6 集 1440",
+    "path": "/#/overview",
+    "wait": 10000,
+    "steps": [
+      { "wait": 2500 },
+      { "js": "const h=[...document.querySelectorAll('*')].filter(e=>/^第 6 集/.test((e.innerText||'').trim()) && e.children.length<8).sort((a,b)=>a.innerText.length-b.innerText.length)[0]; h?.scrollIntoView({block:'start'}); window.scrollBy(0,-120); document.querySelectorAll('main,[class*=scroll],.season').forEach(s=>{}); await new Promise(r=>setTimeout(r,2500)); const row=h?.closest('section, [class*=ep-row], [class*=season-ep], [class*=sea-ep]') || h?.parentElement?.parentElement; return {head: h?.innerText, rowText: row?.innerText?.slice(0,1500), rowClass: row?.className}" },
+      { "shot": "ep06" },
+      { "js": "const h=[...document.querySelectorAll('*')].filter(e=>/^第 6 集/.test((e.innerText||'').trim()) && e.children.length<8).sort((a,b)=>a.innerText.length-b.innerText.length)[0]; const row=h?.closest('section, [class*=ep-row], [class*=season-ep], [class*=sea-ep]') || h?.parentElement?.parentElement; const tiles=[...(row||document).querySelectorAll('[title]')].map(t=>t.title).filter(t=>/S\\d/.test(t)).slice(0,12); return tiles" }
+    ]
+  },
+  {
+    "id": "ov_ep06_detail",
+    "title": "总览第 6 集 细节 ▸",
+    "path": "/#/overview",
+    "wait": 10000,
+    "steps": [
+      { "wait": 2500 },
+      { "js": "const h=[...document.querySelectorAll('*')].filter(e=>/^第 6 集/.test((e.innerText||'').trim()) && e.children.length<8).sort((a,b)=>a.innerText.length-b.innerText.length)[0]; const row=h?.closest('section, [class*=ep-row], [class*=season-ep], [class*=sea-ep]') || h?.parentElement?.parentElement; const b=[...(row||document).querySelectorAll('button, [role=button], summary')].find(x=>/细节/.test(x.innerText)); b?.scrollIntoView({block:'center'}); b?.click(); await new Promise(r=>setTimeout(r,1500)); h?.scrollIntoView({block:'start'}); window.scrollBy(0,-100); return {clicked: b?.innerText, row: row?.innerText?.slice(0,1800)}" },
+      { "shot": "ep06_detail" }
+    ]
+  },
+  {
+    "id": "ov_full_detail",
+    "title": "总览 显示细节 1440",
+    "path": "/#/overview",
+    "wait": 10000,
+    "steps": [
+      { "wait": 2500 },
+      { "click": "显示细节", "after": 2000 },
+      { "js": "return {txt: document.body.innerText.slice(0,2500)}" },
+      { "shot": "detail" },
+      { "js": "const h=[...document.querySelectorAll('*')].filter(e=>/^第 2 集/.test((e.innerText||'').trim()) && e.children.length<8).sort((a,b)=>a.innerText.length-b.innerText.length)[0]; h?.scrollIntoView({block:'start'}); window.scrollBy(0,-100); await new Promise(r=>setTimeout(r,2000)); return h?.innerText", "after": 500 },
+      { "shot": "detail_ep02" },
+      { "click": "显示细节", "after": 1000 }
+    ]
+  },
+  {
+    "id": "ov_ep02",
+    "title": "总览第 2 集 + 细节",
+    "path": "/#/overview",
+    "wait": 10000,
+    "steps": [
+      { "wait": 2500 },
+      { "js": "const h=[...document.querySelectorAll('*')].filter(e=>/^第 2 集/.test((e.innerText||'').trim()) && e.children.length<8).sort((a,b)=>a.innerText.length-b.innerText.length)[0]; const row=h?.closest('section, [class*=ep-row], [class*=season-ep], [class*=sea-ep]') || h?.parentElement?.parentElement; const b=[...(row||document).querySelectorAll('button, [role=button], summary')].find(x=>/细节/.test(x.innerText)); b?.click(); await new Promise(r=>setTimeout(r,1500)); h?.scrollIntoView({block:'start'}); window.scrollBy(0,-100); await new Promise(r=>setTimeout(r,1500)); return {row: row?.innerText?.slice(0,1800)}" },
+      { "shot": "ep02_detail" }
+    ]
+  },
+  {
+    "id": "ov_filter",
+    "title": "总览 板块筛选 过期 / 状态色筛选",
+    "path": "/#/overview",
+    "wait": 10000,
+    "steps": [
+      { "wait": 2500 },
+      { "js": "const eps=()=>[...document.querySelectorAll('*')].filter(e=>/^第 \\d+ 集/.test((e.innerText||'').trim()) && e.children.length<8 && e.getBoundingClientRect().height>0).map(e=>e.innerText.trim().slice(0,8)); const before=new Set(eps()).size; const btns=[...document.querySelectorAll('button')]; const res={before}; for (const w of ['进行中','已确认','未开始','过期']) { const b=btns.find(x=>x.innerText.trim().startsWith(w) && x.getBoundingClientRect().y<260); if(!b){res[w]='no btn'; continue;} b.click(); await new Promise(r=>setTimeout(r,900)); res[w]={btn:b.innerText, pressed:b.getAttribute('aria-pressed'), cls:b.className, eps:new Set(eps()).size, empty:/没有|无匹配|0 集/.test(document.querySelector('main')?.innerText?.slice(0,600)||'')}; if (w!=='过期') { b.click(); await new Promise(r=>setTimeout(r,600)); } } return res" },
+      { "shot": "board_overdue" },
+      { "js": "const btns=[...document.querySelectorAll('button')]; const b=btns.find(x=>x.innerText.trim().startsWith('过期') && x.getBoundingClientRect().y<260); b?.click(); await new Promise(r=>setTimeout(r,800)); const lg=btns.find(x=>/^看图没过/.test(x.innerText.trim())); lg?.click(); await new Promise(r=>setTimeout(r,1200)); const tiles=[...document.querySelectorAll('img.live-img')].filter(i=>i.getBoundingClientRect().height>0).length; const vis=[...document.querySelectorAll('[class*=tag], [class*=sst]')].filter(e=>e.getBoundingClientRect().height>0).map(e=>e.innerText.trim()).filter(t=>t && t.length<12); const cnt={}; vis.forEach(t=>cnt[t]=(cnt[t]||0)+1); return {legendBtn: lg?.innerText, pressed: lg?.getAttribute('aria-pressed'), cls: lg?.className, tiles, tagCounts: cnt}" },
+      { "shot": "legend_vqa" }
+    ]
+  },
+  {
+    "id": "ov_imgs",
+    "title": "总览所有图（滚到底）",
+    "path": "/#/overview",
+    "wait": 10000,
+    "steps": [
+      { "wait": 2000 },
+      { "click": "显示细节", "after": 1500 },
+      { "js": "for (let y=0;y<30000;y+=600){ window.scrollTo(0,y); document.querySelectorAll('*').forEach(()=>{}); await new Promise(r=>setTimeout(r,250)); } const sc=[...document.querySelectorAll('*')].filter(e=>e.scrollHeight>e.clientHeight+200 && /auto|scroll/.test(getComputedStyle(e).overflowY)); for (const s of sc){ for(let y=0;y<s.scrollHeight;y+=500){ s.scrollTop=y; await new Promise(r=>setTimeout(r,200)); } } await new Promise(r=>setTimeout(r,4000)); const imgs=[...document.querySelectorAll('img')].map(i=>({src:decodeURIComponent(i.currentSrc||i.src||''), c:i.complete, n:i.naturalWidth})); return {n: imgs.length, broken: imgs.filter(i=>i.c && i.n===0 && i.src), pending: imgs.filter(i=>!i.c).length, srcs: imgs.map(i=>i.src)}" },
+      { "click": "显示细节", "after": 800 }
+    ]
+  },
+  {
+    "id": "cv_ep06",
+    "title": "画布 ep06 1440",
+    "path": "/#ep06",
+    "wait": 10000,
+    "steps": [
+      { "wait": 2500 },
+      { "shot": "top" },
+      { "js": "const sc=[...document.querySelectorAll('*')].filter(e=>e.scrollHeight>e.clientHeight+200 && /auto|scroll/.test(getComputedStyle(e).overflowY)); for (const s of sc){ for(let y=0;y<s.scrollHeight;y+=500){ s.scrollTop=y; await new Promise(r=>setTimeout(r,250)); } s.scrollTop=0; } for (let y=0;y<20000;y+=600){ window.scrollTo(0,y); await new Promise(r=>setTimeout(r,200)); } window.scrollTo(0,0); await new Promise(r=>setTimeout(r,4000)); const imgs=[...document.querySelectorAll('img, video')].map(i=>({tag:i.tagName, src:decodeURIComponent(i.currentSrc||i.src||i.poster||''), c:i.tagName==='IMG'?i.complete:true, n:i.tagName==='IMG'?i.naturalWidth:i.videoWidth, alt:i.alt||i.getAttribute('data-zoom-label')||''})); const none=[...document.querySelectorAll('.v3-frame-none')].map(x=>x.innerText); const old=[...document.querySelectorAll('button')].filter(b=>/旧图 ×/.test(b.innerText)).map(b=>b.innerText); const det=[...document.querySelectorAll('button')].filter(b=>/详情 ▸/.test(b.innerText)).length; return {n:imgs.length, broken: imgs.filter(i=>i.tag==='IMG' && i.c && i.n===0 && i.src), pending: imgs.filter(i=>!i.c).length, imgs, none, old, det}" }
+    ]
+  },
+  {
+    "id": "cv_ep10",
+    "title": "画布 ep10 1440",
+    "path": "/#ep10",
+    "wait": 10000,
+    "steps": [
+      { "wait": 2500 },
+      { "shot": "top" },
+      { "js": "const sc=[...document.querySelectorAll('*')].filter(e=>e.scrollHeight>e.clientHeight+200 && /auto|scroll/.test(getComputedStyle(e).overflowY)); for (const s of sc){ for(let y=0;y<s.scrollHeight;y+=500){ s.scrollTop=y; await new Promise(r=>setTimeout(r,250)); } s.scrollTop=0; } await new Promise(r=>setTimeout(r,4000)); const imgs=[...document.querySelectorAll('img, video')].map(i=>({tag:i.tagName, src:decodeURIComponent(i.currentSrc||i.src||i.poster||''), c:i.tagName==='IMG'?i.complete:true, n:i.tagName==='IMG'?i.naturalWidth:i.videoWidth, alt:i.alt||i.getAttribute('data-zoom-label')||''})); const none=[...document.querySelectorAll('.v3-frame-none')].map(x=>x.innerText); const old=[...document.querySelectorAll('button')].filter(b=>/旧图 ×/.test(b.innerText)).map(b=>b.innerText); return {n:imgs.length, broken: imgs.filter(i=>i.tag==='IMG' && i.c && i.n===0 && i.src), pending: imgs.filter(i=>!i.c).length, imgs, none, old}" }
+    ]
+  },
+  {
+    "id": "cv_ep02",
+    "title": "画布 ep02 1440（审片页）",
+    "path": "/#ep02",
+    "wait": 10000,
+    "steps": [
+      { "wait": 2500 },
+      { "shot": "top" },
+      { "js": "const sc=[...document.querySelectorAll('*')].filter(e=>e.scrollHeight>e.clientHeight+200 && /auto|scroll/.test(getComputedStyle(e).overflowY)); for (const s of sc){ for(let y=0;y<s.scrollHeight;y+=500){ s.scrollTop=y; await new Promise(r=>setTimeout(r,250)); } s.scrollTop=0; } await new Promise(r=>setTimeout(r,4000)); const imgs=[...document.querySelectorAll('img, video')].map(i=>({tag:i.tagName, src:decodeURIComponent(i.currentSrc||i.src||i.poster||''), c:i.tagName==='IMG'?i.complete:true, n:i.tagName==='IMG'?i.naturalWidth:i.videoWidth})); return {n:imgs.length, broken: imgs.filter(i=>i.tag==='IMG' && i.c && i.n===0 && i.src), pending: imgs.filter(i=>!i.c).length, imgs}" }
+    ]
+  },
+  {
+    "id": "review_play",
+    "title": "串播审片 ep01",
+    "path": "/#ep01",
+    "wait": 10000,
+    "steps": [
+      { "wait": 2500 },
+      { "click": "串播审片", "after": 5000 },
+      { "js": "const imgs=[...document.querySelectorAll('img, video')].filter(i=>i.getBoundingClientRect().width>0).map(i=>({tag:i.tagName, src:decodeURIComponent(i.currentSrc||i.src||i.poster||''), c:i.tagName==='IMG'?i.complete:true, n:i.tagName==='IMG'?i.naturalWidth:i.videoWidth})); return {n:imgs.length, broken: imgs.filter(i=>i.tag==='IMG' && i.c && i.n===0 && i.src), imgs, txt: document.body.innerText.slice(0,600)}" },
+      { "shot": "play" }
+    ]
+  }
+]

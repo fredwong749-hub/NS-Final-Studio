@@ -57,7 +57,7 @@ def thresholds(path: Path | None = None) -> dict:
 
 def _probe_fps(path: Path) -> float:
     r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=r_frame_rate",
-                        "-of", "csv=p=0", str(path)], capture_output=True, text=True)
+                        "-of", "csv=p=0", str(path)], capture_output=True, text=True, timeout=60)   # K-OPS-S01
     try:
         num, den = r.stdout.strip().split("/")
         return float(num) / float(den) or 24.0
@@ -68,7 +68,7 @@ def _probe_fps(path: Path) -> float:
 def video_frames(path: Path) -> np.ndarray:
     """→ (n, H, W) float32 灰度"""
     r = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-vf", f"scale={W}:{H},format=gray",
-                        "-f", "rawvideo", "-"], capture_output=True)
+                        "-f", "rawvideo", "-"], capture_output=True, timeout=600)   # K-OPS-S01
     if r.returncode != 0:
         raise RuntimeError(f"ffmpeg 读帧失败：{r.stderr[-400:].decode('utf-8', 'replace')}")
     return np.frombuffer(r.stdout, np.uint8).reshape(-1, H, W).astype(np.float32)

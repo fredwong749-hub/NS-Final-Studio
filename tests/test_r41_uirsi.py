@@ -38,7 +38,7 @@ def test_active_quarantined_counts_as_none():
     src = (ROOT / "services/api/ns_api/app.py").read_text(encoding="utf-8")
     i = src.index("def _active(shot_id: str")
     body = src[i: src.index("return out", i)]
-    assert 'out[stage] = None if (t and t.get("quarantined")) else t' in body
+    assert "out[stage] = None if (t and is_quarantined(t)) else t" in body   # r42：标记被并回冲掉、文件在隔离区的也算
 
 
 def test_quarantine_tool_marks_only_and_restorable():
@@ -57,3 +57,13 @@ def test_simplified_ui_keeps_features():
     assert "详情：本镜配乐 / 环境声 · 人物造型（本镜造型角标）与场景参考 · 分镜详情 · 首帧提示词 · 视频提示词" in rr
     assert "分镜详情 {sbOpen" in rr and "首帧提示词 {open" in rr and "视频提示词 {open" in rr and "收起 ▴" in rr
     assert "<HistoryBox shot={s.id}" in rr and ">历史版本</button>" in rr
+
+
+
+def test_quarantined_detected_even_if_mark_lost(tmp_path, monkeypatch):
+    """r42：服务器并回 takes.json“新者为准”会冲掉 quarantined 标记——文件在隔离区、不在 data/ 的照样算已隔离"""
+    monkeypatch.setattr(P, "DATA", tmp_path)
+    (tmp_path / "_quarantine_20261102_oldscript" / "data" / "renders" / "ep01" / "S1" / "takes").mkdir(parents=True)
+    (tmp_path / "_quarantine_20261102_oldscript" / "data" / "renders" / "ep01" / "S1" / "takes" / "last_001.png").write_bytes(b"x")
+    assert T.is_quarantined({"file": "renders/ep01/S1/takes/last_001.png"})
+    assert not T.is_quarantined({"file": "renders/ep01/S1/takes/last_002.png"})

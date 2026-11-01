@@ -28,6 +28,7 @@ FACTORY = ROOT / "tools" / "factory" / "sync.py"
 LANES = ["gpu33:0", "gpu33:1", "gpu33:3", "gpu36:0", "gpu36:1"]
 VQA = [("laptop", "笔记本看图卡", "http://127.0.0.1:8870"), ("gpu36", "gpu36 看图卡", "http://127.0.0.1:8871")]
 PHASE = {"server": "服务器自派", "laptop": "笔记本代派", "draining": "交还中"}
+RECENT_S = 60      # r43 K1：最近 60 s 出过东西也算在出
 _cache: dict = {"t": 0.0, "vqa": None}
 _lock = threading.Lock()
 
@@ -107,10 +108,14 @@ def _lanes(now: float) -> list[dict]:
             state, word = "faulty", "坏卡"
         elif c.get("state") == "offline" or (c.get("link") and c["link"].get("offline")):
             state, word = "down", "连不上"
+        elif c.get("state") in ("busy", "external") or (done and now - float(done[-1]["end"]) < RECENT_S) or (c.get("hw") or {}).get("util", 0) and (c.get("hw") or {}).get("util", 0) > 30:
+            # r43（OVERVIEW_REDESIGN K1）：两单之间的上传 / 后处理 / 看图也是在干活——ComfyUI 正在跑、最近 60 s 出过东西、或卡利用率 > 30% 都算在出
+            r0 = (c.get("running") or [{}])[0] if c.get("running") else {}
+            ag = ((r0.get("tag") or {}).get("agent") or "") if isinstance(r0, dict) else ""
+            # K2：能对上我们自己的登记（ns_tag agent）就写“出图”；对不上才写“其他任务”
+            state, word = "busy", ("出图" if (not r0 or ag) else "其他任务")
         elif c.get("link"):
-            state, word = "warn", "暂时连不上"
-        elif c.get("state") in ("busy", "external"):
-            state, word = "busy", "在出"
+            state, word = "warn", "暂时连不上"     # 读数断了、也看不出在干活
         elif not c:
             state, word = "down", "没有读数"
         else:
@@ -141,8 +146,20 @@ def build(now: float | None = None) -> dict:
         lanes = _lanes(now)
     except Exception as e:  # noqa: BLE001
         lanes = [{"id": x, "label": x.replace(":", "·卡"), "state": "down", "text": "读不到", "tech": str(e)[:120]} for x in LANES]
-    return {"at": time.strftime("%H:%M:%S", time.localtime(now)), "lanes": lanes, "vqa": _vqa(now), "phases": phases,
-            "producer": producer, "source": "live"}
+    vq = _vqa(now)
+    busy = sum(1 for x in lanes if x.get("state") == "busy")
+    down = sum(1 for x in lanes if x.get("state") == "down")
+    warn = sum(1 for x in lanes if x.get("state") == "warn")
+    bad_vqa = [x for x in vq if x.get("state") in ("down", "warn")]
+    # 生产灯（OVERVIEW_REDESIGN §4.1）：平时安静；有道连不上 / 看图卡停了或显存不够 → 黄“生产偏慢”；全部道都停 / producer 没心跳 → 红“生产停了”
+    if (down == len(lanes) and lanes) or producer["state"] == "down":
+        light = {"level": "bad", "text": "生产停了"}
+    elif down or warn or bad_vqa:
+        light = {"level": "warn", "text": "生产偏慢"}
+    else:
+        light = {"level": "ok", "text": "生产正常"}
+    return {"at": time.strftime("%H:%M:%S", time.localtime(now)), "lanes": lanes, "vqa": vq, "phases": phases,
+            "producer": producer, "source": "live", "busy": busy, "total": len(lanes), "light": light}
 
 
 @router.get("/api/factory/health")

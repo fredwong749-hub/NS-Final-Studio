@@ -130,6 +130,16 @@ def content_clauses(text: str) -> list[str]:
     return [p for p in re.split(r"[，,；;。]", rest) if p.strip() and not any(c in p for c in CAMERA)]
 
 
+CLOSE_NO_LOWER = ("极近特写", "大特写", "特写", "中近景", "近景")
+
+
+def close_no_lower() -> bool:
+    """K-REN-707（IMGFIX 11-02，总调度 P1）：特写 / 近景 / 中近景不注入下半身描述（角色锁“长腿”、造型补句“露出长腿 / 裙 / 鞋”），
+    并修 lower_focus 把“穿 A、B 裙与 C 外套”整句当成下半身主体的误判。开关 config/recipes/image_framing.json close_no_lower
+    （缺省 false = 旧行为；总调度看过期数字后决定上线时间）"""
+    return bool(_cfg().get("close_no_lower", False))
+
+
 def lower_focus(img_raw: str, kept_triggers=None) -> bool:
     """img 原文（含触发词）以下半身为主体 → 不按景别删下半身部件（例：hh12clear 极近特写 = 鞋的特写）。
     判定：有鞋 / 脚触发词（kept_triggers 给出时，只认编译器真正保留的触发词——LoRA 不可用被剥掉的触发词不算证据，
@@ -144,6 +154,14 @@ def lower_focus(img_raw: str, kept_triggers=None) -> bool:
     if not size:
         return False
     first = next(iter(content_clauses(t)), "")
+    if close_no_lower():
+        # 首句是并列造型（“林晚穿米白衬衫、及膝铅笔裙与短款西装外套”）时，只有每一项都看不见才算下半身主体
+        # “穿 / 换上 …”是造型描述，不是画面主体（ep02-S9“林晚穿雾蓝针织长裙”、ep08-S9“…束腰配…短裙”）
+        # 只有整段正文都只写下半身（“极近特写，林晚穿黑色漆皮超短裙”）才算下半身主体；后面还写了手 / 脸 / 动作的不算
+        if re.search(r"穿|换上|换成", first):
+            return all(not visible(c, size) for c in content_clauses(t))
+        items = [x for x in re.split(r"[、与和及配]", first) if x.strip()]
+        return bool(items) and all(not visible(x, size) for x in items)
     return not visible(first, size)
 
 
@@ -243,7 +261,7 @@ def faced_people(shot, names: list[str]) -> tuple[list[str], list[tuple[str, str
         n, pr = gv(c, "name"), gv(c, "presence")
         if n not in names:
             continue
-        if pr == "在画" or (pr == "局部" and _AR.face_described(n, img, names)):
+        if pr == "在画" or (pr == "局部" and _AR.partial_face_visible(n, img, [gv(x, "name") for x in cast if gv(x, "presence") in ("在画", "局部")])):
             faced.append(n)
         elif pr == "局部":
             partial.append((n, (gv(c, "part") or "").strip()))

@@ -167,3 +167,42 @@ def test_dead_loop_restarted_after_kill(monkeypatch, tmp_path):
     for i in range(2):
         st = W.tick(st, now=9500.0 + 30 * i)
     assert "tunnel_gpu36.sh" in started
+
+
+def test_pull_handed_to_puller_when_acked_grows(monkeypatch, tmp_path):
+    """NETFIX 01:5x：puller 的 acked_total 增长之后，resident_sync 停掉该台的 20 分钟定时 pull（之前两者并存，merge 幂等）"""
+    import json as _j
+    monkeypatch.setattr(RS, "ROOT", tmp_path)
+    monkeypatch.setattr(RS, "STATE", tmp_path / "st.json")
+    monkeypatch.setattr(RS, "log", lambda *a: None)
+    (tmp_path / "data/netfix").mkdir(parents=True)
+    ps = tmp_path / "data/netfix/puller_status.json"
+    ps.write_text(_j.dumps({"hosts": {"gpu36": {"acked_total": 0}}}), encoding="utf-8")
+    assert RS.puller_took_over("gpu36") is False          # 记基线
+    assert RS.puller_took_over("gpu36") is False          # 没增长
+    ps.write_text(_j.dumps({"hosts": {"gpu36": {"acked_total": 3}}}), encoding="utf-8")
+    assert RS.puller_took_over("gpu36") is True
+    ps.write_text(_j.dumps({"hosts": {"gpu36": {"acked_total": 3}}}), encoding="utf-8")
+    assert RS.puller_took_over("gpu36") is True           # 一旦接管就一直停
+
+
+def test_restart_queue_merges_gaps_and_urgent(monkeypatch, tmp_path):
+    """DJ-20：同一台 30 分钟内最多执行一次、合并多条请求；紧急请求可插队并记审计；执行前先排空"""
+    import restart_queue as RQ
+    monkeypatch.setattr(RQ, "REQ", tmp_path / "req.jsonl")
+    monkeypatch.setattr(RQ, "DONE", tmp_path / "done.jsonl")
+    monkeypatch.setattr(RS, "STATE", tmp_path / "st.json")
+    monkeypatch.setattr(RS, "log", lambda *a: None)
+    calls = []
+    monkeypatch.setattr(RS, "ssh", lambda h, cmd, **k: calls.append(cmd) or (b'{"inflight": 0}' if "heartbeat" in cmd else b"ok"))
+    monkeypatch.setattr(RS, "restart", lambda h, mode=None: calls.append("RESTART") or "started")
+    RQ.request("gpu36", "deploy sv-1", "FACTORY")
+    RQ.request("gpu36", "代码推送", "WORKFLOW")
+    r1 = RQ.process("gpu36")
+    assert r1["ok"] and len(r1["request_ids"]) == 2 and calls.count("RESTART") == 1 and any("pause" in c for c in calls)
+    RQ.request("gpu36", "又一次", "NETFIX")
+    assert RQ.process("gpu36") is None and calls.count("RESTART") == 1          # 30 分钟内：留着不执行
+    RQ.request("gpu36", "服务器卡死", "总调度", urgent=True)
+    r3 = RQ.process("gpu36")
+    assert r3["urgent_jump"] is True and calls.count("RESTART") == 2 and len(r3["request_ids"]) == 2
+    assert RQ.pending("gpu36") == []

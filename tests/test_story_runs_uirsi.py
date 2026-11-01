@@ -79,10 +79,15 @@ def env(tmp_path, monkeypatch):
             return rep, text, ""
         return real_validate(link, text, ctx)
     monkeypatch.setattr(RC, "validate", validate)
+    SR.join_all()          # UIRSI r43：上一个测试（或别的测试文件）留下的写作线程先收完，再清表
     SR._threads.clear()
     app = FastAPI()
     app.include_router(SR.router)
-    return TestClient(app), SR, fw, tmp_path
+    yield TestClient(app), SR, fw, tmp_path
+    # 收尾：本测试起的线程全部结束后才撤 monkeypatch（env 先于 monkeypatch 收尾）——
+    # 否则线程会在撤掉假写作网关后改调真网关、写到别的测试的临时目录，并行跑时偶发 error / running（根因，见 story_runs.wait）
+    SR.join_all()
+    SR._threads.clear()
 
 
 def _start(c, SR, upto="P3"):
@@ -107,7 +112,7 @@ def test_runs_to_p3_stage_by_stage(env):
     c, SR, fw, tmp = env
     rid = _start(c, SR)
     d = c.get(f"/api/story-runs/{rid}").json()
-    assert d["status"] == "ok", d
+    assert d["status"] == "ok", d.get("error")
     st = {s["node"]: s["status"] for s in d["stages"]}
     assert st == {"P0": "ok", "P1": "ok", "P2": "ok", "P3": "ok", "P4": "pending"}
     assert fw.calls == ["P0-P1", "P1-P2", "P2-P3"]          # 逐段推进，已过的段复用、不重复调用
@@ -131,7 +136,7 @@ def test_needs_writer_then_retry(env):
     assert r.status_code == 200
     SR.wait(rid)
     d = c.get(f"/api/story-runs/{rid}").json()
-    assert d["status"] == "ok" and all(s["status"] == "ok" for s in d["stages"][:4])
+    assert d["status"] == "ok" and all(s["status"] == "ok" for s in d["stages"][:4]), d.get("error")
     sup = list((SR.RUNS / rid / "superseded").rglob("P2_ep01_outline.json*"))
     assert sup, "返修前的产物挪到 superseded/，不删"
 
@@ -149,9 +154,11 @@ def test_edit_revalidates_and_supersedes_downstream(env):
     r = c.put(f"/api/story-runs/{rid}/artifact/P2", json={"text": json.dumps(OUTLINE, ensure_ascii=False)})
     assert r.json()["status"] == "ok"
     n = len(fw.calls)
-    c.post(f"/api/story-runs/{rid}/resume", json={})
+    r = c.post(f"/api/story-runs/{rid}/resume", json={})
+    assert r.status_code == 200, r.text
     SR.wait(rid)
-    assert fw.calls[n:] == ["P2-P3"]                          # 改过的 P2 被复用，只重写下游
+    d = c.get(f"/api/story-runs/{rid}").json()
+    assert fw.calls[n:] == ["P2-P3"], (d.get("status"), d.get("error"), [(x["node"], x["status"]) for x in d["stages"]])   # 改过的 P2 被复用，只重写下游
     assert c.put(f"/api/story-runs/{rid}/artifact/P0", json={"text": "x"}).status_code == 422
 
 

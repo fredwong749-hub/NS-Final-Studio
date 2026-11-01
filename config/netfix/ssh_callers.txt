@@ -30,3 +30,4 @@ tools/series10_video/sync.py
 tools/video_rca/lab.py
 tools/voice10/voice10.py
 tools/vqa/after_network.py
+tools/qa/arch_scan.py

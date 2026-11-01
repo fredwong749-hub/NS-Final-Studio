@@ -412,8 +412,12 @@ def compute_progress(run: str | None, summary_eps: list[dict], jobs: list[dict],
                             pass
                     seg[k]["eta_s"] = round((seg[k]["eta_s"] or 0) + left, 1)
             elif state == "failed" and not have.get((sid, k)):
-                seg[k]["failed"] += 1
                 err = str(j.get("error") or "没出成").splitlines()[0][:80]
+                if INFRA_ERR.search(str(j.get("error") or "")):
+                    # UIRSI r43（OVERVIEW_REDESIGN K4）：连不上 / API 重启中断是生产问题，进生产健康，不算内容进度的“失败”
+                    seg[k]["infra_failed"] = seg[k].get("infra_failed", 0) + 1
+                    continue
+                seg[k]["failed"] += 1
                 seg[k]["reasons"].append(f"{sid.split('-')[1]}：{err}")
         vd, vt = _cached(("voice", n, VERSION.get("voice", 0)), 30, lambda: _voice_counts(sc_eps.get(n) or {})) if sc_eps.get(n) else (0, 0)
         seg["voice"].update(done=vd, total=vt)
@@ -435,6 +439,10 @@ def compute_progress(run: str | None, summary_eps: list[dict], jobs: list[dict],
 # 进度倒退要说明原因（PAGEWATCH PW-012：演员表一换，声音缓存按音色计，条子变短却没说为什么，项目方会以为丢数据）
 _hw: dict[tuple, tuple[int, float]] = {}       # (集 / total, 段) → (见过的最高完成数, 时间)
 REGRESS_KEEP_S = 1800                           # 说明保留 30 分钟（或补回到原来的数）
+# r43（K4）：基础设施错误（连接被拒、超时、API 重启打断）不算内容失败
+INFRA_ERR = re.compile(r"WinError 10061|actively refused|Connection refused|ConnectionRefused|timed out|URLError|RemoteDisconnected|API 重启|重启打断|重启中断")
+# r43（K5）：r40 / r41 有意隔离旧剧本版本后数字变少，不算“倒退”
+QUARANTINE_LOG = REPO / "data" / "_quarantine_20261102_oldscript" / "moves.jsonl"
 
 
 def _why_down(seg: str) -> str:
@@ -453,6 +461,14 @@ def _why_down(seg: str) -> str:
     return "数字变少了"
 
 
+def _quarantined_since(t0: float) -> bool:
+    """高点之后做过旧剧本版本隔离（moves.jsonl 比高点新）→ 这次减少是有意的"""
+    try:
+        return QUARANTINE_LOG.stat().st_mtime >= t0 - 5
+    except OSError:
+        return False
+
+
 def _mark_regressions(eps_out: list[dict], tot: dict, now: float) -> None:
     rows = [((e["episode"],), e["segs"]) for e in eps_out] + [(("total",), tot)]
     for key, segs in rows:
@@ -463,6 +479,9 @@ def _mark_regressions(eps_out: list[dict], tot: dict, now: float) -> None:
                 _hw[hk] = (v["done"], now)
                 continue
             if now - at > REGRESS_KEEP_S:      # 太久之前的高点不再提（当作新基线）
+                _hw[hk] = (v["done"], now)
+                continue
+            if k in ("first", "last", "video") and _quarantined_since(at):   # 有意隔离造成的减少：重设基线，不标 ↓
                 _hw[hk] = (v["done"], now)
                 continue
             v["regressed"] = {"from": hi, "to": v["done"], "reason": _why_down(k)}

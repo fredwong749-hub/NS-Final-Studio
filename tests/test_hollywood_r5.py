@@ -90,3 +90,65 @@ def test_patch_mode_line_patches(R, ep04):
     assert not err and len(ch) == 1 and c.count("（改）") == orig.count("（改）") + 1
     assert R.apply_patches(orig, [{"line": 1, "new": "**镜9｜img**：x"}], nl)[2]          # 镜号不能改
     assert R.apply_patches(orig, [{"line": 99999, "new": "x"}], nl)[2]
+
+
+def test_ruler_evidence_must_be_verbatim(R):
+    body = R._norm_txt("**镜1｜img**：特写，林晚扶碗的手指停在碗沿，视线落在白瓷碗上")
+    assert R.evidence_found("镜1｜**img**：……扶碗的手指停在碗沿……", body)
+    assert not R.evidence_found("镜1｜**img**：她很紧张地看着他", body)
+
+
+def test_r6_rubric_code_share_and_parsers():
+    import importlib.util as iu
+    spec = iu.spec_from_file_location("rubric_code", ROOT / "tools" / "script_rsi" / "rubric_code.py")
+    RC = iu.module_from_spec(spec)
+    spec.loader.exec_module(RC)
+    sh = RC.share()
+    assert (sh["code"], sh["mixed"], sh["llm"]) == (24, 3, 23)
+    assert all(sorted(RC.CODE_ITEMS.get(d, []) + list(RC.MIXED_ITEMS.get(d, {})) + RC.LLM_ITEMS[d]) == [1, 2, 3, 4, 5] for d in RC.DIMS)
+    assert RC.accessory_tokens({"饰品": "2件（九串铁珠、钻石水晶甲（5 厘米超长透明水晶甲、镶满钻石饰品，与现有定妆一致））"}) == ["串铁珠", "水晶甲"]
+    looks = RC.parse_looks("**造型｜林晚**：服装=雾蓝针织长裙，柔软贴身｜发=雾霾天蓝色及腰直发（略深），齐刘海\n"
+                           "**造型｜林晚｜镜4起**：服装=黑色漆皮束腰配黑色漆皮短裙，露出长腿")
+    assert RC.garment_tokens(RC.look_at(looks, "林晚", 2)) == ["雾蓝针织长裙"]
+    assert RC.garment_tokens(RC.look_at(looks, "林晚", 5)) == ["黑色漆皮束腰", "黑色漆皮短裙"]
+    assert RC.hair_core(RC.look_at(looks, "林晚", 5)) == "雾霾天蓝色及腰直发"          # 换装行继承发型
+
+
+def test_r6_code_checks_deterministic(R, ep04, tmp_path, monkeypatch):
+    import p4_adapter
+    monkeypatch.setattr(p4_adapter, "TMP", tmp_path)
+    pre, orig = ep04
+    obj = R.H.episode_obj(pre, orig, 4, tmp_path)
+    shots = sorted(obj.shots, key=lambda s: s.index)
+    blocks = [R.RL.block_text(orig, k) for k in range(len(shots))]
+    codes = R.H.lint(orig, 4)["codes"]
+    a = R.RC6.code_checks(orig, shots, blocks, R.RL.block_text(orig, "head"), codes)
+    b = R.RC6.code_checks(orig, shots, blocks, R.RL.block_text(orig, "head"), codes)
+    assert a == b and sum(len(v) for v in a.values()) == 27
+
+
+def test_r7_rubric_gate_runs_offline(tmp_path, monkeypatch):
+    import importlib.util as iu
+    import p4_adapter
+    monkeypatch.setattr(p4_adapter, "TMP", tmp_path)
+    spec = iu.spec_from_file_location("rubric_audit", ROOT / "tools" / "script_rsi" / "rubric_audit.py")
+    RA = iu.module_from_spec(spec)
+    spec.loader.exec_module(RA)
+    monkeypatch.setattr(RA, "OUT", tmp_path)
+    text, _ = RA.H.RC.assemble(RA.RL, [4], RA.H.RC.episode_sources())
+    f = tmp_path / "ep04.md"
+    f.write_text(text, encoding="utf-8")
+    r = RA.gate(f)
+    assert 4 in r["eps"] and r["eps"][4]["total"] == 27
+    assert r["ok"] == (not r["eps"][4]["fails"])
+
+
+def test_r7_compiled_prompt_parsing():
+    import importlib.util as iu
+    spec = iu.spec_from_file_location("rubric_code", ROOT / "tools" / "script_rsi" / "rubric_code.py")
+    RC = iu.module_from_spec(spec)
+    spec.loader.exec_module(RC)
+    comp = "林晚的眼睛看着他，眼睛不看镜头。图1是林晚的脸部参考（只取脸和发型）。中景构图（膝盖以上），林晚坐着"
+    assert RC._size(comp) == "中景"
+    assert not RC.LOOK_CAMERA.search("眼睛不看镜头，脸不正对镜头")
+    assert RC.LOOK_CAMERA.search("她回头看向门口")

@@ -285,10 +285,21 @@ def _start(run_id: str) -> None:
         t.start()
 
 
-def wait(run_id: str, timeout: float = 30) -> None:
-    """测试用：等后台线程结束"""
+def wait(run_id: str, timeout: float = 180) -> None:
+    """测试用：等后台线程结束。
+    UIRSI r43（总调度：test_needs_writer_then_retry 并行偶发失败、两次挡住 sv 发版）：原来 join(30) 超时后静默返回，
+    -n 12 并行压测时一次 3 轮重写可能超过 30 s → 测试读到 running / 下一步 retry 撞 409，且线程带着测试的假写作网关继续跑、
+    测试结束 monkeypatch 撤掉后改用真网关 → 后面的测试读到 error。现在超时直接报错（不再静默），默认等 180 s"""
     t = _threads.get(run_id)
     if t:
+        t.join(timeout)
+        if t.is_alive():
+            raise TimeoutError(f"story-run {run_id} 还在跑（等了 {timeout:.0f} 秒）")
+
+
+def join_all(timeout: float = 180) -> None:
+    """测试用：等所有后台写作线程结束（fixture 收尾时调，防止线程漏到下一个测试 / monkeypatch 撤掉之后）"""
+    for t in list(_threads.values()):
         t.join(timeout)
 
 
@@ -647,11 +658,29 @@ def _story_images(run: str | None):
             chars.setdefault(cid, []).append(item)
         elif me and ms:
             by_shot.setdefault(f"ep{int(me.group(1)):02d}-S{int(ms.group(1))}", []).append(item)
+    # UIAUDIT r38–r41 P0-2（UIRSI r43）：出图目录里的草图也要跟剧本版本走——早于本集最后一次导入的是旧剧本的草图
+    # （剧本重导后镜头重新编号，旧草图对不上新镜头），不给画布当兜底显示（文件不动，只是不返回）
+    old_drafts = 0
+    try:
+        from ns_api import takes_ui as _TU  # noqa: PLC0415
+        for sid in list(by_shot):
+            cut = _TU.cutoff_for(int(sid[2:4]))
+            if not cut:
+                continue
+            cut_t = time.mktime(time.strptime(cut[:19], "%Y-%m-%dT%H:%M:%S"))
+            keep = [x for x in by_shot[sid] if x["mtime"] >= cut_t]
+            old_drafts += len(by_shot[sid]) - len(keep)
+            if keep:
+                by_shot[sid] = keep
+            else:
+                del by_shot[sid]
+    except Exception:  # noqa: BLE001 — 判不了就照旧返回
+        pass
     for v in list(by_shot.values()):
         v.sort(key=lambda x: -x["mtime"])
     for v in chars.values():
         v.sort(key=lambda x: (x.get("look") or "", x.get("seed") or 0, x["path"]))
-    return {"run": d.name, "by_shot": by_shot, "chars": chars, "count": n, "picks": _read(d / PICKS) or {}}
+    return {"run": d.name, "by_shot": by_shot, "chars": chars, "count": n, "picks": _read(d / PICKS) or {}, "old_drafts_hidden": old_drafts}
 
 
 PICKS = "ui_sheet_picks.json"

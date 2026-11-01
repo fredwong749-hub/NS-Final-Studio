@@ -73,3 +73,49 @@
 
 - 01:0x 我在 gpu33 上 kill 了 pid 1531364（`bash -s`，已挂约 15 分钟，没有子进程，阻塞在 do_wait）。**推断是我自己的探测进程**：它的启动时间和我那次超时的探测吻合。kill 之后没看到别的会话报错。
 - 从此以后：探测命令在服务器上一律套 `timeout`，退出时清理自己留下的临时文件和进程（K-OPS-E06）。
+
+---
+
+# r2（01:2x 起，总调度派：本机看图改专用、服务器交还之后的新瓶颈；目标 5 条出图道利用率 ≥ 80%）
+
+测法：tools/debug/lane_util.py（ComfyUI /history，统计各作业 execution_start 到结束的并集 / 窗口长度，按 ns_tag.agent 分开；结果追加到 data/debug/lane_util.jsonl）。每 30 分钟测一次。
+
+| 时间 | 窗口 | gpu33:0 | gpu33:1 | gpu33:3 | gpu36:0 | gpu36:1 | 平均 |
+|---|---|---|---|---|---|---|---|
+| 01:31 | 01:01–01:31（交还前后混合） | 0.206（未标 0.141 = IMGFIX 实验） | 0.129 | 0.112 | 0.123 | 0.137 | **0.141** |
+
+交还后（gpu33 01:23、gpu36 01:25 起由服务器本机 producer 派单）服务器日志：
+
+- 服务器本机：render_s 37–64 s、gpu_s 35–62 s，派单间隔 5–20 s；本机打分到出结果约 20–70 s（redo_fail 时间戳减 rendered 时间戳）。对比笔记本经隧道时 render_s 137–158 s、打分 8–25 分钟。
+- 新问题 r2-1：gpu33 本机 producer 01:23:28、01:26:55 起了两次（sv-02 部署热重启）。重启后同一对象用同一个 seed 重派，ComfyUI 直接命中缓存（ep03-S4、ep03-S7：render_s 4.6、gpu_s 0.0），等于把同一张图再打一次分、再记一个版本。属于小浪费，记录。
+- 新问题 r2-2：笔记本交还前出好、还没打完分的图（ep02-S8/S9、ep03-S6/S7/S8）服务器又出了一遍。总调度定：由 FACTORY D4（声明式 inbox 带上笔记本的在途 / 待打分对象）解决。
+- 新问题 r2-3：gpu36 本机还是 sv-01，没有 hold 逻辑，01:24:51 出了暂缓清单里的 ep02-S1/S2。总调度 01:2x 正在单独 cut sv-03 部署 gpu36（推送前检查拦下了 cut 之后新建的两个代码文件）。
+| 01:46 | 01:15–01:45 | 0.262 | 0.258 | 0.241 | 0.355 | 0.330 | **0.289** |
+| 01:46 | 01:30–01:45（15 分钟） | 0.143 | 0.171 | 0.146 | 0.355 | 0.326 | **0.228** |
+
+- r2-4（P0，已交 VQAGATE）：gpu36 的 vLLM（GPU2，:8000）一直 0%，没接到请求。vllm_proxy.py 没有在听任何端口，因为 127.0.0.1:8870 还被旧的 vqa/server.py（pid 2350180）占着。旧服务在出图卡 GPU0 / GPU1 之间反复装卸（server.log 01:26–01:44 共 12 次，其中 1 次 OOM），打分约 0.7 张/分钟，三条道出图能力约 4 张/分钟 → 两台的 E05 积压闸（上限 12）顶满（score_backlog：gpu33 01:38:47 / 01:43:52，gpu36 01:41:06），GPU 等打分。
+- r2-5：笔记本 producer 01:45:02 重启（44720 → 13972，sv-02 代码）。手上 8 单打分卡了 16–27 分钟，而这几镜服务器已经重出过。
+- r2-6（01:5x，总调度要求“删掉笔记本 :18388 排队的 9 单”）：**没删，也删不了**。01:51 查时 :18388 已经不在听端口（curl 连接被拒）。原因：最后一单在 4080 上 8 步跑了 5 分 07 秒（38 s/步，平时约 5 s/步，因为和 01:22 装上的专用看图抢显存），之后进程不再响应（comfy_20261101_183640.err 最后一行 01:44:18）。watchdog 01:45:54 判“18388 不通”去重启，新进程 01:45:58 报 “Port 18388 is already in use” 退出；旧进程 52092 还在，但内存只剩 29 MB、端口已释放，是挂死状态。原来那 1 跑 9 等的队列随进程一起没了，所以不用删、也无从按单号删。**派单方：未知**（总调度 01:5x 更正：VIDEO-RCA 核实 r19 / r20 一直在 gpu36 本机执行，11-01 20 点之后没连过 18388）。查过的线索：ComfyUI 日志不打 client_id 和 filename_prefix（0 处）；history 只在内存里，随进程一起没了；output/ns_final 最后一张是 01:37:53 的 ep10-S3_image_v9_00002_（“Prompt executed in 00:15:25”），那是笔记本 producer 01:22:27 派的 PRODUCER 单，不是那 9 单。不再追：笔记本 ComfyUI 已经停了，这个来源也断了。
+  - 待批：按 L-100，笔记本 ComfyUI（19152 / 52092）和它的 watchdog（powershell 40220）应该停掉，否则 watchdog 迟早会把 ComfyUI 再拉起来，又和看图抢 12 GB 显存。这些进程归 LOCALGPU，我没动。
+- r2-7（01:5x，总调度批准 L-100，CONSENT LOCALGPU → DEBUG_RSI）：停掉笔记本 ComfyUI（19152 / 52092）、watchdog（powershell 40220）和它刚拉起的 start.ps1（26492）；查了计划任务、HKCU Run 和启动文件夹，都没有会拉起 ns_comfy 的项（NS-Studio-Autostart-Trial 指向 D:/Coding/NS-Storyboard 下一个不存在的脚本，和这里无关），所以不用 disable 任何东西。config/render_endpoints.json 的 laptop:0 改成 hold=true + disabled=true，原因写进 _hold_change 和 label（check_lane 只允许这几个字段）；services/api/ns_api/infra_status.py 在 disabled 时只显示“笔记本显卡：看图卡”，不再报“没在运行 / 离线”。gpu_live 和 producer 读的 _extra_lanes 会跳过 disabled 的道。测试：tests/test_debug_rsi.py::test_l100_laptop_lane_disabled_and_shown_as_vqa_card；localgpu_lane / infra_status / gpuview / producer 一共 100 条全过。API :8800 要重启才会加载 infra_status 的改动。备份在 data/_quarantine/debug_rsi_20261102/。
+
+| 时间 | 窗口 | gpu33:0 | gpu33:1 | gpu33:3 | gpu36:0 | gpu36:1 | 平均 |
+|---|---|---|---|---|---|---|---|
+| 02:20 | 01:50–02:20（切 vLLM 前后混合） | 0.470 | 0.473 | 0.450 | 0.698 | 取不到 | 0.523 |
+| 02:20 | **02:05–02:20（切 vLLM 之后）** | 0.536 | 取不到 | 0.442 | 0.797 | 0.772 | **0.637** |
+
+- r2-8：切 vLLM 之后，gpu36 到了 0.77–0.80，gpu33 停在 0.44–0.54。gpu33 的根因（服务器日志）：派单到这一单真正开始执行之间排了 50–100 s，例如 gpu33:3 02:08:30 派单、02:10:04 才 rendered，但 render_s 只记 39.9 s——线程池排队的时间没算进去。原因是本机线程池 18 个线程（max(8, 3×6 道)），而积压上限是 48（2×6×4）；gpu33 打分 p50 352 s / p90 563 s（gpu36 是 132 / 253 s），等打分的单把 18 个线程占满（inflight 19），新单只能在池里排队。**已修**（K-OPS-E05 修订）：线程数改成 积压上限 + 2×道数。要部署到服务器、重启常驻 producer 才生效。
+- r2-9（已交 VQAGATE）：gpu33 打分出现 score_infra：“看图模型输出不是 JSON”（02:16:02），以及“ssh … gpu36 unreachable from gpu33 (no cross-host key)”（02:17:11）——看图客户端连内网入口失败时退去走 ssh，而 gpu33 没有到 gpu36 的密钥。
+- r2-10：gpu33 打分慢的地方还有 clip_srv.py（comfy env）。FACTORY 说 gpu36 的 CLIP 退到了 CPU（89 s）——我这次测的是 gpu36 打分 p50 132 s，比 gpu33 快，下一轮单独拆段计时。
+- r2-11（02:2x–02:36，热修，总调度 02:22 令）：只在服务器各自现有的 producer.py（sv-03，sha 5ef221b0…）上就地补了 K-OPS-E05 线程池那一处（远端脚本做替换 + compile 检查，原文件备份在 /root/work/fredw/debug_rsi_backup/producer.py.sv03.*）。热修后两台 sha 都是 **21f7ffeb615d12ca8be8c97f60fe5b6a821021429ac94aea4008a78713d0c332**。笔记本那份 producer.py 里还有暂停 / dryrun / RUN_ID 等没部署的改动，所以没有整份推上去（服务器缺 policy.pause_decision、import_events.py、config/pipeline/run.json）。重启已排进 restart_queue（urgent）：gpu33 1f43d29cfb1f、gpu36 e1ce79339c69，等 resident_sync 执行。
+- r2-12（02:33，**gpu33 四张卡 0% 的真实原因不是线程池**）：gpu33 本机 producer 分区（42 镜）里已经没有 ready 对象——首帧 41 个是“驳回重出 2 次都没换上，等总调度定”，尾帧 16 个是“首帧过契约”才能做。gpu36 同样有 36 个首帧卡在“等总调度定”，只剩 10 个 ready。这是一道决策闸门：驳回计划用完、没有自动的下一步。两台合计 77 个首帧在等总调度。
+
+## r2 后段（02:3x–03:0x）：producer 接手后的改动和 P0“0 张通过”
+
+- r2-13（P0 根因，K-OPS-E10）：02:00 之前和之后都是 0 张通过（gpu36 02:00 前 26 张 / 后 59 张 redo_fail，gpu33 前 27 / 后 64）。02:00 后的失败里，**约 30%（gpu36 19/61、gpu33 19/64）blocking 为空**，照样记 redo_fail。根因在 vqa/contract.py:apply()：契约先按“Q9 未跑”判了 ok=False，看图回来是 pass 时，代码是 ok = 旧 ok and Q9 没挡，永远翻不回 True。笔记本已修并补了测试；**服务器热修被权限系统拦下**（Remote Shell Writes），没有绕过。补丁脚本在 scratchpad 的 hotfix_vqa.sh，交项目方决定是否执行，正式版随 sv-04 发。
+- r2-14（真没过，约 70%）：Q1 身份 ArcFace 0.61–0.64 < 0.70（gpu36 33 张、gpu33 36 张）；看图判的配饰不符 38 / 26、服装不符 29 / 11、看镜头 10 / 4、塑料感 9 / 6。身份线不降（项目方要求人物一致）。根因待查：身份参考和本镜造型冲突、多张参考互相稀释，还是这批景别本身就测不准。和 VQAGATE / IMGFIX 一起抽样核对。
+- r2-15（K-OPS-E09）：驳回阶梯写成代码，“等总调度定”这个出口删掉；策略写在 config/policies/retry.yaml redo_ladder。
+- r2-16（K-OPS-E08）：暂停口径。判定 = policy.pause_decision；set_paused 强制写 reason_kind + expires_at；producer 和 infra_watchdog 每拍执行；restart_producer.ps1 改为 --kind ops --expires-s 180、最多等 3 分钟。
+- r2-17：dryrun 修好。FakeFrameExec 补上 Q9 pass；原来看图闸门要求 Q9，演练里的图一直设不成当前，被 reconcile 撤回后无限循环、退出码还是 0。现在 S1 视频 passed 才算成功，否则返回 2 并报卡在哪一步；普通演练和注入演练都能走通。
+- r2-18（K-OPS-W15）：RUN_ID 改成读 config/pipeline/run.json；import_staged 成功后调 import_events.append_import。
+- 待做：(2) 登记表一致性检查进 data_parity + 修派生逻辑；(3) auto_force_eps 只对过了契约的镜生效；(4) 尽力版在规则 / 资产版本变化时自动 reset；多 run（DISTILL 接口）；import-staged --run（第二季）；Q1 和配饰误判抽样核对。

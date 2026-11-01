@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -150,6 +151,63 @@ def backup(rel: str):
             shutil.copy2(dst, b)
 
 
+LOCAL_STICKY = ("quarantined",)       # 本地对版本的处置，服务器那份永远不能盖掉（UIRSI r42：整份覆盖冲掉了 72 个“已隔离”标记）
+
+
+def merge_takes(src: Path, dst: Path, dry: bool = False) -> str:
+    """data/renders/**/takes.json 按版本（stage, n）逐条合并（UIRSI r42，总调度 01:3x）：
+      · 服务器有、本地没有的版本 → 收；本地有、服务器没有的 → 留；
+      · 两边都有 → 服务器字段覆盖同名字段（契约 / 打分是服务器上算的），本地独有字段保留，LOCAL_STICKY（已隔离）一律用本地的；
+      · 顶层（active / locked / master_gate …）同理按键合并；但服务器的 active / locked 若指向本地已隔离的版本，保留本地的值；
+      · restore_log 等本地独有的顶层键保留"""
+    r = json.loads(src.read_text(encoding="utf-8"))
+    l = json.loads(dst.read_text(encoding="utf-8")) if dst.exists() else {"takes": []}
+    lt = {(t.get("stage"), t.get("n")): t for t in l.get("takes") or []}
+    out_takes, added, updated = [], 0, 0
+    seen = set()
+    for t in r.get("takes") or []:
+        k = (t.get("stage"), t.get("n"))
+        seen.add(k)
+        if k in lt:
+            m = {**lt[k], **t}
+            for f in LOCAL_STICKY:
+                if f in lt[k]:
+                    m[f] = lt[k][f]
+                elif f in m and f not in lt[k]:
+                    pass                      # 服务器上隔离的也收（本地还没处置过）
+            if m != lt[k]:
+                updated += 1
+            out_takes.append(m)
+        else:
+            out_takes.append(t)
+            added += 1
+    out_takes += [t for k, t in lt.items() if k not in seen]
+    out_takes.sort(key=lambda t: (str(t.get("stage")), int(t.get("n") or 0)))
+    quarantined = {(t.get("stage"), t.get("n")) for t in out_takes if t.get("quarantined")}
+    out = {**l, **{k: v for k, v in r.items() if k != "takes"}}
+    for key in ("active", "locked"):
+        sv, lv = dict(r.get(key) or {}), dict(l.get(key) or {})
+        if not sv and not lv:
+            continue
+        merged = {**lv, **sv}
+        for stage, n in list(merged.items()):
+            if (stage, n) in quarantined:
+                if lv.get(stage) is not None and (stage, lv.get(stage)) not in quarantined:
+                    merged[stage] = lv[stage]
+                else:
+                    merged.pop(stage, None)
+        out[key] = merged
+    out["takes"] = out_takes
+    if not dry:
+        if dst.exists():
+            backup(dst.relative_to(ROOT).as_posix())
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dst.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+        os.replace(tmp, dst)
+    return f"takes+{added}~{updated}"
+
+
 def merge_file(host: str, rel: str, src: Path, att: dict | None = None, dry: bool = False) -> str:
     """并回一个文件的唯一入口（NETFIX puller 与本脚本共用；总调度 01:0x 新架构：传图流水线由 puller 接管，规则仍在这里）。
     host = 文件来自哪台服务器；rel = 仓库相对路径（data/…）；src = 拉回来的本地临时文件。
@@ -163,6 +221,7 @@ def merge_file(host: str, rel: str, src: Path, att: dict | None = None, dry: boo
       ④ data/producer/*.json 对象表（master_rejects 等）：按对象合并，对象内 *at 更晚者胜（merge_objects）；
       ⑤ APPEND 日志：只追加本地没有的行，带集号的行只收负责那台的；
       ⑥ night_state.json：按集合并；
+      ⑦a data/renders/**/takes.json：按版本逐条合并，本地“已隔离”（quarantined）永远保留（merge_takes，UIRSI r42）；
       ⑦ 其余：先验完整（图片解码、mp4 有 moov、json 能解析、不是本地文件的截断前缀，pulled_problem），再“新者为准”覆盖，
          覆盖前备份到 data/_offline_pull/_backup/。永不删除本地文件"""
     import re as _re
@@ -215,6 +274,11 @@ def merge_file(host: str, rel: str, src: Path, att: dict | None = None, dry: boo
     bad = pulled_problem(src, dst)
     if bad:
         return f"corrupt:{bad}"
+    if rel.startswith("data/renders/") and rel.endswith("/takes.json"):      # ⑦a 版本表：逐条合并，本地“已隔离”永远保留
+        try:
+            return merge_takes(src, dst, dry)
+        except (ValueError, OSError) as e:
+            return f"corrupt:{e!r}"[:200]
     if not dst.exists():
         act = "new"
     elif src.stat().st_mtime > dst.stat().st_mtime:

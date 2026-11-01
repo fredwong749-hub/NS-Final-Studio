@@ -129,6 +129,21 @@ def generate(req: dict, *, wait_s: float = 1800, refresh: bool = False, label: s
                 if "path" in im and Path(im["path"]).exists():
                     im["b64"] = base64.b64encode(_shrink(Path(im["path"]), im.get("max_pixels"))).decode()
                     im.pop("path")
+    if not url and (os.environ.get("OFFLINE_SELF") or os.environ.get("VQA_LAN") == "1"):
+        # 服务器上（gpu33 没有到 gpu36 的密钥，DEBUG-RSI 11-02）：ssh 退路永远走不通 → 只重试内网入口，不走 ssh
+        m = cfg().get("model") or {}
+        u = m.get("lan_url")
+        for _ in range(3):
+            if u and _local_up(u):
+                url = u
+                break
+            time.sleep(10)
+        if not url:
+            return {"error": "内网看图入口不可达（服务器上不走 ssh 退路）"}
+        for im in body["images"]:
+            if "path" in im and Path(im["path"]).exists():
+                im["b64"] = base64.b64encode(_shrink(Path(im["path"]), im.get("max_pixels"))).decode()
+                im.pop("path")
     res = _post_local(url, body, wait_s + 120) if url else _post_ssh(body, wait_s + 120)
     if "error" not in res:
         res["key"] = key

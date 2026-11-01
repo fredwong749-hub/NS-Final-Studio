@@ -13,6 +13,7 @@ import "./story.css";
 import { LiveProgress } from "../../ds/StageProgress";
 import { useLiveEvent } from "../live";
 import { ProducerPanel } from "../ProducerPanel";
+import { AutoflowPanel } from "./AutoflowPanel";
 
 const runIdOf = () => new URLSearchParams(location.hash.split("?")[1] ?? "").get("run");
 const setRunInHash = (id: string | null) => {
@@ -276,6 +277,8 @@ function BriefForm({ busy, onStarted }: { busy: string | null; onStarted: (r: Ru
         <h1>新建剧本</h1>
         <p className="ds-muted">给一份故事提纲，写作模型自动写出故事线 → 单集大纲 → 剧本 → 剧本分镜；每段都会出现在这里给你看、改，最后由你确认导入。</p>
       </header>
+      {/* UIRSI r43（总调度 02:5x）：全流程自动（HOLLYWOOD script_autoflow），可切换剧目（多剧并行，新剧本是新的 run） */}
+      <AutoflowPanel />
       <ChainMap />
       <section className="ns-card">
         <div className="ns-row2">

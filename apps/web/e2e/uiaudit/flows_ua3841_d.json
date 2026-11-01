@@ -1,0 +1,23 @@
+[
+  {
+    "id": "hub_undo",
+    "title": "人物中心 林晚 造型A：用这张 → (确认) → 撤销；写请求本地假成功，不发到 :8800",
+    "path": "/#/assets?type=character&char=lin_wan",
+    "wait": 10000,
+    "steps": [
+      { "js": "for (let i=0;i<80;i++){ if (document.querySelector('[aria-label=\"造型 A 设定图候选\"]')) return 'ok '+i; await new Promise(r=>setTimeout(r,500)); } return 'timeout'" },
+      { "wait": 2000 },
+      { "clickAt": "(()=>{const L=document.querySelector('[aria-label=\"造型 A 设定图候选\"]'); const w=[...L.querySelectorAll('.hub-candw')].find(w=>!w.querySelector('.hub-cand.on')); const b=[...w.querySelectorAll('button')].find(x=>/用这张/.test(x.innerText)); b.scrollIntoView({block:'center'}); const r=b.getBoundingClientRect(); window.__ua_t0=Date.now(); return [r.x+r.width/2, r.y+r.height/2]})()", "after": 1200 },
+      { "js": "const dlg=[...document.querySelectorAll('[role=dialog], .ds-modal')].filter(e=>e.getBoundingClientRect().width>100); return {confirmDialogs: dlg.map(d=>d.innerText.slice(0,200)), toasts: [...document.querySelectorAll('.hub-toast')].map(x=>x.innerText.replace(/\\n/g,' | ')), undoBtn: [...document.querySelectorAll('.hub-toast-undo')].map(b=>b.innerText)}" },
+      { "shot": "after_use" },
+      { "clickAt": "(()=>{const b=[...document.querySelectorAll('.hub-toast-undo')].find(x=>/撤销/.test(x.innerText)); if(!b) return [null,null]; window.__ua_undoAt=Date.now()-window.__ua_t0; const r=b.getBoundingClientRect(); return [r.x+r.width/2, r.y+r.height/2]})()", "after": 1500 },
+      { "js": "return {undoClickedAtMs: window.__ua_undoAt, toasts: [...document.querySelectorAll('.hub-toast')].map(x=>x.innerText.replace(/\\n/g,' | '))}" },
+      { "shot": "after_undo" },
+      { "clickAt": "(()=>{const L=document.querySelector('[aria-label=\"造型 A 设定图候选\"]'); const w=[...L.querySelectorAll('.hub-candw')].find(w=>!w.querySelector('.hub-cand.on')); const b=[...w.querySelectorAll('button')].find(x=>/用这张/.test(x.innerText)); b.scrollIntoView({block:'center'}); const r=b.getBoundingClientRect(); window.__ua_t1=Date.now(); return [r.x+r.width/2, r.y+r.height/2]})()", "after": 1200 },
+      { "wait": 9500 },
+      { "js": "return {at: Date.now()-window.__ua_t1, undoStillThere: [...document.querySelectorAll('.hub-toast-undo')].map(b=>b.innerText)}" },
+      { "wait": 1500 },
+      { "js": "return {at: Date.now()-window.__ua_t1, undoStillThere: [...document.querySelectorAll('.hub-toast-undo')].map(b=>b.innerText)}" }
+    ]
+  }
+]

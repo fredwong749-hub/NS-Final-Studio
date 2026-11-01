@@ -1,0 +1,44 @@
+[
+  {
+    "id": "ov_epdetail",
+    "title": "总览 第 6 集 / 第 2 集 细节 ▸ + 悬停提示",
+    "path": "/#/overview",
+    "wait": 10000,
+    "steps": [
+      { "wait": 2500 },
+      { "js": "const res={}; for (const n of [6,2]) { const h=[...document.querySelectorAll('.sea-epn')].find(e=>e.innerText.trim()===`第 ${n} 集`); const head=h?.parentElement; let b=null; let p=h; for(let i=0;i<4 && p && !b;i++){ p=p.parentElement; b=[...(p?.querySelectorAll('button, [role=button], summary')||[])].find(x=>/^细节/.test(x.innerText.trim())); } res['ep'+n]={btn:b?.innerText, headCls: head?.className}; b?.click(); await new Promise(r=>setTimeout(r,1200)); res['ep'+n].after=p?.innerText?.slice(0,700); } const tile=[...document.querySelectorAll('[title]')].find(t=>/^S\\d|镜|景别|候选/.test(t.title) && t.getBoundingClientRect().width>60); res.tileTitle=tile?.title; const h6=[...document.querySelectorAll('.sea-epn')].find(e=>e.innerText.trim()==='第 6 集'); h6?.scrollIntoView({block:'start'}); window.scrollBy(0,-90); return res" },
+      { "wait": 1500 },
+      { "shot": "ep06_detail" },
+      { "js": "const h=[...document.querySelectorAll('.sea-epn')].find(e=>e.innerText.trim()==='第 2 集'); h?.scrollIntoView({block:'start'}); window.scrollBy(0,-90); const tiles=[...document.querySelectorAll('[title]')].filter(t=>t.getBoundingClientRect().top>0 && t.getBoundingClientRect().top<600 && t.title.length>20).map(t=>t.title).slice(0,6); return tiles", "after": 1500 },
+      { "shot": "ep02_detail" }
+    ]
+  },
+  {
+    "id": "ov1280",
+    "title": "总览 1280 深色",
+    "path": "/#/overview",
+    "size": [1280, 800],
+    "wait": 10000,
+    "steps": [ { "wait": 2500 }, { "shot": "main" } ]
+  },
+  {
+    "id": "ov1440light",
+    "title": "总览 1440 浅色",
+    "path": "/#/overview",
+    "theme": "light",
+    "wait": 10000,
+    "steps": [ { "wait": 2500 }, { "shot": "main" } ]
+  },
+  {
+    "id": "gpu_wait",
+    "title": "GPU 面板 等 20 秒看最近出图",
+    "path": "/#/overview",
+    "wait": 9000,
+    "steps": [
+      { "wait": 2000 },
+      { "clickAt": "(()=>{const b=document.querySelector('.v3-gpu'); const r=b.getBoundingClientRect(); return [r.x+r.width/2, r.y+r.height/2]})()", "after": 20000 },
+      { "js": "const imgs=[...document.querySelectorAll('.gl-thumb img')].map(i=>({src:decodeURIComponent(i.currentSrc||i.src).slice(-80), complete:i.complete, nat:i.naturalWidth})); const none=[...document.querySelectorAll('.gl-thumb-none')].map(x=>x.innerText); const cards=[...document.querySelectorAll('[class*=gpu-card], .gpu-lane, [class*=gl-card]')].map(c=>c.innerText.split('\\n').slice(0,4).join(' / ')); return {imgs, broken: imgs.filter(i=>i.complete&&i.nat===0).length, pending: imgs.filter(i=>!i.complete).length, none, cards: cards.slice(0,8), gpuBtn: document.querySelector('.v3-gpu')?.innerText}" },
+      { "shot": "gpu" }
+    ]
+  }
+]

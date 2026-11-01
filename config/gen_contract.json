@@ -53,7 +53,28 @@
    "other_margin": 0.05,
    "recognize_floor": 0.45,
    "min_face_ratio": 0.04,
-   "yaw_relax": {"characters": ["lin_wan"], "tiers": [[0.4, 0.70], [0.8, 0.65], [99, 0.60]], "require_vlm_identity_ok": true, "src": "总调度 11-01 23:0x 采纳 IMGFIX 方案：林晚 Q1 按 gaze_mp |yaw_n| 分档（<0.4 维持 0.70；0.4–0.8 用 0.65；≥0.8 用 0.60），同时要求本地看图 identity_drift = ok；看图身份不过 / 拿不准 / 没测 → 回到 0.70。只用于单脸镜（Q1 只有一个角色、MediaPipe 只测到一张脸）。实现 ns_agent.vqa.contract.q1_yaw_relax（在 Q9 并进契约时一起算）"}, "all_faces_note": "总调度 11-01 P1：每张脸高≥min_face_ratio 的脸都要像本镜 cast（在画/局部）里某个有身份脸的角色（在画者用其阈值，局部者≥recognize_floor）；认不出 → Q1 不过；无身份脸参考的 cast 每人抵一张"
+   "bands": {"default": [[0.10, "近中景及以上", 0.60, 0.50], [0.0, "小脸", 0.50, 0.40]]}, "_bands": "K-REV-V18 修订（总调度 11-02 亲审 data/review_pages/q1_band/：0.55–0.70 带 20 张里 19 张是同一林晚，低分来自四分之三侧脸 / 侧脸，03-S2 v14 0.577 脸圆发糊不合格）：林晚等主角 0.70 单线退役，改三段——≥ 通过线过；复核下限到通过线交本地看图与 L-086 左右并排复核（同一人、画风 / 质感、清晰度三项全过）；< 复核下限直接不过。小脸（脸高 < 0.10）下移 0.10。特写暂不另设（没有标定数据支持更严）", "size_tiers": [[0.27, "特写", 0.55], [0.10, "近中景", 0.50], [0.04, "小脸", 0.40]], "_size_tiers": "VQAGATE 11-02 人物一致性闸门（K-REV-V18）：cast 写不露脸 / 本镜没有在画角色、画面里却出了够大的脸时用的分档线（ArcFace buffalo_l 余弦，对 L-086 身份脸）。标定 data/vqa/idgate_calib/：林晚正例 73 张最低 0.669；ep02-S10 换人 3 张 0.240–0.258（GATE_CALIBRATION §15）", "yaw_relax": {"enabled": false, "_enabled": "K-REV-V18 修订（11-02）后由三段判定 + 复核带取代", 
+    "characters": [
+     "lin_wan"
+    ],
+    "tiers": [
+     [
+      0.4,
+      0.7
+     ],
+     [
+      0.8,
+      0.65
+     ],
+     [
+      99,
+      0.6
+     ]
+    ],
+    "require_vlm_identity_ok": true,
+    "src": "总调度 11-01 23:0x 采纳 IMGFIX 方案：林晚 Q1 按 gaze_mp |yaw_n| 分档（<0.4 维持 0.70；0.4–0.8 用 0.65；≥0.8 用 0.60），同时要求本地看图 identity_drift = ok；看图身份不过 / 拿不准 / 没测 → 回到 0.70。只用于单脸镜（Q1 只有一个角色、MediaPipe 只测到一张脸）。实现 ns_agent.vqa.contract.q1_yaw_relax（在 Q9 并进契约时一起算）"
+   },
+   "all_faces_note": "总调度 11-01 P1：每张脸高≥min_face_ratio 的脸都要像本镜 cast（在画/局部）里某个有身份脸的角色（在画者用其阈值，局部者≥recognize_floor）；认不出 → Q1 不过；无身份脸参考的 cast 每人抵一张"
   },
   "Q2_outfit": {
    "clip_item": 0.8,
@@ -94,6 +115,10 @@
     "ch_a_lan:黑色工作围裙": [
      "a woman wearing a black work apron with straps over her top",
      "a woman wearing just her top or dress, with no apron"
+    ],
+    "ch_a_lan:军绿工装": [
+     "a woman wearing an army-green utility work jacket with pockets over her top",
+     "a woman wearing just her top or dress, with no jacket"
     ]
    },
    "outer_block_keys": [
@@ -107,7 +132,8 @@
     "gu_chen:深灰西装": "只记录：20 张造型 A（目检全穿着黑西装外套）0.016–0.994，与造型 B 12 张 0.000–0.072 重叠；黑外套叠黑高领 CLIP 分不开，且库里没有“只穿高领”的反例（本机 YuNet 框，11-01）",
     "ch_a_lan:黑色工作围裙": "只记录：3 张穿着 0.977–0.992；反例只有别的角色 / 造型 5 张 0.008–0.504，不是阿岚不穿围裙，线 0.75 暂定",
     "lin_wan:黑色漆皮长风衣": "只记录：现行剧本没有可校准的版本",
-    "chen_yu": "三套造型没有外层单品"
+    "chen_yu": "三套造型没有外层单品",
+    "ch_a_lan:军绿工装": "只记录：设定图正面栏 阿岚 B（穿军绿工装）0.999；反例 阿岚 A 0.288、阿岚 C 0.000、林晚 A/B/C ≤0.001、陈宇 A/B/C ≤0.052（IMGFIX r7 11-02，data/ab/imgfix/probe_cal_ch_a_lan_B.json）；出图上的留出复核未测"
    },
    "hair_probes": {
     "gu_chen:黑色短发": [

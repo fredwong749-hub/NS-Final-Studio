@@ -146,11 +146,22 @@ def verify(RL, inp: Path, out: Path, eps: list[int]) -> dict:
     return res
 
 
-def srcs_name_prefix(rec: list[dict]) -> str:
-    """来源文件名里 _series10_v1 之前的剧名部分 + _series10_v1"""
+def _run_ids() -> list[str]:
+    """登记过的全部 run（tools/autopilot/runs.py；K-OPS-W17 / K-OPS-S01 不写死 run_id），长的优先匹配"""
+    if str(ROOT / "tools/autopilot") not in sys.path:
+        sys.path.insert(0, str(ROOT / "tools/autopilot"))
+    import runs as RUNS
+    return sorted(RUNS.list_runs(status=None) or [RUNS.primary_run()], key=len, reverse=True)
+
+
+def srcs_name_prefix(rec: list[dict], run_ids: list[str] | None = None) -> str:
+    """来源文件名里 _<run_id> 之前的剧名部分 + _<run_id>（例：漆皮之下·十日_series10_v1）；没有 run_id 就取第一段"""
     name = Path(rec[0]["source"]).stem
-    i = name.find("_series10_v1")
-    return name[: i + len("_series10_v1")] if i >= 0 else name.split("_")[0]
+    for rid in (run_ids if run_ids is not None else _run_ids()):
+        i = name.find("_" + rid)
+        if i >= 0:
+            return name[: i + len(rid) + 1]
+    return name.split("_")[0]
 
 
 def validate_md(path: Path) -> dict:
@@ -202,7 +213,7 @@ def main(argv=None) -> int:
         summary["verify"] = verify(RL, inp, out, eps)
         summary["output"] = _rel(out)
         # 导入接口只收 data/staging_input、data/staging_v3(/merged) 下的 md（ns_api.script_inbox.candidates）：
-        # 真跑且校验通过时复制一份到 staging_v3/merged（原名规则：<剧名>_series10_v1_qwA_epXX_..._v3.md），导入计划指向它
+        # 真跑且校验通过时复制一份到 staging_v3/merged（原名规则：<剧名>_<run_id>_qwA_epXX_..._v3.md），导入计划指向它
         staged = out
         if a.run and summary["verify"]["ok"]:
             pre = srcs_name_prefix(rec)

@@ -26,7 +26,7 @@ def _notes():
             yield "".join(AR.TEXT_FALLBACK_NOTE.format(name=n) for n in names)
 
 
-@pytest.mark.parametrize("body", BODIES)
+@pytest.mark.parametrize("body", BODIES, ids=["with_style_suffix", "no_suffix"])   # K-OPS-F08：参数里含会变的配置文本，固定 id，xdist 各 worker 收集一致
 def test_every_with_note_path_matches(body):
     for note in _notes():
         full = FJ.with_note(body, note)

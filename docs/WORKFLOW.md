@@ -91,3 +91,11 @@ Claude 只读这些字段、检查文件与尺寸，原样用于 H3；不改提�
 - 在 venv Python 里直接起的 `ssh gpu33 ...` / `ssh gpu36 ...` 会被 .pth 闸门自动改走主连接。新代码请直接用 rssh.run / rsh.py。新增直接起 ssh 的文件必须登记到 config/netfix/ssh_callers.txt（有测试检查）。
 - 不要用 Windows 自带 OpenSSH 加 `-F config/netfix/ssh_config`（会报 hostname contains invalid characters），那是 Git ssh / WSL 的语法。
 - 当前走哪条路、连接状态：`data/netfix/net_status.json`（relay.route、hosts.<连接>.route / state）。
+- r2（11-02 02:0x，K-OPS-N09）：现在到跳板只有一条香港底座隧道（127.0.0.1:22360 → gpu36:22，22330 → gpu33:22），其它连接都在这条隧道里直连服务器 sshd。agent 跑临时命令一律用 rsh.py，不要直接 ssh gpu33/gpu36，否则每次都要在跳板上新握手。
+- 结果回传：服务器 outbox（FACTORY tools/factory/outbox.py）→ 笔记本 tools/netfix/puller.py（监管进程保活，状态在 net_status.transfer）。视频按需拉：`.venv/Scripts/python.exe tools/netfix/puller.py request gpu36 <rel>`。
+
+
+## 发版冻结窗口（K-OPS-F08，FACTORY 11-02 02:3x，总调度定）
+- `tools/qa/system_version.py cut` 进行中时 `data/system_versions/cut_lock.json` 的 active=true（45 分钟到期自动失效）。
+- 任何 agent 改代码 / 测试 / 配置 / 规则（tools/ services/ packages/ config/ knowledge/ ops/ tests/）之前先查：`.venv/Scripts/python.exe tools/qa/system_version.py lock-status`，退出码 3 = cut 进行中，等它结束再改；即使改了也不会进这一版（cut 提交的是开始时冻结的树），只进下一版。
+- 发版脚本链一律 `cut && deploy`；cut 失败 deploy 自己也会拒绝（K-OPS-F07）。

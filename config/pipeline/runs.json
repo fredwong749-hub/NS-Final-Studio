@@ -1,0 +1,19 @@
+{
+ "_doc": "多剧并行 run 登记表（WORKFLOW 11-02，总调度批准，docs/AUTOPILOT.md §0.1；读取 tools/autopilot/runs.py）。导入新剧本 = 追加一条（priority 默认 10，数字小 = 优先），不改 primary、不替换 series10。config/pipeline/run.json 保留为 primary 指针。",
+ "primary": "series10_v1",
+ "runs": {
+  "series10_v1": {
+   "priority": 0,
+   "status": "producing",
+   "source": "import",
+   "created_at": "2026-10-31T00:00:00"
+  },
+  "series10_s2": {
+   "priority": 10,
+   "status": "writing",
+   "created_at": "2026-11-02T02:36:43",
+   "source": "flow-start",
+   "note": "HOLLYWOOD r8 autoflow 写作中（L-104），未导入；status=writing 不派生产作业"
+  }
+ }
+}

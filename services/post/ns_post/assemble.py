@@ -394,7 +394,8 @@ def frame_diffs(path: str | Path, ff: "FFmpeg | None" = None, w: int = 96, h: in
     import subprocess
     exe = getattr(ff, "ffmpeg", None) or "ffmpeg"
     r = subprocess.run([exe, "-v", "error", "-nostdin", "-i", str(path), "-map", "0:v:0",
-                        "-vf", f"scale={w}:{h},format=gray", "-f", "rawvideo", "-"], capture_output=True)
+                        "-vf", f"scale={w}:{h},format=gray", "-f", "rawvideo", "-"], capture_output=True,
+                       timeout=600)   # K-OPS-S01：子进程必须有 timeout（SYSARCH 4-5）
     if r.returncode != 0:
         raise RuntimeError(r.stderr[-300:].decode("utf-8", "replace"))
     fr = np.frombuffer(r.stdout, np.uint8).reshape(-1, h, w).astype(np.float32)

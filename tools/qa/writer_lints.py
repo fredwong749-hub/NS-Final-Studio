@@ -250,6 +250,36 @@ def check_pacing(ep) -> list[dict]:
     return out
 
 
+# HOLLYWOOD r7（总调度 fredw-2b 11-02 批复，L-098 / L-102，CONSENT 总调度 -> HOLLYWOOD）：可核对清单里能机检的 27 条
+# （tools/script_rsi/rubric_code.py）并进写作 lint——写作方自检直接调用；级别固定 RUBRIC_LEVEL（默认 warn，不跟 WRITER_LINT_LEVEL 升 block，
+# 不影响现行稿与各返修环）；导入闸门（validate_qwen_script --rubric-gate / producer import-staged）把它升为 block
+RUBRIC_LEVEL = "warn"
+RULES["QW-RB1"] = ("warn", "HOLLYWOOD 可核对清单的代码判定条目（rubric_code，K-WRT-H07 / H08）：字段写全、分拍按秒切到镜长、镜1 近景或中景、"
+                           "近景不写下半身、台词后下一镜写听者反应、分拍不写穿脱过程、不写回头 / 看镜头、不用情绪直陈句、人物卡原文（发型 / 服装 / 饰品）")
+_RUBRIC = None
+
+
+def _rubric():
+    global _RUBRIC
+    if _RUBRIC is None:
+        import importlib.util
+        from pathlib import Path as _P
+        spec = importlib.util.spec_from_file_location("rubric_code", _P(__file__).resolve().parents[2] / "tools" / "script_rsi" / "rubric_code.py")
+        _RUBRIC = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_RUBRIC)
+    return _RUBRIC
+
+
+def check_rubric(ep, text: str) -> list[dict]:
+    """QW-RB1：rubric_code 代码判定失败的条目，一条一个 issue（集级）"""
+    try:
+        items = _rubric().episode_issues(ep, text)
+    except Exception as e:  # noqa: BLE001  rubric 自身出错不拦校验，只记一条
+        items = [("error", f"rubric_code 运行失败：{e!r}"[:200])]
+    return [{"rule_id": "QW-RB1", "level": RUBRIC_LEVEL, "detail": f"[{it}] {why}"[:300], "field": "清单", "rule": RULES["QW-RB1"][1]}
+            for it, why in items]
+
+
 def check_episode(ep, fields: dict | None = None) -> list[dict]:
     out = check_pacing(ep)
     names = {c.name for s in getattr(ep, "shots", []) for c in (s.cast or [])}

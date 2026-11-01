@@ -11,7 +11,7 @@ from ns_api import shot_status as S  # noqa: E402
 
 
 def test_tags_from_registry_and_script(monkeypatch):
-    reg = {"ep06-S1": {"first": {"status": "ready", "redo": True, "master_reject": "L-088 全量重做"},
+    reg = {"ep06-S1": {"first": {"status": "ready", "redo": True, "master_reject": "总调度驳回 v3：脸不像"},
                        "last": {"status": "ready", "stale": True}, "video": {"status": "pending"}},
            "ep10-S2": {"first": {"status": "passed", "last_error": "契约没过：服装 / 单品对不上参考"},
                        "video": {"status": "best_effort"}, "last": {"status": "running"}}}
@@ -33,7 +33,7 @@ def test_tags_from_registry_and_script(monkeypatch):
 
 def test_episode_blocks_states(monkeypatch):
     regs = {6: {"objects": {"script": {"status": "passed"}, "assembly": {"status": "passed"}},
-                "shots": [{"shot": "ep06-S1", "objects": {"assets": {"status": "passed"}, "first": {"status": "ready", "redo": True},
+                "shots": [{"shot": "ep06-S1", "objects": {"assets": {"status": "passed"}, "first": {"status": "ready", "redo": True, "master_reject": "总调度驳回 v3"},
                                                           "last": {"status": "pending"}, "video": {"status": "pending"}}}]}}
     monkeypatch.setattr(S, "_registry_eps", lambda: regs)
     shots = [{"id": "ep06-S1", "status": {"tags": [{"kind": "redo", "stage": "首帧"}]}}]
@@ -71,3 +71,31 @@ def test_overview_and_canvas_use_backend_tags():
     assert "<MainTag st={rowCands?.[s.id]?.status} />" in rr
     css = (ROOT / "apps/web/src/v3/infra.css").read_text(encoding="utf-8")
     assert "@media (max-width: 1440px)" in css and ".v3-step.cur:not(.on) small { display: none; }" in css
+
+
+
+def test_r42_full_redo_is_in_progress_not_stale(monkeypatch):
+    """r42（总调度：“每集都挂过期”核实）：L-088 全量重做是现行计划——在出 = 出图中、没轮到 = 排队中，板块算进行中，不算过期"""
+    reg = {"ep02-S1": {"first": {"status": "ready", "redo": True, "master_reject": "L-088 全量重做（R0：现行 frame_v9）"}},
+           "ep02-S2": {"first": {"status": "running", "redo": True, "reason": "总调度驳回 v14：L-088 全量重做"}}}
+    monkeypatch.setattr(S, "_registry", lambda: reg)
+    a = S.tags_for("ep02-S1", {})
+    b = S.tags_for("ep02-S2", {})
+    assert a["main"] == "queued" and "全量重做" in a["tags"][0]["text"] and b["main"] == "busy"
+    regs = {2: {"objects": {"script": {"status": "passed"}}, "shots": [{"shot": "ep02-S1", "objects": reg["ep02-S1"]}]}}
+    monkeypatch.setattr(S, "_registry_eps", lambda: regs)
+    blk = S.episode_blocks(2, [{"id": "ep02-S1", "status": a}])
+    assert {x["key"]: x["state"] for x in blk["stages"]}["first"] == "doing" and blk["state"] != "stale"
+
+
+def test_r42_topbar_counts():
+    rt = (ROOT / "services/api/ns_api/render_tasks.py").read_text(encoding="utf-8")
+    assert 'counts["queued"]' in rt and 'counts["planned"]' in rt and 'counts["failed_recent"]' in rt
+    btn = (ROOT / "apps/web/src/components/RenderTasks.tsx").read_text(encoding="utf-8")
+    assert "排队 {c.queued ?? c.pending}" in btn and "c.failed_recent ?? c.failed" in btn
+    jb = (ROOT / "services/api/ns_api/jobs.py").read_text(encoding="utf-8")
+    assert '"probing": bool(pr.get("probing"))' in jb
+    gp = (ROOT / "apps/web/src/components/GpuPanel.tsx").read_text(encoding="utf-8")
+    assert "卡 探测中…" in gp and "known" in gp
+    ln = (ROOT / "apps/web/src/v3/edit/lanes.ts").read_text(encoding="utf-8")
+    assert 'external: "在出（服务器派单）"' in ln and 'if (l.probing) return "探测中…";' in ln

@@ -158,6 +158,21 @@ function useDialogueSource(n: number): { label: string; hint: string } | null {
   return v;
 }
 
+// UIAUDIT F26（UIRSI r43）：恢复“立即推进一步”入口（git 0a91a20 删了按钮，后端 POST /api/projects/{slug}/production/tick 仍在；
+// 旧 BoardView 的 papi.tick(slug)，标题“立即推进一步（后台每 20 秒自动推进）”）。点一下即生效，不让打字；slug 取默认项目。
+async function tickProduction(notify: (m: string, k?: "ok" | "err") => void) {
+  try {
+    const ps = (await fetch("/api/projects").then((r) => r.json())) as { slug: string; is_default?: boolean }[];
+    const slug = (ps.find((p) => p.is_default) ?? ps[0])?.slug;
+    if (!slug) return notify("没有找到项目，没法推进", "err");
+    const r = await fetch(`/api/projects/${encodeURIComponent(slug)}/production/tick`, { method: "POST" });
+    if (!r.ok) return notify(`推进失败（${r.status}）`, "err");
+    notify("已推进一步（后台本来每 20 秒也会自动推进）");
+  } catch (e) {
+    notify(`推进失败：${(e as Error).message}`, "err");
+  }
+}
+
 export function TopBarV3({ page }: { page: V3Page | null }) {
   const st = useStudio();
   const { episodes, epNum, gotoEpisode, view, setView, jobs, drawer, setDrawer, setHelpOpen, setPaletteOpen, episode, filter, setFilter } = st;
@@ -386,6 +401,12 @@ export function TopBarV3({ page }: { page: V3Page | null }) {
                     <small>{hint}</small>
                   </button>
                 ))}
+                {g.group === "运行" && (
+                  <button data-tool="tick" onClick={() => (void tickProduction(st.notify), close())} title="立即推进一步（后台每 20 秒自动推进）">
+                    <span>立即推进一步</span>
+                    <small>不等 20 秒，马上让整集出片往下走一步</small>
+                  </button>
+                )}
               </section>
             ))}
             {me && (

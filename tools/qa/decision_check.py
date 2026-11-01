@@ -110,6 +110,15 @@ def check_paths(c, exists: bool):
     return not bad, (f"{'缺' if exists else '仍在'} {bad}" if bad else "符合")
 
 
+def check_cmd(c):
+    """type: cmd（DISTILL 11-02，身份脸断言 K-OPS-X07）：{cmd: [脚本, 参数…]}，用本 venv 的 python 跑，退出码 0 = 符合"""
+    import subprocess
+    r = subprocess.run([sys.executable, "-X", "utf8", *c["cmd"]], cwd=str(ROOT), capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", timeout=int(c.get("timeout", 300)))
+    out = (r.stdout or r.stderr or "").strip().splitlines()
+    return r.returncode == 0, ("；".join(out[:4]) or f"rc={r.returncode}")[:400]
+
+
 def run(use_api=True):
     cfg = yaml.safe_load((ROOT / "config" / "owner_decisions.yaml").read_text(encoding="utf-8"))
     rows = []
@@ -124,6 +133,8 @@ def run(use_api=True):
                 ok, detail = check_grep(c, t == "grep_present")
             elif t in ("exists", "absent"):
                 ok, detail = check_paths(c, t == "exists")
+            elif t == "cmd":
+                ok, detail = check_cmd(c)
             else:
                 ok, detail = False, f"未知类型 {t}"
         except Exception as e:  # noqa: BLE001

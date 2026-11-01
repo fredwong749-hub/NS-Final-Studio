@@ -1,0 +1,34 @@
+/* UIRSI r43（项目方 11-02 02:0x：“在 rendering 中，采取像呼吸灯一样一点一点慢慢闪烁会比较舒服，用这个逻辑来做。”）
+   全站统一的“正在渲染”呼吸灯（K-UI-048）：
+   · 只有真的在出图 / 出视频的元素才呼吸；排队中、未开始 = 静止灰色（.is-queued / .s-queued / .k-queued 不动）
+   · 透明度 0.35 ↔ 1、亮度 0.75 ↔ 1，周期 2.7 s，ease-in-out，无限往返——不闪、不跳
+   · 同屏多个呼吸点：父元素给 --breathe-delay（按镜号 / 卡号错开，负值 = 从周期中段开始），避免整屏齐闪
+   · prefers-reduced-motion：静止、满亮度
+   旧的各自为政的 pulse（canvas step-busy / styles b-running / 总览 s-busy / 整集出片 .live / GPU 卡“在跑”）在这里统一接管，
+   原文件不动（UIPIXEL 文件），选择器用 html 前缀提高优先级覆盖。 */
+:root { --breathe-period: 2.7s; --breathe-lo: .35; }
+@keyframes ns-breathe {
+  0%, 100% { opacity: var(--breathe-lo); filter: brightness(.75); }
+  50% { opacity: 1; filter: brightness(1); }
+}
+html .is-rendering,
+html .stag.k-busy,
+html .step-busy,
+html .b-running,
+html .sea-seg.s-busy,
+html .sea-busy,
+html .live,
+html .gpu-state.busy {
+  animation: ns-breathe var(--breathe-period) ease-in-out infinite;
+  animation-delay: var(--breathe-delay, 0s);
+}
+/* 排队中 / 未开始：静止灰色 */
+html .is-queued,
+html .sea-seg.s-queued { animation: none; opacity: 1; filter: none; }
+html .sea-seg.s-queued { background: var(--c-text-3); }
+@media (prefers-reduced-motion: reduce) {
+  html .is-rendering, html .stag.k-busy, html .step-busy, html .b-running, html .sea-seg.s-busy, html .sea-busy, html .live, html .gpu-state.busy {
+    animation: none; opacity: 1; filter: none;
+  }
+}
+html .sea-busy.is-queued { background: var(--c-sunken); color: var(--c-text-2); }

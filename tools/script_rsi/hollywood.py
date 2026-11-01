@@ -861,6 +861,13 @@ def cmd_merge(a) -> int:
         out.write_text(pre + "".join(parts), encoding="utf-8")
         v = FR.validate_json(out)
         summary["validate"] = {"blocking": v.get("blocking"), "warnings": v.get("warnings")}
+        # r7 导入闸门（总调度 11-02：新剧本导入前先跑 rubric_code，代码判定失败项 = 0 才能导入；K-WRT-H08）
+        RA = _load("rubric_audit", "tools/script_rsi/rubric_audit.py")
+        rg = RA.gate(out)
+        summary["rubric_gate"] = {"ok": rg["ok"], "eps": {e: {"met": x["met"], "total": x["total"], "fails": x["fails"][:8]} for e, x in rg["eps"].items()}}
+        if not rg["ok"] and not getattr(a, "skip_rubric_gate", False):
+            bad.update({e: "rubric_code 代码判定失败项 ≠ 0（导入闸门）：" + "；".join(x["fails"][:3]) for e, x in rg["eps"].items() if x["fails"]})
+            v = {**v, "blocking": (v.get("blocking") or 0) + sum(1 for x in rg["eps"].values() if x["fails"])}
         if not v.get("blocking"):
             staged = ROOT / "data/staging_v3/merged" / f"漆皮之下·十日_series10_v1_hwd_{'_'.join(f'ep{e:02d}' for e in ok_eps)}_v3.md"
             if staged.exists():
@@ -1250,6 +1257,7 @@ def main(argv=None) -> int:
     mg.add_argument("--out-dir", required=True, help="各集 run 的上级目录（含 epNN/）")
     mg.add_argument("--episodes", required=True)
     mg.add_argument("--note", default="")
+    mg.add_argument("--skip-rubric-gate", action="store_true", help="跳过 rubric_code 导入闸门（只用于复现 r7 之前的旧稿，须总调度批准）")
     mg.add_argument("--stage-below-target", action="store_true",
                     help="未达 95 的集也暂存 + 写导入命令（只暂存不导入，等总调度 / 项目方定降级导入口径）")
     sh = sub.add_parser("ship", help="单集流水线：run → 单集 merge → producer import-staged → CHANGELOG（总调度 22:06）")

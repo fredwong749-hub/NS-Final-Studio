@@ -41,6 +41,7 @@
 | apps/web/src/ds/Flash.tsx（新建，实时刷新提示包装） | UIRSI | 实时刷新做完 |
 | apps/web/src/ds/live.css（UIRSI 按总调度指令新建；UIPIXEL 11-01 已同意接管：“live.css 写完交我接管没问题”） | UIPIXEL（接管） | 长期 |
 | apps/web/src/projects/Root.tsx（无 owner，共享；UIRSI 11-01 03:1x 事后补登：只把 script-chat 从“旧地址重定向”里去掉，恢复写作对话路由，UIAUDIT F23） | 共享（UIRSI 已改完） | — |
+| UIRSI r43（总调度 fredw-2b 11-02 UIAUDIT 复核派单 + r43 / 02:2x / 02:4x 规格）：apps/web/src/components/GpuPanel.tsx（连接读 infra tunnels、呼吸灯相位）、services/api/ns_api/decision_locks.py（regex + match）、services/api/ns_api/app.py（count / latest_take 排除隔离）、services/api/ns_api/infra_status.py（重连提示只说真断的）、services/api/ns_api/season.py（faces / img 字段）、apps/web/src/v3/pages/story.css（全流程自动面板 af-* 样式，只追加） | UIRSI | 本轮收轮即释放（改完已跑 data_parity：752 项不一致 0） |
 
 ## 授权（CONSENT，iter_gate O1 读这一节）
 
@@ -48,6 +49,7 @@
 
 `CONSENT: <文件 owner> -> <被授权 agent> : <路径或 glob> | <原话 / 日期>`
 
+- CONSENT: ITERAUDIT -> SYSARCH : tools/qa/iter_gate.py | 总调度 fredw-2b 11-02 03:1x 代录（ITERAUDIT 不在岗）：“iter_gate 的 A1 检查项也由你直接加，CONSENT 记我名下。”（只加 A1 一项）
 - CONSENT: 总调度 -> RESEARCH : docs/master/MASTER_PICTURE.md（只加 L-087 一行）, config/owner_decisions.yaml（只加 D-IMG-87a/b/c） | 总调度 fredw-2b 11-01 17:5x：“这两个文件总调度授权你改，写 CONSENT。”
 - CONSENT: REFLOCK -> RESEARCH : services/render_router/ns_render/unified_frame.py | 总调度 fredw-2b 11-01 代录：“GPU A/B 走方案 ②：给 frame-jobs 加 scope=ab 标记，不进 auto_current，不进 rescore，不进契约账本，产物放在独立目录……改 services/api 的 frame_jobs 和 producer 时要写 CONSENT（by 总调度 fredw-2b），在 LOCKS 登记，补测试。”
 - CONSENT: 总调度 -> RESEARCH : services/api/ns_api/frame_jobs.py | 总调度 fredw-2b 11-01（同上一条原话）
@@ -115,6 +117,9 @@
 - CONSENT: UIRSI -> BGM10 : services/api/ns_api/shot_audio.py | 总调度 11-01（_music_dir 指向 series10、挂 bgm 路由）
 - CONSENT: AUTOPILOT -> DATAALIGN : tools/pipeline/register_takes.py | 总调度 11-01（AUTOPILOT 不活跃；--video10 视频登记 + retract_stale_video10，D-VIDEO 任务）
 - CONSENT: UIRSI -> UIMASTER : apps/web/src/v3/**（仅 PW-019 导入路径改写：只改 import 行的路径，不碰其他逻辑；每步先在沙盒跑 tsc） | UIRSI 11-01
+- CONSENT: GPUVIEW -> UIRSI : services/api/ns_api/render_tasks.py | by 总调度 fredw-2b 11-02 r42：“先修状态口径错误，这些属于 bug……顶栏‘卡 0/7 忙’……‘渲染任务 1 跑 · 301 等 · 30 失败’查清楚口径……每集都挂‘过期’核实判定”
+- CONSENT: GPUVIEW -> UIRSI : apps/web/src/components/RenderTasks.helpers.ts | by 总调度 fredw-2b 11-02 r42：“先修状态口径错误，这些属于 bug……顶栏‘卡 0/7 忙’……‘渲染任务 1 跑 · 301 等 · 30 失败’查清楚口径……每集都挂‘过期’核实判定”（只加 counts 类型字段）
+- CONSENT: EDITDEL -> UIRSI : apps/web/src/v3/edit/lanes.ts | by 总调度 fredw-2b 11-02 r42：“先修状态口径错误，这些属于 bug……顶栏‘卡 0/7 忙’……‘渲染任务 1 跑 · 301 等 · 30 失败’查清楚口径……每集都挂‘过期’核实判定”（只改道的活动词和“探测中”）
 - CONSENT: DATAALIGN -> UIRSI : services/api/ns_api/app.py | by 总调度 fredw-2b 11-02 r41（项目方 00:5x：“旧版本的东西就隔离开吧,然后在我的网页里面尽量给我看最新的”）：“集摘要（/api/episodes）的计数口径一起改：那 50 个旧尾帧不能再算作有尾帧，CONSENT 写 DATAALIGN → UIRSI”（只改 _active 一处）
 - CONSENT: DATAALIGN -> UIRSI : tools/qa/data_parity.py | by 总调度 fredw-2b 11-02 r40 紧急派单（项目方 00:0x：“图片生成错误,你刷新了图片库没有?”；00:1x：“在 UI 里面做一个错误标志吧”；误点事故 23:57）：“data_parity 加一项检查：界面显示的候选必须属于现行剧本版本，加进 iter_gate”
 - CONSENT: UIPIXEL -> UIRSI : apps/web/src/v3/shotstatus.css | by 总调度 fredw-2b 11-02 r40 紧急派单（项目方 00:0x：“图片生成错误,你刷新了图片库没有?”；00:1x：“在 UI 里面做一个错误标志吧”；误点事故 23:57）（新建状态标签样式）
@@ -182,12 +187,14 @@ CONSENT: AUTOPILOT -> PRODUCER : tools/iterate_loop/submitter.py、services/api/
 - CONSENT: VIDEO10 -> AUTOPILOT : tools/series10_video/upscale_preview.py | 总调度 2026-11-01 19:0x（VIDEO-RCA r1：Pika 去抖接进合成链路，PROD 已收工）
 - CONSENT: VIDEO10 -> AUTOPILOT : tools/series10_video/night.py | 总调度 2026-11-01 19:0x（同上：assembly_sources 认去抖版）
 - CONSENT: PRODUCER -> AUTOPILOT : tools/autopilot/producer.py | 总调度 2026-11-01 19:3x（CLEANUP D-LEDGER：master_reject 驳回即撤下后账本同步待重出；PROD 已收工）
+- CONSENT: REFLOCK -> AUTOPILOT : services/agent/ns_agent/asset_refs.py, config/recipes/asset_refs.json | 总调度 2026-11-02 02:5x（第二季 inherits 继承，K-OPS-W18）
 - CONSENT: AUTOPILOT -> VIDEO_RCA : services/recipes/ns_recipes/prompt.py | by 总调度 fredw-2b 11-01 19:2x 派 r2：“O1：授权你改 services/recipes 的 prompt.py、lint.py、_base.yaml”
 - CONSENT: AUTOPILOT -> VIDEO_RCA : services/recipes/ns_recipes/lint.py | by 总调度 fredw-2b 11-01 19:2x 派 r2：“O1：授权你改 services/recipes 的 prompt.py、lint.py、_base.yaml”
 - CONSENT: AUTOPILOT -> VIDEO_RCA : services/recipes/recipes/_base.yaml | by 总调度 fredw-2b 11-01 19:2x 派 r2：“O1：授权你改 services/recipes 的 prompt.py、lint.py、_base.yaml”
 - CONSENT: REFLOCK -> VIDEO_RCA : services/agent/ns_agent/framing.py（只改 two_shot_clause 措辞） | by 总调度 fredw-2b 11-01 19:2x：“现在就把 framing.two_shot_clause 改成你实测有效的句子……CONSENT 写 REFLOCK → VIDEO_RCA”
 - CONSENT: SCRIPT_RSI -> VIDEO_RCA : tests/test_script_rsi_eyeline.py（只改 two_shot 一条断言，随 framing 证据例外） | by 总调度 fredw-2b 11-01 19:2x r2 决定 3（“它和 SCRIPT-RSI 的‘只写正向句’规则冲突，这里按证据例外处理”）
 - CONSENT: ITERAUDIT -> VIDEO_RCA : knowledge/rules/writer_iteration.yaml（只改 K-WRT-702 证据：补“只管整件消失”的限定） | by 总调度 fredw-2b 11-02 r4 派：“你直接在 writer_iteration.yaml 的 K-WRT-702 证据里补一条……CONSENT 写 ITERAUDIT → VIDEO_RCA，然后跑 compile”
+- CONSENT: ITERAUDIT -> VIDEO_RCA : tools/qa/writer_lints.py（只加 QW-W12）, tests/test_writer_lints.py（只加 test_w12） | by 总调度 fredw-2b 11-02 r4 回复：“K-WRT-704 转正。规则要落两处：编译层……写作规则 + lint”
 - CONSENT: 总调度 -> VIDEO_RCA : tests/test_video_rca.py | by 总调度 fredw-2b 11-01 19:2x：“tests/test_video_rca.py 你自己补登”- CONSENT: DATAALIGN -> CLEANUP : tools/qa/data_parity.py（pending_redo 过期上限 + A-PARITY-PENDING 报警）、新 config/data_parity.json | by 总调度 fredw-2b 11-01 AUDIT P2：“pending_redo 超过 N 小时……单列为‘过期待重做’，并写一条 data/qa/alerts.jsonl 报警”
 - CONSENT: LOCALGPU -> VQAGATE : services/render_router/ns_render/comfy_client.py | by 总调度 fredw-2b 11-01 20:3x：“最短看图窗口由你实现：server.py 归你，comfy_client 的 _yield_peer 和 D:
 s_vqastart.ps1 归 LOCALGPU（已收工），CONSENT 写 LOCALGPU → VQAGATE”（本轮只改了 server.py；_yield_peer 没改）
@@ -210,3 +217,18 @@ s_vqastart.ps1 归 LOCALGPU（已收工），CONSENT 写 LOCALGPU → VQAGATE”
 - CONSENT: REFLOCK -> DEBUG_RSI : services/render_router/ns_render/comfy_client.py（K-OPS-E01 轮询宽限 / E02 IncompleteRead 归连接 + 下载重试 / E03 cancel(prompt_id)；备份 data/_quarantine/debug_rsi_20261102/comfy_client.py.bak） | by 总调度 fredw-2b 11-02 00:4x：“三项都认可，按你的方案修”
 - CONSENT: PRODUCER -> DEBUG_RSI : tools/autopilot/producer.py（K-OPS-E05 派单线程池 + 打分积压背压 + vlm_instances；备份 data/_quarantine/debug_rsi_20261102/producer.py.bak）、data/producer/attempts.json（只改 first:ep01-S7 tries 1→0，带 audit） | by 总调度 fredw-2b 11-02 01:0x：“按你的方案马上重启，由你执行”“first:ep01-S7 的 tries 退回 1 次……我授权你在重启窗口里改 PRODUCER 账本”
 - CONSENT: 总调度 -> IMGFIX : docs/master/MASTER_PICTURE.md（只加 L-101 一行）、config/owner_decisions.yaml（只改 D-AST-93 断言为新文件名）、data/pipeline/runs/series10_v1/assets/sheets_chosen.json（经中枢 set_sheet）、data/assetmaster/sheet_item_checks.json（lin_wan_lookA 按文件认的 pass 记录）、data/assetmaster/sheets_v2/adopted/lin_wan_lookA_v2_s202_sleevefix.png（新增） | by 总调度 fredw-2b 11-02 01:2x：“采用候选 1……按 REFLOCK 流程走……MASTER_PICTURE 记一行 L-101”
+- CONSENT: ITERAUDIT -> DIRECTOR : tools/qa/ownership.yaml（只加 owners.DIRECTOR 一行 + rule_owners.by_file director.yaml；备份 data/_quarantine/director_20261102/ownership.yaml.before） | by 总调度 fredw-2b 11-02 回复 DIRECTOR r1 第 2 条：“批准登记 ownership.yaml，按你列的路径登记 DIRECTOR 的文件归属”
+- CONSENT: VIDEO10 -> DIRECTOR : tools/series10_video/night.py（只在 finalize 合成成功后加 tools/director/finish.py 调用块 + st 记 director / lip_redo；备份 data/_quarantine/director_20261102/night.py.before） | by 总调度 fredw-2b 11-02 回复 DIRECTOR r1 第 1 条：“批准把 post_pass + film_score、lip_redo.blocking、merge_music_intensity + 导演规格转场接进 night 合成链”
+- CONSENT: VIDEO10 -> DIRECTOR : services/post/ns_post/assemble.py（只加 ns_post.director 导入 + 4 个落点：split_pieces max_s、J-cut jl、BGM cue 合并、timeline.director；开关 config/post/director.json，关时行为不变；备份 data/_quarantine/director_20261102/assemble.py.before） | by 总调度 fredw-2b 11-02 同上
+- CONSENT: PROMPT -> DIRECTOR : services/agent/ns_agent/compiler.py（只加 CompiledShot.h3_norm 字段 + compile_shot 里 camera_norm 一处调用）、services/recipes/ns_recipes/prompt.py（只加 _camera_norm 载入 + build_base 一处规范化并记 notes）、tests/test_h3_prompt.py（不变量改为“只有项目方覆盖或带规则号的编译层规范化能改 H3 正文”，EX1N + test_h3_norm_only_change）；备份 data/_quarantine/director_20261102/ | by 总调度 fredw-2b 11-02 批复 DIRECTOR r2 第 1 条：“K-REN-801 运镜规范化：接……test_h3_prompt 的不变量改成……测试要守住除此之外不许改”
+- CONSENT: VIDEO10 -> DIRECTOR : tools/series10_video/vidgen.py（只加 LIP_REDO 常量 + Runner.check_lip_redo + pending() 里一处调用；备份 data/_quarantine/director_20261102/vidgen.py.before） | by 总调度 fredw-2b 11-02 批复 r2 第 3 条：“口型重出单的消费由你做（VIDEO10 已经不在跑了）……走现有的视频驳回 → 待重出路径，不另造通道，不计次，带原因”
+- CONSENT: ASSETMASTER -> IMGFIX : tools/assetmaster/choose.py（只在 enforce_item_check 末尾加 K-AST-264 入库检查）；ASSETUX -> IMGFIX : services/api/ns_api/character_hub.py（set_sheet 加入库检查）；新建 services/agent/ns_agent/sheet_intake.py、tools/asset_repair/**、config/asset_repair/** | by 总调度 fredw-2b 11-02 r6：“写成可复用的工具……加一个资产入库检查……在设定图被采用前就拦下”
+- CONSENT: 总调度 -> HOLLYWOOD : tools/validate_qwen_script.py、tools/qa/writer_lints.py（只加 rubric_code 代码判定 QW-RB1 + --rubric-gate）、tests/test_writer_lints.py | by 总调度 fredw-2b 11-02 r7 批复（L-098 / L-102）：“授权你把 rubric 导入闸门接进生产导入：validate_qwen_script（ITERAUDIT）……同时把 rubric_code 并进 writer_lints.py（ITERAUDIT 不在跑，授权同上）”
+- CONSENT: 总调度 -> HOLLYWOOD : tools/autopilot/producer.py（只改 import_staged：导入前 rubric 闸门 + --skip-rubric-gate 仅总调度可批、记审计） | by 总调度 fredw-2b 11-02 r7 批复（L-098 / L-102）：“producer import-staged（PRODUCER，现在由 DEBUG-RSI 接管）……改 producer.py 之前先告知 DEBUG-RSI”
+- CONSENT: LOCALGPU -> DEBUG_RSI : 停笔记本 ComfyUI :18388（19152/52092）与 D:/ns_comfy/watchdog.ps1（40220）；config/render_endpoints.json laptop:0 hold=true + disabled=true；services/api/ns_api/infra_status.py（disabled 时显示“看图卡”；UIRSI r39 文件，只加 disabled 分支） | by 总调度 fredw-2b 11-02 01:5x：“总调度批准（L-100）：你来停笔记本的 ComfyUI……laptop:0 在 render_endpoints 里标成 disabled（注明原因 L-100），让看板和 UI 显示‘看图卡’”
+- CONSENT: PRODUCER -> DEBUG_RSI : tools/autopilot/producer.py、data/producer/**、tests/test_producer.py、services/api/ns_api/producer.py 所有权整体转交（PRODUCER 不在岗） | by 总调度 fredw-2b 11-02 02:2x：“PRODUCER 不在岗，producer.py 的所有权整体转给你（DEBUG-RSI）。CONSENT 记我名下，L-098 / L-102”
+- CONSENT: GPUVIEW -> UIRSI : apps/web/src/components/GpuPanel.tsx | by 总调度 fredw-2b 11-02 UIAUDIT 复核派单：“P1-2 / P1-3 顶栏两套探测口径矛盾……所有连接状态统一读 net_status 一个口径”（GPU 卡“连不上”改读 /api/infra/status tunnels；K-UI-048 呼吸灯按卡号错开相位）
+- CONSENT: UIPIXEL -> UIRSI : apps/web/src/v3/breathe.css | by 总调度 fredw-2b 11-02 r43（项目方 02:0x：“在 rendering 中，采取像呼吸灯一样一点一点慢慢闪烁会比较舒服”）：“做成一个共享 CSS 类 / token，比如 .is-rendering”（新建样式）
+- CONSENT: DATAALIGN -> UIRSI : services/api/ns_api/app.py | by 总调度 fredw-2b 11-02 UIAUDIT 复核派单：“P1-1 /api/episodes takes_count 含已隔离版本”（只改 count / latest_take 两处，is_quarantined 同口径）
+- CONSENT: UIPIXEL -> UIRSI : apps/web/src/v3/pages/story.css | by 总调度 fredw-2b 11-02 02:5x：“#/script-create 加一个‘全流程自动’入口……页面按 r44 的整洁规格做”（只追加 af-* 样式）
+- CONSENT: CLEANUP -> DEBUG_RSI : tools/qa/data_parity.py（只加 D-REGCONS：读 data/producer/consistency.json） | by 总调度 fredw-2b 11-02 03:2x：“授权 CONSENT CLEANUP → DEBUG_RSI（L-098），由你在 data_parity.py 里读 consistency.json”

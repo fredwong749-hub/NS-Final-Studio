@@ -79,3 +79,116 @@ button.stag.on { outline: 2px solid var(--k); outline-offset: 1px; }
 /* r42（总调度定 A）：行高不变；收起时剧本多显示一行，用掉原来“详情”那一行的留白 */
 .v3-row.lean .v3-script:not(.full) { -webkit-line-clamp: 3; height: 4.5em; }
 .v3-l1 .v3-more { margin-left: var(--sp-2); }
+/* ---------- r43 整洁版总览（项目方 02:1x：“颜色太错乱了，能不能再整洁一点？”“参考过程…能给我更专业的 layout 吗？”；
+   总调度 02:2x 规格，不用 DaVinci）。默认（.simple）：
+   一、全页只用中性色（背景 / 卡片 / 文字三档灰）；状态只用 8px 小圆点三种：渲染中=蓝点+呼吸灯、需要人看/失败=琥珀点、已确认=绿点；其他状态不画点
+   二、板块胶囊、状态胶囊、显示细节收进“筛选 ▾”；进度=一行灰字+细单色线；图下彩色胶囊去掉
+   三、镜头卡：1440 宽每行 7 张、1920 宽每行 9 张，间距 12px，圆角 6px；图 + 左上镜号 + 右上状态点 + 图下一行灰字（景别 · 时长）
+   五、字体：标题 15px 半粗、正文 13px、辅助 12px 灰；数字等宽
+   只隐藏不删：勾“显示细节”（在“筛选 ▾”里）全部回来（G10） ---------- */
+.sea-page.simple { font-size: 13px; font-variant-numeric: tabular-nums; }
+.sea-page.simple .sea-ep, .sea-page.simple .sea-ep.blk, .sea-page.simple .sea-ep.cur { border: 1px solid var(--c-line); border-left-width: 1px; background: var(--c-raise); }
+.sea-page.simple .sea-ep.cur { border-color: var(--c-line-2); }
+.sea-page.simple .sea-eph { align-items: center; gap: var(--sp-2); }
+.sea-page.simple .sea-eph > :is(.blk-badge, .sea-more, .stag-counts, .sea-scn, .sea-xep, .blk-stages, .sea-epbar, .sea-selall, .sea-epm:not(.sea-prog)) { display: none !important; }
+.sea-page.simple .sea-epn { color: var(--c-text); font-size: 15px; font-weight: 600; }
+.sea-page.simple .sea-ept { font-size: 15px; font-weight: 600; color: var(--c-text); }
+.sea-page.simple .sea-ept::before { content: "· "; color: var(--c-text-2); font-weight: 400; }
+.sea-page.simple .sea-prog { font-size: 12px; color: var(--c-text-2); }
+.sea-need { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--c-text-2); }
+/* 状态点（8px）：只有三种颜色 */
+.sea-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.sea-dot.d-run, .sd-dot.d-run { background: var(--c-info); }
+.sea-dot.d-need, .sd-dot.d-need { background: var(--c-warn); }
+.sea-dot.d-ok, .sd-dot.d-ok { background: var(--c-ok); }
+.sea-pic > .sea-dot { position: absolute; top: 7px; right: 7px; box-shadow: 0 0 0 2px color-mix(in srgb, var(--c-bg) 70%, transparent); z-index: 2; }
+.sea-page:not(.simple) .sea-pic > .sea-dot { display: none; }
+/* 去掉的东西 */
+.sea-page.simple :is(.sea-filters, .blk-bar, .stag-counts, .sea-link) { display: none !important; }
+.sea-page.simple .sea-legend[aria-label="图例"] { display: none !important; }
+.sea-page .sea-filter-pop :is(.sea-filters, .blk-bar) { display: flex !important; }
+.sea-page.simple .sea-pic :is(.stag, .sea-busy, .sea-cand, .sea-adult, .sea-last) { display: none !important; }
+.sea-page.simple .sea-card, .sea-page.simple .sea-card[class*="k-"] { box-shadow: none; }
+/* 进度：一行灰字 + 细单色线 */
+.sea-tot { display: flex; flex-direction: column; gap: 6px; }
+.sea-tot-t { font-size: 12px; color: var(--c-text-2); font-variant-numeric: tabular-nums; }
+.sea-tot-bar { display: block; height: 3px; border-radius: 2px; background: var(--c-line); overflow: hidden; }
+.sea-tot-bar > i { display: block; height: 100%; background: var(--c-text-2); transition: width .6s ease; }
+/* 筛选下拉 */
+.sea-filter-pop { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2); min-width: 320px; max-width: 520px; }
+/* 镜头卡网格 */
+.sea-page.simple .sea-row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 12px; overflow: visible; padding-bottom: 0; }
+@media (min-width: 1800px) { .sea-page.simple .sea-row { grid-template-columns: repeat(9, minmax(0, 1fr)); } }
+@media (max-width: 1100px) { .sea-page.simple .sea-row { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .sea-page.simple .sea-row { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.sea-page.simple .sea-cell { display: block; min-width: 0; }
+.sea-page.simple .sea-card { width: 100%; gap: 0; padding: 0; border: 1px solid var(--c-line); border-radius: 8px; background: var(--c-raise); overflow: hidden; transition: border-color .15s; }
+.sea-page.simple .sea-card:hover { border-color: var(--c-text-3); }
+.sea-page.simple .sea-cell.sel .sea-card { box-shadow: none; }
+.sea-page.simple .sea-cell.sel .sea-card { border-color: var(--c-text-2); }
+.sea-page.simple .sea-pic { border-radius: 0; overflow: hidden; background: color-mix(in srgb, var(--c-sunken) 85%, var(--c-text) 4%); }
+.sea-page.simple .sea-pic > span:not(.stag):not(.sea-no):not(.sea-busy):not(.sea-cand):not(.sea-adult) { font-size: 12px; color: var(--c-text-3); }
+.sea-page.simple .sea-no { top: 6px; left: 6px; font-size: 11px; font-weight: 600; padding: 1px 5px; border-radius: 4px; background: rgba(0, 0, 0, .55); color: #fff; }
+.sea-page.simple .sea-meta { display: none !important; }
+/* ---------- 详情抽屉（§四）：右侧 520px，盖在页面上，Esc 关闭 ---------- */
+.sd-scrim { position: fixed; inset: 0; background: color-mix(in srgb, #000 35%, transparent); z-index: 60; }
+.sd { position: fixed; top: 0; right: 0; bottom: 0; width: min(520px, 100vw); z-index: 61; display: flex; flex-direction: column; background: var(--c-raise); border-left: 1px solid var(--c-line);
+  box-shadow: -12px 0 32px rgba(0, 0, 0, .28); font-size: 13px; font-variant-numeric: tabular-nums; animation: sd-in .18s ease-out; }
+@keyframes sd-in { from { transform: translateX(24px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .sd { animation: none; } }
+.sd-head { display: flex; align-items: baseline; gap: var(--sp-2); padding: 14px 16px 12px; border-bottom: 1px solid var(--c-line); }
+.sd-title { font-size: 15px; font-weight: 600; white-space: nowrap; }
+.sd-sub { font-size: 12px; color: var(--c-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-x { border: 0; background: transparent; color: var(--c-text-2); font-size: 15px; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
+.sd-x:hover { background: var(--c-sunken); color: var(--c-text); }
+.sd-body { flex: 1; overflow-y: auto; padding: 0 16px 16px; }
+.sd-sec { padding: 14px 0; border-bottom: 1px solid var(--c-line); }
+.sd-sec:last-child { border-bottom: 0; }
+.sd-sec > h5 { margin: 0 0 10px; font-size: 11px; font-weight: 600; letter-spacing: .08em; color: var(--c-text-2); }
+.sd-big { display: block; width: 100%; max-height: 44vh; object-fit: contain; border-radius: 6px; background: var(--c-sunken); cursor: zoom-in; }
+.sd-none { display: grid; place-items: center; aspect-ratio: 9 / 16; max-height: 42vh; color: var(--c-text-3); font-size: 12px; cursor: default; }
+.sd-status { display: flex; align-items: baseline; gap: 6px; margin: 10px 0 0; line-height: 1.5; }
+.sd-status > .sd-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; align-self: center; flex: none; }
+.sd-why { color: var(--c-text-2); font-size: 12px; }
+.sd-muted { margin: 0; font-size: 12px; color: var(--c-text-3); }
+.sd-grid4 { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.sd-grid4 li, .sd-hist li { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.sd-grid4 img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 4px; background: var(--c-sunken); cursor: zoom-in; }
+.sd-grid4 small, .sd-hist small { font-size: 11px; color: var(--c-text-2); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.sd-hist { list-style: none; margin: 0; padding: 0 0 4px; display: grid; grid-auto-flow: column; grid-auto-columns: 92px; gap: 8px; overflow-x: auto; }
+.sd-hist img { width: 92px; aspect-ratio: 9 / 16; object-fit: cover; border-radius: 4px; background: var(--c-sunken); cursor: zoom-in; }
+.sd-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.sd-table th { text-align: left; font-size: 11px; font-weight: 600; color: var(--c-text-2); padding: 0 8px 6px 0; border-bottom: 1px solid var(--c-line); }
+.sd-table td { padding: 7px 8px 7px 0; border-bottom: 1px solid color-mix(in srgb, var(--c-line) 60%, transparent); vertical-align: top; }
+.sd-table td:first-child { width: 96px; color: var(--c-text-2); white-space: nowrap; }
+.sd-foot { display: flex; gap: var(--sp-2); align-items: center; padding: 12px 16px; border-top: 1px solid var(--c-line); }
+.sd-more { min-width: 240px; }
+/* ---------- r43 镜头卡信息区（项目方 02:4x：“缺乏很多细节，比如人物什么的……下面黑的一坨东西也不知道是干嘛的……信息也不够”）
+   总调度定：图下固定 3 行左对齐 12–13px：① 出场人物 18px 身份脸圆片 + 名字 ② 景别 · 时长 · 场景 ③ 一句话内容（前 20 字，悬停全文）+ 右侧灰字阶段；
+   卡片圆角 8px、1px 中性灰细边框，悬停边框提亮并显示“查看详情”；去掉底部黑底那排小圆点和 4 段进度条（.sea-segs，已在 .simple 隐藏） ---------- */
+.sea-info { display: none; }
+.sea-page.simple .sea-info { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px 10px; min-width: 0; text-align: left; }
+.sea-info > span { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; overflow: hidden; }
+.sea-i1 { font-size: 13px; color: var(--c-text); height: 20px; }
+.sea-who { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.sea-who img, .sea-who i { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; flex: none; background: var(--c-sunken); }
+.sea-who i { display: inline-grid; place-items: center; font-style: normal; font-size: 10px; color: var(--c-text-2); }
+.sea-who + .sea-who::before { content: "·"; color: var(--c-text-3); margin-right: 2px; }
+.sea-who.none { color: var(--c-text-3); font-size: 12px; }
+.sea-i2 { font-size: 12px; color: var(--c-text-2); }
+.sea-i2, .sea-txt { text-overflow: ellipsis; overflow: hidden; }
+.sea-i3 { font-size: 12px; color: var(--c-text-2); justify-content: space-between; }
+.sea-txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--c-text-2); }
+.sea-stage { flex: none; color: var(--c-text-3); font-size: 11px; }
+/* 悬停“查看详情” */
+.sea-hover { display: none; }
+.sea-page.simple .sea-hover { display: block; position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); padding: 3px 10px; border-radius: 999px; font-size: 12px;
+  background: rgba(0, 0, 0, .6); color: #fff; opacity: 0; transition: opacity .15s; pointer-events: none; white-space: nowrap; }
+.sea-page.simple .sea-card:hover .sea-hover, .sea-page.simple .sea-card:focus-visible .sea-hover { opacity: 1; }
+/* 详情抽屉“出场人物” */
+.sd-cast { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.sd-cast li { display: grid; grid-template-columns: 56px 56px 1fr; gap: 10px; align-items: center; }
+.sd-cast img, .sd-cast .sd-ph { width: 56px; height: 56px; border-radius: 6px; object-fit: cover; background: var(--c-sunken); cursor: zoom-in; }
+.sd-cast .sd-ph { display: grid; place-items: center; font-size: 11px; color: var(--c-text-3); cursor: default; }
+.sd-cast b { font-size: 13px; font-weight: 600; display: block; }
+.sd-cast small { font-size: 12px; color: var(--c-text-2); }

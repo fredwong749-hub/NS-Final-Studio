@@ -85,3 +85,44 @@ rules:
     confidence: high
     status: 待验
     date: 2026-11-02
+  - id: K-WRT-H07
+    check: [tests/test_hollywood_r5.py]
+    domain: writer
+    link: P3-P4
+    title: HOLLYWOOD 尺子（r6）：清单 50 条里 24 条整条代码判定、3 条代码 + 评审、23 条 7 个评审（温度 0、关推理、逐条附原文证据）逐条取多数
+    when: 给 HOLLYWOOD 改写稿打分（hollywood_r5.py ruler6 / score_r6；G1 / L-102 判定落成代码）
+    then: 代码判定 tools/script_rsi/rubric_code.py（时长、分拍按秒切段、景别字段、下半身词、脸红词、QW-W11 / QW-A5 / QW-A7、看镜头词、情绪形容词直陈、模糊词、说破意图句、每镜台词 ≤2 + 听者反应、人物卡发型 / 服装 / 饰品原文、换装镜、跨段服装混入、末镜最后 2 秒）；评审证据须在镜头块里逐字找到，否则按不满足；同稿重复 5 次标准差 ≤ 1 才算尺子合格
+    params: {judges: 7, temperature: 0, code_items: 24, mixed_items: 3, llm_items: 23}
+    evidence:
+      - {src: data/review_pages/hollywood_r5/ruler6_ep04/ruler6_final.json, note: "ep04 补丁版 5 次：17 / 17 / 16 / 17 / 17，标准差 0.4（合格）；r5 旧尺子 3 评审多数 sd 3.3、5 评审多数 sd 1.25"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02
+  - id: K-WRT-H08
+    check: [tests/test_hollywood_r5.py]
+    domain: writer
+    link: P3-P4
+    title: 剧本导入闸门 = rubric_code 代码判定失败项为 0；现行 10 集代码判定出的写法问题写成规则（回头 / 穿脱过程 / 情绪直陈 / 近景写下半身 / 台词后无听者反应 / 字段缺行）
+    when: 新剧本导入前（hollywood.cmd_merge 内置；rubric_audit.py gate 可单独跑），以及写作方写分镜时
+    then: tools/script_rsi/rubric_audit.py gate <剧本.md> 退出码 0 才暂存 / 导入；技术缺口优先由编译层按人物卡 / 造型登记自动补（视线句、外层单品描述、造型设定图参考），补不了的由闸门拦
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: 每镜字段写全（img、场景、人物、衔接、站位、光线、镜头运动、分拍、motion、时长、sound、H3），分拍按秒切段一直写到镜长；镜1 用近景或中景；特写 / 近景 / 中景的 img 不写鞋、高跟、腿、脚（画面外的下半身）；有台词或 🎙 的镜分拍写清视线落点；每句台词之后，下一镜的分拍要写听者的反应（名字 + 视线 + 表情）；分拍不写穿上 / 脱下 / 披上 / 换上的过程（换装另起一镜、首帧已换好）；不写回头、看镜头；台词和独白不用“很生气 / 很难过”这类情绪直陈。
+    params: {gate: rubric_code_fails_zero}
+    evidence:
+      - {src: data/review_pages/hollywood_r5/code_gaps/summary.json, note: "现行 10 集代码判定 183/270（剧本原文）→ 204/270（编译后）；写法问题出现次数：近景写下半身 10 集、镜1 景别不是近 / 中景 10 集、台词后无听者反应 6 集、穿脱过程 3 集、回头 / 看镜头 3 集"}
+    confidence: high
+    status: 待验
+    date: 2026-11-02
+  - id: K-WRT-H09
+    check: [tests/test_autoflow.py]
+    domain: writer
+    link: P3-P4
+    title: 新建剧本 → 可导入的全自动流程（autoflow）：P0→P4 每段带 Hollywood 模板 + 全部 K-WRT；P4 后代码判定补丁环 + 事实表 + 新尺子 + policy.pick_import + 导入闸门；项目方只点一次“导入”
+    when: 新建剧本页（#/script-create?new=1）一键“全自动”，或 flow.py 剧本段无人值守
+    then: tools/script_rsi/autoflow.py run（API：/api/script-autoflow/{run}/start|repair|import|status）；P3-P4 reasoning high + 输出上限 64000；事实表取自 P0 Brief + P1 故事线 + 本集 P2 / P3；代码判定失败项逐条补丁（每补丁做代码不变量 + 补丁事实核对，失败项变少才采用）；score_r6 + noise_stop；预算默认 budget.writing_episode_cap_usd；每段记 decider（code / api_model / owner），状态 <run>/autoflow.json
+    params: {code_rounds: 4, writer_p4: flash-high, max_out: 64000}
+    evidence:
+      - {src: docs/master/HOLLYWOOD_PLAN.md, note: 总调度 r8 派令；项目方 02:3x“以后我会在这里创建一个新剧本，走现在的流程”}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02

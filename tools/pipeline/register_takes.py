@@ -9,7 +9,7 @@
 
 用法：
   # 从 IMGGEN 的 state.json 登记每镜当前选中的首帧（标“旧配方”）
-  .venv/Scripts/python.exe tools/pipeline/register_takes.py --imggen-state data/pipeline/runs/series10_v1/images/state.json --label 旧配方
+  .venv/Scripts/python.exe tools/pipeline/register_takes.py --imggen-state data/pipeline/runs/<run_id>/images/state.json --label 旧配方
   # 通用清单：[{shot, stage?, file, seed?, prompt?, refs?, label?, origin?}]
   .venv/Scripts/python.exe tools/pipeline/register_takes.py --manifest items.json --label 新配方
   # 跟随：每 N 秒重读 state.json，新出 / 新选中的图自动登记（新配方重出时用）
@@ -121,7 +121,7 @@ def items_from_video10(video_dir: Path) -> list[dict]:
                 "shot": sid, "stage": "video", "file": f, "seed": r.get("seed") or 0, "prompt": var.get("prompt") or "",
                 "workflow": "video10", "frames": var.get("frames") or job.get("frames"), "seconds": job.get("seconds"),
                 "from_first": ff,
-                "origin": {"run": "series10_v1/video", "host": st.get("host"), "variant": ch, "recipe": r.get("recipe"),
+                "origin": {"run": f"{video_dir.parent.name}/{video_dir.name}", "host": st.get("host"), "variant": ch, "recipe": r.get("recipe"),
                            "lane": r.get("lane"), "pid": r.get("pid"), "remote_file": r.get("file"), "preview": preview,
                            "first_frame_input": job.get("first_frame"), "spec_hash": job.get("spec_hash"),
                            "verdict": (r.get("score") or {}).get("verdict"), "score": r.get("score")},
@@ -241,7 +241,15 @@ def register(item: dict, *, label: str, dry: bool = False) -> dict:
     return out
 
 
-FRAMES_OK = ROOT / "data/pipeline/runs/series10_v1/video/frames_ok.json"
+def _primary_run() -> str:
+    """K-OPS-W17：主 run 从 config/pipeline/runs.json 读（笔记本侧，缺文件回退 DEFAULT_PRIMARY）"""
+    if str(ROOT / "tools/autopilot") not in sys.path:
+        sys.path.insert(0, str(ROOT / "tools/autopilot"))
+    import runs as RUNS
+    return RUNS.primary_run()
+
+
+FRAMES_OK = ROOT / "data/pipeline/runs" / _primary_run() / "video/frames_ok.json"
 
 
 def mark_episode_done(ep: int, path: Path | None = None) -> list[int]:

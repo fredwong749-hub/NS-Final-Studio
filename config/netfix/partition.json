@@ -6,7 +6,8 @@
    1,
    3,
    5,
-   7
+   7,
+   10
   ],
   "gpu36": [
    2,
@@ -15,9 +16,7 @@
    8,
    9
   ],
-  "laptop": [
-   10
-  ]
+  "laptop": []
  },
  "video": {
   "gpu33": [
@@ -35,7 +34,7 @@
    10
   ]
  },
- "_video_note": "笔记本道 laptop:0 是 image_only，不出视频：ep10 的首尾帧在笔记本出，视频归 gpu36（首帧通过后由 resident_sync push_frames 推到 gpu36）。",
+ "_video_note": "ep10 的首尾帧 11-02 01:4x 起在 gpu33 出（laptop:0 停派，L-100），视频归 gpu36（首帧通过后推到 gpu36）。⤴ 取代“ep10 首尾帧在笔记本出”。",
  "lanes": {
   "gpu33": [
    "gpu33:0",
@@ -58,5 +57,6 @@
  ],
  "_global_pause_note": "笔记本 control.json 的 paused 是总调度 / 项目方的全局暂停开关；paused_by 属于这几种（历史上“笔记本让位给服务器”的标记）时不算全局暂停。",
  "work_stealing": false,
- "_work_stealing_note": "跨机接手别人分区的对象：没有跨机共享锁，不安全，先不做（见 tools/netfix/dispatch.py steal_plan 的评估；只有笔记本两台都连得上时才能做两阶段：先撤 A 的 only、确认 A 无租约，再加给 B）。"
+ "_work_stealing_note": "跨机接手别人分区的对象：没有跨机共享锁，不安全，先不做（见 tools/netfix/dispatch.py steal_plan 的评估；只有笔记本两台都连得上时才能做两阶段：先撤 A 的 only、确认 A 无租约，再加给 B）。",
+ "note_ep10_move": "11-02 01:4x 总调度定（L-100 后续）：笔记本 4080 改专用看图卡，laptop:0 停派；ep10 图片分区移到 gpu33（[1,3,5,7,10]），ep10 视频仍归 gpu36。FACTORY 执行：先同步笔记本 ep10 出图状态到 gpu33，再推本文件 + server-control。"
 }

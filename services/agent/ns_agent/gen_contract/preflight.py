@@ -156,8 +156,16 @@ def check(req: dict) -> ContractResult:
                      if c.get("presence") == "在画" or c.get("face_described")] if rec.get("subject") not in ("part", "object") else []
             lack = [c for c in faced if c and c not in face_ids]
             two = "两张脸都清晰入画" in str(req.get("prompt") or "")
+            # K-REN-708 矛盾 lint（阻断）：同一个人既写“只露出…，不露脸”，又是露脸人物 / 提示词有脸部占比（特写脸部构图）
+            import re as _re
+            hidden = set(_re.findall(r"([^，。、；（）]{1,12}?)(?:只露出[^，。]{1,30}，)?不露脸", str(req.get("prompt") or "")))
+            names = {c.get("name"): c for c in rec.get("characters") or []}
+            clash = [n for n in hidden if n in names and (names[n].get("presence") == "在画" or names[n].get("face_described")
+                                                          or ("脸部占画面" in str(req.get("prompt") or "") and len(names) == 1))]
             if m:
                 add("I2", "fail", "；".join(x["detail"] for x in m))
+            elif clash:
+                add("I2", "fail", f"提示词矛盾：{'、'.join(clash)} 写了“不露脸”，但本镜他是露脸人物 / 脸部特写构图（K-REN-708，写作 / 导入格式问题）")
             elif lack:
                 add("I2", "fail", f"露脸的人没有身份脸参考槽：{'、'.join(lack)}（K-AST-263）")
             elif two and len(face_ids) < 2:

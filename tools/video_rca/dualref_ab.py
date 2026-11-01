@@ -6,13 +6,14 @@ D = 双参考：refs = [正脸, 侧脸裁切 lin_wan_face_side_A_s202.png, 其�
     改成“图1、图2都是林晚的脸部参考（图1正面、图2侧面；只取五官身份和发型，头部角度和视线按正文）”，其余“图N”顺延 +1。
 其余全同（first_frame_jobs.json 作业、frame_v9 = S★ 参数、同 seed）。出图走生产 build_graph，本机道 laptop:0，scope=ab：
 图只进 data/ab/video_rca/r2_dualref/，不写 takes.json / 契约账本。度量复用 tools/localgpu/identity_gaze_ab.measure
-（gaze_mp = Q9 旁证、YuNet 视线、sface 对现行正脸）。生产要用本机道时先让：每张图前查 18388 队列为空。
+（gaze_mp = Q9 旁证、YuNet 视线、sface 对现行正脸）。⤴ 11-02 L-100：笔记本 4080 改作专用看图卡，本脚本不再连笔记本本机道；要复跑必须用 VRCA_IMG_URL 指向服务器出图道的隧道（且遵守空闲 ≥5 分钟）。
 
     .venv/Scripts/python.exe tools/video_rca/dualref_ab.py run ep01-S2,ep01-S3,ep01-S6 --seeds job,job+100
 """
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import time
@@ -24,6 +25,10 @@ sys.path.insert(0, str(ROOT / "tools/localgpu"))
 import identity_gaze_ab as IG  # noqa: E402
 
 OUT = ROOT / "data/ab/video_rca/r2_dualref"
+_URL = os.environ.get("VRCA_IMG_URL", "")
+if not _URL or ":" + "18388" in _URL:
+    raise SystemExit("dualref_ab：笔记本本机道已改作专用看图卡（L-100）。设 VRCA_IMG_URL 为服务器出图道隧道后再跑")
+IG.URL = _URL
 SIDE = IG.FACE_B
 OLD = "图1是林晚的脸部参考（只取脸和发型）"
 NEW = "图1、图2都是林晚的脸部参考（图1正面、图2侧面；只取五官身份和发型，头部角度和视线按正文）"

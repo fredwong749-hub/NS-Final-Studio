@@ -114,6 +114,8 @@ from ns_api import asset_center_p1 as ACP1  # noqa: E402  UX6 资产中心 B6–
 app.include_router(ACP1.router)
 from ns_api import story_runs as STORY  # noqa: E402  UIRSI 新建剧本：提纲 → 写作链 P0→P4（异步、逐段可看可改、返修、送导入）
 app.include_router(STORY.router)
+from ns_api import script_autoflow as AUTOFLOW  # noqa: E402  HOLLYWOOD r8：新建剧本 → 可导入，全自动（tools/script_rsi/autoflow.py）
+app.include_router(AUTOFLOW.router)
 from ns_api import thumbs as THUMBS  # noqa: E402  UIRSI 缩略图（/api/thumb，缓存 data/_cache/thumbs）
 app.include_router(THUMBS.router)
 from ns_api import auth as AUTH  # noqa: E402  UIRSI 账户登录：项目方闸门从登录会话取身份（不再要原话）+ 写操作审计 data/audit/
@@ -146,6 +148,8 @@ from ns_api import infra_status as INFRA  # noqa: E402  UIRSI r38 实时连接�
 app.include_router(INFRA.router)
 from ns_api import decision_locks as DLOCKS  # noqa: E402  UIRSI r40 项目方已定决策锁：/api/decision-locks（换掉已定的图前一键确认）
 app.include_router(DLOCKS.router)
+from ns_api import factory_health as FHEALTH  # noqa: E402  UIRSI r42 生产健康汇总：/api/factory/health（只读；总览上的展示等 UI-DESIGN 新设计再接）
+app.include_router(FHEALTH.router)
 app.router.on_startup.append(EPROD.resume_on_startup)   # 在 JOBS.restore 之后：被重启打断的任务按可恢复错误重试
 VJ.get_script = lambda: _script
 
@@ -219,7 +223,9 @@ def _active(shot_id: str, data: dict | None = None) -> dict:
         t = next((t for t in data["takes"] if t["stage"] == stage and t["n"] == n), None)
         # UIRSI r41（项目方 11-02 00:5x：“旧版本的东西就隔离开吧”）：当前版本已隔离（旧剧本版本，文件已移走）= 这一阶段没有当前版本，
         # 集摘要 / 详情都不再把它算作“有”（CONSENT DATAALIGN → UIRSI）
-        out[stage] = None if (t and t.get("quarantined")) else t
+        # r42：标记被服务器并回冲掉、但文件已在隔离区的，也算已隔离（ns_api.takes_ui.is_quarantined 同口径）
+        from ns_api.takes_ui import is_quarantined  # noqa: PLC0415
+        out[stage] = None if (t and is_quarantined(t)) else t
     return out
 
 
@@ -649,7 +655,9 @@ def _shot_summary(ep, s, ctx: Ctx | None = None) -> dict:
                 stale_deps[k] = deps
     pending = [j for j in _jobs.values() if j.get("shot_id") == s.id and j["state"] in ("queued", "running")]
     lf = _last_frame_info(s.id, edit, act)
-    count = {st: sum(1 for t in takes["takes"] if t["stage"] == st) for st in STAGES}
+    # UIAUDIT P1-1（UIRSI r43）：已隔离的旧剧本版本不计数（否则画布写“视频 1 版待选”却没有可挑的）
+    from ns_api.takes_ui import is_quarantined  # noqa: PLC0415
+    count = {st: sum(1 for t in takes["takes"] if t["stage"] == st and not is_quarantined(t)) for st in STAGES}
     boost = _boosts(edit, ep_edit)
     chain_info = _chain_fields(ep, s, c, edit, ep_edit, act, lf, ctx)
     h3v = H3V.view(s, compiled, edit, ctx.slug, c.adult)
@@ -695,7 +703,7 @@ def _shot_summary(ep, s, ctx: Ctx | None = None) -> dict:
         **lf,
         "takes_count": count,
         # 每个阶段最新版本号：大于当前版本 = 有新版本待选（行内「新 vN 待选」，检查器自动放到对比位）
-        "latest_take": {st: max((t["n"] for t in takes["takes"] if t["stage"] == st), default=None) for st in STAGES},
+        "latest_take": {st: max((t["n"] for t in takes["takes"] if t["stage"] == st and not is_quarantined(t)), default=None) for st in STAGES},
         "score": {k: (v.get("score") if v else None) for k, v in act.items() if k != "video"},
         "needs_review": takes.get("review") or {},
         "dialogue": [d.model_dump() for d in s.dialogue],

@@ -553,3 +553,21 @@ checks:
     type: grep_present
     pattern: 'adopted/lin_wan_lookA_v2_s202_sleevefix\.png'
     paths: [data/pipeline/runs/series10_v1/assets/sheets_chosen.json]
+  # ---------------- 提炼：判断 → 策略 / 规则 / 编排器（DISTILL；L-102）
+  - id: D-OPS-102a
+    decision: L-102（项目方 11-02 01:4x：“所有的 learning 规则都要写到这个系统里……所有工作尽量写成一个代码库，来 monitor 整个 process”）
+    title: 策略层、判断清单、统一编排器、覆盖率入口都在
+    type: exists
+    paths: [config/policies/resources.yaml, config/policies/handback.yaml, config/policies/budget.yaml, config/policies/retry.yaml, config/policies/gates.yaml, config/policies/deploy.yaml, config/policies/decisions.yaml, tools/autopilot/flow.py, tools/autopilot/policy.py]
+  - id: D-OPS-102b
+    decision: L-102（§G1-2：编排器给每个环节标 decider）
+    title: 编排器判断点带 decider 标注
+    type: grep_present
+    pattern: 'DECIDERS = \("code", "local_model", "api_model", "owner", "claude"\)'
+    paths: [tools/autopilot/flow.py]
+  # ---------------- 身份脸逐 run 断言（DISTILL；总调度 11-02 03:0x：同类事故第二次）
+  - id: D-AST-86d
+    decision: L-086（林晚身份脸 = lin_wan_face_hd_A_s202 高清裁）；总调度 11-02 03:0x：对 runs.json 每个 run 的每个角色用生产入口解析身份脸，必须等于项目方定的那张
+    title: 每个 run 每个角色的身份脸（asset_refs.face_of）= 项目方定的那张；子 run 继承的角色 = 父 run
+    type: cmd
+    cmd: [tools/qa/identity_face_check.py]

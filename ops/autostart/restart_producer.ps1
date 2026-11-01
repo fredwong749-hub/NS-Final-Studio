@@ -8,8 +8,8 @@ $env:PYTHONUTF8 = "1"
 $ctrlPath = Join-Path $Root "data\producer\control.json"
 $wasPaused = $false
 if (Test-Path $ctrlPath) { try { $wasPaused = [bool]((Get-Content $ctrlPath -Raw | ConvertFrom-Json).paused) } catch { } }
-& $Py (Join-Path $Root "tools\autopilot\producer.py") pause --by "restart_producer" | Out-Null
-$deadline = (Get-Date).AddMinutes(6)   # 11-01 08:39：等满 15 分钟时 5 条道全空着；出图 + 契约通常 2–3 分钟，排在视频后面的才会更长
+& $Py (Join-Path $Root "tools\autopilot\producer.py") pause --by "restart_producer" --kind ops --expires-s 180 | Out-Null   # K-OPS-E08：运维暂停 ≤180 s，到点自动恢复
+$deadline = (Get-Date).AddMinutes(3)   # K-OPS-E08（11-02）：运维暂停上限 180 s，等不满就重启（在途单靠租约过期 / 重派恢复）   # 11-01 08:39：等满 15 分钟时 5 条道全空着；出图 + 契约通常 2–3 分钟，排在视频后面的才会更长
 while ((Get-Date) -lt $deadline) {
   try { $hb = Get-Content (Join-Path $Root "data\producer\heartbeat.json") -Raw | ConvertFrom-Json } catch { $hb = $null }
   if ($hb -and [int]$hb.inflight -eq 0) { break }

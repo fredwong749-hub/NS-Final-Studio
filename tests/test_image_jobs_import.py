@@ -43,8 +43,8 @@ def test_g21_check_compares_shot_set_and_source_sha(tmp_path, monkeypatch):
     run = tmp_path / "run"
     (run / "assets").mkdir(parents=True)
     si = NS(episodes=[NS(number=1, shots=[_shot("ep01-S1"), _shot("ep01-S2")])])
-    monkeypatch.setattr(IJ, "load_import", lambda: si)
-    monkeypatch.setattr(IJ, "import_sha", lambda: "NEW")
+    monkeypatch.setattr(IJ, "load_import", lambda run=None: si)          # image_jobs 02:3x 加了 run 参数（多剧本）
+    monkeypatch.setattr(IJ, "import_sha", lambda run=None: "NEW")
     jobs = {"jobs": [{"ep": 1, "shot": "ep01-S1", "prompt_source": {"sha256": "OLD"}},
                      {"ep": 1, "shot": "ep01-S9", "prompt_source": {"sha256": "NEW"}}]}
     (run / "assets" / "first_frame_jobs.json").write_text(json.dumps(jobs), encoding="utf-8")

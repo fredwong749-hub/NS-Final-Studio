@@ -87,6 +87,9 @@ def outer_items(project: str, ep, shot, sr=None, body: str | None = None) -> lis
         loose = _size != "特写"
         vis = [x for x in L.parts if (x.zone in zones or (loose and x.slot == "outfit")) and x.slot != "marker"
                and AR.part_active(x, n_ep, img)]
+        # K-REN-707（开关 close_no_lower）：特写 / 近景 / 中近景不补看不见的下半身单品 / 描述（露出长腿、裙、鞋）
+        if AR.FR.close_no_lower() and _size in AR.FR.CLOSE_NO_LOWER:
+            vis = [x for x in vis if AR.FR.visible(AR._short(x.label), _size)]
         if any(x.extra and x.slot == "shoes" for x in vis):
             vis = [x for x in vis if not (x.slot == "shoes" and not x.extra)]
         names = []

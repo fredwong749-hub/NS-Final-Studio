@@ -74,4 +74,34 @@ rules:
     confidence: medium
     status: 待验
     date: 2026-11-01
+  - id: K-WRT-704
+    domain: writer
+    link: P3-P4
+    title: 穿外套 / 西装 / 大衣的人不在一镜里做完坐→站、站→坐、起身离开——这一镜停在准备起身，下一镜从站定开始（拆镜）
+    when: 写 **分拍** 和 H3 正文分拍（At 00:0X），在画人物本镜造型有外层衣物，动作里有起身 / 站起 / 坐下 / rises / stands up / sits down
+    then: 拆成两镜：镜 A 到“手撑桌沿准备起身”为止；镜 B 首帧就是站定姿态（外套完整），从站着的动作开始；衔接写“接力｜承：动作｜起身”。剪辑由 DIRECTOR 处理（运镜 / 转场字段只在 cut_plan 维护，这里不另写）：tools/director/cut_plan.py 读到这条衔接，就在 data/director/epNN_cut_plan.json 给下一镜 shots[].transition_in（type=动作匹配切、split=K-WRT-704），上一镜 shots[].cut.out = on_action（停在起势出刀）；规则 K-EDT-812（转场）、K-EDT-811（大动作镜固定机位）；测试 tests/test_director.py::test_split_standup_is_action_match。不改剧情，只改切点（系统不改正文）
+    targets: [{kind: writer_prompt, section: 时长与节奏}]
+    writer_text: 穿外套或西装的人要从坐变站（或站变坐、起身离开）时，不要放在同一镜里做完：这一镜停在准备起身，下一镜从已经站好开始，衔接写“接力｜承：动作｜起身”。视频模型在一镜里做大幅动作时，外套会变形、变无袖甚至消失。
+    lint: [QW-W12]
+    check: [tools/qa/writer_lints.py, tests/test_writer_lints.py]
+    evidence:
+      - {src: data/ab/video_rca/r8_outfit_action/, note: "ep01-S3 坐→站：带整理动作 8/8 外套整件消失再穿回；去掉动作 2/2 仍变无袖马甲（docs/video_rca/RCA_r3.md §1.2）"}
+      - {src: data/ab/video_rca/r17_split_standing/, note: "拆镜镜 B（从站定开始，去掉起身一拍）2/2：外套整条片与首帧一致（docs/video_rca/RCA_r4.md）"}
+      - {src: data/ab/video_rca/r10c_shape/torso_compare.jpg, note: "全程站着的 ep01-S4 5 条：外套基本不变"}
+      - {src: docs/video_rca/RCA_r4.md, note: "上游另一根因：造型 A 设定图外套缺一只袖子（已由 IMGFIX 修，候选 1 采用），重出后复测"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-02
+  - id: K-REN-706
+    domain: render
+    link: [P7-P8]
+    title: 编译层标出“穿外层衣物 + 全身姿态切换”的镜（RL-P1 warn，建议拆成站定起始的下一镜）
+    when: services/recipes lint（每镜编译都跑）：H3 正文第一句含外层衣物（blazer / jacket / coat…），分拍段含 rises / stands up / sits down…
+    then: 记 RL-P1（warn），计划里留“建议拆镜”；编译器不改镜头结构——拆镜由写作方（QW-W12 返修）或 DIRECTOR cut_plan 处理
+    check: [tests/test_video_rca.py]
+    evidence:
+      - {src: data/ab/video_rca/r17_split_standing/, note: "同 K-WRT-704"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-02
 

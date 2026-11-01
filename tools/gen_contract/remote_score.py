@@ -237,10 +237,20 @@ try:
     # 给 ComfyUI 留余量（11-01 04:16–04:20 OOM）：CLIP-L fp32 约 1.7 GB + 滑窗激活；空闲不到 CLIP_MIN_FREE_MB 的卡不用，全不够就用 CPU
     env = dict(os.environ, CUDA_VISIBLE_DEVICES=gpus[0][1] if gpus and gpus[0][0] >= int(MINFREE) else "",
                NS_CLIP_PATH=os.path.join(RL, "clip-vit-large-patch14"))
-    c = subprocess.run([CPY, "clip_srv.py", "-"], cwd=RL, env=env, capture_output=True, text=True,
-                       input=json.dumps({"refs_dir": os.path.join(RL, "refs"), "items": clip_items}))
-    co = [ln for ln in c.stdout.splitlines() if ln.startswith("{")]
-    cl = json.loads(co[-1]) if co else {"items": {}, "missing_refs": [], "error": c.stderr[-400:]}
+    creq = {"refs_dir": os.path.join(RL, "refs"), "items": clip_items}
+    cl = None
+    try:   # FACTORY D6（K-OPS-F04）：先走本机常驻 CLIP（127.0.0.1，只加载一次；gpu36 钉 GPU2）；不在 / 409 代码已换 → 当次退回单次子进程
+        import urllib.request
+        _rq = urllib.request.Request("http://127.0.0.1:" + os.environ.get("NS_CLIP_SRV_PORT", "8872") + "/measure",
+                                     data=json.dumps(creq).encode(), headers={"Content-Type": "application/json"})
+        cl = json.loads(urllib.request.urlopen(_rq, timeout=600).read())
+        env["CUDA_VISIBLE_DEVICES"] = "resident"
+    except Exception as _e:
+        res["clip_resident_error"] = repr(_e)[:160]
+    if cl is None:
+        c = subprocess.run([CPY, "clip_srv.py", "-"], cwd=RL, env=env, capture_output=True, text=True, input=json.dumps(creq))
+        co = [ln for ln in c.stdout.splitlines() if ln.startswith("{")]
+        cl = json.loads(co[-1]) if co else {"items": {}, "missing_refs": [], "error": c.stderr[-400:]}
     res.update(local=cl.get("items", {}), missing_refs=cl.get("missing_refs", []), clip_error=cl.get("error"),
                clip_device=cl.get("device"), clip_gpu=cl.get("gpu"), clip_cuda=env["CUDA_VISIBLE_DEVICES"],
                clip_cpu_fallback=cl.get("cpu_fallback"), clip_gpu_retried=cl.get("gpu_retried"))

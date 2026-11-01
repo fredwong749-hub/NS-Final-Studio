@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 import re
+
+import pytest
 import sys
 from pathlib import Path
 
@@ -67,7 +69,8 @@ def test_real_look_a_outer_items_and_current_sheet_unchecked():
         assert gaps == []
     else:
         assert "短款西装外套" in gaps
-    assert AR.sheet_outer_gaps(pj, "lin_wan", "A", "data/assetmaster/sheets_v2/adopted/lin_wan_lookA_v2_s202.png") == []
+    # L-101（11-02）：检查记录改为按文件认，只认袖子修复版
+    assert AR.sheet_outer_gaps(pj, "lin_wan", "A", "data/assetmaster/sheets_v2/adopted/lin_wan_lookA_v2_s202_sleevefix.png") == []
 
 
 def test_hub_sheet_candidates_include_adopted_v2_and_current():
@@ -75,12 +78,12 @@ def test_hub_sheet_candidates_include_adopted_v2_and_current():
     from ns_agent import asset_refs as AR
     from ns_api import character_hub as H
     pj = "series10_v1"
-    ad = ROOT / "data/assetmaster/sheets_v2/adopted/lin_wan_lookA_v2_s202.png"
+    ad = ROOT / "data/assetmaster/sheets_v2/adopted/lin_wan_lookA_v2_s202_sleevefix.png"
     if not ad.is_file():
         return
     cands = H._sheet_candidates(pj, "lin_wan", "A")
     by = {c["file"]: c for c in cands}
-    v2 = by.get("data/assetmaster/sheets_v2/adopted/lin_wan_lookA_v2_s202.png")
+    v2 = by.get("data/assetmaster/sheets_v2/adopted/lin_wan_lookA_v2_s202_sleevefix.png")   # L-101 袖子修复版
     assert v2 and v2.get("adopted") and v2["item_check"] == "pass"
     cur = AR.sheet_of(pj, "lin_wan", "A")
     assert cur in by
@@ -142,7 +145,7 @@ def test_closeup_outer_items_only_visible_zone():
     sr = SimpleNamespace(characters=[{"character": "lin_wan", "look": "A", "name": "林晚", "presence": "在画"}])
     ep = {"number": 1}
     close = {"img_prompt": "特写，平视，林晚坐在桌前，细银链贴在锁骨上，视线落在屏幕下方，嘴角轻轻抿着"}
-    near = {"img_prompt": "近景，平视，林晚站在桌前，细银链在锁骨，视线落在画面右侧的桌沿"}
+    near = {"img_prompt": "中景，平视，林晚站在桌前，细银链在锁骨，视线落在画面右侧的桌沿"}   # K-REN-707 后近景也不补下装，对照改用中景
     c = [x for _n, _l, xs in FJ.outer_items("series10_v1", ep, close, sr, body=close["img_prompt"]) for x in xs]
     n = [x for _n, _l, xs in FJ.outer_items("series10_v1", ep, near, sr, body=near["img_prompt"]) for x in xs]
     assert not any("裙" in x for x in c), c
@@ -236,3 +239,108 @@ def test_asset_hold_objects(tmp_path):
     (tmp_path / "autopilot/lookA_hold.json").write_text(json.dumps({"active": True, "shots": [{"objects": ["first:ep01-S1", "last:ep01-S1"]}]}), encoding="utf-8")
     (tmp_path / "autopilot/x_hold.json").write_text(json.dumps({"active": False, "shots": [{"objects": ["first:ep09-S1"]}]}), encoding="utf-8")
     assert P.asset_hold_objects(tmp_path) == {"first:ep01-S1", "last:ep01-S1"}
+
+
+@pytest.mark.real_clip
+def test_k264_sheet_intake_catches_missing_sleeve_and_missing_outer():
+    """K-AST-264：入库检查——缺袖的 v2_s202 挡（IN1），没画外套的 s101 挡（IN2），修好的 sleevefix 和其他 adopted 设定图放行"""
+    from ns_agent import sheet_intake as SI
+    A = "data/assetmaster/sheets_v2/adopted/"
+    old, fixed = ROOT / (A + "lin_wan_lookA_v2_s202.png"), ROOT / (A + "lin_wan_lookA_v2_s202_sleevefix.png")
+    if not (old.is_file() and fixed.is_file()):
+        return
+    r = SI.check(old, "lin_wan", "A")
+    assert not r["ok"] and r["IN1"]["status"] == "fail"
+    assert SI.check(fixed, "lin_wan", "A")["ok"]
+    s101 = ROOT / "data/pipeline/runs/series10_v1/images/sheets/lin_wan/lin_wan_lookA_s101.png"
+    if s101.is_file():
+        r = SI.check(s101, "lin_wan", "A")
+        assert not r["ok"] and any(x["status"] == "fail" for x in r["IN2"])   # 真 CLIP：0.154 < 0.3（data/ab/imgfix/sheet_intake_calibration.json）
+    gu = ROOT / (A + "gu_chen_lookA_v2_s101.png")
+    if gu.is_file():
+        assert SI.check(gu, "gu_chen", "A")["ok"]
+
+
+def test_k264_hub_set_sheet_blocks_failed_intake(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from ns_agent import sheet_intake as SI
+    from ns_api import character_hub as H
+    monkeypatch.setattr(H, "_sheet_candidates", lambda pj, cid, look: [{"file": "x/bad.png"}])
+    monkeypatch.setattr(H.R, "sheet_of", lambda pj, cid, look: "x/current.png")
+    monkeypatch.setattr(SI, "check", lambda f, cid, look, pj="series10_v1": {"ok": False, "blocking": ["IN1 左右袖子不一致：测试"]})
+    app = FastAPI()
+    app.include_router(H.router)
+    r = TestClient(app).post("/api/character-hub/lin_wan/sheet", json={"look": "A", "file": "x/bad.png", "project": "series10_v1"})
+    assert r.status_code == 422 and "入库检查" in r.text
+
+
+def test_asset_repair_tool_prefill_and_measure_on_synthetic():
+    """通用资产修复工具：铺底只动 select 命中的像素；度量能分出“修好 / 没修好”"""
+    import importlib
+    import sys as _s
+    import numpy as _np
+    from PIL import Image as _I
+    _s.path.insert(0, str(ROOT / "tools/asset_repair"))
+    RP = importlib.import_module("repair")
+    a = _np.full((100, 100, 3), 250, _np.uint8)
+    a[20:80, 10:30] = (70, 70, 72)          # 左袖深灰
+    a[20:80, 70:90] = (235, 222, 195)       # 右袖米白（缺陷）
+    s = {"defect_box": [65, 15, 95, 85], "select": {"rgb_min": [125, 110, 80], "r_minus_b_min": 6}, "color_from": [12, 30, 28, 70],
+         "mirror_x": 50, "_pw": 100}
+    filled, mask = RP.prefill(_I.fromarray(a), s)
+    f = _np.asarray(filled)
+    assert (f[20:80, 70:90].max(-1) < 130).all() and (f[:, :60] == a[:, :60]).all()
+    assert _np.asarray(mask).sum() == 255 * 60 * 20
+    good, bad = RP.measure(f, s, 0), RP.measure(a, s, 0)
+    assert good["target_dark"] > 0.9 and bad["target_light"] > 0.5
+
+
+def test_k706_close_shots_no_lower_body_injection(monkeypatch):
+    """K-REN-707：特写 / 近景 / 中近景不注入看不见的下半身描述；“穿…”/ 并列造型首句不当下半身主体；中景照旧"""
+    from ns_agent import framing as FR
+    monkeypatch.setattr(FR, "close_no_lower", lambda: True)
+    assert not FR.lower_focus("近景，平视，林晚穿米白衬衫、及膝深灰羊毛铅笔裙与短款西装外套，站在镜面轿厢左侧")
+    assert not FR.lower_focus("近景，平视，林晚穿雾蓝针织长裙，双手捧碗")
+    assert FR.lower_focus("hh12clear，极近特写，透明细高跟的鞋尖踩在金属地板上")
+    lk = "【林晚】22岁中国成年女性，蓝发及腰、齐刘海、冷白皮肤、G罩杯、长腿，真人写实"
+    assert "长腿" not in FR.filter_parts(lk, "近景") and "长腿" in FR.filter_parts(lk, "中景")
+
+
+def test_k706_jobs_have_no_long_legs_in_close_shots():
+    import json as _j
+    from ns_agent import framing as FR
+    if not FR.close_no_lower():
+        import pytest as _p
+        _p.skip("close_no_lower 未打开")
+    jobs = _j.loads((ROOT / "data/pipeline/runs/series10_v1/assets/first_frame_jobs.json").read_text(encoding="utf-8"))["jobs"]
+    bad = [j["shot"] for j in jobs if j["size"] in FR.CLOSE_NO_LOWER and ("长腿" in j["prompt"])]
+    assert not bad, bad
+
+
+def test_k708_partial_but_face_visible():
+    from ns_agent import asset_refs as AR
+    img = "特写，俯拍，林晚的双手捧着汤碗，5厘米超长透明水晶甲，指节贴在温热的碗壁上，红绳手链垂在腕侧，视线落在汤面，嘴唇轻抿"
+    assert AR.partial_face_visible("林晚", img, ["林晚"])
+    assert not AR.partial_face_visible("林晚", "极近特写，林晚的手指按在桌沿，水晶甲反光", ["林晚"])
+    # 多人镜：别人的脸词不算到局部的人头上
+    assert not AR.partial_face_visible("顾沉", "近景，林晚抬眼看向门口，嘴唇轻抿；顾沉的西装下摆在画面右侧", ["林晚", "顾沉"])
+
+
+def test_k708_preflight_blocks_contradiction():
+    from ns_agent.gen_contract import preflight as PF
+    rec = {"subject": "face", "primary": "lin_wan", "slots": [{"kind": "face", "character": "lin_wan", "file": "f.png"}],
+           "characters": [{"character": "lin_wan", "name": "林晚", "presence": "局部", "face_described": True}]}
+    r = PF.check({"kind": "image", "model": "qwen_image_2.1", "asset_refs": rec, "cast": [],
+                  "prompt": "特写构图：脸部占画面约六成，林晚只露出双手，不露脸，视线落在汤面"})
+    i2 = next(i for i in r.items if i.id == "I2")
+    assert i2.status == "fail" and "矛盾" in i2.detail
+
+
+def test_k708_jobs_have_no_self_contradiction():
+    import json as _j
+    jobs = _j.loads((ROOT / "data/pipeline/runs/series10_v1/assets/first_frame_jobs.json").read_text(encoding="utf-8"))["jobs"]
+    for j in jobs:
+        for c in j["asset_refs"].get("characters") or []:
+            if c.get("presence") == "在画" or c.get("face_described"):
+                assert f"{c.get('name')}只露出" not in j["prompt"] and f"{c.get('name')}不露脸" not in j["prompt"], j["shot"]

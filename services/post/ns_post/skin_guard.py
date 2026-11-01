@@ -173,7 +173,7 @@ class _Detector:
 def _probe(path: Path) -> dict:
     r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
                         "stream=width,height,color_space,r_frame_rate", "-of", "json", str(path)],
-                       capture_output=True, text=True, encoding="utf-8")
+                       capture_output=True, text=True, encoding="utf-8", timeout=60)   # K-OPS-S01
     return (json.loads(r.stdout or "{}").get("streams") or [{}])[0]
 
 
@@ -185,7 +185,7 @@ def _matrix(v: dict) -> str:
 def decode(path: Path, w: int, h: int, matrix: str) -> np.ndarray:
     r = subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-i", str(path), "-map", "0:v:0", "-vf",
                         f"scale={w}:{h}:flags=area:in_color_matrix={matrix}:in_range=tv", "-f", "rawvideo",
-                        "-pix_fmt", "rgb24", "-"], capture_output=True)
+                        "-pix_fmt", "rgb24", "-"], capture_output=True, timeout=600)   # K-OPS-S01
     if r.returncode != 0:
         raise RuntimeError(r.stderr[-300:].decode("utf-8", "replace"))
     return np.frombuffer(r.stdout, np.uint8).reshape(-1, h, w, 3)

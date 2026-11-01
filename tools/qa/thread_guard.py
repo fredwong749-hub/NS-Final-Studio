@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SERVER_SCRIPTS = ["tools/series10_video/score_clip.py", "tools/series10_video/v6_limbs.py", "tools/series10_video/v7_lipsync.py",
-                  "tools/series10_video/calibrate_v67.py", "tools/series10_video/v7_asr.py"]
+                  "tools/series10_video/calibrate_v67.py", "tools/series10_video/v7_asr.py", "tools/identity/id_gate.py"]
 HEAVY = re.compile(r"^\s*(import (cv2|numpy|onnxruntime|torch|mediapipe)\b|from (cv2|numpy|onnxruntime|torch|insightface|mediapipe)\b)")
 
 

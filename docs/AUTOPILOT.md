@@ -8,6 +8,72 @@
 
 整个过程不需要 Claude 在线。写剧本由写作模型（外部网关）完成；审片由本地看图模型或规则完成；出片走 6 张 3090。
 
+> ⤴ 2026-11-02 DISTILL（L-102 / ITERATION_PROTOCOL §G1）：上面这句是目标，还没有完全做到。现在哪些环节仍要 Claude 判断、怎么替换，见下面 §0；§0 的数字由代码生成，以 `data/autopilot/coverage.json` 为准。§1–§6 写的是 10-31 版 run.py（P4-P5…P11-P12 走 iterate_loop），剧本导入以后的实际生产已经改走 §0 的编排器。
+
+## 0. 统一编排器与“谁在判断”（DISTILL 11-02，规则 K-OPS-X01–X05）
+
+**一个编排器**：`tools/autopilot/flow.py`，入口仍然是 `run.py`。每集一个状态机，状态从真实记录现推（producer 登记表、作业清单、ready_episodes、night 状态、成片文件、成片分），不另存副本。
+
+| 命令 | 做什么 |
+|---|---|
+| `run.py status --all` | 全局进度 + 卡点，同时写 `data/autopilot/flow/status.json`（界面直接读） |
+| `run.py flow --episode 4` | 这一集逐段状态、下一步命令 |
+| `run.py flow --episode 4 --dry-run [--with-producer-dryrun]` | 冷启动演练：把这一集当成新剧本走一遍，不出图、不调付费 API，列出所有要人或 Claude 介入的断点 → `data/autopilot/flow/drill_ep04.json` |
+| `run.py coverage [--episode 4]` | 无 Claude 覆盖率 → `data/autopilot/coverage.json` |
+| `run.py policy-check` | 策略和代码是否一致、引用的文件是否存在（退出码 0 = 通过） |
+| `run.py guard [--apply]` | 策略守卫：系统暂停超过 180 秒就报警（`--apply` 才自动恢复） |
+| `run.py approve-delivery --episode 4` | 项目方确认交付 |
+
+**新剧本从页面启动（r2，项目方 02:3x）**：`#/script-create` 填 P0 Brief（现有 `POST /api/story-runs`），或 `run.py flow-start --brief <P0.json> --episode N`。flow 登记到 `data/autopilot/flow/runs.json`，`status --all` 里多一行“新剧本 …”逐段现推：故事提纲 → 写作链 P1–P4（run_chain）→ 好莱坞返修 + 评分（HOLLYWOOD r8 交付 `data/pipeline/runs/<id>/hollywood/epNN.json`：{candidates:[{name, score, invariants_pass, p4_block_zero, fact_check_zero}], spent_usd, rounds_left, staged_path, sha}，`policy.pick_import` 选导入稿）→ 导入（`imports.jsonl` 事件）→ 下面的生产段。冷启动演练 `run.py flow --episode 1 --dry-run` 从样例 Brief 开始，每个断点写负责方。
+
+**每集 15 段**，每段的执行者都是已有工具，编排器不另起入口：
+
+| 段 | 执行者 | 判断由谁做（现在） |
+|---|---|---|
+| 故事提纲 / 写作链 | 页面 + `tools/pipeline/run_chain.py`（外部写作 API） | owner 填 Brief；api_model 写、code 校验 |
+| 好莱坞返修 + 评分 | HOLLYWOOD r8（基于 `tools/script_rsi/hollywood_r5.py`） | api_model；预算、选导入稿由 code；**评审噪声大时先修评审清单仍由 claude 判断** |
+| 剧本导入 | `producer.py import-staged`（PRODUCER 令牌，项目方 11-01 方案 A 授权） | owner（Claude 会话会被权限系统拦下）→ 目标 code |
+| 作业编译 | `episode_pipeline.py prepare` | code |
+| 资产就绪 | `tools/factory/deps.py`、`sheet_intake.py`、`tools/asset_repair/repair.py` | code；**新角色设定图候选挑选仍由 claude 判断** |
+| 首帧 / 尾帧 | producer 常驻 | code；**暂停超时恢复、尽力版重置、服务器代码版本仍由 claude 判断** |
+| 看图闸门 | 生成契约 + 本地看图（`config/vqa.json`） | code + local_model；**换版首批复核、漏检入回归集、master_review 签字仍由 claude 判断** |
+| 视频 / 视频检测 | night 常驻（Pika）+ `score_clip.py` + 视频看图 | code + local_model |
+| 合成 / 后期 / 成片评分 | `night.finalize` → `tools/director/finish.py` → `film_score.py` | code |
+| 交付闸门 | K-EDT-817 选后期版或原版 + 项目方看片 | code + owner |
+
+**覆盖率**（2026-11-02 r2 起，`data/autopilot/coverage.json`）：51 个判断点（含写作段），现在 code 32、local_model 3、api_model 3、owner 4、claude 9（17.6%）；按 plan 全部落地后 claude 0。r2 目标 claude ≤ 4。交付闸门改为预览棘轮：成片分 ≥ max(30, 该集历史最好 − 1)，口型重出单 0，视线 A1 无零分，代码过了再等项目方看预览确认（gates.delivery_gate）。暂停按总调度 D5 口径：每次 pause 带 reason_kind / expires_at，运维暂停到点自动恢复，显式暂停超过 180 s 只告警（policy.pause_decision 唯一实现）。
+
+**策略层**：`config/policies/`（resources / handback / budget / retry / gates / deploy，56 项）是阈值的单一来源。每项都写了出处（L 编号或规则号）、由哪段代码执行、状态：
+- code_reads：代码直接读这一项；
+- drift_checked：代码里另有一份常量，`policy-check` 逐项比对；
+- pending：还没有代码执行，写了方案和负责人。
+
+改阈值时要两边一起改，否则 `policy-check` 不通过。
+
+**判断清单**：`config/policies/decisions.yaml`，记录今晚总调度和各 agent 做过的 52 个判断（数字以 coverage.json 为准）。每条都写了“现在由谁判、目标由谁判、代码化方案”。
+
+**数据快照**：data/ 不进 git，其中决策 / 配置类文件（配方选择、设定图选择、驳回、ready_episodes、交还记录、takes 当前指针等，清单 `config/policies/state_files.yaml`）由 `tools/autopilot/state_snapshot.py` 在每次 cut 时打快照到 `data/system_versions/<sv>/`（tar + 逐文件 sha256），回滚用 `restore <sv>`；新剧本用 `init-run <run_id>` 只从 config/ 默认值生成（K-OPS-X06）。
+
+**新增判定 prompt**：`config/prompts/asset_sheet_inspect.md`（本地看图模型逐栏检查设定图是否完整）。原因：出图闸门把设定图当标准答案，参考图本身的缺陷它查不出来。
+
+**还要人或 Claude 介入的地方（以 drill_ep01.json 为准，r2 起从 P0 Brief 演练）（冷启动演练 ep04，13 个断点）**：producer 的 RUN_ID 写死 series10_v1（episode_pipeline 已由 WORKFLOW 改读 config/pipeline/run.json）；producer 零点击 dryrun 走不完首帧 → 尾帧 → 视频（首帧通过后被重打分撤下、循环），退出码却是 0；尽力镜放行合成与 ITERATION_PROTOCOL §3 冲突；import_staged 还没写导入事件（目前靠 ep_hash 兜底）；以及上表粗体的 claude 判断点。完整清单 `data/autopilot/flow/drill_ep04.json`。
+
+## 0.1 多剧并行接口（总调度 11-02 02:4x 定；策略 resources.multi_run / run_priority，判断清单 DJ-54）
+
+项目方在 #/script-create 新建剧本时，series10 继续生产。导入新剧本只新增一个 run，不替换正式剧。项目方闸门只保留两处：填 P0 Brief、看预览确认交付。
+
+| 对象 | 接口 | 负责 |
+|---|---|---|
+| run 登记表 | `config/pipeline/runs.json`：`{"primary": "series10_v1", "runs": {"<run_id>": {"priority": 0, "status": "producing", "episode": N?, "created_at", "source": "import|flow-start"}}}`；`config/pipeline/run.json` 保留为 primary 指针（兼容旧读法）；导入新剧本 = 追加一条（priority 默认 10） | WORKFLOW |
+| 导入事件 | `data/autopilot/imports.jsonl` 每条必须带 `run_id`；episode_pipeline 按 run 分别准备（作业写 `data/pipeline/runs/<run>/assets/first_frame_jobs.json`），ready 写 `data/autopilot/runs/<run>/ready_episodes.json`（primary 兼容旧路径） | WORKFLOW；import_staged 写事件 = DEBUG-RSI |
+| producer | 对象 / 租约 / 账本 id 加 run 前缀 `<run>/<kind>:<shot>`（primary 兼容无前缀）；登记表、attempts、master_rejects 按 run 分文件 `data/producer/runs/<run>/`（primary 暂留 `data/producer/`）；渲染目录 `data/renders/<run>/epNN/SN/`（primary 仍是 `data/renders/`）；派单按 `resources.run_priority`：高优先级 run 有 ready 对象时，低优先级不派；不打断在途作业 | DEBUG-RSI |
+| 服务器工厂 | inbox 目标状态按 run 分：`inbox/<run>/state-<seq>.json`（作业表 sha、holds、rejects、ready、min_code_sv）；`expected_refs` 按 run；outbox manifest 带 `run_id`；本地库按 sha 共用（相同资产不重复存）；交还条件按 (host, run) 记，preflight dryrun 按 run 跑 | FACTORY |
+| 导入稿路径 | primary 仍是 `data/import/script_v2.json`；新 run 是 `data/import/runs/<run>/script_v2.json`（导入接口按 run_id 写，备份也按 run 分开放）。`image_jobs.rebuild_first_frame_jobs(run)` 按 run 读对应的导入稿 | 导入写入：DEBUG-RSI（import_staged）；image_jobs：AUTOPILOT / RSI |
+| 派单 only | `tools/netfix/dispatch.py` 计算 only / 分区时认 `<run>/<kind>:<shot>` 前缀；分区按 (run, 集) 划分，新 run 默认跟随正式剧的分区规则，只用空档 | NETFIX |
+| 过渡期 | 在 producer 和 dispatch 能认 run 前缀之前，primary 继续用不带前缀的旧格式，只有非 primary 的 run 带前缀（不影响现在的生产） | WORKFLOW / DEBUG-RSI / NETFIX |
+| 编排器 | `flow.py` 读 `runs.json`：primary 走逐集状态，其余 run 走“新剧本”行；status.json 的 `new_runs` 带 priority | DISTILL |
+| 预算 | 每部新剧：每集 ≤ $3、整部 ≤ $15（budget.writing_per_run），超出即停；追加预算才问项目方 | DISTILL / HOLLYWOOD |
+
 ## 1. 启动
 
 在项目根目录运行。

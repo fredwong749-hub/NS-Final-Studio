@@ -21,9 +21,13 @@ import { LiveProgress } from "../../ds/StageProgress";
 import { Flash } from "../../ds/Flash";
 import { useLiveEvent } from "../live";
 import { MainTag, TagCounts, TagLegend } from "../StatusTags";
+import { breatheDelay } from "../status";
+import { SeasonDrawer } from "./SeasonPeek";
+import { dotOf, statusWord, DOT_TITLE, type MainStatus } from "./seasonDot";
+import { Pop } from "../widgets";
 import { countKinds, hasKind, tagsTitle, type ShotStatusTags, type TagKind } from "../StatusTags.helpers";
 
-type SShot = { id: string; index: number; size: string | null; scene_id: string | null; scene: string | null; link: string | null; carry: string | null; cast: { name: string; presence: string }[]; switch: string[]; seconds: number | null; adult: boolean; cand_url: string | null; cand_n: number; old_script_n?: number; first_old?: boolean; last_old?: boolean; status?: ShotStatusTags };
+type SShot = { id: string; index: number; size: string | null; scene_id: string | null; scene: string | null; link: string | null; carry: string | null; cast: { name: string; presence: string }[]; switch: string[]; seconds: number | null; adult: boolean; img?: string; cand_url: string | null; cand_n: number; old_script_n?: number; first_old?: boolean; last_old?: boolean; status?: ShotStatusTags };
 /** UIRSI r40：板块状态（后端 ns_api/shot_status.episode_blocks；口径同镜头格标签） */
 type BlockState = "stale" | "doing" | "done" | "todo";
 type SBlocks = { state: BlockState; text: string; stages: { key: string; label: string; state: BlockState; counts: Record<BlockState, number>; text: string }[] };
@@ -32,6 +36,7 @@ const BLOCK_WORD: Record<BlockState, string> = { stale: "过期", doing: "进行
 
 function useSeason() {
   const [d, setD] = useState<SEp[] | null>(null);
+  const [faces, setFaces] = useState<Record<string, string>>({});
   const [err, setErr] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -40,7 +45,7 @@ function useSeason() {
     fetch("/api/season")
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.status === 404 ? "starting" : `HTTP ${r.status}`))))
       .then(
-        (x: { episodes: SEp[] }) => alive && (setD(x.episodes), setErr(null)),
+        (x: { episodes: SEp[]; faces?: Record<string, string> }) => alive && (setD(x.episodes), setFaces(x.faces ?? {}), setErr(null)),
         (e: Error) => {
           if (!alive) return;
           setErr(e.message);
@@ -55,7 +60,42 @@ function useSeason() {
     };
   }, [tick]);
   useLiveEvent((e) => e.type === "frame" || e.type === "lastframe" || e.type === "stage", () => setTick((n) => n + 1), 1500);
-  return { d, err, retry: () => setTick((n) => n + 1) };
+  return { d, faces, err, retry: () => setTick((n) => n + 1) };
+}
+
+/** r43（总调度 02:2x §二）：全剧总进度——一行灰字“剧本 10/10 · 首帧 2/102 · 尾帧 0/102 · 视频 0/102 · 成片 0/10”+ 一条细的单色总进度线。
+ *  数据同原 7 段条：GET /api/progress（ns_api/live.py），各集同名段 done / total 相加；实时事件来了重取。总进度 = 五段 done 之和 / total 之和。 */
+type PSeg = { done: number; total: number };
+type PData = { order: string[]; labels: Record<string, string>; episodes: { segs: Record<string, PSeg> }[] };
+const TOT_KEYS = ["script", "first", "last", "video", "cut"];
+function useTotals(): PData | null {
+  const [p, setP] = useState<PData | null>(null);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/progress")
+      .then((r) => (r.ok ? (r.json() as Promise<PData>) : null))
+      .then((x) => alive && x && setP(x), () => {});
+    return () => {
+      alive = false;
+    };
+  }, [tick]);
+  useLiveEvent((e) => e.type === "frame" || e.type === "lastframe" || e.type === "stage", () => setTick((n) => n + 1), 3000);
+  return p;
+}
+function Totals({ p }: { p: PData | null }) {
+  const sum = (k: string) => (p?.episodes ?? []).reduce((a, e) => ({ done: a.done + (e.segs[k]?.done ?? 0), total: a.total + (e.segs[k]?.total ?? 0) }), { done: 0, total: 0 });
+  const rows = TOT_KEYS.map((k) => ({ k, label: p?.labels[k] ?? k, ...sum(k) }));
+  const done = rows.reduce((a, r) => a + r.done, 0);
+  const tot = rows.reduce((a, r) => a + r.total, 0);
+  return (
+    <div className="sea-tot" role="group" aria-label="全剧进度">
+      <span className="sea-tot-t">{p ? rows.map((r) => `${r.label} ${r.done}/${r.total}`).join(" · ") : "进度读取中…"}</span>
+      <span className="sea-tot-bar" title={tot ? `总进度 ${Math.round((done / tot) * 100)}%（五段完成数之和 / 总数之和）` : ""}>
+        <i style={{ width: tot ? `${(done / tot) * 100}%` : 0 }} />
+      </span>
+    </div>
+  );
 }
 
 /** 场景 → 色带颜色（同一场景同一色；只用主题变量） */
@@ -63,13 +103,14 @@ const BANDS = ["var(--c-info)", "var(--c-ok)", "var(--c-warn)", "var(--c-accent)
 const LINK_ICON: Record<string, [string, string]> = { 换场: ["┃", "换场"], 同场换机位: ["─", "同场换机位"], 接力: ["➜", "接力（上一镜的动作 / 视线直接接过来）"] };
 const PRES: Record<string, [string, string]> = { 在画: ["●", "在画"], 局部: ["◐", "局部入画"], 画外: ["○", "画外（只有声音）"] };
 
-type Seg = "none" | "cand" | "ok" | "stale" | "bad" | "busy";
+type Seg = "none" | "cand" | "ok" | "stale" | "bad" | "busy" | "queued";
 function segs(s: ShotSummary | undefined, ss: SShot): [Seg, Seg, Seg, Seg] {
   if (!s) return ["none", "none", "none", "none"];
   const st = s.stale as Record<string, unknown[]> | undefined;
   const isStale = (k: string) => !!(st?.[k] && (st[k] as unknown[]).length);
+  // UIRSI r43（K-UI-048）：只有真的在跑才算“生成中”（呼吸灯）；排队中单列，静止灰色
   const busy = (k: string) => s.job != null && (s.job_stage === k || (!s.job_stage && k === "image"));
-  const one = (have: boolean, k: string, cand = false): Seg => (busy(k) ? "busy" : (s.bad as Record<string, unknown> | undefined)?.[k] ? "bad" : have ? (isStale(k) ? "stale" : "ok") : cand ? "cand" : "none");
+  const one = (have: boolean, k: string, cand = false): Seg => (busy(k) ? (s.job === "running" ? "busy" : "queued") : (s.bad as Record<string, unknown> | undefined)?.[k] ? "bad" : have ? (isStale(k) ? "stale" : "ok") : cand ? "cand" : "none");
   return [
     one(!!s.first_frame && !ss.first_old, "image", ss.cand_n > 0),
     one(!!s.last_frame_target && !ss.last_old, "last"), // UIRSI r40：旧剧本出的当前版本不算“有”
@@ -80,7 +121,7 @@ function segs(s: ShotSummary | undefined, ss: SShot): [Seg, Seg, Seg, Seg] {
 
 export default function SeasonPage() {
   const st = useStudio();
-  const { d, err, retry } = useSeason();
+  const { d, faces, err, retry } = useSeason();
   const [people, setPeople] = useState(true);
   // UIRSI r40：按状态筛（ep = null 表示全剧，数字 = 只筛这一集）
   const [tagF, setTagF] = useState<{ ep: number | null; k: TagKind } | null>(null);
@@ -104,6 +145,9 @@ export default function SeasonPage() {
     }
   };
   const [openEp, setOpenEp] = useState<Set<number>>(new Set());
+  // UIRSI r43（总调度 02:1x）：每镜可展开看参考图和过程小图（同一时间展开一镜，面板在本集这一排下面）
+  const [peek, setPeek] = useState<string | null>(null);
+  const prog = useTotals();
   const byId = useMemo(() => {
     const m = new Map<string, ShotSummary>();
     for (const e of st.episodes ?? []) for (const s of e.shots) m.set(s.id, s);
@@ -134,33 +178,71 @@ export default function SeasonPage() {
   const all = d.flatMap((e) => e.shots);
   const cnt = (f: (s: ShotSummary) => boolean) => all.filter((x) => { const s = byId.get(x.id); return s ? f(s) : false; }).length;
   const total = all.length;
+  // r43（总调度 02:2x §四）：单击 = 右侧详情抽屉（不跳页）；双击 = 进画布这一镜；Ctrl / Shift 点 = 多选（照旧）
   const go = (ev: MouseEvent, id: string) => {
     if (ev.shiftKey || ev.ctrlKey || ev.metaKey) return st.select(id, { shift: ev.shiftKey, ctrl: ev.ctrlKey || ev.metaKey });
-    location.hash = `#${id}`; // 直达这一镜的每镜一行（画布）
+    setPeek(id);
   };
+  const goCanvas = (id: string) => (setPeek(null), (location.hash = `#${id}`)); // 直达这一镜的每镜一行（画布）
+  const nFilter = (blockF ? 1 : 0) + (tagF ? 1 : 0);
+  const peekShot = peek ? all.find((x) => x.id === peek) : undefined;
   return (
     <div className={`v3p-page sea-page${detail ? "" : " simple"}`}>
       <header className="v3p-head sea-head">
         <h1>全剧总览</h1>
         <span className="v3p-muted">
-          {d.length} 集 · {total} 镜 · 首帧 {cnt((s) => !!s.first_frame)}/{total} · 尾帧 {cnt((s) => !!s.last_frame_target)}/{total} · 视频 {cnt((s) => !!s.video)}/{total} · 通过 {cnt((s) => s.review?.state === "passed")}/{total}
-          {all.some((x) => x.cand_n > 0) ? ` · 有候选待挑 ${all.filter((x) => x.cand_n > 0 && !byId.get(x.id)?.first_frame).length}` : ""}
+          {d.length} 集 · {total} 镜{!detail ? null : <> · 首帧 {cnt((s) => !!s.first_frame)}/{total} · 尾帧 {cnt((s) => !!s.last_frame_target)}/{total} · 视频 {cnt((s) => !!s.video)}/{total} · 通过 {cnt((s) => s.review?.state === "passed")}/{total}
+          {all.some((x) => x.cand_n > 0) ? ` · 有候选待挑 ${all.filter((x) => x.cand_n > 0 && !byId.get(x.id)?.first_frame).length}` : ""}</>}
         </span>
         <span className="grow" />
-        <label className="sea-tog" title="每镜的景别 · 时长 · 候选数 · 四段进度 · 人物时间线 · 换装 · 各色数量 · 各阶段">
-          <input type="checkbox" checked={detail} onChange={(e) => setDetail(e.target.checked)} /> 显示细节
-        </label>
-        {detail && (
-          <label className="sea-tog">
-            <input type="checkbox" checked={people} onChange={(e) => setPeople(e.target.checked)} /> 人物时间线
-          </label>
-        )}
+        {/* r43（总调度 02:2x §二）：板块胶囊、9 个状态胶囊、显示细节都收进“筛选 ▾”（功能保留，只是收起） */}
+        <Pop label={<>筛选{nFilter ? ` · ${nFilter}` : ""} ▾</>} btnClass="v3-btn sea-filter-btn" align="right" title="按板块 / 状态筛选；显示细节；人物时间线">
+          {() => (
+            <div className="sea-filter-pop">
+            <label className="sea-tog" title="每镜的景别 · 时长 · 候选数 · 四段进度 · 人物时间线 · 换装 · 各色数量 · 各阶段">
+              <input type="checkbox" checked={detail} onChange={(e) => setDetail(e.target.checked)} /> 显示细节
+            </label>
+            {(
+              <label className="sea-tog" hidden={!detail}>
+                <input type="checkbox" checked={people} onChange={(e) => setPeople(e.target.checked)} /> 人物时间线
+              </label>
+            )}
+          {/* UIRSI r40（项目方：“哪些是重置的,过期的,就给它用不同的颜色 label 一下”）：每格左下角一个彩色主标签（最严重的那个，悬停看全部）；点颜色只看这类 */}
+          {d && (
+            <div className="sea-legend blk-bar" role="group" aria-label="板块状态筛选">
+              <span className="blk-lg-t">板块</span>
+              {(["stale", "doing", "done", "todo"] as BlockState[]).map((k) => {
+                const n = d.filter((e) => e.blocks?.state === k).length;
+                return (
+                  <button key={k} type="button" className={`blk-chip b-${k}${blockF === k ? " on" : ""}`} onClick={() => setBlockF(blockF === k ? null : k)} aria-pressed={blockF === k}
+                    title={`${BLOCK_WORD[k]}：${k === "stale" ? "剧本或作业变了、旧剧本版本，需要重出" : k === "doing" ? "有在出、排队、待补判的" : k === "done" ? "全部通过、已设为当前 / 已定稿" : "还没开始"}；点一下只看这 ${n} 集，再点取消`}>
+                    {BLOCK_WORD[k]} <em>{n} 集</em>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {d && (
+            <div className="sea-legend sea-filters">
+              <TagLegend counts={countKinds(d.flatMap((e) => e.shots.map((x) => x.status)))} on={tagF?.ep == null ? tagF?.k ?? null : null} onPick={(k) => setTagF(k ? { ep: null, k } : null)} />
+            </div>
+          )}
+              {nFilter > 0 && (
+                <button type="button" className="v3p-link" onClick={() => (setBlockF(null), setTagF(null))}>
+                  清除筛选
+                </button>
+              )}
+            </div>
+          )}
+        </Pop>
       </header>
-      <LiveProgress run={null} title="全剧进度" />
+      {/* r43（§二）：总进度改成一行灰字 + 一条细的单色总进度线；原 7 段彩色条在“显示细节”里 */}
+      {detail ? <LiveProgress run={null} title="全剧进度" /> : <Totals p={prog} />}
       <div className="sea-legend" aria-label="图例">
         <span><i className="sea-seg s-ok" />有了</span>
         <span><i className="sea-seg s-cand" />有候选待挑</span>
         <span><i className="sea-seg s-busy" />生成中</span>
+        <span><i className="sea-seg s-queued" />排队中</span>
         <span><i className="sea-seg s-stale" />过期</span>
         <span><i className="sea-seg s-bad" />坏图 / 打回</span>
         <span className="sea-lg-sep">每格下方四段：首帧 · 尾帧 · 视频 · 通过</span>
@@ -170,26 +252,6 @@ export default function SeasonPage() {
         <span>● 在画 ◐ 局部 ○ 画外{people && leads.length ? `（每格最下一行依次是：${leads.join(" · ")}）` : ""}</span>
         <span className="sea-sw">换装</span>
       </div>
-      {/* UIRSI r40（项目方：“哪些是重置的,过期的,就给它用不同的颜色 label 一下”）：每格左下角一个彩色主标签（最严重的那个，悬停看全部）；点颜色只看这类 */}
-      {d && (
-        <div className="sea-legend blk-bar" role="group" aria-label="板块状态筛选">
-          <span className="blk-lg-t">板块</span>
-          {(["stale", "doing", "done", "todo"] as BlockState[]).map((k) => {
-            const n = d.filter((e) => e.blocks?.state === k).length;
-            return (
-              <button key={k} type="button" className={`blk-chip b-${k}${blockF === k ? " on" : ""}`} onClick={() => setBlockF(blockF === k ? null : k)} aria-pressed={blockF === k}
-                title={`${BLOCK_WORD[k]}：${k === "stale" ? "剧本或作业变了、旧剧本版本，需要重出" : k === "doing" ? "有在出、排队、待补判的" : k === "done" ? "全部通过、已设为当前 / 已定稿" : "还没开始"}；点一下只看这 ${n} 集，再点取消`}>
-                {BLOCK_WORD[k]} <em>{n} 集</em>
-              </button>
-            );
-          })}
-        </div>
-      )}
-      {d && (
-        <div className="sea-legend">
-          <TagLegend counts={countKinds(d.flatMap((e) => e.shots.map((x) => x.status)))} on={tagF?.ep == null ? tagF?.k ?? null : null} onPick={(k) => setTagF(k ? { ep: null, k } : null)} />
-        </div>
-      )}
       <div className="sea-grid">
         {d.map((e, ei) => {
           const prev = ei > 0 ? d[ei - 1] : null;
@@ -213,6 +275,15 @@ export default function SeasonPage() {
                   第 {e.number} 集
                 </a>
                 <b className="sea-ept" title={e.title}>{e.title}</b>
+                {(() => {
+                  const nNeed = e.shots.filter((x) => dotOf(x.status as MainStatus) === "need").length;
+                  return nNeed ? (
+                    <span className="sea-need" title={`这一集有 ${nNeed} 镜需要你看（没过检查或尽力版待接受）`}>
+                      <i className="sea-dot d-need" />
+                      {nNeed}
+                    </span>
+                  ) : null;
+                })()}
                 <span className="sea-epm">{e.shots.length} 镜 · {Math.round(secs)} 秒</span>
                 <span className="sea-epm sea-prog" title={`首帧 ${nFF}/${e.shots.length} · 视频 ${nV} · 通过 ${nP}`}>
                   {detail ? `首帧 ${nFF}/${e.shots.length} · 视频 ${nV} · 过 ${nP}` : nV ? `视频 ${nV}/${e.shots.length}` : `首帧 ${nFF}/${e.shots.length}`}
@@ -262,21 +333,42 @@ export default function SeasonPage() {
                           {lk?.[0] ?? (sameScene ? "─" : "┃")}
                         </span>
                       )}
-                      <button type="button" className={`sea-card k-${x.status?.main ?? "none"}`} onClick={(ev) => go(ev, x.id)} title={`${x.id} · ${x.size ?? ""} · ${x.scene ?? ""} · ${x.seconds ?? "?"} 秒${x.cand_n ? ` · ${x.cand_n} 张候选` : ""}${x.adult ? " · 成人镜头（只在本机生成）" : ""}\n${tagsTitle(x.status)}\n${s?.img_summary ?? ""}\n点：打开这一镜（每镜一行）；Ctrl / Shift 点：多选`}>
+                      <button type="button" className={`sea-card k-${x.status?.main ?? "none"}`} onClick={(ev) => go(ev, x.id)} onDoubleClick={() => goCanvas(x.id)} title={`${x.id} · ${x.size ?? ""} · ${x.scene ?? ""} · ${x.seconds ?? "?"} 秒${x.cand_n ? ` · ${x.cand_n} 张候选` : ""}${x.adult ? " · 成人镜头（只在本机生成）" : ""}\n${tagsTitle(x.status)}\n${s?.img_summary ?? ""}\n${statusWord(x.status as MainStatus)}${(x.status as MainStatus | undefined)?.why ? `：${(x.status as MainStatus).why}` : ""}
+单击：右侧看详情；双击：进画布这一镜；Ctrl / Shift 点：多选`}>
                         <span className="sea-band" style={{ background: x.scene_id ? bandOf.get(x.scene_id) : undefined }} title={x.scene ?? "场景未标"} />
-                        <span className={`sea-pic${img ? "" : " none"}`} data-zoom-label={`${x.id.split("-")[1]} · ${s?.first_frame ? `首帧 #${s.first_frame_take ?? "?"}` : x.cand_n ? "首帧候选" : "首帧"}`}>
-                          {img ? <img key={img} className="live-img" src={thumb(img, 120) ?? img} alt="" loading="lazy" decoding="async" draggable={false} /> : <span title={x.old_script_n ? `有 ${x.old_script_n} 张是剧本更新前出的旧图，不再作候选（在这一镜的“旧图”里能看）` : undefined}>{x.old_script_n || x.first_old ? <>未出<br />（剧本已更新）</> : "未出"}</span>}
+                        <span className={`sea-pic${img ? "" : " none"}`} style={breatheDelay(x.id)} data-zoom-label={`${x.id.split("-")[1]} · ${s?.first_frame ? `首帧 #${s.first_frame_take ?? "?"}` : x.cand_n ? "首帧候选" : "首帧"}`}>
+                          {img ? <img key={img} className="live-img" src={thumb(img, 120) ?? img} alt="" loading="lazy" decoding="async" draggable={false} /> : <span title={x.old_script_n ? `有 ${x.old_script_n} 张是剧本更新前出的旧图，不再作候选（在这一镜的“旧图”里能看）` : undefined}>{detail ? (x.old_script_n || x.first_old ? <>未出<br />（剧本已更新）</> : "未出") : s?.job === "running" || (x.status as MainStatus | undefined)?.running ? "正在出" : s?.job === "queued" || (x.status as MainStatus | undefined)?.main5 === "doing" ? "排队中" : "未开始"}</span>}
+                          {(() => { const dt = dotOf(x.status as MainStatus); return dt ? <i className={`sea-dot d-${dt}${dt === "run" ? " is-rendering" : ""}`} title={DOT_TITLE[dt]} /> : null; })()}
                           {lastImg && <img className="sea-last" src={thumb(lastImg, 120) ?? lastImg} alt="" loading="lazy" />}
                           <b className="sea-no">S{x.index}</b>
+                          <span className="sea-hover" aria-hidden>查看详情</span>
                           <MainTag st={x.status} size="xs" />
                           {(!s?.first_frame || x.first_old) && x.cand_n > 0 && <span className="sea-cand" title={`有 ${x.cand_n} 张合格的首帧候选，还没选定用哪张`}>{x.cand_n} 张候选</span>}
-                          {s?.job && <span className="sea-busy">生成中</span>}
+                          {s?.job === "running" && <span className="sea-busy">生成中</span>}
+                          {s?.job === "queued" && <span className="sea-busy is-queued">排队中</span>}
                           {x.adult && <span className="sea-adult" title="成人镜头：只在本机生成">本地</span>}
                         </span>
-                        <span className="sea-segs" aria-label="首帧 · 尾帧 · 视频 · 通过">
+                        <span className="sea-segs" style={breatheDelay(x.id)} aria-label="首帧 · 尾帧 · 视频 · 通过">
                           {sg.map((g, k) => (
                             <i key={k} className={`sea-seg s-${g}`} />
                           ))}
+                        </span>
+                        {/* r43（项目方 02:4x：“缺乏很多细节，比如人物什么的……信息也不够”）：图下固定 3 行——人物 / 景别 · 时长 · 场景 / 一句话内容 + 阶段 */}
+                        <span className="sea-info">
+                          <span className="sea-i1" title={x.cast.map((c) => `${c.name}（${c.presence}）`).join("、") || "这一镜没有人物"}>
+                            {x.cast.filter((c) => c.presence !== "画外").map((c) => (
+                              <span key={c.name} className="sea-who">
+                                {faces[c.name] ? <img src={thumb(faces[c.name], 64) ?? faces[c.name]} alt="" loading="lazy" /> : <i>{c.name.slice(0, 1)}</i>}
+                                {c.name}
+                              </span>
+                            ))}
+                            {!x.cast.some((c) => c.presence !== "画外") && <span className="sea-who none">{x.cast.length ? `画外：${x.cast.map((c) => c.name).join("、")}` : "无人物"}</span>}
+                          </span>
+                          <span className="sea-i2">{[x.size, x.seconds ? `${x.seconds}s` : null, x.scene].filter(Boolean).join(" · ")}</span>
+                          <span className="sea-i3">
+                            <span className="sea-txt" title={x.img || ""}>{x.img ? (x.img.length > 20 ? `${x.img.slice(0, 20)}…` : x.img) : "—"}</span>
+                            <span className="sea-stage">{s?.video ? "视频 已出" : s?.last_frame_target && !x.last_old ? "尾帧 已出" : s?.first_frame && !x.first_old ? "首帧 已定" : x.cand_n ? `首帧 · 候选 ${x.cand_n}` : ""}</span>
+                          </span>
                         </span>
                         <span className="sea-meta">
                           {x.size ?? "—"}
@@ -305,6 +397,10 @@ export default function SeasonPage() {
           );
         })}
       </div>
+      {peek && (
+        <SeasonDrawer shot={peek} sum={byId.get(peek)} status={peekShot?.status as MainStatus | undefined}
+          meta={[peekShot?.scene, peekShot?.size, peekShot?.seconds ? `${peekShot.seconds} 秒` : null].filter(Boolean).join(" · ")} onClose={() => setPeek(null)} />
+      )}
     </div>
   );
 }

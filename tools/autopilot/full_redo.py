@@ -36,6 +36,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).parent))
 OUT = ROOT / "data/autopilot/full_redo"
+
+
+def run_dir() -> Path:
+    """现行主 run 的目录（tools/autopilot/runs.py；K-OPS-W17 / K-OPS-S01 不写死 run_id）"""
+    import runs as RUNS
+    return ROOT / "data/pipeline/runs" / RUNS.primary_run()
 GATES = OUT / "gates.json"
 STATE = OUT / "state.json"
 PLAN = OUT / "plan.json"
@@ -77,7 +83,7 @@ def g21_check(run_dir: Path) -> dict:
 def gates_status() -> dict:
     g = jl(GATES, {}) or {}
     out = {i: g.get(i) or {"ok": False} for i in GATE_IDS}
-    jobs = ROOT / "data/pipeline/runs/series10_v1/assets/first_frame_jobs.json"
+    jobs = run_dir() / "assets/first_frame_jobs.json"
     script = ROOT / "data/import/script_v2.json"
     if out["G21"].get("ok") and jobs.exists() and script.exists():
         # K-OPS-Q24（RSI 11-01，总调度授权）：不比修改时间，核对镜头集合 + 每条作业的提示词来源 sha = 现行 script_v2.json
@@ -102,7 +108,7 @@ def image_jobs_green() -> dict:
                        env={**os.environ, "PYTHONUTF8": "1"})
     tail = [ln for ln in (r.stdout or "").splitlines() if ln.strip()][-3:]
     try:
-        chk = g21_check(ROOT / "data/pipeline/runs/series10_v1")
+        chk = g21_check(run_dir())
     except Exception as e:  # noqa: BLE001
         chk = {"ok": False, "error": repr(e)[:200]}
     return {"ok": r.returncode == 0 and bool(chk.get("ok")), "tests_rc": r.returncode, "tests": " | ".join(tail)[-300:],
@@ -281,7 +287,7 @@ def reject_old_jobs(shots: list[str], since: str, reason: str, watch_min: int = 
     done = set()
     t_end = time.time() + watch_min * 60
     while True:
-        jobs = {j["shot"]: j for j in (jl(ROOT / "data/pipeline/runs/series10_v1/assets/first_frame_jobs.json", {}) or {}).get("jobs") or []
+        jobs = {j["shot"]: j for j in (jl(run_dir() / "assets/first_frame_jobs.json", {}) or {}).get("jobs") or []
                 if not str(j.get("status", "")).startswith("stale:")}
         for sid in shots:
             ep, sn = sid.split("-")
@@ -311,7 +317,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("cmd", choices=["status", "gate", "plan", "apply", "pause", "resume", "reset-redo", "reject-stale-clause", "reject-old-jobs"])
     ap.add_argument("--pattern", default="")
-    ap.add_argument("--reason", default="")
+    ap.add_argument("--reason", nargs="*", default=[])     # 总调度 01:2x：调用方没加引号时多个词也收下（拼回一句），不再参数报错
     ap.add_argument("--watch-min", type=int, default=0)
     ap.add_argument("--whole-take", action="store_true", help="在整条版本记录里找（参考图路径等），不只提示词")
     ap.add_argument("--since")
@@ -319,11 +325,13 @@ def main(argv=None) -> int:
     ap.add_argument("--shots", default="")
     ap.add_argument("gate_id", nargs="?")
     ap.add_argument("--by", default="")
-    ap.add_argument("--note", default="")
+    ap.add_argument("--note", nargs="*", default=[])
     ap.add_argument("--host")
     ap.add_argument("--executor", choices=["laptop", "server"], default="laptop")
     ap.add_argument("--dry", action="store_true")
     a = ap.parse_args(argv)
+    a.reason = " ".join(a.reason) if isinstance(a.reason, list) else a.reason
+    a.note = " ".join(a.note) if isinstance(a.note, list) else a.note
     if a.cmd == "status":
         print(json.dumps({"gates": gates_status(), "image_jobs": image_jobs_green(), "gates_ok": gates_ok(),
                           "state": jl(STATE, {})}, ensure_ascii=False, indent=1)[:4000])

@@ -1,35 +1,35 @@
 {
- "kb_version": "kb-20261102-5e907d0b",
- "n": 479,
+ "kb_version": "kb-20261102-31f413be",
+ "n": 536,
  "by_domain": {
-  "render": 77,
+  "render": 81,
   "prompt": 27,
-  "writer": 63,
-  "edit": 45,
-  "review": 61,
+  "writer": 71,
+  "edit": 47,
+  "review": 64,
   "loop": 9,
-  "asset": 41,
-  "ops": 101,
-  "ui": 55
+  "asset": 43,
+  "ops": 136,
+  "ui": 58
  },
  "by_link": {
   "P0-P1": 20,
   "P1-P2": 2,
-  "P10-P11": 49,
-  "P11-P12": 23,
+  "P10-P11": 56,
+  "P11-P12": 25,
   "P11-RETRY": 47,
   "P2-P3": 3,
-  "P3-P4": 78,
-  "P4-P5": 33,
-  "P4-P6": 24,
+  "P3-P4": 86,
+  "P4-P5": 39,
+  "P4-P6": 25,
   "P4-P7": 22,
   "P4-P9": 16,
-  "P5-P6": 120,
-  "P6-P7": 26,
-  "P7-P8": 99,
-  "P8-P10": 16,
+  "P5-P6": 154,
+  "P6-P7": 29,
+  "P7-P8": 105,
+  "P8-P10": 18,
   "P8-P9": 12,
-  "P9-P10": 18
+  "P9-P10": 20
  },
  "rules": [
   {
@@ -967,6 +967,155 @@
    "_file": "knowledge/rules/asset_ops.yaml"
   },
   {
+   "id": "K-OPS-W13",
+   "domain": "ops",
+   "link": [
+    "P5-P6",
+    "P6-P7"
+   ],
+   "title": "推送资产清单 = producer preflight 的文件依赖（复用 frame_job.build_first，不另列）；推送方不写 ready，服务器 dryrun preflight 0 挡后才写",
+   "when": "resident_sync push_required / required_data 计算要推到服务器的资产；临时覆盖交还服务器出图之前",
+   "then": "tools/pipeline/preflight_deps.py 对现行导入稿每一镜调 ns_agent.frame_job.build_first（与 producer 同一入口），收集作业 refs / asset_refs 里的全部文件（身份脸、设定图与去头裁切、单品 / 参考板、场景底图），再加来源（选定设定图、单品图、assets/scenes 有效图、scene_overrides）；resident_sync.required_data 直接用它；push_required 推完只写 assets_ready.pushed，ready 一律 false，由 FACTORY 在服务器上跑 dryrun preflight 0 挡后写 ready",
+   "check": "tests/test_push_preflight_deps.py",
+   "evidence": [
+    {
+     "src": "data/autopilot/assets_ready.json",
+     "note": "11-02 01:14：清单漏 assets/scenes，gpu36 交还后 preflight I5（sk_elevator 没有参考底图）每单挡，清单却写 ready、缺 0；总调度收回并改规则"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/asset_ops.yaml"
+  },
+  {
+   "id": "K-OPS-W14",
+   "domain": "ops",
+   "link": [
+    "P8-P10"
+   ],
+   "title": "服务器常驻不因“代码有变”反复重启：只在常驻实际加载的文件变了才重启、30 分钟最多一次、先排空；版本统一走 system_version deploy",
+   "when": "resident_sync loop / 任何推代码到服务器后要重启常驻 producer / night 的场合",
+   "then": "resident_sync.AUTO_CODE_PUSH = False（loop 只做 health / push_control / 并回，不推代码、不重启）；需要时用 restart_guarded：resident_imports_changed 只认 producer / series10_video / ns_agent / ns_render / recipes / packages / gen_contract / netfix / config 下的 .py/.json/.yaml，30 分钟内跳过，重启前 producer pause 并等心跳 inflight=0（最多 15 分钟）再 restart、resume；正式发版走 system_version deploy（服务器运行时归 FACTORY）",
+   "check": "tests/test_full_redo.py::test_restart_guarded_skips_without_resident_changes",
+   "evidence": [
+    {
+     "src": "docs/debug/DEBUG_r1.md",
+     "note": "20:55–00:23 resident_sync 因代码有变重启服务器常驻 22 次，每次作废租约、不等在途作业"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/asset_ops.yaml"
+  },
+  {
+   "id": "K-OPS-W15",
+   "domain": "ops",
+   "link": [
+    "P4-P5"
+   ],
+   "title": "新集由导入事件触发（data/autopilot/imports.jsonl），不靠 CHANGELOG 的一行字；运行 ID 从 config/pipeline/run.json 读",
+   "when": "任何正式导入（producer import_staged 等）之后；episode_pipeline 判断要准备哪些集；换一部剧",
+   "then": "导入方成功后调 tools/autopilot/import_events.append_import(集号, by, source, note) 追加事件（集号、剧本 sha256、时间、by）；episode_pipeline.candidate_eps = 事件里的集 ∪ 导入稿全部集（按集内容哈希兜底），CHANGELOG 只给人看；run_dir 先读 config/pipeline/run.json 的 run_id，再按 asset_refs.json 项目匹配",
+   "check": "tests/test_episode_pipeline.py::test_candidate_eps_from_events_and_import",
+   "evidence": [
+    {
+     "src": "docs/CHANGELOG_AGENTS.md",
+     "note": "DISTILL 冷启动演练（run.py flow --episode 4 --dry-run）：不经 HOLLYWOOD 的导入不会被准备；RUN 写死 series10_v1"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/asset_ops.yaml"
+  },
+  {
+   "id": "K-OPS-W16",
+   "domain": "ops",
+   "link": [
+    "P8-P10"
+   ],
+   "title": "服务器常驻重启一律走队列：各方只写请求，resident_sync 合并执行（同一台 30 分钟一次、先排空、紧急插队记审计）",
+   "when": "任何 loop、system_version deploy、人工要重启 gpu33 / gpu36 的常驻 producer / night",
+   "then": "调 tools/autopilot/restart_queue.request(host, reason, by, urgent) 往 data/autopilot/restart_requests.jsonl 追加请求（不直接重启）；resident_sync loop 每拍 restart_queue.process(host)：同一台距上次重启 < 30 分钟且无紧急请求 → 留着；否则合并全部待办一次执行：producer pause → 等 inflight=0（≤15 分钟）→ resident_restart → resume，结果写 restart_done.jsonl（请求 id、请求方、原因、urgent_jump、drained、耗时），失败不记 done 下一拍再试",
+   "check": "tests/test_infra_resident.py::test_restart_queue_merges_gaps_and_urgent",
+   "evidence": [
+    {
+     "src": "docs/debug/DEBUG_r1.md",
+     "note": "20:55–00:23 重启 22 次；总调度 02:1x 批准 DJ-20：各 loop 写请求、resident_sync 合并"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/asset_ops.yaml"
+  },
+  {
+   "id": "K-OPS-W17",
+   "domain": "ops",
+   "link": [
+    "P4-P5",
+    "P5-P6"
+   ],
+   "title": "多剧并行：run 登记表 + 按 run 分开的导入稿 / 作业 / ready / 导入事件；primary 保持旧路径与无前缀镜号（过渡期）",
+   "when": "新剧本导入（不替换正式剧）；episode_pipeline 准备各 run 的集；任何读写导入稿 / 作业 / ready 的工具",
+   "then": "config/pipeline/runs.json（primary + runs{priority, status, source}），run.json 保留为 primary 指针，读取统一用 tools/autopilot/runs.py；imports.jsonl 每条带 run_id（缺省 primary）；image_jobs.rebuild_first_frame_jobs / jobs_vs_import 按 run 读 data/import/runs/<run>/script_v2.json；episode_pipeline.watch_other_runs 对非 primary run 各自准备，作业写 data/pipeline/runs/<run>/，ready 写 data/autopilot/runs/<run>/ready_episodes.json 且镜号带 <run>/ 前缀；primary 的流程、路径、无前缀镜号不变，直到 producer / dispatch 认前缀",
+   "check": "tests/test_episode_pipeline.py::test_second_run_prepares_separately_without_touching_primary",
+   "evidence": [
+    {
+     "src": "docs/AUTOPILOT.md",
+     "note": "§0.1 多剧并行接口（总调度 11-02 02:4x 定、批准）"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/asset_ops.yaml"
+  },
+  {
+   "id": "K-OPS-W18",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "新一季继承上一季的资产项目（asset_refs.json 的 inherits 键），不另造资产库；本季新增造型走 IMGFIX 资产流程写进本季文件",
+   "when": "第二季（series10_s2）及以后同一角色班底的新剧本登记资产项目",
+   "then": "config/recipes/asset_refs.json 子项目写 inherits=<父项目>；ns_agent.asset_refs.project_cfg 从最上层父项目起逐层合并（faces / item_map 等字典深合并，子项目写的路径覆盖），project_chain 防环；sheet_of 按继承链子季优先、回落父季（沿用第一季现行设定图）；load_looks 父季造型在前、子季同 id 覆盖新 id 追加；shot_looks_file / run_dir 每季自己的；本季新增造型由 IMGFIX 出设定图候选 → sheet_intake 入库检查 → 自动选图（R1–R8 / VLM 平局裁决）写进本季 sheets_file / looks_file",
+   "check": "tests/test_asset_refs_inherit.py",
+   "evidence": [
+    {
+     "src": "config/recipes/asset_refs.json",
+     "note": "总调度 11-02：series10_s2 继承 series10_v1（角色、身份脸 L-086、现行造型设定图、单品）；series10_v1 合并后配置与原配置逐键相同"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/asset_ops.yaml"
+  },
+  {
+   "id": "K-OPS-W19",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "解析层（face_overrides / item_map_overrides / item_map_quarantine / hub_extra_looks）也按 run 继承，并统一登记，进 FACTORY 闭包和 SENTINEL S6",
+   "when": "新一季 inherits 父项目，或新增任何 {project:{...}} 形式、会改变参考图解析的覆盖文件",
+   "then": "参考图解析只走 ns_agent.asset_refs 同一入口（生产 / dryrun / 测试一致）；face_of 用 overlay_value 取继承链上第一个写了该角色的覆盖（子季设了用子季，否则父季），再落到合并后的 config faces；item_map 覆盖、quarantine、hub_extra_looks 用 overlay_layers 父先子后深合并；hub_episode_looks 按集排期每季自己的不继承；所有覆盖文件登记在 config/policies/resolution_layers.yaml，SENTINEL S6 files 必须覆盖全部登记文件；DISTILL decision_check 断言每个 run 每个角色身份脸 = MASTER_PICTURE 定的那张（D-AST-86 扩到所有 run）",
+   "check": "tests/test_resolution_layers.py",
+   "evidence": [
+    {
+     "src": "data/looks/face_overrides.json",
+     "note": "总调度 11-02 P0：第二季身份脸被解析成 lin_wan_face_ref2va.png（只合并了 asset_refs.json faces，漏 face_overrides），L-086 应为 lin_wan_face_hd_A_s202.png；修后两季均为 hd_A_s202，第一季 102 镜 preflight_deps per_shot refs 改前改后 0 差异"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/asset_ops.yaml"
+  },
+  {
    "id": "K-AST-201",
    "enforced": false,
    "domain": "asset",
@@ -1361,7 +1510,10 @@
    "link": "P8-P9",
    "title": "配乐强度跟剧本情绪节拍：BGM 时间轴保留时间，强度用剧本【配乐】强度 0–3",
    "when": "合成铺 BGM（ns_post.music.resolve_cues）",
-   "then": "tools/director/cut_plan.merge_music_intensity(json_cues, 剧本镜)；强度升 = swell、降到 0 = drop；合成接线待 CONSENT（VIDEO10 / WORKFLOW）",
+   "then": "ns_post.director.merge_cues（合成里，config/post/director.json）；强度下限 music_min_intensity=2（时间轴作曲电平），导演层只往上推高点（升 = swell）",
+   "params": {
+    "config/post/director.json.music_min_intensity": 2
+   },
    "evidence": [
     {
      "src": "data/film_score/ep01_v2.json S3.4",
@@ -1370,6 +1522,14 @@
     {
      "src": "data/music/series10/ep01.json",
      "note": "bgm10 时间轴全部 intensity 2"
+    },
+    {
+     "src": "data/film_score/ep01_r2_dir.json",
+     "note": "下限 1：S1→S2 切点跳变 −11.8 dB、逐镜响度差 8.4 LU，总分 27.8 → 27.0（否决）"
+    },
+    {
+     "src": "data/film_score/ep01_r2_dir2.json",
+     "note": "下限 2：S3.4 转通过，总分 27.8 → 28.5"
     }
    ],
    "check": [
@@ -1386,7 +1546,7 @@
    "link": "P9-P10",
    "title": "画内对白被 TTS 兜底 = 口型与成片声音不一致：送回重出视频，不进定稿",
    "when": "合成用 --dialogue-source h3，某镜 H3 原声回听不合格改用 TTS",
-   "then": "tools/director/lip_redo.blocking(timeline) 列出这些镜 → data/director/redo_requests.json；本集只出预览、不定稿；成片分 A3.1 不通过；night 接线待 CONSENT",
+   "then": "finish.py → lip_redo.record → data/director/redo_requests.json；vidgen.check_lip_redo 走“首帧换版”同一条作废路径（旧片挪进 superseded 带原因、状态回待出、变体从头算＝不计次、每条请求只用一次、发 lip_redo 事件）；交付闸门 final_ok=false；成片分 A3.1 不通过",
    "evidence": [
     {
      "src": "docs/vqa/GATE_CALIBRATION.md §10–11",
@@ -1519,6 +1679,204 @@
    ],
    "confidence": "medium",
    "status": "建议",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/director.yaml"
+  },
+  {
+   "id": "K-EDT-816",
+   "domain": "edit",
+   "link": "P9-P10",
+   "title": "导演层 / 后期层接进 night 合成链，总开关 config/post/director.json",
+   "when": "night.finalize 合成（ns_post.assemble）与合成之后",
+   "then": "合成内：刀长上限 = 导演规格目标区间中点、J-cut 取导演规格、配乐强度跟剧本；合成后：tools/director/finish.py（lip_redo → post_pass → film_score → 交付闸门），每步 decider=code；关开关 = 行为与改动前一致",
+   "params": {
+    "config/post/director.json.enabled": true
+   },
+   "evidence": [
+    {
+     "src": "data/film_score/ep01_r2_base.json",
+     "note": "同素材本地重合成（导演层关）27.8"
+    },
+    {
+     "src": "data/film_score/ep01_r2_dir2.json",
+     "note": "导演层开 28.5（E1.2 平均每刀 4.11 → 3.43 s、S3.4 转通过；原合成 TP −0.7 由后期 loudnorm 收回）"
+    },
+    {
+     "src": "data/film_score/ep01_r2_dir2_post.json",
+     "note": "导演层 + 后期 32.5（同素材 base + 后期 31.2）"
+    }
+   ],
+   "check": [
+    "tests/test_director.py",
+    "tests/test_post.py",
+    "tests/test_v2_pace.py"
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/director.yaml"
+  },
+  {
+   "id": "K-EDT-817",
+   "domain": "edit",
+   "link": "P10-P11",
+   "title": "交付闸门（decider=code）：后期版成片分不低于原合成版才交付后期版；有口型重出镜 / 报错 → 不算定稿",
+   "when": "finish.py 收尾",
+   "then": "delivery_gate → deliver=post|raw、final_ok、why；night 按 deliver 选交付文件，st.eps[ep].director 记录",
+   "evidence": [
+    {
+     "src": "docs/ITERATION_PROTOCOL.md §G1",
+     "quote": "编排器给每个环节标 decider"
+    }
+   ],
+   "check": [
+    "tests/test_director.py"
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/director.yaml"
+  },
+  {
+   "id": "K-REN-801",
+   "domain": "render",
+   "link": "P4-P6",
+   "title": "编译层运镜句规范化到 Pika 稳定范围（拉远 / 晃动 → 固定；环绕 → 小幅推近或固定；中 / 大幅 → 小幅；去速度词），改动带规则号记录",
+   "when": "Pika 作业提示词（ns_recipes.prompt.build_base → jobs.json prompt_notes）与编译稿（ns_agent.compiler → CompiledShot.h3_norm）",
+   "then": "ns_agent.camera_norm.normalize_video_prompt；H3 正文不变量 = 只有项目方覆盖、或带规则号的编译层规范化能改（tests/test_h3_prompt.py::test_h3_norm_only_change 倒回规范化必须逐字等于原文）；开关 config/post/director.json camera_norm",
+   "params": {
+    "config/post/director.json.camera_norm": true
+   },
+   "evidence": [
+    {
+     "src": "config/prompts/hollywood_pika_reference.md P3 P16"
+    },
+    {
+     "src": "docs/video_rca/RCA_r1.md §1 C16",
+     "note": "视频比首帧再远 ≥1 档 11/55"
+    },
+    {
+     "src": "data/import/script_v2.json",
+     "note": "现行剧本 8 镜运镜句被规范化（拉远 2、环绕 1、中幅 5）；新剧本视频 0/102，不浪费已出视频（总调度 11-02 批复）"
+    }
+   ],
+   "check": [
+    "tests/test_director.py",
+    "tests/test_h3_prompt.py"
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/director.yaml"
+  },
+  {
+   "id": "K-WRT-801",
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "motion 第一句写一种运镜 + 幅度，不写速度；不用拉远 / 环绕 / 晃动",
+   "when": "每镜 motion",
+   "then": "运镜只用 static / push in / truck / pan / tilt / pedestal，幅度写“小幅 / 中幅”；不写“缓慢 / 缓缓”；不用 pull out、arc、shake（lint：tools/director/cut_plan.py lint）",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "镜头字段"
+    }
+   ],
+   "writer_text": "motion 第一句写一种运镜加幅度（例：camera push in 小幅推近），不写“缓慢”这类速度词；不用拉远、环绕、晃动——Pika 本来就会往远退，环绕和大动作叠在一起会变形。",
+   "evidence": [
+    {
+     "src": "config/prompts/hollywood_pika_reference.md P3 P16"
+    },
+    {
+     "src": "tools/director/cut_plan.py lint",
+     "note": "现行剧本“缓慢推近”48 镜（已有稿不返修，L-098）"
+    }
+   ],
+   "check": [
+    "tests/test_director.py"
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/director.yaml"
+  },
+  {
+   "id": "K-WRT-802",
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "衔接写“接力”时必须写接什么（动作 / 视线 / 环境 / 位置）",
+   "when": "每镜衔接字段",
+   "then": "link_carry = 动作｜… / 视线｜… / 环境｜… / 位置｜…；导演层据此定动作匹配切 / 视线匹配切（K-EDT-812）",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "镜头字段"
+    }
+   ],
+   "writer_text": "衔接写“接力”时，后面写清接的是什么：动作｜具体动作、视线｜看向哪、环境｜什么声音或光、位置｜站位；剪辑按它决定动作匹配切还是视线匹配切。",
+   "evidence": [
+    {
+     "src": "knowledge/rules/writer_camera.yaml K-EDT-102"
+    }
+   ],
+   "check": [
+    "tests/test_director.py"
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/director.yaml"
+  },
+  {
+   "id": "K-WRT-803",
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "每镜【配乐】写“强度 0–3”，整集至少两档，高点镜写 3",
+   "when": "每镜【配乐】",
+   "then": "导演层按强度定刀长（K-EDT-813），配乐按强度起伏（K-EDT-804）",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "声音"
+    }
+   ],
+   "writer_text": "每镜【配乐】都写“强度 0–3”；一集里强度至少有两档，情绪最高的那一镜写 3——剪辑节奏和配乐起伏都按这个数走。",
+   "evidence": [
+    {
+     "src": "data/film_score/ep01_v2.json S3.4",
+     "note": "BGM 时间轴强度全是 2"
+    }
+   ],
+   "check": [
+    "tests/test_director.py"
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/director.yaml"
+  },
+  {
+   "id": "K-REV-805",
+   "domain": "review",
+   "link": "P10-P11",
+   "title": "成片分 A3 口型按 11-02 V7 口径：台词段相关 ≥0.30，或张嘴帧占比 ≥0.3 且开合幅度达标",
+   "when": "film_score A3.3（画内对白镜）",
+   "then": "读成片所用那一版视频的 V7（scores/<镜>__<变体>.json）；VQAGATE 新版输出带 caliber 时直接用其 status，旧输出按口径重算；没有 V7 才退回 DIR 嘴部相关代理并注明",
+   "evidence": [
+    {
+     "src": "docs/CHANGELOG_AGENTS.md",
+     "note": "总调度 11-02 批复 V7 口径；人工标签 S4ffb s102 过、S4calm s101 过、r18 三条不过；已通知 VQAGATE"
+    },
+    {
+     "src": "data/film_score/ep01_v2.json A3.3",
+     "note": "代理判 0/1 不过 → V7 口径 S4 / S5 2/2 过，ep01_v2 28.7/50"
+    }
+   ],
+   "check": [
+    "tests/test_director.py"
+   ],
+   "confidence": "medium",
+   "status": "确认",
    "date": "2026-11-02",
    "_file": "knowledge/rules/director.yaml"
   },
@@ -3488,6 +3846,58 @@
    "_file": "knowledge/rules/netfix.yaml"
   },
   {
+   "id": "K-OPS-N09",
+   "domain": "ops",
+   "link": [
+    "P5-P6",
+    "P7-P8"
+   ],
+   "title": "底座隧道（一条香港常驻，只转发两台 sshd 22360/22330）+ 内层连接在隧道里直连服务器；跳板每小时新建 < 50；结果经服务器 outbox → 笔记本 puller 持续回传",
+   "when": "笔记本与 gpu33 / gpu36 之间的任何连接、远程命令、结果回传",
+   "then": "tunnel_supervisor 的 base 连接 = ssh -F config/netfix/ssh_config -L 127.0.0.1:22360:10.0.0.36:22 -L 127.0.0.1:22330:10.0.0.33:22 194relay-hk（直连备用 194relay），退避 15 s 翻倍最多 300 s，不许更快（运维 FONG-QUICK：快速重连像暴力破解）；道隧道 / WSL 命令主连接一律 via=t 连 gpu36-t / gpu33-t（WSL 侧经 tools/netfix/tcpbridge.py 走 interop），底座断 → 内层立刻清掉、底座一通并行重建（≤8 同时握手）；出现 REMOTE HOST IDENTIFICATION HAS CHANGED → 停止该连接、报 A-HOSTKEY，不删 known_hosts、不关校验；agent 临时命令一律 tools/netfix/rsh.py（不装用户级 ~/bin/ssh 包装，总调度 r2 定）；直接起 ssh 的文件只许 config/netfix/ssh_callers.txt；结果回传 = FACTORY 写 outbox/<id>/{files/,manifest.json,.done}，tools/netfix/puller.py 按 P0 json → P1 缩略图 → P2 原图（P3 视频按需 request）拉，sha 核对、原子落盘、merge_pull.merge_file 并回、建 .acked；交还服务器派单要 assets_ready.ready 且 preflight_dryrun_ok=true",
+   "check": "tests/test_netfix.py::test_base_backoff_follows_ops_rule",
+   "evidence": [
+    {
+     "src": "data/netfix/conn_watch_rate.jsonl",
+     "note": "跳板入口新建连接：改前 442/小时（并发 20–22）；改后见 after r2 clean 记录"
+    },
+    {
+     "src": "data/netfix/puller_selftest.json",
+     "note": "puller 自检：2 个结果拉回 + ack、重跑 0 重复、P3 未请求不拉、模拟断开期间不丢、恢复后追上 4/4"
+    },
+    {
+     "src": "data/netfix/supervisor.log",
+     "note": "01:43 杀底座：底座 49 s 恢复（含 15 s 退避），14 条内层全部恢复 118 s（改并行前 175 s）"
+    }
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/netfix.yaml"
+  },
+  {
+   "id": "K-OPS-N10",
+   "domain": "ops",
+   "link": [
+    "P5-P6",
+    "P7-P8"
+   ],
+   "title": "底座隧道两条互为备份（base-a 香港 22360/22330、base-b 直连 22361/22331），内层按道分摊；一条断只重建其上内层并改挂另一条，≤ ~30 s；banner 读不到但隧道在搬数据或其上内层还通，不许杀底座",
+   "when": "tunnel_supervisor 管理底座与内层连接",
+   "then": "config/netfix/tunnels.json 两条 kind=base（route 固定 hk / direct，alias_suffix -t / -tb）；内层 base=首选底座（l1/cmd2/cmd4 挂 b，其余挂 a），pick_base 首选不通挂另一条；底座 EXIT → 只清挂在它上面的内层、立刻改挂（REHOME），不等底座 15 s 退避；首选底座稳定 120 s 后逐条迁回；底座带 LogLevel=VERBOSE（通道开关明细）+ 记 banner 耗时；adopt 对 “host:port” 转发规格要能匹配（r2 时每次重载都误杀底座）",
+   "check": "tests/test_netfix.py::test_ssh_cmd_has_keepalive_and_tag",
+   "evidence": [
+    {
+     "src": "data/netfix/supervisor.log",
+     "note": "02:24:40 单底座被“读不到 banner”判死（实际其上内层仍在传数据）→ 14 条全断；r3 后 02:31:24 杀 base-a：8 条内层改挂 base-b，32 s 全部可用，挂 b 的 6 条全程不断"
+    }
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/netfix.yaml"
+  },
+  {
    "id": "K-OPS-Q30",
    "domain": "ops",
    "link": [
@@ -3828,6 +4238,31 @@
    "_file": "knowledge/rules/ops_debug.yaml"
   },
   {
+   "id": "K-OPS-E05",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "出完图后等契约打分 / 看图不许占着派单线程；“出好但还没打完分”的图积压到上限就停派（背压），不让道显示“在做”而 GPU 空着",
+   "when": "producer 派单线程池大小、出图后的打分等待",
+   "then": "线程池 ≥ 积压上限 + 2×道数（11-02 02:2x 复核：原 max(8, 3×道数) 在 gpu33 = 18 线程 < 积压上限 48，新单在池里排 50–100 s）；scoring 集合记录出好、正在等打分的对象，在 _run_one 的 finally 里清掉；积压 ≥ 2×道数×看图实例数（config/vqa.json model.instances，环境变量 NS_VQA_INSTANCES 优先；NS_PRODUCER_SCORE_BACKLOG 可直接覆盖）时 dispatch_frames 停派，记 score_backlog（每 5 分钟最多一条）",
+   "check": "tests/test_debug_rsi.py::test_e05_pool_larger_than_lanes_and_backlog_blocks_dispatch, tests/test_debug_rsi.py::test_e05_scoring_cleared_in_finally, tests/test_debug_rsi.py::test_e05_backlog_scales_with_vlm_instances",
+   "evidence": [
+    {
+     "src": "docs/debug/DEBUG_r1.md",
+     "note": "r2 02:2x gpu33 本机：dispatch 02:08:30 → rendered 02:10:04 但 render_s 39.9（线程池排队 54 s），inflight 19 = 线程数 18+1"
+    },
+    {
+     "src": "data/producer/log.jsonl",
+     "note": "11-02 00:46 派出的 ep01-S10 / ep02-S1 / ep02-S2 / ep02-S3 到 01:03 都没交给 ComfyUI（四个 /queue 都空、/history 也没有）；同期 contract_s 506–1484 s，6 个派单线程全在等打分"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_debug.yaml"
+  },
+  {
    "id": "K-OPS-E06",
    "domain": "ops",
    "link": [
@@ -3836,7 +4271,7 @@
    "title": "在服务器上跑的探测 / 分析命令一律套 timeout，加 nice、限线程；退出时清理自己留下的进程和临时文件",
    "when": "任何 loop 经 ssh / rssh 在 gpu33 / gpu36 上跑一次性探测或分析脚本",
    "then": "远端命令写成 timeout <秒> nice -n 19 env OMP_NUM_THREADS=1 ...；本地超时也要能保证远端会自己退出（不能只靠本地 subprocess 超时）；临时文件放 /tmp/dbg_*，脚本末尾删掉",
-   "check": "人工（DEBUG-RSI 探测脚本模板）",
+   "check": "tests/test_debug_rsi.py::test_e06_remote_calls_have_timeout",
    "evidence": [
     {
      "src": "docs/debug/DEBUG_r1.md",
@@ -3857,11 +4292,158 @@
    "title": "服务器 ComfyUI 日志必须有落点并轮转；轮转用 copytruncate，不为轮转重启 ComfyUI",
    "when": "新起或改造服务器上的 ComfyUI 实例",
    "then": "gpu33 走 systemd ns-comfy@<gpu>-<port>（journald 管）；gpu36 用 nohup 重定向到文件的，在 /etc/logrotate.d/ns-comfy-gpu36 登记（size 50M、rotate 7、copytruncate）；查错先看日志，/history 只做补充",
-   "check": "人工（logrotate -d /etc/logrotate.d/ns-comfy-gpu36）",
+   "check": "tests/test_debug_rsi.py::test_e07_logrotate_spec, tools/debug/check_logrotate.py",
    "evidence": [
     {
      "src": "docs/debug/DEBUG_r1.md",
      "note": "11-02 01:2x：gpu36 gpu0.log 713 KB、gpu1.log 835 KB、lane.log 524 KB，之前没有轮转；gpu33 journal 1.1 GB"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_debug.yaml"
+  },
+  {
+   "id": "K-OPS-E08",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "暂停一律带 reason_kind + expires_at；运维暂停（line_switch / restart / deploy）≤180 s 到点自动恢复，总调度 / 项目方显式暂停（master / owner）不自动恢复、超 180 s 报警",
+   "when": "任何代码或人暂停 producer（producer.py pause、/api/producer/pause、restart_producer.ps1、resident_sync RESTART_DRAIN）",
+   "then": "判定只用 tools/autopilot/policy.py:pause_decision（DISTILL 唯一实现）；producer.set_paused 强制写 reason_kind + expires_at（--kind / --expires-s，不写按 --by 推断）；producer 每拍和 infra_watchdog 每拍调 pause_tick 执行 resume / 报警（A-PAUSE-OVERDUE，10 分钟最多一条）",
+   "check": "tests/test_debug_rsi.py::test_e08_ops_pause_auto_resumes, tests/test_debug_rsi.py::test_e08_explicit_pause_never_auto_resumes_but_alerts_once, tests/test_debug_rsi.py::test_e08_kind_inference",
+   "evidence": [
+    {
+     "src": "docs/master/NIGHT_PLAN_20261101.md",
+     "note": "11-02 00:52 NETFIX 切线路全局暂停 12 分钟没恢复（总调度 01:04 手动 resume），GPU 空转"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_debug.yaml"
+  },
+  {
+   "id": "K-OPS-E09",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "驳回重出阶梯用完不再停下“等总调度定”——资产暂缓的继续等；输入变了重置（不计次）；输入没变追加 frame_v9_heavy ×2；再不过标尽力版 + SENTINEL 工单",
+   "when": "producer 对象的驳回计划（master_rejects plan + 账本 ladder_plan）用完",
+   "then": "Producer.escalate_exhausted 每拍执行（config/policies/retry.yaml redo_ladder，decider=code）；输入比对 = 最后一次驳回重出版本 vs first_frame_jobs.json（提示词 / compiler_inputs_sha / 参考图集合 / 参考图文件 mtime）；尽力版写 redo_exhausted + final=best_effort，工单写 data/sentinel/tickets.jsonl（附失败项统计）",
+   "check": "tests/test_debug_rsi.py::test_e09_no_wait_for_master_exit_and_ladder_helpers, tests/test_debug_rsi.py::test_e09_escalate_routes",
+   "evidence": [
+    {
+     "src": "docs/debug/DEBUG_r1.md",
+     "note": "11-02 02:33 gpu33 分区 41 个首帧、gpu36 36 个首帧卡在“驳回重出 2 次都没换上，等总调度定”，gpu33 四卡 0%"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_debug.yaml"
+  },
+  {
+   "id": "K-OPS-E10",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "看图闸门结果并进契约时，之前只因“Q9 未跑”判的 ok=False，看图 pass 后必须翻回 True；旧的 Q9 理由要清掉；其他项不过不翻",
+   "when": "services/agent/ns_agent/vqa/contract.py:apply()",
+   "then": "ok = 没有挡住项 且 Q9 不是 fail / untested 且（旧 ok 为真 或 旧 blocking 只有 Q9）且其他项都没有 fail / untested",
+   "check": "tests/test_debug_rsi.py::test_e10_vqa_pass_flips_ok_when_only_q9_blocked",
+   "evidence": [
+    {
+     "src": "docs/debug/DEBUG_r1.md",
+     "note": "11-02 02:00 后 gpu36 19/61、gpu33 19/64 的 redo_fail blocking 为空（例 ep09-S2 v3：vqa_gate pass，reasons 仍写“Q9 没有本地看图复核结果”）"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_debug.yaml"
+  },
+  {
+   "id": "K-OPS-E11",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "尽力版（不进合成）在规则或资产版本变化时自动重置、重新进正常流程，不计次；资产暂缓清单里的不动",
+   "when": "producer 每拍（5 分钟查一次）",
+   "then": "Producer.auto_reset_best_effort：第一次见到尽力版记 be_basis（规则 = gen_contract / render_quality / vqa 三份配置哈希；本镜 = compiler_inputs_sha / 提示词哈希 / 参考图最新 mtime）；之后任一项变了 → tries=0、final=None、旧历史标 before_gate_change，记 best_effort_reset（counted=false）。知识库 compile 版本不算（太频繁）",
+   "check": "tests/test_debug_rsi.py::test_e11_best_effort_auto_reset",
+   "evidence": [
+    {
+     "src": "docs/master/NIGHT_PLAN_20261101.md",
+     "note": "11-01 16:46 59 项尽力版挡住下游 42 项，靠总调度手动 reset-best-effort（DJ-12）"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_debug.yaml"
+  },
+  {
+   "id": "K-OPS-E12",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "含尽力镜的集不再整集写 force_eps 放行；过了契约的镜由 night 逐镜出视频，尽力镜不进视频 / 合成",
+   "when": "producer VideoBridge.tick（auto_force_eps）",
+   "then": "只记 video_release_skipped（每集一次），不写 night_control.json force_eps；⤴ 取代“含尽力镜的集自动放行”",
+   "check": "tests/test_debug_rsi.py::test_no_force_eps_for_best_effort_episode",
+   "evidence": [
+    {
+     "src": "docs/ITERATION_PROTOCOL.md",
+     "note": "§3 不合格不进合成；总调度 11-02 02:2x：auto_force 只能对过了契约的镜生效"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_debug.yaml"
+  },
+  {
+   "id": "K-OPS-E13",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "登记表以 takes.json 当前版本和契约结果为准——尾帧 passed 但首帧没过或首帧比尾帧新，尾帧作废重出（不计次）；每拍自检写 consistency.json",
+   "when": "producer.derive / tick",
+   "then": "last_consistent() 在派生时把这类尾帧改为 ready / pending（voided）；registry_consistency() 每拍写 data/producer/consistency.json（data_parity 读这份）；不反过来改 takes",
+   "check": "tests/test_debug_rsi.py::test_e13_last_voided_when_first_changed_or_not_passed",
+   "evidence": [
+    {
+     "src": "data/renders/ep04/S1/takes.json",
+     "note": "11-02 当前首帧 v5（01:48）比当前尾帧 v1（11-01 04:34）新，登记表仍记尾帧 passed；DISTILL 统计 79 处、总调度复核 49 处自相矛盾"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_debug.yaml"
+  },
+  {
+   "id": "K-OPS-E14",
+   "domain": "ops",
+   "link": [
+    "P7-P8"
+   ],
+   "title": "改工作树前用 tools/qa/lock_guard.py 查冻结锁（rc≠0 不改）；不许把 lock-status 接进管道（| head / | tail 会吞退出码）",
+   "when": "任何 loop 在 system_version cut 可能进行时改代码 / 配置 / 规则、跑 knowledge compile",
+   "then": "lock_guard.py（或 lock_guard.py -- <命令>）；Python 里 require_unlocked()；要看输出用 `; echo rc=$?`，不用 `| head && …`",
+   "check": "tests/test_debug_rsi.py::test_e14_lock_guard",
+   "evidence": [
+    {
+     "src": "docs/debug/DEBUG_r1.md",
+     "note": "11-02 02:5x / 03:0x DEBUG-RSI 用 `lock-status | head -2 && 改文件`，lock rc=3 时仍改了 producer.py / 规则并 compile"
     }
    ],
    "confidence": "high",
@@ -3976,6 +4558,372 @@
    "status": "确认",
    "date": "2026-11-01",
    "_file": "knowledge/rules/ops_decisions.yaml"
+  },
+  {
+   "id": "K-OPS-X01",
+   "domain": "ops",
+   "link": [
+    "P5-P6",
+    "P7-P8",
+    "P10-P11"
+   ],
+   "title": "阈值和判断的单一来源是 config/policies/*.yaml；代码里另有常量的项由 policy_check 逐项比对，不一致即不通过",
+   "when": "任何 loop 新定或修改一个运行期阈值 / 判断（GPU 分工、积压闸、暂停时限、交还条件、预算、重试次数、阻断项、发版条件）",
+   "then": "先改 config/policies/<域>.yaml 对应项（value + source 出处 + enforced_by + status），代码直接读（status=code_reads）或写 drift 规则（status=drift_checked）；pending 项必须写 plan；改完跑 run.py policy-check 退出码 0",
+   "check": "tests/test_distill_flow.py::test_policy_drift_clean, tests/test_distill_flow.py::test_policy_refs_exist, tests/test_distill_flow.py::test_drift_detects_change",
+   "evidence": [
+    {
+     "src": "config/policies/resources.yaml",
+     "note": "11-02 首次比对即发现 config/vqa.json model.instances 已被 VQAGATE 改为 4，而积压闸说明仍写 1；漂移检查把它暴露出来"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_distill.yaml"
+  },
+  {
+   "id": "K-OPS-X02",
+   "domain": "ops",
+   "link": [
+    "P4-P5",
+    "P5-P6",
+    "P7-P8",
+    "P9-P10",
+    "P10-P11",
+    "P11-P12"
+   ],
+   "title": "剧本导入后的全部环节由 tools/autopilot/flow.py 一个编排器现推状态、标 decider、列卡点；各 loop 的工具接到它的段上，不另起入口",
+   "when": "新增或改动生产链路中的任何一段（作业、首尾帧、看图闸门、视频、视频检测、合成、后期、成片分、交付）或其中的判断点",
+   "then": "在 flow.STAGES 对应段登记判断点 {what, now, target, ref, plan}（now/target ∈ code | local_model | api_model | owner | claude）；now=claude 必须写 plan；run.py coverage 重新生成 data/autopilot/coverage.json；界面读 data/autopilot/flow/status.json",
+   "check": "tests/test_distill_flow.py::test_stage_points_complete, tests/test_distill_flow.py::test_status_all_on_fixture, tests/test_distill_flow.py::test_coverage_counts",
+   "evidence": [
+    {
+     "src": "tools/autopilot/run.py",
+     "note": "10-31 的 P5-P10 走 iterate_loop，实际生产已是 producer → VQA → night → finish；旧 dry-run --auto-approve 10/10 全过（假绿），新编排器冷启动演练找出 16 个断点"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_distill.yaml"
+  },
+  {
+   "id": "K-OPS-X03",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "系统或 agent 暂停 producer 超过 resources.pause_max_s（180 s）即为事故——检测、报警，经授权后自动恢复；项目方本人暂停不受限",
+   "when": "control.json paused=true 且 paused_by 不是项目方",
+   "then": "run.py guard 每拍检测，超时写 data/qa/alerts.jsonl（A-PAUSE-OVERDUE）；--apply 时经 producer.set_paused 恢复（by=POLICY_GUARD，审计进 producer log）；切线路 / 重启只许滚动、按道排空",
+   "check": "tests/test_distill_flow.py::test_pause_overdue",
+   "evidence": [
+    {
+     "src": "docs/overnight/morning_20261102.md",
+     "note": "11-02 00:52 NETFIX 切线路全局 pause，12 分钟未恢复，GPU 只有一张在忙；总调度 01:04 手动 resume 并定“暂停 ≤3 分钟自动恢复”"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_distill.yaml"
+  },
+  {
+   "id": "K-OPS-X04",
+   "domain": "ops",
+   "link": [
+    "P4-P5"
+   ],
+   "title": "设定图本身要先过完整性检查再当参考——出图闸门拿设定图当标准答案，查不出参考图自身的缺陷（代码检查 K-AST-264 sheet_intake 为主，本地 VLM 逐栏检查为补充）",
+   "when": "设定图候选登记为当前之前；或同一造型 ≥3 镜出现同一 outfit_mismatch / clothing_state",
+   "then": "先过 services/agent/ns_agent/sheet_intake.py（K-AST-264，IN1 袖子镜像 / IN2 外层 Q2 探针，已接 set_sheet）；再由本地 VLM 按 config/prompts/asset_sheet_inspect.md 逐栏核部件（两只袖子、外层各栏一致、部件不残缺）；defect → 不许设为当前、走局部重绘 + sleeve_check 契约",
+   "check": "tests/test_distill_flow.py::test_asset_sheet_prompt_contract",
+   "evidence": [
+    {
+     "src": "docs/overnight/morning_20261102.md",
+     "note": "01:02 造型 A 设定图 v2_s202 正面栏缺左臂外套袖 → 首帧单袖、视频外套漂移；出图闸门一直没报（L-101）"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_distill.yaml"
+  },
+  {
+   "id": "K-OPS-X05",
+   "domain": "ops",
+   "link": [
+    "P5-P6",
+    "P10-P11"
+   ],
+   "title": "每个判断进判断清单 config/policies/decisions.yaml，coded≠yes 必须带代码化方案；清单里写的文件必须存在",
+   "when": "总调度或 agent 做了一次判断（选图、驳回、资源、交还、止损、部署、看图口径）",
+   "then": "追加一条 {cat, decision, trigger, basis, coded, where, decider_now, decider_target, plan}；run.py coverage 统计已代码化比例和 decider 分布",
+   "check": "tests/test_distill_flow.py::test_decisions_inventory_valid",
+   "evidence": [
+    {
+     "src": "config/policies/decisions.yaml",
+     "note": "DISTILL r1：51 条判断，34 条已代码化（yes），14 条部分，3 条未代码化"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_distill.yaml"
+  },
+  {
+   "id": "K-OPS-X06",
+   "domain": "ops",
+   "link": [
+    "P4-P5",
+    "P5-P6"
+   ],
+   "title": "data/ 里的决策 / 配置类文件不进 git，每次 system_version cut 打快照（tar + 逐文件 sha256 manifest），回滚一起恢复；新剧本从 config/ 默认值生成",
+   "when": "system_version cut / rollback；新剧本冷启动；新增一个“像配置”的数据文件",
+   "then": "新文件先登记到 config/policies/state_files.yaml（decision 或 runtime，decision 写 default）；cut 时 tools/autopilot/state_snapshot.py snapshot <sv> → data/system_versions/<sv>/；恢复用 restore <sv>（先校验 sha、先备份现状、不删文件）；新剧本用 init-run <run_id>（只读 config/，不读 series10 数据，正式路径只补缺不覆盖）；寻址与 FACTORY 本地库一致（sha256），library.py 落地后同时 put 进本地库",
+   "check": "tests/test_distill_flow.py::test_state_snapshot_roundtrip, tests/test_distill_flow.py::test_state_snapshot_tamper_refused, tests/test_distill_flow.py::test_init_run_from_config_only",
+   "evidence": [
+    {
+     "src": "config/policies/state_files.yaml",
+     "note": "WORKFLOW 11-02 指出 recipe_choice.json（L-088）、ready_episodes / assets_ready / master_rejects / shot_looks / sheets_chosen / face_overrides 等不进版本；现行 decision 类 119 个文件约 8.2 MB（含 102 个 takes.json）"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_distill.yaml"
+  },
+  {
+   "id": "K-OPS-X07",
+   "domain": "ops",
+   "link": [
+    "P4-P5",
+    "P5-P6"
+   ],
+   "title": "身份脸按“结果”断言而不是按“文件在不在”——每个 run 每个角色用生产入口 face_of 解析，必须等于项目方定的那张（林晚 = lin_wan_face_hd_A_s202，L-086），子 run 继承的角色必须等于父 run",
+   "when": "system_version cut；SENTINEL 每拍；新增 run / 改继承链 / 推服务器后",
+   "then": "tools/qa/identity_face_check.py（owner_decisions D-AST-86d，decision_check type=cmd，cut 闸门 0 ❌ 才发版）；pinned 名单在 config/policies/gates.yaml identity_faces",
+   "check": "tests/test_distill_flow.py::test_identity_face_check_catches_inherit_gap",
+   "evidence": [
+    {
+     "src": "docs/overnight/morning_20261102.md",
+     "note": "01:32 服务器缺 face_overrides，47/50 镜身份脸解析成 lin_wan_face_ref2va，preflight 照样 0 挡"
+    },
+    {
+     "src": "tools/qa/identity_face_check.py",
+     "note": "11-02 03:0x 首跑即抓到 series10_s2 林晚解析成 lin_wan_face_ref2va（继承链漏 face_overrides，第二次同类事故）；WORKFLOW 修继承链后 0 不一致"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_distill.yaml"
+  },
+  {
+   "id": "K-OPS-F01",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "工厂代码（tools/factory/）的生产路径上不许有隧道端口、不许跨机同步调用；远程只用于异步传文件 / 发起服务器本机后台任务，长任务结果落服务器本地文件、笔记本短轮询",
+   "when": "写或改 tools/factory/*、服务器 producer 的出图 / 打分 / 记账路径",
+   "then": "道地址只用本机 127.0.0.1 ComfyUI（D1）；远程命令经 tools/netfix/rssh.py 常驻主连接；超过 2 分钟的远程任务用 setsid nohup 在服务器后台跑、结果写服务器文件，笔记本每 15 s 短查一次（主连接抖动不打断任务）",
+   "check": "tests/test_factory.py::test_factory_has_no_tunnel_ports",
+   "evidence": [
+    {
+     "src": "data/producer/log.jsonl",
+     "note": "11-01 20:00 后经隧道派单：gpu33 墙钟 p50 109.2 s / GPU 38.0 s（18 单），gpu36 136.4 s / 36.7 s（12 单）；11-02 01:24 后服务器本机出图 render_s p50 39.8–43.9 s"
+    },
+    {
+     "src": "docs/master/FRAMEWORK_REFRAME.md",
+     "note": "P1–P6；11-02 01:34–01:44 跳板主连接三次断开（Connection closed by UNKNOWN port 65535），同步挂着等的 sync verify 两次失败，改后台 + 短轮询后完成"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
+  },
+  {
+   "id": "K-OPS-F02",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "服务器交还（assets_ready.<host>.ready / preflight_dryrun_ok）= 服务器本机对它负责的全部集跑 preflight dryrun 挡 0，且每镜 refs（路径 + sha）与笔记本 dryrun 一致；推送清单不能代替",
+   "when": "交还服务器出图 / 改分区 / 推资产之后",
+   "then": "笔记本跑 tools/factory/sync.py push HOST（deps.py 依赖闭包按 sha 补缺，含覆盖类配置 data/looks/*overrides*、schedule；视频机另含 night 合成依赖 data/sfx_lib、config/post）→ sync.py verify HOST --write-ready；只有两条都满足才写 ready=true / preflight_dryrun_ok=true（NETFIX reconcile 两个都认）",
+   "check": "tests/test_factory.py::test_ready_requires_zero_block_and_refs_match, tests/test_factory.py::test_deps_rel_of_skips_runtime_dirs",
+   "evidence": [
+    {
+     "src": "data/producer/log.jsonl",
+     "note": "11-02 01:13 gpu36 交还后每单 preflight I5（sk_elevator 没有底图）：推送清单漏 assets/scenes"
+    },
+    {
+     "src": "docs/master/FRAMEWORK_REFRAME.md",
+     "note": "11-02 01:24–01:32：两台 preflight 0 挡，但服务器缺 data/looks/face_overrides.json，47/50 镜 refs 与笔记本不同（林晚身份脸解析成 ref2va，不是 L-086 的 hd_A_s202）；31 个 take 驳回"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
+  },
+  {
+   "id": "K-OPS-F03",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "producer 每次派首帧之前，把这单 refs 的路径 + sha 与目标状态 data/factory/inbox/expected_refs.json 比对，不一致就拒派（按 preflight 处理、不计次）并写报警事件 refs_mismatch",
+   "when": "producer FrameExec.render 首帧 preflight 通过后、提交 ComfyUI 之前",
+   "then": "refs_guard() → tools/factory/inbox.check_refs；期望表由笔记本 tools/factory/inbox.py build 生成，sync.py push 时重建并推到服务器；没有期望表 / 这镜不在表里不拦（记 refs_unchecked），避免表没到时全线停产",
+   "check": "tests/test_factory.py::test_check_refs_wrong_face_path_blocks, tests/test_factory.py::test_check_refs_ok_and_sha_mismatch, tests/test_factory.py::test_producer_render_calls_refs_guard_before_submit",
+   "evidence": [
+    {
+     "src": "docs/master/FRAMEWORK_REFRAME.md",
+     "note": "11-02 01:24–01:32 两台 34 个 take 里 31 个用错身份脸，事后逐镜比对才发现（总调度 01:3x：用错图要在派单前拦下）"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
+  },
+  {
+   "id": "K-OPS-F04",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "服务器契约打分的 CLIP 走本机常驻服务（tools/gen_contract/clip_srv.py --serve，127.0.0.1:8872，模型只加载一次；gpu36 钉 GPU2 与 vLLM 同卡，L-100），不在 / 代码换了才当次退回单次子进程",
+   "when": "改 remote_score.full_score 的远端脚本（_FULL）、clip_srv.py、服务器打分部署",
+   "then": "_FULL 先 POST 本机常驻 /measure，失败才起 clip_srv 子进程；常驻进程每次请求比对 metrics.py / clip_srv.py 的 sha，与启动时不同 → 409 并退出，由 ops/factory/clip_resident.sh 的保活循环按仓库最新代码重启（口径与笔记本同一份）；只听 127.0.0.1；模块头先限线程（K-OPS-V13）",
+   "check": "tests/test_factory.py::test_full_score_tries_resident_clip_first, tests/test_factory.py::test_clip_resident_script_pins_gpu2_on_gpu36_only",
+   "evidence": [
+    {
+     "src": "docs/master/FRAMEWORK_REFRAME.md",
+     "note": "11-02 01:46 服务器本机分段实测（ep02-S10 v2，gpu36）：ArcFace+OCR 5.8 s、mediapipe 1.1 s、CLIP 88.9 s（空闲显存 < 8000 MB 退 CPU、每单冷启动）；gpu33 GPU 路径 CLIP 7.6 s"
+    },
+    {
+     "src": "docs/master/FRAMEWORK_REFRAME.md",
+     "note": "11-02 02:0x gpu36 GPU2 影子常驻（端口 8873，不进生产队列）：同一张图连测 3 次 0.45 / 0.11 / 0.11 s（rows 为空，Q2/Q4/Q7/Q8 全出）"
+    }
+   ],
+   "confidence": "high",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
+  },
+  {
+   "id": "K-OPS-F05",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "服务器工厂的结果经 outbox 回传：每个结果一个目录（files/ 快照 + manifest.json 含 sha / size / prio + 最后写 .done），NETFIX puller 取回后 merge_file；本端不删，.acked 后只归档",
+   "when": "服务器 producer 出图打分完成、改 outbox 格式、写 puller",
+   "then": "tools/factory/outbox.write（producer._postflight 末尾 outbox_emit，只在 OFFLINE_SELF / NS_FACTORY_HOST 有值的服务器上写）；prio 0 状态 json、1 缩略图 512px JPEG（rel + .thumb.jpg）、2 全尺寸帧、3 视频；created 带时区 ISO（+09:00）；写失败只记 outbox_err，不影响生产",
+   "check": "tests/test_factory.py::test_outbox_format_matches_netfix, tests/test_factory.py::test_producer_emits_outbox_after_postflight",
+   "evidence": [
+    {
+     "src": "docs/debug/DEBUG_r1.md",
+     "note": "第 19 / 19b 条：笔记本下载 3.1 MB PNG 约 33 KB/s、每单约 100 s——原图进了关键路径；resident_sync 每 20 分钟整批 tar pull（resident_sync.py loop pull_every_s=1200）"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
+  },
+  {
+   "id": "K-OPS-F06",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "部署只发该版本 git 快照里的代码；工作树里 tag 之外的新文件 / 改动只报 drift（留给下一版），不能让整台机器部署失败",
+   "when": "tools/qa/system_version.py deploy；改 resident_sync.push / push_check",
+   "then": "deploy_host：代码部分 export_tag 快照当源（推送前检查 P1–P4 也对快照做）→ rs.push(code_only)；第一级数据从工作树推、检查时 CODE_DIRS 置空；再按快照核 sha；res[\"drift_local\"] / drift_files 记 tag 之外的代码改动",
+   "check": "tests/test_system_version.py::test_deploy_ignores_new_code_file_after_cut_and_reports_drift, tests/test_system_version.py::test_deploy_host_fails_on_bad_snapshot",
+   "evidence": [
+    {
+     "src": "data/system_versions/deploy_sv-20261102-02_012355.json",
+     "note": "gpu36：PushGateFailed [P3] tools/imgfix/lookA_adopt.py、tools/netfix/relay_rate.py 代码文件没推到（cut 之后新建）→ gpu36 整次部署失败、继续跑无 hold 逻辑的 sv-01，01:24:51 派出 hold 里的 ep02-S1/S2；gpu33 同版成功，两台版本不一致"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
+  },
+  {
+   "id": "K-OPS-F07",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "cut 失败就不许 deploy：system_version 记录每次 cut 结果，最近一次 cut 失败（晚于最新 tag）时 deploy 拒绝；只许部署最新版本，旧版本要 --allow-old（回退流程）；脚本链用 cut && deploy",
+   "when": "发版、写发版脚本、回退",
+   "then": "main 的 cut 分支调 record_cut（data/system_versions/last_cut.json），失败退出码 1；deploy 开头调 deploy_guard，拒绝时 SystemExit 不碰服务器",
+   "check": "tests/test_system_version.py::test_deploy_refuses_after_failed_cut_and_old_versions, tests/test_system_version.py::test_cli_records_cut_and_chains_exit_code",
+   "evidence": [
+    {
+     "src": "docs/master/FRAMEWORK_REFRAME.md",
+     "note": "11-02 02:0x：sv-04 cut 失败后，另一流程把 sv-03 重新部署，服务器 config/vqa.json 被还原成 instances=1，积压闸卡死 GPU（总调度手动写回 4、重启两台 producer）"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
+  },
+  {
+   "id": "K-OPS-F08",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "发版冻结窗口：cut 开始写 data/system_versions/cut_lock.json，先把工作树冻结成一棵 git 树并导出快照，所有闸门对快照跑，提交冻结树；cut 期间别人的改动只进下一版；pytest 收集错误报出具体文件",
+   "when": "tools/qa/system_version.py cut；任何 agent 在发版期间改 tools/ services/ packages/ config/ knowledge/ ops/ tests/",
+   "then": "改代码前跑 system_version.py lock-status（退出码 3 = cut 进行中）；cut = cut_lock → freeze_tree（独立 GIT_INDEX_FILE）→ build_snapshot（git archive + 被忽略数据联接 / 硬链接，PYTHONPATH 指快照）→ gates(root=快照) → commit-tree + update-ref（比较交换）→ tag → finally 解锁；pytest 参数含会变的文本必须给固定 ids",
+   "check": "tests/test_system_version.py::test_cut_gates_run_on_frozen_snapshot_and_commit_frozen_tree, tests/test_system_version.py::test_collection_problems_reports_files, tests/test_system_version.py::test_lock_status_cli",
+   "evidence": [
+    {
+     "src": "docs/CHANGELOG_AGENTS.md",
+     "note": "11-02 sv-04 连续 4 次 cut 失败：syntax 坏、compile 生成物过期、test_story_runs_uirsi 并行偶发、xdist “Different tests were collected between gw2 and gw10”（收集 4 error、无 FAILED 行，串行重跑没触发）；cut 期间别的 agent 持续改文件"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
+  },
+  {
+   "id": "K-OPS-F09",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "决策 / 覆盖文件缺失或损坏一律失败关闭：producer 每拍派单前查 tools/factory/decisions_guard（必需文件缺 / 坏、可选覆盖坏、*_hold.json 坏、服务器缺期望 refs 表、run.json 缺）→ 一单不派并报警；asset_refs 的覆盖文件坏了抛 DecisionFileError，不再静默当成“没有覆盖”",
+   "when": "改 asset_refs 覆盖层、producer 派单、增加新的决策 / 覆盖文件、交还服务器",
+   "then": "新增决策文件要登记进 decisions_guard.REQUIRED / OPTIONAL；asset_refs._overlay_doc：不存在 = 没有覆盖，存在但读不出 = 抛错；inbox 期望表里没有这镜 = 拒派；cut 时代码目录里被 .gitignore 挡住的代码文件阻断并列出（ARCH_MAP",
+   "check": "tests/test_factory.py::test_decision_files_fail_closed, tests/test_factory.py::test_overlay_doc_raises_on_corrupt_not_silent, tests/test_factory.py::test_producer_dispatch_checks_decision_files_first, tests/test_factory.py::test_refs_table_missing_shot_blocks",
+   "evidence": [
+    {
+     "src": "docs/master/ARCH_MAP.md",
+     "note": "§9 #2：同类静默放行至少 9 处（face_overrides、item_map_overrides、item_map_quarantine、hub_extra_looks / hub_episode_looks、look_extras、*_hold.json、expected_refs、run.json）；config/pipeline/run.json 两台服务器都没有，producer 静默回退 series10_v1"
+    },
+    {
+     "src": "docs/master/FRAMEWORK_REFRAME.md",
+     "note": "11-02 01:24–01:32：服务器缺 face_overrides.json，preflight 0 挡，31 个 take 用错身份脸"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
   },
   {
    "id": "K-OPS-G01",
@@ -4631,6 +5579,31 @@
    "status": "确认",
    "date": "2026-11-01",
    "_file": "knowledge/rules/ops_iteration.yaml"
+  },
+  {
+   "id": "K-OPS-S01",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "结构退化只许减不许增——tools/qa/arch_scan.py 棘轮（没 timeout 的子进程、直接起 ssh、自写 def ssh、写死 series10_v1 / 服务器路径、读文件失败静默放行、非原子写 JSON、未入版代码被已入版代码 import、无主文件）",
+   "when": "任何 loop 交 cut 之前；SYSARCH 每 30–60 分钟巡检",
+   "then": "跑 python tools/qa/arch_scan.py --check（或 --files <本轮改动> --check）；任一文件某项计数比 data/sysarch/baseline.json 大、或新冒出未入版却被 import 的模块 = 不过，回负责方修；失败静默放行确属调用方显式处理的，在 except 行写 arch-ok 标记（井号 + arch-ok + 冒号 + 理由）豁免；基线只由 SYSARCH 在关单后收紧（--write-baseline）",
+   "check": "tests/test_arch_scan.py::test_ratchet_only_flags_regressions, tests/test_arch_scan.py::test_no_timeout_counts_only_missing_timeout, tests/test_arch_scan.py::test_silent_read_fail_open",
+   "evidence": [
+    {
+     "src": "docs/master/ARCH_MAP.md",
+     "note": "§9 Top 15：运行中的代码不在版本里、决策文件失败开放、70 处 subprocess 无 timeout、41 个文件直接起 ssh、series10_v1 写死 97 个文件——都是项目方或事故先发现，不是系统先发现"
+    },
+    {
+     "src": "data/sysarch/scan_latest.json",
+     "note": "11-02 02:42 首扫 10 分钟内就抓到 2 个新退化：tools/factory/decisions_guard.py 未入版却被 producer.py import；tools/sentinel/probes.py 写死 series10_v1 帧目录"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_sysarch.yaml"
   },
   {
    "id": "K-PRM-001",
@@ -5845,6 +6818,110 @@
    "_file": "knowledge/rules/render_imgfix.yaml"
   },
   {
+   "id": "K-AST-264",
+   "domain": "asset",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "设定图入库检查——采用前机检左右袖子一致（IN1）和外层单品完整（IN2），不过就不采用",
+   "when": "ns_api.character_hub.set_sheet（换到别的设定图时）、tools/assetmaster/choose.enforce_item_check；实现 ns_agent.sheet_intake.check",
+   "then": "IN1 正面栏人物外框两侧手臂带逐行镜像比颜色（平均 ΔE76 ≤18、一深一浅的行 ≤25%）；IN2 本造型外层单品用契约 Q2 同一探针在正面栏躯干上测存在性（≥0.3）；参数 config/gen_contract.json image_thresholds.sheet_intake",
+   "check": [
+    "tests/test_imgfix.py"
+   ],
+   "evidence": [
+    {
+     "src": "data/ab/imgfix/sheet_intake_calibration.json",
+     "note": "v2_s202 缺袖：IN1 ΔE 33.9、一深一浅 62% → 挡；s101 没画外套：IN2 0.154 → 挡；sleevefix：ΔE 6.45 / 0% / 外套 0.83 → 过；其余 10 张 adopted 设定图全过（ΔE 1.5–5.2）"
+    }
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/render_imgfix.yaml"
+  },
+  {
+   "id": "K-AST-265",
+   "domain": "asset",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "资产缺陷局部修复走通用工具 tools/asset_repair/repair.py（spec 参数化），选候选用代码判据，不靠亲审",
+   "when": "设定图 / 单品图 / 身份脸外的资产图发现局部缺陷（缺件、颜色错、单侧缺失）",
+   "then": "spec（config/asset_repair/*.json）→ 主色铺底 → Qwen-Image 2.1 潜空间遮罩重绘 → 只贴回遮罩（遮罩外逐像素不变）→ R1 缺陷区修好 / R2 ΔE / R3 遮罩外不变 / R4 Q1 不降 / R5 交界无残留 / R6 入库检查 K-AST-264 / R7 面料纹理（深色区内部高频比 0.85–1.18）→ 全过的按纹理比最接近 1、再按 ΔE 自动选；审片页 data/review_pages/asset_repair_<id>/",
+   "check": [
+    "tests/test_imgfix.py"
+   ],
+   "evidence": [
+    {
+     "src": "data/assetmaster/sheets_v2/candidates/lookA_sleeve_fix/check.json",
+     "note": "24 张候选 2 张 R1–R7 全过（v4_d85_s1102 纹理比 0.978、v4_d92_s1102 0.914），自动选 d85_s1102；总调度 / IMGFIX 目检选的是 d92_s1102（d85 在头发边有一圈浅描边，R1–R7 测不到）→ 待补“轮廓光晕”判据或本地看图复核"
+    },
+    {
+     "src": "tools/imgfix/sleeve_fix.py",
+     "note": "失败的两种做法：不加遮罩时模型照抄原袖（denoise 0.7、0.9 都不变）；镜像打底把缝线 / 翻领轮廓搬过来"
+    }
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/render_imgfix.yaml"
+  },
+  {
+   "id": "K-REN-707",
+   "domain": "render",
+   "link": [
+    "P6-P7"
+   ],
+   "title": "特写 / 近景 / 中近景不注入看不见的下半身描述（角色锁“长腿”、造型补句“露出长腿 / 裙 / 鞋”）；“穿…”/ 并列造型首句不当下半身主体",
+   "when": "frame_job.outer_items（造型补句）、framing.lower_focus（决定编译器是否按景别过滤角色锁）；开关 config/recipes/image_framing.json close_no_lower（11-02 总调度定打开）",
+   "then": "景别 ∈ CLOSE_NO_LOWER 时造型补句只留 framing.visible 的单品；lower_focus 遇“穿 / 换上”或并列造型首句时只有每一项都看不见才算下半身主体；中景及以上照旧（看得到腿的镜头保留“大长腿”风格）",
+   "check": [
+    "tests/test_imgfix.py"
+   ],
+   "evidence": [
+    {
+     "src": "data/ab/imgfix/k706_impact.json",
+     "note": "打开前近景 33 / 特写 12 / 中近景 9 条作业带“长腿”（造型 B“露出长腿”经造型补句注入 + lower_focus 误判让角色锁不过滤）；打开后 0；作业变 68 条，账本 passed 首帧 0 张受影响"
+    },
+    {
+     "src": "docs/video_rca/RCA_r1.md",
+     "note": "C16：描述句带画外鞋 / 高跟 / 腿 62/111 退档 vs 不带 0/7（VIDEO-RCA P4）"
+    },
+    {
+     "src": "data/ab/imgfix/leg_ab.json",
+     "note": "A/B（LEG0 有“长腿” / LEG1 去掉，ep03-S4/S9/S10、ep10-S5 × 2 seed，服务器空档）：景别档准确 3/8 vs 3/8，脸高均值 0.180 vs 0.186，Q1 均值 0.785 vs 0.764（逐对 −0.138…+0.042，n=8 噪声内），看镜头 0/8 vs 0/8 → 单去“长腿”看不出好坏；两组近景 / 中近景都有 5/8 退一档（问题在别处）"
+    }
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/render_imgfix.yaml"
+  },
+  {
+   "id": "K-REN-708",
+   "domain": "render",
+   "link": [
+    "P6-P7"
+   ],
+   "title": "cast 写“局部”但其实露脸的人按露脸处理（挂身份脸、不写“不露脸”）；同一个人既“不露脸”又露脸 = 矛盾，preflight 挡",
+   "when": "asset_refs.partial_face_visible（resolve_shot 身份脸槽、framing.faced_people、single_turn_line）；gen_contract.preflight I2",
+   "then": "露脸 = 名字后写到脸 / 头发（face_described）；或本镜只有这一个人且正文有眼 / 视线 / 唇 / 表情 / 脸等词，或景别是特写 / 近景 / 中近景且不是局部 / 物件特写。矛盾（同一人“不露脸”+ 露脸 / 单人脸部特写构图）→ I2 fail（写作 / 导入格式问题，报 WORKFLOW）",
+   "check": [
+    "tests/test_imgfix.py"
+   ],
+   "evidence": [
+    {
+     "src": "data/pipeline/runs/series10_v1/assets/first_frame_jobs.before_k708_20261102.json",
+     "note": "ep02-S10 cast“林晚（局部｜双手）”，正文“特写……视线落在汤面，嘴唇轻抿”：作业同时写“脸部占画面约六成”和“林晚只露出双手，不露脸”，没有林晚身份脸 → 项目方发现换脸；同类 ep04-S7、ep08-S8，共 3 镜"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/render_imgfix.yaml"
+  },
+  {
    "id": "K-OPS-121",
    "enforced": false,
    "domain": "ops",
@@ -6527,6 +7604,73 @@
    "confidence": "medium",
    "status": "待验",
    "date": "2026-11-01",
+   "_file": "knowledge/rules/render_video_rca.yaml"
+  },
+  {
+   "id": "K-WRT-704",
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "穿外套 / 西装 / 大衣的人不在一镜里做完坐→站、站→坐、起身离开——这一镜停在准备起身，下一镜从站定开始（拆镜）",
+   "when": "写 **分拍** 和 H3 正文分拍（At 00:0X），在画人物本镜造型有外层衣物，动作里有起身 / 站起 / 坐下 / rises / stands up / sits down",
+   "then": "拆成两镜：镜 A 到“手撑桌沿准备起身”为止；镜 B 首帧就是站定姿态（外套完整），从站着的动作开始；衔接写“接力｜承：动作｜起身”。剪辑由 DIRECTOR 处理（运镜 / 转场字段只在 cut_plan 维护，这里不另写）：tools/director/cut_plan.py 读到这条衔接，就在 data/director/epNN_cut_plan.json 给下一镜 shots[].transition_in（type=动作匹配切、split=K-WRT-704），上一镜 shots[].cut.out = on_action（停在起势出刀）；规则 K-EDT-812（转场）、K-EDT-811（大动作镜固定机位）；测试 tests/test_director.py::test_split_standup_is_action_match。不改剧情，只改切点（系统不改正文）",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "时长与节奏"
+    }
+   ],
+   "writer_text": "穿外套或西装的人要从坐变站（或站变坐、起身离开）时，不要放在同一镜里做完：这一镜停在准备起身，下一镜从已经站好开始，衔接写“接力｜承：动作｜起身”。视频模型在一镜里做大幅动作时，外套会变形、变无袖甚至消失。",
+   "lint": [
+    "QW-W12"
+   ],
+   "check": [
+    "tools/qa/writer_lints.py",
+    "tests/test_writer_lints.py"
+   ],
+   "evidence": [
+    {
+     "src": "data/ab/video_rca/r8_outfit_action/",
+     "note": "ep01-S3 坐→站：带整理动作 8/8 外套整件消失再穿回；去掉动作 2/2 仍变无袖马甲（docs/video_rca/RCA_r3.md §1.2）"
+    },
+    {
+     "src": "data/ab/video_rca/r17_split_standing/",
+     "note": "拆镜镜 B（从站定开始，去掉起身一拍）2/2：外套整条片与首帧一致（docs/video_rca/RCA_r4.md）"
+    },
+    {
+     "src": "data/ab/video_rca/r10c_shape/torso_compare.jpg",
+     "note": "全程站着的 ep01-S4 5 条：外套基本不变"
+    },
+    {
+     "src": "docs/video_rca/RCA_r4.md",
+     "note": "上游另一根因：造型 A 设定图外套缺一只袖子（已由 IMGFIX 修，候选 1 采用），重出后复测"
+    }
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/render_video_rca.yaml"
+  },
+  {
+   "id": "K-REN-706",
+   "domain": "render",
+   "link": [
+    "P7-P8"
+   ],
+   "title": "编译层标出“穿外层衣物 + 全身姿态切换”的镜（RL-P1 warn，建议拆成站定起始的下一镜）",
+   "when": "services/recipes lint（每镜编译都跑）：H3 正文第一句含外层衣物（blazer / jacket / coat…），分拍段含 rises / stands up / sits down…",
+   "then": "记 RL-P1（warn），计划里留“建议拆镜”；编译器不改镜头结构——拆镜由写作方（QW-W12 返修）或 DIRECTOR cut_plan 处理",
+   "check": [
+    "tests/test_video_rca.py"
+   ],
+   "evidence": [
+    {
+     "src": "data/ab/video_rca/r17_split_standing/",
+     "note": "同 K-WRT-704"
+    }
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-02",
    "_file": "knowledge/rules/render_video_rca.yaml"
   },
   {
@@ -10890,6 +12034,69 @@
    "_file": "knowledge/rules/ui.yaml"
   },
   {
+   "id": "K-UI-047",
+   "check": "tests/test_r40_uirsi.py",
+   "domain": "ui",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "顶栏和总览的状态口径只数“眼下真实的事”——探测中不算空闲、服务器派的活算在出、计划不算排队、旧失败不挂按钮、全量重做算进行中",
+   "when": "顶栏“卡 N/M 忙”、“渲染任务 N 跑 · N 等 · N 失败”、总览每集 / 每镜“过期”等状态显示",
+   "then": "/api/render/lanes 透传 probing（:8800 刚起还没探过的道），前端探测中的道不进分母，全部在探测时写“卡 探测中…”；服务器自派的活（external）写“在出（服务器派单）”并算忙；render_tasks 的 counts 加 queued（真在排队，不含 plan 计划行）、planned、failed_recent（最近 RECENT_FAIL_H=6 小时），按钮用它们，历史累计放悬停；shot_status 里 L-088 全量重做挂的 redo / master_reject（含“全量重做 / L-088”）在出 = 出图中、没轮到 = 排队中，板块算进行中，只有真被驳回才算“待重出 / 过期”",
+   "evidence": [
+    {
+     "src": "docs/uirsi/rounds/r42.md",
+     "note": "总调度 01:26 实测 5 条服务器道都在跑，顶栏写“卡 0/7 忙”（:8800 01:23 刚重启、道还在探测）；“30 失败”全是 7.8–47.5 小时前 jobs/v1 落盘的历史；“301 等”里 197 是计划行；10 集全挂“过期”全来自 L-088 全量重做的 redo 标记"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ui.yaml"
+  },
+  {
+   "id": "K-UI-048",
+   "check": "tests/test_r43_uirsi.py",
+   "domain": "ui",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "正在渲染一律用呼吸灯慢闪（全站一个共享类 .is-rendering），排队 / 未开始静止灰色",
+   "when": "任何“出图中 / 渲染中 / 正在出”的元素（镜头卡状态点、生产灯、道状态、整集出片点、画布步骤）",
+   "then": "用 apps/web/src/v3/breathe.css 的 ns-breathe：透明度 0.35 ↔ 1、亮度 0.75 ↔ 1，周期 --breathe-period 2.7 s（2.4–3 s），ease-in-out，不闪不跳；只有真的在跑才呼吸（总览按 job=running / main5 running），排队中用 .is-queued 静止灰色；同屏多个呼吸点父元素给 --breathe-delay（v3/status.ts breatheDelay 按镜号 / 卡号错开）；prefers-reduced-motion 时静止满亮度；旧的 pulse（step-busy / b-running / s-busy / .live / gpu-state.busy）由 breathe.css 统一接管，不各自写动画",
+   "evidence": [
+    {
+     "src": "docs/uirsi/rounds/r43.md",
+     "note": "项目方 11-02 02:0x：“在 rendering 中，采取像呼吸灯一样一点一点慢慢闪烁会比较舒服，用这个逻辑来做。”"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ui.yaml"
+  },
+  {
+   "id": "K-UI-049",
+   "check": "tests/test_r43_uirsi.py",
+   "domain": "ui",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "总览整洁规则——全页中性色，状态只用三种 8px 小圆点；镜头卡图下固定 3 行（人物 / 景别·时长·场景 / 一句话内容 + 阶段）；单击开右侧详情抽屉、双击进画布",
+   "when": "全剧总览（#/overview）默认视图，或任何镜头网格",
+   "then": "背景 / 卡片 / 文字三档灰；状态色只有 渲染中=蓝点+呼吸灯、需要人看/失败=琥珀点、已确认=绿点（pages/seasonDot.ts dotOf，口径 shot_status.main5），其他状态不画点、只在悬停和抽屉里写字；板块胶囊、状态胶囊、显示细节收进“筛选 ▾”（功能保留）；进度=一行灰字 + 细单色线；卡片 1440 宽每行 7 张 / 1920 宽 9 张、间距 12px、圆角 8px、1px 中性灰边、悬停提亮并显示“查看详情”，不用彩色描边；图下 3 行：出场人物 18px 身份脸圆片（/api/season faces，asset_refs.face_of 同一张）+ 名字、景别 · 时长 · 场景、剧本 img 去触发词 / 机位后的前 20 字（悬停全文）+ 右侧灰字阶段（首帧 · 候选 N）；详情抽屉 520px、Esc 关，从上到下：出场人物（身份脸 + 本镜设定图 + Q1 身份相似度）/ 当前首帧（没当前时写“最新候选，还没定为当前”）+ 状态原因 / 参考图 4 列 / 出图历史新→旧（第几版 · 通过 / 没过 · 原因）/ 检查结果两列表（GET /api/shots/{id}/takes/{stage}/{n}/checks）/ 打开画布 · 重出 · 更多；不出 DaVinci 式改版",
+   "evidence": [
+    {
+     "src": "docs/uirsi/rounds/r43.md",
+     "note": "项目方 02:1x：“颜色太错乱了，能不能再整洁一点？……参考过程我也觉得不好看，能给我更专业的 layout 吗？”；02:4x：“缺乏很多细节，比如人物什么的……下面黑的一坨东西也不知道是干嘛的……信息也不够”；02:1x 否决 DaVinci 稿"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ui.yaml"
+  },
+  {
    "id": "K-REV-V01",
    "domain": "review",
    "link": [
@@ -11256,6 +12463,75 @@
     }
    ],
    "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/vqa.yaml"
+  },
+  {
+   "id": "K-REV-V16",
+   "domain": "review",
+   "link": [
+    "P11-P12"
+   ],
+   "title": "V7 口型只评台词段（回听时间戳），判据 = 台词段开合幅度 ≥0.004 且（台词段相关 ≥0.30 或 张嘴帧占比 ≥0.30）——幅度作前提是总调度批准的偏离（r18 s103 相关 0.593 但嘴不动），样本少继续扩",
+   "when": "score_clip 跑 V7（有画内对白的镜头）",
+   "then": "tools/series10_video/v7_asr.py 用 SenseVoice 取台词实际时段，分拍时间码只作兜底；v7_lipsync 输出 win_amp / win_open_frac / pass_by，阈值在 TH；标定集 data/vqa/gate_calib/v7_labels.json（总调度人工标签）必须全对",
+   "check": [
+    "tests/test_vqagate.py"
+   ],
+   "evidence": [
+    {
+     "src": "data/review_pages/v7_window/index.html",
+     "note": "总调度 11-02 亲审：S4ffb s102、S4calm s101 台词段都有清楚张合 = 过；整轨口径错判 calm、只看相关错判 ffb；r18 三条嘴几乎不动 = 不过（s103 相关 0.593 也不过）"
+    }
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/vqa.yaml"
+  },
+  {
+   "id": "K-OPS-V17",
+   "domain": "ops",
+   "link": [
+    "P10-P11"
+   ],
+   "title": "看图跑在专用卡上（L-100）：笔记本 4080 和 gpu36 GPU2 不出图；换服务框架 / 量化前先做 20 张以上 A/B，阻断项判定一致率 ≥0.95 才切",
+   "when": "部署 / 扩容看图服务",
+   "then": "专用实例 VQA_DEDICATED=1（不让卡、不开窗口、不卸载）；gpu36 用 tools/vqa/vqa_router.py 在 :8870 分发到多个同口径实例；model.instances 写实际并发；A/B 用 tools/vqa/vram_bench.py + vram_compare.py",
+   "check": [
+    "tests/test_vqagate.py"
+   ],
+   "evidence": [
+    {
+     "src": "data/vqa/vram_bench/compare_ab_nf4_full_ab_vllm_B.json",
+     "note": "vLLM fp8 vs nf4：逐条判定一致 0.909（120/132），未达 0.95，改用 3 个 nf4 实例"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/vqa.yaml"
+  },
+  {
+   "id": "K-REV-V18",
+   "domain": "review",
+   "link": [
+    "P10-P11"
+   ],
+   "title": "人物一致性闸门：画面里每张够大的脸都必须认得出是 cast 里的谁——cast 写不露脸 / 本镜没有在画角色时也照比，认不出或不像本人就拦（按脸大小分档，特写最严）",
+   "when": "postflight Q1（契约打分），score_remote 给出所有脸对 4 个主角身份脸的 ArcFace 相似度之后",
+   "then": "不露脸的镜头出了脸（脸高 ≥0.04）→ identity_unexpected 按 size_tiers（0.55 / 0.50 / 0.40）判；像 cast 里的人且过线才过；不过时证据带 stranger_boxes，背影后脑交 K-REV-V14 复核；标定集 data/vqa/idgate_calib/",
+   "check": [
+    "tests/test_vqagate.py"
+   ],
+   "evidence": [
+    {
+     "src": "data/vqa/idgate_calib/sims_L086.json",
+     "note": "ep02-S10 换人 3 张 0.240–0.258 全拦；林晚正例 73 张最低 0.669；ep02-S9 v1/v2 0.807 身份分区分不出（ref2va 与 L-086 互相 0.986）"
+    }
+   ],
+   "confidence": "medium",
    "status": "确认",
    "date": "2026-11-02",
    "_file": "knowledge/rules/vqa.yaml"
@@ -12008,6 +13284,31 @@
    "_file": "knowledge/rules/writer_camera.yaml"
   },
   {
+   "id": "K-WRT-705",
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "“人物”行的在画 / 局部要和景别、正文一致：写了脸、视线、嘴唇、表情的人就是“在画”，不能写“局部”",
+   "when": "每镜 **人物** 行（cast）与 img 正文",
+   "then": "特写 / 近景 / 中近景里正文写到某人的眼睛、视线、嘴唇、表情、脸 → 这人写“在画”；只有真的只露手、背影、下半身时才写“局部｜<部位>”",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "镜头字段"
+    }
+   ],
+   "writer_text": "“人物”行和画面要对得上：正文写到谁的眼睛 / 视线 / 嘴唇 / 表情 / 脸，谁就写“在画”；“局部｜<部位>”只用于真的只露手、背影或下半身的人。特写、近景、中近景里只有一个人且写了视线，就一定是“在画”。",
+   "evidence": [
+    {
+     "src": "data/import/script_v2.json",
+     "note": "ep02-S10“林晚（局部｜双手）”却写“视线落在汤面，嘴唇轻抿”（特写）；ep04-S7、ep08-S8 同类——编译层按局部处理丢了身份脸，出图换脸（项目方 11-02 发现）"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/writer_camera.yaml"
+  },
+  {
    "id": "K-WRT-H01",
    "check": [
     "tests/test_hollywood.py"
@@ -12191,6 +13492,91 @@
     }
    ],
    "confidence": "high",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/writer_hollywood.yaml"
+  },
+  {
+   "id": "K-WRT-H07",
+   "check": [
+    "tests/test_hollywood_r5.py"
+   ],
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "HOLLYWOOD 尺子（r6）：清单 50 条里 24 条整条代码判定、3 条代码 + 评审、23 条 7 个评审（温度 0、关推理、逐条附原文证据）逐条取多数",
+   "when": "给 HOLLYWOOD 改写稿打分（hollywood_r5.py ruler6 / score_r6；G1 / L-102 判定落成代码）",
+   "then": "代码判定 tools/script_rsi/rubric_code.py（时长、分拍按秒切段、景别字段、下半身词、脸红词、QW-W11 / QW-A5 / QW-A7、看镜头词、情绪形容词直陈、模糊词、说破意图句、每镜台词 ≤2 + 听者反应、人物卡发型 / 服装 / 饰品原文、换装镜、跨段服装混入、末镜最后 2 秒）；评审证据须在镜头块里逐字找到，否则按不满足；同稿重复 5 次标准差 ≤ 1 才算尺子合格",
+   "params": {
+    "judges": 7,
+    "temperature": 0,
+    "code_items": 24,
+    "mixed_items": 3,
+    "llm_items": 23
+   },
+   "evidence": [
+    {
+     "src": "data/review_pages/hollywood_r5/ruler6_ep04/ruler6_final.json",
+     "note": "ep04 补丁版 5 次：17 / 17 / 16 / 17 / 17，标准差 0.4（合格）；r5 旧尺子 3 评审多数 sd 3.3、5 评审多数 sd 1.25"
+    }
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/writer_hollywood.yaml"
+  },
+  {
+   "id": "K-WRT-H08",
+   "check": [
+    "tests/test_hollywood_r5.py"
+   ],
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "剧本导入闸门 = rubric_code 代码判定失败项为 0；现行 10 集代码判定出的写法问题写成规则（回头 / 穿脱过程 / 情绪直陈 / 近景写下半身 / 台词后无听者反应 / 字段缺行）",
+   "when": "新剧本导入前（hollywood.cmd_merge 内置；rubric_audit.py gate 可单独跑），以及写作方写分镜时",
+   "then": "tools/script_rsi/rubric_audit.py gate <剧本.md> 退出码 0 才暂存 / 导入；技术缺口优先由编译层按人物卡 / 造型登记自动补（视线句、外层单品描述、造型设定图参考），补不了的由闸门拦",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "镜头字段"
+    }
+   ],
+   "writer_text": "每镜字段写全（img、场景、人物、衔接、站位、光线、镜头运动、分拍、motion、时长、sound、H3），分拍按秒切段一直写到镜长；镜1 用近景或中景；特写 / 近景 / 中景的 img 不写鞋、高跟、腿、脚（画面外的下半身）；有台词或 🎙 的镜分拍写清视线落点；每句台词之后，下一镜的分拍要写听者的反应（名字 + 视线 + 表情）；分拍不写穿上 / 脱下 / 披上 / 换上的过程（换装另起一镜、首帧已换好）；不写回头、看镜头；台词和独白不用“很生气 / 很难过”这类情绪直陈。",
+   "params": {
+    "gate": "rubric_code_fails_zero"
+   },
+   "evidence": [
+    {
+     "src": "data/review_pages/hollywood_r5/code_gaps/summary.json",
+     "note": "现行 10 集代码判定 183/270（剧本原文）→ 204/270（编译后）；写法问题出现次数：近景写下半身 10 集、镜1 景别不是近 / 中景 10 集、台词后无听者反应 6 集、穿脱过程 3 集、回头 / 看镜头 3 集"
+    }
+   ],
+   "confidence": "high",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/writer_hollywood.yaml"
+  },
+  {
+   "id": "K-WRT-H09",
+   "check": [
+    "tests/test_autoflow.py"
+   ],
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "新建剧本 → 可导入的全自动流程（autoflow）：P0→P4 每段带 Hollywood 模板 + 全部 K-WRT；P4 后代码判定补丁环 + 事实表 + 新尺子 + policy.pick_import + 导入闸门；项目方只点一次“导入”",
+   "when": "新建剧本页（#/script-create?new=1）一键“全自动”，或 flow.py 剧本段无人值守",
+   "then": "tools/script_rsi/autoflow.py run（API：/api/script-autoflow/{run}/start|repair|import|status）；P3-P4 reasoning high + 输出上限 64000；事实表取自 P0 Brief + P1 故事线 + 本集 P2 / P3；代码判定失败项逐条补丁（每补丁做代码不变量 + 补丁事实核对，失败项变少才采用）；score_r6 + noise_stop；预算默认 budget.writing_episode_cap_usd；每段记 decider（code / api_model / owner），状态 <run>/autoflow.json",
+   "params": {
+    "code_rounds": 4,
+    "writer_p4": "flash-high",
+    "max_out": 64000
+   },
+   "evidence": [
+    {
+     "src": "docs/master/HOLLYWOOD_PLAN.md",
+     "note": "总调度 r8 派令；项目方 02:3x“以后我会在这里创建一个新剧本，走现在的流程”"
+    }
+   ],
+   "confidence": "medium",
    "status": "待验",
    "date": "2026-11-02",
    "_file": "knowledge/rules/writer_hollywood.yaml"

@@ -278,6 +278,39 @@ def vlm_cond(vlm: dict | None, keys: tuple, cid: str, text: str) -> dict:
 
 
 # ---------------------------------------------------------------- 打分
+V7_OPEN_FRAC = 0.3     # 总调度 11-02 定 V7 口型口径（已通知 VQAGATE）：台词段相关 ≥ corr_min，或张嘴帧占比 ≥0.3 且开合幅度达标
+
+
+def v7_pass(v7: dict | None) -> bool | None:
+    """V7 口型按 11-02 口径判：VQAGATE 新版输出带 caliber 字段时直接用它的 status；旧输出按口径重算——
+    相关 ≥ th.corr_min（有台词时段就是台词段相关），或 open_frac ≥ 0.3 且开合幅度（aperture_p90）≥ th.amp_min（缺省 th.open_thr）。
+    人工标签（总调度）：S4ffb s102 过、S4calm s101 过、r18 三条不过。未测 / 闭嘴模式 → None"""
+    if not v7 or v7.get("status") == "未测" or v7.get("mode") == "closed":
+        return None
+    if v7.get("caliber"):
+        return v7.get("status") == "通过"
+    th = v7.get("th") or {}
+    if v7.get("corr") is not None and v7["corr"] >= float(th.get("corr_min", 0.3)):
+        return True
+    amp = v7.get("aperture_p90")
+    return bool((v7.get("open_frac") or 0) >= V7_OPEN_FRAC and amp is not None
+                and amp >= float(th.get("amp_min", th.get("open_thr", 0.035))))
+
+
+def v7_for(tl_shot: dict) -> tuple[dict | None, str | None]:
+    """成片里用的那一版视频的 V7 结果：origin 里的变体名 → data/pipeline/runs/series10_v1/video/scores/<镜>__<变体>.json"""
+    sid = tl_shot.get("shot") or ""
+    m = re.search(re.escape(sid) + r"\s+(\S+)", tl_shot.get("origin") or "")
+    if not m:
+        return None, None
+    f = ROOT / "data/pipeline/runs/series10_v1/video/scores" / f"{sid}__{m.group(1)}.json"
+    try:
+        d = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None, rel(f)
+    return d.get("v7") or (d.get("score") or {}).get("v7"), rel(f)
+
+
 def cut_list(timeline: dict) -> list[float]:
     """实际刀长（含 assemble 拆刀 pieces）"""
     out = []
@@ -431,13 +464,21 @@ def score_all(rep: dict, tl: dict, fp: dict, gz: dict, sb: dict, vlm: dict | Non
     syn = [x for s in shots for x in s["lip_sync"]]
     meas = [x for x in syn if "corr_best" in x]
     good = [x for x in meas if x["corr_best"] >= T["lip_corr"] and abs(x["best_lag_s"]) <= T["lip_lag"]]
+    v7r, v7f = {}, {}
+    for s_ in tl["shots"]:
+        if s_["index"] in dia_shots and not (s_.get("placeholder") or s_.get("kind") == "still"):
+            v, f = v7_for(s_)
+            ok = v7_pass(v)
+            if ok is not None:
+                v7r[s_["shot"]], v7f[s_["shot"]] = ok, f
     items["A3"] = item_score([
         C("A3.1", "画内对白没有 TTS 兜底（兜底 = 口型与成片声音不一致，K-EDT-805 送回重出）", not tts_fb, tts_fb or "无",
           "timeline h3_dialogue[].dialogue"),
         C("A3.2", "对白镜都是视频（不是静帧配音）", not dia_still, dia_still or "无", "timeline shots + speech"),
-        C("A3.3", f"可测对白句中嘴部相关 ≥{T['lip_corr']} 且 |偏移| ≤{T['lip_lag']} s 的 ≥70%",
-          (len(good) / len(meas) >= T["lip_good_frac"]) if meas else None,
-          {"good": len(good), "measured": len(meas)} if meas else "无可测句", RV + " lip_sync"),
+        C("A3.3", "画内对白镜 V7 口型通过 ≥70%（口径 11-02：台词段相关 ≥0.30，或张嘴帧占比 ≥0.3 且开合幅度达标；没有 V7 时退回 DIR 嘴部相关代理）",
+          (sum(v7r.values()) / len(v7r) >= T["lip_good_frac"]) if v7r else ((len(good) / len(meas) >= T["lip_good_frac"]) if meas else None),
+          ({"v7": v7r, "files": v7f} if v7r else ({"proxy_good": len(good), "proxy_measured": len(meas)} if meas else "无可测句")),
+          "scores/<镜>__<变体>.json v7（VQAGATE）" if v7r else RV + " lip_sync（代理）"),
         C("A3.4", "说话人的脸在对白期间入画（可测句 / 全部对白句 ≥70%）",
           (len(meas) / len(syn) >= 0.7) if syn else None, {"measured": len(meas), "lines": len(syn)} if syn else "无对白", RV),
     ])

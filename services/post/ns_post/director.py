@@ -27,7 +27,10 @@ def enabled(key: str | None = None) -> bool:
     """环境变量 NS_DIRECTOR=1 / 0 覆盖总开关（A/B 用，不改配置文件）"""
     import os
     c = cfg()
-    on = {"1": True, "0": False}.get(os.environ.get("NS_DIRECTOR", ""), bool(c.get("enabled")))
+    # 测试期（pytest）不读会变的真实开关（K-OPS-C02）：没显式设 NS_DIRECTOR 就按关——合成基础行为的测试不受导演层开关影响
+    # （SYSARCH 11-02 报 test_fix_ep02_assemble 拆刀 2 段变 3 段，根因是 enabled=true 被测试读到）
+    default = False if os.environ.get("PYTEST_CURRENT_TEST") else bool(c.get("enabled"))
+    on = {"1": True, "0": False}.get(os.environ.get("NS_DIRECTOR", ""), default)
     return on and (key is None or bool(c.get(key, True)))
 
 

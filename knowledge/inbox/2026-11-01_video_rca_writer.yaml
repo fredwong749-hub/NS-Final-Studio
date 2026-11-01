@@ -30,17 +30,4 @@ rules:
     confidence: low
     status: 草案
     date: 2026-11-02
-  - id: K-WRT-704
-    domain: writer
-    link: P3-P4
-    title: 穿外套 / 西装的人物，不在一镜里完成“坐→站”这类大幅姿态变化——上一镜停在起身开始，下一镜从已经站定开始（拆镜，靠剪辑跳过过程）
-    when: H3 分拍里在画人物有 rises / stands up / sits down / 起身 / 坐下 / 转身离开 等全身姿态切换，且造型有外套、西装、大衣
-    then: 拆成两镜：镜 A 到“手撑桌沿准备起身”为止；镜 B 首帧就是站定的姿态（另出首帧，外套完整），从站着的动作开始。不改剧情，只改切点（交写作方 / 分镜，系统不改正文）
-    writer_text: "穿外套或西装的人要从坐变站（或站变坐、整个人转身）时，不要放在同一镜里做完：上一镜停在准备起身，下一镜从已经站好开始。视频模型在一镜里做大幅动作时，外套会变成无袖或短款。"
-    evidence:
-      - {src: data/ab/video_rca/r8_outfit_action/, note: "ep01-S3（坐→站）去掉整理外套的动作后，站起来外套仍变成无袖短马甲 2/2；带动作的同镜 8/8 整件消失（docs/video_rca/RCA_r3.md §1.2）"}
-      - {src: data/ab/video_rca/r10c_shape/torso_compare.jpg, note: "ep01-S4（全程站着、小动作）5 条：外套长度和袖子基本不变"}
-    check: 未定（拆镜后的 A/B 还没做：要等镜 B 的站姿首帧；候选 QW lint：分拍含 rises / stands up / 起身 且人物造型含外套 → warn）
-    confidence: low
-    status: 草案
-    date: 2026-11-02
+  # K-WRT-704 已转正 → knowledge/rules/render_video_rca.yaml（总调度 11-02 r4 回复）

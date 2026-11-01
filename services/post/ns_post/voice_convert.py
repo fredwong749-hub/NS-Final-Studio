@@ -39,7 +39,7 @@ def available() -> bool:
 
 
 def _ff(*args: str) -> None:
-    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *args], check=True)
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *args], check=True, timeout=300)   # K-OPS-S01
 
 
 def read_wav(p: Path) -> tuple[np.ndarray, int]:
@@ -69,7 +69,8 @@ def seed_vc(src: Path, ref: Path, out_dir: Path, *, steps: int = 30, cfg_rate: f
     cmd = [str(SEEDVC_PY), "inference.py", "--source", str(src), "--target", str(ref), "--output", str(out_dir),
            "--diffusion-steps", str(steps), "--length-adjust", "1.0", "--inference-cfg-rate", str(cfg_rate),
            "--f0-condition", "False", "--fp16", "True"]
-    p = subprocess.run(cmd, cwd=str(SEEDVC_DIR), capture_output=True, text=True, encoding="utf-8", errors="replace")
+    p = subprocess.run(cmd, cwd=str(SEEDVC_DIR), capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       timeout=1800)   # K-OPS-S01：Seed-VC 单条推理远小于 30 分钟，超了就是挂住
     outs = sorted(out_dir.glob("vc_*.wav"), key=lambda q: q.stat().st_mtime)
     if p.returncode != 0 or not outs:
         raise RuntimeError(f"Seed-VC 失败（{p.returncode}）：{(p.stderr or p.stdout)[-800:]}")

@@ -14,6 +14,8 @@ export interface LaneInfo {
   server?: string;
   reachable: boolean;
   activity: "image" | "video" | "external" | "idle" | string;
+  /** UIRSI r42：后端还没探过这条道（:8800 刚起）——既不是空闲也不是连不上 */
+  probing?: boolean;
   queued: number;
   /** 这条道上已有的活（秒，含别人直接投的外部任务） */
   load_s: number;
@@ -112,6 +114,7 @@ async function load() {
         server,
         reachable: l.reachable !== false,
         activity: l.train_locked && (l.activity ?? "idle") === "idle" ? "train" : l.activity ?? "idle",
+        probing: !!(l as { probing?: boolean }).probing,
         queued: l.queued ?? 0,
         load_s: l.load_s ?? 0,
         image_pref: !!l.image_pref,
@@ -216,7 +219,8 @@ export function laneBusyBy(kind: "image" | "video", g: LanePick, frames?: number
   return l.activity === "external" || l.activity === "train" ? l.activity : null;
 }
 
-const ACT: Record<string, string> = { image: "正在出图", video: "正在出视频", external: "其他任务占用", idle: "空闲", train: "训练占用" };
+// UIRSI r42：服务器自派之后，道上的活大多不是画布投的（external），它就是在出图 / 出视频，不是“被占用”
+const ACT: Record<string, string> = { image: "正在出图", video: "正在出视频", external: "在出（服务器派单）", idle: "空闲", train: "训练占用" };
 
 /** “自动”为什么选这张卡（一句话，写在下拉里） */
 export function autoWhy(kind: "image" | "video", l: LaneInfo | null, lanes: LaneInfo[] | null): string {
@@ -231,6 +235,7 @@ export function autoWhy(kind: "image" | "video", l: LaneInfo | null, lanes: Lane
 
 /** 一条道现在的状态（人话） */
 export function laneState(l: LaneInfo): string {
+  if (l.probing) return "探测中…";
   if (!l.reachable) return "连不上";
   // UXF5：训练占用且有锁说明时只写锁说明（以前是“训练占用 · LoRA 训练占用中”）
   const parts = l.activity === "train" && l.lock ? [] : [ACT[l.activity] ?? l.activity];

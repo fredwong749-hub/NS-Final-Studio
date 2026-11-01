@@ -31,7 +31,11 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
 # 标定（11-01，10 条）：正对镜头的对白镜 corr 0.33–0.80；远景小脸（ep10-S5 全景，脸高 <90 px）开合噪声大 → 小脸帧记“没检出”
-TH = {"corr_min": 0.30, "open_thr": 0.035, "closed_max": 0.25, "seen_min": 0.30, "max_lag": 3, "min_face_px": 90}
+TH = {"corr_min": 0.30, "open_thr": 0.035, "closed_max": 0.25, "seen_min": 0.30, "max_lag": 3, "min_face_px": 90,
+      # 台词段第二判据（总调度 11-02，K-REV-V16）：张嘴帧 = 内唇间距 / 脸高 ≥ win_open_thr；阈值由标定集定（GATE_CALIBRATION §13）
+      # 标定（GATE_CALIBRATION §13，总调度人工标签：S4ffb s102 / S4calm s101 过，r18 三条不过）：幅度 p90−p10 过 0.004 是共同前提
+      # （r18 s103 嘴几乎不动但相关 0.593，单看相关会误过），再“相关 ≥0.30 或 张嘴帧（≥0.010）占比 ≥0.30”满足其一
+      "win_open_thr": 0.010, "win_open_frac_min": 0.30, "win_amp_min": 0.004}
 UP, LO = 62, 60          # 106 点：上内唇中点 / 下内唇中点（ep01-S5 首帧实测：71 上外唇、62 上内唇、60 下内唇、53 下外唇）
 
 
@@ -177,6 +181,14 @@ def main(argv):
         wm = window_mask(wins, n)
         if wins and wm.sum() > 12:                     # 有台词时间码：只在台词时段（时间码 ±0.5 s）算，整轨的只记录
             c = best_corr_masked(xs, ys, TH["max_lag"], wm)
+            wa = ap[wm]
+            wa = wa[~np.isnan(wa)]
+            if len(wa):                                  # 总调度 11-02：台词段张嘴帧占比 + 开合幅度（侧脸小嘴时相关系数不稳）
+                amp = float(np.percentile(wa, 90) - np.percentile(wa, 10))
+                m.update(win_amp=round(amp, 4), win_open_frac=round(float(np.mean(wa >= TH["win_open_thr"])), 3),
+                         win_p90=round(float(np.percentile(wa, 90)), 4))
+                if meta.get("debug_aperture"):
+                    m["win_aperture"] = [round(float(x), 4) for x in wa]
             m.update(corr_scope="台词时段", window_source=meta.get("window_source") or "stamps", window_frames=int(wm.sum()),
                      windows=[[round(a, 2), round(b, 2)] for a, b in wins])
         else:
@@ -185,7 +197,13 @@ def main(argv):
         m.update(corr=round(c, 3), corr_full=round(c_full, 3), voiced_frac=round(float(voiced.mean()), 3),
                  open_in_voiced=round(float(np.nanmean(ap[voiced] >= TH["open_thr"])), 3) if voiced.any() else None)
         ok = c >= TH["corr_min"]
-        st, why = ("通过", "") if ok else ("不通过", f"嘴部开合与声音相关 {c:.2f} < {TH['corr_min']}")
+        if m.get("corr_scope") == "台词时段" and m.get("win_amp") is not None:   # K-REV-V16：台词段口径
+            moving = m["win_amp"] >= TH["win_amp_min"]
+            by_open = (m.get("win_open_frac") or 0) >= TH["win_open_frac_min"]
+            ok = moving and (c >= TH["corr_min"] or by_open)
+            m["pass_by"] = ("相关" if c >= TH["corr_min"] else "张嘴占比") if ok else None
+        st, why = ("通过", "") if ok else ("不通过", f"嘴部开合与声音相关 {c:.2f} < {TH['corr_min']}，台词段张嘴占比 "
+                                                   f"{m.get('win_open_frac')} / 幅度 {m.get('win_amp')} 也没过线")
     print(json.dumps({"v7": {"status": st, "why": why, **m, "th": TH}}, ensure_ascii=False))
 
 

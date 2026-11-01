@@ -1,0 +1,16 @@
+# SYSARCH 11-02（总调度 fredw-2b 派；项目方 02:5x 原话：“我需要你整一个 master agent，更加全面地去看整个 system 的 code 怎么样去做。”
+# 此前原话：“每次都是我指出来你才去修……这不是 RSI。”）路线图：docs/master/ARCH_ROADMAP.md；地图：docs/master/ARCH_MAP.md。
+rules:
+  - id: K-OPS-S01
+    domain: ops
+    link: [P5-P6]
+    title: 结构退化只许减不许增——tools/qa/arch_scan.py 棘轮（没 timeout 的子进程、直接起 ssh、自写 def ssh、写死 series10_v1 / 服务器路径、读文件失败静默放行、非原子写 JSON、未入版代码被已入版代码 import、无主文件）
+    when: 任何 loop 交 cut 之前；SYSARCH 每 30–60 分钟巡检
+    then: 跑 python tools/qa/arch_scan.py --check（或 --files <本轮改动> --check）；任一文件某项计数比 data/sysarch/baseline.json 大、或新冒出未入版却被 import 的模块 = 不过，回负责方修；失败静默放行确属调用方显式处理的，在 except 行写 arch-ok 标记（井号 + arch-ok + 冒号 + 理由）豁免；基线只由 SYSARCH 在关单后收紧（--write-baseline）
+    check: tests/test_arch_scan.py::test_ratchet_only_flags_regressions, tests/test_arch_scan.py::test_no_timeout_counts_only_missing_timeout, tests/test_arch_scan.py::test_silent_read_fail_open
+    evidence:
+      - {src: docs/master/ARCH_MAP.md, note: "§9 Top 15：运行中的代码不在版本里、决策文件失败开放、70 处 subprocess 无 timeout、41 个文件直接起 ssh、series10_v1 写死 97 个文件——都是项目方或事故先发现，不是系统先发现"}
+      - {src: data/sysarch/scan_latest.json, note: "11-02 02:42 首扫 10 分钟内就抓到 2 个新退化：tools/factory/decisions_guard.py 未入版却被 producer.py import；tools/sentinel/probes.py 写死 series10_v1 帧目录"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

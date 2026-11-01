@@ -64,8 +64,47 @@ def _cfg() -> dict:
         return {}
 
 
+def project_chain(project: str) -> list[str]:
+    """项目 → [自己, 父, 祖父…]（"inherits": "<父项目>"；总调度 11-02：第二季继承第一季的资产项目，不另造资产库）。防环"""
+    projs = _cfg().get("projects") or {}
+    out, cur = [], project
+    while cur and cur not in out and cur in projs:
+        out.append(cur)
+        cur = (projs.get(cur) or {}).get("inherits")
+    return out or [project]
+
+
+def _deep_merge(base: dict, over: dict) -> dict:
+    out = json.loads(json.dumps(base))
+    for k, v in (over or {}).items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
 def project_cfg(project: str) -> dict:
-    return (_cfg().get("projects") or {}).get(project) or {}
+    """项目配置；有 inherits 时从最上层父项目起逐层合并（字典键深合并：faces / item_map / female…；标量与文件路径子项目覆盖）。
+    子项目没写的文件路径（looks_file / sheets_file / shot_looks_file / crop_dir / board_dir）沿用父项目的"""
+    projs = _cfg().get("projects") or {}
+    merged: dict = {}
+    for name in reversed(project_chain(project)):
+        merged = _deep_merge(merged, {k: v for k, v in (projs.get(name) or {}).items() if k != "inherits"})
+    if len(project_chain(project)) > 1:
+        merged["inherits"] = (projs.get(project) or {}).get("inherits")
+    return merged
+
+
+def chain_files(project: str, key: str) -> list[Path]:
+    """继承链上每一层自己写的某个文件（子在前）：例如 sheets_file——子季新加的造型设定图写在子季文件里，没写的回落到父季"""
+    projs = _cfg().get("projects") or {}
+    out = []
+    for name in project_chain(project):
+        v = (projs.get(name) or {}).get(key)
+        if v and (ROOT / v) not in out:
+            out.append(ROOT / v)
+    return out
 
 
 def model_slots(model: str) -> int:
@@ -189,22 +228,56 @@ OVERRIDES = ROOT / "data" / "looks" / "item_map_overrides.json"
 QUARANTINE = ROOT / "data" / "looks" / "item_map_quarantine.json"
 
 
+# ---------------------------------------------------------------- 解析层（覆盖配置）按 run 继承（K-OPS-W18 修订，总调度 11-02 P0）
+# 解析层 = 资产中心等写的 {project: {...}} 覆盖文件：face_overrides / item_map_overrides / item_map_quarantine / hub_extra_looks。
+# 子季没写的回落父季；hub_episode_looks（按集排期）每季集号不同，不继承。登记见 config/policies/resolution_layers.yaml
+
+class DecisionFileError(ValueError):
+    """决策 / 覆盖文件存在但读不出（坏 JSON、截断）——K-OPS-F09：不许静默当成“没有覆盖”，出图前就报错拒派"""
+
+
+def _overlay_doc(path: Path) -> dict:
+    """覆盖文件：不存在 = 没有覆盖（是否必须存在由 tools/factory/decisions_guard 在派单前查，K-OPS-F09）；
+    存在但读不出 = 抛 DecisionFileError（⤴ 取代原来的“读不出 = {}”静默回退，ARCH_MAP #2；总调度 03:0x 授权，CONSENT 总调度）"""
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8")) or {}
+    except (OSError, ValueError) as e:
+        raise DecisionFileError(f"决策文件读不出：{path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else path}（{e}）") from e
+
+
+def overlay_value(path: Path, project: str, key: str):
+    """单键覆盖（例：身份脸 face_overrides[project][cid]）：继承链上第一个写了这个键的项目的值"""
+    d = _overlay_doc(path)
+    for name in project_chain(project):
+        v = (d.get(name) or {}).get(key)
+        if v is not None:
+            return v
+    return None
+
+
+def overlay_layers(path: Path, project: str) -> list[dict]:
+    """分层覆盖（例：item_map_overrides）：父季在前、子季在后，调用方依次叠加"""
+    d = _overlay_doc(path)
+    return [d.get(name) or {} for name in reversed(project_chain(project))]
+
+
 def quarantine(project: str) -> dict:
     """待项目方确认、暂不生效的映射（总调度 11-01：疑似资产中心选择器点错的 6 条）"""
-    try:
-        return (json.loads(QUARANTINE.read_text(encoding="utf-8")) or {}).get(project) or {}
-    except (OSError, ValueError):
-        return {}
+    out: dict = {}
+    for layer in overlay_layers(QUARANTINE, project):
+        out = _deep_merge(out, layer)
+    return out
 
 
 def item_map(project: str) -> dict:
     """造型部件 → 衣橱单品：config item_map（系统提议）之上合并资产中心写的 data/looks/item_map_overrides.json
     （{project:{char:{look:{部件名: item_id | null}}}}；null = 解除映射；可带 _by / _at 记录键，读时忽略）"""
     base = json.loads(json.dumps(project_cfg(project).get("item_map") or {}))
-    try:
-        ov = (json.loads(OVERRIDES.read_text(encoding="utf-8")) or {}).get(project) or {}
-    except (OSError, ValueError):
-        ov = {}
+    ov: dict = {}
+    for layer in overlay_layers(OVERRIDES, project):      # 解析层按 run 继承：父季的映射在前，子季的覆盖在后
+        ov = _deep_merge(ov, layer)
     for cid, lks in ov.items():
         if cid.startswith("_") or not isinstance(lks, dict):
             continue
@@ -227,18 +300,21 @@ HUB_LOOKS = ROOT / "data" / "looks" / "hub_extra_looks.json"
 HUB_EP_LOOKS = ROOT / "data" / "looks" / "hub_episode_looks.json"
 
 
-def _hub(path: Path, project: str) -> dict:
-    try:
-        return (json.loads(path.read_text(encoding="utf-8")) or {}).get(project) or {}
-    except (OSError, ValueError):
-        return {}
+def _hub(path: Path, project: str, inherit: bool = False) -> dict:
+    """inherit=True：按继承链逐层合并（hub_extra_looks）；按集排期（hub_episode_looks）每季集号不同，不继承"""
+    if not inherit:
+        return (_overlay_doc(path).get(project) or {})
+    out: dict = {}
+    for layer in overlay_layers(path, project):
+        out = _deep_merge(out, layer)
+    return out
 
 
 def hub_extra_looks(project: str, p1: list) -> list:
     """data/looks/hub_extra_looks.json {project:{cid:[{id, use, zh}]}} → 与 P1 同格式的条目（P1 已有的 id 跳过）"""
     have = {(c.get("char_id") or NAME_ID.get(c.get("name"))): {lk["id"] for lk in c.get("looks") or []} for c in p1}
     out = []
-    for cid, lks in _hub(HUB_LOOKS, project).items():
+    for cid, lks in _hub(HUB_LOOKS, project, inherit=True).items():
         if cid.startswith("_") or not isinstance(lks, list):
             continue
         new = [{k: v for k, v in lk.items() if not k.startswith("_")} for lk in lks
@@ -255,11 +331,26 @@ def episode_look_override(project: str, cid: str, ep_n: int) -> str | None:
 
 
 def load_looks(project: str) -> dict[str, dict[str, Look]]:
-    pc = project_cfg(project)
-    p = ROOT / (pc.get("looks_file") or "")
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    # 继承：父季造型表在前、子季在后（同一角色同一造型 id 以子季为准；子季新增的造型追加）
+    data = []
+    for p in reversed(chain_files(project, "looks_file")):
+        try:
+            layer = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for c in layer:
+            cid = c.get("char_id") or NAME_ID.get(c.get("name"), c.get("name"))
+            hit = next((x for x in data if (x.get("char_id") or NAME_ID.get(x.get("name"), x.get("name"))) == cid), None)
+            if hit is None:
+                data.append(json.loads(json.dumps(c)))
+            else:
+                ids = {lk.get("id"): i for i, lk in enumerate(hit.get("looks") or [])}
+                for lk in c.get("looks") or []:
+                    if lk.get("id") in ids:
+                        hit["looks"][ids[lk["id"]]] = lk
+                    else:
+                        hit.setdefault("looks", []).append(lk)
+    if not data:
         return {}
     imap = item_map(project)
     out: dict[str, dict[str, Look]] = {}
@@ -306,10 +397,7 @@ def _eps_of(role: str) -> tuple | None:
 
 def extra_parts(cid: str, look_id: str) -> list[LookPart]:
     """ASSETMASTER 暂定登记（总调度批）：造型外搭 / 身体装饰。不改 P1 原文；只在对应集、且 img 正文写到时算在画"""
-    try:
-        d = json.loads(EXTRAS.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
+    d = _overlay_doc(EXTRAS)          # K-OPS-F09：不存在 = 没有外搭；坏文件 = 报错，不静默
     out = []
     for e in ((d.get(cid) or {}).get(look_id) or []):
         name = e.get("name") or ""
@@ -368,14 +456,17 @@ def item_name(item_id: str) -> str:
 
 
 def sheet_of(project: str, cid: str, look_id: str) -> str | None:
-    pc = project_cfg(project)
-    try:
-        d = json.loads((ROOT / pc.get("sheets_file", "")).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    e = d.get(f"sheet:{cid}_look{look_id}") or {}
-    f = e.get("file")
-    return f if f and (ROOT / f).is_file() else None
+    """当前设定图：继承链上子季的选定表优先，没有这条（或文件不在）就回落到父季（第二季沿用第一季现行造型设定图）"""
+    for p in chain_files(project, "sheets_file"):
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        e = d.get(f"sheet:{cid}_look{look_id}") or {}
+        f = e.get("file")
+        if f and (ROOT / f).is_file():
+            return f
+    return None
 
 
 # K-AST-262（IMGFIX 11-01，总调度 fredw-2b 派）：设定图与造型单品不一致时，参考板上的外层单品赢。
@@ -556,10 +647,9 @@ FACE_OVERRIDES = ROOT / "data" / "looks" / "face_overrides.json"
 
 def face_of(project: str, cid: str) -> str | None:
     """身份脸：资产中心“设为当前身份脸”（data/looks/face_overrides.json {project:{cid: 路径}}）> config faces 列表"""
-    try:
-        ov = ((json.loads(FACE_OVERRIDES.read_text(encoding="utf-8")) or {}).get(project) or {}).get(cid)
-    except (OSError, ValueError):
-        ov = None
+    # 总调度 11-02 P0：解析层（face_overrides）也按 run 继承——子季自己设过身份脸用子季的，否则用父季的（L-086 的 hd_A_s202 在
+    # series10_v1 的覆盖里；只合并 asset_refs.json faces 会退回 face_ref2va，01:24 服务器用错身份脸同一类错误）
+    ov = overlay_value(FACE_OVERRIDES, project, cid)
     cands = ([ov] if isinstance(ov, str) else []) + list((project_cfg(project).get("faces") or {}).get(cid) or [])
     for f in cands:
         if (ROOT / f).is_file():
@@ -809,6 +899,29 @@ def face_described(name: str, img: str, others: list[str] | tuple = ()) -> bool:
     return False
 
 
+# K-REN-708（IMGFIX 11-02 P0，ep02-S10：cast 写“林晚（局部｜双手）”，正文“特写……视线落在汤面，嘴唇轻抿”→ 判成不露脸、
+# 没挂身份脸、还写了“林晚只露出双手，不露脸”，模型自己编了一张脸）：露脸推断不只看名字后 3 句
+FACE_VIS_WORDS = ("脸", "五官", "眉", "眼", "鼻", "嘴", "唇", "下巴", "面容", "面孔", "视线", "目光", "表情", "神情", "睫", "侧颜", "抬眼", "垂眼")
+FACE_VIS_SIZES = ("极近特写", "大特写", "特写", "近景", "中近景")
+
+
+def partial_face_visible(name: str, img: str, cast_names: list[str] | tuple = (), size: str | None = None,
+                         subject: str | None = None) -> bool:
+    """cast 写“局部”的人其实露脸吗：① 名字后写到脸 / 头发（face_described，多人镜按人切段）；② 本镜只有这一个人：
+    正文出现眼睛 / 视线 / 嘴唇 / 表情 / 脸等词，或景别是特写 / 近景 / 中近景且不是局部 / 物件特写 → 露脸"""
+    if face_described(name, img, cast_names):
+        return True
+    others = [n for n in cast_names if n and n != name]
+    if others:
+        return False
+    body = (img or "").replace("眼睛为真实人眼大小", "")
+    if any(w in body for w in FACE_VIS_WORDS):
+        return True
+    if size is None:
+        size, subject, _z = visible_zones(img)
+    return size in FACE_VIS_SIZES and subject not in ("part", "object")
+
+
 def resolve_shot(project: str, ep, shot, *, kept_triggers=None, looks=None, two_person: str | None = None) -> ShotRefs:
     """一镜每个在画角色必须锁定的参考图（未排槽位）。ep / shot：导入器对象或 script_v2.json 的 dict"""
     n_ep = int(g(ep, "number") or g(shot, "episode") or 0)
@@ -848,11 +961,11 @@ def resolve_shot(project: str, ep, shot, *, kept_triggers=None, looks=None, two_
                 how = f"script_match {score:.2f}"
                 if lid and dev:
                     warns.append({"character": name, "kind": "造型偏离", "detail": "；".join(dev), "look": lid})
-        partial_face = pr == "局部" and face_described(name, img, [n for n, _ in on])
+        partial_face = pr == "局部" and partial_face_visible(name, img, [n for n, _ in on], size, subject)
         info = {"character": cid, "name": name, "presence": pr, "primary": is_primary, "look": lid, "look_how": how}
         if partial_face:
             info["face_described"] = True
-            warns.append({"character": name, "kind": "局部但写到脸", "detail": f"{name} 在 cast 里是“局部”，img 原文写到了脸 / 头发：按脸可见挂身份脸、进 Q1（K-AST-236）"})
+            warns.append({"character": name, "kind": "局部但写到脸", "detail": f"{name} 在 cast 里是“局部”，但正文写到了脸 / 视线或景别露脸：按脸可见挂身份脸、进 Q1（K-AST-236 / K-REN-708）——cast 应改成“在画”（写作格式问题）"})
         chars.append(info)
         # 身份脸（I2）
         # 局部 / 物件特写不挂身份脸（挂了模型就会画出脸，总调度 11-01）；原文写到这个人的脸（face_described）例外
@@ -1216,7 +1329,7 @@ def single_turn_line(sr: ShotRefs, shot) -> str:
     if sr.subject in ("part", "object"):
         return ""
     img = g(shot, "img_prompt") or ""
-    on = [c for c in sr.characters or [] if c.get("presence", "在画") == "在画"]
+    on = [c for c in sr.characters or [] if c.get("presence", "在画") == "在画" or c.get("face_described")]   # K-REN-708：局部但露脸的也算
     if len(on) != 1:
         return ""
     name = on[0].get("name") or ID_NAME.get(on[0].get("character") or "", "")

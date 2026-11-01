@@ -36,7 +36,8 @@ export interface RTData {
   at: string;
   ts: number;
   run: string | null;
-  counts: Record<RTStatus | "all", number>;
+  /** UIRSI r42：queued = 真在排队（不含计划）、planned = 计划中的镜、failed_recent = 最近 recent_fail_h 小时的失败 */
+  counts: Record<RTStatus | "all", number> & { queued?: number; planned?: number; failed_recent?: number; recent_fail_h?: number };
   rows: RTRow[];
   sources: Record<string, number>;
   episodes: number[];

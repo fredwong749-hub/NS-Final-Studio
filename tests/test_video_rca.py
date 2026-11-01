@@ -85,3 +85,13 @@ def test_v06_compile_flags_pose_change_in_outerwear():
     assert any(i["code"] == "RL-P1" for i in lint_people_eyeline(txt, None, {}))
     assert not any(i["code"] == "RL-P1" for i in lint_people_eyeline(txt.replace("she rises from the chair", "she shifts her weight"), None, {}))
     assert not any(i["code"] == "RL-P1" for i in lint_people_eyeline(txt.replace("and a cropped blazer", "and a pencil skirt"), None, {}))
+
+
+def test_v07_no_laptop_vision_lane_hardcoded():
+    """L-100（总调度 11-02）：笔记本 4080（:18388）是专用看图卡，VIDEO-RCA 工具不得写死它当出图 / 出片道"""
+    import re as _re
+    for f in (ROOT / "tools/video_rca").glob("*.py"):
+        txt = f.read_text(encoding="utf-8")
+        code = _re.sub(r'""".*?"""', "", txt, flags=_re.S)
+        code = "\n".join(ln.split("#")[0] for ln in code.splitlines())
+        assert not _re.search(r"\b18388\b", code.replace('":" + "18388"', "")), f.name

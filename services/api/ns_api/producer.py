@@ -84,13 +84,19 @@ def status(run: str | None = None, ep: int | None = None):
 class PauseBody(BaseModel):
     by: str = "owner"
     note: str = ""
+    kind: str = "owner"          # K-OPS-E08：界面点的暂停 = 项目方显式暂停（不自动恢复，超 180 s 报警）；line_switch / restart / deploy = 运维暂停（≤180 s 到点恢复）
+    expires_s: float = 0
 
 
 @router.post("/api/producer/pause")
 def pause(body: PauseBody | None = None):
     b = body or PauseBody()
     c = _jl(PD / "control.json", {}) or {}
-    c.update(paused=True, paused_by=b.by or "owner", paused_at=time.strftime("%Y-%m-%dT%H:%M:%S"), note=b.note or None)
+    kind = b.kind if b.kind in ("line_switch", "restart", "deploy", "master", "owner") else "owner"
+    ops = kind in ("line_switch", "restart", "deploy")
+    exp = time.time() + (min(float(b.expires_s or 180), 180) if ops else float(b.expires_s or 180))
+    c.update(paused=True, paused_by=b.by or "owner", paused_at=time.strftime("%Y-%m-%dT%H:%M:%S"), note=b.note or None,
+             reason_kind=kind, expires_at=time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(exp)), overdue_alert_t=None)
     _js(PD / "control.json", c)
     _log("pause", by=b.by, note=b.note)
     return {"paused": True, "note": "已暂停：不再派新活，在跑的跑完"}
@@ -100,7 +106,7 @@ def pause(body: PauseBody | None = None):
 def resume(body: PauseBody | None = None):
     b = body or PauseBody()
     c = _jl(PD / "control.json", {}) or {}
-    c.update(paused=False, paused_by=None, paused_at=None, note=None)
+    c.update(paused=False, paused_by=None, paused_at=None, note=None, reason_kind=None, expires_at=None, overdue_alert_t=None)
     _js(PD / "control.json", c)
     _log("resume", by=b.by)
     return {"paused": False, "note": "已继续自动制作"}

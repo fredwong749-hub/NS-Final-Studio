@@ -534,8 +534,11 @@ def _next_n(shot_id: str, stage: str) -> int:
 
 
 def extract_last_frame(video: Path, out: Path) -> Path | None:
-    r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-sseof", "-0.1", "-i", str(video),
-                        "-frames:v", "1", "-update", "1", str(out)], capture_output=True)
+    try:
+        r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-sseof", "-0.1", "-i", str(video),
+                            "-frames:v", "1", "-update", "1", str(out)], capture_output=True, timeout=120)   # K-OPS-S01
+    except subprocess.TimeoutExpired:
+        return None   # 和 ffmpeg 失败同样处理：调用方见 None 即“没抽到尾帧”
     return out if r.returncode == 0 and out.exists() else None
 
 

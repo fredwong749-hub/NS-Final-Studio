@@ -32,12 +32,13 @@
       "url": "http://127.0.0.1:18388",
       "image_only": true,
       "concurrency": 1,
-      "hold": false,
-      "_hold_change": "2026-11-01 19:2x 总调度 fredw-2b 选 A：本机道开派，本机看图停（Q9 记未测待补判），服务器跳板断；回退 = 改回 true",
+      "hold": true,
+      "disabled": true,
+      "_hold_change": "L-100（总调度 fredw-2b 11-02 01:5x 定）：笔记本 4080 专做看图，不再出图；ComfyUI :18388 与 watchdog 已由 DEBUG-RSI 停掉（CONSENT LOCALGPU → DEBUG_RSI）。界面显示“看图卡”。恢复出图 = 去掉 disabled 并重新起 D:/ns_comfy/start.ps1｜旧记录：2026-11-01 19:2x 总调度 fredw-2b 选 A：本机道开派，本机看图停（Q9 记未测待补判），服务器跳板断；回退 = 改回 true",
       "preset_lock": "leica_sstar",
       "yield_url": "http://127.0.0.1:8870/yield",
       "yield_timeout_s": 300,
-      "label": "laptop:0 本机出图道（RTX 4080 Laptop 12 GB，D:\\ns_comfy ComfyUI 0.42.0，只出图、并发 1；hold=true 时不自动派，等总调度开派）",
+      "label": "laptop:0 已停用：笔记本 RTX 4080 改为专用看图卡（L-100）；原为本机出图道（D:/ns_comfy ComfyUI 0.42.0）",
       "_comment": "LOCALGPU 11-01（总调度 fredw-2b 派）：启动 D:\\ns_comfy\\start.ps1；模型 sha256 与 HF 官方 / 服务器记录一致（D:\\ns_comfy\\MODELS.sha256）；参数与 leica_sstar 一致由 tools/localgpu/check_lane.py + tests/test_localgpu_lane.py 自动比对（knowledge K-OPS-L01）。开派 = 把 hold 改成 false"
     }
   },

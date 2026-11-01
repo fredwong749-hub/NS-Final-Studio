@@ -112,11 +112,62 @@ def inspect_for(sid: str, kind: str, image: str | Path, prompt: str, references:
     extra = [(f, lab) for f, lab in extra if str(Path(f).resolve()) != me]
     v = client.inspect_image(str(image), prompt or "", list(references or []), extra_refs=extra,
                              spec={"continuity": note} if note else None, **kw)
+    if v.get("error") == "看图模型输出不是 JSON":      # 偶发格式坏（DEBUG-RSI 11-02 gpu33 score_infra）：重看一次，不当基础设施失败
+        v = client.inspect_image(str(image), prompt or "", list(references or []), extra_refs=extra,
+                                 spec={"continuity": note} if note else None, **{**kw, "refresh": True})
     v["continuity_ref"] = [f for f, _ in extra]
     if not v.get("error"):
-        merge_gaze(v, gaze_mp(image), prompt or "")
+        faces = gaze_mp(image)
+        merge_gaze(v, faces, prompt or "")
+        recheck_gaze_band(v, faces, image, prompt or "")
     remember(image, v)
     return v
+
+
+GAZE_Q = ("这是从一张图里裁出来的一个人的脸。只判断他 / 她的眼睛（瞳孔）是不是正对镜头、看着观众，输出 JSON："
+          '{"gaze": "看镜头|看别处|闭眼或垂眼|拿不准", "e": "依据，不超过 20 字"}。头偏了但瞳孔转回来正对观众的也算看镜头。')
+
+
+def recheck_gaze_band(v: dict, faces: list[dict] | None, image, prompt: str) -> None:
+    """看镜头拿不准带复判（L-102：总调度亲审的漏检 s20261304 落成判定）：MediaPipe 分数落在 (T, 2T] 的“差一点”带、
+    俯仰 / 垂眼 / 闭眼条件都满足、看图模型整图没判 eye_contact → 把这张脸裁出来单独问本地看图（K-REV-V01）；答“看镜头”= eye_contact defect"""
+    g = gate_cfg().get("gaze_mp") or {}
+    if not faces or not g.get("enabled", True) or (v.get("checks") or {}).get("eye_contact", {}).get("s") == "defect":
+        return
+    from . import rubric
+    if rubric.spec_from_prompt(prompt).get("camera_ok") == "允许":
+        return
+    A, T, P = float(g.get("A", 0.3)), float(g.get("T", 0.05)), float(g.get("P", 0.12))
+    D, BL, band = float(g.get("down_max", 0.35)), float(g.get("blink_max", 0.6)), float(g.get("band", 2.0))
+    cand = [f for f in faces if f.get("ybox") and T < abs(A * f["yaw_n"] + f["eye_x"]) <= band * T and f["pitch_n"] <= P
+            and f.get("bs_y", 0) <= D and f.get("blink", 0) <= BL]
+    if not cand:
+        return
+    try:
+        from PIL import Image
+        from . import client
+        im = Image.open(image).convert("RGB")
+        out_dir = ROOT / "data" / "vqa" / "crops"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        answers = []
+        for k, f in enumerate(cand):
+            x, y, w, h = f["ybox"]
+            c = im.crop((int(max(0, x - 0.4 * w)), int(max(0, y - 0.4 * h)), int(min(im.width, x + 1.4 * w)), int(min(im.height, y + 1.3 * h))))
+            fp = out_dir / f"{Path(str(image)).stem}_gaze{k}.jpg"
+            c.save(fp, quality=92)
+            res = client.generate({"system": "你是画面质检员，只看图、只报事实，只输出 JSON。", "text": GAZE_Q,
+                                   "images": [{"path": str(fp), "label": "【裁切】", "max_pixels": 200000}]}, wait_s=900)
+            d = rubric_loads(res.get("text", "")) if "error" not in res else None
+            answers.append((d or {}).get("gaze") or "拿不准")
+    except Exception as e:  # noqa: BLE001
+        v["gaze_recheck"] = f"复判失败：{e}"[:200]
+        return
+    v["gaze_recheck"] = answers
+    if "看镜头" in answers:
+        c = v.setdefault("checks", {})
+        c["eye_contact"] = {"s": "defect", "e": f"拿不准带裁脸复判：{answers.count('看镜头')} 张脸看镜头（MediaPipe 分数在 {T}–{band * T}）"}
+        v["defects"] = sorted(set(v.get("defects") or []) | {"eye_contact"})
+        v["unsure"] = [u for u in v.get("unsure") or [] if u != "eye_contact"]
 
 
 def gaze_mp(image: str | Path) -> list[dict] | None:
@@ -141,7 +192,7 @@ def gaze_mp(image: str | Path) -> list[dict] | None:
                 continue
             f = GM.face_in_box(bgr, b)
             if f:
-                out.append(f)
+                out.append({**f, "ybox": list(b)})        # 原图坐标的 YuNet 框（拿不准时裁脸复判用）
         return out if boxes else (GM.faces(bgr) or [])
     except Exception:  # noqa: BLE001
         return None
@@ -241,16 +292,23 @@ def apply(pf: dict, v: dict | None) -> dict:
     items = [i for i in pf.get("items") or [] if i.get("id") != "Q9"]
     items.append({"id": "Q9", "title": TITLE, "status": st, "detail": d, "evidence": ev})
     pf["items"] = items
-    blk = [b for b in (pf.get("blocking") or []) if b != "Q9"]
+    old_blk = list(pf.get("blocking") or [])
+    blk = [b for b in old_blk if b != "Q9"]
+    pf["reasons"] = [r for r in pf.get("reasons") or [] if not str(r).startswith("Q9")]   # 旧的 Q9 说法（如“没有本地看图结果”）先清掉
     if st in ("fail", "untested"):
         blk.append("Q9")
-        pf["reasons"] = [r for r in pf.get("reasons") or [] if not str(r).startswith("Q9")] + [f"Q9 {d}"]
+        pf["reasons"] = pf["reasons"] + [f"Q9 {d}"]
     pf["blocking"] = blk
     relaxed = q1_yaw_relax(pf, v)                       # Q1 按转角放宽（要看图身份 ok，所以在这里和 Q9 一起算）
     if relaxed and not pf["blocking"]:
         pf["ok"] = True
     if pf.get("ok") is not None or st in ("fail", "untested"):
-        pf["ok"] = bool(pf.get("ok")) and st not in ("fail", "untested")
+        # K-OPS-E10（DEBUG-RSI 11-02 02:5x）：原来 ok = 旧 ok and Q9 没挡——契约先按“Q9 未跑”判了 ok=False，看图回来 pass 也翻不回 True，
+        # 结果 blocking 为空的图照样 redo_fail（gpu36 ep09-S2 v3：blocking []、vqa_gate pass，仍记“没过”）。现在 ok 只看挡住项是否为空
+        others_bad = any(i.get("status") in ("fail", "untested") and i.get("id") != "Q9" and i.get("blocking", True) is not False
+                         for i in pf.get("items") or [])
+        q9_only = bool(pf.get("ok")) or set(old_blk) <= {"Q9"}       # 之前判不过只是因为 Q9（或本来就过）
+        pf["ok"] = (not pf["blocking"]) and st not in ("fail", "untested") and q9_only and not others_bad
     pf["vqa_gate"] = {"q1_yaw_relax": relaxed, "status": st, "defects": ev.get("defects") or [], "unsure": ev.get("unsure") or [],
                       "key": ev.get("key"), "enforce": enforced(), "continuity_ref": (v or {}).get("continuity_ref")}
     return pf
@@ -267,8 +325,8 @@ def q1_yaw_relax(pf: dict, v: dict | None) -> str | None:
     except Exception:  # noqa: BLE001
         return None
     q1 = next((i for i in pf.get("items") or [] if i.get("id") == "Q1"), None)
-    if not yr or not q1 or q1.get("status") != "fail" or not v or v.get("error"):
-        return None
+    if not yr or not yr.get("enabled", True) or not q1 or q1.get("status") != "fail" or not v or v.get("error"):
+        return None                                    # K-REV-V18 修订后转角放宽由三段判定 + 复核带取代（yaw_relax.enabled=false）
     ev = q1.get("evidence") or {}
     sims = ev.get("sims") or {}
     if len(sims) != 1 or ev.get("strangers") or "；" in str(q1.get("detail") or ""):
@@ -343,6 +401,99 @@ def recheck_strangers(pf: dict, image, out_dir: Path | None = None) -> str | Non
 def rubric_loads(text: str) -> dict | None:
     from . import rubric
     return rubric._loads_loose(text or "")
+
+
+L086 = "data/assets/identity_refs/lin_wan/lin_wan_face_hd_A_s202.png"
+BAND_Q = ("参考图是这个角色项目方认定的身份脸（L-086）；【待检】是新出图里裁出来的同一角色的脸。只看脸，回答三项，输出 JSON："
+          '{"same_person": "是|否|拿不准", "style_ok": "是|否|拿不准", "sharp": "是|否|拿不准", "e": "依据，不超过 30 字"}。'
+          "same_person：五官、脸型、年龄感是不是同一个人（侧脸 / 转角不算不同）；style_ok：画风和质感和参考一致（不是另一种脸型画法、没有发平发糊的塑料感）；"
+          "sharp：脸部清晰，不糊。")
+
+
+def band_ref(cid: str) -> str | None:
+    """复核带并排复核的参照：林晚一律 L-086（总调度 11-02：ArcFace 分不开 ref2va 与 L-086，项目方认 L-086）；其他角色用 asset_refs.face_of。
+    读不到运行登记表 / 资产 → 抛异常，由调用方记“复核失败”（不失败开放，arch_scan silent_read）"""
+    if cid == "lin_wan":
+        return str(ROOT / L086)
+    from ns_agent import asset_refs as AR
+    reg = json.loads((ROOT / "config" / "pipeline" / "runs.json").read_text(encoding="utf-8"))   # 项目 id 只从运行登记表读（hard_run）
+    f = AR.face_of(reg.get("primary"), cid)
+    return str(ROOT / f) if f else None
+
+
+def q1_band_review(pf: dict, image) -> str | None:
+    """K-REV-V18 修订：Q1 落在复核带（证据 review_band）→ 每个角色的脸裁出来和参照左右并排交本地看图（K-REV-V01）：
+    同一人 / 画风质感 / 清晰度三项都是“是”才算这个角色过；全部过、且 Q1 没有别的不过原因 → Q1 改判 pass。→ 改判说明或 None"""
+    q1 = next((i for i in pf.get("items") or [] if i.get("id") == "Q1"), None)
+    if not q1 or q1.get("status") != "fail":
+        return None
+    ev = q1.get("evidence") or {}
+    band = ev.get("review_band") or []
+    reasons = [r for r in str(q1.get("detail") or "").split("；") if r]
+    if not band or any("复核带" not in r for r in reasons):
+        return None
+    try:
+        from PIL import Image
+        from . import client
+        im = Image.open(image).convert("RGB")
+        out_dir = ROOT / "data" / "vqa" / "crops"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        results = []
+        for k, b in enumerate(band):
+            ref = band_ref(b["cid"])
+            if not ref or not b.get("bbox"):
+                results.append({"cid": b["cid"], "ok": False, "why": "没有参照或脸框"})
+                continue
+            x1, y1, x2, y2 = b["bbox"]
+            w, h = x2 - x1, y2 - y1
+            fp = out_dir / f"{Path(str(image)).stem}_band{k}.jpg"
+            im.crop((int(max(0, x1 - 0.3 * w)), int(max(0, y1 - 0.3 * h)), int(min(im.width, x2 + 0.3 * w)),
+                     int(min(im.height, y2 + 0.3 * h)))).save(fp, quality=92)
+            res = client.generate({"system": "你是画面质检员，只看图、只报事实，只输出 JSON。", "text": BAND_Q,
+                                   "images": [{"path": ref, "label": "参考图：身份脸（L-086）", "max_pixels": 150000},
+                                              {"path": str(fp), "label": "【待检】", "max_pixels": 200000}]}, wait_s=900)
+            d = rubric_loads(res.get("text", "")) if "error" not in res else None
+            d = d or {}
+            ok = all(d.get(x) == "是" for x in ("same_person", "style_ok", "sharp"))
+            results.append({"cid": b["cid"], "sim": b.get("sim"), "ok": ok, **{x: d.get(x) for x in ("same_person", "style_ok", "sharp", "e")}})
+    except Exception as e:  # noqa: BLE001
+        q1.setdefault("evidence", {})["band_review"] = f"复核失败：{e}"[:200]
+        return None
+    q1["evidence"] = {**ev, "band_review": results}
+    if results and all(r["ok"] for r in results):
+        note = "Q1 复核带经本地看图并排复核通过（" + "、".join(f"{r['cid']} {r['sim']}" for r in results) + "：同一人 / 画风 / 清晰都是）"
+        q1.update(status="pass", detail=note + "；原判：" + str(q1.get("detail") or ""))
+        pf["blocking"] = [x for x in pf.get("blocking") or [] if x != "Q1"]
+        pf["reasons"] = [r for r in pf.get("reasons") or [] if not str(r).startswith("Q1")]
+        if not pf["blocking"]:
+            pf["ok"] = True
+        return note
+    return None
+
+
+def q1_needs_vlm(pf: dict) -> bool:
+    """Q1 不过时，看图结果还能不能把它救回来（决定要不要排队看图，K-OPS-V15）：
+    单脸、分数落在转角放宽最低档以上（q1_yaw_relax 的候选），或者只因“认不出的脸”且 cast 有背影 / 局部人物（recheck_strangers 的候选）"""
+    q1 = next((i for i in pf.get("items") or [] if i.get("id") == "Q1"), None)
+    if not q1 or q1.get("status") != "fail":
+        return False
+    ev = q1.get("evidence") or {}
+    detail = str(q1.get("detail") or "")
+    if ev.get("partial_cast") and ev.get("stranger_boxes") and detail.startswith("画面里多了不该有的人"):
+        return True
+    if ev.get("review_band") and all("复核带" in r for r in detail.split("；") if r):
+        return True
+    sims = ev.get("sims") or {}
+    try:
+        from ns_agent.gen_contract import cfg as gcfg
+        yr = ((gcfg().get("image_thresholds") or {}).get("Q1_identity") or {}).get("yaw_relax") or {}
+    except Exception:  # noqa: BLE001
+        return False
+    floor = min((t for _lim, t in yr.get("tiers") or []), default=None)
+    if len(sims) == 1 and "；" not in detail and not ev.get("strangers") and floor is not None:
+        cid, sim = next(iter(sims.items()))
+        return cid in (yr.get("characters") or []) and sim is not None and sim >= floor
+    return False
 
 
 def q9_passed(pf: dict | None) -> bool:

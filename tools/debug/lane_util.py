@@ -77,9 +77,9 @@ def parse(raw: str) -> dict[int, dict]:
     return out
 
 
-def measure(minutes: float = 30, lanes: dict | None = None, fetch=None) -> dict:
+def measure(minutes: float = 30, lanes: dict | None = None, fetch=None, now: float | None = None) -> dict:
     lanes = lanes or DEFAULT_LANES
-    t1 = time.time()
+    t1 = now or time.time()
     t0 = t1 - minutes * 60
     by_host: dict[str, list[int]] = {}
     for lane, port in lanes.items():

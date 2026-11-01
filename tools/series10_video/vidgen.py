@@ -36,6 +36,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 RUN = ROOT / "data/pipeline/runs/series10_v1"
 VID = RUN / "video"
+LIP_REDO = ROOT / "data" / "director" / "redo_requests.json"   # DIRECTOR K-EDT-805 口型重出单（finish.py 写，check_lip_redo 读）
 PORTS = {"gpu33": {"gpu33:0": 8188, "gpu33:1": 8189, "gpu33:3": 8191},
          "gpu36": {"gpu36:0": 8188, "gpu36:1": 8189, "gpu36:2": 8190}}
 OUTDIR = {"gpu33:0": "/root/claude-kimi-ns-studio-v1/ComfyUI/output/gpu0",
@@ -294,6 +295,7 @@ class Runner:
             r = self.rec(sid)
             if not validate:
                 self.check_stale(sid, sh, r)
+                self.check_lip_redo(sid, r)
             if r["status"] in ("done", "best_effort", "blocked"):
                 continue
             if not sh.get("variants"):           # 无可出变体（如无人露脸镜首帧未过契约）→ 等资料，不出
@@ -312,6 +314,27 @@ class Runner:
             if v:
                 out.append((sid, v))
         return out
+
+    def check_lip_redo(self, sid, r):
+        """DIRECTOR K-EDT-805（总调度 11-02 批复 r2 第 3 条）：成片里画内对白被 TTS 兜底的镜（data/director/redo_requests.json，
+        tools/director/finish.py 写）→ 走和“首帧换版”同一条作废路径：现有视频挪进 superseded（带原因），状态回到待出，
+        变体从头算（不计次）。每条请求只用一次（r.lip_redo_applied 记请求键），不写回请求文件"""
+        reqs = [q for q in (jload(LIP_REDO, {}) or {}).get("requests") or []
+                if q.get("shot") == sid and q.get("status", "pending") == "pending"]
+        done = set(r.get("lip_redo_applied") or [])
+        new = [q for q in reqs if f"{q.get('timeline')}@{q.get('at')}" not in done]
+        if not new or any(x.get("state") in ("submitted", "scoring") for x in r["renders"]):
+            return
+        q = new[-1]
+        with self.lock:
+            r.setdefault("superseded", []).extend({**x, "superseded_at": time.time(), "why": q.get("reason"), "rule": "K-EDT-805"}
+                                                  for x in r["renders"])
+            r["renders"] = []
+            r["status"] = "pending"
+            r["chosen"] = None
+            r["lip_redo_applied"] = sorted(done | {f"{x.get('timeline')}@{x.get('at')}" for x in new})
+        log(self.host, "LIP_REDO", sid, q.get("reason"), q.get("timeline"))
+        self.event("lip_redo", shot=sid, reason=q.get("reason"), timeline=q.get("timeline"), rule="K-EDT-805")
 
     def check_stale(self, sid, sh, r):
         """首帧换版或被撤（postflight 不再 ok）→ 旧片作废：挪进 superseded，状态回到待出 / 等首帧（总调度 11-01：

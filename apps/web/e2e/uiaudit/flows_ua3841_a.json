@@ -1,0 +1,86 @@
+[
+  {
+    "id": "top1440",
+    "title": "顶栏 1440 深色",
+    "path": "/#/overview",
+    "wait": 9000,
+    "steps": [
+      { "wait": 3000 },
+      { "js": "const top=document.querySelector('header.v3-top'); const steps=[...document.querySelectorAll('.v3-steps .v3-step')].map(b=>{const sp=b.querySelector('span'); const sm=b.querySelector('small'); return {label:sp?.innerText, spanTrunc: sp? sp.scrollWidth>sp.clientWidth+1:null, spanW: sp?.clientWidth, smallText: sm?.innerText, smallVis: sm? getComputedStyle(sm).display!=='none' && sm.getBoundingClientRect().width>0 : false, smallTrunc: sm? sm.scrollWidth>sm.clientWidth+1:null, btnTrunc: b.scrollWidth>b.clientWidth+1}}); const chip=document.querySelector('.infra-pop'); const chipBtn=chip?.querySelector('button'); const rt=document.querySelector('.rt-btn'); const gpu=document.querySelector('.v3-gpu'); return {steps, chipText: chipBtn?.innerText, chipTitle: chipBtn?.title?.slice(0,300), chipDot: chip?.querySelector('.infra-dot')?.className, rtText: rt?.innerText, gpuText: gpu?.innerText, topOverflow: top? top.scrollWidth>top.clientWidth+1:null}" },
+      { "shot": "top" }
+    ]
+  },
+  {
+    "id": "pop1440",
+    "title": "连接胶囊点开 1440",
+    "path": "/#/overview",
+    "wait": 9000,
+    "steps": [
+      { "wait": 3000 },
+      { "clickAt": "(()=>{const b=document.querySelector('.infra-pop button')||document.querySelector('.infra-pop'); const r=b.getBoundingClientRect(); return [r.x+r.width/2, r.y+r.height/2]})()", "after": 1500 },
+      { "js": "const p=document.querySelector('.infra-panel'); return p? {text:p.innerText, hasPort:/\\b(18[1-3]\\d\\d|8800|8870|8188|8189|8190|8191)\\b/.test(p.innerText.replace(p.querySelector('details.infra-tech')?.innerText||'','')), hasApi:/\\/api\\//.test(p.innerText)} : 'no panel'" },
+      { "shot": "pop" }
+    ]
+  },
+  {
+    "id": "gpu1440",
+    "title": "GPU 面板 1440",
+    "path": "/#/overview",
+    "wait": 9000,
+    "steps": [
+      { "wait": 3000 },
+      { "clickAt": "(()=>{const b=document.querySelector('.v3-gpu'); const r=b.getBoundingClientRect(); return [r.x+r.width/2, r.y+r.height/2]})()", "after": 6000 },
+      { "js": "const imgs=[...document.querySelectorAll('.gl-thumb img, .gpu-drawer img, [class*=gpu] img')]; const thumbs=imgs.map(i=>({src:(i.currentSrc||i.src).slice(-90), complete:i.complete, nat:i.naturalWidth})); const none=[...document.querySelectorAll('.gl-thumb-none')].map(x=>x.innerText); const panel=document.querySelector('.infra-panel'); const dr=document.querySelector('[class*=gpu-drawer], aside[class*=gpu], .gpu-panel'); return {thumbs, broken: thumbs.filter(t=>t.complete && t.nat===0).length, none, infraTop: panel?.innerText?.slice(0,600), drawerText: (dr||document.body).innerText.slice(0,3000)}" },
+      { "shot": "gpu" },
+      { "js": "const d=document.querySelector('[class*=gpu-drawer], aside[class*=gpu], .gpu-panel'); if(d){d.scrollTop=d.scrollHeight/2;} return !!d" , "after": 800},
+      { "shot": "gpu_mid" }
+    ]
+  },
+  {
+    "id": "rt1440",
+    "title": "渲染任务抽屉 1440",
+    "path": "/#/overview",
+    "wait": 9000,
+    "steps": [
+      { "wait": 3000 },
+      { "click": "渲染任务", "after": 3000 },
+      { "js": "const b=document.querySelector('.rt-btn'); const d=document.querySelector('.rt-drawer'); return {btn:b?.innerText, title:b?.title, drawer: d?.innerText?.slice(0,800)}" },
+      { "shot": "rt" }
+    ]
+  },
+  {
+    "id": "top1280",
+    "title": "顶栏 1280 深色",
+    "path": "/#/overview",
+    "size": [1280, 800],
+    "wait": 9000,
+    "steps": [
+      { "wait": 3000 },
+      { "js": "const steps=[...document.querySelectorAll('.v3-steps .v3-step')].map(b=>{const sp=b.querySelector('span'); const sm=b.querySelector('small'); return {label:sp?.innerText, spanTrunc: sp? sp.scrollWidth>sp.clientWidth+1:null, spanW: sp?.clientWidth, smallVis: sm? getComputedStyle(sm).display!=='none' && sm.getBoundingClientRect().width>0 : false, btnTrunc: b.scrollWidth>b.clientWidth+1}}); const chip=document.querySelector('.infra-pop button'); const rt=document.querySelector('.rt-btn'); return {steps, chipText: chip?.innerText, rtText: rt?.innerText}" },
+      { "shot": "top" }
+    ]
+  },
+  {
+    "id": "top1440canvas",
+    "title": "顶栏 1440 在画布 ep06",
+    "path": "/#ep06",
+    "wait": 9000,
+    "steps": [
+      { "wait": 3000 },
+      { "js": "const steps=[...document.querySelectorAll('.v3-steps .v3-step')].map(b=>{const sp=b.querySelector('span'); const sm=b.querySelector('small'); return {label:sp?.innerText, spanTrunc: sp? sp.scrollWidth>sp.clientWidth+1:null, smallText: sm?.innerText, smallVis: sm? getComputedStyle(sm).display!=='none' && sm.getBoundingClientRect().width>0 : false, smallTrunc: sm? sm.scrollWidth>sm.clientWidth+1:null}}); return {steps, rt: document.querySelector('.rt-btn')?.innerText, chip: document.querySelector('.infra-pop button')?.innerText}" },
+      { "shot": "top" }
+    ]
+  },
+  {
+    "id": "top1280canvas",
+    "title": "顶栏 1280 在画布 ep06",
+    "path": "/#ep06",
+    "size": [1280, 800],
+    "wait": 9000,
+    "steps": [
+      { "wait": 3000 },
+      { "js": "const steps=[...document.querySelectorAll('.v3-steps .v3-step')].map(b=>{const sp=b.querySelector('span'); const sm=b.querySelector('small'); return {label:sp?.innerText, spanTrunc: sp? sp.scrollWidth>sp.clientWidth+1:null, smallVis: sm? getComputedStyle(sm).display!=='none' && sm.getBoundingClientRect().width>0 : false}}); return {steps, rt: document.querySelector('.rt-btn')?.innerText}" },
+      { "shot": "top" }
+    ]
+  }
+]

@@ -51,8 +51,10 @@ def mark(dry: bool = False) -> dict:
         for t in d.get("takes") or []:
             if t.get("quarantined") or T.script_version(t, ep) != "old":
                 continue
+            # 文件已在隔离区（上次标记被别的进程整份重写 takes.json 时冲掉了）也照样记 moved_to，补回标记
             moved = {k: f"data/_quarantine_20261102_oldscript/data/{v}" for k, v in t.items()
-                     if isinstance(v, str) and v.startswith("renders/") and (ROOT / "data" / v).is_file()}
+                     if isinstance(v, str) and v.startswith("renders/")
+                     and ((ROOT / "data" / v).is_file() or (QDIR / "data" / v).is_file())}
             t["quarantined"] = {"at": now, "by": BY, "reason": REASON, "moved_to": moved,
                                 "was_active": act.get(t.get("stage")) == t.get("n")}
             stats["takes"] += 1

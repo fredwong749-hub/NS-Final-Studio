@@ -577,6 +577,15 @@ def set_sheet(cid: str, body: SheetBody, request: Request):
     cands = {x["file"]: x for x in _sheet_candidates(pj, cid, body.look)}
     if body.file not in cands:
         raise HTTPException(422, "这张图不在这套造型的设定图候选里")
+    # K-AST-264（IMGFIX r6，L-102）：设定图入库检查——左右袖子一致、外层单品在；不过就不采用（v2_s202 缺袖事故）
+    if body.file != R.sheet_of(pj, cid, body.look):
+        from ns_agent import sheet_intake as SI
+        try:
+            chk = SI.check(body.file, cid, body.look, pj)
+        except Exception as e:  # noqa: BLE001  检查本身出错不挡（记日志）
+            chk = {"ok": True, "error": repr(e)[:200]}
+        if not chk.get("ok"):
+            raise HTTPException(422, "设定图入库检查没过：" + "；".join(chk.get("blocking") or []))
     by = _actor(request)
     f = _sheets_file(pj)
     key = f"sheet:{cid}_look{body.look}"

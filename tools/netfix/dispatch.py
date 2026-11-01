@@ -90,6 +90,31 @@ def ready_shots(ready: dict | None) -> dict[int, list[str]]:
     return out
 
 
+RUNS = ROOT / "config/pipeline/runs.json"
+LIVE_RUN_STATUS = ("producing",)
+
+
+def split_obj(s: str) -> tuple[str | None, str]:
+    """多剧并行（AUTOPILOT §0.1，L-104）：'<run>/<kind>:<shot>' 或 '<run>/<shot>' → (run, 余下)；无前缀 = primary（返回 None）"""
+    if "/" in s:
+        run, rest = s.split("/", 1)
+        return run, rest
+    return None, s
+
+
+def extra_runs() -> list[tuple[str, int]]:
+    """除 primary 外正在生产的 run（按 priority 升序）"""
+    d = jl(RUNS, {}) or {}
+    prim = d.get("primary")
+    out = [(r, int((v or {}).get("priority", 10))) for r, v in (d.get("runs") or {}).items()
+           if r != prim and (v or {}).get("status") in LIVE_RUN_STATUS]
+    return sorted(out, key=lambda x: x[1])
+
+
+def run_ready(run: str) -> dict:
+    return jl(ROOT / "data/autopilot/runs" / run / "ready_episodes.json", {}) or {}
+
+
 def global_pause(laptop_ctrl: dict | None, part: dict | None = None) -> tuple[bool, str | None]:
     part = part or partition()
     c = laptop_ctrl or {}
@@ -114,7 +139,7 @@ def phases(state: dict | None = None) -> dict[str, str]:
 
 
 def control_for(host: str, laptop_ctrl: dict | None, ready: dict | None, part: dict | None = None,
-                ph: dict | None = None) -> dict:
+                ph: dict | None = None, runs: list | None = None, ready_by_run: dict | None = None) -> dict:
     """本机 producer 的 control 字段（只这几个；control.json 其它字段读-改-写保留）"""
     part = part or partition()
     ph = ph if ph is not None else phases()
@@ -126,10 +151,19 @@ def control_for(host: str, laptop_ctrl: dict | None, ready: dict | None, part: d
         eps = sorted(set(eps) | set(taken))
     rs = ready_shots(ready)
     ready_eps = [e for e in eps if e in rs]
-    only = sorted({s for e in ready_eps for s in rs[e]}) or [NONE]
+    only = sorted({s for e in ready_eps for s in rs[e]})
+    runs_extra = {}
+    for run, _prio in (extra_runs() if runs is None else runs):   # 新 run：同一分区规则（按集），镜号带 '<run>/' 前缀；primary 不带前缀（过渡期零变化）
+        rr = ready_shots(run_ready(run) if ready_by_run is None else ready_by_run.get(run, {}))
+        add = sorted({f"{run}/{x}" for e in eps if e in rr for x in rr[e] if "/" not in x} |
+                     {x for e in eps if e in rr for x in rr[e] if x.startswith(run + "/")})
+        if add:
+            runs_extra[run] = len(add)
+            only += add
+    only = only or [NONE]
     if host == "laptop":
         hold = sorted({ln for h, ls in (part.get("lanes") or {}).items() if h != "laptop" and ph.get(h, "server") != "laptop"
-                       for ln in ls} | {ln for ln in (ov.get("laptop_hold") or []) if any(p == "laptop" for p in ph.values())})
+                       for ln in ls} | set(ov.get("laptop_hold") or []))   # L-100（总调度 01:5x）：laptop_hold 无条件生效（笔记本 4080 / gpu36 GPU2 专做看图），不再只在代派阶段生效
     else:
         hold = sorted({ln for h, ls in (part.get("lanes") or {}).items() if h != host for ln in ls})
         if ph.get(host, "server") in ON_LAPTOP:  # 本机分区正由笔记本代派（或交还中）：一单都不派，防重复
@@ -138,6 +172,7 @@ def control_for(host: str, laptop_ctrl: dict | None, ready: dict | None, part: d
     fields = {"only": only, "hold_lanes": hold,
               "dispatch_by": {"by": "NETFIX dispatch.py", "at": iso(), "host": host,
                               "partition_eps": eps, "ready_eps": ready_eps, "override_phases": ph, "laptop_takes_eps": taken,
+                              "extra_runs": runs_extra,
                               "rule": "K-OPS-N04 only = 分区 ∩ 已准备好的集；hold = 别的机器的道；paused 跟随笔记本全局暂停；"
                                       "K-OPS-N06 临时覆盖：phase=laptop 的服务器分区由笔记本经隧道派、服务器 only=__none__"}}
     if host != "laptop":                     # 笔记本的 paused 就是全局开关本身，不改
@@ -174,7 +209,7 @@ def _pid_alive(pid: int) -> bool:
 
 
 PUSH_FILES = ["data/netfix/override_state.json", "data/netfix/laptop_ctrl.json", "data/autopilot/ready_episodes.json",
-              "tools/netfix/dispatch.py", "config/netfix/override.json", "config/netfix/partition.json"]
+              "tools/netfix/dispatch.py", "config/netfix/override.json", "config/netfix/partition.json", "config/pipeline/runs.json"]
 
 
 def push_server_control(host: str) -> dict:
@@ -184,7 +219,8 @@ def push_server_control(host: str) -> dict:
     import tarfile
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w") as tf:
-        for rel in PUSH_FILES:
+        rels = PUSH_FILES + [f.relative_to(ROOT).as_posix() for f in (ROOT / "data/autopilot/runs").glob("*/ready_episodes.json")]
+        for rel in rels:                             # 多剧并行：各 run 的 ready 一起推
             if (ROOT / rel).exists():
                 tf.add(str(ROOT / rel), arcname=rel)
     sys.path.insert(0, str(ROOT / "tools/netfix"))
@@ -216,9 +252,12 @@ def reconcile(now_t: float | None = None, write: bool = True) -> dict:
     for h in ("gpu33", "gpu36"):
         rec = hosts.setdefault(h, {"phase": "server"})
         ph = rec.get("phase", "server")
-        back = (not ov.get("active")) or bool((ar.get(h) or {}).get("ready"))
+        a = ar.get(h) or {}
+        # 总调度 r2：assets_ready 曾是假的（gpu36 缺场景底图、preflight 全挡）→ 交还要两样都有：ready=true 且
+        # preflight_dryrun_ok=true（FACTORY 用服务器 producer dryrun 跑 preflight，0 挡才写）
+        back = (not ov.get("active")) or (bool(a.get("ready")) and a.get("preflight_dryrun_ok") is True)
         if ph == "laptop" and back:
-            rec.update(phase="draining", since=iso(), why=("override 关闭" if not ov.get("active") else f"assets_ready.{h}.ready=true"))
+            rec.update(phase="draining", since=iso(), why=("override 关闭" if not ov.get("active") else f"assets_ready.{h}.ready=true 且 preflight_dryrun_ok=true"))
             changed.append((h, "draining"))
         elif ph == "draining":
             busy = live_leases(part["images"].get(h) or [], now_t)

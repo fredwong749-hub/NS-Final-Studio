@@ -49,13 +49,26 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-E05
+    domain: ops
+    link: [P5-P6]
+    title: 出完图后等契约打分 / 看图不许占着派单线程；“出好但还没打完分”的图积压到上限就停派（背压），不让道显示“在做”而 GPU 空着
+    when: producer 派单线程池大小、出图后的打分等待
+    then: 线程池 ≥ 积压上限 + 2×道数（11-02 02:2x 复核：原 max(8, 3×道数) 在 gpu33 = 18 线程 < 积压上限 48，新单在池里排 50–100 s）；scoring 集合记录出好、正在等打分的对象，在 _run_one 的 finally 里清掉；积压 ≥ 2×道数×看图实例数（config/vqa.json model.instances，环境变量 NS_VQA_INSTANCES 优先；NS_PRODUCER_SCORE_BACKLOG 可直接覆盖）时 dispatch_frames 停派，记 score_backlog（每 5 分钟最多一条）
+    check: tests/test_debug_rsi.py::test_e05_pool_larger_than_lanes_and_backlog_blocks_dispatch, tests/test_debug_rsi.py::test_e05_scoring_cleared_in_finally, tests/test_debug_rsi.py::test_e05_backlog_scales_with_vlm_instances
+    evidence:
+      - {src: docs/debug/DEBUG_r1.md, note: "r2 02:2x gpu33 本机：dispatch 02:08:30 → rendered 02:10:04 但 render_s 39.9（线程池排队 54 s），inflight 19 = 线程数 18+1"}
+      - {src: data/producer/log.jsonl, note: "11-02 00:46 派出的 ep01-S10 / ep02-S1 / ep02-S2 / ep02-S3 到 01:03 都没交给 ComfyUI（四个 /queue 都空、/history 也没有）；同期 contract_s 506–1484 s，6 个派单线程全在等打分"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
   - id: K-OPS-E06
     domain: ops
     link: [P7-P8]
     title: 在服务器上跑的探测 / 分析命令一律套 timeout，加 nice、限线程；退出时清理自己留下的进程和临时文件
     when: 任何 loop 经 ssh / rssh 在 gpu33 / gpu36 上跑一次性探测或分析脚本
     then: 远端命令写成 timeout <秒> nice -n 19 env OMP_NUM_THREADS=1 ...；本地超时也要能保证远端会自己退出（不能只靠本地 subprocess 超时）；临时文件放 /tmp/dbg_*，脚本末尾删掉
-    check: 人工（DEBUG-RSI 探测脚本模板）
+    check: tests/test_debug_rsi.py::test_e06_remote_calls_have_timeout
     evidence:
       - {src: docs/debug/DEBUG_r1.md, note: "11-02 00:4x 本地超时后，gpu33 上 bash -s（pid 1531364）留了约 15 分钟，最后手动 kill；11-01 晚 v7_lipsync 吃满 96 核，负载 250"}
     confidence: high
@@ -67,9 +80,93 @@ rules:
     title: 服务器 ComfyUI 日志必须有落点并轮转；轮转用 copytruncate，不为轮转重启 ComfyUI
     when: 新起或改造服务器上的 ComfyUI 实例
     then: gpu33 走 systemd ns-comfy@<gpu>-<port>（journald 管）；gpu36 用 nohup 重定向到文件的，在 /etc/logrotate.d/ns-comfy-gpu36 登记（size 50M、rotate 7、copytruncate）；查错先看日志，/history 只做补充
-    check: 人工（logrotate -d /etc/logrotate.d/ns-comfy-gpu36）
+    check: tests/test_debug_rsi.py::test_e07_logrotate_spec, tools/debug/check_logrotate.py
     evidence:
       - {src: docs/debug/DEBUG_r1.md, note: "11-02 01:2x：gpu36 gpu0.log 713 KB、gpu1.log 835 KB、lane.log 524 KB，之前没有轮转；gpu33 journal 1.1 GB"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-E08
+    domain: ops
+    link: [P5-P6]
+    title: 暂停一律带 reason_kind + expires_at；运维暂停（line_switch / restart / deploy）≤180 s 到点自动恢复，总调度 / 项目方显式暂停（master / owner）不自动恢复、超 180 s 报警
+    when: 任何代码或人暂停 producer（producer.py pause、/api/producer/pause、restart_producer.ps1、resident_sync RESTART_DRAIN）
+    then: 判定只用 tools/autopilot/policy.py:pause_decision（DISTILL 唯一实现）；producer.set_paused 强制写 reason_kind + expires_at（--kind / --expires-s，不写按 --by 推断）；producer 每拍和 infra_watchdog 每拍调 pause_tick 执行 resume / 报警（A-PAUSE-OVERDUE，10 分钟最多一条）
+    check: tests/test_debug_rsi.py::test_e08_ops_pause_auto_resumes, tests/test_debug_rsi.py::test_e08_explicit_pause_never_auto_resumes_but_alerts_once, tests/test_debug_rsi.py::test_e08_kind_inference
+    evidence:
+      - {src: docs/master/NIGHT_PLAN_20261101.md, note: "11-02 00:52 NETFIX 切线路全局暂停 12 分钟没恢复（总调度 01:04 手动 resume），GPU 空转"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-E09
+    domain: ops
+    link: [P5-P6]
+    title: 驳回重出阶梯用完不再停下“等总调度定”——资产暂缓的继续等；输入变了重置（不计次）；输入没变追加 frame_v9_heavy ×2；再不过标尽力版 + SENTINEL 工单
+    when: producer 对象的驳回计划（master_rejects plan + 账本 ladder_plan）用完
+    then: Producer.escalate_exhausted 每拍执行（config/policies/retry.yaml redo_ladder，decider=code）；输入比对 = 最后一次驳回重出版本 vs first_frame_jobs.json（提示词 / compiler_inputs_sha / 参考图集合 / 参考图文件 mtime）；尽力版写 redo_exhausted + final=best_effort，工单写 data/sentinel/tickets.jsonl（附失败项统计）
+    check: tests/test_debug_rsi.py::test_e09_no_wait_for_master_exit_and_ladder_helpers, tests/test_debug_rsi.py::test_e09_escalate_routes
+    evidence:
+      - {src: docs/debug/DEBUG_r1.md, note: "11-02 02:33 gpu33 分区 41 个首帧、gpu36 36 个首帧卡在“驳回重出 2 次都没换上，等总调度定”，gpu33 四卡 0%"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-E10
+    domain: ops
+    link: [P5-P6]
+    title: 看图闸门结果并进契约时，之前只因“Q9 未跑”判的 ok=False，看图 pass 后必须翻回 True；旧的 Q9 理由要清掉；其他项不过不翻
+    when: services/agent/ns_agent/vqa/contract.py:apply()
+    then: ok = 没有挡住项 且 Q9 不是 fail / untested 且（旧 ok 为真 或 旧 blocking 只有 Q9）且其他项都没有 fail / untested
+    check: tests/test_debug_rsi.py::test_e10_vqa_pass_flips_ok_when_only_q9_blocked
+    evidence:
+      - {src: docs/debug/DEBUG_r1.md, note: "11-02 02:00 后 gpu36 19/61、gpu33 19/64 的 redo_fail blocking 为空（例 ep09-S2 v3：vqa_gate pass，reasons 仍写“Q9 没有本地看图复核结果”）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-E11
+    domain: ops
+    link: [P5-P6]
+    title: 尽力版（不进合成）在规则或资产版本变化时自动重置、重新进正常流程，不计次；资产暂缓清单里的不动
+    when: producer 每拍（5 分钟查一次）
+    then: Producer.auto_reset_best_effort：第一次见到尽力版记 be_basis（规则 = gen_contract / render_quality / vqa 三份配置哈希；本镜 = compiler_inputs_sha / 提示词哈希 / 参考图最新 mtime）；之后任一项变了 → tries=0、final=None、旧历史标 before_gate_change，记 best_effort_reset（counted=false）。知识库 compile 版本不算（太频繁）
+    check: tests/test_debug_rsi.py::test_e11_best_effort_auto_reset
+    evidence:
+      - {src: docs/master/NIGHT_PLAN_20261101.md, note: "11-01 16:46 59 项尽力版挡住下游 42 项，靠总调度手动 reset-best-effort（DJ-12）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-E12
+    domain: ops
+    link: [P5-P6]
+    title: 含尽力镜的集不再整集写 force_eps 放行；过了契约的镜由 night 逐镜出视频，尽力镜不进视频 / 合成
+    when: producer VideoBridge.tick（auto_force_eps）
+    then: 只记 video_release_skipped（每集一次），不写 night_control.json force_eps；⤴ 取代“含尽力镜的集自动放行”
+    check: tests/test_debug_rsi.py::test_no_force_eps_for_best_effort_episode
+    evidence:
+      - {src: docs/ITERATION_PROTOCOL.md, note: "§3 不合格不进合成；总调度 11-02 02:2x：auto_force 只能对过了契约的镜生效"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-E13
+    domain: ops
+    link: [P5-P6]
+    title: 登记表以 takes.json 当前版本和契约结果为准——尾帧 passed 但首帧没过或首帧比尾帧新，尾帧作废重出（不计次）；每拍自检写 consistency.json
+    when: producer.derive / tick
+    then: last_consistent() 在派生时把这类尾帧改为 ready / pending（voided）；registry_consistency() 每拍写 data/producer/consistency.json（data_parity 读这份）；不反过来改 takes
+    check: tests/test_debug_rsi.py::test_e13_last_voided_when_first_changed_or_not_passed
+    evidence:
+      - {src: data/renders/ep04/S1/takes.json, note: "11-02 当前首帧 v5（01:48）比当前尾帧 v1（11-01 04:34）新，登记表仍记尾帧 passed；DISTILL 统计 79 处、总调度复核 49 处自相矛盾"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-E14
+    domain: ops
+    link: [P7-P8]
+    title: 改工作树前用 tools/qa/lock_guard.py 查冻结锁（rc≠0 不改）；不许把 lock-status 接进管道（| head / | tail 会吞退出码）
+    when: 任何 loop 在 system_version cut 可能进行时改代码 / 配置 / 规则、跑 knowledge compile
+    then: lock_guard.py（或 lock_guard.py -- <命令>）；Python 里 require_unlocked()；要看输出用 `; echo rc=$?`，不用 `| head && …`
+    check: tests/test_debug_rsi.py::test_e14_lock_guard
+    evidence:
+      - {src: docs/debug/DEBUG_r1.md, note: "11-02 02:5x / 03:0x DEBUG-RSI 用 `lock-status | head -2 && 改文件`，lock rc=3 时仍改了 producer.py / 规则并 compile"}
     confidence: high
     status: 确认
     date: 2026-11-02

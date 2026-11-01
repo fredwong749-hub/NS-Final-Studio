@@ -28,6 +28,7 @@ BAKEOFF / AUTOPILOT）在宣布“本轮完成”之前必须跑它；退出码 
   L1 账本 / 报告    --report 存在；7 步关键词齐；引用的路径都存在；带数字的结论行同一行要有出处
   RL 规则有检查     --rules 每条在 knowledge 里且有 check 字段（指向存在的文件 / 测试）；或 --no-lesson "<理由>"
   H1 内容缺陷猎捕   生成类 loop：tools/qa/defect_hunt.py 的 state 必须比最新首帧 / 视频评分 / 成片新（K-OPS-Q13）
+  A1 结构棘轮       tools/qa/arch_scan.py --files <本轮 .py> --check：任一文件结构退化计数比 data/sysarch/baseline.json 多 = fail（K-OPS-S01，SYSARCH）
   V2 系统版本       本轮 --changed 是否已进系统版本（git tag sv-*，tools/qa/system_version.py cut）；没进只提示（K-OPS-V01）
   Y1 语法守卫       tools/qa/syntax_guard.py 全仓：写断的字符串 / 语法错误 / 非法转义 / 未定义名 / 项目内导入失效（K-OPS-C01，CODE-RSI）
   T1 测试           --tests 给的 pytest 路径；带真实数据写保护（tests/conftest.py + tools/qa/real_data_guard.py），写真实 data/ / 遗留线程 / 哨兵文件被改 = fail
@@ -581,6 +582,19 @@ class Gate:
         st = {0: "pass", 1: "fail"}.get(code, "untested")
         self.add("Y1", "全仓语法守卫（K-OPS-C01）", st, tail(out, 4))
 
+    def a1_arch(self):
+        # K-OPS-S01（SYSARCH 11-02，总调度批准、CONSENT 代录 docs/uimaster/LOCKS.md）：本轮改动不许新增结构退化
+        #（没 timeout 的子进程、直接 ssh、自写 def ssh、写死 run_id / 服务器路径、静默读取、非原子写 JSON、未入版、无主）
+        if not (ROOT / "tools/qa/arch_scan.py").exists():
+            return self.add("A1", "结构退化棘轮（K-OPS-S01）", "untested", "没有 tools/qa/arch_scan.py")
+        py = [c for c in self.changed if c.endswith(".py")]
+        if not py:
+            return self.add("A1", "结构退化棘轮（K-OPS-S01）", "na", "本轮没有改 .py", False)
+        code, out = sh([PY, "tools/qa/arch_scan.py", "--files", *py, "--check"], 300)
+        st = {0: "pass", 1: "fail"}.get(code, "untested")
+        bad = [ln.strip() for ln in out.splitlines() if ln.strip().startswith("退化")]
+        self.add("A1", "结构退化棘轮（K-OPS-S01）", st, (" ⏎ ".join(bad[:6]) if bad else tail(out, 2)))
+
     def v2_version(self):
         # K-OPS-V01（CODE-RSI r3，项目方 11-01 22:5x“每一次迭代都是用 override system,然后用 create a new version”）：
         # 本轮改动是否已进某个系统版本（git tag sv-*）；没进只提示，由总调度巡检时 tools/qa/system_version.py cut
@@ -630,6 +644,7 @@ class Gate:
         self.h1_hunt()
         self.g0_propagation()
         self.y1_syntax()
+        self.a1_arch()
         self.v2_version()
         self.t1_tests()
         fail = [r for r in self.rows if r["status"] == "fail"]

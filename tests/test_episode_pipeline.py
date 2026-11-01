@@ -113,3 +113,69 @@ def test_remote_merge_keeps_newer_server_objects(tmp_path):
     assert out["first:ep01-S1"].get("plan") == ["frame_v9"]          # 笔记本更晚 → 用笔记本的
     assert "cleared" in out["first:ep02-S1"]                          # 服务器更晚 → 不盖
     assert "first:ep03-S1" in out
+
+
+def test_candidate_eps_from_events_and_import(monkeypatch, tmp_path):
+    """总调度 02:0x：导入事件（imports.jsonl）触发；导入稿的集兜底；CHANGELOG 不再作为触发；事件按 run 区分（§0.1）"""
+    _setup(monkeypatch, tmp_path)
+    import import_events as IE
+    monkeypatch.setattr(IE, "EVENTS", tmp_path / "imports.jsonl")
+    monkeypatch.setattr(EP, "CHANGELOG", tmp_path / "CHANGELOG.md")
+    (tmp_path / "CHANGELOG.md").write_text("- HOLLYWOOD 导入 ep07\n", encoding="utf-8")
+    assert EP.candidate_eps() == [1, 2]                     # 只看到导入稿；CHANGELOG 的 ep07 不触发
+    IE.append_import([5], by="PRODUCER import_staged", script=tmp_path / "data/import/script_v2.json")
+    IE.append_import([3], by="PRODUCER import_staged", script=tmp_path / "data/import/script_v2.json", run_id="newshow_v1")
+    assert EP.candidate_eps() == [5, 1, 2]                  # 别的 run 的事件不混进 primary
+    ev = IE.read_events()
+    assert ev[0]["run_id"] and ev[1]["run_id"] == "newshow_v1" and len(ev[0]["script_sha"]) == 64
+    assert IE.episodes_imported(run_id="newshow_v1") == [3]
+
+
+def test_run_dir_from_project_registry(monkeypatch, tmp_path):
+    """DISTILL ①：运行目录按 asset_refs.json 里命中的项目取，不写死 series10_v1"""
+    monkeypatch.setattr(EP, "ROOT", tmp_path)
+    (tmp_path / "config/recipes").mkdir(parents=True)
+    (tmp_path / "data/import").mkdir(parents=True)
+    (tmp_path / "config/recipes/asset_refs.json").write_text(json.dumps({"projects": {
+        "series10_v1": {"run_dir": "data/pipeline/runs/series10_v1"}, "newshow_v1": {"run_dir": "data/pipeline/runs/newshow_v1"}}}), encoding="utf-8")
+    (tmp_path / "data/import/script_v2.json").write_text(json.dumps({"sources": [{"path": "data/staging_v3/merged/x_newshow_v1_ep01.md"}]}), encoding="utf-8")
+    assert EP.run_dir() == tmp_path / "data/pipeline/runs/newshow_v1"
+    (tmp_path / "config/pipeline").mkdir(parents=True)
+    (tmp_path / "config/pipeline/run.json").write_text(json.dumps({"run_id": "show3_v2"}), encoding="utf-8")
+    assert EP.run_dir() == tmp_path / "data/pipeline/runs/show3_v2"          # 配置优先
+
+
+def test_second_run_prepares_separately_without_touching_primary(monkeypatch, tmp_path):
+    """§0.1 多剧并行：新 run 的 ep01-S1 与 primary 的 ep01-S1 同名——作业 / ready 各在各的目录，ready 镜号带 run 前缀，primary 文件不动"""
+    _setup(monkeypatch, tmp_path)
+    import runs as RN
+    monkeypatch.setattr(RN, "ROOT", tmp_path)
+    (tmp_path / "config/pipeline").mkdir(parents=True)
+    (tmp_path / "config/pipeline/runs.json").write_text(json.dumps({"primary": "series10_v1", "runs": {
+        "series10_v1": {"priority": 0, "status": "producing"}, "newshow_v1": {"priority": 10, "status": "producing"}}}), encoding="utf-8")
+    (tmp_path / "data/import/runs/newshow_v1").mkdir(parents=True)
+    (tmp_path / "data/import/runs/newshow_v1/script_v2.json").write_text(json.dumps(
+        {"episodes": [{"number": 1, "shots": [{"index": 1}, {"index": 2}, {"index": 3}]}]}), encoding="utf-8")
+    seen = {}
+
+    class IJ:
+        @staticmethod
+        def rebuild_first_frame_jobs(rd, project=None, write=True, run=None):
+            seen["rebuild"] = (str(rd), run)
+            return {}
+
+        @staticmethod
+        def jobs_vs_import(rd, run=None):
+            return {"ok": True, "missing": [], "extra": [], "stale_sha": []}
+    monkeypatch.setattr(EP, "_image_jobs", lambda: IJ)
+    import import_events as IE
+    monkeypatch.setattr(IE, "EVENTS", tmp_path / "imports.jsonl")
+    primary_ready = tmp_path / "data/autopilot/ready_episodes.json"
+    st = {}
+    EP.watch_other_runs(st)
+    assert seen["rebuild"][1] == "newshow_v1" and seen["rebuild"][0].endswith("newshow_v1")
+    r = json.loads((tmp_path / "data/autopilot/runs/newshow_v1/ready_episodes.json").read_text(encoding="utf-8"))
+    assert r["episodes"]["1"]["shots"] == ["newshow_v1/ep01-S1", "newshow_v1/ep01-S2", "newshow_v1/ep01-S3"]
+    assert not primary_ready.exists()                                  # primary 的 ready 没被碰
+    assert st["runs"]["newshow_v1"]["eps"]["1"]["status"] == "prepared" and "eps" not in {k for k in st if k != "runs"}
+    assert RN.obj_id("newshow_v1", "first", "ep01-S1") == "newshow_v1/first:ep01-S1" and RN.obj_id("series10_v1", "first", "ep01-S1") == "first:ep01-S1"

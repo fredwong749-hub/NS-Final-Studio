@@ -244,7 +244,8 @@ def test_postflight_identity_and_framing_judgement():
     r = postflight.evaluate("x.png", req, remote=good, hands={"flags": []}, local={"Q2": [], "Q4": None, "Q7": None})
     st = {i.id: i.status for i in r.items}
     assert st["Q1"] == "pass" and st["Q3"] == "pass" and st["Q5"] == "pass" and st["Q6"] == "pass"
-    weak = {"faces": [{"h_ratio": 0.09, "bbox": [0, 0, 10, 10], "sims": {"lin_wan": 0.62}}], "text": [{"text": "LOGO"}]}
+    # K-REV-V18 修订（11-02，0.70 单线退役）：小脸档 ≥0.50 过、0.40–0.50 复核带、<0.40 直接不过 → 用 0.35 测“直接不过”
+    weak = {"faces": [{"h_ratio": 0.09, "bbox": [0, 0, 10, 10], "sims": {"lin_wan": 0.35}}], "text": [{"text": "LOGO"}]}
     st = {i.id: i.status for i in postflight.evaluate("x.png", req, remote=weak, local={"Q2": [], "Q4": None, "Q7": None}).items}
     assert st["Q1"] == "fail" and st["Q3"] == "fail" and st["Q6"] == "fail"
 

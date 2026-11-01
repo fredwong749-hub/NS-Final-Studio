@@ -21,6 +21,10 @@ from pathlib import Path
 # r3（总调度 22:05）：空档可用 gpu36 三道；VRCA_PORT / VRCA_OUT 指定道（默认 gpu36:2 长镜头道）
 PORT = int(os.environ.get("VRCA_PORT", "8190"))
 OUT = os.environ.get("VRCA_OUT", "/root/work/fredw/comfy/output/gpu2")
+# r5（总调度 11-02）：出图道由服务器 producer 派单；VRCA_LANES="8188:/root/work/fredw/comfy/output/gpu0,8189:..." 时
+# 只在某道“连续空闲 ≥ VRCA_IDLE_S 秒（默认 300）”后才提交，一次只挂 1 个；没设 VRCA_LANES 时沿用旧单道逻辑
+LANES = [(int(x.split(":", 1)[0]), x.split(":", 1)[1]) for x in os.environ.get("VRCA_LANES", "").split(",") if x]
+IDLE_S = int(os.environ.get("VRCA_IDLE_S", "300"))
 PROD_JOBS = Path("/root/work/fredw/video10_srv/data/pipeline/runs/series10_v1/video/jobs.json")
 REPO = "/root/work/fredw/video10_srv"
 PY = "/root/work/fredw/venv_idm/bin/python"
@@ -143,6 +147,17 @@ def score(d, j, src):
     if j.get("v67_meta") and not s.get("error"):
         # 剧本 18:24 重导入后镜号变了（旧 S4 = 新 S5…），score_clip 按镜号读 jobs.json 会拿错人数 / 对白 →
         # 用实验自带的旧镜头信息重跑 V6 / V7（同生产脚本、同阈值），并按新结果改 gate 的 多肢 / 口型 两项
+        # V7 口径（总调度 11-02 定）：只评台词段——先用回听时间戳（score_clip.asr_windows），没听到才用分拍时间码兜底
+        if [x for x in j["v67_meta"].get("dialogue") or [] if not x.get("off")] and not j["v67_meta"].get("dialogue_windows"):
+            code = ("import sys,json; sys.path.insert(0,'tools/series10_video'); import score_clip as S; from pathlib import Path; "
+                    "w=S.asr_windows(Path(sys.argv[1])); src='asr' if w else 'stamps'; "
+                    "w=w or S.dialogue_windows(sys.argv[2]); print(json.dumps({'w':w,'src':src}))")
+            rw = subprocess.run([*LIMIT, PY, "-c", code, str(mp4), j["score_meta"].get("prompt") or ""], capture_output=True,
+                                text=True, env=env, cwd=REPO, timeout=900)
+            lw = [x for x in rw.stdout.splitlines() if x.startswith("{")]
+            if lw:
+                ww = json.loads(lw[-1])
+                j["v67_meta"] = {**j["v67_meta"], "dialogue_windows": ww["w"], "window_source": ww["src"]}
         for key, py, script in (("v6", "/root/work/fredw/venv_hand/bin/python", "v6_limbs.py"),
                                 ("v7", PY, "v7_lipsync.py")):
             rr = subprocess.run([*LIMIT, py, f"{REPO}/tools/series10_video/{script}", str(mp4),
@@ -165,6 +180,33 @@ def score(d, j, src):
     return s
 
 
+def pick_idle_lane(d):
+    """轮询 LANES，找“连续空闲 ≥ IDLE_S 秒”的道（队列为空、生产没有 ready 视频变体）；找到就把全局 PORT / OUT 指过去"""
+    global PORT, OUT
+    since = {}
+    last_log = 0
+    while True:
+        now = time.time()
+        for port, out in LANES:
+            try:
+                q = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/queue", timeout=20).read())
+                busy = bool(q["queue_running"] or q["queue_pending"]) or prod_ready()
+            except Exception:  # noqa: BLE001
+                busy = True
+            if busy:
+                since.pop(port, None)
+                continue
+            since.setdefault(port, now)
+            if now - since[port] >= IDLE_S:
+                PORT, OUT = port, out
+                log(d, "选道", port, f"已连续空闲 {int(now - since[port])} s")
+                return
+        if now - last_log > 600:
+            log(d, "等空档", {p: int(now - s) for p, s in since.items()})
+            last_log = now
+        time.sleep(30)
+
+
 def main(d, adopt):
     d = Path(d)
     exp = d.name
@@ -180,15 +222,18 @@ def main(d, adopt):
             pid = adopt[a]
             log(d, "ADOPT", a, pid)
         else:
-            while True:
-                try:
-                    ok, why = lane_free()
-                except Exception as e:  # noqa: BLE001
-                    ok, why = False, str(e)
-                if ok:
-                    break
-                log(d, "让道", why)
-                time.sleep(90)
+            if LANES:
+                pick_idle_lane(d)
+            else:
+                while True:
+                    try:
+                        ok, why = lane_free()
+                    except Exception as e:  # noqa: BLE001
+                        ok, why = False, str(e)
+                    if ok:
+                        break
+                    log(d, "让道", why)
+                    time.sleep(90)
             pid = submit(d, exp, j)
             log(d, "SUBMIT", a, j.get("recipe"), j.get("seed"), pid)
         t0 = time.time()

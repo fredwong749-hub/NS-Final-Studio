@@ -139,7 +139,7 @@ def test_r39_topbar_short_texts():
     inf = (web / "v3" / "InfraStatus.tsx").read_text(encoding="utf-8")
     assert '`${n - bad}/${n}`' in inf and '"跳板断"' in inf
     rt = (web / "components" / "RenderTasks.tsx").read_text(encoding="utf-8")
-    assert "{c.rendering} 跑 · {c.pending} 等" in rt and "渲染任务" in rt   # 按钮字“渲染任务”保留（UIAUDIT flows 按它找）
+    assert "在办 {c.rendering} · 排队 {c.queued ?? c.pending}" in rt and "渲染任务" in rt   # 按钮字“渲染任务”保留（UIAUDIT flows 按它找）
     top = (web / "v3" / "TopBarV3.tsx").read_text(encoding="utf-8")
     assert "prodOn || (offline && !infraOn)" in top
     gl = (ROOT / "services" / "api" / "ns_api" / "gpu_live.py").read_text(encoding="utf-8")

@@ -49,6 +49,7 @@ STATUS_DOC = {
     "hosts.<连接名>": "每条 ssh 一项（00:0x 起按道分连接：gpu33-l0 / gpu33-l1 / gpu33-l3 / gpu36-l0 / gpu36-l1 / gpu36-l2；server 字段 = 所属服务器）{state: up|connecting|backoff|relay_down|stopped, pid, since_t（本条 ssh 起的时间）, up_since_t（端口全部通的时间）, "
                  "restarts, last_restart: {t, reason}, next_try_t, ports: {<本机口>: {remote, ok, why: ok|timeout|refused|remote_down, checked_t}}}",
     "dispatch_mode": "派单模式（K-OPS-N06）：{override_active: 临时覆盖是否生效, phases: {gpu33|gpu36: laptop=该台分区由笔记本经隧道代派 | draining=正在交还 | server=服务器自己派}, checked_t}",
+    "transfer": "传图队列（K-OPS-N09，puller 写）：{hosts: {gpu33|gpu36: {reachable, backlog_items 积压条数, backlog_bytes, throughput_kBps, latency_p50_s / p90_s 产出→落地, acked_total}}}；界面例：“传图队列：积压 12 张，约 3 分钟”",
     "tunnels_up / tunnels_total": "出图 / 视频道（probe_http）通的条数 / 总数",
     "servers.<h>": "服务器自主生产：{last_health_t, last_pull_t, last_push_t, sync_age_min（最后一次并回距今分钟，界面“最后一次同步 xx 分钟前”用它）, producer_hb_age_min, producer_paused, night_state_age_min, dispatchable, autonomous: 跳板断时 true}（取自 resident_sync.json，跳板断时停在最后一次）",
 }
@@ -144,7 +145,12 @@ def mux_check(sock: str, host: str, timeout: float = 20) -> bool:
 
 def _route_of(cmd: str) -> str:
     c = cmd.rstrip().strip('"')
-    return "t" if c.endswith("-t") else "hk" if c.endswith("-hk") else "direct"
+    return "t" if (c.endswith("-t") or c.endswith("-tb")) else "hk" if c.endswith("-hk") else "direct"
+
+
+def _base_of(cmd: str) -> str | None:
+    c = cmd.rstrip().strip('"')
+    return "base-b" if c.endswith("-tb") else "base-a" if c.endswith("-t") else None
 
 
 def ssh_banner(port: int, timeout: float = 10) -> bool:
@@ -252,22 +258,36 @@ class Supervisor:
         hc = self.c["hosts"][h]
         route = self.pick_route()
         target = hc.get("ssh_host", h) + (self.c.get("routes") or {}).get(route, {}).get("suffix", "")
-        if hc.get("kind") == "base":                # r2：底座隧道连跳板本身（香港 194relay-hk / 直连 194relay），只转发两台 sshd
-            target = (self.c.get("routes") or {}).get(route, {}).get("relay", "194relay")
-        elif hc.get("via") == "t":                  # r2：在底座隧道里直连服务器 sshd（127.0.0.1:22360 / 22330），不在跳板上握手
-            target = hc.get("ssh_host", h) + "-t"
+        if hc.get("kind") == "base":                # r2/r3：底座隧道连跳板本身；base-a 固定香港、base-b 固定直连（互为备份，不再一条单点）
+            target = (self.c.get("routes") or {}).get(hc.get("route") or route, {}).get("relay", "194relay")
+        elif hc.get("via") == "t":                  # 在底座隧道里直连服务器 sshd，不在跳板上握手；挂哪条底座见 pick_base
+            b = self.pick_base(h) or hc.get("base", "base-a")
+            target = hc.get("ssh_host", h) + self.c["hosts"][b].get("alias_suffix", "-t")
         cfg = self.c.get("ssh_config")
         if hc.get("kind") == "wsl_mux":            # P0 11-02：WSL OpenSSH 命令主连接（ControlMaster），远程命令 / 文件都复用它
             return WSL + ["ssh", *(["-F", self.c["ssh_config_wsl"]] if cfg else []), "-o", "BatchMode=yes", "-M", "-S", hc["sock"],
                           "-o", "ControlPersist=no", "-N", "-o", f"Tag={self.host_tag(h)}", target]
+        extra = ["-o", "LogLevel=VERBOSE"] if hc.get("kind") == "base" else []   # r3：底座记通道开关明细，查 no_banner 根因
         if cfg:                                     # K-OPS-N08：项目 ssh 配置（香港中转主路 / 直连备用），相对路径 + cwd=ROOT（路径有空格）
-            cmd = [self.c["ssh_exe"], "-F", cfg, *self.c["ssh_opts"], "-o", f"Tag={self.host_tag(h)}"]
+            cmd = [self.c["ssh_exe"], "-F", cfg, *self.c["ssh_opts"], *extra, "-o", f"Tag={self.host_tag(h)}"]
         else:
             cmd = [self.c["ssh_exe"], *self.c["ssh_opts"], "-o", f"Tag={self.host_tag(h)}",
                    "-o", "ProxyCommand=" + self.c["relay"]["proxy_cmd"].replace("Tag=nsnetfix-proxy", f"Tag={self.tag}-proxy-{h}")]
         for lp, rp in hc["forwards"]:
             cmd += ["-L", f"127.0.0.1:{lp}:{rp}" if isinstance(rp, str) else f"127.0.0.1:{lp}:127.0.0.1:{rp}"]
         return cmd + [target]
+
+    def bases(self) -> list[str]:
+        return [k for k, v in self.c["hosts"].items() if v.get("kind") == "base"]
+
+    def pick_base(self, h: str) -> str | None:
+        """内层连接挂哪条底座：优先自己配置的那条（按道分摊），它不通就挂另一条通的；都不通 → None"""
+        pref = self.c["hosts"][h].get("base") or (self.bases() or [None])[0]
+        order = [pref] + [b for b in self.bases() if b != pref]
+        for b in order:
+            if b and (self.hosts.get(b) or {}).get("state") == "up":
+                return b
+        return None
 
     def pick_route(self) -> str:
         """K-OPS-N08：按 route_order 选第一条“入口 TCP 通且没被判坏”的路；都不行用 direct"""
@@ -300,22 +320,23 @@ class Supervisor:
                     continue
                 if mux:
                     tgt = self.c["hosts"][hh].get("ssh_host", hh)
-                    if any(cmd.rstrip().endswith(f'{mine} {tgt}{suf}') for suf in ("", "-hk", "-t")):   # 精确匹配（-cmd 是 -cmd2 的前缀）
+                    if any(cmd.rstrip().endswith(f'{mine} {tgt}{suf}') for suf in ("", "-hk", "-t", "-tb")):   # 精确匹配（-cmd 是 -cmd2 的前缀）
                         if st["pid"] is None and pid_alive(pid):
                             st.update(pid=pid, since_t=now() - 60, state="up", up_since_t=now(),
-                                      route=_route_of(cmd))
+                                      route=_route_of(cmd), base=_base_of(cmd))
                             self.log("ADOPT own mux", hh, pid)
                         # 同一条 wsl.exe --exec 在 Windows 上是两个同命令行的进程（00:32 实测：杀“重复”的那个 = 杀掉主连接），不杀
                     continue
                 if mine in cmd:
-                    want = [f"127.0.0.1:{lp}:127.0.0.1:{rp}" for lp, rp in self.c["hosts"][hh]["forwards"]]
+                    want = [f"127.0.0.1:{lp}:{rp}" if isinstance(rp, str) else f"127.0.0.1:{lp}:127.0.0.1:{rp}"
+                            for lp, rp in self.c["hosts"][hh]["forwards"]]   # r3 修：底座 "10.0.0.36:22" 规格原先永远不匹配 → 每次重载都杀底座
                     if not all(w in cmd for w in want):              # 配置加了转发（例：8871 收编）→ 旧 ssh 不认领，杀掉按新配置重起
                         kill(pid)
                         self.log("ADOPT kill own ssh with stale forwards", hh, pid)
                         continue
                     if st["pid"] is None and pid_alive(pid):          # 上一个监管进程起的：认领，不打断
                         st.update(pid=pid, since_t=now() - self.c.get("listen_grace_s", 45), state="up", up_since_t=now(),
-                                  route=_route_of(cmd))   # 认领时按命令行目标认路   # 认领的按“通”算，卡死要连续 hang_rounds 轮（23:44 一轮就杀的教训）
+                                  route=_route_of(cmd), base=_base_of(cmd))   # 认领时按命令行目标认路 / 认底座   # 认领的按“通”算，卡死要连续 hang_rounds 轮（23:44 一轮就杀的教训）
                         self.log("ADOPT own ssh", hh, pid)
                     elif st["pid"] != pid:                            # 同 Tag 多出来的：杀
                         kill(pid)
@@ -342,12 +363,14 @@ class Supervisor:
         cmd = self.ssh_cmd(h)
         p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, cwd=str(ROOT),
                              stderr=open(self.dir / f"ssh_{h}.err.log", "ab"), creationflags=NOWIN)
-        st["route"] = self.pick_route()
+        st["route"] = "t" if hc.get("via") == "t" else (hc.get("route") or self.pick_route())
+        if hc.get("via") == "t":
+            st["base"] = self.pick_base(h) or hc.get("base")
         st.update(pid=p.pid, since_t=now(), up_since_t=None, state="connecting", hang=0, probe_t=0.0, _io=None)
         st["_popen"] = p
         self.log("SPAWN", h, p.pid, reason)
 
-    def stop_host(self, h: str, reason: str) -> None:
+    def stop_host(self, h: str, reason: str, count: bool = True) -> None:
         st = self.hosts[h]
         if st["pid"]:
             kill(st["pid"])
@@ -355,12 +378,12 @@ class Supervisor:
         st.update(pid=None, since_t=None, up_since_t=None, state="backoff")
         st["restarts"] += 1
         st["last_restart"] = {"t": now(), "reason": reason}
-        self.schedule(h)
+        self.schedule(h, count)
 
-    def schedule(self, h: str) -> None:
+    def schedule(self, h: str, count: bool = True) -> None:
         st = self.hosts[h]
         r = st.get("route")
-        if r and r != "direct" and self.c.get("routes"):    # 主路上连续失败：计数，≥ route_fail_max 判坏 10 分钟，退回直连
+        if count and r and r in (self.c.get("routes") or {}) and r != "direct" and self.c["hosts"][h].get("kind") == "base":    # 只算底座在主路上的真实失败：计数，≥ route_fail_max 判坏 10 分钟，退回直连
             self.route_fails[r] = self.route_fails.get(r, 0) + 1
             if self.route_fails[r] >= self.c.get("route_fail_max", 4):
                 self.route_bad_until[r] = now() + self.c.get("route_bad_s", 600)
@@ -412,8 +435,12 @@ class Supervisor:
         st = self.hosts[h]
         hc = self.c["hosts"][h]
         if hc.get("kind") == "base":
+            t0 = now()
             res = [ssh_banner(lp) for lp, _ in hc["forwards"]]
             t = now()
+            st["banner_s"] = round(t - t0, 1)
+            if t - t0 > 5:
+                self.log("BASE banner slow", h, f"{t - t0:.1f}s", res)
             st["probe_t"] = t
             st["ports"] = {str(lp): {"remote": rp, "ok": ok, "why": "ok" if ok else "no_banner", "checked_t": t}
                            for (lp, rp), ok in zip(hc["forwards"], res)}
@@ -425,9 +452,21 @@ class Supervisor:
                     self.log("UP", h, st["pid"], "base", st.get("route"), f"{age:.0f}s after spawn")
                 st["state"] = "up"
             elif age >= self.c.get("listen_grace_s", 45) or st["state"] == "up":
+                prev, cur = st.get("_io"), io_bytes(st["pid"])
+                st["_io"] = cur
+                moving = prev is not None and cur is not None and cur > prev + 4096
+                inner_ok = [x for x, y in self.hosts.items() if y.get("base") == h and y["state"] == "up"
+                            and any(v.get("ok") for v in y["ports"].values())]
+                if st["state"] == "up" and (moving or inner_ok):
+                    st["hang"] = 0
+                    for v in st["ports"].values():
+                        v["why"] = "banner_slow_but_alive"
+                    self.log("BASE banner slow but alive", h, "io moving" if moving else f"inner ok {len(inner_ok)}")
+                    return
                 st["hang"] += 1
+                self.log("PROBE fail", h, st["pid"], "no_banner", f"round {st['hang']}")
                 if st["hang"] >= self.c.get("hang_rounds", 3) or st["state"] != "up":
-                    self.stop_host(h, f"底座隧道读不到服务器 sshd banner（{age:.0f}s）")
+                    self.stop_host(h, f"底座隧道读不到服务器 sshd banner、也没在搬数据（{age:.0f}s）")
             return
         if hc.get("kind") == "wsl_mux":
             ok = mux_check(hc["sock"], hc.get("ssh_host", h))
@@ -498,13 +537,28 @@ class Supervisor:
                 st.update(pid=None, since_t=None, up_since_t=None, state="backoff")
                 st["restarts"] += 1
                 st["last_restart"] = {"t": t, "reason": f"ssh 退出 rc={rc}"}
+                if self.c["hosts"][h].get("kind") == "base":   # 底座断了：只清挂在它上面的内层，立刻改挂另一条底座（r3：≤30 s 恢复）
+                    moved = []
+                    for hh, x in self.hosts.items():
+                        if self.c["hosts"][hh].get("via") == "t" and x["pid"] and x.get("base") in (h, None):
+                            kill(x["pid"])
+                            x.update(pid=None, since_t=None, up_since_t=None, state="wait_base", fails=0, next_try_t=0.0, hang=0)
+                            x.pop("_popen", None)
+                            moved.append(hh)
+                    self.log("BASE down", h, "→ 清掉其上内层", moved, "改挂另一条底座")
                 self.schedule(h)
                 if not relay_up:
                     st["next_try_t"] = 0.0
             if st.get("state") == "hostkey_changed":
                 continue
-            if not st["pid"] and self.c["hosts"][h].get("via") == "t" and (self.hosts.get("base") or {}).get("state") != "up":
-                st["state"] = "wait_base"            # 底座隧道没通，内层连接不起
+            if self.c["hosts"][h].get("via") == "t" and st["pid"] and st.get("base") and \
+                    (self.hosts.get(st["base"]) or {}).get("state") not in ("up",) and self.pick_base(h):
+                kill(st["pid"])                      # 它挂的底座已经不在、另一条在：立刻改挂
+                self.log("REHOME", h, st.get("base"), "→", self.pick_base(h))
+                st.update(pid=None, since_t=None, up_since_t=None, state="wait_base", fails=0, next_try_t=0.0, hang=0)
+                st.pop("_popen", None)
+            if not st["pid"] and self.c["hosts"][h].get("via") == "t" and not self.pick_base(h):
+                st["state"] = "wait_base"            # 两条底座都没通，内层连接不起
                 continue
             if not st["pid"]:
                 if not relay_up:
@@ -513,7 +567,8 @@ class Supervisor:
                                    for p, r in self.c["hosts"][h]["forwards"] if p in (self.c["hosts"][h].get("probe_http") or [])}
                     continue
                 connecting = sum(1 for x in self.hosts.values() if x["state"] == "connecting" and x["pid"])
-                if t >= st["next_try_t"] and connecting < self.c.get("max_connecting", 2):   # 新建连接全局串行：同时握手 ≤2（跳板 MaxStartups 10:30:100）
+                lim = self.c.get("max_connecting_inner", 4) if self.c["hosts"][h].get("via") == "t" else self.c.get("max_connecting", 2)
+                if t >= st["next_try_t"] and connecting < lim:   # 新建连接全局串行：同时握手 ≤2（跳板 MaxStartups 10:30:100）
                     self.spawn(h, "跳板通、ssh 不在")
                 elif t >= st["next_try_t"]:
                     st["state"] = "queued"
@@ -524,12 +579,17 @@ class Supervisor:
             if t - st["probe_t"] >= every:
                 due.append(h)
         pref = self.pick_route()
-        if self.c.get("routes") and t - self.relay.get("route_changed_t", 0) > self.c.get("migrate_after_s", 120):
-            for h, st in self.hosts.items():         # 回到主路：每拍最多迁一条（逐条断开重连，不一次全断）
-                if st["pid"] and st["state"] == "up" and self.c["hosts"][h].get("kind") == "base" and st.get("route", "direct") != pref:
-                    self.stop_host(h, f"迁回主路 {st.get('route', 'direct')} → {pref}")
-                    st["fails"], st["next_try_t"] = 0, 0.0
-                    break
+        for h, st in self.hosts.items():             # 内层不在首选底座（或还连旧路由）、首选底座已稳定 ≥ migrate_after_s → 每拍迁一条（滚动）
+            hc = self.c["hosts"][h]
+            if hc.get("via") != "t" or not st["pid"] or st["state"] != "up":
+                continue
+            want = hc.get("base")
+            wb = self.hosts.get(want) or {}
+            if (st.get("route") != "t" or st.get("base") != want) and wb.get("state") == "up" and \
+                    t - (wb.get("up_since_t") or t) >= self.c.get("migrate_after_s", 120):
+                self.stop_host(h, f"迁回首选底座 {st.get('base')} → {want}", count=False)
+                st["fails"], st["next_try_t"] = 0, 0.0
+                break
         if due:                                     # 两台并行探测：一拍最长约一个探测超时（20 s），心跳不拖过 90 s 线
             with ThreadPoolExecutor(len(due)) as ex:
                 list(ex.map(self.probe_round, due))
@@ -539,6 +599,9 @@ class Supervisor:
                 import dispatch
                 if dispatch.snapshot_laptop():
                     self.log("SNAPSHOT laptop_ctrl 已更新")
+                if t - getattr(self, "_pull_t", 0) >= 60:         # K-OPS-N09：puller 常驻保活（拿得到它的锁 = 不在跑 → 拉起）
+                    self._pull_t = t
+                    self.ensure_puller()
                 if t - getattr(self, "_rec_t", 0) >= 30:          # K-OPS-N06 临时覆盖：逐台交还状态机，30 s 一次
                     self._rec_t = t
                     r = dispatch.reconcile()
@@ -549,6 +612,23 @@ class Supervisor:
             except Exception as e:  # noqa: BLE001
                 self.log("snapshot error", repr(e)[:200])
         self.write_status()
+
+    def ensure_puller(self) -> None:
+        if (self.dir / "PULLER_OFF").exists():
+            return
+        import msvcrt
+        try:
+            f = open(self.dir / "puller.lock", "a+")
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+            f.close()
+        except OSError:
+            return                                   # 锁被占 = puller 在跑
+        pyw = ROOT / ".venv/Scripts/pythonw.exe"
+        subprocess.Popen([str(pyw if pyw.exists() else sys.executable), "-u", str(ROOT / "tools/netfix/puller.py"), "serve"], cwd=str(ROOT),
+                         stdin=subprocess.DEVNULL, stdout=open(self.dir / "puller.out.log", "ab"), stderr=subprocess.STDOUT,
+                         creationflags=NOWIN | getattr(subprocess, "DETACHED_PROCESS", 0))
+        self.log("PULLER started")
 
     def servers_view(self) -> dict:
         """服务器自主生产视图（取自 resident_sync.json；跳板断时这些值停在最后一次同步）"""
@@ -577,7 +657,8 @@ class Supervisor:
         js(self.status_p, {"schema": STATUS_DOC["schema"], "at": iso(), "t": now(),
                            "supervisor": {"pid": os.getpid(), "started_t": self.started, "conf": str(self.conf_path)},
                            "relay": self.relay, "hosts": pub, "tunnels_up": up, "tunnels_total": total,
-                           "servers": self.servers_view(), "dispatch_mode": getattr(self, "mode", None), "_doc": STATUS_DOC})
+                           "servers": self.servers_view(), "dispatch_mode": getattr(self, "mode", None),
+                           "transfer": jl(self.dir / "puller_status.json", None), "_doc": STATUS_DOC})
 
     def serve(self, max_s: float | None = None) -> None:
         self.log("START pid", os.getpid(), "conf", self.conf_path)

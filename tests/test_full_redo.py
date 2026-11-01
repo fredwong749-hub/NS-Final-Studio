@@ -100,3 +100,29 @@ def test_apply_refuses_when_image_jobs_red(monkeypatch, tmp_path):
     monkeypatch.setattr(FR, "image_jobs_green", lambda: {"ok": False, "tests": "2 failed"})
     r = FR.apply()
     assert r["ok"] is False and r["image_jobs"]["ok"] is False
+
+
+def test_cli_reason_with_spaces_not_split(monkeypatch, tmp_path, capsys):
+    """DEBUG_r1 #12：Start-Process / 未加引号的调用把带空格的原因拆成多个参数 → argparse 报错。现在多词原因拼回一句"""
+    monkeypatch.setattr(FR, "ROOT", tmp_path)
+    (tmp_path / "data/pipeline/runs/series10_v1/assets").mkdir(parents=True)
+    (tmp_path / "data/pipeline/runs/series10_v1/assets/first_frame_jobs.json").write_text('{"jobs": []}', encoding="utf-8")
+    rc = FR.main(["reject-old-jobs", "--shots", "ep01-S1", "--since", "2099-01-01", "--reason", "局部出场人物去外貌", "/", "脸部词（IMGFIX", "00:3x）",
+                  "--note", "a", "b", "--dry"])
+    assert rc == 0 and '"rejected": []' in capsys.readouterr().out
+
+
+def test_restart_guarded_skips_without_resident_changes(monkeypatch, tmp_path):
+    """DEBUG_r1：只在常驻实际加载的文件变了才重启；30 分钟内最多一次"""
+    import resident_sync as RS
+    monkeypatch.setattr(RS, "STATE", tmp_path / "st.json")
+    monkeypatch.setattr(RS, "log", lambda *a: None)
+    calls = []
+    monkeypatch.setattr(RS, "ssh", lambda *a, **k: calls.append(a) or b"{}")
+    monkeypatch.setattr(RS, "restart", lambda h, mode=None: calls.append(("restart", h)) or "ok")
+    monkeypatch.setattr(RS, "local_manifest", lambda dirs: {"tests/test_x.py": (1, 9e9), "docs/a.md": (1, 9e9)})
+    assert RS.restart_guarded("gpu33") is None and not calls                 # 只改了测试 / 文档 → 不重启
+    monkeypatch.setattr(RS, "local_manifest", lambda dirs: {"tools/autopilot/producer.py": (1, 9e9)})
+    assert RS.restart_guarded("gpu33") == "ok"
+    assert RS.restart_guarded("gpu33") is None                               # 30 分钟内第二次 → 跳过
+    assert RS.AUTO_CODE_PUSH is False                                        # loop 不再自己推代码 / 重启

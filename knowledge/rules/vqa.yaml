@@ -191,3 +191,39 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-REV-V16
+    domain: review
+    link: [P11-P12]
+    title: V7 口型只评台词段（回听时间戳），判据 = 台词段开合幅度 ≥0.004 且（台词段相关 ≥0.30 或 张嘴帧占比 ≥0.30）——幅度作前提是总调度批准的偏离（r18 s103 相关 0.593 但嘴不动），样本少继续扩
+    when: score_clip 跑 V7（有画内对白的镜头）
+    then: tools/series10_video/v7_asr.py 用 SenseVoice 取台词实际时段，分拍时间码只作兜底；v7_lipsync 输出 win_amp / win_open_frac / pass_by，阈值在 TH；标定集 data/vqa/gate_calib/v7_labels.json（总调度人工标签）必须全对
+    check: [tests/test_vqagate.py]
+    evidence:
+      - {src: data/review_pages/v7_window/index.html, note: "总调度 11-02 亲审：S4ffb s102、S4calm s101 台词段都有清楚张合 = 过；整轨口径错判 calm、只看相关错判 ffb；r18 三条嘴几乎不动 = 不过（s103 相关 0.593 也不过）"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-V17
+    domain: ops
+    link: [P10-P11]
+    title: 看图跑在专用卡上（L-100）：笔记本 4080 和 gpu36 GPU2 不出图；换服务框架 / 量化前先做 20 张以上 A/B，阻断项判定一致率 ≥0.95 才切
+    when: 部署 / 扩容看图服务
+    then: 专用实例 VQA_DEDICATED=1（不让卡、不开窗口、不卸载）；gpu36 用 tools/vqa/vqa_router.py 在 :8870 分发到多个同口径实例；model.instances 写实际并发；A/B 用 tools/vqa/vram_bench.py + vram_compare.py
+    check: [tests/test_vqagate.py]
+    evidence:
+      - {src: data/vqa/vram_bench/compare_ab_nf4_full_ab_vllm_B.json, note: "vLLM fp8 vs nf4：逐条判定一致 0.909（120/132），未达 0.95，改用 3 个 nf4 实例"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-REV-V18
+    domain: review
+    link: [P10-P11]
+    title: 人物一致性闸门：画面里每张够大的脸都必须认得出是 cast 里的谁——cast 写不露脸 / 本镜没有在画角色时也照比，认不出或不像本人就拦（按脸大小分档，特写最严）
+    when: postflight Q1（契约打分），score_remote 给出所有脸对 4 个主角身份脸的 ArcFace 相似度之后
+    then: 不露脸的镜头出了脸（脸高 ≥0.04）→ identity_unexpected 按 size_tiers（0.55 / 0.50 / 0.40）判；像 cast 里的人且过线才过；不过时证据带 stranger_boxes，背影后脑交 K-REV-V14 复核；标定集 data/vqa/idgate_calib/
+    check: [tests/test_vqagate.py]
+    evidence:
+      - {src: data/vqa/idgate_calib/sims_L086.json, note: "ep02-S10 换人 3 张 0.240–0.258 全拦；林晚正例 73 张最低 0.669；ep02-S9 v1/v2 0.807 身份分区分不出（ref2va 与 L-086 互相 0.986）"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-02

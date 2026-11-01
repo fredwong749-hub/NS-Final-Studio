@@ -155,6 +155,22 @@ def hide_offframe_parts(body: str, size: str | None) -> tuple[str, list[str]]:
     return ", ".join(keep) + "." + body[m.end(1):], gone
 
 
+def _camera_norm():
+    """ns_agent.camera_norm（只依赖标准库；按文件路径载入，ns_recipes 不依赖 ns_agent 包）"""
+    import importlib.util
+    from pathlib import Path as _P
+    global _CN_MOD
+    if _CN_MOD is None:
+        f = _P(__file__).resolve().parents[3] / "services" / "agent" / "ns_agent" / "camera_norm.py"
+        sp = importlib.util.spec_from_file_location("nsfs_camera_norm", f)
+        _CN_MOD = importlib.util.module_from_spec(sp)
+        sp.loader.exec_module(_CN_MOD)
+    return _CN_MOD
+
+
+_CN_MOD = None
+
+
 def build_base(spec: ShotSpec, recipe: dict, mode: str, frames: int, attempt: int = 1) -> dict:
     """I2VA / FL2VA 提示词。→ {text, fields, notes}"""
     if not spec.h3.text:
@@ -176,6 +192,10 @@ def build_base(spec: ShotSpec, recipe: dict, mode: str, frames: int, attempt: in
         body, gone = hide_offframe_parts(body, getattr(spec.camera, "size", None))
         if gone:
             notes.append("删去景别外造型分句（prompt.hide_offframe_parts）：" + " | ".join(gone))
+    # DIRECTOR 11-02（总调度批复 r2 第 1 条，K-REN-801）：运镜句确定性规范化到 Pika 稳定范围，改动记进 notes（jobs.json prompt_notes）
+    body, cam_changes = _camera_norm().normalize_video_prompt(body, getattr(getattr(spec, "motion", None), "text", "") or "")
+    for ch in cam_changes:
+        notes.append(f"{ch['rule']} 运镜规范化：{ch['from']} → {ch['to']}")
     # ACTING 11-01（R11-2 / R11-8）：开头即动 + 视线落点，两句系统固定提示（_base.yaml prompt.open_motion_cue / eyeline_cue），
     # 放在第一个分拍时间码之前（官方 I2VA 顺序：首帧锚点 → 动作起势 → 连续发展；没有时间码就放句末）
     for key in ("open_motion_cue", "eyeline_cue", "outfit_cue"):   # outfit_cue：VIDEO-RCA 11-01 服装保持（待验 VRCA-E5）

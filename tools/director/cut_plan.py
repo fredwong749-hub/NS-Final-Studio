@@ -112,7 +112,10 @@ def plan_episode(ep: dict) -> list[dict]:
             tr = ({"type": "叠化", "s": DISSOLVE_S} if TIME_JUMP.search(detail)
                   else {"type": "声音先行", "s": SOUND_LEAD_S})
         elif carry_kind == "动作":
-            tr = {"type": "动作匹配切", "s": 0.0}
+            what = str(s.get("link_carry") or "").split("｜", 1)[-1]
+            tr = {"type": "动作匹配切", "s": 0.0, "action": what}
+            if re.search(r"起身|站起|坐下|rises|stands up|sits down", what):   # K-WRT-704 / QW-W12 拆镜（VIDEO-RCA）：上一镜停在起势，本镜从站定接
+                tr["split"] = "K-WRT-704"
         elif carry_kind == "视线":
             tr = {"type": "视线匹配切", "s": 0.0}
         else:

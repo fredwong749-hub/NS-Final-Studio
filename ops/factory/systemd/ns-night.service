@@ -1,0 +1,24 @@
+# FACTORY L-105（项目方 11-02 03:1x：“允许服务器常驻托管”；规则 K-OPS-F10）：服务器视频 night，systemd --user 托管
+# 安装：bash ops/factory/systemd/install.sh <host>（随 sv 发版，不在服务器上手写）
+[Unit]
+Description=NS-Final Studio night video loop (FACTORY, %u)
+After=network-online.target ns-fwd.service
+Wants=ns-fwd.service
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+EnvironmentFile=%h/work/fredw/ns_factory_systemd/host.env
+WorkingDirectory=/root/work/fredw/offline_20261101/repo
+ExecStart=/root/work/fredw/offline_20261101/venv/bin/python -u tools/series10_video/night.py
+Restart=on-failure
+RestartSec=15
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Nice=5
+StandardOutput=append:/root/work/fredw/offline_20261101/logs/night.out
+StandardError=append:/root/work/fredw/offline_20261101/logs/night.out
+
+[Install]
+WantedBy=default.target

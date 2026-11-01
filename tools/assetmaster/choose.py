@@ -44,6 +44,22 @@ def enforce_item_check(live: dict, checks: dict | None = None) -> dict:
             c["why"] = "待单品一致性检查（K-AST-260）" if not ck else f"单品一致性检查记录是 seed {ck.get('seed')} / {ck.get('verdict')}"
         else:
             c["item_check"] = {x: ck.get(x) for x in ("how", "by", "at", "note")}
+        # K-AST-264（IMGFIX r6，L-102）：入库检查（左右袖子一致、外层单品在）——人工 / 自动单品检查记录之外再机检一遍
+        f = c.get("file")
+        if c.get("ok") and f and (ROOT / f).is_file():
+            try:
+                import sys as _s
+                for _p in ("services/agent", "packages/schema", "packages/qc"):
+                    if str(ROOT / _p) not in _s.path:
+                        _s.path.insert(0, str(ROOT / _p))
+                from ns_agent import sheet_intake as SI
+                cid, _, lk = k.partition("_look")
+                chk = SI.check(f, cid, lk[:1] or None)
+                c["intake"] = {"ok": chk["ok"], "blocking": chk["blocking"]}
+                if not chk["ok"]:
+                    c["ok"], c["why"] = False, "设定图入库检查没过（K-AST-264）：" + "；".join(chk["blocking"])
+            except Exception as e:  # noqa: BLE001
+                c["intake"] = {"ok": None, "error": repr(e)[:200]}
     return live
 
 

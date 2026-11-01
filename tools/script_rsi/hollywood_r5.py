@@ -432,6 +432,19 @@ def run_episode(a) -> int:
                     log(f"  d{i} 分数 {H._sum(sc)}（评审 {sc['judge_sums']}）")
             rec_r = {"round": r, "kind": kind, "dim": dim, "drafts": len(raws), "valid": len(cands),
                      "scored": [{"draft": i, "sum": s, "judges": sc["judge_sums"]} for s, i, *_, sc in scored]}
+            # DJ-29（DISTILL tools/autopilot/policy.noise_stop）：一轮里过半稿子评审极差 > 3 → 本轮不计涨没涨，停下先修尺子
+            try:
+                sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+                import policy as _POL
+                ns = _POL.noise_stop([sc["judge_sums"] for *_, sc in scored])
+            except Exception as e:  # noqa: BLE001
+                ns = {"stop": False, "error": repr(e)[:200]}
+            rec_r["noise_stop"] = ns
+            if ns.get("stop"):
+                rec_r.update({"eligible": False, "scores": None, "discarded": True})
+                rounds.append(rec_r)
+                log(f"r{r} 评审噪声过大（{ns}），本轮不计入，停下先修尺子（DJ-29）")
+                break
             if not scored:
                 rec_r.update({"discarded": True, "eligible": False, "scores": None})
                 rounds.append(rec_r)
@@ -511,6 +524,206 @@ def cmd_ab(a) -> int:
         out[kind] = rec
         print(kind, json.dumps(rec, ensure_ascii=False)[:600], flush=True)
     (od / "ab.json").write_text(json.dumps(out, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+    return 0
+
+
+# ------------------------------------------------------------------ 修尺子（总调度 11-02 01:4x G0）
+# 评审噪声 ±5 > 补丁增益 +3 → 先修尺子：温度 0；逐条 met / unmet 附原文证据，证据在镜头块里逐字找不到 = 不满足；3 个评审逐条取多数；
+# 同一稿重复 5 次，总分标准差 ≤ 1 才算合格（hollywood_judge.md §六）。
+
+def _norm_txt(s: str) -> str:
+    return re.sub(r"[\s*`｜|：:，,。.、；;“”\"'（）()]+", "", s or "")
+
+
+LABEL_RE = re.compile(r"镜\d+(?:[/、]镜?\d+)*[｜|]?|\*\*[^*]{1,12}\*\*[：:]?|（[^）]{0,30}）|\([^)]{0,30}\)")
+
+
+def evidence_found(ev: str, body_norm: str) -> bool:
+    """证据按“……”“；”“/”切成片段，去掉镜号和字段标签；至少一段 ≥6 个有效字逐字出现在镜头块里才算有证据
+    （第 1 次 ruler 实测：只比证据开头 20 字时，评审惯用的“镜1｜**img**：……原文”格式全被误判无证据，总分塌到 10–11）"""
+    for part in re.split(r"……|\.\.\.|；|;|/|、镜|，镜", LABEL_RE.sub("|", ev)):
+        for frag in part.split("|"):
+            f = _norm_txt(frag)
+            if len(f) >= 6 and f[:30] in body_norm:
+                return True
+    return False
+
+
+def judge_system_evidence() -> str:
+    return H.judge_system() + "\n\n【按 §三 清单逐条判定，输出格式按 §六（每条 met 必须附镜头块原文证据）】"
+
+
+def parse_evidence(raw: str, chunk: str) -> tuple[dict | None, str]:
+    """→ {dim: {id: bool}}；met=true 但证据为空 / 在镜头块里逐字找不到（“全文检索无”类除外）→ 按不满足"""
+    d, err = H._json_block(raw)
+    if err:
+        return None, err
+    items = (d or {}).get("items") or {}
+    body = _norm_txt(H.shots_text(chunk))
+    out = {}
+    for k, _ in H.DIMS:
+        got = {int(x.get("id")): x for x in items.get(k) or [] if isinstance(x, dict) and str(x.get("id", "")).isdigit()}
+        res = {}
+        for i in range(1, 6):
+            x = got.get(i) or {}
+            ev = str(x.get("evidence") or "")
+            ok = bool(x.get("met")) and bool(ev.strip())
+            if ok and not ev.startswith("全文检索"):
+                ok = evidence_found(ev, body)
+            res[i] = {"met": ok, "evidence": ev[:120], "why": str(x.get("why") or "")[:200]}
+        out[k] = res
+    return out, ""
+
+
+def score_ruler(judges, chunk, ep, pre, calls_dir: Path, uid: str) -> dict | None:
+    user = H.judge_user(ep, pre, chunk, None)
+
+    def one(i):
+        for t in range(2):
+            raw = judges[i](judge_system_evidence(), user)
+            (calls_dir / f"{uid}-ev{i}{t}.reply.txt").write_text(raw, encoding="utf-8")
+            r, _ = parse_evidence(raw, chunk)
+            if r:
+                return r
+        return None
+    with cf.ThreadPoolExecutor(len(judges)) as ex:
+        res = [r for r in ex.map(one, range(len(judges))) if r]
+    if len(res) < 2:
+        return None
+    scores = {}
+    for k, _ in H.DIMS:
+        met = [i for i in range(1, 6) if sum(r[k][i]["met"] for r in res) * 2 > len(res)]     # 逐条多数
+        unmet = [{"id": i, "why": next((r[k][i]["why"] for r in res if not r[k][i]["met"] and r[k][i]["why"]), "")} for i in range(1, 6) if i not in met]
+        scores[k] = {"score": max(1, len(met)), "met": met, "unmet": unmet, "shots": [],
+                     "why": "；".join(f"#{u['id']} {u['why']}" for u in unmet)}
+    return {"scores": scores, "judges_ok": len(res), "per_judge": [sum(max(1, sum(r[k][i]["met"] for i in range(1, 6))) for k, _ in H.DIMS) for r in res]}
+
+
+# ---- r6：机检条目改代码（tools/script_rsi/rubric_code.py），其余条目 7 个评审逐条取多数（温度 0、证据逐字）
+_rc_spec = importlib.util.spec_from_file_location("rubric_code", ROOT / "tools" / "script_rsi" / "rubric_code.py")
+RC6 = importlib.util.module_from_spec(_rc_spec)
+_rc_spec.loader.exec_module(RC6)
+
+
+def judge_items_r6() -> list[tuple[str, int, str]]:
+    rub = json.loads(RUBRIC_JSON.read_text(encoding="utf-8"))
+    out = []
+    for d in RC6.DIMS:
+        for i in RC6.LLM_ITEMS[d]:
+            out.append((d, i, rub[d][i - 1]))
+        for i, note in RC6.MIXED_ITEMS.get(d, {}).items():
+            out.append((d, i, f"{rub[d][i - 1]}【{note}】"))
+    return out
+
+
+def judge_system_r6() -> str:
+    items = judge_items_r6()
+    return (H.judge_system() + "\n\n【r6：本次只判下面这些条目（其余条目由代码判定，不用你判）。输出格式按 §六，items 里只列这些条目的 id】\n"
+            + "\n".join(f"- {d}#{i}：{t}" for d, i, t in items))
+
+
+def score_r6(judges, chunk, ep, pre, calls_dir: Path, uid: str, wd: Path) -> dict | None:
+    obj = H.episode_obj(pre, chunk, ep, wd)
+    shots = sorted(obj.shots, key=lambda s: s.index)
+    blocks = [RL.block_text(chunk, k) for k in range(len(shots))]
+    codes = H.lint(chunk, ep)["codes"]
+    cc = RC6.code_checks(chunk, shots, blocks, RL.block_text(chunk, "head"), codes)
+    user = H.judge_user(ep, pre, chunk, None)
+    items = judge_items_r6()
+
+    def one(i):
+        for t in range(2):
+            raw = judges[i](judge_system_r6(), user)
+            (calls_dir / f"{uid}-j{i}{t}.reply.txt").write_text(raw, encoding="utf-8")
+            r, _ = parse_evidence(raw, chunk)
+            if r:
+                return r
+        return None
+    with cf.ThreadPoolExecutor(len(judges)) as ex:
+        res = [r for r in ex.map(one, range(len(judges))) if r]
+    if len(res) * 2 <= len(judges):
+        return None
+    llm = {(d, i): sum(r[d][i]["met"] for r in res) * 2 > len(res) for d, i, _ in items}
+    scores = {}
+    for d in RC6.DIMS:
+        met, unmet = [], []
+        for i in range(1, 6):
+            parts = []
+            if (d, i) in llm:
+                parts.append(llm[(d, i)])
+            if i in cc[d]:
+                parts.append(cc[d][i][0])
+            (met if all(parts) else unmet).append(i)
+        why = "；".join(f"#{i} {'代码：' + cc[d][i][1] if i in cc[d] and not cc[d][i][0] else '评审多数判不满足'}" for i in unmet)
+        scores[d] = {"score": max(1, len(met)), "met": met, "unmet": [{"id": i} for i in unmet], "shots": [], "why": why}
+    judge_sums = []      # 每个评审单独算的总分（代码条目共用）→ policy.noise_stop（DJ-29）
+    for r in res:
+        tot = 0
+        for d in RC6.DIMS:
+            m = sum(1 for i in range(1, 6) if (((d, i) not in llm) or r[d][i]["met"]) and ((i not in cc[d]) or cc[d][i][0]))
+            tot += max(1, m)
+        judge_sums.append(tot)
+    return {"scores": scores, "judges_ok": len(res), "judge_sums": judge_sums, "code": {f"{d}#{i}": v for d in RC6.DIMS for i, v in cc[d].items()},
+            "llm_majority": {f"{d}#{i}": v for (d, i), v in llm.items()}}
+
+
+def cmd_ruler6(a) -> int:
+    import statistics
+    ep = a.episode
+    od = Path(a.root) / f"ruler6_ep{ep:02d}"
+    (od / "calls").mkdir(parents=True, exist_ok=True)
+    (od / "work").mkdir(exist_ok=True)
+    judges = [FR.Writer(temperature=0.0, max_tokens=8000) for _ in range(a.judges)]
+    budget = Budget(a.budget, judges)
+    out = {"share": RC6.share(), "files": {}}
+    for f in a.files.split(","):
+        pre, ch = RL.split_doc(Path(f).read_text(encoding="utf-8"))
+        sums, code_sum = [], None
+        for n in range(a.n):
+            if budget.left() < 0.05:
+                H._log(od, f"预算将尽 ${budget.usage()['usd']}，停")
+                break
+            sc = score_r6(judges, ch[0], ep, pre, od / "calls", f"{Path(f).parent.name}-{Path(f).stem}-rep{n}", od / "work")
+            s = H._sum(sc) if sc else None
+            sums.append(s)
+            code_sum = sum(1 for v in (sc or {}).get("code", {}).values() if v[0])
+            H._log(od, f"{f} 第 {n + 1} 次：{s}（代码满足 {code_sum}/{sum(len(v) for v in RC6.CODE_ITEMS.values()) + 3}）；"
+                       f"{json.dumps({k: v['score'] for k, v in (sc or {}).get('scores', {}).items()})}")
+            if sc and n == 0:
+                (od / f"{Path(f).parent.name}-{Path(f).stem}.detail.json").write_text(json.dumps(sc, ensure_ascii=False, indent=1), encoding="utf-8")
+        vals = [x for x in sums if x is not None]
+        sd = statistics.pstdev(vals) if len(vals) > 1 else None
+        out["files"][f] = {"sums": sums, "mean": (sum(vals) / len(vals)) if vals else None, "stdev": sd, "pass": sd is not None and sd <= 1.0}
+        H._log(od, f"{f}：{sums} 均值 {out['files'][f]['mean']} 标准差 {sd} → {'合格' if sd is not None and sd <= 1 else '不合格'}")
+    out["usage"] = budget.usage()
+    (od / "ruler6.json").write_text(json.dumps(out, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+    H._log(od, f"费用 {out['usage']}；机检占比 {out['share']}")
+    return 0
+
+
+def cmd_ruler(a) -> int:
+    """同一稿重复打 N 次 → 标准差；≤ 1 合格"""
+    import statistics
+    ep = a.episode
+    od = Path(a.root) / f"ruler_ep{ep:02d}_j{a.judges}"
+    (od / "calls").mkdir(parents=True, exist_ok=True)
+    pre, ch = RL.split_doc(Path(a.file).read_text(encoding="utf-8"))
+    chunk = ch[0]
+    judges = [FR.Writer(temperature=0.0, max_tokens=12000) for _ in range(a.judges)]
+    budget = Budget(a.budget, judges)
+    sums = []
+    for n in range(a.n):
+        if budget.left() < 0.1:
+            break
+        sc = score_ruler(judges, chunk, ep, pre, od / "calls", f"rep{n}")
+        s = H._sum(sc) if sc else None
+        sums.append(s)
+        H._log(od, f"第 {n + 1} 次：{s}（各评审 {sc and sc['per_judge']}）；{json.dumps({k: v['score'] for k, v in (sc or {}).get('scores', {}).items()})}")
+    vals = [x for x in sums if x is not None]
+    sd = statistics.pstdev(vals) if len(vals) > 1 else None
+    rep = {"file": a.file, "sums": sums, "stdev": sd, "pass": sd is not None and sd <= 1.0, "usage": budget.usage()}
+    (od / "ruler.json").write_text(json.dumps(rep, ensure_ascii=False, indent=1), encoding="utf-8")
+    H._log(od, f"尺子：{sums} 标准差 {sd}；{'合格' if rep['pass'] else '不合格'}；费用 {rep['usage']}")
     return 0
 
 
@@ -703,6 +916,43 @@ def cmd_patch(a) -> int:
     return 0
 
 
+def cmd_jobs_dry(a) -> int:
+    """导入前 dry 比对（总调度 01:4x 第 3 条）：候选稿 vs 现行导入稿（data/import/script_v2.json）这一集——镜头集合、
+    每镜首帧作业提示词（image_jobs.frame_prompt，与 rebuild_first_frame_jobs 同一编译入口）、台词 / 🎙 是否变。
+    只读，不写 first_frame_jobs.json。结论：jobs_unchanged = 镜号集合相同且每镜首帧提示词逐字相同"""
+    sys.path.insert(0, str(ROOT / "tools" / "pipeline"))
+    import image_jobs as IJ
+    from ns_agent.importer.script_md import import_script
+    ep = a.episode
+    si = IJ.load_import()
+    cur = next(e for e in si.episodes if e.number == ep)
+    cand = next(e for e in import_script(Path(a.file)).episodes if e.number == ep)
+    g = si.globals
+    proj = "series10_v1"
+    cs, ns = {s.id: s for s in cur.shots}, {s.id: s for s in cand.shots}
+    rows = []
+    for sid in sorted(set(cs) | set(ns), key=lambda x: int(x.split("-S")[1])):
+        a_, b_ = cs.get(sid), ns.get(sid)
+        if not a_ or not b_:
+            rows.append({"shot": sid, "status": "镜头新增" if b_ else "镜头删除"})
+            continue
+        pa, _ = IJ.frame_prompt(cur, a_, g, [], proj)
+        pb, _ = IJ.frame_prompt(cand, b_, g, [], proj)
+        da = [f"{d.speaker}|{d.text}" for d in a_.dialogue] + ([f"🎙|{a_.voiceover.text}"] if a_.voiceover and a_.voiceover.text else [])
+        db = [f"{d.speaker}|{d.text}" for d in b_.dialogue] + ([f"🎙|{b_.voiceover.text}"] if b_.voiceover and b_.voiceover.text else [])
+        rows.append({"shot": sid, "frame_prompt_same": pa == pb, "speech_changed": da != db, "duration": [a_.duration, b_.duration],
+                     "h3_changed": (a_.h3_prompt or "") != (b_.h3_prompt or "")})
+    unchanged = all(r.get("frame_prompt_same") for r in rows) and all("status" not in r for r in rows)
+    rep = {"episode": ep, "file": a.file, "jobs_unchanged": unchanged, "shots_now": len(cs), "shots_cand": len(ns),
+           "frame_changed": [r["shot"] for r in rows if r.get("frame_prompt_same") is False or "status" in r],
+           "speech_changed": [r["shot"] for r in rows if r.get("speech_changed")], "rows": rows,
+           "jobs_vs_import_now": IJ.jobs_vs_import()}
+    out = Path(a.out) if a.out else Path(a.file).with_suffix(".jobs_dry.json")
+    out.write_text(json.dumps(rep, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+    print(json.dumps({k: v for k, v in rep.items() if k != "rows"}, ensure_ascii=False, default=str)[:1500])
+    return 0
+
+
 def main(argv=None) -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -729,8 +979,26 @@ def main(argv=None) -> int:
     pt.add_argument("--writer", default="flash-high", choices=["flash-high", "flash-medium", "flash-low", "flash"])
     pt.add_argument("--budget", type=float, default=1.0)
     pt.add_argument("--tag", default="patch")
+    ru = sub.add_parser("ruler", help="修尺子：同一稿重复打 N 次看标准差（温度 0、逐条证据、3 评审多数）")
+    ru.add_argument("--episode", type=int, required=True)
+    ru.add_argument("--root", required=True)
+    ru.add_argument("--file", required=True)
+    ru.add_argument("--n", type=int, default=5)
+    ru.add_argument("--budget", type=float, default=1.0)
+    ru.add_argument("--judges", type=int, default=3, help="每次几个评审逐条取多数")
+    r6 = sub.add_parser("ruler6", help="r6 尺子：机检条目代码判 + 7 评审逐条多数；同稿重复 N 次看标准差")
+    r6.add_argument("--episode", type=int, required=True)
+    r6.add_argument("--root", required=True)
+    r6.add_argument("--files", required=True, help="逗号分隔，可同时打现行稿与候选稿")
+    r6.add_argument("--n", type=int, default=5)
+    r6.add_argument("--judges", type=int, default=7)
+    r6.add_argument("--budget", type=float, default=1.0)
+    jd = sub.add_parser("jobs-dry", help="导入前 dry 比对首帧作业（只读）")
+    jd.add_argument("--episode", type=int, required=True)
+    jd.add_argument("--file", required=True)
+    jd.add_argument("--out", default="")
     a = ap.parse_args(argv)
-    return {"run": run_episode, "ab": cmd_ab, "patch": cmd_patch}[a.cmd](a)
+    return {"run": run_episode, "ab": cmd_ab, "patch": cmd_patch, "ruler": cmd_ruler, "jobs-dry": cmd_jobs_dry, "ruler6": cmd_ruler6}[a.cmd](a)
 
 
 if __name__ == "__main__":

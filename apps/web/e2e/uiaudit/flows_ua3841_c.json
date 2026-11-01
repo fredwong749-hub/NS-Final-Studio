@@ -1,0 +1,99 @@
+[
+  {
+    "id": "hub_lockA",
+    "title": "人物中心 林晚 造型A：点图只看大图 / 用这张弹确认 / 换后撤销（写请求本地假成功，不发到 :8800）",
+    "path": "/#/assets?type=character&char=lin_wan",
+    "wait": 10000,
+    "steps": [
+      { "js": "for (let i=0;i<80;i++){ if (document.querySelector('[aria-label=\"造型 A 设定图候选\"]')) return 'ok '+i; await new Promise(r=>setTimeout(r,500)); } return 'timeout'" },
+      { "wait": 2000 },
+      { "js": "const L=document.querySelector('[aria-label=\"造型 A 设定图候选\"]'); L.scrollIntoView({block:'center'}); await new Promise(r=>setTimeout(r,800)); const items=[...L.querySelectorAll('.hub-candw')].map(w=>({cur: !!w.querySelector('.hub-cand.on'), txt: w.innerText.replace(/\\n/g,' | '), img: decodeURIComponent(w.querySelector('img')?.src||'').slice(-90)})); const main=document.querySelector('.hub-sheet-main'); return {n: items.length, items, main: main?.innerText?.slice(0,200), mainImg: decodeURIComponent(L.closest('section,div')?.parentElement?.querySelector('.hub-sheet-main img')?.src||'').slice(-100)}" },
+      { "shot": "lookA" },
+      { "clickAt": "(()=>{const L=document.querySelector('[aria-label=\"造型 A 设定图候选\"]'); const w=[...L.querySelectorAll('.hub-candw')].find(w=>!w.querySelector('.hub-cand.on')); const b=w.querySelector('.hub-cand'); b.scrollIntoView({block:'center'}); const r=b.getBoundingClientRect(); window.__ua_target=w.querySelector('img')?.alt; return [r.x+r.width/2, r.y+r.height/3]})()", "after": 1800 },
+      { "js": "const dlg=[...document.querySelectorAll('[role=dialog], .ds-modal, [class*=lightbox], [class*=big]')].filter(e=>e.getBoundingClientRect().width>200); return {target: window.__ua_target, openDialogs: dlg.map(d=>({cls:d.className, txt:d.innerText.slice(0,120), img: !!d.querySelector('img')}))}" },
+      { "shot": "clickimg_big" },
+      { "key": "Escape" },
+      { "wait": 800 },
+      { "clickAt": "(()=>{const L=document.querySelector('[aria-label=\"造型 A 设定图候选\"]'); const w=[...L.querySelectorAll('.hub-candw')].find(w=>!w.querySelector('.hub-cand.on')); const b=[...w.querySelectorAll('button')].find(x=>/用这张/.test(x.innerText)); if(!b) return [null,null]; b.scrollIntoView({block:'center'}); const r=b.getBoundingClientRect(); return [r.x+r.width/2, r.y+r.height/2]})()", "after": 1500 },
+      { "js": "const dlg=[...document.querySelectorAll('[role=dialog], .ds-modal')].filter(e=>e.getBoundingClientRect().width>100); return dlg.map(d=>({txt:d.innerText.slice(0,300), btns:[...d.querySelectorAll('button')].map(b=>b.innerText.trim())}))" },
+      { "shot": "use_confirm" },
+      { "click": "=不换", "after": 1200 },
+      { "js": "return {dialogsLeft: [...document.querySelectorAll('[role=dialog], .ds-modal')].filter(e=>e.getBoundingClientRect().width>100).length, toasts: [...document.querySelectorAll('[class*=toast]')].map(t=>t.innerText)}" },
+      { "clickAt": "(()=>{const L=document.querySelector('[aria-label=\"造型 A 设定图候选\"]'); const w=[...L.querySelectorAll('.hub-candw')].find(w=>!w.querySelector('.hub-cand.on')); const b=[...w.querySelectorAll('button')].find(x=>/用这张/.test(x.innerText)); b.scrollIntoView({block:'center'}); const r=b.getBoundingClientRect(); return [r.x+r.width/2, r.y+r.height/2]})()", "after": 1500 },
+      { "js": "window.__ua_t0=Date.now(); return 'confirm shown again: '+[...document.querySelectorAll('[role=dialog], .ds-modal')].filter(e=>e.getBoundingClientRect().width>100).length" },
+      { "click": "=换", "after": 1500 },
+      { "js": "const t=[...document.querySelectorAll('.hub-toast, [class*=toast]')].map(x=>x.innerText.replace(/\\n/g,' | ')); return {afterMs: Date.now()-window.__ua_t0, toasts: t, undoBtn: !!document.querySelector('.hub-toast-undo')}" },
+      { "shot": "swapped_toast" },
+      { "clickAt": "(()=>{const b=[...document.querySelectorAll('.hub-toast-undo')].find(x=>/撤销/.test(x.innerText)); if(!b) return [null,null]; const r=b.getBoundingClientRect(); return [r.x+r.width/2, r.y+r.height/2]})()", "after": 1500 },
+      { "js": "const t=[...document.querySelectorAll('.hub-toast, [class*=toast]')].map(x=>x.innerText.replace(/\\n/g,' | ')); return {afterMs: Date.now()-window.__ua_t0, toasts: t}" },
+      { "shot": "undone_toast" },
+      { "wait": 11000 },
+      { "js": "return {afterMs: Date.now()-window.__ua_t0, toastsLeft: [...document.querySelectorAll('.hub-toast')].map(x=>x.innerText)}" }
+    ]
+  },
+  {
+    "id": "hub_face",
+    "title": "人物中心 林晚 身份脸：点图只看大图",
+    "path": "/#/assets?type=character&char=lin_wan",
+    "wait": 10000,
+    "steps": [
+      { "js": "for (let i=0;i<80;i++){ if (document.querySelector('.hub-face-img')) return 'ok '+i; await new Promise(r=>setTimeout(r,500)); } return 'timeout'" },
+      { "wait": 1500 },
+      { "clickAt": "(()=>{const b=[...document.querySelectorAll('.hub-face-img')].find(x=>!/当前/.test(x.title)); if(!b) return [null,null]; b.scrollIntoView({block:'center'}); const r=b.getBoundingClientRect(); return [r.x+r.width/2, r.y+r.height/2]})()", "after": 1800 },
+      { "js": "const dlg=[...document.querySelectorAll('[role=dialog], .ds-modal, [class*=lightbox], [class*=big]')].filter(e=>e.getBoundingClientRect().width>200); return dlg.map(d=>({cls:d.className, txt:d.innerText.slice(0,120), img: !!d.querySelector('img')}))" },
+      { "shot": "face_big" },
+      { "key": "Escape" }
+    ]
+  },
+  {
+    "id": "cv_detail",
+    "title": "画布 ep01 详情 ▸ / 收起 ▴ / 展开全部 / ⋯ 历史版本",
+    "path": "/#ep01",
+    "wait": 10000,
+    "steps": [
+      { "wait": 2500 },
+      { "js": "const rows=[...document.querySelectorAll('button')].filter(b=>/^详情 ▸/.test(b.innerText.trim())); const body=document.body.innerText; return {detailBtns: rows.length, hasSound: /声音|台词音/.test(body), hasVidPrompt: /视频提示词/.test(body), hasFirstPrompt: /首帧提示词/.test(body), hasRef: /场景参考|人物造型|人物与场景/.test(body)}" },
+      { "shot": "collapsed" },
+      { "clickAt": "(()=>{const b=[...document.querySelectorAll('button')].find(b=>/^详情 ▸/.test(b.innerText.trim())); b.scrollIntoView({block:'center'}); const r=b.getBoundingClientRect(); return [r.x+r.width/2, r.y+r.height/2]})()", "after": 1500 },
+      { "js": "const body=document.body.innerText; const up=[...document.querySelectorAll('button')].filter(b=>/收起 ▴/.test(b.innerText)).length; return {collapseBtns: up, hasVidPrompt: /视频提示词/.test(body), hasFirstPrompt: /首帧提示词/.test(body), hasSound: /声音/.test(body), hasRef: /场景参考|人物造型|参考/.test(body), detailBtnsLeft: [...document.querySelectorAll('button')].filter(b=>/^详情 ▸/.test(b.innerText.trim())).length}" },
+      { "shot": "expanded" },
+      { "clickAt": "(()=>{const b=[...document.querySelectorAll('button')].find(b=>/收起 ▴/.test(b.innerText)); if(!b) return [null,null]; b.scrollIntoView({block:'center'}); const r=b.getBoundingClientRect(); return [r.x+r.width/2, r.y+r.height/2]})()", "after": 1200 },
+      { "js": "return {collapseBtnsAfter: [...document.querySelectorAll('button')].filter(b=>/收起 ▴/.test(b.innerText)).length, detailBtns: [...document.querySelectorAll('button')].filter(b=>/^详情 ▸/.test(b.innerText.trim())).length}" },
+      { "js": "const all=[...document.querySelectorAll('button, label, [role=menuitem], [role=switch], input[type=checkbox]')].filter(e=>/展开全部分镜详情/.test(e.innerText||e.title||e.getAttribute('aria-label')||'')); return all.map(e=>({tag:e.tagName, txt:(e.innerText||e.title).slice(0,40), vis:e.getBoundingClientRect().width>0}))" },
+      { "click": "本集设置", "after": 1200 },
+      { "js": "const all=[...document.querySelectorAll('button, label, [role=menuitem], [role=switch], [role=menuitemcheckbox]')].filter(e=>/展开全部分镜详情/.test(e.innerText||e.title||'') && e.getBoundingClientRect().width>0); return all.map(e=>({tag:e.tagName, txt:e.innerText.slice(0,60)}))" },
+      { "shot": "settings_menu" },
+      { "click": "展开全部分镜详情", "after": 2000 },
+      { "js": "return {collapseBtns: [...document.querySelectorAll('button')].filter(b=>/收起 ▴/.test(b.innerText)).length, detailBtns: [...document.querySelectorAll('button')].filter(b=>/^详情 ▸/.test(b.innerText.trim())).length, vidPromptCount: (document.body.innerText.match(/视频提示词/g)||[]).length}" },
+      { "shot": "expand_all" }
+    ]
+  },
+  {
+    "id": "cv_hist",
+    "title": "画布 ep06 行尾 ⋯ → 历史版本",
+    "path": "/#ep06",
+    "wait": 10000,
+    "steps": [
+      { "wait": 2500 },
+      { "clickAt": "(()=>{const b=[...document.querySelectorAll('button')].filter(x=>/^[.…⋯]+$/.test(x.innerText.trim()) && x.getBoundingClientRect().width>0 && x.getBoundingClientRect().x>1300)[0]; if(!b) return [null,null]; const r=b.getBoundingClientRect(); return [r.x+r.width/2, r.y+r.height/2]})()", "after": 1500 },
+      { "js": "const m=[...document.querySelectorAll('button')].filter(b=>b.getBoundingClientRect().width>0).map(b=>b.innerText.trim()).filter(t=>t && t.length<20); return m.slice(-30)" },
+      { "shot": "menu" },
+      { "click": "=历史版本", "after": 4000 },
+      { "js": "const d=[...document.querySelectorAll('[role=dialog], .ds-modal')].filter(e=>e.getBoundingClientRect().width>100)[0]; if(!d) return 'no dialog'; const imgs=[...d.querySelectorAll('img')].map(i=>({src:decodeURIComponent(i.currentSrc||i.src).slice(-110), c:i.complete, n:i.naturalWidth})); return {txt: d.innerText.slice(0,800), n: imgs.length, broken: imgs.filter(i=>i.c&&i.n===0).length, imgs: imgs.slice(0,12)}" },
+      { "shot": "history" }
+    ]
+  },
+  {
+    "id": "cv_oldimg",
+    "title": "画布 ep10 旧图 ×N",
+    "path": "/#ep10",
+    "wait": 10000,
+    "steps": [
+      { "wait": 2500 },
+      { "js": "const b=[...document.querySelectorAll('button')].filter(x=>/旧图 ×/.test(x.innerText)); return b.map(x=>x.innerText)" },
+      { "click": "旧图 ×", "after": 3500 },
+      { "js": "const d=[...document.querySelectorAll('[role=dialog], .ds-modal')].filter(e=>e.getBoundingClientRect().width>100)[0]; if(!d) return 'no dialog'; const imgs=[...d.querySelectorAll('img')].map(i=>({src:decodeURIComponent(i.currentSrc||i.src).slice(-110), c:i.complete, n:i.naturalWidth})); return {txt: d.innerText.slice(0,800), n: imgs.length, broken: imgs.filter(i=>i.c&&i.n===0).length}" },
+      { "shot": "oldimg" }
+    ]
+  }
+]

@@ -1,0 +1,23 @@
+# FACTORY L-105（K-OPS-F04 / F10）：本机常驻 CLIP 打分（127.0.0.1:8872），只在 gpu36 起，钉 GPU2（L-100 看图卡）
+[Unit]
+Description=NS-Final Studio resident CLIP scorer (FACTORY)
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+EnvironmentFile=%h/work/fredw/ns_factory_systemd/host.env
+Environment=CUDA_VISIBLE_DEVICES=2 NS_CLIP_DEVICE=cuda NS_CLIP_PATH=/root/work/fredw/reflock/clip-vit-large-patch14
+WorkingDirectory=/root/work/fredw/reflock
+ExecStartPre=/bin/cp -a /root/work/fredw/offline_20261101/repo/tools/gen_contract/clip_srv.py /root/work/fredw/reflock/clip_srv.py
+ExecStartPre=/bin/cp -a /root/work/fredw/offline_20261101/repo/services/agent/ns_agent/gen_contract/metrics.py /root/work/fredw/reflock/metrics.py
+ExecStartPre=/bin/sh -c 'echo "{\"kind\": \"clip_resident\", \"host\": \"$OFFLINE_SELF\", \"at\": \"$(date -Iseconds)\", \"reason\": \"systemd_start\"}" >> /root/work/fredw/factory/logs/clip_resident_events.jsonl'
+ExecStart=/root/work/fredw/venv/bin/python -u clip_srv.py --serve 8872
+Restart=on-failure
+RestartSec=10
+Nice=5
+StandardOutput=append:/root/work/fredw/factory/logs/clip_resident.log
+StandardError=append:/root/work/fredw/factory/logs/clip_resident.log
+
+[Install]
+WantedBy=default.target

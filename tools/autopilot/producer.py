@@ -58,7 +58,17 @@ for _p in ("services/render_router", "services/agent", "packages/schema", "tools
         sys.path.insert(0, str(ROOT / _p))
 
 AGENT = "PRODUCER"
-RUN_ID = "series10_v1"
+def _run_id_from_config(default: str = "series10_v1") -> str:
+    """K-OPS-W15 / DISTILL 冷启动 ①：现行运行 ID 只从 config/pipeline/run.json 读（换一部剧只改一处）。
+    读不到时这里仍给默认值（只为模块能导入），但 K-OPS-F09 decisions_guard 会在派单前拒派并报警，不再静默按 series10_v1 生产"""
+    try:
+        v = json.loads((Path(__file__).resolve().parents[2] / "config" / "pipeline" / "run.json").read_text(encoding="utf-8")).get("run_id")
+        return str(v).strip() or default
+    except (OSError, ValueError, AttributeError):
+        return default
+
+
+RUN_ID = _run_id_from_config()
 MAX_TRIES = 3                       # GEN_CONTRACT：每镜每阶段内容尝试 ≤3
 TICK_S = 20
 LEASE_S = 45 * 60                   # 一次出图 + 取回的上限；过期视为失效
@@ -85,9 +95,142 @@ def vlm_instances() -> int:
         return 1
 
 
+def redo_ladder_policy() -> dict:
+    """config/policies/retry.yaml redo_ladder（单一来源）；读不到按默认"""
+    d = {"heavy_plan": ["frame_v9_heavy", "frame_v9_heavy"]}
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import policy as POL
+        it = POL.item("retry.redo_ladder", ROOT)
+        d.update({k: v for k, v in (it.get("value") or {}).items() if k in d})
+    except Exception:  # noqa: BLE001
+        pass
+    return d
+
+
+def redo_inputs_changed(paths, sid: str, kind: str, led: dict) -> str | None:
+    """最后一次驳回重出那一版的输入 vs 现在编译出的作业：提示词 / 编译输入哈希 / 参考图集合 / 参考图文件比那一版新 → 说明；没变 None"""
+    try:
+        from ns_render import pipeline as P
+        hist = [h for h in led.get("redo_history") or [] if h.get("take")]
+        if not hist:
+            return None
+        n = hist[-1]["take"]
+        stage = "image" if kind == "first" else "last"
+        t = next((x for x in P.load_takes(sid).get("takes") or [] if x.get("stage") == stage and x.get("n") == n), None)
+        if not t:
+            return None
+        jobs = (jl(paths.run / "assets" / "first_frame_jobs.json", {}) or {}).get("jobs") or []
+        job = next((j for j in jobs if j.get("shot") == sid or j.get("id") == sid), None)
+        if not job:
+            return None
+        if kind == "first" and (job.get("prompt") or "").strip() != (t.get("prompt") or "").strip():
+            return "提示词变了"
+        if job.get("compiler_inputs_sha") and t.get("inputs_sha") and job["compiler_inputs_sha"] != t["inputs_sha"]:
+            return "编译输入哈希变了"
+        old = t.get("refs") or t.get("references") or []
+        old = {Path(str(x if isinstance(x, str) else (x.get("file") or x.get("path") or ""))).name for x in old} - {""}
+        new = {Path(str(r)).name for r in job.get("refs") or []}
+        if old and new and old != new:
+            return "参考图换了：" + "、".join(sorted(new - old))[:80]
+        t0 = time.mktime(time.strptime(str(t.get("created_at"))[:19], "%Y-%m-%dT%H:%M:%S"))
+        for r in job.get("refs") or []:
+            f = paths.root / str(r)
+            if f.exists() and f.stat().st_mtime > t0:
+                return "参考图更新了：" + f.name
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+BE_RULE_FILES = ("config/gen_contract.json", "config/render_quality.json", "config/vqa.json")
+
+
+def be_rule_sig(root: Path = ROOT) -> str:
+    """尽力版判定依据的“规则版本”：契约门槛 / 出图预设 / 看图闸门三份配置的内容哈希（知识库每次 compile 都变，不用它，免得反复重置）"""
+    import hashlib
+    h = hashlib.sha256()
+    for f in BE_RULE_FILES:
+        try:
+            h.update((root / f).read_bytes())
+        except OSError:
+            h.update(b"-")
+    return h.hexdigest()[:16]
+
+
+def shot_inputs_sig(paths, sid: str) -> dict:
+    """本镜现在编译出的作业：{inputs: compiler_inputs_sha, refs_mtime: 参考图最新修改时间, prompt_sha}；作业表里没有 → {}"""
+    import hashlib
+    jobs = (jl(paths.run / "assets" / "first_frame_jobs.json", {}) or {}).get("jobs") or []
+    job = next((j for j in jobs if j.get("shot") == sid or j.get("id") == sid), None)
+    if not job:
+        return {}
+    mt = 0.0
+    for r in job.get("refs") or []:
+        try:
+            mt = max(mt, (paths.root / str(r)).stat().st_mtime)
+        except OSError:
+            pass
+    return {"inputs": job.get("compiler_inputs_sha"), "refs_mtime": round(mt, 1),
+            "prompt_sha": hashlib.sha256((job.get("prompt") or "").encode()).hexdigest()[:16]}
+
+
+def last_consistent(td: dict, fo: dict, lo: dict) -> dict:
+    """K-OPS-E13（总调度 11-02 02:2x：以 takes.json 当前版本和契约结果为准，不反过来改 takes）：
+    尾帧 passed 但①首帧不是 passed，或②当前尾帧比当前首帧旧（首帧换过）→ 尾帧作废，回到 ready（首帧过了）/ pending（首帧没过），不计次"""
+    if lo.get("status") != "passed" or lo.get("na"):
+        return lo
+    fa, la = active_take(td, "image"), active_take(td, "last")
+    stale = bool(fa and la and str(la.get("created_at") or "") < str(fa.get("created_at") or ""))
+    if fo.get("status") == "passed" and not stale:
+        return lo
+    why = ("首帧换过（当前首帧 v{} 比尾帧 v{} 新），尾帧作废，跟着重出，不计次".format(fa.get("n"), la.get("n")) if stale
+           else "首帧现在不是“已通过”（{}），尾帧作废，等首帧过契约后重出".format(fo.get("status")))
+    return {**lo, "status": "ready" if fo.get("status") == "passed" else "pending", "attempts": 0, "reason": why,
+            "waiting_for": "空闲道" if fo.get("status") == "passed" else "首帧过契约", "voided": True}
+
+
+def registry_consistency(reg: dict) -> list[dict]:
+    """登记表自检：passed 却没有 take / 尾帧 passed 首帧没过 / 视频 passed 首尾帧没过 → 问题清单（写 data/producer/consistency.json）"""
+    probs = []
+    for E in reg.get("episodes") or []:
+        for S in E.get("shots") or []:
+            ob = S.get("objects") or {}
+            f, l, v = (ob.get(k) or {} for k in ("first", "last", "video"))
+            if f.get("status") == "passed" and not f.get("take"):
+                probs.append({"shot": S["shot"], "kind": "first", "why": "首帧 passed 但没有当前版本"})
+            if l.get("status") == "passed" and not l.get("na") and f.get("status") != "passed":
+                probs.append({"shot": S["shot"], "kind": "last", "why": "尾帧 passed 但首帧不是 passed"})
+            if v.get("status") == "passed" and (f.get("status") != "passed" or (l.get("status") != "passed")):
+                probs.append({"shot": S["shot"], "kind": "video", "why": "视频 passed 但首 / 尾帧不是 passed（只记录，视频不自动作废）"})
+    return probs
+
+
+def fail_stats(led: dict) -> dict:
+    """驳回重出 / 普通尝试历史里的不过项计数（Q1 身份、Q9 看图……）"""
+    from collections import Counter
+    c = Counter()
+    for h in (led.get("redo_history") or []) + (led.get("history") or []):
+        for b in h.get("blocking") or []:
+            c[str(b)] += 1
+    return dict(c.most_common())
+
+
+def sentinel_ticket(paths, oid: str, why: str, stats: dict, led: dict) -> None:
+    """K-OPS-E09：阶梯走完 → 给 SENTINEL 开工单（data/sentinel/tickets.jsonl，追加一行）"""
+    f = paths.data / "sentinel" / "tickets.jsonl"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    rec = {"at": iso(), "kind": "redo_ladder_exhausted", "obj": oid, "why": why, "fail_stats": stats,
+           "tries": len(led.get("redo_history") or []), "by": "producer.escalate_exhausted", "rule": "K-OPS-E09",
+           "route": "VQAGATE / IMGFIX（按失败项修根因）"}
+    with open(f, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(rec, ensure_ascii=False) + chr(10))
+
+
 def asset_hold_objects(data: Path) -> set:
     """IMGFIX r5（总调度 fredw-2b 11-02）：data/autopilot/*_hold.json（active=true）列出的首帧 / 尾帧对象暂缓派单——
-    资产（例：林晚造型 A 设定图缺袖）修复后等项目方点选，点选前不出图。文件坏 / 不在 = 不挡"""
+    资产（例：林晚造型 A 设定图缺袖）修复后等项目方点选，点选前不出图。不在 = 没有 hold；
+    文件坏 → K-OPS-F09 decisions_guard 在派单前整体拒派（⤴ 取代“文件坏 = 不挡”）"""
     out: set = set()
     for f in (data / "autopilot").glob("*_hold.json"):
         try:
@@ -401,6 +544,8 @@ def vqa_gate(sid: str, stage: str, file_rel: str, job: dict, pf: dict) -> dict |
         if not VQ.enforced():
             return None
         other = [b for b in (pf.get("blocking") or []) if b not in ("Q9", "Q1")]
+        if pf.get("ok") is False and "Q1" in (pf.get("blocking") or []) and not VQ.q1_needs_vlm(pf):
+            other.append("Q1")                   # Q1 不过、又不是转角放宽 / 后脑复核能救的（11-02 服务器上大头是“身份”不过）→ 也不排队看图
         if pf.get("ok") is False and other:
             # 总调度 11-02 P0（看图是整条出图线的吞吐上限）：Q2–Q8 已经不过的图反正要重出，不再排队看图（11-01 08–16 时 214 张里 151 张
             # 属于这种情况）。Q1 例外：Q1 的转角放宽 / 后脑复核要看图结果
@@ -411,6 +556,7 @@ def vqa_gate(sid: str, stage: str, file_rel: str, job: dict, pf: dict) -> dict |
         v = VQ.inspect_for(sid, "first" if stage == "image" else "last", str(P.DATA / file_rel), job.get("prompt") or "",
                            refs, wait_s=1200)
         VQ.recheck_strangers(pf, str(P.DATA / file_rel))   # K-REV-V14：背影人物的后脑被认成“多出的脸” → 本地看图复核
+        VQ.q1_band_review(pf, str(P.DATA / file_rel))      # K-REV-V18 修订：Q1 复核带 → 和 L-086 左右并排的本地看图复核
         VQ.apply(pf, v)
         if v.get("error") and pf.get("ok") is False and pf.get("blocking") == ["Q9"]:
             pf["score_infra"] = True
@@ -422,6 +568,53 @@ def vqa_gate(sid: str, stage: str, file_rel: str, job: dict, pf: dict) -> dict |
         except Exception:  # noqa: BLE001
             pass
         return None
+
+
+def outbox_emit(sid: str, stage: str, n: int, file_rel: str) -> None:
+    """K-OPS-F05（FACTORY D7）：服务器工厂打分完成 → 写 outbox 结果目录（takes.json + 成图 + 512px 缩略图，.done 最后写），
+    由 NETFIX puller 取回并 merge_file。只在服务器（OFFLINE_SELF / NS_FACTORY_HOST）写；失败只留痕，不影响生产"""
+    host = os.environ.get("NS_FACTORY_HOST") or os.environ.get("OFFLINE_SELF")
+    if not host:
+        return
+    try:
+        if str(ROOT / "tools" / "factory") not in sys.path:
+            sys.path.insert(0, str(ROOT / "tools" / "factory"))
+        import outbox as OB
+        ep, s = sid.split("-", 1)
+        OB.write(f"{'first' if stage == 'image' else 'last'}:{sid}", "take",
+                 [f"data/renders/{ep}/{s}/takes.json", f"data/{file_rel}"], host=host, root=ROOT)
+    except Exception as e:  # noqa: BLE001
+        try:
+            log_event(Paths(), "outbox_err", obj=f"{stage}:{sid}", take=n, error=repr(e)[:200])
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def decision_file_problems() -> list[str]:
+    """K-OPS-F09：tools/factory/decisions_guard.problems()；校验器自身出错也算问题（失败关闭）"""
+    try:
+        if str(ROOT / "tools" / "factory") not in sys.path:
+            sys.path.insert(0, str(ROOT / "tools" / "factory"))
+        import decisions_guard as DG
+        return DG.problems(ROOT)
+    except Exception as e:  # noqa: BLE001
+        return [f"决策文件校验器出错：{e!r}"[:200]]
+
+
+def refs_guard(paths: "Paths", sid: str, job: dict) -> list[str]:
+    """K-OPS-F03（FACTORY D4，总调度 01:3x）：派单前把这单 refs 的路径 + sha 和目标状态 data/factory/inbox/expected_refs.json 比对；
+    不一致 → 返回问题列表（调用方拒派、不计次）并写报警事件 refs_mismatch。没有期望表 / 这镜不在表里 → 不拦（[]）"""
+    try:
+        if str(ROOT / "tools" / "factory") not in sys.path:
+            sys.path.insert(0, str(ROOT / "tools" / "factory"))
+        import inbox as IB
+        probs = IB.check_refs(sid, list(job.get("refs") or []), root=ROOT)
+    except Exception as e:  # noqa: BLE001  校验器自身出错不挡生产，但留痕
+        log_event(paths, "refs_unchecked", obj=f"first:{sid}", error=repr(e)[:200])
+        return []
+    if probs:
+        log_event(paths, "refs_mismatch", obj=f"first:{sid}", problems=probs[:6], alarm=True, counted=False)
+    return probs or []
 
 
 def vqa_delta(sid: str, stage: str) -> dict | None:
@@ -741,6 +934,7 @@ def derive(w: World, ledger: dict, leases: dict, run_summary: dict | None = None
                             stale=stl.get("image"))
             lo = _frame_obj("last", "last", sid, n, td, fv, ledger, leases, canvas, n in fv2_eps, deps_ok=fo["status"] == "passed",
                             first=fo, stale=stl.get("last"))
+            lo = last_consistent(td, fo, lo)          # K-OPS-E13：尾帧不能比首帧旧、首帧没过尾帧不能算过
             vo = _video_obj(w, sid, n, td, fo, lo, ledger, leases, night_alive)
             S["objects"] = {"assets": ao, "first": fo, "last": lo, "video": vo}
             shot_objs.append(S)
@@ -818,7 +1012,7 @@ def derive(w: World, ledger: dict, leases: dict, run_summary: dict | None = None
 
 def _frame_obj(kind, stage, sid, n, td, fv, ledger, leases, canvas, fv2_owned, deps_ok, first=None, stale=None) -> dict:
     rj = (ledger.get("_master_rejects") or {}).get(f"{kind}:{sid}")
-    if rj and not rj.get("cleared"):
+    if rj and not rj.get("cleared") and not (ledger.get(f"{kind}:{sid}") or {}).get("redo_exhausted"):
         return _redo_obj(kind, sid, n, td, ledger, leases, rj, first)
     o = obj(kind, sid, ep=n, shot=sid)
     led = ledger.get(o["id"]) or {}
@@ -881,7 +1075,7 @@ def _redo_obj(kind, sid, n, td, ledger, leases, rj, first=None) -> dict:
     o = obj(kind, sid, ep=n, shot=sid)
     oid = o["id"]
     led = ledger.get(oid) or {}
-    plan = rj.get("plan") or []
+    plan = (rj.get("plan") or []) + list(led.get("ladder_plan") or [])      # K-OPS-E09：阶梯追加的计划记在本机账本
     k = int(led.get("redo_tries") or 0)
     o.update(redo=True, attempts=k, max_attempts=len(plan) or None, master_reject=rj.get("reason"),
              reason=("总调度驳回 v{}：{}".format(rj.get("reject_n"), rj.get("reason")) if rj.get("reject_n") else "总调度插队：" + str(rj.get("reason"))))
@@ -896,7 +1090,9 @@ def _redo_obj(kind, sid, n, td, ledger, leases, rj, first=None) -> dict:
     if kind == "last" and first and first.get("redo"):
         return {**o, "status": "pending", "waiting_for": "首帧被驳回、替换版复核后再重做尾帧"}
     if k >= len(plan):
-        return {**o, "status": "pending", "waiting_for": "驳回重出 {} 次都没换上，等总调度定".format(k)}
+        # K-OPS-E09（总调度 02:4x，G1）：取消“等总调度定”——阶梯用完交给 Producer.escalate_exhausted 自动定下一步
+        return {**o, "status": "pending", "escalate": True,
+                "waiting_for": "驳回重出 {} 次都没换上 → 阶梯自动处理（输入变了重置 / 换重档 / 尽力 + 工单）".format(k)}
     if led.get("backoff_until", 0) > now():
         return {**o, "status": "ready", "waiting_for": "基础设施退避到 " + iso(led["backoff_until"])[11:]}
     return {**o, "status": "ready", "waiting_for": "空闲道（驳回重出，第 {}/{} 次：{}）".format(k + 1, len(plan), plan[k].get("name"))}
@@ -1026,6 +1222,9 @@ class FrameExec:
             pf = UF._contract(job)
             if not pf.ok:
                 raise ComfyError(f"{sid} 生成契约 preflight 不通过，未提交：" + "；".join(pf.reasons()))
+            bad_refs = refs_guard(self.p, sid, job)
+            if bad_refs:
+                raise ComfyError(f"{sid} 生成契约 preflight 不通过，未提交：K-OPS-F03 refs 与目标状态不一致：" + "；".join(bad_refs)[:400])
             stage = "image"
         else:
             td = P.load_takes(sid)
@@ -1112,6 +1311,7 @@ class FrameExec:
         except Exception:  # noqa: BLE001
             pass
         vqa_record(sid, stage, n, file_rel, job, pf, vlm=vlm)
+        outbox_emit(sid, stage, n, file_rel)
         return pf
 
     def activate(self, sid: str, stage: str, n: int) -> None:
@@ -1145,8 +1345,11 @@ class FakeFrameExec:
                     seconds=0.1, created_at=P.now(), workflow="dryrun")
         P._add_take(sid, take, activate=False)
         ok = step == "ok"
+        # 演练要走完整闸门：看图闸门 enforce 时 auto_current 要求 Q9 pass（11-02 DEBUG-RSI：原来缺 Q9 → 过契约却设不成当前 →
+        # reconcile_demoted 撤回 → 无限循环、退出码仍是 0）
         pf = {"ok": ok, "blocking": [] if ok else ["Q1"], "items": [{"id": "Q1", "status": "pass" if ok else "fail",
-                                                                     "evidence": {"value": 0.5 + 0.05 * attempt}}],
+                                                                     "evidence": {"value": 0.5 + 0.05 * attempt}},
+                                                                    {"id": "Q9", "status": "pass", "evidence": {"dryrun": True}}],
               "reasons": [] if ok else ["Q1 身份相似度 0.31 < 0.40（注入）"]}
         from ns_render import frame_edit as FE
         FE.annotate(sid, stage, n, postflight=pf, producer={"attempt": attempt, "rung": rung.get("name"), "lane": lane, "tag": tag})
@@ -1169,6 +1372,7 @@ class VideoBridge:
     def __init__(self, paths: Paths):
         self.p = paths
         self._night_state = None
+        self._warned: set = set()
 
     def tick(self, reg: dict, ctrl: dict, night_alive: bool, logf) -> None:
         if ctrl.get("auto_force_eps", True):
@@ -1182,12 +1386,13 @@ class VideoBridge:
                 fs = [S["objects"]["first"]["status"] for S in shots]
                 ls = [S["objects"]["last"]["status"] for S in shots]
                 if all(x in ("passed", "best_effort") for x in fs) and all(x in ("passed", "best_effort") for x in ls) \
-                        and any(x == "best_effort" for x in fs):
-                    # 全部通过的集 night 自己会派；有“尽力”镜的集原先要人写 force_eps，现在自动放行
-                    c["force_eps"] = sorted(forced | {E["ep"]})
-                    js(cpath, c)
-                    forced.add(E["ep"])
-                    logf("video_release", ep=E["ep"], why="本集每镜首尾帧都定下（含尽力镜），自动放行出视频（原先要人写 force_eps）")
+                        and any(x == "best_effort" for x in fs) and E["ep"] not in self._warned:
+                    # 总调度 11-02 02:2x（ITERATION_PROTOCOL §3 不合格不进合成；DISTILL gates.best_effort_policy）：
+                    # ⤴ 取代“含尽力镜的集自动写 force_eps 放行”。force_eps 是整集放行，会把尽力镜带进视频 / 合成，所以不再写；
+                    # 过了契约的镜 night 本来就逐镜派（first_ready），尽力镜等规则 / 资产变化后自动 reset 重做（K-OPS-E11）
+                    self._warned.add(E["ep"])
+                    logf("video_release_skipped", ep=E["ep"], counted=False,
+                         why="本集有尽力镜：不整集放行（尽力镜不进合成）；过了契约的镜照常逐镜出视频")
         if (ctrl.get("workers") or {}).get("video") == "producer" and not night_alive:
             import night as NT  # noqa: PLC0415
             if self._night_state is None:
@@ -1250,9 +1455,12 @@ class Producer:
         # 原来线程数 = 道数 → 6 张图都在等打分时，新派的单只能在线程池里排队，道被标“在做”、GPU 实际空着
         # （00:46 派出的 ep01-S10 / ep02-S1 / S2 / S3 到 01:03 一直没交给 ComfyUI，四个队列都是空的）。
         # 线程数放大到道数 × 3；同时用 SCORE_BACKLOG 限制“出好但还没打完分”的数量，打分跟不上时停派（背压），不堆积。
-        self.pool = cf.ThreadPoolExecutor(max_workers=max(8, 3 * (len(self.lanes) or 1)), thread_name_prefix="producer-lane")
         self.scoring: set[str] = set()             # 出好、正在等契约打分 / 看图的对象
         self.score_backlog_max = int(os.environ.get("NS_PRODUCER_SCORE_BACKLOG", "0")) or 2 * (len(self.lanes) or 1) * vlm_instances()
+        # 11-02 02:2x 复核：gpu33 线程池 18 < 积压上限 48，等打分的线程占满后新单在池里排 50–100 s 才开始（dispatch 02:08:30 → rendered
+        # 02:10:04，render_s 只记 39.9）。线程数必须 ≥ 积压上限 + 道数，让积压闸而不是线程池来限流
+        self.pool = cf.ThreadPoolExecutor(max_workers=max(8, self.score_backlog_max + 2 * (len(self.lanes) or 1)),
+                                          thread_name_prefix="producer-lane")
         self.mu = threading.RLock()
         self.last_sig = None
         self.reg: dict = {}
@@ -1303,6 +1511,10 @@ class Producer:
 
     # -- 一轮 --
     def tick(self, dispatch: bool = True) -> dict:
+        try:
+            pause_tick(self.p)                     # K-OPS-E08：运维暂停到点自动恢复；显式暂停超时只报警
+        except Exception as e:  # noqa: BLE001
+            self.logf("pause_tick_err", error=repr(e)[:200])
         ctrl = self.ctrl()
         only = self.only or (set(ctrl.get("only") or []) or None)
         # PW-005：共享登记表永远是整季（分母 = 每集镜数）；--only / control.only 只限制派单。演练（临时目录）才按 only 推导
@@ -1325,6 +1537,14 @@ class Producer:
                         return self.tick(dispatch)
                 except Exception as e:  # noqa: BLE001
                     self.logf("adopt_err", error=repr(e)[:300])
+                try:
+                    self.auto_reset_best_effort(reg)   # K-OPS-E11：尽力版在规则 / 资产版本变化时自动重置
+                except Exception as e:  # noqa: BLE001
+                    self.logf("be_reset_err", error=repr(e)[:300])
+                try:
+                    self.escalate_exhausted(reg)  # K-OPS-E09：驳回阶梯用完的对象自动定下一步（不停下等人）
+                except Exception as e:  # noqa: BLE001
+                    self.logf("escalate_err", error=repr(e)[:300])
                 self.dispatch_frames(reg, lanes, ctrl)
             try:
                 self.video.tick(reg, ctrl, w.night_alive(), self.logf)
@@ -1336,6 +1556,11 @@ class Producer:
                 except Exception as e:  # noqa: BLE001
                     self.logf("import_err", error=repr(e)[:300])
             self.raise_gates(reg)
+        try:                                         # K-OPS-E13 登记表自检（data_parity 读同一份文件）
+            probs = registry_consistency(reg)
+            js(self.p.pd / "consistency.json", {"at": iso(), "n": len(probs), "problems": probs[:200], "rule": "K-OPS-E13"})
+        except Exception as e:  # noqa: BLE001
+            self.logf("consistency_err", error=repr(e)[:200])
         js(self.p.registry, reg)
         js(self.p.heartbeat, {"ts": iso(), "t": now(), "pid": os.getpid(), "paused": reg["paused"], "inflight": len(self.inflight)})
         sig = json.dumps([[(o["id"], o["status"], o.get("attempts")) for S in E["shots"] for o in S["objects"].values()]
@@ -1345,6 +1570,85 @@ class Producer:
             js(self.p.mirror, {"updated": reg["updated"], "counts": reg["counts"], "paused": reg["paused"],
                                "note": "PRODUCER 状态变了（live.py 据此推 stage 事件，界面重取 /api/producer/status）"})
         return reg
+
+    def auto_reset_best_effort(self, reg, every_s: float = 300) -> dict:
+        """K-OPS-E11（总调度 11-02 02:2x / DISTILL gates.best_effort_policy）：尽力版（不进合成）在规则或资产版本变化时自动重置、
+        重新进正常流程，不计次。第一次见到尽力版只记下当时的依据（be_basis），之后依据变了才重置。资产暂缓清单里的不动。每 5 分钟查一次"""
+        if now() - getattr(self, "_be_check_t", 0) < every_s:
+            return {}
+        self._be_check_t = now()
+        rule = be_rule_sig(self.p.root)
+        held = asset_hold_objects(self.p.data)
+        out = {"basis": 0, "reset": 0}
+        for E in reg.get("episodes") or []:
+            for S in E["shots"]:
+                for k in ("first", "last"):
+                    o = S["objects"][k]
+                    if o.get("status") != "best_effort" or o["id"] in held:
+                        continue
+                    led = self.ledger().get(o["id"]) or {}
+                    sig = {"rule": rule, **shot_inputs_sig(self.p, S["shot"])}
+                    base = led.get("be_basis")
+                    if not base:
+                        self.led_update(o["id"], be_basis=sig)
+                        out["basis"] += 1
+                        continue
+                    changed = [x for x in ("rule", "inputs", "prompt_sha") if sig.get(x) and base.get(x) and sig[x] != base[x]]
+                    if sig.get("refs_mtime") and base.get("refs_mtime") and sig["refs_mtime"] > base["refs_mtime"]:
+                        changed.append("refs")
+                    if not changed:
+                        continue
+                    word = {"rule": "契约 / 预设 / 看图规则", "inputs": "编译输入", "prompt_sha": "提示词", "refs": "参考图"}
+                    why = "尽力版的" + "、".join(word[c] for c in changed) + "变了 → 自动重置，重新给 3 次，不计次（K-OPS-E11）"
+                    self.led_update(o["id"], tries=0, final=None, redo_exhausted=None, ladder_plan=[], redo_tries=0, be_basis=None,
+                                    demoted_at=iso(), reason=why,
+                                    history=[dict(h, before_gate_change=True) for h in led.get("history") or []])
+                    self.logf("best_effort_reset", obj=o["id"], counted=False, why=why, changed=changed)
+                    out["reset"] += 1
+        return out
+
+    def escalate_exhausted(self, reg) -> dict:
+        """K-OPS-E09 驳回阶梯（config/policies/retry.yaml redo_ladder，decider=code）：
+          ① 还在资产暂缓清单（*_hold.json）→ 继续等；
+          ② 最后一次失败之后输入变了（提示词 / 参考图集合 / 参考图文件更新 / 编译输入哈希）→ 重置驳回次数，counted=false，原因“输入已更新”；
+          ③ 输入没变 → 下一级：追加 frame_v9_heavy 换 seed ×2（只追加一次）；
+          ④ 再不过 → 标尽力版（不进合成）+ 给 SENTINEL 开工单（附失败原因统计）。"""
+        held = asset_hold_objects(self.p.data)
+        lad = redo_ladder_policy()
+        out = {"held": 0, "reset": 0, "heavy": 0, "best_effort": 0}
+        for E in reg.get("episodes") or []:
+            for S in E["shots"]:
+                for k in ("first", "last"):
+                    o = S["objects"][k]
+                    if not o.get("escalate"):
+                        continue
+                    oid = o["id"]
+                    if oid in held:
+                        out["held"] += 1
+                        continue
+                    led = self.ledger().get(oid) or {}
+                    changed = redo_inputs_changed(self.p, o["shot"], k, led)
+                    if changed:
+                        self.led_update(oid, redo_tries=0, ladder_plan=[], redo_exhausted=None,
+                                        redo_resets=(led.get("redo_resets") or []) + [{"at": iso(), "why": "输入已更新：" + changed}],
+                                        reason="输入已更新（" + changed + "），驳回重出重新给，不计次")
+                        self.logf("redo_reset", obj=oid, counted=False, why="输入已更新：" + changed)
+                        out["reset"] += 1
+                    elif not led.get("ladder_plan"):
+                        plan = [plan_item(x) for x in lad["heavy_plan"]]
+                        self.led_update(oid, ladder_plan=plan, reason="驳回重出用完、输入没变 → 下一级：" + "、".join(lad["heavy_plan"]))
+                        self.logf("redo_escalate", obj=oid, counted=False, plan=lad["heavy_plan"])
+                        out["heavy"] += 1
+                    else:
+                        stats = fail_stats(led)
+                        why = "驳回阶梯走完仍没过（" + "、".join(f"{a}×{b}" for a, b in stats.items()) + "），标尽力版，不进合成"
+                        self.led_update(oid, redo_exhausted=True, final="best_effort", reason=why)
+                        sentinel_ticket(self.p, oid, why, stats, led)
+                        self.logf("best_effort", obj=oid, reason=why, via="redo_ladder", counted=False)
+                        out["best_effort"] += 1
+        if any(out[x] for x in ("reset", "heavy", "best_effort")):
+            self.logf("ladder_tick", **out)
+        return out
 
     def _tasks(self, reg) -> list[dict]:
         """给 GPUVIEW /api/render-tasks：在做 / 要做 / 失败 / 尽力的出图视频对象（扁平）"""
@@ -1399,6 +1703,12 @@ class Producer:
         free = [ln for ln, s in lanes.items() if s["free"]]
         if not free:
             return
+        dprobs = decision_file_problems()
+        if dprobs:          # K-OPS-F09：决策 / 覆盖文件缺失或损坏 → 这一拍一单不派（失败关闭），5 分钟报一次警
+            if getattr(self, "_last_dfb_log", 0) < now() - 300:
+                self._last_dfb_log = now()
+                self.logf("decision_files_block", problems=dprobs[:8], alarm=True, counted=False)
+            return
         with self.mu:
             backlog = len(self.scoring)
         if backlog >= self.score_backlog_max:     # K-OPS-E05：打分积压到上限就先不派（GPU 出得再快也只是排队等打分）
@@ -1435,7 +1745,7 @@ class Producer:
             if o.get("redo"):                    # 总调度驳回重出：按驳回计划，不计入 3 次上限
                 rj = (jl(self.p.rejects, {}) or {}).get(o["id"]) or {}
                 k = int(led.get("redo_tries") or 0)
-                plan = rj.get("plan") or []
+                plan = (rj.get("plan") or []) + list(led.get("ladder_plan") or [])
                 if k >= len(plan):
                     continue
                 from ns_render import pipeline as P
@@ -1888,10 +2198,21 @@ class Producer:
 
 
 # ---------------------------------------------------------------------------------------------- 控制
-def import_staged(paths: Paths, path: str, sha: str, note: str, by: str = "PRODUCER") -> int:
+def rubric_gate(paths: Paths, path: str) -> dict:
+    """HOLLYWOOD r7 导入闸门（总调度 fredw-2b 11-02 批复，L-098 / L-102，CONSENT 总调度 -> HOLLYWOOD）：
+    暂存稿每集 rubric_code 代码判定失败项 = 0 才放行（tools/script_rsi/rubric_audit.gate，只读）。只拦新导入，不碰已导入的现行稿"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("rubric_audit", paths.root / "tools" / "script_rsi" / "rubric_audit.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m.gate(paths.root / path)
+
+
+def import_staged(paths: Paths, path: str, sha: str, note: str, by: str = "PRODUCER", skip_rubric_gate: bool = False,
+                  run: str | None = None) -> int:
     """总调度派的整稿导入（D-SCR-07，项目方 11-01 选 A：“自动执行对应制作,人类不应该点,坏了,系统自动做”）：
-    走与 auto_import 相同的通道——先核 sha256、/api/script-inbox/validate 阻断 = 0，再带 PRODUCER 令牌 POST
-    /api/script-inbox/import（merge，导入接口自己备份）；审计进 log.jsonl（imported_staged / import_blocked）"""
+    走与 auto_import 相同的通道——先核 sha256、rubric 导入闸门（HOLLYWOOD r7）、/api/script-inbox/validate 阻断 = 0，再带 PRODUCER 令牌 POST
+    /api/script-inbox/import（merge，导入接口自己备份）；审计进 log.jsonl（imported_staged / import_blocked / rubric_gate_skipped）"""
     import hashlib
     f = paths.root / path
     got = hashlib.sha256(f.read_bytes()).hexdigest()
@@ -1899,8 +2220,31 @@ def import_staged(paths: Paths, path: str, sha: str, note: str, by: str = "PRODU
         log_event(paths, "import_blocked", path=path, step="sha", want=sha, got=got, by=by)
         print(json.dumps({"ok": False, "why": f"sha256 不符：{got}"}, ensure_ascii=False))
         return 1
+    if skip_rubric_gate:
+        if "总调度" not in (by or ""):
+            log_event(paths, "import_blocked", path=path, step="rubric_skip_denied", by=by)
+            print(json.dumps({"ok": False, "why": "--skip-rubric-gate 只有总调度能批（--by 须写总调度）"}, ensure_ascii=False))
+            return 1
+        log_event(paths, "rubric_gate_skipped", path=path, sha=sha, by=by, note=note)
+    else:
+        try:
+            rg = rubric_gate(paths, path)
+        except Exception as e:  # noqa: BLE001  闸门自身出错 = 不放行
+            rg = {"ok": False, "eps": {}, "error": repr(e)[:300]}
+        if not rg.get("ok"):
+            fails = {e: x.get("fails", [])[:5] for e, x in (rg.get("eps") or {}).items() if x.get("fails")}
+            log_event(paths, "import_blocked", path=path, step="rubric", fails=fails, error=rg.get("error"), by=by)
+            print(json.dumps({"ok": False, "why": "rubric 导入闸门：代码判定失败项 ≠ 0", "fails": fails, "error": rg.get("error")},
+                             ensure_ascii=False)[:2000])
+            return 1
     pr = Producer.__new__(Producer)
     st, v = Producer._http(pr, "POST", "/api/script-inbox/validate", {"path": path})
+    if run and not _runs().is_primary(run, paths.root):         # 第二季等非主剧：写 data/import/runs/<run>/script_v2.json，不碰主导入稿
+        if st != 200 or not v.get("ok") or v.get("blocking"):
+            log_event(paths, "import_blocked", path=path, step="validate", status=st, blocking=v.get("blocking"), by=by, run=run)
+            print(json.dumps({"ok": False, "why": "validate", "status": st, "blocking": v.get("blocking"), "run": run}, ensure_ascii=False))
+            return 1
+        return import_staged_run(paths, path, sha, note, by, run)
     if st != 200 or not v.get("ok") or v.get("blocking"):
         log_event(paths, "import_blocked", path=path, step="validate", status=st, blocking=v.get("blocking"), by=by)
         print(json.dumps({"ok": False, "why": "validate", "status": st, "blocking": v.get("blocking"),
@@ -1911,9 +2255,81 @@ def import_staged(paths: Paths, path: str, sha: str, note: str, by: str = "PRODU
         "note": note})
     log_event(paths, "imported_staged" if st == 200 else "import_blocked", path=path, sha=sha, status=st, by=by, note=note,
               backup=r.get("backup"), detail=None if st == 200 else str(r.get("detail") or "")[:300])
+    if st == 200:                                  # K-OPS-W15（WORKFLOW）：导入事件给 episode_pipeline 等下游
+        try:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            import import_events as IE
+            IE.append_import(imported_episodes(paths, path, r), by=f"PRODUCER import_staged（{by}）", source=path, note=note)
+        except Exception as e:  # noqa: BLE001  事件没写上不影响导入本身，记日志
+            log_event(paths, "import_event_err", path=path, error=repr(e)[:200])
     print(json.dumps({"ok": st == 200, "status": st, **({k: r.get(k) for k in ("backup", "episodes", "detail") if k in r})},
                      ensure_ascii=False))
     return 0 if st == 200 else 1
+
+
+def _runs():
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import runs as RN
+    return RN
+
+
+def import_staged_run(paths: Paths, path: str, sha: str, note: str, by: str, run: str) -> int:
+    """多剧并行（DISTILL §0.1，总调度 02:4x / r3 ③）：非主剧导入 = tools/import_script.py -o data/import/runs/<run>/script_v2.json
+    （同 run 已有稿则先备份、按集合并；不重建全局 state_timeline）→ runs.register_run → import_events.append_import(run_id=run)"""
+    import subprocess
+    RN = _runs()
+    out = RN.import_path(run, paths.root)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    backup = None
+    if out.exists():
+        bdir = out.parent / "backups"
+        bdir.mkdir(parents=True, exist_ok=True)
+        backup = bdir / f"script_v2.{time.strftime('%Y%m%d-%H%M%S')}.json"
+        shutil.copy2(out, backup)
+    cmd = [sys.executable, str(paths.root / "tools" / "import_script.py"), "--script", str(paths.root / path), "-o", str(out),
+           "--no-timeline"]
+    if backup:
+        cmd += ["--merge-base", str(backup)]
+    r = subprocess.run(cmd, capture_output=True, cwd=paths.root, timeout=900,
+                       env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+    if r.returncode != 0:
+        if backup:
+            shutil.copy2(backup, out)
+        log_event(paths, "import_blocked", path=path, step="import_script", run=run, by=by,
+                  detail=(r.stderr or b"").decode("utf-8", "replace")[-300:])
+        print(json.dumps({"ok": False, "why": "import_script 失败", "run": run}, ensure_ascii=False))
+        return 1
+    eps = imported_episodes(paths, path, None)
+    RN.register_run(run, source="import", episode=min(eps) if eps else None, root=paths.root)
+    try:
+        import import_events as IE
+        IE.append_import(eps, by=f"PRODUCER import_staged（{by}）", source=path, note=note, run_id=run)
+    except Exception as e:  # noqa: BLE001
+        log_event(paths, "import_event_err", path=path, run=run, error=repr(e)[:200])
+    log_event(paths, "imported_staged", path=path, sha=sha, status=200, by=by, note=note, run=run, out=str(out.relative_to(paths.root)),
+              backup=str(backup.relative_to(paths.root)) if backup else None, episodes=eps)
+    print(json.dumps({"ok": True, "run": run, "out": str(out.relative_to(paths.root)), "episodes": eps}, ensure_ascii=False))
+    return 0
+
+
+def imported_episodes(paths: Paths, path: str, resp: dict | None = None) -> list[int]:
+    """这次导入替换的集号：导入接口回的 episodes 优先；否则从暂存稿文件名（…_epNN_…）或稿内集头（第 N 集 / EP N）取"""
+    eps = (resp or {}).get("episodes")
+    out: set[int] = set()
+    if isinstance(eps, list):
+        for e in eps:
+            m = re.search(r"\d+", str(e.get("n") if isinstance(e, dict) else e))
+            if m:
+                out.add(int(m.group()))
+    if not out:
+        out |= {int(m) for m in re.findall(r"ep(\d{1,2})(?!\d)", Path(path).name, re.I)}
+    if not out:
+        try:
+            txt = (paths.root / path).read_text(encoding="utf-8")
+            out |= {int(m) for m in re.findall(r"^#+\s*(?:第\s*(\d+)\s*集)", txt, re.M)}
+        except OSError:
+            pass
+    return sorted(out)
 
 
 def ensure_token(paths: Paths) -> str:
@@ -1931,13 +2347,86 @@ def ensure_token(paths: Paths) -> str:
     return t
 
 
-def set_paused(paths: Paths, paused: bool, by: str = "owner", note: str = "") -> dict:
+# ---- K-OPS-E08 暂停口径（总调度 11-02 D5）：判定只有一份实现 = tools/autopilot/policy.py:pause_decision（DISTILL）。
+# 这里只负责：写暂停时强制带 reason_kind + expires_at；每拍（producer.tick / infra_watchdog）按判定执行 resume 或报警。
+#   运维暂停 reason_kind ∈ resources.pause_max_s.ops_kinds（line_switch / restart / deploy）：到 expires_at（≤ paused_at+180 s）自动恢复
+#   显式暂停 reason_kind ∈ explicit_kinds（master / owner）：不自动恢复，超过 180 s 写报警 A-PAUSE-OVERDUE（每 10 分钟最多一条）
+OPS_HINTS = (("line_switch", ("netfix", "切线路", "线路")), ("deploy", ("deploy", "部署", "system_version")),
+             ("restart", ("restart", "drain", "重启", "排空")))
+
+
+def _pol():
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import policy as POL
+    return POL
+
+
+def pause_ops_max_s() -> int:
+    """单一来源：config/policies/resources.yaml resources.pause_max_s；读不到按 180"""
+    try:
+        return int(_pol().item("resources.pause_max_s", ROOT)["value"])
+    except Exception:  # noqa: BLE001
+        return 180
+
+
+def infer_pause_kind(by: str) -> str:
+    """没写 reason_kind 时按 --by 推断：运维类 → line_switch / deploy / restart；项目方 → owner；其余（总调度 / agent 显式）→ master"""
+    b = str(by or "").lower()
+    for kind, hints in OPS_HINTS:
+        if any(h in b for h in hints):
+            return kind
+    return "owner" if (b.strip() in ("owner", "fred") or "项目方" in b) else "master"
+
+
+def is_ops_kind(kind: str) -> bool:
+    try:
+        return kind in set(_pol().item("resources.pause_max_s", ROOT).get("ops_kinds") or [])
+    except Exception:  # noqa: BLE001
+        return kind in ("line_switch", "restart", "deploy")
+
+
+def set_paused(paths: Paths, paused: bool, by: str = "owner", note: str = "", kind: str | None = None,
+               expires_s: float | None = None) -> dict:
+    """暂停一律带 reason_kind + expires_at（D5 require_fields）。运维暂停 expires ≤ 180 s；显式暂停 expires 只作提示（不自动恢复）"""
     c = jl(paths.ctrl, {}) or {}
-    c.update(paused=paused, paused_by=by if paused else None, paused_at=iso() if paused else None, note=note or None)
+    if paused:
+        kind = kind or infer_pause_kind(by)
+        if kind == "ops":
+            kind = infer_pause_kind(by) if is_ops_kind(infer_pause_kind(by)) else "restart"
+        cap = pause_ops_max_s()
+        exp = now() + (min(float(expires_s or cap), cap) if is_ops_kind(kind) else float(expires_s or cap))
+        c.update(paused=True, paused_by=by, paused_at=iso(), note=note or None, reason_kind=kind,
+                 expires_at=time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(exp)), overdue_alert_t=None)
+    else:
+        c.update(paused=False, paused_by=None, paused_at=None, note=note or None, reason_kind=None,
+                 expires_at=None, overdue_alert_t=None)
+    c.pop("expires_t", None)
     js(paths.ctrl, c)
-    log_event(paths, "pause" if paused else "resume", by=by, note=note)
+    log_event(paths, "pause" if paused else "resume", by=by, note=note,
+              **({"reason_kind": c.get("reason_kind"), "expires_at": c.get("expires_at")} if paused else {}))
     return c
 
+
+def pause_tick(paths: Paths, t: float | None = None, apply: bool = True, alerts: Path | None = None) -> dict:
+    """按 policy.pause_decision 执行（幂等）→ {"action": None|resume|alert, ...}"""
+    t = now() if t is None else t
+    c = jl(paths.ctrl, {}) or {}
+    d = _pol().pause_decision(c, t, ROOT)
+    if not d:
+        return {"action": None}
+    if d["action"] == "resume" and apply:
+        set_paused(paths, False, by="PAUSE_EXPIRY", note=f"运维暂停（{d.get('by')}，{d.get('kind')}）到点自动恢复：{d.get('why')}（K-OPS-E08）")
+    elif d["action"] == "alert" and apply and t - float(c.get("overdue_alert_t") or 0) >= 600:
+        ap = alerts or (ROOT / "data/qa/alerts.jsonl")
+        ap.parent.mkdir(parents=True, exist_ok=True)
+        with open(ap, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"ts": iso(), "t": t, "id": "A-PAUSE-OVERDUE", "state": "open", "level": "warn", "by": "producer.pause_tick",
+                                "msg": f"暂停（{d.get('by')}，{d.get('kind') or '没写类型'}：{c.get('note') or '无说明'}）已 "
+                                       f"{round((d.get('paused_s') or 0) / 60)} 分钟，不自动恢复：{d.get('why')}", "rule": "K-OPS-E08"},
+                               ensure_ascii=False) + chr(10))
+        c["overdue_alert_t"] = t
+        js(paths.ctrl, c)
+    return d
 
 def serve(paths: Paths) -> int:
     pidf = paths.pd / "producer.pid"
@@ -1986,8 +2475,10 @@ def dryrun(inject_fail: bool = False, keep: bool = False, dest: Path | None = No
     pr.backoff = (1, 1, 1)
     # 演练里尾帧要有 last_prompt：FakeFrameExec 不编译，直接出
     trail = []
+    max_ticks = 30                                # 上限：到点没走完 = 失败（退出码 2），报卡在哪一步
+    ok = False
     try:
-        for i in range(30):
+        for i in range(max_ticks):
             reg = pr.tick()
             pr.wait_idle(60)
             row = {S["shot"]: {k: S["objects"][k]["status"] for k in ("first", "last", "video")}
@@ -1996,15 +2487,25 @@ def dryrun(inject_fail: bool = False, keep: bool = False, dest: Path | None = No
             print(f"tick {i:02d}", json.dumps(row, ensure_ascii=False))
             if all(v["video"] == "passed" or v["first"] == "best_effort" for v in row.values()):
                 reg = pr.tick(dispatch=False)
+                ok = True
                 break
             time.sleep(1.2)
         out = {"tmp": str(tmp), "trail": trail, "final": {S["shot"]: {k: {f: S["objects"][k].get(f) for f in ("status", "attempts", "reason", "waiting_for")}
                                                                      for k in ("first", "last", "video")}
                                                           for E in reg["episodes"] for S in E["shots"]},
                "log": [json.loads(x) for x in paths.log.read_text(encoding="utf-8").splitlines()]}
+        want_video = {"ep01-S1"}                  # 成功条件：S1 必须一路到视频 passed（注入时 S2 按设计落到“尽力”）
+        final = out["final"]
+        ok = ok and all((final.get(sid) or {}).get("video", {}).get("status") == "passed" for sid in want_video)
+        stuck = {sid: next((f"{k}={v['status']}（{v.get('reason') or v.get('waiting_for') or ''}）" for k, v in st.items()
+                            if v.get("status") != "passed"), None) for sid, st in final.items()}
+        out.update(ok=ok, max_ticks=max_ticks, stuck=None if ok else stuck)
         dest = dest or ROOT / "data" / "producer" / ("dryrun_inject.json" if inject_fail else "dryrun.json")
         js(dest, out)
         print("演练记录：", dest)
+        if not ok:
+            print("演练失败：", json.dumps(stuck, ensure_ascii=False))
+            return 2
         return 0
     finally:
         P.DATA, P.RENDERS = old
@@ -2139,8 +2640,8 @@ def reset_best_effort(paths: Paths, why: str, by: str) -> int:
     """总调度 11-01：门槛 / 编译器更新后，仍是“尽力”的首帧 / 尾帧重新给 3 次（旧次数标 before_gate_change，不算）。
     安全做法：先暂停、等手上的活做完（heartbeat inflight=0，最多 15 分钟），改账本，再恢复原来的暂停状态"""
     was = bool((jl(paths.ctrl, {}) or {}).get("paused"))
-    set_paused(paths, True, by="reset-best-effort")
-    t_end = now() + 900
+    set_paused(paths, True, by="reset-best-effort", kind="restart", expires_s=180)   # K-OPS-E08：运维暂停 ≤180 s
+    t_end = now() + 170
     while now() < t_end and int((jl(paths.heartbeat, {}) or {}).get("inflight") or 0) > 0:
         time.sleep(10)
     reg = jl(paths.registry, {}) or {}
@@ -2224,8 +2725,13 @@ def main(argv=None) -> int:
     ap.add_argument("--no-dispatch", action="store_true")
     ap.add_argument("--by", default="owner")
     ap.add_argument("--note", default="")
+    ap.add_argument("--run", default="", help="import-staged：目标剧（config/pipeline/runs.json）；不写 / 主剧 = 合并进主导入稿，其它 = data/import/runs/<run>/")
+    ap.add_argument("--kind", default="", choices=["", "ops", "line_switch", "restart", "deploy", "master", "owner"],
+                    help="pause 的 reason_kind：line_switch / restart / deploy = 运维暂停（≤180 s 到点恢复）；master / owner = 显式暂停（不自动恢复，超 180 s 报警）；不写按 --by 推断")
+    ap.add_argument("--expires-s", type=float, default=0, help="pause：到点自动恢复的秒数（ops 上限 180）")
     ap.add_argument("--inject-fail", action="store_true")
     ap.add_argument("--keep", action="store_true")
+    ap.add_argument("--skip-rubric-gate", action="store_true", help="import-staged：跳过 rubric 导入闸门（只有总调度能批，--by 须写总调度，记审计）")
     a = ap.parse_args(argv)
     paths = Paths()
     if a.cmd == "serve":
@@ -2235,7 +2741,7 @@ def main(argv=None) -> int:
     if a.cmd == "reset-best-effort":
         return reset_best_effort(paths, a.note or "门槛 / 编译器更新后重新给 3 次（总调度 11-01）", a.by)
     if a.cmd == "import-staged":          # 总调度派的整稿导入（走 PRODUCER 令牌通道）：--obj <暂存稿路径> --reason <sha256> --note
-        return import_staged(paths, a.obj, a.reason, a.note, a.by)
+        return import_staged(paths, a.obj, a.reason, a.note, a.by, skip_rubric_gate=a.skip_rubric_gate, run=a.run or None)
     if a.cmd == "unwait":                 # 驳回重出在等的前提（如 REFLOCK 修 Q1）满足了 → 放行
         rj = jl(paths.rejects, {}) or {}
         if a.obj in rj:
@@ -2250,7 +2756,8 @@ def main(argv=None) -> int:
     if a.cmd == "dryrun":
         return dryrun(a.inject_fail, a.keep)
     if a.cmd in ("pause", "resume"):
-        print(json.dumps(set_paused(paths, a.cmd == "pause", a.by, a.note), ensure_ascii=False))
+        print(json.dumps(set_paused(paths, a.cmd == "pause", a.by, a.note, kind=a.kind or None, expires_s=a.expires_s or None),
+                         ensure_ascii=False))
         return 0
     if a.cmd == "status":
         reg = jl(paths.registry, {}) or {}

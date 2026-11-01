@@ -90,3 +90,6 @@ gpu.lock.*
 /assets/**/uploads/
 # 会话记录自动提取（tools/qa/extract_owner_messages.py 生成，含项目方原话全文 = 会话记录，按 10-30 封板规则不入库）
 /docs/master/owner_messages_extracted.md
+
+# K-OPS-F08（FACTORY 11-02）：测试夹具里的 data/ 是代码的一部分，要进版本（data/ 规则会把任何名为 data 的目录都忽略）
+!tests/fixtures/t06_golden/data/

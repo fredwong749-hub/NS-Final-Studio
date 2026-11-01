@@ -52,6 +52,7 @@ Host gpu36
     HostKeyAlias gpu36
     IdentityFile ~/.ssh/id_ed25519_gpu36
     ProxyJump 194relay
+# ---- r3：-tb = 经 base-b（直连跳板）的第二条底座，端口 22361 / 22331
 # ---- r2（总调度 11-02，运维 FONG-QUICK.md）：一条香港常驻底座隧道转发两台服务器 sshd（127.0.0.1:22360 → 10.0.0.36:22、22330 → 10.0.0.33:22），
 # 其它连接一律连 gpu36-t / gpu33-t，在隧道里直连服务器 sshd，不在跳板上握手（跳板每小时新建 < 50）。
 Host gpu36-t
@@ -64,6 +65,21 @@ Host gpu36-t
 Host gpu33-t
     HostName 127.0.0.1
     Port 22330
+    User root
+    HostKeyAlias gpu33
+    IdentityFile ~/.ssh/id_rsa_gpu33
+    IdentityFile ~/.ssh/id_ed25519_gpu36
+    ConnectTimeout 15
+Host gpu36-tb
+    HostName 127.0.0.1
+    Port 22361
+    User root
+    HostKeyAlias gpu36
+    IdentityFile ~/.ssh/id_ed25519_gpu36
+    ConnectTimeout 15
+Host gpu33-tb
+    HostName 127.0.0.1
+    Port 22331
     User root
     HostKeyAlias gpu33
     IdentityFile ~/.ssh/id_rsa_gpu33

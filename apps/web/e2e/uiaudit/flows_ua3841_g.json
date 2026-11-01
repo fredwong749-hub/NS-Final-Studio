@@ -1,0 +1,52 @@
+[
+  {
+    "id": "f26_tools",
+    "title": "F26 工具 ▾ 里的“立即推进一步”（只看不点）",
+    "path": "/#/overview",
+    "wait": 10000,
+    "steps": [
+      { "wait": 2000 },
+      { "click": "工具 ▾", "after": 1200 },
+      { "js": "const b=document.querySelector('[data-tool=tick]'); const all=[...document.querySelectorAll('.v3-tools button, .v3-tools a')].map(x=>x.innerText.trim()).filter(Boolean); return {tick: b ? {txt:b.innerText, title:b.title, vis:b.getBoundingClientRect().width>0} : null, items: all.slice(0,60)}" },
+      { "shot": "tools" }
+    ]
+  },
+  {
+    "id": "p12_gpu",
+    "title": "P1-2 顶栏卡数 / GPU 面板 与连接胶囊一致",
+    "path": "/#/overview",
+    "wait": 10000,
+    "steps": [
+      { "wait": 4000 },
+      { "js": "const g=document.querySelector('.v3-gpu'); return {gpu:g?.innerText, gpuTitle:g?.title?.slice(0,400), chip:document.querySelector('.infra-pop button')?.innerText, chipTitle:document.querySelector('.infra-pop button')?.title?.slice(0,120)}" },
+      { "clickAt": "(()=>{const b=document.querySelector('.v3-gpu'); const r=b.getBoundingClientRect(); return [r.x+r.width/2, r.y+r.height/2]})()", "after": 6000 },
+      { "js": "const d=document.querySelector('[class*=gpu-drawer], aside[class*=gpu], .gpu-panel'); return (d||document.body).innerText.slice(0,1400)" },
+      { "shot": "gpu" }
+    ]
+  },
+  {
+    "id": "p02_canvas06",
+    "title": "P0-2 / P1-1 画布 ep06（后端未重启前预计仍复现）",
+    "path": "/#ep06",
+    "wait": 10000,
+    "steps": [
+      { "wait": 6000 },
+      { "js": "const imgs=[...document.querySelectorAll('img')].filter(i=>i.getBoundingClientRect().width>100).map(i=>decodeURIComponent(i.currentSrc||i.src).replace(/.*src=/,'').slice(0,100)); const draft=[...document.querySelectorAll('*')].filter(e=>e.children.length===0 && /草图/.test(e.innerText||'')).length; const vid=[...document.querySelectorAll('*')].filter(e=>e.children.length===0 && /视频 \\d+ 版待选/.test(e.innerText||'')).length; return {imgs, draftLabels:draft, videoPending:vid}" },
+      { "shot": "top" }
+    ]
+  },
+  {
+    "id": "r43_overview",
+    "title": "r43 整洁版总览 + 单击开抽屉",
+    "path": "/#/overview",
+    "wait": 10000,
+    "steps": [
+      { "wait": 3000 },
+      { "shot": "main" },
+      { "js": "const imgs=[...document.querySelectorAll('img')].map(i=>({c:i.complete,n:i.naturalWidth,src:decodeURIComponent(i.src)})); return {n:imgs.length, broken:imgs.filter(i=>i.c&&i.n===0).length, quarantine:imgs.filter(i=>/_quarantine/.test(i.src)).length, oldDraft:imgs.filter(i=>/images\\/frames\\//.test(i.src)).length, hasDetailToggle: /显示细节/.test(document.body.innerText)}" },
+      { "clickAt": "(()=>{const t=[...document.querySelectorAll('img.live-img')].find(i=>i.getBoundingClientRect().width>40 && i.getBoundingClientRect().top>200); if(!t) return [null,null]; const r=t.getBoundingClientRect(); return [r.x+r.width/2, r.y+r.height/2]})()", "after": 2000 },
+      { "js": "const d=[...document.querySelectorAll('aside, [role=dialog], [class*=peek], [class*=drawer]')].filter(e=>e.getBoundingClientRect().width>200); return {hash: location.hash, drawers: d.map(x=>({cls:x.className, txt:x.innerText.slice(0,500)}))}" },
+      { "shot": "drawer" }
+    ]
+  }
+]

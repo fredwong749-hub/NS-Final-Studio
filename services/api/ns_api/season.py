@@ -16,6 +16,8 @@ REPO = Path(__file__).resolve().parents[3]
 router = APIRouter(tags=["season"])
 SIZE_RE = re.compile(r"(大远景|远景|大全景|全景|中全景|中景|中近景|近景|大特写|特写)")
 _cache: dict = {"key": None, "val": None}
+# 卡片一句话内容去掉开头的机位短语（“侧面机位”“过肩”“固定机位”…）
+CAM_RE = re.compile(r".{0,6}(机位|视角|角度)|过肩|侧面|正面|背面|固定|手持|跟拍|推镜|拉镜|摇镜|static shot.*|over.?the.?shoulder.*")
 
 
 def _script() -> tuple[dict, float]:
@@ -32,6 +34,32 @@ def _cands(ep: int) -> dict:
         return takes_ui.candidates(ep).get("shots") or {}
     except Exception:  # noqa: BLE001
         return {}
+
+
+def _img_line(t: str) -> str:
+    """剧本 img 去掉开头的 LoRA 触发词 / 景别 / 机位短语（“lnwan01，特写，平视，”），留镜头内容本身；前端只显示前 20 字、悬停看全文"""
+    parts = [x for x in re.split(r"[，,]", t) if x.strip()]
+    while parts and (re.fullmatch(r"[A-Za-z0-9_\- ]+", parts[0].strip()) or SIZE_RE.fullmatch(parts[0].strip())
+                     or parts[0].strip() in ("平视", "俯视", "仰视", "侧拍", "背拍", "正拍", "略俯", "略仰")
+                     or CAM_RE.fullmatch(parts[0].strip())):
+        parts.pop(0)
+    return "，".join(x.strip() for x in parts)[:200]
+
+
+def _faces(sc: dict) -> dict[str, str]:
+    """出场人物名字 → 身份脸图址（asset_refs.face_of，与出图用的同一张；资产中心改了身份脸这里跟着变）"""
+    out: dict[str, str] = {}
+    try:
+        from ns_agent import asset_refs as R  # noqa: PLC0415
+        from ns_api.character_hub import current_project  # noqa: PLC0415
+        proj = current_project()
+        for c in (sc.get("globals") or {}).get("character_registry") or []:
+            f = R.face_of(proj, c.get("char_id") or "") if c.get("char_id") else None
+            if f and c.get("name"):
+                out[c["name"]] = "/files/" + (f[len("data/"):] if f.startswith("data/") else f)
+    except Exception:  # noqa: BLE001 — 读不到身份脸就只显示名字
+        pass
+    return out
 
 
 def _structure(sc: dict) -> list[dict]:
@@ -59,7 +87,9 @@ def _structure(sc: dict) -> list[dict]:
                           # DATAALIGN（K-UI-D01）：与 /api/episodes 的 duration.seconds 同一规则（剧本没写 = 10 秒兜底，标 default），两页总秒数一致
                           "seconds": s.get("duration") if s.get("duration") is not None else 10,
                           "seconds_source": s.get("duration_source") or ("script" if s.get("duration") is not None else "default"),
-                          "adult": bool(s.get("adult"))})
+                          "adult": bool(s.get("adult")),
+                          # r43（项目方 02:4x：“缺乏很多细节，比如人物什么的”）：卡片第 3 行一句话镜头内容 = 剧本 img（去掉开头触发词）
+                          "img": _img_line(s.get("img_prompt") or "")})
         out.append({"number": n, "title": e.get("title"), "scenes": [lib.get(x) or x for x in e.get("scene_ids") or []],
                     "shots": shots})
     return out
@@ -92,4 +122,4 @@ def season():
             e["blocks"] = shot_status.episode_blocks(e["number"], e["shots"])
         except Exception:  # noqa: BLE001
             e["blocks"] = None
-    return {"episodes": eps}
+    return {"episodes": eps, "faces": _faces(sc)}

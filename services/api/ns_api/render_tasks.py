@@ -39,6 +39,7 @@ STAGE_TYPE = {"image": "首帧", "first": "首帧", "last": "尾帧", "video": "
               "frame": "首帧"}
 TYPE_FIELD = {"首帧": "first_frame", "尾帧": "last_frame_target", "视频": "video"}
 _cache: dict = {"at": 0.0, "key": None, "val": None}
+RECENT_FAIL_H = 24    # UIRSI r42 → r43（OVERVIEW_REDESIGN K3）：顶栏只挂最近 24 小时、且后来没成功过的失败
 
 
 # ---------------------------------------------------------------- 来源
@@ -427,6 +428,21 @@ def build(run: str | None = DEFAULT_RUN) -> dict:
     rows.sort(key=lambda r: (ORDER[r["status"]], -(r.get("at") or 0) if r["status"] == "done" else (r.get("at") or 0)))
     counts = {k: sum(1 for r in rows if r["status"] == k) for k in ORDER}
     counts["all"] = len(rows)
+    # UIRSI r42（总调度：“渲染任务 1 跑 · 301 等 · 30 失败”口径要查清）：顶栏按钮只数眼下的事——
+    # 等 = 真在排队的（producer 待派 + ComfyUI / 画布排队），不含“计划”（还没到能派的镜，plan 行另计 planned）；
+    # 失败 = 最近 RECENT_FAIL_H 小时内的失败（更早的是 jobs/v1 落盘的历史，留在列表里可筛，不再挂在按钮上）
+    now_ = time.time()
+    counts["planned"] = sum(1 for r in rows if r["source"] == "plan")
+    counts["queued"] = sum(1 for r in rows if r["status"] == "pending" and r["source"] != "plan")
+    ok_after: dict[tuple, float] = {}
+    for r in rows:
+        if r["status"] in ("done", "rendering") and r.get("at"):
+            k_ = (r.get("episode"), r.get("shot"), r.get("type"))
+            ok_after[k_] = max(ok_after.get(k_, 0.0), float(r["at"]))
+    counts["failed_recent"] = sum(
+        1 for r in rows if r["status"] == "failed" and r.get("at") and now_ - float(r["at"]) < RECENT_FAIL_H * 3600
+        and ok_after.get((r.get("episode"), r.get("shot"), r.get("type")), 0.0) <= float(r["at"]))   # 后来同一镜同一步成功过 = 已解决
+    counts["recent_fail_h"] = RECENT_FAIL_H
     src = {k: sum(1 for r in rows if r["source"] == k) for k in ("ns_api", "comfy", "heartbeat", "story", "producer", "plan")}
     src["cancelled_jobs_excluded"] = cancelled
     lane_q = {name: {"running": len(ln.get("running") or []), "pending": len(ln.get("pending") or []),

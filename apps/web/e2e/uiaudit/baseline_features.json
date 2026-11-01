@@ -26,7 +26,7 @@
     {"id": "F23", "area": "剧本", "name": "写作对话框：继续下一集 / 按校验返修", "src": "ChatApp.tsx「按校验返修」「发送“继续”」", "re": "返修|继续", "pages": ["chat"]},
     {"id": "F24", "area": "剧本", "name": "导入候选：校验、确认后导入", "src": "ScriptCreatePage「登记为导入候选」", "re": "导入", "pages": ["script"]},
     {"id": "F25", "area": "项目", "name": "项目向导：风格 SOP / 声音规则 / 全剧配乐风格 / LoRA 计划 / 写实质感强度", "src": "Wizard.tsx", "re": "风格 SOP|声音规则|配乐风格|LoRA 计划|质感强度", "pages": ["settings"]},
-    {"id": "F26", "area": "项目", "name": "进度看板（立即推进一步）", "src": "BoardView.tsx", "re": "进度看板|推进", "pages": []},
+    {"id": "F26", "area": "项目", "name": "进度看板（立即推进一步）", "src": "BoardView.tsx", "re": "进度看板|立即推进|推进一步", "pages": [], "note": "UIAUDIT 11-02 01:5x（总调度派）：原 re 写的是“进度看板|推进”，r22g 判“在”其实是剧本原文“镜头推进…”碰巧匹配上的（假阳性，见 r22g_detect.json 的 RG_canvas / RG_storyboard）。现在改成只认按钮原文“立即推进一步”和标题“进度看板”。实测：BoardView.tsx 在 git 0a91a20（11-01 18:59，早于 UIRSI r38）被删，前端已经没有任何入口，后端 POST /api/projects/{slug}/production/tick 还在。所以这一条按精确匹配是真 P0：不是 r38–r42 改出来的，但是一项没有走过“不删功能”流程的下线。要恢复入口，或者拿到项目方原话后改成 dropped，由总调度定。"},
     {"id": "F27", "area": "SOP", "name": "一次确认全部集 / 退回返工", "src": "SopBar.tsx", "re": "退回返工|确认全部|待你决定|先过前面的关口|交付确认", "pages": []},
     {"id": "F28", "area": "资产", "name": "新造型（+ 新造型）", "src": "CharacterCard.tsx「+ 新造型」", "re": "新造型|新增造型|加一套造型", "pages": ["char"]},
     {"id": "F29", "area": "资产", "name": "造型组合器：给插槽选单品 / 移出", "src": "parts.tsx「造型组合器 A/B/C」「移出」", "re": "挂到造型|组合器|拿下|移出", "pages": ["char"]},

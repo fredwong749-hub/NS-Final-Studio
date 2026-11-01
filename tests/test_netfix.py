@@ -34,10 +34,13 @@ READY = {"episodes": {"1": {"shots": ["ep01-S1", "ep01-S2"]}, "2": {"shots": ["e
 
 
 def test_control_only_is_partition_intersect_ready():
+    part = D.partition()
     f = D.control_for("gpu33", {"paused": False}, READY)
-    assert f["only"] == ["ep01-S1", "ep01-S2"] and f["paused"] is False
+    want = sorted(x for e, x in ((1, "ep01-S1"), (1, "ep01-S2"), (10, "ep10-S1")) if e in part["images"]["gpu33"])
+    assert f["only"] == want and f["paused"] is False
     assert set(f["hold_lanes"]) == {"gpu36:0", "gpu36:1", "gpu36:2", "laptop:0"}
-    assert D.control_for("laptop", {}, READY)["only"] == ["ep10-S1"]
+    lap = [x for e, x in ((10, "ep10-S1"),) if e in part["images"].get("laptop", [])] or [D.NONE]
+    assert D.control_for("laptop", {}, READY)["only"] == lap      # 11-02 01:4x 起 ep10 归 gpu33（FACTORY / 总调度 L-100），笔记本分区为空
     assert "paused" not in D.control_for("laptop", {"paused": True, "paused_by": "x"}, READY)   # 笔记本的 paused 就是全局开关，不改
 
 
@@ -163,8 +166,13 @@ def test_ssh_cmd_has_keepalive_and_tag():
     s.c = json.loads(TS.CONF.read_text(encoding="utf-8"))
     s.tag, s.route_bad_until = "nsnetfix", {}
     s.relay = {"routes": {"hk": {"up": True}, "direct": {"up": True}}}
-    base = " ".join(s.ssh_cmd("base"))                                   # r2 底座：只转发两台 sshd，连跳板本身
+    s.hosts = {"base-a": {"state": "up"}, "base-b": {"state": "up"}}
+    base = " ".join(s.ssh_cmd("base-a"))                                 # r3 底座 a：香港，只转发两台 sshd
     assert "127.0.0.1:22360:10.0.0.36:22" in base and "127.0.0.1:22330:10.0.0.33:22" in base and base.endswith(" 194relay-hk")
+    assert s.ssh_cmd("base-b")[-1] == "194relay" and "127.0.0.1:22361:10.0.0.36:22" in " ".join(s.ssh_cmd("base-b"))   # 底座 b：直连
+    assert s.ssh_cmd("gpu36-l1")[-1] == "gpu36-tb"                       # 按道分摊：l1 挂 b
+    s.hosts["base-b"]["state"] = "backoff"
+    assert s.ssh_cmd("gpu36-l1")[-1] == "gpu36-t"                        # b 断 → 改挂 a
     cmd = " ".join(s.ssh_cmd("gpu36-l0"))
     for k in ("-F config/netfix/ssh_config", "ExitOnForwardFailure=yes", "Tag=nsnetfix-gpu36-l0",
               "127.0.0.1:18288:127.0.0.1:8188", "127.0.0.1:8871:127.0.0.1:8870"):
@@ -172,10 +180,6 @@ def test_ssh_cmd_has_keepalive_and_tag():
     assert cmd.endswith(" gpu36-t")                                      # 内层连接在底座里直连 sshd，不在跳板握手
     assert "18290" in " ".join(s.ssh_cmd("gpu36-l2")) and "18288" not in " ".join(s.ssh_cmd("gpu36-l2"))   # 按道一条连接
     assert s.ssh_cmd("gpu33-cmd")[-1] == "gpu33-t" and "ssh_config.wsl" in " ".join(s.ssh_cmd("gpu33-cmd"))
-    s.relay["routes"]["hk"]["up"] = False                               # 香港入口不通 → 底座走直连
-    assert s.ssh_cmd("base")[-1] == "194relay"
-    s.relay["routes"]["hk"]["up"], s.route_bad_until["hk"] = True, TS.now() + 600   # 判坏期内也走直连
-    assert s.ssh_cmd("base")[-1] == "194relay"
     cfg = (ROOT / "config/netfix/ssh_config").read_text(encoding="utf-8")
     for k in ("ServerAliveInterval 10", "HostName sz194.instameta.org", "ProxyJump hkjump", "47.243.63.181", "Host gpu36-t", "Port 22360"):
         assert k in cfg
@@ -189,16 +193,16 @@ def test_base_backoff_follows_ops_rule(tmp_path):
     s.c = json.loads(TS.CONF.read_text(encoding="utf-8"))
     s.route_fails, s.route_bad_until, s.dir = {}, {}, tmp_path
     st = {"fails": 0, "route": "hk"}
-    s.hosts = {"base": st}
+    s.hosts = {"base-a": st}
     s.log = lambda *a: None
     waits = []
     for _ in range(7):
         st["_last_up_s"] = 5
-        s.schedule("base")
+        s.schedule("base-a")
         waits.append(st["_wait"])
     assert waits == [15, 30, 60, 120, 240, 300, 300]
     st["_last_up_s"] = 3600
-    s.schedule("base")
+    s.schedule("base-a")
     assert st["_wait"] == 15
 
 
@@ -259,6 +263,8 @@ def test_reconcile_hands_back_only_after_assets_ready_and_leases_done(monkeypatc
     D.js(D.LEASES / "first_ep02-S1.json", {"until": 9e12})
     assert D.reconcile()["phases"] == {"gpu33": "laptop", "gpu36": "laptop"}
     D.js(D.ASSETS_READY, {"gpu36": {"ready": True}})
+    assert D.reconcile()["phases"]["gpu36"] == "laptop"                  # 只有 ready、没有 preflight dryrun 0 挡：不交还
+    D.js(D.ASSETS_READY, {"gpu36": {"ready": True, "preflight_dryrun_ok": True}})
     assert D.reconcile()["phases"]["gpu36"] == "draining"
     assert D.reconcile()["phases"]["gpu36"] == "draining"                # ep02 还有在途租约
     assert "ep02-S1" not in D.jl(D.CONTROL)["only"]
@@ -321,3 +327,25 @@ def test_no_new_direct_ssh_outside_allowlist():
             except OSError:
                 pass
     assert not (found - allow), f"新增直接调 ssh 的文件（改用 tools/netfix/rssh.run 或登记 config/netfix/ssh_callers.txt）：{sorted(found - allow)}"
+
+
+# ---------------------------------------------------------------- 多剧并行（AUTOPILOT §0.1，L-104）：run 前缀
+def test_split_obj_run_prefix():
+    assert D.split_obj("s11_v1/first:ep01-S1") == ("s11_v1", "first:ep01-S1")
+    assert D.split_obj("first:ep01-S1") == (None, "first:ep01-S1")      # primary 无前缀
+
+
+def test_new_run_shots_prefixed_primary_unchanged():
+    part = D.partition()
+    h = next(k for k, v in part["images"].items() if 1 in v)
+    base = D.control_for(h, {}, READY, ph={}, runs=[])
+    with_run = D.control_for(h, {}, READY, ph={}, runs=[("s11_v1", 10)],
+                             ready_by_run={"s11_v1": {"episodes": {"1": {"shots": ["ep01-S1", "ep01-S2"]}, "2": {"shots": ["ep02-S1"]}}}})
+    assert [x for x in with_run["only"] if "/" not in x] == base["only"]          # primary 零变化
+    extra = [x for x in with_run["only"] if "/" in x]
+    assert extra == ["s11_v1/ep01-S1", "s11_v1/ep01-S2"]                          # 同一分区规则（按集），带前缀
+    other = next(k for k, v in part["images"].items() if 2 in v)
+    assert "s11_v1/ep02-S1" in D.control_for(other, {}, READY, ph={}, runs=[("s11_v1", 10)],
+                                             ready_by_run={"s11_v1": {"episodes": {"2": {"shots": ["ep02-S1"]}}}})["only"]
+    assert D.control_for(h, {}, READY, ph={h: "laptop"}, runs=[("s11_v1", 10)],
+                         ready_by_run={"s11_v1": {"episodes": {"1": {"shots": ["ep01-S1"]}}}})["only"] == [D.NONE]   # 覆盖期照样不派

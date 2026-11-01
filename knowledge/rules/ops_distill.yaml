@@ -1,0 +1,88 @@
+# DISTILL 11-02（总调度 fredw-2b 派；L-102 / ITERATION_PROTOCOL §G1）：把总调度和各 agent 的判断提炼成代码策略、规则、编排器
+# 项目方原话（11-02 01:4x）：“所有的 learning 规则都要写到这个系统里，后面就不用 Claude 来指引整个事情了……所有工作尽量写成一个代码库，来 monitor 整个 process”
+rules:
+  - id: K-OPS-X01
+    domain: ops
+    link: [P5-P6, P7-P8, P10-P11]
+    title: 阈值和判断的单一来源是 config/policies/*.yaml；代码里另有常量的项由 policy_check 逐项比对，不一致即不通过
+    when: 任何 loop 新定或修改一个运行期阈值 / 判断（GPU 分工、积压闸、暂停时限、交还条件、预算、重试次数、阻断项、发版条件）
+    then: 先改 config/policies/<域>.yaml 对应项（value + source 出处 + enforced_by + status），代码直接读（status=code_reads）或写 drift 规则（status=drift_checked）；pending 项必须写 plan；改完跑 run.py policy-check 退出码 0
+    check: tests/test_distill_flow.py::test_policy_drift_clean, tests/test_distill_flow.py::test_policy_refs_exist, tests/test_distill_flow.py::test_drift_detects_change
+    evidence:
+      - {src: config/policies/resources.yaml, note: "11-02 首次比对即发现 config/vqa.json model.instances 已被 VQAGATE 改为 4，而积压闸说明仍写 1；漂移检查把它暴露出来"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-X02
+    domain: ops
+    link: [P4-P5, P5-P6, P7-P8, P9-P10, P10-P11, P11-P12]
+    title: 剧本导入后的全部环节由 tools/autopilot/flow.py 一个编排器现推状态、标 decider、列卡点；各 loop 的工具接到它的段上，不另起入口
+    when: 新增或改动生产链路中的任何一段（作业、首尾帧、看图闸门、视频、视频检测、合成、后期、成片分、交付）或其中的判断点
+    then: 在 flow.STAGES 对应段登记判断点 {what, now, target, ref, plan}（now/target ∈ code | local_model | api_model | owner | claude）；now=claude 必须写 plan；run.py coverage 重新生成 data/autopilot/coverage.json；界面读 data/autopilot/flow/status.json
+    check: tests/test_distill_flow.py::test_stage_points_complete, tests/test_distill_flow.py::test_status_all_on_fixture, tests/test_distill_flow.py::test_coverage_counts
+    evidence:
+      - {src: tools/autopilot/run.py, note: "10-31 的 P5-P10 走 iterate_loop，实际生产已是 producer → VQA → night → finish；旧 dry-run --auto-approve 10/10 全过（假绿），新编排器冷启动演练找出 16 个断点"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-X03
+    domain: ops
+    link: [P5-P6]
+    title: 系统或 agent 暂停 producer 超过 resources.pause_max_s（180 s）即为事故——检测、报警，经授权后自动恢复；项目方本人暂停不受限
+    when: control.json paused=true 且 paused_by 不是项目方
+    then: run.py guard 每拍检测，超时写 data/qa/alerts.jsonl（A-PAUSE-OVERDUE）；--apply 时经 producer.set_paused 恢复（by=POLICY_GUARD，审计进 producer log）；切线路 / 重启只许滚动、按道排空
+    check: tests/test_distill_flow.py::test_pause_overdue
+    evidence:
+      - {src: docs/overnight/morning_20261102.md, note: "11-02 00:52 NETFIX 切线路全局 pause，12 分钟未恢复，GPU 只有一张在忙；总调度 01:04 手动 resume 并定“暂停 ≤3 分钟自动恢复”"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-X04
+    domain: ops
+    link: [P4-P5]
+    title: 设定图本身要先过完整性检查再当参考——出图闸门拿设定图当标准答案，查不出参考图自身的缺陷（代码检查 K-AST-264 sheet_intake 为主，本地 VLM 逐栏检查为补充）
+    when: 设定图候选登记为当前之前；或同一造型 ≥3 镜出现同一 outfit_mismatch / clothing_state
+    then: 先过 services/agent/ns_agent/sheet_intake.py（K-AST-264，IN1 袖子镜像 / IN2 外层 Q2 探针，已接 set_sheet）；再由本地 VLM 按 config/prompts/asset_sheet_inspect.md 逐栏核部件（两只袖子、外层各栏一致、部件不残缺）；defect → 不许设为当前、走局部重绘 + sleeve_check 契约
+    check: tests/test_distill_flow.py::test_asset_sheet_prompt_contract
+    evidence:
+      - {src: docs/overnight/morning_20261102.md, note: "01:02 造型 A 设定图 v2_s202 正面栏缺左臂外套袖 → 首帧单袖、视频外套漂移；出图闸门一直没报（L-101）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-X05
+    domain: ops
+    link: [P5-P6, P10-P11]
+    title: 每个判断进判断清单 config/policies/decisions.yaml，coded≠yes 必须带代码化方案；清单里写的文件必须存在
+    when: 总调度或 agent 做了一次判断（选图、驳回、资源、交还、止损、部署、看图口径）
+    then: 追加一条 {cat, decision, trigger, basis, coded, where, decider_now, decider_target, plan}；run.py coverage 统计已代码化比例和 decider 分布
+    check: tests/test_distill_flow.py::test_decisions_inventory_valid
+    evidence:
+      - {src: config/policies/decisions.yaml, note: "DISTILL r1：51 条判断，34 条已代码化（yes），14 条部分，3 条未代码化"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-X06
+    domain: ops
+    link: [P4-P5, P5-P6]
+    title: data/ 里的决策 / 配置类文件不进 git，每次 system_version cut 打快照（tar + 逐文件 sha256 manifest），回滚一起恢复；新剧本从 config/ 默认值生成
+    when: system_version cut / rollback；新剧本冷启动；新增一个“像配置”的数据文件
+    then: 新文件先登记到 config/policies/state_files.yaml（decision 或 runtime，decision 写 default）；cut 时 tools/autopilot/state_snapshot.py snapshot <sv> → data/system_versions/<sv>/；恢复用 restore <sv>（先校验 sha、先备份现状、不删文件）；新剧本用 init-run <run_id>（只读 config/，不读 series10 数据，正式路径只补缺不覆盖）；寻址与 FACTORY 本地库一致（sha256），library.py 落地后同时 put 进本地库
+    check: tests/test_distill_flow.py::test_state_snapshot_roundtrip, tests/test_distill_flow.py::test_state_snapshot_tamper_refused, tests/test_distill_flow.py::test_init_run_from_config_only
+    evidence:
+      - {src: config/policies/state_files.yaml, note: "WORKFLOW 11-02 指出 recipe_choice.json（L-088）、ready_episodes / assets_ready / master_rejects / shot_looks / sheets_chosen / face_overrides 等不进版本；现行 decision 类 119 个文件约 8.2 MB（含 102 个 takes.json）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-X07
+    domain: ops
+    link: [P4-P5, P5-P6]
+    title: 身份脸按“结果”断言而不是按“文件在不在”——每个 run 每个角色用生产入口 face_of 解析，必须等于项目方定的那张（林晚 = lin_wan_face_hd_A_s202，L-086），子 run 继承的角色必须等于父 run
+    when: system_version cut；SENTINEL 每拍；新增 run / 改继承链 / 推服务器后
+    then: tools/qa/identity_face_check.py（owner_decisions D-AST-86d，decision_check type=cmd，cut 闸门 0 ❌ 才发版）；pinned 名单在 config/policies/gates.yaml identity_faces
+    check: tests/test_distill_flow.py::test_identity_face_check_catches_inherit_gap
+    evidence:
+      - {src: docs/overnight/morning_20261102.md, note: "01:32 服务器缺 face_overrides，47/50 镜身份脸解析成 lin_wan_face_ref2va，preflight 照样 0 挡"}
+      - {src: tools/qa/identity_face_check.py, note: "11-02 03:0x 首跑即抓到 series10_s2 林晚解析成 lin_wan_face_ref2va（继承链漏 face_overrides，第二次同类事故）；WORKFLOW 修继承链后 0 不一致"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

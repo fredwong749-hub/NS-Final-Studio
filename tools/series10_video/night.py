@@ -357,11 +357,26 @@ def finalize(ep, host, st, ctrl):
         tlj = cands[-1].with_suffix(".timeline.json")
         if tlj.exists():
             shutil.copy2(tlj, EPS_OUT / f"ep{ep:02d}_{ver}.timeline.json")
+    director = {}
+    if final:   # DIRECTOR 11-02（总调度批准，CONSENT VIDEO10/WORKFLOW → DIRECTOR）：调色 + 音效 + 响度、成片分、口型重出单（K-EDT-816 / 805）
+        rc_d, out_d = run([PY, "tools/director/finish.py", str(final)], 3600)
+        try:
+            director = json.loads([x for x in out_d.splitlines() if x.startswith("{")][-1])
+        except (IndexError, ValueError):
+            director = {"errors": [f"finish.py rc={rc_d}: {out_d.strip()[-200:]}"]}
+        log("director", f"ep{ep:02d}", rc_d, json.dumps({k: director.get(k) for k in ("post", "film_score", "film_score_post", "lip_redo", "errors")},
+                                                       ensure_ascii=False, default=str)[:400])
+        if (director.get("delivery_gate") or {}).get("deliver") == "post" and director.get("post") and Path(director["post"]).exists():
+            final = Path(director["post"])   # 交付闸门（K-EDT-817，decider=code）放行 → 交付后期版；原合成版 epNN_vN.mp4 保留
+        if director.get("lip_redo"):        # K-EDT-805：画内对白 TTS 兜底 → 这几镜送回重出，本集不进定稿
+            log("LIP_REDO", f"ep{ep:02d}", [r.get("shot") for r in director["lip_redo"]])
     rc2, out2 = run([PY, "tools/series10_video/episode_report.py", str(ep), host, ver], 1800)
     log("report", f"ep{ep:02d}", rc2, out2.strip()[-200:].replace("\n", " "))
     st["eps"][str(ep)].update(status="assembled" if final else "assemble_failed", final=str(final) if final else None,
                               finalized=time.time(), assembled_n=int(ver[1:]) if final else int(ver[1:]) - 1,
-                              resolved_sig=ep_sig(ep, host))
+                              resolved_sig=ep_sig(ep, host),
+                              director={k: director.get(k) for k in ("film_score", "film_score_post", "lip_redo", "errors", "steps", "delivery_gate")} if director else None,
+                              lip_redo=[r.get("shot") for r in director.get("lip_redo") or []] if director else [])
 
 
 def write_status(st):

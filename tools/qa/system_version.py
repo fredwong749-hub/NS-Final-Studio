@@ -48,10 +48,10 @@ ENV = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
 
 
 # ---------------------------------------------------------------- 基础
-def sh(cmd: list[str], timeout: int = 1800, cwd: Path = ROOT) -> tuple[int, str]:
+def sh(cmd: list[str], timeout: int = 1800, cwd: Path = ROOT, env: dict | None = None) -> tuple[int, str]:
     try:
         r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                           timeout=timeout, env=ENV)
+                           timeout=timeout, env=env or ENV)
         return r.returncode, (r.stdout or "") + (r.stderr or "")
     except subprocess.TimeoutExpired:
         return 124, f"超时 {timeout}s：{' '.join(cmd)[:120]}"
@@ -110,21 +110,39 @@ def pending_changes() -> list[tuple[str, str]]:
 
 
 # ---------------------------------------------------------------- 闸门
-def pick_tests(changed: list[str]) -> list[str]:
+def pick_tests(changed: list[str], root: Path | None = None) -> list[str]:
+    root = root or ROOT
     tests = set()
     for f in changed:
-        if f.startswith("tests/") and f.endswith(".py") and Path(f).name.startswith("test_") and (ROOT / f).exists():
+        if f.startswith("tests/") and f.endswith(".py") and Path(f).name.startswith("test_") and (root / f).exists():
             tests.add(f)
         elif f.endswith(".py") and f.startswith(("services/", "tools/", "packages/")):
             stem = Path(f).stem
             if stem in ("__init__", "run", "report", "page", "build_jobs", "server", "utils", "common"):
                 continue
-            tests |= {p.relative_to(ROOT).as_posix() for p in (ROOT / "tests").glob(f"test_*{stem}*.py")}
-    return sorted(tests | {t for t in SMOKE if (ROOT / t).exists()})
+            tests |= {p.relative_to(root).as_posix() for p in sorted((root / "tests").glob(f"test_*{stem}*.py"))}
+    return sorted(tests | {t for t in SMOKE if (root / t).exists()})
 
 
-def gates(changed: list[str], run_tests: bool = True) -> list[dict]:
+def collection_problems(out: str) -> list[str]:
+    """pytest 收集阶段的问题（K-OPS-F08）：ERROR collecting <文件> / xdist 各 worker 收集不一致 → 具体文件 / 提示"""
+    probs = sorted(set(re.findall(r"ERROR collecting (\S+)", out)))
+    if "Different tests were collected between" in out:
+        m = re.findall(r"^(?:\+|-)\s*(tests/\S+?)::", out, re.M)
+        probs.append("xdist 各 worker 收集不一致" + (("：" + "、".join(sorted(set(m))[:10])) if m else "（收集期间测试或其参数在变）"))
+    return probs
+
+
+def gates(changed: list[str], run_tests: bool = True, root: Path | None = None, env: dict | None = None) -> list[dict]:
+    """全部闸门；root / env = 冻结快照目录与快照的 PYTHONPATH（K-OPS-F08：闸门只对快照跑，不对活的工作树跑）"""
     rows = []
+    root = root or ROOT
+    _sh0 = globals()["sh"]
+
+    def sh(cmd, timeout=1800):          # noqa: F811  闸门里的命令一律在快照目录、用快照环境跑
+        if env is None and root == ROOT:
+            return _sh0(cmd, timeout)
+        return _sh0(cmd, timeout, cwd=root, env=env)
 
     def add(gid, name, ok, detail):
         rows.append({"id": gid, "name": name, "ok": bool(ok), "detail": detail})
@@ -133,6 +151,9 @@ def gates(changed: list[str], run_tests: bool = True) -> list[dict]:
     add("syntax", "全仓语法守卫（K-OPS-C01）", code == 0, tail(out, 2))
     code, out = sh([PY, "tools/knowledge/compile.py", "--check"], 600)
     add("kb", "知识库 compile --check", code == 0, tail(out, 2))
+    if (root / "tools/qa/arch_scan.py").exists():      # K-OPS-S01（SYSARCH，总调度 03:0x 批准）：结构问题只许减、不许增
+        code, out = sh([PY, "tools/qa/arch_scan.py", "--check"], 600)
+        add("arch", "arch_scan --check（K-OPS-S01 棘轮）", code == 0, tail(out, 2))
     code, out = sh([PY, "tools/qa/decision_check.py"], 900)
     m = re.search(r"合计 (\d+)：✅ (\d+)\s+❌ (\d+)\s+⏳ (\d+)", out)
     bad = int(m.group(3)) if m else -1
@@ -141,15 +162,20 @@ def gates(changed: list[str], run_tests: bool = True) -> list[dict]:
     code, out = sh([PY, "tools/qa/decision_propagation.py", "--dry"], 900)
     add("propagation", "decision_propagation（K-OPS-D02）", code == 0, tail(out, 1)[:300])
     if run_tests:
-        tests = pick_tests(changed)
+        tests = pick_tests(changed, root)
         code, out = sh([PY, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-n", str(min(12, os.cpu_count() or 4)), *tests], 2400)
         flaky = []
         if code != 0:   # 并行下的偶发（story_runs 等）：失败的用例串行重跑一次，仍红才算不过
             failed = sorted(set(re.findall(r"^FAILED (\S+?)(?: - |$)", out, re.M)))
+            coll = collection_problems(out)
             if failed:
                 c2, o2 = sh([PY, "-m", "pytest", "-q", "-p", "no:cacheprovider", *failed], 1200)
                 if c2 == 0:
                     flaky, code, out = failed, 0, out + "\n串行重跑通过：" + "，".join(failed)
+            elif coll:      # K-OPS-F08：收集阶段出错（没有 FAILED 行）——报出具体文件，整组串行重跑一次
+                c2, o2 = sh([PY, "-m", "pytest", "-q", "-p", "no:cacheprovider", *tests], 2400)
+                out = out + "\n收集问题：" + "；".join(coll) + ("\n串行重跑通过" if c2 == 0 else "\n串行重跑仍不过：" + tail(o2, 3))
+                code = c2
         m = re.search(r"(\d+) passed", out)
         add("pytest", f"定向 pytest（{len(tests)} 个文件：改动涉及 + smoke）", code == 0,
             tail(out, 2) + (f" ⏎ 并行偶发、串行通过：{flaky}" if flaky else ""))
@@ -158,9 +184,10 @@ def gates(changed: list[str], run_tests: bool = True) -> list[dict]:
     return rows
 
 
-def staged_problems() -> list[str]:
+def staged_problems(env: dict | None = None) -> list[str]:
     bad = []
-    names = [x for x in git("diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z").split("\0") if x]
+    out = gitx(env, "diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z") if env else git("diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z")
+    names = [x for x in out.split("\0") if x]
     for f in names:
         p = ROOT / f
         low = f.lower()
@@ -290,7 +317,8 @@ def gate_results(since: float) -> list[dict]:
     return out
 
 
-def metrics(gate_rows: list[dict]) -> dict:
+def metrics(gate_rows: list[dict], root: Path | None = None, env: dict | None = None) -> dict:
+    root = root or ROOT
     m = {}
     try:
         idx = json.loads((ROOT / "knowledge/generated/index.json").read_text(encoding="utf-8"))
@@ -302,10 +330,10 @@ def metrics(gate_rows: list[dict]) -> dict:
             m["decision_check"] = r["detail"]
         if r["id"] == "pytest":
             m["tests_passed"] = r.get("passed")
-    code, out = sh([PY, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider"], 600)
+    code, out = sh([PY, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider"], 600, cwd=root, env=env)
     c = re.search(r"(\d+) tests? collected", out)
     m["tests_collected"] = int(c.group(1)) if c else None
-    code, out = sh([PY, "tools/qa/data_parity.py"], 900)
+    code, out = sh([PY, "tools/qa/data_parity.py"], 900, cwd=root, env=env)
     m["data_parity"] = tail(out, 1)[:200]
     return m
 
@@ -383,64 +411,221 @@ def loops_since(gr: list[dict]) -> str:
 
 
 # ---------------------------------------------------------------- 命令
+# ---------------------------------------------------------------- 冻结窗口 + 快照（K-OPS-F08，总调度 02:1x）
+CUT_LOCK = DATA / "cut_lock.json"
+SNAP_BASE = Path(os.environ.get("NS_CUT_SNAPSHOTS") or (Path(ROOT.anchor) / "nsfs_cut_snapshots"))
+CUT_LOCK_TTL_S = 45 * 60
+PY_PATHS = ("packages/schema", "services/agent", "services/api", "services/orchestrator", "services/render_router",
+            "services/recipes", "services/post")
+
+
+def cut_lock(active: bool, sv: str | None = None, note: str = "") -> dict:
+    """data/system_versions/cut_lock.json：cut 进行中 = active=true（到期自动失效）。各 agent 写代码 / 规则 / 配置前先看它
+    （tools/qa/system_version.py lock-status；规则 K-OPS-F08）。结束时改回 active=false（不删文件）"""
+    DATA.mkdir(parents=True, exist_ok=True)
+    rec = {"active": bool(active), "sv": sv, "pid": os.getpid(), "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+           "expires_t": time.time() + CUT_LOCK_TTL_S if active else None, "note": note,
+           "rule": "K-OPS-F08：active 期间不要改 tools/ services/ packages/ config/ knowledge/ ops/ tests/（改了也不会进这一版，进下一版）"}
+    tmp = CUT_LOCK.with_suffix(".tmp")
+    tmp.write_text(json.dumps(rec, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, CUT_LOCK)
+    return rec
+
+
+def cut_locked(now: float | None = None) -> dict | None:
+    try:
+        d = json.loads(CUT_LOCK.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return d if d.get("active") and float(d.get("expires_t") or 0) > (now or time.time()) else None
+
+
+def gitx(env: dict, *a, timeout: int = 600) -> str:
+    code, out = sh(["git", *a], timeout, env=env)
+    if code != 0:
+        raise RuntimeError(f"git {' '.join(a)[:80]} 失败：{out[-400:]}")
+    return out
+
+
+def freeze_tree(idx_file: Path) -> tuple[str, dict]:
+    """用独立的 index 文件把此刻的工作树（.gitignore 口径）写成一棵 git 树——之后别人再改文件，这一版的内容也不变"""
+    env = {**ENV, "GIT_INDEX_FILE": str(idx_file)}
+    gitx(env, "read-tree", "HEAD")
+    gitx(env, "add", "-A")
+    return gitx(env, "write-tree").strip(), env
+
+
+def ignored_paths() -> list[str]:
+    out = git("status", "--ignored", "--porcelain=v1", "-z")
+    return [e[3:].rstrip("/") for e in out.split("\0") if e.startswith("!! ")]
+
+
+def _link(src: Path, dst: Path) -> None:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.exists():
+        return
+    if src.is_dir():
+        if os.name == "nt":
+            subprocess.run(["cmd", "/c", "mklink", "/J", str(dst), str(src)], capture_output=True, check=True)
+        else:
+            os.symlink(src, dst, target_is_directory=True)
+    else:
+        try:
+            os.link(src, dst)
+        except OSError:
+            import shutil
+            shutil.copy2(src, dst)
+
+
+HARDLINK_TOP = ("data", "assets", "golden")
+
+
+def _hardlink_tree(src: Path, dst: Path) -> int:
+    n = 0
+    for dp, dns, fns in os.walk(src):
+        dns[:] = [d for d in dns if d not in ("__pycache__", "node_modules")]
+        rel = Path(dp).relative_to(src)
+        (dst / rel).mkdir(parents=True, exist_ok=True)
+        for f in fns:
+            try:
+                os.link(Path(dp) / f, dst / rel / f)
+                n += 1
+            except OSError:
+                pass
+    return n
+
+
+CODE_TOP = ("tools/", "services/", "packages/", "config/", "knowledge/", "ops/", "tests/")
+CODE_EXT = (".py", ".sh", ".ps1", ".yaml", ".yml", ".toml", ".json", ".md", ".txt", ".cube", ".service", ".timer", ".mjs", ".ts", ".tsx")
+
+
+def ignored_code_files() -> list[str]:
+    """ARCH_MAP #1（总调度 03:0x）：代码目录里被 .gitignore 挡住、永远进不了版本的代码类文件（缓存 / 日志 / *.local.json 除外）。
+    非空 → cut 阻断并列出（要么改 .gitignore 收进来，要么挪出代码目录）"""
+    out = git("status", "--ignored", "--porcelain=v1", "-uall", "-z")
+    files = [e[3:] for e in out.split("\0") if e.startswith("!! ")]
+    return sorted(f for f in files if f.startswith(CODE_TOP) and f.endswith(CODE_EXT)
+                  and "__pycache__" not in f and ".pytest_cache" not in f and not f.startswith("ops/logs/")
+                  and not f.endswith(".local.json"))
+
+
+def untracked_code_after(tree: str) -> list[str]:
+    """提交后仍未跟踪的代码文件 = 冻结之后才出现的（进下一版）；冻结时就在的未跟踪文件已由 git add -A 收进冻结树"""
+    left = [x for x in git("ls-files", "--others", "--exclude-standard", "-z").split("\0") if x]
+    return sorted(f for f in left if f.startswith(CODE_TOP))
+
+
+def build_snapshot(tree: str, dest: Path) -> dict:
+    """快照目录 = 冻结树的完整导出（代码 / 测试 / 配置 / 规则 / 文档）+ 被忽略的数据（data/、assets 图片、模型缓存……）以
+    目录联接 / 硬链接接到工作树（闸门要读真实数据；数据不进版本）"""
+    import shutil
+    if dest.exists():
+        shutil.move(str(dest), str(dest) + f".old{int(time.time())}")
+    dest.mkdir(parents=True)
+    raw = subprocess.run(["git", "archive", "--format=tar", tree], cwd=ROOT, capture_output=True, check=True).stdout
+    with tarfile.open(fileobj=io.BytesIO(raw)) as tf:
+        tf.extractall(dest, filter="fully_trusted") if hasattr(tarfile, "fully_trusted_filter") else tf.extractall(dest)
+        n = sum(1 for m in tf.getmembers() if m.isfile())
+    linked = 0
+    for rel in ignored_paths():
+        if rel.startswith((".git", ".venv", ".pytest_cache", "nsfs_cut_snapshots")) or "__pycache__" in rel or rel.endswith(".pyc")                 or rel.endswith("_selftest_take"):
+            continue
+        src = ROOT / rel
+        if not src.exists() or (dest / rel).exists():
+            continue
+        if src.is_dir() and rel.split("/")[0] in HARDLINK_TOP:
+            linked += _hardlink_tree(src, dest / rel)       # 数据目录逐文件硬链接：路径 resolve 仍落在快照里（目录联接会跳回工作树）
+        else:
+            _link(src, dest / rel)
+            linked += 1
+    env = {**ENV, "PYTHONPATH": os.pathsep.join(str(dest / x) for x in PY_PATHS)}
+    return {"dir": str(dest), "files": n, "linked": linked, "env": env}
+
+
 def cut(base: str | None = None, dry: bool = False, sv: str | None = None, run_tests: bool = True) -> dict:
+    """发版（K-OPS-V01 / K-OPS-F08）：冻结窗口 → 冻结树 → 快照 → 闸门全部对快照跑 → 提交冻结树（不是此刻的工作树）→ tag。
+    cut 期间别的 agent 改的文件不进这一版、也不会让闸门失败（留给下一版）"""
     prev = prev_ref(base)
+    sv = sv or next_id()
     changed = pending_changes()
     files = [p for _s, p in changed]
     if not changed and not git("diff", "--name-only", prev, "HEAD").strip():
         return {"ok": False, "reason": "相对上一版没有任何改动，不发版"}
-    g = gates(files, run_tests)
-    fails = [x for x in g if not x["ok"]]
-    sv = sv or next_id()
-    rep = {"id": sv, "prev": prev, "gates": g}
-    if fails:
-        rep.update(ok=False, reason="闸门不过：" + "；".join(f"{x['name']}：{x['detail'][:200]}" for x in fails))
-        return rep
-    since = ref_time(prev)
-    gr = gate_results(since)
-    loops_line = loops_since(gr)
-    if dry:
-        rep.update(ok=True, dry=True, changed=len(changed), loops=loops_line)
-        return rep
-    git("add", "-A")
-    probs = staged_problems()
-    if probs:
-        git("reset", "-q")
-        rep.update(ok=False, reason="暂存区有不该进 git 的文件：" + "；".join(probs[:10]))
-        return rep
-    # 先按暂存区算差异写文档，文档一起进这次提交
-    tree = git("write-tree").strip()
-    rd, cd, cs = rule_diff(prev, tree), config_diff(prev, tree), code_stats(prev, tree)
-    dec = owner_decisions(prev, tree)
-    mt = metrics(g)
-    DOCS.mkdir(parents=True, exist_ok=True)
-    (DOCS / f"{sv}.md").write_text(version_md(sv, prev, g, rd, cd, cs, gr, dec, mt, changed, loops_line), encoding="utf-8")
-    entry = {"id": sv, "prev": prev, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "files_changed": len(changed),
-             "rules": rd, "config_files": sorted(cd), "code": cs, "gates": [{k: x[k] for k in ("id", "ok", "detail")} for x in g],
-             "iter_gate": gr, "decisions": dec, "metrics": mt, "doc": f"docs/system_versions/{sv}.md", "deployed": {}}
-    idx = write_index(entry)
-    git("add", "-A", "docs/system_versions")
-    msg = [f"{sv}：系统版本（K-OPS-V01）", "",
-           "项目方 11-01 22:5x：“每一次迭代都是用 override system,然后用 create a new version 那个 system versions”",
-           f"上一版：{prev}；改动文件 {len(changed)}；规则 +{len(rd['added'])} ~{len(rd['modified'])} 归档 {len(rd['archived'])}；kb {mt.get('kb_version')}",
-           f"本版包含的 loop 轮次：{loops_line or '—'}", f"项目方 / 总调度决定：{'、'.join(dec) or '—'}",
-           f"闸门：{'；'.join(x['name'] + ' 通过' for x in g)}", f"记录：docs/system_versions/{sv}.md", "", CO_AUTHOR]
-    fd, mfn = tempfile.mkstemp(suffix=".txt")
-    os.close(fd)                     # Windows：不关 fd，之后 unlink 报 WinError 32（sv-20261101-01 首跑踩到，commit 已成、tag 手补）
-    mf = Path(mfn)
-    mf.write_text("\n".join(msg) + "\n", encoding="utf-8")
+    cut_lock(True, sv, "cut 开始")
+    idx_fd, idx_name = tempfile.mkstemp(prefix="nsfs_cut_index_")
+    os.close(idx_fd)
+    idx_file = Path(idx_name)
+    idx_file.unlink(missing_ok=True)
+    rep = {"id": sv, "prev": prev}
     try:
-        git("commit", "-q", "-F", str(mf))
+        ign = ignored_code_files()
+        if ign:
+            rep.update(ok=False, reason="代码目录里有被 .gitignore 挡住、进不了版本的代码文件（ARCH_MAP #1）：" + "、".join(ign[:20]))
+            return rep
+        tree, ienv = freeze_tree(idx_file)
+        frozen = [x for x in gitx(ienv, "diff", "--cached", "--name-only", "HEAD").split("\n") if x]
+        snap = build_snapshot(tree, SNAP_BASE / sv)
+        rep.update(tree=tree, snapshot={k: v for k, v in snap.items() if k != "env"}, frozen_files=len(frozen))
+        g = gates(frozen or files, run_tests, root=Path(snap["dir"]), env=snap["env"])
+        rep["gates"] = g
+        fails = [x for x in g if not x["ok"]]
+        if fails:
+            rep.update(ok=False, reason="闸门不过：" + "；".join(f"{x['name']}：{x['detail'][:200]}" for x in fails))
+            return rep
+        since = ref_time(prev)
+        gr = gate_results(since)
+        loops_line = loops_since(gr)
+        if dry:
+            rep.update(ok=True, dry=True, changed=len(frozen), loops=loops_line)
+            return rep
+        probs = staged_problems(ienv)
+        if probs:
+            rep.update(ok=False, reason="冻结树里有不该进 git 的文件：" + "；".join(probs[:10]))
+            return rep
+        rd, cd, cs = rule_diff(prev, tree), config_diff(prev, tree), code_stats(prev, tree)
+        dec = owner_decisions(prev, tree)
+        mt = metrics(g, Path(snap["dir"]), snap["env"])
+        DOCS.mkdir(parents=True, exist_ok=True)
+        chg = [("M", f) for f in frozen]
+        (DOCS / f"{sv}.md").write_text(version_md(sv, prev, g, rd, cd, cs, gr, dec, mt, chg, loops_line), encoding="utf-8")
+        entry = {"id": sv, "prev": prev, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "files_changed": len(frozen),
+                 "rules": rd, "config_files": sorted(cd), "code": cs, "gates": [{k: x[k] for k in ("id", "ok", "detail")} for x in g],
+                 "iter_gate": gr, "decisions": dec, "metrics": mt, "doc": f"docs/system_versions/{sv}.md", "deployed": {},
+                 "tree": tree, "drift_during_cut": None}
+        idx = write_index(entry)
+        gitx(ienv, "add", "-A", "docs/system_versions")          # 文档进冻结树（只加文档，别的文件仍是冻结时刻的内容）
+        tree2 = gitx(ienv, "write-tree").strip()
+        msg = [f"{sv}：系统版本（K-OPS-V01）", "",
+               "项目方 11-01 22:5x：“每一次迭代都是用 override system,然后用 create a new version 那个 system versions”",
+               f"上一版：{prev}；改动文件 {len(frozen)}；规则 +{len(rd['added'])} ~{len(rd['modified'])} 归档 {len(rd['archived'])}；kb {mt.get('kb_version')}",
+               f"本版包含的 loop 轮次：{loops_line or '—'}", f"项目方 / 总调度决定：{'、'.join(dec) or '—'}",
+               f"闸门（冻结快照上跑，K-OPS-F08）：{'；'.join(x['name'] + ' 通过' for x in g)}", f"记录：docs/system_versions/{sv}.md", "", CO_AUTHOR]
+        fd, mfn = tempfile.mkstemp(suffix=".txt")
+        os.close(fd)                 # Windows：不关 fd，之后 unlink 报 WinError 32（sv-20261101-01 首跑踩到）
+        mf = Path(mfn)
+        mf.write_text("\n".join(msg) + "\n", encoding="utf-8")
+        try:
+            old_head = git("rev-parse", "HEAD").strip()
+            commit = git("commit-tree", tree2, "-p", old_head, "-F", str(mf)).strip()
+        finally:
+            mf.unlink(missing_ok=True)
+        branch = git("symbolic-ref", "HEAD").strip()
+        git("update-ref", branch, commit, old_head)              # 比较并交换：期间有人另行提交就失败，不覆盖
+        git("reset", "-q")                                        # 只同步 index 到新 HEAD；工作树不动（cut 期间别人的改动留作下一版）
+        git("tag", "-a", sv, "-m", f"{sv} 系统版本（上一版 {prev}）", commit)
+        drift = [p for _s, p in pending_changes() if not p.startswith("docs/system_versions/")]
+        late = untracked_code_after(tree)
+        entry.update(commit=commit, drift_during_cut=len(drift), untracked_code_after_cut=late[:50])
+        entry["state_snapshot"] = take_state_snapshot(sv)    # K-OPS-X06（DISTILL）：决策 / 配置 / 运行状态快照，回退时可还原
+        entry["remote_push"] = push_remote(prev, sv)          # 总调度 23:0x：发版后推 GitHub（失败不影响发版，记下来）
+        write_index(entry)
+        rep.update(ok=True, commit=commit, doc=entry["doc"], rules=rd, files=len(frozen), current=idx.get("current"),
+                   remote_push=entry["remote_push"], state_snapshot=entry["state_snapshot"], drift_during_cut=len(drift),
+                   untracked_code_after_cut=late[:50])
+        return rep
     finally:
-        mf.unlink(missing_ok=True)
-    commit = git("rev-parse", "HEAD").strip()
-    git("tag", "-a", sv, "-m", f"{sv} 系统版本（上一版 {prev}）")
-    entry["commit"] = commit
-    entry["remote_push"] = push_remote(prev, sv)          # 总调度 23:0x：发版后推 GitHub（失败不影响发版，记下来）
-    write_index(entry)
-    rep.update(ok=True, commit=commit, doc=entry["doc"], rules=rd, files=len(changed), current=idx.get("current"),
-               remote_push=entry["remote_push"])
-    return rep
+        idx_file.unlink(missing_ok=True)
+        cut_lock(False, sv, "cut 结束：" + ("成功" if rep.get("ok") else str(rep.get("reason") or "失败")[:200]))
 
 
 PUSH_SECRET_RE = re.compile(r"(sk-[A-Za-z0-9]{24,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[0-9A-Z]{16}|"
@@ -502,42 +687,161 @@ def export_tag(sv: str, dirs: list[str], dest: Path) -> list[str]:
     return names
 
 
-def deploy(sv: str | None = None, hosts: list[str] | None = None, restart: bool = True) -> dict:
-    sv = sv or (sv_tags() or [None])[-1]
-    if not sv:
-        raise SystemExit("还没有任何系统版本，先 cut")
+def load_state_snapshot():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ns_state_snapshot_sv", ROOT / "tools/autopilot/state_snapshot.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def take_state_snapshot(sv: str, ss=None) -> dict:
+    """cut 打完 tag 后做状态快照（data/system_versions/<sv>/state_snapshot.tar + manifest.json）；失败只记录，不影响发版"""
+    try:
+        ss = ss or load_state_snapshot()
+        r = ss.snapshot(sv) or {}
+        f = r.get("files")
+        return {"ok": True, "dir": f"data/system_versions/{sv}/", "files": len(f) if isinstance(f, dict) else f,
+                "tar_sha256": r.get("tar_sha256"), "at": r.get("at")}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"[:300]}
+
+
+def load_restart_queue():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ns_restart_queue_sv", ROOT / "tools/autopilot/restart_queue.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def load_push_check():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ns_push_check_sv", ROOT / "tools/qa/push_check.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+class _Patched:
+    """临时改 resident_sync 模块的全局（ROOT / CODE_DIRS），退出时还原"""
+
+    def __init__(self, rs, **kw):
+        self.rs, self.kw, self.old = rs, kw, {}
+
+    def __enter__(self):
+        for k, v in self.kw.items():
+            self.old[k] = getattr(self.rs, k)
+            setattr(self.rs, k, v)
+        return self.rs
+
+    def __exit__(self, *a):
+        for k, v in self.old.items():
+            setattr(self.rs, k, v)
+
+
+def drift_files(sv: str, code_dirs: list[str]) -> list[str]:
+    """工作树相对该版本多出 / 改动的代码文件（tag 之后的提交 + 未提交 + 未跟踪）——只报，不拦部署（K-OPS-F06）"""
+    after = [x for x in git("diff", "--name-only", sv, "HEAD", "--", *code_dirs).split("\n") if x]
+    pend = [p for _s, p in pending_changes()]
+    return sorted({p for p in after + pend if p.startswith(tuple(d + "/" for d in code_dirs))})
+
+
+def deploy_host(rs, h: str, snap: Path, names: list[str], tracked_code: list[str], sv: str, commit: str,
+                restart: bool = True, pc=None, rq=None, urgent: bool = False) -> dict:
+    """一台机器的部署（FACTORY D9 / K-OPS-F06，总调度 01:3x 批准）：
+    ① 代码只发该版本的 git 快照（export_tag 解出的目录）：推送前检查也对快照做（P1–P4），工作树里 tag 之外的新文件 / 改动根本不参与，
+       不会再因“cut 之后又新建了代码文件”判“没推到”而整台失败（11-02 01:23 gpu36 sv-02 事故）；
+    ② 第一级数据（作业表 / 身份脸等）照旧从工作树推，推送前检查只看数据（CODE_DIRS 置空）；
+    ③ 代码按快照逐个核 sha、不同就重推；④ 写 data/system_version.txt；⑤ 热重启（按道排空由 restart 负责）"""
+    pc = pc or load_push_check()
+    r = {"at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    try:
+        with _Patched(rs, ROOT=snap):
+            g = pc.run(code_only=True, tier=1, rs=rs, skip_guard=True)          # 快照在 cut 时已过 syntax_guard
+            if g.get("verdict") != "PASS":
+                raise RuntimeError("快照推送前检查不通过：" + "；".join(f"[{x['kind']}] {x['file']}" for x in g["problems"][:5]))
+            rs.push(h, code_only=True, tier=1, yes=True, gate=False)
+        with _Patched(rs, CODE_DIRS=[]):
+            g2 = pc.run(code_only=False, tier=1, rs=rs, skip_guard=True)
+            if g2.get("verdict") != "PASS":
+                raise RuntimeError("数据推送前检查不通过：" + "；".join(f"[{x['kind']}] {x['file']}" for x in g2["problems"][:5]))
+            rs.push(h, tier=1, yes=True, gate=False)
+        with _Patched(rs, ROOT=snap):                                         # 代码按该版本快照逐个核 sha，不同就重推
+            v = rs.verify_sha(h, [n for n in names if n in tracked_code], fix=True)
+        r["sha_checked"], r["sha_mismatch"], r["sha_fixed"] = v["checked"], len(v["mismatch"]), len(v["fixed"])
+        if v["mismatch"]:
+            raise RuntimeError(f"{len(v['mismatch'])} 个代码文件与 {sv} 不一致：{v['mismatch'][:5]}")
+        stamp = json.dumps({"id": sv, "commit": commit, "at": r["at"], "by": "tools/qa/system_version.py deploy"}, ensure_ascii=False)
+        rs.ssh(h, f"cd {rs.R} && mkdir -p data && cat > data/system_version.txt && cat data/system_version.txt",
+               data=(stamp + "\n").encode(), tries=3)
+        r["version_file"] = "data/system_version.txt"
+        # K-OPS-F09：新代码会对缺失 / 损坏的决策文件拒派——重启前先在服务器上用新代码查一遍，不过就不排重启（老进程继续生产）
+        dg = rs.ssh(h, f"cd {rs.R} && OFFLINE_SELF={h} NS_FACTORY_HOST={h} {rs.OFF}/venv/bin/python tools/factory/decisions_guard.py; echo rc=$?",
+                    tries=3).decode("utf-8", "replace")
+        r["decisions_guard"] = dg.strip()[-400:]
+        if "rc=0" not in dg:
+            raise RuntimeError("服务器决策文件不齐（K-OPS-F09），不排重启，老进程继续：" + dg.strip()[-300:])
+        if restart:      # K-OPS-W16（DJ-20）：不直接重启，写重启队列（resident_sync loop 排空后合并执行，同台 30 分钟最多一次）
+            rq = rq or load_restart_queue()
+            q = rq.request(h, f"system_version deploy {sv}", by="system_version deploy", urgent=urgent)
+            r["restart"] = f"queued {q['id']}（tools/autopilot/restart_queue.py，执行记录 data/autopilot/restart_done.jsonl）"
+        r["ok"] = True
+    except Exception as e:  # noqa: BLE001
+        r.update(ok=False, error=f"{type(e).__name__}: {e}"[:400])
+    return r
+
+
+LAST_CUT = DATA / "last_cut.json"
+
+
+def record_cut(out: dict, dry: bool) -> None:
+    """每次 cut（非 dry）都记结果；deploy 据此判断“最近一次 cut 失败”就不部署（K-OPS-F07）"""
+    if dry:
+        return
+    DATA.mkdir(parents=True, exist_ok=True)
+    LAST_CUT.write_text(json.dumps({"ok": bool(out.get("ok")), "id": out.get("id"), "at": time.time(),
+                                    "at_iso": time.strftime("%Y-%m-%dT%H:%M:%S"), "reason": str(out.get("reason") or "")[:300]},
+                                   ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def deploy_guard(sv: str | None, allow_old: bool = False, last_cut: dict | None = None, tags: list[str] | None = None,
+                 tag_time=None) -> str | None:
+    """→ None = 可以部署；否则返回拒绝原因（K-OPS-F07，总调度 02:0x：sv-04 cut 失败后另一流程把 sv-03 重新部署，
+    服务器 config/vqa.json 被还原成 instances=1、积压闸卡死 GPU）。
+    ① 最近一次 cut 失败（时间晚于最新 tag）→ 拒绝；② 只许部署最新版本，旧版本要 --allow-old（回退流程）"""
+    tags = tags if tags is not None else sv_tags()
+    if not tags:
+        return "还没有任何系统版本，先 cut"
+    newest = tags[-1]
+    lc = last_cut if last_cut is not None else (json.loads(LAST_CUT.read_text(encoding="utf-8")) if LAST_CUT.exists() else {})
+    tt = tag_time or (lambda t: float(git("log", "-1", "--format=%ct", t).strip() or 0))
+    if lc and lc.get("ok") is False and float(lc.get("at") or 0) > tt(newest):
+        return f"最近一次 cut 失败（{lc.get('at_iso')}：{lc.get('reason') or '闸门不过'}），不部署；修好后重新 cut 再 deploy"
+    target = sv or newest
+    if target != newest and not allow_old:
+        return f"{target} 不是最新版本（最新 {newest}）；回退请走 rollback 流程并加 --allow-old"
+    return None
+
+
+def deploy(sv: str | None = None, hosts: list[str] | None = None, restart: bool = True, allow_old: bool = False,
+           urgent: bool = False) -> dict:
+    why = deploy_guard(sv, allow_old)
+    if why:
+        raise SystemExit("deploy 拒绝：" + why)
+    sv = sv or sv_tags()[-1]
     rs = load_rs()
     hosts = hosts or list(rs.HOSTS)
     commit = git("rev-list", "-n", "1", sv).strip()
     tracked_code = [x for x in git("ls-tree", "-r", "--name-only", sv, "--", *rs.CODE_DIRS).split("\n") if x]
-    drift = [p for _s, p in pending_changes() if p.startswith(tuple(d + "/" for d in rs.CODE_DIRS))]
-    res = {"id": sv, "commit": commit, "hosts": {}, "drift_local": len(drift)}
+    drift = drift_files(sv, rs.CODE_DIRS)
+    res = {"id": sv, "commit": commit, "hosts": {}, "drift_local": len(drift), "drift_files": drift[:50],
+           "drift_note": "工作树里 tag 之外的代码改动只报不推（K-OPS-F06），留给下一版" if drift else None}
     with tempfile.TemporaryDirectory(prefix="nsfs_sv_") as td:
         names = export_tag(sv, rs.CODE_DIRS, Path(td))
+        pc = load_push_check()
         for h in hosts:
-            r = {"at": time.strftime("%Y-%m-%dT%H:%M:%S")}
-            try:
-                rs.push(h, tier=1, yes=True)                         # 第一级推送（内含 push_gate，不过抛 PushGateFailed）
-                live_root = rs.ROOT
-                rs.ROOT = Path(td)                                    # 代码按该版本快照逐个核 sha，不同就重推（= 覆盖成这一版）
-                try:
-                    v = rs.verify_sha(h, [n for n in names if n in tracked_code], fix=True)
-                finally:
-                    rs.ROOT = live_root
-                r["sha_checked"], r["sha_mismatch"], r["sha_fixed"] = v["checked"], len(v["mismatch"]), len(v["fixed"])
-                if v["mismatch"]:
-                    raise RuntimeError(f"{len(v['mismatch'])} 个代码文件与 {sv} 不一致：{v['mismatch'][:5]}")
-                stamp = json.dumps({"id": sv, "commit": commit, "at": r["at"], "by": "tools/qa/system_version.py deploy"}, ensure_ascii=False)
-                rs.ssh(h, f"cd {rs.R} && mkdir -p data && cat > data/system_version.txt && cat data/system_version.txt",
-                       data=(stamp + "\n").encode(), tries=3)
-                r["version_file"] = "data/system_version.txt"
-                if restart:
-                    r["restart"] = rs.restart(h).strip().replace("\n", "；")[-300:]
-                    r["alive"] = rs.alive(h).replace("\n", "；")
-                r["ok"] = True
-            except Exception as e:  # noqa: BLE001
-                r.update(ok=False, error=f"{type(e).__name__}: {e}"[:400])
-            res["hosts"][h] = r
+            res["hosts"][h] = deploy_host(rs, h, Path(td), names, tracked_code, sv, commit, restart=restart, pc=pc, urgent=urgent)
     idx = write_index()
     for v in idx["versions"]:
         if v["id"] == sv:
@@ -553,7 +857,8 @@ def rollback(sv: str) -> dict:
     stat = git("diff", "--stat", "HEAD", sv)
     pend = pending_changes()
     cmds = [f"git stash push -u -m 'before rollback to {sv}'   # 仅当工作区有未入版改动（现在 {len(pend)} 个）",
-            f"git checkout {sv} -- .", f".venv/Scripts/python.exe tools/qa/system_version.py cut --base {sv}   # 回退本身也记一版",
+            f"git checkout {sv} -- .",
+            f".venv/Scripts/python.exe tools/autopilot/state_snapshot.py restore {sv}   # 先预览；确认后加 --apply（校验 sha、先备份现状到 data/system_versions/{sv}/pre_restore_*，不删）", f".venv/Scripts/python.exe tools/qa/system_version.py cut --base {sv}   # 回退本身也记一版",
             ".venv/Scripts/python.exe tools/qa/system_version.py deploy"]
     return {"target": sv, "preview_stat": tail(stat, 40), "pending_local": len(pend), "commands": cmds,
             "note": "只生成命令与差异预览，未执行；执行要总调度确认（K-OPS-V01）"}
@@ -576,9 +881,12 @@ def main(argv=None) -> int:
     d.add_argument("sv", nargs="?")
     d.add_argument("--hosts")
     d.add_argument("--no-restart", action="store_true")
+    d.add_argument("--allow-old", action="store_true", help="部署非最新版本（只给回退流程用）")
+    d.add_argument("--urgent", action="store_true", help="重启请求插队（K-OPS-W16 urgent，审计记 urgent_jump）")
     r = sp.add_parser("rollback")
     r.add_argument("sv")
     sp.add_parser("status")
+    sp.add_parser("lock-status")
     a = ap.parse_args(argv)
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -586,14 +894,19 @@ def main(argv=None) -> int:
         pass
     if a.cmd == "cut":
         out = cut(a.base, a.dry, a.id)
+        record_cut(out, a.dry)
         print(json.dumps({k: v for k, v in out.items() if k != "gates"}, ensure_ascii=False, indent=1)[:4000])
         for gg in out.get("gates", []):
             print(f"  {'✅' if gg['ok'] else '❌'} {gg['name']}：{gg['detail'][:200]}")
         return 0 if out.get("ok") else 1
     if a.cmd == "deploy":
-        out = deploy(a.sv, a.hosts.split(",") if a.hosts else None, not a.no_restart)
+        out = deploy(a.sv, a.hosts.split(",") if a.hosts else None, not a.no_restart, a.allow_old, a.urgent)
         print(json.dumps(out, ensure_ascii=False, indent=1)[:4000])
         return 0 if out["hosts"] and all(x.get("ok") for x in out["hosts"].values()) else 1
+    if a.cmd == "lock-status":       # K-OPS-F08：别的 agent 写代码前先查；退出码 3 = cut 进行中
+        lk = cut_locked()
+        print(json.dumps(lk or {"active": False}, ensure_ascii=False, indent=1))
+        return 3 if lk else 0
     if a.cmd == "rollback":
         print(json.dumps(rollback(a.sv), ensure_ascii=False, indent=1))
         return 0

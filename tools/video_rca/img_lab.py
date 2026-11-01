@@ -35,17 +35,8 @@ def upload_png(rel: str) -> str:
     return (r.get("subfolder") + "/" if r.get("subfolder") else "") + r["name"]
 
 
-def _local_free():
-    """本机道 laptop:0（18388）：队列为空才交（生产优先）"""
-    d = json.loads(L.api("/queue", timeout=20))
-    n = len(d["queue_running"]) + len(d["queue_pending"])
-    return (n == 0), f"本机道队列 {n}"
-
-
-def main(p: Path, local: bool = False):
-    if local:            # 跳板慢 / 断时走笔记本本机道，不经网络（scope=ab，只写 data/ab/video_rca/）
-        L.PORT = 18388
-        L.lane_free = _local_free
+def main(p: Path):
+    # 总调度 11-02（L-100）：笔记本 4080 改作专用看图卡，本工具不再有“本机道”模式；出图实验只走服务器道（img_lab export → srv_run）
     exp = json.loads(p.read_text(encoding="utf-8"))
     name = exp["name"]
     out = L.AB / name
@@ -147,6 +138,6 @@ if __name__ == "__main__":
     if sys.argv[1] == "export":
         export(Path(sys.argv[2]))
     elif sys.argv[1] == "local":
-        main(Path(sys.argv[2]), local=True)
+        raise SystemExit("本机道模式已撤（L-100：笔记本 4080 是专用看图卡）。用 export 走服务器道（空闲 ≥5 分钟才交）")
     else:
         main(Path(sys.argv[1]))
