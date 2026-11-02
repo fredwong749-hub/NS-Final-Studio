@@ -32,3 +32,6 @@
 - 项目方 AskUserQuestion 点选“B 深色桌面 + 灰纸框”，取代 r45 胶卷条（胶卷条样式隔离在 apps/web/src/_quarantine/r45_filmstrip.css，不删）。
 - UIRSI 已实现 B（apps/web/src/v3/slide.css），但项目方 04:2x 又说“电影胶片效果，现在 uiux 不好看，重做”：总调度暂停 B 上线，B 只在 `<html class="ui-slide">` 时生效（默认关）。另派设计 agent 出高保真稿，定稿后由 UIRSI 实现。
 - 与样式无关、已上线的部分：镜头 D-LENS（实拍 / 计划）、候选“未通过：原因”、页面过期检测、:8800 守护重启、每镜一行镜头字段（规则 K-UI-050 / K-UI-051，报告 docs/uirsi/rounds/r45.md）。
+
+## L-114（11-02 08:xx）UI = 电影胶片 A「放映室片条」，取代 L-113 正片 B
+- 项目方 AskUserQuestion 选 A（FILMUI 稿 data/review_pages/filmui/a.html）。UIRSI 实现在开关后：?ui=film（html.ui-film，v3/uiStyle.ts），亲审通过后去掉开关。正片 B 留在 html.ui-slide 开关后，胶卷条在 apps/web/src/_quarantine/。报告 docs/uirsi/rounds/r46.md，规则 K-UI-052。

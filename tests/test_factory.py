@@ -230,3 +230,22 @@ def test_rssh_offline_aliases_are_local(monkeypatch):
     monkeypatch.setenv("OFFLINE_ALIASES", "")
     assert rssh._local_self("gpu33") == "other"
     assert rssh._local_self("gpu36") == "self"
+
+
+def test_check_refs_per_run_tables(tmp_path):
+    """多剧：第二季镜号和第一季重名，按 run 分表查（K-OPS-F03 修订）"""
+    (tmp_path / "a.png").write_bytes(b"A")
+    (tmp_path / "b.png").write_bytes(b"B")
+    exp = {"primary": "series10_v1", "shots": {"ep01-S1": [{"rel": "a.png", "sha": _sha(b"A")}]},
+           "runs": {"series10_s2": {"ep01-S1": [{"rel": "b.png", "sha": _sha(b"B")}]}}}
+    assert IB.check_refs("ep01-S1", ["a.png"], expected=exp, root=tmp_path, run="series10_v1") == []
+    assert IB.check_refs("ep01-S1", ["b.png"], expected=exp, root=tmp_path, run="series10_s2") == []
+    assert IB.check_refs("ep01-S1", ["a.png"], expected=exp, root=tmp_path, run="series10_s2")     # 拿第一季的图出第二季 → 拒派
+    assert IB.check_refs("ep01-S1", ["b.png"], expected=exp, root=tmp_path, run="series10_s9")     # 表里没这部剧 → 拒派
+
+
+def test_deploy_pushes_expected_table_built_from_snapshot():
+    s = (ROOT / "tools/qa/system_version.py").read_text(encoding="utf-8")
+    assert "def build_expected(" in s and "SNAP_BASE / sv" in s
+    d = s[s.index("def deploy_host("):s.index("def deploy(sv")]
+    assert d.index("expected_refs.json") < d.index("server_deps.py") < d.index("decisions_guard.py")

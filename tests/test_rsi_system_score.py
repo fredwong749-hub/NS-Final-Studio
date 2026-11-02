@@ -66,3 +66,28 @@ def test_gpu_from_sentinel_24h(tmp_path):
     d = r["detail"]["self_run"]
     assert d["gpu_src"] == "gpu_24h.productive_pct" and d["gpu_score"] == 0.5
     assert r["parts"]["self_run"] == round((0.75 + 0.5) / 2 * 100, 1)
+
+
+def test_hotfixed_version_is_not_first_pass(tmp_path):
+    _fixture(tmp_path)
+    _w(tmp_path / "data/rsi/release_incidents.jsonl", {"sv": "sv-20261102-02", "kind": "hotfix"})
+    r = SS.score(root=tmp_path, out=tmp_path / "data/rsi", write=False, day="2026-11-02")
+    assert r["detail"]["release"]["first_pass_rate"] == 0.0
+    assert r["detail"]["release"]["hotfixed_or_rolled_back"] == ["sv-20261102-02"]
+
+
+def test_system_version_record_cut_appends_ledger():
+    src = (ROOT / "tools/qa/system_version.py").read_text(encoding="utf-8")
+    assert "data/rsi/cut_seen.jsonl" in src and "system_version.record_cut" in src
+
+
+def test_unledgered_versions_after_ledger_start_count(tmp_path):
+    _fixture(tmp_path)
+    _w(tmp_path / "data/system_versions/index.json", {"versions": [
+        {"id": "sv-20261102-01", "at": "2026-11-02T00:00:00"},     # 账本开始前：不算
+        {"id": "sv-20261102-02", "at": "2026-11-02T02:00:00"},
+        {"id": "sv-20261102-03", "at": "2026-11-02T03:00:00"}]})   # 账本漏记、在账本开始后：补“首次通过”
+    _w(tmp_path / "data/rsi/release_incidents.jsonl", {"sv": "sv-20261102-03", "kind": "hotfix"})
+    r = SS.score(root=tmp_path, out=tmp_path / "data/rsi", write=False, day="2026-11-02")
+    d = r["detail"]["release"]
+    assert d["svs_seen"] == 2 and d["first_pass_rate"] == 0.5     # 02 过、03 热修算不过；01 不算

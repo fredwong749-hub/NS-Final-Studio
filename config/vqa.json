@@ -28,7 +28,7 @@
   "subject_max_pixels": 600000,
   "ref_max_pixels": 150000,
   "video_frames": 6,
-  "instances": 3,
+  "instances": 2,
   "_instances": "L-100（11-02 02:1x 起）：gpu36 GPU2 专用卡上 3 个 nf4 实例（:8876/:8878/:8879，tools/vqa/vqa_router.py 占 :8870 按排队最少分发）+ 笔记本 4080 专用 1 个 = 4。vLLM fp8 版 A/B 判定一致率 0.909 < 0.95 没上（GATE_CALIBRATION §14）。producer 打分积压上限按它算（K-OPS-E05）",
   "_caliber": "口径 B（VQAGATE 11-01 22:5x 切，本机 4080 与 gpu36 同一套）：主图 0.6 MP、参考图 0.15 MP、输出 1000 token。gpu36 同一批 29 条对照原口径（1.3 MP / 0.36 MP / 1800）：阻断项逐项一致率 eye_contact 0.931、continuity_break 1.0、hair_mismatch 1.0、framing_mismatch 0.931、extra_person 0.966、underage_look 1.0、extra_limbs 0.828（两种口径下都不稳）；eye_contact 对人工标签召回 8/10 两边相同，误报 3/10 → 2/10。数据 data/vqa/vram_bench/compare_g36_orig_g36_Bfull.json；本机峰值 10.8–11.3 GB（GATE_CALIBRATION §7–8）",
   "instances_note": "总调度 01:5x L-100：gpu36 GPU2 vLLM 并发 4（:8870 已切到 vllm_proxy）；笔记本 4080 专用实例另计给笔记本 producer"

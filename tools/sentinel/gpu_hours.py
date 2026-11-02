@@ -91,7 +91,7 @@ try:
             except ValueError:
                 continue
             if d.get("t", 0) >= since:
-                out["log"].append({k: d.get(k) for k in ("ts", "t", "ev", "obj", "lane", "take", "gpu_s", "render_s", "reason")})
+                out["log"].append({k: d.get(k) for k in ("ts", "t", "ev", "obj", "lane", "take", "gpu_s", "render_s", "reason", "by", "note")})
 except OSError as e:
     out["log_err"] = repr(e)[:120]
 out["log"] += [{"t": m * 60, "ev": "pf_minute"} for m in sorted(pf)]
@@ -163,10 +163,16 @@ def tunnel_down(since: float) -> dict[str, list]:
     return out
 
 
-WAIT_REASONS = ("service_down", "disconnect", "tz_suspect", "pause", "score_backlog", "hold", "no_jobs", "unknown")
-WAIT_ZH = {"service_down": "服务停", "disconnect": "断连", "tz_suspect": "时区存疑（只有 ts、没有 epoch t，K-OPS-E18）", "pause": "暂停（pause）", "score_backlog": "打分积压闸顶满",
+WAIT_REASONS = ("service_down", "disconnect", "tz_suspect", "pause_master", "pause", "score_backlog", "hold", "no_jobs", "unknown")
+MASTER_BY = ("总调度", "fredw-2b", "fredw")
+
+
+def is_master(by) -> bool:
+    """暂停是不是总调度本人下的：by 以“总调度 / fredw”开头才算（“NETFIX 切香港线路（总调度 00:5x）”是 NETFIX 下的，不算）"""
+    return str(by or "").strip().startswith(MASTER_BY)
+WAIT_ZH = {"service_down": "服务停", "disconnect": "断连", "tz_suspect": "时区存疑（只有 ts、没有 epoch t，K-OPS-E18）", "pause_master": "总调度暂停", "pause": "暂停（运维 / 各 loop）", "score_backlog": "打分积压闸顶满",
            "hold": "hold（让道）", "no_jobs": "队列没单（缺资产 / 缺稿，preflight 挡）", "unknown": "原因不明（无证据）"}
-WAIT_OWNER = {"service_down": "DEBUG-RSI", "disconnect": "DEBUG-RSI", "tz_suspect": "DEBUG-RSI", "pause": "DEBUG-RSI", "score_backlog": "DEBUG-RSI",
+WAIT_OWNER = {"service_down": "DEBUG-RSI", "disconnect": "DEBUG-RSI", "tz_suspect": "DEBUG-RSI", "pause_master": "总调度", "pause": "DEBUG-RSI", "score_backlog": "DEBUG-RSI",
               "hold": "FACTORY", "no_jobs": "FACTORY", "unknown": "SENTINEL"}
 
 
@@ -234,27 +240,28 @@ def wait_reasons(lane: str, t0: float, n: int, waiting_idx: list[int], events: l
             arr[i] = True
 
     tzq = {s: [False] * n for s in srcs}
+    mpause = {s: [False] * n for s in srcs}              # 总调度暂停（by 含 总调度 / fredw-2b）
     for s_ in srcs:
         ev = sorted((e for e in events if e.get("src", "laptop") == s_), key=lambda e: e["t"])
-        p0, p0_tz = None, False
+        p0, p0_tz, p0_m = None, False, False
         for e in ev:
             if e["ev"] == "pause":
                 if p0 is None:
-                    p0, p0_tz = e["t"], tz_suspect(e)
+                    p0, p0_tz, p0_m = e["t"], tz_suspect(e), is_master(e.get("by"))
             elif p0 is not None and (e["ev"] == "resume" or (e["ev"] == "dispatch")):
                 # 结束 = resume，或同一派单方又开始派单（有证据它已经在跑：dispatch.py 直接改 control.json 恢复时日志里没有 resume）
-                mark(tzq[s_] if p0_tz else paused[s_], p0, e["t"])
+                mark(tzq[s_] if p0_tz else mpause[s_] if p0_m else paused[s_], p0, e["t"])
                 p0 = None
             elif e["ev"] == "score_backlog":
                 mark(backlog[s_], e["t"], e["t"] + 300)      # producer 每 300 s 记一次“积压闸顶满、先不派”
             elif e["ev"] == "pf_minute":
                 mark(nojob[s_], e["t"], e["t"] + 60)
         if p0 is not None:
-            mark(tzq[s_] if p0_tz else paused[s_], p0, None)
-    held = [False] * n
+            mark(tzq[s_] if p0_tz else mpause[s_] if p0_m else paused[s_], p0, None)
+    held = {s: [False] * n for s in srcs | {"temp"}}
     for src, o in (ctrl or {}).items():                     # SENTINEL control 历史（08:0x 起）：pause / hold 有据可查
         for a, b in o.get("hold", {}).get(lane, []):
-            mark(held, a, b)
+            mark(held.setdefault(src, [False] * n), a, b)
         if src in paused:
             for a, b in o.get("pause", []):
                 mark(paused[src], a, b)
@@ -272,8 +279,8 @@ def wait_reasons(lane: str, t0: float, n: int, waiting_idx: list[int], events: l
     out = {r: 0 for r in WAIT_REASONS}
     for i in waiting_idx:
         o = owner[i]
-        r = ("service_down" if down[i] else "disconnect" if (disc[i] and o == "laptop") else "pause" if paused[o][i]
-             else "tz_suspect" if tzq[o][i] else "hold" if held[i] else "score_backlog" if backlog[o][i] else "no_jobs" if nojob[o][i]
+        r = ("service_down" if down[i] else "disconnect" if (disc[i] and o == "laptop") else "pause_master" if mpause[o][i] else "pause" if paused[o][i]
+             else "tz_suspect" if tzq[o][i] else "hold" if (held["temp"][i] or held.get(o, [False] * n)[i]) else "score_backlog" if backlog[o][i] else "no_jobs" if nojob[o][i]
              else "unknown")
         out[r] += STEP
     return out
@@ -399,6 +406,14 @@ def build(now: float | None = None, remote: dict | None = None, lap: list[dict] 
         cards[lane] = classify(lane, t0, now, hist, events, tun, ctrl)
     for v in VLM:
         cards[v] = vlm_from_samples(v, t0, now)
+    allev = lap + [e | {"src": h} for h, rd in remote.items() for e in ((rd or {}).get("log") or [])]
+    try:
+        from tools.autopilot import policy
+        labels = policy.load()["sentinel"]["GPU24_alloc"]["value"].get("pause_labels") or []
+    except (KeyError, ImportError):  # arch-ok: 没配显示名时按默认名（总调度暂停 / 暂停）
+        labels = []
+    segs = pause_segments(allev, t0, now, labels)
+    runs_out = by_run(allev, t0)
     prod = [c for k, c in cards.items() if k in LANES]
     tot = {b: sum(c[b] for c in prod) for b in BUCKETS}
     wr = {r: sum(c["waiting_reasons"][r] for c in prod) for r in WAIT_REASONS}
@@ -413,10 +428,72 @@ def build(now: float | None = None, remote: dict | None = None, lap: list[dict] 
                                "note": "pause / hold：SENTINEL control 历史（data/sentinel/control_history.jsonl）开始记录之后有据可查，之前按日志；"
                                        "事件时刻以 epoch t 为准（与时区无关）；只有 ts 没有 t 的 pause 记“时区存疑”（K-OPS-E18）；"
                                        "pause 没有 resume 时，以同一派单方下一次派单为结束"},
+           "pause_segments": segs,
+           "by_run": runs_out,
            "errors": errs,
            "for_rsi_line5": {"productive_pct": round(100 * tot["productive"] / span, 1),
                              "note": "线 5“自运行”分项接这里：生产出图卡 24 小时“真正在跑”占比（含无数据时段在分母里，只升不虚高）"}}
     return res
+
+
+def pause_segments(events: list[dict], t0: float, t1: float, labels: list | None = None) -> list[dict]:
+    """各派单方的暂停段（窗口内）：谁暂停的、备注、起止、时长；labels（sentinel.yaml GPU24_alloc.pause_labels）给特定段起显示名，
+    例：19:41–23:17 “总调度全局暂停（为 IMGFIX）”"""
+    out = []
+    for src in sorted({e.get("src", "laptop") for e in events}):
+        ev = sorted((e for e in events if e.get("src", "laptop") == src and e.get("ev") in ("pause", "resume", "dispatch")), key=lambda e: e["t"])
+        cur = None
+        for e in ev:
+            if e["ev"] == "pause" and cur is None:
+                cur = e
+            elif cur is not None and e["ev"] in ("resume", "dispatch"):
+                out.append((src, cur, e["t"], e["ev"]))
+                cur = None
+        if cur is not None:
+            out.append((src, cur, None, "窗口末仍暂停"))
+    rows = []
+    for src, p, end, how in out:
+        s, e = max(p["t"], t0), min(end or t1, t1)
+        if e - s < 60:
+            continue
+        by = str(p.get("by") or "")
+        label = next((lb["label"] for lb in labels or [] if lb.get("by_match", "") in by and (not lb.get("start") or abs((J.ts(lb["start"]) or 0) - p["t"]) < 120)), None)
+        rows.append({"src": src, "by": by, "label": label or ("总调度暂停" if is_master(by) else "暂停"),
+                     "note": str(p.get("note") or "")[:80], "start": J.iso(s), "end": J.iso(e), "ended_by": how, "hours": round((e - s) / 3600, 2)})
+    return sorted(rows, key=lambda r: -r["hours"])
+
+
+def run_of(obj: str | None, primary: str) -> str:
+    """对象 id → run：非主 run 带前缀 <run>/<kind>:<shot>（tools/autopilot/runs.obj_id）"""
+    o = str(obj or "")
+    return o.split("/", 1)[0] if "/" in o else primary
+
+
+def by_run(events: list[dict], t0: float) -> dict:
+    """24 小时内按 run 分开的出图量：rendered 次数、被收下（没被回滚作废）的次数、GPU 执行秒数、出过图的镜数"""
+    from tools.autopilot import runs as RUNS
+    prim = RUNS.primary_run()
+    void = {(e.get("obj"), e.get("take")) for e in events if e.get("ev") == "master_reject" and any(w in str(e.get("reason") or "") for w in VOID_WORDS)}
+    out: dict = {}
+    seen = set()
+    for e in events:
+        if e.get("ev") != "rendered" or (e.get("t") or 0) < t0:
+            continue
+        k = (e.get("obj"), e.get("take"), e.get("lane"))
+        if k in seen:                                        # 笔记本日志与服务器日志可能各记一次
+            continue
+        seen.add(k)
+        r = out.setdefault(run_of(e.get("obj"), prim), {"renders": 0, "kept": 0, "gpu_h": 0.0, "shots": set()})
+        r["renders"] += 1
+        r["kept"] += 0 if (e.get("obj"), e.get("take")) in void else 1
+        r["gpu_h"] += float(e.get("gpu_s") or 0) / 3600
+        r["shots"].add(e.get("obj"))
+    for r in out.values():
+        r["gpu_h"] = round(r["gpu_h"], 2)
+        r["shots"] = len(r["shots"])
+    for run in RUNS.list_runs(status=None):
+        out.setdefault(run, {"renders": 0, "kept": 0, "gpu_h": 0.0, "shots": 0})
+    return out
 
 
 VLM_SRC = {"gpu36:2": ("gpu36", 2), "laptop:4080": ("laptop", 0)}

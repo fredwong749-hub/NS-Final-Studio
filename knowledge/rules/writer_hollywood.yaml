@@ -283,3 +283,32 @@ rules:
     confidence: high
     status: 待验
     date: 2026-11-02
+  - id: K-WRT-H15
+    check: [tests/test_staging.py]
+    domain: writer
+    link: P3-P4
+    title: 每个在画人物在 img 里写一个和场景物件的接触动作；不写正面直立对镜头
+    when: 首帧 img（项目方 11-02 亲标 20 张融合样本，IMGFIX 分析：“自然”的图都是单人、非特写、人物和场景物件有接触、身体侧向；“贴图”的多是正面居中站立的设定图姿势）
+    then: tools/script_rsi/staging.py check_shot：人物行“在画”的每个人，img 里写了他名字的分句至少一句带接触动作（扶 / 坐 / 拿 / 靠 / 握 / 撑 / 搭 / 按 / 端 / 托 / 倚 …）；同一分句既写站立又写正面 / 面向镜头 = 不过。“局部”人物不判。进 autoflow.all_fails（补丁目标 stage#H15-<镜>，每条 2 镜）和 rubric_audit.gate（导入闸门）
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: 首帧里每个在画人物都要写一个“人名主语 + 接触动作 + 场景里的物件”的分句——扶着门框、坐在桌沿、手里拿着杯子、肩靠在墙上、手撑在吧台上；身体写侧向或四分之三侧。不要写人物正面直立、居中、对着镜头的设定图姿势。
+    evidence:
+      - {src: data/rsi/staging_dist_s1.json, note: "第一季 80 镜达标 20（25%），无接触 58"}
+      - {src: data/rsi/staging_dist_s2.json, note: "第二季 110 镜达标 67（60.9%），无接触 36"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02
+  - id: K-WRT-H16
+    check: [tests/test_staging.py]
+    domain: writer
+    link: P3-P4
+    title: 双人镜（≥2 人在画露脸）用中景以上，或把其中一人写成前景局部
+    when: 首帧 img 景别 + 人物行（同上融合样本：“贴图”多是双人、特写；K-REN-902 只管特写，这条扩到近景 / 中近景）
+    then: staging.check_shot：人物行 ≥2 个“在画”且 img 开头景别是 大特写 / 特写 / 近景 / 中近景 = 不过；改中景 / 中全景 / 全景，或把其中一人改成“局部”（肩 / 背影 / 手，人物行写 <名>（局部｜<部位>｜<左/中/右>））
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: 两个人都要露脸的镜头用中景或更宽；要拍近景或特写时，只让一个人露脸，另一个人写成前景的肩、背影或手（人物行写“局部”）。
+    evidence:
+      - {src: data/rsi/staging_dist_s2.json, note: "第二季双人紧景别 12 镜；第一季 11 镜"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02

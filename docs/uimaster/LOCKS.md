@@ -248,3 +248,5 @@ s_vqastart.ps1 归 LOCALGPU（已收工），CONSENT 写 LOCALGPU → VQAGATE”
 - CONSENT: UIPIXEL -> UIRSI : apps/web/src/v3/slide.css | by 总调度 fredw-2b 11-02 04:3x：“请按 B 落地到总览和审片页”（新建样式，现在开关后）
 - CONSENT: UIPIXEL -> UIRSI : apps/web/src/_quarantine/r45_filmstrip.css | by 总调度 fredw-2b 11-02 04:3x：“.film 开关的旧胶卷条代码不再用，隔离进 _quarantine，不要删”
 - CONSENT: REFLOCK/IMGFIX -> IMGLAB : services/agent/ns_agent/framing.py（K-REN-903：partial_only 开关、closeup_lead 局部首句放宽到非特写景别、narrow_lock 局部人物锁收窄（改 W5 b 发色保留与 HC-07 成年句写法））、services/agent/ns_agent/compiler.py（全员局部 → subject=part 一处）、services/agent/ns_agent/frame_job.py（eyeline_note 只给露脸的人补）；备份 data/_quarantine/imglab_20261102b/ | by 总调度 fredw-2b 11-02 批准（“方案 A 全部批准，包括第 4 条：W5 b 和 HC-07 的写法由你改，CONSENT 记在总调度名下……sv-06 之后合入，带开关”）
+- CONSENT: VIDEO10 -> DEBUG_RSI : tools/series10_video/night.py（apply_lane_policy：控制文件 hold_lanes 在两种模式下都合并，且进缓存 key；K-OPS-E20） | by 总调度 fredw-2b 11-02 08:4x：“night.py 第 455 行：授权你改（CONSENT 记在总调度名下）……进 sv-08；改前通知 VIDLAB”
+- CONSENT: UIPIXEL -> UIRSI : apps/web/src/v3/film.css | by 总调度 fredw-2b 11-02 08:xx：“请按 A 实现总览和单集页，并放在开关后面”（新建样式）

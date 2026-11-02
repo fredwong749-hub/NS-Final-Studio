@@ -315,3 +315,47 @@ def test_ctrl_history_gives_hold(tmp_path):
     hist = {"n": 1, "rows": [[T0, T0 + 5, True, "VQAGATE", None, None, None]]}
     w = G.classify("gpu36:0", T0, T0 + 3600, hist, [], {}, ctrl)["waiting_reasons"]
     assert 1150 <= w["hold"] <= 1250
+
+
+def test_master_pause_split_and_not_ticketed():
+    """总调度下的暂停单列“总调度暂停”、派单方照实写，不算到 DEBUG-RSI 头上、不开单（总调度 08:2x）"""
+    from tools.sentinel import gpu_hours as G
+    ev = [{"t": T0 + 100, "ev": "pause", "by": "总调度 fredw-2b", "note": "为 IMGFIX", "src": "laptop"},
+          {"t": T0 + 1300, "ev": "resume", "by": "总调度", "src": "laptop"}]
+    hist = {"n": 1, "rows": [[T0, T0 + 5, True, "VQAGATE", None, None, None]]}
+    w = G.classify("gpu33:0", T0, T0 + 3600, hist, ev, {})["waiting_reasons"]
+    assert 1150 <= w["pause_master"] <= 1250 and w["pause"] == 0
+    segs = G.pause_segments(ev, T0, T0 + 3600, [{"by_match": "总调度", "start": J.iso(T0 + 100), "label": "总调度全局暂停（为 IMGFIX）"}])
+    assert segs[0]["label"] == "总调度全局暂停（为 IMGFIX）" and segs[0]["by"].startswith("总调度")
+    res = {"waiting_reasons": {"seconds": {"pause_master": 9000, "pause": 100, "no_jobs": 50}, "pct_of_waiting": {}, "zh": G.WAIT_ZH, "owner": G.WAIT_OWNER}}
+    fs = {f["key"]: f for f in J.j_wait_top(res, 2)}
+    assert not fs["GPU24:wait:pause_master"]["violated"] and fs["GPU24:wait:pause"]["violated"]
+
+
+def test_by_run_splits_seasons():
+    from tools.sentinel import gpu_hours as G
+    from tools.autopilot import runs as RUNS
+    prim = RUNS.primary_run()
+    ev = [{"t": T0, "ev": "rendered", "obj": "first:ep01-S1", "take": 1, "lane": "gpu33:0", "gpu_s": 36},
+          {"t": T0, "ev": "rendered", "obj": "series10_s2/first:ep01-S1", "take": 1, "lane": "gpu36:0", "gpu_s": 72}]
+    r = G.by_run(ev, T0 - 1)
+    assert r[prim]["renders"] == 1 and r["series10_s2"]["renders"] == 1 and r["series10_s2"]["gpu_h"] == 0.02
+
+
+def test_capacity_floor():
+    c = C["S19_capacity_floor"]
+    f = J.j_capacity({"gpu33": 2, "gpu36": 3}, [], ["series10_s2:ep08"], c)[0]
+    assert f["violated"] and "导入了没放单" in f["title"] and f["owner_loop"] == c["owner_loop"]
+    assert not J.j_capacity({"gpu33": 2, "gpu36": 3}, ["series10_s2:ep01"], [], c)[0]["violated"]      # 有下一批
+    assert not J.j_capacity({"gpu33": 6, "gpu36": 6}, [], [], c)[0]["violated"]
+    assert J.j_capacity({}, [], [], c) == []
+    fs = {x["key"]: x for x in J.j_capacity({"gpu33": 0, "gpu36": 40}, [], [], c)}
+    assert not fs["S19:capacity"]["violated"] and fs["S19:capacity:gpu33"]["violated"] and not fs["S19:capacity:gpu36"]["violated"]
+
+
+def test_capacity_not_producing_and_host_text():
+    c = C["S19_capacity_floor"]
+    fs = {x["key"]: x for x in J.j_capacity({"gpu33": 1, "gpu36": 30}, [], [], c, {"gpu33": {"series10_s2": 60}})}
+    h = fs["S19:capacity:gpu33"]
+    assert h["violated"] and "gpu36 还剩 30" in h["title"] and "60 个 ready 属于非 producing" in h["title"]
+    assert not fs["S19:capacity"]["violated"]                                  # 合计可派 31 ≥ 10

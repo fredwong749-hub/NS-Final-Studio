@@ -21,6 +21,7 @@
 | S16 | 笔记本常驻进程清单（tunnel_supervisor / puller / ns_api / vite / producer / infra_watchdog / resident_sync / episode_pipeline / 8810 看板 / 4080 看图） | 缺 0 | 进程命令行（清单在 sentinel.yaml S16_laptop_procs；L-103 缺口：resident_sync 没在跑无人发现） | 各进程负责方 |
 | S17 | 单镜出图速率 | 同一镜每小时 ≤ 8 次 | producer rendered（笔记本 + 服务器；ep05-S3 重出到第 82 版的缺口） | DEBUG-RSI |
 | S18 | 临时挂道到期（partition.json _temp_holds） | 不过 expires_at；没写 expires_at ≤ 15 分钟 | partition.json（gpu36:0 挂 3.5 小时的缺口） | 挂道的 loop |
+| S19 | 产能见底：所有 run 的可派 ready（只算 runs.json 里 status=producing 的 run；已导入但 run 不是 producing 的 ready 单列、不算可派）合计 vs 道数 × 2，每台 vs 本机道数 × 2（单里写哪台见底、另一台还剩多少）；有没有下一批（待导入的稿 / 导入了没放单） | 可派 ready ≥ 10、每台 ≥ 本机道数 × 2，或有待导入的稿 | 两台服务器登记表 ready + autoflow.json verdict=importable + imports.jsonl（11:01 gpu33 空 30 分钟的缺口） | 总调度 / DEBUG-RSI |
 | S13 | 等人决定：任何对象等总调度 / 项目方定；流水线断档（GPU 空、ready 0、pending 多） | 等人 ≤ 10 分钟；断档 0 | 登记表 waiting_for + nvidia-smi（总调度 02:4x 追加：02:22 gpu33 全 0% 根因 = 77 个首帧“等总调度定”） | DEBUG-RSI |
 
 探针实现：tools/sentinel/（K-OPS-S02…S07；阈值 config/policies/sentinel.yaml）；工单 data/sentinel/issues.jsonl，未关闭快照 data/sentinel/open.json，看板 :8810“工单”区。
@@ -47,10 +48,12 @@ RSI 线 5“自运行”分项取 `for_rsi_line5.productive_pct`（生产 5 卡�
 | 服务停 | 这条道 infra_error 之后到下一次 rendered（最多 30 分钟） | DEBUG-RSI |
 | 断连 | supervisor.log 该道隧道 PROBE fail / KILL / EXIT → UP 之间，且当时由笔记本经隧道派单 | DEBUG-RSI |
 | 时区存疑 | 只有 ts 字符串、没有 epoch t 的 pause（ts 可能是服务器 EST 写的，K-OPS-E18）；带 t 的事件一律以 t 为准（11-02 08:1x 核对：EST 写的 pause 的 t 与东京时间一致） | DEBUG-RSI |
-| 暂停（pause） | 该道当时的派单方（最近一次派单来自笔记本还是服务器 producer）处于 pause / resume 之间（没有 resume 时以同一派单方下一次派单为结束；SENTINEL control 历史开始记录后以历史为准） | DEBUG-RSI |
+| 总调度暂停 | 暂停事件 by 含“总调度 / fredw-2b”的段（派单方照实写，记在总调度账上，不开单；例 11-01 19:41–23:17 总调度全局暂停（为 IMGFIX），显示名在 sentinel.yaml GPU24_alloc.pause_labels） | 总调度 |
+| 暂停（运维 / 各 loop） | 该道当时的派单方（最近一次派单来自笔记本还是服务器 producer）处于 pause / resume 之间（没有 resume 时以同一派单方下一次派单为结束；SENTINEL control 历史开始记录后以历史为准） | DEBUG-RSI |
 | 打分积压闸顶满 | 派单方记 score_backlog 后 300 s 内 | DEBUG-RSI |
 | hold（让道） | SENTINEL control 历史（data/sentinel/control_history.jsonl，11-02 08:1x 起）里该道在 hold_lanes 或 partition.json _temp_holds；之前没有历史的时段计入“原因不明” | FACTORY |
 | 队列没单（缺资产 / 缺稿） | 派单方这一分钟有 preflight_block | FACTORY |
 | 原因不明 | 以上都没有证据 | SENTINEL（探针缺口） |
 最大两项（不含原因不明）各开一张 GPU24 工单；原因不明超过等待任务的 20% 另开一张派 SENTINEL。
 ComfyUI 重启会清空 /history：空历史不算“没执行”（记无数据），SENTINEL 每小时把取到的执行区间存档到 data/sentinel/comfy_hist/，重启后用存档补。VLM 卡按 data/sentinel/gpu_samples.jsonl 的 nvidia-smi 采样算（利用率 ≥ 5% = 在跑），没有采样的时段 = 无数据，攒满 24 小时自动全覆盖。
+按 run（季）分开的出图量：gpu_24h.json by_run（对象 id 带 <run>/ 前缀的归该 run，否则归主 run；rendered 次数、收下次数、GPU 执行小时、出过图的镜数），看板 GPU 24 小时区和 RSI 区、晚报都按 run 分开显示（总调度 08:2x，第二季与第一季同等优先）。暂停段清单 pause_segments 写谁暂停的、备注、起止。

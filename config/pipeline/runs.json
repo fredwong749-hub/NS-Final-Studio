@@ -13,7 +13,8 @@
    "status": "writing",
    "created_at": "2026-11-02T02:36:43",
    "source": "flow-start",
-   "note": "HOLLYWOOD r8 autoflow 写作中（L-104），未导入；status=writing 不派生产作业"
+   "note": "HOLLYWOOD r8 autoflow 写作中（L-104），未导入；status=writing 不派生产作业",
+   "episode": 10
   }
  }
 }

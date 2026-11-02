@@ -2,6 +2,8 @@
 // ｜文字列固定行数（剧本 2 · 表情 1 · 对白 2 · 人物小卡与提示词开关同一行）｜主按钮 = 下一步 + ⋯。状态胶囊点开 = 为什么卡住。
 import { Lightbox } from "../ds/MediaPlayer";
 import { thumb } from "../thumb";
+import { FilmStrip } from "./pages/FilmOverview";
+import { filmOn } from "./uiStyle";
 import { storyFrame, useStoryImages } from "./storyImages";
 import { candidateFor, candLabel, epOf, passed, pickTake, rejectedFor, useCandidates } from "./candidates";
 import { MainTag } from "./StatusTags";
@@ -379,6 +381,9 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
   const statusFlash = useFlash([s.review?.state, status.text]);
   const meta = shotMeta(s); // 场景名只在人物行的场景小卡里出现一次
   const lens = useLens(s.id); // r45 · L-113：每镜一行加“镜头”字段
+  const film = filmOn();
+  const filmH = Math.round(Math.max(427, Math.min(569, window.innerWidth * 0.296))); // 1440 宽每格 ≥ 240 px、1920 宽 ≥ 320 px（9:16）
+  const procTakes = film ? [...(rowCands?.[s.id]?.image?.takes ?? []), ...(rowCands?.[s.id]?.last?.takes ?? [])].slice(-8).reverse() : [];
   const line = shotLine(s);
   const dlg = s.dialogue.length ? s.dialogue : [];
   const hl = st.hlChar && s.characters.some((c) => c.character === st.hlChar);
@@ -399,17 +404,34 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
   const miss = missingOf(s, storyboardOf(s, d));
   return (
     <article
-      className={`v3-row${more ? "" : " lean"}${selected ? " sel" : ""}${inMulti ? " multi" : ""}${dim ? " dim" : ""}${hl ? " hl" : ""}${s.video ? " has-vid" : ""}`}
+      className={`v3-row${film ? " film-row" : ""}${more ? "" : " lean"}${selected ? " sel" : ""}${inMulti ? " multi" : ""}${dim ? " dim" : ""}${hl ? " hl" : ""}${s.video ? " has-vid" : ""}`}
       data-shot={s.id}
       style={breatheDelay(s.id)}
       onClick={(e) => st.select(s.id, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey })}
       onDoubleClick={() => (st.select(s.id), st.setCanvasMode("edit"))}
     >
-      <div className="v3-frames">
-        <Frame s={s} stage="image" st={st} />
-        <Frame s={s} stage="last" st={st} />
-        <VideoTile s={s} st={st} />
-      </div>
+      {film ? (
+        // r46 · L-114（总调度亲审：首尾帧必须大图；片上只放这一镜的当前首帧 / 尾帧 / 视频，候选和过程小图放右侧）
+        <div className="film-cut">
+          <FilmStrip
+            H={filmH}
+            thumbW={480}
+            kk={`EASTMAN 5219  ${short(s.id)}`}
+            frames={[
+              { key: "f", src: s.first_frame, ed: s.first_frame ? `首帧 · 定稿 #${s.first_frame_take ?? "?"}` : "首帧 · 未出", empty: "首帧未出", cap: `${short(s.id)} · 首帧` },
+              { key: "l", src: s.last_frame_target, ed: s.last_frame_target ? `尾帧 · 定稿 #${s.last_frame_take ?? "?"}` : "尾帧 · 未出", empty: "尾帧未出", cap: `${short(s.id)} · 尾帧` },
+              s.video ? { key: "v", src: s.video, kind: "video", ed: `视频 · 当前`, cap: `${short(s.id)} · 视频` } : { key: "v", src: null, ed: "视频 · 未出", empty: "视频未出" },
+            ]}
+            onFrame={(i) => (st.select(s.id), i === 2 && s.video ? st.setCanvasMode("edit") : undefined)}
+          />
+        </div>
+      ) : (
+        <div className="v3-frames">
+          <Frame s={s} stage="image" st={st} />
+          <Frame s={s} stage="last" st={st} />
+          <VideoTile s={s} st={st} />
+        </div>
+      )}
       <div className="v3-info">
         <div className="v3-l1">
           <b className="v3-sid">{short(s.id)}</b>
@@ -436,6 +458,17 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
             <StatusLine st={pend?.auto ? { ...status, dot: "green", text: `${pend.stage === "first" ? "首帧" : "尾帧"} #${pend.n} 已自动采用（可改）` } : status} />
           </span>
         </div>
+        {film && procTakes.length > 0 && (
+          <div className="film-proc" onClick={(e) => e.stopPropagation()}>
+            <span className="v3-k">候选 · 过程</span>
+            <div className="film-proc-row">
+              {procTakes.map((t) => (
+                <img key={t.url} src={thumb(t.url, 160) ?? t.url} alt="" loading="lazy" title={`#${t.n}${t.ok === false || t.bad ? ` · 没过：${t.why_not ?? t.bad ?? ""}` : " · 通过"}`}
+                  className={t.ok === false || t.bad ? "bad" : ""} data-zoom-label={`${short(s.id)} · 第 ${t.n} 版${t.ok === false || t.bad ? ` · 没过：${t.why_not ?? t.bad ?? ""}` : " · 通过"}`} />
+              ))}
+            </div>
+          </div>
+        )}
         <div className="v3-field">
           <span className="v3-k">剧本</span>
           <p className={`v3-script${full ? " full" : ""}`} title={full ? "点击收起" : `${s.script_text || s.img_summary || ""}${s.script_text || s.img_summary ? "\n（点击展开全文）" : ""}`} onClick={(e) => (e.stopPropagation(), setFull((v) => !v))}>

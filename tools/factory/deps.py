@@ -199,11 +199,12 @@ def main(argv=None) -> int:
     d.add_argument("--shots", default="")
     d.add_argument("--out", default="")
     d.add_argument("--write-ready", action="store_true")
+    d.add_argument("--all-eps", action="store_true", help="导入稿里的全部集（期望 refs 表用；非主剧由环境变量 NS_SCRIPT_JSON / NS_RENDERS_DIR 指向它的导入稿）")
     f = sub.add_parser("diff")
     f.add_argument("need")
     a = ap.parse_args(argv)
     if a.cmd == "dryrun":
-        eps = [int(x) for x in a.eps.split(",") if x] or partition_eps(a.host)
+        eps = list(range(1, 100)) if a.all_eps else ([int(x) for x in a.eps.split(",") if x] or partition_eps(a.host))
         only = {x for x in a.shots.split(",") if x} or None
         res = dryrun(eps, only)
         res["host"] = a.host

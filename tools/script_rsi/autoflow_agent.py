@@ -216,6 +216,19 @@ def post_step(run_dir: Path, ep: int, st, import_mode: str) -> dict:
                 hard = [x for x in g["checks"] if not x["ok"] and x["id"] != "I7"]
                 if hard:
                     note = "；".join(f"{x['id']} {x['name']} 不满足：{x['detail']}" for x in hard)[:1200]
+                elif any(t.startswith("narr#") for t in pk.get("targets", [])):
+                    # 叙事补丁（N05 结尾类型）：代码判定的结尾类型落在允许集合里、失败项不变多才采用；采用后整集事实重核
+                    got = ending_of(pre + c, ep)
+                    f2 = fitems + AF.all_fails(pre, c, ep, wd)
+                    allowed = pk.get("narrative_allowed") or []
+                    if got not in allowed:
+                        note = f"补丁后结尾类型代码判为 {got}，要的是 {' / '.join(allowed)}"
+                    elif len(f2) > len(fails):
+                        note = f"补丁后失败项变多（{len(fails)} → {len(f2)}）"
+                    else:
+                        cur, fails = c, f2
+                        final_p.write_text(pre + cur, encoding="utf-8")
+                        ag["fact_devs"] = None
                 else:
                     tg_fact = any(t.startswith("fact#") for t in pk.get("targets", []))
                     keep_f = [] if tg_fact else fitems           # 修事实偏差的补丁：偏差先清掉，等下一次整集核对确认
@@ -223,7 +236,8 @@ def post_step(run_dir: Path, ep: int, st, import_mode: str) -> dict:
                     if len(f2) < len(fails) or (tg_fact and len(f2) <= len(fails)):
                         cur, fails = c, f2
                         final_p.write_text(pre + cur, encoding="utf-8")
-                        if tg_fact:
+                        if tg_fact or ag.get("fact_devs") == []:
+                            # 修事实偏差的补丁，或已核对通过（0 偏差）的稿被补丁改了：作废旧核对，失败项清零后整集重核（剧情事实不变要有核对兜底）
                             ag["fact_devs"] = None
                     else:
                         note = f"补丁后失败项没有变少（{len(fails)} → {len(f2)}）"
@@ -312,6 +326,61 @@ def post_step(run_dir: Path, ep: int, st, import_mode: str) -> dict:
     st.set(verdict="importable", awaiting=None, next_action="项目方点“导入”（导入目标待 import-staged --run）")
     mark_dirty(run_dir, ep, "过导入闸门")
     return st.d
+
+
+def ending_of(text: str, ep: int) -> str:
+    """整份稿（集头 + 镜头区）第 ep 集的结尾类型（N05 代码判定，narrative_code.ending_type）"""
+    NC = _load("narrative_code", "tools/script_rsi/narrative_code.py")
+    shots, blocks = NC._episode_material(text, ep)
+    return NC.ending_type(blocks[-1], shots[-1]) if shots else "other"
+
+
+def season_types(run_dir: Path) -> dict[int, str]:
+    out = {}
+    for f in sorted(run_dir.glob("P4_ep[0-9][0-9].final.md")):
+        ep = int(f.name[5:7])
+        out[ep] = ending_of(f.read_text(encoding="utf-8"), ep)
+    return out
+
+
+def narrative_patch(run_dir: Path, ep: int, want: list[str] | None = None, why: str = "") -> dict:
+    """N05 叙事补丁包（总调度 11-02 定：相邻 3 集结尾类型重复的集出补丁，剧情事实不变）。
+    want 不给 = 按整季现状算允许的结尾类型（NC.allowed_endings）；给了 = 只收这些类型（如“纯视线”= gaze_out）。
+    产物回来走 post_step 的补丁处理：代码判定结尾类型在允许集合里 + 闸门不变量过 + 失败项不变多 → 采用 → 整集事实重核 → 再判可导入"""
+    NC = _load("narrative_code", "tools/script_rsi/narrative_code.py")
+    from ns_api import script_chat as SC
+    final_p = run_dir / f"P4_ep{ep:02d}.final.md"
+    if not final_p.exists():
+        return {"ok": False, "why": f"{final_p.name} 不存在（这一集还没过补丁环）"}
+    header, _ = SC.script_header(registry={})
+    pre = header + "\n---\n\n"
+    cur = RL.split_doc(final_p.read_text(encoding="utf-8"))[1][0]
+    types = season_types(run_dir)
+    allowed = list(want) if want else NC.allowed_endings(types, ep)
+    bad = [t for t in allowed if t not in NC.ENDING_TYPES]
+    if bad or not allowed:
+        return {"ok": False, "why": f"结尾类型不认识或没有可选：{bad or allowed}"}
+    st = AF.Status(run_dir, ep, 0.0)
+    facts = json.loads((run_dir / f"facts_ep{ep:02d}.json").read_text(encoding="utf-8"))
+    how = "\n".join(f"  · {t}：{NC.ENDING_HOW[t]}" for t in allowed)
+    target = ("narr", {"id": "N05", "why": (
+        f"整季结尾类型（代码判定）：{json.dumps(types, ensure_ascii=False)}。本集结尾现在是 {types.get(ep)}，与相邻集重复（N05：相邻 3 集结尾类型不重复）。"
+        f"{why}请只改末镜（必要时连带末镜前一镜）的分拍 / 表演节拍 / 下镜 / 最后一句台词的措辞，把结尾改成下面任一类型，剧情事实不变、台词说话人和条数不变：\n{how}")})
+    step_base = f"patch_ep{ep:02d}"
+    k = attempts(run_dir, step_base)
+    ag = st.d.setdefault("agent", {"processed": [], "used": {}, "fact_devs": None})
+    if k and f"{step_base}_a{k}" not in ag["processed"]:
+        ag["processed"].append(f"{step_base}_a{k}")          # 旧的未处理补丁包作废，免得补丁环等它
+    user = AF.patch_user(ep, pre, cur, facts, [target], "")
+    AF.write_json(run_dir / "hollywood" / f"ep{ep:02d}.json", {
+        "candidates": [], "code_fails": 0, "fails": ["narr#N05"], "spent_usd": float(st.d.get("usd_total") or 0), "rounds_left": 0,
+        "staged_path": None, "sha256": None, "writer_backend": "claude_agent", "status": "叙事补丁中"})
+    pk = packet(run_dir, st, step_base, "writer", ep, "patch", R5.r5_writer_system(), user, "patches_json", [H.RC._rel(final_p)], k + 1,
+                {"base_sha": _sha(cur), "targets": ["narr#N05"], "narrative_allowed": allowed})
+    st.d.setdefault("agent_history", []).append({"step": f"{step_base}_a{k + 1}", "accepted": None, "note": f"叙事补丁包 N05 → {allowed}"})
+    st.save()
+    return {"ok": True, "packet": H.RC._rel(run_dir / WT / f"{step_base}_a{k + 1}.json"), "allowed": allowed, "now": types.get(ep),
+            "output": pk["output"]["path"]}
 
 
 def intake_full_p4(RCH, run_dir: Path, ep: int, st, ctx: dict) -> None:

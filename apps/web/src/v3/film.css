@@ -1,0 +1,77 @@
+/* ---------- UIRSI r46 · L-114 电影胶片 A「放映室片条」（项目方 AskUserQuestion 选 A；FILMUI 稿 data/review_pages/filmui/a.html、研究 docs/research/filmui/refs.md）
+   开关：<html class="ui-film">（v3/uiStyle.ts，地址栏 ?ui=film 打开 / ?ui=off 关闭）；总调度亲审通过前不默认开。规则 K-UI-052。
+   · 总览：暗场，每集一条真实比例 35mm 正片（片基黑、KS 齿孔、片边暖灰小字、片头竖写 EPxx），一屏两列 × 五行 / 大图一列；悬停 420px 放大镜带片边信息。
+   · 单集（画布每镜一行）：首帧 · 尾帧 · 视频三帧在同一段片上（片基 + 上下齿孔），右侧字段（含 D-LENS 镜头、D-STATUS 状态原因）。
+   · 状态只用片窗角上一个小圆点；图片本身不加滤镜。 ---------- */
+:root { --fs-page: #0d0d0d; --fs-base: #030303; --fs-edge: #8a8173; --fs-t1: #e9e6e0; --fs-t2: rgba(233, 230, 224, .62); --fs-t3: rgba(233, 230, 224, .4); --fs-mono: "IBM Plex Mono", Consolas, "Cascadia Mono", monospace; }
+/* 片条（总览 / 单集共用组件 FilmStrip） */
+.fs-strip { position: relative; display: flex; background: var(--fs-base); width: max-content; }
+.fs-rail { position: absolute; left: 0; right: 0; background-repeat: repeat-x; pointer-events: none; }
+.fs-rail.t { top: 0; } .fs-rail.b { bottom: 0; }
+.fs-lead { flex: none; position: relative; }
+.fs-lead span { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) rotate(-90deg); font: 500 10px var(--fs-mono); color: var(--fs-edge); letter-spacing: .14em; white-space: nowrap; }
+.fs-fr { flex: none; position: relative; cursor: pointer; }
+.fs-img { position: absolute; left: 1px; right: 1px; overflow: hidden; background: #0a0a0a; }
+.fs-img img, .fs-img video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fs-img > .sea-dot { position: absolute; top: 5px; right: 5px; width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 2px rgba(0, 0, 0, .55); }
+.fs-none { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--fs-t3); font: 10.5px var(--fs-mono); letter-spacing: .14em; }
+.fs-ed { position: absolute; left: 0; right: 0; text-align: center; font: 500 9px/1 var(--fs-mono); color: var(--fs-edge); letter-spacing: .08em; white-space: nowrap; overflow: hidden; }
+.fs-fr:hover .fs-img { outline: 1px solid rgba(255, 255, 255, .7); outline-offset: -1px; }
+.fs-kk { position: absolute; font: 500 8.5px/1 var(--fs-mono); color: var(--fs-edge); opacity: .75; letter-spacing: .12em; white-space: nowrap; z-index: 1; }
+
+/* ---------- 总览 ---------- */
+html.ui-film .sea-page { background: var(--fs-page); color: var(--fs-t1); }
+html.ui-film .sea-page .sea-legend[aria-label="图例"] { display: none !important; }
+.fo-mode { display: flex; align-items: baseline; gap: 14px; margin: 0 0 10px; font-size: 12px; }
+.fo-hint { color: var(--fs-t3); margin-right: auto; }
+.fo-mode button { border: 0; background: none; padding: 0; font: inherit; color: var(--fs-t3); cursor: pointer; }
+.fo-mode button.on { color: var(--fs-t1); }
+.fo-reels { display: grid; grid-template-columns: 1fr 1fr; column-gap: 32px; row-gap: 12px; }
+.fo-reels.big { grid-template-columns: 1fr; row-gap: 22px; }
+.fo-reel { min-width: 0; }
+.fo-h { display: flex; align-items: baseline; gap: 10px; height: 22px; white-space: nowrap; overflow: hidden; }
+.fo-h .no { font: 500 11px var(--fs-mono); color: var(--fs-t2); letter-spacing: .06em; }
+.fo-h .ti { font-size: 13px; font-weight: 500; color: var(--fs-t1); }
+.fo-h .st { margin-left: auto; display: flex; align-items: center; gap: 6px; color: var(--fs-t3); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; }
+.fo-h .st .sea-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.fo-scroll { overflow-x: auto; overflow-y: hidden; }
+.fo-scroll::-webkit-scrollbar { height: 6px; }
+.fo-scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .14); border-radius: 3px; }
+/* 悬停放大镜 */
+.fo-loupe { position: fixed; z-index: 70; pointer-events: none; background: #000; padding: 6px 6px 0; box-shadow: 0 0 0 1px rgba(255, 255, 255, .08), 0 18px 40px rgba(0, 0, 0, .6); }
+.fo-loupe img { height: 420px; width: auto; display: block; }
+.fo-loupe .cap { width: 236px; padding: 7px 2px 8px; font: 11px/1.45 var(--fs-mono); color: var(--fs-t2); letter-spacing: .03em; white-space: normal; }
+
+/* ---------- 单集（画布每镜一行）：首帧 · 尾帧 · 视频装在同一段片上 ---------- */
+html.ui-film .v3-canvas, html.ui-film .v3-rows, html.ui-film .v3-page { background: var(--fs-page); }
+html.ui-film .v3-row { background: transparent; border-color: rgba(255, 255, 255, .08); }
+html.ui-film .v3-row .v3-frames { position: relative; gap: 2px; padding: 26px 1px; background-color: var(--fs-base); border-radius: 0;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='26'%3E%3Crect x='6.5' y='9' width='9' height='6.5' rx='1.4' fill='%232b2825'/%3E%3C/svg%3E"),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='26'%3E%3Crect x='6.5' y='10.5' width='9' height='6.5' rx='1.4' fill='%232b2825'/%3E%3C/svg%3E");
+  background-repeat: repeat-x, repeat-x; background-position: 0 0, 0 100%; background-size: 22px 26px, 22px 26px; }
+html.ui-film .v3-row .v3-frames::before { content: "EASTMAN 5219"; position: absolute; left: 8px; top: 3px; font: 500 8.5px/1 var(--fs-mono); color: var(--fs-edge); opacity: .75; letter-spacing: .12em; }
+html.ui-film .v3-row .v3-frames .v3-frame, html.ui-film .v3-row .v3-frames > * { border-radius: 0; border: 0; box-shadow: none; background: #0a0a0a; }
+html.ui-film .v3-row .v3-frames .v3-frame > img { border-radius: 0; }
+html.ui-film .v3-row .v3-frames .v3-frame-none { color: var(--fs-t3); font-family: var(--fs-mono); letter-spacing: .12em; }
+html.ui-film .v3-row .v3-info { color: var(--fs-t1); }
+html.ui-film .v3-row .v3-sid { font: 400 22px/1 var(--fs-mono); letter-spacing: -.02em; }
+html.ui-film .v3-row .v3-k { color: var(--fs-t2); }
+html.ui-film .v3-lens { font-family: var(--fs-mono); color: var(--fs-t1); }
+html.ui-film .v3-row .v3-frames { align-self: start; height: auto; }
+/* r46 亲审修改：单集每镜一行（.film-row）——片上只放当前首帧 / 尾帧 / 视频（每格 1440 宽 ≥240px、1920 宽 ≥320px），右侧字段 + 候选 · 过程小图（最多 8 张）；
+   彩色胶囊 / 角标一律改成圆点 + 灰字（“用这张 / 不要”按钮保留颜色） */
+html.ui-film .v3-row.film-row { grid-template-columns: auto minmax(0, 1fr) auto; height: auto !important; min-height: 0 !important; max-height: none !important; align-items: start; padding-top: 18px; padding-bottom: 18px; }
+html.ui-film .v3-row.film-row .film-cut { align-self: start; line-height: 0; }
+html.ui-film .v3-row.film-row .v3-info { min-width: 0; }
+.film-proc { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 10px; }
+.film-proc-row { display: flex; gap: 2px; flex-wrap: nowrap; overflow: hidden; }
+.film-proc-row img { height: 84px; width: auto; aspect-ratio: 9 / 16; object-fit: cover; cursor: zoom-in; opacity: .92; }
+.film-proc-row img:hover { opacity: 1; outline: 1px solid rgba(255, 255, 255, .6); outline-offset: -1px; }
+.film-proc-row img.bad { filter: grayscale(.8) brightness(.6); }
+html.ui-film .v3-status, html.ui-film .v3-status.click { background: transparent !important; border-color: transparent !important; color: var(--fs-t2) !important; }
+html.ui-film .v3-status .v3-dot.d-yellow, html.ui-film .v3-status .v3-dot.d-red { background: var(--c-warn); }
+html.ui-film .stag { border-color: transparent !important; background: transparent !important; padding-left: 0; color: var(--fs-t2); }
+html.ui-film .v3-frame .v3-tag, html.ui-film .v3-frame-hint { background: transparent; color: var(--fs-t2); }
+html.ui-film .v3-row.film-row .v3-l1 { flex-wrap: wrap; row-gap: 4px; }
+html.ui-film .v3-row.film-row .v3-l1 .v3-grow { flex-basis: 100%; height: 0; }

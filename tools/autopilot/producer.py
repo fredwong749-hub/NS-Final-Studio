@@ -114,6 +114,35 @@ def redo_ladder_policy() -> dict:
     return d
 
 
+def job_sig(paths, sid: str) -> str | None:
+    """本镜现在编译出的作业签名：提示词 + compiler_inputs_sha + 参考图（路径 + 修改时间）的哈希；作业表里没有 → None"""
+    import hashlib
+    jobs = (jl(paths.run / "assets" / "first_frame_jobs.json", {}) or {}).get("jobs") or []
+    job = next((j for j in jobs if j.get("shot") == sid or j.get("id") == sid), None)
+    if not job:
+        return None
+    parts = [job.get("prompt") or "", str(job.get("compiler_inputs_sha") or "")]
+    for r in job.get("refs") or []:
+        try:
+            parts.append(f"{r}@{round((paths.root / str(r)).stat().st_mtime)}")
+        except OSError:
+            parts.append(str(r))
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
+
+
+def redo_inputs_changed_v2(paths, sid: str, kind: str, led: dict) -> str | None:
+    """K-OPS-E09 修订（11-02 08:4x，ep05-S3 出到第 82 版的根因）：只拿“现在的作业签名”和“上次重置 / 升级时记下的签名”比；
+    第一次（没记过）才退回比参考图修改时间 / 编译输入哈希。绝不拿出图后的提示词比（出图时会追加朝向句 / 看图修正，永远不同）"""
+    sig = job_sig(paths, sid)
+    if not sig:
+        return None
+    last = led.get("ladder_sig")
+    if last:
+        return "作业输入变了" if sig != last else None
+    why = redo_inputs_changed(paths, sid, kind, led)
+    return why if why and why != "提示词变了" else None
+
+
 def redo_inputs_changed(paths, sid: str, kind: str, led: dict) -> str | None:
     """最后一次驳回重出那一版的输入 vs 现在编译出的作业：提示词 / 编译输入哈希 / 参考图集合 / 参考图文件比那一版新 → 说明；没变 None"""
     try:
@@ -283,6 +312,24 @@ def dynamic_backlog(done_times: list, t: float, lanes: int, depth: int, window_s
     recent = [x for x in done_times if t - x <= window_s]
     rate = len(recent) / (window_s / 60.0)
     return max(lanes * depth, int(round(rate * horizon_min)))
+
+
+LOCAL_ONLY_MARKS = ("本地生成", "占位", "暂缓")
+
+
+def local_only_shots(script) -> set:
+    """K-OPS-E22（项目方 11-02 点选导入第二季时的硬约束）：剧本 **H3校验** 写了“本地生成 / 占位 / 暂缓”的镜（亲密镜、露骨暂缓），
+    服务器一律不派单——派单层代码检查，不靠人记。→ 镜号集合"""
+    out = set()
+    for ep in getattr(script, "episodes", None) or []:
+        for sh in getattr(ep, "shots", None) or []:
+            if any(m in str(getattr(sh, "h3_check", "") or "") for m in LOCAL_ONLY_MARKS):
+                out.add(sh.id)
+    return out
+
+
+def is_server_lane(lane: str) -> bool:
+    return str(lane).split(":", 1)[0] in ("gpu33", "gpu36") or str(lane).isdigit()
 
 
 def asset_hold_objects(data: Path) -> set:
@@ -673,7 +720,7 @@ def refs_guard(paths: "Paths", sid: str, job: dict) -> list[str]:
         if str(ROOT / "tools" / "factory") not in sys.path:
             sys.path.insert(0, str(ROOT / "tools" / "factory"))
         import inbox as IB
-        probs = IB.check_refs(sid, list(job.get("refs") or []), root=ROOT)
+        probs = IB.check_refs(sid, list(job.get("refs") or []), root=ROOT, run=getattr(paths, "run_id", None))   # 多剧：按剧查
     except Exception as e:  # noqa: BLE001  校验器自身出错不挡生产，但留痕
         log_event(paths, "refs_unchecked", obj=f"first:{sid}", error=repr(e)[:200])
         return []
@@ -1091,6 +1138,13 @@ def _frame_obj(kind, stage, sid, n, td, fv, ledger, leases, canvas, fv2_owned, d
     fv_tries = len(fvs.get("attempts") or [])
     o["attempts"] = max(o["attempts"], fv_tries) if not led.get("tries") and not led.get("demoted_at") else o["attempts"]
     lease = leases.get(o["id"])
+    try:                                       # K-OPS-E23：项目方定稿锁（非 auto）的阶段一律算定稿，不自动重出
+        from ns_render import auto_current as AC  # （ep01-S1 尾帧锁在 v11：新版设不成当前 → 撤回 → 重出，10:30 起每 45 s 空转一轮）
+        lock_n = AC.owner_lock(td, stage)
+    except Exception:  # noqa: BLE001
+        lock_n = None
+    if lock_n is not None and not lease:
+        return {**o, "status": "passed", "reason": f"项目方定稿 v{lock_n}（定稿锁），不自动重出", "take": lock_n, "owner_locked": True}
     if t and pf.get("ok") and stale:
         return {**o, "status": "ready", "stale": True, "attempts": 0, "waiting_for": "空闲道",
                 "reason": f"v{t['n']} 过期（{stale if isinstance(stale, str) else '剧本 / 输入改了'}），自动重出，不算之前的次数"}
@@ -1683,6 +1737,31 @@ class Producer:
                     out["reset"] += 1
         return out
 
+    def obj_rate_exceeded(self, o: dict, cap: int = 8) -> bool:
+        """K-OPS-E21（总调度 08:0x P0：ep05-S3 出到第 82 版、S7 46 次，计次没拦住）：同一对象最近 1 小时派单 ≥ cap →
+        写 data/autopilot/runaway_hold.json（按镜暂停，reason_kind=runaway，6 小时到期）+ SENTINEL 工单，这一单不派"""
+        t = now()
+        hist = self.__dict__.setdefault("_obj_disp", {})
+        recent = [x for x in hist.get(o["id"], []) if t - x <= 3600]
+        hist[o["id"]] = recent
+        if len(recent) < cap:
+            return False
+        f = self.p.data / "autopilot" / "runaway_hold.json"
+        d = jl(f, {}) or {}
+        items = {it.get("shot"): it for it in d.get("shots") or []}
+        if o["shot"] not in items:
+            exp = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t + 6 * 3600))
+            items[o["shot"]] = {"shot": o["shot"], "objects": [f"first:{o['shot']}", f"last:{o['shot']}"], "expires_at": exp,
+                                "why": f"1 小时内派了 {len(recent)} 次（上限 {cap}）", "at": iso()}
+            d.update(active=True, reason_kind=d.get("reason_kind") or "runaway", shots=list(items.values()),
+                     rule="K-OPS-E21 单对象出图速率超限自动暂停；到期（expires_at）自动失效")
+            f.parent.mkdir(parents=True, exist_ok=True)
+            js(f, d)
+            sentinel_ticket(self.p, o["id"], f"单对象出图速率超限：1 小时 {len(recent)} 次（上限 {cap}），已自动按镜暂停",
+                            {"per_hour": len(recent), "cap": cap}, self.ledger().get(o["id"]) or {})
+            self.logf("runaway_hold", obj=o["id"], per_hour=len(recent), cap=cap, counted=False)
+        return True
+
     def escalate_exhausted(self, reg) -> dict:
         """K-OPS-E09 驳回阶梯（config/policies/retry.yaml redo_ladder，decider=code）：
           ① 还在资产暂缓清单（*_hold.json）→ 继续等；
@@ -1703,16 +1782,17 @@ class Producer:
                         out["held"] += 1
                         continue
                     led = self.ledger().get(oid) or {}
-                    changed = redo_inputs_changed(self.p, o["shot"], k, led)
+                    changed = redo_inputs_changed_v2(self.p, o["shot"], k, led)
+                    sig = job_sig(self.p, o["shot"])
                     if changed:
-                        self.led_update(oid, redo_tries=0, ladder_plan=[], redo_exhausted=None,
+                        self.led_update(oid, redo_tries=0, ladder_plan=[], redo_exhausted=None, ladder_sig=sig,
                                         redo_resets=(led.get("redo_resets") or []) + [{"at": iso(), "why": "输入已更新：" + changed}],
                                         reason="输入已更新（" + changed + "），驳回重出重新给，不计次")
                         self.logf("redo_reset", obj=oid, counted=False, why="输入已更新：" + changed)
                         out["reset"] += 1
                     elif not led.get("ladder_plan"):
                         plan = [plan_item(x) for x in lad["heavy_plan"]]
-                        self.led_update(oid, ladder_plan=plan, reason="驳回重出用完、输入没变 → 下一级：" + "、".join(lad["heavy_plan"]))
+                        self.led_update(oid, ladder_plan=plan, ladder_sig=sig, reason="驳回重出用完、输入没变 → 下一级：" + "、".join(lad["heavy_plan"]))
                         self.logf("redo_escalate", obj=oid, counted=False, plan=lad["heavy_plan"])
                         out["heavy"] += 1
                     else:
@@ -1818,7 +1898,20 @@ class Producer:
                         cands.append((E["ep"], 0 if k == "last" else 1, S["index"], o))
         cands.sort(key=lambda x: (0 if x[3].get("redo") else 1, *x[:3]))   # 总调度驳回 / 插队的先派
         held = asset_hold_objects(self.p.data)
+        rate_cap = int(os.environ.get("NS_PRODUCER_OBJ_PER_HOUR", "8"))
+        try:
+            local_only = local_only_shots(self.script())
+        except Exception:  # noqa: BLE001  读不到剧本 = 失败关闭：这一拍不派
+            self.logf("local_only_unknown", counted=False)
+            return
         for _ep, _k, _i, o in cands:
+            if o["shot"] in local_only and all(is_server_lane(ln) for ln in free):   # K-OPS-E22：本地生成镜，服务器不派
+                if o["id"] not in self.__dict__.setdefault("_local_only_logged", set()):
+                    self._local_only_logged.add(o["id"])
+                    self.logf("local_only_skip", obj=o["id"], counted=False, why="剧本 H3校验 标了本地生成 / 占位，服务器不派单")
+                continue
+            if self.obj_rate_exceeded(o, rate_cap):      # K-OPS-E21：同一对象 1 小时出图超过上限 → 自动按镜暂停 + 工单
+                continue
             if self._dispatch_only and o["shot"] not in self._dispatch_only:
                 continue
             if o["id"] in held:                  # IMGFIX r5：资产修复待点选的造型（data/autopilot/*_hold.json）暂缓派单
@@ -1860,6 +1953,7 @@ class Producer:
                 with self.mu:
                     self.lane_busy.setdefault(lane, []).append(o["id"])
                     self.inflight[o["id"]] = {"lane": lane, "since": now()}
+                    self.__dict__.setdefault("_obj_disp", {}).setdefault(o["id"], []).append(now())
                 self.logf("dispatch", obj=o["id"], lane=lane, attempt=k + 1, rung=rung["name"], preset=rung.get("preset"),
                           seed=rung["seed"], redo=True, counted=False, comfy_tag=tag)
                 self.pool.submit(self._run_one, o, lane, k + 1, rung, tag)
@@ -1879,6 +1973,7 @@ class Producer:
             with self.mu:
                 self.lane_busy.setdefault(lane, []).append(o["id"])
                 self.inflight[o["id"]] = {"lane": lane, "since": now()}
+                self.__dict__.setdefault("_obj_disp", {}).setdefault(o["id"], []).append(now())
             self.logf("dispatch", obj=o["id"], lane=lane, attempt=attempt, rung=rung["name"], variant=rung.get("variant"),
                       strategy=rung.get("strategy"),
                       seed=rung["seed"], comfy_tag=tag)
@@ -2335,6 +2430,15 @@ def import_staged(paths: Paths, path: str, sha: str, note: str, by: str = "PRODU
     pr = Producer.__new__(Producer)
     st, v = Producer._http(pr, "POST", "/api/script-inbox/validate", {"path": path})
     if run and not _runs().is_primary(run, paths.root):         # 第二季等非主剧：写 data/import/runs/<run>/script_v2.json，不碰主导入稿
+        if st == 404:                                           # 收件箱接口只认收件箱目录；非主剧稿直接跑同一个校验器（失败关闭）
+            import subprocess
+            r = subprocess.run([sys.executable, str(paths.root / "tools" / "validate_qwen_script.py"), str(paths.root / path), "--json"],
+                               capture_output=True, cwd=paths.root, timeout=900, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+            try:
+                d = json.loads(r.stdout.decode("utf-8"))
+                st, v = 200, {"ok": d.get("blocking", 1) == 0, "blocking": d.get("blocking")}
+            except ValueError:
+                st, v = 500, {"ok": False, "blocking": None}
         if st != 200 or not v.get("ok") or v.get("blocking"):
             log_event(paths, "import_blocked", path=path, step="validate", status=st, blocking=v.get("blocking"), by=by, run=run)
             print(json.dumps({"ok": False, "why": "validate", "status": st, "blocking": v.get("blocking"), "run": run}, ensure_ascii=False))
@@ -2857,7 +2961,8 @@ def main(argv=None) -> int:
     ap.add_argument("--skip-rubric-gate", action="store_true", help="import-staged：跳过 rubric 导入闸门（只有总调度能批，--by 须写总调度，记审计）")
     a = ap.parse_args(argv)
     run = (a.run or "").strip() or RUN_ID
-    os.environ.update(run_env(run))                 # K-OPS-E15：非主剧进程的渲染 / 导入稿目录（ns_render 在函数里才 import）
+    if a.cmd != "import-staged":                    # 导入时还没有该剧的导入稿，不能把 ns_render 指过去（rubric 闸门要读主剧结构）
+        os.environ.update(run_env(run))             # K-OPS-E15：非主剧进程的渲染 / 导入稿目录（ns_render 在函数里才 import）
     paths = Paths(run_id=run) if a.cmd != "import-staged" else Paths()
     if a.cmd == "serve":
         return serve(paths)

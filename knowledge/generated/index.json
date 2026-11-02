@@ -1,16 +1,16 @@
 {
- "kb_version": "kb-20261102-b1a82268",
- "n": 582,
+ "kb_version": "kb-20261102-b06604cd",
+ "n": 587,
  "by_domain": {
   "render": 86,
   "prompt": 27,
-  "writer": 86,
+  "writer": 88,
   "edit": 49,
   "review": 66,
   "loop": 9,
   "asset": 43,
-  "ops": 156,
-  "ui": 60
+  "ops": 158,
+  "ui": 61
  },
  "by_link": {
   "P0-P1": 20,
@@ -19,12 +19,12 @@
   "P11-P12": 27,
   "P11-RETRY": 47,
   "P2-P3": 3,
-  "P3-P4": 102,
-  "P4-P5": 39,
+  "P3-P4": 104,
+  "P4-P5": 40,
   "P4-P6": 28,
   "P4-P7": 23,
   "P4-P9": 16,
-  "P5-P6": 175,
+  "P5-P6": 178,
   "P6-P7": 31,
   "P7-P8": 108,
   "P8-P10": 18,
@@ -6200,6 +6200,28 @@
    "_file": "knowledge/rules/ops_sentinel.yaml"
   },
   {
+   "id": "K-OPS-S12",
+   "domain": "ops",
+   "link": [
+    "P4-P5",
+    "P5-P6"
+   ],
+   "title": "所有 run 的 ready 合计低于道数 × 2 且没有下一批（没有待导入的稿，或导入了没放单）即开单派总调度 / DEBUG-RSI——GPU 空不一定是运行期故障，可能是产能见底",
+   "when": "季与季之间、一批镜出完、导入新稿之后",
+   "then": "SENTINEL S19 每拍读两台服务器登记表 ready 数、autoflow.json 的 importable 集与 imports.jsonl；见底时总调度安排导入 / 放单，DEBUG-RSI 查导入后为什么没有 ready",
+   "check": "tests/test_sentinel.py::test_capacity_floor",
+   "evidence": [
+    {
+     "src": "docs/master/SLO.md",
+     "note": "11-02 11:01 gpu33 空了 30 分钟，S1（利用率）不报是对的——那是没有单，不是道坏了；缺的是产能见底探针"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_sentinel.yaml"
+  },
+  {
    "id": "K-OPS-S01",
    "domain": "ops",
    "link": [
@@ -6232,8 +6254,8 @@
    ],
    "title": "线 5（系统代码）RSI 分数只由代码算——tools/rsi/system_score.py 读 coverage.json、SENTINEL 探针、cut / 部署记录、arch_scan、规则索引，写 data/rsi/scores.jsonl（line=system）；来源缺失记 null，不当 0 也不当满分",
    "when": "SYSARCH 每轮巡检结束；任何 loop 声称“系统更能自己跑了”时",
-   "then": "跑 python tools/rsi/system_score.py；报分数轨迹和最低分项，最低分项就是下一轮的整改对象（RSI_PROGRAM 共同规则：分数不升不算完成）；结构健康只和首扫锚点同口径的 10 项比，后加的检查项不进锚点",
-   "check": "tests/test_rsi_system_score.py::test_parts_and_weights, tests/test_rsi_system_score.py::test_missing_source_is_null_not_zero, tests/test_rsi_system_score.py::test_first_attempt_failure_counts",
+   "then": "跑 python tools/rsi/system_score.py；报分数轨迹和最低分项，最低分项就是下一轮的整改对象（RSI_PROGRAM 共同规则：分数不升不算完成）；结构健康只和首扫锚点同口径的 10 项比，后加的检查项不进锚点；发版：每次 cut 尝试由 system_version.record_cut 追加到 data/rsi/cut_seen.jsonl，部署后需要热修 / 回滚的版本记进 data/rsi/release_incidents.jsonl，一律不算一次通过（总调度 11-02 09:1x）",
+   "check": "tests/test_rsi_system_score.py::test_hotfixed_version_is_not_first_pass, tests/test_rsi_system_score.py::test_system_version_record_cut_appends_ledger, tests/test_rsi_system_score.py::test_parts_and_weights, tests/test_rsi_system_score.py::test_missing_source_is_null_not_zero, tests/test_rsi_system_score.py::test_first_attempt_failure_counts",
    "evidence": [
     {
      "src": "docs/master/RSI_PROGRAM.md",
@@ -6242,6 +6264,27 @@
     {
      "src": "data/rsi/cut_seen.jsonl",
      "note": "sv-04 前三次 cut 失败（02:17 xdist、02:48 test_vqagate、02:53 棘轮）03:06 才过，只看 last_cut 会把一次通过率算成 100%"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_sysarch.yaml"
+  },
+  {
+   "id": "K-OPS-Y02",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "换远程调用入口（ssh → rssh 等）时，resident_restart.sh 设的服务器环境（OFFLINE_SELF / OFFLINE_ALIASES / PATH 里的 bin/ssh 包装）是接口契约，每个服务器侧调用点都要在这套环境下测：调本机和别名 = 本机执行，调另一台 = rc 255 不起进程",
+   "when": "改任何会在服务器上跑的远程调用（remote_score、night、imggen、deploy、resident 常驻）；改 rssh 的本机判定",
+   "then": "tests/test_rssh_server_contract.py 加上这个调用点（假 subprocess.run，不连服务器）；契约来源 resident_restart.sh 变了，先改这个测试再改代码；只在笔记本实测通过不算验证",
+   "check": "tests/test_rssh_server_contract.py::test_remote_score_ssh_under_server_env, tests/test_rssh_server_contract.py::test_restart_sh_still_sets_the_contract, tests/test_rssh_server_contract.py::test_other_converted_sites_alias_is_local, tests/test_factory.py::test_rssh_offline_aliases_are_local",
+   "evidence": [
+    {
+     "src": "tools/netfix/rssh.py",
+     "note": "11-02 sv-06：SYSARCH 4-1 把 remote_score 换成 rssh.run_retry，_local_self 没认 OFFLINE_ALIASES；gpu36 上 full_score(\"gpu33\") 被判跨机 rc=255 → 退回 CPU 打分无 torch → 36 单全 score_infra（FACTORY 发现，sv-07 热修）。SYSARCH 只在笔记本连 gpu36 实测，没测服务器环境"
     }
    ],
    "confidence": "high",
@@ -12873,6 +12916,27 @@
    "_file": "knowledge/rules/ui.yaml"
   },
   {
+   "id": "K-UI-052",
+   "check": "tests/test_r43_uirsi.py",
+   "domain": "ui",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "L-114 电影胶片 A（放映室片条）——开关后实现，亲审通过才默认开；取代 L-113 正片 B（B 隔离保留）",
+   "when": "全剧总览 / 单集每镜一行的视觉",
+   "then": "开关 v3/uiStyle.ts（?ui=film → html.ui-film；?ui=off 关）；总览 pages/FilmOverview.tsx：每集一条真实比例 35mm 片（片基黑、KS 齿孔 3 齿 / 帧、片边暖灰镜号、片头竖写 EPxx），一屏两列 × 五行 / 大图一列，悬停 420px 放大镜带“集 · 镜 · 景别 · 时长 · 实拍 / 计划镜头”（D-LENS），单击 = 详情抽屉、双击 = 进画布、Ctrl / Shift = 多选，状态只用片窗角小圆点（D-STATUS 口径）；单集（v3/film.css）：首帧 · 尾帧 · 视频装在同一段片上，右侧字段含镜头；正片 B 的 slide.css 留在 html.ui-slide 开关后，胶卷条在 src/_quarantine",
+   "evidence": [
+    {
+     "src": "docs/uirsi/rounds/r46.md",
+     "note": "项目方 AskUserQuestion 选“A 放映室片条”（FILMUI 稿 data/review_pages/filmui/a.html）；总调度：放在开关后面，亲审后去掉开关"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ui.yaml"
+  },
+  {
    "id": "K-REV-V01",
    "domain": "review",
    "link": [
@@ -14683,6 +14747,66 @@
     }
    ],
    "confidence": "high",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/writer_hollywood.yaml"
+  },
+  {
+   "id": "K-WRT-H15",
+   "check": [
+    "tests/test_staging.py"
+   ],
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "每个在画人物在 img 里写一个和场景物件的接触动作；不写正面直立对镜头",
+   "when": "首帧 img（项目方 11-02 亲标 20 张融合样本，IMGFIX 分析：“自然”的图都是单人、非特写、人物和场景物件有接触、身体侧向；“贴图”的多是正面居中站立的设定图姿势）",
+   "then": "tools/script_rsi/staging.py check_shot：人物行“在画”的每个人，img 里写了他名字的分句至少一句带接触动作（扶 / 坐 / 拿 / 靠 / 握 / 撑 / 搭 / 按 / 端 / 托 / 倚 …）；同一分句既写站立又写正面 / 面向镜头 = 不过。“局部”人物不判。进 autoflow.all_fails（补丁目标 stage#H15-<镜>，每条 2 镜）和 rubric_audit.gate（导入闸门）",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "镜头字段"
+    }
+   ],
+   "writer_text": "首帧里每个在画人物都要写一个“人名主语 + 接触动作 + 场景里的物件”的分句——扶着门框、坐在桌沿、手里拿着杯子、肩靠在墙上、手撑在吧台上；身体写侧向或四分之三侧。不要写人物正面直立、居中、对着镜头的设定图姿势。",
+   "evidence": [
+    {
+     "src": "data/rsi/staging_dist_s1.json",
+     "note": "第一季 80 镜达标 20（25%），无接触 58"
+    },
+    {
+     "src": "data/rsi/staging_dist_s2.json",
+     "note": "第二季 110 镜达标 67（60.9%），无接触 36"
+    }
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/writer_hollywood.yaml"
+  },
+  {
+   "id": "K-WRT-H16",
+   "check": [
+    "tests/test_staging.py"
+   ],
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "双人镜（≥2 人在画露脸）用中景以上，或把其中一人写成前景局部",
+   "when": "首帧 img 景别 + 人物行（同上融合样本：“贴图”多是双人、特写；K-REN-902 只管特写，这条扩到近景 / 中近景）",
+   "then": "staging.check_shot：人物行 ≥2 个“在画”且 img 开头景别是 大特写 / 特写 / 近景 / 中近景 = 不过；改中景 / 中全景 / 全景，或把其中一人改成“局部”（肩 / 背影 / 手，人物行写 <名>（局部｜<部位>｜<左/中/右>））",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "镜头字段"
+    }
+   ],
+   "writer_text": "两个人都要露脸的镜头用中景或更宽；要拍近景或特写时，只让一个人露脸，另一个人写成前景的肩、背影或手（人物行写“局部”）。",
+   "evidence": [
+    {
+     "src": "data/rsi/staging_dist_s2.json",
+     "note": "第二季双人紧景别 12 镜；第一季 11 镜"
+    }
+   ],
+   "confidence": "medium",
    "status": "待验",
    "date": "2026-11-02",
    "_file": "knowledge/rules/writer_hollywood.yaml"

@@ -189,6 +189,10 @@ function render(d){
         `<table style="width:100%;border-collapse:collapse;font-size:13px"><tr class="mute"><td>原因</td><td style="text-align:right">时长</td><td style="text-align:right">占等待</td><td>负责方</td>${Object.keys(g.cards).filter(k=>(g.cards[k].waiting_reasons||{})[R[0]]!==undefined&&!k.includes('4080')&&k!=='gpu36:2').map(k=>`<td style="text-align:right">${esc(k)}</td>`).join('')}</tr>`+
         R.map(r=>`<tr><td>${esc(w.zh[r])}</td><td style="text-align:right">${(w.seconds[r]/3600).toFixed(1)} h</td><td style="text-align:right">${w.pct_of_waiting[r]}%</td><td class="mute">${esc(w.owner[r])}</td>${Object.keys(g.cards).filter(k=>!k.includes('4080')&&k!=='gpu36:2').map(k=>`<td style="text-align:right" class="mute">${((g.cards[k].waiting_reasons||{})[r]/3600||0).toFixed(1)} h</td>`).join('')}</tr>`).join('')+
         `</table><div class="mute" style="font-size:12px">${esc(w.note||'')}</div></details>`;})():'')
+    +(g.pause_segments&&g.pause_segments.length?`<details style="margin-top:6px"><summary>暂停段（谁暂停的、为什么；按时长）</summary><table style="width:100%;border-collapse:collapse;font-size:13px"><tr class="mute"><td>暂停</td><td>派单方</td><td>来源</td><td style="text-align:right">时长</td><td>起止</td><td>备注</td></tr>`+
+      g.pause_segments.slice(0,12).map(p=>`<tr><td>${esc(p.label)}</td><td>${esc(p.by)}</td><td class="mute">${esc(p.src)}</td><td style="text-align:right">${p.hours.toFixed(1)} h</td><td class="mute">${esc(p.start.slice(5,16))} → ${esc(p.end.slice(5,16))}</td><td class="mute">${esc(p.note)}</td></tr>`).join('')+'</table></details>':'')
+    +(g.by_run?`<table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:6px"><tr class="mute"><td>按 run（季）出图量 · 24 小时</td><td style="text-align:right">出图次数</td><td style="text-align:right">收下</td><td style="text-align:right">GPU 执行</td><td style="text-align:right">出过图的镜</td></tr>`+
+      Object.entries(g.by_run).map(([r,v])=>`<tr><td>${esc(r)}</td><td style="text-align:right">${v.renders}</td><td style="text-align:right">${v.kept}</td><td style="text-align:right">${v.gpu_h} h</td><td style="text-align:right">${v.shots}</td></tr>`).join('')+'</table>':'')
     +`<div class="mute" style="font-size:12px">窗口 ${esc(g.window[0])} → ${esc(g.window[1])} · ${g.age_s} s 前刷新 · 线 5“自运行”取 真正在跑 ${g.for_rsi_line5.productive_pct}%${Object.keys(g.errors||{}).length?' · 取数问题：'+esc(Object.values(g.errors).join('；')):''}</div>`;
 
   // ---- RSI 分数（L-112）：轨迹是单序列小图，中性灰线；圆点：灰 = 未开始，橙 = 有 S14 工单，绿 = 正常
@@ -201,6 +205,7 @@ function render(d){
     `<table style="width:100%;border-collapse:collapse;font-size:13px"><tr class="mute"><td></td><td>线</td><td>牵头</td><td style="text-align:right">当前分</td><td style="text-align:right">目标</td><td>轨迹</td><td>最近一轮</td></tr>`+
     Object.entries(rs.lines).map(([id,l])=>{const tk=[...openKeys].some(k=>k.startsWith('S14:'+id+':'));const st=l.score==null?['#8b919c','未开始']:tk?['#d98a1c','有工单']:['#3fae6a','正常'];
       return `<tr><td style="color:${st[0]}" title="${st[1]}">●</td><td>${esc(l.name)}</td><td>${esc(l.lead)}</td><td style="text-align:right">${l.score??'—'}</td><td style="text-align:right">${l.target??'未定'}</td><td>${spark(l.track)}</td><td class="mute">${esc(l.at||'—')} ${esc(l.sv||'')} · ${l.n} 轮</td></tr>`}).join('')+'</table>'
+    +(d.gpu24&&d.gpu24.by_run?`<div class="mute" style="font-size:12px">两季出图量（24 小时，收下 / 出图次数）：${Object.entries(d.gpu24.by_run).map(([r,v])=>esc(r)+' '+v.kept+' / '+v.renders).join(' · ')}</div>`:'')
     +`<div class="mute" style="font-size:12px">${rs.stale_h??2} 小时没有新分数或连续 ${rs.flat_rounds??3} 轮不升 → SENTINEL S14 开工单派牵头人${rs.bad?' · 读不懂的行 '+rs.bad:''}</div>`;
 
   // ---- 全局图

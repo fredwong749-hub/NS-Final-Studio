@@ -446,16 +446,19 @@ def apply_lane_policy(st, ctrl):
     mode = "video_lane_only" if busy and ctrl.get("frames_exclusive") else "yield"
     ep01_open = mode == "video_lane_only" and (st["eps"].get("1") or {}).get("status") not in (
         "assembled", "assemble_failed", "hold_voices")
-    key = mode + ("+ep01@gpu33:3" if ep01_open else "")
+    key = mode + ("+ep01@gpu33:3" if ep01_open else "") + "|hold=" + ",".join(sorted(ctrl.get("hold_lanes", []) or []))   # K-OPS-E20：挂道变了要重算
     if st.get("lane_mode") == mode and st.get("lane_key") == key:
         return ctrl
     hosts = jl(VID / "hosts.json", {}) or {}
     for host in ("gpu33", "gpu36"):
         eps_on = sorted(int(e) for e, h in hosts.items() if h == host)
-        hold = IMAGE_LANES if mode == "video_lane_only" else ctrl.get("hold_lanes", [])
+        # DEBUG-RSI 11-02（K-OPS-E20，CONSENT VIDEO10 → DEBUG_RSI by 总调度）：video_lane_only 模式原来只挡出图道、不看
+        # control 的 hold_lanes → 挂道挡不住视频（gpu36:0 两次重启窗口被 VIDEO10 视频占住）。现在两者合并
+        ctl_hold = list(ctrl.get("hold_lanes", []) or [])
+        hold = sorted(set(IMAGE_LANES if mode == "video_lane_only" else []) | set(ctl_hold))
         per_lane, shared = ctrl["per_lane"], ctrl.get("shared_lanes", [])
         if ep01_open and host == hosts.get("1"):
-            hold = [x for x in IMAGE_LANES if x != "gpu33:3"]
+            hold = sorted(set(x for x in IMAGE_LANES if x != "gpu33:3") | set(ctl_hold))
             eps_on, per_lane, shared = [1], 1, [x for x in shared if x != "gpu33:3"]
         c = {"jobs": "jobs.json", "mode": "prod", "eps": eps_on, "per_lane": per_lane, "linger": True,
              "hold_lanes": hold, "shared_lanes": shared, "yield_s": ctrl["yield_s"]}

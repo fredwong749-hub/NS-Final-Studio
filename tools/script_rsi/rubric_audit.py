@@ -142,8 +142,13 @@ def gate(path: Path, eps: list[int] | None = None) -> dict:
         SH = _load("shootable", "tools/script_rsi/shootable.py")
         bad = [x for x in SH.shootable_rows(pre + ch, ep) if not x["ok"]]
         fails += [f"shootable#镜{x['shot']} {SH.why(x)[:160]}" for x in bad]
-        res["eps"][ep] = {"met": r["met"], "total": r["total"], "fails": fails, "unshootable": [x["shot"] for x in bad]}
-        res["ok"] &= not bad
+        # K-WRT-H15 / H16（总调度 11-02，项目方融合样本）：在画人物接触场景物件、不正面直立对镜头；双人不用紧景别
+        ST = _load("staging", "tools/script_rsi/staging.py")
+        st_bad = [x for x in ST.staging_rows(pre + ch, ep) if not x["ok"]]
+        fails += [f"staging#镜{x['shot']} {ST.why(x)[:160]}" for x in st_bad]
+        res["eps"][ep] = {"met": r["met"], "total": r["total"], "fails": fails, "unshootable": [x["shot"] for x in bad],
+                          "staging_bad": [x["shot"] for x in st_bad]}
+        res["ok"] &= not bad and not st_bad
         res["ok"] &= not r["fails"]
     return res
 

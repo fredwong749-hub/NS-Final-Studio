@@ -118,6 +118,26 @@ def season_endings(types: dict[int, str]) -> dict:
     return {"ok": not bad, "types": types, "repeats_at": bad}
 
 
+ENDING_TYPES = ["reveal+question", "question", "gaze_out", "reveal", "interrupted"]
+ENDING_HOW = {   # 写给写手的代码判定口径（与 ending_type 一致；只说怎么判，不替写手写内容）
+    "reveal+question": "最后一句台词 / 独白以问号结尾，且末镜最后两拍或 **下镜** 行里有揭示动作词（亮起 / 出现 / 露出 / 打开 / 认出 / 走进 等）",
+    "question": "最后一句台词 / 独白以问号结尾，末镜最后两拍和 **下镜** 行里不出现揭示动作词",
+    "gaze_out": "最后一句台词 / 独白不以问号结尾（或末镜没有台词）；末镜最后两拍或 **下镜** 行写视线外指（视线=画外 / 门 / 窗 / 远处 / 身后 / 反光，或“看向门 / 窗 / 画外”“抬眼看”“望向”），且不出现揭示动作词",
+    "reveal": "最后一句台词 / 独白不以问号结尾；末镜最后两拍或 **下镜** 行里有揭示动作词",
+    "interrupted": "最后一句不以问号结尾、没有揭示动作词，最后两拍写动作停在半途（停住 / 顿住 / 悬在半空 / 还没）",
+}
+
+
+def allowed_endings(types: dict[int, str], ep: int) -> list[str]:
+    """第 ep 集换成哪些结尾类型后，所有包含它的相邻 3 集窗口（判在 ep、ep+1、ep+2）都不重复（N05）；按 ENDING_TYPES 顺序给"""
+    out = []
+    for t in ENDING_TYPES:
+        rep = season_endings({**types, ep: t})["repeats_at"]
+        if not any(ep <= x <= ep + 2 for x in rep):
+            out.append(t)
+    return out
+
+
 def _episode_material(text: str, ep: int):
     sys.path[:0] = [str(ROOT / "packages" / "schema"), str(ROOT / "services" / "agent")]
     from ns_agent.importer.script_md import import_script

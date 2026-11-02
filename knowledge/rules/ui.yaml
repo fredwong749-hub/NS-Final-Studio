@@ -790,3 +790,15 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-UI-052
+    check: tests/test_r43_uirsi.py
+    domain: ui
+    link: [P5-P6]
+    title: L-114 电影胶片 A（放映室片条）——开关后实现，亲审通过才默认开；取代 L-113 正片 B（B 隔离保留）
+    when: 全剧总览 / 单集每镜一行的视觉
+    then: 开关 v3/uiStyle.ts（?ui=film → html.ui-film；?ui=off 关）；总览 pages/FilmOverview.tsx：每集一条真实比例 35mm 片（片基黑、KS 齿孔 3 齿 / 帧、片边暖灰镜号、片头竖写 EPxx），一屏两列 × 五行 / 大图一列，悬停 420px 放大镜带“集 · 镜 · 景别 · 时长 · 实拍 / 计划镜头”（D-LENS），单击 = 详情抽屉、双击 = 进画布、Ctrl / Shift = 多选，状态只用片窗角小圆点（D-STATUS 口径）；单集（v3/film.css）：首帧 · 尾帧 · 视频装在同一段片上，右侧字段含镜头；正片 B 的 slide.css 留在 html.ui-slide 开关后，胶卷条在 src/_quarantine
+    evidence:
+      - {src: docs/uirsi/rounds/r46.md, note: "项目方 AskUserQuestion 选“A 放映室片条”（FILMUI 稿 data/review_pages/filmui/a.html）；总调度：放在开关后面，亲审后去掉开关"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

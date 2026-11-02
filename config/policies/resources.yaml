@@ -24,8 +24,8 @@ items:
     owner: NETFIX / VQAGATE
     drift: {kind: json, file: config/netfix/override.json, path: [laptop_hold], view: sorted}
   vlm_instances:
-    value: 3
-    source: K-OPS-E05（config/vqa.json model.instances；VQAGATE 11-02 vLLM 专卡上线后 1→4；11-02 08:0x config/vqa.json 改为 3（服务器 3 个看图实例），DISTILL drift_check 发现后同步）
+    value: 2
+    source: K-OPS-E05（config/vqa.json model.instances；VQAGATE 11-02 vLLM 专卡上线后 1→4；11-02 08:0x 改为 3；11-02 11:0x 总调度定显存预算 0.9×显存 → 3×7400 MiB 超 82 MiB，0.5 MP A/B 达标前临时 2 个实例，达标恢复 3 时与 config/vqa.json 两处一起改）
     enforced_by: tools/autopilot/producer.py:vlm_instances()
     status: drift_checked
     owner: VQAGATE

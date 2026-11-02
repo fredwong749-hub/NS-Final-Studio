@@ -105,13 +105,28 @@ def score_episode(run_dir: Path, ep: int, lenses: set[str]) -> dict | None:
              "shot_block": round(WEIGHTS["shot_block"] * sum(sb_ok) / n, 2),
              "shootable": round(WEIGHTS["shootable"] * sum(sh_ok) / n, 2),
              "structure": round(WEIGHTS["structure"] * sum(struct) / len(struct), 2)}
-    NC = _load("narrative_code", "tools/script_rsi/narrative_code.py")       # 第 3 轮：叙事质量 N01–N07（先只记录，阈值定后再进分数）
+    NC = _load("narrative_code", "tools/script_rsi/narrative_code.py")       # 叙事质量 N01–N07：剧本分 = 代码判定 70% + 叙事 30%（N05 整季判，在 main 里合）
     nar = NC.episode_checks(shots, blocks)
     return {"episode": ep, "parts": parts, "code_met": met, "shots": len(shots), "seconds": total,
             "narrative": {k: {"ok": v["ok"], "value": v["value"], "detail": v["detail"][:160]} for k, v in nar.items()},
             "shot_block_bad": [s.index for s, ok in zip(shots, sb_ok) if not ok],
             "unshootable": [s.index for s, ok in zip(shots, sh_ok) if not ok], "validate_blocking": v.get("blocking"),
             "structure_fail": [k for k, ok in zip(["hook5s#1", "hook5s#4", "endhook#3", "endhook#5", "turns#1", "时长60–120"], struct) if not ok]}
+
+
+NARR_KEYS = ["N01", "N02", "N03", "N04", "N05", "N06", "N07"]
+SCRIPT_MIX = {"code": 0.7, "narrative": 0.3}     # 总调度 11-02：叙事 7 条计入总分（代码判定 70%、叙事 30%）
+
+
+def apply_narrative(eps: list[dict], n05_repeats: list[int]) -> None:
+    """把叙事 7 条合进每集剧本分：N05 按整季判（本集落在相邻 3 集重复里 = 不过），其余按本集"""
+    for e in eps:
+        ok = {k: bool(e["narrative"][k]["ok"]) for k in NARR_KEYS if k != "N05"}
+        ok["N05"] = e["episode"] not in n05_repeats
+        e["narrative_pass"] = sum(ok.values())
+        e["narrative_fail"] = [k for k in NARR_KEYS if not ok[k]]
+        e["parts"]["script"] = round(WEIGHTS["script"] * (SCRIPT_MIX["code"] * e["code_met"] / 27
+                                                          + SCRIPT_MIX["narrative"] * e["narrative_pass"] / len(NARR_KEYS)), 2)
 
 
 def _tmp_write(run_dir: Path, ep: int, text: str) -> str:
@@ -147,10 +162,6 @@ def main(argv=None) -> int:
     eps = [e for e in eps if e]
     auto, auto_eps = automation(run_dir)
     keys = ["script", "shot_block", "shootable", "structure"]
-    avg = {k: round(sum(e["parts"][k] for e in eps) / len(eps), 2) if eps else 0.0 for k in keys}
-    avg["automation"] = auto
-    score = round(sum(avg.values()), 2)
-    low = min(((k, avg[k] / WEIGHTS[k]) for k in WEIGHTS), key=lambda t: t[1])[0]
     try:
         import subprocess
         sv = subprocess.run(["git", "describe", "--tags", "--abbrev=0"], cwd=ROOT, capture_output=True, text=True, timeout=20).stdout.strip()
@@ -158,6 +169,11 @@ def main(argv=None) -> int:
         sv = f"unknown（{e!r}）"[:80]
     NC = _load("narrative_code", "tools/script_rsi/narrative_code.py")
     n05 = NC.season_endings({e["episode"]: e["narrative"]["N05"]["value"] for e in eps})
+    apply_narrative(eps, n05["repeats_at"])
+    avg = {k: round(sum(e["parts"][k] for e in eps) / len(eps), 2) if eps else 0.0 for k in keys}
+    avg["automation"] = auto
+    score = round(sum(avg.values()), 2)
+    low = min(((k, avg[k] / WEIGHTS[k]) for k in WEIGHTS), key=lambda t: t[1])[0]
     nar_keys = ["N01", "N02", "N03", "N04", "N06", "N07"]
     narrative = {k: f"{sum(1 for e in eps if e['narrative'][k]['ok'])}/{len(eps)}" for k in nar_keys}
     narrative["N05"] = "ok" if n05["ok"] else f"相邻 3 集结尾类型重复：第 {n05['repeats_at']} 集"
@@ -165,7 +181,8 @@ def main(argv=None) -> int:
     rec = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "line": "script", "score": score, "parts": avg, "weights": WEIGHTS,
            "narrative": rec_narr,
            "version": sv, "run": run_dir.name, "episodes": eps, "automation_eps": auto_eps, "lowest": low,
-           "note": "测试期剧本分只用代码判定（L-109，判断条目缓）"}
+           "note": ("剧本分 = 35 ×（0.7 × 代码判定 27 条通过率 + 0.3 × 叙事 7 条通过率）（总调度 11-02 定）；"
+                    "100 = 全部代码可判条目通过，不代表判断条目（人物弧、情感、台词好坏）已评，判断条目测试期缓（L-109）")}
     if a.ref:      # 参照锚点：同一套指标给参照打分，作为满分锚点（RSI_PROGRAM 共同规则）
         rec["ref"] = a.ref
         rec["score_no_automation"] = round(score - avg["automation"], 2)

@@ -339,12 +339,13 @@ def test_e09_escalate_routes(monkeypatch, tmp_path):
     reg = {"episodes": [{"shots": [{"shot": "ep01-S1", "objects": {"first": {"id": "first:ep01-S1", "shot": "ep01-S1", "escalate": True},
                                                                       "last": {"id": "last:ep01-S1"}}}]}]}
     monkeypatch.setattr(PR, "asset_hold_objects", lambda d: set())
-    monkeypatch.setattr(PR, "redo_inputs_changed", lambda *a: None)
+    monkeypatch.setattr(PR, "redo_inputs_changed_v2", lambda *a: None)
+    monkeypatch.setattr(PR, "job_sig", lambda paths, sid: "S1")
     assert pr.escalate_exhausted(reg)["heavy"] == 1                       # 输入没变 → 追加重档
     assert pr.ledger()["first:ep01-S1"]["ladder_plan"]
     assert pr.escalate_exhausted(reg)["best_effort"] == 1                 # 重档也用完 → 尽力 + 工单
     assert pr.ledger()["first:ep01-S1"]["final"] == "best_effort"
-    monkeypatch.setattr(PR, "redo_inputs_changed", lambda *a: "参考图更新了：x.png")
+    monkeypatch.setattr(PR, "redo_inputs_changed_v2", lambda *a: "作业输入变了")
     assert pr.escalate_exhausted(reg)["reset"] == 1                       # 输入变了 → 重置不计次
     assert pr.ledger()["first:ep01-S1"]["redo_tries"] == 0
 
@@ -554,3 +555,59 @@ def test_e19_global_pause_over_30min_opens_ticket(tmp_path):
     PR.pause_tick(p, t=time.time() + 2000, alerts=tmp_path / "a.jsonl")
     lines = (tmp_path / "data/sentinel/tickets.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1 and json.loads(lines[0])["obj"] == "global_pause"
+
+
+# ---- K-OPS-E20：night 的挂道（control hold_lanes）在任何模式下都生效，且挂道变化会触发重算 ----
+def test_e20_night_hold_lanes_respected():
+    src = (ROOT / "tools/series10_video/night.py").read_text(encoding="utf-8")
+    body = src.split("def apply_lane_policy(", 1)[1].split(chr(10) + "def ", 1)[0]
+    assert '"|hold=" + ",".join(sorted(ctrl.get("hold_lanes", []) or []))' in body        # 挂道进缓存 key
+    assert 'set(IMAGE_LANES if mode == "video_lane_only" else []) | set(ctl_hold)' in body  # 两种模式都合并控制文件挂道
+
+
+# ---- K-OPS-E09 修订 + E21：重置只看作业签名变化（不比出图后的提示词）；单对象 1 小时超 8 次自动暂停 ----
+def test_e09_reset_only_when_job_sig_changes(monkeypatch, tmp_path):
+    PR = _producer()
+    p = PR.Paths(root=tmp_path)
+    monkeypatch.setattr(PR, "job_sig", lambda paths, sid: "S1")
+    assert PR.redo_inputs_changed_v2(p, "ep05-S3", "first", {"ladder_sig": "S1"}) is None     # 签名没变 → 不重置
+    assert PR.redo_inputs_changed_v2(p, "ep05-S3", "first", {"ladder_sig": "S0"}) == "作业输入变了"
+    monkeypatch.setattr(PR, "redo_inputs_changed", lambda *a: "提示词变了")
+    assert PR.redo_inputs_changed_v2(p, "ep05-S3", "first", {}) is None                       # 第一次也不信“提示词变了”
+
+
+def test_e21_obj_rate_guard(tmp_path):
+    PR = _producer()
+    import threading
+    pr = object.__new__(PR.Producer)
+    pr.p = PR.Paths(root=tmp_path); pr.p.pd.mkdir(parents=True, exist_ok=True)
+    pr.mu = threading.RLock(); pr.logf = lambda ev, **kw: None
+    o = {"id": "first:ep05-S3", "shot": "ep05-S3"}
+    pr._obj_disp = {o["id"]: [time.time() - i * 60 for i in range(8)]}
+    assert pr.obj_rate_exceeded(o, 8) is True
+    assert "first:ep05-S3" in PR.asset_hold_objects(pr.p.data)
+    assert json.loads((tmp_path / "data/sentinel/tickets.jsonl").read_text(encoding="utf-8").splitlines()[0])["obj"] == "first:ep05-S3"
+    pr._obj_disp = {o["id"]: [time.time() - 4000]}
+    assert pr.obj_rate_exceeded({"id": "first:ep01-S1", "shot": "ep01-S1"}, 8) is False
+
+
+# ---- K-OPS-E22：剧本 H3校验 标“本地生成 / 占位”的镜，服务器一律不派 ----
+def test_e22_local_only_shots():
+    PR = _producer()
+    from types import SimpleNamespace as NS
+    sc = NS(episodes=[NS(shots=[NS(id="ep07-S10", h3_check="本地生成（亲密镜占位）"), NS(id="ep07-S9", h3_check=None),
+                                NS(id="ep08-S4", h3_check="暂缓（露骨内容）")])])
+    assert PR.local_only_shots(sc) == {"ep07-S10", "ep08-S4"}
+    assert PR.is_server_lane("gpu33:1") and PR.is_server_lane("gpu36:0") and not PR.is_server_lane("laptop:0")
+    src = (ROOT / "tools/autopilot/producer.py").read_text(encoding="utf-8")
+    body = src.split("def dispatch_frames(", 1)[1].split(chr(10) + "    def ", 1)[0]
+    assert "local_only_shots(self.script())" in body and "local_only_skip" in body
+
+
+# ---- K-OPS-E23：项目方定稿锁的阶段不自动重出（防“撤回 → 重出 → 设不成当前”空转） ----
+def test_e23_owner_lock_counts_as_final():
+    PR = _producer()
+    td = {"active": {"last": 11}, "locked": {"last": 11}, "locked_by": {"last": {"by": "owner", "n": 11}},
+          "takes": [{"stage": "last", "n": 11, "postflight": {"ok": False}}]}
+    o = PR._frame_obj("last", "last", "ep01-S1", 1, td, {}, {}, {}, {}, False, deps_ok=True, first={"status": "passed"})
+    assert o["status"] == "passed" and o.get("owner_locked")

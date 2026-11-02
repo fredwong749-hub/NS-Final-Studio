@@ -807,3 +807,23 @@ def test_vram_budget_static_blocks_overcommit():
     assert V.static_check({"model": {"instances": 4, "vram_budget": b}})
     b["gpu36:2"]["residents"].append({"name": "clip", "count": 1, "peak_mib": 2500})
     assert V.static_check({"model": {"instances": 3, "vram_budget": b}})     # 11-02 13:17 的 OOM 组合
+
+
+def test_autosign_history_skips_quarantined_and_logs_false_reject(monkeypatch, tmp_path):
+    """总调度 11-02：机签历史样本只取现行剧本（图已隔离的旧剧本不比）；判过但机器拦了的记误拦样本"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ns_vqa_autosign2", ROOT / "tools/vqa/autosign.py")
+    A = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(A)
+    d = tmp_path / "data/renders/ep01/S1"
+    d.mkdir(parents=True)
+    (d / "a.png").write_bytes(b"x")
+    rj = {"by": "总调度", "reason": "下装错"}
+    tk = [{"stage": "image", "file": "renders/ep01/S1/a.png", "postflight": {"ok": False}, "master_reject": rj},
+          {"stage": "image", "file": "renders/ep01/S1/gone.png", "postflight": {"ok": True}, "master_reject": rj}]
+    (d / "takes.json").write_text(json.dumps({"takes": tk}), encoding="utf-8")
+    h = A.history_pairs(tmp_path)
+    assert len(h) == 1 and h[0]["file"].endswith("a.png")              # 已隔离的那张（漏放）不计
+    monkeypatch.setattr(A, "FALSE_REJECT", tmp_path / "fr.jsonl")
+    A.false_reject("renders/x.png", "总调度判过")
+    assert A._rows(tmp_path / "fr.jsonl")[0]["human"] == "pass"

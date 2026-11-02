@@ -53,3 +53,15 @@ def test_k_wrt_h13_shootable_single_source():
     spec.loader.exec_module(SH)
     w = SH.why({"lost": ["阿岚"], "misowned": [], "clash": "特写脸占六成 + 两张脸都清晰入画"})
     assert "K-REN-901" in w and "K-REN-902" in w
+
+
+def test_script_part_mixes_code_70_narrative_30(L3):
+    """总调度 11-02：剧本分 = 35 ×（0.7 × 代码 27 条通过率 + 0.3 × 叙事 7 条通过率）；N05 按整季重复判"""
+    nar = {k: {"ok": True} for k in L3.NARR_KEYS}
+    eps = [{"episode": 1, "code_met": 27, "narrative": dict(nar), "parts": {}},
+           {"episode": 2, "code_met": 27, "narrative": {**nar, "N06": {"ok": False}}, "parts": {}},
+           {"episode": 3, "code_met": 18, "narrative": dict(nar), "parts": {}}]
+    L3.apply_narrative(eps, [3])
+    assert eps[0]["parts"]["script"] == 35.0 and eps[0]["narrative_fail"] == []
+    assert eps[1]["parts"]["script"] == round(35 * (0.7 + 0.3 * 6 / 7), 2) and eps[1]["narrative_fail"] == ["N06"]
+    assert eps[2]["parts"]["script"] == round(35 * (0.7 * 18 / 27 + 0.3 * 6 / 7), 2) and eps[2]["narrative_fail"] == ["N05"]

@@ -6,7 +6,8 @@
   无 Claude   30  data/autopilot/coverage.json  deciders_now.claude（上线配置下 claude 判断点数）       分项 = max(0, 1 − n / CLAUDE_CAP)
   自运行      20  data/sentinel/state.json probes：Σviolated / Σn（探针自己报错的不算样本）→ SLO 达标率；
                   GPU = data/rsi/gpu_24h.json productive_pct / 80（SENTINEL 每小时刷新；缺时退回 S1 探针） 分项 = 两者平均
-  发版        15  data/system_versions/last_cut.json 每轮记一次到 data/rsi/cut_seen.jsonl → 每个 sv 首次尝试是否通过；
+  发版        15  data/rsi/cut_seen.jsonl（system_version.record_cut 每次 cut 都追加；打分时也补记 last_cut）→ 每个 sv 首次尝试是否通过，
+                  data/rsi/release_incidents.jsonl 里记了热修 / 回滚的 sv 一律算不通过；
                   index.json / deploy_*.json → 服务器版本落后几版                                 分项 = 0.5 × 一次通过率 + 0.5 × [落后 ≤ 1]
   结构健康    20  data/sysarch/scan_latest.json 生产代码 10 项总数之和，对比首扫锚点 STRUCT_ANCHOR    分项 = max(0, 1 − 现值 / 锚点)；另报“比上一轮降没降”
   规则覆盖    15  knowledge/generated/index.json：今天（date = 当天）新增的规则里带 check 的比例    分项 = 有 check / 全部
@@ -89,7 +90,26 @@ def s_release(root: Path, out: Path, write: bool) -> tuple[float, dict]:
                 fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
     first: dict[str, bool] = {}
     for s in sorted(seen, key=lambda x: str(x.get("at"))):
-        first.setdefault(s["id"], s["ok"])
+        if s.get("id"):
+            first.setdefault(s["id"], bool(s.get("ok")))
+    # 部署后需要热修 / 回滚的版本不算一次通过（总调度 11-02 09:1x；账本 data/rsi/release_incidents.jsonl，FACTORY 热修 / 回滚时追加）
+    inc_p = out / "release_incidents.jsonl"
+    incidents = set()
+    if inc_p.exists():
+        for ln in inc_p.read_text(encoding="utf-8").splitlines():
+            try:
+                incidents.add(json.loads(ln)["sv"])
+            except (ValueError, KeyError, TypeError):
+                continue   # arch-ok: 坏行跳过，其余事件照算
+    # 账本开始之后 cut 成功的版本（index.json 有）但账本漏记的 → 补一条“首次通过”（账本 09:1x 才改成 cut 时写入，之前靠采样会漏）；
+    # 账本开始之前的版本不算（不知道它们失败过几次）
+    t0 = min((str(s.get("at")) for s in seen if s.get("at")), default=None)
+    if t0:
+        for v in (_jl(root / "data/system_versions/index.json").get("versions") or []):
+            if _sv_key(v.get("id")) and str(v.get("at", "")) >= t0[:19]:
+                first.setdefault(v["id"], True)
+    for sv in incidents & first.keys():
+        first[sv] = False
     fp = sum(first.values()) / len(first) if first else None
     tags = sorted({v["id"] for v in (_jl(root / "data/system_versions/index.json").get("versions") or []) if _sv_key(v.get("id"))},
                   key=_sv_key)
@@ -106,7 +126,8 @@ def s_release(root: Path, out: Path, write: bool) -> tuple[float, dict]:
     lag = (len(tags) - 1 - tags.index(latest_dep)) if latest_dep in tags else None
     lag_ok = lag is not None and lag <= 1
     val = (0.5 * fp if fp is not None else 0.0) + (0.5 if lag_ok else 0.0)
-    return val, {"first_pass_rate": None if fp is None else round(fp, 3), "svs_seen": len(first), "latest_tag": tags[-1] if tags else None,
+    return val, {"first_pass_rate": None if fp is None else round(fp, 3), "svs_seen": len(first),
+                 "hotfixed_or_rolled_back": sorted(incidents), "latest_tag": tags[-1] if tags else None,
                  "latest_deployed_all_hosts": latest_dep, "server_lag": lag}
 
 

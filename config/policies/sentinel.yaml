@@ -131,6 +131,7 @@ items:
     owner: SENTINEL
   GPU24_alloc:
     value: {every_s: 3600, step_s: 10, out: data/rsi/gpu_24h.json, owner_loop: DEBUG-RSI, top_n: 2,
+            pause_labels: [{by_match: 总调度, start: "2026-11-01T19:41:26", label: 总调度全局暂停（为 IMGFIX）}],
             void_words: [身份脸用错, 覆盖配置缺失, 作废, 回滚, 孤儿, 重复, 全量重做]}
     source: 项目方 11-02 04:0x（总调度派 SENTINEL）：每张生产 GPU 最近 24 小时“真正在跑 / 空跑 / 等待任务”三项合计 24 h，拿不到的单列无数据；接进 RSI 线 5“自运行”
     note: 口径见 docs/master/SLO.md“GPU 24 小时”；void_words 与 tools/sentinel/gpu_hours.py VOID_WORDS 一致（回滚作废的 take 算空跑）
@@ -180,5 +181,12 @@ items:
     source: 总调度 11-02 04:2x / 08:0x：control.json 变更历史（hold / pause / 恢复，带 reason_kind、expires_at），GPU 24 小时“原因不明”要靠它消掉；只写一处
     note: 唯一写入方 = SENTINEL（每拍比对笔记本 + 两台服务器 control.json 和 partition.json _temp_holds，有变化追加一行），各 loop 不另写历史；reason_kind / expires_at 由写 control.json 的一方写进 control.json 本身
     enforced_by: tools/sentinel/probes.py:p_ctrl_history
+    status: code_reads
+    owner: SENTINEL
+  S19_capacity_floor:
+    value: {ready_per_lane: 2, lanes: 5, host_lanes: {gpu33: 3, gpu36: 2}, recent_import_s: 7200, every_s: 60, owner_loop: 总调度 / DEBUG-RSI}
+    source: 总调度 11-02 11:1x：所有 run 的 ready 合计 < 道数 × 2，且没有下一批（没有待导入的稿，或导入了没放单）→ 开单派总调度和 DEBUG-RSI（11:01 gpu33 空 30 分钟，S1 不报是对的，缺的是这个探针）
+    note: ready = 两台服务器 producer 登记表 ready 数之和（所有 run 的对象都在同一登记表，非主 run 带 <run>/ 前缀）；待导入的稿 = data/pipeline/runs/<run>/autoflow.json 里 verdict=importable 且 imports.jsonl 还没有的集
+    enforced_by: tools/sentinel/probes.py:p_s19
     status: code_reads
     owner: SENTINEL

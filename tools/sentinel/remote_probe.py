@@ -59,16 +59,20 @@ for f in FILES:
         sha[f] = None
 out["sha"] = sha
 reg = jl("data/producer/registry.json")
-cnt, waits = {}, {}
+cnt, waits, ready_by_run = {}, {}, {}
 for E in (reg or {}).get("episodes") or []:
     for S in E.get("shots") or []:
         for o in (S.get("objects") or {}).values():
             st = o.get("status")
             cnt[st] = cnt.get(st, 0) + 1
+            if st == "ready":
+                rid = str(o.get("id") or "")
+                rk = rid.split("/", 1)[0] if "/" in rid else ""
+                ready_by_run[rk] = ready_by_run.get(rk, 0) + 1
             w = str(o.get("waiting_for") or "")
             if st != "passed" and any(x in w for x in HUMAN):
                 waits[o.get("id")] = w[:40]
-out["registry"] = {"counts": cnt, "waits": waits, "updated": (reg or {}).get("updated")} if reg else None
+out["registry"] = {"counts": cnt, "waits": waits, "ready_by_run": ready_by_run, "updated": (reg or {}).get("updated")} if reg else None
 ev = []
 try:
     p = os.path.join(R, "data/producer/log.jsonl")

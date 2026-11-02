@@ -286,7 +286,15 @@ def all_fails(pre: str, chunk: str, ep: int, wd: Path) -> list[tuple[str, dict]]
     SH = _load("shootable", "tools/script_rsi/shootable.py")      # K-WRT-H13：编译后孤儿描述 / 特写双人露脸
     shoot = [("shoot", {"id": x["shot"], "shots": [x["shot"]], "why": f"镜{x['shot']}：{SH.why(x)}"})
              for x in SH.shootable_rows(pre + chunk, ep) if not x["ok"]]
-    return out + shoot + code_fails(pre, chunk, ep, wd)
+    ST = _load("staging", "tools/script_rsi/staging.py")           # K-WRT-H15 / H16：在画人物接触场景物件、双人不用紧景别
+    bad = [x for x in ST.staging_rows(pre + chunk, ep) if not x["ok"]]
+    stage = [("stage", {"id": f"H15-{bad[i]['shot']}", "shots": [x["shot"] for x in bad[i:i + STAGE_GROUP]],
+                        "why": "；".join(f"镜{x['shot']}：{ST.why(x)}" for x in bad[i:i + STAGE_GROUP])})
+             for i in range(0, len(bad), STAGE_GROUP)]
+    return out + shoot + stage + code_fails(pre, chunk, ep, wd)
+
+
+STAGE_GROUP = 2      # 摆位补丁每条目标最多带 2 镜（一个补丁包 2 条目标 = 4 镜，改动行数在补丁上限内）
 
 
 def patch_user(ep, pre, chunk, facts, targets, note="") -> str:
@@ -702,7 +710,18 @@ def main(argv=None) -> int:
     t.add_argument("--run-dir", required=True)
     s = sub.add_parser("status")
     s.add_argument("--run-dir", required=True)
+    n = sub.add_parser("narrative-patch", help="N05 叙事补丁包：相邻 3 集结尾类型重复的集，请写手改结尾类型（剧情事实不变）")
+    n.add_argument("--run-dir", required=True)
+    n.add_argument("--episode", type=int, required=True)
+    n.add_argument("--want", default="", help="只收这些结尾类型（逗号分隔，如 gaze_out）；不给 = 按整季现状算允许集合")
+    n.add_argument("--why", default="")
     a = ap.parse_args(argv)
+    if a.cmd == "narrative-patch":
+        AG = _load("autoflow_agent", "tools/script_rsi/autoflow_agent.py")
+        rd = Path(a.run_dir) if Path(a.run_dir).is_absolute() else ROOT / a.run_dir
+        out = AG.narrative_patch(rd, a.episode, [x.strip() for x in a.want.split(",") if x.strip()] or None, a.why)
+        print(json.dumps(out, ensure_ascii=False))
+        return 0 if out.get("ok") else 1
     if a.cmd == "run":
         if a.budget is None:
             import policy as POL

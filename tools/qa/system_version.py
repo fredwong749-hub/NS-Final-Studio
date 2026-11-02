@@ -755,7 +755,7 @@ def drift_files(sv: str, code_dirs: list[str]) -> list[str]:
 
 
 def deploy_host(rs, h: str, snap: Path, names: list[str], tracked_code: list[str], sv: str, commit: str,
-                restart: bool = True, pc=None, rq=None, urgent: bool = False) -> dict:
+                restart: bool = True, pc=None, rq=None, urgent: bool = False, expected: bytes | None = None) -> dict:
     """一台机器的部署（FACTORY D9 / K-OPS-F06，总调度 01:3x 批准）：
     ① 代码只发该版本的 git 快照（export_tag 解出的目录）：推送前检查也对快照做（P1–P4），工作树里 tag 之外的新文件 / 改动根本不参与，
        不会再因“cut 之后又新建了代码文件”判“没推到”而整台失败（11-02 01:23 gpu36 sv-02 事故）；
@@ -783,6 +783,10 @@ def deploy_host(rs, h: str, snap: Path, names: list[str], tracked_code: list[str
         rs.ssh(h, f"cd {rs.R} && mkdir -p data && cat > data/system_version.txt && cat data/system_version.txt",
                data=(stamp + "\n").encode(), tries=3)
         r["version_file"] = "data/system_version.txt"
+        if expected:     # K-OPS-F03 修订：期望 refs 表按本版（cut 冻结快照）建，部署时一起推，重启后的 refs_guard 对的就是这一版
+            rel = "data/factory/inbox/expected_refs.json"
+            rs.ssh(h, f"cd {rs.R} && mkdir -p data/factory/inbox && cat > {rel}.tmp && mv {rel}.tmp {rel} && sha256sum {rel}", data=expected, tries=3)
+            r["expected_refs"] = "pushed"
         # 服务器运行依赖（config/deploy/server_deps.yaml：venv 能 import 的包 / 版本、模型文件 sha）——缺了不排重启（总调度 04:0x）
         sd = rs.ssh(h, f"cd {rs.R} && {rs.OFF}/venv/bin/python tools/factory/server_deps.py; echo rc=$?", tries=3).decode("utf-8", "replace")
         r["server_deps"] = sd.strip()[-400:]
@@ -815,6 +819,13 @@ def record_cut(out: dict, dry: bool) -> None:
     LAST_CUT.write_text(json.dumps({"ok": bool(out.get("ok")), "id": out.get("id"), "at": time.time(),
                                     "at_iso": time.strftime("%Y-%m-%dT%H:%M:%S"), "reason": str(out.get("reason") or "")[:300]},
                                    ensure_ascii=False, indent=1), encoding="utf-8")
+    # 线 5 发版分项的账本（SYSARCH，总调度 11-02 09:1x 定）：每次 cut 尝试都追加一行，打分器按“每个 sv 第一次尝试是否通过”算
+    ledger = ROOT / "data/rsi/cut_seen.jsonl"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    with ledger.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"id": out.get("id"), "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "ok": bool(out.get("ok")),
+                             "src": "system_version.record_cut", "reason": str(out.get("reason") or "")[:160]},
+                            ensure_ascii=False) + "\n")
 
 
 def deploy_guard(sv: str | None, allow_old: bool = False, last_cut: dict | None = None, tags: list[str] | None = None,
@@ -836,6 +847,27 @@ def deploy_guard(sv: str | None, allow_old: bool = False, last_cut: dict | None 
     return None
 
 
+def build_expected(sv: str) -> tuple[bytes | None, dict]:
+    """期望 refs 表：优先用 cut 冻结快照（D:/nsfs_cut_snapshots/<sv>，代码 = 本版 tag）建，含全部有导入稿的剧（第二季等）；
+    快照不在 → 退回本仓库工作树建并注明。建不出来 → 不推（服务器沿用旧表；decisions_guard 仍要求表存在）"""
+    import importlib.util
+    snap = SNAP_BASE / sv
+    root = snap if (snap / "tools/factory/inbox.py").exists() else ROOT
+    try:
+        spec = importlib.util.spec_from_file_location("ns_inbox_sv", root / "tools/factory/inbox.py")
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        out = DATA / f"expected_refs_{sv}.json"
+        t = m.build(root=root, out_path=out)
+        b = out.read_bytes()
+        (ROOT / "data/factory/inbox").mkdir(parents=True, exist_ok=True)
+        (ROOT / "data/factory/inbox/expected_refs.json").write_bytes(b)
+        return b, {"built_from": "cut 快照" if root == snap else "工作树（快照不在）", "counts": t.get("counts"),
+                   "blocked": len(t.get("laptop_blocked") or {})}
+    except Exception as e:  # noqa: BLE001
+        return None, {"error": f"{type(e).__name__}: {e}"[:300]}
+
+
 def deploy(sv: str | None = None, hosts: list[str] | None = None, restart: bool = True, allow_old: bool = False,
            urgent: bool = False) -> dict:
     why = deploy_guard(sv, allow_old)
@@ -852,8 +884,10 @@ def deploy(sv: str | None = None, hosts: list[str] | None = None, restart: bool 
     with tempfile.TemporaryDirectory(prefix="nsfs_sv_") as td:
         names = export_tag(sv, rs.CODE_DIRS, Path(td))
         pc = load_push_check()
+        expected, res["expected_refs"] = build_expected(sv)
         for h in hosts:
-            res["hosts"][h] = deploy_host(rs, h, Path(td), names, tracked_code, sv, commit, restart=restart, pc=pc, urgent=urgent)
+            res["hosts"][h] = deploy_host(rs, h, Path(td), names, tracked_code, sv, commit, restart=restart, pc=pc, urgent=urgent,
+                                          expected=expected)
     idx = write_index()
     for v in idx["versions"]:
         if v["id"] == sv:

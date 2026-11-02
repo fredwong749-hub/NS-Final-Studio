@@ -122,3 +122,15 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-S12
+    domain: ops
+    link: [P4-P5, P5-P6]
+    title: 所有 run 的 ready 合计低于道数 × 2 且没有下一批（没有待导入的稿，或导入了没放单）即开单派总调度 / DEBUG-RSI——GPU 空不一定是运行期故障，可能是产能见底
+    when: 季与季之间、一批镜出完、导入新稿之后
+    then: SENTINEL S19 每拍读两台服务器登记表 ready 数、autoflow.json 的 importable 集与 imports.jsonl；见底时总调度安排导入 / 放单，DEBUG-RSI 查导入后为什么没有 ready
+    check: tests/test_sentinel.py::test_capacity_floor
+    evidence:
+      - {src: docs/master/SLO.md, note: "11-02 11:01 gpu33 空了 30 分钟，S1（利用率）不报是对的——那是没有单，不是道坏了；缺的是产能见底探针"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

@@ -117,7 +117,7 @@ def push_expected(host: str, rebuild: bool = True) -> str:
     """K-OPS-F03：期望 refs 表（data/factory/inbox/expected_refs.json）随 push 推到服务器，原子替换"""
     import inbox as IB
     if rebuild:
-        IB.build(["gpu33", "gpu36", "laptop"])
+        IB.build()
     b = IB.EXPECTED.read_bytes()
     rel = IB.EXPECTED.relative_to(ROOT).as_posix()
     return rrun(host, f"mkdir -p {PROD}/$(dirname {rel}) && cat > {PROD}/{rel}.tmp && mv {PROD}/{rel}.tmp {PROD}/{rel} && sha256sum {PROD}/{rel}",

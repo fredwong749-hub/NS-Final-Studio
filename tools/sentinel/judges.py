@@ -21,7 +21,7 @@ SLO_TITLE = {
     "S14": "RSI 线分数（2 小时无新分 / 连续不升）",
     "GPU24": "GPU 24 小时等待任务原因",
     "S15": "编排器 tick 存活", "S16": "笔记本常驻进程清单",
-    "S17": "单镜出图速率", "S18": "临时挂道到期",
+    "S17": "单镜出图速率", "S18": "临时挂道到期", "S19": "产能见底（ready 不够、没有下一批）",
 }
 
 
@@ -371,11 +371,13 @@ def j_wait_top(res: dict, top_n: int = 2) -> list[dict]:
     “原因不明”超过等待任务的 20% 另开一张派 SENTINEL（探针缺口：缺证据源）"""
     wr = res.get("waiting_reasons") or {}
     sec, zh, own, pct = wr.get("seconds") or {}, wr.get("zh") or {}, wr.get("owner") or {}, wr.get("pct_of_waiting") or {}
-    ranked = [r for r in sorted(sec, key=lambda r: -sec[r]) if r != "unknown" and sec[r] > 0]
+    ranked = [r for r in sorted(sec, key=lambda r: -sec[r]) if r not in ("unknown", "pause_master") and sec[r] > 0]
     top = set(ranked[:top_n])
     out = []
     for r, s in sec.items():
-        if r == "unknown":
+        if r == "pause_master":
+            bad = False                                  # 总调度自己下的暂停：照实展示、记在总调度账上，不开单
+        elif r == "unknown":
             bad = (pct.get(r) or 0) > 20
         else:
             bad = r in top
@@ -444,6 +446,40 @@ def j_temp_holds(holds: dict | None, now: float, cfg: dict) -> list[dict]:
               by=h.get("by"), why=h.get("why"), age_s=round(age))
         f["owner_loop"] = h.get("by") or cfg.get("owner_loop")
         out.append(f)
+    return out
+
+
+# ------------------------------------------------------------------ S19 产能见底（总调度 11:1x）
+def j_capacity(ready: dict[str, int], pending_drafts: list[str], recent_imports: list[str], cfg: dict,
+               not_producing: dict[str, dict] | None = None) -> list[dict]:
+    """ready = 每台“可派”的 ready（只算 run.status=producing 的 run）；not_producing = {台: {run: ready}} 已导入但 run 还不是 producing、派不出去的，
+    单独写进证据、不算可派（总调度 11:2x：第二季在 sv-08 部署、series10_s2 变 producing 之前派不出去）。
+    合计 < 道数 × ready_per_lane 且没有待导入的稿 → 违约；每台也判（本机道数 × ready_per_lane），单里写清哪台见底、另一台还剩多少"""
+    if not ready:
+        return []
+    np_ = not_producing or {}
+    np_total = sum(sum(v.values()) for v in np_.values())
+    total = sum(ready.values())
+    floor = int(cfg["lanes"]) * int(cfg["ready_per_lane"])
+    cause = "导入了没放单（最近导入：" + "、".join(recent_imports[:6]) + "）" if recent_imports else "没有新稿可导入"
+    np_txt = f"；另有 {np_total} 个 ready 属于还不是 producing 的 run（派不出去）" if np_total else ""
+    f = F("S19", "capacity", total < floor and not pending_drafts,
+          f"产能见底：可派 ready 合计 {total} < 道数 × {cfg['ready_per_lane']} = {floor}，{cause}{np_txt}",
+          ready=ready, total=total, floor=floor, not_producing=np_, pending_drafts=pending_drafts[:10], recent_imports=recent_imports[:10])
+    f["owner_loop"] = cfg.get("owner_loop")
+    out = [f]
+    for h, n in ready.items():                       # 每台也看：分区不均时一台见底、另一台有单（11:01 gpu33 空 30 分钟）
+        lanes = int((cfg.get("host_lanes") or {}).get(h, 0))
+        if not lanes:
+            continue
+        others = "、".join(f"{o} 还剩 {m}" for o, m in ready.items() if o != h) or "没有别的机器"
+        hnp = sum((np_.get(h) or {}).values())
+        hf = F("S19", f"capacity:{h}", n < lanes * int(cfg["ready_per_lane"]) and not pending_drafts,
+               f"{h} 见底：可派 ready {n} < 本机道数 {lanes} × {cfg['ready_per_lane']}；{others}"
+               + (f"；{h} 另有 {hnp} 个 ready 属于非 producing 的 run（派不出去）" if hnp else "") + "——可改分区（config/netfix/partition.json）",
+               host=h, ready=n, lanes=lanes, others={o: m for o, m in ready.items() if o != h}, not_producing=np_.get(h) or {}, total=total)
+        hf["owner_loop"] = cfg.get("owner_loop")
+        out.append(hf)
     return out
 
 

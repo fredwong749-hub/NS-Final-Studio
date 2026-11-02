@@ -124,7 +124,7 @@ owners:
   SCRIPTWRITER: ["data/pipeline/runs/*/writer_out/**"]   # 总调度 04:4x
   VIDLAB:    ["tools/vidlab/**", "docs/research/vidlab/**", "data/review_pages/vidlab/**", "tools/acting/**"]   # 总调度 05:0x，SYSARCH 代录   # 总调度 fredw-2b 11-02 04:3x 批 SYSARCH 无主文件分配表（CONSENT 总调度）
   SENTINEL:  ["tools/sentinel/**", "data/sentinel/**", "config/policies/sentinel.yaml", "docs/master/SLO.md", "tools/monitor/**"]   # 总调度 fredw-2b 11-02 03:0x（L-103）   # 总调度 fredw-2b 11-02 04:3x 批 SYSARCH 无主文件分配表（CONSENT 总调度）
-  SYSARCH:   ["docs/master/ARCH_MAP.md", "docs/master/ARCH_ROADMAP.md", "tools/qa/arch_scan.py", "tests/test_arch_scan.py", "knowledge/rules/ops_sysarch.yaml", "data/sysarch/**", "tools/rsi/system_score.py", "tests/test_rsi_system_score.py", "tools/*.py", "tools/ab/**", "tools/prompt_v2/**", "tools/lab_ep02/**", "tools/ep02_iter/**", "tools/ep02_director/**", "tools/knowledge/**", "tools/qa/**"]   # 总调度 fredw-2b 11-02 03:0x：全系统代码总架构师；跨 owner 整合须先告知负责方   # 总调度 fredw-2b 11-02 04:3x 批 SYSARCH 无主文件分配表（CONSENT 总调度）
+  SYSARCH:   ["docs/master/ARCH_MAP.md", "docs/master/ARCH_ROADMAP.md", "tools/qa/arch_scan.py", "tests/test_arch_scan.py", "knowledge/rules/ops_sysarch.yaml", "data/sysarch/**", "tools/rsi/system_score.py", "tests/test_rsi_system_score.py", "tests/test_rssh_server_contract.py", "tools/*.py", "tools/ab/**", "tools/prompt_v2/**", "tools/lab_ep02/**", "tools/ep02_iter/**", "tools/ep02_director/**", "tools/knowledge/**", "tools/qa/**"]   # 总调度 fredw-2b 11-02 03:0x：全系统代码总架构师；跨 owner 整合须先告知负责方   # 总调度 fredw-2b 11-02 04:3x 批 SYSARCH 无主文件分配表（CONSENT 总调度）
 
 # 优先于 owners 的归属（总调度 11-01：ds/zoom.css、ZoomLayer.tsx 和全部 CSS 归 UIPIXEL，包括资产 / 编辑目录下的 .css）
 override:

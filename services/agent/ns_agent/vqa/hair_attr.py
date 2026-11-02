@@ -119,7 +119,7 @@ def judge(cid: str, f: dict, card: dict) -> list[str]:
     return bad
 
 
-VLM_Q = ("看【待检】图里正中这个人，只按画面回答，输出 JSON："
+VLM_Q = ("看【待检】图里红框框住的那张脸是谁的、这个人的样子（红框外的其他人不算），只按画面回答，输出 JSON："
          '{"gender": "男|女|看不清", "hair_color": "黑|棕|蓝|灰银|金|其它|看不清", "hair_length": "短|及肩|长|看不清", '
          '"nails": "长美甲|普通|看不见", "e": "一句依据"}')
 
@@ -133,7 +133,13 @@ def vlm_ask(image, box) -> dict | None:
     im = Image.open(image).convert("RGB")
     fp = VROOT / "data" / "vqa" / "crops" / f"{Path(str(image)).stem}_q1a_{int(box[0])}_{int(box[1])}.jpg"
     fp.parent.mkdir(parents=True, exist_ok=True)
-    im.crop(crop_box(im.width, im.height, box)).save(fp, quality=92)
+    # 红框标出要问的那张脸（11-02 正常样本 057：裁图里旁边林晚占了正中，“正中这个人”有歧义，陈宇被答成蓝发女性）
+    from PIL import ImageDraw
+    cx1, cy1, cx2, cy2 = crop_box(im.width, im.height, box)
+    c = im.crop((cx1, cy1, cx2, cy2))
+    x1, y1, x2, y2 = box
+    ImageDraw.Draw(c).rectangle([x1 - cx1, y1 - cy1, x2 - cx1, y2 - cy1], outline=(255, 0, 0), width=max(3, int((x2 - x1) / 40)))
+    c.save(fp, quality=92)
     res = client.generate({"system": "你是画面质检员，只看图、只报事实，只输出 JSON。", "text": VLM_Q,
                            "images": [{"path": str(fp), "label": "【待检】", "max_pixels": 250000}]}, wait_s=600)
     if "error" in res:

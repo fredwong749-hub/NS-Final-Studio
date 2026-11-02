@@ -23,6 +23,8 @@ import { useLiveEvent } from "../live";
 import { MainTag, TagCounts, TagLegend } from "../StatusTags";
 import { breatheDelay } from "../status";
 import { SeasonDrawer } from "./SeasonPeek";
+import { FilmOverview } from "./FilmOverview";
+import { filmOn } from "../uiStyle";
 import { dotOf, statusWord, DOT_TITLE, type MainStatus } from "./seasonDot";
 import { Pop } from "../widgets";
 import { countKinds, hasKind, tagsTitle, type ShotStatusTags, type TagKind } from "../StatusTags.helpers";
@@ -252,7 +254,35 @@ export default function SeasonPage() {
         <span>● 在画 ◐ 局部 ○ 画外{people && leads.length ? `（每格最下一行依次是：${leads.join(" · ")}）` : ""}</span>
         <span className="sea-sw">换装</span>
       </div>
-      <div className="sea-grid">
+      {/* r46 · L-114：电影胶片 A（开关 html.ui-film）——每集一条片；单击 = 详情抽屉、双击 = 进画布、Ctrl / Shift = 多选、悬停放大 */}
+      {filmOn() && (
+        <FilmOverview
+          eps={d.filter((e) => !blockF || e.blocks?.state === blockF).map((e) => ({
+            number: e.number,
+            title: e.title,
+            // r46 亲审：一个圆点 + 一行短字（如“3 镜要重出”），详细原因放悬停
+            state: (() => {
+              const need = e.shots.filter((x) => dotOf(x.status as MainStatus) === "need").length;
+              const redo = e.shots.filter((x) => (x.status as MainStatus | undefined)?.main5 === "doing" || (x.status as MainStatus | undefined)?.main5 === "stale").length;
+              return need ? `${need} 镜要你看` : redo ? `${redo} 镜要重出` : e.blocks?.state === "done" ? "已确认" : `首帧 ${e.shots.filter((x) => byId.get(x.id)?.first_frame && !x.first_old).length}/${e.shots.length}`;
+            })(),
+            stateTip: `${e.blocks?.text ?? ""}
+首帧 ${e.shots.filter((x) => byId.get(x.id)?.first_frame && !x.first_old).length}/${e.shots.length}`,
+            stateDot: e.shots.some((x) => dotOf(x.status as MainStatus) === "need") ? "need" : e.blocks?.state === "done" ? "ok" : null,
+            shots: e.shots.filter((x) => !tagF || (tagF.ep != null && tagF.ep !== e.number) || hasKind(x.status, tagF.k)).map((x) => ({
+              id: x.id,
+              index: x.index,
+              img: (x.first_old ? null : byId.get(x.id)?.first_frame) ?? x.cand_url,
+              cap: `EP${String(e.number).padStart(2, "0")} · S${String(x.index).padStart(2, "0")} · ${x.size ?? "景别未标"} · ${x.seconds ?? "?"}s · ${x.lens ?? ""}`,
+              dot: dotOf(x.status as MainStatus),
+            })),
+          }))}
+          onOpen={(id) => setPeek(id)}
+          onCanvas={(id) => goCanvas(id)}
+          onMulti={(id, ev) => st.select(id, { shift: ev.shiftKey, ctrl: ev.ctrlKey || ev.metaKey })}
+        />
+      )}
+      <div className="sea-grid" hidden={filmOn()} style={filmOn() ? { display: "none" } : undefined}>
         {d.map((e, ei) => {
           const prev = ei > 0 ? d[ei - 1] : null;
           const first = e.shots[0];

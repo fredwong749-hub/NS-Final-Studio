@@ -108,7 +108,35 @@ def main(argv):
                                    input=f.read_bytes(), timeout=600)
                 if r.returncode:
                     raise RuntimeError(f"上传控制视频失败 {f.name} rc={r.returncode}")
-        LAB.export(e["name"], jobs, [], lane)
+        if "--runner" in argv and argv[argv.index("--runner") + 1] == "ab":
+            # 借道专用执行器：已部署的 tools/director/ab_runner.py（只往 borrowed_lanes 里的道交单，client 前缀 vidlab-），
+            # 配置随实验放服务器 <exp>/ab_runner.json；借道起止由 DEBUG-RSI 登记，本工具只在拿到确认后用
+            port = lane or 8189
+            lanes = VIO.read_json(ROOT / "config" / "vidlab" / "lanes.json")["hosts"][LAB.HOST]
+            gi = lanes["ports"][str(port)]
+            cfg = {"lane": f"{LAB.HOST}:{gi}", "port": port, "out": lanes["comfy_output"].format(gpu=gi),
+                   "client_prefix": "vidlab-", "dedicated": True, "borrowed_lanes": [f"{LAB.HOST}:{gi}"],
+                   "borrowed_by": "DEBUG-RSI 窗口（总调度批）", "exp": e["name"]}
+            dsrv = f"{LAB.SRV}/{e['name']}"
+            r = rssh.run_retry(LAB.HOST, f"mkdir -p {dsrv} && cat > {dsrv}/ab_runner.json",
+                               input=json.dumps(cfg, ensure_ascii=False).encode(), timeout=120)
+            if r.returncode:
+                raise RuntimeError(f"上传 ab_runner 配置失败 rc={r.returncode}")
+            import yaml
+            pol = yaml.safe_load((ROOT / "config" / "policies" / "sentinel.yaml").read_text(encoding="utf-8"))
+            repo = pol["items"]["S6_config_parity"]["value"]["server_root"]   # 服务器仓库根目录（策略文件唯一来源）
+            orig = LAB.ssh
+
+            def ssh_ab(c, timeout=1800):
+                if "setsid nohup" in c and "srv_run.py" in c:
+                    c = (f"cd {repo} || exit 1; setsid nohup {LAB.SRV_PY} tools/director/ab_runner.py --config {dsrv}/ab_runner.json "
+                         f"{dsrv} > {dsrv}/nohup.out 2>&1 < /dev/null & echo $! > {dsrv}/run.pid; cat {dsrv}/run.pid")
+                return orig(c, timeout=timeout)
+            LAB.ssh = ssh_ab
+            LAB.export(e["name"], jobs, [], None)   # lane=None → 走 LANES_ENV 分支（命令整条被 ssh_ab 换掉）
+            LAB.ssh = orig
+        else:
+            LAB.export(e["name"], jobs, [], lane)
     elif cmd == "pull":
         LAB.pull(e["name"])
         dst = ROOT / "data" / "rsi" / "vidlab" / "ab_clips" / e["name"]

@@ -8,6 +8,7 @@
                            manifest = [{"sid": "ep01-S1", "stage": "image", "n": 3}, ...]（审片页上的候选）。mode=auto 且每条都
                            契约 postflight.ok + Q9 pass（Q1a 有就要 pass）+ 回归集全过 → 写 <review_dir>/master_review_auto.md（by=POLICY）；
                            否则不写、列出原因（回到总调度亲签）。签了的按 testphase_spot_check_ratio 抽进 data/vqa/autosign_spot.jsonl
+  false-reject <file> [说明]  总调度判过、机器拦了 → data/vqa/autosign_false_reject.jsonl（误拦面样本）
   spot <id> pass|fail      总调度抽检结论 → autosign_spot_check：不一致 → mode=manual（退回人工）+ data/vqa/alerts.jsonl 报警
 """
 from __future__ import annotations
@@ -24,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[2]
 STATE = ROOT / "data" / "vqa" / "autosign_state.json"
 SPOT = ROOT / "data" / "vqa" / "autosign_spot.jsonl"
 SIGNED = ROOT / "data" / "vqa" / "autosign_signed.jsonl"
+FALSE_REJECT = ROOT / "data" / "vqa" / "autosign_false_reject.jsonl"   # 总调度判过、机器拦了（误拦面样本，测试期积累）
 ALERTS = ROOT / "data" / "vqa" / "alerts.jsonl"
 PROCESS_WORDS = ("全量重做", "剧本", "重出", "旧 img", "隔离")
 
@@ -63,6 +65,10 @@ def history_pairs(root: Path = ROOT) -> list[dict]:
             continue
         for t in d.get("takes") or []:
             if t.get("stage") != "image" or (t.get("postflight") or {}).get("ok") is None:
+                continue
+            if not (root / "data" / str(t.get("file") or "")).exists():
+                # 总调度 11-02 08:3x：只取现行剧本的样本——旧剧本的图已隔离（data/_quarantine_20261102_oldscript），
+                # 现行契约按新剧本的镜头要求判，拿它去比旧图不成立
                 continue
             mr, rj = t.get("master_review") or {}, t.get("master_reject")
             if rj:
@@ -183,12 +189,22 @@ def spot(sid: str, verdict: str) -> dict:
     return res
 
 
+def false_reject(file: str, note: str = "") -> dict:
+    """总调度抽检 / 亲审时判过、但机器（契约 / 看图）拦了的图：记误拦样本（不影响机签开关，用来调闸门、补回归集）"""
+    row = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "file": file, "auto": "fail", "human": "pass", "note": note[:200]}
+    _append(FALSE_REJECT, row)
+    return row
+
+
 def main(argv: list[str]) -> int:
     if argv and argv[0] == "check":
         print(json.dumps(check(), ensure_ascii=False, indent=1))
         return 0
     if len(argv) == 3 and argv[0] == "sign":
         return sign(argv[1], argv[2])
+    if len(argv) >= 2 and argv[0] == "false-reject":
+        print(json.dumps(false_reject(argv[1], " ".join(argv[2:])), ensure_ascii=False))
+        return 0
     if len(argv) == 3 and argv[0] == "spot" and argv[2] in ("pass", "fail"):
         print(json.dumps(spot(argv[1], argv[2]), ensure_ascii=False))
         return 0

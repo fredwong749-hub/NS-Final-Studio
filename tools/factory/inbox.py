@@ -55,15 +55,22 @@ def load_expected(path: Path | None = None) -> dict | None:
         return None
 
 
-def check_refs(sid: str, refs: list, expected: dict | None = None, root: Path | None = None) -> list[str] | None:
-    """→ None = 无期望值（不拦）；[] = 一致；[问题…] = 不一致（拒派）"""
+def check_refs(sid: str, refs: list, expected: dict | None = None, root: Path | None = None,
+               run: str | None = None) -> list[str] | None:
+    """→ None = 无期望值（不拦）；[] = 一致；[问题…] = 不一致（拒派）。run = 非主剧时查 expected["runs"][run]
+    （多剧并行：第二季镜号与第一季重名，必须按 run 分开，K-OPS-F03 / 总调度 09:2x）"""
     root = root or ROOT
     exp = expected if expected is not None else load_expected()
     if not exp:
         return None
-    want = (exp.get("shots") or {}).get(sid)
+    table = exp.get("shots") or {}
+    if run and run != exp.get("primary", run):
+        table = (exp.get("runs") or {}).get(run)
+        if table is None:
+            return [f"期望 refs 表里没有剧 {run}（先在笔记本 inbox.py build + sync push）"]
+    want = table.get(sid)
     if want is None:        # K-OPS-F09：有期望表但这镜不在表里 = 目标状态没覆盖到 → 拒派（⤴ 取代“不在表里不拦”）
-        return [f"期望 refs 表里没有 {sid}（先在笔记本 inbox.py build + sync push）"]
+        return [f"期望 refs 表里没有 {run + ':' if run else ''}{sid}（先在笔记本 inbox.py build + sync push）"]
     got = [_rel(str(r), root) for r in refs or []]
     probs = []
     wl = [w["rel"] for w in want]
@@ -79,25 +86,65 @@ def check_refs(sid: str, refs: list, expected: dict | None = None, root: Path | 
     return probs
 
 
-def build(hosts: list[str]) -> dict:
-    """笔记本：对各工厂负责的集跑 deps dryrun，写期望 refs（路径 + sha）"""
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    import deps
-    shots = {}
-    blocked = {}
-    for h in hosts:
-        res = deps.dryrun(deps.partition_eps(h))
+def _runs(root: Path) -> tuple[str, list[str]]:
+    """(主剧, 有导入稿的全部剧)——按 config/pipeline/runs.json（tools/autopilot/runs.py）"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ns_runs_ib", root / "tools/autopilot/runs.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    prim = m.primary_run(root)
+    allr = [r for r in m.list_runs(root, status=None) if m.import_path(r, root).exists()]
+    return prim, ([prim] + [r for r in allr if r != prim]) if prim else allr
+
+
+def _dryrun_run(root: Path, run: str, primary: str, py: str) -> dict:
+    """每部剧单独起一个进程跑 deps dryrun（非主剧要在 import ns_render 之前设 NS_SCRIPT_JSON / NS_RENDERS_DIR）"""
+    import subprocess
+    import tempfile
+    env = dict(os.environ, NS_ROOT=str(root), PYTHONIOENCODING="utf-8", PYTHONUTF8="1",
+               PYTHONPATH=os.pathsep.join(str(root / x) for x in ("packages/schema", "services/agent", "services/api",
+                                                                    "services/render_router", "services/recipes")))
+    if run != primary:
+        env.update(NS_RENDERS_DIR=str(root / "data" / "renders" / run),
+                   NS_SCRIPT_JSON=str(root / "data" / "import" / "runs" / run / "script_v2.json"))
+    fd, out = tempfile.mkstemp(suffix=".json", prefix=f"expref_{run}_")
+    os.close(fd)
+    try:
+        r = subprocess.run([py, str(root / "tools/factory/deps.py"), "dryrun", "--host", "all", "--all-eps", "--out", out],
+                           cwd=root, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=3600)
+        try:
+            return json.loads(Path(out).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            raise RuntimeError(f"{run} dryrun 没出结果：{(r.stderr or r.stdout)[-400:]}")
+    finally:
+        Path(out).unlink(missing_ok=True)
+
+
+def build(hosts: list[str] | None = None, root: Path | None = None, out_path: Path | None = None) -> dict:
+    """期望 refs 表（路径 + sha），按剧分开：shots = 主剧，runs[<剧>] = 其它有导入稿的剧（第二季 series10_s2 等）。
+    root = 用哪棵树建：deploy 时传 cut 冻结快照（代码 = 已部署的 tag，数据 = cut 时刻），平时缺省本仓库（K-OPS-F03 修订）"""
+    root = Path(root or ROOT)
+    py = sys.executable
+    prim, runs = _runs(root)
+    tables, blocked, counts = {}, {}, {}
+    for run in runs:
+        res = _dryrun_run(root, run, prim, py)
+        t = {}
         for sid, v in res["shots"].items():
             if not v.get("ok"):
-                blocked[sid] = v.get("reasons")
+                blocked[f"{run}:{sid}"] = v.get("reasons")
                 continue
-            shots[sid] = [{"rel": _rel(r, ROOT), "sha": _sha(ROOT / _rel(r, ROOT))} for r in v.get("refs") or []]
-    out = {"at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "by": "FACTORY tools/factory/inbox.py build（K-OPS-F03）", "hosts": hosts,
-           "shots": shots, "laptop_blocked": blocked}
-    EXPECTED.parent.mkdir(parents=True, exist_ok=True)
-    tmp = EXPECTED.with_suffix(".tmp")
+            t[sid] = [{"rel": _rel(r, root), "sha": _sha(root / _rel(r, root))} for r in v.get("refs") or []]
+        tables[run] = t
+        counts[run] = len(t)
+    out = {"at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "by": "FACTORY tools/factory/inbox.py build（K-OPS-F03）",
+           "built_from": str(root), "primary": prim, "shots": tables.get(prim, {}),
+           "runs": {r: t for r, t in tables.items() if r != prim}, "counts": counts, "laptop_blocked": blocked}
+    dest = out_path or (ROOT / "data/factory/inbox/expected_refs.json")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(".tmp")
     tmp.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
-    os.replace(tmp, EXPECTED)
+    os.replace(tmp, dest)
     return out
 
 
@@ -108,5 +155,5 @@ if __name__ == "__main__":
     ap.add_argument("cmd", choices=["build"])
     ap.add_argument("--hosts", default="gpu33,gpu36,laptop")
     a = ap.parse_args()
-    o = build([h for h in a.hosts.split(",") if h])
-    print(json.dumps({"shots": len(o["shots"]), "laptop_blocked": len(o["laptop_blocked"]), "file": str(EXPECTED)}, ensure_ascii=False))
+    o = build()
+    print(json.dumps({"counts": o["counts"], "laptop_blocked": len(o["laptop_blocked"]), "file": str(EXPECTED)}, ensure_ascii=False))

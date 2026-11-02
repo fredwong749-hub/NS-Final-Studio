@@ -147,9 +147,15 @@ def gpu_board(now: float) -> str:
             continue
         d = "—（没有昨天的数）" if not prev or k not in prev else f"{(s - prev[k]) / 3600:+.1f} h"
         trs.append(f"<tr><td>{e(k)}</td><td class='n'>{s / 3600:.1f} h</td><td>{e(own)}</td><td class='n'>{e(d)}</td></tr>")
+    segs = "".join(f"<tr><td>{e(p['label'])}</td><td>{e(p['by'])}</td><td class='n'>{p['hours']:.1f} h</td><td class='m'>{e(p['start'][5:16])} → {e(p['end'][5:16])}</td>"
+                   f"<td class='m'>{e(p['note'])}</td></tr>" for p in (g.get("pause_segments") or [])[:12])
+    runs_ = "".join(f"<tr><td>{e(r)}</td><td class='n'>{v['renders']}</td><td class='n'>{v['kept']}</td><td class='n'>{v['gpu_h']} h</td><td class='n'>{v['shots']}</td></tr>"
+                    for r, v in (g.get("by_run") or {}).items())
+    extra = ((f"<h2>暂停段（谁暂停的、为什么）</h2><table><tr><th>暂停</th><th>派单方</th><th class='n'>时长</th><th>起止</th><th>备注</th></tr>{segs}</table>" if segs else "")
+             + (f"<h2>按 run（季）出图量 · 24 小时</h2><table><tr><th>run</th><th class='n'>出图次数</th><th class='n'>收下</th><th class='n'>GPU 执行</th><th class='n'>出过图的镜</th></tr>{runs_}</table>" if runs_ else ""))
     return (f"<h2>GPU 漏洞榜（生产 5 卡，{e(g['window'][0])} → {e(g['window'][1])}）</h2>"
             f"<table><tr><th>漏洞</th><th class='n'>时长</th><th>负责方</th><th class='n'>比昨天</th></tr>{''.join(trs)}</table>"
-            f"<div class='m'>真正在跑 {g['totals']['pct']['productive']}% · 口径 docs/master/SLO.md“GPU 24 小时”</div>")
+            f"<div class='m'>真正在跑 {g['totals']['pct']['productive']}% · 口径 docs/master/SLO.md“GPU 24 小时”</div>" + extra)
 
 
 def _open_keys() -> set:

@@ -712,12 +712,62 @@ def p_ctrl_history(ctx: Ctx) -> list[dict]:
     return []
 
 
+# ================================================================== S19 产能见底（总调度 11:1x）
+def drafts_and_imports(now: float, recent_s: float) -> tuple[list[str], list[str]]:
+    """→ (待导入的稿 ["run:epNN"], 最近 recent_s 内导入过的 ["run:epNN"])"""
+    from tools.autopilot import runs as RUNS
+    prim = RUNS.primary_run()
+    imported, recent = set(), []
+    p = ROOT / "data/autopilot/imports.jsonl"
+    if p.exists():
+        for ln in p.read_text(encoding="utf-8").splitlines():
+            try:
+                d = json.loads(ln)
+            except ValueError:  # arch-ok: 半行跳过
+                continue
+            run = d.get("run_id") or prim
+            for ep in d.get("episodes") or []:
+                k = f"{run}:ep{int(ep):02d}"
+                imported.add(k)
+                if now - (J.ts(d.get("at")) or 0) <= recent_s:
+                    recent.append(k)
+    pending = []
+    for r in dict.fromkeys([prim, *RUNS.list_runs(status=None)]):
+        af = jl(RUNS.run_dir(r) / "autoflow.json") if (RUNS.run_dir(r) / "autoflow.json").exists() else None
+        for ep, v in ((af or {}).get("episodes") or {}).items():
+            k = f"{r}:ep{int(ep):02d}"
+            if isinstance(v, dict) and v.get("verdict") == "importable" and k not in imported:
+                pending.append(k)
+    return pending, recent
+
+
+def p_s19(ctx: Ctx) -> list[dict]:
+    from tools.autopilot import runs as RUNS
+    c = ctx.c("S19_capacity_floor")
+    prim, producing = RUNS.primary_run(), set(RUNS.list_runs(status="producing"))
+    ready, notp = {}, {}
+    for h in HOSTS:
+        r = ctx.remote(h)
+        if not (r and r.get("registry")):
+            continue
+        by = r["registry"].get("ready_by_run")
+        if by is None:                         # 旧格式（没按 run 拆）：全算可派
+            ready[h] = int((r["registry"].get("counts") or {}).get("ready", 0))
+            continue
+        ready[h] = sum(n for k, n in by.items() if (k or prim) in producing)
+        notp[h] = {k: n for k, n in by.items() if (k or prim) not in producing}
+    if len(ready) < len(HOSTS):                # 少一台没取到 = 本拍不判（不能把取不到当 ready=0）
+        return []
+    pending, recent = drafts_and_imports(ctx.now, c["recent_import_s"])
+    return J.j_capacity(ready, pending, recent, c, notp)
+
+
 PROBES = {"S1": p_s1, "S2": p_s2, "S3": p_s3, "S4": p_s4, "S5": p_s5, "S6": p_s6, "S7": p_s7, "S8": p_s8, "S9": p_s9,
-          "S10": p_s10, "S11": p_s11, "S12": p_s12, "S13": p_s13, "S14": p_s14, "GPU24": p_gpu24, "S15": p_s15, "S16": p_s16, "S17": p_s17, "S18": p_s18,
+          "S10": p_s10, "S11": p_s11, "S12": p_s12, "S13": p_s13, "S14": p_s14, "GPU24": p_gpu24, "S15": p_s15, "S16": p_s16, "S17": p_s17, "S18": p_s18, "S19": p_s19,
           "CTRL": p_ctrl_history}
 CFG_OF = {"S1": "S1_lane_util_min", "S2": "S2_gpu_all_idle_s", "S3": "S3_score_p50_s", "S4": "S4_recover_s", "S5": "S5_release",
           "S6": "S6_config_parity", "S7": "S7_pause_max_s", "S8": "S8_vlm_sample", "S9": "S9_ui_rules", "S10": "S10_rules_green",
           "S11": "S11_stage_stuck_s", "S12": "S12_script_ruler", "S13": "S13_human_wait",
           "S14": "S14_rsi_lines", "GPU24": "GPU24_alloc",
-          "S15": "S15_flow_tick", "S16": "S16_laptop_procs", "S17": "S17_shot_render_rate", "S18": "S18_temp_holds",
+          "S15": "S15_flow_tick", "S16": "S16_laptop_procs", "S17": "S17_shot_render_rate", "S18": "S18_temp_holds", "S19": "S19_capacity_floor",
           "CTRL": "CTRL_history"}

@@ -19,7 +19,11 @@ import { UndoHost } from "./ds/Undo";
 import "./ds/live.css";
 import "./v3/breathe.css"; // UIRSI r43 K-UI-048：全站“正在渲染”呼吸灯
 import { StaleBanner } from "./v3/StaleBanner"; // UIRSI r45 页面过期检测（L-103）
-import "./v3/slide.css"; // UIRSI r45 · L-113 正片 B（总览纸框 + 审片页纸框）
+import "./v3/slide.css"; // UIRSI r45 · L-113 正片 B（总览纸框 + 审片页纸框）——开关 html.ui-slide，已被 L-114 取代、隔离保留
+import "./v3/film.css"; // UIRSI r46 · L-114 电影胶片 A——开关 html.ui-film（?ui=film）
+import { applyUiStyle } from "./v3/uiStyle";
+applyUiStyle();
+window.addEventListener("hashchange", () => applyUiStyle());
 import { LiveBridge } from "./v3/LiveBridge";
 
 // fredw-92/W4a：v3 新页面（W4c），挂在 #/script-create、#/models、#/assets

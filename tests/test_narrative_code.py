@@ -96,3 +96,15 @@ def test_k_wrt_h14_solo_episode_conflict():
     assert not RC.solo_conflict(solo, blocks_no_choice)[0]
     blocks_no_pressure = ["**镜1｜img**：近景，林晚\n**分拍**：0–2秒｜抬眼｜视线=窗"] * 3
     assert not RC.solo_conflict([Shot(1, [Cast("林晚", "在画")])] * 3, blocks_no_pressure)[0]
+
+
+def test_allowed_endings_respects_all_windows():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("narrative_code", ROOT / "tools" / "script_rsi" / "narrative_code.py")
+    NC = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(NC)
+    t = {1: "gaze_out", 2: "reveal", 3: "interrupted", 4: "interrupted", 5: "reveal", 6: "gaze_out",
+         7: "question", 8: "interrupted", 9: "question", 10: "gaze_out"}
+    assert NC.allowed_endings(t, 4) == ["reveal+question", "question"]
+    assert NC.allowed_endings(t, 9) == ["reveal+question", "reveal"]
+    assert set(NC.ENDING_HOW) == set(NC.ENDING_TYPES)
