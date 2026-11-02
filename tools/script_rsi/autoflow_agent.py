@@ -36,6 +36,7 @@ def _load(name, rel):
 AF = _load("autoflow", "tools/script_rsi/autoflow.py")
 R5, H, RL = AF.R5, AF.H, AF.RL
 WT, WO = "writer_tasks", "writer_out"
+NEXT_STEP = "交稿后只建 .done，等系统推进，不要自己跑命令"
 PATCH_MAX = 10
 CONTENT_RULES = ("全部人物成年（≥22 岁）、一切亲密情节双方自愿、人物均为虚构。暧昧和张力可以写；露骨的性描写不写。"
                  "亲密镜写成占位：该镜的 img / motion / H3 只写非露骨的画面（构图、视线、手、呼吸、环境），并在镜头块里加一行 "
@@ -51,7 +52,8 @@ def mark_dirty(run_dir: Path, ep: int, why: str) -> None:
     p = run_dir / SCORE_DIRTY
     try:
         d = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
-    except (OSError, ValueError):     # 标记文件坏了：重写一份（宁可多打一次分），不吞掉这次变化
+    except (OSError, ValueError) as e:     # 标记文件坏了：重写一份（宁可多打一次分），不吞掉这次变化
+        print(f"[autoflow] {p.name} 读不了（{e!r}），重写")
         d = {}
     d.setdefault("episodes", {})[str(ep)] = {"why": why, "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
     d["cmd"] = f".venv/Scripts/python.exe tools/script_rsi/line3_score.py --run-dir {H.RC._rel(run_dir)}"
@@ -84,20 +86,356 @@ def attempts(run_dir: Path, step: str) -> int:
     return len(list((run_dir / WT).glob(f"{step}_a*.json")))
 
 
+CONTENT_RULES_CLEAN = ("全部人物成年（≥22 岁）、一切亲密情节双方自愿、人物均为虚构。暧昧和张力可以写；露骨的性描写不写。"
+                       "亲密镜写成占位：该镜的 img / motion / H3 只写非露骨的画面（构图、视线、手、呼吸、环境），并在镜头块里加一行 "
+                       "`**H3校验**：本地生成（亲密镜占位）`——这类镜头只在项目方自有机器上生成（笔记本 / gpu33 / gpu36，L-128），写法仍不露骨。人物、造型、场景以本剧 P0 / P1 为准；缺信息标“未提供”。")
+
+
+def clean_cut(run_dir: Path) -> bool:
+    """L-126 完全切割的 run（run 目录里有 CLEAN_CUT.json）：写作包里不带任何旧剧内容（v1_leak.redact）"""
+    return (run_dir / "CLEAN_CUT.json").exists()
+
+
 def packet(run_dir: Path, st, step: str, role: str, ep: int, link: str, system: str, user: str, fmt: str,
-           inputs: list[str], attempt: int, extra: dict | None = None) -> dict:
-    op = out_path(run_dir, step, attempt, fmt)
+           inputs: list[str], attempt: int, extra: dict | None = None, output_path: Path | None = None) -> dict:
+    if not step.startswith(("P1", "facts", "factcheck", "patch", "revise", "lockline")):     # P2 / P3 / P4 包：P1 没过项目方闸门一律不出
+        OG = _load("owner_gate", "tools/script_rsi/owner_gate.py")
+        if not OG.p1_approved(run_dir):
+            raise RuntimeError(f"{run_dir.name}：P1 还没过项目方闸门（用这版），不出 {step} 包（11-02 19:17 事故守卫）")
+    rules = CONTENT_RULES
+    if clean_cut(run_dir):          # 旧规则里的举例（旧剧人物名 / 场景 / 道具）换成中性占位；内容边界用不含旧剧事实的版本
+        VL = _load("v1_leak", "tools/script_rsi/v1_leak.py")
+        v = VL.vocab(current=run_dir.name)
+        system, user, rules = VL.redact(system, v), VL.redact(user, v), CONTENT_RULES_CLEAN
+    op = output_path or out_path(run_dir, step, attempt, fmt)      # 集返修稿要落 writer_out/P4_epNN_r<k>.md（intake_full_p4 收），其余按 step 命名
     pk = {"schema": "nsfs.writer_task/1", "run": run_dir.name, "step": step, "role": role, "episode": ep, "link": link,
-          "system": system + "\n\n========\n\n【内容边界】" + CONTENT_RULES, "user": user, "inputs": inputs,
+          "system": system + "\n\n========\n\n【内容边界】" + rules, "user": user, "inputs": inputs,
           "output": {"path": H.RC._rel(op), "format": fmt, "done_marker": H.RC._rel(op) + ".done"},
-          "content_rules": CONTENT_RULES, "attempt": attempt, "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "status": "open",
-          "advance_cmd": f".venv/Scripts/python.exe tools/script_rsi/autoflow.py run --run-dir {H.RC._rel(run_dir)} --episode {ep} "
-                         f"--backend claude_agent --import dry", **(extra or {})}
+          "content_rules": rules, "attempt": attempt, "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "status": "open",
+          "next": NEXT_STEP, **(extra or {})}       # 根因模式 1“双入口”（总调度 11-02）：包里不再给推进命令，推进只走 autoflow（网页 /repair 或 .done 守护）
     AF.write_json(run_dir / WT / f"{step}_a{attempt}.json", pk)
     st.set(awaiting={"step": step, "role": role, "attempt": attempt, "packet": H.RC._rel(run_dir / WT / f"{step}_a{attempt}.json"),
                      "output": pk["output"]["path"]}, verdict="awaiting_" + role,
            next_action=f"等{'写手' if role == 'writer' else '评审'}交 {step}（第 {attempt} 次）")
     return pk
+
+
+LOOKS = "P1_looks.json"
+
+
+def mark_voided(p: Path, why: str) -> None:
+    """作废的写作包统一写法：文件名 <名>.void<时分秒>.json，包内 status=voided、voided_at、void_why（回稿等非包文件只改名）"""
+    if p.suffix != ".json" or p.name.endswith(".done"):
+        return
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:                 # 回稿不是 JSON（如 .md）：只改名，不加字段；记一行说明
+        print(f"[void] {p.name} 不是写作包 JSON（{type(e).__name__}），只改名")
+        return
+    if isinstance(d, dict) and d.get("schema", "").startswith("nsfs.writer_task"):
+        d.update(status="voided", voided_at=time.strftime("%Y-%m-%dT%H:%M:%S"), void_why=why[:300])
+        AF.write_json(p, d)
+
+
+def void_downstream(run_dir: Path, why: str) -> list[str]:
+    """P1 返修（项目方“修改”或三评委未过）出新 P1 时，下游的造型包 / P2–P4 包和它们的回稿一并作废：移进 writer_tasks_void/、writer_out_void/
+    （改名带时间戳，不删；OVERSIGHT-F 11-02）。返回移走的文件名"""
+    tag = time.strftime("%H%M%S")
+    moved = []
+    for sub, void in ((WT, "writer_tasks_void"), (WO, "writer_out_void")):
+        src = run_dir / sub
+        if not src.exists():
+            continue
+        (run_dir / void).mkdir(exist_ok=True)
+        for f in sorted(src.iterdir()):
+            if f.is_file() and f.name.startswith(("P1_looks_", "P2_", "P3_", "P4_ep")):
+                dst = run_dir / void / f"{f.stem}.void{tag}{f.suffix}"
+                f.rename(dst)
+                mark_voided(dst, why)
+                moved.append(f"{sub}/{f.name}")
+    if moved:
+        log = run_dir / "writer_tasks_void" / "VOID_LOG.jsonl"
+        log.parent.mkdir(exist_ok=True)
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "why": why, "moved": moved}, ensure_ascii=False) + "\n")
+    return moved
+
+
+def _looks_step(run_dir: Path, ep: int, st, storyline: dict, note: str = "") -> bool:
+    """P1-looks：造型表做成链里的一步（总调度 11-02）。产物 writer_out/P1_looks_a<k>.json → looks_table.check（含 lead_f 只认清单 O1–O4）
+    → 正式文件 <run>/P1_looks.json。返回 True = 已有正式造型表"""
+    if (run_dir / LOOKS).exists():
+        st.stage("P1L", "造型表", "reused", "code", output=H.RC._rel(run_dir / LOOKS))
+        return True
+    LT = _load("looks_table", "tools/script_rsi/looks_table.py")
+    step, k = "P1_looks", attempts(run_dir, "P1_looks")
+    base_user = LT.packet_user(storyline, ROOT)
+    if note:
+        base_user = "【项目方修改意见】" + note + "\n\n" + base_user
+    sl_sha = _sha(json.dumps(storyline, ensure_ascii=False, sort_keys=True))
+    if k:
+        pk_prev = json.loads((run_dir / WT / f"{step}_a{k}.json").read_text(encoding="utf-8"))
+        if pk_prev.get("storyline_sha") != sl_sha:      # 故事线换了版本（或旧包没记版本）：旧造型包作废，按新故事线重出
+            packet(run_dir, st, step, "writer", ep, "P1-looks", LT.SYSTEM, base_user, "json", [], k + 1, {"storyline_sha": sl_sha})
+            st.stage("P1L", "造型表", "awaiting_writer", "api_model", step=step, attempt=k + 1, detail="故事线有新版本，造型表按新版重写")
+            return False
+        txt = ready(out_path(run_dir, step, k, "json"))
+        if txt is None:
+            st.stage("P1L", "造型表", "awaiting_writer", "api_model", step=step, attempt=k)
+            return False
+        looks, err = LT.parse(txt)
+        probs = [f"不是 JSON：{err}"] if looks is None else LT.check(looks, storyline) + LT.closed_check(looks, ROOT)
+        if not probs:
+            AF.write_json(run_dir / LOOKS, looks)
+            st.stage("P1L", "造型表", "ok", "api_model", step=step, attempt=k, output=H.RC._rel(run_dir / LOOKS))
+            return True
+        packet(run_dir, st, step, "writer", ep, "P1-looks", LT.SYSTEM,
+               base_user + "\n\n【上一版没过的地方】\n" + "\n".join(f"- {p}" for p in probs[:30]), "json", [], k + 1, {"storyline_sha": sl_sha})
+        st.stage("P1L", "造型表", "repair_requested", "code", step=step, attempt=k + 1, problems=probs[:10])
+        return False
+    packet(run_dir, st, step, "writer", ep, "P1-looks", LT.SYSTEM, base_user, "json", [], 1, {"storyline_sha": sl_sha})
+    st.stage("P1L", "造型表", "awaiting_writer", "api_model", step=step, attempt=1)
+    return False
+
+
+REVIEW_CFG = "config/prompts/hollywood_p1_review.yaml"
+REVIEW_STATE = "judge_p1/STATE.json"
+
+
+LIVE = "docs/master/V2_LIVE.md"
+
+
+def live_note(text: str) -> None:
+    """V2_LIVE.md 顶部加一行（总调度看这里派新一轮评委）；写不进去不影响推进，但要打印出来"""
+    p = ROOT / LIVE
+    try:
+        old = p.read_text(encoding="utf-8") if p.exists() else ""
+        tmp = p.with_suffix(".md.tmp")
+        tmp.write_text(time.strftime("%H:%M") + " HOLLYWOOD（autoflow）：" + text + "\n" + old, encoding="utf-8")
+        tmp.replace(p)
+    except OSError as e:
+        print(f"[autoflow] V2_LIVE.md 写不进去：{e!r}；原文：{text}")
+
+
+def judge_done_sig(d: Path) -> str:
+    """一轮评审目录里评委 .done 的签名（文件名 + 产物字节数）；watch 用它判断“这组交稿收过没有”"""
+    parts = []
+    for f in sorted(d.glob("judge_*/out/p1_review.json.done")):
+        out = f.with_name("p1_review.json")
+        parts.append(f"{f.parent.parent.name}:{out.stat().st_size if out.exists() else 0}")
+    return "|".join(parts)
+
+
+def review_cfg() -> dict:
+    import yaml
+    return yaml.safe_load((ROOT / REVIEW_CFG).read_text(encoding="utf-8")) or {}
+
+
+def review_round_dir(run_dir: Path, n: int) -> Path:
+    return run_dir / "judge_p1" if n == 1 else run_dir / "judge_p1" / f"r{n}"
+
+
+def review_add_fixes(run_dir: Path, fixes: list[str], by: str, replace: bool = False) -> dict:
+    """给当前轮评审追加返修意见（如总调度汇总的共识意见）——唯一写法，带来源；状态文件不许手写（OVERSIGHT-F 11-02）"""
+    sp = run_dir / REVIEW_STATE
+    state = json.loads(sp.read_text(encoding="utf-8"))
+    cur = state["rounds"][-1]
+    if replace:                                  # 总调度给了更完整的共同意见：替换本轮旧的追加意见（旧的记进 extra_replaced 留档）
+        cur.setdefault("extra_replaced", []).append({"fixes": cur.get("extra_fixes") or [], "at": time.strftime("%Y-%m-%dT%H:%M:%S")})
+        cur["extra_fixes"] = []
+    cur.setdefault("extra_fixes", []).extend(x for x in fixes if x.strip())
+    cur.setdefault("extra_by", [])
+    if isinstance(cur["extra_by"], str):
+        cur["extra_by"] = [cur["extra_by"]]
+    cur["extra_by"].append({"by": by, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "n": len(fixes)})
+    AF.write_json(sp, state)
+    return cur
+
+
+def review_state_normalize(run_dir: Path) -> dict:
+    """把评审状态里的手写痕迹改回工具口径：packed_at 取该轮评审包 created_at 的最早值"""
+    sp = run_dir / REVIEW_STATE
+    state = json.loads(sp.read_text(encoding="utf-8"))
+    for r in state.get("rounds") or []:
+        d = ROOT / r["dir"]
+        ts = sorted(json.loads(f.read_text(encoding="utf-8")).get("created_at", "") for f in d.glob("judge_*/p1_review_task.json"))
+        if ts and ts[0]:
+            r["packed_at"] = ts[0]
+        if isinstance(r.get("extra_by"), str):
+            r["extra_by"] = [{"by": r["extra_by"], "at": None, "n": len(r.get("extra_fixes") or [])}]
+        for e in r.get("extra_by") or []:            # W-24：占位 / 编出来的时间（如“20:xx”“19:5x”）一律去掉，改记“未记时间”
+            if isinstance(e, dict) and re.search(r"\d{1,2}:[0-9]?x", str(e.get("by", "")) + str(e.get("at") or "")):
+                e["by"] = re.sub(r"\s*\d{1,2}:[0-9]?x+", "", str(e.get("by", "")))
+                e["at"] = None
+                e["at_note"] = "当时手写、未记时间（写入早于 autoflow.log 19:25:45 那次推进）；以后只经 review_add_fixes 写"
+    state["normalized_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    AF.write_json(sp, state)
+    return state
+
+
+def review_passed(res: dict, cfg: dict) -> tuple[bool, list[str]]:
+    """门槛（config/prompts/hollywood_p1_review.yaml）→ (过没过, 没过的原因)"""
+    why = []
+    if res.get("n", 0) < int(cfg.get("judges", 3)):
+        why.append(f"评委只交了 {res.get('n', 0)} 家")
+    if cfg.get("require_distinct_judges", True) and res.get("single_judge"):
+        why.append("三家 judge_id 不是三个不同评委")
+    if cfg.get("require_stable") and not res.get("stable"):
+        why.append(f"σ={res.get('sigma')} > 1")
+    if (res.get("mean") or 0) < float(cfg.get("min_mean", 34)):
+        why.append(f"均分 {res.get('mean')} < {cfg.get('min_mean', 34)}")
+    low = [k for k, v in (res.get("item_mean") or {}).items() if v < float(cfg.get("min_item_mean", 2.01))]
+    if low:
+        why.append(f"有条目三家均分 ≤ 2：{low}")
+    return not why, why
+
+
+def _p1_review(RCH, run_dir: Path, ep: int, st, ctx: dict, canon: Path, sl: dict) -> bool:
+    """P1 三评委（总调度 11-02：P1 先过三评委，均分 ≥ 门槛且没有条目 ≤ 2 才开项目方闸门；不过按三家“最该改的地方”自动出 P1 返修包，
+    最多 max_rounds 轮，超过转总调度）。每个 P1 版本（sha）一轮；评委由总调度派，本函数只出包、收分、判门槛、出返修包。返回 True = 过了"""
+    cfg = review_cfg()
+    if not cfg.get("enabled", True):
+        return True
+    JA = _load("judge_agent", "tools/script_rsi/judge_agent.py")
+    sp = run_dir / REVIEW_STATE
+    state = json.loads(sp.read_text(encoding="utf-8")) if sp.exists() else {"rounds": []}
+    sha = JA._sha(canon.read_text(encoding="utf-8"))
+    cur = state["rounds"][-1] if state["rounds"] else None
+    if cur is None or cur.get("sha") != sha:
+        n = len(state["rounds"]) + 1
+        if n > int(cfg.get("max_rounds", 3)):
+            st.stage("P1R", "P1 三评委", "escalated", "code", detail=f"已评 {n - 1} 轮仍未过门槛")
+            st.set(verdict="p1_review_failed", next_action="P1 三评委已到轮数上限仍未过，交总调度")
+            return False
+        d = review_round_dir(run_dir, n)
+        legacy = n == 1 and all((d / f"judge_{j}" / "p1_review_task.json").exists() for j in range(1, int(cfg.get("judges", 3)) + 1))
+        if not legacy:
+            JA.p1_pack(run_dir, int(cfg.get("judges", 3)), out=d)
+            live_note(f"{run_dir.name} 第 {n} 轮 P1 评审包已出（{H.RC._rel(d)}/judge_1–{cfg.get('judges', 3)}），请派 {cfg.get('judges', 3)} 位新评委（不同模型、不复用上一轮）")
+        state["rounds"].append({"n": n, "sha": sha, "dir": H.RC._rel(d), "packed_at": time.strftime("%Y-%m-%dT%H:%M:%S")})
+        AF.write_json(sp, state)
+        cur = state["rounds"][-1]
+    d = review_round_dir(run_dir, int(cur["n"]))
+    res = JA.p1_collect(run_dir, out=d)
+    cur.update(result={k: res.get(k) for k in ("n", "totals", "mean", "sigma", "item_mean", "item_split", "judge_ids", "single_judge", "problems")})
+    ok, why = review_passed(res, cfg)
+    if res.get("n", 0) < int(cfg.get("judges", 3)):
+        cur["collected_sig"] = judge_done_sig(ROOT / cur["dir"])        # 同一组评委 .done 已收过一次：watch 不再每 30 秒空转
+        AF.write_json(sp, state)
+        st.stage("P1R", "P1 三评委", "awaiting_judges", "judge", round=cur["n"], got=res.get("n", 0), dir=cur["dir"])
+        st.stage("P1G", "项目方看 P1", "waiting_p1_review", "owner", detail="三评委过门槛后才交项目方")
+        st.set(verdict="awaiting_p1_judges", awaiting=None, next_action=f"等第 {cur['n']} 轮三位评委交稿（{res.get('n', 0)} / {cfg.get('judges', 3)}）：{cur['dir']}")
+        return False
+    if ok:
+        cur["passed"] = True
+        AF.write_json(sp, state)
+        st.stage("P1R", "P1 三评委", "passed", "judge", round=cur["n"], mean=res.get("mean"), totals=res.get("totals"))
+        live_note(f"{run_dir.name} P1 第 {cur['n']} 轮三评委过门槛：{res.get('totals')}，均分 {res.get('mean')}/40 → 交项目方看（P1 闸门）")
+        return True
+    cur["passed"], cur["why"] = False, why
+    if int(cur["n"]) >= int(cfg.get("max_rounds", 3)):
+        AF.write_json(sp, state)
+        st.stage("P1R", "P1 三评委", "escalated", "judge", round=cur["n"], why=why)
+        st.set(verdict="p1_review_failed", next_action=f"转总调度：第 {cur['n']} 轮仍未过（{'；'.join(why)}），不给项目方看")
+        live_note(f"{run_dir.name} P1 第 {cur['n']} 轮仍未过门槛（{res.get('mean')}/40），已到轮数上限，转总调度")
+        return False
+    if cur.get("revise_issued"):
+        AF.write_json(sp, state)
+        return False
+    fixes = res.get("top_fixes") or []
+    low = sorted((res.get("item_mean") or {}).items(), key=lambda kv: kv[1])[:4]
+    note = "P1 三评委第 " + str(cur["n"]) + " 轮未过（" + "；".join(why) + "）。"
+    if int(cur["n"]) + 1 >= int(cfg.get("max_rounds", 3)):
+        note += f"这是第 {int(cur['n']) + 1} 稿，也是最后一稿：这一稿三评委还不到 {cfg.get('min_mean', 34)} 分（或有条目 ≤ 2），就转总调度，不再返修。"
+    if cur.get("extra_fixes"):                     # 总调度汇总的共同意见放最前面（总调度 11-02：两位评委的共同意见先改）
+        note += "\n【最先改：评委共同意见】\n" + "\n".join(f"- {x}" for x in cur["extra_fixes"])
+    note += ("\n【三家各自最该改的地方】\n" + "\n".join(f"- {f}" for f in fixes[:12])
+             + "\n得分最低的条目：" + "、".join(f"{k} {v}" for k, v in low) + "（口径 config/prompts/hollywood_p1_judge.md）")
+    tag = time.strftime("%H%M%S")
+    for f in (canon, canon.parent / f"{canon.name}.report.json", run_dir / LOOKS):
+        if f.exists():
+            f.rename(f.with_name(f.stem + f".v{tag}" + f.suffix))
+    void_downstream(run_dir, f"P1 三评委第 {cur['n']} 轮未过（{res.get('mean')}/40）")
+    k = attempts(run_dir, "P1")
+    pr = RCH.WP.build("P0-P1", ctx)
+    user = (pr["user"] + "\n\n【三评委意见（P1 第 " + str(cur["n"]) + " 轮）】\n" + note + "\n\n【上一版故事线（在它基础上改，剧名和主线可保留）】\n"
+            + json.dumps(sl, ensure_ascii=False)[:20000])
+    packet(run_dir, st, "P1", "writer", ep, "P0-P1", pr["system"], user, "json", [], k + 1)
+    cur["revise_issued"] = True
+    cur["revise_attempt"] = k + 1
+    AF.write_json(sp, state)
+    st.stage("P1R", "P1 三评委", "revise_requested", "judge", round=cur["n"], mean=res.get("mean"), why=why, attempt=k + 1)
+    st.stage("P1G", "项目方看 P1", "waiting_p1_review", "owner", detail="三评委过门槛后才交项目方")
+    st.set(verdict="awaiting_writer", next_action=f"返修中（第 {cur['n']} 轮，评审 {res.get('mean')}/40）：等写手按三评委意见改 P1（第 {k + 1} 稿）")
+    live_note(f"{run_dir.name} P1 第 {cur['n']} 轮评审 {res.get('totals')}，均分 {res.get('mean')}/40 未过门槛 → 已出返修包 P1_a{k + 1}（交 SCRIPTWRITER）")
+    return False
+
+
+def p1_gate(RCH, run_dir: Path, ep: int, st, ctx: dict, canon: Path) -> bool:
+    """P1 审阅闸（总调度 11-02，L-123）：有 owner_gates.json 的 run，P1 故事线 + 造型表收下后停在“等项目方看”；
+    “用这版”→ 继续出 P2；“修改”→ 旧稿改名留档，出 P1 返修包（带这句话），新稿回来重新等项目方看。返回 True = 可以继续"""
+    OG = _load("owner_gate", "tools/script_rsi/owner_gate.py")
+    if not OG.enabled(run_dir):
+        return True
+    g = OG.get(run_dir, "P1")
+    sl = ctx["storyline"].model_dump(mode="json", by_alias=True) if hasattr(ctx["storyline"], "model_dump") else ctx["storyline"]
+    if g.get("status") == "revise_requested" and not g.get("handled"):
+        tag = time.strftime("%H%M%S")
+        for f in (canon, canon.parent / f"{canon.name}.report.json", run_dir / LOOKS):
+            if f.exists():
+                f.rename(f.with_name(f.stem + f".v{tag}" + f.suffix))
+        void_downstream(run_dir, "项目方点了 P1 “修改”：" + g.get("note", "")[:100])
+        k = attempts(run_dir, "P1")
+        pr = RCH.WP.build("P0-P1", ctx)
+        user = (pr["user"] + "\n\n【项目方修改意见（原话）】" + g.get("note", "") + "\n\n【上一版故事线（在它基础上改）】\n"
+                + json.dumps(sl, ensure_ascii=False)[:20000])
+        packet(run_dir, st, "P1", "writer", ep, "P0-P1", pr["system"], user, "json", [], k + 1)
+        OG.set_status(run_dir, "P1", "revising", note=g.get("note", ""), handled=True, revise_attempt=k + 1)
+        st.stage("P1G", "项目方看 P1", "revising", "owner", note=g.get("note", "")[:200], attempt=k + 1)
+        st.set(verdict="awaiting_writer", next_action="等写手按项目方意见改 P1")
+        return False
+    if not _looks_step(run_dir, ep, st, sl, g.get("note", "") if g.get("status") == "revising" else ""):
+        return False
+    if not _p1_review(RCH, run_dir, ep, st, ctx, canon, sl):
+        return False
+    if g.get("status") == "revising":
+        OG.set_status(run_dir, "P1", "pending", note=g.get("note", ""))
+        g = {"status": "pending"}
+    if g.get("status") == "approved":
+        st.stage("P1G", "项目方看 P1", "approved", "owner")
+        return True
+    for s_ in st.d.get("stages", []):        # 闸门之后的段（如闸门上线前已出的 P2 包）标成“被 P1 闸门挡住”，网页不显示成在等写手
+        if s_.get("id") in ("P2", "P3", "P4") and s_.get("status") in ("awaiting_writer", "repair_requested"):
+            s_["status"] = "held_by_p1_gate"
+    st.stage("P1G", "项目方看 P1", "awaiting_owner", "owner", detail="网页上点“用这版”出 P2；点“修改”写一句话进返修")
+    st.set(verdict="awaiting_owner_p1", awaiting=None, next_action="等项目方看 P1 故事线和造型表（用这版 / 修改）")
+    return False
+
+
+def ep_gate(run_dir: Path, ep: int, st) -> bool:
+    """每集闸门：默认自动通过；项目方点了“修改”→ 出整集返修包（writer_out/P4_epNN_r<k>.md，由 intake_full_p4 收）。返回 True = 不拦"""
+    OG = _load("owner_gate", "tools/script_rsi/owner_gate.py")
+    if not OG.enabled(run_dir):
+        return True
+    key = f"ep{ep:02d}"
+    g = OG.get(run_dir, key)
+    if g.get("status") != "revise_requested" or g.get("handled"):
+        return True
+    final_p = run_dir / f"P4_ep{ep:02d}.final.md"
+    cur_p = final_p if final_p.exists() else run_dir / f"P4_ep{ep:02d}.md"
+    if not cur_p.exists():
+        return True                 # 这一集还没写到 P4：意见留着，写到时再出
+    used = [int(m) for p in (run_dir / WO).glob(f"P4_ep{ep:02d}_r*.md") for m in re.findall(r"_r(\d+)\.md$", p.name)]
+    r = max(used, default=0) + 1
+    op = run_dir / WO / f"P4_ep{ep:02d}_r{r}.md"
+    packet(run_dir, st, f"revise_ep{ep:02d}", "writer", ep, "owner-revise",
+           "你是这部剧的编剧。项目方对这一集提了修改意见，请整集改写（剧情事实以 P1–P3 为准，只按意见改）。",
+           "【项目方修改意见（原话）】" + g.get("note", "") + "\n\n【现稿】\n" + cur_p.read_text(encoding="utf-8")[-60000:],
+           "markdown_episode", [H.RC._rel(cur_p)], r, output_path=op)          # 唯一出包口 packet()（OVERSIGHT-F H4）
+    OG.set_status(run_dir, key, "revising", note=g.get("note", ""), handled=True, output=H.RC._rel(op))
+    st.stage("EPG", "项目方修改", "revising", "owner", note=g.get("note", "")[:200], output=H.RC._rel(op))
+    st.set(verdict="awaiting_writer", next_action=f"等写手按项目方意见改写 ep{ep:02d}")
+    return False
 
 
 def chain_step(RCH, run_dir: Path, ep: int, st, ctx: dict) -> bool:
@@ -117,6 +455,8 @@ def chain_step(RCH, run_dir: Path, ep: int, st, ctx: dict) -> bool:
         if obj is not None:
             st.stage(node, name, "reused", "code", output=H.RC._rel(canon))
             ctx[key[link]] = obj
+            if link == "P0-P1" and not p1_gate(RCH, run_dir, ep, st, ctx, canon):
+                return False
             continue
         step = "P1" if link == "P0-P1" else f"{node}_ep{ep:02d}"
         kind = RCH.chain()["links"][link]["writer"]["output"]
@@ -141,6 +481,8 @@ def chain_step(RCH, run_dir: Path, ep: int, st, ctx: dict) -> bool:
                 st.stage(node, name, "ok" if rep.ok else "needs_patch", "api_model", step=step, attempt=k, blocking=blocking,
                          output=H.RC._rel(canon), decider_note="写手 agent（claude_agent）")
                 ctx[key[link]] = obj
+                if link == "P0-P1" and not p1_gate(RCH, run_dir, ep, st, ctx, canon):
+                    return False
                 continue
             user = pr["user"] + "\n\n" + RCH.WP.repair_message([i.as_dict() for i in rep.issues], kind, (extra or "")[:6000])
             packet(run_dir, st, step, "writer", ep, link, pr["system"], user, fmt, [], k + 1)
@@ -262,11 +604,11 @@ def post_step(run_dir: Path, ep: int, st, import_mode: str) -> dict:
             if any(x["id"] == sid for x in st.d.get("stages", [])):
                 st.stage(sid, {"gate": "导入闸门", "import": "导入", "decide": "导入决定"}[sid], "reopened", "code", detail="有新失败项，退回待修")
         if k >= PATCH_MAX:
-            st.set(verdict="not_importable", next_action=f"补丁已出 {k} 次仍有失败项，交总调度")
+            st.set(verdict="not_importable", awaiting=None, next_action=f"补丁已出 {k} 次仍有失败项，交总调度")
             return st.d
         targets = [(d, u) for d, u in fails if ag["used"].get(f"{d}#{u['id']}", 0) < AF.ITEM_TRIES and f"{d}#{u['id']}" not in AF.STRUCTURAL][:2]
         if not targets:
-            st.set(verdict="not_importable", next_action="剩下的失败项都已试满（或是镜数这类结构项），交总调度 / 整集重写 P4")
+            st.set(verdict="not_importable", awaiting=None, next_action="剩下的失败项都已试满（或是镜数这类结构项），交总调度 / 整集重写 P4")
             return st.d
         for d, u in targets:
             ag["used"][f"{d}#{u['id']}"] = ag["used"].get(f"{d}#{u['id']}", 0) + 1
@@ -306,7 +648,7 @@ def post_step(run_dir: Path, ep: int, st, import_mode: str) -> dict:
     st.stage("score", "打分（测试期：代码判定）", "ok", "code", sum_code=met)
     lint_now = H.lint(cur, ep)
     if lint_now["shot_block"]:
-        st.set(verdict="not_importable", next_action="P4 阻断未清零")
+        st.set(verdict="not_importable", awaiting=None, next_action="P4 阻断未清零")
         return st.d
     RA = _load("rubric_audit", "tools/script_rsi/rubric_audit.py")
     rg = RA.gate(final_p)
@@ -494,6 +836,9 @@ def intake_full_p4(RCH, run_dir: Path, ep: int, st, ctx: dict) -> None:
         stale = [q2.stem for q2 in (run_dir / WT).glob(f"patch_ep{ep:02d}_a*.json")]
         st.d["agent"] = {"processed": stale, "used": {}, "fact_devs": None, "full_p4_done": done}
         st.d.setdefault("agent_history", []).append({"step": q.name, "accepted": True, "note": f"整集稿收为正式 P4（阻断 {blocking}）"})
+        OG = _load("owner_gate", "tools/script_rsi/owner_gate.py")
+        if OG.enabled(run_dir) and OG.get(run_dir, f"ep{ep:02d}").get("status") == "revising":
+            OG.set_status(run_dir, f"ep{ep:02d}", "approved", note="项目方修改已收稿（默认自动通过，可再点修改）")
         mark_dirty(run_dir, ep, f"收整集稿 {q.name}")
         st.save()
 
@@ -515,14 +860,18 @@ def run(run_dir: Path, ep: int, import_mode: str) -> dict:
     except Exception as e:  # noqa: BLE001  登记表读不到：照样写，记下原因（写作方会少了已登记人物的逐字格）
         rc, rs = [], []
         st.set(registry_error=repr(e)[:200])
+    if clean_cut(run_dir):          # L-126：完全切割的 run 不带任何已登记（旧剧）人物 / 场景表进写作请求
+        rc, rs = [], []
     ctx = {"brief": brep.obj, "episode": ep, "registry_chars": rc, "registry_scenes": rs}
     for link, key in (("P0-P1", "storyline"), ("P1-P2", "outline"), ("P2-P3", "screenplay")):   # 收整集稿要用到上游
         cp = run_dir / dict(RCH.STAGES)[link].format(ep=ep)
         ctx[key] = RCH._load_ok(cp, link, ctx) if cp.exists() else None
+    if not ep_gate(run_dir, ep, st):
+        return st.d
     intake_full_p4(RCH, run_dir, ep, st, ctx)
     p4_exists = (run_dir / f"P4_ep{ep:02d}.md").exists()
     AF.REQUIRE_V2["on"] = not p4_exists or (run_dir / f"P4_ep{ep:02d}.md.v2").exists()   # 新写 / 重写的集按 v2（K-WRT-805 / 806）
-    AF.REQUIRE_V3["on"] = (run_dir / f"P4_ep{ep:02d}.md.v3").exists()                   # v3 试点（K-WRT-H19 / H20，总调度 11-02）
+    AF.REQUIRE_V3["on"] = (run_dir / f"P4_ep{ep:02d}.md.v3").exists() or clean_cut(run_dir)   # v3（H19 / H20 / H23–H25 / K-WRT-211）：标记集或 V2 完全切割 run 整季强制
     if not chain_step(RCH, run_dir, ep, st, ctx):
         return st.d
     return post_step(run_dir, ep, st, import_mode)

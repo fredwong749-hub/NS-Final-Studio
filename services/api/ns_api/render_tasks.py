@@ -19,6 +19,7 @@ GET /api/render-tasks[?run=series10_v1]
 """
 from __future__ import annotations
 
+from ns_api import run_paths as _RP   # K-OPS-F24：按当前剧取路径（V1 已归档，不在网页显示）
 import json
 import re
 import time
@@ -370,7 +371,7 @@ def _producer_rows(active: set, shots: dict) -> list[dict]:
     """PRODUCER 登记表（data/producer/registry.json，docs/uimaster/LOCKS.md 接口说明）：它排着、还没投到 ComfyUI 的对象。
     已经在 ComfyUI / 画布队列里的（同镜同类有“等待 / 渲染中”行）不重复列；passed 由 ComfyUI 历史 / 画布任务体现，不再列"""
     try:
-        reg = json.loads(PRODUCER_REGISTRY.read_text(encoding="utf-8"))
+        reg = json.loads((_RP.producer_dir(REPO) / "registry.json").read_text(encoding="utf-8"))   # L-125：当前剧的 producer（V1 已归档）
     except (OSError, ValueError):
         return []
     rows = []
@@ -453,10 +454,31 @@ def build(run: str | None = DEFAULT_RUN) -> dict:
 
 
 @router.get("/api/render-tasks")
-def render_tasks(run: str | None = DEFAULT_RUN):
+def render_tasks(run: str | None = None):
+    run = run or _RP.current_run()               # L-125：默认当前剧（原来写死第一季）
     now = time.time()
     if _cache["key"] == run and now - _cache["at"] < 3 and _cache["val"]:
         return _cache["val"]
-    val = build(run)
+    val = hide_archived_rows(build(run))
     _cache.update(key=run, at=now, val=val)
     return val
+
+
+def hide_archived_rows(val: dict) -> dict:
+    """L-125（项目方 18:4x：网页上旧的全部下架）：当前剧不是 legacy 剧时，切换前的任务历史（第一季的出图 / 视频任务）不显示——
+    以当前剧在 runs.json 登记的 created_at 为界，之前开始的行一律隐藏（数据不删，V1 在剧本库历史区只读可看）"""
+    if not _RP.v1_hidden():
+        return val
+    import datetime as _dt
+    try:
+        reg = json.loads((REPO / "config/pipeline/runs.json").read_text(encoding="utf-8"))
+        since = _dt.datetime.fromisoformat(reg["runs"][reg["primary"]]["created_at"]).timestamp()
+    except (OSError, ValueError, KeyError):   # arch-ok: 读不到切换时间 = 全部隐藏（宁可空，不外露 V1）
+        since = time.time()
+    rows = [r for r in val.get("rows") or [] if float(r.get("started") or r.get("at") or 0) >= since]
+    c = dict(val.get("counts") or {})
+    for k in ("rendering", "pending", "failed", "done", "queued", "planned", "failed_recent"):
+        if k in c:
+            c[k] = sum(1 for r in rows if r.get("status") == k) if k not in ("failed_recent", "queued", "planned") else 0
+    c["all"] = len(rows)
+    return {**val, "rows": rows, "counts": c, "hidden_archived": len(val.get("rows") or []) - len(rows)}

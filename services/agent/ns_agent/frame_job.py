@@ -276,6 +276,9 @@ def build_first(project: str, ep, shot, g, *, bible=None, model: str = "qwen_ima
             "recipe": "frame_v9（K-REN-134 唯一出图路径）", "last_prompt": c.last_prompt,
             "face_files": [s.file for s in plan.slots if s.kind == "face"], "compiler_inputs_sha": c.inputs_sha,
             "blocking": AR.blocking_of(shot), "last_faces": last_face_plan(project, shot, c.last_prompt, plan)}
+    job["route"], job["route_reasons"] = AR.plan_route(project, sr, plan)      # K-REN-958：本地专用资产 → 只许自有机器的道（L-128）
+    job["adult_reasons"] = AR.plan_adult(project, sr, plan)                    # L-128 不变项：成人画面作业只由项目方触发
+    job["adult"] = bool(job["adult_reasons"])
     job["compile_trace"] = trace_of(job)
     return job
 
@@ -302,7 +305,7 @@ def trace_of(job: dict) -> dict:
             "refs_sha": _sha16(json.dumps([r["sha"] or r["file"] for r in refs])),
             "compiler_inputs_sha": job.get("compiler_inputs_sha"), "blocking": job.get("blocking"),
             "faces": [s.get("character") for s in ar.get("slots") or [] if s.get("kind") in ("face", "faceboard")],
-            "last_faces": job.get("last_faces"),
+            "last_faces": job.get("last_faces"), "route": job.get("route"), "route_reasons": job.get("route_reasons"), "adult": job.get("adult"),
             "conflicts": [w for w in ar.get("warnings") or [] if w.get("kind") == "cast_face_conflict"],
             "wardrobe_scope": {c.get("name"): c.get("wardrobe_scope") for c in ar.get("characters") or []
                                if c.get("wardrobe_scope") is not None},

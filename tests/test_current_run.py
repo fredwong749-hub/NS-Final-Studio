@@ -26,7 +26,7 @@ def test_runs_strict(tmp_path):
     (tmp_path / "config/pipeline/runs.json").write_text(json.dumps({"runs": {"x": {}}}), encoding="utf-8")
     with pytest.raises(RUNS.RunRegistryMissing):
         RUNS.primary_run(tmp_path, strict=True)                          # 有 runs 但没写 primary
-    (tmp_path / "config/pipeline/runs.json").write_text(json.dumps({"primary": "x", "runs": {"x": {}}}), encoding="utf-8")
+    (tmp_path / "config/pipeline/runs.json").write_text(json.dumps({"primary": "x", "legacy_unprefixed_run": "x", "runs": {"x": {}}}), encoding="utf-8")
     assert RUNS.primary_run(tmp_path, strict=True) == "x"
 
 
@@ -34,7 +34,7 @@ def test_order_runs_ignores_mtime(tmp_path):
     from ns_api import current_run as CR
     (tmp_path / "config/pipeline").mkdir(parents=True)
     (tmp_path / "config/pipeline/runs.json").write_text(json.dumps(
-        {"primary": "s1", "runs": {"s1": {"priority": 0}, "s2": {"priority": 10}}}), encoding="utf-8")
+        {"primary": "s1", "legacy_unprefixed_run": "s1", "runs": {"s1": {"priority": 0}, "s2": {"priority": 10}}}), encoding="utf-8")
     d = tmp_path / "runs"
     for n in ("s1", "s2", "zz"):
         (d / n).mkdir(parents=True)
@@ -52,7 +52,7 @@ def test_character_hub_current_project_is_primary(monkeypatch, tmp_path):
     cfg.write_text(json.dumps({"projects": {"s1": {"run_dir": "data/pipeline/runs/s1"},
                                             "s2": {"inherits": "s1", "run_dir": "data/pipeline/runs/s2"}}}), encoding="utf-8")
     (tmp_path / "config/pipeline").mkdir(parents=True)
-    (tmp_path / "config/pipeline/runs.json").write_text(json.dumps({"primary": "s1", "runs": {"s1": {}, "s2": {}}}), encoding="utf-8")
+    (tmp_path / "config/pipeline/runs.json").write_text(json.dumps({"primary": "s1", "legacy_unprefixed_run": "s1", "runs": {"s1": {}, "s2": {}}}), encoding="utf-8")
     for n in ("s1", "s2"):
         (tmp_path / "data/pipeline/runs" / n).mkdir(parents=True)
     t = time.time()

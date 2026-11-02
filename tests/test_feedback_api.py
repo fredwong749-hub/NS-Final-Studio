@@ -58,3 +58,18 @@ def test_test_ticket_closes_directly_and_hidden(tmp_path, monkeypatch):
     # 非测试单仍然不能跳步关单
     c.post("/api/feedback", json={"text": "真反馈"})
     assert c.post("/api/feedback/fb-0002/status", json={"status": "closed"}).status_code == 409
+
+
+def test_frozen_close(tmp_path, monkeypatch):
+    c = _client(tmp_path, monkeypatch)
+    c.post("/api/feedback", json={"text": "手不对"})
+    c.post("/api/feedback/fb-0001/status", json={"status": "triaged", "category": "video.hand"})
+    c.post("/api/feedback/fb-0001/status", json={"status": "fixing"})
+    assert c.post("/api/feedback/fb-0001/status", json={"status": "closed", "resolution": "frozen"}).status_code == 422   # 没写依据
+    assert c.post("/api/feedback/fb-0001/status", json={"status": "closed", "resolution": "frozen", "note": "L-125"}).status_code == 422  # 缺漏检 / 改进 / 回归
+    it = c.post("/api/feedback/fb-0001/status", json={"status": "closed", "resolution": "frozen", "note": "L-125 V1 冻结",
+                                                       "miss_analysis": "x", "improvements": [{"kind": "rule"}], "regression": "r"}).json()
+    assert it["status"] == "closed" and it["resolution"] == "frozen"
+    c.post("/api/feedback", json={"text": "新单"})
+    assert c.post("/api/feedback/fb-0002/status", json={"status": "closed", "resolution": "frozen", "note": "x",
+                                                        "miss_analysis": "x", "improvements": [{"kind": "rule"}], "regression": "r"}).status_code == 409  # new 不能直接冻结

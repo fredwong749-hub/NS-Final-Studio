@@ -125,3 +125,14 @@ def test_light_source_visible_in_scene_counts():
     assert RC.source_seen("柜台油灯", "| sk_x | 酒店 | … | 柜台上油灯暖光 |", [])
     assert not RC.source_seen("壁炉", "门口的天光", [])
     assert RC.source_seen("台灯", "", ["台灯", "窗"])
+
+
+def test_test_brief_never_overwrites(tmp_path):
+    """11-02 事故：test-brief 覆盖了 V2 的 P0_brief.json 并调了外部 API —— 已有 Brief 时必须拒绝，且不调网关"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("autoflow", ROOT / "tools" / "script_rsi" / "autoflow.py")
+    AF = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(AF)
+    (tmp_path / "P0_brief.json").write_text('{"keep": 1}', encoding="utf-8")
+    assert AF.main(["test-brief", "--run-dir", str(tmp_path)]) == 2
+    assert (tmp_path / "P0_brief.json").read_text(encoding="utf-8") == '{"keep": 1}'

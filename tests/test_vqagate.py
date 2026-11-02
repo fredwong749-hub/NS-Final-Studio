@@ -75,7 +75,16 @@ def test_enforce_off_back_to_record_only(monkeypatch):
     assert pf["ok"] is False                           # HC-07 任何时候都拦
 
 
-def test_continuity_prev_same_scene():
+def test_continuity_prev_same_scene(monkeypatch):
+    # 跨镜连贯按当前剧取剧本（I-14）；这条测 V1 的剧本口径，显式钉在 V1（legacy 无前缀路径）
+    class _V1:
+        @staticmethod
+        def script_path():
+            return CT.ROOT / "data" / "import" / "script_v2.json"
+        @staticmethod
+        def renders_dir():
+            return CT.ROOT / "data" / "renders"
+    monkeypatch.setattr(CT, "_runs", lambda: _V1)
     assert CT.prev_same_scene("ep01-S1") is None
     assert CT.prev_same_scene("ep01-S2") == "ep01-S1"     # 同一场 sk_office_night
 
@@ -1106,3 +1115,48 @@ def test_accept_gate_defers_count_on_gpu33(monkeypatch):
     monkeypatch.setenv("OFFLINE_SELF", "gpu36")
     VQ.accept_gate("ep02-S1", "image", "x.png", {"ok": True, "blocking": [], "items": []})
     assert seen["defer"] is False
+
+
+def test_v2_identity_is_fail_closed(monkeypatch, tmp_path):
+    """L-126（总调度 11-02 18:5x）：资产包模式的剧（V2）身份脸只认清单——清单里没有就返回“无”、preflight 挡住出图，
+    绝不退回 config faces / face_overrides / 配方裁切 / V1 plates；preflight、编译器、资产页、复核带参照、打分上传名单都一样"""
+    import sys
+    sys.path[:0] = [str(ROOT / "services/recipes"), str(ROOT / "services/api"), str(ROOT / "tools/gen_contract"), str(ROOT)]
+    from ns_agent import asset_refs as AR
+    from ns_agent.gen_contract import preflight as PF
+    monkeypatch.setattr(AR, "manifest_rel", lambda pj: "assets_v2/manifest.json")
+    monkeypatch.setattr(AR, "manifest", lambda pj: {"characters": {"lead_f": {"outfits": []}}})
+    monkeypatch.setattr(AR, "face_of", lambda pj, cid: None)             # 清单里还没合进身份脸
+    v1_face = "data/assets/identity_refs/lin_wan/lin_wan_face_hd_A_s202.png"
+    bad = PF.stale_face_slots([{"kind": "face", "character": "lead_f", "file": v1_face}])
+    assert bad and "没有身份脸" in bad[0]                                  # 槽里放 V1 的脸：挡
+    assert PF.manifest_missing_faces(["lead_f"]) == ["lead_f"]            # 露脸却没身份脸：挡
+    from ns_recipes import compiler as C
+    class _F:
+        name, id, identity_ref = "林晚", "lin_wan", None
+    class _S:
+        faces, keyframes = [_F()], {}
+    slots = C.ref_slots(_S(), {"ref2va": {"identity_crops": {"林晚": v1_face}, "project": "series10_v2"}})
+    assert not [s for s in slots if s.get("role") == "identity"]           # 不退回配方里的 V1 裁切
+    assert VQ.band_ref("lead_f") is None                                  # 复核带没有参照 = 复核失败（失败关闭）
+    import remote_score as RS
+    monkeypatch.setattr(AR, "face_of", lambda pj, cid: "assets_v2/characters/lead_f/face/lead_f_face_v1.png" if cid == "lead_f" else v1_face)
+    assert RS.local_faces("series10_v2") == {"lead_f": "assets_v2/characters/lead_f/face/lead_f_face_v1.png"}   # 只按清单角色上传
+
+
+def test_continuity_paths_follow_current_run(monkeypatch, tmp_path):
+    """AUDIT-M I-14：跨镜连贯的剧本 / 出图目录按当前剧取（runs.script_path / renders_dir），不写死 V1 的 data/renders"""
+    from ns_agent.vqa import continuity as CT
+    class _R:
+        @staticmethod
+        def script_path():
+            return tmp_path / "script_v2.json"
+        @staticmethod
+        def renders_dir():
+            return tmp_path / "renders"
+    monkeypatch.setattr(CT, "_runs", lambda: _R)
+    (tmp_path / "renders/ep01/S1").mkdir(parents=True)
+    (tmp_path / "renders/ep01/S1/takes.json").write_text(json.dumps({"active": {"image": 1}, "takes": [
+        {"stage": "image", "n": 1, "file": "nope.png"}]}), encoding="utf-8")
+    assert CT.renders_dir() == tmp_path / "renders" and CT.script_file() == tmp_path / "script_v2.json"
+    assert CT.current_first("ep01-S1") is None                            # 读的是 V2 的目录（文件不在 → None），不是 V1 的

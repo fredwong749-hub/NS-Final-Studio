@@ -34,3 +34,26 @@ def test_busy_hands_over_two_beats():
     r = RC.mirror_hand_checks([S(1)], [b])
     assert not r[2][0] and "3 拍" in r[2][1]
     assert RC.mirror_hand_checks([S(1, 10)], [b])[2][0]          # 镜长 > 8 秒不判
+
+
+def test_rule_enforced_and_wired():
+    """总调度 11-02：K-WRT-211 不能是假强制——规则 enforced:true + check 指向本文件，生成索引一致，检查真的接进补丁环和导入闸门"""
+    import json
+    import yaml
+    rules = yaml.safe_load((ROOT / "knowledge/rules/writer_series10.yaml").read_text(encoding="utf-8"))["rules"]
+    r = next(x for x in rules if x["id"] == "K-WRT-211")
+    assert r.get("enforced") is True and "tests/test_k211.py" in (r.get("check") or [])
+    idx = json.loads((ROOT / "knowledge/generated/index.json").read_text(encoding="utf-8"))
+    items = idx.get("rules") if isinstance(idx, dict) else idx
+    g = next(x for x in items if x.get("id") == "K-WRT-211")
+    assert g.get("enforced") is True
+    af = (ROOT / "tools/script_rsi/autoflow.py").read_text(encoding="utf-8")
+    ra = (ROOT / "tools/script_rsi/rubric_audit.py").read_text(encoding="utf-8")
+    assert "mirror_hand_checks" in af and "mirror_hand_checks" in ra
+
+
+def test_v2_clean_cut_run_enforces_v3_and_k211():
+    """V2（CLEAN_CUT.json 的 run）不靠逐集 .v3 标记：补丁环和导入闸门整季开 v3 / K-WRT-211"""
+    ag = (ROOT / "tools/script_rsi/autoflow_agent.py").read_text(encoding="utf-8")
+    ra = (ROOT / "tools/script_rsi/rubric_audit.py").read_text(encoding="utf-8")
+    assert 'or clean_cut(run_dir)' in ag and '"CLEAN_CUT.json").exists()' in ra

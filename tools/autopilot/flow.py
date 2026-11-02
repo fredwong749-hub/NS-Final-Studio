@@ -846,7 +846,7 @@ def autoflow_due(root: Path = ROOT) -> list[dict]:
         for ep, (_, f, pk) in best.items():
             mk = (pk.get("output") or {}).get("done_marker")
             if mk and (root / mk).exists():
-                due.append({"run": run_dir.name, "episode": ep, "package": f.name, "marker": mk, "cmd": pk.get("advance_cmd"),
+                due.append({"run": run_dir.name, "episode": ep, "package": f.name, "marker": mk, "cmd": None,
                             "sig": f"{f.name}@{(root / mk).stat().st_mtime:.0f}"})
         for f in (run_dir / "writer_out").glob("P4_ep*_*.md.done") if (run_dir / "writer_out").exists() else []:
             m = _re.match(r"P4_ep(\d+)_[ra]\d+\.md\.done$", f.name)
@@ -857,13 +857,21 @@ def autoflow_due(root: Path = ROOT) -> list[dict]:
             name = f.name[: -len(".done")]
             if name not in done and not any(x["run"] == run_dir.name and x["episode"] == ep for x in due):
                 due.append({"run": run_dir.name, "episode": ep, "package": name, "marker": _rel(root, f),
-                            "cmd": f"{PY} tools/script_rsi/autoflow.py run --run-dir {_rel(root, run_dir)} --episode {ep} --backend {writer_backend(root)} --import dry",
+                            "cmd": None,
                             "sig": f"{name}@{f.stat().st_mtime:.0f}"})
     return due
 
 
 def autoflow_tick(root: Path = ROOT, apply: bool = True, timeout_s: int = 120) -> dict:
-    """按集串行推进；同一个包 + 交稿时刻只推一次（data/autopilot/flow/autoflow_tick.json 记账）；每集 work_epNN/flow_tick.lock 防并发"""
+    """（已停用推进，总调度 11-02 W-23 / 根因模式 1 双入口）写作链只留一个推进入口：tools/script_rsi/autoflow.py（网页 /repair、.done 守护 watch），
+    每次推进记 <run>/autoflow.log（source cli / web / daemon）。这里只报告“哪些集交了稿在等推进”，不再执行任何推进命令。
+    19:17:06 事故：本函数看到 .done 就执行写作包里的 advance_cmd，越过了 P1 闸门出了 P2 包。"""
+    due = autoflow_due(root)
+    return {"ok": True, "ran": [], "due": due, "note": "推进统一由 autoflow.py watch / 网页 /repair 负责；autoflow_tick 只报告"}
+
+
+def _autoflow_tick_retired(root: Path = ROOT, apply: bool = True, timeout_s: int = 120) -> dict:
+    """旧实现（留档不调用）：按集串行推进；同一个包 + 交稿时刻只推一次；每集 work_epNN/flow_tick.lock 防并发"""
     memo_p = root / "data/autopilot/flow/autoflow_tick.json"
     memo = _jl(memo_p, {}) or {}
     ran = []

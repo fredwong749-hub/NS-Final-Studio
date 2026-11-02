@@ -1,0 +1,1941 @@
+{
+ "sources": [
+  {
+   "path": "D:\\NS-Final Studio\\data\\staging_v3\\merged\\漆皮之下·十日_series10_v1_ep01-10.md",
+   "sha256": "e79c896d8005aa136fb81410a71c28ae6d852ee9643223a3cdfeabc3dfc22cd2",
+   "version": "v3",
+   "episodes": []
+  },
+  {
+   "path": "data\\staging_v3\\merged\\漆皮之下·十日_series10_v1_lookfix_ep04_ep07_v3.md",
+   "sha256": "180e283a438ea650dae5b8d3501b8eb922662b20fff0897e1bbe3b9113b9c225",
+   "version": "v3",
+   "episodes": []
+  },
+  {
+   "path": "D:\\NS-Final Studio\\data\\staging_v3\\merged\\漆皮之下·十日_series10_v1_lookfix_ep09_10_v3.md",
+   "sha256": "dccad7531988d4cfa758baf5cb00676f017026b1492e3e09f058732c937c0ba8",
+   "version": "v3",
+   "episodes": []
+  },
+  {
+   "path": "D:\\NS-Final Studio\\data\\staging_v3\\merged\\漆皮之下·十日_series10_v1_lookfix_ep03_v3.md",
+   "sha256": "bc972c0984bfd2663775a0710ae3c2f611214224737cfd4f20a6bd1ada3ff092",
+   "version": "v3",
+   "episodes": []
+  },
+  {
+   "path": "D:\\NS-Final Studio\\data\\staging_v3\\merged\\漆皮之下·十日_series10_v1_lookfix_ep03_04_05_06_v3.md",
+   "sha256": "9496393fab49e0bbc75570277da17782cc577c977f38ed0903c375ef0f78a978",
+   "version": "v3",
+   "episodes": []
+  },
+  {
+   "path": "D:\\NS-Final Studio\\data\\staging_v3\\merged\\漆皮之下·十日_series10_v1_qwch6_ep03_08_10_v3.md",
+   "sha256": "4f12caa9658ae574b4ff85f9cb6ad1262863cf47fb06f2a5fb83e350e00fc2ca",
+   "version": "v3",
+   "episodes": []
+  },
+  {
+   "path": "D:\\NS-Final Studio\\data\\staging_v3\\merged\\漆皮之下·十日_series10_v1_rsiD07_ep01_ep02_ep03_ep04_ep05_ep06_ep07_ep08_ep09_ep10_v3.md",
+   "sha256": "75dbfdb9bb68c2d3fdd96d22201ff0771408c0215d16a0a58591f902d5acb235",
+   "version": "v3",
+   "episodes": []
+  },
+  {
+   "path": "D:\\NS-Final Studio\\data\\staging_v3\\merged\\漆皮之下·十日_series10_v1_hwd_ep04_v3.md",
+   "sha256": "8a54a86fc085f40be7a43d4371ea8e20eaafb50b43a55237ecedcd8d2be7febd",
+   "version": "v3",
+   "episodes": [
+    4
+   ]
+  },
+  {
+   "path": "D:\\NS-Final Studio\\data\\staging_v3\\merged\\漆皮之下·十日_series10_v1_hwd_ep02_v3.md",
+   "sha256": "ee46fc387e5303c2e763e20beffff2474ab7a9f7fed963cdad20a446104a22cd",
+   "version": "v3",
+   "episodes": []
+  },
+  {
+   "path": "D:\\NS-Final Studio\\data\\staging_v3\\merged\\漆皮之下·十日_series10_v1_hwd_ep06_v3.md",
+   "sha256": "f427cb26b926639b4e8fd8f23d2b3d91970e598db50ca7f792ff7de920020489",
+   "version": "v3",
+   "episodes": [
+    6
+   ]
+  },
+  {
+   "path": "D:\\NS-Final Studio\\data\\staging_v3\\merged\\漆皮之下·十日_series10_v1_hwd_ep08_v3.md",
+   "sha256": "0f39d6d9b7f1b8fab06581b156cea8451e3e2c6fd3258ca3ea30b7e25a1ffd9a",
+   "version": "v3",
+   "episodes": [
+    8
+   ]
+  },
+  {
+   "path": "D:\\NS-Final Studio\\data\\staging_v3\\merged\\漆皮之下·十日_series10_v1_hwd_ep01_v3.md",
+   "sha256": "5e4ab70f9cf04d518fa0c7727b95adfceb600c74bbacd058b3d7199d2db85b0e",
+   "version": "v3",
+   "episodes": [
+    1
+   ]
+  },
+  {
+   "path": "D:\\NS-Final Studio\\data\\staging_v3\\merged\\漆皮之下·十日_series10_v1_hwd_ep05_v3.md",
+   "sha256": "7c617356ad1a4da883bb3caa4e81b9461ab35be06a6c2c88b56383bef39f92dc",
+   "version": "v3",
+   "episodes": [
+    5
+   ]
+  },
+  {
+   "path": "D:\\NS-Final Studio\\data\\staging_v3\\merged\\漆皮之下·十日_series10_v1_hwd_ep07_v3.md",
+   "sha256": "273ac15adfb7a3c982ab2bcb96324e6a175d3d861755a8878493ef16abcc2900",
+   "version": "v3",
+   "episodes": [
+    7
+   ]
+  },
+  {
+   "path": "D:\\NS-Final Studio\\data\\staging_v3\\merged\\漆皮之下·十日_series10_v1_hwd_ep09_v3.md",
+   "sha256": "39283298fc2d9eab049d1d98e0e21671af0c85f3446f795dd6df4d115b14603d",
+   "version": "v3",
+   "episodes": [
+    9
+   ]
+  },
+  {
+   "path": "D:\\NS-Final Studio\\data\\staging_v3\\merged\\漆皮之下·十日_series10_v1_hwd_ep03_v3.md",
+   "sha256": "765e4c1f44991b661293479c4e4a3a703b6045de3aee1e68009d862e903a6f7b",
+   "version": "v3",
+   "episodes": [
+    3
+   ]
+  },
+  {
+   "path": "D:\\NS-Final Studio\\data\\staging_v3\\merged\\漆皮之下·十日_series10_v1_hwd_ep10_v3.md",
+   "sha256": "76d22c0dae5dc7eeb3c753288a1088ea51bdd1fd62180afc7f4c48c240b1b611",
+   "version": "v3",
+   "episodes": [
+    10
+   ]
+  },
+  {
+   "path": "D:\\NS-Final Studio\\data\\staging_v3\\merged\\漆皮之下·十日_series10_v1_fb0001_ep02_v3.md",
+   "sha256": "3f024c4ec18e29975b34cd3c25ea3d652964f7940b05b352773c3855d88128ad",
+   "version": "v3",
+   "episodes": [
+    2
+   ]
+  },
+  {
+   "path": "D:\\NS-Final Studio\\script play lib\\为他而骚（image提示词） v2.md",
+   "sha256": "307f2f9e619dd4cdebef6d52ddceb7fe3c5871f999173b0e155fc5e3bfd55683",
+   "version": null,
+   "episodes": []
+  }
+ ],
+ "globals": {
+  "character_locks": [
+   {
+    "name": "林晚",
+    "description": "22岁中国成年女性，蓝发及腰、齐刘海、冷白皮肤、G罩杯、长腿，真人写实；手指甲为5厘米超长透明水晶甲、镶满钻石饰品"
+   },
+   {
+    "name": "顾沉",
+    "description": "34岁成年男性CEO，黑色高定衬衫，成熟克制英俊"
+   },
+   {
+    "name": "陈宇",
+    "description": "23岁成年男性，温暖阳光，休闲装"
+   },
+   {
+    "name": "阿岚",
+    "description": "26岁成年女性，娇小，黑色齐耳短发，黑色，右眉尾一道浅疤，右眉尾浅疤"
+   }
+  ],
+  "motion_suffix": "真人写实摄影，8K，自然皮肤纹理毛孔，电影级布光，浅景深，9:16竖屏，单一运镜，动作流畅，专业电影镜头画面感，画面干净，徕卡镜头级锐利度与通透质感，85mm人像镜头f/1.2大光圈，主体锐利对焦，前景与背景奶油般柔焦虚化、柔和圆形光斑，浓郁饱和的暖色调电影调色，色彩丰富艳丽、通透明亮，柔和的大面积光源与暖调轮廓光、高光柔和不过曝，皮肤通透有真实质感，无字幕、无文字、无水印",
+  "image_suffix": "专业电影镜头画面感，画面干净，徕卡镜头级锐利度与通透质感，85mm人像镜头f/1.2大光圈，主体锐利对焦，前景与背景奶油般柔焦虚化、柔和圆形光斑，浓郁饱和的暖色调电影调色，色彩丰富艳丽、通透明亮，柔和的大面积光源与暖调轮廓光、高光柔和不过曝，皮肤通透有真实质感，无字幕、无文字、无水印",
+  "base_negative": "动漫脸、CGI感、娃娃脸、肢体变形、多余手指、脸跳变、未成年人外观、水印、横构图、字幕、画面文字、灰暗脏乱的色调",
+  "lora_triggers": [
+   {
+    "trigger": "nprng2",
+    "kind": "image",
+    "description": "乳环：左右乳头各一枚细金属环（共2枚）",
+    "file": "jewellery_nprng2_v1.safetensors",
+    "strength": [
+     0.6,
+     0.9
+    ],
+    "starts": "ep09起"
+   },
+   {
+    "trigger": "lbrng9",
+    "kind": "image",
+    "description": "阴环：九枚小环，左右大阴唇各4枚、阴蒂包皮正中1枚",
+    "file": "jewellery_lbrng9_v1.safetensors",
+    "strength": [
+     0.6,
+     0.9
+    ],
+    "starts": "ep15起（逐步到9枚）"
+   },
+   {
+    "trigger": "lbrng9_beads",
+    "kind": "image",
+    "description": "阴环挂铁珠串：九枚阴环各挂一颗5mm不锈钢本色小钢珠（共9颗），左右各4、阴蒂中间1",
+    "file": "jewellery_lbrng9_beads_v1.safetensors",
+    "strength": [
+     0.6,
+     0.9
+    ],
+    "starts": "ep21起"
+   },
+   {
+    "trigger": "hh12clear",
+    "kind": "image",
+    "description": "12cm透明细高跟（鞋跟直径约6毫米、细如一根筷子的针形细跟，跟高12厘米）",
+    "file": "wardrobe_heels_v1.safetensors",
+    "strength": [
+     0.6,
+     0.8
+    ],
+    "starts": null
+   },
+   {
+    "trigger": "hh12patent",
+    "kind": "image",
+    "description": "12cm黑漆皮侧开细高跟（像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利；鞋跟直径约6毫米、细如一根筷子的针形细跟，跟高12厘米；偶尔替换透明款）",
+    "file": "wardrobe_heels_v1.safetensors",
+    "strength": [
+     0.6,
+     0.8
+    ],
+    "starts": null
+   },
+   {
+    "trigger": "ptxcorset",
+    "kind": "image",
+    "description": "黑色漆皮束腰（像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利）",
+    "file": "wardrobe_clothes_v1.safetensors",
+    "strength": [
+     0.6,
+     0.8
+    ],
+    "starts": null
+   },
+   {
+    "trigger": "ptxharness",
+    "kind": "image",
+    "description": "黑色漆皮捆绑内衣（极少布料：开杯完全露胸、颈挂细带配金属扣、胸前O环、胸下一条窄漆皮带、腹部中央单带向下分叉成开裆细带丁字、胯侧细带与金属扣；像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利）",
+    "file": "wardrobe_clothes_v1.safetensors",
+    "strength": [
+     0.6,
+     0.8
+    ],
+    "starts": null
+   },
+   {
+    "trigger": "ptxtrench",
+    "kind": "image",
+    "description": "黑色漆皮长风衣（像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利）",
+    "file": "wardrobe_clothes_v1.safetensors",
+    "strength": [
+     0.6,
+     0.8
+    ],
+    "starts": null
+   },
+   {
+    "trigger": "ltxsuit",
+    "kind": "image",
+    "description": "乳胶连体衣",
+    "file": "wardrobe_clothes_v1.safetensors",
+    "strength": [
+     0.6,
+     0.8
+    ],
+    "starts": null
+   },
+   {
+    "trigger": "lnwan01",
+    "kind": "video",
+    "description": "林晚：蓝发及腰、齐刘海、冷白皮肤（来自你提供的定妆图）",
+    "file": "lin_wan_h3_v1.safetensors",
+    "strength": [
+     0.6,
+     1.0
+    ],
+    "starts": null
+   }
+  ],
+  "references": [
+   {
+    "id": "REF-LW-01",
+    "description": "林晚素颜通勤态",
+    "usage": "ep01-08,49,51-58等素颜集的垫图seed"
+   },
+   {
+    "id": "REF-LW-02",
+    "description": "林晚浓妆女王态",
+    "usage": "ep06后浓妆集垫图"
+   },
+   {
+    "id": "REF-LW-03",
+    "description": "林晚全套CHAIN态(正/背/侧三张)",
+    "usage": "ep21起全套集垫图"
+   },
+   {
+    "id": "REF-GC-01",
+    "description": "顾沉半身标准像",
+    "usage": null
+   },
+   {
+    "id": "REF-CY-01",
+    "description": "陈宇半身标准像",
+    "usage": null
+   }
+  ],
+  "decor_schedule": [
+   {
+    "first_ep": 1,
+    "last_ep": 8,
+    "state": "D0",
+    "note": "",
+    "overrides": {}
+   },
+   {
+    "first_ep": 9,
+    "last_ep": 14,
+    "state": "D1",
+    "note": "",
+    "overrides": {}
+   },
+   {
+    "first_ep": 15,
+    "last_ep": 15,
+    "state": "D2",
+    "note": "",
+    "overrides": {}
+   },
+   {
+    "first_ep": 16,
+    "last_ep": 18,
+    "state": "D3",
+    "note": "(17为D4礼服)",
+    "overrides": {
+     "17": "D4"
+    }
+   },
+   {
+    "first_ep": 19,
+    "last_ep": 20,
+    "state": "D5",
+    "note": "",
+    "overrides": {}
+   },
+   {
+    "first_ep": 21,
+    "last_ep": 25,
+    "state": "D6",
+    "note": "",
+    "overrides": {}
+   },
+   {
+    "first_ep": 26,
+    "last_ep": 26,
+    "state": "D7",
+    "note": "",
+    "overrides": {}
+   },
+   {
+    "first_ep": 27,
+    "last_ep": 27,
+    "state": "D8",
+    "note": "",
+    "overrides": {}
+   },
+   {
+    "first_ep": 28,
+    "last_ep": 29,
+    "state": "D9",
+    "note": "(29起含舌钉)",
+    "overrides": {}
+   },
+   {
+    "first_ep": 30,
+    "last_ep": 52,
+    "state": "D10",
+    "note": "",
+    "overrides": {}
+   },
+   {
+    "first_ep": 53,
+    "last_ep": 53,
+    "state": "D9",
+    "note": "+珠链在匣(DN)",
+    "overrides": {}
+   },
+   {
+    "first_ep": 54,
+    "last_ep": 55,
+    "state": "D10",
+    "note": "隐藏",
+    "overrides": {}
+   },
+   {
+    "first_ep": 56,
+    "last_ep": 56,
+    "state": "DN",
+    "note": "",
+    "overrides": {}
+   },
+   {
+    "first_ep": 57,
+    "last_ep": 57,
+    "state": "D10",
+    "note": "",
+    "overrides": {}
+   },
+   {
+    "first_ep": 58,
+    "last_ep": 58,
+    "state": "DN",
+    "note": "",
+    "overrides": {}
+   },
+   {
+    "first_ep": 59,
+    "last_ep": 60,
+    "state": "D10",
+    "note": "",
+    "overrides": {}
+   }
+  ],
+  "daily_outfit": "林晚每天都穿得性感，从不保守；上班/通勤也穿黑色高亮镜面漆皮超短裙（像抹了油一样的镜面漆皮），配修身上衣与12cm针形细跟高跟鞋；剧本中“通勤装/职业装”均按此理解。",
+  "decor_tables": {},
+  "scene_library": [
+   {
+    "scene_id": "sk_office_night",
+    "name": "深夜写字楼办公区角落",
+    "space": "开放式办公区一角，落地窗外城市霓虹，一张办公桌与一把转椅，桌面有文件与键盘",
+    "time_of_day": "深夜",
+    "light": "暖黄台灯侧逆光，屏幕冷白光，窗外霓虹虚化成光斑",
+    "fixtures": "办公桌、转椅、台灯",
+    "defined_in": [
+     null
+    ],
+    "conflicts": [],
+    "source_line": 110
+   },
+   {
+    "scene_id": "sk_gu_apartment",
+    "name": "顾沉公寓",
+    "space": "深色木地板铺开的开阔客厅，一侧是全身镜与衣帽间推拉门，暖光壁灯沿墙排布，衣帽间内挂着成排衣物与漆皮短裙",
+    "time_of_day": "夜",
+    "light": "暖黄壁灯从侧后方打来，镜面反射柔光",
+    "fixtures": "全身镜、衣帽间推拉门、深色木地板",
+    "defined_in": [
+     null,
+     3,
+     5,
+     6,
+     7,
+     8,
+     9
+    ],
+    "conflicts": [],
+    "source_line": 111
+   },
+   {
+    "scene_id": "sk_home_kitchen",
+    "name": "林晚与陈宇的家",
+    "space": "小户型客厅与厨房相连，小餐桌靠墙，卧室门半掩露出双人床一角，浴室门在走廊尽头",
+    "time_of_day": "夜",
+    "light": "暖黄居家顶灯，厨房方向略亮",
+    "fixtures": "小餐桌、双人床、浴室门",
+    "defined_in": [
+     null,
+     2,
+     4,
+     9,
+     10
+    ],
+    "conflicts": [],
+    "source_line": 112
+   },
+   {
+    "scene_id": "sk_studio",
+    "name": "穿孔纹身工作室",
+    "space": "白墙房间，中央一张器械台，墙边金属器械盘与冷光灯架，地面浅灰",
+    "time_of_day": "日",
+    "light": "冷白顶光与器械台侧灯，墙面反光",
+    "fixtures": "器械台、器械盘、冷光灯架",
+    "defined_in": [
+     null,
+     5
+    ],
+    "conflicts": [],
+    "source_line": 113
+   },
+   {
+    "scene_id": "sk_elevator",
+    "name": "电梯与楼道",
+    "space": "金属门电梯轿厢，镜面墙三面环绕，楼层按钮面板在门侧，楼道昏黄灯延伸至转角",
+    "time_of_day": "夜",
+    "light": "昏黄楼道灯从门缝渗入，轿厢顶灯偏冷",
+    "fixtures": "金属电梯门、镜面墙、楼层按钮面板",
+    "defined_in": [
+     null,
+     2
+    ],
+    "conflicts": [],
+    "source_line": 114
+   },
+   {
+    "scene_id": "sk_alley_ballroom",
+    "name": "街巷与酒会厅",
+    "space": "黄昏小巷砖墙与路灯，尽头通向会场；会场内水晶灯垂落，长桌与高脚杯陈列",
+    "time_of_day": "黄昏至夜",
+    "light": "巷内黄昏暖橙余光，会场水晶灯暖白高光",
+    "fixtures": "砖墙路灯、水晶吊灯、长桌",
+    "defined_in": [
+     null,
+     7,
+     8
+    ],
+    "conflicts": [],
+    "source_line": 115
+   }
+  ],
+  "character_registry": [
+   {
+    "name": "林晚",
+    "char_id": "lin_wan",
+    "zh": "系统锁",
+    "en": "a 22-year-old Chinese woman with waist-length misty sky-blue straight hair with a blunt fringe, cool pale skin and a tall slender build",
+    "voice": "a mid-high sweet breathy voice, natural pace",
+    "defined_in": [
+     null,
+     1
+    ],
+    "conflicts": [],
+    "source_line": 102
+   },
+   {
+    "name": "顾沉",
+    "char_id": "gu_chen",
+    "zh": "系统锁",
+    "en": "a 34-year-old East Asian man with short black hair, a composed handsome face, fair skin and a broad-shouldered build",
+    "voice": "a low restrained voice, natural pace",
+    "defined_in": [
+     null,
+     1
+    ],
+    "conflicts": [],
+    "source_line": 103
+   },
+   {
+    "name": "陈宇",
+    "char_id": "chen_yu",
+    "zh": "系统锁",
+    "en": "a 23-year-old East Asian man with short black hair, a warm open face, fair skin and a lean build",
+    "voice": "a warm bright voice, natural pace",
+    "defined_in": [
+     null
+    ],
+    "conflicts": [],
+    "source_line": 104
+   },
+   {
+    "name": "阿岚",
+    "char_id": "ch_a_lan",
+    "zh": "26岁｜娇小｜黑色齐耳短发｜黑色｜右眉尾一道浅疤｜右眉尾浅疤",
+    "en": "a 26-year-old East Asian woman with short black hair, a round face, tan skin and a petite build",
+    "voice": "a low husky alto voice, natural pace",
+    "defined_in": [
+     null,
+     5
+    ],
+    "conflicts": [],
+    "source_line": 105
+   }
+  ]
+ },
+ "warnings": [
+  "合并导入：以 script_v2.20261102-142847.json 为底，替换集 [2]，其余 9 集保持不变"
+ ],
+ "episodes": [
+  {
+   "number": 1,
+   "title": "入职日的一瞥",
+   "high_intensity": false,
+   "tag": "",
+   "synopsis": "入职第一天的深夜加班，林晚被顾沉一眼看穿，他把外套披在她肩上，只留下两个字。",
+   "music": "低频电子铺底加稀疏钢琴单音，节奏缓慢克制，随顾沉出现加入低音弦乐；【BGM】A sparse piano motif over a low synth pad at 68 BPM in D minor, a single cello line entering in the second half, soft dynamics with a gradual swell.",
+   "music_bgm": "A sparse piano motif over a low synth pad at 68 BPM in D minor, a single cello line entering in the second half, soft dynamics with a gradual swell.",
+   "negative_extra": "",
+   "cast": [
+    "林晚",
+    "顾沉"
+   ],
+   "scene_ids": [
+    "sk_office_night"
+   ],
+   "looks": [
+    {
+     "character": "林晚",
+     "from_shot": null,
+     "slots": {
+      "服装": "米白衬衫配深灰铅笔裙，外罩短款西装外套",
+      "鞋": "透明12cm细高跟",
+      "妆": "素颜通勤，自然深棕色眼睛，唇色淡润",
+      "发": "雾霾天蓝色及腰直发（比参考图略深、带一点灰的真实染发色），齐刘海",
+      "甲": "5厘米超长透明水晶甲、镶满钻石饰品",
+      "饰品": "2件（细银链在颈间、钻石水晶甲在手上）"
+     },
+     "en": "an ivory blouse with a dark grey pencil skirt and a cropped blazer, transparent 12cm stiletto heels, a thin silver necklace",
+     "raw": "服装=米白衬衫配深灰铅笔裙，外罩短款西装外套｜鞋=透明12cm细高跟｜妆=素颜通勤，自然深棕色眼睛，唇色淡润｜发=雾霾天蓝色及腰直发（比参考图略深、带一点灰的真实染发色），齐刘海｜甲=5厘米超长透明水晶甲、镶满钻石饰品｜饰品=2件（细银链在颈间、钻石水晶甲在手上）｜EN=an ivory blouse with a dark grey pencil skirt and a cropped blazer, transparent 12cm stiletto heels, a thin silver necklace",
+     "source_line": 123
+    },
+    {
+     "character": "顾沉",
+     "from_shot": null,
+     "slots": {
+      "服装": "黑色高领毛衣配深灰西装",
+      "鞋": "黑色皮鞋",
+      "妆": "自然哑光，眉形利落",
+      "发": "黑色短发，向后梳整",
+      "甲": "修剪整齐的短甲",
+      "饰品": "1件（左手无名指旧银戒）"
+     },
+     "en": "a black turtleneck with a dark grey suit, black leather shoes, an old silver ring on the left ring finger",
+     "raw": "服装=黑色高领毛衣配深灰西装｜鞋=黑色皮鞋｜妆=自然哑光，眉形利落｜发=黑色短发，向后梳整｜甲=修剪整齐的短甲｜饰品=1件（左手无名指旧银戒）｜EN=a black turtleneck with a dark grey suit, black leather shoes, an old silver ring on the left ring finger",
+     "source_line": 124
+    }
+   ],
+   "shots": [
+    {
+     "episode": 1,
+     "index": 1,
+     "img_note": null,
+     "img_prompt": "lnwan01，特写，平视，林晚坐在转椅上，米白衬衫的袖口挽到手肘，外罩短款西装外套敞开，细银链贴在锁骨上，雾霾天蓝色及腰直发（比参考图略深、带一点灰的真实染发色），齐刘海垂在眉前，自然深棕色眼睛，5厘米超长透明水晶甲镶满钻石饰品的手指悬在键盘上方不动，侧脸朝窗，视线落在屏幕上的入职照片，深夜写字楼办公区角落，暖黄台灯从右侧逆光勾出发丝与颈线，屏幕冷白光从正面打在脸上，背景城市霓虹虚化成光斑，真实皮肤质感，可见细小毛孔与细软绒毛",
+     "img_triggers": [
+      "lnwan01"
+     ],
+     "motion_prompt": "lnwan01，camera push in 缓慢推近，林晚的手指悬在键盘上方不动，睫毛轻颤，视线从屏幕上的入职照片移向窗外的霓虹光斑，随后吸了一口气，指尖落回键盘边缘——特写，林晚侧脸朝窗，齐刘海垂在眉前，视线落在窗外光斑上，指尖搭在键盘边缘",
+     "motion_triggers": [
+      "lnwan01"
+     ],
+     "sound": "空调低鸣持续，键盘一声轻响后停；【配乐】进入，强度1，独白避让；【H3 audio】A low steady hum of air conditioning fills the office. One soft keyboard click, then silence. Distant traffic noise rises faintly from the street below.",
+     "sound_intimate": "",
+     "sound_h3": "A low steady hum of air conditioning fills the office. One soft keyboard click, then silence. Distant traffic noise rises faintly from the street below.",
+     "music_cue": "进入，强度1，独白避让",
+     "h3_prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 6.58-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] Live-action, cinematic, shallow depth of field, a close-up at eye level begins in the position, framing and lighting established by Picture 1, featuring a 22-year-old Chinese woman with waist-length misty sky-blue straight hair with a blunt fringe, cool pale skin and a tall slender build in an ivory blouse with a dark grey pencil skirt and a cropped blazer, transparent 12cm stiletto heels, a thin silver necklace, seated in an office chair at the corner of a dark office, her face turned in profile toward the window, lit by a warm yellow desk lamp from the right and cool white screen light from the front, her eyes resting on the ID photo glowing on the screen. The camera pushes in with small amplitude as her fingers hang still above the keys, her lashes flickering. At 00:02.000, her gaze slides from the screen to the neon glow beyond the window, her shoulders lowering. At 00:04.000, she draws a breath, her chest rising, her fingertips settling back on the keyboard edge as the shot ends. The woman settles into the profile pose established by Picture 2 at the end of the shot.\n\noverall_soundscape: A low steady hum of air conditioning fills the office. One soft keyboard click, then silence. Distant traffic noise rises faintly from the street below.\n\nnon_diegetic_music: A sparse piano motif at 68 BPM in D minor over a low synth pad, entering softly and holding at a low level.",
+     "h3_check": null,
+     "voiceover": {
+      "note": "林晚，低声自语",
+      "text": "第一天，我想让他记住我。",
+      "speaker": "林晚"
+     },
+     "dialogue_raw": null,
+     "dialogue": [],
+     "dialogue_stage": [],
+     "extras": [],
+     "decor_state": "D0",
+     "scene_id": "sk_office_night",
+     "scene_detail": "办公桌一角，台灯亮着，键盘与文件摊开，转椅偏向桌侧",
+     "cast": [
+      {
+       "name": "林晚",
+       "presence": "在画",
+       "x": "中",
+       "depth": "前",
+       "part": null,
+       "raw": "林晚（在画｜中｜前）"
+      }
+     ],
+     "cast_raw": "林晚（在画｜中｜前）",
+     "link": "换场",
+     "link_carry": "无",
+     "duration": 6,
+     "duration_source": "script",
+     "adult": false,
+     "adult_reasons": [],
+     "source_line": 132
+    },
+    {
+     "episode": 1,
+     "index": 8,
+     "img_note": null,
+     "img_prompt": "近景，平视，林晚在画面左侧，肩上披着深色外套，米白衬衫与深灰铅笔裙，外罩短款西装外套敞开，细银链在锁骨，雾霾天蓝色及腰直发（比参考图略深、带一点灰的真实染发色），齐刘海，自然深棕色眼睛，视线落在画面右侧顾沉的手上，顾沉的手在她肩头停着，5厘米超长透明水晶甲的手放在桌沿，深夜写字楼办公区角落，暖黄台灯右侧逆光勾出发丝与颈线，窗外霓虹在她侧脸虚成光斑，真实皮肤质感，可见细小毛孔与细软绒毛",
+     "img_triggers": [],
+     "motion_prompt": "lnwan01，camera push in 缓慢推近，顾沉的手在林晚肩头停住，她抬起下巴，嘴唇轻轻抿住，肩膀绷直，随后他的手指离开她肩头收回画面右侧，她的视线追着那只手移过去，胸口起伏一次——近景，林晚侧脸朝画面右侧，外套披在肩上，视线落在画面右侧",
+     "motion_triggers": [
+      "lnwan01"
+     ],
+     "sound": "衣料摩擦声，轻浅呼吸；【配乐】推到高点，强度3，对白避让；【H3 audio】Fabric rustles as the hand withdraws from her shoulder. Her light breathing is audible in the quiet corner. The office hum stays low beneath.",
+     "sound_intimate": "",
+     "sound_h3": "Fabric rustles as the hand withdraws from her shoulder. Her light breathing is audible in the quiet corner. The office hum stays low beneath.",
+     "music_cue": "推到高点，强度3，对白避让",
+     "h3_prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 6.58-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] Live-action, cinematic, shallow depth of field, a close shot at eye level begins in the position, framing and lighting established by Picture 1, featuring a 22-year-old Chinese woman with waist-length misty sky-blue straight hair with a blunt fringe, cool pale skin and a tall slender build in an ivory blouse with a dark grey pencil skirt and a cropped blazer, transparent 12cm stiletto heels, a thin silver necklace, a dark coat draped over her shoulders, seated at the left side of frame, her eyes on the hand at her shoulder, and the hand of a 34-year-old East Asian man with a low restrained voice, natural pace resting at the right of frame, in a dark office corner lit by a warm yellow desk lamp from the right and neon glow from the window. The camera pushes in with small amplitude as his hand pauses on her shoulder, her lashes lifting. At 00:02.000, a 34-year-old East Asian man with a low restrained voice, natural pace (S1) says in an off-screen voiceover: <d>[Chinese] 别洗。</d> while his lips remain completely closed. She lifts her chin, her lips pressing together, her shoulders drawing straight. At 00:04.000, his fingers leave her shoulder and withdraw toward the right of frame, her eyes following the hand, her chest rising once as the shot ends. The woman settles into the quiet close-up established by Picture 2 at the end of the shot.\n\noverall_soundscape: Fabric rustles as the hand withdraws from her shoulder. Her light breathing is audible in the quiet corner. The office hum stays low beneath.\n\nnon_diegetic_music: Cello and piano at 68 BPM in D minor reach their loudest point, the strings surging and then easing.",
+     "h3_check": null,
+     "voiceover": null,
+     "dialogue_raw": "（顾沉，低沉简短）“别洗。”",
+     "dialogue": [
+      {
+       "speaker_note": "顾沉，低沉简短",
+       "text": "别洗。",
+       "stage": null,
+       "speaker": "顾沉"
+      }
+     ],
+     "dialogue_stage": [],
+     "extras": [],
+     "decor_state": "D0",
+     "scene_id": "sk_office_night",
+     "scene_detail": "办公桌侧，走廊暗处在画面右侧，台灯在后方",
+     "cast": [
+      {
+       "name": "林晚",
+       "presence": "在画",
+       "x": "左",
+       "depth": "前",
+       "part": null,
+       "raw": "林晚（在画｜左｜前）"
+      },
+      {
+       "name": "顾沉",
+       "presence": "局部",
+       "x": "右",
+       "depth": null,
+       "part": "手",
+       "raw": "顾沉（局部｜手｜右）"
+      }
+     ],
+     "cast_raw": "林晚（在画｜左｜前）、顾沉（局部｜手｜右）",
+     "link": "接力",
+     "link_carry": "动作｜外套停在身前",
+     "duration": 6,
+     "duration_source": "script",
+     "adult": false,
+     "adult_reasons": [],
+     "source_line": 292
+    },
+    {
+     "episode": 1,
+     "index": 9,
+     "img_note": null,
+     "img_prompt": "中景，平视，林晚站在画面左侧，肩上披着深色外套，米白衬衫与深灰铅笔裙，外罩短款西装外套敞开，细银链在锁骨，雾霾天蓝色及腰直发（比参考图略深、带一点灰的真实染发色），齐刘海，自然深棕色眼睛，视线朝画面右侧的走廊暗处，5厘米超长透明水晶甲镶满钻石饰品的手抬到肩头，指尖停在肩头；顾沉的背影在画面右侧远处，黑色高领毛衣配深灰西装，背对镜头朝走廊暗处走，深夜写字楼办公区角落，暖黄台灯右侧逆光，走廊尽头安全出口绿光，背景霓虹虚化，真实皮肤质感，可见细小毛孔与细软绒毛",
+     "img_triggers": [],
+     "motion_prompt": "camera static shot 固定机位，顾沉的背影朝走廊暗处迈步走远，林晚的视线追着他的背影，手指抬到肩头，指尖停在肩头，肩膀轻轻一颤，随后视线留在暗处，嘴唇轻轻张开——中景，林晚站在画面左侧，指尖停在肩头，顾沉的背影没入画面右侧暗处",
+     "motion_triggers": [],
+     "sound": "皮鞋踏地声渐远，布料在指间轻响，空调低鸣；【配乐】延续，强度2，独白避让；【H3 audio】Leather shoes step away into the dark corridor. Fabric rustles faintly under her fingertips. The air conditioning hum fills the empty office.",
+     "sound_intimate": "",
+     "sound_h3": "Leather shoes step away into the dark corridor. Fabric rustles faintly under her fingertips. The air conditioning hum fills the empty office.",
+     "music_cue": "延续，强度2，独白避让",
+     "h3_prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 6.58-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] Live-action, cinematic, shallow depth of field, a medium shot at eye level begins in the position, framing and lighting established by Picture 1, featuring a 22-year-old Chinese woman with waist-length misty sky-blue straight hair with a blunt fringe, cool pale skin and a tall slender build in an ivory blouse with a dark grey pencil skirt and a cropped blazer, transparent 12cm stiletto heels, a thin silver necklace, a dark coat draped over her shoulders, standing at the left side of frame with her eyes on the corridor, and a 34-year-old East Asian man with short black hair, a composed handsome face, fair skin and a broad-shouldered build in a black turtleneck with a dark grey suit, black leather shoes, an old silver ring on the left ring finger, walking away at the right side of frame with his back to the room, in a dark office corner lit by a warm yellow desk lamp from the right and a green exit light down the corridor. The camera holds a static shot as he steps away toward the dark corridor, his jaw tight and his eyelids lowered, her eyes following his back with her lashes lifting, her fingers lifting to her shoulder. At 00:02.000, her fingertips pause at her shoulder, her shoulder trembling lightly, his gaze on the dark corridor and his mouth flat, his back growing smaller at the right of frame. At 00:04.000, her eyes stay on the dark corridor, her lips parting softly, her fingertips resting at her shoulder, his gaze still down the corridor with his jaw easing as the shot ends. The woman settles into the standing pose established by Picture 2 at the end of the shot.\n\noverall_soundscape: Leather shoes step away into the dark corridor. Fabric rustles faintly under her fingertips. The air conditioning hum fills the empty office.\n\nnon_diegetic_music: Piano and cello continue at 68 BPM in D minor at a moderate level, the strings holding a steady pulse.",
+     "h3_check": null,
+     "voiceover": {
+      "note": "林晚，低声",
+      "text": "外套上有他的味道。今晚，我大概睡不着了。",
+      "speaker": "林晚"
+     },
+     "dialogue_raw": null,
+     "dialogue": [],
+     "dialogue_stage": [],
+     "extras": [],
+     "decor_state": "D0",
+     "scene_id": "sk_office_night",
+     "scene_detail": "办公桌侧，走廊暗处在画面右侧，尽头安全出口绿光亮着，台灯在后方",
+     "cast": [
+      {
+       "name": "林晚",
+       "presence": "在画",
+       "x": "左",
+       "depth": "中",
+       "part": null,
+       "raw": "林晚（在画｜左｜中）"
+      },
+      {
+       "name": "顾沉",
+       "presence": "在画",
+       "x": "右",
+       "depth": "后",
+       "part": null,
+       "raw": "顾沉（在画｜右｜后）"
+      }
+     ],
+     "cast_raw": "林晚（在画｜左｜中）、顾沉（在画｜右｜后）",
+     "link": "接力",
+     "link_carry": "动作｜手收回画面右侧",
+     "duration": 6,
+     "duration_source": "script",
+     "adult": false,
+     "adult_reasons": [],
+     "source_line": 316
+    }
+   ],
+   "extras": [
+    {
+     "label": "站位",
+     "text": "林晚：侧右｜坐在转椅上，上身微前倾"
+    },
+    {
+     "label": "光线",
+     "text": "主光=右侧暖黄台灯侧逆光｜补光=正面屏幕冷白光｜轮廓光=窗外霓虹蓝紫虚光｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Static Shot｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜林晚的视线从窗外收回，落到桌角工牌上自己的名字，手指在桌沿敲了一下｜视线=桌角工牌｜表情=眉心轻皱｜反应=—｜运镜=Static Shot｜声音=键盘轻响｜交接=手指停在桌沿；2–4秒｜她低下头看工牌，另一只手把纸页拨开一页｜视线=桌角工牌｜表情=眼睑垂下｜反应=—｜运镜=Static Shot｜声音=纸张翻动声｜交接=纸页停在半翻处；4–6秒｜她抬起脸，肩膀往下沉，指尖在桌沿收紧｜视线=桌角工牌｜表情=嘴唇抿紧｜反应=—｜运镜=Static Shot｜声音=空调低鸣｜交接=指尖扣住桌沿"
+    },
+    {
+     "label": "下镜",
+     "text": "动作匹配切｜指尖仍扣住桌沿，视线落在桌角工牌上"
+    },
+    {
+     "label": "站位",
+     "text": "林晚：侧左｜坐在转椅上，脸微侧向走廊"
+    },
+    {
+     "label": "光线",
+     "text": "主光=右侧暖黄台灯侧逆光｜补光=正面屏幕冷白光｜轮廓光=走廊尽头安全出口绿光｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Push In｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜林晚的指尖仍扣在桌沿，指节压得发白，眼睛盯住走廊尽头的绿光｜视线=走廊尽头绿光｜表情=睫毛抬起｜反应=—｜运镜=Push In｜声音=空调低鸣｜交接=指尖在桌沿收紧；2–4秒｜她吸了一口气，胸口起伏，嘴唇抿成一条线｜视线=走廊尽头绿光｜表情=下颌绷紧｜反应=—｜运镜=Push In｜声音=呼吸声｜交接=嘴唇抿紧；4–6秒｜她眼珠微微一动，视线从走廊移向桌角的工牌，指尖松开半寸｜视线=桌角工牌｜表情=眉心松开｜反应=—｜运镜=Push In｜声音=纸张轻响｜交接=指尖悬在桌沿上方"
+    },
+    {
+     "label": "下镜",
+     "text": "硬切｜指尖悬在桌沿上方，视线落在桌角工牌"
+    },
+    {
+     "label": "站位",
+     "text": "林晚：侧左｜坐在转椅上，身体微转向走廊"
+    },
+    {
+     "label": "光线",
+     "text": "主光=右侧暖黄台灯侧逆光｜补光=正面屏幕冷白光｜轮廓光=走廊尽头安全出口绿光｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Static Shot｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜林晚悬在桌沿上方的手指慢慢落回桌沿，指节压紧｜视线=走廊尽头绿光｜表情=嘴唇合上｜反应=—｜运镜=Static Shot｜声音=空调低鸣｜交接=手指压紧桌沿；2–4秒｜她屏住呼吸，胸口停住不动，眼睛盯住走廊尽头的绿光｜视线=走廊尽头绿光｜表情=瞳孔一缩｜反应=—｜运镜=Static Shot｜声音=皮鞋踏地声由远及近｜交接=呼吸停住；4–6秒｜脚步声更近，她的脸微微侧过去，下巴抬起一点｜视线=走廊尽头绿光｜表情=下颌绷紧｜反应=—｜运镜=Static Shot｜声音=皮鞋踏地声停住｜交接=脸停在侧向走廊的位置"
+    },
+    {
+     "label": "下镜",
+     "text": "动作匹配切｜脸停在侧向走廊的位置，手指压紧桌沿"
+    },
+    {
+     "label": "站位",
+     "text": "顾沉：侧左｜站立，肩线朝画面左侧；林晚：侧右｜坐着，身体朝画面右侧"
+    },
+    {
+     "label": "光线",
+     "text": "主光=右侧暖黄台灯侧逆光｜补光=正面屏幕冷白光｜轮廓光=窗外霓虹蓝紫虚光｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Push In｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜顾沉的脚步停在桌侧，目光从她的发梢往下扫到她的手上｜视线=林晚的手｜表情=眉梢微动｜反应=林晚：视线落在桌角工牌上，睫毛抬起；2–4秒｜他的视线在她压着桌沿的手指上停住，下颌微收｜视线=林晚的手｜表情=嘴角压平｜反应=林晚：视线落在自己压着桌沿的手指上，指尖在桌沿收紧，嘴唇微张；4–6秒｜他抬起眼，视线落到她脸上，开口说话｜视线=林晚的脸｜表情=眼神收紧｜反应=林晚：视线抬向顾沉的脸，睫毛一颤，肩膀绷紧"
+    },
+    {
+     "label": "下镜",
+     "text": "动作匹配切｜顾沉抬眼看向她的脸"
+    },
+    {
+     "label": "站位",
+     "text": "林晚：侧右｜坐着，身体朝画面右侧"
+    },
+    {
+     "label": "光线",
+     "text": "主光=右侧暖黄台灯侧逆光｜补光=正面屏幕冷白光｜轮廓光=窗外霓虹蓝紫虚光｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Push In｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜林晚的手指扶住桌沿，头低下去｜视线=桌面｜表情=睫毛垂下｜反应=—｜运镜=Push In｜声音=衣料轻响｜交接=手扶桌沿；2–4秒｜她抬起眼睛看向画面右侧，嘴唇轻轻张开说话｜视线=画面右侧的桌沿｜表情=嘴唇微张｜反应=—｜运镜=Push In｜声音=呼吸声｜交接=视线抬起；4–6秒｜她的下颌抬起一点，指尖在桌沿收紧｜视线=画面右侧的桌沿｜表情=嘴角轻抿｜反应=—｜运镜=Push In｜声音=空调低鸣｜交接=指尖扣住桌沿"
+    },
+    {
+     "label": "下镜",
+     "text": "视线匹配切｜指尖扣住桌沿，视线朝画面右侧"
+    },
+    {
+     "label": "站位",
+     "text": "顾沉：侧左｜站立，身体朝画面左侧；林晚：侧右｜坐着，身体朝画面右侧"
+    },
+    {
+     "label": "光线",
+     "text": "主光=右侧暖黄台灯侧逆光｜补光=正面屏幕冷白光｜轮廓光=窗外霓虹蓝紫虚光｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Push In｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜顾沉双手把外套抖开，衣料在灯下张开｜视线=外套｜表情=眉梢平直｜反应=林晚：视线落在抖开的外套上，嘴唇微张；2–4秒｜他手腕一转，外套翻过一面，布料垂下来｜视线=外套｜表情=眼神沉下来｜反应=林晚：视线跟着外套移动，肩膀一颤；4–6秒｜他的视线在她脸上停住，外套停在身前｜视线=林晚眼睛｜表情=嘴角压平｜反应=林晚：视线迎着他的眼睛，睫毛抬起"
+    },
+    {
+     "label": "下镜",
+     "text": "动作匹配切｜外套停在身前，他的视线落在她脸上"
+    },
+    {
+     "label": "站位",
+     "text": "林晚：侧右｜坐着，身体朝画面右侧；顾沉：侧左｜站在她肩侧，只入画一只手"
+    },
+    {
+     "label": "光线",
+     "text": "主光=右侧暖黄台灯侧逆光｜补光=正面屏幕冷白光｜轮廓光=窗外霓虹蓝紫虚光｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Push In｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜顾沉的手在林晚肩头停住，指节放松｜视线=顾沉的手｜表情=睫毛抬起｜反应=顾沉：手指在她肩头停住，指节放松；2–4秒｜她抬起下巴，嘴唇轻轻抿住，肩膀绷直｜视线=顾沉的手｜表情=嘴角松开｜反应=顾沉：手指离开她肩头，收回画面右侧；4–6秒｜她的视线追着那只手移向画面右侧，胸口起伏一次｜视线=画面右侧的手｜表情=眼睑垂下｜反应=顾沉：手在画面右侧边缘停住"
+    },
+    {
+     "label": "下镜",
+     "text": "动作匹配切｜她的视线追着那只手移向画面右侧"
+    },
+    {
+     "label": "站位",
+     "text": "林晚：侧右｜站立，身体朝画面右侧；顾沉：背对｜走开，背影朝走廊"
+    },
+    {
+     "label": "光线",
+     "text": "主光=右侧暖黄台灯侧逆光｜补光=正面屏幕冷白光｜轮廓光=走廊尽头安全出口绿光｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Static Shot｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜顾沉的背影朝走廊暗处迈步走远｜视线=走廊暗处｜表情=下颌线绷着，眼睑半垂｜反应=林晚：视线追着他的背影，睫毛抬起，手指抬到肩头；2–4秒｜林晚的指尖停在肩头，肩膀轻轻一颤｜视线=走廊暗处的背影｜表情=睫毛抬起｜反应=顾沉：视线落在走廊暗处，嘴角压平，背影在画面右侧变小，脚步不停；4–6秒｜她的视线留在暗处，嘴唇轻轻张开，指尖停在肩头｜视线=走廊暗处的背影｜表情=嘴唇微张｜反应=顾沉：视线仍朝走廊深处，下颌放松，背影没入暗处，只剩肩线轮廓"
+    },
+    {
+     "label": "下镜",
+     "text": "叠化 0.4 秒｜指尖停在肩头，视线停在走廊暗处"
+    },
+    {
+     "label": "站位",
+     "text": "林晚：侧右｜坐在转椅上，身体朝画面右侧"
+    },
+    {
+     "label": "光线",
+     "text": "主光=右侧暖黄台灯侧逆光｜补光=桌角手机屏幕冷光｜轮廓光=发丝边缘暖光｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Push In｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜林晚坐回转椅，脸转向窗外的霓虹光斑｜视线=窗外霓虹｜表情=睫毛垂下｜反应=—｜运镜=Push In｜声音=椅面轻响｜交接=脸转向窗；2–4秒｜桌角手机亮起，她的视线从窗外移到手机屏幕上｜视线=桌角手机｜表情=眼睛睁大｜反应=—｜运镜=Push In｜声音=手机震动一声｜交接=视线停在手机；4–6秒｜她吸了一口气，胸口起伏，指尖抬向手机屏幕｜视线=桌角手机｜表情=睫毛轻颤｜反应=—｜运镜=Push In｜声音=空调低鸣｜交接=指尖停在手机上方"
+    },
+    {
+     "label": "下镜",
+     "text": "叠化 0.4 秒｜指尖悬在手机上方，视线停在手机屏幕上"
+    }
+   ],
+   "source_line": 119
+  },
+  {
+   "number": 4,
+   "title": "温柔背叛",
+   "high_intensity": true,
+   "tag": "",
+   "synopsis": "陈宇提前回家做汤，两人从餐桌到床上温存；事后林晚在手机冷光里收到顾沉的预约单，站在床与椅之间没有回复。",
+   "music": "暖调钢琴与低音提琴，慢速铺底，中段加入细碎电子脉冲，结尾撤成单音；【BGM】solo piano with warm upright bass at 68 BPM in D major, soft brushed percussion entering mid-piece, sparse electronic pulses, closing on a single sustained piano note",
+   "music_bgm": "solo piano with warm upright bass at 68 BPM in D major, soft brushed percussion entering mid-piece, sparse electronic pulses, closing on a single sustained piano note",
+   "negative_extra": "",
+   "cast": [
+    "林晚",
+    "陈宇"
+   ],
+   "scene_ids": [
+    "sk_home_kitchen"
+   ],
+   "looks": [
+    {
+     "character": "林晚",
+     "from_shot": null,
+     "slots": {
+      "服装": "雾蓝针织长裙，柔软贴身",
+      "鞋": "白球鞋",
+      "妆": "素颜通勤，唇部薄涂一层润色唇膏，眼尾干净",
+      "发": "雾霾天蓝色及腰直发（比参考图略深、带一点灰的真实染发色），齐刘海",
+      "甲": "5厘米超长透明水晶甲、镶满钻石饰品",
+      "饰品": "3件（左腕红绳手链、颈间细银链、钻石水晶甲）"
+     },
+     "en": "a misty blue knit long dress, white sneakers, a red string bracelet and a thin silver necklace",
+     "raw": "服装=雾蓝针织长裙，柔软贴身｜鞋=白球鞋｜妆=素颜通勤，唇部薄涂一层润色唇膏，眼尾干净｜发=雾霾天蓝色及腰直发（比参考图略深、带一点灰的真实染发色），齐刘海｜甲=5厘米超长透明水晶甲、镶满钻石饰品｜饰品=3件（左腕红绳手链、颈间细银链、钻石水晶甲）｜EN=a misty blue knit long dress, white sneakers, a red string bracelet and a thin silver necklace",
+     "source_line": 123
+    },
+    {
+     "character": "陈宇",
+     "from_shot": null,
+     "slots": {
+      "服装": "浅灰卫衣配牛仔裤",
+      "鞋": "白色帆布鞋",
+      "妆": "素颜，皮肤干净",
+      "发": "短黑发自然蓬松",
+      "甲": "短甲干净",
+      "饰品": "1件（右腕红绳）"
+     },
+     "en": "a light grey hoodie with jeans, white canvas shoes, a red string on the wrist",
+     "raw": "服装=浅灰卫衣配牛仔裤｜鞋=白色帆布鞋｜妆=素颜，皮肤干净｜发=短黑发自然蓬松｜甲=短甲干净｜饰品=1件（右腕红绳）｜EN=a light grey hoodie with jeans, white canvas shoes, a red string on the wrist",
+     "source_line": 124
+    },
+    {
+     "character": "林晚",
+     "from_shot": 4,
+     "slots": {
+      "服装": "黑色漆皮束腰配黑色漆皮短裙，露出长腿",
+      "鞋": "12cm侧开透明细高跟",
+      "饰品": "九串铁珠、钻石水晶甲（5 厘米超长透明水晶甲、镶满钻石饰品，与现有定妆一致）"
+     },
+     "en": "a black patent leather corset with a black patent leather mini skirt baring long legs, transparent 12cm stiletto heels with side cutouts, a chain of nine iron beads",
+     "raw": "服装=黑色漆皮束腰配黑色漆皮短裙，露出长腿｜鞋=12cm侧开透明细高跟｜饰品=九串铁珠、钻石水晶甲（5 厘米超长透明水晶甲、镶满钻石饰品，与现有定妆一致）｜EN=a black patent leather corset with a black patent leather mini skirt baring long legs, transparent 12cm stiletto heels with side cutouts, a chain of nine iron beads",
+     "source_line": 125
+    }
+   ],
+   "shots": [
+    {
+     "episode": 4,
+     "index": 10,
+     "img_note": null,
+     "img_prompt": "近景，平视机位，林晚在画面中央偏左，陈宇在画面右侧床上；林晚穿黑色漆皮束腰配黑色漆皮短裙，露出长腿，雾霾天蓝色及腰直发（比参考图略深、带一点灰的真实染发色），齐刘海，赤脚站在床与椅之间，背对床，林晚的视线投向画面右侧的窗玻璃上自己的倒影；陈宇穿浅灰卫衣配牛仔裤，闭眼睡着，手臂搭在她那侧枕头上，陈宇的视线落在枕边；林晚与陈宇的家里双人床与椅之间，椅背上挂着漆皮短裙；暖黄顶灯从上方打下来，把她的影子拉长在地板上；真实皮肤质感，可见细小毛孔与细软绒毛，自然的轻微不对称，眼睛为真实人眼大小。",
+     "img_triggers": [],
+     "motion_prompt": "lnwan01，camera pull out 缓慢拉远，林晚把手机扣在床头柜上，赤脚走回床边，停在床与椅之间没有躺下，视线落到窗玻璃上自己的倒影，手指在身侧虚握一下又松开——近景，林晚背对床站在床与椅之间，赤脚，陈宇闭眼睡着，暖黄顶灯把她的影子拉长，窗玻璃上映出她的倒影。",
+     "motion_triggers": [
+      "lnwan01"
+     ],
+     "sound": "手机扣在木面的轻响，赤脚踩木板的轻响，夜里很轻的呼吸，远处车流极轻的声；【配乐】落下，强度1，无需避让；【H3 audio】The phone lands face down on the wooden nightstand with a small knock. Bare feet cross the floorboards in slow steps. Two quiet breaths move in the dark room, and distant traffic murmurs beyond the window.",
+     "sound_intimate": "",
+     "sound_h3": "The phone lands face down on the wooden nightstand with a small knock. Bare feet cross the floorboards in slow steps. Two quiet breaths move in the dark room, and distant traffic murmurs beyond the window.",
+     "music_cue": "落下，强度1，无需避让",
+     "h3_prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 6.58-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] Live-action, cinematic, shallow depth of field, a close shot at eye level begins in the position, framing and lighting established by Picture 1, with a 22-year-old Chinese woman with waist-length misty sky-blue straight hair with a blunt fringe, cool pale skin and a tall slender build in a black patent leather corset with a black patent leather mini skirt baring long legs, transparent 12cm stiletto heels with side cutouts, a chain of nine iron beads standing barefoot on the left between the bed and the chair, her eyes on her own reflection in the window glass at the right of the frame, and a 23-year-old East Asian man with short black hair, a warm open face, fair skin and a lean build in a light grey hoodie with jeans, white canvas shoes, a red string on the wrist lying asleep on the right, his eyes closed with his gaze resting on the pillow edge, a patent mini skirt on the chair back, warm yellow ceiling light above stretching her shadow across the floorboards. The camera pulls out with small amplitude as she sets the phone face down and walks back toward the bed. At 00:02.000, her eyes lift from the phone to the bed, her lips pressing together, while he lies with his eyes closed and his gaze on the pillow edge, the corners of his mouth slack, his fingers twitching once in sleep. At 00:04.000, she stops between the bed and the chair, her gaze settling on her own reflection in the window glass, her brows loosening and tightening again, while he stays asleep with his eyes closed and his gaze on the pillow edge, his breath steady. At 00:06.000, her hand closes into a loose fist at her side and opens again, her gaze holding on the reflection, while he keeps his eyes closed and his gaze on the pillow edge, his brow loosening, his arm sliding an inch down the pillow, and her hand keeps opening at her side as the shot ends. The framing settles into the close standing composition established by Picture 2 at the end of the shot.\n\noverall_soundscape: The phone lands face down on the wooden nightstand with a small knock. Bare feet cross the floorboards in slow steps. Two quiet breaths move in the dark room, and distant traffic murmurs beyond the window.\n\nnon_diegetic_music: Solo piano closes on a single sustained note in D major at 62 BPM, upright bass fading underneath, volume settling to the lowest level.",
+     "h3_check": null,
+     "voiceover": null,
+     "dialogue_raw": null,
+     "dialogue": [],
+     "dialogue_stage": [],
+     "extras": [],
+     "decor_state": "D0",
+     "scene_id": "sk_home_kitchen",
+     "scene_detail": "双人床与椅之间，椅背挂着漆皮短裙，窗玻璃映出室内",
+     "cast": [
+      {
+       "name": "林晚",
+       "presence": "在画",
+       "x": "左",
+       "depth": "中",
+       "part": null,
+       "raw": "林晚（在画｜左｜中）"
+      },
+      {
+       "name": "陈宇",
+       "presence": "在画",
+       "x": "右",
+       "depth": "后",
+       "part": null,
+       "raw": "陈宇（在画｜右｜后）"
+      }
+     ],
+     "cast_raw": "林晚（在画｜左｜中）、陈宇（在画｜右｜后）",
+     "link": "接力",
+     "link_carry": "动作｜林晚把手机扣在床头柜上起身",
+     "duration": 6,
+     "duration_source": "script",
+     "adult": true,
+     "adult_reasons": [
+      "整集🔴"
+     ],
+     "source_line": 329
+    }
+   ],
+   "extras": [
+    {
+     "label": "站位",
+     "text": "林晚：镜头｜坐姿，右手握勺"
+    },
+    {
+     "label": "光线",
+     "text": "暖黄居家顶灯从上方偏左打下来，光沿她的锁骨与颈线滑下，汤面浮起一层白气"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Push In｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜林晚用瓷勺在汤里搅动两圈，白气绕过她的手背｜视线=落在汤面｜表情=嘴唇轻抿｜反应=—｜运镜=push in｜声音=瓷勺碰碗沿的轻响；2–4秒｜勺子停在碗中央，白气散开又合拢｜视线=从汤面飘向画面右侧的手机方向｜表情=眼睑半垂｜反应=—｜运镜=push in｜声音=汤面细沸；4–6秒｜她的视线收回落在碗沿，睫毛抬了一下又落下，勺子仍停在碗中央｜视线=从画面右侧移回碗沿｜表情=嘴角松开一点，下颌线放松｜反应=—｜运镜=push in｜声音=厨房抽油烟机的低鸣"
+    },
+    {
+     "label": "站位",
+     "text": "林晚：背对｜站姿，肩头后靠；陈宇：镜头｜站姿，双臂环住她"
+    },
+    {
+     "label": "光线",
+     "text": "暖黄顶灯从上方打下来，光落在两人肩背的弧线上，门缝透出一道亮边"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Push In｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜陈宇从背后环住林晚的腰，手臂收紧｜视线=落在她的侧颈｜表情=下颌放松｜反应=林晚：肩头后靠，睫毛轻颤，视线落在他的下颌｜运镜=push in｜声音=衣料摩擦的细响；2–4秒｜她的指尖在他手背上轻敲两下，他的手在她腰侧停住｜视线=垂在自己的手背｜表情=嘴角松开｜反应=林晚：视线落在自己敲击的手背，嘴角松开；陈宇：视线落在她敲击的指尖，嘴唇微张｜运镜=push in｜声音=她一次较深的呼吸；4–6秒｜两人重心慢慢向床的方向侧倾，她的肩背压低，他的手臂再收紧一分｜视线=她的脸侧向他的下颌｜表情=眉心松开｜反应=林晚：视线落在陈宇的下颌，眉心松开；陈宇：视线移向床沿，肩背压低｜运镜=push in｜声音=呼吸声渐密"
+    },
+    {
+     "label": "站位",
+     "text": "林晚：镜头｜仰卧，双腿分开；陈宇：镜头｜俯身撑在她两侧"
+    },
+    {
+     "label": "光线",
+     "text": "暖黄顶灯从正上方直落，光在漆皮上拉出锐利高光，床面陷处留一道暗影"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Push In｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜两人重心向床侧倾着倒进双人床，被面深深陷下去，一双透明侧开细高跟从她脚尖滑落磕在地板上｜视线=她的眼半睁看向他｜表情=嘴唇微张｜反应=陈宇：视线落在她颈侧，眉梢压低，肩背压低｜运镜=push in｜声音=床板一声闷响，鞋跟落地一声；2–4秒｜她的手指抓住床单，指节收紧，一缕发丝贴在鬓角｜视线=仍看向他｜表情=眉心轻皱｜反应=陈宇：视线落在她手上，下颌绷紧，手掌扣住她的腰｜运镜=push in｜声音=急促的呼吸；4–6秒｜她的腰背轻轻弓起，锁骨窝里一点反光，指尖从床单滑到他手臂上｜视线=仍看向他｜表情=嘴唇张开｜反应=陈宇：视线落在她下颌，呼吸落在她颈侧｜运镜=push in｜声音=床板连续轻响与急促呼吸"
+    },
+    {
+     "label": "站位",
+     "text": "林晚：床侧低机位｜仰卧，头朝画面右侧；陈宇：床侧低机位｜俯身撑在她头侧"
+    },
+    {
+     "label": "光线",
+     "text": "暖黄顶灯从上方直落，光落在她扣紧的指节与他的小臂上，枕侧留一道暗影"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Tilt Up｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜她的指甲在他小臂上轻轻扣了一下，指节收紧｜视线=落在他的小臂上｜表情=眼睑半垂｜反应=陈宇：视线落在她的指尖，下颌绷紧；2–4秒｜他的手掌从她腰侧移到她手背，把她的手指按平｜视线=她的视线移到他脸上｜表情=嘴唇轻抿｜反应=陈宇：视线抬到她眼睛，眉梢压低；4–6秒｜她的手指反扣住他的手腕，拇指压在他的腕侧｜视线=落在她扣住的手腕｜表情=下颌微抬｜反应=陈宇：视线落回她的眼睛，喉结滚动，眉心松开"
+    },
+    {
+     "label": "站位",
+     "text": "林晚：背对｜坐姿，赤脚踩地，手指捏裙边"
+    },
+    {
+     "label": "光线",
+     "text": "暖黄顶灯从上方打下来，光落在她裸露的肩线与地板上的脚背，椅背漆皮反出一道锐利高光"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Truck Right｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜林晚的手指捏住椅背上的裙边，指节收紧｜视线=落在椅背的裙子上｜表情=眼睑低垂｜反应=—｜运镜=truck right｜声音=漆皮轻响；2–4秒｜她赤脚踩上地板，脚趾蜷了一下｜视线=仍看椅背｜表情=嘴唇轻抿｜反应=—｜运镜=truck right｜声音=赤脚踩木板的轻响；4–6秒｜她侧过脸回头看一眼床上睡着的陈宇，又转回去，手指在裙边上停半秒没回头｜视线=从床上的陈宇转回裙边｜表情=眉心微动、下颌收紧｜反应=—｜运镜=truck right｜声音=夜里很轻的呼吸"
+    },
+    {
+     "label": "站位",
+     "text": "林晚：背对｜手指搭在椅背边缘，身体在画外"
+    },
+    {
+     "label": "光线",
+     "text": "暖黄顶灯从右上方打下来，光落在指节与甲面上，漆皮反出一道锐利高光"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Push In｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜手指搭在椅背边缘，甲面在灯下转过一个角度｜视线=落在椅背边缘的金属扣上｜表情=—｜反应=—｜运镜=push in｜声音=漆皮轻响；2–4秒｜指腹压住漆皮一寸，停住不动｜视线=停在金属扣上｜表情=—｜反应=—｜运镜=push in｜声音=系带轻碰椅背的细响；4–6秒｜手指仍压在漆皮上，画面右侧床头柜方向透出一道冷光｜视线=从金属扣移向画面右侧的冷光方向｜表情=—｜反应=—｜运镜=push in｜声音=远处一声极轻的屏幕提示音"
+    },
+    {
+     "label": "站位",
+     "text": "林晚：镜头｜坐姿，双手捧手机"
+    },
+    {
+     "label": "光线",
+     "text": "冷白屏幕光从下方打在她的下颌与鼻梁，暖黄顶灯在背景虚成光斑"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Push In｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜屏幕暗着，林晚的拇指在屏幕边缘无意识摩挲，随后屏幕突然亮起，冷白光映在她脸上｜视线=落在暗着的屏幕上｜表情=眼睑低垂｜反应=—｜运镜=push in｜声音=拇指擦过屏幕的细响，随后短促的提示音；2–4秒｜她的眼睛睁大一分，拇指悬在屏幕上方停住｜视线=被光吸引落到手机屏幕上｜表情=眼睛睁大一分｜反应=—｜运镜=push in｜声音=屏幕微弱的电流声；4–6秒｜屏幕光在她瞳孔里缩成一点，她的拇指缓缓下移停在回复框上方，下颌绷紧｜视线=盯着屏幕上的那一行字｜表情=眉心收紧、下颌绷紧｜反应=—｜运镜=push in｜声音=夜里很轻的呼吸"
+    },
+    {
+     "label": "站位",
+     "text": "林晚：镜头｜坐姿，拇指悬在屏幕上；陈宇：侧右｜仰卧，手臂搭在枕上"
+    },
+    {
+     "label": "光线",
+     "text": "暖黄顶灯从上方打下来，冷白屏幕光从下方映亮她的下颌，枕边留一道暗影"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Push In｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜林晚的拇指在屏幕上轻轻点了一下，又立刻停住｜视线=落在手机屏幕上｜表情=眉心收紧｜反应=陈宇：视线落在枕边，眼皮不动，呼吸平稳｜运镜=push in｜声音=指尖碰屏幕的轻响；2–4秒｜她侧过脸看向床上的陈宇，身体不自觉向床侧倾了一点又收回｜视线=从屏幕移向陈宇的脸｜表情=嘴唇抿起｜反应=林晚：视线落在陈宇的脸上，嘴唇抿起；陈宇：视线落在枕边，眼皮不动，嘴角松着，手指在睡梦里轻动｜运镜=push in｜声音=夜里很轻的呼吸；4–6秒｜她的视线落回屏幕，拇指把回复框里的字一个个删掉，随后悬停不动｜视线=回到手机屏幕｜表情=下颌绷紧｜反应=林晚：视线落在手机屏幕上，下颌绷紧；陈宇：视线落在枕边，眼皮不动，呼吸依旧均匀｜运镜=push in｜声音=屏幕按键的细响"
+    },
+    {
+     "label": "站位",
+     "text": "林晚：背对｜站姿，赤脚；陈宇：侧右｜仰卧，手臂搭在枕上"
+    },
+    {
+     "label": "光线",
+     "text": "暖黄顶灯从上方打下来，把她的影子拉长在地板上，窗玻璃上映出室内的暖黄与冷白"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Pull Out｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜林晚把手机扣在床头柜上，屏幕光熄灭｜视线=从手机移向床｜表情=眼睑抬起｜反应=陈宇：视线落在枕边，眼皮不动，呼吸平稳｜运镜=pull out｜声音=手机扣在木面的轻响；2–4秒｜她赤脚走回床边，影子在地板上拉长｜视线=落在陈宇搭在枕上的手臂｜表情=嘴唇抿起｜反应=陈宇：视线落在枕边，眼皮不动，嘴角松着，手指在睡梦里轻动｜运镜=pull out｜声音=赤脚踩木板的轻响；4–6秒｜她停在床与椅之间，没有躺下，视线落到窗玻璃上自己的倒影｜视线=移向画面右侧的窗玻璃倒影｜表情=眉心松开又收紧｜反应=陈宇：视线落在枕边，眼皮不动，呼吸依旧均匀｜运镜=pull out｜声音=夜里很轻的呼吸；6–8秒｜她的手指在身侧虚握一下又松开，视线仍停在窗玻璃的倒影上｜视线=停在窗玻璃上自己的倒影｜表情=嘴角落下｜反应=陈宇：视线落在枕边，眼皮不动，眉头松开，手臂滑落一寸｜运镜=pull out｜声音=远处车流极轻的声"
+    }
+   ],
+   "source_line": 119
+  },
+  {
+   "number": 5,
+   "title": "第一枚乳环",
+   "high_intensity": true,
+   "tag": "",
+   "synopsis": "林晚在穿孔工作室打下第一枚乳环，五天后在顾沉公寓的镜前，第一次认真看这个被自己改写的身体。",
+   "music": "低频合成器铺底、单音钢琴点落，中段加入缓慢鼓点，收尾只剩一条长弦；【BGM】Low synth pad with sparse single piano notes at 68 BPM in A minor, a slow kick entering midway, one sustained cello line at the close.",
+   "music_bgm": "Low synth pad with sparse single piano notes at 68 BPM in A minor, a slow kick entering midway, one sustained cello line at the close.",
+   "negative_extra": "",
+   "cast": [
+    "林晚",
+    "阿岚"
+   ],
+   "scene_ids": [
+    "sk_studio",
+    "sk_gu_apartment"
+   ],
+   "looks": [
+    {
+     "character": "林晚",
+     "from_shot": null,
+     "slots": {
+      "服装": "黑色漆皮束腰配黑色漆皮短裙，露出长腿",
+      "鞋": "12cm侧开透明细高跟",
+      "妆": "素颜通勤，自然深棕色眼睛，唇色偏淡的润泽唇",
+      "发": "雾霾天蓝色及腰直发（比参考图略深、带一点灰的真实染发色），齐刘海",
+      "甲": "5厘米超长透明水晶甲、镶满钻石饰品",
+      "饰品": "九串铁珠、钻石水晶甲（5 厘米超长透明水晶甲、镶满钻石饰品，与现有定妆一致）"
+     },
+     "en": "a black patent leather corset with a black patent leather mini skirt baring long legs, transparent 12cm stiletto heels with side cutouts, a chain of nine iron beads",
+     "raw": "服装=黑色漆皮束腰配黑色漆皮短裙，露出长腿｜鞋=12cm侧开透明细高跟｜妆=素颜通勤，自然深棕色眼睛，唇色偏淡的润泽唇｜发=雾霾天蓝色及腰直发（比参考图略深、带一点灰的真实染发色），齐刘海｜甲=5厘米超长透明水晶甲、镶满钻石饰品｜饰品=九串铁珠、钻石水晶甲（5 厘米超长透明水晶甲、镶满钻石饰品，与现有定妆一致）｜EN=a black patent leather corset with a black patent leather mini skirt baring long legs, transparent 12cm stiletto heels with side cutouts, a chain of nine iron beads",
+     "source_line": 123
+    },
+    {
+     "character": "阿岚",
+     "from_shot": null,
+     "slots": {
+      "服装": "黑色工作围裙配黑色长袖",
+      "鞋": "黑色短靴",
+      "妆": "素颜，眉形利落，唇色自然",
+      "发": "黑色齐耳短发",
+      "甲": "短甲本色",
+      "饰品": "皮手套、右眉尾浅疤外露"
+     },
+     "en": "a black work apron over a black long-sleeve top, black ankle boots, leather gloves",
+     "raw": "服装=黑色工作围裙配黑色长袖｜鞋=黑色短靴｜妆=素颜，眉形利落，唇色自然｜发=黑色齐耳短发｜甲=短甲本色｜饰品=皮手套、右眉尾浅疤外露｜EN=a black work apron over a black long-sleeve top, black ankle boots, leather gloves",
+     "source_line": 124
+    }
+   ],
+   "shots": [
+    {
+     "episode": 5,
+     "index": 3,
+     "img_note": null,
+     "img_prompt": "近景（手与肩颈），俯拍机位，阿岚戴皮手套的手握着记号笔，笔尖点在林晚胸口偏左的皮肤上，留下一个小圆点，另一只手套按在林晚肩头，林晚的黑色漆皮束腰边缘与肩头入画，冷白顶光在皮肤与漆皮上各留一道高光；sk_studio 器械台边；冷白顶光从上方直下，肩头皮肤泛出冷白反光；像抹了油一样的高亮镜面漆皮，表面湿润光泽，镜面反射清晰，高光锐利，真实皮肤质感，可见细小毛孔与细软绒毛。",
+     "img_triggers": [],
+     "motion_prompt": "static shot，固定机位，记号笔笔尖点在林晚胸口偏左的皮肤上留下小圆点，按在肩头的手套随之收紧，笔尖抬起半寸，随后停在记号点上方，肩头被手套稳稳按住——近景（手与肩颈），笔尖悬在记号点上方，林晚的肩头绷紧，呼吸压住。",
+     "motion_triggers": [],
+     "sound": "记号笔尖摩擦皮肤的细响，皮手套收紧的轻响，一次短促吸气；【配乐】延续，强度1，对白避让；【H3 audio】A marker tip drags softly across skin. Leather creaks as a gloved hand tightens on a shoulder. A short intake of breath.",
+     "sound_intimate": "",
+     "sound_h3": "A marker tip drags softly across skin. Leather creaks as a gloved hand tightens on a shoulder. A short intake of breath.",
+     "music_cue": "延续，强度1，对白避让",
+     "h3_prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 6.58-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] Live-action, cinematic, shallow depth of field, a close-up of hands and shoulder begins in the position, framing and lighting established by Picture 1, with a gloved hand holding a marker against pale skin just above a black patent leather corset edge, another gloved hand pressed on a shoulder, in a white-walled studio under a cold white overhead lamp. The camera holds a static shot as the marker tip touches down and leaves a small dot. At 00:02.000, the glove on the shoulder tightens and the marker lifts half an inch while the shoulder rises once in a short breath. At 00:03.000, an off-screen 26-year-old woman with a low husky alto voice, natural pace (S1) says in an off-screen voiceover: <d>[Chinese] 现在反悔还来得及。</d> while the lips of the woman in frame remain closed. The marker tip settles into the hover above the marked spot established by Picture 2 at the end of the shot.\n\noverall_soundscape: A marker tip drags softly across skin. Leather creaks as a gloved hand tightens on a shoulder. A short intake of breath.\n\nnon_diegetic_music: A low synth pad holds under a single piano note, steady in volume.",
+     "h3_check": null,
+     "voiceover": null,
+     "dialogue_raw": "（阿岚，低声）“现在反悔还来得及。”",
+     "dialogue": [
+      {
+       "speaker_note": "阿岚，低声",
+       "text": "现在反悔还来得及。",
+       "stage": null,
+       "speaker": "阿岚"
+      }
+     ],
+     "dialogue_stage": [],
+     "extras": [],
+     "decor_state": "D0",
+     "scene_id": "sk_studio",
+     "scene_detail": "林晚肩头被手套按住，胸口偏左留一个记号笔小点",
+     "cast": [
+      {
+       "name": "林晚",
+       "presence": "局部",
+       "x": "中",
+       "depth": null,
+       "part": "肩头",
+       "raw": "林晚（局部｜肩头｜中）"
+      },
+      {
+       "name": "阿岚",
+       "presence": "局部",
+       "x": "右",
+       "depth": null,
+       "part": "手",
+       "raw": "阿岚（局部｜手｜右）"
+      }
+     ],
+     "cast_raw": "林晚（局部｜肩头｜中）、阿岚（局部｜手｜右）",
+     "link": "同场换机位",
+     "link_carry": "动作｜阿岚手中镊子已换成记号笔",
+     "duration": 6,
+     "duration_source": "script",
+     "adult": true,
+     "adult_reasons": [
+      "整集🔴"
+     ],
+     "source_line": 183
+    }
+   ],
+   "extras": [
+    {
+     "label": "站位",
+     "text": "林晚：侧左｜坐在器械台边，双手撑台沿"
+    },
+    {
+     "label": "光线",
+     "text": "主光=正上方冷白顶光｜补光=器械台侧灯冷白｜轮廓光=墙面反光｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Tilt Up｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜林晚指节在台沿收紧，肩线绷起｜视线=盯向画面上方的冷光灯｜表情=唇微抿，睫毛压低｜反应=—｜运镜=tilt up 起幅｜声音=器械盘轮子轻响；2–4秒｜她胸口起伏一次，肩线松半分｜视线=仍盯冷光灯｜表情=下颌轻抬｜反应=—｜运镜=tilt up 到腰线｜声音=细跟在地砖上蹭出轻响；4–6秒｜长腿在台沿微收，撑台沿的手指再压一下｜视线=仍盯冷光灯｜表情=睫毛再压低｜反应=—｜运镜=tilt up 到胸口｜声音=冷光灯低频嗡鸣"
+    },
+    {
+     "label": "站位",
+     "text": "阿岚：侧右｜站在器械台右侧，双手推盘"
+    },
+    {
+     "label": "光线",
+     "text": "主光=正上方冷白顶光｜补光=器械台侧灯冷白｜轮廓光=墙面反光｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Push In｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜阿岚双手把器械盘推到台边，手套在金属上滑过｜视线=落在台面｜表情=唇线平直，眉尾疤随动作牵动｜反应=—｜运镜=push in 起幅｜声音=镊子与钳子轻碰；2–4秒｜她右手两指捏起镊子，抬到胸前｜视线=移到器械盘上方｜表情=眼睑微垂｜反应=—｜运镜=push in 到器械盘；4–6秒｜她抬眼看向台边的人，镊子停在指间｜视线=看向画外左侧｜表情=眉梢轻抬｜反应=—｜运镜=push in 收幅｜声音=手套皮革轻响"
+    },
+    {
+     "label": "站位",
+     "text": "阿岚：侧右｜俯身，一手按肩"
+    },
+    {
+     "label": "光线",
+     "text": "主光=正上方冷白顶光｜补光=器械台侧灯冷白｜轮廓光=墙面反光｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Static Shot｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜笔尖落下点在皮肤上，留下一个小圆点｜视线=—｜表情=—｜反应=林晚肩头轻缩一下｜运镜=static｜声音=笔尖摩擦皮肤；2–4秒｜按在肩头的手套收紧，笔尖抬起半寸｜视线=—｜表情=—｜反应=林晚呼吸一顿，肩头起伏｜运镜=static｜声音=手套皮革轻响；4–6秒｜笔尖在记号点上方停住，手套指尖压稳肩头｜视线=—｜表情=—｜反应=林晚肩头绷紧，呼吸压住｜运镜=static｜声音=一次短促吸气"
+    },
+    {
+     "label": "站位",
+     "text": "林晚：侧左｜面孔朝向冷光灯，左手掐台沿"
+    },
+    {
+     "label": "光线",
+     "text": "主光=正上方冷白顶光｜补光=器械台侧灯冷白｜轮廓光=墙面反光｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Push In｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜林晚喉部动了一下，随即缓缓摇头｜视线=盯住冷光灯｜表情=唇微张，睫毛压低｜反应=—｜运镜=push in 起幅｜声音=一次短促吸气；2–4秒｜她咬着下唇，掐台沿的五指收紧｜视线=仍盯冷光灯｜表情=唇被齿咬住，眉头轻皱｜反应=—｜运镜=push in 到眼部｜声音=指甲磕在台沿；4–6秒｜她松开下唇，呼吸压低，视线微垂又抬起｜视线=回到冷光灯｜表情=下颌绷紧｜反应=—｜运镜=push in 收幅｜声音=细跟在地砖上蹭一下"
+    },
+    {
+     "label": "站位",
+     "text": "林晚：侧左｜面孔转向画面左侧，左手掐台沿"
+    },
+    {
+     "label": "光线",
+     "text": "主光=正上方冷白顶光｜补光=器械台侧灯冷白｜轮廓光=墙面反光｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Push In｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜林晚视线从冷光灯移向画面左侧的器械盘，下颌绷起｜视线=落在画面左侧的器械盘上｜表情=唇线抿平，眉梢压低｜反应=—｜运镜=push in 起幅｜声音=一次吸气；2–4秒｜她开口，唇动，颈侧筋绷起｜视线=仍落在画面左侧的器械盘上｜表情=唇开合，下颌绷紧｜反应=—｜运镜=push in 到眼部｜声音=短促的说话声；4–6秒｜说完她抿住唇，掐台沿的手指松开半寸｜视线=仍落在画面左侧的器械盘上｜表情=唇角收紧，睫毛压低｜反应=—｜运镜=push in 收幅｜声音=指甲从台沿滑下"
+    },
+    {
+     "label": "站位",
+     "text": "阿岚：侧右｜俯身，一手按肩一手持针"
+    },
+    {
+     "label": "光线",
+     "text": "主光=正上方冷白顶光｜补光=器械台侧灯冷白｜轮廓光=墙面反光｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Push In｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜针尖压进皮肤，皮肤被顶出一个小凹｜视线=—｜表情=—｜反应=林晚肩头猛地一缩｜运镜=push in 起幅｜声音=短促针刺声；2–4秒｜针管推到底，手套指节绷起｜视线=—｜表情=—｜反应=林晚指甲掐进台沿，肩头绷紧｜运镜=push in 到针尾｜声音=指甲磕台沿；4–6秒｜针尖退出，一小点血珠冒出｜视线=—｜表情=—｜反应=林晚短促吸气，肩头起伏｜运镜=push in 收幅｜声音=一次短促吸气"
+    },
+    {
+     "label": "站位",
+     "text": "阿岚：侧右｜俯身，一手按棉片一手扶肩"
+    },
+    {
+     "label": "光线",
+     "text": "主光=正上方冷白顶光｜补光=器械台侧灯冷白｜轮廓光=墙面反光｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Static Shot｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜棉片轻按，手套指尖压住边缘｜视线=—｜表情=—｜反应=林晚下颌低垂，睫毛颤两下｜运镜=static｜声音=棉片摩擦皮肤；2–4秒｜手套移开半寸，露出小金属球的反光｜视线=—｜表情=—｜反应=林晚呼吸缓下来，肩头起伏变浅｜运镜=static｜声音=金属轻响；4–6秒｜手套收回，指尖在金属球旁停住，棉片被捏成一团｜视线=—｜表情=—｜反应=林晚下颌抬起半寸，睫毛抬起看向那点金属｜运镜=static｜声音=一次缓慢呼气"
+    },
+    {
+     "label": "站位",
+     "text": "林晚：侧左｜站在镜前，右手抬起"
+    },
+    {
+     "label": "光线",
+     "text": "主光=侧后方暖黄壁灯｜补光=镜面反射柔光｜轮廓光=壁灯沿墙的暖边｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Push In｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜林晚右手指尖悬在镜中金属上方，手腕停住｜视线=落在镜面｜表情=唇微张，睫毛压低｜反应=—｜运镜=push in 起幅｜声音=壁灯电流低鸣；2–4秒｜指尖再往前一寸，仍未落下，肩线松了半分｜视线=仍落镜面｜表情=眉头轻蹙｜反应=—｜运镜=push in 到镜面｜声音=漆皮轻响；4–6秒｜她微微偏头，视线从镜中金属移到镜中自己的眼睛｜视线=移到镜中眼睛｜表情=唇线松开｜反应=—｜运镜=push in 收幅｜声音=木地板上细跟轻挪"
+    },
+    {
+     "label": "站位",
+     "text": "林晚：侧左｜站在镜前，右手食指按住金属"
+    },
+    {
+     "label": "光线",
+     "text": "主光=侧后方暖黄壁灯｜补光=镜面反射柔光｜轮廓光=壁灯沿墙的暖边｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Push In｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜食指按上金属，指尖压出一点皮肤凹陷｜视线=对上镜中目光｜表情=唇微张，睫毛颤一下｜反应=—｜运镜=push in 起幅｜声音=金属轻响；2–4秒｜她头再偏半寸，肩线转向镜面，指尖沿着金属边缘轻蹭｜视线=仍与镜中目光相对｜表情=眉头松开，唇线松开｜反应=—｜运镜=push in 到侧脸｜声音=漆皮轻响；4–6秒｜她下颌微抬，肩线贴向镜面，指尖停在金属边缘｜视线=仍与镜中目光相对｜表情=眼睑微垂，唇角轻轻动了一下｜反应=—｜运镜=push in 收幅｜声音=一次缓慢呼气，壁灯低鸣"
+    },
+    {
+     "label": "站位",
+     "text": "林晚：侧左｜站在镜前，右手停在金属边缘"
+    },
+    {
+     "label": "光线",
+     "text": "主光=侧后方暖黄壁灯｜补光=镜面反射柔光｜轮廓光=壁灯沿墙的暖边｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Static Shot｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜指尖从金属边缘抬起半寸，又落回去轻点一下｜视线=落在指尖按住的金属上｜表情=眼睑微垂，呼吸放缓｜反应=—｜运镜=static shot 起幅｜声音=金属轻响；2–4秒｜指腹贴着金属外圈向右推过一小段，指甲上的钻石切面转出亮点｜视线=跟着指尖移动｜表情=唇角松开｜反应=—｜运镜=static shot 延续｜声音=一次轻呼气；4–6秒｜指腹沿外圈继续转完剩下的半圈，肩线随呼吸轻轻起伏，下颌微抬｜视线=跟着指尖回到金属上缘｜表情=下颌微抬，睫毛轻颤｜反应=—｜运镜=static shot 收幅｜声音=壁灯低鸣"
+    }
+   ],
+   "source_line": 119
+  },
+  {
+   "number": 7,
+   "title": "九环全挂",
+   "high_intensity": true,
+   "tag": "",
+   "synopsis": "顾沉公寓衣帽间里，林晚把第九枚金属环扣进腰侧，随后在镜前确认自己；周五酒会上她握着翻页笔稳住声音，顾沉在桌下按遥控，散场后他在走廊给出验收结论。",
+   "music": "低频弦乐与单音钢琴缓慢铺开，金属轻响处加一记细碎铃声；【BGM】Low sustained cello drone at 60 BPM with sparse single piano notes, a thin metallic chime accent on each ring clasp, gradual build to a soft string swell.",
+   "music_bgm": "Low sustained cello drone at 60 BPM with sparse single piano notes, a thin metallic chime accent on each ring clasp, gradual build to a soft string swell.",
+   "negative_extra": "",
+   "cast": [
+    "林晚",
+    "顾沉"
+   ],
+   "scene_ids": [
+    "sk_gu_apartment",
+    "sk_alley_ballroom"
+   ],
+   "looks": [
+    {
+     "character": "林晚",
+     "from_shot": null,
+     "slots": {
+      "服装": "黑色漆皮束腰配黑色漆皮短裙，露出长腿",
+      "鞋": "12cm侧开透明细高跟",
+      "妆": "素颜通勤，自然深棕色眼睛，唇色偏淡的润泽唇",
+      "发": "雾霾天蓝色及腰直发（比参考图略深、带一点灰的真实染发色），齐刘海",
+      "甲": "手指甲为5厘米超长透明水晶甲、镶满钻石饰品",
+      "饰品": "九串铁珠、钻石水晶甲（5 厘米超长透明水晶甲、镶满钻石饰品，与现有定妆一致）"
+     },
+     "en": "a black patent leather corset with a black patent leather mini skirt baring long legs, transparent 12cm stiletto heels with side cutouts, a chain of nine iron beads",
+     "raw": "服装=黑色漆皮束腰配黑色漆皮短裙，露出长腿｜鞋=12cm侧开透明细高跟｜妆=素颜通勤，自然深棕色眼睛，唇色偏淡的润泽唇｜发=雾霾天蓝色及腰直发（比参考图略深、带一点灰的真实染发色），齐刘海｜甲=手指甲为5厘米超长透明水晶甲、镶满钻石饰品｜饰品=九串铁珠、钻石水晶甲（5 厘米超长透明水晶甲、镶满钻石饰品，与现有定妆一致）｜EN=a black patent leather corset with a black patent leather mini skirt baring long legs, transparent 12cm stiletto heels with side cutouts, a chain of nine iron beads",
+     "source_line": 123
+    },
+    {
+     "character": "顾沉",
+     "from_shot": null,
+     "slots": {
+      "服装": "白衬衫袖口卷起配黑西裤",
+      "鞋": "黑色皮鞋",
+      "妆": "自然哑光，眉形利落",
+      "发": "黑色短发，向后梳整",
+      "甲": "干净短甲",
+      "饰品": "左手无名指旧银戒"
+     },
+     "en": "a white shirt with rolled sleeves and black trousers, black leather shoes, an old silver ring on the left ring finger",
+     "raw": "服装=白衬衫袖口卷起配黑西裤｜鞋=黑色皮鞋｜妆=自然哑光，眉形利落｜发=黑色短发，向后梳整｜甲=干净短甲｜饰品=左手无名指旧银戒｜EN=a white shirt with rolled sleeves and black trousers, black leather shoes, an old silver ring on the left ring finger",
+     "source_line": 124
+    }
+   ],
+   "shots": [
+    {
+     "episode": 7,
+     "index": 3,
+     "img_note": null,
+     "img_prompt": "lnwan01，特写，低机位，林晚侧腰与腰线占画面中央，黑色漆皮束腰下缘贴着腰线，第九枚细金属环正被指尖按进腰侧皮肤，冷白皮肤上可见细汗光泽，雾霾天蓝色及腰直发（比参考图略深、带一点灰的真实染发色）垂落一缕在腰前，钻石水晶甲清晰，顾沉公寓的深色木地板在画面下方，暖黄壁灯从右后方打来，镜面冷光沿腰线排开",
+     "img_triggers": [
+      "lnwan01"
+     ],
+     "motion_prompt": "lnwan01，camera push in 缓慢推近，第九枚细金属环被按进腰侧、皮肤微微凹陷，指腹随后在环上压平、腰线绷成一道弧——特写里她下唇松开，嘴角放松，视线抬起看向镜面",
+     "motion_triggers": [
+      "lnwan01"
+     ],
+     "sound": "金属环扣合的一声脆响，衣料摩擦的细响，房间底噪；【配乐】渐强，强度2，对白避让；【H3 audio】A single crisp metallic click as the last ring clasps shut. Cotton fabric shifts against skin with a soft rustle. A quiet warm room tone underneath.",
+     "sound_intimate": "",
+     "sound_h3": "A single crisp metallic click as the last ring clasps shut. Cotton fabric shifts against skin with a soft rustle. A quiet warm room tone underneath.",
+     "music_cue": "渐强，强度2，对白避让",
+     "h3_prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 6.58-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] Live-action, cinematic, shallow depth of field, a close-up from a low angle begins in the position, framing and lighting established by Picture 1, her waist filling the center of frame in a black patent leather corset with a black patent leather mini skirt baring long legs, transparent 12cm stiletto heels with side cutouts, a chain of nine iron beads, warm yellow wall light from the rear right. The camera pushes in with small amplitude as her fingertip presses the ninth thin metal ring into the skin at her waist, the skin dimpling slightly. At 00:02.000, an off-screen 34-year-old man with a low restrained voice, natural pace (S1) says in an off-screen voiceover: <d>[Chinese] 第八。</d> while her lips remain completely closed. At 00:03.200, her fingertip flattens the ring and her waist pulls into a taut curve, her eyes lifting toward the mirror while her finger stays pressed at her waist as the shot ends. She settles into the low-angle waist composition established by Picture 2 at the end of the shot.\n\noverall_soundscape: A single crisp metallic click as the last ring clasps shut. Cotton fabric shifts against skin with a soft rustle. A quiet warm room tone underneath.\n\nnon_diegetic_music: A low sustained cello drone at 60 BPM with sparse single piano notes. A thin metallic chime accent on each ring clasp, swelling in volume.",
+     "h3_check": null,
+     "voiceover": null,
+     "dialogue_raw": "（顾沉，画外，低声报数）“第八。”",
+     "dialogue": [
+      {
+       "speaker_note": "顾沉，画外，低声报数",
+       "text": "第八。",
+       "stage": null,
+       "speaker": "顾沉"
+      }
+     ],
+     "dialogue_stage": [],
+     "extras": [],
+     "decor_state": "D0",
+     "scene_id": "sk_gu_apartment",
+     "scene_detail": "衣帽间推拉门半开，全身镜立在左侧，暖黄射灯打在镜面上，深色木地板反出细长光带",
+     "cast": [
+      {
+       "name": "林晚",
+       "presence": "局部",
+       "x": "中",
+       "depth": null,
+       "part": "腰侧",
+       "raw": "林晚（局部｜腰侧｜中）"
+      },
+      {
+       "name": "顾沉",
+       "presence": "画外",
+       "x": null,
+       "depth": null,
+       "part": null,
+       "raw": "顾沉（画外）"
+      }
+     ],
+     "cast_raw": "林晚（局部｜腰侧｜中）、顾沉（画外）",
+     "link": "同场换机位",
+     "link_carry": "动作｜她的手指仍停在腰侧，视线留在镜面",
+     "duration": 6,
+     "duration_source": "script",
+     "adult": true,
+     "adult_reasons": [
+      "整集🔴"
+     ],
+     "source_line": 173
+    },
+    {
+     "episode": 7,
+     "index": 12,
+     "img_note": null,
+     "img_prompt": "lnwan01，中近景，平视，林晚穿黑色漆皮短裙与黑色漆皮束腰站在酒会厅外走廊里，雾霾天蓝色及腰直发（比参考图略深、带一点灰的真实染发色）齐刘海垂在肩前，钻石水晶甲清晰，冷白皮肤，掌心压在腰侧第九枚细金属环上，她侧面朝画面右侧、视线落在他脸上，砖墙路灯在右侧，走廊壁灯暖黄从侧面打来，会场水晶灯余光在背后虚化成光斑",
+     "img_triggers": [
+      "lnwan01"
+     ],
+     "motion_prompt": "lnwan01，camera push in 小幅度推近，林晚掌心仍压在腰侧第九枚环上，肩膀慢慢放松、呼吸起伏，下巴微抬——中近景里她睫毛一颤，侧面轮廓朝向画面右侧，视线始终落在他脸上",
+     "motion_triggers": [
+      "lnwan01"
+     ],
+     "sound": "走廊壁灯的电流低鸣，远处会场人声收尾，漆皮轻响；【配乐】落下，强度1，独白避让；【H3 audio】A faint electrical hum from the corridor wall lamps. Distant ballroom voices thin out into the night. Patent leather shifts softly at her waist.",
+     "sound_intimate": "",
+     "sound_h3": "A faint electrical hum from the corridor wall lamps. Distant ballroom voices thin out into the night. Patent leather shifts softly at her waist.",
+     "music_cue": "落下，强度1，独白避让",
+     "h3_prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 6.58-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] Live-action, cinematic, shallow depth of field, a medium close-up begins in the position, framing and lighting established by Picture 1, with a 22-year-old Chinese woman with waist-length misty sky-blue straight hair with a blunt fringe, cool pale skin and a tall slender build in a black patent leather corset with a black patent leather mini skirt baring long legs, transparent 12cm stiletto heels with side cutouts, a chain of nine iron beads, standing in profile on the left of frame against the brick wall and street lamp of the corridor outside the ballroom, her palm pressed over the ninth ring at her waist, her eyes resting on the face of the man off-screen to the right, warm yellow corridor wall light from the side. The camera pushes in with small amplitude as her shoulders ease down and her chest rises with a slow breath. At 00:02.000, her chin lifts a little and her lashes flicker, her gaze holding on his face. At 00:03.600, her palm stays pressed at her waist and her shoulders settle, and her eyes remain on him as the shot ends. She settles into the profile facing right established by Picture 2 at the end of the shot.\n\noverall_soundscape: A faint electrical hum from the corridor wall lamps. Distant ballroom voices thin out into the night. Patent leather shifts softly at her waist.\n\nnon_diegetic_music: A low sustained cello drone at 60 BPM with sparse single piano notes, easing to a soft string swell.",
+     "h3_check": null,
+     "voiceover": null,
+     "dialogue_raw": null,
+     "dialogue": [],
+     "dialogue_stage": [],
+     "extras": [],
+     "decor_state": "D0",
+     "scene_id": "sk_alley_ballroom",
+     "scene_detail": "酒会厅外走廊，大理石地面延伸向画面深处，砖墙与路灯在尽头，会场水晶灯的光从画外后方透出",
+     "cast": [
+      {
+       "name": "林晚",
+       "presence": "在画",
+       "x": "左",
+       "depth": "前",
+       "part": null,
+       "raw": "林晚（在画｜左｜前）"
+      },
+      {
+       "name": "顾沉",
+       "presence": "画外",
+       "x": null,
+       "depth": null,
+       "part": null,
+       "raw": "顾沉（画外）"
+      }
+     ],
+     "cast_raw": "林晚（在画｜左｜前）、顾沉（画外）",
+     "link": "接力",
+     "link_carry": "动作｜她的掌心仍压在腰侧，视线留在他脸上",
+     "duration": 6,
+     "duration_source": "script",
+     "adult": true,
+     "adult_reasons": [
+      "整集🔴"
+     ],
+     "source_line": 352
+    }
+   ],
+   "extras": [
+    {
+     "label": "下镜",
+     "text": "动作匹配切｜她的手指仍按在腰侧，视线留在镜面"
+    },
+    {
+     "label": "下镜",
+     "text": "动作匹配切｜她的手指仍停在腰侧，视线留在镜面"
+    },
+    {
+     "label": "下镜",
+     "text": "动作匹配切｜她的手指仍压在腰侧，视线抬起"
+    },
+    {
+     "label": "下镜",
+     "text": "视线匹配切｜她的视线顺着镜中腰线往下"
+    },
+    {
+     "label": "下镜",
+     "text": "声音先行 0.4 秒｜她的指腹仍压在漆皮边缘，视线留在镜中"
+    },
+    {
+     "label": "下镜",
+     "text": "动作匹配切｜她的拇指仍压在翻页键上，视线留在幕布"
+    },
+    {
+     "label": "下镜",
+     "text": "视线匹配切｜她的视线抬向幕布"
+    },
+    {
+     "label": "下镜",
+     "text": "动作匹配切｜她的拇指仍压在翻页键上，视线留在幕布"
+    },
+    {
+     "label": "下镜",
+     "text": "硬切｜她的手指仍收拢在裙侧，脚步未停"
+    },
+    {
+     "label": "下镜",
+     "text": "叠化 0.4 秒｜她的掌心仍压在腰侧，视线留在他脸上"
+    }
+   ],
+   "source_line": 119
+  },
+  {
+   "number": 8,
+   "title": "巷中拉开风衣",
+   "high_intensity": true,
+   "tag": "",
+   "synopsis": "黄昏小巷里林晚当着一个陌生男人的面拉开风衣，顾沉替她合拢；夜里酒会签字后，她在顾沉公寓的全身镜前想起那句“签字即验收”。",
+   "music": "低音提琴拨弦与电钢琴单音铺底，中速，弦乐在巷中拉开风衣时渐强，酒会段落换钢琴三连音；【BGM】Low double bass pizzicato with sparse electric piano notes at 88 BPM in D minor, muted cello swell entering in the middle section, piano triplets carrying the final section, close-miked strings with soft reverb.",
+   "music_bgm": "Low double bass pizzicato with sparse electric piano notes at 88 BPM in D minor, muted cello swell entering in the middle section, piano triplets carrying the final section, close-miked strings with soft reverb.",
+   "negative_extra": "",
+   "cast": [
+    "林晚",
+    "顾沉"
+   ],
+   "scene_ids": [
+    "sk_alley_ballroom",
+    "sk_gu_apartment"
+   ],
+   "looks": [
+    {
+     "character": "林晚",
+     "from_shot": null,
+     "slots": {
+      "服装": "黑色漆皮束腰配黑色漆皮短裙，露出长腿",
+      "鞋": "12cm侧开透明细高跟",
+      "妆": "蓝调玫瑰色眼影配莓果色唇，脸颊薄扫草莓粉",
+      "发": "雾霾天蓝色及腰直发（比参考图略深、带一点灰的真实染发色），齐刘海",
+      "甲": "5厘米超长透明水晶甲、镶满钻石饰品",
+      "饰品": "3件（九串铁珠、细银链、钻石水晶甲）"
+     },
+     "en": "a black patent leather corset with a black patent leather mini skirt baring long legs, transparent 12cm stiletto heels with side cutouts, a chain of nine iron beads",
+     "raw": "服装=黑色漆皮束腰配黑色漆皮短裙，露出长腿｜鞋=12cm侧开透明细高跟｜妆=蓝调玫瑰色眼影配莓果色唇，脸颊薄扫草莓粉｜发=雾霾天蓝色及腰直发（比参考图略深、带一点灰的真实染发色），齐刘海｜甲=5厘米超长透明水晶甲、镶满钻石饰品｜饰品=3件（九串铁珠、细银链、钻石水晶甲）｜EN=a black patent leather corset with a black patent leather mini skirt baring long legs, transparent 12cm stiletto heels with side cutouts, a chain of nine iron beads",
+     "source_line": 123
+    },
+    {
+     "character": "顾沉",
+     "from_shot": null,
+     "slots": {
+      "服装": "白衬衫袖口卷起配黑西裤",
+      "鞋": "黑色皮鞋",
+      "妆": "自然哑光底妆，眉形利落",
+      "发": "黑色短发向后梳齐",
+      "甲": "短甲修整干净",
+      "饰品": "1件（左手无名指旧银戒）"
+     },
+     "en": "a white shirt with rolled sleeves and black trousers, black leather shoes, an old silver ring on the left ring finger",
+     "raw": "服装=白衬衫袖口卷起配黑西裤｜鞋=黑色皮鞋｜妆=自然哑光底妆，眉形利落｜发=黑色短发向后梳齐｜甲=短甲修整干净｜饰品=1件（左手无名指旧银戒）｜EN=a white shirt with rolled sleeves and black trousers, black leather shoes, an old silver ring on the left ring finger",
+     "source_line": 124
+    }
+   ],
+   "shots": [
+    {
+     "episode": 8,
+     "index": 5,
+     "img_note": null,
+     "img_prompt": "特写，过肩，顾沉穿白衬衫袖口卷起配黑西裤，黑色短发向后梳齐，从林晚肩后伸手，指尖停在风衣前襟上方，左手无名指旧银戒反着光，视线落在风衣前襟，表情克制，画面左侧是林晚的肩线局部，黄昏小巷砖墙路灯虚化成暖橙光斑，暖橙余光从右后方打在他手背与指节，真实皮肤质感",
+     "img_triggers": [],
+     "motion_prompt": "lnwan01，camera push in 缓慢推近，顾沉从林晚肩后伸出手，指尖向前襟靠近，停在前襟上方半寸，指节微微收紧，随即再靠近前襟边缘，停住半秒，视线跟着自己的手移动，下颌绷紧——特写，顾沉的手停在风衣前襟上方，指尖离布料半寸，视线落在手边",
+     "motion_triggers": [
+      "lnwan01"
+     ],
+     "sound": "衣料摩擦的细声，巷子深处水滴声，远处车流低鸣，风穿过巷口；【配乐】延续，强度2，对白避让；【H3 audio】Fabric brushes against itself, water drips deep in the alley, distant traffic hums under the wind, and air moves through the alley mouth.",
+     "sound_intimate": "",
+     "sound_h3": "Fabric brushes against itself, water drips deep in the alley, distant traffic hums under the wind, and air moves through the alley mouth.",
+     "music_cue": "延续，强度2，对白避让",
+     "h3_prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 6.58-second mark of the target video.\n\nintegrated_multimodal_description: [Shot 1] Live-action, cinematic, shallow depth of field, a close-up over the shoulder begins in the position, framing and lighting established by Picture 1, featuring a 34-year-old East Asian man with short black hair, a composed handsome face, fair skin and a broad-shouldered build in a white shirt with rolled sleeves and black trousers, black leather shoes, an old silver ring on the left ring finger, reaching from behind the shoulder of the woman on the left of the frame beside a brick wall lamp in a dusk alley with warm orange lamp light from the right rear, his eyes on the coat front. The camera pushes in with small amplitude as his fingers move toward the coat front and stop half an inch above it. At 00:02.000, his fingertips hover above the coat edge, his knuckles tightening, his gaze following his own hand. At 00:04.000, his fingers move closer to the edge of the coat front and stop for half a second, his jaw tightening. His hand stays above the coat edge, and he settles into the hovering hand pose established by Picture 2 at the end of the shot.\n\noverall_soundscape: Fabric brushes against itself, water drips deep in the alley, distant traffic hums under the wind, and air moves through the alley mouth.\n\nnon_diegetic_music: Cello swell holds at medium volume, double bass pizzicato steady at 88 BPM, electric piano note decaying.",
+     "h3_check": null,
+     "voiceover": null,
+     "dialogue_raw": null,
+     "dialogue": [],
+     "dialogue_stage": [],
+     "extras": [],
+     "decor_state": "D0",
+     "scene_id": "sk_alley_ballroom",
+     "scene_detail": "黄昏小巷，砖墙路灯被染成暖橙色，巷子另一头陌生男人的剪影正在转身",
+     "cast": [
+      {
+       "name": "顾沉",
+       "presence": "在画",
+       "x": "右",
+       "depth": "中",
+       "part": null,
+       "raw": "顾沉（在画｜右｜中）"
+      },
+      {
+       "name": "林晚",
+       "presence": "局部",
+       "x": "左",
+       "depth": null,
+       "part": "肩后",
+       "raw": "林晚（局部｜肩后｜左）"
+      }
+     ],
+     "cast_raw": "顾沉（在画｜右｜中）、林晚（局部｜肩后｜左）",
+     "link": "同场换机位",
+     "link_carry": "位置｜顾沉在她侧后方，手已抬起",
+     "duration": 6,
+     "duration_source": "script",
+     "adult": true,
+     "adult_reasons": [
+      "整集🔴"
+     ],
+     "source_line": 217
+    }
+   ],
+   "extras": [
+    {
+     "label": "光线",
+     "text": "主光=右后方暖橙路灯余光｜补光=左前方砖墙反射暖光｜轮廓光=右后侧暖橙勾边｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Push In｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜林晚的指尖把风衣前襟带开一寸，露出漆皮束腰上缘一线，指节绷起｜视线=落在巷口的砖墙路灯上｜表情=嘴唇轻抿｜反应=—｜运镜=Push In｜声音=漆皮摩擦的轻响；2–4秒｜她下颌抬起半寸，蓝发被巷口的风掀起一缕，指尖在前襟边缘停住｜视线=从巷口路灯移到自己前襟｜表情=眼睛微眯｜反应=—｜运镜=Push In｜声音=风掠过砖墙；4–6秒｜她视线从自己前襟抬回巷口，指尖仍扣在前襟边缘，胸口的呼吸起伏一次｜视线=抬回巷口的砖墙路灯｜表情=眼睑压低｜反应=—｜运镜=Push In｜声音=细跟轻点地面"
+    },
+    {
+     "label": "光线",
+     "text": "主光=右后方暖橙路灯余光｜补光=左前方砖墙反射暖光｜轮廓光=右后侧暖橙勾边｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Static Shot｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜顾沉下颌微收，左手无名指旧银戒在灯下转过一道光｜视线=落在她肩后｜表情=嘴唇将启｜反应=林晚：肩线微微一绷｜运镜=Static Shot｜声音=巷内风声；2–4秒｜他喉结动了一下，视线从她肩后抬到她耳侧｜视线=落在她耳侧｜表情=眼睑压低｜反应=林晚：肩线停住｜运镜=Static Shot｜声音=低语；4–6秒｜他嘴唇开合说出短句，说完嘴唇合上｜视线=回到她肩后｜表情=下颌绷紧｜反应=林晚：肩线轻轻一沉｜运镜=Static Shot｜声音=低语收尾"
+    },
+    {
+     "label": "光线",
+     "text": "主光=右后方暖橙路灯余光｜补光=左前方砖墙反射暖光｜轮廓光=右后侧暖橙勾边｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Static Shot｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜巷子另一头的男人剪影停住脚步、头转向她，林晚的双手离开前襟落到腰侧｜视线=落在巷子另一头的男人剪影上｜表情=嘴唇轻抿，睫毛压低一次｜反应=顾沉：手臂在画面右侧微微前倾｜运镜=Static Shot｜声音=远处脚步停住；2–4秒｜风衣敞着垂在身体两侧，她下颌抬起，胸口起伏一次｜视线=仍钉在巷子另一头的剪影上｜表情=眼睛不眨，唇角绷平｜反应=顾沉：手臂在画面右侧停住｜运镜=Static Shot｜声音=风衣布料垂落的轻响；4–6秒｜她肩线放松下来，双手在腰侧摊开，视线始终不看画面右侧｜视线=仍钉在巷子另一头的剪影上｜表情=下颌抬起，唇角微松｜反应=顾沉：手臂在画面右侧垂定｜运镜=Static Shot｜声音=风穿过巷口"
+    },
+    {
+     "label": "光线",
+     "text": "主光=右后方暖橙路灯余光｜补光=左前方砖墙反射暖光｜轮廓光=右后侧暖橙勾边｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Push In｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜林晚的右手从腰侧抬起，指尖捏住自己前襟边缘往上带｜视线=投向画面右侧探入的白衬衫手臂｜表情=下颌微抬｜反应=顾沉：手臂从画面右侧探入，指尖朝她的前襟压来｜运镜=Push In｜声音=漆皮轻响；2–4秒｜她的指尖把前襟带上半寸，他的指尖压到同一处，把布料压回去｜视线=落在顾沉的手背｜表情=睫毛垂下半寸｜反应=顾沉：指尖停在布料边缘，旧银戒反光｜运镜=Push In｜声音=衣料摩擦；4–6秒｜她的手指松开，前襟落到敞着的位置，肩线一沉｜视线=从他的手背抬到他手臂｜表情=唇线放松｜反应=顾沉：指尖留在布料边缘半寸｜运镜=Push In｜声音=漆皮轻响"
+    },
+    {
+     "label": "光线",
+     "text": "主光=右后方暖橙路灯余光｜补光=左前方砖墙反射暖光｜轮廓光=右后侧暖橙勾边｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Push In｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜顾沉从她肩后伸出手，指尖向前襟靠近｜视线=落在风衣前襟｜表情=眼神沉静｜反应=林晚：肩线一颤｜运镜=Push In｜声音=衣料摩擦；2–4秒｜他指尖停在前襟上方半寸，指节微微收紧｜视线=跟着自己的手｜表情=嘴唇抿平｜反应=林晚：呼吸停了一拍｜运镜=Push In｜声音=巷内风声；4–6秒｜他手指再靠近前襟边缘，停住半秒｜视线=落在布料边缘｜表情=下颌绷紧｜反应=林晚：肩头轻轻下沉｜运镜=Push In｜声音=衣料轻响"
+    },
+    {
+     "label": "光线",
+     "text": "主光=右后方暖橙路灯余光｜补光=左前方砖墙反射暖光｜轮廓光=右后侧暖橙勾边｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Push In｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜风衣前襟随她的呼吸自己合拢到胸口，顾沉的手指停在布料边缘外侧、松开半寸｜视线=落在她合拢的前襟上｜表情=眼神沉静｜反应=林晚：肩线一颤，锁骨绷起｜运镜=Push In｜声音=衣料摩擦；2–4秒｜他手指完全松开，垂在布料旁边，视线从她前襟移到她眼睛再移回前襟｜视线=从她的眼睛移回前襟｜表情=下颌绷紧｜反应=林晚：呼吸一滞，锁骨起伏｜运镜=Push In｜声音=漆皮轻响；4–6秒｜他嘴唇开合说出短句，说完嘴唇合上｜视线=落在她的前襟上｜表情=嘴唇抿平｜反应=林晚：视线避开半寸｜运镜=Push In｜声音=低语"
+    },
+    {
+     "label": "光线",
+     "text": "主光=上方水晶吊灯暖白高光｜补光=桌面反光｜轮廓光=背后墙面暖白光｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Arc Shot｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜两人隔桌举杯，杯沿轻轻相碰｜视线=林晚看向顾沉｜表情=林晚嘴角微扬｜反应=顾沉：视线落在她举杯的手上，下颌一点｜运镜=Arc Shot｜声音=杯沿轻响；2–4秒｜顾沉收回杯子，杯底落到桌面，视线抬向她的脸｜视线=顾沉看向她的脸｜表情=顾沉眼神沉静｜反应=林晚：视线迎上他的眼睛，眉梢轻抬｜运镜=Arc Shot｜声音=杯底触桌的轻响；4–6秒｜顾沉开口说话，指节在杯脚上轻扣一下｜视线=顾沉看向她｜表情=顾沉下颌微收｜反应=林晚：视线落在他扣杯的手上，随即回到他脸上｜运镜=Arc Shot｜声音=会场低语"
+    },
+    {
+     "label": "光线",
+     "text": "主光=上方水晶吊灯暖白高光｜补光=桌面反光｜轮廓光=背后墙面暖白光｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Push In｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜笔尖落在末页签名线上，指节绷起｜视线=—｜表情=—｜反应=—｜运镜=Push In｜声音=笔尖摩擦纸面；2–4秒｜笔尖在纸上停了一瞬，指甲上的钻石闪了一下｜视线=—｜表情=—｜反应=—｜运镜=Push In｜声音=纸页轻响；4–6秒｜笔尖划出最后一笔，指甲在签名旁的纸上压出一道浅痕，手指松开半分｜视线=—｜表情=—｜反应=—｜运镜=Push In｜声音=笔尖离纸"
+    },
+    {
+     "label": "光线",
+     "text": "主光=上方水晶吊灯暖白高光｜补光=桌面反光｜轮廓光=背后墙面暖白光｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Static Shot｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜画外门铃响起，林晚的视线先投向画面右侧的门口｜视线=投向画面右侧的门口｜表情=眼睛一凝｜反应=—｜运镜=Static Shot｜声音=门铃；2–4秒｜她低头看自己握杯的手，握杯的手指把杯脚捏得发白｜视线=落到自己握杯的手上｜表情=嘴唇抿紧｜反应=—｜运镜=Static Shot｜声音=会场低语；4–6秒｜画外传来低声的规则重申，她下颌绷紧，握杯的手指松开半分又收紧｜视线=仍落在自己握杯的手上｜表情=眼睑微垂｜反应=—｜运镜=Static Shot｜声音=会场低语"
+    },
+    {
+     "label": "光线",
+     "text": "主光=侧后方暖黄壁灯｜补光=镜面反射柔光｜轮廓光=背后壁灯勾边｜修正=无"
+    },
+    {
+     "label": "镜头运动",
+     "text": "Push In｜幅度=小｜速度=正常"
+    },
+    {
+     "label": "分拍",
+     "text": "0–2秒｜林晚抬手碰了碰锁骨，指尖停在锁骨下方｜视线=落在镜中自己的眼睛｜表情=眼睛微沉｜反应=—｜运镜=Push In｜声音=壁灯电流细响；2–4秒｜镜中的人眼神变了，她侧过脸，钻石水晶甲在暖光里清晰｜视线=落在镜中自己的眼睛｜表情=睫毛轻颤，嘴唇微启｜反应=—｜运镜=Push In｜声音=呼吸放轻；4–6秒｜指尖停在锁骨下方不动，她呼吸停了一拍，胸口起伏一次｜视线=从镜中自己的眼睛移到镜中自己的领口｜表情=下颌微收，唇角绷起｜反应=—｜运镜=Push In｜声音=漆皮轻响"
+    }
+   ],
+   "source_line": 119
+  }
+ ],
+ "_fixture_note": "PROMPTFIX 11-02：series10_v1 导入稿冻结子集（data/import/script_v2.json 11-02 18:5x，sources 指向 series10_v1）——tests/test_promptfix.py 固定夹具，不随现行主剧切换"
+}

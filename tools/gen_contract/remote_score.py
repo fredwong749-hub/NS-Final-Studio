@@ -27,6 +27,15 @@ def srv_repo(host: str) -> str:
     return m.server_root(host)
 
 
+def comfy_py(host: str) -> str:
+    """A-07（总调度 19:2x）：CLIP 单次子进程的解释器按主机取 hosts.json comfy_python（原来 resident_prep 在 gpu36 上就地改本文件的 COMFY_PY）"""
+    import importlib.util as _u
+    sp = _u.spec_from_file_location("factory_hosts_rs", Path(__file__).resolve().parents[2] / "tools/factory/hosts.py")
+    m = _u.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m.load()["hosts"].get(host, {}).get("comfy_python") or COMFY_PY
+
+
 SCORE_PY = "tools/series10_imggen/score_remote.py"
 HANDS_PY = "tools/series10_imggen/hands_remote.py"
 CLIP_PY = "tools/gen_contract/clip_srv.py"
@@ -37,18 +46,37 @@ HAND = "/root/work/fredw/venv_hand/bin/python"
 # （资产中心“设为当前身份脸”覆盖 > config/recipes/asset_refs.json faces）解析出本机文件，按内容哈希放到机器上 refs/id_<sha16>.png。
 # 原来的 lin_wan@master（10-31 旧母版裁切）作废：总调度 P0 已把林晚改回 A-s202 face_ref2va，打分再对旧母版取高者会放过不像的图。
 FACE_CHARS = ("lin_wan", "gu_chen", "chen_yu", "ch_a_lan")
-FACE_PROJECT = "series10_v1"
+def face_project() -> str:
+    """当前打分对哪部剧的身份脸（AUDIT-M I-2，总调度 18:5x：原来写死第一季）：进程环境 NS_RUN_ID（非主剧 producer 设）→ runs.json primary"""
+    import os as _o
+    v = _o.environ.get("NS_RUN_ID")
+    if v:
+        return v
+    import importlib.util as _u
+    sp = _u.spec_from_file_location("runs_for_face", Path(__file__).resolve().parents[2] / "tools/autopilot/runs.py")
+    m = _u.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m.primary_run()
 
 
-def local_faces(project: str = FACE_PROJECT) -> dict[str, str]:
+def __getattr__(name):            # 兼容旧读法 RS.FACE_PROJECT（tools/vqa/accept.py、anomaly.py）：每次按当前剧解析
+    if name == "FACE_PROJECT":
+        return face_project()
+    raise AttributeError(name)
+
+
+def local_faces(project: str | None = None) -> dict[str, str]:
     """{角色 id: 出图用的身份脸（仓库相对路径）}——与 asset_refs.plan_for 同一个函数解析"""
+    project = project or face_project()
     import sys as _s
     root = Path(__file__).resolve().parents[2]
     if str(root / "services/agent") not in _s.path:
         _s.path.insert(0, str(root / "services/agent"))
     from ns_agent import asset_refs as AR
     out = {}
-    for cid in FACE_CHARS:
+    # L-126（总调度 11-02 18:5x）：资产包（清单）模式的剧——角色名单只取清单里的（V2 女主 lead_f 不在 V1 的 FACE_CHARS 里，原来不会上传她的脸）
+    chars = list(((AR.manifest(project) or {}).get("characters") or {})) if AR.manifest_rel(project) else list(FACE_CHARS)
+    for cid in chars:
         f = AR.face_of(project, cid)
         if f:
             out[cid] = f
@@ -69,7 +97,7 @@ print("ok")
 Q1_MODE: dict = {"mode": "anchor_only", "why": "face_refs 还没跑"}   # 身份库 top-k 是否生效（随打分结果下发到 Q1 证据）
 
 
-def face_refs(host: str, project: str = FACE_PROJECT) -> dict[str, str]:
+def face_refs(host: str, project: str | None = None) -> dict[str, str]:
     """{角色 id: 机器上的身份脸路径}；机器上没有的先传上去（一次 ssh，之后按哈希记在本机已知清单里不再传）"""
     import base64
     root = Path(__file__).resolve().parents[2]
@@ -387,7 +415,7 @@ def full_score(host: str, items: list[dict], timeout: float = 900, label: str | 
     rev = {v: k for k, v in sha_of.items()}
     send = {s for s in sha_of.values() if s not in known}
     script = base64.b64encode(_FULL.encode()).decode()
-    cmd = (f'python3 -c "$(echo {script} | base64 -d)" {R} {IDM} {HAND} {RL} {COMFY_PY} {",".join(sorted(GPU_EXCLUDE)) or "-"} {CLIP_MIN_FREE_MB} '
+    cmd = (f'python3 -c "$(echo {script} | base64 -d)" {R} {IDM} {HAND} {RL} {comfy_py(host)} {",".join(sorted(GPU_EXCLUDE)) or "-"} {CLIP_MIN_FREE_MB} '
            f'{srv_repo(host)}')
     d = {}
     hb = _hb_start(host, items, label)

@@ -9,6 +9,7 @@ infra_watchdog 每拍调 sweep() 自动重拼；stale / building / eta 来自 da
 """
 from __future__ import annotations
 
+from ns_api import run_paths as _RP   # K-OPS-F24：渲染根目录按当前剧（V1 已归档，不在网页显示）
 import json
 import time
 
@@ -28,7 +29,7 @@ def _jl(p, d=None):
 
 @router.get("/api/episodes/{n}/preview")
 def episode_preview(n: int):
-    fin = P.DATA / "renders" / f"ep{n:02d}" / "_final"
+    fin = _RP.renders_for_data(P.DATA) / f"ep{n:02d}" / "_final"
     man = _jl(fin / "preview_latest_manifest.json")
     sw = ((_jl(P.DATA / "state" / "preview_sweep.json", {}) or {}).get("eps") or {}).get(str(n), {})
     if not man or not (fin / "preview_latest.mp4").is_file():

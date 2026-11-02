@@ -324,9 +324,10 @@ def source_hashes(project_root_: str | Path | None = None) -> dict[str, str | No
     """bible_version 的全部输入（gpu3 可据此判断是哪一份输入变了）"""
     root = project_root(project_root_)
     bible = root / "config" / "visual_bible.toml"
-    script = root / "data" / "import" / "script_v2.json"
+    from . import run_paths as RP                         # I-14
+    script = RP.script_json(root)
     own = root / "config" / "shot_ownership.json"
-    looks_dir = root / "data" / "looks"
+    looks_dir = RP.looks_dir(root)
     looks = sorted(looks_dir.glob("*.json")) if looks_dir.is_dir() else []
     key = _stat_key([bible, script, own, *looks])
     hit = _SRC_CACHE.get(str(root))

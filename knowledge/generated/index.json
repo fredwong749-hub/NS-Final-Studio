@@ -1,15 +1,15 @@
 {
- "kb_version": "kb-20261102-26729ce9",
- "n": 646,
+ "kb_version": "kb-20261102-3edfd2c2",
+ "n": 656,
  "by_domain": {
-  "render": 95,
+  "render": 98,
   "prompt": 28,
   "writer": 99,
   "edit": 49,
   "review": 68,
   "loop": 9,
   "asset": 44,
-  "ops": 189,
+  "ops": 196,
   "ui": 65
  },
  "by_link": {
@@ -24,8 +24,8 @@
   "P4-P6": 30,
   "P4-P7": 24,
   "P4-P9": 16,
-  "P5-P6": 209,
-  "P6-P7": 38,
+  "P5-P6": 216,
+  "P6-P7": 41,
   "P7-P8": 114,
   "P8-P10": 18,
   "P8-P9": 12,
@@ -5797,6 +5797,153 @@
    "_file": "knowledge/rules/ops_factory.yaml"
   },
   {
+   "id": "K-OPS-F23",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "资产包模式（项目配了 assets_manifest，V2）身份脸 / 设定图 / 单品 / 场景只从清单取（sha 对上才算），清单没有就是“无”、不回退任何旧来源；清单外参考 preflight I11 挡；派生参考图只在笔记本生成，服务器上没有就挡、绝不本地生成",
+   "when": "asset_refs 解析参考、preflight、服务器上编译出图作业",
+   "then": "asset_refs.manifest / face_of / sheet_of / item_image / scene_ref 资产包模式；manifest_violations → I11；_derived_on_server：服务器有就用（不按修改时间判过期）、没有抛 DerivedRefMissing（资产缺图）",
+   "check": "tests/test_factory.py::test_k_ops_f23_v2_manifest_only_and_no_server_derived, tests/test_factory.py::test_v2_identity_face_fail_closed_no_v1_fallback",
+   "evidence": [
+    {
+     "src": "docs/master/V2_READINESS.md",
+     "note": "C1 身份脸 3–5 个来源；C7 gpu36 编译时本机重生成 refcrops / refboards（11-02 18:17:31）两台 refs_sha 不一致；C10 新旧资产混用 → L-125 / L-126 V2 完全切割"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
+  },
+  {
+   "id": "K-OPS-F24",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "只有 runs.json legacy_unprefixed_run 那部剧用不带 run 前缀的旧路径；其它剧（包括当上 primary 的 V2）一律 data/renders/<run>/ 等带前缀路径；按剧取路径只走 runs.script_path / renders_dir / looks_path / producer_dir / asset_manifest；缺 legacy_unprefixed_run 字段 = 抛错",
+   "when": "任何模块定位导入稿 / 渲染目录 / 造型数据 / producer 账本；primary 切换",
+   "then": "runs.legacy_run（缺字段抛 RunRegistryMissing）；ns_render.pipeline / producer.Paths / run_env / API run_paths 都调它；网页在 V1 归档后不显示 V1 的图 / 资产 / 任务；测试一律钉 NS_PRIMARY_RUN（conftest），不读真实 primary",
+   "check": "tests/test_factory.py::test_k_ops_f24_only_legacy_run_uses_unprefixed_paths, tests/test_factory.py::test_run_path_entries, tests/test_factory.py::test_tests_never_read_real_primary",
+   "evidence": [
+    {
+     "src": "docs/master/V2_PLAN.md",
+     "note": "11-02 18:4x NETFIX 提醒：Paths 让主剧用不带前缀的旧路径，V2 当上 primary 会写进 data/renders/epNN/ 和 V1 混在一起；19:0x 切 primary 后 6 个读真实当前剧的测试一起红"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
+  },
+  {
+   "id": "K-OPS-F25",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "route=local_only = 只许项目方自有机器（hosts.json owner_controlled：笔记本 + gpu33 + gpu36），不是自有机器 / 没指定道挡；成人画面（adult=true）系统和 agent 不自动派，只有项目方在界面触发（owner_triggers.json）才派",
+   "when": "producer 派单、preflight I12、剧本标了本地生成的镜",
+   "then": "hosts.owner_lane(lane)；producer.adult_shot_ids + owner_trigger_ids；不变：K-REV-V01 图片 / 视频不发外部 API、HC-07 全部成年",
+   "check": "tests/test_factory.py::test_l128_owner_controlled_lanes_and_adult_wait",
+   "evidence": [
+    {
+     "src": "docs/master/V2_PLAN.md",
+     "note": "L-128 项目方 11-02 19:1x：“远程 gpu3 和 gpu6 是我家的服务器，不是外部的，不要做安全检测”"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
+  },
+  {
+   "id": "K-OPS-F26",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "部署 / 重启只解自己设的暂停：部署前服务器已被别人暂停（项目方 owner / 运维 / runs.json）就不 pause 也不 resume；部署自己的暂停在重启成功后自己解",
+   "when": "system_version deploy --urgent / restart_queue 执行重启",
+   "then": "system_version.server_pause_owner 先读服务器 control；restart_queue.pre_paused 同口径",
+   "check": "tests/test_system_version.py::test_a09_deploy_never_clears_someone_elses_pause",
+   "evidence": [
+    {
+     "src": "docs/master/V2_READINESS.md",
+     "note": "A-09 ③：18:13 / 18:14 sv-14 重启后 RESTART_QUEUE resume 清掉了暂停，今天第二次；之后 producer 仍写 demote"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
+  },
+  {
+   "id": "K-OPS-F27",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "服务器上不许就地改源码（resident_prep 不打补丁）；按主机不同的行为写进代码（OFFLINE_SELF）或 hosts.json（comfy_python 等），部署树始终 = tag",
+   "when": "常驻重启 / 部署后在服务器上准备运行环境",
+   "then": "night / sync 用 _hosts_here()；remote_score.comfy_py(host) 读 hosts.json；resident_prep 只写 control / 作废租约",
+   "check": "tests/test_factory.py::test_a07_no_in_place_source_patching",
+   "evidence": [
+    {
+     "src": "docs/master/V2_READINESS.md",
+     "note": "A-07：resident_prep 每次重启在服务器上就地改 night.py / sync.py / remote_score.py（11-02 19:2x gpu36 实测 remote_score.py COMFY_PY 被改成 /root/work/fredw/venv/bin/python、sync.py 带 resident 补丁），部署树和 tag 不一致"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
+  },
+  {
+   "id": "K-OPS-F28",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "剧本导入器没有默认剧本 / 默认旧剧文档；输出默认 = 当前剧导入稿；非 V1 的导入引用第一季文档目录直接拒绝；VQA 配置读坏 = 失败关闭；契约结果只认 take.postflight 一个字段",
+   "when": "tools/import_script.py 导入；ns_agent.vqa.cfg 读配置；unified_frame 写回 / 读取出图后契约",
+   "then": "--script 必填、--image-doc 默认无、old_doc_refs 拒绝；vqa.cfg 读坏返回 _config_error + enforce，Q9 判不过；unified_frame.pf_of 唯一读法、_pf_write 写唯一字段",
+   "check": "tests/test_factory.py::test_a08_importer_no_default_old_docs, tests/test_factory.py::test_a05_vqa_config_broken_fails_closed, tests/test_factory.py::test_a03_single_postflight_field",
+   "evidence": [
+    {
+     "src": "docs/master/V2_READINESS.md",
+     "note": "A-08 导入默认并入第一季 image 文档、带 run=s2 导入会覆盖第一季；A-05 VQA 配置读坏 = 闸门放行；A-03 take.postflight 与 contract.postflight 两个字段导致重复打分"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
+  },
+  {
+   "id": "K-OPS-F29",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "剧本写作推进是笔记本上的常驻服务（tools/factory/autoflow_resident.py，单实例锁 + 心跳），由 ops/restart_autoflow.ps1 拉起；只推进 runs.json 里 preparing / active / producing 的剧，不写任何暂停字段",
+   "when": "写手交稿（.done）后推进；会话结束后仍要继续推进",
+   "then": "acquire_lock 单实例；advance_runs 按状态过滤；tick 调 autoflow.pending_done + autoflow run --source daemon；心跳 data/factory/autoflow_resident.json 给 SENTINEL",
+   "check": "tests/test_factory.py::test_autoflow_resident_single_instance_and_status_filter",
+   "evidence": [
+    {
+     "src": "docs/master/V2_PLAN.md",
+     "note": "11-02 19:4x：HOLLYWOOD 的 autoflow watch --run-dir data/pipeline/runs/series10_v2 挂在会话下面，会话一结束就停"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
+  },
+  {
    "id": "K-OPS-G01",
    "domain": "ops",
    "link": [
@@ -8911,6 +9058,75 @@
     {
      "src": "data/review_pages/promptfix/back_far.json",
      "note": "全剧在画但写背影 4 处（ep01-S9 顾沉、ep03-S2 / ep04-S6 / ep10-S6 林晚），局部背影 1 处（ep02-S4），在画后景 17 处"
+    }
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/render_promptfix.yaml"
+  },
+  {
+   "id": "K-REN-956",
+   "domain": "render",
+   "link": [
+    "P6-P7"
+   ],
+   "title": "先验收、后重出——编译规则变化不作废已通过的版本；只有人主动改的输入或验收失败才重出",
+   "when": "tools/autopilot/producer（E11 过期重出：stale_requeue_map；E24 作业输入变：first_input_changed）",
+   "then": "画布摘要的过期标记只按白名单（STALE_REQUEUE_ON：提示词已改 / 导演加强已改 / 本集加强已改 / 剧本已改）放回重出，“编译器升级”和系统固定句、参考槽调整不重出；E24 只比本镜剧本输入签名（input_sig = 导入稿该镜 img / motion / cast / 场景 / 时长，过契约时记 passed_input_sig），作业签名（提示词 + 参考图）变了不作废；没记过 passed_input_sig 的旧数据不动。已通过的帧交出图后验收（站位核对 blocking_defects、服装验收）查，查出问题的走验收失败重出；新出的图一律用新规则",
+   "check": [
+    "tests/test_promptfix.py"
+   ],
+   "evidence": [
+    {
+     "src": "tools/autopilot/producer.py job_sig",
+     "note": "旧 E24 签名 = first_frame_jobs.json 的提示词 + 参考图；sv-14 编译规则（站位句 48 镜、局部收窄 8 镜、手部单品撤槽）一上线，已通过首帧的签名全变 → 估计约 56 镜被无谓重出（总调度 11-02 17:3x 定先验收、后重出）"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/render_promptfix.yaml"
+  },
+  {
+   "id": "K-REN-958",
+   "domain": "render",
+   "link": [
+    "P6-P7"
+   ],
+   "title": "V2 资产包造型封闭 + 本地专用资产只许本地道（编译标 route，preflight I12 按道挡）",
+   "when": "asset_refs.resolve_shot（looks_closed）、asset_refs.plan_route → frame_job.build_first（job.route / route_reasons）、gen_contract.preflight I12、producer（首帧传 lane；尾帧同样挡）",
+   "then": "资产包清单里 looks_closed 的角色（lead_f 只有 O1–O4），本镜造型不在清单 → missing“造型不在资产包清单”（挡）；本镜造型或任何参考（含参考板每一格）route=local_only（O2 / O3 / J1 / J2）→ job.route=local_only，preflight I12 只许 hosts.json owner_controlled=true 的道（L-128：笔记本 + gpu33 + gpu36；FACTORY K-OPS-F25 实现），未指定道 / 非自有机器 fail（失败关闭）；用到 adult=true 资产的作业标 job.adult，producer 未收到项目方触发（owner_triggers）不提交；compile_trace 记 route / route_reasons / adult",
+   "check": [
+    "tests/test_promptfix_v2.py"
+   ],
+   "evidence": [
+    {
+     "src": "assets_v2/manifest.json",
+     "note": "lead_f looks_closed=true，O2 / O3 route=local_only adult；J1 / J2 只用于本地亲密镜（项目方 18:5x–19:1x）"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/render_promptfix.yaml"
+  },
+  {
+   "id": "K-REN-959",
+   "domain": "render",
+   "link": [
+    "P6-P7"
+   ],
+   "title": "带品牌 logo 的参考只取款式——槽位说明正向写“没有任何标志和文字”，提示词出现品牌字样 preflight I13 挡",
+   "when": "asset_refs.plan_slots（manifest no_brand 的参考）、gen_contract.preflight I13（config/compile/brand_words.json）",
+   "then": "参考板 / 单品槽里有 no_brand 的文件 → 槽位说明句尾接 NO_BRAND_NOTE（正向写法；Turbo cfg=1 负面词不生效）；资产包模式下提示词含品牌词表里的字样 → I13 fail。根治在资产侧：SH2 参考图应换成去 logo 的裁切（交 IMGMASTER / ASSETUX）",
+   "check": [
+    "tests/test_promptfix_v2.py"
+   ],
+   "evidence": [
+    {
+     "src": "assets_v2/manifest.json lead_f.items.SH2",
+     "note": "no_brand=true：参考图带品牌 logo，项目方要求只取款式、生成时不出现任何品牌字样或标志"
     }
    ],
    "confidence": "medium",

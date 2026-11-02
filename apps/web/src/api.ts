@@ -27,8 +27,15 @@ import type {
 /** 后端 detail → 文字（422 是数组，不能直接当字符串；封板修复：对话框 capi 共用） */
 export const detailText = (detail: unknown): string => (typeof detail === "string" ? detail : JSON.stringify(detail));
 
+/** 浏览器的英文网络错误（Failed to fetch 等）统一成大白话；提交类和读取类分开说（NAVIA） */
+export const NET_DOWN_WRITE = "网络不通，没有提交上，请再点一次";
+export const NET_DOWN_READ = "网络不通，读不到，稍后会自动重试";
+export const plainNetError = (msg: string, write = true) => msg.replace(/Failed to fetch|NetworkError when attempting to fetch resource\.?|Load failed|network error/gi, write ? NET_DOWN_WRITE : NET_DOWN_READ);
+
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(url, init);
+  const r = await fetch(url, init).catch((e: unknown) => {
+    throw Object.assign(new Error(plainNetError(String((e as Error)?.message ?? e), (init?.method ?? "GET") !== "GET")), { status: 0 });
+  });
   if (!r.ok) {
     let msg = `${r.status} ${r.statusText}`;
     try {

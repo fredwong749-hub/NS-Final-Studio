@@ -440,7 +440,17 @@ def wardrobe() -> dict[str, dict]:
         return {}
 
 
-def item_image(item_id: str) -> str | None:
+def item_image(item_id: str, project: str | None = None) -> str | None:
+    if project and manifest_rel(project):                       # V2 资产包模式：单品只认清单
+        for c in ((manifest(project) or {}).get("characters") or {}).values():
+            f = _manifest_file((c.get("items") or {}).get(item_id))
+            if f:
+                return f
+            for lk in (c.get("looks") or {}).values():
+                f = _manifest_file((lk.get("items") or {}).get(item_id))
+                if f:
+                    return f
+        return None
     it = wardrobe().get(item_id)
     if not it:
         return None
@@ -457,6 +467,9 @@ def item_name(item_id: str) -> str:
 
 def sheet_of(project: str, cid: str, look_id: str) -> str | None:
     """当前设定图：继承链上子季的选定表优先，没有这条（或文件不在）就回落到父季（第二季沿用第一季现行造型设定图）"""
+    if manifest_rel(project):                                   # V2 资产包模式
+        c = ((manifest(project) or {}).get("characters") or {}).get(cid) or {}
+        return _manifest_file(((c.get("looks") or {}).get(str(look_id)) or {}).get("sheet"))
     for p in chain_files(project, "sheets_file"):
         try:
             d = json.loads(p.read_text(encoding="utf-8"))
@@ -629,6 +642,9 @@ def sheet_crop(project: str, sheet: str, panel: str, zone: str | None = None) ->
     src = ROOT / sheet
     tag = f"{Path(sheet).stem}_{panel}" + (f"_{zone}" if zone else "") + ("2" if zone == "hand" else "")   # hand2：W5 重裁版
     out = ROOT / pc.get("crop_dir", "data/refcrops") / f"{tag}.png"
+    srv = _derived_on_server(out)                               # 服务器：有就用、没有就挡，绝不本地生成（K-OPS-F23）
+    if srv:
+        return srv
     if out.is_file() and out.stat().st_mtime >= src.stat().st_mtime:
         return rel(out)
     im = Image.open(src).convert("RGB")
@@ -663,10 +679,220 @@ def sheet_crop(project: str, sheet: str, panel: str, zone: str | None = None) ->
 FACE_OVERRIDES = ROOT / "data" / "looks" / "face_overrides.json"
 
 
+# ---------------------------------------------------------------- V2 资产包清单（L-125 / C10 / C1，FACTORY 11-02 18:4x）
+# 项目配置写了 assets_manifest（例 series10_v2 → assets_v2/manifest.json）= 资产包模式：身份脸 / 设定图 / 单品 / 场景底图
+# 只从这份清单取（每项带 sha），不读 face_overrides / config faces / sheets_chosen / wardrobe / 场景目录“最新一张”，不继承任何项目。
+# 清单格式：{"schema": "nsfs.assets_manifest/1", "run", "locked", "characters": {cid: {"face": {file, sha256},
+#   "looks": {look_id: {"sheet": {file, sha256}, "items": {item_id: {file, sha256}}}}}}, "scenes": {scene_id: {"base": {file, sha256}}}}
+class ManifestError(ValueError):
+    pass
+
+
+def manifest_rel(project):
+    return (project_cfg(project).get("assets_manifest") if project else None) or None
+
+
+def manifest(project):
+    """资产包清单；项目没配 → None（旧行为）；配了但读不出 → ManifestError（失败关闭，不退回旧来源）"""
+    rel_ = manifest_rel(project)
+    if not rel_:
+        return None
+    try:
+        d = json.loads((ROOT / rel_).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise ManifestError(f"{project} 的资产包清单 {rel_} 读不出来：{e}（失败关闭）") from e
+    if not isinstance(d, dict):
+        raise ManifestError(f"{rel_} 不是 JSON 对象")
+    return d
+
+
+def manifest_entries(project) -> dict:
+    """清单里登记的全部文件 → sha256"""
+    d = manifest(project) or {}
+    out = {}
+
+    def put(e):
+        if isinstance(e, dict) and e.get("file"):
+            out[e["file"]] = e.get("sha256") or ""
+    for c in (d.get("characters") or {}).values():
+        put(c.get("face"))
+        for it in (c.get("items") or {}).values():           # 角色级单品（鞋 / 饰品，不属于某一套造型）
+            put(it)
+        for lk in (c.get("looks") or {}).values():
+            put(lk.get("sheet"))
+            for it in (lk.get("items") or {}).values():
+                put(it)
+    for sc in (d.get("scenes") or {}).values():
+        put(sc.get("base"))
+    return out
+
+
+_SHA_CACHE: dict = {}
+
+
+def _sha_ok(f: str, want: str) -> bool:
+    p = ROOT / f
+    try:
+        st = p.stat()
+    except OSError:
+        return False
+    k = (f, st.st_mtime, st.st_size)
+    if k not in _SHA_CACHE:
+        _SHA_CACHE[k] = hashlib.sha256(p.read_bytes()).hexdigest()
+    return bool(want) and _SHA_CACHE[k] == want
+
+
+def _manifest_file(e):
+    """清单条目 → 文件（文件在且 sha 对上）；否则 None"""
+    if isinstance(e, dict) and e.get("file") and _sha_ok(e["file"], e.get("sha256") or ""):
+        return e["file"]
+    return None
+
+
+def manifest_derived_dirs(project: str) -> tuple:
+    """资产包模式下允许的派生 / 生产路径：本项目的 refcrops / refboards（由清单里的图生成）与本剧渲染目录（尾帧用首帧）"""
+    pc = project_cfg(project)
+    return tuple(x.rstrip("/") + "/" for x in (pc.get("crop_dir"), pc.get("board_dir"), f"data/renders/{project}") if x) + (
+        "data/renders/_first_frame_placeholder.png",)
+
+
+def manifest_violations(project, files) -> list:
+    """preflight I11：资产包模式下，参考文件不在清单里（或 sha 不符）、也不是本项目派生 / 渲染路径 → 列出来（挡）"""
+    if not manifest_rel(project):
+        return []
+    try:
+        ent = manifest_entries(project)
+    except ManifestError as e:
+        return [str(e)]
+    ok_pref = manifest_derived_dirs(project)
+    bad = []
+    for f in files or []:
+        f = rel(f) if f else f
+        if not f or str(f).startswith(ok_pref):
+            continue
+        if f not in ent:
+            bad.append(f"{f} 不在资产包清单 {manifest_rel(project)} 里")
+        elif not _sha_ok(f, ent[f]):
+            bad.append(f"{f} 的 sha 与资产包清单登记不符")
+    return bad
+
+
+# ---------------------------------------------------------------- V2 资产包约束（PROMPTFIX 11-02 19:1x，L-126；K-REN-958 / 959）
+NO_BRAND_NOTE = "（只取款式与材质，表面光洁、没有任何标志和文字）。"
+
+
+def brand_hits(text: str) -> list[str]:
+    """K-REN-959：提示词里的品牌字样（config/compile/brand_words.json，大小写不敏感；LV 这类短词按词边界）"""
+    try:
+        words = json.loads((ROOT / "config" / "compile" / "brand_words.json").read_text(encoding="utf-8")).get("words") or []
+    except (OSError, ValueError):
+        return ["brand_words.json 读不出（失败关闭）"]
+    t = text or ""
+    out = []
+    for w in words:
+        if re.fullmatch(r"[A-Za-z]{1,3}", w):
+            if re.search(r"(?<![A-Za-z])" + re.escape(w) + r"(?![A-Za-z])", t):
+                out.append(w)
+        elif w.lower() in t.lower():
+            out.append(w)
+    return out
+
+
+def manifest_meta(project) -> dict:
+    """清单文件 → {cid, look, item, route, adult, no_brand, kind}；角色造型（look）本身的 route 也按 look 记（look:<cid>:<id>）"""
+    d = manifest(project) or {}
+    out = {}
+    for cid, c in (d.get("characters") or {}).items():
+        f = (c.get("face") or {}).get("file")
+        if f:
+            out[f] = {"cid": cid, "kind": "face", "route": "server_ok"}
+        for iid, it in (c.get("items") or {}).items():
+            if isinstance(it, dict):
+                m = {"cid": cid, "item": iid, "kind": it.get("slot") or "item", "route": it.get("route") or "server_ok",
+                     "adult": bool(it.get("adult")), "no_brand": bool(it.get("no_brand")), "name": it.get("name")}
+                out[f"item:{cid}:{iid}"] = m
+                if it.get("file"):
+                    out[it["file"]] = m
+        for lid, lk in (c.get("looks") or {}).items():
+            lm = {"cid": cid, "look": lid, "kind": "look", "route": lk.get("route") or "server_ok", "adult": bool(lk.get("adult")),
+                  "name": lk.get("name")}
+            out[f"look:{cid}:{lid}"] = lm
+            if (lk.get("sheet") or {}).get("file"):
+                out[lk["sheet"]["file"]] = {**lm, "kind": "sheet"}
+            for iid, it in (lk.get("items") or {}).items():
+                if isinstance(it, dict) and it.get("file"):
+                    out[it["file"]] = {**lm, "item": iid, "kind": "item", "route": it.get("route") or lm["route"],
+                                       "no_brand": bool(it.get("no_brand"))}
+    return out
+
+
+def closed_looks(project) -> dict:
+    """looks_closed=true 的角色 → 允许的造型 id 集合（例 lead_f → {O1..O4}）"""
+    d = manifest(project) or {}
+    return {cid: set((c.get("looks") or {}).keys()) for cid, c in (d.get("characters") or {}).items() if c.get("looks_closed")}
+
+
+def plan_adult(project, sr, plan) -> list[str]:
+    """L-128 不变项：本镜用到 adult=true 的造型 / 参考（O2 / O3 / J1 / J2）→ 原因列表（非空 = 成人画面作业，只由项目方在界面触发）"""
+    if not manifest_rel(project):
+        return []
+    meta = manifest_meta(project)
+    why = []
+    for ch in (sr.characters if sr is not None else None) or []:
+        m = meta.get(f"look:{ch.get('character')}:{ch.get('look')}")
+        if m and m.get("adult"):
+            why.append(f"{ch.get('name')} 造型 {ch.get('look')} adult")
+    for s in (plan.slots if plan is not None else None) or []:
+        for mem in s.members or [{"file": s.file}]:
+            m = meta.get(rel(mem.get("file") or "")) if mem.get("file") else None
+            if m and m.get("adult"):
+                why.append(f"参考 {mem.get('file')} adult")
+    return list(dict.fromkeys(why))
+
+
+def plan_route(project, sr, plan) -> tuple[str, list[str]]:
+    """K-REN-958：本镜作业用到的造型 / 参考（含参考板里的每一格）有 route=local_only 的 → ("local_only", 原因)；否则 server_ok"""
+    if not manifest_rel(project):
+        return "server_ok", []
+    meta = manifest_meta(project)
+    why = []
+    for ch in (sr.characters if sr is not None else None) or []:
+        m = meta.get(f"look:{ch.get('character')}:{ch.get('look')}")
+        if m and m.get("route") == "local_only":
+            why.append(f"{ch.get('name')} 造型 {ch.get('look')}（{m.get('name')}）只许本地生成")
+    for s in (plan.slots if plan is not None else None) or []:
+        for mem in s.members or [{"file": s.file}]:
+            m = meta.get(rel(mem.get("file") or "")) if mem.get("file") else None
+            if m and m.get("route") == "local_only":
+                why.append(f"参考 {mem.get('file')}（{m.get('name') or m.get('item')}）只许本地生成")
+    return ("local_only" if why else "server_ok"), list(dict.fromkeys(why))
+
+
+def _on_server() -> bool:
+    import os
+    return bool(os.environ.get("OFFLINE_SELF") or os.environ.get("NS_FACTORY_HOST"))
+
+
+class DerivedRefMissing(RuntimeError):
+    pass
+
+
+def _derived_on_server(out: Path):
+    """C7 后半（FACTORY 11-02 18:1x：gpu36 编译时本机重生成 refcrops / refboards，字节和笔记本不同 → 两台 refs_sha 不一致）：
+    派生参考图只在笔记本生成、按 sha 推送。服务器上：文件在就直接用（不按修改时间判过期），不在就挡（资产缺图），绝不本地生成"""
+    if not _on_server():
+        return None
+    if out.is_file():
+        return rel(out)
+    raise DerivedRefMissing(f"资产缺图：派生参考图 {rel(out)} 服务器上没有（只在笔记本生成，按 sha 推送；K-OPS-F23）")
+
+
 def face_of(project: str, cid: str) -> str | None:
     """身份脸：资产中心“设为当前身份脸”（data/looks/face_overrides.json {project:{cid: 路径}}）> config faces 列表"""
     # 总调度 11-02 P0：解析层（face_overrides）也按 run 继承——子季自己设过身份脸用子季的，否则用父季的（L-086 的 hd_A_s202 在
     # series10_v1 的覆盖里；只合并 asset_refs.json faces 会退回 face_ref2va，01:24 服务器用错身份脸同一类错误）
+    if manifest_rel(project):                                   # V2 资产包模式：只读清单（不读 face_overrides / faces，不继承）
+        return _manifest_file(((manifest(project) or {}).get("characters") or {}).get(cid, {}).get("face"))
     ov = overlay_value(FACE_OVERRIDES, project, cid)
     cands = ([ov] if isinstance(ov, str) else []) + list((project_cfg(project).get("faces") or {}).get(cid) or [])
     for f in cands:
@@ -704,10 +930,12 @@ def registered_scene_ref(scene_id: str) -> str | None:
     return ref
 
 
-def scene_ref(scene_id: str | None) -> str | None:
-    """场景参考底图：assets/scenes/<目录>/ 下最新的一张（不进回收站目录）"""
+def scene_ref(scene_id: str | None, project: str | None = None) -> str | None:
+    """场景参考底图：assets/scenes/<目录>/ 下最新的一张（不进回收站目录）；资产包模式只认清单 scenes.<id>.base"""
     if not scene_id:
         return None
+    if project and manifest_rel(project):
+        return _manifest_file((((manifest(project) or {}).get("scenes") or {}).get(scene_id) or {}).get("base"))
     sid, _ = scene_dir(scene_id)
     reg = registered_scene_ref(scene_id)
     if reg:                                                      # 登记了底图就只用登记的（IMGMASTER：登记 = 槽位送入）
@@ -1149,6 +1377,10 @@ def resolve_shot(project: str, ep, shot, *, kept_triggers=None, looks=None, two_
                 refs.append(Ref("face", cid, f, f"{name}的脸部参考", 0 if is_primary else 0.5, "face", "identity", has_face=True))
             else:
                 missing.append({"character": name, "kind": "身份脸缺图", "detail": f"{name} 没有登记身份脸部参考"})
+        if lid and manifest_rel(project) and cid in closed_looks(project) and lid not in closed_looks(project)[cid]:
+            missing.append({"character": name, "kind": "造型不在资产包清单", "rule": "K-REN-958",
+                            "detail": f"{name} 本镜造型 {lid} 不在资产包清单允许的造型 {sorted(closed_looks(project)[cid])} 里（looks_closed）"})
+            continue
         if not lid or lid not in cl:
             missing.append({"character": name, "kind": "造型未登记",
                             "detail": f"{name} 本镜造型对不上 P1 登记（{how or '剧本没有造型行'}）"})
@@ -1198,7 +1430,7 @@ def resolve_shot(project: str, ep, shot, *, kept_triggers=None, looks=None, two_
                 warns.append({"character": name, "kind": "手部单品不进参考槽", "item": _short(p.label), "rule": "K-REN-955",
                               "detail": f"{_short(p.label)} 的参考图是手部照片，手不是本镜主体：不送参考，走文字"})
                 continue
-            if p.force_missing and not (p.item_id and item_image(p.item_id)):
+            if p.force_missing and not (p.item_id and item_image(p.item_id, project)):
                 lab_ = _short(p.label)
                 if p.extra or lab_ in img:
                     missing.append({"character": name, "kind": "资产缺图",
@@ -1208,7 +1440,7 @@ def resolve_shot(project: str, ep, shot, *, kept_triggers=None, looks=None, two_
                                   "detail": f"{name} 造型{lid} 的“{lab_}”登记为缺图；本镜正文没写到，不阻断（画面按设定图 / 正文走）"})
                 continue
             if p.item_id:
-                f = item_image(p.item_id)
+                f = item_image(p.item_id, project)
                 src = "wardrobe" if f else ""
                 if not f:
                     warns.append({"character": name, "kind": "单品图缺失", "detail": f"{p.item_id} 映射了但没有图片"})
@@ -1241,7 +1473,8 @@ def resolve_shot(project: str, ep, shot, *, kept_triggers=None, looks=None, two_
     if sov == "none":                                             # 画布选了“不用底图”
         sid_scene = None
     if sid_scene and subject != "part":
-        sr = (f"assets/scenes/{sov}" if sov and (SCENES / sov).is_file() else None) or scene_ref(sid_scene)
+        sr = (None if manifest_rel(project) else (f"assets/scenes/{sov}" if sov and (SCENES / sov).is_file() else None)) \
+            or scene_ref(sid_scene, project)
         sdir, sst = scene_dir(sid_scene)
         if sr:
             refs.append(Ref("scene", None, sr, f"场景 {sid_scene}", 30, None, "scene"))
@@ -1339,6 +1572,7 @@ def make_board(project: str, tiles: list[tuple[str, str]]) -> str:
     out = ROOT / project_cfg(project).get("board_dir", "data/refboards") / f"board_{key}.png"
     if out.is_file():
         return rel(out)
+    _derived_on_server(out)                                     # 服务器上没有 → 抛 DerivedRefMissing（K-OPS-F23）
     n = len(tiles)
     cols = n if n <= 2 else (2 if n <= 4 else 3)
     rows = (n + cols - 1) // cols
@@ -1475,6 +1709,10 @@ def plan_slots(sr: ShotRefs, model: str = "qwen_image_2.1", capacity: int | None
             s = Slot(n, "board", make_board(sr.project, [(r.file, lab) for r, lab in zip(gr, labels)]), r0.character,
                      labels, members, faces=sum(r.has_face for r in gr))
         s.line = _line(sr.project, s)
+        if manifest_rel(sr.project):                    # K-REN-959：带品牌 logo 的参考只取款式（正向写法；cfg=1 负面词不生效）
+            meta = manifest_meta(sr.project)
+            if any((meta.get(rel(m.get("file") or "")) or {}).get("no_brand") for m in members):
+                s.line = s.line.rstrip("。") + NO_BRAND_NOTE
         slots.append(s)
     _apply_sheet_gaps(sr.project, slots)
     prefix = "".join(s.line for s in slots)
@@ -1628,7 +1866,7 @@ def look_inventory(project: str, char: str | None = None) -> list[dict]:
             sheet = sheet_of(project, cid, lid)
             parts = []
             for p in L.parts:
-                f = item_image(p.item_id) if p.item_id else None
+                f = item_image(p.item_id, project) if p.item_id else None
                 st = "wardrobe" if f else ("missing" if p.force_missing or not sheet else "sheet_only")
                 if p.slot == "marker":
                     st = "identity"

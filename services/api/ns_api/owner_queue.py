@@ -22,6 +22,7 @@
 """
 from __future__ import annotations
 
+from ns_api import run_paths as _RP   # K-OPS-F24：渲染根目录按当前剧（V1 已归档，不在网页显示）
 import contextvars
 import glob
 import hashlib
@@ -53,7 +54,7 @@ def _paths(root: Path) -> dict:
     return {"requests": q / "requests.json", "decisions": q / "decisions.jsonl", "spot": root / "data" / "vqa" / "autosign_spot.jsonl",
             "signed": root / "data" / "vqa" / "autosign_signed.jsonl", "state": root / "data" / "vqa" / "autosign_state.json",
             "sentinel": root / "data" / "sentinel" / "open.json", "master": root / "docs" / "master" / "MASTER_PICTURE.md",
-            "renders": root / "data" / "renders"}
+            "renders": _RP.renders_root(root)}
 
 
 # 本次汇总里读不了的来源（每次 build 调用一份，ContextVar 隔离并发请求）：随结果返回 source_errors / status=error，

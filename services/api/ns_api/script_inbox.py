@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+from ns_api import run_paths as _RP   # K-OPS-F24：渲染根目录按当前剧（V1 已归档，不在网页显示）
 import hashlib
 import json
 import re
@@ -226,7 +227,8 @@ PRODUCER_TOKEN = DATA / "producer" / "import_token"        # 只有监督服务�
 def _locked_takes() -> list[str]:
     """有项目方定稿（takes.json locked 非空）的镜头"""
     out = []
-    for tj in (DATA / "renders").glob("ep*/S*/takes.json"):
+    rr = _RP.renders_root() if DATA == REPO / "data" else DATA / "renders"     # 测试 / 沙箱改了 DATA 就用它
+    for tj in rr.glob("ep*/S*/takes.json"):
         try:
             d = json.loads(tj.read_text(encoding="utf-8"))
         except (OSError, ValueError):

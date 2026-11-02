@@ -55,6 +55,16 @@
    "looks_file": "data/pipeline/runs/series10_s2/P1_looks.json",
    "sheets_file": "data/pipeline/runs/series10_s2/assets/sheets_chosen.json",
    "shot_looks_file": "data/pipeline/runs/series10_s2/assets/shot_looks.json"
+  },
+  "series10_v2": {
+   "_doc": "L-125 / L-126：V2 完全切割——不设 inherits；参考只认 assets_v2/manifest.json（asset_refs 资产包模式）；派生参考图在本剧 images/ 下，只在笔记本生成",
+   "run_dir": "data/pipeline/runs/series10_v2",
+   "assets_manifest": "assets_v2/manifest.json",
+   "looks_file": "data/pipeline/runs/series10_v2/assets/P1_looks.json",
+   "sheets_file": "data/pipeline/runs/series10_v2/assets/sheets_chosen.json",
+   "shot_looks_file": "data/pipeline/runs/series10_v2/assets/shot_looks.json",
+   "crop_dir": "data/pipeline/runs/series10_v2/images/refcrops",
+   "board_dir": "data/pipeline/runs/series10_v2/images/refboards"
   }
  },
  "models": {

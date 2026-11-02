@@ -24,7 +24,7 @@ from ns_schema.looks import (CHARACTER_SLUG, CHARACTERS, SLOTS, AdornmentState, 
 from ns_schema.script import ScriptImport, Shot
 
 ROOT = Path(os.environ.get("NS_PROJECT_ROOT") or Path(__file__).resolve().parents[3])  # T42：子进程可指向 projects/<slug>
-DEFAULT_LOOKS_DIR = ROOT / "data" / "looks"
+DEFAULT_LOOKS_DIR = ROOT / "data" / "looks"                   # V1（legacy）位置；LookStore 缺省改经 run_paths 按剧取（I-14）
 DEFAULT_SCRIPT_JSON = ROOT / "data" / "import" / "script_v2.json"
 LIN_WAN_FACE = "assets/characters/lin_wan/lin_wan.png"
 LAYERS = ("default", "episode", "shot")
@@ -620,8 +620,9 @@ class LookStore:
     """data/looks/ 下三份 JSON 的读写。文件缺失时用剧本种子生成。所有修改返回受影响的镜头，从不触发渲染。"""
 
     def __init__(self, looks_dir: Path | str | None = None, script_json: Path | str | None = None):
-        self.dir = Path(looks_dir or os.environ.get("NS_LOOKS_DIR") or DEFAULT_LOOKS_DIR)
-        self.script_json = Path(script_json or DEFAULT_SCRIPT_JSON)
+        from . import run_paths as RP                     # I-14：缺省按当前剧（V2 不读 V1 的 data/looks / 导入稿）
+        self.dir = Path(looks_dir or os.environ.get("NS_LOOKS_DIR") or RP.looks_dir(ROOT))
+        self.script_json = Path(script_json or RP.script_json(ROOT))
         self._lock = threading.RLock()
         self._script: ScriptImport | None = None
         self._script_key: tuple[int, int] | None = None   # 读入时剧本文件的 (mtime_ns, size)

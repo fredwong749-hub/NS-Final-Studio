@@ -68,12 +68,54 @@ def check_json(c):
     raise ValueError(op)
 
 
+_PINNED_API = r"""
+import json, os, sys
+os.environ["NS_PRIMARY_RUN"] = sys.argv[1]
+sys.path[:0] = ["services/api", "services/agent", "services/render_router", "packages/schema", "packages/qc", ""]
+from fastapi.testclient import TestClient
+from ns_api.app import app
+out = {}
+with TestClient(app) as cl:
+    for u in sys.argv[2:]:
+        r = cl.get(u)
+        out[u] = r.json() if r.status_code == 200 else {"_status": r.status_code}
+print("@@" + json.dumps(out, ensure_ascii=False))
+"""
+_PINNED_CACHE: dict = {}
+
+
+def pinned_api(run: str, url: str):
+    """K-OPS-F24（总调度 19:2x）：决定绑定某部剧（run: series10_v1）时，用钉住该剧的独立进程调接口（NS_PRIMARY_RUN），
+    不随网页当前剧（primary）漂移——V1 冻结后它的断言照样要对。同一部剧的接口一次进程取全"""
+    import subprocess
+    if run not in _PINNED_CACHE:
+        cfg = yaml.safe_load((ROOT / "config" / "owner_decisions.yaml").read_text(encoding="utf-8"))
+        urls = sorted({c["url"] for c in cfg["checks"] if c.get("type") == "api" and c.get("run") == run})
+        r = subprocess.run([sys.executable, "-X", "utf8", "-c", _PINNED_API, run, *urls], cwd=str(ROOT), capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=600, env={**os.environ, "NS_DISABLE_BG": "1"})
+        line = next((x for x in (r.stdout or "").splitlines() if x.startswith("@@")), None)
+        if not line:
+            raise RuntimeError(f"钉剧接口进程失败：{(r.stderr or '')[-300:]}")
+        _PINNED_CACHE[run] = json.loads(line[2:])
+    return _PINNED_CACHE[run][url]
+
+
+def _current_primary() -> str | None:
+    try:
+        return json.loads((ROOT / "config" / "pipeline" / "runs.json").read_text(encoding="utf-8")).get("primary")
+    except (OSError, ValueError):   # arch-ok: 读不到 = 按直连接口查（旧行为）
+        return None
+
+
 def check_api(c, use_api):
     if not use_api:
         return None, "跳过（--no-api）"
     try:
-        with urllib.request.urlopen(API + c["url"], timeout=90) as r:
-            data = json.loads(r.read().decode("utf-8"))
+        if c.get("run") and c["run"] != _current_primary():
+            data = pinned_api(c["run"], c["url"])
+        else:
+            with urllib.request.urlopen(API + c["url"], timeout=90) as r:
+                data = json.loads(r.read().decode("utf-8"))
     except Exception as e:  # noqa: BLE001
         return None, f"跳过（API 不可达：{e}）"
     lst = _dig(data, c.get("list") or [])
@@ -119,6 +161,28 @@ def check_cmd(c):
     return r.returncode == 0, ("；".join(out[:4]) or f"rc={r.returncode}")[:400]
 
 
+def check_v2_isolation(c, use_api):
+    """type: v2_isolation（L-125 / L-126，总调度 19:2x）：当前剧（V2）网页人物只来自 V2 资产清单 / V2 剧本人物登记，且不含任何 V1 人物"""
+    if not use_api:
+        return None, "跳过（--no-api）"
+    try:
+        with urllib.request.urlopen(API + c["url"], timeout=90) as r:
+            data = json.loads(r.read().decode("utf-8"))
+    except Exception as e:  # noqa: BLE001
+        return None, f"跳过（API 不可达：{e}）"
+    got = {x.get(c.get("field", "id")) for x in _dig(data, c.get("list") or [])}
+    man = json.loads((ROOT / c["manifest"]).read_text(encoding="utf-8"))
+    allowed = set((man.get("characters") or {}).keys())
+    sp = ROOT / c["script"]
+    if sp.is_file():
+        reg = (json.loads(sp.read_text(encoding="utf-8")).get("globals") or {}).get("character_registry") or []
+        allowed |= {x.get("char_id") or x.get("id") for x in reg if isinstance(x, dict)}
+    v1 = set(c.get("v1_cast") or [])
+    leak, extra = sorted(map(str, got & v1)), sorted(map(str, got - allowed - v1))
+    ok = not leak and not extra
+    return ok, (f"V1 人物外露 {leak}" if leak else "") + (f" 清单外 {extra}" if extra else "") or f"只含 V2 人物 {sorted(map(str, got))}"
+
+
 def run(use_api=True):
     cfg = yaml.safe_load((ROOT / "config" / "owner_decisions.yaml").read_text(encoding="utf-8"))
     rows = []
@@ -129,6 +193,8 @@ def run(use_api=True):
                 ok, detail = check_json(c)
             elif t == "api":
                 ok, detail = check_api(c, use_api)
+            elif t == "v2_isolation":
+                ok, detail = check_v2_isolation(c, use_api)
             elif t in ("grep_absent", "grep_present"):
                 ok, detail = check_grep(c, t == "grep_present")
             elif t in ("exists", "absent"):

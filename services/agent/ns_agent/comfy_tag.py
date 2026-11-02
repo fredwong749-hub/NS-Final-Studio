@@ -77,6 +77,8 @@ CLIENT_AGENT = [
     ("imggen-s10-", "IMGGEN"), ("video10-", "VIDEO10"), ("bakeoff-", "BAKEOFF"), ("series-", "SERIES"),
     ("reflock-", "REFLOCK"), ("consist", "CONSIST"), ("prompt-planc-", "PROMPT"), ("asset-", "ASSET"),
     ("ns_edit", "画布修图"), ("voice10", "VOICE10"),
+    ("stylev2-", "STYLE-V2"), ("producer-", "PRODUCER"), ("imgmaster", "IMGMASTER"), ("vqagate", "VQAGATE"), ("promptfix", "PROMPTFIX"),
+    ("debug-rsi", "DEBUG-RSI"), ("assetux", "ASSETUX"),        # 总调度 19:3x：client_id 前缀对得上已知 agent 就直接标名，不显示“未标记”
 ]
 PREFIX_AGENT = [("assetmaster", "ASSETMASTER"), ("bakeoff", "BAKEOFF"), ("video10", "VIDEO10"), ("imggen", "IMGGEN"),
                 ("reflock", "REFLOCK"), ("consist", "CONSIST"), ("longshot", "LONGSHOT"), ("series", "SERIES")]

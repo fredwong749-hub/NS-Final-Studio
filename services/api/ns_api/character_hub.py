@@ -38,6 +38,7 @@ data/looks/character_hub_log.jsonl（另外 auth 中间件对每个写请求记�
 """
 from __future__ import annotations
 
+from ns_api import run_paths as _RP   # K-OPS-F24：按当前剧取路径（V1 已归档，不在网页显示）
 import hashlib
 import json
 import os
@@ -240,15 +241,16 @@ def _face_candidates(project: str, cid: str) -> list[dict]:
         if f and f not in seen and (root / f).is_file():
             seen.append(f)
     add(R.face_of(project, cid))
-    for f in (R.project_cfg(project).get("faces") or {}).get(cid) or []:
+    manifest_mode = bool(R.manifest_rel(project))         # V2 资产包模式（L-125 / L-126）：候选只来自清单，不列 V1 的身份脸 / 参考图
+    for f in ([] if manifest_mode else (R.project_cfg(project).get("faces") or {}).get(cid) or []):
         add(f)
-    refs = _rjson(root / "data" / "assets" / "asset_refs.json", {})
+    refs = {} if manifest_mode else _rjson(root / "data" / "assets" / "asset_refs.json", {})
     for r in refs.get(cid) or []:
         if isinstance(r, dict) and r.get("role") == "identity" and not r.get("void"):
             add(r.get("file"))
-    for f in _regen_files(cid, "face"):
+    for f in ([] if manifest_mode else _regen_files(cid, "face")):
         add(f)
-    for d in (root / "data" / "assets" / "identity_refs" / cid, _run_dir(project) / "images" / "sheets" / cid):
+    for d in (() if manifest_mode else (root / "data" / "assets" / "identity_refs" / cid, _run_dir(project) / "images" / "sheets" / cid)):
         if d.is_dir():
             for f in sorted(d.glob("*face*")):
                 if f.suffix.lower() in IMAGE_EXT:
@@ -1086,7 +1088,11 @@ def rejected_map() -> dict[str, dict]:
 
 @router.get("/api/asset-rejects")
 def list_rejects():
-    return {"rejected": rejected_map()}
+    rm = rejected_map()
+    mids = _RP.manifest_character_ids()          # L-125：V2 只显示清单里角色的驳回记录（V1 资产不外露）
+    if mids is not None:
+        rm = {k: v for k, v in rm.items() if str(k).split("/")[0] in mids}
+    return {"rejected": rm}
 
 
 class PrimaryBody(BaseModel):

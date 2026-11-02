@@ -78,7 +78,13 @@ class _FakeRS:
     deps_rc = 0
     OFF = "/srv/off"
 
+    ctrl = '{"paused": false}'
+
     def ssh(self, h, cmd, data=None, tries=3):
+        if 'base64 -d)" ' in cmd and cmd.endswith(self.R):      # tools/factory/pause_state.py 远端判定（按剧取 control + runs.json status）
+            import json as _j
+            c = _j.loads(self.ctrl)
+            return _j.dumps({"paused_by": (c.get("paused_by") or "unknown") if c.get("paused") else None}).encode()
         if "server_deps" in cmd:
             return ('{"problems": []}' + chr(10) + f'rc={self.deps_rc}').encode()
         if "decisions_guard" in cmd:
@@ -361,3 +367,22 @@ def test_deploy_hold_data_not_pushed(tmp_path):
                        hold_data=["data/pipeline/runs/series10_v1/assets/first_frame_jobs.json"])
     assert "data/pipeline/runs/series10_v1/assets/first_frame_jobs.json" in r["hot_skipped"]
     assert seen == {"held": False, "other": True}
+
+
+def test_a09_deploy_never_clears_someone_elses_pause(tmp_path):
+    """A-09 ③（总调度 18:3x）：部署前已被别人暂停（项目方 owner 等）→ 部署不 pause、重启后也不 resume；
+    部署自己设的暂停在重启成功后由部署自己解（重启队列看到已暂停不会 resume）"""
+    class RQ(_FakeRQ):
+        def process(self, h, rs):
+            return {"ok": True, "secs": 5}
+    for ctrl, expect_pause in (('{"paused": true, "paused_by": "项目方 L-125"}', False), ('{"paused": false}', True)):
+        rs = _FakeRS(tmp_path)
+        rs.ctrl = ctrl
+        (tmp_path / "tools").mkdir(exist_ok=True)
+        cmds = []
+        o = rs.ssh
+        rs.ssh = lambda h, cmd, data=None, tries=3, _o=o: (cmds.append(cmd), _o(h, cmd, data, tries))[1]
+        r = SV.deploy_host(rs, "gpu36", tmp_path, [], [], "sv-x", "c", restart=True, pc=_FakePC(), rq=RQ(), urgent=True)
+        assert r["ok"]
+        assert any("pause --by DEPLOY_ATOMIC" in c for c in cmds) is expect_pause
+        assert any("resume --by DEPLOY_ATOMIC" in c for c in cmds) is expect_pause

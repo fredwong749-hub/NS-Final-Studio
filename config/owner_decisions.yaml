@@ -34,8 +34,9 @@ checks:
     value: *cast_names
   - id: D-SCR-03
     decision: L-031
-    title: /api/episodes 返回 10 集
+    title: /api/episodes 返回 10 集（V1 已冻结，钉 series10_v1 查）
     type: api
+    run: series10_v1
     url: /api/episodes
     list: []
     op: len_eq
@@ -64,13 +65,40 @@ checks:
     value: *cast_nar
   - id: D-CLN-02
     decision: L-030 / L-058
-    title: /api/assets/characters 不含 series10 以外的人物
+    title: /api/assets/characters 不含 series10 以外的人物（V1 已冻结，钉 series10_v1 查）
     type: api
+    run: series10_v1
     url: /api/assets/characters
     list: [characters]
     field: id
     op: subset
     value: *cast
+  - id: D-V2-01
+    decision: L-125 / L-126（V2 完全切割：网页只显示 V2；人物只来自 V2 剧本和资产清单）
+    title: 当前剧（V2）/api/assets/characters 只含 V2 资产清单 / V2 剧本人物，不含任何 V1 人物
+    type: v2_isolation
+    url: /api/assets/characters
+    list: [characters]
+    field: id
+    manifest: assets_v2/manifest.json
+    script: data/import/runs/series10_v2/script_v2.json
+    v1_cast: *cast
+  - id: D-V2-02
+    decision: L-125（V2 第一季十集）
+    title: V2 导入后 /api/episodes 返回 10 集
+    type: api
+    url: /api/episodes
+    list: []
+    op: len_eq
+    value: 10
+    pending_until:
+      paths: [data/import/runs/series10_v2/IMPORTED]
+      why: V2 剧本还在写（20:10 起），导入完成后写 IMPORTED 标记再查
+  - id: D-OPS-128
+    decision: L-128（项目方 11-02 19:1x：gpu33 / gpu36 是自有服务器，local_only 资产可在两台生成；成人画面仍只由项目方触发）
+    title: hosts.json 里笔记本 / gpu33 / gpu36 都是 owner_controlled=true
+    type: cmd
+    cmd: ["-c", "import json,sys;d=json.load(open('config/factory/hosts.json',encoding='utf-8'));sys.exit(0 if all(d['hosts'][h].get('owner_controlled') is True for h in ('gpu33','gpu36','laptop')) else 1)"]
   - id: D-CLN-03
     decision: L-030 / L-058
     title: /api/looks 不含 series10 以外的人物

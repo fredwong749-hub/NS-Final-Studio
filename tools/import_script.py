@@ -160,12 +160,41 @@ def auto_triggers(result, cfg_path: Path = AUTO_TRIGGERS) -> int:
     return added
 
 
+def _runs():
+    import importlib.util as _u
+    sp = _u.spec_from_file_location("runs_for_import", ROOT / "tools" / "autopilot" / "runs.py")
+    m = _u.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m
+
+
+def default_out() -> Path:
+    """不给 -o = 当前剧（primary）的导入稿；legacy 剧 = 旧路径（K-OPS-F24）"""
+    return _runs().script_path(None, ROOT)
+
+
+OLD_DOC_DIR = "script play lib"      # 第一季（V1）剧本 / image 提示词文档所在目录
+
+
+def old_doc_refs(out: Path, docs: list) -> list[str]:
+    """A-08：输出不是 legacy 剧（V1）的导入稿，却引用了第一季文档目录里的文件 → 列出来（拒绝导入，V2 完全切割 L-126）"""
+    try:
+        legacy_out = _runs().script_path(_runs().legacy_run(ROOT), ROOT).resolve()
+    except Exception:  # noqa: BLE001  # arch-ok: 登记表读不出 = 按非 legacy 处理（更严）
+        legacy_out = None
+    if legacy_out is not None and Path(out).resolve() == legacy_out:
+        return []
+    return [f"{d} 是第一季文档（{OLD_DOC_DIR}/），不许导入到 {out}" for d in docs if d and OLD_DOC_DIR in Path(d).resolve().as_posix()]
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser()
-    ap.add_argument("--script", type=Path, default=LIB / "为他而骚 （剧本和镜头）v2.md")
-    ap.add_argument("--image-doc", type=Path, default=LIB / "为他而骚（image提示词） v2.md")
-    ap.add_argument("-o", "--out", type=Path, default=ROOT / "data" / "import" / "script_v2.json")
+    # A-08（V2_READINESS，总调度 19:2x：V2 导入前必须修）：不再默认导入第一季剧本、不再默认并入第一季的 image 提示词文档；
+    # 输出默认 = 当前剧的导入稿（runs.script_path，K-OPS-F24）——以前默认写 data/import/script_v2.json，带 run=s2 导入会覆盖第一季
+    ap.add_argument("--script", type=Path, required=True, help="要导入的剧本 md（必须给，没有默认值）")
+    ap.add_argument("--image-doc", type=Path, default=None, help="可选：image 提示词文档（只在明确给出时并入；V2 不许引用旧剧文档）")
+    ap.add_argument("-o", "--out", type=Path, default=None, help="输出导入稿；不给 = 当前剧（runs.json primary）的导入稿路径")
     ap.add_argument("--no-timeline", action="store_true", help="不重建 data/state_timeline.json")
     ap.add_argument("--source-version", default=None,
                     help="这份剧本的版本（如 v3；Qwen 剧本创作对话 script.md 文件名里没有版本时必须给，S1 闸门要求 ≥ v3）")
@@ -173,6 +202,12 @@ def main():
                     help="单集 / 部分导入：以这个 script_v2.json 为底，只替换新稿里出现的集号，其余集保持不变"
                          "（2026-10-30 总调度：单集导入 = 只替换这一集）")
     args = ap.parse_args()
+    if args.out is None:
+        args.out = default_out()
+    bad = old_doc_refs(args.out, [args.script, args.image_doc])
+    if bad:
+        print("拒绝导入：" + "；".join(bad))
+        return 2
 
     result = import_script(args.script, args.image_doc)
     # 剧本源文件记下版本与它提供的集（合并导入后 S1 闸门按集判版本）；版本优先 --source-version，否则文件名里的 vN

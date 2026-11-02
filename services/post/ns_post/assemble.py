@@ -849,11 +849,11 @@ def loudnorm(ff: FFmpeg, raw: Path, out: Path, s: Settings) -> dict:
 def converge_loudness(ff: FFmpeg, wav: Path, s: Settings) -> list[dict]:
     """ASSEMBLY 11-02（ep03 预览 -16.24 LUFS 的根因）：loudnorm 自报的 output_i 不是成品实测——它在 TP 顶不住时退回 dynamic，
     而且 room tone 填底噪之后用 measure_loudness 实测又掉约 1 LU。所以在最后一道工序（room tone 之后）以成品 WAV 的实测为准，
-    偏差 > 0.4 LU 就补增益（带限幅），最多 2 次。返回修正记录"""
+    偏差 > 0.15 LU 就补增益（带限幅），最多 3 次（阈值 0.15，留给 AAC 编码的余量）。返回修正记录"""
     fixes = []
-    for k in range(2):
+    for k in range(3):
         got = float(measure_loudness(ff, wav)["integrated_lufs"])
-        if not math.isfinite(got) or abs(got - s.target_lufs) <= 0.4:
+        if not math.isfinite(got) or abs(got - s.target_lufs) <= 0.15:
             break
         tmp = wav.with_name(wav.stem + f"_fix{k}.wav")
         limit = 10 ** ((s.true_peak_db - 1.0) / 20)

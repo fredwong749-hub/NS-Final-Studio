@@ -555,9 +555,10 @@ def _resolver(root):
     """data/looks 解析器（按文件 mtime 缓存）；读不到返回 None"""
     from .bible import _stat_key
     from .looks import LookStore
-    looks_dir, script = Path(root) / "data" / "looks", Path(root) / "data" / "import" / "script_v2.json"
+    from . import run_paths as RP                         # I-14：按剧取路径（V2 不读 V1 的 data/looks / 导入稿 / 渲染目录）
+    looks_dir, script = RP.looks_dir(root), RP.script_json(root)
     key = _stat_key([script, *(looks_dir / f"{n}.json" for n in ("wardrobe", "looks", "schedule")),
-                     Path(root) / "data" / "renders" / "ref_overrides.json"])   # W5：画布参考覆盖索引
+                     RP.renders_dir(root) / "ref_overrides.json"])   # W5：画布参考覆盖索引
     hit = _RESOLVER_CACHE.get(str(root))
     if hit and hit[0] == key:
         return hit[1]

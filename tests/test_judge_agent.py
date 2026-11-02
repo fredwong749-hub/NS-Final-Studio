@@ -59,3 +59,23 @@ def test_blind_pack_hides_version(JA, tmp_path):
             assert "v2v3" not in txt and '"v2"' not in txt and '"v3"' not in txt and "version" not in txt
     orders = [[key["packets"][JA._abs(p).stem.split("_", 1)[1]]["version"] + str(key["packets"][JA._abs(p).stem.split("_", 1)[1]]["episode"]) for p in made[j]] for j in made]
     assert len({tuple(o) for o in orders}) > 1          # 三个评审的顺序不全一样
+
+
+def test_p1_pack_and_collect(JA, tmp_path):
+    """P1 三评委（总调度 11-02 19:3x）：每家一份；8 条 1–5 分；无证据记 1 分；judge_id 去重；σ ≤ 1 才稳定"""
+    import json
+    rd = tmp_path / "run"
+    rd.mkdir()
+    (rd / "P1_storyline.json").write_text('{"title": "t"}', encoding="utf-8")
+    made = JA.p1_pack(rd, 3)
+    assert len(made) == 3
+    for j, base in zip((1, 2, 3), (4, 4, 5)):
+        pk = json.loads(JA._abs(made[j - 1]).read_text(encoding="utf-8"))
+        op = JA._abs(pk["output"]["path"])
+        op.parent.mkdir(parents=True, exist_ok=True)
+        items = [{"id": i, "score": base, "evidence": "原文"} for i in JA.P1_ITEMS]
+        items[0]["evidence"] = "" if j == 3 else "原文"              # 无证据 → 1 分
+        op.write_text("```json\n" + json.dumps({"judge_id": f"J{j}", "items": items}) + "\n```", encoding="utf-8")
+        op.with_name(op.name + ".done").write_text("", encoding="utf-8")
+    r = JA.p1_collect(rd)
+    assert r["n"] == 3 and r["totals"] == [32, 32, 36] and not r["single_judge"] and "act3" in r["item_split"]

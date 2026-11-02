@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import re
 import sys
 import time
@@ -562,12 +563,78 @@ def run_post(run_dir: Path, episode: int, st: Status, budget: float, import_mode
 
 # ------------------------------------------------------------------ 命令
 
+def advance_log(run_dir: Path, source: str, episode: int, verdict=None, note: str = "") -> None:
+    """每次推进记一行 <run>/autoflow.log（总调度 11-02：命令行推进也要记，标来源 cli / web / daemon，以后查得到是谁推进的）"""
+    rec = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "source": source, "episode": episode, "pid": os.getpid(),
+           "user": os.environ.get("USERNAME") or os.environ.get("USER") or "", "agent": os.environ.get("CLAUDE_AGENT_NAME", ""),
+           "verdict": verdict, "note": note}
+    with open(run_dir / "autoflow.log", "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+LOCK_STALE_S = 1800
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        if os.name == "nt":
+            import ctypes
+            h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)        # PROCESS_QUERY_LIMITED_INFORMATION
+            if not h:
+                return False
+            code = ctypes.c_ulong()
+            ctypes.windll.kernel32.GetExitCodeProcess(h, ctypes.byref(code))
+            ctypes.windll.kernel32.CloseHandle(h)
+            return code.value == 259                                          # STILL_ACTIVE
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def acquire_advance_lock(run_dir: Path, episode: int, source: str) -> Path | None:
+    """跨进程推进锁（OVERSIGHT-F 11-02 第 2 轮 P1-a：网页 / watch / 命令行 / 旧 autopilot 互不相认，同一集会被并发推进）：
+    <run>/work_epNN/advance.lock 用 O_EXCL 建；锁主进程已死或超过 30 分钟视为陈旧、接管。拿不到 = None（本次跳过）"""
+    lk = run_dir / f"work_ep{episode:02d}" / "advance.lock"
+    lk.parent.mkdir(parents=True, exist_ok=True)
+    for _ in range(2):
+        try:
+            fd = os.open(str(lk), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(json.dumps({"pid": os.getpid(), "source": source, "at": time.time()}))
+            return lk
+        except FileExistsError:
+            try:
+                info = json.loads(lk.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                info = {}
+            stale = (time.time() - float(info.get("at") or 0) > LOCK_STALE_S) or not _pid_alive(int(info.get("pid") or 0))
+            if not stale:
+                return None
+            lk.unlink(missing_ok=True)
+    return None
+
+
 def cmd_run(a) -> int:
     run_dir = Path(a.run_dir) if Path(a.run_dir).is_absolute() else ROOT / a.run_dir
     AG = _load("autoflow_agent", "tools/script_rsi/autoflow_agent.py")
     be = a.backend or AG.backend()
     if be == "claude_agent":       # L-109：测试期写作 / 评审都交 agent，不调外部 API
-        d = AG.run(run_dir, a.episode, a.import_mode)
+        src = getattr(a, "source", "cli") or "cli"
+        lk = acquire_advance_lock(run_dir, a.episode, src)
+        if lk is None:
+            advance_log(run_dir, src, a.episode, verdict="skipped_locked", note="同一集正在被别的入口推进，本次跳过")
+            print(json.dumps({"verdict": "skipped_locked"}, ensure_ascii=False))
+            return 0
+        advance_log(run_dir, src, a.episode, note="开始")
+        try:
+            d = AG.run(run_dir, a.episode, a.import_mode)
+        except Exception as e:
+            advance_log(run_dir, src, a.episode, verdict="error", note=repr(e)[:300])
+            raise
+        finally:
+            lk.unlink(missing_ok=True)
+        advance_log(run_dir, src, a.episode, verdict=d.get("verdict"), note=str(d.get("next_action") or "")[:200])
         print(json.dumps({k: d.get(k) for k in ("verdict", "awaiting", "next_action")}, ensure_ascii=False, default=str))
         return 0
     if a.season_cap:
@@ -609,6 +676,15 @@ def cmd_run(a) -> int:
 def cmd_test_brief(a) -> int:
     """测试 Brief 由写作模型生成（Claude 不写内容）：1 集、与现行剧无关、按 nsfs.brief/1 结构"""
     run_dir = Path(a.run_dir) if Path(a.run_dir).is_absolute() else ROOT / a.run_dir
+    # 11-02 事故：在 V2 run 上误跑 test-brief，覆盖了刚写好的 P0_brief.json 且调了外部写作 API → 两道闸：
+    # ① 已有 P0_brief.json 不覆盖（要测试请用新的空目录）；② writer_backend=claude_agent（L-109 测试期）时不调外部 API
+    if (run_dir / "P0_brief.json").exists():
+        print(json.dumps({"ok": False, "why": f"{run_dir.name} 已有 P0_brief.json，test-brief 不覆盖（测试请用新的空目录）"}, ensure_ascii=False))
+        return 2
+    AG = _load("autoflow_agent", "tools/script_rsi/autoflow_agent.py")
+    if AG.backend() == "claude_agent" and not getattr(a, "allow_api", False):
+        print(json.dumps({"ok": False, "why": "writer_backend=claude_agent（L-109）：test-brief 会调外部写作 API，默认不跑；确需请加 --allow-api"}, ensure_ascii=False))
+        return 2
     run_dir.mkdir(parents=True, exist_ok=True)
     ex = (ROOT / "config/pipeline/examples/P0_brief.json").read_text(encoding="utf-8")
     w = FR.Writer(temperature=0.9, max_tokens=3000)
@@ -694,6 +770,53 @@ def cmd_sequel_brief(a) -> int:
     return 0 if rep.ok else 1
 
 
+def pending_done(run_dir: Path) -> list[int]:
+    """哪几集“写手已交稿（awaiting.output 的 .done 在）但还没推进”——.done 守护据此推进"""
+    eps = []
+    for f in sorted(run_dir.glob("autoflow_ep*.json")):
+        d = json.loads(f.read_text(encoding="utf-8"))
+        aw = d.get("awaiting") or {}
+        out = aw.get("output")
+        ep = int(d.get("episode") or int(f.stem[-2:]))
+        if out and (ROOT / (out + ".done")).exists():
+            eps.append(ep)
+        elif d.get("verdict") == "awaiting_p1_judges":         # 三评委都交了（.done 齐）→ 推进一次：自动 p1_collect + 按门槛分流
+            sp = run_dir / "judge_p1" / "STATE.json"
+            if sp.exists():
+                rounds = json.loads(sp.read_text(encoding="utf-8")).get("rounds") or []
+                if rounds:
+                    jd = ROOT / rounds[-1]["dir"]
+                    tasks = list(jd.glob("judge_*/p1_review_task.json"))
+                    done = [t for t in tasks if (t.parent / "out" / "p1_review.json.done").exists()]
+                    if tasks and len(done) == len(tasks):
+                        AG = _load("autoflow_agent", "tools/script_rsi/autoflow_agent.py")
+                        if rounds[-1].get("collected_sig") != AG.judge_done_sig(jd):     # 同一组 .done 收过、没收齐（坏稿）→ 不空转，等评委重交
+                            eps.append(ep)
+    return eps
+
+
+def cmd_watch(a) -> int:
+    """.done 守护（总调度 11-02）：写手交稿只建 .done，由系统推进，不靠人点。每 interval 秒扫一遍；同一集正在推进时跳过"""
+    import subprocess
+    run_dirs = [Path(x) if Path(x).is_absolute() else ROOT / x for x in a.run_dir]
+    procs: dict[tuple, subprocess.Popen] = {}
+    while True:
+        for rd in run_dirs:
+            for ep in pending_done(rd):
+                key = (str(rd), ep)
+                p = procs.get(key)
+                if p is not None and p.poll() is None:
+                    continue
+                procs[key] = subprocess.Popen([sys.executable, str(ROOT / "tools/script_rsi/autoflow.py"), "run", "--run-dir", str(rd),
+                                               "--episode", str(ep), "--import", "dry", "--source", "daemon"], cwd=ROOT,
+                                              env={**os.environ, "PYTHONUTF8": "1"})
+        if a.once:
+            for p in procs.values():
+                p.wait(timeout=1800)
+            return 0
+        time.sleep(a.interval)
+
+
 def main(argv=None) -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -710,6 +833,17 @@ def main(argv=None) -> int:
     r.add_argument("--backend", choices=["claude_agent", "api"], default=None,
                    help="写作后端；默认读 config/llm_providers.json writer_backend（L-109：测试期 claude_agent）")
     r.add_argument("--season-cap", type=float, default=None, help="整季写作上限（如 L-104 的 $8）；已花 + 本集预算超出就不开跑")
+    r.add_argument("--source", choices=["cli", "web", "daemon"], default="cli", help="推进来源（记进 autoflow.log）")
+    rv = sub.add_parser("review-state", help="P1 三评委状态：--normalize 改回工具口径；--fix 追加返修意见（带 --by 来源）")
+    rv.add_argument("--run-dir", required=True)
+    rv.add_argument("--normalize", action="store_true")
+    rv.add_argument("--fix", action="append", default=[])
+    rv.add_argument("--by", default="")
+    rv.add_argument("--replace", action="store_true", help="替换本轮旧的追加意见（旧的留档）")
+    w = sub.add_parser("watch", help=".done 守护：写手交稿（建 .done）后自动推进，来源记 daemon")
+    w.add_argument("--run-dir", action="append", required=True)
+    w.add_argument("--interval", type=int, default=30)
+    w.add_argument("--once", action="store_true")
     q = sub.add_parser("sequel-brief", help="续季 Brief：项目方原话（owner_quote.txt）+ 上一季原文摘录 + 旧剧本素材 + 系统硬约束；并登记 run")
     q.add_argument("--run-dir", required=True)
     q.add_argument("--title", default="")
@@ -717,8 +851,9 @@ def main(argv=None) -> int:
     q.add_argument("--prev-episodes", default="1-10")
     q.add_argument("--material-md", default="")
     q.add_argument("--material-eps", default="31-60")
-    t = sub.add_parser("test-brief")
+    t = sub.add_parser("test-brief", help="生成一份测试 Brief（调外部写作 API；目录里已有 P0_brief.json 时拒绝）")
     t.add_argument("--run-dir", required=True)
+    t.add_argument("--allow-api", action="store_true", help="writer_backend=claude_agent 时也允许调外部写作 API")
     s = sub.add_parser("status")
     s.add_argument("--run-dir", required=True)
     n = sub.add_parser("narrative-patch", help="N05 叙事补丁包：相邻 3 集结尾类型重复的集，请写手改结尾类型（剧情事实不变）")
@@ -748,6 +883,20 @@ def main(argv=None) -> int:
             import policy as POL
             a.budget = float(POL.get("budget.writing_episode_cap_usd", 3.0))
         return cmd_run(a)
+    if a.cmd == "watch":
+        return cmd_watch(a)
+    if a.cmd == "review-state":
+        AG = _load("autoflow_agent", "tools/script_rsi/autoflow_agent.py")
+        rd = Path(a.run_dir) if Path(a.run_dir).is_absolute() else ROOT / a.run_dir
+        if a.fix:
+            if not a.by:
+                print("追加意见要写 --by（来源）")
+                return 2
+            AG.review_add_fixes(rd, a.fix, a.by, replace=a.replace)
+        if a.normalize:
+            AG.review_state_normalize(rd)
+        print((rd / AG.REVIEW_STATE).read_text(encoding="utf-8")[:2000])
+        return 0
     if a.cmd == "sequel-brief":
         return cmd_sequel_brief(a)
     if a.cmd == "test-brief":

@@ -54,14 +54,14 @@ export function LoraTablePanel() {
   const hidden = (d?.loras.length ?? 0) - rows.length;
   return (
     <section className="ac-panel">
-      <Head sub="只读合并：出图 / 视频 · 所属 · 状态 · sha · 来源；视频身份 LoRA 记训练所用定妆版本" />
-      {err && <LoadError what="LoRA 总表" err={err} retry={retry} hint="后台恢复后这里列出全部 LoRA；身份 LoRA 在左栏“身份 LoRA”里照常看。" />}
+      <Head sub="只读合并：出图 / 视频 · 所属 · 状态 · sha · 来源；视频身份模型 记训练所用定妆版本" />
+      {err && <LoadError what="模型总表" err={err} retry={retry} hint="后台恢复后这里列出全部模型；身份模型 在左栏“身份模型”里照常看。" />}
       {!d && !err && <Loading />}
       {d && (
         <>
           <p className="ds-small ds-muted">
             {hidden > 0 && <>已移进隔离区的 {hidden} 个不再列出。</>}
-            视频身份 LoRA 总开关：{d.video_identity_enabled ? <Tag tone="ok">开</Tag> : <Tag>关（全部镜头不挂）</Tag>} · 登记新版本（训练完成后）一律是“候选”，采用 / 作废由登录的项目方点选。
+            视频身份模型 总开关：{d.video_identity_enabled ? <Tag tone="ok">开</Tag> : <Tag>关（全部镜头不挂）</Tag>} · 登记新版本（训练完成后）一律是“候选”，采用 / 作废由登录的项目方点选。
           </p>
           <div className="ac-tbl-wrap">
             <table className="ac-tbl">
@@ -300,7 +300,7 @@ export function PropsPanel() {
           </Button>
         }
       />
-      {err && <LoadError what="道具表" err={err} retry={retry} hint="下面的卡片（衣橱里带 LoRA 的饰品）照常显示；自建道具等后台恢复后出现。" />}
+      {err && <LoadError what="道具表" err={err} retry={retry} hint="下面的卡片（衣橱里带模型的饰品）照常显示；自建道具等后台恢复后出现。" />}
       {undo && (
         <p className={`ds-note ${undo.err ? "warn" : "ok"}`} role="status">
           {undo.err ? `“${undo.name}”删不了：${undo.err}。数据没改动` : `“${undo.name}”已移到回收站。`}
@@ -311,7 +311,7 @@ export function PropsPanel() {
           )}
         </p>
       )}
-      {d && !own.length && <p className="ds-small ds-muted">还没有自建道具。下面的卡片是从衣橱映射过来的（带产品 LoRA 的饰品）。</p>}
+      {d && !own.length && <p className="ds-small ds-muted">还没有自建道具。下面的卡片是从衣橱映射过来的（带产品模型 的饰品）。</p>}
       {own.length > 0 && (
         <div className="ac-tbl-wrap">
           <table className="ac-tbl">
@@ -319,7 +319,7 @@ export function PropsPanel() {
               <tr>
                 <th>名称</th>
                 <th>类型</th>
-                <th>LoRA · 触发词</th>
+                <th>模型 · 触发词</th>
                 <th>说明</th>
                 <th />
               </tr>
@@ -342,7 +342,7 @@ export function PropsPanel() {
                     <Button
                       size="xs"
                       variant="ghost"
-                      title="删除这条自建道具（进回收站，可撤销；图片和 LoRA 文件保留）"
+                      title="删除这条自建道具（进回收站，可撤销；图片和 模型文件保留）"
                       onClick={() =>
                         void fetch(`/api/trash/object?type=prop&id=${encodeURIComponent(p.id)}&reason=${encodeURIComponent("资产中心删除道具")}`, { method: "DELETE" })
                           .then(async (r) => {
@@ -379,7 +379,7 @@ export function PropsPanel() {
                 <input className="ds-input" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })} placeholder="product / jewellery / phone…" />
               </label>
               <label>
-                LoRA 文件
+                模型文件
                 <input className="ds-input" value={form.lora_file} onChange={(e) => setForm({ ...form, lora_file: e.target.value })} placeholder="xxx.safetensors（可空）" />
               </label>
               <label>

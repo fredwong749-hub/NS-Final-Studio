@@ -225,7 +225,8 @@ def table(root: str | Path | None = None) -> dict:
             r["owner"] = r["owner"] or e.get("label")
             r["sha256"] = r["sha256"] or e.get("sha256")
             r["license"] = e.get("license") or r["license"]
-    wd = AR._json(root / "data" / "looks" / "wardrobe.json")
+    from . import run_paths as RP
+    wd = AR._json(RP.looks_dir(root) / "wardrobe.json")       # I-14
     for it in (wd or {}).get("items") or [] if isinstance(wd, dict) else []:
         if isinstance(it, dict) and it.get("lora_file"):
             r = row(str(it["lora_file"]))
@@ -235,7 +236,8 @@ def table(root: str | Path | None = None) -> dict:
             r.setdefault("items", []).append({"id": it.get("id"), "name": it.get("name"), "character": it.get("character")})
             if it.get("trigger") and it["trigger"] not in r["triggers"]:
                 r["triggers"].append(it["trigger"])
-    sc = AR._json(root / "data" / "import" / "script_v2.json")
+    from . import run_paths as RP
+    sc = AR._json(RP.script_json(root))                       # I-14
     for e in ((sc or {}).get("globals") or {}).get("lora_triggers") or [] if isinstance(sc, dict) else []:
         if isinstance(e, dict) and e.get("file"):
             r = row(str(e["file"]))

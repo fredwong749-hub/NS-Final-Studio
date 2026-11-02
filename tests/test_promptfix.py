@@ -95,18 +95,21 @@ def test_anomaly_blocking_defects():
 
 
 # ---------------------------------------------------------------- 真剧本（series10）编译断言
+FIXTURE = ROOT / "tests" / "fixtures" / "promptfix" / "series10_v1_subset.json"
+PROJECT = "series10_v1"
+
+
 @pytest.fixture(scope="module")
 def S():
-    from ns_render import pipeline as P
-    from ns_render import unified_frame as UF
-    s = P.load_script()
-    proj = UF.project_for(s)
-    if not proj:
-        pytest.skip("剧本不在资产项目里")
+    """固定夹具：series10_v1 导入稿冻结子集（8 镜）+ 资产项目 series10_v1；不随现行主剧（V2）切换而跳过"""
+    from ns_schema.script import ScriptImport
+    s = ScriptImport.model_validate_json(FIXTURE.read_text(encoding="utf-8"))
+    assert AR.project_cfg(PROJECT), "series10_v1 资产项目登记缺失"
+    shots = {f"ep{int(e.number):02d}-S{sh.index}": (e, sh) for e in s.episodes for sh in e.shots}
 
     def job(sid):
-        ep, sh = P.find_shot(s, sid)
-        return FJ.build_first(proj, ep, sh, s.globals), sh
+        ep, sh = shots[sid]
+        return FJ.build_first(PROJECT, ep, sh, s.globals), sh
     return job
 
 
@@ -145,8 +148,7 @@ def test_k950_all_partial_uses_crop_not_face(S):
 def test_k950_partial_with_onscreen_partner_sends_face(S):
     """ep01-S8：林晚在画、顾沉局部（手）、景别不是局部特写 → 报矛盾、送顾沉的脸，且正文不再写“顾沉只露出…不露脸”"""
     job, _sh = S("ep01-S8")
-    if not job["compile_trace"]["conflicts"]:
-        pytest.skip("ep01-S8 景别已改")
+    assert job["compile_trace"]["conflicts"], "冻结夹具里 ep01-S8 必须检出 cast_face_conflict"
     assert "顾沉只露出" not in job["prompt"] and "顾沉不露脸" not in job["prompt"]
 
 

@@ -11,7 +11,7 @@ import type { EpisodeLooks, RenderBackend, SopStage } from "../types";
 import { framesLocked, scriptGaps, videoCounts } from "./status";
 import { FILTER_LABEL, isInterrupted, type Filter } from "../util";
 import { useSop } from "./sop.helpers";
-import { fmtEta, pickDot, useFramesCounts, useVideosSummary, type NavDot } from "./NavTabs.helpers";
+import { fmtEta, pickDot, useEpisodePreviews, useFramesCounts, useVideosSummary, type NavDot } from "./NavTabs.helpers";
 import "./navia.css";
 import { Pop } from "./widgets";
 import { loadReadiness } from "./Materials.helpers";
@@ -355,6 +355,7 @@ export function TopBarV3({ page }: { page: V3Page | null }) {
   // NAVIA：五个 tab 的圆点（灰 / 琥珀呼吸 / 琥珀实心 / 绿）；读不到数据 = 灰点，不白板
   const vs = useVideosSummary();
   const fc = useFramesCounts();
+  const pv = useEpisodePreviews(episodes?.length ?? 0);
   const dots: Record<TabId, NavDot> = {
     OV: pickDot(false, (vs?.rendering ?? 0) > 0, !vs, "", vs ? `全剧 ${vs.total} 镜 · 视频已定稿 ${vs.final}` : "全剧总览"),
     SB: pickDot(!!gaps?.size, false, !gaps, n ? `${n} 镜` : "", gaps ? (gaps.size ? `本集 ${gaps.size} 镜分镜字段待补` : "本集分镜字段齐全") : "本集分镜"),
@@ -366,7 +367,9 @@ export function TopBarV3({ page }: { page: V3Page | null }) {
     S4: vs
       ? pickDot(vs.pending_review + vs.need_frames + vs.failed > 0, vs.rendering > 0, vs.queued + vs.todo > 0, `${vs.final}/${vs.total}`, `已定稿 ${vs.final}/${vs.total}\n待你看 ${vs.pending_review} · 缺首尾帧 ${vs.need_frames} · 出视频中 ${vs.rendering} · 排队 ${vs.queued} · 未出 ${vs.todo}${vs.eta_all ? `\n全部预计 ${fmtEta(vs.eta_all)} 出完` : ""}`)
       : pickDot(false, false, true, "", "还在读"),
-    S5: pickDot(false, false, !cuts?.n, cuts?.n ? `${cuts.n} 版` : "", cuts ? (cuts.n ? `本集 ${cuts.n} 版成片` : "本集还没成片") : "还在读"),
+    S5: pv
+      ? pickDot(false, pv.building > 0, pv.have < pv.total || pv.stale > 0, `${pv.have}/${pv.total} 集`, `整集预览 ${pv.have}/${pv.total} 集已拼好${pv.building ? ` · 正在拼 ${pv.building}` : ""}${pv.stale ? ` · ${pv.stale} 集有新镜头，会自动重拼` : ""}`)
+      : pickDot(false, false, !cuts?.n, cuts?.n ? `${cuts.n} 版` : "", cuts ? (cuts.n ? `本集 ${cuts.n} 版成片` : "本集还没成片") : "还在读"),
   };
   const cur = sop?.stage === "done" ? null : sop?.stage ?? null;
   const onCanvas = !page && view === "episode";

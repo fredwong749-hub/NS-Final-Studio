@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { api } from "./api";
+import { api, plainNetError } from "./api";
 import type {
   AffectedShots,
   BatchResult,
@@ -278,7 +278,7 @@ function useStudioState() {
   // ---------------- 基础 ----------------
   const notify = useCallback((msg: string, kind: "ok" | "err" = "ok") => {
     const id = Date.now() + Math.random();
-    setToasts((t) => [...t.slice(-4), { id, msg, kind }]);
+    setToasts((t) => [...t.slice(-4), { id, msg: plainNetError(msg), kind }]); // NAVIA：所有提示统一出口，英文网络错误改大白话
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === "err" ? 7000 : 3000);
   }, []);
 

@@ -157,7 +157,7 @@ def test_item_map_overrides_merge(tmp_path, monkeypatch):
 def test_missing_shoe_asset_blocked(monkeypatch, look_a):
     """缺鞋资产图被阻断：鞋没有衣橱图、设定图也没有 → 资产缺图，I4 不通过，拒交"""
     monkeypatch.setattr(AR, "sheet_of", lambda project, cid, lid: None)
-    monkeypatch.setattr(AR, "item_image", lambda iid: None)
+    monkeypatch.setattr(AR, "item_image", lambda iid, project=None: None)
     req, sr, plan = _req(*FULL)
     assert any(m["kind"] == "资产缺图" and "鞋" in m["detail"] for m in sr.missing)
     r = PF.check(req)

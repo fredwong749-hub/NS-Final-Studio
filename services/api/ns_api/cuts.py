@@ -11,6 +11,7 @@ UX5 成片页（docs/ux_round5/D_workflow_visual.md D1 / §5「成片」）：�
 """
 from __future__ import annotations
 
+from ns_api import run_paths as _RP   # K-OPS-F24：渲染根目录按当前剧（V1 已归档，不在网页显示）
 import json
 import re
 import subprocess
@@ -149,13 +150,13 @@ def script_replaced_at():
 
 def final_cuts(n: int) -> list[Path]:
     """CUTEDIT / ASSEMBLY：data/renders/epNN/_final/epNN_*.mp4（装配成片版 + 剪辑器导出的定稿；预览 preview_latest 不算）"""
-    d = P.DATA / "renders" / f"ep{n:02d}" / "_final"
+    d = _RP.renders_for_data(P.DATA) / f"ep{n:02d}" / "_final"
     return [f for f in d.glob(f"ep{n:02d}_*.mp4") if f.is_file()] if d.is_dir() else []
 
 
 def _final_file(n: int) -> Path | None:
     try:
-        f = (json.loads((P.DATA / "renders" / f"ep{n:02d}" / "_final" / "cut_project.json").read_text(encoding="utf-8"))
+        f = (json.loads((_RP.renders_for_data(P.DATA) / f"ep{n:02d}" / "_final" / "cut_project.json").read_text(encoding="utf-8"))
              .get("final") or {}).get("file")
     except FileNotFoundError:   # arch-ok: 还没建剪辑工程 = 没有定稿（正常状态，不是读失败）
         return None

@@ -2,6 +2,9 @@ import os
 
 # 测试里不在后台重建 data/state_timeline.json（需要时由测试自己打开）
 os.environ.setdefault("NS_TIMELINE_AUTOBUILD", "0")
+# 总调度 11-02 19:1x（K-OPS-F24）：测试不许依赖“真实当前剧”（primary 会切换：19:0x 切到还没剧本的 series10_v2，6 个测试一起红）。
+# 读真实仓库数据的测试一律钉到已冻结的 V1 真实数据；临时目录里的测试照读自己的 runs.json（runs.primary_run 只对真实仓库生效）
+os.environ.setdefault("NS_PRIMARY_RUN", "series10_v1")
 
 
 import pytest  # noqa: E402

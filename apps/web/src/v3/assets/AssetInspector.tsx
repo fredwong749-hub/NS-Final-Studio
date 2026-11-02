@@ -202,7 +202,7 @@ export function AssetInspector({
                 <dd>{slotName(w.slot)}</dd>
                 {w.lora_file && (
                   <>
-                    <dt>LoRA</dt>
+                    <dt>附加模型</dt>
                     <dd>
                       <code>{w.lora_file}</code>
                       {w.trigger ? ` · 触发词 ${w.trigger}` : ""}
@@ -260,7 +260,7 @@ export function AssetInspector({
       {c.revKey && !rev && !revErr && <Loading />}
       {!vers.length && !(c.revKey && (!rev || revErr)) && (
         <p className="ds-muted ds-small">
-          {c.type === "look" ? `当前 v${c.version ?? 1}。还没有存过新版本：在“编辑 · 生成…”里选“存为这个形象的新版本”，就会进这条版本链（资产 id 不变）。` : c.type === "character" ? "定妆 / 身份参考的版本在“身份 LoRA”和账本里记；打开角色详情看全部参考图。" : "还没有别的版本。"}
+          {c.type === "look" ? `当前 v${c.version ?? 1}。还没有存过新版本：在“编辑 · 生成…”里选“存为这个形象的新版本”，就会进这条版本链（资产 id 不变）。` : c.type === "character" ? "定妆 / 身份参考的版本在“身份模型”和账本里记；打开角色详情看全部参考图。" : "还没有别的版本。"}
         </p>
       )}
       {!!vers.length && (

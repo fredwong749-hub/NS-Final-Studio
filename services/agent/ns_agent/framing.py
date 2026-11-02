@@ -39,7 +39,8 @@ def _cfg() -> dict:
 
 def _locked_image(root: Path, episode: int, index: int) -> bool:
     """该镜首帧已定稿（data/renders/epNN/SN/takes.json locked.image 有值）→ 不改它的出图提示词，免得触发重出"""
-    p = Path(root) / "data" / "renders" / f"ep{episode:02d}" / f"S{index}" / "takes.json"
+    from . import run_paths as RP                         # I-14
+    p = RP.renders_dir(Path(root)) / f"ep{episode:02d}" / f"S{index}" / "takes.json"
     try:
         d = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):

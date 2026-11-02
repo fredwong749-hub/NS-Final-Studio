@@ -34,3 +34,8 @@
 2. 所有 UI 检查（detect / regress_check / topbar_check）只断言元素存在、可点，没有一条断言媒体的实际状态（muted / paused / 有没有解码到音频）。
 3. 界面上把“静音”写成标签，看起来像设计，而不是报警。
 **系统改进**：`apps/web/e2e/uirsi/film_hover_sound.py`（FILMUI 写）已接进 `tools/qa/iter_gate.py` R1：悬停有当前视频的帧必须 muted=false、paused=false、解码到音频字节，否则 R1 不通过。后续 UI 检查要按“行为”断言（播放、出声、跳转后的数据），不只看元素在不在。
+
+## 结案记录（11-02 18:2x 后）
+
+- fb-0001（SYS-01）：项目方 L-125 冻结 V1、不再出视频 → 冻结关单（resolution=frozen）。根因规则 K-WRT-211 已进 V2 写作规则（enforced=false，强制 check 等 HOLLYWOOD）；SYS-01 里“手形检测器（DETECT-S / VQAGATE）”“作废状态服务器↔笔记本一致性检查”两项仍是 V2 的未完成项，没有随单关掉。
+- fb-0004–0007：同样按 L-125 冻结关单，根因修复在 knowledge/rules/render_promptfix.yaml（实有 K-REN-950–955、957，无 956）。

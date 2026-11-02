@@ -167,7 +167,9 @@ def test_graph_variants_link_integrity(reg):
     assert "150" not in pk["graph"]
 
 
-def test_ref2va_six_fields(reg):
+def test_ref2va_six_fields(reg, monkeypatch):
+    # 身份槽按当前剧解析（L-126：V2 清单模式失败关闭）；这条测 V1 配方口径，显式钉在 V1（VQAGATE 11-02 18:4x）
+    monkeypatch.setattr(C, "_primary_run", lambda: "series10_v1")
     p = C.compile_shot(mk(), reg, recipe_id="two_person_ref2va")
     t = p["prompt"]["text"]
     heads = [ln.split(":")[0] for ln in t.splitlines() if ln and ln.split(":")[0] in PR.REF_FIELDS]

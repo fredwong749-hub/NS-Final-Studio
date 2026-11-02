@@ -56,7 +56,7 @@ def env(tmp_path, monkeypatch):
                                                   "item_map": {}}}}), encoding="utf-8")
     # K-OPS-W20：当前剧读 config/pipeline/runs.json 的 primary（不再按目录修改时间猜）
     (root / "config" / "pipeline").mkdir(parents=True, exist_ok=True)
-    (root / "config" / "pipeline" / "runs.json").write_text(json.dumps({"primary": PJ, "runs": {PJ: {"priority": 0, "status": "producing"}}}), encoding="utf-8")
+    (root / "config" / "pipeline" / "runs.json").write_text(json.dumps({"primary": PJ, "legacy_unprefixed_run": PJ, "runs": {PJ: {"priority": 0, "status": "producing"}}}), encoding="utf-8")
     looks_dir = root / "data" / "looks"
     looks_dir.mkdir(parents=True, exist_ok=True)
     (looks_dir / "wardrobe.json").write_text(json.dumps({"version": 2, "items": [], "decor_states": []}), encoding="utf-8")

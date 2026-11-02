@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+from ns_api import run_paths as _RP   # K-OPS-F24：渲染根目录按当前剧（V1 已归档，不在网页显示）
 import json
 import re
 from pathlib import Path
@@ -21,7 +22,7 @@ CAM_RE = re.compile(r".{0,6}(机位|视角|角度)|过肩|侧面|正面|背面|�
 
 
 def _script() -> tuple[dict, float]:
-    p = REPO / "data" / "import" / "script_v2.json"
+    p = _RP.script_path(REPO)
     try:
         return json.loads(p.read_text(encoding="utf-8")), p.stat().st_mtime
     except (OSError, ValueError):  # arch-ok: 导入稿不存在 = 还没导入剧本，空总览是真实状态（前端写“还没有剧本”）
@@ -79,7 +80,7 @@ def lens_info(sid: str) -> dict:
     实拍 = 本版 take 实际编译提示词（含 style_suffix）里解析出的镜头；没出过图 = 出图链 style_suffix 的镜头；
     计划 = takes.lens / visual_spec.lens / 作业提示词镜头句。显示：一致只写一个；不一致写“实拍 50mm f/2 · 计划 85mm f/1.2”。"""
     m = re.fullmatch(r"ep(\d+)-S(\d+)", sid)
-    d = REPO / "data" / "renders" / f"ep{int(m.group(1)):02d}" / f"S{int(m.group(2))}" if m else None
+    d = _RP.renders_root(REPO) / f"ep{int(m.group(1)):02d}" / f"S{int(m.group(2))}" if m else None
     actual = plan = None
     tk = {}
     if d:
@@ -130,7 +131,7 @@ def shot_extra(sid: str) -> dict:
     out = {"camera_move": None, "lighting_sources": [], "lighting_name": None, "video": None, "video_old": None}
     if not m:
         return out
-    d = REPO / "data" / "renders" / f"ep{int(m.group(1)):02d}" / f"S{int(m.group(2))}"
+    d = _RP.renders_root(REPO) / f"ep{int(m.group(1)):02d}" / f"S{int(m.group(2))}"
     try:
         vs = (json.loads((d / "compiled.json").read_text(encoding="utf-8")).get("visual_spec") or {})
     except (OSError, ValueError):  # arch-ok: 没有编译稿 = 运镜 / 灯光为空，前端写“—”

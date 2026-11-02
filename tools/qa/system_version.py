@@ -880,7 +880,9 @@ def deploy_host(rs, h: str, snap: Path, names: list[str], tracked_code: list[str
         r["decisions_guard"] = dg.strip()[-400:]
         if "rc=0" not in dg:
             raise RuntimeError("服务器决策文件不齐（K-OPS-F09），不排重启，老进程继续：" + dg.strip()[-300:])
-        if restart and urgent:   # K-OPS-F13 修订：推完、核对都过了才暂停派单，紧接着当场排空重启——暂停窗口 = 排空 + 重启（≤ 3 分钟），
+        pre = server_pause_owner(rs, h) if restart and urgent else None
+        r["pre_paused"] = pre
+        if restart and urgent and not pre:   # K-OPS-F13 修订：推完、核对都过了才暂停派单，紧接着当场排空重启——暂停窗口 = 排空 + 重启（≤ 3 分钟）
             rs.ssh(h, f"cd {rs.R} && {rs.OFF}/venv/bin/python tools/autopilot/producer.py pause --by DEPLOY_ATOMIC "   # 不再覆盖整个推送过程（sv-11 停派 26 分钟）
                       f"--note '部署 {sv}：重启前暂停派单，重启后恢复'", tries=3)
             paused = True
@@ -893,7 +895,15 @@ def deploy_host(rs, h: str, snap: Path, names: list[str], tracked_code: list[str
                 done = rq.process(h, rs) or {}
                 r["restart"] += (f"；当场执行 ok={done.get('ok')} drain={done.get('drain_mode') or done.get('drained')} {done.get('secs')} s"
                                  + (f" error={str(done.get('error'))[:200]}" if done.get("error") else ""))
-                paused = not done.get("ok")
+                if paused and done.get("ok"):
+                    # A-09 ③（总调度 18:3x）：重启队列看到“已暂停”不会 resume（不清别人的暂停）——部署自己设的暂停由部署自己解；
+                    # 部署前就被别人（项目方 owner / 运维 / runs.json）暂停的，部署不碰（pre 有值时上面根本没 pause）
+                    rs.ssh(h, f"cd {rs.R} && {rs.OFF}/venv/bin/python tools/autopilot/producer.py resume --by DEPLOY_ATOMIC "
+                              f"--note '部署 {sv} 重启完成，解除部署自己的暂停'", tries=3)
+                    r["resumed_own_pause"] = True
+                    paused = False
+                else:
+                    paused = paused and not done.get("ok")
         r["ok"] = True
     except Exception as e:  # noqa: BLE001
         r.update(ok=False, error=f"{type(e).__name__}: {e}"[:400])
@@ -904,6 +914,15 @@ def deploy_host(rs, h: str, snap: Path, names: list[str], tracked_code: list[str
         except Exception as e2:  # noqa: BLE001
             r["resume_error"] = repr(e2)[:200]
     return r
+
+
+def server_pause_owner(rs, h: str) -> str | None:
+    """部署前服务器上本机主剧是否已被别人暂停（OVERSIGHT-F P1-3：按剧取 control 路径 + runs.json status，tools/factory/pause_state.py）"""
+    import importlib.util as _u
+    sp = _u.spec_from_file_location("factory_pause_state", ROOT / "tools/factory/pause_state.py")
+    m = _u.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m.remote_pause_owner(rs, h, tries=2)
 
 
 LAST_CUT = DATA / "last_cut.json"

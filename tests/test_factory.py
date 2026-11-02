@@ -209,7 +209,7 @@ def test_overlay_doc_raises_on_corrupt_not_silent(tmp_path):
 def test_producer_dispatch_checks_decision_files_first():
     s = (ROOT / "tools/autopilot/producer.py").read_text(encoding="utf-8")
     d = s[s.index("    def dispatch_frames("):]
-    assert d.index("decision_file_problems()") < d.index("backlog = len(self.scoring)")
+    assert d.index("decision_file_problems(self.p.run_id)") < d.index("backlog = len(self.scoring)")
     fn = s[s.index("def decision_file_problems("):s.index("def refs_guard(")]
     assert "return [" in fn                       # 校验器自身出错也算问题（失败关闭）
 
@@ -476,3 +476,332 @@ def test_k_ops_f22_compile_only_released_code():
     assert EP.compile_gate(SV(boom=True)) is None
     src = (ROOT / "tools/autopilot/episode_pipeline.py").read_text(encoding="utf-8")
     assert '"compile_frozen"))' in src and src.count("why = compile_gate()") == 2
+
+
+def test_k_ops_f24_only_legacy_run_uses_unprefixed_paths(tmp_path):
+    """K-OPS-F24（总调度 18:4x）：primary 切到 series10_v2 后，只有 legacy_unprefixed_run（series10_v1）用不带前缀的旧路径，
+    V2 一律 data/renders/<run>/、data/import/runs/<run>/、带前缀对象 id——不会写进 V1 的目录"""
+    import json as _j
+    sys.path.insert(0, str(ROOT / "tools/autopilot"))
+    import runs as RN
+    import producer as P
+    (tmp_path / "config/pipeline").mkdir(parents=True)
+    (tmp_path / "config/pipeline/runs.json").write_text(_j.dumps({
+        "primary": "series10_v2", "legacy_unprefixed_run": "series10_v1",
+        "runs": {"series10_v1": {"status": "frozen"}, "series10_v2": {"status": "preparing"}}}), encoding="utf-8")
+    assert RN.legacy_run(tmp_path) == "series10_v1" and RN.is_legacy("series10_v1", tmp_path) and not RN.is_legacy(None, tmp_path)
+    assert RN.import_path(None, tmp_path) == tmp_path / "data/import/runs/series10_v2/script_v2.json"
+    assert RN.import_path("series10_v1", tmp_path) == tmp_path / "data/import/script_v2.json"
+    assert RN.obj_id(None, "first", "ep01-S1", tmp_path) == "series10_v2/first:ep01-S1"
+    assert RN.ready_paths("series10_v2", tmp_path) == [tmp_path / "data/autopilot/runs/series10_v2/ready_episodes.json"]
+    pv2 = P.Paths(root=tmp_path, run_id="series10_v2")
+    assert pv2.renders == tmp_path / "data/renders/series10_v2" and not pv2.primary
+    assert P.Paths(root=tmp_path, run_id="series10_v1").renders == tmp_path / "data/renders"
+    assert P.run_env("series10_v2", tmp_path)["NS_RENDERS_DIR"].endswith("series10_v2")
+    assert P.run_env("series10_v1", tmp_path) == {}
+
+
+def test_run_path_entries(tmp_path):
+    """AUDIT-M I-14 / I-15：按剧取路径的唯一入口——script_path / renders_dir / looks_path / asset_manifest（V2 不读 V1 树）"""
+    import json as _j
+    sys.path.insert(0, str(ROOT / "tools/autopilot"))
+    import runs as RN
+    (tmp_path / "config/pipeline").mkdir(parents=True)
+    (tmp_path / "config/pipeline/runs.json").write_text(_j.dumps({
+        "primary": "series10_v2", "legacy_unprefixed_run": "series10_v1",
+        "runs": {"series10_v1": {"status": "archived"}, "series10_v2": {"status": "preparing", "assets_manifest": "assets_v2/manifest.json"}}}),
+        encoding="utf-8")
+    assert RN.renders_dir(root=tmp_path) == tmp_path / "data/renders/series10_v2"
+    assert RN.renders_dir("series10_v1", tmp_path) == tmp_path / "data/renders"
+    assert RN.script_path(root=tmp_path) == tmp_path / "data/import/runs/series10_v2/script_v2.json"
+    assert RN.looks_path(root=tmp_path) == tmp_path / "data/pipeline/runs/series10_v2/looks"
+    assert RN.looks_path("series10_v1", tmp_path) == tmp_path / "data/looks"
+    assert RN.asset_manifest(root=tmp_path) == tmp_path / "assets_v2/manifest.json" and RN.asset_manifest("series10_v1", tmp_path) is None
+
+
+def test_k_ops_f23_v2_manifest_only_and_no_server_derived(tmp_path, monkeypatch):
+    """L-125 / L-126（C10 / C1 / C7）：资产包模式下 face_of / sheet_of / scene_ref / item_image 只读清单（sha 对上才算），
+    清单空 = 返回无（preflight 挡住出图）；清单外参考 I11 挡；服务器上派生参考图只用现成的、没有就挡，不本地生成"""
+    import hashlib
+    import json as _j
+    sys.path.insert(0, str(ROOT / "services/agent"))
+    from ns_agent import asset_refs as AR
+    face = tmp_path / "assets_v2/characters/f/face.png"
+    face.parent.mkdir(parents=True)
+    face.write_bytes(b"png-face")
+    man = {"characters": {}, "scenes": {}}
+    (tmp_path / "assets_v2/manifest.json").write_text(_j.dumps(man), encoding="utf-8")
+    cfg = {"projects": {"v2": {"assets_manifest": "assets_v2/manifest.json", "crop_dir": "data/pipeline/runs/v2/images/refcrops",
+                               "board_dir": "data/pipeline/runs/v2/images/refboards"}}}
+    (tmp_path / "asset_refs.json").write_text(_j.dumps(cfg), encoding="utf-8")
+    monkeypatch.setattr(AR, "ROOT", tmp_path)
+    monkeypatch.setattr(AR, "CFG", tmp_path / "asset_refs.json")
+    assert AR.face_of("v2", "f") is None                                         # 空清单：项目方挑定前没有身份脸
+    man["characters"]["f"] = {"face": {"file": "assets_v2/characters/f/face.png", "sha256": hashlib.sha256(b"png-face").hexdigest()},
+                              "looks": {"A": {"sheet": {"file": "assets_v2/characters/f/sheet.png", "sha256": "bad"}}}}
+    (tmp_path / "assets_v2/manifest.json").write_text(_j.dumps(man), encoding="utf-8")
+    assert AR.face_of("v2", "f") == "assets_v2/characters/f/face.png"
+    assert AR.sheet_of("v2", "f", "A") is None                                   # sha 不符 = 不算
+    assert AR.manifest_violations("v2", ["assets_v2/characters/f/face.png", "data/pipeline/runs/v2/images/refboards/b.png"]) == []
+    assert AR.manifest_violations("v2", ["assets/characters/lin_wan/old.png"])   # V1 资产 → 挡
+    assert AR.manifest_violations("nomanifest", ["anything.png"]) == []           # 没配清单的项目不受影响
+    (tmp_path / "assets_v2/manifest.json").write_text("{broken", encoding="utf-8")
+    assert AR.manifest_violations("v2", ["x.png"])                                # 清单读坏 = 失败关闭
+    monkeypatch.setenv("OFFLINE_SELF", "gpu36")
+    import pytest
+    with pytest.raises(AR.DerivedRefMissing):
+        AR._derived_on_server(tmp_path / "data/pipeline/runs/v2/images/refcrops/x.png")
+    out = tmp_path / "data/pipeline/runs/v2/images/refcrops/y.png"
+    out.parent.mkdir(parents=True)
+    out.write_bytes(b"y")
+    assert AR._derived_on_server(out) == "data/pipeline/runs/v2/images/refcrops/y.png"
+    monkeypatch.delenv("OFFLINE_SELF")
+    monkeypatch.delenv("NS_FACTORY_HOST", raising=False)
+    assert AR._derived_on_server(tmp_path / "nope.png") is None                   # 笔记本：照常生成
+    src = (ROOT / "services/agent/ns_agent/gen_contract/preflight.py").read_text(encoding="utf-8")
+    assert '"I11"' in src and "manifest_violations" in src
+
+
+def test_v2_identity_face_fail_closed_no_v1_fallback():
+    """VQAGATE / 总调度 19:0x：V2 没登记的角色，身份脸一律“无”——不回退 config faces / face_overrides / V1 资产（真实配置）"""
+    sys.path.insert(0, str(ROOT / "services/agent"))
+    sys.path.insert(0, str(ROOT / "tools/gen_contract"))
+    from ns_agent import asset_refs as AR
+    import remote_score as RS
+    assert AR.manifest_rel("series10_v2") == "assets_v2/manifest.json"
+    assert AR.face_of("series10_v2", "lin_wan") is None and AR.face_of("series10_v2", "gu_chen") is None
+    assert "lin_wan" not in RS.local_faces("series10_v2")
+    assert not (AR.project_cfg("series10_v2").get("faces") or {}) and not AR.project_cfg("series10_v2").get("inherits")
+    src = (ROOT / "services/api/ns_api/character_hub.py").read_text(encoding="utf-8")
+    assert "manifest_mode = bool(R.manifest_rel(project))" in src
+
+
+def test_decisions_guard_manifest_mode(tmp_path):
+    """L-125：资产包模式的剧（runs.json assets_manifest）只要求清单 + 资产配置，不要求 V1 的 data/looks 覆盖文件；清单坏 = 拦"""
+    import json as _j
+    import decisions_guard as DG
+    (tmp_path / "config/pipeline").mkdir(parents=True)
+    (tmp_path / "config/recipes").mkdir(parents=True)
+    (tmp_path / "config/recipes/asset_refs.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "config/pipeline/runs.json").write_text(_j.dumps({"primary": "v2", "runs": {"v2": {"assets_manifest": "assets_v2/manifest.json"}}}),
+                                                        encoding="utf-8")
+    assert DG.problems(tmp_path, server=False, run="v2") == ["缺必需的决策文件 assets_v2/manifest.json"]
+    (tmp_path / "assets_v2").mkdir()
+    (tmp_path / "assets_v2/manifest.json").write_text("{bad", encoding="utf-8")
+    assert "读不出" in DG.problems(tmp_path, server=False, run="v2")[0]
+    (tmp_path / "assets_v2/manifest.json").write_text("{}", encoding="utf-8")
+    assert DG.problems(tmp_path, server=False, run="v2") == []
+    assert any("data/looks" in x for x in DG.problems(tmp_path, server=False, run="v1"))   # 旧剧照旧要求
+
+
+def test_tests_never_read_real_primary():
+    """总调度 19:1x：测试不许依赖真实当前剧（primary 会切换）——conftest 钉 NS_PRIMARY_RUN；测试代码里不许直接读真实 runs.json 的 primary"""
+    import re
+    assert 'os.environ.setdefault("NS_PRIMARY_RUN"' in (ROOT / "tests/conftest.py").read_text(encoding="utf-8")
+    pat = re.compile(r'(?:ROOT|REPO)\s*/\s*"config"\s*/\s*"pipeline"\s*/\s*"runs\.json"\)\.read_text\([^)]*\)\)\.get\("primary"\)')
+    bad = [p.name for p in (ROOT / "tests").glob("test_*.py") if pat.search(p.read_text(encoding="utf-8", errors="replace"))]
+    assert not bad, bad
+
+
+def test_l128_owner_controlled_lanes_and_adult_wait(tmp_path):
+    """L-128（项目方 19:1x）：local_only = 项目方自有机器（笔记本 + gpu33 + gpu36）都可以；不认识的机器 / 没指定道挡（失败关闭）。
+    不变项：成人镜系统 / agent 不自动派，只有项目方在界面触发（owner_triggers.json）才派"""
+    import json as _j
+    import hosts as H
+    assert H.owner_lane("gpu33:0") and H.owner_lane("gpu36:1") and H.owner_lane("laptop:0")
+    assert not H.owner_lane("other:0") and not H.owner_lane("")
+    sys.path.insert(0, str(ROOT / "tools/autopilot"))
+    import producer as P
+
+    class Sh:
+        def __init__(self, i, adult):
+            self.id, self.adult = i, adult
+
+    class Ep:
+        def __init__(self, shots):
+            self.shots = shots
+
+    class Sc:
+        episodes = [Ep([Sh("ep01-S1", True), Sh("ep01-S2", False)])]
+    assert P.adult_shot_ids(Sc()) == {"ep01-S1"}
+    p = P.Paths(root=tmp_path, run_id="v2x")
+    assert P.owner_trigger_ids(p) == set()                                    # 没有触发记录 = 一个都不放
+    p.pd.mkdir(parents=True)
+    (p.pd / "owner_triggers.json").write_text(_j.dumps({"objects": ["first:ep01-S1"]}), encoding="utf-8")
+    assert P.owner_trigger_ids(p) == {"first:ep01-S1"}
+    src = (ROOT / "tools/autopilot/producer.py").read_text(encoding="utf-8")
+    assert 'o["shot"] in adult_shots and o["id"] not in owner_triggers' in src
+    assert 'job.get("route") == "local_only" and not owner_lane(lane)' in src
+    hj = _j.loads((ROOT / "config/factory/hosts.json").read_text(encoding="utf-8"))
+    assert all(hj["hosts"][h].get("owner_controlled") is True for h in ("gpu33", "gpu36", "laptop"))
+
+
+def test_arch_scan_hard_import_path_metric():
+    """AUDIT-M I-14 / 总调度 19:2x：写死导入稿 / data/looks / data/renders 根目录计入 hard_import_path（基线只许减）；入口文件除外"""
+    sys.path.insert(0, str(ROOT / "tools/qa"))
+    import arch_scan as A
+    src = 'a = "data/import/script_v2.json"\nb = "data/looks/wardrobe.json"\nc = "data/renders"\nd = "data/renders/ep01/S1"\nok = "data/renders/series10_v2"\n'
+    assert A.scan_source("tools/x.py", src)["hard_import_path"] == 4
+    assert A.scan_source("tools/autopilot/runs.py", src).get("hard_import_path", 0) == 0
+    import json as _j
+    base = _j.loads((ROOT / "data/sysarch/baseline.json").read_text(encoding="utf-8"))
+    assert "hard_import_path" in base.get("totals", {})
+
+
+def test_a05_vqa_config_broken_fails_closed(tmp_path, monkeypatch):
+    """A-05：config/vqa.json 读不出 / 读坏 → 闸门仍执行、Q9 直接判不过（以前 {} = 闸门放行）"""
+    sys.path.insert(0, str(ROOT / "services/agent"))
+    from ns_agent import vqa as VQ
+    from ns_agent.gen_contract import postflight as PF
+    bad = tmp_path / "vqa.json"
+    bad.write_text("{broken", encoding="utf-8")
+    monkeypatch.setattr(VQ, "CFG", bad)
+    c = VQ.cfg()
+    assert c.get("_config_error") and c["gate"]["enforce"] is True
+    st, d, _ = PF._q9_item(VQ, ("untested", "没有结果", {}))
+    assert st == "fail" and "失败关闭" in d
+    monkeypatch.setattr(VQ, "CFG", tmp_path / "missing.json")
+    assert VQ.cfg().get("_config_error")
+
+
+def test_a08_importer_no_default_old_docs():
+    """A-08：导入器不再默认导入 / 并入第一季文档；输出默认 = 当前剧导入稿；非 V1 输出引用第一季文档目录 → 拒绝"""
+    import importlib.util as _u
+    sp = _u.spec_from_file_location("import_script_t", ROOT / "tools/import_script.py")
+    IS = _u.module_from_spec(sp)
+    sp.loader.exec_module(IS)
+    src = (ROOT / "tools/import_script.py").read_text(encoding="utf-8")
+    assert '"--script", type=Path, required=True' in src and '"--image-doc", type=Path, default=None' in src
+    v2_out = ROOT / "data/import/runs/series10_v2/script_v2.json"
+    assert IS.old_doc_refs(v2_out, [ROOT / "script play lib" / "x.md"])                 # V2 引用旧剧文档 → 拒绝
+    assert IS.old_doc_refs(v2_out, [ROOT / "data/inbox/new.md"]) == []
+    assert IS.old_doc_refs(ROOT / "data/import/script_v2.json", [ROOT / "script play lib" / "x.md"]) == []   # V1 自己照旧
+
+
+def test_a03_single_postflight_field():
+    """A-03：契约结果只认 pf_of（take.postflight 唯一字段，旧数据退到 contract.postflight）；写回同时写唯一字段；已有结果不重复打分"""
+    sys.path.insert(0, str(ROOT / "services/render_router"))
+    from ns_render import unified_frame as UF
+    assert UF.pf_of({"postflight": {"ok": True, "items": []}}) == {"ok": True, "items": []}
+    assert UF.pf_of({"contract": {"postflight": {"status": "done", "ok": False}}})["status"] == "done"
+    assert UF.pf_of({"contract": {"ok": True}}) == {"ok": True}
+    assert UF.pf_of({}) == {} and UF.pf_of(None) == {}
+    assert UF._pf_done(UF.pf_of({"postflight": {"ok": True, "items": [1]}}))          # 只在 take.postflight 的结果也算算过
+    src = (ROOT / "services/render_router/ns_render/unified_frame.py").read_text(encoding="utf-8")
+    assert 't["postflight"] = pf' in src and "cur = pf_of(t)" in src
+
+
+def test_comfy_tag_known_client_prefixes():
+    """总调度 19:3x：client_id 前缀能对上已知 agent（例 stylev2-*）就直接标 agent 名，不显示“未标记”"""
+    sys.path.insert(0, str(ROOT / "services/agent"))
+    from ns_agent import comfy_tag as CT
+    assert CT.infer({}, {"client_id": "stylev2-ab12"})["agent"] == "STYLE-V2"
+    assert CT.infer({}, {"client_id": "zzz-unknown"})["agent"] == "未标记"
+
+
+def test_a07_no_in_place_source_patching(monkeypatch):
+    """A-07：服务器上不再就地改源码——night / sync 原生认 OFFLINE_SELF，CLIP 解释器按 hosts.json comfy_python；resident_prep 不调 patch_*"""
+    import importlib.util as _u
+    src = (ROOT / "ops/offline/resident_prep.py").read_text(encoding="utf-8")
+    main = src.split('if __name__ == "__main__":')[1]
+    assert "patch_night()" not in main and "patch_sync_and_score()" not in main
+    for rel in ("tools/series10_video/night.py", "tools/series10_video/sync.py"):
+        sp = _u.spec_from_file_location("hh_" + rel.replace("/", "_"), ROOT / rel)
+        m = _u.module_from_spec(sp)
+        sp.loader.exec_module(m)
+        monkeypatch.setenv("OFFLINE_SELF", "gpu36")
+        assert m._hosts_here() == ("gpu36",)
+        monkeypatch.delenv("OFFLINE_SELF")
+        assert m._hosts_here() == ("gpu33", "gpu36")
+    sys.path.insert(0, str(ROOT / "tools/gen_contract"))
+    import remote_score as RS
+    assert RS.comfy_py("gpu36") == "/root/work/fredw/venv/bin/python" and "comfy" in RS.comfy_py("gpu33")
+
+
+def test_pause_state_real_layout(tmp_path):
+    """OVERSIGHT-F P1-3：用真实目录结构判“已被别人暂停”——legacy 剧读 data/producer/control.json，其它剧读 runs/<run>/control.json；
+    runs.json status 不是 producing 也算暂停（F20）；登记表坏 = 当作已暂停"""
+    import json as _j
+    import subprocess
+    import pause_state as PS
+
+    def run_snip(root):
+        r = subprocess.run([sys.executable, "-c", PS.PAUSE_PY, str(root)], capture_output=True, text=True, timeout=60)
+        return PS.parse(r.stdout)
+    (tmp_path / "config/pipeline").mkdir(parents=True)
+    (tmp_path / "data/producer/runs/v2").mkdir(parents=True)
+    w = lambda p, d: (tmp_path / p).write_text(_j.dumps(d), encoding="utf-8")
+    w("config/pipeline/runs.json", {"primary": "v2", "legacy_unprefixed_run": "v1", "runs": {"v1": {"status": "archived"}, "v2": {"status": "producing"}}})
+    w("config/pipeline/run.json", {"run_id": "v2"})
+    w("data/producer/control.json", {"paused": True, "paused_by": "V1 的暂停"})            # V1 的 control 不能拿来判 V2
+    w("data/producer/runs/v2/control.json", {"paused": False})
+    assert run_snip(tmp_path) is None
+    w("data/producer/runs/v2/control.json", {"paused": True, "paused_by": "项目方"})
+    assert run_snip(tmp_path) == "项目方"
+    w("data/producer/runs/v2/control.json", {"paused": False})
+    w("config/pipeline/runs.json", {"primary": "v2", "legacy_unprefixed_run": "v1", "runs": {"v2": {"status": "paused"}}})
+    assert "status=paused" in run_snip(tmp_path)
+    (tmp_path / "config/pipeline/runs.json").write_text("{bad", encoding="utf-8")
+    assert run_snip(tmp_path).startswith("unknown")
+
+
+def test_oversight_p2_items(monkeypatch):
+    """OVERSIGHT-F P2：NS_RUN / NS_PRIMARY_RUN 统一（runs.current_run）；lead_f 造型只从 manifest 读；出图作业没写项目 I11–I13 失败关闭"""
+    sys.path.insert(0, str(ROOT / "tools/autopilot"))
+    import runs as RN
+    monkeypatch.setenv("NS_RUN", "series10_v2")
+    assert RN.current_run() == "series10_v2"
+    monkeypatch.delenv("NS_RUN")
+    assert RN.current_run() == RN.primary_run()
+    sys.path.insert(0, str(ROOT / "tools/script_rsi"))
+    import looks_table as LT
+    allk, adult, daily, shoes = LT.lead_manifest()
+    assert set(allk) == set(adult) | set(daily) and shoes and "LEAD_LOOKS = (" not in (ROOT / "tools/script_rsi/looks_table.py").read_text(encoding="utf-8")
+    sys.path.insert(0, str(ROOT / "services/agent"))
+    from ns_agent.gen_contract import preflight as PF
+    r = PF.check({"kind": "image", "model": "qwen_image_2.1", "asset_refs": {"slots": []}, "prompt": "x", "cast": []})
+    st = {i.id: i.status for i in r.items}
+    assert st.get("I11") == "fail" and st.get("I12") == "fail"
+    import producer as P
+    assert P.run_env("series10_v2")["NS_RUN"] == "series10_v2"
+
+
+def test_autoflow_resident_single_instance_and_status_filter(tmp_path, monkeypatch):
+    """写作推进常驻服务：单实例锁；只推进 preparing / active / producing 的剧（paused / frozen / archived 不碰）；不写 control（不清暂停）"""
+    import json as _j
+    import autoflow_resident as AR
+    lock = tmp_path / "x.lock"
+    assert AR.acquire_lock(lock) is True
+    assert AR.acquire_lock(lock) is False                                    # 本进程还活着 → 第二份起不来
+    AR.release_lock(lock)
+    lock.write_text(_j.dumps({"pid": 999999}), encoding="utf-8")
+    assert AR.acquire_lock(lock) is True                                     # 陈旧锁 → 接管
+    AR.release_lock(lock)
+    (tmp_path / "config/pipeline").mkdir(parents=True)
+    (tmp_path / "config/pipeline/runs.json").write_text(_j.dumps({"runs": {
+        "v1": {"status": "archived"}, "s2": {"status": "paused"}, "v2": {"status": "preparing"}, "x": {"status": "frozen"}}}), encoding="utf-8")
+    assert AR.advance_runs(tmp_path) == ["v2"]
+    monkeypatch.setattr(AR, "advance_runs", lambda root=None: ["v2"])
+    rd = tmp_path / "data/pipeline/runs/v2"
+    rd.mkdir(parents=True)
+
+    class AF:
+        @staticmethod
+        def pending_done(d):
+            return [1]
+
+    class RN:
+        @staticmethod
+        def run_dir(run, root):
+            return rd
+    spawned = []
+
+    class Pr:
+        def poll(self):
+            return None
+    r = AR.tick({}, af=AF, runs_mod=RN, spawn=lambda d, ep: spawned.append((d, ep)) or Pr())
+    assert r["started"] == ["v2 ep01"] and spawned == [(rd, 1)]
+    procs = {("v2", 1): Pr()}
+    assert AR.tick(procs, af=AF, runs_mod=RN, spawn=lambda d, ep: spawned.append(1))["started"] == []   # 同一集还在跑：不重复起
+    src = (ROOT / "tools/factory/autoflow_resident.py").read_text(encoding="utf-8")
+    assert "control.json" not in src.split('"""', 2)[2]                     # 代码里不碰 control（不清别人的暂停）

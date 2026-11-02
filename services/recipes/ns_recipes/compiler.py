@@ -43,9 +43,13 @@ def _mode(rc: dict, spec: ShotSpec) -> tuple[str, bool]:
 
 
 def _primary_run() -> str | None:
-    """当前主剧 id：只从运行登记表 config/pipeline/runs.json 读（hard_run），读不到抛异常"""
+    """当前主剧 id：统一调 tools/autopilot/runs.py primary_run（K-OPS-F24 唯一入口；测试钉 NS_PRIMARY_RUN 生效），读不到抛异常"""
+    import importlib.util as _u
     root = Path(__file__).resolve().parents[3]
-    return json.loads((root / "config" / "pipeline" / "runs.json").read_text(encoding="utf-8")).get("primary")
+    sp = _u.spec_from_file_location("runs_for_recipes", root / "tools" / "autopilot" / "runs.py")
+    m = _u.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m.primary_run(root)
 
 
 def ref_slots(spec: ShotSpec, rc: dict) -> list[dict]:
@@ -60,9 +64,16 @@ def ref_slots(spec: ShotSpec, rc: dict) -> list[dict]:
         # K-OPS-E29 / AUDIT-M A-01（总调度 11-02 17:1x）：身份脸唯一入口 asset_refs.face_of——配方里写死的旧裁切（L-122 换脸前的
         # face_ref2va）只在 face_of 解不出时兜底，否则 Ref2VA 视频的身份槽还是旧脸（和帧打分口径分叉）
         from ns_agent import asset_refs as _AR
+        _pj = r.get("project") or _primary_run()
         _cid = _AR.NAME_ID.get(c.name) or getattr(c, "id", None)
-        crop = (_AR.face_of(r.get("project") or _primary_run(), _cid) if _cid else None) \
-            or crops.get(c.name) or crops.get(getattr(c, "id", None) or "")
+        _cur = _AR.face_of(_pj, _cid) if _cid else None
+        if _AR.manifest_rel(_pj):
+            # L-126（总调度 11-02 18:5x）：资产包模式的剧（V2）只认清单里的身份脸——没有就不放身份槽（preflight I2 挡住出图），
+            # 绝不退回配方裁切 / 剧本 identity_ref（那是 V1 的脸）
+            if _cur:
+                slots.append({"role": "identity", "character": c.name, "path": _cur, "sha": None})
+            continue
+        crop = _cur or crops.get(c.name) or crops.get(getattr(c, "id", None) or "")
         if crop:
             slots.append({"role": "identity", "character": c.name, "path": crop, "sha": None,
                           **({"crop_of": c.identity_ref.path} if c.identity_ref else {})})

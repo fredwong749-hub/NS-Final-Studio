@@ -17,6 +17,7 @@
     GET  /api/looks/shots?episode=n                  一集每镜的人物信息（脸图、造型字母、单品缩略图）
 生成（POST /api/assets/characters/{id}/generate）在 app.py 里入队，执行函数 generate_asset 在本模块。
 """
+from ns_api import run_paths as _RP   # K-OPS-F24：按当前剧取路径（V1 已归档，不在网页显示）
 import hashlib
 import json
 import re
@@ -186,6 +187,9 @@ def scan_character(cid: str) -> list[dict]:
 
 
 def character_ids() -> list[str]:
+    mids = _RP.manifest_character_ids()          # L-125：V2 资产包模式只列清单里的角色，不列 V1 人物
+    if mids is not None:
+        return mids
     extra = sorted(p.name for p in chars_dir().iterdir() if p.is_dir() and p.name not in CHARACTERS) \
         if chars_dir().is_dir() else []
     return list(CHARACTERS) + extra
@@ -223,6 +227,8 @@ class AssetIndex:
             from ns_agent import asset_refs as _AR
             proj = _json.loads((ROOT / "config" / "pipeline" / "runs.json").read_text(encoding="utf-8")).get("primary")
             cur = _AR.face_of(proj, cid)
+            if _AR.manifest_rel(proj):          # L-126：资产包模式（V2）只认清单，没有就不显示，绝不退回 V1 plates
+                return file_url(cur) if cur else None
         except (OSError, ValueError, ImportError) as e:  # arch-ok: 登记表 / 资产解析读不到 → 退回旧 plates 显示并打日志（只影响界面显示，不影响任何判定）
             print(f"[assets.face_url] face_of 解析失败，退回 plates：{e!r}"[:200])
             cur = None

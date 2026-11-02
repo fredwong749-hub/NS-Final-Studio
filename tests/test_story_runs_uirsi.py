@@ -61,6 +61,7 @@ def env(tmp_path, monkeypatch):
     from ns_api import script_inbox as SI
     from ns_api import story_runs as SR
     monkeypatch.setattr(SR, "RUNS", tmp_path / "data" / "pipeline" / "runs")
+    monkeypatch.setattr(SR, "writer_backend", lambda: "api")     # 本组测外部写作链路（假网关）；claude_agent 交接另有测试
     monkeypatch.setattr(SI, "DATA", tmp_path / "data")
     monkeypatch.setattr(SI, "REPO", tmp_path)
     monkeypatch.setattr(SC, "registry_tables", lambda reg: ([], [], []))
@@ -255,7 +256,7 @@ def test_story_images_grouped(env):
     old = M.REPO
     M.REPO = tmp
     try:
-        j = c.get("/api/story-images").json()
+        j = c.get("/api/story-images?run=series_img").json()
     finally:
         M.REPO = old
     assert j["run"] == "series_img" and j["count"] == 5 and "ch_b" in j["chars"]
@@ -277,7 +278,7 @@ def test_sheet_pick_owner_gate_and_thumbs(env):
     old = M.REPO
     M.REPO = tmp
     try:
-        j = c.get("/api/story-images").json()
+        j = c.get("/api/story-images?run=series_pick").json()
         assert j["count"] == 2
         a = j["chars"]["ch_a"]
         assert [x["seed"] for x in a] == [101, 202] and a[0]["look"] == "A" and a[0]["thumb"].endswith(".jpg?v=" + a[0]["thumb"].split("=")[-1])
@@ -286,9 +287,26 @@ def test_sheet_pick_owner_gate_and_thumbs(env):
         assert c.post("/api/story-images/pick", json={**body, "by": "unauthenticated"}).status_code == 403
         r = c.post("/api/story-images/pick", json={**body, "by": "owner"})                           # 点选即生效，不要原话
         assert r.status_code == 200 and r.json()["look"] == "A"
-        assert c.get("/api/story-images").json()["picks"]["ch_a"]["A"]["path"].endswith("s202.png")
+        assert c.get("/api/story-images?run=series_pick").json()["picks"]["ch_a"]["A"]["path"].endswith("s202.png")
         assert c.post("/api/story-images/pick", json={"run": "series_pick", "char": "ch_a", "path": "", "look": "A", "by": "owner"}).status_code == 200
-        assert "A" not in c.get("/api/story-images").json()["picks"].get("ch_a", {})                  # 撤销
+        assert "A" not in c.get("/api/story-images?run=series_pick").json()["picks"].get("ch_a", {})                  # 撤销
         assert c.post("/api/story-images/pick", json={**body, "path": "../../x.png", "by": "owner", "owner_quote": "x"}).status_code == 404
     finally:
         M.REPO = old
+
+
+def test_claude_agent_backend_never_calls_external_writer(tmp_path, monkeypatch):
+    """V2-WALK W-01 / W-02 / L-109：writer_backend=claude_agent 时 story-runs 不起外部写作线程，也不另发写作包（writer_package），直接拒绝，推进只走 autoflow"""
+    import pytest as _pt
+    from fastapi import HTTPException
+    from ns_api import story_runs as SR
+    monkeypatch.setattr(SR, "RUNS", tmp_path / "runs")
+    monkeypatch.setattr(SR, "writer_backend", lambda: "claude_agent")
+    d = tmp_path / "runs" / "ui_x"
+    d.mkdir(parents=True)
+    called = []
+    monkeypatch.setattr(SR, "_worker", lambda rid: called.append(rid))
+    with _pt.raises(HTTPException) as ei:
+        SR._start("ui_x")
+    assert ei.value.status_code == 409 and not called and "ui_x" not in SR._threads
+    assert not (d / "writer_package.json").exists()

@@ -38,3 +38,33 @@ export const fmtEta = (iso: string | null | undefined) => {
   const d = new Date(iso);
   return Number.isNaN(+d) ? "" : `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
+
+export type PreviewSummary = { total: number; have: number; building: number; stale: number };
+/** 成片 tab：逐集读 GET /api/episodes/{n}/preview 汇总（全集视角）；读不到 → null */
+export function useEpisodePreviews(total: number): PreviewSummary | null {
+  const [v, setV] = useState<PreviewSummary | null>(null);
+  useEffect(() => {
+    if (!total) return;
+    let alive = true;
+    const load = () =>
+      Promise.all(
+        Array.from({ length: total }, (_, i) =>
+          fetch(`/api/episodes/${i + 1}/preview`)
+            .then((r) => (r.ok ? (r.json() as Promise<{ url?: string | null; building?: boolean; stale?: boolean }>) : null))
+            .catch(() => null),
+        ),
+      ).then((rows) => {
+        if (!alive) return;
+        const ok = rows.filter((x): x is { url?: string | null; building?: boolean; stale?: boolean } => !!x);
+        setV(ok.length ? { total, have: ok.filter((x) => !!x.url).length, building: ok.filter((x) => x.building).length, stale: ok.filter((x) => x.stale).length } : null);
+      });
+    const first = window.setTimeout(load, 2200);
+    const t = window.setInterval(load, 30000);
+    return () => {
+      alive = false;
+      window.clearTimeout(first);
+      window.clearInterval(t);
+    };
+  }, [total]);
+  return v;
+}

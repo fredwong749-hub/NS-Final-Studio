@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+from ns_api import run_paths as _RP   # K-OPS-F24：渲染根目录按当前剧（V1 已归档，不在网页显示）
 import json
 import os
 import re
@@ -84,7 +85,7 @@ class ProjectContext:
 
     @property
     def renders(self) -> Path:
-        return self.data_dir / "renders"
+        return _RP.renders_root(self.root)
 
     @property
     def import_dir(self) -> Path:

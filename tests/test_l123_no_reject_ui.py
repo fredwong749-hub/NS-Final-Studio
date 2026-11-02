@@ -16,12 +16,12 @@ def code_only(src: str) -> str:
     return "\n".join(ln for ln in src.splitlines() if not ln.strip().startswith(("//", "/*", "*", "{/*")))
 
 
-GONE = ("✗ 不要", "✗ 已标不要", "不要并重出", "只标记不要", "已标不要", "看完一遍后可通过", "首尾帧都定稿后才能出视频", "先完整播放一遍")
+GONE = ("或不要", "✗ 不要", "✗ 已标不要", "不要并重出", "只标记不要", "已标不要", "看完一遍后可通过", "首尾帧都定稿后才能出视频", "先完整播放一遍")
 
 
 def test_no_reject_wording_in_the_eight_components():
     for f in ("v3/Verdict.tsx", "v3/assets/Verdict.tsx", "v3/ReviewRow.tsx", "v3/CandidateBox.tsx", "v3/edit/EditCenter.tsx",
-              "v3/assets/PeopleHub.tsx", "v3/pages/ScenesTab.tsx", "v3/edit/AssetDrawer.tsx", "components/ReviewMode.tsx", "v3/Canvas.tsx"):
+              "v3/assets/PeopleHub.tsx", "v3/pages/ScenesTab.tsx", "v3/edit/AssetDrawer.tsx", "components/ReviewMode.tsx", "v3/Canvas.tsx", "v3/status.ts", "v3/shotWord.ts"):
         c = code_only(read(f))
         for w in GONE:
             assert w not in c, f"{f} 还有：{w}"

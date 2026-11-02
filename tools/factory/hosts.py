@@ -116,3 +116,21 @@ def recipe_max_frames(lane: str, recipe: str, d: dict | None = None) -> int | No
     """某道上某配方的帧数上限（例：3090 上 H3 FunControlNet = 107）；没登记 = None（调用方用配方自己的默认）"""
     v = (_lane(lane, d).get("recipe_max_frames") or {}).get(recipe)
     return int(v) if v else None
+
+
+def owner_controlled(host: str, d: dict | None = None) -> bool:
+    """L-128：项目方自有机器（笔记本 + gpu33 + gpu36）。没写 / 不认识的机器 = False（失败关闭）"""
+    try:
+        return bool(_host(host, d).get("owner_controlled"))
+    except Exception:  # noqa: BLE001  # arch-ok: 不认识的机器 = 不是自有机器（local_only 作业不许去）
+        return False
+
+
+def owner_lane(lane: str, d: dict | None = None) -> bool:
+    """这条道是否在项目方自有机器上（route=local_only 的作业只许这些道，L-128）；没指定道 = False（失败关闭）"""
+    if not lane:
+        return False
+    try:
+        return owner_controlled(host_of(lane), d)
+    except Exception:  # noqa: BLE001  # arch-ok: 认不出道 = 不放行
+        return False

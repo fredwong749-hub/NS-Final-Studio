@@ -176,7 +176,7 @@ def test_k263_preflight_blocks_missing_face():
     from ns_agent.gen_contract import preflight as PF
     from ns_agent import asset_refs as AR
     import json as _json
-    proj = _json.loads((PF.ROOT / "config" / "pipeline" / "runs.json").read_text(encoding="utf-8")).get("primary")
+    proj = _json.loads('"series10_v1"')   # 总调度 19:1x：测试不读真实当前剧，钉到已冻结的 V1（conftest NS_PRIMARY_RUN）
     gf = AR.face_of(proj, "gu_chen") or "f.png"   # 总调度 11-02：A-01 后 I2 只认当前身份脸，用 face_of 那张，测试仍考“缺脸 / 两张脸”
     base = {"subject": None, "primary": "gu_chen", "slots": [{"kind": "face", "character": "gu_chen", "file": gf}],
             "characters": [{"character": "gu_chen", "name": "顾沉", "presence": "在画"}, {"character": "lin_wan", "name": "林晚", "presence": "在画"}]}

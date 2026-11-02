@@ -27,7 +27,9 @@ TITLES = {
     "I1": "在画角色清单 + 朝向 / 站位", "I2": "身份脸部参考", "I3": "本镜造型 id + 造型设定图",
     "I4": "景别可见的单品资产图", "I5": "场景参考底图", "I6": "提示词 = 系统编译器输出（含景别首句、参考图逐一标注）",
     "I7": "系统后缀 = 默认出图预设，无旧柔焦 / 奶油 / 浓郁饱和 / 油光", "I8": "LoRA 白名单（禁已证伪）",
-    "I9": "模型槽位规划（优先级、参考板、双人脸不同槽）", "I10": "成年人与锁定外貌（HC-07）",
+    "I9": "模型槽位规划（优先级、参考板、双人脸不同槽）", "I10": "成年人与锁定外貌（HC-07）", "I11": "资产包清单（V2：参考只认 assets_v2/manifest.json，清单外 / sha 不符就挡）",
+    "I12": "本地专用资产（V2：route=local_only 的造型 / 单品只许项目方自有机器的道，L-128 / K-REN-958）",
+    "I13": "品牌字样（V2：带 logo 的参考只取款式，提示词不许出现品牌字样，K-REN-959）",
 }
 REF_LINE = re.compile(r"图(\d+)是")
 IMG_TAG = re.compile(r"<image(\d+)>是")
@@ -110,12 +112,22 @@ def registered_identity_files() -> set[str]:
     return out
 
 
-def stale_face_slots(slots: list[dict]) -> list[str]:
+def _proj_or_primary(proj: str | None) -> str:
+    """本作业的项目；不给才按当前剧（统一调 runs.primary_run，FACTORY 19:1x：不直接读 runs.json primary——V1 作业不能按 V2 判）"""
+    if proj:
+        return proj
+    import importlib.util as _u
+    sp = _u.spec_from_file_location("runs_for_preflight", ROOT / "tools" / "autopilot" / "runs.py")
+    m = _u.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m.primary_run(ROOT)
+
+
+def stale_face_slots(slots: list[dict], proj: str | None = None) -> list[str]:
     """AUDIT-M A-01 / K-OPS-E29（总调度 11-02 17:1x）：身份脸只认 asset_refs.face_of 那一张——face 槽和脸板里标了 face 的格，
     文件不等于该角色当前身份脸的列出来（旧脸、旧 plates、配方里写死的旧裁切都算）。项目 id 只从运行登记表读（hard_run），读不到抛异常"""
-    import json
     from ns_agent import asset_refs as AR
-    proj = json.loads((ROOT / "config" / "pipeline" / "runs.json").read_text(encoding="utf-8")).get("primary")
+    proj = _proj_or_primary(proj)
     cur: dict[str, str | None] = {}
     bad = []
     for s in slots:
@@ -129,7 +141,25 @@ def stale_face_slots(slots: list[dict]) -> list[str]:
                 cur[cid] = AR.face_of(proj, cid)
             if cur[cid] and _relpath(f) != _relpath(cur[cid]):
                 bad.append(f"{cid} 用的是 {_relpath(f)}，当前身份脸是 {_relpath(cur[cid])}")
+            elif not cur[cid] and AR.manifest_rel(proj):
+                # L-126：资产包模式（V2）清单里没有这个人的身份脸 → 槽里不管放什么都不许用（多半是 V1 的脸），失败关闭
+                bad.append(f"{cid} 在本剧资产清单里没有身份脸，不许用 {_relpath(f)}（L-126，不退回旧脸）")
     return bad
+
+
+def manifest_missing_faces(faced: list, proj: str | None = None) -> list[str]:
+    """L-126（总调度 11-02 18:5x）：资产包模式的剧，每个露脸的人都必须在清单里有身份脸；没有 → 列出来（preflight I2 挡住出图）。
+    proj = 本作业的项目（framing_project）；不给才按当前剧（runs.primary_run，FACTORY 19:1x：不直接读 runs.json primary，否则 V1 作业被按 V2 判）"""
+    from ns_agent import asset_refs as AR
+    if not proj:
+        import importlib.util as _u
+        sp = _u.spec_from_file_location("runs_for_preflight", ROOT / "tools" / "autopilot" / "runs.py")
+        m = _u.module_from_spec(sp)
+        sp.loader.exec_module(m)
+        proj = m.primary_run(ROOT)
+    if not AR.manifest_rel(proj):
+        return []
+    return [c for c in faced if c and not AR.face_of(proj, c)]
 
 
 def _kinds(rec: dict, *kinds) -> list[dict]:
@@ -175,24 +205,27 @@ def check(req: dict) -> ContractResult:
             face_ids = {s.get("character") for s in faces} | {mm.get("character") for s in slots if s.get("kind") == "faceboard"
                                                              for mm in s.get("members") or [] if mm.get("role") == "face"}
             faced = [c.get("character") for c in rec.get("characters") or []
-                     if c.get("presence") == "在画" or c.get("face_described")] if rec.get("subject") not in ("part", "object") else []
+                     if (c.get("presence") == "在画" and not c.get("back_view")) or c.get("face_described")]                 if rec.get("subject") not in ("part", "object") else []      # K-REN-957：在画但写背影 = 不露脸
             lack = [c for c in faced if c and c not in face_ids]
             two = "两张脸都清晰入画" in str(req.get("prompt") or "")
             # K-REN-708 矛盾 lint（阻断）：同一个人既写“只露出…，不露脸”，又是露脸人物 / 提示词有脸部占比（特写脸部构图）
             import re as _re
             hidden = set(_re.findall(r"([^，。、；（）]{1,12}?)(?:只露出[^，。]{1,30}，)?不露脸", str(req.get("prompt") or "")))
             names = {c.get("name"): c for c in rec.get("characters") or []}
-            clash = [n for n in hidden if n in names and (names[n].get("presence") == "在画" or names[n].get("face_described")
+            clash = [n for n in hidden if n in names and ((names[n].get("presence") == "在画" and not names[n].get("back_view"))
+                                                          or names[n].get("face_described")
                                                           or ("脸部占画面" in str(req.get("prompt") or "") and len(names) == 1))]
             if m:
                 add("I2", "fail", "；".join(x["detail"] for x in m))
             elif clash:
                 add("I2", "fail", f"提示词矛盾：{'、'.join(clash)} 写了“不露脸”，但本镜他是露脸人物 / 脸部特写构图（K-REN-708，写作 / 导入格式问题）")
+            elif manifest_missing_faces(faced, req.get("framing_project") or req.get("project")):
+                add("I2", "fail", f"露脸的人在本剧资产清单里没有身份脸：{'、'.join(manifest_missing_faces(faced, req.get('framing_project') or req.get('project')))}（L-126 失败关闭，不退回旧脸）")
             elif lack:
                 add("I2", "fail", f"露脸的人没有身份脸参考槽：{'、'.join(lack)}（K-AST-263）")
-            elif stale_face_slots(slots):
+            elif stale_face_slots(slots, req.get('framing_project') or req.get('project')):
                 # AUDIT-M A-01（总调度 11-02 17:1x）：原来只看“有没有身份脸槽”，登记过的旧脸也能过；身份脸只认 asset_refs.face_of 那一张（K-OPS-E29）
-                add("I2", "fail", "身份脸参考不是当前身份脸（只认 asset_refs.face_of）：" + "；".join(stale_face_slots(slots)))
+                add("I2", "fail", "身份脸参考不是当前身份脸（只认 asset_refs.face_of）：" + "；".join(stale_face_slots(slots, req.get('framing_project') or req.get('project'))))
             elif two and len(face_ids) < 2:
                 add("I2", "fail", f"提示词写了两张脸都入画，但身份脸参考只有 {len(face_ids)} 张（K-AST-263 / K-REN-705）")
             elif need_face and not faces:
@@ -323,6 +356,46 @@ def check(req: dict) -> ContractResult:
         if kind == "image" and re.search(rf"(^|[，,\s]){re.escape(t)}([，,\s]|$)", prompt):
             bad.append(f"提示词里有禁用触发词 {t}（{why}）")
     add("I8", "fail" if bad else "pass", "；".join(bad) if bad else "LoRA 都在白名单", loras=req.get("loras") or [])
+    # I11 资产包清单（L-125 / C10，FACTORY 11-02 18:4x）：项目配了 assets_manifest 才判；没配 = na（V1 / 第二季旧行为）
+    proj = req.get("framing_project") or req.get("project")
+    try:
+        from ns_agent import asset_refs as _AR
+        if proj and _AR.manifest_rel(proj):
+            files = [x for x in refs] + [s.get("file") for s in (rec.get("slots") or []) if s.get("file")]
+            bad = _AR.manifest_violations(proj, files)
+            add("I11", "fail" if bad else "pass", "；".join(bad[:5]) if bad else f"{len(set(files))} 个参考都在资产包清单里")
+        elif not proj and kind == "image":       # OVERSIGHT-F P2：出图作业没写项目 = 判不了资产包 → 失败关闭
+            add("I11", "fail", "出图作业没有 framing_project，判不了资产包清单（失败关闭）")
+        else:
+            add("I11", "na", "本项目没有资产包清单")
+    except Exception as e:  # noqa: BLE001  # arch-ok: 资产包模式下查不了 = 不放行（失败关闭）
+        add("I11", "fail", f"资产包清单检查失败：{e!r}"[:300])
+    # I12 / I13（PROMPTFIX 11-02 19:1x，K-REN-958 / 959）：资产包模式才判
+    try:
+        from ns_agent import asset_refs as _AR2
+        if proj and _AR2.manifest_rel(proj):
+            route = req.get("route") or "server_ok"
+            lane = str(req.get("lane") or "")
+            import importlib.util as _u
+            _sp = _u.spec_from_file_location("factory_hosts_pf", ROOT / "tools" / "factory" / "hosts.py")
+            _H = _u.module_from_spec(_sp)
+            _sp.loader.exec_module(_H)
+            owner = _H.owner_lane(lane)          # L-128：项目方自有机器（笔记本 + gpu33 + gpu36，hosts.json owner_controlled）
+            if route == "local_only" and not owner:
+                add("I12", "fail", "本镜用到本地专用资产，只许项目方自有机器的道：" + "；".join((req.get("route_reasons") or [])[:3])
+                    + ("（未指定道 = 失败关闭）" if not lane else f"（道 {lane} 不是自有机器）"))
+            else:
+                add("I12", "pass", "没有本地专用资产" if route != "local_only" else f"本地专用资产，自有机器道 {lane}")
+            hits = _AR2.brand_hits(prompt)
+            add("I13", "fail" if hits else "pass", ("提示词出现品牌字样：" + "、".join(hits)) if hits else "无品牌字样")
+        elif not proj and kind == "image":       # OVERSIGHT-F P2：同 I11，没写项目 = 失败关闭
+            add("I12", "fail", "出图作业没有 framing_project（失败关闭）")
+            add("I13", "fail", "出图作业没有 framing_project（失败关闭）")
+        else:
+            add("I12", "na", "本项目没有资产包清单")
+            add("I13", "na", "本项目没有资产包清单")
+    except Exception as e:  # noqa: BLE001  # arch-ok: 资产包模式下查不了 = 不放行（失败关闭）
+        add("I12", "fail", f"本地专用资产检查失败：{e!r}"[:300])
     # I10
     HC = _hc()
     iss = [x for x in HC.check_text(prompt) + HC.check_look_lock(prompt) if x.get("level") == "block"]

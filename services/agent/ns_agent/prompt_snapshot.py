@@ -26,7 +26,8 @@ def compile_all(root: str | Path | None = None, inject_looks: bool | None = None
     from .frame_spec import build_spec
     root = project_root(root)
     b = load_bible(root)
-    script = ScriptImport.model_validate_json((root / "data" / "import" / "script_v2.json").read_text(encoding="utf-8"))
+    from . import run_paths as RP
+    script = ScriptImport.model_validate_json(RP.script_json(root).read_text(encoding="utf-8"))   # I-14
     g = script.globals
     files = {t.file for t in g.lora_triggers if t.file}
     trig = {t.trigger for t in g.lora_triggers if t.file}
@@ -99,7 +100,8 @@ def from_compiled_files(version: str, root: str | Path | None = None) -> dict:
     """退路：没有快照时，用 data/renders/epXX/SN/compiled.json 里 bible_version 匹配的那些（含画布修改）"""
     root = project_root(root)
     out = {}
-    for p in sorted((root / "data" / "renders").glob("ep*/S*/compiled.json")):
+    from . import run_paths as RP
+    for p in sorted(RP.renders_dir(root).glob("ep*/S*/compiled.json")):   # I-14
         try:
             c = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, ValueError):

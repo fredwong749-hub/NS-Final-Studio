@@ -42,7 +42,7 @@ export const isNotReady = (x: unknown) => x instanceof ApiError && x.notReady;
 // UX4（审查 R8）：网络层失败（后台没起 / 断开）写成人话，原文放括号里给技术排查
 export const errText = (x: unknown) => {
   const m = String((x as Error)?.message ?? x);
-  return /Failed to fetch|NetworkError|连不上画布 API/i.test(m) ? "这一块读不到：后台服务没响应，恢复后点刷新（Failed to fetch）" : m;
+  return /Failed to fetch|NetworkError|网络不通|连不上画布 API/i.test(m) ? "这一块读不到：后台服务没响应，恢复后点刷新" : m;
 };
 
 // ---------------------------------------------------------------- A. 模型与 API 配置

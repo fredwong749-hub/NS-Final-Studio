@@ -1,4 +1,4 @@
 {
  "_doc": "现行生产运行 ID（WORKFLOW 11-02，总调度 02:0x：episode_pipeline 与 producer 都从这里读 RUN_ID，换一部剧只改这一处；DISTILL 冷启动演练 ①）",
- "run_id": "series10_v1"
+ "run_id": "series10_v2"
 }

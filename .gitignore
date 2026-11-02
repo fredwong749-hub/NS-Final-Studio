@@ -93,3 +93,5 @@ gpu.lock.*
 
 # K-OPS-F08（FACTORY 11-02）：测试夹具里的 data/ 是代码的一部分，要进版本（data/ 规则会把任何名为 data 的目录都忽略）
 !tests/fixtures/t06_golden/data/
+# V2 资产包（L-125）：图片和清单是数据，按 sha 同步（tools/factory/sync），不进代码版本
+assets_v2/

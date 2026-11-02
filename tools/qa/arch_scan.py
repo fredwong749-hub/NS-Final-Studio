@@ -15,6 +15,8 @@
   nonatomic_json  函数里 write_text(json.dumps(...)) 而同函数没有 os.replace（ARCH_MAP §6）
   untracked_code  代码目录里 git 未跟踪的 .py（Top15 #1：运行中的代码不在版本里）；imported=被已跟踪代码 import
   unowned         代码文件在 tools/qa/ownership.yaml 里匹配不到 owner（Top15 #15）
+  hard_import_path 写死某部剧的导入稿 / 造型目录 / 渲染根目录（script_v2.json、data/looks、data/renders、data/renders/epNN…）——
+                  按剧取路径一律调 runs.script_path / looks_path / renders_dir（K-OPS-F24，AUDIT-M I-14 / I-15，总调度 18:5x）；现有处进基线，只拦新增
   bypass_script   服务器上被生产调用的脚本不是来自仓库部署目录（K-OPS-F18，总调度 11-02 16:5x：同一个东西两个入口，今天第四次）：
                   [PY, "x.py"] / cd {DIR} && {PY} x.py 这类按 cwd 相对跑脚本，或写死仓库外的 /root/work/fredw/<目录>/x.py
 
@@ -57,7 +59,8 @@ HARD_RUN_ALLOW = {"tools/autopilot/runs.py", "tools/qa/arch_scan.py"}
 HARD_PATHS = ("/root/work/fredw", "offline_20261101")
 READ_ATTRS = {"read_text", "read_bytes", "load", "loads", "safe_load", "open"}
 METRICS = ("no_timeout", "direct_ssh", "ssh_unlisted", "def_ssh", "hard_run", "hard_path", "silent_read",
-           "nonatomic_json", "untracked_code", "unowned", "pipe_gate", "mtime_run_guess", "mtime_latest", "prompt_bypass", "bypass_script")
+           "nonatomic_json", "untracked_code", "unowned", "pipe_gate", "mtime_run_guess", "mtime_latest", "prompt_bypass", "bypass_script",
+           "hard_import_path")
 # L-118 四道关之四（总调度 11-02 13:3x 定）：编译模块以外的代码往提示词字段里拼接句子 = 规则又散落了。
 # 只许经 config/compile/plugins.yaml 登记的插件改本段（IMGMASTER 合入）。现有散落处进基线，只许减。
 PROMPT_FIELDS = {"prompt", "img_prompt", "positive", "positive_prompt", "text_prompt", "prompt_text", "pos", "full_prompt"}
@@ -75,6 +78,14 @@ PIPE_GATE_RE = re.compile(r"(lock-status|pytest|system_version|iter_gate|decisio
 BYPASS_RES = (re.compile(r"\[\s*[A-Za-z_][\w.]*\s*,\s*[\"'][\w-]+\.py[\"']"),                  # [PY, "x.py", ...]：按 cwd 相对跑
               re.compile(r"cd \{?\$?[A-Za-z_]\w*\}?\s*&&\s*\S+\s+[\w-]+\.py\b"),               # cd {R} && {PY} x.py
               re.compile(r"/root/work/fredw/(?!offline_20261101/repo/)[\w./-]+?\.py\b"))      # 仓库外绝对路径的 .py
+HARD_IMPORT_ALLOW = {"tools/autopilot/runs.py", "services/api/ns_api/run_paths.py", "tools/qa/arch_scan.py"}
+HARD_IMPORT_RE = re.compile(r"script_v2\.json|(?:^|/)data/looks(?:/|$)|^data/renders/?$|(?:^|/)data/renders/ep\d")
+
+
+def hard_import_count(strs: list[str]) -> int:
+    return sum(1 for x in strs if HARD_IMPORT_RE.search(x))
+
+
 SHELL_DIRS = CODE_DIRS + ("docs", "knowledge", "config")
 SHELL_EXTS = {".sh", ".ps1", ".md"}
 
@@ -234,6 +245,8 @@ def scan_source(path: str, src: str) -> dict[str, int]:
     c["pipe_gate"] = sum(len(PIPE_GATE_RE.findall(x)) for x in strs)
     if path != "tools/qa/arch_scan.py" and not is_test(path):
         c["bypass_script"] = sum(len(rx.findall(x)) for x in strs for rx in BYPASS_RES)
+    if path not in HARD_IMPORT_ALLOW and not is_test(path):
+        c["hard_import_path"] = hard_import_count(strs)
     for ln in (lines if path != "tools/qa/arch_scan.py" else []):   # 本文件的正则自己会命中
         if "# arch-ok:" in ln or ln.lstrip().startswith("#"):
             continue

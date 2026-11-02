@@ -249,3 +249,45 @@ button.ns-node:not(:disabled):hover { border-color: var(--c-accent); }
 .af-table th { text-align: left; font-size: 11px; font-weight: 600; color: var(--c-text-2); padding: 0 8px 5px 0; border-bottom: 1px solid var(--c-line); }
 .af-table td { padding: 6px 8px 6px 0; border-bottom: 1px solid color-mix(in srgb, var(--c-line) 60%, transparent); }
 .af-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* V2-WALK：写作流程面板（步骤 tab · 阅读 · 两个按钮 · 每集三态）。颜色只用灰 / 琥珀 / 绿 */
+.af-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #7d7a74; flex: none; }
+.af-dot.amber { background: #d6a63c; }
+.af-dot.green { background: #5fae72; }
+.af-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--c-line); }
+.af-tabs button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--c-text-2); font: inherit; cursor: pointer; }
+.af-tabs button.on { color: var(--c-text); border-bottom-color: #d6a63c; }
+.af-read { max-height: 460px; overflow: auto; padding: 4px 4px 4px 0; line-height: 1.7; }
+.af-read h3 { margin: 0 0 8px; font-size: 17px; font-weight: 600; }
+.af-read h5 { margin: 16px 0 6px; font-size: 11px; letter-spacing: .1em; color: var(--c-text-2); }
+.af-read p { margin: 0 0 6px; }
+.af-read ul, .af-read ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
+.af-prem { color: var(--c-text); }
+.af-sm { font-size: 12.5px; color: var(--c-text-2); }
+.af-gate { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-top: 10px; border-top: 1px solid var(--c-line); position: sticky; bottom: 0; background: var(--c-raise); }
+.af-rev { display: flex; gap: 8px; flex: 1; }
+.af-rev input { flex: 1; min-width: 200px; font: inherit; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--c-line); background: var(--c-bg); color: var(--c-text); }
+.af-gstate { display: inline-flex; align-items: center; gap: 6px; }
+.af-eps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.af-eps li { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 9px 12px; border: 1px solid var(--c-line); border-radius: 6px; background: var(--c-bg); }
+.af-eps li.s-look { border-color: rgba(214, 166, 60, .55); }
+.af-eps li.s-done { border-color: rgba(95, 174, 114, .45); }
+.af-es { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--c-text-2); }
+.af-dtoggle { align-self: flex-start; border: 0; background: none; color: var(--c-text-2); font: inherit; font-size: 12px; cursor: pointer; padding: 0; }
+.af-row2 { display: grid; grid-template-columns: 1fr 80px 130px 64px; gap: 8px; padding: 7px 2px; font-size: 13px; }
+.af-rv { padding: 10px 0; border-bottom: 1px solid var(--c-line); }
+.af-rvt { display: flex; gap: 22px; font-size: 13px; color: var(--c-text-2); margin: 4px 0 8px; }
+.af-rvt b { color: var(--c-text); }
+.af-rvi { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px 22px; font-size: 12.5px; }
+.af-rvi span { display: grid; grid-template-columns: 78px 1fr 28px; gap: 8px; align-items: center; color: var(--c-text-2); }
+.af-rvi i { height: 4px; border-radius: 2px; background: linear-gradient(90deg, #d6a63c var(--w), rgba(255, 255, 255, .12) var(--w)); }
+.af-rvi b { color: var(--c-text); font-weight: 500; text-align: right; }
+.af-fix { font-size: 13px; margin-top: 8px; }
+.af-fix summary { cursor: pointer; color: var(--c-text-2); }
+.af-fix ol { margin: 6px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; color: var(--c-text-2); font-size: 12.5px; line-height: 1.6; }
+.af-p1x { display: flex; flex-direction: column; gap: 8px; padding: 10px 0; }
+.af-rev { flex-direction: column; }
+.af-quick { display: flex; flex-wrap: wrap; gap: 8px; }
+.af-rev2 { display: flex; gap: 8px; }
+.af-rev2 input { flex: 1; min-width: 200px; font: inherit; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--c-line); background: var(--c-bg); color: var(--c-text); }
+.ns-chk { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--c-text-2); cursor: pointer; }
+.ns-chk input { width: 14px; height: 14px; }

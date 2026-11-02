@@ -25,7 +25,7 @@ def _outline(ep, intimate, scenes):
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(SL, "REPO", tmp_path)
     d = tmp_path / "data" / "pipeline" / "runs" / RUN
-    _w(tmp_path / "config" / "pipeline" / "runs.json", {"primary": RUN, "runs": {
+    _w(tmp_path / "config" / "pipeline" / "runs.json", {"primary": RUN, "legacy_unprefixed_run": RUN, "runs": {
         RUN: {"status": "producing"}, "old_s0": {"status": "done"}, "gone": {"status": "deleted"}}})
     for r in ("old_s0", "gone"):
         (tmp_path / "data" / "pipeline" / "runs" / r).mkdir(parents=True)

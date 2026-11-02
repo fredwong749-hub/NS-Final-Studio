@@ -295,7 +295,7 @@ def test_new_run_from_registry_without_episode(tmp_path):
     """HOLLYWOOD r8 直接建目录的整季新 run（例 series10_s2，L-104）：从 config/pipeline/runs.json 读到，按目录产物找集号"""
     root = _fake_root(tmp_path)
     (root / "config/pipeline").mkdir(parents=True, exist_ok=True)
-    (root / "config/pipeline/runs.json").write_text(json.dumps({"primary": "series10_v1", "runs": {
+    (root / "config/pipeline/runs.json").write_text(json.dumps({"primary": "series10_v1", "legacy_unprefixed_run": "series10_v1", "runs": {
         "series10_v1": {"priority": 0}, "series10_s2": {"priority": 10, "status": "writing"}}}), encoding="utf-8")
     d = root / "data/pipeline/runs/series10_s2"
     d.mkdir(parents=True)
@@ -351,7 +351,7 @@ def test_latest_cut_reads_delivery_record_not_mtime(tmp_path):
 
 def test_snapshot_runs_from_registry(tmp_path):
     root = _snap_root(tmp_path)
-    (root / "config/pipeline/runs.json").write_text(json.dumps({"primary": "demo_run", "runs": {"demo_run": {}, "s2": {}}}), encoding="utf-8")
+    (root / "config/pipeline/runs.json").write_text(json.dumps({"primary": "demo_run", "legacy_unprefixed_run": "demo_run", "runs": {"demo_run": {}, "s2": {}}}), encoding="utf-8")
     (root / "data/pipeline/runs/s2/video").mkdir(parents=True)
     (root / "data/pipeline/runs/s2/video/recipe_choice.json").write_text("{}", encoding="utf-8")
     assert SS.run_id(root) == "demo_run" and SS.run_ids(root) == ["demo_run", "s2"]
@@ -396,8 +396,8 @@ def test_autoflow_due_and_memo(tmp_path):
     assert due == {(6, "P2_ep06_a2.json"), (3, "P4_ep03_r1.md")}
     (d / "autoflow_ep03.json").write_text(json.dumps({"agent": {"full_p4_done": ["P4_ep03_r1.md"]}}), encoding="utf-8")
     assert {x["episode"] for x in FL.autoflow_due(root)} == {6}
-    r = FL.autoflow_tick(root, apply=False)
-    assert r["ran"] and r["ran"][0]["dry"]
+    r = FL.autoflow_tick(root, apply=True)          # W-23：autoflow_tick 只报告、不推进（推进只走 autoflow.py：网页 /repair + watch）
+    assert r["ran"] == [] and {x["episode"] for x in r["due"]} == {6} and all(x["cmd"] is None for x in r["due"])
 
 
 

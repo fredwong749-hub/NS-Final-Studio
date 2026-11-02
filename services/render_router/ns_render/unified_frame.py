@@ -63,7 +63,7 @@ def _job_for(script, shot_id: str, project: str, prompt_override: str | None):
 
 def _contract(job: dict):
     from ns_agent.gen_contract import preflight as PF
-    req = {k: job.get(k) for k in ("model", "cast", "prompt", "refs", "asset_refs", "loras", "compiled_by")}
+    req = {k: job.get(k) for k in ("model", "cast", "prompt", "refs", "asset_refs", "loras", "compiled_by", "route", "route_reasons", "lane")}
     req.update(kind="image", project=job.get("framing_project"), shot_id=job["shot"])
     if job.get("stage") == "last":
         req["kind"] = "image"
@@ -218,7 +218,7 @@ def render_ab(client, script, shot_id: str, *, experiment: str, tier: str, seed:
     # preflight 照查（I1–I10）；只有 I7 后缀一项按现成的实验口径放行：scope=bakeoff + suffix_variant（preflight 第 217 行，
     # “BAKEOFF A/B 可换后缀，禁用词照查；生产不放”）——改写了提示词的实验才声明
     from ns_agent.gen_contract import preflight as PF
-    req = {k: job.get(k) for k in ("model", "cast", "prompt", "refs", "asset_refs", "loras", "compiled_by")}
+    req = {k: job.get(k) for k in ("model", "cast", "prompt", "refs", "asset_refs", "loras", "compiled_by", "route", "route_reasons", "lane")}
     req.update(kind="image", project=job.get("framing_project"), shot_id=job["shot"])
     if prompt_edits:
         req.update(scope="bakeoff", suffix_variant=True)
@@ -273,6 +273,23 @@ def _pf_done(pf: dict | None) -> bool:
     return bool(pf) and (pf.get("status") in ("done", "error") or ("items" in pf and pf.get("status") is None))
 
 
+def pf_of(t: dict | None) -> dict:
+    """A-03（V2_READINESS，总调度 19:2x）：一版的出图后契约结果只认这一个读法——take.postflight（唯一字段）优先，
+    旧数据只有 contract.postflight / contract.ok 时退到它们。以前两个字段各写各读，一边看不到结果就重新打分（重复打分）"""
+    if not t:
+        return {}
+    p_ = t.get("postflight")
+    if isinstance(p_, dict) and (p_.get("ok") is not None or p_.get("status") or p_.get("state")):
+        return p_
+    c = t.get("contract") or {}
+    if isinstance(c, dict):
+        if isinstance(c.get("postflight"), dict) and c["postflight"]:
+            return c["postflight"]
+        if c.get("ok") is not None:
+            return c
+    return {}
+
+
 def _pf_write(shot_id: str, stage: str, n: int, pf: dict, ctx: dict | None = None, *, path: Path | None = None,
               expect_file: str | None = None) -> None:
     """写回 contract.postflight。path：开算时就钉死的 takes.json 路径（11-01 事故：后台线程跨过测试的临时目录切换，
@@ -287,10 +304,11 @@ def _pf_write(shot_id: str, stage: str, n: int, pf: dict, ctx: dict | None = Non
         if t is None or (expect_file and t.get("file") != expect_file):
             return
         c = dict(t.get("contract") or {})
-        c["postflight"] = pf
+        c["postflight"] = pf                     # 兼容旧读者（镜像）
         if ctx is not None:
             c["pf_ctx"] = ctx
         t["contract"] = c
+        t["postflight"] = pf                     # A-03：唯一字段（pf_of 先读它）
         P._write_json(path, data)
 
 
@@ -327,7 +345,7 @@ def run_postflight(shot_id: str, stage: str, n: int) -> dict | None:
         t = next((x for x in (P._read_json(tpath, None) or {"takes": []})["takes"] if x["stage"] == stage and x["n"] == n), None)
         if t is None:
             return None
-        cur = (t.get("contract") or {}).get("postflight") or {}
+        cur = pf_of(t)                           # A-03：两个字段任一已有结果都算算过，不重复打分
         if _pf_done(cur):
             return cur
         ctx = _ctx_for(shot_id, t)

@@ -21,6 +21,7 @@ P4 通过后“送去导入”：原样存成剧本输入草稿（data/staging_i
 """
 from __future__ import annotations
 
+from ns_api import run_paths as _RP   # K-OPS-F24：按当前剧取路径（V1 已归档，不在网页显示）
 import json
 import re
 import shutil
@@ -108,6 +109,11 @@ def _episode_of(d: Path, st: dict | None) -> int | None:
     rj = _read(d / "run.json") or {}
     if rj.get("episode"):
         return int(rj["episode"])
+    # V2-WALK 11-02：全自动链（script_autoflow / claude_agent）跑的剧没有 ui_state / run.json，P2 前推不出集号 →
+    # 网页只显示 P0、看不到已交的 P1 故事线；按 autoflow.json 的当前集补上
+    af = _read(d / "autoflow.json") or {}
+    if af.get("episode") or af.get("latest_episode"):
+        return int(af.get("episode") or af.get("latest_episode"))
     for f in d.glob("P2_ep*_outline.json"):
         m = re.search(r"ep(\d+)", f.name)
         if m:
@@ -216,7 +222,7 @@ def _summary(d: Path, full: bool = False, ep_sel: int | None = None) -> dict:
     out = {"id": d.name, "ui": bool(st), "episode": ep, "status": status, "current": (st or {}).get("current"),
            "upto": (st or {}).get("upto", "P4"), "created_at": (st or {}).get("created_at") or time.strftime(
                "%Y-%m-%dT%H:%M:%S", time.localtime(d.stat().st_mtime)), "updated_at": (st or {}).get("updated_at"),
-           "title": brief.get("title") or "", "outline_head": (brief.get("outline") or "")[:80],
+           "title": brief.get("title") or (_read(d / "P1_storyline.json") or {}).get("title") or "", "outline_head": (brief.get("outline") or "")[:80],
            "episodes": brief.get("episodes"), "error": (st or {}).get("error"), "budget_usd": (st or {}).get("budget_usd"),
            "spent_usd": max(_ledger_usd((st or {}).get("tag")), round(sum(float(s.get("usd") or 0) for s in stages), 4)),
            "sent_to_import": ((st or {}).get("sent_by_ep") or {}).get(str(ep)) if eps else (st or {}).get("sent_to_import"),
@@ -275,7 +281,22 @@ def _worker(run_id: str) -> None:
         _write_state(d, st)
 
 
+def writer_backend() -> str:
+    """L-109：config/llm_providers.json writer_backend（claude_agent = 测试期剧本写作交 Claude agent，不花外部写作 API 的钱；api = 上线）。
+    文件缺 = api（上线默认）；文件坏 = 抛错（不静默当 api 花钱）"""
+    p = REPO / "config" / "llm_providers.json"
+    if not p.is_file():
+        return "api"
+    return json.loads(p.read_text(encoding="utf-8")).get("writer_backend") or "api"
+
+
+AGENT_REFUSE = ("测试期剧本只走“新建剧本”页的写作流程（写手收包，花费 $0），这里不再单独起写作；"
+                "提纲在新建剧本页填，点“开始写作”。")   # V2-WALK W-01：不另造写作包格式，写手只收 writer_tasks/*.json（nsfs.writer_task/1）
+
+
 def _start(run_id: str) -> None:
+    if writer_backend() == "claude_agent":       # W-01 / W-02：不调外部写作 API，也不另发写作包；推进只走 /api/script-autoflow
+        raise HTTPException(409, AGENT_REFUSE)
     with _lock:
         busy = [k for k in _threads if _alive(k)]
         if busy:
@@ -333,6 +354,8 @@ def list_runs(limit: int = 30):
 
 @router.post("/api/story-runs")
 def start_run(body: StartBody):
+    if writer_backend() == "claude_agent":
+        raise HTTPException(409, AGENT_REFUSE)
     RC = _rc()
     from ns_schema import storyline as SL
     if body.upto not in ("P1", "P2", "P3", "P4"):
@@ -586,13 +609,7 @@ def story_images(run: str | None = None):
     if not run:
         # DATAALIGN（K-DATA-001）：没指定运行 = 当前画布剧本自己的运行（config/recipes/asset_refs.json 登记的项目），
         # 不再取“最近有图的任一运行”（别的剧出了图，画布 / 阅读页就会显示别的剧的同号镜头图）
-        try:
-            from ns_api.shot_cast import import_project
-            pj = import_project()
-        except Exception:  # noqa: BLE001
-            pj = None
-        if pj and (RUNS / pj / "images").is_dir():
-            run = pj
+        run = _RP.current_run()     # K-OPS-F24（L-125）：没给 run = 当前 primary 剧；V1 已归档，网页不再显示它的图
     return _story_images_cached(run)
 
 

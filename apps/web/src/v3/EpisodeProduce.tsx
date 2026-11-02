@@ -233,7 +233,7 @@ function ProduceForm({ ep, close }: { ep: number; close: () => void }) {
       notify(`第 ${ep} 集整集出片已开始（${mode === "review" ? "每步等你定稿" : "自动测试定稿"}）`);
       close();
     } catch (e) {
-      notify(`整集出片没开始：${/Failed to fetch|NetworkError/i.test((e as Error).message) ? "后台服务没响应（Failed to fetch），稍后重试" : (e as Error).message}`, "err");
+      notify(`整集出片没开始：${/Failed to fetch|NetworkError|网络不通/i.test((e as Error).message) ? "网络不通，没有提交上，请再点一次" : (e as Error).message}`, "err");
     } finally {
       setBusy(false);
     }
@@ -298,7 +298,7 @@ function ProduceForm({ ep, close }: { ep: number; close: () => void }) {
         {!picked.length ? (
           <p>先勾选要出的阶段</p>
         ) : planErr ? (
-          <p className="v3-prod-warn">{/Failed to fetch|NetworkError/i.test(planErr) ? "读不到影响面：后台服务没响应，稍后再打开这个窗口（Failed to fetch）" : `读不到影响面：${planErr}`}</p>
+          <p className="v3-prod-warn">{/Failed to fetch|NetworkError|网络不通/i.test(planErr) ? "读不到影响面：后台服务没响应，稍后再打开这个窗口" : `读不到影响面：${planErr}`}</p>
         ) : !plan ? (
           <p>计算中…</p>
         ) : (

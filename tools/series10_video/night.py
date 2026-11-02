@@ -134,7 +134,7 @@ def ready_shots(eps_specs, ctrl) -> dict[int, list[str]]:
 def pick_host(st) -> str:
     """可用道多、已派镜头少的那台（gpu36:2 视频专用道算 1；让道道只在空闲时算）"""
     score = {}
-    for h in ("gpu33", "gpu36"):
+    for h in _hosts_here():      # A-07：服务器上只管本机（原来 resident_prep 就地改源码）
         busy = ssh(h, f"cd {DEST} 2>/dev/null && [ -f run/vidgen.pid ] && kill -0 $(cat run/vidgen.pid) 2>/dev/null && "
                       f"grep -q validate_jobs {VID_REL}/control_{h}.json && echo VALIDATING", 60)
         if "VALIDATING" in busy:
@@ -457,7 +457,7 @@ def apply_lane_policy(st, ctrl):
     if st.get("lane_mode") == mode and st.get("lane_key") == key:
         return ctrl
     hosts = jl(VID / "hosts.json", {}) or {}
-    for host in ("gpu33", "gpu36"):
+    for host in _hosts_here():   # A-07
         eps_on = sorted(int(e) for e, h in hosts.items() if h == host)
         # DEBUG-RSI 11-02（K-OPS-E20，CONSENT VIDEO10 → DEBUG_RSI by 总调度）：video_lane_only 模式原来只挡出图道、不看
         # control 的 hold_lanes → 挂道挡不住视频（gpu36:0 两次重启窗口被 VIDEO10 视频占住）。现在两者合并
@@ -483,6 +483,13 @@ def apply_lane_policy(st, ctrl):
     st["lane_key"] = key
     log("LANE_POLICY", key, f"首帧 / 尾帧在排或在跑 {busy}")
     return ctrl
+
+
+def _hosts_here() -> tuple:
+    """服务器上（OFFLINE_SELF）只处理本机；笔记本两台都管（A-07）"""
+    import os as _os
+    me = _os.environ.get("OFFLINE_SELF")
+    return (me,) if me else ("gpu33", "gpu36")
 
 
 def partition_hosts(part: dict | None = None) -> dict:

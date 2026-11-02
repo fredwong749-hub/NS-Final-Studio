@@ -260,6 +260,9 @@ items:
       ui_weights: {topbar: 25, no_blank: 20, clean: 20, no_jargon: 15, feedback: 20}
       ui_unmeasured: [页面之间深链接顺畅, 只有“用这张”+“修改”, 提交类操作 300 ms 内收下 + 全局队列, 只显示通过验收的图]
       ui_pages: ["/#/overview", "/#ep01", "/#/script-create?new=1", "/#/assets?type=people", "/#/sound", "/#/cut", "/#/settings"]
+      ui_topbar_labels: [总览, 剧本, 资产, 分镜, 出图, 视频, 成片]
+      ui_topbar_sizes: ["1280x800", "1440x900", "1920x1080"]
+      ui_picker_pages: ["/#/frames", "/#/videos", "/#/cut", "/#ep01"]
       ui_jargon_words: [preflight, postflight, seed, lane, sha, json, take, VQA, ComfyUI, dispatch, producer, registry, workflow, prompt, LoRA, Q1, Q2, Q9, V6, V7, rsi, sv-]
       ui_feedback_zero_at: 5
       ui_measure_every_s: 3600

@@ -63,11 +63,35 @@ def _code_sv(root: Path) -> list[str]:
     return [pb] if pb else []
 
 
-def problems(root: Path | None = None, server: bool | None = None) -> list[str]:
+MANIFEST_REQUIRED = ["config/recipes/asset_refs.json"]   # V2 资产包模式：V1 的 data/looks 等覆盖文件不是必需（也不该被读）
+
+
+def run_manifest(root: Path, run: str | None) -> str | None:
+    """runs.json 里该剧登记的资产包清单（L-125：series10_v2 → assets_v2/manifest.json）；没登记 = None（旧必需文件表）"""
+    try:
+        d = json.loads((root / "config/pipeline/runs.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):   # arch-ok: 读不到 = 按旧必需文件表查（不放宽）
+        return None
+    return ((d.get("runs") or {}).get(run or "") or {}).get("assets_manifest")
+
+
+def problems(root: Path | None = None, server: bool | None = None, run: str | None = None) -> list[str]:
     root = Path(root or ROOT)
     server = is_server() if server is None else server
     out = []
-    run = run_id(root)
+    run = run or run_id(root)
+    man = run_manifest(root, run) if run else None
+    if man:                                   # K-OPS-F09 × L-125：资产包模式只要求清单本身 + 资产配置（清单坏 = 失败关闭）
+        for rel in MANIFEST_REQUIRED + [man] + (SERVER_ONLY if server else []):
+            p = root / rel
+            if not p.is_file():
+                out.append(f"缺必需的决策文件 {rel}")
+            else:
+                bad = _bad_json(p)
+                if bad:
+                    out.append(f"决策文件读不出 {rel}（{bad}）")
+        out += _code_sv(root) if server else []
+        return out
     if not run:
         out.append("run.json（data/state/pipeline/run.json，兼容期 config/pipeline/run.json）缺失或没有 run_id（不再静默回退 series10_v1）")
     # run 为空时上面已报问题；这里不拼默认路径（SYSARCH 02:4x：不再回退 series10_v1）

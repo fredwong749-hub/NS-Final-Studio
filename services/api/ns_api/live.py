@@ -22,6 +22,7 @@
 """
 from __future__ import annotations
 
+from ns_api import run_paths as _RP   # K-OPS-F24：渲染根目录按当前剧（V1 已归档，不在网页显示）
 import asyncio
 import json
 import os
@@ -85,7 +86,7 @@ class Watcher:
         return self._r("runs", DATA / "pipeline" / "runs")
 
     def renders_dir(self) -> Path:
-        return self._r("renders", DATA / "renders")
+        return self._r("renders", _RP.renders_root())
 
     # -- 快照 --
     def _walk(self, root: Path, depth: int, out: dict[str, float], pred=None) -> None:

@@ -506,6 +506,198 @@
       },
       "note": "备选（不作默认）。项目方 2026-11-01 先说“v10H 同上（写实·重）”，随后最新原话“v9 v10+场景底图这个还可以”，以较新的为准 → 默认改 frame_v9（写实·中 krea2 0.5）。",
       "src": "data/review_pages/series10_imgfix（v9 / v10 / v10L / v10H 对照）；tools/series10_imggen/imgfix_ab.py"
+    },
+    {
+      "id": "v2_editorial_fantasy_a",
+      "label": "V2 幻想 A · 霓虹宝石（候选，待项目方挑）",
+      "tier": "preview",
+      "run": "series10_v2",
+      "params": {
+        "unet": "turbo",
+        "sampler": "euler",
+        "vae": "texture_fix",
+        "width": 768,
+        "height": 1344,
+        "spec_words": true,
+        "loras": [
+          {
+            "name": "krea2_film_texture_qwen21.safetensors",
+            "strength": 0.5
+          }
+        ],
+        "render_scale": 1.5,
+        "sharpen": {
+          "enabled": true,
+          "radius": 1.2,
+          "amount": 0.6,
+          "threshold": 2
+        },
+        "style_suffix": "时尚杂志大片，品红与电光蓝双色轮廓光，深邃纯净的黑位，漆皮上有锐利的反光，饱满的宝石色调，85mm人像镜头，电影级布光"
+      },
+      "post_lut": "config/post/luts/v2_fantasy_a.cube",
+      "lang": "fantasy",
+      "note": "STYLE-V2（L-127，项目方 19:1x 主题“上海时尚模特的幻想和现实的挣扎”）V2 调色候选：技术参数同 Turbo 8 步 + texture_fix + krea2 0.5 + 1.5× 出图 + USM（不含任何 V1 风格后缀）；颜色 = 本后缀的光位 / 色调 + 后期 LUT post_lut（tools/v2style/looks.py 生成）。只给 V2 用；项目方挑定后再定 V2 默认，V1 的 default_preset / frame_redo_preset 不变。",
+      "src": "tools/v2style/grade_ab.py；data/review_pages/v2_style/grade.html"
+    },
+    {
+      "id": "v2_editorial_fantasy_b",
+      "label": "V2 幻想 B · 胭脂红金（候选，待项目方挑）",
+      "tier": "preview",
+      "run": "series10_v2",
+      "params": {
+        "unet": "turbo",
+        "sampler": "euler",
+        "vae": "texture_fix",
+        "width": 768,
+        "height": 1344,
+        "spec_words": true,
+        "loras": [
+          {
+            "name": "krea2_film_texture_qwen21.safetensors",
+            "strength": 0.5
+          }
+        ],
+        "render_scale": 1.5,
+        "sharpen": {
+          "enabled": true,
+          "radius": 1.2,
+          "amount": 0.6,
+          "threshold": 2
+        },
+        "style_suffix": "时尚杂志大片，胭脂红与琥珀金为主色，硬朗侧光勾出轮廓，浓重的暖色阴影，肤色红润通透，35mm电影胶片质感，细腻颗粒"
+      },
+      "post_lut": "config/post/luts/v2_fantasy_b.cube",
+      "lang": "fantasy",
+      "note": "STYLE-V2（L-127，项目方 19:1x 主题“上海时尚模特的幻想和现实的挣扎”）V2 调色候选：技术参数同 Turbo 8 步 + texture_fix + krea2 0.5 + 1.5× 出图 + USM（不含任何 V1 风格后缀）；颜色 = 本后缀的光位 / 色调 + 后期 LUT post_lut（tools/v2style/looks.py 生成）。只给 V2 用；项目方挑定后再定 V2 默认，V1 的 default_preset / frame_redo_preset 不变。",
+      "src": "tools/v2style/grade_ab.py；data/review_pages/v2_style/grade.html"
+    },
+    {
+      "id": "v2_editorial_fantasy_c",
+      "label": "V2 幻想 C · 黄金时刻（候选，待项目方挑）",
+      "tier": "preview",
+      "run": "series10_v2",
+      "params": {
+        "unet": "turbo",
+        "sampler": "euler",
+        "vae": "texture_fix",
+        "width": 768,
+        "height": 1344,
+        "spec_words": true,
+        "loras": [
+          {
+            "name": "krea2_film_texture_qwen21.safetensors",
+            "strength": 0.5
+          }
+        ],
+        "render_scale": 1.5,
+        "sharpen": {
+          "enabled": true,
+          "radius": 1.2,
+          "amount": 0.6,
+          "threshold": 2
+        },
+        "style_suffix": "时尚杂志大片，日落黄金时刻的低角度暖阳，橙粉色天空，逆光勾边与镜头光晕，色彩明艳温暖，肤色金润，70mm电影胶片质感"
+      },
+      "post_lut": "config/post/luts/v2_fantasy_c.cube",
+      "lang": "fantasy",
+      "note": "STYLE-V2（L-127，项目方 19:1x 主题“上海时尚模特的幻想和现实的挣扎”）V2 调色候选：技术参数同 Turbo 8 步 + texture_fix + krea2 0.5 + 1.5× 出图 + USM（不含任何 V1 风格后缀）；颜色 = 本后缀的光位 / 色调 + 后期 LUT post_lut（tools/v2style/looks.py 生成）。只给 V2 用；项目方挑定后再定 V2 默认，V1 的 default_preset / frame_redo_preset 不变。",
+      "src": "tools/v2style/grade_ab.py；data/review_pages/v2_style/grade.html"
+    },
+    {
+      "id": "v2_editorial_reality_a",
+      "label": "V2 现实 A · 阴天冷青（候选，待项目方挑）",
+      "tier": "preview",
+      "run": "series10_v2",
+      "params": {
+        "unet": "turbo",
+        "sampler": "euler",
+        "vae": "texture_fix",
+        "width": 768,
+        "height": 1344,
+        "spec_words": true,
+        "loras": [
+          {
+            "name": "krea2_film_texture_qwen21.safetensors",
+            "strength": 0.5
+          }
+        ],
+        "render_scale": 1.5,
+        "sharpen": {
+          "enabled": true,
+          "radius": 1.2,
+          "amount": 0.6,
+          "threshold": 2
+        },
+        "style_suffix": "纪实杂志摄影，阴天的柔和自然光，整体偏冷的青灰色调，色彩克制但肤色真实，轻微手持感，35mm胶片质感与细颗粒"
+      },
+      "post_lut": "config/post/luts/v2_reality_a.cube",
+      "lang": "reality",
+      "note": "STYLE-V2（L-127，项目方 19:1x 主题“上海时尚模特的幻想和现实的挣扎”）V2 调色候选：技术参数同 Turbo 8 步 + texture_fix + krea2 0.5 + 1.5× 出图 + USM（不含任何 V1 风格后缀）；颜色 = 本后缀的光位 / 色调 + 后期 LUT post_lut（tools/v2style/looks.py 生成）。只给 V2 用；项目方挑定后再定 V2 默认，V1 的 default_preset / frame_redo_preset 不变。",
+      "src": "tools/v2style/grade_ab.py；data/review_pages/v2_style/grade.html"
+    },
+    {
+      "id": "v2_editorial_reality_b",
+      "label": "V2 现实 B · 夜街混合光（候选，待项目方挑）",
+      "tier": "preview",
+      "run": "series10_v2",
+      "params": {
+        "unet": "turbo",
+        "sampler": "euler",
+        "vae": "texture_fix",
+        "width": 768,
+        "height": 1344,
+        "spec_words": true,
+        "loras": [
+          {
+            "name": "krea2_film_texture_qwen21.safetensors",
+            "strength": 0.5
+          }
+        ],
+        "render_scale": 1.5,
+        "sharpen": {
+          "enabled": true,
+          "radius": 1.2,
+          "amount": 0.6,
+          "threshold": 2
+        },
+        "style_suffix": "纪实杂志摄影，夜晚的混合光源，暖黄钨丝灯与冷白荧光灯交织，高反差，阴影深沉，偏青绿的暗部，35mm胶片质感与细颗粒"
+      },
+      "post_lut": "config/post/luts/v2_reality_b.cube",
+      "lang": "reality",
+      "note": "STYLE-V2（L-127，项目方 19:1x 主题“上海时尚模特的幻想和现实的挣扎”）V2 调色候选：技术参数同 Turbo 8 步 + texture_fix + krea2 0.5 + 1.5× 出图 + USM（不含任何 V1 风格后缀）；颜色 = 本后缀的光位 / 色调 + 后期 LUT post_lut（tools/v2style/looks.py 生成）。只给 V2 用；项目方挑定后再定 V2 默认，V1 的 default_preset / frame_redo_preset 不变。",
+      "src": "tools/v2style/grade_ab.py；data/review_pages/v2_style/grade.html"
+    },
+    {
+      "id": "v2_editorial_reality_c",
+      "label": "V2 现实 C · 直闪纪实（候选，待项目方挑）",
+      "tier": "preview",
+      "run": "series10_v2",
+      "params": {
+        "unet": "turbo",
+        "sampler": "euler",
+        "vae": "texture_fix",
+        "width": 768,
+        "height": 1344,
+        "spec_words": true,
+        "loras": [
+          {
+            "name": "krea2_film_texture_qwen21.safetensors",
+            "strength": 0.5
+          }
+        ],
+        "render_scale": 1.5,
+        "sharpen": {
+          "enabled": true,
+          "radius": 1.2,
+          "amount": 0.6,
+          "threshold": 2
+        },
+        "style_suffix": "纪实杂志摄影，机顶直闪硬光，背景略暗，真实的皮肤质感，冷调白平衡，色彩干净略低饱和，轻微颗粒"
+      },
+      "post_lut": "config/post/luts/v2_reality_c.cube",
+      "lang": "reality",
+      "note": "STYLE-V2（L-127，项目方 19:1x 主题“上海时尚模特的幻想和现实的挣扎”）V2 调色候选：技术参数同 Turbo 8 步 + texture_fix + krea2 0.5 + 1.5× 出图 + USM（不含任何 V1 风格后缀）；颜色 = 本后缀的光位 / 色调 + 后期 LUT post_lut（tools/v2style/looks.py 生成）。只给 V2 用；项目方挑定后再定 V2 默认，V1 的 default_preset / frame_redo_preset 不变。",
+      "src": "tools/v2style/grade_ab.py；data/review_pages/v2_style/grade.html"
     }
   ],
   "user_presets": [],

@@ -281,6 +281,9 @@ def _q9_item(VQ, v):
     """VQAGATE 11-01（项目方原话转阻断，config/vqa.json gate.enforce）：没有看图结果 = untested（不算通过）；
     blocking 项 defect = fail（VQ 给）。enforce 关掉时回到只记录：没有结果 = 不适用；未成年外观（HC-07）任何时候都不过"""
     st, d, ev = v
+    err = (getattr(VQ, "cfg", dict)() or {}).get("_config_error")
+    if err:                                       # A-05：VQA 配置读坏 = 失败关闭（不放行、不当“只记录”）
+        return "fail", f"看图闸门配置读不出（config/vqa.json：{err}），失败关闭", ev
     enf = getattr(VQ, "enforced", lambda: False)() and (getattr(VQ, "gate_cfg", dict)() or {}).get("untested_blocks", True)
     if st == "untested" and not enf:
         st, d = "na", f"只记录（没有本地看图结果）：{d}"

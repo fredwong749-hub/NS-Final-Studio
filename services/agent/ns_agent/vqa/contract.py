@@ -606,7 +606,7 @@ def same_scene_peers(sid: str) -> list[str]:
     if not sc:
         return []
     out = []
-    for tj in sorted((ROOT / "data" / "renders").glob("ep*/S*/takes.json")):
+    for tj in sorted(CT.renders_dir().glob("ep*/S*/takes.json")):          # 按当前剧（I-14）
         o = f"{tj.parent.parent.name}-{tj.parent.name}"
         if o != sid and (CT.shot_rec(o) or {}).get("scene_id") == sc:
             out.append(o)

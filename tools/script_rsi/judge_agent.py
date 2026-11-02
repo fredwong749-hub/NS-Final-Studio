@@ -264,6 +264,68 @@ def blind_collect(out: Path) -> dict:
     return res
 
 
+# ---- P1 故事线三评委（总调度 11-02 19:3x：P1 先过三评委盲评再交项目方；口径 config/prompts/hollywood_p1_judge.md）
+P1_ITEMS = ("act3", "arc", "men", "hooks", "av", "theme", "assets", "craft")
+
+
+def p1_pack(run_dir: Path, judges: int = 3, out: Path | None = None) -> list[str]:
+    """每个评审一份同样的包（P1 故事线 + 造型表 + 口径），目录 judge_p1/judge_k/；评审互不相见"""
+    md = (ROOT / "config" / "prompts" / "hollywood_p1_judge.md").read_text(encoding="utf-8")
+    sl = (run_dir / "P1_storyline.json").read_text(encoding="utf-8")
+    lk = (run_dir / "P1_looks.json").read_text(encoding="utf-8") if (run_dir / "P1_looks.json").exists() else "（没有造型表）"
+    out = out or (run_dir / "judge_p1")
+    made = []
+    for j in range(1, judges + 1):
+        op = out / f"judge_{j}" / "out" / "p1_review.json"
+        pk = {"schema": "nsfs.judge_task/1", "mode": "p1", "judge_slot": f"judge_{j}", "role": "judge", "judge_md": "config/prompts/hollywood_p1_judge.md",
+              "base_sha": _sha(sl), "system": md, "user": "【P1 故事线】\n" + sl + "\n\n【造型表】\n" + lk,
+              "rules": "独立作答：只读自己这个 judge 目录的包，不看别的评审，不看写手的自检。顶层写 judge_id。",
+              "output": {"path": _rel(op), "done_marker": _rel(op) + ".done"}, "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "status": "open"}
+        pp = out / f"judge_{j}" / "p1_review_task.json"
+        _write_json(pp, pk)
+        made.append(_rel(pp))
+    return made
+
+
+def p1_collect(run_dir: Path, out: Path | None = None) -> dict:
+    """收三家：每家 8 条 1–5 分（满分 40）→ 各家总分、σ、逐条均分与分歧（逐条极差 ≥2 的列出来），3 个 judge_id 互不相同才算有效"""
+    out = out or (run_dir / "judge_p1")
+    sl = (run_dir / "P1_storyline.json").read_text(encoding="utf-8")
+    reps, problems = [], []
+    for pp in sorted(out.glob("judge_*/p1_review_task.json")):
+        pk = json.loads(pp.read_text(encoding="utf-8"))
+        op = _abs(pk["output"]["path"])
+        if not (op.exists() and Path(str(op) + ".done").exists()):
+            problems.append(f"{pk['judge_slot']} 还没交")
+            continue
+        if pk.get("base_sha") != _sha(sl):
+            problems.append(f"{pk['judge_slot']} 出包后故事线变了，作废")
+            continue
+        _L3, R5 = _modules()
+        d, err = R5.H._json_block(op.read_text(encoding="utf-8"))
+        if d is None:
+            problems.append(f"{pk['judge_slot']} 不是 JSON：{err}")
+            continue
+        sc = {str(x.get("id")): max(1, min(5, int(x.get("score") or 1))) if str(x.get("evidence") or "").strip() else 1
+              for x in d.get("items") or [] if isinstance(x, dict)}
+        if set(sc) != set(P1_ITEMS):
+            problems.append(f"{pk['judge_slot']} 条目不全：缺 {sorted(set(P1_ITEMS) - set(sc))}")
+            continue
+        reps.append({"judge_slot": pk["judge_slot"], "judge_id": str(d.get("judge_id") or "").strip(), "scores": sc,
+                     "total": sum(sc.values()), "top_fixes": d.get("top_fixes") or []})
+    st = stability([r["total"] for r in reps])
+    ids = [r["judge_id"] for r in reps]
+    single = any(not x for x in ids) or len(set(ids)) < len(ids)
+    per_item = {it: [r["scores"][it] for r in reps] for it in P1_ITEMS} if reps else {}
+    res = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "run": run_dir.name, "base_sha": _sha(sl), **st, "max": 40,
+           "stable": st["stable"] and not single, "single_judge": single, "judge_ids": ids,
+           "item_mean": {k: round(sum(v) / len(v), 2) for k, v in per_item.items()},
+           "item_split": {k: v for k, v in per_item.items() if v and max(v) - min(v) >= 2},
+           "top_fixes": [f for r in reps for f in r["top_fixes"]][:12], "problems": problems}
+    _write_json(out / "RESULT.json", res)
+    return res
+
+
 def main(argv=None) -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -286,7 +348,21 @@ def main(argv=None) -> int:
     bp.add_argument("--out", required=True)
     bc = sub.add_parser("blind-collect")
     bc.add_argument("--out", required=True)
+    pp_ = sub.add_parser("p1-pack", help="P1 故事线三评委出包（每家一份，互不相见）")
+    pp_.add_argument("--run-dir", required=True)
+    pp_.add_argument("--judges", type=int, default=3)
+    pc_ = sub.add_parser("p1-collect")
+    pc_.add_argument("--run-dir", required=True)
     a = ap.parse_args(argv)
+    if a.cmd in ("p1-pack", "p1-collect"):
+        rd = _abs(a.run_dir)
+        if a.cmd == "p1-pack":
+            print(json.dumps({"packets": p1_pack(rd, a.judges)}, ensure_ascii=False, indent=1))
+        else:
+            r = p1_collect(rd)
+            print(json.dumps({k: r[k] for k in ("n", "totals", "sigma", "mean", "stable", "single_judge", "item_mean", "item_split", "problems")},
+                             ensure_ascii=False, indent=1))
+        return 0
     if a.cmd in ("blind-pack", "blind-collect"):
         outd = _abs(a.out)
         if a.cmd == "blind-pack":

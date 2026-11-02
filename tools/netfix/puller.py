@@ -199,8 +199,16 @@ def mirror(state: dict) -> dict:
     if time.time() - state.get("_mirror_t", 0) < MIRROR_EVERY_S:
         return state.get("_mirror_last", {})
     state["_mirror_t"] = time.time()
+    rels = list(MIRROR_FILES)
+    for run, rec in ((_runs().get("runs") or {}).items()):          # L-125：每个在用的 run 各自的 registry 也镜像（按 run 推路径，不写死）
+        if (rec or {}).get("status") in FROZEN_STATUS:
+            continue
+        legacy = legacy_run()
+        rel = "data/producer/registry.json" if run == legacy else f"data/producer/runs/{run}/registry.json"
+        if rel not in rels:
+            rels.append(rel)
     for host in HOSTS:
-        for rel in MIRROR_FILES:
+        for rel in rels:
             r = remote(host, f"cat {OFF}/repo/{rel}", timeout=60)
             ok = r.returncode == 0 and r.stdout[:1] in (b"{", b"[")
             if ok:
@@ -213,6 +221,8 @@ def mirror(state: dict) -> dict:
                                     "rc": r.returncode}
     state["_mirror_last"] = out
     return out
+
+
 
 
 
@@ -252,7 +262,9 @@ def takes_scan(state: dict) -> dict:
     res = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "merged": {}, "drift": []}
     code = base64.b64encode(SCAN_PY.encode()).decode()
     for host in HOSTS:
-        since = state.get(f"_scan_since_{host}", 0)
+        since = state.get(f"_scan_since_{host}")
+        first = since is None                      # 第一次只建基线、只做一致性比对，不批量合并历史改动（避免一上线就全量并回）
+        since = time.time() if first else since
         t_start = time.time() - 30
         r = remote(host, f"python3 -c \"import base64;exec(base64.b64decode('{code}'))\" {OFF}/repo {since}", timeout=120)
         if r.returncode != 0:
@@ -263,7 +275,7 @@ def takes_scan(state: dict) -> dict:
         except (ValueError, IndexError):
             res["merged"][host] = "bad output"
             continue
-        changed = info.get("changed") or []
+        changed = [] if first else [c for c in (info.get("changed") or []) if not frozen(c)]
         acts = {}
         if changed:
             tr = remote(host, f"cd {OFF}/repo && tar cf - -T - 2>/dev/null; true", data=("\n".join(changed) + "\n").encode(), timeout=300)
@@ -284,6 +296,8 @@ def takes_scan(state: dict) -> dict:
         state[f"_scan_since_{host}"] = t_start if not any(str(v).startswith("error") for v in acts.values()) else since
         res["merged"][host] = {k: v for k, v in acts.items() if not str(v).startswith("skipped")}
         for rel, sv in (info.get("summary") or {}).items():           # 一致性：只比本台负责的 stage
+            if frozen(rel):
+                continue
             m = re.search(r"/ep(\d{2})/", rel)
             if not m:
                 continue
@@ -308,10 +322,111 @@ def takes_scan(state: dict) -> dict:
     return res
 
 
+
+FETCH_QUEUE = ROOT / "data/netfix/fetch_queue.jsonl"
+FETCH_STATUS = ROOT / "data/netfix/fetch_status.json"
+FETCH_MB_PER_TICK = 12
+
+
+def fetch_queue(state: dict) -> dict:
+    """按需拉取队列（takes_backfill / 界面插队写 data/netfix/fetch_queue.jsonl：{host, rel(仓库相对), stage}）：
+    按文件顺序每拍最多拉 FETCH_MB_PER_TICK MB；本地已有就跳过（绝不覆盖）；拉到原子落盘。
+    data/netfix/fetch_status.json = {pending: [rel…], done_n, failed}——界面据此对没拉到的显示“原图传输中”，不显示裂图"""
+    try:
+        lines = FETCH_QUEUE.read_text(encoding="utf-8").splitlines()
+    except OSError:   # arch-ok: 没有队列 = 没有待拉
+        return {"pending": 0}
+    items, seen = [], set()
+    for ln in lines:
+        try:
+            q = json.loads(ln)
+        except ValueError:   # arch-ok: 半行跳过
+            continue
+        if q.get("rel") in seen or (ROOT / q.get("rel", "")).exists() or frozen(q.get("rel", "")):
+            continue
+        seen.add(q["rel"])
+        items.append(q)
+    done, failed, budget = 0, state.setdefault("_fetch_failed", {}), FETCH_MB_PER_TICK * 1e6
+    for host in HOSTS:
+        mine = [q for q in items if q.get("host") == host and failed.get(q["rel"], 0) < 3][:20]
+        if not mine or budget <= 0:
+            continue
+        r = remote(host, f"cd {OFF}/repo && tar cf - -T - 2>/dev/null; true", data=("\n".join(q["rel"] for q in mine) + "\n").encode(), timeout=900)
+        try:
+            with tarfile.open(fileobj=io.BytesIO(r.stdout)) as tf:
+                for m in tf.getmembers():
+                    if not m.isfile() or ".." in m.name or m.name.startswith("/"):
+                        continue
+                    dst = ROOT / m.name
+                    if dst.exists():
+                        continue
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    tmp = dst.with_suffix(dst.suffix + ".part")
+                    tmp.write_bytes(tf.extractfile(m).read())
+                    os.replace(tmp, dst)
+                    done += 1
+                    budget -= m.size
+        except tarfile.TarError as e:
+            log("fetch tar error", host, repr(e)[:120])
+        for q in mine:
+            if not (ROOT / q["rel"]).exists():
+                failed[q["rel"]] = failed.get(q["rel"], 0) + 1
+    pending = [q["rel"] for q in items if not (ROOT / q["rel"]).exists()]
+    stt = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "pending_n": len(pending), "pending": pending[:500], "done_this_tick": done,
+           "failed": {k: v for k, v in failed.items() if v >= 3}}
+    tmp = FETCH_STATUS.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(stt, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, FETCH_STATUS)
+    if not pending:                                   # 全部拉完：队列清空（保留到 .done 归档）
+        try:
+            FETCH_QUEUE.replace(FETCH_QUEUE.with_suffix(time.strftime(".%Y%m%d%H%M%S.done")))
+        except OSError:   # arch-ok: 归档失败下拍再试
+            pass
+    return {"pending": len(pending), "done": done}
+
+
+
+FROZEN_STATUS = ("frozen", "readonly", "archived")
+
+
+def run_of(rel: str) -> str:
+    """仓库相对路径属于哪个 run（L-125：一律按 run 区分路径，不写死）：data/renders/<run>/epNN/… → run；
+    不带 run 段的旧路径 data/renders/epNN/… → runs.json 的 legacy_unprefixed_run（缺省 series10_v1）"""
+    import re
+    m = re.match(r"data/renders/([^/]+)/ep\d{2}/", rel)
+    if m and not re.fullmatch(r"ep\d{2}", m.group(1)):
+        return m.group(1)
+    return legacy_run()
+
+
+def _runs() -> dict:
+    try:
+        sys.path.insert(0, str(ROOT / "tools/factory"))
+        import state_paths as SP
+        return SP.read_state("pipeline/runs", default={}) or {}
+    except Exception:  # noqa: BLE001  # arch-ok: 读不到 run 登记表 → 当作没有冻结的 run
+        return {}
+
+
+def legacy_run() -> str:
+    """用不带 run 前缀旧路径的那部剧 = runs.json 的 legacy_unprefixed_run（K-OPS-F24）；字段缺失就报错，不猜默认值（总调度 18:5x）"""
+    v = _runs().get("legacy_unprefixed_run")
+    if not v:
+        raise RuntimeError("runs.json 缺 legacy_unprefixed_run：无法判断不带前缀的旧路径属于哪部剧（K-OPS-F24）")
+    return v
+
+
+def frozen(rel: str) -> bool:
+    """L-125：冻结（只读视频库）的 run 不再同步 / 拉取新东西"""
+    st = ((_runs().get("runs") or {}).get(run_of(rel)) or {}).get("status")
+    return st in FROZEN_STATUS
+
+
 def tick(state: dict) -> dict:
     stats = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "t": time.time(), "hosts": {}}
     try:
         stats["mirror"] = mirror(state)
+        stats["fetch"] = fetch_queue(state)
         sc = takes_scan(state)
         stats["takes_sync"] = {"at": sc.get("at"), "merged": sc.get("merged"), "drift_n": len(sc.get("drift") or []),
                                "drift": (sc.get("drift") or [])[:30]}

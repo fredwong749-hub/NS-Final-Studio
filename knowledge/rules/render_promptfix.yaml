@@ -98,3 +98,42 @@ rules:
     confidence: medium   # 机制确定；效果待 S9 重出 + 借道 A/B
     status: 确认
     date: 2026-11-02
+
+  - id: K-REN-956
+    domain: render
+    link: [P6-P7]
+    title: 先验收、后重出——编译规则变化不作废已通过的版本；只有人主动改的输入或验收失败才重出
+    when: tools/autopilot/producer（E11 过期重出：stale_requeue_map；E24 作业输入变：first_input_changed）
+    then: 画布摘要的过期标记只按白名单（STALE_REQUEUE_ON：提示词已改 / 导演加强已改 / 本集加强已改 / 剧本已改）放回重出，“编译器升级”和系统固定句、参考槽调整不重出；E24 只比本镜剧本输入签名（input_sig = 导入稿该镜 img / motion / cast / 场景 / 时长，过契约时记 passed_input_sig），作业签名（提示词 + 参考图）变了不作废；没记过 passed_input_sig 的旧数据不动。已通过的帧交出图后验收（站位核对 blocking_defects、服装验收）查，查出问题的走验收失败重出；新出的图一律用新规则
+    check: [tests/test_promptfix.py]
+    evidence:
+      - {src: tools/autopilot/producer.py job_sig, note: "旧 E24 签名 = first_frame_jobs.json 的提示词 + 参考图；sv-14 编译规则（站位句 48 镜、局部收窄 8 镜、手部单品撤槽）一上线，已通过首帧的签名全变 → 估计约 56 镜被无谓重出（总调度 11-02 17:3x 定先验收、后重出）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+
+  - id: K-REN-958
+    domain: render
+    link: [P6-P7]
+    title: V2 资产包造型封闭 + 本地专用资产只许本地道（编译标 route，preflight I12 按道挡）
+    when: asset_refs.resolve_shot（looks_closed）、asset_refs.plan_route → frame_job.build_first（job.route / route_reasons）、gen_contract.preflight I12、producer（首帧传 lane；尾帧同样挡）
+    then: 资产包清单里 looks_closed 的角色（lead_f 只有 O1–O4），本镜造型不在清单 → missing“造型不在资产包清单”（挡）；本镜造型或任何参考（含参考板每一格）route=local_only（O2 / O3 / J1 / J2）→ job.route=local_only，preflight I12 只许 hosts.json owner_controlled=true 的道（L-128：笔记本 + gpu33 + gpu36；FACTORY K-OPS-F25 实现），未指定道 / 非自有机器 fail（失败关闭）；用到 adult=true 资产的作业标 job.adult，producer 未收到项目方触发（owner_triggers）不提交；compile_trace 记 route / route_reasons / adult
+    check: [tests/test_promptfix_v2.py]
+    evidence:
+      - {src: assets_v2/manifest.json, note: "lead_f looks_closed=true，O2 / O3 route=local_only adult；J1 / J2 只用于本地亲密镜（项目方 18:5x–19:1x）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+
+  - id: K-REN-959
+    domain: render
+    link: [P6-P7]
+    title: 带品牌 logo 的参考只取款式——槽位说明正向写“没有任何标志和文字”，提示词出现品牌字样 preflight I13 挡
+    when: asset_refs.plan_slots（manifest no_brand 的参考）、gen_contract.preflight I13（config/compile/brand_words.json）
+    then: 参考板 / 单品槽里有 no_brand 的文件 → 槽位说明句尾接 NO_BRAND_NOTE（正向写法；Turbo cfg=1 负面词不生效）；资产包模式下提示词含品牌词表里的字样 → I13 fail。根治在资产侧：SH2 参考图应换成去 logo 的裁切（交 IMGMASTER / ASSETUX）
+    check: [tests/test_promptfix_v2.py]
+    evidence:
+      - {src: assets_v2/manifest.json lead_f.items.SH2, note: "no_brand=true：参考图带品牌 logo，项目方要求只取款式、生成时不出现任何品牌字样或标志"}
+    confidence: medium   # 文字层确定；参考图里的 logo 仍可能被照搬，待去 logo 资产
+    status: 确认
+    date: 2026-11-02

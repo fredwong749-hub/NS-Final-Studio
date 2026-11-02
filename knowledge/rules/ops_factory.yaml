@@ -258,3 +258,87 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-F23
+    domain: ops
+    link: [P5-P6]
+    title: 资产包模式（项目配了 assets_manifest，V2）身份脸 / 设定图 / 单品 / 场景只从清单取（sha 对上才算），清单没有就是“无”、不回退任何旧来源；清单外参考 preflight I11 挡；派生参考图只在笔记本生成，服务器上没有就挡、绝不本地生成
+    when: asset_refs 解析参考、preflight、服务器上编译出图作业
+    then: asset_refs.manifest / face_of / sheet_of / item_image / scene_ref 资产包模式；manifest_violations → I11；_derived_on_server：服务器有就用（不按修改时间判过期）、没有抛 DerivedRefMissing（资产缺图）
+    check: tests/test_factory.py::test_k_ops_f23_v2_manifest_only_and_no_server_derived, tests/test_factory.py::test_v2_identity_face_fail_closed_no_v1_fallback
+    evidence:
+      - {src: docs/master/V2_READINESS.md, note: "C1 身份脸 3–5 个来源；C7 gpu36 编译时本机重生成 refcrops / refboards（11-02 18:17:31）两台 refs_sha 不一致；C10 新旧资产混用 → L-125 / L-126 V2 完全切割"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-F24
+    domain: ops
+    link: [P5-P6]
+    title: 只有 runs.json legacy_unprefixed_run 那部剧用不带 run 前缀的旧路径；其它剧（包括当上 primary 的 V2）一律 data/renders/<run>/ 等带前缀路径；按剧取路径只走 runs.script_path / renders_dir / looks_path / producer_dir / asset_manifest；缺 legacy_unprefixed_run 字段 = 抛错
+    when: 任何模块定位导入稿 / 渲染目录 / 造型数据 / producer 账本；primary 切换
+    then: runs.legacy_run（缺字段抛 RunRegistryMissing）；ns_render.pipeline / producer.Paths / run_env / API run_paths 都调它；网页在 V1 归档后不显示 V1 的图 / 资产 / 任务；测试一律钉 NS_PRIMARY_RUN（conftest），不读真实 primary
+    check: tests/test_factory.py::test_k_ops_f24_only_legacy_run_uses_unprefixed_paths, tests/test_factory.py::test_run_path_entries, tests/test_factory.py::test_tests_never_read_real_primary
+    evidence:
+      - {src: docs/master/V2_PLAN.md, note: "11-02 18:4x NETFIX 提醒：Paths 让主剧用不带前缀的旧路径，V2 当上 primary 会写进 data/renders/epNN/ 和 V1 混在一起；19:0x 切 primary 后 6 个读真实当前剧的测试一起红"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-F25
+    domain: ops
+    link: [P5-P6]
+    title: route=local_only = 只许项目方自有机器（hosts.json owner_controlled：笔记本 + gpu33 + gpu36），不是自有机器 / 没指定道挡；成人画面（adult=true）系统和 agent 不自动派，只有项目方在界面触发（owner_triggers.json）才派
+    when: producer 派单、preflight I12、剧本标了本地生成的镜
+    then: hosts.owner_lane(lane)；producer.adult_shot_ids + owner_trigger_ids；不变：K-REV-V01 图片 / 视频不发外部 API、HC-07 全部成年
+    check: tests/test_factory.py::test_l128_owner_controlled_lanes_and_adult_wait
+    evidence:
+      - {src: docs/master/V2_PLAN.md, note: "L-128 项目方 11-02 19:1x：“远程 gpu3 和 gpu6 是我家的服务器，不是外部的，不要做安全检测”"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-F26
+    domain: ops
+    link: [P5-P6]
+    title: 部署 / 重启只解自己设的暂停：部署前服务器已被别人暂停（项目方 owner / 运维 / runs.json）就不 pause 也不 resume；部署自己的暂停在重启成功后自己解
+    when: system_version deploy --urgent / restart_queue 执行重启
+    then: system_version.server_pause_owner 先读服务器 control；restart_queue.pre_paused 同口径
+    check: tests/test_system_version.py::test_a09_deploy_never_clears_someone_elses_pause
+    evidence:
+      - {src: docs/master/V2_READINESS.md, note: "A-09 ③：18:13 / 18:14 sv-14 重启后 RESTART_QUEUE resume 清掉了暂停，今天第二次；之后 producer 仍写 demote"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-F27
+    domain: ops
+    link: [P5-P6]
+    title: 服务器上不许就地改源码（resident_prep 不打补丁）；按主机不同的行为写进代码（OFFLINE_SELF）或 hosts.json（comfy_python 等），部署树始终 = tag
+    when: 常驻重启 / 部署后在服务器上准备运行环境
+    then: night / sync 用 _hosts_here()；remote_score.comfy_py(host) 读 hosts.json；resident_prep 只写 control / 作废租约
+    check: tests/test_factory.py::test_a07_no_in_place_source_patching
+    evidence:
+      - {src: docs/master/V2_READINESS.md, note: "A-07：resident_prep 每次重启在服务器上就地改 night.py / sync.py / remote_score.py（11-02 19:2x gpu36 实测 remote_score.py COMFY_PY 被改成 /root/work/fredw/venv/bin/python、sync.py 带 resident 补丁），部署树和 tag 不一致"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-F28
+    domain: ops
+    link: [P5-P6]
+    title: 剧本导入器没有默认剧本 / 默认旧剧文档；输出默认 = 当前剧导入稿；非 V1 的导入引用第一季文档目录直接拒绝；VQA 配置读坏 = 失败关闭；契约结果只认 take.postflight 一个字段
+    when: tools/import_script.py 导入；ns_agent.vqa.cfg 读配置；unified_frame 写回 / 读取出图后契约
+    then: --script 必填、--image-doc 默认无、old_doc_refs 拒绝；vqa.cfg 读坏返回 _config_error + enforce，Q9 判不过；unified_frame.pf_of 唯一读法、_pf_write 写唯一字段
+    check: tests/test_factory.py::test_a08_importer_no_default_old_docs, tests/test_factory.py::test_a05_vqa_config_broken_fails_closed, tests/test_factory.py::test_a03_single_postflight_field
+    evidence:
+      - {src: docs/master/V2_READINESS.md, note: "A-08 导入默认并入第一季 image 文档、带 run=s2 导入会覆盖第一季；A-05 VQA 配置读坏 = 闸门放行；A-03 take.postflight 与 contract.postflight 两个字段导致重复打分"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-F29
+    domain: ops
+    link: [P5-P6]
+    title: 剧本写作推进是笔记本上的常驻服务（tools/factory/autoflow_resident.py，单实例锁 + 心跳），由 ops/restart_autoflow.ps1 拉起；只推进 runs.json 里 preparing / active / producing 的剧，不写任何暂停字段
+    when: 写手交稿（.done）后推进；会话结束后仍要继续推进
+    then: acquire_lock 单实例；advance_runs 按状态过滤；tick 调 autoflow.pending_done + autoflow run --source daemon；心跳 data/factory/autoflow_resident.json 给 SENTINEL
+    check: tests/test_factory.py::test_autoflow_resident_single_instance_and_status_filter
+    evidence:
+      - {src: docs/master/V2_PLAN.md, note: "11-02 19:4x：HOLLYWOOD 的 autoflow watch --run-dir data/pipeline/runs/series10_v2 挂在会话下面，会话一结束就停"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

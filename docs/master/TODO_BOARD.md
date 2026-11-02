@@ -145,4 +145,64 @@ AUDIT-M 已修、还没发版、随 sv-14 走的 4 个文件：
   - 记录写进 moves.jsonl 和 MANIFEST，可以用 restore 还原；
   - 移到 data/_quarantine_20261102_audit/。
 - **预演**（17:2x dry-run，笔记本）：约 2215 MB，包括 1208 个版本、248 个孤儿文件、7 个 S11 目录；另外还有 9 个目录和 195 条任务记录。
-- **状态**：⏳ 等 sv-14。
+- **状态**：⛔ 暂停（总调度 18:2x）。
+  - 项目方新决定：停止所有渲染，把现有成果整体打包成 V1 视频库，另建 V2 从头重做。
+  - 隔离方案改为“V1 整体冻结归档 + V2 全新目录”，等总调度和项目方对齐后再派新任务。
+  - 18:2x 已核实：三台机器都没有移动任何文件，data/_quarantine_20261102_audit/ 在三处都不存在。
+  - 预览清单保留：data/audit_m/quarantine_preview_laptop_renders_20261102.json。
+  - 工具 tools/qa/audit_quarantine.py 也保留：它的 plan / keepset 可以用来给 V1 归档分好坏。
+
+---
+
+## 第八屏：V1 冻结 + V2 隔离（S7，总调度 18:4x）
+
+### V1 冻结清单
+
+- **状态**：✅ 三台都已写完（18:3x）。原地冻结，不搬、不删、不改 takes.json。
+- **清单位置**：每台的 data/library/v1/MANIFEST.json，由 tools/qa/v1_manifest.py 生成。
+- **清单内容**：每个版本标 good / bad / unknown；每镜写“V1 正本”（canon）。ep02/04/06 的正本按 K-OPS-W27 判定表决定，共 53 处覆盖。
+
+| 机器 | good:current | good:passed | bad | unknown | 正本缺文件 |
+|---|---|---|---|---|---|
+| 笔记本 | 252 | 167 | 2154 | 94 | 10 |
+| gpu33 | 219 | 157 | 1878 | 137 | 52 |
+| gpu36 | 193 | 59 | 1205 | 98 | 8 |
+
+- 服务器两份清单已用笔记本保留集交叉核对。
+- 三台正本对比：
+  - 首帧：52 镜三台一致，42 镜笔记本和 gpu33 一致，1 镜只有笔记本有（ep01-S9，原因见下）。
+  - 尾帧：40 镜三台一致，31 镜和 gpu33 一致，3 镜和 gpu36 一致。
+  - 视频：38 镜和 gpu33 一致，26 镜和 gpu36 一致，1 镜只有笔记本有。
+- **runs.json 状态：✅ 笔记本已改 archived（19:0x）；两台服务器由 FACTORY 按 sha 推送。**
+  - 背景：FACTORY 18:37 确认两台停稳——producer 和 night 都已停；vidgen 只收回在途的单，不写 data/renders 和 takes.json。
+  - 停稳后重跑了 V1 清单，三台的数字和 18:3x 那一版完全一致。
+  - 以下是改 archived 之前的记录：
+  - 现状：runs.json 里 series10_v1 已由 FACTORY 先标成 frozen（18:32）。
+  - 停稳之后 AUDIT-M 重跑 v1_manifest，刷新三份清单，再改成 archived。
+  - 选 archived 的理由：puller FROZEN_STATUS 同时认 frozen / readonly / archived；script_library._DONE_STATES 认 archived、不认 frozen；producer 只跑 status=producing 的剧，两种状态都会被排除。所以 archived 在同步和界面两边都能被识别。
+  - 18:30 实测（停稳前）：两台 producer、vidgen 进程都在；control.json paused=false（18:13 RESTART_QUEUE 的 resume 清掉了暂停，即 A-09 ③）；gpu33 18:26 有一次 demote（ep01-S9 当前首帧被撤）。
+
+### A-16 V2 隔离审计（18:5x 实测复核）
+
+- 前提：骨架已建，primary 已是 series10_v2。复核方法是在笔记本上 import 实际模块，打印路径解析结果。
+- 依据：L-126 完全切割，V2 只带代码和流程规则，内容全部从零。
+
+| # | 位置 | 实测结果 | 怎么修 | 负责 | 状态 |
+|---|---|---|---|---|---|
+| I-1 | pipeline._run_renders / RENDERS / SCRIPT_JSON、runs.import_path、producer.run_env | ✅ 实测：RENDERS = data/renders/series10_v2；takes_path(v1) 仍是 data/renders/ep01/…；import_path(None) = data/import/runs/series10_v2/script_v2.json | 已修（FACTORY K-OPS-F24） | FACTORY | ✅ |
+| I-2 P0 | remote_score.py:40 | ❌ FACE_PROJECT 仍是 "series10_v1"，V2 的 Q1 会拿 V1 的脸打分。face_of(series10_v2, *) 实测返回 None（asset_refs 里没有 V2 的配置，assets_v2/ 还不存在） | 按作业的 project 解析，读 assets_v2/manifest.json | VQAGATE | ⏳ |
+| I-3 | image_jobs.import_json(None) | ❌ run=None 时仍返回 data/import/script_v2.json（V1 稿） | None 改成走 runs.import_path(None)，或直接 raise | PROMPTFIX | ⏳ |
+| I-4 | night.py（VID_REL、DEST、EPS_OUT、voices "series10_v1"、music/series10） | ❌ 写死 series10_v1 5 处、music/series10 2 处 | 按 run 解析；V2 视频目录 data/pipeline/runs/series10_v2/video | DEBUG-RSI | ⏳ |
+| I-5 | vidgen.py:37、570-571 | ❌ RUN 写死 V1；在第二棵代码树 video10_srv 上跑（A-07） | 按 run 解析，从部署树启动 | FACTORY | ⏳ |
+| I-6 | build_jobs.py:37、137、242、373 | ❌ RUN 写死 V1；读 data/renders 下的 takes（V1 树）；PF 的 project 写死 V1 | 按 run 解析，走 takes_path(run) | DEBUG-RSI | ⏳ |
+| I-7 | series10_video/sync.py、deploy.py | ❌ 写死 V1 视频目录和 video10_srv | V2 不再用这两个文件（新版 factory sync 取代），或者按 run 解析 | FACTORY | ⏳ |
+| I-8 P1 | assemble_series.py:139、199、200、243、296 | ⚠ RUN_ID 跟随 primary（V2，对了），但读的剧本仍是 data/import/script_v2.json（V1 稿），**_final 写进 data/renders/epNN/（V1 冻结树）**，music/series10 也写死了 | 剧本走 import_path(run)；输出走 _run_renders(run)；music 按 run 解析 | ASSEMBLY | ⏳ |
+| I-9 | assemble_episode.py:64、78 | ⚠ 默认剧本是 V1 稿（参数可以覆盖） | 默认值按 run 解析 | ASSEMBLY | ⏳ |
+| I-10 | ns_api/frames_index.py:38 | ⚠ 渲染根跟随 P.RENDERS（V2，对了），但人物筛选读 V1 稿 | 剧本走 P.SCRIPT_JSON | NAVIA | ⏳ |
+| I-11 | ns_api/video_index.py | ✅ 只读 P.RENDERS，F24 之后指向 V2；没有写死路径 | — | NAVIA | ✅ |
+| I-12 | ns_api/script_library.py:248、283 | ❌ 固定读 data/renders/epNN（V1 树），V2 剧本卡会显示 V1 的进度 | 按 run 走 _run_renders(run) | NAVIA | ⏳ |
+| I-13 | producer.py:805 outbox、无参 Paths()、runaway_hold 全局、render_tasks DEFAULT_RUN | ❌ 非主剧的日志、暂停、回传会串剧（见 A-09 / A-10） | 按 run 解析 | DEBUG-RSI（producer）/ NAVIA（render_tasks） | ⏳ |
+| I-14 P0（新） | **编译和验收核心读 V1 内容**：compiler._resolver:558（data/import/script_v2.json + data/looks + data/renders/ref_overrides.json）、frame_spec:933、bible:327、looks.DEFAULT_SCRIPT_JSON:28、state_timeline:631、vqa/continuity.py:14-15（上一镜参考取自 V1 的 data/renders）、asset_revs:44、lora_registry:238、prompt_snapshot:29 | ❌ 第 2 步编译和第 8 步连续性参考，会把 V1 的剧本、造型（data/looks 是 V1 内容）、上一镜首帧带进 V2，违反 L-126 | 统一走 P.SCRIPT_JSON / runs.import_path(run) / _run_renders(run)；造型目录按 run 分开（data/looks/<run>/ 或 assets_v2）；V2 读到 V1 路径就 raise | FACTORY（路径收口）+ PROMPTFIX（compiler / looks）+ VQAGATE（continuity） | ⏳ **金样镜开跑前必须修完** |
+| I-15（新） | **界面 / 接口写死 V1 稿约 20 处**：season.py:24、82、133；live.py:517；story_runs.py:767；shot_cast.py:131、158、209；import_sources.py:16；script_inbox.py:33；script_chat.py:118；takes_ui.py:36；sop.py:147；shot_audio.py:39；voice_preview.py:52、167；trash.py:114；ref_switch.py:177；assets.py:397；app.py:1043；owner_queue.py:56；episode_pipeline.py:47、96 | ❌ primary 切到 V2 之后，这些页面仍然显示 V1 的剧本、镜头和进度；导入接口仍会写 V1 稿 | 加一个统一的 script_path(run) / renders(run)，全部替换；arch_scan 新增 hard_import_path 度量，按棘轮清零 | NAVIA（ns_api）+ FACTORY（统一入口）+ DEBUG-RSI（episode_pipeline） | ⏳ |
+
+| I-16（新，HOLLYWOOD 19:4x） | **第二季旧写作包里还留着 advance_cmd**：data/pipeline/runs/series10_s2/writer_tasks/*.json（根因模式 1 双入口；新包已去掉，改为 next 提示，推进只走 /repair 和 .done 守护） | ⏳ 第二季暂停中，先不动 | 第二季恢复时批量把旧包的 advance_cmd 换成 next 提示，并确认 .done 守护覆盖 series10_s2 | HOLLYWOOD | ⏳ |

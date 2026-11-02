@@ -18,6 +18,7 @@
 """
 from __future__ import annotations
 
+from ns_api import run_paths as _RP   # K-OPS-F24：渲染根目录按当前剧（V1 已归档，不在网页显示）
 import hashlib
 import json
 import os
@@ -43,7 +44,7 @@ DEFAULT_EST_S = 180
 
 
 def _fin(n: int) -> Path:
-    return P.DATA / "renders" / f"ep{n:02d}" / "_final"
+    return _RP.renders_for_data(P.DATA) / f"ep{n:02d}" / "_final"
 
 
 def proj_path(n: int) -> Path:
@@ -101,6 +102,8 @@ def _seg_from_shot(sh: dict) -> dict:
            "trim_head_s": float(sh.get("trim_head_s") or 0.0) if kind == "video" else 0.0,
            "trim_tail_s": float(sh.get("trim_tail_s") or 0.0) if kind == "video" else 0.0,
            "trim_by": "auto"}
+    seg["base_trim_head_s"] = seg["trim_head_s"]
+    seg["base_length_s"] = float(sh.get("duration_s") or 0.0) or None
     return seg
 
 
@@ -192,18 +195,32 @@ def refresh_sources(proj: dict, cur: dict[int, dict] | None = None) -> list[str]
     return notes
 
 
+def ensure_base(proj: dict) -> bool:
+    """早期工程没记基准（建工程时每镜的自动裁头 / 长度）→ 从基准时间线补上；对白 / 字幕的位置换算靠它"""
+    if all("base_length_s" in s for s in proj["segments"]):
+        return False
+    tl = _jl(P.ROOT / proj["base_timeline"], {}) if proj.get("base_timeline") else {}
+    by = {int(x["index"]): x for x in (tl or {}).get("shots") or []}
+    for s in proj["segments"]:
+        sh = by.get(int(s["index"]), {})
+        s.setdefault("base_trim_head_s", float(sh.get("trim_head_s") or 0.0) if s.get("kind") == "video" else 0.0)
+        s.setdefault("base_length_s", float(sh.get("duration_s") or 0.0) or None)
+    return True
+
+
 def load_project(n: int, *, refresh: bool = True) -> dict:
     with _lock:
         proj = _jl(proj_path(n))
         created = False
         if not proj or proj.get("schema") != SCHEMA:
             proj, created = init_project(n), True
+        migrated = ensure_base(proj)
         notes = refresh_sources(proj) if refresh else []
         if notes:
             proj["rev"] = int(proj["rev"]) + 1
             proj["updated_at"] = P.now()
             proj["history"] = (proj.get("history") or [])[-49:] + [{"at": P.now(), "what": "；".join(notes), "by": "system"}]
-        if created or notes:
+        if created or notes or migrated:
             _wj(proj_path(n), proj)
         return proj
 
@@ -220,7 +237,41 @@ def cut_edit_of(proj: dict) -> dict:
              if s.get("kind") == "video" and s.get("trim_by") == "owner"}
     b = proj.get("bgm") or {}
     bgm = {k: b.get(k) for k in ("file", "offset_s", "gain_db", "fade_in_s", "fade_out_s")}
-    return {"trims": trims, "bgm": bgm}
+    order = [int(s["index"]) for s in proj["segments"]]
+    return {"trims": trims, "bgm": bgm, **({"order": order} if order != sorted(order) else {})}
+
+
+def subtitles_of(proj: dict) -> list[dict] | None:
+    """项目方改过的字幕：[{shot, text, d0, d1}]（d0/d1 = 相对这一镜在成片里起点的秒数，别的镜头裁切 / 换序后仍跟着本镜走）；
+    没改过 = None（导出时按对白自动出 srt）"""
+    subs = proj.get("subtitles")
+    return subs if isinstance(subs, list) else None
+
+
+def seed_subtitles(proj: dict) -> list[dict]:
+    """第一次改字幕时，从当前对白（按当前裁切 / 顺序平移后的时间）生成可编辑字幕"""
+    base = {int(s["index"]): s for s in proj["segments"]}
+    t, starts = 0.0, {}
+    for sg in proj["segments"]:
+        starts[int(sg["index"])] = t
+        t += segment_length(sg)
+    # 基准时间线里每镜起点（建工程时的顺序和自动裁切）
+    bt, bstarts = 0.0, {}
+    for sg in sorted(proj.get("base_segments") or proj["segments"], key=lambda x: int(x["index"])):
+        bstarts[int(sg["index"])] = bt
+        bt += float(sg.get("base_length_s") or segment_length(sg))
+    out = []
+    for x in proj.get("speech") or []:
+        k = int(x["shot"])
+        if k not in base or x.get("start_s") is None:
+            continue
+        d0 = float(x["start_s"]) - bstarts.get(k, 0.0)
+        d1 = float(x["end_s"]) - bstarts.get(k, 0.0)
+        if x.get("kind") == "dialogue" and base[k].get("kind") == "video":
+            shift = float(base[k]["trim_head_s"]) - float(base[k].get("base_trim_head_s", base[k]["trim_head_s"]))
+            d0, d1 = d0 - shift, d1 - shift
+        out.append({"shot": k, "text": x.get("text") or "", "d0": round(max(0.0, d0), 3), "d1": round(max(d0 + 0.2, d1), 3)})
+    return out
 
 
 def music_choices(n: int) -> list[dict]:
@@ -240,7 +291,9 @@ def _view(n: int, proj: dict) -> dict:
         ln = segment_length(s)
         segs.append(s | {"url": file_url(s.get("file")), "start_s": round(t, 3), "length_s": ln})
         t += ln
+    subs = subtitles_of(proj)
     return proj | {"segments": segs, "duration_s": round(t, 3), "music_choices": music_choices(n),
+                   "subtitles": subs if subs is not None else seed_subtitles(proj), "subtitles_edited": subs is not None,
                    "bgm_url": file_url((proj.get("bgm") or {}).get("file")),
                    "speech": [x | {"urls": [file_url(f) for f in x.get("files") or []]} for x in proj.get("speech") or []],
                    "job": job_view(n)}
@@ -265,10 +318,19 @@ class BgmEdit(BaseModel):
     fade_out_s: float = 0.0
 
 
+class SubEdit(BaseModel):
+    shot: int
+    text: str
+    d0: float
+    d1: float
+
+
 class ProjEdit(BaseModel):
     rev: int
     segments: list[SegEdit] | None = None
     bgm: BgmEdit | None = None
+    order: list[int] | None = None          # 镜头新顺序（镜号排列）
+    subtitles: list[SubEdit] | None = None  # 改过的字幕（整表）
     by: str | None = None
 
 
@@ -288,6 +350,26 @@ def put_project(n: int, body: ProjEdit):
             if (h, t) != (round(seg["trim_head_s"], 3), round(seg["trim_tail_s"], 3)):
                 seg.update(trim_head_s=h, trim_tail_s=t, trim_by="owner", trim_adjusted=False)
                 what.append(f"S{seg['index']} 入 {h:.2f} / 尾裁 {t:.2f}")
+        if body.order is not None:
+            cur = [int(x["index"]) for x in proj["segments"]]
+            new = [int(x) for x in body.order]
+            if sorted(new) != sorted(cur):
+                raise HTTPException(422, "镜头顺序必须是本集全部镜头各出现一次")
+            if new != cur:
+                proj["segments"] = [by_idx[i] for i in new]
+                what.append("镜头顺序 " + " ".join(f"S{i}" for i in new))
+        if body.subtitles is not None:
+            subs = []
+            for x in body.subtitles:
+                if int(x.shot) not in by_idx:
+                    raise HTTPException(422, f"字幕挂在不存在的镜头 S{x.shot} 上")
+                ln = segment_length(by_idx[int(x.shot)])
+                d0 = round(min(max(0.0, x.d0), max(0.0, ln - 0.2)), 3)
+                d1 = round(min(max(d0 + 0.2, x.d1), ln + 3.0), 3)   # 允许跨到下一镜（独白常见），最多 3 s
+                subs.append({"shot": int(x.shot), "text": x.text.strip(), "d0": d0, "d1": d1})
+            if subs != proj.get("subtitles"):
+                proj["subtitles"] = subs
+                what.append(f"字幕 {len(subs)} 条")
         if body.bgm is not None:
             b = body.bgm.model_dump()
             if b.get("file"):

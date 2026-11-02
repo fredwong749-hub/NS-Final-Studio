@@ -12,6 +12,7 @@ GET /api/script-library/{run}/brief              提纲字段（给“复制为�
 """
 from __future__ import annotations
 
+from ns_api import run_paths as _RP   # K-OPS-F24：渲染根目录按当前剧（V1 已归档，不在网页显示）
 import json
 import re
 import time
@@ -245,7 +246,7 @@ def _file_url(rel: str | None) -> str | None:
 
 
 def _shot_first_frame(ep: int, shot: int = 1) -> str | None:
-    d = REPO / "data" / "renders" / f"ep{ep:02d}" / f"S{shot}"
+    d = _RP.renders_root(REPO) / f"ep{ep:02d}" / f"S{shot}"
     t = _rj(d / "takes.json", {}) or {}
     n = (t.get("locked") or {}).get("image")
     if n is None:
@@ -280,7 +281,7 @@ def _finished_cuts(primary: bool) -> int:
 
 def _ep_video_progress(ep: int) -> tuple[float, float]:
     """本集“视频已定稿 / 镜数”（镜 = data/renders/epNN/S* 下有 takes.json 的目录；定稿 = takes.json 的 locked.video 有值）"""
-    d = REPO / "data" / "renders" / f"ep{ep:02d}"
+    d = _RP.renders_root(REPO) / f"ep{ep:02d}"
     total = done = have = 0
     for sd in d.glob("S[0-9]*") if d.is_dir() else []:
         t = _rj(sd / "takes.json")

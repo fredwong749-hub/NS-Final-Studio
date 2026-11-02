@@ -58,7 +58,9 @@
       "h3_funcontrolnet": 107
      }
     }
-   }
+   },
+   "owner_controlled": true,
+   "comfy_python": "/root/claude-kimi-ns-studio-v1/env/comfy/bin/python"
   },
   "gpu36": {
    "ssh": "gpu36",
@@ -110,7 +112,9 @@
      "max_frames": 362,
      "note": "L-100：GPU2 专用看图卡（vqa_router 3 实例），ComfyUI :8190 已停；视频阶段长镜头道再规划"
     }
-   }
+   },
+   "owner_controlled": true,
+   "comfy_python": "/root/work/fredw/venv/bin/python"
   },
   "laptop": {
    "ssh": null,
@@ -127,8 +131,10 @@
      "enabled": false,
      "note": "L-100：笔记本 4080 专用看图卡，不出图"
     }
-   }
+   },
+   "owner_controlled": true
   }
  },
- "_recipe_max_frames": "VIDLAB 11-02 实测（RTX 3090 24 GB）：H3 FunControlNet 158 帧 OOM、107 帧可跑；配方按道读这里（hosts.recipe_max_frames(lane, recipe)），不在配方里写死"
+ "_recipe_max_frames": "VIDLAB 11-02 实测（RTX 3090 24 GB）：H3 FunControlNet 158 帧 OOM、107 帧可跑；配方按道读这里（hosts.recipe_max_frames(lane, recipe)），不在配方里写死",
+ "_owner_controlled_doc": "L-128（项目方 11-02 19:1x：“远程 gpu3 和 gpu6 是我家的服务器，不是外部的”）：owner_controlled=true = 项目方自有机器（笔记本 + gpu33 + gpu36）。route=local_only 的作业只许 owner_controlled 的道；不是 owner_controlled（或没写）的机器一律挡（失败关闭）。不变：K-REV-V01 图片 / 视频不发外部 API；HC-07 全部成年；成人画面作业只由项目方在界面触发，系统 / agent 不自动派"
 }

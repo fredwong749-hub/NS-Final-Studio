@@ -160,6 +160,7 @@ class StatusIn(BaseModel):
     verify: dict | None = None           # 复核 {check, result: pass|fail, evidence}
     regression: str | None = None        # 回归集登记（文件 / 用例 id）
     systemic: bool | None = None         # 是否写进 docs/feedback/SYSTEMIC.md
+    resolution: str | None = None        # 关单方式：不填 = 修复复核；"frozen" = 项目方决定不处理（note 写依据）
 
 
 def _save_screenshot(fid: str, b64: str) -> str | None:
@@ -290,6 +291,12 @@ def set_status(fid: str, body: StatusIn, request: Request):
                 action = "reopen"
             elif to == "closed" and it.get("category") == "test":
                 pass   # 测试单（链路实测）：直接关，不走修复闸门，也不进计数（见 list_items）
+            elif to == "closed" and body.resolution == "frozen" and cur in ("triaged", "fixing", "fixed", "verified"):
+                # 项目方决定不处理（如 L-125 V1 冻结）：不走 fixed / verified，但漏检分析、系统改进、回归登记照样必填，
+                # 还要写明依据（note 里写决定编号）——根因修复必须已经进了规则，不能只是“算了”
+                if not (body.note or "").strip():
+                    raise HTTPException(422, "冻结关单要在 note 写明依据（项目方决定编号）")
+                it["resolution"] = "frozen"
             elif to not in FLOW.get(cur, []):
                 raise HTTPException(409, f"{STATUS_ZH.get(cur, cur)} 不能直接改成 {STATUS_ZH.get(to, to)}；可改：{FLOW.get(cur)}")
             # 每一步的必填项（G1：每个判断落成字段，不靠口头）

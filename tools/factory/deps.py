@@ -27,7 +27,7 @@ for _p in ("services/render_router", "services/agent", "packages/schema", "tools
     if str(ROOT / _p) not in sys.path:
         sys.path.insert(0, str(ROOT / _p))
 
-TRACK_TOP = ("assets/", "data/", "config/", "knowledge/")
+TRACK_TOP = ("assets/", "assets_v2/", "data/", "config/", "knowledge/")
 SKIP_PREFIX = ("data/producer/", "data/_quarantine", "data/_offline_pull", "data/cache/", "data/qa/", "data/factory/")
 
 

@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "apps" / "web" / "src" / "v3"
 TECH = re.compile(r"GEN_CONTRACT|preflight|postflight|契约|I[1-9]\b|Q[1-9]\b|master_reject|registry|producer|prompt_rewrite|ComfyUI|payload", re.I)
 BANNED = re.compile(r"不要|打回|或不要|已标不要|不选")        # L-123：界面只有正向动作，没有“不要 / 打回”
-FILES = ["EditBox.tsx", "Verdict.tsx", "QueueDock.tsx", "GenState.tsx", "pages/FramesPage.tsx", "assets/Verdict.tsx"]
+FILES = ["shotWord.ts", "EditBox.tsx", "Verdict.tsx", "QueueDock.tsx", "GenState.tsx", "pages/FramesPage.tsx", "assets/Verdict.tsx"]
 
 
 def visible_strings(src: str):
@@ -50,3 +50,20 @@ def test_no_reject_wording_in_owner_facing_text():
     for f in FILES:
         for s in visible_strings((WEB / f).read_text(encoding="utf-8")):
             assert not BANNED.search(s), f"{f} 界面文字里有“不要 / 打回”：{s}"
+
+
+def test_assets_pages_say_model_not_lora():
+    """总调度 17:4x：资产页的“身份 LoRA / LoRA（总表）”改成大白话（身份模型 / 模型总表）"""
+    for f in ("assets/AssetCenter.tsx", "assets/AssetInspector.tsx", "assets/center.ts", "assets/P1Panels.tsx"):
+        for s in visible_strings((WEB / f).read_text(encoding="utf-8")):
+            if "search" in s or "${" in s:   # 搜索关键词不是界面文字
+                continue
+            assert "LoRA" not in s, f"{f} 界面文字里还有 LoRA：{s}"
+
+
+import pytest  # noqa: E402
+
+
+def test_status_ts_fully_plain():
+    for s in visible_strings((WEB / "status.ts").read_text(encoding="utf-8")):
+        assert not TECH.search(s) and not BANNED.search(s), s

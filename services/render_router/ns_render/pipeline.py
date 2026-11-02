@@ -42,8 +42,31 @@ ROOT = Path(os.environ.get("NS_PROJECT_ROOT") or Path(__file__).resolve().parent
 DATA = ROOT / "data"
 # 多剧并行（DISTILL §0.1，K-OPS-E15）：一部剧一个 producer 进程；非主剧进程设 NS_RENDERS_DIR / NS_SCRIPT_JSON，
 # 渲染目录 data/renders/<run>/、导入稿 data/import/runs/<run>/script_v2.json，takes.json 跨剧绝不共用。不设 = 主剧原路径
-RENDERS = Path(os.environ["NS_RENDERS_DIR"]) if os.environ.get("NS_RENDERS_DIR") else DATA / "renders"
-SCRIPT_JSON = Path(os.environ["NS_SCRIPT_JSON"]) if os.environ.get("NS_SCRIPT_JSON") else DATA / "import" / "script_v2.json"
+def _legacy_and_primary() -> tuple[str | None, str | None]:
+    """K-OPS-F24：统一调 tools/autopilot/runs.py 的 legacy_run / primary_run（不在这里另写解析）。
+    没有登记表（沙箱 / 测试目录）→ (None, None) = 旧行为；登记表在却缺 legacy_unprefixed_run → runs.legacy_run 抛错（失败关闭）"""
+    if not (ROOT / "config" / "pipeline" / "runs.json").is_file():
+        return None, None
+    import importlib.util as _u
+    sp = _u.spec_from_file_location("runs_for_pipeline", ROOT / "tools" / "autopilot" / "runs.py")
+    m = _u.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m.legacy_run(ROOT), m.primary_run(ROOT)
+
+
+def _default_renders() -> Path:
+    leg, prim = _legacy_and_primary()
+    return DATA / "renders" if prim == leg else DATA / "renders" / prim
+
+
+def _default_script() -> Path:
+    leg, prim = _legacy_and_primary()
+    return DATA / "import" / "script_v2.json" if prim == leg else DATA / "import" / "runs" / prim / "script_v2.json"
+
+
+# K-OPS-F24：不设环境变量时 = 当前 primary 的目录；只有 legacy_unprefixed_run 那部剧是不带前缀的旧路径
+RENDERS = Path(os.environ["NS_RENDERS_DIR"]) if os.environ.get("NS_RENDERS_DIR") else _default_renders()
+SCRIPT_JSON = Path(os.environ["NS_SCRIPT_JSON"]) if os.environ.get("NS_SCRIPT_JSON") else _default_script()
 
 IMAGE_SIZE = (1088, 1920)
 VIDEO_SIZE = (768, 1344)   # SOP S4 P-B3 锁定（短边 768、面积 ≤768×1344、32 的倍数）；旧值 576×1024
@@ -302,8 +325,8 @@ def _run_renders(run: str | None) -> Path:
     if str(ROOT / "tools" / "autopilot") not in _sys.path:
         _sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
     import runs as RUNS                          # 登记表读不到就 raise（strict，失败关闭：不能猜错 takes 落到哪部剧）
-    primary = RUNS.primary_run(ROOT, strict=True)
-    return DATA / "renders" if run == primary else DATA / "renders" / run
+    RUNS.primary_run(ROOT, strict=True)
+    return DATA / "renders" if run == RUNS.legacy_run(ROOT) else DATA / "renders" / run   # K-OPS-F24
 
 
 def takes_path(shot_id: str, run: str | None = None) -> Path:

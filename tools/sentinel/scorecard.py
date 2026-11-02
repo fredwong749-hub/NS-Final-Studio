@@ -92,6 +92,9 @@ def existing_scores() -> dict:
     for k in ("image", "video", "script", "system"):
         if out.get(k) and isinstance(out[k].get("parts"), dict):
             out[k]["parts"] = {pk: (pv.get("score") if isinstance(pv, dict) else pv) for pk, pv in out[k]["parts"].items()}
+        if out.get(k) and not out[k].get("lowest") and out[k]["parts"]:
+            num = {pk: pv for pk, pv in out[k]["parts"].items() if isinstance(pv, (int, float))}
+            out[k]["lowest"] = min(num, key=num.get) if num else None
     return out
 
 
@@ -194,6 +197,25 @@ def gpu_score(c: dict) -> dict:
 
 
 # ------------------------------------------------------------------ 界面实测（后台子进程）
+# 顶栏口径 v2（总调度 11-02 18:0x 批：NAVIA 按项目方要求把换集下拉移到页内范围条，顶栏不再放集号）：
+#   顶栏 7 个一级入口（总览 / 剧本 / 资产 / 分镜 / 出图 / 视频 / 成片）都在、可点、互不重叠、页面无横向滚动；
+#   出图 / 视频 / 成片 / 分镜四页的范围条（.v3-scope）里有换集下拉（“第 N 集 ▾”）
+TOPBAR_JS = r'''
+const vis = (e) => { if (!e) return false; const r = e.getBoundingClientRect(); const c = getComputedStyle(e); return r.width > 0 && r.height > 0 && c.visibility !== "hidden" && c.display !== "none"; };
+const want = __LABELS__;
+const steps = [...document.querySelectorAll(".v3-top .v3-step")].filter(vis);
+const txt = (b) => (b.innerText || "").replace(/\s+/g, "");
+const missing = want.filter((w) => !steps.some((b) => txt(b).includes(w) && !b.disabled));
+const R = steps.map((e) => e.getBoundingClientRect());
+let overlap = false;
+for (let i = 0; i < R.length; i++) { if (R[i].left < -0.5 || R[i].right > innerWidth + 0.5) overlap = true; for (let j = i + 1; j < R.length; j++) { const a = R[i], b = R[j]; if (a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1) overlap = true; } }
+const hscroll = document.documentElement.scrollWidth > innerWidth + 1;
+const scope = document.querySelector(".v3-scope");
+const picker = !!scope && [...scope.querySelectorAll("button, span")].some((b) => vis(b) && /第\s*\d+\s*集/.test(b.textContent || ""));
+return {missing, overlap, hscroll, picker};
+'''
+
+
 JARGON_JS = r'''
 const T = (document.getElementById("root")?.innerText || "");
 const W = __WORDS__;
@@ -207,15 +229,34 @@ def ui_measure() -> dict:
     """顶栏：apps/web/e2e/uirsi/topbar_check.mjs（7 页 × 3 宽度）；每页 DOM：空白页 / 技术词（policy 词表）+ S9 同一套整洁规则（ui_rules.js）"""
     c = cfg()
     res = {"t": time.time(), "at": J.iso(time.time())}
-    try:
-        r = subprocess.run(["node", str(ROOT / "apps/web/e2e/uirsi/topbar_check.mjs")], cwd=str(ROOT), capture_output=True, timeout=1500,
-                           creationflags=NOWIN)
-        lines = r.stdout.decode("utf-8", "replace").splitlines()
-        ok = sum(1 for ln in lines if ln.startswith("✓"))
-        badl = [ln for ln in lines if ln.startswith("✗")]
-        res["topbar"] = {"ok": ok, "total": ok + len(badl), "bad": badl[:10]}
-    except (OSError, subprocess.TimeoutExpired) as e:  # arch-ok: 记 topbar 未测
-        res["topbar"] = {"error": repr(e)[:100]}
+    tex = "JSON.stringify((()=>{" + TOPBAR_JS.replace("__LABELS__", json.dumps(c["ui_topbar_labels"], ensure_ascii=False)) + "})())"
+    ok, total, badl = 0, 0, []
+    for page in c["ui_pages"]:
+        for size in c["ui_topbar_sizes"]:
+            total += 1
+            try:
+                out = subprocess.run(["node", str(ROOT / "apps/web/e2e/uirsi/probe.mjs"), page, tex, "12000", size], cwd=str(ROOT),
+                                     capture_output=True, timeout=180, creationflags=NOWIN).stdout.decode("utf-8", "replace").strip().splitlines()
+                d = json.loads(json.loads(out[-1]))
+                why = (["缺入口 " + "、".join(d["missing"])] if d.get("missing") else []) + (["重叠"] if d.get("overlap") else []) + (["横向滚动"] if d.get("hscroll") else [])
+            except (OSError, subprocess.TimeoutExpired, ValueError, IndexError, KeyError) as e:  # arch-ok: 探针失败记“不过”（不当正常）
+                why = [f"探针失败 {type(e).__name__}"]
+            ok += 0 if why else 1
+            if why:
+                badl.append(f"{page} {size}：{'、'.join(why)}")
+    for page in c["ui_picker_pages"]:
+        total += 1
+        try:
+            out = subprocess.run(["node", str(ROOT / "apps/web/e2e/uirsi/probe.mjs"), page, tex, "12000", "1440x900"], cwd=str(ROOT),
+                                 capture_output=True, timeout=180, creationflags=NOWIN).stdout.decode("utf-8", "replace").strip().splitlines()
+            d = json.loads(json.loads(out[-1]))
+            good = bool(d.get("picker"))
+        except (OSError, subprocess.TimeoutExpired, ValueError, IndexError) as e:  # arch-ok: 探针失败记“不过”
+            good, d = False, {"error": type(e).__name__}
+        ok += 1 if good else 0
+        if not good:
+            badl.append(f"{page} 范围条里没有换集下拉{'（' + d['error'] + '）' if d.get('error') else ''}")
+    res["topbar"] = {"ok": ok, "total": total, "bad": badl[:20], "rule": "v2（总调度 18:0x 批）"}
     rules = (ROOT / "tools/sentinel/ui_rules.js").read_text(encoding="utf-8")
     rules = "\n".join(ln for ln in rules.splitlines() if not ln.startswith("//"))
     from tools.autopilot import policy

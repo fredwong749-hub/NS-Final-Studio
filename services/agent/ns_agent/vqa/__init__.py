@@ -19,7 +19,13 @@ CFG = ROOT / "config" / "vqa.json"
 
 
 def cfg() -> dict:
+    """A-05（V2_READINESS，总调度 19:2x：金样前必须修）：配置读不出 / 读坏 → 失败关闭——闸门照样执行、没有看图结果一律不算通过，
+    并带 _config_error 让 Q9 直接判不过（以前返回 {} = enforce 关 = 闸门整个放行）"""
     try:
-        return json.loads(CFG.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
+        d = json.loads(CFG.read_text(encoding="utf-8"))
+        if not isinstance(d, dict):
+            raise ValueError("config/vqa.json 不是 JSON 对象")
+        return d
+    except (OSError, ValueError) as e:
+        return {"_config_error": f"{type(e).__name__}: {e}"[:200], "gate": {"enforce": True, "untested_blocks": True, "video_requires_q9": True},
+                "judge": {"enforce": True}, "checks": {}}

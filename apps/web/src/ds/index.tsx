@@ -104,7 +104,7 @@ export function Skel({ w = "100%", h = 16, r }: { w?: number | string; h?: numbe
 /** 读不到：一句人话 + 重试 + 折叠的技术细节（不直接给用户看“502 Bad Gateway”，D4） */
 export function LoadError({ what, err, retry, hint }: { what: string; err?: string | null; retry?: () => void; hint?: ReactNode }) {
   const notReady = !!err && /404|没有这个接口|Not Found/i.test(err);
-  const down = !!err && /502|503|504|Failed to fetch|NetworkError|ECONNREFUSED/i.test(err);
+  const down = !!err && /502|503|504|Failed to fetch|NetworkError|ECONNREFUSED|网络不通/i.test(err);
   const human = notReady ? `${what}暂时读不到：后台还没有这项功能（等 API 重启后自动出现）` : down ? `${what}暂时读不到：后台服务没响应` : `${what}没读到`;
   return (
     <div className="ds-loaderr" role="alert">

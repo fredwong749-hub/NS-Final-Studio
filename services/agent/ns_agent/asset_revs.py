@@ -193,7 +193,8 @@ def voice_rev(root: Path, slug: str) -> str | None:
 
 def registry_rev(root: Path, slug: str) -> str | None:
     """人物表登记指纹：按 char_id（或中文名）找 character_registry 一行，只取影响生成的三格"""
-    d = _json(root / SCRIPT_JSON)
+    from . import run_paths as RP
+    d = _json(RP.script_json(root))                           # I-14：按剧取导入稿
     if not isinstance(d, dict):
         return None
     name = char_name(slug)

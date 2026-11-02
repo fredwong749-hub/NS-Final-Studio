@@ -68,7 +68,8 @@ def test_overview_and_canvas_use_backend_tags():
     sp = (ROOT / "apps/web/src/v3/pages/SeasonPage.tsx").read_text(encoding="utf-8")
     assert "<MainTag st={x.status} size=\"xs\" />" in sp and "<TagLegend" in sp and "<TagCounts" in sp and "blk-stages" in sp
     rr = (ROOT / "apps/web/src/v3/ReviewRow.tsx").read_text(encoding="utf-8")
-    assert "<MainTag st={rowCands?.[s.id]?.status} />" in rr
+    # FACTORY 替 UIRSI / UISCRIPT 改（总调度 19:5x）：画布行改成状态行 + 悬停提示，标签仍取后端给的 rowCands[...].status（原意：不自己算标签）
+    assert "mainTip(rowCands?.[s.id]?.status)" in rr and "StatusTags.helpers" in rr
     css = (ROOT / "apps/web/src/v3/infra.css").read_text(encoding="utf-8")
     assert "@media (max-width: 1440px)" in css and ".v3-step.cur:not(.on) small { display: none; }" in css
 

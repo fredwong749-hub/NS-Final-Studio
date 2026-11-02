@@ -34,10 +34,7 @@
 
 1. 把产物写到 `output.path`（目录 `writer_out/`），**不要**直接写或覆盖 `P2_epNN_outline.json` / `P4_epNN.md` / `P4_epNN.final.md` 这些正式文件——autoflow 校验通过后自己落正式文件（与 API 模式同名同格式）。
 2. 写完再建一个空的标记文件 `<output.path>.done`（例：`writer_out/P4_ep06.md.done`）。没有 `.done` 的产物 autoflow 不读（防止读到写了一半的文件）。
-3. 然后跑一次推进命令（或 SendMessage 告诉 HOLLYWOOD 由它跑）：
-   ```
-   .venv/Scripts/python.exe tools/script_rsi/autoflow.py run --run-dir data/pipeline/runs/series10_s2 --episode <N> --backend claude_agent --import dry
-   ```
+3. 交稿后只建 `.done`，等系统推进，不要自己跑命令（总调度 11-02，根因模式 1“双入口”）。推进只有两个入口：网页的 /api/script-autoflow/{run}/repair，和 .done 守护（`autoflow.py watch`，看到 .done 自动推进）；每次推进都记进 `<run>/autoflow.log`，标来源 cli / web / daemon。写作包里不再带 advance_cmd。
    autoflow 读产物 → 校验 / 代码判定 → 过了就落正式文件并写**下一个**任务包；没过就写同一 step 的返修包（`attempt` +1，`user` 里带上没过的原因）。
 4. 状态看 `data/pipeline/runs/series10_s2/autoflow_epNN.json`：`awaiting` 字段写着现在在等哪个 step、谁（writer / reviewer）。页面 #/script-create?new=1 的 AutoflowPanel 同步显示。
 

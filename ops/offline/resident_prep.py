@@ -96,4 +96,6 @@ def control():
 
 
 if __name__ == "__main__":
-    print(SELF, patch_night(), "|", patch_sync_and_score(), "|", control())
+    # A-07（V2_READINESS，总调度 19:2x）：不再就地改服务器上的源码（night / sync / remote_score 原生认 OFFLINE_SELF / hosts.json），
+    # 部署树 = tag，verify_sha 不会再被补丁弄脏。patch_* 函数保留不调用，供回看
+    print(SELF, "源码不改（A-07）", "|", control())

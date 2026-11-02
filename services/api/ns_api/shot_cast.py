@@ -128,7 +128,8 @@ def import_project() -> str | None:
     用于没带 run 参数的“出图线新图”接口默认取这部剧自己的运行目录，而不是“最近有图的任一运行”"""
     from pathlib import Path
     import json
-    f = Path(__file__).resolve().parents[3] / "data" / "import" / "script_v2.json"
+    from ns_api import run_paths as _RP
+    f = _RP.script_path()
     try:
         st = f.stat()
         key = (st.st_mtime_ns, st.st_size)
@@ -155,7 +156,8 @@ def episode_cast_ids() -> dict[int, list[str]] | None:
     from pathlib import Path
     if not import_project():
         return None
-    f = Path(__file__).resolve().parents[3] / "data" / "import" / "script_v2.json"
+    from ns_api import run_paths as _RP
+    f = _RP.script_path()
     try:
         st = f.stat()
         key = (st.st_mtime_ns, st.st_size)
@@ -206,7 +208,8 @@ def impact_count(cid: str, kind: str, look: str | None = None) -> int | None:
     import json
     from pathlib import Path
     proj = import_project()
-    f = Path(__file__).resolve().parents[3] / "data" / "import" / "script_v2.json"
+    from ns_api import run_paths as _RP
+    f = _RP.script_path()
     if not proj:
         return None
     try:

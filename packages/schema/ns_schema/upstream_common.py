@@ -14,7 +14,7 @@ from pydantic import BaseModel, ValidationError
 CJK_RE = re.compile(r"[㐀-鿿豈-﫿　-〿＀-￯]")
 NEG_EN_RE = re.compile(r"\b(no|not|never|without|don't|doesn't|avoid|nothing|none|nobody|neither|nor)\b|n't\b", re.I)
 SCENE_ID_RE = re.compile(r"^sk_[a-z0-9_]+$")
-CHAR_ID_RE = re.compile(r"^(lin_wan|gu_chen|chen_yu|ch_[a-z0-9_]+)$")   # CLEANUP 11-01（总调度 R16）：旧 60 集 alex/ryan/kai/leo 撤下；阿岚 = ch_a_lan
+CHAR_ID_RE = re.compile(r"^(lin_wan|gu_chen|chen_yu|lead_[a-z0-9_]+|ch_[a-z0-9_]+)$")   # CLEANUP 11-01：阿岚 = ch_a_lan；V2（L-126）女主固定 lead_f，资产包清单 assets_v2/manifest.json 的角色键
 PUNCT_RE = re.compile(r"[\s，。！？、；：,.!?;:…—\-“”\"'‘’（）()《》【】]")
 SPEECH_CPS = 3.5          # 字 / 秒：config/script_chat_rules.md §2“对白（不计标点）≤ 3.5×N”
 EPISODE_S = (60, 120)     # 每集秒数：script_chat_rules.md §2“各镜 N 之和 60–120 秒”（项目方 11-01 21:4x：“改成 60–120 秒”，L-092 / D-SCR-08）

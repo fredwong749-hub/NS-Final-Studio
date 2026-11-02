@@ -628,7 +628,8 @@ def build(root: str | Path | None = None, previous: dict | None = None) -> tuple
     from .ref_overrides import effective_scene, plate_path
     root = project_root(root)
     b = load_bible(root)
-    script_path = root / "data" / "import" / "script_v2.json"
+    from . import run_paths as RP
+    script_path = RP.script_json(root)                        # I-14
     script = ScriptImport.model_validate_json(script_path.read_text(encoding="utf-8"))
     res = _resolver(root)
     if res is None:
@@ -654,7 +655,8 @@ def build(root: str | Path | None = None, previous: dict | None = None) -> tuple
 
     # 集确认
     episodes: dict[str, dict] = {}
-    lock_file = root / "data" / "looks" / "assets_lock.json"
+    from . import run_paths as RP
+    lock_file = RP.looks_dir(root) / "assets_lock.json"       # I-14
     try:
         assets_locked = json.loads(lock_file.read_text(encoding="utf-8")).get("version")
     except (OSError, ValueError):
@@ -949,13 +951,14 @@ def _plate_files(root: Path) -> list[Path]:
 
 def input_files(root: Path) -> list[Path]:
     """时间线的全部输入文件（stat 键用于缓存 / 重建后复核）"""
-    return [root / "config" / "visual_bible.toml", root / "data" / "import" / "script_v2.json",
-            *sorted((root / "data" / "looks").glob("*.json")), root / "comfy" / "models.lock",
+    from . import run_paths as RP                         # I-14
+    return [root / "config" / "visual_bible.toml", RP.script_json(root),
+            *sorted(RP.looks_dir(root).glob("*.json")), root / "comfy" / "models.lock",
             root / LORA_REGISTRIES[1], root / "config" / "shot_ownership.json",
             root / "config" / "face_reference.json",
             *sorted((root / "assets" / "scenes").glob("*/manifest.json")), *_plate_files(root),
             *sorted((root / "assets" / "characters").glob("*/plates/master.png")), root / S1_GATE,
-            root / "data" / "renders" / "ref_overrides.json"]   # W5：画布参考覆盖索引
+            RP.renders_dir(root) / "ref_overrides.json"]   # W5：画布参考覆盖索引
 
 
 LOCK_STALE_S = 600.0

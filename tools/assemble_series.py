@@ -93,15 +93,25 @@ def host_of(ep: int) -> str:
 
 
 def refresh_state(host: str) -> dict:
+    """拉服务器 state；通道抖动时 cat 可能 rc=0 但内容为空 / 截断（11-02 ep03 / ep05 被误拼成 0 条视频的根因）→ 解析不过就抛，
+    不覆盖本机上一份好的"""
     p = VID / f"state_{host}.json"
-    rsh(host, f"cat {srv(host)}/{RUN_REL}/video/state_{host}.json", p)
-    return read_json(p, {}).get("shots", {})
+    raw = rsh(host, f"cat {srv(host)}/{RUN_REL}/video/state_{host}.json")
+    try:
+        shots = json.loads(raw.decode("utf-8"))["shots"]
+    except (ValueError, KeyError) as e:
+        raise RuntimeError(f"state_{host}.json 拉回来不完整（{len(raw)} 字节）") from e
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_bytes(raw)
+    os.replace(tmp, p)
+    return shots
 
 
 def local_state(host: str) -> dict:
     return read_json(VID / f"state_{host}.json", {}).get("shots", {})
 
 
+RECIPE_ZH = {"i2va_pika_flex": "皮卡出片", "i2va_pdd2": "旧版出片"}   # 来源行用大白话；配方名 / seed 收进 origin_detail
 RANK = {"done": 4, "best_effort": 3, "rendering": 2, "pending": 1}
 
 
@@ -126,7 +136,7 @@ def merged_state(refresh: bool = True) -> dict:
 
 def plan(ep: int, state: dict, *, best_effort_video: bool) -> list[dict]:
     """每镜入选来源（纯读 state，不拉文件）：kind = video | best_effort | placeholder，file = 视频或首帧相对路径"""
-    script = json.loads((ROOT / "data/import/script_v2.json").read_text(encoding="utf-8"))
+    script = json.loads(RUNS.script_path(RUN_ID, ROOT).read_text(encoding="utf-8"))   # OVERSIGHT-F P1-4：按剧取导入稿（K-OPS-F24）
     ep_shots = next(e for e in script["episodes"] if int(e["number"]) == ep)["shots"]
     name = f"ep{ep:02d}"
     out = []
@@ -138,8 +148,11 @@ def plan(ep: int, state: dict, *, best_effort_video: bool) -> list[dict]:
         r = next((x for x in s.get("renders", []) if x.get("variant") == chosen and x.get("file")), None)
         row = {"shot": key, "index": idx, "state": status, "chosen": chosen, "host": s.get("_host")}
         if r and (status == "done" or (best_effort_video and status == "best_effort")):
+            n = [x.get("variant") for x in s.get("renders", []) if x.get("file")].index(chosen) + 1
             row.update(kind="video" if status == "done" else "best_effort", file=r["file"],
-                       verdict=(r.get("score") or {}).get("verdict"), recipe=r.get("recipe"), seed=r.get("seed"))
+                       verdict=(r.get("score") or {}).get("verdict"), recipe=r.get("recipe"), seed=r.get("seed"),
+                       version_no=n, origin=f"{RECIPE_ZH.get(r.get('recipe'), '出片')} · 第 {n} 版",
+                       origin_detail=f"{r.get('recipe')} · 变体 {chosen} · seed {r.get('seed')}")
         else:
             ff = next((x.get("first_frame") for x in reversed(s.get("renders", [])) if x.get("first_frame")), None)
             if not ff:   # state 里没有首帧 → 本机 images/frames 最新一张
@@ -154,45 +167,20 @@ def signature(rows: list[dict]) -> str:
     return hashlib.sha1(json.dumps([(r["shot"], r["kind"], r.get("file")) for r in rows]).encode()).hexdigest()[:16]
 
 
-def build(ep: int, variant: str = "v1", *, preview: bool = False, pull_on: bool = True,
-          dialogue_source: str = "h3", bgm: bool = True) -> dict:
-    name = f"ep{ep:02d}"
-    state = merged_state(pull_on)
-    rows = plan(ep, state, best_effort_video=preview)
-    sources = {}
-    for r in rows:
-        f = r.get("file")
-        if f and pull_on and not (ROOT / f).is_file():
-            try:
-                pull(r.get("host") or host_of(ep), f)
-            except RuntimeError:
-                pass
-        p = ROOT / f if f else None
-        if p and p.is_file():
-            if r["kind"] == "placeholder":
-                sources[r["index"]] = {"kind": "still", "origin": f"占位首帧 {r['shot']}", "path": p, "placeholder": True}
-            else:
-                sources[r["index"]] = {"kind": "video", "origin": f"{r['shot']} {r['chosen']} {r.get('recipe')} seed {r.get('seed')}",
-                                       "path": p, "path_4k": None}
-        else:
-            r.update(kind="placeholder", reason=(r.get("reason") or "文件缺失") + "；无首帧 → 黑场", file=None)
-            sources[r["index"]] = {"kind": "black", "origin": None, "path": None, "missing": True,
-                                   "missing_reason": r["reason"]}
-    sig = signature(rows)
-
+def compose(ep: int, sources: dict, work: Path, variant: str, *, preview: bool = False, cut_edit: dict | None = None,
+            dialogue_source: str = "h3", bgm: bool = True, cache_dir: Path | None = None) -> tuple[dict, int]:
+    """配音 + 配乐 + 转场 + 响度的唯一合成入口（assemble_series 预览 / 成片版和 CUTEDIT 的 cut_export 共用，11-02 对齐）。
+    sources = {镜号: {kind: video|still|black, path, origin, ...}}；cut_edit = cut_project 归一后的覆写（None = 不变）；
+    preview=True：不叫远程克隆 TTS（会在服务器上排队等空闲卡），没缓存的克隆音色句子用本机 Kokoro 临时音顶，
+    只写 data/cache/tts_preview 临时缓存，不污染正式缓存。返回 (timeline, 临时音句数)"""
     sys.path.insert(0, str(ROOT / "services/post"))
     from ns_post.assemble import Settings, assemble_episode, load_episode  # noqa: E402
     from ns_post.tts import KokoroBackend, RoutedTts, SenseVoiceAsr, Voice, load_voice_config  # noqa: E402
 
-    out_dir = ROOT / "data/renders" / name / "_final"
-    work = out_dir / "_asm"
-    work.mkdir(parents=True, exist_ok=True)
     cfg = load_voice_config()
     kokoro = KokoroBackend(cfg, num_threads=4)
-    tts, cache_dir, n_cached = kokoro, ROOT / "data/cache/tts", 0
+    tts, cache_dir, n_cached = kokoro, Path(cache_dir or ROOT / "data/cache/tts"), 0
     if preview:
-        # 预览不叫远程克隆 TTS（它在服务器上排队等空闲卡，会卡住，也不该占卡）：已缓存的句子照用；
-        # 没缓存的克隆音色句子用本机 Kokoro 临时音顶（只写 tts_preview 临时缓存，不污染正式缓存），manifest 里记条数
         main = ROOT / "data/cache/tts"
         cache_dir = ROOT / "data/cache/tts_preview"
         shutil.rmtree(cache_dir, ignore_errors=True)   # 自己的临时缓存目录，每次重建
@@ -210,11 +198,55 @@ def build(ep: int, variant: str = "v1", *, preview: bool = False, pull_on: bool 
     settings = Settings(threads=8, bgm=bgm, deliver_4k="off", dialogue_source=dialogue_source,
                         music_dir=str(ROOT / "data/music/series10"))
     episode = load_episode(ROOT / "data/import/script_v2.json", ep)
+    tl = assemble_episode(episode, work, tts=tts, cache_dir=cache_dir, asr=SenseVoiceAsr(cfg, num_threads=4),
+                          settings=settings, voices_cfg=cfg, allow_laptop_video=False,
+                          keep_work=bool(os.environ.get("ASM_KEEP_WORK")), sources=sources, variant=variant,
+                          cut_edit=cut_edit)
+    return tl, (len(list(cache_dir.glob("*.wav"))) - n_cached if preview else 0)
+
+
+def write_srt(tl: dict, path: Path) -> None:
+    cues = sorted((s for s in tl["speech"] if s.get("start_s") is not None), key=lambda s: s["start_s"])
+    nl = "\n"
+    blocks = [f"{i}{nl}{srt_time(s['start_s'])} --> {srt_time(s['end_s'])}{nl}{s['text']}{nl}" for i, s in enumerate(cues, 1)]
+    path.write_text(nl.join(blocks), encoding="utf-8")
+
+
+def build(ep: int, variant: str = "v1", *, preview: bool = False, pull_on: bool = True,
+          dialogue_source: str = "h3", bgm: bool = True, cut_edit: dict | None = None,
+          sources: dict | None = None) -> dict:
+    name = f"ep{ep:02d}"
+    state = merged_state(pull_on)
+    rows = plan(ep, state, best_effort_video=preview)
+    own_sources = sources is None
+    sources = {} if own_sources else sources
+    for r in rows:
+        f = r.get("file")
+        if f and pull_on and not (ROOT / f).is_file():
+            try:
+                pull(r.get("host") or host_of(ep), f)
+            except RuntimeError:
+                pass
+        p = ROOT / f if f else None
+        if p and p.is_file():
+            if r["kind"] == "placeholder":
+                sources[r["index"]] = {"kind": "still", "origin": "占位 · 首帧缓推", "path": p, "placeholder": True}
+            else:
+                sources[r["index"]] = {"kind": "video", "origin": r["origin"],
+                                       "path": p, "path_4k": None}
+        else:
+            r.update(kind="placeholder", reason=(r.get("reason") or "文件缺失") + "；无首帧 → 黑场", file=None)
+            sources[r["index"]] = {"kind": "black", "origin": None, "path": None, "missing": True,
+                                   "missing_reason": r["reason"]}
+    sig = signature(rows)
+
+    out_dir = RUNS.renders_dir(RUN_ID, ROOT) / name / "_final"     # I-8：V2 成片写 V2 目录，不写进 V1 冻结树
+    work = out_dir / "_asm"
+    work.mkdir(parents=True, exist_ok=True)
     stem_var = "preview" if preview else variant
     t0 = time.time()
-    tl = assemble_episode(episode, work, tts=tts, cache_dir=cache_dir, asr=SenseVoiceAsr(cfg, num_threads=4),
-                          settings=settings, voices_cfg=cfg, allow_laptop_video=False, keep_work=bool(os.environ.get("ASM_KEEP_WORK")),
-                          sources=sources, variant=stem_var)
+    tl, n_fb = compose(ep, sources, work, stem_var, preview=preview, cut_edit=cut_edit,
+                       dialogue_source=dialogue_source, bgm=bgm)
     produced = ROOT / next(iter(tl["deliveries"].values()))["file"]
     base = "preview_latest" if preview else f"{name}_{variant}"
     final = out_dir / f"{base}.mp4"
@@ -224,15 +256,12 @@ def build(ep: int, variant: str = "v1", *, preview: bool = False, pull_on: bool 
     if not preview:
         shutil.copyfile(next(iter(work.glob(f"*{variant}.timeline.json"))), out_dir / f"{name}_{variant}.timeline.json")
 
-    cues = sorted((s for s in tl["speech"] if s.get("start_s") is not None), key=lambda s: s["start_s"])
-    srt = "\n".join(f"{i}\n{srt_time(s['start_s'])} --> {srt_time(s['end_s'])}\n{s['text']}\n" for i, s in enumerate(cues, 1))
-    (out_dir / f"{base}.srt").write_text(srt, encoding="utf-8")
+    write_srt(tl, out_dir / f"{base}.srt")
 
     by_idx = {int(s["index"]): s for s in tl["shots"]}
     for r in rows:
         t = by_idx.get(r["index"], {})
         r.update(start_s=t.get("start_s"), duration_s=t.get("duration_s"), audio=t.get("audio"))
-    n_fb = len(list(cache_dir.glob("*.wav"))) - n_cached if preview else 0
     n_ph = sum(1 for r in rows if r["kind"] == "placeholder")
     n_be = sum(1 for r in rows if r["kind"] == "best_effort")
     manifest = {"episode": name, "variant": stem_var, "preview": preview, "built_at": time.time(),
@@ -264,7 +293,7 @@ def sweep(now: float | None = None, eps=range(1, N_EPS + 1), refresh: bool = Tru
     for e in eps:
         rows = plan(e, merged, best_effort_video=True)
         sig = signature(rows)
-        cur = read_json(ROOT / f"data/renders/ep{e:02d}/_final/preview_latest_manifest.json", {}) or {}
+        cur = read_json(RUNS.renders_dir(RUN_ID, ROOT) / f"ep{e:02d}/_final/preview_latest_manifest.json", {}) or {}
         info = st["eps"].setdefault(str(e), {})
         info["sig_now"] = sig
         info["stale"] = cur.get("signature") != sig

@@ -310,7 +310,7 @@ CHARACTER_COLUMNS = ("角色", "角色id", "中文外貌句", "EN外貌短语", 
 CHARACTER_FIELDS = ("name", "char_id", "zh", "en", "voice")
 CHARACTER_FIELD_LABEL = dict(zip(CHARACTER_FIELDS, CHARACTER_COLUMNS))
 CHARACTER_TABLE_LABEL_RE = re.compile(r"^\*\*(全剧人物表|本集人物表)\*\*\s*[：:]?\s*$")
-CHARACTER_ID_RE = re.compile(r"^ch_[a-z0-9_]+$")
+CHARACTER_ID_RE = re.compile(r"^(ch|lead)_[a-z0-9_]+$")   # V2（L-126）：项目方指定资产的女主 id = lead_f（CONSENT 总调度 fredw-2b 19:2x）
 _TABLE_SEP_RE = re.compile(r"^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$")
 _PIPE_SPLIT_RE = re.compile(r"(?<!\\)\|")
 

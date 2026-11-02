@@ -113,7 +113,7 @@ export const RUN_LABEL: Record<string, [string, "neutral" | "accent" | "ok" | "w
   error: ["出错", "bad"],
   interrupted: ["中断", "neutral"],
   paused: ["已暂停", "neutral"],
-  cli: ["命令行", "neutral"],
+  cli: ["写手在写", "neutral"],
   reused: ["写完了", "ok"],
 };
 export const STAGE_LABEL: Record<string, [string, "neutral" | "accent" | "ok" | "warn" | "bad" | "busy" | "info" | "stale"]> = {

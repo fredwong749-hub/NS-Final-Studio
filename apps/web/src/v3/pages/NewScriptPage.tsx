@@ -13,7 +13,8 @@ import "./story.css";
 import { LiveProgress } from "../../ds/StageProgress";
 import { useLiveEvent } from "../live";
 import { ProducerPanel } from "../ProducerPanel";
-import { AutoflowPanel } from "./AutoflowPanel";
+import { AutoflowPanel, FLOW_EVENT } from "./AutoflowPanel";
+import { P1Extras, canShowP1, p1InReview, p1Round, useAutoflow } from "./P1Review";
 
 const runIdOf = () => new URLSearchParams(location.hash.split("?")[1] ?? "").get("run");
 const setRunInHash = (id: string | null) => {
@@ -44,7 +45,7 @@ function downstream(ep: number | null, sm: EpSum): { label: string; href: string
 
 export default function NewScriptPage({ onGoImport }: { onGoImport: () => void }) {
   const [runs, setRuns] = useState<Run[] | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
+  const [, setBusy] = useState<string | null>(null);
   const [listErr, setListErr] = useState<string | null>(null);
   const [sel, setSel] = useState<string | null>(runIdOf);
   const [run, setRun] = useState<Run | null>(null);
@@ -162,7 +163,7 @@ export default function NewScriptPage({ onGoImport }: { onGoImport: () => void }
       </aside>
       <main className="ns-main">
         {mode === "new" ? (
-          <BriefForm busy={busy} onStarted={(r) => (void loadList(), setRun(r), open(r.id))} />
+          <BriefForm onStarted={() => void loadList()} />
         ) : runErr ? (
           <LoadError what="这次写作" err={runErr} retry={() => sel && loadRun(sel)} />
         ) : !run && listErr && !sel ? (
@@ -194,7 +195,7 @@ function RunRow({ r, on, onClick, onDeleted }: { r: Run; on: boolean; onClick: (
     )}
     <button className={`ns-run${on ? " on" : ""}`} onClick={onClick} title={r.outline_head}>
       <span className="ns-run-t">
-        <b>{r.title || "未命名剧本"}</b>
+        <b>{r.title || "新剧（未定名）"}</b>
         <span className="ds-muted"> · {r.series_eps?.length ? `${r.series_eps.length} 集` : r.episodes ? (r.episodes.from === r.episodes.to ? `第 ${r.episodes.from} 集` : `第 ${r.episodes.from}–${r.episodes.to} 集`) : r.episode ? `第 ${r.episode} 集` : ""}</span>
       </span>
       <Tag tone={tone} dot size="xs">
@@ -207,29 +208,37 @@ function RunRow({ r, on, onClick, onDeleted }: { r: Run; on: boolean; onClick: (
 }
 
 // ------------------------------------------------------------------ 提纲表单（P0 Brief）
-function BriefForm({ busy, onStarted }: { busy: string | null; onStarted: (r: Run) => void }) {
+function BriefForm({ onStarted }: { onStarted: () => void }) {
   const { episodes } = useStudio();
   const [title, setTitle] = useState("");
   const [outline, setOutline] = useState("");
   const [from, setFrom] = useState(1);
   const [to, setTo] = useState(1);
-  const [ep, setEp] = useState(1);
   const [lines, setLines] = useState<Record<string, string>>({});
   const [secMin, setSecMin] = useState(50);
   const [secMax, setSecMax] = useState(75);
   const [shots, setShots] = useState<number | "">("");
-  const [upto, setUpto] = useState<"P1" | "P2" | "P3" | "P4">("P4");
-  const [budget, setBudget] = useState(3);
+  const [target, setTarget] = useState<string>("__new"); // 写进哪部剧的提纲：新一部 / 已有的（V2-WALK W-01：提纲只写进写作流程，不再单独起写作）
+  const [targets, setTargets] = useState<{ id: string; title: string }[]>([]);
+  const [continueOld, setContinueOld] = useState(false); // 续写已有剧才带旧剧人物表；新剧默认完全切割（OVERSIGHT-F P1-5）
+  const [writerFree, setWriterFree] = useState<boolean | null>(null);
   const [err, setErr] = useState<{ msg: string; issues: Issue[] } | null>(null);
   const [sending, setSending] = useState(false);
-  const [model, setModel] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    fetch("/api/llm/purposes")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { id: string; provider?: string; model?: string }[] | null) => {
-        const p = Array.isArray(d) ? d.find((x) => x.id === "script_write") : null;
-        if (p) setModel(`${p.provider ?? ""} · ${p.model ?? ""}`);
+    // 能选的剧：还没开始写的（有提纲但写作流程还没起）；顺带看写作后端，提交前显示花费
+    fetch("/api/story-runs?limit=60")
+      .then((r) => (r.ok ? r.json() : { runs: [] }))
+      .then(async (r: { runs: { id: string; title?: string }[] }) => {
+        const out: { id: string; title: string }[] = [];
+        let free: boolean | null = null;
+        for (const it of r.runs) {
+          const f = await fetch(`/api/script-autoflow/${encodeURIComponent(it.id)}`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
+          if (f && free === null && f.writer_backend) free = f.writer_backend === "claude_agent";
+          if (f && f.verdict === "not_started") out.push({ id: it.id, title: it.title || "新剧（未定名）" });
+        }
+        setTargets(out);
+        setWriterFree(free);
       })
       .catch(() => undefined);
   }, []);
@@ -245,7 +254,6 @@ function BriefForm({ busy, onStarted }: { busy: string | null; onStarted: (r: Ru
         setOutline(b.outline);
         setFrom(b.episodes.from);
         setTo(b.episodes.to);
-        setEp(b.episodes.from);
         setLines(b.episode_lines ?? {});
         if (b.seconds_per_episode?.length === 2) (setSecMin(b.seconds_per_episode[0]), setSecMax(b.seconds_per_episode[1]));
         setShots(b.shots_per_ep ?? "");
@@ -254,37 +262,40 @@ function BriefForm({ busy, onStarted }: { busy: string | null; onStarted: (r: Ru
   }, []);
   const lo = Math.min(from, to);
   const hi = Math.max(from, to);
-  useEffect(() => {
-    if (ep < lo || ep > hi) setEp(lo);
-  }, [lo, hi, ep]);
   const epNums = Array.from({ length: Math.min(30, hi - lo + 1) }, (_, i) => lo + i);
   const nProd = episodes?.length ?? 0;
-  const why = busy
-    ? `已有一个剧本在写（${busy}），写完后再开新的`
-    : !outline.trim()
-      ? "先填故事提纲"
-      : hi - lo >= 100
-        ? "一次最多 100 集"
-        : secMin > secMax
-          ? "每集秒数下限大于上限"
-          : null;
+  const why = !outline.trim()
+    ? "先填故事提纲"
+    : hi - lo >= 100
+      ? "一次最多 100 集"
+      : secMin > secMax
+        ? "每集秒数下限大于上限"
+        : null;
 
+  // V2-WALK W-01：提纲写进所选剧的 Brief（POST /api/script-autoflow/{run}/brief），写作只走写作流程（/start 推进，到故事线先停下等你看）
   async function start() {
     if (why) return;
     setSending(true);
     setErr(null);
+    const runId = target === "__new" ? `v2_${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}` : target;
+    const call = async (path: string, body: unknown) => {
+      const r = await fetch(`/api/script-autoflow/${encodeURIComponent(runId)}/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : `没成功（${r.status}）`);
+      return j;
+    };
     try {
       const el = Object.fromEntries(Object.entries(lines).filter(([k, v]) => v.trim() && Number(k) >= lo && Number(k) <= hi));
-      const r = await storyApi.start({
-        brief: { title: title.trim(), outline, episodes: { from: lo, to: hi }, episode_lines: el, seconds_per_episode: [secMin, secMax], shots_per_ep: shots === "" ? null : shots },
-        episode: ep,
-        upto,
-        budget_usd: budget,
+      await call("brief", {
+        brief: { schema: "nsfs.brief/1", title: title.trim(), outline, episodes: { from: lo, to: hi }, episode_lines: el, seconds_per_episode: [secMin, secMax], shots_per_ep: shots === "" ? null : shots, registry_from: [], notes: "", source: "新建剧本页" },
+        clean_cut: !continueOld,
       });
-      onStarted(r);
+      await call("start", { episode: lo });
+      window.dispatchEvent(new CustomEvent(FLOW_EVENT, { detail: runId }));
+      window.scrollTo?.({ top: 0 });
+      onStarted();
     } catch (e) {
-      const se = e as StoryError;
-      setErr({ msg: se.message, issues: se.issues ?? [] });
+      setErr({ msg: (e as Error).message, issues: [] });
     } finally {
       setSending(false);
     }
@@ -294,9 +305,9 @@ function BriefForm({ busy, onStarted }: { busy: string | null; onStarted: (r: Ru
     <div className="ns-form">
       <header className="ns-h">
         <h1>新建剧本</h1>
-        <p className="ds-muted">给一份故事提纲，写作模型自动写出故事线 → 单集大纲 → 剧本 → 剧本分镜；每段都会出现在这里给你看、改，最后由你确认导入。</p>
+        <p className="ds-muted">给一份故事提纲，写手依次写出故事线 → 造型表 → 各集大纲 · 剧本 · 分镜；故事线写好后先停下等你看，最后由你确认导入。</p>
       </header>
-      {/* UIRSI r43（总调度 02:5x）：全流程自动（HOLLYWOOD script_autoflow），可切换剧目（多剧并行，新剧本是新的 run） */}
+      {/* V2-WALK W-01：写作流程是唯一的写作入口（script_autoflow）；下面的提纲表单只写提纲 */}
       <AutoflowPanel />
       <ChainMap />
       <section className="ns-card">
@@ -313,16 +324,20 @@ function BriefForm({ busy, onStarted }: { busy: string | null; onStarted: (r: Ru
             </span>
           </label>
           <label className="ns-f">
-            <span>这次先写到分镜的集</span>
-            <select value={ep} onChange={(e) => setEp(Number(e.target.value))}>
-              {epNums.map((n) => (
-                <option key={n} value={n}>
-                  第 {n} 集
+            <span>写进哪部剧</span>
+            <select value={target} onChange={(e) => setTarget(e.target.value)}>
+              <option value="__new">新建一部剧</option>
+              {targets.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.title}
                 </option>
               ))}
             </select>
           </label>
         </div>
+        <label className="ns-chk" title="默认是全新的一部剧，不带旧剧的人物和场景；勾上才接着旧剧写">
+          <input type="checkbox" checked={continueOld} onChange={(e) => setContinueOld(e.target.checked)} /> 续写已有剧（带上旧剧的人物表；不勾 = 全新的一部剧）
+        </label>
         <label className="ns-f">
           <span className="ns-f-h">
             故事提纲 <small className="ds-muted">原文原样交给写作模型，系统不改写</small>
@@ -368,25 +383,6 @@ function BriefForm({ busy, onStarted }: { busy: string | null; onStarted: (r: Ru
             <span>每集镜头数</span>
             <input type="number" min={1} placeholder="按规则" value={shots} onChange={(e) => setShots(e.target.value === "" ? "" : Number(e.target.value))} />
           </label>
-          <label className="ns-f">
-            <span>预算上限</span>
-            <span className="ns-inl">
-              $ <input type="number" min={0.5} max={20} step={0.5} value={budget} onChange={(e) => setBudget(Number(e.target.value) || 3)} />
-            </span>
-          </label>
-          <div className="ns-f">
-            <span>写到哪一步</span>
-            <Seg
-              value={upto}
-              onChange={setUpto}
-              options={[
-                ["P1", "故事线"],
-                ["P2", "大纲"],
-                ["P3", "剧本"],
-                ["P4", "分镜"],
-              ]}
-            />
-          </div>
         </div>
         {err && (
           <div className="ns-err" role="alert">
@@ -396,10 +392,10 @@ function BriefForm({ busy, onStarted }: { busy: string | null; onStarted: (r: Ru
         )}
         <footer className="ns-go">
           <Button variant="primary" disabled={!!why || sending} why={why ?? "正在提交"} onClick={() => void start()}>
-            {sending ? "正在开始…" : "开始自动写作"}
+            {sending ? "正在提交…" : "开始写作"}
           </Button>
-          <span className="ds-small ds-muted" title={`写作模型 ${model ?? "默认"} · 每段不过自动带错误重写最多 2 轮 · 上一份实跑约 $0.5`}>
-            写完的每一段都会出现在这里给你看、改；导入前不会动现有剧本{nProd ? `（现有 ${nProd} 集）` : ""}
+          <span className="ds-small ds-muted">
+            {writerFree === false ? "按写作模型计费" : "花费 $0.00 · 写手直接写，不调外部接口"} · 写好故事线会先停下等你看；导入前不会动现有剧本{nProd ? `（现有 ${nProd} 集）` : ""}
           </span>
         </footer>
       </section>
@@ -408,7 +404,7 @@ function BriefForm({ busy, onStarted }: { busy: string | null; onStarted: (r: Ru
 }
 
 /** P0 → P12 一条线：上游这页做，下游通到现有页面 */
-function ChainMap({ stages, onPick, pick, ep, imported }: { stages?: Stage[]; onPick?: (n: string) => void; pick?: string; ep?: number | null; imported?: boolean }) {
+function ChainMap({ stages, onPick, pick, ep, imported, overrides }: { stages?: Stage[]; onPick?: (n: string) => void; pick?: string; ep?: number | null; imported?: boolean; overrides?: Record<string, string> }) {
   const { episodes } = useStudio();
   const sm = imported && ep ? episodes?.find((e) => e.number === ep)?.summary : undefined;
   const down = downstream(ep ?? null, sm);
@@ -416,7 +412,9 @@ function ChainMap({ stages, onPick, pick, ep, imported }: { stages?: Stage[]; on
   return (
     <nav className="ns-chain" aria-label="从提纲到成片">
       {nodes.map((s) => {
-        const [lab, tone] = STAGE_LABEL[s.status] ?? [s.status, "neutral"];
+        const [lab0, tone0] = STAGE_LABEL[s.status] ?? [s.status, "neutral"];
+        const lab = overrides?.[s.node] ?? lab0;
+        const tone = overrides?.[s.node] ? "neutral" : tone0;
         const meta = s.status === "running" ? `第 ${(s.rounds_done ?? 0) + 1} 轮` : "";
         return (
           <button key={s.node} className={`ns-node st-${s.status}${pick === s.node ? " on" : ""}`} onClick={() => onPick?.(s.node)} disabled={!onPick} aria-current={pick === s.node ? "step" : undefined}>
@@ -469,7 +467,10 @@ function RunView({ run, reload, onGoImport, onPickEp }: { run: Run; reload: () =
   }, [run.id]);
   const [act, setAct] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ tone: "ok" | "bad" | "warn"; text: ReactNode } | null>(null);
-  const [lab, tone] = RUN_LABEL[run.status] ?? [run.status, "neutral"];
+  const [lab0, tone0] = RUN_LABEL[run.status] ?? [run.status, "neutral"];
+  const afHead = useAutoflow(run.id);
+  const lab = p1InReview(afHead.d) ? "评审中" : lab0;
+  const tone = p1InReview(afHead.d) ? "neutral" : tone0;
   const p4 = run.stages.find((s) => s.node === "P4");
   const p4ok = p4?.status === "ok";
   const live = ACTIVE.has(run.status);
@@ -477,6 +478,12 @@ function RunView({ run, reload, onGoImport, onPickEp }: { run: Run; reload: () =
   // UIRSI r21：画布里的正式剧本就是这一季（集数和每集标题都对得上）→ 显示“已是正式剧本”，不再给“送去导入”
   const { episodes: prodEps } = useStudio();
   const [p1Titles, setP1Titles] = useState<string[] | null>(null);
+  const [p1Title, setP1Title] = useState<string>("");
+  useEffect(() => {
+    // 页头剧名读 P1 定的剧名（没有就用提纲里的）
+    const base = `/files/pipeline/runs/${encodeURIComponent(run.id)}`;
+    void fetch(`${base}/P1_storyline.json?t=${Date.now()}`).then((r) => (r.ok ? r.json() : null)).then((j) => (j?.title ? setP1Title(j.title) : null)).catch(() => undefined);
+  }, [run.id]);
   const [p1ByEp, setP1ByEp] = useState<Record<number, string>>({});
   useEffect(() => {
     storyApi.artifact(run.id, "P1").then(
@@ -532,7 +539,7 @@ function RunView({ run, reload, onGoImport, onPickEp }: { run: Run; reload: () =
     <div className="ns-run-view">
       <header className="ns-rh">
         <div className="ns-rh-t">
-          <h1>{run.title || "未命名剧本"}</h1>
+          <h1>{p1Title || run.title || "新剧（未定名）"}</h1>
           <Tag tone={tone} dot>
             {lab}
             {live && run.current ? ` · ${NODE_SHORT[run.current.split("-")[1]] ?? run.current}` : ""}
@@ -646,9 +653,11 @@ function RunView({ run, reload, onGoImport, onPickEp }: { run: Run; reload: () =
 }
 
 function ProcessView({ run, pick, setPick, stage, live, act, ro, reload, doAct }: { run: Run; pick: string; setPick: (n: string) => void; stage: Stage; live: boolean; act: string | null; ro: boolean; reload: () => void; doAct: (name: string, f: () => Promise<unknown>, ok: ReactNode) => Promise<void> }) {
+  const afv = useAutoflow(run.id);
   return (
     <>
       <ChainMap
+        overrides={p1InReview(afv.d) ? { P1: "评审中" } : undefined}
         stages={run.stages}
         ep={run.episode}
         imported={!!run.sent_to_import}
@@ -698,6 +707,12 @@ function StagePanel({ run, s, busy, roWhy, reload, onRetry }: { run: Run; s: Sta
   }
   const [lab, tone] = STAGE_LABEL[s.status] ?? [s.status, "neutral"];
   const canEdit = s.node !== "P0" && has && !busy;
+  // V2-WALK W-22：故事线走写作流程时，返修入口只留闸门的“用这版 / 修改”（下面的 P1Extras），旧的三个按钮不再出现
+  const af = useAutoflow(run.id);
+  const gated = s.node === "P1" && !!af.d;
+  // 评审没过门槛的故事线项目方一律看不到（只给看通过的）：评审 / 返修中隐藏“看内容 / 原文 / 校验问题”
+  const hideP1 = gated && !(canShowP1(af.d) || af.d?.owner_gates?.gates?.P1?.status === "approved");
+  const round = af.d ? p1Round(af.d) : 1;
 
   return (
     <section className="ns-stage">
@@ -705,8 +720,8 @@ function StagePanel({ run, s, busy, roWhy, reload, onRetry }: { run: Run; s: Sta
         <h2>
           <span className="ns-node-n">{s.node}</span> {s.label}
         </h2>
-        <Tag tone={tone} dot size="xs">
-          {lab}
+        <Tag tone={hideP1 ? "neutral" : tone} dot size="xs">
+          {hideP1 ? "评审中" : lab}
         </Tag>
         <span className="ds-small ds-muted" title={`${s.rounds ? `写了 ${s.rounds} 轮` : ""}${s.usd ? ` · 花费 ${money(s.usd)}` : ""}`}>
           {s.blocking ? `要改 ${s.blocking} 处` : ""}
@@ -714,7 +729,7 @@ function StagePanel({ run, s, busy, roWhy, reload, onRetry }: { run: Run; s: Sta
           {s.edited_by === "owner" ? " · 你改过原文" : ""}
         </span>
         <span className="ds-grow" />
-        {edit == null && (
+        {edit == null && !hideP1 && (
           <Seg
             value={view}
             onChange={setView}
@@ -725,27 +740,30 @@ function StagePanel({ run, s, busy, roWhy, reload, onRetry }: { run: Run; s: Sta
             ]}
           />
         )}
-        {s.link && edit == null && has && (
+        {s.link && edit == null && has && !gated && (
           <EditButton type="script" id={`run:${run.id}/${s.node}${run.series && run.episode ? `@${run.episode}` : ""}`} size="sm" label="让模型改…" onChanged={reload} />
         )}
-        {s.link && edit == null && (
+        {s.link && edit == null && !gated && (
           <Button size="sm" disabled={!canEdit} why={roWhy ?? (busy ? "正在写作，写完后再改" : "这一段还没有产物")} onClick={() => (setEdit(art?.text ?? ""), setSaveRes(null))}>
             改原文
           </Button>
         )}
-        {s.link && edit == null && s.status !== "pending" && (
+        {s.link && edit == null && !gated && s.status !== "pending" && (
           <Button size="sm" variant={s.status === "needs_writer" || s.status === "budget_stop" ? "primary" : "ghost"} disabled={busy} why={roWhy ?? "正在写作"} onClick={() => onRetry(s.link!)} title="让写作模型重写这一段（带上一次的校验问题），下游跟着重写">
             返修这一段
           </Button>
         )}
       </header>
+      {gated && <P1Extras runId={run.id} hasStory={has && s.status !== "pending"} />}
       {saveRes && (
         <div className={`ns-msg ${saveRes.ok ? "ok" : "warn"}`}>
           {saveRes.text}
           {!saveRes.ok && saveRes.issues.length > 0 && <IssueList issues={saveRes.issues} />}
         </div>
       )}
-      {edit != null ? (
+      {hideP1 ? (
+        <Empty icon="…" title={`故事线在评审 / 返修中（第 ${round} 轮）`} sub="过了门槛就在这里给你看" />
+      ) : edit != null ? (
         <div className="ns-edit">
           <p className="ds-small ds-muted">原样保存你写的文字，系统只重新校验格式。保存后这一段下游的旧产物会挪到 superseded/（不删）。</p>
           <textarea value={edit} onChange={(e) => setEdit(e.target.value)} spellCheck={false} />

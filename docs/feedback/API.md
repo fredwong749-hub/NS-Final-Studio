@@ -66,3 +66,8 @@
 - overview（`?ui=film`）和单集页顶栏加“反馈模式”开关；打开后点任意帧（首帧 / 尾帧 / 视频）或任意元素 → 弹文字框，自动带上 §1 的上下文（视频带 currentTime，元素带 data-testid / 文字），一键提交，不要求项目方填别的。
 - 反馈列表抽屉：按状态分组，每条显示圆点 + 原话 + 镜号 + 当前处理说明；fixed / verified / closed 条目上有“没修好”按钮（打回）。
 - 风格：电影胶片 A；状态色只用 §3 的三种圆点。
+
+## 6. 两种特殊关单（FEEDBACK 11-02 补）
+
+- **测试单**：`{"status":"closed","category":"test","note":"测试单"}`，任何状态一步关；默认不进列表 / 计数，`?tests=1` 才显示。
+- **冻结关单**（项目方决定不处理，如 L-125 V1 冻结）：`{"status":"closed","resolution":"frozen","note":"<决定编号与理由>"}`，只能从 triaged / fixing / fixed / verified 关；不走 fixed / verified，但漏检分析、系统改进、回归登记照样必填。记录带 `resolution: "frozen"`，前端可在已关单旁标“冻结”。

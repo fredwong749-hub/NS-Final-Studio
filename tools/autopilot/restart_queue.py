@@ -106,6 +106,16 @@ def drain(host: str, rs, sleep=time.sleep, clock=time.time) -> dict:
         sleep(DRAIN_POLL_S)
 
 
+def pre_paused(host: str, rs) -> str | None:
+    """重启前服务器上本机主剧是否已被别人暂停：暂停人 / None；读不到 = 当作已暂停（保守）。
+    OVERSIGHT-F P1-3：统一调 tools/factory/pause_state.py（按剧取 control 路径 + runs.json status），不再写死读 V1 的 control"""
+    import importlib.util as _u
+    sp = _u.spec_from_file_location("factory_pause_state_rq", Path(__file__).resolve().parents[2] / "tools/factory/pause_state.py")
+    m = _u.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m.remote_pause_owner(rs, host, timeout=60, tries=2)
+
+
 def process(host: str, rs=None, now: float | None = None) -> dict | None:
     """resident_sync 每拍调用：有待办就按规则合并执行一次；返回执行记录或 None（没执行）"""
     if rs is None:
@@ -127,12 +137,18 @@ def process(host: str, rs=None, now: float | None = None) -> dict | None:
            "by": sorted({r.get("by") or "?" for r in todo}), "reasons": [r.get("reason") for r in todo][:20],
            "urgent_jump": bool(urgent and not gap_ok), "since_last_restart_min": round((now - last) / 60, 1) if last else None}
     try:
-        rs.ssh(host, f"cd {rs.R} && {rs.PY[host]} tools/autopilot/producer.py pause --by RESTART_QUEUE --note '重启前排空'",
-               timeout=120, tries=3)
+        # A-09（V2_READINESS）：重启前已经被别人暂停（运维 / 部署 / 人工）→ 不再 pause、重启后也不 resume（以前无条件 resume，
+        # 把别人的全局暂停清掉了）；只解自己设的暂停
+        pre = pre_paused(host, rs)
+        rec["pre_paused"] = pre
+        if not pre:
+            rs.ssh(host, f"cd {rs.R} && {rs.PY[host]} tools/autopilot/producer.py pause --by RESTART_QUEUE --note '重启前排空'",
+                   timeout=120, tries=3)
         rec.update(drain(host, rs))
         rec["restart_out"] = str(rs.restart(host)).strip()[-300:]
-        rs.ssh(host, f"cd {rs.R} && {rs.PY[host]} tools/autopilot/producer.py resume --by RESTART_QUEUE --note '重启完成'",
-               timeout=120, tries=3)
+        if not pre:
+            rs.ssh(host, f"cd {rs.R} && {rs.PY[host]} tools/autopilot/producer.py resume --by RESTART_QUEUE --note '重启完成'",
+                   timeout=120, tries=3)
         rec["ok"] = True
     except Exception as e:  # noqa: BLE001
         rec["ok"] = False

@@ -22,9 +22,26 @@ def _prompt(j):
     return next(x["inputs"]["prompt"] for x in j["graph"].values() if x.get("class_type") == "TextEncodeQwenImage21")
 
 
-def test_series_jobs_prompt_equals_compiler_output():
+V1 = "series10_v1"
+
+
+@pytest.fixture
+def v1_jobs(tmp_path, monkeypatch):
+    """PROMPTFIX 11-02 19:2x（L-125 V1 冻结）：显式钉到 V1，不读当前 primary；用现行编译器把 V1 作业表重编到临时目录
+    （write 只落 tmp_path，绝不重建 / 改写冻结的 V1 数据），再拿这份去比——不变量“作业提示词 = 系统编译器输出”照查，
+    不再和 V1 冻结时那份旧文件逐字比（编译器演进后旧文件天然对不上）"""
+    import image_jobs as IJ
+    monkeypatch.setenv("NS_PRIMARY_RUN", V1)
+    monkeypatch.setenv("NS_RUN", V1)
+    run = tmp_path / V1
+    (run / "assets").mkdir(parents=True)
+    IJ.rebuild_first_frame_jobs(RUN, project=V1, write=True, out=run / "assets" / "first_frame_jobs.json", run=V1)
+    return run
+
+
+def test_series_jobs_prompt_equals_compiler_output(v1_jobs):
     import audit_framing as A
-    r = A.audit(RUN)
+    r = A.audit(v1_jobs)
     assert r["jobs"] >= 1 and r["ok"] == r["jobs"], r["rows"][:5]
 
 
@@ -53,9 +70,9 @@ def test_jobs_graph_loads_compiler_selected_loras():
         assert got == want, j["shot"]
 
 
-def test_submit_gate_rejects_hand_written_prompt():
+def test_submit_gate_rejects_hand_written_prompt(v1_jobs):
     import submit_jobs as SJ
-    d = json.loads(JOBS.read_text(encoding="utf-8"))
+    d = json.loads((v1_jobs / "assets" / "first_frame_jobs.json").read_text(encoding="utf-8"))
     j = copy.deepcopy(d["jobs"][0])
     assert SJ.compile_mismatch(RUN, [j]) == []
     for n in j["graph"].values():

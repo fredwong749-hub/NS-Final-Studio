@@ -215,7 +215,12 @@ def test_recipe_plan_body_for_api():
     assert rp == {"plan_hash": p["plan_hash"], "recipe_id": "static_emotion"}
     ref = _plan(recipe_id="two_person_ref2va")
     rp2 = SB.recipe_plan_body(ref, with_graph=True)
-    assert rp2["graph"] == ref["graph"] and rp2["images"] == {"@ref:林晚": "data/assets/identity_refs/lin_wan/lin_wan_face_ref2va.png"}   # V2：林晚用项目方挑定身份图的脸部裁切
+    from ns_agent import asset_refs as _AR    # 总调度 19:5x：期望从 face_of 取（K-OPS-E29 身份脸唯一入口），不写死任何脸
+    import importlib.util as _u
+    _sp = _u.spec_from_file_location("runs_for_iter_test", ROOT / "tools" / "autopilot" / "runs.py")
+    _RN = _u.module_from_spec(_sp)
+    _sp.loader.exec_module(_RN)
+    assert rp2["graph"] == ref["graph"] and rp2["images"] == {"@ref:林晚": _AR.face_of(_RN.primary_run(), "lin_wan")}
     assert ref["lane"]["only"] == ["0", "1", "3"]                # Ref2VA 只在 gpu33
     off = SB.ApiSubmitter("http://127.0.0.1:1", graph_passthrough=False)
     assert off.submit(ref, 0)["state"] == "needs_api"           # 接入点没开：不提交

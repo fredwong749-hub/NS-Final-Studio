@@ -11,17 +11,34 @@ from pathlib import Path
 
 from . import ROOT, cfg
 
-SCRIPT = ROOT / "data" / "import" / "script_v2.json"
-RENDERS = ROOT / "data" / "renders"
+# AUDIT-M I-14（总调度 11-02 18:5x）：剧本 / 出图目录按当前剧取（tools/autopilot/runs.py script_path / renders_dir），
+# 不再写死 V1 的 data/import/script_v2.json、data/renders——V2 当上主剧时不会读到 V1 的镜头和首帧
+
+
+def _runs():
+    import importlib.util as _u
+    sp = _u.spec_from_file_location("runs_for_continuity", ROOT / "tools/autopilot/runs.py")
+    m = _u.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m
+
+
+def script_file() -> Path:
+    return _runs().script_path()
+
+
+def renders_dir() -> Path:
+    return _runs().renders_dir()
 LABEL = "上一镜首帧（同一场，同一人的服装 / 外套 / 发色发型、场景、光线应与它一致；原文写了换装换场除外）"
 _cache: dict = {}
 
 
 def _script() -> dict:
-    m = SCRIPT.stat().st_mtime if SCRIPT.exists() else 0
+    sf = script_file()
+    m = (str(sf), sf.stat().st_mtime if sf.exists() else 0)
     if _cache.get("m") != m:
         try:
-            _cache.update(m=m, s=json.loads(SCRIPT.read_text(encoding="utf-8")))
+            _cache.update(m=m, s=json.loads(sf.read_text(encoding="utf-8")))
         except (OSError, ValueError):
             _cache.update(m=m, s={"episodes": []})
     return _cache["s"]
@@ -47,7 +64,7 @@ def prev_same_scene(sid: str) -> str | None:
 
 def current_first(sid: str) -> str | None:
     """镜的当前首帧（takes.json active.image，且过契约、不是驳回版）→ 绝对路径"""
-    tj = RENDERS / sid[:4] / sid.split("-")[1] / "takes.json"
+    tj = renders_dir() / sid[:4] / sid.split("-")[1] / "takes.json"
     try:
         d = json.loads(tj.read_text(encoding="utf-8"))
     except (OSError, ValueError):

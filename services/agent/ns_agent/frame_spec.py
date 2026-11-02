@@ -930,7 +930,8 @@ def _main(argv: list[str]) -> int:
         return 2
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
     root = project_root(argv[1] if len(argv) > 1 else None)
-    script = ScriptImport.model_validate_json((Path(root) / "data" / "import" / "script_v2.json").read_text(encoding="utf-8"))
+    from . import run_paths as RP
+    script = ScriptImport.model_validate_json(RP.script_json(root).read_text(encoding="utf-8"))   # I-14
     tl = load_timeline_index(root)
     b = load_bible(root)
     specs, prev_male = [], None

@@ -300,7 +300,7 @@ export const STATUS_TABLE: Record<StatusKey, { dot: Dot; text: string; label: st
   failed_first: { dot: "red", text: "首帧没出成，需重出", label: "重出首帧", act: "regen-first" },
   failed_last: { dot: "red", text: "尾帧没出成，需重出", label: "重出尾帧", act: "regen-last" },
   failed_video: { dot: "red", text: "视频没出成，需重出", label: "重出视频", act: "video" },
-  rejected: { dot: "red", text: "已打回，去精修改", label: "去精修", act: "edit" },
+  rejected: { dot: "red", text: "待重做，去精修改", label: "去精修", act: "edit" },
   no_first: { dot: "gray", text: "还没有首帧，出首帧", label: "出首帧", act: "regen-first" },
   stale_first: { dot: "yellow", text: staleLong("首帧"), label: "重出首帧", act: "regen-first" },
   broken_chain: { dot: "red", text: "链不完整：没有首帧，下游作废", label: "出首帧", act: "regen-first", title: "先出首帧并定稿，再由定稿首帧重出尾帧和视频" },
@@ -319,7 +319,7 @@ export const STATUS_TABLE: Record<StatusKey, { dot: Dot; text: string; label: st
   review_video_watched: { dot: "yellow", text: "视频看完了：用这版，或修改", label: "通过 ✓", act: "pass", title: "通过这版视频（想改用“修改”）" },
   done: { dot: "green", text: "已定，无需操作", label: "看视频", act: "watch" },
   // UIRSI2 L-116：机签通过（灰点 + 灰字，无主按钮——系统自动往下做；手动“用这张 / 不要”保留但不提示）
-  machine_first: { dot: "gray", text: "机签通过", label: "", act: null, title: "首帧机签通过并已设为当前（契约全过 + 本地看图 Q9 过）；系统自动出尾帧。要换：点首帧看候选，或 ⋯ → 进精修" },
+  machine_first: { dot: "gray", text: "机签通过", label: "", act: null, title: "首帧已自动检查通过并设为当前；系统自动出尾帧。要换：点首帧看候选，或 ⋯ → 进精修" },
   machine_last: { dot: "gray", text: "机签通过", label: "", act: null, title: "尾帧机签通过并已设为当前；系统自动出视频。要换：⋯ → 进精修" },
 };
 

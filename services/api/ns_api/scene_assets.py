@@ -22,6 +22,7 @@ S2 闸门（state_timeline.plate_info）照旧：只有 by=owner 且带项目方
 """
 from __future__ import annotations
 
+from ns_api import run_paths as _RP   # K-OPS-F24：按当前剧取路径（V1 已归档，不在网页显示）
 import hashlib
 import json
 import re
@@ -110,6 +111,9 @@ def usage(store: LookStore | None = None) -> dict[str, list[str]]:
 
 
 def scene_ids(store: LookStore | None = None) -> list[str]:
+    mids = _RP.manifest_scene_ids()               # L-125：V2 资产包模式只列清单里的场景
+    if mids is not None:
+        return mids
     store = store or _store()
     ids = list(library(_script(store)))
     ids += [s for s in scenes_json() if s not in ids]

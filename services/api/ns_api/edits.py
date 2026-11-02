@@ -47,6 +47,7 @@
 """
 from __future__ import annotations
 
+from ns_api import run_paths as _RP   # K-OPS-F24：按当前剧取路径（V1 已归档，不在网页显示）
 import hashlib
 import json
 import re
@@ -1334,12 +1335,15 @@ def create_edit(body: EditBody, request: Request):
 @router.get("/api/edits")
 def list_edits(type: str | None = None, id: str | None = None, limit: int = 50):
     items = []
+    hide_v1, cur = _RP.v1_hidden(), _RP.current_run()
     for p in sorted(_items_dir().glob("ed-*.json"), key=lambda p: -p.stat().st_mtime):
         try:
             it = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
         if (type and it.get("type") != type) or (id and it.get("id") != id):
+            continue
+        if hide_v1 and it.get("run") != cur:     # L-125：只显示当前剧（V2）的修改单；V1 的已归档
             continue
         items.append(_sync_job(it))
         if len(items) >= max(1, min(limit, 500)):

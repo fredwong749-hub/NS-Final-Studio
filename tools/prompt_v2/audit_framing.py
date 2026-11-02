@@ -56,7 +56,11 @@ def audit(run_dir: Path) -> dict:
         if VIDEO_TRIGGERS.search(p):
             issues.append("图像提示词里有视频触发词 lnwan01")
         rows.append({"shot": j["shot"], "size": size, "lower_focus": F.lower_focus(shot.img_prompt), "issues": issues})
-    return {"run": str(run_dir.relative_to(ROOT)).replace("\\", "/"), "jobs": len(rows),
+    try:
+        run_s = str(run_dir.resolve().relative_to(ROOT)).replace("\\", "/")
+    except ValueError:                                   # 测试临时目录（重编到 tmp 的作业表）
+        run_s = str(run_dir)
+    return {"run": run_s, "jobs": len(rows),
             "ok": sum(1 for r in rows if not r["issues"]), "rows": [r for r in rows if r["issues"]]}
 
 

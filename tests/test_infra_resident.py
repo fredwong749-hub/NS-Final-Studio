@@ -161,7 +161,8 @@ def test_restart_queue_merges_gaps_and_urgent(monkeypatch, tmp_path):
     monkeypatch.setattr(RS, "STATE", tmp_path / "st.json")
     monkeypatch.setattr(RS, "log", lambda *a: None)
     calls = []
-    monkeypatch.setattr(RS, "ssh", lambda h, cmd, **k: calls.append(cmd) or (b'{"0": [0, 0], "1": [0, 0]}' if cmd == "python3 -" else b"ok"))
+    monkeypatch.setattr(RS, "ssh", lambda h, cmd, **k: calls.append(cmd) or (b'{"0": [0, 0], "1": [0, 0]}' if cmd == "python3 -" else
+                                                                       b'{"paused_by": null}' if 'base64 -d)" ' in cmd else b"ok"))   # pause_state：没被别人暂停
     monkeypatch.setattr(RS, "restart", lambda h, mode=None: calls.append("RESTART") or "started")
     RQ.request("gpu36", "deploy sv-1", "FACTORY")
     RQ.request("gpu36", "代码推送", "WORKFLOW")

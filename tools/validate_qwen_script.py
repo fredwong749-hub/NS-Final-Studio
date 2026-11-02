@@ -117,7 +117,7 @@ RULES: dict[str, tuple[str, str]] = {
     "QW-P1": ("block", "人物表写成 `**全剧人物表**：` / `**本集人物表**：` + 表头 `| 角色 | 角色id | 中文外貌句 | EN外貌短语 | "
                        "VOICE声线短语 |` + 分隔行 + 每人一行 5 格（格内不用 |）"),
     "QW-P2": ("block", "角色名全剧唯一；角色id 用已有 slug（lin_wan、gu_chen、chen_yu、ch_a_lan）或 "
-                       "`ch_<小写英文数字下划线>`，一个 id 只对应一个角色名"),
+                       "`ch_<小写英文数字下划线>`（V2 女主等项目方指定资产的角色可用 `lead_<…>`，如 lead_f），一个 id 只对应一个角色名"),
     "QW-P3": ("block", "EN外貌短语：一条英文名词短语，只写身份（年龄、性别、发色长度与刘海、脸 / 肤色 / 体型），不写服装；"
                        "无中文、无否定词、无双引号、不含人名和触发词"),
     "QW-P4": ("block", "VOICE声线短语：一条英文短语，含 voice（音色、音区、语速），无中文、无否定词、无双引号；"
@@ -601,7 +601,7 @@ def check_v3(imp, text: str, require: bool) -> tuple[list[dict], dict[int, list[
         first = e.defined_in[0] if e.defined_in else None
         cid = e.char_id
         if not (cid in CHARACTERS or CHARACTER_ID_RE.match(cid or "")):
-            at(first, _issue("QW-P2", f"角色 {e.name} 的角色id「{cid}」应为已有 slug 或 ch_<小写英文数字下划线>", field="人物表"))
+            at(first, _issue("QW-P2", f"角色 {e.name} 的角色id「{cid}」应为已有 slug、ch_<小写英文数字下划线> 或 lead_<…>", field="人物表"))
         elif e.name in CHARACTER_SLUG and cid != CHARACTER_SLUG[e.name]:
             at(first, _issue("QW-P2", f"角色 {e.name} 已有 slug {CHARACTER_SLUG[e.name]}，人物表写成了 {cid}", field="人物表"))
         id_names.setdefault(cid, set()).add(e.name)

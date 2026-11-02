@@ -8,7 +8,8 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const [, , PATH = "/#ep01", EXPR = "document.title", WAIT = "9000", SIZE = "1440x900", THEME = "dark", OUT = ""] = process.argv;
 const [W, H] = SIZE.split("x").map(Number);
-const PORT = 9688;
+// V2-WALK 11-02：多个 agent 同时截图会抢同一个 9688 端口，连到别人的 Chrome 后卡死。PROBE_PORT 可以指定端口，没给就随机取一个
+const PORT = Number(process.env.PROBE_PORT) || 9700 + Math.floor(Math.random() * 200);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const udir = join(process.env.TEMP || HERE, `uirsi_probe_${Date.now()}`);
 mkdirSync(udir, { recursive: true });

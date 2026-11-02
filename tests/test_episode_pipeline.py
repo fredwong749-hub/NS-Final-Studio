@@ -151,7 +151,7 @@ def test_second_run_prepares_separately_without_touching_primary(monkeypatch, tm
     import runs as RN
     monkeypatch.setattr(RN, "ROOT", tmp_path)
     (tmp_path / "config/pipeline").mkdir(parents=True)
-    (tmp_path / "config/pipeline/runs.json").write_text(json.dumps({"primary": "series10_v1", "runs": {
+    (tmp_path / "config/pipeline/runs.json").write_text(json.dumps({"primary": "series10_v1", "legacy_unprefixed_run": "series10_v1", "runs": {
         "series10_v1": {"priority": 0, "status": "producing"}, "newshow_v1": {"priority": 10, "status": "producing"}}}), encoding="utf-8")
     (tmp_path / "data/import/runs/newshow_v1").mkdir(parents=True)
     (tmp_path / "data/import/runs/newshow_v1/script_v2.json").write_text(json.dumps(

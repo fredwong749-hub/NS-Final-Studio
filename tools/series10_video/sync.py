@@ -21,6 +21,14 @@ DEST = "/root/work/fredw/video10_srv"
 MARK = ROOT / VID_REL / "_sync_marks.json"
 
 
+
+
+def _hosts_here() -> tuple:
+    """服务器上（OFFLINE_SELF）只处理本机；笔记本两台都管（A-07：不再靠 resident_prep 改源码）"""
+    import os as _os
+    me = _os.environ.get("OFFLINE_SELF")
+    return (me,) if me else ("gpu33", "gpu36")
+
 def write_atomic(dst: Path, data: bytes) -> None:
     """K-OPS-308：先写 .part 再 os.replace——别的进程（register_takes / episode_report / API）读 state_*.json 时
     不会读到写了一半的 JSON（离线 11-01 10:54 register_takes JSONDecodeError line 280）。
@@ -102,7 +110,7 @@ def pull_clips(host: str, limit: int = CLIPS_PER_ROUND) -> int:
 
 
 def once(marks):
-    for h in ("gpu33", "gpu36"):
+    for h in _hosts_here():    # A-07：服务器上只管本机（OFFLINE_SELF），原来由 resident_prep 就地改本文件
         t = time.time()
         try:
             n, b = pull(h, marks.get(h, 0))

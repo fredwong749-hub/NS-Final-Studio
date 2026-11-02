@@ -253,7 +253,7 @@ export default function AssetCenter() {
             {data.errors.scenes && <LoadError what="场景" err={data.errors.scenes} retry={reload} />}
             {(data.errors.presets || data.errors.video) && <LoadError what="风格（预设 / 出片方式）" err={data.errors.presets ?? data.errors.video} retry={reload} />}
             {data.errors.revisions && (node.id === "all" || ["style", "lora", "voice"].includes(node.id)) && (
-              <LoadError what="版本账本（身份 LoRA、音色、依赖已更新）" err={data.errors.revisions} hint="其余资产照常显示。" />
+              <LoadError what="版本账本（身份模型、音色、依赖已更新）" err={data.errors.revisions} hint="其余资产照常显示。" />
             )}
           </div>
         )}
@@ -323,7 +323,7 @@ export default function AssetCenter() {
                 <>
                 {node.id === "prop" && <PropsPanel />}
                 {node.id === "voice" && <VoiceStudio />}
-                {node.id !== "voice" && <Grid list={filtered.filter((c) => inNode(c))} showType={node.types.length > 1} onOpen={openCard} onUsage={(c) => setInsp(c)} selected={insp?.uid} emptyHint={node.id === "voice" || node.id === "lora" ? (data.revNotReady ? "音色和身份 LoRA 来自版本账本接口，API 重启后出现。" : undefined) : undefined} />}
+                {node.id !== "voice" && <Grid list={filtered.filter((c) => inNode(c))} showType={node.types.length > 1} onOpen={openCard} onUsage={(c) => setInsp(c)} selected={insp?.uid} emptyHint={node.id === "voice" || node.id === "lora" ? (data.revNotReady ? "音色和身份模型 来自版本账本接口，API 重启后出现。" : undefined) : undefined} />}
                 </>
               ))
             )}

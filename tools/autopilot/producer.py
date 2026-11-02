@@ -331,11 +331,16 @@ def higher_priority_busy(paths) -> dict:
     return out
 
 
+def legacy_run_id(root: Path = ROOT) -> str:
+    """K-OPS-F24：统一调 runs.legacy_run（缺 legacy_unprefixed_run 字段 → 抛错，失败关闭；没有登记表的演练目录 = 主剧旧路径）"""
+    return _runs().legacy_run(root)
+
+
 def run_env(run: str, root: Path = ROOT) -> dict:
-    """非主剧 producer 进程要设的环境变量（在 import ns_render 之前）"""
-    if run == RUN_ID:
+    """非 legacy 剧的 producer 进程要设的环境变量（在 import ns_render 之前）——K-OPS-F24：primary 切到 V2 也一律带前缀路径"""
+    if run == legacy_run_id(root):
         return {}
-    return {"NS_RENDERS_DIR": str(root / "data" / "renders" / run),
+    return {"NS_RUN": run, "NS_RENDERS_DIR": str(root / "data" / "renders" / run),
             "NS_SCRIPT_JSON": str(root / "data" / "import" / "runs" / run / "script_v2.json")}
 
 
@@ -372,12 +377,28 @@ def hard_cap_per_stage() -> int:
         return 10
 
 
+def ts_epoch(s) -> float | None:
+    """A-09（V2_READINESS）：时间串 → epoch 秒。带时区（+09:00 / Z / -05:00）按时区换算；不带时区的按项目时区 Asia/Tokyo
+    （K-OPS-E18）。以前 E28 直接拿字符串比大小：服务器旧数据有 EST 串、新数据有 +09:00 串，比出来不对"""
+    from datetime import datetime, timedelta, timezone
+    if not s:
+        return None
+    try:
+        d = datetime.fromisoformat(str(s).strip().replace("Z", "+00:00"))
+    except ValueError:   # arch-ok: 格式不认识 = 没有时间，调用方按“不在窗口内”处理
+        return None
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=timezone(timedelta(hours=9)))
+    return d.timestamp()
+
+
 def stage_renders_24h(takes: dict, stage: str, t: float | None = None) -> int:
     """takes.json 里这一阶段最近 24 小时自动出的版本数（手工编辑 origin=manual_edit 不算）。
-    以 takes.json 为准：不受 E09 / E11 / E24 / 驳回各条重置路径影响，进程重启也不丢（E21 的计数在内存里，重启就清零）"""
-    since = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime((t or now()) - 24 * 3600))
+    以 takes.json 为准：不受 E09 / E11 / E24 / 驳回各条重置路径影响，进程重启也不丢（E21 的计数在内存里，重启就清零）。
+    时间按 ts_epoch 带时区比较（A-09）"""
+    since = (t or now()) - 24 * 3600
     return sum(1 for x in takes.get("takes") or [] if x.get("stage") == stage and x.get("origin") != "manual_edit"
-               and str(x.get("created_at") or "") >= since)
+               and (ts_epoch(x.get("created_at")) or 0) >= since)
 
 
 def prefetch_depth() -> int:
@@ -416,8 +437,31 @@ def local_only_shots(script) -> set:
     return out
 
 
+def adult_shot_ids(script) -> set:
+    """L-128 不变项：剧本里 adult=true 的镜（导入时编译器分类写入）——系统 / agent 不自动派，只由项目方在界面触发"""
+    return {sh.id for ep in getattr(script, "episodes", []) or [] for sh in ep.shots if getattr(sh, "adult", None)}
+
+
+def owner_trigger_ids(paths) -> set:
+    """项目方在界面上点了“出这一镜”的对象 id（data/producer[/runs/<run>]/owner_triggers.json {"objects": [...]}）；读不到 = 空（不放行成人镜）"""
+    try:
+        return set((json.loads((paths.pd / "owner_triggers.json").read_text(encoding="utf-8")) or {}).get("objects") or [])
+    except (OSError, ValueError):   # arch-ok: 没有触发记录 = 一个都不放（失败关闭）
+        return set()
+
+
 def is_server_lane(lane: str) -> bool:
     return str(lane).split(":", 1)[0] in ("gpu33", "gpu36") or str(lane).isdigit()
+
+
+def owner_lane(lane: str) -> bool:
+    """L-128（项目方 19:1x）：route=local_only / 剧本标了本地生成的作业只许项目方自有机器的道（笔记本 + gpu33 + gpu36，
+    config/factory/hosts.json owner_controlled）；不是自有机器 / 认不出 = False（失败关闭）。取代“服务器一律拦”"""
+    import importlib.util as _u
+    sp = _u.spec_from_file_location("factory_hosts_prod", ROOT / "tools" / "factory" / "hosts.py")
+    m = _u.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m.owner_lane(str(lane))
 
 
 WAIT_ASSET_MAX_S = 6 * 3600          # 等资产的兜底上限（正常靠签名变化放回，不靠时间）
@@ -471,7 +515,7 @@ def wait_kind(err: str) -> str | None:
     return None
 
 
-def asset_hold_objects(data: Path) -> set:
+def asset_hold_objects(data: Path, run: str | None = None, primary: str | None = None) -> set:
     """IMGFIX r5（总调度 fredw-2b 11-02）：data/autopilot/*_hold.json（active=true）列出的首帧 / 尾帧对象暂缓派单——
     资产（例：林晚造型 A 设定图缺袖）修复后等项目方点选，点选前不出图。不在 = 没有 hold；
     文件坏 → K-OPS-F09 decisions_guard 在派单前整体拒派（⤴ 取代“文件坏 = 不挡”）"""
@@ -482,9 +526,16 @@ def asset_hold_objects(data: Path) -> set:
         except (OSError, ValueError):
             continue
         if d.get("active"):
-            t_now = time.strftime("%Y-%m-%dT%H:%M:%S")
-            out |= {o for it in d.get("shots") or [] if not (it.get("expires_at") and str(it["expires_at"])[:19] < t_now)
-                    for o in it.get("objects") or []}           # K-OPS-E19：带 expires_at 的条目到期自动失效
+            t_now = now()
+
+            def mine(it: dict) -> bool:
+                # A-09（V2_READINESS）：hold 按 run 隔离——条目 / 文件写了 run 就只管那部剧；旧条目没写 run 的只管主剧
+                # （以前 runaway_hold 全局共用：对象 id 不分季，第一季的暂停把第二季同号镜也挡了；V2 不能继承 V1 的遗留 hold）
+                r = it.get("run") or d.get("run")
+                return run is None or r == run or (not r and run == primary)
+            out |= {o for it in d.get("shots") or [] if mine(it)
+                    and not (it.get("expires_at") and (ts_epoch(it["expires_at"]) or 0) < t_now)
+                    for o in it.get("objects") or []}           # K-OPS-E19：带 expires_at 的条目到期自动失效（A-09：带时区比较）
     return out
 
 
@@ -495,7 +546,7 @@ class Paths:
         self.root = root
         self.data = root / "data"
         self.run_id = run_id
-        self.primary = run_id == RUN_ID                      # K-OPS-E15：主剧沿用旧路径（在途单 / 账本不失效）
+        self.primary = run_id == legacy_run_id(root)         # K-OPS-F24：只有 legacy_unprefixed_run（series10_v1）用不带前缀的旧路径
         self.pd = pd or (self.data / "producer" if self.primary else self.data / "producer" / "runs" / run_id)
         self.run = self.data / "pipeline" / "runs" / run_id
         self.renders = self.data / "renders" if self.primary else self.data / "renders" / run_id
@@ -836,8 +887,13 @@ def outbox_emit(sid: str, stage: str, n: int, file_rel: str) -> None:
             sys.path.insert(0, str(ROOT / "tools" / "factory"))
         import outbox as OB
         ep, s = sid.split("-", 1)
+        # NETFIX 11-02 18:2x（CONSENT PRODUCER → NETFIX）：takes.json 跟成图在同一镜目录下取——非主剧在 data/renders/<run>/epNN/SN/，
+        # 原来写死 data/renders/epNN/SN/takes.json，第二季的 takes 从没进过 outbox（笔记本 98 镜没有 takes.json）
+        import re as _re
+        mdir = _re.match(r"(renders/(?:[^/]+/)?ep\d{2}/S\d+)/", file_rel or "")
+        takes_rel = f"data/{mdir.group(1)}/takes.json" if mdir else f"data/renders/{ep}/{s}/takes.json"
         OB.write(f"{'first' if stage == 'image' else 'last'}:{sid}", "take",
-                 [f"data/renders/{ep}/{s}/takes.json", f"data/{file_rel}"], host=host, root=ROOT)
+                 [takes_rel, f"data/{file_rel}"], host=host, root=ROOT)
     except Exception as e:  # noqa: BLE001
         try:
             log_event(Paths(), "outbox_err", obj=f"{stage}:{sid}", take=n, error=repr(e)[:200])
@@ -845,13 +901,13 @@ def outbox_emit(sid: str, stage: str, n: int, file_rel: str) -> None:
             pass
 
 
-def decision_file_problems() -> list[str]:
+def decision_file_problems(run: str | None = None) -> list[str]:
     """K-OPS-F09：tools/factory/decisions_guard.problems()；校验器自身出错也算问题（失败关闭）"""
     try:
         if str(ROOT / "tools" / "factory") not in sys.path:
             sys.path.insert(0, str(ROOT / "tools" / "factory"))
         import decisions_guard as DG
-        return DG.problems(ROOT)
+        return DG.problems(ROOT, run=run)
     except Exception as e:  # noqa: BLE001
         return [f"决策文件校验器出错：{e!r}"[:200]]
 
@@ -1527,6 +1583,11 @@ class FrameExec:
             if dl:
                 from ns_agent.vqa import judge as VJ
                 job = {**job, "prompt": VJ.apply_delta(job["prompt"], dl), "vqa_delta": dl}
+            job = {**job, "lane": lane}                    # K-REN-958：preflight I12 按道判本地专用资产
+            trig = owner_trigger_ids(self.p)
+            if job.get("adult") and not ({f"first:{sid}", f"{self.p.run_id}/first:{sid}"} & trig):   # L-128：成人资产 → 等项目方触发
+                raise ComfyError(f"{sid} 生成契约 preflight 不通过，未提交：成人画面资产（{'；'.join(job.get('adult_reasons') or [])[:160]}）"
+                                 "只由项目方在界面触发，producer 不自动派")
             pf = UF._contract(job)
             if not pf.ok:
                 raise ComfyError(f"{sid} 生成契约 preflight 不通过，未提交：" + "；".join(pf.reasons()))
@@ -1550,6 +1611,8 @@ class FrameExec:
                 k = len(job["refs"]) + 1
                 job = {**job, "refs": [*job["refs"], f0],
                        "prompt": f"图{k}是同一人的脸部参考（与图2同一张，加强身份，只取脸和发型）。" + job["prompt"]}
+            if job.get("route") == "local_only" and not owner_lane(lane):   # K-REN-958 × L-128：只许项目方自有机器的道
+                raise ComfyError(f"{sid} 生成契约 preflight 不通过，未提交：I12 本地专用资产只许项目方自有机器的道（{'；'.join(job.get('route_reasons') or [])[:200]}）")
             stage = "last"
         job = {**job, "seed_policy": rung.get("seed_info") or "producer"}  # K-REN-954：种子来源进 compile_trace
         take = UF._run(client, sid, stage, job, rung["seed"])[0]       # REFLOCK 11-01 起返回 (take, eff, post_rec)
@@ -1911,7 +1974,7 @@ class Producer:
             return {}
         self._be_check_t = now()
         rule = be_rule_sig(self.p.root)
-        held = asset_hold_objects(self.p.data)
+        held = asset_hold_objects(self.p.data, self.p.run_id, RUN_ID)
         out = {"basis": 0, "reset": 0}
         for E in reg.get("episodes") or []:
             for S in E["shots"]:
@@ -1981,9 +2044,9 @@ class Producer:
         ex = led.get("cap_extra") or {}
         if ex and now() - float(ex.get("t") or 0) < 24 * 3600:
             # uncap = 放行之后再出 N 版（以前写成“上限 + N”，108 版的镜放 3 次等于没放；ep01-S1 17:00 实测）
-            since = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(float(ex.get("t") or 0)))
+            since = float(ex.get("t") or 0)
             after = sum(1 for x in td.get("takes") or [] if x.get("stage") == stage and x.get("origin") != "manual_edit"
-                        and str(x.get("created_at") or "") >= since)
+                        and (ts_epoch(x.get("created_at")) or 0) >= since)
             if after < int(ex.get("n") or 0):
                 return False
             lim = n
@@ -2010,7 +2073,7 @@ class Producer:
         items = {it.get("shot"): it for it in d.get("shots") or []}
         if o["shot"] not in items:
             exp = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t + 6 * 3600))
-            items[o["shot"]] = {"shot": o["shot"], "objects": [f"first:{o['shot']}", f"last:{o['shot']}"], "expires_at": exp,
+            items[o["shot"]] = {"shot": o["shot"], "run": self.p.run_id, "objects": [f"first:{o['shot']}", f"last:{o['shot']}"], "expires_at": exp,
                                 "why": f"1 小时内派了 {len(recent)} 次（上限 {cap}）", "at": iso()}
             d.update(active=True, reason_kind=d.get("reason_kind") or "runaway", shots=list(items.values()),
                      rule="K-OPS-E21 单对象出图速率超限自动暂停；到期（expires_at）自动失效")
@@ -2027,7 +2090,7 @@ class Producer:
           ② 最后一次失败之后输入变了（提示词 / 参考图集合 / 参考图文件更新 / 编译输入哈希）→ 重置驳回次数，counted=false，原因“输入已更新”；
           ③ 输入没变 → 下一级：追加 frame_v9_heavy 换 seed ×2（只追加一次）；
           ④ 再不过 → 标尽力版（不进合成）+ 给 SENTINEL 开工单（附失败原因统计）。"""
-        held = asset_hold_objects(self.p.data)
+        held = asset_hold_objects(self.p.data, self.p.run_id, RUN_ID)
         lad = redo_ladder_policy()
         out = {"held": 0, "reset": 0, "heavy": 0, "best_effort": 0}
         for E in reg.get("episodes") or []:
@@ -2127,7 +2190,7 @@ class Producer:
                 self._last_prio_log = now()
                 self.logf("priority_yield", run=self.p.run_id, to=hi, counted=False)
             return
-        dprobs = decision_file_problems()
+        dprobs = decision_file_problems(self.p.run_id)     # 按本进程的剧查（V2 资产包模式要求不同）
         if dprobs:          # K-OPS-F09：决策 / 覆盖文件缺失或损坏 → 这一拍一单不派（失败关闭），5 分钟报一次警
             if getattr(self, "_last_dfb_log", 0) < now() - 300:
                 self._last_dfb_log = now()
@@ -2156,18 +2219,25 @@ class Producer:
                     if o["status"] == "ready" and not str(o.get("waiting_for") or "").startswith("基础设施退避") and o["id"] not in self.inflight:
                         cands.append((E["ep"], 0 if k == "last" else 1, S["index"], o))
         cands.sort(key=episode_order_key)        # K-OPS-E30（L-124）：集号从小到大、集内驳回 / 插队先、尾帧先、按镜号
-        held = asset_hold_objects(self.p.data)
+        held = asset_hold_objects(self.p.data, self.p.run_id, RUN_ID)
         rate_cap = int(os.environ.get("NS_PRODUCER_OBJ_PER_HOUR", "8"))
         try:
             local_only = local_only_shots(self.script())
+            adult_shots = adult_shot_ids(self.script())
+            owner_triggers = owner_trigger_ids(self.p)
         except Exception:  # noqa: BLE001  读不到剧本 = 失败关闭：这一拍不派
             self.logf("local_only_unknown", counted=False)
             return
         for _ep, _k, _i, o in cands:
-            if o["shot"] in local_only and all(is_server_lane(ln) for ln in free):   # K-OPS-E22：本地生成镜，服务器不派
+            if o["shot"] in local_only and not any(owner_lane(ln) for ln in free):   # K-OPS-E22 × L-128：只拦非自有机器
                 if o["id"] not in self.__dict__.setdefault("_local_only_logged", set()):
                     self._local_only_logged.add(o["id"])
-                    self.logf("local_only_skip", obj=o["id"], counted=False, why="剧本 H3校验 标了本地生成 / 占位，服务器不派单")
+                    self.logf("local_only_skip", obj=o["id"], counted=False, why="剧本 H3校验 标了本地生成 / 占位，空闲道都不在项目方自有机器上")
+                continue
+            if o["shot"] in adult_shots and o["id"] not in owner_triggers:   # L-128 不变项：成人画面只由项目方在界面触发
+                if o["id"] not in self.__dict__.setdefault("_adult_wait_logged", set()):
+                    self._adult_wait_logged.add(o["id"])
+                    self.logf("adult_wait_owner", obj=o["id"], counted=False, why="成人画面：等项目方在界面触发（系统 / agent 不自动派）")
                 continue
             try:
                 if self.hard_capped(o):                  # K-OPS-E28：每镜每阶段 24 小时硬上限，到了就停、转人工 / 本地修
@@ -2919,7 +2989,8 @@ def pause_shots(paths: Paths, shots: list, by: str, note: str, minutes: float = 
     items = {it["shot"]: it for it in d.get("shots") or [] if it.get("shot")}
     exp = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(now() + minutes * 60))
     for sid in shots:
-        items[sid] = {"shot": sid, "objects": [f"first:{sid}", f"last:{sid}"], "by": by, "note": note, "at": iso(), "expires_at": exp}
+        items[sid] = {"shot": sid, "run": paths.run_id, "objects": [f"first:{sid}", f"last:{sid}"], "by": by, "note": note, "at": iso(),
+                      "expires_at": exp}
     d.update(active=True, rule="K-OPS-E19 按镜暂停；到期（expires_at）自动失效", shots=list(items.values()))
     f.parent.mkdir(parents=True, exist_ok=True)
     js(f, d)
@@ -2986,10 +3057,11 @@ def dryrun(inject_fail: bool = False, keep: bool = False, dest: Path | None = No
     (root / "data" / "renders").mkdir(parents=True)
     (root / "config").mkdir(parents=True)
     (root / "docs" / "overnight").mkdir(parents=True)
-    paths = Paths(root=root)
+    paths = Paths(root=root, run_id=legacy_run_id())     # 演练用系统剧本（legacy 剧，旧路径）；K-OPS-F24 后 primary 可能是还没剧本的 V2
     paths.vid.mkdir(parents=True)
-    old = (P.DATA, P.RENDERS)
+    old = (P.DATA, P.RENDERS, P.SCRIPT_JSON)
     P.DATA, P.RENDERS = root / "data", root / "data" / "renders"
+    P.SCRIPT_JSON = ROOT / "data" / "import" / "script_v2.json"
     script = P.load_script()
     only = {"ep01-S1", "ep01-S2"} if inject_fail else {"ep01-S1"}
     plan = {}
@@ -3038,7 +3110,7 @@ def dryrun(inject_fail: bool = False, keep: bool = False, dest: Path | None = No
             return 2
         return 0
     finally:
-        P.DATA, P.RENDERS = old
+        P.DATA, P.RENDERS, P.SCRIPT_JSON = old
         if not keep:
             shutil.rmtree(tmp, ignore_errors=True)
 

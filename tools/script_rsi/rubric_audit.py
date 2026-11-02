@@ -145,7 +145,7 @@ def gate(path: Path, eps: list[int] | None = None) -> dict:
         # K-WRT-H15 / H16（总调度 11-02，项目方融合样本）：在画人物接触场景物件、不正面直立对镜头；双人不用紧景别
         ST = _load("staging", "tools/script_rsi/staging.py")
         st_bad = [x for x in ST.staging_rows(pre + ch, ep) if not x["ok"]]
-        if (Path(path).parent / f"P4_ep{ep:02d}.md.v3").exists():     # v3 试点集：K-WRT-H19 / H20 进闸门
+        if (Path(path).parent / f"P4_ep{ep:02d}.md.v3").exists() or (Path(path).parent / "CLEAN_CUT.json").exists():   # v3 集 / V2 完全切割 run：H19 / H20 / H23–H25 / K-WRT-211 进闸门
             obj3 = H.episode_obj(pre, ch, ep, wd)
             sh3 = sorted(obj3.shots, key=lambda s: s.index)
             v3 = RC6.v3_checks(sh3, [RL.block_text(ch, k) for k in range(len(sh3))])

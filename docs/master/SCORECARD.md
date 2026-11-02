@@ -34,6 +34,7 @@
 | 剧本 | 沿用线 3：script 35 + shot_block 20 + shootable 20 + structure 15 + automation 10（第二季） | tools/script_rsi/line3_score.py --run-dir data/pipeline/runs/series10_s2 |
 | 代码 | 沿用线 5：no_claude 30 + self_run 20 + release 15 + structure 20 + rule_coverage 15 | tools/rsi/system_score.py |
 | UI | topbar 25 = topbar_check 通过的（页 × 宽度）/ 21；no_blank 20 = 7 个一级页面里非空白页占比；clean 20 = 无彩色胶囊 / 无口径矛盾 / 无裂图的页面占比（S9 同一套 DOM 规则）；no_jargon 15 = 页面文字不含技术词（词表 SC_scorecard.ui_jargon_words）的页面占比；feedback 20 = max(0, 1 − 未关闭 UI 反馈单 / 5) | apps/web/e2e/uirsi/topbar_check.mjs、probe.mjs（只读）、data/feedback/items（category 以 ui 开头、状态不在 closed / done / verified / deferred）；界面实测每小时一次（后台），超过 90 分钟的实测不用 |
+| UI 顶栏口径 v2（留痕：总调度 11-02 18:0x 批） | topbar = 通过的检查 / 25：7 个页面 × 3 宽度（1280 / 1440 / 1920）各查一次——顶栏 7 个一级入口（总览 / 剧本 / 资产 / 分镜 / 出图 / 视频 / 成片）都在、可点、互不重叠、页面无横向滚动（21 次）；出图 / 视频 / 成片 / 分镜四页范围条里有换集下拉（4 次）。改动原因：NAVIA 按项目方要求把换集下拉从顶栏移到页内范围条（有意的改版），旧口径（顶栏要有“第 N 集 ▾”）已过时；这次改口径是为了反映已批准的新设计，不是为了涨分 | SENTINEL 自己的检查（tools/sentinel/scorecard.py TOPBAR_JS，经 apps/web/e2e/uirsi/probe.mjs 只读执行）；UIRSI 的 topbar_check.mjs 另行由 UIRSI 按新设计更新 |
 | UI 未测 | 页面之间深链接顺畅；只有“用这张”+“修改”；提交类操作 300 ms 内收下 + 全局队列；只显示通过验收的图 | — |
 | 工作流 | unattended 35 = 1 − 等人决定的对象 / 在途对象（S13 + 登记表 pending / ready / running）；no_stuck 25 = 1 − S11 卡段工单 / 集数；no_dup 25 = max(0, 1 − S17 无限重出工单 / 5)；auto_requeue 15 = 1 − 建单超过 30 分钟仍是 new 的反馈单 / 反馈单总数 | data/sentinel/state.json、data/producer/registry.json、data/autopilot/flow/status.json、data/feedback/items |
 | 工作流未测 | 每集完成自动回报；第二季暂停状态只认一个来源 | — |

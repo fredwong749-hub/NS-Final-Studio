@@ -138,7 +138,7 @@ def test_r04_dispatch_consults_hold_before_rescore_and_dispatch():
 # ---- K-OPS-E05：打分等待不许占住派单线程；打分积压到上限停派 ----
 def test_e05_pool_larger_than_lanes_and_backlog_blocks_dispatch(tmp_path, monkeypatch):
     PR = _producer()
-    monkeypatch.setattr(PR, "decision_file_problems", lambda: [])       # 决策文件闸门另有测试，这里只测积压闸
+    monkeypatch.setattr(PR, "decision_file_problems", lambda *a, **k: [])       # 决策文件闸门另有测试，这里只测积压闸
     src = (ROOT / "tools/autopilot/producer.py").read_text(encoding="utf-8")
     assert "max_workers=max(8, max(self.score_backlog_max, 96)" in src
     import threading
@@ -339,7 +339,7 @@ def test_e09_escalate_routes(monkeypatch, tmp_path):
     pr.logf = lambda ev, **kw: logs.append(ev)
     reg = {"episodes": [{"shots": [{"shot": "ep01-S1", "objects": {"first": {"id": "first:ep01-S1", "shot": "ep01-S1", "escalate": True},
                                                                       "last": {"id": "last:ep01-S1"}}}]}]}
-    monkeypatch.setattr(PR, "asset_hold_objects", lambda d: set())
+    monkeypatch.setattr(PR, "asset_hold_objects", lambda d, *a: set())
     monkeypatch.setattr(PR, "redo_inputs_changed_v2", lambda *a: None)
     monkeypatch.setattr(PR, "job_sig", lambda paths, sid: "S1")
     assert pr.escalate_exhausted(reg)["heavy"] == 1                       # 输入没变 → 追加重档
@@ -357,7 +357,7 @@ def test_import_staged_run_writes_per_run_file(tmp_path, monkeypatch):
     import subprocess as SP
     root = tmp_path
     (root / "config/pipeline").mkdir(parents=True)
-    (root / "config/pipeline/runs.json").write_text(json.dumps({"primary": "series10_v1", "runs": {"series10_v1": {}}}), encoding="utf-8")
+    (root / "config/pipeline/runs.json").write_text(json.dumps({"primary": "series10_v1", "legacy_unprefixed_run": "series10_v1", "runs": {"series10_v1": {}}}), encoding="utf-8")
     (root / "stage").mkdir()
     (root / "stage/x_hwd_ep01_v1.md").write_text("# 第 1 集\n", encoding="utf-8")
     p = PR.Paths(root=root); p.pd.mkdir(parents=True, exist_ok=True)
@@ -400,7 +400,7 @@ def test_e11_best_effort_auto_reset(monkeypatch, tmp_path):
     pr.p = PR.Paths(root=tmp_path); pr.p.pd.mkdir(parents=True, exist_ok=True)
     pr.mu = threading.RLock(); logs = []
     pr.logf = lambda ev, **kw: logs.append(ev)
-    monkeypatch.setattr(PR, "asset_hold_objects", lambda d: set())
+    monkeypatch.setattr(PR, "asset_hold_objects", lambda d, *a: set())
     sig = {"rule": "r1", "inputs": "i1", "refs_mtime": 10.0, "prompt_sha": "p1"}
     monkeypatch.setattr(PR, "be_rule_sig", lambda root: sig["rule"])
     monkeypatch.setattr(PR, "shot_inputs_sig", lambda paths, sid: {k: v for k, v in sig.items() if k != "rule"})
@@ -465,7 +465,7 @@ def test_e13_data_parity_regcons(tmp_path):
 def test_e15_multi_run_paths_and_priority(tmp_path):
     PR = _producer()
     (tmp_path / "config/pipeline").mkdir(parents=True)
-    (tmp_path / "config/pipeline/runs.json").write_text(json.dumps({"primary": PR.RUN_ID, "runs": {
+    (tmp_path / "config/pipeline/runs.json").write_text(json.dumps({"primary": PR.RUN_ID, "legacy_unprefixed_run": PR.RUN_ID, "runs": {   # K-OPS-F24：旧路径只给 legacy 剧
         PR.RUN_ID: {"priority": 0, "status": "producing"}, "s2": {"priority": 10, "status": "producing"}}}), encoding="utf-8")
     a, b = PR.Paths(root=tmp_path), PR.Paths(root=tmp_path, run_id="s2")
     assert a.pd == tmp_path / "data/producer" and a.renders == tmp_path / "data/renders"          # 主剧旧路径兼容
@@ -777,7 +777,7 @@ def test_a2_backup_rotation_moves_to_quarantine(monkeypatch, tmp_path):
 def test_a2_last_ops_capped_and_run_path(monkeypatch, tmp_path):
     P = _pl(monkeypatch, tmp_path)
     (tmp_path / "config/pipeline").mkdir(parents=True)
-    (tmp_path / "config/pipeline/runs.json").write_text('{"primary": "s1", "runs": {"s1": {}, "s2": {}}}', encoding="utf-8")
+    (tmp_path / "config/pipeline/runs.json").write_text('{"primary": "s1", "legacy_unprefixed_run": "s1", "runs": {"s1": {}, "s2": {}}}', encoding="utf-8")
     assert P.takes_path("ep01-S1", "s1") == tmp_path / "data/renders/ep01/S1/takes.json"
     assert P.takes_path("ep01-S1", "s2") == tmp_path / "data/renders/s2/ep01/S1/takes.json"
     monkeypatch.setattr(P, "TAKES_LAST_OPS", 3)
@@ -857,7 +857,7 @@ def test_y04_idle_sweep(tmp_path):
 def test_video_hold_filters_and_expires(monkeypatch, tmp_path):
     sys.path.insert(0, str(ROOT / "tools" / "series10_video"))
     sys.path.insert(0, str(ROOT / "tools" / "pipeline"))
-    import build_jobs as B
+    B = _load_s10v("build_jobs")      # script_name_guard：tools/char_assets 也有 build_jobs.py，按路径加载
     f = tmp_path / "video_hold.json"
     monkeypatch.setattr(B, "VIDEO_HOLD", f)
     assert B.video_holds() == {}
@@ -970,7 +970,7 @@ def test_e29_identity_face_single_entry():
 def test_e29_video_score_refs_use_face_of(monkeypatch):
     sys.path.insert(0, str(ROOT / "tools" / "series10_video"))
     sys.path.insert(0, str(ROOT / "tools" / "pipeline"))
-    import build_jobs as B
+    B = _load_s10v("build_jobs")      # script_name_guard：tools/char_assets 也有 build_jobs.py，按路径加载
     from ns_agent import asset_refs as AR
     monkeypatch.setattr(AR, "face_of", lambda project, cid: f"faces/{project}/{cid}.png")
     spec = type("S", (), {"faces": [type("C", (), {"name": "林晚"})(), type("C", (), {"name": "路人"})()]})()
@@ -991,7 +991,7 @@ def test_l124_last_consistent_respects_owner_lock():
 def test_l124_build_jobs_last_frame_pairing(monkeypatch, tmp_path):
     sys.path.insert(0, str(ROOT / "tools" / "series10_video"))
     sys.path.insert(0, str(ROOT / "tools" / "pipeline"))
-    import build_jobs as B
+    B = _load_s10v("build_jobs")      # script_name_guard：tools/char_assets 也有 build_jobs.py，按路径加载
     monkeypatch.setattr(B, "ROOT", tmp_path)
     d = tmp_path / "data/renders/ep01/S1"; d.mkdir(parents=True)
     (tmp_path / "data/renders/ep01/S1/last_011.png").write_bytes(b"x")
@@ -1040,7 +1040,7 @@ def test_queue_eta_order_and_stale(tmp_path):
     sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
     import queue_eta as Q
     (tmp_path / "config/pipeline").mkdir(parents=True)
-    (tmp_path / "config/pipeline/runs.json").write_text('{"primary": "s1", "runs": {"s1": {}}}', encoding="utf-8")
+    (tmp_path / "config/pipeline/runs.json").write_text('{"primary": "s1", "legacy_unprefixed_run": "s1", "runs": {"s1": {}}}', encoding="utf-8")
     (tmp_path / "data/state/netfix").mkdir(parents=True)
     (tmp_path / "data/state/netfix/partition.json").write_text(json.dumps(
         {"images": {"gpu33": [1, 2]}, "video": {"gpu33": [1, 2]}, "lanes": {"gpu33": ["gpu33:0", "gpu33:1"]}}), encoding="utf-8")
@@ -1070,7 +1070,7 @@ def test_guard_stale_whitelist():
 def test_guard_anomaly_blocks_video(monkeypatch, tmp_path):
     sys.path.insert(0, str(ROOT / "tools" / "series10_video"))
     sys.path.insert(0, str(ROOT / "tools" / "pipeline"))
-    import build_jobs as B
+    B = _load_s10v("build_jobs")      # script_name_guard：tools/char_assets 也有 build_jobs.py，按路径加载
     rows = {("ep04-S10", "image_006.png"): {"ok": "fail", "count": {"status": "fail", "defects": ["duplicate_person：两个头都是陈宇"]}}}
     assert "duplicate_person" in B.anomaly_block("ep04-S10", "renders/ep04/S10/takes/image_006.png", {"ok": True}, rows)
     assert B.anomaly_block("ep04-S10", "renders/ep04/S10/takes/image_007.png", {"ok": True}, rows) is None      # 另一版没判过：不拦
@@ -1090,7 +1090,7 @@ def test_guard_a02_score_timeout_only_rescore():
 def test_accept_gate_status():
     sys.path.insert(0, str(ROOT / "tools" / "series10_video"))
     sys.path.insert(0, str(ROOT / "tools" / "pipeline"))
-    import build_jobs as B
+    B = _load_s10v("build_jobs")      # script_name_guard：tools/char_assets 也有 build_jobs.py，按路径加载
     rows = {("ep07-S1", "image_008.png"): {"ok": "pass", "count": {"defects": []}},
             ("ep07-S2", "image_008.png"): {"ok": "fail", "count": {"defects": []}}}
     assert B.accept_status("ep07-S1", "renders/ep07/S1/takes/image_008.png", {}, rows) == "pass"
@@ -1098,3 +1098,56 @@ def test_accept_gate_status():
     assert B.accept_status("ep07-S3", "x/image_001.png", {}, rows) is None                     # 没跑过 → 不进视频
     assert B.accept_status("ep07-S1", "x.png", {"items": [{"id": "Q10", "status": "untested"}]}, rows) == "untested"   # Q10 优先
     assert B.ACCEPT_REQUIRED is True
+
+
+# ---- A-09（V2_READINESS）：E28 带时区比较；hold 按 run 隔离；restart_queue 只解自己设的暂停 ----
+def test_a09_ts_epoch_timezones():
+    PR = _producer()
+    a = PR.ts_epoch("2026-11-02T18:00:00+09:00")
+    assert PR.ts_epoch("2026-11-02T18:00:00") == a                       # 不带时区按东京
+    assert PR.ts_epoch("2026-11-02T04:00:00-05:00") == a                 # EST 旧串换算后相同
+    assert PR.ts_epoch("2026-11-02T09:00:00Z") == a and PR.ts_epoch("x") is None and PR.ts_epoch(None) is None
+    t = a + 3600
+    td = {"takes": [{"stage": "image", "created_at": "2026-11-02T04:30:00-05:00"},      # 东京 18:30，在 24 小时内
+                    {"stage": "image", "created_at": "2026-11-01T17:00:00+09:00"}]}     # 25 小时前
+    assert PR.stage_renders_24h(td, "image", t) == 1
+
+
+def test_a09_hold_isolated_by_run(tmp_path):
+    PR = _producer()
+    d = tmp_path / "autopilot"; d.mkdir()
+    (d / "runaway_hold.json").write_text(json.dumps({"active": True, "shots": [
+        {"shot": "ep05-S3", "objects": ["first:ep05-S3"]},                               # 旧条目没写 run → 只管主剧
+        {"shot": "ep01-S1", "run": "series10_v2", "objects": ["first:ep01-S1"]}]}), encoding="utf-8")
+    v1 = PR.asset_hold_objects(tmp_path, "series10_v1", "series10_v1")
+    v2 = PR.asset_hold_objects(tmp_path, "series10_v2", "series10_v1")
+    assert v1 == {"first:ep05-S3"} and v2 == {"first:ep01-S1"}
+    assert PR.asset_hold_objects(tmp_path) == {"first:ep05-S3", "first:ep01-S1"}           # 不指定 run（旧调用）= 全部
+
+
+def test_a09_restart_queue_keeps_foreign_pause():
+    sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+    import restart_queue as RQ
+    class RS:
+        R = "/r"
+        def __init__(self, ctrl): self.ctrl = ctrl
+        def ssh(self, host, cmd, **kw): return json.dumps(self.ctrl).encode()
+    assert RQ.pre_paused("gpu33", RS({"paused": True, "paused_by": "DEPLOY_ATOMIC"})) == "DEPLOY_ATOMIC"
+    assert RQ.pre_paused("gpu33", RS({"paused": False})) is None
+    class Bad(RS):
+        def ssh(self, host, cmd, **kw): raise RuntimeError("连不上")
+    assert RQ.pre_paused("gpu33", Bad({})).startswith("unknown")                          # 读不到 = 保守按已暂停
+
+
+def _load_s10v(name: str):
+    """按文件路径加载 tools/series10_video/<name>.py（同名脚本别处也有，裸 import 在别的测试先改过 sys.path 时会撞名）"""
+    import importlib.util as _u
+    import sys as _s
+    key = f"s10v_{name}"
+    if key in _s.modules:
+        return _s.modules[key]
+    sp = _u.spec_from_file_location(key, ROOT / "tools" / "series10_video" / f"{name}.py")
+    m = _u.module_from_spec(sp)
+    _s.modules[key] = m
+    sp.loader.exec_module(m)
+    return m
