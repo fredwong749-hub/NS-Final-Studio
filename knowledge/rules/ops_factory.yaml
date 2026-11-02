@@ -125,3 +125,39 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-F12
+    domain: ops
+    link: [P5-P6]
+    title: 打分进行到一半进程重启（租约随进程失效）→ 这张图只重打分（不占道、不重出、不计次），对象不许永远停在“契约质检中”；producer 心跳分开报 rendering / scoring，重启排空只看出图
+    when: producer 重启 / 部署 / 改 postflight 状态流转
+    then: _frame_obj：postflight.state=running 且没有活租约、版本创建超过 ORPHAN_SCORE_S → status=ready + rescore_take，dispatch_frames 走 _rescore_one；心跳 {inflight, scoring, rendering}
+    check: tests/test_debug_rsi.py, tests/test_producer.py
+    evidence:
+      - {src: data/autopilot/restart_done.jsonl, note: "11-02 03:52–04:04：重启队列按 inflight（含打分积压 42）排空，等满 15 分钟才动；FACTORY 手动以 60 s 上限执行"}
+    confidence: high
+    status: 待验
+    date: 2026-11-02
+  - id: K-OPS-F13
+    domain: ops
+    link: [P5-P6]
+    title: urgent 部署做原子切换：推代码前先暂停派单，推完和核对通过后当场按重启队列规则排空重启（不等 loop 下一拍），失败则恢复派单；热修版本用 deploy --hotfix-of 自动记发版事故账本
+    when: system_version deploy --urgent / 热修
+    then: deploy_host：pause --by DEPLOY_ATOMIC → 推代码 / 期望表 / server_deps / decisions_guard → restart_queue.request + process → resume；任何一步失败 resume（老进程继续）；--hotfix-of <sv> 成功后写 data/rsi/release_incidents.jsonl
+    check: tests/test_system_version.py::test_urgent_deploy_pauses_then_restarts_now, tests/test_system_version.py::test_gates_include_vqa_regression_and_hotfix_ledger
+    evidence:
+      - {src: docs/master/FRAMEWORK_REFRAME.md, note: "11-02 03:11–03:14 / 03:52：代码推上去后老进程还在跑，新 frame_job.py 配内存里旧 framing → 15 个 code_error；sv-06 热修（sv-07）需要手工记账"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-F14
+    domain: ops
+    link: [P5-P6]
+    title: 车道表只有一份 config/factory/hosts.json，读取只走 tools/factory/hosts.py（lane_url：服务器本机端口 / 笔记本隧道端口；读不到 raise），主机 aliases 与 resident_restart.sh 的 OFFLINE_ALIASES 同源
+    when: 新增 / 改道、端口、服务器路径；写任何要连 ComfyUI 或服务器目录的代码
+    then: 第 ① 步（sv-09）：建表 + 入口 + 一致性测试（只报不挡）；第 ② 步起各读者改读 hosts.py（SYSARCH 协调）；第 ③ 步端口 / 路径字面量只许出现在 hosts.json；第 ④ 步停 fwd.py
+    check: tests/test_factory_hosts.py::test_lane_url_server_vs_laptop_and_aliases, tests/test_factory_hosts.py::test_aliases_match_resident_restart_contract, tests/test_factory_hosts.py::test_schema_and_fail_closed
+    evidence:
+      - {src: docs/master/ARCH_ROADMAP.md, note: "§8：车道表 6 份互相对不上（producer IMAGE_LANES、resident_sync、fwd.py、tunnels.json 含死口、render_endpoints、vidlab lanes.json）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

@@ -611,3 +611,15 @@ def test_e23_owner_lock_counts_as_final():
           "takes": [{"stage": "last", "n": 11, "postflight": {"ok": False}}]}
     o = PR._frame_obj("last", "last", "ep01-S1", 1, td, {}, {}, {}, {}, False, deps_ok=True, first={"status": "passed"})
     assert o["status"] == "passed" and o.get("owner_locked")
+
+
+# ---- K-OPS-E24：重新导入后作业签名变了 → 已过的首帧自动重出（不计次） ----
+def test_e24_first_input_changed(monkeypatch, tmp_path):
+    PR = _producer()
+    p = PR.Paths(root=tmp_path)
+    fo = {"id": "first:ep01-S1", "status": "passed", "take": 3}
+    monkeypatch.setattr(PR, "job_sig", lambda paths, sid: "NEW")
+    assert PR.first_input_changed(p, "ep01-S1", fo, {"passed_sig": "OLD"})["status"] == "ready"
+    assert PR.first_input_changed(p, "ep01-S1", fo, {"passed_sig": "NEW"})["status"] == "passed"
+    assert PR.first_input_changed(p, "ep01-S1", fo, {})["status"] == "passed"                       # 旧数据没签名不动
+    assert PR.first_input_changed(p, "ep01-S1", {**fo, "owner_locked": True}, {"passed_sig": "OLD"})["status"] == "passed"

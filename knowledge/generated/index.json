@@ -1,15 +1,15 @@
 {
- "kb_version": "kb-20261102-b06604cd",
- "n": 587,
+ "kb_version": "kb-20261102-1b769615",
+ "n": 596,
  "by_domain": {
   "render": 86,
   "prompt": 27,
-  "writer": 88,
+  "writer": 94,
   "edit": 49,
   "review": 66,
   "loop": 9,
   "asset": 43,
-  "ops": 158,
+  "ops": 161,
   "ui": 61
  },
  "by_link": {
@@ -19,12 +19,12 @@
   "P11-P12": 27,
   "P11-RETRY": 47,
   "P2-P3": 3,
-  "P3-P4": 104,
+  "P3-P4": 110,
   "P4-P5": 40,
   "P4-P6": 28,
   "P4-P7": 23,
   "P4-P9": 16,
-  "P5-P6": 178,
+  "P5-P6": 181,
   "P6-P7": 31,
   "P7-P8": 108,
   "P8-P10": 18,
@@ -756,8 +756,8 @@
    ],
    "title": "渲染道隧道要有看门狗：探测失败自动重建，跳板不通时不乱杀",
    "when": "笔记本经 ssh -L 隧道（18188/18189/18191 → gpu33，18288/18289/18290 → gpu36）访问 ComfyUI 的任何时候",
-   "then": "tools/autopilot/infra_watchdog.py serve（laptop_autostart.ps1 拉起）30 s 一拍并行探测 /system_stats；连续 2 拍不通 → 杀持有该 -L 的 ssh，交 tunnel.sh / tunnel_gpu36.sh 原有循环重连，之后每 4 拍再试一次；循环不在就按原脚本拉起；跳板 TCP 不通 → 不杀、开 A-RELAY 报警；重建后 3 拍仍不通开 A-TUNNEL-<端口>；注入测试 tools/autopilot/infra_inject_test.py（freeze = 进程活着转发卡死，kill = 断线），恢复须 ≤ 120 s",
-   "check": "tests/test_infra_resident.py",
+   "then": "tools/autopilot/infra_watchdog.py serve（laptop_autostart.ps1 拉起）30 s 一拍并行探测 /system_stats；连续 2 拍不通 → 杀持有该 -L 的 ssh，交 tunnel.sh / tunnel_gpu36.sh 原有循环重连，之后每 4 拍再试一次；循环不在就按原脚本拉起；跳板 TCP 不通 → 不杀、开 A-RELAY 报警；重建后 3 拍仍不通开 A-TUNNEL-<端口>；注入测试 tools/autopilot/infra_inject_test.py（freeze = 进程活着转发卡死，kill = 断线），恢复须 ≤ 120 s；⤴ 11-02 SYSARCH 4-3（总调度批）：修复职责整体交给 K-OPS-N01 / N10 的 tools/netfix/tunnel_supervisor.py，看门狗删掉杀 ssh / 拉循环段，只探测、连续 ALERT_AFTER 拍不通开 A-TUNNEL-<端口>；tunnel*.sh 循环与 infra_inject_test.py 已退役（隔离在 data/_quarantine/netfix_20261101/）",
+   "check": "tests/test_infra_resident.py::test_tunnel_down_alerts_but_never_repairs",
    "evidence": [
     {
      "src": "data/qa/infra_inject.jsonl",
@@ -2058,14 +2058,14 @@
    "link": "P3-P4",
    "title": "每镜写【灯光】：灯光词表方案名，或“动机光源（画面哪一侧）+ 布光比 + 色温”三要素（L-111，第二季起）",
    "when": "每镜",
-   "then": "方案名见 config/director/lighting.yaml schemes；三要素写法：动机光源必须是画面里存在的光（窗 / 台灯 / 顶灯 / 霓虹 / 屏幕 / 烛光）并写方向；布光比 2:1 / 3:1 / 5:1 / 8:1；色温 K 值或暖 / 冷；HOLLYWOOD rubric_code 加字段齐全 + 动机光源在场景里存在的检查",
+   "then": "方案名见 config/director/lighting.yaml schemes；三要素写法：动机光源必须是画面里看得见的东西发出的光并写方向——总调度 11-02 修订：“动机光源=”里的光源项出现在本镜或本场的场景描述、道具里，或在 lighting.yaml sources 词表里，都算合规（rubric_code.light_sources / source_seen）；布光比 2:1 / 3:1 / 5:1 / 8:1；色温 K 值或暖 / 冷；HOLLYWOOD rubric_code 加字段齐全 + 动机光源可见的检查",
    "targets": [
     {
      "kind": "writer_prompt",
      "section": "镜头字段"
     }
    ],
-   "writer_text": "每镜写【灯光】：用灯光词表里的方案名（如“深夜办公室·台灯”），或写三要素——动机光源（画面里真实存在的光，写在画面哪一侧）、布光比（2:1 柔和到 8:1 戏剧）、色温（K 值或暖 / 冷）；可加人物适配（蓝发高光、皮肤质感、水晶甲反光点）。人物和背景用同一套光。",
+   "writer_text": "每镜写【灯光】：用灯光词表里的方案名（如“深夜办公室·台灯”），或写三要素——动机光源（写成“动机光源=<光源>（方位）”；光源是画面里看得见的东西——窗、台灯、门口天光、柜台油灯、烛台都行，只要它写在本镜或本场的场景描述 / 道具里，或是灯光词表里的词）、布光比（2:1 柔和到 8:1 戏剧）、色温（K 值或暖 / 冷）；可加人物适配（蓝发高光、皮肤质感、水晶甲反光点）。人物和背景用同一套光。",
    "evidence": [
     {
      "src": "config/director/lighting.yaml"
@@ -5321,6 +5321,69 @@
     {
      "src": "docs/master/FRAMEWORK_REFRAME.md",
      "note": "11-02 04:0x VQAGATE：gpu33 / gpu36 offline venv 没装 mediapipe，gaze_mp 在生产静默返回 None（当天 112 条带看图结果的 take 无一有 gaze_mp 证据）；FACTORY 04:1x 装 mediapipe 1.2.0（--no-deps）+ absl / flatbuffers / matplotlib，两台 FaceLandmarker / ImageSegmenter 加载通过，server_deps.py 两台 problems=[]"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
+  },
+  {
+   "id": "K-OPS-F12",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "打分进行到一半进程重启（租约随进程失效）→ 这张图只重打分（不占道、不重出、不计次），对象不许永远停在“契约质检中”；producer 心跳分开报 rendering / scoring，重启排空只看出图",
+   "when": "producer 重启 / 部署 / 改 postflight 状态流转",
+   "then": "_frame_obj：postflight.state=running 且没有活租约、版本创建超过 ORPHAN_SCORE_S → status=ready + rescore_take，dispatch_frames 走 _rescore_one；心跳 {inflight, scoring, rendering}",
+   "check": "tests/test_debug_rsi.py, tests/test_producer.py",
+   "evidence": [
+    {
+     "src": "data/autopilot/restart_done.jsonl",
+     "note": "11-02 03:52–04:04：重启队列按 inflight（含打分积压 42）排空，等满 15 分钟才动；FACTORY 手动以 60 s 上限执行"
+    }
+   ],
+   "confidence": "high",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
+  },
+  {
+   "id": "K-OPS-F13",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "urgent 部署做原子切换：推代码前先暂停派单，推完和核对通过后当场按重启队列规则排空重启（不等 loop 下一拍），失败则恢复派单；热修版本用 deploy --hotfix-of 自动记发版事故账本",
+   "when": "system_version deploy --urgent / 热修",
+   "then": "deploy_host：pause --by DEPLOY_ATOMIC → 推代码 / 期望表 / server_deps / decisions_guard → restart_queue.request + process → resume；任何一步失败 resume（老进程继续）；--hotfix-of <sv> 成功后写 data/rsi/release_incidents.jsonl",
+   "check": "tests/test_system_version.py::test_urgent_deploy_pauses_then_restarts_now, tests/test_system_version.py::test_gates_include_vqa_regression_and_hotfix_ledger",
+   "evidence": [
+    {
+     "src": "docs/master/FRAMEWORK_REFRAME.md",
+     "note": "11-02 03:11–03:14 / 03:52：代码推上去后老进程还在跑，新 frame_job.py 配内存里旧 framing → 15 个 code_error；sv-06 热修（sv-07）需要手工记账"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
+  },
+  {
+   "id": "K-OPS-F14",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "车道表只有一份 config/factory/hosts.json，读取只走 tools/factory/hosts.py（lane_url：服务器本机端口 / 笔记本隧道端口；读不到 raise），主机 aliases 与 resident_restart.sh 的 OFFLINE_ALIASES 同源",
+   "when": "新增 / 改道、端口、服务器路径；写任何要连 ComfyUI 或服务器目录的代码",
+   "then": "第 ① 步（sv-09）：建表 + 入口 + 一致性测试（只报不挡）；第 ② 步起各读者改读 hosts.py（SYSARCH 协调）；第 ③ 步端口 / 路径字面量只许出现在 hosts.json；第 ④ 步停 fwd.py",
+   "check": "tests/test_factory_hosts.py::test_lane_url_server_vs_laptop_and_aliases, tests/test_factory_hosts.py::test_aliases_match_resident_restart_contract, tests/test_factory_hosts.py::test_schema_and_fail_closed",
+   "evidence": [
+    {
+     "src": "docs/master/ARCH_ROADMAP.md",
+     "note": "§8：车道表 6 份互相对不上（producer IMAGE_LANES、resident_sync、fwd.py、tunnels.json 含死口、render_endpoints、vidlab lanes.json）"
     }
    ],
    "confidence": "high",
@@ -14764,7 +14827,7 @@
    "targets": [
     {
      "kind": "writer_prompt",
-     "section": "镜头字段"
+     "section": "分拍与动作"
     }
    ],
    "writer_text": "首帧里每个在画人物都要写一个“人名主语 + 接触动作 + 场景里的物件”的分句——扶着门框、坐在桌沿、手里拿着杯子、肩靠在墙上、手撑在吧台上；身体写侧向或四分之三侧。不要写人物正面直立、居中、对着镜头的设定图姿势。",
@@ -14804,6 +14867,174 @@
     {
      "src": "data/rsi/staging_dist_s2.json",
      "note": "第二季双人紧景别 12 镜；第一季 11 镜"
+    }
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/writer_hollywood.yaml"
+  },
+  {
+   "id": "K-WRT-H17",
+   "check": [
+    "tests/test_judge_agent.py"
+   ],
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "每集写出赌注：失败会失去什么，在画面或台词里看得见",
+   "when": "每集（JUDGE 第二季：9/10 集缺）",
+   "then": "评审条目 hollywood_judge.md §七 stakes（不能代码判）；v3 试点起写作必写",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "分拍与动作"
+    }
+   ],
+   "writer_text": "每集都要让观众看见“这件事办砸了会失去什么”——具体的人、物、位置或关系（被收回的钥匙、要搬走的箱子、会被看见的名字），放进画面或台词里，不写抽象的担心。",
+   "evidence": [
+    {
+     "src": "data/rsi/scores.jsonl",
+     "note": "JUDGE 第二季判断分（single_judge，非正式）共性弱点；总调度 11-02 定转规则"
+    }
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/writer_hollywood.yaml"
+  },
+  {
+   "id": "K-WRT-H18",
+   "check": [
+    "tests/test_judge_agent.py"
+   ],
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "对手戏要有诉求相反的阻碍方，当面施压或拒绝",
+   "when": "有对手戏的集（JUDGE：6 集缺）",
+   "then": "评审条目 §七 opposition；全集只有顺从、问候、配合 = 不满足",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "分拍与动作"
+    }
+   ],
+   "writer_text": "对手戏里要有一方想要的和主角相反，并且当面施压、拒绝或设条件；不能整集都是顺从、问候和配合。可以为此补情节节点，但谁、在哪、什么关系不变。",
+   "evidence": [
+    {
+     "src": "data/rsi/scores.jsonl",
+     "note": "JUDGE 第二季判断分（single_judge，非正式）共性弱点；总调度 11-02 定转规则"
+    }
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/writer_hollywood.yaml"
+  },
+  {
+   "id": "K-WRT-H19",
+   "check": [
+    "tests/test_hollywood_r5.py"
+   ],
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "结尾钩子在画面里：末镜最后 2 秒出现新信息，末镜不重复前一镜",
+   "when": "末镜（JUDGE：10/10 集缺）",
+   "then": "rubric_code.v3_checks",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "分拍与动作"
+    }
+   ],
+   "writer_text": "末镜的最后 2 秒必须在画面里出现新东西：一个新动作、一件新物件被拿出 / 亮出，或新人入画；不要只靠独白里的疑问收尾，末镜也不要和前一镜是同一个画面。",
+   "evidence": [
+    {
+     "src": "data/rsi/scores.jsonl",
+     "note": "JUDGE 第二季判断分（single_judge，非正式）共性弱点；总调度 11-02 定转规则"
+    }
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/writer_hollywood.yaml"
+  },
+  {
+   "id": "K-WRT-H20",
+   "check": [
+    "tests/test_hollywood_r5.py"
+   ],
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "一镜一个主动作，分拍不写转身 / 走动（与 Pika 参考对齐）",
+   "when": "每镜分拍（JUDGE：10/10 集缺）",
+   "then": "rubric_code.v3_checks",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "分拍与动作"
+    }
+   ],
+   "writer_text": "一镜只放一个主动作。不写转身、走向、走过这类走动——要换位置就切到下一镜，下一镜开头人已经在新位置；要表现起身或离开，只写镜尾的起势（重心前移、手撑桌沿）。新人进画写“入画”。",
+   "evidence": [
+    {
+     "src": "data/rsi/scores.jsonl",
+     "note": "JUDGE 第二季判断分（single_judge，非正式）共性弱点；总调度 11-02 定转规则"
+    }
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/writer_hollywood.yaml"
+  },
+  {
+   "id": "K-WRT-H21",
+   "check": [
+    "tests/test_judge_agent.py"
+   ],
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "潜台词：台词不直说意图，至少一处台词和同镜动作相反",
+   "when": "台词镜",
+   "then": "评审条目 §七 subtext_contrast（N02 只管有没有身体信号，这条要求相反）",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "分拍与动作"
+    }
+   ],
+   "writer_text": "台词不要直说意图。每集至少有一处，台词和同一镜的动作是相反的：嘴上说没事，手在攥紧；嘴上说走吧，脚没动。",
+   "evidence": [
+    {
+     "src": "data/rsi/scores.jsonl",
+     "note": "JUDGE 第二季判断分（single_judge，非正式）共性弱点；总调度 11-02 定转规则"
+    }
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/writer_hollywood.yaml"
+  },
+  {
+   "id": "K-WRT-H22",
+   "check": [
+    "tests/test_judge_agent.py"
+   ],
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "开场 5 秒：镜 1 交代谁遇到了什么事",
+   "when": "镜 1",
+   "then": "评审条目 §七 open5s（N03 只管前 5 秒有变化，这条要求人物在画 + 正在发生的事）",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "分拍与动作"
+    }
+   ],
+   "writer_text": "镜 1 的前 5 秒要让观众知道“谁遇到了什么事”：主角在画，并且有一件正在发生的事（手机亮起、门被敲响、有人递来东西），不是空镜或氛围。",
+   "evidence": [
+    {
+     "src": "data/rsi/scores.jsonl",
+     "note": "JUDGE 第二季判断分（single_judge，非正式）共性弱点；总调度 11-02 定转规则"
     }
    ],
    "confidence": "medium",

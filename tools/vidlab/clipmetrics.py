@@ -46,7 +46,7 @@ import vio as VIO  # noqa: E402
 
 cv2.setNumThreads(int(_os.environ.get("NS_SCORE_THREADS", "4")))
 
-ALGO = "vlm-cm-v3"          # 改算法就改版本号，缓存自动失效
+ALGO = "vlm-cm-v4"          # 改算法就改版本号，缓存自动失效
 CACHE = ROOT / "data" / "rsi" / "vidlab" / "clip_cache"
 FPS = 12.0
 
@@ -298,12 +298,27 @@ def camera_motion(frames, face_boxes_per_frame, fps):
         tc = M[:, :2] @ c + M[:, 2] - c
         m = (float(np.hypot(*tc)) / diag + abs(np.log(max(sc, 1e-6))) + abs(rot)) * fps
         sp.append(m)
+        mov.append((float(tc[0]) / w, float(tc[1]) / h, float(np.log(max(sc, 1e-6))), rot))
     if not sp:
         return None
     sp = np.array(sp)
     spf = _medfilt3(sp)
     return {"cam_speed_med": round(float(np.median(spf)), 4), "cam_moving_frac": round(float((spf > 0.03).mean()), 3),
-            "cam_path_ps": round(float(spf.mean()), 4), "cam_pairs": int(len(sp))}
+            "cam_path_ps": round(float(spf.mean()), 4), "cam_pairs": int(len(sp)), **_cam_net(np.array(mov), fps)}
+
+
+def _cam_net(mv: np.ndarray, fps: float) -> dict:
+    """v4：有方向的连贯机位运动（AI 背景漂移是来回抖，净位移小；真运镜是一个方向走到底）。
+    tx / ty = 内容相对画面的累计平移（占宽 / 占高，正 = 向右 / 向下），zoom = 累计 log 缩放，rot = 累计弧度；
+    cam_net_ps = 净运动量 / 秒（对角线归一），cam_coherence = 净运动量 / 逐帧运动量之和（1 = 一个方向走到底）"""
+    if not len(mv):
+        return {}
+    dur = len(mv) / fps
+    tot = mv.sum(0)
+    net = float(np.hypot(tot[0], tot[1]) + abs(tot[2]) + abs(tot[3]))
+    path = float((np.hypot(mv[:, 0], mv[:, 1]) + np.abs(mv[:, 2]) + np.abs(mv[:, 3])).sum())
+    return {"cam_tx": round(float(tot[0]), 4), "cam_ty": round(float(tot[1]), 4), "cam_zoom": round(float(tot[2]), 4),
+            "cam_rot": round(float(tot[3]), 4), "cam_net_ps": round(net / dur, 4), "cam_coherence": round(net / path, 3) if path else 0.0}
 
 
 def analyze(path: Path, t0: float = 0.0, dur: float | None = None, fps: float = FPS, j4: bool = True, use_cache: bool = True) -> dict:
@@ -346,7 +361,7 @@ def clip_summary(a: dict) -> dict:
         s[k] = round(float(np.mean(v)), 4) if v else None
     s["faces"] = len(tr)
     cam = a.get("camera") or {}
-    for k in ("cam_speed_med", "cam_moving_frac", "cam_path_ps"):
+    for k in ("cam_speed_med", "cam_moving_frac", "cam_path_ps", "cam_net_ps", "cam_coherence", "cam_tx", "cam_ty", "cam_zoom", "cam_rot"):
         s[k] = cam.get(k)
     s["J4"] = a.get("J4")
     return s

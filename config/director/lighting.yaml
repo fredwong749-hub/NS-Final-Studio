@@ -15,6 +15,7 @@ ratios:
   natural: {ratio: "3:1", en: "a soft 3:1 key-to-fill ratio"}
   moody: {ratio: "5:1", en: "a moody 5:1 key-to-fill ratio"}
   dramatic: {ratio: "8:1", en: "a dramatic 8:1 key-to-fill ratio with deep shadows"}
+sources_note: 动机光源的本意是“光从画面里看得见的东西来”。本表是常用光源词表，不是白名单——【灯光】“动机光源=”里的光源项出现在本镜或本场的场景描述、道具里，或在本表里，都算合规；方向和布光比要求不变（总调度 fredw-2b 11-02 定，rubric_code.source_seen；CONSENT 记总调度名下，DIRECTOR 未在跑）
 sources:   # 动机光源 → 英文名 + 默认色温
   desk_lamp: {zh: [台灯], en: "the desk lamp", kelvin: 3000, tone: warm}
   ceiling_lamp: {zh: [顶灯, 吊灯, 灯泡, 顶光, 轿厢顶灯], en: "the ceiling lamp", kelvin: 3200, tone: warm}

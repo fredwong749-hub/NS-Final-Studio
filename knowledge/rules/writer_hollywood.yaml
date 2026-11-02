@@ -290,7 +290,7 @@ rules:
     title: 每个在画人物在 img 里写一个和场景物件的接触动作；不写正面直立对镜头
     when: 首帧 img（项目方 11-02 亲标 20 张融合样本，IMGFIX 分析：“自然”的图都是单人、非特写、人物和场景物件有接触、身体侧向；“贴图”的多是正面居中站立的设定图姿势）
     then: tools/script_rsi/staging.py check_shot：人物行“在画”的每个人，img 里写了他名字的分句至少一句带接触动作（扶 / 坐 / 拿 / 靠 / 握 / 撑 / 搭 / 按 / 端 / 托 / 倚 …）；同一分句既写站立又写正面 / 面向镜头 = 不过。“局部”人物不判。进 autoflow.all_fails（补丁目标 stage#H15-<镜>，每条 2 镜）和 rubric_audit.gate（导入闸门）
-    targets: [{kind: writer_prompt, section: 镜头字段}]
+    targets: [{kind: writer_prompt, section: 分拍与动作}]
     writer_text: 首帧里每个在画人物都要写一个“人名主语 + 接触动作 + 场景里的物件”的分句——扶着门框、坐在桌沿、手里拿着杯子、肩靠在墙上、手撑在吧台上；身体写侧向或四分之三侧。不要写人物正面直立、居中、对着镜头的设定图姿势。
     evidence:
       - {src: data/rsi/staging_dist_s1.json, note: "第一季 80 镜达标 20（25%），无接触 58"}
@@ -309,6 +309,90 @@ rules:
     writer_text: 两个人都要露脸的镜头用中景或更宽；要拍近景或特写时，只让一个人露脸，另一个人写成前景的肩、背影或手（人物行写“局部”）。
     evidence:
       - {src: data/rsi/staging_dist_s2.json, note: "第二季双人紧景别 12 镜；第一季 11 镜"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02
+  - id: K-WRT-H17
+    check: [tests/test_judge_agent.py]
+    domain: writer
+    link: P3-P4
+    title: 每集写出赌注：失败会失去什么，在画面或台词里看得见
+    when: 每集（JUDGE 第二季：9/10 集缺）
+    then: 评审条目 hollywood_judge.md §七 stakes（不能代码判）；v3 试点起写作必写
+    targets: [{kind: writer_prompt, section: 分拍与动作}]
+    writer_text: 每集都要让观众看见“这件事办砸了会失去什么”——具体的人、物、位置或关系（被收回的钥匙、要搬走的箱子、会被看见的名字），放进画面或台词里，不写抽象的担心。
+    evidence:
+      - {src: data/rsi/scores.jsonl, note: "JUDGE 第二季判断分（single_judge，非正式）共性弱点；总调度 11-02 定转规则"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02
+  - id: K-WRT-H18
+    check: [tests/test_judge_agent.py]
+    domain: writer
+    link: P3-P4
+    title: 对手戏要有诉求相反的阻碍方，当面施压或拒绝
+    when: 有对手戏的集（JUDGE：6 集缺）
+    then: 评审条目 §七 opposition；全集只有顺从、问候、配合 = 不满足
+    targets: [{kind: writer_prompt, section: 分拍与动作}]
+    writer_text: 对手戏里要有一方想要的和主角相反，并且当面施压、拒绝或设条件；不能整集都是顺从、问候和配合。可以为此补情节节点，但谁、在哪、什么关系不变。
+    evidence:
+      - {src: data/rsi/scores.jsonl, note: "JUDGE 第二季判断分（single_judge，非正式）共性弱点；总调度 11-02 定转规则"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02
+  - id: K-WRT-H19
+    check: [tests/test_hollywood_r5.py]
+    domain: writer
+    link: P3-P4
+    title: 结尾钩子在画面里：末镜最后 2 秒出现新信息，末镜不重复前一镜
+    when: 末镜（JUDGE：10/10 集缺）
+    then: rubric_code.v3_checks #1：末镜落在最后 2 秒的分拍有新信息动作词（新动作 / 新物件 / 新人入画），不能只靠 OS 疑问；末镜与前一镜 img 二字片段重合 ≥ 0.7 且景别相同 = 重复。v3 标记集（P4_epNN.md.v3）进补丁环和导入闸门
+    targets: [{kind: writer_prompt, section: 分拍与动作}]
+    writer_text: 末镜的最后 2 秒必须在画面里出现新东西：一个新动作、一件新物件被拿出 / 亮出，或新人入画；不要只靠独白里的疑问收尾，末镜也不要和前一镜是同一个画面。
+    evidence:
+      - {src: data/rsi/scores.jsonl, note: "JUDGE 第二季判断分（single_judge，非正式）共性弱点；总调度 11-02 定转规则"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02
+  - id: K-WRT-H20
+    check: [tests/test_hollywood_r5.py]
+    domain: writer
+    link: P3-P4
+    title: 一镜一个主动作，分拍不写转身 / 走动（与 Pika 参考对齐）
+    when: 每镜分拍（JUDGE：10/10 集缺）
+    then: rubric_code.v3_checks #2：分拍出现 转身 / 走向 / 走到 / 走过 / 走开 / 走近 / 走出 / 走进 / 穿过 / 迈步 等 = 不过；新人进画写“入画”。对齐 config/prompts/hollywood_pika_reference.md：站起 / 转身走开写成镜尾起势，下一镜首帧已到位
+    targets: [{kind: writer_prompt, section: 分拍与动作}]
+    writer_text: 一镜只放一个主动作。不写转身、走向、走过这类走动——要换位置就切到下一镜，下一镜开头人已经在新位置；要表现起身或离开，只写镜尾的起势（重心前移、手撑桌沿）。新人进画写“入画”。
+    evidence:
+      - {src: data/rsi/scores.jsonl, note: "JUDGE 第二季判断分（single_judge，非正式）共性弱点；总调度 11-02 定转规则"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02
+  - id: K-WRT-H21
+    check: [tests/test_judge_agent.py]
+    domain: writer
+    link: P3-P4
+    title: 潜台词：台词不直说意图，至少一处台词和同镜动作相反
+    when: 台词镜
+    then: 评审条目 §七 subtext_contrast（N02 只管有没有身体信号，这条要求相反）
+    targets: [{kind: writer_prompt, section: 分拍与动作}]
+    writer_text: 台词不要直说意图。每集至少有一处，台词和同一镜的动作是相反的：嘴上说没事，手在攥紧；嘴上说走吧，脚没动。
+    evidence:
+      - {src: data/rsi/scores.jsonl, note: "JUDGE 第二季判断分（single_judge，非正式）共性弱点；总调度 11-02 定转规则"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02
+  - id: K-WRT-H22
+    check: [tests/test_judge_agent.py]
+    domain: writer
+    link: P3-P4
+    title: 开场 5 秒：镜 1 交代谁遇到了什么事
+    when: 镜 1
+    then: 评审条目 §七 open5s（N03 只管前 5 秒有变化，这条要求人物在画 + 正在发生的事）
+    targets: [{kind: writer_prompt, section: 分拍与动作}]
+    writer_text: 镜 1 的前 5 秒要让观众知道“谁遇到了什么事”：主角在画，并且有一件正在发生的事（手机亮起、门被敲响、有人递来东西），不是空镜或氛围。
+    evidence:
+      - {src: data/rsi/scores.jsonl, note: "JUDGE 第二季判断分（single_judge，非正式）共性弱点；总调度 11-02 定转规则"}
     confidence: medium
     status: 待验
     date: 2026-11-02

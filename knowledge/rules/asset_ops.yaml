@@ -176,8 +176,8 @@ rules:
     link: [P6-P7, P7-P8]
     title: 渲染道隧道要有看门狗：探测失败自动重建，跳板不通时不乱杀
     when: 笔记本经 ssh -L 隧道（18188/18189/18191 → gpu33，18288/18289/18290 → gpu36）访问 ComfyUI 的任何时候
-    then: tools/autopilot/infra_watchdog.py serve（laptop_autostart.ps1 拉起）30 s 一拍并行探测 /system_stats；连续 2 拍不通 → 杀持有该 -L 的 ssh，交 tunnel.sh / tunnel_gpu36.sh 原有循环重连，之后每 4 拍再试一次；循环不在就按原脚本拉起；跳板 TCP 不通 → 不杀、开 A-RELAY 报警；重建后 3 拍仍不通开 A-TUNNEL-<端口>；注入测试 tools/autopilot/infra_inject_test.py（freeze = 进程活着转发卡死，kill = 断线），恢复须 ≤ 120 s
-    check: tests/test_infra_resident.py
+    then: tools/autopilot/infra_watchdog.py serve（laptop_autostart.ps1 拉起）30 s 一拍并行探测 /system_stats；连续 2 拍不通 → 杀持有该 -L 的 ssh，交 tunnel.sh / tunnel_gpu36.sh 原有循环重连，之后每 4 拍再试一次；循环不在就按原脚本拉起；跳板 TCP 不通 → 不杀、开 A-RELAY 报警；重建后 3 拍仍不通开 A-TUNNEL-<端口>；注入测试 tools/autopilot/infra_inject_test.py（freeze = 进程活着转发卡死，kill = 断线），恢复须 ≤ 120 s；⤴ 11-02 SYSARCH 4-3（总调度批）：修复职责整体交给 K-OPS-N01 / N10 的 tools/netfix/tunnel_supervisor.py，看门狗删掉杀 ssh / 拉循环段，只探测、连续 ALERT_AFTER 拍不通开 A-TUNNEL-<端口>；tunnel*.sh 循环与 infra_inject_test.py 已退役（隔离在 data/_quarantine/netfix_20261101/）
+    check: tests/test_infra_resident.py::test_tunnel_down_alerts_but_never_repairs
     evidence:
       - {src: data/qa/infra_inject.jsonl, note: "11-01 16:42 freeze 18288 → 109.4 s 恢复（看门狗 16:41:17 杀 ssh 35824）；16:43 kill 18288 → 42.6 s 恢复；首轮串行探测 138.5 s 超线 → 改并行"}
       - {src: ops/logs/tunnel.log, note: "16:18 总调度实测 18188 卡死、18189 断开无自动重连：tunnel.sh 只在 ssh 退出时重连，ssh 活着但转发卡死永不恢复"}

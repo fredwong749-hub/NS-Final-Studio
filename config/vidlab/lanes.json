@@ -1,7 +1,0 @@
-{
- "_doc": "VIDLAB A/B 借道执行（tools/vidlab/ab_run.py --runner ab）：各机 ComfyUI 端口 → GPU 序号、输出目录（不在代码里写死服务器路径；arch_scan hard_path）。仓库根目录读 config/policies/sentinel.yaml S6_config_parity.server_root。",
- "hosts": {
-  "gpu36": {"comfy_output": "/root/work/fredw/comfy/output/gpu{gpu}", "ports": {"8188": 0, "8189": 1, "8190": 2}},
-  "gpu33": {"comfy_output": "/root/claude-kimi-ns-studio-v1/ComfyUI/output/gpu{gpu}", "ports": {"8188": 0, "8189": 1, "8191": 3}}
- }
-}

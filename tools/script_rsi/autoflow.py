@@ -258,7 +258,8 @@ def facts_from_upstream(client, run_dir: Path, episode: int) -> dict:
     raise RuntimeError(f"事实表抽取失败：{err}")
 
 
-REQUIRE_V2 = {"on": False}      # claude_agent 写的新集（第二季 ep06 起）必须按 v2 写；旧稿只在已经用了 v2 标签时才判
+REQUIRE_V2 = {"on": False}
+REQUIRE_V3 = {"on": False}      # 总调度 11-02 v3 试点（第二季 ep01–03 起）：结尾钩子在画面里 + 一镜一个主动作，按集标记 P4_epNN.md.v3 开      # claude_agent 写的新集（第二季 ep06 起）必须按 v2 写；旧稿只在已经用了 v2 标签时才判
 
 
 def code_fails(pre: str, chunk: str, ep: int, wd: Path) -> list[tuple[str, dict]]:
@@ -267,9 +268,11 @@ def code_fails(pre: str, chunk: str, ep: int, wd: Path) -> list[tuple[str, dict]
     blocks = [RL.block_text(chunk, k) for k in range(len(shots))]
     cc = R5.RC6.code_checks(chunk, shots, blocks, RL.block_text(chunk, "head"), H.lint(chunk, ep)["codes"])
     if R5.RC6.uses_v2(blocks) or REQUIRE_V2.get("on"):      # K-WRT-805 / 806：第二季起的镜头块 v2 + 【灯光】
-        cc["v2"] = R5.RC6.v2_checks(shots, blocks)
+        cc["v2"] = R5.RC6.v2_checks(shots, blocks, pre + RL.block_text(chunk, "head"))
+    if REQUIRE_V3.get("on"):                                   # K-WRT-H19 / H20：v3 试点集（P4_epNN.md.v3 标记）
+        cc["v3"] = R5.RC6.v3_checks(shots, blocks)
     out = []
-    for d in list(R5.RC6.DIMS) + (["v2"] if "v2" in cc else []):
+    for d in list(R5.RC6.DIMS) + [x for x in ("v2", "v3") if x in cc]:
         for i, (ok, why) in cc[d].items():
             if not ok:
                 shots_ = sorted({int(x) for x in re.findall(r"镜(\d+)", why)} |

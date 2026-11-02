@@ -154,6 +154,9 @@ def gates(changed: list[str], run_tests: bool = True, root: Path | None = None, 
     if (root / "tools/qa/arch_scan.py").exists():      # K-OPS-S01（SYSARCH，总调度 03:0x 批准）：结构问题只许减、不许增
         code, out = sh([PY, "tools/qa/arch_scan.py", "--check"], 600)
         add("arch", "arch_scan --check（K-OPS-S01 棘轮）", code == 0, tail(out, 2))
+    if (root / "tools/vqa/regression_check.py").exists():   # VQA 回归集（VQAGATE K-REV-V19，总调度批准接进 cut 闸门）：确定性用例，本机约 1 分钟
+        code, out = sh([PY, "tools/vqa/regression_check.py"], 900)
+        add("vqa_regress", "VQA 回归集（K-REV-V19）", code == 0, tail(out, 2))
     code, out = sh([PY, "tools/qa/decision_check.py"], 900)
     m = re.search(r"合计 (\d+)：✅ (\d+)\s+❌ (\d+)\s+⏳ (\d+)", out)
     bad = int(m.group(3)) if m else -1
@@ -763,7 +766,13 @@ def deploy_host(rs, h: str, snap: Path, names: list[str], tracked_code: list[str
     ③ 代码按快照逐个核 sha、不同就重推；④ 写 data/system_version.txt；⑤ 热重启（按道排空由 restart 负责）"""
     pc = pc or load_push_check()
     r = {"at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    paused = False
     try:
+        if restart and urgent:   # K-OPS-F13 原子切换：推代码前先暂停派单（老进程不再拿新旧混杂的文件出新单），推完立刻排空重启
+            rs.ssh(h, f"cd {rs.R} && {rs.OFF}/venv/bin/python tools/autopilot/producer.py pause --by DEPLOY_ATOMIC "
+                      f"--note '部署 {sv}：推代码期间暂停派单，重启后恢复'", tries=3)
+            paused = True
+            r["paused_at"] = time.strftime("%H:%M:%S")
         with _Patched(rs, ROOT=snap, required_data=lambda: set()):   # 快照里没有 data/：代码推送不需要数据清单
             g = pc.run(code_only=True, tier=1, rs=rs, skip_guard=True)          # 快照在 cut 时已过 syntax_guard
             if g.get("verdict") != "PASS":
@@ -802,9 +811,19 @@ def deploy_host(rs, h: str, snap: Path, names: list[str], tracked_code: list[str
             rq = rq or load_restart_queue()
             q = rq.request(h, f"system_version deploy {sv}", by="system_version deploy", urgent=urgent)
             r["restart"] = f"queued {q['id']}（tools/autopilot/restart_queue.py，执行记录 data/autopilot/restart_done.jsonl）"
+            if urgent and hasattr(rq, "process"):     # K-OPS-F13：urgent 不等 loop 下一拍，当场按队列规则（排空 ≤90 s）执行，重启后 resume
+                done = rq.process(h, rs) or {}
+                r["restart"] += f"；当场执行 ok={done.get('ok')} drain={done.get('drain_mode') or done.get('drained')} {done.get('secs')} s"
+                paused = not done.get("ok")
         r["ok"] = True
     except Exception as e:  # noqa: BLE001
         r.update(ok=False, error=f"{type(e).__name__}: {e}"[:400])
+    if paused and not r.get("ok", False) or (paused and "当场执行 ok=False" in str(r.get("restart"))):
+        try:     # 部署没成：老进程继续生产（解除暂停）
+            rs.ssh(h, f"cd {rs.R} && {rs.OFF}/venv/bin/python tools/autopilot/producer.py resume --by DEPLOY_ATOMIC --note '部署未完成，恢复派单'", tries=3)
+            r["resumed_after_fail"] = True
+        except Exception as e2:  # noqa: BLE001
+            r["resume_error"] = repr(e2)[:200]
     return r
 
 
@@ -868,8 +887,21 @@ def build_expected(sv: str) -> tuple[bytes | None, dict]:
         return None, {"error": f"{type(e).__name__}: {e}"[:300]}
 
 
+INCIDENTS = ROOT / "data/rsi/release_incidents.jsonl"
+
+
+def record_incident(sv: str, kind: str, fixed_by: str | None, note: str = "") -> dict:
+    """发版事故账本（总调度 11-02 定：部署后需要热修 / 回滚的版本不算一次通过；SYSARCH 记分读这里）"""
+    rec = {"sv": sv, "kind": kind, "fixed_by": fixed_by, "by": "tools/qa/system_version.py", "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+           "note": note}
+    INCIDENTS.parent.mkdir(parents=True, exist_ok=True)
+    with open(INCIDENTS, "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    return rec
+
+
 def deploy(sv: str | None = None, hosts: list[str] | None = None, restart: bool = True, allow_old: bool = False,
-           urgent: bool = False) -> dict:
+           urgent: bool = False, hotfix_of: str | None = None) -> dict:
     why = deploy_guard(sv, allow_old)
     if why:
         raise SystemExit("deploy 拒绝：" + why)
@@ -893,6 +925,8 @@ def deploy(sv: str | None = None, hosts: list[str] | None = None, restart: bool 
         if v["id"] == sv:
             v.setdefault("deployed", {}).update({h: r for h, r in res["hosts"].items() if r.get("ok")})
             write_index(v)
+    if hotfix_of and res["hosts"] and all(x.get("ok") for x in res["hosts"].values()):
+        res["incident"] = record_incident(hotfix_of, "hotfix", sv, f"{sv} 热修 {hotfix_of}")
     (DATA / f"deploy_{sv}_{time.strftime('%H%M%S')}.json").write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
     return res
 
@@ -907,7 +941,8 @@ def rollback(sv: str) -> dict:
             f".venv/Scripts/python.exe tools/autopilot/state_snapshot.py restore {sv}   # 先预览；确认后加 --apply（校验 sha、先备份现状到 data/system_versions/{sv}/pre_restore_*，不删）", f".venv/Scripts/python.exe tools/qa/system_version.py cut --base {sv}   # 回退本身也记一版",
             ".venv/Scripts/python.exe tools/qa/system_version.py deploy"]
     return {"target": sv, "preview_stat": tail(stat, 40), "pending_local": len(pend), "commands": cmds,
-            "note": "只生成命令与差异预览，未执行；执行要总调度确认（K-OPS-V01）"}
+            "note": "只生成命令与差异预览，未执行；执行要总调度确认（K-OPS-V01）",
+            "incident_cmd": f".venv/Scripts/python.exe -c \"import importlib.util as u;s=u.spec_from_file_location('sv','tools/qa/system_version.py');m=u.module_from_spec(s);s.loader.exec_module(m);m.record_incident('<被回滚的版本>','rollback','{sv}')\"   # 执行回滚后记事故账本"}
 
 
 def status() -> dict:
@@ -929,6 +964,7 @@ def main(argv=None) -> int:
     d.add_argument("--no-restart", action="store_true")
     d.add_argument("--allow-old", action="store_true", help="部署非最新版本（只给回退流程用）")
     d.add_argument("--urgent", action="store_true", help="重启请求插队（K-OPS-W16 urgent，审计记 urgent_jump）")
+    d.add_argument("--hotfix-of", default=None, help="本版是热修哪一版：部署成功后自动记发版事故账本 data/rsi/release_incidents.jsonl")
     r = sp.add_parser("rollback")
     r.add_argument("sv")
     sp.add_parser("status")
@@ -946,7 +982,7 @@ def main(argv=None) -> int:
             print(f"  {'✅' if gg['ok'] else '❌'} {gg['name']}：{gg['detail'][:200]}")
         return 0 if out.get("ok") else 1
     if a.cmd == "deploy":
-        out = deploy(a.sv, a.hosts.split(",") if a.hosts else None, not a.no_restart, a.allow_old, a.urgent)
+        out = deploy(a.sv, a.hosts.split(",") if a.hosts else None, not a.no_restart, a.allow_old, a.urgent, a.hotfix_of)
         print(json.dumps(out, ensure_ascii=False, indent=1)[:4000])
         return 0 if out["hosts"] and all(x.get("ok") for x in out["hosts"].values()) else 1
     if a.cmd == "lock-status":       # K-OPS-F08：别的 agent 写代码前先查；退出码 3 = cut 进行中

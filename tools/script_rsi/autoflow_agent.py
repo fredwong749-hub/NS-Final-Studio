@@ -322,10 +322,68 @@ def post_step(run_dir: Path, ep: int, st, import_mode: str) -> dict:
     if not gate_ok:
         st.set(verdict="blocked_by_gate", next_action="一键返修")
         return st.d
+    mark_dirty(run_dir, ep, "过导入闸门")
+    re_ = reimport(run_dir, ep, final_p, sha, st)
+    if re_ is not None:                  # 这一季已经导入过（项目方闸门过过一次）→ 补丁后的新稿自动覆盖导入（总调度 11-02）
+        st.stage("import", "导入", "reimported" if re_.get("ok") else "reimport_failed", "code", **{k: v_ for k, v_ in re_.items() if k != "ok"})
+        st.set(verdict="imported" if re_.get("ok") else "import_failed", awaiting=None,
+               next_action="已用新稿覆盖导入；改了提示词的镜由下游按作业签名重置（K-OPS-E09）" if re_.get("ok") else "重新导入失败，看 stages.import")
+        return st.d
     st.stage("import", "导入", "dry_run_ok" if import_mode == "dry" else "awaiting_owner", "code" if import_mode == "dry" else "owner")
     st.set(verdict="importable", awaiting=None, next_action="项目方点“导入”（导入目标待 import-staged --run）")
-    mark_dirty(run_dir, ep, "过导入闸门")
     return st.d
+
+
+def _imported_shots(run: str, ep: int) -> dict | None:
+    """这一季导入稿（data/import/runs/<run>/script_v2.json）里第 ep 集每镜的 {镜号: 提示词签名}；没导入过 = None"""
+    import sys
+    sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+    import runs as RN
+    p = RN.import_path(run, ROOT)
+    if not p.exists():
+        return None
+    d = json.loads(p.read_text(encoding="utf-8"))
+    eps = d.get("episodes") or (d.get("script") or {}).get("episodes") or []
+    e = next((x for x in eps if int(x.get("number") or 0) == ep), None)
+    if e is None:
+        return {}
+    return {int(s.get("index")): _sha(json.dumps([s.get("img_prompt"), s.get("motion_prompt"), s.get("h3_prompt"), s.get("cast_raw")],
+                                                  ensure_ascii=False)) for s in e.get("shots") or []}
+
+
+def reimport(run_dir: Path, ep: int, final_p: Path, sha: str, st) -> dict | None:
+    """补丁过闸 + 事实核对通过后：这一季已经导入过（导入稿存在）且这一集的新稿和上次导入的不一样 → producer import-staged --run 覆盖
+    （同一通道：sha 核对 + rubric 闸门 + validate，按集合并、旧导入稿留备份）。返回 None = 这一季还没导入过（仍走项目方闸门）。
+    改了提示词的镜号记在 changed_shots；已出过图的镜由下游按作业签名（K-OPS-E09 job_sig vs ladder_sig）重置，不在这里动作业。"""
+    before = _imported_shots(run_dir.name, ep)
+    if before is None:
+        return None
+    if st.d.get("imported_sha") == sha:
+        return {"ok": True, "skipped": "这一稿已经导入过", "sha256": sha}
+    from ns_agent.importer.script_md import import_script
+    e = next((x for x in import_script(final_p).episodes if x.number == ep), None)
+    after = {s.index: _sha(json.dumps([s.img_prompt, s.motion_prompt, s.h3_prompt, s.cast_raw], ensure_ascii=False)) for s in (e.shots if e else [])}
+    changed = sorted(k for k in after if before.get(k) != after[k])
+    if before and not changed and set(before) == set(after):    # 导入稿里这一集和新稿逐镜一致：不重导
+        st.set(imported_sha=sha, reimport_changed_shots=[])
+        return {"ok": True, "skipped": "导入稿与新稿逐镜一致", "sha256": sha, "changed_shots": []}
+    import subprocess
+    r = subprocess.run([sys_exe(), "tools/autopilot/producer.py", "import-staged", "--obj", H.RC._rel(final_p), "--reason", sha,
+                        "--run", run_dir.name, "--by", "PRODUCER autoflow", "--note",
+                        f"autoflow {run_dir.name} ep{ep:02d} 补丁过闸 + 事实核对 0 偏差，新稿覆盖导入（总调度 11-02）；改了的镜 {changed}"],
+                       cwd=ROOT, capture_output=True, timeout=1800, env={**__import__("os").environ, "PYTHONUTF8": "1"})
+    out = (r.stdout.decode("utf-8", "replace").strip().splitlines() or [""])[-1]
+    ok = r.returncode == 0
+    if ok:
+        st.set(imported_sha=sha, reimport_changed_shots=changed)
+        st.d.setdefault("agent_history", []).append({"step": "reimport", "accepted": True, "note": f"覆盖导入，改了的镜 {changed}"})
+        st.save()
+    return {"ok": ok, "sha256": sha, "changed_shots": changed, "out": out[:300]}
+
+
+def sys_exe() -> str:
+    import sys
+    return sys.executable
 
 
 def ending_of(text: str, ep: int) -> str:
@@ -445,6 +503,7 @@ def run(run_dir: Path, ep: int, import_mode: str) -> dict:
     intake_full_p4(RCH, run_dir, ep, st, ctx)
     p4_exists = (run_dir / f"P4_ep{ep:02d}.md").exists()
     AF.REQUIRE_V2["on"] = not p4_exists or (run_dir / f"P4_ep{ep:02d}.md.v2").exists()   # 新写 / 重写的集按 v2（K-WRT-805 / 806）
+    AF.REQUIRE_V3["on"] = (run_dir / f"P4_ep{ep:02d}.md.v3").exists()                   # v3 试点（K-WRT-H19 / H20，总调度 11-02）
     if not chain_step(RCH, run_dir, ep, st, ctx):
         return st.d
     return post_step(run_dir, ep, st, import_mode)

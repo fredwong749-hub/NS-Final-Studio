@@ -275,6 +275,16 @@ def merge_gaze(v: dict, faces: list[dict] | None, prompt: str) -> None:
             and f.get("bs_y", 0) <= D and f.get("blink", 0) <= BL]
     v["gaze_mp"] = {"faces": [{k: f.get(k) for k in ("yaw_n", "pitch_n", "eye_x", "gaze_x", "bs_y", "blink")} for f in faces][:4],
                     "hits": len(hits)}
+    c0 = v.setdefault("checks", {})
+    if (g.get("primary") and not hits and faces and (c0.get("eye_contact") or {}).get("s") == "defect"
+            and len(faces) >= len([p for p in v.get("people") or [] if isinstance(p, dict)])
+            and all(abs(A * f["yaw_n"] + f["eye_x"]) > float(g.get("band", 2.0)) * T for f in faces)):
+        # 总调度 11-02（0.5 / 0.6 MP 之间 VLM eye_contact 来回翻，判定余量薄）：gaze_mp 主判——测到的每张脸都明显没看镜头（> band×T）、
+        # 且测到的脸数不少于看图数到的人数 → VLM 的 defect 降为 ok（证据保留原判）。A/B 见 GATE_CALIBRATION §19，开关 gate.gaze_mp.primary
+        c0["eye_contact"] = {"s": "ok", "e": f"gaze_mp 主判：{len(faces)} 张脸都明显没看镜头；看图模型原判 defect（{str(c0['eye_contact'].get('e') or '')[:60]}）"}
+        v["defects"] = [d for d in v.get("defects") or [] if d != "eye_contact"]
+        v["gaze_mp"]["primary_override"] = True
+        return
     if not hits or rubric.spec_from_prompt(prompt).get("camera_ok") == "允许":
         return
     c = v.setdefault("checks", {})
@@ -553,6 +563,22 @@ def q1a_vlm(pf: dict, image) -> str | None:
     pf["blocking"] = sorted(set(pf.get("blocking") or []) | {"Q1a"})
     pf.setdefault("reasons", []).append("Q1a " + note)
     return note
+
+
+def hair_primary(pf: dict, v: dict | None) -> bool:
+    """总调度 11-02（发色判定余量薄：0.5 / 0.6 MP 之间 VLM hair_mismatch 来回翻）：Q1a 确定性分割主判——
+    Q1a 用分割测过且 pass（q1a_mode=seg）→ VLM 的 hair_mismatch 降为 unsure（只作旁证）；Q1a fail 照拦；Q1a 没测 / vlm_only → VLM 照判。
+    开关 gate.hair_primary（A/B 见 GATE_CALIBRATION §19）。→ 是否降级"""
+    if not v or not gate_cfg().get("hair_primary") or "hair_mismatch" not in (v.get("defects") or []):
+        return False
+    it = next((i for i in pf.get("items") or [] if i.get("id") == "Q1a"), None)
+    if not it or it.get("status") != "pass" or (it.get("evidence") or {}).get("q1a_mode") != "seg":
+        return False
+    v["defects"] = [d for d in v["defects"] if d != "hair_mismatch"]
+    v["unsure"] = sorted(set(v.get("unsure") or []) | {"hair_mismatch"})
+    c = (v.get("checks") or {}).get("hair_mismatch") or {}
+    v.setdefault("checks", {})["hair_mismatch"] = {"s": "unsure", "e": "Q1a 分割主判已过；看图原判 defect：" + str(c.get("e") or "")[:80]}
+    return True
 
 
 def _q1a_alert(image: str, why: str) -> None:

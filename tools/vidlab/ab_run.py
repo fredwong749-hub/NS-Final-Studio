@@ -64,8 +64,6 @@ def add_camctl(e: dict, v: dict) -> None:
 def plan(e: dict) -> list[dict]:
     vs = LAB.plan(e)
     for v in vs:
-        if v["arm"].get("camctl"):
-            add_camctl(e, v)
         for cls, key, val in v["arm"].get("graph_set") or []:
             hit = 0
             for n in v["graph"].values():
@@ -75,6 +73,11 @@ def plan(e: dict) -> list[dict]:
             if not hit:
                 raise SystemExit(f"{v['arm']['id']}：图里没有 {cls}.{key}")
             v["prompt_notes"] = v["prompt_notes"] + [f"graph_set {cls}.{key} = {val}"]
+            if cls == "MiniMaxH3ImageToVideo" and key == "length":
+                v["frames"] = int(val)
+                v["score_meta"]["frames"] = int(val)
+        if v["arm"].get("camctl"):          # 在 graph_set 之后：控制视频帧数跟改过的 length 走
+            add_camctl(e, v)
     return vs
 
 
@@ -112,9 +115,11 @@ def main(argv):
             # 借道专用执行器：已部署的 tools/director/ab_runner.py（只往 borrowed_lanes 里的道交单，client 前缀 vidlab-），
             # 配置随实验放服务器 <exp>/ab_runner.json；借道起止由 DEBUG-RSI 登记，本工具只在拿到确认后用
             port = lane or 8189
-            lanes = VIO.read_json(ROOT / "config" / "vidlab" / "lanes.json")["hosts"][LAB.HOST]
-            gi = lanes["ports"][str(port)]
-            cfg = {"lane": f"{LAB.HOST}:{gi}", "port": port, "out": lanes["comfy_output"].format(gpu=gi),
+            sys.path.insert(0, str(ROOT / "tools" / "factory"))
+            import hosts as HOSTS   # 车道表唯一来源 config/factory/hosts.json（SYSARCH 4-2）
+            ln = next(k for k, rec in HOSTS.lanes(LAB.HOST, enabled=None).items() if int(rec.get("comfy_port") or 0) == port)
+            gi = ln.split(":")[1]
+            cfg = {"lane": f"{LAB.HOST}:{gi}", "port": port, "out": HOSTS.comfy_output(ln),
                    "client_prefix": "vidlab-", "dedicated": True, "borrowed_lanes": [f"{LAB.HOST}:{gi}"],
                    "borrowed_by": "DEBUG-RSI 窗口（总调度批）", "exp": e["name"]}
             dsrv = f"{LAB.SRV}/{e['name']}"
@@ -122,9 +127,7 @@ def main(argv):
                                input=json.dumps(cfg, ensure_ascii=False).encode(), timeout=120)
             if r.returncode:
                 raise RuntimeError(f"上传 ab_runner 配置失败 rc={r.returncode}")
-            import yaml
-            pol = yaml.safe_load((ROOT / "config" / "policies" / "sentinel.yaml").read_text(encoding="utf-8"))
-            repo = pol["items"]["S6_config_parity"]["value"]["server_root"]   # 服务器仓库根目录（策略文件唯一来源）
+            repo = HOSTS.server_root(LAB.HOST)   # 服务器仓库根目录（hosts.json）
             orig = LAB.ssh
 
             def ssh_ab(c, timeout=1800):

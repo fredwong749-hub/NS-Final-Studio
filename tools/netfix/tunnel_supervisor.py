@@ -284,10 +284,13 @@ class Supervisor:
         """内层连接挂哪条底座：优先自己配置的那条（按道分摊），它不通就挂另一条通的；都不通 → None"""
         pref = self.c["hosts"][h].get("base") or (self.bases() or [None])[0]
         order = [pref] + [b for b in self.bases() if b != pref]
-        for b in order:
-            if b and (self.hosts.get(b) or {}).get("state") == "up":
-                return b
-        return None
+        ups = [b for b in order if b and (self.hosts.get(b) or {}).get("state") == "up"]
+        good = [b for b in ups if not self.degraded(b)]    # 11:5x 实测：base-b（直连，丢包 16%）banner 20 s、其上道反复超时 → 劣化的底座不优先
+        return (good or ups or [None])[0]
+
+    def degraded(self, b: str) -> bool:
+        """底座劣化：最近连续 ≥ degraded_after 次 banner 慢（> 5 s）或读不到"""
+        return (self.hosts.get(b) or {}).get("slow_streak", 0) >= self.c.get("degraded_after", 2)
 
     def pick_route(self) -> str:
         """K-OPS-N08：按 route_order 选第一条“入口 TCP 通且没被判坏”的路；都不行用 direct"""
@@ -447,8 +450,13 @@ class Supervisor:
             res = [ssh_banner(lp) for lp, _ in hc["forwards"]]
             t = now()
             st["banner_s"] = round(t - t0, 1)
-            if t - t0 > 5:
+            slow = t - t0 > 5 or not all(res)
+            was = self.degraded(h)
+            st["slow_streak"] = st.get("slow_streak", 0) + 1 if slow else 0
+            if slow:
                 self.log("BASE banner slow", h, f"{t - t0:.1f}s", res)
+            if self.degraded(h) != was:
+                self.log("BASE degraded" if not was else "BASE recovered", h, f"slow_streak={st['slow_streak']}")
             st["probe_t"] = t
             st["ports"] = {str(lp): {"remote": rp, "ok": ok, "why": "ok" if ok else "no_banner", "checked_t": t}
                            for (lp, rp), ok in zip(hc["forwards"], res)}
@@ -591,11 +599,12 @@ class Supervisor:
             hc = self.c["hosts"][h]
             if hc.get("via") != "t" or not st["pid"] or st["state"] != "up":
                 continue
-            want = hc.get("base")
+            want = self.pick_base(h)                 # 首选底座；首选劣化时 = 另一条健康的
             wb = self.hosts.get(want) or {}
-            if (st.get("route") != "t" or st.get("base") != want) and wb.get("state") == "up" and \
-                    t - (wb.get("up_since_t") or t) >= self.c.get("migrate_after_s", 120):
-                self.stop_host(h, f"迁回首选底座 {st.get('base')} → {want}", count=False)
+            cur_bad = self.degraded(st.get("base") or "")
+            if want and (st.get("route") != "t" or st.get("base") != want) and wb.get("state") == "up" and \
+                    (cur_bad or t - (wb.get("up_since_t") or t) >= self.c.get("migrate_after_s", 120)):
+                self.stop_host(h, f"迁到底座 {st.get('base')} → {want}" + ("（原底座劣化）" if cur_bad else "（回首选）"), count=False)
                 st["fails"], st["next_try_t"] = 0, 0.0
                 break
         if due:                                     # 两台并行探测：一拍最长约一个探测超时（20 s），心跳不拖过 90 s 线

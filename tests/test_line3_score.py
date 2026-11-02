@@ -65,3 +65,9 @@ def test_script_part_mixes_code_70_narrative_30(L3):
     assert eps[0]["parts"]["script"] == 35.0 and eps[0]["narrative_fail"] == []
     assert eps[1]["parts"]["script"] == round(35 * (0.7 + 0.3 * 6 / 7), 2) and eps[1]["narrative_fail"] == ["N06"]
     assert eps[2]["parts"]["script"] == round(35 * (0.7 * 18 / 27 + 0.3 * 6 / 7), 2) and eps[2]["narrative_fail"] == ["N05"]
+
+
+def test_automation_counts_reimported(L3, tmp_path):
+    """autoflow 覆盖导入后 verdict=imported（总调度 11-02），仍算无人干预到可导入"""
+    (tmp_path / "autoflow_ep01.json").write_text(json.dumps({"episode": 1, "verdict": "imported", "agent_history": [{"step": "reimport"}]}), encoding="utf-8")
+    assert L3.automation(tmp_path)[1] == [1]

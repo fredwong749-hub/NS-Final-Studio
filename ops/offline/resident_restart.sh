@@ -6,6 +6,8 @@
 set -u
 SELF=$1; MODE=${2:-all}; OFF=/root/work/fredw/offline_20261101
 R=$OFF/repo
+# 第二季等额外剧的 producer（ensure_runs.sh，K-OPS-W25）：night-only 以外的模式先停、最后再按 runs.json 起
+[ "$MODE" != "night-only" ] && bash $R/ops/offline/ensure_runs.sh $SELF stop
 for n in night producer; do
   f=$OFF/run/$n.pid; [ -f $f ] || continue; p=$(cat $f)
   if kill -0 $p 2>/dev/null && grep -q "night.py\|producer.py" /proc/$p/cmdline 2>/dev/null; then
@@ -46,3 +48,4 @@ elif [ "$MODE" = "night-only" ]; then
 else
   bash $OFF/start.sh $SELF
 fi
+[ "$MODE" != "night-only" ] && bash $R/ops/offline/ensure_runs.sh $SELF

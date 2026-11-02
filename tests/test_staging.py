@@ -55,3 +55,13 @@ def test_rules_registered():
     af = (ROOT / "tools/script_rsi/autoflow.py").read_text(encoding="utf-8")
     ra = (ROOT / "tools/script_rsi/rubric_audit.py").read_text(encoding="utf-8")
     assert "staging.py" in af and "staging.py" in ra
+
+
+def test_spliced_contact_clause_flagged(ST):
+    """FACTCHECK 11-02：补丁把接触分句插进视线句中间 → 判不过"""
+    cast = [("林晚", "在画"), ("顾沉", "在画")]
+    bad = "中景，林晚坐在桌沿，林晚的视线落在画面右侧顾沉的右手搭着长桌拐角，顾沉的手撑着桌面"
+    r = ST.check_shot(bad, cast)
+    assert not r["ok"] and r["spliced"] and "插断" in ST.why(r)
+    good = "中景，林晚坐在桌沿，林晚的视线落在画面右侧的顾沉身上，顾沉的右手搭着长桌拐角"
+    assert ST.check_shot(good, cast)["ok"]

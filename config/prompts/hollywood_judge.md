@@ -143,3 +143,13 @@ met 与 unmet 的编号合起来必须正好是 1–5，每条只出现一次。
            "conflict": [...], "turns": [...], "gos": [...], "show": [...], "specificity": [...], "pika": [...], "consistency": [...],
            "subtext": [...], "endhook": [...]}}
 规则：met=true 必须给 evidence，且 evidence 必须是镜头块里能逐字找到的原文；“全文不含 X”这类条件，evidence 写“全文检索无 X”。没有证据就写 met=false。
+
+## 七、v3 判断条目（总调度 11-02，来自 JUDGE 第二季共性弱点；和 §三 的 50 分分开记）
+
+在 §六 的 JSON 里再加一个 "v3" 键，每条格式同 §六（met + 逐字 evidence + why）：
+{"v3": [{"id": "stakes", ...}, {"id": "opposition", ...}, {"id": "subtext_contrast", ...}, {"id": "open5s", ...}]}
+- stakes（赌注）：画面或台词里看得见“失败会失去什么”（具体的人、物、位置、关系），不是抽象情绪。
+- opposition（阻碍方）：有一方诉求和主角相反，并在本集当面施压或拒绝；全集只有顺从、问候、配合 = 不满足。
+- subtext_contrast（潜台词反差）：至少一处台词和同一镜的动作相反（嘴上说没事，手在攥紧），台词不直说意图。
+- open5s（开场 5 秒）：镜 1 交代“谁遇到了什么事”（人物在画 + 一件正在发生的事），不是空镜或氛围。
+另外在 JSON 顶层写 "judge_id"：你自己的评审 agent 名或 id（σ 检验要求 3 份来自 3 个不同评审）。

@@ -241,3 +241,34 @@ def test_deploy_refuses_restart_when_server_deps_missing(tmp_path):
     rs.deps_rc = 1
     r = SV.deploy_host(rs, "gpu33", tmp_path, [], [], "sv-x", "c", restart=True, pc=pc, rq=rq)
     assert r["ok"] is False and "运行依赖不齐" in r["error"] and rq.reqs == []
+
+
+def test_gates_include_vqa_regression_and_hotfix_ledger(tmp_path, monkeypatch):
+    s = (ROOT / "tools/qa/system_version.py").read_text(encoding="utf-8")
+    g = s[s.index("def gates("):s.index("def staged_problems(")]
+    assert "tools/vqa/regression_check.py" in g
+    monkeypatch.setattr(SV, "INCIDENTS", tmp_path / "inc.jsonl")
+    SV.record_incident("sv-x", "hotfix", "sv-y", "n")
+    rec = __import__("json").loads((tmp_path / "inc.jsonl").read_text(encoding="utf-8").strip())
+    assert rec["sv"] == "sv-x" and rec["kind"] == "hotfix" and rec["fixed_by"] == "sv-y"
+
+
+def test_urgent_deploy_pauses_then_restarts_now(tmp_path):
+    """K-OPS-F13 原子切换：urgent 部署先暂停派单再推代码，当场执行重启；失败时恢复派单"""
+    class RQ(_FakeRQ):
+        def process(self, h, rs):
+            return {"ok": True, "secs": 5}
+    rs, pc, rq = _FakeRS(tmp_path), _FakePC(), RQ()
+    (tmp_path / "tools").mkdir()
+    cmds = []
+    orig = rs.ssh
+    rs.ssh = lambda h, cmd, data=None, tries=3: (cmds.append(cmd), orig(h, cmd, data, tries))[1]
+    r = SV.deploy_host(rs, "gpu36", tmp_path, [], [], "sv-x", "c", restart=True, pc=pc, rq=rq, urgent=True)
+    assert r["ok"] and "当场执行 ok=True" in r["restart"] and "pause" in cmds[0]
+    rs2, rq2 = _FakeRS(tmp_path), RQ()
+    rs2.deps_rc = 1
+    cmds2 = []
+    o2 = rs2.ssh
+    rs2.ssh = lambda h, cmd, data=None, tries=3: (cmds2.append(cmd), o2(h, cmd, data, tries))[1]
+    r2 = SV.deploy_host(rs2, "gpu36", tmp_path, [], [], "sv-x", "c", restart=True, pc=pc, rq=rq2, urgent=True)
+    assert r2["ok"] is False and r2.get("resumed_after_fail") and "resume" in cmds2[-1]

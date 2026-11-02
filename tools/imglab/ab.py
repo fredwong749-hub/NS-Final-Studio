@@ -29,6 +29,11 @@ for p in ("services/agent", "packages/schema", "services/render_router", "tools/
         sys.path.insert(0, str(ROOT / p))
 
 FUN_CN = "qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors"
+# 可选基座臂：KLEIN / MOSS = 官方模板默认；带后缀的臂改参数（调参 A/B 在这里登记，臂名即配方变体）
+BASE_ARM_PARAMS = {
+    "KLEIN_s8": {"steps": 8}, "KLEIN_s24": {"steps": 24}, "KLEIN_noref": {"max_refs": 0},
+    "MOSS_s15": {"steps": 15}, "MOSS_cfg4": {"cfg": 4.0}, "MOSS_edit": {"use_edit_lora": True},
+}
 POSE_DIR = ROOT / "data/ab/imglab/pose"
 
 
@@ -155,8 +160,16 @@ def run(rnd: str, shots: list[str], arms: list[str], seed_spec: str, lanes: list
                 up = lambda p: client.upload_image(p, subfolder="ns_ab/imglab")  # noqa: E731
                 wf, eff, sent = UF.build_graph({"prompt": job["prompt"], "refs": job["refs"]}, seed, up,
                                                f"ns_ab/imglab/{rnd}/{sid}_{arm}_s{seed}")
-                pose_name = up(pf) if arm != "A0" else None
-                wf = arm_graph(wf, arm, pose_name)
+                if arm.split("_")[0] in ("KLEIN", "MOSS"):      # 可选基座（tools/imglab/bases.py）；S★ 后期（缩回 768×1344 + 锐化）照用，便于同口径打分
+                    import bases as BS
+                    base = arm.split("_")[0].lower()
+                    names = [up(ROOT / r) for r in job["refs"]] if BS.BASES[base]["max_refs"] or "edit" in arm.lower() else []
+                    wf = BS.build(base, job["prompt"], names, seed, f"ns_ab/imglab/{rnd}/{sid}_{arm}_s{seed}",
+                                  BASE_ARM_PARAMS.get(arm, {}))
+                    pose_name = None
+                else:
+                    pose_name = up(pf) if arm != "A0" else None
+                    wf = arm_graph(wf, arm, pose_name)
                 t0 = time.time()
                 entry, secs = client.run(wf, timeout_s=1800)
                 warm = True

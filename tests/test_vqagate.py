@@ -827,3 +827,40 @@ def test_autosign_history_skips_quarantined_and_logs_false_reject(monkeypatch, t
     monkeypatch.setattr(A, "FALSE_REJECT", tmp_path / "fr.jsonl")
     A.false_reject("renders/x.png", "总调度判过")
     assert A._rows(tmp_path / "fr.jsonl")[0]["human"] == "pass"
+
+
+def test_gaze_primary_switch(monkeypatch, enf):
+    """总调度 11-02：gaze_mp 主判（开关 gate.gaze_mp.primary）——每张脸都明显没看镜头且脸数够 → VLM defect 降 ok；关着不动；脸数不够不动"""
+    enf["gate"]["gaze_mp"] = {"enabled": True, "A": 0.3, "T": 0.05, "P": 0.2, "band": 2.0, "primary": False}
+    away = {"yaw_n": 1.3, "eye_x": 0.7, "pitch_n": 0.05, "bs_y": 0.0, "blink": 0.0}
+
+    def v(n_people=1):
+        return {"checks": {"eye_contact": {"s": "defect", "e": "男左眼正对镜头"}}, "defects": ["eye_contact"],
+                "people": [{"who": "x"}] * n_people}
+    x = v(); VQ.merge_gaze(x, [away], "")
+    assert x["defects"] == ["eye_contact"]                       # 开关关着：现行
+    enf["gate"]["gaze_mp"]["primary"] = True
+    x = v(); VQ.merge_gaze(x, [away], "")
+    assert x["defects"] == [] and x["checks"]["eye_contact"]["s"] == "ok"
+    x = v(2); VQ.merge_gaze(x, [away], "")
+    assert x["defects"] == ["eye_contact"]                       # 看图数到 2 人、gaze_mp 只测到 1 张 → 不降
+    near = {**away, "yaw_n": 0.0, "eye_x": 0.08}                 # 带内（0.05–0.1）→ 不降，交复判
+    x = v(); VQ.merge_gaze(x, [near], "")
+    assert x["defects"] == ["eye_contact"]
+
+
+def test_hair_primary_switch(enf):
+    """总调度 11-02：发色 Q1a 分割主判（开关 gate.hair_primary）——Q1a seg pass → VLM hair_mismatch 降 unsure；Q1a fail / vlm_only / 关着不动"""
+    def pf(st="pass", mode="seg"):
+        return {"items": [{"id": "Q1a", "status": st, "evidence": {"q1a_mode": mode}}]}
+
+    def v():
+        return {"checks": {"hair_mismatch": {"s": "defect", "e": "发色偏灰"}}, "defects": ["hair_mismatch"], "unsure": []}
+    x = v()
+    assert VQ.hair_primary(pf(), x) is False and x["defects"] == ["hair_mismatch"]   # 关着
+    enf["gate"]["hair_primary"] = True
+    x = v()
+    assert VQ.hair_primary(pf(), x) and x["defects"] == [] and "hair_mismatch" in x["unsure"]
+    for p_ in (pf("fail"), pf("pass", "vlm_only")):
+        x = v()
+        assert VQ.hair_primary(p_, x) is False and x["defects"] == ["hair_mismatch"]

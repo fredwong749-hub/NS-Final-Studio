@@ -25,6 +25,7 @@ CONTACT = re.compile(r"扶|坐|拿|靠|倚|握|撑|搭|按|捏|端|托|抱|攥|�
 UPRIGHT = re.compile(r"站着|站在|站立|直立|笔直地站|立在")
 FRONTAL = re.compile(r"正面|面向镜头|面对镜头|看向镜头|直视镜头|对着镜头|看镜头|朝向镜头")
 TIGHT = ("大特写", "特写", "近景", "中近景")
+SPLICE_PART = r"的(?:左手|右手|手|左肩|右肩|肩|后背|背|手肘|手指|后腰|腰)[^，；。]{0,8}?(?:扶|撑|倚|贴|靠|搭|按|抵)"
 SIZES = ["大特写", "中近景", "中全景", "特写", "近景", "中景", "全景", "远景"]
 
 
@@ -49,8 +50,12 @@ def check_shot(img: str, cast: list[tuple[str, str]]) -> dict:
             frontal.append(n)
     size = _size(img or "")
     tight_pair = len(on) >= 2 and size in TIGHT
-    return {"ok": not no_contact and not frontal and not tight_pair, "no_contact": no_contact, "frontal": frontal,
-            "tight_pair": on if tight_pair else [], "size": size}
+    # 插断的分句（FACTCHECK 11-02 发现：补丁把“<名>的手 / 肩 + 接触”插进了另一句中间，如“视线落在林晚的左手扶着矮柜边缘”“停在林晚的后背贴在砖墙上”）
+    names = [n for n, _p in cast]
+    spliced = [c.strip()[:40] for c in clauses for a in names for b in names
+               if a != b and re.search(re.escape(a) + r"[^，；。]{1,14}?" + re.escape(b) + SPLICE_PART, c)]
+    return {"ok": not no_contact and not frontal and not tight_pair and not spliced, "no_contact": no_contact, "frontal": frontal,
+            "tight_pair": on if tight_pair else [], "size": size, "spliced": sorted(set(spliced))}
 
 
 def staging_rows(text: str, ep_no: int | None = None) -> list[dict]:
@@ -77,6 +82,8 @@ def why(row: dict) -> str:
                      "人名主语 + 接触动作 + 场景里的物件（扶着门框 / 坐在桌沿 / 拿着杯子 / 靠在墙上），身体写侧向")
     if row["frontal"]:
         parts.append(f"{'、'.join(row['frontal'])} 写成了正面直立对镜头（设定图姿势，K-WRT-H15）——改成侧身 / 坐 / 倚靠，视线落在画里的人或物上")
+    if row.get("spliced"):
+        parts.append(f"接触分句插断了别的句子：{row['spliced']}（K-WRT-H15）——接触分句单独成句，以人名开头放在逗号之间，原句（视线落点 / 走位）补完整")
     if row["tight_pair"]:
         parts.append(f"{row['size']}里 {'、'.join(row['tight_pair'])} 两人都露脸（K-WRT-H16）——改成中景以上，或把其中一人写成前景“局部”（肩 / 背影 / 手）")
     return "；".join(parts)
@@ -103,6 +110,38 @@ def season_dist(paths: list[Path]) -> dict:
     return {"total": tot, "episodes": per}
 
 
+def supplement(paths: list[Path]) -> list[dict]:
+    """已拍季（第一季）不返修剧本：给 H15 不达标的镜列出“编译层补充”候选——缺接触的在画人物 + 本镜场景的固定陈设（场景表原文），
+    交编译层负责方（ns_agent，IMGFIX）在首帧编译时补一句“<人名>的手扶着 / 靠着 <陈设>”；已定稿（已过闸 / 已批）的镜由编译层按生产状态跳过"""
+    from ns_api import script_chat as SC
+    from ns_agent.importer.script_md import import_script
+    header, _ = SC.script_header(registry={})
+    out = []
+    for p in paths:
+        t = p.read_text(encoding="utf-8")
+        m = re.search(r"ep(\d+)", p.name)
+        ep = int(m.group(1)) if m else None
+        text = header + "\n---\n\n" + t[t.find("## ep"):]
+        with tempfile.TemporaryDirectory() as td:
+            f = Path(td) / "cand.md"
+            f.write_text(text, encoding="utf-8")
+            si = import_script(f)
+        lib = {x.scene_id: x for x in (si.globals.scene_library or [])} if getattr(si.globals, "scene_library", None) else {}
+        for e in si.episodes:
+            if ep is not None and e.number != ep:
+                continue
+            for sh in sorted(e.shots, key=lambda q: q.index):
+                cast = [(c.name, c.presence or "在画") for c in (sh.cast or [])]
+                r = check_shot(sh.img_prompt or "", cast)
+                if r["ok"]:
+                    continue
+                sc = lib.get(sh.scene_id)
+                out.append({"shot": f"ep{e.number:02d}-S{sh.index}", "no_contact": r["no_contact"], "tight_pair": r["tight_pair"],
+                            "size": r["size"], "scene_id": sh.scene_id, "fixtures": getattr(sc, "fixtures", None) if sc else None,
+                            "scene_detail": sh.scene_detail})
+    return out
+
+
 def main(argv=None) -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -114,8 +153,21 @@ def main(argv=None) -> int:
     d = sub.add_parser("dist", help="分布：给一组稿（glob，相对仓库根）算 H15 / H16 达标率")
     d.add_argument("--glob", action="append", required=True)
     d.add_argument("--out", default="")
+    sp = sub.add_parser("supplement", help="已拍季：H15 / H16 不达标镜的编译层补充候选（不改剧本）")
+    sp.add_argument("--glob", action="append", required=True)
+    sp.add_argument("--out", required=True)
     a = ap.parse_args(argv)
     paths = sorted({p for g in a.glob for p in ROOT.glob(g)})
+    if a.cmd == "supplement":
+        rows = supplement(paths)
+        op = ROOT / a.out
+        op.parent.mkdir(parents=True, exist_ok=True)
+        tmp = op.with_suffix(op.suffix + ".tmp")
+        tmp.write_text(json.dumps({"rule": "K-WRT-H15/H16", "shots": rows}, ensure_ascii=False, indent=1), encoding="utf-8")
+        tmp.replace(op)
+        print(json.dumps({"shots": len(rows), "no_contact": sum(bool(r["no_contact"]) for r in rows),
+                          "tight_pair": sum(bool(r["tight_pair"]) for r in rows), "out": a.out}, ensure_ascii=False))
+        return 0
     res = season_dist(paths)
     if a.out:
         op = ROOT / a.out

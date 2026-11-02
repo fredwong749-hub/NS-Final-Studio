@@ -86,3 +86,42 @@ def test_v2_shot_block_and_lighting_checks():
     r2 = RC.v2_checks([S()], [bad])
     assert not r2[1][0] and not r2[2][0]
     assert RC.uses_v2([good]) and not RC.uses_v2(["**镜1｜img**：近景"])
+
+
+def test_reimport_skips_unimported_and_identical(tmp_path, monkeypatch):
+    """总调度 11-02：已导入过的季，补丁过闸 + 事实核对后自动覆盖导入；没导入过 = None（仍走项目方闸门）；逐镜一致 = 不重导"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("autoflow_agent", ROOT / "tools" / "script_rsi" / "autoflow_agent.py")
+    AG = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(AG)
+
+    class St:
+        def __init__(self):
+            self.d = {}
+
+        def set(self, **k):
+            self.d.update(k)
+
+        def save(self):
+            pass
+    monkeypatch.setattr(AG, "_imported_shots", lambda run, ep: None)
+    assert AG.reimport(tmp_path, 1, tmp_path / "x.md", "abc", St()) is None
+    called = []
+    monkeypatch.setattr(AG.subprocess if hasattr(AG, "subprocess") else __import__("subprocess"), "run", lambda *a, **k: called.append(a))
+    st = St()
+    st.d["imported_sha"] = "abc"
+    monkeypatch.setattr(AG, "_imported_shots", lambda run, ep: {1: "x"})
+    assert AG.reimport(tmp_path, 1, tmp_path / "x.md", "abc", st)["skipped"] and not called
+
+
+def test_light_source_visible_in_scene_counts():
+    """总调度 11-02 灯光规则修订：动机光源出现在本镜 / 本场场景描述或道具里，或在 lighting.yaml 词表里，都算合规"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("rubric_code", ROOT / "tools" / "script_rsi" / "rubric_code.py")
+    RC = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(RC)
+    lt = "酒店柜台（自定）｜动机光源=店门（左侧），柜台油灯（下方）｜布光=主光从左侧，主辅比约 4:1｜色温=4500K"
+    assert RC.light_sources(lt) == ["店门", "柜台油灯"]
+    assert RC.source_seen("柜台油灯", "| sk_x | 酒店 | … | 柜台上油灯暖光 |", [])
+    assert not RC.source_seen("壁炉", "门口的天光", [])
+    assert RC.source_seen("台灯", "", ["台灯", "窗"])

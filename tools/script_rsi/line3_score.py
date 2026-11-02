@@ -91,7 +91,7 @@ def score_episode(run_dir: Path, ep: int, lenses: set[str]) -> dict | None:
     # 镜头块：逐镜判（v2_checks 按镜拆开调用）
     sb_ok = []
     for s, b in zip(shots, blocks):
-        v = RC6.v2_checks([s], [b])
+        v = RC6.v2_checks([s], [b], pre + RL.block_text(chunk, "head"))
         lens_line = next((ln.split("：", 1)[1].strip() for ln in b.split("\n") if ln.startswith("**镜头**：")), "")
         lens_ok = (not lens_line) or (not lenses) or any(x in lens_line for x in lenses)
         sb_ok.append(v[1][0] and v[2][0] and lens_ok)
@@ -140,7 +140,7 @@ def automation(run_dir: Path) -> tuple[float, list[int]]:
     ok = []
     for f in sorted(run_dir.glob("autoflow_ep*.json")):
         d = json.loads(f.read_text(encoding="utf-8"))
-        if d.get("verdict") == "importable" and not any("manual" in json.dumps(h, ensure_ascii=False) for h in d.get("agent_history") or []):
+        if d.get("verdict") in ("importable", "imported") and not any("manual" in json.dumps(h, ensure_ascii=False) for h in d.get("agent_history") or []):
             ok.append(int(d.get("episode")))
     return round(WEIGHTS["automation"] * len(ok) / TARGET_EPISODES, 2), ok
 

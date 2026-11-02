@@ -110,6 +110,53 @@ def lens_info(sid: str) -> dict:
     return {"text": text, "actual": actual, "plan": plan, "actual_source": source}
 
 
+def _furl(f: str | None) -> str | None:
+    """takes.json 里的 file（相对 data/）→ /files 图址；文件不在笔记本上（服务器出的还没同步）→ None"""
+    if not f:
+        return None
+    p = REPO / "data" / f
+    try:
+        v = int(p.stat().st_mtime)
+    except OSError:  # arch-ok: 文件还没同步到笔记本 = 没有可播的视频，前端写“视频未出”
+        return None
+    return f"/files/{f}?v={v}"
+
+
+def shot_extra(sid: str) -> dict:
+    """r46（项目方 11:3x：“包裹镜头细节也上去……预览视频也需要”）：总览每帧下面的镜头细节 + 悬停预览视频。
+    camera_move / lighting_sources 取 compiled.json visual_spec（接口真值）；lighting_name 现在没有字段 → None（前端用 mock 并标“示意”）；
+    video = 当前版本视频；没有当前版本时 video_old = 最新一版（前端标“旧版”）。文件不在笔记本上的不给。"""
+    m = re.fullmatch(r"ep(\d+)-S(\d+)", sid)
+    out = {"camera_move": None, "lighting_sources": [], "lighting_name": None, "video": None, "video_old": None}
+    if not m:
+        return out
+    d = REPO / "data" / "renders" / f"ep{int(m.group(1)):02d}" / f"S{int(m.group(2))}"
+    try:
+        vs = (json.loads((d / "compiled.json").read_text(encoding="utf-8")).get("visual_spec") or {})
+    except (OSError, ValueError):  # arch-ok: 没有编译稿 = 运镜 / 灯光为空，前端写“—”
+        vs = {}
+    if isinstance(vs, dict):
+        out["camera_move"] = vs.get("camera_move") or None
+        lt = vs.get("lighting") if isinstance(vs.get("lighting"), dict) else {}
+        out["lighting_sources"] = [str(x) for x in (lt.get("sources") or [])][:3]
+        out["lighting_name"] = lt.get("name") or lt.get("scheme") or None
+    try:
+        tk = json.loads((d / "takes.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # arch-ok: 没出过 = 没视频
+        return out
+    vts = [t for t in tk.get("takes") or [] if t.get("stage") == "video"]
+    act = (tk.get("active") or {}).get("video")
+    cur = next((t for t in vts if t.get("n") == act), None)
+    out["video"] = _furl((cur or {}).get("file")) if cur else None
+    if not out["video"]:
+        for t in reversed(vts):
+            u = _furl(t.get("file"))
+            if u:
+                out["video_old"] = u
+                break
+    return out
+
+
 def _faces(sc: dict) -> dict[str, str]:
     """出场人物名字 → 身份脸图址（asset_refs.face_of，与出图用的同一张；资产中心改了身份脸这里跟着变）"""
     out: dict[str, str] = {}
@@ -178,6 +225,7 @@ def season():
             # r45 胶卷片边下边码：镜头参数 takes.lens → compiled visual_spec.lens → 作业提示词里的镜头句（DIRECTOR 在给 takes 加 lens）
             li = lens_info(s["id"])
             s["lens"], s["lens_actual"], s["lens_plan"] = li["text"], li["actual"], li["plan"]
+            s.update(shot_extra(s["id"]))
             # 当前版本本身是旧剧本出的（全量重做没撤掉的尾帧等）：前端不显示这张、按“未出（剧本已更新）”处理
             for stg, key in (("image", "first_old"), ("last", "last_old")):
                 x = (c.get(s["id"]) or {}).get(stg) or {}

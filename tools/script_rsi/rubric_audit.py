@@ -61,7 +61,7 @@ def episode_eval(pre: str, chunk: str, ep: int, wd: Path, compiled: bool, si=Non
             imgs = [IJ.frame_prompt(pe, s, si.globals, [], "series10_v1")[0] for s in sorted(pe.shots, key=lambda s: s.index)]
     cc = RC6.code_checks(chunk, shots, blocks, RL.block_text(chunk, "head"), codes, imgs=imgs)
     if RC6.uses_v2(blocks):        # 第二季起的镜头块 v2 + 【灯光】（K-WRT-805 / 806）
-        cc["v2"] = RC6.v2_checks(shots, blocks)
+        cc["v2"] = RC6.v2_checks(shots, blocks, pre + RL.block_text(chunk, "head"))
     fails = [{"item": f"{d}#{i}", "kind": "TECH" if (d, i) in TECH else "WRITING", "detail": why,
               "shots": sorted({int(x) for x in re.findall(r"镜(\d+)", why)} | {int(x) for x in re.findall(r"\[([\d, ]+)\]", why) for x in [x] if False}),
               "owner": OWNER_HINT.get((d, i), "写作规则 + lint（HOLLYWOOD）")}
@@ -145,6 +145,12 @@ def gate(path: Path, eps: list[int] | None = None) -> dict:
         # K-WRT-H15 / H16（总调度 11-02，项目方融合样本）：在画人物接触场景物件、不正面直立对镜头；双人不用紧景别
         ST = _load("staging", "tools/script_rsi/staging.py")
         st_bad = [x for x in ST.staging_rows(pre + ch, ep) if not x["ok"]]
+        if (Path(path).parent / f"P4_ep{ep:02d}.md.v3").exists():     # v3 试点集：K-WRT-H19 / H20 进闸门
+            obj3 = H.episode_obj(pre, ch, ep, wd)
+            sh3 = sorted(obj3.shots, key=lambda s: s.index)
+            v3 = RC6.v3_checks(sh3, [RL.block_text(ch, k) for k in range(len(sh3))])
+            fails += [f"v3#{i} {why[:160]}" for i, (ok, why) in v3.items() if not ok]
+            r["fails"] = list(r["fails"]) + [{"item": f"v3#{i}"} for i, (ok, _w) in v3.items() if not ok]
         fails += [f"staging#镜{x['shot']} {ST.why(x)[:160]}" for x in st_bad]
         res["eps"][ep] = {"met": r["met"], "total": r["total"], "fails": fails, "unshootable": [x["shot"] for x in bad],
                           "staging_bad": [x["shot"] for x in st_bad]}

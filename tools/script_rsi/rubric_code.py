@@ -438,9 +438,26 @@ def uses_v2(blocks: list[str]) -> bool:
     return any("**机位与景别**：" in b for b in blocks)
 
 
-def v2_checks(shots: list, blocks: list[str]) -> dict:
-    """→ {1: (ok, 说明), 2: (ok, 说明)}：① 七段（必填五段）齐全且顺序固定；② 【灯光】是方案名，或三要素（动机光源 + 方向、布光比、色温）齐全，
-    且动机光源词在本镜 **机位与景别** / **构图** / img / 场景细节里出现过"""
+def light_sources(lt: str) -> list[str]:
+    """【灯光】行“动机光源=”字段里的光源项（去掉括号里的方位）；没有这个字段 = []"""
+    m = re.search(r"动机光源=([^｜]+)", lt)
+    if not m:
+        return []
+    return [x for x in (re.sub(r"（[^）]*）|\([^)]*\)", "", t).strip() for t in re.split(r"[，、,；;]", m.group(1))) if x]
+
+
+def source_seen(item: str, ctx: str, vocab: list[str]) -> bool:
+    """总调度 11-02 灯光规则修订：动机光源的本意 = 光从画面里看得见的东西来。光源项（或它的任意两字片段，如“柜台油灯”→“油灯”、“石板地面”→“石板”）
+    出现在本镜 / 本场的场景描述、道具里，或者是 lighting.yaml sources 词表里的词，都算合规"""
+    if any(w and (w in item or item in w) for w in vocab):
+        return True
+    return item in ctx or (len(item) > 2 and any(item[i:i + 2] in ctx for i in range(len(item) - 1)))
+
+
+def v2_checks(shots: list, blocks: list[str], scene_text: str = "") -> dict:
+    """→ {1: (ok, 说明), 2: (ok, 说明)}：① 七段（必填五段）齐全且顺序固定；② 【灯光】是方案名，或三要素（动机光源 + 方向、布光比、色温）齐全；
+    动机光源（总调度 11-02 修订）：“动机光源=”里的每一项出现在本镜 **机位与景别** / **构图** / img / **场景** 行、或本场场景描述（scene_text：
+    剧本头 + 集头里的场景表 / 用到的场景），或在 lighting.yaml sources 词表里，都算合规；方向、布光比、色温要求不变"""
     segs, light = v2_spec()
     schemes = {str(s.get("zh", "")).strip() for s in light.get("schemes") or []} | {str(s.get("id", "")).strip() for s in light.get("schemes") or []}
     src_words = [w for v in (light.get("sources") or {}).values() for w in (v.get("zh") or [])]
@@ -465,13 +482,16 @@ def v2_checks(shots: list, blocks: list[str]) -> dict:
             continue
         if any(x and x in lt for x in schemes):
             continue
-        ctx = " ".join(ln for ln in lines if ln.startswith(("**机位与景别**", "**构图**", "**场景**")) or SHOT_HEAD.match(ln))
-        srcs = [w for w in src_words if w in lt]
+        ctx = " ".join(ln for ln in lines if ln.startswith(("**机位与景别**", "**构图**", "**场景**")) or SHOT_HEAD.match(ln)) + " " + (scene_text or "")
+        items = light_sources(lt)
         probs = []
-        if not srcs:
-            probs.append("没写动机光源（词表 lighting.yaml sources）")
-        elif not any(w in ctx for w in srcs):
-            probs.append(f"动机光源“{srcs[0]}”在本镜画面 / 场景里没出现")
+        if items:
+            unseen = [x for x in items if not source_seen(x, ctx, src_words)]
+            old_ok = any(w in lt and w in ctx for w in src_words)      # 修订前的判法过了的，修订后不变严
+            if len(unseen) == len(items) and not old_ok:
+                probs.append(f"动机光源“{unseen[0]}”在本镜画面 / 本场场景描述 / 道具里都没出现，也不在 lighting.yaml 词表里")
+        elif not [w for w in src_words if w in lt]:
+            probs.append("没写动机光源（写“动机光源=<画面里看得见的光源>（方位）”，或用 lighting.yaml sources 词表里的词）")
         if not SIDE_WORDS.search(lt):
             probs.append("没写光源方向（左侧 / 右侧 / 上方 / 身后 / 正面）")
         if not RATIO.search(lt):
@@ -482,3 +502,49 @@ def v2_checks(shots: list, blocks: list[str]) -> dict:
             light_bad.append(f"镜{s.index}：" + "、".join(probs))
     return {1: (not miss and not order_bad, f"缺段：{miss[:8] or '无'}；段顺序不对的镜：{order_bad or '无'}"),
             2: (not light_bad, f"灯光问题：{light_bad[:8] or '无'}")}
+
+
+# ---- v3（总调度 11-02，JUDGE 第二季共性弱点 → 能代码判的两条；K-WRT-H19 / H20）
+V3_NEW_INFO = re.compile(r"亮起|出现|发现|看见|看到|打开|掉出|露出|显示|弹出|推开|揭开|认出|震了|震动|抽出|抽走|递到|递过|放到|放下|拿起|拿出|"
+                         r"入画|响起|响了|落下|掉在|划掉|按下|塞进|扣下|翻开|撕开|亮出")
+V3_WALK = re.compile(r"转身|转过身|回身|走向|走到|走过|走开|走近|走出|走进|走回|踱|穿过|起身走|迈步|往前走|朝[^｜；]{0,6}走")
+
+
+def _img_line(block: str) -> str:
+    return next((ln.split("：", 1)[1] for ln in block.split("\n") if SHOT_HEAD.match(ln)), "")
+
+
+def _bigrams(t: str) -> set[str]:
+    t = re.sub(r"[\s，。；、：|｜（）()“”\"*]", "", t)
+    return {t[i:i + 2] for i in range(len(t) - 1)}
+
+
+def v3_checks(shots: list, blocks: list[str]) -> dict:
+    """→ {1: 结尾钩子在画面里, 2: 一镜一个主动作}（K-WRT-H19 / H20）。
+    ① 末镜最后 2 秒（落在镜长最后 2 秒内的分拍）出现新信息动作词（V3_NEW_INFO：新动作 / 新物件 / 新人入画），不能只靠 OS 疑问；
+       且末镜不重复前一镜：两镜 img 二字片段重合率 ≥ 0.7 且景别相同 = 重复。
+    ② 分拍里不写转身 / 走动（V3_WALK；与 config/prompts/hollywood_pika_reference.md“一镜只放一个主动作、站起 / 转身走开写成镜尾起势”对齐）；
+       新人进画写“入画”，不写“走进”。"""
+    if not shots:
+        return {1: (False, "没有镜"), 2: (False, "没有镜")}
+    last, lb = shots[-1], blocks[-1]
+    dur = float(last.duration or 0)
+    tail = [t for a, e, t in _beats(lb) if e > dur - 2 - 0.01]
+    has_new = any(V3_NEW_INFO.search(t) for t in tail)
+    rep = False
+    if len(blocks) >= 2:
+        a, b = _bigrams(_img_line(blocks[-2])), _bigrams(_img_line(lb))
+        jac = len(a & b) / max(1, len(a | b))
+        size = lambda t: next((x for x in ("大特写", "中近景", "中全景", "特写", "近景", "中景", "全景", "远景") if x in t[:12]), None)
+        rep = jac >= 0.7 and size(_img_line(blocks[-2])) == size(_img_line(lb))
+    end_ok = has_new and not rep
+    end_why = ("末镜最后 2 秒有新信息" if has_new else f"末镜最后 2 秒（{dur - 2:.0f}–{dur:.0f} 秒）没有新动作 / 新物件 / 新人入画：{'；'.join(t[:30] for t in tail) or '无分拍'}") + \
+              ("；末镜与前一镜几乎重复（img 重合 ≥ 0.7 且景别相同）" if rep else "")
+    walk = []
+    for s, b in zip(shots, blocks):
+        for _a, _e, t in _beats(b):
+            m = next((x for x in V3_WALK.finditer(t) if not re.search(r"(没有|没|不|未|别)$", t[:x.start()])), None)   # “没有回身”不算
+            if m and "入画" not in t:
+                walk.append(f"镜{s.index}“{m.group(0)}”")
+                break
+    return {1: (end_ok, end_why), 2: (not walk, f"写了转身 / 走动的镜：{walk[:8] or '无'}")}

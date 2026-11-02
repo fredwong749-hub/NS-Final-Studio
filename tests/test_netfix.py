@@ -312,8 +312,8 @@ import rssh as RS  # noqa: E402
 def test_rssh_rewrites_only_command_calls_to_servers():
     new = RS.rewrite(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-i", "C:/k", "gpu36", "nvidia-smi"])
     assert new[:4] == RS.WSL[:4] and any(x in new for x in RS.POOL["gpu36"]) and "ProxyCommand=false" in new
-    assert new[-2:] == ["gpu36", "nvidia-smi"] and "C:/k" not in new
-    assert RS.rewrite(["ssh", "root@gpu33", "ls"])[-2:] == ["gpu33", "ls"]
+    assert new[-2:] == ["gpu36", RS.TZ_PREFIX + "nvidia-smi"] and "C:/k" not in new      # 远程命令统一带 TZ（时区根治）
+    assert RS.rewrite(["ssh", "root@gpu33", "ls"])[-2:] == ["gpu33", RS.TZ_PREFIX + "ls"]
     for argv in (["ssh", "-N", "-L", "1:127.0.0.1:2", "gpu36"], ["ssh", "-M", "gpu36", "x"], ["ssh", "-O", "check", "gpu36"],
                  ["ssh", "gpu99", "ls"], ["ssh", "194relay", "ls"], ["scp", "a", "gpu33:/b"], ["ssh", "gpu33"],
                  ["ssh", "-o", "ProxyCommand=x", "-W", "h:22", "gpu33"], "ssh gpu33 ls", ["python", "gpu33"]):
@@ -397,3 +397,31 @@ def test_run_retry_on_server_local_and_cross_host(monkeypatch):
     if shutil.which("bash"):
         r = RS.run_retry("gpu33", "echo local", text=True)               # 本机：bash -c 直接执行
         assert r.returncode == 0 and "local" in r.stdout
+
+
+# ---------------------------------------------------------------- 时区根治（DEBUG-RSI tz_check PATCH_RSSH）
+def test_rssh_injects_tz(monkeypatch):
+    a = RS.rewrite(["ssh", "gpu33", "date"])
+    assert a[-1].startswith("TZ=Asia/Tokyo ") and a[-1].endswith("date")
+    b = RS.rewrite(["ssh", "gpu36", "cd /x && date"])
+    assert b[-1] == "TZ=Asia/Tokyo && export TZ && cd /x && date"                 # 整条链都拿到 TZ，不只第一条命令
+    assert RS.with_tz("TZ=UTC date") == "TZ=UTC date"                            # 已指定不覆盖
+    import subprocess as sp
+    seen = []
+    monkeypatch.setenv("OFFLINE_SELF", "gpu33")
+    monkeypatch.setattr(RS.subprocess, "run", lambda argv, **k: seen.append(argv) or sp.CompletedProcess(argv, 0, b"", b""))
+    RS.run_retry("gpu33", "date")                                                # 服务器本机 bash -c 分支同样注入
+    assert seen[-1][:2] == ["bash", "-c"] and seen[-1][2].startswith("TZ=Asia/Tokyo ")
+
+
+def test_degraded_base_not_preferred():
+    """11:5x：base-b 直连 banner 20 s、其上道反复超时 → 劣化底座不优先，内层改挂健康的那条；恢复后回首选"""
+    s = TS.Supervisor.__new__(TS.Supervisor)
+    s.c = json.loads(TS.CONF.read_text(encoding="utf-8"))
+    s.hosts = {"base-a": {"state": "up", "slow_streak": 0}, "base-b": {"state": "up", "slow_streak": 3}}
+    assert s.pick_base("gpu36-l1") == "base-a"                          # l1 首选 b，但 b 劣化
+    s.hosts["base-b"]["slow_streak"] = 0
+    assert s.pick_base("gpu36-l1") == "base-b"
+    s.hosts["base-a"]["state"] = "backoff"
+    s.hosts["base-b"]["slow_streak"] = 5
+    assert s.pick_base("gpu36-l0") == "base-b"                          # 只剩劣化的也要用

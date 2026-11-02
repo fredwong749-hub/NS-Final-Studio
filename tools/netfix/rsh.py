@@ -15,5 +15,5 @@ if __name__ == "__main__":
         print(__doc__)
         sys.exit(2)
     host, cmd = sys.argv[1], " ".join(sys.argv[2:])
-    argv = (rssh.rewrite(["ssh", host, cmd]) if rssh.enabled() else None) or ["ssh", "-o", "BatchMode=yes", host, cmd]
+    argv = (rssh.rewrite(["ssh", host, cmd]) if rssh.enabled() else None) or ["ssh", "-o", "BatchMode=yes", host, rssh.with_tz(cmd)]
     sys.exit(subprocess.call(argv, stdin=sys.stdin.buffer if not sys.stdin.isatty() else None))

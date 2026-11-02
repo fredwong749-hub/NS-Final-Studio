@@ -161,3 +161,22 @@ def test_k_wrt_h10_wardrobe_not_fact(R):
     out = R.drop_wardrobe([keep, drop, face])
     assert keep in out and drop not in out and face in out
     assert "K-WRT-H10" in (ROOT / "config/prompts/hollywood_facts.md").read_text(encoding="utf-8")
+
+
+def test_v3_checks_end_hook_and_walk():
+    """K-WRT-H19 / H20（总调度 11-02）：末镜最后 2 秒要有新信息、不重复前一镜；分拍不写转身 / 走动"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("rubric_code", ROOT / "tools" / "script_rsi" / "rubric_code.py")
+    RC = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(RC)
+
+    class S:
+        def __init__(self, i):
+            self.index, self.duration = i, 6
+    b1 = "**镜1｜img**：中景，林晚坐在桌前，林晚的手扶着桌沿\n**分拍**：0–2秒｜林晚看着手机｜视线=手机；2–4秒｜林晚放下手机｜视线=桌面；4–6秒｜林晚抬眼｜视线=门"
+    good = "**镜2｜img**：近景，门缝里一只手递进来一个信封\n**分拍**：0–2秒｜林晚盯着门｜视线=门；2–4秒｜门把手动了一下｜视线=门把；4–6秒｜一只信封从门缝塞进来｜视线=信封"
+    bad = "**镜2｜img**：近景，林晚看着门\n**分拍**：0–2秒｜林晚转身走向门口｜视线=门；2–4秒｜林晚停住｜视线=门；4–6秒｜林晚的视线停在门上｜视线=门"
+    r = RC.v3_checks([S(1), S(2)], [b1, good])
+    assert r[1][0] and r[2][0]
+    r2 = RC.v3_checks([S(1), S(2)], [b1, bad])
+    assert not r2[1][0] and not r2[2][0] and "转身" in r2[2][1]

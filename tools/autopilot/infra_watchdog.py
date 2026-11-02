@@ -4,13 +4,13 @@
 ops/autostart/tunnel.sh 的 while 循环只在 ssh 退出时重连——ssh 进程活着但转发卡死（经 194relay 跳板常见）时永远不恢复。
 
 本进程（单实例，30 s 一拍）：
-  a) 隧道：每条渲染道探测 http://127.0.0.1:<port>/system_stats；连续 2 次失败 → 杀掉持有该 -L 的 ssh 进程
-     （tunnel.sh / tunnel_gpu36.sh 的循环 30 s 内自己重连，不另起一套隧道）；循环本身不在 → 按 laptop_autostart.ps1 的方式重新拉起脚本。
+  a) 隧道：每条渲染道探测 http://127.0.0.1:<port>/system_stats，只报警不修（NETFIX K-OPS-N01：隧道由 tools/netfix/tunnel_supervisor.py
+     一家负责；SYSARCH 4-3 已删掉原来“杀 ssh / 拉 tunnel*.sh 循环”的修复段）；监管进程心跳过期报 A-SUPERVISOR。
   b) 空转报警（写 data/qa/alerts.jsonl，监控看板 :8810 显示）：
      A-IDLE   渲染道全部空闲 ≥ 20 分钟，而 vidgen 状态里有可派的镜（不是 done / best_effort / blocked / waiting_frame）
      A-NIGHT  night.log ≥ 20 分钟没有新行（并且 night_state.json 也 ≥ 20 分钟没更新 → 级别 crit = 卡住或已退出）
      A-PROD   data/producer/heartbeat.json 过期 ≥ 10 分钟（暂停中不报）
-     A-TUNNEL 某条隧道重建后仍不通
+     A-TUNNEL 某条隧道连续 ALERT_AFTER 拍不通
      报警按“开 / 关”记一次，不每分钟刷屏。
 用法：
   .venv/Scripts/python.exe tools/autopilot/infra_watchdog.py serve      # 常驻（laptop_autostart.ps1 拉起）
@@ -32,12 +32,10 @@ ALERTS = ROOT / "data/qa/alerts.jsonl"
 STATE = ROOT / "data/qa/infra_watchdog_state.json"
 LOG = ROOT / "ops/logs/infra_watchdog.log"
 PIDF = ROOT / "ops/logs/infra_watchdog.pid"
-BASH = r"C:\Program Files\Git\bin\bash.exe"
-# 端口 → (所属隧道脚本, ssh 主机)；与 ops/autostart/tunnel.sh、tunnel_gpu36.sh、laptop_autostart.ps1 的检测列表一致
-TUNNELS = {18188: ("tunnel.sh", "gpu33"), 18189: ("tunnel.sh", "gpu33"), 18191: ("tunnel.sh", "gpu33"),
-           18288: ("tunnel_gpu36.sh", "gpu36"), 18289: ("tunnel_gpu36.sh", "gpu36"), 18290: ("tunnel_gpu36.sh", "gpu36")}
-FULL_REBUILD = 6                       # 连续 6 拍（约 3 分钟）不通：连同循环整体重建（总调度 22:09）
-TICK_S, FAILS_TO_KILL = 30, 2          # 30 s 一拍、连续 2 次（约 60 s）判卡死；加循环 30 s 重连 → 约 90 s 恢复（W7 要求 ≤ 2 分钟）
+# 端口 → 服务器（只探测、只报警；修隧道归 tools/netfix/tunnel_supervisor.py，K-OPS-N01）。与 config/netfix/tunnels.json 的道一致；
+# gpu36:2（18290）已按 L-100 退役（GPU2 改看图卡）。SYSARCH 4-3（11-02）：旧的 tunnel*.sh 循环修复段已删，原文件在 data/_quarantine/netfix_20261101/
+TUNNELS = {18188: "gpu33", 18189: "gpu33", 18191: "gpu33", 18288: "gpu36", 18289: "gpu36"}
+TICK_S, ALERT_AFTER = 30, 5            # 30 s 一拍；连续 5 拍（约 2.5 分钟）不通才报 A-TUNNEL（监管进程的恢复目标 ≤ 30 s，过了这么久还不通 = 真有问题）
 IDLE_MIN, NIGHT_MIN, PROD_MIN = 10, 20, 10      # 空转线：总调度 16:55 改 10 分钟
 ACTIVE = {"done", "best_effort", "blocked", "waiting_frame"}
 
@@ -79,59 +77,6 @@ def queue_len(port: int) -> int | None:
 def _ps(cmd: str) -> str:
     r = subprocess.run(["powershell.exe", "-NoProfile", "-Command", cmd], capture_output=True, text=True, timeout=60)
     return r.stdout
-
-
-def ssh_pids_for(port: int) -> list[int]:
-    out = _ps("Get-CimInstance Win32_Process -Filter \"Name='ssh.exe'\" | Where-Object { $_.CommandLine -match "
-              f"'-L {port}:' -and $_.CommandLine -match ' -N ' }} | ForEach-Object {{ $_.ProcessId }}")
-    return [int(x) for x in out.split() if x.strip().isdigit()]
-
-
-def loop_running(script: str) -> bool:
-    out = _ps("Get-CimInstance Win32_Process -Filter \"Name='bash.exe'\" | Where-Object { $_.CommandLine -match "
-              f"'{script}' }} | Measure-Object | ForEach-Object {{ $_.Count }}")
-    return out.strip() not in ("", "0")
-
-
-def loop_pids(script: str) -> list[int]:
-    out = _ps("Get-CimInstance Win32_Process -Filter \"Name='bash.exe'\" | Where-Object { $_.CommandLine -match "
-              f"'{script}' }} | ForEach-Object {{ $_.ProcessId }}")
-    return [int(x) for x in out.split() if x.strip().isdigit()]
-
-
-LOOP_SIG = "-N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=20 -o ServerAliveCountMax=3"
-LOOP_MARK = {"tunnel.sh": "-L 15180:", "tunnel_gpu36.sh": "IPQoS=throughput"}   # 各循环 ssh 命令行里独有的一段
-
-
-def is_loop_ssh(script: str, cmd: str) -> bool:
-    """Git Bash 起的 ssh 父进程在 Windows 上看不到（msys 转手），只能按命令行认：循环的 ssh = 固定参数串 + 本脚本独有的一段"""
-    return LOOP_SIG in cmd and LOOP_MARK.get(script, "\0") in cmd
-
-
-def orphan_ssh(script: str) -> list[int]:
-    """持有该脚本端口、但不是该脚本循环起的 ssh（例：总调度 22:09 手动起的 -L 18288/18289/18290）——看门狗接管：杀掉交循环重建"""
-    ports = [p for p, (sc, _h) in TUNNELS.items() if sc == script]
-    out = _ps("Get-CimInstance Win32_Process -Filter \"Name='ssh.exe'\" | Where-Object { $_.CommandLine -match ' -N ' } | "
-              "ForEach-Object { \"$($_.ProcessId) $($_.CommandLine)\" }")
-    res = []
-    for ln in out.splitlines():
-        parts = ln.split(None, 1)
-        if len(parts) < 2 or not parts[0].isdigit():
-            continue
-        pid, cmd = int(parts[0]), parts[1]
-        if any(f"-L {p}:" in cmd for p in ports) and not is_loop_ssh(script, cmd):
-            res.append(pid)
-    return res
-
-
-def kill(pid: int) -> None:
-    subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, timeout=30)
-
-
-def start_loop(script: str) -> None:
-    subprocess.Popen([BASH, f"{ROOT.as_posix()}/ops/autostart/{script}"], stdin=subprocess.DEVNULL,
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
 
 RELAY = ("sz194.instameta.org", 19422)
@@ -221,14 +166,14 @@ def tick(st: dict, now: float | None = None) -> dict:
     now = time.time() if now is None else now
     sup = supervisor_fresh()
     st["supervisor_fresh"] = sup
-    alert(st, "A-SUPERVISOR", not sup, "crit", "隧道监管进程 tools/netfix/tunnel_supervisor.py 心跳过期（看门狗临时兜底修隧道；计划任务 5 分钟内会拉起）")
+    alert(st, "A-SUPERVISOR", not sup, "crit", "隧道监管进程 tools/netfix/tunnel_supervisor.py 心跳过期（计划任务 NS-Studio-TunnelSupervisor 5 分钟内会拉起；看门狗只报警不修）")
     st["_tick"] = now
     fails = st.setdefault("fails", {})
     down, busy, reachable = [], False, 0
     from concurrent.futures import ThreadPoolExecutor   # 并行探测：卡死的道每条要等满超时，串行会拖慢判定（注入测试 138 s → 并行）
     with ThreadPoolExecutor(len(TUNNELS)) as ex:
         res = dict(zip(TUNNELS, ex.map(lambda p: (probe(p, timeout=6) is not None) and (queue_len(p) or 0), TUNNELS)))
-    for port, (script, _host) in TUNNELS.items():
+    for port in TUNNELS:
         ok = res[port] is not False
         k = str(port)
         if ok:
@@ -238,45 +183,11 @@ def tick(st: dict, now: float | None = None) -> dict:
             continue
         fails[k] = fails.get(k, 0) + 1
         down.append(port)
-        # 连续 2 次 → 重建；之后每 4 拍（约 2 分钟）再重建一次——11-01 16:45 实测：重连的 ssh 卡在连接阶段
-        # （tunnel*.sh 没有 ConnectTimeout，经 194relay 跳板时一直挂着、端口不监听），只杀一次救不回来
-        if fails[k] >= FAILS_TO_KILL and (fails[k] - FAILS_TO_KILL) % 4 == 0 and not sup and not relay_down(st):
-            pids = ssh_pids_for(port)
-            for pid in pids:
-                kill(pid)
-            # 总调度 22:09：杀完要看循环在不在——循环不在（或连续 FULL_REBUILD 拍都救不回来 = 循环卡在连接阶段）就整体重建
-            if fails[k] >= FULL_REBUILD:
-                for lp in loop_pids(script):
-                    kill(lp)
-                start_loop(script)
-                log("TUNNEL", port, f"连续 {fails[k]} 拍不通 → 整体重建：杀 ssh {pids} + 循环，重新拉起", script)
-            elif not loop_running(script):
-                start_loop(script)
-                log("TUNNEL", port, "杀 ssh", pids, "；循环不在 → 看门狗直接拉起", script)
-            else:
-                log("TUNNEL", port, "探测连续失败 → 杀 ssh", pids, "（", script, "循环 30 s 内重连）")
-            st.setdefault("rebuilds", []).append({"t": now, "port": port, "killed": pids})
-            st["rebuilds"] = st["rebuilds"][-50:]
-        if fails[k] >= FAILS_TO_KILL + 3:          # 重建后 3 拍仍不通
-            alert(st, f"A-TUNNEL-{port}", True, "crit", f"隧道 {port} 重建后仍不通（{fails[k]} 拍）")
+        alert(st, f"A-TUNNEL-{port}", fails[k] >= ALERT_AFTER, "crit",
+              f"隧道 {port}（{TUNNELS[port]}）连续 {fails[k]} 拍不通（监管进程负责重建，看 data/netfix/net_status.json）")
     for port in TUNNELS:
         if fails.get(str(port), 0) == 0:
             alert(st, f"A-TUNNEL-{port}", False)
-    if not sup and not relay_down(st):          # 接管：每个隧道脚本的循环都要在；不归循环管的孤儿 ssh 杀掉交循环（不留没人管的进程）
-        for script in sorted({sc for sc, _h in TUNNELS.values()}):
-            try:
-                orph = orphan_ssh(script)
-                if not loop_running(script):
-                    for o in orph:
-                        kill(o)
-                    start_loop(script)
-                    log("TUNNEL", script, "循环不在 → 看门狗拉起；接管孤儿 ssh", orph)
-                elif orph:
-                    for o in orph:
-                        kill(o)
-                    log("TUNNEL", script, "接管孤儿 ssh（不归循环管）", orph, "→ 交循环重连")
-            except Exception as e:  # noqa: BLE001
-                log("TUNNEL adopt error", script, repr(e)[:200])
     relay_down(st)                                 # 每拍都测一次跳板（A-RELAY 开 / 关）
     try:                                           # K-OPS-E08（DEBUG-RSI，总调度 11-02 D5）：producer 不在跑时也要让运维暂停到点恢复、显式暂停超时报警
         sys.path.insert(0, str(ROOT / "tools/autopilot"))

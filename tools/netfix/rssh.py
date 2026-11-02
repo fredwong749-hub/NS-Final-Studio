@@ -103,14 +103,25 @@ def rewrite(argv) -> list[str] | None:
     rest = a[i:]
     if not rest:                                     # 交互式登录不拦
         return None
+    rest = [with_tz(rest[0]), *rest[1:]]
     return WSL + ["ssh", "-S", pick_sock(host), "-o", "ControlMaster=no", "-o", "ProxyCommand=false", "-o", "BatchMode=yes",
                   *kept, host, *rest]
+
+
+TZ_NAME = "Asia/Tokyo"
+TZ_PREFIX = f"TZ={TZ_NAME} && export TZ && "
+
+
+def with_tz(cmd: str) -> str:
+    """时区根治（DEBUG-RSI tz_check PATCH_RSSH）：服务器系统时区 America/New_York、笔记本 UTC+9，远程命令写的时间戳要和笔记本一致 →
+    一律前缀 'TZ=Asia/Tokyo && export TZ && '（不用 'TZ=… cmd'：那只作用于第一条命令，'cd x && y' 里的 y 拿不到）。已带就不重复加"""
+    return cmd if cmd.lstrip().startswith("TZ=") else TZ_PREFIX + cmd
 
 
 def run(host: str, cmd: str, input: bytes | None = None, timeout: float = 900, check: bool = False) -> subprocess.CompletedProcess:
     """显式复用主连接执行远程命令（主连接不在 → 立刻失败 rc=255，不新建握手）"""
     argv = rewrite(["ssh", host, cmd]) if enabled() else None
-    argv = argv or ["ssh", "-o", "BatchMode=yes", host, cmd]
+    argv = argv or ["ssh", "-o", "BatchMode=yes", host, with_tz(cmd)]
     return subprocess.run(argv, input=input, capture_output=True, timeout=timeout, check=check, creationflags=NOWIN)
 
 
@@ -147,7 +158,7 @@ def run_retry(host: str, cmd: str, input: bytes | str | None = None, timeout: fl
                                                   "服务器之间无 ssh 互信（设计如此），跨机请走 HTTP（如 10.0.0.36:8870）".encode("utf-8"))
                 break
             if where == "self":
-                res = subprocess.run(["bash", "-c", cmd], input=data, capture_output=True, timeout=timeout)
+                res = subprocess.run(["bash", "-c", with_tz(cmd)], input=data, capture_output=True, timeout=timeout)
             else:
                 res = run(host, cmd, input=data, timeout=timeout)
         except subprocess.TimeoutExpired:

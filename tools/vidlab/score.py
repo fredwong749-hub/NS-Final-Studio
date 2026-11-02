@@ -52,11 +52,11 @@ SCORES = RSI / "scores.jsonl"
 REF_RAW = RSI / "ref_video" / "raw"
 REF_JSON = VL / "ref_metrics.json"
 DEFAULT_CORPUS = [VL / "corpus"]
-RUBRIC = "vidlab-v1-2026-11-02"
+RUBRIC = "vidlab-v2-2026-11-02"   # v2：运镜第三块 = 执行准确度（v1 = 运动量占参照比，Pika 背景漂移导致虚高）
 W = {"cam": 20, "act": 25, "lip": 15, "cons": 20, "stab": 10, "film": 10}
 NAMES = {"cam": "运镜执行", "act": "表情与表演", "lip": "口型", "cons": "一致性", "stab": "画面稳定", "film": "成片分"}
 ACT_KEYS = ("expr_std", "brow_rng", "lm_nonrigid", "head_std", "blink_pm", "gaze_shift_ps")
-CAM_KEYS = ("cam_speed_med", "cam_moving_frac")
+CAM_KEYS = ("cam_net_ps", "cam_coherence")   # v4：只认有方向的连贯运动（背景漂移不算运镜）
 TH = {"sface": 0.30, "seen": 0.15, "dup_side": 0.15, "hair_dV": 30.0, "hair_dS": 35.0, "J4": 1.3, "J4_dj": 1.2,
       "lip_full": 0.95, "cons_full": 0.98, "stab_full": 0.98, "film_full": 45.0, "cam_vocab_full": 12}
 REF_FILMS = {"charade_1963.mp4": "Charade (1963) 公有领域", "tears_of_steel_720p.mov": "Tears of Steel (2012) CC-BY 3.0"}
@@ -144,7 +144,7 @@ def ref_build(per_film: int = 50, workers: int = 3):
 
 def anchors(rows):
     a = {}
-    for k in (*ACT_KEYS, "cam_gaze", *CAM_KEYS, "cam_path_ps", "expr_rng"):
+    for k in (*ACT_KEYS, "cam_gaze", *CAM_KEYS, "cam_speed_med", "cam_moving_frac", "cam_path_ps", "expr_rng"):
         v = [r[k] for r in rows if r.get(k) is not None]
         a[k] = {"median": round(float(np.median(v)), 4), "mean": round(float(np.mean(v)), 4), "p25": round(float(np.percentile(v, 25)), 4),
                 "p75": round(float(np.percentile(v, 75)), 4), "n": len(v)} if v else None
@@ -174,9 +174,11 @@ def corpus_clips(dirs):
             rf = mp4.parent / "results.json"
             res = VIO.read_json(rf) if rf.is_file() else {}
             arm = res.get(m["arm"]) or {}
+            jf = mp4.parent / "jobs.json"
+            prompt = next((j.get("prompt") for j in (VIO.read_json(jf) if jf.is_file() else []) if j.get("id") == m["arm"]), None)
             if arm.get("recipe") and arm["recipe"] != "i2va_pika_flex":
                 continue
-            clips.append({"path": mp4, "exp": exp, "arm": m["arm"], "shot": m["shot"], "score": arm.get("score") or {},
+            clips.append({"path": mp4, "exp": exp, "arm": m["arm"], "shot": m["shot"], "score": arm.get("score") or {}, "prompt": prompt,
                           "dj": mp4.parent / (mp4.stem + "_dj.mp4")})
     return clips
 
@@ -238,6 +240,66 @@ def cam_index(summ: dict, anc: dict) -> float | None:
     return geo([ratio_score(summ.get(k), anc.get(k)) for k in CAM_KEYS])
 
 
+# 提示词运镜句 → 目标量（内容相对画面的累计量；“small amplitude”档 = tools/vidlab/camctl.AMP 同一张表）
+CAM_RE = [(r"pushes in|zooms in", "push_in"), (r"pulls out|zooms out", "pull_out"), (r"trucks right", "truck_right"),
+          (r"trucks left", "truck_left"), (r"pans right", "pan_right"), (r"pans left", "pan_left"), (r"tilts up", "tilt_up"),
+          (r"tilts down", "tilt_down"), (r"pedestals up", "pedestal_up"), (r"pedestals down", "pedestal_down"),
+          (r"arcs", "arc"), (r"holds a static shot", "static")]
+
+
+def cam_target(prompt: str) -> tuple[str | None, dict | None]:
+    import camctl as CC
+    for rx, mv in CAM_RE:
+        if re.search(r"The camera[^.]*\b(?:" + rx + r")\b", prompt or ""):
+            tx, ty, sc, rot = CC.AMP[mv]
+            t = {"cam_tx": tx, "cam_ty": ty, "cam_zoom": float(np.log(sc)), "cam_rot": float(np.radians(rot))}
+            return mv, {k: v for k, v in t.items() if abs(v) > 1e-9}
+    return None, None
+
+
+def cam_exec_tol(summ: dict, move: str | None, target: dict | None) -> float | None:
+    """运镜执行（语料版，带容差）：静止镜 = 净运动 ≤ 参照 p25 记 1，越大越低；有运动的镜每个目标量：
+    方向反 → 0；实测 / 目标在 0.5–2 倍之间 → 1；不足 0.5 倍按比例；超过 2 倍线性降到 4 倍为 0。多个目标量取平均"""
+    if move is None:
+        return None
+    if move == "static":
+        v = summ.get("cam_net_ps")
+        return None if v is None else round(max(0.0, min(1.0, 1 - (v - 0.008) / 0.03)), 3)
+    acc = []
+    for k, t in target.items():
+        v = summ.get(k)
+        if v is None:
+            continue
+        r = v / t
+        acc.append(0.0 if r <= 0 else (min(1.0, r / 0.5) if r < 2 else max(0.0, 1 - (r - 2) / 2)))
+    return round(float(np.mean(acc)), 3) if acc else None
+
+
+def write_camexec(rows) -> None:
+    """DIRECTOR camera_ab.py 判 AB6 用（11-02 约定）：data/rsi/vidlab/camexec.json，“实验名/臂 id → {move, acc, amp_ratio, rot_deg}”，
+    与已有条目合并（同键覆盖），口径 = clipmetrics ALGO + cam_exec_tol"""
+    import camctl as CC
+    f = VL / "camexec.json"
+    cur = VIO.read_json(f) if f.is_file() else {"schema": "nsfs.vidlab_camexec/1", "items": {}}
+    for r in rows:
+        mv = r.get("cam_move")
+        if not mv:
+            continue
+        amp = None
+        if mv != "static":
+            _, tg = cam_target("The camera " + {"push_in": "pushes in", "pull_out": "pulls out"}.get(mv, mv.replace("_", "s ", 1)) + ".")
+            tg = tg or {}
+            if tg:
+                k = max(tg, key=lambda x: abs(tg[x]))
+                amp = round(r[k] / tg[k], 3) if r.get(k) is not None else None
+        cur["items"][f"{r['exp']}/{r['arm']}"] = {"move": mv, "acc": r.get("cam_exec"), "amp_ratio": amp,
+                                                 "rot_deg": round(float(np.degrees(r["cam_rot"])), 2) if r.get("cam_rot") is not None else None,
+                                                 "net_ps": r.get("cam_net_ps"), "coherence": r.get("cam_coherence")}
+    cur.update({"algo": CM.ALGO, "rubric": RUBRIC, "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "doc": "acc：方向反 0；实测/目标 0.5–2 倍 = 1；不足按比例；超 2 倍线性降到 4 倍为 0。目标 = camctl.AMP 小幅档"})
+    VIO.write_json(f, cur, indent=1)
+
+
 def cam_vocab():
     import yaml
     y = yaml.safe_load((ROOT / "config" / "director" / "camera_moves.yaml").read_text(encoding="utf-8"))
@@ -283,6 +345,8 @@ def score(dirs, name="base", note="", write=True, use_vlm=False, workers=3, deju
         r = {"exp": c["exp"], "arm": c["arm"], "shot": c["shot"], "path": str(c["path"].relative_to(ROOT)), **s}
         r["act"] = act_index(s, anc)
         r["cam_idx"] = cam_index(s, anc)
+        mv, tg = cam_target(c.get("prompt"))
+        r["cam_move"], r["cam_exec"] = mv, cam_exec_tol(s, mv, tg)
         # 口型
         v7n = rj.get((c["exp"], c["arm"]))
         v7 = sc.get("v7") or {}
@@ -335,15 +399,21 @@ def finish(rows, anc, ref, name, note, write, dirs):
     cov["act"] = {"clips_with_faces": len(ai), "vlm": "未测（--vlm 未开；VQAGATE 本地看图道）"}
     # 运镜
     cv = cam_vocab()
-    ci = [r["cam_idx"] for r in rows if r.get("cam_idx") is not None]
+    # v4：运镜第三块从“运动量占参照比”改成“提示词要求的运镜执行准确度”（Pika 背景运动量本来就 ≥ 参照，量多少不代表执行对）
+    ci = [r["cam_exec"] for r in rows if r.get("cam_exec") is not None]
     cam_live = float(np.median(ci)) if ci else None
+    by_move = {}
+    for r in rows:
+        if r.get("cam_exec") is not None:
+            by_move.setdefault(r["cam_move"], []).append(r["cam_exec"])
     parts = [(0.4, min(1.0, cv["n_enabled"] / TH["cam_vocab_full"]))]
     if cv["ab"] and cv["ab"]["rate"] is not None:
         parts.append((0.3, cv["ab"]["rate"]))
     if cam_live is not None:
         parts.append((0.3, cam_live))
     items["cam"] = round(sum(w * v for w, v in parts) / sum(w for w, _ in parts), 4)
-    cov["cam"] = {"vocab_enabled": cv["n_enabled"], "vocab_total": cv["n_total"], "ab": cv["ab"], "cam_live_median": cam_live}
+    cov["cam"] = {"vocab_enabled": cv["n_enabled"], "vocab_total": cv["n_total"], "ab": cv["ab"], "cam_exec_median": cam_live,
+                  "cam_exec_by_move": {k: {"n": len(v), "median": round(float(np.median(v)), 3)} for k, v in by_move.items()}}
     # 口型 / 一致性 / 稳定
     for k, full in (("lip", TH["lip_full"]), ("cons", TH["cons_full"]), ("stab", TH["stab_full"])):
         rt, n = rate(rows, k)
@@ -370,6 +440,7 @@ def finish(rows, anc, ref, name, note, write, dirs):
               "ref_medians": {k: (v or {}).get("median") for k, v in anc.items()},
               "ref_films": ref.get("films"), "rows": rows}
     VIO.write_json(VL / f"score_{name}.json", detail, indent=1)
+    write_camexec(rows)
     if write:
         with SCORES.open("a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
@@ -378,7 +449,19 @@ def finish(rows, anc, ref, name, note, write, dirs):
 
 # ======================= A/B（代码判定） =======================
 
-def ab(a_glob, b_glob, name, metric="act", min_gain=0.15):
+def cam_exec(summ: dict, target: dict) -> float | None:
+    """运镜执行准确度：每个目标量（cam_tx / cam_ty / cam_zoom / cam_rot，内容相对画面的累计量）1 − |实测−目标|/|目标|，
+    方向反了记 0；多个目标取平均。没测到 → None"""
+    acc = []
+    for k, t in (target or {}).items():
+        v = summ.get(k)
+        if v is None or not t:
+            continue
+        acc.append(0.0 if v * t < 0 else max(0.0, 1 - abs(v - t) / abs(t)))
+    return round(float(np.mean(acc)), 3) if acc else None
+
+
+def ab(a_glob, b_glob, name, metric="act", min_gain=0.15, target=None):
     """B 相对 A：目标指标中位数提升 ≥ min_gain（相对），且护栏不退：身份 SFace 中位不降 >0.05、V6 不新增不通过、J4 中位不升 >0.1、
     看镜头占比不升 >0.05。判定写 data/rsi/vidlab/ab_<name>.json。"""
     ref = load_ref()
@@ -391,12 +474,15 @@ def ab(a_glob, b_glob, name, metric="act", min_gain=0.15):
             s = _an(p)
             s["act_idx"] = act_index(s, anc)["index"]
             s["cam_idx"] = cam_index(s, anc)
+            s["cam_exec"] = cam_exec(s, target)
             s["path"] = p
             out.append(s)
         return out
 
     A, B = summarize(a_glob), summarize(b_glob)
     key = {"act": "act_idx", "cam": "cam_idx"}.get(metric, metric)
+    if metric == "cam_exec" and not target:
+        raise SystemExit("cam_exec 需要 --target cam_tx=-0.07 这类目标量")
 
     def med(rows, k):
         v = [r[k] for r in rows if r.get(k) is not None]
@@ -406,7 +492,7 @@ def ab(a_glob, b_glob, name, metric="act", min_gain=0.15):
     fails = []
     if ma is None or mb is None:
         fails.append("目标指标未测")
-    elif mb < ma * (1 + min_gain):
+    elif mb < ma * (1 + min_gain) and not (ma == 0 and mb > 0.3):
         fails.append(f"{key} 中位 {mb:.3f} 未比 A {ma:.3f} 高 {int(min_gain * 100)}%")
     ga, gb = med(A, "cam_gaze"), med(B, "cam_gaze")
     if ga is not None and gb is not None and gb > ga + 0.05:
@@ -414,7 +500,7 @@ def ab(a_glob, b_glob, name, metric="act", min_gain=0.15):
     ja, jb = med(A, "J4"), med(B, "J4")
     if ja is not None and jb is not None and jb > ja + 0.1:
         fails.append(f"J4 中位升 {ja:.2f}→{jb:.2f}")
-    v = {"name": name, "metric": key, "A": {"n": len(A), "median": ma}, "B": {"n": len(B), "median": mb},
+    v = {"name": name, "metric": key, "target": target, "A": {"n": len(A), "median": ma}, "B": {"n": len(B), "median": mb},
          "guards": {"cam_gaze": [ga, gb], "J4": [ja, jb]}, "pass": not fails, "fails": fails, "decider": "code",
          "rows": {"A": A, "B": B}, "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
     VIO.write_json(VL / f"ab_{name}.json", v, indent=1)
@@ -439,6 +525,7 @@ def main(argv=None):
     a.add_argument("--name", required=True)
     a.add_argument("--metric", default="act")
     a.add_argument("--min-gain", type=float, default=0.15)
+    a.add_argument("--target", nargs="*", default=[], help="cam_exec 目标量，如 cam_tx=-0.07")
     sub.add_parser("lowest")
     x = ap.parse_args(argv)
     if x.cmd == "ref":
@@ -450,7 +537,7 @@ def main(argv=None):
         print(json.dumps({k: d[k] for k in ("score", "items", "lowest", "clips", "coverage", "act_ratio_medians",
                                             "ours_medians", "ref_medians")}, ensure_ascii=False, indent=1, default=str))
     elif x.cmd == "ab":
-        v = ab(x.a, x.b, x.name, x.metric, x.min_gain)
+        v = ab(x.a, x.b, x.name, x.metric, x.min_gain, {k: float(val) for k, val in (t.split("=") for t in x.target)})
         print(json.dumps({k: v[k] for k in ("name", "metric", "A", "B", "guards", "pass", "fails")}, ensure_ascii=False, indent=1))
     elif x.cmd == "lowest":
         last = [json.loads(l) for l in SCORES.read_text(encoding="utf-8").splitlines() if '"line": "video"' in l]

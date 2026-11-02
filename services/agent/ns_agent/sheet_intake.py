@@ -45,8 +45,33 @@ def front_panel(sheet: str | Path):
     a, b = (AR._cfg().get("sheet_layout") or {}).get("front", [0.335, 0.556])
     W, H = im.size
     x0, x1 = int(a * W), int(b * W)
-    bx0, by0, bx1, by1 = AR._person_box(im, x0 + 4, x1 - 4)
-    return im.crop((x0, 0, x1, H)), (bx0 - x0, by0, bx1 - x0, by1)
+    panel = im.crop((x0, 0, x1, H))
+    return panel, _robust_box(panel)
+
+
+def _robust_box(panel):
+    """人物外框：比 asset_refs._person_box 更稳——灰阶 < 225 算人物，列 / 行的占比要过下限（去掉浅灰底色渐变、
+    相邻栏伸进来的发梢、栏边阴影；第二季 D s202 / I s202 / I s303 曾把整栏当成人物框，IN1 误报）"""
+    a = np.asarray(panel.convert("L")).astype(np.int16)
+    H, W = a.shape
+    m = a < 225
+    m[:, :8] = False
+    m[:, -8:] = False
+    on = m.mean(0) > 0.03
+    runs, st = [], None                      # 连续有人物的列段；取最宽的一段（栏间竖线、邻栏发梢是窄段）
+    for x, v in enumerate(list(on) + [False]):
+        if v and st is None:
+            st = x
+        elif not v and st is not None:
+            runs.append((st, x))
+            st = None
+    if not runs:
+        return (0, 0, W, H)
+    c0, c1 = max(runs, key=lambda r: r[1] - r[0])
+    rows = np.where(m[:, c0:c1].mean(1) > 0.01)[0]
+    if len(rows) == 0:
+        return (0, 0, W, H)
+    return (int(c0), int(rows[0]), int(c1), int(rows[-1]) + 1)
 
 
 def arm_symmetry(panel, box, c: dict | None = None) -> dict:
@@ -61,8 +86,10 @@ def arm_symmetry(panel, box, c: dict | None = None) -> dict:
     for y in ys:
         L = a[y, x0:x0 + aw]
         R = a[y, x1 - aw:x1][::-1]
-        lm = ~(L > 235).all(-1)                  # 去白背景
-        rm = ~(R > 235).all(-1)
+        # 去白背景；去掉头发（蓝 / 黑长发常只垂在一侧肩前，会把一侧手臂带染成发色——第二季设定图 D s202、I s202/s303 误报）
+        hair = lambda X: ((X[..., 2] > X[..., 0] + 25) & (X[..., 2] > X[..., 1] + 5))   # noqa: E731  偏蓝的发色
+        lm = ~(L > 235).all(-1) & ~hair(L)
+        rm = ~(R > 235).all(-1) & ~hair(R)
         if lm.sum() < 3 or rm.sum() < 3:
             continue
         lc, rc = L[lm].mean(0), R[rm].mean(0)

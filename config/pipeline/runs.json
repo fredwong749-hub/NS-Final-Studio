@@ -9,12 +9,13 @@
    "created_at": "2026-10-31T00:00:00"
   },
   "series10_s2": {
-   "priority": 10,
-   "status": "writing",
+   "priority": 0,
+   "status": "producing",
    "created_at": "2026-11-02T02:36:43",
    "source": "flow-start",
-   "note": "HOLLYWOOD r8 autoflow 写作中（L-104），未导入；status=writing 不派生产作业",
-   "episode": 10
+   "note": "项目方点选“导入第二季，和第一季同等优先”（总调度 11:4x）；sv-08 部署后放单",
+   "episode": 9,
+   "started_at": "2026-11-02T11:48:26"
   }
  }
 }

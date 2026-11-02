@@ -1,0 +1,112 @@
+"""FACTORY D1：唯一车道表 config/factory/hosts.json 的唯一读取入口（SYSARCH 4-2 / ARCH_ROADMAP §8，总调度 11-02 定）。
+读不到 / 没登记 → raise（失败关闭，K-OPS-F09 同口径）。服务器身份 = NS_FACTORY_HOST 或 OFFLINE_SELF（K-OPS-Y02 服务器环境契约）。
+
+  lane_url(lane, from_host=None)  服务器本机 → http://127.0.0.1:<comfy_port>；笔记本 → http://127.0.0.1:<tunnel_port>
+  lanes(host=None, role=None, enabled=True)   comfy_output(lane)   server_root(host)   aliases(host)   python(host)
+"""
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+
+ROOT = Path(os.environ.get("NS_ROOT") or Path(__file__).resolve().parents[2]).resolve()
+HOSTS_JSON = ROOT / "config/factory/hosts.json"
+
+
+class HostsError(RuntimeError):
+    """车道表读不到 / 没登记（失败关闭）"""
+
+
+def load(path: Path | None = None) -> dict:
+    p = path or HOSTS_JSON
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise HostsError(f"车道表读不出：{p}（{e}）") from e
+    if d.get("schema") != "nsfs.factory.hosts/1" or not isinstance(d.get("hosts"), dict):
+        raise HostsError(f"车道表格式不对：{p}")
+    return d
+
+
+def self_host() -> str | None:
+    return os.environ.get("NS_FACTORY_HOST") or os.environ.get("OFFLINE_SELF") or None
+
+
+def host_of(lane: str) -> str:
+    return str(lane).split(":", 1)[0]
+
+
+def _host(host: str, d: dict | None = None) -> dict:
+    d = d or load()
+    h = d["hosts"].get(host)
+    if h is None:
+        raise HostsError(f"车道表里没有主机 {host}")
+    return h
+
+
+def _lane(lane: str, d: dict | None = None) -> dict:
+    d = d or load()
+    ln = _host(host_of(lane), d)["lanes"].get(lane)
+    if ln is None:
+        raise HostsError(f"车道表里没有道 {lane}")
+    return ln
+
+
+def lanes(host: str | None = None, role: str | None = None, enabled: bool | None = True, d: dict | None = None) -> dict:
+    """{lane: 记录}；host=None = 全部主机"""
+    d = d or load()
+    out = {}
+    for hn, h in d["hosts"].items():
+        if host and hn != host:
+            continue
+        for ln, rec in (h.get("lanes") or {}).items():
+            if enabled is not None and bool(rec.get("enabled")) != enabled:
+                continue
+            if role and role not in (rec.get("roles") or []):
+                continue
+            out[ln] = rec
+    return out
+
+
+def lane_url(lane: str, from_host: str | None = None, d: dict | None = None) -> str:
+    """from_host 缺省 = 本进程身份：在道所在的服务器（或它的别名机）上 = 本机端口，否则（笔记本）= 隧道端口"""
+    d = d or load()
+    rec = _lane(lane, d)
+    me = from_host if from_host is not None else self_host()
+    h = host_of(lane)
+    if me and (me == h or h in (_host(me, d).get("aliases") or [])):
+        return f"http://127.0.0.1:{int(rec['comfy_port'])}"
+    if me and me != "laptop":
+        raise HostsError(f"{me} 不能直连 {lane}（服务器之间不互连，K-OPS-Y02）")
+    tp = rec.get("tunnel_port")
+    if not tp:
+        if h == "laptop":
+            return f"http://127.0.0.1:{int(rec['comfy_port'])}"
+        raise HostsError(f"{lane} 没有隧道端口")
+    return f"http://127.0.0.1:{int(tp)}"
+
+
+def comfy_output(lane: str, d: dict | None = None) -> str:
+    v = _lane(lane, d).get("comfy_output")
+    if not v:
+        raise HostsError(f"{lane} 没登记 comfy_output")
+    return v
+
+
+def server_root(host: str, d: dict | None = None) -> str:
+    v = _host(host, d).get("repo")
+    if not v:
+        raise HostsError(f"{host} 没登记 repo")
+    return v
+
+
+def aliases(host: str, d: dict | None = None) -> list[str]:
+    return list(_host(host, d).get("aliases") or [])
+
+
+def python(host: str, d: dict | None = None) -> str:
+    v = _host(host, d).get("python")
+    if not v:
+        raise HostsError(f"{host} 没登记 python")
+    return v

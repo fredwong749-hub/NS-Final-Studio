@@ -210,6 +210,19 @@ def shot_inputs_sig(paths, sid: str) -> dict:
             "prompt_sha": hashlib.sha256((job.get("prompt") or "").encode()).hexdigest()[:16]}
 
 
+def first_input_changed(paths, sid: str, fo: dict, led: dict) -> dict:
+    """K-OPS-E24（总调度 11:3x：第二季等非主剧重新导入后，按 E09 的 job_sig 自动重编、自动重出）：
+    首帧 passed 时记过 passed_sig、现在编译出的作业签名不同了 → 回到 ready（不计次，原因“作业输入变了”）。
+    没记过 passed_sig（旧数据）不动；项目方定稿锁不动"""
+    if fo.get("status") != "passed" or fo.get("owner_locked") or not led.get("passed_sig"):
+        return fo
+    sig = job_sig(paths, sid)
+    if not sig or sig == led["passed_sig"]:
+        return fo
+    return {**fo, "status": "ready", "attempts": 0, "stale": True, "waiting_for": "空闲道",
+            "reason": f"v{fo.get('take')} 之后作业输入变了（重新导入 / 重编），自动重出，不算之前的次数"}
+
+
 def last_consistent(td: dict, fo: dict, lo: dict) -> dict:
     """K-OPS-E13（总调度 11-02 02:2x：以 takes.json 当前版本和契约结果为准，不反过来改 takes）：
     尾帧 passed 但①首帧不是 passed，或②当前尾帧比当前首帧旧（首帧换过）→ 尾帧作废，回到 ready（首帧过了）/ pending（首帧没过），不计次"""
@@ -669,6 +682,7 @@ def vqa_gate(sid: str, stage: str, file_rel: str, job: dict, pf: dict) -> dict |
         VQ.recheck_strangers(pf, str(P.DATA / file_rel))   # K-REV-V14：背影人物的后脑被认成“多出的脸” → 本地看图复核
         VQ.q1_band_review(pf, str(P.DATA / file_rel))      # K-REV-V18 修订：Q1 复核带 → 和 L-086 左右并排的本地看图复核
         VQ.q1a_vlm(pf, str(P.DATA / file_rel))             # K-REV-V19：Q1a 逐人头发——确定性过了再由本地看图逐人问答复核
+        VQ.hair_primary(pf, v)                              # 发色：Q1a 分割主判、VLM 辅助（开关 gate.hair_primary）
         VQ.apply(pf, v)
         if v.get("error") and pf.get("ok") is False and pf.get("blocking") == ["Q9"]:
             pf["score_infra"] = True
@@ -1046,6 +1060,7 @@ def derive(w: World, ledger: dict, leases: dict, run_summary: dict | None = None
                             stale=stl.get("image"))
             lo = _frame_obj("last", "last", sid, n, td, fv, ledger, leases, canvas, n in fv2_eps, deps_ok=fo["status"] == "passed",
                             first=fo, stale=stl.get("last"))
+            fo = first_input_changed(w.p, sid, fo, ledger.get(f"first:{sid}") or {})   # K-OPS-E24：重新导入后作业变了 → 重出
             lo = last_consistent(td, fo, lo)          # K-OPS-E13：尾帧不能比首帧旧、首帧没过尾帧不能算过
             vo = _video_obj(w, sid, n, td, fo, lo, ledger, leases, night_alive)
             S["objects"] = {"assets": ao, "first": fo, "last": lo, "video": vo}
@@ -1122,6 +1137,16 @@ def derive(w: World, ledger: dict, leases: dict, run_summary: dict | None = None
                          "画布任务": len(w.api_jobs)}}
 
 
+ORPHAN_SCORE_S = 120          # 打分中的版本，没有活租约且创建超过这么久 = 打分被打断（K-OPS-F12）
+
+
+def _age_s(ts) -> float:
+    try:
+        return now() - time.mktime(time.strptime(str(ts)[:19], "%Y-%m-%dT%H:%M:%S"))
+    except (ValueError, TypeError):
+        return 0.0
+
+
 def _frame_obj(kind, stage, sid, n, td, fv, ledger, leases, canvas, fv2_owned, deps_ok, first=None, stale=None) -> dict:
     rj = (ledger.get("_master_rejects") or {}).get(f"{kind}:{sid}")
     if rj and not rj.get("cleared") and not (ledger.get(f"{kind}:{sid}") or {}).get("redo_exhausted"):
@@ -1154,6 +1179,11 @@ def _frame_obj(kind, stage, sid, n, td, fv, ledger, leases, canvas, fv2_owned, d
               if isinstance(i.get("evidence"), dict) and (i["evidence"].get("review"))]
         return {**o, "status": "passed", "reason": f"v{t['n']} 过契约并设为当前", "take": t["n"], "review": "；".join(rv) or None}
     if t and pf.get("state") == "running":
+        # K-OPS-F12（FACTORY sv-09）：打分进行到一半进程重启了（租约随进程失效）→ 这张图只重打分，不重出、不计次；
+        # 否则对象永远停在“契约质检中”。重启队列因此可以只等出图道排空、不必等打分积压清空
+        if not leases.get(f"{kind}:{sid}") and _age_s(t.get("created_at")) > ORPHAN_SCORE_S:
+            return {**o, "status": "ready", "rescore_take": t["n"], "take": t["n"],
+                    "reason": f"v{t['n']} 打分被进程重启打断", "waiting_for": "只重打分（不占道、不重出、不计次）"}
         return {**o, "status": "running", "reason": f"v{t['n']} 契约质检中", "where": "postflight（CPU，不占道）", "take": t["n"]}
     if kind == "last" and (led.get("na") or fvf.get("status") == "不适用"):
         return {**o, "status": "passed", "reason": "剧本这一镜没有结束状态，不需要尾帧", "na": True}
@@ -1692,7 +1722,10 @@ class Producer:
         except Exception as e:  # noqa: BLE001
             self.logf("consistency_err", error=repr(e)[:200])
         js(self.p.registry, reg)
-        js(self.p.heartbeat, {"ts": iso(), "t": now(), "pid": os.getpid(), "paused": reg["paused"], "inflight": len(self.inflight)})
+        with self.mu:
+            scoring_n = len(self.scoring)
+        js(self.p.heartbeat, {"ts": iso(), "t": now(), "pid": os.getpid(), "paused": reg["paused"], "inflight": len(self.inflight),
+                              "scoring": scoring_n, "rendering": max(0, len(self.inflight) - scoring_n)})   # K-OPS-F12：重启队列只等 rendering=0
         sig = json.dumps([[(o["id"], o["status"], o.get("attempts")) for S in E["shots"] for o in S["objects"].values()]
                           for E in reg["episodes"]] + [reg["paused"]], ensure_ascii=False)
         if sig != self.last_sig:
@@ -1919,11 +1952,12 @@ class Producer:
             if not free:
                 break
             led = self.ledger().get(o["id"]) or {}
-            if led.get("rescore_take"):          # 上次只是打分没打成：只重打分（不占道、不重出、不计次）
+            rt = led.get("rescore_take") or o.get("rescore_take")     # K-OPS-F12：打分被重启打断的版本同样只重打分
+            if rt:                               # 上次只是打分没打成：只重打分（不占道、不重出、不计次）
                 if self.leases.acquire(o["id"], holder_note="rescore"):
                     with self.mu:
                         self.inflight[o["id"]] = {"lane": None, "since": now()}
-                    self.pool.submit(self._rescore_one, o, int(led["rescore_take"]))
+                    self.pool.submit(self._rescore_one, o, int(rt))
                 continue
             tried = set(led.get("lanes_failed") or [])
             lane = next((ln for ln in free if ln not in tried), free[0])
@@ -2085,7 +2119,8 @@ class Producer:
                                                      "variant": rung.get("variant"),
                                                      "blocking": pf.get("blocking"), "rung": rung["name"], "at": iso()}]
             if pf.get("ok"):
-                self.led_update(oid, tries=attempt, history=hist, final="passed", reason=None, last_error=None)
+                self.led_update(oid, tries=attempt, history=hist, final="passed", reason=None, last_error=None,
+                                passed_sig=job_sig(self.p, sid) if kind == "first" else None)
                 self.logf("passed", obj=oid, take=res["take"], attempt=attempt, variant=rung.get("variant"), strategy=rung.get("strategy"),
                           render_s=render_s, contract_s=contract_s,
                           gpu_s=res.get("gpu_s"), scored_from=pf.get("scored_from") or pf.get("measured_on"))

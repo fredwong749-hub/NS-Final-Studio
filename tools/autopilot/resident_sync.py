@@ -348,6 +348,92 @@ def restart(host: str, mode: str = DEFAULT_MODE) -> str:
     return txt
 
 
+# ---------------------------------------------------------------- 当前版本视频必拉（K-OPS-W24，总调度 11-02 派；DEBUG-RSI 查出缺 68 条）
+# 22:2x 跳板慢时 pull 只拉成片 / manifest 入选 / 放大版 / 预览 mp4，takes.json 里 active.video 指向的版本视频从不回笔记本，
+# 胶片总览悬停预览没有片。现走香港线路，active.video 一律拉回，拉完按服务器报的大小核对。
+REMOTE_ACTIVE_VIDEOS = r"""
+import json, glob, os
+out = {}
+for f in glob.glob("data/renders/ep*/*/takes.json"):
+    try:
+        d = json.load(open(f, encoding="utf-8"))
+    except Exception:
+        continue
+    n = (d.get("active") or {}).get("video")
+    if n is None:
+        continue
+    t = next((x for x in d.get("takes") or [] if x.get("n") == n and x.get("stage") == "video"), None)
+    if not t or not t.get("file"):
+        continue
+    p = "data/" + str(t["file"]).lstrip("/")
+    if os.path.isfile(p):
+        out[p] = os.path.getsize(p)
+print(json.dumps(out))
+"""
+
+
+def active_video_paths(doc: dict) -> list[str]:
+    """一份 takes.json → 当前版本视频的仓库相对路径（data/renders/...）；没有当前视频返回 []"""
+    n = ((doc or {}).get("active") or {}).get("video")
+    if n is None:
+        return []
+    t = next((x for x in doc.get("takes") or [] if x.get("n") == n and x.get("stage") == "video"), None)
+    return ["data/" + str(t["file"]).lstrip("/")] if t and t.get("file") else []
+
+
+def remote_active_videos(host: str) -> dict[str, int]:
+    """服务器上 takes.json 的 active.video 且文件在 → {相对路径: 字节数}"""
+    raw = ssh(host, f"cd {R} && python3 -", data=REMOTE_ACTIVE_VIDEOS.encode(), timeout=300, tries=3)
+    txt = raw.decode("utf-8", "replace")
+    return json.loads([ln for ln in txt.splitlines() if ln.startswith("{")][-1])
+
+
+def _local_ok(rel: str, size: int) -> bool:
+    p = ROOT / rel
+    return p.is_file() and p.stat().st_size == size
+
+
+def pull_active_videos(host: str, dry: bool = False, batch_mb: float = 64.0) -> dict:
+    """补拉：服务器 active.video 里笔记本没有（或大小不符）的片，分批 tar 拉回，按服务器大小核对后原子写进仓库对应路径"""
+    av = remote_active_videos(host)
+    todo = sorted(k for k, v in av.items() if not _local_ok(k, v))
+    res = {"host": host, "active_videos": len(av), "missing": len(todo), "got": 0, "bad": [], "mb": round(sum(av[k] for k in todo) / 1e6, 1)}
+    if dry or not todo:
+        res["todo"] = todo[:200]
+        log("pull_active_videos", host, json.dumps({k: res[k] for k in ("active_videos", "missing", "mb")}, ensure_ascii=False), "dry" if dry else "")
+        return res
+    global BATCH
+    old, BATCH = BATCH, int(batch_mb * 1024 * 1024)
+    try:
+        for b in batches(todo, {k: (av[k],) for k in todo}):
+            blob = ssh(host, f"cd {R} && tar cf - -T - 2>/dev/null; true", data="\n".join(b).encode(), timeout=1800)
+            try:
+                with tarfile.open(fileobj=io.BytesIO(blob)) as tf:
+                    for m in tf.getmembers():
+                        if not m.isfile() or ".." in m.name or m.name.startswith("/") or m.name not in av:
+                            continue
+                        data = tf.extractfile(m).read()
+                        if len(data) != av[m.name]:
+                            res["bad"].append(m.name)
+                            continue
+                        p = ROOT / m.name
+                        p.parent.mkdir(parents=True, exist_ok=True)
+                        tmp = p.with_name(p.name + ".pulltmp")
+                        tmp.write_bytes(data)
+                        os.replace(tmp, p)
+                        os.utime(p, (m.mtime, m.mtime))
+                        res["got"] += 1
+            except tarfile.TarError as e:
+                log("pull_active_videos", host, "批次 tar 读不全", repr(e)[:120])
+                res["bad"] += b
+    finally:
+        BATCH = old
+    res["verified"] = sum(1 for k in todo if _local_ok(k, av[k]))
+    log("pull_active_videos", host, json.dumps({k: res[k] for k in ("active_videos", "missing", "got", "verified", "mb")}, ensure_ascii=False),
+        "不收", len(res["bad"]))
+    return res
+
+
 def pull(host: str) -> dict:
     st = jl(STATE, {}) or {}
     since = int((st.get(host) or {}).get("last_pull") or int(ssh(host, f"cat {OFF}/FREEZE_TS").strip() or 0))
@@ -369,6 +455,13 @@ def pull(host: str) -> dict:
     for f in files:
         if f.lower().endswith(".mp4") and (f.startswith("data/episodes/") or "_sr1080" in f or "/_preview/" in f):
             need_mp4.add(f)
+    try:                                     # K-OPS-W24：takes.json 当前版本视频一律拉回（笔记本没有 / 大小不符的都拉，不只本轮新改的）
+        for rel, size in remote_active_videos(host).items():
+            if rel in files or not _local_ok(rel, size):
+                files.setdefault(rel, size)
+                need_mp4.add(rel)
+    except Exception as e:  # noqa: BLE001
+        log("pull", host, "active.video 清单取不到", repr(e)[:160])
     for mf in [f for f in small if f.endswith("/manifest.json")]:
         try:
             raw = ssh(host, f"cat {R}/{mf}", timeout=120, tries=2)
@@ -1099,6 +1192,8 @@ def main(argv):
         print(push(argv[1], "--code-only" in argv, tier=tier, yes="--yes" in argv))
     elif cmd == "pull":
         print(pull(argv[1]))
+    elif cmd == "pull-active-videos":          # 补拉当前版本视频：pull-active-videos <host> [--dry]
+        print(json.dumps(pull_active_videos(argv[1], dry="--dry" in argv), ensure_ascii=False))
     elif cmd == "restart":
         print(restart(argv[1], "producer-only" if "--producer-only" in argv else ("all" if "--all" in argv else DEFAULT_MODE)))
     elif cmd == "switch":        # 一条命令切到常驻：两台各 push（代码 + 数据）→ prep + 重启 → health；一台失败不影响另一台

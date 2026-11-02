@@ -42,6 +42,7 @@
 | apps/web/src/ds/live.css（UIRSI 按总调度指令新建；UIPIXEL 11-01 已同意接管：“live.css 写完交我接管没问题”） | UIPIXEL（接管） | 长期 |
 | apps/web/src/projects/Root.tsx（无 owner，共享；UIRSI 11-01 03:1x 事后补登：只把 script-chat 从“旧地址重定向”里去掉，恢复写作对话路由，UIAUDIT F23） | 共享（UIRSI 已改完） | — |
 | UIRSI r43（总调度 fredw-2b 11-02 UIAUDIT 复核派单 + r43 / 02:2x / 02:4x 规格）：apps/web/src/components/GpuPanel.tsx（连接读 infra tunnels、呼吸灯相位）、services/api/ns_api/decision_locks.py（regex + match）、services/api/ns_api/app.py（count / latest_take 排除隔离）、services/api/ns_api/infra_status.py（重连提示只说真断的）、services/api/ns_api/season.py（faces / img 字段）、apps/web/src/v3/pages/story.css（全流程自动面板 af-* 样式，只追加） | UIRSI | 本轮收轮即释放（改完已跑 data_parity：752 项不一致 0） |
+| UIRSI2 L-116 待你看队列（总调度 fredw-2b 11-02 12:xx 派）：services/api/ns_api/owner_queue.py（新建：GET /api/owner/queue、POST /api/owner/decide）、services/api/ns_api/app.py（只加 include_router 一行）、tools/qa/data_parity.py（只加 D-QUEUE 一节；DATAALIGN 不在岗、custodian UIRSI）、apps/web/src/v3/TopBarV3.helpers.ts（V3_PAGES 加 #/queue）、apps/web/src/v3/ownerQueue.ts、apps/web/src/v3/pages/OwnerQueuePage.tsx（新建）、apps/web/src/v3/ownerqueue.css（新建，样式归 UIPIXEL，custodian UIRSI）、data/owner_queue/**（新建：requests.json 投递 / decisions.jsonl 决定） | UIRSI | 本轮收轮即释放 |
 
 ## 授权（CONSENT，iter_gate O1 读这一节）
 
@@ -250,3 +251,4 @@ s_vqastart.ps1 归 LOCALGPU（已收工），CONSENT 写 LOCALGPU → VQAGATE”
 - CONSENT: REFLOCK/IMGFIX -> IMGLAB : services/agent/ns_agent/framing.py（K-REN-903：partial_only 开关、closeup_lead 局部首句放宽到非特写景别、narrow_lock 局部人物锁收窄（改 W5 b 发色保留与 HC-07 成年句写法））、services/agent/ns_agent/compiler.py（全员局部 → subject=part 一处）、services/agent/ns_agent/frame_job.py（eyeline_note 只给露脸的人补）；备份 data/_quarantine/imglab_20261102b/ | by 总调度 fredw-2b 11-02 批准（“方案 A 全部批准，包括第 4 条：W5 b 和 HC-07 的写法由你改，CONSENT 记在总调度名下……sv-06 之后合入，带开关”）
 - CONSENT: VIDEO10 -> DEBUG_RSI : tools/series10_video/night.py（apply_lane_policy：控制文件 hold_lanes 在两种模式下都合并，且进缓存 key；K-OPS-E20） | by 总调度 fredw-2b 11-02 08:4x：“night.py 第 455 行：授权你改（CONSENT 记在总调度名下）……进 sv-08；改前通知 VIDLAB”
 - CONSENT: UIPIXEL -> UIRSI : apps/web/src/v3/film.css | by 总调度 fredw-2b 11-02 08:xx：“请按 A 实现总览和单集页，并放在开关后面”（新建样式）
+- CONSENT: DIRECTOR -> HOLLYWOOD : config/director/lighting.yaml（加 sources_note 说明字段）、knowledge/rules/director.yaml（K-WRT-806 then / writer_text：动机光源可见即合规） | by 总调度 fredw-2b 11-02：“改 rubric 判定和写作提示词时，同步给 lighting.yaml 加一个说明字段，CONSENT 记在总调度名下，因为 DIRECTOR 不在跑”

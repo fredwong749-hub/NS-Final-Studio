@@ -29,7 +29,7 @@ import { dotOf, statusWord, DOT_TITLE, type MainStatus } from "./seasonDot";
 import { Pop } from "../widgets";
 import { countKinds, hasKind, tagsTitle, type ShotStatusTags, type TagKind } from "../StatusTags.helpers";
 
-type SShot = { id: string; index: number; size: string | null; scene_id: string | null; scene: string | null; link: string | null; carry: string | null; cast: { name: string; presence: string }[]; switch: string[]; seconds: number | null; adult: boolean; img?: string; lens?: string | null; cand_url: string | null; cand_n: number; old_script_n?: number; first_old?: boolean; last_old?: boolean; status?: ShotStatusTags };
+type SShot = { id: string; index: number; size: string | null; scene_id: string | null; scene: string | null; link: string | null; carry: string | null; cast: { name: string; presence: string }[]; switch: string[]; seconds: number | null; adult: boolean; img?: string; lens?: string | null; lens_actual?: string | null; lens_plan?: string | null; camera_move?: string | null; lighting_sources?: string[]; lighting_name?: string | null; video?: string | null; video_old?: string | null; cand_url: string | null; cand_n: number; old_script_n?: number; first_old?: boolean; last_old?: boolean; status?: ShotStatusTags };
 /** UIRSI r40：板块状态（后端 ns_api/shot_status.episode_blocks；口径同镜头格标签） */
 type BlockState = "stale" | "doing" | "done" | "todo";
 type SBlocks = { state: BlockState; text: string; stages: { key: string; label: string; state: BlockState; counts: Record<BlockState, number>; text: string }[] };
@@ -275,6 +275,17 @@ export default function SeasonPage() {
               img: (x.first_old ? null : byId.get(x.id)?.first_frame) ?? x.cand_url,
               cap: `EP${String(e.number).padStart(2, "0")} · S${String(x.index).padStart(2, "0")} · ${x.size ?? "景别未标"} · ${x.seconds ?? "?"}s · ${x.lens ?? ""}`,
               dot: dotOf(x.status as MainStatus),
+              // r46（项目方 11:3x）：每帧下面的镜头细节——接口有的用真值（src: api），没有的用 mock（src: mock，前端灰色斜体“示意”）
+              size: { v: x.size, src: "api" as const },
+              secs: { v: x.seconds ? `${x.seconds}s` : null, src: "api" as const },
+              lens: { v: x.lens ?? null, src: "api" as const },
+              light: x.lighting_name || x.lighting_sources?.length ? { v: x.lighting_name ?? x.lighting_sources![0].slice(0, 14), src: "api" as const } : { v: "夜景主光 + 轮廓光", src: "mock" as const },
+              move: x.camera_move ? { v: x.camera_move.replace(/^[a-z ]+/i, "").trim() || x.camera_move, src: "api" as const } : { v: "固定机位", src: "mock" as const },
+              faces: x.cast.filter((c) => c.presence !== "画外").map((c) => ({ name: c.name, url: faces[c.name] ?? null })),
+              video: x.video ?? null,
+              videoOld: x.video_old ?? null,
+              // 演示悬停播放（地址栏 ?mock=1 才有）：本机还没有同步到任何当前剧本的视频，用一段示意视频，帧角标“示意视频”
+              videoMock: !x.video && !x.video_old && /[?&]mock=1/.test(location.search) && x.index <= 3 ? "/files/ab/director_post/ep01_v2_post.mp4" : null,
             })),
           }))}
           onOpen={(id) => setPeek(id)}

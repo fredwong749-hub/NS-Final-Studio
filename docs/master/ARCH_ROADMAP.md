@@ -88,8 +88,8 @@
 | # | 项 | 涉及 owner | 验收 | 状态 |
 |---|---|---|---|---|
 | 4-1 | ssh 统一到 rssh（14 个自写 def ssh 改成一行调 rssh.run_retry） | NETFIX（接口）+ 各文件 owner | arch_scan def_ssh 14 → 0（薄包装不算；tunnel_supervisor / inject_test / bw_test 例外） | 接口已定（NETFIX 03:3x）：run_retry(host, cmd, input, timeout=900, tries=4, backoff_s≥10, text)；服务器上 OFFLINE_SELF 调本机退回 bash -c、跨机 rc=255（服务器间无互信，跨机只走 HTTP）；remote_score full_score 要显式给足 timeout。sv-05 解冻后 NETFIX 先加，SYSARCH 再逐文件替换 |
-| 4-2 | 车道表收成 config/factory/hosts.json | FACTORY（D1 主导） | 同 G1；SYSARCH 只做读者改造 | 等 FACTORY 定 schema |
-| 4-3 | 退役 tunnel*.sh / gpu3_tunnels.py / infra_watchdog 修隧道段 | NETFIX | K-OPS-N01；infra_watchdog 无 taskkill ssh | 排期：sv-05 解冻后 NETFIX 与 run_retry 一起改（kill / start_loop 段 + :151 arch-ok） |
+| 4-2 | 车道表收成 config/factory/hosts.json | FACTORY（D1 主导） | 同 G1；SYSARCH 只做读者改造 | ① 完成（FACTORY：hosts.json + tools/factory/hosts.py + tests/test_factory_hosts.py drift=0，K-OPS-F14，随 sv-09）；② 已派单（sv-09 部署后）：producer IMAGE_LANES → DEBUG-RSI；resident_sync → WORKFLOW；ab_run / lanes.json 并入 → VIDLAB；S6 server_root → SENTINEL；render_endpoints → UIRSI；tunnels.json 生成 + fwd.py 停用 → NETFIX（排在 4-3 后） |
+| 4-3 | 退役 tunnel*.sh / gpu3_tunnels.py / infra_watchdog 修隧道段 | NETFIX | K-OPS-N01；infra_watchdog 无 taskkill ssh | **关闭（待 sv-09 入版）**：NETFIX 删 infra_watchdog 修隧道整段（只剩探测 + 报警，看门狗已重启，test_infra_resident 10 passed）；SYSARCH 隔离 tunnel.sh、tunnel_gpu36.sh、gpu3_tunnels.py + 测试（data/_quarantine，可恢复） |
 | 4-4 | 删繁就简里能隔离的 → data/_quarantine | 各 owner | quarantine_refcheck 0 引用 | 进行中：push_assets_json.py 已隔离（WORKFLOW 同意） |
 | 4-5 | 80 处 subprocess 补 timeout（先无主文件，再核心链路 19 处由 owner） | DEBUG-RSI / DIRECTOR / UIRSI | arch_scan no_timeout 80 → 0 | 进行中 72 |
 | 4-6 | series10_v1 写死 157 处改读 runs.py | WORKFLOW（runs.py） | arch_scan hard_run → 0 | 进行中 125（WORKFLOW 复核通过；服务器侧 strict=True） |
@@ -119,6 +119,25 @@
 | 05:0x | 41.6 | 12.5（claude 点 7） | 50.0（SLO 80%；GPU 道达标 20%） | 75.0（一次通过 50%：sv-04 三败一过；落后 0） | 8.8（1155 / 锚点 1266） | 99.1（K-WRT-705 缺 check） | 结构健康 → 4-1 / 4-5 / 4-6 继续降；无 Claude → DISTILL 7 个 claude 点 |
 | 05:3x | 45.6 | 25.0（claude 点 6） | 49.2（SLO 87%；GPU 真正在跑 9.1%，来源 gpu_24h） | 75.0 | 10.6（1132，本轮 −23：隔离 18 个一次性脚本、4-1 bgm / voice10 改 run_retry、修两处误报） | 100（K-WRT-705 补 check） | 自运行 GPU → DEBUG-RSI / SENTINEL 工单；无 Claude → DISTILL 前 3 项（min_code_sv、:8800 空闲重启、master_review 机签） |
 | 06:0x | 52.7 | 37.5（claude 点 5） | 47.1（GPU 真正在跑 10.0%） | 75.0 | 28.8（902，本轮 −218：217 个无主文件按总调度批的表登记；4-1 resident_sync / night / imggen / remote_score / server_deploy / series10_video/deploy 改 run_retry，def_ssh 9→6、direct_ssh 31→29） | 100 | GPU 利用率（DEBUG-RSI 预取深度 2）；claude 点（VQAGATE 回归集 → 机签） |
+
+## 8. 4-2 设计稿：车道表收成一份 config/factory/hosts.json（SYSARCH 起草，待 FACTORY 定 schema；对齐 D1）
+
+**现状（6 份，互相对不上）**：producer.py IMAGE_LANES（写死隧道端口）、resident_sync.py 车道 / 端口、服务器 offline_20261101/fwd.py、config/netfix/tunnels.json（含死口 18290 / 18098）、config/render_endpoints.json、config/vidlab/lanes.json（VIDLAB 11-02 新增，含 comfy_output）；另 config/policies/sentinel.yaml S6 server_root 也是服务器路径来源。
+
+**提议 schema**（nsfs.factory.hosts/1）：
+```
+{"schema": "nsfs.factory.hosts/1",
+ "hosts": {
+   "gpu33": {"ssh": "gpu33", "repo": "/root/work/fredw/offline_20261101/repo", "comfy_root": "/root/claude-kimi-ns-studio-v1/ComfyUI",
+             "lanes": {"gpu33:0": {"gpu": 0, "comfy_port": 8188, "tunnel_port": 18188, "roles": ["image"], "enabled": true},
+                       "gpu33:1": {...}, "gpu33:3": {...}},
+             "aliases": []},
+   "gpu36": {..., "aliases": ["gpu33"]},          # = resident_restart.sh 的 OFFLINE_ALIASES（K-OPS-Y02 契约，同源）
+   "laptop": {"lanes": {"laptop:0": {"enabled": false}}}}}
+```
+**唯一读取入口**：tools/factory/hosts.py（FACTORY）——lane_url(lane, from_host)：服务器本机（NS_FACTORY_HOST / OFFLINE_SELF）= 127.0.0.1:comfy_port；笔记本 = 127.0.0.1:tunnel_port；comfy_output(lane)；server_root(host)；aliases(host)。读不到 = raise（失败关闭，K-OPS-F09 同口径）。
+**迁移顺序（每步可回退、带测试）**：① FACTORY 建 hosts.json + hosts.py + 一致性测试（现有 6 份与 hosts.json 逐项比对，先只报不挡）→ ② 读者逐个改读 hosts.py：producer IMAGE_LANES、resident_sync、render_endpoints（改成由 hosts.json 生成）、vidlab lanes.json（VIDLAB 并入）、tunnels.json 的 -L 列表（NETFIX 由 hosts.json 生成）、sentinel S6 server_root → ③ 一致性测试改成“除 hosts.json 外不得再出现端口 / 服务器路径字面量”（arch_scan hard_path 已覆盖路径；端口另加一项）→ ④ 服务器 fwd.py 停用（G1 / Top15 #9），旧文件隔离。
+**验收**：G1 关闭条件 = config/factory/hosts.json 唯一；arch_scan hard_path 中服务器路径类 → 0；端口字面量只在 hosts.json；服务器停掉 fwd.py 照常出图。
 
 ## 进度
 
