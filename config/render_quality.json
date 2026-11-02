@@ -698,6 +698,70 @@
       "lang": "reality",
       "note": "STYLE-V2（L-127，项目方 19:1x 主题“上海时尚模特的幻想和现实的挣扎”）V2 调色候选：技术参数同 Turbo 8 步 + texture_fix + krea2 0.5 + 1.5× 出图 + USM（不含任何 V1 风格后缀）；颜色 = 本后缀的光位 / 色调 + 后期 LUT post_lut（tools/v2style/looks.py 生成）。只给 V2 用；项目方挑定后再定 V2 默认，V1 的 default_preset / frame_redo_preset 不变。",
       "src": "tools/v2style/grade_ab.py；data/review_pages/v2_style/grade.html"
+    },
+    {
+      "id": "v2_editorial_fantasy_b2",
+      "label": "V2 幻想 B · 胭脂红金（第 2 版）（候选，待项目方挑）",
+      "tier": "preview",
+      "run": "series10_v2",
+      "params": {
+        "unet": "turbo",
+        "sampler": "euler",
+        "vae": "texture_fix",
+        "width": 768,
+        "height": 1344,
+        "spec_words": true,
+        "loras": [
+          {
+            "name": "krea2_film_texture_qwen21.safetensors",
+            "strength": 0.5
+          }
+        ],
+        "render_scale": 1.5,
+        "sharpen": {
+          "enabled": true,
+          "radius": 1.2,
+          "amount": 0.6,
+          "threshold": 2
+        },
+        "style_suffix": "时尚杂志大片，夜晚室内，胭脂红色调的霓虹灯与琥珀金色暖光交织，背景沉入深红与暗金，硬朗侧光勾出轮廓，浓重的红色阴影，肤色红润通透，35mm电影胶片质感，细腻颗粒"
+      },
+      "post_lut": "config/post/luts/v2_fantasy_b2.cube",
+      "lang": "fantasy",
+      "note": "STYLE-V2 第 2 轮：第 1 版 v2_editorial_fantasy_b 背景偏白天、胭脂红感弱（总调度 20:4x）→ 改夜晚室内胭脂红霓虹 + 琥珀金；其余同 v2_editorial_* 第 1 轮。",
+      "src": "tools/v2style/grade_ab.py；data/review_pages/v2_style/grade.html"
+    },
+    {
+      "id": "v2_editorial_reality_c2",
+      "label": "V2 现实 C · 直闪纪实（第 2 版）（候选，待项目方挑）",
+      "tier": "preview",
+      "run": "series10_v2",
+      "params": {
+        "unet": "turbo",
+        "sampler": "euler",
+        "vae": "texture_fix",
+        "width": 768,
+        "height": 1344,
+        "spec_words": true,
+        "loras": [
+          {
+            "name": "krea2_film_texture_qwen21.safetensors",
+            "strength": 0.5
+          }
+        ],
+        "render_scale": 1.5,
+        "sharpen": {
+          "enabled": true,
+          "radius": 1.2,
+          "amount": 0.6,
+          "threshold": 2
+        },
+        "style_suffix": "纪实杂志快照，夜里用相机机顶闪光灯正面直闪，人物被闪光打得很亮，身后墙面上有一道清晰锐利的黑色硬阴影，背景迅速坠入黑暗，高反差，白平衡偏冷，真实皮肤质感，轻微颗粒"
+      },
+      "post_lut": "config/post/luts/v2_reality_c2.cube",
+      "lang": "reality",
+      "note": "STYLE-V2 第 2 轮：第 1 版 v2_editorial_reality_c 直闪效果不明显、和现实 A 太像（总调度 20:4x）→ 改相机正面直闪 + 墙面硬阴影 + 背景压黑；其余同 v2_editorial_* 第 1 轮。",
+      "src": "tools/v2style/grade_ab.py；data/review_pages/v2_style/grade.html"
     }
   ],
   "user_presets": [],

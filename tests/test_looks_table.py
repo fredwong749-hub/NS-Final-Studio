@@ -40,3 +40,11 @@ def test_lead_f_fixed_looks_and_schedule():
     sl["episodes"][1]["intimate"] = False
     p = "；".join(LT.lead_f_check(lead, sl))
     assert "日常造型只能是 O1 / O4" in p and "没标 intimate" in p
+
+
+def test_placeholder_in_looks_blocked():
+    """SL-12 同口径：造型表里的占位词也拦"""
+    looks = [{"name": "林晚", "char_id": "lin_wan", "marker": "钻石水晶甲",
+              "looks": [look("A"), {**look("B", "私域：ep03"), "zh": "服装=（未提供）｜鞋=12cm透明细高跟｜饰品=细银链"}]}]
+    sl = {"characters": [{"name": "林晚"}], "episodes": [{"episode": 1, "characters": ["林晚"]}, {"episode": 3, "characters": ["林晚"]}]}
+    assert any("占位词" in p and "未提供" in p for p in LT.check(looks, sl))

@@ -71,10 +71,7 @@ def _script_for(run: str | None):
     from ns_render import pipeline as P
     if not run:
         return P.load_script(), None
-    import importlib.util
-    sp = importlib.util.spec_from_file_location("runs_cs", ROOT / "tools" / "autopilot" / "runs.py")
-    m = importlib.util.module_from_spec(sp)
-    sp.loader.exec_module(m)
+    from tools.autopilot import runs as m      # OVERSIGHT-F P2：tools 侧 runs 唯一入口（ROOT 已在 sys.path）
     from ns_schema.script import ScriptImport
     return ScriptImport.model_validate_json(Path(m.script_path(run, ROOT)).read_text(encoding="utf-8")), run
 

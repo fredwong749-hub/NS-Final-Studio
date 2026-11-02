@@ -21,7 +21,7 @@ SLO_TITLE = {
     "S14": "RSI 线分数（2 小时无新分 / 连续不升）",
     "GPU24": "GPU 24 小时等待任务原因",
     "S15": "编排器 tick 存活", "S16": "笔记本常驻进程清单",
-    "S17": "单镜出图速率", "S18": "临时挂道到期", "S21": "读旧状态路径（state_legacy_read）", "S22": "冻结期间改文件", "S23": "笔记本侧出图道可达率", "S24": "API 响应时间", "S25": "常驻 CLIP", "SC": "SCORECARD 七项不到 100 分", "S20": "scratchpad 里跑的进程（K-OPS-Y04）", "G26": "声明 vs 实际（hosts.json）", "S19": "产能见底（ready 不够、没有下一批）",
+    "S17": "单镜出图速率", "S18": "临时挂道到期", "S21": "读旧状态路径（state_legacy_read）", "S22": "冻结期间改文件", "S23": "笔记本侧出图道可达率", "S24": "API 响应时间", "S25": "常驻 CLIP", "S26": "写作推进常驻服务心跳", "S27": "P1 评审汇总", "SC": "SCORECARD 七项不到 100 分", "S20": "scratchpad 里跑的进程（K-OPS-Y04）", "G26": "声明 vs 实际（hosts.json）", "S19": "产能见底（ready 不够、没有下一批）",
 }
 
 
@@ -545,7 +545,9 @@ def j_scratch_procs(procs: list[dict] | None, cfg: dict) -> list[dict]:
             continue
         hits.setdefault(m[-1], []).append(p)
     out = []
-    for script, ps in hits.items():
+    for script, ps0 in hits.items():
+        pids = {p.get("pid") for p in ps0}
+        ps = [p for p in ps0 if p.get("ppid") not in pids]          # .venv 转发器 + 子进程 = 一份（总调度 20:10）
         known = (cfg.get("known") or {}).get(script)
         exempt = (cfg.get("readonly_exempt") or {}).get(script)
         if exempt and not any(re.search(r"\bssh\b|\bscp\b|rsh\.py", str(p.get("cmd") or "")) for p in ps):
@@ -691,6 +693,9 @@ def j_scorecard(res: dict, owners: dict) -> list[dict]:
     """七项每项一张单：< 100 即违约，派负责方并抄送总调度；证据写最低分项、未测条目、打分器出处"""
     out = []
     for line, r in res.items():
+        if r and r.get("score") is None and r.get("pending_stage"):
+            out.append(F("SC", line, False, f"SCORECARD {line} 阶段未到：{r['pending_stage']}", pending_stage=r["pending_stage"]))   # 关掉旧单
+            continue
         if not r or r.get("score") is None:
             continue
         low = r.get("lowest")
@@ -699,6 +704,51 @@ def j_scorecard(res: dict, owners: dict) -> list[dict]:
               + (f"；未测：{'、'.join(r['unmeasured'][:3])}" if r.get("unmeasured") else ""),
               score=r["score"], parts=parts, lowest=low, unmeasured=r.get("unmeasured"), src=r.get("src"), evidence=r.get("evidence"))
         f["owner_loop"] = f"{owners.get(line, '总调度')}（抄送总调度）"
+        out.append(f)
+    return out
+
+
+# ------------------------------------------------------------------ S26 / S27（总调度 20:10）
+def j_autoflow_resident(hb: dict | None, mtime: float | None, now: float, cfg: dict) -> list[dict]:
+    t = ts((hb or {}).get("t") or (hb or {}).get("at")) or mtime
+    age = None if t is None else now - t
+    bad = age is None or age > cfg["stale_s"]
+    f = F("S26", "heartbeat", bad, f"写作推进常驻服务心跳{'不存在' if age is None else f' {age:.0f} s 没更新'}（上限 {cfg['stale_s']} s）",
+          age_s=None if age is None else round(age), pid=(hb or {}).get("pid"), runs=(hb or {}).get("runs"), last_started=(hb or {}).get("last_started"))
+    f["owner_loop"] = cfg.get("owner_loop")
+    return [f]
+
+
+def j_review_chain(rounds: list[dict], now: float, cfg: dict) -> list[dict]:
+    """rounds = [{name, done: [交卷时刻], result_t: RESULT.json 修改时刻或 None}]；交齐 judges 份后 aggregate_max_s 内没有更新的 RESULT → 违约（每轮一张）"""
+    out = []
+    for r in rounds:
+        if len(r["done"]) < cfg["judges"]:
+            continue
+        last = max(r["done"])
+        ok = r.get("result_t") is not None and r["result_t"] >= last - 5
+        late = now - last > cfg["aggregate_max_s"]
+        f = F("S27", r["name"], (not ok) and late, f"P1 评审 {r['name']} 交齐 {now - last:.0f} s 了还没自动汇总（上限 {cfg['aggregate_max_s']} s）",
+              last_done=iso(last), result_at=iso(r.get("result_t")))
+        f["owner_loop"] = cfg.get("owner_loop")
+        out.append(f)
+    return out
+
+
+def j_ui_measure(m: dict, owner: str) -> list[dict]:
+    """SCORECARD 界面实测的扣分项按页开单（总调度 20:3x）：技术词一张、彩色胶囊 / 口径矛盾 / 裂图一张；探针失败的页不判"""
+    out = []
+    for page, p in (m.get("pages") or {}).items():
+        if p.get("error"):
+            continue
+        jg = p.get("jargon") or []
+        f = F("S9", f"sc{page}:jargon", bool(jg), f"界面 {page} 出现技术词：{'、'.join(jg)}", page=page, words=jg, at=m.get("at"))
+        f["owner_loop"] = owner
+        out.append(f)
+        caps, con, brk = p.get("color_capsules") or [], p.get("contradictions") or [], p.get("broken_imgs") or []
+        f = F("S9", f"sc{page}:clean", bool(caps or con or brk), f"界面 {page} 不整洁：彩色胶囊 {len(caps)} 个、口径矛盾 {len(con)} 处、裂图 {len(brk)} 张"
+              + (f"（{con[0][:40]}）" if con else ""), page=page, capsules=caps[:6], contradictions=con[:4], broken=brk[:4], at=m.get("at"))
+        f["owner_loop"] = owner
         out.append(f)
     return out
 

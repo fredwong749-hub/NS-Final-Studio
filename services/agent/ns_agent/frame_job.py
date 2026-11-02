@@ -41,7 +41,7 @@ def compile_frame(ep, shot, g, project: str | None, *, bible=None, available=Non
     use_assets = bool(project and AR.project_cfg(project)) if assets is None else assets
     if use_assets:
         g, _removed = AR.locks_without_wardrobe(g)          # K-AST-232
-    c = C.compile_shot(ep, retrigger(shot, g), g, set(available or ()), image_style=ST.image_suffix(),
+    c = C.compile_shot(ep, retrigger(shot, g), g, set(available or ()), image_style=ST.image_suffix(project),   # 按剧取风格（L-126）
                        bible=bible or load_bible(), framing_project=project)
     if not use_assets:
         return (role_lines(legacy_refs or []) if role_lines else "") + c.image_prompt, c, None, None

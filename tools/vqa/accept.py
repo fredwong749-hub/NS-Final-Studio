@@ -37,7 +37,9 @@ def identity(pf: dict) -> dict:
     if not q1:
         return {"status": "untested", "why": "契约里没有 Q1（没打分）"}
     ev = q1.get("evidence") or {}
-    return {"status": q1.get("status"), "sims": ev.get("sims"), "anchor": ev.get("anchor") or {}, "why": str(q1.get("detail") or "")[:200]}
+    wrong = [f for f in ev.get("per_face") or [] if f.get("verdict") not in ("过", "可放行", "小脸不判", "未判")]
+    return {"status": q1.get("status"), "sims": ev.get("sims"), "anchor": ev.get("anchor") or {}, "why": str(q1.get("detail") or "")[:200],
+            "per_face": ev.get("per_face") or [], "wrong_faces": wrong}   # 逐脸：多人镜指出是哪张脸错了（总调度 20:1x）
 
 
 WARDROBE_Q = ("看【待检】图里红框框住那张脸的这个人（红框外的人不算），对照造型登记逐项核对，只按画面回答，输出 JSON："
@@ -170,8 +172,15 @@ def count_check(sid: str, image, feat: dict | None = None, host: str | None = No
             return {"status": "untested", "why": f"检测器没跑成：{type(e).__name__}: {e}"[:200], "infra": True}
     if not feat or feat.get("error"):
         return {"status": "untested", "why": "检测器没跑成：" + str((feat or {}).get("error") or "无结果")[:150], "infra": True}
+    faced = any(c.get("faced") for c in cast or [])
+    if not feat.get("refs_loaded") and (faced or feat.get("faces") or feat.get("yolo_faces")):
+        # L-126 失败关闭（VQAGATE 11-02 20:1x 实测：同一张陌生人图，带身份参照判 extra_head，不带参照判干净）：本剧身份脸一张都没加载
+        # （V2 清单还没合进身份脸）→ 认不出脸是谁、陌生人 / 多出人头判不了 → untested，不当通过
+        return {"status": "untested", "why": "身份参照没加载（本剧资产清单里没有身份脸），陌生人 / 多出人头判不了"}
     r = AN.judge(feat, cast)
     m = r.get("metrics") or {}
+    if r.get("untested") and not [d for d in r["defects"] if d.get("conf") != "low"]:
+        return {"status": "untested", "why": "；".join(r["untested"])[:200]}          # judge 判未测（身份参照没加载）= 未测，不当通过
     hits = [d for d in r["defects"] if d.get("conf") != "low"]
     # 单人镜的站位（blocking_mismatch）记日志、不拦（VQAGATE 11-02 17:2x 亲看 ep01-S3 / S4：单人近景脸在画面正中附近 0.47–0.54，
     # 线 0.55，编译稿没写左右，判“站位不符”偏严；多人镜左右站反才是真错，照拦）。口径待总调度定
@@ -248,13 +257,28 @@ def run_shots(prefix: str, feats_path: str | None, via_tunnel: bool) -> list[dic
     return rows
 
 
+def legacy_run() -> str:
+    """无前缀老路径的那部剧（人工标注回归集的出处）：只从运行登记表读（tools/autopilot/runs.legacy_run，hard_run）"""
+    from tools.autopilot import runs
+    return runs.legacy_run()
+
+
 def regression() -> int:
     """人工标注回归集（data/vqa/regression_anomaly/labeled.json）：每条 label 的 true_issue / false_positive 都要判对"""
     from tools.vqa import anomaly as AN
     d = json.loads((ROOT / "data/vqa/regression_anomaly/labeled.json").read_text(encoding="utf-8"))
     bad = n = 0
+    old = os.environ.get("NS_RUN_ID")
     for k, v in d.items():
-        codes = {x["code"] for x in AN.judge(v["feat"], v["cast"])["defects"] if x.get("conf") != "low"}
+        # 回归样本按它所属的剧判（人物清单、身份参照随剧走；这批人工标注都是 V1 的，缺省 series10_v1）——主剧切到 V2 也不变口径
+        os.environ["NS_RUN_ID"] = v.get("run") or legacy_run()
+        try:
+            codes = {x["code"] for x in AN.judge(v["feat"], v["cast"])["defects"] if x.get("conf") != "low"}
+        finally:
+            if old is None:
+                os.environ.pop("NS_RUN_ID", None)
+            else:
+                os.environ["NS_RUN_ID"] = old
         for code, lab in v["labels"].items():
             n += 1
             if (lab["label"] == "true_issue") != (code in codes):

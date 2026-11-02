@@ -271,3 +271,76 @@ moves:
     enabled: false
     ab: {status: not_tested}
     reason: 项目规则不用 Roll（camera_language.md §1）
+  # ---- V2（L-127，STYLE-V2 11-02 20:3x）：Vogue 式运镜 Pika A/B（tools/v2style/camera_ab.py；data/ab/v2_style/camera/results.json；
+  #      页面 data/review_pages/v2_style/camera.html）。同一首帧集（V2 lead_f + O1 风衣，F_full / F_mid / F_full 换 seed），pika_flex、只给首帧、124 帧。
+  #      判定：AB1–AB4 同上；AB5（景别）对“以改景别为目的”的运镜不适用；执行量 = VIDLAB clipmetrics v4 分段（前 1.2 s / 1.5 s 后 / 前后半）+ 总调度看抽帧。
+  #      调研出处：Vogue China 2025 Forces of Fashion 子弹时间（影视飓风 60 台 iPhone 弧形阵列 genlock）https://creativecow.net/media-storms-vogue-bullet-time-production-diary/ ；
+  #      高速机械臂 + 1000fps 参照 E! GlamBOT（Bolt + Phantom）https://nofilmschool.com/Oscars-GlamBOT-Technical 。Vogue 自己的高速环绕 / 慢动作急推没查到一手出处。
+  - id: orbit_slowmo
+    zh: 慢动作环绕
+    en: Slow-motion Orbit
+    runs: [series10_v2]
+    aliases: ["慢动作环绕", "慢环绕", "环绕慢动作", "slow-motion orbit"]
+    template: "The camera orbits slowly around her at eye level, about half a circle over the shot, keeping her centered, while she moves in slow motion, her hair and coat drifting softly, her gaze following the lens"
+    params: {lens: "50mm"}
+    sizes: [中景, 中全景, 全景]
+    moods: [幻想段, 登场, 高光]
+    conflicts: [push_in, pull_out, zoom_in, arc]
+    split: null
+    enabled: false
+    ab: {status: pass, exp: v2_style_cam, arms: 3, pass: 3, note: "AB1–AB5 3/3 过；背景横向机位轨迹 |tx| 0.10 / 0.29 / 0.31（一致性 0.98–0.99），主体角度可见变化；实际幅度约 20–40°（提示词写半圈，做不到），方向随 seed 左右不定"}
+    reason: "V2 Pika A/B 3/3 稳定执行（小–中幅环绕），待启用：①模板含速度词（slowly / slow motion），与现行词表规则冲突（K-PRM-101 不写速度词、tests/test_director.py test_vocab_schema 守）——V2 是否放开速度词由总调度定；②编译层 camera_norm EN_MOVES 不认这个 id（会识别成 arc 退回固定），启用时同步改"
+  - id: bolt_push_settle
+    zh: 高速急推急停（机械臂式）
+    en: Robotic Whip Push & Settle
+    runs: [series10_v2]
+    aliases: ["高速急推急停", "机械臂急推", "高速环绕急停", "bolt 急推"]
+    template: "A robotic high-speed camera move: the camera whips in a fast, tight arc from her side to her front within the first second, then decelerates sharply and settles into a locked medium close-up, while she moves in super slow motion, hair drifting"
+    params: {lens: "35mm→50mm"}
+    sizes: [全景, 中全景, 中景]
+    moods: [幻想段, 登场, 爆点]
+    conflicts: [push_in, arc, orbit_slowmo, pull_out]
+    split: null
+    enabled: false
+    ab: {status: pass, exp: v2_style_cam, arms: 3, pass: 3, note: "3/3 前 1.2 s 机位运动 0.19–0.22/s、1.5 s 后 0.03–0.08/s（先快后停）；落幅中景 / 近景（AB5 景别变化是本运镜目的，不计）；AB1–AB4 全过，SFace 0.64–0.68。实际是“高速推近 + 急停”，横向环绕量很小（|tx| ≤ 0.13）"}
+    reason: "V2 Pika A/B 3/3 稳定（高速推近后急停定住；名字按实际效果写），待启用：①模板不以 The camera 开头且含速度词（fast / super slow motion），与现行词表规则冲突（K-PRM-101、test_vocab_schema）——V2 是否放开由总调度定；②camera_norm 现会识别成 arc 退回，启用时同步加英文识别"
+  - id: slowmo_snap_push
+    zh: 慢动作急推
+    en: Slow-motion Snap Push
+    runs: [series10_v2]
+    aliases: ["慢动作急推", "急推特写", "snap push"]
+    template: "Ultra slow-motion shot: she turns her head slowly toward the lens, hair flowing; halfway through, the camera suddenly snaps forward in a fast dolly-in from a medium shot to a close-up of her face, then holds still in slow motion"
+    sizes: []
+    moods: []
+    conflicts: [push_in, bolt_push_settle]
+    split: null
+    enabled: false
+    ab: {status: fail, exp: v2_style_cam, arms: 3, pass: 2, note: "急推 3/3 都有（全片缩放 0.18 / 0.42 / 0.69），但时间点不受控：2/3 落在后半（后半缩放 0.13 / 0.53），1/3 在前半就推完（前半 0.33）"}
+    reason: 急推本身能出，但“半途急推”的时间点不稳定；要用时改用 bolt_push_settle（开头急推，3/3 稳定）
+  - id: bullet_time
+    zh: 子弹时间（定格环绕）
+    en: Bullet Time
+    runs: [series10_v2]
+    aliases: ["子弹时间", "定格环绕", "bullet time", "frozen moment"]
+    template: null
+    sizes: []
+    moods: []
+    conflicts: []
+    split: "Pika 只靠提示词做不出：定格和机位环绕不能同时出现。备选：用 orbit_slowmo（真实慢动作环绕）；或后期在定格帧上做 2.5D 视差环绕（未验证）"
+    enabled: false
+    ab: {status: fail, exp: v2_style_cam, arms: 6, pass: 0, note: "两种写法各 3 条。写法 1（主体雕塑般静止 + 匀速环绕约 90°）：机位横移 |tx| 0.06–0.40，但头发、风衣下摆照常在动，0/3 定格。写法 2（爱范儿可灵基线句改写，强调时间冻结）：主体更静（expr_std 0.006），机位几乎不动（|tx| 0.05–0.13），0/3 出环绕"}
+    reason: 6 条里 0 条同时做到“主体定格 + 机位环绕”
+  - id: handheld_follow
+    zh: 手持跟拍（现实段）
+    en: Handheld Follow
+    runs: [series10_v2]
+    aliases: ["手持跟拍", "手持跟随", "纪实手持"]
+    template: "Handheld documentary camera: the camera follows her at shoulder height with a gentle natural sway and small breathing movements, real-time speed, staying close to her"
+    params: {lens: "35mm"}
+    sizes: [中全景, 全景]
+    moods: [现实段, 走动]
+    conflicts: [static, push_in]
+    split: null
+    enabled: false
+    ab: {status: partial, exp: v2_style_cam, arms: 3, pass: 2, note: "走动镜 2/2：机位随人后退、轻微晃动（背景运动一致性 0.82 / 0.91，比稳定运镜的 0.98 低 = 有手持感），AB1–AB5 过；静坐镜 1/1 退化成平稳推近（一致性 0.99、缩放 0.21），J4 1.43（软项）"}
+    reason: 只在人物走动的镜头上稳定；静坐镜不出手持感。V1 规则不用 Shake（camera_language.md §1）是否适用 V2 现实段待总调度定；定之前不 enabled

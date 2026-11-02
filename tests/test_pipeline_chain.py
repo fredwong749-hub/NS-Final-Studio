@@ -69,3 +69,17 @@ def test_attribute_narrator_to_p4_p9():
     r = attribute_bug.attribute("旁白声音老")
     assert r["primary_link"] == "P4-P9"
     assert attribute_bug.attribute("完全无关的描述 xyz")["primary_link"] is None
+
+
+def test_storyline_placeholder_blocked():
+    """SL-12（总调度 11-02，r4-fable 发现第 3 集正文漏出“（未提供）”）：占位词一律阻断；全半角都认；正常文字不误伤"""
+    for bad in ("（未提供）", "(未提供)", "待定", "TODO 补", "她叫XXX", "ＸＸＸ", "<女主名>", "＜场景＞", "tbd"):
+        s = _storyline()
+        s["episodes"][0]["logline"] = "原话展开，" + bad
+        rep = SL.check_storyline(s)
+        assert any(i.rule == "SL-12" and i.field == "episodes[0].logline" for i in rep.issues), bad
+        assert not rep.ok
+    s = _storyline()
+    s["episodes"][0]["logline"] = "她把 TODOS 清单撕了，Xbox 摔在地上，定下心来"     # 不是占位词
+    assert SL.check_storyline(s).ok
+    assert SL.placeholder_hits({"a": [{"b": "x（未提供）"}]}) == [("a[0].b", "未提供")]

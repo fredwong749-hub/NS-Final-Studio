@@ -52,11 +52,12 @@ def face_project() -> str:
     v = _o.environ.get("NS_RUN_ID")
     if v:
         return v
-    import importlib.util as _u
-    sp = _u.spec_from_file_location("runs_for_face", Path(__file__).resolve().parents[2] / "tools/autopilot/runs.py")
-    m = _u.module_from_spec(sp)
-    sp.loader.exec_module(m)
-    return m.primary_run()
+    import sys as _s
+    root = Path(__file__).resolve().parents[2]
+    if str(root) not in _s.path:
+        _s.path.insert(0, str(root))
+    from tools.autopilot import runs as _RN    # OVERSIGHT-F P2：tools 侧 runs 唯一入口
+    return _RN.current_run()
 
 
 def __getattr__(name):            # 兼容旧读法 RS.FACE_PROJECT（tools/vqa/accept.py、anomaly.py）：每次按当前剧解析

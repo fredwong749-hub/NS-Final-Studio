@@ -61,7 +61,13 @@ def _ago(s: float | None) -> str:
 
 
 def _hm(t: float | None) -> str | None:
-    return time.strftime("%H:%M:%S", time.localtime(t)) if t else None
+    """时间戳 → HH:MM:SS；非法值（负数 / 超范围 / 不是数字，例：心跳年龄算出来的负时间）→ None，不让整个接口 500（FACTORY 20:4x）"""
+    if not t:
+        return None
+    try:
+        return time.strftime("%H:%M:%S", time.localtime(float(t)))
+    except (OSError, OverflowError, ValueError, TypeError):   # arch-ok: 非法时间戳 = 不显示时间，状态照出
+        return None
 
 
 def _probe(url: str) -> tuple[bool, float | None]:

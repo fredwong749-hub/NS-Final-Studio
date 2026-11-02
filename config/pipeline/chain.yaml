@@ -148,7 +148,7 @@ links:
     must: [提纲范围内每集一条, 项目方逐集一句话逐字放进 owner_line, 已登记人物 / 场景逐字照抄, 全部角色成年]
     forbid: [改提纲剧情, 新增提纲外的集, 写镜头语言, 在场景卡写人物, 输出 JSON 以外的文字]
     input: [P0]
-    rules: [BR-01, BR-02, BR-03, BR-04, SL-01, SL-02, SL-03, SL-04, SL-05, SL-06, SL-07, SL-08, SL-09, SL-10, SL-11, LK01-01, LK01-02, LK01-03, LK01-04]
+    rules: [BR-01, BR-02, BR-03, BR-04, SL-01, SL-02, SL-03, SL-04, SL-05, SL-06, SL-07, SL-08, SL-09, SL-10, SL-11, SL-12, LK01-01, LK01-02, LK01-03, LK01-04]
     validators: [check_brief, check_storyline, check_link_p0_p1]
     writer: {template: config/pipeline/prompts/P0-P1.md, output: json, max_tokens: 12000}
     on_fail: writer_repair
@@ -446,6 +446,8 @@ rules:
      writer_text: "已登记的人物 / 场景（输入里给出）各格逐字照抄，不改写"}
   - {id: SL-11, link: P0-P1, node: P1, level: warn, check: check_storyline, confidence: medium, evidence: "script_chat_rules.md §2P 中文外貌句六项",
      writer_text: "zh_look 写 <年龄段>｜<体型>｜<发型发色>｜<服装主色>｜<标志物>｜<不可变特征>（全角｜）；有系统锁的写 系统锁"}
+  - {id: SL-12, link: P0-P1, node: P1, level: block, check: check_storyline, confidence: high, evidence: "总调度 11-02：r4-fable 在第 3 集正文发现占位词“（未提供）”（bug 转写作规则）",
+     writer_text: "正文和造型表里不能留占位词：（未提供）、TODO、待定、XXX、<…> 这类一律写成真内容"}
   - {id: LK01-01, link: P0-P1, node: P1, level: block, check: check_link_p0_p1, confidence: high, evidence: "script_chat_rules.md §1“不改大纲剧情”",
      writer_text: "episodes 正好覆盖提纲给的集数范围，不多不少"}
   - {id: LK01-02, link: P0-P1, node: P1, level: block, check: check_link_p0_p1, confidence: high, evidence: "script_chat_rules.md §1“不改大纲剧情”",

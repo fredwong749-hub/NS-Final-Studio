@@ -95,7 +95,7 @@ def test_anomaly_blocking_defects():
 
 
 # ---------------------------------------------------------------- 真剧本（series10）编译断言
-FIXTURE = ROOT / "tests" / "fixtures" / "promptfix" / "series10_v1_subset.json"
+FIXTURE = ROOT / "tests" / "fixtures" / "promptfix" / "frozen_v1_subset.json"
 PROJECT = "series10_v1"
 
 

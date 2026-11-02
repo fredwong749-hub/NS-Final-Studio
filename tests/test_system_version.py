@@ -386,3 +386,28 @@ def test_a09_deploy_never_clears_someone_elses_pause(tmp_path):
         assert r["ok"]
         assert any("pause --by DEPLOY_ATOMIC" in c for c in cmds) is expect_pause
         assert any("resume --by DEPLOY_ATOMIC" in c for c in cmds) is expect_pause
+
+
+def test_export_tag_uses_repo_bytes_not_worktree(tmp_path):
+    """总调度 20:1x：部署导出 = 版本库原字节（LF），不再换成工作区 CRLF——服务器文件 sha 和 git show 直接对得上"""
+    import pytest
+    if not (SV.ROOT / ".git").exists():
+        pytest.skip("cut 冻结快照里没有 .git（快照本身就是 git archive 的原字节）")
+    tags = SV.sv_tags()
+    if not tags:
+        pytest.skip("no sv tag")
+    sv = tags[-1]
+    names = SV.export_tag(sv, ["tools/qa"], tmp_path)
+    f = "tools/qa/system_version.py"
+    assert f in names
+    import subprocess
+    blob = subprocess.run(["git", "show", f"{sv}:{f}"], cwd=SV.ROOT, capture_output=True, check=True, timeout=60).stdout
+    assert (tmp_path / f).read_bytes() == blob and b"\r\n" not in (tmp_path / f).read_bytes()
+
+
+def test_deploy_records_post_verify(tmp_path):
+    """总调度 20:3x：部署后核对（face_of + sha）做进 deploy 自动流程，结果在每台的 post_verify；跑不了也要记下（不当作通过）"""
+    rs, pc = _FakeRS(tmp_path), _FakePC()
+    (tmp_path / "tools").mkdir(exist_ok=True)
+    r = SV.deploy_host(rs, "gpu36", tmp_path, [], [], "sv-x", "c", restart=False, pc=pc)
+    assert "post_verify" in r and r["post_verify"].get("ok") is False

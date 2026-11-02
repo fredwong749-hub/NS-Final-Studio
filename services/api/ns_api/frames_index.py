@@ -24,6 +24,9 @@ STAGES = (("first", "image"), ("last", "last"))
 
 
 def _url(rel: str | None) -> str | None:
+    from ns_api import v1_guard
+    from ns_render import pipeline as _P
+    rel = v1_guard.scoped(rel, data_dir=_P.DATA)   # NAVIA：V1 的文件不给 V2 页面（L-126）
     if not rel:
         return None
     r = rel.replace("\\", "/")

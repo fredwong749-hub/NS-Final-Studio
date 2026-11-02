@@ -542,7 +542,13 @@ def test_k_ops_f23_v2_manifest_only_and_no_server_derived(tmp_path, monkeypatch)
     (tmp_path / "assets_v2/manifest.json").write_text(_j.dumps(man), encoding="utf-8")
     assert AR.face_of("v2", "f") == "assets_v2/characters/f/face.png"
     assert AR.sheet_of("v2", "f", "A") is None                                   # sha 不符 = 不算
+    bd = tmp_path / "data/pipeline/runs/v2/images/refboards"      # PROMPTFIX 20:3x：派生图须在 sha 账本里（_derived_index.json）
+    bd.mkdir(parents=True)
+    (bd / "b.png").write_bytes(b"board")
+    AR.record_derived(bd / "b.png")
     assert AR.manifest_violations("v2", ["assets_v2/characters/f/face.png", "data/pipeline/runs/v2/images/refboards/b.png"]) == []
+    (bd / "b.png").write_bytes(b"changed")
+    assert AR.manifest_violations("v2", ["data/pipeline/runs/v2/images/refboards/b.png"])   # 字节不是账本那张 → 挡
     assert AR.manifest_violations("v2", ["assets/characters/lin_wan/old.png"])   # V1 资产 → 挡
     assert AR.manifest_violations("nomanifest", ["anything.png"]) == []           # 没配清单的项目不受影响
     (tmp_path / "assets_v2/manifest.json").write_text("{broken", encoding="utf-8")
@@ -554,6 +560,7 @@ def test_k_ops_f23_v2_manifest_only_and_no_server_derived(tmp_path, monkeypatch)
     out = tmp_path / "data/pipeline/runs/v2/images/refcrops/y.png"
     out.parent.mkdir(parents=True)
     out.write_bytes(b"y")
+    AR.record_derived(out)                                                    # 账本登记过的（笔记本那张）才用
     assert AR._derived_on_server(out) == "data/pipeline/runs/v2/images/refcrops/y.png"
     monkeypatch.delenv("OFFLINE_SELF")
     monkeypatch.delenv("NS_FACTORY_HOST", raising=False)
@@ -726,8 +733,14 @@ def test_pause_state_real_layout(tmp_path):
     import pause_state as PS
 
     def run_snip(root):
-        r = subprocess.run([sys.executable, "-c", PS.PAUSE_PY, str(root)], capture_output=True, text=True, timeout=60)
+        env = {k: v for k, v in __import__("os").environ.items() if k not in ("NS_PRIMARY_RUN", "NS_RUN")}
+        r = subprocess.run([sys.executable, "-c", PS.PAUSE_PY, str(root)], capture_output=True, text=True, timeout=60, env=env)
         return PS.parse(r.stdout)
+    import shutil
+    (tmp_path / "tools/autopilot").mkdir(parents=True)
+    (tmp_path / "tools/__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "tools/autopilot/__init__.py").write_text("", encoding="utf-8")
+    shutil.copy(ROOT / "tools/autopilot/runs.py", tmp_path / "tools/autopilot/runs.py")
     (tmp_path / "config/pipeline").mkdir(parents=True)
     (tmp_path / "data/producer/runs/v2").mkdir(parents=True)
     w = lambda p, d: (tmp_path / p).write_text(_j.dumps(d), encoding="utf-8")
@@ -805,3 +818,94 @@ def test_autoflow_resident_single_instance_and_status_filter(tmp_path, monkeypat
     assert AR.tick(procs, af=AF, runs_mod=RN, spawn=lambda d, ep: spawned.append(1))["started"] == []   # 同一集还在跑：不重复起
     src = (ROOT / "tools/factory/autoflow_resident.py").read_text(encoding="utf-8")
     assert "control.json" not in src.split('"""', 2)[2]                     # 代码里不碰 control（不清别人的暂停）
+
+
+def test_expected_table_only_live_runs(tmp_path, monkeypatch):
+    """总调度 20:1x：期望参考表只给在做的剧建（preparing / active / producing），归档 / 冻结 / 暂停的剧跳过"""
+    import json as _j
+    monkeypatch.delenv("NS_PRIMARY_RUN", raising=False)     # runs.py 拷进临时仓库后它的 ROOT 就是临时目录：不钉剧，读临时登记表
+    import shutil
+    (tmp_path / "config/pipeline").mkdir(parents=True)
+    (tmp_path / "tools/autopilot").mkdir(parents=True)
+    shutil.copy(ROOT / "tools/autopilot/runs.py", tmp_path / "tools/autopilot/runs.py")
+    (tmp_path / "config/pipeline/runs.json").write_text(_j.dumps({"primary": "v2", "legacy_unprefixed_run": "v1", "runs": {
+        "v1": {"status": "archived"}, "s2": {"status": "paused"}, "v2": {"status": "preparing"}}}), encoding="utf-8")
+    for p in ("data/import/script_v2.json", "data/import/runs/s2/script_v2.json", "data/import/runs/v2/script_v2.json"):
+        (tmp_path / p).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / p).write_text("{}", encoding="utf-8")
+    assert IB._runs(tmp_path) == ("v2", ["v2"])
+
+
+def test_assemble_compose_reads_run_script():
+    """OVERSIGHT-F P1-4c：compose 按剧取导入稿（V2 run 下读不到 V1 剧本），plan 同口径"""
+    src = (ROOT / "tools/assemble_series.py").read_text(encoding="utf-8")
+    assert 'load_episode(RUNS.script_path(run or RUN_ID, ROOT), ep)' in src and "run: str | None = None) -> tuple[dict, int]" in src
+    assert 'ROOT / "data/import/script_v2.json"' not in src
+    sys.path.insert(0, str(ROOT / "tools/autopilot"))
+    import runs as RN
+    assert RN.script_path("series10_v2") == ROOT / "data/import/runs/series10_v2/script_v2.json"
+
+
+def test_k_ops_f30_no_mass_kill_by_name_or_port():
+    """W-34 / K-OPS-F30（总调度 20:2x）：agent 只能停自己记下 pid 的进程；不许按端口 / 进程名批量杀（taskkill /IM、pkill -f、killall、
+    Stop-Process -Name、fuser -k）。共享服务重启一律走 ops/restart_*.ps1（它们是唯一允许按命令行匹配的地方），并先通知总调度"""
+    import re
+    pat = re.compile(r"taskkill\s+(?:/F\s+)?/IM|pkill\s+-f|killall\b|Stop-Process\s+-Name|fuser\s+-k", re.I)
+    legacy = {"ops/gpu0_relay.sh"}                          # 10-30 旧中继脚本（已停用），只许减不许增
+    bad = []
+    for top in ("tools", "ops", "services"):
+        for p in (ROOT / top).rglob("*"):
+            if p.suffix not in (".py", ".sh", ".ps1", ".mjs", ".js") or "node_modules" in p.parts or "_quarantine" in p.parts:
+                continue
+            rel = p.relative_to(ROOT).as_posix()
+            if rel.startswith("ops/restart_") or rel in legacy or rel == "tests/test_factory.py":
+                continue
+            try:
+                txt = p.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if pat.search(txt):
+                bad.append(rel)
+    assert not bad, bad
+
+
+def test_anomaly_resident_script():
+    """检测器常驻服务：只在 gpu36 GPU2、单实例 pid 文件、只听 127.0.0.1:8893、内网 lan_proxy 只放行 gpu33；不按名字批量杀（K-OPS-F30）"""
+    t = (ROOT / "ops/factory/anomaly_resident.sh").read_text(encoding="utf-8")
+    assert "CUDA_VISIBLE_DEVICES=2" in t and '[ "$SELF" = gpu36 ]' in t and "ANOMALY_PORT=$PORT" in t and "PORT=8893" in t
+    assert "--allow 10.0.0.33" in t and "--bind 10.0.0.36" in t and "alive $PIDF" in t
+    assert "pkill -f" not in t and "rm -" not in t
+
+
+def test_infra_status_hm_invalid_timestamp():
+    """/api/infra/status 500（OSError Errno 22）：_hm 收到非法时间戳（负数 / 超范围）时返回 None，不让整个接口出错"""
+    sys.path.insert(0, str(ROOT / "services/api"))
+    from ns_api import infra_status as IS
+    assert IS._hm(None) is None and IS._hm(-1e12) is None and IS._hm(1e20) is None and IS._hm("x") is None
+    assert IS._hm(1793616000) and len(IS._hm(1793616000)) == 8
+
+
+def test_api_watchdog_and_restart_caller(tmp_path):
+    """总调度 20:5x：restart_api.ps1 记调用方（-By / 父进程链 → data/ops/restart_events.jsonl）、经看门狗起 uvicorn；
+    看门狗记 started / exited（强制结束也能看到退出码和时间）；app 启动 / 关闭各记一行"""
+    import json as _j
+    import api_watchdog as W
+
+    class P_:
+        pid = 4242
+
+        def wait(self):
+            return 1
+    log = tmp_path / "lc.jsonl"
+    orig = W.LOG
+    W.LOG = log
+    try:
+        assert W.run(["-m", "x"], "TEST", popen=lambda *a, **k: P_()) == 1
+    finally:
+        W.LOG = orig
+    ev = [_j.loads(x) for x in log.read_text(encoding="utf-8").splitlines()]
+    assert [e["event"] for e in ev] == ["started", "exited"] and ev[1]["rc"] == 1 and ev[0]["by"] == "TEST"
+    ps1 = (ROOT / "ops/restart_api.ps1").read_text(encoding="utf-8-sig")
+    assert "restart_events.jsonl" in ps1 and "parent_chain" in ps1 and "tools/factory/api_watchdog.py" in ps1 and "[string]$By" in ps1
+    app_src = (ROOT / "services/api/ns_api/app.py").read_text(encoding="utf-8")
+    assert '_lifecycle("api_shutdown")' in app_src and '_lifecycle("api_startup")' in app_src

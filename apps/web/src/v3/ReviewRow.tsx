@@ -43,6 +43,7 @@ import { RegenButton } from "./RegenButton";
 import "./rowcalm.css"; // UIFIX-S 第 2 轮：行内状态收静
 import { TAG_WORD, tagsTitle } from "./StatusTags.helpers";
 import type { ShotStatusTags } from "./StatusTags.helpers";
+import { LoadImg } from "../ds/LoadImg";
 const short = (id: string) => id.split("-")[1];
 /** UIFIX-S：同一镜行上只显示一条状态（StatusLine）；原来并排的“看图没过 +1”这类彩色胶囊收进它的悬停提示 */
 const mainTip = (st: ShotStatusTags | null | undefined) => (st?.main ? `${TAG_WORD[st.main]}${st.tags.length > 1 ? `（共 ${new Set(st.tags.map((t) => t.kind)).size} 项）` : ""}${nl0}${tagsTitle(st)}` : undefined);
@@ -123,7 +124,7 @@ function Frame({ s, stage, st }: { s: ShotSummary; stage: "image" | "last"; st: 
     {box && cstage && <CandidateBox shot={s.id} stage={stage} data={cstage} start={cand?.n ?? rejected[rejected.length - 1]?.n} stale={s.stale_global?.[stage]} onClose={() => setBox(false)} />}
     <div className={`v3-frame${url ? "" : " empty"}${cand ? " cand" : ""}${fs === "stale" ? " stale" : ""}${fs === "bad" ? " bad" : ""}${fs === "orphan" ? " orphan" : ""}${tileFlash ? " live-flash" : ""}`} onClick={open} data-zoom-own title={url ? (cand ? `${label}候选：点开看全部候选、对比（悬停右上角放大镜看原图）` : `${label}：点开全屏对比（首帧 | 尾帧）`) : candLoading ? `正在读取${label}候选` : `还没有${label}`}>
       <FbDot sid={s.id} kind={stage === "image" ? "first" : "last"} />
-      {url ? <img key={url} className="live-img" src={thumb(url, 360) ?? url} alt={label} loading="lazy" decoding="async" draggable={false} data-zoom-label={`${short(s.id)} · ${label}${take != null ? ` #${take}` : ""}${cand ? " · 候选" : ""}`} /> : <span className="v3-frame-none">{candLoading ? "读取中…" : oldN ? `${label}未出（剧本已更新）` : `${label}未出`}</span>}
+      {url ? <LoadImg key={url} className="live-img" src={thumb(url, 360) ?? url} alt={label} loading="lazy" decoding="async" draggable={false} data-zoom-label={`${short(s.id)} · ${label}${take != null ? ` #${take}` : ""}${cand ? " · 候选" : ""}`} /> : <span className="v3-frame-none">{candLoading ? "读取中…" : oldN ? `${label}未出（剧本已更新）` : `${label}未出`}</span>}
       <TileTop>
         {/* UIRSI r36：78px 窄格里“首帧候选”四个字会把右上角的 ↻ 挤到标签上 → 标签只写“首帧 #n”，“候选”写进底下的候选条（和“用这张”在一起） */}
         <b className="v3-tag" title={cand ? `${label}候选 #${take}：还没设为当前，点“用这张”才用它` : undefined}>

@@ -45,6 +45,7 @@ ACTIVE = ("queued", "running")
 router = APIRouter(tags=["story-runs"])
 _lock = threading.Lock()
 _threads: dict[str, threading.Thread] = {}
+_done: dict[str, threading.Event] = {}      # T-SR-01：每次写作一个完成事件（线程写完状态后才置位），等待方按事件同步，不靠线程超时
 
 
 def _rc():
@@ -206,6 +207,38 @@ def _stage_rows(d: Path, st: dict | None, ep: int | None) -> list[dict]:
     return rows
 
 
+def _autoflow_brief(d: Path) -> dict | None:
+    """列表里带上写作流程状态（前端 p1Status 要用：verdict、P1G 段、P1 闸门、评审最新一轮和轮数上限），不另写一套；没走写作流程 = None"""
+    if not (d / "autoflow.json").is_file():
+        return None
+    try:
+        from ns_api import script_autoflow as SA
+        st = SA.status(d.name)
+    except Exception:  # noqa: BLE001  列表不因某部剧的状态读不出而整个挂掉
+        return None
+    rv = st.get("p1_review") or {}
+    latest = rv.get("latest") or {}
+    return {"verdict": st.get("verdict"), "stages": [{"id": x.get("id"), "status": x.get("status")} for x in (st.get("stages") or []) if x.get("id") == "P1G"],
+            "owner_gates": {"enabled": (st.get("owner_gates") or {}).get("enabled"), "gates": {"P1": ((st.get("owner_gates") or {}).get("gates") or {}).get("P1")}},
+            "p1_review": {"latest": {"n": latest.get("n"), "passed": latest.get("passed"), "mean": latest.get("mean")} if latest else None, "threshold": rv.get("threshold")}}
+
+
+def _registry_status(run_id: str) -> str | None:
+    """config/pipeline/runs.json 里这部剧的状态（producing / paused / archived …）；没登记 = None（测试 run / 旧稿）"""
+    from ns_api.script_library import _registry
+    return ((_registry().get("runs") or {}).get(run_id) or {}).get("status")
+
+
+def _title_of(d: Path) -> str:
+
+    from ns_api.script_library import run_title_of   # 剧名只有一个来源（和剧本库同一个函数）
+
+    return run_title_of(d)
+
+
+
+
+
 def _summary(d: Path, full: bool = False, ep_sel: int | None = None) -> dict:
     st = _read(d / STATE)
     eps = series_eps(d)
@@ -222,8 +255,8 @@ def _summary(d: Path, full: bool = False, ep_sel: int | None = None) -> dict:
     out = {"id": d.name, "ui": bool(st), "episode": ep, "status": status, "current": (st or {}).get("current"),
            "upto": (st or {}).get("upto", "P4"), "created_at": (st or {}).get("created_at") or time.strftime(
                "%Y-%m-%dT%H:%M:%S", time.localtime(d.stat().st_mtime)), "updated_at": (st or {}).get("updated_at"),
-           "title": brief.get("title") or (_read(d / "P1_storyline.json") or {}).get("title") or "", "outline_head": (brief.get("outline") or "")[:80],
-           "episodes": brief.get("episodes"), "error": (st or {}).get("error"), "budget_usd": (st or {}).get("budget_usd"),
+           "title": _title_of(d), "outline_head": (brief.get("outline") or "")[:80],
+           "registry_status": _registry_status(d.name), "autoflow": _autoflow_brief(d), "episodes": brief.get("episodes"), "error": (st or {}).get("error"), "budget_usd": (st or {}).get("budget_usd"),
            "spent_usd": max(_ledger_usd((st or {}).get("tag")), round(sum(float(s.get("usd") or 0) for s in stages), 4)),
            "sent_to_import": ((st or {}).get("sent_by_ep") or {}).get(str(ep)) if eps else (st or {}).get("sent_to_import"),
            "series": bool(eps), "readonly": bool(eps),
@@ -279,6 +312,9 @@ def _worker(run_id: str) -> None:
         st.update(status="error", current=None, error=f"{type(e).__name__}: {e}"[:600])
     finally:
         _write_state(d, st)
+        ev = _done.get(run_id)
+        if ev is not None:
+            ev.set()                          # 状态已落盘才通知（T-SR-01）
 
 
 def writer_backend() -> str:
@@ -303,6 +339,7 @@ def _start(run_id: str) -> None:
             raise HTTPException(409, f"已有一个剧本在写（{busy[0]}）：写完或停下后再开新的")
         t = threading.Thread(target=_worker, args=(run_id,), name=f"story-run-{run_id}", daemon=True)
         _threads[run_id] = t
+        _done[run_id] = threading.Event()
         t.start()
 
 
@@ -311,8 +348,13 @@ def wait(run_id: str, timeout: float = 180) -> None:
     UIRSI r43（总调度：test_needs_writer_then_retry 并行偶发失败、两次挡住 sv 发版）：原来 join(30) 超时后静默返回，
     -n 12 并行压测时一次 3 轮重写可能超过 30 s → 测试读到 running / 下一步 retry 撞 409，且线程带着测试的假写作网关继续跑、
     测试结束 monkeypatch 撤掉后改用真网关 → 后面的测试读到 error。现在超时直接报错（不再静默），默认等 180 s"""
-    t = _threads.get(run_id)
-    if t:
+    ev, t = _done.get(run_id), _threads.get(run_id)
+    if ev is not None:                        # T-SR-01：按完成事件同步（写完状态才置位），再收线程
+        if not ev.wait(timeout):
+            raise TimeoutError(f"story-run {run_id} 还在跑（等了 {timeout:.0f} 秒）")
+        if t:
+            t.join(5)
+    elif t:
         t.join(timeout)
         if t.is_alive():
             raise TimeoutError(f"story-run {run_id} 还在跑（等了 {timeout:.0f} 秒）")

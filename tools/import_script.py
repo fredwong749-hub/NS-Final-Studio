@@ -161,11 +161,11 @@ def auto_triggers(result, cfg_path: Path = AUTO_TRIGGERS) -> int:
 
 
 def _runs():
-    import importlib.util as _u
-    sp = _u.spec_from_file_location("runs_for_import", ROOT / "tools" / "autopilot" / "runs.py")
-    m = _u.module_from_spec(sp)
-    sp.loader.exec_module(m)
-    return m
+    import sys as _s
+    if str(ROOT) not in _s.path:
+        _s.path.insert(0, str(ROOT))
+    from tools.autopilot import runs as _RN    # OVERSIGHT-F P2：tools 侧 runs 唯一入口
+    return _RN
 
 
 def default_out() -> Path:

@@ -116,11 +116,8 @@ def _proj_or_primary(proj: str | None) -> str:
     """本作业的项目；不给才按当前剧（统一调 runs.primary_run，FACTORY 19:1x：不直接读 runs.json primary——V1 作业不能按 V2 判）"""
     if proj:
         return proj
-    import importlib.util as _u
-    sp = _u.spec_from_file_location("runs_for_preflight", ROOT / "tools" / "autopilot" / "runs.py")
-    m = _u.module_from_spec(sp)
-    sp.loader.exec_module(m)
-    return m.primary_run(ROOT)
+    from ns_agent import run_paths as _RPA     # OVERSIGHT-F P2：runs 加载器只此一处
+    return _RPA.runs_module(ROOT).current_run(ROOT)
 
 
 def stale_face_slots(slots: list[dict], proj: str | None = None) -> list[str]:
@@ -152,11 +149,7 @@ def manifest_missing_faces(faced: list, proj: str | None = None) -> list[str]:
     proj = 本作业的项目（framing_project）；不给才按当前剧（runs.primary_run，FACTORY 19:1x：不直接读 runs.json primary，否则 V1 作业被按 V2 判）"""
     from ns_agent import asset_refs as AR
     if not proj:
-        import importlib.util as _u
-        sp = _u.spec_from_file_location("runs_for_preflight", ROOT / "tools" / "autopilot" / "runs.py")
-        m = _u.module_from_spec(sp)
-        sp.loader.exec_module(m)
-        proj = m.primary_run(ROOT)
+        proj = _proj_or_primary(None)
     if not AR.manifest_rel(proj):
         return []
     return [c for c in faced if c and not AR.face_of(proj, c)]
@@ -292,11 +285,15 @@ def check(req: dict) -> ContractResult:
             bad.append("构图矛盾：同时写了“脸部占画面约六成”和“两张脸都清晰入画”（特写 + ≥2 人露脸，K-REN-902）")
         add("I6", "fail" if bad else "pass", "；".join(bad) if bad else "编译器输出 + 参考逐一标注")
         # I7
-        suf = ST.preset_suffix()
+        _p7 = req.get("framing_project") or req.get("project")
+        suf = ST.preset_suffix(_p7 if _p7 and ST._manifest_mode(_p7) else None)
         hits = ST.banned_hits(prompt)
         bad = []
         if hits:
             bad.append(f"出现禁用后缀词：{hits}")
+        v1s = ST.v1_style_hits(prompt, _p7 if _p7 and ST._manifest_mode(_p7) else None)
+        if v1s:                                     # PROMPTFIX 20:4x（L-126）：V2 提示词里出现 V1 风格短语 = V1 内容泄漏，阻断
+            bad.append(f"V2 提示词出现 V1 风格短语：{v1s}（S★ / 徕卡暖调这一组不许进 V2）")
         if suf and suf not in prompt and not (bakeoff and req.get("suffix_variant")):
             # BAKEOFF A/B（scope=bakeoff 且声明 suffix_variant）可换后缀，禁用词照查；生产不放
             bad.append(f"没有默认出图预设（{c.get('suffix_preset')}）的系统后缀")
@@ -309,7 +306,12 @@ def check(req: dict) -> ContractResult:
             slots = req.get("ref_slots") or []
             have = {s.get("character"): s.get("path") for s in slots if s.get("role") == "identity"}
             on = [x.get("name") for x in (req.get("cast") or []) if x.get("presence") == "在画"]
-            reg = registered_identity_files()
+            _proj = req.get("framing_project") or req.get("project")
+            from ns_agent import asset_refs as _ARr
+            if _proj and _ARr.manifest_rel(_proj):     # OVERSIGHT-F P2：资产包模式（V2）身份图只认清单里的脸，不读 V1 data/assets/identity_refs
+                reg = {(c.get("face") or {}).get("file") for c in ((_ARr.manifest(_proj) or {}).get("characters") or {}).values()} - {None}
+            else:
+                reg = registered_identity_files()
             miss = [n for n in on if n not in have]
             unreg = [f"{n}:{p}" for n, p in have.items() if n in on and _relpath(p) not in reg]
             bad = ([f"缺身份参考：{miss}"] if miss else []) + ([f"不是已登记身份图：{unreg}"] if unreg else [])

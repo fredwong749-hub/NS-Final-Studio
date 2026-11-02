@@ -55,3 +55,10 @@ def load_json(path: Path, default):
     if not path.exists():
         return default
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def file_lock(path: Path, timeout: float = 60):
+    """跨进程文件锁（复用 tools/debug/lanes.partition_lock 的实现，只换锁文件）"""
+    sys.path.insert(0, str(ROOT / "tools" / "debug"))
+    import lanes as LN
+    return LN.partition_lock(timeout=timeout, lock=path)

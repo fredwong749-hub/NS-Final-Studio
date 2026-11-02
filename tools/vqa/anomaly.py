@@ -60,6 +60,26 @@ SIGNATURE_KEYWORD = "红绳"      # 标志饰品按“造型登记”判（总�
 NAME_ID = {"林晚": "lin_wan", "顾沉": "gu_chen", "陈宇": "chen_yu", "陈阿兰": "ch_a_lan"}
 
 
+def _ids() -> dict:
+    """当前剧的 {人物名 / id: 角色 id}（OVERSIGHT-F 第 6 轮 P2：原来写死 V1 的 NAME_ID，V2 角色全被当成“没有身份参照的路人”，
+    陌生人判据整个跳过）。资产包（清单）模式的剧 → 清单 characters（id 本身 + display_name）；否则 V1 的 NAME_ID。
+    当前剧解析失败 → 空表（全部算未登记，judge 会判 untested，不退回 V1 名单）"""
+    try:
+        sys.path[:0] = [str(ROOT / "services/agent"), str(ROOT / "packages/schema"), str(ROOT / "tools/gen_contract")]
+        import remote_score as RS
+        from ns_agent import asset_refs as AR
+        pj = RS.face_project()
+        if AR.manifest_rel(pj):
+            ch = (AR.manifest(pj) or {}).get("characters") or {}
+            out = {k: k for k in ch}
+            out.update({v.get("display_name"): k for k, v in ch.items() if isinstance(v, dict) and v.get("display_name")})
+            return out
+    except Exception as e:  # noqa: BLE001 — 解析不了当前剧：返回空表并显式报（下游判 untested），不退回 V1 名单
+        print(f"[anomaly._ids] 当前剧人物清单解析失败：{e!r}"[:200], file=sys.stderr)
+        return {}
+    return dict(NAME_ID)
+
+
 # ───────────────────────── 几何小工具（纯函数） ─────────────────────────
 def _iou(a, b) -> float:
     x1, y1, x2, y2 = max(a[0], b[0]), max(a[1], b[1]), min(a[2], b[2]), min(a[3], b[3])
@@ -132,14 +152,14 @@ def cast_info(cast: list[dict] | None) -> dict:
         if "faced" in c:
             return bool(c["faced"])
         return c.get("presence") == "在画"
-    faced = [NAME_ID.get(c.get("name"), c.get("name")) for c in cast if is_faced(c)]
+    faced = [_ids().get(c.get("name"), c.get("name")) for c in cast if is_faced(c)]
     partial = [c for c in cast if c.get("presence") in ("在画", "局部", "背影") and not is_faced(c)]
     inframe = [c for c in cast if c.get("presence") in ("在画", "局部", "背影")]
-    known_ids = set(NAME_ID.values())
-    refless = [c for c in cast if NAME_ID.get(c.get("name"), c.get("name")) not in known_ids and c.get("presence") != "画外"]
+    known_ids = set(_ids().values())
+    refless = [c for c in cast if _ids().get(c.get("name"), c.get("name")) not in known_ids and c.get("presence") != "画外"]
     return {"faced": faced, "n_faced": len(faced), "n_partial": len(partial), "n_in_frame": len(inframe), "known": True,
             "has_back": any(back(c) for c in cast), "refless": len(refless),
-            "in_frame_ids": [NAME_ID.get(c.get("name"), c.get("name")) for c in inframe]}
+            "in_frame_ids": [_ids().get(c.get("name"), c.get("name")) for c in inframe]}
 
 
 def yaw_proxy(kps) -> float | None:
@@ -349,7 +369,7 @@ def judge(feat: dict, cast: list[dict] | None = None, th: dict | None = None) ->
     if feet_dup:
         defects.append({"code": "feet_dup", "conf": "low", "detail": f"{feet_dup} 只脚的关键点分成两簇"})
     # —— 标志饰品（红绳）按造型登记判：这个人本镜造型的饰品里没登记红绳，手腕上却有 → 错位 ——
-    acc_of = {NAME_ID.get(c.get("name"), c.get("name")): c.get("look_acc") for c in (cast or []) if c.get("look_acc") is not None}
+    acc_of = {_ids().get(c.get("name"), c.get("name")): c.get("look_acc") for c in (cast or []) if c.get("look_acc") is not None}
     for w in feat.get("wrists") or []:
         if not red_cord_like(w, t):
             continue
@@ -370,8 +390,16 @@ def judge(feat: dict, cast: list[dict] | None = None, th: dict | None = None) ->
                "persons_big": len(big), "dw_people": len(dw), "hands": len(hands), "expected_faced": ci["n_faced"],
                "expected_in_frame": ci["n_in_frame"], "fingers_tested": tested_f, "fingers_bad": bad_f}
     defects += blocking_defects(heads, cast, feat.get("W") or 0, t)      # K-REN-952：站位核对（cast x vs 认出的脸）
-    return {"defects": defects, "metrics": metrics, "mirror_seg": seg, "refs_loaded": refs_ok,
-            "verdict": "hit" if any(d["conf"] != "low" for d in defects) else "clean"}
+    verdict = "hit" if any(d["conf"] != "low" for d in defects) else "clean"
+    untested = []
+    if real and not refs_ready and not ci.get("refless"):
+        # OVERSIGHT-F 第 6 轮（11-02）：身份参照没加载 / 在场角色缺身份脸时，陌生人判据整个跳过，原来静默判 clean = 未测当通过
+        untested.append("身份参照没加载（在场角色的身份脸缺：" + "、".join(sorted(set(ci.get("in_frame_ids") or []) - refs_have) or ["全部"]) +
+                        "），陌生人 / 多出人头判不了")
+        if verdict == "clean":
+            verdict = "untested"
+    return {"defects": defects, "metrics": metrics, "mirror_seg": seg, "refs_loaded": refs_ok, "untested": untested,
+            "verdict": verdict}
 
 
 # K-REN-952（PROMPTFIX 11-02，fb-0005 ep05-S3“我的位置不对”：cast 林晚 = 中，出图林晚在左）：站位核对。
@@ -387,7 +415,7 @@ def blocking_defects(heads: list[dict], cast: list[dict] | None, W: float, th: d
     out = []
     for c in cast:
         x = c.get("x")
-        cid = NAME_ID.get(c.get("name"), c.get("name"))
+        cid = _ids().get(c.get("name"), c.get("name"))
         if x not in BLOCK_RANGE or not cid:
             continue
         cand = [f for f in heads if not f.get("_mir") and (f.get("sims") or {}).get(cid, 0) >= t["same_cos"]]
@@ -542,6 +570,26 @@ print("@@RES@@" + json.dumps(res))
 REMOTE_SRC = REMOTE_SRC.replace("@@WRIST_RED@@", WRIST_RED_SRC)
 
 
+def _measure_http(files: dict[str, Path], url: str, batch: int, refs: dict) -> dict:
+    """常驻检测服务（VQAGATE 11-02 20:1x，总调度：人脸 / 人数 / 手形模型常驻，不每次冷启动；图片只进本地 / 自有服务器模型）"""
+    import urllib.request
+    out: dict = {}
+    ids = list(files)
+    for i in range(0, max(1, len(ids)), batch):
+        part = ids[i:i + batch]
+        body = json.dumps({"refs": refs, "items": [{"id": k, "b64": _jpeg_b64(Path(files[k]))} for k in part]}).encode("utf-8")
+        req = urllib.request.Request(url.rstrip("/") + "/measure", body, {"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=900) as r:
+                out.update(json.loads(r.read()))
+        except Exception as e:  # noqa: BLE001 — 服务不可用 = 这批 untested（调用方按 error 记），不当通过
+            for k in part:
+                out[k] = {"error": f"常驻检测服务不可用：{type(e).__name__}: {e}"[:300]}
+        if not ids:
+            break
+    return out
+
+
 def _face_refs() -> dict[str, str]:
     sys.path[:0] = [str(ROOT / "services/agent"), str(ROOT / "packages/qc"), str(ROOT), str(ROOT / "tools/gen_contract")]
     try:
@@ -626,10 +674,13 @@ def device_prefix(host: str, hosts: dict | None = None) -> str:
 
 
 def measure(files: dict[str, Path], host: str = "gpu36", batch: int = 8, refs: dict | None = None) -> dict:
-    """{id: 本机图片} → {id: 测量值}。远程调用走 tools/netfix/rssh.run_retry，GPU2 打分道"""
+    """{id: 本机图片} → {id: 测量值}。host = 主机名 → rssh 冷启动跑 REMOTE_SRC；host = http(s) 地址 → 常驻检测服务
+    （tools/vqa/anomaly_server.py，模型只加载一次，gpu36 内网入口；返回格式完全相同）"""
     sys.path.insert(0, str(ROOT))
-    from tools.netfix.rssh import run_retry
     refs = _face_refs() if refs is None else refs
+    if str(host).startswith(("http://", "https://")):
+        return _measure_http(files, str(host), batch, refs)
+    from tools.netfix.rssh import run_retry
     from tools.factory import hosts as H
     comfy_root = H.load()["hosts"][host]["comfy_root"].rstrip("/")      # 车道表登记的 ComfyUI 根；其上一级 = 打分 / 模型工作区
     work = comfy_root.rsplit("/", 1)[0]
@@ -691,7 +742,7 @@ def shot_cast(sid: str) -> list[dict] | None:
     faced, _partial = FR.faced_people(ep_shot[1], names)      # 编译稿口径：在画，或局部但原文写到脸 / 头发
     acc = shot_accessories(sid)
     return [{"name": c.name, "presence": c.presence, "part": c.part, "faced": c.name in faced, "x": getattr(c, "x", None),
-             **({"look_acc": acc[NAME_ID.get(c.name, c.name)]} if NAME_ID.get(c.name, c.name) in acc else {})} for c in ep_shot[1].cast]
+             **({"look_acc": acc[_ids().get(c.name, c.name)]} if _ids().get(c.name, c.name) in acc else {})} for c in ep_shot[1].cast]
 
 
 def current_images(include_last: bool = True) -> list[tuple[str, str, Path]]:
@@ -725,8 +776,9 @@ def check(image_path, cast: list[dict] | None, host: str = "gpu36") -> dict:
     r = judge(f, cast)
     m = r["metrics"]
     hits = [d for d in r["defects"] if d["conf"] != "low"]
-    return {"status": "fail" if hits else "pass", "mode": "full" if r["mirror_seg"] == "ok" else "no_mirror_seg",
-            "reasons": [f"{d['code']}：{d['detail']}" for d in r["defects"]],
+    status = "fail" if hits else ("untested" if r.get("untested") else "pass")     # 未测不当通过（config/vqa.json untested_blocks）
+    return {"status": status, "mode": "full" if r["mirror_seg"] == "ok" else "no_mirror_seg",
+            "reasons": [f"{d['code']}：{d['detail']}" for d in r["defects"]] + list(r.get("untested") or []),
             "heads": {"expected": m["expected_faced"], "got": m["heads_real"], "mirror": m["heads_mirror"],
                       "extra": [d["detail"] for d in r["defects"] if d["code"] in ("duplicate_person", "extra_head")]},
             "hands": {"got": m["hands"], "fingers_bad": m["fingers_bad"], "fingers_tested": m["fingers_tested"]},
@@ -761,7 +813,7 @@ def run_files(files: dict[str, Path], casts: dict[str, list | None], host: str =
         print(f"红色口径重算：{refresh_red({k: feats[k] for k in stale}, files)} 张", file=sys.stderr)
         if feats_out or feats_in:
             _atomic_json(feats_out or feats_in, feats)
-    want = set(NAME_ID.values())
+    want = set(_ids().values())
     miss = [k for k, f in feats.items() if not k.startswith("@") and not f.get("error") and want - set(f.get("refs_loaded") or [])]
     if miss:
         refs = feats.get("@refs") or ref_embs(host)

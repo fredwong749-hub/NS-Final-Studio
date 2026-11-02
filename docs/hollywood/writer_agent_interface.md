@@ -69,3 +69,7 @@
 - 全部写作规则：`config/recipes/writer_knowledge.md`（含 K-WRT-H06 / H08 / H10、K-WRT-801–804 运镜）。
 - 运镜词表：`config/director/camera_moves.yaml`（只写 enabled 的名字，每镜一种，“小幅”，不写速度词；复合运镜按词表 split 拆两镜）。名单会随 Pika A/B 变化，以包里 `system` 给的为准。
 - 代码判定 27 条：`config/prompts/hollywood_rubric.json` + `tools/script_rsi/rubric_code.py`；导入闸门 = 代码判定 0 失败 + P4 阻断 0 + 事实核对 0 偏差。
+
+## 守则：不许读 data/master/
+
+所有写作 / 评审 / 走查 agent 都不许读、列目录、复制 `data/master/`（里面是总调度令牌 escalate.token 等）。“把低于门槛的 P1 转项目方定方向”（review-state --escalate-owner）只能由总调度带 `--token-file` 触发，令牌摘要对上 `config/master/escalate.sha256` 才放行；只写 `--by 总调度` 一律拒绝（OVERSIGHT-F P1-4a / W-33，总调度 11-02）。

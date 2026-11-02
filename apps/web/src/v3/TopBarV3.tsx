@@ -55,6 +55,7 @@ const TOOLS: { group: string; items: [Target, string, string][] }[] = [
   {
     group: "查看",
     items: [
+      ["#/v1-library", "Version 1 视频库（只读）", "第一版冻结后的视频，只能看，不会进入 Version 2"],
       ["#/overview", "全剧总览", "10 集 × 每一镜：首尾帧 / 视频 / 通过进度，镜与镜、集与集怎么接（1）"],
       ["canvas", "画布（审片 / 精修）", "一镜一行；L / Enter / 双击进精修"],
       ["play", "串播审片", "按顺序播放本集视频（R）"],

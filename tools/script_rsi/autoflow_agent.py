@@ -41,7 +41,7 @@ PATCH_MAX = 10
 CONTENT_RULES = ("全部人物成年（≥22 岁）、一切亲密情节双方自愿、人物均为虚构。暧昧和张力可以写；露骨的性描写不写。"
                  "亲密镜写成占位：该镜的 img / motion / H3 只写非露骨的画面（构图、视线、手、呼吸、环境），并在镜头块里加一行 "
                  "`**H3校验**：本地生成（亲密镜占位）`——这类镜头的画面只在本地生成。不改第一季已定的剧情事实和人物设定（身份、名字、年龄、"
-                 "发色发型、脸、5 厘米透明水晶甲、人物关系、已发生剧情）；每集服装 / 造型不是事实，以本集造型行为准（K-WRT-H10）。缺信息标“未提供”。")
+                 "发色发型、脸、5 厘米透明水晶甲、人物关系、已发生剧情）；每集服装 / 造型不是事实，以本集造型行为准（K-WRT-H10）。缺信息标“未提供”。" + AF.PLACEHOLDER_OVERRIDE)
 EXT = {"json": "json", "markdown_episode": "md", "patches_json": "json", "facts_json": "json", "factcheck_json": "json"}
 
 
@@ -88,7 +88,8 @@ def attempts(run_dir: Path, step: str) -> int:
 
 CONTENT_RULES_CLEAN = ("全部人物成年（≥22 岁）、一切亲密情节双方自愿、人物均为虚构。暧昧和张力可以写；露骨的性描写不写。"
                        "亲密镜写成占位：该镜的 img / motion / H3 只写非露骨的画面（构图、视线、手、呼吸、环境），并在镜头块里加一行 "
-                       "`**H3校验**：本地生成（亲密镜占位）`——这类镜头只在项目方自有机器上生成（笔记本 / gpu33 / gpu36，L-128），写法仍不露骨。人物、造型、场景以本剧 P0 / P1 为准；缺信息标“未提供”。")
+                       "`**H3校验**：本地生成（亲密镜占位）`——这类镜头只在项目方自有机器上生成（笔记本 / gpu33 / gpu36，L-128），写法仍不露骨。人物、造型、场景以本剧 P0 / P1 为准；"
+                       "正文里不留占位词（未提供 / 待定 / TODO / XXX / <…>，SL-12）：缺信息就按 P0 / P1 已有设定写成具体内容。" + AF.PLACEHOLDER_OVERRIDE)
 
 
 def clean_cut(run_dir: Path) -> bool:
@@ -107,6 +108,8 @@ def packet(run_dir: Path, st, step: str, role: str, ep: int, link: str, system: 
         VL = _load("v1_leak", "tools/script_rsi/v1_leak.py")
         v = VL.vocab(current=run_dir.name)
         system, user, rules = VL.redact(system, v), VL.redact(user, v), CONTENT_RULES_CLEAN
+    if ("标“未提供”" in system + user + rules or "标未提供" in system + user + rules) and AF.OVERRIDE_TAG not in system + rules:
+        system += "\n" + AF.PLACEHOLDER_OVERRIDE                    # OVERSIGHT-F P1-8a：单一出口兜底——提到“标未提供”的包必带 SL-12 覆盖说明
     op = output_path or out_path(run_dir, step, attempt, fmt)      # 集返修稿要落 writer_out/P4_epNN_r<k>.md（intake_full_p4 收），其余按 step 命名
     pk = {"schema": "nsfs.writer_task/1", "run": run_dir.name, "step": step, "role": role, "episode": ep, "link": link,
           "system": system + "\n\n========\n\n【内容边界】" + rules, "user": user, "inputs": inputs,
@@ -218,11 +221,13 @@ def live_note(text: str) -> None:
 
 
 def judge_done_sig(d: Path) -> str:
-    """一轮评审目录里评委 .done 的签名（文件名 + 产物字节数）；watch 用它判断“这组交稿收过没有”"""
+    """一轮评审目录里评委 .done 的签名（文件名 + 产物字节数 + 修改时间 + .done 时间）；watch 用它判断“这组交稿收过没有”。
+    评委重交（证据不合格整份无效后）即使字节数一样，修改时间也会变 → 重新汇总"""
     parts = []
     for f in sorted(d.glob("judge_*/out/p1_review.json.done")):
         out = f.with_name("p1_review.json")
-        parts.append(f"{f.parent.parent.name}:{out.stat().st_size if out.exists() else 0}")
+        o = out.stat() if out.exists() else None
+        parts.append(f"{f.parent.parent.name}:{o.st_size if o else 0}:{o.st_mtime_ns if o else 0}:{f.stat().st_mtime_ns}")
     return "|".join(parts)
 
 
@@ -250,6 +255,53 @@ def review_add_fixes(run_dir: Path, fixes: list[str], by: str, replace: bool = F
     cur["extra_by"].append({"by": by, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "n": len(fixes)})
     AF.write_json(sp, state)
     return cur
+
+
+ESCALATE_DIGEST = "config/master/escalate.sha256"      # 入版：只放令牌摘要；令牌本身 data/master/escalate.token 由总调度会话生成，agent 不许读
+
+
+def _check_escalate_token(token_file: str | None) -> str:
+    """OVERSIGHT-F P1-4a / W-33：凭令牌放行（不是凭 --by 字符串）。返回摘要前 8 位；不对就 PermissionError"""
+    import hashlib
+    if not token_file:
+        raise PermissionError("转项目方要带 --token-file（总调度令牌）；只写 --by 总调度不放行")
+    dp = ROOT / ESCALATE_DIGEST
+    if not dp.exists():
+        raise PermissionError(f"{ESCALATE_DIGEST} 还没写入令牌摘要，不能转项目方")
+    want = dp.read_text(encoding="utf-8").split()[0].strip().lower()
+    try:
+        raw = Path(token_file).read_bytes().strip()
+    except OSError:                                   # OVERSIGHT-F 第 5 轮：文件不存在 / 读不了 → 大白话 PermissionError，不是 FileNotFoundError
+        raise PermissionError(f"令牌文件 {token_file} 不存在或读不了，不能转项目方") from None
+    got = hashlib.sha256(raw).hexdigest()
+    if got != want:
+        raise PermissionError("令牌不对，不能转项目方")
+    return got[:8]
+
+
+def review_escalate_owner(run_dir: Path, by: str, why: str = "", token_file: str | None = None) -> dict:
+    """总调度动作（只能由总调度触发）：把当前这一稿（低于门槛）连同各轮评分转给项目方定方向 → owner_direction。
+    凭令牌放行（--token-file，摘要对上 config/master/escalate.sha256）；记审计（谁、摘要前 8 位、pid、用户名、当时的分数、理由），只对这一稿有效"""
+    if "总调度" not in (by or ""):
+        raise PermissionError("只有总调度能把故事线转给项目方定方向（--by 须写总调度）")
+    digest8 = _check_escalate_token(token_file)
+    import hashlib
+    sp = run_dir / REVIEW_STATE
+    state = json.loads(sp.read_text(encoding="utf-8"))
+    canon = run_dir / "P1_storyline.json"
+    if not canon.exists():
+        raise FileNotFoundError("当前没有 P1 正式稿（可能还在返修），不能转项目方")
+    sha = hashlib.sha256(canon.read_text(encoding="utf-8").encode("utf-8")).hexdigest()[:16]
+    cur = state["rounds"][-1] if state.get("rounds") else {}
+    if cur.get("sha") != sha:
+        raise ValueError("当前这一稿还没评审完，等评分出来再转")
+    import os as _os
+    state["owner_direction"] = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "by": by, "why": why, "round": cur.get("n"),
+                                "mean": (cur.get("result") or {}).get("mean"), "totals": (cur.get("result") or {}).get("totals"), "sha": sha,
+                                "token_digest8": digest8, "pid": _os.getpid(), "user": _os.environ.get("USERNAME") or _os.environ.get("USER") or ""}
+    AF.write_json(sp, state)
+    live_note(f"{run_dir.name} P1 第 {cur.get('n')} 轮 {(cur.get('result') or {}).get('mean')}/40 低于门槛，总调度转项目方定方向（用这版 / 修改 / 换方向）")
+    return state["owner_direction"]
 
 
 def review_state_normalize(run_dir: Path) -> dict:
@@ -296,14 +348,27 @@ def _p1_review(RCH, run_dir: Path, ep: int, st, ctx: dict, canon: Path, sl: dict
     cfg = review_cfg()
     if not cfg.get("enabled", True):
         return True
+    OG_ = _load("owner_gate", "tools/script_rsi/owner_gate.py")
+    od = OG_.owner_direction(run_dir)
+    if od:                                           # 总调度已转项目方定方向：不再判门槛，交给项目方闸门（用这版 / 修改 / 换方向）
+        st.stage("P1R", "P1 三评委", "owner_direction", "owner", round=od.get("round"), mean=od.get("mean"), by="总调度")   # 审计全文在 STATE.json，给人看的不带内部编号（W-39）
+        if OG_.get(run_dir, "P1").get("status") == "approved":
+            return True
+        txt = OG_.owner_direction_text(run_dir) + "，总调度转给你定方向"
+        st.stage("P1G", "项目方看 P1", "owner_direction", "owner", detail=f"{txt}：{OG_.OWNER_CHOICES}")
+        st.set(verdict="owner_direction", awaiting=None, below_threshold=True,
+               next_action=f"{txt}：{OG_.OWNER_CHOICES}"
+               + ("。" + fill_note(st.d["p1_owner_hold_fields"]) if st.d.get("p1_owner_hold_fields") else ""))
+        return False
     JA = _load("judge_agent", "tools/script_rsi/judge_agent.py")
     sp = run_dir / REVIEW_STATE
     state = json.loads(sp.read_text(encoding="utf-8")) if sp.exists() else {"rounds": []}
     sha = JA._sha(canon.read_text(encoding="utf-8"))
     cur = state["rounds"][-1] if state["rounds"] else None
+    took = bool(state.get("owner_took_over"))       # 项目方已接手：轮数上限不再适用（评审只作参考）
     if cur is None or cur.get("sha") != sha:
         n = len(state["rounds"]) + 1
-        if n > int(cfg.get("max_rounds", 3)):
+        if n > int(cfg.get("max_rounds", 3)) and not took:
             st.stage("P1R", "P1 三评委", "escalated", "code", detail=f"已评 {n - 1} 轮仍未过门槛")
             st.set(verdict="p1_review_failed", next_action="P1 三评委已到轮数上限仍未过，交总调度")
             return False
@@ -317,7 +382,8 @@ def _p1_review(RCH, run_dir: Path, ep: int, st, ctx: dict, canon: Path, sl: dict
         cur = state["rounds"][-1]
     d = review_round_dir(run_dir, int(cur["n"]))
     res = JA.p1_collect(run_dir, out=d)
-    cur.update(result={k: res.get(k) for k in ("n", "totals", "mean", "sigma", "item_mean", "item_split", "judge_ids", "single_judge", "problems")})
+    cur.update(result={k: res.get(k) for k in ("n", "totals", "mean", "sigma", "item_mean", "item_split", "judge_ids", "single_judge", "problems",
+                                     "evidence_fail", "invalid_judges")})
     ok, why = review_passed(res, cfg)
     if res.get("n", 0) < int(cfg.get("judges", 3)):
         cur["collected_sig"] = judge_done_sig(ROOT / cur["dir"])        # 同一组评委 .done 已收过一次：watch 不再每 30 秒空转
@@ -333,6 +399,19 @@ def _p1_review(RCH, run_dir: Path, ep: int, st, ctx: dict, canon: Path, sl: dict
         live_note(f"{run_dir.name} P1 第 {cur['n']} 轮三评委过门槛：{res.get('totals')}，均分 {res.get('mean')}/40 → 交项目方看（P1 闸门）")
         return True
     cur["passed"], cur["why"] = False, why
+    if took:                                          # 项目方接手后的新稿没到门槛：自动停在 owner_direction（新稿 sha），带上评分，不再 escalate、不出返修包
+        import os as _os
+        state["owner_direction"] = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "by": "系统（项目方已接手，自动带评分）", "why": "；".join(why),
+                                    "round": cur["n"], "mean": res.get("mean"), "totals": res.get("totals"), "sha": sha,
+                                    "auto_after_owner_revise": True, "pid": _os.getpid()}
+        cur["reference_only"] = True
+        AF.write_json(sp, state)
+        st.stage("P1R", "P1 三评委", "owner_direction", "owner", round=cur["n"], mean=res.get("mean"), reference_only=True)
+        st.stage("P1G", "项目方看 P1", "owner_direction", "owner", detail="项目方改过的新稿：评分只作参考，由你定")
+        st.set(verdict="owner_direction", awaiting=None, below_threshold=True,
+               next_action=f"项目方改过的新稿：评审 {res.get('mean')}/40（只作参考，没到 {cfg.get('min_mean', 34)}），由你定：用这版 / 修改 / 换方向")
+        live_note(f"{run_dir.name} P1 项目方改过的新稿评审 {res.get('totals')}，均分 {res.get('mean')}/40（只作参考）→ 停在 owner_direction 等项目方定")
+        return False
     if int(cur["n"]) >= int(cfg.get("max_rounds", 3)):
         AF.write_json(sp, state)
         st.stage("P1R", "P1 三评委", "escalated", "judge", round=cur["n"], why=why)
@@ -379,11 +458,33 @@ def p1_gate(RCH, run_dir: Path, ep: int, st, ctx: dict, canon: Path) -> bool:
         return True
     g = OG.get(run_dir, "P1")
     sl = ctx["storyline"].model_dump(mode="json", by_alias=True) if hasattr(ctx["storyline"], "model_dump") else ctx["storyline"]
+    if g.get("status") == "redirect_requested" and not g.get("handled"):      # “换方向”：回到 P0 Brief，P1 / 造型 / 评审全部归档重来
+        tag = time.strftime("%Y%m%d_%H%M%S")
+        arc = run_dir / f"_redirect_{tag}"
+        arc.mkdir()
+        for f in (canon, canon.parent / f"{canon.name}.report.json", run_dir / LOOKS, run_dir / "judge_p1"):
+            if f.exists():
+                f.rename(arc / f.name)
+        void_downstream(run_dir, "项目方换方向：" + g.get("note", "")[:100])
+        bp = run_dir / "P0_brief.json"
+        brief = json.loads(bp.read_text(encoding="utf-8"))
+        brief["outline"] = "【项目方新方向（" + time.strftime("%m-%d %H:%M") + "，取代之前的故事方向）】" + g.get("note", "") + "\n\n" + brief["outline"]
+        AF.write_json(bp, brief)
+        OG.set_status(run_dir, "P1", "pending", note="项目方换方向，按新 Brief 重写 P1", handled=True, archive=H.RC._rel(arc))
+        live_note(f"{run_dir.name} 项目方换方向：旧 P1 / 造型 / 评审归档到 {H.RC._rel(arc)}，按新 Brief 重写 P1")
+        st.stage("P1G", "项目方看 P1", "redirected", "owner", archive=H.RC._rel(arc))
+        st.set(verdict="redirected", awaiting=None, next_action="项目方换了方向：下一次推进按新 Brief 出 P1 包")
+        return False
     if g.get("status") == "revise_requested" and not g.get("handled"):
         tag = time.strftime("%H%M%S")
         for f in (canon, canon.parent / f"{canon.name}.report.json", run_dir / LOOKS):
             if f.exists():
                 f.rename(f.with_name(f.stem + f".v{tag}" + f.suffix))
+        if OG.owner_direction(run_dir):            # 项目方在“定方向”状态下点了修改 → 项目方已接手：之后的新稿照样评审，分数只作参考、不拦
+            sp_ = run_dir / REVIEW_STATE
+            st_ = json.loads(sp_.read_text(encoding="utf-8"))
+            st_["owner_took_over"] = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "note": g.get("note", "")[:300]}
+            AF.write_json(sp_, st_)
         void_downstream(run_dir, "项目方点了 P1 “修改”：" + g.get("note", "")[:100])
         k = attempts(run_dir, "P1")
         pr = RCH.WP.build("P0-P1", ctx)
@@ -403,6 +504,8 @@ def p1_gate(RCH, run_dir: Path, ep: int, st, ctx: dict, canon: Path) -> bool:
         g = {"status": "pending"}
     if g.get("status") == "approved":
         st.stage("P1G", "项目方看 P1", "approved", "owner")
+        if st.d.get("p1_owner_hold_fields") and not _p1_fill(RCH, run_dir, ep, st, ctx, canon, sl):
+            return False
         return True
     for s_ in st.d.get("stages", []):        # 闸门之后的段（如闸门上线前已出的 P2 包）标成“被 P1 闸门挡住”，网页不显示成在等写手
         if s_.get("id") in ("P2", "P3", "P4") and s_.get("status") in ("awaiting_writer", "repair_requested"):
@@ -438,12 +541,180 @@ def ep_gate(run_dir: Path, ep: int, st) -> bool:
     return False
 
 
+FIELD_LABEL = {"logline": "一句简介", "title": "标题", "owner_line": "一句话", "carry_out": "结尾状态", "premise": "故事前提"}
+FILL_MAX = 3
+FILL_MIN_CHARS = 6
+TRIVIAL_FILL = {"", "无", "暂无", "没有", "空", "略", "同上", "见上", "none", "None", "null", "NA", "na"}
+
+
+def _field_zh(path: str) -> str:
+    m = re.match(r"episodes\[(\d+)\]\.(\w+)$", path)
+    if m:
+        return f"第 {int(m.group(1)) + 1} 集{FIELD_LABEL.get(m.group(2), '的一处文字')}"
+    return FIELD_LABEL.get(path, "故事线里的一处文字")
+
+
+def fill_note(fields: list[str]) -> str:
+    """给项目方的一句话（总调度 11-02）：“第 3 集一句简介还没写完，写手会自动补上，不影响你选的这版。”"""
+    return "、".join(dict.fromkeys(_field_zh(f) for f in fields)) + "还没写完，写手会自动补上，不影响你选的这版。"
+
+
+def _path_tokens(path: str) -> list:
+    return [int(x[1:-1]) if x.startswith("[") else x for x in re.findall(r"\[\d+\]|[^.\[\]]+", path)]
+
+
+def _set_path(obj, path: str, value) -> None:
+    t = _path_tokens(path)
+    for k in t[:-1]:
+        obj = obj[k]
+    if isinstance(obj, dict) and t[-1] not in obj:
+        raise KeyError(t[-1])
+    obj[t[-1]] = value
+
+
+def _get_path(obj, path: str):
+    for k in _path_tokens(path):
+        obj = obj[k]
+    return obj
+
+
+def diff_paths(a, b, path: str = "") -> list[str]:
+    """逐字段 diff：返回所有不一样的叶子路径（列表长度不同 / 类型不同 / 多出或少了的键 = 这个路径本身）"""
+    if isinstance(a, dict) and isinstance(b, dict):
+        out = []
+        for k in list(a) + [k for k in b if k not in a]:
+            sub = f"{path}.{k}" if path else str(k)
+            out += diff_paths(a[k], b[k], sub) if (k in a and k in b) else [sub]
+        return out
+    if isinstance(a, list) and isinstance(b, list):
+        if len(a) != len(b):
+            return [path]
+        return [x for i, (p_, q_) in enumerate(zip(a, b)) for x in diff_paths(p_, q_, f"{path}[{i}]")]
+    return [] if a == b else [path]
+
+
+def fill_check(RCH, sl: dict, txt: str, allowed: list[str], ctx: dict):
+    """补占位稿收稿：只许改 allowed 里的字段（逐字段 diff），改完重新跑 check_storyline（含 P0-P1 连接）。→ (新故事线 dict | None, 问题列表)"""
+    import copy
+    d, err = H._json_block(txt)
+    if d is None or not isinstance(d, dict):
+        return None, [f"不是 JSON：{err}"]
+    if isinstance(d.get("fields"), dict):
+        new = copy.deepcopy(sl)
+        for k, v in d["fields"].items():
+            try:
+                _set_path(new, str(k), v)
+            except (KeyError, IndexError, TypeError):
+                return None, [f"字段 {k} 不存在"]
+    else:
+        new = d                                       # 交了整份故事线：同样逐字段 diff
+    changed = diff_paths(sl, new)
+    probs = [f"改了不许改的字段：{x}（这一包只补 {', '.join(allowed)}）" for x in changed if x not in allowed]
+    for x in allowed:                                  # OVERSIGHT-F P2：补的值要非空、去空白后 ≥ 6 字、不能只是“无”“。”这类
+        try:
+            v = _get_path(new, x)
+        except (KeyError, IndexError, TypeError):
+            v = None
+        core = re.sub(r"[\s\W_]+", "", str(v or ""))
+        if not isinstance(v, str) or len(re.sub(r"\s+", "", v)) < FILL_MIN_CHARS or core in TRIVIAL_FILL or len(core) < 2:
+            probs.append(f"{x} 补的内容太短或是空话（{str(v)[:20]!r}）：要写成至少 {FILL_MIN_CHARS} 个字的具体内容")
+    probs += [f"{x} 没补" for x in allowed if x not in changed]
+    if probs:
+        return None, probs
+    rep, obj, _ = RCH.validate("P0-P1", json.dumps(new, ensure_ascii=False), ctx)
+    if not rep.ok:
+        return None, [f"{i.rule} {i.field}：{i.message}" for i in rep.issues if i.level == "block"][:20]
+    return new, []                                    # 写回的是原结构只改了那几个字段的 JSON（不经 model_dump，免得补出默认字段）
+
+
+def _p1_fill(RCH, run_dir: Path, ep: int, st, ctx: dict, canon: Path, sl: dict) -> bool:
+    """补占位（总调度 11-02）：项目方点了“用这版”，但这一稿只剩 SL-12 占位词 → 出“补占位”小包，只许改含占位词的字段；
+    不进三评委；收稿逐字段 diff + 重跑 check_storyline，过了写回正式稿（评审 / 转交记录的 sha 跟着换，审计记 placeholder_fills），再进 P2。"""
+    fields = st.d["p1_owner_hold_fields"]
+    note = fill_note(fields)
+    sl = json.loads(canon.read_text(encoding="utf-8"))   # 逐字段 diff 的基准 = 正式稿文件本身（不是补了默认值的模型）
+    step, k = "P1_fill", attempts(run_dir, "P1_fill")
+    base_sha = _sha(canon.read_text(encoding="utf-8"))
+    cur_vals = {f: _get_path(sl, f) for f in fields}
+    user = ("项目方已经选了这一版故事线（用这版）。只有下面这几个字段还留着占位词，请把它们写成具体内容，其余字段一个字都不许动。\n"
+            "【要补的字段（现在的写法）】\n" + "\n".join(f"- {f}：{v}" for f, v in cur_vals.items())
+            + "\n\n【交稿格式】只交 JSON：{\"fields\": {\"" + fields[0] + "\": \"补好的文字\"" + (", …" if len(fields) > 1 else "") + "}}"
+            + "\n\n【整份故事线（只读参考，按里面已有的人物、场景、前后集写）】\n" + json.dumps(sl, ensure_ascii=False)[:20000])
+    system = "你是这部剧的写手。这是一个“补占位”小包：只补指定字段，不改剧情、不改其它字段；不留任何占位词（未提供 / 待定 / TODO / XXX / <…>）。"
+    pk_prev = json.loads((run_dir / WT / f"{step}_a{k}.json").read_text(encoding="utf-8")) if k else None
+    if pk_prev is None or pk_prev.get("base_sha") != base_sha or pk_prev.get("fields") != fields:
+        packet(run_dir, st, step, "writer", ep, "P1-fill", system, user, "json", [], k + 1, {"base_sha": base_sha, "fields": fields})
+        st.stage("P1F", "补占位", "awaiting_writer", "agent", step=step, attempt=k + 1, fields=fields)
+        st.set(next_action="写手在补：" + note)
+        return False
+    txt = ready(out_path(run_dir, step, k, "json"))
+    if txt is None:
+        st.stage("P1F", "补占位", "awaiting_writer", "agent", step=step, attempt=k, fields=fields)
+        st.set(verdict="awaiting_writer", next_action="写手在补：" + note)
+        return False
+    new, probs = fill_check(RCH, sl, txt, fields, ctx)
+    if probs:
+        if k >= FILL_MAX:
+            st.stage("P1F", "补占位", "escalated", "code", attempt=k, problems=probs[:10])
+            st.set(verdict="p1_fill_failed", awaiting=None, next_action=f"补占位交了 {k} 次都没过，转总调度")
+            live_note(f"{run_dir.name} P1 补占位交了 {k} 次都没过（{'；'.join(probs[:3])}），转总调度")
+            return False
+        packet(run_dir, st, step, "writer", ep, "P1-fill", system,
+               user + "\n\n【上一版补占位稿没收（原因）】\n" + "\n".join(f"- {x}" for x in probs[:20]), "json", [], k + 1,
+               {"base_sha": base_sha, "fields": fields})
+        st.stage("P1F", "补占位", "repair_requested", "code", step=step, attempt=k + 1, problems=probs[:10])
+        st.set(next_action="写手在补：" + note)
+        return False
+    old_text = canon.read_text(encoding="utf-8")
+    canon.rename(canon.with_name(canon.stem + f".prefill{time.strftime('%H%M%S')}" + canon.suffix))
+    AF.write_json(canon, new)
+    new_sha = _sha(canon.read_text(encoding="utf-8"))
+    sp = run_dir / REVIEW_STATE
+    if sp.exists():                                   # 这一稿内容（除了补的字段）没变：评审结果和转交记录跟着指向新 sha，不再进三评委
+        state = json.loads(sp.read_text(encoding="utf-8"))
+        old_sha = _sha(old_text)
+        if (state.get("owner_direction") or {}).get("sha") == old_sha:
+            state["owner_direction"]["sha"] = new_sha
+        if state.get("rounds") and state["rounds"][-1].get("sha") == old_sha:
+            state["rounds"][-1]["sha"] = new_sha
+        state.setdefault("placeholder_fills", []).append({"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "old_sha": old_sha, "new_sha": new_sha,
+                                                          "fields": fields, "packet": f"{step}_a{k}"})
+        AF.write_json(sp, state)
+    ctx["storyline"] = RCH.validate("P0-P1", json.dumps(new, ensure_ascii=False), ctx)[1]
+    st.set(p1_owner_hold=None, p1_owner_hold_fields=None)
+    st.stage("P1F", "补占位", "ok", "agent", step=step, attempt=k, fields=fields)
+    live_note(f"{run_dir.name} P1 补占位完成（{'、'.join(fields)}），重跑 check_storyline 通过，进 P2")
+    return True
+
+
+def _p1_owner_hold(RCH, run_dir: Path, canon: Path, ctx: dict, st):
+    """P1 已在项目方手里（总调度转项目方定方向 / 项目方已通过）时，后加的规则（如 SL-12 占位词）不能让系统自动出返修包、
+    绕过项目方：只要不合格项全是“新规则”这一类，就沿用这一稿并把问题挂在状态里给项目方看；其余格式错照旧返修。"""
+    OG_ = _load("owner_gate", "tools/script_rsi/owner_gate.py")
+    if not (OG_.owner_direction(run_dir) or OG_.get(run_dir, "P1").get("status") == "approved"):
+        return None
+    rep, obj, _ = RCH.validate("P0-P1", canon.read_text(encoding="utf-8"), ctx)
+    blocks = [i for i in rep.issues if i.level == "block"]
+    if obj is None or not blocks or any(i.rule not in OWNER_HOLD_RULES for i in blocks):
+        return None
+    st.set(p1_owner_hold=[f"{i.rule} {i.field}：{i.message}"[:200] for i in blocks],
+           p1_owner_hold_fields=sorted({i.field for i in blocks if i.rule == "SL-12"}))
+    return obj
+
+
+OWNER_HOLD_RULES = {"SL-12"}
+
+
 def chain_step(RCH, run_dir: Path, ep: int, st, ctx: dict) -> bool:
     """P1→P4；返回 True = 四段都齐（可进后处理），False = 在等写手"""
     key = {"P0-P1": "storyline", "P1-P2": "outline", "P2-P3": "screenplay", "P3-P4": "p4"}
     for link, node, name in AF.LINKS:
         canon = run_dir / dict(RCH.STAGES)[link].format(ep=ep)
+        if link == "P0-P1":
+            st.set(p1_owner_hold=None, p1_owner_hold_fields=None)
         obj = RCH._load_ok(canon, link, ctx)
+        if obj is None and link == "P0-P1" and canon.exists():
+            obj = _p1_owner_hold(RCH, run_dir, canon, ctx, st)
         rep_p = canon.parent / f"{canon.name}.report.json"
         if obj is None and link == "P3-P4" and canon.exists() and rep_p.exists():
             pr_ = json.loads(rep_p.read_text(encoding="utf-8"))

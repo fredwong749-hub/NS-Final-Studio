@@ -112,6 +112,11 @@ def lens_term(style: str, bible: Bible | None = None) -> str:
     b = bible or load_bible()
     if any(w in style for w in b.lens_skip_if):
         return ""
+    from . import cast_table as _CT
+    from . import asset_refs as _AR
+    _p = _CT.current_project()
+    if _p and _AR.manifest_rel(_p):     # PROMPTFIX 20:4x（L-126）：V2 不补 V1 visual_bible 的 Leica 镜头句（风格只按剧取 run_style.json）
+        return ""
     m = LENS_RE.search(style)
     mm, f = (m.group(1), m.group(2)) if m else b.lens_default
     return b.scrub(b.lens_template.format(mm=mm, f=f))

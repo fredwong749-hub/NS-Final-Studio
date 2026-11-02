@@ -161,33 +161,54 @@ def wait_job(host_gen: dict, jid: str, what: str, max_h: float = 3.0) -> dict:
     raise RM.RemoteError(f"{jid} 超时")
 
 
-def run():
-    cfg, gen = gen_cfg()
-    cands, briefs = build()
-    work = OUT / "work"
-    work.mkdir(parents=True, exist_ok=True)
-    state_p = OUT / "themes.json"
-    jid = f"stylev2-bgm_{int(time.time())}"
+def submit_gen(gen: dict, cfg: dict, cands: list[dict], jid: str, seed_files: dict | None = None) -> dict:
+    """投生成作业（只用 GPU 道 GPU）并等完；seed_files = {候选 id: 远端已有 raw.wav 路径}（retake 时把幻想编配拷进新作业目录当 cover 源）"""
     wd = gen["workdir"]
     jd = f"{wd}/jobs/{jid}"
-    job = {"id": jid, "gen": gen, "out": cfg["output"], "candidates": cands, "score": False}
+    work = OUT / "work"
+    work.mkdir(parents=True, exist_ok=True)
     RM.ssh(gen["host"], f"mkdir -p {jd}")
+    for cid, src in (seed_files or {}).items():
+        RM.ssh(gen["host"], f"cp {src} {jd}/{cid}.raw.wav")
     RM.put(gen["host"], RM.WORKER, f"{wd}/bgm_worker.py")
     RM.put(gen["host"], LOCAL_WORKER, f"{wd}/v2style_bgm_worker.py")
     lj = work / f"job_{jid}.json"
-    jsave(lj, job)
+    jsave(lj, {"id": jid, "gen": gen, "out": cfg["output"], "candidates": cands, "score": False})
     RM.put(gen["host"], lj, f"{jd}/job.json")
     pid = RM.ssh(gen["host"], f"cd {wd} || exit 1; nohup {gen['python']} v2style_bgm_worker.py run --job {jd}/job.json "
                               f"> {jd}/worker.log 2>&1 < /dev/null & echo $! > {jd}/worker.pid; cat {jd}/worker.pid").strip()
-    log(f"生成作业 {jid} 已投 gpu33 pid={pid}（只允许 GPU{GPU}）")
+    log(f"生成作业 {jid} 已投 {gen['host']} pid={pid}（只允许 GPU{GPU}）")
     res = wait_job(gen, jid, "生成")
     if not res.get("ok"):
         raise RuntimeError(f"生成失败：{res.get('error')}\n{res.get('trace', '')[-1500:]}")
     g = res["gen"]
     log(f"生成完成：device={g.get('device')} gpu={g.get('gpu')} tier={g.get('tier')} lm={g.get('lm')} "
         f"vram_peak={g.get('vram_peak_mb')} 候选={json.dumps(g.get('cands'), ensure_ascii=False)} yielded={g.get('yielded')}")
+    return g
+
+
+def deliver(src: Path, dst: Path, cfg: dict) -> dict:
+    """两遍 loudnorm（deliver.loudnorm）；ffmpeg 动态模式够不到目标（瞬态尖、峰值因子大：A_reality 首轮实测只到 −19.98 LUFS）
+    → 192 kHz 过采样快速限幅把差值补上，再走一遍 loudnorm。两次结果都记录。"""
+    tgt, tp = cfg["output"]["lufs"], cfg["output"]["true_peak_db"]
+    r = D.loudnorm(src, dst, tgt, tp)
+    if abs(r["output_i"] - tgt) <= 0.5:
+        return r
+    gain = round(tgt - r["input_i"] + 0.3, 1)
+    lim = src.with_name(src.stem + ".lim.flac")
+    D.subprocess.run([D.ffmpeg(), "-y", "-hide_banner", "-loglevel", "error", "-i", str(src), "-af",
+                      f"aresample=192000,volume={gain}dB,alimiter=limit=0.80:attack=0.1:release=10:level=0:latency=1,aresample=48000",
+                      "-c:a", "flac", "-sample_fmt", "s32", str(lim)], check=True, capture_output=True, timeout=300)
+    r2 = D.loudnorm(lim, dst, tgt, tp)
+    r2.update(first_try=r, pre=f"192 kHz 过采样快速限幅（+{gain} dB，limit 0.80 / attack 0.1 ms / release 10 ms）后再两遍 loudnorm")
+    return r2
+
+
+def score_and_deliver(gen: dict, cfg: dict, cands: list[dict], briefs: dict, jid: str, g: dict) -> list[dict]:
+    """打分：bgm.json score_host（gpu36 CPU），每条一个作业（每条 clap_text / BPM 不同）→ 交付响度 → 闸门"""
+    jd = f"{gen['workdir']}/jobs/{jid}"
+    work = OUT / "work"
     made = [c for c in cands if (g["cands"].get(c["id"]) or {}).get("raw")]
-    # 打分：gpu36 CPU（bgm.json score_host），每条一个作业（每条的 clap_text / BPM 不同）
     sgen = score_gen(gen) or gen
     sjobs = {}
     for c in made:
@@ -210,18 +231,81 @@ def run():
         if "error" not in m:
             src = work / f"{c['id']}.src.flac"
             RM.get(sgen["host"], f"{sgen['workdir']}/jobs/{sjobs[c['id']]}/{c['id']}.flac", src)
-            m["delivery"] = D.loudnorm(src, OUT / f"{c['id']}.flac", cfg["output"]["lufs"], cfg["output"]["true_peak_db"])
+            m["delivery"] = deliver(src, OUT / f"{c['id']}.flac", cfg)
         ok, fails, flags = gate(m, briefs[c["id"]], cfg)
         tier = g.get("tier") or {}
         rows.append({**{k: c.get(k) for k in ("id", "seed", "bpm", "keyscale", "caption", "negative", "cover_of", "cover_strength")},
                      "task": (g["cands"].get(c["id"]) or {}).get("task"), "gen_s": (g["cands"].get(c["id"]) or {}).get("gen_s"),
-                     "model": tier.get("model"), "steps": tier.get("steps"), "quant": tier.get("quant"), "lm": g.get("lm") and not c.get("cover_of"),
-                     "device": g.get("device"), "gpu": g.get("gpu"), "job": jid, "metrics": m, "gate_pass": ok,
-                     "gate_fail": fails, "flags": flags, "file": f"data/music/v2_style/{c['id']}.flac" if "error" not in m else None})
+                     "model": tier.get("model"), "steps": tier.get("steps"), "quant": tier.get("quant"),
+                     "lm": g.get("lm") and not c.get("cover_of"), "device": g.get("device"), "gpu": g.get("gpu"), "job": jid,
+                     "score_job": sjobs.get(c["id"]), "metrics": m, "gate_pass": ok, "gate_fail": fails, "flags": flags,
+                     "file": f"data/music/v2_style/{c['id']}.flac" if "error" not in m else None})
         log(f"{c['id']} pass={ok} fail={fails} flags={flags} " + json.dumps({k: m.get(k) for k in (
             "vocal_rel_db", "p_vocal", "clip_ratio", "longest_gap_s", "clap", "tempo_bpm", "duration_s")}, ensure_ascii=False))
-    jsave(state_p, {"generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "job": jid, "gen": g, "gates": cfg["gates"],
-                    "output": cfg["output"], "themes": [{k: v for k, v in t.items()} for t in THEMES], "candidates": rows})
+    return rows
+
+
+def motif_sim(rows: list[dict]) -> float | None:
+    """幻想 vs 现实编配的旋律 / 和声相似度：逐帧 chroma 余弦均值（score_host CPU，tools/v2style/bgm_chroma_sim.py）；
+    对照 = 不同主题之间（幻想 X vs 现实 Y）的均值。写进每条现实编配的 metrics.motif_sim"""
+    _, gen = gen_cfg()
+    sgen = score_gen(gen) or gen
+    jobs = f"{sgen['workdir']}/jobs"
+    RM.put(sgen["host"], Path(__file__).resolve().parent / "bgm_chroma_sim.py", f"{jobs}/stylev2_chroma_sim.py")
+    files = {r["id"]: f"{jobs}/{r['score_job']}/{r['id']}.raw.wav" for r in rows if r.get("score_job")}
+    lj = OUT / "work" / "chroma_files.json"
+    jsave(lj, files)
+    RM.put(sgen["host"], lj, f"{jobs}/stylev2_chroma_files.json")
+    out = RM.ssh(sgen["host"], f"cd {jobs} && OMP_NUM_THREADS=8 nice {sgen['python']} stylev2_chroma_sim.py stylev2_chroma_files.json",
+                 timeout=900)
+    sims = json.loads(out.strip().splitlines()[-1])
+    for r in rows:
+        if r["id"] in sims["pair"]:
+            r["metrics"]["motif_sim"] = sims["pair"][r["id"]]
+    log(f"动机相似度 {json.dumps(sims, ensure_ascii=False)}")
+    return sims.get("cross_theme_mean")
+
+
+def run():
+    cfg, gen = gen_cfg()
+    cands, briefs = build()
+    jid = f"stylev2-bgm_{int(time.time())}"
+    g = submit_gen(gen, cfg, cands, jid)
+    rows = score_and_deliver(gen, cfg, cands, briefs, jid, g)
+    cross = motif_sim(rows)
+    jsave(OUT / "themes.json", {"generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "job": jid, "gen": g, "gates": cfg["gates"],
+                                "output": cfg["output"], "themes": THEMES, "motif_cross_theme_mean": cross, "candidates": rows})
+    page()
+
+
+def retake(spec: list[tuple[str, float]]):
+    """现实编配重出：同一条幻想编配做 cover 源、同 seed，只换 cover 强度。新条目追加（原条保留）"""
+    cfg, gen = gen_cfg()
+    st = json.loads((OUT / "themes.json").read_text(encoding="utf-8"))
+    cands0, briefs0 = build()
+    by = {c["id"]: c for c in cands0}
+    cands, briefs, seeds = [], {}, {}
+    for k, s in spec:
+        cid = f"{k}_reality_s{int(round(s * 100))}"
+        cands.append(dict(by[f"{k}_reality"], id=cid, cover_strength=s))
+        briefs[cid] = briefs0[f"{k}_reality"]
+        seeds[f"{k}_fantasy"] = f"{gen['workdir']}/jobs/{st['job']}/{k}_fantasy.raw.wav"
+    jid = f"stylev2-bgm_{int(time.time())}_retake"
+    g = submit_gen(gen, cfg, cands, jid, seed_files=seeds)
+    rows = score_and_deliver(gen, cfg, cands, briefs, jid, g)
+    allrows = [r for r in st["candidates"]] + rows
+    st["motif_cross_theme_mean"] = motif_sim(allrows)
+    st["candidates"] = allrows
+    st.setdefault("retakes", []).append({"job": jid, "gen": g, "spec": spec, "at": time.strftime("%Y-%m-%dT%H:%M:%S")})
+    jsave(OUT / "themes.json", st)
+    page()
+
+
+def resim():
+    """只重算动机相似度（已有打分作业目录里的 raw.wav）"""
+    st = json.loads((OUT / "themes.json").read_text(encoding="utf-8"))
+    st["motif_cross_theme_mean"] = motif_sim(st["candidates"])
+    jsave(OUT / "themes.json", st)
     page()
 
 
@@ -248,7 +332,7 @@ def page():
     parts = [f"""<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>V2 整季主题配乐候选</title>
 <style>body{{font-family:system-ui,"Microsoft YaHei",sans-serif;max-width:1100px;margin:24px auto;padding:0 16px;color:#222;line-height:1.55}}
 h1{{font-size:22px}}h2{{font-size:18px;margin-top:32px;border-bottom:1px solid #ddd;padding-bottom:4px}}
-.pair{{display:grid;grid-template-columns:1fr 1fr;gap:16px}}.card{{border:1px solid #ddd;border-radius:8px;padding:12px;background:#fafafa}}
+.pair{{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:16px}}.card{{border:1px solid #ddd;border-radius:8px;padding:12px;background:#fafafa}}
 .card h3{{margin:0 0 6px;font-size:15px}}audio{{width:100%;margin:6px 0}}table{{border-collapse:collapse;font-size:13px;width:100%}}
 td{{padding:2px 6px;border-bottom:1px solid #eee;vertical-align:top}}td:first-child{{color:#666;white-space:nowrap;width:110px}}
 .cap{{font-size:12px;color:#555}}.fail{{color:#b00}}.ok{{color:#070}}.note{{font-size:14px}}</style></head><body>
@@ -258,9 +342,12 @@ td{{padding:2px 6px;border-bottom:1px solid #eee;vertical-align:top}}td:first-ch
 <div class="note">{STYLE_NOTE}</div>"""]
     for t in d["themes"]:
         parts.append(f"<h2>{e(t['key'])}. {e(t['name'])}</h2><p class='note'>{e(t['why'])}　|　{t['bpm']} BPM · {e(t['keyscale'])} · "
-                     f"现实编配 cover 强度 {t['cover_strength']}</p><div class='pair'>")
-        for arr, label in (("fantasy", "幻想编配"), ("reality", "现实编配")):
-            r = rows.get(f"{t['key']}_{arr}") or {}
+                     f"现实编配 = cover（源为幻想编配）</p><div class='pair'>")
+        ids = [f"{t['key']}_fantasy"] + sorted(i for i in rows if i.startswith(f"{t['key']}_reality"))
+        for cid in ids:
+            arr = "fantasy" if cid.endswith("_fantasy") else "reality"
+            r = rows.get(cid) or {}
+            label = "幻想编配" if arr == "fantasy" else f"现实编配（cover 强度 {r.get('cover_strength')}）"
             m = r.get("metrics") or {}
             parts.append(f"<div class='card'><h3>{label}　<span class='{'ok' if r.get('gate_pass') else 'fail'}'>"
                          f"{'闸门通过' if r.get('gate_pass') else '闸门未过'}</span></h3>")
@@ -278,7 +365,10 @@ td{{padding:2px 6px;border-bottom:1px solid #eee;vertical-align:top}}td:first-ch
                    ("削波", f"clip_ratio {m.get('clip_ratio')}（≤ {gates['clip_ratio_max']}）"),
                    ("空白", f"longest_gap {m.get('longest_gap_s')} s（≤ {gates['longest_gap_s_max']}）"),
                    ("CLAP", f"{m.get('clap')}（≥ {gates['clap_min']}）；energy_r {m.get('energy_r')}"),
-                   ("响度", f"{dv.get('output_i')} LUFS / {dv.get('output_tp')} dBTP（{dv.get('normalization_type')}）"),
+                   *([("动机相似", f"与幻想编配 chroma 相似度 {m['motif_sim']}（不同主题之间对照均值 {d.get('motif_cross_theme_mean')}；"
+                                 "越高 = 旋律/和声越像同一首）")] if m.get("motif_sim") is not None else []),
+                   ("响度", f"{dv.get('output_i')} LUFS / {dv.get('output_tp')} dBTP（{dv.get('normalization_type')}）"
+                           + (f"；首轮 loudnorm 只到 {dv['first_try']['output_i']} LUFS → {dv.get('pre')}" if dv.get("first_try") else "")),
                    ("闸门", gate_s + (f"；提示：{flags}" if flags else "")),
                    ("生成", f"{model}；{task}；seed {r.get('seed')}；{r.get('device')} GPU{r.get('gpu')}；{r.get('gen_s')} s"),
                    ("caption", f"<span class='cap'>{e(r.get('caption') or '')}</span>")]
@@ -297,4 +387,11 @@ td{{padding:2px 6px;border-bottom:1px solid #eee;vertical-align:top}}td:first-ch
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "run"
-    run() if cmd == "run" else page()
+    if cmd == "run":
+        run()
+    elif cmd == "retake":   # retake B:0.75 C:0.75
+        retake([(x.split(":")[0], float(x.split(":")[1])) for x in sys.argv[2:]])
+    elif cmd == "resim":
+        resim()
+    else:
+        page()

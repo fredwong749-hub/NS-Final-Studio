@@ -44,12 +44,9 @@ def _mode(rc: dict, spec: ShotSpec) -> tuple[str, bool]:
 
 def _primary_run() -> str | None:
     """当前主剧 id：统一调 tools/autopilot/runs.py primary_run（K-OPS-F24 唯一入口；测试钉 NS_PRIMARY_RUN 生效），读不到抛异常"""
-    import importlib.util as _u
+    from ns_agent import run_paths as _RPA     # OVERSIGHT-F P2：runs 加载器只此一处
     root = Path(__file__).resolve().parents[3]
-    sp = _u.spec_from_file_location("runs_for_recipes", root / "tools" / "autopilot" / "runs.py")
-    m = _u.module_from_spec(sp)
-    sp.loader.exec_module(m)
-    return m.primary_run(root)
+    return _RPA.runs_module(root).current_run(root)
 
 
 def ref_slots(spec: ShotSpec, rc: dict) -> list[dict]:

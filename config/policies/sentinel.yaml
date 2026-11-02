@@ -267,17 +267,32 @@ items:
       ui_feedback_zero_at: 5
       ui_measure_every_s: 3600
       ui_measure_max_age_s: 5400
-      workflow_weights: {unattended: 35, no_stuck: 25, no_dup: 25, auto_requeue: 15}
+      workflow_weights: {unattended: 35, review_chain: 25, no_dup: 25, auto_requeue: 15}
       workflow_unmeasured: [每集完成自动回报, 第二季暂停状态只认一个来源]
       dup_zero_at: 5
       gpu_weights: {productive: 40, rssh: 20, deploy_stop: 15, resident: 15, lend_expiry: 10}
       gpu_unmeasured: [没有因分区错误或旁路导致的重复出图（分区唯一来源落地后接 S17 按分区拆）]
       gpu_productive_target_pct: 80
+      gpu_expected_by_stage: {S1: 0, S2: 0.3, S3: 0.8, S4: 0.8, S5: 0.5}
+      score_run: primary
       rssh_target: 0.99
       deploy_stop_max_s: 120
       deploy_pause_by: [RESTART_QUEUE, restart_producer, deploy, SERVER_RESIDENT]
     source: 总调度 11-02 17:4x（项目方：“UI、剧本、工作流、rendering、GPU 管理、代码全都要 100 分，没到自动迭代”）；docs/master/SCORECARD.md 附录 A
     note: 出图 / 视频 / 剧本 / 代码沿用 RSI_PROGRAM 现有打分器重算；UI / 工作流 / GPU 按 SCORECARD“100 分标准”拆分项。未测分项按 0 计入；SCORECARD 标准里还不能代码测的条目列在 *_unmeasured，存在时总分封顶 95。改权重 / 线要总调度批准并在 SCORECARD.md 留痕
     enforced_by: tools/sentinel/scorecard.py:compute
+    status: code_reads
+    owner: SENTINEL
+  S26_autoflow_resident:
+    value: {file: data/factory/autoflow_resident.json, stale_s: 120, every_s: 60, owner_loop: FACTORY}
+    source: 总调度 11-02 20:10：写作推进常驻服务（tools/factory/autoflow_resident.py）心跳超过 2 分钟没更新即开单
+    enforced_by: tools/sentinel/probes.py:p_s26
+    status: code_reads
+    owner: SENTINEL
+  S27_p1_review_chain:
+    value: {run_dir_of: series10_v2, judges: 3, aggregate_max_s: 300, every_s: 60, owner_loop: HOLLYWOOD}
+    source: 总调度 11-02 20:10：P1 评审链路——评审交齐（judge_k/out/p1_review.json.done 都在）后 5 分钟内要自动汇总（该轮 RESULT.json 生成且晚于最后一份交卷）
+    note: 轮次目录 = judge_p1/（第 1 轮）与 judge_p1/rN/；run 取 runs.primary_run()（现为 series10_v2）
+    enforced_by: tools/sentinel/probes.py:p_s27
     status: code_reads
     owner: SENTINEL

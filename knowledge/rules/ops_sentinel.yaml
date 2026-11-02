@@ -194,3 +194,15 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-S18
+    domain: ops
+    link: [P1-P2, P5-P6]
+    title: 写作段也要有探针——写作推进常驻服务心跳超过 2 分钟（S26）、P1 评审交齐后 5 分钟内没自动汇总（S27）都开单；SCORECARD 按主 run 计分，没到的阶段写 pending_stage 不出分，GPU 按当前阶段应有占用算
+    when: 主 run 在写剧本 / 评审阶段，或计分对象换剧
+    then: SENTINEL S26 读 data/factory/autoflow_resident.json，S27 读主 run judge_p1/（rN）的交卷 .done 与 RESULT.json；scorecard 用 runs.primary_run()，stage_status.json 定阶段
+    check: tests/test_sentinel.py::test_autoflow_resident_and_review_chain
+    evidence:
+      - {src: docs/master/V2_LIVE.md, note: "11-02 20:10 V1 归档、V2 在写故事线（P1 第 3 轮评审 32/40），写作段没有任何探针；GPU 空闲属预期"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

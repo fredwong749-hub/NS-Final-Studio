@@ -207,12 +207,8 @@ def _udir() -> Path:
 
 
 def _s10_run() -> Path:
-    try:
-        from ns_api.edits import engines_cfg  # noqa: PLC0415
-        project = engines_cfg().get("project") or "series10_v1"
-    except Exception:  # noqa: BLE001
-        project = "series10_v1"
-    return REPO / "data" / "pipeline" / "runs" / project
+    from ns_api import run_paths as _RP  # noqa: PLC0415  OVERSIGHT-F P1-5a：按当前剧，不退回 series10_v1
+    return REPO / "data" / "pipeline" / "runs" / _RP.current_run()
 
 
 def _wav_s(p: Path) -> float | None:

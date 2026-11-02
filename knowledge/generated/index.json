@@ -1,6 +1,6 @@
 {
- "kb_version": "kb-20261102-3edfd2c2",
- "n": 656,
+ "kb_version": "kb-20261102-46175d5f",
+ "n": 660,
  "by_domain": {
   "render": 98,
   "prompt": 28,
@@ -9,12 +9,12 @@
   "review": 68,
   "loop": 9,
   "asset": 44,
-  "ops": 196,
+  "ops": 200,
   "ui": 65
  },
  "by_link": {
   "P0-P1": 20,
-  "P1-P2": 2,
+  "P1-P2": 3,
   "P10-P11": 61,
   "P11-P12": 28,
   "P11-RETRY": 48,
@@ -24,7 +24,7 @@
   "P4-P6": 30,
   "P4-P7": 24,
   "P4-P9": 16,
-  "P5-P6": 216,
+  "P5-P6": 220,
   "P6-P7": 41,
   "P7-P8": 114,
   "P8-P10": 18,
@@ -5944,6 +5944,69 @@
    "_file": "knowledge/rules/ops_factory.yaml"
   },
   {
+   "id": "K-OPS-F30",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "agent 只能停自己记下 pid 的进程，不许按端口 / 进程名批量杀；共享服务（:8800 API、常驻服务）重启一律走 ops/restart_*.ps1，并先通知总调度",
+   "when": "任何代码 / 脚本 / agent 操作要停进程",
+   "then": "记 pid 文件、按 pid 停（含子进程）；共享服务用 ops/restart_api.ps1 / restart_autoflow.ps1 / restart_resident_sync.ps1（先确认旧实例全退出再起、单实例）；检查扫 taskkill /IM、pkill -f、killall、Stop-Process -Name、fuser -k",
+   "check": "tests/test_factory.py::test_k_ops_f30_no_mass_kill_by_name_or_port",
+   "evidence": [
+    {
+     "src": "docs/master/V2_LIVE.md",
+     "note": "11-02 19:3x V2-WALK W-34：:8800 上出现“两个 uvicorn”时有人建议按进程名停系统 Python 那份——实际是 .venv 转发器的子进程，按名字杀会把唯一的 API 杀掉"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
+  },
+  {
+   "id": "K-OPS-F31",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "部署后核对做进 deploy 自动流程：每台跑 tools/factory/post_verify.py（当前剧资产包里每个角色的 face_of + 文件 sha 对清单 + 本机版本号），结果写进 deploy_*.json 的 post_verify；跑不了记 ok=false",
+   "when": "system_version deploy 每台推完、核对完之后",
+   "then": "deploy_host 调 post_verify(rs, h)；部署导出用版本库原字节（LF），服务器文件 sha 与 git show 直接可比；*.py / *.json / *.yaml 固定 eol=lf",
+   "check": "tests/test_system_version.py::test_deploy_records_post_verify, tests/test_system_version.py::test_export_tag_uses_repo_bytes_not_worktree",
+   "evidence": [
+    {
+     "src": "docs/master/V2_LIVE.md",
+     "note": "11-02 20:1x：sv-15 部署记录里没有两台 face_of 结果（总调度亲自去 gpu36 验）；remote_score.py 服务器 sha 041b… ≠ git show 8601…，根因是部署导出把工作区 CRLF 推上了服务器"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
+  },
+  {
+   "id": "K-OPS-F32",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "重启 :8800 必须留痕：restart_api.ps1 记调用方（-By、父进程链、命令行）进 data/ops/restart_events.jsonl；API 经看门狗起，启动 / 正常关闭 / 进程退出（含被强制结束）都记进 data/ops/api_lifecycle.jsonl",
+   "when": "任何人重启或结束 :8800",
+   "then": "ops/restart_api.ps1 -By <agent>；tools/factory/api_watchdog.py 记 started / exited（不自动重启）；app.py startup / shutdown 钩子",
+   "check": "tests/test_factory.py::test_api_watchdog_and_restart_caller",
+   "evidence": [
+    {
+     "src": "docs/master/V2_LIVE.md",
+     "note": "11-02 20:17:38 有人重启 :8800（标记 by=master 写死，看不出是谁），20:28:13 后进程被直接结束，日志和审计都没有留痕"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
+  },
+  {
    "id": "K-OPS-G01",
    "domain": "ops",
    "link": [
@@ -6935,6 +6998,28 @@
     {
      "src": "docs/master/SCORECARD.md",
      "note": "11-02 17:4x 项目方：七项全到 100 分，没到自动迭代；当时 image 分停在 03:56、system 停在 13:31，已过时"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_sentinel.yaml"
+  },
+  {
+   "id": "K-OPS-S18",
+   "domain": "ops",
+   "link": [
+    "P1-P2",
+    "P5-P6"
+   ],
+   "title": "写作段也要有探针——写作推进常驻服务心跳超过 2 分钟（S26）、P1 评审交齐后 5 分钟内没自动汇总（S27）都开单；SCORECARD 按主 run 计分，没到的阶段写 pending_stage 不出分，GPU 按当前阶段应有占用算",
+   "when": "主 run 在写剧本 / 评审阶段，或计分对象换剧",
+   "then": "SENTINEL S26 读 data/factory/autoflow_resident.json，S27 读主 run judge_p1/（rN）的交卷 .done 与 RESULT.json；scorecard 用 runs.primary_run()，stage_status.json 定阶段",
+   "check": "tests/test_sentinel.py::test_autoflow_resident_and_review_chain",
+   "evidence": [
+    {
+     "src": "docs/master/V2_LIVE.md",
+     "note": "11-02 20:10 V1 归档、V2 在写故事线（P1 第 3 轮评审 32/40），写作段没有任何探针；GPU 空闲属预期"
     }
    ],
    "confidence": "high",

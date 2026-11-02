@@ -71,20 +71,21 @@ def vocab(root: Path = ROOT, current: str | None = None) -> dict:
             if d.get("title"):
                 titles.add(d["title"])
     allow = set()
-    oi = root / "assets_v2" / "owner_inputs.json"         # 项目方给 V2 的造型 / 鞋 / 饰品名（19:1x 起 O1–O4、SH1 / SH2、J1 / J2）
-    if oi.exists():
-        allow |= {str(it.get("name")) for it in json.loads(oi.read_text(encoding="utf-8")).get("items") or [] if it.get("name")}
     dv = root / "docs" / "v2" / "DIRECTION_V2.md"          # 项目方给 V2 的方向原话（> 引用行）整句放行：他自己的话不算旧内容
     if dv.exists():
         allow |= {ln.lstrip("> ").strip() for ln in dv.read_text(encoding="utf-8").splitlines() if ln.startswith(">") and len(ln) > 10}
     mf = root / "assets_v2" / "manifest.json"
     if mf.exists():
         lf = (json.loads(mf.read_text(encoding="utf-8")).get("characters") or {}).get("lead_f") or {}
-        for lk in (lf.get("looks") or {}).values():
+        for lk in (lf.get("looks") or {}).values():         # 项目方给 V2 的造型 / 鞋 / 饰品名：只从 manifest 读（OVERSIGHT-F 第 4 轮）
             allow.add(lk.get("name", ""))
+        for it in (lf.get("items") or {}).values():
+            allow.add((it or {}).get("name", ""))
     clean = lambda xs: sorted(x for x in xs if x and len(x) >= 2)
+    rs = root / "config" / "compile" / "run_style.json"     # V1 风格短语（S★ / 徕卡暖调这一组，PROMPTFIX 20:4x）：V2 稿 / 编译提示词出现即命中
+    style = (json.loads(rs.read_text(encoding="utf-8")).get("v1_style_phrases") or []) if rs.exists() else []
     return {"names": clean(names), "char_ids": clean(ids), "scenes": clean(scenes), "titles": clean(titles), "props": list(PROP_LINE),
-            "allow_text": sorted(allow)}
+            "style": clean(style), "allow_text": sorted(allow)}
 
 
 def scan(text: str, v: dict) -> list[dict]:
@@ -93,8 +94,8 @@ def scan(text: str, v: dict) -> list[dict]:
         if a and len(a) >= 2:                  # 空串 replace 会在每个字之间插空格，把所有命中都打散（11-02 发现的 bug）
             body = body.replace(a, " ")        # 项目方指定的 V2 造型名整串放行
     hits = []
-    for kind in ("names", "char_ids", "scenes", "titles", "props"):
-        for w in v[kind]:
+    for kind in ("names", "char_ids", "scenes", "titles", "props", "style"):
+        for w in v.get(kind) or []:
             n = body.count(w)
             if n:
                 i = body.find(w)

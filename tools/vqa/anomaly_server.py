@@ -76,13 +76,12 @@ def load() -> None:
     croot = comfy_root()
     boot = {"comfy": croot, "work": croot.rsplit("/", 1)[0], "refs": {}, "items": []}
     _ns.clear()
-    with contextlib.redirect_stdin(io.StringIO(json.dumps(boot))) if hasattr(contextlib, "redirect_stdin") else contextlib.nullcontext():
-        old = sys.stdin
-        sys.stdin = io.StringIO(json.dumps(boot))
-        try:
-            exec(compile(setup, "REMOTE_SRC[setup]", "exec"), _ns)    # noqa: S102 — 单一来源的远端脚本，仓库内代码
-        finally:
-            sys.stdin = old
+    old = sys.stdin                      # 加载段第一句是 req = json.load(sys.stdin)：喂一份只带路径的 req
+    sys.stdin = io.StringIO(json.dumps(boot))
+    try:
+        exec(compile(setup, "REMOTE_SRC[setup]", "exec"), _ns)    # noqa: S102 — 单一来源的远端脚本，仓库内代码
+    finally:
+        sys.stdin = old
     STATE.update(loaded=True, mirror_seg=bool(_ns.get("seg")))
 
 

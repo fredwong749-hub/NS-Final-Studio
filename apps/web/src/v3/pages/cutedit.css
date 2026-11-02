@@ -106,3 +106,27 @@
 .ce-root .ce-kv input[type="number"], .ce-root .ce-bgm input[type="number"] { width: 84px; flex: 0 0 84px; min-width: 0; }
 .ce-root .ce-bgm select { width: 190px; flex: 0 0 auto; }
 .ce-root .ce-bgm input[type="range"] { width: 130px; flex: 0 0 130px; }
+
+/* P1 续：换序插入线、字幕编辑 */
+.ce-clip.moving { opacity: .45; outline: 1px dashed var(--ce-acc); }
+.ce-clip { touch-action: none; }
+.ce-ins { position: absolute; top: 4px; bottom: 4px; width: 3px; margin-left: -1.5px; background: var(--ce-acc); box-shadow: 0 0 8px rgba(201, 169, 106, .6); z-index: 4; pointer-events: none; }
+.ce-blk.sb { cursor: grab; touch-action: none; }
+.ce-blk.sb.on { border-color: var(--ce-acc); box-shadow: inset 0 0 0 1px var(--ce-acc); }
+.ce-blk.sb.empty { color: var(--ce-t3); border-style: dashed; }
+.ce-blk.sb .end { position: absolute; top: 0; right: 0; bottom: 0; width: 6px; cursor: ew-resize; }
+.ce-blk.sb.on .end { background: var(--ce-acc); }
+.ce-subbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; min-height: 30px; }
+.ce-subbar b { font-weight: 500; }
+.ce-subbar label { display: flex; align-items: center; gap: 5px; color: var(--ce-t2); }
+.ce-root .ce-subbar input.ce-subtext { width: 340px; flex: 0 1 340px; background: #151413; color: var(--ce-t1); border: 1px solid rgba(255, 255, 255, .18); border-radius: 3px; padding: 4px 8px; font: 13px inherit; }
+.ce-root .ce-subbar input[type="number"] { width: 84px; flex: 0 0 84px; }
+
+/* 改动记录 + 被覆盖的改动“恢复这条”（OVERSIGHT-F r9） */
+.ce-hist { font-size: 12px; color: var(--ce-t2); border-top: 1px solid var(--ce-line); padding-top: 8px; }
+.ce-hist summary { cursor: pointer; color: var(--ce-t3); }
+.ce-hist ul { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.ce-hist li .t { font-family: var(--ce-mono); color: var(--ce-t3); margin-right: 8px; }
+.ce-hist li .ov { margin: 3px 0 0 44px; display: flex; align-items: center; gap: 10px; color: var(--ce-acc); }
+.ce-hist li .ov em.done { font-style: normal; color: var(--ce-t3); }
+.ce-btn.sm { padding: 2px 10px; font-size: 11.5px; }

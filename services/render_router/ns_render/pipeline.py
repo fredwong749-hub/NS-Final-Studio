@@ -47,11 +47,9 @@ def _legacy_and_primary() -> tuple[str | None, str | None]:
     没有登记表（沙箱 / 测试目录）→ (None, None) = 旧行为；登记表在却缺 legacy_unprefixed_run → runs.legacy_run 抛错（失败关闭）"""
     if not (ROOT / "config" / "pipeline" / "runs.json").is_file():
         return None, None
-    import importlib.util as _u
-    sp = _u.spec_from_file_location("runs_for_pipeline", ROOT / "tools" / "autopilot" / "runs.py")
-    m = _u.module_from_spec(sp)
-    sp.loader.exec_module(m)
-    return m.legacy_run(ROOT), m.primary_run(ROOT)
+    from ns_agent import run_paths as _RPA     # OVERSIGHT-F P2：runs 加载器只此一处
+    m = _RPA.runs_module(ROOT)
+    return m.legacy_run(ROOT), m.current_run(ROOT)
 
 
 def _default_renders() -> Path:

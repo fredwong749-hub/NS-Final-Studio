@@ -1,0 +1,18 @@
+/* V2 资产页：胶片风、多图少字；文字卡（成人类 / 没有原图 / 占位）和图片卡同一网格 */
+.v2a-page { padding-bottom: 60px; }
+.v2a-char h2 { font-size: 16px; margin: 26px 0 4px; }
+.v2a-group h3 { font-size: 12.5px; font-weight: 500; color: var(--c-text-2, #aaa); margin: 14px 0 8px; }
+.v2a-grid { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+.v2a-card { width: 190px; background: var(--c-sunken, #101011); border: 1px solid var(--c-line, rgba(255,255,255,.09)); border-radius: 4px; overflow: hidden; display: flex; flex-direction: column; }
+.v2a-img { position: relative; height: 250px; background: #171515; }
+.v2a-img img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.v2a-badge { position: absolute; left: 6px; top: 6px; font-size: 11px; padding: 1px 8px; border-radius: 2px; background: rgba(0,0,0,.66); color: var(--c-ok, #5fae6e); }
+.v2a-name { font-size: 12.5px; font-weight: 500; padding: 8px 10px 2px; line-height: 1.4; }
+.v2a-note { font-size: 11.5px; color: var(--c-text-3, #888); padding: 0 10px; }
+.v2a-bar { display: flex; gap: 6px; padding: 8px 10px 10px; }
+.v2a-edit { border: 1px solid var(--c-warn, #d4a24c); color: var(--c-warn, #d4a24c); background: none; border-radius: 3px; padding: 2px 12px; font: inherit; font-size: 12.5px; cursor: pointer; }
+.v2a-edit:hover { background: color-mix(in srgb, var(--c-warn, #d4a24c) 14%, transparent); }
+.v2a-card.text { min-height: 96px; justify-content: center; border-style: dashed; padding-bottom: 12px; }
+.v2a-card.text.wide { width: 420px; padding: 18px 14px; }
+.v2a-text { font-size: 12.5px; color: var(--c-text-2, #aaa); padding: 4px 10px 0; }
+.v2a-card.adult .v2a-text { color: var(--c-warn, #d4a24c); }

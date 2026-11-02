@@ -49,3 +49,5 @@
 .v3-xlinks a { color: var(--c-text-3, #8a8a8a); text-decoration: none; border-bottom: 1px dotted var(--c-text-3, #666); }
 .v3-xlinks a:hover { color: var(--c-text, #e6e3dc); }
 .sb-sysdot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--c-warn, #d6a23a); margin: 0 6px; align-self: center; }
+.v1-banner { display: flex; gap: 12px; align-items: center; padding: 8px 12px; margin-bottom: 8px; border: 1px solid var(--c-line, #2a2a33); border-left: 3px solid var(--c-text-3, #8a8a8a); border-radius: 6px; font-size: 13px; color: var(--c-text-2, #aaa); }
+.v1-banner b { color: var(--c-text, #e6e3dc); }

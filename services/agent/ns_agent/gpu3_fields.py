@@ -18,8 +18,30 @@ from ns_schema.looks import CHARACTERS
 # ------------------------------------------------------------------ 公共
 
 CLAUSE_SPLIT = re.compile(r"[，,。；;：:！!？?（）()\[\]【】／/]|——|…")
-FEMALE = {"lin_wan"}
+FEMALE = {"lin_wan"}                                   # V1 旧表；运行时经 _female() / _names() / _lead()（cast_table，P1-5b）
 NAMES = {v: k for k, v in CHARACTERS.items()}          # 林晚 → lin_wan …
+
+
+def _v2() -> bool:
+    from . import asset_refs as AR
+    from . import cast_table as CT
+    p = CT.current_project()
+    return bool(p and AR.manifest_rel(p))
+
+
+def _female() -> set:
+    from . import cast_table as CT
+    return CT.female_ids() if _v2() else FEMALE
+
+
+def _names() -> dict:
+    from . import cast_table as CT
+    return CT.char_ids() if _v2() else NAMES
+
+
+def _lead() -> str | None:
+    from . import cast_table as CT
+    return CT.lead_id() if _v2() else "lin_wan"
 
 
 def clauses(text: str) -> list[tuple[int, str]]:
@@ -46,8 +68,9 @@ def who(text: str, i: int, present: list[str]) -> tuple[str | None, str]:
     → (slug, "text" | "guess")"""
     st, c = _clause_at(text, i)
     before = text[st:i]
-    male = next((p for p in present if p not in FEMALE), None)
-    refs = [(n, NAMES[n]) for n in NAMES] + [("她", "lin_wan"), ("他", male), ("男性", male), ("女性", "lin_wan")]
+    fem, names, lead = _female(), _names(), _lead()
+    male = next((p for p in present if p not in fem), None)
+    refs = [(n, names[n]) for n in names] + [("她", lead), ("他", male), ("男性", male), ("女性", lead)]
     m = re.search(r"(" + "|".join(re.escape(n) for n, _ in refs) + r")的[^，,。的]{0,8}$", before)
     if m:
         slug = dict(refs)[m.group(1)]
@@ -60,8 +83,8 @@ def who(text: str, i: int, present: list[str]) -> tuple[str | None, str]:
             best = (j, slug)
     if best:
         return best[1], "text"
-    if "lin_wan" in present:
-        return "lin_wan", "guess"
+    if lead in present:
+        return lead, "guess"
     return (present[0] if present else None), "guess"
 
 
@@ -233,7 +256,7 @@ def shot_props(shot, img: str, motion: str, cands: list[dict], present: list[str
             elif e["pos"] is not None:
                 holder, hsrc = who(img, e["pos"], present)
             else:
-                holder, hsrc = ("lin_wan", "guess") if "lin_wan" in present else (present[0], "guess")
+                holder, hsrc = (_lead(), "guess") if _lead() in present else (present[0], "guess")
         in_look = any(i["id"] == pid for ch in chars.values() if ch["present"]
                       for lst in ch["items"].values() for i in lst)
         p = {"id": pid, "name": c["name"], "description": c["description"], "slot": c["slot"],
@@ -436,8 +459,8 @@ def faces_visible(img: str, framing: str, present: list[str]) -> tuple[list[str]
             src = "text"
     for m in re.finditer(r"画外", img):
         near = img[m.end():m.end() + 6]
-        for n, slug in NAMES.items():
-            if n in near and slug in faces and slug != "lin_wan":
+        for n, slug in _names().items():
+            if n in near and slug in faces and slug != _lead():
                 faces.remove(slug)
                 src = "text"
     return faces, src

@@ -74,25 +74,98 @@ def _first_json(txt: str | None) -> dict | None:
 
 
 # ------------------------------------------------------------------ 沿用的四项（重算）
+def score_run() -> str:
+    """计分对象 = 主 run（总调度 20:10：V1 已归档不计分，按 series10_v2 算）"""
+    from tools.autopilot import runs as RUNS
+    return RUNS.primary_run()
+
+
+def stage_of(run: str) -> tuple[str, dict]:
+    """run 当前走到哪一段：stage_status.json 里最靠后的 doing / done（S1 剧本 → S2 资产 → S3 出图 → S4 视频 → S5 成片）"""
+    from tools.autopilot import runs as RUNS
+    st = jl((RUNS.run_dir(run) / "stage_status.json").relative_to(ROOT)) or {}
+    order = ["S1", "S2", "S3", "S4", "S5"]
+    cur = max((k for k in order if (st.get(k) or {}).get("state") in ("doing", "done")), key=order.index, default="S1")
+    return cur, st
+
+
+def p1_stage_score(run: str) -> dict | None:
+    """剧本线 S1 阶段分（总调度 20:3x）：还没有分集稿时，用 P1 故事线最新一轮三评委均分折算百分制，注明“P1 阶段分”；有分集稿后切回线 3"""
+    from tools.autopilot import runs as RUNS
+    base = RUNS.run_dir(run) / "judge_p1"
+    if not base.exists():
+        return None
+    best = None
+    for d in [base] + [x for x in base.glob("r*") if x.is_dir()]:
+        res = jl((d / "RESULT.json").relative_to(ROOT))
+        if res and res.get("mean") is not None and (best is None or (res.get("at") or "") > (best[1].get("at") or "")):
+            best = (d, res)
+    if not best:
+        return None
+    d, res = best
+    mx = float(res.get("max") or 40)
+    items = res.get("item_mean") or {}
+    low = min(items, key=items.get) if items else None
+    return {"score": round(100 * float(res["mean"]) / mx, 1), "parts": {k: round(v / 5 * 100, 1) for k, v in items.items()}, "lowest": low,
+            "stage_score": "P1 阶段分", "src": f"{(d / 'RESULT.json').relative_to(ROOT).as_posix()}（P1 阶段分：三评委均分 {res['mean']}/{int(mx)}，{res.get('at')}）",
+            "evidence": {"round": "r1" if d == base else d.name, "totals": res.get("totals"), "sigma": res.get("sigma"), "judge_ids": res.get("judge_ids")}}
+
+
+def structure_top(n: int = 5) -> dict:
+    """代码线 structure 扣分来源：data/sysarch/scan_latest.json per_file 里按 system_score.STRUCT_ANCHOR 的 10 项求和，取前 n 个文件和前 n 个模块（前两级目录）"""
+    from tools.rsi import system_score as SS
+    scan = jl("data/sysarch/scan_latest.json") or {}
+    keys = list(SS.STRUCT_ANCHOR)
+    per = {f: sum(int(m.get(k, 0)) for k in keys) for f, m in (scan.get("per_file") or {}).items()}
+    per = {f: v for f, v in per.items() if v and not f.startswith("tests/")}
+    mods: dict = {}
+    for f, v in per.items():
+        m = "/".join(f.split("/")[:2])
+        mods[m] = mods.get(m, 0) + v
+    top_f = sorted(per.items(), key=lambda x: -x[1])[:n]
+    top_m = sorted(mods.items(), key=lambda x: -x[1])[:n]
+    detail = {f: {k: v for k, v in (scan["per_file"][f]).items() if k in keys and v} for f, _ in top_f}
+    return {"scan_at": scan.get("at"), "total": sum(per.values()), "files": top_f, "modules": top_m, "file_detail": detail}
+
+
 def existing_scores() -> dict:
+    from tools.autopilot import runs as RUNS
     out = {}
-    d = _first_json(_run(["tools/imglab/score.py", "--no-write", "--json"], 300))
-    out["image"] = d and {"score": d["score"], "parts": d.get("items") or d.get("parts") or {}, "lowest": d.get("lowest"), "src": "tools/imglab/score.py"}
-    d = _first_json(_run(["tools/vidlab/score.py", "score", "--no-write"], 900))
-    out["video"] = d and {"score": d["score"], "parts": d.get("items") or {}, "lowest": d.get("lowest"), "src": "tools/vidlab/score.py score"}
-    d = _first_json(_run(["tools/script_rsi/line3_score.py", "--run-dir", "data/pipeline/runs/series10_s2", "--no-write"], 600))
-    out["script"] = d and {"score": d["score"], "parts": d.get("parts") or {}, "lowest": d.get("lowest"), "src": "tools/script_rsi/line3_score.py"}
+    run = score_run()
+    stage, _ = stage_of(run)
+    order = ["S1", "S2", "S3", "S4", "S5"]
+    # 出图：只算本 run 的版本（run 的 renders 目录）；还没到出图段 / 没有版本 = 阶段未到，不出分、不开单
+    try:
+        from tools.imglab import score as IS
+        takes = IS.load_takes("2000-01-01T00:00:00", RUNS.renders_dir(run))
+        d = IS.score(takes) if takes else None
+    except Exception as e:  # noqa: BLE001  # arch-ok: 记未测
+        d, out["_image_err"] = None, repr(e)[:120]
+    out["image"] = ({"score": d["score"], "parts": d.get("items") or {}, "lowest": d.get("lowest"), "src": f"tools/imglab/score.py（{run}）"} if d and d.get("score") is not None
+                    else {"score": None, "pending_stage": f"{run} 在 {stage}，还没有出图版本", "src": "tools/imglab/score.py"})
+    vdir = RUNS.run_dir(run) / "video"
+    if order.index(stage) >= order.index("S4") and vdir.exists() and any(vdir.iterdir()):
+        d = _first_json(_run(["tools/vidlab/score.py", "score", "--no-write", "--corpus", str(vdir)], 900))
+        out["video"] = d and {"score": d["score"], "parts": d.get("items") or {}, "lowest": d.get("lowest"), "src": f"tools/vidlab/score.py score（{run}）"}
+    else:
+        out["video"] = {"score": None, "pending_stage": f"{run} 在 {stage}，还没有视频", "src": "tools/vidlab/score.py"}
+    d = _first_json(_run(["tools/script_rsi/line3_score.py", "--run-dir", str(RUNS.run_dir(run).relative_to(ROOT)), "--no-write"], 600))
+    out["script"] = d and {"score": d["score"], "parts": d.get("parts") or {}, "lowest": d.get("lowest"), "src": f"tools/script_rsi/line3_score.py（{run}）"}
+    if out["script"] and not any((v or 0) > 0 for v in (out["script"]["parts"] or {}).values()):
+        # 线 3 按分集剧本打分；主 run 还在写故事线（没有分集稿）时各分项全 0 = 阶段未到，不是 0 分
+        out["script"] = p1_stage_score(run) or {"score": None, "pending_stage": f"{run} 在 {stage}，还没有分集剧本，也没有 P1 评审结果", "src": out["script"]["src"]}
     try:
         from tools.rsi import system_score as SS
         d = SS.score(write=False)
-        out["system"] = {"score": d.get("score"), "parts": d.get("parts") or d.get("items") or {}, "lowest": d.get("lowest"), "src": "tools/rsi/system_score.py"}
+        out["system"] = {"score": d.get("score"), "parts": d.get("parts") or d.get("items") or {}, "lowest": d.get("lowest"), "src": "tools/rsi/system_score.py",
+                         "evidence": {"structure_top": structure_top()}}
     except Exception as e:  # noqa: BLE001  # arch-ok: 记未测
         out["system"] = None
         out["_system_err"] = repr(e)[:120]
     for k in ("image", "video", "script", "system"):
-        if out.get(k) and isinstance(out[k].get("parts"), dict):
+        if out.get(k) and out[k].get("score") is not None and isinstance(out[k].get("parts"), dict):
             out[k]["parts"] = {pk: (pv.get("score") if isinstance(pv, dict) else pv) for pk, pv in out[k]["parts"].items()}
-        if out.get(k) and not out[k].get("lowest") and out[k]["parts"]:
+        if out.get(k) and not out[k].get("lowest") and out[k].get("parts"):
             num = {pk: pv for pk, pv in out[k]["parts"].items() if isinstance(pv, (int, float))}
             out[k]["lowest"] = min(num, key=num.get) if num else None
     return out
@@ -106,6 +179,8 @@ def _combine(parts: dict, weights: dict, unmeasured: list[str], cap: float) -> d
     if unmeasured:
         s = min(s, cap)
     low = min(weights, key=lambda k: (parts.get(k) if parts.get(k) is not None else -1))
+    if unmeasured and all((parts.get(k) or 0) >= 1 for k in weights):
+        low = "未测条目"                               # 实测分项都满分，差的是还测不了的标准（封顶 95 的原因）
     return {"score": round(s, 1), "parts": {k: (None if parts.get(k) is None else round(parts[k] * 100, 1)) for k in weights},
             "weights": weights, "lowest": low, "unmeasured": unmeasured, "capped": bool(unmeasured) and s >= cap}
 
@@ -150,28 +225,25 @@ def _open_keys(prefix: str) -> list[str]:
 
 
 def workflow_score(c: dict) -> dict:
-    st = jl("data/sentinel/state.json", {}) or {}
-    waits = sum(len(v) for v in ((st.get("mem") or {}).get("waits") or {}).values())
-    reg = jl("data/producer/registry.json", {}) or {}
-    pending = sum(1 for E in reg.get("episodes") or [] for S in E.get("shots") or [] for o in (S.get("objects") or {}).values()
-                  if o.get("status") in ("pending", "ready", "running"))
-    stuck = _open_keys("S11:")
-    eps = len((jl("data/autopilot/flow/status.json", {}) or {}).get("episodes") or []) or 10
-    dup = _open_keys("S17:")
-    # 项目方修改自动入队：反馈单建好后 30 分钟内离开 new（被自动分诊）
+    """按主 run（V2）算：unattended = 写作推进常驻服务心跳正常且无人等人决定（S26 无单、S13 主 run 无单）；review_chain = P1 评审交齐后自动汇总（S27 无单）；
+    no_dup = S17 无限重出；auto_requeue = 反馈单 30 分钟内被自动分诊"""
+    run = score_run()
+    s26, s27, dup = _open_keys("S26:"), _open_keys("S27:"), _open_keys("S17:")
+    waits = [k for k in _open_keys("S13:wait:")]
     fb_new_stale = []
     for p in sorted((ROOT / "data/feedback/items").glob("fb-*.json")):
         d = jl(p.relative_to(ROOT)) or {}
         if d.get("status") == "new" and time.time() - (J.ts(d.get("created_at")) or time.time()) > 1800:
             fb_new_stale.append(d.get("id"))
     n_fb = len(list((ROOT / "data/feedback/items").glob("fb-*.json"))) or 1
-    parts = {"unattended": max(0.0, 1 - waits / max(1, pending)) if pending else (0.0 if waits else 1.0),
-             "no_stuck": max(0.0, 1 - len(stuck) / eps),
+    waits = []                                       # S13 现在只看 V1 producer 登记表（已归档），主 run 写作段没有等人对象；V2 进出图段后改按 run 拆
+    parts = {"unattended": 0.0 if s26 else 1.0,
+             "review_chain": 0.0 if s27 else 1.0,
              "no_dup": max(0.0, 1 - len(dup) / c["dup_zero_at"]),
              "auto_requeue": 1 - len(fb_new_stale) / n_fb}
     r = _combine(parts, c["workflow_weights"], c["workflow_unmeasured"], c["cap_when_unmeasured"])
-    r.update(src="tools/sentinel/scorecard.py workflow_score",
-             evidence={"waiting_human": waits, "pending_objs": pending, "stuck": stuck, "dup_render_tickets": dup, "feedback_new_over_30min": fb_new_stale})
+    r.update(src=f"tools/sentinel/scorecard.py workflow_score（{run}）",
+             evidence={"run": run, "s26_open": s26, "s27_open": s27, "s13_wait_open": waits, "dup_render_tickets": dup, "feedback_new_over_30min": fb_new_stale})
     return r
 
 
@@ -184,14 +256,19 @@ def gpu_score(c: dict) -> dict:
     ok, n = sum(v.get("ok", 0) for v in rc.values()), sum(v.get("n", 0) for v in rc.values())
     segs = [s for s in g.get("pause_segments") or [] if any(w in (s.get("by") or "") for w in c["deploy_pause_by"])]
     worst = max((s["hours"] * 3600 for s in segs), default=0.0)
-    parts = {"productive": None if pk is None else min(1.0, pk / c["gpu_productive_target_pct"]),
+    run = score_run()
+    stage, _ = stage_of(run)
+    expect = float((c.get("gpu_expected_by_stage") or {}).get(stage, 0.8))
+    # 按“当前阶段应该有的占用”算（总调度 20:10）：写剧本段预期 0 → 不扣分；出图 / 视频段按目标占用比
+    prod = 1.0 if expect <= 0 else (None if pk is None else min(1.0, (pk / 100) / expect))
+    parts = {"productive": prod,
              "rssh": None if n < 10 else min(1.0, (ok / n) / c["rssh_target"]),
              "deploy_stop": 1.0 if worst <= c["deploy_stop_max_s"] else max(0.0, c["deploy_stop_max_s"] / worst),
              "resident": 0.0 if _open_keys("S25:") else 1.0,
              "lend_expiry": 0.0 if _open_keys("S18:") else 1.0}
     r = _combine(parts, c["gpu_weights"], c["gpu_unmeasured"], c["cap_when_unmeasured"])
     r.update(src="tools/sentinel/scorecard.py gpu_score",
-             evidence={"gpu24_pct": known, "productive_pct_of_known": pk, "rssh_ok_n": [ok, n], "deploy_pause_worst_s": round(worst),
+             evidence={"run": run, "stage": stage, "expected_occupancy": expect, "gpu24_pct": known, "productive_pct_of_known": pk, "rssh_ok_n": [ok, n], "deploy_pause_worst_s": round(worst),
                        "deploy_pause_segments": segs[:5], "s25_open": _open_keys("S25:"), "s18_open": _open_keys("S18:")})
     return r
 
@@ -306,8 +383,9 @@ def compute(write: bool = True) -> dict:
     if write:
         with SCORES.open("a", encoding="utf-8") as f:
             for line, r in res.items():
-                if r and r.get("score") is not None:
-                    f.write(json.dumps({"at": J.iso(now), "line": line, "score": r["score"], "parts": r.get("parts") or {}, "sv": sv,
+                if r and (r.get("score") is not None or r.get("pending_stage")):
+                    f.write(json.dumps({"at": J.iso(now), "line": line, "score": r.get("score"), "run": score_run(), "pending_stage": r.get("pending_stage"),
+                                        "parts": r.get("parts") or {}, "sv": sv,
                                         "by": "SENTINEL scorecard", "src": r.get("src"), "lowest": r.get("lowest"),
                                         "unmeasured": r.get("unmeasured"), "evidence": r.get("evidence")}, ensure_ascii=False) + chr(10))
     return res

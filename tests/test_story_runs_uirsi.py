@@ -310,3 +310,26 @@ def test_claude_agent_backend_never_calls_external_writer(tmp_path, monkeypatch)
         SR._start("ui_x")
     assert ei.value.status_code == 409 and not called and "ui_x" not in SR._threads
     assert not (d / "writer_package.json").exists()
+
+
+def test_tsr01_wait_uses_completion_event(monkeypatch, tmp_path):
+    """T-SR-01：wait 按完成事件同步（状态落盘后才置位），不靠线程 join 超时"""
+    import threading as _t
+    from ns_api import story_runs as SR
+    monkeypatch.setattr(SR, "RUNS", tmp_path)
+    monkeypatch.setattr(SR, "writer_backend", lambda: "api")
+    (tmp_path / "r1").mkdir()
+    gate = _t.Event()
+
+    def worker(rid):
+        gate.wait(5)
+        SR._done[rid].set()
+    monkeypatch.setattr(SR, "_worker", worker)
+    SR._threads.pop("r1", None)
+    SR._start("r1")
+    import pytest
+    with pytest.raises(TimeoutError):
+        SR.wait("r1", timeout=0.2)
+    gate.set()
+    SR.wait("r1", timeout=10)
+    assert SR._done["r1"].is_set()

@@ -95,15 +95,27 @@ def check_refs(sid: str, refs: list, expected: dict | None = None, root: Path | 
     return probs
 
 
+LIVE_STATUSES = ("preparing", "active", "producing")
+
+
+def _runs_for(root: Path):
+    """tools 侧 runs 唯一入口：runs.for_root（root 可以是 cut 冻结快照）"""
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from tools.autopilot import runs as _RN
+    return _RN.for_root(root)
+
+
 def _runs(root: Path) -> tuple[str, list[str]]:
     """(主剧, 有导入稿的全部剧)——按 config/pipeline/runs.json（tools/autopilot/runs.py）"""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("ns_runs_ib", root / "tools/autopilot/runs.py")
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
+    m = _runs_for(root)
     prim = m.primary_run(root)
-    allr = [r for r in m.list_runs(root, status=None) if m.import_path(r, root).exists()]
-    return prim, ([prim] + [r for r in allr if r != prim]) if prim else allr
+    # 总调度 20:1x：只给“在做”的剧建期望表（preparing / active / producing）；归档 / 冻结 / 暂停的剧（V1、第二季）跳过——
+    # sv-15 部署时给已归档的 V1 跑 dryrun 报“没出结果”。恢复生产（status 改回）后下一次 auto 自动补上
+    live = set(m.list_runs(root, status=None)) & {r for r, v in (m.registry(root).get("runs") or {}).items()
+                                                    if (v or {}).get("status") in LIVE_STATUSES}
+    allr = [r for r in sorted(live) if m.import_path(r, root).exists()]
+    return prim, ([prim] + [r for r in allr if r != prim]) if prim in allr else allr
 
 
 def _dryrun_run(root: Path, run: str, primary: str, py: str) -> dict:
@@ -114,9 +126,9 @@ def _dryrun_run(root: Path, run: str, primary: str, py: str) -> dict:
                PYTHONPATH=os.pathsep.join(str(root / x) for x in ("packages/schema", "services/agent", "services/api",
                                                                     "services/render_router", "services/recipes")))
     env["NS_RUN_ID"] = run          # deps 的 project 回退值 = 本剧 run_id（与 producer 的 project_for(...) or run_id 同口径）
-    if run != primary:
-        env.update(NS_RENDERS_DIR=str(root / "data" / "renders" / run),
-                   NS_SCRIPT_JSON=str(root / "data" / "import" / "runs" / run / "script_v2.json"))
+    m = _runs_for(root)
+    # K-OPS-F24：路径一律按剧取（legacy 剧旧路径，其它剧带前缀），不再按“是不是 primary”判
+    env.update(NS_RUN=run, NS_RENDERS_DIR=str(m.renders_dir(run, root)), NS_SCRIPT_JSON=str(m.script_path(run, root)))
     fd, out = tempfile.mkstemp(suffix=".json", prefix=f"expref_{run}_")
     os.close(fd)
     try:

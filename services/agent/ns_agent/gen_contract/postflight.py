@@ -53,7 +53,7 @@ def gaze_item(image) -> tuple[str, str, dict]:
     return "na", f"只记录（未标定，不阻断）：{r['status']}", {**ev, "would_fail": bad, "record_only": True}
 SIZE_BAND = {"极近特写": 0, "大特写": 0, "特写": 1, "近景": 2, "中近景": 2, "中景": 3, "中全景": 4, "全身": 5, "全景": 5,
              "远景": 6, "大远景": 6}
-NAME_ID = {"林晚": "lin_wan", "顾沉": "gu_chen", "陈宇": "chen_yu", "阿岚": "ch_a_lan"}
+from ..asset_refs import NAME_ID   # noqa: E402  OVERSIGHT-F P2（PROMPTFIX）：同一张人物表（V2 清单角色由 register_manifest_names 登记进来）
 from .metrics import (ZONE_REGION, _clip, _ref_crop, embed, hist_corr, hs_hist, measure, region_match,  # noqa: E402,F401
                       texture, windows)
 
@@ -74,6 +74,20 @@ def save_q1_emb(image, per: dict) -> None:
     tmp = out.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(per), encoding="utf-8")
     os.replace(tmp, out)
+
+
+def per_face_rows(faces: list[dict], verdict: dict, min_h: float) -> list[dict]:
+    """逐脸身份表（总调度 11-02 20:1x：每张脸单独比对身份，多人镜要能指出是哪张脸错了）：
+    每张检出的脸 → 框、脸高、认作谁 + 分、最像谁 + 分、结论（过 / 复核带 / 不像 / 同一角色第二张脸 / 局部却露脸 / 陌生人 / 可放行 / 小脸不判）"""
+    rows = []
+    for k, f in enumerate(faces):
+        sims = {c: v[0] for c, v in (f.get("sims") or {}).items() if isinstance(v, (list, tuple))}
+        top = max(sims, key=sims.get) if sims else None
+        who, v = verdict.get(k, (None, "小脸不判" if (f.get("h_ratio") or 0) < min_h else "未判"))
+        rows.append({"face": k, "bbox": [round(float(x), 1) for x in f.get("bbox") or []], "h_ratio": round(float(f.get("h_ratio") or 0), 3),
+                     "as": who, "sim": round(sims[who], 3) if who in sims else None,
+                     "best": top, "best_sim": round(sims[top], 3) if top else None, "verdict": v})
+    return rows
 
 
 def q1a_item(image, boxes: dict, all_boxes: list, t1a: dict) -> tuple[str, str, dict]:
@@ -205,7 +219,9 @@ def measure_local(image: str | Path, rec: dict, remote: dict | None = None) -> d
     img = Image.open(image).convert("RGB")
     rows = q2_rows(rec)
     refs = {r["ref"]: Image.open(ROOT / r["file"]).convert("RGB") for r in rows}
-    faces = sorted((remote or {}).get("faces") or [], key=lambda f: -((f.get("sims") or {}).get("lin_wan", -1)))   # 林晚的脸优先（Q8）
+    from ..cast_table import lead_id
+    _lead = lead_id(rec.get("project") if isinstance(rec, dict) else None) or "lin_wan"
+    faces = sorted((remote or {}).get("faces") or [], key=lambda f: -((f.get("sims") or {}).get(_lead, -1)))   # 女主的脸优先（Q8；按剧取，P2）
     sc = scene_file(rec)
     scene = Image.open(ROOT / sc).convert("RGB") if sc and (ROOT / sc).is_file() else None
     from .metrics import outer_rows_with_faces
@@ -355,6 +371,7 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
         q1_band = []                                  # K-REV-V18 修订：落在复核带的角色（交本地看图左右并排复核）
         q1_boxes = {}                                 # Q1a：每个在画角色认到的那张脸（ArcFace 最像的一张）
         q1_idx = {}                                   # Q1x：同上，脸在 faces 里的下标（取特征）
+        face_verdict: dict[int, tuple[str | None, str]] = {}   # 逐脸结论（总调度 20:1x：多人镜要指出是哪张脸错了）
         refd = {k for f in faces for k in f["sims"]}
         for cid in expect:
             if faces and cid not in refd:                 # 没有身份脸参考的角色（路人）：不判，下面按“可抵一张认不出的脸”算
@@ -370,9 +387,12 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
                 q1_idx[cid] = k_best
                 h = float(faces[k_best].get("h_ratio") or 0)
                 need, lo, tname = band_lines(cid, h, t1)
+                face_verdict[k_best] = (cid, "过")
                 if best < lo:
+                    face_verdict[k_best] = (cid, "不像")
                     bad.append(f"{cid} {best:.3f}（对 {ref}）< {lo}（{tname}，直接不过）")
                 elif best < need:
+                    face_verdict[k_best] = (cid, "复核带")
                     bad.append(f"{cid} {best:.3f}（对 {ref}）在复核带 {lo}–{need}（{tname}），待本地看图并排复核")
                     q1_band.append({"cid": cid, "sim": round(best, 3), "lo": lo, "need": need, "tier": tname,
                                  "bbox": faces[k_best].get("bbox"), "h_ratio": round(h, 3)})
@@ -380,6 +400,7 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
                     # L-098 身份库 A/B（11-02）：top-k 把 03-S2 v14（脸圆发糊、亲审不合格，锚 0.573）抬到 0.611–0.650，
                     # 会绕开复核带的清晰度把关 → 锚自己没过线时仍进复核带，只是免本地看图（top-k 已证明是同一人），清晰度照查
                     a0 = faces[k_best]["anchor"][cid]
+                    face_verdict[k_best] = (cid, "复核带（只查清晰度）")
                     bad.append(f"{cid} 锚 {a0:.3f}（对当前身份脸）在复核带 {lo}–{need}（{tname}），身份库 top-k {best:.3f} 过线，待清晰度复核")
                     q1_band.append({"cid": cid, "sim": round(a0, 3), "topk": round(best, 3), "mode": "sharp_only", "lo": lo, "need": need,
                                     "tier": tname, "bbox": faces[k_best].get("bbox"), "h_ratio": round(h, 3)})
@@ -402,16 +423,20 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
             if ok:
                 me = max(ok, key=sims.get)
                 pres = next((c.get("presence") for c in req.get("cast") or [] if NAME_ID.get(c.get("name"), c.get("name")) == me), None)
+                face_verdict[k] = (me, "可放行")
                 if me in got and not rec.get("mirror"):
                     # 总调度 11-01 标注（Q7-36 / Q7-56）：同一角色两张脸、原文没写镜子 / 倒影 → 重复人物，不过
+                    face_verdict[k] = (me, "同一角色第二张脸")
                     bad.append(f"同一角色出现两次：{me} 第二张脸 {sims[me]:.3f}（原文没写镜子 / 倒影）")
                 elif pres == "局部" and me not in described and me not in got:
                     # 总调度 11-01（Q7-31 光膀子的男人）：cast 写“局部”（只出西装下摆 / 手）的人出了脸 → 不过
+                    face_verdict[k] = (me, "局部却露脸")
                     bad.append(f"局部角色出了脸：{me}（cast 写局部，原文也没写他的脸）{sims[me]:.3f}")
                 else:
                     extra_ok.append(f"{me} {sims[me]:.3f}" + ("（同一角色第二张脸：原文写了镜子 / 倒影，待目检）" if me in got else ""))
                 continue
             top = max(sims, key=sims.get) if sims else None
+            face_verdict[k] = (None, "陌生人")
             strangers.append(f"脸高 {f.get('h_ratio', 0):.2f}" + (f"，最像 {top} {sims[top]:.3f}" if top else ""))
             stranger_boxes.append(f.get("bbox"))
         if len(strangers) > len(no_ref):
@@ -436,6 +461,7 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
             (f"；其他脸：{'、'.join(extra_ok)}" if extra_ok else ""),
             sims=got, ref=via, faces=len(faces), strangers=strangers, others=extra_ok, stranger_boxes=stranger_boxes, review_band=q1_band,
             partial_cast=any(c.get("presence") in ("局部", "背影") for c in req.get("cast") or []), boxes=q1_boxes,
+            per_face=per_face_rows(faces, face_verdict, min_h),
             q1_mode=(remote or {}).get("q1_mode"))
         save_q1_emb(image, {cid: (faces[k].get("emb"), faces[k].get("h_ratio")) for cid, k in q1_idx.items()})
         for f in faces:
@@ -456,7 +482,8 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
         omin = t2.get("outer_min", 0.5)
         for o in want_outer:
             pv = got.get((o["character"], o["label"]))
-            who = {"lin_wan": "林晚", "gu_chen": "顾沉", "chen_yu": "陈宇", "ch_a_lan": "阿岚"}.get(o["character"], o["character"])
+            from ..asset_refs import ID_NAME
+            who = ID_NAME.get(o["character"], o["character"])
             if pv is None:
                 outer_note.append(f"{who}的{o['label']} 未测（没有{who}的脸框 / 旧打分）")
             else:

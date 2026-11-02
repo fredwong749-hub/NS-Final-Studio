@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useStudio } from "../../store";
 import { useLiveEvent } from "../live";
-import { P1Gate, ReviewBlock, canShowP1, p1Round } from "./P1Review";
+import { P1Gate, ReviewBlock, canShowP1, p1Round, p1Status } from "./P1Review";
 
 type AStage = { id: string; name: string; status: string; decider?: string; usd?: number | null; detail?: string[] | string; fails?: number };
 type AScore = { at: string; sum?: number; sum_code?: number; of?: number; judge_sums?: number[] };
@@ -14,7 +14,7 @@ export type AFlow = {
   run?: string; episode?: number; verdict: string; next_action?: string | null; running?: boolean; stages?: AStage[]; score_trajectory?: AScore[];
   usd_total?: number | null; budget_usd?: number | null; import_mode?: string; episodes?: Record<string, AEp>; latest_episode?: number; writer_backend?: string;
   owner_gates?: { enabled?: boolean; gates?: Record<string, Gate> };
-  p1_review?: { latest?: Review | null; rounds?: Review[]; threshold?: { min_mean?: number; max_rounds?: number; judges?: number } };
+  p1_review?: { latest?: Review | null; rounds?: Review[]; threshold?: { min_mean?: number; max_rounds?: number; judges?: number }; revise_options?: string[]; owner_direction?: { at?: string; by?: string; why?: string; round?: number; mean?: number; totals?: number[] } };
 };
 export type Review = { n: number; passed: boolean; why?: string[]; totals?: number[]; mean?: number; item_mean?: Record<string, number>; top_fixes?: string[] };
 type Story = {
@@ -31,7 +31,7 @@ type RunOpt = { id: string; title: string };
 const VERDICT: Record<string, string> = {
   not_started: "还没开始", running: "正在写", awaiting_writer: "等写手交稿", awaiting_reviewer: "等核查", awaiting_owner_p1: "等你看故事线",
   held_by_p1_gate: "等你看完故事线再写", needs_patch: "正在返修", reopened: "重新打开了", stopped_in_chain: "写到一半停了", not_importable: "还有没过的项",
-  blocked_by_gate: "导入前的检查没过", importable: "可以导入", imported: "已导入", awaiting_owner: "等你看", reused: "复用", ok: "通过", pending: "等待",
+  blocked_by_gate: "导入前的检查没过", importable: "可以导入", imported: "已导入", awaiting_owner: "等你看", owner_direction: "等你定方向", reused: "复用", ok: "通过", pending: "等待",
   fails_left: "还有没过的项", failed: "没过", needs_writer: "等写手", dry_run: "试跑", revise_requested: "已收下修改，正在重写", waiting_p1_review: "评审中", awaiting_p1_judges: "故事线在评审", awaiting_judges: "等评委打分", voided: "已作废，重写中", p1_review_failed: "评审三轮没过，已转总调度",
 };
 export const zhState = (k?: string | null) => (k ? VERDICT[k] ?? "进行中" : "");
@@ -48,20 +48,11 @@ function epState(v: string | undefined, p1Open: boolean): { s: EpState; stuck: b
   if (["awaiting_owner_p1", "held_by_p1_gate", "awaiting_owner"].includes(v)) return { s: "look", stuck: false };
   return { s: "writing", stuck: ["stopped_in_chain", "not_importable", "blocked_by_gate", "failed", "fails_left", "needs_writer"].includes(v) };
 }
-/** 故事线返修 / 评审时的状态行：第几稿、是不是最后一轮（门槛读后端的 max_rounds） */
-function p1Line(d: AFlow): string | null {
-  const max = d.p1_review?.threshold?.max_rounds ?? 3;
-  if (!["awaiting_writer", "awaiting_p1_judges", "waiting_p1_review"].includes(d.verdict) || d.owner_gates?.gates?.P1?.status === "approved") return null;
-  if (!d.stages?.some((s) => s.id === "P1G")) return null;
-  const n = p1Round(d);
-  const last = n >= max ? "（最后一轮）" : "";
-  return d.verdict === "awaiting_writer" ? `写手在改第 ${n} 稿${last}` : `第 ${n} 稿在评审${last}`;
-}
 const EP_WORD: Record<EpState, string> = { idle: "未开始（等故事线定稿）", writing: "写作中", look: "等你看", done: "完成" };
 
 async function listRuns(): Promise<RunOpt[]> {
   const r = await fetch("/api/story-runs?limit=60").then((x) => (x.ok ? x.json() : { runs: [] }));
-  const items: { id: string; title?: string }[] = r.runs ?? [];
+  const items: { id: string; title?: string; registry_status?: string | null }[] = (r.runs ?? []).filter((x: { id: string; registry_status?: string | null }) => x.registry_status !== "archived" && !/^(drill_|zz_)/.test(x.id));
   const ok = await Promise.all(
     items.map((it) =>
       fetch(`/api/script-autoflow/${encodeURIComponent(it.id)}`)
@@ -191,7 +182,7 @@ export function AutoflowPanel() {
         <>
           <p className="af-verdict">
             <i className={`af-dot ${canLook ? "amber" : d.verdict === "imported" || d.verdict === "importable" ? "green" : ""}`} aria-hidden />
-            <b>{d.running ? "正在写" : p1Line(d) ?? zhState(d.verdict)}</b>
+            <b>{d.running && !p1Status(d) ? "正在写" : p1Status(d)?.text ?? zhState(d.verdict)}</b>
             <span className="af-muted">
               {" "}
               · 已花 {money(d.usd_total)}
@@ -292,6 +283,13 @@ export function AutoflowPanel() {
 
           {tab === "eps" && (
             <div className="af-block">
+              {eps.length > 1 && eps.every((e) => e.s === eps[0].s && !e.stuck) ? (
+                // 全部集状态相同：合成一行，不重复 10 遍
+                <p className="af-same">
+                  <i className={`af-dot ${eps[0].s === "look" ? "amber" : eps[0].s === "done" ? "green" : ""}`} aria-hidden />{" "}
+                  {eps.length} 集{{ idle: "都还没开始（等故事线定稿）", writing: "都在写作中", look: "都等你看", done: "都完成了" }[eps[0].s]}
+                </p>
+              ) : (
               <ul className="af-eps">
                 {eps.map((e) => (
                   <li key={e.n} className={`s-${e.s}`}>
@@ -311,6 +309,7 @@ export function AutoflowPanel() {
                   </li>
                 ))}
               </ul>
+              )}
               {d.verdict === "importable" && (
                 <div className="af-foot">
                   <button type="button" className="v3-btn primary" disabled={!!busy || !!d.running} onClick={doImport} title="导入这一集（你确认的唯一一步）">

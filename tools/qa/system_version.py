@@ -730,13 +730,9 @@ def export_tag(sv: str, dirs: list[str], dest: Path) -> list[str]:
     with tarfile.open(fileobj=io.BytesIO(raw)) as tf:
         names = [m.name for m in tf.getmembers() if m.isfile()]
         tf.extractall(dest, filter="data")
-    # git archive 出来是仓库里的 LF；工作区是 CRLF（autocrlf）。内容与该版本一致（git 认为没改）的文件用工作区原字节，
-    # 免得只因换行符不同就整批重推、和日常 push 来回覆盖（sv-20261101-01 首次 deploy：gpu36 重推 292 个只差换行的文件）
-    changed = set(x for x in git("diff", "--name-only", sv, "--", *dirs).splitlines() if x)
-    for n in names:
-        src = ROOT / n
-        if n not in changed and src.is_file():
-            (dest / n).write_bytes(src.read_bytes())
+    # 总调度 11-02 20:1x：服务器上的文件 = 版本库里的原字节（LF，.gitattributes eol=lf）。以前“内容没改就用工作区原字节”把 Windows
+    # 工作区的 CRLF 推上了服务器，服务器文件的 sha 和 git show 永远对不上（实测 remote_score.py 041b… ≠ 8601…）。日常代码推送已停用
+    # （部署是唯一入口），不再有来回覆盖的问题；第一次切换会按 sha 补推一批只差换行的文件
     return names
 
 
@@ -882,6 +878,7 @@ def deploy_host(rs, h: str, snap: Path, names: list[str], tracked_code: list[str
             raise RuntimeError("服务器决策文件不齐（K-OPS-F09），不排重启，老进程继续：" + dg.strip()[-300:])
         pre = server_pause_owner(rs, h) if restart and urgent else None
         r["pre_paused"] = pre
+        r["post_verify"] = post_verify(rs, h)    # 总调度 20:3x：部署后核对（当前剧资产包里每个角色的 face_of + sha）做进自动流程
         if restart and urgent and not pre:   # K-OPS-F13 修订：推完、核对都过了才暂停派单，紧接着当场排空重启——暂停窗口 = 排空 + 重启（≤ 3 分钟）
             rs.ssh(h, f"cd {rs.R} && {rs.OFF}/venv/bin/python tools/autopilot/producer.py pause --by DEPLOY_ATOMIC "   # 不再覆盖整个推送过程（sv-11 停派 26 分钟）
                       f"--note '部署 {sv}：重启前暂停派单，重启后恢复'", tries=3)
@@ -914,6 +911,16 @@ def deploy_host(rs, h: str, snap: Path, names: list[str], tracked_code: list[str
         except Exception as e2:  # noqa: BLE001
             r["resume_error"] = repr(e2)[:200]
     return r
+
+
+def post_verify(rs, h: str) -> dict:
+    """部署后在服务器上跑 tools/factory/post_verify.py（经 stdin 送部署版脚本）：当前剧 face_of + sha 对清单；跑不了 = ok False 记原因"""
+    try:
+        raw = rs.ssh(h, f"cd {rs.R} && {rs.OFF}/venv/bin/python tools/factory/post_verify.py {rs.R}", tries=2)
+        txt = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw)
+        return json.loads([x for x in txt.strip().splitlines() if x.startswith("{")][-1])
+    except Exception as e:  # noqa: BLE001  # arch-ok: 核对跑不了 = 记下来（不当作通过）
+        return {"ok": False, "error": repr(e)[:200]}
 
 
 def server_pause_owner(rs, h: str) -> str | None:

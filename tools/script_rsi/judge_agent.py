@@ -287,11 +287,68 @@ def p1_pack(run_dir: Path, judges: int = 3, out: Path | None = None) -> list[str
     return made
 
 
+EVIDENCE_MAX = 60          # 每条证据不超过 60 字（hollywood_p1_judge.md）
+EVIDENCE_FAIL_CAP = 2      # 证据不是原文：那一条最多 2 分
+EVIDENCE_FAIL_MAX = 3      # 一份评审证据不合格超过 3 条：整份无效，请重交（总调度 11-02 第 4 轮 r4-sonnet 事件）
+_QUOTES = str.maketrans({c: '"' for c in "“”„‟″「」『』'‘’"})
+
+
+def _ev_norm(s: str) -> str:
+    """证据比对前归一化：全半角（NFKC）、各种引号统一、去掉所有空白"""
+    import re
+    import unicodedata
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", s).translate(_QUOTES))
+
+
+def _ev_corpus(sl_text: str) -> str:
+    """P1 正文 = 故事线 JSON 里所有字符串值（不是 JSON 原文，免得转义符干扰）"""
+    try:
+        d = json.loads(sl_text)
+    except ValueError:
+        return _ev_norm(sl_text)
+    vals: list[str] = []
+
+    def walk(x):
+        if isinstance(x, str):
+            vals.append(x)
+        elif isinstance(x, dict):
+            for v in x.values():
+                walk(v)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+    walk(d)
+    return "\n".join(_ev_norm(v) for v in vals)
+
+
+def evidence_check(evidence: str, corpus: str) -> str | None:
+    """一条证据合格返回 None；否则返回大白话原因"""
+    e = _ev_norm(evidence).strip('"')
+    if not e:
+        return "没有证据"
+    if len(e) > EVIDENCE_MAX:
+        return f"证据 {len(e)} 字，超过 {EVIDENCE_MAX} 字"
+    if e not in corpus:
+        return "证据不是 P1 原文"
+    return None
+
+
+def _placeholder_scan(sl_text: str) -> list[str]:
+    """SL-12 占位词扫描结果（只记录，不改稿）：["episodes[2].beats: （未提供）", …]"""
+    sys.path.insert(0, str(ROOT / "packages" / "schema"))
+    from ns_schema.storyline import placeholder_hits
+    try:
+        return [f"{p}: {w}" for p, w in placeholder_hits(json.loads(sl_text))]
+    except ValueError as e:
+        return [f"故事线不是 JSON，没法扫占位词：{e}"]
+
+
 def p1_collect(run_dir: Path, out: Path | None = None) -> dict:
     """收三家：每家 8 条 1–5 分（满分 40）→ 各家总分、σ、逐条均分与分歧（逐条极差 ≥2 的列出来），3 个 judge_id 互不相同才算有效"""
     out = out or (run_dir / "judge_p1")
     sl = (run_dir / "P1_storyline.json").read_text(encoding="utf-8")
-    reps, problems = [], []
+    reps, problems, ev_fail, invalid = [], [], [], []
+    corpus = _ev_corpus(sl)
     for pp in sorted(out.glob("judge_*/p1_review_task.json")):
         pk = json.loads(pp.read_text(encoding="utf-8"))
         op = _abs(pk["output"]["path"])
@@ -306,10 +363,28 @@ def p1_collect(run_dir: Path, out: Path | None = None) -> dict:
         if d is None:
             problems.append(f"{pk['judge_slot']} 不是 JSON：{err}")
             continue
-        sc = {str(x.get("id")): max(1, min(5, int(x.get("score") or 1))) if str(x.get("evidence") or "").strip() else 1
-              for x in d.get("items") or [] if isinstance(x, dict)}
+        sc, bad = {}, []
+        for x in d.get("items") or []:
+            if not isinstance(x, dict):
+                continue
+            iid, ev = str(x.get("id")), str(x.get("evidence") or "")
+            try:
+                s = max(1, min(5, int(x.get("score") or 1)))
+            except (TypeError, ValueError):
+                s = 1
+            if not ev.strip():
+                s = 1                                   # 无证据记 1 分（原规则）
+            elif (why := evidence_check(ev, corpus)):
+                s = min(s, EVIDENCE_FAIL_CAP)           # 证据不合格：这一条封顶 2 分
+                bad.append({"judge_slot": pk["judge_slot"], "id": iid, "why": why, "evidence": ev[:80]})
+            sc[iid] = s
         if set(sc) != set(P1_ITEMS):
             problems.append(f"{pk['judge_slot']} 条目不全：缺 {sorted(set(P1_ITEMS) - set(sc))}")
+            continue
+        ev_fail += bad
+        if len(bad) > EVIDENCE_FAIL_MAX:                # 超过 3 条：整份无效，不计入均分，要求重交
+            invalid.append(pk["judge_slot"])
+            problems.append(f"{pk['judge_slot']} 证据不合格 {len(bad)} 条（超过 {EVIDENCE_FAIL_MAX} 条），整份无效，请重交")
             continue
         reps.append({"judge_slot": pk["judge_slot"], "judge_id": str(d.get("judge_id") or "").strip(), "scores": sc,
                      "total": sum(sc.values()), "top_fixes": d.get("top_fixes") or []})
@@ -321,7 +396,8 @@ def p1_collect(run_dir: Path, out: Path | None = None) -> dict:
            "stable": st["stable"] and not single, "single_judge": single, "judge_ids": ids,
            "item_mean": {k: round(sum(v) / len(v), 2) for k, v in per_item.items()},
            "item_split": {k: v for k, v in per_item.items() if v and max(v) - min(v) >= 2},
-           "top_fixes": [f for r in reps for f in r["top_fixes"]][:12], "problems": problems}
+           "top_fixes": [f for r in reps for f in r["top_fixes"]][:12], "problems": problems,
+           "evidence_fail": ev_fail, "invalid_judges": invalid, "placeholder_scan": _placeholder_scan(sl)}
     _write_json(out / "RESULT.json", res)
     return res
 

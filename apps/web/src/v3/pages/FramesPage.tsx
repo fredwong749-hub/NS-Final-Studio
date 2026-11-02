@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Empty, LoadError, Skel } from "../../ds";
 import { Verdict } from "../Verdict";
+import { LoadImg } from "../../ds/LoadImg";
 import { fmtClock, fmtRemain, genView, statusText } from "../GenState.helpers";
 import { GenLamp } from "../GenState";
 import { QueueDock } from "../QueueDock";
@@ -31,15 +32,13 @@ function hashQuery(): URLSearchParams {
 
 /** 缩略图：加载失败 / 没有地址 → “文件不在 + 原因”，不出现裂图图标（项目方 16:3x：版本和片条里有好几张破图） */
 export function SafeImg({ src, why = "文件不在", alt = "" }: { src: string | null; why?: string; alt?: string }) {
-  const [bad, setBad] = useState(false);
-  useEffect(() => setBad(false), [src]);
-  if (!src || bad)
+  if (!src)
     return (
       <div className="fp-miss" role="img" aria-label={alt || why}>
-        <span>{src ? "文件不在" : why}</span>
+        <span>{why}</span>
       </div>
     );
-  return <img src={src} alt={alt} loading="lazy" onError={() => setBad(true)} />;
+  return <LoadImg src={src} alt={alt} loading="lazy" onError={() => undefined} />;
 }
 
 function useFrames(ep: string, status: string, char: string) {
@@ -264,7 +263,12 @@ export default function FramesPage() {
           </span>
         )}
       </header>
-      {!d.episodes.length && <Empty icon="○" title={filtered ? "没有符合的镜头" : "还没有镜头"} sub={filtered ? "换个筛选条件，或者选“全部”。" : "剧本分镜出来后，这里按集显示每镜的首帧和尾帧。"} />}
+      {!d.episodes.length &&
+        (status || char ? (
+          <Empty icon="○" title="没有符合的镜头" sub="换个筛选条件，或者选“全部”。" />
+        ) : (
+          <Empty icon="○" title="这部剧还没有镜头，先去剧本" sub="剧本分镜出来后，这里按集显示每镜的首帧和尾帧。" action={<a className="v3-btn" href="#/script-create">去剧本</a>} />
+        ))}
       {d.episodes.map((e, i) => {
         const shut = open[e.ep] === undefined ? i >= 1 && !filtered : !open[e.ep];
         return (

@@ -110,14 +110,15 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     ep = int(a.episode.lower().removeprefix("ep"))
     name = f"ep{ep:02d}"
-    fin = ROOT / "data" / "renders" / name / "_final"
-    proj_p, job_p = fin / "cut_project.json", fin / "_cut_export_job.json"
+    from ns_api import cut_project as CP  # noqa: E402  按剧取路径（K-OPS-F24）：成片目录 / 剧本都走 run_paths，不写死
+    from ns_api import run_paths as RP  # noqa: E402
+    fin = CP._fin(ep)
+    proj_p, job_p = CP.proj_path(ep), CP.job_path(ep)
     proj = read_json(proj_p)
     if not proj:
         write_json(job_p, (read_json(job_p, {}) or {}) | {"state": "failed", "error": "没有剪辑工程"})
         return 2
     rev = int(proj["rev"])
-    from ns_api.cut_project import cut_edit_of  # noqa: E402
     from ns_post.assemble import Settings, assemble_episode, load_episode  # noqa: E402
     from ns_post.tts import KokoroBackend, SenseVoiceAsr, load_voice_config  # noqa: E402
 
@@ -132,25 +133,27 @@ def main(argv=None) -> int:
     try:
         cfg = load_voice_config()
         variant = f"cut_r{rev}"
-        settings = Settings(threads=8, bgm=True, deliver_4k="off", dialogue_source=proj.get("dialogue_source") or "h3",
-                            music_dir=str(ROOT / "data/music/series10"))
-        episode = load_episode(ROOT / "data/import/script_v2.json", ep)
-        cut_edit = cut_edit_of(proj)
-        tl = assemble_episode(episode, work, tts=KokoroBackend(cfg, num_threads=4), cache_dir=cache_dir,
+        bgm_file = (proj.get("bgm") or {}).get("file")   # 配乐目录跟着工程里的那条配乐（装配时定的），不写死某部剧的目录
+        settings = Settings(threads=8, bgm=bool(bgm_file), deliver_4k="off",
+                            dialogue_source=proj.get("dialogue_source") or "h3",
+                            music_dir=str((ROOT / bgm_file).parent) if bgm_file else None)
+        episode = load_episode(RP.script_path(ROOT), ep)
+        cut_edit = CP.cut_edit_of(proj)
+        episode2, sources2, cut_edit2, back = CP.renumber_for_order(episode, sources_of(proj), cut_edit)
+        tl = assemble_episode(episode2, work, tts=KokoroBackend(cfg, num_threads=4), cache_dir=cache_dir,
                               asr=SenseVoiceAsr(cfg, num_threads=4), settings=settings, voices_cfg=cfg,
-                              allow_laptop_video=False, keep_work=False, sources=sources_of(proj), variant=variant,
-                              cut_edit=cut_edit)
+                              allow_laptop_video=False, keep_work=False, sources=sources2, variant=variant,
+                              cut_edit=cut_edit2)
+        CP.relabel_timeline(tl, back, name)
         prog.stop.set()
         produced = ROOT / next(iter(tl["deliveries"].values()))["file"]
         base = f"{name}_{variant}"
         final = fin / f"{base}.mp4"
         shutil.copyfile(produced, final.with_suffix(".mp4.tmp"))
         os.replace(final.with_suffix(".mp4.tmp"), final)
-        tlj = next(iter(work.glob(f"*{variant}.timeline.json")), None)
-        if tlj:
-            shutil.copyfile(tlj, fin / f"{base}.timeline.json")
-        cues = sorted((s for s in tl["speech"] if s.get("start_s") is not None), key=lambda s: s["start_s"])
-        srt = "\n".join(f"{i}\n{srt_time(s['start_s'])} --> {srt_time(s['end_s'])}\n{s['text']}\n" for i, s in enumerate(cues, 1))
+        write_json(fin / f"{base}.timeline.json", tl)   # 镜号已还原成剧本镜号（cut_position = 成片里的位置）
+        cues = CP.srt_cues(tl, proj)
+        srt = "\n".join(f"{i}\n{srt_time(a)} --> {srt_time(b)}\n{t}\n" for i, (a, b, t) in enumerate(cues, 1))
         (fin / f"{base}.srt").write_text(srt, encoding="utf-8")
         rel = str(final.relative_to(ROOT)).replace("\\", "/")
         build_s = round(time.time() - t0, 1)

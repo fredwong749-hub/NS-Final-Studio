@@ -471,3 +471,48 @@ def test_scorecard_combine_and_tickets():
     assert r["score"] == 95 and r["capped"]                                           # 有未测标准时封顶 95
     fs = {f["key"]: f for f in J.j_scorecard({"ui": r, "script": {"score": 100.0, "parts": {}, "lowest": None}}, {"ui": "NAVIA"})}
     assert fs["SC:ui"]["violated"] and fs["SC:ui"]["owner_loop"] == "NAVIA（抄送总调度）" and not fs["SC:script"]["violated"]
+
+
+def test_autoflow_resident_and_review_chain():
+    c = C["S26_autoflow_resident"]
+    assert not J.j_autoflow_resident({"t": T0}, None, T0 + 60, c)[0]["violated"]
+    assert J.j_autoflow_resident({"t": T0}, None, T0 + 121, c)[0]["violated"]
+    assert J.j_autoflow_resident(None, None, T0, c)[0]["violated"]
+    c2 = C["S27_p1_review_chain"]
+    rounds = [{"name": "r2", "done": [T0, T0 + 10, T0 + 20], "result_t": None}, {"name": "r3", "done": [T0, T0 + 5, T0 + 9], "result_t": T0 + 60},
+              {"name": "r4", "done": [T0], "result_t": None}]
+    fs = {f["key"]: f for f in J.j_review_chain(rounds, T0 + 400, c2)}
+    assert fs["S27:r2"]["violated"] and not fs["S27:r3"]["violated"] and "S27:r4" not in fs
+
+
+def test_scratch_parent_child_counted_once():
+    c = C["S20_scratchpad_procs"]
+    sp = "C:/Users/fredw/AppData/Local/Temp/claude/x/scratchpad/"
+    procs = [{"pid": 1, "ppid": 0, "cmd": f"D:/.venv/Scripts/python.exe {sp}job.py"}, {"pid": 2, "ppid": 1, "cmd": f"C:/Python312/python.exe {sp}job.py"}]
+    f = J.j_scratch_procs(procs, c)[0]
+    assert f["evidence"]["pids"] == [1]
+
+
+def test_review_rounds_scans_all_rn(tmp_path):
+    """S27 扫描所有 rN 轮次目录（r4、r10 以后都要看到），不是只看 r1–r3"""
+    from tools.sentinel import probes as P
+    base = tmp_path / "judge_p1"
+    for d in ["", "r2", "r3", "r4", "r10"]:
+        for k in (1, 2, 3):
+            o = base / d / f"judge_{k}" / "out"
+            o.mkdir(parents=True, exist_ok=True)
+            (o / "p1_review.json.done").write_text("ok", encoding="utf-8")
+    (base / "RESULT.json").write_text("{}", encoding="utf-8")
+    names = {r["name"]: r for r in P.review_rounds(base, 3)}
+    assert set(names) == {"r1", "r2", "r3", "r4", "r10"}
+    assert names["r10"]["result_t"] is None and len(names["r10"]["done"]) == 3
+
+
+def test_ui_measure_tickets():
+    m = {"at": "x", "pages": {"/#/settings": {"jargon": ["seed", "LoRA"], "color_capsules": [], "contradictions": []},
+                              "/#/overview": {"jargon": [], "color_capsules": ["描边胶囊｜待重出"], "contradictions": []},
+                              "/#/cut": {"error": "timeout"}}}
+    fs = {f["key"]: f for f in J.j_ui_measure(m, "UIRSI")}
+    assert fs["S9:sc/#/settings:jargon"]["violated"] and not fs["S9:sc/#/settings:clean"]["violated"]
+    assert fs["S9:sc/#/overview:clean"]["violated"] and "S9:sc/#/cut:jargon" not in fs
+

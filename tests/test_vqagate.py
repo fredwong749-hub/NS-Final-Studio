@@ -1160,3 +1160,103 @@ def test_continuity_paths_follow_current_run(monkeypatch, tmp_path):
         {"stage": "image", "n": 1, "file": "nope.png"}]}), encoding="utf-8")
     assert CT.renders_dir() == tmp_path / "renders" and CT.script_file() == tmp_path / "script_v2.json"
     assert CT.current_first("ep01-S1") is None                            # 读的是 V2 的目录（文件不在 → None），不是 V1 的
+
+
+def test_q1_per_face_points_at_wrong_face():
+    """总调度 11-02 20:1x：逐脸比对身份——双人镜林晚对、顾沉换人，Q1 证据 per_face 指出是第 1 张脸（顾沉的框）不像；陌生脸单独标出"""
+    import sys
+    sys.path.insert(0, str(ROOT))
+    from ns_agent.gen_contract import postflight as PO
+    from tools.vqa import accept as ACC
+    rec = {"size": "中景", "subject": None, "zones": ["face"], "primary": "lin_wan", "slots": [], "missing": [],
+           "characters": [{"character": "lin_wan", "presence": "在画"}, {"character": "gu_chen", "presence": "在画"}]}
+    req = {"asset_refs": rec, "cast": [{"name": "林晚", "presence": "在画"}, {"name": "顾沉", "presence": "在画"}]}
+    faces = [{"h_ratio": 0.2, "bbox": [10, 10, 60, 80], "sims": {"lin_wan": 0.78, "gu_chen": 0.05}},
+             {"h_ratio": 0.2, "bbox": [200, 12, 250, 82], "sims": {"lin_wan": 0.04, "gu_chen": 0.21}},
+             {"h_ratio": 0.15, "bbox": [400, 30, 440, 90], "sims": {"lin_wan": 0.03, "gu_chen": 0.02}}]
+    q1 = next(i for i in PO.evaluate("x.png", req, remote={"faces": faces}, local={"Q2": [], "Q4": None, "Q7": None}).items if i.id == "Q1")
+    pf_ = {r["face"]: r for r in q1.evidence["per_face"]}
+    assert q1.status == "fail" and pf_[0]["verdict"] == "过" and pf_[0]["as"] == "lin_wan"
+    assert pf_[1]["verdict"] == "不像" and pf_[1]["as"] == "gu_chen" and pf_[1]["bbox"] == [200, 12, 250, 82]
+    assert pf_[2]["verdict"] == "陌生人"
+    lab = ACC.identity({"items": [{"id": "Q1", "status": q1.status, "detail": q1.detail, "evidence": q1.evidence}]})
+    assert [f["face"] for f in lab["wrong_faces"]] == [1, 2]
+
+
+def test_video_hands_frame_rules(tmp_path):
+    """视频手形抽帧（总调度 20:1x）：≥2 帧同类手部命中才 fail；单帧只记录；低置信不算；一帧都没测成 = untested；能从片子均匀抽帧"""
+    import sys
+    sys.path.insert(0, str(ROOT))
+    import numpy as np
+    import cv2
+    from tools.vqa import video_hands as VH
+    hit = {"code": "extra_hands", "conf": "med", "detail": "单人手框 人0=3 > 2"}
+    low = {"code": "finger_ratio", "conf": "low", "detail": "x"}
+    r = VH.judge_frames([{"frame": "f1", "defects": [hit], "hands": 3}, {"frame": "f2", "defects": [hit, low], "hands": 3},
+                         {"frame": "f3", "defects": [], "hands": 2}])
+    assert r["status"] == "fail" and r["hits"] == {"extra_hands": 2} and "f1" in r["reasons"][0] and "2/3" in r["reasons"][0]
+    r = VH.judge_frames([{"frame": "f1", "defects": [hit], "hands": 3}, {"frame": "f2", "defects": [low], "hands": 2},
+                         {"frame": "f3", "defects": [], "hands": 2}])
+    assert r["status"] == "pass" and r["noted"]
+    assert VH.judge_frames([{"frame": "f1", "error": "服务不可用"}])["status"] == "untested"
+    # OVERSIGHT-F 第 6 轮 P2：测成 < 3 帧 = untested；分母只算检出了手的帧；都没检出手 = na
+    assert VH.judge_frames([{"frame": "f1", "defects": [], "hands": 2}, {"frame": "f2", "defects": [], "hands": 2}])["status"] == "untested"
+    r = VH.judge_frames([{"frame": "f1", "defects": [hit], "hands": 3}, {"frame": "f2", "defects": [hit], "hands": 3},
+                         {"frame": "f3", "defects": [], "hands": 0}, {"frame": "f4", "defects": [], "hands": 0}])
+    assert r["status"] == "fail" and r["tested"] == 2 and "2/2" in r["reasons"][0]
+    assert VH.judge_frames([{"frame": f"f{i}", "defects": [], "hands": 0} for i in range(4)])["status"] == "na"
+    clip = tmp_path / "c.mp4"
+    w = cv2.VideoWriter(str(clip), cv2.VideoWriter_fourcc(*"mp4v"), 12, (64, 48))
+    for i in range(48):
+        w.write(np.full((48, 64, 3), i * 5, np.uint8))
+    w.release()
+    fr = VH.sample_frames(clip, 8, tmp_path / "frames")
+    assert 6 <= len(fr) <= 8 and all(p.exists() for p in fr)
+
+
+def test_anomaly_server_split_and_http_client(monkeypatch, tmp_path):
+    """常驻检测服务（总调度 20:1x）：REMOTE_SRC 单一来源拆成“加载模型 / 每请求”两段，拆不开就启动报错；
+    客户端 host 写 http 地址就走服务（返回格式不变），服务不可用 = 每条 error（调用方记 untested），不当通过"""
+    import sys
+    sys.path.insert(0, str(ROOT))
+    from tools.vqa import anomaly as AN
+    from tools.vqa import anomaly_server as S
+    setup, per = S.split_remote_src(AN.REMOTE_SRC)
+    assert "json.load(sys.stdin)" in setup and per.startswith("refs = {}") and "@@RES@@" in per
+    with pytest.raises(RuntimeError):
+        S.split_remote_src("import os\nprint(1)\n")
+    from PIL import Image
+    img = tmp_path / "a.png"
+    Image.new("RGB", (32, 32)).save(img)
+    import urllib.request
+    def boom(*a, **k):
+        raise OSError("connection refused")
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    out = AN.measure({"a": img}, "http://10.0.0.36:8893", refs={})
+    assert "常驻检测服务不可用" in out["a"]["error"]
+
+
+def test_anomaly_refless_stranger_is_untested_and_blocks(monkeypatch):
+    """OVERSIGHT-F 第 6 轮：同一张陌生人图（ep07-S3 尾帧）不带身份参照 → judge 必须 untested（不是 clean），check / 验收人数项 untested 并阻断；
+    带参照照判 extra_head。原来 refs 没就绪时 strangers=[] 静默跳过 = 未测当通过"""
+    import sys
+    sys.path.insert(0, str(ROOT))
+    from tools.vqa import anomaly as AN
+    from tools.vqa import accept as ACC
+    monkeypatch.setenv("NS_RUN_ID", "series10_v1")                     # 回归样本是 V1 的
+    lab = json.loads((ROOT / "data/vqa/regression_anomaly/labeled.json").read_text(encoding="utf-8"))["ep07-S3|last_v19"]
+    r = AN.judge(lab["feat"], lab["cast"])
+    assert [d["code"] for d in r["defects"] if d["conf"] != "low"] == ["extra_head"]
+    noref = {**lab["feat"], "refs_loaded": []}
+    r = AN.judge(noref, lab["cast"])
+    assert r["verdict"] == "untested" and r["untested"] and "身份参照没加载" in r["untested"][0]
+    monkeypatch.setattr(AN, "measure", lambda files, host="gpu36", **k: {"x": noref})
+    assert AN.check("x.png", lab["cast"])["status"] == "untested"
+    monkeypatch.setattr(AN, "shot_cast", lambda sid: lab["cast"])
+    c = ACC.count_check("ep07-S3", "x.png", feat=noref)
+    assert c["status"] == "untested"
+    lab_ = {"identity": {"status": "pass"}, "outfit": {"status": "pass"}, "prompt": {"status": "pass"}, "count": c}
+    lab_["ok"] = ACC.summarize(lab_)
+    pf = {"ok": True, "blocking": [], "items": []}
+    ACC.apply(pf, lab_)
+    assert pf["ok"] is False and "Q10" in pf["blocking"]                 # 未测 = 阻断，不是 pass

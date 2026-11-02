@@ -5,6 +5,7 @@ import type { ShotDetail, Take } from "../types";
 import { fmtTime, LAST_SOURCE_LABEL, segDiff, stageActive, stageTakes, usesGpu3Chain } from "../util";
 import { JobBar, Score } from "./frames";
 import { useFocusTrap } from "../ds/helpers";
+import { LoadImg } from "../ds/LoadImg";
 
 /** UIMASTER（UM-0531）：全屏看图是弹框——role=dialog + 焦点陷阱，关掉后焦点回到“看大图”按钮（和其它弹框同一套） */
 function TrapDiv(props: React.HTMLAttributes<HTMLDivElement>) {
@@ -237,7 +238,7 @@ export function Viewer() {
                   )}
                 </figcaption>
                 <div className="vw-img">
-                  {p.shown.url ? <img src={p.shown.url} alt={p.role} /> : <div className="vw-empty">{`还没有${LABEL[p.stage]}`}</div>}
+                  {p.shown.url ? <LoadImg src={p.shown.url} alt={p.role} /> : <div className="vw-empty">{`还没有${LABEL[p.stage]}`}</div>}
                 </div>
                 <div className="vw-meta muted">
                   {t ? (

@@ -42,7 +42,27 @@ def _dir(run_id: str) -> Path:
     return d
 
 
+CLOSED = ("archived", "frozen", "paused")
+
+
+def run_status(run_id: str) -> str | None:
+    """runs.json 里这部剧的状态（不在登记表 = None）"""
+    import sys as _s
+    _s.path.insert(0, str(REPO / "tools" / "autopilot"))
+    import runs as RN
+    return ((RN.registry(REPO).get("runs") or {}).get(run_id) or {}).get("status")
+
+
+def _refuse_closed(run_id: str, what: str) -> None:
+    """W-37：已归档 / 冻结 / 暂停的剧不能再开写、续写或推进（409 大白话原因）"""
+    s = run_status(run_id)
+    if s in CLOSED:
+        word = {"archived": "已归档", "frozen": "已冻结", "paused": "已暂停"}[s]
+        raise HTTPException(409, f"{run_id} {word}（{s}），不能{what}；要恢复请找总调度")
+
+
 def _spawn(run_id: str, body: StartBody, owner_ok: bool = False) -> dict:
+    _refuse_closed(run_id, "开写或推进")
     p = _procs.get(run_id)
     if p is not None and p.poll() is None:
         raise HTTPException(409, "这个剧本正在自动写，等它停下再点")
@@ -101,14 +121,18 @@ def p1_review(d: Path) -> dict | None:
     state = json.loads(sp.read_text(encoding="utf-8"))
     rounds = []
     for r in state.get("rounds") or []:
-        rp = REPO / r["dir"] / "RESULT.json"
+        rp = REPO / (r.get("dir") or "_no_dir_") / "RESULT.json"
         res = json.loads(rp.read_text(encoding="utf-8")) if rp.exists() else {}
         rounds.append({"n": r.get("n"), "dir": r.get("dir"), "passed": r.get("passed"), "why": r.get("why"),
                        **{k: res.get(k) for k in ("totals", "mean", "sigma", "item_mean", "item_split", "judge_ids", "top_fixes", "problems")}})
     import yaml
     cfg = yaml.safe_load((REPO / "config/prompts/hollywood_p1_review.yaml").read_text(encoding="utf-8")) or {}
+    od = state.get("owner_direction")
     return {"rounds": rounds, "latest": rounds[-1] if rounds else None,
-            "threshold": {k: cfg.get(k) for k in ("min_mean", "min_item_mean", "max_rounds", "judges")}}
+            "threshold": {k: cfg.get(k) for k in ("min_mean", "min_item_mean", "max_rounds", "judges")},
+            "owner_direction": ({**{k: od.get(k) for k in ("at", "round", "mean", "totals", "sha")}, "by": "总调度", "why": _og().owner_direction_text(d)}      # W-39：给项目方看的不带内部编号（审计原文在 STATE.json）
+                                if (od and _og().owner_direction(d)) else None),          # 总调度转项目方定方向（只对当时那一稿有效）
+            "revise_options": list(_og().REVISE_OPTIONS)}
 
 
 def _load(name: str, rel: str):
@@ -170,8 +194,9 @@ def _actor(request: Request) -> str:
 
 class GateBody(BaseModel):
     key: str
-    action: str
+    action: str                     # approve =“用这版”；revise =“修改”；redirect =“换方向”（只在 owner_direction 状态）
     note: str = ""
+    options: list[str] = []         # “修改”的一键选项（owner_gate.REVISE_OPTIONS）
     by: str = "项目方"
 
 
@@ -183,7 +208,7 @@ def gate(run_id: str, body: GateBody, request: Request):
     if actor == "未登录":                       # OVERSIGHT-F 第 3 轮 P1-3a：未登录不能替项目方点闸门
         raise HTTPException(403, "请先登录再点“用这版 / 修改”")
     try:
-        g = _og().act(d, body.key, body.action, body.note, actor)   # by 一律取登录会话，不信前端传的值
+        g = _og().act(d, body.key, body.action, body.note, actor, body.options)   # by 一律取登录会话，不信前端传的值
     except PermissionError as e:              # W-25：P1 没过三评委门槛不收“用这版”（“修改”照常收）
         raise HTTPException(409, str(e)) from e
     except ValueError as e:
@@ -194,6 +219,16 @@ def gate(run_id: str, body: GateBody, request: Request):
     if p is None or p.poll() is not None:
         started = _spawn(run_id, StartBody(episode=ep))
     return {"accepted": True, "gate": g, "started": started, "note": None if started else "正在推进中，已记下，下一次推进会处理"}
+
+
+def _reject_archived(run_id: str, brief: dict | None) -> None:
+    reg = json.loads((REPO / "config" / "pipeline" / "runs.json").read_text(encoding="utf-8")).get("runs") or {}
+    arch = {k for k, v in reg.items() if (v or {}).get("status") == "archived"}
+    if run_id in arch:
+        raise HTTPException(409, "这部剧已归档，不能再往里写；请新建一部剧")
+    bad = [x for x in ((brief or {}).get("registry_from") or []) if x in arch]
+    if bad:
+        raise HTTPException(409, "不能拿已归档的剧做续写来源：" + "、".join(bad))
 
 
 class BriefBody(BaseModel):
@@ -207,12 +242,21 @@ class BriefBody(BaseModel):
     seconds_min: int = 60
     seconds_max: int = 120
     clean_cut: bool = True                 # 完全切割（不带旧剧内容进写作包，L-126）；OVERSIGHT-F 11-02：新剧默认 True，自动写 CLEAN_CUT.json
+    source_run: str = ""                   # clean_cut=false 续写时的源剧（不能是已归档 / 冻结 / 暂停的剧，W-37）
 
 
 @router.post("/api/script-autoflow/{run_id}/brief")
 def brief(run_id: str, body: BriefBody):
     if not run_id.replace("-", "").replace("_", "").isalnum():
         raise HTTPException(400, "运行编号不合法")
+    _refuse_closed(run_id, "写新的 Brief")
+    _reject_archived(run_id, body.brief)   # 旧实现（只认 archived）保留：已归档剧再挡一道
+    if not body.clean_cut:                 # 续写：源剧（source_run，或 brief.registry_from 里登记过的剧）不能是已归档的剧
+        srcs = [body.source_run] if body.source_run else []
+        srcs += [x for x in ((body.brief or {}).get("registry_from") or []) if run_status(str(x)) is not None]
+        for src in srcs:
+            if run_status(src) in CLOSED:
+                raise HTTPException(409, f"续写的源剧 {src} 状态是 {run_status(src)}（已归档 / 冻结 / 暂停），不能从它续写；V2 请用完全切割（clean_cut）")
     import sys as _s
     _s.path.insert(0, str(REPO / "packages" / "schema"))
     from ns_schema import storyline as SL

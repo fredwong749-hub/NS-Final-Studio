@@ -121,3 +121,57 @@ def test_poster_cover_preferred(tmp_path, monkeypatch):
     assert SL._poster_cover(RUN) is None
     _w(tmp_path / "data" / "posters" / RUN / "manifest.json", {"current": {"file": f"data/posters/{RUN}/portrait_A_zh.jpg"}})
     assert SL._poster_cover(RUN).startswith(f"/files/posters/{RUN}/portrait_A_zh.jpg")
+
+
+def test_story_runs_list_carries_autoflow_brief(tmp_path, monkeypatch):
+    """W-30：左侧列表要用的写作状态（verdict / P1G / 闸门 / 评审轮数上限）由 /api/story-runs 带出，前端和页头用同一个 p1Status"""
+    from ns_api import story_runs as SR
+    from ns_api import script_autoflow as SA
+    monkeypatch.setattr(SR, "RUNS", tmp_path)
+    d = tmp_path / "r1"
+    _w(d / "P0_brief.json", {"title": "x"})
+    _w(d / "autoflow.json", {"verdict": "awaiting_p1_judges"})
+    monkeypatch.setattr(SA, "status", lambda rid: {"verdict": "p1_review_failed", "stages": [{"id": "P1G", "status": "x"}, {"id": "P2", "status": "y"}],
+                                                   "owner_gates": {"enabled": True, "gates": {}}, "p1_review": {"latest": {"n": 3, "passed": False, "mean": 27.3, "top_fixes": ["别带"]},
+                                                                                                               "threshold": {"max_rounds": 4}}})
+    b = SR._autoflow_brief(d)
+    assert b["verdict"] == "p1_review_failed" and [s["id"] for s in b["stages"]] == ["P1G"] and b["p1_review"]["threshold"]["max_rounds"] == 4
+    assert "top_fixes" not in b["p1_review"]["latest"]
+    assert SR._autoflow_brief(tmp_path / "none") is None
+
+
+def test_run_title_survives_p1_revision_rename(tmp_path):
+    """W-32：P1 返修期间正式 P1_storyline.json 被改名留档，剧名读最新一份 P1_storyline.v*.json；剧本库和 story-runs 同一个函数"""
+    import os
+    import time
+    d = tmp_path / "r"
+    _w(d / "P0_brief.json", {"title": ""})
+    assert SL.run_title_of(d) == ""
+    _w(d / "P1_storyline.v1.json", {"title": "旧名"})
+    old = d / "P1_storyline.v1.json"
+    os.utime(old, (time.time() - 100, time.time() - 100))
+    _w(d / "P1_storyline.v2.json", {"title": "透明高跟"})
+    assert SL.run_title_of(d) == "透明高跟"
+    _w(d / "P1_storyline.json", {"title": "定稿名"})
+    assert SL.run_title_of(d) == "定稿名"
+    from ns_api import story_runs as SR
+    assert SR._title_of(d) == "定稿名"
+
+
+def test_archived_run_cannot_be_target_or_continue_source(tmp_path, monkeypatch):
+    """W-37（完全切割 L-126）：已归档的剧不能作为写作目标，也不能出现在 registry_from（续写来源）里；story-runs 列表带 registry_status"""
+    import pytest as _pt
+    from fastapi import HTTPException
+    from ns_api import script_autoflow as SA
+    from ns_api import story_runs as SR
+    monkeypatch.setattr(SA, "REPO", tmp_path)
+    _w(tmp_path / "config" / "pipeline" / "runs.json", {"runs": {"old_v1": {"status": "archived"}, "cur": {"status": "producing"}}})
+    with _pt.raises(HTTPException) as e1:
+        SA._reject_archived("old_v1", None)
+    assert e1.value.status_code == 409
+    with _pt.raises(HTTPException) as e2:
+        SA._reject_archived("new_run", {"registry_from": ["old_v1"]})
+    assert e2.value.status_code == 409          # 和 script_autoflow 里 CLOSED 源剧检查统一用 409
+    SA._reject_archived("cur", {"registry_from": ["cur"]})        # 没归档的不拦
+    monkeypatch.setattr(SL, "REPO", tmp_path)
+    assert SR._registry_status("old_v1") == "archived" and SR._registry_status("drill_x") is None

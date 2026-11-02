@@ -66,7 +66,7 @@ def test_p1_pack_and_collect(JA, tmp_path):
     import json
     rd = tmp_path / "run"
     rd.mkdir()
-    (rd / "P1_storyline.json").write_text('{"title": "t"}', encoding="utf-8")
+    (rd / "P1_storyline.json").write_text('{"title": "原文"}', encoding="utf-8")
     made = JA.p1_pack(rd, 3)
     assert len(made) == 3
     for j, base in zip((1, 2, 3), (4, 4, 5)):
@@ -79,3 +79,77 @@ def test_p1_pack_and_collect(JA, tmp_path):
         op.with_name(op.name + ".done").write_text("", encoding="utf-8")
     r = JA.p1_collect(rd)
     assert r["n"] == 3 and r["totals"] == [32, 32, 36] and not r["single_judge"] and "act3" in r["item_split"]
+
+
+
+def _p1_run(JA, tmp_path, story: dict):
+    import json
+    rd = tmp_path / "run"
+    rd.mkdir()
+    (rd / "P1_storyline.json").write_text(json.dumps(story, ensure_ascii=False, indent=1), encoding="utf-8")
+    made = JA.p1_pack(rd, 3)
+    ops = [JA._abs(json.loads(JA._abs(m).read_text(encoding="utf-8"))["output"]["path"]) for m in made]
+    return rd, ops
+
+
+def _submit(op, judge_id, evs, score=5):
+    import json
+    op.parent.mkdir(parents=True, exist_ok=True)
+    items = [{"id": i, "score": score, "evidence": e} for i, e in evs.items()]
+    op.write_text(json.dumps({"judge_id": judge_id, "items": items}, ensure_ascii=False), encoding="utf-8")
+    op.with_name(op.name + ".done").write_text("", encoding="utf-8")
+
+
+def test_p1_evidence_normalized_substring_and_cap(JA, tmp_path):
+    """总调度 11-02（r4-sonnet 事件）：证据必须是 P1 原文子串（空白、全半角、引号归一化后），≤60 字；不合格那条封顶 2 分，记 evidence_fail"""
+    story = {"title": "透明高跟", "acts": [{"beat": "她在外滩系紧腰带，ABC 灯下像杂志封面。"}, {"beat": "天亮后“她”挡风回家"}]}
+    rd, ops = _p1_run(JA, tmp_path, story)
+    good = "她在外滩 系紧腰带，ＡＢＣ灯下"            # 多了空格、全角字母、全角逗号 → 归一化后仍是原文
+    for j, op in enumerate(ops, 1):
+        evs = {i: good for i in JA.P1_ITEMS}
+        evs["arc"] = '天亮后"她"挡风回家'                # 引号换了种写法，仍算原文
+        if j == 1:
+            evs["act3"] = "她在外滩痛哭"                # 编的 → 封顶 2
+            evs["men"] = "她在外滩系紧腰带" * 8         # 超过 60 字 → 封顶 2
+        _submit(op, f"J{j}", evs)
+    r = JA.p1_collect(rd)
+    assert r["n"] == 3 and r["totals"] == [34, 40, 40]          # 6×5 + 2 + 2
+    assert {(x["judge_slot"], x["id"]) for x in r["evidence_fail"]} == {("judge_1", "act3"), ("judge_1", "men")}
+    assert any("超过 60" in x["why"] for x in r["evidence_fail"]) and r["invalid_judges"] == []
+    import json
+    assert json.loads((rd / "judge_p1" / "RESULT.json").read_text(encoding="utf-8"))["evidence_fail"]
+
+
+def test_p1_evidence_over_3_invalid_then_recollect(JA, tmp_path):
+    """一份评审证据不合格超过 3 条：整份无效、不计入均分、要求重交；重交后 .done 签名变了，能重新汇总"""
+    import os
+    import time
+    AG = _agent()
+    story = {"title": "透明高跟", "beat": "她在外滩系紧腰带"}
+    rd, ops = _p1_run(JA, tmp_path, story)
+    for j, op in enumerate(ops, 1):
+        evs = {i: "她在外滩系紧腰带" for i in JA.P1_ITEMS}
+        if j == 2:
+            for i in JA.P1_ITEMS[:4]:
+                evs[i] = "编出来的话"
+        _submit(op, f"J{j}", evs)
+    r = JA.p1_collect(rd)
+    assert r["n"] == 2 and r["invalid_judges"] == ["judge_2"] and r["mean"] == 40
+    assert any("judge_2 证据不合格 4 条" in p and "请重交" in p for p in r["problems"])
+    sig1 = AG.judge_done_sig(rd / "judge_p1")
+    time.sleep(0.02)
+    _submit(ops[1], "J2", {i: "她在外滩系紧腰带" for i in JA.P1_ITEMS}, score=4)   # 重交（这里字节数同样可能不变）
+    os.utime(ops[1], ns=(time.time_ns(), time.time_ns() + 10_000_000))
+    assert AG.judge_done_sig(rd / "judge_p1") != sig1
+    r = JA.p1_collect(rd)
+    assert r["n"] == 3 and r["invalid_judges"] == [] and r["totals"] == [40, 32, 40]
+
+
+def _agent():
+    import importlib.util
+    import sys
+    sys.path.insert(0, str(ROOT / "tools" / "script_rsi"))
+    spec = importlib.util.spec_from_file_location("autoflow_agent_t", ROOT / "tools" / "script_rsi" / "autoflow_agent.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m

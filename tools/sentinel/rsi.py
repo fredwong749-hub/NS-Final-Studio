@@ -42,6 +42,8 @@ def load(c: dict, path: Path | None = None) -> tuple[list[dict], list[str]]:
             continue
         t = J.ts(d.get("at") or d.get("ts") or d.get("time") or d.get("t"))
         lid = alias.get(str(d.get("line", "")).lower())
+        if t is not None and lid is not None and d.get("score") is None and d.get("pending_stage"):
+            continue                                  # 阶段未到（SCORECARD 按主 run 算，V2 还没到这一段）：不进轨迹、不算坏行
         if t is None or lid is None or d.get("score") is None:
             bad.append(f"第 {i} 行缺时间 / 线名不认识 / 无 score：{ln[:80]}")
             continue

@@ -16,6 +16,7 @@ AB1–AB5（tools/director/camera_ab.judge，角色名换成“女主”）；�
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -37,7 +38,8 @@ PAGE = ROOT / "data/review_pages/v2_style/camera.html"
 CFG = C.cfg()
 FACE = C.asset("face")                       # assets_v2/manifest.json，sha 校验
 CLIENT = CFG["client_prefix"]
-LANES = {k: (v["url"], v["host"], v["outdir"]) for k, v in CFG["lanes"].items()}
+LANES = {k: (v["url"], v["host"], v["outdir"]) for k, v in CFG["lanes"].items()
+         if not os.environ.get("V2STYLE_LANES") or k in os.environ["V2STYLE_LANES"].split(",")}   # 卡被 4K 占用时可只用部分道
 VS = CFG["video_score"]
 SRV, SRV_REPO, SCORE_HOST = VS["dir"], VS["repo"], VS["host"]
 FRAMES = 124            # 17k+5 网格，约 5.2 s @24fps
@@ -77,12 +79,16 @@ MOVES = {
     "orbit_slowmo": ("慢动作环绕", "fantasy",
                      "The camera orbits slowly around her at eye level, about half a circle over the shot, keeping her centered, "
                      "while she moves in slow motion, her hair and coat drifting softly, her gaze following the lens."),
-    "whip_orbit": ("高速环绕急停（机械臂式）", "fantasy",
+    "whip_orbit": ("高速急推急停（机械臂式）", "fantasy",
                    "A robotic high-speed camera move: the camera whips in a fast, tight arc from her side to her front within the first second, "
                    "then decelerates sharply and settles into a locked medium close-up, while she moves in super slow motion, hair drifting."),
     "slowmo_snap_push": ("慢动作急推", "fantasy",
                          "Ultra slow-motion shot: she turns her head slowly toward the lens, hair flowing; halfway through, the camera suddenly "
                          "snaps forward in a fast dolly-in from a medium shot to a close-up of her face, then holds still in slow motion."),
+    "bullet_freeze": ("子弹时间 v2（爱范儿可灵基线句改写）", "fantasy",
+                      "Cinematic bullet time with time completely frozen: she is perfectly still like a sculpture, her hair and the hem of "
+                      "her coat hang motionless in mid-air, nothing in the scene moves except the camera, which rotates clockwise around her, "
+                      "smooth and stable with no shake, the background showing clear parallax layers, and she stays at the center of the frame."),
     "handheld_follow": ("手持跟拍（现实段）", "reality",
                         "Handheld documentary camera: the camera follows her at shoulder height with a gentle natural sway and small "
                         "breathing movements, real-time speed, staying close to her."),
@@ -177,7 +183,10 @@ def score(a: dict, host: str, host_path: str) -> dict:
 
 
 def judge(sc: dict, size: str) -> dict:
-    import camera_ab as CA          # tools/director/camera_ab.py：AB1–AB5 同口径
+    import importlib.util           # tools/director/camera_ab.py：AB1–AB5 同口径（按路径加载，避免和本文件同名冲突）
+    spec = importlib.util.spec_from_file_location("director_camera_ab", ROOT / "tools/director/camera_ab.py")
+    CA = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(CA)
     CA.WHO = "女主"
     return CA.judge({"score": sc}, want_size=size)
 

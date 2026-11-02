@@ -41,4 +41,22 @@
 | GPU 管理 | productive 40 = min(1, gpu_24h 真实运行占已知时段 / 80%)；rssh 20 = min(1, 近 24 h SENTINEL 合并调用成功率 / 0.99)（样本 < 10 记未测）；deploy_stop 15 = 部署 / 重启类暂停最长一段 ≤ 120 s 记 1，否则 120 / 最长；resident 15 = S25 常驻 CLIP 无未关工单记 1；lend_expiry 10 = S18 临时挂道无过期工单记 1 | data/rsi/gpu_24h.json（含 pause_segments）、data/sentinel/state.json mem.remote_calls、S25 / S18 工单 |
 | GPU 未测 | 没有因分区错误或旁路导致的重复出图（分区唯一来源落地后接 S17 按分区拆） | — |
 
+**口径变更留痕（总调度 11-02 20:10 批）**：七项改按主 run（series10_v2）计分，V1 已归档不再计分。出图只算 V2 的版本、视频只算 V2 的片，V2 还没到该段时写 pending_stage（不出分、不开单、不进轨迹）；剧本按 series10_v2 跑线 3；工作流的 no_stuck 换成 review_chain（P1 评审交齐后 5 分钟内自动汇总，S27），unattended 改看写作推进常驻服务心跳（S26）+ 主 run 等人决定；GPU 的 productive 按“当前阶段应有占用”算（S1 写剧本 0、S2 资产 0.3、S3 出图 0.8、S4 视频 0.8、S5 成片 0.5；应有占用为 0 时不扣分）。
+
 负责方（工单派给谁，抄送总调度）：出图 PROMPTFIX / VQAGATE / DETECT-S；视频 DEBUG-RSI / ASSEMBLY / CUTEDIT；剧本 HOLLYWOOD / SCRIPTWRITER；UI NAVIA / ASSETUX / UISCRIPT / POSTER；工作流 DEBUG-RSI / FACTORY；GPU 管理 FACTORY / NETFIX / SENTINEL；代码 AUDIT-M / FACTORY。
+
+**剧本线 S1 阶段分（总调度 11-02 20:3x 批）**：主 run 还没有分集稿时，剧本线 = P1 故事线最新一轮三评委均分 ÷ 满分 × 100，记录注明“P1 阶段分”（现 32/40 = 80，judge_p1/r4/RESULT.json 20:17）；有分集稿后自动切回线 3。S27 评审汇总探针扫描 judge_p1/ 下所有 rN 轮次目录。
+
+## 附录 B：代码线 structure 扣分前 5（SENTINEL 自动生成，口径 = tools/rsi/system_score.py STRUCT_ANCHOR 的 10 项，取自 data/sysarch/scan_latest.json 20:16:09；实时数据见 scores.jsonl system 记录 evidence.structure_top）
+
+structure 现值 888（首扫锚点 1266），分项 31.0。按文件：
+
+| # | 文件 | 扣分点数 | 构成 | 负责方（ownership.yaml） |
+|---|---|---|---|---|
+| 1 | tools/bakeoff/run.py | 19 | hard_path 5、direct_ssh 4、hard_run 4、no_timeout 3、def_ssh 1、silent_read 1、nonatomic_json 1 | BAKEOFF（已停，IMGFIX 代管） |
+| 2 | tools/video_rca/lab.py | 19 | hard_path 13、direct_ssh 2、nonatomic_json 2、def_ssh 1、hard_run 1 | VIDEO_RCA |
+| 3 | tools/monitor/server.py | 15 | silent_read 9、hard_path 6 | SENTINEL（我名下，下一轮自己清） |
+| 4 | tools/video_rca/srv_run.py | 15 | hard_path 7、no_timeout 4、nonatomic_json 2、hard_run 1、silent_read 1 | VIDEO_RCA |
+| 5 | services/api/ns_api/edits.py | 12 | silent_read 9、nonatomic_json 2、hard_run 1 | EDITDEL（已停，UIRSI 代管；改前要在 docs/uimaster/LOCKS.md 登记临时锁、改完跑 data_parity） |
+
+按模块（前两级目录）：services/api 112、tools/series10_video 63、tools/gen_contract 53、tools/video_rca 49、services/agent 48。

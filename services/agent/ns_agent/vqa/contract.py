@@ -692,7 +692,8 @@ def accept_gate(sid: str, stage: str, image, pf: dict) -> dict | None:
         _h = (_H.load().get("hosts") or {}).get(host) or {}
     except Exception:  # noqa: BLE001 — 车道表读不到：按“没有检测卡”处理（只会推迟，不会用错卡）
         _h = {}
-    defer = bool(host) and _h.get("detector_gpu", AN.DETECTOR_GPU.get(host)) is None
+    # 配了常驻检测服务（count_host = http 地址，gpu36 内网入口）就不推迟：服务器上也能直接测人数
+    defer = bool(host) and not host.startswith(("http://", "https://")) and _h.get("detector_gpu", AN.DETECTOR_GPU.get(host)) is None
     try:
         lab = ACC.label(sid, stage, image, pf, host=host or None, defer_count=defer)
     except Exception as e:  # noqa: BLE001 — 验收本身出错 = untested（闸门挡、记 score_infra），不当通过

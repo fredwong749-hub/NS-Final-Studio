@@ -813,7 +813,7 @@ def p_g26(ctx: Ctx) -> list[dict]:
 def laptop_procs_full() -> list[dict] | None:
     """python / pythonw / bash / sh 进程（pid、名字、命令行）；一次 CIM 查询，取不到返回 None 并记 UNKNOWN"""
     ps = ("[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-CimInstance Win32_Process -Filter \"Name='python.exe' OR Name='pythonw.exe' OR Name='bash.exe' OR Name='sh.exe'\" | "
-          "Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress")
+          "Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress")
     try:
         r = subprocess.run(["powershell.exe", "-NoProfile", "-Command", ps], capture_output=True, timeout=30, creationflags=NOWIN)
         d = json.loads(r.stdout.decode("utf-8", "replace") or "[]", strict=False)   # 命令行里可能有换行 / 制表符
@@ -821,7 +821,7 @@ def laptop_procs_full() -> list[dict] | None:
         UNKNOWN["laptop:process_list_full"] = repr(e)[:80]
         return None
     d = [d] if isinstance(d, dict) else d or []
-    return [{"pid": x.get("ProcessId"), "name": x.get("Name"), "cmd": x.get("CommandLine") or ""} for x in d]
+    return [{"pid": x.get("ProcessId"), "ppid": x.get("ParentProcessId"), "name": x.get("Name"), "cmd": x.get("CommandLine") or ""} for x in d]
 
 
 def laptop_shell_snapshot() -> list[dict] | None:
@@ -1107,16 +1107,42 @@ def p_scorecard(ctx: Ctx) -> list[dict]:
     SC.ensure_ui_measure(c)                    # 界面实测放后台子进程（慢）
     res = SC.compute(write=True)
     ctx.mem["scorecard"] = {k: (v or {}).get("score") for k, v in res.items()}
-    return J.j_scorecard(res, c["owners"])
+    return J.j_scorecard(res, c["owners"]) + J.j_ui_measure(jl("data/rsi/ui_measure.json") or {}, c["owners"].get("ui", "UIRSI"))
+
+
+# ================================================================== S26 / S27（总调度 20:10）
+def p_s26(ctx: Ctx) -> list[dict]:
+    c = ctx.c("S26_autoflow_resident")
+    p = ROOT / c["file"]
+    return J.j_autoflow_resident(jl(c["file"]) if p.exists() else None, p.stat().st_mtime if p.exists() else None, ctx.now, c)
+
+
+def review_rounds(base: Path, judges: int) -> list[dict]:
+    rounds = []
+    for d in [base] + sorted(x for x in base.glob("r*") if x.is_dir()):
+        done = [(d / f"judge_{k}" / "out" / "p1_review.json.done") for k in range(1, judges + 1)]
+        res = d / "RESULT.json"
+        rounds.append({"name": "r1" if d == base else d.name, "done": [x.stat().st_mtime for x in done if x.exists()],
+                       "result_t": res.stat().st_mtime if res.exists() else None})
+    return rounds
+
+
+def p_s27(ctx: Ctx) -> list[dict]:
+    from tools.autopilot import runs as RUNS
+    c = ctx.c("S27_p1_review_chain")
+    base = RUNS.run_dir(RUNS.primary_run()) / "judge_p1"
+    if not base.exists():
+        return []
+    return J.j_review_chain(review_rounds(base, int(c["judges"])), ctx.now, c)
 
 
 PROBES = {"S1": p_s1, "S2": p_s2, "S3": p_s3, "S4": p_s4, "S5": p_s5, "S6": p_s6, "S7": p_s7, "S8": p_s8, "S9": p_s9,
-          "S10": p_s10, "S11": p_s11, "S12": p_s12, "S13": p_s13, "S14": p_s14, "GPU24": p_gpu24, "S15": p_s15, "S16": p_s16, "S17": p_s17, "S18": p_s18, "S19": p_s19, "G26": p_g26, "S20": p_s20, "S21": p_s21, "S22": p_s22, "S23": p_s23, "S24": p_s24, "S25": p_s25, "SC": p_scorecard,
+          "S10": p_s10, "S11": p_s11, "S12": p_s12, "S13": p_s13, "S14": p_s14, "GPU24": p_gpu24, "S15": p_s15, "S16": p_s16, "S17": p_s17, "S18": p_s18, "S19": p_s19, "G26": p_g26, "S20": p_s20, "S21": p_s21, "S22": p_s22, "S23": p_s23, "S24": p_s24, "S25": p_s25, "SC": p_scorecard, "S26": p_s26, "S27": p_s27,
           "CTRL": p_ctrl_history}
 CFG_OF = {"S1": "S1_lane_util_min", "S2": "S2_gpu_all_idle_s", "S3": "S3_score_p50_s", "S4": "S4_recover_s", "S5": "S5_release",
           "S6": "S6_config_parity", "S7": "S7_pause_max_s", "S8": "S8_vlm_sample", "S9": "S9_ui_rules", "S10": "S10_rules_green",
           "S11": "S11_stage_stuck_s", "S12": "S12_script_ruler", "S13": "S13_human_wait",
           "S14": "S14_rsi_lines", "GPU24": "GPU24_alloc",
           "S15": "S15_flow_tick", "S16": "S16_laptop_procs", "S17": "S17_shot_render_rate", "S18": "S18_temp_holds", "S19": "S19_capacity_floor", "G26": "G26_decl_vs_actual", "S20": "S20_scratchpad_procs",
-          "S21": "S21_state_legacy_read", "S22": "S22_freeze_drift", "S23": "S23_laptop_lane_reach", "S24": "S24_api_latency", "S25": "S25_clip_resident", "SC": "SC_scorecard",
+          "S21": "S21_state_legacy_read", "S22": "S22_freeze_drift", "S23": "S23_laptop_lane_reach", "S24": "S24_api_latency", "S25": "S25_clip_resident", "SC": "SC_scorecard", "S26": "S26_autoflow_resident", "S27": "S27_p1_review_chain",
           "CTRL": "CTRL_history"}

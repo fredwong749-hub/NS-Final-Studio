@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "apps" / "web" / "src" / "v3"
 TECH = re.compile(r"GEN_CONTRACT|preflight|postflight|契约|I[1-9]\b|Q[1-9]\b|master_reject|registry|producer|prompt_rewrite|ComfyUI|payload", re.I)
 BANNED = re.compile(r"不要|打回|或不要|已标不要|不选")        # L-123：界面只有正向动作，没有“不要 / 打回”
-FILES = ["shotWord.ts", "EditBox.tsx", "Verdict.tsx", "QueueDock.tsx", "GenState.tsx", "pages/FramesPage.tsx", "assets/Verdict.tsx"]
+FILES = ["assets/V2AssetsPage.tsx", "shotWord.ts", "EditBox.tsx", "Verdict.tsx", "QueueDock.tsx", "GenState.tsx", "pages/FramesPage.tsx", "assets/Verdict.tsx"]
 
 
 def visible_strings(src: str):

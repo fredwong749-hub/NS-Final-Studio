@@ -211,7 +211,17 @@ MENTIONS = {
              "总经理", "经理", "男性驾驶", "CEO"),
     "陈宇": ("陈宇", "年轻男生"),
 }
-CHAR_IDS = {"林晚": "lin_wan", "顾沉": "gu_chen", "陈宇": "chen_yu"}
+CHAR_IDS = {"林晚": "lin_wan", "顾沉": "gu_chen", "陈宇": "chen_yu"}   # V1 旧表；运行时一律经 _char_ids()（cast_table，P1-5b）
+
+
+def _char_ids() -> dict[str, str]:
+    from . import cast_table as CT
+    return CT.char_ids() if _manifest_mode() else CHAR_IDS
+
+
+def _lead_id() -> str | None:
+    from . import cast_table as CT
+    return CT.lead_id() if _manifest_mode() else "lin_wan"
 OFFSCREEN = ("画外",)
 EXTRAS = ("柜姐", "成年男性路人", "路人", "男人")
 ADORNMENT_BY_TRIGGER = {  # 数量写成整数（REQUIREMENTS C4）
@@ -237,8 +247,25 @@ def _has(words, text: str) -> bool:
     return any(w in text for w in words)
 
 
+def _manifest_mode() -> bool:
+    from . import asset_refs as AR
+    from . import cast_table as CT
+    p = CT.current_project()
+    return bool(p and AR.manifest_rel(p))
+
+
 def mentions(bible: Bible | None = None) -> dict[str, tuple[str, ...]]:
-    """角色代称表：内置 MENTIONS + visual_bible [characters.*].detect（只追加，不改顺序）"""
+    """角色代称表：内置 MENTIONS + visual_bible [characters.*].detect（只追加，不改顺序）。
+    OVERSIGHT-F P1-5b：资产包模式（V2）只认当前剧人物表（cast_table：清单角色名 + 别名，“她” = 女主），不带 V1 的 MENTIONS / visual_bible"""
+    if _manifest_mode():
+        from . import asset_refs as AR
+        from . import cast_table as CT
+        ids, lead = CT.char_ids(), CT.lead_id()
+        out2: dict[str, tuple[str, ...]] = {}
+        for cid in dict.fromkeys(ids.values()):
+            words = tuple(n for n, c in ids.items() if c == cid) + (("她",) if cid == lead else ())
+            out2[AR.ID_NAME.get(cid, cid)] = words
+        return out2
     out = {k: tuple(v) for k, v in MENTIONS.items()}
     for c in (bible or load_bible()).characters:
         cur = out.get(c.name, ())
@@ -257,7 +284,7 @@ def resolve_characters(img: str, motion: str, prev_male: str | None = None,
         hits = [w for w in words if w in text]
         if hits:
             found[name] = hits
-    if "他" in text.replace("其他", ""):
+    if "他" in text.replace("其他", "") and not _manifest_mode():
         # “她与陈宇的日常：他递给她…”：物件所有格的主人又以“他”出现 → 就是他（不落到默认顾沉）
         male = next((m for m in ("陈宇", "顾沉") if m in found), None) or             next((m for m in ("陈宇", "顾沉") if m in obj_i + obj_m), prev_male or "顾沉")
         found.setdefault(male, []).append("他")
@@ -355,7 +382,10 @@ WHO_IDS = {"她": "lin_wan", "林晚": "lin_wan", "顾沉": "gu_chen", "陈宇":
 def _gaze_hits(text: str, present: list[str]) -> list[tuple[int, str, str, str, str | None]]:
     """→ [(位置, target, at, cue, 主语 id | None=双方)]，按位置排序"""
     out = []
-    male = next((p for p in present if p != "lin_wan"), None)
+    from . import cast_table as CT
+    fem = CT.female_ids()
+    male = next((p for p in present if p not in fem), None)
+    who_ids = CT.who_ids() if _manifest_mode() else WHO_IDS
     for k, rx in _GAZE_RE:
         for m in rx.finditer(text):
             subj = None if k == "mutual" else G3.who(text, m.start(), present)[0]
@@ -364,7 +394,7 @@ def _gaze_hits(text: str, present: list[str]) -> list[tuple[int, str, str, str, 
                 at = m.group("obj")
             elif k == "other":
                 w = m.group("who")
-                at = WHO_IDS.get(w) or (male if w in ("他", "男人", "总经理", "经理") else "") or ""
+                at = who_ids.get(w) or (male if w in ("他", "男人", "总经理", "经理") else "") or ""
                 if w == "对方" or not at or at == subj:
                     at = next((p for p in present if p != subj), "")
             out.append((m.start(), k, at, m.group(0), subj))
@@ -612,18 +642,18 @@ def build_spec(ep: Episode, shot: Shot, g: ScriptGlobals, *, looks: dict[str, di
     found = resolve_characters(img, motion, prev_male, b)
     people_words = [w for ws in found.values() for w in ws]
     for name, mentions in found.items():
-        if not visible_in(name, mentions, img) and not (name == "林晚" and "她" in motion and not img):
+        if not visible_in(name, mentions, img) and not (_char_ids().get(name) == _lead_id() and "她" in motion and not img):
             spec.notes.append(f"{name} 不在首帧画面内（{'/'.join(mentions)}）")
             continue
         own = [c for c in clauses(img) if _has(mentions, c)] or clauses(img)
         own_text = "，".join(own)
         body = [k for k, ws in BODY_PARTS.items() if _has(ws, own_text)]
         lk = looks.get(name, {})
-        cs = CharacterSpec(id=CHAR_IDS.get(name, "extra"), name=name, mentions=mentions, look_id=lk.get("look_id"),
+        cs = CharacterSpec(id=_char_ids().get(name, "extra"), name=name, mentions=mentions, look_id=lk.get("look_id"),
                            items=list(lk.get("items", [])), facing=_facing(own_text),
                            clarity=_clarity(img, mentions), visible_body=body,
                            makeup=lk.get("makeup_design", ""))
-        if name == "林晚":
+        if _char_ids().get(name) == _lead_id():
             lock = next((c.description for c in g.character_locks if c.name == name), "")
             nails = re.search(r"手指甲为([^；;，,]+(?:、[^；;，,]+)*)", lock)
             if "hands" in body and nails:
@@ -646,7 +676,7 @@ def build_spec(ep: Episode, shot: Shot, g: ScriptGlobals, *, looks: dict[str, di
     for x in EXTRAS:
         if x in img and not any(x in c.mentions for c in spec.characters):
             spec.characters.append(CharacterSpec(id="extra", name=x, mentions=[x], clarity=_clarity(img, [x])))
-    lead = next((c for c in spec.characters if c.id == "lin_wan"), None)
+    lead = next((c for c in spec.characters if c.id == _lead_id()), None)
     spec.look_id = lead.look_id if lead else None
 
     # 场景 / 光线

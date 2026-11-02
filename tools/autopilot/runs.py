@@ -64,6 +64,25 @@ def primary_run(root: Path | None = None, strict: bool = False) -> str:
     return p or DEFAULT_PRIMARY
 
 
+_FOR_ROOT: dict = {}
+
+
+def for_root(root: Path | str | None = None):
+    """tools 侧加载 runs 的唯一入口（OVERSIGHT-F P2：加载器副本收口）：root 是本仓库 → 本模块；
+    别的树（cut 冻结快照 / 测试临时仓库）→ 按文件加载那棵树里的 runs.py（缓存一份）"""
+    import importlib.util as _u
+    import sys as _s
+    if root is None or Path(root).resolve() == ROOT.resolve():
+        return _s.modules[__name__]
+    key = str(Path(root).resolve())
+    if key not in _FOR_ROOT:
+        sp = _u.spec_from_file_location(f"runs_for_root_{abs(hash(key))}", Path(root) / "tools" / "autopilot" / "runs.py")
+        m = _u.module_from_spec(sp)
+        sp.loader.exec_module(m)
+        _FOR_ROOT[key] = m
+    return _FOR_ROOT[key]
+
+
 def legacy_run(root: Path | None = None) -> str:
     """K-OPS-F24（总调度 11-02 18:4x，NETFIX 提醒）：只有这部剧（runs.json legacy_unprefixed_run，= series10_v1）用不带 run 前缀的旧路径
     （data/renders/epNN、data/import/script_v2.json、data/autopilot/ready_episodes.json、对象 id 无前缀）。primary 可以切到别的剧，

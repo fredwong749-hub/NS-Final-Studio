@@ -49,6 +49,25 @@ def _mt(p: Path) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(p.stat().st_mtime))
 
 
+def run_title_of(d: Path) -> str:
+    """剧名的唯一来源（剧本库卡片、/api/story-runs 列表、下拉、页头都用它）：提纲里的名字 → P1 定稿的剧名 →
+    P1 返修期间正式文件被改名留档（P1_storyline.v*.json）时取最新一份的剧名；都没有 = 空串"""
+    t = (_rj(d / "P0_brief.json", {}) or {}).get("title")
+    if t:
+        return t
+    st = _rj(d / "P1_storyline.json", {}) or {}
+    if st.get("title"):
+        return st["title"]
+    # OVERSIGHT-F 第 4 轮（arch_scan mtime_latest）：按文件名里的版本号取最新，不按修改时间猜
+    import re as _re
+    old = sorted(d.glob("P1_storyline.v*.json"), key=lambda q: int((_re.search(r"\.v(\d+)\.json$", q.name) or [0, 0])[1]), reverse=True)
+    for f in old:
+        t = (_rj(f, {}) or {}).get("title")
+        if t:
+            return t
+    return ""
+
+
 # ----------------------------------------------------------------------------- 场景归类（客观：地点关键词）
 # 顺序有意义：先匹配先得。每条 = (关键词, 室内/户外, 私密/公开/社交)
 _SCENE_RULES: list[tuple[tuple[str, ...], str, str]] = [
@@ -320,7 +339,7 @@ def _card(run: str, meta: dict, primary: bool) -> dict:
     ols = outlines(run)
     brief = _rj(d / "P0_brief.json", {}) or {}
     story = _rj(d / "P1_storyline.json", {}) or {}
-    title = brief.get("title") or story.get("title") or run
+    title = run_title_of(d) or "新剧（未定名）"
     total_eps = int(((brief.get("episodes") or {}).get("to") or (max(ols) if ols else 0)) or 0)
     states = {n: _ep_state(run, n, n in ols)[0] for n in range(1, total_eps + 1)}
     n_imp = sum(1 for v in states.values() if v == "imported")

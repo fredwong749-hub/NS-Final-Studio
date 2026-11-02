@@ -330,8 +330,39 @@ def episode_look_override(project: str, cid: str, ep_n: int) -> str | None:
     return v if isinstance(v, str) and v else None
 
 
+MANIFEST_DEFAULT_ALIAS = {"lead_f": "女主"}     # 清单 display_name 还没定（V2 剧本未定名）时的临时称呼
+
+
+def register_manifest_names(project) -> dict:
+    """PROMPTFIX 11-02 20:2x（V2）：资产包清单里的角色名（display_name / aliases / 默认称呼 / cid 本身）登记进 NAME_ID / ID_NAME，
+    V2 剧本的 cast 名才能对上 lead_f 等清单角色（NAME_ID 原先只有 V1 四个名字）。返回本次登记的 {名字: cid}"""
+    if not manifest_rel(project):
+        return {}
+    out = {}
+    for cid, c in ((manifest(project) or {}).get("characters") or {}).items():
+        disp = c.get("display_name") or MANIFEST_DEFAULT_ALIAS.get(cid) or cid
+        for n in [disp, *(c.get("aliases") or []), MANIFEST_DEFAULT_ALIAS.get(cid), cid]:
+            if n and NAME_ID.get(n, cid) == cid:
+                NAME_ID[n] = cid
+                out[n] = cid
+        ID_NAME[cid] = disp
+    return out
+
+
+def manifest_looks(project) -> dict[str, dict[str, Look]]:
+    """资产包模式、本剧还没有造型表（P1_looks 未定稿）时：造型直接取清单（每套造型的单品 = 部件，item_id = 清单单品 id）"""
+    out: dict[str, dict[str, Look]] = {}
+    for cid, c in ((manifest(project) or {}).get("characters") or {}).items():
+        for lid, lk in (c.get("looks") or {}).items():
+            parts = [LookPart("outfit", it.get("name") or iid, zone_of("outfit", it.get("name") or ""), iid)
+                     for iid, it in (lk.get("items") or {}).items() if isinstance(it, dict)]
+            out.setdefault(cid, {})[lid] = Look(cid, lid, "服装=" + (lk.get("name") or lid), lk.get("en") or "", lk.get("route") or "", parts)
+    return out
+
+
 def load_looks(project: str) -> dict[str, dict[str, Look]]:
     # 继承：父季造型表在前、子季在后（同一角色同一造型 id 以子季为准；子季新增的造型追加）
+    register_manifest_names(project)
     data = []
     for p in reversed(chain_files(project, "looks_file")):
         try:
@@ -351,7 +382,7 @@ def load_looks(project: str) -> dict[str, dict[str, Look]]:
                     else:
                         hit.setdefault("looks", []).append(lk)
     if not data:
-        return {}
+        return manifest_looks(project) if manifest_rel(project) else {}
     imap = item_map(project)
     out: dict[str, dict[str, Look]] = {}
     data = list(data) + hub_extra_looks(project, data)     # 资产中心“＋ 新造型”（id 与 P1 重复时以 P1 为准）
@@ -646,6 +677,8 @@ def sheet_crop(project: str, sheet: str, panel: str, zone: str | None = None) ->
     if srv:
         return srv
     if out.is_file() and out.stat().st_mtime >= src.stat().st_mtime:
+        if out.name not in _derived_index(out.parent) and derived_writable(project):   # 账本之前生成的缓存：笔记本上补登记
+            record_derived(out, project)                        # （已归档 / 冻结的剧不写——V1 树只读，FACTORY 20:4x）
         return rel(out)
     im = Image.open(src).convert("RGB")
     W, H = im.size
@@ -661,8 +694,10 @@ def sheet_crop(project: str, sheet: str, panel: str, zone: str | None = None) ->
     elif not zone:
         box = (x0, 0, x1, H)
     elif zone == "hand":
+        _guard_derived_write(project, out)
         out.parent.mkdir(parents=True, exist_ok=True)
         _hand_pair(im, _person_box(im, x0 + 4, x1 - 4)).save(out)
+        record_derived(out, project)
         return rel(out)
     else:
         bx0, by0, bx1, by1 = _person_box(im, x0 + 4, x1 - 4)
@@ -671,8 +706,10 @@ def sheet_crop(project: str, sheet: str, panel: str, zone: str | None = None) ->
         y0, y1 = by0 + int(t * h), by0 + int(btm * h)
         pad = int(0.06 * h) if zone == "feet" else int(0.02 * h)
         box = (max(x0, bx0 - pad), max(0, y0 - pad), min(x1, bx1 + pad), min(H, y1 + pad))
+    _guard_derived_write(project, out)
     out.parent.mkdir(parents=True, exist_ok=True)
     im.crop(box).save(out)
+    record_derived(out, project)
     return rel(out)
 
 
@@ -768,7 +805,13 @@ def manifest_violations(project, files) -> list:
     bad = []
     for f in files or []:
         f = rel(f) if f else f
-        if not f or str(f).startswith(ok_pref):
+        if not f:
+            continue
+        if str(f).startswith(ok_pref):
+            pc = project_cfg(project)
+            if any(str(f).startswith(str(x).rstrip("/") + "/") for x in (pc.get("crop_dir"), pc.get("board_dir")) if x) \
+                    and not derived_sha_ok(ROOT / f):
+                bad.append(f"{f} 是派生参考图，但不在 sha 账本 {DERIVED_INDEX} 里或 sha 不符（只认笔记本生成、按 sha 推送的那张）")
             continue
         if f not in ent:
             bad.append(f"{f} 不在资产包清单 {manifest_rel(project)} 里")
@@ -877,13 +920,98 @@ class DerivedRefMissing(RuntimeError):
     pass
 
 
+# PROMPTFIX 11-02 20:3x（总调度 20:10 ②）：派生参考图的 sha 账本——笔记本生成时记 <目录>/_derived_index.json {文件名: sha256}，
+# 随图一起按 sha 推两台；服务器只用账本里登记、sha 对得上的文件（字节不同 = 不是笔记本那张 → 挡）。资产包模式（V2）的 preflight I11 同样核对
+DERIVED_INDEX = "_derived_index.json"
+
+
+def _derived_index(d: Path) -> dict:
+    """账本不存在 = 空（什么都没登记 → 服务器 / I11 一律不认）；存在但读坏 = 抛错（失败关闭，不当成空账本）"""
+    f = d / DERIVED_INDEX
+    if not f.is_file():
+        return {}
+    return json.loads(f.read_text(encoding="utf-8"))
+
+
+def _archived(project: str | None) -> bool:
+    """runs.json 里这部剧是已归档 / 冻结（V1）：它的目录只读，不补写任何账本（FACTORY 20:4x：测试往 V1 refcrops 写账本被 real_data_guard 拦）"""
+    try:
+        d = json.loads((ROOT / "config" / "pipeline" / "runs.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):   # arch-ok: 读不到登记表 = 按没归档处理（旧行为）
+        return False
+    return ((d.get("runs") or {}).get(project or "") or {}).get("status") in ("archived", "frozen")
+
+
+WRITABLE_RUN_STATUS = ("preparing", "active", "producing")
+
+
+class DerivedWriteRefused(RuntimeError):
+    """派生图 / 账本要写进不在制作中的剧（已归档 / 冻结 / 暂停）——一律拒绝（L-126，OVERSIGHT-F P1-6b）"""
+
+
+def derived_writable(project: str | None) -> bool:
+    """统一写入口守卫：runs.json 里这部剧状态是 preparing / active / producing 才许写派生图和账本；
+    登记表在但读不出、剧没登记或状态是别的（archived / frozen / paused…）→ False（失败关闭）。没有登记表（沙箱）= 旧行为放行"""
+    f = ROOT / "config" / "pipeline" / "runs.json"
+    if not f.is_file():
+        return True
+    try:
+        d = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):   # arch-ok: 读不出 = 不许写（失败关闭）
+        return False
+    return ((d.get("runs") or {}).get(project or "") or {}).get("status") in WRITABLE_RUN_STATUS
+
+
+def _run_of_path(out: Path) -> str | None:
+    """写入目标所属的剧：仓库里 data/pipeline/runs/<剧>/… 或 data/renders/<剧>/…；不在仓库剧目录下（测试临时目录等）→ None"""
+    try:
+        rp = Path(out).resolve().relative_to(ROOT.resolve()).parts
+    except ValueError:
+        return None
+    if len(rp) > 3 and rp[:3] == ("data", "pipeline", "runs"):
+        return rp[3]
+    return None
+
+
+def _guard_derived_write(project: str | None, out: Path) -> None:
+    """按写入目标判（FACTORY 21:0x：按剧名一刀切会把测试临时目录也拦了）：目标在仓库某部剧的目录下，那部剧必须在制作中"""
+    run = _run_of_path(out)
+    if run is None:
+        return
+    if not derived_writable(run):
+        raise DerivedWriteRefused(f"{project} 不在制作中（runs.json 状态不是 {'/'.join(WRITABLE_RUN_STATUS)}），"
+                                  f"不许写派生图 / 账本 {rel(out)}（L-126 已归档 / 冻结的剧只读）")
+
+
+def record_derived(out: Path, project: str | None = None) -> None:
+    """笔记本生成派生图后登记 sha（原子写；服务器上不调用——服务器根本不生成）。写之前过统一守卫（P1-6b）"""
+    import os
+    import tempfile
+    out = Path(out)
+    _guard_derived_write(project, out)
+    idx = _derived_index(out.parent)
+    idx[out.name] = hashlib.sha256(out.read_bytes()).hexdigest()
+    fd, tmp = tempfile.mkstemp(dir=str(out.parent), prefix=DERIVED_INDEX + ".", suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(json.dumps(idx, ensure_ascii=False, indent=1, sort_keys=True))
+    os.replace(tmp, out.parent / DERIVED_INDEX)
+
+
+def derived_sha_ok(out: Path) -> bool:
+    out = Path(out)
+    want = _derived_index(out.parent).get(out.name)
+    return bool(want) and out.is_file() and hashlib.sha256(out.read_bytes()).hexdigest() == want
+
+
 def _derived_on_server(out: Path):
     """C7 后半（FACTORY 11-02 18:1x：gpu36 编译时本机重生成 refcrops / refboards，字节和笔记本不同 → 两台 refs_sha 不一致）：
     派生参考图只在笔记本生成、按 sha 推送。服务器上：文件在就直接用（不按修改时间判过期），不在就挡（资产缺图），绝不本地生成"""
     if not _on_server():
         return None
-    if out.is_file():
+    if out.is_file() and derived_sha_ok(out):
         return rel(out)
+    if out.is_file():
+        raise DerivedRefMissing(f"资产缺图：派生参考图 {rel(out)} 与笔记本 sha 账本（{DERIVED_INDEX}）不符或没登记，不用（K-OPS-F23）")
     raise DerivedRefMissing(f"资产缺图：派生参考图 {rel(out)} 服务器上没有（只在笔记本生成，按 sha 推送；K-OPS-F23）")
 
 
@@ -1387,7 +1515,10 @@ def resolve_shot(project: str, ep, shot, *, kept_triggers=None, looks=None, two_
             continue
         L = cl[lid]
         sheet = sheet_of(project, cid, lid)
-        if not sheet:
+        if not sheet and manifest_rel(project) and any(p.item_id and item_image(p.item_id, project) for p in L.parts):
+            # V2 资产包：造型就是项目方给的单品图（设定图在资产阶段 S3 才出），单品图进参考槽即为造型锁定，不算缺图
+            warns.append({"character": name, "kind": "造型参考用清单单品图", "detail": f"{name} 造型{lid} 还没有设定图，造型参考用资产包单品图"})
+        elif not sheet:
             missing.append({"character": name, "kind": "资产缺图", "detail": f"{name} 造型{lid} 没有设定图"})
         part_shot = subject == "part"
         # K-REN-951（PROMPTFIX 11-02，fb-0007 ep08-S5 顾沉穿上林晚的漆皮风衣）：局部、不露脸、不是背影的人只送 cast 部位看得到的
@@ -1466,7 +1597,7 @@ def resolve_shot(project: str, ep, shot, *, kept_triggers=None, looks=None, two_
             pr_item = (base - 1 if focus else base + 2 + ZONE_ORDER.get(p.zone, 9) * 0.1)
             if p.zone == "feet" and not part_shot:
                 pr_item = base + 2                                    # 鞋可见：单品里最先
-            lab = item_name(p.item_id) if src == "wardrobe" else _short(p.label)
+            lab = (_short(p.label) if manifest_rel(project) else item_name(p.item_id)) if src == "wardrobe" else _short(p.label)
             refs.append(Ref("item", cid, f, f"{SLOT_LABEL[p.slot]}：{lab}", pr_item, p.zone, src, p.item_id, lid, focus))
     sid_scene = g(shot, "scene_id")
     sov = scene_ovs.get(sid)
@@ -1570,9 +1701,13 @@ def make_board(project: str, tiles: list[tuple[str, str]]) -> str:
     T, LH = int(bc.get("tile", 512)), int(bc.get("label_h", 60))
     key = hashlib.sha1(json.dumps([[f, l, sha_file(ROOT / f)] for f, l in tiles], ensure_ascii=False).encode()).hexdigest()[:12]
     out = ROOT / project_cfg(project).get("board_dir", "data/refboards") / f"board_{key}.png"
+    srv = _derived_on_server(out)                               # 服务器：只用 sha 账本对得上的那张，绝不本地生成
+    if srv:
+        return srv
     if out.is_file():
-        return rel(out)
-    _derived_on_server(out)                                     # 服务器上没有 → 抛 DerivedRefMissing（K-OPS-F23）
+        if out.name not in _derived_index(out.parent) and derived_writable(project):   # 已归档剧（V1）目录只读，不补账本
+            record_derived(out, project)
+        return rel(out)                                     # 服务器上没有 → 抛 DerivedRefMissing（K-OPS-F23）
     n = len(tiles)
     cols = n if n <= 2 else (2 if n <= 4 else 3)
     rows = (n + cols - 1) // cols
@@ -1594,8 +1729,10 @@ def make_board(project: str, tiles: list[tuple[str, str]]) -> str:
         board.paste(im, (x + (T - im.width) // 2, y + (T - im.height) // 2))
         d.rectangle([x, y, x + T - 1, y + T + LH - 1], outline=(200, 200, 200), width=2)
         d.text((x + 10, y + T + 12), f"{CIRCLED[i]} {label}"[:22], fill=(20, 20, 20), font=font)
+    _guard_derived_write(project, out)
     out.parent.mkdir(parents=True, exist_ok=True)
     board.save(out)
+    record_derived(out, project)
     return rel(out)
 
 

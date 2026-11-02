@@ -2,7 +2,7 @@
  "_doc": "VQA 本地看图复核（契约 Q9 / 视频 V9；R11-4 / R11-5 / R11-7 / R11-10）。owner = VQA。硬规则 K-REV-V01：图片 / 视频帧只进本地视觉模型（gpu36 自建服务），绝不发外部 API；写作网关只收文字（本地模型写的描述 + 缺陷清单 + 镜头文字 + 契约结果）。每个检查项映射到一条 GEN_CONTRACT 项（contract）；blocking 只在留出一致率 ≥ calibration.min_agreement 且总调度批准后由总调度改成 true。",
  "version": "vqa-v2-gate-2026-11-01",
  "model": {
-  "vram_budget": {"gpu36:2": {"total_mib": 24576, "residents": [{"name": "vqa_nf4 实例（server.py VQA_DEDICATED=1）", "count_from": "model.instances", "peak_mib": 7400}]}, "_doc": "总调度 11-02（S3 根因：3×7.3 GB 看图 + 常驻 CLIP 2.5 GB 超出 24 GB → OOM 死锁）：同卡常驻进程峰值和 ≤ 0.9×显存，部署前 tools/vqa/vram_budget.py 拦；峰值取实例 /health 的 peak_mib 实测上限（7206–7386）。CLIP 已由 FACTORY 改 CPU，不占这张卡；以后谁要在这张卡上常驻，先登记到 residents"},
+  "vram_budget": {"gpu36:2": {"total_mib": 24576, "residents": [{"name": "vqa_nf4 实例（server.py VQA_DEDICATED=1）", "count_from": "model.instances", "peak_mib": 7400}, {"name": "异常检测常驻（tools/vqa/anomaly_server.py：yolov8m-seg + face / hand yolo + DWPose + OneFormer）", "count": 1, "peak_mib": 3000}]}, "_doc": "总调度 11-02（S3 根因：3×7.3 GB 看图 + 常驻 CLIP 2.5 GB 超出 24 GB → OOM 死锁）：同卡常驻进程峰值和 ≤ 0.9×显存，部署前 tools/vqa/vram_budget.py 拦；峰值取实例 /health 的 peak_mib 实测上限（7206–7386）。CLIP 已由 FACTORY 改 CPU，不占这张卡；以后谁要在这张卡上常驻，先登记到 residents"},
   "backends": {"gpu36": "router_nf4", "laptop": "nf4", "_doc": "SENTINEL S3 读（VQAGATE 11-02）：gpu36 = GPU2 上 3 个 nf4 实例（8876/8878/8879）由 vqa_router 占 8870 分发；laptop = 本机单实例 nf4（tools/vqa/server.py）"},
   "name": "Qwen3-VL-8B-Instruct",
   "hf": "Qwen/Qwen3-VL-8B-Instruct",

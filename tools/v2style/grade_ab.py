@@ -40,12 +40,14 @@ CFG = C.cfg()
 FACE = C.asset("face")                       # assets_v2/manifest.json，sha 校验
 TRENCH = C.asset("garment", look="O1")       # O1 风衣（server_ok）；O2 / O3 / J1 / J2 不用
 CLIENT = CFG["client_prefix"]
-LANES = {k: v["url"] for k, v in CFG["lanes"].items()}
+LANES = {k: v["url"] for k, v in CFG["lanes"].items()
+         if not __import__("os").environ.get("V2STYLE_LANES") or k in __import__("os").environ["V2STYLE_LANES"].split(",")}
 OUTDIR = {k: v["outdir"] for k, v in CFG["lanes"].items()}
 R36 = CFG["image_score"]["host_dir"]
 SCORE_PY = CFG["image_score"]["python"]
 UP = CFG["upscale_4k"]
-UP_DIR, NS_STUDIO, UP_HOST, UP_GPU = UP["work_dir"], UP["ns_studio"], UP["host"], UP["gpu"]
+UP_DIR, NS_STUDIO, UP_HOST = UP["work_dir"], UP["ns_studio"], UP["host"]
+UP_GPU = __import__("os").environ.get("V2STYLE_UP_GPU") or UP["gpu"]   # 两张借来的卡并行时逐进程指定
 
 REF_CLAUSE = ("图1是女主的脸部参考（只取脸和发型）。图2是女主的服装参考：黑色漆皮双排扣长风衣（系腰带），"
               "只取服装的款式、颜色、材质和细节，陈列架、灯框和背景不取。")
@@ -59,10 +61,13 @@ SCENES = {
     "reality": {
         "s1": ("特写", "特写构图：只拍头部与肩颈，脸部约占画面六成，头顶到下巴完整入画。她站在老式公寓的窗边，侧脸看向窗外，神情疲惫、若有所思，窗玻璃上有一层水汽"),
         "s2": ("全身", "全身构图：头顶到鞋尖完整入画，脚穿透明尖头细高跟。她走在上海石库门弄堂里，两侧是晾衣竿和斑驳的砖墙，手里拎着便利店塑料袋，低头看手机"),
-        "s3": ("中景", "中景构图：膝盖以上入画。她坐在狭小出租屋的床沿，身后是堆着纸箱的墙角和一盏小台灯，风衣没有脱，双手捧着一杯外卖咖啡，目光落在地板上"),
+        # s3（身后堆纸箱）第 1 轮纸箱上出了模糊字样（总调度 20:4x 判不合格）→ 撤下，换 s4：去掉纸箱、写明物品无字
+        "s4": ("中景", "中景构图：膝盖以上入画。她坐在狭小出租屋的床沿，身后是素色墙面、一个挂着几件衣服的简易衣架和一盏小台灯，"
+                       "风衣没有脱，双手捧着一只纯白无图案的外卖咖啡杯，目光落在地板上，画面里所有物品表面都没有任何文字、标签或图案"),
     },
 }
-SEEDS = {"s1": 20261127, "s2": 20261128, "s3": 20261129}
+SEEDS = {"s1": 20261127, "s2": 20261128, "s3": 20261129, "s4": 20261130}
+HIDDEN_LOOKS = {"fantasy_b", "reality_c"}   # 第 1 轮未过总调度审（偏白天 / 与现实 A 太像），由 fantasy_b2 / reality_c2 取代；文件保留
 NO_TEXT = "无字幕、无文字、无水印"
 
 
@@ -115,13 +120,20 @@ def load_res() -> dict:
     return C.load_json(RES, {})
 
 
-def save_res(res: dict) -> None:
-    C.save_json_atomic(RES, res)
+def save_res(res: dict, key: str | None = None) -> None:
+    """key 给了 = 只合并这一条（gen / up4k 可能多进程同时写，持文件锁：重读磁盘 → 改这一条 → 原子写）"""
+    if key is None:
+        C.save_json_atomic(RES, res)
+        return
+    with C.file_lock(RES.with_suffix(".lock")):
+        disk = C.load_json(RES, {})
+        disk[key] = res[key]
+        C.save_json_atomic(RES, disk)
 
 
 def gen() -> None:
     res = load_res()
-    tasks = [(lk, sc) for lk in L.LOOKS for sc in SEEDS if not (res.get(f"{lk}/{sc}") or {}).get("graded")]
+    tasks = [(lk, sc) for lk in L.LOOKS if lk not in HIDDEN_LOOKS for sc in SCENES[L.LOOKS[lk]["lang"]] if not (res.get(f"{lk}/{sc}") or {}).get("graded")]
     print("tasks", len(tasks), flush=True)
     refs = [prep_ref(FACE), prep_ref(TRENCH)]
     lk_ = threading.Lock()
@@ -178,13 +190,13 @@ def gen() -> None:
                        "host_path": host_path, "secs": round(time.time() - t0, 1)}
                 with lk_:
                     res[key] = rec
-                    save_res(res)
+                    save_res(res, key)
                 print(time.strftime("%H:%M:%S"), lane, key, rec["secs"], flush=True)
             except Exception as e:  # noqa: BLE001
                 print("ERR", lane, key, repr(e)[:300], flush=True)
                 with lk_:
                     res[key] = {"look": look, "scene": sc, "err": repr(e)[:300]}
-                    save_res(res)
+                    save_res(res, key)
 
     th = [threading.Thread(target=worker, args=(n, u)) for n, u in LANES.items()]
     for x in th:
@@ -237,7 +249,7 @@ def score() -> None:
 
 
 def up4k(only: list[str] | None = None) -> None:
-    """4K：静帧 → 1 s 24 fps 无损片 → gpu33 scripts/upscale_4k.py shot（SeedVR2 3B，GPU0 = 借来的道）→ 取中间帧 PNG"""
+    """4K：静帧 → 9 帧 24 fps 无损片（SeedVR2 按时间批处理，帧越少越快；24 帧实测约 12 min / 张） → gpu33 scripts/upscale_4k.py shot（SeedVR2 3B，GPU0 = 借来的道）→ 取中间帧 PNG"""
     res = load_res()
     keys = [k for k, v in res.items() if v.get("graded") and not v.get("k4") and (not only or k in only)]
     for k in keys:
@@ -246,7 +258,7 @@ def up4k(only: list[str] | None = None) -> None:
         src = ROOT / v["graded"]
         clip = OUT / "4k_work" / f"{name}.mp4"
         clip.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-loop", "1", "-i", str(src), "-t", "1", "-r", "24",
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-loop", "1", "-r", "24", "-i", str(src), "-frames:v", "9",
                         "-c:v", "libx264", "-qp", "0", "-pix_fmt", "yuv444p", str(clip)], check=True, timeout=300)
         rclip = f"{UP_DIR}/{name}.mp4"
         r = _remote(UP_HOST, f"mkdir -p {UP_DIR} && cat > {rclip}", stdin=clip.read_bytes())
@@ -262,13 +274,13 @@ def up4k(only: list[str] | None = None) -> None:
         if not rp:
             print("4k fail", k, log[-800:])
             v["k4_err"] = log[-500:]
-            save_res(res)
+            save_res(res, k)
             continue
         got = _remote(UP_HOST, f"cat {rp[0]}")
         mp4 = OUT / "4k_work" / f"{name}.4k.mp4"
         mp4.write_bytes(got.stdout)
         png = ROOT / v["graded"].replace("_graded.png", "_4k.png")
-        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", "0.5", "-i", str(mp4), "-frames:v", "1", str(png)], check=True, timeout=300)
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(mp4), "-vf", r"select=eq(n\,4)", "-frames:v", "1", str(png)], check=True, timeout=300)
         pr = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
                              "-of", "csv=p=0", str(png)], capture_output=True, text=True, timeout=60)
         v["k4"] = png.relative_to(ROOT).as_posix()
@@ -276,7 +288,7 @@ def up4k(only: list[str] | None = None) -> None:
         v["k4_secs"] = round(time.time() - t0, 1)
         v["k4_engine"] = f"{UP_HOST} SeedVR2 3B（scripts/upscale_4k.py shot --gpu {UP_GPU}）"
         v["k4_log_tail"] = log[-400:]
-        save_res(res)
+        save_res(res, k)
         print(k, v["k4_size"], v["k4_secs"], flush=True)
 
 
@@ -297,11 +309,11 @@ def page() -> None:
     for lang, title in (("fantasy", "幻想段"), ("reality", "现实段")):
         o.append(f"<div><h2>{title}</h2>")
         for look, lk in L.LOOKS.items():
-            if lk["lang"] != lang:
+            if lk["lang"] != lang or look in HIDDEN_LOOKS:
                 continue
             o.append(f"<div class=cand><b>{html.escape(lk['label'])}</b>　<span class=sm>预设 v2_editorial_{look} · LUT v2_{look}.cube</span>"
                      f"<div class=sm>风格后缀：{html.escape(L.SUFFIX[look])}</div><div class=row>")
-            for sc in SEEDS:
+            for sc in SCENES[lang]:
                 v = res.get(f"{look}/{sc}") or {}
                 if not v.get("graded") or v.get("hide"):
                     continue

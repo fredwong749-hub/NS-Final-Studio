@@ -62,36 +62,44 @@
   "gpu36:2",
   "gpu36:0",
   "gpu36:1",
-  "gpu33:0"
+  "gpu33:1",
+  "gpu33:3"
  ],
  "_retired_lanes_note": "退役的道：所有 producer 一律 hold（render_endpoints 里还登记着 gpu36:2，不 hold 会被派单）。gpu36:2 = L-100 改看图卡（11-02 03:1x NETFIX）。",
  "_lent_lanes": {
-  "gpu33:0": {
-   "to": "STYLE-V2",
-   "until": "2026-11-02T23:10:56",
-   "expires_at": "2026-11-02T23:10:56",
-   "client_prefix": "stylev2-",
-   "by": "STYLE-V2",
-   "at": "2026-11-02T19:10:56"
-  },
   "gpu36:0": {
    "to": "STYLE-V2",
-   "until": "2026-11-02T23:10:56",
-   "expires_at": "2026-11-02T23:10:56",
+   "until": "2026-11-02T22:18:03",
+   "expires_at": "2026-11-02T22:18:03",
    "client_prefix": "stylev2-",
    "by": "STYLE-V2",
-   "at": "2026-11-02T19:10:56"
+   "at": "2026-11-02T20:48:03"
   },
   "gpu36:1": {
    "to": "STYLE-V2",
-   "until": "2026-11-02T23:10:56",
-   "expires_at": "2026-11-02T23:10:56",
+   "until": "2026-11-02T22:18:03",
+   "expires_at": "2026-11-02T22:18:03",
    "client_prefix": "stylev2-",
    "by": "STYLE-V2",
-   "at": "2026-11-02T19:10:56"
+   "at": "2026-11-02T20:48:03"
+  },
+  "gpu33:3": {
+   "to": "PROMPTFIX",
+   "until": "2026-11-02T21:25:30",
+   "expires_at": "2026-11-02T21:25:30",
+   "client_prefix": "promptfix-",
+   "by": "PROMPTFIX",
+   "at": "2026-11-02T20:55:30"
   }
  },
- "_temp_holds": {},
+ "_temp_holds": {
+  "gpu33:1": {
+   "why": "STYLE-V2 SeedVR2 4K 放大（非 ComfyUI GPU 任务，总调度 20:4x 定用 hold）",
+   "at": "2026-11-02T20:49:09",
+   "by": "DEBUG-RSI",
+   "expires_at": "2026-11-02T22:49:09"
+  }
+ },
  "_images_history": [
   {
    "at": "2026-11-02T08:08:08",

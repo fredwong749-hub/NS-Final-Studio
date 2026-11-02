@@ -42,8 +42,8 @@ def test_looks_parse_list_and_closed(tmp_path):
     looks, err = LT.parse('```json\n[{"name": "x", "char_id": "lead_f", "looks": [{"id": "O1"}]}]\n```')
     assert looks and not err                             # 列表回稿（hollywood._json_block 会截坏）
     (tmp_path / "assets_v2").mkdir()
-    (tmp_path / "assets_v2" / "owner_inputs.json").write_text(json.dumps({"items": [
-        {"kind": "outfit", "outfit_id": "O1", "name": "a", "file": "f"}, {"kind": "outfit", "outfit_id": "O2", "name": "b", "file": "g"}]}), encoding="utf-8")
+    (tmp_path / "assets_v2" / "manifest.json").write_text(json.dumps({"characters": {"lead_f": {"looks": {   # OVERSIGHT-F 第 4 轮：只读 manifest.json
+        "O1": {"name": "a", "items": {"x": {"file": "f"}}}, "O2": {"name": "b", "items": {"y": {"file": "g"}}}}}}}), encoding="utf-8")
     assert any("少了清单里的造型" in p for p in LT.closed_check(looks, tmp_path))
     looks[0]["looks"].append({"id": "O9"})
     assert any("清单外" in p for p in LT.closed_check(looks, tmp_path))
@@ -62,6 +62,7 @@ def api(tmp_path, monkeypatch):
     monkeypatch.setattr(SA, "RUNS", tmp_path)
     monkeypatch.setattr(SA, "_spawn", lambda run_id, body, owner_ok=False: {"started": True, "episode": body.episode, "mode": body.import_mode})
     monkeypatch.setattr(SA, "_actor", lambda request: "owner" if request is not None else "未登录")
+    monkeypatch.setattr(SA, "run_status", lambda run_id: {"series10_v1": "archived", "series10_s2": "paused"}.get(run_id))
     return SA
 
 
@@ -93,7 +94,7 @@ def test_p1_review_threshold_from_config():
     """W-19：门槛读 config/prompts/hollywood_p1_review.yaml；均分 < 门槛、条目均分 ≤ 2、评委重复都不过"""
     AG = _load("autoflow_agent_t", "tools/script_rsi/autoflow_agent.py")
     cfg = AG.review_cfg()
-    assert cfg["min_mean"] == 34 and cfg["max_rounds"] == 3
+    assert cfg["min_mean"] == 34 and cfg["max_rounds"] == 4          # 总调度 20:0x M-V2-P1-R4：只此一次改成 4
     base = {"n": 3, "single_judge": False, "stable": True, "mean": 35, "item_mean": {"men": 4.0, "arc": 4.3}}
     assert AG.review_passed(base, cfg)[0]
     assert not AG.review_passed(dict(base, mean=27.33), cfg)[0]
@@ -374,3 +375,350 @@ def test_pending_done_no_spin_when_collect_short(tmp_path):
     assert AF.pending_done(rd) == []
     (jd / "judge_2" / "out" / "p1_review.json").write_text("评委重交了一份更长的稿", encoding="utf-8")
     assert AF.pending_done(rd) == [1]
+
+
+def _token(AG, tmp_path):
+    """测试用令牌：摘要写进临时 escalate.sha256，AG.ESCALATE_DIGEST 指过去（不碰真实 data/master、config/master）"""
+    import hashlib
+    tok = tmp_path / "escalate.token"
+    tok.write_text("test-token-123", encoding="utf-8")
+    dg = tmp_path / "escalate.sha256"
+    dg.write_text(hashlib.sha256(b"test-token-123").hexdigest() + "\n", encoding="utf-8")
+    AG.ESCALATE_DIGEST = str(dg)
+    return str(tok)
+
+
+def _od_run(api, tmp_path, name):
+    import hashlib
+    api.brief(name, api.BriefBody(theme="主题"))
+    d = tmp_path / name
+    (d / "P1_storyline.json").write_text('{"title": "t"}', encoding="utf-8")
+    (d / "judge_p1").mkdir()
+    sha = hashlib.sha256('{"title": "t"}'.encode("utf-8")).hexdigest()[:16]
+    (d / "judge_p1" / "STATE.json").write_text(json.dumps({"rounds": [{"n": 4, "sha": sha, "passed": False,
+                                                                       "result": {"mean": 32.0, "totals": [34, 32, 30]}}]}), encoding="utf-8")
+    return d
+
+
+def test_owner_direction_flow(api, tmp_path):
+    """总调度 11-02：没 escalate 时 approve 仍 409；只有总调度能 escalate；escalate 后项目方（登录）能 approve 并记“低于门槛、项目方放行”；未登录 403"""
+    from fastapi import HTTPException
+    AG = _load("autoflow_agent_t8", "tools/script_rsi/autoflow_agent.py")
+    d = _od_run(api, tmp_path, "od1")
+    with pytest.raises(HTTPException) as e:
+        api.gate("od1", api.GateBody(key="P1", action="approve"), LOGGED_IN)
+    assert e.value.status_code == 409
+    tok = _token(AG, tmp_path)
+    AG.live_note = lambda text: None
+    with pytest.raises(PermissionError):
+        AG.review_escalate_owner(d, by="HOLLYWOOD", token_file=tok)            # 不是总调度
+    with pytest.raises(PermissionError):
+        AG.review_escalate_owner(d, by="总调度 fredw-2b")                       # 只写 --by 总调度、没令牌：拒绝（P1-4a）
+    bad = tmp_path / "bad.token"
+    bad.write_text("wrong", encoding="utf-8")
+    with pytest.raises(PermissionError):
+        AG.review_escalate_owner(d, by="总调度 fredw-2b", token_file=str(bad))  # 令牌不对：拒绝
+    od = AG.review_escalate_owner(d, by="总调度 fredw-2b", why="第 4 轮仍 32", token_file=tok)
+    assert od["mean"] == 32.0 and OG.owner_direction(d) and len(od["token_digest8"]) == 8 and od["pid"]
+    assert api.status("od1")["p1_review"]["owner_direction"]["round"] == 4
+    with pytest.raises(HTTPException) as e:
+        api.gate("od1", api.GateBody(key="P1", action="approve"), None)
+    assert e.value.status_code == 403
+    g = api.gate("od1", api.GateBody(key="P1", action="approve"), LOGGED_IN)["gate"]
+    assert g["status"] == "approved" and g["below_threshold"] and g["released_by_owner"]
+    hist = OG.summary(d)["history"][-1]
+    assert hist["audit"] == "低于门槛、项目方放行" and hist["by"] == "owner"
+
+
+def test_owner_direction_revise_options_and_redirect(api, tmp_path):
+    AG = _load("autoflow_agent_t9", "tools/script_rsi/autoflow_agent.py")
+    AG.live_note = lambda text: None
+    d = _od_run(api, tmp_path, "od2")
+    with pytest.raises(Exception):
+        OG.act(d, "P1", "redirect", "新方向")              # 没转项目方之前不能换方向
+    AG.review_escalate_owner(d, by="总调度", token_file=_token(AG, tmp_path))
+    g = api.gate("od2", api.GateBody(key="P1", action="revise", options=["因果不清", "节奏拖"], note="第 9 集再狠一点"), LOGGED_IN)["gate"]
+    assert g["status"] == "revise_requested" and g["note"].startswith("因果不清；节奏拖。第 9 集再狠一点")
+    g2 = api.gate("od2", api.GateBody(key="P1", action="redirect", note="改成悬疑方向"), LOGGED_IN)["gate"]
+    assert g2["status"] == "redirect_requested"
+
+
+
+def test_owner_revise_new_draft_reviewed_reference_only(tmp_path, monkeypatch):
+    """OVERSIGHT-F P1-4b：项目方接手后改稿，新稿照样出评审包、三评委评分（只作参考、不拦）；
+    没到 34 → 自动停在 owner_direction（新稿 sha，带评分，不用再 escalate、不出返修包）；过了 34 → 走正常闸门"""
+    import hashlib
+    AG = _load("autoflow_agent_t10", "tools/script_rsi/autoflow_agent.py")
+    monkeypatch.setattr(AG, "live_note", lambda text: None)
+    rd = tmp_path / "run"
+    (rd / "writer_tasks").mkdir(parents=True)
+    (rd / "writer_out").mkdir()
+    (rd / "judge_p1").mkdir()
+    (rd / "CLEAN_CUT.json").write_text("{}", encoding="utf-8")
+    canon = rd / "P1_storyline.json"
+    canon.write_text('{"title": "new"}', encoding="utf-8")
+    old_sha = "0000000000000000"
+    (rd / "judge_p1" / "STATE.json").write_text(json.dumps({
+        "rounds": [{"n": 4, "sha": old_sha, "dir": str(rd / "judge_p1"), "passed": False, "result": {"mean": 32}}],
+        "owner_direction": {"sha": old_sha, "round": 4, "mean": 32}, "owner_took_over": {"at": "x"}}), encoding="utf-8")
+
+    class St:
+        def __init__(self):
+            self.d = {"stages": []}
+
+        def set(self, **k):
+            self.d.update(k)
+
+        def stage(self, sid, name, status, decider, **k):
+            self.d["stages"].append({"id": sid, "status": status})
+
+        def save(self):
+            pass
+    JA = _load("judge_agent_t2", "tools/script_rsi/judge_agent.py")
+    monkeypatch.setattr(AG, "_load", lambda name, rel: JA if name == "judge_agent" else _load(name + "_y", rel))
+    monkeypatch.setattr(JA, "p1_pack", lambda run_dir, judges, out=None: [])
+    # 第 5 轮（超过 max_rounds=4）：项目方已接手 → 照样出包，不 escalate
+    monkeypatch.setattr(JA, "p1_collect", lambda run_dir, out=None: {"n": 0})
+    st = St()
+    assert AG._p1_review(None, rd, 1, st, {}, canon, {}) is False and st.d.get("verdict") == "awaiting_p1_judges"
+    # 评完没到 34 → 自动 owner_direction（新稿 sha）
+    monkeypatch.setattr(JA, "p1_collect", lambda run_dir, out=None: {"n": 3, "totals": [33, 32, 31], "mean": 32.0, "sigma": 0.8, "stable": True,
+                                                                     "single_judge": False, "item_mean": {"men": 3.5}, "top_fixes": []})
+    st = St()
+    assert AG._p1_review(None, rd, 1, st, {}, canon, {}) is False and st.d["verdict"] == "owner_direction"
+    od = json.loads((rd / "judge_p1" / "STATE.json").read_text(encoding="utf-8"))["owner_direction"]
+    assert od["sha"] == hashlib.sha256('{"title": "new"}'.encode("utf-8")).hexdigest()[:16] and od["mean"] == 32.0 and od["auto_after_owner_revise"]
+    assert not list((rd / "writer_tasks").glob("P1_a*.json"))         # 不出返修包
+    assert OG.p1_review_ok(rd)[0]                                     # 项目方可以直接“用这版”
+
+
+
+def test_closed_runs_refused(api, tmp_path):
+    """W-37：已归档 / 冻结 / 暂停的剧，/brief 和 /start 都回 409；clean_cut=false 续写时源剧不能是已归档的剧（选 series10_v1 续写被拒）"""
+    from fastapi import HTTPException
+    for rid in ("series10_v1", "series10_s2"):
+        with pytest.raises(HTTPException) as e:
+            api.brief(rid, api.BriefBody(theme="主题"))
+        assert e.value.status_code == 409
+    with pytest.raises(HTTPException) as e:
+        api.brief("new_run", api.BriefBody(theme="续写", clean_cut=False, source_run="series10_v1"))
+    assert e.value.status_code == 409 and "series10_v1" in e.value.detail
+    with pytest.raises(HTTPException) as e:
+        api.brief("new_run2", api.BriefBody(brief={"schema": "nsfs.brief/1", "outline": "x", "episodes": {"from": 1, "to": 1},
+                                                   "registry_from": ["series10_v1"]}, clean_cut=False))
+    assert e.value.status_code == 409
+    assert api.brief("new_run3", api.BriefBody(theme="全新的剧"))["ok"]
+
+
+def test_spawn_refuses_closed_run():
+    import importlib.util
+    src = (ROOT / "services/api/ns_api/script_autoflow.py").read_text(encoding="utf-8")
+    assert '_refuse_closed(run_id, "开写或推进")' in src          # /start /repair /import /gate 都经 _spawn
+
+
+
+def test_escalate_missing_token_file_is_permission_error(tmp_path):
+    AG = _load("autoflow_agent_t12", "tools/script_rsi/autoflow_agent.py")
+    _token(AG, tmp_path)
+    with pytest.raises(PermissionError) as e:
+        AG._check_escalate_token(str(tmp_path / "nope.token"))
+    assert "不存在" in str(e.value)
+
+
+def test_escalate_advances_immediately(api, tmp_path):
+    """W-38：escalate 之后 /tasks 的 verdict 立刻就是 owner_direction（同一把推进锁里推进一次，source=escalate；escalate 自己不写 verdict）"""
+    AG = _load("autoflow_agent_t13", "tools/script_rsi/autoflow_agent.py")
+    AF = _load("autoflow_t13", "tools/script_rsi/autoflow.py")
+    AG.live_note = lambda text: None
+    d = _od_run(api, tmp_path, "od5")
+    tok = _token(AG, tmp_path)
+    seen = {}
+
+    def fake_run(run_dir, ep, import_mode):           # 真实 _p1_review 的 owner_direction 分支写状态（不跑整条链）
+        seen["locked"] = (run_dir / f"work_ep{ep:02d}" / "advance.lock").exists()
+        st = AF.Status(run_dir, ep, 0.0)
+        AG._p1_review(None, run_dir, ep, st, {}, run_dir / "P1_storyline.json", {})
+        return st.d
+    AG.run = fake_run
+    r = AF.escalate_and_advance(d, "总调度", "第 4 轮 32", tok, AG=AG)
+    assert r["verdict"] == "owner_direction" and seen["locked"]
+    assert api.tasks("od5")["episodes"]["autoflow_ep01"]["verdict"] == "owner_direction"
+    assert not (d / "work_ep01" / "advance.lock").exists()
+    log = [json.loads(x) for x in (d / "autoflow.log").read_text(encoding="utf-8").splitlines()]
+    assert [x["source"] for x in log] == ["escalate", "escalate"] and log[-1]["verdict"] == "owner_direction"
+
+
+def test_escalate_waits_for_lock_and_writes_nothing_if_busy(api, tmp_path):
+    import os
+    AG = _load("autoflow_agent_t14", "tools/script_rsi/autoflow_agent.py")
+    AF = _load("autoflow_t14", "tools/script_rsi/autoflow.py")
+    AG.live_note = lambda text: None
+    d = _od_run(api, tmp_path, "od6")
+    tok = _token(AG, tmp_path)
+    lk = d / "work_ep01" / "advance.lock"
+    lk.parent.mkdir(parents=True, exist_ok=True)
+    lk.write_text(json.dumps({"pid": os.getpid(), "source": "daemon", "at": __import__("time").time()}), encoding="utf-8")
+    with pytest.raises(RuntimeError):
+        AF.escalate_and_advance(d, "总调度", "", tok, AG=AG, wait_s=0.6)
+    assert not OG.owner_direction(d)                  # 没拿到锁：什么都没写
+
+
+def test_new_rule_does_not_auto_repair_p1_in_owner_hands(api, tmp_path):
+    """SL-12 上线时 V2 P1 正在项目方手里（owner_direction）：新规则只挂在状态里给项目方看，不自动出返修包；
+    没转项目方时照旧返修；混有别的阻断项也照旧返修"""
+    from types import SimpleNamespace as NS
+    AG = _load("autoflow_agent_t15", "tools/script_rsi/autoflow_agent.py")
+    AF = _load("autoflow_t15", "tools/script_rsi/autoflow.py")
+    AG.live_note = lambda text: None
+    d = _od_run(api, tmp_path, "od7")
+    issues = [NS(rule="SL-12", level="block", field="episodes[2].logline", message="占位词「未提供」")]
+    RCH = NS(validate=lambda link, txt, ctx: (NS(issues=issues), {"title": "t"}, ""))
+    st = AF.Status(d, 1, 0.0)
+    canon = d / "P1_storyline.json"
+    assert AG._p1_owner_hold(RCH, d, canon, {}, st) is None              # 还没转项目方：照旧返修
+    AG.review_escalate_owner(d, by="总调度", token_file=_token(AG, tmp_path))
+    assert AG._p1_owner_hold(RCH, d, canon, {}, st) == {"title": "t"}
+    assert "SL-12" in st.d["p1_owner_hold"][0]
+    issues.append(NS(rule="SL-02", level="block", field="characters", message="未成年"))
+    assert AG._p1_owner_hold(RCH, d, canon, {}, st) is None              # 有别的阻断项：照旧返修
+
+
+
+def test_owner_direction_text_plain(api, tmp_path):
+    """W-39：给项目方看的文字不带内部编号；两选（用这版 / 修改，换方向在修改里）"""
+    import re
+    AG = _load("autoflow_agent_t16", "tools/script_rsi/autoflow_agent.py")
+    AF = _load("autoflow_t16", "tools/script_rsi/autoflow.py")
+    AG.live_note = lambda text: None
+    d = _od_run(api, tmp_path, "od8")
+    sp = d / "judge_p1" / "STATE.json"
+    stt = json.loads(sp.read_text(encoding="utf-8"))
+    stt["rounds"] = [{"n": i + 1, "sha": "x", "result": {"mean": m}} for i, m in enumerate((27.33, 31.67, 32))] + stt["rounds"]
+    sp.write_text(json.dumps(stt), encoding="utf-8")
+    AG.review_escalate_owner(d, by="总调度 fredw-2b（M-V2-P1-R4）", why="按 M-V2-P1-R4 交项目方", token_file=_token(AG, tmp_path))
+    assert OG.owner_direction_text(d) == "四轮评审都在 32 分左右，没到 34"
+    st = AF.Status(d, 1, 0.0)
+    AG._p1_review(None, d, 1, st, {}, d / "P1_storyline.json", {})
+    na = st.d["next_action"]
+    assert na == "四轮评审都在 32 分左右，没到 34，总调度转给你定方向：用这版 / 修改（修改里可以选换个方向重写）"
+    shown = json.dumps({"na": na, "stages": st.d.get("stages"), "od": api.status("od8")["p1_review"]["owner_direction"]}, ensure_ascii=False)
+    assert not re.search(r"[A-Z]-[A-Z0-9]+-|fredw", shown) and "换方向 /" not in shown
+
+
+def _fill_run(api, tmp_path, name):
+    """可过 check_storyline 的小故事线，第 1 集 logline 留了占位词；已评 4 轮、低于门槛"""
+    import hashlib
+    sys.path.insert(0, str(ROOT / "packages" / "schema"))
+    from ns_schema import storyline as SL
+    d = _od_run(api, tmp_path, name)
+    s = {"schema": "nsfs.storyline/1", "title": "T", "premise": "p", "world": {"setting": "s"},
+         "characters": [{"name": "甲", "char_id": "ch_a", "role": "主角", "age": 24, "gender": "女", "zh_look": "系统锁",
+                         "en_phrase": "a 24-year-old East Asian woman with long black hair", "voice_phrase": "a bright young female voice, brisk pace"}],
+         "scenes": [{"scene_id": "sk_room", "name": "房间", "space": "小房间", "time_of_day": "夜", "light": "台灯暖光", "fixtures": "桌子、椅子"}],
+         "episodes": [{"episode": 1, "title": "一", "owner_line": "原话", "logline": "原话展开（未提供）", "characters": ["甲"], "scenes": ["sk_room"]}]}
+    txt = json.dumps(s, ensure_ascii=False, indent=1)
+    (d / "P1_storyline.json").write_text(txt, encoding="utf-8")
+    (d / "P1_looks.json").write_text("[]", encoding="utf-8")
+    sp = d / "judge_p1" / "STATE.json"
+    stt = json.loads(sp.read_text(encoding="utf-8"))
+    stt["rounds"][-1]["sha"] = hashlib.sha256(txt.encode("utf-8")).hexdigest()[:16]
+    sp.write_text(json.dumps(stt), encoding="utf-8")
+    ctx = {"brief": SL.Brief.model_validate({"outline": "x", "episodes": {"from": 1, "to": 1}}), "episode": 1,
+           "registry_chars": [], "registry_scenes": []}
+    return d, s, ctx
+
+
+def test_approve_triggers_placeholder_fill(api, tmp_path):
+    """总调度 11-02：项目方点“用这版”且只剩 SL-12 → 自动出补占位包（只许改含占位词的字段，不进三评委）；
+    改了别的字段 → 拒收、重出包；只改那个字段且 check_storyline 过 → 写回正式稿、转交记录跟着新 sha、P1 仍算通过"""
+    AG = _load("autoflow_agent_t17", "tools/script_rsi/autoflow_agent.py")
+    AF = _load("autoflow_t17", "tools/script_rsi/autoflow.py")
+    AG.live_note = lambda text: None
+    RCH = AG._load("run_chain", "tools/pipeline/run_chain.py")
+    d, s, ctx = _fill_run(api, tmp_path, "fill1")
+    canon = d / "P1_storyline.json"
+    AG.review_escalate_owner(d, by="总调度", token_file=_token(AG, tmp_path))
+    st = AF.Status(d, 1, 0.0)
+    obj = AG._p1_owner_hold(RCH, d, canon, ctx, st)
+    assert obj is not None and st.d["p1_owner_hold_fields"] == ["episodes[0].logline"]
+    ctx["storyline"] = obj
+    assert not AG.p1_gate(RCH, d, 1, st, ctx, canon)                    # 还没点“用这版”：等项目方
+    assert "第 1 集一句简介还没写完，写手会自动补上，不影响你选的这版" in st.d["next_action"]
+    assert not (d / "writer_tasks" / "P1_fill_a1.json").exists()
+    api.gate("fill1", api.GateBody(key="P1", action="approve"), LOGGED_IN)
+    assert not AG.p1_gate(RCH, d, 1, st, ctx, canon)
+    pk = json.loads((d / "writer_tasks" / "P1_fill_a1.json").read_text(encoding="utf-8"))
+    assert pk["fields"] == ["episodes[0].logline"] and "原话展开（未提供）" in pk["user"]
+    assert not list((d / "judge_p1").glob("r5"))                         # 不进三评委
+    # 改了别的字段 → 拒收
+    out = d / "writer_out" / "P1_fill_a1.json"
+    out.parent.mkdir(exist_ok=True)
+    bad = json.loads(json.dumps(s))
+    bad["episodes"][0]["logline"] = "原话展开，她把鞋留在门口"
+    bad["title"] = "新剧名"
+    out.write_text(json.dumps(bad, ensure_ascii=False), encoding="utf-8")
+    out.with_name(out.name + ".done").write_text("", encoding="utf-8")
+    assert not AG.p1_gate(RCH, d, 1, st, ctx, canon)
+    pk2 = json.loads((d / "writer_tasks" / "P1_fill_a2.json").read_text(encoding="utf-8"))
+    assert "改了不许改的字段：title" in pk2["user"] and json.loads(canon.read_text(encoding="utf-8"))["title"] == "T"
+    # 只补那个字段 → 收下
+    out2 = d / "writer_out" / "P1_fill_a2.json"
+    out2.write_text(json.dumps({"fields": {"episodes[0].logline": "原话展开，她把鞋留在门口"}}, ensure_ascii=False), encoding="utf-8")
+    out2.with_name(out2.name + ".done").write_text("", encoding="utf-8")
+    assert AG.p1_gate(RCH, d, 1, st, ctx, canon)
+    new = json.loads(canon.read_text(encoding="utf-8"))
+    assert new["episodes"][0]["logline"] == "原话展开，她把鞋留在门口" and new["title"] == "T"
+    assert AG.diff_paths(s, new) == ["episodes[0].logline"]
+    assert OG.owner_direction(d) and OG.p1_approved(d)                   # 转交记录 / 评审跟着新 sha，P1 仍算通过，不重评
+    stt = json.loads((d / "judge_p1" / "STATE.json").read_text(encoding="utf-8"))
+    assert stt["placeholder_fills"][-1]["fields"] == ["episodes[0].logline"]
+    assert list(d.glob("P1_storyline.prefill*.json"))                   # 旧稿留档
+
+
+def test_fill_check_rejects_still_placeholder_and_unknown_field(api, tmp_path):
+    AG = _load("autoflow_agent_t18", "tools/script_rsi/autoflow_agent.py")
+    RCH = AG._load("run_chain", "tools/pipeline/run_chain.py")
+    d, s, ctx = _fill_run(api, tmp_path, "fill2")
+    f = ["episodes[0].logline"]
+    assert AG.fill_check(RCH, s, json.dumps({"fields": {"episodes[0].logline": "她 TODO"}}), f, ctx)[0] is None
+    assert AG.fill_check(RCH, s, json.dumps({"fields": {"episodes[0].nope": "x"}}), f, ctx)[1] == ["字段 episodes[0].nope 不存在"]
+    assert "episodes[0].logline 没补" in AG.fill_check(RCH, s, json.dumps({"fields": {}}), f, ctx)[1]
+
+
+def test_writer_packets_carry_placeholder_override(tmp_path):
+    """OVERSIGHT-F P1-8a：任何新出的写作包，只要提到“标未提供”，就必须带 SL-12 覆盖说明（P1 包 dry 出一份核对；packet 单一出口兜底）"""
+    AG = _load("autoflow_agent_t19", "tools/script_rsi/autoflow_agent.py")
+    AF = AG.AF
+    sys.path.insert(0, str(ROOT / "packages" / "schema"))
+    from ns_schema import storyline as SL
+    RCH = AG._load("run_chain", "tools/pipeline/run_chain.py")
+    AF.patch_chain(RCH)
+    rd = tmp_path / "dry_run"
+    rd.mkdir()
+    st = AF.Status(rd, 1, 0.0)
+    ctx = {"brief": SL.Brief.model_validate({"outline": "上海时尚模特的幻想和现实", "episodes": {"from": 1, "to": 10}}), "episode": 1,
+           "registry_chars": [], "registry_scenes": []}
+    pr = RCH.WP.build("P0-P1", ctx)
+    pk = AG.packet(rd, st, "P1", "writer", 1, "P0-P1", pr["system"], pr["user"], "json", [], 1)
+    for k in ("system", "content_rules"):
+        assert AF.OVERRIDE_TAG in pk[k] or "正文不留占位词" in pk[k]
+    assert pk["system"].count(AF.OVERRIDE_TAG) >= 1 and "缺信息就按 P0 / P1 已有设定写成具体内容" in pk["system"]
+    assert AF.OVERRIDE_TAG in AF.HARD_RULES and AF.OVERRIDE_TAG in AG.CONTENT_RULES and AF.OVERRIDE_TAG in AG.CONTENT_RULES_CLEAN
+    pk2 = AG.packet(rd, st, "P1_x", "writer", 1, "P0-P1", "缺信息标“未提供”", "u", "json", [], 1)    # 兜底：任何提到“标未提供”的包
+    assert AF.OVERRIDE_TAG in pk2["system"]
+    for f in (rd / "writer_tasks").glob("*.json"):
+        t = f.read_text(encoding="utf-8")
+        assert not (("标“未提供”" in t or "标未提供" in t) and AF.OVERRIDE_TAG not in t), f.name
+
+
+def test_fill_value_must_be_substantial(api, tmp_path):
+    """OVERSIGHT-F P2：补占位的值要非空、去空白后 ≥ 6 字、不能只是“无”“。”"""
+    AG = _load("autoflow_agent_t20", "tools/script_rsi/autoflow_agent.py")
+    RCH = AG._load("run_chain", "tools/pipeline/run_chain.py")
+    d, s, ctx = _fill_run(api, tmp_path, "fill3")
+    f = ["episodes[0].logline"]
+    for v in ("无", "。", "  ", "同上同上", "无。。。。。。", "a b c"):
+        new, probs = AG.fill_check(RCH, s, json.dumps({"fields": {"episodes[0].logline": v}}, ensure_ascii=False), f, ctx)
+        assert new is None and any("太短或是空话" in p or "没补" in p for p in probs), v
+    new, probs = AG.fill_check(RCH, s, json.dumps({"fields": {"episodes[0].logline": "她把鞋留在门口"}}, ensure_ascii=False), f, ctx)
+    assert new is not None and probs == []

@@ -946,6 +946,12 @@ def main(argv: list[str]) -> int:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
     store = default_store()
     if argv[:1] == ["seed"]:
+        from . import cast_table as CT
+        from . import asset_refs as AR
+        p = CT.current_project()
+        if p and AR.manifest_rel(p):              # OVERSIGHT-F P2：seed 会塞 V1 林晚的脸 / 触发词；资产包模式（V2）的造型只认清单
+            print(f"拒绝：{p} 是资产包模式，造型和身份脸只认 {AR.manifest_rel(p)}，不用 looks seed（会带进 V1 内容）")
+            return 2
         store.seed(force="--force" in argv)
         w, b, s = store.wardrobe(), store.lookbook(), store.schedule()
         print(f"seeded {store.dir}: {len(w.items)} items, {len(w.decor_states)} decor states, {len(b.looks)} looks, "

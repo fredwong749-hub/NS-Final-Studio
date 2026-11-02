@@ -151,17 +151,26 @@ def ledger(event: str, it: dict, **extra) -> None:
 
 
 def read_ledger() -> list[dict]:
-    try:
-        lines = ledger_path().read_text(encoding="utf-8").splitlines()
-    except OSError:
+    """账本不存在 = 还没有记录（空表）；存在但读不了 = 抛错（不当成空账本）。单行坏 = 跳过并记数（追加式账本写一半的尾行）"""
+    p = ledger_path()
+    if not p.is_file():
         return []
-    out = []
-    for ln in lines:
+    out, bad = [], 0
+    for ln in p.read_text(encoding="utf-8").splitlines():
+        if not ln.strip():
+            continue
         try:
             out.append(json.loads(ln))
-        except ValueError:
-            continue
+        except ValueError:  # arch-ok: 追加式账本的单个坏行（写到一半）跳过并计数，其它行照用
+            bad += 1
+    if bad:
+        _log_bad_lines(p, bad)
     return out
+
+
+def _log_bad_lines(p: Path, n: int) -> None:
+    import logging
+    logging.getLogger("ns_api.edits").warning("%s 有 %d 行不是 JSON，已跳过", p, n)
 
 
 # ============================================================ 版本链（非 take 的图片）
@@ -182,10 +191,19 @@ def load_chain(obj_id: str, original: str | None = None) -> dict:
                           "label": "原版"}]}
 
 
-def save_chain(ch: dict) -> dict:
-    p = chain_path(ch["id"])
+def _atomic_json(p: Path, obj) -> None:
+    """JSON 原子写：临时文件 + os.replace（arch_scan nonatomic_json）"""
+    import os
+    import tempfile
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(ch, ensure_ascii=False, indent=1), encoding="utf-8")
+    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=p.name + ".", suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(json.dumps(obj, ensure_ascii=False, indent=1))
+    os.replace(tmp, p)
+
+
+def save_chain(ch: dict) -> dict:
+    _atomic_json(chain_path(ch["id"]), ch)
     return ch
 
 
@@ -268,13 +286,11 @@ def identity_refs(text: str) -> list[dict]:
         if pick:
             out.append({"character": name, "asset_id": cid, "path": pick["file"], "role": "identity",
                         "ref_id": pick.get("ref_id")})
-        elif cid == "lin_wan":
-            try:
-                fr = json.loads((REPO / "config" / "face_reference.json").read_text(encoding="utf-8"))
-                if (REPO / fr["reference"]).is_file():
-                    out.append({"character": name, "asset_id": cid, "path": fr["reference"], "role": "identity"})
-            except (OSError, ValueError, KeyError):
-                pass
+        elif cid == "lin_wan" and not _RP.manifest():          # V1 旧兜底；资产包模式（V2）身份脸只认清单，不读 V1 face_reference
+            frp = REPO / "config" / "face_reference.json"
+            fr = json.loads(frp.read_text(encoding="utf-8")) if frp.is_file() else {}
+            if fr.get("reference") and (REPO / fr["reference"]).is_file():
+                out.append({"character": name, "asset_id": cid, "path": fr["reference"], "role": "identity"})
     return out
 
 
@@ -454,10 +470,7 @@ def _yaml_rules() -> list[dict]:
     import yaml
     out = []
     for p in sorted((KNOWLEDGE / "rules").glob("*.yaml")) + sorted((KNOWLEDGE / "inbox").glob("*edit_*.yaml")):
-        try:
-            d = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-        except Exception:  # noqa: BLE001
-            continue
+        d = yaml.safe_load(p.read_text(encoding="utf-8")) or {}      # 规则文件读坏 = 抛错（knowledge compile --check 也会拦）
         for r in d.get("rules") or []:
             if isinstance(r, dict):
                 out.append({**r, "_src": _prel(p)})
@@ -623,10 +636,7 @@ def make_plan(ctx: dict, feedback: str, ann: dict | None, llm: dict | None) -> t
 # ============================================================ 执行层：图片
 def _contract_cfg() -> dict:
     """config/gen_contract.json（REFLOCK：LoRA 白名单 / 禁用、后缀禁用词）"""
-    try:
-        return json.loads((REPO / "config" / "gen_contract.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
+    return json.loads((REPO / "config" / "gen_contract.json").read_text(encoding="utf-8"))   # 契约配置缺 / 坏 = 抛错（失败关闭，不当成没有禁用词）
 
 
 def clean_instruction(text: str) -> tuple[str, list[str]]:
@@ -661,12 +671,22 @@ def compose_instruction(plan: dict, ctx: dict) -> str:
     return ins
 
 
+def edit_project(run: str | None = None) -> str:
+    """改图 / 导演加强的槽位规划项目 = 镜头所在的剧（NS_RUN 或 runs.json primary，ns_agent.run_paths.current_run）；
+    该剧在 config/recipes/asset_refs.json 没有项目配置 → 抛错，不退回 series10_v1（config/edit_engines.json 的 project 字段已废）"""
+    from ns_agent import asset_refs as AR
+    r = run or _RP.current_run()
+    if not r or not AR.project_cfg(r):
+        raise ValueError(f"改图槽位规划：当前剧 {r!r} 没有资产项目配置（不退回 V1，失败关闭）")
+    return r
+
+
 def contract_inputs(ctx: dict, instruction: str, engine: dict) -> dict:
     """生成契约 preflight 请求（REFLOCK：参考图 = ns_agent.asset_refs 槽位规划 plan.files，提示词 = plan.prompt_prefix +
     改图指令 + 默认出图预设后缀 I7；LoRA 过白名单 I8）。原图作底图（init_image），不占参考槽"""
     shot = ctx.get("shot_id")
     model = engine.get("contract_model") or "qwen_image_2.1"
-    project = engines_cfg().get("project") or "series10_v1"
+    project = edit_project()                       # OVERSIGHT-F P1-5a：按当前剧取（V2 不按 V1 规划参考图）；取不到 = ValueError（失败关闭）
     cc = _contract_cfg()
     allow, banned = set(cc.get("lora_allow") or {}), set(cc.get("lora_banned") or {})
     comp = _compiled(shot)
@@ -810,7 +830,7 @@ def _front(client) -> None:
             if getattr(e, "status", None) == 400:
                 try:
                     return {"_http400": json.loads(e.body), "_msg": str(e)}
-                except (TypeError, ValueError):
+                except (TypeError, ValueError):  # arch-ok: 400 的正文不是 JSON → 按原错误抛出（下一行 raise），不吞
                     pass
             raise
     client._post_prompt = post
@@ -859,7 +879,9 @@ def base_quality(path: Path) -> dict | None:
         from ns_agent.gen_contract import postflight as PF
         t4 = (_contract_cfg().get("image_thresholds") or {}).get("Q4_texture") or {}
         q = PF.texture(Image.open(path).convert("RGB"))
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001  # arch-ok: 底图质感只作参考（调用方把 None 当“未测”，不当通过），原因写日志
+        import logging
+        logging.getLogger("ns_api.edits").warning("底图质感算不了（未测）：%s：%r", path, e)
         return None
     bad = []
     if "lap_full" in q and t4.get("lap_full_min") is not None and q["lap_full"] < t4["lap_full_min"]:
@@ -1339,7 +1361,7 @@ def list_edits(type: str | None = None, id: str | None = None, limit: int = 50):
     for p in sorted(_items_dir().glob("ed-*.json"), key=lambda p: -p.stat().st_mtime):
         try:
             it = json.loads(p.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except (OSError, ValueError):  # arch-ok: 列表接口跳过读坏的单条（写到一半 / 正被删），该条本身不受影响；其余照列
             continue
         if (type and it.get("type") != type) or (id and it.get("id") != id):
             continue
@@ -1540,16 +1562,13 @@ def _learn_id(key: str, prefix: str) -> str:
     """K-<域>-E<两位>：按改法类别固定分配（data/edits/learn_ids.json），满足 knowledge 的 id 格式"""
     p = data_dir() / "learn_ids.json"
     with _lock:
-        try:
-            ids = json.loads(p.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            ids = {}
+        ids = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}   # 不存在 = 还没分配过；读坏 = 抛错（不重新从 E01 发号撞 id）
         k = f"{prefix}:{key}"
         if k not in ids:
             used = {int(v.rsplit("E", 1)[1]) for v in ids.values() if v.startswith(f"K-{prefix}-E")}
             ids[k] = f"K-{prefix}-E{next(i for i in range(1, 100) if i not in used):02d}"
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(json.dumps(ids, ensure_ascii=False, indent=1), encoding="utf-8")
+            _atomic_json(p, ids)
         return ids[k]
 
 
@@ -1588,10 +1607,9 @@ def learn_from(it: dict) -> dict | None:
 def _rsi_line(rid: str, key: str, n: int, path: Path) -> None:
     """RSI_LEDGER 记一行；规则列写“inbox 草案 REN-Exx”（不带 K- 前缀：草案不是正式规则，免得 compile.py 的 id 存在性检查报错）"""
     led = KNOWLEDGE / "RSI_LEDGER.md"
-    try:
-        txt = led.read_text(encoding="utf-8")
-    except OSError:
-        return
+    if not led.is_file():
+        raise FileNotFoundError(f"{led} 不在，编辑闭环沉淀记不了（RSI_LEDGER 是必备文件）")
+    txt = led.read_text(encoding="utf-8")
     if "## E. 编辑闭环沉淀" not in txt:
         txt = (txt.rstrip("\n") + "\n\n## E. 编辑闭环沉淀（EDITDEL，自动）\n\n"
                "| # | 假设 | 实验 | 结果（数字） | 结论 | 规则 | 来源 |\n|---|---|---|---|---|---|---|\n")

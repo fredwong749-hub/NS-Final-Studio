@@ -40,21 +40,21 @@ def ffmpeg() -> str:
     return f
 
 
-def loudnorm(src: Path, dst: Path, lufs: float = -16.0, tp: float = -1.0, lra: float = 20.0) -> dict:
-    """ffmpeg 两遍 loudnorm（EBU R128）：先测，再按测量值归一；整体增益够不到目标（真峰卡住）时 ffmpeg 自动转动态模式
-    （透明限幅）。输出 48 kHz；dst 后缀决定编码（.flac / .wav=24-bit）。返回 ffmpeg 第二遍报告。"""
+LEVEL_TOL_LU = 0.5     # 交付响度偏离目标的容差（STYLE-V2 11-02：瞬态很尖的音轨两遍 loudnorm 只到 −19.98 LUFS，原来静默交付偏轻的音轨）
+
+
+def _loudnorm_2pass(ff: str, src: Path, dst: Path, lufs: float, tp: float, lra: float) -> dict:
     import re as _re
-    ff = ffmpeg()
     base = f"loudnorm=I={lufs}:TP={tp - 0.5}:LRA={lra}"   # 动态模式真峰会超出目标约 0.3 dB（ep06 实测 −0.7），留 0.5 dB 余量
     r1 = subprocess.run([ff, "-hide_banner", "-nostats", "-i", str(src), "-af", base + ":print_format=json", "-f", "null", "-"],
-                        capture_output=True, text=True)
+                        capture_output=True, text=True, timeout=600)
     m = json.loads(_re.findall(r"\{[^{}]*\"input_i\"[^{}]*\}", r1.stderr)[-1])
     af = (f"{base}:measured_I={m['input_i']}:measured_TP={m['input_tp']}:measured_LRA={m['input_lra']}:"
           f"measured_thresh={m['input_thresh']}:offset={m['target_offset']}:linear=true:print_format=json")
     tmp = dst.with_name(dst.stem + ".tmp" + dst.suffix)
     codec = ["-c:a", "flac", "-sample_fmt", "s32"] if dst.suffix == ".flac" else ["-c:a", "pcm_s24le"]
     r2 = subprocess.run([ff, "-y", "-hide_banner", "-nostats", "-i", str(src), "-af", af, "-ar", "48000", "-ac", "2", *codec, str(tmp)],
-                        capture_output=True, text=True)
+                        capture_output=True, text=True, timeout=600)
     if r2.returncode != 0:
         raise RuntimeError(r2.stderr[-300:])
     tmp.replace(dst)
@@ -63,10 +63,57 @@ def loudnorm(src: Path, dst: Path, lufs: float = -16.0, tp: float = -1.0, lra: f
             "output_tp": float(out["output_tp"]), "normalization_type": out.get("normalization_type")}
 
 
+def _prelimit(ff: str, src: Path, dst: Path, gain_db: float, tp: float) -> None:
+    """重做用：192 kHz 下先加增益再快速限幅（attack 0.1 ms / release 10 ms），压住尖瞬态，让 loudnorm 的线性增益够得到目标"""
+    lim = 10 ** ((tp - 0.5) / 20)
+    af = (f"aresample=192000,volume={gain_db:.2f}dB,alimiter=limit={lim:.4f}:attack=0.1:release=10:level=false,"
+          f"aresample=48000")
+    r = subprocess.run([ff, "-y", "-hide_banner", "-nostats", "-i", str(src), "-af", af, "-c:a", "pcm_f32le", str(dst)],
+                       capture_output=True, text=True, timeout=600)
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr[-300:])
+
+
+def loudnorm(src: Path, dst: Path, lufs: float = -16.0, tp: float = -1.0, lra: float = 20.0) -> dict:
+    """ffmpeg 两遍 loudnorm（EBU R128）：先测，再按测量值归一；整体增益够不到目标（真峰卡住）时 ffmpeg 自动转动态模式
+    （透明限幅）。输出 48 kHz；dst 后缀决定编码（.flac / .wav=24-bit）。返回 ffmpeg 第二遍报告。
+    交付检查：output_i 偏离目标 > LEVEL_TOL_LU → 报警（stderr + 返回 level_warn）并重做一次（先限幅再两遍 loudnorm）；
+    重做后仍偏离 → level_ok=False（调用方 / 闸门据此拦），不静默交付。"""
+    import sys as _sys
+    ff = ffmpeg()
+    rep = _loudnorm_2pass(ff, src, dst, lufs, tp, lra)
+    dev = rep["output_i"] - lufs
+    rep["level_dev_lu"] = round(dev, 2)
+    rep["level_ok"] = abs(dev) <= LEVEL_TOL_LU
+    if rep["level_ok"]:
+        return rep
+    warn = f"BGM 响度偏离目标 {dev:+.2f} LU（目标 {lufs} LUFS，实测 {rep['output_i']}，{Path(src).name}）→ 限幅后重做"
+    print("WARN", warn, file=_sys.stderr, flush=True)
+    import tempfile
+    gain = max(0.0, -dev) + 1.0
+    tries = []
+    with tempfile.TemporaryDirectory(prefix="bgm_prelimit_") as td:   # 中间文件放系统临时目录，不落 data/music
+        lim = Path(td) / "prelimit.wav"
+        for _ in range(5):        # 限幅会吃掉一部分响度：按剩余偏差加增益，最多 5 次
+            _prelimit(ff, src, lim, gain, tp)
+            rep2 = _loudnorm_2pass(ff, lim, dst, lufs, tp, lra)
+            dev2 = rep2["output_i"] - lufs
+            tries.append({"prelimit_gain_db": round(gain, 2), "output_i": rep2["output_i"]})
+            if abs(dev2) <= LEVEL_TOL_LU:
+                break
+            gain += max(0.0, -dev2) + 1.0
+    rep2.update(level_dev_lu=round(dev2, 2), level_ok=abs(dev2) <= LEVEL_TOL_LU, level_warn=warn,
+                redo={"why": "level_dev", "first": {k: rep[k] for k in ("output_i", "output_tp", "normalization_type")},
+                      "tries": tries})
+    if not rep2["level_ok"]:
+        print("WARN", f"重做后仍偏离 {dev2:+.2f} LU：level_ok=False", file=_sys.stderr, flush=True)
+    return rep2
+
+
 def flac_to_wav(src: Path, dst: Path) -> None:
     tmp = dst.with_name(dst.stem + ".tmp.wav")
     r = subprocess.run([ffmpeg(), "-y", "-v", "error", "-i", str(src), "-c:a", "pcm_s24le", "-ar", "48000", "-ac", "2", str(tmp)],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, timeout=600)
     if r.returncode != 0:
         raise RuntimeError(r.stderr[-300:])
     tmp.replace(dst)

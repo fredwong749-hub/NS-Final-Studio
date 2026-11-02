@@ -252,7 +252,9 @@ def measure(img, rows: list[dict], refs: dict, face_bbox=None, scene_ref=None, o
     def _fb(o):                                   # 行里带了这个角色自己的脸框就用它；没带时林晚用主脸框，其他角色未测
         if "face_bbox" in o:
             return o["face_bbox"]
-        return face_bbox if o.get("character", "lin_wan") == "lin_wan" else None
+        from ..cast_table import lead_id                         # OVERSIGHT-F P2：主脸框归女主（按剧取，不写死 lin_wan）
+        lead = lead_id() or "lin_wan"
+        return face_bbox if o.get("character", lead) == lead else None
     out["outer"] = [{k: v for k, v in {**o, "p": (lambda v: None if v is None else round(float(v), 4))(
         outer_presence(img, _fb(o), o.get("en") or "jacket", o.get("probe"), o.get("region") or "torso"))}.items() if k != "face_bbox"} for o in outer or []]
     if scene_ref is not None:

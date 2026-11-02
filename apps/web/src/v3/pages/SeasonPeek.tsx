@@ -13,6 +13,7 @@ import { epOf, loadCandidates, plainLabel, reloadCandidates, type Cand, type Can
 import { regenTake } from "../RegenButton.helpers";
 import { Pop } from "../widgets";
 import { dotOf, statusWord, type MainStatus } from "./seasonDot";
+import { LoadImg } from "../../ds/LoadImg";
 
 type Img = { url: string; label: string };
 const fileUrl = (f: string | null | undefined) => (f ? (f.startsWith("/") ? f : `/files/${f.replace(/^data\//, "")}`) : null);
@@ -175,7 +176,7 @@ export function SeasonDrawer({ shot, sum, status, meta, onClose }: { shot: strin
           <Section title={sum?.first_frame || img?.active != null ? "当前首帧" : cur ? (cur.ok === false || cur.bad ? `最新一版（首帧第 ${cur.n} 版，没通过，所有版本都没过）` : `最近通过的候选（首帧第 ${cur.n} 版，还没定为当前）`) : "当前首帧"}>
             {cur && !sum?.first_frame && (cur.ok === false || cur.bad) && <p className="sd-fail">未通过：{(cur.why_not ?? cur.bad ?? "").replace(/^未通过：/, "") || "检查没过"}</p>}
             {big ? (
-              <img className={`sd-big${cur && !sum?.first_frame && (cur.ok === false || cur.bad) ? " failed" : ""}`} src={thumb(big, 720) ?? big} alt="" data-zoom-label={`${shot} · 首帧${curN != null ? ` 第 ${curN} 版` : ""}`} />
+              <LoadImg className={`sd-big${cur && !sum?.first_frame && (cur.ok === false || cur.bad) ? " failed" : ""}`} src={thumb(big, 720) ?? big} alt="" data-zoom-label={`${shot} · 首帧${curN != null ? ` 第 ${curN} 版` : ""}`} />
             ) : (
               <div className="sd-big sd-none">{status?.main5 === "doing" && !status.running ? "排队中" : status?.running ? "正在出" : "未开始"}</div>
             )}

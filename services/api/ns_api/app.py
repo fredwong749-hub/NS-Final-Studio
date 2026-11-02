@@ -56,6 +56,16 @@ CAMERA_RE = re.compile(r"^((?:extreme )?slow motion|camera [^，]+|static camera
                        r"orbit[^，]*|push in[^，]*|tracking[^，]*)", re.I)
 
 app = FastAPI(title="momoso Agentic Drama Studio API")
+
+@app.middleware("http")
+async def _v1_v2_split(request: Request, call_next):
+    """V1 / V2 分开显示（NAVIA，总调度 20:3x）：文件发放层统一拦截，当前剧是 V2 时一律不给 V1 的 renders/ep… 文件"""
+    from ns_api import v1_guard
+    if request.method in ("GET", "HEAD") and v1_guard.deny(request.url.path, request.url.query, P.DATA):
+        return Response(status_code=404, content="这部剧里没有这个文件（Version 1 的文件只在 Version 1 视频库里看）")
+    return await call_next(request)
+
+
 app.add_middleware(GZipMiddleware, minimum_size=1024)  # T60：集数据 JSON 压缩（SSE 流 Starlette 默认不压）
 app.include_router(A.router)
 app.include_router(looks_router)
@@ -157,8 +167,12 @@ from ns_api import frames_index as FIDX  # noqa: E402  ASSETUX 1b：“出图”
 app.include_router(FIDX.router)
 from ns_api import frame_edit_queue as FEQ  # noqa: E402  ASSETUX：镜头“修改”异步通道（立即 202 → 改写 → 检查 → producer 队列）+ 全系统出图队列
 app.include_router(FEQ.router)
+from ns_api import v2_assets as V2A  # noqa: E402  V2 资产页（只读 assets_v2/manifest.json；成人类只给文字卡）
+app.include_router(V2A.router)
 from ns_api import video_index as VIDX  # noqa: E402  NAVIA：“视频”页索引 GET /api/videos/overview
 app.include_router(VIDX.router)
+from ns_api import v1_library as V1LIB  # noqa: E402  NAVIA：Version 1 视频库（只读）
+app.include_router(V1LIB.router)
 from ns_api import producer as PRODUCER  # noqa: E402  PRODUCER 制作监督：/api/producer/status、pause / resume / gate（读 data/producer/registry.json）
 app.include_router(PRODUCER.router)
 from ns_api import infra_status as INFRA  # noqa: E402  UIRSI r38 实时连接状态：/api/infra/status（只读看门狗 / 常驻健康状态文件，不在请求里 ssh）
@@ -2063,6 +2077,16 @@ async def _start_loop_watchdog():
 
 app.router.on_startup.append(_start_loop_watchdog)
 
+class _V1VideoFiles(StaticFiles):
+    """Version 1 视频库的只读文件出口：只放 renders/ep*/S*/takes/*.mp4|webm"""
+    async def get_response(self, path, scope):
+        from ns_api import v1_guard
+        if not v1_guard.V1_VIDEO_RE.match(path.replace("\\", "/")):
+            raise HTTPException(404, "只有 Version 1 的视频可以在这里看")
+        return await super().get_response(path, scope)
+
+
+app.mount("/v1-files", _V1VideoFiles(directory=P.DATA), name="v1-files")
 app.mount("/files", StaticFiles(directory=P.DATA), name="files")
 if WEB_DIST.exists():
     app.mount("/assets", StaticFiles(directory=WEB_DIST / "assets"), name="assets")
@@ -2075,3 +2099,29 @@ if WEB_DIST.exists():
         if path and f.is_file() and f.is_relative_to(WEB_DIST.resolve()):   # T60：dist 根下的静态文件（favicon.svg 等）
             return FileResponse(f)
         return FileResponse(WEB_DIST / "index.html")
+
+
+# 总调度 20:5x（:8800 在 20:28 后被直接结束、没有任何留痕）：启动 / 正常关闭各记一行 data/ops/api_lifecycle.jsonl；
+# 强制结束触发不了这里，由父进程侧看门狗 tools/factory/api_watchdog.py 记“exited”（退出码 + 运行时长）
+def _lifecycle(event: str) -> None:
+    import json as _j
+    import os as _o
+    import time as _t
+    try:
+        d = P.ROOT / "data" / "ops"
+        d.mkdir(parents=True, exist_ok=True)
+        with open(d / "api_lifecycle.jsonl", "a", encoding="utf-8") as f:
+            f.write(_j.dumps({"at": _t.strftime("%Y-%m-%dT%H:%M:%S"), "event": event, "pid": _o.getpid(), "ppid": _o.getppid()},
+                             ensure_ascii=False) + "\n")
+    except OSError:   # arch-ok: 留痕失败不影响服务
+        pass
+
+
+@app.on_event("startup")
+def _lifecycle_startup():
+    _lifecycle("api_startup")
+
+
+@app.on_event("shutdown")
+def _lifecycle_shutdown():
+    _lifecycle("api_shutdown")

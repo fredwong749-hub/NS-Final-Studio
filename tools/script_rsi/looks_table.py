@@ -18,10 +18,19 @@ ROOT = Path(__file__).resolve().parents[2]
 NEG = re.compile(r"\b(no|not|never|without)\b", re.I)
 
 
+def _placeholder_hits(obj) -> list[tuple[str, str]]:
+    """SL-12 同一口径（ns_schema.storyline.placeholder_hits，单一来源）"""
+    if str(ROOT / "packages" / "schema") not in sys.path:
+        sys.path.insert(0, str(ROOT / "packages" / "schema"))
+    from ns_schema.storyline import placeholder_hits
+    return placeholder_hits(obj)
+
+
 def check(looks, storyline: dict | None = None, ep_range=(1, 10)) -> list[str]:
     probs = []
     if not isinstance(looks, list) or not looks:
         return ["造型表不是非空列表"]
+    probs += [f"造型表 {p} 里有占位词「{w}」（SL-12：不能留（未提供）/ TODO / 待定 / XXX / <…>）" for p, w in _placeholder_hits(looks)]
     names = {str(c.get("name")): c for c in looks if isinstance(c, dict)}
     chars = [c.get("name") for c in (storyline or {}).get("characters") or []]
     for n in chars:
@@ -128,9 +137,22 @@ def parse(text: str):
 
 
 def owner_items(root: Path) -> list[dict]:
-    """项目方给的 V2 资产（assets_v2/owner_inputs.json items）；没有这个文件 = []"""
-    p = root / "assets_v2" / "owner_inputs.json"
-    return json.loads(p.read_text(encoding="utf-8")).get("items") or [] if p.exists() else []
+    """项目方给的 V2 资产——只从 assets_v2/manifest.json 读（OVERSIGHT-F 第 4 轮：owner_inputs.json 只是登记来源，不再被代码读）。
+    → [{kind: outfit|item|identity_face, outfit_id / item_id, name, file}]；清单读不出 = []"""
+    try:
+        m = json.loads((root / "assets_v2" / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):   # arch-ok: 清单读不出 = 没有项目方资产（closed_check 不判、写作请求不列）
+        return []
+    out = []
+    for cid, c in (m.get("characters") or {}).items():
+        if (c.get("face") or {}).get("file"):
+            out.append({"kind": "identity_face", "character": cid, "id": (c["face"].get("id") or ""), "file": c["face"]["file"]})
+        for lid, lk in (c.get("looks") or {}).items():
+            f = next((it.get("file") for it in ((lk or {}).get("items") or {}).values() if it.get("file")), None)
+            out.append({"kind": "outfit", "character": cid, "outfit_id": lid, "name": (lk or {}).get("name"), "file": f})
+        for iid, it in (c.get("items") or {}).items():
+            out.append({"kind": "item", "character": cid, "item_id": iid, "name": (it or {}).get("name"), "file": (it or {}).get("file")})
+    return out
 
 
 def _iid(it: dict) -> str:
@@ -167,7 +189,7 @@ def packet_user(storyline: dict, root: Path) -> str:
         "【任务】给故事线里的每个人物写造型表：" + chars + "。",
         "1) 女主 lead_f：造型只用项目方清单里的编号（looks_closed，不许增减、不许改名）；非亲密镜只能穿 O1 / O4（或 O4 外罩 O1，写 O1+O4）；"
         "O2 / O3 只能在 storyline 标 intimate=true 的集作为 intimate_outfit；鞋只有 SH1 / SH2；J1 / J2 只在亲密镜。schedule 逐集写清她穿哪套、配哪双鞋。",
-        "项目方资产清单（assets_v2/owner_inputs.json）：", *lines,
+        "项目方资产清单（assets_v2/manifest.json）：", *lines,
         "2) 其他人物：每人 2–3 套固定造型（服装 / 鞋 / 饰品 / EN，以及用在哪几集）。",
         "格式：", json.dumps([lead, other], ensure_ascii=False, indent=1),
     ])

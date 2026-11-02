@@ -272,3 +272,33 @@ def test_deliver_keeps_reason_plain_on_redeliver(tmp_path, monkeypatch):
     assert st["chosen"]["reason_plain"] == "人话" and st["chosen"]["reason_evidence"] == "e"
     D.deliver(1, st, CFG, "r1_c2", "项目方在声音页换用", "界面：fred（owner）")
     assert st["chosen"]["reason_plain"] == "项目方在声音页换用"
+
+
+def test_loudnorm_level_check_redoes_spiky_track(tmp_path):
+    """STYLE-V2 11-02：瞬态很尖（峰值因子 ~27 dB）的音轨两遍 loudnorm 达不到目标时，要报警并限幅重做，不静默交付偏轻的音轨"""
+    import shutil
+    import wave
+    import numpy as np
+    import pytest
+    if not shutil.which("ffmpeg"):
+        pytest.skip("没有 ffmpeg")
+    from tools.bgm import deliver as D
+    sr = 48000
+    rng = np.random.default_rng(0)
+    t = np.arange(sr * 12) / sr
+    x = 0.03 * np.sin(2 * np.pi * 220 * t) + 0.02 * np.sin(2 * np.pi * 330 * t)   # 轻的钢琴垫底
+    env = np.exp(-np.arange(int(0.03 * sr)) / (0.004 * sr))                      # 刷鼓式尖瞬态：4 ms 衰减
+    for k in range(0, len(x) - len(env), sr // 4):                                # 每 0.25 s 一下，峰值因子约 27 dB
+        x[k:k + len(env)] += 0.95 * env * rng.standard_normal(len(env)).clip(-1, 1)
+    pcm = (np.clip(np.stack([x, x], 1), -1, 1) * 32767).astype("<i2")
+    src = tmp_path / "spiky.wav"
+    with wave.open(str(src), "wb") as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(sr)
+        w.writeframes(pcm.tobytes())
+    rep = D.loudnorm(src, tmp_path / "out.flac", -16.0, -1.0)
+    assert "level_ok" in rep and "level_dev_lu" in rep
+    assert rep["level_ok"], rep                             # 重做后到位
+    assert abs(rep["output_i"] + 16.0) <= D.LEVEL_TOL_LU
+    assert rep.get("redo"), "这条应当触发重做"

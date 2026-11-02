@@ -375,7 +375,7 @@ export function EditButton({ label = "修改", size = "sm", onChanged, ...target
 }
 
 /* ================================================================ DeleteButton */
-export function DeleteButton({ type, id, label = "删除", size = "sm", icon, onDeleted }: { type: TrashType; id: string; label?: ReactNode; size?: "xs" | "sm" | "md"; icon?: boolean; onDeleted?: (e: TrashEntry) => void }) {
+export function DeleteButton({ type, id, label = "删除", size = "sm", icon, soft, onDeleted }: { type: TrashType; id: string; label?: ReactNode; size?: "xs" | "sm" | "md"; icon?: boolean; soft?: boolean; onDeleted?: (e: TrashEntry) => void }) {
   const [imp, setImp] = useState<TrashImpact | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -420,19 +420,19 @@ export function DeleteButton({ type, id, label = "删除", size = "sm", icon, on
   };
   return (
     <>
-      <Button variant="danger" size={size} icon={icon} disabled={busy} title="移到回收站（可还原）" onClick={(e) => (e.stopPropagation(), open())}>
-        {icon ? "🗑" : `🗑 ${label}`}
+      <Button variant={soft ? "ghost" : "danger"} size={size} icon={icon} disabled={busy} title="移到回收站（可还原）" onClick={(e) => (e.stopPropagation(), open())}>
+        {icon ? "🗑" : soft ? label : `🗑 ${label}`}
       </Button>
       {imp && (
         <Modal
-          title={`删除 ${imp.type_label ?? ""}「${imp.name}」？`}
+          title={soft ? `把 ${imp.type_label ?? ""}「${imp.name}」移到回收站？` : `删除 ${imp.type_label ?? ""}「${imp.name}」？`}
           sub="移到回收站，可以一键还原；永久删除要在回收站里另外确认。"
           onClose={() => setImp(null)}
           foot={
             <>
               <Button onClick={() => setImp(null)}>取消</Button>
               <Button variant="danger" solid disabled={!imp.can_delete || busy} why={imp.blocked.join("；") || err || "现在不能删"} onClick={go}>
-                {imp.needs_confirm ? "确认删除" : "删除"}
+                {soft ? "移到回收站" : imp.needs_confirm ? "确认删除" : "删除"}
               </Button>
             </>
           }

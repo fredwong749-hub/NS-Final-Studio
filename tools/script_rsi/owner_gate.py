@@ -14,7 +14,8 @@ import time
 from pathlib import Path
 
 FILE = "owner_gates.json"
-ACTIONS = ("approve", "revise")
+ACTIONS = ("approve", "revise", "redirect")     # redirect =“换方向”：只在总调度把 P1 转给项目方定方向（owner_direction）时可用
+REVISE_OPTIONS = ("因果不清", "人物动机弱", "节奏拖", "结尾没力", "台词不好", "幻想 / 现实区分不明显")   # “修改”的 6 个一键选项（总调度 11-02）
 
 
 def enabled(run_dir: Path) -> bool:
@@ -23,10 +24,49 @@ def enabled(run_dir: Path) -> bool:
     return (run_dir / FILE).exists() or (run_dir / "CLEAN_CUT.json").exists()
 
 
+OWNER_CHOICES = "用这版 / 修改（修改里可以选换个方向重写）"      # L-123：只有两选，换方向在“修改”里（W-39）
+
+
+def owner_direction_text(run_dir: Path) -> str:
+    """给项目方看的一句大白话（W-39：不带内部编号）：“四轮评审都在 32 分左右，没到 34”"""
+    sp = run_dir / "judge_p1" / "STATE.json"
+    rounds = json.loads(sp.read_text(encoding="utf-8")).get("rounds") or [] if sp.exists() else []
+    means = [float((r.get("result") or {}).get("mean")) for r in rounds if (r.get("result") or {}).get("mean") is not None]
+    try:
+        import yaml
+        min_mean = (yaml.safe_load((Path(__file__).resolve().parents[2] / "config/prompts/hollywood_p1_review.yaml")
+                                   .read_text(encoding="utf-8")) or {}).get("min_mean", 34)
+    except Exception:  # noqa: BLE001
+        min_mean = 34
+    if not means:
+        return f"评审没到 {min_mean} 分"
+    zh = "一二三四五六七八九十"
+    n = len(means)
+    head = f"{zh[n - 1]}轮评审" if n <= 10 else f"{n} 轮评审"
+    return f"{head}都在 {round(means[-1])} 分左右，没到 {min_mean}" if n > 1 else f"评审 {round(means[-1])} 分，没到 {min_mean}"
+
+
+def owner_direction(run_dir: Path) -> dict | None:
+    """总调度把低于门槛的 P1 转给项目方定方向（只能由总调度动作触发：review-state --escalate-owner --by 总调度）。
+    只对当时那一稿有效（sha 对得上）；P1 换稿后自动失效。返回 {at, by, round, mean, sha} 或 None"""
+    import hashlib
+    sp = run_dir / "judge_p1" / "STATE.json"
+    canon = run_dir / "P1_storyline.json"
+    if not (sp.exists() and canon.exists()):
+        return None
+    od = json.loads(sp.read_text(encoding="utf-8")).get("owner_direction")
+    if not od:
+        return None
+    sha = hashlib.sha256(canon.read_text(encoding="utf-8").encode("utf-8")).hexdigest()[:16]
+    return od if od.get("sha") == sha else None
+
+
 def p1_review_ok(run_dir: Path) -> tuple[bool, str]:
     """P1 三评委过没过（V2-WALK W-25：“用这版”不能绕过 34 分门槛）：judge_p1/STATE.json 最后一轮 passed=True，且那一轮评的 sha = 当前 P1_storyline.json 的 sha。
     没有评审状态：完全切割的 run 算没过（V2 必须评审）；旧 run 不设这道门槛"""
     import hashlib
+    if owner_direction(run_dir):                    # 总调度已转项目方定方向：低于门槛也允许项目方拍板（审计里记“低于门槛、项目方放行”）
+        return True, ""
     sp = run_dir / "judge_p1" / "STATE.json"
     canon = run_dir / "P1_storyline.json"
     rounds0 = (json.loads(sp.read_text(encoding="utf-8")).get("rounds") or []) if sp.exists() else []
@@ -103,12 +143,20 @@ def set_status(run_dir: Path, key: str, status: str, **extra) -> dict:
     return g
 
 
-def act(run_dir: Path, key: str, action: str, note: str = "", by: str = "项目方") -> dict:
+def act(run_dir: Path, key: str, action: str, note: str = "", by: str = "项目方", options: list[str] | None = None) -> dict:
     """网页按钮：approve =“用这版”；revise =“修改”（一句话）。先收下，推进由 autoflow 异步处理"""
     if action not in ACTIONS:
         raise ValueError(f"只认 {ACTIONS}（L-123：没有“不要”）")
+    opts = [x for x in (options or []) if x in REVISE_OPTIONS]
+    if action == "revise" and opts:                 # 一键选项 + 可选文字
+        note = "；".join(opts) + (("。" + note.strip()) if note.strip() else "")
     if action == "revise" and not note.strip():
-        raise ValueError("“修改”要写一句话")
+        raise ValueError("“修改”要写一句话，或选一个选项")
+    if action == "redirect":
+        if key != "P1" or not owner_direction(run_dir):
+            raise PermissionError("“换方向”只在总调度把故事线转给项目方定方向时可用")
+        if not note.strip():
+            raise ValueError("“换方向”要写新方向")
     if not (key == "P1" or (key.startswith("ep") and key[2:].isdigit())):
         raise ValueError("闸门只有 P1 和 epNN")
     if action == "approve" and key == "P1":
@@ -118,11 +166,19 @@ def act(run_dir: Path, key: str, action: str, note: str = "", by: str = "项目�
     d = _read(run_dir)
     g = d.setdefault("gates", {}).setdefault(key, {})
     now = time.strftime("%Y-%m-%dT%H:%M:%S")
+    od = owner_direction(run_dir) if key == "P1" else None
+    extra_hist = {}
     if action == "approve":
         g.update(status="approved", at=now, by=by)
+        if od:
+            g.update(below_threshold=True, released_by_owner=True, round=od.get("round"), mean=od.get("mean"))
+            extra_hist = {"audit": "低于门槛、项目方放行", "round": od.get("round"), "mean": od.get("mean")}
+    elif action == "redirect":
+        g.update(status="redirect_requested", note=note.strip()[:4000], at=now, by=by, handled=False)
+        extra_hist = {"audit": "项目方换方向（回到 P0 Brief）"}
     else:
         g.update(status="revise_requested", note=note.strip()[:2000], at=now, by=by, handled=False)
-    d.setdefault("history", []).append({"at": now, "key": key, "action": action, "by": by, "note": note.strip()[:300]})
+    d.setdefault("history", []).append({"at": now, "key": key, "action": action, "by": by, "note": note.strip()[:300], **extra_hist})
     d["enabled"] = True
     _write(run_dir, d)
     return g

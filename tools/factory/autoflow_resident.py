@@ -93,7 +93,10 @@ def _write_hb(rec: dict) -> None:
 def tick(procs: dict, af=None, runs_mod=None, spawn=None) -> dict:
     """一拍：每部可推进的剧，写手已交稿的集起一个 autoflow run（同一集已在跑就跳过）。返回本拍记录"""
     af = af or _load("autoflow_for_resident", "tools/script_rsi/autoflow.py")
-    runs_mod = runs_mod or _load("runs_for_autoflow_resident", "tools/autopilot/runs.py")
+    if runs_mod is None:
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+        from tools.autopilot import runs as runs_mod    # OVERSIGHT-F P2：tools 侧 runs 唯一入口
     spawn = spawn or (lambda rd, ep: subprocess.Popen([sys.executable, str(ROOT / "tools/script_rsi/autoflow.py"), "run", "--run-dir", str(rd),
                                                        "--episode", str(ep), "--import", "dry", "--source", "daemon"], cwd=ROOT,
                                                       env={**os.environ, "PYTHONUTF8": "1"}))

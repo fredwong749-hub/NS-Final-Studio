@@ -57,7 +57,9 @@ await send("Network.enable");
 await send("Network.setExtraHTTPHeaders", { headers: { "x-ns-viewer-token": readFileSync(join(HERE, "..", "..", "..", "..", "data", "auth", "viewer_token"), "utf8").trim() } });
 await send("Emulation.setDeviceMetricsOverride", { width: W, height: H, deviceScaleFactor: 1, mobile: false });
 const [p, hash] = PATH.split("#");
-await send("Page.navigate", { url: `http://127.0.0.1:5173${p || "/"}?theme=${THEME}${hash ? `#${hash}` : ""}` });
+// CUTEDIT 11-02：PROBE_BASE 可指向沙箱 / 测试夹具前端（默认仍是 :5173 正式页）
+const BASE = process.env.PROBE_BASE || "http://127.0.0.1:5173";
+await send("Page.navigate", { url: `${BASE}${p || "/"}?theme=${THEME}${hash ? `#${hash}` : ""}` });
 await sleep(Number(WAIT));
 const r = await send("Runtime.evaluate", { expression: EXPR, awaitPromise: true, returnByValue: true });
 console.log(JSON.stringify(r.result?.value ?? r.exceptionDetails ?? null, null, 1));

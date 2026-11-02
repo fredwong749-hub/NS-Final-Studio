@@ -168,7 +168,7 @@ def signature(rows: list[dict]) -> str:
 
 
 def compose(ep: int, sources: dict, work: Path, variant: str, *, preview: bool = False, cut_edit: dict | None = None,
-            dialogue_source: str = "h3", bgm: bool = True, cache_dir: Path | None = None) -> tuple[dict, int]:
+            dialogue_source: str = "h3", bgm: bool = True, cache_dir: Path | None = None, run: str | None = None) -> tuple[dict, int]:
     """配音 + 配乐 + 转场 + 响度的唯一合成入口（assemble_series 预览 / 成片版和 CUTEDIT 的 cut_export 共用，11-02 对齐）。
     sources = {镜号: {kind: video|still|black, path, origin, ...}}；cut_edit = cut_project 归一后的覆写（None = 不变）；
     preview=True：不叫远程克隆 TTS（会在服务器上排队等空闲卡），没缓存的克隆音色句子用本机 Kokoro 临时音顶，
@@ -197,7 +197,7 @@ def compose(ep: int, sources: dict, work: Path, variant: str, *, preview: bool =
         tts = RoutedTts(kokoro, cfg, remote=_FallbackTts())
     settings = Settings(threads=8, bgm=bgm, deliver_4k="off", dialogue_source=dialogue_source,
                         music_dir=str(ROOT / "data/music/series10"))
-    episode = load_episode(ROOT / "data/import/script_v2.json", ep)
+    episode = load_episode(RUNS.script_path(run or RUN_ID, ROOT), ep)   # OVERSIGHT-F P1-4c：按剧取导入稿（成片 / 预览 / CUTEDIT 都走这里）
     tl = assemble_episode(episode, work, tts=tts, cache_dir=cache_dir, asr=SenseVoiceAsr(cfg, num_threads=4),
                           settings=settings, voices_cfg=cfg, allow_laptop_video=False,
                           keep_work=bool(os.environ.get("ASM_KEEP_WORK")), sources=sources, variant=variant,

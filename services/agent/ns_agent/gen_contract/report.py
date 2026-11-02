@@ -96,7 +96,7 @@ def q4_metrics(pf: dict | None) -> dict:
     return {k: ev.get(k) for k in ("face_hf", "face_lap", "face_oil", "p_plastic", "lap_full", "face_px")}
 
 
-WHO = {"lin_wan": "林晚", "gu_chen": "顾沉", "chen_yu": "陈宇", "ch_a_lan": "阿岚"}
+from ..asset_refs import ID_NAME as WHO   # noqa: E402  OVERSIGHT-F P2：同一张人物表（V2 清单角色名由 register_manifest_names 登记）
 
 
 def review_flags(pf: dict | None) -> list[str]:

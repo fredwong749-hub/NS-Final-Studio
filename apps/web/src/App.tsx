@@ -33,7 +33,8 @@ const V3_PAGE_COMP: Record<V3Page, ReturnType<typeof lazy>> = {
   "#/script-create": lazy(() => import("./v3/pages/ScriptFlowPage")), // UX6（D5）：① 创作 + ② 导入 合成一页
   "#/models": lazy(() => import("./v3/pages/ModelsPage")),
   "#/cut": lazy(() => import("./v3/pages/CutPage")), // UX5（D1）：⑤ 成片页
-  "#/assets": lazy(() => import("./v3/assets/AssetCenter")), // UX5：资产中心（角色详情仍复用 v3/pages/AssetsPage）
+  "#/assets": lazy(() => import("./v3/assets/V2AssetsPage")), // V2 资产页（20:10 总调度）：只读 assets_v2/manifest.json；成人类只给文字卡
+  "#/assets-v1": lazy(() => import("./v3/assets/AssetCenter")), // 旧资产中心（V1 / 人物页 PeopleHub 等），不删，换到这里
   "#/trash": lazy(() => import("./v3/pages/TrashRoute")), // EDITDEL 回收站
   "#/audit": lazy(() => import("./v3/pages/AuditRoute")), // 操作记录（独立页）
   "#/script-ab": lazy(() => import("./v3/pages/ScriptABPage")), // 回退补回：剧本 A/B 对比
@@ -44,6 +45,7 @@ const V3_PAGE_COMP: Record<V3Page, ReturnType<typeof lazy>> = {
   "#/image-edit": lazy(() => import("./v3/pages/ImageEditPage")), // FILMUI 图像工坊 P1（②资产下的标签；docs/master/EDITOR_INTEGRATION.md）
   "#/frames": lazy(() => import("./v3/pages/FramesPage")), // ASSETUX 1b：“出图”页（全部集 × 每镜首尾帧）
   "#/videos": lazy(() => import("./v3/pages/VideosPage")), // NAVIA：“视频”页（全部集 × 每镜视频状态）
+  "#/v1-library": lazy(() => import("./v3/pages/V1Library")), // NAVIA：Version 1 视频库（只读；主导航只显示 V2）
   "#/queue": lazy(() => import("./v3/pages/OwnerQueuePage")), // UIRSI2 L-116：待你看阵列（顶栏常驻入口）
 };
 /** UX4（R8）：后台没响应的提示——人话 + 自动重连计次 + 折叠的技术细节 */

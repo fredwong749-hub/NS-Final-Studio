@@ -10,10 +10,8 @@ REPO = Path(__file__).resolve().parents[3]
 
 
 def _runs():
-    sp = importlib.util.spec_from_file_location("runs_registry_api", REPO / "tools/autopilot/runs.py")
-    m = importlib.util.module_from_spec(sp)
-    sp.loader.exec_module(m)
-    return m
+    from ns_agent import run_paths as _RPA     # OVERSIGHT-F P2：runs 加载器只此一处（services 侧）
+    return _RPA.runs_module(REPO)
 
 
 def renders_root(root: Path | None = None, run: str | None = None) -> Path:

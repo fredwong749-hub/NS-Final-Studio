@@ -19,13 +19,47 @@ def preset() -> dict:
     return next((p for p in rq.get("image_presets") or [] if p.get("id") == pid), {})
 
 
-def preset_suffix() -> str:
+class StyleMissing(RuntimeError):
+    """资产包模式（V2）的剧没有登记自己的风格后缀——不退回 V1 的 S★（L-126）"""
+
+
+def run_style_cfg() -> dict:
+    p = ROOT / "config" / "compile" / "run_style.json"
+    return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+
+
+def _run() -> str | None:
+    from ns_agent import run_paths as RP
+    return RP.current_run(ROOT)
+
+
+def _manifest_mode(run: str | None) -> bool:
+    from ns_agent import asset_refs as AR
+    return bool(run and AR.project_cfg(run) and AR.manifest_rel(run))
+
+
+def preset_suffix(run: str | None = None) -> str:
+    """按剧取风格后缀（config/compile/run_style.json）；资产包模式的剧没登记 → StyleMissing；旧剧 → render_quality 默认预设"""
+    r = run or _run()
+    ent = ((run_style_cfg().get("runs") or {}).get(r or "") or {})
+    if ent.get("suffix"):
+        return ent["suffix"].strip()
+    if _manifest_mode(r):
+        raise StyleMissing(f"{r} 是资产包模式（V2），config/compile/run_style.json 里没有它的风格后缀；不退回 V1 的 S★（L-126）")
     return ((preset().get("params") or {}).get("style_suffix") or "").strip()
 
 
-def image_suffix() -> str:
-    """编译器 image_style 参数用：预设后缀 + 无字幕句（Q6）"""
-    s = preset_suffix()
+def v1_style_hits(prompt: str, run: str | None = None) -> list[str]:
+    """V2（资产包模式）提示词里的 V1 风格短语（run_style.json v1_style_phrases）；旧剧不判"""
+    r = run or _run()
+    if not _manifest_mode(r):
+        return []
+    return [w for w in run_style_cfg().get("v1_style_phrases") or [] if w and w in (prompt or "")]
+
+
+def image_suffix(run: str | None = None) -> str:
+    """编译器 image_style 参数用：本剧风格后缀 + 无字幕句（Q6）"""
+    s = preset_suffix(run)
     return f"{s}，{NO_TEXT}" if s else NO_TEXT
 
 

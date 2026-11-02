@@ -1,6 +1,8 @@
 """DETECT-S：tools/vqa/anomaly.py 的判定纯函数（人数 / 头数 / 镜像 / 同一人两次 / 手脚）。不连远端。"""
 from __future__ import annotations
 
+import pytest
+
 import sys
 from pathlib import Path
 
@@ -19,11 +21,22 @@ def _v(seed: int, n: int = 8):
 
 
 def face(emb, box, sims=None, score=0.9):
-    return {"box": box, "score": score, "emb": emb, "sims": sims or {}}
+    # 身份参照就绪时陌生人判据生效（OVERSIGHT-F 第 6 轮）：A_ 代表林晚、B_ 代表陈宇，默认带上对应身份分（原来空 sims 只因参照没加载才不被当陌生人）
+    if sims is None:
+        sims = {"lin_wan": 0.85} if emb is A_ else ({"chen_yu": 0.85} if emb is B_ else {})
+    return {"box": box, "score": score, "emb": emb, "sims": sims}
 
 
 def feat(faces, mirror=None, **kw):
+    # OVERSIGHT-F 第 6 轮：身份参照没加载时 judge 判 untested（不再静默 clean）；这些用例测的是参照就绪时的口径，默认带上 V1 四个角色的参照
+    kw.setdefault("refs_loaded", ["lin_wan", "gu_chen", "chen_yu", "ch_a_lan"])
     return {"W": 1000, "H": 1000, "faces": faces, "mirror": mirror, "persons": [], "hands": [], "dw": [], **kw}
+
+
+@pytest.fixture(autouse=True)
+def _v1_run(monkeypatch):
+    """本文件的 cast 是 V1 人物（林晚 / 陈宇）：人物清单按 V1 解析（anomaly._ids 随当前剧走，主剧已切 V2）"""
+    monkeypatch.setenv("NS_RUN_ID", "series10_v1")
 
 
 A_, B_ = _v(1), _v(2)

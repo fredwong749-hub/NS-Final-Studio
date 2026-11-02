@@ -1,0 +1,11 @@
+{
+ "_doc": "按剧取出图风格后缀（PROMPTFIX 11-02 20:4x，总调度定：V1 的 S★ 后缀进了 V2 提示词 = V1 内容泄漏，违反 L-126）。gen_contract.style.preset_suffix 先查这里（剧 = NS_RUN / runs.json primary）；资产包模式的剧在这里没有条目 → 抛错（失败关闭），绝不退回 V1 的 render_quality 默认预设。没有条目的旧剧（V1 / 第二季）照旧读 render_quality 默认预设。v1_style_phrases：V1 风格短语，V2 编译出的提示词里出现即阻断（preflight I7 + tools/script_rsi/v1_leak.py style）",
+ "runs": {
+  "series10_v2": {
+   "suffix": "时尚杂志大片质感，色彩艳丽、浓郁、高饱和，4K 电影级画质",
+   "temporary": true,
+   "note": "（措辞避开 gen_contract suffix_banned 里 V1 的“浓郁饱和”）临时，等项目方选定 STYLE-V2 调色后替换（docs/v2/DIRECTION_V2.md：时尚杂志风格、色彩艳丽浓郁饱和、4K 电影级）"
+  }
+ },
+ "v1_style_phrases": ["徕卡", "Leica", "leica", "S★", "R0", "暖调通透", "微反差强", "50mm f/2", "干净真实"]
+}

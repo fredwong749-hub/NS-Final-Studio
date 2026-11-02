@@ -6,6 +6,7 @@ P1 由写作 LLM 产出 JSON。本模块只查格式、id、登记一致和“�
 """
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -120,6 +121,31 @@ class Storyline(_Strict):
 
 PRONOUNS = ("她", "他", "她们", "他们")
 
+# SL-12（总调度 11-02，r4-fable 在第 3 集正文里发现占位词“（未提供）”）：正文 / 造型表里的占位词一律阻断
+PLACEHOLDER_RES = (
+    re.compile(r"未提供|待定|待补充?|待填|占位符"),
+    re.compile(r"(?<![A-Za-z])(TODO|TBD|FIXME)(?![A-Za-z])", re.I),
+    re.compile(r"(?<![A-Za-z])X{3,}(?![A-Za-z])", re.I),
+    re.compile(r"<[^<>\n]{0,40}>"),
+)
+
+
+def placeholder_hits(obj, path: str = "") -> list[tuple[str, str]]:
+    """遍历任意 JSON（dict / list / str），返回 [(字段路径, 命中的占位词)]；比对前做全半角归一化（＜＞（）也认）"""
+    import unicodedata
+    out: list[tuple[str, str]] = []
+    if isinstance(obj, str):
+        t = unicodedata.normalize("NFKC", obj)
+        for rx in PLACEHOLDER_RES:
+            out += [(path, m.group(0)) for m in rx.finditer(t)]
+    elif isinstance(obj, dict):
+        for k, v in obj.items():
+            out += placeholder_hits(v, f"{path}.{k}" if path else str(k))
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            out += placeholder_hits(v, f"{path}[{i}]")
+    return out
+
 
 def check_storyline(data, *, registry_chars: list[dict] | None = None, registry_scenes: list[dict] | None = None) -> Report:
     """P1 节点内部规则 SL-*。registry_* = 已登记人物 / 场景（ns_api.script_chat.registry_tables 的结果，原文）"""
@@ -127,6 +153,8 @@ def check_storyline(data, *, registry_chars: list[dict] | None = None, registry_
     s = parse_model(rep, "SL-01", Storyline, data)
     if s is None:
         return rep
+    for path, w in placeholder_hits(s.model_dump(by_alias=True)):
+        rep.add("SL-12", "block", f"{path} 里有占位词「{w}」：正文不能留（未提供）/ TODO / 待定 / XXX / <…> 这类占位，写成真内容", path)
     names = [c.name for c in s.characters]
     ids = [c.char_id for c in s.characters]
     for c in s.characters:
@@ -215,4 +243,4 @@ def check_link_p0_p1(brief: Brief, s: Storyline) -> Report:
 
 
 RULE_IDS = {"BR-01", "BR-02", "BR-03", "BR-04", "SL-01", "SL-02", "SL-03", "SL-04", "SL-05", "SL-06", "SL-07",
-            "SL-08", "SL-09", "SL-10", "SL-11", "LK01-01", "LK01-02", "LK01-03", "LK01-04"}
+            "SL-08", "SL-09", "SL-10", "SL-11", "SL-12", "LK01-01", "LK01-02", "LK01-03", "LK01-04"}

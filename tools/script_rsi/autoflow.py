@@ -120,12 +120,17 @@ class Status:
 
 # ------------------------------------------------------------------ 写作段：模板 + 规则注入
 
+PLACEHOLDER_OVERRIDE = ("【系统覆盖（总调度 11-02，SL-12）】上面‘缺信息标未提供’只适用于事实核对类字段；"
+                        "故事、剧本、造型正文一律不留占位词，缺信息就按 P0 / P1 已有设定写成具体内容。")
+OVERRIDE_TAG = "【系统覆盖（总调度 11-02，SL-12）】"
+
+
 def extra_system() -> str:
     w = (H.PROMPTS / "hollywood_writer.md").read_text(encoding="utf-8")
     tpl = w[w.find("## 一、模板原文"):w.find("## 二、")] if "## 一、模板原文" in w else w
     wk = (ROOT / "config" / "recipes" / "writer_knowledge.md").read_text(encoding="utf-8")
     return ("【项目方 11-01 好莱坞模板（原文；红线：不改给定的剧情事实和人物设定，缺信息标“未提供”，不编剧情）】\n" + tpl
-            + "\n\n========\n\n" + wk)
+            + "\n" + PLACEHOLDER_OVERRIDE + "\n\n========\n\n" + wk)      # 模板原文不改（等项目方定），紧接覆盖说明（OVERSIGHT-F P1-8a）
 
 
 STRUCTURAL = {"turns#1"}
@@ -597,22 +602,59 @@ def acquire_advance_lock(run_dir: Path, episode: int, source: str) -> Path | Non
     <run>/work_epNN/advance.lock 用 O_EXCL 建；锁主进程已死或超过 30 分钟视为陈旧、接管。拿不到 = None（本次跳过）"""
     lk = run_dir / f"work_ep{episode:02d}" / "advance.lock"
     lk.parent.mkdir(parents=True, exist_ok=True)
-    for _ in range(2):
+    for _ in range(5):
         try:
             fd = os.open(str(lk), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(json.dumps({"pid": os.getpid(), "source": source, "at": time.time()}))
             return lk
         except FileExistsError:
-            try:
-                info = json.loads(lk.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                info = {}
+            info = None
+            for _r in range(20):                     # W-35：持锁方刚 O_EXCL 建好、内容还没写完时读到空 / 半截 → 等一下再读，不能当成陈旧锁删掉
+                try:
+                    info = json.loads(lk.read_text(encoding="utf-8"))
+                    break
+                except FileNotFoundError:            # 持锁方刚释放：锁已空，回去重抢
+                    info = "gone"
+                    break
+                except (OSError, ValueError):
+                    time.sleep(0.01)
+            if info == "gone":
+                continue
+            if not isinstance(info, dict):           # 一直读不出内容：按“有人持锁”处理（宁可跳过一次，不误删别人的锁）
+                return None
             stale = (time.time() - float(info.get("at") or 0) > LOCK_STALE_S) or not _pid_alive(int(info.get("pid") or 0))
             if not stale:
                 return None
             lk.unlink(missing_ok=True)
     return None
+
+
+def escalate_and_advance(run_dir: Path, by: str, why: str = "", token_file: str | None = None, episode: int = 1,
+                         AG=None, wait_s: float = 60.0) -> dict:
+    """W-38（V2-WALK 11-02）：总调度转项目方定方向后，状态文件要立刻跟上，不能等下一次推进。
+    在同一把推进锁里：① review_escalate_owner（凭令牌，写 judge_p1/STATE.json 的 owner_direction）② 立刻推进一次（source=escalate），
+    verdict / next_action / autoflow_ep01.json 都由推进统一写（escalate 自己不写 verdict，免得状态两套来源）。
+    拿不到锁（别的入口正在推进）最多等 wait_s 秒；还拿不到 = 报错，什么都不写。"""
+    AG = AG or _load("autoflow_agent", "tools/script_rsi/autoflow_agent.py")
+    t0 = time.time()
+    while (lk := acquire_advance_lock(run_dir, episode, "escalate")) is None:
+        if time.time() - t0 > wait_s:
+            raise RuntimeError(f"第 {episode} 集正在被别的入口推进，{int(wait_s)} 秒内没拿到推进锁；没有转项目方，稍后再试")
+        time.sleep(0.5)
+    try:
+        od = AG.review_escalate_owner(run_dir, by, why, token_file)
+        advance_log(run_dir, "escalate", episode, verdict="owner_direction_requested",
+                    note=f"总调度转项目方定方向：{by}；令牌 {od.get('token_digest8')}；pid {od.get('pid')}；用户 {od.get('user')}；第 {od.get('round')} 轮 {od.get('mean')}/40；{why}"[:300])
+        try:
+            d = AG.run(run_dir, episode, "dry")
+        except Exception as e:
+            advance_log(run_dir, "escalate", episode, verdict="error", note=repr(e)[:300])
+            raise
+    finally:
+        lk.unlink(missing_ok=True)
+    advance_log(run_dir, "escalate", episode, verdict=d.get("verdict"), note=str(d.get("next_action") or "")[:200])
+    return {"owner_direction": od, "verdict": d.get("verdict"), "next_action": d.get("next_action")}
 
 
 def cmd_run(a) -> int:
@@ -711,7 +753,7 @@ def locked_face() -> str:
     reg = json.loads((ROOT / "config/pipeline/runs.json").read_text(encoding="utf-8"))
     return AR.face_of(reg.get("primary"), "lin_wan") or "（读不到当前身份脸）"
 HARD_RULES = ("系统硬约束：全部人物为成年人（≥22 岁）；一切亲密情节双方自愿；人物均为虚构，非真实人物；亲密内容在剧本里按平台规则写，"
-              "亲密镜头只在本地生成；不改第一季已定的剧情事实和人物设定（人物、关系、造型、林晚身份脸）；缺信息标“未提供”，不编造。")
+              "亲密镜头只在本地生成；不改第一季已定的剧情事实和人物设定（人物、关系、造型、林晚身份脸）；缺信息标“未提供”，不编造。" + PLACEHOLDER_OVERRIDE)
 
 
 def sequel_materials(prev_eps: list[int], material_md: Path | None, material_eps: list[int]) -> str:
@@ -833,13 +875,16 @@ def main(argv=None) -> int:
     r.add_argument("--backend", choices=["claude_agent", "api"], default=None,
                    help="写作后端；默认读 config/llm_providers.json writer_backend（L-109：测试期 claude_agent）")
     r.add_argument("--season-cap", type=float, default=None, help="整季写作上限（如 L-104 的 $8）；已花 + 本集预算超出就不开跑")
-    r.add_argument("--source", choices=["cli", "web", "daemon"], default="cli", help="推进来源（记进 autoflow.log）")
+    r.add_argument("--source", choices=["cli", "web", "daemon", "escalate"], default="cli", help="推进来源（记进 autoflow.log）")
     rv = sub.add_parser("review-state", help="P1 三评委状态：--normalize 改回工具口径；--fix 追加返修意见（带 --by 来源）")
     rv.add_argument("--run-dir", required=True)
     rv.add_argument("--normalize", action="store_true")
     rv.add_argument("--fix", action="append", default=[])
     rv.add_argument("--by", default="")
     rv.add_argument("--replace", action="store_true", help="替换本轮旧的追加意见（旧的留档）")
+    rv.add_argument("--escalate-owner", action="store_true", help="总调度动作：把当前这一稿（低于门槛）连同评分转给项目方定方向")
+    rv.add_argument("--why", default="")
+    rv.add_argument("--token-file", default="", help="总调度令牌文件（--escalate-owner 必须带；摘要对上 config/master/escalate.sha256 才放行）")
     w = sub.add_parser("watch", help=".done 守护：写手交稿（建 .done）后自动推进，来源记 daemon")
     w.add_argument("--run-dir", action="append", required=True)
     w.add_argument("--interval", type=int, default=30)
@@ -895,6 +940,9 @@ def main(argv=None) -> int:
             AG.review_add_fixes(rd, a.fix, a.by, replace=a.replace)
         if a.normalize:
             AG.review_state_normalize(rd)
+        if a.escalate_owner:
+            r = escalate_and_advance(rd, a.by, a.why, a.token_file or None, AG=AG)     # W-38：转完立刻推进一次，状态文件和日志一致
+            print(json.dumps({"verdict": r["verdict"], "next_action": r["next_action"]}, ensure_ascii=False))
         print((rd / AG.REVIEW_STATE).read_text(encoding="utf-8")[:2000])
         return 0
     if a.cmd == "sequel-brief":

@@ -19,13 +19,16 @@
 from __future__ import annotations
 
 from ns_api import run_paths as _RP   # K-OPS-F24：渲染根目录按当前剧（V1 已归档，不在网页显示）
+import copy
 import hashlib
 import json
+import re
 import os
 import subprocess
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -120,7 +123,7 @@ def init_project(n: int) -> dict:
     return {"schema": SCHEMA, "episode": n, "rev": 1, "updated_at": P.now(), "base_timeline": _rel(tlp),
             "base_duration_s": tl.get("duration_s"),
             "segments": [_seg_from_shot(s) for s in sorted(tl.get("shots") or [], key=lambda x: int(x["index"]))],
-            "bgm": {"file": _rel(bgm.get("file")) or f"data/music/series10/ep{n:02d}.wav", "offset_s": 0.0,
+            "bgm": {"file": _rel(bgm.get("file")) if bgm.get("used") and bgm.get("file") else None, "offset_s": 0.0,
                     "gain_db": 0.0, "fade_in_s": 0.0, "fade_out_s": 0.0},
             "dialogue_source": (tl.get("settings") or {}).get("dialogue_source") or "h3",
             "speech": speech, "final": None, "history": [{"at": P.now(), "what": f"从 {tlp.name} 建工程"}]}
@@ -189,6 +192,8 @@ def refresh_sources(proj: dict, cur: dict[int, dict] | None = None) -> list[str]
         if seg.get("trim_by") == "owner":
             h, t, adj = clamp(seg["trim_head_s"], seg["trim_tail_s"], src_s)
             seg.update(trim_head_s=h, trim_tail_s=t, trim_adjusted=adj)
+            if adj:
+                mark_field(proj, f"trim:{seg['index']}", "system", f"S{seg['index']} 新片更短，裁切收到片尾")
         else:   # 没动过的镜头导出时由装配器自动裁；这里先按整段显示
             seg.update(trim_head_s=0.0, trim_tail_s=0.0, trim_adjusted=False)
         notes.append(f"S{seg['index']} 换成新片{'（裁切沿用' + ('，已收到片尾' if seg.get('trim_adjusted') else '') + '）' if seg.get('trim_by') == 'owner' else ''}")
@@ -274,10 +279,75 @@ def seed_subtitles(proj: dict) -> list[dict]:
     return out
 
 
-def music_choices(n: int) -> list[dict]:
-    d = P.DATA / "music" / "series10"
+# ---------------- 换序导出：按新顺序给镜头重新编号（装配器内部按镜号排序、对白按镜号挂），导出后再还原剧本镜号
+
+def renumber_for_order(episode: dict, sources: dict[int, dict], cut_edit: dict) -> tuple[dict, dict, dict, dict[int, int]]:
+    """cut_edit["order"] = 剧本镜号的新排列 → (按位置 1..n 重编号的剧集副本, sources, cut_edit, {新号: 剧本镜号})。
+    没换序 = 原样返回（back 为恒等）。对白 / 独白挂在镜头上，跟着镜头走；手动裁切按新号重挂。"""
+    order = [int(x) for x in cut_edit.get("order") or []]
+    shots = sorted(episode["shots"], key=lambda x: int(x["index"]))
+    if not order:
+        return episode, sources, cut_edit, {int(s["index"]): int(s["index"]) for s in shots}
+    by = {int(s["index"]): s for s in shots}
+    if sorted(order) != sorted(by):
+        raise ValueError(f"剪辑工程的镜头顺序 {order} 和剧本镜头 {sorted(by)} 对不上")
+    new_shots, back = [], {}
+    for pos, orig in enumerate(order, 1):
+        sh = dict(by[orig])
+        sh["index"] = pos
+        if isinstance(sh.get("id"), str):   # 镜头 id（epNN-SK）跟着新号走，导出后 relabel_timeline 还原
+            sh["id"] = re.sub(r"-S\d+$", f"-S{pos}", sh["id"])
+        new_shots.append(sh)
+        back[pos] = orig
+    fwd = {v: k for k, v in back.items()}
+    ce = dict(cut_edit)
+    ce.pop("order", None)
+    ce["trims"] = {str(fwd[int(k)]): v for k, v in (cut_edit.get("trims") or {}).items() if int(k) in fwd}
+    return episode | {"shots": new_shots}, {fwd[k]: v for k, v in sources.items() if k in fwd}, ce, back
+
+
+def relabel_timeline(tl: dict, back: dict[int, int], name: str) -> None:
+    """导出时间线还原剧本镜号：shots[].index / shot 用剧本镜号，cut_position = 成片里的位置；对白同理"""
+    for sh in tl.get("shots") or []:
+        pos = int(sh["index"])
+        orig = back.get(pos, pos)
+        sh["cut_position"], sh["index"], sh["shot"] = pos, orig, f"{name}-S{orig}"
+    for sp in tl.get("speech") or []:
+        pos = int(sp.get("shot") or 0)
+        if pos in back:
+            sp["cut_position"], sp["shot"] = pos, back[pos]
+            if isinstance(sp.get("key"), str):
+                sp["key"] = sp["key"].replace(f"-S{pos}#", f"-S{back[pos]}#")
+
+
+def srt_cues(tl: dict, proj: dict) -> list[tuple[float, float, str]]:
+    """外挂字幕（L-002 不烧录）：项目方改过字幕 → 按“本镜在成片里的起点 + 相对秒数”换算；没改过 → 按装配的对白时间"""
+    subs = subtitles_of(proj)
+    if subs is None:
+        cues = sorted((s for s in tl.get("speech") or [] if s.get("start_s") is not None), key=lambda s: s["start_s"])
+        return [(float(s["start_s"]), float(s["end_s"]), str(s.get("text") or "")) for s in cues]
+    start = {int(sh["index"]): float(sh["start_s"]) for sh in tl.get("shots") or []}
+    total = float(tl.get("duration_s") or 0) or None
     out = []
-    for w in sorted(d.glob("ep*.wav")) if d.is_dir() else []:
+    for x in subs:
+        if int(x["shot"]) not in start or not str(x.get("text") or "").strip():
+            continue
+        a = start[int(x["shot"])] + float(x["d0"])
+        b = start[int(x["shot"])] + float(x["d1"])
+        if total:
+            a, b = min(a, total), min(b, total)
+        if b - a >= 0.1:
+            out.append((round(a, 3), round(b, 3), str(x["text"]).strip()))
+    return sorted(out)
+
+
+def music_choices(n: int, proj: dict | None = None) -> list[dict]:
+    """可换的配乐 = 本集配乐所在目录里的 ep*.wav（目录由装配定，跟着剧走；不写死某部剧的配乐目录）。
+    本集还没有配乐 → 空（界面写“这一集还没有配乐”）"""
+    cur = ((proj or {}).get("bgm") or {}).get("file")
+    d = (P.ROOT / cur).parent if cur else None
+    out = []
+    for w in sorted(d.glob("ep*.wav")) if d and d.is_dir() else []:
         meta = _jl(w.with_suffix(".json"), {}) or {}
         out.append({"file": _rel(w), "url": file_url(_rel(w)), "name": w.stem, "duration_s": meta.get("duration_s"),
                     "bpm": meta.get("bpm"), "mine": w.stem == f"ep{n:02d}"})
@@ -292,7 +362,7 @@ def _view(n: int, proj: dict) -> dict:
         segs.append(s | {"url": file_url(s.get("file")), "start_s": round(t, 3), "length_s": ln})
         t += ln
     subs = subtitles_of(proj)
-    return proj | {"segments": segs, "duration_s": round(t, 3), "music_choices": music_choices(n),
+    return proj | {"segments": segs, "duration_s": round(t, 3), "music_choices": music_choices(n, proj),
                    "subtitles": subs if subs is not None else seed_subtitles(proj), "subtitles_edited": subs is not None,
                    "bgm_url": file_url((proj.get("bgm") or {}).get("file")),
                    "speech": [x | {"urls": [file_url(f) for f in x.get("files") or []]} for x in proj.get("speech") or []],
@@ -311,11 +381,12 @@ class SegEdit(BaseModel):
 
 
 class BgmEdit(BaseModel):
+    """只发改了的字段（None = 没动）"""
     file: str | None = None
-    offset_s: float = 0.0
-    gain_db: float = 0.0
-    fade_in_s: float = 0.0
-    fade_out_s: float = 0.0
+    offset_s: float | None = None
+    gain_db: float | None = None
+    fade_in_s: float | None = None
+    fade_out_s: float | None = None
 
 
 class SubEdit(BaseModel):
@@ -332,32 +403,122 @@ class ProjEdit(BaseModel):
     order: list[int] | None = None          # 镜头新顺序（镜号排列）
     subtitles: list[SubEdit] | None = None  # 改过的字幕（整表）
     by: str | None = None
+    client: str | None = None               # 哪个窗口发的（同一窗口自己的连改 / 重发不算“覆盖”）
 
 
-@router.put("/api/episodes/{n}/cut-project")
+FIELD_LABEL = {"order": "镜头顺序", "subtitles": "字幕", "bgm.file": "配乐曲目", "bgm.offset_s": "配乐起点",
+               "bgm.gain_db": "配乐音量", "bgm.fade_in_s": "配乐淡入", "bgm.fade_out_s": "配乐淡出"}
+
+
+def _label(field: str) -> str:
+    return FIELD_LABEL.get(field) or (f"S{field.split(':')[1]} 裁切" if field.startswith("trim:") else field)
+
+
+def field_value(proj: dict, field: str):
+    """字段当前的完整值（三方合并比较 / 被覆盖时存 prev_value 用）"""
+    if field.startswith("trim:"):
+        seg = next((x for x in proj["segments"] if int(x["index"]) == int(field.split(":")[1])), None)
+        return [round(float(seg["trim_head_s"]), 3), round(float(seg["trim_tail_s"]), 3)] if seg else None
+    if field == "order":
+        return [int(x["index"]) for x in proj["segments"]]
+    if field == "subtitles":
+        return copy.deepcopy(proj.get("subtitles"))
+    if field.startswith("bgm."):
+        return (proj.get("bgm") or {}).get(field[4:])
+    raise KeyError(field)
+
+
+def apply_field(proj: dict, field: str, value) -> None:
+    if field.startswith("trim:"):
+        seg = next(x for x in proj["segments"] if int(x["index"]) == int(field.split(":")[1]))
+        seg.update(trim_head_s=float(value[0]), trim_tail_s=float(value[1]), trim_by="owner", trim_adjusted=False)
+    elif field == "order":
+        by_idx = {int(x["index"]): x for x in proj["segments"]}
+        proj["segments"] = [by_idx[int(i)] for i in value]
+    elif field == "subtitles":
+        proj["subtitles"] = copy.deepcopy(value)
+    elif field.startswith("bgm."):
+        proj["bgm"] = dict(proj.get("bgm") or {}) | {field[4:]: value}
+    else:
+        raise KeyError(field)
+
+
+def describe(field: str, value) -> str:
+    if field.startswith("trim:"):
+        return f"S{field.split(':')[1]} 入 {value[0]:.2f} / 尾裁 {value[1]:.2f}"
+    if field == "order":
+        return "镜头顺序 " + " ".join(f"S{i}" for i in value)
+    if field == "subtitles":
+        subs = value or []
+        head = "／".join((str(x.get("text") or "（空）"))[:12] for x in subs[:3])
+        return f"字幕 {len(subs)} 条" + (f"：{head}{'…' if len(subs) > 3 else ''}" if subs else "")
+    if field == "bgm.file":
+        return f"配乐曲目 {Path(str(value)).stem if value else '（无）'}"
+    return f"{_label(field)} {value}"
+
+
+def mark_field(proj: dict, field: str, by: str, what: str, client: str | None = None) -> None:
+    """记下这个字段最后一次是哪一版、谁（哪个窗口）、改成了什么（三方合并靠它判断“基线之后别人改过没有”）"""
+    proj.setdefault("field_rev", {})[field] = {"rev": int(proj["rev"]) + 1, "by": by, "client": client, "at": P.now(), "what": what}
+
+
+def commit_changes(proj: dict, changes: list, *, base: int, by: str, client: str | None,
+                   always_record: bool = False, extra: dict | None = None) -> dict | None:
+    """逐字段应用（值相同的跳过）。基线之后别的窗口改过同一字段 → 以后到的为准，overrode 里存被覆盖的完整旧值（prev_value），
+    以后可以用 restore 找回。同一个窗口（client 相同）自己的改动不算覆盖（重发 / 连改时不记假的“覆盖”）。
+    always_record = 恢复操作：无论基线，被它盖掉的当前值也存下来（恢复本身也能再恢复回去）。返回新写的 history 条目。"""
+    fr = proj.setdefault("field_rev", {})
+    what, overrode = [], []
+    for field, new in changes:
+        old = field_value(proj, field)
+        if old == new:
+            continue
+        prev = fr.get(field)
+        other = bool(prev) and not (client and prev.get("client") == client)
+        if (other and int(prev.get("rev") or 0) > base) or always_record:
+            pv = prev or {}
+            pwhat = pv.get("what") or describe(field, old)
+            overrode.append({"field": field, "label": _label(field), "prev_rev": pv.get("rev"), "prev_by": pv.get("by"),
+                             "prev_at": pv.get("at"), "prev_what": pwhat, "prev_value": old,
+                             "text": f"{_label(field)}：覆盖了第 {pv.get('rev') or '?'} 版（{pv.get('by') or '?'} "
+                                     f"{str(pv.get('at') or '')[11:16]}）的“{pwhat}”"})
+        apply_field(proj, field, new)
+        desc = describe(field, new)
+        mark_field(proj, field, by, desc, client)
+        what.append(desc)
+    if not what:
+        return None
+    proj["rev"] = int(proj["rev"]) + 1
+    proj["updated_at"] = P.now()
+    note = f"（基于第 {base} 版改的，合并到第 {proj['rev']} 版）" if base != proj["rev"] - 1 else ""
+    entry = {"id": uuid.uuid4().hex[:10], "at": P.now(), "what": "；".join(what) + note, "by": by, "base_rev": base,
+             **(extra or {})}
+    if overrode:
+        entry["overrode"] = overrode
+    proj["history"] = (proj.get("history") or [])[-49:] + [entry]
+    return entry
+
+
+@router.put("/api/episodes/{n}/cut-project", status_code=202)
 def put_project(n: int, body: ProjEdit):
+    """原位保存（202 收下，L-123 / 项目方的改动永不丢）——三方合并：
+    网页只发“和它的基线版本（rev）相比改了的字段”；服务端逐字段应用，没发的字段一律不动（别的窗口刚改的不会被旧值盖回去）。
+    同一字段在基线之后别处也改过 → 以后到的为准，history.overrode 存被覆盖的完整旧值，POST …/restore 可以找回。"""
     proj = load_project(n, refresh=False)
     with _lock:
-        if int(body.rev) != int(proj["rev"]):
-            raise HTTPException(409, f"工程已更新到第 {proj['rev']} 版（镜头换了新片或别处改过），刷新后再改")
-        what = []
-        by_idx = {int(s["index"]): s for s in proj["segments"]}
+        changes: list = []
+        by_idx = {int(x["index"]): x for x in proj["segments"]}
         for e in body.segments or []:
             seg = by_idx.get(int(e.index))
             if not seg or seg.get("kind") != "video":
                 continue
             h, t, _ = clamp(e.trim_head_s, e.trim_tail_s, seg.get("source_duration_s"))
-            if (h, t) != (round(seg["trim_head_s"], 3), round(seg["trim_tail_s"], 3)):
-                seg.update(trim_head_s=h, trim_tail_s=t, trim_by="owner", trim_adjusted=False)
-                what.append(f"S{seg['index']} 入 {h:.2f} / 尾裁 {t:.2f}")
+            changes.append((f"trim:{seg['index']}", [h, t]))
         if body.order is not None:
-            cur = [int(x["index"]) for x in proj["segments"]]
             new = [int(x) for x in body.order]
-            if sorted(new) != sorted(cur):
+            if sorted(new) != sorted(by_idx):
                 raise HTTPException(422, "镜头顺序必须是本集全部镜头各出现一次")
-            if new != cur:
-                proj["segments"] = [by_idx[i] for i in new]
-                what.append("镜头顺序 " + " ".join(f"S{i}" for i in new))
+            changes.append(("order", new))
         if body.subtitles is not None:
             subs = []
             for x in body.subtitles:
@@ -367,29 +528,60 @@ def put_project(n: int, body: ProjEdit):
                 d0 = round(min(max(0.0, x.d0), max(0.0, ln - 0.2)), 3)
                 d1 = round(min(max(d0 + 0.2, x.d1), ln + 3.0), 3)   # 允许跨到下一镜（独白常见），最多 3 s
                 subs.append({"shot": int(x.shot), "text": x.text.strip(), "d0": d0, "d1": d1})
-            if subs != proj.get("subtitles"):
-                proj["subtitles"] = subs
-                what.append(f"字幕 {len(subs)} 条")
+            changes.append(("subtitles", subs))
         if body.bgm is not None:
-            b = body.bgm.model_dump()
+            b = {k: v for k, v in body.bgm.model_dump().items() if v is not None}
             if b.get("file"):
                 f = _rel(b["file"])
                 if not f or not f.startswith("data/") or ".." in f or not (P.ROOT / f).is_file():
                     raise HTTPException(422, f"配乐文件不在 data/ 下或不存在：{b['file']}")
                 b["file"] = f
-            else:
-                b["file"] = (proj.get("bgm") or {}).get("file")
-            b["offset_s"] = round(max(0.0, b["offset_s"]), 3)
-            b["gain_db"] = round(min(6.0, max(-30.0, b["gain_db"])), 2)
-            b["fade_in_s"] = round(min(10.0, max(0.0, b["fade_in_s"])), 2)
-            b["fade_out_s"] = round(min(10.0, max(0.0, b["fade_out_s"])), 2)
-            if b != proj.get("bgm"):
-                proj["bgm"] = b
-                what.append(f"配乐 {Path(b['file']).stem} · 起点 {b['offset_s']:g}s · {b['gain_db']:+g} dB · 淡入 {b['fade_in_s']:g}s · 淡出 {b['fade_out_s']:g}s")
-        if what:
-            proj["rev"] = int(proj["rev"]) + 1
-            proj["updated_at"] = P.now()
-            proj["history"] = (proj.get("history") or [])[-49:] + [{"at": P.now(), "what": "；".join(what), "by": body.by or "owner"}]
+            lim = {"offset_s": (0.0, 1e9, 3), "gain_db": (-30.0, 6.0, 2), "fade_in_s": (0.0, 10.0, 2), "fade_out_s": (0.0, 10.0, 2)}
+            for k, v in b.items():
+                if k in lim:
+                    lo, hi, nd = lim[k]
+                    v = round(min(hi, max(lo, float(v))), nd)
+                changes.append((f"bgm.{k}", v))
+        if commit_changes(proj, changes, base=int(body.rev), by=body.by or "owner", client=body.client):
+            _wj(proj_path(n), proj)
+    return _view(n, proj)
+
+
+class RestoreBody(BaseModel):
+    history_id: str
+    field: str | None = None      # 只恢复这条里的某一个字段；不给 = 这条里被覆盖的全部
+    by: str | None = None
+    client: str | None = None
+
+
+@router.post("/api/episodes/{n}/cut-project/restore", status_code=202)
+def restore_overridden(n: int, body: RestoreBody):
+    """把某条 history 里被覆盖的改动找回来（202 收下）：用 overrode.prev_value 原样写回，记成一次新改动（restored_from），
+    被它盖掉的当前值也存进新条目的 overrode，可以再恢复回去。"""
+    proj = load_project(n, refresh=False)
+    with _lock:
+        entry = next((h for h in proj.get("history") or [] if h.get("id") == body.history_id), None)
+        if entry is None:
+            raise HTTPException(404, "找不到这条记录（可能已超出最近 50 条）")
+        ovs = [o for o in entry.get("overrode") or [] if isinstance(o, dict) and "prev_value" in o
+               and (body.field is None or o.get("field") == body.field)]
+        if not ovs:
+            raise HTTPException(422, "这条记录里没有可恢复的被覆盖内容")
+        segs = {int(x["index"]) for x in proj["segments"]}
+        changes = []
+        for o in ovs:
+            v = o["prev_value"]
+            if o["field"] == "order" and sorted(int(i) for i in v or []) != sorted(segs):
+                continue
+            if o["field"].startswith("trim:") and int(o["field"].split(":")[1]) not in segs:
+                continue
+            changes.append((o["field"], v))
+        new = commit_changes(proj, changes, base=int(proj["rev"]), by=body.by or "owner", client=body.client,
+                             always_record=True, extra={"restored_from": body.history_id})
+        if new:
+            new["what"] = "恢复被覆盖的改动：" + new["what"]
+            entry.setdefault("restored", []).append({"at": P.now(), "by": body.by or "owner", "history_id": new["id"],
+                                                     "fields": [f for f, _ in changes]})
             _wj(proj_path(n), proj)
     return _view(n, proj)
 

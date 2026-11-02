@@ -30,6 +30,11 @@ def _runs_mod(root: str):
     return m
 
 
+def runs_module(root=None):
+    """services 侧加载 tools/autopilot/runs.py 的唯一入口（OVERSIGHT-F P2：副本收口）；root 默认本仓库；没有 runs.py → None"""
+    return _runs_mod(str(Path(root) if root else Path(__file__).resolve().parents[3]))
+
+
 def _ctx(root) -> tuple:
     root = Path(root)
     if not (root / "config" / "pipeline" / "runs.json").is_file():

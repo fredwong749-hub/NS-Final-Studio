@@ -16,10 +16,8 @@ from . import ROOT, cfg
 
 
 def _runs():
-    import importlib.util as _u
-    sp = _u.spec_from_file_location("runs_for_continuity", ROOT / "tools/autopilot/runs.py")
-    m = _u.module_from_spec(sp)
-    sp.loader.exec_module(m)
+    from ns_agent import run_paths as _RPA     # OVERSIGHT-F P2：runs 加载器只此一处
+    m = _RPA.runs_module(ROOT)
     return m
 
 

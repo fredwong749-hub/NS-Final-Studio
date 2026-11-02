@@ -14,7 +14,8 @@ import { LiveProgress } from "../../ds/StageProgress";
 import { useLiveEvent } from "../live";
 import { ProducerPanel } from "../ProducerPanel";
 import { AutoflowPanel, FLOW_EVENT } from "./AutoflowPanel";
-import { P1Extras, canShowP1, p1InReview, p1Round, useAutoflow } from "./P1Review";
+import { P1Extras, canShowP1, p1Round, p1Status, useAutoflow } from "./P1Review";
+import type { AFlow } from "./AutoflowPanel";
 
 const runIdOf = () => new URLSearchParams(location.hash.split("?")[1] ?? "").get("run");
 const setRunInHash = (id: string | null) => {
@@ -57,7 +58,7 @@ export default function NewScriptPage({ onGoImport }: { onGoImport: () => void }
   const loadList = useCallback(async () => {
     try {
       const r = await storyApi.list();
-      setRuns(r.runs);
+      setRuns(r.runs.filter(shownRun));
       setBusy(r.busy);
       setListErr(null);
     } catch (e) {
@@ -184,13 +185,19 @@ export default function NewScriptPage({ onGoImport }: { onGoImport: () => void }
   );
 }
 
+/** 左侧列表和“写进哪部剧”不显示：已归档的剧（V1）和测试 run（drill_ / zz_ 开头） */
+const shownRun = (r: { id: string; registry_status?: string | null }) => r.registry_status !== "archived" && !/^(drill_|zz_)/.test(r.id);
+
 function RunRow({ r, on, onClick, onDeleted }: { r: Run; on: boolean; onClick: () => void; onDeleted?: () => void }) {
-  const [lab, tone] = RUN_LABEL[r.status] ?? [r.status, "neutral"];
+  const [lab0, tone0] = RUN_LABEL[r.status] ?? [r.status, "neutral"];
+  const ps = p1Status((r as unknown as { autoflow?: AFlow }).autoflow);   // 和页头 / 链条 / 段标签同一个状态函数
+  const lab = ps && ps.key !== "approved" ? ps.short : lab0;
+  const tone = ps && ps.key !== "approved" ? "neutral" : tone0;
   return (
     <div className="ns-run-wrap">
     {!ACTIVE.has(r.status) && (
       <span className="ns-run-del">
-        <DeleteButton type="story_run" id={r.id} icon size="xs" onDeleted={() => onDeleted?.()} />
+        <DeleteButton type="story_run" id={r.id} soft label="移到回收站" size="xs" onDeleted={() => onDeleted?.()} />
       </span>
     )}
     <button className={`ns-run${on ? " on" : ""}`} onClick={onClick} title={r.outline_head}>
@@ -229,10 +236,11 @@ function BriefForm({ onStarted }: { onStarted: () => void }) {
     // 能选的剧：还没开始写的（有提纲但写作流程还没起）；顺带看写作后端，提交前显示花费
     fetch("/api/story-runs?limit=60")
       .then((r) => (r.ok ? r.json() : { runs: [] }))
-      .then(async (r: { runs: { id: string; title?: string }[] }) => {
+      .then(async (r: { runs: { id: string; title?: string; registry_status?: string | null }[] }) => {
         const out: { id: string; title: string }[] = [];
         let free: boolean | null = null;
         for (const it of r.runs) {
+          if (!shownRun(it) || !it.registry_status) continue; // 已归档 / 没登记的测试 run 不能作为写进的目标（完全切割 L-126）
           const f = await fetch(`/api/script-autoflow/${encodeURIComponent(it.id)}`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
           if (f && free === null && f.writer_backend) free = f.writer_backend === "claude_agent";
           if (f && f.verdict === "not_started") out.push({ id: it.id, title: it.title || "新剧（未定名）" });
@@ -335,12 +343,14 @@ function BriefForm({ onStarted }: { onStarted: () => void }) {
             </select>
           </label>
         </div>
+        {target !== "__new" && (
         <label className="ns-chk" title="默认是全新的一部剧，不带旧剧的人物和场景；勾上才接着旧剧写">
           <input type="checkbox" checked={continueOld} onChange={(e) => setContinueOld(e.target.checked)} /> 续写已有剧（带上旧剧的人物表；不勾 = 全新的一部剧）
         </label>
+        )}
         <label className="ns-f">
           <span className="ns-f-h">
-            故事提纲 <small className="ds-muted">原文原样交给写作模型，系统不改写</small>
+            故事提纲 <small className="ds-muted">原文原样交给写手，系统不改写</small>
             <span className="ds-grow" />
             <Button size="xs" variant="ghost" onClick={() => fileRef.current?.click()}>
               上传 .md / .txt
@@ -360,7 +370,7 @@ function BriefForm({ onStarted }: { onStarted: () => void }) {
           <small className="ds-muted">{outline.length} 字</small>
         </label>
         <details className="ns-more">
-          <summary>逐集一句话（可选，{Object.values(lines).filter((v) => v.trim()).length}/{epNums.length}）· 写作模型会逐字照抄进故事线</summary>
+          <summary>逐集一句话（可选，{Object.values(lines).filter((v) => v.trim()).length}/{epNums.length}）· 写手会逐字照抄进故事线</summary>
           <div className="ns-lines">
             {epNums.map((n) => (
               <label key={n} className="ns-line">
@@ -368,7 +378,7 @@ function BriefForm({ onStarted }: { onStarted: () => void }) {
                 <input value={lines[n] ?? ""} onChange={(e) => setLines({ ...lines, [n]: e.target.value })} />
               </label>
             ))}
-            {hi - lo + 1 > epNums.length && <p className="ds-small ds-muted">只列前 30 集；其余集写作模型按提纲写。</p>}
+            {hi - lo + 1 > epNums.length && <p className="ds-small ds-muted">只列前 30 集；其余集写手按提纲写。</p>}
           </div>
         </details>
         <div className="ns-row2">
@@ -426,7 +436,7 @@ function ChainMap({ stages, onPick, pick, ep, imported, overrides }: { stages?: 
                 {s.blocking ? ` ${s.blocking}` : ""}
               </Tag>
             ) : (
-              <small className="ds-muted">{s.node === "P0" ? "你写" : "写作模型"}</small>
+              <small className="ds-muted">{s.node === "P0" ? "你写" : "写手"}</small>
             )}
             {meta && <small className="ds-muted">{meta}</small>}
           </button>
@@ -469,8 +479,9 @@ function RunView({ run, reload, onGoImport, onPickEp }: { run: Run; reload: () =
   const [msg, setMsg] = useState<{ tone: "ok" | "bad" | "warn"; text: ReactNode } | null>(null);
   const [lab0, tone0] = RUN_LABEL[run.status] ?? [run.status, "neutral"];
   const afHead = useAutoflow(run.id);
-  const lab = p1InReview(afHead.d) ? "评审中" : lab0;
-  const tone = p1InReview(afHead.d) ? "neutral" : tone0;
+  const ps = p1Status(afHead.d);
+  const lab = ps && ps.key !== "approved" ? ps.text : lab0;
+  const tone = ps && ps.key !== "approved" ? "neutral" : tone0;
   const p4 = run.stages.find((s) => s.node === "P4");
   const p4ok = p4?.status === "ok";
   const live = ACTIVE.has(run.status);
@@ -657,7 +668,7 @@ function ProcessView({ run, pick, setPick, stage, live, act, ro, reload, doAct }
   return (
     <>
       <ChainMap
-        overrides={p1InReview(afv.d) ? { P1: "评审中" } : undefined}
+        overrides={p1Status(afv.d) && p1Status(afv.d)!.key !== "approved" ? { P1: p1Status(afv.d)!.text } : undefined}
         stages={run.stages}
         ep={run.episode}
         imported={!!run.sent_to_import}
@@ -713,6 +724,7 @@ function StagePanel({ run, s, busy, roWhy, reload, onRetry }: { run: Run; s: Sta
   // 评审没过门槛的故事线项目方一律看不到（只给看通过的）：评审 / 返修中隐藏“看内容 / 原文 / 校验问题”
   const hideP1 = gated && !(canShowP1(af.d) || af.d?.owner_gates?.gates?.P1?.status === "approved");
   const round = af.d ? p1Round(af.d) : 1;
+  const st1 = gated ? p1Status(af.d) : null;
 
   return (
     <section className="ns-stage">
@@ -720,8 +732,8 @@ function StagePanel({ run, s, busy, roWhy, reload, onRetry }: { run: Run; s: Sta
         <h2>
           <span className="ns-node-n">{s.node}</span> {s.label}
         </h2>
-        <Tag tone={hideP1 ? "neutral" : tone} dot size="xs">
-          {hideP1 ? "评审中" : lab}
+        <Tag tone={st1 && st1.key !== "approved" ? "neutral" : tone} dot size="xs">
+          {st1 && st1.key !== "approved" ? st1.text : lab}
         </Tag>
         <span className="ds-small ds-muted" title={`${s.rounds ? `写了 ${s.rounds} 轮` : ""}${s.usd ? ` · 花费 ${money(s.usd)}` : ""}`}>
           {s.blocking ? `要改 ${s.blocking} 处` : ""}
@@ -777,12 +789,12 @@ function StagePanel({ run, s, busy, roWhy, reload, onRetry }: { run: Run; s: Sta
           </footer>
         </div>
       ) : s.status === "pending" ? (
-        <Empty icon="…" title="还没写到这一段" sub={run.status === "running" || run.status === "queued" ? "写作模型正在写上游，写完自动接着写这一段" : "上游通过后点“继续写”"} />
+        <Empty icon="…" title="还没写到这一段" sub={run.status === "running" || run.status === "queued" ? "写手正在写上游，写完自动接着写这一段" : "上游通过后点“继续写”"} />
       ) : s.status === "running" ? (
         <div className="ns-wait">
           <span className="ns-spin" aria-hidden="true" />
           <div>
-            <b>写作模型正在写{s.label}（第 {(s.rounds_done ?? 0) + 1} 轮）</b>
+            <b>写手正在写{s.label}（第 {(s.rounds_done ?? 0) + 1} 轮）</b>
             <p className="ds-small ds-muted">写完自动校验；不过就把问题带回去重写，最多 2 轮。这一页会自己刷新，可以先去别的页面。</p>
           </div>
         </div>
