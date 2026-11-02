@@ -3,7 +3,9 @@
  "scenes": {
   "sk_office_night": {
    "asset_dir": "sk_office_night",
-   "status": "series10 场景参考底图（IMGGEN 2026-10-31，暂定，待总调度亲审）：assets/scenes/sk_office_night/refs/ar-4b287fd630.png（ref ar-4b287fd630，role=space）；原 asset_dir=sk_office"
+   "ref": "assets/scenes/sk_office_night/refs/ar-9565919866.png",
+   "ref_sha256": "6f2e7544ef5964deee1943b85b7c9f2c9627bc37a8c26b52f5a6f40b4d9fc117",
+   "status": "series10 场景参考底图：assets/scenes/sk_office_night/refs/ar-9565919866.png（总调度 11-02 亲审定，登记 = 槽位送入；旧图 ar-4b287fd630 不再用）；走廊在画面左侧画外；原 asset_dir=sk_office"
   },
   "sk_gu_apartment": {
    "asset_dir": "sk_gu_apartment",

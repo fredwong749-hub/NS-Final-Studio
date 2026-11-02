@@ -50,6 +50,7 @@ STATUS_DOC = {
                  "restarts, last_restart: {t, reason}, next_try_t, ports: {<本机口>: {remote, ok, why: ok|timeout|refused|remote_down, checked_t}}}",
     "dispatch_mode": "派单模式（K-OPS-N06）：{override_active: 临时覆盖是否生效, phases: {gpu33|gpu36: laptop=该台分区由笔记本经隧道代派 | draining=正在交还 | server=服务器自己派}, checked_t}",
     "transfer": "传图队列（K-OPS-N09，puller 写）：{hosts: {gpu33|gpu36: {reachable, backlog_items 积压条数, backlog_bytes, throughput_kBps, latency_p50_s / p90_s 产出→落地, acked_total}}}；界面例：“传图队列：积压 12 张，约 3 分钟”",
+    "rssh": "命令通道成功率（总调度 14:2x，目标 > 99%）：{1h|10m: {gpu33|gpu36: {n, ok, rate, p50_s}}, target}；数据 = rssh.run 每次调用 + 每分钟合成探测（data/netfix/rssh_calls.jsonl）",
     "tunnels_up / tunnels_total": "出图 / 视频道（probe_http）通的条数 / 总数",
     "servers.<h>": "服务器自主生产：{last_health_t, last_pull_t, last_push_t, sync_age_min（最后一次并回距今分钟，界面“最后一次同步 xx 分钟前”用它）, producer_hb_age_min, producer_paused, night_state_age_min, dispatchable, autonomous: 跳板断时 true}（取自 resident_sync.json，跳板断时停在最后一次）",
 }
@@ -145,12 +146,12 @@ def mux_check(sock: str, host: str, timeout: float = 20) -> bool:
 
 def _route_of(cmd: str) -> str:
     c = cmd.rstrip().strip('"')
-    return "t" if (c.endswith("-t") or c.endswith("-tb")) else "hk" if c.endswith("-hk") else "direct"
+    return "t" if (c.endswith("-t") or c.endswith("-tb") or c.endswith("-tc")) else "hk" if c.endswith("-hk") else "direct"
 
 
 def _base_of(cmd: str) -> str | None:
     c = cmd.rstrip().strip('"')
-    return "base-b" if c.endswith("-tb") else "base-a" if c.endswith("-t") else None
+    return "base-b" if c.endswith("-tb") else "base-c" if c.endswith("-tc") else "base-a" if c.endswith("-t") else None
 
 
 def ssh_banner(port: int, timeout: float = 10) -> bool:
@@ -265,11 +266,15 @@ class Supervisor:
             target = hc.get("ssh_host", h) + self.c["hosts"][b].get("alias_suffix", "-t")
         cfg = self.c.get("ssh_config")
         if hc.get("kind") == "wsl_mux":            # P0 11-02：WSL OpenSSH 命令主连接（ControlMaster），远程命令 / 文件都复用它
-            return WSL + ["ssh", *(["-F", self.c["ssh_config_wsl"]] if cfg else []), "-o", "BatchMode=yes", "-M", "-S", hc["sock"],
+            # 14:2x：命令主连接也要放宽保活（15 s × 6 = 90 s；-o 放在 -F 读到的配置之前生效），底座卡顿 ~60 s 时不再整批掉线（14:23 一次掉 6 条）
+            return WSL + ["ssh", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=6",
+                          *(["-F", self.c["ssh_config_wsl"]] if cfg else []), "-o", "BatchMode=yes", "-M", "-S", hc["sock"],
                           "-o", "ControlPersist=no", "-N", "-o", f"Tag={self.host_tag(h)}", target]
         extra = ["-o", "LogLevel=VERBOSE"] if hc.get("kind") == "base" else []   # r3：底座记通道开关明细，查 no_banner 根因
+        if hc.get("via") == "t":                    # 内层经底座：保活放宽到 15 s × 6 = 90 s，底座短暂卡顿不连带把道杀掉（13:2x 抖动事故）
+            extra += ["-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=6"]
         if cfg:                                     # K-OPS-N08：项目 ssh 配置（香港中转主路 / 直连备用），相对路径 + cwd=ROOT（路径有空格）
-            cmd = [self.c["ssh_exe"], "-F", cfg, *self.c["ssh_opts"], *extra, "-o", f"Tag={self.host_tag(h)}"]
+            cmd = [self.c["ssh_exe"], "-F", cfg, *extra, *self.c["ssh_opts"], "-o", f"Tag={self.host_tag(h)}"]   # extra 在前：ssh 同名选项先出现的生效
         else:
             cmd = [self.c["ssh_exe"], *self.c["ssh_opts"], "-o", f"Tag={self.host_tag(h)}",
                    "-o", "ProxyCommand=" + self.c["relay"]["proxy_cmd"].replace("Tag=nsnetfix-proxy", f"Tag={self.tag}-proxy-{h}")]
@@ -290,7 +295,7 @@ class Supervisor:
 
     def degraded(self, b: str) -> bool:
         """底座劣化：最近连续 ≥ degraded_after 次 banner 慢（> 5 s）或读不到"""
-        return (self.hosts.get(b) or {}).get("slow_streak", 0) >= self.c.get("degraded_after", 2)
+        return bool((self.hosts.get(b) or {}).get("degraded"))
 
     def pick_route(self) -> str:
         """K-OPS-N08：按 route_order 选第一条“入口 TCP 通且没被判坏”的路；都不行用 direct"""
@@ -323,7 +328,7 @@ class Supervisor:
                     continue
                 if mux:
                     tgt = self.c["hosts"][hh].get("ssh_host", hh)
-                    if any(cmd.rstrip().endswith(f'{mine} {tgt}{suf}') for suf in ("", "-hk", "-t", "-tb")):   # 精确匹配（-cmd 是 -cmd2 的前缀）
+                    if any(cmd.rstrip().endswith(f'{mine} {tgt}{suf}') for suf in ("", "-hk", "-t", "-tb", "-tc")):   # 精确匹配（-cmd 是 -cmd2 的前缀）
                         if st["pid"] is None and pid_alive(pid):
                             st.update(pid=pid, since_t=now() - 60, state="up", up_since_t=now(),
                                       route=_route_of(cmd), base=_base_of(cmd))
@@ -446,17 +451,28 @@ class Supervisor:
         st = self.hosts[h]
         hc = self.c["hosts"][h]
         if hc.get("kind") == "base":
+            inner_ok = [x for x, y in self.hosts.items() if y.get("base") == h and y["state"] == "up"
+                        and any(v.get("ok") for v in y["ports"].values())]
+            if st["state"] == "up" and inner_ok and now() - st.get("banner_t", 0) < self.c.get("banner_every_s", 300):
+                st["probe_t"] = now()            # 12:1x：其上内层都在正常干活就不探 banner（每次探都是服务器 sshd 一条只连不握手的连接，
+                return                           # gpu36 auth.log 刷 kex_exchange_identification，还占 MaxStartups 名额）；至少 5 分钟探一次
+            st["banner_t"] = now()
             t0 = now()
             res = [ssh_banner(lp) for lp, _ in hc["forwards"]]
             t = now()
             st["banner_s"] = round(t - t0, 1)
             slow = t - t0 > 5 or not all(res)
-            was = self.degraded(h)
             st["slow_streak"] = st.get("slow_streak", 0) + 1 if slow else 0
+            st["good_streak"] = 0 if slow else st.get("good_streak", 0) + 1
             if slow:
                 self.log("BASE banner slow", h, f"{t - t0:.1f}s", res)
-            if self.degraded(h) != was:
-                self.log("BASE degraded" if not was else "BASE recovered", h, f"slow_streak={st['slow_streak']}")
+            # 滞回：连续 degraded_after 次慢 → 劣化；连续 recover_after 次正常（约 90 s）才算恢复，恢复后再等 migrate_after_s 才迁回（11:57 实测一次好就迁回 → 来回抖）
+            if not st.get("degraded") and st["slow_streak"] >= self.c.get("degraded_after", 2):
+                st["degraded"], st["degraded_t"] = True, t
+                self.log("BASE degraded", h, f"slow_streak={st['slow_streak']}")
+            elif st.get("degraded") and st["good_streak"] >= self.c.get("recover_after", 6):
+                st["degraded"], st["recovered_t"] = False, t
+                self.log("BASE recovered", h, f"good_streak={st['good_streak']}")
             st["probe_t"] = t
             st["ports"] = {str(lp): {"remote": rp, "ok": ok, "why": "ok" if ok else "no_banner", "checked_t": t}
                            for (lp, rp), ok in zip(hc["forwards"], res)}
@@ -601,10 +617,14 @@ class Supervisor:
                 continue
             want = self.pick_base(h)                 # 首选底座；首选劣化时 = 另一条健康的
             wb = self.hosts.get(want) or {}
-            cur_bad = self.degraded(st.get("base") or "")
-            if want and (st.get("route") != "t" or st.get("base") != want) and wb.get("state") == "up" and \
-                    (cur_bad or t - (wb.get("up_since_t") or t) >= self.c.get("migrate_after_s", 120)):
-                self.stop_host(h, f"迁到底座 {st.get('base')} → {want}" + ("（原底座劣化）" if cur_bad else "（回首选）"), count=False)
+            # 13:2x 事故：两条底座交替“劣化 / 恢复”，按劣化主动迁移 = 不停杀掉正在干活的道（13:07–13:21 迁了 20+ 次，总调度看到 6 道全 refused）。
+            # 改为：劣化只影响新起连接挑哪条；已在跑的连接只在底座死了（EXIT / REHOME）才换；回首选要首选连续健康 ≥ migrate_back_s，
+            # 且全局每 migrate_gap_s 最多迁一条
+            healthy_for = t - max(wb.get("up_since_t") or t, wb.get("recovered_t") or 0, wb.get("degraded_t") or 0)
+            if want and want == hc.get("base") and st.get("base") != want and wb.get("state") == "up" and not self.degraded(want) and \
+                    healthy_for >= self.c.get("migrate_back_s", 600) and t - getattr(self, "_last_mig_t", 0) >= self.c.get("migrate_gap_s", 60):
+                self._last_mig_t = t
+                self.stop_host(h, f"迁回首选底座 {st.get('base')} → {want}（首选已连续健康 {healthy_for:.0f}s）", count=False)
                 st["fails"], st["next_try_t"] = 0, 0.0
                 break
         if due:                                     # 两台并行探测：一拍最长约一个探测超时（20 s），心跳不拖过 90 s 线
@@ -616,16 +636,42 @@ class Supervisor:
                 import dispatch
                 if dispatch.snapshot_laptop():
                     self.log("SNAPSHOT laptop_ctrl 已更新")
+                pt = getattr(self, "_rssh_probe_thread", None)
+                if t - getattr(self, "_rssh_probe_t", 0) >= 60 and not (pt and pt.is_alive()):   # 命令通道合成探测：每台 1 次 / 分钟
+                    self._rssh_probe_t = t
+                    import threading
+
+                    def _probe():
+                        try:
+                            import rssh
+                            for hh in ("gpu33", "gpu36"):
+                                try:
+                                    rssh.run(hh, "true", timeout=20)
+                                except Exception:  # noqa: BLE001  超时已由 rssh._note 记成失败
+                                    pass
+                        except Exception as e:  # noqa: BLE001
+                            self.log("rssh probe error", repr(e)[:150])
+                    self._rssh_probe_thread = threading.Thread(target=_probe, daemon=True)
+                    self._rssh_probe_thread.start()
                 if t - getattr(self, "_pull_t", 0) >= 60:         # K-OPS-N09：puller 常驻保活（拿得到它的锁 = 不在跑 → 拉起）
                     self._pull_t = t
                     self.ensure_puller()
-                if t - getattr(self, "_rec_t", 0) >= 30:          # K-OPS-N06 临时覆盖：逐台交还状态机，30 s 一次
+                rt = getattr(self, "_rec_thread", None)
+                if t - getattr(self, "_rec_t", 0) >= 30 and not (rt and rt.is_alive()):   # K-OPS-N06：30 s 一次
                     self._rec_t = t
-                    r = dispatch.reconcile()
-                    self.mode = {"override_active": bool((dispatch.jl(dispatch.OVERRIDE, {}) or {}).get("active")),
-                                 "phases": r["phases"], "checked_t": t}
-                    if r.get("changed") or r.get("laptop_control"):
-                        self.log("DISPATCH", r)
+                    import threading
+
+                    def _rec(t=t):                        # 12:4x：reconcile 里会推送（经主连接取 / 推 partition，可达分钟级），
+                        try:                              # 放后台线程，不拖住主循环心跳（否则 net_status 过期 → 看门狗报 A-SUPERVISOR）
+                            r = dispatch.reconcile()
+                            self.mode = {"override_active": bool((dispatch.read_override() or {}).get("active")),
+                                         "phases": r["phases"], "checked_t": t}
+                            if r.get("changed") or r.get("laptop_control"):
+                                self.log("DISPATCH", r)
+                        except Exception as e:  # noqa: BLE001
+                            self.log("reconcile error", repr(e)[:200])
+                    self._rec_thread = threading.Thread(target=_rec, daemon=True)
+                    self._rec_thread.start()
             except Exception as e:  # noqa: BLE001
                 self.log("snapshot error", repr(e)[:200])
         self.write_status()
@@ -675,7 +721,44 @@ class Supervisor:
                            "supervisor": {"pid": os.getpid(), "started_t": self.started, "conf": str(self.conf_path)},
                            "relay": self.relay, "hosts": pub, "tunnels_up": up, "tunnels_total": total,
                            "servers": self.servers_view(), "dispatch_mode": getattr(self, "mode", None),
-                           "transfer": jl(self.dir / "puller_status.json", None), "_doc": STATUS_DOC})
+                           "transfer": jl(self.dir / "puller_status.json", None), "rssh": self.rssh_stats(), "_doc": STATUS_DOC})
+
+    def rssh_stats(self) -> dict | None:
+        """命令通道成功率（rssh.run 每次调用一行 data/netfix/rssh_calls.jsonl + 每分钟合成探测）：最近 1 小时 / 10 分钟。
+        成功 = 连接层没出错（rc != 255 且未超时）；目标 > 99%（总调度 14:2x）。文件超过 5 MB 只留后半"""
+        if now() - getattr(self, "_rssh_stat_t", 0) < 30 and getattr(self, "_rssh_stat", None) is not None:
+            return self._rssh_stat
+        p = self.dir / "rssh_calls.jsonl"
+        try:
+            raw = p.read_bytes()
+        except OSError:   # arch-ok: 还没有任何调用记录 → 指标为空（None），不是 0%
+            return None
+        if len(raw) > 5_000_000:
+            raw = raw[len(raw) // 2:]
+            raw = raw[raw.find(b"\n") + 1:]
+            tmp = p.with_suffix(".jsonl.tmp")
+            tmp.write_bytes(raw)
+            os.replace(tmp, p)
+        t = now()
+        out = {}
+        for win, sec in (("1h", 3600), ("10m", 600)):
+            agg = {}
+            for ln in raw.splitlines()[-20000:]:
+                try:
+                    d = json.loads(ln)
+                except ValueError:   # arch-ok: 并发追加偶有半行，跳过
+                    continue
+                if t - float(d.get("t") or 0) > sec:
+                    continue
+                a = agg.setdefault(d.get("host", "?"), {"n": 0, "ok": 0, "durs": []})
+                a["n"] += 1
+                a["ok"] += 1 if d.get("ok") else 0
+                a["durs"].append(float(d.get("dur") or 0))
+            out[win] = {h: {"n": a["n"], "ok": a["ok"], "rate": round(a["ok"] / a["n"], 4) if a["n"] else None,
+                            "p50_s": sorted(a["durs"])[len(a["durs"]) // 2] if a["durs"] else None} for h, a in agg.items()}
+        out["target"] = 0.99
+        self._rssh_stat, self._rssh_stat_t = out, t
+        return out
 
     def serve(self, max_s: float | None = None) -> None:
         self.log("START pid", os.getpid(), "conf", self.conf_path)

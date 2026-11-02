@@ -32,7 +32,9 @@ SKIP_PREFIX = ("data/producer/", "data/_quarantine", "data/_offline_pull", "data
 
 
 def partition_eps(host: str) -> list[int]:
-    part = json.loads((ROOT / "config/netfix/partition.json").read_text(encoding="utf-8"))
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import state_paths as SP                 # §10：运行期状态走 data/state/（兼容期读旧会留痕）
+    part = SP.read_state("netfix/partition", root=ROOT)
     return sorted(int(x) for x in (part.get("images") or {}).get(host) or [])
 
 
@@ -115,7 +117,7 @@ def dryrun(eps: list[int], only: set[str] | None = None, rec: Recorder | None = 
     from ns_render import unified_frame as UF
     rec = rec or Recorder()
     script = P.load_script()
-    project = UF.project_for(script) or "series10_v1"
+    project = UF.project_for(script) or os.environ.get("NS_RUN_ID") or "series10_v1"   # 与 producer 同口径：project_for 认不出 → 用本剧 run_id（第二季）
     res: dict = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "root": str(ROOT), "project": project, "eps": eps, "shots": {}}
     need: set[str] = set()
     for sid in shots_for(script, eps, only):

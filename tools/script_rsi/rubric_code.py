@@ -548,3 +548,32 @@ def v3_checks(shots: list, blocks: list[str]) -> dict:
                 walk.append(f"镜{s.index}“{m.group(0)}”")
                 break
     return {1: (end_ok, end_why), 2: (not walk, f"写了转身 / 走动的镜：{walk[:8] or '无'}")}
+
+
+# ---- K-WRT-211（fb-0001，总调度 11-02 授权 HOLLYWOOD 补 check）：镜面 / 玻璃场景手不碰反光面；≤8 秒的镜手部动作 ≤2 处
+MIRROR_CTX = re.compile(r"镜面|镜子|全身镜|镜墙|玻璃|落地窗|反光|mirror|glass|reflect", re.I)
+HAND_ON_MIRROR = re.compile(
+    r"(掌心|手掌|手|指尖|指节|手指)[^。；｜，,]{0,10}(贴|按|扶|抵|撑|压|碰|摸)[^。；｜，,]{0,6}(镜面|镜子|镜墙|玻璃|落地窗|反光)(?!框|边|柜)"
+    r"|(hand|palm|fingertips?|knuckles?)[^.,;]{0,40}\b(on|against)\b (the )?(mirror|glass|window)(?! ?(frame|edge|border|sill|cabinet))", re.I)
+HAND_ACT = re.compile(r"(掌心|手掌|指尖|指节|手指|(?<![一二三四五六七八九十对双])手(?![机表帕套段法艺术]))[^，；｜]{0,8}"
+                      r"(抬|收|按|握|拨|推|拿|放|递|攥|松|捏|摸|扶|撑|压|点|划|塞|抽|翻|捻|揉|抓|勾|贴|折|拉|扣|捧|托)")
+
+
+def mirror_hand_checks(shots: list, blocks: list[str]) -> dict:
+    """→ {1: 镜面场景手不碰反光面, 2: ≤8 秒的镜手部动作 ≤2 处}（K-WRT-211）。
+    ① 本镜 img / **场景** 行有镜面 / 玻璃 / 落地窗等反光面，且 分拍 / 表演节拍 / motion / H3 写了手贴 / 按 / 扶 / 抵在反光面上（镜框、镜边、镜柜不算）；
+    ② 镜长 ≤8 秒的镜，分拍里带手部动作（手 / 掌 / 指 + 抬收按握拨推拿放递…）的拍超过 2 拍。"""
+    touch, busy = [], []
+    for s, b in zip(shots, blocks):
+        lines = b.split("\n")
+        ctx = " ".join(ln for ln in lines if SHOT_HEAD.match(ln) or ln.startswith("**场景**"))
+        act = " ".join(ln for ln in lines if ln.startswith(("**分拍**", "**表演节拍**", "**motion**"))) + " " + " ".join(lines[i] for i in range(len(lines)) if "```" not in lines[i] and not lines[i].startswith("**"))
+        if MIRROR_CTX.search(ctx):
+            m = HAND_ON_MIRROR.search(act)
+            if m:
+                touch.append(f"镜{s.index}“{m.group(0)[:20]}”")
+        if int(s.duration or 0) <= 8:
+            n = sum(1 for _a, _e, t in _beats(b) if HAND_ACT.search(t.split("｜")[0]))
+            if n > 2:
+                busy.append(f"镜{s.index}（{n} 拍）")
+    return {1: (not touch, f"镜面场景手碰反光面：{touch[:8] or '无'}"), 2: (not busy, f"≤8 秒镜手部动作超过 2 拍：{busy[:8] or '无'}")}

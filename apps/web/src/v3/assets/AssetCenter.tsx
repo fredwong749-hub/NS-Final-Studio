@@ -167,6 +167,11 @@ export default function AssetCenter() {
         ) : (
           <PeopleNav list={hubList} cur={hubCid} onPick={(cid) => go("people-hub", cid)} />
         )}
+        {/* FILMUI：图像工坊（选基座 · 参考图 · 出图 · 历史 · 对比；项目方 12:5x） */}
+        <a className="ac-nav-i ac-nav-ws" href="#/image-edit">
+          <span>图像工坊</span>
+          <small>出图 · 修图</small>
+        </a>
         <div className="ac-nav-g">其他资产</div>
         {TREE.filter((t) => OTHER_NODES.has(t.id)).map((t) => (
           <div key={t.id}>

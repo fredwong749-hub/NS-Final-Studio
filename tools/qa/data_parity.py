@@ -188,7 +188,10 @@ class Api:
                 return get_episode(int(m.group(1)), default_store())
             if path == "/api/season":
                 from ns_api import season as SEA  # noqa: PLC0415
-                return SEA.season()
+                return SEA.season_now()   # UIRSI2：/api/season 走缓存，进程内比对用现算
+            if path == "/api/owner/queue":   # UIRSI2 L-116：D-QUEUE
+                from ns_api import owner_queue as OQ  # noqa: PLC0415
+                return OQ.build()
             if path == "/api/assets/scenes":
                 from ns_api import scene_assets as SCA  # noqa: PLC0415
                 from ns_agent.looks import default_store as _ds  # noqa: PLC0415
@@ -641,6 +644,38 @@ def main() -> int:
                         eq("D-STATUS", x["id"], f"有定稿{word_}时状态不说“{word_}未开始”", "矛盾：" + why_ if bad_ else "一致", "一致")
     except Exception as ex:  # noqa: BLE001
         warns.append(f"D-STATUS 取不到：{ex}")
+    # D-QUEUE（UIRSI2 L-116，K-UI-053）：“待你看”数 = 队列条目数 = 各类小计之和；队列读取失败不算通过；
+    # “机签通过 vN” = 该镜 takes.json 当前版本号（页面徽标 / 画布计数直接读 count，见 apps/web/e2e/uirsi/queue_check.mjs）
+    try:
+        oq = api.get("/api/owner/queue")
+        eq("D-QUEUE", "owner_queue", "队列读取状态", oq.get("status"), "ok")
+        eq("D-QUEUE", "owner_queue", "待你看数 = 条目数", oq.get("count"), len(oq.get("items") or []))
+        eq("D-QUEUE", "owner_queue", "待你看数 = 各类小计之和", oq.get("count"), sum((oq.get("counts") or {}).values()))
+        eq("D-QUEUE", "owner_queue", "条目 id 不重复", len({x.get("id") for x in oq.get("items") or []}), len(oq.get("items") or []))
+        spot_sids = {(x.get("sid"), x.get("stage")) for x in oq.get("items") or [] if x.get("kind") == "spot"}
+        for sid_, st_ in (oq.get("machine_signed") or {}).items():
+            m5 = re.fullmatch(r"ep(\d+)-S(\d+)", sid_)
+            if not m5:
+                continue
+            tj = rj(ROOT / "data" / "renders" / f"ep{int(m5.group(1)):02d}" / f"S{int(m5.group(2))}" / "takes.json", {}) or {}
+            for stg_, n_ in st_.items():
+                eq("D-QUEUE", sid_, f"机签通过的{stg_}版本 = 当前版本", n_, (tj.get("active") or {}).get(stg_))
+                eq("D-QUEUE", sid_, f"{stg_} 不同时是机签通过和待抽检", (sid_, stg_) in spot_sids, False)
+    except Exception as ex:  # noqa: BLE001
+        fails.append(f"D-QUEUE /api/owner/queue 取不到：{ex}")
+    # D-PROG（UIFIX-S，总调度 13:4x：顶栏“系统状态”的全剧进度曾是 首帧 16/102，全剧总览页头是 90/102，口径不一）：
+    # 两处现在读同一份数据（集列表里每镜当前有没有首帧 / 视频，SeasonPage 页头 = SystemStatus.helpers.progOf）；
+    # 这里按同一口径独立数一遍，必须等于集摘要 /api/episodes/summary 的 first_frames / videos 之和，也不许退回按定稿锁数
+    try:
+        sm_ = api.get("/api/episodes/summary").get("episodes") or []
+        ff_ = sum(1 for e_ in sm_ for s_ in e_.get("shots") or [] if s_.get("first_frame"))
+        vd_ = sum(1 for e_ in sm_ for s_ in e_.get("shots") or [] if s_.get("video"))
+        eq("D-PROG", "全剧进度", "首帧数（总览页头 = 状态面板）= 集摘要首帧数之和", ff_, sum(((e_.get("summary") or {}).get("first_frames") or 0) for e_ in sm_))
+        eq("D-PROG", "全剧进度", "视频数（总览页头 = 状态面板）= 集摘要视频数之和", vd_, sum(((e_.get("summary") or {}).get("videos") or 0) for e_ in sm_))
+        ss_ = (ROOT / "apps/web/src/v3/SystemStatus.helpers.ts").read_text(encoding="utf-8")
+        eq("D-PROG", "全剧进度", "状态面板不再读 production lights 口径", "/production" in ss_, False)
+    except Exception as ex:  # noqa: BLE001
+        warns.append(f"D-PROG 取不到：{ex}")
     # D-LOOKGATE：顶栏 ② 造型确认的人物 = 剧本本集在画 / 局部的人
     if project:
         for e in eps:

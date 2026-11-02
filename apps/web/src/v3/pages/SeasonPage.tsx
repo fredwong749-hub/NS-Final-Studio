@@ -284,8 +284,11 @@ export default function SeasonPage() {
               faces: x.cast.filter((c) => c.presence !== "画外").map((c) => ({ name: c.name, url: faces[c.name] ?? null })),
               video: x.video ?? null,
               videoOld: x.video_old ?? null,
+              hasLast: !!byId.get(x.id)?.last_frame_target, // FILMUI r4：片窗角“已有尾帧”图标
               // 演示悬停播放（地址栏 ?mock=1 才有）：本机还没有同步到任何当前剧本的视频，用一段示意视频，帧角标“示意视频”
-              videoMock: !x.video && !x.video_old && /[?&]mock=1/.test(location.search) && x.index <= 3 ? "/files/ab/director_post/ep01_v2_post.mp4" : null,
+              videoMock: null, // r6（项目方 12:4x“只看最新状态”）：去掉 ?mock=1 示意视频
+              // r6：出图中 → 片窗右上角琥珀呼吸灯；悬停说明用后端 live 状态（status.running / step / why），不编数据
+              dotTip: (x.status as MainStatus | undefined)?.running ? `出图中 · ${({ first: "首帧", last: "尾帧", video: "视频" } as Record<string, string>)[(x.status as MainStatus).step ?? ""] ?? (x.status as MainStatus).step ?? ""}${(x.status as MainStatus).why ? " · " + (x.status as MainStatus).why : ""}` : null,
             })),
           }))}
           onOpen={(id) => setPeek(id)}

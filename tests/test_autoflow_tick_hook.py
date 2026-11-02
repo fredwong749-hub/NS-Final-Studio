@@ -58,3 +58,12 @@ def test_three_parts_threads_and_core_merges(monkeypatch, tmp_path):
     st = _j.loads((out / "status.json").read_text(encoding="utf-8"))
     assert st["global"]["api_restart"] == {"status": "busy"} and st["global"]["last_tick"]["dry"] is False
     assert (out / "last_tick.json").is_file()
+
+
+def test_factory_sync_thread_wired():
+    """FACTORY 11-02：loop 每 10 分钟跑 tools/factory/sync.py auto，独立线程、失败只记日志"""
+    src = (ROOT / "tools/autopilot/resident_sync.py").read_text(encoding="utf-8")
+    body = src.split("def loop(", 1)[1].split("\ndef ", 1)[0]
+    assert "factory_sync_thread" in body and RS.FACTORY_SYNC_EVERY_S == 600
+    fn = src.split("def factory_sync_thread(", 1)[1].split("\ndef ", 1)[0]
+    assert '"tools/factory/sync.py"), "auto"' in fn and "taskkill" in fn

@@ -105,6 +105,19 @@ def _local(now: float) -> list[dict]:
 PHASE_WORD = {"laptop": "由笔记本统一派图", "draining": "正在交还给服务器", "server": "服务器自己派图"}
 
 
+def _disabled_ports() -> set[int]:
+    """hosts.json 里 enabled=false 的道的隧道端口（退役道）；读不到 → 空集合（不隐藏任何连接）"""
+    out: set[int] = set()
+    try:
+        for h in ((_jl(ROOT / "config/factory/hosts.json", {}) or {}).get("hosts") or {}).values():
+            for ln in (h.get("lanes") or {}).values() if isinstance(h, dict) else []:
+                if ln.get("enabled") is False and ln.get("tunnel_port"):
+                    out.add(int(ln["tunnel_port"]))
+    except (AttributeError, TypeError, ValueError):
+        return set()
+    return out
+
+
 def _from_netfix(ns: dict, now: float) -> tuple[dict, list[dict], list[str], dict | None]:
     """NETFIX net_status.json → 跳板 / 6 条连接 / 自动重连 / 派单模式（大白话；端口只进 tech）"""
     r = ns.get("relay") or {}
@@ -289,6 +302,12 @@ def build(now: float | None = None, wd: dict | None = None, res: dict | None = N
             servers[host]["sync_age_min"] = nsv["sync_age_min"]
             servers[host]["text"] += f"；最后一次同步 {_ago(float(nsv['sync_age_min']) * 60)}前"
 
+    # L-100（UIFIX-S）：退役道（config/factory/hosts.json 里 enabled=false，如 gpu36:2 改做看图卡）不算连接，不进分母，也不报断
+    off = _disabled_ports()
+    if off:
+        gone = [t for t in tunnels if t["port"] in off]
+        tunnels = [t for t in tunnels if t["port"] not in off]
+        reconnect = [r for r in reconnect if not any(g["name"] in r for g in gone)]
     bad_t = [t for t in tunnels if not t["ok"]]
     if relay_down:
         level, summary = "bad", f"跳板断了 {_ago(relay['down_s'])}：笔记本连不上两台服务器（服务器上的常驻照常跑）"

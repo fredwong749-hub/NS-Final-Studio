@@ -169,7 +169,8 @@ def ab_dir(experiment: str) -> Path:
 
 def render_ab(client, script, shot_id: str, *, experiment: str, tier: str, seed: int | None = None,
               prompt_edits: list | None = None, overrides: dict | None = None, preset: str | None = None,
-              postflight: bool = False, host: str | None = None, tag: dict | None = None) -> dict:
+              postflight: bool = False, host: str | None = None, tag: dict | None = None,
+              job_patch: dict | None = None) -> dict:
     """scope=ab（RESEARCH 11-01，总调度 fredw-2b 方案 ②）：走唯一出图路径的同一套作业 / 契约 preflight / 图 / 后处理，但
     ① 不写 takes.json（不调 P._add_take / record_params）→ auto_current、rescore_takes、画布都看不到；
     ② 不写契约账本（postflight 结果只进实验清单，不调 _pf_write）；
@@ -189,6 +190,13 @@ def render_ab(client, script, shot_id: str, *, experiment: str, tier: str, seed:
     job = dict(_job_for(script, shot_id, project, None))
     if preset:
         job["preset"] = preset
+    # job_patch（IMGMASTER 11-02）：新编译入口的 prompt / refs / asset_refs 直接替换作业对应字段（只给 scope=ab；
+    # 不写账本；字段限 prompt、refs、asset_refs）
+    if job_patch:
+        bad = set(job_patch) - {"prompt", "refs", "asset_refs"}
+        if bad:
+            raise ValueError(f"job_patch 只允许 prompt / refs / asset_refs，收到 {sorted(bad)}")
+        job.update(job_patch)
     prompt = job["prompt"]
     for pair in prompt_edits or []:
         old, new = pair[0], pair[1]

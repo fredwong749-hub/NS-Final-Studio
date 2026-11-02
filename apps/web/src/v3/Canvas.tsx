@@ -26,6 +26,7 @@ import { useSbUi } from "./StoryboardDetails.helpers";
 import { SbEpisodeBar, StoryboardTable } from "./StoryboardTable";
 import { ProduceClipDots } from "./EpisodeProduce"; // fredw-92/EB 整集出片进度点
 import { stageWords } from "./words"; // UXF5（R5）
+import { queueItemsOfEp, useOwnerQueue } from "./ownerQueue"; // UIRSI2 L-116：待审计数读队列
 
 const short = (id: string) => id.split("-")[1];
 
@@ -132,6 +133,7 @@ function EditHead({ s }: { s: ShotSummary }) {
   const st = useStudio();
   const { sop } = useSop();
   useEdit(); // F2：v1 任务进度
+  useOwnerQueue(); // UIRSI2 L-116：机签通过随队列刷新
   const status = shotStatus(s, st, sop?.shots.find((x) => x.id === s.id));
   return (
     <div className="v3-edit-head">
@@ -175,8 +177,9 @@ function ClipStrip({ ep }: { ep: Episode }) {
   const { sel, multi, details } = st;
   const es = useEdit();
   // v3.1 §1.7：统计与状态点同一套判定（status.ts）；已定 = 首尾帧都已定稿且未过期，视频另计
+  const { q: oq } = useOwnerQueue(); // UIRSI2 L-116：机签通过 / 待你看计数读队列
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const c = useMemo(() => episodeCounts(ep.shots, st, sop), [ep, st, sop, es.jobs]);
+  const c = useMemo(() => episodeCounts(ep.shots, st, sop), [ep, st, sop, es.jobs, oq]);
   // v3.1 §1.6：批量操作只对片段条的多选生效，没有选择就不显示
   const pick = ep.shots.filter((s) => multi.has(s.id));
   const firstList = pick.filter((s) => frameState(s, details[s.id], "image") === "none");
@@ -201,7 +204,11 @@ function ClipStrip({ ep }: { ep: Episode }) {
   const keyOf = (s: ShotSummary) => c.status.get(s.id)?.key;
   const lockFirstList = pick.filter((s) => s.first_frame_take != null && (keyOf(s) === "review_first" || keyOf(s) === "auto_first"));
   const lockLastList = pick.filter((s) => s.last_frame_take != null && (keyOf(s) === "review_last" || keyOf(s) === "auto_last"));
-  const toReview = ep.shots.filter((s) => ["review_first", "auto_first", "review_last", "auto_last"].includes(keyOf(s) ?? ""));
+  const toReview0 = ep.shots.filter((s) => ["review_first", "auto_first", "review_last", "auto_last"].includes(keyOf(s) ?? ""));
+  // UIRSI2 L-116：“选中待审 N”的 N = 本集在“待你看”队列里的条目数（D-QUEUE）；点了选上这些镜 + 还要人工定稿的镜（功能不变）
+  const qEp = queueItemsOfEp(oq, ep.number);
+  const qIds = new Set(qEp.map((x) => x.sid!));
+  const toReview = ep.shots.filter((s) => qIds.has(s.id) || toReview0.includes(s));
   const batchLock = async (slot: "first" | "last") => {
     const gpu = getEdit().gpu;
     for (const s of slot === "first" ? lockFirstList : lockLastList) {
@@ -220,7 +227,7 @@ function ClipStrip({ ep }: { ep: Episode }) {
           多选
         </button>
         <button className="v3-btn" disabled={!toReview.length} onClick={() => (setPickMode(true), st.setMulti(new Set(toReview.map((s) => s.id))))} title={toReview.length ? `选上待你定稿首帧 / 尾帧的镜头：${toReview.map((s) => short(s.id)).join("、")}` : "没有待你定稿首帧 / 尾帧的镜头"}>
-          选中待审{toReview.length ? ` ${toReview.length}` : ""}
+          选中待审{qEp.length ? ` ${qEp.length}` : ""}
         </button>
       </div>
       <div className="v3-clips">
@@ -242,7 +249,8 @@ function ClipStrip({ ep }: { ep: Episode }) {
         ))}
       </div>
       <div className="v3-strip-side">
-        <p className="v3-strip-stats" title={`状态点：已定（视频审过）${c.dots.green} · 待你审 ${c.dots.yellow} · 生成中 ${c.dots.blue} · 失败 ${c.dots.red} · 未出 ${c.dots.gray}`}>
+        <p className="v3-strip-stats" title={`状态点：已定（视频审过）${c.dots.green} · 琥珀（要处理，系统多数自动做）${c.dots.yellow} · 生成中 ${c.dots.blue} · 失败 ${c.dots.red} · 灰（未出 / 机签通过）${c.dots.gray}
+待你看 ${oq?.count ?? "…"}（全剧队列，顶栏“待你看”）`}>
           <span>
             {ep.shots.length} 镜 · {c.secs}s
           </span>
@@ -252,9 +260,9 @@ function ClipStrip({ ep }: { ep: Episode }) {
           <span>
             有视频 <b>{c.videos}</b>
           </span>
-          <span className="s-yellow">
-            <StatusDot dot="yellow" /> 待你审 {c.dots.yellow}
-          </span>
+          <a className="s-yellow" href="#/queue" data-oq-count={oq ? String(oq.count) : ""} title="待你看：只放必须你拍板、机签抽检、审美挑选的事（全剧）">
+            <StatusDot dot={oq && oq.count > 0 ? "yellow" : "gray"} /> 待你看 {oq?.count ?? "…"}
+          </a>
           {c.dots.blue > 0 && (
             <span className="s-blue">
               <StatusDot dot="blue" /> 生成中 {c.dots.blue}

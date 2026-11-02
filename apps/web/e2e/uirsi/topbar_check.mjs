@@ -7,12 +7,16 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const PAGES = ["/#/overview", "/#ep01", "/#/script-create?new=1", "/#/assets?type=people", "/#/sound", "/#/cut", "/#/settings"];
+const PAGES = process.env.TOPBAR_PAGES ? process.env.TOPBAR_PAGES.split(",") : ["/#/overview", "/#ep01", "/#/script-create?new=1", "/#/assets?type=people", "/#/sound", "/#/cut", "/#/settings"];
 const SIZES = ["1280x800", "1440x900", "1920x1080"];
 const EXPR = `JSON.stringify((()=>{const vis=(e)=>{if(!e)return false;const r=e.getBoundingClientRect();const c=getComputedStyle(e);return r.width>0&&r.height>0&&c.visibility!=="hidden"&&c.display!=="none"&&r.bottom>0&&r.top<innerHeight};
 const top=document.querySelector(".v3-top");
 return {top:vis(top),brand:vis(document.querySelector(".v3-brand-full"))||vis(document.querySelector(".v3-brand-short")),
-newScript:vis(document.querySelector(".v3-new")),picker:[...document.querySelectorAll(".v3-top button")].some((b)=>/第\\s*\\d+\\s*集/.test(b.textContent)&&vis(b))}})())`;
+noOverlap:(()=>{const top=document.querySelector(".v3-top");if(!top)return false;const els=[...top.querySelectorAll(".v3-top-l > *, .v3-step, .v3-top-r > *")].filter((e)=>vis(e)&&!e.closest(".v3-top-hidden")&&!e.querySelector(".v3-step")&&!(e.matches(".v3-top-l > *, .v3-top-r > *")&&e.querySelector(".v3-top-l > *, .v3-top-r > *")));const R=els.map((e)=>e.getBoundingClientRect());for(let i=0;i<R.length;i++){if(R[i].left<-0.5||R[i].right>innerWidth+0.5)return false;for(let j=i+1;j<R.length;j++){if(els[i].contains(els[j])||els[j].contains(els[i]))continue;const a=R[i],b=R[j];if(a.left<b.right-1&&b.left<a.right-1&&a.top<b.bottom-1&&b.top<a.bottom-1)return false;}}return document.documentElement.scrollWidth<=innerWidth+1;})(),
+newScript:vis(document.querySelector(".v3-new")),picker:[...document.querySelectorAll(".v3-top button")].some((b)=>/第\\s*\\d+\\s*集/.test(b.textContent)&&vis(b)),
+navText:(()=>{const s=[...document.querySelectorAll(".v3-top .v3-step")];return s.length>0&&s.every((b)=>{const t=b.querySelector("span");return vis(b)&&t&&t.scrollWidth<=t.clientWidth+1&&b.scrollWidth<=b.clientWidth+1&&t.getBoundingClientRect().width>=t.textContent.trim().length*10;});})()}})())`;
+// UIFIX-S：noOverlap = 顶栏各元素两两不重叠、不超出视口宽度、页面无横向滚动
+// UIRSI2（总调度亲审 r47）：navText = 导航五步文字完整（span / 按钮不溢出、宽度放得下全部字，不许被挤成“1 剧 / 2 资”）
 let bad = 0;
 for (const p of PAGES)
   for (const s of SIZES) {
@@ -20,7 +24,7 @@ for (const p of PAGES)
     // 探针本身起不来（无头 Chrome 启动偶发失败）只重试一次；两次都起不来才记缺——这是工具问题，不掩盖顶栏回退
     for (let k = 0; k < 2; k++) {
       try {
-        const out = execFileSync("node", [join(HERE, "probe.mjs"), p, EXPR, "12000", s], { encoding: "utf8", timeout: 120000, stdio: ["ignore", "pipe", "ignore"] }).trim().split("\n").pop();
+        const out = execFileSync("node", [join(HERE, "probe.mjs"), p, EXPR, process.env.TOPBAR_WAIT || "12000", s], { encoding: "utf8", timeout: 120000, stdio: ["ignore", "pipe", "ignore"] }).trim().split("\n").pop();
         r = JSON.parse(JSON.parse(out));
         break;
       } catch (e) {

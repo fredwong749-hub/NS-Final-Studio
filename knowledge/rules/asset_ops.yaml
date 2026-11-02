@@ -416,3 +416,75 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-W24
+    domain: ops
+    link: [P5-P6]
+    title: takes.json 当前版本视频（active.video）一律从服务器拉回笔记本，拉完按服务器报的大小核对
+    when: resident_sync pull 并回服务器产物，或笔记本缺当前版本视频（胶片总览悬停预览要用）
+    then: pull 每轮经 remote_active_videos 取服务器 takes.json 的 active.video（文件在的）→ 笔记本没有或大小不符的并入 need_mp4，不受“只拉成片 / manifest 入选 / 放大版”的省带宽规则限制；补拉用 resident_sync.py pull-active-videos <host> [--dry]，分批 tar、逐个按服务器大小核对、原子写进仓库对应路径，截断的不收下次再拉
+    check: tests/test_pull_active_videos.py
+    evidence:
+      - {src: tools/autopilot/resident_sync.py, note: "总调度 11-02 派（DEBUG-RSI 查出）：22:2x 跳板慢时 pull 先滤掉 .mp4，active.video 从不回笔记本；改后补拉 gpu33 18 + gpu36 25 = 43 条（5.8 MB），全部按大小核对通过，复查缺 0"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-W25
+    domain: ops
+    link: [P5-P6]
+    title: 服务器上每部在产的非主剧各保一个 producer serve --run <run>，和第一季同一套管理（重启时一起起、挂了自动拉起），并且只派本机分区
+    when: config/pipeline/runs.json 有 status=producing 且不是 primary 的剧（第二季 series10_s2 起）
+    then: ops/offline/ensure_runs.sh 按 runs.json 起缺的 producer serve --run（TZ=Asia/Tokyo 等环境同 resident_restart.sh），pid 写 data/producer/runs/<run>/serve.pid（producer.pid 是 producer 自己的 JSON 锁，不能占）、日志 producer.out，STOP 存在不起；resident_restart.sh 先停后起；resident_sync.loop 每拍 ensure_runs；该剧 control.json 必须有按集分区的 only（与 dispatch.py 同规则），缺 control 时 producer 会派全部镜、两台重复
+    check: tests/test_pull_active_videos.py
+    evidence:
+      - {src: ops/offline/ensure_runs.sh, note: "服务器 data/producer/runs/series10_s2/producer.out：11:57 第二季 producer 起后两台都派了 first:ep01-S8～S11（该剧 control.json 不存在 → only 为空 = 全派）；WORKFLOW 按 partition.json 写临时 control 后 gpu36 只派 ep02/04/06、gpu33 只派 ep01/03/05/07–10"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-W26
+    domain: ops
+    link: [P5-P6]
+    title: resident_sync / restart_queue 的服务器根目录、venv、渲染道与端口一律读 config/factory/hosts.json（tools/factory/hosts.py），读不到就 raise
+    when: 笔记本侧工具要拼服务器路径、选 ComfyUI 端口或冒烟道
+    then: R = hosts.server_root（两台不一致即失败关闭）、OFF = R 的上一级、PY[host] = hosts.python(host)、LANES = hosts.lanes(host, role=image) 里启用的道（gpu33 GPU2 坏卡、gpu36:2 看图卡 enabled=false 都不列）、SMOKE_LANE = 该机最后一条启用出图道；不再写死路径和端口；tests/test_factory_hosts.py drift 必须为 0
+    check: tests/test_pull_active_videos.py
+    evidence:
+      - {src: config/factory/hosts.json, note: "SYSARCH 4-2 ②（总调度 12:0x 派）：原 LANES 含 gpu36:2 → 8190 死口，SMOKE_LANE 也指向它；改后 LANES gpu36 = {0: 8188, 1: 8189}，冒烟道 gpu36:1，drift []"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-W27
+    domain: ops
+    link: [P5-P6]
+    title: 两台各自出过同一批镜时逐镜合并：锁定优先 → 只一台过契约用那台 → 都过用原分区机、另一份隔离 → 都没过都保留；takes 按文件认版本，同号不同图换号，不删文件
+    when: 分区搬动 / 两台 takes 不同步导致同一镜在两台都有新版本（11-02 ep08/09 搬到 gpu33 后重做 90 张）
+    then: ops/offline/resolve_dup_takes.py plan 出判定表、apply 执行（先按镜暂停现分区机 producer 15 分钟；以现分区机 takes 为底，另一台版本按文件认、撞号换新号记 renumbered；active 按判定设；落选重复版本打 quarantined；笔记本隔离标记按文件带进；三处写同一份 takes.json 并留 .before_dupmerge 备份；只补 active 的图）；merge_pull.merge_takes_docs 同样先按文件认版本、撞号换号、active 跟着换号（以后任何并回都不再按编号互相覆盖）
+    check: tests/test_resolve_dup_takes.py
+    evidence:
+      - {src: ops/offline/resolve_dup_takes.py, note: "总调度 12:4x 定规则（DEBUG-RSI 派）：第一季 ep08/09 20 镜 40 个阶段 → ③ 用 gpu36 31、② 用 gpu33 5、④ 都保留 4；无项目方锁；13:3x 三处 takes.json 一致，补图 gpu33 31 / gpu36 5 / 笔记本 2"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-W28
+    domain: ops
+    link: [P5-P6]
+    title: 资产推送清单包含每部在产的非主剧（用它自己的导入稿算 preflight 依赖 + 它继承链上的造型 / 设定图 / 每镜造型登记 + 解析层）
+    when: 第二季等非主剧在服务器出图，新登记了造型设定图 / 单品
+    then: resident_sync.required_data 对 runs.json 里 producing 的非主剧调用 run_required_data(run)：preflight_deps(script=该剧导入稿) + asset_refs.chain_files(run, looks_file / sheets_file / shot_looks_file) + 设定图登记里的图 + resolution_layers.yaml 全部文件；push_required 按清单补推，复核缺 0
+    check: tests/test_pull_active_videos.py
+    evidence:
+      - {src: tools/autopilot/resident_sync.py, note: "DEBUG-RSI 12:3x：第二季 D/E/F/I 设定图笔记本已登记，gpu33 12:34:53 派 first:ep03-S8 仍报“林晚 造型D 没有设定图”；改后 12:56 推 gpu33 26 / gpu36 8 个文件，复核缺 0"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-W29
+    domain: ops
+    link: [P5-P6]
+    title: 同步链路写 takes.json 一律经 ns_render.pipeline.mutate_takes（跨进程锁 + seq + last_op + 备份），笔记本改服务器上的 takes 走 takes_cli replace --expect-seq
+    when: register_takes 登记 / 撤销、merge_pull 并回、resolve_dup_takes 合并等同步链路写 takes.json
+    then: 本机写 = P.mutate_takes(sid, fn, op, by[, op_id, run, expect_seq])；先只读判断再写的地方带 expect_seq，TakesConflict 就留到下一轮或重算；merge_pull 写仓库内 takes.json 时在锁里现读本地再并（_sid_run_of 认出镜号与 run）；服务器侧有 tools/pipeline/takes_cli.py 就 replace --expect-seq，退出码 3（stale_base）即中止重跑；不再直接 json.dump / _save_takes
+    check: tests/test_takes_write_entry_sync.py
+    evidence:
+      - {src: tools/pipeline/register_takes.py, note: "SYSARCH 结构问题 #16（ARCH_ROADMAP §11）第 1 步，DEBUG-RSI 落地写入口（11-02 13:5x）；WORKFLOW 改 register_takes 2 处、merge_pull、resolve_dup_takes；两个进程各写 25 次不丢、seq=50"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

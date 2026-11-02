@@ -38,7 +38,8 @@ def add_camctl(e: dict, v: dict) -> None:
     ff = v["inputs"].get("@first_frame") or v["score_meta"].get("first_frame")
     ff = ff if Path(ff).is_absolute() else ROOT / ff
     name = f"{v['arm']['id']}_ctl.mp4"
-    meta = CC.render(Path(ff), c["move"], int(v["frames"]), CTL_DIR / e["name"] / name, float(c.get("amp", 1.0)))
+    meta = CC.render(Path(ff), c["move"], int(v["frames"]), CTL_DIR / e["name"] / name, float(c.get("amp", 1.0)),
+                     int(c.get("dilate", 25)))
     g = v["graph"]
     lora = next(k for k, n in g.items() if n["class_type"] == "LoraLoaderModelOnly")
     vae = next(k for k, n in g.items() if n["class_type"] == "MiniMaxH3ImageToVideo")
@@ -81,9 +82,17 @@ def plan(e: dict) -> list[dict]:
     return vs
 
 
+def src_v67(arm: dict) -> dict | None:
+    """from_job 臂沿用源实验的 v67_meta（人数 / 对白 / 说话人）：剧本重导入后镜号会变，按新 jobs.json 取会拿错说话人（vl_r1 S5 教训）"""
+    if not arm.get("from_job"):
+        return None
+    f = LAB.AB / arm["from_job"][0] / "jobs_local.json"
+    return next((j.get("v67_meta") for j in VIO.read_json(f) if j["id"] == arm["from_job"][1]), None)
+
+
 def jobs_of(e: dict, vs: list[dict]) -> list[dict]:
     return [{"id": v["arm"]["id"], "shot": v["shot"], "recipe": v["recipe"], "seed": v["seed"], "kind": "video",
-             "v67_meta": v["arm"].get("v67_meta") or e.get("v67_meta", {}).get(v["shot"]),
+             "v67_meta": v["arm"].get("v67_meta") or e.get("v67_meta", {}).get(v["shot"]) or src_v67(v["arm"]),
              "graph": v["graph"], "inputs": dict(v["inputs"]), "score_meta": {**v["score_meta"], "first_frame": None},
              "prompt": v["prompt"], "prompt_notes": v["prompt_notes"], "overrides": v["arm"].get("overrides"),
              "graph_set": v["arm"].get("graph_set")} for v in vs]

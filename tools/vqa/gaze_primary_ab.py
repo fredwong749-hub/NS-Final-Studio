@@ -87,7 +87,16 @@ def decide(r: dict, g: dict, rule: str) -> bool | None:
 def report() -> dict:
     from ns_agent.vqa import contract as VQ
     g = {"A": 0.3, "T": 0.05, "P": 0.2, "band": 2.0, **(VQ.gate_cfg().get("gaze_mp") or {})}
-    rows = json.loads(OUT.read_text(encoding="utf-8"))
+    raw = json.loads(OUT.read_text(encoding="utf-8"))
+    # 标签按“图里第几个人”（img:<jpg>#k），规则按整张图判 → 按图汇总：任一人看镜头 = 这张图看镜头
+    by: dict = {}
+    for r in raw:
+        if r["img"] in by:
+            if r["label"] == "看镜头":
+                by[r["img"]]["label"] = "看镜头"
+        else:
+            by[r["img"]] = dict(r)
+    rows = list(by.values())
     res = {}
     for rule in ("R0", "R1"):
         tp = fp = fn = tn = 0

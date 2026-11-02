@@ -271,8 +271,11 @@ def code_fails(pre: str, chunk: str, ep: int, wd: Path) -> list[tuple[str, dict]
         cc["v2"] = R5.RC6.v2_checks(shots, blocks, pre + RL.block_text(chunk, "head"))
     if REQUIRE_V3.get("on"):                                   # K-WRT-H19 / H20：v3 试点集（P4_epNN.md.v3 标记）
         cc["v3"] = R5.RC6.v3_checks(shots, blocks)
+        SL = _load("scene_lock", "tools/script_rsi/scene_lock.py")       # K-WRT-H23–H25：场景定稿行 / 衔接点 / 不重复描述环境
+        cc["scene"] = SL.check_episode(RL.block_text(chunk, "head"), shots, blocks)
+        cc["k211"] = R5.RC6.mirror_hand_checks(shots, blocks)            # K-WRT-211（fb-0001）：镜面手不碰反光面 / ≤8 秒手部动作 ≤2 拍
     out = []
-    for d in list(R5.RC6.DIMS) + [x for x in ("v2", "v3") if x in cc]:
+    for d in list(R5.RC6.DIMS) + [x for x in ("v2", "v3", "scene", "k211") if x in cc]:
         for i, (ok, why) in cc[d].items():
             if not ok:
                 shots_ = sorted({int(x) for x in re.findall(r"镜(\d+)", why)} |
@@ -718,7 +721,17 @@ def main(argv=None) -> int:
     n.add_argument("--episode", type=int, required=True)
     n.add_argument("--want", default="", help="只收这些结尾类型（逗号分隔，如 gaze_out）；不给 = 按整季现状算允许集合")
     n.add_argument("--why", default="")
+    ro = sub.add_parser("reopen", help="补丁预算用尽后重开（清零逐项尝试计数，记 manual 历史；不动稿、不跳闸门）")
+    ro.add_argument("--run-dir", required=True)
+    ro.add_argument("--episode", type=int, required=True)
+    ro.add_argument("--why", required=True)
+    ro.add_argument("--by", default="HOLLYWOOD")
     a = ap.parse_args(argv)
+    if a.cmd == "reopen":
+        AG = _load("autoflow_agent", "tools/script_rsi/autoflow_agent.py")
+        rd = Path(a.run_dir) if Path(a.run_dir).is_absolute() else ROOT / a.run_dir
+        print(json.dumps(AG.reopen(rd, a.episode, a.why, a.by), ensure_ascii=False))
+        return 0
     if a.cmd == "narrative-patch":
         AG = _load("autoflow_agent", "tools/script_rsi/autoflow_agent.py")
         rd = Path(a.run_dir) if Path(a.run_dir).is_absolute() else ROOT / a.run_dir

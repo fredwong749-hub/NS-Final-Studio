@@ -11,7 +11,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const PORT = 9681;
+const PORT = Number(process.env.SHOOT_PORT || 9681); // UIFIX-S：多个 agent 同时截图会撞端口、连到别人的浏览器
 const BASE = "http://127.0.0.1:5173";
 const SIDE = process.env.SIDE_URL || "http://127.0.0.1:8803";  // r38：可用环境变量换旁路（infra_sidecar.py :8804）
 const CHROME = "C:/Program Files/Google/Chrome/Application/chrome.exe";

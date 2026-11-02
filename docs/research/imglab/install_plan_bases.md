@@ -48,3 +48,18 @@ gated 仓库的 sha256 由脚本在下载后计算（11-02 21:3x 服务器时间
 ## 回退
 
 删除上表文件即可，两台机器都不涉及节点和 pip 改动。
+
+## 异常检测用模型（VQAGATE / DETECT-S 用；项目方 AskUserQuestion 点选“两个都下载”，总调度 11-02 13:2x 批）
+
+只装 gpu36：/root/work/fredw/hf_models/（下载日志 install.log，冒烟脚本 smoke.py）。用 transformers 直接跑，不装 ComfyUI 节点。
+
+| 模型 | 来源（HF revision） | 文件 | 大小 | sha256 | 许可证 |
+|---|---|---|---|---|---|
+| OneFormer ADE20K swin-tiny | shi-labs/oneformer_ade20k_swin_tiny@05f2812b1eccf9909b3897777450f8d68148cafc | pytorch_model.bin + config / preprocessor / tokenizer / vocab / merges | 203 MB | 909b07dbf4129c2bbb8df4498e35dcd46f305e3ec45329d3ff6d4f0360de27f3 | MIT |
+| （OneFormer 类别表） | datasets/shi-labs/oneformer_demo · ade20k_panoptic.json | 放在模型目录 | 小 | 9d47d3bf5cedeefee0a41888b069bde254bf614f738ae43e4b423d1b2f321427 | 随 OneFormer |
+| Depth-Anything-V2-Small | depth-anything/Depth-Anything-V2-Small-hf@5426e4f0f36572d16453bbda7a8389317b1bef99 | model.safetensors + config / preprocessor | 99 MB | 3152477ce0d8d6978d76b995120de97cb5b928701fd0f817769f59e249a16b70 | Apache-2.0 |
+
+冒烟（gpu36 CPU，512×896 灰图）：OneFormer 语义分割 2.9 s，深度 0.7 s。
+加载时报 swin layernorm MISSING：这是 OneFormer 骨干的已知提示，骨干只用中间特征，不影响分割。
+处理器要离线加载：`OneFormerProcessor.from_pretrained(dir, repo_path=dir, class_info_file="ade20k_panoptic.json")`，并设 `HF_HUB_OFFLINE=1`。
+ADE20K 类 id（0 起，post_process_semantic_segmentation 输出）：window（windowpane）= 8，mirror = 27，glass（drinking glass）= 147。

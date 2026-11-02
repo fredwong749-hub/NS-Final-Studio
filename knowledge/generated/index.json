@@ -1,16 +1,16 @@
 {
- "kb_version": "kb-20261102-0e3e558a",
- "n": 596,
+ "kb_version": "kb-20261102-7f3fc2d7",
+ "n": 626,
  "by_domain": {
-  "render": 86,
-  "prompt": 27,
-  "writer": 94,
+  "render": 88,
+  "prompt": 28,
+  "writer": 98,
   "edit": 49,
   "review": 66,
   "loop": 9,
-  "asset": 43,
-  "ops": 161,
-  "ui": 61
+  "asset": 44,
+  "ops": 179,
+  "ui": 65
  },
  "by_link": {
   "P0-P1": 20,
@@ -19,14 +19,14 @@
   "P11-P12": 27,
   "P11-RETRY": 47,
   "P2-P3": 3,
-  "P3-P4": 110,
-  "P4-P5": 40,
-  "P4-P6": 28,
+  "P3-P4": 114,
+  "P4-P5": 41,
+  "P4-P6": 30,
   "P4-P7": 23,
   "P4-P9": 16,
-  "P5-P6": 181,
-  "P6-P7": 31,
-  "P7-P8": 108,
+  "P5-P6": 202,
+  "P6-P7": 32,
+  "P7-P8": 111,
   "P8-P10": 18,
   "P8-P9": 12,
   "P9-P10": 21
@@ -1192,6 +1192,132 @@
     {
      "src": "data/autopilot/restart_done.jsonl",
      "note": "总调度 11-02 04:1x：排空把打分积压算进 inflight（gpu33 当时 42），干等满 15 分钟才重启，gpu36 一直没处理，GPU 白闲"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/asset_ops.yaml"
+  },
+  {
+   "id": "K-OPS-W24",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "takes.json 当前版本视频（active.video）一律从服务器拉回笔记本，拉完按服务器报的大小核对",
+   "when": "resident_sync pull 并回服务器产物，或笔记本缺当前版本视频（胶片总览悬停预览要用）",
+   "then": "pull 每轮经 remote_active_videos 取服务器 takes.json 的 active.video（文件在的）→ 笔记本没有或大小不符的并入 need_mp4，不受“只拉成片 / manifest 入选 / 放大版”的省带宽规则限制；补拉用 resident_sync.py pull-active-videos <host> [--dry]，分批 tar、逐个按服务器大小核对、原子写进仓库对应路径，截断的不收下次再拉",
+   "check": "tests/test_pull_active_videos.py",
+   "evidence": [
+    {
+     "src": "tools/autopilot/resident_sync.py",
+     "note": "总调度 11-02 派（DEBUG-RSI 查出）：22:2x 跳板慢时 pull 先滤掉 .mp4，active.video 从不回笔记本；改后补拉 gpu33 18 + gpu36 25 = 43 条（5.8 MB），全部按大小核对通过，复查缺 0"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/asset_ops.yaml"
+  },
+  {
+   "id": "K-OPS-W25",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "服务器上每部在产的非主剧各保一个 producer serve --run <run>，和第一季同一套管理（重启时一起起、挂了自动拉起），并且只派本机分区",
+   "when": "config/pipeline/runs.json 有 status=producing 且不是 primary 的剧（第二季 series10_s2 起）",
+   "then": "ops/offline/ensure_runs.sh 按 runs.json 起缺的 producer serve --run（TZ=Asia/Tokyo 等环境同 resident_restart.sh），pid 写 data/producer/runs/<run>/serve.pid（producer.pid 是 producer 自己的 JSON 锁，不能占）、日志 producer.out，STOP 存在不起；resident_restart.sh 先停后起；resident_sync.loop 每拍 ensure_runs；该剧 control.json 必须有按集分区的 only（与 dispatch.py 同规则），缺 control 时 producer 会派全部镜、两台重复",
+   "check": "tests/test_pull_active_videos.py",
+   "evidence": [
+    {
+     "src": "ops/offline/ensure_runs.sh",
+     "note": "服务器 data/producer/runs/series10_s2/producer.out：11:57 第二季 producer 起后两台都派了 first:ep01-S8～S11（该剧 control.json 不存在 → only 为空 = 全派）；WORKFLOW 按 partition.json 写临时 control 后 gpu36 只派 ep02/04/06、gpu33 只派 ep01/03/05/07–10"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/asset_ops.yaml"
+  },
+  {
+   "id": "K-OPS-W26",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "resident_sync / restart_queue 的服务器根目录、venv、渲染道与端口一律读 config/factory/hosts.json（tools/factory/hosts.py），读不到就 raise",
+   "when": "笔记本侧工具要拼服务器路径、选 ComfyUI 端口或冒烟道",
+   "then": "R = hosts.server_root（两台不一致即失败关闭）、OFF = R 的上一级、PY[host] = hosts.python(host)、LANES = hosts.lanes(host, role=image) 里启用的道（gpu33 GPU2 坏卡、gpu36:2 看图卡 enabled=false 都不列）、SMOKE_LANE = 该机最后一条启用出图道；不再写死路径和端口；tests/test_factory_hosts.py drift 必须为 0",
+   "check": "tests/test_pull_active_videos.py",
+   "evidence": [
+    {
+     "src": "config/factory/hosts.json",
+     "note": "SYSARCH 4-2 ②（总调度 12:0x 派）：原 LANES 含 gpu36:2 → 8190 死口，SMOKE_LANE 也指向它；改后 LANES gpu36 = {0: 8188, 1: 8189}，冒烟道 gpu36:1，drift []"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/asset_ops.yaml"
+  },
+  {
+   "id": "K-OPS-W27",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "两台各自出过同一批镜时逐镜合并：锁定优先 → 只一台过契约用那台 → 都过用原分区机、另一份隔离 → 都没过都保留；takes 按文件认版本，同号不同图换号，不删文件",
+   "when": "分区搬动 / 两台 takes 不同步导致同一镜在两台都有新版本（11-02 ep08/09 搬到 gpu33 后重做 90 张）",
+   "then": "ops/offline/resolve_dup_takes.py plan 出判定表、apply 执行（先按镜暂停现分区机 producer 15 分钟；以现分区机 takes 为底，另一台版本按文件认、撞号换新号记 renumbered；active 按判定设；落选重复版本打 quarantined；笔记本隔离标记按文件带进；三处写同一份 takes.json 并留 .before_dupmerge 备份；只补 active 的图）；merge_pull.merge_takes_docs 同样先按文件认版本、撞号换号、active 跟着换号（以后任何并回都不再按编号互相覆盖）",
+   "check": "tests/test_resolve_dup_takes.py",
+   "evidence": [
+    {
+     "src": "ops/offline/resolve_dup_takes.py",
+     "note": "总调度 12:4x 定规则（DEBUG-RSI 派）：第一季 ep08/09 20 镜 40 个阶段 → ③ 用 gpu36 31、② 用 gpu33 5、④ 都保留 4；无项目方锁；13:3x 三处 takes.json 一致，补图 gpu33 31 / gpu36 5 / 笔记本 2"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/asset_ops.yaml"
+  },
+  {
+   "id": "K-OPS-W28",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "资产推送清单包含每部在产的非主剧（用它自己的导入稿算 preflight 依赖 + 它继承链上的造型 / 设定图 / 每镜造型登记 + 解析层）",
+   "when": "第二季等非主剧在服务器出图，新登记了造型设定图 / 单品",
+   "then": "resident_sync.required_data 对 runs.json 里 producing 的非主剧调用 run_required_data(run)：preflight_deps(script=该剧导入稿) + asset_refs.chain_files(run, looks_file / sheets_file / shot_looks_file) + 设定图登记里的图 + resolution_layers.yaml 全部文件；push_required 按清单补推，复核缺 0",
+   "check": "tests/test_pull_active_videos.py",
+   "evidence": [
+    {
+     "src": "tools/autopilot/resident_sync.py",
+     "note": "DEBUG-RSI 12:3x：第二季 D/E/F/I 设定图笔记本已登记，gpu33 12:34:53 派 first:ep03-S8 仍报“林晚 造型D 没有设定图”；改后 12:56 推 gpu33 26 / gpu36 8 个文件，复核缺 0"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/asset_ops.yaml"
+  },
+  {
+   "id": "K-OPS-W29",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "同步链路写 takes.json 一律经 ns_render.pipeline.mutate_takes（跨进程锁 + seq + last_op + 备份），笔记本改服务器上的 takes 走 takes_cli replace --expect-seq",
+   "when": "register_takes 登记 / 撤销、merge_pull 并回、resolve_dup_takes 合并等同步链路写 takes.json",
+   "then": "本机写 = P.mutate_takes(sid, fn, op, by[, op_id, run, expect_seq])；先只读判断再写的地方带 expect_seq，TakesConflict 就留到下一轮或重算；merge_pull 写仓库内 takes.json 时在锁里现读本地再并（_sid_run_of 认出镜号与 run）；服务器侧有 tools/pipeline/takes_cli.py 就 replace --expect-seq，退出码 3（stale_base）即中止重跑；不再直接 json.dump / _save_takes",
+   "check": "tests/test_takes_write_entry_sync.py",
+   "evidence": [
+    {
+     "src": "tools/pipeline/register_takes.py",
+     "note": "SYSARCH 结构问题 #16（ARCH_ROADMAP §11）第 1 步，DEBUG-RSI 落地写入口（11-02 13:5x）；WORKFLOW 改 register_takes 2 处、merge_pull、resolve_dup_takes；两个进程各写 25 次不丢、seq=50"
     }
    ],
    "confidence": "high",
@@ -4196,6 +4322,28 @@
    "_file": "knowledge/rules/netfix.yaml"
   },
   {
+   "id": "K-OPS-N11",
+   "domain": "ops",
+   "link": [
+    "P5-P6",
+    "P7-P8"
+   ],
+   "title": "每个 producing run 各写一份 control（主剧 data/producer/control.json，其它 data/producer/runs/<run>/control.json），镜号不带前缀；写前校验两台不相交、并集 = 该 run 全部 ready",
+   "when": "dispatch.py server-control（resident_sync health / reconcile 推送时）",
+   "then": "分区沿用 partition.json 按集规则；主剧 control 不再夹带其它 run 的镜号；全局暂停同步 paused / reason_kind / expires_at 到每个 run 的 control（D5）；verify_run 不过 → 拒写该 run、保留旧 control、rc=2；分区改动按两阶段（先撤、确认无租约、再给）",
+   "check": "tests/test_netfix.py::test_run_control_unprefixed_disjoint_and_complete",
+   "evidence": [
+    {
+     "src": "data/netfix/supervisor.log",
+     "note": "11:57 第二季没有自己的 control，两台重复派 4 个对象；12:1x 上线后 gpu33 第二季 77 镜（ep1/3/5/7/8/9/10）、gpu36 33 镜（ep2/4/6），不相交"
+    }
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/netfix.yaml"
+  },
+  {
    "id": "K-OPS-Q30",
    "domain": "ops",
    "link": [
@@ -4813,6 +4961,27 @@
    "_file": "knowledge/rules/ops_debug.yaml"
   },
   {
+   "id": "K-OPS-E26",
+   "domain": "ops",
+   "link": [
+    "P7-P8"
+   ],
+   "title": "缺资产 / 期望 refs 表不一致挡下的镜进“等资产”状态，资产登记或期望表签名一变自动放回，不靠 30 分钟退避反复派、不手动清",
+   "when": "preflight 挡单原因是 I3 / I4（造型设定图或单品资产缺图）或 K-OPS-F03（refs 与 data/factory/inbox/expected_refs.json 不一致）",
+   "then": "账本记 waiting_asset（kind=asset 或 refs，带 asset_sig / refs_sig），blocked_until 兜底 6 小时；producer 每分钟算一次签名（asset_sig = config/recipes/asset_refs.json + wardrobe.json + 各项目 *_file 的 stat；refs_sig = 期望表 stat），kind=asset 资产签名变、kind=refs 期望表或资产签名变 → 清 blocked_until 和 assets:<sid> 的 blocked，记 asset_release（counted=false）；其它 preflight 原因（如 I5 场景底图）照旧 30 分钟退避",
+   "check": "tests/test_debug_rsi.py::test_e26_wait_kind / test_e26_asset_release_on_registry_change / test_e26_refs_release_on_expected_table_change / test_e26_release_throttled / test_e26_asset_sig_follows_config_registry",
+   "evidence": [
+    {
+     "src": "docs/debug/DEBUG_r1.md",
+     "note": "11-02 13:24–13:31 gpu33：第二季 dispatch 9 / refs_mismatch 7 / preflight_block 7，期望表用的是 series10_v1 路径，镜在 30 分钟退避里空转，FACTORY 改表后还要手动清退避；producer 日志 preflight_block 原因 I3 林晚造型B 没有设定图 371 次"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_debug.yaml"
+  },
+  {
    "id": "K-OPS-D02",
    "domain": "ops",
    "link": [
@@ -4860,7 +5029,7 @@
     },
     {
      "src": "ops/cleanup/delete_quarantine_20261101.ps1",
-     "note": "11-01 隔离 76 项 23.0G；项目方一键：“先隔离，验证后你删”；⤴ 11-02 13:2x 项目方本人下令删除，隔离区已删，证据改指删除脚本"
+     "note": "11-01 隔离 76 项 23.0G；项目方一键：“先隔离，验证后你删”；⤴ 11-02 13:2x 项目方本人下令删除，隔离区（含原 MANIFEST.md）已删，证据改指删除脚本和 docs/overnight/morning_20261102.md"
     }
    ],
    "confidence": "high",
@@ -5384,6 +5553,48 @@
     {
      "src": "docs/master/ARCH_ROADMAP.md",
      "note": "§8：车道表 6 份互相对不上（producer IMAGE_LANES、resident_sync、fwd.py、tunnels.json 含死口、render_endpoints、vidlab lanes.json）"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
+  },
+  {
+   "id": "K-OPS-F15",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "运行期状态（程序自动改写的）只放 data/state/，读写只走 tools/factory/state_paths.py；兼容期读旧位置必留痕（data/state/legacy_reads.jsonl），写只落新位置（原子写）；读不到 raise",
+   "when": "新增 / 读写运行期状态文件（partition、override、runs、run 指针等）",
+   "then": "read_state(name) 先新后旧、读旧写事件 {at,name,old_path,caller,host}；write_state 原子写新位置；新状态名先登记 LEGACY / 状态表；sv-11 起删旧读（SENTINEL state_legacy_read 24 h = 0 为前提）",
+   "check": "tests/test_factory.py::test_state_paths_compat_read_and_atomic_write",
+   "evidence": [
+    {
+     "src": "docs/master/ARCH_ROADMAP.md",
+     "note": "§10：config/ 里混着运行期改写的 partition / override / runs.json，冻结锁不得不对它们开豁免"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
+  },
+  {
+   "id": "K-OPS-F16",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "派单前 refs 校验只核身份脸 + sha（不比整张清单）：身份脸必须在本镜期望里、每个已登记文件 sha 与笔记本一致、没登记的非身份图只记不拦；期望表随参考板变化自动重建（sync.py auto，loop 每拍调）",
+   "when": "改 refs_guard / inbox.check_refs / 自修阶梯变体 / 参考板生成",
+   "then": "变体（只挂脸 / 两张脸 + 设定图 / 参考板 / 同脸双槽）合法改 refs 组合不被拦；身份脸用错照拦；sync.py auto 内容变了才推",
+   "check": "tests/test_factory.py::test_check_refs_wrong_face_path_blocks, tests/test_factory.py::test_check_refs_per_run_tables",
+   "evidence": [
+    {
+     "src": "data/producer/log.jsonl",
+     "note": "11-02 11:50–12:21：gpu33 4 次、gpu36 1 次 refs_mismatch，全是自修阶梯变体（只挂两张脸 / 挂设定图）被整张清单比对拦下"
     }
    ],
    "confidence": "high",
@@ -6285,6 +6496,90 @@
    "_file": "knowledge/rules/ops_sentinel.yaml"
   },
   {
+   "id": "K-OPS-S13",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "道的声明以 config/factory/hosts.json 为唯一来源，SENTINEL G26 每拍核对每条启用的道：端口有进程在听、system_stats 正常、监听进程跑在声明的 GPU、坏卡没有作业；不符即开单",
+   "when": "改 hosts.json、重启 / 迁移 ComfyUI、换卡、标坏卡",
+   "then": "先改 hosts.json（FACTORY），再动服务器；G26 不符 → 运行期问题派 DEBUG-RSI，声明错了 FACTORY 改表；sv-09 部署前探针自动不判",
+   "check": "tests/test_sentinel.py::test_decl_vs_actual, tests/test_sentinel.py::test_g26_waits_for_sv09",
+   "evidence": [
+    {
+     "src": "config/factory/hosts.json",
+     "note": "11-02 SYSARCH 4-2：车道 / 端口 / 服务器路径原散在 6 份表里；gpu33 GPU2 坏卡永不用"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_sentinel.yaml"
+  },
+  {
+   "id": "K-OPS-S14",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "结构性违规由 SENTINEL 常驻开单——scratchpad 里跑的脚本与会话 shell 里 > 2 小时的 ssh 轮询（S20，K-OPS-Y04）、24 小时内读旧状态路径（S21，sv-11 删旧读前提为 0）、冻结期间改文件（S22）；负责方按脚本名 / 调用方 / 文件查 ownership.yaml",
+   "when": "任何 agent 从 scratchpad 起进程、运行期状态仍从 config/ 旧位置读、cut 冻结期间改文件",
+   "then": "S20 读进程命令行（脚本本身在 scratchpad 才算），S21 读 data/state/legacy_reads.jsonl，S22 读 data/rsi/freeze_drift.jsonl（之后成功 cut 自动关单）；SENTINEL 自己的运行期状态读法走 tools/factory/state_paths.read_state",
+   "check": "tests/test_sentinel.py::test_scratchpad_procs, tests/test_sentinel.py::test_ssh_loops, tests/test_sentinel.py::test_legacy_reads_and_freeze_drift",
+   "evidence": [
+    {
+     "src": "docs/master/SLO.md",
+     "note": "11-02 12:0x 首拍 scratchpad 里在跑 5 类脚本（watch_green.sh、s2_sheets.py 等）；SENTINEL 自己 11:56 冻结期间改过文件"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_sentinel.yaml"
+  },
+  {
+   "id": "K-OPS-S15",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "出图道要从两侧量——服务器本机端口（S2 / G26）和笔记本隧道端口（S23）；笔记本侧 5 分钟可达率 < 80% 或同一拍半数以上的道不通即开单派 NETFIX",
+   "when": "隧道重连 / 换线路 / 跳板抖动，或笔记本经隧道派单、看板读数",
+   "then": "SENTINEL S23 每拍并发测本地隧道端口 /system_stats（端口读 hosts.json tunnel_port），与 NETFIX A-TUNNEL-FLAP 互为备份；退役道（gpu36:2）不计",
+   "check": "tests/test_sentinel.py::test_laptop_lane_reach",
+   "evidence": [
+    {
+     "src": "docs/master/SLO.md",
+     "note": "11-02 13:07–13:21 隧道来回重连、6 道全部拒连，S2 / G26 只测服务器本机端口，没有报警"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_sentinel.yaml"
+  },
+  {
+   "id": "K-OPS-S16",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "界面依赖的 API（/api/episodes、/api/season）每分钟测响应时间，最近 20 次 p95 ≥ 2 s 开单派 UIRSI2；失败 / 超时按超时时长计入，不能当快",
+   "when": "改 ns_api 的列表 / 季度接口，或页面卡在加载",
+   "then": "SENTINEL S24 带本机只读查看令牌测（不碰项目方账号）；慢的接口改后台缓存 / 预计算，不在请求里现算",
+   "check": "tests/test_sentinel.py::test_api_latency",
+   "evidence": [
+    {
+     "src": "docs/master/SLO.md",
+     "note": "11-02 /api/season 一度 6–25 s，页面卡在加载界面，没有探针报警；UIRSI2 改后台缓存后 0.02–0.25 s"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_sentinel.yaml"
+  },
+  {
    "id": "K-OPS-S01",
    "domain": "ops",
    "link": [
@@ -6348,6 +6643,91 @@
     {
      "src": "tools/netfix/rssh.py",
      "note": "11-02 sv-06：SYSARCH 4-1 把 remote_score 换成 rssh.run_retry，_local_self 没认 OFFLINE_ALIASES；gpu36 上 full_score(\"gpu33\") 被判跨机 rc=255 → 退回 CPU 打分无 torch → 36 单全 score_infra（FACTORY 发现，sv-07 热修）。SYSARCH 只在笔记本连 gpu36 实测，没测服务器环境"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_sysarch.yaml"
+  },
+  {
+   "id": "K-OPS-Y03",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "冻结锁是强制的——system_version cut 期间（lock-status 非 0 或查不了），Claude Code 的 Edit / Write / NotebookEdit 写代码目录（tools services apps config knowledge tests ops packages）一律被 ops/hooks/freeze_guard.py 拒绝；docs 和 data 不拦",
+   "when": "任何 agent 改代码目录；system_version cut 冻结期间",
+   "then": "被拒就停手，等解冻后再改（改了也进不了本版）；冻结期间禁止用 Bash 写代码目录（sed -i、> / >> 重定向、heredoc、python -c 写文件都算）——第 1 层拦不到，但由 iter_gate F1 / cut 报告 drift + SENTINEL 工单查出后记在本 loop 的账上（总调度 11-02 12:2x；ARCH_ROADMAP §9 第 2–4 层，sv-10）",
+   "check": "tests/test_freeze_guard.py::test_locked_denies_code_dirs, tests/test_freeze_guard.py::test_lock_unknown_fails_closed_only_for_code, tests/test_freeze_guard.py::test_unlocked_allows",
+   "evidence": [
+    {
+     "src": "data/system_versions/cut_lock.json",
+     "note": "11-02 sv-09 冻结（11:56 起）期间 SENTINEL 脚本查到 lock-status rc=3 仍写入 G26 代码，UIRSI2 可能也有一起；K-OPS-F08 原本只靠自觉"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_sysarch.yaml"
+  },
+  {
+   "id": "K-OPS-Y04",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "会改生产状态（partition / control / hold / takes / attempts / 服务器文件等）的代码不许从 scratchpad 或仓库外路径跑——必须先进仓库（带最小测试、进系统版本）再跑",
+   "when": "任何 loop 想临时写个脚本去改生产状态（借道、挂道、重置次数、改 control、推文件）",
+   "then": "先放进仓库对应目录（如 tools/debug/）并带最小测试，再运行；临时调研只读的脚本可以在 scratchpad。SENTINEL 探针查从 scratchpad 路径起来、仍在运行的 python / sh 进程，开单派该进程负责方（总调度 11-02 12:4x 批）",
+   "check": "tests/test_sentinel.py::test_scratchpad_procs",
+   "evidence": [
+    {
+     "src": "docs/master/ARCH_ROADMAP.md",
+     "note": "11-02 12:3x DEBUG-RSI 自报：借道 / 临时挂道兜底 lend_any.py、hold_lane.py、lend_lane.sh 在 scratchpad 里跑，直接改笔记本和两台服务器的 partition.json 与服务器 control.json hold；arch_scan / iter_gate / cut 都看不到，无测试、无版本可回退"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_sysarch.yaml"
+  },
+  {
+   "id": "K-OPS-Y05",
+   "domain": "ops",
+   "link": [
+    "P5-P6",
+    "P6-P7"
+   ],
+   "title": "出图提示词只有一个编译入口（frame_job 分段编译，归 IMGMASTER）；别处的规则只能做成 config/compile/plugins.yaml 登记的插件改某一段，不许在编译入口以外往提示词里拼句子",
+   "when": "任何 loop 想加 / 改出图提示词里的句子（融合、灯光、视线、F1 / F3 / K-REN-903 之类）",
+   "then": "写成插件（签名 (segment_text, shot, continuity) -> segment_text，只改登记的那一段，挂一条存在且带 check 的规则），IMGFIX 的插件放 config/compile/plugins/imgfix_*，由 IMGMASTER 合入登记表；未登记插件编译时报错；arch_scan prompt_bypass 棘轮查编译入口以外的提示词拼接（现有散落处进基线只许减）",
+   "check": "tests/test_arch_scan.py::test_prompt_bypass_outside_compile_entry",
+   "evidence": [
+    {
+     "src": "docs/master/CONSISTENCY_PLAN.md",
+     "note": "11-02 项目方：问题散落在各个地方，存在一些不确定性；ep01 01/06/07/08 拼接生硬，提示词来源分散（style_suffix、融合句、灯光句、镜头句、视线句、F1/F3/K-REN-903 各自追加）；L-118 总调度 13:3x 定唯一编译入口 + 插件四道关"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_sysarch.yaml"
+  },
+  {
+   "id": "K-OPS-Y06",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "真删除（含项目方下令删隔离区）之前先反查——knowledge 规则证据、RSI 账本、knowledge/archive、config/owner_decisions.yaml 有指向要删路径的，先列出并改指，不自动删；删除脚本由 tools/qa/purge_precheck.py --emit-ps1 生成，脚本开头自带反查",
+   "when": "生成或执行任何删除脚本 / 删除隔离区 / 腾磁盘",
+   "then": "跑 python tools/qa/purge_precheck.py <路径>；有引用 → 按给出的改指方案把要点存进 knowledge/archive/deleted_evidence.md 并改 src，再重跑到 PASS；只有 PASS 才生成删除脚本（脚本内再查一次，不过就中止）。“不删只隔离”约束 agent 自己，项目方本人决定的删除照做，但要先过这一步",
+   "check": "tests/test_purge_precheck.py::test_rule_evidence_under_deleted_dir_is_reported, tests/test_purge_precheck.py::test_owner_decisions_reference_is_reported, tests/test_purge_precheck.py::test_referenced_path_refuses_to_emit_ps1",
+   "evidence": [
+    {
+     "src": "docs/master/ARCH_ROADMAP.md",
+     "note": "11-02 13:2x 项目方本人下令删除隔离区（L-058，-Delete，两台服务器也删）后，规则证据指向的文件没了，knowledge compile --check 失败挡住 sv-10 发版；quarantine_refcheck 只管移进隔离区之前"
     }
    ],
    "confidence": "high",
@@ -7672,6 +8052,53 @@
    "_file": "knowledge/rules/render_imgfix.yaml"
   },
   {
+   "id": "K-REN-710",
+   "domain": "render",
+   "link": [
+    "P4-P6"
+   ],
+   "decision": "D-SCR-07",
+   "title": "出图正文没写视线时，编译侧按人补一句固定的正向视线落点句（所有图片不要看镜头）",
+   "when": "frame_job.eyeline_note（IMGMASTER 分段编译里是 action 段的 eyeline 插件）；局部 / 物件特写不加",
+   "then": "逐人判断，正文里归给某人的小句有视线词（GAZE_WORDS）就不补（多人镜里背对也算写了）；没有就补 asset_refs.EYELINE_NOTE 句式，落点取第一拍 视线= / 反应=，都没有时多人镜看另一个露脸的人，单人镜写“画面里的人或物”；只给露脸的人补（K-REN-903）",
+   "check": [
+    "tests/test_imgmaster_compile.py::test_eyeline_note_fills_missing_gaze"
+   ],
+   "evidence": [
+    {
+     "src": "services/agent/ns_agent/frame_job.py",
+     "note": "SCRIPT-RSI 11-01 D-SCR-07，项目方 18:2x“所有图片不要看镜头”；原先只给第一个人、正文有任何视线词就整句不加"
+    }
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/render_imgfix.yaml"
+  },
+  {
+   "id": "K-REN-709",
+   "domain": "render",
+   "link": [
+    "P4-P6"
+   ],
+   "title": "在画且上身入画的人，本造型外层单品的衣橱登记描述补一句（袖子 / 领口细节），正文已有不重复",
+   "when": "frame_job.garment_detail_note（IMGMASTER 分段编译里是 characters 段的 garment_detail 插件）；局部 / 物件特写、上身不入画不加",
+   "then": "句式 asset_refs.GARMENT_DETAIL_NOTE，内容取 asset_refs.garment_details（衣橱登记，例“短款西装外套：两只袖子都是深灰西装袖（露米白衬衫袖口）”）；句式改了要同步 unified_stale 识别式",
+   "check": [
+    "tests/test_imgfix.py::test_garment_detail_note_from_wardrobe_registry"
+   ],
+   "evidence": [
+    {
+     "src": "tools/imgfix/sleeve_fix.py",
+     "note": "IMGFIX r5：模型常把外套画成无袖或单袖，补登记描述句后袖子稳定；规则条目由 IMGMASTER 代补（总调度 11-02 定）"
+    }
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/render_imgfix.yaml"
+  },
+  {
    "id": "K-OPS-121",
    "enforced": false,
    "domain": "ops",
@@ -8066,6 +8493,29 @@
     }
    ],
    "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/render_imglab.yaml"
+  },
+  {
+   "id": "K-AST-901",
+   "domain": "asset",
+   "link": [
+    "P4-P5"
+   ],
+   "title": "设定图脸部栏构图必须带到衣服领口（不能只到锁骨下，像没穿衣服）",
+   "when": "四栏设定图出图（设定图提示词“far-left panel … cropped at …”）与登记前检查（tools/imglab/sheet_neckline.py）",
+   "then": "提示词写“cropped below the neckline of the outfit so the collar or neckline of the clothing is clearly visible”；登记前最左栏底边带肤色占比 > 0.45 → 不过、不进候选（线按 11-02 第二季 8 张标定，见脚本说明）",
+   "check": [
+    "tools/imglab/sheet_neckline.py"
+   ],
+   "evidence": [
+    {
+     "src": "data/assetmaster/sheets_s2/check.json",
+     "note": "总调度 11-02 12:3x 亲审第二季 F：F s101 / s202 脸部栏只到锁骨下，看起来像没穿衣服，不选；选 s303。底边带肤色占比 0.57 / 0.57 vs 选中 F s303 0.35、E s101 0.03、D s101 0.01、I s303 0.24"
+    }
+   ],
+   "confidence": "medium",
    "status": "确认",
    "date": "2026-11-02",
    "_file": "knowledge/rules/render_imglab.yaml"
@@ -9146,6 +9596,31 @@
    "confidence": "high",
    "status": "确认",
    "date": "2026-11-01",
+   "_file": "knowledge/rules/render_video_s10.yaml"
+  },
+  {
+   "id": "K-PRM-310",
+   "domain": "prompt",
+   "link": [
+    "P7-P8"
+   ],
+   "title": "Pika 近景单人镜每个分拍句末补一个物理微表情分句（眉 / 眨眼 / 呼吸 / 嘴角），由编译层加，不靠写作方",
+   "when": "编译 i2va_pika_flex 视频作业，recipe prompt.acting_micro_beats = true 且 prompt.acting_scope 命中（closeup_single = 近景及更紧、画内单人）",
+   "then": "ns_recipes.acting.micro_beats 在每个“At 00:0X”分拍句末（最后一拍插在 as the shot ends 前）按拍轮换补一个微表情分句，主语取该拍第一个 his/her/he/she；只写物理动作不写情绪内容；作业 prompt_notes 记“插入分拍微表情”。开关默认关，V7 台词段口型 / SFace 身份护栏补测通过后由 VIDLAB 打开",
+   "check": "tests/test_acting_beats.py（开关默认关；范围只命中近景单人；两份规则表一致）",
+   "evidence": [
+    {
+     "src": "data/rsi/vidlab/ab_vl_r1_act2.json",
+     "note": "同 seed 同首帧配对：S5 近景单人表演活跃度 +47% / +45%，眨眼 0→16 次/分；S4 双人中景 +1% / −4%；J4、看镜头不变"
+    },
+    {
+     "src": "docs/research/h3_deep/01_official.md",
+     "quote": "#96 几乎不眨眼：建议在提示词里写明第几秒眨眼"
+    }
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-02",
    "_file": "knowledge/rules/render_video_s10.yaml"
   },
   {
@@ -13000,6 +13475,90 @@
    "_file": "knowledge/rules/ui.yaml"
   },
   {
+   "id": "K-UI-053",
+   "check": "tests/test_r43_uirsi.py",
+   "domain": "ui",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "L-116 待你看队列——只放必须项目方拍板 / 机签抽检 / 审美挑选三类，其余全自动；机签通过的镜写“机签通过 vN”不再提示点选；读不到队列不显示成空",
+   "when": "任何需要项目方看或决定的事，或页面上显示“待审 / 待你看”的计数、每镜首帧尾帧的审核提示",
+   "then": "后端 services/api/ns_api/owner_queue.py：GET /api/owner/queue 汇总 ① decide（data/owner_queue/requests.json 的 spend / license / delete / overturn / import_season 五类 + MASTER_PICTURE §1 状态写“待项目方”的行按脚本去重 + SENTINEL S13 写明等项目方的工单；等总调度的只计数 master_waits，不进队列）② spot（autosign_spot.jsonl 未判 + 今天机签通过并设为当前的版本按 id 的 md5 每 10 张抽 1 张）③ pick（只留过契约的候选，只剩一张系统直接选并记 by=POLICY）；POST /api/owner/decide 只认登录项目方（by=owner，审计中间件自动记），spot 结论交 tools/vqa/autosign.py spot（不一致自动退回人工），POST /api/owner/undo 10 分钟内撤销；来源坏了 / 必需来源缺失 → status=error、status_label“队列读取失败：<来源>”并写 data/qa/alerts.jsonl OWNERQ-READ（错误表每次调用一份，ContextVar 隔离并发）。前端 v3/ownerQueue.ts 一份缓存：顶栏常驻“待你看 ● N”（有必须拍板 = 琥珀点，读取失败 = “!”），#/queue 阵列页（← → / 1 2 3 / 空格 / Esc / Z，审核视图大图 + 契约逐项 + 系统推荐 + 选填理由），空队列写“没有需要你看的” + 今天自动处理数；画布 / 单集页当前版本机签通过 → status machine_first / machine_last 灰点灰字“机签通过 vN”、无主按钮，“用这张 / 不要”保留但收成灰色；“选中待审 N”与底栏“待你看 N”读队列数；data_parity D-QUEUE（数 = 条目数 = 小计和、状态 ok、机签版本 = 当前版本）+ apps/web/e2e/uirsi/queue_check.mjs（页面徽标 = 队列数，读取失败不显示成空）",
+   "evidence": [
+    {
+     "src": "docs/uirsi/rounds/r47.md",
+     "note": "项目方 11:5x：“uiux 需要添加个要我看的阵列，点击去审核。其中，我需要全自动检测，尽量少人的操作。”；FILMUI 稿 data/review_pages/filmui/owner_queue.html；SYSARCH 巡检：读不到不能当成没有要看的"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ui.yaml"
+  },
+  {
+   "id": "K-UI-054",
+   "check": "tests/test_r43_uirsi.py",
+   "domain": "ui",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "后端改动先暂存再整体替换；:8800 重启前全量编译，不过就不重启、开工单",
+   "when": "改 services/api、services/render_router、services/agent 下的 .py（:8800 守护会在看到改动后自动重启），或守护准备重启 :8800",
+   "then": "多处修改先在内存 / 临时文件里改完、compile() 过（.ts / .tsx 先在副本上过 tsc）、跑过测试，再用临时文件 + os.replace 一次性替换，工作树里不留半成品；tools/uirsi/api_restart_guard.py tick 在跑 ops/restart_api.ps1 前对 COMPILE_DIRS（services/api、render_router、agent）全部 .py 做 compile()，有任何一个不过 → 不重启（API 继续跑旧代码）、请求留着、写 data/qa/alerts.jsonl API-COMPILE（同一组错误只记一次）",
+   "evidence": [
+    {
+     "src": "docs/uirsi/rounds/r47.md",
+     "note": "11:55 owner_queue.py 改到一半时被守护自动重启，:8800 起不来约 10 分钟；同一时刻 sv-09 快照拍到半成品（总调度选 B：sv-09 不收）。总调度 12:0x：写成规则，并让 api_restart_guard 重启前全量 py_compile"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ui.yaml"
+  },
+  {
+   "id": "K-UI-055",
+   "check": "tests/test_r43_uirsi.py",
+   "domain": "ui",
+   "link": [
+    "P5-P6"
+   ],
+   "title": "项目方抽检“不同意”→ 系统自动作废这一版、按原因重出、记入回归样本；派不成开工单",
+   "when": "待你看队列里的机签抽检样本被项目方判“不同意”",
+   "then": "owner_queue.decide 在 autosign.spot(fail)（机签按规则退回人工）之后调 spot_fail_redo：按现行分工在笔记本调 tools/autopilot/producer.py reject（版本记 master_reject = “项目方抽检不同意：<理由>”、是当前就撤下、按原因选重出计划：身份 → frame_v9:double_face ×2，造型 / 鞋 / 饰品 → frame_v9:faces_look ×2，假 / 塑料 / 质感 → frame_v9_heavy ×2，其余或没写理由 → frame_v9 ×2；替换版过契约 + 看图闸门后换上）；同时追加回归样本 data/vqa/regression/owner_spot_fail.jsonl（auto=pass、human=fail、理由、契约分）；重出派不成 → data/qa/alerts.jsonl OWNERQ-REDO，不吞掉",
+   "evidence": [
+    {
+     "src": "docs/uirsi/rounds/r47.md",
+     "note": "总调度 11-02 14:0x：“抽检不过就自动重出请你做进系统：项目方抽检不同意 → 自动作废、按原因重出、记入回归样本，写成规则加测试”；起因 ep04-S10 首帧 v6 抽检不同意（陈宇出现两次）由 DEBUG-RSI 手动作废重出"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ui.yaml"
+  },
+  {
+   "id": "K-UI-056",
+   "check": "tests/test_r43_uirsi.py",
+   "domain": "ui",
+   "link": [
+    "P5-P6"
+   ],
+   "title": ":8800 的 HTTP 请求路径里不许有远程调用——训练锁 / 显卡等远程状态由后台线程定时刷新，请求只读缓存并标缓存年龄；远程调用一律走 rssh.run_retry",
+   "when": "任何接口要用到服务器上的状态（训练锁、显卡、队列、文件）",
+   "then": "services/api/ns_api/jobs.py：_train_refresh_loop 后台线程每 30 s 经 tools/netfix/rssh.run_retry（单次 15 s、不重试）读各服务器训练锁进缓存；_train_locks_async / train_locks 只读缓存、不 join 等待（原来第一次最多等 20 s，旧 ssh 每次可能卡 25 s）；/api/render/lanes 每道带 train_lock_age_s；派活前最后一道闸 lane_train_locked_now 在任务线程里现读（不在 HTTP 请求里）；/api/episodes、/api/season p95 < 2 s 由 SENTINEL 探针盯，超了开工单",
+   "evidence": [
+    {
+     "src": "docs/uirsi/rounds/r47.md",
+     "note": "总调度 P0 11-02 14:1x：UIFIX-S 截图停在“正在读全剧的集与镜头（24 秒）”，:8800 错误日志反复“读不到 gpu33 / gpu36 的训练锁……timed out after 25 seconds”"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ui.yaml"
+  },
+  {
    "id": "K-REV-V01",
    "domain": "review",
    "link": [
@@ -14125,6 +14684,9 @@
    "id": "K-REN-101",
    "domain": "render",
    "link": "P4-P6",
+   "check": [
+    "tests/test_image_framing.py"
+   ],
    "title": "出图提示词按景别只写看得见的造型部件，首句先写景别构图",
    "when": "首帧 / 尾帧 / 分镜预览出图（Qwen-Image 2.1）",
    "then": "特写/大特写/近景/中近景 去掉下装、腿、鞋、脚（含角色锁里的“长腿”、鞋跟 / 脚趾 / 漆皮材质条目）；中景去掉鞋、脚；中全景及更远保留全套；提示词首句“<景别>构图”",
@@ -15035,6 +15597,90 @@
     {
      "src": "data/rsi/scores.jsonl",
      "note": "JUDGE 第二季判断分（single_judge，非正式）共性弱点；总调度 11-02 定转规则"
+    }
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/writer_hollywood.yaml"
+  },
+  {
+   "id": "K-WRT-H23",
+   "check": [
+    "tests/test_scene_lock.py"
+   ],
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "每场开头写场景定稿行（陈设 / 主光 / 站位 / 屏幕方向），各镜不得矛盾",
+   "when": "集头（**配乐** 前），本集用到的每个场景一行（总调度 11-02，CONSISTENCY_PLAN §3；IMGMASTER continuity 读这一行）",
+   "then": "tools/script_rsi/scene_lock.py check_episode H23：每个用到的场景都有 `**场景定稿｜<场景id>**：陈设=…｜主光=…｜站位=<名>：<左/中/右>·<姿态>；…｜屏幕方向=…`，四字段齐；同框 ≥2 人的镜人物行左右顺序和定稿一致（不越轴，衔接写“承：动作｜<名>移到<侧>”可换位）；【灯光】同方案名或含同一动机光源。v3 标记集进补丁环和导入闸门；过闸覆盖导入时导出 <run>/continuity/scene_locks_epNN.json",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "镜头字段"
+    }
+   ],
+   "writer_text": "集头里给本集每个场景写一行场景定稿：`**场景定稿｜<场景id>**：陈设=<1–5 件，照抄场景表>｜主光=<灯光方案名或动机光源（方位）>｜站位=<名>：<左/中/右>·<姿态>；…｜屏幕方向=<谁在哪侧、面朝哪边>`。各镜的人物左右、灯光都要和这一行一致；剧情里有人换位置，就在那一镜的衔接写“承：动作｜<名>移到<侧>”。过肩镜里前景的肩、背影（人物行写“局部”）也算占了画面那一侧，左右同样要和定稿行一致。",
+   "evidence": [
+    {
+     "src": "docs/master/CONSISTENCY_PLAN.md",
+     "note": "§3 提示层：场景定稿行、衔接点、去重复环境句（L-118）"
+    }
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/writer_hollywood.yaml"
+  },
+  {
+   "id": "K-WRT-H24",
+   "check": [
+    "tests/test_scene_lock.py"
+   ],
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "镜间衔接点：同场换机位 / 接力镜的“承：”只用 视线 / 动作 / 声音，并写具体内容",
+   "when": "每个同场换机位 / 接力镜的 **衔接** 行",
+   "then": "scene_lock.check_episode H24：“承：<视线|动作|声音>｜<内容>”，写“环境”或空内容 = 不过；换场可写“承：无”",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "镜头字段"
+    }
+   ],
+   "writer_text": "同一场里换机位或接力的镜，衔接行写清上一镜交过来的是什么：视线（谁看向哪）、动作（手上正在做的事）或声音（哪一声响）——“承：视线｜林晚看向门口”。不要写“承：环境”。",
+   "evidence": [
+    {
+     "src": "docs/master/CONSISTENCY_PLAN.md",
+     "note": "§3 提示层：场景定稿行、衔接点、去重复环境句（L-118）"
+    }
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/writer_hollywood.yaml"
+  },
+  {
+   "id": "K-WRT-H25",
+   "check": [
+    "tests/test_scene_lock.py"
+   ],
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "同一场里各镜 img 不重复描述环境，场景外观交给场景定稿行",
+   "when": "同一场景的各镜 img",
+   "then": "scene_lock.check_episode H25：img 里不带人名的环境分句（光 / 灯 / 窗 / 墙 / 背景 / 虚化 / 霓虹…）和本场前面某镜的环境分句二字片段重合 ≥ 0.6 = 重复",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "镜头字段"
+    }
+   ],
+   "writer_text": "同一场里不要每镜都重写一遍环境（例如每镜都写“落地窗外霓虹虚化成光斑”）。场景长什么样由场景定稿行交代；img 只写本镜的人物、动作、机位和这一镜独有的东西。人物扶、靠场景物件的接触分句照写。img 里 QW-W9 要求的光线句照写，但写成带人名的句子（“暖黄顶灯从上方落在林晚的肩上”），不写成和前镜一样的纯环境句。",
+   "evidence": [
+    {
+     "src": "docs/master/CONSISTENCY_PLAN.md",
+     "note": "§3 提示层：场景定稿行、衔接点、去重复环境句（L-118）"
     }
    ],
    "confidence": "medium",
@@ -16057,6 +16703,40 @@
    "confidence": "high",
    "status": "确认",
    "date": "2026-10-31",
+   "_file": "knowledge/rules/writer_series10.yaml"
+  },
+  {
+   "id": "K-WRT-211",
+   "enforced": true,
+   "check": [
+    "tests/test_k211.py"
+   ],
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "镜面 / 玻璃场景里手不碰反光面；一镜 8 秒内手部动作不超过 2 处",
+   "when": "本镜场景或 img 里有 镜面 / 镜子 / 玻璃 / 落地窗 / 反光面（场景表固定陈设含“镜面墙”“全身镜”等），或任何镜长 ≤8 秒的镜头",
+   "then": "分拍 / motion / H3 不写 掌心贴上镜面、手扶镜面墙、指尖按在玻璃上 等手与反光面接触的动作（英文 palm pressing on the mirror、hand against the glass 同禁）；手要有去处就写抵在自己身上或场景实物（锁骨、桌沿、扶手）；一镜 8 秒内手部动作（抬手、收手、按、握、拨）合计 ≤2 处，其余节拍用视线、呼吸、肩线、表情",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "分拍与动作"
+    }
+   ],
+   "writer_text": "镜面 / 玻璃场景（镜面墙、全身镜、落地窗）里手不碰反光面——不写“掌心贴上镜面”“手扶镜面墙”“指尖按在玻璃上”（生成模型会把真手和倒影画成粘连、倒影姿势跟不上）；手要落点就抵在自己身上或场景实物（锁骨、桌沿、扶手）；一镜 8 秒内手部动作合计不超过 2 处，其余节拍用视线、呼吸、肩线、表情给变化。 [fb-0001]",
+   "evidence": [
+    {
+     "src": "data/feedback/items/fb-0001.json root_cause",
+     "quote": "手按镜面墙再收回压锁骨 = 已知失败模式",
+     "note": "ep02-S3 坏帧 86–91、104–128、144–184：真手与倒影合掌粘连、指节变形"
+    },
+    {
+     "src": "tools/feedback/hand_scan.py prompt_risk",
+     "note": "镜面 + 手触反光面 = high；镜面 + 手部动作 / 8 s 内 ≥3 处手部动作 = mid"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
    "_file": "knowledge/rules/writer_series10.yaml"
   }
  ]

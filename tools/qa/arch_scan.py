@@ -55,7 +55,12 @@ HARD_RUN_ALLOW = {"tools/autopilot/runs.py", "tools/qa/arch_scan.py"}
 HARD_PATHS = ("/root/work/fredw", "offline_20261101")
 READ_ATTRS = {"read_text", "read_bytes", "load", "loads", "safe_load", "open"}
 METRICS = ("no_timeout", "direct_ssh", "ssh_unlisted", "def_ssh", "hard_run", "hard_path", "silent_read",
-           "nonatomic_json", "untracked_code", "unowned", "pipe_gate", "mtime_run_guess", "mtime_latest")
+           "nonatomic_json", "untracked_code", "unowned", "pipe_gate", "mtime_run_guess", "mtime_latest", "prompt_bypass")
+# L-118 四道关之四（总调度 11-02 13:3x 定）：编译模块以外的代码往提示词字段里拼接句子 = 规则又散落了。
+# 只许经 config/compile/plugins.yaml 登记的插件改本段（IMGMASTER 合入）。现有散落处进基线，只许减。
+PROMPT_FIELDS = {"prompt", "img_prompt", "positive", "positive_prompt", "text_prompt", "prompt_text", "pos", "full_prompt"}
+COMPILE_OWNERS = {"services/agent/ns_agent/frame_job.py", "services/agent/ns_agent/asset_refs.py",
+                  "services/render_router/ns_render/unified_frame.py"}
 # K-OPS-W20（WORKFLOW 11-02，UIAUDIT N1 林晚人物页 404 根因）：按修改时间猜“当前剧”——同一行 iterdir() + st_mtime / getmtime，
 # 或 runs / run_dir 目录按 mtime 排序，或 def mt(p: str)；当前剧只许读 runs.py / ns_api.current_run。口径同 tests/test_current_run.py
 MTIME_RUN_GUESS_RE = re.compile(r"(?:runs?|RUNS|run_dir|root)\b.{0,120}key=lambda [a-z_]+: -?\(?[a-z_]+(?: / \"[a-z_]+\")?\)?\.stat\(\)\.st_mtime"
@@ -143,6 +148,34 @@ def _is_trivial_handler(h: ast.ExceptHandler) -> bool:
     return False
 
 
+def _field_name(t) -> str | None:
+    if isinstance(t, ast.Name):
+        return t.id
+    if isinstance(t, ast.Attribute):
+        return t.attr
+    if isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant) and isinstance(t.slice.value, str):
+        return t.slice.value   # job["prompt"] += ...
+    return None
+
+
+def _prompt_bypass(tree, lines) -> int:
+    """x.prompt += "..." / prompt = prompt + "..." / prompt_parts.append(...)（字段名在 PROMPT_FIELDS）"""
+    n_hit = 0
+    for n in ast.walk(tree):
+        hit = False
+        if isinstance(n, ast.AugAssign) and isinstance(n.op, ast.Add) and (_field_name(n.target) or "").lower() in PROMPT_FIELDS:
+            hit = True
+        elif isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.value, ast.BinOp) and isinstance(n.value.op, ast.Add):
+            tgt = (_field_name(n.targets[0]) or "").lower()
+            left = (_field_name(n.value.left) or "").lower()
+            hit = tgt in PROMPT_FIELDS and left == tgt
+        elif isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in ("append", "extend", "insert"):
+            hit = (_field_name(n.func.value) or "").lower() in PROMPT_FIELDS
+        if hit and not _line_waived(lines, n):
+            n_hit += 1
+    return n_hit
+
+
 def _delegates_to_rssh(fn: ast.AST) -> bool:
     """函数体里有 rssh.run / rssh.run_retry 之类的调用，且没有自己起 ssh/scp 子进程 = 薄包装"""
     uses_rssh = own_ssh = False
@@ -203,6 +236,8 @@ def scan_source(path: str, src: str) -> dict[str, int]:
     if path not in HARD_RUN_ALLOW:
         c["hard_run"] = sum(x.count(HARD_RUN) for x in strs)
         c["hard_path"] = sum(x.count(h) for x in strs for h in HARD_PATHS)
+    if path not in COMPILE_OWNERS and not path.startswith("config/compile/") and not is_test(path):
+        c["prompt_bypass"] = _prompt_bypass(tree, lines)
     for n in ast.walk(tree):
         if isinstance(n, ast.Call):
             base, name = _call_name(n)

@@ -43,3 +43,16 @@ rules:
     status: 确认
     date: 2026-11-02
 
+
+  - id: K-AST-901
+    domain: asset
+    link: [P4-P5]
+    title: 设定图脸部栏构图必须带到衣服领口（不能只到锁骨下，像没穿衣服）
+    when: 四栏设定图出图（设定图提示词“far-left panel … cropped at …”）与登记前检查（tools/imglab/sheet_neckline.py）
+    then: 提示词写“cropped below the neckline of the outfit so the collar or neckline of the clothing is clearly visible”；登记前最左栏底边带肤色占比 > 0.45 → 不过、不进候选（线按 11-02 第二季 8 张标定，见脚本说明）
+    check: [tools/imglab/sheet_neckline.py]
+    evidence:
+      - {src: data/assetmaster/sheets_s2/check.json, note: "总调度 11-02 12:3x 亲审第二季 F：F s101 / s202 脸部栏只到锁骨下，看起来像没穿衣服，不选；选 s303。底边带肤色占比 0.57 / 0.57 vs 选中 F s303 0.35、E s101 0.03、D s101 0.01、I s303 0.24"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-02

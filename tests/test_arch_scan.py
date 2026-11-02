@@ -255,3 +255,15 @@ def test_real_knowledge_has_no_dup_ids():
 def test_iter_gate_runs_q2_vqa_regression_only_when_vqa_touched():
     src = (ROOT / "tools/qa/iter_gate.py").read_text(encoding="utf-8")
     assert "def q2_vqa_regression" in src and "self.q2_vqa_regression()" in src and "tools/vqa/regression_check.py" in src
+
+
+def test_prompt_bypass_outside_compile_entry():
+    s = ("job = {}\nprompt = 'a'\n"
+         "prompt += '，柔光'\n"
+         "job['prompt'] += '镜头'\n"
+         "prompt = prompt + 'x'\n"
+         "prompt.append('y')\n"
+         "other = other + 'z'\n")
+    assert AS.scan_source("tools/x.py", s)["prompt_bypass"] == 4
+    assert AS.scan_source("services/agent/ns_agent/frame_job.py", s)["prompt_bypass"] == 0   # 唯一编译入口本身
+    assert AS.scan_source("config/compile/plugins/imgfix_f1.py", s)["prompt_bypass"] == 0

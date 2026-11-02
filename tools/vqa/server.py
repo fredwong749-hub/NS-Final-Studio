@@ -92,7 +92,10 @@ CAP_SUBJECT = int(os.environ.get("VQA_CAP_SUBJECT_PX", "0") or 0)
 CAP_REF = int(os.environ.get("VQA_CAP_REF_PX", "0") or 0)
 CAP_TOKENS = int(os.environ.get("VQA_CAP_TOKENS", "0") or 0)      # 只给标定 / 测试：指定卡，仍然遵守队列空闲
 
-STATE = {"loaded": False, "gpu": None, "queue": 0, "served": 0, "last_error": None, "started": time.time(),
+# VQAGATE 11-02（FEEDBACK：笔记本 8870 跑着 01:21 的旧副本，带着已修好的死锁 bug 排队几小时没人发现）：
+# /health 报本份代码的哈希（去掉回车符再算，Windows / Linux 同口径），tools/vqa/vram_budget.py --live 比对仓库版本，不一致报警
+CODE_SHA = hashlib.sha256(Path(__file__).read_bytes().replace(bytes([13]), b"")).hexdigest()[:16]
+STATE = {"loaded": False, "gpu": None, "queue": 0, "served": 0, "last_error": None, "started": time.time(), "code_sha": CODE_SHA,
          "last_job": None, "load_s": None, "peak_mib": None, "waiting_since": None, "why_waiting": None}
 JOBS: "queue.Queue[tuple[dict, queue.Queue]]" = queue.Queue()
 # VQAGATE 11-01（总调度批）：让道模式下给看图留最短窗口——出图连续排队时看图会一直饿着（19:34–19:50 实测一条没跑成）。

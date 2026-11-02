@@ -17,7 +17,7 @@ from pathlib import Path
 
 ROOT = Path(os.environ.get("NS_ROOT") or Path(__file__).resolve().parents[2]).resolve()
 
-REQUIRED = ["config/pipeline/run.json", "config/scene_aliases.json", "config/recipes/asset_refs.json",
+REQUIRED = ["config/scene_aliases.json", "config/recipes/asset_refs.json",
             "data/looks/face_overrides.json", "data/looks/item_map_overrides.json", "data/looks/hub_episode_looks.json",
             "data/looks/wardrobe.json", "data/assetmaster/look_extras.json", "data/assetmaster/sheet_item_checks.json",
             "data/pipeline/runs/{run}/assets/sheets_chosen.json"]
@@ -39,10 +39,15 @@ def _bad_json(p: Path) -> str | None:
 
 
 def run_id(root: Path) -> str | None:
+    """现行主剧：§10 起 run.json 在 data/state/pipeline/run.json（兼容期旧位置 config/pipeline/run.json 也认，读旧会留痕）"""
+    import importlib.util
     try:
-        v = json.loads((root / "config/pipeline/run.json").read_text(encoding="utf-8")).get("run_id")
+        spec = importlib.util.spec_from_file_location("ns_state_paths_dg", Path(__file__).resolve().parent / "state_paths.py")
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        v = (m.read_state("pipeline/run", root=root) or {}).get("run_id")
         return str(v).strip() or None
-    except (OSError, ValueError, AttributeError):
+    except Exception:  # noqa: BLE001  读不到 = None，problems() 会报（失败关闭）
         return None
 
 
@@ -64,7 +69,7 @@ def problems(root: Path | None = None, server: bool | None = None) -> list[str]:
     out = []
     run = run_id(root)
     if not run:
-        out.append("config/pipeline/run.json 缺失或没有 run_id（不再静默回退 series10_v1）")
+        out.append("run.json（data/state/pipeline/run.json，兼容期 config/pipeline/run.json）缺失或没有 run_id（不再静默回退 series10_v1）")
     # run 为空时上面已报问题；这里不拼默认路径（SYSARCH 02:4x：不再回退 series10_v1）
     req = [r.format(run=run) for r in REQUIRED if run or "{run}" not in r] + (SERVER_ONLY if server else [])
     for rel in req:

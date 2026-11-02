@@ -19,6 +19,7 @@ R = sys.argv[1]
 FILES = [f for f in (sys.argv[2] if len(sys.argv) > 2 else "").split(",") if f]
 VQA = len(sys.argv) > 3 and sys.argv[3] == "1"
 COMFY = [int(x) for x in (sys.argv[4] if len(sys.argv) > 4 else "").split(",") if x.strip().isdigit()]
+BROKEN = [int(x) for x in (sys.argv[5] if len(sys.argv) > 5 else "").split(",") if x.strip().isdigit()]
 HUMAN = ("等总调度", "等项目方", "总调度复核", "项目方点选", "总调度定")
 EVS = ('"contract_s"', '"score_backlog"', '"redo_fail"', '"pause"', '"resume"', '"dispatch"', '"rendered"', '"passed"', '"content_fail"',
        '"redo_auto_approved"', '"redo_candidate"', '"score_infra"', '"content_error"', '"best_effort"')
@@ -97,6 +98,53 @@ for port in COMFY:
     except Exception as e:  # noqa: BLE001  # arch-ok: 回传 False + 原因，笔记本开 S2 comfy 工单
         comfy[str(port)] = "ERR " + repr(e)[:80]
 out["comfy"] = comfy
+# G26：每个声明端口 → 监听进程 pid → 命令行 --cuda-device / nvidia-smi 计算进程所在 GPU；system_stats 的 devices
+uuid2idx = {}
+for ln in sh(["nvidia-smi", "--query-gpu=index,uuid", "--format=csv,noheader"]).splitlines():
+    p_ = [x.strip() for x in ln.split(",")]
+    if len(p_) == 2 and p_[0].isdigit():
+        uuid2idx[p_[1]] = int(p_[0])
+apps = {}
+for ln in sh(["nvidia-smi", "--query-compute-apps=gpu_uuid,pid", "--format=csv,noheader"]).splitlines():
+    p_ = [x.strip() for x in ln.split(",")]
+    if len(p_) == 2 and p_[1].isdigit() and p_[0] in uuid2idx:
+        apps.setdefault(int(p_[1]), set()).add(uuid2idx[p_[0]])
+lanes = {}
+for port in COMFY:
+    rec = {"port": port}
+    lst = sh(["ss", "-ltnpH", "sport = :%d" % port], 8)
+    pid = None
+    if "pid=" in lst:
+        try:
+            pid = int(lst.split("pid=", 1)[1].split(",", 1)[0])
+        except ValueError:  # arch-ok: pid 解析不出 = 不判 GPU 序号
+            pid = None
+    rec["pid"] = pid
+    if pid:
+        try:
+            with open("/proc/%d/cmdline" % pid, "rb") as fh:
+                cl = fh.read().replace(b"\0", b" ").decode("utf-8", "replace")
+        except OSError:  # arch-ok: 读不到命令行 = 只用 nvidia-smi
+            cl = ""
+        rec["cuda_arg"] = int(cl.split("--cuda-device", 1)[1].split()[0]) if "--cuda-device" in cl and cl.split("--cuda-device", 1)[1].split()[0].isdigit() else None
+        try:
+            env = open("/proc/%d/environ" % pid, "rb").read().split(b"\0")
+            cvd = [e.split(b"=", 1)[1].decode() for e in env if e.startswith(b"CUDA_VISIBLE_DEVICES=")]
+        except OSError:  # arch-ok: 读不到环境 = 不用 CUDA_VISIBLE_DEVICES 判
+            cvd = []
+        rec["cvd"] = cvd[0] if cvd else None
+        rec["smi_gpus"] = sorted(apps.get(pid, set()))
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:%d/system_stats" % port, timeout=4) as r:
+            st = json.loads(r.read(4000))
+        rec["stats_ok"] = True
+        rec["devices"] = [d.get("name") for d in st.get("devices") or []]
+    except Exception as e:  # noqa: BLE001  # arch-ok: 回传原因，笔记本开 G26 工单
+        rec["stats_ok"] = False
+        rec["err"] = repr(e)[:100]
+    lanes[str(port)] = rec
+out["g26_lanes"] = lanes
+out["broken_apps"] = {str(i): sorted(pid for pid, gs in apps.items() if i in gs) for i in BROKEN}
 if VQA:
     try:
         with urllib.request.urlopen("http://127.0.0.1:8870/v1/models", timeout=4) as r:

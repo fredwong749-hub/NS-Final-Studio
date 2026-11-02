@@ -461,7 +461,77 @@ def cam_exec(summ: dict, target: dict) -> float | None:
     return round(float(np.mean(acc)), 3) if acc else None
 
 
-def ab(a_glob, b_glob, name, metric="act", min_gain=0.15, target=None):
+def pair_key(path: str) -> str | None:
+    """同镜同 seed 配对键：ep01-S5__rca_S5pika_s20261102.mp4 / S5act2_s20261102_00001_.mp4 → S5_20261102"""
+    n = Path(path).name
+    m = re.search(r"(S\d+)[^_]*_s(\d{8})", n.split("__rca_")[-1])
+    return f"{m.group(1)}_{m.group(2)}" if m else None
+
+
+def ab_paired(A, B, key, name, min_gain, target):
+    """配对判定（同镜同 seed 只换一处）：每对相对增益 = B/A − 1；通过 = 增益中位 ≥ min_gain 且 ≥ 3/4 的对变好，
+    护栏（每对差值中位）：J4 升 ≤ 0.1、看镜头占比升 ≤ 0.05"""
+    a = {pair_key(r["path"]): r for r in A}
+    pairs = [(a[k], r) for r in B if (k := pair_key(r["path"])) in a]
+    rows, fails = [], []
+    for x, y in pairs:
+        if x.get(key) is None or y.get(key) is None:
+            continue
+        g = (y[key] / x[key] - 1) if x[key] else (1.0 if y[key] > 0 else 0.0)
+        rows.append({"pair": pair_key(y["path"]), "A": x[key], "B": y[key], "gain": round(g, 3),
+                     "dJ4": round((y.get("J4") or 0) - (x.get("J4") or 0), 3),
+                     "dgaze": round((y.get("cam_gaze") or 0) - (x.get("cam_gaze") or 0), 3),
+                     "detail": {k: [x.get(k), y.get(k)] for k in (*ACT_KEYS, "cam_tx", "cam_ty", "cam_zoom", "cam_rot", "cam_exec") if k in x}})
+    if not rows:
+        fails.append("没有可配对的片")
+    else:
+        gm = float(np.median([r["gain"] for r in rows]))
+        up = sum(r["gain"] > 0 for r in rows)
+        if gm < min_gain:
+            fails.append(f"{key} 配对增益中位 {gm:+.1%} < {min_gain:.0%}")
+        if up < 0.75 * len(rows):
+            fails.append(f"只有 {up}/{len(rows)} 对变好")
+        if float(np.median([r["dJ4"] for r in rows])) > 0.1:
+            fails.append("J4 配对差中位 > +0.1")
+        if float(np.median([r["dgaze"] for r in rows])) > 0.05:
+            fails.append("看镜头占比配对差中位 > +0.05")
+    v = {"name": name, "metric": key, "mode": "paired", "target": target, "pairs": rows, "pass": not fails, "fails": fails,
+         "decider": "code", "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    VIO.write_json(VL / f"ab_{name}.json", v, indent=1)
+    return v
+
+
+def camctl_verdict(base: str, ctl: str, move: str, name: str) -> dict:
+    """结构化运镜（Fun ControlNet 控制视频）同 seed 有 / 无控制配对判定（decider = code）：
+    控制版运镜执行 ≥0.5 且比无控制版高 ≥0.3；J4 不升 >0.1；表演活跃度不降 >15%（控制不能把人锁死）；看镜头占比不升 >0.05（项目方硬规则）"""
+    anc = load_ref()["anchor"]
+    _, tg = cam_target("The camera " + {"push_in": "pushes in", "pull_out": "pulls out"}.get(move, move.replace("_", "s ", 1)) + ".")
+    rows = {}
+    for k, pth in (("base", base), ("ctl", ctl)):
+        x = _an(pth)
+        x["cam_exec"] = cam_exec_tol(x, move, tg)
+        x["act_idx"] = act_index(x, anc)["index"]
+        x["path"] = pth
+        rows[k] = x
+    b, c = rows["base"], rows["ctl"]
+    fails = []
+    if (c["cam_exec"] or 0) < 0.5:
+        fails.append(f"控制版执行准确度 {c['cam_exec']} < 0.5")
+    if (c["cam_exec"] or 0) < (b["cam_exec"] or 0) + 0.3:
+        fails.append("没比同 seed 无控制版高 0.3 以上")
+    if (c.get("J4") or 9) > (b.get("J4") or 0) + 0.1:
+        fails.append(f"J4 升 {b.get('J4')}→{c.get('J4')}")
+    if (c["act_idx"] or 0) < 0.85 * (b["act_idx"] or 0):
+        fails.append(f"表演活跃度降 >15%（{b['act_idx']:.3f}→{c['act_idx']:.3f}）")
+    if (c.get("cam_gaze") or 0) > (b.get("cam_gaze") or 0) + 0.05:
+        fails.append(f"看镜头占比升 {b.get('cam_gaze')}→{c.get('cam_gaze')}（项目方硬规则：演员不看镜头）")
+    v = {"name": name, "mode": "camctl_pair", "move": move, "target": tg, "rows": rows, "pass": not fails, "fails": fails,
+         "decider": "code", "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    VIO.write_json(VL / f"ab_{name}.json", v, indent=1)
+    return v
+
+
+def ab(a_glob, b_glob, name, metric="act", min_gain=0.15, target=None, paired=False):
     """B 相对 A：目标指标中位数提升 ≥ min_gain（相对），且护栏不退：身份 SFace 中位不降 >0.05、V6 不新增不通过、J4 中位不升 >0.1、
     看镜头占比不升 >0.05。判定写 data/rsi/vidlab/ab_<name>.json。"""
     ref = load_ref()
@@ -481,6 +551,8 @@ def ab(a_glob, b_glob, name, metric="act", min_gain=0.15, target=None):
 
     A, B = summarize(a_glob), summarize(b_glob)
     key = {"act": "act_idx", "cam": "cam_idx"}.get(metric, metric)
+    if paired:
+        return ab_paired(A, B, key, name, min_gain, target)
     if metric == "cam_exec" and not target:
         raise SystemExit("cam_exec 需要 --target cam_tx=-0.07 这类目标量")
 
@@ -526,6 +598,12 @@ def main(argv=None):
     a.add_argument("--metric", default="act")
     a.add_argument("--min-gain", type=float, default=0.15)
     a.add_argument("--target", nargs="*", default=[], help="cam_exec 目标量，如 cam_tx=-0.07")
+    a.add_argument("--paired", action="store_true", help="同镜同 seed 配对判定")
+    cc = sub.add_parser("camctl")
+    cc.add_argument("--base", required=True)
+    cc.add_argument("--ctl", required=True)
+    cc.add_argument("--move", required=True)
+    cc.add_argument("--name", required=True)
     sub.add_parser("lowest")
     x = ap.parse_args(argv)
     if x.cmd == "ref":
@@ -537,8 +615,16 @@ def main(argv=None):
         print(json.dumps({k: d[k] for k in ("score", "items", "lowest", "clips", "coverage", "act_ratio_medians",
                                             "ours_medians", "ref_medians")}, ensure_ascii=False, indent=1, default=str))
     elif x.cmd == "ab":
-        v = ab(x.a, x.b, x.name, x.metric, x.min_gain, {k: float(val) for k, val in (t.split("=") for t in x.target)})
-        print(json.dumps({k: v[k] for k in ("name", "metric", "A", "B", "guards", "pass", "fails")}, ensure_ascii=False, indent=1))
+        v = ab(x.a, x.b, x.name, x.metric, x.min_gain, {k: float(val) for k, val in (t.split("=") for t in x.target)}, x.paired)
+        print(json.dumps({k: v.get(k) for k in ("name", "metric", "mode", "A", "B", "guards", "pass", "fails")}, ensure_ascii=False, indent=1))
+        for r in v.get("pairs") or []:
+            print(r["pair"], r["A"] if not isinstance(r["A"], float) else round(r["A"], 3), "→",
+                  r["B"] if not isinstance(r["B"], float) else round(r["B"], 3), f"{r['gain']:+.1%}", "dJ4", r["dJ4"])
+    elif x.cmd == "camctl":
+        v = camctl_verdict(x.base, x.ctl, x.move, x.name)
+        print(json.dumps({k: v[k] for k in ("name", "move", "target", "pass", "fails")}, ensure_ascii=False, indent=1))
+        for k, r in v["rows"].items():
+            print(k, {q: r.get(q) for q in ("cam_exec", "cam_tx", "cam_ty", "cam_zoom", "cam_rot", "act_idx", "J4", "cam_gaze")})
     elif x.cmd == "lowest":
         last = [json.loads(l) for l in SCORES.read_text(encoding="utf-8").splitlines() if '"line": "video"' in l]
         print(json.dumps(last[-1] if last else None, ensure_ascii=False, indent=1))

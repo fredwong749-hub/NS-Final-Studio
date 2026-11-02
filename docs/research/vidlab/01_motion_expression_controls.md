@@ -23,3 +23,15 @@
 - 节点文档：https://docs.comfy.org/built-in-nodes/MiniMaxH3FunControlNetApply.md
 - Union 2.0（二手来源，没有核实）：https://comfyui-wiki.com/fr/news/2026-09-22-minimax-h3-fun-controlnet-union-2
 - 既有调研：docs/research/h3_deep/、docs/research/h3_prompt_and_fl2v.md
+
+## 实测结果（vl_r1，11-02 11:1x–12:2x，gpu36:1 + gpu33:1，判定 decider = code）
+| 实验 | 判定 | 数据 | 文件 |
+|---|---|---|---|
+| ACT1 全局表演句 | 不通过 | 配对增益中位 +3.3%（S4 s02 +10.3%，但 J4 +0.32；S4 s03 +1.3%；S5 s02 +3.3%） | data/rsi/vidlab/ab_vl_r1_act1.json |
+| ACT2 分拍微表情（acting.micro_beats） | 通过（规则：配对增益中位 ≥15% 且 ≥3/4 对变好） | S5 近景单人 s02 +47.0%、s03 +45.3%（眨眼从 0 次/分升到 16 次/分，视线跳动 0.27→0.68/s）；S4 双人 s02 +1.3%、s03 −4.4%；J4、看镜头均不变 | data/rsi/vidlab/ab_vl_r1_act2.json |
+| 结构化运镜 camctl（横移，107 帧，strength 0.6、end_percent 0.5） | 不通过 | 运镜执行 0.0→1.0（横移实测 −0.0711，目标 −0.07；杂旋转 2.3°→0.3°），表演活跃度 0.95→0.89；**看镜头占比 0→0.775**，判失败；画面右缘出现暗色竖条（已修：控制视频先放大铺满画面） | data/rsi/vidlab/ab_vl_r1_camctl_truck.json |
+| camctl 158 帧 | OOM | gpu36:1 和 gpu33:1 都超显存；107 帧能跑（单条 365 s） | — |
+
+结论：
+- 表情：问题不在缺一句“要演”的口号，而在每个分拍没有可执行的微动作。ACT2 对近景单人有效（Pika 默认几乎不眨眼，HF #96）；双人中景没效果，下一步要查双人镜的脸是否太小，或者分拍主语只写了一个人。
+- 运镜：Pika 只靠提示词基本执行不了横移 / 俯仰（41 条语料：横移 0.10、上摇 0.0）。FunControlNet 控制视频能把机位轨迹执行准，但会诱发看镜头；下一版试 strength 0.4、end_percent 0.3，同时把人物遮罩外扩到肩部以上的整块区域。

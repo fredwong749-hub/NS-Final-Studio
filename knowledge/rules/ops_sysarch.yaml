@@ -39,3 +39,51 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-Y03
+    domain: ops
+    link: [P5-P6]
+    title: 冻结锁是强制的——system_version cut 期间（lock-status 非 0 或查不了），Claude Code 的 Edit / Write / NotebookEdit 写代码目录（tools services apps config knowledge tests ops packages）一律被 ops/hooks/freeze_guard.py 拒绝；docs 和 data 不拦
+    when: 任何 agent 改代码目录；system_version cut 冻结期间
+    then: 被拒就停手，等解冻后再改（改了也进不了本版）；冻结期间禁止用 Bash 写代码目录（sed -i、> / >> 重定向、heredoc、python -c 写文件都算）——第 1 层拦不到，但由 iter_gate F1 / cut 报告 drift + SENTINEL 工单查出后记在本 loop 的账上（总调度 11-02 12:2x；ARCH_ROADMAP §9 第 2–4 层，sv-10）
+    check: tests/test_freeze_guard.py::test_locked_denies_code_dirs, tests/test_freeze_guard.py::test_lock_unknown_fails_closed_only_for_code, tests/test_freeze_guard.py::test_unlocked_allows
+    evidence:
+      - {src: data/system_versions/cut_lock.json, note: "11-02 sv-09 冻结（11:56 起）期间 SENTINEL 脚本查到 lock-status rc=3 仍写入 G26 代码，UIRSI2 可能也有一起；K-OPS-F08 原本只靠自觉"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-Y04
+    domain: ops
+    link: [P5-P6]
+    title: 会改生产状态（partition / control / hold / takes / attempts / 服务器文件等）的代码不许从 scratchpad 或仓库外路径跑——必须先进仓库（带最小测试、进系统版本）再跑
+    when: 任何 loop 想临时写个脚本去改生产状态（借道、挂道、重置次数、改 control、推文件）
+    then: 先放进仓库对应目录（如 tools/debug/）并带最小测试，再运行；临时调研只读的脚本可以在 scratchpad。SENTINEL 探针查从 scratchpad 路径起来、仍在运行的 python / sh 进程，开单派该进程负责方（总调度 11-02 12:4x 批）
+    check: tests/test_sentinel.py::test_scratchpad_procs
+    evidence:
+      - {src: docs/master/ARCH_ROADMAP.md, note: "11-02 12:3x DEBUG-RSI 自报：借道 / 临时挂道兜底 lend_any.py、hold_lane.py、lend_lane.sh 在 scratchpad 里跑，直接改笔记本和两台服务器的 partition.json 与服务器 control.json hold；arch_scan / iter_gate / cut 都看不到，无测试、无版本可回退"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-Y05
+    domain: ops
+    link: [P5-P6, P6-P7]
+    title: 出图提示词只有一个编译入口（frame_job 分段编译，归 IMGMASTER）；别处的规则只能做成 config/compile/plugins.yaml 登记的插件改某一段，不许在编译入口以外往提示词里拼句子
+    when: 任何 loop 想加 / 改出图提示词里的句子（融合、灯光、视线、F1 / F3 / K-REN-903 之类）
+    then: 写成插件（签名 (segment_text, shot, continuity) -> segment_text，只改登记的那一段，挂一条存在且带 check 的规则），IMGFIX 的插件放 config/compile/plugins/imgfix_*，由 IMGMASTER 合入登记表；未登记插件编译时报错；arch_scan prompt_bypass 棘轮查编译入口以外的提示词拼接（现有散落处进基线只许减）
+    check: tests/test_arch_scan.py::test_prompt_bypass_outside_compile_entry
+    evidence:
+      - {src: docs/master/CONSISTENCY_PLAN.md, note: "11-02 项目方：问题散落在各个地方，存在一些不确定性；ep01 01/06/07/08 拼接生硬，提示词来源分散（style_suffix、融合句、灯光句、镜头句、视线句、F1/F3/K-REN-903 各自追加）；L-118 总调度 13:3x 定唯一编译入口 + 插件四道关"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-Y06
+    domain: ops
+    link: [P5-P6]
+    title: 真删除（含项目方下令删隔离区）之前先反查——knowledge 规则证据、RSI 账本、knowledge/archive、config/owner_decisions.yaml 有指向要删路径的，先列出并改指，不自动删；删除脚本由 tools/qa/purge_precheck.py --emit-ps1 生成，脚本开头自带反查
+    when: 生成或执行任何删除脚本 / 删除隔离区 / 腾磁盘
+    then: 跑 python tools/qa/purge_precheck.py <路径>；有引用 → 按给出的改指方案把要点存进 knowledge/archive/deleted_evidence.md 并改 src，再重跑到 PASS；只有 PASS 才生成删除脚本（脚本内再查一次，不过就中止）。“不删只隔离”约束 agent 自己，项目方本人决定的删除照做，但要先过这一步
+    check: tests/test_purge_precheck.py::test_rule_evidence_under_deleted_dir_is_reported, tests/test_purge_precheck.py::test_owner_decisions_reference_is_reported, tests/test_purge_precheck.py::test_referenced_path_refuses_to_emit_ps1
+    evidence:
+      - {src: docs/master/ARCH_ROADMAP.md, note: "11-02 13:2x 项目方本人下令删除隔离区（L-058，-Delete，两台服务器也删）后，规则证据指向的文件没了，knowledge compile --check 失败挡住 sv-10 发版；quarantine_refcheck 只管移进隔离区之前"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

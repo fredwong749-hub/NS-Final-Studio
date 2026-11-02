@@ -35,8 +35,22 @@ import runs as _RUNS  # noqa: E402
 # K-OPS-W17 / SYSARCH 4-6：主 run 从 config/pipeline/runs.json 读，不写死；本工具驱动服务器 → strict（缺 runs.json 直接失败，K-OPS-F09）
 RUN_ID = _RUNS.primary_run(strict=True)
 RUN_REL = f"data/pipeline/runs/{RUN_ID}"
-OFF = "/root/work/fredw/offline_20261101"
-R = OFF + "/repo"
+# SYSARCH 4-2 ②（K-OPS-W26）：服务器根目录 / venv / 渲染道一律读 config/factory/hosts.json（tools/factory/hosts.py），读不到就 raise
+sys.path.insert(0, str(ROOT / "tools/factory"))
+import hosts as _HOSTS  # noqa: E402
+SERVERS = ("gpu33", "gpu36")
+
+
+def _server_root() -> str:
+    roots = {h: _HOSTS.server_root(h) for h in SERVERS}
+    if len(set(roots.values())) != 1:            # 本工具的远程模板只用一个仓库根：两台不一致就失败关闭
+        raise _HOSTS.HostsError(f"两台服务器 repo 不一致：{roots}")
+    return roots[SERVERS[0]]
+
+
+R = _server_root()
+OFF = R.rsplit("/", 1)[0]                        # 离线根（FREEZE_TS / run / logs / venv 都在它下面）
+PY = {h: _HOSTS.python(h) for h in SERVERS}
 def _partition_hosts() -> dict[str, list[int]]:
     """NETFIX 22:2x：按集归属改读 config/netfix/partition.json（images ∪ video；laptop 不是服务器，不在内）；读不到用旧分集"""
     try:
@@ -203,6 +217,38 @@ LIVE_PREFIX = ("data/renders/", "data/producer/", f"{RUN_REL}/", "data/import/",
                "data/looks/", "data/music/series10/", "data/episodes/series10/", "data/assetmaster/sheets_v2/adopted/")
 
 
+def run_required_data(run: str) -> set[str]:
+    """一部非主剧的出图必需文件：用它自己的导入稿跑 preflight_deps（frame_job.build_first 实际读的参考图），
+    加它在 asset_refs.json 里登记的造型 / 设定图 / 每镜造型文件、设定图登记里指向的图，以及全部解析层（resolution_layers.yaml）"""
+    sys.path.insert(0, str(ROOT / "tools/pipeline"))
+    for p in ("services/agent", "services/render_router", "packages/schema"):
+        if str(ROOT / p) not in sys.path:
+            sys.path.insert(0, str(ROOT / p))
+    import image_jobs as IJ
+    import preflight_deps as PD
+    from ns_agent import asset_refs as AR
+    out = set(PD.preflight_deps(script=IJ.load_import(run), include_sources=False)["files"])
+    out.add(f"data/import/runs/{run}/script_v2.json")
+    for key in ("looks_file", "sheets_file", "shot_looks_file"):
+        for f in AR.chain_files(run, key):
+            rel = f.relative_to(AR.ROOT).as_posix()
+            out.add(rel)
+            if key == "sheets_file":
+                try:
+                    for rec in (json.loads(f.read_text(encoding="utf-8")) or {}).values():
+                        if isinstance(rec, dict) and rec.get("file"):
+                            out.add(str(rec["file"]).replace("\\", "/"))
+                except (OSError, ValueError) as e:
+                    log("run_required_data", run, "设定图登记读不了", rel, repr(e)[:120])
+    try:
+        import yaml
+        reg = yaml.safe_load((ROOT / "config/policies/resolution_layers.yaml").read_text(encoding="utf-8")) or {}
+        out |= {x["path"] for x in (reg.get("layers") or []) + (reg.get("global") or [])}
+    except (OSError, ValueError, ImportError) as e:
+        log("run_required_data", run, "解析层登记读不了", repr(e)[:120])
+    return {f for f in out if (ROOT / f).is_file()}
+
+
 def required_data() -> set[str]:
     """生产必需、服务器副本可能缺的数据：remote_preflight 的资产图清单（选定设定图 / 身份脸 / 单品图）+ 首帧作业参考图"""
     sys.path.insert(0, str(ROOT / "tools/pipeline"))
@@ -210,6 +256,11 @@ def required_data() -> set[str]:
     # （tools/pipeline/preflight_deps.py），不再自己另列一份（01:14 场景底图漏列，服务器 I5 每单挡）
     import preflight_deps as PD
     out = set(PD.preflight_deps()["files"])
+    for run in [r for r in _RUNS.list_runs(status="producing") if r != RUN_ID]:   # K-OPS-W28：每部在产的非主剧也算（第二季造型图 / 登记）
+        try:
+            out |= run_required_data(run)
+        except Exception as e:  # noqa: BLE001
+            log("required_data", run, "第二季等额外剧依赖算不出", repr(e)[:200])
     # VOICE10 11-01（K-EDT-022，总调度授权对接）：成片在服务器合成 → 每个说话人的参考音频 / 音色元数据也是生产必需
     # （config/voices.json characters[].ref_wav / asset；缺了 ns_post.tts.tts_preflight 会 hold_tts）
     try:
@@ -341,7 +392,7 @@ DEFAULT_MODE = "all"     # ⤴ 总调度 22:2x（NETFIX）：服务器 producer 
 
 def restart(host: str, mode: str = DEFAULT_MODE) -> str:
     prep_arg = "video-only" if mode == "night-only" else ""
-    out = ssh(host, f"cd {R} && {OFF}/venv/bin/python ops/offline/resident_prep.py {host} {prep_arg} && bash {R}/ops/offline/resident_restart.sh {host} {mode}",
+    out = ssh(host, f"cd {R} && {PY[host]} ops/offline/resident_prep.py {host} {prep_arg} && bash {R}/ops/offline/resident_restart.sh {host} {mode}",
               timeout=300)
     txt = out.decode("utf-8", "replace")
     log("restart", host, txt.strip().replace("\n", " | ")[-400:])
@@ -432,6 +483,65 @@ def pull_active_videos(host: str, dry: bool = False, batch_mb: float = 64.0) -> 
     log("pull_active_videos", host, json.dumps({k: res[k] for k in ("active_videos", "missing", "got", "verified", "mb")}, ensure_ascii=False),
         "不收", len(res["bad"]))
     return res
+
+
+# ---------------------------------------------------------------- 非主剧临时 control 按 partition 自动生成（K-OPS-W25 修订，总调度 12:0x）
+# NETFIX 的 dispatch.py 按 run 写 control 上线前的过渡：每拍从 config/netfix/partition.json ∩ 该 run 已准备好的集算 only，
+# hold 同主剧规则；内容变了才推。服务器上已有、但不是本函数写的 control（dispatch_by.by 不以 TEMP_CTL_BY 开头）一律不碰。
+TEMP_CTL_BY = "WORKFLOW 临时"
+
+
+def run_control_for(host: str, run: str, part: dict | None = None, ready: dict | None = None) -> dict:
+    sys.path.insert(0, str(ROOT / "tools/netfix"))
+    import dispatch as D
+    part = part or D.partition()
+    rs = D.ready_shots(D.run_ready(run) if ready is None else ready)
+    eps = sorted(set(part["images"].get(host) or []))
+    only = sorted({x.split("/", 1)[1] if x.startswith(run + "/") else x for e in eps if e in rs for x in rs[e]
+                   if "/" not in x or x.startswith(run + "/")})
+    hold = sorted({ln for h, ls in (part.get("lanes") or {}).items() if h != host for ln in ls} | set(part.get("retired_lanes") or []))
+    return {"paused": False, "run": run, "only": only or ["__none__"], "hold_lanes": hold,
+            "dispatch_by": {"by": f"{TEMP_CTL_BY}（resident_sync.sync_run_controls，按 partition.json 自动生成；dispatch.py 按 run 写 control 上线后停用）",
+                            "host": host, "partition_eps": eps, "rule": "K-OPS-N04 同一按集分区；K-OPS-W25 防两台重复派"}}
+
+
+def extra_runs_local() -> list[str]:
+    return [r for r in _RUNS.list_runs(status="producing") if r != RUN_ID]
+
+
+def sync_run_controls(host: str) -> list[str]:
+    """每个非主在产剧：算 control → 和上次推的比 → 变了才推（只覆盖本函数写的或缺失的文件）"""
+    st = jl(STATE, {}) or {}
+    hs = st.setdefault(host, {}).setdefault("run_controls", {})
+    pushed = []
+    for run in extra_runs_local():
+        ctl = run_control_for(host, run)
+        key = json.dumps({k: ctl[k] for k in ("only", "hold_lanes", "paused")}, sort_keys=True)
+        if hs.get(run) == key:
+            continue
+        body = json.dumps(ctl, ensure_ascii=False, indent=1).encode()
+        rel = f"data/producer/runs/{run}/control.json"
+        out = ssh(host, f"cd {R} && mkdir -p data/producer/runs/{run} && "
+                        f"if [ -f {rel} ] && ! grep -q '{TEMP_CTL_BY}' {rel}; then echo SKIP_OWNED; else "
+                        f"cat > {rel}.new && mv {rel}.new {rel} && echo PUSHED; fi", data=body, timeout=60, tries=2).decode("utf-8", "replace")
+        if "PUSHED" in out:
+            hs[run] = key
+            pushed.append(run)
+            log("run_control", host, run, "only", len(ctl["only"]), "eps", ctl["dispatch_by"]["partition_eps"])
+        elif "SKIP_OWNED" in out:
+            hs[run] = key
+            log("run_control", host, run, "服务器上已有非临时 control（dispatch.py 接管），不覆盖")
+    js(STATE, st)
+    return pushed
+
+
+def ensure_runs(host: str) -> str:
+    """服务器上给 runs.json 里 producing 的非主剧各保一个 producer serve --run（ops/offline/ensure_runs.sh，K-OPS-W25）；
+    有新拉起的才记日志"""
+    out = ssh(host, f"bash {R}/ops/offline/ensure_runs.sh {host}", timeout=180, tries=2).decode("utf-8", "replace").strip()
+    if "started" in out or "DEAD" in out:
+        log("ensure_runs", host, out.replace("\n", " | ")[-300:])
+    return out
 
 
 def pull(host: str) -> dict:
@@ -548,7 +658,15 @@ except Exception:
 print(json.dumps(out))
 """
 IDLE_ALERT_MIN = 10        # 总调度 16:55：GPU 空闲但有待派任务超过 10 分钟要报警
-LANES = {"gpu33": {"0": 8188, "1": 8189, "3": 8191}, "gpu36": {"0": 8188, "1": 8189, "2": 8190}}   # gpu33 GPU2 坏卡不列
+def _lanes_from_hosts() -> dict[str, dict[str, int]]:
+    """{host: {gpu: 本机 comfy 端口}}：hosts.json 里启用的出图道（gpu33 GPU2 坏卡、gpu36:2 看图卡 enabled=false，都不列）"""
+    out = {h: {str(rec["gpu"]): int(rec["comfy_port"]) for rec in _HOSTS.lanes(h, role="image").values()} for h in SERVERS}
+    if not all(out.values()):
+        raise _HOSTS.HostsError(f"hosts.json 有服务器没有启用的出图道：{out}")
+    return out
+
+
+LANES = _lanes_from_hosts()
 
 
 def health(host: str) -> dict:
@@ -665,14 +783,14 @@ def push_control(host: str, force: bool = False) -> dict:
         ssh(host, f"cat > /tmp/ctl_{Path(rel).name}", data=f.read_bytes(), timeout=300, tries=4)
         code = REMOTE_MERGE.replace("__R__", R)
         ssh(host, f"cat > /tmp/ctl_merge.py", data=code.encode(), timeout=120, tries=4)
-        out = ssh(host, f"{OFF}/venv/bin/python /tmp/ctl_merge.py {rel} /tmp/ctl_{Path(rel).name}", timeout=120, tries=4)
+        out = ssh(host, f"{PY[host]} /tmp/ctl_merge.py {rel} /tmp/ctl_{Path(rel).name}", timeout=120, tries=4)
         hs[rel] = sha
         done[rel] = out.decode("utf-8", "replace").strip()
     js(STATE, st)
     if done:
         log("push_control", host, done)
         try:      # NETFIX：推完在服务器上按分区 ∩ 已准备集 ∩ 笔记本全局暂停 重算本机 producer 的 control
-            out = ssh(host, f"cd {R} && {OFF}/venv/bin/python tools/netfix/dispatch.py server-control {host} "
+            out = ssh(host, f"cd {R} && {PY[host]} tools/netfix/dispatch.py server-control {host} "
                             f"--laptop-ctrl data/netfix/laptop_ctrl.json --write", timeout=120, tries=3)
             log("server-control", host, out.decode("utf-8", "replace").strip().replace(chr(10), " | ")[-300:])
         except Exception as e:  # noqa: BLE001
@@ -694,7 +812,7 @@ def sync_pause(host: str) -> str | None:
     hs = st.setdefault(host, {})
     if hs.get("pause_synced") == want:
         return None
-    ssh(host, f"cd {R} && {OFF}/venv/bin/python tools/autopilot/producer.py {want} --by SYNC_LAPTOP "
+    ssh(host, f"cd {R} && {PY[host]} tools/autopilot/producer.py {want} --by SYNC_LAPTOP "
               f"--note '笔记本 producer 全局{want}（{c.get('paused_by') or ''}）同步'", timeout=120, tries=3)
     hs["pause_synced"] = want
     js(STATE, st)
@@ -735,12 +853,12 @@ def restart_guarded(host: str, drain_timeout_s: int = 900) -> str | None:
     if not changed:
         log("restart_guarded", host, "常驻加载的文件没变，不重启")
         return None
-    ssh(host, f"cd {R} && {OFF}/venv/bin/python tools/autopilot/producer.py pause --by RESTART_DRAIN --note '重启前排空'", timeout=120, tries=3)
+    ssh(host, f"cd {R} && {PY[host]} tools/autopilot/producer.py pause --by RESTART_DRAIN --note '重启前排空'", timeout=120, tries=3)
     import restart_queue as RQ                 # K-OPS-W23：与重启队列同一排空口径（只看 ComfyUI 执行中 + 排队，≤ 90 s；打分积压不算）
     dr = RQ.drain(host, sys.modules[__name__])
     log("restart_guarded", host, "排空", json.dumps(dr, ensure_ascii=False))
     txt = restart(host)
-    ssh(host, f"cd {R} && {OFF}/venv/bin/python tools/autopilot/producer.py resume --by RESTART_DRAIN --note '重启完成'", timeout=120, tries=3)
+    ssh(host, f"cd {R} && {PY[host]} tools/autopilot/producer.py resume --by RESTART_DRAIN --note '重启完成'", timeout=120, tries=3)
     hs["last_restart"] = time.time()
     js(STATE, st)
     log("restart_guarded", host, f"重启（常驻文件变了 {len(changed)} 个，例 {changed[:3]}）")
@@ -825,6 +943,34 @@ def autoflow_thread(every_s: int = AUTOFLOW_EVERY_S, part: str | None = None) ->
         time.sleep(max(1.0, every_s - (time.time() - t0)))
 
 
+FACTORY_SYNC_EVERY_S = 600        # FACTORY 11-02：每 10 分钟 tools/factory/sync.py auto（期望 refs 表变了才补推），超时 900 s
+FACTORY_SYNC_TIMEOUT_S = 900
+
+
+def factory_sync_thread(every_s: int | None = None) -> None:
+    every_s = every_s or FACTORY_SYNC_EVERY_S
+    while True:
+        t0 = time.time()
+        out_p = ROOT / "ops/logs/factory_sync_auto.out"
+        try:
+            with open(out_p, "wb") as f:
+                pr = subprocess.Popen([sys.executable, "-X", "utf8", str(ROOT / "tools/factory/sync.py"), "auto"], cwd=ROOT,
+                                      stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT, env={**os.environ, "PYTHONUTF8": "1"})
+                try:
+                    rc = pr.wait(timeout=FACTORY_SYNC_TIMEOUT_S)
+                except subprocess.TimeoutExpired:
+                    if os.name == "nt":
+                        subprocess.run(["taskkill", "/PID", str(pr.pid), "/T", "/F"], capture_output=True, timeout=30)
+                    else:
+                        pr.kill()
+                    rc = "timeout"
+            tail = out_p.read_bytes()[-200:].decode("utf-8", "replace").strip()
+            log("factory_sync_auto", json.dumps({"rc": rc, "secs": round(time.time() - t0, 1), "tail": tail}, ensure_ascii=False))
+        except Exception as e:  # noqa: BLE001
+            log("factory_sync_auto error", repr(e)[:300])
+        time.sleep(max(1.0, every_s - (time.time() - t0)))
+
+
 def loop(pull_every_s: int = 1200, health_every_s: int = 300):
     """5 分钟一次健康 / 报警；20 分钟一次并回；代码有改动 → 推代码 + 服务器热重启（每台独立，一台断连不影响另一台）"""
     last_pull = {h: 0.0 for h in HOSTS}
@@ -833,12 +979,23 @@ def loop(pull_every_s: int = 1200, health_every_s: int = 300):
         for part in AUTOFLOW_PARTS:
             threading.Thread(target=autoflow_thread, kwargs={"part": part}, name=f"autoflow_{part}", daemon=True).start()
         log("autoflow_tick", "三条线线程已启动", list(AUTOFLOW_PARTS), AUTOFLOW_EVERY_S, "s 一拍")
+    if FACTORY_SYNC_EVERY_S:             # FACTORY 11-02：参考板一变就重建期望 refs 表并补推（sync.py auto，没变化什么都不做），独立线程、失败只记日志
+        import threading
+        threading.Thread(target=factory_sync_thread, name="factory_sync_auto", daemon=True).start()
     while True:
         for h in HOSTS:
             try:
                 health(h)
             except Exception as e:  # noqa: BLE001
                 log("health error", h, repr(e)[:200])
+            try:                                 # K-OPS-W25：额外剧的临时 control 按 partition 自动生成（先于拉起，防全派）
+                sync_run_controls(h)
+            except Exception as e:  # noqa: BLE001
+                log("run_control error", h, repr(e)[:200])
+            try:                                 # K-OPS-W25：额外剧（第二季等）的 producer serve --run 挂了就拉起（只起不在的，STOP 时不起）
+                ensure_runs(h)
+            except Exception as e:  # noqa: BLE001
+                log("ensure_runs error", h, repr(e)[:200])
             try:                                 # DJ-20 重启队列：合并各方请求，30 分钟一次、先排空，紧急插队记审计（K-OPS-W16）
                 import restart_queue as RQ
                 RQ.process(h)
@@ -947,8 +1104,8 @@ def rebuild_jobs(host: str) -> dict:
     q = f"data/_quarantine_20261101/prompts_{time.strftime('%Y%m%d-%H%M%S')}"
     out = ssh(host, f"cd {R} && V={RUN_REL}/video && if [ -d $V/prompts ]; then mkdir -p {q} && mv $V/prompts {q}/ && "
                     f"echo quarantined_prompts {q}; fi; mkdir -p $V/prompts; "
-                    f"PYTHONUTF8=1 {OFF}/venv/bin/python tools/series10_video/build_jobs.py >/tmp/build_jobs.out 2>&1; "
-                    f"tail -c 300 /tmp/build_jobs.out; {OFF}/venv/bin/python -", data=REBUILD_CHECK.replace("__RUN__", RUN_ID).encode(), timeout=2400, tries=3)
+                    f"PYTHONUTF8=1 {PY[host]} tools/series10_video/build_jobs.py >/tmp/build_jobs.out 2>&1; "
+                    f"tail -c 300 /tmp/build_jobs.out; {PY[host]} -", data=REBUILD_CHECK.replace("__RUN__", RUN_ID).encode(), timeout=2400, tries=3)
     txt = out.decode("utf-8", "replace")
     res = json.loads([ln for ln in txt.splitlines() if ln.startswith("{")][-1])
     js(ROOT / f"data/autopilot/resident/jobs_rebuild_{host}.json", res)
@@ -971,7 +1128,7 @@ def video_up(host: str) -> dict:
         raise RuntimeError(f"{host} 重编后仍有 {res['non_pika_ready']} 个非 Pika ready 变体，不起 night")
     if res.get("rl_e3_ready"):          # AUDIT 20:15：重编后 RL-E3（系统句朝向镜头）必须 0 命中才起 night
         raise RuntimeError(f"{host} 重编后仍有 {res['rl_e3_ready']} 个 ready 变体带朝向镜头的系统句（RL-E3）：{res.get('rl_e3_examples')}")
-    txt = ssh(host, f"cd {R} && {OFF}/venv/bin/python ops/offline/resident_prep.py {host} video-only && "
+    txt = ssh(host, f"cd {R} && {PY[host]} ops/offline/resident_prep.py {host} video-only && "
                     f"bash {R}/ops/offline/resident_restart.sh {host} night-only", timeout=300).decode("utf-8", "replace")
     log("video_up", host, txt.strip().replace(chr(10), " | ")[-400:])
     return res
@@ -1106,7 +1263,14 @@ if res.get("file"):
     res["score"] = json.loads(line[-1]) if line else {"error": r.stderr[-500:]}
 json.dump(res, open("/tmp/resident_smoke_result.json", "w"))
 """
-SMOKE_LANE = {"gpu33": (8191, "/root/claude-kimi-ns-studio-v1/ComfyUI/output/gpu3"), "gpu36": (8190, "/root/work/fredw/comfy/output/gpu2")}
+def _smoke_lane(host: str) -> tuple[int, str]:
+    """冒烟用的道：hosts.json 里该机最后一条启用的出图道（本机端口 + 输出目录）；原来写死的 gpu36:2 是死口（L-100 改看图卡）"""
+    ln = sorted(_HOSTS.lanes(host, role="image"))[-1]
+    rec = _HOSTS.lanes(host, role="image")[ln]
+    return int(rec["comfy_port"]), _HOSTS.comfy_output(ln)
+
+
+SMOKE_LANE = {h: _smoke_lane(h) for h in SERVERS}
 
 
 def smoke(host: str, sid: str = "ep01-S3", wait_s: int = 2400) -> dict:
@@ -1128,7 +1292,7 @@ def smoke(host: str, sid: str = "ep01-S3", wait_s: int = 2400) -> dict:
     port, outdir = SMOKE_LANE[host]
     code = REMOTE_SMOKE.replace("__R__", R).replace("__PORT__", str(port)).replace("__OUTDIR__", outdir).replace("__SID__", sid)
     ssh(host, "cat > /tmp/resident_smoke.py", data=code.encode())
-    ssh(host, f"rm -f /tmp/resident_smoke_result.json; setsid nohup {OFF}/venv/bin/python /tmp/resident_smoke.py "
+    ssh(host, f"rm -f /tmp/resident_smoke_result.json; setsid nohup {PY[host]} /tmp/resident_smoke.py "
               f"</dev/null >/tmp/resident_smoke.out 2>&1 & echo started")
     log("smoke", host, sid, rid, "已在服务器后台提交")
     t0, res = time.time(), {}

@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 TASKS, OUTS = "judge_tasks", "judge_out"
 SIGMA_MAX = 1.0
 MIN_REPS = 3
+BSL = chr(92)
 V3_ITEMS = ("stakes", "opposition", "subtext_contrast", "open5s")      # hollywood_judge.md §七
 
 
@@ -152,6 +153,117 @@ def collect(run_dir: Path, ep: int, write_score: bool = False) -> dict:
     return res
 
 
+def _rel(p: Path) -> str:
+    """仓库内 → 相对路径（正斜杠）；仓库外（测试临时目录）→ 绝对路径"""
+    try:
+        return str(Path(p).resolve().relative_to(ROOT.resolve())).replace(BSL, "/")
+    except ValueError:
+        return str(Path(p).resolve()).replace(BSL, "/")
+
+
+def _abs(s: str) -> Path:
+    q = Path(s)
+    return q if q.is_absolute() else ROOT / q
+
+
+# ---- 盲评（总调度 11-02：v2 / v3 对比，包里不写版本，用随机编号，对照表另存，collect 时还原）
+def _doc_chunk(path: Path) -> tuple[str, str, int]:
+    import re as _re
+    _L3, R5 = _modules()
+    pre, chunks = R5.RL.split_doc(path.read_text(encoding="utf-8"))
+    return pre, chunks[0], int(_re.search(r"ep(\d+)", path.name).group(1))
+
+
+def _key_dir(out: Path) -> Path:
+    """对照表不放在评审包目录下：<out 的上级>/_keys/<out 名>/（评审只读自己的 judge_k 目录）"""
+    return out.parent / "_keys" / out.name
+
+
+def blind_pack(sources: dict, eps: list, judges: int, out: Path, seed=None) -> dict:
+    """sources = {版本标签: 快照目录（含 P4_epNN.final.md）}。每个评审 judge_k 拿到 len(sources) × len(eps) 份，随机编号、顺序打乱；
+    对照表写 out/_key/KEY.json（评审不读这个目录）。返回 {judge_k: [包路径…]}"""
+    import random
+    import secrets
+    rng = random.Random(seed if seed is not None else secrets.randbits(64))
+    _L3, R5 = _modules()
+    system = R5.judge_system_r6()
+    items = [f"{d}#{i}" for d, i, _t in R5.judge_items_r6()]
+    key = {"created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "sources": {k: _rel(v) for k, v in sources.items()}, "packets": {}}
+    made, used = {}, set()
+    for j in range(1, judges + 1):
+        docs = [(tag, ep) for tag in sources for ep in eps]
+        rng.shuffle(docs)
+        made[f"judge_{j}"] = []
+        for order, (tag, ep) in enumerate(docs, 1):
+            bid = None
+            while bid is None or bid in used:
+                bid = f"B{rng.randrange(10 ** 5, 10 ** 6)}"
+            used.add(bid)
+            doc = Path(sources[tag]) / f"P4_ep{ep:02d}.final.md"
+            pre, chunk, _ep = _doc_chunk(doc)
+            op = out / f"judge_{j}" / "out" / f"{bid}.json"
+            pk = {"schema": "nsfs.judge_task/1", "mode": "blind", "judge_slot": f"judge_{j}", "blind_id": bid, "order": order,
+                  "role": "judge", "judge_md": "config/prompts/hollywood_judge.md", "items": items, "system": system,
+                  "user": R5.H.judge_user(ep, pre, chunk, None),
+                  "rules": ("你是独立评审：不是写手，也不是 HOLLYWOOD；只读自己这个 judge 目录里的包，不要打开别的目录，不要猜这份稿是哪一版。每份单独作答，按 order 顺序做。"
+                            "只判 items 里的条目；met=true 必须附镜头块里逐字可找到的原文证据。只输出一个 ```json（hollywood_judge.md §六 + §七 v3 四条），"
+                            "顶层写 judge_id（你的评审 agent 名）和 blind_id。"),
+                  "output": {"path": _rel(op), "done_marker": _rel(op) + ".done"},
+                  "created_at": key["created_at"], "status": "open"}
+            pp = out / f"judge_{j}" / f"{order:02d}_{bid}.json"
+            _write_json(pp, pk)
+            made[f"judge_{j}"].append(_rel(pp))
+            key["packets"][bid] = {"judge_slot": f"judge_{j}", "version": tag, "episode": ep, "doc": _rel(doc),
+                                   "base_sha": _sha(chunk), "output": _rel(op)}
+    _write_json(_key_dir(out) / "KEY.json", key)
+    return made
+
+
+def blind_collect(out: Path) -> dict:
+    """按对照表还原：每个（版本, 集）收各评审的 50 分制总分 → σ / 均值 / 是否不同评审；v3 四条多数。结果写 out/_key/RESULT.json"""
+    _L3, R5 = _modules()
+    RC6, H, RL = R5.RC6, R5.H, R5.RL
+    key = json.loads((_key_dir(out) / "KEY.json").read_text(encoding="utf-8"))
+    llm_items = [(d, i) for d, i, _t in R5.judge_items_r6()]
+    code_cache, groups, problems = {}, {}, []
+    for bid, k in key["packets"].items():
+        op = _abs(k["output"])
+        if not (op.exists() and Path(str(op) + ".done").exists()):
+            problems.append(f"{k['judge_slot']} {bid} 还没交")
+            continue
+        pre, chunk, ep = _doc_chunk(_abs(k["doc"]))
+        if _sha(chunk) != k["base_sha"]:
+            problems.append(f"{bid} 稿变了，作废")
+            continue
+        if k["doc"] not in code_cache:
+            wd = _key_dir(out) / "work" / k["version"] / f"ep{ep:02d}"
+            wd.mkdir(parents=True, exist_ok=True)
+            obj = H.episode_obj(pre, chunk, ep, wd)
+            shots = sorted(obj.shots, key=lambda q: q.index)
+            blocks = [RL.block_text(chunk, n) for n in range(len(shots))]
+            code_cache[k["doc"]] = RC6.code_checks(chunk, shots, blocks, RL.block_text(chunk, "head"), H.lint(chunk, ep)["codes"])
+        raw = op.read_text(encoding="utf-8")
+        judged, err = R5.parse_evidence(raw, chunk)
+        if judged is None:
+            problems.append(f"{bid} 不是 §六 的 JSON：{err}")
+            continue
+        raw_d, _e = H._json_block(raw)
+        v3 = {str(x.get("id")): bool(x.get("met")) and bool(str(x.get("evidence") or "").strip())
+              for x in (raw_d or {}).get("v3") or [] if isinstance(x, dict)}
+        groups.setdefault(f"{k['version']}|ep{k['episode']:02d}", []).append(
+            {"blind_id": bid, "judge_slot": k["judge_slot"], "judge_id": str((raw_d or {}).get("judge_id") or "").strip(),
+             "total": rep_total(code_cache[k["doc"]], judged, llm_items, RC6.DIMS), "v3": v3})
+    res = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "groups": {}, "problems": problems}
+    for name, g in sorted(groups.items()):
+        st = stability([x["total"] for x in g])
+        ids = [x["judge_id"] for x in g]
+        single = any(not x for x in ids) or len(set(ids)) < len(ids)
+        res["groups"][name] = {**st, "stable": st["stable"] and not single, "single_judge": single, "judge_ids": ids,
+                               "v3_majority": {it: sum(x["v3"].get(it, False) for x in g) * 2 > len(g) for it in V3_ITEMS}}
+    _write_json(_key_dir(out) / "RESULT.json", res)
+    return res
+
+
 def main(argv=None) -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -167,7 +279,28 @@ def main(argv=None) -> int:
             s.add_argument("--reps", type=int, default=MIN_REPS)
         else:
             s.add_argument("--write-score", action="store_true")
+    bp = sub.add_parser("blind-pack", help="盲评出包：--source v2=<快照目录> --source v3=<快照目录>")
+    bp.add_argument("--source", action="append", required=True)
+    bp.add_argument("--episodes", default="1-3")
+    bp.add_argument("--judges", type=int, default=3)
+    bp.add_argument("--out", required=True)
+    bc = sub.add_parser("blind-collect")
+    bc.add_argument("--out", required=True)
     a = ap.parse_args(argv)
+    if a.cmd in ("blind-pack", "blind-collect"):
+        outd = _abs(a.out)
+        if a.cmd == "blind-pack":
+            L3, _R5 = _modules()
+            srcs = {x.split("=", 1)[0]: _abs(x.split("=", 1)[1]) for x in a.source}
+            made = blind_pack(srcs, sorted(L3.H.RL.parse_episodes(a.episodes)), a.judges, outd)
+            print(json.dumps({k: len(v) for k, v in made.items()}, ensure_ascii=False))
+        else:
+            r = blind_collect(outd)
+            print(json.dumps({k: {x: v[x] for x in ("n", "totals", "sigma", "mean", "stable", "single_judge")} for k, v in r["groups"].items()},
+                             ensure_ascii=False, indent=1))
+            if r["problems"]:
+                print("问题：", r["problems"][:12])
+        return 0
     run_dir = Path(a.run_dir) if Path(a.run_dir).is_absolute() else ROOT / a.run_dir
     L3, _R5 = _modules()
     eps = sorted(L3.H.RL.parse_episodes(a.episodes))

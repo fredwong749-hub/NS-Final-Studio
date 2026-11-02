@@ -22,6 +22,13 @@
 | S17 | 单镜出图速率 | 同一镜每小时 ≤ 8 次 | producer rendered（笔记本 + 服务器；ep05-S3 重出到第 82 版的缺口） | DEBUG-RSI |
 | S18 | 临时挂道到期（partition.json _temp_holds） | 不过 expires_at；没写 expires_at ≤ 15 分钟 | partition.json（gpu36:0 挂 3.5 小时的缺口） | 挂道的 loop |
 | S19 | 产能见底：所有 run 的可派 ready（只算 runs.json 里 status=producing 的 run；已导入但 run 不是 producing 的 ready 单列、不算可派）合计 vs 道数 × 2，每台 vs 本机道数 × 2（单里写哪台见底、另一台还剩多少）；有没有下一批（待导入的稿 / 导入了没放单） | 可派 ready ≥ 10、每台 ≥ 本机道数 × 2，或有待导入的稿 | 两台服务器登记表 ready + autoflow.json verdict=importable + imports.jsonl（11:01 gpu33 空 30 分钟的缺口） | 总调度 / DEBUG-RSI |
+| G26 | 声明 vs 实际：config/factory/hosts.json 里每条 enabled 的道——ComfyUI 端口有进程在听、system_stats 正常、监听进程跑在声明的 GPU 上（--cuda-device / CUDA_VISIBLE_DEVICES / nvidia-smi 计算进程）；broken_gpus（gpu33:2）上没有任何作业 | 0 不符 | 服务器本机实测（remote_probe 同一次调用）；sv-09 部署后自动上线 | DEBUG-RSI（运行期）/ FACTORY（声明错） |
+| S20 | 笔记本上命令行在 scratchpad 路径下、还在运行的 python / sh 进程（K-OPS-Y04：会改生产状态的代码不许从 scratchpad 跑） | 0 | 进程命令行（Windows 拿不到工作目录，只看命令行）；lend_any.py / hold_lane.py / lend_lane.sh 标“已知，sv-10 收编”；只读豁免（sentinel.yaml readonly_exempt，总调度认领、命令行里没有 ssh）：watch_green.sh | 按脚本名的负责方，判断不出派总调度 |
+| S20+ | 会话 shell（Git Bash / sh / pwsh / powershell）活了 > 2 小时、30 分钟内在它下面新起 ssh ≥ 3 次 = 永不结束的 ssh 轮询 | 0 | SENTINEL 每拍进程快照（新 ssh 的父 / 祖父 shell）∪ NETFIX ssh_spawn_watch.ps1 记录（VQAGATE 凌晨两个轮询让跳板新建连接维持 108 次/小时） | 起它的 loop，看不出派总调度 |
+| S21 | 读旧状态路径：data/state/legacy_reads.jsonl 24 小时内的 state_legacy_read（netfix/partition、netfix/override、pipeline/runs、pipeline/run） | 0（sv-11 删旧读的前提） | state_paths.read_state 读旧位置时记的日志；负责方按 caller 查 ownership.yaml | 调用方负责方 |
+| S22 | 冻结期间改文件：data/rsi/freeze_drift.jsonl（{sv, at, files}） | 0；之后成功 cut 自动关 | FACTORY cut 记录 | 文件负责方 |
+| S23 | 笔记本侧出图道可达率：每拍测本地隧道端口 /system_stats（gpu33:0/1/3、gpu36:0/1；gpu36:2 按 L-100 退役不计） | 每道 5 分钟可达率 ≥ 80%；同一拍不通的道 < 半数 | 笔记本本机实测（13:07–13:21 隧道来回重连、6 道全拒连，S2 / G26 只测服务器本机端口没报）；与 NETFIX A-TUNNEL-FLAP 互为备份 | NETFIX |
+| S24 | API 响应时间：/api/episodes、/api/season 每分钟测一次（带只读查看令牌） | 最近 20 次 p95 < 2 s（失败按 30 s 计） | 笔记本本机实测（今天 /api/season 一度 6–25 s、页面卡在加载） | UIRSI2 |
 | S13 | 等人决定：任何对象等总调度 / 项目方定；流水线断档（GPU 空、ready 0、pending 多） | 等人 ≤ 10 分钟；断档 0 | 登记表 waiting_for + nvidia-smi（总调度 02:4x 追加：02:22 gpu33 全 0% 根因 = 77 个首帧“等总调度定”） | DEBUG-RSI |
 
 探针实现：tools/sentinel/（K-OPS-S02…S07；阈值 config/policies/sentinel.yaml）；工单 data/sentinel/issues.jsonl，未关闭快照 data/sentinel/open.json，看板 :8810“工单”区。

@@ -337,3 +337,16 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-01
+  - id: K-PRM-310
+    domain: prompt
+    link: [P7-P8]
+    title: Pika 近景单人镜每个分拍句末补一个物理微表情分句（眉 / 眨眼 / 呼吸 / 嘴角），由编译层加，不靠写作方
+    when: 编译 i2va_pika_flex 视频作业，recipe prompt.acting_micro_beats = true 且 prompt.acting_scope 命中（closeup_single = 近景及更紧、画内单人）
+    then: ns_recipes.acting.micro_beats 在每个“At 00:0X”分拍句末（最后一拍插在 as the shot ends 前）按拍轮换补一个微表情分句，主语取该拍第一个 his/her/he/she；只写物理动作不写情绪内容；作业 prompt_notes 记“插入分拍微表情”。开关默认关，V7 台词段口型 / SFace 身份护栏补测通过后由 VIDLAB 打开
+    check: tests/test_acting_beats.py（开关默认关；范围只命中近景单人；两份规则表一致）
+    evidence:
+      - {src: data/rsi/vidlab/ab_vl_r1_act2.json, note: "同 seed 同首帧配对：S5 近景单人表演活跃度 +47% / +45%，眨眼 0→16 次/分；S4 双人中景 +1% / −4%；J4、看镜头不变"}
+      - {src: docs/research/h3_deep/01_official.md, quote: "#96 几乎不眨眼：建议在提示词里写明第几秒眨眼"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02

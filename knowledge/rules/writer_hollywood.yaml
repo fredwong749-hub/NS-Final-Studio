@@ -396,3 +396,45 @@ rules:
     confidence: medium
     status: 待验
     date: 2026-11-02
+  - id: K-WRT-H23
+    check: [tests/test_scene_lock.py]
+    domain: writer
+    link: P3-P4
+    title: 每场开头写场景定稿行（陈设 / 主光 / 站位 / 屏幕方向），各镜不得矛盾
+    when: 集头（**配乐** 前），本集用到的每个场景一行（总调度 11-02，CONSISTENCY_PLAN §3；IMGMASTER continuity 读这一行）
+    then: tools/script_rsi/scene_lock.py check_episode H23：每个用到的场景都有 `**场景定稿｜<场景id>**：陈设=…｜主光=…｜站位=<名>：<左/中/右>·<姿态>；…｜屏幕方向=…`，四字段齐；同框 ≥2 人的镜人物行左右顺序和定稿一致（不越轴，衔接写“承：动作｜<名>移到<侧>”可换位）；【灯光】同方案名或含同一动机光源。v3 标记集进补丁环和导入闸门；过闸覆盖导入时导出 <run>/continuity/scene_locks_epNN.json
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: 集头里给本集每个场景写一行场景定稿：`**场景定稿｜<场景id>**：陈设=<1–5 件，照抄场景表>｜主光=<灯光方案名或动机光源（方位）>｜站位=<名>：<左/中/右>·<姿态>；…｜屏幕方向=<谁在哪侧、面朝哪边>`。各镜的人物左右、灯光都要和这一行一致；剧情里有人换位置，就在那一镜的衔接写“承：动作｜<名>移到<侧>”。过肩镜里前景的肩、背影（人物行写“局部”）也算占了画面那一侧，左右同样要和定稿行一致。
+    evidence:
+      - {src: docs/master/CONSISTENCY_PLAN.md, note: "§3 提示层：场景定稿行、衔接点、去重复环境句（L-118）"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02
+  - id: K-WRT-H24
+    check: [tests/test_scene_lock.py]
+    domain: writer
+    link: P3-P4
+    title: 镜间衔接点：同场换机位 / 接力镜的“承：”只用 视线 / 动作 / 声音，并写具体内容
+    when: 每个同场换机位 / 接力镜的 **衔接** 行
+    then: scene_lock.check_episode H24：“承：<视线|动作|声音>｜<内容>”，写“环境”或空内容 = 不过；换场可写“承：无”
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: 同一场里换机位或接力的镜，衔接行写清上一镜交过来的是什么：视线（谁看向哪）、动作（手上正在做的事）或声音（哪一声响）——“承：视线｜林晚看向门口”。不要写“承：环境”。
+    evidence:
+      - {src: docs/master/CONSISTENCY_PLAN.md, note: "§3 提示层：场景定稿行、衔接点、去重复环境句（L-118）"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02
+  - id: K-WRT-H25
+    check: [tests/test_scene_lock.py]
+    domain: writer
+    link: P3-P4
+    title: 同一场里各镜 img 不重复描述环境，场景外观交给场景定稿行
+    when: 同一场景的各镜 img
+    then: scene_lock.check_episode H25：img 里不带人名的环境分句（光 / 灯 / 窗 / 墙 / 背景 / 虚化 / 霓虹…）和本场前面某镜的环境分句二字片段重合 ≥ 0.6 = 重复
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: 同一场里不要每镜都重写一遍环境（例如每镜都写“落地窗外霓虹虚化成光斑”）。场景长什么样由场景定稿行交代；img 只写本镜的人物、动作、机位和这一镜独有的东西。人物扶、靠场景物件的接触分句照写。img 里 QW-W9 要求的光线句照写，但写成带人名的句子（“暖黄顶灯从上方落在林晚的肩上”），不写成和前镜一样的纯环境句。
+    evidence:
+      - {src: docs/master/CONSISTENCY_PLAN.md, note: "§3 提示层：场景定稿行、衔接点、去重复环境句（L-118）"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02

@@ -53,3 +53,18 @@
 5. **齿孔是“画上去的花边”**：比例不对（药丸形、过密），一看就是假的。
 
 结论：新方向一律去掉卡片；片条按 F4–F6 的真实比例算；信息只在片边（等宽小字）和右侧字段列；每屏能看到全部 10 集。
+
+## 6. r3 / r4 对照真实放映拷贝修正（2026-11-02 12:0x，项目方“胶片 design 感觉不太像”“胶片太亮了，暗黑调”）
+
+参照照片（只下载到本机做对照，不上传）：
+- [Commons: Anamorphic-digital sound+cue.jpg](https://commons.wikimedia.org/wiki/File:Anamorphic-digital_sound%2Bcue.jpg)（35mm 放映拷贝，CC BY，Jay Holben / John Hawkinson）
+- [Commons: 35mm film audio macro.jpg](https://commons.wikimedia.org/wiki/File:35mm_film_audio_macro.jpg)（拷贝片边近照：KS 孔、数字声轨、模拟声轨）
+
+| 观察 | 改法 |
+|---|---|
+| 正片片种是 2383（Vision 正片），5219 是摄影负片 | 片边印 EASTMAN 2383 + KeyKode 人可读码 + 条码 |
+| KS 孔：宽大于高的圆角矩形，孔里透出背后的光 | 齿孔按 2.79×1.98 mm、圆角 0.5 mm；按项目方暗调要求只透很弱的暖光，不画亮白孔 |
+| 帧间黑色帧线约为帧宽的 3–4% | 每边 1.8% 帧宽的黑帧线 |
+| 片窗四角轻微圆角 | 圆角约 2.2% 帧宽 |
+| 片边字紧贴齿孔外侧，小号等宽 | 镜号 · 时长 · 景别印在下片边外侧（暗琥珀 #8c7347），片条下面只留“镜头 · 运镜” |
+| 照片里的拷贝是灯箱背光（很亮） | 不照搬亮度：项目方要求暗黑调，片基深炭黑偏暖、去纹理，画面是整页最亮的东西 |

@@ -81,3 +81,15 @@ s_vqa\logs\switch.jsonl（ev=vqa_window：开始 / 结束、判了几条、出�
 - 吞吐估算：出图约 60 s 一张时，N=6 意味着每 6 分钟让出约 5 分钟，出图吞吐约降一半。要是太慢，可以把看图放到 gpu36 备用道（隧道通的时候），本机只补判。
 - **已实现（20:3x，总调度批参数）**：tools/vqa/server.py 的 maybe_open_window / window_active 与 /yield 等窗口。参数用环境变量 VQA_WIN_N=6、VQA_WIN_WAIT_S=480、VQA_WIN_BACKLOG=10、VQA_WIN_PER_JOB_S=50、VQA_WIN_MAX_S=270（270 小于出图方 yield_timeout_s 300，出图方不会超时报错），VQA_WIN_N=0 关掉。窗口内跳过“空闲 IDLE_S 秒”的等待，显存不够照旧先 /free ComfyUI。开、关窗口都记 switch.jsonl（ev=vqa_window，含 served、draw_waited_s）。comfy_client._yield_peer 没改（CONSENT LOCALGPU → VQAGATE 已登记）。测试 tests/test_vqagate.py::test_vqa_min_window_opens_on_any_condition。
 - **吞吐实测：未测。** 要等全量重做恢复、laptop 道连续出图后，跑 `tools/vqa/window_report.py --since <启用时间> --before <启用前一段>`，结果写 data/vqa/window_report.json。现成的“启用前”基线只有 18:30–19:40 的 3 张（2.6 张 / 小时），太少，不能当基线。生效前提：本机看图服务要用新的 server.py 重启（start.ps1 -Restart 会把仓库里的 server.py 拷过去）。
+
+## 机签（master_review autosign）现状 — 2026-11-02 14:xx
+
+- **现在是 manual（人工签），不是测试期。**
+  - 11:00 按“只取现行剧本”的口径切到 auto：35 对，一致率 1.0，漏放 0。
+  - 12:45 项目方抽检否决 ep04-S10 v6：陈宇在画面里出现两次，人数异常，现行契约测不到这一项。
+  - 12:46:26 autosign_spot_check 判为 revert，自动退回人工（data/vqa/autosign_state.json：reverted_at = 2026-11-02T12:46:26）。
+- **切回条件**：
+  1. detector 的人数检测（DETECT-S anomaly.py）接进契约，并由总调度标定后打开拦截；
+  2. 把 ep04-S10 v6 这类“同一人出现两次”加进回归集，重新跑 autosign.py check 评估门槛；
+  3. 切回由总调度定。代码层面：退回过人工后，check 即使达标也维持 manual，要总调度确认才会切。
+- **测试期抽检**：每 10 张抽 1 张（data/vqa/autosign_spot.jsonl）；误拦记 data/vqa/autosign_false_reject.jsonl。

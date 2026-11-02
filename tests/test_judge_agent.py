@@ -37,3 +37,25 @@ def test_rules_v3_registered():
     assert all(f"id: K-WRT-H{n}" in t for n in range(17, 23))
     j = (ROOT / "config/prompts/hollywood_judge.md").read_text(encoding="utf-8")
     assert "## 七、v3 判断条目" in j and "judge_id" in j
+
+
+def test_blind_pack_hides_version(JA, tmp_path):
+    """盲评（总调度 11-02）：包里不出现版本标签和快照路径；每个评审 6 份、编号唯一；对照表另存在 _key/"""
+    import json
+    src = ROOT / "data" / "rsi" / "v2v3"
+    if not ((src / "v2" / "P4_ep01.final.md").exists() and (src / "v3" / "P4_ep01.final.md").exists()):
+        import pytest
+        pytest.skip("没有 v2 / v3 快照")
+    out = tmp_path / "blind"
+    made = JA.blind_pack({"v2": src / "v2", "v3": src / "v3"}, [1, 2, 3], 3, out, seed=7)
+    assert {k: len(v) for k, v in made.items()} == {"judge_1": 6, "judge_2": 6, "judge_3": 6}
+    key = json.loads((JA._key_dir(out) / "KEY.json").read_text(encoding="utf-8"))
+    assert len(key["packets"]) == 18
+    for j in made:
+        for pp in made[j]:
+            pk = json.loads(JA._abs(pp).read_text(encoding="utf-8"))
+            txt = json.dumps({k: v for k, v in pk.items() if k not in ("system", "user", "output")}, ensure_ascii=False)   # output 在 pytest 临时目录下，目录名含测试名
+            assert "v2v3" not in pk["output"]["path"] and "_key" not in pk["output"]["path"]
+            assert "v2v3" not in txt and '"v2"' not in txt and '"v3"' not in txt and "version" not in txt
+    orders = [[key["packets"][JA._abs(p).stem.split("_", 1)[1]]["version"] + str(key["packets"][JA._abs(p).stem.split("_", 1)[1]]["episode"]) for p in made[j]] for j in made]
+    assert len({tuple(o) for o in orders}) > 1          # 三个评审的顺序不全一样

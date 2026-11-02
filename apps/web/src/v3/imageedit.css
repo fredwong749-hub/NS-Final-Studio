@@ -1,0 +1,74 @@
+/* FILMUI · 图像工坊 P1（风格 A 暗调；不依赖 html.ui-film，默认界面下也能用）。图片本身不加滤镜。 */
+.ie { --ie-bg: #080807; --ie-line: rgba(255, 255, 255, .08); --ie-line2: rgba(255, 255, 255, .16); --ie-t1: #e9e6e0; --ie-t2: rgba(233, 230, 224, .62); --ie-t3: rgba(233, 230, 224, .4);
+  --ie-mono: "IBM Plex Mono", Consolas, monospace; background: var(--ie-bg); color: var(--ie-t1); height: calc(100vh - 52px); display: flex; flex-direction: column; font-size: 13px; }
+.ie button { font: inherit; color: inherit; }
+.ie-hd { height: 50px; flex: none; display: flex; align-items: center; gap: 18px; padding: 0 20px; border-bottom: 1px solid var(--ie-line); }
+.ie-hd h1 { margin: 0; font-size: 16px; font-weight: 600; }
+.ie-shot { white-space: nowrap; display: flex; align-items: center; gap: 8px; color: var(--ie-t2); font-size: 12px; }
+.ie-shot input, .ie-in { height: 26px; width: 110px; min-width: 0; background: transparent; border: 1px solid var(--ie-line2); border-radius: 2px; color: var(--ie-t1); font: 12px var(--ie-mono); padding: 0 8px; }
+.ie-src { color: var(--ie-t3); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ie-sp { flex: 1; }
+.ie-btn { height: 30px; padding: 0 12px; border: 1px solid var(--ie-line2); border-radius: 2px; background: none; white-space: nowrap; cursor: pointer; }
+.ie-btn:disabled { color: var(--ie-t3); border-color: var(--ie-line); cursor: not-allowed; }
+.ie-ws { flex: 1; min-height: 0; display: grid; grid-template-columns: 260px minmax(0, 1fr) 320px; }
+.ie-l, .ie-r { overflow-y: auto; padding: 14px 18px; }
+.ie-l { border-right: 1px solid var(--ie-line); } .ie-r { border-left: 1px solid var(--ie-line); padding-top: 0; }
+.ie h4 { margin: 14px 0 8px; display: flex; justify-content: space-between; font: 500 11px var(--ie-mono); color: var(--ie-t3); letter-spacing: .14em; }
+.ie h4 span { font-family: inherit; letter-spacing: 0; }
+.ie-note { margin: 8px 0; color: var(--ie-t3); font-size: 11.5px; line-height: 1.55; }
+.ie-base { width: 100%; display: grid; grid-template-columns: 14px 1fr; gap: 2px 10px; padding: 8px 0; border: 0; border-bottom: 1px solid var(--ie-line); background: none; text-align: left; cursor: pointer; }
+.ie-base:disabled { cursor: not-allowed; opacity: .55; }
+.ie-base .rd { width: 12px; height: 12px; margin-top: 3px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, .35); }
+.ie-base.on .rd { border-color: var(--ie-t1); box-shadow: inset 0 0 0 3px var(--ie-bg), inset 0 0 0 6px var(--ie-t1); }
+.ie-base .nm { font: 500 12px var(--ie-mono); }
+.ie-base .ds { grid-column: 2; display: flex; gap: 6px; align-items: center; color: var(--ie-t2); font-size: 11.5px; }
+.ie .sea-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; background: #7f7f7f; }
+.ie .sea-dot.d-ok { background: #5fae6e; } .ie .sea-dot.d-need { background: #d4a24c; } .ie .sea-dot.d-none { background: #7f7f7f; }
+.ie-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; font-size: 12px; }
+.ie-row > span:first-child { width: 34px; flex: none; white-space: nowrap; color: var(--ie-t3); }
+.ie-chk { white-space: nowrap; }
+.ie-v { color: var(--ie-t2); }
+.ie-seg { display: inline-flex; border: 1px solid var(--ie-line2); border-radius: 2px; }
+.ie-seg button { border: 0; background: none; padding: 3px 11px; cursor: pointer; color: var(--ie-t2); }
+.ie-seg button.on { background: var(--ie-t1); color: #111; }
+.ie-chk { display: flex; align-items: center; gap: 5px; color: var(--ie-t2); }
+.ie-mid { display: flex; flex-direction: column; min-width: 0; }
+.ie-stage { flex: 1; min-height: 0; overflow: hidden; background: #000; display: flex; gap: 14px; padding: 14px; justify-content: center; }
+.ie-pane { margin: 0; flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
+.ie-pane img { max-width: 100%; max-height: calc(100vh - 52px - 50px - 32px - 96px - 150px - 54px); object-fit: contain; display: block; }
+.ie-pane figcaption { font: 11px var(--ie-mono); color: var(--ie-t2); }
+.ie-pane figcaption b { color: var(--ie-t1); }
+.ie-none { align-self: center; color: var(--ie-t3); }
+.ie-bar { height: 32px; flex: none; display: flex; align-items: center; gap: 14px; padding: 0 16px; border-top: 1px solid var(--ie-line); color: var(--ie-t3); font-size: 12px; }
+.ie-lnk { border: 0; background: none; color: var(--ie-t2); cursor: pointer; padding: 0; }
+.ie-lnk:hover { color: var(--ie-t1); }
+.ie-prompt { flex: none; display: grid; grid-template-columns: 1fr auto; gap: 6px 14px; padding: 8px 16px 10px; border-top: 1px solid var(--ie-line); }
+.ie-pt { grid-column: 1 / -1; display: flex; gap: 12px; font-size: 12px; color: var(--ie-t3); }
+.ie-pt b { color: var(--ie-t2); font-weight: 500; }
+.ie-prompt textarea { height: 52px; resize: none; background: transparent; border: 1px solid var(--ie-line2); border-radius: 2px; color: var(--ie-t2); font: 12.5px/1.55 inherit; padding: 6px 10px; }
+.ie-go { min-width: 168px; border: 0; border-radius: 2px; background: var(--ie-t1); color: #111 !important; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; padding: 0 16px; cursor: pointer; }
+.ie-go:disabled { opacity: .45; cursor: not-allowed; }
+.ie-go b { font-size: 14px; } .ie-go span { font: 10.5px var(--ie-mono); color: #555; margin-top: 3px; }
+.ie-hist { flex: none; border-top: 1px solid var(--ie-line); padding: 6px 16px 10px; }
+.ie-ht { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--ie-t3); margin-bottom: 5px; }
+.ie-scroll { overflow-x: auto; overflow-y: hidden; }
+.ie-tabs { position: sticky; top: 0; z-index: 2; display: flex; gap: 2px; height: 40px; margin: 0 -18px 12px; padding: 0 18px; background: var(--ie-bg); border-bottom: 1px solid var(--ie-line); }
+.ie-tabs button { border: 0; background: none; padding: 0 9px; color: var(--ie-t2); cursor: pointer; }
+.ie-tabs button:first-child { padding-left: 0; }
+.ie-tabs button.on { color: var(--ie-t1); box-shadow: inset 0 -1px 0 var(--ie-t1); }
+.ie-refs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.ie-refs .ie-note { grid-column: 1 / -1; }
+.ie-refs figure { margin: 0; } .ie-refs img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; object-position: 50% 20%; display: block; }
+.ie-refs figcaption { font-size: 11px; color: var(--ie-t3); margin-top: 3px; line-height: 1.4; }
+.ie-ck { display: grid; grid-template-columns: 12px 30px 1fr; gap: 0 6px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--ie-line); font-size: 12px; line-height: 1.5; color: var(--ie-t2); }
+.ie-ck b { font: 500 10.5px var(--ie-mono); color: var(--ie-t1); }
+.ie-meta { display: grid; grid-template-columns: 52px 1fr; gap: 6px 10px; margin: 0; font-size: 12px; }
+.ie-meta dt { color: var(--ie-t3); } .ie-meta dd { margin: 0; word-break: break-all; } .ie-meta .mono { font-family: var(--ie-mono); }
+.ie-meta pre { margin: 0; white-space: pre-wrap; font: 11.5px/1.55 inherit; color: var(--ie-t2); max-height: 260px; overflow: auto; }
+.ie-nd { width: 100%; display: flex; align-items: center; gap: 10px; padding: 4px 0; border: 0; background: none; text-align: left; cursor: pointer; color: var(--ie-t2); }
+.ie-nd img { width: 36px; height: 48px; object-fit: cover; }
+.ie-nd.on { color: var(--ie-t1); text-decoration: underline; text-underline-offset: 3px; }
+.ie-nd.sub { padding-left: 22px; }
+.ie-branch { margin: 6px 0 2px; color: var(--ie-t3); font-size: 11.5px; }
+.ie-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ie-t1); color: #111; padding: 8px 14px; border-radius: 2px; font-size: 12.5px; z-index: 80; }
+.ac-nav-ws { display: flex; justify-content: space-between; align-items: baseline; text-decoration: none; }

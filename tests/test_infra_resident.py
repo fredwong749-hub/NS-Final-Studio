@@ -43,7 +43,7 @@ def test_tunnel_down_alerts_but_never_repairs(monkeypatch, tmp_path):
     for i in range(W.ALERT_AFTER):
         st = W.tick(st, now=1000.0 + 30 * i)
     assert st["fails"]["18188"] == W.ALERT_AFTER and st["fails"]["18288"] == 0
-    assert [a["id"] for a in alerts if a["state"] == "open" and a["id"].startswith("A-TUNNEL")] == ["A-TUNNEL-18188"]
+    assert [a["id"] for a in alerts if a["state"] == "open" and a["id"].startswith("A-TUNNEL-1")] == ["A-TUNNEL-18188"]
     monkeypatch.setattr(W, "probe", lambda p, path="/system_stats", timeout=6: {} if path == "/system_stats" else {"queue_running": [], "queue_pending": []})
     monkeypatch.setattr(W, "queue_len", lambda p: 0)
     st = W.tick(st, now=2000.0)
@@ -199,3 +199,19 @@ def test_restart_drain_ignores_scoring_backlog_and_caps(monkeypatch):
     r = RQ.drain("gpu33", RS, sleep=sleep, clock=clock)
     assert r["drained"] is False and r["drain_mode"] == "timeout" and r["drain_s"] <= RQ.DRAIN_MAX_S + RQ.DRAIN_POLL_S
     assert "heartbeat" not in RQ.process.__code__.co_consts.__repr__()
+
+
+def test_tunnel_flap_alert(monkeypatch, tmp_path):
+    """13:2x 探针缺口：道断几十秒又恢复、凑不够连续 ALERT_AFTER 拍 → 也要报 A-TUNNEL-FLAP；半数道同时不通立刻报"""
+    killed, alerts = _stub(monkeypatch, tmp_path, set(W.TUNNELS))
+    st = {}
+    for i in range(W.FLAP_WINDOW):
+        up = set(W.TUNNELS) - ({18188} if i % 2 == 0 else set())          # 18188 隔拍断一次
+        monkeypatch.setattr(W, "probe", lambda p, path="/system_stats", timeout=6, up=up: ({} if path == "/system_stats" else {"queue_running": [], "queue_pending": []}) if p in up else None)
+        monkeypatch.setattr(W, "queue_len", lambda p, up=up: 0 if p in up else None)
+        st = W.tick(st, now=5000.0 + 30 * i)
+    ids = [a["id"] for a in alerts if a["state"] == "open"]
+    assert "A-TUNNEL-FLAP" in ids and "A-TUNNEL-18188" not in ids                # 连续不够，但抖动报了
+    killed2, alerts2 = _stub(monkeypatch, tmp_path, {18188, 18189})              # 5 条里 3 条同时不通
+    st2 = W.tick({}, now=6000.0)
+    assert any(a["id"] == "A-TUNNEL-FLAP" and a["state"] == "open" for a in alerts2)

@@ -375,6 +375,11 @@ def reimport(run_dir: Path, ep: int, final_p: Path, sha: str, st) -> dict | None
     out = (r.stdout.decode("utf-8", "replace").strip().splitlines() or [""])[-1]
     ok = r.returncode == 0
     if ok:
+        try:                       # IMGMASTER continuity 读的场景定稿导出（K-WRT-H23）；导出失败不影响导入本身，记下原因
+            SL = _load("scene_lock", "tools/script_rsi/scene_lock.py")
+            st.set(scene_locks=H.RC._rel(SL.export(run_dir, ep)))
+        except Exception as e:  # noqa: BLE001
+            st.set(scene_locks_error=repr(e)[:200])
         st.set(imported_sha=sha, reimport_changed_shots=changed)
         st.d.setdefault("agent_history", []).append({"step": "reimport", "accepted": True, "note": f"覆盖导入，改了的镜 {changed}"})
         st.save()
@@ -384,6 +389,20 @@ def reimport(run_dir: Path, ep: int, final_p: Path, sha: str, st) -> dict | None
 def sys_exe() -> str:
     import sys
     return sys.executable
+
+
+def reopen(run_dir: Path, ep: int, why: str, by: str = "HOLLYWOOD") -> dict:
+    """补丁预算用尽（某失败项试满 ITEM_TRIES / not_importable）后重开：清零逐项尝试计数，记一条 manual 历史（自动化分如实不计这一集）。
+    不动稿、不跳闸门；下一次 run 会照常重算失败项、出补丁包或走事实核对"""
+    st = AF.Status(run_dir, ep, 0.0)
+    ag = st.d.setdefault("agent", {"processed": [], "used": {}, "fact_devs": None})
+    before = dict(ag.get("used") or {})
+    ag["used"] = {}
+    st.d.setdefault("agent_history", []).append({"step": "reopen", "accepted": True, "manual": True, "by": by,
+                                                 "note": f"manual 重开补丁预算：{why}"[:300], "used_before": before})
+    st.set(verdict="reopened", next_action="已重开补丁预算，跑 autoflow run 继续")
+    st.save()
+    return {"ok": True, "used_before": before}
 
 
 def ending_of(text: str, ep: int) -> str:

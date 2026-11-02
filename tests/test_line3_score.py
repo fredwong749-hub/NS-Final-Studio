@@ -71,3 +71,13 @@ def test_automation_counts_reimported(L3, tmp_path):
     """autoflow 覆盖导入后 verdict=imported（总调度 11-02），仍算无人干预到可导入"""
     (tmp_path / "autoflow_ep01.json").write_text(json.dumps({"episode": 1, "verdict": "imported", "agent_history": [{"step": "reimport"}]}), encoding="utf-8")
     assert L3.automation(tmp_path)[1] == [1]
+
+
+def test_official_judge_replaces_code_share(L3):
+    """总调度 11-02：同一稿有正式判断分（3 个独立评审）时，剧本分的 70% 用新尺子 50 分制，叙事 30% 不变"""
+    nar = {k: {"ok": True} for k in L3.NARR_KEYS}
+    eps = [{"episode": 1, "code_met": 27, "base_sha": "abc", "narrative": dict(nar), "parts": {}},
+           {"episode": 2, "code_met": 27, "base_sha": "zzz", "narrative": dict(nar), "parts": {}}]
+    L3.apply_narrative(eps, [], {(1, "abc"): 40.0, (2, "other"): 10.0})
+    assert eps[0]["parts"]["script"] == round(35 * (0.7 * 40 / 50 + 0.3), 2) and eps[0]["judge50"] == 40.0
+    assert eps[1]["parts"]["script"] == 35.0 and "judge50" not in eps[1]        # sha 对不上 = 不用

@@ -26,11 +26,13 @@ PULL = ROOT / "data" / "_offline_pull"
 OWN = {"gpu33": {1, 3, 5}, "gpu36": {2, 4, 6, 7, 8, 9, 10}}      # 旧分集（partition.json 读不到时用）
 OWN_IMG, OWN_VID = dict(OWN), dict(OWN)
 try:   # NETFIX 22:2x：按集归属改读 config/netfix/partition.json——图 / 账本按 images，视频按 video（ep10 图归笔记本、视频归 gpu36）
-    _part = json.loads((ROOT / "config/netfix/partition.json").read_text(encoding="utf-8"))
+    sys.path.insert(0, str(ROOT / "tools/factory"))
+    import state_paths as _SP   # ARCH_ROADMAP §10（NETFIX 11-02，CONSENT AUTOPILOT → NETFIX）：先读 data/state/netfix/partition.json，没有再读旧位置并留痕
+    _part = _SP.read_state("netfix/partition")
     OWN_IMG = {h: {int(x) for x in v} for h, v in (_part.get("images") or {}).items() if h != "laptop"} or OWN_IMG
     OWN_VID = {h: {int(x) for x in v} for h, v in (_part.get("video") or {}).items() if h != "laptop"} or OWN_VID
     OWN = {h: OWN_IMG.get(h, set()) | OWN_VID.get(h, set()) for h in set(OWN_IMG) | set(OWN_VID)}
-except (OSError, ValueError):
+except (OSError, ValueError, RuntimeError):   # arch-ok: 分区读不到 → 用上面的旧分集（显式回退，旧行为）
     pass
 
 
@@ -154,19 +156,31 @@ def backup(rel: str):
 LOCAL_STICKY = ("quarantined",)       # 本地对版本的处置，服务器那份永远不能盖掉（UIRSI r42：整份覆盖冲掉了 72 个“已隔离”标记）
 
 
-def merge_takes(src: Path, dst: Path, dry: bool = False) -> str:
-    """data/renders/**/takes.json 按版本（stage, n）逐条合并（UIRSI r42，总调度 01:3x）：
-      · 服务器有、本地没有的版本 → 收；本地有、服务器没有的 → 留；
-      · 两边都有 → 服务器字段覆盖同名字段（契约 / 打分是服务器上算的），本地独有字段保留，LOCAL_STICKY（已隔离）一律用本地的；
-      · 顶层（active / locked / master_gate …）同理按键合并；但服务器的 active / locked 若指向本地已隔离的版本，保留本地的值；
-      · restore_log 等本地独有的顶层键保留"""
-    r = json.loads(src.read_text(encoding="utf-8"))
-    l = json.loads(dst.read_text(encoding="utf-8")) if dst.exists() else {"takes": []}
+def merge_takes_docs(r: dict, l: dict) -> tuple[dict, int, int, dict]:
+    """merge_takes 的纯函数版：远端 r 并进本地 l → (合并后, 新增, 更新, 换号表 {(stage, 远端n): 本地n})"""
     lt = {(t.get("stage"), t.get("n")): t for t in l.get("takes") or []}
+    # K-OPS-W27（11-02 ep08/09 两台各自往上编号）：同一 (stage, n) 在两边可能是不同的图。先按文件认版本：
+    # 本地已有同文件的版本 → 用本地编号；编号撞了但文件不同 → 远端这条改用新编号追加（记 renumbered），active / locked 跟着换号
+    by_file = {(t.get("stage"), t.get("file")): t for t in l.get("takes") or [] if t.get("file")}
+    next_n: dict = {}
+    for t in list(l.get("takes") or []) + list(r.get("takes") or []):
+        next_n[t.get("stage")] = max(next_n.get(t.get("stage"), 0), int(t.get("n") or 0))
+    remap: dict = {}
     out_takes, added, updated = [], 0, 0
     seen = set()
     for t in r.get("takes") or []:
         k = (t.get("stage"), t.get("n"))
+        same = by_file.get((t.get("stage"), t.get("file"))) if t.get("file") else None
+        if same is not None and same.get("n") != t.get("n"):
+            remap[k] = same.get("n")
+            k = (t.get("stage"), same.get("n"))
+            t = {**t, "n": same.get("n")}
+        elif k in lt and t.get("file") and lt[k].get("file") and lt[k].get("file") != t.get("file"):
+            next_n[t.get("stage")] += 1
+            nn = next_n[t.get("stage")]
+            remap[k] = nn
+            t = {**t, "n": nn, "renumbered": {"from_n": k[1], "why": "两边同号不同图（K-OPS-W27）"}}
+            k = (t.get("stage"), nn)
         seen.add(k)
         if k in lt:
             m = {**lt[k], **t}
@@ -187,6 +201,7 @@ def merge_takes(src: Path, dst: Path, dry: bool = False) -> str:
     out = {**l, **{k: v for k, v in r.items() if k != "takes"}}
     for key in ("active", "locked"):
         sv, lv = dict(r.get(key) or {}), dict(l.get(key) or {})
+        sv = {st: remap.get((st, n), n) if not isinstance(n, dict) else n for st, n in sv.items()}   # 远端换了号的版本，指针跟着换
         if not sv and not lv:
             continue
         merged = {**lv, **sv}
@@ -198,6 +213,43 @@ def merge_takes(src: Path, dst: Path, dry: bool = False) -> str:
                     merged.pop(stage, None)
         out[key] = merged
     out["takes"] = out_takes
+    return out, added, updated, remap
+
+
+def _sid_run_of(dst: Path) -> tuple[str, str | None] | None:
+    """仓库内 data/renders/[<run>/]epNN/SN/takes.json → (镜号, run)；不在仓库渲染目录下（测试临时目录）→ None"""
+    try:
+        parts = dst.resolve().relative_to((ROOT / "data" / "renders").resolve()).parts
+    except ValueError:
+        return None
+    if len(parts) == 3 and parts[2] == "takes.json":
+        return f"{parts[0]}-{parts[1]}", None
+    if len(parts) == 4 and parts[3] == "takes.json":
+        return f"{parts[1]}-{parts[2]}", parts[0]
+    return None
+
+
+def merge_takes(src: Path, dst: Path, dry: bool = False) -> str:
+    """data/renders/**/takes.json 按版本（stage, n）逐条合并（UIRSI r42，总调度 01:3x）：
+      · 服务器有、本地没有的版本 → 收；本地有、服务器没有的 → 留；
+      · 两边都有 → 服务器字段覆盖同名字段（契约 / 打分是服务器上算的），本地独有字段保留，LOCAL_STICKY（已隔离）一律用本地的；
+      · 顶层（active / locked / master_gate …）同理按键合并；但服务器的 active / locked 若指向本地已隔离的版本，保留本地的值；
+      · restore_log 等本地独有的顶层键保留"""
+    r = json.loads(src.read_text(encoding="utf-8"))
+    sid_run = _sid_run_of(dst)
+    if sid_run and not dry:                  # K-OPS-W29：仓库内的 takes.json 只经 mutate_takes 写（锁里现读本地再并，不会盖掉并发写入）
+        sys.path.insert(0, str(ROOT / "services/render_router"))
+        from ns_render import pipeline as P
+        cnt = {}
+
+        def _fn(local):
+            o, a, u, _rm = merge_takes_docs(r, local if local.get("takes") is not None else {"takes": []})
+            cnt.update(a=a, u=u)
+            return o
+        P.mutate_takes(sid_run[0], _fn, op="merge_pull.merge_takes", by="ops/offline/merge_pull.py", run=sid_run[1])
+        return f"takes+{cnt.get('a', 0)}~{cnt.get('u', 0)}"
+    l = json.loads(dst.read_text(encoding="utf-8")) if dst.exists() else {"takes": []}
+    out, added, updated, _remap = merge_takes_docs(r, l)
     if not dry:
         if dst.exists():
             backup(dst.relative_to(ROOT).as_posix())

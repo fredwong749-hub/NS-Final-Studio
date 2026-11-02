@@ -137,8 +137,8 @@ def retract_stale_video10(log=print) -> list[dict]:
     from ns_render import pipeline as P
     out = []
     for sid in sorted(current_shots()):
-        with P.shot_lock(sid):
-            data = P.load_takes(sid)
+        if True:                                   # K-OPS-W29：先只读判断，要撤销时才经 mutate_takes 带 expect_seq 写（期间被改过就留到下一轮）
+            seq0, data = P.get_takes(sid)
             act = data.get("active") or {}
             vn = act.get("video")
             vt = next((t for t in data.get("takes") or [] if t.get("stage") == "video" and t.get("n") == vn), None)
@@ -158,10 +158,19 @@ def retract_stale_video10(log=print) -> list[dict]:
                 why = f"片子用的首帧 v{ff} 被总调度打回（{mr.get('reason') if isinstance(mr, dict) else mr}）"
             if not why:
                 continue
-            act.pop("video", None)
-            vt.setdefault("params", {})["retracted"] = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "why": why,
-                                                        "by": "tools/pipeline/register_takes.py --video10"}
-            P._save_takes(sid, data)
+            rec = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "why": why, "by": "tools/pipeline/register_takes.py --video10"}
+
+            def _retract(d, _vn=vn, _rec=rec):          # 只标“已撤销”；撤当前指针走 P.clear_active（K-OPS-Q23 唯一入口，带审计）
+                for t in d.get("takes") or []:
+                    if t.get("stage") == "video" and t.get("n") == _vn:
+                        t.setdefault("params", {})["retracted"] = _rec
+            try:
+                P.mutate_takes(sid, _retract, op="register_takes.retract_video", by="tools/pipeline/register_takes.py",
+                               expect_seq=seq0)
+            except P.TakesConflict:
+                log(json.dumps({"shot": sid, "status": "retract_deferred", "why": "判断后 takes.json 被改过，下一轮再判"}, ensure_ascii=False))
+                continue
+            P.clear_active(sid, "video", reason=f"撤销视频 v{vn}：{why}", actor="tools/pipeline/register_takes.py --video10")
         r = {"shot": sid, "stage": "video", "status": "retracted", "n": vn, "why": why}
         out.append(r)
         log(json.dumps(r, ensure_ascii=False))
@@ -215,12 +224,13 @@ def register(item: dict, *, label: str, dry: bool = False) -> dict:
         # （项目方授权“全部默认同意” = 后台自动采用；VIDEO10 night.py 读 takes.json 的 postflight / active）
         rec = {"ok": bool(pf.get("ok")), "items": pf.get("items") or [], "reasons": pf.get("reasons") or [],
                "ts": time.strftime("%Y-%m-%dT%H:%M:%S")}
-        with P.shot_lock(shot):
-            data = P.load_takes(shot)
+        def _pf(data, _st=stage, _n=take.n, _rec=rec):
             for t in data["takes"]:
-                if t["stage"] == stage and t["n"] == take.n:
-                    t["postflight"] = rec
-            P._save_takes(shot, data)
+                if t["stage"] == _st and t["n"] == _n:
+                    t["postflight"] = _rec
+        # SYSARCH #16 第 1 步（K-OPS-W29）：takes.json 只经 ns_render.pipeline.mutate_takes 写（跨进程锁 + seq + last_op）
+        P.mutate_takes(shot, _pf, op="register_takes.postflight", by="tools/pipeline/register_takes.py",
+                       op_id=f"register_takes:{shot}:{stage}:{take.n}:postflight")
         if item.get("activate", True) and stage == "video":
             # DATAALIGN 11-01：视频不归 auto_current（只管首尾帧）——片子门过了、项目方没定稿别的视频 → 设为当前
             with P.shot_lock(shot):

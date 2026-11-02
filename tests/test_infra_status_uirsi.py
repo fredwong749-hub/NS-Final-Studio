@@ -16,6 +16,15 @@ LOCAL = [{"id": "laptop:0", "label": "笔记本显卡出图", "ok": True, "ms": 
 RES = {"gpu33": {"health": {"at": "2027-01-15 08:00:00", "night_state_age_min": 2.0}}}
 INTERNAL = re.compile(r":\d{4,5}|/api/|1\d{4}\b|ComfyUI|ssh")
 
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_live_retired_lanes(monkeypatch):
+    """总调度 11-02 14:4x（sv-11 cut 失败）：本文件测汇总逻辑，不读真实 config/factory/hosts.json——
+    gpu36:2 按 L-100 退役后，写死 6 条 / 5 条的断言在 live 上变红。退役道逻辑由 test_retired_lane_excluded 单测。"""
+    monkeypatch.setattr(I, "_disabled_ports", lambda: set())
+
 
 def _texts(d: dict) -> list[str]:
     out = [d["summary"], d["relay"]["text"], *d["reconnect"]]
@@ -81,7 +90,7 @@ def test_gpu_thumb_uses_local_copy(tmp_path, monkeypatch):
 def test_frontend_wiring():
     web = ROOT / "apps" / "web" / "src"
     top = (web / "v3" / "TopBarV3.tsx").read_text(encoding="utf-8")
-    assert "<InfraChip />" in top
+    assert "<SystemStatusButton />" in top and "<InfraPanel d={infra.data} />" in (web / "v3" / "SystemStatus.tsx").read_text(encoding="utf-8")   # UIFIX-S：连接胶囊并入系统状态面板
     gp = (web / "components" / "GpuPanel.tsx").read_text(encoding="utf-8")
     assert "<InfraPanel d={infra} compact />" in gp and "merged={allDown}" in gp
     assert "onError={() => setThumbBad(c.thumb!.src)}" in gp and "图在服务器上，笔记本还没有" in gp
@@ -141,7 +150,7 @@ def test_r39_topbar_short_texts():
     rt = (web / "components" / "RenderTasks.tsx").read_text(encoding="utf-8")
     assert "在办 {c.rendering} · 排队 {c.queued ?? c.pending}" in rt and "渲染任务" in rt   # 按钮字“渲染任务”保留（UIAUDIT flows 按它找）
     top = (web / "v3" / "TopBarV3.tsx").read_text(encoding="utf-8")
-    assert "prodOn || (offline && !infraOn)" in top
+    assert "<SystemStatusHidden" in top   # UIFIX-S：渲染任务按钮挂在系统状态面板里，“出图未连上”只在悬停里
     gl = (ROOT / "services" / "api" / "ns_api" / "gpu_live.py").read_text(encoding="utf-8")
     assert "ComfyUI 离线（" not in gl and "这张卡的出图程序没响应" in gl
 
@@ -165,3 +174,12 @@ def test_netfix_per_lane_hosts_real_structure():
     assert d["level"] == "warn" and "全断" not in d["summary"] and "gpu36·卡1" in d["summary"]
     assert any("gpu36·卡1" in r and "重连" in r for r in d["reconnect"])
     assert not any("没人在管" in x or "没在运行" in x for x in [t["text"] for t in d["tunnels"]] + d["reconnect"])
+
+
+def test_retired_lane_excluded(monkeypatch):
+    """L-100：hosts.json 里 enabled=false 的道（gpu36:2 改看图卡）不进连接列表、不进分母、不报断。"""
+    monkeypatch.setattr(I, "_disabled_ports", lambda: {18290})
+    wd = {"t": NOW - 10, "fails": {}, "_relay_down": False, "_relay_t": NOW - 10}
+    d = I.build(NOW, wd, RES, LOCAL)
+    assert d["level"] == "ok" and all(t["ok"] for t in d["tunnels"])
+    assert 18290 not in {t.get("port") for t in d["tunnels"]} and len(d["tunnels"]) == 5

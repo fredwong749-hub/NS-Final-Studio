@@ -206,3 +206,15 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-E26
+    domain: ops
+    link: [P7-P8]
+    title: 缺资产 / 期望 refs 表不一致挡下的镜进“等资产”状态，资产登记或期望表签名一变自动放回，不靠 30 分钟退避反复派、不手动清
+    when: preflight 挡单原因是 I3 / I4（造型设定图或单品资产缺图）或 K-OPS-F03（refs 与 data/factory/inbox/expected_refs.json 不一致）
+    then: 账本记 waiting_asset（kind=asset 或 refs，带 asset_sig / refs_sig），blocked_until 兜底 6 小时；producer 每分钟算一次签名（asset_sig = config/recipes/asset_refs.json + wardrobe.json + 各项目 *_file 的 stat；refs_sig = 期望表 stat），kind=asset 资产签名变、kind=refs 期望表或资产签名变 → 清 blocked_until 和 assets:<sid> 的 blocked，记 asset_release（counted=false）；其它 preflight 原因（如 I5 场景底图）照旧 30 分钟退避
+    check: tests/test_debug_rsi.py::test_e26_wait_kind / test_e26_asset_release_on_registry_change / test_e26_refs_release_on_expected_table_change / test_e26_release_throttled / test_e26_asset_sig_follows_config_registry
+    evidence:
+      - {src: docs/debug/DEBUG_r1.md, note: "11-02 13:24–13:31 gpu33：第二季 dispatch 9 / refs_mismatch 7 / preflight_block 7，期望表用的是 series10_v1 路径，镜在 30 分钟退避里空转，FACTORY 改表后还要手动清退避；producer 日志 preflight_block 原因 I3 林晚造型B 没有设定图 371 次"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

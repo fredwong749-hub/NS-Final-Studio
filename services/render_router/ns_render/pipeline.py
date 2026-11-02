@@ -268,8 +268,155 @@ def load_takes(shot_id: str) -> dict:
     return _read_json(shot_dir(shot_id) / "takes.json", {"takes": [], "active": {}})
 
 
-def _save_takes(shot_id: str, data: dict):
-    _write_json(shot_dir(shot_id) / "takes.json", data)
+def _save_takes(shot_id: str, data: dict, *, op: str = "legacy_save", by: str = "pipeline._save_takes"):
+    """旧接口（调用方自己 load_takes → 改 → 存）：内部改走写入口的同一套落盘（跨进程锁、seq+1、last_op、备份）。
+    调用方读到的 seq 比文件里的旧 = 中间有别的进程写过：记 data/state/takes_conflicts.jsonl 报警，仍按调用方的版本写
+    （不打断渲染线程；新代码请直接用 mutate_takes(expect_seq=...)）"""
+    p = shot_dir(shot_id) / "takes.json"
+    with shot_lock(shot_id), _file_lock(p.with_name("takes.json.lock")):
+        cur = int((_read_json(p, {}) or {}).get("seq") or 0)
+        mine = int(data.get("seq") or 0)
+        if mine < cur:
+            _takes_conflict(shot_id, mine, cur, op, by)
+        _commit_takes(p, data, max(cur, mine), op=op, by=by, op_id=None, run=None, shot_id=shot_id)
+
+
+# ------------------------------------------------------------------ takes.json 唯一写入口（EDITOR_INTEGRATION 附录 A2）
+TAKES_LAST_OPS = 50          # last_ops 只留最近 50 条（op_id 防重放用）
+TAKES_BAK_KEEP = 10          # .takes_bak/ 只留最近 10 份
+
+
+class TakesConflict(RuntimeError):
+    """expect_seq 和文件里的 seq 对不上（底版 / 副本落后），调用方先拉最新再让人确认"""
+
+    def __init__(self, sid: str, expect: int, actual: int):
+        super().__init__(f"{sid} takes.json seq={actual}，调用方期望 {expect}")
+        self.sid, self.expect, self.actual = sid, expect, actual
+
+
+def _run_renders(run: str | None) -> Path:
+    """run → 渲染根目录：不给 / 主剧（config/pipeline/runs.json primary）= 本进程 RENDERS 的主剧路径；其它剧 = data/renders/<run>"""
+    if not run:
+        return RENDERS
+    import sys as _sys
+    if str(ROOT / "tools" / "autopilot") not in _sys.path:
+        _sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+    import runs as RUNS                          # 登记表读不到就 raise（strict，失败关闭：不能猜错 takes 落到哪部剧）
+    primary = RUNS.primary_run(ROOT, strict=True)
+    return DATA / "renders" if run == primary else DATA / "renders" / run
+
+
+def takes_path(shot_id: str, run: str | None = None) -> Path:
+    ep, s = shot_id.split("-")
+    return _run_renders(run) / ep / s / "takes.json"
+
+
+def _iso_jst() -> str:
+    from datetime import datetime, timedelta, timezone
+    return datetime.now(timezone(timedelta(hours=9))).isoformat(timespec="seconds")
+
+
+def _file_lock(lp: Path, timeout: float = 30):
+    """跨进程文件锁（Windows msvcrt / Linux fcntl），拿不到超时抛 TimeoutError"""
+    import contextlib
+
+    @contextlib.contextmanager
+    def cm():
+        lp.parent.mkdir(parents=True, exist_ok=True)
+        f = open(lp, "a+b")
+        t0 = time.time()
+        try:
+            while True:
+                try:
+                    if os.name == "nt":
+                        import msvcrt
+                        f.seek(0)
+                        msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                    else:
+                        import fcntl
+                        fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    if time.time() - t0 > timeout:
+                        raise TimeoutError(f"拿不到 {lp}")
+                    time.sleep(0.05)
+            yield
+        finally:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    f.seek(0)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            except OSError:   # arch-ok: 释放文件锁失败（文件已关）不影响已落盘的结果，关文件句柄即释放
+                pass
+            f.close()
+    return cm()
+
+
+def get_takes(shot_id: str, run: str | None = None) -> tuple[int, dict]:
+    """读 takes.json → (seq, doc)；没有 seq 的旧文件按 0"""
+    p = takes_path(shot_id, run)
+    doc = _read_json(p, {"takes": [], "active": {}})
+    return int(doc.get("seq") or 0), doc
+
+
+def _takes_conflict(shot_id: str, mine: int, cur: int, op: str, by: str) -> None:
+    try:
+        f = DATA / "state" / "takes_conflicts.jsonl"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        with f.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"at": _iso_jst(), "sid": shot_id, "caller_seq": mine, "file_seq": cur, "op": op, "by": by},
+                                ensure_ascii=False) + "\n")
+    except OSError:   # arch-ok: 只是追加冲突报警，写失败不能挡 takes 落盘，不是读账本
+        pass
+
+
+def _commit_takes(p: Path, doc: dict, seq: int, *, op: str, by: str, op_id, run, shot_id: str) -> dict:
+    """锁内落盘：备份旧文件（留 TAKES_BAK_KEEP 份，更旧的移隔离区，不删）→ seq+1 / last_op / last_ops → 原子写。调用方持锁"""
+    if p.exists():
+        bak = p.parent / ".takes_bak"
+        bak.mkdir(exist_ok=True)
+        shutil.copy2(p, bak / f"takes.{seq}.{time.strftime('%Y%m%dT%H%M%S')}.{os.getpid()}.json")
+        def _bseq(x: Path) -> tuple:
+            parts = x.name.split(".")              # takes.<seq>.<时间>[.<pid>].json → 按 seq、时间排，不按修改时间
+            return (int(parts[1]) if len(parts) > 2 and parts[1].isdigit() else -1, parts[2] if len(parts) > 3 else "")
+        olds = sorted(bak.glob("takes.*.json"), key=_bseq)
+        if olds[:-TAKES_BAK_KEEP]:
+            q = DATA / "_quarantine" / "takes_bak" / (run or "_") / shot_id
+            q.mkdir(parents=True, exist_ok=True)
+            for x in olds[:-TAKES_BAK_KEEP]:
+                try:
+                    shutil.move(str(x), str(q / x.name))
+                except OSError:   # arch-ok: 旧备份挪隔离区失败就留在原处，下次再挪，不影响落盘
+                    pass
+    rec = {"seq": seq + 1, "op": op, "by": by, "op_id": op_id, "at": _iso_jst()}
+    doc["seq"], doc["last_op"] = seq + 1, rec
+    doc["last_ops"] = (list(doc.get("last_ops") or []) + [rec])[-TAKES_LAST_OPS:]
+    _write_json(p, doc)
+    return doc
+
+
+def mutate_takes(shot_id: str, fn, *, op: str, by: str, op_id: str | None = None, run: str | None = None,
+                 expect_seq: int | None = None) -> dict:
+    """takes.json 的唯一写入口：本进程每镜锁 + 跨进程 takes.json.lock 里读-改-写。
+    - expect_seq 给了且和文件 seq（缺省 0）不等 → TakesConflict，不写；
+    - op_id 已在 last_ops 里 → 视为重放，原样返回、不再执行 fn（幂等）；
+    - fn(doc) 原地改或返回新 doc；写前把旧文件备份到 .takes_bak/takes.<seq>.<时间>.json（留 10 份，更旧的移到 data/_quarantine/takes_bak/）；
+    - seq+1，last_op={seq, op, by, op_id, at(+09:00)}，last_ops 留最近 50 条。返回写入后的 doc"""
+    p = takes_path(shot_id, run)
+    with shot_lock(shot_id), _file_lock(p.with_name("takes.json.lock")):
+        doc = _read_json(p, {"takes": [], "active": {}})
+        seq = int(doc.get("seq") or 0)
+        if op_id and any((x or {}).get("op_id") == op_id for x in doc.get("last_ops") or []):
+            return doc
+        if expect_seq is not None and int(expect_seq) != seq:
+            raise TakesConflict(shot_id, int(expect_seq), seq)
+        new = fn(doc)
+        doc = new if isinstance(new, dict) and "takes" in new else doc   # fn 可能顺手返回 pop 出的 dict，只认整份 doc
+        return _commit_takes(p, doc, seq, op=op, by=by, op_id=op_id, run=run, shot_id=shot_id)
 
 
 class QCRejected(ValueError):

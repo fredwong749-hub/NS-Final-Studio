@@ -31,3 +31,5 @@ tools/video_rca/lab.py
 tools/voice10/voice10.py
 tools/vqa/after_network.py
 tools/qa/arch_scan.py
+tools/sentinel/probes.py
+# ↑ tools/sentinel/probes.py：只是按进程名 ssh.exe 统计会话 shell 起的轮询（S20 扩展），本身不起 ssh（NETFIX 14:3x 登记）

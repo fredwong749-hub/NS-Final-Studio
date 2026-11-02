@@ -25,7 +25,12 @@ def problems(repo: Path = ROOT, spec: dict | None = None, spec_file: Path | None
     import yaml
     spec = spec or yaml.safe_load((spec_file or (ROOT / "config/deploy/server_deps.yaml")).read_text(encoding="utf-8")) or {}
     out = []
-    for venv, req in (spec.get("venvs") or {}).items():
+    import os
+    me = os.environ.get("NS_FACTORY_HOST") or os.environ.get("OFFLINE_SELF")
+    venvs = dict(spec.get("venvs") or {})
+    if me:
+        venvs.update((spec.get("host_venvs") or {}).get(me) or {})
+    for venv, req in venvs.items():
         py = Path(venv) / "bin" / "python"
         if not py.exists():
             out.append(f"缺解释器 {py}")
@@ -45,6 +50,21 @@ def problems(repo: Path = ROOT, spec: dict | None = None, spec_file: Path | None
             got = next((ln.split(":", 1)[1].strip() for ln in r.stdout.splitlines() if ln.startswith("Version:")), None)
             if got != str(ver):
                 out.append(f"{venv}: {pkg} 版本 {got} ≠ {ver}")
+    b = spec.get("binaries") or {}
+    if b:
+        import os
+        import shutil
+        path = os.pathsep.join([x for x in (b.get("path_prefix"), os.environ.get("PATH", "")) if x])
+        for exe in b.get("required") or []:
+            if not shutil.which(exe, path=path):
+                out.append(f"PATH 上找不到 {exe}（前缀 {b.get('path_prefix')}）")
+    if me:
+        for absp, want in ((spec.get("host_models") or {}).get(me) or {}).items():
+            pth = Path(absp)
+            if not pth.is_file():
+                out.append(f"{me} 缺模型文件 {absp}")
+            elif sha256(pth) != want:
+                out.append(f"{me} 模型文件 sha 不符 {absp}")
     for rel, want in (spec.get("models") or {}).items():
         p = repo / rel
         if not p.is_file():

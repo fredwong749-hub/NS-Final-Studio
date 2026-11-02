@@ -19,6 +19,7 @@ ab_criteria:
   seeds: [20261102, 20261103]
   shot: ep10-S2
 exec_modes:
+  camctl_r1: "VIDLAB 11-02 冒烟（data/rsi/vidlab/ab_vl_r1_camctl_truck.json，ep10-S2 横移 seed 20261102，107 帧同 seed 对照）：执行准确度 0.0 → 1.0（横移 -0.0711 / 目标 -0.07，杂旋转 2.3° → 0.3°），但看镜头占比 0 → 0.775 触发硬规则护栏 → 不通过；158 帧在 gpu36:1 / gpu33:1 OOM，107 帧可跑、单条 365 s；右缘黑边已修。横移 / 摇镜 / 俯仰暂不改 camctl，等第 2 轮（strength 0.4、end_percent 0.3、人物遮罩外扩）"
   doc: 运镜的执行方式。prompt = 只靠 Pika 提示词；camctl = 首帧背景 Canny 按机位轨迹仿射成控制视频，经 MiniMax H3 Fun ControlNet 驱动（VIDLAB tools/vidlab/camctl.py，冒烟中）
   measured_by: "VIDLAB tools/vidlab/clipmetrics.py v4，41 条 Pika 片按提示词运镜分组的执行准确度中位：push_in 1.0（18）、static 1.0（3）、arc 0.64（7）、truck_right 0.10（2；cm_r2 横移实测 -0.7% 画宽，目标 -7%，另有 2.2° 杂旋转）、tilt_up 0.0（11）"
   conclusion: "Pika 能执行推近和固定；横移、俯仰基本不按提示词执行（背景净运动 0.029/s 不比好莱坞参照 0.017/s 少，问题是方向不受控）→ truck / pan / tilt 只靠提示词不 enabled，camctl 冒烟通过后把执行方式改成 camctl 再 A/B"

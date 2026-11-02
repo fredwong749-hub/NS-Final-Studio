@@ -150,6 +150,12 @@ def gate(path: Path, eps: list[int] | None = None) -> dict:
             sh3 = sorted(obj3.shots, key=lambda s: s.index)
             v3 = RC6.v3_checks(sh3, [RL.block_text(ch, k) for k in range(len(sh3))])
             fails += [f"v3#{i} {why[:160]}" for i, (ok, why) in v3.items() if not ok]
+            SL = _load("scene_lock", "tools/script_rsi/scene_lock.py")
+            scn = SL.check_episode(RL.block_text(ch, "head"), sh3, [RL.block_text(ch, k) for k in range(len(sh3))])
+            fails += [f"scene#{i} {why[:160]}" for i, (ok, why) in scn.items() if not ok]
+            k211 = RC6.mirror_hand_checks(sh3, [RL.block_text(ch, k) for k in range(len(sh3))])
+            fails += [f"k211#{i} {why[:160]}" for i, (ok, why) in k211.items() if not ok]
+            v3 = {**v3, **{f"scene#{i}": x for i, x in scn.items()}, **{f"k211#{i}": x for i, x in k211.items()}}
             r["fails"] = list(r["fails"]) + [{"item": f"v3#{i}"} for i, (ok, _w) in v3.items() if not ok]
         fails += [f"staging#镜{x['shot']} {ST.why(x)[:160]}" for x in st_bad]
         res["eps"][ep] = {"met": r["met"], "total": r["total"], "fails": fails, "unshootable": [x["shot"] for x in bad],

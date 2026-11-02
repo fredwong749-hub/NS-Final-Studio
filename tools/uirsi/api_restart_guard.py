@@ -37,6 +37,10 @@ API = "http://127.0.0.1:8800"
 MARKER = ROOT / "data/qa/api_restart.json"
 MIN_GAP_S = 600
 WATCH = [ROOT / "services/api", ROOT / "services/render_router", ROOT / "services/agent", ROOT / "packages"]
+# 重启前编译闸门（总调度 11-02 12:0x，K-UI-054）：ns_api 启动会 import 这些目录；任何一个 .py 编译不过就不重启、开工单，
+# 不能把 :8800 重启成起不来的状态（11:55 owner_queue.py 改到一半时被自动重启，API 停了 10 分钟）
+COMPILE_DIRS = [ROOT / "services/api", ROOT / "services/render_router", ROOT / "services/agent"]
+ALERTS = ROOT / "data/qa/alerts.jsonl"
 WEB = ROOT / "apps/web"
 
 
@@ -131,6 +135,30 @@ def _last_restart() -> float:
     return max(t, _ts(_marker().get("up_at")))
 
 
+def compile_gate() -> list[str]:
+    """COMPILE_DIRS 下全部 .py 用 compile() 过一遍（不写 __pycache__）；返回编译不过的“文件:行 原因”"""
+    bad = []
+    for d in COMPILE_DIRS:
+        for f in sorted(d.rglob("*.py")):
+            if any(x in f.parts for x in ("__pycache__", "_quarantine", ".venv", "node_modules")):
+                continue
+            try:
+                compile(f.read_bytes(), str(f), "exec")
+            except (SyntaxError, ValueError) as e:
+                rel = f.relative_to(ROOT) if f.is_relative_to(ROOT) else f
+                bad.append(f"{rel}:{getattr(e, 'lineno', '?')} {getattr(e, 'msg', e)}"[:200])
+    return bad
+
+
+def _compile_alert(bad: list[str]) -> None:
+    """开工单：data/qa/alerts.jsonl（同一组错误只记一次）"""
+    key = "|".join(bad)[:400]
+    if any(r.get("id") == "API-COMPILE" and r.get("key") == key for r in RQ._lines(ALERTS)):
+        return
+    RQ._append(ALERTS, {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "id": "API-COMPILE", "key": key, "owner_loop": "UIRSI", "severity": "P1",
+                        "title": f":8800 重启前编译不过 {len(bad)} 个文件，已暂缓重启（API 继续跑旧代码）", "files": bad[:10]})
+
+
 def tick(dry: bool = False) -> dict:
     now = time.time()
     act: dict = {"at": time.strftime("%Y-%m-%dT%H:%M:%S")}
@@ -157,6 +185,13 @@ def tick(dry: bool = False) -> dict:
     b = busy()
     if b is None or b > 0:
         act["skip"] = "读不到 /api/jobs，不重启" if b is None else f"/api/jobs 还有 {b} 个在排 / 在跑，等空闲"
+        return act
+    bad = compile_gate()
+    if bad:
+        act["skip"] = f"编译不过 {len(bad)} 个文件，不重启（API 继续跑旧代码，已开工单 API-COMPILE）：" + "；".join(bad[:3])
+        act["compile_fail"] = bad
+        if not dry:
+            _compile_alert(bad)
         return act
     act["would_restart"] = [r.get("id") for r in todo]
     if dry:

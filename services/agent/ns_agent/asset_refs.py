@@ -521,6 +521,24 @@ def _person_box(im, x0: int, x1: int):
     xs = np.where(mask.any(axis=0))[0]
     if len(ys) == 0:
         return (x0, 0, x1, im.height)
+    H, W = mask.shape
+    if len(xs) and (xs[-1] - xs[0] + 1) >= 0.97 * W or (ys[-1] - ys[0] + 1) >= 0.99 * H:
+        # IMGFIX 11-02：浅灰底 / 栏间竖线 / 邻栏发梢让“任何非白像素”的外框撑满整栏（第二季 lin_wan_lookD_s101 手部裁切裁成了裙子）
+        # → 改用灰阶 < 225 + 列占比 ≥3% 的最宽连续列段，再在该段里按行占比 ≥1% 取上下界
+        m = a < 225
+        on = list(m.mean(0) > 0.03) + [False]
+        runs, st = [], None
+        for x, v in enumerate(on):
+            if v and st is None:
+                st = x
+            elif not v and st is not None:
+                runs.append((st, x))
+                st = None
+        if runs:
+            c0, c1 = max(runs, key=lambda r: r[1] - r[0])
+            rows = np.where(m[:, c0:c1].mean(1) > 0.01)[0]
+            if len(rows):
+                return (x0 + int(c0), int(rows[0]), x0 + int(c1), int(rows[-1]) + 1)
     return (x0 + int(xs[0]), int(ys[0]), x0 + int(xs[-1]) + 1, int(ys[-1]) + 1)
 
 
@@ -671,11 +689,29 @@ def scene_dir(scene_id: str) -> tuple[str | None, str]:
     return scene_id, ""
 
 
+def registered_scene_ref(scene_id: str) -> str | None:
+    """config/scene_aliases.json 里登记的底图（ref + ref_sha256）；文件缺或 sha 不符 → 抛错，不静默换图"""
+    try:
+        sc = (json.loads(SCENE_ALIASES.read_text(encoding="utf-8")).get("scenes") or {}).get(scene_id) or {}
+    except (OSError, ValueError) as e:
+        raise ValueError(f"{SCENE_ALIASES} 读不出来或不是 JSON：{e}（失败关闭，不静默换成目录里最新一张）") from e
+    ref = sc.get("ref")
+    if not ref:
+        return None
+    f = ROOT / ref
+    if not f.is_file() or hashlib.sha256(f.read_bytes()).hexdigest() != sc.get("ref_sha256"):
+        raise ValueError(f"场景 {scene_id} 登记底图 {ref} 缺失或 sha 与登记不符")
+    return ref
+
+
 def scene_ref(scene_id: str | None) -> str | None:
     """场景参考底图：assets/scenes/<目录>/ 下最新的一张（不进回收站目录）"""
     if not scene_id:
         return None
     sid, _ = scene_dir(scene_id)
+    reg = registered_scene_ref(scene_id)
+    if reg:                                                      # 登记了底图就只用登记的（IMGMASTER：登记 = 槽位送入）
+        return reg
     d = SCENES / sid if sid else None
     if d and d.is_dir():
         fs = sorted((p for p in d.rglob("*") if p.suffix.lower() in IMG_EXT and not {"trash", "_trash", "rejected"} & set(p.parts)),
@@ -1221,7 +1257,7 @@ def _apply_sheet_gaps(project: str, slots: list) -> None:
         s.line = s.line.rstrip("。") + add + "。"
 
 
-def plan_slots(sr: ShotRefs, model: str = "qwen_image_2.1", capacity: int | None = None) -> SlotPlan:
+def plan_slots(sr: ShotRefs, model: str = "qwen_image_2.1", capacity: int | None = None, scene_protected: bool = False) -> SlotPlan:
     """按模型槽位排参考图（I9）。规则：脸不进参考板；一块板只放同一角色、最多一张带脸的图（设定图）；
     超出时先合并同角色低优先级项为参考板，仍超出才丢（场景 → 第二人单品 → 第二人设定图），丢弃项记 dropped（走文字）"""
     N = capacity or model_slots(model)
@@ -1241,7 +1277,7 @@ def plan_slots(sr: ShotRefs, model: str = "qwen_image_2.1", capacity: int | None
         return sum(r.has_face for r in a + b) <= 1 and len(a) + len(b) <= max_tiles
 
     while len(groups) > N:
-        sc = [k for k, gr in enumerate(groups) if gr[0].role == "scene"]
+        sc = [k for k, gr in enumerate(groups) if gr[0].role == "scene"] if not scene_protected else []   # IMGMASTER：场景不让位
         if sc:                                                   # 优先级最低：场景先让位（走文字 + 【场景】段）
             for r in groups[sc[-1]]:
                 dropped.append({"file": r.file, "label": r.label, "character": None, "role": "scene",
@@ -1262,7 +1298,8 @@ def plan_slots(sr: ShotRefs, model: str = "qwen_image_2.1", capacity: int | None
             continue
         # 合并不了 → 丢最低优先级（脸和主体角色永不丢）
         cand = [k for k, gr in enumerate(groups) if not any(r.role == "face" for r in gr)
-                and not any(r.character == sr.primary and r.role != "scene" for r in gr)]
+                and (scene_protected and not any(r.role == "scene" for r in gr)
+                     or not any(r.character == sr.primary and r.role != "scene" for r in gr))]
         if not cand:
             break
         k = max(cand, key=lambda k: min(r.prio for r in groups[k]))
@@ -1352,6 +1389,51 @@ def _apply_single_turn(plan: SlotPlan, line: str) -> None:
     # 放在提示词最前面（参考说明之前）：验收时放在身份脸句之后 ep01-S1 仍正对镜头（data/ab/imgfix ACC s20261201），
     # 放最前面 S1 / S2 各 2 seed 都转开（T3）。仍算参考说明段的一部分（prompt_prefix），正文切分不变
     plan.prompt_prefix = line + plan.prompt_prefix
+
+
+SCENE_SLOT_PRIO = 5.0      # IMGMASTER：身份脸（prio < 5）> 场景局部底图（5）> 本场造型（>5）> 其它；场景槽不再被挤掉
+
+
+def scene_look_refs(per_shot: list[ShotRefs]) -> dict[str, list[Ref]]:
+    """本场造型单品板的来源：同一场所有镜头里每个角色出现过的非脸、非场景参考（按文件去重、按 prio 排）。
+    整场共用这一份 → 同一角色同一造型在各镜得到同一块板（同文件集 → make_board 同哈希同文件）。设定图只取全场最常用的一种裁法"""
+    out: dict[str, list[Ref]] = {}
+    sheet_count: dict[tuple, int] = {}
+    for sr in per_shot:
+        for r in sr.refs:
+            if r.role == "sheet" and r.character:
+                sheet_count[(r.character, r.file)] = sheet_count.get((r.character, r.file), 0) + 1
+    best = {}
+    for (ch, f), n in sheet_count.items():
+        if ch not in best or n > best[ch][1] or (n == best[ch][1] and f < best[ch][0]):
+            best[ch] = (f, n)
+    seen: set = set()
+    for sr in sorted(per_shot, key=lambda x: x.shot_id):
+        for r in sorted(sr.refs, key=lambda r: r.prio):
+            if r.role in ("face", "scene") or not r.character or not r.file or (r.character, r.file) in seen:
+                continue
+            if r.role == "sheet" and best.get(r.character, (None,))[0] != r.file:
+                continue
+            seen.add((r.character, r.file))
+            out.setdefault(r.character, []).append(r)
+    return out
+
+
+def plan_slots_v2(sr: ShotRefs, model: str = "qwen_image_2.1", capacity: int | None = None,
+                  scene_looks: dict[str, list[Ref]] | None = None) -> SlotPlan:
+    """IMGMASTER 统一参考图槽分配（单一函数）：身份脸 > 场景局部底图 > 本场造型单品板 > 其它。
+    scene_looks 给定时，本镜各角色的造型参考一律取整场同一份（scene_look_refs），不再按镜各自拼"""
+    import dataclasses
+    faces = [r for r in sr.refs if r.role == "face"]
+    scene = [dataclasses.replace(r, prio=SCENE_SLOT_PRIO) for r in sr.refs if r.role == "scene"]
+    rest = [r for r in sr.refs if r.role not in ("face", "scene")]
+    if scene_looks is not None:
+        names = [c.get("character") for c in sr.characters or [] if c.get("presence", "在画") == "在画" or c.get("face_described")]
+        base = max([r.prio for r in rest] + [SCENE_SLOT_PRIO + 1])
+        rest = [dataclasses.replace(r, prio=min(max(r.prio, SCENE_SLOT_PRIO + 1), base))
+                for ch in names for r in scene_looks.get(ch, [])]
+    sr2 = dataclasses.replace(sr, refs=sorted(faces + scene + rest, key=lambda r: r.prio))
+    return plan_slots(sr2, model, capacity, scene_protected=True)
 
 
 def plan_for(project: str, ep, shot, model: str = "qwen_image_2.1", **kw) -> tuple[ShotRefs, SlotPlan]:

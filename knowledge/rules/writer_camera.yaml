@@ -195,6 +195,7 @@ rules:
   - id: K-REN-101
     domain: render
     link: P4-P6
+    check: [tests/test_image_framing.py]   # IMGMASTER 11-02 补引用（总调度定）
     title: 出图提示词按景别只写看得见的造型部件，首句先写景别构图
     when: 首帧 / 尾帧 / 分镜预览出图（Qwen-Image 2.1）
     then: 特写/大特写/近景/中近景 去掉下装、腿、鞋、脚（含角色锁里的“长腿”、鞋跟 / 脚趾 / 漆皮材质条目）；中景去掉鞋、脚；中全景及更远保留全套；提示词首句“<景别>构图”

@@ -856,6 +856,7 @@ def test_hair_primary_switch(enf):
 
     def v():
         return {"checks": {"hair_mismatch": {"s": "defect", "e": "发色偏灰"}}, "defects": ["hair_mismatch"], "unsure": []}
+    enf["gate"]["hair_primary"] = False
     x = v()
     assert VQ.hair_primary(pf(), x) is False and x["defects"] == ["hair_mismatch"]   # 关着
     enf["gate"]["hair_primary"] = True
@@ -864,3 +865,45 @@ def test_hair_primary_switch(enf):
     for p_ in (pf("fail"), pf("pass", "vlm_only")):
         x = v()
         assert VQ.hair_primary(p_, x) is False and x["defects"] == ["hair_mismatch"]
+
+
+def test_q1x_same_scene_identity(monkeypatch, enf):
+    """Q1x（总调度批准）：同场其他镜头同一角色取最像 3 张平均——换人 < 0.50 不过；同一人过；复核带只记录；同场没可比 = na"""
+    import numpy as np
+    from ns_agent.vqa import continuity as CT
+    rng = np.random.default_rng(0)
+    base = rng.normal(size=512)
+    def near(x):                                  # 和 base 余弦约 x
+        o = rng.normal(size=512)
+        o -= o.dot(base) / base.dot(base) * base
+        return list(x * base / np.linalg.norm(base) + np.sqrt(1 - x * x) * o / np.linalg.norm(o))
+    peers = {"p1": {"lin_wan": {"emb": list(base), "h": 0.2}}, "p2": {"lin_wan": {"emb": near(0.9), "h": 0.2}}}
+    store = {"me": None, **{f"f_{k}": v for k, v in peers.items()}}
+    monkeypatch.setattr(VQ, "same_scene_peers", lambda sid: list(peers))
+    monkeypatch.setattr(CT, "current_first", lambda o: f"f_{o}")
+    monkeypatch.setattr(VQ, "_emb_of", lambda f: store.get(f) or {})
+    def run(x):
+        store["me"] = {"lin_wan": {"emb": near(x), "h": 0.2}}
+        pf = {"ok": True, "blocking": [], "items": []}
+        return VQ.q1x("ep02-S10", "image", "me", pf), pf
+    it, pf = run(0.25)
+    assert it["status"] == "fail" and pf["ok"] is False and "Q1x" in pf["blocking"]
+    it, pf = run(0.85)
+    assert it["status"] == "pass" and pf["ok"] is True
+    it, pf = run(0.58)
+    assert it["status"] == "pass" and it["evidence"]["band"]          # 复核带：只记录不拦
+    monkeypatch.setattr(VQ, "same_scene_peers", lambda sid: [])
+    assert run(0.25)[0]["status"] == "na"
+
+
+def test_save_q1_emb_writes_atomically(monkeypatch, tmp_path):
+    """Q1x：save_q1_emb 对真实图片文件必须能写出 data/identity/emb/<sha16>.json（11-02 14:xx 漏 import json / os，测试因图不存在提前返回没走到）"""
+    from PIL import Image
+    from ns_agent.gen_contract import postflight as PO
+    img = tmp_path / "x.png"
+    Image.new("RGB", (32, 32), (9, 9, 9)).save(img)
+    monkeypatch.setattr(PO, "EMB_DIR", tmp_path / "emb")
+    PO.save_q1_emb(img, {"lin_wan": ([0.1, 0.2], 0.2), "gu_chen": (None, 0.1)})
+    files = list((tmp_path / "emb").glob("*.json"))
+    assert len(files) == 1 and not list((tmp_path / "emb").glob("*.tmp"))
+    assert json.loads(files[0].read_text(encoding="utf-8")) == {"lin_wan": {"emb": [0.1, 0.2], "h": 0.2}}   # 没特征的角色不写

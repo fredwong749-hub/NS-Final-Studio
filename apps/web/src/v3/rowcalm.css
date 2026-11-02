@@ -1,0 +1,25 @@
+/* UIFIX-S 第 2 轮：单集页每镜一行收静。状态一律“圆点 + 灰字”；同一镜行上只显示一条最重要的状态（其余在悬停里）；
+   行上只留一个主按钮，用中性色；蓝色只给“当前选中”。全站只用 灰 / 琥珀 / 绿 三色圆点。 */
+:root .v3-l1 .v3-status, :root .v3-l1 .v3-status.click { background: transparent; border-color: transparent; color: var(--c-text-2); padding-inline: 4px; }
+:root .v3-l1 .v3-status.click:hover, :root .v3-l1 .v3-status.click.open { border-color: rgba(127, 127, 127, .45); }
+:root .v3-l1 .v3-status .v3-dot.d-blue { background: var(--c-text-3, #8a8a8a); box-shadow: none; }
+:root .v3-l1 .v3-status .v3-dot.d-red { background: var(--c-warn); }
+:root .v3-l1 .v3-status-t { color: var(--c-text-2); }
+/* 格子上的“过期 / 已定稿 / 坏图 / 作废”：深色半透明底 + 圆点 + 白灰字，不再整块着色 */
+:root .v3-frame .v3-ftag, :root .v3-vid .v3-ftag, :root .ds-tilebar .v3-ftag { background: color-mix(in srgb, var(--c-media-bg) 72%, transparent); color: var(--c-on-media); font-weight: 400; }
+:root .v3-ftag::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--c-text-3, #8a8a8a); align-self: center; margin-right: 4px; display: inline-block; flex: none; }
+:root .v3-ftag.stale::before, :root .v3-ftag.bad::before { background: var(--c-warn); }
+:root .v3-ftag.locked::before { background: var(--c-ok); }
+:root .ds-tilebar .v3-ftag.stale::before { display: inline-block; }
+/* 行右侧：只留一个主按钮（中性色）；“不要”收成灰字 */
+:root .v3-act .v3-btn.primary:not(:disabled), :root .v3-act .vd-yes, :root .v3-cand-use { background: rgba(127, 127, 127, .2); border: 1px solid rgba(127, 127, 127, .55); color: var(--c-text, #eee); font-weight: 500; }
+:root .v3-act .v3-btn.primary:hover:not(:disabled):not(.x), :root .v3-act .vd-yes:hover, :root .v3-cand-use:hover { background: rgba(127, 127, 127, .32); filter: none; }
+:root .v3-act .vd-no { border-color: transparent; background: transparent; color: var(--c-text-2, #aaa); font-weight: 400; }
+:root .v3-act .vd-no:hover { background: rgba(127, 127, 127, .15); }
+
+/* ds.css 窄屏规则给 .stale 整块橙底，这里同样压成“深底 + 橙点” */
+:root .ds-tilebar .v3-ftag.stale, :root .v3-frame .v3-ftag.stale, :root .v3-vid .v3-ftag.stale, :root .v3-frame .v3-ftag.locked, :root .v3-vid .v3-ftag.locked, :root .ds-tilebar .v3-ftag.locked { background: color-mix(in srgb, var(--c-media-bg) 72%, transparent) !important; color: var(--c-on-media) !important; }
+/* 第 3 轮：格子角标也并进那一条状态——格子上只留一个小圆点，“过期 / 已定稿 / 坏图”写在悬停里（title） */
+:root .v3-ftag, :root .ds-tilebar .v3-ftag, :root .v3-frame .v3-ftag, :root .v3-vid .v3-ftag { font-size: 0 !important; line-height: 0; width: 16px; height: 16px; min-width: 0; padding: 0 !important; display: inline-flex !important; align-items: center; justify-content: center; border-radius: 50%; }
+:root .v3-ftag > span { display: none !important; }
+:root .v3-ftag::before, :root .ds-tilebar .v3-ftag::before { display: inline-block !important; width: 8px; height: 8px; margin: 0 !important; }

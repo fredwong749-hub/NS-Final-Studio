@@ -161,3 +161,27 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-F15
+    domain: ops
+    link: [P5-P6]
+    title: 运行期状态（程序自动改写的）只放 data/state/，读写只走 tools/factory/state_paths.py；兼容期读旧位置必留痕（data/state/legacy_reads.jsonl），写只落新位置（原子写）；读不到 raise
+    when: 新增 / 读写运行期状态文件（partition、override、runs、run 指针等）
+    then: read_state(name) 先新后旧、读旧写事件 {at,name,old_path,caller,host}；write_state 原子写新位置；新状态名先登记 LEGACY / 状态表；sv-11 起删旧读（SENTINEL state_legacy_read 24 h = 0 为前提）
+    check: tests/test_factory.py::test_state_paths_compat_read_and_atomic_write
+    evidence:
+      - {src: docs/master/ARCH_ROADMAP.md, note: "§10：config/ 里混着运行期改写的 partition / override / runs.json，冻结锁不得不对它们开豁免"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-F16
+    domain: ops
+    link: [P5-P6]
+    title: 派单前 refs 校验只核身份脸 + sha（不比整张清单）：身份脸必须在本镜期望里、每个已登记文件 sha 与笔记本一致、没登记的非身份图只记不拦；期望表随参考板变化自动重建（sync.py auto，loop 每拍调）
+    when: 改 refs_guard / inbox.check_refs / 自修阶梯变体 / 参考板生成
+    then: 变体（只挂脸 / 两张脸 + 设定图 / 参考板 / 同脸双槽）合法改 refs 组合不被拦；身份脸用错照拦；sync.py auto 内容变了才推
+    check: tests/test_factory.py::test_check_refs_wrong_face_path_blocks, tests/test_factory.py::test_check_refs_per_run_tables
+    evidence:
+      - {src: data/producer/log.jsonl, note: "11-02 11:50–12:21：gpu33 4 次、gpu36 1 次 refs_mismatch，全是自修阶梯变体（只挂两张脸 / 挂设定图）被整张清单比对拦下"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

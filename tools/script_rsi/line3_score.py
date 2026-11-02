@@ -107,7 +107,7 @@ def score_episode(run_dir: Path, ep: int, lenses: set[str]) -> dict | None:
              "structure": round(WEIGHTS["structure"] * sum(struct) / len(struct), 2)}
     NC = _load("narrative_code", "tools/script_rsi/narrative_code.py")       # 叙事质量 N01–N07：剧本分 = 代码判定 70% + 叙事 30%（N05 整季判，在 main 里合）
     nar = NC.episode_checks(shots, blocks)
-    return {"episode": ep, "parts": parts, "code_met": met, "shots": len(shots), "seconds": total,
+    return {"episode": ep, "parts": parts, "code_met": met, "base_sha": __import__("hashlib").sha256(chunk.encode("utf-8")).hexdigest()[:16], "shots": len(shots), "seconds": total,
             "narrative": {k: {"ok": v["ok"], "value": v["value"], "detail": v["detail"][:160]} for k, v in nar.items()},
             "shot_block_bad": [s.index for s, ok in zip(shots, sb_ok) if not ok],
             "unshootable": [s.index for s, ok in zip(shots, sh_ok) if not ok], "validate_blocking": v.get("blocking"),
@@ -118,15 +118,39 @@ NARR_KEYS = ["N01", "N02", "N03", "N04", "N05", "N06", "N07"]
 SCRIPT_MIX = {"code": 0.7, "narrative": 0.3}     # 总调度 11-02：叙事 7 条计入总分（代码判定 70%、叙事 30%）
 
 
-def apply_narrative(eps: list[dict], n05_repeats: list[int]) -> None:
+def apply_narrative(eps: list[dict], n05_repeats: list[int], judge: dict | None = None) -> None:
     """把叙事 7 条合进每集剧本分：N05 按整季判（本集落在相邻 3 集重复里 = 不过），其余按本集"""
     for e in eps:
         ok = {k: bool(e["narrative"][k]["ok"]) for k in NARR_KEYS if k != "N05"}
         ok["N05"] = e["episode"] not in n05_repeats
         e["narrative_pass"] = sum(ok.values())
         e["narrative_fail"] = [k for k in NARR_KEYS if not ok[k]]
-        e["parts"]["script"] = round(WEIGHTS["script"] * (SCRIPT_MIX["code"] * e["code_met"] / 27
+        j = (judge or {}).get((e["episode"], e.get("base_sha")))
+        if j is not None:      # 总调度 11-02：有正式判断分（3 个独立评审、同一稿 sha）→ 代码 27 条换成新尺子 50 分制（已含代码条目）
+            e["judge50"] = j
+            base = j / 50
+        else:
+            base = e["code_met"] / 27
+        e["parts"]["script"] = round(WEIGHTS["script"] * (SCRIPT_MIX["code"] * base
                                                           + SCRIPT_MIX["narrative"] * e["narrative_pass"] / len(NARR_KEYS)), 2)
+
+
+def official_judge(run: str) -> dict:
+    """scores.jsonl 里 line=script_judge、official=true 的记录 → {(集, 稿 sha): 50 分制均值}（同一集同一 sha 取最新一条）"""
+    out = {}
+    if not SCORES.exists():
+        return out
+    for n, ln in enumerate(SCORES.read_text(encoding="utf-8").splitlines(), 1):
+        if not ln.strip():
+            continue
+        try:
+            d = json.loads(ln)
+        except ValueError as ex:          # 坏行不吞：报出来，判断分照常从其余行取
+            print(f"[line3_score] scores.jsonl 第 {n} 行不是 JSON（{ex}），跳过", file=sys.stderr)
+            continue
+        if d.get("line") == "script_judge" and d.get("official") and d.get("run") == run and d.get("base_sha"):
+            out[(int(d["episode"]), d["base_sha"])] = float(d["score50"])
+    return out
 
 
 def _tmp_write(run_dir: Path, ep: int, text: str) -> str:
@@ -169,7 +193,7 @@ def main(argv=None) -> int:
         sv = f"unknown（{e!r}）"[:80]
     NC = _load("narrative_code", "tools/script_rsi/narrative_code.py")
     n05 = NC.season_endings({e["episode"]: e["narrative"]["N05"]["value"] for e in eps})
-    apply_narrative(eps, n05["repeats_at"])
+    apply_narrative(eps, n05["repeats_at"], official_judge(run_dir.name))
     avg = {k: round(sum(e["parts"][k] for e in eps) / len(eps), 2) if eps else 0.0 for k in keys}
     avg["automation"] = auto
     score = round(sum(avg.values()), 2)

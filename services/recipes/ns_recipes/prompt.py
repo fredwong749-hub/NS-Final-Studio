@@ -171,6 +171,17 @@ def _camera_norm():
 _CN_MOD = None
 
 
+def _shot_music_off() -> bool:
+    """config/post/director.json shot_music_off（DIRECTOR K-EDT-820）；读不到按开（不配镜头级音乐）"""
+    import json as _json
+    from pathlib import Path as _P
+    try:
+        return bool(_json.loads((_P(__file__).resolve().parents[3] / "config/post/director.json").read_text(encoding="utf-8"))
+                    .get("shot_music_off", True))
+    except (OSError, ValueError):   # arch-ok: 读不到按“关镜头级配乐”处理（K-EDT-820 默认值），不是失败开放
+        return True
+
+
 def build_base(spec: ShotSpec, recipe: dict, mode: str, frames: int, attempt: int = 1) -> dict:
     """I2VA / FL2VA 提示词。→ {text, fields, notes}"""
     if not spec.h3.text:
@@ -211,6 +222,14 @@ def build_base(spec: ShotSpec, recipe: dict, mode: str, frames: int, attempt: in
         m = re.search(r"\bAt (?:\d{1,2}:\d{2}|the \d)", body)
         body = (body[:m.start()] + cue.strip() + " " + body[m.start():]) if m else (body.rstrip() + " " + cue.strip())
         notes.append("插入最低动作提示句（prompt.min_motion_cue）")
+    # K-PRM-310（VIDLAB 11-02，vl_r1 ACT2）：每个分拍句末补一个物理微表情分句（眉 / 眨眼 / 呼吸 / 嘴角），只对近景单人镜，开关默认关
+    pr = recipe.get("prompt") or {}
+    if pr.get("acting_micro_beats"):
+        from . import acting as _ACT
+        if _ACT.in_scope(pr.get("acting_scope") or "closeup_single", getattr(spec.camera, "size", None), len(spec.visible)):
+            body, mb = _ACT.micro_beats(body)
+            if mb:
+                notes.append("插入分拍微表情（prompt.acting_micro_beats，K-PRM-310）：" + " | ".join(mb))
     if attempt >= 2 and recipe.get("prompt", {}).get("retry_anchor_prefix"):
         a = anchor_sentence(spec)
         if a:
@@ -220,6 +239,9 @@ def build_base(spec: ShotSpec, recipe: dict, mode: str, frames: int, attempt: in
     if not f.get("overall_soundscape") and sound:
         notes.append("overall_soundscape 取自剧本【H3 audio】")
     music = f.get("non_diegetic_music") or "N/A"
+    if music != "N/A" and _shot_music_off():   # K-EDT-820：镜头级不配乐（集级 BGM 剪辑锁定后再铺），Pika 只出环境声 / 对白
+        notes.append(f"K-EDT-820 镜头级配乐关闭：non_diegetic_music {music[:40]!r} → N/A")
+        music = "N/A"
     text = (f"{line}\n\nintegrated_multimodal_description: {body}\n\n"
             f"overall_soundscape: {sound}\n\nnon_diegetic_music: {music}")
     return {"text": text, "fields": {"integrated_multimodal_description": body, "overall_soundscape": sound,

@@ -590,6 +590,89 @@ def _q1a_alert(image: str, why: str) -> None:
                             "why": why[:200]}, ensure_ascii=False) + chr(10))
 
 
+def _emb_of(file) -> dict:
+    import hashlib
+    p = Path(str(file))
+    if not p.exists():
+        return {}
+    e = ROOT / "data" / "identity" / "emb" / (hashlib.sha256(p.read_bytes()).hexdigest()[:16] + ".json")
+    if not e.exists():
+        return {}
+    return json.loads(e.read_text(encoding="utf-8"))
+
+
+def same_scene_peers(sid: str) -> list[str]:
+    """同一场（shot_rec.scene_id）的其他镜头"""
+    from . import continuity as CT
+    sc = (CT.shot_rec(sid) or {}).get("scene_id")
+    if not sc:
+        return []
+    out = []
+    for tj in sorted((ROOT / "data" / "renders").glob("ep*/S*/takes.json")):
+        o = f"{tj.parent.parent.name}-{tj.parent.name}"
+        if o != sid and (CT.shot_rec(o) or {}).get("scene_id") == sc:
+            out.append(o)
+    return out
+
+
+def q1x(sid: str, stage: str, image, pf: dict) -> dict | None:
+    """Q1x 同场跨镜比对（总调度批准设计，GATE_CALIBRATION §20）：本图每个在画角色那张脸，对同场其他镜头当前首帧里同一角色的脸，
+    取最像的 3 张余弦平均 → ≥ pass 线过；复核下限–pass 线记复核带（先只记录，不拦）；< 复核下限不过（“和同场 Sx 不像同一人”）；
+    同场没有可比的当前首帧 = na。小脸（脸高 < 0.10）两条线都下移 0.10。阈值 config/gen_contract.json Q1x_scene。→ 加进 pf 的项"""
+    if stage != "image":
+        return None
+    from ns_agent.gen_contract import cfg as GC
+    from . import continuity as CT
+    import numpy as np
+    t = (GC().get("image_thresholds") or {}).get("Q1x_scene") or {}
+    if not t.get("enabled"):
+        return None
+    mine = _emb_of(image)
+    peers = {}
+    for o in same_scene_peers(sid):
+        f = CT.current_first(o)
+        if f:
+            e = _emb_of(f)
+            if e:
+                peers[o] = e
+    item = {"id": "Q1x", "title": "同场跨镜身份一致（对同场其他镜头当前首帧）", "status": "na", "detail": "", "evidence": {}}
+    if not mine or not peers:
+        item["detail"] = "同场没有可比的当前首帧" if mine else "本图没有角色脸特征"
+    else:
+        bad, band, got = [], [], {}
+        for cid, m in mine.items():
+            v = np.asarray(m["emb"], np.float32)
+            v /= np.linalg.norm(v) + 1e-9
+            sims = []
+            for o, e in peers.items():
+                if cid in e:
+                    w = np.asarray(e[cid]["emb"], np.float32)
+                    sims.append((float(v @ (w / (np.linalg.norm(w) + 1e-9))), o))
+            if not sims:
+                continue
+            sims.sort(reverse=True)
+            top = sims[:int(t.get("k", 3))]
+            score = sum(x for x, _ in top) / len(top)
+            small = (m.get("h") or 0) < float(t.get("small_face", 0.10))
+            need, lo = float(t.get("pass", 0.60)) - (0.10 if small else 0), float(t.get("review_min", 0.50)) - (0.10 if small else 0)
+            got[cid] = {"score": round(score, 3), "vs": [o for _, o in top], "need": need, "lo": lo}
+            if score < lo:
+                bad.append(f"{cid} 和同场 {'、'.join(o for _, o in top)} 不像同一人（{score:.3f} < {lo}）")
+            elif score < need:
+                band.append(f"{cid} {score:.3f} 在复核带 {lo}–{need}")
+        if got:
+            item.update(status="fail" if bad else "pass", detail="；".join(bad + band) or "同场一致（" + "、".join(f"{c} {g['score']}" for c, g in got.items()) + "）",
+                        evidence={"per_person": got, "band": band})
+        else:
+            item["detail"] = "同场其他镜头里没有同一角色的脸"
+    pf["items"] = [i for i in pf.get("items") or [] if i.get("id") != "Q1x"] + [item]
+    if item["status"] == "fail":
+        pf["ok"] = False
+        pf["blocking"] = sorted(set(pf.get("blocking") or []) | {"Q1x"})
+        pf.setdefault("reasons", []).append("Q1x " + item["detail"])
+    return item
+
+
 def q1_needs_vlm(pf: dict) -> bool:
     """Q1 不过时，看图结果还能不能把它救回来（决定要不要排队看图，K-OPS-V15）：
     单脸、分数落在转角放宽最低档以上（q1_yaw_relax 的候选），或者只因“认不出的脸”且 cast 有背影 / 局部人物（recheck_strangers 的候选）"""

@@ -9,6 +9,7 @@ import { laneBusyBy } from "./edit/lanes";
 import { episodeMissing } from "./StoryboardDetails.helpers";
 import { SLOT_NAME, lockAndNext, submitFrame, submitVideo } from "./edit/actions";
 import { AUTO_LONG, staleLong } from "./words";
+import { inSpotQueue, machineSignedN } from "./ownerQueue"; // UIRSI2 L-116：机签通过的镜不再提示人工点选
 
 export type Dot = "gray" | "blue" | "yellow" | "green" | "red";
 export const DOT_LABEL: Record<Dot, string> = { gray: "未出", blue: "生成中", yellow: "待你审", green: "已定", red: "出错" }; // UXF1：红 = 失败 / 坏图 / 链不完整
@@ -240,16 +241,26 @@ export function shotStatus(s: ShotSummary, st: Studio, sop?: SopShot): ShotStatu
   if (fFirst === "bad") return make("bad_first", [{ text: badOf(s, d, "image") ?? "坏图" }, ...why], { title: `首帧 #${s.first_frame_take ?? "?"} 是${badOf(s, d, "image")}。直接重出首帧` });
   if (fFirst === "stale") return make("stale_first", why, { title: `首帧已过期：${why1("image") || "上游改过"}。直接重出首帧（要先改再出：⋯ → 进精修）` });
   if (fFirst === "auto") return make("auto_first", why, { text: `首帧 #${s.first_frame_take ?? "?"} 是${AUTO_LONG}` });
-  if (fFirst !== "locked") {
+  // UIRSI2 L-116：当前首帧 / 尾帧机签通过（契约 + Q9 本地看图过、机签 mode=auto、不在待抽检里，口径 /api/owner/queue machine_signed）
+  // → 灰字“机签通过 vN”，当作已通过往下走；只有抽检样本进“待你看”队列。手动“用这张 / 不要”仍在（不提示）
+  const mFirst = s.first_frame_take != null && machineSignedN(s.id, "image") === s.first_frame_take;
+  const mLast = s.last_frame_take != null && machineSignedN(s.id, "last") === s.last_frame_take;
+  if (fFirst !== "locked" && mFirst && !s.last_frame_target)
+    return make("machine_first", why, { text: `机签通过 v${s.first_frame_take}` });
+  if (fFirst !== "locked" && !mFirst) {
     const lk = lockedOf(s, d, "image");
     if (lk != null && s.first_frame_take != null && lk !== s.first_frame_take)
       return make("review_first", why, { text: `当前看的是 #${s.first_frame_take}，定稿是 #${lk}：满意就改定这一版` });
+    if (inSpotQueue(s.id, "image", s.first_frame_take)) return make("review_first", why, { text: `机签通过 v${s.first_frame_take} · 抽检样本，在“待你看”里` });
     return make("review_first", why);
   }
   if (fLast === "bad") return make("bad_last", [{ text: badOf(s, d, "last") ?? "坏图" }, ...why], { title: `尾帧是${badOf(s, d, "last")}。由定稿首帧重出尾帧` });
   if (fLast === "stale") return make("stale_last", why, { title: `尾帧已过期：${why1("last") || "首帧定稿换了版本"}。由定稿首帧直接重出尾帧` });
   if (fLast === "auto") return make("auto_last", why, { text: `尾帧 #${s.last_frame_take ?? "?"} 是${AUTO_LONG}` });
-  if (fLast !== "locked") return make(s.last_frame_target ? "review_last" : "need_last", why);
+  if (fLast !== "locked" && mLast && !s.video) return make("machine_last", why, { text: `机签通过 v${s.last_frame_take}` });
+  if (fLast !== "locked" && !mLast && s.last_frame_target && inSpotQueue(s.id, "last", s.last_frame_take))
+    return make("review_last", why, { text: `机签通过 v${s.last_frame_take} · 抽检样本，在“待你看”里` });
+  if (fLast !== "locked" && !mLast) return make(s.last_frame_target ? "review_last" : "need_last", why);
   if (!s.video) return make("need_video", why);
   if (frameState(s, d, "video") === "stale") return make("stale_video", why, { title: `视频已过期：${why1("video") || "上游改过"}` });
   if (s.review.state === "passed") return make("done", []);
@@ -280,7 +291,7 @@ export type StatusKey =
   | "job_v1" | "job_old" | "failed_first" | "failed_last" | "failed_video" | "rejected"
   | "no_first" | "stale_first" | "review_first" | "stale_last" | "need_last" | "review_last"
   | "need_video" | "stale_video" | "review_video" | "done" | "broken_chain" | "bad_first" | "bad_last" | "review_video_watched"
-  | "auto_first" | "auto_last";
+  | "auto_first" | "auto_last" | "machine_first" | "machine_last";
 
 /** 状态 ↔ 一句话 ↔ 主按钮 的唯一对照表（v3.1：状态写什么，主按钮就做什么；改对应关系只改这里） */
 export const STATUS_TABLE: Record<StatusKey, { dot: Dot; text: string; label: string; act: ActKind | null; title?: string }> = {
@@ -307,6 +318,9 @@ export const STATUS_TABLE: Record<StatusKey, { dot: Dot; text: string; label: st
   review_video: { dot: "yellow", text: "待你审视频", label: "看视频", act: "watch" },
   review_video_watched: { dot: "yellow", text: "视频看完了：用这版，或不要", label: "通过 ✓", act: "pass", title: "通过这版视频（不满意用 ⋯ → 打回）" },
   done: { dot: "green", text: "已定，无需操作", label: "看视频", act: "watch" },
+  // UIRSI2 L-116：机签通过（灰点 + 灰字，无主按钮——系统自动往下做；手动“用这张 / 不要”保留但不提示）
+  machine_first: { dot: "gray", text: "机签通过", label: "", act: null, title: "首帧机签通过并已设为当前（契约全过 + 本地看图 Q9 过）；系统自动出尾帧。要换：点首帧看候选，或 ⋯ → 进精修" },
+  machine_last: { dot: "gray", text: "机签通过", label: "", act: null, title: "尾帧机签通过并已设为当前；系统自动出视频。要换：⋯ → 进精修" },
 };
 
 /** 某阶段的定稿版本号：takes.json 顶层 locked:{stage:n}，或某个 take.locked（本机链优先，再看 gpu3 链） */

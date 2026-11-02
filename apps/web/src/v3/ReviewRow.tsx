@@ -6,7 +6,6 @@ import { FilmStrip } from "./pages/FilmOverview";
 import { filmOn } from "./uiStyle";
 import { storyFrame, useStoryImages } from "./storyImages";
 import { candidateFor, candLabel, epOf, passed, pickTake, rejectedFor, useCandidates } from "./candidates";
-import { MainTag } from "./StatusTags";
 import { HistoryBox } from "./HistoryBox";
 import { CandidateBox } from "./CandidateBox";
 import { Verdict, type VStage } from "./Verdict";
@@ -37,8 +36,16 @@ import { relFromUrl } from "../ds/editdel.api";
 import { TileBar, TileTop } from "../ds/TileBar";
 
 import { passBlock } from "./ReviewRow.helpers";
+import { useOwnerQueue } from "./ownerQueue"; // UIRSI2 L-116
+import { FbDot } from "./FeedbackLayer"; // UIRSI2 反馈模式：帧角标
 import { RegenButton } from "./RegenButton";
+import "./rowcalm.css"; // UIFIX-S 第 2 轮：行内状态收静
+import { TAG_WORD, tagsTitle } from "./StatusTags.helpers";
+import type { ShotStatusTags } from "./StatusTags.helpers";
 const short = (id: string) => id.split("-")[1];
+/** UIFIX-S：同一镜行上只显示一条状态（StatusLine）；原来并排的“看图没过 +1”这类彩色胶囊收进它的悬停提示 */
+const mainTip = (st: ShotStatusTags | null | undefined) => (st?.main ? `${TAG_WORD[st.main]}${st.tags.length > 1 ? `（共 ${new Set(st.tags.map((t) => t.kind)).size} 项）` : ""}${nl0}${tagsTitle(st)}` : undefined);
+const nl0 = String.fromCharCode(10);
 
 /** 一格右上角的状态牌：过期优先于定稿（v3.1 §5.1），两者不同时出现 */
 /** UIPIXEL：状态牌放进格子底栏（ds/TileBar），单行省略号 + title 看全文（以前按“·”分段换行，窄格里换成两行后压到“渲染中 / ✎ 改”） */
@@ -114,6 +121,7 @@ function Frame({ s, stage, st }: { s: ShotSummary; stage: "image" | "last"; st: 
     {big && <Lightbox src={big} onClose={() => setBig(null)} />}
     {box && cstage && <CandidateBox shot={s.id} stage={stage} data={cstage} start={cand?.n ?? rejected[rejected.length - 1]?.n} stale={s.stale_global?.[stage]} onClose={() => setBox(false)} />}
     <div className={`v3-frame${url ? "" : " empty"}${cand ? " cand" : ""}${fs === "stale" ? " stale" : ""}${fs === "bad" ? " bad" : ""}${fs === "orphan" ? " orphan" : ""}${tileFlash ? " live-flash" : ""}`} onClick={open} data-zoom-own title={url ? (cand ? `${label}候选：点开看全部候选、对比（悬停右上角放大镜看原图）` : `${label}：点开全屏对比（首帧 | 尾帧）`) : candLoading ? `正在读取${label}候选` : `还没有${label}`}>
+      <FbDot sid={s.id} kind={stage === "image" ? "first" : "last"} />
       {url ? <img key={url} className="live-img" src={thumb(url, 360) ?? url} alt={label} loading="lazy" decoding="async" draggable={false} data-zoom-label={`${short(s.id)} · ${label}${take != null ? ` #${take}` : ""}${cand ? " · 候选" : ""}`} /> : <span className="v3-frame-none">{candLoading ? "读取中…" : oldN ? `${label}未出（剧本已更新）` : `${label}未出`}</span>}
       <TileTop>
         {/* UIRSI r36：78px 窄格里“首帧候选”四个字会把右上角的 ↻ 挤到标签上 → 标签只写“首帧 #n”，“候选”写进底下的候选条（和“用这张”在一起） */}
@@ -249,6 +257,7 @@ function VideoTile({ s, st }: { s: ShotSummary; st: Studio }) {
       }}
       title={s.video ? "悬停预览，点击放大播放" : vPending ? `有 ${vNew} 版视频，还没设为当前：点进精修挑一版` : vOld ? `有 ${vOld} 版是剧本更新前出的旧视频，不作候选` : blk ? `还没有视频：${blk}` : "还没有视频"}
     >
+      <FbDot sid={s.id} kind="video" />
       {s.video ? (
         <>
           <video ref={ref} src={s.video} poster={s.first_frame ?? undefined} muted loop playsInline preload="metadata" />
@@ -348,6 +357,7 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
   const st = useStudio();
   const ui = useUi();
   useEdit(); // F2：v1 任务进度（状态点 / 一句话）随任务轮询刷新
+  useOwnerQueue(); // UIRSI2 L-116：“机签通过 vN”随待你看队列刷新
   const [open, setOpen] = useState<null | "first" | "h3">(null);
   const [full, setFull] = useState(false);
   const status0 = shotStatus(s, st, sop);
@@ -367,7 +377,12 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
   // UM-P0-01：现在待你看的是哪一格的哪一版
   const contractOk = (stage: "image" | "last", n: number | null) => n != null && cands?.[s.id]?.[stage]?.takes.find((x) => x.n === n)?.contract === "pass";
   const vtakeN = d?.takes?.active?.video ?? s.latest_take?.video ?? null;
-  const pend: { stage: VStage; n: number; auto?: boolean; accept?: () => Promise<unknown> } | null = cfirst && status0.key === "no_first"
+  // UIRSI2 L-116：机签通过的镜也保留“用这张 / 不要”（不删功能），但收成灰色小按钮、不提示（quiet）
+  const pend: { stage: VStage; n: number; auto?: boolean; quiet?: boolean; accept?: () => Promise<unknown> } | null = status.key === "machine_first" && s.first_frame_take != null
+    ? { stage: "first", n: s.first_frame_take, quiet: true }
+    : status.key === "machine_last" && s.last_frame_take != null
+      ? { stage: "last", n: s.last_frame_take, quiet: true }
+      : cfirst && status0.key === "no_first"
     ? { stage: "first", n: cfirst.n, accept: () => pickTake(s.id, "image", cfirst.n, null, () => void st.refreshAfter([s.id]), st.notify) }
     : (status.key === "review_first" || status.key === "auto_first") && s.first_frame_take != null
       ? { stage: "first", n: s.first_frame_take, auto: contractOk("image", s.first_frame_take) }
@@ -416,7 +431,7 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
           <FilmStrip
             H={filmH}
             thumbW={480}
-            kk={`EASTMAN 5219  ${short(s.id)}`}
+            kk={`EASTMAN 2383  ${short(s.id)}`}
             frames={[
               { key: "f", src: s.first_frame, ed: s.first_frame ? `首帧 · 定稿 #${s.first_frame_take ?? "?"}` : "首帧 · 未出", empty: "首帧未出", cap: `${short(s.id)} · 首帧` },
               { key: "l", src: s.last_frame_target, ed: s.last_frame_target ? `尾帧 · 定稿 #${s.last_frame_take ?? "?"}` : "尾帧 · 未出", empty: "尾帧未出", cap: `${short(s.id)} · 尾帧` },
@@ -436,7 +451,6 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
         <div className="v3-l1">
           <b className="v3-sid">{short(s.id)}</b>
           {/* UIRSI r40：和全剧总览同一套彩色状态标签（最严重的一个；悬停看全部） */}
-          <MainTag st={rowCands?.[s.id]?.status} />
           <MissBadge miss={miss} onJump={() => (st.select(s.id), sbUi.openTableAt(s.id))} />
           <MaterialsBadge shotId={s.id} />
           <span className="v3-meta" title={camRaw(s) ? `剧本原文：${camRaw(s)}` : undefined}>{meta.join(" · ")}</span>
@@ -454,8 +468,8 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
           )}
           {!more && s.characters.some((c) => c.has_override) && <small className="v3-look-ovr">本镜造型</small>}
           <span className="v3-grow" />
-          <span className={`v3-status-wrap${statusFlash ? " live-flash" : ""}`}>
-            <StatusLine st={pend?.auto ? { ...status, dot: "green", text: `${pend.stage === "first" ? "首帧" : "尾帧"} #${pend.n} 已自动采用（可改）` } : status} />
+          <span className={`v3-status-wrap${statusFlash ? " live-flash" : ""}`} title={mainTip(rowCands?.[s.id]?.status)}>
+            <StatusLine st={pend?.auto && !pend.quiet ? { ...status, dot: "green", text: `${pend.stage === "first" ? "首帧" : "尾帧"} #${pend.n} 已自动采用（可改）` } : status} />
           </span>
         </div>
         {film && procTakes.length > 0 && (
@@ -593,7 +607,9 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
       <div className="v3-act" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
         {/* UM-P0-01：待审对象一对明确按钮（✓ 用这张 / ✗ 不要）；“定稿并出下一步”收进 ⋯ */}
         {pend ? (
-          <Verdict shot={s.id} stage={pend.stage} n={pend.n} auto={pend.auto} onAccept={pend.accept} />
+          <span className={pend.quiet ? "v3-quiet" : undefined} title={pend.quiet ? "机签已通过并设为当前，不需要你点；要手动定稿或不要，仍可用这两个按钮" : undefined}>
+            <Verdict shot={s.id} stage={pend.stage} n={pend.n} auto={pend.auto} onAccept={pend.accept} />
+          </span>
         ) : (
           status.action && (
             <button className="v3-btn primary" onClick={status.action.run} title={status.action.title}>

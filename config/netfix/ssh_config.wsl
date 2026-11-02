@@ -84,3 +84,18 @@ Host gpu33-tb
     IdentityFile ~/.ssh/id_ed25519_gpu36
     ConnectTimeout 15
     ProxyCommand "/mnt/d/NS-Final Studio/.venv/Scripts/python.exe" -u "D:/NS-Final Studio/tools/netfix/tcpbridge.py" 127.0.0.1 22331
+Host gpu36-tc
+    HostName 127.0.0.1
+    User root
+    HostKeyAlias gpu36
+    IdentityFile ~/.ssh/id_ed25519_gpu36
+    ConnectTimeout 15
+    ProxyCommand "/mnt/d/NS-Final Studio/.venv/Scripts/python.exe" -u "D:/NS-Final Studio/tools/netfix/tcpbridge.py" 127.0.0.1 22362
+Host gpu33-tc
+    HostName 127.0.0.1
+    User root
+    HostKeyAlias gpu33
+    IdentityFile ~/.ssh/id_rsa_gpu33
+    IdentityFile ~/.ssh/id_ed25519_gpu36
+    ConnectTimeout 15
+    ProxyCommand "/mnt/d/NS-Final Studio/.venv/Scripts/python.exe" -u "D:/NS-Final Studio/tools/netfix/tcpbridge.py" 127.0.0.1 22332

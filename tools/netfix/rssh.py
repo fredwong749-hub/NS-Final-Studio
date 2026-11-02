@@ -119,10 +119,51 @@ def with_tz(cmd: str) -> str:
 
 
 def run(host: str, cmd: str, input: bytes | None = None, timeout: float = 900, check: bool = False) -> subprocess.CompletedProcess:
-    """显式复用主连接执行远程命令（主连接不在 → 立刻失败 rc=255，不新建握手）"""
+    """显式复用主连接执行远程命令（主连接不在 → 立刻失败 rc=255，不新建握手）。
+    14:2x：挑中的主连接恰好在重建（socket 不在 / mux 拒绝）→ 立刻换同台另一条主连接再试（不等待、不新握手），
+    每次调用的结果记一行 data/netfix/rssh_calls.jsonl（监管进程汇总成 net_status.rssh 成功率）"""
+    t0 = time.time()
     argv = rewrite(["ssh", host, cmd]) if enabled() else None
-    argv = argv or ["ssh", "-o", "BatchMode=yes", host, with_tz(cmd)]
-    return subprocess.run(argv, input=input, capture_output=True, timeout=timeout, check=check, creationflags=NOWIN)
+    tried = []
+    if argv:
+        socks = [argv[argv.index("-S") + 1]] + [s for s in POOL.get(host, []) if s != argv[argv.index("-S") + 1]]
+        for sk in socks:
+            argv[argv.index("-S") + 1] = sk
+            tried.append(sk.rsplit("/", 1)[-1])
+            try:
+                res = subprocess.run(argv, input=input, capture_output=True, timeout=timeout, check=False, creationflags=NOWIN)
+            except subprocess.TimeoutExpired:
+                _note(host, 124, time.time() - t0, tried)
+                raise
+            err = (res.stderr or b"")[-300:]
+            mux_down = res.returncode == 255 and (b"Control socket connect" in err or b"mux_client" in err
+                                                  or b"Connection closed by UNKNOWN" in err)
+            if not mux_down:
+                break
+    else:
+        try:
+            res = subprocess.run(["ssh", "-o", "BatchMode=yes", host, with_tz(cmd)], input=input, capture_output=True,
+                                 timeout=timeout, check=False, creationflags=NOWIN)
+        except subprocess.TimeoutExpired:
+            _note(host, 124, time.time() - t0, ["direct"])
+            raise
+    _note(host, res.returncode, time.time() - t0, tried or ["direct"])
+    if check and res.returncode:
+        raise subprocess.CalledProcessError(res.returncode, res.args, res.stdout, res.stderr)
+    return res
+
+
+CALLS = ROOT / "data/netfix/rssh_calls.jsonl"
+
+
+def _note(host: str, rc: int, dur: float, tried: list) -> None:
+    """一次调用一行（几十字节，追加写）；“成功” = 连接层没出错（rc != 255 且没超时），远端命令自己的非零退出码不算通道失败"""
+    try:
+        with open(CALLS, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"t": round(time.time(), 1), "host": host, "rc": rc, "ok": rc not in (255, 124),
+                                "dur": round(dur, 2), "tried": tried}) + "\n")
+    except OSError:   # arch-ok: 指标落盘失败不影响调用本身（只少一条统计）
+        pass
 
 
 def _local_self(host: str) -> str | None:

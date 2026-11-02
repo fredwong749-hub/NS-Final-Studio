@@ -110,3 +110,9 @@ def python(host: str, d: dict | None = None) -> str:
     if not v:
         raise HostsError(f"{host} 没登记 python")
     return v
+
+
+def recipe_max_frames(lane: str, recipe: str, d: dict | None = None) -> int | None:
+    """某道上某配方的帧数上限（例：3090 上 H3 FunControlNet = 107）；没登记 = None（调用方用配方自己的默认）"""
+    v = (_lane(lane, d).get("recipe_max_frames") or {}).get(recipe)
+    return int(v) if v else None

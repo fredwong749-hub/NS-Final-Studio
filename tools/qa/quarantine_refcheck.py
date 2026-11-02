@@ -63,7 +63,7 @@ def rg(terms: list[str], dirs: tuple[str, ...]) -> list[str]:
     for t in terms:
         cmd += ["-e", t]
     cmd += existing
-    r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)   # K-OPS-S01
     return [ln for ln in r.stdout.splitlines() if ln.strip()]
 
 

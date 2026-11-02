@@ -359,3 +359,97 @@ def test_capacity_not_producing_and_host_text():
     h = fs["S19:capacity:gpu33"]
     assert h["violated"] and "gpu36 还剩 30" in h["title"] and "60 个 ready 属于非 producing" in h["title"]
     assert not fs["S19:capacity"]["violated"]                                  # 合计可派 31 ≥ 10
+
+
+# ------------------------------------------------------------------ G26 声明 vs 实际
+def test_decl_vs_actual():
+    decl = {"gpu33:0": {"gpu": 0, "comfy_port": 8188}, "gpu33:1": {"gpu": 1, "comfy_port": 8189}, "gpu33:3": {"gpu": 3, "comfy_port": 8191}}
+    actual = {"8188": {"pid": 11, "cuda_arg": 0, "stats_ok": True},
+              "8189": {"pid": 12, "cuda_arg": None, "cvd": "2", "stats_ok": True},           # 跑到坏卡 2 上
+              "8191": {"pid": None, "stats_ok": False, "err": "refused"}}
+    fs = {f["key"]: f for f in J.j_decl_vs_actual("gpu33", decl, actual, [2], {"2": [12]})}
+    assert not fs["G26:gpu33:0"]["violated"]
+    assert fs["G26:gpu33:1"]["violated"] and "实际跑在 GPU 2" in fs["G26:gpu33:1"]["title"]
+    assert fs["G26:gpu33:3"]["violated"] and "没有进程在听" in fs["G26:gpu33:3"]["title"]
+    assert fs["G26:gpu33:broken2"]["violated"]
+    assert J.lane_gpu_actual({"smi_gpus": [0, 1]}) is None                                 # 不唯一不判
+
+
+def test_g26_waits_for_sv09(monkeypatch):
+    from tools.sentinel import probes as P
+    monkeypatch.setattr(P, "jl", lambda p, default=None: {"id": "sv-20261102-04"} if "system_version" in str(p) else default)
+    ctx = P.Ctx(policy.load()["sentinel"], {})
+    assert P.p_g26(ctx) == [] and "sv-20261102-09" in ctx.mem["g26_state"]
+
+
+def test_scratchpad_procs():
+    c = C["S20_scratchpad_procs"]
+    sp = "C:\\Users\\fredw\\AppData\\Local\\Temp\\claude\\C--Users-fredw\\abc\\scratchpad\\"
+    procs = [{"pid": 1, "name": "python.exe", "cmd": f'python.exe "{sp}lend_any.py" gpu36:0'},
+             {"pid": 2, "name": "python.exe", "cmd": f'python.exe "{sp}fix_prod.py"'},
+             {"pid": 3, "name": "python.exe", "cmd": "python.exe -u tools/autopilot/producer.py serve"},
+             {"pid": 4, "name": "python.exe", "cmd": f'python.exe tools/qa/data_parity.py --out "{sp}out.json"'},      # 只是输出写到 scratchpad
+             {"pid": 5, "name": "bash.exe", "cmd": f'bash -c "source {sp}snapshot-bash-1793516248100-q1sni9.sh; ls"'}]
+    fs = {f["key"]: f for f in J.j_scratch_procs(procs, c)}
+    assert set(fs) == {"S20:lend_any.py", "S20:fix_prod.py"}
+    assert fs["S20:lend_any.py"]["owner_loop"] == "DEBUG-RSI" and "已知，sv-10 收编" in fs["S20:lend_any.py"]["title"]
+    assert fs["S20:fix_prod.py"]["owner_loop"] == "总调度"
+    assert J.j_scratch_procs(None, c) == []
+
+
+def test_legacy_reads_and_freeze_drift():
+    c = C["S21_state_legacy_read"]
+    rows = [{"at": J.iso(T0) + "+0900", "name": "netfix/partition", "old_path": "config/netfix/partition.json", "caller": "probes.py:126", "host": "x"}]
+    fs = {f["key"]: f for f in J.j_legacy_reads(rows, ["netfix/partition", "pipeline/run"], T0 + 60, c, lambda cl: "SENTINEL")}
+    assert fs["S21:netfix/partition"]["violated"] and fs["S21:netfix/partition"]["owner_loop"] == "SENTINEL"
+    assert not fs["S21:pipeline/run"]["violated"]
+    assert not {f["key"]: f for f in J.j_legacy_reads(rows, ["netfix/partition"], T0 + 90000, c)}["S21:netfix/partition"]["violated"]
+    drift = [{"sv": "sv-20261102-09", "at": J.iso(T0), "files": ["tools/sentinel/probes.py", "tools/qa/iter_gate.py"]}]
+    own = {"tools/sentinel/probes.py": "SENTINEL", "tools/qa/iter_gate.py": "SYSARCH"}.get
+    fs = {f["key"]: f for f in J.j_freeze_drift(drift, {"ok": False, "at": T0 + 10}, own)}
+    assert fs["S22:sv-20261102-09:SENTINEL"]["violated"] and fs["S22:sv-20261102-09:SYSARCH"]["owner_loop"] == "SYSARCH"
+    assert not any(f["violated"] for f in J.j_freeze_drift(drift, {"ok": True, "at": T0 + 10}, own))
+
+
+def test_laptop_lane_reach():
+    c = C["S23_laptop_lane_reach"]
+    hist = {"gpu33:0": [[T0 + i * 60, i % 3 == 0] for i in range(5)], "gpu36:0": [[T0 + i * 60, True] for i in range(5)]}
+    cur = {"gpu33:0": False, "gpu36:0": True}
+    fs = {f["key"]: f for f in J.j_lane_reach(hist, cur, T0 + 240, c)}
+    assert fs["S23:gpu33:0"]["violated"] and not fs["S23:gpu36:0"]["violated"]
+    assert fs["S23:half_down"]["violated"] and fs["S23:half_down"]["owner_loop"] == "NETFIX"     # 1/2 ≥ 半数
+    fs2 = {f["key"]: f for f in J.j_lane_reach(hist, {"gpu33:0": True, "gpu36:0": True}, T0 + 240, c)}
+    assert not fs2["S23:half_down"]["violated"]
+
+
+def test_ssh_loops():
+    c = dict(C["S20_scratchpad_procs"]["ssh_loop"], owner_loop="总调度")
+    shells = {10: {"cmd": "bash -c 'while true; do ssh gpu36 nvidia-smi; sleep 60; done'", "created_t": T0 - 3 * 3600},
+              11: {"cmd": "bash -c 'ls'", "created_t": T0 - 3 * 3600},
+              12: {"cmd": "bash -c 'tools/vqa/poll.sh'", "created_t": T0 - 600}}
+    spawns = {10: [T0 - 600, T0 - 300, T0 - 60], 12: [T0 - 100, T0 - 50, T0 - 10]}
+    fs = {f["key"]: f for f in J.j_ssh_loops(shells, spawns, T0, c, lambda cmd: "VQAGATE" if "vqa" in cmd else None)}
+    assert fs["S20:ssh_loop:10"]["violated"] and fs["S20:ssh_loop:10"]["owner_loop"] == "总调度"
+    assert "S20:ssh_loop:11" not in fs                                         # 老 shell 但没起 ssh
+    assert not fs["S20:ssh_loop:12"]["violated"] and fs["S20:ssh_loop:12"]["owner_loop"] == "VQAGATE"   # 起 ssh 但没满 2 小时
+
+
+def test_scratchpad_readonly_exempt():
+    c = C["S20_scratchpad_procs"]
+    sp = "C:/Users/fredw/AppData/Local/Temp/claude/x/scratchpad/"
+    fs = {f["key"]: f for f in J.j_scratch_procs([{"pid": 1, "cmd": f"sh {sp}watch_green.sh"}], c)}
+    assert not fs["S20:watch_green.sh"]["violated"] and "只读" in fs["S20:watch_green.sh"]["evidence"]["exempt"]
+    fs = {f["key"]: f for f in J.j_scratch_procs([{"pid": 1, "cmd": f"sh {sp}watch_green.sh; ssh gpu33 ls"}], c)}
+    assert fs["S20:watch_green.sh"]["violated"]                                  # 命令行里有 ssh 就不豁免
+
+
+def test_api_latency():
+    c = C["S24_api_latency"]
+    slow = {"/api/season": [[T0 + i, 0.05, 200] for i in range(18)] + [[T0 + 18, 6.0, 200], [T0 + 19, 25.0, 200]]}
+    fs = {f["key"]: f for f in J.j_api_latency(slow, c)}
+    assert fs["S24:/api/season"]["violated"] and fs["S24:/api/season"]["owner_loop"] == "UIRSI2"
+    fast = {"/api/episodes": [[T0 + i, 0.1, 200] for i in range(20)]}
+    assert not J.j_api_latency(fast, c)[0]["violated"]
+    assert J.j_api_latency({"/api/x": [[T0, 0.1, 200]]}, c) == []                        # 样本不足不判
+    fails = {"/api/season": [[T0 + i, 0.05, 200] for i in range(18)] + [[T0 + 18, 0.1, 0], [T0 + 19, 0.1, 0]]}
+    assert J.j_api_latency(fails, c)[0]["violated"]                                     # 失败按超时计

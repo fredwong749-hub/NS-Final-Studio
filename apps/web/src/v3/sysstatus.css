@@ -1,0 +1,41 @@
+/* UIFIX-S：顶栏重排 + 系统状态面板（全站只用 灰 / 琥珀 / 绿 三色圆点，不用蓝） */
+.v3-sdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--c-text-3, #8a8a8a); }
+.v3-sdot.d-green { background: var(--c-ok, #4caf7d); }
+.v3-sdot.d-yellow { background: var(--c-warn, #d6a23a); }
+.v3-sdot.d-gray { background: var(--c-text-3, #8a8a8a); }
+.v3-top-hidden { position: absolute; left: -9999px; top: 0; width: 0; height: 0; overflow: visible; }
+
+/* 导航五步：名字 + 一个状态圆点，副标题在悬停提示里 */
+:root .v3-top-grid .v3-step { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px; white-space: nowrap; min-width: max-content; }
+:root .v3-top-grid .v3-step span { min-width: 0; line-height: 1; font-size: 13.5px; }
+:root .v3-top-grid .v3-step.done .v3-sdot { background: var(--c-ok, #4caf7d); }
+:root .v3-top-grid .v3-step.cur:not(.on) .v3-sdot { background: var(--c-warn, #d6a23a); }
+.v3-top-grid .v3-steps { gap: 2px; }
+
+/* 顶栏右侧：待你看 · 系统状态 · 工具 · 主题 · ? */
+.v3-top-r { gap: 8px; flex-wrap: nowrap; }
+.v3-sys { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 11px; border: 1px solid rgba(127, 127, 127, .35); border-radius: 3px; background: none; color: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+.v3-sys:hover, .v3-sys.open { border-color: currentColor; }
+.v3-sys.lv-warn { border-color: color-mix(in srgb, var(--c-warn, #d6a23a) 60%, transparent); }
+.v3-sys-panel { width: 400px; max-width: calc(100vw - 24px); box-sizing: border-box; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
+.v3-sys-panel header { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.v3-sys-panel ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+.v3-sys-panel li { display: grid; grid-template-columns: 10px 104px 1fr; column-gap: 8px; align-items: baseline; line-height: 1.45; }
+.v3-sys-panel li .v3-sdot { align-self: center; }
+.v3-sys-panel li .k { color: var(--c-text-2, #aaa); }
+.v3-sys-panel li .v { color: var(--c-text, #eee); font-variant-numeric: tabular-nums; }
+.v3-sys-panel li .why { grid-column: 2 / 4; margin: 1px 0 0; font-size: 12px; color: var(--c-warn-text, #d6a23a); }
+.v3-sys-acts { display: flex; gap: 8px; }
+.v3-sys-acts button { height: 28px; padding: 0 12px; border: 1px solid rgba(127, 127, 127, .35); border-radius: 3px; background: none; color: inherit; font-size: 12.5px; cursor: pointer; }
+.v3-sys-acts button:hover { border-color: currentColor; }
+.v3-sys-det summary { cursor: pointer; font-size: 12.5px; color: var(--c-text-2, #aaa); }
+.v3-sys-snd { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--c-text-2, #aaa); cursor: pointer; border-top: 1px solid rgba(127, 127, 127, .25); padding-top: 10px; }
+.v3-sys-pop .v3-pop { padding: 0; }
+/* 步骤圆点盖过 v3.css 里 .v3-step i（22px 数字圈）的旧样式；当前步不再用蓝色填充（全站只许灰 / 琥珀 / 绿） */
+:root .v3-top-grid .v3-step i.v3-sdot { width: 8px; height: 8px; min-width: 8px; grid-row: auto; box-shadow: none; background: var(--c-text-3, #8a8a8a); color: transparent; }
+:root .v3-top-grid .v3-step.done i.v3-sdot { background: var(--c-ok, #4caf7d); }
+:root .v3-top-grid .v3-step.cur:not(.on) i.v3-sdot, :root .v3-top-grid .v3-step.on.cur i.v3-sdot { background: var(--c-warn, #d6a23a); box-shadow: none; }
+:root .v3-top-grid .v3-step.on { border-color: var(--c-text-2, #aaa); background: rgba(127, 127, 127, .16); }
+:root .v3-top-grid .v3-step.on i.v3-sdot { background: var(--c-text-2, #aaa); }
+:root .v3-top-grid .v3-step.on.done i.v3-sdot { background: var(--c-ok, #4caf7d); }
+.v3-sys-snd input { accent-color: var(--c-text-2, #aaa); }

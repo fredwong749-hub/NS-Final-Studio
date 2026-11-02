@@ -345,6 +345,57 @@ def is_server_lane(lane: str) -> bool:
     return str(lane).split(":", 1)[0] in ("gpu33", "gpu36") or str(lane).isdigit()
 
 
+WAIT_ASSET_MAX_S = 6 * 3600          # 等资产的兜底上限（正常靠签名变化放回，不靠时间）
+
+
+def asset_sig(paths) -> str:
+    """K-OPS-E26：资产登记的签名——preflight（services/agent/ns_agent/asset_refs.py）真正读的登记源：
+    config/recipes/asset_refs.json 本身、data/looks/wardrobe.json（单品图），以及配置里每个项目（含继承的父季）登记的
+    *_file（P1_looks / assets/sheets_chosen / assets/shot_looks）。设定图 / 单品 / 身份脸一登记，签名就变。只 stat 不读内容"""
+    import hashlib
+    root = getattr(paths, "root", ROOT)
+    cfg_p = root / "config" / "recipes" / "asset_refs.json"
+    files = [cfg_p, root / "data" / "looks" / "wardrobe.json"]
+    try:
+        projs = (json.loads(cfg_p.read_text(encoding="utf-8")).get("projects") or {})
+    except (OSError, ValueError):
+        projs = {}
+    for name in sorted(projs):
+        for k, v in sorted((projs.get(name) or {}).items()):
+            if k.endswith("_file") and isinstance(v, str):
+                files.append(root / v)
+    run = getattr(paths, "run", None)                   # 配置里没登记的本 run 资产文件也算上（新剧还没写进配置时）
+    if run is not None:
+        files += [run / "P1_looks.json", run / "assets" / "sheets_chosen.json", run / "assets" / "shot_looks.json"]
+    h = hashlib.sha256()
+    for f in dict.fromkeys(files):
+        try:
+            st = f.stat()
+            h.update(f"{f.as_posix()}:{st.st_size}:{st.st_mtime_ns}".encode())
+        except OSError:
+            h.update(f"{f.as_posix()}:-".encode())
+    return h.hexdigest()[:16]
+
+
+def refs_table_sig(root: Path = ROOT) -> str:
+    """期望 refs 表（FACTORY data/factory/inbox/expected_refs.json）的签名：表一重建就变"""
+    f = root / "data" / "factory" / "inbox" / "expected_refs.json"
+    try:
+        st = f.stat()
+        return f"{st.st_size}:{st.st_mtime_ns}"
+    except OSError:
+        return "-"
+
+
+def wait_kind(err: str) -> str | None:
+    """preflight 挡的原因 → 等什么：asset（I3 / I4 缺设定图 / 单品）/ refs（K-OPS-F03 期望表不一致）/ None（别的原因，照旧退避）"""
+    if "K-OPS-F03" in err or "refs 与目标状态不一致" in err or "期望 refs 表" in err:
+        return "refs"
+    if any(k in err for k in ("没有设定图", "没有图", "资产缺图", "I3 ", "I4 ")):
+        return "asset"
+    return None
+
+
 def asset_hold_objects(data: Path) -> set:
     """IMGFIX r5（总调度 fredw-2b 11-02）：data/autopilot/*_hold.json（active=true）列出的首帧 / 尾帧对象暂缓派单——
     资产（例：林晚造型 A 设定图缺袖）修复后等项目方点选，点选前不出图。不在 = 没有 hold；
@@ -683,6 +734,7 @@ def vqa_gate(sid: str, stage: str, file_rel: str, job: dict, pf: dict) -> dict |
         VQ.q1_band_review(pf, str(P.DATA / file_rel))      # K-REV-V18 修订：Q1 复核带 → 和 L-086 左右并排的本地看图复核
         VQ.q1a_vlm(pf, str(P.DATA / file_rel))             # K-REV-V19：Q1a 逐人头发——确定性过了再由本地看图逐人问答复核
         VQ.hair_primary(pf, v)                              # 发色：Q1a 分割主判、VLM 辅助（开关 gate.hair_primary）
+        VQ.q1x(sid, stage, str(P.DATA / file_rel), pf)      # Q1x 同场跨镜身份一致（开关 Q1x_scene.enabled）
         VQ.apply(pf, v)
         if v.get("error") and pf.get("ok") is False and pf.get("blocking") == ["Q9"]:
             pf["score_infra"] = True
@@ -1047,7 +1099,7 @@ def derive(w: World, ledger: dict, leases: dict, run_summary: dict | None = None
             if led_a.get("blocked") and now() - led_a.get("at", 0) < PREFLIGHT_RETRY_S:
                 gate = bool(GATE_PAT.search(" ".join(led_a.get("reasons") or [])))
                 ao.update(status="failed", reason="出图前契约没过：" + "；".join(led_a.get("reasons") or [])[:200],
-                          waiting_for="项目方挑定身份参考（characters 闸门）" if gate else "资料补齐后 30 分钟内自动重查",
+                          waiting_for="项目方挑定身份参考（characters 闸门）" if gate else "资产登记 / 期望 refs 表一更新就自动放回重查",
                           gate="characters" if gate else None)
             elif pfb and not pfb.get("ok"):
                 ao.update(status="failed", reason="出图前契约没过：" + "；".join(pfb.get("reasons") or [])[:200], waiting_for="资料补齐后自动重查")
@@ -1698,6 +1750,10 @@ class Producer:
                 except Exception as e:  # noqa: BLE001
                     self.logf("adopt_err", error=repr(e)[:300])
                 try:
+                    self.release_waiting_assets()      # K-OPS-E26：等资产的对象签名一变就放回
+                except Exception as e:  # noqa: BLE001
+                    self.logf("asset_release_err", error=repr(e)[:300])
+                try:
                     self.auto_reset_best_effort(reg)   # K-OPS-E11：尽力版在规则 / 资产版本变化时自动重置
                 except Exception as e:  # noqa: BLE001
                     self.logf("be_reset_err", error=repr(e)[:300])
@@ -1768,6 +1824,29 @@ class Producer:
                                     history=[dict(h, before_gate_change=True) for h in led.get("history") or []])
                     self.logf("best_effort_reset", obj=o["id"], counted=False, why=why, changed=changed)
                     out["reset"] += 1
+        return out
+
+    def release_waiting_assets(self, every_s: float = 60) -> list:
+        """K-OPS-E26：等资产的对象，资产登记签名或期望 refs 表签名变了 → 清退避、回到 ready（不计次）。每分钟查一次"""
+        if now() - getattr(self, "_wa_check_t", 0) < every_s:
+            return []
+        self._wa_check_t = now()
+        asig, rsig = asset_sig(self.p), refs_table_sig(self.p.root)
+        out = []
+        for oid, r in list(self.ledger().items()):
+            wa = r.get("waiting_asset") if isinstance(r, dict) else None
+            if not wa or not r.get("blocked_until"):
+                continue
+            changed = (wa.get("kind") == "asset" and wa.get("asset_sig") != asig) or \
+                      (wa.get("kind") == "refs" and (wa.get("refs_sig") != rsig or wa.get("asset_sig") != asig))
+            if changed:
+                self.led_update(oid, blocked_until=0, waiting_asset=None,
+                                reason=("资产登记有更新" if wa.get("kind") == "asset" else "期望 refs 表 / 资产有更新") + "，自动放回重派（不计次）")
+                sid = oid.split(":", 1)[-1]
+                if (self.ledger().get(f"assets:{sid}") or {}).get("blocked"):
+                    self.led_update(f"assets:{sid}", blocked=False, released_at=now())
+                self.logf("asset_release", obj=oid, kind=wa.get("kind"), counted=False)
+                out.append(oid)
         return out
 
     def obj_rate_exceeded(self, o: dict, cap: int = 8) -> bool:
@@ -2161,7 +2240,13 @@ class Producer:
             elif k == "preflight":
                 reasons = [x for x in re.split(r"[；;]", err.split("：", 1)[-1]) if x.strip()]
                 gate = bool(GATE_PAT.search(err))
-                self.led_update(oid, blocked_until=now() + PREFLIGHT_RETRY_S, last_error=err[:300], reason=plain_reason(k, err))
+                wk = wait_kind(err)
+                if wk:                              # K-OPS-E26：缺资产 / 期望表不一致 → 标“等资产”，签名一变自动放回（不靠 30 分钟退避反复派）
+                    self.led_update(oid, blocked_until=now() + WAIT_ASSET_MAX_S, last_error=err[:300], reason=plain_reason(k, err),
+                                    waiting_asset={"kind": wk, "asset_sig": asset_sig(self.p), "refs_sig": refs_table_sig(self.p.root),
+                                                   "at": iso()})
+                else:
+                    self.led_update(oid, blocked_until=now() + PREFLIGHT_RETRY_S, last_error=err[:300], reason=plain_reason(k, err))
                 self.led_update(f"assets:{sid}", blocked=True, at=now(), reasons=reasons[:6], gate="characters" if gate else None)
                 self.logf("preflight_block", obj=oid, reasons=reasons[:6], owner_gate=gate)
             else:
@@ -2800,10 +2885,8 @@ def master_reject(paths: Paths, oid: str, n: int, reason: str, presets: list, wa
         FE.annotate(sid, stage, n, master_reject={"by": by, "reason": reason, "at": iso()})
         if (P.load_takes(sid).get("active") or {}).get(stage) == n:
             P.clear_active(sid, stage, f"总调度驳回 v{n}：{reason}（驳回即撤下当前，等替换版）", actor=f"producer.master_reject（{by}）")
-    with P.shot_lock(sid):
-        d = P.load_takes(sid)
-        d.setdefault("master_gate", {})[stage] = {"reject_n": n, "reason": reason, "by": by, "at": iso()}
-        P._save_takes(sid, d)
+    P.mutate_takes(sid, lambda d: d.setdefault("master_gate", {}).__setitem__(stage, {"reject_n": n, "reason": reason, "by": by, "at": iso()}),
+                   op="master_reject", by=f"producer（{by}）")
     rj = jl(paths.rejects, {}) or {}
     rj[oid] = {"reject_n": n, "reason": reason, "by": by, "at": iso(), "wait": wait,
                "label": "总调度插队" if not n else "驳回重出",
@@ -2859,10 +2942,7 @@ def master_approve(paths: Paths, oid: str, n: int, by: str, note: str = "") -> i
     stage = "image" if kind == "first" else "last"
     from ns_render import auto_current as AC
     FE.annotate(sid, stage, n, master_review={"ok": True, "by": by, "at": iso(), "note": note})
-    with P.shot_lock(sid):
-        d = P.load_takes(sid)
-        (d.get("master_gate") or {}).pop(stage, None)
-        P._save_takes(sid, d)
+    P.mutate_takes(sid, lambda d: [(d.get("master_gate") or {}).pop(stage, None), None][1], op="master_approve", by=f"producer（{by}）")
     # K-OPS-Q23：唯一入口 set_active（拒绝驳回版、自己记一条审计，传操作人；不再另记 AC.audit_change，免得重复）
     P.set_active(sid, stage, n, reason=f"总调度复核通过替换版 v{n}：{note}", actor=f"producer.master_approve（{by}）")
     L0 = jl(paths.ledger, {}) or {}
@@ -2884,10 +2964,7 @@ def master_approve(paths: Paths, oid: str, n: int, by: str, note: str = "") -> i
     if kind == "first" and lo in rj and not rj[lo].get("cleared"):
         # 尾帧是随首帧一起被驳回的：首帧替换版复核通过后，尾帧回到常规自动流程（过契约即设为当前，不再要总调度复核）
         rj[lo]["cleared"] = {"by": by, "at": iso(), "why": f"首帧换成 v{n}（总调度复核），尾帧走常规自动流程"}
-        with P.shot_lock(sid):
-            d = P.load_takes(sid)
-            (d.get("master_gate") or {}).pop("last", None)
-            P._save_takes(sid, d)
+        P.mutate_takes(sid, lambda d: [(d.get("master_gate") or {}).pop("last", None), None][1], op="master_approve_last", by=f"producer（{by}）")
     js(paths.rejects, rj)
     L = jl(paths.ledger, {}) or {}
     L.setdefault(oid, {}).update(redo_candidate=None, final="passed")

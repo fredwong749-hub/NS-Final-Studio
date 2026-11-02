@@ -134,3 +134,51 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-S13
+    domain: ops
+    link: [P5-P6]
+    title: 道的声明以 config/factory/hosts.json 为唯一来源，SENTINEL G26 每拍核对每条启用的道：端口有进程在听、system_stats 正常、监听进程跑在声明的 GPU、坏卡没有作业；不符即开单
+    when: 改 hosts.json、重启 / 迁移 ComfyUI、换卡、标坏卡
+    then: 先改 hosts.json（FACTORY），再动服务器；G26 不符 → 运行期问题派 DEBUG-RSI，声明错了 FACTORY 改表；sv-09 部署前探针自动不判
+    check: tests/test_sentinel.py::test_decl_vs_actual, tests/test_sentinel.py::test_g26_waits_for_sv09
+    evidence:
+      - {src: config/factory/hosts.json, note: "11-02 SYSARCH 4-2：车道 / 端口 / 服务器路径原散在 6 份表里；gpu33 GPU2 坏卡永不用"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-S14
+    domain: ops
+    link: [P5-P6]
+    title: 结构性违规由 SENTINEL 常驻开单——scratchpad 里跑的脚本与会话 shell 里 > 2 小时的 ssh 轮询（S20，K-OPS-Y04）、24 小时内读旧状态路径（S21，sv-11 删旧读前提为 0）、冻结期间改文件（S22）；负责方按脚本名 / 调用方 / 文件查 ownership.yaml
+    when: 任何 agent 从 scratchpad 起进程、运行期状态仍从 config/ 旧位置读、cut 冻结期间改文件
+    then: S20 读进程命令行（脚本本身在 scratchpad 才算），S21 读 data/state/legacy_reads.jsonl，S22 读 data/rsi/freeze_drift.jsonl（之后成功 cut 自动关单）；SENTINEL 自己的运行期状态读法走 tools/factory/state_paths.read_state
+    check: tests/test_sentinel.py::test_scratchpad_procs, tests/test_sentinel.py::test_ssh_loops, tests/test_sentinel.py::test_legacy_reads_and_freeze_drift
+    evidence:
+      - {src: docs/master/SLO.md, note: "11-02 12:0x 首拍 scratchpad 里在跑 5 类脚本（watch_green.sh、s2_sheets.py 等）；SENTINEL 自己 11:56 冻结期间改过文件"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-S15
+    domain: ops
+    link: [P5-P6]
+    title: 出图道要从两侧量——服务器本机端口（S2 / G26）和笔记本隧道端口（S23）；笔记本侧 5 分钟可达率 < 80% 或同一拍半数以上的道不通即开单派 NETFIX
+    when: 隧道重连 / 换线路 / 跳板抖动，或笔记本经隧道派单、看板读数
+    then: SENTINEL S23 每拍并发测本地隧道端口 /system_stats（端口读 hosts.json tunnel_port），与 NETFIX A-TUNNEL-FLAP 互为备份；退役道（gpu36:2）不计
+    check: tests/test_sentinel.py::test_laptop_lane_reach
+    evidence:
+      - {src: docs/master/SLO.md, note: "11-02 13:07–13:21 隧道来回重连、6 道全部拒连，S2 / G26 只测服务器本机端口，没有报警"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-S16
+    domain: ops
+    link: [P5-P6]
+    title: 界面依赖的 API（/api/episodes、/api/season）每分钟测响应时间，最近 20 次 p95 ≥ 2 s 开单派 UIRSI2；失败 / 超时按超时时长计入，不能当快
+    when: 改 ns_api 的列表 / 季度接口，或页面卡在加载
+    then: SENTINEL S24 带本机只读查看令牌测（不碰项目方账号）；慢的接口改后台缓存 / 预计算，不在请求里现算
+    check: tests/test_sentinel.py::test_api_latency
+    evidence:
+      - {src: docs/master/SLO.md, note: "11-02 /api/season 一度 6–25 s，页面卡在加载界面，没有探针报警；UIRSI2 改后台缓存后 0.02–0.25 s"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

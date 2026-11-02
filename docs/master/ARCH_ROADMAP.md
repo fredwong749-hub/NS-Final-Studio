@@ -39,6 +39,7 @@
 | 13 | ssh 调用分散 | NETFIX；SYSARCH 做迁移 | arch_scan direct_ssh、def_ssh 降到只剩登记的必需项；ssh_unlisted = 0 | — | 进行中（基线 35 / 15；ssh_unlisted 1：apps/web/e2e/gpuview/crosscheck.py） |
 | 14 | 缺超时和回压 | DEBUG-RSI / DIRECTOR / UIRSI；SYSARCH 做无主部分 | arch_scan no_timeout = 0；ns_api 队列有上限 | — | 进行中：80 → 72（SYSARCH 补核心链 assemble / skin_guard / voice_convert / motion_qc / pipeline.extract_last_frame；剩余无主的多为待隔离的实验脚本） |
 | 15 | 所有权表脱节 | ITERAUDIT（总调度定） | arch_scan unowned = 0；HOLLYWOOD / IMGFIX / SENTINEL / SYSARCH / FACTORY 有条目；docs/AUTOPILOT.md 一个 owner | — | 待办（基线 243 个代码文件无主） |
+| 16 | **两台 takes.json 不同步 / 多写者**（EDITOR_INTEGRATION 评审单列，详见 §11） | services/render_router/ns_render/pipeline.py:240；merge_pull | DEBUG-RSI + NETFIX + WORKFLOW + UIRSI2 | 每镜单一权威写者 + seq + 交接；并发写测试不丢版本 | §10、G7 | 待办 |
 
 ## 2. 目标架构差距 G1–G26
 
@@ -138,6 +139,49 @@
 **唯一读取入口**：tools/factory/hosts.py（FACTORY）——lane_url(lane, from_host)：服务器本机（NS_FACTORY_HOST / OFFLINE_SELF）= 127.0.0.1:comfy_port；笔记本 = 127.0.0.1:tunnel_port；comfy_output(lane)；server_root(host)；aliases(host)。读不到 = raise（失败关闭，K-OPS-F09 同口径）。
 **迁移顺序（每步可回退、带测试）**：① FACTORY 建 hosts.json + hosts.py + 一致性测试（现有 6 份与 hosts.json 逐项比对，先只报不挡）→ ② 读者逐个改读 hosts.py：producer IMAGE_LANES、resident_sync、render_endpoints（改成由 hosts.json 生成）、vidlab lanes.json（VIDLAB 并入）、tunnels.json 的 -L 列表（NETFIX 由 hosts.json 生成）、sentinel S6 server_root → ③ 一致性测试改成“除 hosts.json 外不得再出现端口 / 服务器路径字面量”（arch_scan hard_path 已覆盖路径；端口另加一项）→ ④ 服务器 fwd.py 停用（G1 / Top15 #9），旧文件隔离。
 **验收**：G1 关闭条件 = config/factory/hosts.json 唯一；arch_scan hard_path 中服务器路径类 → 0；端口字面量只在 hosts.json；服务器停掉 fwd.py 照常出图。
+
+## 9. 设计稿：冻结锁从“靠自觉”改成强制（SYSARCH 起草，总调度 11-02 12:0x 派，和 FACTORY 对齐，排 sv-10）
+
+**缺口**：cut_lock.json 只是一个状态文件，K-OPS-F08 靠各 agent 自己查 lock-status；sv-09 冻结期间 SENTINEL 的脚本查到 rc=3 仍继续写（UIRSI2 也可能有一起）。写进冻结目录的改动不会进本版，但会造成“以为上线了其实没有”、并让快照与工作树分叉。
+
+**四层，按可靠度从高到低**：
+1. **写入前拦（agent 编辑入口）——已上线（项目方 11-02 12:1x 批准，总调度配置；ops/hooks/freeze_guard.py 归 SYSARCH，tests/test_freeze_guard.py 12 过）**：多数代码改动走 Claude 的 Edit / Write 工具，不经过 Python。最有效的一层是 Claude Code 的 PreToolUse hook：Edit / Write / NotebookEdit 的目标路径落在 tools/ services/ packages/ config/ knowledge/ ops/ tests/ 下、且 cut_lock 有效时 → 拒绝并提示“sv-XX 冻结中”。这是 harness 配置（settings.json），**须项目方批准**，SYSARCH 不能自己改。
+2. **写入前拦（Python 进程）——代码已写好待装（ops/hooks/freeze_audit.py + tests/test_freeze_audit.py 7 过，含子进程真装 hook 实测；NETFIX 要求的独立 .pth / 只判写模式 / 锁文件 2 s 缓存 / 豁免 data、ops/logs、config/netfix 两份运行期配置都已做；sv-10 入版后装 .venv/Lib/site-packages/ns_freeze_guard.pth；FACTORY 须在 cut 里设 NS_FREEZE_EXEMPT=1）**：笔记本 venv 已有 sitecustomize（ssh shim 用的同一处）。加 sys.addaudithook 监听 open(写模式) / os.replace / os.rename：目标在冻结目录、cut_lock 有效、当前进程不是锁的持有者（cut_lock.pid 及其子进程）→ 抛 PermissionError。覆盖各 loop 的 Python 脚本、vio 原子写等所有写法，不用逐个改公共函数。只装笔记本 venv（服务器只跑已发布代码）。负责：NETFIX（sitecustomize 现属 ssh_shim）+ FACTORY。
+3. **交付时拦（iter_gate F1）**：system_version 在 lock 获取 / 释放时追加 data/system_versions/lock_history.jsonl（sv、开始、结束、pid）；iter_gate 新检查 F1：本轮 --changed（含 A2 的未入版新文件）里 mtime 落在任一冻结窗口内的 → fail“冻结期间写入，进下一版，请在下一轮重新声明”。负责：FACTORY（lock_history）+ SYSARCH（F1，ITERAUDIT 代管）。
+4. **事后报（cut 报告 + 工单）**：cut 结束时 drift_during_cut > 0 → 把文件清单写进 cut 报告（docs/system_versions/sv-XX.md）并发 SENTINEL 工单（owner = 文件负责方，总调度 12:0x 已采纳）；arch_scan 加 freeze_drift 一项（读 lock_history，统计冻结窗口内被改的代码文件），进线 5 结构健康之外单列报告、不进锚点。负责：FACTORY（报告 + 工单）+ SYSARCH（arch_scan）。
+
+**已知缺口**：第 1 层只拦 Edit / Write / NotebookEdit；经 Bash 工具写文件（sed、echo、python heredoc）拦不到——第 2 层（venv audit hook）能盖住经 venv Python 的写入，sed / echo 只能靠第 3、4 层事后查出。
+
+**验收**：模拟一次冻结 → ① Claude Edit 冻结目录被拒（若批准第 1 层）② venv 里 python -c 写 tools/x.py 抛 PermissionError、system_version 自己的写入不受影响 ③ iter_gate F1 对冻结期间改过的文件判 fail ④ cut 报告列出 drift 文件、SENTINEL 开单。
+
+## 10. 迁移方案：运行期状态从 config/ 挪到 data/state/（总调度 11-02 12:3x 定；config/ 只放人写的配置；排 sv-10 / sv-11）
+
+**判定口径**：程序在运行中自动改写的 = 状态 → data/state/；人（含项目方经界面点选）写的 = 配置 → 留 config/。
+按此口径：render_endpoints.json / llm_providers.json（界面 PUT 是人写）、owner_decisions.yaml（项目方闸门）留 config/；以下三份迁走。
+
+| 文件 | 写方 | 读方 | 新位置 | 负责 |
+|---|---|---|---|---|
+| config/netfix/partition.json（含 _temp_holds） | netfix/dispatch.py；DEBUG 兜底进程借道到期改写 | dispatch.py、ops/offline/merge_pull.py、ops/offline/resident_prep.py、tools/factory/deps.py、autopilot/resident_sync.py、autopilot/episode_pipeline.py、sentinel/probes.py、sentinel/judges.py | data/state/netfix/partition.json | NETFIX（写方 + dispatch / merge_pull / resident_prep）；DEBUG-RSI（兜底写方）；各读方由 SYSARCH 通知负责方改 |
+| config/netfix/override.json | netfix/dispatch.py；DEBUG 兜底进程 | dispatch.py | data/state/netfix/override.json | NETFIX + DEBUG-RSI |
+| config/pipeline/runs.json | autopilot/runs.register_run（导入新剧时自动追加） | runs.py 及其调用方（producer、flow、full_redo、image_jobs、register_takes、resident_sync、factory/inbox、dispatch、canvas app 等，均经 runs.py） | data/state/pipeline/runs.json | WORKFLOW（runs.py 一处改，调用方不动）——总调度点名 NETFIX / DEBUG-RSI，runs.py 归 WORKFLOW，建议由 WORKFLOW 做 |
+
+**唯一路径入口**：新建 tools/factory/state_paths.py（FACTORY，和 hosts.py 同层；D2 本地数据布局）——state_path(name) 返回新路径；兼容期 read_state(name) 先读新、没有再读旧并写一条 state_legacy_read 事件（不静默），写一律写新。各读方不再自己拼 config/... 路径。
+**兼容期（一个版本）**：sv-N 上线 state_paths + 写方改写新位置 + 读方双读 + 一次性迁移（启动时旧在新不在 → 原子复制，记事件）；两台服务器部署 sv-N 且 SENTINEL 24 h 内 state_legacy_read = 0 → sv-N+1 删旧读、旧文件进 data/_quarantine、撤掉 ops/hooks/freeze_audit.py 的 EXEMPT_FILES。
+**测试**：每个文件 ① 只有新 → 读新 ② 只有旧（兼容期）→ 读旧 + 事件 ③ 都有 → 读新 ④ 写只落新 ⑤ sv-N+1：只有旧 → raise（失败关闭，同 K-OPS-F09）；另加 arch_scan 检查：代码里出现 "config/netfix/partition.json" 等旧路径字面量 = 退化。
+**部署注意**：dispatch.push_server_control 把 partition / override 推到服务器并在服务器跑 server-control（服务器侧也读这两个路径）——NETFIX 同一版改推送清单，兼容期新旧两份都推（NETFIX 12:4x）；merge_pull.py / resident_prep.py 归 AUTOPILOT，NETFIX 写 CONSENT 局部改。服务器 producer / night 读 partition.json；必须两台都部署 sv-N（含迁移）后再上 sv-N+1；deps / sync 推送清单同步改成新路径（FACTORY）。
+
+## 11. 结构问题 #16：两台 takes.json 不同步（总调度 11-02 13:xx 单列；EDITOR_INTEGRATION 评审时提出）
+
+**现状**：每镜 takes.json 在笔记本和镜头所属服务器各一份；写者 4 类（服务器 producer、:8800 API、merge_pull ×2 调用方、register_takes / night），锁只是进程内 RLock（services/render_router/ns_render/pipeline.py:240），merge_pull 按整份合并，后写覆盖。借道 / 改分区时镜头换主机，两台都可能写同一镜。后果：丢版本、丢 active / locked，E25 一类事故；编辑器（L-117）上线后再加一个写者。
+**目标**：每镜一个权威写者 = 所属主机的 producer；笔记本副本只读、由 puller 按 outbox 事件更新；其他一切写入（API、编辑器、register_takes）改成投命令到所属主机 inbox（op_id 幂等）；takes.json 加单调 seq，merge_pull 冲突报警不覆盖；换主机走交接（停写 → 最后 seq → 接收）。
+| 步 | 内容 | 负责 | 验收 |
+|---|---|---|---|
+| 1 | takes.json 加 seq + op_id 字段，写入口统一到 pipeline._write_json 一处（原子 + 跨进程文件锁；直接写 takes 的 frame_edit / auto_current / producer 逐个改走入口） | DEBUG-RSI + WORKFLOW（总调度 13:2x 分派；sv-11） | 并发写测试：两进程同时写不丢版本 |
+| 2 | （sv-11）merge_pull 冲突检测（副本 seq ≥ 权威 seq → 报警、保留权威），唯一调用方（puller 持锁；resident_sync 那处改调 puller） | NETFIX + WORKFLOW | 冲突用例测试；SENTINEL 冲突计数探针 |
+| 3 | :8800 API / register_takes 对服务器镜头的写改成命令（rssh.run_retry 调所属主机 producer 子命令，op_id；EDITOR_INTEGRATION 附录 A）；outbox manifest 加 seq | UIRSI2 + FACTORY（总调度 13:2x 分派；sv-11）；子命令实现 DEBUG-RSI | arch_scan 新项：笔记本代码直接写服务器镜头 takes = 退化 |
+| 4 | 分区变更时的 takes 交接 | NETFIX（partition 写方）+ DEBUG-RSI | 借道演练：交接前后 seq 连续、无双写 |
+| 5 | 编辑器 P1 依赖 1–3 完成 | UIRSI2 / FILMUI | EDITOR_INTEGRATION §3-1/4 |
+依赖：§10 state_paths（partition 新位置）先行；D7 outbox / puller 接通（G7）。
 
 ## 进度
 

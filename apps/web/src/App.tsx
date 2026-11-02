@@ -20,11 +20,13 @@ import "./ds/live.css";
 import "./v3/breathe.css"; // UIRSI r43 K-UI-048：全站“正在渲染”呼吸灯
 import { StaleBanner } from "./v3/StaleBanner"; // UIRSI r45 页面过期检测（L-103）
 import "./v3/slide.css"; // UIRSI r45 · L-113 正片 B（总览纸框 + 审片页纸框）——开关 html.ui-slide，已被 L-114 取代、隔离保留
+import "./v3/ownerqueue.css"; // UIRSI2 L-116 待你看（顶栏入口 + 机签通过灰字；队列页）
 import "./v3/film.css"; // UIRSI r46 · L-114 电影胶片 A——开关 html.ui-film（?ui=film）
 import { applyUiStyle } from "./v3/uiStyle";
 applyUiStyle();
 window.addEventListener("hashchange", () => applyUiStyle());
 import { LiveBridge } from "./v3/LiveBridge";
+import { FeedbackHost } from "./v3/FeedbackLayer"; // UIRSI2 反馈模式：高亮 / 点选 / 弹框 / 列表抽屉
 
 // fredw-92/W4a：v3 新页面（W4c），挂在 #/script-create、#/models、#/assets
 const V3_PAGE_COMP: Record<V3Page, ReturnType<typeof lazy>> = {
@@ -39,6 +41,8 @@ const V3_PAGE_COMP: Record<V3Page, ReturnType<typeof lazy>> = {
   "#/script-chat": lazy(() => import("./v3/chat/ChatRoute")), // 回退补回：写作对话框
   "#/overview": lazy(() => import("./v3/pages/SeasonPage")), // 项目方 11-01：全剧总览（快捷键 1）
   "#/sound": lazy(() => import("./v3/pages/SoundPage")), // UIRSI B4：声音一级页（音色 · 旁白 · 对白 · 配乐）
+  "#/image-edit": lazy(() => import("./v3/pages/ImageEditPage")), // FILMUI 图像工坊 P1（②资产下的标签；docs/master/EDITOR_INTEGRATION.md）
+  "#/queue": lazy(() => import("./v3/pages/OwnerQueuePage")), // UIRSI2 L-116：待你看阵列（顶栏常驻入口）
 };
 /** UX4（R8）：后台没响应的提示——人话 + 自动重连计次 + 折叠的技术细节 */
 function BootError({ err, retry, slim }: { err: string; retry: () => Promise<unknown> | void; slim?: boolean }) {
@@ -175,6 +179,9 @@ function Shell() {
       <Toasts />
       <UndoHost />
       <LiveBridge />
+      <ErrorBoundary name="反馈模式">
+        <FeedbackHost />
+      </ErrorBoundary>
     </div>
   );
 }

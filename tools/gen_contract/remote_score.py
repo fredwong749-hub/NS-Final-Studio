@@ -232,7 +232,10 @@ try:
     s = json.loads(out[-1]) if out else {"items": {}, "cross": {}, "error": "score_remote: " + r.stderr[-300:]}
     for it in s.get("items", {}).values():
         for f in it.get("faces", []):
-            f.pop("emb", None)
+            if (f.get("h_ratio") or 0) >= 0.04 and f.get("emb"):      # Q1x（VQAGATE 11-02）：够大的脸带特征回本机，postflight 落 data/identity/emb/
+                f["emb"] = [round(float(x), 4) for x in f["emb"]]
+            else:
+                f.pop("emb", None)
     hi = [{"id": i["id"], "path": i["path"], "faces": len(s["items"].get(i["id"], {}).get("faces", []))} for i in items]
     rh = subprocess.run([HAND, "hands_remote.py"], cwd=R, input=json.dumps({"items": hi}), capture_output=True, text=True)
     ho = [ln for ln in rh.stdout.splitlines() if ln.startswith("{")]

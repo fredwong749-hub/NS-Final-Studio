@@ -35,7 +35,7 @@ CODE_PREFIX = ("tools/", "services/", "packages/", "config/", "knowledge/", "ops
 
 def rrun(host: str, cmd: str, data: bytes | None = None, timeout: float = 900) -> str:
     import rssh
-    r = rssh.run(host, cmd, input=data, timeout=timeout)
+    r = rssh.run_retry(host, cmd, input=data, timeout=timeout, tries=4)    # 主连接抖动（rc 255）退避重试，不新建握手
     if r.returncode != 0:
         raise RuntimeError(f"{host} rc={r.returncode}: {r.stderr.decode('utf-8', 'replace')[-400:]}")
     return r.stdout.decode("utf-8", "replace")
@@ -62,10 +62,46 @@ def night_files() -> dict[str, str]:
     return out
 
 
-def laptop_need(host: str, eps: list[int] | None) -> dict:
+def sheet_files() -> dict[str, str]:
+    """各剧 sheets_chosen.json 引用到的设定图（存在性检查是 stat，审计钩子记不到——11-02 12:5x 第二季造型 F 在 gpu36 缺图）"""
+    import re
     import deps
+    out = {}
+    for f in sorted((ROOT / "data/pipeline/runs").glob("*/assets/sheets_chosen.json")):
+        txt = f.read_text(encoding="utf-8")        # 读不出就抛（闭包不完整不许静默推送）
+        for rel in set(re.findall(r'((?:data|assets)/[^"\\]+?\.(?:png|jpg|jpeg|webp))', txt)):
+            if (ROOT / rel).is_file():
+                out[rel] = deps.sha256_file(ROOT / rel)
+    return out
+
+
+def import_files() -> dict[str, str]:
+    import deps
+    out = {}
+    for p in [ROOT / "data/import/script_v2.json", *sorted((ROOT / "data/import/runs").glob("*/script_v2.json"))]:
+        if p.is_file():
+            out[p.relative_to(ROOT).as_posix()] = deps.sha256_file(p)
+    return out
+
+
+def laptop_need(host: str, eps: list[int] | None) -> dict:
+    """依赖闭包：主剧按本机分区跑 dryrun；其它有导入稿的剧（第二季等）各起一个进程全量跑；加设定图和 night 合成依赖"""
+    import deps
+    import inbox as IB
     res = deps.dryrun(eps or deps.partition_eps(host))
     res["host"] = host
+    prim, runs = IB._runs(ROOT)
+    for run in runs:
+        if run == prim:
+            continue
+        try:
+            r2 = IB._dryrun_run(ROOT, run, prim, sys.executable)
+            res["files"].update({k: v for k, v in (r2.get("files") or {}).items() if v})
+            res.setdefault("runs_checked", []).append(run)
+        except Exception as e:  # noqa: BLE001
+            res.setdefault("runs_error", {})[run] = repr(e)[:200]
+    res["files"].update(sheet_files())
+    res["files"].update(import_files())     # 各剧导入稿：服务器 sha 必须等于笔记本（总调度 13:4x；不一致 = changed → 补推 + 记 import_drift）
     if host in ("gpu33", "gpu36"):          # 两台都跑 night（视频分区），合成依赖一并补齐
         res["files"].update(night_files())
     return res
@@ -90,6 +126,11 @@ def push(host: str, eps: list[int] | None = None, dry: bool = False) -> dict:
     need = laptop_need(host, eps)
     d = remote_diff(host, need)
     allx = sorted(set(d["absent"]) | set(d["changed"]))
+    imp = [r for r in allx if r.startswith("data/import/")]
+    if imp:      # 服务器导入稿和笔记本不一致：记账本（SENTINEL 开工单），本次补推
+        (ROOT / "data/factory").mkdir(parents=True, exist_ok=True)
+        with open(ROOT / "data/factory/import_drift.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps({"at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "host": host, "files": imp}, ensure_ascii=False) + chr(10))
     # D9 / K-OPS-F06：代码目录（tools / services / packages / config / knowledge / ops）只随 sv-* deploy 走，sync 不推——
     # 否则新配置会配上服务器的旧代码（例：K-REN-706 的 image_framing.json 先到、framing.py 还没部署）。差异只报 code_drift
     todo = [r for r in allx if not r.startswith(CODE_PREFIX)]
@@ -181,6 +222,43 @@ def write_ready_flag(host: str, v: dict, path: Path | None = None) -> dict:
     return rec
 
 
+def _table_key(t: dict) -> str:
+    import hashlib
+    core = {k: t.get(k) for k in ("shots", "runs", "files", "run_files")}
+    return hashlib.sha256(json.dumps(core, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def auto(hosts: tuple[str, ...] = ("gpu33", "gpu36"), dry: bool = False) -> dict:
+    """K-OPS-F03 修订（总调度 12:2x：参考板变化时自动重建期望表，不要等 deploy）：重建期望表；内容（不含时间戳）和上次推过的不同
+    → 对每台跑 push（补缺失的依赖 sha + 推新表）。由 resident_sync loop 每拍调（WORKFLOW），也可手动跑。没变化 = 什么都不做"""
+    import inbox as IB
+    t = IB.build()
+    key = _table_key(t)
+    st_p = ROOT / "data/factory/expected_pushed.json"
+    try:
+        last = json.loads(st_p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):   # arch-ok: 没有推送记录 = 首次（或记录坏了）→ 两台都重推一遍，不会漏推
+        last = {}
+    res = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "key": key[:16], "counts": t.get("counts"), "pushed": {}}
+    for h in hosts:
+        if last.get(h) == key:
+            res["pushed"][h] = "unchanged"
+            continue
+        if dry:
+            res["pushed"][h] = "would_push"
+            continue
+        try:
+            r = push(h)            # push 自己会重建并推表；依赖文件按 sha 补
+            res["pushed"][h] = {"sent": r.get("sent"), "absent": len(r.get("absent") or []), "expected": str(r.get("expected_refs"))[:20]}
+            last[h] = key
+        except Exception as e:  # noqa: BLE001
+            res["pushed"][h] = f"失败：{e!r}"[:200]
+    if not dry:
+        _atomic_json(st_p, last)
+    _save("all", "auto", res)
+    return res
+
+
 def status() -> dict:
     out = {}
     for h in ("gpu33", "gpu36"):
@@ -193,14 +271,20 @@ def status() -> dict:
     return out
 
 
+def _atomic_json(p: Path, obj) -> None:
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, p)
+
+
 def _save(host: str, kind: str, rec: dict) -> None:
     try:
         st = json.loads(STATE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         st = {}
     st.setdefault(host, {})[kind] = rec
-    STATE.parent.mkdir(parents=True, exist_ok=True)
-    STATE.write_text(json.dumps(st, ensure_ascii=False, indent=1), encoding="utf-8")
+    _atomic_json(STATE, st)
 
 
 def main(argv=None) -> int:
@@ -214,6 +298,8 @@ def main(argv=None) -> int:
             s.add_argument("--dry", action="store_true")
         else:
             s.add_argument("--write-ready", action="store_true")
+    au = sub.add_parser("auto")
+    au.add_argument("--dry", action="store_true")
     sub.add_parser("pull")
     sub.add_parser("status")
     a = ap.parse_args(argv)
@@ -225,6 +311,8 @@ def main(argv=None) -> int:
         print(json.dumps({k: v for k, v in r.items() if k != "mismatch"} | {"mismatch_sample": dict(list(r["mismatch"].items())[:3])},
                          ensure_ascii=False, indent=1))
         return 0 if r["ok"] else 2
+    elif a.cmd == "auto":
+        print(json.dumps(auto(dry=a.dry), ensure_ascii=False, indent=1))
     elif a.cmd == "pull":
         print("pull 由 NETFIX puller 负责（长连接 + 断点续传 + sha 校验），落地后调 ops/offline/merge_pull.merge_file；本命令不另起传输")
     else:

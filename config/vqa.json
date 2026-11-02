@@ -264,6 +264,8 @@
   "enforce": true,
   "untested_blocks": true,
   "continuity_prev_shot": true,
+  "hair_primary": true,
+  "_hair_primary": "总调度 11-02 采纳标准（主判召回 ≥ 现行、误报 ≤ 现行、回归集 12/12 → 带开关上线）：Q1a 标定集 44 张 A/B，召回 1/1 = 1/1，误报 0/43 < 3/43（3 张看图误报亲看确认：林晚雾霾蓝正常，看图称“原文未提蓝发 / 与参考衬衫不符”）；Q1a fail 照拦。data/vqa/gate_calib/hair_primary_ab.json，GATE_CALIBRATION §19",
   "auto_review_redo": true,
   "auto_review_by": "VQAGATE 本地看图闸门",
   "_extra_limbs": "总调度 11-01 23:0x：extra_limbs 两口径一致率仅 0.828，单独拦会来回重出 → 看图这一项本身不拦；视频层改成 V6 手数规则命中且看图 extra_limbs = defect 两者同时成立才判多肢（score_clip.gate），只有一方命中只记录；等 V6 看图复核（多手 vs 衣物形变）做完再评估",

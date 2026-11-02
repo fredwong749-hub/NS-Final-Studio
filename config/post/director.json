@@ -10,6 +10,8 @@
   "post_pass": true,
   "film_score": true,
   "lip_redo": true,
+  "shot_music_off": true,
+  "_shot_music_off": "K-EDT-820（总调度 13:1x 派，项目方：按镜头配乐断层、不连贯）：合成时 H3 轨只留画内对白句（h3_music=dialogue_only），Pika 提示词 non_diegetic_music 写 N/A；配乐只用集级 BGM（剪辑锁定后按整集情绪曲线出），场景底噪由 post_pass 铺",
   "camera_norm": true,
   "_camera_norm": "11-02 总调度批复 r2 第 1 条：接（新剧本视频 0/102，改提示词不浪费已出视频）。改动记 CompiledShot.h3_norm（rule K-REN-801）；test_h3_prompt 不变量改为“只有项目方覆盖或带规则号的编译层规范化能改 H3 正文”"
 }

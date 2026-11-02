@@ -190,3 +190,53 @@ items:
     enforced_by: tools/sentinel/probes.py:p_s19
     status: code_reads
     owner: SENTINEL
+  G26_decl_vs_actual:
+    value: {every_s: 60, min_sv: sv-20261102-09, decl: config/factory/hosts.json, owner_loop: DEBUG-RSI / FACTORY}
+    source: 总调度 11-02 11:2x 批（SYSARCH 4-2 G26）：以 hosts.json 为声明，每拍核对每条启用的道——端口实测可达、system_stats 正常、GPU 序号对得上、坏卡（gpu33:2）没有作业；sv-09（hosts.py 入版）部署后上线
+    note: sv-09 部署到服务器之前探针自动不判（hosts_decl 返回 None），部署后自动生效；届时 S2 端口表、S6 server_root 也改读 hosts.json
+    enforced_by: tools/sentinel/probes.py:p_g26
+    status: code_reads
+    owner: SENTINEL
+  S20_scratchpad_procs:
+    value:
+      every_s: 120
+      path_match: "[\\\\/]Temp[\\\\/]claude[\\\\/].*[\\\\/]scratchpad[\\\\/]"
+      owner_by_script: {lend_any.py: DEBUG-RSI, hold_lane.py: DEBUG-RSI, lend_lane.sh: DEBUG-RSI}
+      known: {lend_any.py: 已知，sv-10 收编, hold_lane.py: 已知，sv-10 收编, lend_lane.sh: 已知，sv-10 收编}
+      readonly_exempt: {watch_green.sh: 只读，保留（总调度 11-02 14:1x 认领：每 10 分钟只读跑 compile --check / decision_propagation --dry / 写作 lint，只打标准输出；sv-11 后由 SENTINEL 决定并入后停掉）}
+      owner_loop: 总调度
+      ssh_loop: {min_age_s: 7200, window_s: 1800, min_spawns: 3, spawns_file: data/netfix/ssh_spawns.jsonl}
+    source: SYSARCH 派单（总调度批，K-OPS-Y04）：会改生产状态的代码不许从 scratchpad 跑；笔记本上命令行在 scratchpad 路径下、还在运行的 python / sh 进程即开单，派进程负责方（按脚本名判断，判断不出派总调度）
+    note: 只看命令行（Windows CIM 拿不到进程工作目录，命令行里含 scratchpad 路径才判）；known 里的脚本照样开单但标“已知，sv-10 收编”，不重复催。ssh_loop（总调度 13:3x 扩展）：会话 shell（bash / sh / pwsh / powershell）活了 > 2 小时、30 分钟内在它下面新起 ssh ≥ 3 次 = 永不结束的轮询（VQAGATE 凌晨两个轮询让跳板新建连接维持 108 次/小时），数据 = SENTINEL 每拍的进程快照（新 ssh 的父 / 祖父）∪ NETFIX ssh_spawn_watch.ps1 的 data/netfix/ssh_spawns.jsonl
+    enforced_by: tools/sentinel/probes.py:p_s20
+    status: code_reads
+    owner: SENTINEL
+  S21_state_legacy_read:
+    value: {window_s: 86400, file: data/state/legacy_reads.jsonl, every_s: 300, owner_loop: 调用方负责方}
+    source: SYSARCH / FACTORY 11-02 12:3x（ARCH_ROADMAP §10）：运行期状态从 config/ 挪到 data/state/；24 小时内出现 state_legacy_read（data/state/legacy_reads.jsonl）即开单，sv-11 删旧读的前提是 24 小时内为 0
+    note: 每个状态名一张单，证据列调用方（caller 文件:行）与次数；负责方按 caller 文件查 tools/qa/ownership.yaml
+    enforced_by: tools/sentinel/probes.py:p_s21
+    status: code_reads
+    owner: SENTINEL
+  S22_freeze_drift:
+    value: {file: data/rsi/freeze_drift.jsonl, every_s: 300, owner_loop: 文件负责方}
+    source: FACTORY 11-02 12:3x：cut 冻结期间有改动的文件追加到 data/rsi/freeze_drift.jsonl（{sv, at, files}），按它开单，负责方填文件的负责方（SENTINEL 自己 11:56 就违规过一次）
+    note: 每条记录按负责方分组开单；之后有一次成功的 cut（last_cut.ok 且时间晚于记录）= 这些改动已进下一版 → 自动关单
+    enforced_by: tools/sentinel/probes.py:p_s22
+    status: code_reads
+    owner: SENTINEL
+  S23_laptop_lane_reach:
+    value: {window_s: 300, min_ratio: 0.8, min_samples: 3, half_down: 0.5, timeout_s: 5, every_s: 60, owner_loop: NETFIX,
+            fallback_ports: {"gpu33:0": 18188, "gpu33:1": 18189, "gpu33:3": 18191, "gpu36:0": 18288, "gpu36:1": 18289}}
+    source: 总调度 11-02 13:2x：笔记本侧出图道可达率——每拍测本地隧道端口 /system_stats，5 分钟内可达率 < 80%，或同一拍半数以上的道同时不通 → 开单派 NETFIX（13:07–13:21 隧道来回重连、6 道全部拒连，S2 / G26 只测服务器本机端口所以没报）；与 NETFIX A-TUNNEL-FLAP 互为备份；gpu36:2 按 L-100 退役不计入
+    note: 道与隧道端口优先读 config/factory/hosts.json（enabled 且有 tunnel_port、role 含 image），读不到用 fallback_ports；编号用 S23（S21 已给“读旧状态路径”）
+    enforced_by: tools/sentinel/probes.py:p_s23
+    status: code_reads
+    owner: SENTINEL
+  S24_api_latency:
+    value: {base: "http://127.0.0.1:8800", paths: [/api/episodes, /api/season], last_n: 20, p95_max_s: 2.0, timeout_s: 30, every_s: 60, owner_loop: UIRSI2}
+    source: 总调度 11-02 14:1x：每分钟测 /api/episodes 和 /api/season，最近 20 次 p95 ≥ 2 s 开单派 UIRSI2（今天 /api/season 一度 6–25 s，页面卡在加载界面没人报警；UIRSI2 改成后台缓存后 0.02–0.25 s）
+    note: 带本机只读查看令牌（data/auth/viewer_token，x-ns-viewer-token）；超时 / 非 200 按 timeout_s 计入（不能当快）；样本 ≥ 5 才判
+    enforced_by: tools/sentinel/probes.py:p_s24
+    status: code_reads
+    owner: SENTINEL

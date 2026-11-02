@@ -91,3 +91,9 @@ def test_other_lane_tables_drift_report_only():
     drift = _drift()
     print("hosts drift:", drift)
     assert isinstance(drift, list)
+
+
+def test_recipe_max_frames_h3_on_3090():
+    assert H.recipe_max_frames("gpu33:0", "h3_funcontrolnet") == 107
+    assert H.recipe_max_frames("gpu36:1", "h3_funcontrolnet") == 107
+    assert H.recipe_max_frames("gpu36:1", "unknown_recipe") is None

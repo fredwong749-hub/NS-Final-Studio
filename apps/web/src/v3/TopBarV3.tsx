@@ -3,8 +3,6 @@ import { useMe } from "../projects/AuthGate.helpers";
 import { AuditDrawer } from "./AuditDrawer";
 import { useEffect, useState, type ReactNode } from "react";
 import { api, qwenApi } from "../api";
-import { GpuButton } from "../components/GpuPanel";
-import { RenderTasksButton } from "../components/RenderTasks";
 import { useStudio, type View } from "../store";
 import { ThemeToggle } from "../themeMode";
 import { useTheme } from "../themeMode.helpers";
@@ -18,12 +16,14 @@ import { loadReadiness } from "./Materials.helpers";
 import { openMaterials } from "./MaterialsDrawer.helpers";
 import { sbUi } from "./StoryboardDetails.helpers";
 import type { V3Page } from "./TopBarV3.helpers";
-import { LiveIndicator } from "./LiveBridge";
-import { InfraChip } from "./InfraStatus";
-import { useInfra } from "./InfraStatus.helpers";
 import { ProduceButton } from "./EpisodeProduce"; // fredw-92/EB 整集出片
 import { useProduceView } from "./EpisodeProduce.helpers";
-import { Brand } from "../ds/Brand"; // momoso 标识（项目方挑定候选 2 · 双环）
+import { Brand } from "../ds/Brand";
+// momoso 标识（项目方挑定候选 2 · 双环）
+import { setFbDrawer } from "./feedback";
+import { SystemStatusButton, SystemStatusHidden } from "./SystemStatus"; // UIFIX-S：顶栏右侧只放“待你看”和“系统状态”
+import { queueFailText, useOwnerQueue } from "./ownerQueue"; // UIRSI2 L-116 待你看队列
+import { FeedbackToggle } from "./FeedbackLayer"; // UIRSI2 反馈模式（后端 FEEDBACK）
 
 /** 新页面路由（W4c 的页面挂在 #/…） */
 
@@ -173,8 +173,28 @@ async function tickProduction(notify: (m: string, k?: "ok" | "err") => void) {
   }
 }
 
+/** UIRSI2 L-116：顶栏常驻“待你看 ● N”——有必须拍板的事 = 琥珀点，其余 = 灰点；队列读取失败 = 琥珀点 + “!”（不显示成 0）。点开 = #/queue 阵列页 */
+function OwnerQueueButton({ on }: { on: boolean }) {
+  const { q, err } = useOwnerQueue();
+  const fail = queueFailText(q, err);
+  const n = q?.count ?? 0;
+  const amber = !!fail || (q?.counts.decide ?? 0) > 0;
+  const title = fail
+    ? fail
+    : q
+      ? `待你看 ${n} 项：必须你拍板 ${q.counts.decide} · 机签抽检 ${q.counts.spot} · 审美挑选 ${q.counts.pick}
+今天系统自动处理 ${q.auto_today.total} 项，不进队列`
+      : "正在读待你看队列";
+  return (
+    <button className={`v3-oq${on ? " on" : ""}`} data-oq-count={fail ? "error" : String(n)} onClick={() => (location.hash = "#/queue")} title={title}>
+      待你看 <span className={`v3-dot d-${amber ? "yellow" : "gray"}`} aria-hidden /> <b>{fail ? "!" : q ? n : "…"}</b>
+    </button>
+  );
+}
+
 export function TopBarV3({ page }: { page: V3Page | null }) {
   const st = useStudio();
+  const { q: oq } = useOwnerQueue();
   const { episodes, epNum, gotoEpisode, view, setView, jobs, drawer, setDrawer, setHelpOpen, setPaletteOpen, episode, filter, setFilter } = st;
   const { sop } = useSop();
   const total = episodes?.length ?? 60;
@@ -213,24 +233,13 @@ export function TopBarV3({ page }: { page: V3Page | null }) {
     (j) => j.state === "failed" && !jobs.some((k) => k.shot_id === j.shot_id && k.stage === j.stage && k.state === "done" && k.created_at > j.created_at),
   );
   const interrupted = unresolved.filter(isInterrupted).length;
-  const failed = unresolved.length - interrupted;
   const offline = backend != null && !backend.reachable;
-  const qCls = failed || offline ? "bad" : running || queued ? "busy" : "ok";
   // UXF1：整集出片进度与队列合成一个胶囊（整集进度条只在“整集出片”弹窗和片段条的进度点里看）
   const prod = useProduceView(epNum);
   const prodOn = prod?.state === "running" || prod?.state === "waiting";
   const pc = prod?.counts ?? {};
   const pDone = (pc.done ?? 0) + (pc.skipped ?? 0);
   const pTotal = Object.values(pc).reduce((a, b) => a + b, 0);
-  const etaMin = prod?.eta_s ? Math.max(1, Math.round(prod.eta_s / 60)) : null;
-  const infraOn = !!useInfra().data; // r39：顶栏连接胶囊有数据时，“出图未连上”不在按钮尾巴重复
-  const qText = prodOn
-    ? `整集 ${pDone}/${pTotal}${etaMin ? ` · 约 ${etaMin} 分钟` : ""}`
-    : running || queued
-      ? `生成中 ${running} · 排队 ${queued}`
-      : offline
-        ? "出图未连上"
-        : "队列空";
   const [themeMode, toggleTheme] = useTheme();
   const { me, logout } = useMe();
   const [auditOpen, setAuditOpen] = useState(false);
@@ -303,7 +312,6 @@ export function TopBarV3({ page }: { page: V3Page | null }) {
   const lookOk = lookChars.filter((c) => !!(c.plan as { owner_confirmed_at?: string | null } | null)?.owner_confirmed_at).length;
   // UXF4（审查 #1）：造型还没读到时不写“就绪”（以前先闪“就绪”再变“造型待确认 3”）
   const s2 = !looks ? "" : !lookChars.length ? (sop && !sop.counts.S2 ? "就绪" : "") : lookOk === lookChars.length ? "造型已确认" : `造型待确认 ${lookChars.length - lookOk}`;
-  const loading: Record<SopStage, boolean> = { S1: !sop || !gaps, S2: !looks, S3: !n, S4: !n, S5: !sop };
   const sub: Record<SopStage, string> = {
     // UX5（D 口径冲突）：① 和审片行“资料不全 N”用同一份检查（/readiness）；读不到再退回剧本字段统计
     S1: ready ? (ready.bad ? `${ready.bad} 镜还缺资料` : "资料都齐了") : !sop || !gaps ? "" : gaps.size ? `${gaps.size} 镜待补` : "已验收",
@@ -360,34 +368,23 @@ export function TopBarV3({ page }: { page: V3Page | null }) {
               <button className={`v3-step${done ? " done" : ""}${here ? " on" : ""}${cur === s.id ? " cur" : ""}`} onClick={() => go(s.to)} title={`${i + 1} ${s.label}${sub[s.id] ? ` · ${sub[s.id]}` : ""}
 点击：${s.hint}${s.id === "S5" && dlgSrc ? `
 成片对白：${dlgSrc.label}（${dlgSrc.hint}）` : ""}${s.id === "S4" && n ? `
-有视频 ${vids} · 待你审 ${Math.max(0, vids - passed)} · 生成中 ${vidRunning}` : ""}${cur === s.id ? "（本集停在这一步）" : ""}`}>
-                <i>{done ? "✓" : i + 1}</i>
+有视频 ${vids} · 通过 ${passed} · 生成中 ${vidRunning} · 待你看 ${oq?.count ?? "…"}（顶栏“待你看”）` : ""}${cur === s.id ? "（本集停在这一步）" : ""}`}>
+                <i className={`v3-sdot d-${done ? "green" : cur === s.id ? "yellow" : "gray"}`} aria-hidden="true" />
                 <span>{s.label}</span>
-                {sub[s.id] ? <small>{sub[s.id]}</small> : loading[s.id] ? <small className="sk" aria-hidden="true" /> : <small className="none" aria-hidden="true" />}
               </button>
             </li>
           );
         })}
       </ol>
       <div className="v3-top-r">
-      <LiveIndicator />
-      {/* UIRSI r38（项目方 22:1x：“uiux加个实时连接状态”）：跳板 / 6 条连接 / 服务器常驻 / 本机 / 自动重连，一个胶囊点开看 */}
-      <InfraChip />
-      <GpuButton labels="short" className="v3-gpu" />
-      {/* GPUVIEW 11-01（项目方：“顶部我需要一个rendering任务tasks…”）：原“● 生成中 · 排队 · 失败”胶囊换成“渲染任务”中心
-          （全系统：各 agent 的 ComfyUI 任务 + 画布任务 + 写作 + 计划中的镜头）；原胶囊的整集进度 / 出图未连上 / 中断写在按钮尾巴和悬停里，
-          原任务队列页从抽屉头部“任务队列页”进入（G10 不删功能） */}
-      <RenderTasksButton
-        className={`v3-queue q-${prodOn && qCls === "ok" ? "busy" : qCls}`}
+      <OwnerQueueButton on={page === "#/queue"} />
+      <FeedbackToggle />
+      {/* UIFIX-S：顶栏右侧只放“待你看 N”和“系统状态”；实时 / 连接 / 卡 / 渲染任务 / 悬停出声 都在系统状态面板里（功能不删） */}
+      <SystemStatusButton />
+      <SystemStatusHidden
         onOpenJobsPage={() => go("jobs")}
         alert={offline}
         extraTitle={[prodOn ? `整集出片进行中：${pDone}/${pTotal} 步完成；画布队列 生成中 ${running} · 排队 ${queued}` : "", offline ? `${backend!.url} 连不上：${backend!.error ?? ""}` : "", interrupted ? `中断 ${interrupted}：API 重启时打断，不是画面问题，可重试` : ""].filter(Boolean).join("\n")}
-        extra={
-          <>
-            {/* UIRSI r39：“出图未连上”和顶栏连接胶囊重复，有连接状态时只留在悬停提示里（整集出片进度照常显示） */}
-            {prodOn || (offline && !infraOn) ? <span className="v3-q-int"> · {qText}</span> : null}
-          </>
-        }
       />
       <Pop label={<>工具 ▾</>} btnClass="v3-btn" align="right" title="剧本、资产、模型配置、旧视图与运行工具">
         {(close) => (
@@ -401,6 +398,12 @@ export function TopBarV3({ page }: { page: V3Page | null }) {
                     <small>{hint}</small>
                   </button>
                 ))}
+                {g.group === "运行" && (
+                  <button data-tool="feedback-list" onClick={() => (setFbDrawer(true), close())} title="你提过的所有反馈：处理进度、被打回的、已修的">
+                    <span>反馈列表</span>
+                    <small>看每条反馈处理到哪一步</small>
+                  </button>
+                )}
                 {g.group === "运行" && (
                   <button data-tool="tick" onClick={() => (void tickProduction(st.notify), close())} title="立即推进一步（后台每 20 秒自动推进）">
                     <span>立即推进一步</span>

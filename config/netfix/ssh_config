@@ -85,3 +85,18 @@ Host gpu33-tb
     IdentityFile ~/.ssh/id_rsa_gpu33
     IdentityFile ~/.ssh/id_ed25519_gpu36
     ConnectTimeout 15
+Host gpu36-tc
+    HostName 127.0.0.1
+    Port 22362
+    User root
+    HostKeyAlias gpu36
+    IdentityFile ~/.ssh/id_ed25519_gpu36
+    ConnectTimeout 15
+Host gpu33-tc
+    HostName 127.0.0.1
+    Port 22332
+    User root
+    HostKeyAlias gpu33
+    IdentityFile ~/.ssh/id_rsa_gpu33
+    IdentityFile ~/.ssh/id_ed25519_gpu36
+    ConnectTimeout 15

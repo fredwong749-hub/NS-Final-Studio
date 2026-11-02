@@ -183,12 +183,14 @@ def test_ssh_cmd_has_keepalive_and_tag():
     base = " ".join(s.ssh_cmd("base-a"))                                 # r3 底座 a：香港，只转发两台 sshd
     assert "127.0.0.1:22360:10.0.0.36:22" in base and "127.0.0.1:22330:10.0.0.33:22" in base and base.endswith(" 194relay-hk")
     assert s.ssh_cmd("base-b")[-1] == "194relay" and "127.0.0.1:22361:10.0.0.36:22" in " ".join(s.ssh_cmd("base-b"))   # 底座 b：直连
-    assert s.ssh_cmd("gpu36-l1")[-1] == "gpu36-tb"                       # 按道分摊：l1 挂 b
-    s.hosts["base-b"]["state"] = "backoff"
-    assert s.ssh_cmd("gpu36-l1")[-1] == "gpu36-t"                        # b 断 → 改挂 a
+    assert s.ssh_cmd("gpu36-l1")[-1] == "gpu36-t"                        # 12:1x 起内层全部首选 a（香港），b 只做热备
+    assert "127.0.0.1:8871:127.0.0.1:8870" in " ".join(s.ssh_cmd("gpu36-vqa"))   # 看图转发独立一条，不跟出图道一起断
+    s.hosts["base-a"]["state"] = "backoff"
+    assert s.ssh_cmd("gpu36-l1")[-1] == "gpu36-tb"                       # a 断 → 改挂 b
+    s.hosts["base-a"]["state"] = "up"
     cmd = " ".join(s.ssh_cmd("gpu36-l0"))
     for k in ("-F config/netfix/ssh_config", "ExitOnForwardFailure=yes", "Tag=nsnetfix-gpu36-l0",
-              "127.0.0.1:18288:127.0.0.1:8188", "127.0.0.1:8871:127.0.0.1:8870"):
+              "127.0.0.1:18288:127.0.0.1:8188"):
         assert k in cmd
     assert cmd.endswith(" gpu36-t")                                      # 内层连接在底座里直连 sshd，不在跳板握手
     assert "18289" in " ".join(s.ssh_cmd("gpu36-l1")) and "18288" not in " ".join(s.ssh_cmd("gpu36-l1"))   # 按道一条连接
@@ -349,23 +351,6 @@ def test_split_obj_run_prefix():
     assert D.split_obj("first:ep01-S1") == (None, "first:ep01-S1")      # primary 无前缀
 
 
-def test_new_run_shots_prefixed_primary_unchanged():
-    part = D.partition()
-    h = next(k for k, v in part["images"].items() if 1 in v)
-    base = D.control_for(h, {}, READY, ph={}, runs=[])
-    with_run = D.control_for(h, {}, READY, ph={}, runs=[("s11_v1", 10)],
-                             ready_by_run={"s11_v1": {"episodes": {"1": {"shots": ["ep01-S1", "ep01-S2"]}, "2": {"shots": ["ep02-S1"]}}}})
-    assert [x for x in with_run["only"] if "/" not in x] == base["only"]          # primary 零变化
-    extra = [x for x in with_run["only"] if "/" in x]
-    assert extra == ["s11_v1/ep01-S1", "s11_v1/ep01-S2"]                          # 同一分区规则（按集），带前缀
-    other = next(k for k, v in part["images"].items() if 2 in v)
-    assert "s11_v1/ep02-S1" in D.control_for(other, {}, READY, ph={}, runs=[("s11_v1", 10)],
-                                             ready_by_run={"s11_v1": {"episodes": {"2": {"shots": ["ep02-S1"]}}}})["only"]
-    assert D.control_for(h, {}, READY, ph={h: "laptop"}, runs=[("s11_v1", 10)],
-                         ready_by_run={"s11_v1": {"episodes": {"1": {"shots": ["ep01-S1"]}}}})["only"] == [D.NONE]   # 覆盖期照样不派
-
-
-# ---------------------------------------------------------------- rssh.run_retry（SYSARCH 4-1 统一接口）
 def test_run_retry_retries_only_on_255_and_timeout(monkeypatch):
     import subprocess as sp
     calls, sleeps = [], []
@@ -418,10 +403,167 @@ def test_degraded_base_not_preferred():
     """11:5x：base-b 直连 banner 20 s、其上道反复超时 → 劣化底座不优先，内层改挂健康的那条；恢复后回首选"""
     s = TS.Supervisor.__new__(TS.Supervisor)
     s.c = json.loads(TS.CONF.read_text(encoding="utf-8"))
-    s.hosts = {"base-a": {"state": "up", "slow_streak": 0}, "base-b": {"state": "up", "slow_streak": 3}}
-    assert s.pick_base("gpu36-l1") == "base-a"                          # l1 首选 b，但 b 劣化
-    s.hosts["base-b"]["slow_streak"] = 0
-    assert s.pick_base("gpu36-l1") == "base-b"
+    s.hosts = {"base-a": {"state": "up"}, "base-b": {"state": "up", "degraded": True}}
+    assert s.pick_base("gpu36-l1") == "base-a"
+    s.hosts["base-a"]["degraded"], s.hosts["base-b"]["degraded"] = True, False
+    assert s.pick_base("gpu36-l1") == "base-b"                          # 首选 a 劣化、b 健康 → b
     s.hosts["base-a"]["state"] = "backoff"
-    s.hosts["base-b"]["slow_streak"] = 5
+    s.hosts["base-b"]["degraded"] = True
     assert s.pick_base("gpu36-l0") == "base-b"                          # 只剩劣化的也要用
+
+
+# ---------------------------------------------------------------- 每个 producing run 各一份 control（sv-10，11:57 第二季两台重复派 4 个对象）
+S2 = {"episodes": {str(e): {"shots": [f"series10_s2/ep{e:02d}-S{i}" for i in (1, 2)]} for e in range(1, 10)}}
+
+
+def test_run_control_unprefixed_disjoint_and_complete():
+    part = D.partition()
+    sets = {}
+    for h in ("gpu33", "gpu36"):
+        f = D.control_for(h, {}, S2, part, ph={}, runs=[], run_id="series10_s2")
+        sets[h] = set(f["only"]) - {D.NONE}
+        assert all("/" not in x for x in sets[h])                                     # DEBUG-RSI：第二季 producer 认不带前缀的镜号
+        assert {int(x[2:4]) for x in sets[h]} <= set(part["images"][h])               # 只派本台分区的集
+    assert not (sets["gpu33"] & sets["gpu36"])                                        # 两台不重复
+    assert sets["gpu33"] | sets["gpu36"] == {x.split("/", 1)[1] for v in S2["episodes"].values() for x in v["shots"]}   # 并集 = 全部
+    assert D.verify_run("series10_s2", S2, part, ph={}) == []
+    assert D.run_control_path("series10_s2").as_posix().endswith("data/producer/runs/series10_s2/control.json")
+
+
+def test_primary_control_no_longer_carries_other_runs():
+    f = D.control_for("gpu33", {}, READY, ph={}, runs=[("series10_s2", 0)], ready_by_run={"series10_s2": S2})
+    assert not [x for x in f["only"] if "/" in x] and f["dispatch_by"]["extra_runs"].get("series10_s2")
+
+
+def test_verify_run_catches_overlap():
+    bad = json.loads(json.dumps(FIXED_PARTITION))
+    bad["images"]["gpu36"] = bad["images"]["gpu36"] + [1]                             # ep01 两台都分到
+    errs = D.verify_run("series10_s2", S2, bad, ph={})
+    assert errs and "重复" in errs[0]
+
+
+def test_run_control_follows_global_pause_with_d5_fields():
+    f = D.control_for("gpu36", {"paused": True, "paused_by": "总调度", "reason_kind": "ops", "expires_at": "2026-11-02T13:00:00+09:00"},
+                      S2, ph={}, runs=[], run_id="series10_s2")
+    assert f["paused"] is True and f["reason_kind"] == "ops" and f["expires_at"].startswith("2026-11-02T13")
+
+
+# ---------------------------------------------------------------- Top15 #5 多写者：借道 hold 进每季 control；partition 三方合并不丢借道
+def test_run_control_holds_lent_and_temp_lanes():
+    part = json.loads(json.dumps(FIXED_PARTITION))
+    part["retired_lanes"] = ["gpu36:2", "gpu33:1"]
+    part["_lent_lanes"] = {"gpu33:3": {"to": "IMGFIX", "until": "2099-01-01T00:00:00", "at": "2026-11-02T12:26:54"},
+                           "gpu33:0": {"to": "OLD", "until": "2000-01-01T00:00:00"}}          # 过期的不 hold
+    part["_temp_holds"] = {"gpu36:0": {"why": "test"}}
+    for rid in (None, "series10_s2"):
+        hold = set(D.control_for("gpu33", {}, S2, part, ph={}, runs=[], run_id=rid)["hold_lanes"])
+        assert {"gpu33:1", "gpu33:3", "gpu36:0", "gpu36:2"} <= hold and "gpu33:0" not in hold   # 主剧与第二季同一套
+
+
+def test_merge_partition_keeps_lending_from_both_writers():
+    base = {"images": {"gpu33": [1]}, "retired_lanes": ["gpu36:2"], "_lent_lanes": {}}
+    mine = {"images": {"gpu33": [1, 3]}, "retired_lanes": ["gpu36:2"], "_lent_lanes": {}}           # 本机只改了分区
+    theirs = {"images": {"gpu33": [1]}, "retired_lanes": ["gpu36:2", "gpu33:3"],                     # 服务器侧兜底进程借出 gpu33:3
+              "_lent_lanes": {"gpu33:3": {"to": "IMGFIX", "at": "2026-11-02T12:26:54"}}}
+    m = D.merge_partition(base, mine, theirs)
+    assert m["images"]["gpu33"] == [1, 3]                                                              # 非借道字段以笔记本为准
+    assert "gpu33:3" in m["retired_lanes"] and "gpu33:3" in m["_lent_lanes"]                          # 借道不丢（12:2x 被整份覆盖抹掉的事故）
+    base2 = m
+    mine2 = json.loads(json.dumps(m))
+    mine2["retired_lanes"].remove("gpu33:3")
+    del mine2["_lent_lanes"]["gpu33:3"]                                                                 # 本机归还
+    m2 = D.merge_partition(base2, mine2, json.loads(json.dumps(m)))
+    assert "gpu33:3" not in m2["retired_lanes"] and "gpu33:3" not in m2["_lent_lanes"]                # 归还能传播，不会被并集复活
+    a = {"gpu36:1": {"to": "A", "at": "2026-11-02T12:00:00"}}
+    b = {"gpu36:1": {"to": "B", "at": "2026-11-02T12:30:00"}}
+    assert D.merge_partition({"_lent_lanes": {}}, {"_lent_lanes": a}, {"_lent_lanes": b})["_lent_lanes"]["gpu36:1"]["to"] == "B"   # 两边都改：更晚的赢
+    assert "gpu33:3" in D.merge_partition(None, mine, theirs)["retired_lanes"]                         # 没有祖先：借道取并集
+
+
+def test_partition_lock_serializes_writers(tmp_path):
+    """多写者共用锁：持锁期间另一个写者拿不到（超时），释放后能拿到"""
+    p = tmp_path / "p.lock"
+    with D.partition_lock(path=p):
+        import subprocess as sp
+        code = ("import sys;sys.path.insert(0,r'%s');import dispatch as D\n"
+                "try:\n with D.partition_lock(timeout=1,path=r'%s'): print('GOT')\n"
+                "except TimeoutError: print('BUSY')") % (str(ROOT / "tools/netfix"), str(p))
+        assert sp.run([sys.executable, "-c", code], capture_output=True, text=True).stdout.strip() == "BUSY"
+    with D.partition_lock(timeout=1, path=p):
+        pass
+
+
+# ---------------------------------------------------------------- ARCH_ROADMAP §10：partition / override 迁到 data/state/（sv-10 兼容期）
+def _seed(root, new=None, old=None):
+    if new is not None:
+        D.SP.write_state("netfix/partition", new, root)
+    if old is not None:
+        p = D.SP.legacy_path("netfix/partition", root)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(old), encoding="utf-8")
+
+
+def test_state_only_new(tmp_path):
+    _seed(tmp_path, new={"v": "new"})
+    assert D.read_partition(tmp_path) == {"v": "new"}
+    assert not (tmp_path / "data/state/legacy_reads.jsonl").exists()
+
+
+def test_state_only_old_compat_logs(tmp_path, monkeypatch):
+    monkeypatch.delenv("NS_STATE_STRICT", raising=False)
+    _seed(tmp_path, old={"v": "old"})
+    assert D.read_partition(tmp_path) == {"v": "old"}
+    assert "netfix/partition" in (tmp_path / "data/state/legacy_reads.jsonl").read_text(encoding="utf-8")   # 读旧留痕
+    assert D.migrate_state(tmp_path) == ["netfix/partition"] and D.SP.state_path("netfix/partition", tmp_path).is_file()
+
+
+def test_state_both_new_wins(tmp_path):
+    _seed(tmp_path, new={"v": "new"}, old={"v": "old"})
+    assert D.read_partition(tmp_path) == {"v": "new"} and D.migrate_state(tmp_path) == []      # 新在就不复制
+
+
+def test_state_write_lands_only_new(tmp_path):
+    _seed(tmp_path, new={"v": 1})
+    D.SP.write_state("netfix/partition", {"v": 2}, tmp_path)
+    assert D.read_partition(tmp_path) == {"v": 2} and not D.SP.legacy_path("netfix/partition", tmp_path).exists()
+
+
+def test_state_strict_next_version_raises_on_old_only(tmp_path, monkeypatch):
+    _seed(tmp_path, old={"v": "old"})
+    monkeypatch.setenv("NS_STATE_STRICT", "1")                                                    # sv-11 起
+    import pytest as _pt
+    with _pt.raises(D.SP.StateError):
+        D.read_partition(tmp_path)
+
+
+# ---------------------------------------------------------------- 命令通道稳定性（总调度 14:2x：rssh 单次成功率 > 99%）
+def test_rssh_run_falls_back_to_other_master(monkeypatch, tmp_path):
+    import subprocess as sp
+    monkeypatch.setattr(RS, "CALLS", tmp_path / "calls.jsonl")
+    monkeypatch.setattr(RS, "enabled", lambda: True)
+    seen = []
+
+    def fake(argv, **k):
+        sk = argv[argv.index("-S") + 1]
+        seen.append(sk)
+        if len(seen) == 1:                                                # 第一条主连接正在重建
+            return sp.CompletedProcess(argv, 255, b"", b"Control socket connect(/x): No such file or directory\r\n")
+        return sp.CompletedProcess(argv, 0, b"ok", b"")
+    monkeypatch.setattr(RS.subprocess, "run", fake)
+    r = RS.run("gpu36", "true")
+    assert r.returncode == 0 and len(seen) == 2 and seen[0] != seen[1]      # 立刻换另一条，不新握手
+    rec = [json.loads(x) for x in (tmp_path / "calls.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert rec[-1]["ok"] is True and len(rec[-1]["tried"]) == 2
+    monkeypatch.setattr(RS.subprocess, "run", lambda argv, **k: sp.CompletedProcess(argv, 1, b"", b"remote said no"))
+    assert RS.run("gpu36", "false").returncode == 1                           # 远端命令自己失败：不换主连接、不算通道失败
+    assert json.loads((tmp_path / "calls.jsonl").read_text(encoding="utf-8").splitlines()[-1])["ok"] is True
+
+
+def test_rssh_stats_rate(tmp_path):
+    s = TS.Supervisor.__new__(TS.Supervisor)
+    s.dir = tmp_path
+    now = TS.now()
+    lines = [{"t": now - 10, "host": "gpu33", "rc": 0, "ok": True, "dur": 1.0}] * 99 + [{"t": now - 5, "host": "gpu33", "rc": 255, "ok": False, "dur": 0.1}]
+    (tmp_path / "rssh_calls.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8")
+    st = s.rssh_stats()
+    assert st["10m"]["gpu33"]["n"] == 100 and st["10m"]["gpu33"]["rate"] == 0.99 and st["target"] == 0.99

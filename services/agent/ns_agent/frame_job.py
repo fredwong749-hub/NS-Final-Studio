@@ -279,3 +279,309 @@ def build_last(first_job: dict, first_file: str, *, prompt_override: str | None 
         lines = f"图2是{AR.ID_NAME.get(lead, lead)}的脸部参考（只取脸和发型，必须一致）。"
     return {**first_job, "id": first_job["id"] + ":last", "stage": "last",
             "prompt": lines + (prompt_override or first_job.get("last_prompt") or ""), "refs": [first_file] + faces}
+
+
+# =====================================================================================================
+# IMGMASTER 分段编译（L-118，docs/imgmaster/DESIGN.md；开关 config/compile/imgmaster.yaml imgmaster.enabled，默认关）
+# 固定五段：[景别·镜头] [场景连续性块] [人物块] [本镜动作] [约束句]，前面是“参考标注头”（槽位分配函数产出，不是一段）。
+# 其它规则只能登记成插件（config/compile/plugins.yaml）改本段；插件签名 (segment_text, shot, continuity) -> segment_text。
+# P1 只提供只读试编（compile_frame_v2），build_first / build_last 在开关关闭时一字不改。
+# =====================================================================================================
+import hashlib as _hl
+import json as _json
+import re as _re
+from pathlib import Path as _Path
+
+_ROOT = _Path(__file__).resolve().parents[3]
+SEGMENTS = ("framing", "continuity", "characters", "action", "constraints")
+_ENV_WORDS = _re.compile(r"光|灯|窗|墙|背景|虚化|霓虹|光斑|夜色|天色|地板|地面|走廊|楼道|街")
+_SIDE_OBJ = ("台灯", "走廊", "窗", "门", "电梯", "屏幕")
+
+
+class CompileError(RuntimeError):
+    """分段编译失败关闭：未登记插件 / 段名不对 / 规则不存在或没有 check / continuity 缺失"""
+
+
+def _sha(s) -> str:
+    return _hl.sha256((s if isinstance(s, bytes) else str(s).encode("utf-8"))).hexdigest()[:12]
+
+
+def imgmaster_cfg() -> dict:
+    import yaml
+    p = _ROOT / "config/compile/imgmaster.yaml"
+    return (yaml.safe_load(p.read_text(encoding="utf-8")) or {}).get("imgmaster", {}) if p.is_file() else {}
+
+
+def imgmaster_enabled() -> bool:
+    return bool(imgmaster_cfg().get("enabled", False))
+
+
+def _rules_with_check() -> dict:
+    import yaml
+    out = {}
+    for f in sorted((_ROOT / "knowledge/rules").glob("*.yaml")):
+        d = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+        for r in (d.get("rules") if isinstance(d, dict) else d) or []:
+            if isinstance(r, dict) and r.get("id"):
+                out[r["id"]] = {"check": r.get("check"), "file": f.relative_to(_ROOT).as_posix()}
+    return out
+
+
+PLUGIN_IMPL: dict = {}
+
+
+def plugin(pid: str):
+    """登记插件实现；必须在 plugins.yaml 有 enabled 条目（load_plugins 校验）"""
+    def deco(fn):
+        PLUGIN_IMPL[pid] = fn
+        return fn
+    return deco
+
+
+def load_plugins(path=None, rules: dict | None = None, impl: dict | None = None) -> list[dict]:
+    """读登记表并校验（失败关闭）；→ 按 (段顺序, order) 排好的条目（含 enabled=false 的，调用方自己筛）"""
+    import yaml
+    p = _Path(path) if path else _ROOT / "config/compile/plugins.yaml"
+    rows = (yaml.safe_load(p.read_text(encoding="utf-8")) or {}).get("plugins") or []
+    rules = _rules_with_check() if rules is None else rules
+    impl = PLUGIN_IMPL if impl is None else impl
+    seen = set()
+    for r in rows:
+        pid = r.get("id")
+        if not pid or pid in seen:
+            raise CompileError(f"插件 id 缺失或重复：{pid}")
+        seen.add(pid)
+        if r.get("segment") not in SEGMENTS:
+            raise CompileError(f"插件 {pid} 的 segment={r.get('segment')} 不是五段之一 {SEGMENTS}")
+        if not r.get("enabled"):
+            continue
+        rid = r.get("rule_id")
+        if not rid or rid not in rules:
+            raise CompileError(f"插件 {pid} 的 rule_id={rid} 在 knowledge/rules 里不存在")
+        if not rules[rid]["check"]:
+            raise CompileError(f"插件 {pid} 的规则 {rid} 没有 check（G1：每个判断有 decider 和 check）")
+        if pid not in impl:
+            raise CompileError(f"插件 {pid} 已登记但代码里没有 @plugin 实现")
+    on = {r["id"] for r in rows if r.get("enabled")}
+    for pid in impl:
+        if pid not in on:
+            raise CompileError(f"代码里有插件 {pid} 但 plugins.yaml 没登记为 enabled（未登记插件不许跑）")
+    return sorted(rows, key=lambda r: (SEGMENTS.index(r["segment"]), r.get("order", 0)))
+
+
+# ---- continuity（HOLLYWOOD 导出，schema nsfs.scene_locks/1）
+def load_continuity(path) -> dict:
+    p = _Path(path)
+    if not p.is_file():
+        raise CompileError(f"continuity 文件不存在：{path}（失败关闭，不按“没有连续性块”出图）")
+    raw = p.read_bytes()
+    d = _json.loads(raw.decode("utf-8"))
+    if d.get("schema") != "nsfs.scene_locks/1":
+        raise CompileError(f"continuity schema 不对：{d.get('schema')}")
+    d["_sha"] = _hl.sha256(raw).hexdigest()
+    d["_file"] = str(path)
+    return d
+
+
+def scene_lock(cont: dict, scene_id: str) -> dict:
+    sc = (cont.get("scenes") or {}).get(scene_id)
+    if not sc:
+        raise CompileError(f"continuity 里没有场景 {scene_id}")
+    miss = [k for k in ("fixtures", "key_light", "blocking", "screen_direction") if not sc.get(k)]
+    if miss:
+        raise CompileError(f"场景 {scene_id} 定稿缺 {miss}")
+    return sc
+
+
+def continuity_sentence(sc: dict) -> str:
+    """整场固定句式（同一场所有镜逐字相同）：主光 / 站位 / 屏幕方向"""
+    return f"主光：{sc['key_light']}；站位与屏幕方向：{sc['screen_direction']}"
+
+
+def _add_note(text: str, note: str | None) -> str:
+    return text if not note else (text.rstrip("，。 ") + "，" if text else "") + note.rstrip("。")
+
+
+_ACTION_WORDS = _re.compile(r"视线|目光|眼神|看|望|盯|朝|转|落在|张开|搭|扣|放|抖|握|拿|走向|走去|走到|走进|背对|坐在|站在|伸|按|敲|停|靠|抬|低头|垂")
+_LIGHT_RE = _re.compile(r"台灯|屏幕.{0,3}光|霓虹|逆光|侧光|光斑")      # continuity 主光句涵盖的光源词；其它光源（例：安全出口绿光）不算重复
+
+
+def _bigrams(t: str) -> set:
+    t = _re.sub(r"[\s，。；、：|｜（）()“”\"*]", "", t or "")
+    return {t[i:i + 2] for i in range(len(t) - 1)}
+
+
+@plugin("cont_scene_block")
+def _p_cont_scene_block(text, shot, cont):
+    """场景表字段（去掉“光线：”，光由 continuity 主光统一给）+ 固定句 → 整场相同的【场景】块"""
+    items = [x for x in text.replace("【场景】", "", 1).split("；") if x and not x.startswith(("光线：", "本镜场景："))]
+    return "【场景】" + "；".join(items + [continuity_sentence(cont["lock"])])
+
+
+@plugin("env_dedupe")
+def _p_env_dedupe(text, shot, cont):
+    """K-WRT-H25 的编译侧：正文里不带人名、不是人物动作 / 视线、且和 continuity（主光 + 站位 + 场景表）重复的环境 / 灯光分句删掉，
+    环境只由 continuity 说一次；continuity 没说到的环境细节（例：安全出口绿光）保留"""
+    names = cont.get("names") or []
+    ref = _bigrams(continuity_sentence(cont["lock"]) + cont.get("scene_base", ""))
+    keep = []
+    for cl in text.split("，"):
+        bc = _bigrams(cl)
+        if (cl and _ENV_WORDS.search(cl) and not any(n in cl for n in names) and not _ACTION_WORDS.search(cl)
+                and bc and (len(bc & ref) / len(bc) >= 0.5 or _LIGHT_RE.search(cl))):
+            cont["dropped"].append({"plugin": "env_dedupe", "clause": cl})
+            continue
+        keep.append(cl)
+    return "，".join(keep)
+
+
+def _sides(txt: str) -> dict:
+    """{物件: {轴: 值}}，轴 = lateral（左 / 右）| depth（后方 / 前方）；只在同一物件同一轴上比较"""
+    out = {}
+    for o in _SIDE_OBJ:
+        for m in _re.finditer(r"(?:画面|在)(左|右)侧?的?" + _re.escape(o), txt or ""):          # “画面左侧走廊方向…”
+            out.setdefault(o, {})["lateral"] = m.group(1)
+        for m in _re.finditer(_re.escape(o) + r"(?:方向|暗处|尽头)?(?:在|位于|从|朝)?(?:画面)?([^，；。]{0,6})", txt or ""):
+            seg = m.group(1)
+            lat = _re.search(r"(左|右)", seg)
+            dep = _re.search(r"(后方|身后|前方|后)", seg)
+            if lat:
+                out.setdefault(o, {})["lateral"] = lat.group(1)
+            if dep:
+                out.setdefault(o, {})["depth"] = "后" if dep.group(1) in ("后方", "身后", "后") else "前"
+    return out
+
+
+def _side_conflicts(detail: str, ref: dict) -> dict:
+    got = _sides(detail)
+    return {o: {ax: (v, ref[o][ax]) for ax, v in axes.items() if ax in ref.get(o, {}) and ref[o][ax] != v}
+            for o, axes in got.items() if o in ref and any(ax in ref[o] and ref[o][ax] != v for ax, v in axes.items())}
+
+
+@plugin("scene_detail_guard")
+def _p_scene_detail_guard(text, shot, cont):
+    """“本镜场景：…”里某物件的左右 / 前后和 continuity（主光 + 屏幕方向）不一致 → 删这个分句并记 trace"""
+    ref = _sides(cont["lock"]["key_light"] + "。" + cont["lock"]["screen_direction"])
+    keep = []
+    for cl in _re.split(r"(?<=[，；])", text):
+        c = cl.strip("，；")
+        bad = _side_conflicts(c, ref)
+        if bad and not _ACTION_WORDS.search(c):
+            cont["dropped"].append({"plugin": "scene_detail_guard", "clause": c, "conflict": bad})
+            continue
+        if bad:
+            cont.setdefault("warn", []).append({"plugin": "scene_detail_guard", "clause": c, "conflict": bad, "why": "含动作 / 视线，不自动删，需写作侧改"})
+        keep.append(cl)
+    return "".join(keep)
+
+
+@plugin("outer_items")
+def _p_outer_items(text, shot, cont):
+    return _add_note(text, cont.get("outer_note"))
+
+
+@plugin("eyeline")
+def _p_eyeline(text, shot, cont):
+    return _add_note(text, cont.get("eyeline_note"))
+
+
+@plugin("garment_detail")
+def _p_garment_detail(text, shot, cont):
+    return _add_note(text, cont.get("garment_note"))
+
+
+@plugin("text_fallback")
+def _p_text_fallback(text, shot, cont):
+    return _add_note(text, cont.get("fallback_note"))
+
+
+def _split_old(c, shot, g) -> dict:
+    """把现行编译输出（c.image_prompt，不含参考标注头和补句）按锚点拆回五段的原料"""
+    from ns_agent.gen_contract import style as ST
+    full = c.image_prompt
+    scene = C.scene_segment(shot, g)
+    i = full.find(scene) if scene else -1
+    pre, post = (full[:i], full[i + len(scene):]) if i >= 0 else (full, "")
+    j = pre.find("【")
+    framing, rest = (pre[:j], pre[j:]) if j >= 0 else (pre, "")
+    body_set = {x.strip() for x in (c.image_body or "").split("，") if x.strip()}
+    frag_set = {x.strip() for f in (c.look_fragments or []) for x in f.split("，")}
+    clauses = rest.split("，")
+    # 人物块 / 动作段的分界 = 最后一个角色锁（“【名】”开头的分句）之后、剧本 img 原文第一个分句（景别词）出现处
+    first_body = ((c.image_body or "").split("，")[0]).strip()
+    start = max([n for n, x in enumerate(clauses) if x.strip().startswith("【")] + [0])
+    k = next((n for n in range(start, len(clauses)) if first_body and clauses[n].strip() == first_body), None)
+    if k is None:
+        k = next((n for n in range(start, len(clauses)) if clauses[n].strip() in body_set and clauses[n].strip() not in frag_set), len(clauses))
+    base, detail = scene.rsplit("；本镜场景：", 1) if "；本镜场景：" in scene else (scene, "")
+    return {"framing": framing.strip("，"), "scene_base": base, "scene_detail": detail,
+            "characters": "，".join(clauses[:k]).strip("，"), "action": "，".join(clauses[k:]).strip("，"),
+            "constraints": post.strip("，"), "suffix": ST.image_suffix()}
+
+
+def sid_of(ep, shot) -> str:
+    return f"ep{int(AR.g(ep, 'number')):02d}-S{AR.g(shot, 'index')}"
+
+
+def compile_frame_v2(ep, shot, g, project: str, cont: dict, *, bible=None, available=None, model: str = "qwen_image_2.1",
+                     scene_looks=None, plugins_path=None, **plan_kw) -> dict:
+    """分段编译（只读，不写任何文件）。→ {prompt, preamble, segments, trace, plan, sr, ctx}
+    """
+    from ns_agent.bible import load_bible
+    from ns_agent.gen_contract import style as ST
+    rows = load_plugins(plugins_path)
+    g2, _removed = AR.locks_without_wardrobe(g)
+    c = C.compile_shot(ep, retrigger(shot, g2), g2, set(available or ()), image_style=ST.image_suffix(),
+                       bible=bible or load_bible(), framing_project=project)
+    kept = plan_kw.get("kept_triggers") or [t for t in (AR.g(shot, "img_triggers") or []) if t not in (c.dropped_triggers or [])]
+    sr = AR.resolve_shot(project, ep, shot, kept_triggers=kept, two_person=plan_kw.get("two_person"))
+    plan = AR.plan_slots_v2(sr, model, plan_kw.get("capacity"), scene_looks)
+    AR._apply_single_turn(plan, AR.single_turn_line(sr, shot))
+    raw = _split_old(c, shot, g2)
+    lock = scene_lock(cont, AR.g(shot, "scene_id"))
+    names = [x.get("name") for x in sr.characters or [] if x.get("name")] + [AR.g(x, "name") for x in AR.g(shot, "cast") or []]
+    ctx = {"lock": lock, "scene_base": raw["scene_base"], "names": [n for n in dict.fromkeys(names) if n], "dropped": [],
+           "outer_note": outer_items_note(project, ep, shot, sr, c.image_prompt), "fallback_note": plan.prompt_note,
+           "eyeline_note": eyeline_note(shot, sr, c.image_prompt), "garment_note": garment_detail_note(project, ep, shot, sr, c.image_prompt)}
+    seg = {"framing": raw["framing"], "continuity": raw["scene_base"], "characters": raw["characters"],
+           "action": raw["action"] + (("，本镜场景：" + raw["scene_detail"]) if raw["scene_detail"] else ""),
+           "constraints": raw["constraints"]}
+    suf = raw["suffix"]                       # S★ 风格后缀固定放全文最后（L-087 不动），不进任何插件的视野
+    if suf and seg["constraints"].endswith(suf):
+        seg["constraints"] = seg["constraints"][:-len(suf)].rstrip("，, ")
+    sources = {k: [{"rule": "compiler.compile_shot", "file": "services/agent/ns_agent/compiler.py", "kind": "base"}] for k in SEGMENTS}
+    sources["framing"][0]["rule_id"] = "K-REN-101"          # 景别首句原样透传（含 K-REN-123/902/903/705）
+    applied = []
+    for r in rows:
+        if not r.get("enabled"):
+            continue
+        before = seg[r["segment"]]
+        seg[r["segment"]] = PLUGIN_IMPL[r["id"]](before, shot, ctx)
+        if seg[r["segment"]] != before:
+            applied.append(r["id"])
+            sources[r["segment"]].append({"plugin": r["id"], "rule_id": r["rule_id"], "order": r.get("order")})
+    seg["constraints"] = "，".join(x for x in (seg["constraints"], suf) if x)
+    prompt = plan.prompt_prefix + "，".join(seg[k].strip("，") for k in SEGMENTS if seg[k].strip("，"))
+    pf = _Path(plugins_path) if plugins_path else _ROOT / "config/compile/plugins.yaml"
+    trace = {"schema": "nsfs.compile_trace/1", "shot": sid_of(ep, shot), "model": model,
+             "continuity": {"file": cont.get("_file"), "sha256": cont.get("_sha"), "scene": AR.g(shot, "scene_id")},
+             "plugins_sha": _sha(pf.read_bytes()), "compiler_inputs_sha": c.inputs_sha, "bible_version": c.bible_version,
+             "segments": [{"name": k, "sha": _sha(seg[k]), "chars": len(seg[k]), "sources": sources[k]} for k in SEGMENTS],
+             "preamble": {"sha": _sha(plan.prompt_prefix),
+                          "slots": [{"index": s.index, "kind": s.kind, "file": s.file, "character": s.character} for s in plan.slots],
+                          "dropped": plan.dropped, "rule": "asset_refs.plan_slots_v2（身份脸 > 场景 > 本场造型 > 其它）"},
+             "look_refs_via_text": [{"character": d.get("character"), "file": d["file"], "why": "造型参考因槽满走文字（总调度 11-02：双人镜不合成脸板，L-086 保真优先）"}
+                                    for d in plan.dropped if d.get("role") != "scene"],
+             "dropped_clauses": ctx["dropped"], "warnings": ctx.get("warn", []), "applied_plugins": applied, "prompt_sha": _sha(prompt)}
+    return {"prompt": prompt, "preamble": plan.prompt_prefix, "segments": seg, "trace": trace, "plan": plan, "sr": sr, "ctx": ctx}
+
+
+def write_compile_trace(trace: dict, out_dir) -> dict:
+    """随 take 落账：trace 写成 <out_dir>/<shot>_<prompt_sha>.json，返回 {file, sha}（take 记录的 compile_trace 字段）。
+    P1 不被任何出图路径调用；开关打开后由 build_first 返回作业时附带"""
+    raw = _json.dumps(trace, ensure_ascii=False, indent=1, sort_keys=True).encode("utf-8")
+    d = _Path(out_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / f"{trace['shot']}_{trace['prompt_sha']}.json"
+    f.write_bytes(raw)
+    return {"file": str(f), "sha": _hl.sha256(raw).hexdigest()}

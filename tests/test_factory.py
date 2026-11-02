@@ -9,7 +9,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools/factory"))
 
 import inbox as IB  # noqa: E402
-import sync as SY  # noqa: E402
+import importlib.util as _ilu  # noqa: E402
+_spec = _ilu.spec_from_file_location("factory_sync", ROOT / "tools/factory/sync.py")   # 名字 sync 与 series10_video/sync.py 重名（script_name_guard）
+SY = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(SY)
 
 
 def _sha(b: bytes) -> str:
@@ -33,12 +36,16 @@ def test_check_refs_ok_and_sha_mismatch(tmp_path):
 
 
 def test_check_refs_wrong_face_path_blocks(tmp_path):
-    """11-02 01:24 事故：服务器缺 face_overrides → 身份脸解析成旧 ref2va；路径不同必须拒派"""
-    for n in ("hd.png", "old.png"):
-        (tmp_path / n).write_bytes(n.encode())
-    exp = {"shots": {"ep02-S1": [{"rel": "hd.png", "sha": _sha(b"hd.png")}]}}
-    probs = IB.check_refs("ep02-S1", ["old.png"], expected=exp, root=tmp_path)
-    assert probs and "路径不一致" in probs[0]
+    """11-02 01:24 事故：服务器缺 face_overrides → 身份脸解析成旧 ref2va；身份脸不在本镜期望里必须拒派"""
+    d = tmp_path / "data/assets/identity_refs/lin_wan"
+    d.mkdir(parents=True)
+    (d / "hd.png").write_bytes(b"hd")
+    (d / "old.png").write_bytes(b"old")
+    hd, old = "data/assets/identity_refs/lin_wan/hd.png", "data/assets/identity_refs/lin_wan/old.png"
+    exp = {"shots": {"ep02-S1": [{"rel": hd, "sha": _sha(b"hd")}]}}
+    probs = IB.check_refs("ep02-S1", [old], expected=exp, root=tmp_path)
+    assert probs and "身份脸不对" in probs[0]
+    assert IB.check_refs("ep02-S1", [hd, "data/x/crop.png"], expected=exp, root=tmp_path) == []   # 变体多挂的非身份图不拦
 
 
 def test_ready_requires_zero_block_and_refs_match(tmp_path):
@@ -154,7 +161,8 @@ def _decision_root(tmp_path):
         p = tmp_path / r.format(run="run_x")
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text("{}", encoding="utf-8")
-    (tmp_path / "config/pipeline/run.json").write_text('{"run_id": "run_x"}', encoding="utf-8")
+    (tmp_path / "config/pipeline").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "config/pipeline/run.json").write_text('{"run_id": "run_x"}', encoding="utf-8")   # 兼容期旧位置也认
     return DG
 
 
@@ -234,14 +242,17 @@ def test_rssh_offline_aliases_are_local(monkeypatch):
 
 def test_check_refs_per_run_tables(tmp_path):
     """多剧：第二季镜号和第一季重名，按 run 分表查（K-OPS-F03 修订）"""
-    (tmp_path / "a.png").write_bytes(b"A")
-    (tmp_path / "b.png").write_bytes(b"B")
-    exp = {"primary": "series10_v1", "shots": {"ep01-S1": [{"rel": "a.png", "sha": _sha(b"A")}]},
-           "runs": {"series10_s2": {"ep01-S1": [{"rel": "b.png", "sha": _sha(b"B")}]}}}
-    assert IB.check_refs("ep01-S1", ["a.png"], expected=exp, root=tmp_path, run="series10_v1") == []
-    assert IB.check_refs("ep01-S1", ["b.png"], expected=exp, root=tmp_path, run="series10_s2") == []
-    assert IB.check_refs("ep01-S1", ["a.png"], expected=exp, root=tmp_path, run="series10_s2")     # 拿第一季的图出第二季 → 拒派
-    assert IB.check_refs("ep01-S1", ["b.png"], expected=exp, root=tmp_path, run="series10_s9")     # 表里没这部剧 → 拒派
+    d = tmp_path / "data/assets/identity_refs/x"
+    d.mkdir(parents=True)
+    (d / "a.png").write_bytes(b"A")
+    (d / "b.png").write_bytes(b"B")
+    a, b = "data/assets/identity_refs/x/a.png", "data/assets/identity_refs/x/b.png"
+    exp = {"primary": "series10_v1", "shots": {"ep01-S1": [{"rel": a, "sha": _sha(b"A")}]},
+           "runs": {"series10_s2": {"ep01-S1": [{"rel": b, "sha": _sha(b"B")}]}}}
+    assert IB.check_refs("ep01-S1", [a], expected=exp, root=tmp_path, run="series10_v1") == []
+    assert IB.check_refs("ep01-S1", [b], expected=exp, root=tmp_path, run="series10_s2") == []
+    assert IB.check_refs("ep01-S1", [a], expected=exp, root=tmp_path, run="series10_s2")     # 拿第一季的脸出第二季 → 拒派
+    assert IB.check_refs("ep01-S1", [b], expected=exp, root=tmp_path, run="series10_s9")     # 表里没这部剧 → 拒派
 
 
 def test_deploy_pushes_expected_table_built_from_snapshot():
@@ -249,3 +260,22 @@ def test_deploy_pushes_expected_table_built_from_snapshot():
     assert "def build_expected(" in s and "SNAP_BASE / sv" in s
     d = s[s.index("def deploy_host("):s.index("def deploy(sv")]
     assert d.index("expected_refs.json") < d.index("server_deps.py") < d.index("decisions_guard.py")
+
+
+def test_state_paths_compat_read_and_atomic_write(tmp_path):
+    """§10：先读新位置；只有旧 → 读旧 + legacy_reads 事件（不静默）；写只落新位置；都不在 → raise"""
+    import state_paths as SP
+    old = tmp_path / "config/netfix/partition.json"
+    old.parent.mkdir(parents=True)
+    old.write_text('{"images": {"gpu33": [1]}}', encoding="utf-8")
+    assert SP.read_state("netfix/partition", root=tmp_path)["images"]["gpu33"] == [1]
+    ev = (tmp_path / "data/state/legacy_reads.jsonl").read_text(encoding="utf-8").strip().splitlines()
+    assert json.loads(ev[-1])["name"] == "netfix/partition" and json.loads(ev[-1])["old_path"] == "config/netfix/partition.json"
+    SP.write_state("netfix/partition", {"images": {"gpu33": [2]}}, root=tmp_path)
+    assert SP.read_state("netfix/partition", root=tmp_path)["images"]["gpu33"] == [2]            # 新的优先
+    assert len((tmp_path / "data/state/legacy_reads.jsonl").read_text(encoding="utf-8").strip().splitlines()) == 1
+    import pytest
+    with pytest.raises(SP.StateError):
+        SP.read_state("pipeline/runs", root=tmp_path)
+    with pytest.raises(SP.StateError):
+        SP.state_path("nope/x", root=tmp_path)

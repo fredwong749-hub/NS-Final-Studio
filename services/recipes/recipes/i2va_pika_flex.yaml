@@ -24,6 +24,9 @@ sampling:
   scheduler: null
   sigmas: "1.0, 0.972973, 0.923077, 0.8, 0.571429, 0.333333, 0.0"
   shift_node: false
+prompt:
+  acting_micro_beats: false        # K-PRM-310：分拍微表情（VIDLAB vl_r1 ACT2 通过）；V7 / SFace 护栏补测通过后再开
+  acting_scope: closeup_single     # 只对近景及更紧、单人画内的镜（双人中景无效，另议）
 blocked_action: hold
 fallback: []
 provenance:
@@ -40,4 +43,6 @@ provenance:
   sampling.sigmas: {src: "Pika 官方 7 值 sigma（shift 12 已算进表）", date: 2026-11-01, status: 确认}
   sampling.shift_node: {src: "Pika 模板无 SigmaShift 节点", date: 2026-11-01, status: 确认}
   blocked_action: {src: "项目方 11-01 18:0x L-088“视频全部用皮卡来做，皮卡做不了就等”：flush_risk 命中 → hold（原因“等 Pika 方案（泛红防护）”），⤴ 取代 16:2x 的换回 i2va_pdd2", date: 2026-11-01, status: 确认}
+  prompt.acting_micro_beats: {src: "VIDLAB vl_r1 ACT2 配对 A/B（data/rsi/vidlab/ab_vl_r1_act2.json）：S5 近景单人 +47% / +45% 表演活跃度、眨眼 0→16 次/分；S4 双人中景 +1% / −4%；总调度 11-02 12:3x 批：默认关，护栏补测通过后开近景单人", date: 2026-11-02, status: 待验, experiment: VL-R1-ACT2}
+  prompt.acting_scope: {src: "同上：只对近景单人生效", date: 2026-11-02, status: 待验, experiment: VL-R1-ACT2}
   fallback: {src: "L-088：不回退旧配方（⤴ 取代 fallback [i2va_pdd2]）", date: 2026-11-01, status: 确认}

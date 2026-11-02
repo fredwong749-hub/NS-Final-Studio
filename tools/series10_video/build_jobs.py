@@ -57,6 +57,22 @@ BAD_LORA_RE = re.compile(r"lin_?wan|lnwan|_qi_|identity", re.I)
 BAD_STYLE_RE = re.compile(r"creamy|f/1\.\d|oily|greasy|glossy skin|richly saturated|vivid saturated|奶油|油光|浓郁饱和", re.I)
 
 
+VIDEO_HOLD = ROOT / "data" / "autopilot" / "video_hold.json"   # 按镜 hold（DEBUG-RSI，总调度 11-02 14:2x，fb-0001 ep02-S3 等写作补丁）
+
+
+def video_holds(now: float | None = None) -> dict:
+    """data/autopilot/video_hold.json {"active": true, "items": {sid: {reason_kind, reason, expires_at, by}}} → 当前生效的 {sid: 原因}。
+    到期（expires_at，+09:00 本地时间串）自动失效；文件没有 / active=false → {}；文件坏 → raise（失败关闭：不能静默放行要 hold 的镜）"""
+    if not VIDEO_HOLD.exists():
+        return {}
+    d = json.loads(VIDEO_HOLD.read_text(encoding="utf-8"))
+    if not d.get("active", True):
+        return {}
+    t = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(now or time.time()))
+    return {sid: f"{v.get('reason_kind') or 'hold'}：{v.get('reason') or ''}"[:200]
+            for sid, v in (d.get("items") or {}).items() if str(v.get("expires_at") or "9999")[:19] > t}
+
+
 def rel(p: Path) -> str:
     return str(Path(p).resolve().relative_to(ROOT)).replace("\\", "/")
 
@@ -306,6 +322,7 @@ def score_refs(spec, reg) -> dict:
 
 
 def build_all(validate_only=False) -> dict:
+    holds = video_holds()
     reg = R.load()
     specs = load_specs()
     frames_of = chosen_frames() if validate_only else passed_frames()
@@ -368,6 +385,9 @@ def build_all(validate_only=False) -> dict:
                 vs[f"s{a}"] = compile_variant(spec, reg, d, a, f"s{a}", frames_of)
             vs["b24"] = compile_variant(spec, reg, "establishing", 1, "b24", frames_of)
             vs["mot"] = compile_variant(spec, reg, d, 2, "mot", frames_of, extra={"prompt.min_motion_cue": MIN_MOTION_CUE})
+        if not validate_only and sid in holds:      # 按镜 hold：不出变体（vidgen 无变体 → waiting_frame，不派单）
+            vs = {}
+            meta["route"], meta["hold"] = "hold", holds[sid]
         for k, v in vs.items():
             if v.get("prompt"):
                 (VID / "prompts" / f"{sid}.{k}.txt").write_text(v["prompt"], encoding="utf-8")

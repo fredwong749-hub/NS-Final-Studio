@@ -76,11 +76,38 @@ class Ctx:
         return self._remote[host]
 
 
+G26_MIN_SV = "sv-20261102-09"
+
+
+def hosts_decl() -> dict | None:
+    """声明（config/factory/hosts.json，tools/factory/hosts.py）：sv-09（hosts.py 入版）部署到服务器之前返回 None，探针继续用旧表。
+    → {"lanes": {lane: rec（enabled 的）}, "broken": {host: [gpu]}, "root": {host: repo}}"""
+    sv = ((jl("data/system_version.txt") or {}).get("id") or "")
+    if sv < G26_MIN_SV:
+        return None
+    try:
+        from tools.factory import hosts as HS
+        d = HS.load()
+    except Exception as e:  # noqa: BLE001  # arch-ok: 记 UNKNOWN（S0 工单），本拍退回旧表
+        UNKNOWN["config/factory/hosts.json"] = repr(e)[:80]
+        return None
+    lanes = {ln: r for ln, r in HS.lanes(enabled=True, d=d).items() if not ln.startswith("laptop")}
+    return {"lanes": lanes, "broken": {h: list(v.get("broken_gpus") or []) for h, v in d["hosts"].items()},
+            "root": {h: v.get("repo") for h, v in d["hosts"].items() if v.get("repo")}}
+
+
 def remote_batch(host: str, parity: dict, timeout: float, vqa: bool) -> dict | None:
     from tools.netfix import rssh
     files = ",".join(parity_files(parity))
-    ports = ",".join(str(p) for ln, p in COMFY_PORTS.items() if ln.startswith(host))
-    cmd = f"timeout {int(timeout) - 8} nice -n 19 python3 - {parity['server_root']} {files} {1 if vqa else 0} {ports}"
+    hs = hosts_decl()
+    if hs:                                     # sv-09 起：端口 / 服务器路径 / 坏卡都读 config/factory/hosts.json（SYSARCH 4-2，唯一来源）
+        ports = ",".join(str(int(r["comfy_port"])) for ln, r in hs["lanes"].items() if ln.startswith(host + ":"))
+        broken = ",".join(str(i) for i in hs["broken"].get(host, [])) or "-"
+        root = hs["root"].get(host) or parity["server_root"]
+    else:
+        ports = ",".join(str(p) for ln, p in COMFY_PORTS.items() if ln.startswith(host))
+        broken, root = "-", parity["server_root"]
+    cmd = f"timeout {int(timeout) - 8} nice -n 19 python3 - {root} {files} {1 if vqa else 0} {ports or '-'} {broken}"
     try:
         r = rssh.run(host, cmd, input=(ROOT / "tools/sentinel/remote_probe.py").read_bytes(), timeout=timeout)
     except subprocess.TimeoutExpired:  # arch-ok: None = 远程未测，Ctx.remote 记 errors[host]，依赖它的探针本拍不出 finding
@@ -96,7 +123,7 @@ def remote_batch(host: str, parity: dict, timeout: float, vqa: bool) -> dict | N
 # ------------------------------------------------------------------ 本机登记表（按分区算 ready）
 def laptop_registry() -> dict:
     reg = jl("data/producer/registry.json", {}) or {}
-    part = (jl("config/netfix/partition.json", {}) or {}).get("images") or {}
+    part = (read_state("netfix/partition", {}) or {}).get("images") or {}
     out = {h: {"ready": 0, "pending": 0} for h in part}
     waits = {}
     for E in reg.get("episodes") or []:
@@ -336,7 +363,7 @@ def p_s6(ctx: Ctx) -> list[dict]:
     c = ctx.c("S6_config_parity")
     files = parity_files(c)
     lap = {f: sha_file(ROOT / f) for f in files}
-    ov = (jl("data/netfix/override_state.json", {}) or {}).get("hosts") or {}
+    ov = (read_state("netfix/override", {}) or {}).get("hosts") or {}
     ar = jl("data/autopilot/assets_ready.json", {}) or {}
     out = p_identity(ctx)
     for h in HOSTS:
@@ -637,11 +664,11 @@ def p_s15(ctx: Ctx) -> list[dict]:
 
 def laptop_cmdlines() -> list[str] | None:
     """一次 PowerShell CIM 查询拿 python / pythonw / node 进程命令行（BELOW_NORMAL、30 s 超时）；取不到返回 None 并记 UNKNOWN"""
-    ps = ("Get-CimInstance Win32_Process -Filter \"Name='python.exe' OR Name='pythonw.exe' OR Name='node.exe'\" | "
+    ps = ("[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-CimInstance Win32_Process -Filter \"Name='python.exe' OR Name='pythonw.exe' OR Name='node.exe'\" | "
           "ForEach-Object { $_.CommandLine } | ConvertTo-Json -Compress")
     try:
         r = subprocess.run(["powershell.exe", "-NoProfile", "-Command", ps], capture_output=True, timeout=30, creationflags=NOWIN)
-        d = json.loads(r.stdout.decode("utf-8", "replace") or "[]")
+        d = json.loads(r.stdout.decode("utf-8", "replace") or "[]", strict=False)   # 命令行里可能有换行 / 制表符
     except (OSError, subprocess.TimeoutExpired, ValueError) as e:  # arch-ok: 记 UNKNOWN（S0 工单），本拍 S16 不判
         UNKNOWN["laptop:process_list"] = repr(e)[:80]
         return None
@@ -681,7 +708,7 @@ def laptop_rendered(since_s: float = 3600) -> list[dict]:
 
 def p_s18(ctx: Ctx) -> list[dict]:
     c = ctx.c("S18_temp_holds")
-    d = jl(c["file"], {}) or {}
+    d = read_state("netfix/partition", {}) or {}
     return J.j_temp_holds(d.get(c["key"]) or {}, ctx.now, c)
 
 
@@ -697,7 +724,7 @@ def p_ctrl_history(ctx: Ctx) -> list[dict]:
         r = ctx.remote(h)
         if r and r.get("control") is not None:
             snaps[h] = r["control"]
-    snaps["temp_holds"] = (jl("config/netfix/partition.json", {}) or {}).get("_temp_holds") or {}
+    snaps["temp_holds"] = (read_state("netfix/partition", {}) or {}).get("_temp_holds") or {}
     last = ctx.mem.setdefault("ctrl_last", {})
     p = ROOT / c["out"]
     for src, v in snaps.items():
@@ -762,12 +789,259 @@ def p_s19(ctx: Ctx) -> list[dict]:
     return J.j_capacity(ready, pending, recent, c, notp)
 
 
+# ================================================================== G26 声明 vs 实际（总调度 11:2x 批）
+def p_g26(ctx: Ctx) -> list[dict]:
+    """以 hosts.json 为声明，每拍逐条核对启用的道：端口可达、system_stats 正常、监听进程跑在声明的 GPU 上、坏卡没有作业"""
+    hs = hosts_decl()
+    if hs is None:
+        ctx.mem["g26_state"] = f"等 {G26_MIN_SV} 部署（hosts.py 入版）后上线"
+        return []
+    out = []
+    for h in HOSTS:
+        r = ctx.remote(h)
+        if not r or "g26_lanes" not in r:
+            continue
+        decl = {ln: rec for ln, rec in hs["lanes"].items() if ln.startswith(h + ":")}
+        out += J.j_decl_vs_actual(h, decl, r["g26_lanes"], hs["broken"].get(h, []), r.get("broken_apps") or {})
+    return out
+
+
+# ================================================================== S20 scratchpad 进程（K-OPS-Y04，SYSARCH 派）
+def laptop_procs_full() -> list[dict] | None:
+    """python / pythonw / bash / sh 进程（pid、名字、命令行）；一次 CIM 查询，取不到返回 None 并记 UNKNOWN"""
+    ps = ("[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-CimInstance Win32_Process -Filter \"Name='python.exe' OR Name='pythonw.exe' OR Name='bash.exe' OR Name='sh.exe'\" | "
+          "Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress")
+    try:
+        r = subprocess.run(["powershell.exe", "-NoProfile", "-Command", ps], capture_output=True, timeout=30, creationflags=NOWIN)
+        d = json.loads(r.stdout.decode("utf-8", "replace") or "[]", strict=False)   # 命令行里可能有换行 / 制表符
+    except (OSError, subprocess.TimeoutExpired, ValueError) as e:  # arch-ok: 记 UNKNOWN（S0 工单），本拍 S20 不判
+        UNKNOWN["laptop:process_list_full"] = repr(e)[:80]
+        return None
+    d = [d] if isinstance(d, dict) else d or []
+    return [{"pid": x.get("ProcessId"), "name": x.get("Name"), "cmd": x.get("CommandLine") or ""} for x in d]
+
+
+def laptop_shell_snapshot() -> list[dict] | None:
+    """bash / sh / pwsh / powershell / ssh 进程（pid、父 pid、创建时间、命令行）；一次 CIM 查询"""
+    ps = ("[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-CimInstance Win32_Process -Filter \"Name='bash.exe' OR Name='sh.exe' OR Name='pwsh.exe' OR Name='powershell.exe' OR Name='ssh.exe'\" | "
+          "Select-Object ProcessId,ParentProcessId,Name,CommandLine,@{n='c';e={$_.CreationDate.ToString('o')}} | ConvertTo-Json -Compress")
+    try:
+        r = subprocess.run(["powershell.exe", "-NoProfile", "-Command", ps], capture_output=True, timeout=30, creationflags=NOWIN)
+        d = json.loads(r.stdout.decode("utf-8", "replace") or "[]", strict=False)
+    except (OSError, subprocess.TimeoutExpired, ValueError) as e:  # arch-ok: 记 UNKNOWN（S0 工单），本拍不判 ssh 轮询
+        UNKNOWN["laptop:shell_snapshot"] = repr(e)[:80]
+        return None
+    d = [d] if isinstance(d, dict) else d or []
+    return [{"pid": x.get("ProcessId"), "ppid": x.get("ParentProcessId"), "name": (x.get("Name") or "").lower(), "cmd": x.get("CommandLine") or "",
+             "created_t": J.ts(str(x.get("c") or "")[:19])} for x in d]
+
+
+def ssh_loop_findings(ctx: Ctx, c: dict) -> list[dict]:
+    snap = laptop_shell_snapshot()
+    if snap is None:
+        return []
+    byid = {p["pid"]: p for p in snap}
+    shells = {p["pid"]: p for p in snap if p["name"] in ("bash.exe", "sh.exe", "pwsh.exe", "powershell.exe")
+              and "ssh_spawn_watch" not in p["cmd"] and "tools/sentinel" not in p["cmd"].replace("\\", "/")}
+    first = "ssh_seen" not in ctx.mem                  # 第一次只记下已有的 ssh，不算“新起”（常驻隧道不能当轮询）
+    mem = ctx.mem.setdefault("ssh_seen", {"pids": [], "spawns": {}})
+    seen = set(mem["pids"])
+    if first:
+        seen |= {p["pid"] for p in snap if p["name"] == "ssh.exe"}
+    spawns = {int(k): v for k, v in mem["spawns"].items()}
+    for p in snap:
+        if p["name"] != "ssh.exe" or p["pid"] in seen:
+            continue
+        seen.add(p["pid"])
+        anc, hops = p.get("ppid"), 0                  # 往上找最近的会话 shell（父或祖父）
+        while anc in byid and hops < 3 and anc not in shells:
+            anc, hops = byid[anc].get("ppid"), hops + 1
+        if anc in shells:
+            spawns.setdefault(anc, []).append(ctx.now)
+    sf = ROOT / c["ssh_loop"]["spawns_file"]          # NETFIX ssh_spawn_watch.ps1 的逐秒记录（在跑时更准）
+    if sf.exists() and ctx.now - sf.stat().st_mtime < c["ssh_loop"]["window_s"]:
+        for ln in sf.read_text(encoding="utf-8", errors="replace").splitlines()[-2000:]:
+            try:
+                d = json.loads(ln)
+            except ValueError:  # arch-ok: 半行跳过
+                continue
+            t = J.ts(d.get("at"))
+            for pid, sh in shells.items():
+                if t and sh["cmd"] and sh["cmd"] in (d.get("parent") or "", d.get("grand") or ""):
+                    spawns.setdefault(pid, []).append(t)
+    spawns = {k: sorted(set(round(x) for x in v if ctx.now - x <= c["ssh_loop"]["window_s"])) for k, v in spawns.items() if k in shells}
+    mem["pids"] = [x for x in seen if x in byid][-500:]
+    mem["spawns"] = {str(k): v for k, v in spawns.items()}
+
+    def owner(cmd: str) -> str | None:
+        import re
+        names = re.findall(r"([\w.\-]+\.(?:py|sh|ps1))", cmd.replace("\\", "/"))
+        for nm in names:
+            o = (c.get("owner_by_script") or {}).get(nm)
+            if o:
+                return o
+            try:
+                o = owner_of_file(nm)
+            except Exception:  # noqa: BLE001  # arch-ok: 归属查不到就派总调度
+                o = None
+            if o:
+                return o
+        return None
+    return J.j_ssh_loops(shells, spawns, ctx.now, dict(c["ssh_loop"], owner_loop=c.get("owner_loop")), owner)
+
+
+def p_s20(ctx: Ctx) -> list[dict]:
+    """进程消失 = 恢复：本拍没再看到的 S20 旧单补一条“正常”，让工单库自动关单"""
+    procs = laptop_procs_full()
+    fs = J.j_scratch_procs(procs, ctx.c("S20_scratchpad_procs")) + ssh_loop_findings(ctx, ctx.c("S20_scratchpad_procs"))
+    if procs is None:
+        return fs
+    seen = {f["key"] for f in fs}
+    st = jl("data/sentinel/state.json", {}) or {}
+    for k in (st.get("open") or {}):
+        if k.startswith("S20:") and k not in seen:
+            fs.append(J.F("S20", k.split(":", 1)[1], False, f"{k.split(':', 1)[1]} 已不在 scratchpad 里运行"))
+    return fs
+
+
+# ================================================================== S21 / S22 + 运行期状态读入口（ARCH_ROADMAP §10）
+def read_state(name: str, default=None):
+    """运行期状态统一读法：tools/factory/state_paths.read_state（先 data/state/，读不到才读 config/ 旧位置并记 legacy_reads）；
+    state_paths 还没上线时退回旧位置（sv-10 兼容期双读，sv-11 删旧读）"""
+    try:
+        from tools.factory import state_paths as SP
+    except ImportError:  # arch-ok: state_paths 未上线 → 旧位置
+        legacy = {"netfix/partition": "config/netfix/partition.json", "netfix/override": "data/netfix/override_state.json"}
+        return jl(legacy[name], default) if name in legacy else default
+    try:
+        return SP.read_state(name, default)
+    except Exception as e:  # noqa: BLE001  # arch-ok: 记 UNKNOWN（S0 工单），返回 default
+        UNKNOWN[f"state:{name}"] = repr(e)[:80]
+        return default
+
+
+_OWN_CACHE: dict = {}
+
+
+def owner_of_file(ref: str) -> str | None:
+    """文件（相对路径，或 caller 的“文件名:行”）→ tools/qa/ownership.yaml 的负责方；只给了文件名时在仓库里找同名文件"""
+    from tools.qa import iter_gate as IG
+    f = str(ref).split(":", 1)[0].replace("\\", "/")
+    if f in _OWN_CACHE:
+        return _OWN_CACHE[f]
+    own = _OWN_CACHE.setdefault("__own__", IG.load_own())
+    cands = [f] if "/" in f else [p.relative_to(ROOT).as_posix() for d in ("tools", "services", "apps", "ops", "packages")
+                                   for p in (ROOT / d).rglob(f) if "node_modules" not in p.parts][:1]
+    o = IG.owner_of(cands[0], own)[0] if cands else None
+    _OWN_CACHE[f] = o
+    return o
+
+
+def p_s21(ctx: Ctx) -> list[dict]:
+    c = ctx.c("S21_state_legacy_read")
+    p = ROOT / c["file"]
+    rows = []
+    if p.exists():
+        for ln in p.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                rows.append(json.loads(ln))
+            except ValueError:  # arch-ok: 半行跳过
+                continue
+    try:
+        from tools.factory import state_paths as SP
+        names = sorted(getattr(SP, "LEGACY", {}).keys())
+    except ImportError:  # arch-ok: state_paths 未上线 → 只按日志里出现的状态名判
+        names = []
+    return J.j_legacy_reads(rows, names, ctx.now, c, owner_of_file)
+
+
+def p_s22(ctx: Ctx) -> list[dict]:
+    c = ctx.c("S22_freeze_drift")
+    p = ROOT / c["file"]
+    if not p.exists():
+        return []
+    rows = []
+    for ln in p.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            rows.append(json.loads(ln))
+        except ValueError:  # arch-ok: 半行跳过
+            continue
+    return J.j_freeze_drift(rows, jl("data/system_versions/last_cut.json"), owner_of_file)
+
+
+# ================================================================== S23 笔记本侧出图道可达率（总调度 13:2x）
+def laptop_lane_ports(c: dict) -> dict[str, int]:
+    """出图道 → 笔记本隧道端口：hosts.json（enabled、role 含 image、有 tunnel_port）优先，读不到用策略里的 fallback_ports"""
+    try:
+        from tools.factory import hosts as HS
+        d = {ln: int(r["tunnel_port"]) for ln, r in HS.lanes(enabled=True).items()
+             if r.get("tunnel_port") and "image" in (r.get("roles") or []) and not ln.startswith("laptop")}
+        if d:
+            return d
+    except Exception as e:  # noqa: BLE001  # arch-ok: 记 UNKNOWN，退回 fallback_ports
+        UNKNOWN["hosts.json:tunnel_ports"] = repr(e)[:80]
+    return {k: int(v) for k, v in (c.get("fallback_ports") or {}).items()}
+
+
+def p_s23(ctx: Ctx) -> list[dict]:
+    """每拍并发测本地隧道端口 /system_stats（每条最多 timeout_s），记 5 分钟窗口"""
+    import concurrent.futures as cf
+    import urllib.request
+    c = ctx.c("S23_laptop_lane_reach")
+    ports = laptop_lane_ports(c)
+
+    def probe(port: int) -> bool:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/system_stats", timeout=c["timeout_s"]) as r:
+                return r.status == 200
+        except Exception:  # noqa: BLE001  # arch-ok: 不通就是测量结果 False（会计入可达率、可能开单），不是“未测”
+            return False
+    with cf.ThreadPoolExecutor(max_workers=max(1, len(ports))) as ex:
+        cur = dict(zip(ports, ex.map(probe, ports.values())))
+    hist = ctx.mem.setdefault("lane_reach", {})
+    for ln, ok in cur.items():
+        h = hist.setdefault(ln, [])
+        h.append([ctx.now, ok])
+        hist[ln] = [x for x in h if ctx.now - x[0] <= c["window_s"] + 60]
+    for ln in list(hist):
+        if ln not in cur:
+            hist.pop(ln)
+    return J.j_lane_reach(hist, cur, ctx.now, c)
+
+
+# ================================================================== S24 API 响应时间（总调度 14:1x）
+def p_s24(ctx: Ctx) -> list[dict]:
+    import urllib.request
+    c = ctx.c("S24_api_latency")
+    tok = ""
+    try:
+        tok = (ROOT / "data/auth/viewer_token").read_text(encoding="utf-8").strip()
+    except OSError as e:  # arch-ok: 没有查看令牌时不带头直接测（旧 API 无登录），记 UNKNOWN
+        UNKNOWN["data/auth/viewer_token"] = type(e).__name__
+    hist = ctx.mem.setdefault("api_latency", {})
+    op = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    for path in c["paths"]:
+        t0 = time.time()
+        try:
+            req = urllib.request.Request(c["base"] + path, headers={"x-ns-viewer-token": tok} if tok else {})
+            with op.open(req, timeout=c["timeout_s"]) as r:
+                r.read()
+                code = r.status
+        except Exception:  # noqa: BLE001  # arch-ok: 失败就是测量结果（按 timeout_s 计入 p95），不是未测
+            code = 0
+        h = hist.setdefault(path, [])
+        h.append([round(ctx.now), round(time.time() - t0, 3), code])
+        del h[:-int(c["last_n"])]
+    return J.j_api_latency(hist, c)
+
+
 PROBES = {"S1": p_s1, "S2": p_s2, "S3": p_s3, "S4": p_s4, "S5": p_s5, "S6": p_s6, "S7": p_s7, "S8": p_s8, "S9": p_s9,
-          "S10": p_s10, "S11": p_s11, "S12": p_s12, "S13": p_s13, "S14": p_s14, "GPU24": p_gpu24, "S15": p_s15, "S16": p_s16, "S17": p_s17, "S18": p_s18, "S19": p_s19,
+          "S10": p_s10, "S11": p_s11, "S12": p_s12, "S13": p_s13, "S14": p_s14, "GPU24": p_gpu24, "S15": p_s15, "S16": p_s16, "S17": p_s17, "S18": p_s18, "S19": p_s19, "G26": p_g26, "S20": p_s20, "S21": p_s21, "S22": p_s22, "S23": p_s23, "S24": p_s24,
           "CTRL": p_ctrl_history}
 CFG_OF = {"S1": "S1_lane_util_min", "S2": "S2_gpu_all_idle_s", "S3": "S3_score_p50_s", "S4": "S4_recover_s", "S5": "S5_release",
           "S6": "S6_config_parity", "S7": "S7_pause_max_s", "S8": "S8_vlm_sample", "S9": "S9_ui_rules", "S10": "S10_rules_green",
           "S11": "S11_stage_stuck_s", "S12": "S12_script_ruler", "S13": "S13_human_wait",
           "S14": "S14_rsi_lines", "GPU24": "GPU24_alloc",
-          "S15": "S15_flow_tick", "S16": "S16_laptop_procs", "S17": "S17_shot_render_rate", "S18": "S18_temp_holds", "S19": "S19_capacity_floor",
+          "S15": "S15_flow_tick", "S16": "S16_laptop_procs", "S17": "S17_shot_render_rate", "S18": "S18_temp_holds", "S19": "S19_capacity_floor", "G26": "G26_decl_vs_actual", "S20": "S20_scratchpad_procs",
+          "S21": "S21_state_legacy_read", "S22": "S22_freeze_drift", "S23": "S23_laptop_lane_reach", "S24": "S24_api_latency",
           "CTRL": "CTRL_history"}

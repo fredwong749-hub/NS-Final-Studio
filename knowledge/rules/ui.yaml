@@ -802,3 +802,51 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-UI-053
+    check: tests/test_r43_uirsi.py
+    domain: ui
+    link: [P5-P6]
+    title: L-116 待你看队列——只放必须项目方拍板 / 机签抽检 / 审美挑选三类，其余全自动；机签通过的镜写“机签通过 vN”不再提示点选；读不到队列不显示成空
+    when: 任何需要项目方看或决定的事，或页面上显示“待审 / 待你看”的计数、每镜首帧尾帧的审核提示
+    then: 后端 services/api/ns_api/owner_queue.py：GET /api/owner/queue 汇总 ① decide（data/owner_queue/requests.json 的 spend / license / delete / overturn / import_season 五类 + MASTER_PICTURE §1 状态写“待项目方”的行按脚本去重 + SENTINEL S13 写明等项目方的工单；等总调度的只计数 master_waits，不进队列）② spot（autosign_spot.jsonl 未判 + 今天机签通过并设为当前的版本按 id 的 md5 每 10 张抽 1 张）③ pick（只留过契约的候选，只剩一张系统直接选并记 by=POLICY）；POST /api/owner/decide 只认登录项目方（by=owner，审计中间件自动记），spot 结论交 tools/vqa/autosign.py spot（不一致自动退回人工），POST /api/owner/undo 10 分钟内撤销；来源坏了 / 必需来源缺失 → status=error、status_label“队列读取失败：<来源>”并写 data/qa/alerts.jsonl OWNERQ-READ（错误表每次调用一份，ContextVar 隔离并发）。前端 v3/ownerQueue.ts 一份缓存：顶栏常驻“待你看 ● N”（有必须拍板 = 琥珀点，读取失败 = “!”），#/queue 阵列页（← → / 1 2 3 / 空格 / Esc / Z，审核视图大图 + 契约逐项 + 系统推荐 + 选填理由），空队列写“没有需要你看的” + 今天自动处理数；画布 / 单集页当前版本机签通过 → status machine_first / machine_last 灰点灰字“机签通过 vN”、无主按钮，“用这张 / 不要”保留但收成灰色；“选中待审 N”与底栏“待你看 N”读队列数；data_parity D-QUEUE（数 = 条目数 = 小计和、状态 ok、机签版本 = 当前版本）+ apps/web/e2e/uirsi/queue_check.mjs（页面徽标 = 队列数，读取失败不显示成空）
+    evidence:
+      - {src: docs/uirsi/rounds/r47.md, note: "项目方 11:5x：“uiux 需要添加个要我看的阵列，点击去审核。其中，我需要全自动检测，尽量少人的操作。”；FILMUI 稿 data/review_pages/filmui/owner_queue.html；SYSARCH 巡检：读不到不能当成没有要看的"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-UI-054
+    check: tests/test_r43_uirsi.py
+    domain: ui
+    link: [P5-P6]
+    title: 后端改动先暂存再整体替换；:8800 重启前全量编译，不过就不重启、开工单
+    when: 改 services/api、services/render_router、services/agent 下的 .py（:8800 守护会在看到改动后自动重启），或守护准备重启 :8800
+    then: 多处修改先在内存 / 临时文件里改完、compile() 过（.ts / .tsx 先在副本上过 tsc）、跑过测试，再用临时文件 + os.replace 一次性替换，工作树里不留半成品；tools/uirsi/api_restart_guard.py tick 在跑 ops/restart_api.ps1 前对 COMPILE_DIRS（services/api、render_router、agent）全部 .py 做 compile()，有任何一个不过 → 不重启（API 继续跑旧代码）、请求留着、写 data/qa/alerts.jsonl API-COMPILE（同一组错误只记一次）
+    evidence:
+      - {src: docs/uirsi/rounds/r47.md, note: "11:55 owner_queue.py 改到一半时被守护自动重启，:8800 起不来约 10 分钟；同一时刻 sv-09 快照拍到半成品（总调度选 B：sv-09 不收）。总调度 12:0x：写成规则，并让 api_restart_guard 重启前全量 py_compile"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-UI-055
+    check: tests/test_r43_uirsi.py
+    domain: ui
+    link: [P5-P6]
+    title: 项目方抽检“不同意”→ 系统自动作废这一版、按原因重出、记入回归样本；派不成开工单
+    when: 待你看队列里的机签抽检样本被项目方判“不同意”
+    then: owner_queue.decide 在 autosign.spot(fail)（机签按规则退回人工）之后调 spot_fail_redo：按现行分工在笔记本调 tools/autopilot/producer.py reject（版本记 master_reject = “项目方抽检不同意：<理由>”、是当前就撤下、按原因选重出计划：身份 → frame_v9:double_face ×2，造型 / 鞋 / 饰品 → frame_v9:faces_look ×2，假 / 塑料 / 质感 → frame_v9_heavy ×2，其余或没写理由 → frame_v9 ×2；替换版过契约 + 看图闸门后换上）；同时追加回归样本 data/vqa/regression/owner_spot_fail.jsonl（auto=pass、human=fail、理由、契约分）；重出派不成 → data/qa/alerts.jsonl OWNERQ-REDO，不吞掉
+    evidence:
+      - {src: docs/uirsi/rounds/r47.md, note: "总调度 11-02 14:0x：“抽检不过就自动重出请你做进系统：项目方抽检不同意 → 自动作废、按原因重出、记入回归样本，写成规则加测试”；起因 ep04-S10 首帧 v6 抽检不同意（陈宇出现两次）由 DEBUG-RSI 手动作废重出"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-UI-056
+    check: tests/test_r43_uirsi.py
+    domain: ui
+    link: [P5-P6]
+    title: :8800 的 HTTP 请求路径里不许有远程调用——训练锁 / 显卡等远程状态由后台线程定时刷新，请求只读缓存并标缓存年龄；远程调用一律走 rssh.run_retry
+    when: 任何接口要用到服务器上的状态（训练锁、显卡、队列、文件）
+    then: services/api/ns_api/jobs.py：_train_refresh_loop 后台线程每 30 s 经 tools/netfix/rssh.run_retry（单次 15 s、不重试）读各服务器训练锁进缓存；_train_locks_async / train_locks 只读缓存、不 join 等待（原来第一次最多等 20 s，旧 ssh 每次可能卡 25 s）；/api/render/lanes 每道带 train_lock_age_s；派活前最后一道闸 lane_train_locked_now 在任务线程里现读（不在 HTTP 请求里）；/api/episodes、/api/season p95 < 2 s 由 SENTINEL 探针盯，超了开工单
+    evidence:
+      - {src: docs/uirsi/rounds/r47.md, note: "总调度 P0 11-02 14:1x：UIFIX-S 截图停在“正在读全剧的集与镜头（24 秒）”，:8800 错误日志反复“读不到 gpu33 / gpu36 的训练锁……timed out after 25 seconds”"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

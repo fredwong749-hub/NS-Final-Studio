@@ -272,3 +272,23 @@ def test_urgent_deploy_pauses_then_restarts_now(tmp_path):
     rs2.ssh = lambda h, cmd, data=None, tries=3: (cmds2.append(cmd), o2(h, cmd, data, tries))[1]
     r2 = SV.deploy_host(rs2, "gpu36", tmp_path, [], [], "sv-x", "c", restart=True, pc=pc, rq=rq2, urgent=True)
     assert r2["ok"] is False and r2.get("resumed_after_fail") and "resume" in cmds2[-1]
+
+
+def test_quiet_since_waits_for_quiet(monkeypatch, tmp_path):
+    """预冻结：冻结目录最近改动不足 60 s 就等；够了才放行"""
+    f = tmp_path / "tools" / "x.py"
+    f.parent.mkdir()
+    f.write_text("x=1")
+    monkeypatch.setattr(SV, "ROOT", tmp_path)
+    monkeypatch.setattr(SV, "pending_changes", lambda: [("M", "tools/x.py"), ("M", "docs/y.md")])
+    now = [f.stat().st_mtime + 5]
+    slept = []
+    q = SV.quiet_since(60, max_wait=600, sleep=lambda s: (slept.append(s), now.__setitem__(0, now[0] + s)), clock=lambda: now[0])
+    assert q["ok"] and slept and q["last_file"] == "tools/x.py"
+
+
+def test_cut_sets_exempt_and_prefreeze():
+    s = (ROOT / "tools/qa/system_version.py").read_text(encoding="utf-8")
+    c = s[s.index("def cut("):s.index("PUSH_SECRET_RE")]
+    assert c.index('NS_FREEZE_EXEMPT') < c.index("cut_lock(True") < c.index("quiet_since(60)") < c.index("freeze_tree(")
+    assert "FREEZE_DRIFT" in c and "LOCK_HISTORY" in s

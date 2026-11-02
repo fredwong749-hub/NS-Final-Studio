@@ -136,8 +136,9 @@ def test_r04_dispatch_consults_hold_before_rescore_and_dispatch():
 
 
 # ---- K-OPS-E05：打分等待不许占住派单线程；打分积压到上限停派 ----
-def test_e05_pool_larger_than_lanes_and_backlog_blocks_dispatch(tmp_path):
+def test_e05_pool_larger_than_lanes_and_backlog_blocks_dispatch(tmp_path, monkeypatch):
     PR = _producer()
+    monkeypatch.setattr(PR, "decision_file_problems", lambda: [])       # 决策文件闸门另有测试，这里只测积压闸
     src = (ROOT / "tools/autopilot/producer.py").read_text(encoding="utf-8")
     assert "max_workers=max(8, max(self.score_backlog_max, 96)" in src
     import threading
@@ -623,3 +624,250 @@ def test_e24_first_input_changed(monkeypatch, tmp_path):
     assert PR.first_input_changed(p, "ep01-S1", fo, {"passed_sig": "NEW"})["status"] == "passed"
     assert PR.first_input_changed(p, "ep01-S1", fo, {})["status"] == "passed"                       # 旧数据没签名不动
     assert PR.first_input_changed(p, "ep01-S1", {**fo, "owner_locked": True}, {"passed_sig": "OLD"})["status"] == "passed"
+
+
+# ---- K-OPS-Y04：借道 / 临时挂道收进 tools/debug/lanes.py（加锁、到期自动清） ----
+def test_y04_lanes_lend_hold_sweep(tmp_path):
+    sys.path.insert(0, str(ROOT / "tools" / "debug"))
+    import lanes as LN
+    part = tmp_path / "partition.json"
+    part.write_text(json.dumps({"retired_lanes": ["gpu36:2"]}), encoding="utf-8")
+    t0 = 1_800_000_000.0
+    LN.lend("gpu33:3", "IMGFIX", 40, "imggen-s10", "test", part=part, now=t0)
+    LN.hold("gpu36:0", 5, "restart", part=part, now=t0)
+    d = json.loads(part.read_text(encoding="utf-8"))
+    assert set(d["retired_lanes"]) == {"gpu36:2", "gpu33:3", "gpu36:0"}
+    assert d["_lent_lanes"]["gpu33:3"]["client_prefix"] == "imggen-s10" and d["_lent_lanes"]["gpu33:3"]["expires_at"]
+    assert LN.sweep(part=part, now=t0 + 10 * 60) == ["gpu36:0"]                      # 挂道 5 分钟到期，借道 40 分钟未到
+    assert LN.sweep(part=part, now=t0 + 41 * 60) == ["gpu33:3"]
+    d = json.loads(part.read_text(encoding="utf-8"))
+    assert d["retired_lanes"] == ["gpu36:2"] and not d["_lent_lanes"] and not d["_temp_holds"]
+
+
+def test_e25_repart_check():
+    sys.path.insert(0, str(ROOT / "tools" / "debug"))
+    import lanes as LN
+    probs = LN.repart_check({"gpu33": [8, 9, 11]}, {"gpu33": {1, 3}, "gpu36": {8, 9}})
+    assert len(probs) == 2 and "ep08" in probs[0]                                   # ep11 两边都没有 → 可直接搬
+
+
+# ---- K-OPS-E26：缺资产（I3 / I4）/ 期望 refs 表不一致 → 等资产，签名一变自动放回（不靠 30 分钟退避） ----
+def _wa_producer(PR, tmp_path):
+    import threading
+    pr = object.__new__(PR.Producer)
+    pr.p = PR.Paths(root=tmp_path); pr.p.pd.mkdir(parents=True, exist_ok=True); pr.p.run.mkdir(parents=True, exist_ok=True)
+    pr.mu = threading.RLock(); pr.events = []
+    pr.logf = lambda ev, **kw: pr.events.append((ev, kw))
+    return pr
+
+
+def test_e26_wait_kind():
+    PR = _producer()
+    assert PR.wait_kind("ep01-S1 生成契约 preflight 不通过：I3 本镜造型 id + 造型设定图：林晚 造型B 没有设定图") == "asset"
+    assert PR.wait_kind("preflight：I4 景别可见的单品资产图：资产缺图：林晚 造型A 的服装“米白衬衫”没有图") == "asset"
+    assert PR.wait_kind("生成契约 preflight 不通过，未提交：K-OPS-F03 refs 与目标状态不一致：x") == "refs"
+    assert PR.wait_kind("I5 场景参考底图：场景 x 没有参考底图") is None       # 别的原因照旧 30 分钟退避
+
+
+def _wait(pr, PR, oid, kind):
+    pr.led_update(oid, blocked_until=time.time() + PR.WAIT_ASSET_MAX_S,
+                  waiting_asset={"kind": kind, "asset_sig": PR.asset_sig(pr.p), "refs_sig": PR.refs_table_sig(pr.p.root)})
+    pr.led_update("assets:" + oid.split(":", 1)[1], blocked=True, at=time.time())
+
+
+def test_e26_asset_release_on_registry_change(tmp_path):
+    PR = _producer()
+    pr = _wa_producer(PR, tmp_path)
+    _wait(pr, PR, "first:ep01-S1", "asset")
+    assert pr.release_waiting_assets(every_s=0) == []                              # 没变 → 继续等
+    assert pr.ledger()["first:ep01-S1"]["blocked_until"] > time.time()
+    d = pr.p.run / "assets"; d.mkdir(parents=True)
+    (d / "sheets_chosen.json").write_text('{"sheet:lin_wan_lookB": {}}', encoding="utf-8")   # 设定图登记 → 签名变
+    assert pr.release_waiting_assets(every_s=0) == ["first:ep01-S1"]
+    r = pr.ledger()["first:ep01-S1"]
+    assert r["blocked_until"] == 0 and r["waiting_asset"] is None and "不计次" in r["reason"]
+    assert pr.ledger()["assets:ep01-S1"]["blocked"] is False
+    assert pr.events[-1][0] == "asset_release" and pr.events[-1][1]["counted"] is False
+    assert pr.release_waiting_assets(every_s=0) == []                              # 已放回，不重复
+
+
+def test_e26_refs_release_on_expected_table_change(tmp_path):
+    PR = _producer()
+    pr = _wa_producer(PR, tmp_path)
+    f = tmp_path / "data/factory/inbox/expected_refs.json"; f.parent.mkdir(parents=True)
+    f.write_text("{}", encoding="utf-8")
+    _wait(pr, PR, "first:ep02-S3", "refs")
+    _wait(pr, PR, "first:ep02-S4", "asset")
+    assert pr.release_waiting_assets(every_s=0) == []
+    f.write_text('{"series10_s2": {}}', encoding="utf-8")                          # FACTORY 重建期望表
+    assert pr.release_waiting_assets(every_s=0) == ["first:ep02-S3"]               # 只放等表的；等资产的不动
+    assert pr.ledger()["first:ep02-S4"]["blocked_until"] > time.time()
+
+
+def test_e26_release_throttled(tmp_path):
+    PR = _producer()
+    pr = _wa_producer(PR, tmp_path)
+    _wait(pr, PR, "first:ep03-S1", "asset")
+    pr.release_waiting_assets(every_s=60)
+    (pr.p.run / "P1_looks.json").write_text("{}", encoding="utf-8")
+    assert pr.release_waiting_assets(every_s=60) == []                              # 一分钟内不重查
+    pr._wa_check_t = 0
+    assert pr.release_waiting_assets(every_s=60) == ["first:ep03-S1"]
+
+
+def test_e26_asset_sig_follows_config_registry(tmp_path):
+    PR = _producer()
+    p = PR.Paths(root=tmp_path)
+    cfg = tmp_path / "config/recipes/asset_refs.json"; cfg.parent.mkdir(parents=True)
+    cfg.write_text('{"projects": {"s1": {"sheets_file": "data/s1_sheets.json"}}}', encoding="utf-8")
+    a = PR.asset_sig(p)
+    (tmp_path / "data").mkdir(exist_ok=True)
+    (tmp_path / "data/s1_sheets.json").write_text("{}", encoding="utf-8")           # 父季设定图表登记 → 变
+    b = PR.asset_sig(p)
+    assert a != b
+    w = tmp_path / "data/looks/wardrobe.json"; w.parent.mkdir(parents=True); w.write_text("{}", encoding="utf-8")
+    assert PR.asset_sig(p) != b                                                     # 单品图登记 → 变
+
+
+# ---- 附录 A2：takes.json 唯一写入口 mutate_takes + tools/pipeline/takes_cli.py ----
+def _pl(monkeypatch, tmp_path):
+    for p in ("services/render_router", "packages/schema", "services/agent", "services/recipes"):
+        if str(ROOT / p) not in sys.path:
+            sys.path.insert(0, str(ROOT / p))
+    from ns_render import pipeline as P
+    monkeypatch.setattr(P, "RENDERS", tmp_path / "data/renders")
+    monkeypatch.setattr(P, "DATA", tmp_path / "data")
+    monkeypatch.setattr(P, "ROOT", tmp_path)
+    return P
+
+
+def test_a2_mutate_takes_seq_lastop_conflict(monkeypatch, tmp_path):
+    P = _pl(monkeypatch, tmp_path)
+    p = P.takes_path("ep01-S1"); p.parent.mkdir(parents=True)
+    p.write_text(json.dumps({"takes": [{"n": 1}], "active": {"image": 1}}), encoding="utf-8")   # 旧文件没有 seq = 0
+    d = P.mutate_takes("ep01-S1", lambda doc: doc["takes"].append({"n": 2}), op="t", by="DEBUG_RSI", op_id="o1", expect_seq=0)
+    assert d["seq"] == 1 and d["last_op"]["op_id"] == "o1" and d["last_op"]["at"].endswith("+09:00")
+    assert len(json.loads(p.read_text(encoding="utf-8"))["takes"]) == 2
+    d2 = P.mutate_takes("ep01-S1", lambda doc: doc["takes"].append({"n": 3}), op="t", by="x", op_id="o1")   # 重放 → 不执行
+    assert d2["seq"] == 1 and len(d2["takes"]) == 2
+    import pytest
+    with pytest.raises(P.TakesConflict) as ei:
+        P.mutate_takes("ep01-S1", lambda doc: None, op="t", by="x", expect_seq=0)
+    assert ei.value.actual == 1
+    assert len(list((p.parent / ".takes_bak").glob("takes.*.json"))) == 1
+
+
+def test_a2_backup_rotation_moves_to_quarantine(monkeypatch, tmp_path):
+    P = _pl(monkeypatch, tmp_path)
+    p = P.takes_path("ep02-S1"); p.parent.mkdir(parents=True)
+    p.write_text('{"takes": [], "active": {}}', encoding="utf-8")
+    monkeypatch.setattr(P, "TAKES_BAK_KEEP", 2)
+    for i in range(4):
+        P.mutate_takes("ep02-S1", lambda doc: None, op="t", by="x")
+        time.sleep(0.02)
+    assert len(list((p.parent / ".takes_bak").glob("*.json"))) == 2
+    assert len(list((tmp_path / "data/_quarantine/takes_bak/_/ep02-S1").glob("*.json"))) == 2     # 不删，隔离
+    assert json.loads(p.read_text(encoding="utf-8"))["seq"] == 4
+
+
+def test_a2_last_ops_capped_and_run_path(monkeypatch, tmp_path):
+    P = _pl(monkeypatch, tmp_path)
+    (tmp_path / "config/pipeline").mkdir(parents=True)
+    (tmp_path / "config/pipeline/runs.json").write_text('{"primary": "s1", "runs": {"s1": {}, "s2": {}}}', encoding="utf-8")
+    assert P.takes_path("ep01-S1", "s1") == tmp_path / "data/renders/ep01/S1/takes.json"
+    assert P.takes_path("ep01-S1", "s2") == tmp_path / "data/renders/s2/ep01/S1/takes.json"
+    monkeypatch.setattr(P, "TAKES_LAST_OPS", 3)
+    for i in range(5):
+        d = P.mutate_takes("ep01-S1", lambda doc: None, op="t", by="x", op_id=f"o{i}", run="s2")
+    assert [x["op_id"] for x in d["last_ops"]] == ["o2", "o3", "o4"] and d["seq"] == 5
+
+
+def test_a2_takes_cli_get_replace(monkeypatch, tmp_path, capsys):
+    import io
+    P = _pl(monkeypatch, tmp_path)
+    sys.path.insert(0, str(ROOT / "tools" / "pipeline"))
+    import takes_cli as TC
+    p = P.takes_path("ep03-S2"); p.parent.mkdir(parents=True)
+    p.write_text('{"takes": [{"n": 1}], "active": {"image": 1}}', encoding="utf-8")
+    assert TC.main(["get", "--sid", "ep03-S2"]) == 0
+    got = json.loads(capsys.readouterr().out)
+    assert got["seq"] == 0 and got["doc"]["active"]["image"] == 1
+
+    def run(args, doc):
+        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(json.dumps(doc).encode("utf-8"))))
+        rc = TC.main(args)
+        return rc, json.loads(capsys.readouterr().out)
+    new = {"takes": [{"n": 1}, {"n": 2}], "active": {"image": 2}, "seq": 99}
+    rc, out = run(["replace", "--sid", "ep03-S2", "--op", "merge", "--by", "WORKFLOW", "--expect-seq", "0", "--op-id", "w1"], new)
+    assert rc == 0 and out == {"ok": True, "seq": 1}
+    d = json.loads(p.read_text(encoding="utf-8"))
+    assert d["active"]["image"] == 2 and d["seq"] == 1 and d["last_op"]["by"] == "WORKFLOW"   # stdin 里的 seq 被忽略
+    rc, out = run(["replace", "--sid", "ep03-S2", "--op", "merge", "--by", "WORKFLOW", "--expect-seq", "0"], new)
+    assert rc == 3 and out["code"] == "stale_base" and out["seq"] == 1
+    rc, out = run(["replace", "--sid", "ep03-S2", "--op", "m", "--by", "W"], {"active": {}})
+    assert rc == 2
+
+
+def test_a2_legacy_save_takes_goes_through_entry(monkeypatch, tmp_path):
+    P = _pl(monkeypatch, tmp_path)
+    p = P.takes_path("ep04-S1"); p.parent.mkdir(parents=True)
+    p.write_text('{"takes": [], "active": {}}', encoding="utf-8")
+    d = P.load_takes("ep04-S1"); d["active"]["image"] = 1
+    P._save_takes("ep04-S1", d)
+    assert json.loads(p.read_text(encoding="utf-8"))["seq"] == 1
+    stale = {"takes": [], "active": {}, "seq": 0}                                  # 读的时候 seq=0，期间别人写到 1
+    P._save_takes("ep04-S1", stale)
+    assert json.loads(p.read_text(encoding="utf-8"))["seq"] == 2                   # seq 不倒退
+    c = (tmp_path / "data/state/takes_conflicts.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(c) == 1 and json.loads(c[0])["file_seq"] == 1
+    # fn 返回 pop 出来的 dict 不会把整份 doc 换掉
+    P.mutate_takes("ep04-S1", lambda x: x.setdefault("master_gate", {}).__setitem__("image", {"k": 1}), op="t", by="x")
+    P.mutate_takes("ep04-S1", lambda x: (x.get("master_gate") or {}).pop("image", None), op="t", by="x")
+    d = json.loads(p.read_text(encoding="utf-8"))
+    assert "takes" in d and d["master_gate"] == {} and d["seq"] == 4
+
+
+# ---- Y04 补：借道借出满 10 分钟没人用 → 自动收回（总调度 11-02 14:0x） ----
+def test_y04_idle_sweep(tmp_path):
+    sys.path.insert(0, str(ROOT / "tools" / "debug"))
+    import lanes as LN
+    part = tmp_path / "partition.json"
+    t0 = time.time()
+    for lane in ("gpu33:1", "gpu33:3", "gpu36:0", "gpu36:1"):
+        LN.lend(lane, "X", 60, "x-", "t", part=part, now=t0 - 20 * 60)
+    LN.lend("gpu33:0", "Y", 60, "y-", "t", part=part, now=t0 - 2 * 60)              # 刚借出 2 分钟 → 不收
+    st = {"gpu33:1": {"ok": True, "busy": False, "last_end": t0 - 15 * 60},          # 空 15 分钟 → 收
+          "gpu33:3": {"ok": True, "busy": True, "last_end": None},                   # 在跑 → 不收
+          "gpu36:0": {"ok": True, "busy": False, "last_end": t0 - 3 * 60},           # 3 分钟前刚出完 → 不收
+          "gpu36:1": {"ok": False}}                                                  # 探测失败 → 不动
+    called = []
+    gone = LN.idle_sweep(10, probe=lambda l: (called.append(l), st[l])[1], part=part, now=t0)
+    assert gone == ["gpu33:1"] and "gpu33:0" not in called
+    d = json.loads(part.read_text(encoding="utf-8"))
+    assert "gpu33:1" not in d["_lent_lanes"] and "gpu33:1" not in d["retired_lanes"] and "gpu33:3" in d["retired_lanes"]
+    assert any(json.loads(x)["ev"] == "idle_release" for x in (tmp_path / "lane_loans.jsonl").read_text(encoding="utf-8").splitlines())
+    assert LN.lane_port("gpu33:3") == 8191
+
+
+# ---- 视频按镜 hold：data/autopilot/video_hold.json → build_jobs 不出变体（总调度 11-02 14:2x，fb-0001） ----
+def test_video_hold_filters_and_expires(monkeypatch, tmp_path):
+    sys.path.insert(0, str(ROOT / "tools" / "series10_video"))
+    sys.path.insert(0, str(ROOT / "tools" / "pipeline"))
+    import build_jobs as B
+    f = tmp_path / "video_hold.json"
+    monkeypatch.setattr(B, "VIDEO_HOLD", f)
+    assert B.video_holds() == {}
+    t = time.time()
+    fut = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t + 3600))
+    past = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t - 60))
+    f.write_text(json.dumps({"active": True, "items": {
+        "ep02-S3": {"reason_kind": "wait_script_patch", "reason": "fb-0001", "expires_at": fut},
+        "ep04-S1": {"reason_kind": "x", "expires_at": past}}}), encoding="utf-8")
+    h = B.video_holds(t)
+    assert list(h) == ["ep02-S3"] and h["ep02-S3"].startswith("wait_script_patch")
+    f.write_text('{"active": false, "items": {"ep02-S3": {}}}', encoding="utf-8")
+    assert B.video_holds(t) == {}
+    f.write_text("{bad", encoding="utf-8")
+    import pytest
+    with pytest.raises(ValueError):
+        B.video_holds(t)

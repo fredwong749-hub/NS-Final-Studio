@@ -146,3 +146,20 @@ rules:
     confidence: high
     status: 确认
     date: 2026-10-31
+  - id: K-WRT-211
+    enforced: true    # HOLLYWOOD 11-02 补 check：rubric_code.mirror_hand_checks（v3 标记集进 autoflow 补丁环 + rubric 导入闸门），tests/test_k211.py
+    check: [tests/test_k211.py]
+    domain: writer
+    link: P3-P4
+    title: 镜面 / 玻璃场景里手不碰反光面；一镜 8 秒内手部动作不超过 2 处
+    when: 本镜场景或 img 里有 镜面 / 镜子 / 玻璃 / 落地窗 / 反光面（场景表固定陈设含“镜面墙”“全身镜”等），或任何镜长 ≤8 秒的镜头
+    then: 分拍 / motion / H3 不写 掌心贴上镜面、手扶镜面墙、指尖按在玻璃上 等手与反光面接触的动作（英文 palm pressing on the mirror、hand against the glass 同禁）；手要有去处就写抵在自己身上或场景实物（锁骨、桌沿、扶手）；一镜 8 秒内手部动作（抬手、收手、按、握、拨）合计 ≤2 处，其余节拍用视线、呼吸、肩线、表情
+    targets: [{kind: writer_prompt, section: 分拍与动作}]
+    writer_text: 镜面 / 玻璃场景（镜面墙、全身镜、落地窗）里手不碰反光面——不写“掌心贴上镜面”“手扶镜面墙”“指尖按在玻璃上”（生成模型会把真手和倒影画成粘连、倒影姿势跟不上）；手要落点就抵在自己身上或场景实物（锁骨、桌沿、扶手）；一镜 8 秒内手部动作合计不超过 2 处，其余节拍用视线、呼吸、肩线、表情给变化。 [fb-0001]
+    evidence:
+      - {src: data/feedback/items/fb-0001.json root_cause, quote: "手按镜面墙再收回压锁骨 = 已知失败模式", note: "ep02-S3 坏帧 86–91、104–128、144–184：真手与倒影合掌粘连、指节变形"}
+      - {src: tools/feedback/hand_scan.py prompt_risk, note: "镜面 + 手触反光面 = high；镜面 + 手部动作 / 8 s 内 ≥3 处手部动作 = mid"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+

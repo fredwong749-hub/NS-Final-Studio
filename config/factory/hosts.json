@@ -8,11 +8,55 @@
    "python": "/root/work/fredw/offline_20261101/venv/bin/python",
    "comfy_root": "/root/claude-kimi-ns-studio-v1/ComfyUI",
    "aliases": [],
-   "broken_gpus": [2],
+   "broken_gpus": [
+    2
+   ],
    "lanes": {
-    "gpu33:0": {"gpu": 0, "comfy_port": 8188, "tunnel_port": 18188, "roles": ["image", "video"], "enabled": true, "comfy_output": "/root/claude-kimi-ns-studio-v1/ComfyUI/output/gpu0", "max_frames": 260},
-    "gpu33:1": {"gpu": 1, "comfy_port": 8189, "tunnel_port": 18189, "roles": ["image", "video"], "enabled": true, "comfy_output": "/root/claude-kimi-ns-studio-v1/ComfyUI/output/gpu1", "max_frames": 260},
-    "gpu33:3": {"gpu": 3, "comfy_port": 8191, "tunnel_port": 18191, "roles": ["image", "video"], "enabled": true, "comfy_output": "/root/claude-kimi-ns-studio-v1/ComfyUI/output/gpu3", "max_frames": 260}
+    "gpu33:0": {
+     "gpu": 0,
+     "comfy_port": 8188,
+     "tunnel_port": 18188,
+     "roles": [
+      "image",
+      "video"
+     ],
+     "enabled": true,
+     "comfy_output": "/root/claude-kimi-ns-studio-v1/ComfyUI/output/gpu0",
+     "max_frames": 260,
+     "recipe_max_frames": {
+      "h3_funcontrolnet": 107
+     }
+    },
+    "gpu33:1": {
+     "gpu": 1,
+     "comfy_port": 8189,
+     "tunnel_port": 18189,
+     "roles": [
+      "image",
+      "video"
+     ],
+     "enabled": true,
+     "comfy_output": "/root/claude-kimi-ns-studio-v1/ComfyUI/output/gpu1",
+     "max_frames": 260,
+     "recipe_max_frames": {
+      "h3_funcontrolnet": 107
+     }
+    },
+    "gpu33:3": {
+     "gpu": 3,
+     "comfy_port": 8191,
+     "tunnel_port": 18191,
+     "roles": [
+      "image",
+      "video"
+     ],
+     "enabled": true,
+     "comfy_output": "/root/claude-kimi-ns-studio-v1/ComfyUI/output/gpu3",
+     "max_frames": 260,
+     "recipe_max_frames": {
+      "h3_funcontrolnet": 107
+     }
+    }
    }
   },
   "gpu36": {
@@ -20,11 +64,50 @@
    "repo": "/root/work/fredw/offline_20261101/repo",
    "python": "/root/work/fredw/offline_20261101/venv/bin/python",
    "comfy_root": "/root/work/fredw/comfy",
-   "aliases": ["gpu33"],
+   "aliases": [
+    "gpu33"
+   ],
    "lanes": {
-    "gpu36:0": {"gpu": 0, "comfy_port": 8188, "tunnel_port": 18288, "roles": ["image", "video"], "enabled": true, "comfy_output": "/root/work/fredw/comfy/output/gpu0"},
-    "gpu36:1": {"gpu": 1, "comfy_port": 8189, "tunnel_port": 18289, "roles": ["image", "video"], "enabled": true, "comfy_output": "/root/work/fredw/comfy/output/gpu1"},
-    "gpu36:2": {"gpu": 2, "comfy_port": 8190, "tunnel_port": 18290, "roles": ["vlm"], "enabled": false, "comfy_output": "/root/work/fredw/comfy/output/gpu2", "max_frames": 362, "note": "L-100：GPU2 专用看图卡（vqa_router 3 实例），ComfyUI :8190 已停；视频阶段长镜头道再规划"}
+    "gpu36:0": {
+     "gpu": 0,
+     "comfy_port": 8188,
+     "tunnel_port": 18288,
+     "roles": [
+      "image",
+      "video"
+     ],
+     "enabled": true,
+     "comfy_output": "/root/work/fredw/comfy/output/gpu0",
+     "recipe_max_frames": {
+      "h3_funcontrolnet": 107
+     }
+    },
+    "gpu36:1": {
+     "gpu": 1,
+     "comfy_port": 8189,
+     "tunnel_port": 18289,
+     "roles": [
+      "image",
+      "video"
+     ],
+     "enabled": true,
+     "comfy_output": "/root/work/fredw/comfy/output/gpu1",
+     "recipe_max_frames": {
+      "h3_funcontrolnet": 107
+     }
+    },
+    "gpu36:2": {
+     "gpu": 2,
+     "comfy_port": 8190,
+     "tunnel_port": 18290,
+     "roles": [
+      "vlm"
+     ],
+     "enabled": false,
+     "comfy_output": "/root/work/fredw/comfy/output/gpu2",
+     "max_frames": 362,
+     "note": "L-100：GPU2 专用看图卡（vqa_router 3 实例），ComfyUI :8190 已停；视频阶段长镜头道再规划"
+    }
    }
   },
   "laptop": {
@@ -32,8 +115,18 @@
    "repo": "D:/NS-Final Studio",
    "aliases": [],
    "lanes": {
-    "laptop:0": {"gpu": 0, "comfy_port": 18388, "tunnel_port": null, "roles": ["vlm"], "enabled": false, "note": "L-100：笔记本 4080 专用看图卡，不出图"}
+    "laptop:0": {
+     "gpu": 0,
+     "comfy_port": 18388,
+     "tunnel_port": null,
+     "roles": [
+      "vlm"
+     ],
+     "enabled": false,
+     "note": "L-100：笔记本 4080 专用看图卡，不出图"
+    }
    }
   }
- }
+ },
+ "_recipe_max_frames": "VIDLAB 11-02 实测（RTX 3090 24 GB）：H3 FunControlNet 158 帧 OOM、107 帧可跑；配方按道读这里（hosts.recipe_max_frames(lane, recipe)），不在配方里写死"
 }

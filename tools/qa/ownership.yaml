@@ -23,6 +23,10 @@ loops:
   SYSARCH: {status: active}
   VIDEO_RCA: {status: active}
   CODERSI: {status: active}
+  IMGMASTER: {status: active}
+  FEEDBACK: {status: active}  # 总调度 11-02 14:xx：反馈后台（反馈 → 分类 → 修复 → 补检测）
+  DETECT_S: {status: active}  # 总调度 11-02 14:xx：Sonnet 接班，写 tools/vqa/anomaly.py（文件负责方 VQAGATE，CONSENT 授权写）
+  UIFIX_S: {status: active}   # 总调度 11-02 14:xx：Sonnet 接班，改 v3/SystemStatus*（文件负责方 UIRSI，CONSENT 授权写）  # 总调度 11-02 13:3x：出图总编排（L-118），a31f67984f6f4b935
   IMGLAB: {status: active}  # 总调度 04:4x：出图能力深研与根治
   SCRIPTWRITER: {status: active}  # 总调度 04:2x：L-109 测试期剧本写手（Fable），只写 data/pipeline/runs/*/writer_out
   VIDLAB: {status: active}  # 总调度 11-02 05:0x：线 2 视频 RSI 牵头（RSI_PROGRAM.md），SYSARCH 代录
@@ -53,7 +57,7 @@ owners:
   UIMASTER:  ["apps/web/e2e/uimaster/**", "docs/uimaster/**"]
   UIRSI:     ["apps/web/src/App.tsx", "apps/web/src/v3/TopBarV3.tsx", "apps/web/src/v3/Canvas.tsx",
               "apps/web/src/v3/ReviewRow.tsx", "apps/web/src/v3/status.ts", "apps/web/src/v3/widgets.tsx",
-              "apps/web/src/v3/pages/**", "apps/web/e2e/uirsi/**", "docs/uirsi/**",
+              "apps/web/src/v3/pages/**", "apps/web/src/v3/SystemStatus*", "apps/web/e2e/uirsi/**", "docs/uirsi/**",
               "services/api/ns_api/takes_ui.py", "services/api/ns_api/shot_audio.py", "services/api/ns_api/story_runs.py",
               "tools/uirsi/**", "tests/test_ui_copy_uirsi.py", "tests/test_takes_ui_uirsi.py",
               "tests/test_owner_headers.py", "services/canvas_api/**", "tests/test_r43_uirsi.py", "tests/test_story_runs_uirsi.py", "services/api/ns_api/**", "apps/web/e2e/ux6/**"]   # 总调度 fredw-2b 11-01 18:5x 定（CODE-RSI 查出无主）   # 测试归 UIRSI：总调度 11-01（UIRSI r35 报 iter_gate 判“无主”）   # 总调度 fredw-2b 11-02 04:3x 批 SYSARCH 无主文件分配表（CONSENT 总调度）
@@ -65,11 +69,11 @@ owners:
   UIPIXEL:   ["apps/web/src/**/*.css", "apps/web/src/ds/ZoomLayer.tsx", "apps/web/e2e/uipixel/**", "docs/uipixel/**"]
   UIAUDIT:   ["apps/web/e2e/uiaudit/**", "docs/uiaudit/**"]
   ASSETMASTER: ["tools/assetmaster/**", "data/assetmaster/**", "docs/assetmaster/**", "data/review_pages/series10_assets_v2/**"]
-  REFLOCK:   ["tools/gen_contract/**", "services/agent/ns_agent/gen_contract/**", "services/agent/ns_agent/asset_refs.py",
+  REFLOCK:   ["tools/gen_contract/**", "services/agent/ns_agent/gen_contract/**",
               "config/gen_contract.json", "data/review_pages/asset_reflock/**", "docs/GEN_CONTRACT.md",
               # 总调度 11-01：唯一出图路径归 REFLOCK（IMGGEN 已不活跃，imggen.py 交给 REFLOCK）
-              "tools/series10_imggen/imggen.py", "services/agent/ns_agent/frame_job.py",
-              "services/render_router/ns_render/unified_frame.py", "services/render_router/ns_render/frame_edit.py",
+              "tools/series10_imggen/imggen.py",
+              "services/render_router/ns_render/frame_edit.py",
               "config/recipes/asset_refs.json", "tests/test_ref_switch_assets.py", "tests/test_unified_frame.py",
               "tests/test_image_framing.py"]   # 总调度 fredw-2b 11-01 18:5x 定（CODE-RSI 查出无主）   # 测试归 REFLOCK：总调度 11-01 晚
   IMGGEN:    ["tools/series10_imggen/**", "data/pipeline/runs/series10_v1/images/**", "data/review_pages/series10_images/**",
@@ -119,12 +123,14 @@ owners:
   DISTILL:   ["config/policies/**", "knowledge/rules/ops_distill.yaml", "docs/AUTOPILOT.md", "data/autopilot/coverage.json", "tools/qa/identity_face_check.py", "tools/autopilot/policy.py", "tools/autopilot/flow.py", "tools/autopilot/state_snapshot.py", "tests/test_distill_flow.py", "services/orchestrator/**"]   # 总调度 fredw-2b 11-02 02:0x：L-102 提炼 loop（K-OPS-D03 指派）   # 总调度 fredw-2b 11-02 04:3x 批 SYSARCH 无主文件分配表（CONSENT 总调度）
   FACTORY:   ["tools/factory/**", "ops/factory/**", "knowledge/rules/ops_factory.yaml", "tests/test_factory.py", "docs/master/FRAMEWORK_REFRAME.md", "data/factory/**", "tools/qa/system_version.py", "tests/test_system_version.py", "tests/test_push_check.py", "tools/localgpu/**"]   # 总调度 fredw-2b 11-02：L-099 服务器工厂 + 发版工具（F06–F08）   # 总调度 fredw-2b 11-02 04:3x 批 SYSARCH 无主文件分配表（CONSENT 总调度）
   HOLLYWOOD: ["tools/script_rsi/**", "config/prompts/hollywood_*", "knowledge/rules/writer_hollywood.yaml", "tests/test_hollywood.py", "tests/test_hollywood_r5.py", "data/review_pages/hollywood_r5/**", "data/staging_v3/**", "packages/schema/**"]   # 总调度 fredw-2b 11-02 03:0x（ARCH-AUDIT #15）   # 总调度 fredw-2b 11-02 04:3x 批 SYSARCH 无主文件分配表（CONSENT 总调度）
-  IMGFIX:    ["tools/imgfix/**", "tools/asset_repair/**", "config/asset_repair/**", "tests/test_imgfix.py", "data/ab/imgfix/**", "data/review_pages/imgfix/**", "data/review_pages/lookA_sleeve_fix/**", "services/agent/ns_agent/**", "tools/char_assets/**"]   # 总调度 fredw-2b 11-02 03:0x（ARCH-AUDIT #15）   # 总调度 fredw-2b 11-02 04:3x 批 SYSARCH 无主文件分配表（CONSENT 总调度）
+  IMGFIX:    ["tools/imgfix/**", "tools/asset_repair/**", "config/asset_repair/**", "tests/test_imgfix.py", "data/ab/imgfix/**", "data/review_pages/imgfix/**", "data/review_pages/lookA_sleeve_fix/**", "services/agent/ns_agent/**", "tools/char_assets/**", "config/compile/plugins/imgfix_*"]   # 总调度 fredw-2b 11-02 03:0x（ARCH-AUDIT #15）   # 总调度 fredw-2b 11-02 04:3x 批 SYSARCH 无主文件分配表（CONSENT 总调度）
+  IMGMASTER: ["services/agent/ns_agent/frame_job.py", "services/agent/ns_agent/asset_refs.py", "services/render_router/ns_render/unified_frame.py", "config/compile/**", "docs/master/CONSISTENCY_PLAN.md", "tools/imgmaster/**", "docs/imgmaster/**", "data/review_pages/imgmaster/**", "tests/test_imgmaster*.py"]   # 总调度 fredw-2b 11-02 13:3x 定（L-118）：唯一编译入口归 IMGMASTER；插件 config/compile/plugins.yaml 由 IMGMASTER 合入，IMGFIX 维护的插件文件按 config/compile/plugins/imgfix_* 登记给 IMGFIX
+  FEEDBACK:  ["services/api/ns_api/feedback.py", "tools/feedback/**", "docs/feedback/**", "data/feedback/**", "tests/test_feedback*.py"]   # 总调度 fredw-2b 11-02 14:xx 定，SYSARCH 代录
   IMGLAB:    ["tools/imglab/**", "docs/research/imglab/**", "data/review_pages/imglab/**", "tests/test_imglab*.py"]   # 总调度 04:4x
   SCRIPTWRITER: ["data/pipeline/runs/*/writer_out/**"]   # 总调度 04:4x
   VIDLAB:    ["tools/vidlab/**", "docs/research/vidlab/**", "data/review_pages/vidlab/**", "tools/acting/**"]   # 总调度 05:0x，SYSARCH 代录   # 总调度 fredw-2b 11-02 04:3x 批 SYSARCH 无主文件分配表（CONSENT 总调度）
   SENTINEL:  ["tools/sentinel/**", "data/sentinel/**", "config/policies/sentinel.yaml", "docs/master/SLO.md", "tools/monitor/**"]   # 总调度 fredw-2b 11-02 03:0x（L-103）   # 总调度 fredw-2b 11-02 04:3x 批 SYSARCH 无主文件分配表（CONSENT 总调度）
-  SYSARCH:   ["docs/master/ARCH_MAP.md", "docs/master/ARCH_ROADMAP.md", "tools/qa/arch_scan.py", "tests/test_arch_scan.py", "knowledge/rules/ops_sysarch.yaml", "data/sysarch/**", "tools/rsi/system_score.py", "tests/test_rsi_system_score.py", "tests/test_rssh_server_contract.py", "tools/*.py", "tools/ab/**", "tools/prompt_v2/**", "tools/lab_ep02/**", "tools/ep02_iter/**", "tools/ep02_director/**", "tools/knowledge/**", "tools/qa/**"]   # 总调度 fredw-2b 11-02 03:0x：全系统代码总架构师；跨 owner 整合须先告知负责方   # 总调度 fredw-2b 11-02 04:3x 批 SYSARCH 无主文件分配表（CONSENT 总调度）
+  SYSARCH:   ["docs/master/ARCH_MAP.md", "docs/master/ARCH_ROADMAP.md", "tools/qa/arch_scan.py", "tests/test_arch_scan.py", "knowledge/rules/ops_sysarch.yaml", "data/sysarch/**", "tools/rsi/system_score.py", "tests/test_rsi_system_score.py", "tests/test_rssh_server_contract.py", "ops/hooks/**", "tests/test_freeze_guard.py", "tests/test_freeze_audit.py", "tests/test_purge_precheck.py", "tools/*.py", "tools/ab/**", "tools/prompt_v2/**", "tools/lab_ep02/**", "tools/ep02_iter/**", "tools/ep02_director/**", "tools/knowledge/**", "tools/qa/**"]   # 总调度 fredw-2b 11-02 03:0x：全系统代码总架构师；跨 owner 整合须先告知负责方   # 总调度 fredw-2b 11-02 04:3x 批 SYSARCH 无主文件分配表（CONSENT 总调度）
 
 # 优先于 owners 的归属（总调度 11-01：ds/zoom.css、ZoomLayer.tsx 和全部 CSS 归 UIPIXEL，包括资产 / 编辑目录下的 .css）
 override:

@@ -422,6 +422,35 @@ PY_PATHS = ("packages/schema", "services/agent", "services/api", "services/orche
             "services/recipes", "services/post")
 
 
+LOCK_HISTORY = DATA / "lock_history.jsonl"
+FREEZE_DRIFT = ROOT / "data/rsi/freeze_drift.jsonl"
+FROZEN_TOP = ("tools/", "services/", "packages/", "config/", "knowledge/", "ops/", "tests/", "apps/")
+
+
+def quiet_since(seconds: float = 60, max_wait: float = 600, sleep=time.sleep, clock=time.time) -> dict:
+    """预冻结（SYSARCH §9 / K-OPS-F08 修订）：冻结目录里改动过的文件，最近一次 mtime 距今 ≥ seconds 才返回（最多等 max_wait）。
+    写到一半的文件要么在这之前写完，要么被冻结锁拦下，不会再被拍进冻结树（11-02 sv-09 owner_queue.py 事故）"""
+    t0 = clock()
+    last = None
+    while True:
+        latest, who = 0.0, None
+        for _st, path in pending_changes():
+            if not path.startswith(FROZEN_TOP):
+                continue
+            try:
+                m = (ROOT / path).stat().st_mtime
+            except OSError:
+                continue
+            if m > latest:
+                latest, who = m, path
+        age = clock() - latest if latest else 1e9
+        last = {"quiet_s": round(min(age, 1e6), 1), "last_file": who, "waited_s": round(clock() - t0, 1)}
+        if age >= seconds or clock() - t0 >= max_wait:
+            last["ok"] = age >= seconds
+            return last
+        sleep(min(10, seconds - age + 1))
+
+
 def cut_lock(active: bool, sv: str | None = None, note: str = "") -> dict:
     """data/system_versions/cut_lock.json：cut 进行中 = active=true（到期自动失效）。各 agent 写代码 / 规则 / 配置前先看它
     （tools/qa/system_version.py lock-status；规则 K-OPS-F08）。结束时改回 active=false（不删文件）"""
@@ -432,6 +461,9 @@ def cut_lock(active: bool, sv: str | None = None, note: str = "") -> dict:
     tmp = CUT_LOCK.with_suffix(".tmp")
     tmp.write_text(json.dumps(rec, ensure_ascii=False, indent=1), encoding="utf-8")
     os.replace(tmp, CUT_LOCK)
+    with open(CUT_LOCK.parent / "lock_history.jsonl", "a", encoding="utf-8") as f:     # SYSARCH iter_gate F1：冻结窗口内的写入判 fail
+        f.write(json.dumps({"sv": sv, "event": "start" if active else "end", "at": rec["at"], "t": time.time(), "pid": os.getpid(),
+                            "note": note}, ensure_ascii=False) + "\n")
     return rec
 
 
@@ -546,7 +578,7 @@ def build_snapshot(tree: str, dest: Path) -> dict:
     return {"dir": str(dest), "files": n, "linked": linked, "env": env}
 
 
-def cut(base: str | None = None, dry: bool = False, sv: str | None = None, run_tests: bool = True) -> dict:
+def cut(base: str | None = None, dry: bool = False, sv: str | None = None, run_tests: bool = True, tree: str | None = None) -> dict:
     """发版（K-OPS-V01 / K-OPS-F08）：冻结窗口 → 冻结树 → 快照 → 闸门全部对快照跑 → 提交冻结树（不是此刻的工作树）→ tag。
     cut 期间别的 agent 改的文件不进这一版、也不会让闸门失败（留给下一版）"""
     prev = prev_ref(base)
@@ -555,7 +587,13 @@ def cut(base: str | None = None, dry: bool = False, sv: str | None = None, run_t
     files = [p for _s, p in changed]
     if not changed and not git("diff", "--name-only", prev, "HEAD").strip():
         return {"ok": False, "reason": "相对上一版没有任何改动，不发版"}
-    cut_lock(True, sv, "cut 开始")
+    os.environ["NS_FREEZE_EXEMPT"] = "1"              # SYSARCH 冻结锁第 2 层：cut 自己和它起的子进程（git / pytest / compile）豁免
+    cut_lock(True, sv, "预冻结：等冻结目录 60 s 无改动")
+    if not tree:
+        q = quiet_since(60)
+        if not q.get("ok"):
+            cut_lock(False, sv, "预冻结超时：冻结目录一直有人在改")
+            return {"ok": False, "id": sv, "prev": prev, "reason": f"预冻结 10 分钟内冻结目录没安静下来（最后改动 {q.get('last_file')}）"}
     idx_fd, idx_name = tempfile.mkstemp(prefix="nsfs_cut_index_")
     os.close(idx_fd)
     idx_file = Path(idx_name)
@@ -566,7 +604,12 @@ def cut(base: str | None = None, dry: bool = False, sv: str | None = None, run_t
         if ign:
             rep.update(ok=False, reason="代码目录里有被 .gitignore 挡住、进不了版本的代码文件（ARCH_MAP #1）：" + "、".join(ign[:20]))
             return rep
-        tree, ienv = freeze_tree(idx_file)
+        if tree:     # 指定冻结树（例：在上一次冻结树上做总调度批准的最小改动，不从工作树重拍，避免带入冻结期间的未审改动）
+            ienv = {**ENV, "GIT_INDEX_FILE": str(idx_file)}
+            gitx(ienv, "read-tree", tree)
+            rep["tree_given"] = True
+        else:
+            tree, ienv = freeze_tree(idx_file)
         frozen = [x for x in gitx(ienv, "diff", "--cached", "--name-only", "HEAD").split("\n") if x]
         snap = build_snapshot(tree, SNAP_BASE / sv)
         rep.update(tree=tree, snapshot={k: v for k, v in snap.items() if k != "env"}, frozen_files=len(frozen))
@@ -619,6 +662,11 @@ def cut(base: str | None = None, dry: bool = False, sv: str | None = None, run_t
         git("tag", "-a", sv, "-m", f"{sv} 系统版本（上一版 {prev}）", commit)
         drift = [p for _s, p in pending_changes() if not p.startswith("docs/system_versions/")]
         late = untracked_code_after(tree)
+        if drift:     # SYSARCH §9 第 4 层：冻结期间有改动的文件进 cut 报告 + 账本（SENTINEL 探针按它开工单，负责方 = 文件负责方）
+            FREEZE_DRIFT.parent.mkdir(parents=True, exist_ok=True)
+            with open(FREEZE_DRIFT, "a", encoding="utf-8") as f:
+                f.write(json.dumps({"sv": sv, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "files": drift[:200]}, ensure_ascii=False) + "\n")
+            rep["drift_files"] = drift[:50]
         entry.update(commit=commit, drift_during_cut=len(drift), untracked_code_after_cut=late[:50])
         entry["state_snapshot"] = take_state_snapshot(sv)    # K-OPS-X06（DISTILL）：决策 / 配置 / 运行状态快照，回退时可还原
         entry["remote_push"] = push_remote(prev, sv)          # 总调度 23:0x：发版后推 GitHub（失败不影响发版，记下来）
@@ -797,7 +845,7 @@ def deploy_host(rs, h: str, snap: Path, names: list[str], tracked_code: list[str
             rs.ssh(h, f"cd {rs.R} && mkdir -p data/factory/inbox && cat > {rel}.tmp && mv {rel}.tmp {rel} && sha256sum {rel}", data=expected, tries=3)
             r["expected_refs"] = "pushed"
         # 服务器运行依赖（config/deploy/server_deps.yaml：venv 能 import 的包 / 版本、模型文件 sha）——缺了不排重启（总调度 04:0x）
-        sd = rs.ssh(h, f"cd {rs.R} && {rs.OFF}/venv/bin/python tools/factory/server_deps.py; echo rc=$?", tries=3).decode("utf-8", "replace")
+        sd = rs.ssh(h, f"cd {rs.R} && OFFLINE_SELF={h} {rs.OFF}/venv/bin/python tools/factory/server_deps.py; echo rc=$?", tries=3).decode("utf-8", "replace")
         r["server_deps"] = sd.strip()[-400:]
         if "rc=0" not in sd:
             raise RuntimeError("服务器运行依赖不齐（config/deploy/server_deps.yaml），不排重启，老进程继续：" + sd.strip()[-300:])
@@ -813,7 +861,8 @@ def deploy_host(rs, h: str, snap: Path, names: list[str], tracked_code: list[str
             r["restart"] = f"queued {q['id']}（tools/autopilot/restart_queue.py，执行记录 data/autopilot/restart_done.jsonl）"
             if urgent and hasattr(rq, "process"):     # K-OPS-F13：urgent 不等 loop 下一拍，当场按队列规则（排空 ≤90 s）执行，重启后 resume
                 done = rq.process(h, rs) or {}
-                r["restart"] += f"；当场执行 ok={done.get('ok')} drain={done.get('drain_mode') or done.get('drained')} {done.get('secs')} s"
+                r["restart"] += (f"；当场执行 ok={done.get('ok')} drain={done.get('drain_mode') or done.get('drained')} {done.get('secs')} s"
+                                 + (f" error={str(done.get('error'))[:200]}" if done.get("error") else ""))
                 paused = not done.get("ok")
         r["ok"] = True
     except Exception as e:  # noqa: BLE001
@@ -958,6 +1007,7 @@ def main(argv=None) -> int:
     c.add_argument("--base")
     c.add_argument("--dry", action="store_true")
     c.add_argument("--id")
+    c.add_argument("--tree", default=None, help="用指定的 git 树代替冻结工作树（总调度批准的快照修补）")
     d = sp.add_parser("deploy")
     d.add_argument("sv", nargs="?")
     d.add_argument("--hosts")
@@ -975,7 +1025,7 @@ def main(argv=None) -> int:
     except Exception:  # noqa: BLE001
         pass
     if a.cmd == "cut":
-        out = cut(a.base, a.dry, a.id)
+        out = cut(a.base, a.dry, a.id, tree=a.tree)
         record_cut(out, a.dry)
         print(json.dumps({k: v for k, v in out.items() if k != "gates"}, ensure_ascii=False, indent=1)[:4000])
         for gg in out.get("gates", []):

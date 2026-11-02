@@ -303,7 +303,7 @@ checks:
     pattern: 'AGENT = "PRODUCER"'
     paths: [tools/autopilot/producer.py]
   - id: D-CLN-09
-    decision: L-079（先隔离、验证，最后项目方本人运行删除脚本）
+    decision: L-079（先隔离、验证，最后项目方本人运行删除脚本）；⤴ 11-02 13:2x 项目方在待你看队列同意 L-058，并本人两次下令执行 -Delete，笔记本和两台服务器的隔离区都已删除
     title: 隔离区已按项目方决定删除（不得再出现）
     type: absent
     paths: [data/_quarantine_20261101, data/_archive/20261031, data/renders/_archive_60ep_20261031]

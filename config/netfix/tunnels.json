@@ -58,6 +58,23 @@
    ],
    "probe_http": []
   },
+  "base-c": {
+   "kind": "base",
+   "route": "hk",
+   "alias_suffix": "-tc",
+   "forwards": [
+    [
+     22362,
+     "10.0.0.36:22"
+    ],
+    [
+     22332,
+     "10.0.0.33:22"
+    ]
+   ],
+   "probe_http": [],
+   "_note": "14:3x：命令通道专用底座（香港）。实测 rsh 'true' 要 14–70 s：命令会话和出图道的大流量挤在 base-a 同一条 TCP 里排队（队头阻塞）。命令主连接 + 看图转发挂这条，出图道留在 base-a"
+  },
   "gpu33-l0": {
    "ssh_host": "gpu33",
    "forwards": [
@@ -96,7 +113,7 @@
     18189
    ],
    "via": "t",
-   "base": "base-b"
+   "base": "base-a"
   },
   "gpu33-l3": {
    "ssh_host": "gpu33",
@@ -118,10 +135,6 @@
     [
      18288,
      8188
-    ],
-    [
-     8871,
-     8870
     ]
    ],
    "probe_http": [
@@ -129,6 +142,21 @@
    ],
    "via": "t",
    "base": "base-a"
+  },
+  "gpu36-vqa": {
+   "ssh_host": "gpu36",
+   "forwards": [
+    [
+     8871,
+     8870
+    ]
+   ],
+   "probe_http": [
+    8871
+   ],
+   "via": "t",
+   "base": "base-c",
+   "_note": "12:1x VQAGATE 报 8871 断：原挂在 gpu36-l0（出图道）上，l0 忙时探测超时 / ServerAlive 断线重建（14 次）连带断看图；拆成独立连接，互不牵连"
   },
   "gpu36-l1": {
    "ssh_host": "gpu36",
@@ -142,7 +170,7 @@
     18289
    ],
    "via": "t",
-   "base": "base-b"
+   "base": "base-a"
   },
   "gpu33-cmd": {
    "kind": "wsl_mux",
@@ -151,7 +179,7 @@
    "forwards": [],
    "probe_http": [],
    "via": "t",
-   "base": "base-a"
+   "base": "base-c"
   },
   "gpu36-cmd": {
    "kind": "wsl_mux",
@@ -160,7 +188,7 @@
    "forwards": [],
    "probe_http": [],
    "via": "t",
-   "base": "base-a"
+   "base": "base-c"
   },
   "gpu33-cmd2": {
    "kind": "wsl_mux",
@@ -169,7 +197,7 @@
    "forwards": [],
    "probe_http": [],
    "via": "t",
-   "base": "base-b"
+   "base": "base-c"
   },
   "gpu36-cmd2": {
    "kind": "wsl_mux",
@@ -178,7 +206,7 @@
    "forwards": [],
    "probe_http": [],
    "via": "t",
-   "base": "base-b"
+   "base": "base-c"
   },
   "gpu33-cmd3": {
    "kind": "wsl_mux",
@@ -187,7 +215,7 @@
    "forwards": [],
    "probe_http": [],
    "via": "t",
-   "base": "base-a"
+   "base": "base-c"
   },
   "gpu33-cmd4": {
    "kind": "wsl_mux",
@@ -196,7 +224,7 @@
    "forwards": [],
    "probe_http": [],
    "via": "t",
-   "base": "base-b"
+   "base": "base-c"
   },
   "gpu36-cmd3": {
    "kind": "wsl_mux",
@@ -205,7 +233,7 @@
    "forwards": [],
    "probe_http": [],
    "via": "t",
-   "base": "base-a"
+   "base": "base-c"
   },
   "gpu36-cmd4": {
    "kind": "wsl_mux",
@@ -214,7 +242,7 @@
    "forwards": [],
    "probe_http": [],
    "via": "t",
-   "base": "base-b"
+   "base": "base-c"
   }
  },
  "tick_s": 5,
@@ -286,5 +314,6 @@
    "retired_at": "2026-11-02T03:1x",
    "why": "L-100：gpu36 GPU2 改作看图卡（vqa_router → :8870），ComfyUI :8190 已停（03:10 实测 ss 无监听，探测 remote_down）；隧道本身是通的。恢复 = 移回 hosts"
   }
- }
+ },
+ "_r4_note": "12:1x：内层全部首选 base-a（香港）；base-b（直连，丢包约 16%）只做热备——按道分摊时挂 b 的 l1 / cmd 反复 “banner exchange 超时”、gpu36-l1 重启 25 次、IMGLAB 实验窗口一张没出。a 断时 REHOME 到 b（≤ 30 s），a 恢复稳定后迁回。"
 }

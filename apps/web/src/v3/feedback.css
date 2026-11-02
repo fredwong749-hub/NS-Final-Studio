@@ -1,0 +1,37 @@
+/* ---------- UIRSI2 · 反馈模式（docs/feedback/API.md §5）：电影胶片 A 风格；状态圆点只用 灰 / 琥珀 / 绿（v3-dot d-gray / d-yellow / d-green）。
+   样式归 UIPIXEL（custodian UIRSI，LOCKS CONSENT）。 ---------- */
+.fb-top { display: inline-flex; gap: 4px; align-items: center; }
+.fb-switch.on { background: #e9e6e0; color: #111; border-color: #e9e6e0; }
+.fb-count { display: inline-flex; align-items: center; gap: 6px; font-family: "IBM Plex Mono", Consolas, monospace; }
+html.fb-on body, html.fb-on body * { cursor: crosshair !important; }
+html.fb-on .fb-ui, html.fb-on .fb-ui * { cursor: auto !important; }
+html.fb-on .fb-ui button, html.fb-on .fb-ui a, html.fb-on .fb-ui label { cursor: pointer !important; }
+.fb-hl { position: fixed; z-index: 90; pointer-events: none; border: 2px solid #e9e6e0; box-shadow: 0 0 0 9999px rgba(0, 0, 0, .18); border-radius: 2px; transition: all 60ms linear; }
+.fb-banner { position: fixed; z-index: 91; left: 50%; bottom: 18px; transform: translateX(-50%); background: #e9e6e0; color: #111; font-size: 12.5px; padding: 6px 14px; border-radius: 2px; pointer-events: none; }
+.fb-dlg { position: fixed; z-index: 95; width: 380px; background: #0d0d0d; color: #e9e6e0; border: 1px solid rgba(255, 255, 255, .22); box-shadow: 0 18px 40px rgba(0, 0, 0, .6); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.fb-ctx { font: 11px "IBM Plex Mono", Consolas, monospace; color: rgba(233, 230, 224, .62); letter-spacing: .03em; }
+.fb-dlg textarea { width: 100%; box-sizing: border-box; resize: vertical; background: transparent; color: #e9e6e0; border: 1px solid rgba(255, 255, 255, .16); border-radius: 2px; padding: 8px; font: 13px/1.5 system-ui, sans-serif; }
+.fb-row { display: flex; align-items: center; gap: 8px; }
+.fb-grow { flex: 1; }
+.fb-snap { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: rgba(233, 230, 224, .62); }
+.fb-snap img { height: 36px; width: auto; }
+.fb-hint { font-size: 11.5px; color: rgba(233, 230, 224, .4); }
+.fb-send:not(:disabled) { background: #e9e6e0; color: #111; border-color: #e9e6e0; }
+.fb-drawer { position: fixed; z-index: 92; top: 48px; right: 0; bottom: 0; width: 440px; background: #0d0d0d; color: #e9e6e0; border-left: 1px solid rgba(255, 255, 255, .12); overflow-y: auto; padding: 14px 18px 30px; box-shadow: -18px 0 40px rgba(0, 0, 0, .45); }
+.fb-drawer header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.fb-drawer h3 { margin: 0 auto 0 0; font-size: 17px; font-weight: 600; }
+.fb-drawer h4 { display: flex; align-items: center; gap: 8px; margin: 18px 0 6px; padding-bottom: 6px; border-bottom: 1px solid rgba(255, 255, 255, .08); font: 500 11px "IBM Plex Mono", Consolas, monospace; letter-spacing: .12em; color: rgba(233, 230, 224, .62); }
+.fb-drawer h4 span { margin-left: auto; color: rgba(233, 230, 224, .4); }
+.fb-item { padding: 10px 0; border-bottom: 1px solid rgba(255, 255, 255, .08); }
+.fb-meta { font: 11px "IBM Plex Mono", Consolas, monospace; color: rgba(233, 230, 224, .62); }
+.fb-meta b { color: #e9e6e0; font-weight: 500; }
+.fb-text { margin: 6px 0 4px; font-size: 13.5px; line-height: 1.55; }
+.fb-fix { margin: 0 0 6px; font-size: 12px; line-height: 1.5; color: rgba(233, 230, 224, .62); }
+.fb-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 11.5px; color: rgba(233, 230, 224, .4); }
+.fb-foot a { color: rgba(233, 230, 224, .62); }
+.fb-foot input { flex: 1 1 140px; height: 26px; background: transparent; border: 1px solid rgba(255, 255, 255, .16); border-radius: 2px; color: #e9e6e0; font-size: 12px; padding: 0 8px; }
+.fb-err { color: var(--c-warn, #d6a23a); font-size: 13px; }
+/* 帧角标（左上角，避开右上角的放大镜 / ↻） */
+.fb-dot { position: absolute; left: 5px; top: 5px; z-index: 3; display: inline-flex; align-items: center; gap: 3px; padding: 2px 5px; border: 0; border-radius: 9px; background: rgba(0, 0, 0, .62); color: #e9e6e0; font: 500 10px "IBM Plex Mono", Consolas, monospace; cursor: pointer; }
+.fb-dot .v3-dot { width: 7px; height: 7px; }
+.v3-vid, .v3-frame { position: relative; }

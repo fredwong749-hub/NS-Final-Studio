@@ -10,6 +10,8 @@
 """
 from __future__ import annotations
 
+import json
+import os
 import re
 
 import sys
@@ -54,6 +56,24 @@ SIZE_BAND = {"极近特写": 0, "大特写": 0, "特写": 1, "近景": 2, "中�
 NAME_ID = {"林晚": "lin_wan", "顾沉": "gu_chen", "陈宇": "chen_yu", "阿岚": "ch_a_lan"}
 from .metrics import (ZONE_REGION, _clip, _ref_crop, embed, hist_corr, hs_hist, measure, region_match,  # noqa: E402,F401
                       texture, windows)
+
+
+EMB_DIR = Path(__file__).resolve().parents[4] / "data" / "identity" / "emb"
+
+
+def save_q1_emb(image, per: dict) -> None:
+    """Q1x：本图每个在画角色那张脸的 ArcFace 特征 → data/identity/emb/<图内容 sha16>.json（原子写；不进 takes.json）"""
+    import hashlib
+    import os
+    per = {c: {"emb": e, "h": h} for c, (e, h) in per.items() if e}
+    p = Path(str(image))
+    if not per or not p.exists():
+        return
+    EMB_DIR.mkdir(parents=True, exist_ok=True)
+    out = EMB_DIR / (hashlib.sha256(p.read_bytes()).hexdigest()[:16] + ".json")
+    tmp = out.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(per), encoding="utf-8")
+    os.replace(tmp, out)
 
 
 def q1a_item(image, boxes: dict, all_boxes: list, t1a: dict) -> tuple[str, str, dict]:
@@ -323,6 +343,7 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
         bad, got, via, used = [], {}, {}, set()
         q1_band = []                                  # K-REV-V18 修订：落在复核带的角色（交本地看图左右并排复核）
         q1_boxes = {}                                 # Q1a：每个在画角色认到的那张脸（ArcFace 最像的一张）
+        q1_idx = {}                                   # Q1x：同上，脸在 faces 里的下标（取特征）
         refd = {k for f in faces for k in f["sims"]}
         for cid in expect:
             if faces and cid not in refd:                 # 没有身份脸参考的角色（路人）：不判，下面按“可抵一张认不出的脸”算
@@ -335,6 +356,7 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
             else:
                 used.add(k_best)
                 q1_boxes[cid] = faces[k_best].get("bbox")
+                q1_idx[cid] = k_best
                 h = float(faces[k_best].get("h_ratio") or 0)
                 need, lo, tname = band_lines(cid, h, t1)
                 if best < lo:
@@ -404,6 +426,9 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
             sims=got, ref=via, faces=len(faces), strangers=strangers, others=extra_ok, stranger_boxes=stranger_boxes, review_band=q1_band,
             partial_cast=any(c.get("presence") in ("局部", "背影") for c in req.get("cast") or []), boxes=q1_boxes,
             q1_mode=(remote or {}).get("q1_mode"))
+        save_q1_emb(image, {cid: (faces[k].get("emb"), faces[k].get("h_ratio")) for cid, k in q1_idx.items()})
+        for f in faces:
+            f.pop("emb", None)
         # Q1a（VQAGATE 11-02 P0，ep06-S2 v6 顾沉长出林晚的蓝色长发）：逐人头发属性，确定性分割判；上线即阻断
         t1a = th.get("Q1a_attr") or {}
         if t1a.get("enabled"):

@@ -206,8 +206,58 @@ def _structure(sc: dict) -> list[dict]:
     return out
 
 
+# UIRSI2（总调度 P0 14:2x：/api/season 在 :8800 上 6–25 s，首屏卡在“正在读全剧”）：整份结果由后台线程算、请求只读缓存
+# （stale-while-revalidate）。缓存旧于 SEASON_FRESH_S → 起后台重算（同一时间只有一个），立即回上次结果并带 cache_age_s；
+# 从没算过 → 最多等 SEASON_FIRST_WAIT_S；启动时就预热。season_now() = 现算（data_parity --inproc / 测试用）
+SEASON_FRESH_S = 8.0
+SEASON_FIRST_WAIT_S = 20.0
+_swr: dict = {"at": 0.0, "val": None, "thread": None, "err": None}
+_swr_guard = __import__("threading").Lock()
+
+
+def _swr_work() -> None:
+    import time as _t
+    try:
+        v = season_now()
+        with _swr_guard:
+            _swr.update(at=_t.monotonic(), val=v, err=None)
+    except Exception as e:  # noqa: BLE001 — 算失败：保留上次结果，错误随响应带出（不当成空）
+        with _swr_guard:
+            _swr["err"] = repr(e)[:300]
+
+
+def _swr_kick():
+    import threading as _th
+    with _swr_guard:
+        t = _swr["thread"]
+        if t is None or not t.is_alive():
+            t = _swr["thread"] = _th.Thread(target=_swr_work, daemon=True, name="ns-season-swr")
+            t.start()
+    return t
+
+
 @router.get("/api/season")
 def season():
+    import os as _os
+    import time as _t
+    if _os.environ.get("PYTEST_CURRENT_TEST") and not _os.environ.get("SEASON_SWR_IN_TESTS"):
+        return season_now()   # 测试里数据随用例变：现算（SWR 自身由 SEASON_SWR_IN_TESTS=1 的用例测）
+    with _swr_guard:
+        val, at, err = _swr["val"], _swr["at"], _swr["err"]
+    if val is None:
+        _swr_kick().join(SEASON_FIRST_WAIT_S)
+        with _swr_guard:
+            val, at, err = _swr["val"], _swr["at"], _swr["err"]
+        if val is None:
+            from fastapi import HTTPException  # noqa: PLC0415
+            raise HTTPException(503, f"全剧总览还在算（第一次 > {SEASON_FIRST_WAIT_S:.0f} 秒）{('：' + err) if err else ''}，稍后自动重试")
+    age = _t.monotonic() - at
+    if age > SEASON_FRESH_S:
+        _swr_kick()
+    return {**val, "cache_age_s": round(age, 1), **({"cache_error": err} if err else {})}
+
+
+def season_now():
     sc, mt = _script()
     if _cache["key"] != mt:
         _cache.update(key=mt, val=_structure(sc))

@@ -220,7 +220,7 @@ def resolve_settings(s: "Settings", ep: int, config: Path | None = None) -> "Set
     hm = post.get("h3_music") or {}
     if s.h3_music is None:
         v = _per_episode(hm, ep) or "keep"
-        upd["h3_music"] = v if v in ("keep", "duck_under_bgm") else "keep"
+        upd["h3_music"] = v if v in ("keep", "duck_under_bgm", "dialogue_only") else "keep"
     if s.h3_music_duck_db is None:
         upd["h3_music_duck_db"] = float(hm.get("duck_db", 12.0))
     return replace(s, **upd) if upd else s
@@ -1018,6 +1018,9 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
     cfg = voices_cfg or load_voice_config()
     ep = int(episode["number"])
     s = resolve_settings(settings, ep)      # FIX：合成硬规则 / h3_music 等 None → config/render_quality.json post.*
+    if DIRP.enabled("shot_music_off") and s.h3_music != "keep":   # K-EDT-820：停掉镜头级配乐（H3 轨只留对白）
+        from dataclasses import replace as _dc_replace
+        s = _dc_replace(s, h3_music="dialogue_only")
     name = f"ep{ep:02d}"
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1261,6 +1264,8 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
             g = g + (1 - g) * keep  # 画面上正在说的 H3 原声句：独白压过来时也不压它
             if h3_bed and s.h3_music == "duck_under_bgm" and s.bgm:  # H3 配乐压到 BGM 下（对白处分不开，保留）
                 g = g * (keep + (1 - keep) * np.float32(10 ** (-s.h3_music_duck_db / 20)))
+            elif h3_bed and s.h3_music == "dialogue_only":   # K-EDT-820（项目方 13:1x：镜头级配乐断层）：H3 轨只留画内对白句，其余交给集级 BGM + 场景底噪
+                g = g * keep
             return g.astype(np.float32)
 
         duck = {  # role -> (dB under TTS dialogue, dB under voice-over)
@@ -1376,7 +1381,7 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
                 edits = {k: v for k, v in edits.items() if v}
                 cues = resolve_cues(shots, starts, music_meta, edits)
                 bgm_regen = []
-                if s.h3_music == "duck_under_bgm":   # 项目方 2026-10-31“整集统一 BGM”：按镜“撤到静默（H3 已带配乐）”不再生效
+                if s.h3_music in ("duck_under_bgm", "dialogue_only"):   # 项目方 2026-10-31“整集统一 BGM”：按镜“撤到静默（H3 已带配乐）”不再生效
                     cues, bgm_regen = bgm_cues_for_duck_mode(cues, music_meta, starts, durations)
                 director_cues = []
                 if DIRP.enabled():   # K-EDT-804：配乐强度跟剧本情绪节拍（时间轴保留时间和描述）

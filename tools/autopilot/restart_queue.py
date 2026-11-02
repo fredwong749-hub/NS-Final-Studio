@@ -127,11 +127,11 @@ def process(host: str, rs=None, now: float | None = None) -> dict | None:
            "by": sorted({r.get("by") or "?" for r in todo}), "reasons": [r.get("reason") for r in todo][:20],
            "urgent_jump": bool(urgent and not gap_ok), "since_last_restart_min": round((now - last) / 60, 1) if last else None}
     try:
-        rs.ssh(host, f"cd {rs.R} && {rs.OFF}/venv/bin/python tools/autopilot/producer.py pause --by RESTART_QUEUE --note '重启前排空'",
+        rs.ssh(host, f"cd {rs.R} && {rs.PY[host]} tools/autopilot/producer.py pause --by RESTART_QUEUE --note '重启前排空'",
                timeout=120, tries=3)
         rec.update(drain(host, rs))
         rec["restart_out"] = str(rs.restart(host)).strip()[-300:]
-        rs.ssh(host, f"cd {rs.R} && {rs.OFF}/venv/bin/python tools/autopilot/producer.py resume --by RESTART_QUEUE --note '重启完成'",
+        rs.ssh(host, f"cd {rs.R} && {rs.PY[host]} tools/autopilot/producer.py resume --by RESTART_QUEUE --note '重启完成'",
                timeout=120, tries=3)
         rec["ok"] = True
     except Exception as e:  # noqa: BLE001

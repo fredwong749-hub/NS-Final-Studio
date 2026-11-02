@@ -29,6 +29,7 @@ BAKEOFF / AUTOPILOT）在宣布“本轮完成”之前必须跑它；退出码 
   RL 规则有检查     --rules 每条在 knowledge 里且有 check 字段（指向存在的文件 / 测试）；或 --no-lesson "<理由>"
   H1 内容缺陷猎捕   生成类 loop：tools/qa/defect_hunt.py 的 state 必须比最新首帧 / 视频评分 / 成片新（K-OPS-Q13）
   Q2 VQA 回归集      本轮改到 tools/vqa、ns_agent/vqa、gen_contract、config/vqa.json 等口径文件时：tools/vqa/regression_check.py 必须全过（总调度批，VQAGATE 提）
+  （冻结锁 K-OPS-Y03：system_version cut 冻结期间不许写代码目录——Edit / Write 由 ops/hooks/freeze_guard.py 直接拒绝；用 Bash 写（sed -i、重定向、heredoc）同样禁止，sv-10 起由 F1 检查与 cut 报告 drift 查出并记在本 loop 账上）
   A2 新文件零退化   本 loop 名下全部未入版 .py（不限 --changed）：arch_scan --new --owner <loop> --check 必须 0 退化（K-OPS-S01）
   A1 结构棘轮       tools/qa/arch_scan.py --files <本轮 .py> --check：任一文件结构退化计数比 data/sysarch/baseline.json 多 = fail（K-OPS-S01，SYSARCH）
   V2 系统版本       本轮 --changed 是否已进系统版本（git tag sv-*，tools/qa/system_version.py cut）；没进只提示（K-OPS-V01）
@@ -391,6 +392,15 @@ class Gate:
         det += "；" + tail(tout, 1)
         if tcode != 0:
             return self.add("R1", "功能不回退 G10", "fail", det + "（顶栏回退，见 topbar_check 逐页结果）")
+        # FEEDBACK fb-0002（项目方 11-02 12:5x：“胶片总览悬停播放的视频没有声音，标的是‘视频 · 静音’”）：悬停必须出声——
+        # apps/web/e2e/uirsi/film_hover_sound.py（FILMUI 写；muted=false、paused=false、解码到音频字节；退出码 1 = 静音 / 没播）
+        import importlib.util as _ilu   # 项目 .venv 没装 playwright：退回装了 playwright 的系统 python（py -3 / NS_E2E_PY）
+        _py = [sys.executable] if _ilu.find_spec("playwright") else (
+            [os.environ["NS_E2E_PY"]] if os.environ.get("NS_E2E_PY") else ["py", "-3"] if shutil.which("py") else ["python"])
+        scode, sout = sh(_py + ["apps/web/e2e/uirsi/film_hover_sound.py"], 300)
+        det += "；悬停出声 " + ("✓" if scode == 0 else "✗") + " " + tail(sout, 1)[:160]
+        if scode != 0:
+            return self.add("R1", "功能不回退 G10", "fail", det + "（胶片总览悬停视频静音 / 没播，fb-0002 回归）")
         if not age_ok:
             return self.add("R1", "功能不回退 G10", "untested", det + "；但这份 detect 比本轮改动旧 → 改完要重跑 detect（pwsh run_round.ps1 rN）")
         self.add("R1", "功能不回退 G10", "pass", det)

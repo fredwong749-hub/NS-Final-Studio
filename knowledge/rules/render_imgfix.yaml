@@ -107,3 +107,28 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-REN-710
+    domain: render
+    link: [P4-P6]
+    decision: D-SCR-07
+    title: 出图正文没写视线时，编译侧按人补一句固定的正向视线落点句（所有图片不要看镜头）
+    when: frame_job.eyeline_note（IMGMASTER 分段编译里是 action 段的 eyeline 插件）；局部 / 物件特写不加
+    then: 逐人判断，正文里归给某人的小句有视线词（GAZE_WORDS）就不补（多人镜里背对也算写了）；没有就补 asset_refs.EYELINE_NOTE 句式，落点取第一拍 视线= / 反应=，都没有时多人镜看另一个露脸的人，单人镜写“画面里的人或物”；只给露脸的人补（K-REN-903）
+    check: [tests/test_imgmaster_compile.py::test_eyeline_note_fills_missing_gaze]
+    evidence:
+      - {src: services/agent/ns_agent/frame_job.py, note: "SCRIPT-RSI 11-01 D-SCR-07，项目方 18:2x“所有图片不要看镜头”；原先只给第一个人、正文有任何视线词就整句不加"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-02
+  - id: K-REN-709
+    domain: render
+    link: [P4-P6]
+    title: 在画且上身入画的人，本造型外层单品的衣橱登记描述补一句（袖子 / 领口细节），正文已有不重复
+    when: frame_job.garment_detail_note（IMGMASTER 分段编译里是 characters 段的 garment_detail 插件）；局部 / 物件特写、上身不入画不加
+    then: 句式 asset_refs.GARMENT_DETAIL_NOTE，内容取 asset_refs.garment_details（衣橱登记，例“短款西装外套：两只袖子都是深灰西装袖（露米白衬衫袖口）”）；句式改了要同步 unified_stale 识别式
+    check: [tests/test_imgfix.py::test_garment_detail_note_from_wardrobe_registry]
+    evidence:
+      - {src: tools/imgfix/sleeve_fix.py, note: "IMGFIX r5：模型常把外套画成无袖或单袖，补登记描述句后袖子稳定；规则条目由 IMGMASTER 代补（总调度 11-02 定）"}
+    confidence: medium
+    status: 待验
+    date: 2026-11-02

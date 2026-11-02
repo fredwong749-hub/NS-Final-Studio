@@ -701,18 +701,24 @@ def _probe_for_view(url: str) -> dict:
     return {**hit[1], "cached": True, "age_s": age, "stale": age > LANES_VIEW_STALE_S, "refreshing": t.is_alive()}
 
 
+def _rssh():
+    """K-OPS-N07 / SYSARCH 4-1：远程命令统一走 tools/netfix/rssh.run_retry（常驻主连接，不新建跳板握手）"""
+    import importlib.util
+    from pathlib import Path as _P
+    spec = importlib.util.spec_from_file_location("_rssh_jobs", _P(__file__).resolve().parents[3] / "tools/netfix/rssh.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)   # type: ignore[union-attr]
+    return mod
+
+
 def _ssh_train_locks(server: str) -> set:
-    import subprocess
+    """读服务器训练锁目录（UIRSI2 总调度 P0 14:1x：改走 rssh.run_retry，单次 15 s、不重试——由后台刷新线程按周期再读）"""
     d = TRAIN_LOCK_DIRS.get(server)
     if not d:
         return set()
-    git_ssh = r"C:\Program Files\Git\usr\bin\ssh.exe"   # 与隧道同一个 ssh（读 ~/.ssh/config 的 ProxyJump）
-    exe = git_ssh if os.path.exists(git_ssh) else "ssh"
-    r = subprocess.run([exe, "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", server,
-                        f"ls -1A {d} 2>/dev/null; true"], capture_output=True, text=True, timeout=25,
-                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    r = _rssh().run_retry(server, f"ls -1A {d} 2>/dev/null; true", timeout=15, tries=1, text=True)
     if r.returncode != 0:
-        raise RuntimeError((r.stderr or "").strip()[:200] or f"ssh rc={r.returncode}")
+        raise RuntimeError((r.stderr or "").strip()[:200] or f"rssh rc={r.returncode}")
     return parse_train_locks(r.stdout)
 
 
@@ -779,26 +785,42 @@ def lane_train_locked_now(gpu) -> bool:
 _train_threads: dict = {}
 
 
-def _train_locks_async(server: str, wait: bool = True) -> set:
-    """真服务器：ssh 经跳板一次约 5–15 s，不能卡住选卡 → 后台线程刷新，选卡用上次结果；
-    第一次（还没有结果）最多等 20 s"""
-    now = time.monotonic()
+TRAIN_REFRESH_S = 30.0
+_train_refresher: dict = {"thread": None}
+
+
+def _train_refresh_loop() -> None:
+    """后台刷新线程：每 TRAIN_REFRESH_S 秒把各服务器训练锁读一遍进缓存（读不到沿用上次，_read_locks 记日志）。
+    HTTP 请求路径只读缓存，永远不在请求里连远端（总调度 P0 14:1x：/api/... 被 25 秒的 ssh 卡住，首屏停在“正在读全剧”）"""
+    while True:
+        for srv in list(TRAIN_LOCK_DIRS):
+            locks = _read_locks(_ssh_train_locks, srv)
+            with _train_guard:
+                _train_cache[srv] = (time.monotonic(), locks)
+        time.sleep(TRAIN_REFRESH_S)
+
+
+def _ensure_train_refresher() -> None:
+    with _train_guard:
+        t = _train_refresher["thread"]
+        if t is None or not t.is_alive():
+            t = _train_refresher["thread"] = threading.Thread(target=_train_refresh_loop, daemon=True, name="ns-trainlock-refresh")
+            t.start()
+
+
+def train_lock_age(server: str) -> float | None:
+    """缓存里这台服务器训练锁的年龄（秒）；还没读到过 = None"""
     with _train_guard:
         hit = _train_cache.get(server)
-        if hit and now - hit[0] < TRAIN_LOCK_TTL_S:
-            return set(hit[1])
-        t = _train_threads.get(server)
-        if t is None or not t.is_alive():
-            def work():
-                locks = _read_locks(_ssh_train_locks, server)
-                with _train_guard:
-                    _train_cache[server] = (time.monotonic(), locks)
-            t = _train_threads[server] = threading.Thread(target=work, daemon=True, name=f"ns-trainlock-{server}")
-            t.start()
-    if hit is None and wait:
-        t.join(20)
-        with _train_guard:
-            hit = _train_cache.get(server)
+    return round(time.monotonic() - hit[0], 1) if hit else None
+
+
+def _train_locks_async(server: str, wait: bool = True) -> set:  # noqa: ARG001 — wait 保留签名：现在一律不等
+    """真服务器：只读后台刷新线程的缓存，不在调用线程里 ssh、也不等（原来第一次最多等 20 s）。
+    还没读到过 → 空集；派活前的最后一道闸仍是 lane_train_locked_now（任务线程里现读，不在 HTTP 请求里）"""
+    _ensure_train_refresher()
+    with _train_guard:
+        hit = _train_cache.get(server)
     return set(hit[1]) if hit else set()
 
 
@@ -856,6 +878,7 @@ def lanes(probe: bool = True, view: bool = False) -> list[dict]:
             word = "待开派"
         out.append({"gpu": g, "id": name, "server": EP.server_of(g), "label": EP.lane_label(g), "url": url,
                     "reachable": reach, "ok": reach and not locked and not hold, "train_locked": bool(locked),
+                    "train_lock_age_s": train_lock_age(srv) if probe else None,
                     "image_only": EP.image_only(g), "hold": hold,
                     "detail": pr.get("detail"), "image_pref": g == img,
                     "role": "image" if g == img else "long" if EP.long_only(g) else "any",

@@ -120,6 +120,8 @@ from ns_api import thumbs as THUMBS  # noqa: E402  UIRSI 缩略图（/api/thumb�
 app.include_router(THUMBS.router)
 from ns_api import auth as AUTH  # noqa: E402  UIRSI 账户登录：项目方闸门从登录会话取身份（不再要原话）+ 写操作审计 data/audit/
 AUTH.install(app)
+from ns_api import feedback as FEEDBACK  # noqa: E402  FEEDBACK 人类反馈后台：/api/feedback（总调度 11-02 12:5x；LOCKS.md 已登记）
+app.include_router(FEEDBACK.router)
 from ns_api import voice_preview as VPREV  # noqa: E402  UIRSI 音色试听（本机 Kokoro）/ 一键换音色 / 旁白样本
 app.include_router(VPREV.router)
 from ns_api import shot_audio as SHAUD  # noqa: E402  UIRSI 对白逐句试听 / 配乐（B4）
@@ -128,6 +130,7 @@ from ns_api import takes_ui as TAKESUI  # noqa: E402  UIRSI 画布候选版本�
 app.include_router(TAKESUI.router)
 from ns_api import season as SEASON  # noqa: E402  UIRSI 全剧总览（集 × 镜结构 + 衔接）
 app.include_router(SEASON.router)
+app.router.on_startup.append(SEASON._swr_kick)   # UIRSI2 P0：启动即预热全剧总览缓存
 from ns_api import project_settings as PSET  # noqa: E402  回退补回：项目设置页（旧项目向导 44 项）
 app.include_router(PSET.router)
 from ns_api import live as LIVE  # noqa: E402  UIRSI 实时推送 /api/events（SSE）+ 分段进度 /api/progress
@@ -150,6 +153,10 @@ from ns_api import decision_locks as DLOCKS  # noqa: E402  UIRSI r40 项目方�
 app.include_router(DLOCKS.router)
 from ns_api import factory_health as FHEALTH  # noqa: E402  UIRSI r42 生产健康汇总：/api/factory/health（只读；总览上的展示等 UI-DESIGN 新设计再接）
 app.include_router(FHEALTH.router)
+from ns_api import owner_queue as OWNERQ  # noqa: E402  UIRSI2 L-116 待你看队列：GET /api/owner/queue、POST /api/owner/decide
+app.include_router(OWNERQ.router)
+from ns_api import image_workshop as IWS  # noqa: E402  FILMUI 图像工坊：/api/image-workshop/bases · history（只读）· jobs（非 Qwen 先 501）
+app.include_router(IWS.router)
 app.router.on_startup.append(EPROD.resume_on_startup)   # 在 JOBS.restore 之后：被重启打断的任务按可恢复错误重试
 VJ.get_script = lambda: _script
 

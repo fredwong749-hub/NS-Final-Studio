@@ -509,7 +509,21 @@ def _wardrobe_names() -> set[str]:
     except Exception:  # noqa: BLE001
         return set()
     items = data.get("items", []) if isinstance(data, dict) else data
-    return {i.get("name", "") for i in items if isinstance(i, dict) and i.get("name")}
+    names = {i.get("name", "") for i in items if isinstance(i, dict) and i.get("name")}
+    return names | {re.sub(r"[（(][^）)]*[）)]\s*$", "", n).strip() for n in names}     # 衣橱名带“（产品）”后缀：去掉后也认（QW-E6b，总调度 11-02）
+
+
+E6B_SLOTS = ("服装", "鞋", "其他")          # QW-E6b 只查单品槽；发 / 妆 / 甲 / 饰品 是属性槽，不查衣橱（总调度 11-02）
+
+
+def look_items(v: str) -> list[str]:
+    """造型槽位值 → 单品名列表：组合串按 、 / ， / 与 / 配 / 外罩 / 外搭 / 内搭 拆开，去括号；0件 / 无 / 沿用 / 新：… 跳过"""
+    out = []
+    for part in re.split(r"[、，,；;]|与|配|外罩|外搭|内搭", v or ""):
+        part = re.sub(r"[（(][^）)]*[）)]", "", part).strip()
+        if part and part not in ("0件", "无", "沿用") and not part.startswith(("新：", "新:")):
+            out.append(part)
+    return out
 
 
 def lora_table_problems(text: str) -> list[str]:
@@ -686,8 +700,7 @@ def check_v3(imp, text: str, require: bool) -> tuple[list[dict], dict[int, list[
             if wardrobe is None:
                 wardrobe = _wardrobe_names()
             if wardrobe:
-                unknown = [v for k, v in lk.slots.items() if k in LOOK_SLOTS and v and v != "沿用"
-                           and not v.startswith(("新：", "新:")) and v not in wardrobe]
+                unknown = [it for k, v in lk.slots.items() if k in E6B_SLOTS and v for it in look_items(v) if it not in wardrobe]
                 if unknown:
                     ep_out.append(_issue("QW-E6b", f"`**{label}**` 的单品不在 wardrobe.json：{'、'.join(u[:20] for u in unknown)}"
                                                    "（已有单品照抄名称；新单品写 新：…）", field="造型"))

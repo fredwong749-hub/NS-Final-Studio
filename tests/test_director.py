@@ -339,3 +339,13 @@ def test_v2_compile_order_constraints_and_speaker():
     assert r["video"].endswith(V.SPEC["constraints_en"])
     assert "Shot on a Leica" in r["video"] and "clear, visible mouth movement" in r["video"]
     assert "⑤" not in "".join(s[0] for s in r["segments"] if s[2] in r["image"]) and "Lit by" in r["image"]
+
+
+def test_camera_ab_ab6_exec_accuracy():   # AB6：VIDLAB 执行准确度 < 0.5 否决；没有指标不否决
+    import camera_ab as CA
+    good = {"score": {"mean": 0.9, "cuts": [], "identity": {"林晚": {"sface_med": 0.55, "sface_p10": 0.45}},
+                      "v6": {"dup_side_frac": 0.0, "extra_hand_frac": 0.0, "people": 1}, "J4": 1.1, "J4_z": 1.0, "size_measured": "中景"}}
+    assert CA.judge(good, cx=None)["pass"] is True
+    j = CA.judge(good, cx={"move": "truck_right", "acc": 0.1, "rot_deg": 2.2})
+    assert j["pass"] is False and j["fails"][0].startswith("AB6") and j["m"]["exec_acc"] == 0.1
+    assert CA.judge(good, cx={"move": "push_in", "acc": 1.0})["pass"] is True

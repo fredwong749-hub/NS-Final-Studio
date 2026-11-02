@@ -113,3 +113,15 @@ rules:
     confidence: medium
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-N11
+    domain: ops
+    link: [P5-P6, P7-P8]
+    title: 每个 producing run 各写一份 control（主剧 data/producer/control.json，其它 data/producer/runs/<run>/control.json），镜号不带前缀；写前校验两台不相交、并集 = 该 run 全部 ready
+    when: dispatch.py server-control（resident_sync health / reconcile 推送时）
+    then: 分区沿用 partition.json 按集规则；主剧 control 不再夹带其它 run 的镜号；全局暂停同步 paused / reason_kind / expires_at 到每个 run 的 control（D5）；verify_run 不过 → 拒写该 run、保留旧 control、rc=2；分区改动按两阶段（先撤、确认无租约、再给）
+    check: tests/test_netfix.py::test_run_control_unprefixed_disjoint_and_complete
+    evidence:
+      - {src: data/netfix/supervisor.log, note: "11:57 第二季没有自己的 control，两台重复派 4 个对象；12:1x 上线后 gpu33 第二季 77 镜（ep1/3/5/7/8/9/10）、gpu36 33 镜（ep2/4/6），不相交"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-02

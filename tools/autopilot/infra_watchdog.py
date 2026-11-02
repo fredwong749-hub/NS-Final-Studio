@@ -35,7 +35,7 @@ PIDF = ROOT / "ops/logs/infra_watchdog.pid"
 # 端口 → 服务器（只探测、只报警；修隧道归 tools/netfix/tunnel_supervisor.py，K-OPS-N01）。与 config/netfix/tunnels.json 的道一致；
 # gpu36:2（18290）已按 L-100 退役（GPU2 改看图卡）。SYSARCH 4-3（11-02）：旧的 tunnel*.sh 循环修复段已删，原文件在 data/_quarantine/netfix_20261101/
 TUNNELS = {18188: "gpu33", 18189: "gpu33", 18191: "gpu33", 18288: "gpu36", 18289: "gpu36"}
-TICK_S, ALERT_AFTER = 30, 5            # 30 s 一拍；连续 5 拍（约 2.5 分钟）不通才报 A-TUNNEL（监管进程的恢复目标 ≤ 30 s，过了这么久还不通 = 真有问题）
+TICK_S, ALERT_AFTER, FLAP_WINDOW, FLAP_MIN = 30, 5, 10, 3            # 30 s 一拍；连续 5 拍（约 2.5 分钟）不通才报 A-TUNNEL（监管进程的恢复目标 ≤ 30 s，过了这么久还不通 = 真有问题）
 IDLE_MIN, NIGHT_MIN, PROD_MIN = 10, 20, 10      # 空转线：总调度 16:55 改 10 分钟
 ACTIVE = {"done", "best_effort", "blocked", "waiting_frame"}
 
@@ -162,6 +162,33 @@ def supervisor_fresh(max_age: float = 90) -> bool:
         return True
 
 
+_LANES_T = [0.0]
+_LANES_BUSY = [False]
+
+
+def lanes_sweep_bg(now: float | None = None, every_s: float = 120) -> None:
+    """tools/debug/lanes.py sweep + idle_sweep，每 2 分钟一次、后台线程跑（探测走 rssh，不卡本拍）。
+    只改笔记本 partition，NETFIX 推送同步到服务器。单元测试不跑"""
+    t = now or time.time()
+    if os.environ.get("PYTEST_CURRENT_TEST") or _LANES_BUSY[0] or t - _LANES_T[0] < every_s:
+        return
+    _LANES_T[0], _LANES_BUSY[0] = t, True
+
+    def run():
+        try:
+            sys.path.insert(0, str(ROOT / "tools/debug"))
+            import lanes as LN
+            gone = LN.sweep() + LN.idle_sweep()
+            if gone:
+                log("lanes released", gone)
+        except Exception as e:  # noqa: BLE001
+            log("lanes sweep error", repr(e)[:200])
+        finally:
+            _LANES_BUSY[0] = False
+    import threading
+    threading.Thread(target=run, name="lanes-sweep", daemon=True).start()
+
+
 def tick(st: dict, now: float | None = None) -> dict:
     now = time.time() if now is None else now
     sup = supervisor_fresh()
@@ -188,7 +215,23 @@ def tick(st: dict, now: float | None = None) -> dict:
     for port in TUNNELS:
         if fails.get(str(port), 0) == 0:
             alert(st, f"A-TUNNEL-{port}", False)
+    # 抖动报警（13:2x 探针缺口：道反复断几十秒又恢复，从来凑不够“连续 ALERT_AFTER 拍”，A-TUNNEL 一次没开，总调度先发现）：
+    # 最近 FLAP_WINDOW 拍里任一出图道不通 ≥ FLAP_MIN 拍，或同一拍里 ≥ 半数道同时不通 → A-TUNNEL-FLAP
+    hist = st.setdefault("down_hist", [])
+    hist.append(len(down))
+    del hist[:-FLAP_WINDOW]
+    per = st.setdefault("down_hist_port", {})
+    for port in TUNNELS:
+        h = per.setdefault(str(port), [])
+        h.append(1 if port in down else 0)
+        del h[:-FLAP_WINDOW]
+    flappy = sorted(int(p) for p, h in per.items() if sum(h) >= FLAP_MIN)
+    mass = len(down) * 2 >= len(TUNNELS)
+    alert(st, "A-TUNNEL-FLAP", bool(flappy) or mass, "crit",
+          (f"出图道抖动：最近 {FLAP_WINDOW} 拍里 {flappy} 各有 ≥ {FLAP_MIN} 拍不通" if flappy else "") +
+          (f"；本拍 {len(down)}/{len(TUNNELS)} 条同时不通 {down}" if mass else "") + "（看 data/netfix/supervisor.log）")
     relay_down(st)                                 # 每拍都测一次跳板（A-RELAY 开 / 关）
+    lanes_sweep_bg(now)                            # DEBUG-RSI（总调度 11-02 14:0x）：借道到期 / 借出 10 分钟没人用自动收回
     try:                                           # K-OPS-E08（DEBUG-RSI，总调度 11-02 D5）：producer 不在跑时也要让运维暂停到点恢复、显式暂停超时报警
         sys.path.insert(0, str(ROOT / "tools/autopilot"))
         import producer as PR

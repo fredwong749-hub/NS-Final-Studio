@@ -23,7 +23,17 @@ BAND = {"大特写": 0, "特写": 1, "近景": 2, "中近景": 2, "近景/中近
 WHO = "林晚"
 
 
-def judge(arm: dict, want_size: str = "中景") -> dict:
+CAMEXEC = ROOT / "data" / "rsi" / "vidlab" / "camexec.json"   # VIDLAB clipmetrics v4 执行准确度（键 “实验名/臂 id”）
+
+
+def camexec(exp: str, arm_id: str) -> dict | None:
+    try:
+        return (json.loads(CAMEXEC.read_text(encoding="utf-8")).get("items") or {}).get(f"{exp}/{arm_id}")
+    except (OSError, ValueError):   # arch-ok: 调用方把 None 当 AB6“未测”（记录，不否决、不当通过）
+        return None
+
+
+def judge(arm: dict, want_size: str = "中景", cx: dict | None = None) -> dict:
     """一臂 → {pass, fails[], metrics}；没分数 = 未测"""
     sc = arm.get("score") or {}
     if not sc or sc.get("error"):
@@ -45,6 +55,10 @@ def judge(arm: dict, want_size: str = "中景") -> dict:
         soft.append(f"AB4 4 帧一顿 J4 {m['J4']}（z {m['J4_z']}，去抖处理，不否决）")
     if m["size"] and abs(BAND.get(m["size"], 3) - BAND.get(want_size, 3)) > 1:
         f.append(f"AB5 景别跑档 {want_size} → {m['size']}")
+    if cx and cx.get("acc") is not None:   # AB6：VIDLAB 执行准确度（没测到 = 未测，不否决）
+        m["exec_acc"], m["exec_move"], m["rot_deg"] = cx.get("acc"), cx.get("move"), cx.get("rot_deg")
+        if cx["acc"] < 0.5:
+            f.append(f"AB6 运镜没执行 acc {cx['acc']}（{cx.get('move')}，杂旋转 {cx.get('rot_deg')}°）")
     return {"pass": not f, "fails": f, "soft": soft, "m": m}
 
 
@@ -118,7 +132,7 @@ def main(argv):
     for r in rows:
         m = re.match(r"cm_(.+)_s(\d+)$", r.get("id") or "")
         if m:
-            by.setdefault(m.group(1), []).append({"seed": int(m.group(2)), **judge(r)})
+            by.setdefault(m.group(1), []).append({"seed": int(m.group(2)), **judge(r, cx=camexec(EXP, r.get("id")))})
     text = VOCAB.read_text(encoding="utf-8")
     table = {}
     for mid, arms in sorted(by.items()):
