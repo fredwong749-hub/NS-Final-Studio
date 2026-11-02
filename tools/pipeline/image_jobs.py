@@ -33,12 +33,15 @@ from ns_agent import compiler as C  # noqa: E402
 from ns_agent.bible import load_bible  # noqa: E402
 from ns_agent.importer.script_md import import_script  # noqa: E402
 
-EXTRA_FACES = {"阿岚": "../../../assets/identity_refs/ch_a_lan/ch_a_lan_face_ref2va.png"}   # 相对 run 目录（= data/assets/identity_refs，唯一身份脸）
-# IMGGEN 第二轮（总调度 2026-10-31）：在画的每个已定妆角色都挂脸部裁切（双人镜第二人不出脸，K-REV-122）；
-# 男主身份弱（K-AST-223：暂定版中位 0.57 vs 林晚 0.84）→ 另挂身份设定图左两栏（特写 + 正面全身）作第二参考
-CORE_FACES = {"林晚": "data/assets/identity_refs/lin_wan/lin_wan_face_ref2va.png",
-              "顾沉": "data/assets/identity_refs/gu_chen/gu_chen_face_ref2va.png",
-              "陈宇": "data/assets/identity_refs/chen_yu/chen_yu_face_ref2va.png"}
+FACE_CID = {"林晚": "lin_wan", "顾沉": "gu_chen", "陈宇": "chen_yu", "阿岚": "ch_a_lan"}   # 在画角色 → 身份脸 cid；脸本身一律 asset_refs.face_of（K-OPS-E29）
+
+
+def core_faces(project: str | None = None) -> dict:
+    """在画角色名 → 当前身份脸（asset_refs.face_of；project 缺省 = config/pipeline/runs.json primary）。替代旧的写死表 CORE_FACES / EXTRA_FACES"""
+    from ns_agent import asset_refs as AR
+    if not project:
+        project = json.loads((ROOT / "config/pipeline/runs.json").read_text(encoding="utf-8")).get("primary")
+    return {n: f for n, cid in FACE_CID.items() if (f := AR.face_of(project, cid))}
 SHEET_REFS = {"顾沉": "images/refs/gu_chen_sheet2.png", "陈宇": "images/refs/chen_yu_sheet2.png"}   # 相对 run 目录
 AVAILABLE_IMAGE_LORAS: set[str] = set()   # 11-01：lin_wan_qi_v1 已禁用（I8 / 项目方“A. 去掉”）；出图 LoRA 由预设 frame_v9 给（krea2 0.5）
 FACE_NAME = {"lin_wan": "林晚", "gu_chen": "顾沉", "chen_yu": "陈宇", "ch_a_lan": "阿岚"}
@@ -208,18 +211,19 @@ def rebuild_first_frame_jobs(run_dir: Path, project: str | None = None, write: b
         shot = next(s for s in ep.shots if s.id == j["shot"])
         j["prompt_source"] = {"file": import_json(run).relative_to(ROOT).as_posix(), "sha256": sha}
         refs = list(j.get("refs") or [])
-        for name, rel in EXTRA_FACES.items():          # 新角色脸部参考出来后由这里统一补进 refs（IMGGEN 不再自己改提示词）
-            full = os.path.normpath(str((run_dir / rel).relative_to(ROOT))).replace("\\", "/")
-            if name in (j.get("on_screen") or []) and full not in refs and (run_dir / rel).exists():
-                refs.append(full)
-            st = str(j.get("status") or "")
-            if st.startswith("blocked:") and name in st and full in refs:   # 缺的身份参考补上了 → 解除阻塞
-                j["status"] = "ready"
-                j["unblocked_by"] = f"image_jobs.py 补入 {name} 脸部参考 {full}"
         on = list(j.get("on_screen") or [])
-        for name in on:                                   # 在画的已定妆角色都挂脸（按在画顺序补在后面，不打乱已有顺序）
-            if name in CORE_FACES and CORE_FACES[name] not in refs and (ROOT / CORE_FACES[name]).exists():
-                refs.append(CORE_FACES[name])
+        from ns_agent import asset_refs as AR
+        for name in on:                                   # 在画的已定妆角色都挂身份脸（K-OPS-E29：唯一入口 asset_refs.face_of，按在画顺序补在后面）
+            cid = FACE_CID.get(name)
+            f = AR.face_of(project, cid) if cid else None
+            if not f or not (ROOT / f).exists():
+                continue
+            if f not in refs:
+                refs.append(f)
+            st = str(j.get("status") or "")
+            if st.startswith("blocked:") and name in st:   # 缺的身份参考补上了 → 解除阻塞
+                j["status"] = "ready"
+                j["unblocked_by"] = f"image_jobs.py 补入 {name} 脸部参考 {f}"
         for name in on:
             rel = SHEET_REFS.get(name)
             if rel:

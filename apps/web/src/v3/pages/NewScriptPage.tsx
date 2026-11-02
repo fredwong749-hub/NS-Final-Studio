@@ -37,7 +37,7 @@ function downstream(ep: number | null, sm: EpSum): { label: string; href: string
     { label: "资产", href: "#/assets", tip: "P5：人物表 / 场景表进资产中心，定妆是你的闸门" },
     { label: "首尾帧", href: canvas, tip: "P6：画布里出首帧 / 尾帧，你定稿", sub: sm && f(sm.first_frames), done: !!n && sm!.first_frames === n },
     { label: "视频", href: canvas, tip: "P7–P8：定稿帧出视频", sub: sm && f(sm.videos), done: !!n && sm!.videos === n },
-    { label: "审片", href: canvas, tip: "P11：审片行 / 串播，通过 / 打回", sub: sm && (n ? `通过 ${sm.passed}/${n}` : undefined), done: !!n && sm!.passed === n },
+    { label: "审片", href: canvas, tip: "P11：审片行 / 串播，用这版 / 修改", sub: sm && (n ? `通过 ${sm.passed}/${n}` : undefined), done: !!n && sm!.passed === n },
     { label: "成片", href: "#/cut", tip: "P10 / P12：成片页合成、对比，你确认交付" },
   ];
 }
@@ -230,6 +230,25 @@ function BriefForm({ busy, onStarted }: { busy: string | null; onStarted: (r: Ru
       .then((d: { id: string; provider?: string; model?: string }[] | null) => {
         const p = Array.isArray(d) ? d.find((x) => x.id === "script_write") : null;
         if (p) setModel(`${p.provider ?? ""} · ${p.model ?? ""}`);
+      })
+      .catch(() => undefined);
+  }, []);
+  // 剧本库“复制为新剧模板”：?tpl=<run> 把那部剧的提纲预填进表单（可改；不改原剧）
+  useEffect(() => {
+    const tpl = new URLSearchParams(location.hash.split("?")[1] ?? "").get("tpl");
+    if (!tpl) return;
+    fetch(`/api/script-library/${encodeURIComponent(tpl)}/brief`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b: { title: string; outline: string; episodes: { from: number; to: number }; episode_lines: Record<string, string>; seconds_per_episode: number[]; shots_per_ep: number | null } | null) => {
+        if (!b) return;
+        setTitle(`${b.title}（新）`);
+        setOutline(b.outline);
+        setFrom(b.episodes.from);
+        setTo(b.episodes.to);
+        setEp(b.episodes.from);
+        setLines(b.episode_lines ?? {});
+        if (b.seconds_per_episode?.length === 2) (setSecMin(b.seconds_per_episode[0]), setSecMax(b.seconds_per_episode[1]));
+        setShots(b.shots_per_ep ?? "");
       })
       .catch(() => undefined);
   }, []);

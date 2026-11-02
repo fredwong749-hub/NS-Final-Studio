@@ -49,8 +49,13 @@ def compile_frame(ep, shot, g, project: str | None, *, bible=None, available=Non
     plan_kw.setdefault("kept_triggers", [t for t in (AR.g(shot, "img_triggers") or []) if t not in (c.dropped_triggers or [])])
     sr, plan = AR.plan_for(project, ep, shot, model, **plan_kw)
     note = (plan.prompt_note + outer_items_note(project, ep, shot, sr, c.image_prompt) + eyeline_note(shot, sr, c.image_prompt)
-            + garment_detail_note(project, ep, shot, sr, c.image_prompt))
+            + garment_detail_note(project, ep, shot, sr, c.image_prompt) + blocking_note(shot, c.image_prompt))
     return plan.prompt_prefix + with_note(c.image_prompt, note), c, sr, plan
+
+
+def blocking_note(shot, body: str) -> str:
+    """K-REN-952 站位句（cast x 唯一来源，句式 asset_refs.BLOCKING_NOTE_RE）；开关 promptfix.blocking_from_cast"""
+    return AR.blocking_note(shot, body) if AR.pf_on("blocking_from_cast") else ""
 
 
 # K-REN-101（总调度 11-01 07:35，VIDEO10 查出 ep01 首帧丢了造型 A 的短款西装外套：剧本 img 行没写外套，图就照着出了）：
@@ -77,6 +82,8 @@ def outer_items(project: str, ep, shot, sr=None, body: str | None = None) -> lis
     out = []
     for ch in chars:
         cid, lid, name = ch.get("character"), ch.get("look"), ch.get("name") or ch.get("character")
+        if ch.get("wardrobe_scope") is not None or ch.get("back_view"):   # K-REN-951 / 957：局部不露脸、背影的人不补“要穿全”
+            continue
         L = (looks.get(cid) or {}).get(lid) if lid else None
         if L is None:
             continue
@@ -261,24 +268,88 @@ def build_first(project: str, ep, shot, g, *, bible=None, model: str = "qwen_ima
     if prompt_override:
         body = prompt_override if ST.preset_suffix() in prompt_override else f"{prompt_override}，{ST.image_suffix()}"
         body = with_note(body, plan.prompt_note + outer_items_note(project, ep, shot, sr, body) + eyeline_note(shot, sr, body)
-                         + garment_detail_note(project, ep, shot, sr, body))
-    return {"id": sid, "shot": sid, "ep": n, "index": AR.g(shot, "index"), "stage": "image", "model": model,
+                         + garment_detail_note(project, ep, shot, sr, body) + blocking_note(shot, body))
+    job = {"id": sid, "shot": sid, "ep": n, "index": AR.g(shot, "index"), "stage": "image", "model": model,
             "prompt": plan.prompt_prefix + body, "refs": plan.files, "asset_refs": AR.record(sr, plan), "cast": cast_of(shot),
             "loras": [["krea2_film_texture_qwen21.safetensors", 0.5]],
             "compiled_by": "ns_agent.frame_job.build_first → ns_agent.compiler.compile_shot", "framing_project": project,
             "recipe": "frame_v9（K-REN-134 唯一出图路径）", "last_prompt": c.last_prompt,
-            "face_files": [s.file for s in plan.slots if s.kind == "face"], "compiler_inputs_sha": c.inputs_sha}
+            "face_files": [s.file for s in plan.slots if s.kind == "face"], "compiler_inputs_sha": c.inputs_sha,
+            "blocking": AR.blocking_of(shot), "last_faces": last_face_plan(project, shot, c.last_prompt, plan)}
+    job["compile_trace"] = trace_of(job)
+    return job
+
+
+# ---------------------------------------------------------------- PROMPTFIX 11-02（ALIGNMENT 第 2 / 5 / 6 步）
+def _sha16(s: str) -> str:
+    import hashlib
+    return hashlib.sha256((s or "").encode("utf-8")).hexdigest()[:16]
+
+
+def trace_of(job: dict) -> dict:
+    """每个出图作业的 compile_trace（随作业走、随 take 落账 params.compile_trace）：提示词 sha、参考图列表（文件 + 内容 sha）、
+    站位契约、送脸决定、矛盾告警。两台同一 sv 版本编同一镜 → prompt_sha / refs_sha 必须相同（tools/promptfix/compile_sha.py 比对）"""
+    import json
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[3]
+    refs = []
+    for f in job.get("refs") or []:
+        p = Path(f) if Path(f).is_absolute() else root / f
+        refs.append({"file": f, "sha": AR.sha_file(p) if p.is_file() else None})
+    ar = job.get("asset_refs") or {}
+    return {"schema": "nsfs.compile_trace/0.5", "shot": job.get("shot"), "stage": job.get("stage"),
+            "prompt_sha": _sha16(job.get("prompt") or ""), "refs": refs,
+            "refs_sha": _sha16(json.dumps([r["sha"] or r["file"] for r in refs])),
+            "compiler_inputs_sha": job.get("compiler_inputs_sha"), "blocking": job.get("blocking"),
+            "faces": [s.get("character") for s in ar.get("slots") or [] if s.get("kind") in ("face", "faceboard")],
+            "last_faces": job.get("last_faces"),
+            "conflicts": [w for w in ar.get("warnings") or [] if w.get("kind") == "cast_face_conflict"],
+            "wardrobe_scope": {c.get("name"): c.get("wardrobe_scope") for c in ar.get("characters") or []
+                               if c.get("wardrobe_scope") is not None},
+            "rules": ["K-REN-950", "K-REN-951", "K-REN-952", "K-REN-953", "K-REN-954", "K-REN-955", "K-REN-957"]}
+
+
+TURN_WORDS = ("转身", "回头", "转过脸", "抬起头", "抬头", "正面")
+
+
+def last_face_plan(project: str, shot, last_prompt: str | None, plan) -> list[dict]:
+    """K-REN-953（ep07-S3 尾帧 v14–v19 陌生女人）：首帧没送脸（cast 局部 / 局部特写），但尾帧的结束状态写到了脸（嘴唇 / 视线 /
+    表情 / 转身）→ 尾帧必须送这个人的身份脸（asset_refs.face_of）。返回 [{character, file, why}]"""
+    if not AR.pf_on("last_face_guard") or not last_prompt:
+        return []
+    have = {s.character for s in plan.slots if s.kind in ("face", "faceboard")}
+    on = AR.cast_on_screen(shot)
+    names = [n for n, _ in on]
+    txt = last_prompt.replace("眼睛为真实人眼大小", "")
+    out = []
+    for name, _pr in on:
+        cid = AR.NAME_ID.get(name, name)
+        if cid in have:
+            continue
+        solo_face = len(names) == 1 and any(w in txt for w in AR.FACE_VIS_WORDS)
+        if AR.face_described(name, txt, names) or solo_face or any(w in txt for w in TURN_WORDS):
+            f = AR.face_of(project, cid)
+            if f:
+                out.append({"character": cid, "file": f, "why": "尾帧结束状态写到脸 / 转身（K-REN-953）"})
+    return out
 
 
 def build_last(first_job: dict, first_file: str, *, prompt_override: str | None = None) -> dict:
-    """尾帧：通过契约的首帧作图1、项目方挑定的身份脸作图2；提示词 = 编译器 last_prompt（与 ASSETMASTER frames_v2 同法）"""
+    """尾帧：通过契约的首帧作图1、项目方挑定的身份脸作图2；提示词 = 编译器 last_prompt（与 ASSETMASTER frames_v2 同法）。
+    K-REN-953：首帧没送脸、尾帧结束状态写到脸 → 补送该人身份脸（first_job.last_faces）"""
     faces = list(first_job.get("face_files") or [])[:1]
     lines = ""
     if faces:
         lead = next((s.get("character") for s in (first_job["asset_refs"].get("slots") or []) if s.get("kind") == "face"), "主角")
         lines = f"图2是{AR.ID_NAME.get(lead, lead)}的脸部参考（只取脸和发型，必须一致）。"
-    return {**first_job, "id": first_job["id"] + ":last", "stage": "last",
-            "prompt": lines + (prompt_override or first_job.get("last_prompt") or ""), "refs": [first_file] + faces}
+    elif first_job.get("last_faces"):
+        lf = first_job["last_faces"][0]
+        faces = [lf["file"]]
+        lines = f"图2是{AR.ID_NAME.get(lf['character'], lf['character'])}的脸部参考（只取脸和发型，必须一致）。"
+    job = {**first_job, "id": first_job["id"] + ":last", "stage": "last",
+           "prompt": lines + (prompt_override or first_job.get("last_prompt") or ""), "refs": [first_file] + faces}
+    job["compile_trace"] = trace_of(job)
+    return job
 
 
 # =====================================================================================================

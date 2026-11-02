@@ -1,0 +1,100 @@
+# PROMPTFIX（总调度 fredw-2b 派，2026-11-02 16:5x；ALIGNMENT 第 2–6 步）：出图一致性编排的编译层修复。
+# 来源：fb-0004（ep04-S10 多人）、fb-0005（ep05-S3 站位）、fb-0006（ep07-S12 多手）、fb-0007（ep08-S5 男主穿女装）、ep07-S3 尾帧陌生女人。
+# 全部用结构化手段（参考槽、送脸、站位契约 + 出图后位置核对、种子流），不靠负面词（Turbo cfg=1，workflows.negative_for 丢负面词）。
+# 开关：config/recipes/image_framing.json promptfix.*（缺省全开；false = 旧行为）。Claude 不写不评剧本内容：剧本原文一字不动。
+rules:
+  - id: K-REN-950
+    domain: render
+    link: [P6-P7]
+    title: cast 写“局部”（不露脸）但构图可能露脸 → 编译报 cast_face_conflict，并按送脸处理（身份脸 face_of）
+    when: ns_agent.asset_refs.resolve_shot：cast 局部、正文没写到脸、不是背影，景别是近景 / 中近景 / 中景 / 全景 / 远景且主体是人（不是局部 / 物件特写）
+    then: 视为可能露脸：送该人身份脸（asset_refs.face_of，L-122），warnings 记 cast_face_conflict（rule K-REN-950），compile_trace.conflicts 带出；写作侧 lint QW-W13 报矛盾。“不露脸”只能靠局部特写裁切 / 背影来保证，不能只靠不送脸
+    check: [tests/test_promptfix.py]
+    evidence:
+      - {src: data/renders/ep05/S3/takes.json, note: "92 版；v81–v85 Q1 全部“本镜 cast 写不露脸，但画面里出了脸且不像本人”（脸高 0.24–0.26，最像 lin_wan 0.32–0.40）；cast 林晚（局部｜肩头｜中）、阿岚（局部｜手｜右），景别近景"}
+      - {src: data/review_pages/promptfix/scan.json, note: "全剧标了局部 / 背影的镜里 154 版出了脸（Q1 判定），ep05 136、ep07 18；新编译检出矛盾 15 镜"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+
+  - id: K-REN-951
+    domain: render
+    link: [P6-P7]
+    title: 局部且不露脸的人只送 cast 部位看得到的单品，不送设定图 / 整套参考板，正文不补“要穿全”
+    when: resolve_shot / frame_job.outer_items：cast 局部、不露脸、不是背影的人（两人以上同框时尤其）
+    then: 参考槽只放该人 cast 部位（肩 → 颈部饰品；手 → 手部单品；腰 → 腰部饰品）对应区的鞋 / 饰品 / 指甲，服装件和设定图一律不送；“X本镜造型Y要穿全”不补；compile_trace.wardrobe_scope 记收窄范围。参考板每块只放同一个人（plan_slots mergeable 原有约束）
+    check: [tests/test_promptfix.py]
+    evidence:
+      - {src: data/renders/ep08/S5/takes.json image_013_31f1dfc6, note: "林晚（局部｜肩后）被送了整块参考板（造型 B 设定图 + 黑色漆皮长风衣 + 内衣 + 指甲）并补“林晚本镜造型B要穿全：黑色漆皮长风衣…”；本地看图（gpu36 Qwen3-VL）：“那件黑色亮面漆皮长风衣穿在画面中部的男性身上”；takes 里 vlm_text 也记“顾沉 衣 黑色漆皮长风衣”，judge 仍判 pass"}
+      - {src: data/review_pages/promptfix/scan.json, note: "全剧 8 镜生效（ep02 1、ep06 1、ep07 1、ep08 3、ep10 2）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+
+  - id: K-REN-952
+    domain: render
+    link: [P4-P7]
+    title: 站位结构化——cast 的 x / depth 是唯一来源，编成 blocking 契约（作业 + compile_trace）+ 固定站位句 + 出图后位置核对
+    when: frame_job.build_first（≥2 人在画或局部、x 不同）；tools/vqa/anomaly.judge（blocking_defects）
+    then: job.blocking = cast 每人 {x, depth, presence, part}；正文没写每个人的画面左右时补 BLOCKING_NOTE（“站位：A在画面左侧…（按此左右站位，不互换）”，句式进 TEXT_NOTE_RES）；出图后按 ArcFace 认出的脸中心横坐标核对 x（左 <0.45W、右 >0.55W、中 0.25–0.75W），不符 → blocking_mismatch。区域提示 / ControlNet 姿态在现行 Turbo 多参考工作流上已证不可用（docs/research/imglab/TRACK.md T10 / T11），所以结构化落在“契约 + 核对 + 不过即重出”
+    check: [tests/test_promptfix.py]
+    evidence:
+      - {src: data/renders/ep05/S3/takes.json image_011_8cdf619e, note: "cast 林晚 x=中、阿岚 x=右，提示词里一个左右词都没有；本地看图：蓝发女子在画面左侧"}
+      - {src: data/review_pages/promptfix/scan.json, note: "两人以上同框 59 镜，其中 48 镜旧编译站位没进提示词（新编译补站位句）"}
+    confidence: medium   # 站位句效果待 A/B；核对与契约确定性
+    status: 确认
+    date: 2026-11-02
+
+  - id: K-REN-953
+    domain: render
+    link: [P6-P7]
+    title: 尾帧结束状态写到脸 / 转身，而首帧没送脸 → 尾帧必须送该人身份脸
+    when: frame_job.build_first（last_face_plan）→ build_last
+    then: 首帧 face_files 为空、last_prompt 里该人写到脸（face_described）、单人镜出现脸部词（唇 / 视线 / 表情…）或转身 / 回头 / 抬头 → last_faces 记该人 face_of，build_last 作图2 送入并写“图2是X的脸部参考”；compile_trace.last_faces 带出
+    check: [tests/test_promptfix.py]
+    evidence:
+      - {src: data/renders/ep07/S3/takes.json last v14–v19, note: "refs 只有首帧一张，last_prompt“特写里她下唇松开，嘴角放松，视线抬起看向镜面”；Q1 全 fail“cast 写不露脸，但画面里出了脸且不像本人”（最像 ch_a_lan 0.33 / gu_chen 0.207）；本地看图：一位深蓝长发女性在画面中央偏右，是真人"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+
+  - id: K-REN-954
+    domain: render
+    link: [P6-P7]
+    title: 种子流确定性——key = 镜/stage/阶梯变体，第 k 颗 = seed_for(key, k)，这一镜这一 stage 用过的种子一律跳过
+    when: tools/autopilot/producer.rung / rung_strategy / rung_ab（seed_pick → ns_render.seed_stream.pick）
+    then: 首帧、尾帧各一条流；重试与重派永不复用用过的种子；同一账本 + 同一次数 → 两台同一颗（可复现）；seed / key / k / skipped 进 job.seed_policy → take.params.compile_trace。同场一致不靠种子（不同提示词同种子不带来一致），靠参考槽和场景定稿句
+    check: [tests/test_promptfix.py]
+    evidence:
+      - {src: data/renders/ep07/S3/takes.json, note: "尾帧 v14=v17=253708524697205、v15=v18=110292634263597、v16=v19=271940492627291：producer 每轮从第 1 次数起，seed 只按次数取"}
+      - {src: data/review_pages/promptfix/scan.json, note: "全剧首帧 / 尾帧版本里复用种子 1162 次（同镜同 stage 同种子第 2 次起计）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+
+  - id: K-REN-955
+    domain: render
+    link: [P6-P7]
+    title: 手部单品图（指甲 / 戒指 / 手链，本身是两只手的照片）只在手部局部特写时进参考槽
+    when: resolve_shot：单品 zone=hand 且本镜不是手部局部特写
+    then: 不送参考（warnings 记 K-REN-955，走文字：角色锁已写指甲），避免模型把参考里的手照搬进画面
+    check: [tests/test_promptfix.py]
+    evidence:
+      - {src: data/pipeline/runs/series10_v1/images/refboards/board_ade3f4519cea.png, note: "ep07-S12 参考板第②格“指甲：冰川满钻尖甲”——本地看图：“有2只手，无躯干”；项目方 fb-0006：这里又多一只手"}
+    confidence: medium   # 机制确定；效果待 A/B
+    status: 确认
+    date: 2026-11-02
+
+  - id: K-REN-957
+    domain: render
+    link: [P6-P7]
+    title: 背影 / 远景人物结构化——cast 在画但本人分句写背影 / 背对镜头：不送正脸、送设定图背面栏、不算露脸；后景人物加层次句（远小近大）
+    when: asset_refs.resolve_shot / back_view、framing.faced_people、asset_refs.blocking_note（layer_note）
+    then: 背影人物：身份脸不进参考槽，设定图改送 back_nohead；faced_people 记为局部“背影”（首句不写“两张脸都清晰入画”、视线句不补、正文“X只露出背影，不露脸”）；不补“要穿全”。cast depth=后：层次句“X在后景，…人物较小、离镜头远（远小近大）”（LAYER_NOTE_RE 进 TEXT_NOTE_RES）。全员局部的镜头由 K-REN-903 裁切保证不露脸，K-REN-950 不改送脸（crop_guaranteed）。ControlNet 姿态在 Turbo 多参考流程不可用（IMGLAB T10），所以手段是参考槽 + 构图句 + 出图后验收
+    check: [tests/test_promptfix.py, tests/test_imgfix.py]
+    evidence:
+      - {src: data/renders/ep01/S9/takes.json, note: "剧本“顾沉的背影在画面右侧远处，背对镜头朝走廊暗处走”，cast 顾沉（在画｜右｜后）；旧编译送顾沉正脸 + 首句“两人同框，两张脸都清晰入画，互相看着对方”→ 出图他在近处、正面（VQAGATE 验收不过）"}
+      - {src: data/review_pages/promptfix/back_far.json, note: "全剧在画但写背影 4 处（ep01-S9 顾沉、ep03-S2 / ep04-S6 / ep10-S6 林晚），局部背影 1 处（ep02-S4），在画后景 17 处"}
+    confidence: medium   # 机制确定；效果待 S9 重出 + 借道 A/B
+    status: 确认
+    date: 2026-11-02

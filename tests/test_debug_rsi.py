@@ -619,9 +619,13 @@ def test_e24_first_input_changed(monkeypatch, tmp_path):
     PR = _producer()
     p = PR.Paths(root=tmp_path)
     fo = {"id": "first:ep01-S1", "status": "passed", "take": 3}
+    # K-REN-956 + 护栏（17:3x）：只认剧本输入签名 passed_input_sig；编译产物（job_sig）变了不重出已通过的帧
     monkeypatch.setattr(PR, "job_sig", lambda paths, sid: "NEW")
-    assert PR.first_input_changed(p, "ep01-S1", fo, {"passed_sig": "OLD"})["status"] == "ready"
-    assert PR.first_input_changed(p, "ep01-S1", fo, {"passed_sig": "NEW"})["status"] == "passed"
+    monkeypatch.setattr(PR, "input_sig", lambda paths, sid: "IN_NEW")
+    assert PR.first_input_changed(p, "ep01-S1", fo, {"passed_sig": "OLD"})["status"] == "passed"            # 只有编译变化
+    assert PR.first_input_changed(p, "ep01-S1", fo, {"passed_sig": "OLD", "passed_input_sig": "IN_OLD"})["status"] == "ready"
+    assert PR.first_input_changed(p, "ep01-S1", fo, {"passed_sig": "OLD", "passed_input_sig": "IN_NEW"})["status"] == "passed"
+    assert PR.first_input_changed(p, "ep01-S1", fo, {"passed_sig": "stale:补丁", "passed_input_sig": "stale:补丁"})["status"] == "ready"   # requeue_first 手动兜底
     assert PR.first_input_changed(p, "ep01-S1", fo, {})["status"] == "passed"                       # 旧数据没签名不动
     assert PR.first_input_changed(p, "ep01-S1", {**fo, "owner_locked": True}, {"passed_sig": "OLD"})["status"] == "passed"
 
@@ -908,8 +912,11 @@ def test_e28_hard_cap_blocks_and_uncap(monkeypatch, tmp_path):
     assert pr.hard_capped(o, cap=10) is True and sum(1 for e in pr.events if e[0] == "hard_cap") == 1    # 只开一次单
     pr.led_update("first:ep05-S3", redo_tries=0, tries=0, final=None)        # 各条重置路径只清阶梯次数 → 仍然封顶
     assert pr.hard_capped(o, cap=10) is True
-    pr.led_update("first:ep05-S3", cap_extra={"n": 2, "t": time.time()})    # uncap 多放 2 次
+    pr.led_update("first:ep05-S3", cap_extra={"n": 2, "t": time.time() - 1})    # uncap：放行之后再出 2 版
     assert pr.hard_capped(o, cap=10) is False
+    later = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() + 5))
+    takes["takes"] += [{"stage": "image", "n": 90, "created_at": later}, {"stage": "image", "n": 91, "created_at": later}]
+    assert pr.hard_capped(o, cap=10) is True                                     # 放行后已出 2 版 → 又封顶
     assert pr.hard_capped({"id": "last:ep05-S3", "shot": "ep05-S3"}, cap=10) is False   # 阶段分开算
     assert pr.hard_capped({"id": "video:ep05-S3", "shot": "ep05-S3"}, cap=10) is False  # 视频走 vidgen 有限阶梯
 
@@ -927,3 +934,167 @@ def test_night_skips_other_host(monkeypatch):
     assert N.dispatch_hosts({"gpu33", "gpu36"}, {}, ctrl) is True
     pushes = [c for c in calls if "push" in c]
     assert [c[-1] for c in pushes] == ["gpu33"] and not any("gpu36" in c for c in calls)
+
+
+# ---- K-OPS-E29：身份脸唯一入口 asset_refs.face_of（总调度 11-02 16:3x：视频身份分读 config faces、复核带写死 L-086，L-122 换脸后分叉） ----
+FACE_PROD_DIRS = ["services", "packages", "tools/autopilot", "tools/series10_video", "tools/pipeline", "tools/gen_contract",
+                  "tools/script_rsi", "tools/qa", "tools/factory", "tools/netfix", "tools/debug"]
+FACE_LIST_OK = {   # 只枚举候选文件做存在性检查 / 列表展示，允许读配置 faces；“当前身份脸是哪张”一律 face_of
+    "services/agent/ns_agent/asset_refs.py", "services/agent/ns_agent/gen_contract/preflight.py",
+    "tools/pipeline/remote_preflight.py", "services/api/ns_api/character_hub.py", "tools/qa/identity_face_check.py"}
+
+
+def test_e29_identity_face_single_entry():
+    import ast
+    import re
+    lit = re.compile(r"identity_refs/[a-z_]+/[a-z_]+_face|/refs/lin_wan/ar-|face_hd_A_s202")
+    bad = []
+    for d in FACE_PROD_DIRS:
+        for f in (ROOT / d).rglob("*.py"):
+            rel = f.relative_to(ROOT).as_posix()
+            if rel in FACE_LIST_OK or "/tests/" in rel:
+                continue
+            tree = ast.parse(f.read_text(encoding="utf-8"))
+            docs = {id(n.body[0].value) for n in ast.walk(tree)
+                    if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and n.body
+                    and isinstance(n.body[0], ast.Expr) and isinstance(getattr(n.body[0], "value", None), ast.Constant)}
+            for n in ast.walk(tree):
+                if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs and lit.search(n.value):
+                    bad.append(f"{rel}:{n.lineno} 写死身份脸路径")
+                if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "get" and n.args
+                        and isinstance(n.args[0], ast.Constant) and n.args[0].value == "faces" and "cfg" in ast.unparse(n.func.value).lower()):
+                    bad.append(f"{rel}:{n.lineno} 直接读配置 faces")
+    assert not bad, bad
+
+
+def test_e29_video_score_refs_use_face_of(monkeypatch):
+    sys.path.insert(0, str(ROOT / "tools" / "series10_video"))
+    sys.path.insert(0, str(ROOT / "tools" / "pipeline"))
+    import build_jobs as B
+    from ns_agent import asset_refs as AR
+    monkeypatch.setattr(AR, "face_of", lambda project, cid: f"faces/{project}/{cid}.png")
+    spec = type("S", (), {"faces": [type("C", (), {"name": "林晚"})(), type("C", (), {"name": "路人"})()]})()
+    assert B.score_refs(spec, None) == {"林晚": f"faces/{B.RUN.name}/lin_wan.png"}
+
+
+# ---- L-124 ep01-S1：E13 不覆盖定稿锁；视频尾帧关键帧映射 + 首尾成对；提交连报错转 blocked ----
+def test_l124_last_consistent_respects_owner_lock():
+    PR = _producer()
+    td = {"active": {"image": 22, "last": 11}, "takes": [{"stage": "image", "n": 22, "created_at": "2026-11-02T04:07"},
+                                                         {"stage": "last", "n": 11, "created_at": "2026-11-01T05:00"}]}
+    lo = {"status": "passed", "owner_locked": True, "take": 11}
+    assert PR.last_consistent(td, {"status": "passed"}, lo) is lo
+    lo2 = {"status": "passed", "take": 11}
+    assert PR.last_consistent(td, {"status": "passed"}, lo2)["status"] == "ready"       # 没锁的照旧 E13 作废
+
+
+def test_l124_build_jobs_last_frame_pairing(monkeypatch, tmp_path):
+    sys.path.insert(0, str(ROOT / "tools" / "series10_video"))
+    sys.path.insert(0, str(ROOT / "tools" / "pipeline"))
+    import build_jobs as B
+    monkeypatch.setattr(B, "ROOT", tmp_path)
+    d = tmp_path / "data/renders/ep01/S1"; d.mkdir(parents=True)
+    (tmp_path / "data/renders/ep01/S1/last_011.png").write_bytes(b"x")
+    (d / "takes.json").write_text(json.dumps({"locked": {"last": 11}, "active": {"last": 12}, "takes": [
+        {"stage": "last", "n": 11, "file": "renders/ep01/S1/last_011.png", "created_at": "2026-11-01T05:00:00"},
+        {"stage": "last", "n": 12, "file": "renders/ep01/S1/missing.png", "postflight": {"ok": True}}]}), encoding="utf-8")
+    got = B.passed_lasts()
+    assert got == {"ep01-S1": {"file": "data/renders/ep01/S1/last_011.png", "created_at": "2026-11-01T05:00:00"}}   # 定稿锁优先
+    src = (ROOT / "tools/series10_video/build_jobs.py").read_text(encoding="utf-8")
+    assert '"@last_frame"' in src and "stale_pair" in src
+
+
+def test_l124_vidgen_blocks_after_two_submit_errors():
+    src = (ROOT / "tools/series10_video/vidgen.py").read_text(encoding="utf-8")
+    assert "SHOT_BLOCKED_SUBMIT" in src and 'x.get("state") == "submit_error"' in src
+
+
+# ---- K-OPS-E30（L-124）：派单按集顺序，驳回 / 插队只在同一集内优先 ----
+def test_e30_episode_order_key():
+    PR = _producer()
+    c = [(3, 1, 2, {"redo": True}), (1, 1, 5, {}), (1, 0, 7, {}), (2, 1, 1, {"redo": True}), (1, 1, 2, {"redo": True})]
+    got = [(x[0], x[2]) for x in sorted(c, key=PR.episode_order_key)]
+    assert got == [(1, 2), (1, 7), (1, 5), (2, 1), (3, 2)]      # ep01 全部先于 ep02 的驳回单；集内驳回先、尾帧先
+
+
+def test_e30_vidgen_pending_sorted_by_episode():
+    src = (ROOT / "tools/series10_video/vidgen.py").read_text(encoding="utf-8")
+    assert "K-OPS-E30" in src and "sorted(shots.items()" in src
+
+
+def test_l124_vidgen_force_queue_bypasses_cap(monkeypatch):
+    sys.path.insert(0, str(ROOT / "tools" / "series10_video"))
+    import vidgen as V
+    monkeypatch.setattr(V, "policy_ok", lambda var: True)
+    shot = {"variants": {k: {"status": "ready"} for k in ("v1", "mot", "s2", "s3", "r24", "alt", "s4")}}
+    rec = {"renders": [{"variant": k, "score": {"gate": {"fails": ["动作不足"]}}} for k in ("v1", "mot", "s2", "s3")]}
+    assert V.next_variant(shot, rec) is None                          # 4 次上限到了
+    rec["force_queue"] = ["r24", "alt", "s4"]
+    assert V.next_variant(shot, rec) == "r24"                         # 加变体不受上限限制
+    rec["renders"].append({"variant": "r24", "score": {}})
+    assert V.next_variant(shot, rec) == "alt"
+
+
+# ---- 排队位置 / 预计完成（给 ASSETUX）：E30 同口径排序；服务器 registry 过期时标 stale ----
+def test_queue_eta_order_and_stale(tmp_path):
+    sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+    import queue_eta as Q
+    (tmp_path / "config/pipeline").mkdir(parents=True)
+    (tmp_path / "config/pipeline/runs.json").write_text('{"primary": "s1", "runs": {"s1": {}}}', encoding="utf-8")
+    (tmp_path / "data/state/netfix").mkdir(parents=True)
+    (tmp_path / "data/state/netfix/partition.json").write_text(json.dumps(
+        {"images": {"gpu33": [1, 2]}, "video": {"gpu33": [1, 2]}, "lanes": {"gpu33": ["gpu33:0", "gpu33:1"]}}), encoding="utf-8")
+    def ob(i, st, redo=False):
+        return {"id": i, "status": st, "redo": redo}
+    reg = {"updated": "x", "episodes": [
+        {"ep": 2, "shots": [{"shot": "ep02-S1", "index": 1, "objects": {"first": ob("first:ep02-S1", "ready", True), "last": ob("last:ep02-S1", "pending")}}]},
+        {"ep": 1, "shots": [{"shot": "ep01-S3", "index": 3, "objects": {"first": ob("first:ep01-S3", "ready"), "last": ob("last:ep01-S3", "ready")}}]}]}
+    (tmp_path / "data/producer").mkdir(parents=True)
+    (tmp_path / "data/producer/registry.json").write_text(json.dumps(reg), encoding="utf-8")
+    d = Q.compute(tmp_path, now=1_000_000.0)
+    o = d["objects"]
+    assert [k for k, v in sorted(o.items(), key=lambda kv: kv[1]["pos"])] == ["last:ep01-S3", "first:ep01-S3", "first:ep02-S1"]
+    assert o["first:ep02-S1"]["ahead"] == ["last:ep01-S3", "first:ep01-S3"] and d["basis"]["stale"] is True
+
+
+# ---- sv-14 护栏（总调度 11-02 17:3x）：编译变化不作废已通过帧；anomaly 判出重复人 / 多余人头的首帧不进视频；A-02 打分超时只重打分 ----
+def test_guard_stale_whitelist():
+    PR = _producer()
+    assert PR.stale_requeue_reasons(["编译器升级"]) == []
+    assert PR.stale_requeue_reasons(["本镜输入已改"]) == []          # 站位句 / 参考槽调整落在这里：交验收，不重出
+    assert PR.stale_requeue_reasons(["造型已改"]) == [] and PR.stale_requeue_reasons(True) == []
+    assert PR.stale_requeue_reasons(["提示词已改", "编译器升级"]) == ["提示词已改"]
+    assert PR.stale_requeue_reasons("剧本已改") == ["剧本已改"]
+
+
+def test_guard_anomaly_blocks_video(monkeypatch, tmp_path):
+    sys.path.insert(0, str(ROOT / "tools" / "series10_video"))
+    sys.path.insert(0, str(ROOT / "tools" / "pipeline"))
+    import build_jobs as B
+    rows = {("ep04-S10", "image_006.png"): {"ok": "fail", "count": {"status": "fail", "defects": ["duplicate_person：两个头都是陈宇"]}}}
+    assert "duplicate_person" in B.anomaly_block("ep04-S10", "renders/ep04/S10/takes/image_006.png", {"ok": True}, rows)
+    assert B.anomaly_block("ep04-S10", "renders/ep04/S10/takes/image_007.png", {"ok": True}, rows) is None      # 另一版没判过：不拦
+    pf = {"ok": True, "items": [{"id": "Q10", "evidence": {"count": {"defects": ["extra_head：镜里是陌生人"]}}}]}
+    assert "extra_head" in B.anomaly_block("ep01-S1", "x.png", pf, {})
+    assert B.anomaly_block("ep01-S1", "x.png", {"ok": True, "items": [{"id": "Q10", "evidence": {"count": {"defects": ["extra_hands：3 只手"]}}}]}, {}) is None
+
+
+def test_guard_a02_score_timeout_only_rescore():
+    src = (ROOT / "tools/autopilot/producer.py").read_text(encoding="utf-8")
+    i = src.index('pf = res["pf_future"].result(timeout=1800)')
+    block = src[i - 200:i + 900]
+    assert "except Exception" in block and "rescore_take=res[\"take\"]" in block and "score_timeout" in block
+
+
+# ---- D-VQA-01 收紧（总调度 17:4x）：首帧没跑过 / 没通过第 8 步验收的不进视频，按镜生效 ----
+def test_accept_gate_status():
+    sys.path.insert(0, str(ROOT / "tools" / "series10_video"))
+    sys.path.insert(0, str(ROOT / "tools" / "pipeline"))
+    import build_jobs as B
+    rows = {("ep07-S1", "image_008.png"): {"ok": "pass", "count": {"defects": []}},
+            ("ep07-S2", "image_008.png"): {"ok": "fail", "count": {"defects": []}}}
+    assert B.accept_status("ep07-S1", "renders/ep07/S1/takes/image_008.png", {}, rows) == "pass"
+    assert B.accept_status("ep07-S2", "renders/ep07/S2/takes/image_008.png", {}, rows) == "fail"
+    assert B.accept_status("ep07-S3", "x/image_001.png", {}, rows) is None                     # 没跑过 → 不进视频
+    assert B.accept_status("ep07-S1", "x.png", {"items": [{"id": "Q10", "status": "untested"}]}, rows) == "untested"   # Q10 优先
+    assert B.ACCEPT_REQUIRED is True

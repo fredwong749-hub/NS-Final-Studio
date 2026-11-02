@@ -34,7 +34,6 @@ import { useUi } from "../ui.helpers";
 import { LaneSelect } from "./LaneSelect";
 import { laneWait } from "./LaneSelect.helpers";
 import { useLanes } from "./lanes";
-import { autoFinalText, useRenderSettings } from "./ImageParams.helpers";
 import { Verdict } from "../Verdict";
 import { SLOT_NAME, adoptJobs, setLock, submitFrame, submitVideo } from "./actions";
 import { EditLoop } from "./EditLoop";
@@ -86,14 +85,13 @@ export function EditCenter({ shot }: EditCenterProps) {
   const [slow, setSlow] = useState(false);
   const ui = useUi();
   const { lanes } = useLanes();
-  const rs = useRenderSettings(); // 定稿按钮说明按 render_quality.json 实际值写（auto_final_on_lock）
   const firstId = useRef(id);
   /** A / R 键用的最新动作（键盘监听只装一次） */
   const keyAct = useRef<{
     approve: () => void;
-    reject: () => void;
+    edit: () => void;
     on: boolean;
-  }>({ approve: () => undefined, reject: () => undefined, on: false });
+  }>({ approve: () => undefined, edit: () => undefined, on: false });
 
   useEffect(() => {
     if (!studio.details[id]) void studio.refreshShots([id]);
@@ -197,13 +195,12 @@ export function EditCenter({ shot }: EditCenterProps) {
     const on = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
       if (e.ctrlKey || e.metaKey || e.altKey || /INPUT|TEXTAREA|SELECT/.test(el.tagName) || el.isContentEditable) return;
-      // UXF2 #7：A = 通过这版视频，X = 打回（应用内对话框写原因）；只在视频大格时接管
-      // UX5（D7）：以前精修里 R = 打回，和全局 R = 串播审片、帮助表 X = 打回打架；统一成 A 通过 / X 打回 / R 串播
+      // L-123：A = 用这张（视频 = 用这版），E = 修改；没有“不要”。R 仍是串播
       const k = e.key.toLowerCase();
-      if ((k === "a" || k === "x") && !e.shiftKey && keyAct.current.on && !document.querySelector(".modal-back, .v3e-modal")) {
+      if ((k === "a" || k === "e") && !e.shiftKey && keyAct.current.on && !document.querySelector(".modal-back, .v3e-modal")) {
         e.preventDefault();
         e.stopImmediatePropagation();
-        (k === "a" ? keyAct.current.approve : keyAct.current.reject)();
+        (k === "a" ? keyAct.current.approve : keyAct.current.edit)();
         return;
       }
       const s = ({ "1": "first", "2": "last", "3": "video" } as Record<string, Slot>)[e.key];
@@ -282,14 +279,16 @@ export function EditCenter({ shot }: EditCenterProps) {
       notify(`${id} 已通过 · 下一个待你审：${nx}`);
     } else notify(`${id} 已通过 · 本集没有待你审的视频了`);
   };
-  const reject = () => {
-    if (slot !== "video" || !cur?.url) return;
-    studio.setRejectFor([id]);
+  // L-123：A = 用这张（视频 = 用这版）；E = 修改（图 = 打开修改面板，视频 = 改参数 / 换种子面板）
+  const useFrame = () => {
+    if (slot === "video" || !cur || gate || isLocked) return;
+    void setLock(id, slot, cur.n, true, notify, refresh);
   };
+  const editIt = () => (slot === "video" ? openVideoParams() : openLoop());
   keyAct.current = {
-    approve: () => void approve(),
-    reject,
-    on: slot === "video" && !!cur?.url && !loopOpen,
+    approve: () => (slot === "video" ? void approve() : useFrame()),
+    edit: () => !gate && editIt(),
+    on: !loopOpen && (slot === "video" ? !!cur?.url && vidCur : !!cur && !gate),
   };
 
   // ---- 尺寸 ----
@@ -588,60 +587,46 @@ export function EditCenter({ shot }: EditCenterProps) {
       {slot === "video" ? (
         <>
           {cur?.url && (
-            <div className="v3e-review" role="group" aria-label="审这版视频">
+            <div className="v3e-review" role="group" aria-label="这版视频">
               {rv === "passed" && vidCur ? (
                 <>
-                  <span className="v3e-rvst ok">✓ 已通过</span>
-                  <button className="v3e-btn sm" onClick={() => void studio.setReview([id], "unreviewed")} title="撤销通过，回到待你审">
+                  <span className="v3e-rvst ok">已用这版</span>
+                  <button className="v3e-btn sm" onClick={() => void studio.setReview([id], "unreviewed")} title="撤销，回到待你审">
                     撤销
                   </button>
                 </>
               ) : (
                 <>
-                  <button
-                    className="v3e-btn ok strong"
-                    disabled={!vidCur || !watched}
-                    onClick={() => void approve()}
-                    title={
-                      !vidCur
-                        ? `现在看的是 #${cur.n}，不是本镜在用的那版`
-                        : !watched
-                          ? "先把这版视频完整看一遍（拖到结尾也算）"
-                          : "通过这版视频，跳到下一个待你审的镜头（A）"
-                    }
-                  >
-                    ✓ 用这版<kbd>A</kbd>
-                  </button>
-                  <button className="v3e-btn bad" onClick={reject} title="打回并写原因（X）">
-                    ✗ 不要…<kbd>X</kbd>
-                  </button>
-                  {rv === "rejected" && (
-                    <span className="v3e-rvst bad" title={shot.review.reason || undefined}>
-                      已打回
-                      {shot.review.reason ? `：${shot.review.reason}` : ""}
-                    </span>
+                  {vidCur && (
+                    <button className="v3e-btn ok strong" onClick={() => void approve()} title="用这版视频，跳到下一个待你审的镜头（A）">
+                      用这版<kbd>A</kbd>
+                    </button>
                   )}
-                  {cur.auto && rv !== "rejected" && (
+                  {cur.auto && (
                     <span className="v3e-rvst auto" title={AUTO_TIP}>
                       {AUTO_SHORT}
                     </span>
                   )}
-                  {vidCur && !watched && rv !== "rejected" && <span className="v3e-rvst">看完一遍后可通过</span>}
                 </>
               )}
             </div>
           )}
-          <button className={`v3e-btn ${cur?.url ? "" : "primary"}`} disabled={!!gate} onClick={regen} title={gate ?? undefined}>
-            {list.length ? "重新出视频" : "出视频"}
-          </button>
-          <button className="v3e-btn" disabled={!!gate} onClick={openVideoParams} title="改种子 / 步数 / 时长 / LoRA 强度 / 提示词后重渲">
-            改参数重渲…
-          </button>
+          {/* L-123：“重新出视频”“改参数重渲”并入“修改”（种子 / 步数 / 时长 / LoRA / 提示词都在面板里）；条件没满足时按钮不出现 */}
+          {!gate &&
+            (list.length ? (
+              <button className="v3e-btn" onClick={openVideoParams} title="改一句话 / 换个种子 / 改参数后重出这条视频（E）">
+                修改<kbd>E</kbd>
+              </button>
+            ) : (
+              <button className="v3e-btn primary" onClick={regen}>
+                出视频
+              </button>
+            ))}
         </>
       ) : (
         <>
-          <button className="v3e-btn" disabled={!!gate || !cur} onClick={() => openLoop()} title="改提示词重出 / 指令改图 / 换参考再改 / 局部重绘">
-            修改{nm}…
+          <button className="v3e-btn" disabled={!cur} hidden={!!gate} onClick={() => openLoop()} title="改提示词重出 / 指令改图 / 换参考再改 / 局部重绘（E）">
+            修改<kbd>E</kbd>
           </button>
           {/* UXF5（审查 R9）：已定稿（没过期）时主按钮是下一步，不是重出；重出降为次按钮并写明后果 */}
           {lockedDone && (
@@ -708,7 +693,7 @@ export function EditCenter({ shot }: EditCenterProps) {
             </button>
           ) : cur && !gate ? (
             // UM-P0-01：待审的这一版给一对明确按钮——✓ 用这张（= 定稿，10 秒撤销）/ ✗ 不要（原因 → 按原因重出或只标记）
-            <span title={`${slot === "first" ? "用这张 = 定稿首帧，之后才能出尾帧" : "用这张 = 定稿尾帧，首尾帧都定稿后才能出视频"}；${autoFinalText(rs)}`}>
+            <span title={`用这张 = 定稿${nm}（A）`}>
               <Verdict
                 shot={id}
                 stage={slot as "first" | "last"}
@@ -750,7 +735,6 @@ export function EditCenter({ shot }: EditCenterProps) {
             document.body,
           )}
       </div>
-      {gate && <span className="v3e-gate">{gate}</span>}
     </div>
   );
   // UIMASTER（G10 回退 F05 / F09，总调度 11-01 指派）：精修首屏常驻两样——全屏看首尾帧（首帧 | 尾帧并排，←/→ 翻版本）、完整视频提示词（可收起，原文只读）
@@ -792,7 +776,7 @@ export function EditCenter({ shot }: EditCenterProps) {
             rate={slow ? 0.5 : 1}
             placeholder={placeholder(slot)}
             overlay={genOverlay(job)}
-            onWatched={() => vidCur && shot.video && !watched && studio.markWatched(shot.video)}
+            onWatched={() => vidCur && shot.video && studio.markWatched(shot.video)}
             shot={id}
             onChanged={() => void refresh([id])}
           />

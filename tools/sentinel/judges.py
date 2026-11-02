@@ -21,7 +21,7 @@ SLO_TITLE = {
     "S14": "RSI 线分数（2 小时无新分 / 连续不升）",
     "GPU24": "GPU 24 小时等待任务原因",
     "S15": "编排器 tick 存活", "S16": "笔记本常驻进程清单",
-    "S17": "单镜出图速率", "S18": "临时挂道到期", "S21": "读旧状态路径（state_legacy_read）", "S22": "冻结期间改文件", "S23": "笔记本侧出图道可达率", "S24": "API 响应时间", "S25": "常驻 CLIP", "S20": "scratchpad 里跑的进程（K-OPS-Y04）", "G26": "声明 vs 实际（hosts.json）", "S19": "产能见底（ready 不够、没有下一批）",
+    "S17": "单镜出图速率", "S18": "临时挂道到期", "S21": "读旧状态路径（state_legacy_read）", "S22": "冻结期间改文件", "S23": "笔记本侧出图道可达率", "S24": "API 响应时间", "S25": "常驻 CLIP", "SC": "SCORECARD 七项不到 100 分", "S20": "scratchpad 里跑的进程（K-OPS-Y04）", "G26": "声明 vs 实际（hosts.json）", "S19": "产能见底（ready 不够、没有下一批）",
 }
 
 
@@ -682,6 +682,23 @@ def j_clip(host: str, r: dict | None, cfg: dict) -> list[dict]:
         f = F("S25", f"{host}:reload", r["reloads_1h"] > cfg["reload_max_per_h"], f"{host} 常驻 CLIP 一小时重载 {r['reloads_1h']} 次 > {cfg['reload_max_per_h']}（{cfg['reload_reason']}）",
               reloads_1h=r["reloads_1h"])
         f["owner_loop"] = cfg.get("owner_loop")
+        out.append(f)
+    return out
+
+
+# ------------------------------------------------------------------ SCORECARD（总调度 17:4x）
+def j_scorecard(res: dict, owners: dict) -> list[dict]:
+    """七项每项一张单：< 100 即违约，派负责方并抄送总调度；证据写最低分项、未测条目、打分器出处"""
+    out = []
+    for line, r in res.items():
+        if not r or r.get("score") is None:
+            continue
+        low = r.get("lowest")
+        parts = r.get("parts") or {}
+        f = F("SC", line, float(r["score"]) < 100, f"SCORECARD {line} {r['score']} 分 < 100：最低分项 {low}={parts.get(low)}"
+              + (f"；未测：{'、'.join(r['unmeasured'][:3])}" if r.get("unmeasured") else ""),
+              score=r["score"], parts=parts, lowest=low, unmeasured=r.get("unmeasured"), src=r.get("src"), evidence=r.get("evidence"))
+        f["owner_loop"] = f"{owners.get(line, '总调度')}（抄送总调度）"
         out.append(f)
     return out
 

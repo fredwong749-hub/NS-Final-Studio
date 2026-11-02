@@ -306,11 +306,8 @@ function ClipStrip({ ep }: { ep: Episode }) {
             >
               出视频{vidList.length ? `（${vidList.length}）` : ""}
             </button>
-            <button className="v3-btn" onClick={() => void st.setReview(ids, "passed")} title="只对视频已完整播放过的镜头生效">
-              通过
-            </button>
-            <button className="v3-btn" onClick={() => st.setRejectFor(ids)}>
-              打回
+            <button className="v3-btn" onClick={() => void st.setReview(ids, "passed")}>
+              用这版
             </button>
             <button className="v3-icon" onClick={() => st.setMulti(new Set())} title="取消选择">
               ×
@@ -358,7 +355,7 @@ export function CanvasV3() {
           <span className="v3-grow" />
           <EpisodeSettings ep={episode} />
           {/* 回退补回（regress_r1 #11）：串播审片按钮（以前只剩快捷键 R） */}
-          <button className="v3-btn sm" onClick={() => st.setReviewMode(true)} title="按顺序连播本集视频，边看边通过 / 打回（R）">
+          <button className="v3-btn sm" onClick={() => st.setReviewMode(true)} title="按顺序连播本集视频，边看边用这版 / 修改（R）">
             ▶ 串播审片
           </button>
           <ModeSwitch />

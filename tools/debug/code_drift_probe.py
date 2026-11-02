@@ -76,7 +76,18 @@ def expected_shas(sv: str) -> dict:
     with tarfile.open(fileobj=io.BytesIO(raw)) as tf:
         for m in tf.getmembers():
             if m.isfile():
-                out[m.name] = variants(tf.extractfile(m).read())
+                b = tf.extractfile(m).read()
+                out[m.name] = variants(b)
+                # 工作区里混合换行（部分行 CRLF）的文件：deploy 推的是工作区原字节，三种整齐换行都对不上 → 误报漂移
+                # （AUDIT-M 11-02 17:0x 实测两台各误报 4 个：tools/vqa/server.py 等，去 \r 后与 sv-13 逐字相同）。
+                # 工作区文件去 \r 后与快照相同时，把工作区原字节的 sha 也算可接受。
+                lp = ROOT / m.name
+                try:
+                    lb = lp.read_bytes() if lp.is_file() else None
+                except OSError:
+                    lb = None
+                if lb is not None and lb.replace(b"\r", b"") == b.replace(b"\r", b""):
+                    out[m.name].add(hashlib.sha256(lb).hexdigest())
     return out
 
 

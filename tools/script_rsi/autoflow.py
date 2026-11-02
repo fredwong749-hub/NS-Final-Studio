@@ -628,7 +628,12 @@ def cmd_test_brief(a) -> int:
     return 0
 
 
-LOCKED_FACE = "data/assets/identity_refs/lin_wan/lin_wan_face_hd_A_s202.png"     # L-086 林晚身份脸
+def locked_face() -> str:
+    """林晚当前身份脸（K-OPS-E29：唯一入口 asset_refs.face_of，项目 = runs.json primary）"""
+    sys.path.insert(0, str(ROOT / "services/agent"))
+    from ns_agent import asset_refs as AR
+    reg = json.loads((ROOT / "config/pipeline/runs.json").read_text(encoding="utf-8"))
+    return AR.face_of(reg.get("primary"), "lin_wan") or "（读不到当前身份脸）"
 HARD_RULES = ("系统硬约束：全部人物为成年人（≥22 岁）；一切亲密情节双方自愿；人物均为虚构，非真实人物；亲密内容在剧本里按平台规则写，"
               "亲密镜头只在本地生成；不改第一季已定的剧情事实和人物设定（人物、关系、造型、林晚身份脸）；缺信息标“未提供”，不编造。")
 
@@ -652,7 +657,7 @@ def sequel_materials(prev_eps: list[int], material_md: Path | None, material_eps
         out.append("【第一季全剧人物表（原文）】")
         out += [ln for ln in pre0.splitlines() if ln.startswith("| ") and ln.count("|") >= 6 and not ln.startswith("| 角色") and not ln.startswith("|---")
                 and re.search(r"\|\s*[a-z_]+\s*\|", ln)]
-    out.append(f"【林晚身份脸（L-086，不换人）】{LOCKED_FACE}")
+    out.append(f"【林晚身份脸（当前，不换人）】{locked_face()}")
     if material_md and material_md.exists():
         t = material_md.read_text(encoding="utf-8")
         out.append(f"\n【旧剧本素材（只读引用：{H.RC._rel(material_md)}，第 {material_eps[0]}–{material_eps[-1]} 集的标题与剧情行原文）】")

@@ -7,12 +7,10 @@ StartLimitBurst=5
 [Service]
 Type=simple
 EnvironmentFile=%h/work/fredw/ns_factory_systemd/host.env
-Environment=NS_CLIP_PATH=/root/work/fredw/reflock/clip-vit-large-patch14 NS_CLIP_CODE_SRC=/root/work/fredw/offline_20261101/repo
+Environment=NS_CLIP_PATH=/root/work/fredw/reflock/clip-vit-large-patch14 NS_CLIP_CODE_SRC=/root/work/fredw/offline_20261101/repo NS_METRICS_DIR=/root/work/fredw/offline_20261101/repo/services/agent/ns_agent/gen_contract
 WorkingDirectory=/root/work/fredw/reflock
-ExecStartPre=/bin/cp -a /root/work/fredw/offline_20261101/repo/tools/gen_contract/clip_srv.py /root/work/fredw/reflock/clip_srv.py
-ExecStartPre=/bin/cp -a /root/work/fredw/offline_20261101/repo/services/agent/ns_agent/gen_contract/metrics.py /root/work/fredw/reflock/metrics.py
 ExecStartPre=/bin/sh -c 'echo "{\"kind\": \"clip_resident\", \"host\": \"$OFFLINE_SELF\", \"at\": \"$(date -Iseconds)\", \"reason\": \"systemd_start\"}" >> /root/work/fredw/factory/logs/clip_resident_events.jsonl'
-ExecStart=/bin/sh -c 'CUDA_VISIBLE_DEVICES=$CLIP_GPU NS_CLIP_DEVICE=$CLIP_DEV OMP_NUM_THREADS=$CLIP_TH MKL_NUM_THREADS=$CLIP_TH OPENBLAS_NUM_THREADS=$CLIP_TH NS_SCORE_THREADS=$CLIP_TH exec $CLIP_TASKSET $CLIP_PY -u clip_srv.py --serve 8872'
+ExecStart=/bin/sh -c 'CUDA_VISIBLE_DEVICES=$CLIP_GPU NS_CLIP_DEVICE=$CLIP_DEV OMP_NUM_THREADS=$CLIP_TH MKL_NUM_THREADS=$CLIP_TH OPENBLAS_NUM_THREADS=$CLIP_TH NS_SCORE_THREADS=$CLIP_TH exec $CLIP_TASKSET $CLIP_PY -u /root/work/fredw/offline_20261101/repo/tools/gen_contract/clip_srv.py --serve 8872'
 Restart=on-failure
 RestartSec=10
 Nice=5

@@ -138,7 +138,7 @@ def _hair_px(rgb: np.ndarray, face) -> np.ndarray:
     return np.concatenate(px) if px else np.zeros((0, 3), np.uint8)
 
 
-def hair_and_colour(path: Path, first_frame: str | None) -> dict:
+def hair_and_colour(path: Path, first_frame: str | None, lin_ref: str | None = None) -> dict:
     """总调度 11-01 亲审：ep01-S5 v1 发色比首帧明显更深、更灰蓝，且全片如此。
     指标（先记录、后标定阈值）：蓝色发丝像素的 H / S / V 中位数，首帧 vs 片子（开头 0.5 s、全片中位、结尾 0.5 s），
     以及整帧 Lab 均值差（首帧 vs 片子第 0 帧，看是不是整体偏色）。"""
@@ -164,7 +164,7 @@ def hair_and_colour(path: Path, first_frame: str | None) -> dict:
 
     ref = hair_stats(img)
     # 同时记录相对林晚身份参考（项目方挑定的脸部裁切）的发色差：区分“视频改了颜色”和“首帧本身就偏了”
-    idp = ROOT / "data/assets/identity_refs/lin_wan/lin_wan_face_ref2va.png"
+    idp = ROOT / (lin_ref or "_none_")      # K-OPS-E29：林晚当前身份脸 = 作业 score_refs（上游 asset_refs.face_of），不写死
     idimg = cv2.imread(str(idp))
     idh = hair_stats(cv2.cvtColor(idimg, cv2.COLOR_BGR2RGB)) if idimg is not None else None
     lab0 = R.lab_of(img).reshape(-1, 3).mean(0)
@@ -375,7 +375,7 @@ def main(argv):
     stamps = [int(m.group(1)) * 60 + float(m.group(2)) for m in STAMP.finditer(meta.get("prompt") or "")]
     ir = identity_and_red(path, refs)
     try:
-        hc_ = hair_and_colour(path, meta.get("first_frame"))
+        hc_ = hair_and_colour(path, meta.get("first_frame"), refs.get("林晚"))
     except Exception as e:  # noqa: BLE001
         hc_ = {"hair_note": f"发色测量失败：{e}"[:200]}
     LS.sheet(path, sheet_p)

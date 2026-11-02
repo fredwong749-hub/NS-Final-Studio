@@ -29,11 +29,10 @@ setsid nohup bash -c "
   why=boot
   while true; do
     echo \"{\\\"kind\\\": \\\"clip_resident\\\", \\\"host\\\": \\\"$SELF\\\", \\\"at\\\": \\\"\$(date -Iseconds)\\\", \\\"reason\\\": \\\"\$why\\\", \\\"gpu\\\": \\\"$DEV$GPU\\\", \\\"port\\\": $PORT}\" >> $EV
-    cp -a $PROD/tools/gen_contract/clip_srv.py $RL/clip_srv.py
-    cp -a $PROD/services/agent/ns_agent/gen_contract/metrics.py $RL/metrics.py
-    cd $RL && NS_CLIP_CODE_SRC=$PROD CUDA_VISIBLE_DEVICES=$GPU NS_CLIP_DEVICE=$DEV NS_CLIP_PATH=$RL/clip-vit-large-patch14 \
+    # K-OPS-F18：直接跑仓库部署目录里的 clip_srv.py / metrics.py，不再拷进 reflock（旁路拷贝）；reflock 只放模型和参考图缓存
+    cd $RL && NS_CLIP_CODE_SRC=$PROD NS_METRICS_DIR=$PROD/services/agent/ns_agent/gen_contract CUDA_VISIBLE_DEVICES=$GPU NS_CLIP_DEVICE=$DEV NS_CLIP_PATH=$RL/clip-vit-large-patch14 \
       OMP_NUM_THREADS=$TH MKL_NUM_THREADS=$TH OPENBLAS_NUM_THREADS=$TH NUMEXPR_NUM_THREADS=$TH NS_SCORE_THREADS=$TH TZ=Asia/Tokyo \
-      nice -n $NICE ${CPUS:+taskset -c $CPUS} $PY -u clip_srv.py --serve $PORT
+      nice -n $NICE ${CPUS:+taskset -c $CPUS} $PY -u $PROD/tools/gen_contract/clip_srv.py --serve $PORT
     rc=\$?; echo \"\$(date -Is) clip_srv exited rc=\$rc，3 s 后重启\"; why=\"exit_rc_\$rc\"; sleep 3
   done" </dev/null >>$LOG 2>&1 &
 echo $! > $PIDF

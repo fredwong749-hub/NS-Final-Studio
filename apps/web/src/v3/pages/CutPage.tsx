@@ -13,6 +13,7 @@ import { DeleteButton } from "../../ds/editdel";
 import { relFromUrl } from "../../ds/editdel.api";
 import "./pages.css";
 import "./cut.css";
+import CutEditor from "./CutEditor";
 
 interface Cut {
   name: string;
@@ -24,6 +25,8 @@ interface Cut {
   changed: { shot_id: string; used: string; current: string; current_locked: boolean }[];
   /** UIRSI：比当前剧本导入更早的成片（旧剧本），默认不显示 */
   old_script?: boolean;
+  /** CUTEDIT：剪辑器导出的当前定稿 */
+  final?: boolean;
 }
 interface Job {
   state: "running" | "done" | "failed" | "none";
@@ -60,7 +63,7 @@ export default function CutPage() {
   const [err, setErr] = useState<string | null>(null);
   const [sel, setSel] = useState<string | null>(null);
   const [cmpWith, setCmpWith] = useState<string | null>(null);
-  const [mode, setMode] = useState<"one" | "cmp">("one");
+  const [mode, setMode] = useState<"edit" | "one" | "cmp">("edit");   // CUTEDIT：默认进剪辑器
   const [ask, setAsk] = useState(false);
   const [dlg, setDlg] = useState<string>("");
   const [busy, setBusy] = useState(false);
@@ -145,7 +148,7 @@ export default function CutPage() {
           </Tag>
         )}
         <span className="ds-grow" />
-        {cuts && cuts.length > 1 && <Seg value={mode} onChange={setMode} options={[["one", "看一版"], ["cmp", "两版对比"]]} label="看法" />}
+        <Seg value={mode} onChange={setMode} options={cuts && cuts.length > 1 ? [["edit", "剪辑"], ["one", "看一版"], ["cmp", "两版对比"]] : [["edit", "剪辑"], ["one", "看一版"]]} label="看法" />
         <Button variant="primary" disabled={!!err || job?.state === "running"} why={err ? "成片列表暂时读不到，后台恢复后才能合成" : "正在合成，等它跑完"} onClick={() => setAsk(true)}>
           合成新版本…
         </Button>
@@ -159,7 +162,8 @@ export default function CutPage() {
           显示旧剧本的成片（{oldN}）
         </Button>
       )}
-      {cuts && !cuts.length && <Empty icon="▶" title={`第 ${ep} 集还没有成片`} sub={oldN > 0 ? `换剧本之前合成的 ${oldN} 版成片还在，点上面“显示旧剧本的成片”能看、能删。新剧本的视频都通过后点“合成新版本”。` : "视频都通过后点“合成新版本”。合成只用 CPU，不占显卡。"} />}
+      {cuts && !cuts.length && mode === "edit" && <CutEditor ep={ep} onExported={() => setTick((n) => n + 1)} />}
+      {cuts && !cuts.length && mode !== "edit" && <Empty icon="▶" title={`第 ${ep} 集还没有成片`} sub={oldN > 0 ? `换剧本之前合成的 ${oldN} 版成片还在，点上面“显示旧剧本的成片”能看、能删。新剧本的视频都通过后点“合成新版本”。` : "视频都通过后点“合成新版本”。合成只用 CPU，不占显卡。"} />}
 
       {cuts && cuts.length > 0 && (
         <div className="cut-body">
@@ -170,10 +174,14 @@ export default function CutPage() {
               </button>
             )}
             {cuts.map((c, i) => (
+              <div key={c.name} className="cut-item-w">
               <button
-                key={c.name}
                 className={`cut-item${c.name === sel ? " on" : ""}${mode === "cmp" && other?.name === c.name && c.name !== sel ? " cmp" : ""}`}
-                onClick={() => (mode === "cmp" && c.name !== sel ? setCmpWith(c.name) : setSel(c.name))}
+                onClick={() => {
+                  if (mode === "edit") setMode("one");
+                  if (mode === "cmp" && c.name !== sel) setCmpWith(c.name);
+                  else setSel(c.name);
+                }}
                 title={c.timeline?.note ?? c.name}
               >
                 <span className="cut-item-t">
@@ -185,7 +193,7 @@ export default function CutPage() {
                 </span>
                 <span className="ds-row" style={{ gap: 4 }}>
                   {c.tags.map((t) => (
-                    <Tag key={t} tone={t === "勿用" ? "bad" : t === "未完成" || t === "预览" ? "warn" : "neutral"}>
+                    <Tag key={t} tone={t === "定稿" ? "accent" : t === "勿用" ? "bad" : t === "未完成" || t === "预览" ? "warn" : "neutral"}>
                       {t}
                     </Tag>
                   ))}
@@ -201,11 +209,14 @@ export default function CutPage() {
                   )}
                 </span>
               </button>
+              <CutMore c={c} onDeleted={() => setTick((n) => n + 1)} />
+              </div>
             ))}
             {mode === "cmp" && <p className="ds-muted ds-small">对比模式：先点一版当左边（蓝框），再点另一版当右边（橙框）。</p>}
           </aside>
 
           <section className="cut-main">
+            {mode === "edit" && <CutEditor ep={ep} onExported={() => setTick((n) => n + 1)} />}
             {mode === "one" && cur && <CutView c={cur} onDeleted={() => setTick((n) => n + 1)} />}
             {mode === "cmp" && cur && other && <CutCompare a={cur} b={other} onDeleted={() => setTick((n) => n + 1)} />}
           </section>
@@ -244,17 +255,25 @@ export default function CutPage() {
   );
 }
 
+/** CUTEDIT（总调度 11-02，L-123）：删除只放在每一版的“⋯”菜单里，动作是移到回收区（EDITDEL 回收站，可还原） */
+function CutMore({ c, onDeleted }: { c: Cut; onDeleted?: () => void }) {
+  const rel = relFromUrl(c.url);
+  if (!rel) return null;
+  return (
+    <details className="cut-more">
+      <summary title="更多">⋯</summary>
+      <div className="cut-more-pop">
+        <DeleteButton type="cut" id={rel} size="sm" label="移到回收区" onDeleted={() => onDeleted?.()} />
+      </div>
+    </details>
+  );
+}
+
 function CutInfo({ c, onDeleted }: { c: Cut; onDeleted?: () => void }) {
   const tl = c.timeline;
-  const rel = relFromUrl(c.url);
+  void onDeleted;
   return (
     <div className="cut-info">
-      {/* EDITDEL：删除这一版成片（连同时间线，移到回收站，可撤销 / 还原）——每一版的信息区里都能直接点 */}
-      {rel && (
-        <div className="cut-del">
-          <DeleteButton type="cut" id={rel} size="sm" label="删除这一版" onDeleted={() => onDeleted?.()} />
-        </div>
-      )}
       <dl className="ds-kv">
         <dt>时长</dt>
         <dd>{fmtS(tl?.duration_s)}（{tl?.shots ?? "—"} 镜）</dd>

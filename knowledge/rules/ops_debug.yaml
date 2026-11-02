@@ -230,3 +230,27 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-E29
+    domain: ops
+    link: [P7-P8]
+    title: 身份脸只有一个入口 asset_refs.face_of——出图、帧打分、视频打分、看图复核带、写作上下文、数据对账要知道“当前身份脸是哪张”，一律调它，不读配置 faces、不写死路径
+    when: 任何代码需要某角色的当前身份脸（生成参考、Q1 / 视频身份分参考、复核带并排参照、给写手看的身份脸行、对账）
+    then: 调 asset_refs.face_of(项目, cid)（覆盖层 data/looks/face_overrides.json 按 run 继承 > 配置 faces）；部署环境里没有 asset_refs 的（video10_srv 的 score_clip）用上游按 face_of 算好、随作业传下来的路径（jobs.json score_refs）；只枚举候选文件做存在性检查 / 列表展示的（preflight / remote_preflight / character_hub / identity_face_check）可以读配置，列在守卫白名单里
+    check: tests/test_debug_rsi.py::test_e29_identity_face_single_entry（扫生产目录字符串常量和 cfg.get("faces")） / test_e29_video_score_refs_use_face_of；tests/test_vqagate.py 复核带两条
+    evidence:
+      - {src: docs/debug/DEBUG_r1.md, note: "11-02 L-122 换脸（face_overrides → ar-c2351c9dcf）后：帧打分 score_remote 读覆盖层用新脸；视频打分 build_jobs.score_refs 读配方 ref2va identity_crops、score_clip 发色写死 ref2va、看图复核带 contract.band_ref 写死 L-086、写作 autoflow 写死 L-086、image_jobs 写死 CORE_FACES、data_parity 自己复制了一份 face_of——同一个东西六个入口，总调度称当天第三次出现“两个入口”问题"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-E30
+    domain: ops
+    link: [P7-P8]
+    title: 派单严格按集顺序——集号从小到大、集内按镜号；驳回 / 插队只在同一集内优先；两台的道都先吃最小的未完成集（项目方 L-124）
+    when: producer 派首帧 / 尾帧、vidgen 派视频
+    then: producer 候选排序键 episode_order_key = (集, 集内驳回优先, 尾帧先, 镜号)；vidgen pending 按（集号, 镜号）显式排序；帧和视频必须在同一台出（服务器之间推不过去），分区按集整块分给一台
+    check: tests/test_debug_rsi.py::test_e30_episode_order_key / test_e30_vidgen_pending_sorted_by_episode
+    evidence:
+      - {src: docs/debug/DEBUG_r1.md, note: "11-02 16:4x 项目方原话：每个 episode 按 sequence 把图到视频做完，ep01 没做完的最高优先；以前 producer 驳回单排最前面会跨集插队，vidgen 依赖 jobs 写入顺序"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

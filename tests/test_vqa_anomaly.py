@@ -122,12 +122,35 @@ def test_geometric_mirror_same_height_opposite_yaw():
     assert r2["defects"][0]["code"] == "duplicate_person"
 
 
-def test_signature_red_cord_misowned():
+def test_signature_red_cord_by_look_registry():
     dwp = {"box": [0, 0, 500, 900], "feet": [], "lhand": None, "rhand": None}
     f = feat([], dw=[dwp], wrists=[{"person": 0, "red": 0.02, "comp_span": 0.8, "comp_fill": 0.2}])
-    r = A.judge(f, [{"name": "林晚", "presence": "局部", "part": "手"}])
-    assert r["defects"][0]["code"] == "signature_item_misowned"
-    assert not A.judge(f, [{"name": "陈宇", "presence": "局部", "part": "手"}])["defects"]
+    reg = lambda acc: [{"name": "林晚", "presence": "局部", "part": "手", "look_acc": acc}]
+    assert A.judge(f, reg("九串铁珠、钻石水晶甲"))["defects"][0]["code"] == "signature_item_misowned"    # 造型 B 没登记红绳
+    assert not A.judge(f, reg("红绳手链、细银链、钻石水晶甲"))["defects"]                                   # 造型 C 登记了
+    assert not A.judge(f, [{"name": "林晚", "presence": "局部", "part": "手"}])["defects"]               # 没有造型登记 = 不判
+
+
+def test_small_background_head_released_but_foreground_stranger_flagged():
+    cast = [{"name": "林晚", "presence": "在画", "faced": True}]
+    main = face(A_, [100, 100, 300, 400], {"lin_wan": 0.8})
+    bg = face(_v(5), [500, 100, 530, 150], {"lin_wan": 0.02})          # 脸高 50 / 1000 = 5% > 4.5%，仍判
+    tiny = face(_v(6), [600, 100, 620, 140], {"lin_wan": 0.02})        # 4%，放行
+    r = A.judge(feat([main, bg], refs_loaded=["lin_wan"]), cast)
+    assert r["defects"][0]["code"] == "extra_head"
+    assert A.judge(feat([main, tiny], refs_loaded=["lin_wan"]), cast)["verdict"] == "clean"
+
+
+def test_hands_assigned_by_wrist_and_overlap_merged():
+    body = [[0, 0, 0.0]] * 18
+    body[3], body[4] = [200, 600, 0.9], [250, 700, 0.9]              # 右肘 / 右腕
+    dwp = {"box": [0, 0, 500, 900], "body": body, "feet": [], "lhand": None, "rhand": None}
+    mine = {"box": [210, 700, 290, 790], "conf": 0.9}
+    other = {"box": [400, 300, 480, 380], "conf": 0.9}                # 别人只露的手（离腕点太远 = 不归这个人）
+    dup = {"box": [215, 705, 285, 785], "conf": 0.8}                  # 和 mine 交叠 = 同一只手
+    r = A.judge(feat([], dw=[dwp], hands=[mine, other, dup]), None)
+    assert not any(d["code"] == "extra_hands" for d in r["defects"])
+    assert A.assign_hand(other["box"], [dwp], A.TH) is None and A.assign_hand(mine["box"], [dwp], A.TH) == 0
 
 
 def test_hands_quota_counts_partial_people():

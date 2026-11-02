@@ -182,3 +182,15 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-S17
+    domain: ops
+    link: [P5-P6, P11-P12]
+    title: SCORECARD 七项（出图 / 视频 / 剧本 / UI / 工作流 / GPU 管理 / 代码）由代码每 20 分钟计分写 data/rsi/scores.jsonl；不到 100 分自动给负责方开单并抄送总调度；未测分项按 0、SCORECARD 标准里还测不了的条目存在时封顶 95，不许靠改口径涨分
+    when: 任一项要报分、改打分口径、或负责方开下一轮
+    then: 只用 tools/sentinel/scorecard.py（四项沿用 RSI_PROGRAM 打分器重算，UI / 工作流 / GPU 按附录 A 公式）；权重与线在 config/policies/sentinel.yaml SC_scorecard，改动要总调度批准并在 docs/master/SCORECARD.md 附录留痕
+    check: tests/test_sentinel.py::test_scorecard_combine_and_tickets
+    evidence:
+      - {src: docs/master/SCORECARD.md, note: "11-02 17:4x 项目方：七项全到 100 分，没到自动迭代；当时 image 分停在 03:56、system 停在 13:31，已过时"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

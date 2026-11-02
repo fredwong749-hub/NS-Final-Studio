@@ -292,8 +292,11 @@ def main() -> int:
     name_id = {c.get("name"): c.get("char_id") for c in looks if c.get("name")}
 
     def face_file(cid: str) -> str | None:
-        cands = ([face_ov[cid]] if isinstance(face_ov.get(cid), str) else []) + list((pc.get("faces") or {}).get(cid) or [])
-        return next((f for f in cands if (ROOT / f).is_file()), None)
+        """K-OPS-E29：身份脸唯一入口 asset_refs.face_of（含按 run 继承的覆盖层），不再自己拼"""
+        if str(ROOT / "services/agent") not in sys.path:
+            sys.path.insert(0, str(ROOT / "services/agent"))
+        from ns_agent import asset_refs as AR
+        return AR.face_of(project, cid) if project else None
 
     def letter(cid: str, ep_n: int, sid: str) -> str | None:
         v = (hub_ep.get(cid) or {}).get(str(ep_n))

@@ -1,7 +1,7 @@
 """本地图片异常检测 P1（DETECT-S，CONSISTENCY_PLAN §4）：人数 / 头数 / 镜像 / 同一人出现两次 / 手脚。**只记录，不拦截**。
 
 分两半：
-- 远端测量（REMOTE_SRC，gpu36 的 venv，GPU2 打分道，CUDA_VISIBLE_DEVICES=2）：person_yolov8m-seg、face_yolov8m、hand_yolov9c、
+- 远端测量（REMOTE_SRC，在哪张卡上跑由 device_prefix(host) 定：gpu36 = GPU2 打分道，其他主机 CPU，坏卡绝不用）：person_yolov8m-seg、face_yolov8m、hand_yolov9c、
   insightface buffalo_l（头 + ArcFace 向量，CPU）、DWPose（133 点）、镜面分割（OneFormer ADE20K，模型在才跑，不在 = 标“未做镜面分割”）。
   只出测量值（框 / 向量 / 关键点），不做判定。
 - 本地判定 judge()：纯函数，输入测量值 + cast，输出缺陷列表。阈值全在 TH。
@@ -42,6 +42,9 @@ TH = {
     "kp_conf": 0.3,
     "finger_lo": 0.25,          # V6 口径：手指总长 / 掌宽
     "finger_hi": 2.5,
+    "small_face_frac": 0.045,   # cast 没写路人行时，脸高 < 画面高 x 它的后景头不算（总调度定 4%；ep08-S3 的走廊头实测 4.08%，故取 4.5%）
+    "hand_wrist_reach": 1.0,    # 手框中心到腕点距离 <= 手框长边 x 它，才把这只手归给这个人
+    "hand_merge_iou": 0.2,      # 手框交叠 IoU >= 它（或一个中心落在另一个框内）= 同一只手，不重复计
     "stranger_cos": 0.30,       # 头对所有角色身份脸的最高 ArcFace 都低于它 = 陌生人（cast 里没有路人行时判 extra_head）
     "mirror_size_ratio": 1.6,   # 几何镜像：两脸高度比 <=
     "mirror_dy": 0.25,          # 几何镜像：两脸中心高度差 <= 0.25 x 脸高
@@ -53,7 +56,7 @@ TH = {
     "max_hands_per_person": 2,
     "max_feet_per_person": 2,
 }
-SIGNATURE_ITEMS = {"red_cord": "chen_yu"}      # 标志饰品归属（总调度 11-02）：红绳只能出现在陈宇身上
+SIGNATURE_KEYWORD = "红绳"      # 标志饰品按“造型登记”判（总调度 11-02）：这个人本镜的造型饰品里登记了红绳才算对；不另写归属表
 NAME_ID = {"林晚": "lin_wan", "顾沉": "gu_chen", "陈宇": "chen_yu", "陈阿兰": "ch_a_lan"}
 
 
@@ -174,6 +177,54 @@ def red_cord_like(w: dict, th: dict) -> bool:
     return w.get("comp_span", 0) >= th["red_cord_span"] and w.get("comp_fill", 1) <= th["red_cord_fill"]
 
 
+def merge_hands(hands: list[dict], iou: float) -> list[dict]:
+    """交叠的手框并成一只：IoU >= iou，或一个框的中心落在另一个框里"""
+    out: list[dict] = []
+    for h in sorted(hands, key=lambda x: -x.get("conf", 0)):
+        b = h["box"]
+        cx, cy = (b[0] + b[2]) / 2, (b[1] + b[3]) / 2
+        dup = False
+        for o in out:
+            ob = o["box"]
+            ox, oy = (ob[0] + ob[2]) / 2, (ob[1] + ob[3]) / 2
+            if _iou(b, ob) >= iou or (ob[0] <= cx <= ob[2] and ob[1] <= cy <= ob[3]) or (b[0] <= ox <= b[2] and b[1] <= oy <= b[3]):
+                dup = True
+                break
+        if not dup:
+            out.append(h)
+    return out
+
+
+def assign_hand(box, dw: list[dict], th: dict):
+    """手归给谁：DWPose 的腕点（腕到肘连线末端）离手框中心最近、且在 reach 内的那个人；没有人体点（只露手的局部人）→ None。
+    dw 里没有 body 点的旧数据退回“手框中心落在人框内”。"""
+    cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+    reach = th["hand_wrist_reach"] * max(box[2] - box[0], box[3] - box[1])
+    best, bd = None, 1e18
+    for i, p in enumerate(dw):
+        body = p.get("body")
+        if not body or len(body) < 8:
+            pb = p.get("box")
+            if pb and pb[0] <= cx <= pb[2] and pb[1] <= cy <= pb[3]:
+                d = ((cx - (pb[0] + pb[2]) / 2) ** 2 + (cy - (pb[1] + pb[3]) / 2) ** 2) ** 0.5
+                if d < bd:
+                    best, bd = i, d
+            continue
+        for wi, ei in ((4, 3), (7, 6)):       # 右腕 / 右肘，左腕 / 左肘（openpose 序）
+            w, e = body[wi], body[ei]
+            if w[2] < th["kp_conf"]:
+                continue
+            # 腕点沿肘 → 腕方向再延伸半个手长，当作手的预期位置
+            ex, ey = (w[0] - e[0], w[1] - e[1]) if e[2] >= th["kp_conf"] else (0.0, 0.0)
+            n = (ex * ex + ey * ey) ** 0.5 or 1.0
+            hl = max(box[2] - box[0], box[3] - box[1]) * 0.5
+            px, py = w[0] + ex / n * hl, w[1] + ey / n * hl
+            d = ((cx - px) ** 2 + (cy - py) ** 2) ** 0.5
+            if d <= reach and d < bd:
+                best, bd = i, d
+    return best
+
+
 def _owner_person(box, persons):
     cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
     best, bi = None, 1e18
@@ -234,7 +285,8 @@ def judge(feat: dict, cast: list[dict] | None = None, th: dict | None = None) ->
                 dup_pairs.append((i, j, round(pc, 3), a["_id"]))
     refs_have = set(feat.get("refs_loaded") or [])
     refs_ready = bool(refs_have) and set(ci.get("in_frame_ids") or []) <= refs_have      # 在场角色的身份脸缺 = 不做陌生人判据
-    strangers = [f for f in real if f["_sim"] < t["stranger_cos"]] if (refs_ready and not ci.get("refless")) else []
+    strangers = [f for f in real if f["_sim"] < t["stranger_cos"]
+                 and (f["box"][3] - f["box"][1]) >= t["small_face_frac"] * H] if (refs_ready and not ci.get("refless")) else []
     if dup_pairs:
         who = "、".join(sorted({p[3] or "?" for p in dup_pairs}))
         defects.append({"code": "duplicate_person", "conf": "high",
@@ -242,9 +294,12 @@ def judge(feat: dict, cast: list[dict] | None = None, th: dict | None = None) ->
     elif strangers and ci["known"]:
         defects.append({"code": "extra_head", "conf": "med",
                         "detail": f"{len(strangers)} 个头认不出是 cast 里任何人（最高 ArcFace {max(f['_sim'] for f in strangers):.2f} < {t['stranger_cos']}），cast 里没有路人行"})
-    elif ci["known"] and len(real) > ci["n_faced"] + ci["n_partial"]:
-        defects.append({"code": "extra_head", "conf": "med",
-                        "detail": f"非镜面头 {len(real)} 个 > cast 在画 {ci['n_faced']} + 局部 / 背影 {ci['n_partial']}"})
+    elif ci["known"]:
+        # cast 没写路人行时，脸高 < small_face_frac 的后景小头不计入头数（前景陌生人照判）
+        counted = [f for f in real if ci.get("refless") or (f["box"][3] - f["box"][1]) >= t["small_face_frac"] * H]
+        if len(counted) > ci["n_faced"] + ci["n_partial"]:
+            defects.append({"code": "extra_head", "conf": "med",
+                            "detail": f"非镜面头 {len(counted)} 个 > cast 在画 {ci['n_faced']} + 局部 / 背影 {ci['n_partial']}"})
     # 镜中头：必须是在场某人的镜像
     for f in mir:
         best = max([_cos(f.get("emb"), r.get("emb")) for r in real] or [0.0])
@@ -261,10 +316,10 @@ def judge(feat: dict, cast: list[dict] | None = None, th: dict | None = None) ->
     # —— DWPose 人 / 手 / 脚 ——
     dw = feat.get("dw") or []
     npeople = max(len(dw), len(big), ci.get('n_in_frame') or 0, 1)      # 只露手的局部人没有人体框，手的名额按 cast 入画人数补
-    hands = nms([h for h in feat.get("hands") or [] if h.get("conf", 1) >= t["hand_conf"]], t["hand_nms_iou"])
+    hands = merge_hands(nms([h for h in feat.get("hands") or [] if h.get("conf", 1) >= t["hand_conf"]], t["hand_nms_iou"]), t["hand_merge_iou"])
     per_person = {}
     for h in hands:
-        o = _owner_person(h["box"], [{"box": p["box"]} for p in dw]) if dw else None
+        o = assign_hand(h["box"], dw, t)
         per_person[o] = per_person.get(o, 0) + 1
     over = {k: v for k, v in per_person.items() if k is not None and v > t["max_hands_per_person"]}
     if over:
@@ -293,7 +348,8 @@ def judge(feat: dict, cast: list[dict] | None = None, th: dict | None = None) ->
         defects.append({"code": "finger_ratio", "conf": "low", "detail": f"{bad_f}/{tested_f} 只手的手指骨长 / 掌宽超出 V6 口径"})
     if feet_dup:
         defects.append({"code": "feet_dup", "conf": "low", "detail": f"{feet_dup} 只脚的关键点分成两簇"})
-    # —— 标志饰品归属：红绳只能在陈宇身上 ——
+    # —— 标志饰品（红绳）按造型登记判：这个人本镜造型的饰品里没登记红绳，手腕上却有 → 错位 ——
+    acc_of = {NAME_ID.get(c.get("name"), c.get("name")): c.get("look_acc") for c in (cast or []) if c.get("look_acc") is not None}
     for w in feat.get("wrists") or []:
         if not red_cord_like(w, t):
             continue
@@ -306,18 +362,74 @@ def judge(feat: dict, cast: list[dict] | None = None, th: dict | None = None) ->
                     owner = f["_id"] if f["_sim"] >= t["same_cos"] else None
         if owner is None and len(ci.get("in_frame_ids") or []) == 1:
             owner = ci["in_frame_ids"][0]
-        if owner is not None and owner != SIGNATURE_ITEMS["red_cord"]:
+        if owner is not None and owner in acc_of and SIGNATURE_KEYWORD not in (acc_of[owner] or ""):
             defects.append({"code": "signature_item_misowned", "conf": "med",
-                            "detail": f"手腕上有红绳（红色占比 {w['red']:.2f}），但这个人是 {owner}，红绳只属于 {SIGNATURE_ITEMS['red_cord']}"})
+                            "detail": f"手腕上有红绳（红色占比 {w['red']:.2f}），但 {owner} 本镜造型登记的饰品里没有红绳（{acc_of[owner] or '无饰品'}）"})
             break
     metrics = {"heads": len(heads), "heads_real": len(real), "heads_mirror": len(mir), "heads_mirror_geo": sum(1 for f in mir if f.get("_geo")), "faces_small": len(small),
                "persons_big": len(big), "dw_people": len(dw), "hands": len(hands), "expected_faced": ci["n_faced"],
                "expected_in_frame": ci["n_in_frame"], "fingers_tested": tested_f, "fingers_bad": bad_f}
+    defects += blocking_defects(heads, cast, feat.get("W") or 0, t)      # K-REN-952：站位核对（cast x vs 认出的脸）
     return {"defects": defects, "metrics": metrics, "mirror_seg": seg, "refs_loaded": refs_ok,
             "verdict": "hit" if any(d["conf"] != "low" for d in defects) else "clean"}
 
 
+# K-REN-952（PROMPTFIX 11-02，fb-0005 ep05-S3“我的位置不对”：cast 林晚 = 中，出图林晚在左）：站位核对。
+# cast 每人 x（左 / 中 / 右，导入稿唯一来源）vs 认得出是该角色（ArcFace ≥ same_cos）的非镜中脸中心横坐标：
+#   左 = 中心 < 0.45 W；右 = 中心 > 0.55 W；中 = 0.25–0.75 W。对不上 → blocking_mismatch（med）。没 x / 没认出 = 不判
+BLOCK_RANGE = {"左": (0.0, 0.45), "右": (0.55, 1.0), "中": (0.25, 0.75), "中偏左": (0.15, 0.55), "中偏右": (0.45, 0.85)}
+
+
+def blocking_defects(heads: list[dict], cast: list[dict] | None, W: float, th: dict | None = None) -> list[dict]:
+    t = {**TH, **(th or {})}
+    if not cast or not W:
+        return []
+    out = []
+    for c in cast:
+        x = c.get("x")
+        cid = NAME_ID.get(c.get("name"), c.get("name"))
+        if x not in BLOCK_RANGE or not cid:
+            continue
+        cand = [f for f in heads if not f.get("_mir") and (f.get("sims") or {}).get(cid, 0) >= t["same_cos"]]
+        if not cand:
+            continue
+        f = max(cand, key=lambda f: (f.get("sims") or {}).get(cid, 0))
+        cx = (f["box"][0] + f["box"][2]) / 2 / W
+        lo, hi = BLOCK_RANGE[x]
+        if not (lo <= cx <= hi):
+            out.append({"code": "blocking_mismatch", "conf": "med",
+                        "detail": f"{c.get('name')} 剧本站位 {x}，画面里脸中心在 {cx:.2f} W（应在 {lo:.2f}–{hi:.2f}）"})
+    return out
+
+
 # ───────────────────────── 远端测量脚本（gpu36 venv，GPU2） ─────────────────────────
+WRIST_RED_SRC = r'''
+def wrist_red(img, dw):
+    # 手腕红色占比（标志饰品“红绳”）：手腕点周围、以掌长为尺的窗口里 HSV 红色像素的比例。
+    # 口径（11-02 总调度亲看 ep01-S10 尾帧：0.10 的“红”其实是肤色 / 唇色）：色相 <6 或 >174、饱和度 >170、明度 >80
+    H, W = img.shape[:2]
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    red = (((hsv[..., 0] < 6) | (hsv[..., 0] > 174)) & (hsv[..., 1] > 170) & (hsv[..., 2] > 80))
+    wr = []
+    for pi, pp in enumerate(dw):
+        for hk in (pp["lhand"], pp["rhand"]):
+            if not hk or min(q[2] for q in hk) < 0.3:
+                continue
+            wx, wy = hk[0][0], hk[0][1]
+            u = max(8.0, ((hk[9][0] - wx) ** 2 + (hk[9][1] - wy) ** 2) ** 0.5)
+            x1, x2, y1, y2 = int(max(0, wx - 0.7 * u)), int(min(W, wx + 0.7 * u)), int(max(0, wy - 0.7 * u)), int(min(H, wy + 0.7 * u))
+            if x2 > x1 and y2 > y1:
+                win = red[y1:y2, x1:x2].astype(np.uint8)
+                n, lab, st, _c = cv2.connectedComponentsWithStats(win, connectivity=8)
+                span = fill = 0.0
+                if n > 1:
+                    j = 1 + int(np.argmax(st[1:, cv2.CC_STAT_AREA]))
+                    bw, bh, ar = st[j, cv2.CC_STAT_WIDTH], st[j, cv2.CC_STAT_HEIGHT], st[j, cv2.CC_STAT_AREA]
+                    span = max(bw, bh) / max(1.0, float(x2 - x1)); fill = ar / max(1.0, float(bw * bh))
+                wr.append({"person": pi, "red": round(float(win.mean()), 3), "comp_span": round(float(span), 3), "comp_fill": round(float(fill), 3), "xy": [round(wx), round(wy)]})
+    return wr
+'''
+
 REMOTE_SRC = r'''
 import base64, glob, json, os, sys, io
 for k in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
@@ -352,6 +464,7 @@ if os.path.isdir(OF):
     except Exception as e:
         print("seg load fail", repr(e)[:300], file=sys.stderr)
 
+@@WRIST_RED@@
 def emb_of(img):
     out = []
     for f in fa.get(img):
@@ -412,27 +525,8 @@ for it in req["items"]:
                                    max(q[1] for q in p[:18] if q[2] > .3) if any(q[2] > .3 for q in p[:18]) else 0],
                            "body": p[:18], "feet": p[18:24], "lhand": p[92:113], "rhand": p[113:134]})
         o["dw"] = dw
-        # 手腕红色占比（标志饰品“红绳”）：手腕点周围、以掌长为尺的窗口里 HSV 红色像素的比例
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        red = (((hsv[..., 0] < 8) | (hsv[..., 0] > 172)) & (hsv[..., 1] > 110) & (hsv[..., 2] > 70))
-        wr = []
-        for pi, pp in enumerate(dw):
-            for hk in (pp["lhand"], pp["rhand"]):
-                if min(q[2] for q in hk) < 0.3:
-                    continue
-                wx, wy = hk[0][0], hk[0][1]
-                u = max(8.0, ((hk[9][0] - wx) ** 2 + (hk[9][1] - wy) ** 2) ** 0.5)
-                x1, x2, y1, y2 = int(max(0, wx - 0.7 * u)), int(min(W, wx + 0.7 * u)), int(max(0, wy - 0.7 * u)), int(min(H, wy + 0.7 * u))
-                if x2 > x1 and y2 > y1:
-                    win = red[y1:y2, x1:x2].astype(np.uint8)
-                    n, lab, st, _c = cv2.connectedComponentsWithStats(win, connectivity=8)
-                    span = fill = 0.0
-                    if n > 1:
-                        j = 1 + int(np.argmax(st[1:, cv2.CC_STAT_AREA]))
-                        bw, bh, ar = st[j, cv2.CC_STAT_WIDTH], st[j, cv2.CC_STAT_HEIGHT], st[j, cv2.CC_STAT_AREA]
-                        span = max(bw, bh) / max(1.0, float(x2 - x1)); fill = ar / max(1.0, float(bw * bh))
-                    wr.append({"person": pi, "red": round(float(win.mean()), 3), "comp_span": round(float(span), 3), "comp_fill": round(float(fill), 3), "xy": [round(wx), round(wy)]})
-        o["wrists"] = wr
+        o["wrists"] = wrist_red(img, dw)
+        o["red_v"] = 2
         # 贯穿画面的竖线（镜框 / 门框）：几何镜像判据用
         ed = cv2.Canny(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), 60, 150)
         ls = cv2.HoughLinesP(ed, 1, np.pi / 180, 80, minLineLength=int(0.45 * H), maxLineGap=int(0.03 * H))
@@ -444,6 +538,8 @@ for it in req["items"]:
     res[it["id"]] = o
 print("@@RES@@" + json.dumps(res))
 '''
+
+REMOTE_SRC = REMOTE_SRC.replace("@@WRIST_RED@@", WRIST_RED_SRC)
 
 
 def _face_refs() -> dict[str, str]:
@@ -475,6 +571,26 @@ def ref_embs(host: str = "gpu36") -> dict:
     return measure({}, host).get("@refs") or {}
 
 
+def refresh_red(feats: dict, files: dict[str, Path]) -> int:
+    """按当前红色口径（WRIST_RED_SRC）本地重算已落盘测量值里的 wrists（读本机图片，不连远端）"""
+    import cv2
+    import numpy as np
+    ns = {"cv2": cv2, "np": np}
+    exec(WRIST_RED_SRC, ns)      # noqa: S102 — 自己的源码常量，和远端同一份
+    n = 0
+    for k, f in feats.items():
+        if k.startswith("@") or f.get("error") or k not in files or not f.get("dw"):
+            continue
+        im = cv2.imdecode(np.fromfile(str(files[k]), dtype="uint8"), 1)
+        if im is None:
+            print(f"读不了图，红色口径没重算：{files[k]}", file=sys.stderr)
+            continue
+        f["wrists"] = ns["wrist_red"](im, f["dw"])
+        f["red_v"] = 2
+        n += 1
+    return n
+
+
 def resim(feats: dict, refs: dict) -> int:
     """用 refs 向量重算每张脸的 sims 和每条 feat 的 refs_loaded，返回改动的脸数"""
     n = 0
@@ -486,6 +602,27 @@ def resim(feats: dict, refs: dict) -> int:
             x["sims"] = {c: round(_cos(x["emb"], e), 4) for c, e in refs.items()}
             n += 1
     return n
+
+
+DETECTOR_GPU = {"gpu36": 2}     # 只有 gpu36 的 GPU2（看图 / 打分专用卡）跑检测；别的主机一律 CPU（车道表可登记 detector_gpu 覆盖）
+
+
+def device_prefix(host: str, hosts: dict | None = None) -> str:
+    """检测器在哪张卡上跑（FACTORY 11-02 17:4x 🔴：gpu33 的 GPU2 是坏卡，硬规则永远不用；原来写死 CUDA_VISIBLE_DEVICES=2）。
+    卡号 = 车道表 hosts[host].detector_gpu → 否则 DETECTOR_GPU；没有卡 → CPU（清空 CUDA_VISIBLE_DEVICES，K-OPS-F17：8 线程、
+    nice 10、绑最后 16 核）。算出来的卡在 broken_gpus 里 → 直接抛错，绝不往坏卡上提交"""
+    if hosts is None:
+        sys.path.insert(0, str(ROOT))
+        from tools.factory import hosts as H
+        hosts = H.load()["hosts"]
+    h = hosts.get(host) or {}
+    gpu = h.get("detector_gpu", DETECTOR_GPU.get(host))
+    if gpu is not None and int(gpu) in [int(x) for x in h.get("broken_gpus") or []]:
+        raise RuntimeError(f"{host} 的 GPU{gpu} 在 broken_gpus 里，检测器不许用（K-OPS 坏卡硬规则）")
+    if gpu is None:
+        th = "OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 OPENBLAS_NUM_THREADS=8 NS_SCORE_THREADS=8"
+        return f'CUDA_VISIBLE_DEVICES="" {th} nice -n 10 taskset -c $(( $(nproc) - 16 ))-$(( $(nproc) - 1 ))'
+    return f"CUDA_VISIBLE_DEVICES={int(gpu)} CUDA_DEVICE_ORDER=PCI_BUS_ID"
 
 
 def measure(files: dict[str, Path], host: str = "gpu36", batch: int = 8, refs: dict | None = None) -> dict:
@@ -501,7 +638,7 @@ def measure(files: dict[str, Path], host: str = "gpu36", batch: int = 8, refs: d
     ids = list(files)
     if not ids:       # 只取身份脸向量
         run_retry(host, "cat > /tmp/detect_anomaly.py", input=REMOTE_SRC, text=True, timeout=60)
-        r = run_retry(host, f"CUDA_VISIBLE_DEVICES=2 CUDA_DEVICE_ORDER=PCI_BUS_ID {py} /tmp/detect_anomaly.py", text=True, timeout=600,
+        r = run_retry(host, f"{device_prefix(host)} {py} /tmp/detect_anomaly.py", text=True, timeout=600,
                       input=json.dumps({"comfy": comfy_root, "work": work, "refs": refs, "items": []}))
         line = next((ln for ln in (r.stdout or "").splitlines() if ln.startswith("@@RES@@")), None)
         return json.loads(line[7:]) if line else {}
@@ -510,7 +647,7 @@ def measure(files: dict[str, Path], host: str = "gpu36", batch: int = 8, refs: d
         payload = json.dumps({"comfy": comfy_root, "work": work, "refs": refs, "items": [{"id": k, "b64": _jpeg_b64(Path(files[k]))} for k in part]})
         # 脚本走第一行 heredoc 不行（stdin 被 JSON 占用）：脚本写到远端文件再跑
         run_retry(host, "cat > /tmp/detect_anomaly.py", input=REMOTE_SRC, text=True, timeout=60)
-        r = run_retry(host, f"CUDA_VISIBLE_DEVICES=2 CUDA_DEVICE_ORDER=PCI_BUS_ID {py} /tmp/detect_anomaly.py", input=payload,
+        r = run_retry(host, f"{device_prefix(host)} {py} /tmp/detect_anomaly.py", input=payload,
                       text=True, timeout=900)
         line = next((ln for ln in (r.stdout or "").splitlines() if ln.startswith("@@RES@@")), None)
         if not line:
@@ -522,6 +659,26 @@ def measure(files: dict[str, Path], host: str = "gpu36", batch: int = 8, refs: d
 
 
 # ───────────────────────── 镜头 / cast ─────────────────────────
+def shot_accessories(sid: str, project: str | None = None) -> dict[str, str]:
+    """{角色 id: 本镜造型登记的饰品原文}：asset_refs.registry_looks（shot_looks.json）给造型 id，load_looks（P1_looks）给“饰品=…”。
+    登记里没有这个人 / 造型 → 不出现（检测器对它不判饰品）"""
+    sys.path[:0] = [str(ROOT / "services/agent"), str(ROOT / "packages/schema"), str(ROOT / "tools/gen_contract")]
+    from ns_agent import asset_refs as AR
+    if project is None:
+        import remote_score as RS      # 当前项目名的唯一来源（身份脸也是它）
+        project = RS.FACE_PROJECT
+    reg = AR.registry_looks(project).get(sid) or {}
+    looks = AR.load_looks(project)
+    out = {}
+    for cid, lid in reg.items():
+        lk = (looks.get(cid) or {}).get(lid)
+        if lk is None:
+            continue
+        zh = lk.zh or ""
+        out[cid] = zh.split("饰品=", 1)[1].split("｜", 1)[0] if "饰品=" in zh else ""
+    return out
+
+
 def shot_cast(sid: str) -> list[dict] | None:
     sys.path[:0] = [str(ROOT / "packages/schema"), str(ROOT / "services/render_router"), str(ROOT / "services/agent"), str(ROOT / "packages/qc"), str(ROOT)]
     from ns_render import pipeline as P
@@ -532,7 +689,9 @@ def shot_cast(sid: str) -> list[dict] | None:
     from ns_agent import framing as FR
     names = [c.name for c in ep_shot[1].cast]
     faced, _partial = FR.faced_people(ep_shot[1], names)      # 编译稿口径：在画，或局部但原文写到脸 / 头发
-    return [{"name": c.name, "presence": c.presence, "part": c.part, "faced": c.name in faced} for c in ep_shot[1].cast]
+    acc = shot_accessories(sid)
+    return [{"name": c.name, "presence": c.presence, "part": c.part, "faced": c.name in faced, "x": getattr(c, "x", None),
+             **({"look_acc": acc[NAME_ID.get(c.name, c.name)]} if NAME_ID.get(c.name, c.name) in acc else {})} for c in ep_shot[1].cast]
 
 
 def current_images(include_last: bool = True) -> list[tuple[str, str, Path]]:
@@ -597,6 +756,11 @@ def run_files(files: dict[str, Path], casts: dict[str, list | None], host: str =
         feats = {**old, **(measure(todo, host) if todo else {})}
         if feats_out:
             _atomic_json(feats_out, feats)
+    stale = [k for k, f in feats.items() if not k.startswith("@") and not f.get("error") and f.get("dw") is not None and f.get("red_v") != 2]
+    if stale and (feats_in or feats_out):
+        print(f"红色口径重算：{refresh_red({k: feats[k] for k in stale}, files)} 张", file=sys.stderr)
+        if feats_out or feats_in:
+            _atomic_json(feats_out or feats_in, feats)
     want = set(NAME_ID.values())
     miss = [k for k, f in feats.items() if not k.startswith("@") and not f.get("error") and want - set(f.get("refs_loaded") or [])]
     if miss:

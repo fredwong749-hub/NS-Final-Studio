@@ -1,0 +1,51 @@
+/* NAVIA：顶栏五个 tab 的圆点与数字、页内范围条、视频页。颜色只有 灰 / 琥珀 / 绿（项目方不要红蓝）；琥珀呼吸 = 在出，琥珀实心 = 要你看或卡住 */
+.v3-sdot.d-breathe { background: var(--c-warn, #d6a23a); animation: ns-breathe var(--breathe-period, 2.7s) ease-in-out infinite; }
+:root .v3-top-grid .v3-step .v3-sdot.d-green { background: var(--c-ok, #4caf7d); }
+:root .v3-top-grid .v3-step .v3-sdot.d-yellow { background: var(--c-warn, #d6a23a); }
+:root .v3-top-grid .v3-step .v3-sdot.d-breathe { background: var(--c-warn, #d6a23a); }
+:root .v3-top-grid .v3-step .v3-sdot.d-gray { background: var(--c-text-3, #8a8a8a); }
+.v3-step-n { margin-left: 6px; font-size: 11px; color: var(--c-text-3, #8a8a8a); font-variant-numeric: tabular-nums; }
+.v3-scope { display: flex; align-items: center; gap: 6px; padding: 6px var(--sp-4, 16px); border-bottom: 1px solid var(--c-line, #2a2a33); flex: none; flex-wrap: wrap; }
+.v3-scope .v3-scope-chip { padding: 2px 10px; border: 1px solid var(--c-line, #2a2a33); border-radius: 6px; font-size: 12px; color: var(--c-text-2, #aaa); background: transparent; cursor: pointer; }
+.v3-scope .v3-scope-chip.on { background: var(--c-raise, #1b1b21); color: var(--c-text, #e6e3dc); border-color: var(--c-text-3, #555); }
+.v3-scope .sp { flex: 1; }
+.v3-scope .v3-scope-k { font-size: 11px; color: var(--c-text-3, #8a8a8a); }
+.vd-empty { margin: 60px auto; max-width: 520px; text-align: center; color: var(--c-text-2, #aaa); }
+.vd-empty b { display: block; font-size: 16px; color: var(--c-text, #e6e3dc); margin-bottom: 8px; }
+.vd-empty button { margin-top: 12px; }
+.vd-page { padding: 12px var(--sp-4, 16px) 60px; overflow: auto; height: 100%; }
+.vd-eph { margin: 14px 0 6px; color: var(--c-text-2, #aaa); font-size: 12px; display: flex; gap: 12px; align-items: baseline; }
+.vd-eph b { color: var(--c-text, #e6e3dc); font-size: 14px; }
+.vd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.vd-shot { background: var(--c-raise, #141418); border: 1px solid var(--c-line, #2a2a33); border-radius: 6px; overflow: hidden; cursor: pointer; text-align: left; padding: 0; color: inherit; font: inherit; }
+.vd-shot:hover { border-color: var(--c-text-3, #666); }
+.vd-shot .im { height: 108px; position: relative; background: repeating-linear-gradient(45deg, #17171c 0 8px, #1d1d23 8px 16px); }
+.vd-shot .im video { width: 100%; height: 100%; object-fit: cover; object-position: center 18%; display: block; background: #000; }
+.vd-shot .id { position: absolute; left: 6px; top: 4px; font-weight: 600; font-size: 12px; text-shadow: 0 0 4px #000; color: #fff; }
+.vd-shot .st { padding: 5px 8px; display: flex; justify-content: space-between; gap: 6px; font-size: 12px; color: var(--c-text-2, #aaa); }
+.vd-shot .pg { height: 3px; background: var(--c-line, #2a2a33); }
+.vd-shot .pg i { display: block; height: 100%; background: var(--c-warn, #d6a23a); }
+.vd-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: middle; background: var(--c-text-3, #8a8a8a); }
+.vd-dot.amber { background: var(--c-warn, #d6a23a); }
+.vd-dot.run { background: var(--c-warn, #d6a23a); animation: ns-breathe var(--breathe-period, 2.7s) ease-in-out infinite; }
+.vd-dot.green { background: var(--c-ok, #4caf7d); }
+.vd-drawer { position: fixed; right: 0; top: 52px; bottom: 0; width: min(520px, 94vw); background: var(--c-raise, #141418); border-left: 1px solid var(--c-line, #2a2a33); z-index: 40; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; box-shadow: -8px 0 24px rgba(0, 0, 0, .4); }
+.vd-drawer video { width: 100%; max-height: 62vh; background: #000; border-radius: 6px; }
+.vd-drawer .row { display: flex; gap: 8px; align-items: center; }
+:root .v3-top-grid .v3-step small.v3-step-n, :root .v3-top-grid .v3-step.cur:not(.on) small.v3-step-n { display: inline-block; margin-left: 0; }
+.v3-scope .v3-scope-off { opacity: .45; }
+/* 七个一级入口：1440 以下收紧间距，数字只在当前页显示（其余在悬停里），保证 1280 不挤不换行 */
+@media (max-width: 1500px) {
+  :root .v3-top-grid .v3-step { padding: 0 8px; gap: 5px; }
+  :root .v3-top-grid .v3-step:not(.on) small.v3-step-n { display: none; }
+  .v3-top-grid .v3-top-l { gap: 6px; }
+}
+@media (max-width: 1340px) {
+  :root .v3-top-grid .v3-step { padding: 0 6px; gap: 4px; }
+  :root .v3-top-grid .v3-step span { font-size: 13px; }
+  .v3-top-grid .v3-top-r { gap: 4px; }
+}
+.v3-xlinks { display: inline-flex; gap: 8px; margin-left: 6px; font-size: 11px; }
+.v3-xlinks a { color: var(--c-text-3, #8a8a8a); text-decoration: none; border-bottom: 1px dotted var(--c-text-3, #666); }
+.v3-xlinks a:hover { color: var(--c-text, #e6e3dc); }
+.sb-sysdot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--c-warn, #d6a23a); margin: 0 6px; align-self: center; }

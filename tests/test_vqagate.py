@@ -509,12 +509,19 @@ def test_identity_gate_unexpected_face_blocks_stranger():
     """K-REV-V18 人物一致性闸门：cast 写“局部 双手”，画面里却出了脸（ep02-S10 换人，ArcFace 对 L-086 0.24–0.26）→ Q1 拦；
     露了脸但认得出是本人（正例最低 0.669）→ 过；脸太小不判"""
     from ns_agent.gen_contract import postflight as PO
-    rec = {"size": "特写", "subject": "part", "zones": [], "primary": None, "slots": [], "missing": [], "characters": []}
+    # 总调度 11-02 17:1x：局部的人原文写到脸（face_described，ep02-S10 的真实情况）才由 Q1 拦陌生脸；
+    # 只露手 / 背影、原文没写到脸 → Q1 不打身份分（na），多出的脸交 Q10 出图后验收的人数检测（ep07-S3 尾帧在人工回归集里判对）
+    rec = {"size": "特写", "subject": "part", "zones": [], "primary": None, "slots": [], "missing": [],
+           "characters": [{"character": "lin_wan", "presence": "局部", "face_described": True}]}
     req = {"asset_refs": rec, "cast": [{"name": "林晚", "presence": "局部"}]}
     loc = {"Q2": [], "Q4": None, "Q7": None}
-    def q1(faces):
-        r = PO.evaluate("x.png", req, remote={"faces": faces}, local=loc)
+    def q1(faces, r_=None):
+        r = PO.evaluate("x.png", r_ or req, remote={"faces": faces}, local=loc)
         return next(i for i in r.items if i.id == "Q1")
+    hands_only = {"asset_refs": {**rec, "characters": [{"character": "gu_chen", "presence": "局部", "face_described": False}]},
+                  "cast": [{"name": "顾沉", "presence": "局部", "part": "手"}]}
+    it = q1([{"h_ratio": 0.2, "bbox": [1, 2, 3, 4], "sims": {"gu_chen": 0.091}}], hands_only)
+    assert it.status == "na" and it.evidence.get("partial_cast")                       # ep06-S5 尾帧：不再判 0.091 失败
     bad = q1([{"h_ratio": 0.2, "bbox": [1, 2, 3, 4], "sims": {"lin_wan": 0.24, "gu_chen": 0.05}}])
     assert bad.status == "fail" and "不像" in bad.detail
     good = q1([{"h_ratio": 0.2, "sims": {"lin_wan": 0.70, "gu_chen": 0.05}}])
@@ -549,8 +556,9 @@ def test_q1_band_review_fail_closed(monkeypatch, enf, tmp_path):
     Image.new("RGB", (300, 400)).save(img)
     monkeypatch.setattr(VQ, "ROOT", tmp_path)
     monkeypatch.setattr(VQ, "BAND_CALIB", tmp_path / "band_sharp_auto.jsonl")   # 不写真实标定集
-    (tmp_path / "data/assets/identity_refs/lin_wan").mkdir(parents=True)
-    Image.new("RGB", (64, 64)).save(tmp_path / VQ.L086)
+    ref = tmp_path / "lin_wan_face.png"                  # K-OPS-E29：复核带参照走 asset_refs.face_of（band_ref），测试里直接替身
+    Image.new("RGB", (64, 64)).save(ref)
+    monkeypatch.setattr(VQ, "band_ref", lambda cid: str(ref))
 
     def pf():
         return {"ok": False, "blocking": ["Q1"], "reasons": ["Q1 x"], "items": [{"id": "Q1", "status": "fail",
@@ -624,6 +632,9 @@ def test_q1_bank_topk_keeps_sharpness_check(monkeypatch, enf, tmp_path):
     monkeypatch.setattr(VQ, "ROOT", tmp_path)
     monkeypatch.setattr(VQ, "BAND_CALIB", tmp_path / "band_sharp_auto.jsonl")   # 不写真实标定集
     monkeypatch.setattr(C, "generate", lambda req, **k: (_ for _ in ()).throw(AssertionError("sharp_only 不该调看图")))
+    ref = tmp_path / "lin_wan_face.png"
+    Image.new("RGB", (64, 64)).save(ref)
+    monkeypatch.setattr(VQ, "band_ref", lambda cid: str(ref))
 
     def pf():
         return {"ok": False, "blocking": ["Q1"], "reasons": ["Q1 x"],
@@ -891,7 +902,7 @@ def test_q1x_same_scene_identity(monkeypatch, enf):
     it, pf = run(0.85)
     assert it["status"] == "pass" and pf["ok"] is True
     it, pf = run(0.58)
-    assert it["status"] == "pass" and it["evidence"]["band"]          # 复核带：只记录不拦
+    assert it["status"] == "pass" and it["evidence"]["band"]          # 复核带：记日志、不拦
     monkeypatch.setattr(VQ, "same_scene_peers", lambda sid: [])
     assert run(0.25)[0]["status"] == "na"
 
@@ -949,3 +960,149 @@ def test_q1d_anomaly_is_log_only(monkeypatch, tmp_path):
     t0 = time.time()
     it = VQ.q1d("ep01-S1", "image", "x.png", pf)
     assert time.time() - t0 < 2.5 and it["evidence"]["verdict"] == "untested"             # 超时不拖慢出图线
+
+
+def test_accept_labels_and_gate(monkeypatch):
+    """ALIGNMENT 第 8 步：出图后验收四项（身份 / 服装 / 提示词 / 人数）全过才过，写 Q10 作闸门；检测器没跑成 = untested + score_infra"""
+    import sys
+    sys.path.insert(0, str(ROOT))
+    from tools.vqa import accept as ACC
+    pf_ok = {"ok": True, "blocking": [], "reasons": [], "items": [
+        {"id": "Q1", "status": "pass", "detail": "身份过线", "evidence": {"sims": {"lin_wan": 0.71}}},
+        {"id": "Q2", "status": "pass", "detail": ""}, {"id": "Q1a", "status": "pass", "detail": ""}]}
+    assert ACC.identity(pf_ok)["status"] == "pass" and ACC.outfit(pf_ok)["status"] == "pass"
+    bad_outfit = {"items": [{"id": "Q2", "status": "pass"}, {"id": "Q1a", "status": "fail", "detail": "顾沉长发"}]}
+    assert ACC.outfit(bad_outfit)["status"] == "fail"
+    assert ACC.identity({"items": []})["status"] == "untested"
+    good = {"identity": {"status": "pass"}, "outfit": {"status": "pass"}, "prompt": {"status": "pass"}, "count": {"status": "pass"}}
+    assert ACC.summarize(good) == "pass"
+    lab = {**good, "count": {"status": "fail", "defects": ["extra_head：陌生人"]}}
+    lab["ok"] = ACC.summarize(lab)
+    pf = json.loads(json.dumps(pf_ok))
+    it = ACC.apply(pf, lab)
+    assert it["status"] == "fail" and pf["ok"] is False and "Q10" in pf["blocking"] and not pf.get("score_infra")
+    lab = {**good, "count": {"status": "untested", "why": "检测器没跑成", "infra": True}}
+    lab["ok"] = ACC.summarize(lab)
+    pf = json.loads(json.dumps(pf_ok))
+    ACC.apply(pf, lab)
+    assert pf["ok"] is False and pf["blocking"] == ["Q10"] and pf["score_infra"] is True     # 只重打分、不重出
+    monkeypatch.setattr("ns_agent.gen_contract.cfg", lambda: {"image_thresholds": {"Q10_accept": {"enabled": False}}})
+    assert VQ.accept_gate("ep01-S1", "image", "x.png", json.loads(json.dumps(pf_ok))) is None
+
+
+def test_accept_count_uses_anomaly_judge(monkeypatch):
+    """人数一项走 anomaly.judge（人工回归集 19/19 的同一份判定）；低置信度不算命中；测量值缺失 = untested"""
+    import sys
+    sys.path.insert(0, str(ROOT))
+    from tools.vqa import accept as ACC
+    from tools.vqa import anomaly as AN
+    monkeypatch.setattr(AN, "shot_cast", lambda sid: [])
+    monkeypatch.setattr(AN, "judge", lambda feat, cast: {"defects": [{"code": "finger_ratio", "conf": "low", "detail": "x"}],
+                                                         "metrics": {"heads_real": 1, "expected_faced": 1, "hands": 2}, "mirror_seg": "ok"})
+    assert ACC.count_check("ep01-S1", "x.png", feat={"faces": []})["status"] == "pass"
+    monkeypatch.setattr(AN, "judge", lambda feat, cast: {"defects": [{"code": "extra_head", "conf": "med", "detail": "陌生人"}],
+                                                         "metrics": {}, "mirror_seg": "ok"})
+    assert ACC.count_check("ep01-S1", "x.png", feat={"faces": []})["status"] == "fail"
+    assert ACC.count_check("ep01-S1", "x.png", feat={"error": "远端无结果"})["status"] == "untested"
+
+
+def test_accept_single_person_blocking_is_noted_not_blocking(monkeypatch):
+    """单人镜站位不符记日志、不拦（ep01-S3 / S4：脸在正中附近、编译稿没写左右）；多人镜站位不符照拦"""
+    import sys
+    sys.path.insert(0, str(ROOT))
+    from tools.vqa import accept as ACC
+    from tools.vqa import anomaly as AN
+    monkeypatch.setattr(AN, "shot_cast", lambda sid: [])
+    def j(n):
+        return lambda feat, cast: {"defects": [{"code": "blocking_mismatch", "conf": "med", "detail": "林晚 剧本站位 右，脸中心 0.47 W"}],
+                                   "metrics": {"expected_faced": n, "heads_real": n}, "mirror_seg": "ok"}
+    monkeypatch.setattr(AN, "judge", j(1))
+    r = ACC.count_check("ep01-S3", "x.png", feat={"faces": []})
+    assert r["status"] == "pass" and r["noted"]
+    monkeypatch.setattr(AN, "judge", j(2))
+    assert ACC.count_check("ep01-S9", "x.png", feat={"faces": []})["status"] == "fail"
+
+
+def test_accept_wardrobe_who_wears_what(monkeypatch, tmp_path):
+    """PROMPTFIX 根因 11-02：谁穿什么对造型登记（ep08-S5 顾沉被画成漆皮长风衣）→ 硬失败；林晚钻石水晶甲逐件核（“普通”不过、“看不见”不判）"""
+    import sys
+    from PIL import Image
+    sys.path.insert(0, str(ROOT))
+    from tools.vqa import accept as ACC
+    from ns_agent.vqa import client as VC
+    img = tmp_path / "x.png"
+    Image.new("RGB", (400, 700)).save(img)
+    monkeypatch.setattr(ACC, "OUT", tmp_path)
+    monkeypatch.setattr(ACC, "look_texts", lambda sid: {"gu_chen": {"服装": "白衬衫袖口卷起配黑西裤", "饰品": "左手无名指旧银戒"},
+                                                        "lin_wan": {"服装": "黑色漆皮束腰", "饰品": "九串铁珠、钻石水晶甲"}})
+    pf = {"items": [{"id": "Q1", "status": "pass", "evidence": {"boxes": {"gu_chen": [50, 50, 150, 170], "lin_wan": [220, 60, 320, 180]}}}]}
+    ans = {"gu_chen": '{"outfit": "不符", "worn": "黑色漆皮长风衣", "nails": "看不见", "e": "外层是漆皮风衣"}',
+           "lin_wan": '{"outfit": "符合", "worn": "黑色漆皮束腰", "nails": "看不见", "e": ""}'}
+    monkeypatch.setattr(VC, "generate", lambda req, **k: {"text": ans["gu_chen" if "白衬衫" in req["text"] else "lin_wan"]})
+    r = ACC.wardrobe_check("ep08-S5", img, pf)
+    assert r["status"] == "fail" and "gu_chen" in r["why"] and "漆皮长风衣" in r["why"]
+    ans["gu_chen"] = '{"outfit": "符合", "worn": "白衬衫", "nails": "看不见", "e": ""}'
+    assert ACC.wardrobe_check("ep08-S5", img, pf)["status"] == "pass"
+    ans["lin_wan"] = '{"outfit": "符合", "worn": "黑色漆皮束腰", "nails": "普通", "e": ""}'
+    r = ACC.wardrobe_check("ep08-S5", img, pf)
+    assert r["status"] == "fail" and "水晶甲" in r["why"]
+    monkeypatch.setattr(VC, "generate", lambda req, **k: {"error": "服务没起"})
+    assert ACC.wardrobe_check("ep08-S5", img, pf)["status"] == "untested"
+    assert ACC.wardrobe_check("ep08-S5", img, {"items": []})["status"] == "na"
+
+
+def test_accept_wardrobe_same_type_not_blocked(monkeypatch, tmp_path):
+    """ep01-S1 尾帧：看图说“不符”但描述的是登记里就有的款式（黑色西装外套 vs 短款西装外套，下装出框）→ 不拦"""
+    import sys
+    from PIL import Image
+    sys.path.insert(0, str(ROOT))
+    from tools.vqa import accept as ACC
+    from ns_agent.vqa import client as VC
+    img = tmp_path / "x.png"
+    Image.new("RGB", (400, 700)).save(img)
+    monkeypatch.setattr(ACC, "OUT", tmp_path)
+    monkeypatch.setattr(ACC, "look_texts", lambda sid: {"lin_wan": {"服装": "米白衬衫配深灰西装裙，外罩短款西装外套", "饰品": "细银链"}})
+    monkeypatch.setattr(VC, "generate", lambda req, **k: {"text": '{"outfit": "不符", "worn": "米白衬衫配黑色西装外套", "nails": "看不见", "e": "外套是黑色"}'})
+    pf = {"items": [{"id": "Q1", "status": "pass", "evidence": {"boxes": {"lin_wan": [100, 80, 220, 230]}}}]}
+    r = ACC.wardrobe_check("ep01-S1", img, pf)
+    assert r["status"] == "pass" and r["asked"]["lin_wan"].get("note")
+
+
+def test_detector_never_uses_gpu33_broken_gpu2(monkeypatch):
+    """FACTORY / 总调度 11-02 17:4x 🔴：gpu33 的 GPU2 是坏卡，硬规则永远不用——anomaly 任何路径在 gpu33 上都不设 CUDA_VISIBLE_DEVICES=2；
+    卡号从车道表排除 broken_gpus 后再选，不写死；gpu36 照用 GPU2"""
+    import sys
+    sys.path.insert(0, str(ROOT))
+    from tools.vqa import anomaly as AN
+    from tools.factory import hosts as H
+    real = H.load()["hosts"]
+    p33 = AN.device_prefix("gpu33", real)
+    assert "CUDA_VISIBLE_DEVICES=2" not in p33 and 'CUDA_VISIBLE_DEVICES=""' in p33 and "nice -n 10" in p33
+    assert "CUDA_VISIBLE_DEVICES=2" in AN.device_prefix("gpu36", real)
+    with pytest.raises(RuntimeError):                                    # 有人把坏卡登记成检测卡：拒绝，不提交
+        AN.device_prefix("gpu33", {"gpu33": {"broken_gpus": [2], "detector_gpu": 2}})
+    src = (ROOT / "tools/vqa/anomaly.py").read_text(encoding="utf-8")
+    assert 'f"CUDA_VISIBLE_DEVICES=2' not in src and "\"CUDA_VISIBLE_DEVICES=2 " not in src   # 不许再写死
+
+
+def test_accept_gate_defers_count_on_gpu33(monkeypatch):
+    """总调度 11-02 17:4x：gpu33 上 producer 内联 Q10 不跑人数检测，记 deferred（不当失败也不当通过）；汇总不计 deferred"""
+    import sys
+    sys.path.insert(0, str(ROOT))
+    from tools.vqa import accept as ACC
+    seen = {}
+    monkeypatch.setenv("OFFLINE_SELF", "gpu33")
+    monkeypatch.setattr("ns_agent.gen_contract.cfg", lambda: {"image_thresholds": {"Q10_accept": {"enabled": True, "count_host": ""}}})
+    def fake_label(sid, stage, image, pf, host=None, defer_count=False, **k):
+        seen["defer"] = defer_count
+        lab = {"identity": {"status": "pass"}, "outfit": {"status": "pass"}, "prompt": {"status": "pass"},
+               "count": {"status": "deferred"} if defer_count else {"status": "pass"}}
+        lab["ok"] = ACC.summarize(lab)
+        return lab
+    monkeypatch.setattr(ACC, "label", fake_label)
+    pf = {"ok": True, "blocking": [], "items": []}
+    it = VQ.accept_gate("ep01-S1", "image", "x.png", pf)
+    assert seen["defer"] is True and it["status"] == "pass" and pf["blocking"] == []
+    monkeypatch.setenv("OFFLINE_SELF", "gpu36")
+    VQ.accept_gate("ep02-S1", "image", "x.png", {"ok": True, "blocking": [], "items": []})
+    assert seen["defer"] is False

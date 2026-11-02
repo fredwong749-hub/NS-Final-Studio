@@ -56,7 +56,7 @@
    "blocking": false
   },
   "extra_person": {
-   "zh": "多出人 / 同一角色出现两次（没写镜子倒影）/ 人数与镜头不符",
+   "zh": "多出人 / 同一角色出现两次（原文没写明是谁的倒影）/ 人数与镜头不符",
    "contract": "Q1",
    "video": "V1",
    "severity": "hard",

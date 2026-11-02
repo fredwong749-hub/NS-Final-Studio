@@ -5,12 +5,20 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Skel } from "../../ds";
 import NewScriptPage from "./NewScriptPage";
+import ScriptLibrary from "./ScriptLibrary";
 import "./script_flow.css";
 
 const ImportView = lazy(() => import("../../components/ImportView"));
 
-type Tab = "new" | "import";
-const tabOf = (): Tab => (new URLSearchParams(location.hash.split("?")[1] ?? "").get("tab") === "import" ? "import" : "new");
+type Tab = "lib" | "new" | "import";
+// 剧本库是默认入口；带 new / run / ep / tab=new 参数的老链接仍进 ① 新建剧本
+const tabOf = (): Tab => {
+  const q = new URLSearchParams(location.hash.split("?")[1] ?? "");
+  if (q.get("tab") === "import") return "import";
+  if (q.get("lib")) return "lib";
+  if (q.get("new") || q.get("run") || q.get("ep") || q.get("tab")) return "new";
+  return "lib";
+};
 
 export default function ScriptFlowPage() {
   const [tab, setTab] = useState<Tab>(tabOf);
@@ -20,9 +28,10 @@ export default function ScriptFlowPage() {
     return () => window.removeEventListener("hashchange", on);
   }, []);
   const go = (t: Tab) => {
-    location.hash = t === "import" ? "#/script-create?tab=import" : "#/script-create";
+    location.hash = t === "import" ? "#/script-create?tab=import" : t === "new" ? "#/script-create?new=1" : "#/script-create";
   };
   const steps: { id: Tab; n: string; label: string; sub: string }[] = [
+    { id: "lib", n: "▤", label: "剧本库", sub: "所有剧本：在做的、历史的、写作进度" },
     { id: "new", n: "①", label: "新建剧本", sub: "故事提纲 → 自动写故事线 · 大纲 · 剧本 · 分镜，每段可看可改" },
     { id: "import", n: "②", label: "导入", sub: "点“导入”换上新剧本（自动备份，可还原）" },
   ];
@@ -32,7 +41,7 @@ export default function ScriptFlowPage() {
         <b className="sf-title">剧本</b>
         {steps.map((s, i) => (
           <span key={s.id} className="sf-step-wrap">
-            {i > 0 && <span className="sf-arrow" aria-hidden="true">→</span>}
+            {i > 1 && <span className="sf-arrow" aria-hidden="true">→</span>}
             <button className={`sf-step${tab === s.id ? " on" : ""}`} onClick={() => go(s.id)} aria-current={tab === s.id ? "step" : undefined} title={s.sub}>
               <span className="sf-n">{s.n}</span>
               <span className="sf-l">{s.label}</span>
@@ -46,7 +55,9 @@ export default function ScriptFlowPage() {
       {/^(chat|create)$/.test(new URLSearchParams(location.hash.split("?")[1] ?? "").get("tab") ?? "") && (
         <div className="sf-retired" role="status">“单集对话写作”已下线（并入 ① 新建剧本：提纲 → 自动写到分镜，每段可看可改）。旧会话的稿件仍在 ② 导入的候选里。</div>
       )}
-      {tab === "new" ? (
+      {tab === "lib" ? (
+        <ScriptLibrary />
+      ) : tab === "new" ? (
         <NewScriptPage onGoImport={() => go("import")} />
       ) : (
         <div className="sf-import">

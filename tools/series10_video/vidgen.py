@@ -127,6 +127,9 @@ def next_variant(shot: dict, rec: dict) -> str | None:
     # GEN_CONTRACT：preflight 不过的变体不提交（validate 对照模式除外，见 pending）
     ok = lambda v: (v in vs and v not in used and vs[v].get("status") in ("ready", "lint_error")  # noqa: E731
                     and (vs[v].get("preflight") or {}).get("ok", True) and policy_ok(vs[v]))
+    fq = [v for v in rec.get("force_queue") or [] if ok(v)]   # 总调度批的“加 N 个变体再试”（redo_requests 带 variants）：不受 MAX_RENDERS 限制
+    if fq:
+        return fq[0]
     fn = rec.get("force_next")          # 系统修复后指定先出的变体（如 K-REN-302 的 mot），用一次就清
     if fn and ok(fn):              # 只在真正派出时清掉（dispatch 里），没派出（道被挂住）下一轮还认
         return fn
@@ -291,7 +294,8 @@ class Runner:
     def pending(self, shots, validate):
         """→ [(shot, variant)] 可提交的作业（按集、镜顺序；正在出 / 正在打分的镜不发下一版）"""
         out = []
-        for sid, sh in shots.items():
+        # K-OPS-E30（L-124）：显式按（集号, 镜号）排，不依赖 jobs.json 的写入顺序——两台道都先吃最小的未完成集
+        for sid, sh in sorted(shots.items(), key=lambda kv: (int(kv[1].get("ep") or 99), int(kv[1].get("idx") or str(kv[0]).rsplit("S", 1)[-1] or 99))):
             r = self.rec(sid)
             if not validate:
                 self.check_stale(sid, sh, r)
@@ -326,6 +330,14 @@ class Runner:
         if not new or any(x.get("state") in ("submitted", "scoring") for x in r["renders"]):
             return
         q = new[-1]
+        if q.get("variants"):            # 加变体再试（不作废已有出片，最后在全部出片里挑最好的；L-124 ep01-S4）
+            with self.lock:
+                r["force_queue"] = [v for v in q["variants"] if v not in {x["variant"] for x in r["renders"]}]
+                r["status"] = "pending"
+                r["lip_redo_applied"] = sorted(done | {f"{x.get('timeline')}@{x.get('at')}" for x in new})
+            log(self.host, "EXTRA_VARIANTS", sid, r["force_queue"], q.get("reason"))
+            self.event("extra_variants", shot=sid, variants=r["force_queue"], reason=q.get("reason"))
+            return
         with self.lock:
             r.setdefault("superseded", []).extend({**x, "superseded_at": time.time(), "why": q.get("reason"), "rule": "K-EDT-805"}
                                                   for x in r["renders"])
@@ -465,6 +477,15 @@ class Runner:
             r["status"] = "rendering"
             if r.get("force_next") == v and ent.get("pid"):
                 r.pop("force_next", None)
+            if ent.get("pid") and v in (r.get("force_queue") or []):
+                r["force_queue"] = [x for x in r["force_queue"] if x != v]
+            # L-124（DEBUG-RSI，ep01-S1）：提交报错是系统错误，不会触发 collect——以前 4 次报错后这镜永远停在 rendering、看不出卡住。
+            # 连续 2 次提交报错 → 标 blocked 并写明原因（看板可见、可开单），修好后用重出请求（redo_requests）放回
+            errs = [x for x in r["renders"][-2:] if x.get("state") == "submit_error"]
+            if len(errs) >= 2:
+                r.update(status="blocked", block_reason="提交报错（系统问题，不是出片质量）：" + str(errs[-1].get("error"))[:200])
+                log(self.host, "SHOT_BLOCKED_SUBMIT", sid, r["block_reason"][:200])
+                self.event("shot_done", shot=sid, chosen=None, status="blocked", renders=len(r["renders"]))
         log(self.host, "SUBMIT", sid, v, var["recipe"], var["seed"], lane.name, ent.get("pid", "")[:8])
 
     def poll(self, shots):

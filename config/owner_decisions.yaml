@@ -367,7 +367,7 @@ checks:
       - '"?enforce"?\s*[=:]\s*false'
       - 'BLOCK\s*=\s*False'
     new_terms: ['转拦截', 'enforce"?\s*[:=]\s*true', '先于视频', '闸门先于', '命中就重出']
-    stale_allow: [docs/ITERATION_PROTOCOL.md, knowledge/rules/ops_decisions.yaml, 'docs/series10_video/ep*_review.md', 'docs/audit/*', docs/master/MASTER_PICTURE.md]   # 决定本身的记录 / 审片当时的快照
+    stale_allow: [docs/ITERATION_PROTOCOL.md, knowledge/rules/ops_decisions.yaml, 'docs/series10_video/ep*_review.md', 'docs/audit/*', docs/master/MASTER_PICTURE.md, docs/master/TODO_BOARD.md]   # 决定本身的记录 / 审片当时的快照
     propagate: [docs/REQUIREMENTS.md, docs/vqa/STATE.md, docs/acting/STATE.md, docs/GEN_CONTRACT.md, docs/SOP_production.md,
                 config/vqa.json, knowledge/rules/vqa.yaml, knowledge/rules/acting.yaml]
   - id: D-VQA-02

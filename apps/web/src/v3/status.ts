@@ -46,7 +46,7 @@ function whyList(s: ShotSummary, d: ShotDetail | undefined, sop: SopShot | undef
     out.push({ text: k, who, sys });
   };
   if (err) add("上次没生成成功 → 点主按钮重出", undefined, true);
-  if (s.review.state === "rejected") add(`你标了不要${s.review.reason ? `：${s.review.reason}` : ""} → 进精修改`, "项目方", true);
+  if (s.review.state === "rejected") add(`你要改${s.review.reason ? `：${s.review.reason}` : ""} → 进精修改`, "项目方", true);
   for (const b of sop?.blockers ?? []) add(b.text, whoLabel(b.actor ?? b.actor_label));
   for (const r of s.readiness?.blocked_reasons ?? []) add(r);
   for (const r of s.readiness?.gpu3_blocked_reasons ?? []) add(r, "视频端");
@@ -57,7 +57,7 @@ function whyList(s: ShotSummary, d: ShotDetail | undefined, sop: SopShot | undef
 /** 系统内部检查项的字样：不给项目方看（UM-P0-01：不许出现 laptop、G3、校验器、须为 0 等） */
 export const isSysText = (t: string) => SYS_RE.test(t);
 // 文件路径 / 内部文件名（.json .yaml .py、xxx_overrides）一律算系统字样（UM-0585…0592 兜底）
-const SYS_RE = /校验器|须为|须由|\bG\d|laptop|笔记本|gpu|GPU|规则|[A-Z]{1,4}\d*-[A-Z0-9]+|编译|sha|契约|SOP|§|采纳|记录|视频端|画布|写作模型|字段|校验|对齐|帧数|\.(json|ya?ml|py|md)\b|_overrides|[a-z_]+\/[a-z_]+\.[a-z]+/;
+const SYS_RE = /系统正在刷新|对照表有更新|校验器|须为|须由|\bG\d|laptop|笔记本|gpu|GPU|规则|[A-Z]{1,4}\d*-[A-Z0-9]+|编译|sha|契约|SOP|§|采纳|记录|视频端|画布|写作模型|字段|校验|对齐|帧数|\.(json|ya?ml|py|md)\b|_overrides|[a-z_]+\/[a-z_]+\.[a-z]+/;
 
 /** “谁来处理”说人话（原则 4：不出现 gpu3 / owner / canvas 等内部词） */
 const WHO: Record<string, string> = { gpu3: "视频端", GPU3: "视频端", canvas: "画布", owner: "项目方", qwen: "写作模型", Qwen: "写作模型" }; // UX4：千问已撤下，写作方统一叫“写作模型”
@@ -307,16 +307,16 @@ export const STATUS_TABLE: Record<StatusKey, { dot: Dot; text: string; label: st
   bad_first: { dot: "red", text: "首帧是坏图，需重出", label: "重出首帧", act: "regen-first" },
   bad_last: { dot: "red", text: "尾帧是坏图，需重出", label: "重出尾帧", act: "regen-last" },
   // XYQ（小云雀走查 #1）：待审首帧 / 尾帧时主按钮 = 定稿当前这一版并排下一步（下游已有就只定稿）；要对比版本、改图走 ⋯ → 进精修
-  review_first: { dot: "yellow", text: "首帧待你看：用这张，或不要", label: "定稿首帧", act: "lock-first-next", title: "定稿当前这一版首帧，并由它出尾帧（要先对比、改图：⋯ → 进精修；点首帧可全屏看）" },
+  review_first: { dot: "yellow", text: "首帧待你看：用这张，或修改", label: "定稿首帧", act: "lock-first-next", title: "定稿当前这一版首帧，并由它出尾帧（要先对比、改图：⋯ → 进精修；点首帧可全屏看）" },
   auto_first: { dot: "yellow", text: `首帧是${AUTO_LONG}`, label: "确认首帧", act: "lock-first-next", title: "整集出片替你定稿的，不算你定稿：点这里确认这一版（要重出：⋯ → 进精修）" },
   auto_last: { dot: "yellow", text: `尾帧是${AUTO_LONG}`, label: "确认尾帧", act: "lock-last-next", title: "整集出片替你定稿的，不算你定稿：点这里确认这一版（要重出：⋯ → 进精修）" },
   stale_last: { dot: "yellow", text: staleLong("尾帧"), label: "重出尾帧", act: "regen-last" },
   need_last: { dot: "yellow", text: "首帧已定稿，下一步出尾帧", label: "出尾帧", act: "regen-last", title: "由定稿首帧出尾帧" },
-  review_last: { dot: "yellow", text: "尾帧待你看：用这张，或不要", label: "定稿尾帧", act: "lock-last-next", title: "定稿当前这一版尾帧，并出视频（要先对比：⋯ → 进精修）" },
+  review_last: { dot: "yellow", text: "尾帧待你看：用这张，或修改", label: "定稿尾帧", act: "lock-last-next", title: "定稿当前这一版尾帧，并出视频（要先对比：⋯ → 进精修）" },
   need_video: { dot: "yellow", text: "首尾帧已定稿，下一步出视频", label: "出视频", act: "video" },
   stale_video: { dot: "yellow", text: staleLong("视频"), label: "重出视频", act: "video" },
   review_video: { dot: "yellow", text: "待你审视频", label: "看视频", act: "watch" },
-  review_video_watched: { dot: "yellow", text: "视频看完了：用这版，或不要", label: "通过 ✓", act: "pass", title: "通过这版视频（不满意用 ⋯ → 打回）" },
+  review_video_watched: { dot: "yellow", text: "视频看完了：用这版，或修改", label: "通过 ✓", act: "pass", title: "通过这版视频（想改用“修改”）" },
   done: { dot: "green", text: "已定，无需操作", label: "看视频", act: "watch" },
   // UIRSI2 L-116：机签通过（灰点 + 灰字，无主按钮——系统自动往下做；手动“用这张 / 不要”保留但不提示）
   machine_first: { dot: "gray", text: "机签通过", label: "", act: null, title: "首帧机签通过并已设为当前（契约全过 + 本地看图 Q9 过）；系统自动出尾帧。要换：点首帧看候选，或 ⋯ → 进精修" },

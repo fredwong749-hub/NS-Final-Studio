@@ -958,6 +958,132 @@ def partial_face_visible(name: str, img: str, cast_names: list[str] | tuple = ()
     return size in FACE_VIS_SIZES and subject not in ("part", "object")
 
 
+# ---------------------------------------------------------------- PROMPTFIX 11-02（L-118 / ALIGNMENT 第 3–6 步）
+# 开关：config/recipes/image_framing.json promptfix.{face_exposure_guard, partial_wardrobe_scope, blocking_from_cast,
+# last_face_guard, seed_stream}；缺省全开（总调度 11-02 17:1x “先把代码修好，然后先出图”）。false = 旧行为
+def pf_on(key: str) -> bool:
+    try:
+        return bool((FR._cfg().get("promptfix") or {}).get(key, True))
+    except Exception:  # noqa: BLE001
+        return True
+
+
+# K-REN-950：cast 写“局部”（不露脸）却可能露脸的构图——景别在近景及更远、主体是人（不是局部 / 物件特写）
+FACE_RISK_SIZES = ("近景", "中近景", "中景", "全景", "远景", "大全景")
+
+
+def face_exposure_conflict(size: str | None, subject: str | None) -> bool:
+    return bool(size in FACE_RISK_SIZES and subject not in ("part", "object"))
+
+
+def crop_guaranteed(shot) -> bool:
+    """在画的人全是局部（没有“在画”）→ K-REN-903 局部构图首句（画面上沿在下颌以下）就是“不露脸”的结构化保证，
+    K-REN-950 不再改成送脸（ep05-S3 903 上线后 v86–v92 Q1 全是“局部 / 空镜”，没再出陌生脸）"""
+    on = [g(c, "presence") for c in g(shot, "cast") or [] if g(c, "presence") in ("在画", "局部")]
+    return bool(on) and all(p == "局部" for p in on) and FR.partial_only_enabled()
+
+
+def part_scope_zones(shot, name: str) -> set[str]:
+    """K-REN-951：cast 局部人物的部位（“局部｜手”“肩后”）→ 看得到的区域；对不上 = 空集（什么单品都不送）"""
+    part = ""
+    for c in g(shot, "cast") or []:
+        if g(c, "name") == name:
+            part = str(g(c, "part") or "")
+    for words, zs in PART_ZONES:
+        if any(w in part for w in words):
+            return set(zs) - {"body", "upper"}
+    return set()
+
+
+# K-REN-952：站位结构化——cast 的 x（左 / 中 / 右）、depth（前 / 中 / 后）是唯一来源，编译成 blocking 契约（进作业、trace、
+# 出图后位置核对 anomaly.blocking_defects）和一句固定站位句（正文已写了此人画面左右的不重复）
+X_ZH = {"左": "画面左侧", "中": "画面中央", "右": "画面右侧", "中偏左": "画面中央偏左", "中偏右": "画面中央偏右"}
+DEPTH_ZH = {"前": "前景", "后": "后景"}   # “中”不写（易和景别“中景”混淆）
+BLOCKING_NOTE_RE = re.compile(r"站位：[^。]{1,120}（按此左右站位，不互换）")
+
+
+def blocking_of(shot) -> list[dict]:
+    out = []
+    for c in g(shot, "cast") or []:
+        pr = g(c, "presence") or ""
+        if pr not in ("在画", "局部"):
+            continue
+        x = (g(c, "x") or "").strip()
+        out.append({"name": g(c, "name"), "presence": pr, "x": x or None, "depth": (g(c, "depth") or None),
+                    "part": g(c, "part") or None})
+    return out
+
+
+# K-REN-957（PROMPTFIX 11-02，ep01-S9：剧本“顾沉的背影在画面右侧远处，背对镜头朝走廊暗处走”，cast 写“在画｜右｜后”，
+# 编译却给他送了正脸参考、首句写“两人同框，两张脸都清晰入画，互相看着对方”→ 出图他在近处、正面）：
+# cast 在画、但这个人自己的分句写背影 / 背对 → 按背影处理：不送正脸、送设定图背面栏（back_nohead）、不算露脸（首句 / 视线句不写他的脸）、
+# 站位句写“背对镜头的背影”；cast depth=后 → 站位句写“后景，人物较小、离镜头远”（尺度词，远小近大）
+BACK_TXT_WORDS = ("背影", "背对镜头", "背身", "背朝镜头")   # “背对床 / 背对他”不是背对镜头（ep04-S10）
+
+
+def back_in_text(name: str, img: str, others=()) -> bool:
+    if not name or name not in (img or ""):
+        return False
+    for m in re.finditer(re.escape(name), img):
+        seg = img[m.end():]
+        cut = min([i for i in (seg.find(o) for o in others if o and o != name) if i >= 0]
+                  + [i for i in (seg.find("。"), seg.find("；")) if i >= 0] + [len(seg)])
+        if seg.startswith(FACE_PLACE):
+            continue
+        if any(w in seg[:cut] for w in BACK_TXT_WORDS):
+            return True
+    return False
+
+
+def back_view(shot, name: str) -> bool:
+    """这个人本镜是背影：cast 局部且部位写背影（back_part），或 cast 在画但本人分句写背影 / 背对（K-REN-957）"""
+    if back_part(shot, name):
+        return True
+    if not pf_on("back_view_guard"):
+        return False
+    names = [g(c, "name") for c in g(shot, "cast") or [] if g(c, "presence") in ("在画", "局部")]
+    return back_in_text(name, g(shot, "img_prompt") or "", names)
+
+
+def blocking_note(shot, body: str = "") -> str:
+    """≥2 人在画（含局部）且都有 x → “站位：林晚在画面左侧（前景），顾沉在画面右侧（只露手）（按此左右站位，不互换）”。
+    正文里每个人都已写了画面左 / 右 → 不加（剧本原文优先）"""
+    return _side_note(shot, body) + layer_note(shot)
+
+
+LAYER_NOTE_RE = re.compile(r"层次：[^。]{1,120}（远小近大）")
+
+
+def layer_note(shot) -> str:
+    """K-REN-957 景深层次句：背影 / 后景的人 → “层次：顾沉在后景，背对镜头的背影，人物较小、离镜头远（远小近大）。”"""
+    if not pf_on("back_view_guard"):
+        return ""
+    out = []
+    for b in blocking_of(shot):
+        if b["presence"] != "在画":
+            continue
+        bv = back_view(shot, b["name"])
+        far = b["depth"] == "后"
+        if not (bv or far):
+            continue
+        out.append(b["name"] + ("在后景，" if far else "") + ("背对镜头的背影，" if bv else "") + ("人物较小、离镜头远" if far else "看不到脸"))
+    return ("层次：" + "；".join(out) + "（远小近大）。") if out else ""
+
+
+def _side_note(shot, body: str = "") -> str:
+    bl = [b for b in blocking_of(shot) if b["x"] in X_ZH]
+    if len(bl) < 2 or len({b["x"] for b in bl}) < 2:
+        return ""
+    txt = body or ""
+    if all(re.search(re.escape(b["name"]) + r"[^，。；]{0,6}(?:在|站在|坐在|位于)?画面(?:中央)?(?:偏)?[左右中]", txt) for b in bl):
+        return ""
+    parts = []
+    for b in bl:
+        extra = "只露" + b["part"] if b["presence"] == "局部" and b["part"] else DEPTH_ZH.get(b["depth"] or "", "")
+        parts.append(f"{b['name']}在{X_ZH[b['x']]}" + (f"（{extra}）" if extra else ""))
+    return "站位：" + "，".join(parts) + "（按此左右站位，不互换）。"
+
+
 def resolve_shot(project: str, ep, shot, *, kept_triggers=None, looks=None, two_person: str | None = None) -> ShotRefs:
     """一镜每个在画角色必须锁定的参考图（未排槽位）。ep / shot：导入器对象或 script_v2.json 的 dict"""
     n_ep = int(g(ep, "number") or g(shot, "episode") or 0)
@@ -999,6 +1125,14 @@ def resolve_shot(project: str, ep, shot, *, kept_triggers=None, looks=None, two_
                     warns.append({"character": name, "kind": "造型偏离", "detail": "；".join(dev), "look": lid})
         partial_face = pr == "局部" and partial_face_visible(name, img, [n for n, _ in on], size, subject)
         info = {"character": cid, "name": name, "presence": pr, "primary": is_primary, "look": lid, "look_how": how}
+        # K-REN-950（PROMPTFIX 11-02，ep07-S3 尾帧陌生女人 / ep05-S3 92 版）：cast 写局部（不露脸）但构图可能露脸 → 报矛盾、按送脸处理
+        if (pr == "局部" and not partial_face and not back_part(shot, name) and face_exposure_conflict(size, subject)
+                and not crop_guaranteed(shot) and pf_on("face_exposure_guard")):
+            partial_face = True
+            info["face_conflict"] = True
+            warns.append({"character": name, "kind": "cast_face_conflict", "rule": "K-REN-950",
+                          "detail": f"{name} cast 写局部（不露脸），但景别 {size} 主体是人，可能露脸：按送脸处理（身份脸 face_of）"
+                                    "——写作侧应改成“在画”，或写背影 / 局部特写"})
         if partial_face:
             info["face_described"] = True
             warns.append({"character": name, "kind": "局部但写到脸", "detail": f"{name} 在 cast 里是“局部”，但正文写到了脸 / 视线或景别露脸：按脸可见挂身份脸、进 Q1（K-AST-236 / K-REN-708）——cast 应改成“在画”（写作格式问题）"})
@@ -1006,7 +1140,10 @@ def resolve_shot(project: str, ep, shot, *, kept_triggers=None, looks=None, two_
         # 身份脸（I2）
         # 局部 / 物件特写不挂身份脸（挂了模型就会画出脸，总调度 11-01）；原文写到这个人的脸（face_described）例外
         # K-AST-263（IMGFIX 11-02）：局部且原文没写脸的人不挂身份脸——主角也一样（ep05-S3 林晚“只露出肩头”挂了脸，模型画出了脸）
-        if (face_visible or partial_face) and (pr == "在画" or partial_face) and (is_primary or (two_person or _cfg().get("two_person")) == "both_faces"):
+        bv = pr == "在画" and back_view(shot, name)                       # K-REN-957：在画但写背影 → 不送正脸
+        if bv:
+            info["back_view"] = True
+        if (face_visible or partial_face) and (pr == "在画" or partial_face) and not bv and (is_primary or (two_person or _cfg().get("two_person")) == "both_faces"):
             f = face_of(project, cid)
             if f:
                 refs.append(Ref("face", cid, f, f"{name}的脸部参考", 0 if is_primary else 0.5, "face", "identity", has_face=True))
@@ -1021,10 +1158,16 @@ def resolve_shot(project: str, ep, shot, *, kept_triggers=None, looks=None, two_
         if not sheet:
             missing.append({"character": name, "kind": "资产缺图", "detail": f"{name} 造型{lid} 没有设定图"})
         part_shot = subject == "part"
-        if sheet and not part_shot and (zones - {"face"}):
+        # K-REN-951（PROMPTFIX 11-02，fb-0007 ep08-S5 顾沉穿上林晚的漆皮风衣）：局部、不露脸、不是背影的人只送 cast 部位看得到的
+        # 单品，不送设定图 / 整套参考板（整套女装进了参考槽，模型把它穿到画面里唯一露脸的男人身上）
+        scope_zones = (part_scope_zones(shot, name) if (pr == "局部" and not partial_face and not back_part(shot, name)
+                                                        and pf_on("partial_wardrobe_scope")) else None)
+        if scope_zones is not None:
+            info["wardrobe_scope"] = sorted(scope_zones)
+        if sheet and not part_shot and (zones - {"face"}) and scope_zones is None:
             sp = (panel if is_primary else "front") + "_nohead"
             # IMGFIX 11-02（总调度：背影局部人物要补外套）：局部且 cast 部位写背影 / 背面 → 送设定图背面栏裁切
-            if pr == "局部" and back_part(shot, name):
+            if (pr == "局部" and back_part(shot, name)) or bv:
                 sp = "back_nohead"
             refs.append(Ref("sheet", cid, sheet_crop(project, sheet, sp),
                             f"{name}本镜造型{lid}的设定图（{'背面' if sp.startswith('back') else '半身' if sp.startswith('half') else '正面全身'}，去头）",
@@ -1042,11 +1185,19 @@ def resolve_shot(project: str, ep, shot, *, kept_triggers=None, looks=None, two_
                     parts.append(LookPart(slot if slot in SLOT_LABEL else "accessory", nm, zone_of(slot, nm), iid))
             L = Look(L.char, L.look_id, L.zh, L.en, L.use, parts)
         vis = [p for p in L.parts if p.zone in zones and p.slot != "marker" and part_active(p, n_ep, img)]
+        if scope_zones is not None:                               # K-REN-951：只留部位内的鞋 / 饰品 / 指甲，服装件不送
+            vis = [p for p in vis if p.zone in scope_zones and p.slot != "outfit"]
         if any(p.extra and p.slot == "shoes" for p in vis):     # 本镜换鞋（look_extras 备选鞋，正文写到）：登记的原鞋不挂
             vis = [p for p in vis if not (p.slot == "shoes" and not p.extra)]
         for p in sorted(vis, key=lambda p: ZONE_ORDER.get(p.zone, 9)):
             focus = part_shot and p.zone in zones
             f, src = None, ""
+            # K-REN-955（PROMPTFIX 11-02，fb-0006 ep07-S12 多一只手）：手部单品图（指甲 / 戒指 / 手链）本身是“两只手”的照片，
+            # 手不是本镜主体（不是手部局部特写）时不进参考槽——模型会把参考里的手照搬进画面；单品走文字（正文 / 角色锁已写）
+            if p.zone == "hand" and not focus and pf_on("hand_ref_focus_only"):
+                warns.append({"character": name, "kind": "手部单品不进参考槽", "item": _short(p.label), "rule": "K-REN-955",
+                              "detail": f"{_short(p.label)} 的参考图是手部照片，手不是本镜主体：不送参考，走文字"})
+                continue
             if p.force_missing and not (p.item_id and item_image(p.item_id)):
                 lab_ = _short(p.label)
                 if p.extra or lab_ in img:
@@ -1136,7 +1287,7 @@ EYELINE_RE = re.compile(r"[^，。、；]{1,12}的视线落在[^（。]{1,40}上
 GARMENT_DETAIL_NOTE = "{name}的{label}：{desc}"
 # 描述里不放逗号（逗号是正文分句符，识别式靠它定界）；袖口写在括号里
 GARMENT_DETAIL_RE = re.compile(r"[^，。、；：①-⑩]{1,12}的[^，。、；：①-⑩]{0,12}(?:外套|西装|风衣|大衣|皮衣|夹克|围裙|开衫|披肩)：[^，。；：]{1,60}")
-TEXT_NOTE_RES = (TEXT_FALLBACK_RE, OUTER_ITEMS_RE, EYELINE_RE, GARMENT_DETAIL_RE)
+TEXT_NOTE_RES = (TEXT_FALLBACK_RE, OUTER_ITEMS_RE, EYELINE_RE, GARMENT_DETAIL_RE, BLOCKING_NOTE_RE, LAYER_NOTE_RE)   # BLOCKING：K-REN-952
 
 
 def garment_details(project: str, cid: str, lid: str | None) -> list[tuple[str, str]]:

@@ -16,7 +16,7 @@ for p in ("services/agent", "packages/schema", "services/render_router"):
     sys.path.insert(0, str(ROOT / p))
 from ns_agent import asset_refs as AR  # noqa: E402
 
-L086 = "data/assets/identity_refs/lin_wan/lin_wan_face_hd_A_s202.png"
+L086 = "assets/characters/lin_wan/refs/lin_wan/ar-c2351c9dcf.png"   # L-122（项目方 11-02 15:45 换脸，取代 L-086 的 hd_A_s202）；变量名保留
 REG = yaml.safe_load((ROOT / "config/policies/resolution_layers.yaml").read_text(encoding="utf-8"))
 
 

@@ -357,8 +357,13 @@ def faced_people(shot, names: list[str]) -> tuple[list[str], list[tuple[str, str
         n, pr = gv(c, "name"), gv(c, "presence")
         if n not in names:
             continue
-        if pr == "在画" or (pr == "局部" and _AR.partial_face_visible(n, img, [gv(x, "name") for x in cast if gv(x, "presence") in ("在画", "局部")])):
+        if pr == "在画" and _AR.back_view(shot, n):        # K-REN-957：在画但本人分句写背影 → 不算露脸（按背影局部处理）
+            partial.append((n, "背影"))
+        elif pr == "在画" or (pr == "局部" and _AR.partial_face_visible(n, img, [gv(x, "name") for x in cast if gv(x, "presence") in ("在画", "局部")])):
             faced.append(n)
+        elif (pr == "局部" and not _AR.back_part(shot, n) and _AR.pf_on("face_exposure_guard") and not _AR.crop_guaranteed(shot)
+              and _AR.face_exposure_conflict(*_AR.visible_zones(img)[:2])):
+            faced.append(n)                               # K-REN-950：和 resolve_shot 同口径（送了脸就不能再写“不露脸”）
         elif pr == "局部":
             partial.append((n, (gv(c, "part") or "").strip()))
     return faced, partial

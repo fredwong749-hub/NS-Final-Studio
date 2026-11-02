@@ -648,6 +648,12 @@ def compose_instruction(plan: dict, ctx: dict) -> str:
         plan.setdefault("fixes", []).append(f"去掉了含契约禁用词的分句（I7）：{dropped}")
     anchor = identity_anchor(ctx.get("compiled_prompt") or "")
     if anchor:
+        # 11-02 17:0x 项目方：写“男主角穿了女孩子的衣服”→ 提交被“没过”拒收。根因：编译稿的角色锁段（取 200 字）里夹着旧出图后缀
+        # （“奶油般柔焦虚化”…），原样拼进指令 → I7 禁用词。锁段也要去掉含禁用词的分句，不能让系统自己拼出的内容挡住项目方的修改
+        anchor, dropped_a = clean_instruction(anchor)
+        if dropped_a:
+            plan.setdefault("fixes", []).append(f"角色锁段里去掉了含契约禁用词的分句（I7）：{dropped_a}")
+    if anchor:
         ins += f"\n保持角色锁定外貌（编译器角色锁段，不得改变）：{anchor}"
     if plan["action"] == "inpaint":
         ins += "\n只改需要修改的区域，其余画面保持不变。"

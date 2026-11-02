@@ -181,11 +181,45 @@ def set_producer_only(shots: list[str]) -> dict:
     return c
 
 
+# K-OPS-F22（总调度 11-02 17:4x，FACTORY 接 WORKFLOW）：作业编译只用已发版的代码。17:15–17:35 autoflow 每 70 s 用工作树里
+# 改到一半的编译代码重写 first_frame_jobs.json（test_image_jobs 一直红），差点被推上服务器触发 E24 成批重出
+COMPILE_DIRS = ["services/agent/ns_agent", "services/recipes", "services/render_router", "tools/pipeline", "config/recipes", "config/compile"]
+
+
+def _sv():
+    sp = importlib.util.spec_from_file_location("sv_for_compile_gate", ROOT / "tools/qa/system_version.py")
+    m = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m
+
+
+def compile_gate(sv=None) -> str | None:
+    """None = 可以重编；否则返回不重编的原因：cut 冻结中 / 工作树的编译代码和最新已发版 tag 不同（服务器部署树没有 .git = 就是发版代码，放行）"""
+    try:
+        sv = sv or _sv()
+        if sv.cut_locked():
+            return "cut 冻结中，不重编作业（冻结结束后自动继续）"
+        tags = sv.sv_tags()
+        if not tags:
+            return None
+        drift = sv.drift_files(tags[-1], COMPILE_DIRS)
+    except Exception:  # noqa: BLE001  # arch-ok: 没有 git（服务器部署树）= 运行的就是发版代码，放行
+        return None
+    if drift:
+        return f"工作树编译代码与已发版 {tags[-1]} 不同（{len(drift)} 个文件，例 {drift[:3]}），等发版后再重编"
+    return None
+
+
 def prepare(ep: int, st: dict, force: bool = False) -> dict:
     import full_redo as FR
     rec = st.setdefault("eps", {}).setdefault(str(ep), {})
     if (st.get("holds") or {}).get(str(ep)) and not force:
         rec["status"] = "hold"
+        return rec
+    why = compile_gate()
+    if why:
+        rec.update(status="compile_frozen", note=why, at=time.strftime("%F %T"))
+        log("prepare", f"ep{ep:02d}", "不重编：", why)
         return rec
     t0 = time.time()
     IJ = _image_jobs()
@@ -317,6 +351,11 @@ def prepare_run(run: str, ep: int, st: dict) -> dict:
     rec = rs.setdefault("eps", {}).setdefault(str(ep), {})
     IJ = _image_jobs()
     rd = RN.run_dir(run, ROOT)
+    why = compile_gate()
+    if why:
+        rec.update(status="compile_frozen", note=why, at=time.strftime("%F %T"))
+        log("prepare_run", run, f"ep{ep:02d}", "不重编：", why)
+        return rec
     try:
         IJ.rebuild_first_frame_jobs(rd, project=run, write=True, run=run)
         chk = IJ.jobs_vs_import(rd, run=run)
@@ -429,7 +468,7 @@ def watch(interval: int = 60) -> None:
             for ep in candidate_eps():
                 rec = (st.get("eps") or {}).get(str(ep)) or {}
                 redo = rec.get("status") == "prepared" and rec.get("ep_hash") and rec["ep_hash"] != ep_hash(ep)   # 这一集又导入了新版
-                if (redo or rec.get("status") in (None, "hold", "jobs_mismatch", "jobs_red", "error")) and not (st.get("holds") or {}).get(str(ep)):
+                if (redo or rec.get("status") in (None, "hold", "jobs_mismatch", "jobs_red", "error", "compile_frozen")) and not (st.get("holds") or {}).get(str(ep)):
                     st.setdefault("eps", {}).setdefault(str(ep), {}).setdefault("import_seen_at", time.strftime("%F %T"))
                     try:
                         prepare(ep, st)

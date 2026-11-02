@@ -137,7 +137,7 @@ type ProducePlan = {
 };
 
 /** 集头：整集出片按钮 + 进度条（全站唯一的整集出片入口；GPU 面板里不再有第二个） */
-export function ProduceButton({ ep }: { ep: number }) {
+export function ProduceButton({ ep, label }: { ep: number; label?: string }) {
   useProducePoll(ep);
   const v = useProduceView(ep);
   const { notify } = useStudio();
@@ -160,7 +160,7 @@ export function ProduceButton({ ep }: { ep: number }) {
   const totalN = Object.values(c).reduce((a, b) => a + b, 0);
   return (
     <div className="v3-prod">
-      <Pop label={<>整集出片{running ? " ●" : ""}</>} btnClass="v3-btn" title="把本集按镜头分到所有可用的卡上并行出（首帧 → 尾帧 → 视频）；开始前先看镜数、预计时长和用哪些卡">
+      <Pop label={<>{label ?? "整集出片"}{running ? " ●" : ""}</>} btnClass="v3-btn" title="把本集按镜头分到所有可用的卡上并行出（首帧 → 尾帧 → 视频）；开始前先看镜数、预计时长和用哪些卡">
         {(close) => (
           <div className="v3-prod-dlg">
             <b>第 {ep} 集 · 整集出片</b>

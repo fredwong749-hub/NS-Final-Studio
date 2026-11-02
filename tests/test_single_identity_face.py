@@ -48,9 +48,7 @@ def test_legacy_submitters_use_same_alan_face():
     gen = AR.face_of(PROJECT, "ch_a_lan")
     sys.path.insert(0, str(ROOT / "tools" / "pipeline"))
     import image_jobs as IJ
-    run = ROOT / "data/pipeline/runs" / PROJECT
-    rel = os.path.normpath(str((run / IJ.EXTRA_FACES["阿岚"]).relative_to(ROOT))).replace("\\", "/")
-    assert rel == gen
+    assert IJ.core_faces(PROJECT)["阿岚"] == gen          # K-OPS-E29：image_jobs 走 face_of，不再有写死表
     src = (ROOT / "tools/series10_imggen/imggen.py").read_text(encoding="utf-8")
     assert f'ALAN_FACE = ROOT / "{gen}"' in src
 
@@ -64,6 +62,9 @@ def test_face_refs_paths_are_content_addressed(monkeypatch, tmp_path):
     monkeypatch.setattr(RS, "ssh", lambda host, cmd, stdin=None, timeout=900: sent.append(stdin) or R())
     refs = RS.face_refs("gpu33", PROJECT)
     for cid, p in refs.items():
+        if "@" in cid:                              # 身份库条目（lin_wan@b0…，历史过契约帧）：不是 face_of 的输出，只核按内容哈希命名
+            assert "id_" in p or p.endswith(".png"), (cid, p)
+            continue
         assert p.endswith(f"id_{_sha(AR.face_of(PROJECT, cid))[:16]}.png")
     assert len(sent) == 1
     RS.face_refs("gpu33", PROJECT)                  # 已知 → 不再传

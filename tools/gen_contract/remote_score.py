@@ -14,7 +14,23 @@ import time
 import uuid
 from pathlib import Path
 
-R = "/root/work/fredw/imggen"
+R = "/root/work/fredw/imggen"     # 只作数据目录（in/ 上传批、refs/ 身份脸缓存）；脚本一律从服务器仓库部署目录跑（K-OPS-F18）
+
+
+def srv_repo(host: str) -> str:
+    """服务器仓库部署目录（config/factory/hosts.json 唯一来源）。总调度 11-02 16:5x：生产打分原来跑 imggen/ 下 10-31 的旁路拷贝，
+    sv-13 的补边修复没生效（L-122 新脸 Q1 失效）——脚本只许来自这里"""
+    import importlib.util as _u
+    sp = _u.spec_from_file_location("factory_hosts", Path(__file__).resolve().parents[2] / "tools/factory/hosts.py")
+    m = _u.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m.server_root(host)
+
+
+SCORE_PY = "tools/series10_imggen/score_remote.py"
+HANDS_PY = "tools/series10_imggen/hands_remote.py"
+CLIP_PY = "tools/gen_contract/clip_srv.py"
+METRICS_DIR = "services/agent/ns_agent/gen_contract"
 IDM = "/root/work/fredw/venv_idm/bin/python"
 HAND = "/root/work/fredw/venv_hand/bin/python"
 # 身份脸：出图用哪张、打分就对哪张（BAKEOFF P1 11-01：每个角色只有一张身份脸）。不再手写机器路径——由 asset_refs.face_of
@@ -114,7 +130,8 @@ def _rssh():
 def score(host: str, paths: dict[str, str]) -> dict:
     items = [{"id": k, "path": v} for k, v in paths.items()]
     refs = {k: [v] for k, v in face_refs(host).items()}
-    r = ssh(host, f"cd {R} && {IDM} score_remote.py - 2>/dev/null", json.dumps({"refs": refs, "items": items}, ensure_ascii=False))
+    src = srv_repo(host)
+    r = ssh(host, f"cd {R} && {IDM} {src}/{SCORE_PY} - 2>/dev/null", json.dumps({"refs": refs, "items": items}, ensure_ascii=False))
     out = [ln for ln in r.stdout.splitlines() if ln.startswith("{")]
     if not out:
         raise RuntimeError(f"score_remote@{host}: " + r.stderr[-400:])
@@ -123,7 +140,7 @@ def score(host: str, paths: dict[str, str]) -> dict:
         for f in it.get("faces", []):
             f.pop("emb", None)
     hi = [{"id": i["id"], "path": i["path"], "faces": len(d["items"].get(i["id"], {}).get("faces", []))} for i in items]
-    rh = ssh(host, f"cd {R} && {HAND} hands_remote.py 2>/dev/null", json.dumps({"items": hi}))
+    rh = ssh(host, f"cd {R} && {HAND} {src}/{HANDS_PY} 2>/dev/null", json.dumps({"items": hi}))
     ho = [ln for ln in rh.stdout.splitlines() if ln.startswith("{")]
     return {"items": d.get("items", {}), "cross": d.get("cross", {}), "hands": json.loads(ho[-1]) if ho else {},
             "refs": list(refs)}
@@ -144,7 +161,7 @@ def _lim():
         os.sched_setaffinity(0, set(cpus[-int(os.environ.get("NS_SCORE_CPUS", "16")):]))
     except Exception:
         pass
-R, IDM, HAND = sys.argv[1], sys.argv[2], sys.argv[3]
+R, IDM, HAND, SRC = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 req = json.load(sys.stdin)
 d = os.path.join(R, "in", req["batch"]); os.makedirs(d, exist_ok=True)
 try:
@@ -154,7 +171,7 @@ try:
         open(p, "wb").write(base64.b64decode(b64))
         items.append({"id": k, "path": p})
     refs = {k: [v] for k, v in req["refs"].items() if os.path.exists(v)}
-    r = subprocess.run([IDM, "score_remote.py", "-"], cwd=R, input=json.dumps({"refs": refs, "items": items}),
+    r = subprocess.run([IDM, os.path.join(SRC, "tools/series10_imggen/score_remote.py"), "-"], cwd=R, input=json.dumps({"refs": refs, "items": items}),
                        capture_output=True, text=True, env=SENV, preexec_fn=_lim)
     out = [ln for ln in r.stdout.splitlines() if ln.startswith("{")]
     if not out:
@@ -164,7 +181,7 @@ try:
         for f in it.get("faces", []):
             f.pop("emb", None)
     hi = [{"id": i["id"], "path": i["path"], "faces": len(s["items"].get(i["id"], {}).get("faces", []))} for i in items]
-    rh = subprocess.run([HAND, "hands_remote.py"], cwd=R, input=json.dumps({"items": hi}), capture_output=True, text=True, env=SENV, preexec_fn=_lim)
+    rh = subprocess.run([HAND, os.path.join(SRC, "tools/series10_imggen/hands_remote.py")], cwd=R, input=json.dumps({"items": hi}), capture_output=True, text=True, env=SENV, preexec_fn=_lim)
     ho = [ln for ln in rh.stdout.splitlines() if ln.startswith("{")]
     print(json.dumps({"items": s.get("items", {}), "cross": s.get("cross", {}),
                       "hands": json.loads(ho[-1]) if ho else {}, "refs": list(refs)}))
@@ -180,7 +197,7 @@ def score_local_files(host: str, files: dict[str, str | Path], timeout: float = 
     payload = {"batch": b, "refs": face_refs(host),
                "files": {k: [Path(p).name, base64.b64encode(Path(p).read_bytes()).decode()] for k, p in files.items()}}
     code = base64.b64encode(_ONE_SHOT.encode()).decode()
-    cmd = f'python3 -c "$(echo {code} | base64 -d)" {R} {IDM} {HAND}'
+    cmd = f'python3 -c "$(echo {code} | base64 -d)" {R} {IDM} {HAND} {srv_repo(host)}'
     r = ssh(host, cmd, json.dumps(payload), timeout=timeout)
     out = [ln for ln in r.stdout.splitlines() if ln.startswith("{")]
     if not out:
@@ -231,11 +248,10 @@ def _lim():
         os.sched_setaffinity(0, set(cpus[-int(os.environ.get("NS_SCORE_CPUS", "16")):]))
     except Exception:
         pass
-R, IDM, HAND, RL, CPY, EXCL, MINFREE = sys.argv[1:8]
+R, IDM, HAND, RL, CPY, EXCL, MINFREE, SRC = sys.argv[1:9]
 req = json.load(sys.stdin)
 os.makedirs(os.path.join(RL, "refs"), exist_ok=True)
-for name, b64 in (req.get("code") or {}).items():
-    open(os.path.join(RL, name), "wb").write(base64.b64decode(b64))
+# K-OPS-F18：不再把请求方的 metrics.py / clip_srv.py 写进 reflock（旁路拷贝 = 两个入口）；度量代码只用服务器仓库部署目录里的那份
 for sha, b64 in (req.get("refs_b64") or {}).items():
     open(os.path.join(RL, "refs", sha + ".png"), "wb").write(base64.b64decode(b64))
 d = os.path.join(R, "in", req["batch"]); os.makedirs(d, exist_ok=True)
@@ -249,7 +265,7 @@ try:
             open(p, "wb").write(base64.b64decode(it["b64"]))
         items.append({"id": it["id"], "path": p})
     refs = {k: [v] for k, v in req["face_refs"].items() if os.path.exists(v)}
-    r = subprocess.run([IDM, "score_remote.py", "-"], cwd=R, input=json.dumps({"refs": refs, "items": items}), capture_output=True, text=True, env=SENV, preexec_fn=_lim)
+    r = subprocess.run([IDM, os.path.join(SRC, "tools/series10_imggen/score_remote.py"), "-"], cwd=R, input=json.dumps({"refs": refs, "items": items}), capture_output=True, text=True, env=SENV, preexec_fn=_lim)
     out = [ln for ln in r.stdout.splitlines() if ln.startswith("{")]
     s = json.loads(out[-1]) if out else {"items": {}, "cross": {}, "error": "score_remote: " + r.stderr[-300:]}
     for it in s.get("items", {}).values():
@@ -259,7 +275,7 @@ try:
             else:
                 f.pop("emb", None)
     hi = [{"id": i["id"], "path": i["path"], "faces": len(s["items"].get(i["id"], {}).get("faces", []))} for i in items]
-    rh = subprocess.run([HAND, "hands_remote.py"], cwd=R, input=json.dumps({"items": hi}), capture_output=True, text=True, env=SENV, preexec_fn=_lim)
+    rh = subprocess.run([HAND, os.path.join(SRC, "tools/series10_imggen/hands_remote.py")], cwd=R, input=json.dumps({"items": hi}), capture_output=True, text=True, env=SENV, preexec_fn=_lim)
     ho = [ln for ln in rh.stdout.splitlines() if ln.startswith("{")]
     res = {"items": s.get("items", {}), "cross": s.get("cross", {}), "hands": json.loads(ho[-1]) if ho else {},
            "refs": list(refs), "score_error": s.get("error")}
@@ -306,7 +322,8 @@ try:
     except Exception as _e:
         res["clip_resident_error"] = repr(_e)[:160]
     if cl is None:
-        c = subprocess.run([CPY, "clip_srv.py", "-"], cwd=RL, env={**SENV, **env}, capture_output=True, text=True, input=json.dumps(creq), preexec_fn=_lim)
+        c = subprocess.run([CPY, os.path.join(SRC, "tools/gen_contract/clip_srv.py"), "-"], cwd=RL,
+                           env={**SENV, **env, "NS_METRICS_DIR": os.path.join(SRC, "services/agent/ns_agent/gen_contract")}, capture_output=True, text=True, input=json.dumps(creq), preexec_fn=_lim)
         co = [ln for ln in c.stdout.splitlines() if ln.startswith("{")]
         cl = json.loads(co[-1]) if co else {"items": {}, "missing_refs": [], "error": c.stderr[-400:]}
     res.update(local=cl.get("items", {}), missing_refs=cl.get("missing_refs", []), clip_error=cl.get("error"),
@@ -366,12 +383,12 @@ def full_score(host: str, items: list[dict], timeout: float = 900, label: str | 
             f = Path(it["file"])
             e["b64"] = base64.b64encode((f if f.is_absolute() else root / f).read_bytes()).decode()
         req_items.append(e)
-    code = {n: base64.b64encode((root / p).read_bytes()).decode() for n, p in
-            (("metrics.py", "services/agent/ns_agent/gen_contract/metrics.py"), ("clip_srv.py", "tools/gen_contract/clip_srv.py"))}
+    code = {}      # K-OPS-F18：度量代码不随请求下发（服务器只跑部署版；口径一致靠发版，不靠覆盖服务器上的文件）
     rev = {v: k for k, v in sha_of.items()}
     send = {s for s in sha_of.values() if s not in known}
     script = base64.b64encode(_FULL.encode()).decode()
-    cmd = f'python3 -c "$(echo {script} | base64 -d)" {R} {IDM} {HAND} {RL} {COMFY_PY} {",".join(sorted(GPU_EXCLUDE)) or "-"} {CLIP_MIN_FREE_MB}'
+    cmd = (f'python3 -c "$(echo {script} | base64 -d)" {R} {IDM} {HAND} {RL} {COMFY_PY} {",".join(sorted(GPU_EXCLUDE)) or "-"} {CLIP_MIN_FREE_MB} '
+           f'{srv_repo(host)}')
     d = {}
     hb = _hb_start(host, items, label)
     try:

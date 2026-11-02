@@ -15,6 +15,8 @@
   nonatomic_json  函数里 write_text(json.dumps(...)) 而同函数没有 os.replace（ARCH_MAP §6）
   untracked_code  代码目录里 git 未跟踪的 .py（Top15 #1：运行中的代码不在版本里）；imported=被已跟踪代码 import
   unowned         代码文件在 tools/qa/ownership.yaml 里匹配不到 owner（Top15 #15）
+  bypass_script   服务器上被生产调用的脚本不是来自仓库部署目录（K-OPS-F18，总调度 11-02 16:5x：同一个东西两个入口，今天第四次）：
+                  [PY, "x.py"] / cd {DIR} && {PY} x.py 这类按 cwd 相对跑脚本，或写死仓库外的 /root/work/fredw/<目录>/x.py
 
 用法：
   python tools/qa/arch_scan.py                 # 扫描 → data/sysarch/scan_latest.json + history.jsonl，打印摘要
@@ -55,7 +57,7 @@ HARD_RUN_ALLOW = {"tools/autopilot/runs.py", "tools/qa/arch_scan.py"}
 HARD_PATHS = ("/root/work/fredw", "offline_20261101")
 READ_ATTRS = {"read_text", "read_bytes", "load", "loads", "safe_load", "open"}
 METRICS = ("no_timeout", "direct_ssh", "ssh_unlisted", "def_ssh", "hard_run", "hard_path", "silent_read",
-           "nonatomic_json", "untracked_code", "unowned", "pipe_gate", "mtime_run_guess", "mtime_latest", "prompt_bypass")
+           "nonatomic_json", "untracked_code", "unowned", "pipe_gate", "mtime_run_guess", "mtime_latest", "prompt_bypass", "bypass_script")
 # L-118 四道关之四（总调度 11-02 13:3x 定）：编译模块以外的代码往提示词字段里拼接句子 = 规则又散落了。
 # 只许经 config/compile/plugins.yaml 登记的插件改本段（IMGMASTER 合入）。现有散落处进基线，只许减。
 PROMPT_FIELDS = {"prompt", "img_prompt", "positive", "positive_prompt", "text_prompt", "prompt_text", "pos", "full_prompt"}
@@ -69,6 +71,10 @@ MTIME_RUN_GUESS_RE = re.compile(r"(?:runs?|RUNS|run_dir|root)\b.{0,120}key=lambd
 MTIME_LATEST_RE = re.compile(r"(?:glob|iterdir|listdir)\(.*(?:st_mtime|getmtime)|(?:st_mtime|getmtime).*(?:glob|iterdir|listdir)\(")
 # K-OPS-E14（DEBUG-RSI 提议，总调度 11-02 批）：闸门命令接管道再用 && 判成败 → 退出码被 head/tail/grep 吃掉
 PIPE_GATE_RE = re.compile(r"(lock-status|pytest|system_version|iter_gate|decision_check)[^|\n]*\|\s*(head|tail|grep)[^&\n]*&&")
+# K-OPS-F18：脚本只许从仓库部署目录跑（imggen/score_remote.py 旁路拷贝让 sv-13 的修复没生效）
+BYPASS_RES = (re.compile(r"\[\s*[A-Za-z_][\w.]*\s*,\s*[\"'][\w-]+\.py[\"']"),                  # [PY, "x.py", ...]：按 cwd 相对跑
+              re.compile(r"cd \{?\$?[A-Za-z_]\w*\}?\s*&&\s*\S+\s+[\w-]+\.py\b"),               # cd {R} && {PY} x.py
+              re.compile(r"/root/work/fredw/(?!offline_20261101/repo/)[\w./-]+?\.py\b"))      # 仓库外绝对路径的 .py
 SHELL_DIRS = CODE_DIRS + ("docs", "knowledge", "config")
 SHELL_EXTS = {".sh", ".ps1", ".md"}
 
@@ -226,6 +232,8 @@ def scan_source(path: str, src: str) -> dict[str, int]:
             if b and isinstance(b[0], ast.Expr) and isinstance(b[0].value, ast.Constant)}
     strs = [n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs]
     c["pipe_gate"] = sum(len(PIPE_GATE_RE.findall(x)) for x in strs)
+    if path != "tools/qa/arch_scan.py" and not is_test(path):
+        c["bypass_script"] = sum(len(rx.findall(x)) for x in strs for rx in BYPASS_RES)
     for ln in (lines if path != "tools/qa/arch_scan.py" else []):   # 本文件的正则自己会命中
         if "# arch-ok:" in ln or ln.lstrip().startswith("#"):
             continue
@@ -245,6 +253,9 @@ def scan_source(path: str, src: str) -> dict[str, int]:
                 kws = {k.arg for k in n.keywords}
                 if "timeout" not in kws and None not in kws and not _line_waived(lines, n):   # None = **kwargs，可能带 timeout
                     c["no_timeout"] += 1
+            if base == "subprocess" and name in SUBPROC_FUNCS | {"Popen"} and n.args and isinstance(n.args[0], ast.List)                     and "cwd" in {k.arg for k in n.keywords} and path != "tools/qa/arch_scan.py" and not is_test(path)                     and any(isinstance(e, ast.Constant) and isinstance(e.value, str) and e.value.endswith(".py") and "/" not in e.value
+                            for e in n.args[0].elts):
+                c["bypass_script"] += 1      # K-OPS-F18：subprocess.run([PY, "x.py"], cwd=别的目录) = 跑的是那个目录里的拷贝
             if base == "subprocess" and name in SUBPROC_FUNCS | {"Popen"} and path not in SSH_GATE_FILES:
                 exe = _first_arg_exe(n)
                 if exe and exe.rsplit("/", 1)[-1].lower() in SSH_EXES:

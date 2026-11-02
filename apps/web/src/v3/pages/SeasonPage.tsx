@@ -246,7 +246,7 @@ export default function SeasonPage() {
         <span><i className="sea-seg s-busy" />生成中</span>
         <span><i className="sea-seg s-queued" />排队中</span>
         <span><i className="sea-seg s-stale" />过期</span>
-        <span><i className="sea-seg s-bad" />坏图 / 打回</span>
+        <span><i className="sea-seg s-bad" />坏图 / 待修改</span>
         <span className="sea-lg-sep">每格下方四段：首帧 · 尾帧 · 视频 · 通过</span>
         <span>┃ 换场</span>
         <span>─ 同场换机位</span>

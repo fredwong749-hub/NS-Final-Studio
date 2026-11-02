@@ -93,3 +93,29 @@ s_vqa\logs\switch.jsonl（ev=vqa_window：开始 / 结束、判了几条、出�
   2. 把 ep04-S10 v6 这类“同一人出现两次”加进回归集，重新跑 autosign.py check 评估门槛；
   3. 切回由总调度定。代码层面：退回过人工后，check 即使达标也维持 manual，要总调度确认才会切。
 - **测试期抽检**：每 10 张抽 1 张（data/vqa/autosign_spot.jsonl）；误拦记 data/vqa/autosign_false_reject.jsonl。
+
+## 饰品 / 单品归属口径（K-REV-V20，总调度 11-02 16:xx 裁定）
+
+- 一律以 P1 造型登记为准：读 P1_looks.json 的饰品字段 + assets/shot_looks.json（每镜每人穿哪套造型）。造型里登记了的单品不算错位；没登记却出现在这个人身上，才算错位。检测器和闸门代码里都不另写“某单品只属于某人”的固定表。
+- 起因：detector 的 signature_item_misowned 原来写死“红绳只属于陈宇”。林晚造型 C 登记了红绳手链，陈宇 A / B / C 都有手腕红绳，所以 ep02-S9、ep04-S1（林晚穿 C）戴红绳是对的，属于误报。林晚穿 B（ep04-S10、ep08-S7、ep09-S8、ep10-S4、ep08-S3）、穿 A（ep01-S10）时，手上真有红绳才是真问题。
+- 颜色判据也偏松：ep01-S10 尾帧报红色占比 0.08，按原分辨率放大看手腕，没有红绳。
+- 同次裁定：
+  - 背景路人：脸高 < 画面 4% 且在主体后景的头不算多头，ep08-S3、ep08-S5 据此放行；前景出现陌生人照样判。
+  - 多手：手的归属改按 DWPose 手腕到肘的连线来分，交叠的手不重复计。
+  - 以上三条由 DETECT-S 改 anomaly.py。
+
+## 出图后验收入口 Q10（ALIGNMENT 第 8 步，2026-11-02 17:2x 上线，作为闸门）
+
+- 入口：tools/vqa/accept.py；producer.vqa_gate 在合并看图结果前调用 contract.accept_gate；开关 config/gen_contract.json image_thresholds.Q10_accept.enabled = true。
+- 每帧四项标签，全部通过才算通过，写进 postflight 的 Q10 项：
+  - identity：契约 Q1（ArcFace 对 asset_refs.face_of）；
+  - outfit：Q2（服装区域 + 外层单品）+ Q1a（逐人头发），饰品归属按 P1 造型登记（K-REV-V20）；
+  - prompt：本地 Qwen3-VL 按编译稿核对人数 / 左右 / 动作 / 场景；
+  - count：anomaly.judge（头数、手数、同一人两次、饰品归属）。
+- 结论：任一项 fail 就判 fail，挡住并重出；检测器或看图没跑成判 untested，挡住、记 score_infra（只重打分，不重出）。
+- 口径（总调度 11-02 18:xx 亲审 ep01 表后确认）：单人镜的站位不符（blocking_mismatch）记日志、不拦。ep01-S3 / S4 单人近景，脸在画面正中附近（0.47–0.54，线 0.55），编译稿也没写左右。多人镜站位不符照拦。
+- 局部 / 只露手 / 背影、原文没写到脸的人，不打身份分（总调度 17:1x，ep06-S5 尾帧顾沉只露手被判 0.091）；画面里多出来的陌生脸由 Q10 的 count 判（ep07-S3 尾帧在人工回归集里判对）。
+- 人工标注回归集：data/vqa/regression_anomaly/labeled.json，16 条 / 19 个标签，`python tools/vqa/accept.py --regression` 全对才算过。
+- 已知风险：gpu33 上 count 走“服务器调本机”本地执行，固定用 GPU2，会和那张卡上的出图抢约 2.5 GB 显存；gpu33 没有镜面分割模型，镜子场景可能误拦。检测器常驻服务（tools/vqa/anomaly_server.py）补完后，改走 gpu36 的内网入口。
+- “谁穿什么”硬失败口径（总调度 11-02 18:xx 确认）：看图答“不符”、且它描述的衣服里出现登记服装原文没有的类型词（GARMENT_TERMS：风衣 / 漆皮 / 大衣 …），才硬失败；只是颜色深浅、下装出框看不到这类不拦（ep01-S1 尾帧）。
+- gpu33 内联人数检测记 deferred，人数检测统一由笔记本 accept_batch 在 gpu36 上做（总调度 17:4x）。ep01 批量验收（gpu33 真实当前首帧）：10 张，9 过 1 不过（S9 v9 提示词不符），总调度亲审通过，S9 交 DEBUG-RSI 重出。

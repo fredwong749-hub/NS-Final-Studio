@@ -414,8 +414,7 @@ def rubric_loads(text: str) -> dict | None:
     return rubric._loads_loose(text or "")
 
 
-L086 = "data/assets/identity_refs/lin_wan/lin_wan_face_hd_A_s202.png"
-BAND_Q = ("参考图是这个角色项目方认定的身份脸（L-086）；【待检】是新出图里裁出来的同一角色的脸。只看脸，回答三项，输出 JSON："
+BAND_Q = ("参考图是这个角色项目方认定的当前身份脸；【待检】是新出图里裁出来的同一角色的脸。只看脸，回答三项，输出 JSON："
           '{"same_person": "是|否|拿不准", "style_ok": "是|否|拿不准", "sharp": "是|否|拿不准", "e": "依据，不超过 30 字"}。'
           "same_person：五官、脸型、年龄感是不是同一个人（侧脸 / 转角不算不同）；style_ok：画风和质感和参考一致（不是另一种脸型画法、没有发平发糊的塑料感）；"
           "sharp：脸部清晰，不糊。")
@@ -441,10 +440,9 @@ def band_calib_log(row: dict) -> None:
 
 
 def band_ref(cid: str) -> str | None:
-    """复核带并排复核的参照：林晚一律 L-086（总调度 11-02：ArcFace 分不开 ref2va 与 L-086，项目方认 L-086）；其他角色用 asset_refs.face_of。
+    """复核带并排复核的参照：每个角色都用当前身份脸 asset_refs.face_of（K-OPS-E29，文案不写死决定编号）。
     读不到运行登记表 / 资产 → 抛异常，由调用方记“复核失败”（不失败开放，arch_scan silent_read）"""
-    if cid == "lin_wan":
-        return str(ROOT / L086)
+    # K-OPS-E29（总调度 11-02 16:3x）：身份脸唯一入口 asset_refs.face_of，林晚也不例外（原来写死 L-086，L-122 换脸后复核带还拿旧脸比）
     from ns_agent import asset_refs as AR
     reg = json.loads((ROOT / "config" / "pipeline" / "runs.json").read_text(encoding="utf-8"))   # 项目 id 只从运行登记表读（hard_run）
     f = AR.face_of(reg.get("primary"), cid)
@@ -488,7 +486,7 @@ def q1_band_review(pf: dict, image) -> str | None:
                                     "sharpness": round(sharp_v, 1), "mode": "sharp_only", "at": time.strftime("%Y-%m-%dT%H:%M:%S")})
                 continue
             res = client.generate({"system": "你是画面质检员，只看图、只报事实，只输出 JSON。", "text": BAND_Q,
-                                   "images": [{"path": ref, "label": "参考图：身份脸（L-086）", "max_pixels": 150000},
+                                   "images": [{"path": ref, "label": "参考图：当前身份脸", "max_pixels": 150000},
                                               {"path": str(fp), "label": "【待检】", "max_pixels": 200000}]}, wait_s=900)
             d = rubric_loads(res.get("text", "")) if "error" not in res else None
             d = d or {}
@@ -671,6 +669,36 @@ def q1x(sid: str, stage: str, image, pf: dict) -> dict | None:
         pf["blocking"] = sorted(set(pf.get("blocking") or []) | {"Q1x"})
         pf.setdefault("reasons", []).append("Q1x " + item["detail"])
     return item
+
+
+def accept_gate(sid: str, stage: str, image, pf: dict) -> dict | None:
+    """出图后验收闸门（ALIGNMENT 第 8 步，总调度 11-02 17:0x：不再只记录）：tools/vqa/accept.py 四项标签（身份 / 服装 / 提示词 / 人数）
+    → postflight Q10 项，四项全过才算过。开关 config image_thresholds.Q10_accept.enabled；人数检测 host 默认本机（OFFLINE_SELF）"""
+    from ns_agent.gen_contract import cfg as GC
+    t = (GC().get("image_thresholds") or {}).get("Q10_accept") or {}
+    if not t.get("enabled"):
+        return None
+    import sys
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from tools.vqa import accept as ACC
+    from tools.vqa import anomaly as AN
+    import os
+    host = t.get("count_host") or os.environ.get("OFFLINE_SELF") or ""
+    # 总调度 11-02 17:4x：服务器上没有检测卡的主机（gpu33：GPU2 是坏卡，硬规则永远不用）内联不跑人数检测，记 deferred；
+    # 人数检测统一由笔记本发起的批量验收在 gpu36（有镜面分割）上做，视频闸门读 data/vqa/accept/epNN.json
+    try:
+        from tools.factory import hosts as _H
+        _h = (_H.load().get("hosts") or {}).get(host) or {}
+    except Exception:  # noqa: BLE001 — 车道表读不到：按“没有检测卡”处理（只会推迟，不会用错卡）
+        _h = {}
+    defer = bool(host) and _h.get("detector_gpu", AN.DETECTOR_GPU.get(host)) is None
+    try:
+        lab = ACC.label(sid, stage, image, pf, host=host or None, defer_count=defer)
+    except Exception as e:  # noqa: BLE001 — 验收本身出错 = untested（闸门挡、记 score_infra），不当通过
+        lab = {k: {"status": "untested", "why": f"验收出错：{type(e).__name__}: {e}"[:200]} for k in ACC.ORDER}
+        lab["ok"] = "untested"
+    return ACC.apply(pf, lab)
 
 
 def q1d(sid: str, stage: str, image, pf: dict) -> dict | None:

@@ -189,8 +189,135 @@ def ack(host: str, ids: list[str]) -> bool:
     return r.returncode == 0
 
 
+MIRROR_FILES = ["data/producer/registry.json"]   # DEBUG-RSI 16:4x：界面“排第几、几点完成”（queue_eta.py）要服务器实况，每 MIRROR_EVERY_S 镜像一次
+MIRROR_EVERY_S = 90
+
+
+def mirror(state: dict) -> dict:
+    """小文件镜像：经命令主连接 cat（不新开 ssh），写 data/_offline_pull/<host>/<rel>（原子）；不走 merge（只读视图，不并回 data/）"""
+    out = {}
+    if time.time() - state.get("_mirror_t", 0) < MIRROR_EVERY_S:
+        return state.get("_mirror_last", {})
+    state["_mirror_t"] = time.time()
+    for host in HOSTS:
+        for rel in MIRROR_FILES:
+            r = remote(host, f"cat {OFF}/repo/{rel}", timeout=60)
+            ok = r.returncode == 0 and r.stdout[:1] in (b"{", b"[")
+            if ok:
+                dst = STAGE / host / rel
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                tmp = dst.with_suffix(dst.suffix + ".part")
+                tmp.write_bytes(r.stdout)
+                os.replace(tmp, dst)
+            out[f"{host}:{rel}"] = {"ok": ok, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "bytes": len(r.stdout) if ok else 0,
+                                    "rc": r.returncode}
+    state["_mirror_last"] = out
+    return out
+
+
+
+SCAN_EVERY_S = 300
+SCAN_PY = r"""
+import json, os, sys
+R, since = sys.argv[1], float(sys.argv[2])
+out = {"changed": [], "summary": {}}
+for base, dirs, files in os.walk(os.path.join(R, "data/renders")):
+    if "takes.json" not in files or "/_" in base.replace(os.sep, "/"):
+        continue
+    f = os.path.join(base, "takes.json")
+    rel = os.path.relpath(f, R).replace(os.sep, "/")
+    try:
+        st = os.stat(f)
+        d = json.load(open(f, encoding="utf-8"))
+    except Exception:
+        continue
+    if st.st_mtime > since:
+        out["changed"].append(rel)
+    out["summary"][rel] = {"active": d.get("active") or {},
+                           "rejected": sorted([t.get("stage"), t.get("n")] for t in d.get("takes") or [] if t.get("rejected"))}
+print(json.dumps(out))
+"""
+
+
+def takes_scan(state: dict) -> dict:
+    """服务器上直接改的 takes.json（作废 / 清空当前版等，不经 outbox）每 SCAN_EVERY_S 拉回并按 stage 归属合并；
+    同时比对两边每镜“本台负责的 stage”的当前版和作废集合，不一致 → takes_drift（SENTINEL 探针读 puller_status）"""
+    import base64
+    import re
+    if time.time() - state.get("_scan_t", 0) < SCAN_EVERY_S:
+        return state.get("_scan_last", {})
+    state["_scan_t"] = time.time()
+    sys.path.insert(0, str(ROOT / "ops/offline"))
+    import merge_pull as MP
+    res = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "merged": {}, "drift": []}
+    code = base64.b64encode(SCAN_PY.encode()).decode()
+    for host in HOSTS:
+        since = state.get(f"_scan_since_{host}", 0)
+        t_start = time.time() - 30
+        r = remote(host, f"python3 -c \"import base64;exec(base64.b64decode('{code}'))\" {OFF}/repo {since}", timeout=120)
+        if r.returncode != 0:
+            res["merged"][host] = f"rc={r.returncode}"
+            continue
+        try:
+            info = json.loads(r.stdout.decode("utf-8", "replace").strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            res["merged"][host] = "bad output"
+            continue
+        changed = info.get("changed") or []
+        acts = {}
+        if changed:
+            tr = remote(host, f"cd {OFF}/repo && tar cf - -T - 2>/dev/null; true", data=("\n".join(changed) + "\n").encode(), timeout=300)
+            try:
+                with tarfile.open(fileobj=io.BytesIO(tr.stdout)) as tf:
+                    for m in tf.getmembers():
+                        if not m.isfile() or ".." in m.name or m.name not in changed:
+                            continue
+                        dst = STAGE / host / "_scan" / m.name
+                        dst.parent.mkdir(parents=True, exist_ok=True)
+                        dst.write_bytes(tf.extractfile(m).read())
+                        try:
+                            acts[m.name] = MP.merge_file(host, m.name, dst)
+                        except Exception as e:  # noqa: BLE001
+                            acts[m.name] = f"error:{repr(e)[:100]}"
+            except tarfile.TarError as e:
+                acts["_tar"] = repr(e)[:100]
+        state[f"_scan_since_{host}"] = t_start if not any(str(v).startswith("error") for v in acts.values()) else since
+        res["merged"][host] = {k: v for k, v in acts.items() if not str(v).startswith("skipped")}
+        for rel, sv in (info.get("summary") or {}).items():           # 一致性：只比本台负责的 stage
+            m = re.search(r"/ep(\d{2})/", rel)
+            if not m:
+                continue
+            stages = MP.own_stages(host, int(m.group(1)))
+            if not stages:
+                continue
+            try:
+                ld = json.loads((ROOT / rel).read_text(encoding="utf-8"))
+            except (OSError, ValueError):   # arch-ok: 本地还没有这镜 → 记一条漂移
+                res["drift"].append({"host": host, "rel": rel, "why": "本地没有"})
+                continue
+            la, ra = ld.get("active") or {}, sv.get("active") or {}
+            lrej = {(t.get("stage"), t.get("n")) for t in ld.get("takes") or [] if t.get("rejected")}
+            rrej = {tuple(x) for x in sv.get("rejected") or []}
+            for st in stages:
+                if la.get(st) != ra.get(st):
+                    res["drift"].append({"host": host, "rel": rel, "stage": st, "local": la.get(st), "server": ra.get(st), "why": "当前版不一致"})
+            miss = sorted(x for x in rrej - lrej if x[0] in stages)
+            if miss:
+                res["drift"].append({"host": host, "rel": rel, "why": "服务器作废、本地没作废", "takes": miss})
+    state["_scan_last"] = res
+    return res
+
+
 def tick(state: dict) -> dict:
     stats = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "t": time.time(), "hosts": {}}
+    try:
+        stats["mirror"] = mirror(state)
+        sc = takes_scan(state)
+        stats["takes_sync"] = {"at": sc.get("at"), "merged": sc.get("merged"), "drift_n": len(sc.get("drift") or []),
+                               "drift": (sc.get("drift") or [])[:30]}
+    except Exception as e:  # noqa: BLE001
+        stats["mirror"] = {"error": repr(e)[:200]}
+        log("mirror error", repr(e)[:200])
     for host in HOSTS:
         hs = state.setdefault(host, {"acked": [], "files_done": [], "lat": []})
         items = list_outbox(host)

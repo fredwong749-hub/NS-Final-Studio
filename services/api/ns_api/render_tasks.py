@@ -36,7 +36,7 @@ HTTP_BASE = "http://127.0.0.1:8800"
 DEFAULT_RUN = "series10_v1"
 DONE_WINDOW_S = 24 * 3600
 STAGE_TYPE = {"image": "首帧", "first": "首帧", "last": "尾帧", "video": "视频", "asset": "资产图", "asset_gen": "资产图",
-              "frame": "首帧"}
+              "frame": "首帧", "edit": "精修"}   # edit 原兜底成“首帧”，精修失败被显示成首帧失败（AUDIT-M 11-02）
 TYPE_FIELD = {"首帧": "first_frame", "尾帧": "last_frame_target", "视频": "video"}
 _cache: dict = {"at": 0.0, "key": None, "val": None}
 RECENT_FAIL_H = 6     # UIRSI r42 → r43 → r44（总调度 r44：顶栏失败口径改成“近 6 小时”）：只挂最近 6 小时、且后来没成功过的失败

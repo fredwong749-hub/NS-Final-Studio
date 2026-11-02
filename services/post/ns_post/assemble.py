@@ -842,7 +842,26 @@ def loudnorm(ff: FFmpeg, raw: Path, out: Path, s: Settings) -> dict:
     f = (f"{base}:measured_I={m1['input_i']}:measured_TP={m1['input_tp']}:measured_LRA={m1['input_lra']}"
          f":measured_thresh={m1['input_thresh']}:offset={m1['target_offset']}:linear=true:print_format=json")
     proc = ff.run(["-nostats", *inp, "-af", pre + f + f",aresample={s.sample_rate}", "-c:a", "pcm_s16le", out])
-    return {"pass1": m1, "limiter": pre.rstrip(",") or None, "applied": parse_loudnorm(proc.stderr)}
+    res = {"pass1": m1, "limiter": pre.rstrip(",") or None, "applied": parse_loudnorm(proc.stderr)}
+    return res
+
+
+def converge_loudness(ff: FFmpeg, wav: Path, s: Settings) -> list[dict]:
+    """ASSEMBLY 11-02（ep03 预览 -16.24 LUFS 的根因）：loudnorm 自报的 output_i 不是成品实测——它在 TP 顶不住时退回 dynamic，
+    而且 room tone 填底噪之后用 measure_loudness 实测又掉约 1 LU。所以在最后一道工序（room tone 之后）以成品 WAV 的实测为准，
+    偏差 > 0.4 LU 就补增益（带限幅），最多 2 次。返回修正记录"""
+    fixes = []
+    for k in range(2):
+        got = float(measure_loudness(ff, wav)["integrated_lufs"])
+        if not math.isfinite(got) or abs(got - s.target_lufs) <= 0.4:
+            break
+        tmp = wav.with_name(wav.stem + f"_fix{k}.wav")
+        limit = 10 ** ((s.true_peak_db - 1.0) / 20)
+        ff.run(["-i", wav, "-af", f"volume={s.target_lufs - got:.2f}dB,alimiter=limit={limit:.4f}:attack=5:release=80:level=false",
+                "-c:a", "pcm_s16le", tmp])
+        os.replace(tmp, wav)
+        fixes.append({"measured": got, "gain_db": round(s.target_lufs - got, 2)})
+    return fixes
 
 
 def measure_loudness(ff: FFmpeg, path: Path) -> dict:
@@ -1015,13 +1034,48 @@ def qa_gate(qa_path: Path, srcs: list[dict], src_list: list[dict]) -> tuple[bool
             reasons.append(f"{key} 校色版 _cc 不是由验收版本视频生成（_cc.json source_sha256 不符）")
     return not reasons, reasons
 
+def normalise_cut_trims(cut_edit: dict | None) -> dict[int, tuple[float, float]]:
+    """CUTEDIT：cut_edit["trims"] → {镜号: (裁头秒, 裁尾秒)}；坏值丢弃，负数按 0。"""
+    out: dict[int, tuple[float, float]] = {}
+    for k, v in ((cut_edit or {}).get("trims") or {}).items():
+        try:
+            out[int(k)] = (max(0.0, float(v[0])), max(0.0, float(v[1])))
+        except (TypeError, ValueError, IndexError):
+            continue
+    return out
+
+
+def clamp_trim(head: float, tail: float, src_s: float, min_keep_s: float = 0.2) -> tuple[float, float]:
+    """CUTEDIT：手动入出点夹到源片里（镜头重出后新片更短时自动收到片尾），至少留 min_keep_s。"""
+    head = min(max(0.0, head), max(0.0, src_s - min_keep_s))
+    tail = min(max(0.0, tail), max(0.0, src_s - head - min_keep_s))
+    return round(head, 3), round(tail, 3)
+
+
+def bgm_edit_envelope(n: int, sr: int, edit: dict) -> np.ndarray:
+    """CUTEDIT：配乐整体音量（dB）× 线性淡入 / 淡出（秒），长度 n。"""
+    g = np.full(n, 10 ** (float(edit.get("gain_db") or 0.0) / 20), dtype=np.float32)
+    fi = min(n, int(round(max(0.0, float(edit.get("fade_in_s") or 0)) * sr)))
+    fo = min(n, int(round(max(0.0, float(edit.get("fade_out_s") or 0)) * sr)))
+    if fi > 0:
+        g[:fi] *= np.linspace(0.0, 1.0, fi, dtype=np.float32)
+    if fo > 0:
+        g[n - fo:] *= np.linspace(1.0, 0.0, fo, dtype=np.float32)
+    return g
+
+
 def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrBackend | None = None,
                      ff: FFmpeg | None = None, settings: Settings = Settings(), voices_cfg: dict | None = None,
                      data: Path = DATA, cache_dir: Path = CACHE_DIR, sources: dict[int, dict] | None = None,
                      allow_laptop_video: bool = False, keep_work: bool = False, log=print,
-                     variant: str = "") -> dict:
+                     variant: str = "", cut_edit: dict | None = None) -> dict:
     """Build out_dir/epXX.mp4 and out_dir/epXX.timeline.json; returns the timeline dict.
-    variant（AUD）：非空时作为对照版另存 <stem>_<variant>.mp4 + <stem>_<variant>.timeline.json，不碰原版、不建别名。"""
+    variant（AUD）：非空时作为对照版另存 <stem>_<variant>.mp4 + <stem>_<variant>.timeline.json，不碰原版、不建别名。
+    cut_edit（CUTEDIT，成片页剪辑工程 cut_project.json 归一后的覆写；None = 行为完全不变）：
+      {"trims": {镜号: [裁头秒, 裁尾秒]}, "bgm": {"file", "offset_s", "gain_db", "fade_in_s", "fade_out_s"}}
+      有手动入出点的镜头：跳过自动的定住段裁切（trim_frozen）和节奏裁切（pace_tighten），以手动为准。"""
+    manual_trims = normalise_cut_trims(cut_edit)
+    bgm_edit = dict((cut_edit or {}).get("bgm") or {})
     ff = ff or FFmpeg.discover()
     cfg = voices_cfg or load_voice_config()
     ep = int(episode["number"])
@@ -1052,6 +1106,8 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
         for i_f, (src, info) in enumerate(found):
             if src["kind"] != "video" or not info:
                 continue
+            if int(shots[i_f]["index"]) in manual_trims:   # CUTEDIT：手动入出点优先
+                continue
             fps_src = float(info.get("fps") or s.fps)
             try:
                 d = frame_diffs(src["path"], ff)
@@ -1062,6 +1118,12 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
             hf, tf = freeze_trims(d, fps_src, still_diff=float(_rule(s, "freeze_still_diff")),
                                   min_s=float(_rule(s, "freeze_min_s")), min_keep_s=float(_rule(s, "min_keep_s")))
             src["trim_head_s"], src["trim_tail_s"] = round(hf / fps_src, 3), round(tf / fps_src, 3)
+    for i_f, (src, info) in enumerate(found):   # CUTEDIT：手动入出点（夹到源片长度内，至少留 0.2 s）
+        mt = manual_trims.get(int(shots[i_f]["index"]))
+        if mt is None or src["kind"] != "video" or not info:
+            continue
+        src["trim_head_s"], src["trim_tail_s"] = clamp_trim(mt[0], mt[1], float(info["duration"]))
+        src["manual_trim"] = True
     durations = [round(info["duration"] - float(src.get("trim_head_s") or 0) - float(src.get("trim_tail_s") or 0), 3)
                  if info else script_durations[i] for i, (src, info) in enumerate(found)]
     color_match = color_match_enabled(ep, s)
@@ -1133,7 +1195,7 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
         new_durs = list(durations)
         shifts = {}
         for i, (src, info) in enumerate(found):
-            if src["kind"] != "video" or not info:
+            if src["kind"] != "video" or not info or src.get("manual_trim"):   # CUTEDIT：手动入出点不再加节奏裁切
                 continue
             mine = [p for p in placements if p.line.shot == i + 1]
             has_vo = any(p.line.kind == "voiceover" for p in mine)
@@ -1243,6 +1305,7 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
                          "take_policy": src.get("take_policy") or ("sources_override" if sources else None),
                          "missing": bool(src.get("missing")), "missing_reason": src.get("missing_reason"),
                          "trim_head_s": src.get("trim_head_s"), "trim_tail_s": src.get("trim_tail_s"),
+                         **({"manual_trim": True} if src.get("manual_trim") else {}),
                          "pieces": [list(p) for p in src.get("pieces") or []] if len(src.get("pieces") or []) > 1
                          else None, "skin_guard": src.get("skin_guard"),
                          **({"color_match": src.get("color_match")} if color_match else {})})
@@ -1381,6 +1444,17 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
             mdir = (Path(s.music_dir) if Path(s.music_dir).is_absolute() else ROOT / s.music_dir) if s.music_dir \
                 else data / "music"
             music_file, music_meta = find_music(ep, mdir)
+            if bgm_edit.get("file"):   # CUTEDIT：成片页换曲
+                bf = Path(str(bgm_edit["file"]))
+                bf = bf if bf.is_absolute() else ROOT / bf
+                if bf.is_file():
+                    music_file = bf
+                    try:
+                        music_meta = json.loads(bf.with_suffix(".json").read_text(encoding="utf-8"))
+                    except (OSError, ValueError):
+                        music_meta = {}
+                else:
+                    warnings.append(f"剪辑工程里的配乐 {bgm_edit['file']} 找不到，用本集默认配乐")
             if music_file is None:
                 warnings.append(f"no BGM: {_rel(mdir)}/{name}.(wav|flac|mp3) not found — music layer skipped")
                 bgm_info = {"used": False, "reason": "no file"}
@@ -1404,6 +1478,8 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
                     warnings.append(f"S{k}: owner music edit '{v}' not applied — {name}.json carries a cue "
                                     f"timeline; regenerate the BGM on gpu3 (T40) to include it")
                 m = normalise_rms(read_audio(ff, music_file, sr, work=work))
+                if bgm_edit:   # CUTEDIT：从曲中第几秒开始
+                    m = m[int(round(max(0.0, float(bgm_edit.get("offset_s") or 0)) * sr)):]
                 g = level_curve(cues, n_total, sr, total)[:, None]
                 if len(m) < n_total and float(g[len(m):].max()) < 1e-3:  # cues are silent past its end: pad
                     m, looped = np.concatenate([m, np.zeros((n_total - len(m), 2), np.float32)]), False
@@ -1411,6 +1487,8 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
                     m, looped = fit_length(m, n_total, sr)
                 if looped:
                     warnings.append(f"BGM {music_file.name} is shorter than the episode: looped")
+                if bgm_edit:   # CUTEDIT：整体音量 + 淡入淡出
+                    m = m * bgm_edit_envelope(n_total, sr, bgm_edit)[:, None]
                 shot_duck = np.zeros(n_total, dtype=np.float32)
                 for c in cues:
                     if c.duck_db and c.shot:
@@ -1448,6 +1526,7 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
                             ("script/edit" if any(c.source in ("script", "edit") for c in cues) else "default"),
                             "duck_spans": len(h3_spans), "h3_music_mode": s.h3_music,
                             "regenerate_needed": bgm_regen,
+                            **({"cut_edit": bgm_edit} if bgm_edit else {}),
                             "h3_music_shots": {f"S{k}": v for k, v in sorted(h3_music.items())}}
         raw = work / "mix.f32"
         mix.astype(np.float32).tofile(raw)
@@ -1457,6 +1536,7 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
         if _rule(s, "room_tone"):   # FIX：不允许数字静音——响度归一后，低于底噪的窗口补环境底噪
             room_info = _room_tone_wav(wav, float(_rule(s, "room_tone_floor_dbfs")),
                                        float(_rule(s, "room_tone_window_s")))
+        loud_passes["corrections"] = converge_loudness(ff, wav, s)
         timings["sound_s"] = round(time.perf_counter() - t, 2)
 
         # 6. mux (+ 4K delivery with the same sound)
@@ -1548,6 +1628,7 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
         "duration_s": round(info["duration"], 3), "frames": frames, "fps": s.fps,
         "size": [s.width, s.height], "video_codec": info["video_codec"], "audio_codec": info["audio_codec"],
         "subtitles": False, "tail_hold_s": tail,
+        **({"cut_edit": cut_edit} if cut_edit else {}),
         "deliveries": deliveries,
         "loudness": {"target_lufs": s.target_lufs, "measured": loud, "loudnorm": loud_passes},
         "bgm": bgm_info,

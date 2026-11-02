@@ -24,7 +24,7 @@ export const isInterrupted = (j: { state: string; error?: string | null }) => j.
 export const LAST_SOURCE_LABEL: Record<string, string> = { gen: "生成", next: "next", upload: "上传", video: "视频抽帧", gpu3: "gpu3" };
 export const SLOT_LABEL: Record<string, string> = { outfit: "衣", shoes: "鞋", nails: "甲", hair: "发", makeup: "妆", accessory: "饰", other: "他" };
 export const SLOT_NAME: Record<string, string> = { outfit: "服装", shoes: "鞋", nails: "美甲", hair: "发型", makeup: "妆容", accessory: "饰品", other: "其他" };
-export const REVIEW_LABEL: Record<ReviewState, string> = { unreviewed: "未审", passed: "通过", rejected: "打回" };
+export const REVIEW_LABEL: Record<ReviewState, string> = { unreviewed: "未审", passed: "通过", rejected: "待修改" };
 export const REJECT_CODES = ["画面", "表情", "造型", "连贯", "口型", "尾帧", "其他"] as const;
 
 /** 打回原因存成 "码｜备注" */
@@ -66,7 +66,7 @@ export const EXPLICIT_LABEL = "露骨·项目方自行处理";
 export const FILTER_LABEL: Record<Filter, string> = {
   all: "全部",
   unreviewed: "待审",
-  rejected: "打回",
+  rejected: "待修改",
   passed: "通过",
   stale: "已过期",
   failed: "失败",

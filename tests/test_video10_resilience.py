@@ -34,7 +34,8 @@ def _take(root: Path, ep, s, fname):
     d = root / "data" / "renders" / ep / s
     d.mkdir(parents=True, exist_ok=True)
     (d / "takes.json").write_text(json.dumps({"active": {"image": 1}, "takes": [
-        {"stage": "image", "n": 1, "file": fname, "postflight": {"ok": True}}]}), encoding="utf-8")
+        {"stage": "image", "n": 1, "file": fname,
+         "postflight": {"ok": True, "items": [{"id": "Q10", "status": "pass"}]}}]}), encoding="utf-8")   # D-VQA-01：首帧要过第 8 步验收才进视频
 
 
 def test_passed_frames_skips_truncated_png(tmp_path, monkeypatch):

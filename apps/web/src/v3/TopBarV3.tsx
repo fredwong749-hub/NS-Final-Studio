@@ -1,7 +1,7 @@
 // fredw-92/W4a：v3 顶栏 = 集切换｜步骤条 ①–⑤｜GPU · 队列｜工具▾｜主题｜?（规格 §1：四个下拉收进“工具”）
 import { useMe } from "../projects/AuthGate.helpers";
 import { AuditDrawer } from "./AuditDrawer";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, qwenApi } from "../api";
 import { useStudio, type View } from "../store";
 import { ThemeToggle } from "../themeMode";
@@ -11,6 +11,8 @@ import type { EpisodeLooks, RenderBackend, SopStage } from "../types";
 import { framesLocked, scriptGaps, videoCounts } from "./status";
 import { FILTER_LABEL, isInterrupted, type Filter } from "../util";
 import { useSop } from "./sop.helpers";
+import { fmtEta, pickDot, useFramesCounts, useVideosSummary, type NavDot } from "./NavTabs.helpers";
+import "./navia.css";
 import { Pop } from "./widgets";
 import { loadReadiness } from "./Materials.helpers";
 import { openMaterials } from "./MaterialsDrawer.helpers";
@@ -74,12 +76,16 @@ const TOOLS: { group: string; items: [Target, string, string][] }[] = [
 // UXF5（审查 R6）：术语统一；“分镜”只指剧本里的分镜字段
 // UX5（D2）：每一步点进去 = 这一步该做的事——① 本集资料清单（缺什么、谁补）；② 资产中心；③ 画布（首尾帧）；
 // ④ 画布 + 只看待审；⑤ 成片页（以前 ① 去写新剧本、③④ 同一处、⑤ 去旧总览）
-const STEPS: { id: SopStage; label: string; to: Target; hint: string }[] = [
-  { id: "S1", label: "剧本", to: "materials", hint: "打开本集资料清单" },
-  { id: "S2", label: "资产", to: "#/assets", hint: "资产中心：本集造型确认在最上面" },
-  { id: "S3", label: "出图", to: "canvas", hint: "画布：首帧 / 尾帧" },
-  { id: "S4", label: "视频", to: "canvas-video", hint: "画布：只看待审的镜头" },
-  { id: "S5", label: "成片", to: "#/cut", hint: "成片页：播放、对比、合成" },
+type TabId = SopStage | "OV" | "SB";
+// NAVIA：七个一级入口，同一层级同一种样式，按工作流排：总览（全剧）→ 剧本 → 资产 → 分镜（每集一镜一行）→ 出图 → 视频 → 成片
+const STEPS: { id: TabId; label: string; to: Target; hint: string }[] = [
+  { id: "OV", label: "总览", to: "#/overview", hint: "全剧胶片总览：每集每镜一格（1）" },
+  { id: "S1", label: "剧本", to: "#/script-create", hint: "剧本库：全部剧本与每集" },
+  { id: "S2", label: "资产", to: "#/assets", hint: "资产中心" },
+  { id: "SB", label: "分镜", to: "canvas", hint: "每集一镜一行的画布（默认上次看的集，页内范围条切集）" },
+  { id: "S3", label: "出图", to: "#/frames", hint: "出图：全部集每镜的首帧 / 尾帧（画布在“查看”菜单里）" },
+  { id: "S4", label: "视频", to: "#/videos", hint: "全部镜头的视频" },
+  { id: "S5", label: "成片", to: "#/cut", hint: "每集整集预览与成片版本" },
 ];
 
 /** UX5：本集资料不全的镜头数（和审片行角标同一个接口），60 s 刷新 */
@@ -195,10 +201,9 @@ function OwnerQueueButton({ on }: { on: boolean }) {
 export function TopBarV3({ page }: { page: V3Page | null }) {
   const st = useStudio();
   const { q: oq } = useOwnerQueue();
-  const { episodes, epNum, gotoEpisode, view, setView, jobs, drawer, setDrawer, setHelpOpen, setPaletteOpen, episode, filter, setFilter } = st;
+  const { episodes, epNum, view, setView, jobs, drawer, setDrawer, setHelpOpen, episode, filter, setFilter } = st;
   const { sop } = useSop();
   const total = episodes?.length ?? 60;
-  const ep = episodes?.find((e) => e.number === epNum);
 
   // 出图后端 + 队列（原顶栏逻辑）
   const [backend, setBackend] = useState<RenderBackend | null>(null);
@@ -244,6 +249,16 @@ export function TopBarV3({ page }: { page: V3Page | null }) {
   const { me, logout } = useMe();
   const [auditOpen, setAuditOpen] = useState(false);
 
+  const [, setVidTab] = useState(false); // 点了“视频”：即使退到“全部”也要亮在 ④
+  // 顶部轻提示条：3 秒自动消失，不用点掉
+  const [hint, setHint] = useState("");
+  const hintT = useRef(0);
+  const showHint = (m: string) => {
+    setHint(m);
+    window.clearTimeout(hintT.current);
+    hintT.current = window.setTimeout(() => setHint(""), 3000);
+  };
+  useEffect(() => () => window.clearTimeout(hintT.current), []);
   const leavePage = () => {
     if (location.hash.startsWith("#/")) location.hash = `#${st.sel ?? `ep${String(epNum).padStart(2, "0")}`}`;
   };
@@ -259,9 +274,21 @@ export function TopBarV3({ page }: { page: V3Page | null }) {
         st.setClassic(false);
         st.setListMode(false);
         setView("episode");
-        setFilter("unreviewed");
+        setVidTab(true);
+        {
+          // NAVIA：没有待审视频时不再整页变灰——退到“全部”，并说明现在是什么情况
+          const list = episode && !episode.light ? episode.shots : [];
+          const pending = list.filter((x) => x.review?.state === "unreviewed" && !!x.video).length;
+          if (pending > 0) setFilter("unreviewed");
+          else {
+            setFilter("all");
+            const run = jobs.filter((j) => j.stage === "video" && (j.state === "running" || j.state === "queued")).length;
+            showHint(`现在没有要你看的视频${run ? `，正在出 ${run} 条` : ""}；下面是本集全部镜头（想只看待审，用顶部筛选“待审”）`);
+          }
+        }
         return leavePage();
       case "canvas":
+        setVidTab(false);
         if (filter === "unreviewed") setFilter("all");
         st.setClassic(false);
         st.setListMode(false);
@@ -325,8 +352,22 @@ export function TopBarV3({ page }: { page: V3Page | null }) {
         : sop?.stage === "done" ? "可合成" : "还没成片"
       : `${sop?.stage === "done" ? "可合成" : "未合成"}${dlgSrc ? ` · 对白${dlgSrc.label.replace("视频", "")}` : ""}`,
   };
-  const order: SopStage[] = ["S1", "S2", "S3", "S4", "S5"];
-  const doneUpTo = (i: number) => !!sop && sop.total > 0 && order.slice(0, i + 1).every((k) => !sop.counts[k]);
+  // NAVIA：五个 tab 的圆点（灰 / 琥珀呼吸 / 琥珀实心 / 绿）；读不到数据 = 灰点，不白板
+  const vs = useVideosSummary();
+  const fc = useFramesCounts();
+  const dots: Record<TabId, NavDot> = {
+    OV: pickDot(false, (vs?.rendering ?? 0) > 0, !vs, "", vs ? `全剧 ${vs.total} 镜 · 视频已定稿 ${vs.final}` : "全剧总览"),
+    SB: pickDot(!!gaps?.size, false, !gaps, n ? `${n} 镜` : "", gaps ? (gaps.size ? `本集 ${gaps.size} 镜分镜字段待补` : "本集分镜字段齐全") : "本集分镜"),
+    S1: pickDot(!!ready?.bad, false, !ready, `${total} 集`, ready ? (ready.bad ? `${ready.bad} 镜还缺资料` : "资料都齐了") : "还在读"),
+    S2: pickDot(lookChars.length > lookOk, false, !looks, lookChars.length > lookOk ? `${lookChars.length - lookOk} 待确认` : "", s2 || "资产中心"),
+    S3: fc
+      ? pickDot(fc.counts.new + fc.counts.missing > 0, fc.gen.running > 0, fc.gen.queued > 0 || fc.counts.final < fc.counts.shots, `${fc.counts.final}/${fc.counts.shots}`, `首尾帧已定稿 ${fc.counts.final}/${fc.counts.shots}\n待你看 ${fc.counts.new} · 缺图 ${fc.counts.missing} · 出图中 ${fc.gen.running} · 排队 ${fc.gen.queued}`)
+      : pickDot(false, false, true, "", "还在读"),
+    S4: vs
+      ? pickDot(vs.pending_review + vs.need_frames + vs.failed > 0, vs.rendering > 0, vs.queued + vs.todo > 0, `${vs.final}/${vs.total}`, `已定稿 ${vs.final}/${vs.total}\n待你看 ${vs.pending_review} · 缺首尾帧 ${vs.need_frames} · 出视频中 ${vs.rendering} · 排队 ${vs.queued} · 未出 ${vs.todo}${vs.eta_all ? `\n全部预计 ${fmtEta(vs.eta_all)} 出完` : ""}`)
+      : pickDot(false, false, true, "", "还在读"),
+    S5: pickDot(false, false, !cuts?.n, cuts?.n ? `${cuts.n} 版` : "", cuts ? (cuts.n ? `本集 ${cuts.n} 版成片` : "本集还没成片") : "还在读"),
+  };
   const cur = sop?.stage === "done" ? null : sop?.stage ?? null;
   const onCanvas = !page && view === "episode";
 
@@ -348,29 +389,25 @@ export function TopBarV3({ page }: { page: V3Page | null }) {
       <a className={`v3-new v3-sound${page === "#/sound" ? " on" : ""}`} href={`#/sound?ep=${epNum}`} title="声音：人物音色、旁白、每镜台词逐句听、整集配乐">
         ♪ 声音
       </a>
-      <div className="v3-ep">
-        <button className="v3-icon" onClick={() => gotoEpisode(epNum - 1)} disabled={epNum <= 1} title="上一集（[ 或 PgUp）">
-          ‹
-        </button>
-        <EpisodePicker label={<>第 {epNum} 集{ep ? ` · ${ep.title}` : ""} ▾</>} total={total} onSearch={() => setPaletteOpen(true)} />
-        <button className="v3-icon" onClick={() => gotoEpisode(epNum + 1)} disabled={epNum >= total} title="下一集（] 或 PgDn）">
-          ›
-        </button>
       </div>
-      {onCanvas && <ProduceButton ep={epNum} />}
-      </div>
+      {hint && (
+        <div className="v3-hintstrip" role="status" aria-live="polite" style={{ position: "fixed", top: 54, left: "50%", transform: "translateX(-50%)", zIndex: 70, pointerEvents: "none", background: "var(--bg-3)", border: "1px solid var(--line-2)", borderLeft: "3px solid var(--warn, #e0a030)", padding: "6px 14px", borderRadius: 6, boxShadow: "0 4px 16px rgba(0,0,0,.4)", fontSize: 13 }}>
+          {hint}
+        </div>
+      )}
       <ol className="v3-steps" aria-label="本集制作步骤">
         {STEPS.map((s, i) => {
-          const done = doneUpTo(i);
-          const here = page ? s.to === page : onCanvas ? (filter === "unreviewed" ? s.id === "S4" : s.id === "S3") : false; // 当前所在的页面
+          const here = page ? s.to === page : onCanvas ? s.id === "SB" : false; // 当前所在的页面
           return (
             <li key={s.id}>
-              <button className={`v3-step${done ? " done" : ""}${here ? " on" : ""}${cur === s.id ? " cur" : ""}`} onClick={() => go(s.to)} title={`${i + 1} ${s.label}${sub[s.id] ? ` · ${sub[s.id]}` : ""}
+              <button className={`v3-step${here ? " on" : ""}`} onClick={() => go(s.to)} title={`${i + 1} ${s.label}${(sub as Record<string, string>)[s.id] ? ` · ${(sub as Record<string, string>)[s.id]}` : ""}
+${dots[s.id].title}
 点击：${s.hint}${s.id === "S5" && dlgSrc ? `
 成片对白：${dlgSrc.label}（${dlgSrc.hint}）` : ""}${s.id === "S4" && n ? `
 有视频 ${vids} · 通过 ${passed} · 生成中 ${vidRunning} · 待你看 ${oq?.count ?? "…"}（顶栏“待你看”）` : ""}${cur === s.id ? "（本集停在这一步）" : ""}`}>
-                <i className={`v3-sdot d-${done ? "green" : cur === s.id ? "yellow" : "gray"}`} aria-hidden="true" />
+                <i className={`v3-sdot ${dots[s.id].cls}`} aria-hidden="true" />
                 <span>{s.label}</span>
+                {dots[s.id].text && <small className="v3-step-n">{dots[s.id].text}</small>}
               </button>
             </li>
           );
@@ -469,8 +506,9 @@ function epProgress(e: { shots: ShotLite[]; summary?: { shots: number; first_fra
 }
 type ShotLite = { first_frame?: unknown; video?: unknown; review?: { state?: string } };
 
-function EpisodePicker({ label, total, onSearch }: { label: ReactNode; total: number; onSearch: () => void }) {
-  const { episodes, epNum, gotoEpisode } = useStudio();
+function EpisodePicker({ label, total, onSearch, onPick }: { label: ReactNode; total: number; onSearch: () => void; onPick?: (n: number) => void }) {
+  const { episodes, epNum, gotoEpisode: goto0 } = useStudio();
+  const gotoEpisode = onPick ?? goto0;
   const [onlyTodo, setOnlyTodo] = useState(false);
   return (
     <Pop label={label} btnClass="v3-ep-name" title={`换集：每集进度一眼看到（G / Ctrl+K 搜索）· 共 ${total} 集`} className="v3-ep-pick">
@@ -534,5 +572,44 @@ function EpisodePicker({ label, total, onSearch }: { label: ReactNode; total: nu
         );
       }}
     </Pop>
+  );
+}
+
+/** NAVIA：页内范围条（集选择下放到页面；顶栏不再放集号）。出图 / 视频 / 成片 / 画布共用；
+ *  视频页多一个“全部集”（hash 的 ep=all）；单集时带“一键出片 · 第 N 集”（原整集出片组件，同一接口）。
+ *  出图页（#/frames）有自己的集筛选，不重复放。 */
+export function EpisodeScope({ page }: { page: V3Page | null }) {
+  const { episodes, epNum, gotoEpisode, setPaletteOpen } = useStudio();
+  const total = episodes?.length ?? 60;
+  const ep = episodes?.find((e) => e.number === epNum);
+  const isVideos = page === "#/videos" || page === "#/frames"; // 出图页、视频页共用：全部集 / 某一集
+  const base = page === "#/frames" ? "#/frames" : "#/videos";
+  const hashEp = new URLSearchParams(location.hash.split("?")[1] ?? "").get("ep");
+  const all = isVideos && (hashEp == null || hashEp === "all");
+  const pick = (n: number) => {
+    gotoEpisode(n);
+    if (isVideos) location.hash = `${base}?ep=${n}`;
+  };
+  return (
+    <div className="v3-scope" role="toolbar" aria-label="集范围">
+      <span className="v3-scope-k">范围</span>
+      {isVideos && (
+        <button className={`v3-scope-chip${all ? " on" : ""}`} onClick={() => (location.hash = `${base}?ep=all`)} title="全部集，按集顺序排">
+          全部集
+        </button>
+      )}
+      <button className="v3-icon" onClick={() => pick(epNum - 1)} disabled={epNum <= 1} title="上一集（[ 或 PgUp）">
+        ‹
+      </button>
+      <span className={all ? "v3-scope-off" : ""}>
+        <EpisodePicker label={<>第 {epNum} 集{ep ? ` · ${ep.title}` : ""} ▾</>} total={total} onSearch={() => setPaletteOpen(true)} onPick={isVideos ? pick : undefined} />
+      </span>
+      <button className="v3-icon" onClick={() => pick(epNum + 1)} disabled={epNum >= total} title="下一集（] 或 PgDn）">
+        ›
+      </button>
+      <span className="v3-scope-k">［ ］ 切集</span>
+      <span className="sp" />
+      {!all && page !== "#/frames" && <ProduceButton ep={epNum} label={`一键出片 · 第 ${epNum} 集`} />}
+    </div>
   );
 }

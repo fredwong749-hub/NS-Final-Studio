@@ -168,8 +168,6 @@ export function useKeymap(st: Studio) {
           });
           return;
         }
-        case "x":
-          return s.setRejectFor(s.multi.size ? [...s.multi] : [sel]);
         case "l":
           // W4a：v3 画布里 L = 审片 / 精修切换；旧版镜头行保留原含义
           if (v3On(s)) return handled(), s.setCanvasMode(s.canvasMode === "edit" ? "review" : "edit");

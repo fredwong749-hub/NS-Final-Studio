@@ -216,6 +216,18 @@ class AssetIndex:
         return next((e for e in es if e["group"] == "portrait" and e["url"]), None)
 
     def face_url(self, cid: str) -> str | None:
+        # K-OPS-E29 / AUDIT-M A-01（总调度 11-02 17:1x）：身份脸只认 asset_refs.face_of（原来取 plates 正面 / 母版，L-122 换脸后
+        # 资产页显示的还是旧脸）；face_of 解不出时才退回旧 plates 显示
+        try:
+            import json as _json
+            from ns_agent import asset_refs as _AR
+            proj = _json.loads((ROOT / "config" / "pipeline" / "runs.json").read_text(encoding="utf-8")).get("primary")
+            cur = _AR.face_of(proj, cid)
+        except (OSError, ValueError, ImportError) as e:  # arch-ok: 登记表 / 资产解析读不到 → 退回旧 plates 显示并打日志（只影响界面显示，不影响任何判定）
+            print(f"[assets.face_url] face_of 解析失败，退回 plates：{e!r}"[:200])
+            cur = None
+        if cur:
+            return file_url(cur)
         f = self.face(cid)
         return f["url"] if f else None
 

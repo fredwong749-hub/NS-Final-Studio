@@ -16,5 +16,7 @@
  "two_face_close": "two_shot_mcu",
  "_two_face_close_doc": "K-REN-902（IMGLAB 11-02）：脸部特写 + ≥2 人露脸 → 首句改双人近景构图（two_shot_mcu）；off = 旧行为（同时写“脸占六成”和“两张脸都入画”，preflight I6 会拦）",
  "partial_only": true,
- "_partial_only_doc": "K-REN-903（IMGLAB 11-02，总调度批）：在画的人全是局部（不露脸）→ 局部特写首句 + 画面上沿在下颌以下、去脸部通用句与“不露脸”否定句、局部人物锁收窄（成年女性 / 成年男性，肩颈局部不带发色句）；视线句只给露脸的人补。false = 旧行为。回归：tools/imglab/orphan_check.py noface_terms"
+ "_partial_only_doc": "K-REN-903（IMGLAB 11-02，总调度批）：在画的人全是局部（不露脸）→ 局部特写首句 + 画面上沿在下颌以下、去脸部通用句与“不露脸”否定句、局部人物锁收窄（成年女性 / 成年男性，肩颈局部不带发色句）；视线句只给露脸的人补。false = 旧行为。回归：tools/imglab/orphan_check.py noface_terms",
+ "promptfix": {"face_exposure_guard": true, "partial_wardrobe_scope": true, "blocking_from_cast": true, "last_face_guard": true, "seed_stream": true, "hand_ref_focus_only": true, "back_view_guard": true},
+ "_promptfix_doc": "PROMPTFIX 11-02（总调度 fredw-2b，ALIGNMENT 第 3-6 步；fb-0004..0007 + ep07-S3 尾帧陌生人）：face_exposure_guard = K-REN-950（cast 局部但近景及更远、主体是人 → 报 cast_face_conflict 并送身份脸）；partial_wardrobe_scope = K-REN-951（局部不露脸的人只送部位内单品，不送设定图 / 整套板，不补“要穿全”）；blocking_from_cast = K-REN-952（cast x 编成站位契约 + 固定站位句）；last_face_guard = K-REN-953（尾帧结束状态写到脸 → 补送身份脸）；seed_stream = K-REN-954（用过的种子不再用）；hand_ref_focus_only = K-REN-955（手部单品图只在手部局部特写进参考槽）。false = 旧行为"
 }

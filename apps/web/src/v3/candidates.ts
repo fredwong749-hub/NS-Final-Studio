@@ -17,7 +17,7 @@ const subs = new Set<() => void>();
 export function loadCandidates(ep: number, force = false): Promise<CandShots> {
   let p = cache.get(ep);
   if (!p || force) {
-    p = fetch(`/api/candidates?ep=${ep}`)
+    p = fetch(`/api/candidates?ep=${ep}&only_passing=1`) // 只给项目方看通过验收的版本（17:0x ep07-S3 尾帧 #19 陌生人事故）
       .then((r) => (r.ok ? r.json() : { shots: {} }))
       .then((d: { shots: CandShots }) => d.shots ?? {}, () => ({}) as CandShots);
     cache.set(ep, p);

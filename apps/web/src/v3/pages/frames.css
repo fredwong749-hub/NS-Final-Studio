@@ -1,0 +1,43 @@
+/* ASSETUX 1b “出图”页：胶片风、多图少字；徽标 已定稿 / 当前 = 绿，新 = 琥珀；没有红色 */
+.fp-page { padding-bottom: 80px; }
+.fp-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.fp-head select { height: 28px; background: var(--c-sunken, #111); color: var(--c-text, #e9e6e0); border: 1px solid var(--c-line-2, rgba(255,255,255,.16)); border-radius: 3px; padding: 0 8px; font: inherit; }
+.fp-sum { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--c-text-2, #aaa); }
+.fp-ep { margin: 18px 0; }
+.fp-eph { display: flex; align-items: baseline; gap: 12px; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--c-line, rgba(255,255,255,.09)); padding: 6px 0; color: var(--c-text, #e9e6e0); font: inherit; cursor: pointer; }
+.fp-chev { margin-left: auto; color: var(--c-text-3, #888); }
+.fp-grid { display: flex; flex-wrap: wrap; gap: 14px 18px; padding-top: 12px; }
+.fp-shot { display: flex; gap: 6px; }
+.fp-cellw { width: 128px; }
+.fp-cell { position: relative; display: block; width: 128px; height: 190px; padding: 0; border: 1px solid var(--c-line, rgba(255,255,255,.09)); border-radius: 3px; overflow: hidden; background: #131212; cursor: pointer; }
+.fp-cell:hover { border-color: var(--c-line-2, rgba(255,255,255,.3)); }
+.fp-cell.s-final { border-color: rgba(95,174,110,.6); }
+.fp-cell img, .fp-big img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+.fp-miss { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--c-text-3, #777); font-size: 12px; background: repeating-linear-gradient(135deg, #151414 0 8px, #181717 8px 16px); text-align: center; padding: 6px; }
+.fp-badge { position: absolute; left: 5px; top: 5px; font-size: 11px; padding: 1px 7px; border-radius: 2px; background: rgba(0,0,0,.66); }
+.fp-badge.g { color: var(--c-ok, #5fae6e); }
+.fp-badge.a { color: var(--c-warn, #d4a24c); }
+.fp-cap { font-size: 11.5px; color: var(--c-text-3, #888); margin-top: 3px; }
+.fp-gen { position: absolute; inset: 0; background: rgba(10,10,10,.76); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-align: center; font-size: 12px; }
+.fp-gen .fp-ring { position: absolute; inset: 4px; border: 1px solid rgba(212,162,76,.5); border-radius: 3px; pointer-events: none; animation: ns-breathe var(--breathe-period, 2.7s) ease-in-out infinite; }
+.fp-gen.queued .fp-ring { animation: none; border-color: var(--c-line, rgba(255,255,255,.09)); }
+.fp-eta { color: var(--c-text-2, #aaa); font-size: 11.5px; }
+.fp-drawer { position: fixed; right: 0; top: 48px; bottom: 0; width: 380px; z-index: 50; background: var(--c-raise, #161617); border-left: 1px solid var(--c-line-2, rgba(255,255,255,.14)); padding: 14px; display: flex; flex-direction: column; gap: 10px; overflow: auto; box-shadow: -10px 0 30px rgba(0,0,0,.4); }
+.fp-drawer header { display: flex; align-items: center; justify-content: space-between; }
+.fp-x { background: none; border: 0; color: var(--c-text-2, #aaa); font-size: 20px; cursor: pointer; }
+.fp-big { position: relative; width: 100%; aspect-ratio: 9 / 16; max-height: 62vh; background: #131212; border-radius: 3px; overflow: hidden; }
+.fp-act { display: flex; align-items: center; gap: 12px; }
+.fp-link { font-size: 12.5px; color: var(--c-text-2, #aaa); }
+.fp-note { margin: 0; font-size: 12px; color: var(--c-text-3, #888); }
+
+/* 格子上的修改状态：需要你看一眼 = 琥珀实心；抽屉里的修改记录 */
+.fp-gen.look .fp-ring { animation: none; border-color: var(--c-warn, #d4a24c); }
+.fp-solid { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--c-warn, #d4a24c); }
+.fp-log { display: flex; flex-direction: column; gap: 8px; }
+.fp-log-i { border: 1px solid var(--c-line, rgba(255,255,255,.09)); border-left: 2px solid var(--c-text-3, #777); border-radius: 3px; padding: 8px 10px; font-size: 12.5px; }
+.fp-log-i.s-rendering, .fp-log-i.s-needs_look, .fp-log-i.s-scoring { border-left-color: var(--c-warn, #d4a24c); }
+.fp-log-i.s-done { border-left-color: var(--c-ok, #5fae6e); }
+.fp-log-t { display: flex; justify-content: space-between; gap: 8px; }
+.fp-log-t span { color: var(--c-text-3, #888); font-size: 11.5px; }
+.fp-log-q { color: var(--c-text-2, #aaa); margin-top: 3px; }
+.fp-log-q.look { color: var(--c-warn, #d4a24c); }

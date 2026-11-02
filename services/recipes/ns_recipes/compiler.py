@@ -42,6 +42,12 @@ def _mode(rc: dict, spec: ShotSpec) -> tuple[str, bool]:
     return ("fl2va" if use_last else "i2va"), use_last
 
 
+def _primary_run() -> str | None:
+    """当前主剧 id：只从运行登记表 config/pipeline/runs.json 读（hard_run），读不到抛异常"""
+    root = Path(__file__).resolve().parents[3]
+    return json.loads((root / "config" / "pipeline" / "runs.json").read_text(encoding="utf-8")).get("primary")
+
+
 def ref_slots(spec: ShotSpec, rc: dict) -> list[dict]:
     slots = []
     r = rc.get("ref2va") or {}
@@ -51,7 +57,12 @@ def ref_slots(spec: ShotSpec, rc: dict) -> list[dict]:
     for c in spec.faces:
         # V2（lab_recipes.md X4）：整张定妆图会把项链 / 粉裙带进画面 → 用脸部裁切。identity_crops 只登记项目方挑定的
         # 身份图（data/assets/identity_refs/manifest.json，by=owner），所以没有 spec.identity_ref 的角色（顾沉 / 陈宇）也可用
-        crop = crops.get(c.name) or crops.get(getattr(c, "id", None) or "")
+        # K-OPS-E29 / AUDIT-M A-01（总调度 11-02 17:1x）：身份脸唯一入口 asset_refs.face_of——配方里写死的旧裁切（L-122 换脸前的
+        # face_ref2va）只在 face_of 解不出时兜底，否则 Ref2VA 视频的身份槽还是旧脸（和帧打分口径分叉）
+        from ns_agent import asset_refs as _AR
+        _cid = _AR.NAME_ID.get(c.name) or getattr(c, "id", None)
+        crop = (_AR.face_of(r.get("project") or _primary_run(), _cid) if _cid else None) \
+            or crops.get(c.name) or crops.get(getattr(c, "id", None) or "")
         if crop:
             slots.append({"role": "identity", "character": c.name, "path": crop, "sha": None,
                           **({"crop_of": c.identity_ref.path} if c.identity_ref else {})})

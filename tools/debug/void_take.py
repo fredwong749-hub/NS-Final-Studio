@@ -2,7 +2,7 @@
 退到最新一张可用的旧版（没有就清空），之后按正常流程重出。逻辑同 :8800 takes_ui.reject，但支持 video，可在服务器上跑。
 
 用法（服务器 repo 目录；可经 rsh 从 stdin 喂给 python3 -）：
-  python3 void_take.py <sid> <stage image|last|video> <reason> <by> [--n N] [--apply]
+  python3 void_take.py <sid> <stage image|last|video> <reason> <by> [--n N] [--no-fallback] [--apply]
 不带 --apply 只显示当前版本。
 """
 import json
@@ -38,7 +38,7 @@ with P.shot_lock(sid):
 if act == n:
     d = P.load_takes(sid)
     clean = [x for x in d["takes"] if x.get("stage") == stage and x["n"] != n and not P.ineligible_reason(x)]
-    if clean and stage != "video":
+    if clean and stage != "video" and "--no-fallback" not in sys.argv:   # --no-fallback：旧版同样有问题时直接清空、按新规则重出
         P.set_active(sid, stage, clean[-1]["n"], reason=f"v{n} 作废（{reason}），退回最新一张可用的旧版", actor=f"void_take（{by}）")
         new = clean[-1]["n"]
     else:                                      # 视频不退旧版：旧版多半同样的问题，清空后按正常流程重出

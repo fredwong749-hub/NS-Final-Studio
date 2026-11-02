@@ -133,7 +133,7 @@ def run(host: str, cmd: str, input: bytes | None = None, timeout: float = 900, c
             try:
                 res = subprocess.run(argv, input=input, capture_output=True, timeout=timeout, check=False, creationflags=NOWIN)
             except subprocess.TimeoutExpired:
-                _note(host, 124, time.time() - t0, tried)
+                _note(host, 124, time.time() - t0, tried, cmd)
                 raise
             err = (res.stderr or b"")[-300:]
             mux_down = res.returncode == 255 and (b"Control socket connect" in err or b"mux_client" in err
@@ -145,9 +145,9 @@ def run(host: str, cmd: str, input: bytes | None = None, timeout: float = 900, c
             res = subprocess.run(["ssh", "-o", "BatchMode=yes", host, with_tz(cmd)], input=input, capture_output=True,
                                  timeout=timeout, check=False, creationflags=NOWIN)
         except subprocess.TimeoutExpired:
-            _note(host, 124, time.time() - t0, ["direct"])
+            _note(host, 124, time.time() - t0, ["direct"], cmd)
             raise
-    _note(host, res.returncode, time.time() - t0, tried or ["direct"])
+    _note(host, res.returncode, time.time() - t0, tried or ["direct"], cmd)
     if check and res.returncode:
         raise subprocess.CalledProcessError(res.returncode, res.args, res.stdout, res.stderr)
     return res
@@ -156,12 +156,12 @@ def run(host: str, cmd: str, input: bytes | None = None, timeout: float = 900, c
 CALLS = ROOT / "data/netfix/rssh_calls.jsonl"
 
 
-def _note(host: str, rc: int, dur: float, tried: list) -> None:
+def _note(host: str, rc: int, dur: float, tried: list, cmd: str = "") -> None:
     """一次调用一行（几十字节，追加写）；“成功” = 连接层没出错（rc != 255 且没超时），远端命令自己的非零退出码不算通道失败"""
     try:
         with open(CALLS, "a", encoding="utf-8") as f:
             f.write(json.dumps({"t": round(time.time(), 1), "host": host, "rc": rc, "ok": rc not in (255, 124),
-                                "dur": round(dur, 2), "tried": tried}) + "\n")
+                                "dur": round(dur, 2), "tried": tried, "cmd": (cmd or "")[:40]}) + "\n")   # 命令前 40 字：定位哪类调用超时
     except OSError:   # arch-ok: 指标落盘失败不影响调用本身（只少一条统计）
         pass
 

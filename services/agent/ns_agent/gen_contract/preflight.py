@@ -110,6 +110,28 @@ def registered_identity_files() -> set[str]:
     return out
 
 
+def stale_face_slots(slots: list[dict]) -> list[str]:
+    """AUDIT-M A-01 / K-OPS-E29（总调度 11-02 17:1x）：身份脸只认 asset_refs.face_of 那一张——face 槽和脸板里标了 face 的格，
+    文件不等于该角色当前身份脸的列出来（旧脸、旧 plates、配方里写死的旧裁切都算）。项目 id 只从运行登记表读（hard_run），读不到抛异常"""
+    import json
+    from ns_agent import asset_refs as AR
+    proj = json.loads((ROOT / "config" / "pipeline" / "runs.json").read_text(encoding="utf-8")).get("primary")
+    cur: dict[str, str | None] = {}
+    bad = []
+    for s in slots:
+        items = [(s.get("character"), s.get("file") or s.get("path"))] if s.get("kind") == "face" else \
+            [(m.get("character"), m.get("file") or m.get("path")) for m in s.get("members") or [] if m.get("role") == "face"] \
+            if s.get("kind") == "faceboard" else []
+        for cid, f in items:
+            if not cid or not f:
+                continue
+            if cid not in cur:
+                cur[cid] = AR.face_of(proj, cid)
+            if cur[cid] and _relpath(f) != _relpath(cur[cid]):
+                bad.append(f"{cid} 用的是 {_relpath(f)}，当前身份脸是 {_relpath(cur[cid])}")
+    return bad
+
+
 def _kinds(rec: dict, *kinds) -> list[dict]:
     return [m for m in (rec.get("missing") or []) if m.get("kind") in kinds]
 
@@ -168,6 +190,9 @@ def check(req: dict) -> ContractResult:
                 add("I2", "fail", f"提示词矛盾：{'、'.join(clash)} 写了“不露脸”，但本镜他是露脸人物 / 脸部特写构图（K-REN-708，写作 / 导入格式问题）")
             elif lack:
                 add("I2", "fail", f"露脸的人没有身份脸参考槽：{'、'.join(lack)}（K-AST-263）")
+            elif stale_face_slots(slots):
+                # AUDIT-M A-01（总调度 11-02 17:1x）：原来只看“有没有身份脸槽”，登记过的旧脸也能过；身份脸只认 asset_refs.face_of 那一张（K-OPS-E29）
+                add("I2", "fail", "身份脸参考不是当前身份脸（只认 asset_refs.face_of）：" + "；".join(stale_face_slots(slots)))
             elif two and len(face_ids) < 2:
                 add("I2", "fail", f"提示词写了两张脸都入画，但身份脸参考只有 {len(face_ids)} 张（K-AST-263 / K-REN-705）")
             elif need_face and not faces:

@@ -4,8 +4,8 @@
 .vd.vd-md button { height: 32px; padding: 0 var(--sp-4); }
 .vd-yes { border: 1px solid var(--c-ok); background: var(--c-ok); color: var(--c-on-accent); }
 .vd-yes:hover { filter: brightness(1.08); }
-.vd-no { border: 1px solid var(--c-bad); background: transparent; color: var(--c-bad-text); }
-.vd-no:hover { background: var(--c-bad-soft); }
+.vd-edit { border: 1px solid var(--c-warn); background: transparent; color: var(--c-warn); }
+.vd-edit:hover { background: color-mix(in srgb, var(--c-warn) 14%, transparent); }
 .vd button:disabled { opacity: .5; cursor: default; }
 .vd-auto { font-size: var(--fs-xs); padding: 0 var(--sp-2); line-height: 24px; border-radius: var(--r-pill); background: var(--c-ok-soft); color: var(--c-ok-text); white-space: nowrap; }
 

@@ -286,7 +286,7 @@ function BatchDialog({ ep, scenes, onClose, onDone }: { ep: number; scenes: Scen
             ))}
           </div>
           <span className="v3p-muted v3p-small">
-            每个场景发一条：提示词 = 下面的剧本场景表原文（原样，不改写、不补全），不带参考图、不选底图；出图参数用{" "}
+            每个场景发一条：提示词 = 下面的剧本场景表原文（原样，不改写、不补全），不带参考图、不带底图；出图参数用{" "}
             {preset === undefined ? "…" : preset ? `默认预设「${preset.label}」` : "后端默认"}。结果进各场景编辑器的修改链，存版本 / 定稿仍由你点。
           </span>
           {ok.length > 0 && (

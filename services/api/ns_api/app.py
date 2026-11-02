@@ -108,12 +108,18 @@ from ns_api import revisions as REV  # noqa: E402  UX5-B P0 资产版本 / 依�
 app.include_router(REV.router)
 from ns_api import cuts as CUTS  # noqa: E402  UX5 成片页：成片列表 / 落后于定稿的镜头 / 合成新对照版（不覆盖）
 app.include_router(CUTS.router)
+from ns_api import cut_project as CUTP  # noqa: E402  CUTEDIT 成片页剪辑器：剪辑工程 / 导出定稿（异步）/ 时间线小图
+app.include_router(CUTP.router)
+from ns_api import ep_preview as EPPV  # noqa: E402  整集当前最新预览（连播本集）
+app.include_router(EPPV.router)
 from ns_api import revisions_p1 as REV1  # noqa: E402  UX6 资产二次修改 P1：set-current / 回滚 / 快照 / 保留旧版 / 成片过期 / LoRA 总表
 app.include_router(REV1.router)
 from ns_api import asset_center_p1 as ACP1  # noqa: E402  UX6 资产中心 B6–B10：版本链 / 另存 / 道具 / 音色提议 / 提示词模板
 app.include_router(ACP1.router)
 from ns_api import story_runs as STORY  # noqa: E402  UIRSI 新建剧本：提纲 → 写作链 P0→P4（异步、逐段可看可改、返修、送导入）
 app.include_router(STORY.router)
+from ns_api import script_library as SLIB  # noqa: E402  剧本库：剧集卡片 / 历史区 / 集列表 / 版本时间线 / 写作流水线（只读聚合）
+app.include_router(SLIB.router)
 from ns_api import script_autoflow as AUTOFLOW  # noqa: E402  HOLLYWOOD r8：新建剧本 → 可导入，全自动（tools/script_rsi/autoflow.py）
 app.include_router(AUTOFLOW.router)
 from ns_api import thumbs as THUMBS  # noqa: E402  UIRSI 缩略图（/api/thumb，缓存 data/_cache/thumbs）
@@ -147,6 +153,12 @@ from ns_api import character_hub as CHUB  # noqa: E402  ASSETUX 人物资产页�
 app.include_router(CHUB.router)
 from ns_api import asset_actions as AACT  # noqa: E402  ASSETUX L-120：选用 / 不选 / 移到回收区 统一动作
 app.include_router(AACT.router)
+from ns_api import frames_index as FIDX  # noqa: E402  ASSETUX 1b：“出图”页索引（全部集 × 每镜首尾帧当前版）
+app.include_router(FIDX.router)
+from ns_api import frame_edit_queue as FEQ  # noqa: E402  ASSETUX：镜头“修改”异步通道（立即 202 → 改写 → 检查 → producer 队列）+ 全系统出图队列
+app.include_router(FEQ.router)
+from ns_api import video_index as VIDX  # noqa: E402  NAVIA：“视频”页索引 GET /api/videos/overview
+app.include_router(VIDX.router)
 from ns_api import producer as PRODUCER  # noqa: E402  PRODUCER 制作监督：/api/producer/status、pause / resume / gate（读 data/producer/registry.json）
 app.include_router(PRODUCER.router)
 from ns_api import infra_status as INFRA  # noqa: E402  UIRSI r38 实时连接状态：/api/infra/status（只读看门狗 / 常驻健康状态文件，不在请求里 ssh）

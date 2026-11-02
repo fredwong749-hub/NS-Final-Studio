@@ -66,6 +66,7 @@ export type HubChar = {
   rejected?: Record<string, { reasons: string[]; note: string }>;
   /** 排期：每集这个人用哪套造型（registered = 逐镜登记的计数；override = 人物页整集覆盖） */
   schedule?: { ep: number; registered: Record<string, number>; override: string | null }[];
+  usage?: { ep: number; title: string; intimate_ep: boolean; scenes: { scene_id: string; name: string; place_kind: string | null; privacy: string | null; scene_type?: string | null; intimate: boolean; beats: number; est_s: number; time: string | null }[] }[];
 };
 export type HubListRow = { cid: string; name: string; face: FaceCand | null; looks: number; sheets: number; items: number; missing: number; sheet_only: number };
 export type HubList = { project: string; projects: string[]; characters: HubListRow[]; categories: { id: string; slot: string; name: string }[] };

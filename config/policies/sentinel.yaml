@@ -119,13 +119,15 @@ items:
       scores_file: data/rsi/scores.jsonl
       report: data/review_pages/rsi/index.html
       lines:
-        image:  {name: 出图, lead: IMGLAB, aliases: ["1", 线1, img, image, 出图], target: 75}
-        video:  {name: 视频, lead: VIDLAB, aliases: ["2", 线2, vid, video, 视频], target: 60}
-        script: {name: 提纲→剧本→分镜, lead: HOLLYWOOD, aliases: ["3", 线3, script, 剧本, hollywood], target: 70}
-        ui:     {name: UI, lead: UIRSI, aliases: ["4", 线4, ui, UI], target: 90}
-        system: {name: 系统代码, lead: SYSARCH, aliases: ["5", 线5, system, code, 系统, sysarch], target: 60}
+        image:  {name: 出图, lead: IMGLAB, aliases: ["1", 线1, img, image, 出图], target: 100}
+        video:  {name: 视频, lead: VIDLAB, aliases: ["2", 线2, vid, video, 视频], target: 100}
+        script: {name: 提纲→剧本→分镜, lead: HOLLYWOOD, aliases: ["3", 线3, script, 剧本, hollywood], target: 100}
+        ui:     {name: UI, lead: UIRSI, aliases: ["4", 线4, ui, UI], target: 100}
+        system: {name: 系统代码, lead: SYSARCH, aliases: ["5", 线5, system, code, 系统, sysarch], target: 100}
+        workflow: {name: 工作流, lead: DEBUG-RSI, aliases: [workflow, 工作流], target: 100}
+        gpu: {name: GPU 管理, lead: FACTORY, aliases: [gpu, GPU 管理], target: 100}
     source: 总调度 11-02 03:5x（L-112，docs/master/RSI_PROGRAM.md）：五条 RSI 线，牵头人每轮写 data/rsi/scores.jsonl（时间、line、score、分项、版本号）；某线 2 小时没有新分数或连续 3 轮不升 → 工单派牵头人
-    note: target = 今晚目标折算成的总分（总调度 11-02 04:1x 按 docs/master/RSI_PROGRAM.md 定：出图 75、视频 60、剧本 70、UI 90、系统代码 60）；scores.jsonl 记录里带 target 时以最新一条为准
+    note: target 一律 100（总调度 11-02 17:4x SCORECARD：项目方要七项全到 100 分；⤴ 取代 04:1x 的今晚目标 75 / 60 / 70 / 90 / 60）；scores.jsonl 记录里带 target 时以最新一条为准
     enforced_by: tools/sentinel/probes.py:p_s14
     status: code_reads
     owner: SENTINEL
@@ -247,5 +249,32 @@ items:
     source: 总调度转 FACTORY 口径（11-02 14:3x）：两台各测常驻 CLIP /health（单线程，忙时 3 s 会超时，超时给 30 s 别误报）、pid 文件对应进程活着、events 里 reason=exit_rc_3 一小时 > 3 次（反复重载）→ 开单派 FACTORY
     note: 单独一次 rssh 调用（不并进每拍的合并调用，免得 30 s 健康检查拖垮其它探针），5 分钟一次；健康检查超时只记“慢”，进程不在才算挂
     enforced_by: tools/sentinel/probes.py:p_s25
+    status: code_reads
+    owner: SENTINEL
+  SC_scorecard:
+    value:
+      every_s: 1200
+      cap_when_unmeasured: 95
+      owners: {image: PROMPTFIX / VQAGATE / DETECT-S, video: DEBUG-RSI / ASSEMBLY / CUTEDIT, script: HOLLYWOOD / SCRIPTWRITER, ui: NAVIA / ASSETUX / UISCRIPT / POSTER,
+               workflow: DEBUG-RSI / FACTORY, gpu: FACTORY / NETFIX / SENTINEL, system: AUDIT-M / FACTORY}
+      ui_weights: {topbar: 25, no_blank: 20, clean: 20, no_jargon: 15, feedback: 20}
+      ui_unmeasured: [页面之间深链接顺畅, 只有“用这张”+“修改”, 提交类操作 300 ms 内收下 + 全局队列, 只显示通过验收的图]
+      ui_pages: ["/#/overview", "/#ep01", "/#/script-create?new=1", "/#/assets?type=people", "/#/sound", "/#/cut", "/#/settings"]
+      ui_jargon_words: [preflight, postflight, seed, lane, sha, json, take, VQA, ComfyUI, dispatch, producer, registry, workflow, prompt, LoRA, Q1, Q2, Q9, V6, V7, rsi, sv-]
+      ui_feedback_zero_at: 5
+      ui_measure_every_s: 3600
+      ui_measure_max_age_s: 5400
+      workflow_weights: {unattended: 35, no_stuck: 25, no_dup: 25, auto_requeue: 15}
+      workflow_unmeasured: [每集完成自动回报, 第二季暂停状态只认一个来源]
+      dup_zero_at: 5
+      gpu_weights: {productive: 40, rssh: 20, deploy_stop: 15, resident: 15, lend_expiry: 10}
+      gpu_unmeasured: [没有因分区错误或旁路导致的重复出图（分区唯一来源落地后接 S17 按分区拆）]
+      gpu_productive_target_pct: 80
+      rssh_target: 0.99
+      deploy_stop_max_s: 120
+      deploy_pause_by: [RESTART_QUEUE, restart_producer, deploy, SERVER_RESIDENT]
+    source: 总调度 11-02 17:4x（项目方：“UI、剧本、工作流、rendering、GPU 管理、代码全都要 100 分，没到自动迭代”）；docs/master/SCORECARD.md 附录 A
+    note: 出图 / 视频 / 剧本 / 代码沿用 RSI_PROGRAM 现有打分器重算；UI / 工作流 / GPU 按 SCORECARD“100 分标准”拆分项。未测分项按 0 计入；SCORECARD 标准里还不能代码测的条目列在 *_unmeasured，存在时总分封顶 95。改权重 / 线要总调度批准并在 SCORECARD.md 留痕
+    enforced_by: tools/sentinel/scorecard.py:compute
     status: code_reads
     owner: SENTINEL

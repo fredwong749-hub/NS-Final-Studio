@@ -203,13 +203,24 @@ def verify(host: str, eps: list[int] | None = None, write_ready: bool = False) -
         b = [(r, srv["files"].get(r)) for r in s.get("refs") or []]
         if a != b:
             mism[sid] = {"laptop": [x[0] for x in a], "server": [x[0] for x in b]}
+    pmism = prompt_mismatch(need["shots"], srv["shots"])
     res = {"host": host, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "total": srv["total"], "server_blocked": srv["blocked"],
            "laptop_blocked": need["blocked"], "refs_mismatch": len(mism), "mismatch": mism,
-           "ok": srv["total"] > 0 and srv["blocked"] == 0 and not mism}
+           "prompt_mismatch": pmism, "ok": srv["total"] > 0 and srv["blocked"] == 0 and not mism and not pmism}
     if write_ready:
         res["assets_ready"] = write_ready_flag(host, res)
-    _save(host, "verify", {k: v for k, v in res.items() if k != "mismatch"} | {"mismatch_shots": sorted(mism)[:30]})
+    _save(host, "verify", {k: v for k, v in res.items() if k != "mismatch"} | {"mismatch_shots": sorted(mism)[:30]})   # prompt_mismatch 原样保留
     return res
+
+
+def prompt_mismatch(laptop_shots: dict, server_shots: dict) -> dict:
+    """ALIGNMENT 第 2 步（总调度 17:1x）：同一镜笔记本和服务器编译出的提示词 sha 必须相同 → {sid: {laptop, server}}（两边都有 sha 才比）"""
+    out = {}
+    for sid, v in laptop_shots.items():
+        a, b = v.get("prompt_sha"), (server_shots.get(sid) or {}).get("prompt_sha")
+        if a and b and a != b:
+            out[sid] = {"laptop": a, "server": b}
+    return out
 
 
 def write_ready_flag(host: str, v: dict, path: Path | None = None) -> dict:

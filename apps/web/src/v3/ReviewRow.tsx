@@ -16,6 +16,7 @@ import { useStudio, type Studio } from "../store";
 import type { ShotSummary, SopShot } from "../types";
 import { expectedLast, shotLine } from "../util";
 import { letterOf } from "./LeftRail.helpers";
+import { leicaLine } from "./lens";
 import { badOf, camRaw, frameState, shotMeta, shotStatus, staleOf, videoBlock, breatheDelay, useLens } from "./status";
 import { useUi } from "./ui.helpers";
 import { useEdit } from "./edit/state";
@@ -167,8 +168,8 @@ function Frame({ s, stage, st }: { s: ShotSummary; stage: "image" | "last"; st: 
           (!url && rejected.length > 0 && cstage) || hasTag(fs) || hint ? (
             <>
               {!url && rejected.length > 0 && cstage && (
-                <button type="button" className="v3-cand-old" onClick={(e) => (e.stopPropagation(), setBox(true))} title={`${rejected[0].why_not ?? "不合格"}：点开看（不作候选）`}>
-                  旧图 ×{rejected.length}
+                <button type="button" className="v3-cand-old" onClick={(e) => (e.stopPropagation(), setBox(true))} title={`没通过检查的旧版本（${rejected[0].why_not ?? "不合格"}），点开看历史`}>
+                  历史 ×{rejected.length}
                 </button>
               )}
               <StateTag state={fs} why={fs === "bad" ? badOf(s, d, stage) ?? "" : staleOf(s, d, stage).filter(Boolean).join("；")} />
@@ -377,7 +378,7 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
   // UM-P0-01：现在待你看的是哪一格的哪一版
   const contractOk = (stage: "image" | "last", n: number | null) => n != null && cands?.[s.id]?.[stage]?.takes.find((x) => x.n === n)?.contract === "pass";
   const vtakeN = d?.takes?.active?.video ?? s.latest_take?.video ?? null;
-  // UIRSI2 L-116：机签通过的镜也保留“用这张 / 不要”（不删功能），但收成灰色小按钮、不提示（quiet）
+  // UIRSI2 L-116：机签通过的镜也保留“用这张 / 修改”（L-123：没有“不要”），收成灰色小按钮、不提示（quiet）
   const pend: { stage: VStage; n: number; auto?: boolean; quiet?: boolean; accept?: () => Promise<unknown> } | null = status.key === "machine_first" && s.first_frame_take != null
     ? { stage: "first", n: s.first_frame_take, quiet: true }
     : status.key === "machine_last" && s.last_frame_take != null
@@ -395,7 +396,7 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
   // PW-017：整行不闪；状态胶囊自己闪（文字真变了才闪）
   const statusFlash = useFlash([s.review?.state, status.text]);
   const meta = shotMeta(s); // 场景名只在人物行的场景小卡里出现一次
-  const lens = useLens(s.id); // r45 · L-113：每镜一行加“镜头”字段
+  const lens = leicaLine(useLens(s.id)); // r45 · L-113：每镜一行加“镜头”字段
   const film = filmOn();
   const filmH = Math.round(Math.max(427, Math.min(569, window.innerWidth * 0.296))); // 1440 宽每格 ≥ 240 px、1920 宽 ≥ 320 px（9:16）
   const procTakes = film ? [...(rowCands?.[s.id]?.image?.takes ?? []), ...(rowCands?.[s.id]?.last?.takes ?? [])].slice(-8).reverse() : [];
@@ -431,7 +432,7 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
           <FilmStrip
             H={filmH}
             thumbW={480}
-            kk={`EASTMAN 2383  ${short(s.id)}`}
+            kk={`KODAK VISION3 500T 5219  ${short(s.id)}`}
             frames={[
               { key: "f", src: s.first_frame, ed: s.first_frame ? `首帧 · 定稿 #${s.first_frame_take ?? "?"}` : "首帧 · 未出", empty: "首帧未出", cap: `${short(s.id)} · 首帧` },
               { key: "l", src: s.last_frame_target, ed: s.last_frame_target ? `尾帧 · 定稿 #${s.last_frame_take ?? "?"}` : "尾帧 · 未出", empty: "尾帧未出", cap: `${short(s.id)} · 尾帧` },
@@ -466,6 +467,15 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
               详情 ▸
             </button>
           )}
+          {/* NAVIA：这一镜在“出图 / 视频”页的同一个抽屉里（深链接；浏览器后退回到这一行） */}
+          <span className="v3-xlinks">
+            <a href={`#/frames?ep=${Number(/^ep(\d+)/.exec(s.id)?.[1] ?? 0)}&shot=${s.id}`} onClick={(e) => e.stopPropagation()} title="在“出图”页打开这一镜的首尾帧抽屉">
+              出图 ↗
+            </a>
+            <a href={`#/videos?ep=${Number(/^ep(\d+)/.exec(s.id)?.[1] ?? 0)}&shot=${s.id}`} onClick={(e) => e.stopPropagation()} title="在“视频”页打开这一镜的视频抽屉">
+              视频 ↗
+            </a>
+          </span>
           {!more && s.characters.some((c) => c.has_override) && <small className="v3-look-ovr">本镜造型</small>}
           <span className="v3-grow" />
           <span className={`v3-status-wrap${statusFlash ? " live-flash" : ""}`} title={mainTip(rowCands?.[s.id]?.status)}>
@@ -605,9 +615,9 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
         )}
       </div>
       <div className="v3-act" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
-        {/* UM-P0-01：待审对象一对明确按钮（✓ 用这张 / ✗ 不要）；“定稿并出下一步”收进 ⋯ */}
+        {/* UM-P0-01：待审对象一对明确按钮（用这张 / 修改）；“定稿并出下一步”收进 ⋯ */}
         {pend ? (
-          <span className={pend.quiet ? "v3-quiet" : undefined} title={pend.quiet ? "机签已通过并设为当前，不需要你点；要手动定稿或不要，仍可用这两个按钮" : undefined}>
+          <span className={pend.quiet ? "v3-quiet" : undefined} title={pend.quiet ? "机签已通过并设为当前，不需要你点；要手动定稿或改一句话，仍可用这两个按钮" : undefined}>
             <Verdict shot={s.id} stage={pend.stage} n={pend.n} auto={pend.auto} onAccept={pend.accept} />
           </span>
         ) : (
@@ -635,14 +645,18 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
               {/* 回退补回（regress_r1 #7）：三档重出写清楚各动哪一格 */}
               <button onClick={() => st.requestRender(s.id, "image")} title="重画首帧；之后尾帧、视频要跟着重出">{s.first_frame ? "重画首帧（尾帧、视频随后要重出）" : "出首帧"}</button>
               <button disabled={!s.first_frame} onClick={() => st.requestRender(s.id, "last")} title="首帧不动，只重编尾帧">{s.last_frame_target ? "保留首帧，重编尾帧" : "出尾帧"}</button>
-              <button disabled={!!vblk} title={vblk ?? "首尾帧不动，只重出视频"} onClick={() => st.requestRender(s.id, "video")}>
-                只重出视频（首尾帧不动）{vblk ? `（${vblk}）` : ""}
-              </button>
+              {/* L-123：条件不满足 = 按钮不出现（不写条件说明） */}
+              {!vblk && (
+                <button title="首尾帧不动，只重出视频" onClick={() => st.requestRender(s.id, "video")}>
+                  只重出视频（首尾帧不动）
+                </button>
+              )}
               <i />
-              <button disabled={!!pblk} title={pblk ? `不能通过：${pblk}` : "通过这版视频"} onClick={() => void st.setReview([s.id], "passed")}>
-                通过{pblk ? `（${pblk}）` : ""}
-              </button>
-              <button onClick={() => st.setRejectFor([s.id])}>打回</button>
+              {!pblk && (
+                <button title="用这版视频" onClick={() => void st.setReview([s.id], "passed")}>
+                  用这版视频
+                </button>
+              )}
             </div>
           )}
         </Pop>

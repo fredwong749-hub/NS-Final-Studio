@@ -1009,7 +1009,8 @@ function useStudioState() {
   }, []);
 
   /** 通过前必须完整看过当前视频（规范 B11）；没有视频时按首帧审核 */
-  const canPass = useCallback((s: ShotSummary | undefined) => !!s && (!s.video || watched.has(s.video)), [watched]);
+  // L-123（项目方 16:4x）：不设“看完才能通过”的门槛；没看完就点“用这版”是他的选择
+  const canPass = useCallback((s: ShotSummary | undefined) => !!s, []);
 
   const setReview = useCallback(
     async (ids: string[], state: ReviewState, reason = "") => {
@@ -1035,7 +1036,7 @@ function useStudioState() {
           bad.push(`${id}：${(e as Error).message}`);
         }
       }
-      const label = { passed: "通过", rejected: "打回", unreviewed: "未审" }[state];
+      const label = { passed: "通过", rejected: "待修改", unreviewed: "未审" }[state];
       if (ok.length) notify(ids.length === 1 ? `${ok[0]} 已标为${label}` : `${ok.length} 镜已标为${label}`);
       // UIMASTER（批量通过条，项目方动作）：视频没完整看过的镜头不能通过——不只报错，直接打开串播审片停在第一镜，看完按 A 就通过（说明 + 一键解决）
       if (unwatched.length) {

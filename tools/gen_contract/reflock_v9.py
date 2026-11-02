@@ -45,7 +45,8 @@ def jobs():
     for sid in SHOTS:
         shot = next(s for s in ep.shots if f"ep01-S{s.index}" == sid)
         on = [c.name for c in shot.cast if c.presence == "在画"]
-        faces = [IJ.CORE_FACES[n] for n in on if n in IJ.CORE_FACES]
+        cf = IJ.core_faces()                       # K-OPS-E29：身份脸唯一入口 asset_refs.face_of
+        faces = [cf[n] for n in on if n in cf]
         vs = [("vR", {}), ("vN", None)] + ([("vRb", {"two_person": "both_faces"})] if len(on) > 1 else [])
         for vid, kw in vs:
             if kw is None:

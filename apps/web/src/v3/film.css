@@ -3,7 +3,7 @@
    · 总览：暗场，每集一条真实比例 35mm 正片（片基黑、KS 齿孔、片边暖灰小字、片头竖写 EPxx），一屏两列 × 五行 / 大图一列；悬停 420px 放大镜带片边信息。
    · 单集（画布每镜一行）：首帧 · 尾帧 · 视频三帧在同一段片上（片基 + 上下齿孔），右侧字段（含 D-LENS 镜头、D-STATUS 状态原因）。
    · 状态只用片窗角上一个小圆点；图片本身不加滤镜。 ---------- */
-:root { --fs-page: #080807; --fs-base: #15120f; --fs-edge: #8c7347; --fs-t1: #e9e6e0; --fs-t2: rgba(233, 230, 224, .62); --fs-t3: rgba(233, 230, 224, .4); --fs-mono: "IBM Plex Mono", Consolas, "Cascadia Mono", monospace; }
+:root { --fs-page: #080807; --fs-base: #0b0b0c; --fs-edge: #8a8780;   /* 项目方 11-02 16:4x：“底片颜色太黄了，我喜欢暗黑色的底片”——片基中性近黑、片边字冷灰 */ --fs-t1: #e9e6e0; --fs-t2: rgba(233, 230, 224, .62); --fs-t3: rgba(233, 230, 224, .4); --fs-mono: "IBM Plex Mono", Consolas, "Cascadia Mono", monospace; }
 /* 片条（总览 / 单集共用组件 FilmStrip） */
 /* FILMUI r3（项目方 12:0x“胶片 design 感觉不太像”）：对照放映拷贝近照修正——片基深炭黑偏暖（12:0x“胶片太亮了，暗黑调”）；KS 齿孔只透很弱的暖光；
    帧间黑色帧线约 3.5% 帧宽；片窗四角轻微圆角；片边字暗琥珀等宽、紧贴齿孔外侧；KeyKode 人可读码 + 条码；高光压到几乎看不见、去掉颗粒纹理；画面保持原色，是整页最亮的东西。 */
@@ -56,7 +56,7 @@ html.ui-film .v3-row .v3-frames { position: relative; gap: 2px; padding: 26px 1p
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='26'%3E%3Crect x='6.5' y='9' width='9' height='6.5' rx='1.4' fill='%232b2825'/%3E%3C/svg%3E"),
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='26'%3E%3Crect x='6.5' y='10.5' width='9' height='6.5' rx='1.4' fill='%232b2825'/%3E%3C/svg%3E");
   background-repeat: repeat-x, repeat-x; background-position: 0 0, 0 100%; background-size: 22px 26px, 22px 26px; }
-html.ui-film .v3-row .v3-frames::before { content: "EASTMAN 2383"; position: absolute; left: 8px; top: 3px; font: 500 8.5px/1 var(--fs-mono); color: var(--fs-edge); opacity: .75; letter-spacing: .12em; }
+html.ui-film .v3-row .v3-frames::before { content: "KODAK VISION3 500T 5219"; position: absolute; left: 8px; top: 3px; font: 500 8.5px/1 var(--fs-mono); color: var(--fs-edge); opacity: .75; letter-spacing: .12em; }
 html.ui-film .v3-row .v3-frames .v3-frame, html.ui-film .v3-row .v3-frames > * { border-radius: 0; border: 0; box-shadow: none; background: #0a0a0a; }
 html.ui-film .v3-row .v3-frames .v3-frame > img { border-radius: 0; }
 html.ui-film .v3-row .v3-frames .v3-frame-none { color: var(--fs-t3); font-family: var(--fs-mono); letter-spacing: .12em; }
@@ -145,3 +145,30 @@ html.ui-film .v3-row.film-row .v3-info { display: flex; flex-direction: column; 
 html.ui-film .fs-img > .sea-dot.d-run { background: var(--c-warn, #d4a24c); animation: fs-breathe 2.4s ease-in-out infinite; }
 @keyframes fs-breathe { 0%, 100% { opacity: .35; box-shadow: 0 0 0 2px rgba(0, 0, 0, .55); } 50% { opacity: 1; box-shadow: 0 0 0 2px rgba(0, 0, 0, .55), 0 0 8px 2px rgba(212, 162, 76, .55); } }
 @media (prefers-reduced-motion: reduce) { html.ui-film .fs-img > .sea-dot.d-run { animation: none; opacity: .9; } }
+
+/* ASSEMBLY 11-02：整集连播播放器（播拼好的整集预览；时间轴按镜分段，占位灰） */
+.fo-pv { justify-content: flex-start; padding-top: 52px; gap: 10px; }
+.fo-pv-top { position: absolute; left: 0; right: 0; top: 0; height: 44px; display: flex; align-items: center; gap: 14px; padding: 0 18px; color: var(--fs-t1); font-size: 13px; }
+.fo-pv-top .mono { font: 500 12px var(--fs-mono); color: var(--fs-edge); letter-spacing: .15em; }
+.fo-pv-meta { color: var(--fs-t3); font-size: 12px; }
+.fo-pv-sp { flex: 1; }
+.fo-pv-sw { display: flex; align-items: center; gap: 5px; color: var(--fs-t2); font-size: 12px; cursor: pointer; }
+.fo-proj-x2 { border: 0; background: none; color: var(--fs-t3); font: 12px var(--fs-mono); cursor: pointer; }
+.fo-pv-media { position: relative; height: calc(100vh - 210px); }
+.fo-pv-media video { background: #000; }
+.fo-pv-sub { position: absolute; left: 6%; right: 6%; bottom: 14%; text-align: center; color: #fff; font-size: 18px; text-shadow: 0 1px 3px #000, 0 0 6px #000; pointer-events: none; }
+.fo-pv-cap { color: var(--fs-t2); font-size: 12px; height: 16px; }
+.fo-pv-tl { position: relative; display: flex; gap: 2px; width: min(900px, 92vw); height: 26px; }
+.fo-pv-tl .seg { flex-basis: 0; min-width: 0; border: 0; border-radius: 2px; font: 500 10.5px var(--fs-mono); color: #111; cursor: pointer; overflow: hidden; background: #d9d4c7; }
+.fo-pv-tl .seg.k-best_effort { background: #d4a24c; }
+.fo-pv-tl .seg.k-placeholder { background: #5d5d5d; color: #ccc; }
+.fo-pv-tl .seg.on { outline: 2px solid #fff; outline-offset: 1px; }
+.fo-pv-head { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #ff5a4f; pointer-events: none; }
+.fo-pv-leg { display: flex; align-items: center; gap: 6px; color: var(--fs-t3); font-size: 11px; }
+.fo-pv-leg i { display: inline-block; width: 12px; height: 8px; border-radius: 2px; margin-left: 10px; background: #d9d4c7; }
+.fo-pv-leg i.k-best_effort { background: #d4a24c; }
+.fo-pv-leg i.k-placeholder { background: #5d5d5d; }
+.fo-pv-stale { position: absolute; right: 18px; top: 52px; z-index: 2; display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 4px; background: rgba(40, 32, 18, .92); color: #e8c987; font-size: 12px; }
+.fo-pv-stale button, .fo-pv-empty button { border: 1px solid #8a7a52; background: none; color: #e8c987; border-radius: 3px; padding: 2px 8px; cursor: pointer; font-size: 12px; }
+.fo-pv-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #d4a24c; margin-right: 6px; animation: fs-breathe 2.4s ease-in-out infinite; }
+.fo-pv-empty { color: var(--fs-t2); font-size: 14px; text-align: center; line-height: 2.2; margin-top: 18vh; }

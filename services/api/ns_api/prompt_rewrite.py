@@ -20,7 +20,7 @@ SYSTEM_FILE = ROOT / "config" / "recipes" / "regen_prompt_rewrite.md"
 EDIT_FILE = ROOT / "config" / "recipes" / "edit_prompt_rewrite.md"
 # L-120：所有带提示词的入口都走改写。kind → 系统提示词文件（再生成一族共用 regen 文件；编辑 / 新造型 / 新单品用 edit 文件）
 KIND_FILES = {"sheet": "SYSTEM_FILE", "face": "SYSTEM_FILE", "item": "SYSTEM_FILE", "scene_plate": "SYSTEM_FILE",
-              "edit_mask": "EDIT_FILE", "new_look": "EDIT_FILE", "new_item": "EDIT_FILE"}
+              "edit_mask": "EDIT_FILE", "new_look": "EDIT_FILE", "new_item": "EDIT_FILE", "shot_frame": "EDIT_FILE"}
 LEDGER = ROOT / "data" / "pipeline" / "ledger.jsonl"
 TAG = "regen_rewrite"
 BUDGET_USD_PER_DAY = 2.0
@@ -65,6 +65,14 @@ def build_user(kind: str, owner_text: str, ctx: dict) -> str:
         rows.append(f"场景：{ctx['scene']}")
     if ctx.get("region"):
         rows.append(f"项目方框选的区域（相对整张图的位置和大小）：{ctx['region']}")
+    if ctx.get("shot"):
+        rows.append(f"镜头：{ctx['shot']}（{ctx.get('stage') or ''}）")
+    if ctx.get("cast"):
+        rows.append(f"这一镜的人物和站位：{ctx['cast']}")
+    if ctx.get("base_prompt"):
+        rows.append(f"这一镜当前的出图提示词（只供你理解画面，输出里不要整段重抄）：{str(ctx['base_prompt'])[:900]}")
+    if ctx.get("fail_reason"):
+        rows.append(f"上一次你写的修改要求没通过系统检查，原因：{ctx['fail_reason']}。请按这个原因改写，仍然要完成项目方的原话。")
     if ctx.get("gear"):
         rows.append(f"项目方另附装备参考图（模型会看到，作为“取这一件”的参考）：{'、'.join(ctx['gear'])}")
     rows.append(f"项目方原话：{owner_text.strip()}")

@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import time
 import sys
 from pathlib import Path
 
@@ -36,8 +37,53 @@ except (OSError, ValueError, RuntimeError):   # arch-ok: 分区读不到 → 用
     pass
 
 
+_OWN_SIG = None
+
+
+def _reload_own() -> None:
+    """A-06（AUDIT-M / NETFIX 11-02）：分区文件变了就重读（原来只在 import 时读一次，puller 常驻进程一直用启动时的快照）"""
+    global OWN_IMG, OWN_VID, OWN, _OWN_SIG
+    if os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get("NETFIX_TEST_RELOAD"):
+        return                                    # 单元测试自己设 OWN_IMG / OWN_VID，不读真机分区
+    try:
+        sys.path.insert(0, str(ROOT / "tools/factory"))
+        import state_paths as _SP
+        f = _SP.state_path("netfix/partition") if _SP.state_path("netfix/partition").is_file() else _SP.legacy_path("netfix/partition")
+        sig = (str(f), f.stat().st_mtime)
+        if sig == _OWN_SIG:
+            return
+        part = _SP.read_state("netfix/partition")
+        OWN_IMG = {h: {int(x) for x in v} for h, v in (part.get("images") or {}).items() if h != "laptop"} or OWN_IMG
+        OWN_VID = {h: {int(x) for x in v} for h, v in (part.get("video") or {}).items() if h != "laptop"} or OWN_VID
+        OWN = {h: OWN_IMG.get(h, set()) | OWN_VID.get(h, set()) for h in set(OWN_IMG) | set(OWN_VID)}
+        _OWN_SIG = sig
+    except (OSError, ValueError, RuntimeError):   # arch-ok: 分区读不到 → 沿用上一次的归属（显式回退）
+        pass
+
+
+VIDEO_STAGES = {"video"}
+
+
+def own_stages(host: str, ep: int) -> set:
+    """A-06 ②：按 stage 判归属——一个镜的 takes.json 里图归 images 分区那台、视频归 video 分区那台（原来整份按 images 判，
+    ep02 图改划 gpu33 后，gpu36 上视频的作废 / 清空当前全被 skipped:不归这台，FEEDBACK 11-02 ep02-S3）"""
+    _reload_own()
+    out = set()
+    if ep in OWN_IMG.get(host, set()):
+        out |= {"image", "last"}
+    if ep in OWN_VID.get(host, set()):
+        out |= VIDEO_STAGES
+    return out
+
+
 def owns(host: str, rel: str, ep: int) -> bool:
-    """data/renders/**、data/producer/** 是出图侧 → images 归属；其余（video / episodes / music / review）→ video 归属"""
+    """data/renders/**、data/producer/** 是出图侧 → images 归属；其余（video / episodes / music / review）→ video 归属。
+    例外：takes.json 两台都可能有份（按 stage 在 merge_takes 里分），渲染目录里的视频文件归 video 分区"""
+    _reload_own()
+    if rel.startswith("data/renders/") and rel.endswith("/takes.json"):
+        return bool(own_stages(host, ep))
+    if rel.startswith("data/renders/") and (rel.endswith("/video.mp4") or "/takes/video_" in rel):
+        return ep in OWN_VID.get(host, set())
     m = OWN_IMG if rel.startswith(("data/renders/", "data/producer/")) else OWN_VID
     return ep in m.get(host, set())
 SKIP_NAMES = {"control.json", "heartbeat.json", "producer.pid", "registry.json", "night.pid"}
@@ -156,8 +202,12 @@ def backup(rel: str):
 LOCAL_STICKY = ("quarantined",)       # 本地对版本的处置，服务器那份永远不能盖掉（UIRSI r42：整份覆盖冲掉了 72 个“已隔离”标记）
 
 
-def merge_takes_docs(r: dict, l: dict) -> tuple[dict, int, int, dict]:
-    """merge_takes 的纯函数版：远端 r 并进本地 l → (合并后, 新增, 更新, 换号表 {(stage, 远端n): 本地n})"""
+def merge_takes_docs(r: dict, l: dict, stages: set | None = None, base: dict | None = None) -> tuple[dict, int, int, dict]:
+    """merge_takes 的纯函数版：远端 r 并进本地 l → (合并后, 新增, 更新, 换号表 {(stage, 远端n): 本地n})。
+    stages（NETFIX 11-02 A-06）：只收这些 stage 的版本和指针（另一台负责的 stage 一概不动）；None = 全收（旧行为）。
+    base：上次从这台收下的同一份 takes.json——它有、这次没有的 active / locked 键 = 服务器清空了当前版，本地跟着清（结果里 _cleared 列出）"""
+    if stages is not None:
+        r = {**r, "takes": [t for t in r.get("takes") or [] if t.get("stage") in stages]}
     lt = {(t.get("stage"), t.get("n")): t for t in l.get("takes") or []}
     # K-OPS-W27（11-02 ep08/09 两台各自往上编号）：同一 (stage, n) 在两边可能是不同的图。先按文件认版本：
     # 本地已有同文件的版本 → 用本地编号；编号撞了但文件不同 → 远端这条改用新编号追加（记 renumbered），active / locked 跟着换号
@@ -199,8 +249,16 @@ def merge_takes_docs(r: dict, l: dict) -> tuple[dict, int, int, dict]:
     out_takes.sort(key=lambda t: (str(t.get("stage")), int(t.get("n") or 0)))
     quarantined = {(t.get("stage"), t.get("n")) for t in out_takes if t.get("quarantined")}
     out = {**l, **{k: v for k, v in r.items() if k != "takes"}}
+    cleared = []
     for key in ("active", "locked"):
         sv, lv = dict(r.get(key) or {}), dict(l.get(key) or {})
+        if stages is not None:
+            sv = {st: n for st, n in sv.items() if st in stages}
+            bv = {st: n for st, n in dict((base or {}).get(key) or {}).items() if st in stages}
+            for st in bv:                                  # 祖先有、服务器现在没有 → 服务器清空了这个 stage 的当前版
+                if st not in sv and st in lv:
+                    lv.pop(st)
+                    cleared.append((key, st))
         sv = {st: remap.get((st, n), n) if not isinstance(n, dict) else n for st, n in sv.items()}   # 远端换了号的版本，指针跟着换
         if not sv and not lv:
             continue
@@ -213,6 +271,8 @@ def merge_takes_docs(r: dict, l: dict) -> tuple[dict, int, int, dict]:
                     merged.pop(stage, None)
         out[key] = merged
     out["takes"] = out_takes
+    if cleared:
+        out["_cleared"] = cleared
     return out, added, updated, remap
 
 
@@ -229,13 +289,30 @@ def _sid_run_of(dst: Path) -> tuple[str, str | None] | None:
     return None
 
 
-def merge_takes(src: Path, dst: Path, dry: bool = False) -> str:
+def _quarantine_current(dst: Path, cleared: list) -> list:
+    """服务器清空了当前视频：笔记本渲染目录里的 video.mp4 移进 data/_quarantine/netfix_sync_<日>/（不删）"""
+    moved = []
+    if any(st in VIDEO_STAGES for key, st in cleared if key == "active"):
+        v = dst.parent / "video.mp4"
+        if v.exists():
+            q = ROOT / "data/_quarantine" / time.strftime("netfix_sync_%Y%m%d") / v.relative_to(ROOT)
+            q.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(v), str(q))
+            moved.append(str(q.relative_to(ROOT)))
+    return moved
+
+
+def merge_takes(src: Path, dst: Path, dry: bool = False, host: str | None = None, ep: int | None = None) -> str:
     """data/renders/**/takes.json 按版本（stage, n）逐条合并（UIRSI r42，总调度 01:3x）：
       · 服务器有、本地没有的版本 → 收；本地有、服务器没有的 → 留；
       · 两边都有 → 服务器字段覆盖同名字段（契约 / 打分是服务器上算的），本地独有字段保留，LOCAL_STICKY（已隔离）一律用本地的；
       · 顶层（active / locked / master_gate …）同理按键合并；但服务器的 active / locked 若指向本地已隔离的版本，保留本地的值；
       · restore_log 等本地独有的顶层键保留"""
     r = json.loads(src.read_text(encoding="utf-8"))
+    stages = own_stages(host, ep) if host and ep else None
+    base_p = (PULL / "_base" / host / dst.relative_to(ROOT)
+              if host and dst.is_relative_to(ROOT) and not os.environ.get("PYTEST_CURRENT_TEST") else None)   # 测试不读写真机祖先
+    base = json.loads(base_p.read_text(encoding="utf-8")) if base_p and base_p.exists() else None
     sid_run = _sid_run_of(dst)
     if sid_run and not dry:                  # K-OPS-W29：仓库内的 takes.json 只经 mutate_takes 写（锁里现读本地再并，不会盖掉并发写入）
         sys.path.insert(0, str(ROOT / "services/render_router"))
@@ -243,13 +320,16 @@ def merge_takes(src: Path, dst: Path, dry: bool = False) -> str:
         cnt = {}
 
         def _fn(local):
-            o, a, u, _rm = merge_takes_docs(r, local if local.get("takes") is not None else {"takes": []})
-            cnt.update(a=a, u=u)
+            o, a, u, _rm = merge_takes_docs(r, local if local.get("takes") is not None else {"takes": []}, stages, base)
+            cnt.update(a=a, u=u, cleared=o.pop("_cleared", []))
             return o
         P.mutate_takes(sid_run[0], _fn, op="merge_pull.merge_takes", by="ops/offline/merge_pull.py", run=sid_run[1])
-        return f"takes+{cnt.get('a', 0)}~{cnt.get('u', 0)}"
+        _save_base(base_p, r)
+        moved = _quarantine_current(dst, cnt.get("cleared") or [])
+        return f"takes+{cnt.get('a', 0)}~{cnt.get('u', 0)}" + (f" cleared={cnt['cleared']} moved={moved}" if cnt.get("cleared") else "")
     l = json.loads(dst.read_text(encoding="utf-8")) if dst.exists() else {"takes": []}
-    out, added, updated, _remap = merge_takes_docs(r, l)
+    out, added, updated, _remap = merge_takes_docs(r, l, stages, base)
+    cleared = out.pop("_cleared", [])
     if not dry:
         if dst.exists():
             backup(dst.relative_to(ROOT).as_posix())
@@ -257,7 +337,21 @@ def merge_takes(src: Path, dst: Path, dry: bool = False) -> str:
         tmp = dst.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
         os.replace(tmp, dst)
+        _save_base(base_p, r)
+        moved = _quarantine_current(dst, cleared)
+        if cleared:
+            return f"takes+{added}~{updated} cleared={cleared} moved={moved}"
     return f"takes+{added}~{updated}"
+
+
+def _save_base(base_p: Path | None, r: dict) -> None:
+    """记下这次从该台收下的 takes.json（下次三方比较的祖先）"""
+    if base_p is None:
+        return
+    base_p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = base_p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(r, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, base_p)
 
 
 def merge_file(host: str, rel: str, src: Path, att: dict | None = None, dry: bool = False) -> str:
@@ -328,7 +422,9 @@ def merge_file(host: str, rel: str, src: Path, att: dict | None = None, dry: boo
         return f"corrupt:{bad}"
     if rel.startswith("data/renders/") and rel.endswith("/takes.json"):      # ⑦a 版本表：逐条合并，本地“已隔离”永远保留
         try:
-            return merge_takes(src, dst, dry)
+            return merge_takes(src, dst, dry, host, int(m.group(1)) if m else None)
+        except TimeoutError:
+            raise          # AUDIT-M 11-02：拿不到 takes 锁不是“坏文件”——交给调用方记 error 下轮重试（puller 不 ack），不能记 corrupt 被 ack 丢掉
         except (ValueError, OSError) as e:
             return f"corrupt:{e!r}"[:200]
     if not dst.exists():
@@ -360,12 +456,16 @@ def flush_attempts(att: dict, dry: bool = False) -> int:
 def main() -> int:
     stats: dict = {}
     att: dict = {}
-    for host in ("gpu33", "gpu36"):
+    only = os.environ.get("MERGE_ONLY_HOST")          # resident_sync.pull 传这个变量，原来没人读（AUDIT-M 11-02）
+    for host in ((only,) if only else ("gpu33", "gpu36")):
         base = PULL / host
         if not base.exists():
             continue
         for src in sorted(p for p in base.rglob("*") if p.is_file()):
             rel = src.relative_to(base).as_posix()
+            if not rel.startswith(("data/", "docs/")):
+                # puller 暂存 <iid>/<rel> 由 puller 自己并；原来这里把它当仓库相对路径 copy2，写出了仓库根 2026110*_take/ 脏目录（AUDIT-M 11-02）
+                continue
             act = merge_file(host, rel, src, att, DRY)
             k = act.split(":")[0].split("+")[0]
             stats[k] = stats.get(k, 0) + 1

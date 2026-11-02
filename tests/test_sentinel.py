@@ -461,3 +461,13 @@ def test_clip_resident():
     assert fs["S25:gpu36:alive"]["violated"] and fs["S25:gpu36:reload"]["violated"] and fs["S25:gpu36:alive"]["owner_loop"] == "FACTORY"
     fs = {f["key"]: f for f in J.j_clip("gpu33", {"pid": 9, "pid_alive": True, "health": "timeout", "reloads_1h": 1}, c)}
     assert not fs["S25:gpu33:alive"]["violated"] and not fs["S25:gpu33:reload"]["violated"]     # 忙时 /health 超时不算挂
+
+
+def test_scorecard_combine_and_tickets():
+    from tools.sentinel import scorecard as SC
+    r = SC._combine({"a": 1.0, "b": None}, {"a": 50, "b": 50}, [], 95)
+    assert r["score"] == 50.0 and r["lowest"] == "b"                                  # 未测按 0，不当满分
+    r = SC._combine({"a": 1.0, "b": 1.0}, {"a": 50, "b": 50}, ["深链接"], 95)
+    assert r["score"] == 95 and r["capped"]                                           # 有未测标准时封顶 95
+    fs = {f["key"]: f for f in J.j_scorecard({"ui": r, "script": {"score": 100.0, "parts": {}, "lowest": None}}, {"ui": "NAVIA"})}
+    assert fs["SC:ui"]["violated"] and fs["SC:ui"]["owner_loop"] == "NAVIA（抄送总调度）" and not fs["SC:script"]["violated"]

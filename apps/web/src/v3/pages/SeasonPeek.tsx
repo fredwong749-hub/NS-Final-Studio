@@ -256,8 +256,15 @@ export function SeasonDrawer({ shot, sum, status, meta, onClose }: { shot: strin
         </div>
         <footer className="sd-foot">
           <button type="button" className="v3-btn primary" onClick={openCanvas} title="打开这一镜（画布每镜一行）；双击卡片也能直接进">
-            打开画布
+            在分镜打开
           </button>
+          {/* NAVIA：同一镜在出图 / 视频页的同一个抽屉（深链接，后退回到总览） */}
+          <a className="v3-btn" href={`#/frames?ep=${Number(/^ep(\d+)/.exec(shot)?.[1] ?? 0)}&shot=${shot}`} onClick={onClose} title="在“出图”页打开这一镜的首尾帧抽屉">
+            出图
+          </a>
+          <a className="v3-btn" href={`#/videos?ep=${Number(/^ep(\d+)/.exec(shot)?.[1] ?? 0)}&shot=${shot}`} onClick={onClose} title="在“视频”页打开这一镜的视频抽屉">
+            视频
+          </a>
           <button type="button" className="v3-btn" disabled={busy || curN == null} onClick={regen} title={curN == null ? "还没出过首帧，等排队出图" : `基于首帧第 ${curN} 版换 seed 再出一张；新图过检查才设为当前，旧版保留`}>
             {busy ? "正在排…" : "重出"}
           </button>

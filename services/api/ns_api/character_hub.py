@@ -456,6 +456,15 @@ def _schedule(project: str, cid: str, looks: list[str]) -> list[dict]:
     return [{"ep": e, "registered": by_ep.get(e, {}), "override": ov.get(str(e)) if ov.get(str(e)) in looks else None} for e in eps]
 
 
+def _usage(project: str, name: str) -> list[dict]:
+    """造型卡“使用场景”：这个人物每集出现在哪些场景（地点 + 室内 / 户外 + 私密 / 公开 / 社交 + 是否亲密戏），来自 P2 大纲，只做客观归类"""
+    try:
+        from ns_api import script_library as SL
+        return SL.character_usage(project, name)
+    except Exception:  # noqa: BLE001  聚合失败不拖垮人物页
+        return []
+
+
 def character(project: str, cid: str, store: LookStore, all_items: bool = False) -> dict:
     cast = {c["cid"]: c for c in _cast(project)}
     if cid not in cast:
@@ -504,6 +513,7 @@ def character(project: str, cid: str, store: LookStore, all_items: bool = False)
             "unregistered": _unregistered(cid, items_all),
             "rejected": {k: v for k, v in rejected_map().items() if f"/{cid}" in k or f"{cid}_" in k},
             "voice": vc, "recent": _recent(cid), "schedule": _schedule(project, cid, [lk["look"] for lk in looks]),
+            "usage": _usage(project, c["name"]),
             "missing": sum(lk["counts"]["missing"] for lk in looks) + (0 if any(f["current"] for f in faces) else 1),
             "sheet_only": sum(lk["counts"]["sheet_only"] for lk in looks)}
 

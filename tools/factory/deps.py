@@ -110,6 +110,12 @@ def shots_for(script, eps: list[int], only: set[str] | None):
     return out
 
 
+def prompt_sha(job: dict) -> str:
+    """编译出的首帧提示词 sha16（与 producer.shot_inputs_sig 的 prompt_sha 同口径）"""
+    import hashlib
+    return hashlib.sha256((job.get("prompt") or "").encode()).hexdigest()[:16]
+
+
 def dryrun(eps: list[int], only: set[str] | None = None, rec: Recorder | None = None) -> dict:
     """→ {"shots": {sid: {"ok", "reasons", "refs"}}, "files": {rel: sha|None}, "blocked": n, "missing": [rel]}"""
     from ns_agent import frame_job as FJ
@@ -128,7 +134,8 @@ def dryrun(eps: list[int], only: set[str] | None = None, rec: Recorder | None = 
             job = FJ.build_first(project, ep, shot, script.globals)
             pf = UF._contract(job)
             refs = [str(r) for r in job.get("refs") or []]
-            res["shots"][sid] = {"ok": bool(pf.ok), "reasons": list(pf.reasons()) if not pf.ok else [], "refs": refs}
+            res["shots"][sid] = {"ok": bool(pf.ok), "reasons": list(pf.reasons()) if not pf.ok else [], "refs": refs,
+                                 "prompt_sha": prompt_sha(job)}     # ALIGNMENT 第 2 步：同一镜不管在哪台编译，提示词 sha 都相同
         except Exception as e:  # noqa: BLE001
             res["shots"][sid] = {"ok": False, "reasons": [f"dryrun 异常：{e!r}"[:300]], "trace": traceback.format_exc()[-800:]}
             refs = []

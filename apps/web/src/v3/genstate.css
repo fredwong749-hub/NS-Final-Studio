@@ -15,3 +15,17 @@
 .gen-dock { position: fixed; right: 16px; bottom: 16px; z-index: 60; display: flex; flex-direction: column; gap: 6px; max-width: 360px; }
 .gen-dock-row { display: flex; flex-direction: column; gap: 2px; background: var(--c-raise, #1a1a1b); border: 1px solid var(--c-line-2, rgba(255,255,255,.14)); border-radius: 4px; padding: 6px 10px; cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,.35); }
 .gen-dock-t { font-size: 12.5px; }
+/* 全系统出图队列（QueueDock）：右下角常驻一行，点开完整列表 */
+.qd { position: fixed; right: 16px; bottom: 16px; z-index: 55; width: 400px; max-width: calc(100vw - 32px); }
+.qd-bar { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: var(--c-raise, #1a1a1b); color: var(--c-text, #e9e6e0); border: 1px solid var(--c-line-2, rgba(255,255,255,.16)); border-radius: 4px; padding: 7px 12px; font: inherit; font-size: 12.5px; cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,.35); }
+.qd-chev { margin-left: auto; color: var(--c-text-3, #888); }
+.qd-look { color: var(--c-warn, #d4a24c); }
+.qd-list { max-height: 50vh; overflow: auto; background: var(--c-raise, #1a1a1b); border: 1px solid var(--c-line-2, rgba(255,255,255,.16)); border-bottom: 0; border-radius: 4px 4px 0 0; padding: 6px 10px; margin-bottom: -1px; }
+.qd-ep { font-size: 11.5px; color: var(--c-text-3, #888); margin: 8px 0 2px; }
+.qd-row { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 2px 0; color: var(--c-text-2, #aaa); }
+.qd-row b { color: var(--c-text, #e9e6e0); font-weight: 500; }
+.qd-row.mine { background: color-mix(in srgb, var(--c-warn, #d4a24c) 10%, transparent); }
+.qd-row.look { color: var(--c-warn, #d4a24c); }
+.qd-eta { margin-left: auto; color: var(--c-text-3, #888); }
+.qd-me { color: var(--c-warn, #d4a24c); font-size: 11px; }
+.qd-stale { color: var(--c-warn, #d4a24c); font-size: 11.5px; padding: 4px 0 2px; }

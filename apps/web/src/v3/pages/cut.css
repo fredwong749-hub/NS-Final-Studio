@@ -44,3 +44,8 @@
 .cut-video { box-shadow: var(--sh-pop); }
 .cut-item b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cut-del { display: flex; justify-content: flex-end; margin-bottom: var(--sp-2); }
+
+/* CUTEDIT：版本列表每一版右上角“⋯”菜单（删除 = 移到回收区，只放这里） */
+.cut-item-w { position: relative; }
+.cut-item-w > .cut-more { position: absolute; top: 6px; right: 6px; }
+.cut-item-w > .cut-item { width: 100%; padding-right: 32px; }

@@ -829,7 +829,8 @@ def hot_files(rs, now: float | None = None, hot_s: float = HOT_S) -> list[str]:
 
 
 def deploy_host(rs, h: str, snap: Path, names: list[str], tracked_code: list[str], sv: str, commit: str,
-                restart: bool = True, pc=None, rq=None, urgent: bool = False, expected: bytes | None = None) -> dict:
+                restart: bool = True, pc=None, rq=None, urgent: bool = False, expected: bytes | None = None,
+                hold_data: list[str] | None = None) -> dict:
     """一台机器的部署（FACTORY D9 / K-OPS-F06，总调度 01:3x 批准）：
     ① 代码只发该版本的 git 快照（export_tag 解出的目录）：推送前检查也对快照做（P1–P4），工作树里 tag 之外的新文件 / 改动根本不参与，
        不会再因“cut 之后又新建了代码文件”判“没推到”而整台失败（11-02 01:23 gpu36 sv-02 事故）；
@@ -845,7 +846,8 @@ def deploy_host(rs, h: str, snap: Path, names: list[str], tracked_code: list[str
                 raise RuntimeError("快照推送前检查不通过：" + "；".join(f"[{x['kind']}] {x['file']}" for x in g["problems"][:5]))
             # 代码不再按“大小 + 修改时间”整批推（快照导出的修改时间每次都不同 → 每次全量 792 个文件、约 10 分钟，sv-11 实测）；
             # 改由下面 verify_sha 按 sha 只补不一致的文件（K-OPS-F13 修订）
-        hot = hot_files(rs)        # 总调度 11-02 15:4x：推送期间一直在变的数据文件不进第一级（每轮复核都不同 → 一推再推），交给常驻同步循环之后补
+        hot = sorted(set(hot_files(rs)) | set(hold_data or []))   # --hold-data：本次部署明确不推的数据（总调度 17:4x：first_frame_jobs.json 要等新代码上线、重编、测试绿后才推）
+        # 总调度 11-02 15:4x：推送期间一直在变的数据文件不进第一级（每轮复核都不同 → 一推再推），交给常驻同步循环之后补
         if hot:
             r["hot_skipped"] = hot[:50]
         orig_wanted = getattr(rs, "wanted", lambda *a, **k: True)
@@ -978,7 +980,7 @@ def record_incident(sv: str, kind: str, fixed_by: str | None, note: str = "") ->
 
 
 def deploy(sv: str | None = None, hosts: list[str] | None = None, restart: bool = True, allow_old: bool = False,
-           urgent: bool = False, hotfix_of: str | None = None) -> dict:
+           urgent: bool = False, hotfix_of: str | None = None, hold_data: list[str] | None = None) -> dict:
     why = deploy_guard(sv, allow_old)
     if why:
         raise SystemExit("deploy 拒绝：" + why)
@@ -996,7 +998,7 @@ def deploy(sv: str | None = None, hosts: list[str] | None = None, restart: bool 
         expected, res["expected_refs"] = build_expected(sv)
         for h in hosts:
             res["hosts"][h] = deploy_host(rs, h, Path(td), names, tracked_code, sv, commit, restart=restart, pc=pc, urgent=urgent,
-                                          expected=expected)
+                                          expected=expected, hold_data=hold_data)
     idx = write_index()
     for v in idx["versions"]:
         if v["id"] == sv:
@@ -1042,6 +1044,7 @@ def main(argv=None) -> int:
     d.add_argument("--no-restart", action="store_true")
     d.add_argument("--allow-old", action="store_true", help="部署非最新版本（只给回退流程用）")
     d.add_argument("--urgent", action="store_true", help="重启请求插队（K-OPS-W16 urgent，审计记 urgent_jump）")
+    d.add_argument("--hold-data", default="", help="本次部署不推的数据文件（逗号分隔，仓库相对路径），例：data/pipeline/runs/<run>/assets/first_frame_jobs.json")
     d.add_argument("--hotfix-of", default=None, help="本版是热修哪一版：部署成功后自动记发版事故账本 data/rsi/release_incidents.jsonl")
     r = sp.add_parser("rollback")
     r.add_argument("sv")
@@ -1060,7 +1063,8 @@ def main(argv=None) -> int:
             print(f"  {'✅' if gg['ok'] else '❌'} {gg['name']}：{gg['detail'][:200]}")
         return 0 if out.get("ok") else 1
     if a.cmd == "deploy":
-        out = deploy(a.sv, a.hosts.split(",") if a.hosts else None, not a.no_restart, a.allow_old, a.urgent, a.hotfix_of)
+        out = deploy(a.sv, a.hosts.split(",") if a.hosts else None, not a.no_restart, a.allow_old, a.urgent, a.hotfix_of,
+                     hold_data=[x for x in (a.hold_data or "").split(",") if x])
         print(json.dumps(out, ensure_ascii=False, indent=1)[:4000])
         return 0 if out["hosts"] and all(x.get("ok") for x in out["hosts"].values()) else 1
     if a.cmd == "lock-status":       # K-OPS-F08：别的 agent 写代码前先查；退出码 3 = cut 进行中

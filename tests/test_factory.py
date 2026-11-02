@@ -88,7 +88,7 @@ def test_full_score_tries_resident_clip_first():
     sys.path.insert(0, str(ROOT / "tools/gen_contract"))
     import remote_score as RS
     ast.parse(RS._FULL)
-    assert RS._FULL.index('/measure"') < RS._FULL.index('subprocess.run([CPY, "clip_srv.py"')
+    assert RS._FULL.index('/measure"') < RS._FULL.index('subprocess.run([CPY, os.path.join(SRC, "tools/gen_contract/clip_srv.py")')   # K-OPS-F18
     s = (ROOT / "tools/gen_contract/clip_srv.py").read_text(encoding="utf-8")
     assert "def serve(" in s and '"--serve"' in s and "boot_sha" in s and '"127.0.0.1"' in s
     assert "OMP_NUM_THREADS" in s.split("def ")[0]      # K-OPS-V13：模块头先限线程
@@ -294,7 +294,7 @@ def test_k_ops_f17_scoring_subprocesses_are_throttled():
     出图机器上的打分子进程（score_remote / hands_remote / clip_srv 单次）必须限线程 + nice + 绑核。"""
     import re
     src = (ROOT / "tools/gen_contract/remote_score.py").read_text(encoding="utf-8")
-    calls = re.findall(r'subprocess\.run\(\[(?:IDM|HAND|CPY), "(?:score_remote|hands_remote|clip_srv)\.py"[^\n]*\n?[^\n]*', src)
+    calls = re.findall(r'subprocess\.run\(\[(?:IDM|HAND|CPY), os\.path\.join\(SRC, "[\w/]+(?:score_remote|hands_remote|clip_srv)\.py"\)[^\n]*\n?[^\n]*', src)   # K-OPS-F18 仓库目录
     assert calls, "没找到打分子进程调用"
     for c in calls:
         assert "preexec_fn=_lim" in c and "SENV" in c, c
@@ -344,3 +344,135 @@ def test_sync_auto_repushes_when_remote_table_differs(monkeypatch, tmp_path):
     SY.auto(hosts=("gpu36",))
     assert pushed == ["gpu36"]                                     # 一致 → 不动
     assert "sha256sum -c" in SY.verified_install("/x/e.json", b"{}")
+
+
+
+def test_k_ops_f18_no_bypass_script_dirs():
+    """K-OPS-F18（总调度 11-02 16:5x）：服务器上生产调用的脚本只许来自仓库部署目录——arch_scan bypass_script 能抓三种写法，
+    remote_score / clip 常驻全仓 0 处（imggen/score_remote.py 旁路拷贝让 sv-13 的补边修复没生效）"""
+    sys.path.insert(0, str(ROOT / "tools/qa"))
+    import arch_scan as A
+    src = ('import subprocess\nsubprocess.run([IDM, "score_remote.py", "-"], cwd=R, timeout=5)\n'
+           'p = "/root/work/fredw/imggen/score_remote.py"\nok = "/root/work/fredw/offline_20261101/repo/tools/a.py"\n'
+           'S = """\nsubprocess.run([HAND, "hands_remote.py"], cwd=R)\nos.system("cd {R} && {IDM} score_remote.py -")\n"""\n')
+    assert A.scan_source("tools/x.py", src)["bypass_script"] == 4
+    for f in ("tools/gen_contract/remote_score.py", "tools/gen_contract/clip_srv.py", "tools/series10_imggen/server_deploy.py"):
+        assert A.scan_source(f, (ROOT / f).read_text(encoding="utf-8"))["bypass_script"] == 0, f
+    sh = (ROOT / "ops/factory/clip_resident.sh").read_text(encoding="utf-8")
+    assert "cp -a" not in sh and "$PROD/tools/gen_contract/clip_srv.py --serve" in sh
+    svc = (ROOT / "ops/factory/systemd/ns-clip-resident.service").read_text(encoding="utf-8")
+    assert "/bin/cp" not in svc and "repo/tools/gen_contract/clip_srv.py --serve" in svc
+    import remote_score as RS
+    assert RS.srv_repo("gpu33").endswith("/repo") and RS.srv_repo("gpu36").endswith("/repo")
+
+
+def test_k_ops_f20_pause_single_source_runs_json(tmp_path, monkeypatch):
+    """K-OPS-F20（总调度 11-02 17:0x）：暂停状态只有一个来源 = runs.json status。
+    producer 每拍按它判（control 被改回 paused=false 也不派）；dispatch 对暂停中的 run 把 control 写成 paused + owner"""
+    import json as _j
+    sys.path.insert(0, str(ROOT / "tools/autopilot"))
+    sys.path.insert(0, str(ROOT / "tools/netfix"))
+    import producer as P
+    import dispatch as D
+    (tmp_path / "config/pipeline").mkdir(parents=True)
+    runs = {"primary": "series10_v1", "runs": {"series10_v1": {"status": "producing"}, "series10_s2": {"status": "paused"}}}
+    (tmp_path / "config/pipeline/runs.json").write_text(_j.dumps(runs), encoding="utf-8")
+    assert P.run_status(tmp_path, "series10_s2") == "paused" and P.run_status(tmp_path, "series10_v1") == "producing"
+    assert P.run_status(tmp_path / "nope", "series10_s2") is None
+    ctl = tmp_path / "data/producer/runs/series10_s2/control.json"
+    ctl.parent.mkdir(parents=True)
+    ctl.write_text(_j.dumps({"paused": False, "only": ["ep02-S1"]}), encoding="utf-8")
+    monkeypatch.setattr(D, "RUNS", tmp_path / "config/pipeline/runs.json")
+    monkeypatch.setattr(D, "ROOT", tmp_path)
+    assert D.paused_runs() == ["series10_s2"]
+    new = D.pause_run_control("series10_s2")
+    assert new["paused"] is True and new["reason_kind"] == "owner" and new["only"] == ["ep02-S1"]
+    assert D.pause_run_control("series10_s2") is None                     # 已是 owner 暂停：不重复写
+    src = (ROOT / "tools/autopilot/producer.py").read_text(encoding="utf-8")
+    assert "st = run_status(self.p.root, self.p.run_id)" in src.split("def ctrl(self) -> dict:")[1].split("def ledger")[0]
+
+
+def test_alignment_step2_prompt_sha_compared():
+    """ALIGNMENT 第 2 步：同一镜不管在哪台编译，提示词 sha 都相同；verify 比对出不一致的镜"""
+    import deps as DP
+    assert DP.prompt_sha({"prompt": "a"}) == _sha(b"a")[:16]
+    lap = {"ep01-S1": {"prompt_sha": "aa"}, "ep01-S2": {"prompt_sha": "bb"}, "ep01-S3": {}}
+    srv = {"ep01-S1": {"prompt_sha": "aa"}, "ep01-S2": {"prompt_sha": "cc"}, "ep01-S3": {"prompt_sha": "dd"}}
+    assert SY.prompt_mismatch(lap, srv) == {"ep01-S2": {"laptop": "bb", "server": "cc"}}
+
+
+def test_dispatch_push_carries_no_code():
+    """K-OPS-F18：push_server_control 只推派单输入数据，不推 .py（代码只经 deploy）"""
+    sys.path.insert(0, str(ROOT / "tools/netfix"))
+    import dispatch as D
+    assert not [f for f in D.PUSH_FILES if f.endswith(".py")]
+
+
+def test_k_ops_f21_video_hosts_generated_from_partition(tmp_path, monkeypatch):
+    """K-OPS-F21：video/hosts.json 由 partition.json video 分区生成；分区没有的集不派（不再 pick_host）"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("night_t", ROOT / "tools/series10_video/night.py")
+    N = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(N)
+    monkeypatch.setattr(N, "VID", tmp_path)
+    monkeypatch.setattr(N, "LOG", tmp_path / "night.log")
+    (tmp_path / "hosts.json").write_text('{"7": "gpu36", "10": "gpu36"}', encoding="utf-8")
+    part = {"video": {"gpu33": [1, 7], "gpu36": [10]}}
+    assert N.sync_hosts_from_partition(part) == {"1": "gpu33", "7": "gpu33", "10": "gpu36"}
+    import json as _j
+    assert _j.loads((tmp_path / "hosts.json").read_text(encoding="utf-8"))["7"] == "gpu33"
+    src = (ROOT / "tools/series10_video/night.py").read_text(encoding="utf-8")
+    assert "else pick_host(st)" not in src and "sync_hosts_from_partition()" in src.split("def loop_once")[1][:200]
+
+
+def test_repart_refuses_move_to_host_without_takes():
+    """K-OPS-F21 / E25（总调度 17:3x）：改分区必须先过 repart_check——集搬到本机没有当前版本的机器就拒绝（16:31 ep02/04/06 → gpu33 重出 94 次）"""
+    import repart as RP
+    old = {"images": {"gpu33": [1, 3], "gpu36": [2, 4]}, "video": {"gpu33": [1, 3], "gpu36": [2, 4]}}
+    bad = {"images": {"gpu33": [1, 2, 3, 4], "gpu36": []}, "video": {"gpu33": [1, 2, 3, 4], "gpu36": []}}
+    assert RP.moved(old["images"], bad["images"]) == {"gpu33": [2, 4]}
+
+    class R:
+        def __init__(self, have):
+            self.have = have
+
+        def __call__(self, h, cmd, **k):
+            import types
+            return types.SimpleNamespace(stdout=json.dumps(sorted(self.have[h])))
+    run = R({"gpu33": {1, 3}, "gpu36": {2, 4}})
+    assert RP.check(old, bad, run=run)                                   # gpu33 没有 ep02/04 → 拒绝
+    ok = {"images": {"gpu33": [1, 3], "gpu36": [2, 4]}, "video": {"gpu33": [1, 3], "gpu36": [2, 4]}}
+    assert RP.check(old, ok, run=run) == []
+    assert RP.check(old, bad, run=R({"gpu33": {1, 2, 3, 4}, "gpu36": {2, 4}})) == []   # 两边都有 → 放行
+
+
+def test_k_ops_f22_compile_only_released_code():
+    """K-OPS-F22（总调度 17:4x）：cut 冻结中 / 工作树编译代码与最新发版 tag 不同 → episode_pipeline 不重编 first_frame_jobs.json；
+    服务器部署树（无 git）放行；冻结解除后会重试（compile_frozen 在重试状态里）"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ep_pipe_t", ROOT / "tools/autopilot/episode_pipeline.py")
+    EP = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, str(ROOT / "tools/autopilot"))
+    spec.loader.exec_module(EP)
+
+    class SV:
+        def __init__(self, locked=None, drift=(), tags=("sv-20261102-13",), boom=False):
+            self.locked, self.drift, self.tags, self.boom = locked, list(drift), list(tags), boom
+
+        def cut_locked(self):
+            if self.boom:
+                raise RuntimeError("no git")
+            return self.locked
+
+        def sv_tags(self):
+            return self.tags
+
+        def drift_files(self, tag, dirs):
+            assert "services/agent/ns_agent" in dirs and "tools/pipeline" in dirs
+            return self.drift
+    assert "冻结" in EP.compile_gate(SV(locked={"active": True}))
+    assert "不同" in EP.compile_gate(SV(drift=["services/agent/ns_agent/frame_job.py"]))
+    assert EP.compile_gate(SV()) is None
+    assert EP.compile_gate(SV(boom=True)) is None
+    src = (ROOT / "tools/autopilot/episode_pipeline.py").read_text(encoding="utf-8")
+    assert '"compile_frozen"))' in src and src.count("why = compile_gate()") == 2

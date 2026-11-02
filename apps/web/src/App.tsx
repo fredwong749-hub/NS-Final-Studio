@@ -9,7 +9,7 @@ import { StudioProvider, useStudio } from "./store";
 import { useHash } from "./projects/route";
 import { CanvasV3 } from "./v3/Canvas";
 import { SopProvider } from "./v3/sop";
-import { TopBarV3 } from "./v3/TopBarV3";
+import { TopBarV3, EpisodeScope } from "./v3/TopBarV3";
 import { pageOf, type V3Page } from "./v3/TopBarV3.helpers";
 import { UiProvider } from "./v3/ui";
 import { MaterialsDrawerHost } from "./v3/MaterialsDrawer";
@@ -42,6 +42,8 @@ const V3_PAGE_COMP: Record<V3Page, ReturnType<typeof lazy>> = {
   "#/overview": lazy(() => import("./v3/pages/SeasonPage")), // 项目方 11-01：全剧总览（快捷键 1）
   "#/sound": lazy(() => import("./v3/pages/SoundPage")), // UIRSI B4：声音一级页（音色 · 旁白 · 对白 · 配乐）
   "#/image-edit": lazy(() => import("./v3/pages/ImageEditPage")), // FILMUI 图像工坊 P1（②资产下的标签；docs/master/EDITOR_INTEGRATION.md）
+  "#/frames": lazy(() => import("./v3/pages/FramesPage")), // ASSETUX 1b：“出图”页（全部集 × 每镜首尾帧）
+  "#/videos": lazy(() => import("./v3/pages/VideosPage")), // NAVIA：“视频”页（全部集 × 每镜视频状态）
   "#/queue": lazy(() => import("./v3/pages/OwnerQueuePage")), // UIRSI2 L-116：待你看阵列（顶栏常驻入口）
 };
 /** UX4（R8）：后台没响应的提示——人话 + 自动重连计次 + 折叠的技术细节 */
@@ -153,6 +155,7 @@ function Shell() {
     <div className="app v3-app">
       <StaleBanner />
       <TopBarV3 page={page} />
+      {(!page || page === "#/cut" || page === "#/videos" || page === "#/frames") && <EpisodeScope page={page} />}
       {body}
       <ErrorBoundary name="底部抽屉">
         <Drawer />

@@ -16,7 +16,10 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# K-OPS-F18：从服务器仓库部署目录直接跑，metrics.py 在 services/agent/ns_agent/gen_contract（NS_METRICS_DIR）；没设时按仓库相对路径找，最后才是本目录
+METRICS_DIR = os.environ.get("NS_METRICS_DIR") or os.path.normpath(os.path.join(HERE, "..", "..", "services", "agent", "ns_agent", "gen_contract"))
 sys.path.insert(0, HERE)
+sys.path.insert(0, METRICS_DIR)
 os.environ.setdefault("NS_CLIP_PATH", os.path.join(HERE, "clip-vit-large-patch14"))
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 # K-OPS-V13 线程上限（重型 import 都在函数里，这里先设好）
@@ -140,7 +143,8 @@ def serve(port: int) -> None:
     import threading
     from http.server import BaseHTTPRequestHandler, HTTPServer
     import metrics as M
-    boot = {n: _file_sha(os.path.join(HERE, n)) for n in ("metrics.py", "clip_srv.py")}
+    code_paths = {"metrics.py": os.path.abspath(M.__file__), "clip_srv.py": os.path.abspath(__file__)}
+    boot = {n: _file_sha(p) for n, p in code_paths.items()}
     M._clip()                                  # 预热：启动即加载
     lock = threading.Lock()
     st = {"served": 0, "started": time.time(), "last_s": None}
@@ -161,7 +165,7 @@ def serve(port: int) -> None:
             self._send(200, {**st, "device": M._clip()[2], "boot_sha": {k: v[:12] for k, v in boot.items()}})
 
         def do_POST(self):
-            now = {n: _file_sha(os.path.join(HERE, n)) for n in boot}
+            now = {n: _file_sha(p) for n, p in code_paths.items()}
             if now != boot:
                 # FACTORY 11-02 15:4x：本目录的代码每次被请求方覆盖（笔记本工作区版 / 服务器部署版交替）——以前一不一致就退出重启，
                 # 笔记本一来请求就 409 + 重载模型，常驻形同虚设。现在：只有和部署版（NS_CLIP_CODE_SRC 仓库）一致才退出按新版重启；

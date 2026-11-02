@@ -174,7 +174,11 @@ def test_k705_part_lock_splits_dun_hao():
 
 def test_k263_preflight_blocks_missing_face():
     from ns_agent.gen_contract import preflight as PF
-    base = {"subject": None, "primary": "gu_chen", "slots": [{"kind": "face", "character": "gu_chen", "file": "f.png"}],
+    from ns_agent import asset_refs as AR
+    import json as _json
+    proj = _json.loads((PF.ROOT / "config" / "pipeline" / "runs.json").read_text(encoding="utf-8")).get("primary")
+    gf = AR.face_of(proj, "gu_chen") or "f.png"   # 总调度 11-02：A-01 后 I2 只认当前身份脸，用 face_of 那张，测试仍考“缺脸 / 两张脸”
+    base = {"subject": None, "primary": "gu_chen", "slots": [{"kind": "face", "character": "gu_chen", "file": gf}],
             "characters": [{"character": "gu_chen", "name": "顾沉", "presence": "在画"}, {"character": "lin_wan", "name": "林晚", "presence": "在画"}]}
     r = PF.check({"kind": "image", "model": "qwen_image_2.1", "asset_refs": base, "prompt": "x", "cast": []})
     i2 = next(i for i in r.items if i.id == "I2")
@@ -342,5 +346,15 @@ def test_k708_jobs_have_no_self_contradiction():
     jobs = _j.loads((ROOT / "data/pipeline/runs/series10_v1/assets/first_frame_jobs.json").read_text(encoding="utf-8"))["jobs"]
     for j in jobs:
         for c in j["asset_refs"].get("characters") or []:
-            if c.get("presence") == "在画" or c.get("face_described"):
+            if (c.get("presence") == "在画" and not c.get("back_view")) or c.get("face_described"):   # K-REN-957：在画但写背影 = 按背影局部
                 assert f"{c.get('name')}只露出" not in j["prompt"] and f"{c.get('name')}不露脸" not in j["prompt"], j["shot"]
+
+
+def test_a01_preflight_rejects_stale_face_file():
+    """AUDIT-M A-01 / K-OPS-E29：身份脸槽送的不是 face_of 那一张 → I2 fail（旧脸不能再靠“登记过”混过）"""
+    from ns_agent.gen_contract import preflight as PF
+    base = {"subject": None, "primary": "gu_chen", "slots": [{"kind": "face", "character": "gu_chen", "file": "old_face.png"}],
+            "characters": [{"character": "gu_chen", "name": "顾沉", "presence": "在画"}]}
+    r = PF.check({"kind": "image", "model": "qwen_image_2.1", "asset_refs": base, "prompt": "x", "cast": []})
+    i2 = next(i for i in r.items if i.id == "I2")
+    assert i2.status == "fail" and "face_of" in i2.detail

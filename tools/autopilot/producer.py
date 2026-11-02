@@ -210,14 +210,48 @@ def shot_inputs_sig(paths, sid: str) -> dict:
             "prompt_sha": hashlib.sha256((job.get("prompt") or "").encode()).hexdigest()[:16]}
 
 
+_INPUT_SIG_CACHE: dict = {}
+INPUT_FIELDS = ("img_prompt", "motion_prompt", "cast_raw", "cast", "scene_id", "scene_detail", "decor_state", "duration")
+
+
+def input_sig(paths, sid: str) -> str | None:
+    """K-REN-956：本镜“剧本输入”签名（导入稿 data/import/script_v2.json 里这一镜的 img / motion / cast / 场景 / 时长）——
+    不含编译产物（提示词、参考图列表）。编译规则变了它不变；剧本重新导入、本镜改了它才变"""
+    import hashlib
+    f = paths.root / "data" / "import" / "script_v2.json"
+    try:
+        mt = f.stat().st_mtime
+    except OSError:   # arch-ok: 读不到导入稿 → None，E24 判“没变”、不重出已通过的帧（保守方向，护栏 17:3x）
+        return None
+    hit = _INPUT_SIG_CACHE.get(str(f))
+    if not hit or hit[0] != mt:
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):   # arch-ok: 同上，读坏 → None = 不重出（保守方向）
+            return None
+        sigs = {}
+        for ep in d.get("episodes") or []:
+            for sh in ep.get("shots") or []:
+                k = f"ep{int(ep.get('number') or 0):02d}-S{sh.get('index')}"
+                sigs[k] = hashlib.sha256(json.dumps({x: sh.get(x) for x in INPUT_FIELDS}, ensure_ascii=False,
+                                                    sort_keys=True).encode()).hexdigest()[:16]
+        hit = _INPUT_SIG_CACHE[str(f)] = (mt, sigs)
+    return hit[1].get(sid)
+
+
 def first_input_changed(paths, sid: str, fo: dict, led: dict) -> dict:
     """K-OPS-E24（总调度 11:3x：第二季等非主剧重新导入后，按 E09 的 job_sig 自动重编、自动重出）：
     首帧 passed 时记过 passed_sig、现在编译出的作业签名不同了 → 回到 ready（不计次，原因“作业输入变了”）。
-    没记过 passed_sig（旧数据）不动；项目方定稿锁不动"""
+    没记过 passed_sig（旧数据）不动；项目方定稿锁不动。
+    ⤴ K-REN-956（总调度 11-02 17:3x“先验收、后重出”）：只认剧本输入签名（input_sig，passed_input_sig）。编译规则变了
+    （提示词 / 参考槽变、作业签名变）不作废已通过的版本——已通过的帧交出图后验收查，查出问题才重出。没记过 passed_input_sig 的旧数据不动
+    （剧本真改了由画布摘要的本镜过期标记兜底）"""
     if fo.get("status") != "passed" or fo.get("owner_locked") or not led.get("passed_sig"):
         return fo
-    sig = job_sig(paths, sid)
-    if not sig or sig == led["passed_sig"]:
+    if not led.get("passed_input_sig"):
+        return fo
+    sig = input_sig(paths, sid)
+    if not sig or sig == led["passed_input_sig"]:
         return fo
     return {**fo, "status": "ready", "attempts": 0, "stale": True, "waiting_for": "空闲道",
             "reason": f"v{fo.get('take')} 之后作业输入变了（重新导入 / 重编），自动重出，不算之前的次数"}
@@ -226,8 +260,8 @@ def first_input_changed(paths, sid: str, fo: dict, led: dict) -> dict:
 def last_consistent(td: dict, fo: dict, lo: dict) -> dict:
     """K-OPS-E13（总调度 11-02 02:2x：以 takes.json 当前版本和契约结果为准，不反过来改 takes）：
     尾帧 passed 但①首帧不是 passed，或②当前尾帧比当前首帧旧（首帧换过）→ 尾帧作废，回到 ready（首帧过了）/ pending（首帧没过），不计次"""
-    if lo.get("status") != "passed" or lo.get("na"):
-        return lo
+    if lo.get("status") != "passed" or lo.get("na") or lo.get("owner_locked"):
+        return lo                    # K-OPS-E23 优先：项目方定稿锁的尾帧不因首帧换版作废（ep01-S1：E13 无视定稿锁 → 新尾帧设不成当前 → 撤回 → 重出，24 小时 108 版）
     fa, la = active_take(td, "image"), active_take(td, "last")
     stale = bool(fa and la and str(la.get("created_at") or "") < str(fa.get("created_at") or ""))
     if fo.get("status") == "passed" and not stale:
@@ -303,6 +337,25 @@ def run_env(run: str, root: Path = ROOT) -> dict:
         return {}
     return {"NS_RENDERS_DIR": str(root / "data" / "renders" / run),
             "NS_SCRIPT_JSON": str(root / "data" / "import" / "runs" / run / "script_v2.json")}
+
+
+def apply_owner_edit(job: dict, edit: dict | None) -> dict:
+    """L-123：项目方的修改要求（edit.prompt，已改写成中文修改要求并过了禁用词检查）追加到这一单的提示词后面；
+    原编译提示词、参考图、槽位一律不动（图N 的对应关系不能乱）。没有 edit → 原样返回"""
+    p = str((edit or {}).get("prompt") or "").strip()
+    if not p:
+        return job
+    base = str(job.get("prompt") or "")
+    if p in base:
+        return job
+    return {**job, "prompt": base + "\n项目方要求修改（只改这一点，其余保持不变）：" + p, "owner_edit": (edit or {}).get("id")}
+
+
+def episode_order_key(c: tuple) -> tuple:
+    """K-OPS-E30（项目方 L-124：每集按 sequence 把图到视频做完，最小的未完成集优先）：派单候选 (集, 0=尾帧/1=首帧, 镜序, 对象) 的排序键
+    = (集, 驳回 / 插队优先, 尾帧先, 镜序)。以前驳回 / 插队排在最前面，会跨集插队（后面集的驳回单挤掉 ep01 的活）"""
+    ep, k, idx, o = c
+    return (ep, 0 if o.get("redo") else 1, k, idx)
 
 
 def hard_cap_per_stage() -> int:
@@ -758,6 +811,7 @@ def vqa_gate(sid: str, stage: str, file_rel: str, job: dict, pf: dict) -> dict |
         VQ.hair_primary(pf, v)                              # 发色：Q1a 分割主判、VLM 辅助（开关 gate.hair_primary）
         VQ.q1x(sid, stage, str(P.DATA / file_rel), pf)      # Q1x 同场跨镜身份一致（开关 Q1x_scene.enabled）
         VQ.q1d(sid, stage, str(P.DATA / file_rel), pf)      # Q1d 本地图片异常检测（记日志、不拦；开关 Q1d_anomaly.enabled，默认关）
+        VQ.accept_gate(sid, stage, str(P.DATA / file_rel), pf)   # Q10 出图后验收：身份 / 服装 / 提示词 / 人数四项全过（ALIGNMENT 第 8 步）
         VQ.apply(pf, v)
         if v.get("error") and pf.get("ok") is False and pf.get("blocking") == ["Q9"]:
             pf["score_infra"] = True
@@ -1130,7 +1184,7 @@ def derive(w: World, ledger: dict, leases: dict, run_summary: dict | None = None
                 ao.update(status="passed" if io_["status"] == "passed" else "pending",
                           reason="参考槽位齐（出图前再查一次 preflight）" if io_["status"] == "passed" else None)
             # 首帧 / 尾帧
-            stl = (sm or {}).get("stale") or {}                  # 剧本 / 输入改了：画布摘要的过期标记（与 /api/shots 同源）
+            stl = stale_requeue_map((sm or {}).get("stale") or {})   # 剧本 / 输入改了：画布摘要的过期标记（与 /api/shots 同源）；K-REN-956 去掉编译变化
             fo = _frame_obj("first", "image", sid, n, td, fv, ledger, leases, canvas, n in fv2_eps, deps_ok=ao["status"] == "passed",
                             stale=stl.get("image"))
             lo = _frame_obj("last", "last", sid, n, td, fv, ledger, leases, canvas, n in fv2_eps, deps_ok=fo["status"] == "passed",
@@ -1220,6 +1274,35 @@ def _age_s(ts) -> float:
         return now() - time.mktime(time.strptime(str(ts)[:19], "%Y-%m-%dT%H:%M:%S"))
     except (ValueError, TypeError):
         return 0.0
+
+
+# K-REN-956（PROMPTFIX × DEBUG-RSI 11-02，总调度定“先验收、后重出”）：编译规则变化（编译器升级 / 系统固定句变了）不作废已通过的版本；
+# 只有本镜输入真改了（剧本 / 提示词 / 造型 / 首帧 / 参考覆盖）才算过期重出。已通过的帧由出图后验收（站位核对、服装验收）查，
+# 查出问题的走验收失败重出，不走过期。
+STALE_NO_REQUEUE = ("编译器升级", "编译规则", "系统固定句")
+
+
+STALE_REQUEUE_ON = ("提示词已改", "导演加强已改", "本集加强已改", "剧本已改")
+
+
+def stale_requeue_reasons(v) -> list[str]:
+    """过期标记（列表 / 字符串 / True）→ 会触发重出的原因。
+    护栏（总调度 11-02 17:3x，ALIGNMENT 第 8 步）：白名单——只有人主动改的（STALE_REQUEUE_ON）才把已通过版本放回重出；
+    编译器升级、本镜输入已改（站位句 / 参考槽调整也会落在这里）、造型已改、不明原因（True）一律不重出，已通过的交验收判，
+    验收不过才重出（否则 sv-14 一上线约 56 镜被无谓重出）"""
+    if not v or isinstance(v, bool):
+        return []
+    items = v if isinstance(v, (list, tuple)) else [v]
+    return [str(x) for x in items if any(w in str(x) for w in STALE_REQUEUE_ON)]
+
+
+def stale_requeue_map(st: dict) -> dict:
+    out = {}
+    for k, v in (st or {}).items():
+        r = stale_requeue_reasons(v)
+        if r:
+            out[k] = "、".join(r) if not isinstance(v, bool) else True
+    return out
 
 
 def _frame_obj(kind, stage, sid, n, td, fv, ledger, leases, canvas, fv2_owned, deps_ok, first=None, stale=None) -> dict:
@@ -1437,8 +1520,9 @@ class FrameExec:
                 body = first_job["prompt"][len(plan.prompt_prefix):]
                 first_job = {**first_job, "prompt": plan2.prompt_prefix + body, "refs": plan2.files,
                              "asset_refs": AR.record(sr, plan2), "face_files": [x.file for x in plan2.slots if x.kind == "face"]}
+        owner_edit = ((jl(self.p.rejects, {}) or {}).get(f"{kind}:{sid}") or {}).get("edit")
         if kind == "first":
-            job = first_job
+            job = apply_owner_edit(first_job, owner_edit)
             dl = vqa_delta(sid, "image")        # VQAGATE：上一版看图没过 → 套用写作网关给的一维修正（K-REN-V05）
             if dl:
                 from ns_agent.vqa import judge as VJ
@@ -1458,6 +1542,7 @@ class FrameExec:
             if not first_job.get("last_prompt"):
                 return {"na": True}
             job = FJ.build_last(first_job, f"data/{ft['file']}")
+            job = apply_owner_edit(job, owner_edit)
             if rung.get("preset"):
                 job["preset"] = rung["preset"]
             if rung.get("variant") == "double_face" and job.get("face_files"):     # 策略 B（尾帧）：身份脸再放一槽
@@ -1466,6 +1551,7 @@ class FrameExec:
                 job = {**job, "refs": [*job["refs"], f0],
                        "prompt": f"图{k}是同一人的脸部参考（与图2同一张，加强身份，只取脸和发型）。" + job["prompt"]}
             stage = "last"
+        job = {**job, "seed_policy": rung.get("seed_info") or "producer"}  # K-REN-954：种子来源进 compile_trace
         take = UF._run(client, sid, stage, job, rung["seed"])[0]       # REFLOCK 11-01 起返回 (take, eff, post_rec)
         P._add_take(sid, take, activate=False)        # G3：过了契约才由 auto_current.on_contract 设为当前
         bad = next((t.get("bad") for t in P.load_takes(sid).get("takes") or [] if t.get("stage") == stage and t.get("n") == take.n), None)
@@ -1728,6 +1814,11 @@ class Producer:
     def ctrl(self) -> dict:
         c = {**DEFAULT_CTRL, **(jl(self.p.ctrl, {}) or {})}
         c["workers"] = {**DEFAULT_CTRL["workers"], **(c.get("workers") or {})}
+        st = run_status(self.p.root, self.p.run_id)
+        if st and st != "producing" and not c.get("paused"):
+            # K-OPS-F20（总调度 11-02 17:0x）：暂停状态只有一个来源 = runs.json 的 status。control.json 会被 dispatch 重算覆盖
+            # （16:07 gpu36 第二季 control 被改回 paused=false，暂停后又派单），所以每拍都按 runs.json 判，不靠 control 里的字段
+            c.update(paused=True, paused_by="runs.json", reason_kind="owner", note=f"config/pipeline/runs.json status={st}")
         return c
 
     def ledger(self) -> dict:
@@ -1881,13 +1972,21 @@ class Producer:
             return False
         from ns_render import pipeline as P
         stage = "image" if kind == "first" else "last"
-        n = stage_renders_24h(P.load_takes(sid), stage)
+        td = P.load_takes(sid)
+        n = stage_renders_24h(td, stage)
         led = self.ledger().get(o["id"]) or {}
-        ex = led.get("cap_extra") or {}
-        extra = int(ex.get("n") or 0) if now() - float(ex.get("t") or 0) < 24 * 3600 else 0
-        lim = (cap or hard_cap_per_stage()) + extra
+        lim = cap or hard_cap_per_stage()
         if n < lim:
             return False
+        ex = led.get("cap_extra") or {}
+        if ex and now() - float(ex.get("t") or 0) < 24 * 3600:
+            # uncap = 放行之后再出 N 版（以前写成“上限 + N”，108 版的镜放 3 次等于没放；ep01-S1 17:00 实测）
+            since = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(float(ex.get("t") or 0)))
+            after = sum(1 for x in td.get("takes") or [] if x.get("stage") == stage and x.get("origin") != "manual_edit"
+                        and str(x.get("created_at") or "") >= since)
+            if after < int(ex.get("n") or 0):
+                return False
+            lim = n
         hc = led.get("hard_capped") or {}
         if now() - float(hc.get("t") or 0) > 24 * 3600 or int(hc.get("lim") or 0) != lim:
             self.led_update(o["id"], hard_capped={"t": now(), "at": iso(), "n": n, "lim": lim},
@@ -2056,7 +2155,7 @@ class Producer:
                     o = S["objects"][k]
                     if o["status"] == "ready" and not str(o.get("waiting_for") or "").startswith("基础设施退避") and o["id"] not in self.inflight:
                         cands.append((E["ep"], 0 if k == "last" else 1, S["index"], o))
-        cands.sort(key=lambda x: (0 if x[3].get("redo") else 1, *x[:3]))   # 总调度驳回 / 插队的先派
+        cands.sort(key=episode_order_key)        # K-OPS-E30（L-124）：集号从小到大、集内驳回 / 插队先、尾帧先、按镜号
         held = asset_hold_objects(self.p.data)
         rate_cap = int(os.environ.get("NS_PRODUCER_OBJ_PER_HOUR", "8"))
         try:
@@ -2146,14 +2245,28 @@ class Producer:
                       seed=rung["seed"], comfy_tag=tag)
             self.pool.submit(self._run_one, o, lane, attempt, rung, tag)
 
+    def seed_pick(self, o: dict, attempt: int, salt: str = "", legacy_key: str | None = None) -> tuple[int, dict | None]:
+        """K-REN-954 种子流（ns_render.seed_stream）：这一镜这一 stage 用过的种子一律跳过，重试永不复用；开关 promptfix.seed_stream"""
+        from ns_render import pipeline as P
+        from ns_agent import asset_refs as AR
+        if not AR.pf_on("seed_stream"):
+            return P.seed_for(legacy_key or f"{o['shot']}/producer/{o['kind']}", attempt), None
+        from ns_render import seed_stream as SS
+        stage = "image" if o["kind"] == "first" else "last"
+        try:
+            takes = (P.load_takes(o["shot"]) or {}).get("takes") or []
+        except Exception:  # noqa: BLE001
+            takes = []
+        return SS.pick(o["shot"], stage, attempt, takes, salt=salt)
+
     def rung(self, o: dict, attempt: int) -> dict:
         """自修阶梯：1 默认 → 2 换 seed → 3 换参考（双人镜两张脸各占一槽；单人镜再换 seed）"""
         from ns_render import pipeline as P
-        seed = P.seed_for(f"{o['shot']}/producer/{o['kind']}", attempt)
+        seed, sinfo = self.seed_pick(o, attempt)
         if attempt == 1:
-            return {"name": "第 1 次（frame_v9 默认）", "seed": seed}
+            return {"name": "第 1 次（frame_v9 默认）", "seed": seed, "seed_info": sinfo}
         if attempt == 2:
-            return {"name": "第 2 次：换 seed", "seed": seed}
+            return {"name": "第 2 次：换 seed", "seed": seed, "seed_info": sinfo}
         plan_kw = {}
         name = "第 3 次：再换 seed"
         try:
@@ -2163,7 +2276,7 @@ class Producer:
                 name = "第 3 次：换参考（两张脸各占一槽）"
         except Exception:  # noqa: BLE001
             pass
-        return {"name": name, "seed": seed, "plan_kw": plan_kw}
+        return {"name": name, "seed": seed, "plan_kw": plan_kw, "seed_info": sinfo}
 
     def two_person(self, sid: str) -> bool:
         try:
@@ -2180,14 +2293,15 @@ class Producer:
         if stg not in ("A", "B"):
             return None
         from ns_render import pipeline as P
-        seed = P.seed_for(f"{o['shot']}/producer/{o['kind']}/strategy{stg}", attempt)
+        seed, sinfo = self.seed_pick(o, attempt, f"strategy{stg}", f"{o['shot']}/producer/{o['kind']}/strategy{stg}")
         var = "faces_only" if stg == "A" else "double_face"
         word = "只挂脸（服装靠正文点名）" if stg == "A" else "双份身份脸"
         kw = {"two_person": "both_faces"} if stg == "A" else {}
         if attempt < 3:
-            return {"name": f"第 {attempt} 次：策略 {stg} {word}", "seed": seed, "plan_kw": kw, "variant": var, "strategy": stg}
+            return {"name": f"第 {attempt} 次：策略 {stg} {word}", "seed": seed, "plan_kw": kw, "variant": var, "strategy": stg,
+                    "seed_info": sinfo}
         return {"name": f"第 {attempt} 次：策略 C 重档 frame_v9_heavy + {word}", "seed": seed, "plan_kw": kw,
-                "variant": var, "preset": "frame_v9_heavy", "strategy": "C"}
+                "variant": var, "preset": "frame_v9_heavy", "strategy": "C", "seed_info": sinfo}
 
     def rung_ab(self, o: dict, attempt: int) -> dict | None:
         """双人镜首帧（总调度 11-01 06:16 定默认，依据 A/B：A 4/12 过、B 0/8 过）：第 1、2 次 两张脸 + 林晚造型设定图（A，
@@ -2195,12 +2309,12 @@ class Producer:
         if o["kind"] != "first" or not self.two_person(o["shot"]):
             return None
         from ns_render import pipeline as P
-        seed = P.seed_for(f"{o['shot']}/producer/{o['kind']}", attempt)
+        seed, sinfo = self.seed_pick(o, attempt, "ab")
         if attempt < 3:
             return {"name": f"第 {attempt} 次：两张脸 + 林晚造型设定图（A）" + ("，换 seed" if attempt == 2 else ""), "seed": seed,
-                    "plan_kw": {"two_person": "both_faces"}, "variant": "faces_look"}
+                    "plan_kw": {"two_person": "both_faces"}, "variant": "faces_look", "seed_info": sinfo}
         return {"name": f"第 {attempt} 次：退到 两张脸 + 参考板（B）", "seed": seed, "plan_kw": {"two_person": "both_faces"},
-                "board": True, "variant": "faces_board"}
+                "board": True, "variant": "faces_board", "seed_info": sinfo}
 
     def _run_one(self, o, lane, attempt, rung, tag) -> None:
         oid, sid, kind = o["id"], o["shot"], o["kind"]
@@ -2222,7 +2336,14 @@ class Producer:
             with self.mu:
                 self.scoring.add(oid)
             t1 = now()
-            pf = res["pf_future"].result(timeout=1800)
+            try:
+                pf = res["pf_future"].result(timeout=1800)
+            except Exception as e:  # noqa: BLE001  # A-02（总调度：进 sv-14）：图已入库，打分超时 / 出错只重打分、不重出、不计次
+                self.led_update(oid, rescore_take=res["take"], backoff_until=now() + 300,
+                                reason=f"契约打分超时或出错（{type(e).__name__}），图已入库，5 分钟后只重打分、不重出，不算一次尝试")
+                self.logf("score_timeout", obj=oid, take=res["take"], error=repr(e)[:200], counted=False,
+                          render_s=render_s, contract_s=round(now() - t1, 1), gpu_s=res.get("gpu_s"))
+                return
             contract_s = round(now() - t1, 1)
             if pf.get("score_infra"):
                 self.led_update(oid, rescore_take=res["take"], backoff_until=now() + 300,
@@ -2253,7 +2374,8 @@ class Producer:
                                                      "blocking": pf.get("blocking"), "rung": rung["name"], "at": iso()}]
             if pf.get("ok"):
                 self.led_update(oid, tries=attempt, history=hist, final="passed", reason=None, last_error=None,
-                                passed_sig=job_sig(self.p, sid) if kind == "first" else None)
+                                passed_sig=job_sig(self.p, sid) if kind == "first" else None,
+                                passed_input_sig=input_sig(self.p, sid) if kind == "first" else None)
                 self.logf("passed", obj=oid, take=res["take"], attempt=attempt, variant=rung.get("variant"), strategy=rung.get("strategy"),
                           render_s=render_s, contract_s=contract_s,
                           gpu_s=res.get("gpu_s"), scored_from=pf.get("scored_from") or pf.get("measured_on"))
@@ -2390,7 +2512,7 @@ class Producer:
             td = w.takes(sid)
             t = active_take(td, stage)
             sm = (getattr(w, "summary", None) or {}).get(sid) or {}
-            if t and take_pf(t).get("ok") and ((sm.get("stale") or {}).get(stage)):
+            if t and take_pf(t).get("ok") and (stale_requeue_map(sm.get("stale") or {}).get(stage)):
                 r.update(final=None, tries=0, demoted_at=iso(), reason="剧本 / 输入改了，当前版本过期，自动重出，不算之前的次数")
                 changed = True
                 self.logf("stale_requeue", obj=oid, take=t["n"], counted=False, why=str((sm.get("stale") or {}).get(stage))[:120])
@@ -2638,6 +2760,15 @@ def import_staged(paths: Paths, path: str, sha: str, note: str, by: str = "PRODU
     print(json.dumps({"ok": st == 200, "status": st, **({k: r.get(k) for k in ("backup", "episodes", "detail") if k in r})},
                      ensure_ascii=False))
     return 0 if st == 200 else 1
+
+
+def run_status(root: Path, run_id: str) -> str | None:
+    """runs.json 里这部剧的 status（producing / paused / ...）；登记表读不到 → None（不改变 control 的判断）"""
+    try:
+        d = json.loads((root / "config/pipeline/runs.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):   # arch-ok: 没有登记表（老部署 / 演练目录）= 不额外暂停，沿用 control
+        return None
+    return ((d.get("runs") or {}).get(run_id) or {}).get("status")
 
 
 def _runs():
@@ -2926,7 +3057,7 @@ def plan_item(x: str) -> dict:
     return {"preset": preset or None, "variant": variant or None, "name": name}
 
 
-def master_reject(paths: Paths, oid: str, n: int, reason: str, presets: list, wait, by: str) -> int:
+def master_reject(paths: Paths, oid: str, n: int, reason: str, presets: list, wait, by: str, edit: dict | None = None) -> int:
     """总调度驳回某镜某阶段的版本：版本上记 master_reject（原因）；**被驳回的版本若是当前版本，立即撤下**
     （总调度 11-01 按 G0 定：驳回版不能流进视频和成片；视频本来只派过了闸门的首帧，撤下后这一镜等替换版即可。
     ⤴ 取代旧口径“驳回版保留为当前，直到替换版通过”）；takes.json master_gate 挡住自动换当前；
@@ -2945,6 +3076,8 @@ def master_reject(paths: Paths, oid: str, n: int, reason: str, presets: list, wa
     rj[oid] = {"reject_n": n, "reason": reason, "by": by, "at": iso(), "wait": wait,
                "label": "总调度插队" if not n else "驳回重出",
                "plan": [plan_item(x) for x in presets if x]}
+    if edit:      # L-123：项目方在界面上“修改”写的一句话（已由写作模型改写成修改要求）；出图时追加进提示词（apply_owner_edit），n=0 不撤下当前版
+        rj[oid]["edit"] = {k: edit.get(k) for k in ("id", "text", "prompt", "zh_summary", "negative_add", "base_n") if edit.get(k) is not None}
     js(paths.rejects, rj)
     L = jl(paths.ledger, {}) or {}
     rec = L.setdefault(oid, {})
@@ -3110,6 +3243,7 @@ def main(argv=None) -> int:
     ap.add_argument("--reason", default="")
     ap.add_argument("--plan", default="frame_v9,frame_v9", help="reject：驳回重出计划（预设，逗号分隔）")
     ap.add_argument("--wait-for", default="")
+    ap.add_argument("--edit-file", default="", help="reject：项目方“修改”的记录（JSON：id / text / prompt / zh_summary），出图时追加进提示词")
     ap.add_argument("--items", default="Q4,Q5,Q8", help="rescore：只重打“没过的项全在这里面”的版本")
     ap.add_argument("--only", default="")
     ap.add_argument("--wait", action="store_true")
@@ -3133,7 +3267,8 @@ def main(argv=None) -> int:
     if a.cmd == "serve":
         return serve(paths)
     if a.cmd == "reject":
-        return master_reject(paths, a.obj, a.n, a.reason, a.plan.split(","), a.wait_for or None, a.by)
+        edit = json.loads(Path(a.edit_file).read_text(encoding="utf-8")) if a.edit_file else None
+        return master_reject(paths, a.obj, a.n, a.reason, a.plan.split(","), a.wait_for or None, a.by, edit)
     if a.cmd == "reset-best-effort":
         return reset_best_effort(paths, a.note or "门槛 / 编译器更新后重新给 3 次（总调度 11-01）", a.by)
     if a.cmd == "import-staged":          # 总调度派的整稿导入（走 PRODUCER 令牌通道）：--obj <暂存稿路径> --reason <sha256> --note

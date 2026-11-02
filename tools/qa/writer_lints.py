@@ -186,6 +186,20 @@ def check_shot(sh, ep, img: str, size: str | None, fields: dict | None = None) -
         hands = [(img.find(w), w) for w in W10_HAND if w in (img or "")]
         if hit and hands and min(hands)[0] < hit.start() and not re.search("|".join(W10_FACE), img or ""):
             out.append(_issue("QW-W10", f"局部写的是「{min(hands)[1]}」，又写到「{hit.group(0)}」", "img"))
+    # QW-W13（K-WRT-212，PROMPTFIX 11-02：ep07-S3 尾帧陌生女人、ep05-S3 92 版出了陌生脸）：cast 写“局部”（不露脸），
+    # 但景别是近景及更远、又不是局部特写，或者 motion 结束状态写到这个人的脸 / 转身 → 构图会露脸
+    part_people = [c.name for c in cast if c.presence == "局部" and not re.search(r"背", str(c.part or ""))]
+    if part_people:
+        wide = bool(size and re.search(r"^(?:近景|中近景|中景|全景|远景)", size) and not re.search(r"局部|（手|（腰|（腿|（脚|（肩", img[:24] or ""))
+        tail = (getattr(sh, "motion_prompt", None) or "").split("——")[-1]
+        endface = re.search(r"唇|嘴角|视线|目光|抬眼|表情|转身|回头|抬头|眼神", tail)
+        if wide or (endface and not on):          # 有“在画”的人时结束状态的脸 / 视线多半是他的
+            out.append(_issue("QW-W13", f"{'、'.join(part_people)} 在 cast 里写局部（不露脸），但" +
+                              (f"景别「{size}」会拍到脸" if wide else f"结束状态写到「{endface.group(0)}」") +
+                              "：要露脸就把 cast 改成“在画”；不露脸就写局部特写（只拍手 / 腰）或背影，结束状态也不写脸", "cast"))
+    # QW-W14（K-WRT-212，fb-0004 ep04-S10：视线落在“窗玻璃上自己的倒影”→ 画面多出一个陈宇）：两人以上在画的镜头不写倒影 / 映出
+    if len(on) >= 2 and re.search(r"倒影|映出|映着|镜中|镜里", (img or "") + (getattr(sh, "motion_prompt", None) or "")):
+        out.append(_issue("QW-W14", "两人以上在画的镜头写了倒影 / 映出：生成模型会把倒影画成多出来的真人；视线落点改成实物（窗外、床沿、手机）", "img"))
     # QW-W11 对身上正穿着的衣服做整理动作（K-WRT-702）：分拍字段 + H3 正文的分拍段（At 00:0x 之后）
     beats_zh = ex.get("分拍", "")
     h3 = getattr(sh, "h3_prompt", None) or ""
@@ -254,6 +268,9 @@ def check_pacing(ep) -> list[dict]:
 # （tools/script_rsi/rubric_code.py）并进写作 lint——写作方自检直接调用；级别固定 RUBRIC_LEVEL（默认 warn，不跟 WRITER_LINT_LEVEL 升 block，
 # 不影响现行稿与各返修环）；导入闸门（validate_qwen_script --rubric-gate / producer import-staged）把它升为 block
 RUBRIC_LEVEL = "warn"
+RULES["QW-W13"] = ("warn", "cast 写“局部”（不露脸）的人，景别不写近景及更远（除非是局部特写：只拍手 / 腰 / 腿），结束状态也不写到脸、视线、转身；"
+                           "要露脸就把 cast 改成“在画”（K-WRT-212：不露脸却出了脸 = 没送身份脸 = 陌生人）。")
+RULES["QW-W14"] = ("warn", "两人以上在画的镜头不写倒影 / 映出 / 镜中，视线落点写实物（K-WRT-212：倒影会被画成多出来的真人）。")
 RULES["QW-RB1"] = ("warn", "HOLLYWOOD 可核对清单的代码判定条目（rubric_code，K-WRT-H07 / H08）：字段写全、分拍按秒切到镜长、镜1 近景或中景、"
                            "近景不写下半身、台词后下一镜写听者反应、分拍不写穿脱过程、不写回头 / 看镜头、不用情绪直陈句、人物卡原文（发型 / 服装 / 饰品）")
 _RUBRIC = None

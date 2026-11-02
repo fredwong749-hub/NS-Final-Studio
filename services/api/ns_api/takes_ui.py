@@ -167,7 +167,7 @@ def _url(P, f: str | None) -> str | None:
 
 
 @router.get("/api/candidates")
-def candidates(ep: int, history: bool = False):
+def candidates(ep: int, history: bool = False, only_passing: bool = False):
     """history=false（默认）：已隔离的版本（UIRSI r41 旧剧本版本，文件已移进 data/_quarantine_20261102_oldscript）不返回；
     history=true：连隔离的也返回（标 quarantined，给“历史”入口看）"""
     P = _P()
@@ -213,7 +213,9 @@ def candidates(ep: int, history: bool = False):
             a = (data.get("active") or {}).get(st)
             aq = next((x for x in data.get("takes") or [] if x.get("stage") == st and x.get("n") == a and is_quarantined(x)), None)
             # r41：当前版本已隔离 = 没有当前（和集摘要 _active 同口径）
-            row[st] = {"active": None if aq else a, "takes": [x for x in items if x["url"]], **({"active_quarantined": a} if aq else {})}
+            # 项目方 17:0x（ep07-S3 尾帧 #19 Q1 fail 是陌生人，却当“新”给他看）：只给项目方看通过验收的版本；没通过的留在系统里自动重出。
+            # only_passing=1：给项目方看的入口（前端 loadCandidates 一律带）；不带 = 排查口径（带 ok / why_not，测试和 DEBUG 用）。history / 当前版本不过滤
+            row[st] = {"active": None if aq else a, "takes": [x for x in items if x["url"] and (history or not only_passing or x["ok"] or x["n"] == a)], **({"active_quarantined": a} if aq else {})}
         # UIRSI r40：视频版本也标剧本版本（画布“视频 N 版待选”只数现行剧本出的）
         vt = [x for x in data.get("takes") or [] if x.get("stage") == "video" and (history or not is_quarantined(x))]
         if vt:

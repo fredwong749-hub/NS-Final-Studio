@@ -132,6 +132,8 @@ def passed_frames() -> dict:
           ② video/frames_ok.json（ASSETMASTER 通知“契约通过并设为当前”的镜，notify.py 写入，记来源原话）。
     旧 IMGGEN 首帧（项目方 10-31 夜判不合格）不再使用。"""
     out = {}
+    rows = _accept_rows()
+    ANOMALY_SKIPPED.clear()
     for tj in sorted((ROOT / "data/renders").glob("ep*/S*/takes.json")):
         try:
             d = json.loads(tj.read_text(encoding="utf-8"))
@@ -143,12 +145,28 @@ def passed_frames() -> dict:
         # 总调度亲审打回（PRODUCER 写 take.master_reject）= 视同撤销，不算过契约（K-OPS-304）
         # VQAGATE（项目方 11-01：“image 做出来后用本地图像模型检测……再跑视频”）：只给图片闸门（Q9）通过的首帧派视频；
         # 没有看图结果 = 未通过（config/vqa.json gate.video_requires_q9；enforce 关掉时 q9_passed 恒真）
+        sid_k = f"{tj.parent.parent.name}-{tj.parent.name}"
+        why_block = anomaly_block(sid_k, t["file"], pf, rows) if t and t.get("file") and pf.get("ok") else None
+        if why_block:
+            ANOMALY_SKIPPED[sid_k] = f"v{n} 首帧 anomaly 判出：{why_block}，不进视频（等重出）"
+            continue
+        if ACCEPT_REQUIRED and t and t.get("file") and pf.get("ok"):
+            acc = accept_status(sid_k, t["file"], pf, rows)
+            if acc != "pass":
+                ANOMALY_SKIPPED[sid_k] = (f"v{n} 首帧还没跑出图后验收，跑完通过再进视频" if acc is None
+                                          else f"v{n} 首帧出图后验收 {acc}，不进视频")
+                continue
         if t and t.get("file") and pf.get("ok") and not t.get("master_reject") and _q9_ok(pf) and (ROOT / "data" / t["file"]).exists():
             out[f"{tj.parent.parent.name}-{tj.parent.name}"] = {"file": "data/" + t["file"], "postflight": pf,
-                                                               "status": "pass", "take": n}
+                                                               "status": "pass", "take": n, "created_at": str(t.get("created_at") or "")}
     ok = json.loads(FRAMES_OK.read_text(encoding="utf-8")) if FRAMES_OK.exists() else {}
     for sid, v in ok.items():
         if not sid.startswith("_") and v.get("file") and (ROOT / v["file"]).exists() and _q9_ok_file(v["file"]):
+            if sid in out:
+                continue
+            if ACCEPT_REQUIRED and accept_status(sid, v["file"], {}, rows) != "pass":   # 通知来源同样要过第 8 步验收（不留旁路）
+                ANOMALY_SKIPPED.setdefault(sid, "frames_ok 通知的首帧还没通过出图后验收，跑完通过再进视频")
+                continue
             out.setdefault(sid, {"file": v["file"], "postflight": {"ok": True, "source": v.get("by")}, "status": "pass"})
     # 上传瘦身（K-OPS-302：笔记本上行很慢）：首帧转 JPEG q95 放 video/inputs/<镜>.jpg，原图路径记在 src
     from PIL import Image
@@ -171,6 +189,69 @@ def passed_frames() -> dict:
                 continue
         v["src"] = v["file"]
         v["file"] = rel(dst)
+    return out
+
+
+HEAD_DEFECTS = ("duplicate_person", "extra_head")
+ANOMALY_SKIPPED: dict = {}   # 本轮没进视频的镜 → 原因（等验收 / 验收没过 / 重复人头；写进 jobs 的 anomaly_skipped，看板可见）
+# D-VQA-01（项目方 11-01“图片过闸门后才进视频”；总调度 11-02 17:4x 定收紧）：首帧必须有第 8 步出图后验收结果且通过才进视频；
+# 按镜生效（某镜验收一通过，passed_frames 变 → night 的就绪签名变 → 重编作业放行这一镜），不用等全部跑完
+ACCEPT_REQUIRED = True
+
+
+def _accept_rows() -> dict:
+    """VQAGATE 出图后验收批量结果 data/vqa/accept/<集>.json → {(镜, 文件名): count 项}"""
+    out = {}
+    for f in sorted((ROOT / "data/vqa/accept").glob("*.json")):
+        try:
+            rows = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):   # arch-ok: 验收结果文件坏 = 这批没有判定，不据此拦；闸门只拦“判出”的（总调度 17:3x 口径）
+            continue
+        for r in rows if isinstance(rows, list) else []:
+            sid = str(r.get("key") or "").split("|")[0]
+            out[(sid, Path(str(r.get("file") or "").replace("\\", "/")).name)] = r
+    return out
+
+
+def accept_status(sid: str, file: str, pf: dict, rows: dict) -> str | None:
+    """这一版首帧的第 8 步验收结论：postflight Q10 优先，其次验收批量结果（同镜同文件名）→ pass | fail | untested | None（没跑过）"""
+    q10 = next((i for i in pf.get("items") or [] if i.get("id") == "Q10"), None)
+    if q10:
+        return q10.get("status")
+    r = rows.get((sid, Path(file).name))
+    return (r or {}).get("ok")
+
+
+def anomaly_block(sid: str, file: str, pf: dict, rows: dict) -> str | None:
+    """总调度 11-02 17:3x：anomaly 判出重复人 / 多余人头的首帧不许进视频（ep04-S10 v6 就是这样进了视频）。
+    依据：postflight Q10（出图后验收）人数项，或验收批量结果里同一版首帧的 count.defects。没判过的不拦"""
+    q10 = next((i for i in pf.get("items") or [] if i.get("id") == "Q10"), None)
+    cnt = ((q10 or {}).get("evidence") or {}).get("count") or (rows.get((sid, Path(file).name)) or {}).get("count") or {}
+    hit = [d for d in cnt.get("defects") or [] if any(str(d).startswith(c) for c in HEAD_DEFECTS)]
+    return "；".join(hit)[:300] if hit else None
+
+
+LASTS_OF: dict = {}   # build_all 开头按 passed_lasts() 填；compile_variant 映射 @last_frame 用
+
+
+def passed_lasts() -> dict:
+    """视频尾帧关键帧（配方 last_frame_mode=use 且镜头 spec 有 last 关键帧时送）→ {镜: 文件}。
+    项目方定稿锁 locked.last 优先（定稿就是定稿），其次当前尾帧且过契约；文件不在就不算。
+    L-124 ep01-S1（总调度 16:4x）：以前这里根本没有 @last_frame 的映射，S1 七个变体提交全报 KeyError '@last_frame'，一条片都没有"""
+    out = {}
+    for tj in sorted((ROOT / "data/renders").glob("ep*/S*/takes.json")):
+        try:
+            d = json.loads(tj.read_text(encoding="utf-8"))
+        except (OSError, ValueError):   # arch-ok: 读不到这一镜 = 没有尾帧，对应变体标 no_last_frame 不提交（失败关闭）
+            continue
+        n = (d.get("locked") or {}).get("last")
+        locked = n is not None
+        if not locked:
+            n = (d.get("active") or {}).get("last")
+        t = next((x for x in d.get("takes") or [] if x.get("stage") == "last" and x.get("n") == n), None)
+        pf = (t or {}).get("postflight") or (t or {}).get("contract") or {}
+        if t and t.get("file") and (locked or pf.get("ok")) and not t.get("master_reject") and (ROOT / "data" / t["file"]).exists():
+            out[f"{tj.parent.parent.name}-{tj.parent.name}"] = {"file": "data/" + t["file"], "created_at": str(t.get("created_at") or "")}
     return out
 
 
@@ -263,6 +344,13 @@ def compile_variant(spec, reg, rid, attempt, variant, frames_of, *, seed=None, e
                 if not ff:
                     return {"status": "no_first_frame"}
                 inputs[v] = ff["file"]
+            elif v == "@last_frame":          # 配方送尾帧时必须有尾帧输入，否则 vidgen 提交 KeyError（L-124 ep01-S1）
+                lf = LASTS_OF.get(spec.id)
+                if not lf or not ff:
+                    return {"status": "no_last_frame"}
+                if lf["created_at"] < str(ff.get("created_at") or ""):   # 首尾要成对：尾帧比所用首帧旧 = 由旧首帧做的，不能配（E13 同理）
+                    return {"status": "no_last_frame:stale_pair"}
+                inputs[v] = lf["file"]
             elif v.startswith("@look:"):      # Ref2VA 造型槽（REFLOCK 审过的 look_refs，K-REN-303）
                 name = v[6:]
                 slot = next((s for s in plan["ref_slots"] if s.get("role") == "outfit" and s.get("character") == name
@@ -317,8 +405,16 @@ def shot_meta(spec) -> dict:
 
 
 def score_refs(spec, reg) -> dict:
-    crops = (reg.resolve("ref2va_pdd2").get("ref2va") or {}).get("identity_crops") or {}
-    return {c.name: crops[c.name] for c in spec.faces if c.name in crops}
+    """视频打分的身份参考 = 当前身份脸，一律走 asset_refs.face_of（K-OPS-E29 身份脸唯一入口）。
+    旧写法读配方 ref2va_pdd2 的 identity_crops，L-122 换脸后还是旧脸（帧打分已是新脸，两套口径分叉）"""
+    from ns_agent import asset_refs as AR
+    out = {}
+    for c in spec.faces:
+        cid = NAME2ID.get(c.name)
+        f = AR.face_of(RUN.name, cid) if cid else None
+        if f:
+            out[c.name] = f
+    return out
 
 
 def build_all(validate_only=False) -> dict:
@@ -326,6 +422,8 @@ def build_all(validate_only=False) -> dict:
     reg = R.load()
     specs = load_specs()
     frames_of = chosen_frames() if validate_only else passed_frames()
+    LASTS_OF.clear()
+    LASTS_OF.update(passed_lasts())
     alts = alt_crops()
     VID.mkdir(parents=True, exist_ok=True)
     (VID / "specs").mkdir(exist_ok=True)
@@ -405,7 +503,7 @@ def build_all(validate_only=False) -> dict:
     shots.sort(key=lambda m: (m["ep"], m["idx"]))
     out = {"schema": "series10_video.jobs/1", "built_at": time.strftime("%Y-%m-%d %H:%M:%S"),
            "built_by": "tools/series10_video/build_jobs.py", "recipe_choice": ch,
-           "validate": VALIDATE if validate_only else None, "shots": shots}
+           "validate": VALIDATE if validate_only else None, "anomaly_skipped": dict(ANOMALY_SKIPPED), "shots": shots}
     blob = json.dumps(out, ensure_ascii=False, indent=1)
     out_p = VID / ("validate_jobs.json" if validate_only else "jobs.json")
     out_p.write_text(blob, encoding="utf-8")

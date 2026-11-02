@@ -142,6 +142,24 @@ def extra_runs() -> list[tuple[str, int]]:
     return sorted(out, key=lambda x: x[1])
 
 
+def paused_runs() -> list[str]:
+    """runs.json 里登记了、但 status 不是 producing 的非主剧（K-OPS-F20）"""
+    d = jl(RUNS, {}) or {}
+    prim = d.get("primary")
+    return sorted(r for r, v in (d.get("runs") or {}).items() if r != prim and (v or {}).get("status") not in LIVE_RUN_STATUS)
+
+
+def pause_run_control(run: str) -> dict | None:
+    """K-OPS-F20（总调度 11-02 17:0x）：暂停状态只有一个来源 = runs.json。status 不是 producing 的 run，把它的 control 写成
+    paused=true + reason_kind=owner（16:07 gpu36 第二季 control 被重算成 paused=false，暂停后又派单）。没有 control 文件 = 没起，不写"""
+    p = run_control_path(run)
+    c = jl(p, None)
+    if not isinstance(c, dict) or (c.get("paused") and c.get("reason_kind") == "owner"):
+        return None
+    st = ((jl(RUNS, {}) or {}).get("runs") or {}).get(run, {}).get("status")
+    return apply(p, {"paused": True, "paused_by": "runs.json", "reason_kind": "owner", "note": f"config/pipeline/runs.json status={st}"})
+
+
 def run_ready(run: str) -> dict:
     return jl(ROOT / "data/autopilot/runs" / run / "ready_episodes.json", {}) or {}
 
@@ -284,8 +302,9 @@ def _pid_alive(pid: int) -> bool:
         return True
 
 
+# K-OPS-F18（FACTORY 11-02 17:1x）：这里只推派单输入数据，不推代码——dispatch.py / state_paths.py 以前随这里推上服务器，绕过发版（又一个双入口）
 PUSH_FILES = ["data/netfix/override_state.json", "data/netfix/laptop_ctrl.json", "data/autopilot/ready_episodes.json",
-              "tools/netfix/dispatch.py", "tools/factory/state_paths.py", "data/state/netfix/override.json",
+              "data/state/netfix/override.json",
               "data/state/netfix/partition.json", "config/netfix/override.json", "config/netfix/partition.json", "config/pipeline/runs.json"]
 PUSHED_DIR = ROOT / "data/netfix/pushed"          # 每台上次推上去的 partition（三方合并的“共同祖先”）
 MERGE_FIELDS = ("retired_lanes", "_lent_lanes", "_temp_holds")   # 多写者字段（DEBUG-RSI 兜底进程 / 人工借道会直接改）
@@ -610,6 +629,9 @@ def main(argv=None) -> int:
         if a.write:
             apply(run_control_path(run_id), f)
         out[run_id or "primary"] = f if run_id is None else {"only_n": len([x for x in f["only"] if x != NONE]), "path": str(run_control_path(run_id))}
+    if a.write:
+        for r in paused_runs():          # K-OPS-F20：暂停中的 run 不重算 control，但要写成 paused（不留旧的 paused=false）
+            out[r] = {"paused_by_runs_json": bool(pause_run_control(r))}
     prim = out.get("primary") or {}
     print(json.dumps(prim if "only" in prim else out, ensure_ascii=False))
     if len(out) > 1 or rc:

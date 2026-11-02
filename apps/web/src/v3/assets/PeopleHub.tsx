@@ -16,6 +16,34 @@ import { GenDock, GenPoller, GenTiles, trackGen } from "../GenState";
 import type { GearRef } from "../RegenButton.helpers";
 import "./people_hub.css";
 
+/** L-123：删除只在“⋯”菜单里，且是移到回收区（不真删，回收区可恢复） */
+function MoreMenu({ items, busy }: { items: { label: string; run: () => void }[]; busy?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    window.addEventListener("mousedown", h);
+    return () => window.removeEventListener("mousedown", h);
+  }, [open]);
+  return (
+    <span ref={ref} className="hub-more-wrap">
+      <button type="button" className="hub-more-btn" disabled={busy} aria-haspopup="menu" aria-expanded={open} aria-label="更多" title="更多" onClick={() => setOpen((v) => !v)}>
+        ⋯
+      </button>
+      {open && (
+        <span className="hub-more-menu" role="menu">
+          {items.map((it) => (
+            <button key={it.label} type="button" role="menuitem" onClick={() => (setOpen(false), it.run())}>
+              {it.label}
+            </button>
+          ))}
+        </span>
+      )}
+    </span>
+  );
+}
+
 // ---------------------------------------------------------------- 人物列表（左栏，AssetCenter 用）
 export function PeopleNav({ list, cur, onPick }: { list: HubList | null; cur: string | null; onPick: (cid: string) => void }) {
   if (!list)
@@ -328,6 +356,7 @@ export function PeopleHub({ cid, onListChanged }: { cid: string; onListChanged?:
           ["hub-face", "身份脸"],
           ...d.looks.map((l) => [`hub-look-${l.look}`, `造型 ${l.look}`]),
           ["hub-schedule", "排期"],
+          ["hub-usage", "使用场景"],
           ["hub-wardrobe", `衣橱 ${d.items.length}`],
           ["hub-voice", "声音"],
           ["hub-appear", "出场"],
@@ -351,7 +380,7 @@ export function PeopleHub({ cid, onListChanged }: { cid: string; onListChanged?:
           extra={
             d.face ? (
               <button className="regen-btn regen-sm" onClick={() => setRegenFor({ kind: "face", file: d.face!.file, title: `${d.name} 身份脸`, base: "当前身份脸" })} title="以当前身份脸为底图，按你的要求再生成一张候选">
-                ↻ 再生成
+                修改
               </button>
             ) : undefined
           }
@@ -385,28 +414,29 @@ export function PeopleHub({ cid, onListChanged }: { cid: string; onListChanged?:
                 rejected={d.rejected?.[f.file]}
                 busy={!!busy}
                 onUse={() => setFace(f.file)}
+                onEdit={() => setRegenFor({ kind: "face", file: f.file, title: `${d.name} 身份脸`, base: f.current ? "当前身份脸" : "这张身份脸候选" })}
                 onChanged={reload}
                 notify={(text, undo, err) => push({ text, undo, err })}
               />
               {!f.current && f.ref_id && (
-                <button
-                  className="hub-face-del"
-                  disabled={!!busy}
-                  title="删除这张候选（进回收站，10 秒内可撤销）"
-                  onClick={() =>
-                    void (async () => {
-                      try {
-                        const r = await hubApi.trashRef(cid, f.ref_id!);
-                        push({ text: "这张身份脸候选已移到回收站", undo: () => hubApi.restoreTrash(r.entry_id).then(() => reload()) });
-                        reload();
-                      } catch (e) {
-                        push({ text: `删不了：${(e as Error).message}。数据没改动`, err: true });
-                      }
-                    })()
-                  }
-                >
-                  删除
-                </button>
+                <MoreMenu
+                  busy={!!busy}
+                  items={[
+                    {
+                      label: "移到回收区",
+                      run: () =>
+                        void (async () => {
+                          try {
+                            const r = await hubApi.trashRef(cid, f.ref_id!);
+                            push({ text: "这张身份脸候选已移到回收区", undo: () => hubApi.restoreTrash(r.entry_id).then(() => reload()) });
+                            reload();
+                          } catch (e) {
+                            push({ text: `移不了：${(e as Error).message}。数据没改动`, err: true });
+                          }
+                        })(),
+                    },
+                  ]}
+                />
               )}
             </figure>
           ))}
@@ -430,7 +460,7 @@ export function PeopleHub({ cid, onListChanged }: { cid: string; onListChanged?:
           rejected={d.rejected ?? {}}
           notify={(text, undo, err) => push({ text, undo, err })}
           onChangedAll={reload}
-          onRegen={(l) => l.sheet && setRegenFor({ kind: "sheet", file: l.sheet.file, look: l.look, title: `${d.name} 造型 ${l.look} 设定图`, base: `造型 ${l.look} 当前设定图` })}
+          onRegen={(l, file) => (file || l.sheet) && setRegenFor({ kind: "sheet", file: file ?? l.sheet!.file, look: l.look, title: `${d.name} 造型 ${l.look} 设定图`, base: file && file !== l.sheet?.file ? `造型 ${l.look} 这张设定图` : `造型 ${l.look} 当前设定图` })}
           onDelCand={(file) =>
             void (async () => {
               try {
@@ -459,6 +489,7 @@ export function PeopleHub({ cid, onListChanged }: { cid: string; onListChanged?:
       </div>
 
       <ScheduleSection d={d} busy={busy} onSet={(ep, look, prev) => void act(`sch:${ep}`, () => hubApi.schedule(cid, ep, look), look ? `第 ${ep} 集整集改用造型 ${look}` : `第 ${ep} 集回到按剧本逐镜的造型`, () => hubApi.schedule(cid, ep, prev))} />
+      <UsageSection d={d} />
 
       {/* ---- 衣橱 ---- */}
       <Wardrobe d={d} busy={busy} allItems={allItems} setAllItems={setAllItems} onAdd={() => setUpload("pick")} onToggle={toggleLook} onTrash={trashItem} onRename={renameItem} onAddImage={(it, f) => void act(`img:${it.id}`, () => hubApi.addImage(cid, it.id, f, f.name), `“${it.name}”加了一张图`)} onBig={setBig}
@@ -468,7 +499,7 @@ export function PeopleHub({ cid, onListChanged }: { cid: string; onListChanged?:
         }}
         notify={(text, undo, err) => push({ text, undo, err })}
         onChangedAll={reload}
-        onRegen={(it) => it.image && setRegenFor({ kind: "item", file: it.image.file, item_id: it.id, title: `${d.name} · ${it.name}`, base: `“${it.name}”主图` })}
+        onRegen={(it, file) => (file || it.image) && setRegenFor({ kind: "item", file: file ?? it.image!.file, item_id: it.id, title: `${d.name} · ${it.name}`, base: `“${it.name}”主图` })}
         onUseRegen={(it, file) => {
           const prev = it.gallery?.[0]?.file ?? it.image?.file ?? null;
           // 撤销 = 拿掉加进去的那张、主图回到原来的（unuse-regen）；接口还没上线时退回只换主图
@@ -579,7 +610,7 @@ export function PeopleHub({ cid, onListChanged }: { cid: string; onListChanged?:
         )}
       {regenFor && (
         <RegenDialog
-          title={`↻ 再生成 · ${regenFor.title}`}
+          title={`修改 · ${regenFor.title}`}
           sub="写一句要改成什么样，可以再传装备图（衣服、鞋、饰品、美甲…）。出好的图会出现在候选里，点“✓ 用这张”才生效，原图不动。"
           base={regenFor.base}
           where={`资产 ${cid}${regenFor.look ? ` 造型${regenFor.look}` : ""}${regenFor.item_id ? ` ${regenFor.item_id}` : ""}`}
@@ -588,7 +619,7 @@ export function PeopleHub({ cid, onListChanged }: { cid: string; onListChanged?:
           onSubmit={async (text: string, refs: GearRef[]) => {
             const r = await hubApi.regen(cid, { kind: regenFor.kind, file: regenFor.file, prompt: text, look: regenFor.look, item_id: regenFor.item_id, gear: refs.map((g) => ({ path: g.path, label: g.label, item_id: g.item_id })) });
             // L-119：你写的思路已由写作 API 改写成出图提示词；提示里给一句它理解的改动
-            push({ text: r.rewrite ? `已提交再生成（${regenFor.title}）：${r.rewrite.zh_summary}` : `已提交再生成（${regenFor.title}），同提示词换种子`, });
+            push({ text: r.rewrite ? `已提交修改（${regenFor.title}）：${r.rewrite.zh_summary}` : `已提交修改（${regenFor.title}），同提示词换种子`, });
             const jid = r.job?.job_id;
             if (jid) {
               const where = regenFor.kind === "sheet" ? `sheet:${regenFor.look}` : regenFor.kind === "item" ? `item:${regenFor.item_id}` : "face";
@@ -769,6 +800,39 @@ function ScheduleSection({ d, busy, onSet }: { d: HubChar; busy: string | null; 
   );
 }
 
+/** 使用场景：按集列出这个人物出现的场景（地点 · 室内/户外 · 私密/公开/社交 · 是否亲密戏），来自 P2 大纲，只做客观归类，用来对照着调造型 */
+function UsageSection({ d }: { d: HubChar }) {
+  const rows = d.usage ?? [];
+  return (
+    <section id="hub-usage" className="hub-sec">
+      <SecHead title="使用场景" sub="每集这个人物出现在哪些场景（按大纲归类：地点、室内外、私密 / 公开 / 社交、是否亲密戏）。调造型时对照着看。" />
+      {rows.length ? (
+        <div className="hub-use">
+          {rows.map((r) => (
+            <div key={r.ep} className="hub-use-row">
+              <b>第 {r.ep} 集</b>
+              <span className="hub-use-t">{r.title}</span>
+              <div className="hub-use-sc">
+                {r.scenes.map((s) => (
+                  <span key={s.scene_id} className={s.intimate ? "int" : ""}>
+                    {s.name}
+                    {s.privacy ? ` · ${s.place_kind} ${s.privacy}` : ""}
+                    {s.scene_type ? ` · ${s.scene_type}` : ""}
+                    {s.time ? ` · ${s.time}` : ""}
+                    {s.intimate ? " · 亲密戏" : ""}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="ds-muted ds-small">还没有大纲，剧本写出来后这里按集列出场景。</p>
+      )}
+    </section>
+  );
+}
+
 /** 声音（UIRSI 11-01：试听统一用 ds/MediaPlayer；音色换 / A/B 在声音页 VoiceStudio，这里只听 + 跳过去） */
 function VoiceSection({ cid, name, voice }: { cid: string; name: string; voice: HubChar["voice"] }) {
   const [url, setUrl] = useState<string | null>(null);
@@ -919,7 +983,7 @@ function LookSection({
   onUploadSheet: (f: File) => void;
   onRemove?: () => void;
   onDelCand: (file: string) => void;
-  onRegen: (lk: HubLook) => void;
+  onRegen: (lk: HubLook, file?: string) => void;
   rejected: Record<string, { reasons: string[]; note: string }>;
   notify: (text: string, undo?: () => Promise<unknown>, err?: boolean) => void;
   onChangedAll: () => void;
@@ -952,7 +1016,7 @@ function LookSection({
             </Tag>
             {lk.sheet && (
               <button className="regen-btn regen-sm" onClick={() => onRegen(lk)} title="以当前设定图为底图，加装备图和要求再生成一张候选">
-                ↻ 再生成
+                修改
               </button>
             )}
             <label className="ds-btn sm" title="给这套造型传一张设定图（设为当前；原来的留在候选里）">
@@ -1002,13 +1066,12 @@ function LookSection({
                   rejected={rejected[c.file]}
                   busy={!!busy}
                   onUse={() => onSheet(lk, c.file)}
+                  onEdit={() => onRegen(lk, c.file)}
                   onChanged={onChangedAll}
                   notify={notify}
                 />
                 {!c.current && (
-                  <button className="hub-face-del" disabled={!!busy} onClick={() => onDelCand(c.file)} title="删除这张候选（进回收站，10 秒内可撤销；当前设定图不能删）">
-                    删除
-                  </button>
+                  <MoreMenu busy={!!busy} items={[{ label: "移到回收区", run: () => onDelCand(c.file) }]} />
                 )}
                 </div>
               ))}
@@ -1100,7 +1163,7 @@ function Wardrobe({
   onAddImage: (it: HubItem, f: File) => void;
   onBig: (b: { src: string; alt: string }) => void;
   onPrimary: (it: HubItem, file: string) => void;
-  onRegen: (it: HubItem) => void;
+  onRegen: (it: HubItem, file?: string) => void;
   onUseRegen: (it: HubItem, file: string) => void;
   notify: (text: string, undo?: () => Promise<unknown>, err?: boolean) => void;
   onChangedAll: () => void;
@@ -1159,6 +1222,7 @@ function Wardrobe({
                       rejected={d.rejected?.[g.file]}
                       busy={!!busy}
                       onUse={() => onPrimary(it, g.file)}
+                      onEdit={() => onRegen(it, g.file)}
                       onChanged={onChangedAll}
                       notify={notify}
                     />
@@ -1173,7 +1237,7 @@ function Wardrobe({
                     <button onClick={() => onBig({ src: g.url, alt: `${it.name} · 再生成候选` })} title="再生成的候选（点开看大图）">
                       <img src={thumb(g.url, 120) ?? g.url} alt="" loading="lazy" data-zoom-label={`${d.name} · ${it.slot_name} · ${it.name} · 再生成候选`} />
                     </button>
-                    <Verdict kind="item_image" file={g.file} label={`“${it.name}”的再生成图`} cid={d.cid} current={false} rejected={d.rejected?.[g.file]} busy={!!busy} onUse={() => onUseRegen(it, g.file)} onChanged={onChangedAll} notify={notify} />
+                    <Verdict kind="item_image" file={g.file} label={`“${it.name}”的再生成图`} cid={d.cid} current={false} rejected={d.rejected?.[g.file]} busy={!!busy} onUse={() => onUseRegen(it, g.file)} onEdit={() => onRegen(it, g.file)} onChanged={onChangedAll} notify={notify} />
                   </div>
                 ))}
                 <GenTiles where={`item:${it.id}`} />
@@ -1228,16 +1292,14 @@ function Wardrobe({
               <div className="hub-item-tools">
                 {it.image && (
                   <button className="hub-item-add" onClick={() => onRegen(it)} title="以这件的主图为底图，按你的要求再生成一张候选">
-                    ↻ 再生成
+                    修改
                   </button>
                 )}
                 <label className="hub-item-add" title="给这件单品再加一张图（另一角度）">
                   ＋图
                   <input type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(e) => (e.target.files?.[0] && onAddImage(it, e.target.files[0]), (e.target.value = ""))} />
                 </label>
-                <button className="hub-item-del" onClick={() => onTrash(it)} disabled={!!busy} title="删除（进回收站，可撤销）" aria-label={`删除 ${it.name}`}>
-                  删除
-                </button>
+                <MoreMenu busy={!!busy} items={[{ label: "移到回收区", run: () => onTrash(it) }]} />
               </div>
             </div>
           </article>

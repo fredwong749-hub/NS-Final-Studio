@@ -10,7 +10,7 @@
    "board_dir": "data/pipeline/runs/series10_v1/images/refboards",
    "faces": {
     "lin_wan": [
-     "data/assets/identity_refs/lin_wan/lin_wan_face_ref2va.png"
+     "assets/characters/lin_wan/refs/lin_wan/ar-c2351c9dcf.png"
     ],
     "gu_chen": [
      "data/assets/identity_refs/gu_chen/gu_chen_face_ref2va.png"
@@ -22,7 +22,7 @@
      "data/assets/identity_refs/ch_a_lan/ch_a_lan_face_ref2va.png"
     ]
    },
-   "faces_note": "项目方挑定（data/assets/identity_refs/manifest.json，owner_quote “林晚A-s202 顾沉s101 陈宇s202脸”）：身份脸 = <角色>_face_ref2va.png（设定图 A-s202 / s101 / s202 左栏 YuNet 脸框裁切）。11-01 总调度 P0 更正：此前林晚误用旧母版裁切 ar-c2351c9dcf（= data/cache/refs/master_face_b8e7b00b6756，10-31 03:41 的旧母版），已改回 A-s202。阿岚用设定图 A 左栏裁切（K-AST-221）",
+   "faces_note": "L-122（项目方 11-02 15:45 本人在资产页设为身份脸，16:1x AskUserQuestion“是我要换的”）：林晚身份脸 = ar-c2351c9dcf 母版脸；取代 L-086 / 11-01 的 ref2va 口径。唯一读取入口 asset_refs.face_of（K-OPS-E29）；本列表与 face_overrides 一致，旧说法见 faces_note_history。其他角色不变。",
    "female": [
     "lin_wan",
     "ch_a_lan"
@@ -45,7 +45,8 @@
      }
     }
    },
-   "item_map_note": "系统提议（REFLOCK 2026-10-31，按单品名与产品图人工比对）：S01 = 唯一的 12cm 透明细高跟；O09 = 黑色镜面漆皮超短裙；N1 = 冰川满钻尖甲（透明长甲满钻）。未映射：B 的“黑色漆皮束腰”——衣橱 LW-O10 带肩带 / 开窗，与造型 B 设定图（抹胸束腰）不一致，待项目方定以哪个为准，暂以设定图为准；细银链 / 红绳 / 九串铁珠 / 白球鞋 / 雾蓝针织长裙 / 米白衬衫 / 深灰西装裙在衣橱里没有对应产品图 → 用设定图裁切；短款西装外套 = \"__missing__\"（ASSETMASTER lib_map：库里只有顾沉男式外套 LW-O21，设定图 A 也没画外套，判缺图）；11-01 ASSETMASTER：短款西装外套 → am-lin_wan-33599db7（产品图暂定 2 张）、B 九串铁珠 → lw-accessory-lw-a03（9 颗 5mm 不锈钢本色钢珠产品图）"
+   "item_map_note": "系统提议（REFLOCK 2026-10-31，按单品名与产品图人工比对）：S01 = 唯一的 12cm 透明细高跟；O09 = 黑色镜面漆皮超短裙；N1 = 冰川满钻尖甲（透明长甲满钻）。未映射：B 的“黑色漆皮束腰”——衣橱 LW-O10 带肩带 / 开窗，与造型 B 设定图（抹胸束腰）不一致，待项目方定以哪个为准，暂以设定图为准；细银链 / 红绳 / 九串铁珠 / 白球鞋 / 雾蓝针织长裙 / 米白衬衫 / 深灰西装裙在衣橱里没有对应产品图 → 用设定图裁切；短款西装外套 = \"__missing__\"（ASSETMASTER lib_map：库里只有顾沉男式外套 LW-O21，设定图 A 也没画外套，判缺图）；11-01 ASSETMASTER：短款西装外套 → am-lin_wan-33599db7（产品图暂定 2 张）、B 九串铁珠 → lw-accessory-lw-a03（9 颗 5mm 不锈钢本色钢珠产品图）",
+   "faces_note_history": "项目方挑定（data/assets/identity_refs/manifest.json，owner_quote “林晚A-s202 顾沉s101 陈宇s202脸”）：身份脸 = <角色>_face_ref2va.png（设定图 A-s202 / s101 / s202 左栏 YuNet 脸框裁切）。11-01 总调度 P0 更正：此前林晚误用旧母版裁切 ar-c2351c9dcf（= data/cache/refs/master_face_b8e7b00b6756，10-31 03:41 的旧母版），已改回 A-s202。阿岚用设定图 A 左栏裁切（K-AST-221）"
   },
   "series10_s2": {
    "inherits": "series10_v1",

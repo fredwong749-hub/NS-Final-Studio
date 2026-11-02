@@ -240,3 +240,27 @@ rules:
     confidence: medium
     status: 确认
     date: 2026-11-02
+  - id: K-REV-V20
+    domain: review
+    link: [P10-P11]
+    title: 饰品 / 单品一致性一律以 P1 造型登记为准——这一镜这个人穿的造型里登记了的单品不算错位，检测器里不另写归属表
+    when: 任何检查单品在不在对的人身上时（detector signature_item_misowned、Q1a 饰品归属、看图 item_on_wrong_person / accessory_mismatch）
+    then: 读 P1_looks.json 的饰品字段 + assets/shot_looks.json（每镜每人穿哪套造型）；登记了的不算错，没登记却出现在这个人身上才算错位；不在检测器 / 闸门代码里写“某单品只属于某人”的固定表
+    check: [tests/test_vqa_anomaly.py]
+    evidence:
+      - {src: docs/vqa/STATE.md, note: "总调度 11-02 16:xx 裁定：原 signature_item_misowned 写死“红绳只属于陈宇”：林晚造型 C 登记了红绳手链，ep02-S9 / ep04-S1 林晚穿 C 戴红绳被误报；林晚 B（ep04-S10 / ep08-S7 / ep09-S8 / ep10-S4 / ep08-S3）、A（ep01-S10）手上真有红绳才是真问题。另：ep01-S10 尾帧报红色占比 0.08，放大看手腕没有红绳（颜色判据偏松）"}
+    confidence: high
+    status: 待验
+    date: 2026-11-02
+  - id: K-REV-V21
+    domain: review
+    link: [P10-P11]
+    title: 出图后自动验收 Q10——每帧一条结构化标签（身份 / 服装 / 提示词 / 人数），四项全过才算过，作为闸门，不再只记录
+    when: 出图打完契约分之后、设为当前之前（producer.vqa_gate → contract.accept_gate → tools/vqa/accept.py）
+    then: identity = Q1（ArcFace 对 face_of）；outfit = Q2 + Q1a（饰品按 P1 造型登记，K-REV-V20）；prompt = 本地 Qwen3-VL 按编译稿核人数 / 左右 / 动作 / 场景；count = anomaly.judge；任一 fail → 挡并重出；检测器 / 看图没跑成 → untested，挡并记 score_infra；单人镜站位不符记日志、不拦；局部 / 只露手 / 背影且原文没写到脸的人不打身份分，多出的脸由 count 判
+    check: [tests/test_vqagate.py]
+    evidence:
+      - {src: docs/vqa/STATE.md, note: "ep01 18 张自动出标签：15 过、3 不过（S8 尾帧顾沉的手没出现、S9 首尾帧顾沉不是背影），亲看确认是真问题；人工标注回归集 16 条 / 19 个标签全对（含 ep07-S3 尾帧陌生人）"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-02

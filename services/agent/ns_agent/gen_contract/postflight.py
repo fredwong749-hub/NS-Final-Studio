@@ -102,7 +102,7 @@ def q1a_item(image, boxes: dict, all_boxes: list, t1a: dict) -> tuple[str, str, 
 
 
 def apply_bank(sims: dict, t1: dict) -> dict:
-    """身份库 top-k（VQAGATE 11-02，L-098）：sims 里 "<cid>@bN" 是库帧的相似度，"<cid>" 是锚（L-086）。
+    """身份库 top-k（VQAGATE 11-02，L-098）：sims 里 "<cid>@bN" 是库帧的相似度，"<cid>" 是锚（当前身份脸 asset_refs.face_of）。
     锚 ≥ 复核下限（三段线下限，默认 0.50）时，有效分 = 锚 + 库帧里前 k 个的平均；锚低于下限 → 有效分就是锚（库不帮忙，防带偏）。
     返回去掉 @bN 键、cid 键换成有效分的新 dict；原始锚分留在 "<cid>@anchor"（只记录，_merge_refs 不会拿它取高）"""
     k = int((t1.get("bank") or {}).get("k", 3))
@@ -324,7 +324,15 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
     t1 = th.get("Q1_identity") or {}
     big_unexpected = [f for f in (remote or {}).get("faces") or []
                       if (f.get("h_ratio") or 0) >= t1.get("min_face_ratio", 0.04)] if (not face_visible or not expect) else []
-    if (not face_visible or not expect) and big_unexpected:
+    partial_unfaced = (bool(req.get("cast")) and not expect and not described
+                       and all(c.get("presence") in ("局部", "背影", "画外") for c in req.get("cast") or []))
+    if partial_unfaced:
+        # 总调度 11-02 17:1x（ep06-S5 尾帧顾沉只露手，身份分 0.091 被判失败 = 误判）：cast 里只有局部 / 只露手 / 背影、
+        # 原文也没写到谁的脸 → 不打身份分（不知道该比谁、手或背景常被误检成脸），只核对露出部分和造型（Q2 / Q1a）；
+        # 画面里多出来的陌生脸（ep07-S3 尾帧）交 Q10 出图后验收的人数检测判（anomaly extra_head，人工回归集判对）
+        add("Q1", "na", "局部 / 只露手 / 背影：不打身份分（只核对露出部分和造型；多出的脸由 Q10 人数检测判）",
+            faces_seen=len(big_unexpected), partial_cast=True)
+    elif (not face_visible or not expect) and big_unexpected:
         # 人物一致性闸门（VQAGATE 11-02 P0，项目方 02:3x）：cast 写“局部 / 只露手 / 不露脸”或本镜没有在画角色，画面里却出了够大的脸
         # （ep02-S10：林晚判“只露双手”，没挂身份脸，Q1 原来直接“不适用”，换了人的脸照样过）→ 这张脸也必须认得出是 cast 里的谁：
         # 对每个角色的身份脸（score_remote 一直对 4 个主角都算）按脸大小分档比，像 cast 里的人且过线 = 过，否则拦
@@ -369,7 +377,7 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
                     # L-098 身份库 A/B（11-02）：top-k 把 03-S2 v14（脸圆发糊、亲审不合格，锚 0.573）抬到 0.611–0.650，
                     # 会绕开复核带的清晰度把关 → 锚自己没过线时仍进复核带，只是免本地看图（top-k 已证明是同一人），清晰度照查
                     a0 = faces[k_best]["anchor"][cid]
-                    bad.append(f"{cid} 锚 {a0:.3f}（对 L-086）在复核带 {lo}–{need}（{tname}），身份库 top-k {best:.3f} 过线，待清晰度复核")
+                    bad.append(f"{cid} 锚 {a0:.3f}（对当前身份脸）在复核带 {lo}–{need}（{tname}），身份库 top-k {best:.3f} 过线，待清晰度复核")
                     q1_band.append({"cid": cid, "sim": round(a0, 3), "topk": round(best, 3), "mode": "sharp_only", "lo": lo, "need": need,
                                     "tier": tname, "bbox": faces[k_best].get("bbox"), "h_ratio": round(h, 3)})
         # 总调度 11-01 P1（ep03-S6 林晚 + 一个不像顾沉的“外国脸”男人，Q1 只算了林晚）：画面里每一张（够大的）脸都要认得出是谁——

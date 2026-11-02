@@ -102,11 +102,19 @@ def list_cuts(n: int):
     files = sorted(d.glob(f"ep{n:02d}*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True) if d.is_dir() else []
     files = [f for f in files if re.match(rf"ep{n:02d}(?!\d)", f.name)]
     files += plan_cuts(n)
+    files += final_cuts(n)
     files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     # UIRSI：比最近一次“整份替换”导入（import_log mode=replace…）更早合成的成片标 old_script——界面默认不显示
     # 旧剧本的成片（文件不动）。按集合并导入（merge）不算换剧本。
     smt = _last_replace_import()
     cuts = [_summary(f, n) | {"old_script": bool(smt and f.stat().st_mtime < smt)} for f in files]
+    fin = _final_file(n)
+    for c, f in zip(cuts, files):   # CUTEDIT：剪辑器导出的版本标“剪辑”，当前定稿标“定稿”
+        if "_cut_" in f.name:
+            c["tags"].append("剪辑")
+        if fin and f.resolve() == fin:
+            c["tags"].insert(0, "定稿")
+            c["final"] = True
     return {"episode": n, "cuts": cuts, "job": _job_view(n),
             "script_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(smt)) if smt else None}
 
@@ -137,6 +145,24 @@ def script_replaced_at():
     """UIRSI：最近一次整份替换导入（换剧本）的时间。界面据此隐藏换剧本之前的旧记录（旧成片、旧整集出片），文件不动。"""
     t = _last_replace_import()
     return {"at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t)) if t else None}
+
+
+def final_cuts(n: int) -> list[Path]:
+    """CUTEDIT / ASSEMBLY：data/renders/epNN/_final/epNN_*.mp4（装配成片版 + 剪辑器导出的定稿；预览 preview_latest 不算）"""
+    d = P.DATA / "renders" / f"ep{n:02d}" / "_final"
+    return [f for f in d.glob(f"ep{n:02d}_*.mp4") if f.is_file()] if d.is_dir() else []
+
+
+def _final_file(n: int) -> Path | None:
+    try:
+        f = (json.loads((P.DATA / "renders" / f"ep{n:02d}" / "_final" / "cut_project.json").read_text(encoding="utf-8"))
+             .get("final") or {}).get("file")
+    except FileNotFoundError:   # arch-ok: 还没建剪辑工程 = 没有定稿（正常状态，不是读失败）
+        return None
+    except (OSError, ValueError) as e:   # arch-ok: 工程文件坏了只影响“定稿”标签显示，打日志报出来，列表照常
+        print(f"[cuts] cut_project.json 读不了（第 {n} 集，定稿标签先不显示）：{e!r}", file=sys.stderr)
+        return None
+    return (P.ROOT / f).resolve() if f else None
 
 
 def plan_cuts(n: int) -> list[Path]:

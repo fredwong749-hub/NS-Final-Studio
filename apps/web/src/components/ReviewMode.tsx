@@ -14,9 +14,9 @@ function LookDetails({ shotId }: { shotId: string }) {
   );
 }
 
-/** 审片模式（规范 C9）：全屏 9:16 播放器；J/K 移动，A 通过，X 打回，Esc 退出 */
+/** 审片模式（规范 C9）：全屏 9:16 播放器；J/K 移动，A 用这版，Esc 退出 */
 export function ReviewMode() {
-  const { reviewMode, setReviewMode, sel, summaryById, epNum, details, canPass, episode } = useStudio();
+  const { reviewMode, setReviewMode, sel, summaryById, epNum, details, episode } = useStudio();
   const tags = useEpisodeTags(epNum);
   if (!reviewMode) return null;
   const s = sel ? summaryById.get(sel) : undefined;
@@ -64,7 +64,7 @@ export function ReviewMode() {
             <div className="rm-keys">
               <kbd>J</kbd> 上一镜 <kbd>K</kbd> 下一镜 <kbd>空格</kbd> 播放
               <br />
-              <kbd>A</kbd> 通过{!canPass(s) && <span className="bad">（先完整播放一遍）</span>} <kbd>X</kbd> 打回 · 标记后自动跳到下一个未审镜头
+              <kbd>A</kbd> 用这版 · 标记后自动跳到下一个未审镜头
             </div>
           </>
         )}

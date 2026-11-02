@@ -64,6 +64,10 @@ export function SbEpisodeBar({ ep }: { ep: Episode }) {
           </div>
         )}
       </Pop>
+      {nMiss > 0 && gapWhy.length === 0 ? (
+        // NAVIA：只有系统自己在刷新 / 检查的事，不占横条，只给一个小呼吸灯（悬停才有说明）
+        <span className="sb-sysdot is-rendering" title="系统正在核对这一集的资料，会自动更新，不需要你做什么" aria-label="系统正在核对" />
+      ) : (
       <button
         className={`sb-chip${nMiss ? " bad" : " ok"}${ui.onlyMissing ? " on" : ""}`}
         disabled={!nMiss && !ui.onlyMissing}
@@ -74,6 +78,7 @@ export function SbEpisodeBar({ ep }: { ep: Episode }) {
         {nMiss && gapSys && gapWhy.length ? ` · 另有系统检查 ${gapSys} 项` : ""}
         {ui.onlyMissing ? " · 只看这些 ✕" : ""}
       </button>
+      )}
       <ProduceHistoryChip ep={ep.number} />
       <button className={`sb-chip sb-opt${ui.expandAll ? " on" : ""}`} onClick={() => sbUi.setExpandAll(!ui.expandAll)} title="每一行都展开分镜详情（记住）">
         {ui.expandAll ? "收起全部分镜详情" : "展开全部分镜详情"}

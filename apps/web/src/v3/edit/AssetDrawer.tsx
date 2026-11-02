@@ -476,7 +476,7 @@ export function AssetDrawer({ shot, open, onClose, embedded }: AssetDrawerProps)
         ]),
     ...(noShot ? [] : [{ k: "take" as Base, t: `本镜${SLOT_NAME[fromSlot]}${take ? ` #${take.n}` : ""}`, url: takeImg, ok: !!take }]),
     ...(baseGen ? [{ k: "gen" as Base, t: "选中的生成版", url: baseGen.url ?? null, ok: !!baseGen.file }] : []),
-    { k: "none", t: "不选底图（只用参考图）", url: null, ok: true },
+    { k: "none", t: "只用参考图（不带底图）", url: null, ok: true },
   ];
   const saveOpts: [Save, string][] = isScene
     ? [["version", "存为场景新底图版本（原底图不动）"]]
@@ -637,7 +637,7 @@ export function AssetDrawer({ shot, open, onClose, embedded }: AssetDrawerProps)
                           <button
                             className="im"
                             onClick={() => !r.void && setOff((m) => ({ ...m, [r.ref_id]: !m[r.ref_id] }))}
-                            title={r.void ? "已作废，不能用作参考" : off[r.ref_id] ? "没在用 · 点一下用这张" : "在用 · 点一下不用这张；拖到别的组换用途"}
+                            title={r.void ? "已作废，不能用作参考" : off[r.ref_id] ? "没带上 · 点一下带上" : "带着 · 点一下取下；拖到别的组换用途"}
                           >
                             {r.url ? <img src={r.url} alt="" /> : <span className="e">无图</span>}
                           </button>
@@ -661,7 +661,7 @@ export function AssetDrawer({ shot, open, onClose, embedded }: AssetDrawerProps)
 
         <section>
           <h4>
-            ② 底图<span>{base === "none" ? "不选底图时只按参考图出，改动幅度不生效" : "图1 = 底图，参考图从图2起"}</span>
+            ② 底图<span>{base === "none" ? "只用参考图时按参考图出，改动幅度不生效" : "图1 = 底图，参考图从图2起"}</span>
           </h4>
           <div className="v3a-bases">
             {baseOpts.map((o) => (

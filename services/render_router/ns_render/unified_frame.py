@@ -18,6 +18,11 @@ from . import workflows as W
 ROOT = Path(__file__).resolve().parents[3]
 
 
+def _sha16(s: str) -> str:
+    import hashlib
+    return hashlib.sha256((s or "").encode("utf-8")).hexdigest()[:16]
+
+
 def preset_id() -> str:
     try:
         rq = json.loads((ROOT / "config" / "render_quality.json").read_text(encoding="utf-8"))
@@ -87,6 +92,12 @@ def _run(client, shot_id: str, stage: str, job: dict, seed: int, timeout_s: floa
     take = Take(n=n, stage=stage, file=rel, raw_file=raw, seed=seed, prompt=sent, negative="", seconds=round(secs, 1),
                 created_at=P.now(), workflow="frame_v9_unified", reference=job["refs"][0] if job["refs"] else None,
                 references=list(job["refs"]))
+    # PROMPTFIX 11-02（ALIGNMENT 第 2 / 6 步）：compile_trace 随 take 落账（提示词 sha、参考图、种子、种子来源）
+    ct = dict(job.get("compile_trace") or {})
+    if ct:
+        ct.update(seed=seed, seed_policy=job.get("seed_policy") or "caller", sent_prompt_sha=_sha16(sent),
+                  final_prompt_sha=_sha16(job.get("prompt") or ""))   # final ≠ compile 的 prompt_sha = 编译后又被改过（owner_edit / vqa_delta）
+        take.params = {**(take.params or {}), "compile_trace": ct}
     # 交付尺寸记录（11-01 bug：画布 take 7 被判“坏图：768×1344 与请求的 1152×2016 不符”——图是对的（1.5× 出图 →
     # lanczos 缩回 768×1344 → USM），是 params 只记了放大出图的图尺寸）：后处理记成 params.post，effective 记交付尺寸
     post_rec = ({k: v for k, v in post.items() if k != "path"} | {"file": rel, "from": raw}) if post else None

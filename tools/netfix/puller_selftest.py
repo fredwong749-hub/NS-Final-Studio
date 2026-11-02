@@ -21,6 +21,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import puller as P  # noqa: E402
 import rssh  # noqa: E402
 
+P.STAGE = ROOT / "data/netfix/_selftest_stage"   # AUDIT-M 11-02：自检原来用真实暂存区 data/_offline_pull，被 merge_pull.main 并进仓库根（A-11）
+
 MAKE = r'''
 import hashlib, json, os, sys, time
 B, n0, n = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])

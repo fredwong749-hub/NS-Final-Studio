@@ -49,6 +49,9 @@ export function MediaIcons({ m }: { m: NonNullable<FilmFrame["media"]> }) {
 }
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
+import { leicaLens } from "../lens"; // NAVIA：徕卡刻字格式全站共享（v3/lens.ts）
+export { leicaLens };
+
 /** 真实 35mm 正片几何（FILMUI r3，项目方 12:0x“不太像胶片”；参照 Wikimedia Commons 放映拷贝近照，见 docs/research/filmui/refs.md §6）。
  *  画高 H 对应 24.9 mm；片边 rail = 5.05 mm = 0.203H，其中：外侧片边 2.01 mm（0.081H，印片边字 / KeyKode）、KS 齿孔 1.98 × 2.79 mm（0.0795H × 0.112H，
  *  圆角 0.5 mm）、齿孔到画面 1.06 mm（0.043H）；齿距 4.74 mm（0.19H），竖幅横走 3 齿 / 帧。齿孔只透一点很弱的暖光，片基深炭黑偏暖（项目方 12:0x“胶片太亮了，暗黑调”：画面是整页最亮的东西）。 */
@@ -241,7 +244,7 @@ export function FilmOverview({ eps, onOpen, onCanvas, onMulti }: { eps: OvEp[]; 
               <div className="fo-h">
                 <span className="no">EP {pad2(e.number)}</span>
                 <span className="ti">{e.title}</span>
-                <button className="fo-play" onClick={() => setProj({ ep: e, i: 0 })} title="按顺序放整集：有视频放视频，没视频的镜用首帧按时长停留；← → 换镜 · 空格暂停 · Esc 退出">▶ 连播本集</button>
+                <button className="fo-play" onClick={() => setProj({ ep: e, i: 0 })} title="播放拼好的整集预览（视频 + 配音 + BGM + 转场；占位镜首帧缓推）· 时间轴点镜跳转 · 空格暂停 · Esc 退出；播放器里“逐镜看”= 原来的逐镜轮播">▶ 连播本集</button>
                 <span className="st" title={e.stateTip}>
                   {e.stateDot && <i className={`sea-dot d-${e.stateDot}`} aria-hidden />}
                   <span>{e.state}</span>
@@ -251,7 +254,7 @@ export function FilmOverview({ eps, onOpen, onCanvas, onMulti }: { eps: OvEp[]; 
                 <FilmStrip
                   H={H}
                   lead={`EP${pad2(e.number)}`}
-                  kk={`EASTMAN 2383  ${keykode(e.number, 0)}`}
+                  kk={`KODAK VISION3 500T 5219  ${keykode(e.number, 0)}`}
                   thumbW={480}
                   sound={sound}
                   frames={e.shots.map((x) => ({
@@ -268,7 +271,7 @@ export function FilmOverview({ eps, onOpen, onCanvas, onMulti }: { eps: OvEp[]; 
                   {e.shots.map((x) => (
                     <div key={x.id} className="fo-d" style={{ width: w }} title={[x.lens.v ? `镜头 ${x.lens.v}` : "", x.light.v ? `灯光 ${x.light.v}` : "", x.faces.length ? `人物 ${x.faces.map((c) => c.name).join("、")}` : ""].filter(Boolean).join("\n")}>
                       {/* FILMUI r3（项目方 12:0x）：片条下面只留重要信息，一行最多两项：镜头 · 运镜；镜号 / 时长 / 景别印在片边，人物头像去掉 */}
-                      <span className="mono"><F f={{ ...x.lens, v: x.lens.v ? x.lens.v.split(" · ")[0].replace(/^实拍\s*/, "") : x.lens.v }} /></span> · <F f={x.move} />
+                      <span className="mono"><F f={{ ...x.lens, v: leicaLens(x.lens.v) }} /></span> · <F f={x.move} />
                     </div>
                   ))}
                 </div>
@@ -281,8 +284,103 @@ export function FilmOverview({ eps, onOpen, onCanvas, onMulti }: { eps: OvEp[]; 
   );
 }
 
-/** 一集连播（放映机）：片头字卡 → 逐镜放映；画面下方印镜号 · 景别 · 时长和镜头 · 运镜，底部一排镜号标出放到哪 */
+type PvShot = { shot: string; index: number; kind: "video" | "placeholder" | "best_effort"; start_s: number | null; duration_s: number | null };
+type Pv = { url: string | null; srt_url?: string; built_at?: string; built_ts?: number; duration_s?: number; shots: PvShot[]; stale: boolean; building: boolean; eta_s: number | null;
+  video_shots?: number; best_effort_shots?: number; placeholder_shots?: number };
+const KIND_ZH = { video: "视频", best_effort: "尽力版视频", placeholder: "占位（首帧缓推）" } as const;
+type SrtCue = { a: number; b: number; text: string };
+function parseSrt(s: string): SrtCue[] {
+  const tc = (x: string) => { const m = /(\d+):(\d+):(\d+)[,.](\d+)/.exec(x); return m ? +m[1] * 3600 + +m[2] * 60 + +m[3] + +m[4] / 1000 : 0; };
+  return s.split(/\r?\n\r?\n/).map((b) => b.split(/\r?\n/)).filter((l) => l.length >= 3).map((l) => { const [a, b] = l[1].split("-->"); return { a: tc(a), b: tc(b), text: l.slice(2).join(" ") }; });
+}
+
+/** 整集连播（ASSEMBLY 11-02，项目方 16:4x）：播真正拼好的整集预览（视频 + 配音 + BGM + 转场；tools/assemble_series.py --preview 产出）。
+ *  时间轴按镜分段，占位镜灰色，点分段跳到那一镜；预览比最新镜头旧时角上写“正在更新，约 N 分钟”（呼吸灯）；
+ *  外挂字幕可开关（不烧录，L-002）；原来的逐镜轮播收在“逐镜看”开关里。 */
 function Projector({ ep, start, sound, onClose }: { ep: OvEp; start: number; sound: boolean; onClose: () => void }) {
+  const [pv, setPv] = useState<Pv | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [shotMode, setShotMode] = useState(false);
+  const [subs, setSubs] = useState(false);
+  const [cues, setCues] = useState<SrtCue[] | null>(null);
+  const [now, setNow] = useState(0);
+  const [url0, setUrl0] = useState<string | null>(null);
+  const vref = useRef<HTMLVideoElement | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const load = () => fetch(`/api/episodes/${ep.number}/preview`).then(async (r) => {
+      if (!r.ok) throw new Error((await r.json().catch(() => ({ detail: r.statusText }))).detail || r.statusText);
+      return r.json() as Promise<Pv>;
+    }).then((d) => { if (!alive) return; setPv(d); setErr(null); setUrl0((u) => u ?? d.url); }).catch((e) => alive && setErr(String(e.message || e)));
+    load();
+    const t = setInterval(load, 20000);
+    return () => { alive = false; clearInterval(t); };
+  }, [ep.number]);
+  useEffect(() => {
+    if (!subs || cues || !pv?.srt_url) return;
+    fetch(pv.srt_url).then((r) => r.text()).then((s) => setCues(parseSrt(s))).catch(() => setCues([]));
+  }, [subs, cues, pv?.srt_url]);
+  useEffect(() => {
+    if (shotMode) return;
+    const k = (ev: KeyboardEvent) => {
+      const v = vref.current;
+      if (ev.key === "Escape") onClose();
+      else if (ev.key === " " && v) { ev.preventDefault(); if (v.paused) v.play(); else v.pause(); }
+      else if (ev.key === "ArrowRight" && v) v.currentTime = Math.min(v.duration || 1e9, v.currentTime + 5);
+      else if (ev.key === "ArrowLeft" && v) v.currentTime = Math.max(0, v.currentTime - 5);
+    };
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [shotMode, onClose]);
+  if (shotMode) return <ShotProjector ep={ep} start={start} sound={sound} onClose={onClose} />;
+  const total = pv?.duration_s || vref.current?.duration || 1;
+  const shots = pv?.shots ?? [];
+  const cur = shots.find((x) => x.start_s != null && now >= x.start_s && now < (x.start_s + (x.duration_s || 0)));
+  const cue = subs ? cues?.find((c) => now >= c.a && now <= c.b) : null;
+  const newer = !!pv?.url && !!url0 && pv.url !== url0;
+  const mins = pv?.building ? Math.max(1, Math.ceil((pv.eta_s ?? 150) / 60)) : Math.max(2, Math.ceil((600 - (Date.now() / 1000 - (pv?.built_ts ?? 0))) / 60) + 2);
+  return (
+    <div className="fo-proj fo-pv" role="dialog" aria-label="连播本集">
+      <div className="fo-pv-top">
+        <span className="mono">EP {pad2(ep.number)}</span><b>{ep.title}</b>
+        {pv?.url && <span className="fo-pv-meta">{(pv.duration_s ?? 0).toFixed(1)} 秒 · 视频 {pv.video_shots ?? 0} 镜{pv.best_effort_shots ? ` · 尽力版 ${pv.best_effort_shots} 镜` : ""} · 占位 {pv.placeholder_shots ?? 0} 镜 · 预览，非交付</span>}
+        <span className="fo-pv-sp" />
+        <label className="fo-pv-sw"><input type="checkbox" checked={subs} onChange={(e) => setSubs(e.target.checked)} />外挂字幕</label>
+        <label className="fo-pv-sw"><input type="checkbox" checked={false} onChange={() => setShotMode(true)} />逐镜看</label>
+        <button className="fo-proj-x2" onClick={onClose}>Esc 退出</button>
+      </div>
+      {pv?.stale && pv.url && (
+        <div className="fo-pv-stale" role="status"><i className="fo-pv-dot" aria-hidden />正在更新，约 {mins} 分钟{newer && <button onClick={() => { setUrl0(pv.url); setCues(null); }}>用新版</button>}</div>
+      )}
+      {err && !pv?.url ? (
+        <div className="fo-pv-empty">{err}<br /><button onClick={() => setShotMode(true)}>先用逐镜看</button></div>
+      ) : pv && !pv.url ? (
+        <div className="fo-pv-empty"><i className="fo-pv-dot" aria-hidden />这一集的整集预览正在拼，约 {Math.max(1, Math.ceil((pv.eta_s ?? 150) / 60))} 分钟<br /><button onClick={() => setShotMode(true)}>先用逐镜看</button></div>
+      ) : url0 ? (
+        <>
+          <div className="fo-proj-media fo-pv-media">
+            <video key={url0} ref={(v) => { vref.current = v; if (v && !v.dataset.started) { v.dataset.started = "1"; v.muted = !sound; v.play().catch(() => { v.muted = true; v.play().catch(() => undefined); }); } }}
+              src={url0} controls playsInline onTimeUpdate={(e) => setNow(e.currentTarget.currentTime)} />
+            {cue && <div className="fo-pv-sub">{cue.text}</div>}
+          </div>
+          <div className="fo-pv-cap mono">{cur ? `S${pad2(cur.index)} · ${KIND_ZH[cur.kind]}` : ""}</div>
+          <div className="fo-pv-tl" aria-label="分镜时间轴（点分段跳到那一镜）">
+            {shots.map((x) => (
+              <button key={x.shot} className={`seg k-${x.kind}${cur?.shot === x.shot ? " on" : ""}`} style={{ flexGrow: x.duration_s || 1 }}
+                title={`S${pad2(x.index)} · ${KIND_ZH[x.kind]} · ${(x.duration_s ?? 0).toFixed(1)} 秒`}
+                onClick={() => { const v = vref.current; if (v && x.start_s != null) { v.currentTime = x.start_s; v.play().catch(() => undefined); } }}>S{pad2(x.index)}</button>
+            ))}
+            <i className="fo-pv-head" style={{ left: `${Math.min(100, (now / total) * 100)}%` }} />
+          </div>
+          <div className="fo-pv-leg"><i className="k-video" />视频<i className="k-best_effort" />尽力版<i className="k-placeholder" />占位（灰）</div>
+        </>
+      ) : <div className="fo-pv-empty">加载中…</div>}
+    </div>
+  );
+}
+
+/** 逐镜放映（旧连播，收进整集播放器的“逐镜看”开关）：片头字卡 → 逐镜放映；画面下方印镜号 · 景别 · 时长和镜头 · 运镜，底部一排镜号标出放到哪 */
+function ShotProjector({ ep, start, sound, onClose }: { ep: OvEp; start: number; sound: boolean; onClose: () => void }) {
   const [i, setI] = useState(start);
   const [title, setTitle] = useState(true);
   const [paused, setPaused] = useState(false);
@@ -307,7 +405,7 @@ function Projector({ ep, start, sound, onClose }: { ep: OvEp; start: number; sou
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
   }); // eslint-disable-line react-hooks/exhaustive-deps
-  const lensShort = s?.lens.v ? s.lens.v.split(" · ")[0].replace(/^实拍\s*/, "") : null;
+  const lensShort = s?.lens.v ? leicaLens(s.lens.v) : null;
   return (
     <div className="fo-proj" role="dialog" aria-label="连播本集">
       <button className="fo-proj-x" onClick={onClose}>Esc 退出</button>

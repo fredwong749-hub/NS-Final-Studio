@@ -485,7 +485,32 @@ def apply_lane_policy(st, ctrl):
     return ctrl
 
 
+def partition_hosts(part: dict | None = None) -> dict:
+    """K-OPS-F21（总调度 11-02 17:2x，AUDIT-M 查出视频分区 5–6 份来源且不一致）：视频归哪台只有一个来源 =
+    data/state/netfix/partition.json 的 video 分区。→ {"<集号>": host}；读不到 → {}（不改 hosts.json）"""
+    if part is None:
+        try:
+            sys.path.insert(0, str(ROOT / "tools/netfix"))
+            import dispatch as _D
+            part = _D.read_partition()
+        except Exception:  # noqa: BLE001  # arch-ok: 分区读不到 → 本轮不改 hosts.json（下一轮再读）
+            return {}
+    return {str(e): h for h, eps in ((part or {}).get("video") or {}).items() for e in eps}
+
+
+def sync_hosts_from_partition(part: dict | None = None) -> dict:
+    """video/hosts.json 由 partition.json 生成（不再手改、不再 pick_host 自己挑）；有变化才写，返回写入后的表"""
+    want = partition_hosts(part)
+    cur = jl(VID / "hosts.json", {}) or {}
+    if want and want != cur:
+        js(VID / "hosts.json", want)
+        log("HOSTS_FROM_PARTITION", json.dumps(want, ensure_ascii=False), "旧", json.dumps(cur, ensure_ascii=False))
+        return want
+    return cur
+
+
 def loop_once(st):
+    sync_hosts_from_partition()
     ctrl = {**DEFAULT_CTRL, **(jl(CTRL, {}) or {})}
     apply_lane_policy(st, ctrl)
     if st.get("lane_mode") == "video_lane_only":
@@ -501,12 +526,9 @@ def loop_once(st):
         touched = set()
         for ep, ids in rs.items():
             if str(ep) not in hosts:
-                # 有 >260 帧长镜头的集只能在 gpu36（长镜头道 gpu36:2，K-OPS-I03）；ep09-S3 328 帧
-                h = "gpu36" if any(s.frames > 260 for s in eps_specs[ep]) else pick_host(st)
-                if not h:
-                    continue
-                hosts[str(ep)] = h
-                js(VID / "hosts.json", hosts)
+                # K-OPS-F21：分区里没有这一集 = 没人负责，不自己挑主机（以前 pick_host 写 hosts.json，和 partition.json 打架）
+                log("NO_PARTITION", f"ep{ep:02d}", "partition.json video 分区里没有这一集，跳过")
+                continue
             touched.add(hosts[str(ep)])
             x = st["eps"].setdefault(str(ep), {"host": hosts[str(ep)], "dispatched": time.time(), "status": "rendering"})
             x["ready_shots"] = ids

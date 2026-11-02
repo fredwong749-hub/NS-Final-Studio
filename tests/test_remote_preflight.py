@@ -175,6 +175,9 @@ def test_merge_takes_keeps_local_quarantine(tmp_path, monkeypatch):
     MP = _mp()
     monkeypatch.setattr(MP, "ROOT", tmp_path)
     monkeypatch.setattr(MP, "backup", lambda rel: None)
+    monkeypatch.setattr(MP, "OWN_IMG", {"gpu36": {2}, "gpu33": set()})   # 不依赖真机分区（16:3x 起 ep02 图划给 gpu33，本用例原先因此变红）
+    monkeypatch.setattr(MP, "OWN_VID", {"gpu36": {2}, "gpu33": set()})
+    monkeypatch.setattr(MP, "_sid_run_of", lambda p: None)               # 临时目录：走纯文件合并，不碰仓库 takes
     dst = tmp_path / "data/renders/ep02/S1/takes.json"
     dst.parent.mkdir(parents=True)
     q = {"at": "2026-11-02T00:53:02", "by": "UIRSI r41"}
@@ -192,3 +195,29 @@ def test_merge_takes_keeps_local_quarantine(tmp_path, monkeypatch):
     assert act.startswith("takes+1") and t[1]["quarantined"] == q and t[1]["contract"]["ok"]
     assert t[2]["note"] == "local" and t[2]["contract"]["ok"] and 3 in t
     assert out["active"]["image"] == 2 and out["restore_log"] == ["x"]      # 服务器 active 指向本地已隔离的 v1 → 保留本地
+
+
+def test_merge_takes_stage_ownership_and_server_clear(tmp_path, monkeypatch):
+    """NETFIX 11-02（FEEDBACK ep02-S3 / AUDIT-M A-06）：图归 images 那台、视频归 video 那台；服务器清空当前视频 → 本地跟着清，video.mp4 进隔离区"""
+    MP = _mp()
+    monkeypatch.setattr(MP, "ROOT", tmp_path)
+    monkeypatch.setattr(MP, "backup", lambda rel: None)
+    monkeypatch.setattr(MP, "OWN_IMG", {"gpu33": {2}, "gpu36": set()})
+    monkeypatch.setattr(MP, "OWN_VID", {"gpu36": {2}, "gpu33": set()})
+    monkeypatch.setattr(MP, "_sid_run_of", lambda p: None)
+    local = {"active": {"image": 15, "video": 2},
+             "takes": [{"stage": "image", "n": 15}, {"stage": "video", "n": 1}, {"stage": "video", "n": 2}]}
+    srv = {"active": {"image": 14},                                     # gpu36 的图是旧的（图归 gpu33），视频已清空
+           "takes": [{"stage": "image", "n": 14}, {"stage": "video", "n": 1, "rejected": {"why": "坏手"}},
+                     {"stage": "video", "n": 2, "rejected": {"why": "坏手"}}]}
+    base = {"active": {"image": 14, "video": 2}, "takes": []}            # 上次从 gpu36 收到时当前视频还是 v2
+    out, a, u, _ = MP.merge_takes_docs(srv, local, MP.own_stages("gpu36", 2), base)
+    assert out["active"] == {"image": 15}                               # 图指针不动（不归 gpu36），视频当前版清空
+    assert out["_cleared"] == [("active", "video")]
+    tv = {(t["stage"], t["n"]): t for t in out["takes"]}
+    assert tv[("video", 1)].get("rejected") and tv[("video", 2)].get("rejected") and ("image", 14) not in tv
+    d = tmp_path / "data/renders/ep02/S3"
+    d.mkdir(parents=True)
+    (d / "video.mp4").write_bytes(b"x")
+    moved = MP._quarantine_current(d / "takes.json", out["_cleared"])
+    assert moved and not (d / "video.mp4").exists() and (tmp_path / moved[0]).exists()   # 移进隔离区，不删

@@ -341,3 +341,23 @@ def test_verified_install_refuses_truncated_stdin(tmp_path):
     assert bad.returncode != 0 and (tmp_path / "e.json").read_bytes() == b"old"
     ok = subprocess.run([bash, "-c", cmd], input=b'{"a": 1}', capture_output=True, timeout=60)
     assert ok.returncode == 0 and (tmp_path / "e.json").read_bytes() == b'{"a": 1}'
+
+
+def test_deploy_hold_data_not_pushed(tmp_path):
+    """总调度 17:4x：--hold-data 列的数据本次部署不推（first_frame_jobs.json 等新代码上线、重编、测试绿后才推）"""
+    rs, pc = _FakeRS(tmp_path), _FakePC()
+    (tmp_path / "tools").mkdir(exist_ok=True)
+    seen = {}
+    orig_push = rs.push
+
+    def push(h, code_only=False, tier=2, yes=False, gate=True, **kw):
+        w = getattr(rs, "wanted", None)
+        if w is not None and not code_only:
+            seen["held"] = w("data/pipeline/runs/series10_v1/assets/first_frame_jobs.json", {}, {}, 0, set())
+            seen["other"] = w("data/import/script_v2.json", {}, {}, 0, set())
+        return orig_push(h, code_only=code_only, tier=tier, yes=yes, gate=gate, **kw)
+    rs.push = push
+    r = SV.deploy_host(rs, "gpu36", tmp_path, [], [], "sv-x", "c", restart=False, pc=pc,
+                       hold_data=["data/pipeline/runs/series10_v1/assets/first_frame_jobs.json"])
+    assert "data/pipeline/runs/series10_v1/assets/first_frame_jobs.json" in r["hot_skipped"]
+    assert seen == {"held": False, "other": True}

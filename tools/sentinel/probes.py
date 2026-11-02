@@ -73,6 +73,9 @@ class Ctx:
                                               host == VQA_HOST)
             if self._remote[host] is None:
                 self.errors[host] = "远程采样失败（主连接不在 / 超时）"
+            rc = self.mem.setdefault("remote_calls", {}).setdefault(host, {"ok": 0, "n": 0, "hist": []})
+            rc["hist"] = [x for x in rc["hist"] if self.now - x[0] <= 86400][-1500:] + [[round(self.now), self._remote[host] is not None]]
+            rc["n"], rc["ok"] = len(rc["hist"]), sum(1 for x in rc["hist"] if x[1])
         return self._remote[host]
 
 
@@ -1097,13 +1100,23 @@ def p_s25(ctx: Ctx) -> list[dict]:
     return out
 
 
+# ================================================================== SCORECARD 七项（总调度 17:4x）
+def p_scorecard(ctx: Ctx) -> list[dict]:
+    from tools.sentinel import scorecard as SC
+    c = ctx.c("SC_scorecard")
+    SC.ensure_ui_measure(c)                    # 界面实测放后台子进程（慢）
+    res = SC.compute(write=True)
+    ctx.mem["scorecard"] = {k: (v or {}).get("score") for k, v in res.items()}
+    return J.j_scorecard(res, c["owners"])
+
+
 PROBES = {"S1": p_s1, "S2": p_s2, "S3": p_s3, "S4": p_s4, "S5": p_s5, "S6": p_s6, "S7": p_s7, "S8": p_s8, "S9": p_s9,
-          "S10": p_s10, "S11": p_s11, "S12": p_s12, "S13": p_s13, "S14": p_s14, "GPU24": p_gpu24, "S15": p_s15, "S16": p_s16, "S17": p_s17, "S18": p_s18, "S19": p_s19, "G26": p_g26, "S20": p_s20, "S21": p_s21, "S22": p_s22, "S23": p_s23, "S24": p_s24, "S25": p_s25,
+          "S10": p_s10, "S11": p_s11, "S12": p_s12, "S13": p_s13, "S14": p_s14, "GPU24": p_gpu24, "S15": p_s15, "S16": p_s16, "S17": p_s17, "S18": p_s18, "S19": p_s19, "G26": p_g26, "S20": p_s20, "S21": p_s21, "S22": p_s22, "S23": p_s23, "S24": p_s24, "S25": p_s25, "SC": p_scorecard,
           "CTRL": p_ctrl_history}
 CFG_OF = {"S1": "S1_lane_util_min", "S2": "S2_gpu_all_idle_s", "S3": "S3_score_p50_s", "S4": "S4_recover_s", "S5": "S5_release",
           "S6": "S6_config_parity", "S7": "S7_pause_max_s", "S8": "S8_vlm_sample", "S9": "S9_ui_rules", "S10": "S10_rules_green",
           "S11": "S11_stage_stuck_s", "S12": "S12_script_ruler", "S13": "S13_human_wait",
           "S14": "S14_rsi_lines", "GPU24": "GPU24_alloc",
           "S15": "S15_flow_tick", "S16": "S16_laptop_procs", "S17": "S17_shot_render_rate", "S18": "S18_temp_holds", "S19": "S19_capacity_floor", "G26": "G26_decl_vs_actual", "S20": "S20_scratchpad_procs",
-          "S21": "S21_state_legacy_read", "S22": "S22_freeze_drift", "S23": "S23_laptop_lane_reach", "S24": "S24_api_latency", "S25": "S25_clip_resident",
+          "S21": "S21_state_legacy_read", "S22": "S22_freeze_drift", "S23": "S23_laptop_lane_reach", "S24": "S24_api_latency", "S25": "S25_clip_resident", "SC": "SC_scorecard",
           "CTRL": "CTRL_history"}

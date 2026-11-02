@@ -1,0 +1,66 @@
+/* 剧本库：深色胶片风，沿用 film.css 变量（--fs-*） */
+.sl-page { background: var(--fs-page, #080807); color: var(--fs-t1, #e9e6e0); padding: 22px 28px 48px; display: flex; flex-direction: column; gap: 28px; min-height: calc(100vh - 110px); }
+.sl-h { font-size: 12px; font-weight: 500; letter-spacing: .14em; color: var(--fs-t2, #aaa); margin: 0 0 12px; }
+.sl-h small { color: var(--fs-t3, #777); letter-spacing: .04em; margin-left: 8px; }
+.sl-dim { color: var(--fs-t3, #777); font-size: 12px; margin: 0; }
+.sl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 18px; }
+.sl-card { display: flex; gap: 14px; padding: 10px; background: var(--fs-base, #15120f); border: 0; border-radius: 3px; color: inherit; font: inherit; text-align: left; cursor: pointer; text-decoration: none; min-height: 190px; }
+.sl-card:hover { box-shadow: 0 0 0 1px rgba(255, 255, 255, .25); }
+.sl-card.ro .sl-pic img { filter: grayscale(.6); }
+.sl-pic { flex: none; width: 108px; aspect-ratio: 9 / 16; background: #0a0908; overflow: hidden; border-radius: 2px; display: block; }
+.sl-pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sl-pic.big { width: 150px; }
+.sl-pic.sm { width: 44px; }
+.sl-none { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; color: var(--fs-t3, #777); font: 10px var(--fs-mono, monospace); letter-spacing: .12em; }
+.sl-meta { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1; padding: 4px 2px; }
+.sl-meta small, .sl-ht small { font: 500 10.5px var(--fs-mono, monospace); color: var(--fs-edge, #8c7347); letter-spacing: .14em; }
+.sl-meta b { font-size: 16px; font-weight: 500; }
+.sl-sub { color: var(--fs-t2, #aaa); font-size: 12px; }
+.sl-state { color: var(--fs-t1, #e9e6e0); font-size: 12.5px; margin-top: auto; }
+.sl-cells { display: flex; gap: 3px; }
+.sl-cells i { flex: 1; height: 5px; background: linear-gradient(90deg, #c9a24a var(--f, 0%), rgba(201, 162, 74, .38) var(--f, 0%) var(--h, 0%), rgba(255, 255, 255, .12) var(--h, 0%)); border-radius: 1px; }
+.sl-cells i.full { background: #6fae7a; }
+.sl-note { font-style: normal; color: var(--fs-t3, #777); font-size: 11px; }
+.sl-add { flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: transparent; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1); color: var(--fs-t2, #aaa); }
+.sl-add b { font-weight: 400; font-size: 13px; }
+.sl-plus { font-size: 26px; line-height: 1; color: var(--fs-edge, #8c7347); }
+.sl-pipe { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.sl-pipe a { display: grid; grid-template-columns: 110px 14px 80px 1fr; align-items: center; gap: 8px; padding: 7px 4px; border-top: 1px solid rgba(255, 255, 255, .06); color: inherit; text-decoration: none; font-size: 12.5px; }
+.sl-pipe a:hover { background: rgba(255, 255, 255, .03); }
+.sl-pn { font: 500 11px var(--fs-mono, monospace); color: var(--fs-t2, #aaa); letter-spacing: .06em; }
+.sl-pd { color: var(--fs-t3, #777); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sl-dot { width: 7px; height: 7px; border-radius: 50%; background: #666; }
+.sl-dot.stuck { background: #c9a24a; }
+.sl-back { align-self: flex-start; background: none; border: 0; color: var(--fs-t2, #aaa); cursor: pointer; font: inherit; font-size: 12px; padding: 0; }
+.sl-back:hover { color: var(--fs-t1, #e9e6e0); }
+.sl-head { display: flex; gap: 22px; align-items: flex-end; }
+.sl-ht h1 { margin: 4px 0 6px; font-size: 24px; font-weight: 500; }
+.sl-acts { display: flex; gap: 10px; margin-top: 14px; }
+.sl-btn { display: inline-flex; align-items: center; padding: 6px 14px; border-radius: 2px; background: var(--fs-t1, #e9e6e0); color: #111; font-size: 12.5px; text-decoration: none; }
+.sl-btn.ghost { background: transparent; color: var(--fs-t1, #e9e6e0); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .25); }
+.sl-btn.sm { padding: 4px 10px; font-size: 12px; }
+.sl-eps { list-style: none; margin: 0; padding: 0; }
+.sl-eps > li { border-top: 1px solid rgba(255, 255, 255, .07); }
+.sl-ep { display: grid; grid-template-columns: 54px 44px 1fr 150px; gap: 14px; padding: 12px 4px; cursor: pointer; align-items: start; }
+.sl-ep:hover { background: rgba(255, 255, 255, .025); }
+.sl-epn { font: 500 11px var(--fs-mono, monospace); color: var(--fs-edge, #8c7347); letter-spacing: .08em; padding-top: 3px; }
+.sl-et { display: flex; gap: 10px; align-items: baseline; }
+.sl-et b { font-weight: 500; font-size: 14px; }
+.sl-int { font-size: 10.5px; color: #d9a0a0; letter-spacing: .1em; }
+.sl-es { margin-left: auto; font-size: 11.5px; color: var(--fs-t3, #777); }
+.sl-log { margin: 5px 0; font-size: 12.5px; line-height: 1.55; color: var(--fs-t2, #aaa); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sl-sc { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 11.5px; color: var(--fs-t3, #777); }
+.sl-ev { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--fs-t2, #aaa); text-align: right; }
+.sl-more { padding: 4px 4px 16px 126px; display: flex; flex-direction: column; gap: 10px; }
+.sl-tl { display: flex; flex-direction: column; gap: 6px; border-left: 1px solid rgba(255, 255, 255, .12); padding-left: 14px; }
+.sl-tv { display: grid; grid-template-columns: 62px 96px 1fr; gap: 10px; font-size: 12px; position: relative; align-items: baseline; }
+.sl-tv i { position: absolute; left: -18px; top: 6px; width: 7px; height: 7px; border-radius: 50%; background: var(--fs-edge, #8c7347); }
+.sl-tv b { font-weight: 500; }
+.sl-ta { color: var(--fs-t3, #777); font-family: var(--fs-mono, monospace); font-size: 11px; }
+.sl-tr { color: var(--fs-t2, #aaa); }
+.sl-ma { display: flex; gap: 14px; align-items: center; }
+@media (max-width: 1360px) { .sl-ep { grid-template-columns: 54px 44px 1fr 120px; } .sl-grid { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); } }
+.sl-addcol { display: flex; flex-direction: column; gap: 12px; }
+.sl-addcol .sl-card { flex: 1; min-height: 88px; }
+.sl-ep.nopic { grid-template-columns: 54px 1fr 150px; }
+@media (max-width: 1360px) { .sl-ep.nopic { grid-template-columns: 54px 1fr 120px; } }

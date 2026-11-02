@@ -265,3 +265,18 @@
 /* UIPIXEL 11-01：身份脸 / 候选“删除”外观不变，点击区扩到 28px */
 .hub-face-del { position: relative; }
 .hub-face-del::before { content: ""; position: absolute; inset: -2px; }
+
+/* L-123：“⋯”菜单（删除 = 移到回收区只在这里） */
+.hub-more-wrap { position: relative; display: inline-block; }
+.hub-more-btn { height: var(--h-xs); padding: 0 var(--sp-2); border: 0; border-radius: var(--r-s); background: transparent; color: var(--c-text-2); font: inherit; cursor: pointer; }
+.hub-more-btn:not(:disabled):hover { background: var(--c-sunken); color: var(--c-text); }
+.hub-more-menu { position: absolute; z-index: 20; left: 0; top: 100%; min-width: 120px; display: flex; flex-direction: column; background: var(--c-raise); border: 1px solid var(--c-line-2); border-radius: var(--r-m); box-shadow: 0 6px 18px rgba(0,0,0,.35); }
+.hub-more-menu button { border: 0; background: transparent; color: var(--c-text); text-align: left; padding: 6px 12px; font: inherit; cursor: pointer; }
+.hub-more-menu button:hover { background: var(--c-sunken); color: var(--c-warn); }
+
+/* 使用场景（按集列出地点 + 戏的性质） */
+.hub-use { display: grid; gap: var(--sp-1); }
+.hub-use-row { display: grid; grid-template-columns: 64px 160px minmax(0, 1fr); gap: var(--sp-3); align-items: baseline; padding: var(--sp-1) var(--sp-3); border-radius: var(--r-m); background: var(--c-sunken); }
+.hub-use-t { color: var(--c-text-2); font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hub-use-sc { display: flex; flex-wrap: wrap; gap: 2px var(--sp-4); font-size: var(--fs-sm); }
+.hub-use-sc .int { color: var(--c-accent-text); }

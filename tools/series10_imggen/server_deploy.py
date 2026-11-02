@@ -98,7 +98,7 @@ def check(host):
            f"print(\"IMPORT_OK\", imggen.ROOT, len(imggen.frame_jobs()), \"frame jobs\", len(imggen.sheet_jobs()), \"sheet jobs\")' 2>&1 | tail -2; "
            f"for p in {ports}; do printf \"comfy :$p \"; curl -s -m 5 -o /dev/null -w \"%{{http_code}} %{{time_total}}s\\n\" localhost:$p/queue; done; "
            f"/root/work/fredw/venv_idm/bin/python -c 'import cv2, numpy, insightface; print(\"SCORE_ENV_OK\")' 2>&1 | tail -1; "
-           f"ls /root/work/fredw/imggen/score_remote.py >/dev/null 2>&1 && echo SCORE_SCRIPT_OK || echo SCORE_SCRIPT_MISSING; "
+           f"ls tools/series10_imggen/score_remote.py >/dev/null 2>&1 && echo SCORE_SCRIPT_OK || echo SCORE_SCRIPT_MISSING; "   # K-OPS-F18：打分脚本只认仓库目录，不认 imggen/ 旁路拷贝
            f"df -h /root/work | tail -1; awk '/MemAvailable/{{printf \"MemAvailable %.0f GB\\n\", $2/1048576}}' /proc/meminfo; "
            f"[ -f run/imggen.pid ] && kill -0 $(cat run/imggen.pid) 2>/dev/null && echo RUNNING $(cat run/imggen.pid) || echo NOT_RUNNING")
     r = ssh(host, cmd)

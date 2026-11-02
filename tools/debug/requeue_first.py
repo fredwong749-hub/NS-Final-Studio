@@ -21,11 +21,11 @@ oid = f"first:{sid}"
 r = L.get(oid) or {}
 print(json.dumps({"ledger": led_p, "obj": oid, "final": r.get("final"), "passed_sig": r.get("passed_sig")}, ensure_ascii=False))
 if "--apply" in sys.argv:
-    if r.get("passed_sig"):
-        print(json.dumps({"skip": "已有 passed_sig，E24 会自己比对"}, ensure_ascii=False))
+    if r.get("passed_input_sig") and not str(r.get("passed_input_sig")).startswith("stale:"):
+        print(json.dumps({"skip": "已有 passed_input_sig，E24 会按剧本输入自己比对"}, ensure_ascii=False))
         sys.exit(0)
     L = json.load(open(led_p, encoding="utf-8"))   # 写前重读
-    L.setdefault(oid, {})["passed_sig"] = f"stale:{why[:80]}"
+    L.setdefault(oid, {}).update(passed_sig=f"stale:{why[:80]}", passed_input_sig=f"stale:{why[:80]}")   # K-REN-956 后 E24 只认 passed_input_sig
     fd, tmp = tempfile.mkstemp(dir=base, prefix="attempts.json.", suffix=".tmp")
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(L, f, ensure_ascii=False, indent=1)

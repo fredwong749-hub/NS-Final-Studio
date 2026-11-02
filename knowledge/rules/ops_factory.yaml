@@ -198,3 +198,63 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-F18
+    domain: ops
+    link: [P5-P6]
+    title: 服务器上被生产调用的脚本只许来自仓库部署目录（hosts.json repo）；禁止旁路拷贝 / 写死仓库外脚本目录 / 按 cwd 相对跑别处的 .py；度量代码不随请求下发
+    when: remote_score / clip 常驻 / 任何服务器端调用 python 脚本的地方
+    then: 脚本路径 = remote_score.srv_repo(host)（hosts.server_root）+ 仓库相对路径；imggen / reflock 只作数据和模型目录；arch_scan bypass_script 度量（[PY, "x.py"] + cwd、cd DIR && PY x.py、/root/work/fredw/<非 repo>/x.py）棘轮为 0
+    check: tests/test_factory.py::test_k_ops_f18_no_bypass_script_dirs
+    evidence:
+      - {src: docs/master/FRAMEWORK_REFRAME.md, note: "11-02 16:5x：sv-13 修了 score_remote 新身份脸补边（L-122），生产仍跑 /root/work/fredw/imggen/score_remote.py 10-31 旁路拷贝（83dbe8ce ≠ 本版 adab9785），林晚 sims 没有 lin_wan；常驻 CLIP 被请求方下发的 metrics.py 覆盖，gpu33 一小时退出重启 50 次。总调度：同一个东西两个入口今天第四次"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-F19
+    domain: ops
+    link: [P5-P6]
+    title: 经 stdin 推到服务器的决策 / 期望文件一律“临时文件 sha 对上才替换”；sync auto 跳过推送前先核服务器上那份的 sha，不能只信推送记录
+    when: deploy_host / sync.push_expected / sync auto 往服务器写 expected_refs.json 等文件
+    then: 用 sync.verified_install / system_version._verified_install 生成的命令（sha256sum -c 通过才 mv）；auto 记推过去的字节 sha（expected_pushed.json <host>:sha），每拍核服务器 sha，不一致就重推
+    check: tests/test_system_version.py::test_verified_install_refuses_truncated_stdin, tests/test_factory.py::test_sync_auto_repushes_when_remote_table_differs
+    evidence:
+      - {src: docs/master/FRAMEWORK_REFRAME.md, note: "11-02 16:02：gpu36 data/factory/inbox/expected_refs.json 被写成 0 字节（stdin 传丢），推送记录却是成功；decisions_guard 拒了 sv-12 在 gpu36 的重启，auto 之后一直报 unchanged"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-F20
+    domain: ops
+    link: [P5-P6]
+    title: 剧的暂停状态只有一个来源 = config/pipeline/runs.json status；producer 每拍按它判，dispatch 对暂停中的剧把 control 写成 paused + owner，不靠 control 里残留的字段
+    when: 暂停 / 恢复某部剧（producer pause --run、项目方点选），或 dispatch.py server-control 重算 control
+    then: producer.ctrl() 读 run_status(root, run_id)，不是 producing 就当暂停；dispatch.paused_runs() → pause_run_control() 写 paused=true reason_kind=owner；恢复 = 改 runs.json status=producing
+    check: tests/test_factory.py::test_k_ops_f20_pause_single_source_runs_json
+    evidence:
+      - {src: docs/master/FRAMEWORK_REFRAME.md, note: "11-02 15:59 / 16:00 总调度在两台 pause --run series10_s2 --kind owner；16:07:44 gpu36 dispatch.py server-control 把第二季 control 重算成 paused=false，16:12 producer 重启后照派"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-F21
+    domain: ops
+    link: [P5-P6]
+    title: 哪一集在哪台出（出图和视频）只有一个来源 = data/state/netfix/partition.json；video/hosts.json 由 night.py 每轮从 video 分区生成，不手改、不自己挑主机；帧和视频同一台
+    when: 改分区 / night.py 派视频 / build_jobs 读 hosts.json
+    then: night.sync_hosts_from_partition() 每轮覆盖 hosts.json；分区里没有的集只记 NO_PARTITION 不派；改分区只走 tools/factory/repart.py：先过 tools/debug/lanes.py repart_check（新主机本机没有该集当前首帧文件就拒绝），再在 partition_lock 里写，先推撤掉集的机器、再推加集的机器
+    check: tests/test_factory.py::test_k_ops_f21_video_hosts_generated_from_partition, tests/test_factory.py::test_repart_refuses_move_to_host_without_takes
+    evidence:
+      - {src: docs/master/FRAMEWORK_REFRAME.md, note: "11-02 17:2x AUDIT-M：视频分区 5–6 份来源已不一致——partition.json 写 ep07→gpu33，video/hosts.json 写 ep07、ep10→gpu36"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+  - id: K-OPS-F22
+    domain: ops
+    link: [P5-P6]
+    title: 出图作业（first_frame_jobs.json）只用已发版的代码编译——cut 冻结期间不重编；笔记本工作树的编译代码和最新 sv tag 不同就不重编；发版后由 cut 快照编一次推两台
+    when: episode_pipeline prepare / prepare_run 重编作业；发版后刷新作业
+    then: episode_pipeline.compile_gate()（system_version.cut_locked / drift_files(最新 tag, COMPILE_DIRS)）不通过 → status=compile_frozen 记原因、下一拍重试；部署时 --hold-data 挡住作业文件，代码上线后在 cut 快照里重编、test_image_jobs 绿了再推
+    check: tests/test_factory.py::test_k_ops_f22_compile_only_released_code, tests/test_system_version.py::test_deploy_hold_data_not_pushed
+    evidence:
+      - {src: data/autopilot/episode_pipeline/log.txt, note: "11-02 17:15–17:35 autoflow 每约 70 s 用工作树里改到一半的编译代码重写 first_frame_jobs.json，test_image_jobs 一直红；sv-13 的 E24 若收到这份文件会把已通过的首帧成批放回重出"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

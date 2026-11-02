@@ -189,6 +189,33 @@ def lanes_sweep_bg(now: float | None = None, every_s: float = 120) -> None:
     threading.Thread(target=run, name="lanes-sweep", daemon=True).start()
 
 
+_PV_T = [0.0]
+_PV_BUSY = [False]
+
+
+def previews_sweep_bg(now: float | None = None, every_s: float = 120) -> None:
+    """ASSEMBLY 11-02：整集预览巡检（tools/assemble_series.py sweep）——哪集有新定稿 / 首帧换版就在后台线程重拼那一集；
+    同集 10 分钟内最多一次、同一时刻只拼一集（防抖在 sweep 内）。单元测试不跑"""
+    t = now or time.time()
+    if os.environ.get("PYTEST_CURRENT_TEST") or _PV_BUSY[0] or t - _PV_T[0] < every_s:
+        return
+    _PV_T[0], _PV_BUSY[0] = t, True
+
+    def run():
+        try:
+            sys.path.insert(0, str(ROOT / "tools"))
+            import assemble_series as AS
+            done = AS.sweep()
+            if done:
+                log("preview rebuilt", done)
+        except Exception as e:  # noqa: BLE001
+            log("preview sweep error", repr(e)[:200])
+        finally:
+            _PV_BUSY[0] = False
+    import threading
+    threading.Thread(target=run, name="preview-sweep", daemon=True).start()
+
+
 def tick(st: dict, now: float | None = None) -> dict:
     now = time.time() if now is None else now
     sup = supervisor_fresh()
@@ -231,6 +258,7 @@ def tick(st: dict, now: float | None = None) -> dict:
           (f"出图道抖动：最近 {FLAP_WINDOW} 拍里 {flappy} 各有 ≥ {FLAP_MIN} 拍不通" if flappy else "") +
           (f"；本拍 {len(down)}/{len(TUNNELS)} 条同时不通 {down}" if mass else "") + "（看 data/netfix/supervisor.log）")
     relay_down(st)                                 # 每拍都测一次跳板（A-RELAY 开 / 关）
+    previews_sweep_bg(now)                         # ASSEMBLY：整集预览自动重拼
     lanes_sweep_bg(now)                            # DEBUG-RSI（总调度 11-02 14:0x）：借道到期 / 借出 10 分钟没人用自动收回
     try:                                           # K-OPS-E08（DEBUG-RSI，总调度 11-02 D5）：producer 不在跑时也要让运维暂停到点恢复、显式暂停超时报警
         sys.path.insert(0, str(ROOT / "tools/autopilot"))
