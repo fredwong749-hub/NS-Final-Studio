@@ -12,6 +12,7 @@ import { assetsV1, type LightEpisode } from "../api_v1_pages";
 import { ACTION_TEXT, CATS, catOf, choicesFor, hubApi, partFor, type FaceCand, type HubChar, type HubItem, type HubList, type HubLook, type Part } from "./hub_api";
 import { Verdict } from "./Verdict";
 import { RegenDialog } from "../RegenButton";
+import { GenDock, GenPoller, GenTiles, trackGen } from "../GenState";
 import type { GearRef } from "../RegenButton.helpers";
 import "./people_hub.css";
 
@@ -318,6 +319,9 @@ export function PeopleHub({ cid, onListChanged }: { cid: string; onListChanged?:
       }}
     >
       <Hero d={d} onAdd={() => setUpload("pick")} onBig={setBig} />
+      {/* L-120：再生成后的呼吸灯 / 排队 / 预计完成；完成自动刷新成候选 */}
+      <GenPoller onDone={(it) => (push({ text: `再生成好了：${it.title}，在候选里` }), reload())} onFail={(it, j) => push({ text: `没出成：${it.title}（${j.error ?? "原因未知"}）`, err: true })} />
+      <GenDock />
 
       <nav className="hub-anchors" aria-label="页内导航">
         {[
@@ -406,6 +410,7 @@ export function PeopleHub({ cid, onListChanged }: { cid: string; onListChanged?:
               )}
             </figure>
           ))}
+          <GenTiles where="face" />
           {!(d.faces ?? []).length && <Empty icon="◎" title="还没有身份脸" sub="系统出了设定图后，脸部裁切会出现在这里。" />}
         </div>
       </section>
@@ -581,9 +586,14 @@ export function PeopleHub({ cid, onListChanged }: { cid: string; onListChanged?:
           chars={[{ id: cid, name: d.name }]}
           onClose={() => setRegenFor(null)}
           onSubmit={async (text: string, refs: GearRef[]) => {
-            await hubApi.regen(cid, { kind: regenFor.kind, file: regenFor.file, prompt: text, look: regenFor.look, item_id: regenFor.item_id, gear: refs.map((g) => ({ path: g.path, label: g.label, item_id: g.item_id })) });
-            push({ text: `已提交再生成（${regenFor.title}），大约一分钟后出现在候选里` });
-            window.setTimeout(reload, 60000);
+            const r = await hubApi.regen(cid, { kind: regenFor.kind, file: regenFor.file, prompt: text, look: regenFor.look, item_id: regenFor.item_id, gear: refs.map((g) => ({ path: g.path, label: g.label, item_id: g.item_id })) });
+            // L-119：你写的思路已由写作 API 改写成出图提示词；提示里给一句它理解的改动
+            push({ text: r.rewrite ? `已提交再生成（${regenFor.title}）：${r.rewrite.zh_summary}` : `已提交再生成（${regenFor.title}），同提示词换种子`, });
+            const jid = r.job?.job_id;
+            if (jid) {
+              const where = regenFor.kind === "sheet" ? `sheet:${regenFor.look}` : regenFor.kind === "item" ? `item:${regenFor.item_id}` : "face";
+              trackGen({ id: jid, where, title: regenFor.title, summary: r.rewrite?.zh_summary });
+            } else window.setTimeout(reload, 60000);
           }}
         />
       )}
@@ -1002,8 +1012,10 @@ function LookSection({
                 )}
                 </div>
               ))}
+              <GenTiles where={`sheet:${lk.look}`} />
             </div>
           )}
+          {lk.candidates.length === 0 && <div className="hub-cands"><GenTiles where={`sheet:${lk.look}`} /></div>}
         </div>
         <div className="hub-parts">
           <h3>这套造型包含</h3>
@@ -1164,8 +1176,10 @@ function Wardrobe({
                     <Verdict kind="item_image" file={g.file} label={`“${it.name}”的再生成图`} cid={d.cid} current={false} rejected={d.rejected?.[g.file]} busy={!!busy} onUse={() => onUseRegen(it, g.file)} onChanged={onChangedAll} notify={notify} />
                   </div>
                 ))}
+                <GenTiles where={`item:${it.id}`} />
               </div>
             )}
+            {(it.regen ?? []).length === 0 && <div className="hub-item-gal"><GenTiles where={`item:${it.id}`} /></div>}
             <div className="hub-item-b">
               {edit === it.id ? (
                 <input

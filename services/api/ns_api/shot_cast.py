@@ -177,3 +177,40 @@ def episode_cast_ids() -> dict[int, list[str]] | None:
                         lst.append(cid)
         _EPCAST.update(key=key, val=out)
     return _EPCAST["val"]
+
+
+def shots_using(doc: dict, project: str | None, cid: str, look: str | None = None) -> list[str]:
+    """ASSETUX L-120：换身份脸 / 设定图会影响的镜头（与出图同口径：剧本 **人物** 行在画 / 局部 + 造型优先级 排期 > 逐镜登记 > 剧本匹配）。
+    look=None → 这个人物出现的所有镜头（身份脸）；look=“A” → 其中造型解析为 A 的镜头（设定图）。只读。"""
+    if not project:
+        return []
+    from ns_agent import asset_refs as AR
+
+    class _S:   # noqa: N801  CastCtx 只认 .sources
+        sources = [{"path": project}]
+    cc = CastCtx(_S())
+    cc.project = project
+    out: list[str] = []
+    for ep in doc.get("episodes") or []:
+        for shot in ep.get("shots") or []:
+            for row in shot_cast(cc, ep, shot) or []:
+                if row["character"] == cid and (look is None or row["look"] == look):
+                    n = int(AR.g(ep, "number") or AR.g(shot, "episode") or 0)
+                    out.append(f"ep{n:02d}-S{int(AR.g(shot, 'index'))}")
+                    break
+    return out
+
+
+def impact_count(cid: str, kind: str, look: str | None = None) -> int | None:
+    """当前画布剧本里受影响的镜头数；算不出（剧本没登记资产 / 读不到）→ None"""
+    import json
+    from pathlib import Path
+    proj = import_project()
+    f = Path(__file__).resolve().parents[3] / "data" / "import" / "script_v2.json"
+    if not proj:
+        return None
+    try:
+        doc = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):   # arch-ok: None = “算不出”，asset_actions 仍强制 impact_ack（换脸/设定图不会因此放行），界面显示“影响数未知”
+        return None
+    return len(shots_using(doc, proj, cid, look if kind == "sheet" else None))

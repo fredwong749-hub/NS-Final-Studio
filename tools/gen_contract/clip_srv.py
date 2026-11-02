@@ -122,6 +122,16 @@ def _file_sha(p: str) -> str:
         return ""
 
 
+def code_matches_src(now: dict, src: str | None = None) -> bool:
+    """本目录代码 sha 是否等于部署仓库（NS_CLIP_CODE_SRC，常驻脚本设为服务器 repo）里的那份；没配部署仓库时按旧行为（一律重启）"""
+    src = src if src is not None else os.environ.get("NS_CLIP_CODE_SRC", "")
+    if not src:
+        return True
+    paths = {"metrics.py": os.path.join(src, "services/agent/ns_agent/gen_contract/metrics.py"),
+             "clip_srv.py": os.path.join(src, "tools/gen_contract/clip_srv.py")}
+    return all(_file_sha(paths[n]) == now.get(n) for n in paths)
+
+
 def serve(port: int) -> None:
     """FACTORY D6（K-OPS-F04）：常驻模式——CLIP 只加载一次（钉在 CUDA_VISIBLE_DEVICES 指定的卡，gpu36 = GPU2，与 vLLM 同卡，L-100），
     只听 127.0.0.1。POST /measure（与 stdin 模式同一份请求 JSON）→ 同一份结果 JSON；GET /health。
@@ -153,8 +163,13 @@ def serve(port: int) -> None:
         def do_POST(self):
             now = {n: _file_sha(os.path.join(HERE, n)) for n in boot}
             if now != boot:
-                self._send(409, {"error": "代码已更新，常驻进程退出重启"})
-                threading.Thread(target=lambda: (time.sleep(0.5), os._exit(3)), daemon=True).start()
+                # FACTORY 11-02 15:4x：本目录的代码每次被请求方覆盖（笔记本工作区版 / 服务器部署版交替）——以前一不一致就退出重启，
+                # 笔记本一来请求就 409 + 重载模型，常驻形同虚设。现在：只有和部署版（NS_CLIP_CODE_SRC 仓库）一致才退出按新版重启；
+                # 其他版本（笔记本未发版代码）只回 409 不退出，调用方当次退回单次子进程，常驻继续服务部署版请求
+                restart = code_matches_src(now)
+                self._send(409, {"error": "代码与常驻版本不同" + ("（部署版已更新，常驻退出重启）" if restart else "（非部署版，当次走单次子进程）")})
+                if restart:
+                    threading.Thread(target=lambda: (time.sleep(0.5), os._exit(3)), daemon=True).start()
                 return
             req = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
             t0 = time.time()

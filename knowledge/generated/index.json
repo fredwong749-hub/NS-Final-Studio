@@ -1,6 +1,6 @@
 {
- "kb_version": "kb-20261102-3707c4de",
- "n": 627,
+ "kb_version": "kb-20261102-f20beb24",
+ "n": 628,
  "by_domain": {
   "render": 88,
   "prompt": 28,
@@ -9,7 +9,7 @@
   "review": 66,
   "loop": 9,
   "asset": 44,
-  "ops": 180,
+  "ops": 181,
   "ui": 65
  },
  "by_link": {
@@ -26,7 +26,7 @@
   "P4-P9": 16,
   "P5-P6": 203,
   "P6-P7": 32,
-  "P7-P8": 111,
+  "P7-P8": 112,
   "P8-P10": 18,
   "P8-P9": 12,
   "P9-P10": 21
@@ -4982,6 +4982,27 @@
    "_file": "knowledge/rules/ops_debug.yaml"
   },
   {
+   "id": "K-OPS-E28",
+   "domain": "ops",
+   "link": [
+    "P7-P8"
+   ],
+   "title": "每镜每阶段 24 小时自动出图有硬上限（默认 10 版），到上限就停、转人工或本地修；各条重置路径只重置阶梯次数，不重置这个计数",
+   "when": "producer 派首帧 / 尾帧单之前",
+   "then": "按 takes.json 里该阶段最近 24 小时自动出的版本数计（origin=manual_edit 不算），达到 config/policies/retry.yaml hard_cap.per_stage_24h 就不派，账本记 hard_capped，开 SENTINEL 工单（只开一次），转人工 / 本地修；E09 阶梯重置、E11 尽力版重置、E24 输入变化、驳回重出都不能绕过；只有人工 producer.py uncap --obj X --n N 能多放 N 次（24 小时有效）；计数读不到就不派（失败关闭）",
+   "check": "tests/test_debug_rsi.py::test_e28_stage_renders_24h_counts_takes / test_e28_hard_cap_blocks_and_uncap",
+   "evidence": [
+    {
+     "src": "docs/debug/DEBUG_r1.md",
+     "note": "gpu33 日志：first:ep05-S3 出图 88 次（takes 到 v92）。11-02 04:30–08:05 E09 bug 重置 30 次（拿出图后的提示词比对，永远判输入变了）；14:07 runaway_hold（E21，按小时速率、计数在内存里）过期后，14:47 E11 尽力版规则变了又给 3 次，出到 15:22 的 v92"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_debug.yaml"
+  },
+  {
    "id": "K-OPS-D02",
    "domain": "ops",
    "link": [
@@ -5524,14 +5545,18 @@
    "link": [
     "P5-P6"
    ],
-   "title": "urgent 部署做原子切换：推代码前先暂停派单，推完和核对通过后当场按重启队列规则排空重启（不等 loop 下一拍），失败则恢复派单；热修版本用 deploy --hotfix-of 自动记发版事故账本",
+   "title": "urgent 部署做原子切换：先推代码（只按 sha 补不一致的文件）、过 server_deps / decisions_guard，全过之后才暂停派单并当场按重启队列规则排空重启（暂停窗口只含排空 + 重启），重启失败恢复派单；热修版本用 deploy --hotfix-of 自动记发版事故账本",
    "when": "system_version deploy --urgent / 热修",
-   "then": "deploy_host：pause --by DEPLOY_ATOMIC → 推代码 / 期望表 / server_deps / decisions_guard → restart_queue.request + process → resume；任何一步失败 resume（老进程继续）；--hotfix-of <sv> 成功后写 data/rsi/release_incidents.jsonl",
+   "then": "deploy_host：快照门检查 → verify_sha(fix) 按 sha 补代码 → 数据 / 期望表 / server_deps / decisions_guard → pause --by DEPLOY_ATOMIC → restart_queue.request + process → resume；暂停前任何一步失败不暂停（老进程继续）；重启失败 resume；--hotfix-of <sv> 成功后写 data/rsi/release_incidents.jsonl",
    "check": "tests/test_system_version.py::test_urgent_deploy_pauses_then_restarts_now, tests/test_system_version.py::test_gates_include_vqa_regression_and_hotfix_ledger",
    "evidence": [
     {
      "src": "docs/master/FRAMEWORK_REFRAME.md",
      "note": "11-02 03:11–03:14 / 03:52：代码推上去后老进程还在跑，新 frame_job.py 配内存里旧 framing → 15 个 code_error；sv-06 热修（sv-07）需要手工记账"
+    },
+    {
+     "src": "data/rsi/freeze_drift.jsonl",
+     "note": "sv-11（11-02 14:44→15:10）：推代码前就暂停，按修改时间整批重推 792 个文件，gpu33 停派约 26 分钟 → 改成核对全过才暂停、代码按 sha 补"
     }
    ],
    "confidence": "high",

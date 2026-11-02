@@ -102,7 +102,7 @@ def test_partial_cast_gets_head_slot_but_stranger_flagged():
     cast = [{"name": "林晚", "presence": "局部", "part": "手", "faced": False}]
     f = feat([face(A_, [100, 100, 200, 220], {"lin_wan": 0.8})], refs_loaded=["lin_wan"])
     assert A.judge(f, cast)["verdict"] == "clean"
-    f2 = feat([face(A_, [100, 100, 200, 220], {"lin_wan": 0.8}), face(_v(5), [500, 100, 560, 190], {"lin_wan": 0.05})], refs_loaded=["lin_wan"])
+    f2 = feat([face(A_, [100, 100, 200, 220], {"lin_wan": 0.8}), face(_v(5), [500, 100, 560, 190], {"lin_wan": 0.05})], refs_loaded=["lin_wan", "gu_chen"])
     cast2 = [{"name": "林晚", "presence": "在画", "faced": True}, {"name": "顾沉", "presence": "局部", "part": "手臂", "faced": False}]
     r = A.judge(f2, cast2)
     assert r["defects"][0]["code"] == "extra_head"

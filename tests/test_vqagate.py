@@ -907,3 +907,45 @@ def test_save_q1_emb_writes_atomically(monkeypatch, tmp_path):
     files = list((tmp_path / "emb").glob("*.json"))
     assert len(files) == 1 and not list((tmp_path / "emb").glob("*.tmp"))
     assert json.loads(files[0].read_text(encoding="utf-8")) == {"lin_wan": {"emb": [0.1, 0.2], "h": 0.2}}   # 没特征的角色不写
+
+
+def test_metrics_out_of_bounds_face_box_never_raises():
+    """FACTORY 11-02 15:xx（sv-11 后 gpu33 score_infra 3/36，cvtColor -215 !_src.empty()）：脸框落在图外 / 部分越界 / 负坐标时，
+    face_texture / texture / hair 只能返回“量不了”（None 或带 error / note），不能抛异常让整单打分失败"""
+    from PIL import Image
+    from ns_agent.gen_contract import metrics as M
+    img = Image.new("RGB", (300, 400), (60, 90, 160))
+    for box in ([500, 500, 600, 640], [280, 380, 360, 470], [-120, -150, -20, -10], [-40, 100, 30, 200], [100, 390, 200, 520]):
+        assert M.face_texture(img, box) is None or isinstance(M.face_texture(img, box), dict)
+        t = M.texture(img, box)
+        assert isinstance(t, dict)
+        h = M.hair(img, box)
+        assert h is None or isinstance(h, dict)
+    assert M.face_texture(img, [500, 500, 600, 640]) is None
+    assert M.texture(img, [500, 500, 600, 640]).get("error")
+
+
+def test_q1d_anomaly_is_log_only(monkeypatch, tmp_path):
+    """Q1d（总调度 11-02：detector 先记日志、不拦）：开关关着不动；开着时状态恒 na、命中也不进 blocking；检测器抛错 / 超时只记 untested"""
+    import sys
+    import time
+    sys.path.insert(0, str(ROOT))
+    from tools.vqa import anomaly as AN
+    from ns_agent.gen_contract import postflight as PO
+    t = {"enabled": False, "host": "gpu36", "timeout_s": 1}
+    monkeypatch.setattr("ns_agent.gen_contract.cfg", lambda: {"image_thresholds": {"Q1d_anomaly": t}})
+    monkeypatch.setattr(AN, "shot_cast", lambda sid: [{"name": "林晚", "presence": "在画", "part": None, "faced": True}])
+    pf = {"ok": True, "blocking": [], "items": []}
+    assert VQ.q1d("ep01-S1", "image", "x.png", pf) is None and pf["items"] == []          # 关着
+    t["enabled"] = True
+    monkeypatch.setattr(AN, "check", lambda img, cast, host="gpu36": {"status": "fail", "mode": "full", "reasons": ["duplicate_person：陈宇出现两次"],
+                                                                      "heads": {"got": 3}, "hands": {}, "feet": {}})
+    it = VQ.q1d("ep01-S1", "image", "x.png", pf)
+    assert it["status"] == "na" and it["evidence"]["verdict"] == "fail" and "不拦" in it["detail"] and pf["blocking"] == [] and pf["ok"] is True
+    monkeypatch.setattr(AN, "check", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("rssh 超时")))
+    it = VQ.q1d("ep01-S1", "image", "x.png", pf)
+    assert it["status"] == "na" and it["evidence"]["verdict"] == "untested" and len([i for i in pf["items"] if i["id"] == "Q1d"]) == 1
+    monkeypatch.setattr(AN, "check", lambda *a, **k: time.sleep(3) or {"status": "pass"})
+    t0 = time.time()
+    it = VQ.q1d("ep01-S1", "image", "x.png", pf)
+    assert time.time() - t0 < 2.5 and it["evidence"]["verdict"] == "untested"             # 超时不拖慢出图线

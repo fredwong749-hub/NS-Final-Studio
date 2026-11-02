@@ -64,10 +64,17 @@ def build(raw: dict, files: dict[str, Path]) -> Path:
     # 人工标注表：每个命中一行，label 留空由总调度填 true_issue / false_positive；标好后用来标定阈值
     labels = {k: {"codes": [d["code"] for d in raw[k]["defects"] if d["conf"] != "low"], "label": ""} for k in sorted(hit)}
     lp = OUT / "labels.json"
-    if not lp.exists():                       # 已有标注不覆盖
-        tmpl = lp.with_suffix(".tmp")
-        tmpl.write_text(json.dumps(labels, ensure_ascii=False, indent=1), encoding="utf-8")
-        os.replace(tmpl, lp)
+    if lp.exists():                           # 已填的标注保留，只换命中项 / 补新行
+        try:
+            old = json.loads(lp.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            raise SystemExit(f"labels.json 读不了，不覆盖：{e!r}")
+        for k in labels:
+            if old.get(k, {}).get("label"):
+                labels[k]["label"] = old[k]["label"]
+    tmpl = lp.with_suffix(".tmp")
+    tmpl.write_text(json.dumps(labels, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmpl, lp)
     rows_t = "".join(f"<tr><td>{i + 1}</td><td>{html.escape(k)}</td><td>{html.escape(', '.join(v['codes']))}</td><td>{html.escape('; '.join(d['detail'] for d in raw[k]['defects'] if d['conf'] != 'low'))}</td><td>真问题 / 误报：____</td></tr>"
                      for i, (k, v) in enumerate(labels.items()))
     sections.append(f"<h2>人工标注表（{len(labels)} 行；labels.json 同款）</h2><table border=1 cellpadding=4>{rows_t}</table>")

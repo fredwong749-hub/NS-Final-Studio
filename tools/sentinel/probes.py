@@ -1035,13 +1035,75 @@ def p_s24(ctx: Ctx) -> list[dict]:
     return J.j_api_latency(hist, c)
 
 
+# ================================================================== S25 常驻 CLIP（FACTORY 口径）
+CLIP_REMOTE = r'''
+import json, os, sys, time, urllib.request
+port, hto, pidf, evf, reason = int(sys.argv[1]), float(sys.argv[2]), sys.argv[3], sys.argv[4], sys.argv[5]
+out = {"pid": None, "pid_alive": None, "health": None, "reloads_1h": None}
+try:
+    pid = int(open(pidf).read().strip())
+    out["pid"] = pid
+    try:
+        os.kill(pid, 0)
+        out["pid_alive"] = True
+    except OSError:
+        out["pid_alive"] = False
+except (OSError, ValueError):
+    out["pid_alive"] = False if os.path.exists(os.path.dirname(pidf)) else None
+try:
+    with urllib.request.urlopen("http://127.0.0.1:%d/health" % port, timeout=hto) as r:
+        out["health"] = "ok" if r.status == 200 else "HTTP %d" % r.status
+except Exception as e:
+    out["health"] = "timeout" if "timed out" in repr(e) else "ERR " + repr(e)[:80]
+try:
+    n, now = 0, time.time()
+    for ln in open(evf, encoding="utf-8", errors="replace").readlines()[-2000:]:
+        try:
+            d = json.loads(ln)
+        except ValueError:
+            continue
+        t = d.get("t") or 0
+        if not t and d.get("at"):
+            try:
+                import datetime
+                t = datetime.datetime.fromisoformat(str(d["at"])).timestamp()
+            except ValueError:
+                t = 0
+        if d.get("reason") == reason and now - float(t) <= 3600:
+            n += 1
+    out["reloads_1h"] = n
+except OSError:
+    out["reloads_1h"] = None
+print(json.dumps(out))
+'''
+
+
+def p_s25(ctx: Ctx) -> list[dict]:
+    from tools.netfix import rssh
+    c = ctx.c("S25_clip_resident")
+    out = []
+    for h in HOSTS:
+        cmd = (f"timeout {int(c['call_timeout_s']) - 5} nice -n 19 python3 - {c['port']} {c['health_timeout_s']} {c['pid_file']} "
+               f"{c['events_file']} {c['reload_reason']}")
+        try:
+            r = rssh.run(h, cmd, input=CLIP_REMOTE.encode(), timeout=c["call_timeout_s"])
+            d = json.loads(r.stdout.decode("utf-8", "replace").strip().splitlines()[-1]) if r.returncode == 0 else None
+        except (subprocess.TimeoutExpired, ValueError, IndexError) as e:  # arch-ok: 记 UNKNOWN（S0 工单），本拍该机不判
+            UNKNOWN[f"{h}:clip_resident"] = repr(e)[:80]
+            d = None
+        if d is None:
+            UNKNOWN.setdefault(f"{h}:clip_resident", "远程调用失败")
+        out += J.j_clip(h, d, c)
+    return out
+
+
 PROBES = {"S1": p_s1, "S2": p_s2, "S3": p_s3, "S4": p_s4, "S5": p_s5, "S6": p_s6, "S7": p_s7, "S8": p_s8, "S9": p_s9,
-          "S10": p_s10, "S11": p_s11, "S12": p_s12, "S13": p_s13, "S14": p_s14, "GPU24": p_gpu24, "S15": p_s15, "S16": p_s16, "S17": p_s17, "S18": p_s18, "S19": p_s19, "G26": p_g26, "S20": p_s20, "S21": p_s21, "S22": p_s22, "S23": p_s23, "S24": p_s24,
+          "S10": p_s10, "S11": p_s11, "S12": p_s12, "S13": p_s13, "S14": p_s14, "GPU24": p_gpu24, "S15": p_s15, "S16": p_s16, "S17": p_s17, "S18": p_s18, "S19": p_s19, "G26": p_g26, "S20": p_s20, "S21": p_s21, "S22": p_s22, "S23": p_s23, "S24": p_s24, "S25": p_s25,
           "CTRL": p_ctrl_history}
 CFG_OF = {"S1": "S1_lane_util_min", "S2": "S2_gpu_all_idle_s", "S3": "S3_score_p50_s", "S4": "S4_recover_s", "S5": "S5_release",
           "S6": "S6_config_parity", "S7": "S7_pause_max_s", "S8": "S8_vlm_sample", "S9": "S9_ui_rules", "S10": "S10_rules_green",
           "S11": "S11_stage_stuck_s", "S12": "S12_script_ruler", "S13": "S13_human_wait",
           "S14": "S14_rsi_lines", "GPU24": "GPU24_alloc",
           "S15": "S15_flow_tick", "S16": "S16_laptop_procs", "S17": "S17_shot_render_rate", "S18": "S18_temp_holds", "S19": "S19_capacity_floor", "G26": "G26_decl_vs_actual", "S20": "S20_scratchpad_procs",
-          "S21": "S21_state_legacy_read", "S22": "S22_freeze_drift", "S23": "S23_laptop_lane_reach", "S24": "S24_api_latency",
+          "S21": "S21_state_legacy_read", "S22": "S22_freeze_drift", "S23": "S23_laptop_lane_reach", "S24": "S24_api_latency", "S25": "S25_clip_resident",
           "CTRL": "CTRL_history"}

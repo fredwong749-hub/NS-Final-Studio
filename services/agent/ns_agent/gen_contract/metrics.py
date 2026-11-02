@@ -91,6 +91,10 @@ def face_texture(img, face_bbox) -> dict | None:
         return None
     cx0, cy0, cx1, cy1 = max(0, x1 + w // 5), max(0, y1 + h // 5), min(W, x2 - w // 5), min(H, y2 - h // 5)
     crop = a[cy0:cy1, cx0:cx1]
+    if crop.size == 0 or crop.shape[0] < 16 or crop.shape[1] < 16:
+        # FACTORY 11-02 15:xx（sv-11 后 gpu33 score_infra 3/36）：脸框落在图外 / post size 换算后越界 → 裁出空数组，
+        # cvtColor 抛 -215 !_src.empty()，整单打分失败。越界当“量不了”，和脸框太小同口径
+        return None
     g = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY).astype(np.float32)
     g = cv2.resize(g, (max(8, int(256 * g.shape[1] / g.shape[0])), 256), interpolation=cv2.INTER_AREA)
     hf = float(np.abs(g - cv2.GaussianBlur(g, (0, 0), 2)).mean())
@@ -159,9 +163,9 @@ def texture(img, face_box=None) -> dict:
     else:
         crop = a[int(H * .1):int(H * .45), int(W * .25):int(W * .75)]
         src = "center"
-    g = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
-    if g.shape[0] < 16 or g.shape[1] < 16:
+    if crop.size == 0 or crop.shape[0] < 16 or crop.shape[1] < 16:   # 越界脸框裁出空数组：先判，不进 cvtColor（同上）
         return {"src": src, "error": "区域太小"}
+    g = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
     g = cv2.resize(g, (int(256 * g.shape[1] / g.shape[0]), 256))
     lap = float(cv2.Laplacian(g, cv2.CV_64F).var())
     f = np.abs(np.fft.fftshift(np.fft.fft2(g.astype(np.float32) - g.mean()))) ** 2
@@ -267,8 +271,9 @@ def _hair_px(rgb, x, y, w, h):
              (min(W, x + w), max(0, y), min(W, x + w + w // 2), min(H, y + h))]
     px = []
     for x0, y0, x1, y1 in boxes:
-        if x1 > x0 and y1 > y0:
-            hsv = cv2.cvtColor(np.ascontiguousarray(rgb[y0:y1, x0:x1]), cv2.COLOR_RGB2HSV).reshape(-1, 3)
+        sub = rgb[y0:y1, x0:x1] if x1 > x0 and y1 > y0 else rgb[:0, :0]
+        if sub.size:                       # 越界脸框（落在图外）切出空数组：跳过，不进 cvtColor（FACTORY 11-02 15:xx）
+            hsv = cv2.cvtColor(np.ascontiguousarray(sub), cv2.COLOR_RGB2HSV).reshape(-1, 3)
             px.append(hsv[(hsv[:, 0] >= 85) & (hsv[:, 0] <= 130) & (hsv[:, 1] >= 30) & (hsv[:, 2] >= 30)])
     return np.concatenate(px) if px else np.zeros((0, 3), np.uint8)
 
@@ -286,8 +291,11 @@ def hair(img, face_bbox) -> dict | None:
     if len(px) < 200:
         return {"n": int(len(px)), "note": "没检出足够的蓝色发丝"}
     med = np.median(px.astype(np.float32), axis=0)
-    cx0, cy0 = x1 + w // 4, y1 + h // 4
-    skin = cv2.cvtColor(np.ascontiguousarray(rgb[cy0:cy0 + h // 2, cx0:cx0 + w // 2]), cv2.COLOR_RGB2HSV).reshape(-1, 3)
+    cx0, cy0 = max(0, x1 + w // 4), max(0, y1 + h // 4)     # 负下标会从另一头切：先夹到 0
+    sub = rgb[cy0:cy0 + h // 2, cx0:cx0 + w // 2]
+    if not sub.size:                       # 脸框越界：肤色量不了，同“发丝不够”一样记未测
+        return {"n": int(len(px)), "note": "脸框越界，量不了同帧肤色"}
+    skin = cv2.cvtColor(np.ascontiguousarray(sub), cv2.COLOR_RGB2HSV).reshape(-1, 3)
     sv = float(np.median(skin[:, 2])) if len(skin) else 0.0
     return {"n": int(len(px)), "hsv": [round(float(v), 1) for v in med], "skin_v": round(sv, 1),
             "rel_v": round(float(med[2]) / sv, 3) if sv > 0 else None}

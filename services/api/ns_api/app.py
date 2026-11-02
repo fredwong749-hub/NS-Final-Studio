@@ -145,6 +145,8 @@ from ns_api import trash as TRASH  # noqa: E402  EDITDEL 删除 → 回收站 da
 app.include_router(TRASH.router)
 from ns_api import character_hub as CHUB  # noqa: E402  ASSETUX 人物资产页：一人一页、点选即生效（身份脸 / 设定图 / 单品挂造型 / 上传单品）
 app.include_router(CHUB.router)
+from ns_api import asset_actions as AACT  # noqa: E402  ASSETUX L-120：选用 / 不选 / 移到回收区 统一动作
+app.include_router(AACT.router)
 from ns_api import producer as PRODUCER  # noqa: E402  PRODUCER 制作监督：/api/producer/status、pause / resume / gate（读 data/producer/registry.json）
 app.include_router(PRODUCER.router)
 from ns_api import infra_status as INFRA  # noqa: E402  UIRSI r38 实时连接状态：/api/infra/status（只读看门狗 / 常驻健康状态文件，不在请求里 ssh）

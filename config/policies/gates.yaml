@@ -124,9 +124,9 @@ items:
     plan: 已落地（K-OPS-E11 / E12）；sv-05 部署后在服务器核一次
   identity_faces:
     value:
-      pinned: {lin_wan: data/assets/identity_refs/lin_wan/lin_wan_face_hd_A_s202.png}
+      pinned: {lin_wan: assets/characters/lin_wan/refs/lin_wan/ar-c2351c9dcf.png}
       inherit_must_match_parent: true
-    source: L-086（林晚身份脸 = A-s202 高清裁）；总调度 11-02 03:0x（同类事故第二次：01:24 服务器缺 face_overrides、03:0x 第二季继承链漏 face_overrides，都解析成 ref2va）
+    source: L-122（项目方 11-02 15:45 资产页“设为当前身份脸”+16:0x 点选“是我要换的”：林晚身份脸 = ar-c2351c9dcf 母版脸，取代 L-086 的 A-s202 高清裁）；总调度 11-02 03:0x（同类事故第二次：01:24 服务器缺 face_overrides、03:0x 第二季继承链漏 face_overrides，都解析成 ref2va）
     enforced_by: tools/qa/identity_face_check.py（生产入口 ns_agent.asset_refs.face_of 逐 run 逐角色解析）→ owner_decisions D-AST-86d（decision_check / cut 闸门）+ SENTINEL 每拍
     status: code_reads
     owner: DISTILL（断言）/ WORKFLOW（继承链）/ SENTINEL（每拍）

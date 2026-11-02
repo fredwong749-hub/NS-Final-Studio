@@ -48,8 +48,8 @@ TH = {
     "mirror_yaw_sum": 0.15,     # 几何镜像：两脸偏航代理绝对值之和 >=（都正脸时不算）
     "red_cord_lo": 0.008,       # 标志饰品：手腕窗口里红色像素占比在 [lo, hi]（细绳占比小，大块红 = 红衣服）
     "red_cord_hi": 0.15,
-    "red_cord_span": 0.5,       # 最大红色连通块包围盒（长边）/ 窗口边长 >=
-    "red_cord_fill": 0.45,      # 最大红色连通块面积 / 包围盒面积 <=（细环填充率低）
+    "red_cord_span": 0.3,       # 最大红色连通块包围盒（长边）/ 窗口边长 >=
+    "red_cord_fill": 0.30,      # 最大红色连通块面积 / 包围盒面积 <=（细环填充率低）
     "max_hands_per_person": 2,
     "max_feet_per_person": 2,
 }
@@ -232,7 +232,9 @@ def judge(feat: dict, cast: list[dict] | None = None, th: dict | None = None) ->
             same_role = a["_id"] and a["_id"] == b["_id"] and min(a["_sim"], b["_sim"]) >= t["same_cos"]
             if pc >= t["pair_cos"] or same_role:
                 dup_pairs.append((i, j, round(pc, 3), a["_id"]))
-    strangers = [f for f in real if f["_sim"] < t["stranger_cos"]] if (feat.get("refs_loaded") and not ci.get("refless")) else []
+    refs_have = set(feat.get("refs_loaded") or [])
+    refs_ready = bool(refs_have) and set(ci.get("in_frame_ids") or []) <= refs_have      # 在场角色的身份脸缺 = 不做陌生人判据
+    strangers = [f for f in real if f["_sim"] < t["stranger_cos"]] if (refs_ready and not ci.get("refless")) else []
     if dup_pairs:
         who = "、".join(sorted({p[3] or "?" for p in dup_pairs}))
         defects.append({"code": "duplicate_person", "conf": "high",
@@ -360,6 +362,9 @@ refs = {}
 for cid, b64 in (req.get("refs") or {}).items():
     im = cv2.imdecode(np.frombuffer(base64.b64decode(b64), np.uint8), 1)
     fs = emb_of(im)
+    if not fs:      # 紧裁脸 / 大头照检不出：四周补 50% 边再试（2026-11-02 林晚新身份脸 ar-c2351c9dcf 就是这样漏的）
+        ph, pw = im.shape[0] // 2, im.shape[1] // 2
+        fs = emb_of(cv2.copyMakeBorder(im, ph, ph, pw, pw, cv2.BORDER_REFLECT))
     if fs:
         refs[cid] = max(fs, key=lambda f: (f["box"][2] - f["box"][0]) * (f["box"][3] - f["box"][1]))["emb"]
 
@@ -382,7 +387,7 @@ def mirror_mask(img):
     small = cv2.resize(sel, (gw, gh), interpolation=cv2.INTER_AREA) > 0
     return {"W": img.shape[1], "H": img.shape[0], "rows": ["".join("1" if v else "0" for v in r) for r in small]}
 
-res = {}
+res = {"@refs": refs}
 for it in req["items"]:
     img = cv2.imdecode(np.frombuffer(base64.b64decode(it["b64"]), np.uint8), 1)
     H, W = img.shape[:2]
@@ -431,6 +436,7 @@ for it in req["items"]:
         # 贯穿画面的竖线（镜框 / 门框）：几何镜像判据用
         ed = cv2.Canny(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), 60, 150)
         ls = cv2.HoughLinesP(ed, 1, np.pi / 180, 80, minLineLength=int(0.45 * H), maxLineGap=int(0.03 * H))
+        ls = None if ls is None else ls.reshape(-1, 1, 4)
         o["vlines"] = sorted({round((l[0][0] + l[0][2]) / 2) for l in (ls if ls is not None else []) if abs(l[0][0] - l[0][2]) <= 0.03 * abs(l[0][3] - l[0][1])})
         o["mirror"] = mirror_mask(img)
     except Exception as e:
@@ -464,7 +470,25 @@ def _jpeg_b64(path: Path, side: int = 1536) -> str:
     return base64.b64encode(buf.tobytes()).decode()
 
 
-def measure(files: dict[str, Path], host: str = "gpu36", batch: int = 24, refs: dict | None = None) -> dict:
+def ref_embs(host: str = "gpu36") -> dict:
+    """只取身份脸的 ArcFace 向量（不测图）：旧测量值里缺角色时用来本地重算 sims"""
+    return measure({}, host).get("@refs") or {}
+
+
+def resim(feats: dict, refs: dict) -> int:
+    """用 refs 向量重算每张脸的 sims 和每条 feat 的 refs_loaded，返回改动的脸数"""
+    n = 0
+    for k, f in feats.items():
+        if k.startswith("@") or f.get("error"):
+            continue
+        f["refs_loaded"] = sorted(refs)
+        for x in f.get("faces") or []:
+            x["sims"] = {c: round(_cos(x["emb"], e), 4) for c, e in refs.items()}
+            n += 1
+    return n
+
+
+def measure(files: dict[str, Path], host: str = "gpu36", batch: int = 8, refs: dict | None = None) -> dict:
     """{id: 本机图片} → {id: 测量值}。远程调用走 tools/netfix/rssh.run_retry，GPU2 打分道"""
     sys.path.insert(0, str(ROOT))
     from tools.netfix.rssh import run_retry
@@ -475,6 +499,12 @@ def measure(files: dict[str, Path], host: str = "gpu36", batch: int = 24, refs: 
     py = work + "/venv/bin/python"
     out: dict = {}
     ids = list(files)
+    if not ids:       # 只取身份脸向量
+        run_retry(host, "cat > /tmp/detect_anomaly.py", input=REMOTE_SRC, text=True, timeout=60)
+        r = run_retry(host, f"CUDA_VISIBLE_DEVICES=2 CUDA_DEVICE_ORDER=PCI_BUS_ID {py} /tmp/detect_anomaly.py", text=True, timeout=600,
+                      input=json.dumps({"comfy": comfy_root, "work": work, "refs": refs, "items": []}))
+        line = next((ln for ln in (r.stdout or "").splitlines() if ln.startswith("@@RES@@")), None)
+        return json.loads(line[7:]) if line else {}
     for i in range(0, len(ids), batch):
         part = ids[i:i + batch]
         payload = json.dumps({"comfy": comfy_root, "work": work, "refs": refs, "items": [{"id": k, "b64": _jpeg_b64(Path(files[k]))} for k in part]})
@@ -556,11 +586,31 @@ def run_files(files: dict[str, Path], casts: dict[str, list | None], host: str =
     if feats_in:
         feats = json.loads(Path(feats_in).read_text(encoding="utf-8"))
     else:
-        feats = measure(files, host)
+        old = {}
+        if feats_out and Path(feats_out).exists():          # 续跑：已测好且没出错的不重测
+            try:
+                old = {k: v for k, v in json.loads(Path(feats_out).read_text(encoding="utf-8")).items()
+                       if k in files and not v.get("error") and "vlines" in v}
+            except (OSError, ValueError) as e:
+                print(f"旧测量值读不了，全部重测：{e!r}", file=sys.stderr)
+        todo = {k: v for k, v in files.items() if k not in old}
+        feats = {**old, **(measure(todo, host) if todo else {})}
+        if feats_out:
+            _atomic_json(feats_out, feats)
+    want = set(NAME_ID.values())
+    miss = [k for k, f in feats.items() if not k.startswith("@") and not f.get("error") and want - set(f.get("refs_loaded") or [])]
+    if miss:
+        refs = feats.get("@refs") or ref_embs(host)
+        if want - set(refs):
+            print(f"身份脸缺：{sorted(want - set(refs))}（这些角色的陌生人判据会跳过）", file=sys.stderr)
+        print(f"重算 sims：{resim(feats, refs)} 张脸", file=sys.stderr)
+        feats["@refs"] = refs
         if feats_out:
             _atomic_json(feats_out, feats)
     res = {}
     for k, f in feats.items():
+        if k.startswith("@"):
+            continue
         if f.get("error"):
             res[k] = {"error": f["error"], "verdict": "error", "defects": []}
             continue

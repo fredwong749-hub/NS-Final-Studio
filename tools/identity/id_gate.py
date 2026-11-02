@@ -68,10 +68,13 @@ def faces(path: str) -> list[dict]:
         out.append({"bbox": [x1, y1, x2, y2], "h_ratio": (y2 - y1) / H, "det": float(f.det_score),
                     "emb": [float(v) for v in f.normed_embedding]})
     if not out:           # 裁切图 / 身份脸太紧：加边再测
-        big = cv2.copyMakeBorder(bgr, 120, 120, 120, 120, cv2.BORDER_CONSTANT, value=(128, 128, 128))
+        # 总调度 11-02（L-122 新身份脸 ar-c2351c9dcf 脸占满画面，score_remote refs=0）：边宽按图尺寸比例取（固定 120 px 对大图不够），
+        # 纯色填充（镜像填充会复制出多张脸）
+        p = max(120, int(0.25 * max(bgr.shape[:2])))
+        big = cv2.copyMakeBorder(bgr, p, p, p, p, cv2.BORDER_CONSTANT, value=(128, 128, 128))
         for f in app().get(big):
             x1, y1, x2, y2 = [float(v) for v in f.bbox]
-            out.append({"bbox": [x1 - 120, y1 - 120, x2 - 120, y2 - 120], "h_ratio": (y2 - y1) / H, "det": float(f.det_score),
+            out.append({"bbox": [x1 - p, y1 - p, x2 - p, y2 - p], "h_ratio": (y2 - y1) / H, "det": float(f.det_score),
                         "emb": [float(v) for v in f.normed_embedding]})
     return out
 

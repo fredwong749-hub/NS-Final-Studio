@@ -22,6 +22,23 @@ export function progOf(eps: { shots: { first_frame?: unknown; last_frame_target?
   return { ff: [all.filter((s) => !!s.first_frame).length, n], lf: [all.filter((s) => !!s.last_frame_target).length, n], vid: [all.filter((s) => !!s.video).length, n] };
 }
 
+/** UIRSI2 #7（项目方 15:5x：“只告诉我连接成功和失败的数量”“把很多细节收纳起来”“坏卡隐藏……直接告诉我两张坏在底部”“1、2、3…号显卡分别是什么情况”）：
+ *  面板上半部分只放四样汇总——显卡 1–N 号格子、坏卡数、连接成功 / 失败、渲染任务在做 / 排队 / 失败；其余行收进“细节” */
+export type SysCard = NonNullable<ReturnType<typeof useFactory>["data"]>["cards"];
+export function useSystemSummary() {
+  const fac = useFactory().data;
+  const rt = useRenderTasks().data;
+  const infra = useInfra();
+  const t = infra.data?.tunnels ?? null;
+  const c = rt?.counts;
+  return {
+    cards: fac?.cards ?? null,
+    broken: fac?.broken ?? [],
+    conn: t ? { ok: t.filter((x) => x.ok).length, bad: t.filter((x) => !x.ok).length, relayOk: infra.data!.relay.ok } : null,
+    tasks: c ? { doing: c.rendering ?? 0, queued: c.queued ?? c.pending ?? 0, failed: c.failed_recent ?? c.failed ?? 0, failH: c.recent_fail_h ?? 6 } : null,
+  };
+}
+
 export function useSystemStatus(): { rows: SysRow[]; level: "ok" | "warn" | "loading"; warnN: number } {
   const fac = useFactory().data;
   const rt = useRenderTasks().data;

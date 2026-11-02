@@ -210,7 +210,7 @@ export function ProducerPanel({ run }: { run: string }) {
           通过 {c.passed ?? 0} · 进行中 {c.running ?? 0} · 排队 {c.ready ?? 0} · 等前一步 {c.pending ?? 0}
           {c.best_effort ? ` · 尽力 ${c.best_effort}` : ""}
           {c.failed ? ` · 没过 ${c.failed}` : ""}
-          {s.heartbeat_age_s != null ? ` · ${Math.round(s.heartbeat_age_s)} 秒前更新` : ""}
+          {s.heartbeat_age_s != null ? ` · ${Math.round(s.heartbeat_age_s) <= 0 ? "刚刚更新" : `${Math.round(s.heartbeat_age_s)} 秒前更新`}` : ""}
         </span>
         {err && (
           <Tag tone="warn" size="s" title={err}>

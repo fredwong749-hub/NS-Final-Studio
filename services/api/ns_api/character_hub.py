@@ -1171,8 +1171,6 @@ def regen(cid: str, body: RegenBody, request: Request, store: LookStore = Depend
     from ns_api import asset_edit as AE
     if body.kind not in ("sheet", "face", "item"):
         raise HTTPException(422, "kind 只能是 sheet | face | item")
-    if not body.prompt.strip():
-        raise HTTPException(422, "写一句要改成什么样")
     if body.kind == "sheet" and not (body.look and re.fullmatch(r"[A-Z]", body.look)):
         raise HTTPException(422, "再生成设定图要说是哪套造型")
     asset_id = body.item_id if body.kind == "item" else cid
@@ -1191,12 +1189,43 @@ def regen(cid: str, body: RegenBody, request: Request, store: LookStore = Depend
                        {"path": g.path, "item_id": g.item_id}, note=f"再生成装备参考：{g.label}".strip("："))
         refs.append(AE.GenRef(ref_id=r["ref_id"], role="item"))
     tag = f"sheet:{body.look}" if body.kind == "sheet" else body.kind
-    job = AE.create_gen_job(asset_id, AE.GenBody(base=body.file, refs=refs, prompt=body.prompt.strip(),
-                                                 label=f"{REGEN_TAG}{tag}"), store)
+    label = f"{REGEN_TAG}{tag}"
+    owner_text = body.prompt.strip()
+    rw = None
+    if owner_text:
+        # L-119（项目方 11-02 15:4x）：项目方写大概思路 → 外部写作 API 改写成图像模型提示词；网关不可用就不出图、如实报（不本地硬写）
+        from ns_api import prompt_rewrite as PR
+        ctx = {"name": R.ID_NAME.get(cid, cid), "look": body.look,
+               "gear": [g.label for g in body.gear if g.label], "item": body.item_id}
+        if body.look:
+            try:
+                lk = next((x for c in _p1(current_project(body.project)) if c.get("char_id") == cid
+                           for x in c.get("looks", []) if x.get("id") == body.look), None)
+            except HTTPException:   # arch-ok: 读不到造型登记只是少给改写模型一点上下文，改写照做
+                lk = None
+            if lk:
+                ctx.update(look_zh=lk.get("zh"), use=lk.get("use"))
+        try:
+            rw = PR.rewrite(body.kind, owner_text, ctx)
+        except PR.RewriteError as e:
+            raise HTTPException(502, f"提示词改写没成功，没有出图：{e}") from e
+        prompt = rw["prompt"]
+    else:
+        # 弹窗写着“可不写 = 同提示词换个种子”：取这个位置上一次再生成用的提示词
+        last = next((g for g in reversed(AE._read("asset_gens").get(asset_id, []))
+                     if g.get("label") == label and g.get("prompt")), None)
+        if not last:
+            raise HTTPException(422, "这里还没有再生成过，第一次要写一句想改成什么样")
+        prompt = last["prompt"]
+    job = AE.create_gen_job(asset_id, AE.GenBody(base=body.file, refs=refs, prompt=prompt, label=label,
+                                                 negative=(rw or {}).get("negative_add", "")), store)
     by = _actor(request)
-    _log(by, cid, "regen", kind=body.kind, look=body.look, item_id=body.item_id, prompt=body.prompt.strip()[:200],
+    _log(by, cid, "regen", kind=body.kind, look=body.look, item_id=body.item_id, prompt=owner_text[:200],
+         rewritten=(rw or {}).get("prompt", "")[:600], rewrite_model=(rw or {}).get("model"),
          gear=[g.label or g.path for g in body.gear], job_id=(job or {}).get("job_id"))
-    return {"ok": True, "job": job, "asset_id": asset_id, "label": f"{REGEN_TAG}{tag}", "by": by}
+    return {"ok": True, "job": job, "asset_id": asset_id, "label": label, "by": by,
+            "rewrite": {k: rw[k] for k in ("prompt", "zh_summary", "model")} if rw else None,
+            "reseed": not owner_text}
 
 
 class AdoptGenBody(BaseModel):

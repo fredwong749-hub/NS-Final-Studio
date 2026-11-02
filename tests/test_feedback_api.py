@@ -45,3 +45,16 @@ def test_owner_reopen(tmp_path, monkeypatch):
     it = c.post("/api/feedback/fb-0001/status", json={"status": "new", "note": "没修好"}).json()
     assert it["status"] == "new" and it["reopened"] == 1 and it["by"]["name"] == "fred"
     assert c.get("/api/feedback/meta").json()["statuses"][0]["dot"] == "red"
+
+
+def test_test_ticket_closes_directly_and_hidden(tmp_path, monkeypatch):
+    c = _client(tmp_path, monkeypatch)
+    c.post("/api/feedback", json={"text": "【测试】链路实测"})
+    assert c.post("/api/feedback/fb-0001/status", json={"status": "fixing", "category": "test"}).status_code == 409
+    it = c.post("/api/feedback/fb-0001/status", json={"status": "closed", "category": "test", "note": "测试单"}).json()
+    assert it["status"] == "closed" and it["category"] == "test"
+    assert c.get("/api/feedback").json()["total"] == 0                 # 默认不进列表 / 计数
+    assert c.get("/api/feedback?tests=1").json()["total"] == 1
+    # 非测试单仍然不能跳步关单
+    c.post("/api/feedback", json={"text": "真反馈"})
+    assert c.post("/api/feedback/fb-0002/status", json={"status": "closed"}).status_code == 409

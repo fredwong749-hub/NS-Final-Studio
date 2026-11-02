@@ -415,23 +415,23 @@ checks:
                   docs/acting/PERFORMANCE_RULES.md, 'data/script_rsi/*']   # 这些文件在叙述旧口径 / 记录改动前原文
   # ---------------- 林晚身份脸 = A-s202 高清脸部裁切（RSI 登记，2026-11-01 L-086）
   - id: D-AST-86a
-    decision: L-086（项目方 11-01 17:2x AskUserQuestion“只是嫌画质差 (Recommended)”：脸不换，从设定图左边的大头重新高清裁一张脸登记为身份脸；以后“设为身份脸”只接受脸部裁切）
-    title: 林晚出图身份脸 = identity_refs/lin_wan/lin_wan_face_hd_A_s202.png（不是整张设定图）
+    decision: ⤴ L-122（项目方 11-02 15:45 自己在资产页设为身份脸，16:0x AskUserQuestion“是我要换的”）取代 L-086 的那张脸；以下为 L-086 原文：L-086（项目方 11-01 17:2x AskUserQuestion“只是嫌画质差 (Recommended)”：脸不换，从设定图左边的大头重新高清裁一张脸登记为身份脸；以后“设为身份脸”只接受脸部裁切）
+    title: 林晚出图身份脸 = ar-c2351c9dcf 母版脸（L-122 取代 L-086 的 hd_A_s202；不是整张设定图）
     type: json
     file: data/looks/face_overrides.json
     path: [series10_v1, lin_wan]
     op: eq
-    value: data/assets/identity_refs/lin_wan/lin_wan_face_hd_A_s202.png
+    value: assets/characters/lin_wan/refs/lin_wan/ar-c2351c9dcf.png
     stale_terms: ['身份脸.{0,6}(=|是|用)\s*整张(4 栏)?设定图', 'face_overrides.{0,20}(指向|=)\s*整张设定图']   # CLEANUP 11-01 补登记
     stale_allow: [docs/master/MASTER_PICTURE.md, 'docs/audit/*']
   - id: D-AST-86b
     decision: 同 L-086
-    title: identity_refs/manifest.json 登记的林晚身份脸 = 同一张
+    title: identity_refs/manifest.json 登记的林晚身份脸 = 同一张（L-122）
     type: json
     file: data/assets/identity_refs/manifest.json
     path: [chars, lin_wan, file]
     op: eq
-    value: data/assets/identity_refs/lin_wan/lin_wan_face_hd_A_s202.png
+    value: assets/characters/lin_wan/refs/lin_wan/ar-c2351c9dcf.png
   - id: D-AST-86c
     decision: 同 L-086（以后“设为身份脸”只接受脸部裁切）
     title: 后端 set_face 有脸部裁切校验

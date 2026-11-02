@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import base64
 import io
+import hashlib
 import json
 import os
 import sys
@@ -161,8 +162,16 @@ def push_expected(host: str, rebuild: bool = True) -> str:
         IB.build()
     b = IB.EXPECTED.read_bytes()
     rel = IB.EXPECTED.relative_to(ROOT).as_posix()
-    return rrun(host, f"mkdir -p {PROD}/$(dirname {rel}) && cat > {PROD}/{rel}.tmp && mv {PROD}/{rel}.tmp {PROD}/{rel} && sha256sum {PROD}/{rel}",
-                data=b, timeout=300).strip()[:80]
+    return rrun(host, f"mkdir -p {PROD}/$(dirname {rel}) && " + verified_install(f"{PROD}/{rel}", b), data=b, timeout=300).strip()[:80]
+
+
+def verified_install(dest: str, data: bytes) -> str:
+    """服务器端原子替换且先核 sha：stdin 传丢 / 截断时临时文件 sha 对不上 → 不替换、命令失败（11-02 16:02 gpu36 expected_refs.json
+    被写成 0 字节，决策闸门拒了 sv-12 重启）。返回要在服务器上跑的 shell 片段"""
+    import hashlib
+    h = hashlib.sha256(data).hexdigest()
+    return (f"cat > {dest}.tmp && echo '{h}  {dest}.tmp' | sha256sum -c --quiet - && mv {dest}.tmp {dest} && sha256sum {dest}"
+            f" || {{ echo 'sha 不符，未替换 {dest}（收到 '$(stat -c %s {dest}.tmp 2>/dev/null)' 字节，应为 {len(data)}）' >&2; false; }}")
 
 
 def verify(host: str, eps: list[int] | None = None, write_ready: bool = False) -> dict:
@@ -228,6 +237,18 @@ def _table_key(t: dict) -> str:
     return hashlib.sha256(json.dumps(core, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
+def _remote_sha_ok(host: str, want: str | None) -> bool:
+    """服务器上的期望表是否还是上次推的那份（11-02 16:02：gpu36 被写成 0 字节、推送记录却记成功，auto 一直“unchanged”）。
+    没记录 sha（旧记录）/ 查不了 → 当作不一致，重推一次（重推是幂等的）"""
+    if not want:
+        return False
+    try:
+        out = rrun(host, f"sha256sum {PROD}/data/factory/inbox/expected_refs.json 2>/dev/null || true", timeout=60)
+    except Exception:  # noqa: BLE001  # arch-ok: 查不了 → 重推（幂等）
+        return False
+    return out.strip().startswith(want)
+
+
 def auto(hosts: tuple[str, ...] = ("gpu33", "gpu36"), dry: bool = False) -> dict:
     """K-OPS-F03 修订（总调度 12:2x：参考板变化时自动重建期望表，不要等 deploy）：重建期望表；内容（不含时间戳）和上次推过的不同
     → 对每台跑 push（补缺失的依赖 sha + 推新表）。由 resident_sync loop 每拍调（WORKFLOW），也可手动跑。没变化 = 什么都不做"""
@@ -241,7 +262,7 @@ def auto(hosts: tuple[str, ...] = ("gpu33", "gpu36"), dry: bool = False) -> dict
         last = {}
     res = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "key": key[:16], "counts": t.get("counts"), "pushed": {}}
     for h in hosts:
-        if last.get(h) == key:
+        if last.get(h) == key and _remote_sha_ok(h, last.get(h + ":sha")):
             res["pushed"][h] = "unchanged"
             continue
         if dry:
@@ -251,6 +272,7 @@ def auto(hosts: tuple[str, ...] = ("gpu33", "gpu36"), dry: bool = False) -> dict
             r = push(h)            # push 自己会重建并推表；依赖文件按 sha 补
             res["pushed"][h] = {"sent": r.get("sent"), "absent": len(r.get("absent") or []), "expected": str(r.get("expected_refs"))[:20]}
             last[h] = key
+            last[h + ":sha"] = hashlib.sha256(IB.EXPECTED.read_bytes()).hexdigest()   # 推过去的那份字节；下次先核服务器上的 sha
         except Exception as e:  # noqa: BLE001
             res["pushed"][h] = f"失败：{e!r}"[:200]
     if not dry:

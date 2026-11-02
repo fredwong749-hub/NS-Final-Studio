@@ -424,3 +424,19 @@ def test_season_swr_returns_cache_without_blocking(monkeypatch):
     SEA._swr["thread"].join(5)
     r = SEA.season()
     assert r["episodes"][0]["number"] == 1 and "坏" in r.get("cache_error", "")
+
+
+def test_factory_cards_and_heartbeat_skew():
+    """UIRSI2 #7：显卡按 1–N 号（出图道 + 看图卡），坏卡不编号只计数；心跳负数（服务器时钟快）按“刚刚”、记时钟差"""
+    from ns_api import factory_health as F
+    hosts = {"gpu33": {"broken_gpus": [2], "lanes": {"gpu33:0": {"gpu": 0, "roles": ["image"]}, "gpu33:3": {"gpu": 3, "roles": ["image"]}}},
+             "gpu36": {"lanes": {"gpu36:0": {"gpu": 0, "roles": ["image"]}, "gpu36:2": {"gpu": 2, "roles": ["vlm"]}}}}
+    lanes = [{"id": "gpu33:0", "state": "busy", "util": 90}, {"id": "gpu33:3", "state": "idle"}, {"id": "gpu36:0", "state": "faulty"}]
+    vqa = [{"id": "gpu36", "state": "down", "text": "没在运行"}]
+    r = F.cards_of(lanes, vqa, hosts)
+    assert [(c["no"], c["label"], c["word"]) for c in r["cards"]] == [(1, "gpu33·卡0", "出图中"), (2, "gpu33·卡3", "空闲"), (3, "gpu36·卡2", "看图卡")]
+    assert r["cards"][2]["level"] == "warn"
+    assert sorted(b["label"] for b in r["broken"]) == ["gpu33·卡2", "gpu36·卡0"]
+    assert F.heartbeat_age(1000.0, 1097.0) == (0.0, 97.0)
+    assert F.heartbeat_age(1000.0, 990.0) == (10.0, 0.0)
+    assert F.heartbeat_age(1000.0, None) == (None, 0.0)

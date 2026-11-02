@@ -714,6 +714,7 @@ def plan_timeline(durations: list[float], placements: list[Placement], s: Settin
 
 # ---------------- rendering ----------------
 
+PLACEHOLDER_PUSH = 0.06   # 占位静帧缓推幅度（0 = 静止）
 COLOR_TAGS = ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709"]
 
 
@@ -748,7 +749,14 @@ def render_segment(ff: FFmpeg, src: dict, seconds: float, out: Path, s: Settings
     else:
         inp = ["-f", "lavfi", "-i", f"color=c=black:s={w}x{h}:r={s.fps}:d={seconds + 1:.3f}"]
     vbv = ["-maxrate", s.maxrate_4k, "-bufsize", s.bufsize_4k, "-level:v", s.level_4k] if uhd else []
-    ff.run([*inp, "-map", "0:v:0", "-vf", _vf(s, frames, w, h, zoom), "-an", "-c:v", "libx264", "-preset", s.preset,
+    vf = _vf(s, frames, w, h, zoom)
+    if src["kind"] == "still" and PLACEHOLDER_PUSH > 0:
+        # ASSEMBLY 11-02：占位静帧缓推（线性放大到 1+PLACEHOLDER_PUSH，居中裁切），让占位镜看得出是占位又不死板
+        d = max(frames / s.fps, 0.1)
+        vf = vf.replace(f"crop={w}:{h},setsar=1,", f"crop={w}:{h},"
+                        f"scale=w='trunc({w}*(1+{PLACEHOLDER_PUSH}*t/{d:.3f})/2)*2':h=-2:eval=frame:flags=bicubic,"
+                        f"crop={w}:{h},setsar=1,", 1)
+    ff.run([*inp, "-map", "0:v:0", "-vf", vf, "-an", "-c:v", "libx264", "-preset", s.preset,
             "-crf", str(crf), *vbv, "-profile:v", "high", "-pix_fmt", "yuv420p", *COLOR_TAGS, "-r", str(s.fps),
             "-threads", str(s.threads), "-video_track_timescale", "12288", str(out)])
 

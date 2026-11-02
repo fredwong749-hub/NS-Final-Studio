@@ -29,6 +29,7 @@
 | S22 | 冻结期间改文件：data/rsi/freeze_drift.jsonl（{sv, at, files}） | 0；之后成功 cut 自动关 | FACTORY cut 记录 | 文件负责方 |
 | S23 | 笔记本侧出图道可达率：每拍测本地隧道端口 /system_stats（gpu33:0/1/3、gpu36:0/1；gpu36:2 按 L-100 退役不计） | 每道 5 分钟可达率 ≥ 80%；同一拍不通的道 < 半数 | 笔记本本机实测（13:07–13:21 隧道来回重连、6 道全拒连，S2 / G26 只测服务器本机端口没报）；与 NETFIX A-TUNNEL-FLAP 互为备份 | NETFIX |
 | S24 | API 响应时间：/api/episodes、/api/season 每分钟测一次（带只读查看令牌） | 最近 20 次 p95 < 2 s（失败按 30 s 计） | 笔记本本机实测（今天 /api/season 一度 6–25 s、页面卡在加载） | UIRSI2 |
+| S25 | 常驻 CLIP（两台 :8872）：pid 文件对应进程活着；clip_resident_events.jsonl 里 exit_rc_3 一小时 ≤ 3 次；/health 超时给 30 s（单线程忙时会慢，只记证据不算挂） | 进程在、重载 ≤ 3 次/小时 | 服务器本机（单独一次 rssh，5 分钟一次） | FACTORY |
 | S13 | 等人决定：任何对象等总调度 / 项目方定；流水线断档（GPU 空、ready 0、pending 多） | 等人 ≤ 10 分钟；断档 0 | 登记表 waiting_for + nvidia-smi（总调度 02:4x 追加：02:22 gpu33 全 0% 根因 = 77 个首帧“等总调度定”） | DEBUG-RSI |
 
 探针实现：tools/sentinel/（K-OPS-S02…S07；阈值 config/policies/sentinel.yaml）；工单 data/sentinel/issues.jsonl，未关闭快照 data/sentinel/open.json，看板 :8810“工单”区。

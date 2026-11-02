@@ -871,3 +871,59 @@ def test_video_hold_filters_and_expires(monkeypatch, tmp_path):
     import pytest
     with pytest.raises(ValueError):
         B.video_holds(t)
+
+
+# ---- K-OPS-E28：每镜每阶段 24 小时自动出图硬上限（ep05-S3 首帧 92 版），不受各条重置路径影响 ----
+def test_e28_stage_renders_24h_counts_takes():
+    PR = _producer()
+    t = time.time()
+    ts = lambda h: time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t - h * 3600))
+    td = {"takes": [{"stage": "image", "created_at": ts(1)}, {"stage": "image", "created_at": ts(23)},
+                    {"stage": "image", "created_at": ts(25)},                              # 超过 24 小时不算
+                    {"stage": "image", "created_at": ts(2), "origin": "manual_edit"},      # 手工编辑不算
+                    {"stage": "last", "created_at": ts(1)}]}
+    assert PR.stage_renders_24h(td, "image", t) == 2 and PR.stage_renders_24h(td, "last", t) == 1
+
+
+def test_e28_hard_cap_blocks_and_uncap(monkeypatch, tmp_path):
+    PR = _producer()
+    import threading
+    pr = object.__new__(PR.Producer)
+    pr.p = PR.Paths(root=tmp_path); pr.p.pd.mkdir(parents=True, exist_ok=True)
+    pr.mu = threading.RLock(); pr.events = []
+    pr.logf = lambda ev, **kw: pr.events.append((ev, kw))
+    t = time.time()
+    takes = {"takes": [{"stage": "image", "n": i, "created_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t - i * 60))}
+                       for i in range(10)]}
+    for p in ("services/render_router", "packages/schema", "services/agent", "services/recipes"):
+        if str(ROOT / p) not in sys.path:
+            sys.path.insert(0, str(ROOT / p))
+    from ns_render import pipeline as P
+    monkeypatch.setattr(P, "load_takes", lambda sid: takes)
+    o = {"id": "first:ep05-S3", "shot": "ep05-S3"}
+    assert pr.hard_capped(o, cap=10) is True
+    led = pr.ledger()["first:ep05-S3"]
+    assert led["hard_capped"]["n"] == 10 and "K-OPS-E28" in led["reason"]
+    assert json.loads((tmp_path / "data/sentinel/tickets.jsonl").read_text(encoding="utf-8").splitlines()[0])["obj"] == "first:ep05-S3"
+    assert pr.hard_capped(o, cap=10) is True and sum(1 for e in pr.events if e[0] == "hard_cap") == 1    # 只开一次单
+    pr.led_update("first:ep05-S3", redo_tries=0, tries=0, final=None)        # 各条重置路径只清阶梯次数 → 仍然封顶
+    assert pr.hard_capped(o, cap=10) is True
+    pr.led_update("first:ep05-S3", cap_extra={"n": 2, "t": time.time()})    # uncap 多放 2 次
+    assert pr.hard_capped(o, cap=10) is False
+    assert pr.hard_capped({"id": "last:ep05-S3", "shot": "ep05-S3"}, cap=10) is False   # 阶段分开算
+    assert pr.hard_capped({"id": "video:ep05-S3", "shot": "ep05-S3"}, cap=10) is False  # 视频走 vidgen 有限阶梯
+
+
+# ---- night 跨服务器派单：分给另一台的集跳过，不算失败（FOCUS 第 5 条，ep07 / 09 / 10 视频卡住） ----
+def test_night_skips_other_host(monkeypatch):
+    sys.path.insert(0, str(ROOT / "tools" / "series10_video"))
+    import night as N
+    calls = []
+    monkeypatch.setattr(N, "run", lambda args, timeout=3600: (calls.append(list(args)), (0, "ok"))[1])
+    monkeypatch.setattr(N, "_rssh", lambda: type("R", (), {"_local_self": staticmethod(lambda h: "other" if h == "gpu36" else "self")}))
+    monkeypatch.setattr(N, "jl", lambda p, d=None: {"7": "gpu33", "8": "gpu36"} if str(p).endswith("hosts.json") else d)
+    monkeypatch.setattr(N, "log", lambda *a: None)
+    ctrl = {"hold_lanes": [], "per_lane": 2, "shared_lanes": [], "yield_s": 180}
+    assert N.dispatch_hosts({"gpu33", "gpu36"}, {}, ctrl) is True
+    pushes = [c for c in calls if "push" in c]
+    assert [c[-1] for c in pushes] == ["gpu33"] and not any("gpu36" in c for c in calls)

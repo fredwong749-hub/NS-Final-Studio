@@ -1,4 +1,4 @@
-# FACTORY L-105（K-OPS-F04 / F10）：本机常驻 CLIP 打分（127.0.0.1:8872），只在 gpu36 起，CPU 常驻（11-02 07:5x 起；GPU2 全给看图）
+# FACTORY L-105（K-OPS-F04 / F10）：本机常驻 CLIP 打分（127.0.0.1:8872）。两台都起，按主机参数在 env/<host>.env 的 CLIP_*（gpu36 CPU 常驻；gpu33 钉 GPU1，11-02 15:4x）
 [Unit]
 Description=NS-Final Studio resident CLIP scorer (FACTORY)
 StartLimitIntervalSec=600
@@ -7,12 +7,12 @@ StartLimitBurst=5
 [Service]
 Type=simple
 EnvironmentFile=%h/work/fredw/ns_factory_systemd/host.env
-Environment=CUDA_VISIBLE_DEVICES= NS_CLIP_DEVICE=cpu OMP_NUM_THREADS=16 MKL_NUM_THREADS=16 NS_SCORE_THREADS=16 NS_CLIP_PATH=/root/work/fredw/reflock/clip-vit-large-patch14
+Environment=NS_CLIP_PATH=/root/work/fredw/reflock/clip-vit-large-patch14 NS_CLIP_CODE_SRC=/root/work/fredw/offline_20261101/repo
 WorkingDirectory=/root/work/fredw/reflock
 ExecStartPre=/bin/cp -a /root/work/fredw/offline_20261101/repo/tools/gen_contract/clip_srv.py /root/work/fredw/reflock/clip_srv.py
 ExecStartPre=/bin/cp -a /root/work/fredw/offline_20261101/repo/services/agent/ns_agent/gen_contract/metrics.py /root/work/fredw/reflock/metrics.py
 ExecStartPre=/bin/sh -c 'echo "{\"kind\": \"clip_resident\", \"host\": \"$OFFLINE_SELF\", \"at\": \"$(date -Iseconds)\", \"reason\": \"systemd_start\"}" >> /root/work/fredw/factory/logs/clip_resident_events.jsonl'
-ExecStart=/root/work/fredw/venv/bin/python -u clip_srv.py --serve 8872
+ExecStart=/bin/sh -c 'CUDA_VISIBLE_DEVICES=$CLIP_GPU NS_CLIP_DEVICE=$CLIP_DEV OMP_NUM_THREADS=$CLIP_TH MKL_NUM_THREADS=$CLIP_TH OPENBLAS_NUM_THREADS=$CLIP_TH NS_SCORE_THREADS=$CLIP_TH exec $CLIP_TASKSET $CLIP_PY -u clip_srv.py --serve 8872'
 Restart=on-failure
 RestartSec=10
 Nice=5

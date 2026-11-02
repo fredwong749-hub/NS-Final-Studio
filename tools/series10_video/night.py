@@ -156,7 +156,14 @@ def dispatch_hosts(hosts_touched: set, st, ctrl) -> bool:
     if rc:
         return False
     hosts = jl(VID / "hosts.json", {}) or {}
+    rs = _rssh()
     for host in sorted(hosts_touched):
+        # DEBUG-RSI（总调度 FOCUS 第 5 条，11-02 16:1x）：两台各跑一个 night，服务器之间没有 ssh 互信。分给另一台的集推不过去，
+        # 以前这里 return False → ready_sig 不更新 → 每轮重推本机 8 MB、另一台那几集永远派不出（ep07 / 09 / 10 视频 31 条卡住）。
+        # 现在跳过另一台（它的集由那台自己的 night 派），不算失败
+        if getattr(rs, "_local_self", lambda h: None)(host) == "other":
+            log("SKIP_OTHER_HOST", host, "服务器之间不推（无互信），这台的集由它自己的 night 派")
+            continue
         rc, out = run([PY, "tools/series10_video/deploy.py", "push", host], 3600)
         log("push", host, rc, out.strip()[-200:].replace("\n", " "))
         if rc:

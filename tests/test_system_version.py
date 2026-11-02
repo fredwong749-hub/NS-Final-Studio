@@ -132,7 +132,7 @@ def test_deploy_ignores_new_code_file_after_cut_and_reports_drift(tmp_path, monk
     pushes = [c for c in rs.calls if c[0] == "push"]
     code = [c for c in pushes if c[2]]
     data = [c for c in pushes if not c[2]]
-    assert code and all(c[3] == snap for c in code)                    # 代码只从快照推
+    assert not code                                                     # 代码不再整批推，改由 verify_sha 按快照 sha 补
     assert data and all(c[4] == [] for c in data)                      # 数据推送不带代码目录
     assert all(c[5] is False for c in pushes)                          # 闸门由 deploy_host 对快照 / 数据各跑一次
     assert pc.runs[0][1] == snap and pc.runs[1][2] == []
@@ -254,7 +254,7 @@ def test_gates_include_vqa_regression_and_hotfix_ledger(tmp_path, monkeypatch):
 
 
 def test_urgent_deploy_pauses_then_restarts_now(tmp_path):
-    """K-OPS-F13 原子切换：urgent 部署先暂停派单再推代码，当场执行重启；失败时恢复派单"""
+    """K-OPS-F13 修订：urgent 部署推完、核对过才暂停派单，当场重启；核对不过不暂停；重启失败恢复派单"""
     class RQ(_FakeRQ):
         def process(self, h, rs):
             return {"ok": True, "secs": 5}
@@ -264,14 +264,25 @@ def test_urgent_deploy_pauses_then_restarts_now(tmp_path):
     orig = rs.ssh
     rs.ssh = lambda h, cmd, data=None, tries=3: (cmds.append(cmd), orig(h, cmd, data, tries))[1]
     r = SV.deploy_host(rs, "gpu36", tmp_path, [], [], "sv-x", "c", restart=True, pc=pc, rq=rq, urgent=True)
-    assert r["ok"] and "当场执行 ok=True" in r["restart"] and "pause" in cmds[0]
+    assert r["ok"] and "当场执行 ok=True" in r["restart"]
+    pi = next(i for i, c in enumerate(cmds) if "pause" in c)
+    assert pi > next(i for i, c in enumerate(cmds) if "decisions_guard" in c)      # 推送和核对都在暂停之前（暂停窗口只剩重启）
     rs2, rq2 = _FakeRS(tmp_path), RQ()
     rs2.deps_rc = 1
     cmds2 = []
     o2 = rs2.ssh
     rs2.ssh = lambda h, cmd, data=None, tries=3: (cmds2.append(cmd), o2(h, cmd, data, tries))[1]
     r2 = SV.deploy_host(rs2, "gpu36", tmp_path, [], [], "sv-x", "c", restart=True, pc=pc, rq=rq2, urgent=True)
-    assert r2["ok"] is False and r2.get("resumed_after_fail") and "resume" in cmds2[-1]
+    assert r2["ok"] is False and not any("pause" in c for c in cmds2)   # 依赖不齐：根本不暂停，老进程照常派单
+    class RQBad(_FakeRQ):
+        def process(self, h, rs):
+            return {"ok": False, "error": "drain timeout"}
+    rs3 = _FakeRS(tmp_path)
+    cmds3 = []
+    o3 = rs3.ssh
+    rs3.ssh = lambda h, cmd, data=None, tries=3: (cmds3.append(cmd), o3(h, cmd, data, tries))[1]
+    r3 = SV.deploy_host(rs3, "gpu36", tmp_path, [], [], "sv-x", "c", restart=True, pc=pc, rq=RQBad(), urgent=True)
+    assert r3.get("resumed_after_fail") and "resume" in cmds3[-1]          # 暂停后重启失败：恢复派单
 
 
 def test_quiet_since_waits_for_quiet(monkeypatch, tmp_path):
@@ -292,3 +303,41 @@ def test_cut_sets_exempt_and_prefreeze():
     c = s[s.index("def cut("):s.index("PUSH_SECRET_RE")]
     assert c.index('NS_FREEZE_EXEMPT') < c.index("cut_lock(True") < c.index("quiet_since(60)") < c.index("freeze_tree(")
     assert "FREEZE_DRIFT" in c and "LOCK_HISTORY" in s
+
+
+def test_hot_files_skip_recently_changed_tier1_data(tmp_path):
+    """总调度 11-02 15:4x：部署时第一级数据里最近 120 s 还在改的文件不推（交给常驻同步循环之后补）"""
+    import time as _t
+
+    class RS:
+        CODE_DIRS = ["tools"]
+
+        def push_dirs(self, code_only, tier):
+            return (["data"], ["data"])
+
+        def local_manifest(self, dirs):
+            now = _t.time()
+            return {"data/import/script_v2.json": (10, now - 5), "data/assets/identity_refs/a.png": (10, now - 3600),
+                    "data/renders/x.png": (10, now - 1)}
+
+        def tier_of(self, f, sz):
+            return 2 if f.startswith("data/renders/") else 1
+    assert SV.hot_files(RS()) == ["data/import/script_v2.json"]
+    assert SV.hot_files(object()) == []                                   # 量不了 → 不跳过任何文件
+
+
+def test_verified_install_refuses_truncated_stdin(tmp_path):
+    """11-02 16:02：gpu36 expected_refs.json 被写成 0 字节——stdin 传丢时不许替换，命令失败"""
+    import shutil
+    import subprocess
+    bash = shutil.which("bash")
+    if not bash:
+        import pytest
+        pytest.skip("no bash")
+    dest = (tmp_path / "e.json").as_posix()
+    (tmp_path / "e.json").write_bytes(b"old")
+    cmd = SV._verified_install(dest, b'{"a": 1}')
+    bad = subprocess.run([bash, "-c", cmd], input=b"", capture_output=True, timeout=60)
+    assert bad.returncode != 0 and (tmp_path / "e.json").read_bytes() == b"old"
+    ok = subprocess.run([bash, "-c", cmd], input=b'{"a": 1}', capture_output=True, timeout=60)
+    assert ok.returncode == 0 and (tmp_path / "e.json").read_bytes() == b'{"a": 1}'

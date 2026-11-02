@@ -307,7 +307,7 @@ function LiveCard({ c, lane, infra, merged }: { c: LiveCardData; lane?: LaneInfo
                   : "—"}
               </dd>
               <dt>读数</dt>
-              <dd>{c.hw_age_s != null ? `${Math.round(c.hw_age_s)} 秒前（nvidia-smi 经 ssh，每 5 秒）` : "nvidia-smi 读不到"}</dd>
+              <dd>{c.hw_age_s != null ? `${Math.max(0, Math.round(c.hw_age_s))} 秒前（nvidia-smi 经 ssh，每 5 秒）` : "nvidia-smi 读不到"}</dd>
             </dl>
           </details>
         </>

@@ -673,6 +673,39 @@ def q1x(sid: str, stage: str, image, pf: dict) -> dict | None:
     return item
 
 
+def q1d(sid: str, stage: str, image, pf: dict) -> dict | None:
+    """Q1d 本地图片异常检测（CONSISTENCY_PLAN §4，DETECT-S tools/vqa/anomaly.py；人数 / 头数 / 镜面 / 手脚 / 标志饰品归属）。
+    总调度 11-02：先记日志、不拦——契约状态永远 na（不进 blocking），真实判定放 evidence.verdict（pass / fail / untested）和 reasons，
+    等 DETECT-S 出标注表、总调度标定后再改成阻断。默认关（config image_thresholds.Q1d_anomaly.enabled）：
+    anomaly.check 走 rssh 连 gpu36，gpu33 上的 producer 没有到 gpu36 的密钥，要先给检测器一个服务器上能直达的入口再开。
+    带超时（timeout_s）：检测慢或远端挂了只记 untested，不拖慢出图线。→ 加进 pf 的项"""
+    from ns_agent.gen_contract import cfg as GC
+    t = (GC().get("image_thresholds") or {}).get("Q1d_anomaly") or {}
+    if not t.get("enabled"):
+        return None
+    import concurrent.futures as cf
+    import sys
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    ev: dict = {"record_only": True}
+    try:
+        from tools.vqa import anomaly as AN
+        cast = AN.shot_cast(sid)             # 带 faced 字段的 cast（编译稿口径），不是契约 req 里的 cast
+        ex = cf.ThreadPoolExecutor(max_workers=1)
+        try:
+            res = ex.submit(AN.check, image, cast, t.get("host", "gpu36")).result(timeout=float(t.get("timeout_s", 120)))
+        finally:
+            ex.shutdown(wait=False)
+        ev.update(verdict=res.get("status"), mode=res.get("mode"), reasons=res.get("reasons") or [],
+                  heads=res.get("heads"), hands=res.get("hands"), feet=res.get("feet"))
+    except Exception as e:  # noqa: BLE001 — 检测器出错只记日志，不影响出图；原因写进证据
+        ev.update(verdict="untested", mode="error", reasons=[f"{type(e).__name__}: {e}"[:200]])
+    detail = "记日志、不拦：" + ("；".join(ev.get("reasons") or []) or "未发现异常") if ev["verdict"] != "untested"         else "记日志、不拦：检测没跑成（" + "；".join(ev.get("reasons") or []) + "）"
+    item = {"id": "Q1d", "title": "本地图片异常检测（人数 / 头数 / 镜面 / 手脚 / 饰品归属；记日志、不拦）", "status": "na", "detail": detail, "evidence": ev}
+    pf["items"] = [i for i in pf.get("items") or [] if i.get("id") != "Q1d"] + [item]
+    return item
+
+
 def q1_needs_vlm(pf: dict) -> bool:
     """Q1 不过时，看图结果还能不能把它救回来（决定要不要排队看图，K-OPS-V15）：
     单脸、分数落在转角放宽最低档以上（q1_yaw_relax 的候选），或者只因“认不出的脸”且 cast 有背影 / 局部人物（recheck_strangers 的候选）"""

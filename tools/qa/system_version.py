@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import io
+import hashlib
 import json
 import os
 import re
@@ -805,6 +806,28 @@ def drift_files(sv: str, code_dirs: list[str]) -> list[str]:
     return sorted({p for p in after + pend if p.startswith(tuple(d + "/" for d in code_dirs))})
 
 
+def _verified_install(dest: str, data: bytes) -> str:
+    """与 tools/factory/sync.verified_install 同口径：临时文件 sha 对上才替换（stdin 传丢不会留下 0 字节表）"""
+    h = hashlib.sha256(data).hexdigest()
+    return (f"cat > {dest}.tmp && echo '{h}  {dest}.tmp' | sha256sum -c --quiet - && mv {dest}.tmp {dest} && sha256sum {dest}"
+            f" || {{ echo 'sha 不符，未替换 {dest}（收到 '$(stat -c %s {dest}.tmp 2>/dev/null)' 字节，应为 {len(data)}）' >&2; false; }}")
+
+
+HOT_S = 120     # 最近 120 s 内还在改的数据文件算“正在变”
+
+
+def hot_files(rs, now: float | None = None, hot_s: float = HOT_S) -> list[str]:
+    """第一级数据文件里最近 hot_s 秒内还在被改的（笔记本上其他 loop 正在写）：部署时不推，免得推送复核每轮都不同、一推再推"""
+    now = now or time.time()
+    try:
+        with _Patched(rs, CODE_DIRS=[]):
+            dirs, _ = rs.push_dirs(False, 1)
+        loc = rs.local_manifest(dirs)
+    except Exception:  # noqa: BLE001  # arch-ok: 量不了就当没有热文件，照旧推
+        return []
+    return sorted(f for f, (sz, mt) in loc.items() if rs.tier_of(f, sz) == 1 and f.startswith("data/") and now - mt < hot_s)
+
+
 def deploy_host(rs, h: str, snap: Path, names: list[str], tracked_code: list[str], sv: str, commit: str,
                 restart: bool = True, pc=None, rq=None, urgent: bool = False, expected: bytes | None = None) -> dict:
     """一台机器的部署（FACTORY D9 / K-OPS-F06，总调度 01:3x 批准）：
@@ -816,17 +839,17 @@ def deploy_host(rs, h: str, snap: Path, names: list[str], tracked_code: list[str
     r = {"at": time.strftime("%Y-%m-%dT%H:%M:%S")}
     paused = False
     try:
-        if restart and urgent:   # K-OPS-F13 原子切换：推代码前先暂停派单（老进程不再拿新旧混杂的文件出新单），推完立刻排空重启
-            rs.ssh(h, f"cd {rs.R} && {rs.OFF}/venv/bin/python tools/autopilot/producer.py pause --by DEPLOY_ATOMIC "
-                      f"--note '部署 {sv}：推代码期间暂停派单，重启后恢复'", tries=3)
-            paused = True
-            r["paused_at"] = time.strftime("%H:%M:%S")
         with _Patched(rs, ROOT=snap, required_data=lambda: set()):   # 快照里没有 data/：代码推送不需要数据清单
             g = pc.run(code_only=True, tier=1, rs=rs, skip_guard=True)          # 快照在 cut 时已过 syntax_guard
             if g.get("verdict") != "PASS":
                 raise RuntimeError("快照推送前检查不通过：" + "；".join(f"[{x['kind']}] {x['file']}" for x in g["problems"][:5]))
-            rs.push(h, code_only=True, tier=1, yes=True, gate=False)
-        with _Patched(rs, CODE_DIRS=[]):
+            # 代码不再按“大小 + 修改时间”整批推（快照导出的修改时间每次都不同 → 每次全量 792 个文件、约 10 分钟，sv-11 实测）；
+            # 改由下面 verify_sha 按 sha 只补不一致的文件（K-OPS-F13 修订）
+        hot = hot_files(rs)        # 总调度 11-02 15:4x：推送期间一直在变的数据文件不进第一级（每轮复核都不同 → 一推再推），交给常驻同步循环之后补
+        if hot:
+            r["hot_skipped"] = hot[:50]
+        orig_wanted = getattr(rs, "wanted", lambda *a, **k: True)
+        with _Patched(rs, CODE_DIRS=[], wanted=lambda f, *a, **k: f not in hot and orig_wanted(f, *a, **k)):
             g2 = pc.run(code_only=False, tier=1, rs=rs, skip_guard=True)
             if g2.get("verdict") != "PASS":
                 raise RuntimeError("数据推送前检查不通过：" + "；".join(f"[{x['kind']}] {x['file']}" for x in g2["problems"][:5]))
@@ -842,7 +865,7 @@ def deploy_host(rs, h: str, snap: Path, names: list[str], tracked_code: list[str
         r["version_file"] = "data/system_version.txt"
         if expected:     # K-OPS-F03 修订：期望 refs 表按本版（cut 冻结快照）建，部署时一起推，重启后的 refs_guard 对的就是这一版
             rel = "data/factory/inbox/expected_refs.json"
-            rs.ssh(h, f"cd {rs.R} && mkdir -p data/factory/inbox && cat > {rel}.tmp && mv {rel}.tmp {rel} && sha256sum {rel}", data=expected, tries=3)
+            rs.ssh(h, f"cd {rs.R} && mkdir -p data/factory/inbox && " + _verified_install(rel, expected), data=expected, tries=3)
             r["expected_refs"] = "pushed"
         # 服务器运行依赖（config/deploy/server_deps.yaml：venv 能 import 的包 / 版本、模型文件 sha）——缺了不排重启（总调度 04:0x）
         sd = rs.ssh(h, f"cd {rs.R} && OFFLINE_SELF={h} {rs.OFF}/venv/bin/python tools/factory/server_deps.py; echo rc=$?", tries=3).decode("utf-8", "replace")
@@ -855,6 +878,11 @@ def deploy_host(rs, h: str, snap: Path, names: list[str], tracked_code: list[str
         r["decisions_guard"] = dg.strip()[-400:]
         if "rc=0" not in dg:
             raise RuntimeError("服务器决策文件不齐（K-OPS-F09），不排重启，老进程继续：" + dg.strip()[-300:])
+        if restart and urgent:   # K-OPS-F13 修订：推完、核对都过了才暂停派单，紧接着当场排空重启——暂停窗口 = 排空 + 重启（≤ 3 分钟），
+            rs.ssh(h, f"cd {rs.R} && {rs.OFF}/venv/bin/python tools/autopilot/producer.py pause --by DEPLOY_ATOMIC "   # 不再覆盖整个推送过程（sv-11 停派 26 分钟）
+                      f"--note '部署 {sv}：重启前暂停派单，重启后恢复'", tries=3)
+            paused = True
+            r["paused_at"] = time.strftime("%H:%M:%S")
         if restart:      # K-OPS-W16（DJ-20）：不直接重启，写重启队列（resident_sync loop 排空后合并执行，同台 30 分钟最多一次）
             rq = rq or load_restart_queue()
             q = rq.request(h, f"system_version deploy {sv}", by="system_version deploy", urgent=urgent)

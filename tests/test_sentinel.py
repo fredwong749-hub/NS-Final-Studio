@@ -453,3 +453,11 @@ def test_api_latency():
     assert J.j_api_latency({"/api/x": [[T0, 0.1, 200]]}, c) == []                        # 样本不足不判
     fails = {"/api/season": [[T0 + i, 0.05, 200] for i in range(18)] + [[T0 + 18, 0.1, 0], [T0 + 19, 0.1, 0]]}
     assert J.j_api_latency(fails, c)[0]["violated"]                                     # 失败按超时计
+
+
+def test_clip_resident():
+    c = C["S25_clip_resident"]
+    fs = {f["key"]: f for f in J.j_clip("gpu36", {"pid": 9, "pid_alive": False, "health": "ERR refused", "reloads_1h": 5}, c)}
+    assert fs["S25:gpu36:alive"]["violated"] and fs["S25:gpu36:reload"]["violated"] and fs["S25:gpu36:alive"]["owner_loop"] == "FACTORY"
+    fs = {f["key"]: f for f in J.j_clip("gpu33", {"pid": 9, "pid_alive": True, "health": "timeout", "reloads_1h": 1}, c)}
+    assert not fs["S25:gpu33:alive"]["violated"] and not fs["S25:gpu33:reload"]["violated"]     # 忙时 /health 超时不算挂

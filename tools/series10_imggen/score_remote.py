@@ -43,6 +43,12 @@ def main():
             img = cv2.imread(p)
             fs = faces(img) if img is not None else []
             if not fs and img is not None:
+                # 总调度 11-02 16:3x（K-REV-V27）：L-122 新身份脸是脸部特写、脸占满画面，retinaface 在 640 检测尺度下一张脸都检不出
+                # （refs lin_wan = 0 → 全剧林晚 Q1 失效）。先四周补边让脸缩到画面中部再检，再试放大（小脸参考图的老办法）
+                h, w = img.shape[:2]
+                pad = int(0.5 * max(h, w))
+                fs = faces(cv2.copyMakeBorder(img, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=(255, 255, 255)))
+            if not fs and img is not None:
                 img2 = cv2.resize(img, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
                 fs = faces(img2)
             if fs:

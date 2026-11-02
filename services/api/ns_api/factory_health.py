@@ -137,11 +137,7 @@ def build(now: float | None = None) -> dict:
     ns = _jl(NETFIX, {}) or {}
     ph = ((ns.get("dispatch_mode") or {}).get("phases") or {}) if ns.get("t") and now - float(ns["t"]) < 90 else {}
     phases = [{"id": h, "label": h, "phase": ph.get(h), "text": PHASE.get(ph.get(h), "不知道（连接状态没更新）")} for h in ("gpu33", "gpu36")]
-    hb = _jl(HEARTBEAT, {}) or {}
-    hb_age = now - float(hb["t"]) if hb.get("t") else None
-    producer = {"state": "idle" if hb.get("paused") else ("down" if hb_age is None or hb_age > 600 else "busy"),
-                "text": ("已暂停" if hb.get("paused") else "在跑") + (f" · 心跳 {_secs(hb_age)}前" if hb_age is not None else " · 没有心跳"),
-                "inflight": hb.get("inflight")}
+    producer = producer_of(now)
     try:
         lanes = _lanes(now)
     except Exception as e:  # noqa: BLE001
@@ -162,6 +158,64 @@ def build(now: float | None = None) -> dict:
             "producer": producer, "source": "live", "busy": busy, "total": len(lanes), "light": light}
 
 
+HOSTS = ROOT / "config" / "factory" / "hosts.json"
+CARD_WORD = {"busy": "出图中", "idle": "空闲", "down": "断开", "warn": "断开", "vlm": "看图卡"}
+
+
+def heartbeat_age(now: float, t: float | None) -> tuple[float | None, float]:
+    """心跳年龄（秒）+ 时钟差。心跳由服务器上的 producer 写、经同步到笔记本：服务器时钟比笔记本快时 now - t 会是负数
+    （项目方看到“心跳 -97 秒前”）。负数按 0（刚刚）显示，差值记 clock_skew_s"""
+    if t is None:
+        return None, 0.0
+    age = now - float(t)
+    return (max(0.0, age), round(-age, 1) if age < 0 else 0.0)
+
+
+def producer_of(now: float) -> dict:
+    hb = _jl(HEARTBEAT, {}) or {}
+    age, skew = heartbeat_age(now, hb.get("t"))
+    word = "刚刚" if age is not None and age < 1 else (f"{_secs(age)}前" if age is not None else "")
+    return {"state": "idle" if hb.get("paused") else ("down" if age is None or age > 600 else "busy"),
+            "text": ("已暂停" if hb.get("paused") else "在跑") + (f" · 心跳 {word}" if age is not None else " · 没有心跳"),
+            "inflight": hb.get("inflight"), "heartbeat_age_s": round(age, 1) if age is not None else None, "clock_skew_s": skew}
+
+
+def cards_of(lanes: list[dict], vqa: list[dict], hosts: dict | None = None) -> dict:
+    """显卡按 1–N 号一格一格（项目方 15:5x：“1、2、3…号显卡分别是什么情况”“坏卡隐藏……直接告诉我两张坏在底部”）：
+    hosts.json 里每台机器的每张卡（出图道 + 看图卡），坏卡（broken_gpus / 读数判 faulty）不编号、只计数"""
+    hosts = hosts if hosts is not None else ((_jl(HOSTS, {}) or {}).get("hosts") or {})
+    by_lane = {x.get("id"): x for x in lanes}
+    by_vqa = {x.get("id"): x for x in vqa}
+    cards, broken = [], []
+    for h, hv in hosts.items():
+        bad = set(hv.get("broken_gpus") or [])
+        gpus = {int(v.get("gpu")): (ln, v) for ln, v in (hv.get("lanes") or {}).items() if v.get("gpu") is not None}
+        for g in sorted(set(gpus) | bad):
+            ln, v = gpus.get(g, (f"{h}:{g}", {}))
+            label = f"{h}·卡{g}"
+            if g in bad or (by_lane.get(ln) or {}).get("state") == "faulty":
+                broken.append({"host": h, "gpu": g, "label": label, "why": (v.get("note") or "坏卡（hosts.json broken_gpus）")[:80]})
+                continue
+            if "vlm" in (v.get("roles") or []):
+                vq = by_vqa.get(h) or {}
+                st = "vlm"
+                text = "看图卡" + (" · 没在运行" if vq.get("state") == "down" else f" · {vq.get('text')}" if vq.get("text") else "")
+                level = "warn" if vq.get("state") in ("down", "warn") else "ok"
+            else:
+                lane = by_lane.get(ln) or {}
+                st = lane.get("state") or "down"
+                text = CARD_WORD.get(st, st) + (f" · 利用率 {round(lane['util'])}%" if lane.get("util") is not None else "")
+                level = "warn" if st in ("down", "warn") else "ok" if st == "busy" else "idle"
+            cards.append({"lane": ln, "host": h, "gpu": g, "label": label, "state": st, "word": CARD_WORD.get(st, st), "text": text, "level": level})
+    for i, c in enumerate(cards, 1):
+        c["no"] = i
+    return {"cards": cards, "broken": broken}
+
+
 @router.get("/api/factory/health")
 def factory_health():
-    return build()
+    out = build()
+    now = time.time()
+    out["producer"] = {**(out.get("producer") or {}), **producer_of(now)}   # 心跳统一在这里算（修负数）
+    out.update(cards_of(out.get("lanes") or [], out.get("vqa") or []))
+    return out

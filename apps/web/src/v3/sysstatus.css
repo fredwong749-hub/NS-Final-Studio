@@ -39,3 +39,19 @@
 :root .v3-top-grid .v3-step.on i.v3-sdot { background: var(--c-text-2, #aaa); }
 :root .v3-top-grid .v3-step.on.done i.v3-sdot { background: var(--c-ok, #4caf7d); }
 .v3-sys-snd input { accent-color: var(--c-text-2, #aaa); }
+/* UIRSI2 #7：显卡 1–N 号格子 / 坏卡数 / 连接成功失败 / 渲染任务汇总；细节折叠（状态色只有 灰 / 琥珀 / 绿） */
+.v3-sys-sec { padding: 8px 0; border-top: 1px solid rgba(127, 127, 127, .18); }
+.v3-sys-sec h5 { margin: 0 0 6px; font-size: 11px; font-weight: 500; letter-spacing: .08em; opacity: .62; }
+.v3-sys-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.v3-sys-cards li { display: flex; align-items: center; gap: 5px; padding: 6px 7px; border: 1px solid rgba(127, 127, 127, .22); border-radius: 3px; font-size: 12px; white-space: nowrap; min-width: 0; }
+.v3-sys-cards li b { font: 600 12px "IBM Plex Mono", Consolas, monospace; min-width: 1.2em; }
+.v3-sys-cards li span { overflow: hidden; text-overflow: ellipsis; }
+.v3-sys-broken { margin: 8px 0 0; font-size: 12px; opacity: .72; }
+.v3-sys-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.v3-sys-two p { margin: 0; font-size: 12.5px; display: flex; align-items: center; gap: 6px; }
+.v3-sys-two b { font-family: "IBM Plex Mono", Consolas, monospace; font-weight: 600; }
+.v3-sys-link { background: none; border: 0; padding: 0; color: inherit; font: inherit; font-size: 12.5px; cursor: pointer; text-align: left; }
+.v3-sys-link:hover { text-decoration: underline; }
+.v3-sys-muted { margin: 0; font-size: 12px; opacity: .5; }
+.v3-sys-det > summary { cursor: pointer; font-size: 12px; opacity: .72; padding: 6px 0; }
+.v3-sys-det > ul { list-style: none; margin: 0; padding: 0; }

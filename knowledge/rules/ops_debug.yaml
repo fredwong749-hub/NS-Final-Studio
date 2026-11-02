@@ -218,3 +218,15 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-E28
+    domain: ops
+    link: [P7-P8]
+    title: 每镜每阶段 24 小时自动出图有硬上限（默认 10 版），到上限就停、转人工或本地修；各条重置路径只重置阶梯次数，不重置这个计数
+    when: producer 派首帧 / 尾帧单之前
+    then: 按 takes.json 里该阶段最近 24 小时自动出的版本数计（origin=manual_edit 不算），达到 config/policies/retry.yaml hard_cap.per_stage_24h 就不派，账本记 hard_capped，开 SENTINEL 工单（只开一次），转人工 / 本地修；E09 阶梯重置、E11 尽力版重置、E24 输入变化、驳回重出都不能绕过；只有人工 producer.py uncap --obj X --n N 能多放 N 次（24 小时有效）；计数读不到就不派（失败关闭）
+    check: tests/test_debug_rsi.py::test_e28_stage_renders_24h_counts_takes / test_e28_hard_cap_blocks_and_uncap
+    evidence:
+      - {src: docs/debug/DEBUG_r1.md, note: "gpu33 日志：first:ep05-S3 出图 88 次（takes 到 v92）。11-02 04:30–08:05 E09 bug 重置 30 次（拿出图后的提示词比对，永远判输入变了）；14:07 runaway_hold（E21，按小时速率、计数在内存里）过期后，14:47 E11 尽力版规则变了又给 3 次，出到 15:22 的 v92"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

@@ -11,7 +11,7 @@ ENVD=$HOME/work/fredw/ns_factory_systemd
 mkdir -p "$UD" "$ENVD" /root/work/fredw/factory/logs /root/work/fredw/offline_20261101/logs
 cp -a "$SRC/env/$SELF.env" "$ENVD/host.env"
 UNITS="ns-fwd.service ns-producer.service ns-night.service"
-[ "$SELF" = gpu36 ] && UNITS="$UNITS ns-clip-resident.service"      # 常驻 CLIP 只在 gpu36 GPU2（L-100）
+UNITS="$UNITS ns-clip-resident.service"      # 常驻 CLIP 两台都起（gpu33 总调度 11-02 15:4x），参数在 env/<host>.env CLIP_*
 for u in $UNITS; do cp -a "$SRC/$u" "$UD/$u"; done
 loginctl enable-linger "$(id -un)" 2>/dev/null || echo "WARN: enable-linger 失败（开机自启需要它）"
 export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}

@@ -305,6 +305,28 @@ def run_env(run: str, root: Path = ROOT) -> dict:
             "NS_SCRIPT_JSON": str(root / "data" / "import" / "runs" / run / "script_v2.json")}
 
 
+def hard_cap_per_stage() -> int:
+    """K-OPS-E28：每镜每阶段 24 小时内自动出图的硬上限（config/policies/retry.yaml hard_cap.value.per_stage_24h，默认 10）。
+    NS_PRODUCER_HARD_CAP 优先（测试 / 临时）"""
+    try:
+        v = os.environ.get("NS_PRODUCER_HARD_CAP")
+        if not v:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            import policy as POL
+            v = (POL.item("retry.hard_cap", ROOT).get("value") or {}).get("per_stage_24h")
+        return max(1, int(v or 10))
+    except Exception:  # noqa: BLE001  # arch-ok: 政策读不到用默认 10（仍然有上限，失败关闭方向）
+        return 10
+
+
+def stage_renders_24h(takes: dict, stage: str, t: float | None = None) -> int:
+    """takes.json 里这一阶段最近 24 小时自动出的版本数（手工编辑 origin=manual_edit 不算）。
+    以 takes.json 为准：不受 E09 / E11 / E24 / 驳回各条重置路径影响，进程重启也不丢（E21 的计数在内存里，重启就清零）"""
+    since = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime((t or now()) - 24 * 3600))
+    return sum(1 for x in takes.get("takes") or [] if x.get("stage") == stage and x.get("origin") != "manual_edit"
+               and str(x.get("created_at") or "") >= since)
+
+
 def prefetch_depth() -> int:
     """K-OPS-E17：每道 ComfyUI 队列保持“1 单在跑 + (depth-1) 单排队”，派单 / 传图和渲染并行。
     NS_PRODUCER_PREFETCH 优先，其次 config/policies/resources.yaml resources.prefetch_depth，默认 2"""
@@ -735,6 +757,7 @@ def vqa_gate(sid: str, stage: str, file_rel: str, job: dict, pf: dict) -> dict |
         VQ.q1a_vlm(pf, str(P.DATA / file_rel))             # K-REV-V19：Q1a 逐人头发——确定性过了再由本地看图逐人问答复核
         VQ.hair_primary(pf, v)                              # 发色：Q1a 分割主判、VLM 辅助（开关 gate.hair_primary）
         VQ.q1x(sid, stage, str(P.DATA / file_rel), pf)      # Q1x 同场跨镜身份一致（开关 Q1x_scene.enabled）
+        VQ.q1d(sid, stage, str(P.DATA / file_rel), pf)      # Q1d 本地图片异常检测（记日志、不拦；开关 Q1d_anomaly.enabled，默认关）
         VQ.apply(pf, v)
         if v.get("error") and pf.get("ok") is False and pf.get("blocking") == ["Q9"]:
             pf["score_infra"] = True
@@ -1849,6 +1872,31 @@ class Producer:
                 out.append(oid)
         return out
 
+    def hard_capped(self, o: dict, cap: int | None = None) -> bool:
+        """K-OPS-E28（总调度 FOCUS #2）：每镜每阶段 24 小时内自动出图到上限 → 不派、转人工 / 本地修、开工单。
+        各条重置路径（E09 阶梯重置、E11 尽力版重置、E24 输入变化、驳回重出）都只重置“阶梯次数”，不重置这里的计数；
+        只有人工 `producer.py uncap --obj X --n N` 能多放 N 次（24 小时有效）"""
+        kind, sid = o["id"].split(":", 1)
+        if kind not in ("first", "last"):
+            return False
+        from ns_render import pipeline as P
+        stage = "image" if kind == "first" else "last"
+        n = stage_renders_24h(P.load_takes(sid), stage)
+        led = self.ledger().get(o["id"]) or {}
+        ex = led.get("cap_extra") or {}
+        extra = int(ex.get("n") or 0) if now() - float(ex.get("t") or 0) < 24 * 3600 else 0
+        lim = (cap or hard_cap_per_stage()) + extra
+        if n < lim:
+            return False
+        hc = led.get("hard_capped") or {}
+        if now() - float(hc.get("t") or 0) > 24 * 3600 or int(hc.get("lim") or 0) != lim:
+            self.led_update(o["id"], hard_capped={"t": now(), "at": iso(), "n": n, "lim": lim},
+                            reason=f"24 小时内已自动出 {n} 版（硬上限 {lim}），停止自动重出，转人工 / 本地修（K-OPS-E28）")
+            sentinel_ticket(self.p, o["id"], f"重出硬上限：{stage} 24 小时 {n} 版（上限 {lim}），已停止自动重出，转人工 / 本地修",
+                            {"renders_24h": n, "cap": lim}, led)
+            self.logf("hard_cap", obj=o["id"], renders_24h=n, cap=lim, counted=False)
+        return True
+
     def obj_rate_exceeded(self, o: dict, cap: int = 8) -> bool:
         """K-OPS-E21（总调度 08:0x P0：ep05-S3 出到第 82 版、S7 46 次，计次没拦住）：同一对象最近 1 小时派单 ≥ cap →
         写 data/autopilot/runaway_hold.json（按镜暂停，reason_kind=runaway，6 小时到期）+ SENTINEL 工单，这一单不派"""
@@ -2021,6 +2069,12 @@ class Producer:
                 if o["id"] not in self.__dict__.setdefault("_local_only_logged", set()):
                     self._local_only_logged.add(o["id"])
                     self.logf("local_only_skip", obj=o["id"], counted=False, why="剧本 H3校验 标了本地生成 / 占位，服务器不派单")
+                continue
+            try:
+                if self.hard_capped(o):                  # K-OPS-E28：每镜每阶段 24 小时硬上限，到了就停、转人工 / 本地修
+                    continue
+            except Exception as e:  # noqa: BLE001  # arch-ok: 计数读不到 = 这一单不派（失败关闭），记日志
+                self.logf("hard_cap_err", obj=o["id"], error=repr(e)[:200], counted=False)
                 continue
             if self.obj_rate_exceeded(o, rate_cap):      # K-OPS-E21：同一对象 1 小时出图超过上限 → 自动按镜暂停 + 工单
                 continue
@@ -3050,7 +3104,7 @@ def main(argv=None) -> int:
     except Exception:  # noqa: BLE001
         pass
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["serve", "once", "status", "pause", "resume", "dryrun", "rescore", "reject", "approve", "unwait", "reset-best-effort", "import-staged"])
+    ap.add_argument("cmd", choices=["serve", "once", "status", "pause", "resume", "dryrun", "rescore", "reject", "approve", "unwait", "uncap", "reset-best-effort", "import-staged"])
     ap.add_argument("--obj", default="")
     ap.add_argument("--n", type=int, default=0)
     ap.add_argument("--reason", default="")
@@ -3084,6 +3138,13 @@ def main(argv=None) -> int:
         return reset_best_effort(paths, a.note or "门槛 / 编译器更新后重新给 3 次（总调度 11-01）", a.by)
     if a.cmd == "import-staged":          # 总调度派的整稿导入（走 PRODUCER 令牌通道）：--obj <暂存稿路径> --reason <sha256> --note
         return import_staged(paths, a.obj, a.reason, a.note, a.by, skip_rubric_gate=a.skip_rubric_gate, run=a.run or None)
+    if a.cmd == "uncap":                  # K-OPS-E28：人工看过后多放 N 次（24 小时有效），不清计数
+        L = jl(paths.ledger, {}) or {}
+        L.setdefault(a.obj, {}).update(cap_extra={"n": max(1, a.n or 3), "t": now(), "at": iso(), "by": a.by, "note": a.note},
+                                        hard_capped=None)
+        js(paths.ledger, L)
+        log_event(paths, "uncap", obj=a.obj, n=max(1, a.n or 3), by=a.by, note=a.note, counted=False)
+        return 0
     if a.cmd == "unwait":                 # 驳回重出在等的前提（如 REFLOCK 修 Q1）满足了 → 放行
         rj = jl(paths.rejects, {}) or {}
         if a.obj in rj:

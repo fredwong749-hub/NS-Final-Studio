@@ -169,7 +169,7 @@ export function RegenDialog({ title, sub, base, where = "", chars, note, onClose
           className="regen-ta"
           rows={3}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => { setText(e.target.value); setErr(null); }}
           placeholder="例：换成侧脸；手里拿咖啡杯；鞋换成上传的这双"
         />
         <div className="regen-l">

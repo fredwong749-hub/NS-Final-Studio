@@ -14,6 +14,9 @@ export type FHealth = {
   total?: number;
   light?: { level: "ok" | "warn" | "bad"; text: string };
   source?: string;
+  /** UIRSI2 #7：显卡 1–N 号（出图道 + 看图卡；坏卡不编号）与坏卡清单（后端 factory_health.cards_of，读 config/factory/hosts.json） */
+  cards?: { no: number; lane: string; host: string; gpu: number; label: string; state: string; word: string; text: string; level: "ok" | "warn" | "idle" }[];
+  broken?: { host: string; gpu: number; label: string; why: string }[];
 };
 
 let cur: FHealth | null = null;

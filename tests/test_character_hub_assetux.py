@@ -392,6 +392,11 @@ def test_regen_submits_asset_gen_and_results_become_candidates(env, monkeypatch)
     c, root = env["c"], env["root"]
     sent = []
     monkeypatch.setattr(AE, "create_gen_job", lambda aid, body, store=None: sent.append((aid, body)) or {"job_id": "j1"})
+    from ns_api import prompt_rewrite as PR   # L-119：项目方原话先经外部写作 API 改写；测试里替身，不发网络
+    seen = []
+    monkeypatch.setattr(PR, "rewrite", lambda kind, text, ctx=None, chat=None: seen.append((kind, text, ctx)) or
+                        {"prompt": "Keep the same face; change shoes to silver stilettos.", "negative_add": "plastic skin",
+                         "zh_summary": "鞋换银色细高跟", "model": "fake", "usd": 0.0, "owner_text": text})
     gear = c.post("/api/character-hub/lin_wan/wardrobe", files={"file": ("g.png", _png((7, 7, 77)), "image/png")}, data={"cat": "shoes", "name": "银色细高跟"}).json()["item"]
     sheet = "data/pipeline/runs/testproj/images/sheets/lin_wan/lin_wan_lookA_s202.png"
     r = c.post("/api/character-hub/lin_wan/regen", json={"kind": "sheet", "look": "A", "file": sheet, "prompt": "鞋换成银色细高跟",
@@ -399,8 +404,19 @@ def test_regen_submits_asset_gen_and_results_become_candidates(env, monkeypatch)
     assert r.status_code == 202, r.text
     aid, body = sent[0]
     assert aid == "lin_wan" and body.base == sheet and body.label == "再生成·sheet:A" and len(body.refs) == 1
+    assert body.prompt.startswith("Keep the same face") and body.negative == "plastic skin"      # 出图用改写后的提示词
+    assert seen[0][1] == "鞋换成银色细高跟" and seen[0][2]["gear"] == ["鞋"] and r.json()["rewrite"]["zh_summary"]
     assert c.post("/api/character-hub/lin_wan/regen", json={"kind": "sheet", "file": sheet, "prompt": "x"}).status_code == 422   # 没说造型
+    # 不写 = 换种子：这个位置还没再生成过 → 422；有过 → 用上一次的提示词
     assert c.post("/api/character-hub/lin_wan/regen", json={"kind": "sheet", "look": "A", "file": sheet, "prompt": " "}).status_code == 422
+    AE._write("asset_gens", {"lin_wan": [{"gen_id": "ag-0", "asset_id": "lin_wan", "label": "再生成·sheet:A", "prompt": "PREV PROMPT"}]})
+    r2 = c.post("/api/character-hub/lin_wan/regen", json={"kind": "sheet", "look": "A", "file": sheet, "prompt": ""})
+    assert r2.status_code == 202 and r2.json()["reseed"] and sent[-1][1].prompt == "PREV PROMPT" and len(seen) == 1
+    # 改写失败 → 502，不出图
+    monkeypatch.setattr(PR, "rewrite", lambda *a, **k: (_ for _ in ()).throw(PR.RewriteError("网关挂了")))
+    n = len(sent)
+    r3 = c.post("/api/character-hub/lin_wan/regen", json={"kind": "sheet", "look": "A", "file": sheet, "prompt": "再瘦一点"})
+    assert r3.status_code == 502 and "没有出图" in r3.json()["detail"] and len(sent) == n
     # 模拟生成完成：写一条生成记录 → 造型 A 的候选里出现，点“用这张”= 设定图
     out = root / "assets" / "characters" / "lin_wan" / "refs" / "gen" / "ag-1.png"
     out.parent.mkdir(parents=True, exist_ok=True)

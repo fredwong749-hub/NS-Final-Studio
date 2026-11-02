@@ -13,7 +13,7 @@ layers:
     const: FACE_OVERRIDES
     reader: ns_agent.asset_refs.face_of
     inherit: first_hit
-    what: 身份脸覆盖（L-086：林晚 = lin_wan_face_hd_A_s202.png）
+    what: 身份脸覆盖（L-122：林晚 = ar-c2351c9dcf 母版脸，取代 L-086 的 hd_A_s202）
     source: L-086 / L-087 / D-AST-86
   - path: data/looks/item_map_overrides.json
     const: OVERRIDES

@@ -140,12 +140,13 @@ rules:
   - id: K-OPS-F13
     domain: ops
     link: [P5-P6]
-    title: urgent 部署做原子切换：推代码前先暂停派单，推完和核对通过后当场按重启队列规则排空重启（不等 loop 下一拍），失败则恢复派单；热修版本用 deploy --hotfix-of 自动记发版事故账本
+    title: urgent 部署做原子切换：先推代码（只按 sha 补不一致的文件）、过 server_deps / decisions_guard，全过之后才暂停派单并当场按重启队列规则排空重启（暂停窗口只含排空 + 重启），重启失败恢复派单；热修版本用 deploy --hotfix-of 自动记发版事故账本
     when: system_version deploy --urgent / 热修
-    then: deploy_host：pause --by DEPLOY_ATOMIC → 推代码 / 期望表 / server_deps / decisions_guard → restart_queue.request + process → resume；任何一步失败 resume（老进程继续）；--hotfix-of <sv> 成功后写 data/rsi/release_incidents.jsonl
+    then: deploy_host：快照门检查 → verify_sha(fix) 按 sha 补代码 → 数据 / 期望表 / server_deps / decisions_guard → pause --by DEPLOY_ATOMIC → restart_queue.request + process → resume；暂停前任何一步失败不暂停（老进程继续）；重启失败 resume；--hotfix-of <sv> 成功后写 data/rsi/release_incidents.jsonl
     check: tests/test_system_version.py::test_urgent_deploy_pauses_then_restarts_now, tests/test_system_version.py::test_gates_include_vqa_regression_and_hotfix_ledger
     evidence:
       - {src: docs/master/FRAMEWORK_REFRAME.md, note: "11-02 03:11–03:14 / 03:52：代码推上去后老进程还在跑，新 frame_job.py 配内存里旧 framing → 15 个 code_error；sv-06 热修（sv-07）需要手工记账"}
+      - {src: data/rsi/freeze_drift.jsonl, note: "sv-11（11-02 14:44→15:10）：推代码前就暂停，按修改时间整批重推 792 个文件，gpu33 停派约 26 分钟 → 改成核对全过才暂停、代码按 sha 补"}
     confidence: high
     status: 确认
     date: 2026-11-02

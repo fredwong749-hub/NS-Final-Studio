@@ -119,7 +119,7 @@ export const hubApi = {
     fetch(`/api/trash/object?type=${type}&id=${enc(id)}&reason=${enc("资产中心删除")}`, { method: "DELETE" }).then((r) => j<{ entry_id: string }>(r)),
   /** ↻ 再生成（项目方 11-01）：当前图作底图 + 装备图参考 + 提示词 → 资产生成；出好的图回到对应位置当候选 */
   regen: (cid: string, b: { kind: "sheet" | "face" | "item"; file: string; prompt: string; look?: string; item_id?: string; gear: { path: string; label: string; item_id?: string }[] }) =>
-    fetch(`/api/character-hub/${enc(cid)}/regen`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) }).then((r) => j<{ job?: { job_id?: string } }>(r)),
+    fetch(`/api/character-hub/${enc(cid)}/regen`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) }).then((r) => j<{ job?: { job_id?: string }; rewrite?: { prompt: string; zh_summary: string; model: string } | null; reseed?: boolean }>(r)),
   useRegen: (cid: string, id: string, file: string) =>
     fetch(`/api/character-hub/${enc(cid)}/items/${enc(id)}/use-regen`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file }) }).then((r) => j<{ prev: string | null }>(r)),
   unuseRegen: (cid: string, id: string, file: string, prev: string | null) =>

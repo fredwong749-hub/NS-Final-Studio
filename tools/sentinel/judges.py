@@ -21,7 +21,7 @@ SLO_TITLE = {
     "S14": "RSI 线分数（2 小时无新分 / 连续不升）",
     "GPU24": "GPU 24 小时等待任务原因",
     "S15": "编排器 tick 存活", "S16": "笔记本常驻进程清单",
-    "S17": "单镜出图速率", "S18": "临时挂道到期", "S21": "读旧状态路径（state_legacy_read）", "S22": "冻结期间改文件", "S23": "笔记本侧出图道可达率", "S24": "API 响应时间", "S20": "scratchpad 里跑的进程（K-OPS-Y04）", "G26": "声明 vs 实际（hosts.json）", "S19": "产能见底（ready 不够、没有下一批）",
+    "S17": "单镜出图速率", "S18": "临时挂道到期", "S21": "读旧状态路径（state_legacy_read）", "S22": "冻结期间改文件", "S23": "笔记本侧出图道可达率", "S24": "API 响应时间", "S25": "常驻 CLIP", "S20": "scratchpad 里跑的进程（K-OPS-Y04）", "G26": "声明 vs 实际（hosts.json）", "S19": "产能见底（ready 不够、没有下一批）",
 }
 
 
@@ -661,6 +661,26 @@ def j_api_latency(hist: dict[str, list], cfg: dict) -> list[dict]:
         fails = sum(1 for x in w if x[2] != 200)
         f = F("S24", path, q >= cfg["p95_max_s"], f"{path} 最近 {len(w)} 次 p95 {q:.2f} s ≥ {cfg['p95_max_s']} s（失败 {fails} 次）——页面会卡在加载",
               p95_s=round(q, 3), n=len(w), max_s=round(max(secs), 2), fails=fails)
+        f["owner_loop"] = cfg.get("owner_loop")
+        out.append(f)
+    return out
+
+
+# ------------------------------------------------------------------ S25 常驻 CLIP（FACTORY 口径，总调度 14:3x）
+def j_clip(host: str, r: dict | None, cfg: dict) -> list[dict]:
+    """r = {pid_alive: bool|None, health: "ok"|"timeout"|"ERR …", reloads_1h: int}；进程不在 / 一小时重载 > reload_max_per_h → 违约。
+    /health 超时（单线程忙）不单独算挂，只写进证据"""
+    if not r:
+        return []
+    out = []
+    if r.get("pid_alive") is not None:
+        f = F("S25", f"{host}:alive", not r["pid_alive"], f"{host} 常驻 CLIP 进程不在（pid 文件 {cfg['pid_file']}；/health {r.get('health')}）",
+              pid=r.get("pid"), health=r.get("health"))
+        f["owner_loop"] = cfg.get("owner_loop")
+        out.append(f)
+    if r.get("reloads_1h") is not None:
+        f = F("S25", f"{host}:reload", r["reloads_1h"] > cfg["reload_max_per_h"], f"{host} 常驻 CLIP 一小时重载 {r['reloads_1h']} 次 > {cfg['reload_max_per_h']}（{cfg['reload_reason']}）",
+              reloads_1h=r["reloads_1h"])
         f["owner_loop"] = cfg.get("owner_loop")
         out.append(f)
     return out

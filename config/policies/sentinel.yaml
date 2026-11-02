@@ -240,3 +240,12 @@ items:
     enforced_by: tools/sentinel/probes.py:p_s24
     status: code_reads
     owner: SENTINEL
+  S25_clip_resident:
+    value: {port: 8872, health_timeout_s: 30, pid_file: /root/work/fredw/factory/run/clip_resident.pid,
+            events_file: /root/work/fredw/factory/logs/clip_resident_events.jsonl, reload_reason: exit_rc_3, reload_max_per_h: 3,
+            every_s: 300, call_timeout_s: 50, owner_loop: FACTORY}
+    source: 总调度转 FACTORY 口径（11-02 14:3x）：两台各测常驻 CLIP /health（单线程，忙时 3 s 会超时，超时给 30 s 别误报）、pid 文件对应进程活着、events 里 reason=exit_rc_3 一小时 > 3 次（反复重载）→ 开单派 FACTORY
+    note: 单独一次 rssh 调用（不并进每拍的合并调用，免得 30 s 健康检查拖垮其它探针），5 分钟一次；健康检查超时只记“慢”，进程不在才算挂
+    enforced_by: tools/sentinel/probes.py:p_s25
+    status: code_reads
+    owner: SENTINEL

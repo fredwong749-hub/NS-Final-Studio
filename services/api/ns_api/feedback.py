@@ -61,6 +61,7 @@ CATEGORIES = {
     "video.hand": ("视频 · 手", "VIDLAB"), "video.camera": ("视频 · 运镜", "VIDLAB"), "video.expression": ("视频 · 表情", "VIDLAB"),
     "video.lipsync": ("视频 · 口型", "VIDLAB"), "video.drift": ("视频 · 漂移", "VIDLAB"), "video.audio": ("视频 · 声音", "VIDLAB"),
     "script": ("剧本", "HOLLYWOOD"), "ui": ("界面", "UIRSI"), "ops": ("系统 / 运维", "DEBUG_RSI"),
+    "test": ("测试单", "FEEDBACK"),   # 链路实测：可直接关单，默认不进列表 / 计数（?tests=1 才显示）
 }
 TARGET_KINDS = ["first", "last", "video", "field", "ui", "shot", "episode", "other"]
 
@@ -209,13 +210,15 @@ def create(body: FeedbackIn, request: Request):
 
 @router.get("/api/feedback")
 def list_items(status: str | None = None, ep: str | None = None, shot: str | None = None, route: str | None = None,
-               run: str | None = None, open: int = 0, limit: int = 500):
+               run: str | None = None, open: int = 0, limit: int = 500, tests: int = 0):
     items, unreadable = [], []
     for f in sorted(_dir("items").glob("fb-*.json"), reverse=True):
         try:
             it = json.loads(f.read_text(encoding="utf-8"))
         except (OSError, ValueError) as e:   # arch-ok: 坏文件不静默丢，记进 unreadable 随响应返回（总调度 11-02 14:0x）
             unreadable.append({"file": f.name, "error": str(e)[:120]})
+            continue
+        if it.get("category") == "test" and not tests:
             continue
         items.append(it)
     counts = {s: 0 for s in STATUSES}
@@ -285,10 +288,20 @@ def set_status(fid: str, body: StatusIn, request: Request):
                 it["reopened"] = int(it.get("reopened") or 0) + 1
                 it["verify"] = None
                 action = "reopen"
+            elif to == "closed" and it.get("category") == "test":
+                pass   # 测试单（链路实测）：直接关，不走修复闸门，也不进计数（见 list_items）
             elif to not in FLOW.get(cur, []):
                 raise HTTPException(409, f"{STATUS_ZH.get(cur, cur)} 不能直接改成 {STATUS_ZH.get(to, to)}；可改：{FLOW.get(cur)}")
             # 每一步的必填项（G1：每个判断落成字段，不靠口头）
             need = []
+            if it.get("category") == "test":
+                if to != "closed":
+                    raise HTTPException(409, "测试单只能直接关单")
+                it["status"] = "closed"
+                it["updated_at"] = _now()
+                it["history"].append({"at": _now(), "by": who, "status": "closed", "from": cur, "note": body.note or "测试单"})
+                _save(it, {"by": who, "action": "close_test", "from": cur, "status": "closed", "note": body.note})
+                return _view(it)
             if to == "triaged" and not (it.get("category") and it.get("owner")):
                 need.append("category + owner")
             if to == "fixed" and not (it.get("fix_note") and it.get("fix_evidence")):

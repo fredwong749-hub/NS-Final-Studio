@@ -94,10 +94,18 @@ def test_full_score_tries_resident_clip_first():
     assert "OMP_NUM_THREADS" in s.split("def ")[0]      # K-OPS-V13：模块头先限线程
 
 
-def test_clip_resident_script_pins_gpu2_on_gpu36_only():
+def test_clip_resident_script_per_host():
+    """gpu36 CPU 常驻（GPU2 给看图）；gpu33 钉 GPU1、8 线程、绑 80-95 核（总调度 11-02 15:4x，K-OPS-F17）；nohup 脚本和 systemd env 同参数"""
     t = (ROOT / "ops/factory/clip_resident.sh").read_text(encoding="utf-8")
-    assert "NS_CLIP_DEVICE=cpu" in t and "8872" in t        # 07:5x 起 CPU 常驻，不占 GPU2
-    assert "rm -" not in t                               # 不删文件
+    assert "8872" in t and "rm -" not in t                                       # 不删文件
+    assert 'gpu36) GPU=""; DEV=cpu; TH=16' in t
+    assert "gpu33) GPU=1; DEV=cuda; TH=8; NICE=10; CPUS=80-95" in t and "GPU=2" not in t   # gpu33 GPU2 坏卡永不用
+    e33 = (ROOT / "ops/factory/systemd/env/gpu33.env").read_text(encoding="utf-8")
+    e36 = (ROOT / "ops/factory/systemd/env/gpu36.env").read_text(encoding="utf-8")
+    assert "CLIP_GPU=1" in e33 and "CLIP_DEV=cuda" in e33 and "taskset -c 80-95" in e33
+    assert "CLIP_GPU=" + chr(10) in e36 and "CLIP_DEV=cpu" in e36
+    svc = (ROOT / "ops/factory/systemd/ns-clip-resident.service").read_text(encoding="utf-8")
+    assert "$CLIP_PY" in svc and "$CLIP_GPU" in svc
 
 
 def test_outbox_format_matches_netfix(tmp_path):
@@ -291,3 +299,48 @@ def test_k_ops_f17_scoring_subprocesses_are_throttled():
     for c in calls:
         assert "preexec_fn=_lim" in c and "SENV" in c, c
     assert src.count("def _lim():") >= 2 and "os.nice(10)" in src and "sched_setaffinity" in src
+
+
+def test_clip_resident_only_restarts_for_deployed_code(tmp_path, monkeypatch):
+    """常驻 CLIP：本目录代码被笔记本未发版代码覆盖 → 不退出（当次 409 走单次子进程）；等于部署仓库那份 → 退出按新版重启"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("clip_srv_t", ROOT / "tools/gen_contract/clip_srv.py")
+    CS = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(CS)
+    src = tmp_path / "repo"
+    (src / "services/agent/ns_agent/gen_contract").mkdir(parents=True)
+    (src / "tools/gen_contract").mkdir(parents=True)
+    (src / "services/agent/ns_agent/gen_contract/metrics.py").write_text("m2", encoding="utf-8")
+    (src / "tools/gen_contract/clip_srv.py").write_text("c2", encoding="utf-8")
+    import hashlib
+    h = lambda b: hashlib.sha256(b).hexdigest()
+    assert CS.code_matches_src({"metrics.py": h(b"m2"), "clip_srv.py": h(b"c2")}, str(src))
+    assert not CS.code_matches_src({"metrics.py": h(b"laptop"), "clip_srv.py": h(b"c2")}, str(src))
+    assert CS.code_matches_src({"metrics.py": "x", "clip_srv.py": "y"}, "")          # 没配部署仓库：旧行为
+    sh = (ROOT / "ops/factory/clip_resident.sh").read_text(encoding="utf-8")
+    assert "NS_CLIP_CODE_SRC=$PROD" in sh
+
+
+def test_sync_auto_repushes_when_remote_table_differs(monkeypatch, tmp_path):
+    """11-02 16:02：gpu36 期望表被写成 0 字节，推送记录却是成功 → auto 不能只看记录，要核服务器上的 sha，不一致就重推"""
+    import json as _j
+    exp = tmp_path / "expected_refs.json"
+    exp.write_bytes(b'{"shots": {}}')
+    monkeypatch.setattr(IB, "build", lambda *a, **k: {"shots": {}, "counts": {}})
+    monkeypatch.setattr(IB, "EXPECTED", exp)
+    monkeypatch.setattr(SY, "ROOT", tmp_path)
+    monkeypatch.setattr(SY, "_save", lambda *a, **k: None)
+    key = SY._table_key({"shots": {}, "counts": {}})
+    (tmp_path / "data/factory").mkdir(parents=True)
+    (tmp_path / "data/factory/expected_pushed.json").write_text(
+        _j.dumps({"gpu36": key, "gpu36:sha": _sha(b'{"shots": {}}')}), encoding="utf-8")
+    pushed = []
+    monkeypatch.setattr(SY, "push", lambda h, *a, **k: pushed.append(h) or {"sent": 0})
+    remote = {"sha": _sha(b"")}
+    monkeypatch.setattr(SY, "rrun", lambda h, cmd, **k: remote["sha"] + "  x")
+    SY.auto(hosts=("gpu36",))
+    assert pushed == ["gpu36"]                                     # 服务器上是空文件 → 重推
+    remote["sha"] = _sha(b'{"shots": {}}')
+    SY.auto(hosts=("gpu36",))
+    assert pushed == ["gpu36"]                                     # 一致 → 不动
+    assert "sha256sum -c" in SY.verified_install("/x/e.json", b"{}")
