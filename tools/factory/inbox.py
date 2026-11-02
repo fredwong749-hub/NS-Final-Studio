@@ -72,17 +72,26 @@ def check_refs(sid: str, refs: list, expected: dict | None = None, root: Path | 
     if want is None:        # K-OPS-F09：有期望表但这镜不在表里 = 目标状态没覆盖到 → 拒派（⤴ 取代“不在表里不拦”）
         return [f"期望 refs 表里没有 {run + ':' if run else ''}{sid}（先在笔记本 inbox.py build + sync push）"]
     got = [_rel(str(r), root) for r in refs or []]
-    probs = []
     wl = [w["rel"] for w in want]
-    if got != wl:
-        probs.append(f"refs 路径不一致：期望 {wl}，实际 {got}")
-    for w in want:
-        if w["rel"] in got:
-            s = _sha(root / w["rel"])
-            if s is None:
-                probs.append(f"缺文件 {w['rel']}")
-            elif w.get("sha") and s != w["sha"]:
-                probs.append(f"sha 不一致 {w['rel']}：期望 {w['sha'][:12]}，实际 {s[:12]}")
+    wsha = {w["rel"]: w.get("sha") for w in want}
+    closure = (exp.get("files") or {}) if not run or run == exp.get("primary", run) else ((exp.get("run_files") or {}).get(run) or {})
+    probs = []
+    # 自修阶梯的变体（只挂脸 / 两张脸 + 设定图 / 参考板 / 同脸双槽）会合法地改 refs 组合，所以不比整张清单，只核三件事
+    # （11-02 12:2x 实测：按整张清单比，变体镜全被拦）：
+    # ① 身份脸只能是这镜期望里的那几张（防 01:24 那种身份脸用错）；② 每个文件的 sha 与笔记本一致；③ 没登记过的文件只记不拦
+    want_faces = {r for r in wl if "/identity_refs/" in r}
+    for r in got:
+        if "/identity_refs/" in r and r not in want_faces:
+            probs.append(f"身份脸不对：{r} 不在本镜期望 {sorted(want_faces)}")
+    for r in got:
+        exp_sha = wsha.get(r) or closure.get(r)
+        if exp_sha is None:
+            continue
+        s_ = _sha(root / r)
+        if s_ is None:
+            probs.append(f"缺文件 {r}")
+        elif s_ != exp_sha:
+            probs.append(f"sha 不一致 {r}：期望 {exp_sha[:12]}，实际 {s_[:12]}")
     return probs
 
 
@@ -104,6 +113,7 @@ def _dryrun_run(root: Path, run: str, primary: str, py: str) -> dict:
     env = dict(os.environ, NS_ROOT=str(root), PYTHONIOENCODING="utf-8", PYTHONUTF8="1",
                PYTHONPATH=os.pathsep.join(str(root / x) for x in ("packages/schema", "services/agent", "services/api",
                                                                     "services/render_router", "services/recipes")))
+    env["NS_RUN_ID"] = run          # deps 的 project 回退值 = 本剧 run_id（与 producer 的 project_for(...) or run_id 同口径）
     if run != primary:
         env.update(NS_RENDERS_DIR=str(root / "data" / "renders" / run),
                    NS_SCRIPT_JSON=str(root / "data" / "import" / "runs" / run / "script_v2.json"))
@@ -126,7 +136,7 @@ def build(hosts: list[str] | None = None, root: Path | None = None, out_path: Pa
     root = Path(root or ROOT)
     py = sys.executable
     prim, runs = _runs(root)
-    tables, blocked, counts = {}, {}, {}
+    tables, blocked, counts, files_by_run = {}, {}, {}, {}
     for run in runs:
         res = _dryrun_run(root, run, prim, py)
         t = {}
@@ -137,9 +147,11 @@ def build(hosts: list[str] | None = None, root: Path | None = None, out_path: Pa
             t[sid] = [{"rel": _rel(r, root), "sha": _sha(root / _rel(r, root))} for r in v.get("refs") or []]
         tables[run] = t
         counts[run] = len(t)
+        files_by_run[run] = {k: v for k, v in (res.get("files") or {}).items() if v}
     out = {"at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "by": "FACTORY tools/factory/inbox.py build（K-OPS-F03）",
            "built_from": str(root), "primary": prim, "shots": tables.get(prim, {}),
-           "runs": {r: t for r, t in tables.items() if r != prim}, "counts": counts, "laptop_blocked": blocked}
+           "runs": {r: t for r, t in tables.items() if r != prim}, "counts": counts, "laptop_blocked": blocked,
+           "files": files_by_run.get(prim, {}), "run_files": {r: f for r, f in files_by_run.items() if r != prim}}
     dest = out_path or (ROOT / "data/factory/inbox/expected_refs.json")
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(".tmp")

@@ -304,9 +304,9 @@ checks:
     paths: [tools/autopilot/producer.py]
   - id: D-CLN-09
     decision: L-079（先隔离、验证，最后项目方本人运行删除脚本）
-    title: 隔离清单和删除脚本都在
-    type: exists
-    paths: [data/_quarantine_20261101/MANIFEST.md, ops/cleanup/delete_quarantine_20261101.ps1]
+    title: 隔离区已按项目方决定删除（不得再出现）
+    type: absent
+    paths: [data/_quarantine_20261101, data/_archive/20261031, data/renders/_archive_60ep_20261031]
   # ---------------- 视频基底（WORKFLOW fredw-2b 派，2026-11-01）
   - id: D-VID-01
     decision: L-088（项目方 11-01 18:0x：视频全部用皮卡来做；⤴ 取代 16:20 L-082 的“重出镜走 Pika、已通过镜保留”）

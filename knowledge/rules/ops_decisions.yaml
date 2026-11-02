@@ -23,7 +23,7 @@ rules:
     evidence:
       - {src: config/owner_decisions.yaml, note: 34 条断言（剧本 / 清理 / LoRA / 出图 / 声音 / UI）}
       - {src: docs/master/MASTER_PICTURE.md, note: 决策账本 + 残留清单 + 系统图 + 缺口表}
-      - {src: data/_quarantine_20261101/MANIFEST.md, note: "11-01 隔离 76 项 23.0G；项目方一键：“先隔离，验证后你删”"}
+      - {src: ops/cleanup/delete_quarantine_20261101.ps1, note: "11-01 隔离 76 项 23.0G；项目方一键：“先隔离，验证后你删”；⤴ 11-02 13:2x 项目方本人下令删除，隔离区已删，证据改指删除脚本"}
     confidence: high
     status: 确认
     date: 2026-11-01

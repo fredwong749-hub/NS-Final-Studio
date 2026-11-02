@@ -1,5 +1,5 @@
 {
- "kb_version": "kb-20261102-1b769615",
+ "kb_version": "kb-20261102-0e3e558a",
  "n": 596,
  "by_domain": {
   "render": 86,
@@ -4859,8 +4859,8 @@
      "note": "决策账本 + 残留清单 + 系统图 + 缺口表"
     },
     {
-     "src": "data/_quarantine_20261101/MANIFEST.md",
-     "note": "11-01 隔离 76 项 23.0G；项目方一键：“先隔离，验证后你删”"
+     "src": "ops/cleanup/delete_quarantine_20261101.ps1",
+     "note": "11-01 隔离 76 项 23.0G；项目方一键：“先隔离，验证后你删”；⤴ 11-02 13:2x 项目方本人下令删除，隔离区已删，证据改指删除脚本"
     }
    ],
    "confidence": "high",
@@ -12317,8 +12317,8 @@
    "check": "tests/test_character_hub_assetux.py",
    "evidence": [
     {
-     "src": "data/_quarantine_20261101/MANIFEST.md",
-     "note": "旧 60 集场景 7 个、外国演员音色快照 4 个、lin_wan_qi LoRA 已移入隔离区；/api/assets/characters 仍列 alex/ryan/kai/leo（11-01 实测；⤴ 已由 RECALL 改 ns_schema/looks.py 读 series10 演员表修正）"
+     "src": "ops/cleanup/delete_quarantine_20261101.ps1",
+     "note": "（原证据 data/_quarantine_20261101/MANIFEST.md 已随隔离区于 11-02 按项目方决定删除）旧 60 集场景 7 个、外国演员音色快照 4 个、lin_wan_qi LoRA 已移入隔离区；/api/assets/characters 仍列 alex/ryan/kai/leo（11-01 实测；⤴ 已由 RECALL 改 ns_schema/looks.py 读 series10 演员表修正）"
     }
    ],
    "confidence": "high",

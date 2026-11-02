@@ -446,7 +446,7 @@ rules:
     then: 前端读 GET /api/asset-quarantine（moves.jsonl 里 status=moved 的文件名 / 目录名）过滤卡片和 LoRA 行；人物相关卡片只认人物资产页的演员表（series10 P1：林晚、顾沉、陈宇、阿岚），旧接口还列着的旧演员也不显示；“全部”选项不再写“含旧”
     check: tests/test_character_hub_assetux.py
     evidence:
-      - {src: data/_quarantine_20261101/MANIFEST.md, note: "旧 60 集场景 7 个、外国演员音色快照 4 个、lin_wan_qi LoRA 已移入隔离区；/api/assets/characters 仍列 alex/ryan/kai/leo（11-01 实测；⤴ 已由 RECALL 改 ns_schema/looks.py 读 series10 演员表修正）"}
+      - {src: ops/cleanup/delete_quarantine_20261101.ps1, note: "（原证据 data/_quarantine_20261101/MANIFEST.md 已随隔离区于 11-02 按项目方决定删除）旧 60 集场景 7 个、外国演员音色快照 4 个、lin_wan_qi LoRA 已移入隔离区；/api/assets/characters 仍列 alex/ryan/kai/leo（11-01 实测；⤴ 已由 RECALL 改 ns_schema/looks.py 读 series10 演员表修正）"}
     confidence: high
     status: 确认
     date: 2026-11-01
