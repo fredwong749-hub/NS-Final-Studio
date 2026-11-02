@@ -334,12 +334,19 @@ def test_hot_files_skip_recently_changed_tier1_data(tmp_path):
 
 def test_verified_install_refuses_truncated_stdin(tmp_path):
     """11-02 16:02：gpu36 expected_refs.json 被写成 0 字节——stdin 传丢时不许替换，命令失败"""
+    import os
     import shutil
     import subprocess
-    bash = shutil.which("bash")
+    import pytest
+    # 仓库约定（tools/qa/iter_gate.py Y 段同口径）：Windows 上用 Git bash；PATH 里的 System32 / WindowsApps bash.exe 是 WSL 入口，
+    # 收到的 C:/… 路径写不进去 → 每次 cut 的 SMOKE 必红（A-G1 第 22 轮 #4）。找不到 POSIX bash 就 skip 并说明
+    git_bash = r"C:\Program Files\Git\bin\bash.exe"
+    bash = git_bash if os.name == "nt" and os.path.isfile(git_bash) else shutil.which("bash")
     if not bash:
-        import pytest
-        pytest.skip("no bash")
+        pytest.skip("没有 bash")
+    low = bash.replace("/", "\\").lower()
+    if os.name == "nt" and ("\\system32\\" in low or "\\windowsapps\\" in low):
+        pytest.skip(f"只有 WSL 入口 bash（{bash}），它读不到 Windows 临时目录；装 Git for Windows 后本测试会真跑")
     dest = (tmp_path / "e.json").as_posix()
     (tmp_path / "e.json").write_bytes(b"old")
     cmd = SV._verified_install(dest, b'{"a": 1}')
@@ -388,21 +395,34 @@ def test_a09_deploy_never_clears_someone_elses_pause(tmp_path):
         assert any("resume --by DEPLOY_ATOMIC" in c for c in cmds) is expect_pause
 
 
-def test_export_tag_uses_repo_bytes_not_worktree(tmp_path):
-    """总调度 20:1x：部署导出 = 版本库原字节（LF），不再换成工作区 CRLF——服务器文件 sha 和 git show 直接对得上"""
-    import pytest
-    if not (SV.ROOT / ".git").exists():
-        pytest.skip("cut 冻结快照里没有 .git（快照本身就是 git archive 的原字节）")
-    tags = SV.sv_tags()
-    if not tags:
-        pytest.skip("no sv tag")
-    sv = tags[-1]
-    names = SV.export_tag(sv, ["tools/qa"], tmp_path)
-    f = "tools/qa/system_version.py"
-    assert f in names
+def test_export_tag_uses_repo_bytes_not_worktree(tmp_path, monkeypatch):
+    """总调度 20:1x / OVERSIGHT-F 第 12 轮：部署导出 = 版本库原字节（LF），不换成工作区 CRLF。
+    自建一个临时 git 仓库来测（不依赖本仓库 .git，发版闸门的冻结快照里也真跑）"""
+    import shutil
     import subprocess
-    blob = subprocess.run(["git", "show", f"{sv}:{f}"], cwd=SV.ROOT, capture_output=True, check=True, timeout=60).stdout
-    assert (tmp_path / f).read_bytes() == blob and b"\r\n" not in (tmp_path / f).read_bytes()
+    import pytest
+    git = shutil.which("git")
+    if not git:
+        pytest.skip("no git binary")
+    repo = tmp_path / "repo"
+    (repo / "tools" / "qa").mkdir(parents=True)
+    run = lambda *a: subprocess.run([git, *a], cwd=repo, check=True, capture_output=True, timeout=60)
+    run("init", "-q")
+    run("config", "user.email", "t@t")
+    run("config", "user.name", "t")
+    run("config", "core.autocrlf", "false")
+    LF, CRLF = bytes([10]), bytes([13, 10])
+    (repo / ".gitattributes").write_bytes(b"*.py text eol=lf" + LF)
+    (repo / "tools/qa/x.py").write_bytes(b"a = 1" + LF + b"b = 2" + LF)
+    run("add", "-A")
+    run("commit", "-qm", "c")
+    run("tag", "sv-29991231-01")
+    (repo / "tools/qa/x.py").write_bytes(b"a = 1" + CRLF + b"b = 2" + CRLF)   # 工作区换成 CRLF（Windows 编辑器常见）
+    monkeypatch.setattr(SV, "ROOT", repo)
+    out = tmp_path / "out"
+    names = SV.export_tag("sv-29991231-01", ["tools/qa"], out)
+    assert "tools/qa/x.py" in names
+    assert (out / "tools/qa/x.py").read_bytes() == b"a = 1" + LF + b"b = 2" + LF   # 版本库原字节，不是工作区的 CRLF
 
 
 def test_deploy_records_post_verify(tmp_path):

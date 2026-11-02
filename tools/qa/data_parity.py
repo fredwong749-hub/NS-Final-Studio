@@ -52,7 +52,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 API = "http://127.0.0.1:8800"
-SCRIPT = ROOT / "data" / "import" / "script_v2.json"
+def _runs():
+    import sys as _s
+    if str(ROOT) not in _s.path:
+        _s.path.insert(0, str(ROOT))
+    from tools.autopilot import runs as _RN
+    return _RN
+
+
+RUN = _runs().current_run(ROOT)                  # I-16（总调度 21:3x）：按当前剧比较（以前拿 V1 导入稿比 V2 接口，20:4x 跑出 12 项假不一致）
+SCRIPT = _runs().script_path(RUN, ROOT)
 CFG = ROOT / "config" / "recipes" / "asset_refs.json"
 HUB_EP = ROOT / "data" / "looks" / "hub_episode_looks.json"
 FACE_OV = ROOT / "data" / "looks" / "face_overrides.json"
@@ -290,6 +299,11 @@ def main() -> int:
     face_ov = ((rj(FACE_OV, {}) or {}).get(project) or {}) if project else {}
     looks = rj(ROOT / pc.get("looks_file", "_none_"), []) or []
     name_id = {c.get("name"): c.get("char_id") for c in looks if c.get("name")}
+    if not name_id and project:     # W7（A2 第 18 轮 F6）：资产包模式（V2）不设 looks_file → 名→cid 取清单（asset_refs 同一份登记）
+        if str(ROOT / "services/agent") not in sys.path:
+            sys.path.insert(0, str(ROOT / "services/agent"))
+        from ns_agent import asset_refs as _AR
+        name_id = {n: cid for n, cid in _AR.register_manifest_names(project).items() if n != cid}
 
     def face_file(cid: str) -> str | None:
         """K-OPS-E29：身份脸唯一入口 asset_refs.face_of（含按 run 继承的覆盖层），不再自己拼"""
@@ -771,7 +785,7 @@ def ui_check(ep: int, ash: list | None, fails: list[str]) -> str:
     rows_js = ROOT / "apps" / "web" / "e2e" / "dataalign" / "rows.js"
     name = f"parity_ep{ep:02d}"
     try:
-        subprocess.run(["node", str(probe), f"/#/script-create?run=series10_v1&ep={ep}", name, "14000", str(rows_js)],
+        subprocess.run(["node", str(probe), f"/#/script-create?run={RUN}&ep={ep}", name, "14000", str(rows_js)],
                        cwd=ROOT, timeout=180, capture_output=True, check=False)
         d = json.loads((probe.parent / f"{name}.json").read_text(encoding="utf-8"))
     except Exception as ex:  # noqa: BLE001

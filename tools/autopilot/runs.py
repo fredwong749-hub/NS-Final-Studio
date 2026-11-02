@@ -30,11 +30,21 @@ def _jl(p: Path, d=None):
         return d
 
 
-def _js(p: Path, d) -> None:
+def _js(p: Path, d, tries: int = 8) -> None:
+    """原子写（tmp + os.replace）。W8 / A1-1：Windows 上 os.replace 撞上正在读的进程会 PermissionError（producer.js 早有同样重试），
+    这里也退避重试，不让一次撞车把登记表写失败"""
     p.parent.mkdir(parents=True, exist_ok=True)
-    t = p.with_suffix(p.suffix + ".tmp")
+    t = p.with_suffix(p.suffix + f".{os.getpid()}.tmp")
     t.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
-    os.replace(t, p)
+    for i in range(tries):
+        try:
+            os.replace(t, p)
+            return
+        except PermissionError:
+            if i == tries - 1:
+                t.unlink(missing_ok=True)
+                raise
+            time.sleep(0.05 * (i + 1))
 
 
 class RunRegistryMissing(RuntimeError):
@@ -81,6 +91,58 @@ def for_root(root: Path | str | None = None):
         sp.loader.exec_module(m)
         _FOR_ROOT[key] = m
     return _FOR_ROOT[key]
+
+
+class RunNotGiven(SystemExit):
+    pass
+
+
+def require_run(argv: list[str] | None = None) -> str:
+    """I-16（总调度 21:3x）：离线工具对哪部剧动手必须显式说——命令行 --run <剧> 或环境变量 NS_RUN；都没有 → 退出并说明（不再默认第一季）"""
+    import sys as _s
+    a = list(_s.argv[1:] if argv is None else argv)
+    if "--run" in a and a.index("--run") + 1 < len(a):
+        return a[a.index("--run") + 1]
+    for x in a:
+        if x.startswith("--run="):
+            return x.split("=", 1)[1]
+    v = os.environ.get("NS_RUN")
+    if v:
+        return v
+    raise RunNotGiven("这个离线工具必须显式指定剧：加 --run <剧 id>（例 --run series10_v2）或设环境变量 NS_RUN（I-16：不再默认第一季）")
+
+
+def strip_run(argv: list[str]) -> list[str]:
+    """去掉 --run X / --run=X（给自己解析 sys.argv 的旧工具用）"""
+    out, skip = [], False
+    for i, x in enumerate(argv):
+        if skip:
+            skip = False
+            continue
+        if x == "--run":
+            skip = i + 1 < len(argv)
+            continue
+        if x.startswith("--run="):
+            continue
+        out.append(x)
+    return out
+
+
+def gate_legacy_tool(argv: list[str] | None, tool: str, root: Path | None = None) -> list[str]:
+    """I-16：第一季专用的历史离线工具（路径 / 资产都是 legacy run 的，还没按剧参数化）入口闸门。
+    必须显式 --run（或 NS_RUN）；给的不是 legacy run → 退出并说明（不会拿第一季的东西去动 V2）。
+    返回去掉 --run 的参数；argv=None 时同时改 sys.argv（工具后面自己读 sys.argv 也不会撞上 --run）"""
+    import sys as _s
+    a = list(_s.argv[1:] if argv is None else argv)
+    run = require_run(a)
+    leg = legacy_run(root)
+    if run != leg:
+        raise RunNotGiven(f"{Path(tool).name} 是第一季（{leg}）专用的历史工具，还没按剧参数化；--run {run} 不支持（I-16）。"
+                          f"要对 {run} 做同样的事，先把这个工具改成按 runs.script_path / renders_dir / looks_path 取路径")
+    out = strip_run(a)
+    if argv is None:
+        _s.argv[1:] = out
+    return out
 
 
 def legacy_run(root: Path | None = None) -> str:
@@ -182,6 +244,81 @@ def obj_id(run: str | None, kind: str, shot: str, root: Path | None = None) -> s
     """过渡期：primary 不加前缀（producer / dispatch 认前缀之前不影响现生产）；其它 run 一律 <run>/<kind>:<shot>"""
     r = run or primary_run(root)
     return f"{kind}:{shot}" if is_legacy(r, root) else f"{r}/{kind}:{shot}"
+
+
+# ---------------------------------------------------------------- 单一来源（PRODMERGE-O 11-03，PLAN_V2_MASTER v4 1-3）
+# “当前剧”只认 runs.json 的 primary。config/pipeline/run.json 是由它派生的只读指针（旧读法兼容），只由 sync_run_ptr 写；
+# NS_RUN / NS_RENDERS_DIR / NS_SCRIPT_JSON 只由 run_env 按登记表派生（producer / night 的子进程环境）。
+RUN_STATUSES = ("preparing", "producing", "paused", "frozen", "archived")
+RUN_ENV_KEYS = ("NS_RUN", "NS_RENDERS_DIR", "NS_SCRIPT_JSON")
+
+
+class RunNotRegistered(RuntimeError):
+    """要按剧派生环境 / 改状态的剧不在 runs.json 里（失败关闭）"""
+
+
+def is_registered(run: str | None, root: Path | None = None) -> bool:
+    return bool(run) and run in (registry(root).get("runs") or {})
+
+
+def run_ptr(root: Path | None = None) -> dict:
+    """由 runs.json 派生的 run.json 内容（只有 run_id 一个事实字段）"""
+    return {"_doc": "派生文件，勿手改（PRODMERGE-O 11-03 / PLAN_V2_MASTER v4 1-3）：当前剧只认 config/pipeline/runs.json 的 primary；"
+                    "本文件由 tools/autopilot/runs.py sync_run_ptr 按它重写，只给旧读法兼容",
+            "run_id": primary_run(root), "derived_from": "config/pipeline/runs.json#primary"}
+
+
+def run_ptr_drift(root: Path | None = None) -> str | None:
+    """run.json 与 runs.json primary 不一致 → 一句原因；一致 / 没有 run.json → None"""
+    root = root or ROOT
+    p = root / "config/pipeline/run.json"
+    if not p.is_file() or not (root / "config/pipeline/runs.json").is_file():
+        return None
+    have = (_jl(p, {}) or {}).get("run_id")
+    want = registry(root).get("primary")
+    return None if have == want else f"config/pipeline/run.json run_id={have} 与 runs.json primary={want} 不一致（以 runs.json 为准，跑 sync_run_ptr）"
+
+
+def sync_run_ptr(root: Path | None = None) -> dict:
+    """按 runs.json 重写 run.json（原子写）；返回写入内容"""
+    root = root or ROOT
+    d = run_ptr(root)
+    _js(root / "config/pipeline/run.json", d)
+    return d
+
+
+def run_env(run: str, root: Path | None = None) -> dict:
+    """按剧运行的进程环境（唯一派生处；producer.run_env / night 转调）：legacy 剧 = {}（旧路径）；
+    其它剧必须在 runs.json 登记，否则 RunNotRegistered（不给没登记的剧拼目录）"""
+    root = root or ROOT
+    if run == legacy_run(root):
+        return {}
+    if (root / "config/pipeline/runs.json").is_file() and not is_registered(run, root):
+        raise RunNotRegistered(f"{run} 不在 config/pipeline/runs.json（只认登记表里的剧，不按任意 --run / NS_RUN 拼路径）")
+    return {"NS_RUN": run, "NS_RENDERS_DIR": str(root / "data" / "renders" / run),
+            "NS_SCRIPT_JSON": str(root / "data" / "import" / "runs" / run / "script_v2.json")}
+
+
+def set_status(run: str, status: str, by: str, why: str, root: Path | None = None) -> dict:
+    """改一部剧的 status（状态机唯一写入口；preparing → producing 的条件见 tools/master/sop_gate.py promote）。
+    每次改动写 status_history（谁、何时、旧值、新值、依据），runs.json 原子写后同步 run.json"""
+    root = root or ROOT
+    if status not in RUN_STATUSES:
+        raise ValueError(f"不认识的 status {status}（只认 {RUN_STATUSES}）")
+    p = root / "config/pipeline/runs.json"
+    d = _jl(p, None)
+    if not d or run not in (d.get("runs") or {}):
+        raise RunNotRegistered(f"{run} 不在 {p}")
+    e = d["runs"][run]
+    old = e.get("status")
+    if old == status:
+        return e
+    e["status"] = status
+    e.setdefault("status_history", []).append({"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "from": old, "to": status,
+                                               "by": by, "why": why})
+    _js(p, d)
+    sync_run_ptr(root)
+    return e
 
 
 def register_run(run: str, source: str = "import", episode: int | None = None, priority: int = 10,

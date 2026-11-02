@@ -92,7 +92,7 @@ def pinned_api(run: str, url: str):
         cfg = yaml.safe_load((ROOT / "config" / "owner_decisions.yaml").read_text(encoding="utf-8"))
         urls = sorted({c["url"] for c in cfg["checks"] if c.get("type") == "api" and c.get("run") == run})
         r = subprocess.run([sys.executable, "-X", "utf8", "-c", _PINNED_API, run, *urls], cwd=str(ROOT), capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=600, env={**os.environ, "NS_DISABLE_BG": "1"})
+                           encoding="utf-8", errors="replace", timeout=600, env={**os.environ, "NS_NO_API_SNAPSHOT": "1"})   # ISS-1103-014614-86aa：原 NS_DISABLE_BG 无人读；进程内 app 不写快照（启动副作用由 ns_api.instance 挡）
         line = next((x for x in (r.stdout or "").splitlines() if x.startswith("@@")), None)
         if not line:
             raise RuntimeError(f"钉剧接口进程失败：{(r.stderr or '')[-300:]}")

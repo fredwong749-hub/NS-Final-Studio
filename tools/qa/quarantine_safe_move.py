@@ -57,7 +57,16 @@ def move_one(it: dict, q: Path, dry: bool = False) -> dict:
     if not src.exists():
         rec["status"] = "missing"
         return rec
-    rc = RC.check(src)
+    code = RC.protected_code(src)
+    retire = it.get("retire") or {}
+    if code and not (isinstance(retire, dict) and retire.get("reason") and retire.get("by")):
+        # ISS-1103-033325-9b07：tools/ tests/ 的 .py 不属于内容隔离，ref_override 也不放行；
+        # 例外只有显式退役：计划项写 "retire": {"reason": ..., "by": 谁定的, "decision": 决策号}，移动时登记进 <qdir>/RETIRED.json
+        rec.update(status="kept_code", code_refs=[f"系统代码：{x}" for x in code[:10]])
+        return rec
+    rc = {"code_refs": [], "doc_ref_count": 0, "referenced": False} if code else RC.check(src)   # 显式退役的代码：退役登记代替引用检查
+    if code:
+        rec["retire"] = retire
     rec["code_refs"] = rc["code_refs"][:10]
     rec["doc_ref_count"] = rc["doc_ref_count"]
     if rc["referenced"] and not it.get("ref_override"):
@@ -77,6 +86,8 @@ def move_one(it: dict, q: Path, dry: bool = False) -> dict:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src), str(dst))
         rec["status"] = "moved"
+        for x in code:                    # 移成功才登记退役
+            RC.record_retired(q, x, retire["reason"], retire["by"], retire.get("decision", ""))
     except Exception as e:  # noqa: BLE001 - 记录失败继续
         rec.update(status="failed", error=repr(e))
     return rec
@@ -142,8 +153,19 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dry", action="store_true")
     ap.add_argument("--manifest", action="store_true")
     ap.add_argument("--restore")
+    ap.add_argument("--retire-existing", help="已在隔离区里的代码文件（原相对路径）补登记为有意退役（不移动）；须带 --reason --by")
+    ap.add_argument("--reason", default="")
+    ap.add_argument("--by", default="")
+    ap.add_argument("--decision", default="")
     a = ap.parse_args(argv)
     q = ROOT / a.qdir
+    if a.retire_existing:
+        rel = Path(a.retire_existing).as_posix()
+        if not (q / rel).is_file():
+            print(f"隔离区里没有 {q.relative_to(ROOT).as_posix()}/{rel}")
+            return 1
+        print(json.dumps(RC.record_retired(q, rel, a.reason, a.by, a.decision), ensure_ascii=False))
+        return 0
     q.mkdir(parents=True, exist_ok=True)
     if a.restore:
         print(restore(a.restore, q))

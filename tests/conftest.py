@@ -5,6 +5,10 @@ os.environ.setdefault("NS_TIMELINE_AUTOBUILD", "0")
 # 总调度 11-02 19:1x（K-OPS-F24）：测试不许依赖“真实当前剧”（primary 会切换：19:0x 切到还没剧本的 series10_v2，6 个测试一起红）。
 # 读真实仓库数据的测试一律钉到已冻结的 V1 真实数据；临时目录里的测试照读自己的 runs.json（runs.primary_run 只对真实仓库生效）
 os.environ.setdefault("NS_PRIMARY_RUN", "series10_v1")
+# OVERSIGHT-F 第 14 轮 P2（总调度 11-02）：派人请求（judge_request / review_request，autoflow_agent._inbox_write）一律写到临时目录，
+# 任何测试都不会写进真实 data/master/inbox/（data/master 在 real-data-guard 的 data/ 监视范围内，写了当场报错）
+import tempfile as _tempfile  # noqa: E402
+os.environ.setdefault("NSFS_INBOX_DIR", _tempfile.mkdtemp(prefix="nsfs_inbox_"))
 
 
 import pytest  # noqa: E402
@@ -39,7 +43,7 @@ def _auto_final_off_by_default(monkeypatch):
     测试按契约默认值 false 跑；显式传 path 的调用仍读那个文件（测这个开关本身时用）。"""
     from ns_render import final_tier as FT
     orig = FT.auto_final_on_lock
-    monkeypatch.setattr(FT, "auto_final_on_lock", lambda path=None: orig(path) if path is not None else False)
+    monkeypatch.setattr(FT, "auto_final_on_lock", lambda path=None, run=None: orig(path, run) if path is not None else False)
 
 
 @pytest.fixture(autouse=True)
@@ -180,7 +184,8 @@ _SANDBOX_ROOTS = [("ns_render.pipeline", "DATA", ""), ("ns_render.pipeline", "RE
                   ("ns_api.live", "DATA", ""), ("ns_api.script_inbox", "DATA", ""),
                   ("ns_post.assemble", "DATA", ""), ("ns_post.colormatch", "DATA", ""),
                   ("ns_post.tts", "CACHE_DIR", "cache/tts"), ("ns_render.refs", "CACHE", "cache/refs"),
-                  ("ns_agent.comfy_tag", "HEARTBEAT_DIR", "gpu_heartbeats")]
+                  ("ns_agent.comfy_tag", "HEARTBEAT_DIR", "gpu_heartbeats"),
+                  ("ns_agent.asset_refs", "DERIVED_OUT", "derived")]   # 编译时新生成的 refboards / refcrops 写沙盒（总调度 11-03）
 
 
 _GUARD_OFF = os.environ.get("NS_REAL_DATA_GUARD") == "off"   # 只用于排查“没有守卫时是否也失败”；报告记 ok=false，iter_gate T1 不认

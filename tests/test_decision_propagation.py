@@ -48,6 +48,20 @@ def test_fully_synced_passes_and_allow_glob(tmp_path):
     assert res[0]["stale"] == [] and res[0]["unsynced"] == []
 
 
+def test_log_streams_skipped_for_stale_but_still_checked_in_propagate(tmp_path):
+    """W11 / A-G1 第 22 轮：V2_LIVE.md 的卡点行由 report_issue 自动插入、原样引用报错（例“VQA 只记录”）——事件记录不是口径，不扫；
+    同一句写在普通文档里照样判过期；某条决定若把日志文件列进 propagate，仍要求有新口径（排除只作用于 stale 扫描）"""
+    live = "# V2 实况\n05:01 ⚠ 卡点（ASSET-WORKER）：看图只记录，q9=fail\n"
+    d = _mk(tmp_path, {"docs/vqa/STATE.md": "VQA 命中转拦截\n", "docs/master/V2_LIVE.md": live,
+                       "docs/master/CHANNEL.md": "05:02 | X | ASK | 看图只记录？\n", "docs/master/PLAN.md": "看图只记录\n"}, [CHECK])
+    res = DP.run(root=tmp_path, decisions=d)
+    assert [s["file"] for s in res[0]["stale"]] == ["docs/master/PLAN.md"]
+    assert set(DP.LOG_STREAMS) == {"docs/master/V2_LIVE.md", "docs/master/CHANNEL.md"} and all(DP.LOG_STREAMS.values())
+    d2 = _mk(tmp_path, {}, [{**CHECK, "propagate": ["docs/master/V2_LIVE.md"]}])
+    res2 = DP.run(root=tmp_path, decisions=d2)
+    assert res2[0]["unsynced"] and res2[0]["unsynced"][0]["file"] == "docs/master/V2_LIVE.md"
+
+
 def test_section_marker_ends_at_same_level_heading():
     text = "## A ⤴\nx 只记录\n### sub\ny 只记录\n## B\nz 只记录\n"
     assert DP.marked_lines(text, ".md") == {1, 2, 3, 4}

@@ -8,6 +8,9 @@ data/_quarantine_20261101/loras/laptop/<盘符>/<原路径>。每一项追加一
 import json, os, shutil, sys, time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import quarantine_refcheck as RC  # noqa: E402  ISS-1103-033325-9b07：系统代码守卫与 quarantine_safe_move 同一条规则
+
 ROOT = Path(r"D:\NS-Final Studio")
 Q = ROOT / "data" / "_quarantine_20261101"
 
@@ -42,9 +45,13 @@ def main():
     for it in plan:
         src = Path(it["src"])
         rec = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "cat": it["cat"], "src": str(src), "reason": it["reason"], "host": "laptop"}
+        code = RC.protected_code(src, ROOT) if src.exists() else []
         if not src.exists():
             rec.update(status="missing")
             print("MISSING", src)
+        elif code:
+            rec.update(status="kept_code", code=code[:10])
+            print("KEPT（系统代码不属于内容隔离）", src)
         else:
             dst = dest_for(src)
             rec["dst"] = str(dst)

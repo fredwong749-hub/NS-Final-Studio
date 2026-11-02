@@ -47,6 +47,8 @@
 
 **剧本线 S1 阶段分（总调度 11-02 20:3x 批）**：主 run 还没有分集稿时，剧本线 = P1 故事线最新一轮三评委均分 ÷ 满分 × 100，记录注明“P1 阶段分”（现 32/40 = 80，judge_p1/r4/RESULT.json 20:17）；有分集稿后自动切回线 3。S27 评审汇总探针扫描 judge_p1/ 下所有 rN 轮次目录。
 
+**权重变更留痕（总调度 11-02 20:4x 批）**：新增 S28“Q10 人数检测服务”（从 gpu33 测 10.0.0.36:8893/health 且 loaded=true，连续 2 次失败开单），计入两项——工作流 unattended 35→30、no_dup 25→20、新增 q10_detector 10；GPU 管理 productive 40→35、resident 15→10、新增 q10_detector 10（S28 无未关工单记 1）。
+
 ## 附录 B：代码线 structure 扣分前 5（SENTINEL 自动生成，口径 = tools/rsi/system_score.py STRUCT_ANCHOR 的 10 项，取自 data/sysarch/scan_latest.json 20:16:09；实时数据见 scores.jsonl system 记录 evidence.structure_top）
 
 structure 现值 888（首扫锚点 1266），分项 31.0。按文件：

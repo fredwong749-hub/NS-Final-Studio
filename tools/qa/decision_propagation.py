@@ -9,6 +9,10 @@ config/owner_decisions.yaml 的 checks 条目上可加三个字段（decision_ch
 “已标 ⤴”= 该行含 ⤴，或该行所在的 Markdown 小节标题含 ⤴，或 YAML / JSON 里该行的键名以 _ 开头且同行写了“取代 / 已撤 / ⤴”。
 历史记录不扫：research/、_archive、archive、CHANGELOG、RSI_LEDGER、rounds/、overnight/、patches/、*_log.md、文件名带 8 位日期、
 knowledge/generated（compile 生成物）、docs/master/owner_messages_extracted.md、config/owner_decisions.yaml 本身。
+日志型流水也不扫（LOG_STREAMS，W11 / A-G1 第 22 轮）：程序或协议只追加、按时间戳记“谁在什么时候说了什么”的文件——
+  docs/master/V2_LIVE.md（tools/master/report_issue.py 在第一行后自动插卡点行，原样引用卡住时的报错 / 检查项，例“q9=fail”）、
+  docs/master/CHANNEL.md（agent 间消息流水）。这类行是事件记录，不是口径；改它们 = 篡改历史，永远“同步”不了。
+  只免于 stale 扫描；若某条决定把它们写进 propagate，照样要求有新口径。
 
     .venv/Scripts/python.exe tools/qa/decision_propagation.py            # 报告 → data/qa/decision_propagation/report.md / .json
     .venv/Scripts/python.exe tools/qa/decision_propagation.py --only D-VID-01
@@ -33,6 +37,11 @@ SCAN_DIRS = ("docs", "knowledge", "config")
 EXTS = {".md", ".yaml", ".yml", ".json", ".txt"}
 EXCLUDE = re.compile(r"(^|/)(research|_archive|archive|rounds|overnight|patches|generated|_quarantine[^/]*)(/|$)|CHANGELOG|RSI_LEDGER|"
                      r"_log\.md$|\d{8}|owner_messages_extracted|owner_decisions\.yaml$", re.I)
+# 日志型流水：路径 → 理由（见文件头）。新增一项要写清“谁自动追加 / 为什么不是口径”，并在 tests/test_decision_propagation.py 有覆盖
+LOG_STREAMS = {
+    "docs/master/V2_LIVE.md": "report_issue.py 自动插入的卡点流水（引用卡住时的原文）",
+    "docs/master/CHANNEL.md": "agent 间消息流水（按时间追加，不回改）",
+}
 MARK = "⤴"
 MAX_BYTES = 2_000_000
 
@@ -47,7 +56,7 @@ def scan_files(root: Path = ROOT) -> list[Path]:
         for p in (root / d).rglob("*"):
             if p.is_file() and p.suffix.lower() in EXTS and p.stat().st_size <= MAX_BYTES:
                 r = p.relative_to(root).as_posix()
-                if not EXCLUDE.search(r):
+                if not EXCLUDE.search(r) and r not in LOG_STREAMS:
                     out.append(p)
     return sorted(out)
 

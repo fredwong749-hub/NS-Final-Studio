@@ -5,8 +5,8 @@
   auto    = 本地确定性检测（剧本字段 / 契约 postflight 记录 / score_clip 指标 / 合成 timeline / 像素统计）
   partial = 自动能抓一部分，剩下交本地 VLM 评分（VQA）
   vlm     = 只能看图看片判断 → 进 VQA 的 rubric 队列（data/qa/defect_hunt/vlm_queue.json），本工具不冒充“0 命中”
-对象：现行 series10_v1（剧本 = data/staging_v3/merged 里每集最新一份；首帧 = data/renders/epNN/SN/takes.json 当前版；
-视频 = data/pipeline/runs/series10_v1/video/scores/*.json；成片 = data/episodes/series10/*.timeline.json）。
+对象：现行 第一季（legacy run）（剧本 = data/staging_v3/merged 里每集最新一份；首帧 = data/renders/epNN/SN/takes.json 当前版；
+视频 = data/pipeline/runs/<legacy run>/video/scores/*.json；成片 = data/episodes/series10/*.timeline.json）。
 
     .venv/Scripts/python.exe tools/qa/defect_hunt.py              # 跑全部类，可断点续跑（已跑过的类跳过）
     .venv/Scripts/python.exe tools/qa/defect_hunt.py --force      # 全部重跑
@@ -29,6 +29,9 @@ from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+import runs as RUNS  # noqa: E402
+_LEGACY = RUNS.legacy_run(ROOT)   # I-16：第一季专用历史工具（入口 gate_legacy_tool 要求显式 --run）
 for _p in (ROOT / "packages" / "schema", ROOT / "services" / "agent"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
@@ -38,7 +41,7 @@ from writer_lints import scan_fields  # noqa: E402
 STATE = ROOT / "data" / "qa" / "defect_hunt" / "state.json"
 VLMQ = ROOT / "data" / "qa" / "defect_hunt" / "vlm_queue.json"
 DOC = ROOT / "docs" / "rsi" / "DEFECT_HUNT.md"
-RUN = ROOT / "data" / "pipeline" / "runs" / "series10_v1"
+RUN = ROOT / "data" / "pipeline" / "runs" / _LEGACY
 MERGED = ROOT / "data" / "staging_v3" / "merged"
 SIZE_RANK = {"大远景": 0, "远景": 1, "全景": 2, "全身": 3, "中景": 4, "中近景": 5, "近景": 6, "特写": 7, "大特写": 8}
 
@@ -48,11 +51,11 @@ _cache: dict = {}
 
 
 def script_eps() -> dict:
-    """每集取 merged 目录里最新一份含该集的 series10_v1 稿（不含 .before_ 备份）"""
+    """每集取 merged 目录里最新一份含该集的 第一季（legacy run） 稿（不含 .before_ 备份）"""
     if "eps" in _cache:
         return _cache["eps"]
     from ns_agent.importer.script_md import import_script
-    files = sorted((p for p in MERGED.glob("*series10_v1*.md") if ".before_" not in p.name), key=os.path.getmtime, reverse=True)
+    files = sorted((p for p in MERGED.glob(("*" + _LEGACY + "*.md")) if ".before_" not in p.name), key=os.path.getmtime, reverse=True)
     eps, src = {}, {}
     for f in files:
         try:
@@ -981,6 +984,7 @@ def write_doc(st: dict) -> None:
 
 
 def main(argv=None) -> int:
+    argv = RUNS.gate_legacy_tool(argv, __file__)
     ap = argparse.ArgumentParser()
     ap.add_argument("--only")
     ap.add_argument("--force", action="store_true")

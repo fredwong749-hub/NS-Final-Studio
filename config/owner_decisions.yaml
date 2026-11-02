@@ -119,8 +119,9 @@ checks:
     value: *cast_nar
   - id: D-CLN-05
     decision: L-030 / L-058
-    title: /api/assets/scenes 只含 series10 的 6 个场景
+    title: /api/assets/scenes 只含 series10 的 6 个场景（V1 已冻结，钉 series10_v1 查；MERGE-OPS-O 11-03）
     type: api
+    run: series10_v1
     url: /api/assets/scenes
     list: [scenes]
     field: scene_id

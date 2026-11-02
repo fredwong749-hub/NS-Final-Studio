@@ -452,6 +452,81 @@ def quiet_since(seconds: float = 60, max_wait: float = 600, sleep=time.sleep, cl
         sleep(min(10, seconds - age + 1))
 
 
+LOCKS_MD = ROOT / "docs/uimaster/LOCKS.md"
+LOCKS_MD_REL = "docs/uimaster/LOCKS.md"
+LOCK_BEGIN, LOCK_END = "<!-- SV-CUT-LOCK:BEGIN（system_version cut 自动维护，勿手改） -->", "<!-- SV-CUT-LOCK:END -->"
+LOCK_DIRS_MAIN = ("services/", "tools/", "tests/")
+
+
+def locks_md_block(rec: dict | None) -> str:
+    """LOCKS.md 里的发版冻结锁区块（总调度 11-03：cut 期间写入锁和 LOCKS.md 打通，别的 agent 改文件前看 LOCKS.md 就能看到、主动让路）。
+    未冻结时是固定文字（不带时间戳），这样提交进版本的内容和 cut 结束后的工作树一致，不会每次都多出一个改动"""
+    head = "## 发版冻结锁（system_version cut）"
+    how = ("查询：`.venv/Scripts/python.exe tools/qa/system_version.py lock-status`（退出码 3 = 冻结中）；"
+           "锁文件 data/system_versions/cut_lock.json；规则 K-OPS-F08")
+    if rec and rec.get("active"):
+        exp = time.strftime("%Y-%m-%d %H:%M", time.localtime(float(rec.get("expires_t") or 0)))
+        others = " ".join(x for x in FROZEN_TOP if x not in LOCK_DIRS_MAIN)
+        lines = ["| 状态 | 版本 | 持锁进程 | 最晚到期 |", "|---|---|---|---|",
+                 f"| 🔒 冻结中 | {rec.get('sv') or '-'} | pid {rec.get('pid')} | {exp} |", "",
+                 f"**{' '.join(LOCK_DIRS_MAIN)}（以及 {others}）现在不要改。**改了也不会进这一版，还可能让发版闸门失败；"
+                 "等这里变回“未冻结”再动手。" + how]
+    else:
+        lines = ["| 状态 |", "|---|", "| 未冻结（cut 开始时这里会自动改成冻结状态） |", "",
+                 "改 " + " ".join(LOCK_DIRS_MAIN) + " 前先看这一块。" + how]
+    return "\n".join([LOCK_BEGIN, head, "", *lines, LOCK_END])
+
+
+def locks_md_text(text: str, rec: dict | None) -> str:
+    """把冻结锁区块写进 LOCKS.md 文本：已有区块就整块替换；没有就插在“## 临时锁”前（找不到就接在文件末尾）。其余内容一字不动"""
+    nl = "\r\n" if "\r\n" in text else "\n"
+    blk = locks_md_block(rec).replace("\n", nl)
+    i, j = text.find(LOCK_BEGIN), text.find(LOCK_END)
+    if i >= 0 and j > i:
+        return text[:i] + blk + text[j + len(LOCK_END):]
+    k = text.find("## 临时锁")
+    if k >= 0:
+        return text[:k] + blk + nl + nl + text[k:]
+    return text.rstrip() + nl + nl + blk + nl
+
+
+def sync_locks_md(rec: dict | None, path: Path | None = None) -> str:
+    """cut_lock 每次变化都同步到 LOCKS.md（原子替换）。失败不拦 cut（锁文件仍是权威），返回 ok / 错误原因写进锁记录"""
+    path = path or LOCKS_MD
+    try:
+        raw = path.read_bytes().decode("utf-8") if path.exists() else "# 文件锁（UIMASTER 维护）\n"
+        new = locks_md_text(raw, rec)
+        if new != raw:
+            tmp = path.with_name(path.name + ".svlock.tmp")
+            tmp.write_bytes(new.encode("utf-8"))
+            os.replace(tmp, path)
+        return "ok"
+    except Exception as e:  # noqa: BLE001
+        return f"{type(e).__name__}: {e}"[:200]
+
+
+def index_locks_md_inactive(env: dict, root: Path | None = None, rel: str = LOCKS_MD_REL) -> str | None:
+    """冻结树里的 LOCKS.md 一律是“未冻结”版本（cut 期间工作树里是 🔒，不能把冻结状态提交进版本）。返回写入的 blob sha"""
+    root = root or ROOT
+    f = root / rel
+    if not f.exists():
+        return None
+    fd, tn = tempfile.mkstemp(suffix=".md")
+    os.close(fd)
+    try:
+        Path(tn).write_bytes(locks_md_text(f.read_bytes().decode("utf-8"), None).encode("utf-8"))
+        code, out = sh(["git", "hash-object", "-w", "--path", rel, tn], 120, cwd=root, env=env)
+        if code != 0:
+            raise RuntimeError(f"git hash-object 失败：{out[-300:]}")
+        sha = out.strip().splitlines()[-1]
+        code, out = sh(["git", "update-index", "--add", "--cacheinfo", f"100644,{sha},{rel}"], 120, cwd=root, env=env)
+        if code != 0:
+            raise RuntimeError(f"git update-index 失败：{out[-300:]}")
+        return sha
+    finally:
+        Path(tn).unlink(missing_ok=True)
+
+
 def cut_lock(active: bool, sv: str | None = None, note: str = "") -> dict:
     """data/system_versions/cut_lock.json：cut 进行中 = active=true（到期自动失效）。各 agent 写代码 / 规则 / 配置前先看它
     （tools/qa/system_version.py lock-status；规则 K-OPS-F08）。结束时改回 active=false（不删文件）"""
@@ -462,6 +537,7 @@ def cut_lock(active: bool, sv: str | None = None, note: str = "") -> dict:
     tmp = CUT_LOCK.with_suffix(".tmp")
     tmp.write_text(json.dumps(rec, ensure_ascii=False, indent=1), encoding="utf-8")
     os.replace(tmp, CUT_LOCK)
+    rec["locks_md"] = sync_locks_md(rec)            # 总调度 11-03：和 docs/uimaster/LOCKS.md 打通（锁文件写完再同步，锁文件是权威）
     with open(CUT_LOCK.parent / "lock_history.jsonl", "a", encoding="utf-8") as f:     # SYSARCH iter_gate F1：冻结窗口内的写入判 fail
         f.write(json.dumps({"sv": sv, "event": "start" if active else "end", "at": rec["at"], "t": time.time(), "pid": os.getpid(),
                             "note": note}, ensure_ascii=False) + "\n")
@@ -488,6 +564,7 @@ def freeze_tree(idx_file: Path) -> tuple[str, dict]:
     env = {**ENV, "GIT_INDEX_FILE": str(idx_file)}
     gitx(env, "read-tree", "HEAD")
     gitx(env, "add", "-A")
+    index_locks_md_inactive(env)                    # LOCKS.md 此刻是 🔒 冻结中，进版本的要是“未冻结”版本
     return gitx(env, "write-tree").strip(), env
 
 
@@ -1006,7 +1083,9 @@ def record_incident(sv: str, kind: str, fixed_by: str | None, note: str = "") ->
 
 
 def deploy(sv: str | None = None, hosts: list[str] | None = None, restart: bool = True, allow_old: bool = False,
-           urgent: bool = False, hotfix_of: str | None = None, hold_data: list[str] | None = None) -> dict:
+           urgent: bool = False, hotfix_of: str | None = None, hold_data: list[str] | None = None,
+           verify_shot: int | None = None, verify_run: str | None = None, manifest_prefix: str | None = None,
+           run_verify: bool = True) -> dict:
     why = deploy_guard(sv, allow_old)
     if why:
         raise SystemExit("deploy 拒绝：" + why)
@@ -1032,6 +1111,12 @@ def deploy(sv: str | None = None, hosts: list[str] | None = None, restart: bool 
             write_index(v)
     if hotfix_of and res["hosts"] and all(x.get("ok") for x in res["hosts"].values()):
         res["incident"] = record_incident(hotfix_of, "hotfix", sv, f"{sv} 热修 {hotfix_of}")
+    ok_hosts = [h for h, r in res["hosts"].items() if r.get("ok")]
+    if run_verify and ok_hosts:      # 总调度 11-03：deploy 完自动 verify（核部署成功的机器；verify 不过 = 本次部署不算完成，退出码 1）
+        try:
+            res["verify"] = verify(sv, ok_hosts, verify_shot, verify_run, manifest_prefix, rs=rs)
+        except Exception as e:  # noqa: BLE001
+            res["verify"] = {"ok": False, "error": f"{type(e).__name__}: {e}"[:300]}
     (DATA / f"deploy_{sv}_{time.strftime('%H%M%S')}.json").write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
     return res
 
@@ -1050,6 +1135,147 @@ def rollback(sv: str) -> dict:
             "incident_cmd": f".venv/Scripts/python.exe -c \"import importlib.util as u;s=u.spec_from_file_location('sv','tools/qa/system_version.py');m=u.module_from_spec(s);s.loader.exec_module(m);m.record_incident('<被回滚的版本>','rollback','{sv}')\"   # 执行回滚后记事故账本"}
 
 
+# ---------------------------------------------------------------- 部署后核对（总调度 11-03：verify 子命令，deploy 完自动调）
+VERIFY_MANIFEST = "assets_v2/manifest.json"
+VERIFY_CODE = ("services/agent/ns_agent/compiler.py", "services/agent/ns_agent/frame_job.py", "services/agent/ns_agent/asset_refs.py",
+               "services/agent/ns_agent/gen_contract/preflight.py", "services/agent/ns_agent/gen_contract/style.py",
+               "tools/promptfix/golden_v2.py")
+VERIFY_MARK = "@@NSV@@"
+VERIFY_NEED_SHOT = ("verify 必须指定镜号（--shot N；deploy 用 --verify-shot N）：golden dry-run 只认当前剧导入稿里的指定镜，"
+                    "没有默认金样，不退回任何夹具（ISS-1103-005000-2af2）")
+
+
+def tag_blob_sha(sv: str, rel: str) -> str | None:
+    """该版本 git 快照里文件的 sha256（按字节，和服务器 sha256sum 同口径）；版本里没有这个文件 = None"""
+    r = subprocess.run(["git", "show", f"{sv}:{rel}"], cwd=ROOT, capture_output=True, timeout=120)
+    return hashlib.sha256(r.stdout).hexdigest() if r.returncode == 0 else None
+
+
+def verify_probe_cmd(R: str, OFF: str, host: str, run: str | None, shot: int | None) -> str:
+    """一台机器一条只读命令：版本戳 / 清单 sha / 编译相关代码 sha / golden_v2 只编译 dry-run（--summary，不出图）"""
+    import shlex
+    env = (f"NS_RUN={shlex.quote(run)} " if run else "") + f"OFFLINE_SELF={shlex.quote(host)} PYTHONIOENCODING=utf-8"
+    if not shot:
+        raise ValueError(VERIFY_NEED_SHOT)
+    gold = f"tools/promptfix/golden_v2.py --summary --shot {int(shot)}"
+    m = VERIFY_MARK
+    return (f"cd {R} && echo '{m} version'; cat data/system_version.txt 2>/dev/null; "
+            f"echo '{m} manifest'; sha256sum {VERIFY_MANIFEST} 2>/dev/null; "
+            f"echo '{m} code'; sha256sum {' '.join(VERIFY_CODE)} 2>/dev/null; "
+            f"echo '{m} golden'; {env} timeout 600 {OFF}/venv/bin/python {gold} 2>&1 | tail -n 30; true")
+
+
+def parse_probe(raw: str) -> dict:
+    sec: dict[str, list[str]] = {}
+    cur = None
+    for ln in raw.splitlines():
+        if ln.startswith(VERIFY_MARK + " "):
+            cur = ln[len(VERIFY_MARK) + 1:].strip()
+            sec[cur] = []
+        elif cur:
+            sec[cur].append(ln)
+    out: dict = {"stamp": None, "manifest_sha": None, "code": {}, "golden": None, "golden_err": None}
+    vtxt = "\n".join(sec.get("version") or []).strip()
+    try:
+        out["stamp"] = json.loads(vtxt) if vtxt else None
+    except ValueError:
+        out["stamp"] = {"raw": vtxt[:200]}
+    for ln in sec.get("manifest") or []:
+        if ln.strip():
+            out["manifest_sha"] = ln.split()[0]
+    for ln in sec.get("code") or []:
+        parts = ln.split(None, 1)
+        if len(parts) == 2:
+            out["code"][parts[1].strip().lstrip("*")] = parts[0]
+    g = [ln for ln in sec.get("golden") or [] if ln.startswith("GOLDEN_SUMMARY ")]
+    if g:
+        try:
+            out["golden"] = json.loads(g[-1][len("GOLDEN_SUMMARY "):])
+        except ValueError as e:
+            out["golden_err"] = f"GOLDEN_SUMMARY 解析失败：{e}"
+    else:
+        out["golden_err"] = ("没有 GOLDEN_SUMMARY 输出：" + " ⏎ ".join((sec.get("golden") or [])[-4:]))[:400]
+    return out
+
+
+def judge_verify(sv: str, probes: dict, want_code: dict, manifest_prefix: str | None = None,
+                 local_golden: dict | None = None) -> dict:
+    """三项（总调度 11-03）：① 编译版本 = 本版（版本戳 id + 编译相关代码逐个 sha 对本版快照）；② 清单 sha（给了前缀就对前缀，
+    并且各台一致）；③ 同一镜 golden dry-run 结果各台一致（给了本地结果也要一致）。任何一项缺数据 = 不通过，不猜"""
+    rows, gold_set, man_set = {}, set(), set()
+    for h, p in probes.items():
+        if p.get("error"):
+            rows[h] = {"ok": False, "error": p["error"]}
+            continue
+        st = p.get("stamp")
+        sid = st.get("id") if isinstance(st, dict) else None
+        bad_code = sorted(f for f, w in want_code.items() if w is None or p.get("code", {}).get(f) != w)
+        man = p.get("manifest_sha")
+        g = p.get("golden")
+        rows[h] = {"version": sid, "version_ok": sid == sv, "code_mismatch": bad_code, "code_ok": not bad_code,
+                   "manifest_sha": man, "manifest_ok": bool(man) and (not manifest_prefix or man.startswith(manifest_prefix)),
+                   "golden": {k: g.get(k) for k in ("shot", "prompt_sha", "refs_sha", "route", "adult", "preflight_ok", "preflight_fail")} if g else None,
+                   "golden_err": p.get("golden_err"), "golden_ok": bool(g)}
+        man_set.add(man)
+        if g:
+            gold_set.add(json.dumps(g, ensure_ascii=False, sort_keys=True))
+    if local_golden:
+        gold_set.add(json.dumps(local_golden, ensure_ascii=False, sort_keys=True))
+    good = [r for r in rows.values() if "error" not in r]
+    man_same = len(man_set) == 1 and None not in man_set
+    gold_same = len(gold_set) == 1 and bool(good) and all(r["golden_ok"] for r in good)
+    for r in good:
+        r["ok"] = r["version_ok"] and r["code_ok"] and r["manifest_ok"] and r["golden_ok"]
+    ok = bool(rows) and len(good) == len(rows) and all(r["ok"] for r in good) and man_same and gold_same
+    return {"id": sv, "ok": ok, "hosts": rows, "manifest_same": man_same, "golden_same": gold_same,
+            "manifest_prefix": manifest_prefix, "local_golden": local_golden}
+
+
+def local_golden_summary(run: str | None, shot: int | None) -> dict | None:
+    if not shot:
+        raise ValueError(VERIFY_NEED_SHOT)
+    env = {**ENV, **({"NS_RUN": run} if run else {})}
+    _code, out = sh([PY, "tools/promptfix/golden_v2.py", "--summary", "--shot", str(int(shot))], 600, env=env)
+    g = [ln for ln in out.splitlines() if ln.startswith("GOLDEN_SUMMARY ")]
+    return json.loads(g[-1][len("GOLDEN_SUMMARY "):]) if g else None
+
+
+def _write_verify(sv: str, res: dict) -> Path:
+    """verify 结果落盘 data/system_versions/verify_<sv>_HHMMSS.json：tmp + os.replace（同 write_index，ARCH_MAP §6）"""
+    DATA.mkdir(parents=True, exist_ok=True)
+    f = DATA / f"verify_{sv}_{time.strftime('%H%M%S')}.json"
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, f)
+    return f
+
+
+def verify(sv: str | None = None, hosts: list[str] | None = None, shot: int | None = None, run: str | None = None,
+           manifest_prefix: str | None = None, with_local: bool = False, rs=None) -> dict:
+    """部署后核对：每台一条只读探针（rs.ssh → tools/netfix/rssh），golden 只编译不出图；结果写 data/system_versions/verify_<sv>_*.json"""
+    sv = sv or sv_tags()[-1]
+    if not shot:     # 失败关闭：不碰服务器，直接记一条不通过
+        res = {"id": sv, "ok": False, "reason": VERIFY_NEED_SHOT, "hosts": {}, "shot": None, "run": run,
+               "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+        _write_verify(sv, res)
+        return res
+    rs = rs or load_rs()
+    hosts = hosts or list(rs.HOSTS)
+    want = {f: tag_blob_sha(sv, f) for f in VERIFY_CODE}
+    probes = {}
+    for h in hosts:
+        try:
+            raw = rs.ssh(h, verify_probe_cmd(rs.R, rs.OFF, h, run, shot), timeout=900, tries=3).decode("utf-8", "replace")
+            probes[h] = parse_probe(raw)
+        except Exception as e:  # noqa: BLE001
+            probes[h] = {"error": f"{type(e).__name__}: {e}"[:300]}
+    lg = local_golden_summary(run, shot) if with_local else None
+    res = judge_verify(sv, probes, want, manifest_prefix, lg)
+    res.update(at=time.strftime("%Y-%m-%dT%H:%M:%S"), shot=shot, run=run)
+    _write_verify(sv, res)
+    return res
+
+
 def status() -> dict:
     t = sv_tags()
     return {"current": t[-1] if t else None, "versions": t, "pending": len(pending_changes()),
@@ -1057,7 +1283,7 @@ def status() -> dict:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="系统版本：cut / deploy / rollback / status（K-OPS-V01）")
+    ap = argparse.ArgumentParser(description="系统版本：cut / deploy / verify / rollback / status（K-OPS-V01）")
     sp = ap.add_subparsers(dest="cmd", required=True)
     c = sp.add_parser("cut")
     c.add_argument("--base")
@@ -1072,6 +1298,17 @@ def main(argv=None) -> int:
     d.add_argument("--urgent", action="store_true", help="重启请求插队（K-OPS-W16 urgent，审计记 urgent_jump）")
     d.add_argument("--hold-data", default="", help="本次部署不推的数据文件（逗号分隔，仓库相对路径），例：data/pipeline/runs/<run>/assets/first_frame_jobs.json")
     d.add_argument("--hotfix-of", default=None, help="本版是热修哪一版：部署成功后自动记发版事故账本 data/rsi/release_incidents.jsonl")
+    d.add_argument("--verify-shot", type=int, default=None, help="部署后 verify 用的镜号（golden_v2 --shot）；不给 = verify 失败关闭、deploy 退出码 1（没有默认金样）")
+    d.add_argument("--verify-run", default=None, help="verify 时 golden 用的剧（NS_RUN；不给 = 服务器当前剧）")
+    d.add_argument("--manifest-prefix", default=None, help="verify：assets_v2/manifest.json 的 sha 必须以此开头")
+    d.add_argument("--no-verify", action="store_true", help="跳过部署后 verify（只给回退流程用）")
+    v = sp.add_parser("verify")
+    v.add_argument("sv", nargs="?")
+    v.add_argument("--hosts")
+    v.add_argument("--shot", type=int, default=None, help="必填：golden dry-run 的镜号（不给 = 失败关闭）")
+    v.add_argument("--run", default=None)
+    v.add_argument("--manifest-prefix", default=None)
+    v.add_argument("--local", action="store_true", help="同时跑本地 golden dry-run，要求与服务器一致（根因模式 #2）")
     r = sp.add_parser("rollback")
     r.add_argument("sv")
     sp.add_parser("status")
@@ -1090,9 +1327,15 @@ def main(argv=None) -> int:
         return 0 if out.get("ok") else 1
     if a.cmd == "deploy":
         out = deploy(a.sv, a.hosts.split(",") if a.hosts else None, not a.no_restart, a.allow_old, a.urgent, a.hotfix_of,
-                     hold_data=[x for x in (a.hold_data or "").split(",") if x])
-        print(json.dumps(out, ensure_ascii=False, indent=1)[:4000])
-        return 0 if out["hosts"] and all(x.get("ok") for x in out["hosts"].values()) else 1
+                     hold_data=[x for x in (a.hold_data or "").split(",") if x], verify_shot=a.verify_shot,
+                     verify_run=a.verify_run, manifest_prefix=a.manifest_prefix, run_verify=not a.no_verify)
+        print(json.dumps(out, ensure_ascii=False, indent=1)[:6000])
+        ok = bool(out["hosts"]) and all(x.get("ok") for x in out["hosts"].values())
+        return 0 if ok and (a.no_verify or (out.get("verify") or {}).get("ok")) else 1
+    if a.cmd == "verify":
+        out = verify(a.sv, a.hosts.split(",") if a.hosts else None, a.shot, a.run, a.manifest_prefix, a.local)
+        print(json.dumps(out, ensure_ascii=False, indent=1)[:6000])
+        return 0 if out.get("ok") else 1
     if a.cmd == "lock-status":       # K-OPS-F08：别的 agent 写代码前先查；退出码 3 = cut 进行中
         lk = cut_locked()
         print(json.dumps(lk or {"active": False}, ensure_ascii=False, indent=1))
