@@ -49,7 +49,9 @@ def audit(run_dir: Path) -> dict:
             head = re.sub(r"^(图\d+是[^。]*。)*", "", SINGLE_TURN_RE.sub("", p, count=1))
             head = re.sub(r"^((?:[a-z][a-z0-9_]*|pose_[^，]*)，)*", "", head)
             # K-REN-902（IMGLAB 11-02）：脸部特写 + ≥2 人露脸 → 首句是双人近景构图
-            if not head.startswith(F.lead(size)) and not head.startswith(F.TWO_FACE_CLOSE_LEAD):
+            # K-REN-903：全员局部（不露脸）→ 首句是局部特写写法“{景别}构图：画面里只有…”
+            if not head.startswith(F.lead(size)) and not head.startswith(F.TWO_FACE_CLOSE_LEAD) \
+                    and not (F.partial_only(shot, [c.name for c in (shot.cast or []) if c.visible]) and head.startswith(f"{size}构图：画面里只有")):
                 issues.append(f"首句不是“{F.lead(size)}”")
         if VIDEO_TRIGGERS.search(p):
             issues.append("图像提示词里有视频触发词 lnwan01")

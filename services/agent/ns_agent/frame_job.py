@@ -183,6 +183,11 @@ def eyeline_note(shot, sr, body: str) -> str:
     names = [n for n in (c.get("name") or c.get("character") for c in chars) if n] or [
         AR.g(c, "name") for c in AR.g(shot, "cast") or [] if AR.g(c, "presence") == "在画" and AR.g(c, "name")]
     names = list(dict.fromkeys(names))
+    # K-REN-903（IMGLAB 11-02，ep05-S3/S6/S7 局部人物被补“视线落在对方的脸上”→ 画出整张脸）：视线句只给露脸的人补，
+    # 落点也不写不露脸的人的脸
+    if AR.FR.partial_only_enabled() and AR.g(shot, "cast") is not None:
+        faced = set(AR.FR.faced_people(shot, names)[0])
+        names = [n for n in names if n in faced]
     if not names:
         return ""
     if len(names) == 1:

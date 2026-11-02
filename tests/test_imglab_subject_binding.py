@@ -73,3 +73,38 @@ def test_all_shots_zero_orphans_zero_clash():
     assert r["checked"] >= 1
     assert r["orphans"] == 0, [x for x in r["rows"] if x["orphans"]][:3]
     assert r["clash_shots"] == 0
+
+
+# ---- K-REN-903 全员局部（不露脸）----
+def test_narrow_lock_keeps_adult_drops_age_and_hair():
+    lk = "【林晚】22岁中国成年女性，蓝发及腰，齐刘海，冷白皮肤，手指甲为5厘米超长透明水晶甲"
+    out = FR.narrow_lock(lk, "手与肩颈")
+    assert out.startswith("【林晚】成年女性") and "22岁" not in out and "蓝发" not in out and "刘海" not in out
+    assert "水晶甲" in out
+    assert "蓝发" in FR.narrow_lock(lk, "发梢")          # 局部含“发”时保留发色句
+
+
+def test_partial_lead_has_chin_top():
+    lead = FR.closeup_lead("近景", "part", "阿岚戴皮手套的手按在林晚肩头", partial=True)
+    assert lead.startswith("近景构图：画面里只有手与肩颈") and "下颌以下" in lead
+    assert FR.closeup_lead("近景", "part", "手") == FR.lead("近景")     # 非全员局部：近景仍走旧首句
+
+
+def test_partial_only_switch(monkeypatch):
+    class C:  # 最小 cast 桩
+        def __init__(self, n, p, part=""):
+            self.name, self.presence, self.part = n, p, part
+    class S:
+        img_prompt = "近景（手与肩颈），阿岚戴皮手套的手按在林晚肩头"
+        cast = [C("林晚", "局部", "肩头"), C("阿岚", "局部", "手")]
+    assert FR.partial_only(S, ["林晚", "阿岚"])
+    monkeypatch.setattr(FR, "partial_only_enabled", lambda: False)
+    assert not FR.partial_only(S, ["林晚", "阿岚"])
+
+
+def test_all_shots_noface_terms_zero():
+    import orphan_check as O
+    if not (ROOT / "data/import/script_v2.json").exists():
+        pytest.skip("没有导入稿")
+    r = O.check()
+    assert r["noface_shots"] == 0, [x for x in r["rows"] if x["noface_terms"]][:3]

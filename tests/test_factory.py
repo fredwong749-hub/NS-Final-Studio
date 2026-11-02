@@ -218,3 +218,15 @@ def test_decisions_guard_checks_code_sv_on_server(tmp_path):
     (tmp_path / "data/system_version.txt").write_text('{"id": "sv-20991231-99"}', encoding="utf-8")
     assert DG.problems(tmp_path, server=True) == []
     assert DG.problems(tmp_path, server=False) == []
+
+
+def test_rssh_offline_aliases_are_local(monkeypatch):
+    """gpu36 上 OFFLINE_ALIASES=gpu33：full_score("gpu33") 必须当本机执行（11-02 sv-06 P0：漏了 → gpu36 每单 score_infra）"""
+    sys.path.insert(0, str(ROOT / "tools/netfix"))
+    import rssh
+    monkeypatch.setenv("OFFLINE_SELF", "gpu36")
+    monkeypatch.setenv("OFFLINE_ALIASES", "gpu33")
+    assert rssh._local_self("gpu33") == "self" and rssh._local_self("root@gpu33") == "self"
+    monkeypatch.setenv("OFFLINE_ALIASES", "")
+    assert rssh._local_self("gpu33") == "other"
+    assert rssh._local_self("gpu36") == "self"

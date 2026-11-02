@@ -7,7 +7,7 @@ StartLimitBurst=5
 [Service]
 Type=simple
 EnvironmentFile=%h/work/fredw/ns_factory_systemd/host.env
-Environment=CUDA_VISIBLE_DEVICES= NS_CLIP_DEVICE=cpu NS_CLIP_PATH=/root/work/fredw/reflock/clip-vit-large-patch14
+Environment=CUDA_VISIBLE_DEVICES= NS_CLIP_DEVICE=cpu OMP_NUM_THREADS=16 MKL_NUM_THREADS=16 NS_SCORE_THREADS=16 NS_CLIP_PATH=/root/work/fredw/reflock/clip-vit-large-patch14
 WorkingDirectory=/root/work/fredw/reflock
 ExecStartPre=/bin/cp -a /root/work/fredw/offline_20261101/repo/tools/gen_contract/clip_srv.py /root/work/fredw/reflock/clip_srv.py
 ExecStartPre=/bin/cp -a /root/work/fredw/offline_20261101/repo/services/agent/ns_agent/gen_contract/metrics.py /root/work/fredw/reflock/metrics.py

@@ -247,3 +247,4 @@ s_vqastart.ps1 归 LOCALGPU（已收工），CONSENT 写 LOCALGPU → VQAGATE”
 - CONSENT: 共享 -> UIRSI : tools/qa/iter_gate.py | by 总调度 fredw-2b 11-02 04:5x：“topbar_check.mjs 接进 G10 / iter_gate”（只在 R1 里加一段调用 topbar_check.mjs）
 - CONSENT: UIPIXEL -> UIRSI : apps/web/src/v3/slide.css | by 总调度 fredw-2b 11-02 04:3x：“请按 B 落地到总览和审片页”（新建样式，现在开关后）
 - CONSENT: UIPIXEL -> UIRSI : apps/web/src/_quarantine/r45_filmstrip.css | by 总调度 fredw-2b 11-02 04:3x：“.film 开关的旧胶卷条代码不再用，隔离进 _quarantine，不要删”
+- CONSENT: REFLOCK/IMGFIX -> IMGLAB : services/agent/ns_agent/framing.py（K-REN-903：partial_only 开关、closeup_lead 局部首句放宽到非特写景别、narrow_lock 局部人物锁收窄（改 W5 b 发色保留与 HC-07 成年句写法））、services/agent/ns_agent/compiler.py（全员局部 → subject=part 一处）、services/agent/ns_agent/frame_job.py（eyeline_note 只给露脸的人补）；备份 data/_quarantine/imglab_20261102b/ | by 总调度 fredw-2b 11-02 批准（“方案 A 全部批准，包括第 4 条：W5 b 和 HC-07 的写法由你改，CONSENT 记在总调度名下……sv-06 之后合入，带开关”）

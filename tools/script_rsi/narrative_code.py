@@ -23,7 +23,8 @@ ROOT = Path(__file__).resolve().parents[2]
 SIZES = ["大特写", "中近景", "中全景", "特写", "近景", "中景", "全景", "远景"]
 STATIC = re.compile(r"保持|静止|凝视|定住|不动|停留|凝固|静静")
 CHANGE = re.compile(r"响|亮|停|推|抓|撞|打开|拉开|掉|落|出现|转身|抬|按|递|拿起|放下|扣|握|松开|起身|走|跑|伸|摔|碎|闪|震|弹")
-REVEAL = re.compile(r"亮起|出现|发现|看见|看到|打开|掉出|露出|显示|弹出|推开|揭开|认出")
+# N04 词表按第二季 ep01–10 实际写法对齐（SCRIPTWRITER 11-02 提供）：补 震了一下 / 抽出 / 递到 / 放到 / 走近 / 停在…身侧 / 开口 / 叫住 / 划掉 / 拿起
+REVEAL = re.compile(r"亮起|出现|发现|看见|看到|打开|掉出|露出|显示|弹出|推开|揭开|认出|震了|震动|抽出|抽走|递到|放到|走近|停在.{0,4}身侧|开口|叫住|划掉|拿起|入画|走进")
 BODY = re.compile(r"视线=|表情=|手|指|呼吸|喉|睫|嘴角|肩")
 EMO_DIRECT = re.compile(r"(很|好|非常|特别|太|真)(生气|愤怒|难过|伤心|害怕|紧张|开心|高兴|委屈|心动|激动|失望|痛苦|讨厌)|我(爱|恨)你")
 BEAT = re.compile(r"(\d+(?:\.\d+)?)\s*[–-]\s*(\d+(?:\.\d+)?)\s*秒｜([^；]*)")
@@ -48,17 +49,23 @@ def _size(block: str) -> str | None:
 
 
 def ending_type(block: str, shot) -> str:
+    """末镜结尾类型：看最后两拍 + **下镜** 行 + 最后一句台词。先判视线外指（最具体），再判揭示 / 问句组合，最后才算中断"""
     beats = _beats(block)
-    last = beats[-1][2] if beats else ""
+    tail = " ".join(t for _a, _b, t in beats[-2:]) + " " + _field(block, "下镜")
     lines = [d.text for d in shot.dialogue] + ([shot.voiceover.text] if shot.voiceover and shot.voiceover.text else [])
-    if lines and re.search(r"[？?]\s*$", lines[-1].strip()):
+    q = bool(lines) and bool(re.search(r"[？?]\s*$", lines[-1].strip()))
+    rv = bool(REVEAL.search(tail))
+    gaze = bool(re.search(r"视线.{0,10}(画外|门缝|门|窗|远处|身后|反光|光)|看向(门|窗|画外|远处)|抬眼看|望向", tail))
+    if q and rv:
+        return "reveal+question"
+    if q:
         return "question"
-    if REVEAL.search(last):
-        return "reveal"
-    if re.search(r"没有|停在|未|悬|半空|欲|还没", last):
-        return "interrupted"
-    if re.search(r"视线.{0,8}(画外|门|窗|远处|身后)|看向(门|窗|画外|远处)", last):
+    if gaze and not rv:
         return "gaze_out"
+    if rv:
+        return "reveal"
+    if re.search(r"没有|停在|未|悬|半空|欲|还没|停住|顿住", tail):
+        return "interrupted"
     return "other"
 
 

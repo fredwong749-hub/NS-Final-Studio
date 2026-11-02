@@ -14,5 +14,7 @@
  "keep_subject": true,
  "_keep_subject_doc": "K-REN-901（IMGLAB 11-02，总调度 04:3x 批）：按景别删句时保住主语（被删分句以人名开头 → 名字补到下一个保留分句前；视线句不删）。false = 回退旧行为。回归：tools/imglab/orphan_check.py",
  "two_face_close": "two_shot_mcu",
- "_two_face_close_doc": "K-REN-902（IMGLAB 11-02）：脸部特写 + ≥2 人露脸 → 首句改双人近景构图（two_shot_mcu）；off = 旧行为（同时写“脸占六成”和“两张脸都入画”，preflight I6 会拦）"
+ "_two_face_close_doc": "K-REN-902（IMGLAB 11-02）：脸部特写 + ≥2 人露脸 → 首句改双人近景构图（two_shot_mcu）；off = 旧行为（同时写“脸占六成”和“两张脸都入画”，preflight I6 会拦）",
+ "partial_only": true,
+ "_partial_only_doc": "K-REN-903（IMGLAB 11-02，总调度批）：在画的人全是局部（不露脸）→ 局部特写首句 + 画面上沿在下颌以下、去脸部通用句与“不露脸”否定句、局部人物锁收窄（成年女性 / 成年男性，肩颈局部不带发色句）；视线句只给露脸的人补。false = 旧行为。回归：tools/imglab/orphan_check.py noface_terms"
 }

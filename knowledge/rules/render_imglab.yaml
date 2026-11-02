@@ -28,3 +28,18 @@ rules:
     confidence: high
     status: 确认   # 编译 / preflight 确认；A/B 出图效果见 IMGLAB r1
     date: 2026-11-02
+
+  - id: K-REN-903
+    domain: render
+    link: [P6-P7]
+    title: 在画的人全是局部（不露脸）→ 按局部特写编译：局部首句 + 画面上沿在下颌以下，去脸部通用句与“不露脸”否定句，局部锁只留可见部位（成年女性 / 成年男性），视线句只给露脸的人补
+    when: compiler.compile_shot（framing.partial_only → subject=part、framing.narrow_lock、closeup_lead partial=True）；frame_job.eyeline_note
+    then: cast 全部是局部（faced_people 为空）时不按剧本景别词出人像首句；锁里年龄数字 / 国籍 / 发色句去掉（部位含“发 / 头”才留发色），HC-07 成年句保留为“成年女性 / 成年男性”；视线句跳过局部的人（混合镜里局部人物原先被补的“X 的视线落在 Y 的脸上”一并去掉）。开关 image_framing.json partial_only（false = 旧行为）
+    check: [tests/test_imglab_subject_binding.py, tools/imglab/orphan_check.py]
+    evidence:
+      - {src: docs/research/imglab/06_partial_noface_design.md, note: "ep05-S3/S6/S7 现行提示词含“近景构图（胸部以上）”“林晚的视线落在阿岚的脸上 / 阿岚的视线落在林晚的脸上”“面部清晰对焦，五官锐利”“【林晚】22岁中国成年女性，蓝发及腰”→ 模型画整张正脸，Q1 全拦、重出到第 82 版"}
+      - {src: docs/research/imglab/data/prompt_diff_K903.json, note: "102 镜：全员局部 6 镜脸部词 → 0；另 16 镜混合镜只去掉局部人物的视线补句，其余 80 镜逐字不变"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+

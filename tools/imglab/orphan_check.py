@@ -5,6 +5,7 @@ ep06-S2 v6 顾沉长出林晚的蓝色长发：编译层按景别删句（strip_
 （tools/pipeline/image_jobs.frame_prompt_full → ns_agent.frame_job.compile_frame → compiler.compile_shot），逐镜判：
 
   orphan    剧本 img 正文里写了名字的在画角色，编译后正文（CompiledShot.image_body）里名字没了 = 孤儿描述
+  noface    全员局部（不露脸）的镜，提示词里出现“胸部以上 / 五官 / 面部 / 的脸上 / 不露脸 / N岁”（K-REN-903）
   clash     同一首帧提示词既写“脸占六成”又写“两张脸都清晰入画”（特写 + ≥2 人露脸，K-REN-902）
 
 用法：
@@ -34,6 +35,8 @@ def _shot_key(ep, shot) -> str:
 
 
 SPLIT = r"[，,；;、。]"
+import re as _re
+NOFACE_RE = _re.compile(r"胸部以上|五官|面部|的脸上|不露脸|\d+岁")
 
 
 def owners(body: str, names: list[str]) -> list[tuple[str, str | None]]:
@@ -98,12 +101,15 @@ def check(shots: list[str] | None = None, project: str | None = None, run: str |
             mis = misowned(orig, c.image_body or "", cast) if len(cast) >= 1 else []
             orphans = lost + [f"{m['clause'][:16]}（{m['script_owner']}→{m['compiled_owner']}）" for m in mis]
             clash = FR.framing_clash(prompt)
+            # K-REN-903：全员局部（不露脸）的镜，提示词里不得有要脸的词
+            noface = NOFACE_RE.findall(prompt) if FR.partial_only(sh, cast) else []
             rows.append({"shot": key, "orphans": orphans, "lost_names": lost, "misowned": mis, "clash": clash,
-                         "ok": not orphans and not clash, "image_body": c.image_body})
+                         "noface_terms": noface, "ok": not orphans and not clash and not noface, "image_body": c.image_body})
     missing = sorted(want - seen)
     bad = [r for r in rows if not r["ok"]]
     return {"checked": len(rows), "orphan_shots": sum(1 for r in rows if r["orphans"]),
             "orphans": sum(len(r["orphans"]) for r in rows), "clash_shots": sum(1 for r in rows if r["clash"]),
+            "noface_shots": sum(1 for r in rows if r["noface_terms"]),
             "bad": [r["shot"] for r in bad], "missing": missing, "rows": rows,
             "rule": "K-REN-901 删句保主语 / K-REN-902 特写双人露脸冲突"}
 
@@ -129,10 +135,10 @@ def main(argv=None) -> int:
         out["rows"] = [{k: v for k, v in x.items() if k != "image_body" or not x["ok"]} for x in r["rows"]]
         print(json.dumps(out, ensure_ascii=False, indent=1))
     else:
-        print(f"查 {r['checked']} 镜：孤儿 {r['orphans']}（{r['orphan_shots']} 镜），构图冲突 {r['clash_shots']} 镜")
+        print(f"查 {r['checked']} 镜：孤儿 {r['orphans']}（{r['orphan_shots']} 镜），构图冲突 {r['clash_shots']} 镜，不露脸镜脸部词 {r['noface_shots']} 镜")
         for x in r["rows"]:
             if not x["ok"]:
-                print(f"  ✗ {x['shot']} 孤儿={x['orphans']} 冲突={x['clash']}")
+                print(f"  ✗ {x['shot']} 孤儿={x['orphans']} 冲突={x['clash']} 脸部词={x['noface_terms']}")
     return 0 if not r["bad"] else 1
 
 

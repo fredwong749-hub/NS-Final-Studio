@@ -741,13 +741,21 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
     if frame_size:
         # K-REN-123（IMGGEN 第二轮）：特写按主体（脸 / 局部）写构图约束；脸部特写去掉站姿 / 全身分句
         subject = FR.closeup_subject(img_body, frame_size)
+        # K-REN-903（IMGLAB 11-02，ep05-S3/S6/S7）：在画的人全是局部（不露脸）→ 按局部特写编译（局部首句、去脸部通用句、
+        # 不写“不露脸”否定句、锁收窄），不论剧本景别词是不是特写
+        _po_all = FR.partial_only(shot, names)
+        _po = _po_all and subject not in ("part", "object")
+        if _po:
+            subject = "part"
         if subject == "face":
             img_body = FR.strip_fullbody(img_body, subjects=names)          # K-REN-901：删句保主语
         if subject in ("part", "object"):
             # REFLOCK 11-01（ep05-S3/S5、ep10-S8 局部大特写出成带脸的中景）：角色锁里的脸 / 发型 / 身材描写会把模型拉回人像，
             # 局部特写只留锁里与这个局部相关的分句（例：指甲）；锁一句都不剩就整条不放
             locks = [x for x in (FR.part_lock(lk, FR.part_name(img_body)) for lk in locks) if x]
-        framing_lead = FR.closeup_lead(frame_size, subject, img_body)
+            if _po_all:
+                locks = [x for x in (FR.narrow_lock(lk, FR.part_name(img_body)) for lk in locks) if x]
+        framing_lead = FR.closeup_lead(frame_size, subject, img_body, partial=_po)
         # K-REN-705（IMGFIX 11-02，项目方 00:05“很多人物face都出了问题”，ep02-S4）：双人句按“露脸的人数”触发——
         # 原先按 names（在画 + 局部）计数，21 镜第二个人是局部（背影肩线 / 西装下摆）也被写了“两张脸都清晰入画、互相看着”，
         # 模型画出一张没有身份参考的脸。局部的人按剧本 cast 的部位写“只露出 X，不露脸”（剧本原文）

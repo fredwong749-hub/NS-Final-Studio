@@ -235,9 +235,45 @@ def strip_fullbody(text: str, subjects=()) -> str:
     return "，".join(keep)
 
 
-def closeup_lead(size: str | None, subject: str | None, img_body: str = "") -> str:
-    """K-REN-123：特写首句加构图约束（中英各一句，Qwen-Image 2.1 对英文构图词更敏感）"""
-    if size not in CLOSE or not subject:
+def partial_only_enabled() -> bool:
+    """K-REN-903（IMGLAB 11-02，ep05-S3/S6/S7 82 版出整张脸）：在画的人全是局部（cast 局部、不露脸）时按局部特写编译。
+    config/recipes/image_framing.json partial_only（缺省 true；false = 旧行为）"""
+    return bool(_cfg().get("partial_only", True))
+
+
+def partial_only(shot, names: list[str]) -> bool:
+    """露脸的人 0 个、局部的人 ≥1 个（cast 判定，同 faced_people）"""
+    if not partial_only_enabled():
+        return False
+    faced, partial = faced_people(shot, names)
+    return not faced and bool(partial)
+
+
+def narrow_lock(lock: str, part: str) -> str:
+    """K-REN-903：局部人物的角色锁收窄——成年句只留“成年女性 / 成年男性”（HC-07 仍在，去掉年龄数字与国籍），
+    发色 / 刘海句只在局部含“发 / 头”时保留（W5 b 改写：肩颈局部不再带发色句，发色句会把画面拉回人像）"""
+    m = re.match(r"(【[^】]+】)(.*)", lock or "", re.S)
+    if not m:
+        return lock
+    out = []
+    for c in (x for x in re.split(r"[，,；;、]", m.group(2)) if x.strip()):
+        if "成年" in c:
+            a = re.search(r"成年(?:女性|男性|人)", c)
+            out.append(a.group(0) if a else "成年")
+        elif (HAIR_COLOR_RE.search(c) or "刘海" in c) and not any(w in (part or "") for w in ("发", "头")):
+            continue
+        else:
+            out.append(c)
+    return (m.group(1) + "，".join(dict.fromkeys(out))) if out else ""
+
+
+PARTIAL_TOP = "，画面上沿在下颌以下（frame top below the chin）"
+
+
+def closeup_lead(size: str | None, subject: str | None, img_body: str = "", partial: bool = False) -> str:
+    """K-REN-123：特写首句加构图约束（中英各一句，Qwen-Image 2.1 对英文构图词更敏感）。
+    partial=True（K-REN-903 全员局部）：非特写景别也用局部写法，并写明画面上沿在下颌以下"""
+    if not subject or (size not in CLOSE and not (partial and subject == "part")):
         return lead(size)
     if subject == "face":
         if size == "特写":
@@ -247,7 +283,7 @@ def closeup_lead(size: str | None, subject: str | None, img_body: str = "") -> s
     part = part_name(img_body) if subject == "part" else "物件"
     # 肯定句写法（BAKEOFF R11-12 A3：cfg=1 下否定句不生效，“不出现脸”反而把“脸”写进了提示词）
     return (f"{size}构图：画面里只有{part}这一局部，{part}占画面大半，画框紧贴{part}裁切"
-            f"（tight close-up crop on the {PART_EN.get(part, 'detail')} only, filling the frame）")
+            f"（tight close-up crop on the {PART_EN.get(part, 'detail')} only, filling the frame）") + (PARTIAL_TOP if partial else "")
 
 
 def two_face_close_mode() -> str:

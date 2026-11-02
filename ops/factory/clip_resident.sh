@@ -3,6 +3,7 @@
 # 起因：gpu36 上 clip_srv 每单冷启动、空闲显存 < 8000 MB 就退 CPU，一单 88.9 s（11-02 01:46 实测）；常驻后模型只加载一次。
 # gpu36：钉 GPU2（L-100 看图专用卡，与 vLLM 同卡，CLIP-L 约 1.7 GB）。gpu33：暂不起（GPU 路径单次 7.6 s，不是瓶颈；GPU2 坏卡永不用）。
 # 幂等：已在跑就不动。保活：外层循环，409（代码换了）/ 崩溃后 3 s 按仓库最新代码重启。不删任何文件。
+# 线程：常驻单进程（不是按片子反复起的脚本），CPU 模式给 16 线程（96 核机；4 线程时 CLIP-L 一单 83 s，11-02 08:5x 实测）
 # 用法（服务器上）：bash ops/factory/clip_resident.sh gpu36 [status|stop]
 set -u
 export TZ=Asia/Tokyo
@@ -28,7 +29,7 @@ setsid nohup bash -c "
     cp -a $PROD/tools/gen_contract/clip_srv.py $RL/clip_srv.py
     cp -a $PROD/services/agent/ns_agent/gen_contract/metrics.py $RL/metrics.py
     cd $RL && CUDA_VISIBLE_DEVICES=$GPU NS_CLIP_DEVICE=cpu NS_CLIP_PATH=$RL/clip-vit-large-patch14 \
-      OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 NUMEXPR_NUM_THREADS=4 TZ=Asia/Tokyo \
+      OMP_NUM_THREADS=16 MKL_NUM_THREADS=16 OPENBLAS_NUM_THREADS=16 NUMEXPR_NUM_THREADS=16 NS_SCORE_THREADS=16 TZ=Asia/Tokyo \
       nice -n 5 $PY -u clip_srv.py --serve $PORT
     rc=\$?; echo \"\$(date -Is) clip_srv exited rc=\$rc，3 s 后重启\"; why=\"exit_rc_\$rc\"; sleep 3
   done" </dev/null >>$LOG 2>&1 &

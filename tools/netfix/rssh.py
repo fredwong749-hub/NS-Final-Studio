@@ -120,7 +120,10 @@ def _local_self(host: str) -> str | None:
     if not me:
         return None
     h = host.split("@", 1)[-1]
-    return "self" if h in (me, f"{me}-t", f"{me}-tb", "localhost", "127.0.0.1") else "other"
+    # OFFLINE_ALIASES（resident_restart.sh：gpu36 上 = gpu33）：契约打分代码仍写着 full_score("gpu33")，在 gpu36 上要当本机执行
+    # （FACTORY 11-02 09:0x P0：漏了这条，sv-06 起 gpu36 每单打分都被判“跨机”→ 退回 producer venv 的 CPU 打分 → 无 torch → score_infra）
+    aliases = {a.strip() for a in os.environ.get("OFFLINE_ALIASES", "").split(",") if a.strip()}
+    return "self" if h in (me, f"{me}-t", f"{me}-tb", "localhost", "127.0.0.1", *aliases) else "other"
 
 
 def run_retry(host: str, cmd: str, input: bytes | str | None = None, timeout: float = 900, tries: int = 4,
