@@ -200,6 +200,22 @@ def _tqdm(line: str) -> dict:
 
 
 # ---------------------------------------------------------------- ssh 常驻读取
+_RSSH = None
+
+
+def _rssh():
+    """tools/netfix/rssh.py（按文件路径装载，API 进程不依赖 tools 在 sys.path 上）"""
+    global _RSSH
+    if _RSSH is None:
+        import importlib.util
+        root = Path(__file__).resolve().parents[3]
+        spec = importlib.util.spec_from_file_location("ns_netfix_rssh_gpu_live", root / "tools/netfix/rssh.py")
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        _RSSH = m
+    return _RSSH
+
+
 class SshStream:
     def __init__(self, host: str):
         self.host = host
@@ -229,10 +245,17 @@ class SshStream:
     def _run(self):
         while not self.stop:
             try:
-                self.proc = subprocess.Popen(
-                    ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "ServerAliveInterval=20",
-                     self.host, "bash", "-s"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    creationflags=NO_WIN)
+                # NETFIX 11-02 14:4x（CONSENT UIRSI2 → NETFIX，by 总调度）：常驻读取经 rssh 复用监管进程托管的命令主连接
+                # （不在跳板新建连接、命令通道走专用底座 base-c）；监管进程不在时 rssh.enabled()=False → 退回原来的直连写法
+                argv = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "ServerAliveInterval=20", self.host, "bash", "-s"]
+                try:
+                    R = _rssh()
+                    if R.enabled():
+                        argv = R.rewrite(["ssh", self.host, "bash -s"]) or argv
+                except Exception:  # noqa: BLE001  # arch-ok: rssh 装载失败 → 用原直连写法（显式回退）
+                    pass
+                self.proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                             creationflags=NO_WIN)
                 # 二进制写入：Windows 文本模式会把 LF 换成 CRLF，远端 bash 读不懂
                 self.proc.stdin.write(_remote_script(self.host).replace(chr(13) + chr(10), chr(10)).encode("utf-8"))
                 self.proc.stdin.close()

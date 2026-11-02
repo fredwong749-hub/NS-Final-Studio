@@ -1,6 +1,6 @@
 {
- "kb_version": "kb-20261102-7f3fc2d7",
- "n": 626,
+ "kb_version": "kb-20261102-3707c4de",
+ "n": 627,
  "by_domain": {
   "render": 88,
   "prompt": 28,
@@ -9,7 +9,7 @@
   "review": 66,
   "loop": 9,
   "asset": 44,
-  "ops": 179,
+  "ops": 180,
   "ui": 65
  },
  "by_link": {
@@ -17,14 +17,14 @@
   "P1-P2": 2,
   "P10-P11": 59,
   "P11-P12": 27,
-  "P11-RETRY": 47,
+  "P11-RETRY": 48,
   "P2-P3": 3,
   "P3-P4": 114,
   "P4-P5": 41,
   "P4-P6": 30,
   "P4-P7": 23,
   "P4-P9": 16,
-  "P5-P6": 202,
+  "P5-P6": 203,
   "P6-P7": 32,
   "P7-P8": 111,
   "P8-P10": 18,
@@ -5595,6 +5595,28 @@
     {
      "src": "data/producer/log.jsonl",
      "note": "11-02 11:50–12:21：gpu33 4 次、gpu36 1 次 refs_mismatch，全是自修阶梯变体（只挂两张脸 / 挂设定图）被整张清单比对拦下"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-02",
+   "_file": "knowledge/rules/ops_factory.yaml"
+  },
+  {
+   "id": "K-OPS-F17",
+   "domain": "ops",
+   "link": [
+    "P5-P6",
+    "P11-RETRY"
+   ],
+   "title": "出图机器上的打分子进程（score_remote / hands_remote / 单次 clip_srv）一律限线程（NS_SCORE_THREADS=8）+ nice 10 + 只绑最后 NS_SCORE_CPUS=16 个核；不许按整机核数开线程",
+   "when": "remote_score 的 _FULL / _ONE_SHOT / _FACE_UP 在 gpu33 / gpu36 上起任何 CPU 打分子进程",
+   "then": "subprocess.run 带 env=SENV（OMP/MKL/OPENBLAS/NUMEXPR 线程上限）和 preexec_fn=_lim（nice + sched_setaffinity）；CLIP 优先走常驻 8872（K-OPS-F04），常驻不在时 SENTINEL 应开单而不是静默退回单次子进程",
+   "check": "tests/test_factory.py::test_k_ops_f17_scoring_subprocesses_are_throttled",
+   "evidence": [
+    {
+     "src": "docs/overnight/morning_20261102.md",
+     "note": "11-02 15:18 gpu33 load 301 / 96 核；score_remote 单进程 412 线程 1452% CPU，clip_srv 单次子进程同时 4 个（常驻 8872 不在）；rssh 10 分钟成功率 41–63%，p50 卡在 12 s 超时"
     }
    ],
    "confidence": "high",

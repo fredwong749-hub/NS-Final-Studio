@@ -133,6 +133,17 @@ def score(host: str, paths: dict[str, str]) -> dict:
 # scp 1.3 MB 60 s），实测 130 s。改成一次 ssh：图片 base64 走 stdin，远端一个小脚本落盘 → 打分 → 手 → 删目录 → 打一行 JSON。
 _ONE_SHOT = r'''
 import base64, json, os, shutil, subprocess, sys
+# 总调度 11-02 15:2x（K-OPS-F17）：gpu33 load 300，score_remote 单进程 412 线程 1452% CPU（onnxruntime 默认按 96 核开线程），
+# sshd / 命令通道被饿死（rssh 成功率 41-63%）。打分子进程一律限线程 + nice 10 + 只绑最后 NS_SCORE_CPUS 个核。
+NT = os.environ.get("NS_SCORE_THREADS", "8")
+SENV = dict(os.environ, OMP_NUM_THREADS=NT, MKL_NUM_THREADS=NT, OPENBLAS_NUM_THREADS=NT, NUMEXPR_NUM_THREADS=NT, ORT_NUM_THREADS=NT)
+def _lim():
+    try:
+        os.nice(10)
+        cpus = sorted(os.sched_getaffinity(0))
+        os.sched_setaffinity(0, set(cpus[-int(os.environ.get("NS_SCORE_CPUS", "16")):]))
+    except Exception:
+        pass
 R, IDM, HAND = sys.argv[1], sys.argv[2], sys.argv[3]
 req = json.load(sys.stdin)
 d = os.path.join(R, "in", req["batch"]); os.makedirs(d, exist_ok=True)
@@ -144,7 +155,7 @@ try:
         items.append({"id": k, "path": p})
     refs = {k: [v] for k, v in req["refs"].items() if os.path.exists(v)}
     r = subprocess.run([IDM, "score_remote.py", "-"], cwd=R, input=json.dumps({"refs": refs, "items": items}),
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, env=SENV, preexec_fn=_lim)
     out = [ln for ln in r.stdout.splitlines() if ln.startswith("{")]
     if not out:
         print(json.dumps({"error": "score_remote: " + r.stderr[-400:]})); sys.exit(0)
@@ -153,7 +164,7 @@ try:
         for f in it.get("faces", []):
             f.pop("emb", None)
     hi = [{"id": i["id"], "path": i["path"], "faces": len(s["items"].get(i["id"], {}).get("faces", []))} for i in items]
-    rh = subprocess.run([HAND, "hands_remote.py"], cwd=R, input=json.dumps({"items": hi}), capture_output=True, text=True)
+    rh = subprocess.run([HAND, "hands_remote.py"], cwd=R, input=json.dumps({"items": hi}), capture_output=True, text=True, env=SENV, preexec_fn=_lim)
     ho = [ln for ln in rh.stdout.splitlines() if ln.startswith("{")]
     print(json.dumps({"items": s.get("items", {}), "cross": s.get("cross", {}),
                       "hands": json.loads(ho[-1]) if ho else {}, "refs": list(refs)}))
@@ -209,6 +220,17 @@ CLIP_MIN_FREE_MB = 8000        # 卡上空闲显存不到这个数就不放 CLIP
 
 _FULL = r'''
 import base64, json, os, shutil, subprocess, sys
+# 总调度 11-02 15:2x（K-OPS-F17）：gpu33 load 300，score_remote 单进程 412 线程 1452% CPU（onnxruntime 默认按 96 核开线程），
+# sshd / 命令通道被饿死（rssh 成功率 41-63%）。打分子进程一律限线程 + nice 10 + 只绑最后 NS_SCORE_CPUS 个核。
+NT = os.environ.get("NS_SCORE_THREADS", "8")
+SENV = dict(os.environ, OMP_NUM_THREADS=NT, MKL_NUM_THREADS=NT, OPENBLAS_NUM_THREADS=NT, NUMEXPR_NUM_THREADS=NT, ORT_NUM_THREADS=NT)
+def _lim():
+    try:
+        os.nice(10)
+        cpus = sorted(os.sched_getaffinity(0))
+        os.sched_setaffinity(0, set(cpus[-int(os.environ.get("NS_SCORE_CPUS", "16")):]))
+    except Exception:
+        pass
 R, IDM, HAND, RL, CPY, EXCL, MINFREE = sys.argv[1:8]
 req = json.load(sys.stdin)
 os.makedirs(os.path.join(RL, "refs"), exist_ok=True)
@@ -227,7 +249,7 @@ try:
             open(p, "wb").write(base64.b64decode(it["b64"]))
         items.append({"id": it["id"], "path": p})
     refs = {k: [v] for k, v in req["face_refs"].items() if os.path.exists(v)}
-    r = subprocess.run([IDM, "score_remote.py", "-"], cwd=R, input=json.dumps({"refs": refs, "items": items}), capture_output=True, text=True)
+    r = subprocess.run([IDM, "score_remote.py", "-"], cwd=R, input=json.dumps({"refs": refs, "items": items}), capture_output=True, text=True, env=SENV, preexec_fn=_lim)
     out = [ln for ln in r.stdout.splitlines() if ln.startswith("{")]
     s = json.loads(out[-1]) if out else {"items": {}, "cross": {}, "error": "score_remote: " + r.stderr[-300:]}
     for it in s.get("items", {}).values():
@@ -237,7 +259,7 @@ try:
             else:
                 f.pop("emb", None)
     hi = [{"id": i["id"], "path": i["path"], "faces": len(s["items"].get(i["id"], {}).get("faces", []))} for i in items]
-    rh = subprocess.run([HAND, "hands_remote.py"], cwd=R, input=json.dumps({"items": hi}), capture_output=True, text=True)
+    rh = subprocess.run([HAND, "hands_remote.py"], cwd=R, input=json.dumps({"items": hi}), capture_output=True, text=True, env=SENV, preexec_fn=_lim)
     ho = [ln for ln in rh.stdout.splitlines() if ln.startswith("{")]
     res = {"items": s.get("items", {}), "cross": s.get("cross", {}), "hands": json.loads(ho[-1]) if ho else {},
            "refs": list(refs), "score_error": s.get("error")}
@@ -262,7 +284,7 @@ try:
             outer.append({**o, "face_bbox": list(best["bbox"]) if best else None})
         clip_items.append({"id": it["id"], "path": by[it["id"]], "post": it.get("post"), "rows": it.get("rows") or [],
                            "face_bbox": fb, "scene": it.get("scene"), "outer": outer})
-    q = subprocess.run(["nvidia-smi", "--query-gpu=index,memory.free", "--format=csv,noheader,nounits"], capture_output=True, text=True)
+    q = subprocess.run(["nvidia-smi", "--query-gpu=index,memory.free", "--format=csv,noheader,nounits"], capture_output=True, text=True, env=SENV, preexec_fn=_lim)
     gpus = []
     for ln in q.stdout.strip().splitlines():
         if "," in ln:
@@ -284,7 +306,7 @@ try:
     except Exception as _e:
         res["clip_resident_error"] = repr(_e)[:160]
     if cl is None:
-        c = subprocess.run([CPY, "clip_srv.py", "-"], cwd=RL, env=env, capture_output=True, text=True, input=json.dumps(creq))
+        c = subprocess.run([CPY, "clip_srv.py", "-"], cwd=RL, env={**SENV, **env}, capture_output=True, text=True, input=json.dumps(creq), preexec_fn=_lim)
         co = [ln for ln in c.stdout.splitlines() if ln.startswith("{")]
         cl = json.loads(co[-1]) if co else {"items": {}, "missing_refs": [], "error": c.stderr[-400:]}
     res.update(local=cl.get("items", {}), missing_refs=cl.get("missing_refs", []), clip_error=cl.get("error"),

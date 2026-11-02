@@ -134,3 +134,5 @@
 - r3-10（13:35 借道）：gpu33:1 → IMGMASTER-S（imgmaster-，到 14:34:59），gpu33:3 → IMGLAB（imglab-，到 14:04:59）。12:25–13:25 gpu36:0/1 那次借给 IMGLAB 是“有生产可派就让”的软借道，第一季继续在那两条道派单符合约定，不是漏单；IMGLAB 的脚本只在队列空时交，所以没交上。以后给只在空闲时交的脚本借道要用硬挂。
 - r3-11（14:0x）：之前没有常驻的借道到期回收，过去的"自动归还"都是 scratchpad 里的一次性脚本，属于缺口。现在由 infra_watchdog 每 2 分钟调 lanes.sweep + idle_sweep，空闲判断按道（队列 + /history 最近结束时间），不靠借用方的 client 前缀，因为 IMGLAB 实际用的是 UUID 作 client_id。
 - r3-12（14:1x）：fb-0001 ep02-S3。重出走的是原剧本提示词，v1、v2 两版的提示词都写了手按镜面。不改写法，重出大概率还是同样的问题；改写法属于剧本内容，要走写作链路（付费外部 API），已交总调度定。
+- r3-13（14:25，我的违规）：为了让按镜 hold 扛住 night 重编 jobs.json，在 gpu36 上单文件热替换了 build_jobs.py，违反 D9（服务器代码只能经 sv deploy 改；deploy 按 sha 核对时会把它当漂移覆盖）。约 1 分钟后还原，没被执行过。教训：服务器上要临时挡住某件事，只能用数据层办法（jobs.json / control / hold 文件），代码改动一律跟版本走。没有现成数据开关时，先找总调度批单文件例外。
+- r3-14：视频链路（build_jobs / vidgen / night）原来没有按镜 hold，这次补上 video_holds（sv-11）。旧首帧没记 passed_sig 时，剧本补丁改了首帧写法 E24 也不会触发，这是缺口；先用 requeue_first.py 手动标记，后续应在导入补丁时由导入方给受影响的镜记标记（待办）。

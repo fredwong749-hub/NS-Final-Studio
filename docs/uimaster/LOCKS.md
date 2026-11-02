@@ -273,3 +273,4 @@ s_vqastart.ps1 归 LOCALGPU（已收工），CONSENT 写 LOCALGPU → VQAGATE”
 - CONSENT: UIRSI -> UIFIX-S : apps/web/src/v3/ReviewRow.tsx（行内状态收静：MainTag 并进 StatusLine 悬停，引入 rowcalm.css）| by 总调度 fredw-2b 11-02 13:4x 第 2 轮第 4 条
 - CONSENT: AUTOPILOT -> DEBUG_RSI : tools/autopilot/infra_watchdog.py（只加 lanes_sweep_bg：每 2 分钟后台线程跑 tools/debug/lanes.py sweep + idle_sweep，借道到期 / 借出 10 分钟没人用自动收回）| by 总调度 fredw-2b 11-02 14:0x：“确认借道 10 分钟没人用就自动收回”
 - CONSENT: AUTOPILOT -> HOLLYWOOD : knowledge/rules/writer_series10.yaml（K-WRT-211 加 check、enforced:true） | by 总调度 fredw-2b 11-02：“knowledge/rules/writer_series10.yaml 的 CONSENT 给你（记在总调度名下，登记 LOCKS），请为 K-WRT-211 加 lint 和测试，然后改成 enforced:true。”
+- CONSENT: UIRSI2 -> NETFIX : services/api/ns_api/gpu_live.py（SshStream 常驻读取改经 rssh.rewrite 复用命令主连接，rssh 不可用退回原直连） | by=总调度 fredw-2b 11-02 14:4x，文件 owner UIRSI2 正忙于胶片默认化

@@ -46,7 +46,10 @@ TH = {
     "mirror_size_ratio": 1.6,   # 几何镜像：两脸高度比 <=
     "mirror_dy": 0.25,          # 几何镜像：两脸中心高度差 <= 0.25 x 脸高
     "mirror_yaw_sum": 0.15,     # 几何镜像：两脸偏航代理绝对值之和 >=（都正脸时不算）
-    "red_cord_frac": 0.08,      # 标志饰品：手腕窗口里红色像素占比 >= 它 = 戴红绳
+    "red_cord_lo": 0.008,       # 标志饰品：手腕窗口里红色像素占比在 [lo, hi]（细绳占比小，大块红 = 红衣服）
+    "red_cord_hi": 0.15,
+    "red_cord_span": 0.5,       # 最大红色连通块包围盒（长边）/ 窗口边长 >=
+    "red_cord_fill": 0.45,      # 最大红色连通块面积 / 包围盒面积 <=（细环填充率低）
     "max_hands_per_person": 2,
     "max_feet_per_person": 2,
 }
@@ -145,18 +148,30 @@ def yaw_proxy(kps) -> float | None:
     return (nx - (lx + rx) / 2) / d if d > 1e-6 else None
 
 
-def mirror_pair(a: dict, b: dict, th: dict) -> bool:
-    """几何镜像判据（总调度 11-02，镜面分割没覆盖到时补充）：同身份的两张脸，同一水平高度、大小相近、朝向左右相反"""
+def mirror_pair(a: dict, b: dict, th: dict, vlines: list | None = None) -> bool:
+    """几何镜像判据（总调度 11-02，镜面分割没盖到时补充）：同身份的两张脸，同一水平高度、大小相近，
+    且两脸之间隔着一条贯穿画面的竖线（镜框 / 门框 = 竖直镜面）。竖线缺测时退回“朝向左右相反”（偏航代理）。"""
     ha, hb = a["box"][3] - a["box"][1], b["box"][3] - b["box"][1]
     if min(ha, hb) <= 0 or max(ha, hb) / min(ha, hb) > th["mirror_size_ratio"]:
         return False
     dy = abs((a["box"][1] + a["box"][3]) / 2 - (b["box"][1] + b["box"][3]) / 2)
     if dy > th["mirror_dy"] * max(ha, hb):
         return False
+    ca, cb = (a["box"][0] + a["box"][2]) / 2, (b["box"][0] + b["box"][2]) / 2
+    lo, hi = min(ca, cb), max(ca, cb)
+    if vlines is not None and any(lo < x < hi for x in vlines):
+        return True
     ya, yb = yaw_proxy(a.get("kps")), yaw_proxy(b.get("kps"))
     if ya is None or yb is None:
         return False
     return ya * yb < 0 and abs(ya) + abs(yb) >= th["mirror_yaw_sum"]
+
+
+def red_cord_like(w: dict, th: dict) -> bool:
+    """手腕窗口里的红色像“细绳”而不是红衣服：总红色占比在 [lo, hi]，最大红色连通块包围盒够长、填充率低（细环）"""
+    if w.get("red") is None or not (th["red_cord_lo"] <= w["red"] <= th["red_cord_hi"]):
+        return False
+    return w.get("comp_span", 0) >= th["red_cord_span"] and w.get("comp_fill", 1) <= th["red_cord_fill"]
 
 
 def _owner_person(box, persons):
@@ -199,7 +214,7 @@ def judge(feat: dict, cast: list[dict] | None = None, th: dict | None = None) ->
         for j in range(i + 1, len(real)):
             a_, b_ = real[i], real[j]
             same = _cos(a_.get("emb"), b_.get("emb")) >= t["pair_cos"] or (a_["_id"] and a_["_id"] == b_["_id"])
-            if same and mirror_pair(a_, b_, t):
+            if same and mirror_pair(a_, b_, t, feat.get("vlines")):
                 geo.append((a_, b_))
     for a_, b_ in geo:
         edge = min(a_, b_, key=lambda f: min(f["box"][0], feat.get("W", 1e9) - f["box"][2]))
@@ -278,7 +293,7 @@ def judge(feat: dict, cast: list[dict] | None = None, th: dict | None = None) ->
         defects.append({"code": "feet_dup", "conf": "low", "detail": f"{feet_dup} 只脚的关键点分成两簇"})
     # —— 标志饰品归属：红绳只能在陈宇身上 ——
     for w in feat.get("wrists") or []:
-        if w.get("red", 0) < t["red_cord_frac"]:
+        if not red_cord_like(w, t):
             continue
         owner = None
         if w.get("person") is not None and 0 <= w["person"] < len(dw):
@@ -404,8 +419,19 @@ for it in req["items"]:
                 u = max(8.0, ((hk[9][0] - wx) ** 2 + (hk[9][1] - wy) ** 2) ** 0.5)
                 x1, x2, y1, y2 = int(max(0, wx - 0.7 * u)), int(min(W, wx + 0.7 * u)), int(max(0, wy - 0.7 * u)), int(min(H, wy + 0.7 * u))
                 if x2 > x1 and y2 > y1:
-                    wr.append({"person": pi, "red": round(float(red[y1:y2, x1:x2].mean()), 3), "xy": [round(wx), round(wy)]})
+                    win = red[y1:y2, x1:x2].astype(np.uint8)
+                    n, lab, st, _c = cv2.connectedComponentsWithStats(win, connectivity=8)
+                    span = fill = 0.0
+                    if n > 1:
+                        j = 1 + int(np.argmax(st[1:, cv2.CC_STAT_AREA]))
+                        bw, bh, ar = st[j, cv2.CC_STAT_WIDTH], st[j, cv2.CC_STAT_HEIGHT], st[j, cv2.CC_STAT_AREA]
+                        span = max(bw, bh) / max(1.0, float(x2 - x1)); fill = ar / max(1.0, float(bw * bh))
+                    wr.append({"person": pi, "red": round(float(win.mean()), 3), "comp_span": round(float(span), 3), "comp_fill": round(float(fill), 3), "xy": [round(wx), round(wy)]})
         o["wrists"] = wr
+        # 贯穿画面的竖线（镜框 / 门框）：几何镜像判据用
+        ed = cv2.Canny(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), 60, 150)
+        ls = cv2.HoughLinesP(ed, 1, np.pi / 180, 80, minLineLength=int(0.45 * H), maxLineGap=int(0.03 * H))
+        o["vlines"] = sorted({round((l[0][0] + l[0][2]) / 2) for l in (ls if ls is not None else []) if abs(l[0][0] - l[0][2]) <= 0.03 * abs(l[0][3] - l[0][1])})
         o["mirror"] = mirror_mask(img)
     except Exception as e:
         o["error"] = repr(e)[:300]
@@ -438,7 +464,7 @@ def _jpeg_b64(path: Path, side: int = 1536) -> str:
     return base64.b64encode(buf.tobytes()).decode()
 
 
-def measure(files: dict[str, Path], host: str = "gpu36", batch: int = 8, refs: dict | None = None) -> dict:
+def measure(files: dict[str, Path], host: str = "gpu36", batch: int = 24, refs: dict | None = None) -> dict:
     """{id: 本机图片} → {id: 测量值}。远程调用走 tools/netfix/rssh.run_retry，GPU2 打分道"""
     sys.path.insert(0, str(ROOT))
     from tools.netfix.rssh import run_retry
@@ -518,8 +544,21 @@ def check(image_path, cast: list[dict] | None, host: str = "gpu36") -> dict:
             "feet": {"dup": [d["detail"] for d in r["defects"] if d["code"] == "feet_dup"]}}
 
 
-def run_files(files: dict[str, Path], casts: dict[str, list | None], host: str = "gpu36") -> dict:
-    feats = measure(files, host)
+def _atomic_json(path, obj) -> None:
+    tmp = Path(str(path) + ".tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def run_files(files: dict[str, Path], casts: dict[str, list | None], host: str = "gpu36", feats_out: str | None = None,
+              feats_in: str | None = None) -> dict:
+    """feats_out：把远端测量值落盘（标定阈值时不用重扫）；feats_in：读已落盘的测量值，只重判（不连远端）"""
+    if feats_in:
+        feats = json.loads(Path(feats_in).read_text(encoding="utf-8"))
+    else:
+        feats = measure(files, host)
+        if feats_out:
+            _atomic_json(feats_out, feats)
     res = {}
     for k, f in feats.items():
         if f.get("error"):
@@ -539,6 +578,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--host", default="gpu36")
     ap.add_argument("--shots", nargs="*")
     ap.add_argument("--scan", action="store_true")
+    ap.add_argument("--feats", default=None, help="远端测量值落盘路径（可重判）")
+    ap.add_argument("--rejudge", default=None, help="读已落盘的测量值重判，不连远端")
     ap.add_argument("--raw", default=None, help="把远端测量值存到这个 json（扫全剧时可复用）")
     a = ap.parse_args(argv)
     files, casts = {}, {}
@@ -556,11 +597,9 @@ def main(argv: list[str]) -> int:
         cast = [{"name": n, "presence": "在画"} for n in a.cast.split(",")] if a.cast else None
         for p in a.images:
             files[p], casts[p] = Path(p), cast
-    res = run_files(files, casts, a.host)
+    res = run_files(files, casts, a.host, a.feats, a.rejudge)
     if a.raw:
-        tmp = Path(a.raw).with_suffix(".tmp")
-        tmp.write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, a.raw)
+        _atomic_json(a.raw, res)
     print(json.dumps({k: {"verdict": v["verdict"], "defects": v.get("defects"), "metrics": v.get("metrics"), "mirror_seg": v.get("mirror_seg")}
                       for k, v in res.items()}, ensure_ascii=False, indent=1))
     return 0

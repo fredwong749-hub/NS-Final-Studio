@@ -279,3 +279,15 @@ def test_state_paths_compat_read_and_atomic_write(tmp_path):
         SP.read_state("pipeline/runs", root=tmp_path)
     with pytest.raises(SP.StateError):
         SP.state_path("nope/x", root=tmp_path)
+
+
+def test_k_ops_f17_scoring_subprocesses_are_throttled():
+    """K-OPS-F17（总调度 11-02 15:2x）：gpu33 load 300、score_remote 412 线程 1452% CPU 饿死 sshd。
+    出图机器上的打分子进程（score_remote / hands_remote / clip_srv 单次）必须限线程 + nice + 绑核。"""
+    import re
+    src = (ROOT / "tools/gen_contract/remote_score.py").read_text(encoding="utf-8")
+    calls = re.findall(r'subprocess\.run\(\[(?:IDM|HAND|CPY), "(?:score_remote|hands_remote|clip_srv)\.py"[^\n]*\n?[^\n]*', src)
+    assert calls, "没找到打分子进程调用"
+    for c in calls:
+        assert "preexec_fn=_lim" in c and "SENV" in c, c
+    assert src.count("def _lim():") >= 2 and "os.nice(10)" in src and "sched_setaffinity" in src

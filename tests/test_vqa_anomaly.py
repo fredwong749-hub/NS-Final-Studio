@@ -124,7 +124,7 @@ def test_geometric_mirror_same_height_opposite_yaw():
 
 def test_signature_red_cord_misowned():
     dwp = {"box": [0, 0, 500, 900], "feet": [], "lhand": None, "rhand": None}
-    f = feat([], dw=[dwp], wrists=[{"person": 0, "red": 0.2}])
+    f = feat([], dw=[dwp], wrists=[{"person": 0, "red": 0.02, "comp_span": 0.8, "comp_fill": 0.2}])
     r = A.judge(f, [{"name": "林晚", "presence": "局部", "part": "手"}])
     assert r["defects"][0]["code"] == "signature_item_misowned"
     assert not A.judge(f, [{"name": "陈宇", "presence": "局部", "part": "手"}])["defects"]
@@ -136,3 +136,19 @@ def test_hands_quota_counts_partial_people():
     f = feat([], dw=[], hands=hands)
     cast = [{"name": "林晚", "presence": "在画"}, {"name": "陈宇", "presence": "局部", "part": "手"}]
     assert not A.judge(f, cast)["defects"]
+
+
+def test_geometric_mirror_by_vertical_frame_line():
+    fa = face(A_, [360, 270, 490, 450], {"gu_chen": 0.6})
+    fb = face(A_, [650, 310, 750, 475], {"gu_chen": 0.64})
+    cast = [{"name": "顾沉", "presence": "在画", "faced": True}]
+    r = A.judge(feat([fa, fb], refs_loaded=["gu_chen"], vlines=[580]), cast)
+    assert r["verdict"] == "clean" and r["metrics"]["heads_mirror_geo"] == 1
+    r2 = A.judge(feat([fa, fb], refs_loaded=["gu_chen"], vlines=[800]), cast)       # 竖线不在两脸之间
+    assert r2["defects"][0]["code"] == "duplicate_person"
+
+
+def test_red_cord_thin_ring_vs_red_cloth():
+    assert A.red_cord_like({"red": 0.02, "comp_span": 0.8, "comp_fill": 0.2}, A.TH)
+    assert not A.red_cord_like({"red": 0.32, "comp_span": 0.9, "comp_fill": 0.9}, A.TH)
+    assert not A.red_cord_like({"red": 0.002, "comp_span": 0.1, "comp_fill": 0.5}, A.TH)

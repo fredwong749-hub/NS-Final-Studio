@@ -185,3 +185,15 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-F17
+    domain: ops
+    link: [P5-P6, P11-RETRY]
+    title: 出图机器上的打分子进程（score_remote / hands_remote / 单次 clip_srv）一律限线程（NS_SCORE_THREADS=8）+ nice 10 + 只绑最后 NS_SCORE_CPUS=16 个核；不许按整机核数开线程
+    when: remote_score 的 _FULL / _ONE_SHOT / _FACE_UP 在 gpu33 / gpu36 上起任何 CPU 打分子进程
+    then: subprocess.run 带 env=SENV（OMP/MKL/OPENBLAS/NUMEXPR 线程上限）和 preexec_fn=_lim（nice + sched_setaffinity）；CLIP 优先走常驻 8872（K-OPS-F04），常驻不在时 SENTINEL 应开单而不是静默退回单次子进程
+    check: tests/test_factory.py::test_k_ops_f17_scoring_subprocesses_are_throttled
+    evidence:
+      - {src: docs/overnight/morning_20261102.md, note: "11-02 15:18 gpu33 load 301 / 96 核；score_remote 单进程 412 线程 1452% CPU，clip_srv 单次子进程同时 4 个（常驻 8872 不在）；rssh 10 分钟成功率 41–63%，p50 卡在 12 s 超时"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

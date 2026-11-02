@@ -712,11 +712,11 @@ def _rssh():
 
 
 def _ssh_train_locks(server: str) -> set:
-    """读服务器训练锁目录（UIRSI2 总调度 P0 14:1x：改走 rssh.run_retry，单次 15 s、不重试——由后台刷新线程按周期再读）"""
+    """读服务器训练锁目录（UIRSI2 总调度 P0 14:1x：改走 rssh.run_retry，单次 30 s、不重试——由后台刷新线程按周期再读）"""
     d = TRAIN_LOCK_DIRS.get(server)
     if not d:
         return set()
-    r = _rssh().run_retry(server, f"ls -1A {d} 2>/dev/null; true", timeout=15, tries=1, text=True)
+    r = _rssh().run_retry(server, f"ls -1A {d} 2>/dev/null; true", timeout=30, tries=1, text=True)   # NETFIX 14:4x：命令通道迁 base-c 前单次给 30 s（后台线程，不阻塞请求）
     if r.returncode != 0:
         raise RuntimeError((r.stderr or "").strip()[:200] or f"rssh rc={r.returncode}")
     return parse_train_locks(r.stdout)
