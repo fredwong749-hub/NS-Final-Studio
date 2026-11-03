@@ -98,6 +98,12 @@ TICK_S = 20
 LEASE_S = 45 * 60                   # 一次出图 + 取回的上限；过期视为失效
 INFRA_BACKOFF = (30, 60, 120, 300, 600)
 PREFLIGHT_RETRY_S = 30 * 60
+# W20（11-03 15:19 受控重启后 7 个“只重打分”单在隧道断时占着 inflight、心跳记成 rendering=7）：
+# 只重打分走独立通道——不占道、算 scoring 不算 rendering、有硬时限、打分链路不可用时整体退避（熔断），不无限占位
+RESCORE_TIMEOUT_S = int(os.environ.get("NS_PRODUCER_RESCORE_TIMEOUT_S", "900"))   # 一次只重打分最多占位这么久
+RESCORE_MAX = int(os.environ.get("NS_PRODUCER_RESCORE_MAX", "3"))                  # 同时在跑的只重打分（含超时后还没回来的）上限
+RESCORE_BACKOFF = (300, 600, 1200, 1800, 3600)    # 同一对象连续只重打分没拿到结论：逐级退避
+SCORE_CHAIN_COOL_S = 300                          # 打分链路（gpu33 ssh / 共用验收）刚出过错：这么久内不再派只重打分
 CODE_RETRY_S = 5 * 60               # 系统代码 / 接口不匹配：5 分钟后再试（多半已热修），不再停 30 分钟         # preflight 不过：资料可能被别的会话补上，30 分钟后再查
 # 出图道（gpu36:2 是长镜头视频专用道，不派出图；gpu33 GPU2 永不使用）
 IMAGE_LANES = {"gpu33:0": "http://127.0.0.1:18188", "gpu33:1": "http://127.0.0.1:18189", "gpu33:3": "http://127.0.0.1:18191",
@@ -533,7 +539,7 @@ def wait_kind(err: str) -> str | None:
 
 def asset_hold_objects(data: Path, run: str | None = None, primary: str | None = None) -> set:
     """IMGFIX r5（总调度 fredw-2b 11-02）：data/autopilot/*_hold.json（active=true）列出的首帧 / 尾帧对象暂缓派单——
-    资产（例：林晚造型 A 设定图缺袖）修复后等项目方点选，点选前不出图。不在 = 没有 hold；
+    资产（例：V1 女主造型 A 设定图缺袖）修复后等项目方点选，点选前不出图。不在 = 没有 hold；
     文件坏 → K-OPS-F09 decisions_guard 在派单前整体拒派（⤴ 取代“文件坏 = 不挡”）"""
     out: set = set()
     for f in (data / "autopilot").glob("*_hold.json"):
@@ -790,7 +796,16 @@ def _replan(project, ep, shot, job: dict, plan_kw: dict, make_slots):
     plan2 = dataclasses.replace(plan, slots=slots, prompt_prefix="".join(x.line for x in slots))
     body = job["prompt"][len(plan.prompt_prefix):]
     return {**job, "prompt": plan2.prompt_prefix + body, "refs": plan2.files, "asset_refs": AR.record(sr, plan2),
-            "face_files": [x.file for x in slots if x.kind == "face"]}
+            "face_files": face_files_of(slots)}
+
+
+FACE_KINDS = ("face", "faceboard")    # W20：三人镜三张脸合成一个 faceboard 槽——同样是身份脸槽（preflight I2 口径）
+
+
+def face_files_of(slots) -> list:
+    """槽位里的身份脸文件：face 槽本身 + faceboard 槽的成员（与 preflight I2 files 口径一致）"""
+    return [x.file for x in slots if x.kind == "face"] + [m.get("file") for x in slots if x.kind == "faceboard"
+                                                          for m in (x.members or []) if m.get("file")]
 
 
 def faces_only_variant(project, ep, shot, job: dict, plan_kw: dict) -> dict:
@@ -798,7 +813,7 @@ def faces_only_variant(project, ep, shot, job: dict, plan_kw: dict) -> dict:
     import copy
 
     def mk(AR, plan):
-        faces = [copy.copy(x) for x in plan.slots if x.kind == "face"]
+        faces = [copy.copy(x) for x in plan.slots if x.kind in FACE_KINDS]
         return faces or None
     return _replan(project, ep, shot, job, plan_kw, mk)
 
@@ -809,7 +824,7 @@ def double_face_variant(project, ep, shot, job: dict, plan_kw: dict) -> dict:
 
     def mk(AR, plan):
         faces = [x for x in plan.slots if x.kind == "face"]
-        if not faces:
+        if not faces:                      # 只有脸板（三人镜）：不复制脸板，保持默认槽位
             return None
         dup = copy.copy(faces[0])
         rest = [copy.copy(x) for x in plan.slots if x is not faces[0]]
@@ -825,28 +840,50 @@ def double_face_variant(project, ep, shot, job: dict, plan_kw: dict) -> dict:
     return out
 
 
-def linwan_sheet_variant(project, ep, shot, job: dict, plan_kw: dict) -> dict:
-    """双人镜 A 版：两张脸各占一槽 + 第 3 槽固定为林晚本镜造型设定图（去头）；槽位标注用 asset_refs._line 原样生成"""
+def lead_char(run_id: str | None) -> str | None:
+    """当前剧的主角 char_id（MASTER-WSL 14:14 派 CODER-PS：双人镜 A 版原来写死 V1 女主的 id 与名字）。
+    单一来源 = data/pipeline/runs/<run>/P1_storyline.json characters[].role == "主角"（项目方过闸的 P1）；读不到 → None（调用方按默认槽位）"""
+    if not run_id:
+        return None
+    p = ROOT / "data" / "pipeline" / "runs" / str(run_id) / "P1_storyline.json"
+    try:
+        chars = json.loads(p.read_text(encoding="utf-8")).get("characters") or []
+    except (OSError, ValueError):   # arch-ok: 没有 P1（V1 / 演练）= 不认主角，A 版退默认槽位并写 variant_note
+        return None
+    return next((c.get("char_id") for c in chars if c.get("role") == "主角" and c.get("char_id")), None)
+
+
+def lead_sheet_variant(project, ep, shot, job: dict, plan_kw: dict, lead: str | None = None) -> dict:
+    """双人镜 A 版：两张脸各占一槽 + 第 3 槽固定为主角（lead_char，按 run 的 P1 取）本镜造型设定图（去头）；槽位标注用 asset_refs._line 原样生成"""
+    if not lead:
+        return {**job, "variant_note": "认不出本剧主角（P1 没有 role=主角），按默认槽位"}
     import dataclasses
     from ns_agent import asset_refs as AR
     sr, plan = AR.plan_for(project, ep, shot, "qwen_image_2.1", **plan_kw)
     if not job["prompt"].startswith(plan.prompt_prefix):
         return job
-    faces = [sl for sl in plan.slots if sl.kind == "face"]
-    ref = next((r for r in sr.refs if r.role == "sheet" and r.character == "lin_wan" and r.file), None)
-    if ref is None or len(faces) + 1 > plan.capacity:
-        return {**job, "variant_note": "林晚造型设定图不在参考里，按默认槽位"}
-    if any(sl.kind == "sheet" and sl.character == "lin_wan" for sl in plan.slots):
+    # ISS-1103-141532（ep01-S1 三人镜）：三张脸会被 asset_refs 合成一个 faceboard 槽；原来只认 kind=="face"，
+    # 脸板被当成非脸丢掉 → 只剩设定图一槽 → preflight I2“露脸的人没有身份脸参考槽”。脸板同样是脸槽，必须保留
+    faces = [sl for sl in plan.slots if sl.kind in FACE_KINDS]
+    ref = next((r for r in sr.refs if r.role == "sheet" and r.character == lead and r.file), None)
+    if ref is None:
+        return {**job, "variant_note": "主角造型设定图不在参考里，按默认槽位"}
+    if not faces or len(faces) + 1 > plan.capacity:      # K-AST-263 槽位上限：放不下设定图 → 不挤掉脸，保持默认槽位（参考板 B 档），不阻断
+        return {**job, "variant_note": f"脸槽 {len(faces)} 个 + 设定图超过 {plan.capacity} 槽上限（或没有脸槽），按默认槽位"}
+    if any(sl.kind == "sheet" and sl.character == lead for sl in plan.slots):
         return job
     n = len(faces) + 1
-    sl = AR.Slot(n, "sheet", ref.file, "lin_wan", ["造型" + (ref.look_id or "") + "设定图"],
-                 [{"file": ref.file, "label": ref.label, "role": "sheet", "source": ref.source, "character": "lin_wan",
-                   "look_id": ref.look_id or next((c.get("look") for c in sr.characters if c.get("character") == "lin_wan"), None)}])
+    sl = AR.Slot(n, "sheet", ref.file, lead, ["造型" + (ref.look_id or "") + "设定图"],
+                 [{"file": ref.file, "label": ref.label, "role": "sheet", "source": ref.source, "character": lead,
+                   "look_id": ref.look_id or next((c.get("look") for c in sr.characters if c.get("character") == lead), None)}])
     sl.line = AR._line(project, sl)
     plan2 = dataclasses.replace(plan, slots=[*faces, sl], prompt_prefix="".join(x.line for x in faces) + sl.line)
     body = job["prompt"][len(plan.prompt_prefix):]
     return {**job, "prompt": plan2.prompt_prefix + body, "refs": plan2.files, "asset_refs": AR.record(sr, plan2),
-            "face_files": [x.file for x in faces]}
+            "face_files": face_files_of(faces)}
+
+
+linwan_sheet_variant = lead_sheet_variant      # 旧名兼容（外部脚本 / 旧测试）
 
 
 def vqa_gate(sid: str, stage: str, file_rel: str, job: dict, pf: dict) -> dict | None:
@@ -911,7 +948,11 @@ def outbox_emit(sid: str, stage: str, n: int, file_rel: str) -> None:
         # 原来写死 data/renders/epNN/SN/takes.json，第二季的 takes 从没进过 outbox（笔记本 98 镜没有 takes.json）
         import re as _re
         mdir = _re.match(r"(renders/(?:[^/]+/)?ep\d{2}/S\d+)/", file_rel or "")
-        takes_rel = f"data/{mdir.group(1)}/takes.json" if mdir else f"data/renders/{ep}/{s}/takes.json"
+        if mdir:
+            takes_rel = f"data/{mdir.group(1)}/takes.json"
+        else:                                         # W33：兜底也按本进程的剧取目录，不写死 V1 的 data/renders/epNN/SN
+            from ns_render import pipeline as _P, render_paths as _RP
+            takes_rel = f"data/{_RP.shot_rel_dir(_P.shot_dir(sid), _P.DATA, _P.RENDERS)}/takes.json"
         OB.write(f"{'first' if stage == 'image' else 'last'}:{sid}", "take",
                  [takes_rel, f"data/{file_rel}"], host=host, root=ROOT)
     except Exception as e:  # noqa: BLE001
@@ -1141,7 +1182,7 @@ class World:
         self.script = script
         self.filter = shots_filter
         self.procs = python_procs() if paths.root == ROOT else []
-        self.fv2 = jl(paths.frames_v2, {}) or {}
+        self.fv2 = fv2_for_run(paths, jl(paths.frames_v2, {}) or {})   # W33：全局 frames_v2 按镜号存 → 只留本剧的尝试 / final
         self.vstate = {}
         for h in ("gpu33", "gpu36"):
             self.vstate[h] = (jl(paths.vid / f"state_{h}.json", {}) or {}).get("shots") or {}
@@ -1172,6 +1213,8 @@ class World:
         out: set[int] = set()
         for c in self.procs:          # run（出图）和 rescore（重打分，可能改当前版本）都算 ASSETMASTER 占着这几集
             if "frames_v2.py" in c and re.search(r"\s(run|rescore)\b", c):
+                if not fv2_proc_run_ok(self.p, c):   # W33：frames_v2 是 V1 专用工具（--run 只许 legacy）——不把 V2 的集标成 ASSETMASTER 在做
+                    continue
                 m = re.search(r"--eps\s+(\S+)", c)
                 out |= set(parse_eps(m.group(1))) if m else set(range(1, 11))
         return out
@@ -1583,8 +1626,8 @@ class FrameExec:
             first_job = faces_only_variant(project, ep, shot, first_job, rung.get("plan_kw") or {})
         if rung.get("variant") == "double_face" and kind == "first":   # 策略 B：同一张身份脸放两槽，加身份权重
             first_job = double_face_variant(project, ep, shot, first_job, rung.get("plan_kw") or {})
-        if rung.get("variant") == "faces_look" and kind == "first":   # 双人镜 A 版：两张脸 + 林晚本镜造型设定图（第 3 槽）
-            first_job = linwan_sheet_variant(project, ep, shot, first_job, rung.get("plan_kw") or {})
+        if rung.get("variant") == "faces_look" and kind == "first":   # 双人镜 A 版：两张脸 + 主角本镜造型设定图（第 3 槽）
+            first_job = lead_sheet_variant(project, ep, shot, first_job, rung.get("plan_kw") or {}, lead=lead_char(self.p.run_id))
         if rung.get("board") and kind == "first":       # 双人镜 B 版：两张脸 + 参考板（与 ASSETMASTER frames_v2 同一函数）
             from ns_agent import asset_refs as AR
             if str(ROOT / "tools" / "assetmaster") not in sys.path:
@@ -1595,7 +1638,7 @@ class FrameExec:
             if first_job["prompt"].startswith(plan.prompt_prefix) and plan2 is not plan:
                 body = first_job["prompt"][len(plan.prompt_prefix):]
                 first_job = {**first_job, "prompt": plan2.prompt_prefix + body, "refs": plan2.files,
-                             "asset_refs": AR.record(sr, plan2), "face_files": [x.file for x in plan2.slots if x.kind == "face"]}
+                             "asset_refs": AR.record(sr, plan2), "face_files": face_files_of(plan2.slots)}
         owner_edit = ((jl(self.p.rejects, {}) or {}).get(f"{kind}:{sid}") or {}).get("edit")
         if kind == "first":
             job = apply_owner_edit(first_job, owner_edit)
@@ -1740,7 +1783,8 @@ class FakeFrameExec:
             raise ConnectionError(f"/prompt: HTTP 502 Bad Gateway（注入：{lane} 隧道断）")
         stage = "image" if kind == "first" else "last"
         n = P._next_n(sid, stage)
-        rel = f"renders/{sid.split('-')[0]}/{sid.split('-')[1]}/takes/{stage}_{n:03d}.png"
+        from ns_render import render_paths as RP     # W33：带剧名前缀（原来写死 renders/epNN/SNN 落进 V1 目录）
+        rel = f"{RP.shot_take_rel_dir(sid)}/{stage}_{n:03d}.png"
         f = P.DATA / rel
         f.parent.mkdir(parents=True, exist_ok=True)
         Image.effect_noise((768, 1344), 60 + 10 * attempt).convert("RGB").save(f)   # 纯色图会被坏图检查（<10 KB）拦下
@@ -1861,6 +1905,10 @@ class Producer:
         # （00:46 派出的 ep01-S10 / ep02-S1 / S2 / S3 到 01:03 一直没交给 ComfyUI，四个队列都是空的）。
         # 线程数放大到道数 × 3；同时用 SCORE_BACKLOG 限制“出好但还没打完分”的数量，打分跟不上时停派（背压），不堆积。
         self.scoring: set[str] = set()             # 出好、正在等契约打分 / 看图的对象
+        self.rescoring: set[str] = set()           # W20：只重打分的对象（不占道；心跳算 scoring，不算 rendering）
+        self._rescore_futs: dict[str, cf.Future] = {}   # 对象 → 只重打分的 future（超时放位后仍留着，回来前不重派、占上限）
+        self._score_down_until = 0.0               # W20：打分链路熔断到（这之前不派只重打分）
+        self.rescore_pool = cf.ThreadPoolExecutor(max_workers=max(2, RESCORE_MAX + 2), thread_name_prefix="producer-rescore")
         self._backlog_env = int(os.environ.get("NS_PRODUCER_SCORE_BACKLOG", "0"))
         self.score_backlog_max = self._backlog_env or 2 * (len(self.lanes) or 1) * vlm_instances()     # 启动值；之后按实测吞吐动态更新
         # 11-02 02:2x 复核：gpu33 线程池 18 < 积压上限 48，等打分的线程占满后新单在池里排 50–100 s 才开始（dispatch 02:08:30 → rendered
@@ -1919,12 +1967,13 @@ class Producer:
         try:
             SG = sop_gate_mod(self.p.root)
             auto = bool((SG.config(self.p.root).get("promote") or {}).get("auto"))
-            res = SG.promote(self.p.run_id, self.p.root, by="producer.maybe_promote", apply=auto)
+            res = SG.promote(self.p.run_id, self.p.root, by="auto:producer.maybe_promote", apply=auto)   # W18：status_history 记 auto
         except Exception as e:  # noqa: BLE001  # arch-ok: 判不了 = 保持 preparing（暂停，失败关闭）
             self.logf("promote_err", error=repr(e)[:200], counted=False)
             return None
         if res.get("applied"):
             self.logf("run_promoted", run=self.p.run_id, why=res.get("why"), counted=False, rule="PRODMERGE-O / sop_gate.promote")
+            promote_live(self.p.root, f"✅ 自动提升（producer.maybe_promote，L-154）：{self.p.run_id} preparing → producing，{res.get('why')}")
             return "producing"
         if res.get("promote") and getattr(self, "_promote_logged", None) != res.get("episodes"):
             self._promote_logged = res.get("episodes")
@@ -2004,6 +2053,10 @@ class Producer:
         led_all = {**self.ledger(), "_master_rejects": jl(self.p.rejects, {}) or {}}
         reg = derive(w, led_all, leases, self.run_summary_fn())
         lanes = self.probe_lanes(ctrl)
+        try:
+            self.reap_rescores()                   # W20：超时的只重打分放位（暂停时也照做，不让心跳一直挂着 inflight）
+        except Exception as e:  # noqa: BLE001
+            self.logf("rescore_reap_err", error=repr(e)[:300])
         self.heal_lanes()                          # ASSIGN D：卡死道自愈（定向打断自己 / 孤儿的超时单；过期锁、读不到锁登记）
         reg.update(updated=iso(), heartbeat=now(), pid=os.getpid(), paused=bool(ctrl.get("paused")),
                    paused_by=ctrl.get("paused_by"), lanes=lanes, workers=ctrl["workers"],
@@ -2028,6 +2081,10 @@ class Producer:
                     self.escalate_exhausted(reg)  # K-OPS-E09：驳回阶梯用完的对象自动定下一步（不停下等人）
                 except Exception as e:  # noqa: BLE001
                     self.logf("escalate_err", error=repr(e)[:300])
+                try:
+                    self.dispatch_rescores(reg)        # W20：只重打分独立派（不要空闲道、熔断 + 上限 + 退避）
+                except Exception as e:  # noqa: BLE001
+                    self.logf("rescore_dispatch_err", error=repr(e)[:300])
                 self.dispatch_frames(reg, lanes, ctrl)
             try:
                 self.video.tick(reg, ctrl, w.night_alive(), self.logf)
@@ -2045,10 +2102,8 @@ class Producer:
         except Exception as e:  # noqa: BLE001
             self.logf("consistency_err", error=repr(e)[:200])
         js(self.p.registry, reg)
-        with self.mu:
-            scoring_n = len(self.scoring)
-        js(self.p.heartbeat, {"ts": iso(), "t": now(), "pid": os.getpid(), "paused": reg["paused"], "inflight": len(self.inflight),
-                              "scoring": scoring_n, "rendering": max(0, len(self.inflight) - scoring_n),   # K-OPS-F12：重启队列只等 rendering=0
+        js(self.p.heartbeat, {"ts": iso(), "t": now(), "pid": os.getpid(), "paused": reg["paused"],
+                              **self.hb_counts(),                    # K-OPS-F12：重启队列只等 rendering=0
                               **self.identity()})                    # ISS-1103-033310-5833：心跳带 run 身份（为哪部剧在跑、从哪读的）
         sig = json.dumps([[(o["id"], o["status"], o.get("attempts")) for S in E["shots"] for o in S["objects"].values()]
                           for E in reg["episodes"]] + [reg["paused"]], ensure_ascii=False)
@@ -2057,6 +2112,14 @@ class Producer:
             js(self.p.mirror, {"updated": reg["updated"], "counts": reg["counts"], "paused": reg["paused"],
                                "note": "PRODUCER 状态变了（live.py 据此推 stage 事件，界面重取 /api/producer/status）"})
         return reg
+
+    def hb_counts(self) -> dict:
+        """心跳口径：inflight = 全部在途；scoring = 出好等打分 + 只重打分（W20：只重打分不占道，不算 rendering）；
+        rendering = 真在出图道上的"""
+        with self.mu:
+            scoring_n = len(self.scoring) + len(self.rescoring)
+            return {"inflight": len(self.inflight), "scoring": scoring_n, "rescoring": len(self.rescoring),
+                    "rendering": max(0, len(self.inflight) - scoring_n)}
 
     def auto_reset_best_effort(self, reg, every_s: float = 300) -> dict:
         """K-OPS-E11（总调度 11-02 02:2x / DISTILL gates.best_effort_policy）：尽力版（不进合成）在规则或资产版本变化时自动重置、
@@ -2347,12 +2410,7 @@ class Producer:
             if not free:
                 break
             led = self.ledger().get(o["id"]) or {}
-            rt = led.get("rescore_take") or o.get("rescore_take")     # K-OPS-F12：打分被重启打断的版本同样只重打分
-            if rt:                               # 上次只是打分没打成：只重打分（不占道、不重出、不计次）
-                if self.leases.acquire(o["id"], holder_note="rescore"):
-                    with self.mu:
-                        self.inflight[o["id"]] = {"lane": None, "since": now()}
-                    self.pool.submit(self._rescore_one, o, int(rt))
+            if led.get("rescore_take") or o.get("rescore_take"):   # 只重打分归 dispatch_rescores（W20），这里不派、不占道
                 continue
             tried = set(led.get("lanes_failed") or [])
             lane = next((ln for ln in free if ln not in tried), free[0])
@@ -2535,14 +2593,14 @@ class Producer:
                 "variant": var, "preset": "frame_v9_heavy", "strategy": "C", "seed_info": sinfo}
 
     def rung_ab(self, o: dict, attempt: int) -> dict | None:
-        """双人镜首帧（总调度 11-01 06:16 定默认，依据 A/B：A 4/12 过、B 0/8 过）：第 1、2 次 两张脸 + 林晚造型设定图（A，
+        """双人镜首帧（总调度 11-01 06:16 定默认，依据 A/B：A 4/12 过、B 0/8 过）：第 1、2 次 两张脸 + 主角造型设定图（A，
         第 2 次换 seed），第 3 次才退到 两张脸 + 参考板（B）；每次都记 variant"""
         if o["kind"] != "first" or not self.two_person(o["shot"]):
             return None
         from ns_render import pipeline as P
         seed, sinfo = self.seed_pick(o, attempt, "ab")
         if attempt < 3:
-            return {"name": f"第 {attempt} 次：两张脸 + 林晚造型设定图（A）" + ("，换 seed" if attempt == 2 else ""), "seed": seed,
+            return {"name": f"第 {attempt} 次：两张脸 + 主角造型设定图（A）" + ("，换 seed" if attempt == 2 else ""), "seed": seed,
                     "plan_kw": {"two_person": "both_faces"}, "variant": "faces_look", "seed_info": sinfo}
         return {"name": f"第 {attempt} 次：退到 两张脸 + 参考板（B）", "seed": seed, "plan_kw": {"two_person": "both_faces"},
                 "board": True, "variant": "faces_board", "seed_info": sinfo}
@@ -2575,6 +2633,7 @@ class Producer:
                                 reason=f"契约打分超时或出错（{type(e).__name__}），图已入库，5 分钟后只重打分、不重出，不算一次尝试")
                 self.logf("score_timeout", obj=oid, take=res["take"], error=repr(e)[:200], counted=False,
                           render_s=render_s, contract_s=round(now() - t1, 1), gpu_s=res.get("gpu_s"))
+                self.score_chain_trip(f"{oid} 出图后契约打分超时")
                 return
             contract_s = round(now() - t1, 1)
             if pf.get("score_infra"):
@@ -2584,6 +2643,7 @@ class Producer:
                                         "契约打分时 gpu33 出错（显存 / 连接），5 分钟后只重打分、不重出，不算一次尝试"))
                 self.logf("score_infra", obj=oid, take=res["take"], error=str(pf.get("remote_error") or pf.get("error"))[:200],
                           counted=False, render_s=render_s, contract_s=contract_s, gpu_s=res.get("gpu_s"))
+                self.score_chain_trip(f"{oid} 出图后契约打分 score_infra")
                 return
             L = self.ledger().get(oid) or {}
             if rung.get("redo"):
@@ -2682,6 +2742,87 @@ class Producer:
             if slot == oid:
                 self.leases.release(oid)
 
+    def _rescore_dispatchable(self, o: dict) -> int | None:
+        """W20：这一对象是不是“只重打分”且现在可以派 → 返回要重打的版本号"""
+        if o.get("status") != "ready" or str(o.get("waiting_for") or "").startswith("基础设施退避"):
+            return None
+        if o["id"] in self.inflight or o["id"] in self._rescore_futs:
+            return None
+        if self._dispatch_only and o.get("shot") not in self._dispatch_only:
+            return None
+        led = self.ledger().get(o["id"]) or {}
+        if float(led.get("backoff_until") or 0) > now():
+            return None
+        rt = led.get("rescore_take") or o.get("rescore_take")
+        return int(rt) if rt else None
+
+    def score_chain_trip(self, why: str, cool_s: float = SCORE_CHAIN_COOL_S) -> None:
+        """W20：打分链路（gpu33 ssh 打分 / 共用验收）刚出错 → 熔断一段时间：期间不派只重打分（出图照派，打分积压闸照管）"""
+        until = now() + cool_s
+        if until > self._score_down_until:
+            self._score_down_until = until
+            self.logf("score_chain_down", why=str(why)[:200], until=iso(until), counted=False)
+
+    def dispatch_rescores(self, reg) -> int:
+        """W20：只重打分（K-OPS-F12 / A-02：图已入库、只是打分没打成）独立派单：
+        不要空闲道、不进出图线程池；打分链路熔断期间不派；同时在跑（含超时后还没回来的）≤ RESCORE_MAX；返回本拍派出数"""
+        with self.mu:
+            self._rescore_futs = {k: f for k, f in self._rescore_futs.items() if not f.done()}
+            busy = len(self._rescore_futs)
+        pend = [o for E in reg.get("episodes") or [] for S in E.get("shots") or []
+                for k in ("last", "first") for o in [(S.get("objects") or {}).get(k)] if o]
+        pend = [(o, rt) for o in pend for rt in [self._rescore_dispatchable(o)] if rt]
+        if not pend:
+            return 0
+        if self._score_down_until > now():
+            if getattr(self, "_last_rs_defer_log", 0) < now() - 300:
+                self._last_rs_defer_log = now()
+                self.logf("rescore_defer", n=len(pend), until=iso(self._score_down_until), counted=False,
+                          why="打分链路刚出错（隧道 / gpu33 打分 / 共用验收），熔断期内不派只重打分，不占位")
+            return 0
+        n = 0
+        for o, rt in pend:
+            if busy >= RESCORE_MAX:
+                if getattr(self, "_last_rs_cap_log", 0) < now() - 300:
+                    self._last_rs_cap_log = now()
+                    self.logf("rescore_cap", busy=busy, max=RESCORE_MAX, waiting=len(pend) - n, counted=False)
+                break
+            oid = o["id"]
+            if not self.leases.acquire(oid, holder_note="rescore"):
+                continue
+            with self.mu:
+                self.inflight[oid] = {"lane": None, "since": now(), "rescore": True, "take": rt}
+                self.rescoring.add(oid)
+                self._rescore_futs[oid] = self.rescore_pool.submit(self._rescore_one, o, rt)
+            busy += 1
+            n += 1
+            self.logf("rescore_dispatch", obj=oid, take=rt, counted=False)
+        return n
+
+    def reap_rescores(self, timeout_s: float | None = None) -> list:
+        """W20：只重打分超过时限还没回来（隧道断、ssh 卡住、退回 CPU 慢算）→ 放位：出 inflight / rescoring、放租约、
+        逐级退避、熔断打分链路。线程回不来也不再挡心跳和重启队列；future 留着，回来前不重派（占 RESCORE_MAX）"""
+        lim = RESCORE_TIMEOUT_S if timeout_s is None else timeout_s
+        out = []
+        with self.mu:
+            late = [(k, v) for k, v in self.inflight.items() if v.get("rescore") and now() - float(v.get("since") or 0) > lim]
+            for k, _v in late:
+                self.inflight.pop(k, None)
+                self.rescoring.discard(k)
+        for oid, v in late:
+            L = self.ledger().get(oid) or {}
+            ki = int(L.get("rescore_infra") or 0) + 1
+            back = RESCORE_BACKOFF[min(ki - 1, len(RESCORE_BACKOFF) - 1)]
+            self.led_update(oid, rescore_infra=ki, backoff_until=now() + back,
+                            reason=f"只重打分超过 {int(lim)} s 没拿到结论（打分链路不可用），{back // 60} 分钟后再试（不重出、不计次）")
+            self.leases.release(oid)
+            self.logf("rescore_timeout", obj=oid, take=v.get("take"), waited_s=round(now() - float(v.get("since") or 0), 1),
+                      backoff_s=back, counted=False)
+            out.append(oid)
+        if out:
+            self.score_chain_trip(f"只重打分超时：{'、'.join(out)[:120]}")
+        return out
+
     def _rescore_one(self, o, n) -> None:
         oid, sid = o["id"], o["shot"]
         stage = "image" if o["kind"] == "first" else "last"
@@ -2704,21 +2845,34 @@ class Producer:
                     pf = {**pf, "ok": False, "score_infra": False,
                           "reasons": list(pf.get("reasons") or []) + [f"共用验收复核 {k - 1} 次仍没拿到结论"]}
             if pf.get("score_infra"):
-                self.led_update(oid, backoff_until=now() + 600, reason="契约打分 / 共用验收仍没拿到结论，10 分钟后再试（不重出、不计次）")
-                self.logf("score_infra", obj=oid, take=n, counted=False)
+                ki = int(L.get("rescore_infra") or 0) + 1
+                back = RESCORE_BACKOFF[min(ki - 1, len(RESCORE_BACKOFF) - 1)]
+                self.led_update(oid, rescore_infra=ki, backoff_until=now() + back,
+                                reason=f"契约打分 / 共用验收仍没拿到结论，{back // 60} 分钟后再试（不重出、不计次）")
+                self.logf("score_infra", obj=oid, take=n, counted=False, backoff_s=back,
+                          error=str(pf.get("remote_error") or pf.get("error") or "")[:200])
+                self.score_chain_trip(f"{oid} 只重打分 score_infra")
                 return
             hist = [dict(h, ok=bool(pf.get("ok")), blocking=pf.get("blocking")) if h.get("take") == n else h
                     for h in L.get("history") or []]
-            self.led_update(oid, rescore_take=None, history=hist,
+            self.led_update(oid, rescore_take=None, rescore_infra=None, history=hist,
                             **({"final": "passed", "reason": None} if pf.get("ok") else {"reason": "重打分后：" + pf_reason(pf)}))
             self.logf("rescore", obj=oid, take=n, ok=pf.get("ok"), blocking=pf.get("blocking"), counted=False)
         except Exception as e:  # noqa: BLE001
-            self.led_update(oid, backoff_until=now() + 600, last_error=repr(e)[:200])
-            self.logf("rescore_err", obj=oid, take=n, error=repr(e)[:200])
+            L = self.ledger().get(oid) or {}
+            ki = int(L.get("rescore_infra") or 0) + 1
+            back = RESCORE_BACKOFF[min(ki - 1, len(RESCORE_BACKOFF) - 1)]
+            self.led_update(oid, rescore_infra=ki, backoff_until=now() + back, last_error=repr(e)[:200])
+            self.logf("rescore_err", obj=oid, take=n, error=repr(e)[:200], backoff_s=back)
+            self.score_chain_trip(f"{oid} 只重打分出错：{repr(e)[:120]}")
         finally:
             with self.mu:
-                self.inflight.pop(oid, None)
-            self.leases.release(oid)
+                mine = (self.inflight.get(oid) or {}).get("rescore")
+                if mine:                          # 已被 reap_rescores 放位的不再动 inflight / 租约（可能已是别的单）
+                    self.inflight.pop(oid, None)
+                self.rescoring.discard(oid)
+            if mine:
+                self.leases.release(oid)
 
     def reconcile_demoted(self, w) -> None:
         """每轮都让账本跟上 takes.json（DATAALIGN D-LEDGER）：
@@ -2792,7 +2946,7 @@ class Producer:
         """ASSETMASTER 交接（总调度 11-01）：frames_v2 不再占着的集里，还没有过契约当前版本的镜，
         若 frames_v2 已出过、且契约已打过分的尝试还没登记进 takes.json → 走 register_takes 登记（带原契约结果，
         由 auto_current.on_contract 决定是否设为当前），不重出。过契约的优先（只登最好的一张），没过的也登记成可查的候选"""
-        fv = jl(self.p.frames_v2, {}) or {}
+        fv = jl(self.p.frames_v2, {}) or {}       # 按剧过滤在下面 _adopt_same_run（逐条记 adopt_skip 留痕，W28）
         owned = set((reg.get("external") or {}).get("ASSETMASTER frames_v2") or [])
         n_new = 0
         import register_takes as RT
@@ -2807,13 +2961,14 @@ class Producer:
                     atts = [a for a in ((fv.get(S["shot"]) or {}).get(stage) or {}).get("attempts") or []
                             if a.get("file") and isinstance(a.get("postflight"), dict) and a["postflight"].get("ok") is not None
                             and (self.p.root / a["file"]).is_file()]
+                    atts = [a for a in atts if self._adopt_same_run(S["shot"], stage, a)]   # W28：C-14 跨剧不认领
                     for a in sorted(atts, key=lambda a: score_key(a["postflight"]), reverse=True):
                         pf = a["postflight"]
                         it = {"shot": S["shot"], "stage": stage, "file": a["file"], "seed": a.get("seed"),
                               "prompt": a.get("sent_prompt") or "", "refs": a.get("refs"), "workflow": "frame_v9_unified",
                               "label": "ASSETMASTER 已出（PRODUCER 接手登记）",
                               "postflight": {"ok": bool(pf.get("ok")), "items": pf.get("items") or [], "reasons": pf.get("reasons") or []},
-                              "origin": {"run": "assetmaster/frames_v2", "adopted_by": AGENT, "seed": a.get("seed"),
+                              "origin": {"run": "assetmaster/frames_v2", "src_run": self.p.run_id, "adopted_by": AGENT, "seed": a.get("seed"),
                                          "lane": a.get("lane"), "contract_ok": bool(pf.get("ok"))}}
                         r = RT.register(it, label=it["label"])
                         if r.get("status") == "registered":
@@ -2821,6 +2976,19 @@ class Producer:
                             self.logf("adopt", obj=o["id"], take=r.get("n"), ok=bool(pf.get("ok")), seed=a.get("seed"),
                                       current=r.get("current"), rerendered=False)
         return n_new
+
+    def _adopt_same_run(self, sid: str, stage: str, a: dict) -> bool:
+        """W28（C-14 / L-126）：frames_v2/state.json 是全局文件、按镜号不按剧 —— 只认本剧的尝试：
+        条目 run == 本剧，或文件在本剧渲染目录下；都不满足（他剧 / 无剧名的 V1 旧图）→ 不认领，记 adopt_skip（每进程每条一次）"""
+        if fv2_attempt_run_ok(self.p, a):
+            return True
+        key = (sid, stage, a.get("file"))
+        seen = self.__dict__.setdefault("_adopt_skipped", set())
+        if key not in seen:
+            seen.add(key)
+            self.logf("adopt_skip", obj=f"{sid}:{stage}", file=a.get("file"), att_run=a.get("run"), run=self.p.run_id,
+                      counted=False, why="跨剧" if a.get("run") else "无剧名")
+        return False
 
     def _best(self, sid, stage, hist) -> int | None:
         from ns_render import pipeline as P
@@ -3035,6 +3203,18 @@ def sop_gate_mod(root: Path = ROOT):
         sp.loader.exec_module(m)
         _SG_MODS[key] = m
     return _SG_MODS[key]
+
+
+def promote_live(root: Path, line: str) -> None:
+    """W18：自动提升写 V2_LIVE 一行（report_issue._insert_live 同一写法；文件不在 = 不写，测试临时根不会凭空建文件）"""
+    try:
+        import importlib.util as _u
+        sp = _u.spec_from_file_location("report_issue_for_producer", ROOT / "tools/master/report_issue.py")
+        m = _u.module_from_spec(sp)
+        sp.loader.exec_module(m)
+        m._insert_live(f"{time.strftime('%H:%M')} {line}", Path(root) / "docs/master/V2_LIVE.md")
+    except Exception:  # noqa: BLE001  # arch-ok: V2_LIVE 写不进去不拦提升（runs.json status_history 是权威）
+        pass
 
 
 def producer_cfg(root: Path = ROOT) -> dict:
@@ -3577,7 +3757,7 @@ def dryrun(inject_fail: bool = False, keep: bool = False, dest: Path | None = No
 PRESET_WORD = {"frame_v9": "frame_v9 换 seed", "frame_v9_heavy": "frame_v9_heavy（写实·重，krea2 0.8）"}
 
 
-VARIANT_WORD = {"faces_look": "两张脸 + 林晚造型设定图（A）", "faces_board": "两张脸 + 参考板（B）", "faces_only": "只挂脸（策略 A）",
+VARIANT_WORD = {"faces_look": "两张脸 + 主角造型设定图（A）", "faces_board": "两张脸 + 参考板（B）", "faces_only": "只挂脸（策略 A）",
                 "double_face": "双份身份脸（策略 B）"}
 
 
@@ -3691,17 +3871,44 @@ def master_approve(paths: Paths, oid: str, n: int, by: str, note: str = "") -> i
     return 0
 
 
-def reset_best_effort(paths: Paths, why: str, by: str) -> int:
+def best_effort_objs(paths: Paths, shots: set[str] | None = None) -> list[dict]:
+    """本剧 registry（paths.pd 按剧：V2 = data/producer/runs/<run>/registry.json，不读 V1 的 data/producer/）里还是“尽力”的首帧 / 尾帧"""
+    reg = jl(paths.registry, {}) or {}
+    return [o for E in reg.get("episodes") or [] for S in E.get("shots") or [] for k, o in (S.get("objects") or {}).items()
+            if k in ("first", "last") and o.get("status") == "best_effort" and not o.get("redo")
+            and (not shots or S.get("shot") in shots)]
+
+
+def reset_best_effort_dry(paths: Paths, shots: set[str] | None = None) -> dict:
+    """W33：reset-best-effort --dry：只列会被重置的对象 + 账本现值 + 全局 frames_v2 里被 W33 过滤掉的他剧尝试数，不暂停、不写任何文件"""
+    L = jl(paths.ledger, {}) or {}
+    raw = jl(paths.frames_v2, {}) or {}
+    mine = fv2_for_run(paths, raw)
+    rows = []
+    for o in best_effort_objs(paths, shots):
+        sid = o.get("shot") or o["id"].split(":", 1)[1]
+        stg = "image" if o["id"].startswith("first:") else "last"
+        r = L.get(o["id"]) or {}
+        all_n = len(((raw.get(sid) or {}).get(stg) or {}).get("attempts") or [])
+        own_n = len(((mine.get(sid) or {}).get(stg) or {}).get("attempts") or [])
+        rows.append({"obj": o["id"], "reason": o.get("reason"), "ledger_tries": r.get("tries"), "ledger_final": r.get("final"),
+                     "fv2_attempts_all": all_n, "fv2_attempts_this_run": own_n, "fv2_final_foreign": bool(
+                         ((raw.get(sid) or {}).get(stg) or {}).get("final")) and not ((mine.get(sid) or {}).get(stg) or {}).get("final")})
+    return {"run": paths.run_id, "registry": paths.registry.relative_to(paths.root).as_posix(),
+            "ledger": paths.ledger.relative_to(paths.root).as_posix(),
+            "would_reset": len(rows), "objs": rows}
+
+
+def reset_best_effort(paths: Paths, why: str, by: str, shots: set[str] | None = None) -> int:
     """总调度 11-01：门槛 / 编译器更新后，仍是“尽力”的首帧 / 尾帧重新给 3 次（旧次数标 before_gate_change，不算）。
-    安全做法：先暂停、等手上的活做完（heartbeat inflight=0，最多 15 分钟），改账本，再恢复原来的暂停状态"""
+    安全做法：先暂停、等手上的活做完（heartbeat inflight=0，最多 15 分钟），改账本，再恢复原来的暂停状态。
+    只动本剧（paths.pd 按剧）的 registry / ledger；W33：shots 给了只重置这些镜"""
     was = bool((jl(paths.ctrl, {}) or {}).get("paused"))
     set_paused(paths, True, by="reset-best-effort", kind="restart", expires_s=180)   # K-OPS-E08：运维暂停 ≤180 s
     t_end = now() + 170
     while now() < t_end and int((jl(paths.heartbeat, {}) or {}).get("inflight") or 0) > 0:
         time.sleep(10)
-    reg = jl(paths.registry, {}) or {}
-    objs = [o for E in reg.get("episodes") or [] for S in E.get("shots") or [] for k, o in (S.get("objects") or {}).items()
-            if k in ("first", "last") and o.get("status") == "best_effort" and not o.get("redo")]
+    objs = best_effort_objs(paths, shots)
     L = jl(paths.ledger, {}) or {}
     for o in objs:
         r = L.setdefault(o["id"], {})
@@ -3713,6 +3920,28 @@ def reset_best_effort(paths: Paths, why: str, by: str) -> int:
         set_paused(paths, False, by="reset-best-effort")
     print("重新给 3 次：", len(objs))
     return 0
+
+
+def retry_obj(paths: Paths, oid: str, by: str, note: str = "") -> dict:
+    """W20：总调度“放回重派”（资产 / 代码修好后不等 30 分钟 preflight 退避、不等签名变化）：
+    清对象的 blocked_until / waiting_asset / backoff_until，assets:<镜> blocked=False；不动 tries / history（不计次）；写 log_event。
+    只认 first:/last: 对象；返回改动前后的关键字段"""
+    kind, _, sid = (oid or "").partition(":")
+    if kind not in ("first", "last") or not sid:
+        raise ValueError(f"retry 只认 first:<镜> / last:<镜>，收到 {oid!r}")
+    L = jl(paths.ledger, {}) or {}
+    r = L.setdefault(oid, {})
+    keys = ("blocked_until", "waiting_asset", "backoff_until", "reason")
+    before = {k: r.get(k) for k in keys}
+    r.update(blocked_until=0, waiting_asset=None, backoff_until=0,
+             reason=f"{by} 放回重派（不计次）" + (f"：{note}" if note else ""), retried_by={"by": by, "at": iso(), "note": note})
+    a = L.get(f"assets:{sid}")
+    a_before = (a or {}).get("blocked")
+    if isinstance(a, dict) and a.get("blocked"):
+        a.update(blocked=False, released_at=now(), released_by=by)
+    js(paths.ledger, L)
+    log_event(paths, "retry", obj=oid, by=by, note=note, counted=False, before=before, assets_blocked_before=a_before)
+    return {"obj": oid, "before": before, "assets_blocked_before": a_before, "tries": r.get("tries")}
 
 
 def rescore(paths: Paths, items: set) -> int:
@@ -3762,13 +3991,221 @@ def rescore(paths: Paths, items: set) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------------------------- W28：跨剧隔离（C-14 / L-126）
+def _renders_rel(paths: Paths) -> str:
+    """本剧渲染目录相对 data/ 的前缀（take.file 的口径）：V2 = renders/<run>/；legacy（V1 不带前缀）= renders/"""
+    return paths.renders.relative_to(paths.data).as_posix().rstrip("/") + "/"
+
+
+def _in_run_renders(paths: Paths, f: str, *, data_rel: bool) -> bool:
+    """文件路径是否在本剧渲染目录下。data_rel=True：take.file 口径（相对 data/）；False：相对仓库根（frames_v2 口径）"""
+    f = str(f or "").replace("\\\\", "/").replace("\\", "/").lstrip("./")
+    if not f:
+        return False
+    if not data_rel:
+        if not f.startswith("data/"):
+            return False
+        f = f[len("data/"):]
+    pre = _renders_rel(paths)
+    if not f.startswith(pre):
+        return False
+    if paths.primary:                              # legacy 不带前缀：renders/<别的剧>/… 不算本剧
+        return bool(re.match(r"(ep\d+|_h3_keyframes)/", f[len(pre):]))
+    return True
+
+
+def fv2_attempt_run_ok(paths: Paths, a: dict) -> bool:
+    """frames_v2/state.json 的一条尝试是否属于本剧：run 字段 == 本剧，或文件在 data/renders/<run>/ 下"""
+    r = a.get("run")
+    if r:
+        return r == paths.run_id
+    return _in_run_renders(paths, a.get("file") or "", data_rel=False)
+
+
+def fv2_proc_run_ok(paths: Paths, cmdline: str) -> bool:
+    """W33：一条 frames_v2.py 进程是不是在做本剧：命令行带 --run X / NS_RUN=X → X == 本剧；不带 = 旧行为 = legacy（V1）"""
+    m = re.search(r"--run[=\s]+(\S+)", cmdline or "") or re.search(r"\bNS_RUN=(\S+)", cmdline or "")
+    if m:
+        return m.group(1).strip("'\"") == paths.run_id
+    return bool(paths.primary)
+
+
+def _fv2_final_run_ok(paths: Paths, fin: dict, own_files: set[str]) -> bool:
+    """final 属于本剧：带 run 字段 → 等于本剧；否则 final.file 是本剧某条尝试的文件或在本剧渲染目录下"""
+    if fin.get("run"):
+        return fin["run"] == paths.run_id
+    f = fin.get("file") or ""
+    return bool(f) and (f in own_files or _in_run_renders(paths, f, data_rel=False))
+
+
+def fv2_for_run(paths: Paths, fv: dict) -> dict:
+    """W33（C-14 / L-126）：data/assetmaster/frames_v2/state.json 是全局文件、按镜号不按剧。
+    registry 读之前过滤：每镜每阶段只留 fv2_attempt_run_ok 的尝试；final 只在属于本剧时保留（V1 的“不合格”不再把 V2 判尽力）；
+    job.preflight 只在本阶段还有本剧尝试 / final 时保留。V1（legacy）自己读 = 原样（行为不变）"""
+    if paths.primary:
+        return fv
+    out: dict = {}
+    for sid, rec in (fv or {}).items():
+        if not isinstance(rec, dict):
+            continue
+        nrec: dict = {}
+        for stg, v in rec.items():
+            if not isinstance(v, dict) or not ({"attempts", "final", "job"} & set(v)):
+                if stg == "run" and v == paths.run_id:
+                    nrec[stg] = v
+                continue
+            atts = [a for a in v.get("attempts") or [] if isinstance(a, dict) and fv2_attempt_run_ok(paths, a)]
+            own = {a.get("file") for a in atts if a.get("file")}
+            nv = {}
+            if atts:
+                nv["attempts"] = atts
+            fin = v.get("final")
+            if isinstance(fin, dict) and fin and _fv2_final_run_ok(paths, fin, own):
+                nv["final"] = fin
+            if nv and v.get("job") is not None:
+                nv["job"] = v["job"]
+            if nv:
+                nrec[stg] = nv
+        if nrec:
+            out[sid] = nrec
+    return out
+
+
+def run_role_ids(paths: Paths) -> set[str]:
+    """本剧角色表：P1_looks.json[].char_id ∪ P1_storyline.json characters[].char_id ∪ 资产包清单 characters（runs.json assets_manifest）"""
+    ids: set[str] = set()
+    for c in jl(paths.run / "P1_looks.json", []) or []:
+        if isinstance(c, dict) and c.get("char_id"):
+            ids.add(c["char_id"])
+    for c in (jl(paths.run / "P1_storyline.json", {}) or {}).get("characters") or []:
+        if isinstance(c, dict) and c.get("char_id"):
+            ids.add(c["char_id"])
+    try:
+        ent = ((jl(paths.root / "config" / "pipeline" / "runs.json", {}) or {}).get("runs") or {}).get(paths.run_id) or {}
+        man = ent.get("assets_manifest")
+        if man:
+            ids |= set((jl(paths.root / man, {}) or {}).get("characters") or {})
+    except Exception:  # noqa: BLE001
+        pass
+    return ids
+
+
+def take_identity_ids(t: dict) -> set[str]:
+    """postflight 身份项（Q1）里出现的角色 id：evidence.sims 的键 + evidence.ref 的键与值"""
+    out: set[str] = set()
+    for pf in (t.get("postflight"), (t.get("params") or {}).get("postflight")):
+        for it in (pf or {}).get("items") or [] if isinstance(pf, dict) else []:
+            if not isinstance(it, dict) or it.get("id") != "Q1":
+                continue
+            ev = it.get("evidence") or {}
+            out |= {k for k in (ev.get("sims") or {}) if isinstance(k, str)}
+            ref = ev.get("ref") or {}
+            if isinstance(ref, dict):
+                out |= {x for x in list(ref) + list(ref.values()) if isinstance(x, str)}
+    return out
+
+
+def foreign_reasons(paths: Paths, t: dict, roles: set[str], rules: set[str]) -> list[str]:
+    """判据：origin = 从全局 frames_v2 认领、却没带本剧 src_run（W28 前的 adopt 全是这种）；role = 身份项角色不在本剧角色表；
+    path = take.file 不在 data/renders/<run>/ 下（注意：ns_render 写版本时 rel 丢了剧名前缀，V2 自己出的图也会命中，缺省不开）"""
+    why = []
+    o = (t.get("params") or {}).get("origin") or {}
+    if "origin" in rules and o.get("run") == "assetmaster/frames_v2" and o.get("src_run") != paths.run_id:
+        why.append(f"origin：从全局 frames_v2 认领（{o.get('registered_at') or '?'}），不带本剧剧名")
+    if "path" in rules and not _in_run_renders(paths, t.get("file") or "", data_rel=True):
+        why.append(f"path：文件不在 data/{_renders_rel(paths)} 下（{t.get('file')}）")
+    if "role" in rules and roles:
+        bad = sorted(take_identity_ids(t) - roles)
+        if bad:
+            why.append(f"role：身份项角色 {','.join(bad)} 不在本剧角色表")
+    return why
+
+
+def quarantine_foreign(paths: Paths, *, apply: bool, rules: set[str] | None = None, by: str = "PRODUCER quarantine-foreign",
+                       ts: str | None = None, mutate=None) -> dict:
+    """W28：扫本剧全部 takes.json，他剧 / V1 混进来的版本 → takes.json 的 quarantined[]（保留全部字段 + 原因 + 时间）。
+    文件在本剧目录内 → 移到 data/quarantine/<run>/<ts>/（只移不删）；不在本剧目录的文件不动。current / 定稿指向它 → 清空并记原因。
+    dry（apply=False）只出清单，不写任何文件。mutate = takes.json 写入口（缺省 ns_render.pipeline.mutate_takes(path=…)）"""
+    rules = set(rules or {"origin", "role"})
+    ts = ts or time.strftime("%Y%m%d-%H%M%S")
+    roles = run_role_ids(paths)
+    qdir = paths.data / "quarantine" / paths.run_id / ts
+    rows, shots = [], 0
+    for tj in sorted(paths.renders.glob("ep*/S*/takes.json")):
+        if paths.primary and tj.parent.parent.parent != paths.renders:
+            continue
+        doc = jl(tj, {}) or {}
+        sid = f"{tj.parent.parent.name}-{tj.parent.name}"
+        hits = []
+        for t in doc.get("takes") or []:
+            why = foreign_reasons(paths, t, roles, rules)
+            if why:
+                stg, n = t.get("stage"), t.get("n")
+                hits.append({"shot": sid, "stage": stg, "n": n, "file": t.get("file"), "why": why,
+                             "current": (doc.get("active") or {}).get(stg) == n,
+                             "locked": (doc.get("locked") or {}).get(stg) == n,
+                             "file_in_run": _in_run_renders(paths, t.get("file") or "", data_rel=True)})
+        if not hits:
+            continue
+        shots += 1
+        if apply:
+            moved = {}
+            for h in hits:
+                src = paths.data / str(h["file"] or "")
+                if h["file_in_run"] and src.is_file():
+                    dst = qdir / "files" / Path(str(h["file"]))
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(src), str(dst))
+                    moved[(h["stage"], h["n"])] = dst.relative_to(paths.root).as_posix()
+                    h["moved_to"] = moved[(h["stage"], h["n"])]
+
+            def _fn(d, _hits=hits, _moved=moved):
+                keys = {(h["stage"], h["n"]): h for h in _hits}
+                keep, q = [], d.setdefault("quarantined", [])
+                for t in d.get("takes") or []:
+                    h = keys.get((t.get("stage"), t.get("n")))
+                    if not h:
+                        keep.append(t)
+                        continue
+                    rec = {**t, "quarantine": {"why": h["why"], "at": iso(), "by": by, "batch": ts,
+                                               "moved_to": _moved.get((t.get("stage"), t.get("n")))}}
+                    for k in ("active", "locked"):
+                        if (d.get(k) or {}).get(t.get("stage")) == t.get("n"):
+                            d[k].pop(t.get("stage"))
+                            rec["quarantine"][f"{k}_cleared"] = f"{k} 指向跨剧版本 v{t.get('n')}，已清空（W28 隔离）"
+                    q.append(rec)
+                d["takes"] = keep
+                return d
+            if mutate is None:
+                from ns_render import pipeline as P
+                P.mutate_takes(sid, _fn, op="producer.quarantine_foreign", by=by, op_id=f"quarantine_foreign:{ts}:{sid}", path=tj)
+                for h in hits:
+                    if h["current"]:
+                        P.audit_active(sid, h["stage"], h["n"], None, f"W28 跨剧隔离：{'；'.join(h['why'])}", by)
+            else:
+                mutate(tj, _fn)
+        rows += hits
+    out = {"run": paths.run_id, "mode": "apply" if apply else "dry", "ts": ts, "rules": sorted(rules),
+           "role_table": sorted(roles), "role_rule": "on" if roles and "role" in rules else "off（角色表为空或未启用）",
+           "shots": shots, "takes": len(rows),
+           "by_rule": {r: sum(1 for x in rows if any(w.startswith(r + "：") for w in x["why"])) for r in sorted(rules)},
+           "current": sum(1 for x in rows if x["current"]), "locked": sum(1 for x in rows if x["locked"]),
+           "files_in_run": sum(1 for x in rows if x["file_in_run"]), "rows": rows}
+    if apply and rows:
+        js(qdir / "manifest.json", out)
+        log_event(paths, "quarantine_foreign", takes=len(rows), shots=shots, dir=qdir.relative_to(paths.root).as_posix(),
+                  by=by, counted=False)
+    return out
+
+
 def main(argv=None) -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:  # noqa: BLE001
         pass
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["serve", "once", "status", "pause", "resume", "dryrun", "rescore", "reject", "approve", "unwait", "uncap", "reset-best-effort", "import-staged"])
+    ap.add_argument("cmd", choices=["serve", "once", "status", "pause", "resume", "dryrun", "rescore", "reject", "approve", "unwait", "uncap", "retry", "reset-best-effort", "import-staged",
+                                        "quarantine-foreign"])
     ap.add_argument("--obj", default="")
     ap.add_argument("--n", type=int, default=0)
     ap.add_argument("--reason", default="")
@@ -3780,7 +4217,7 @@ def main(argv=None) -> int:
     ap.add_argument("--wait", action="store_true")
     ap.add_argument("--no-dispatch", action="store_true")
     ap.add_argument("--by", default="owner")
-    ap.add_argument("--note", default="")
+    ap.add_argument("--note", "--why", dest="note", default="")
     ap.add_argument("--shots", default="", help="pause：只停这些镜（逗号分隔，默认做法）；不写 = 整条道全局暂停（必须带 --kind）")
     ap.add_argument("--minutes", type=float, default=60, help="pause --shots：多少分钟后自动失效")
     ap.add_argument("--run", default="", help="import-staged：目标剧（config/pipeline/runs.json）；不写 / 主剧 = 合并进主导入稿，其它 = data/import/runs/<run>/")
@@ -3788,10 +4225,23 @@ def main(argv=None) -> int:
                     help="pause 的 reason_kind：line_switch / restart / deploy = 运维暂停（≤180 s 到点恢复）；master / owner = 显式暂停（不自动恢复，超 180 s 报警）；不写按 --by 推断")
     ap.add_argument("--expires-s", type=float, default=0, help="pause：到点自动恢复的秒数（ops 上限 180）")
     ap.add_argument("--inject-fail", action="store_true")
+    ap.add_argument("--dry", action="store_true", help="quarantine-foreign：只出清单（缺省即 dry）；reset-best-effort：只列会重置的对象（W33）")
+    ap.add_argument("--apply", action="store_true", help="quarantine-foreign：真的隔离（只移不删，写 manifest）")
+    ap.add_argument("--rules", default="origin,role", help="quarantine-foreign：判据 origin / role / path（逗号分隔；path 在 ns_render 路径前缀修好前会误伤本剧版本）")
     ap.add_argument("--keep", action="store_true")
     ap.add_argument("--skip-rubric-gate", action="store_true", help="import-staged：跳过 rubric 导入闸门（只有总调度能批，--by 须写总调度，记审计）")
     a = ap.parse_args(argv)
     run = (a.run or "").strip() or default_run()
+    if a.cmd == "quarantine-foreign":               # W28：只读扫描 / 隔离，不起进程、不改 ns_render 环境（冒烟剧也能扫）
+        if a.apply and a.dry:
+            print("--dry 与 --apply 只能选一个", file=sys.stderr)
+            return 2
+        r = quarantine_foreign(Paths(run_id=run), apply=a.apply, rules={x for x in a.rules.split(",") if x},
+                               by=a.by if a.by != "owner" else "PRODUCER quarantine-foreign")
+        print(json.dumps({k: v for k, v in r.items() if k != "rows"}, ensure_ascii=False, indent=1))
+        for x in r["rows"]:
+            print(json.dumps(x, ensure_ascii=False))
+        return 0
     if a.run and a.cmd != "import-staged" and not _runs().is_registered(run):   # PRODMERGE-O：--run 只认 runs.json 登记的剧
         print(f"--run {run} 不在 config/pipeline/runs.json（只认登记表里的剧）", file=sys.stderr)
         return 2
@@ -3804,7 +4254,11 @@ def main(argv=None) -> int:
         edit = json.loads(Path(a.edit_file).read_text(encoding="utf-8")) if a.edit_file else None
         return master_reject(paths, a.obj, a.n, a.reason, a.plan.split(","), a.wait_for or None, a.by, edit)
     if a.cmd == "reset-best-effort":
-        return reset_best_effort(paths, a.note or "门槛 / 编译器更新后重新给 3 次（总调度 11-01）", a.by)
+        shots = {x.strip() for x in a.shots.split(",") if x.strip()} or None
+        if a.dry:                                   # W33：只出清单，不暂停、不改账本
+            print(json.dumps(reset_best_effort_dry(paths, shots), ensure_ascii=False, indent=1))
+            return 0
+        return reset_best_effort(paths, a.note or "门槛 / 编译器更新后重新给 3 次（总调度 11-01）", a.by, shots)
     if a.cmd == "import-staged":          # 总调度派的整稿导入（走 PRODUCER 令牌通道）：--obj <暂存稿路径> --reason <sha256> --note
         return import_staged(paths, a.obj, a.reason, a.note, a.by, skip_rubric_gate=a.skip_rubric_gate, run=a.run or None)
     if a.cmd == "uncap":                  # K-OPS-E28：人工看过后多放 N 次（24 小时有效），不清计数
@@ -3813,6 +4267,9 @@ def main(argv=None) -> int:
                                         hard_capped=None)
         js(paths.ledger, L)
         log_event(paths, "uncap", obj=a.obj, n=max(1, a.n or 3), by=a.by, note=a.note, counted=False)
+        return 0
+    if a.cmd == "retry":                  # W20：放回重派（清 blocked / 等资产 / 退避，assets 解挡，不计次）
+        print(json.dumps(retry_obj(paths, a.obj, a.by, a.note), ensure_ascii=False))
         return 0
     if a.cmd == "unwait":                 # 驳回重出在等的前提（如 REFLOCK 修 Q1）满足了 → 放行
         rj = jl(paths.rejects, {}) or {}

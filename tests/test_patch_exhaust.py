@@ -44,7 +44,9 @@ def test_exhausted_writes_diag_and_reports_once(tmp_path, monkeypatch):
     monkeypatch.setattr(AG, "_load", lambda name, rel: RI if name == "report_issue" else _load(name, rel))
     st = AG.AF.Status(rd, 1, 0.0)
     st.d["agent"] = {"processed": [], "used": {"v3#1": 2, "p4#TL-9": 2}, "fact_devs": None}
-    st.d["agent_history"] = [{"step": "patch_ep01_a1", "accepted": False, "note": "I6 lint 每个码不比原稿多 不满足", "fails": 3},
+    # L-163：有没出过包的项会先自动重开（tests/test_auto_reopen.py）；这里测自动重开已用满之后的交总调度路径
+    st.d["agent_history"] = [{"step": "auto_reopen", "fails": 9}] * AG.AUTO_REOPEN_MAX + [
+                             {"step": "patch_ep01_a1", "accepted": False, "note": "I6 lint 每个码不比原稿多 不满足", "fails": 3},
                              {"step": "patch_ep01_a2", "accepted": True, "note": "", "fails": 3}]
     diag = AG.patch_exhausted(rd, 1, st, FAILS, AG.PATCH_MAX, "补丁已出 10 次仍有 3 项失败")
     # 诊断落盘，内容能让总调度直接定位
@@ -72,6 +74,7 @@ def test_report_failure_does_not_crash_loop(tmp_path, monkeypatch):
     rd = _run(tmp_path, 3)
     monkeypatch.setattr(AG, "_load", lambda name, rel: (_ for _ in ()).throw(RuntimeError("no report_issue")))
     st = AG.AF.Status(rd, 1, 0.0)
+    st.d["agent_history"] = [{"step": "auto_reopen", "fails": 9}] * AG.AUTO_REOPEN_MAX     # L-163 自动重开已用满
     AG.patch_exhausted(rd, 1, st, FAILS, 3, "试满")
     s = json.loads((rd / "autoflow_ep01.json").read_text(encoding="utf-8"))
     assert s["verdict"] == "not_importable" and "登记失败" in s["next_action"] and (rd / "work_ep01" / "patch_diag.json").exists()

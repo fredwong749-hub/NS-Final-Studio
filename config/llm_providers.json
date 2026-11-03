@@ -120,6 +120,16 @@
     "edit_plan": {
       "provider": "abliteration",
       "model": "abliterated-model-large-flash"
+    },
+    "owner_chat": {
+      "provider": "claude_cli",
+      "model": "fable",
+      "timeout_s": 180,
+      "switch_to": {
+        "provider": "abliteration",
+        "model": "abliterated-model-large-flash"
+      },
+      "_doc": "W30 PLAN_OWNER_CHAT 分期 2（项目方 11-03 Q3=Fable）：开发期 claude_cli = 无头 claude -p（命令取 config/pipeline/agent_dispatcher.json claude_cmd，--tools \"\" 不开任何工具）。开发完成后只改这里：provider/model 换成 switch_to 的值（abliteration flash），不改代码。读取方 services/api/ns_api/owner_chat.py"
     }
   }
 }

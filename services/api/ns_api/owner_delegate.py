@@ -13,7 +13,9 @@
 审计：每次代选（含跳过原因，同一原因只记一次）追加 data/owner_queue/delegate_log.jsonl；汇总页 data/review_pages/delegate/index.html。
 
 接口：GET /api/owner/delegate（状态，网页横幅用）· POST /api/owner/delegate/revoke（登录项目方一键撤销）
-CLI：python services/api/ns_api/owner_delegate.py status | enable | revoke | tick | page
+④ 首帧超时代选（L-142 常设，W18）：主剧首帧过“出图检测”、项目方 first_frame.timeout_min 分钟没定 → 按契约分 + bundle 顺序定稿，标“系统代选·可改”
+   （与画布同一定稿入口 frame_jobs.lock_take，L-147 定稿档按 final_tier.auto_final_on_lock 自动接上）；不受 L-136 开关影响，硬规定同上。
+CLI：python services/api/ns_api/owner_delegate.py status | enable | revoke | tick | page | frames [--dry]
 """
 from __future__ import annotations
 
@@ -23,6 +25,7 @@ import importlib
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -525,25 +528,365 @@ def gate_tick(root: Path, spawn=None) -> list[dict]:
     return done
 
 
+# ------------------------------------------------------------------ ④ 首帧超时代选（L-142，W18）
+# 与 L-136 代选模式无关（L-136 到期后照样生效）：L-142 是项目方的常设点选——“ep01 首帧由系统代选（过检后），项目方事后可在 #/queue 修改”。
+# 主剧每镜：首帧有版本过“出图检测”（与 sop_gate.shot_frames 同口径：postflight ok + Q9 pass + 没被驳回）、还没定稿、
+# 项目方 first_frame.timeout_min 分钟（默认 30）内没定 → 按契约分（Q1 身份 + 合并看图逐条通过率）+ bundle 顺序（同分取先出的版本）选一版定稿，
+# 标“系统代选·可改”（takes.json locked_by.image）；写 delegate_log.jsonl + delegate_frames.json + V2_LIVE。
+# 定稿走 frame_jobs.lock_take（与画布定稿同一入口）→ L-147：final_tier.auto_final_on_lock(剧) 为 true 时自动排定稿档重出，定稿档过同一份共用验收。
+# 硬规定（写死）：成人镜 / 成人或本地专用候选 / 拍板类一律 never_reason 拦；项目方动过这镜首帧（锁过 / 解锁过 / 撤过系统代选）不再代；只定稿，不删、不花钱。
+FRAME_SEEN_REL = Path("data/owner_queue/delegate_frames.json")
+FRAME_LEDGER = "L-142"
+FRAME_LABEL = "系统代选·可改"
+FRAME_DEFAULT = {"enabled": False, "timeout_min": 30}          # 配置缺 = 不代（失败关闭）；开关 owner_delegate.json first_frame.enabled
+
+
+def _ts(s) -> float | None:
+    try:
+        return time.mktime(time.strptime(str(s)[:19], "%Y-%m-%dT%H:%M:%S"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _q9_ok(pf: dict) -> bool:
+    q9 = next((i for i in pf.get("items") or [] if isinstance(i, dict) and i.get("id") == "Q9"), None)
+    return bool(q9) and q9.get("status") == "pass"
+
+
+def frame_candidates(root: Path, td: dict) -> list[dict]:
+    """过“出图检测”的首帧版本（sop_gate.shot_frames 同口径）+ 契约分。返回 [{n, score, q1, bundle, at, take}]"""
+    out = []
+    for t in td.get("takes") or []:
+        if t.get("stage") != "image" or not t.get("file") or t.get("quarantined") or t.get("master_reject") or t.get("bad"):
+            continue
+        if not (Path(root) / "data" / str(t["file"])).is_file():
+            continue
+        pf = t.get("postflight") or t.get("contract") or {}
+        if not (isinstance(pf, dict) and pf.get("ok") and _q9_ok(pf)) or pf.get("accept_retry"):
+            continue
+        items = {i.get("id"): i for i in pf.get("items") or [] if isinstance(i, dict)}
+        ev = (items.get("Q1") or {}).get("evidence") or {}
+        q1 = next((float(ev[k]) for k in ("value", "min", "score") if isinstance(ev.get(k), (int, float))), 0.0)
+        rows = ((((items.get("QB") or {}).get("evidence") or {}).get("bundle") or {}).get("items")) or []
+        rows = [r for r in rows if isinstance(r, dict)]
+        bundle = (sum(1 for r in rows if r.get("ok")) / len(rows)) if rows else 0.0
+        at = _ts(pf.get("ts")) or _ts(t.get("created_at"))
+        out.append({"n": int(t["n"]), "score": round(q1 + bundle, 4), "q1": round(q1, 4), "bundle": round(bundle, 4), "at": at,
+                    "blocking": len(pf.get("blocking") or []), "take": t})
+    return out
+
+
+def frame_choose(cands: list[dict]) -> dict:
+    """契约分最高；同分 = bundle 顺序（先出的版本号小的）"""
+    return max(cands, key=lambda c: (-c["blocking"], c["score"], -c["n"]))
+
+
+FRAME_AUDIT_RE = re.compile(r"^/api/shots/(ep\d+-S\d+)/takes/(?:image|first)/\d+/(?:lock|unlock)\b")
+LOCAL_ONLY_MARKS = ("本地生成", "占位", "暂缓")       # 与 producer.LOCAL_ONLY_MARKS 同口径（剧本 H3校验）
+LOCAL_LANE_PREFIX = "laptop:"                       # W18b P1-3：producer 记录的道以 laptop: 开头 = 本地专用
+
+
+class _Unknown(Exception):
+    """判不出来（读不了 / 坏数据）：调用方失败关闭"""
+
+
+def _row_before(r: dict, since: str | None) -> bool:
+    """W29 P2-8：audit / decisions 行不带剧名 → 本剧创建时间（runs.json created_at）之前的行是上一剧的痕迹，不算。
+    行没有可解析的 at → 判不出来，按“本剧的”算（失败关闭）"""
+    if not since:
+        return False
+    at = str(r.get("at") or "")
+    if len(at) < 19 or not at[:4].isdigit():
+        return False
+    return at[:19].replace(" ", "T") < since[:19].replace(" ", "T")
+
+
+def _owner_marks(root: Path, since: str | None = None) -> dict:
+    """W18b P1-4：项目方在网页 / #/queue 动过首帧的镜 → {sid: 说明}。
+    来源：data/audit/*.jsonl 里 /api/shots/<sid>/takes/image|first/<n>/lock|unlock（网页定稿 / 解锁，frame_edit.unlock 不留 locked_history）
+    + data/owner_queue/decisions.jsonl 里提到该镜的任何非代选动作。目录 / 文件不存在 = 没有记录；读不了 → _Unknown（按动过算）"""
+    out: dict[str, str] = {}
+    adir = Path(root) / "data" / "audit"
+    files = sorted(adir.glob("*.jsonl")) if adir.is_dir() else []
+    dec = Path(root) / "data" / "owner_queue" / "decisions.jsonl"
+    if dec.is_file():
+        files.append(dec)
+    for f in files:
+        try:
+            lines = f.read_text(encoding="utf-8").splitlines()
+        except OSError as e:
+            raise _Unknown(f"{f.name} 读不了：{e}") from e
+        for ln in lines:
+            if "ep" not in ln:
+                continue
+            try:
+                r = json.loads(ln)
+            except ValueError as e:
+                print(f"[owner_delegate] 坏行跳过 {f.name}: {e!r}", file=sys.stderr, flush=True)
+                continue                                               # 坏行跳过（其它行照读）
+            if not isinstance(r, dict) or _row_before(r, since):
+                continue
+            if f is dec:
+                if str(r.get("by") or "") == BY or str(r.get("via") or "").startswith("delegate"):
+                    continue                                           # 代选自己的动作不算
+                for sid in set(re.findall(r"ep\d+-S\d+(?!\d)", json.dumps(r, ensure_ascii=False))):
+                    out.setdefault(sid, f"#/queue 有项目方动作（{r.get('id')} {r.get('at')}）")
+            else:
+                m = FRAME_AUDIT_RE.match(str(r.get("path") or ""))
+                if m and str(r.get("method") or "POST").upper() == "POST":
+                    act = "解锁" if r["path"].rstrip("/").endswith("unlock") else "定稿"
+                    out.setdefault(m.group(1), f"网页{act}过首帧（{r.get('user') or '?'} {r.get('at')}）")
+    return out
+
+
+def _owner_touched(td: dict, seen_row: dict | None, mark: str | None = None) -> str | None:
+    if seen_row and (td.get("locked") or {}).get("image") is None:
+        return f"系统代选过 v{seen_row.get('n')}，之后被撤掉（项目方 / 总调度改过），不再代（不推翻）"
+    for h in td.get("locked_history") or []:
+        if isinstance(h, dict) and h.get("stage") == "image":
+            return f"这镜首帧以前锁过 / 解锁过（{h.get('released_by') or '?'}），按项目方动过算，不代"
+    lb = (td.get("locked_by") or {}).get("image")
+    if isinstance(lb, dict) and lb.get("by") not in (None, "delegate"):
+        return f"这镜首帧以前由 {lb.get('by')} 定过稿（locked_by 留痕），按项目方动过算，不代"
+    if mark:
+        return f"{mark}，按项目方动过算，不代"
+    return None
+
+
+def _script_flags(root: Path, run: str, ep: int) -> tuple[set[int], set[int]]:
+    """导入稿（runs.import_path）里本集的 (成人镜, 本地专用镜)。成人 = shot.adult（sop_gate.adult_shots_of 同口径）；
+    本地专用 = H3校验写了“本地生成 / 占位 / 暂缓”或 route=local_only（producer.local_only_shots 同口径）。
+    W18b P0-1：导入稿不存在 / 读不了 / 没有这一集 / 镜号坏 → 抛（调用方整集失败关闭；sop_gate.adult_shots_of 读不到时返回空集 = 放行，不能用）"""
+    sys.path.insert(0, str(_CODE_ROOT / "tools" / "autopilot"))
+    import runs as R  # noqa: PLC0415
+    doc = json.loads(Path(R.import_path(run, Path(root))).read_text(encoding="utf-8"))
+    eps = [e for e in (doc.get("episodes") or []) if isinstance(e, dict) and str(e.get("number")) == str(int(ep))]
+    if not eps:
+        raise LookupError(f"导入稿里没有第 {ep} 集")
+    adult, local = set(), set()
+    for s in eps[0].get("shots") or []:
+        n = int(s["index"])
+        if s.get("adult"):
+            adult.add(n)
+        if any(m in str(s.get("h3_check") or "") for m in LOCAL_ONLY_MARKS) or s.get("route") == "local_only":
+            local.add(n)
+    return adult, local
+
+
+def _producer_lanes(root: Path, run: str) -> dict:
+    """producer 账本（runs.producer_dir(run)/attempts.json）→ {"first:<sid>": {take n: lane}}。没有账本 = {}；读不了 / 坏 → 抛（失败关闭）"""
+    sys.path.insert(0, str(_CODE_ROOT / "tools" / "autopilot"))
+    import runs as R  # noqa: PLC0415
+    p = Path(R.producer_dir(run, Path(root))) / "attempts.json"
+    if not p.is_file():
+        return {}
+    d = json.loads(p.read_text(encoding="utf-8"))
+    if not isinstance(d, dict):
+        raise ValueError(f"{p} 不是对象")
+    out: dict = {}
+    for oid, row in d.items():
+        for h in (row or {}).get("history") or [] if isinstance(row, dict) else []:
+            if isinstance(h, dict) and h.get("take") is not None and h.get("lane"):
+                out.setdefault(oid, {})[int(h["take"])] = str(h["lane"])
+    return out
+
+
+def _cand_lane(take: dict, lanes: dict) -> str | None:
+    pr = take.get("producer")
+    if isinstance(pr, dict) and pr.get("lane"):
+        return str(pr["lane"])
+    return lanes.get(int(take.get("n") or -1))
+
+
+def _primary_run(root: Path) -> tuple[str | None, dict]:
+    reg = _read_json(Path(root) / "config" / "pipeline" / "runs.json", {}) or {}
+    run = reg.get("primary")
+    meta = (reg.get("runs") or {}).get(run) or {}
+    if not run or run == reg.get("legacy_unprefixed_run") or meta.get("status") not in ADVANCE_STATUSES:
+        return None, meta
+    return run, meta
+
+
+def _sop_gate():
+    sp = importlib.util.spec_from_file_location("sop_gate_for_delegate", _CODE_ROOT / "tools" / "master" / "sop_gate.py")
+    m = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m
+
+
+def _default_frame_lock(root: Path, sid: str, n: int, meta: dict, takes_file: Path) -> dict:
+    """与画布定稿同一入口 frame_jobs.lock_take（含 L-147 auto_final_on_lock → submit_final → 定稿档共用验收），再标 locked_by.image。
+    API 进程当前剧的 takes.json 和本拍扫到的不是同一个文件 → 不定（防写错剧）"""
+    from ns_api import frame_jobs as FJ  # noqa: PLC0415
+    from ns_render import pipeline as P  # noqa: PLC0415
+    if (P.shot_dir(sid) / "takes.json").resolve() != Path(takes_file).resolve():
+        raise RuntimeError(f"API 当前剧的 {sid} takes.json 是 {P.shot_dir(sid)}，不是 {takes_file}，不定稿（防写错剧）")
+    view = FJ.lock_take(sid, "image", n, FJ.LockBody())
+    with P.shot_lock(sid):
+        d = P.load_takes(sid)
+        d.setdefault("locked_by", {})["image"] = meta
+        P._save_takes(sid, d, op="delegate_first_frame", by=BY)
+    return {"final_job": bool(view.get("final_job")), "auto_final_on_lock": bool(view.get("final_job")) or None}
+
+
+def frame_tick(root: Path = REPO, now: float | None = None, lock_fn=None, adult_fn=None, live_fn=None, dry: bool = False,
+               local_fn=None, lanes_fn=None, marks_fn=None) -> list[dict]:
+    """→ 本拍代选（或 dry 下“会代选”）的行。超时没到 / 硬规定 / 项目方动过的只记一次 skip。
+    W18b：dry 不受 first_frame.enabled 短路（开关关着也能先看“会代哪些镜”），且 dry 不落盘 delegate_seen / delegate_log / delegate_frames
+    （skip 以 {"event": "skip", "dry": True} 行返回）。成人 / 本地专用 / 项目方动过 —— 判不出来一律失败关闭（不代）"""
+    cfg = {**FRAME_DEFAULT, **(load_cfg(root).get("first_frame") or {})}
+    if not cfg.get("enabled") and not dry:
+        return []
+    run, _meta = _primary_run(root)
+    if not run:
+        return []
+    now = now or time.time()
+    try:
+        sys.path.insert(0, str(_CODE_ROOT / "tools" / "autopilot"))
+        import runs as R  # noqa: PLC0415
+        base = Path(R.renders_dir(run, Path(root)))
+    except Exception:  # noqa: BLE001  # arch-ok: 读不到渲染根 = 不代（失败关闭）
+        return []
+    out: list[dict] = []
+
+    def skip(iid: str, reason: str, extra: dict | None = None) -> None:
+        if dry:
+            out.append({"event": "skip", "item": iid, "reason": reason, "dry": True, **(extra or {})})
+        else:
+            _skip_once(root, iid, reason, extra)
+
+    seen = _read_json(Path(root) / FRAME_SEEN_REL, {})
+    try:                                                                 # P1-4：项目方网页定稿 / 解锁 / #/queue 动作
+        marks, marks_err = (marks_fn(root) if marks_fn else _owner_marks(root, _meta.get("created_at"))), None
+    except Exception as e:  # noqa: BLE001  # arch-ok: 判不出来动没动过 = 按动过算（不代）
+        marks, marks_err = {}, f"{type(e).__name__}: {e}"[:200]
+    try:                                                                 # P1-3：producer 记录的道（laptop: = 本地专用）
+        lanes_all, lanes_err = (lanes_fn or _producer_lanes)(root, run), None
+    except Exception as e:  # noqa: BLE001  # arch-ok: 判不出来 = 不代
+        lanes_all, lanes_err = {}, f"{type(e).__name__}: {e}"[:200]
+    adult_cache: dict[int, set | str] = {}
+    local_cache: dict[int, set | str] = {}
+
+    def ep_set(cache: dict, ep: int, fn) -> set | str:
+        if ep not in cache:
+            try:
+                cache[ep] = set(fn(run, ep))
+            except Exception as e:  # noqa: BLE001  # arch-ok: 判不了 = 整集失败关闭（P0-1：不是只关当前镜）
+                cache[ep] = f"{type(e).__name__}: {e}"[:200]
+        return cache[ep]
+
+    for tj in sorted(base.glob("ep*/S*/takes.json")):
+        ep_s, s_s = tj.parent.parent.name, tj.parent.name
+        if not (ep_s[2:].isdigit() and s_s[1:].isdigit()):
+            continue
+        ep, sn, sid = int(ep_s[2:]), int(s_s[1:]), f"{ep_s}-{s_s}"
+        iid = f"first:{run}/{sid}"
+        td = _read_json(tj, {}) or {}
+        if (td.get("locked") or {}).get("image") is not None:
+            continue                                                     # 已定稿（项目方或已代选）
+        if marks_err:
+            skip(iid, f"项目方动没动过这镜判不出来（{marks_err}），按动过算，不代")
+            continue
+        touched = _owner_touched(td, seen.get(iid), marks.get(sid))
+        if touched:
+            skip(iid, touched)
+            continue
+        cands = frame_candidates(root, td)
+        if not cands:
+            continue                                                     # 还没有过检的版本：等出图检测
+        adult = ep_set(adult_cache, ep, adult_fn or (lambda r, e: _script_flags(Path(root), r, e)[0]))
+        if isinstance(adult, str):
+            skip(iid, f"剧本读不到 / 成人判定失败（第 {ep} 集整集不代）：{adult}")
+            continue
+        local = ep_set(local_cache, ep, local_fn or (lambda r, e: _script_flags(Path(root), r, e)[1]))
+        if isinstance(local, str):
+            skip(iid, f"剧本读不到 / 本地专用判定失败（第 {ep} 集整集不代）：{local}")
+            continue
+        if lanes_err:
+            skip(iid, f"producer 记录读不了，候选是不是本地专用判不出来（{lanes_err}），不代")
+            continue
+        lanes = lanes_all.get(f"first:{sid}") or {}
+        cl = [_cand_lane(c["take"], lanes) for c in cands]
+        if any(x is None for x in cl):
+            unk = [c["n"] for c, x in zip(cands, cl) if x is None]
+            skip(iid, f"候选 v{unk} 没有 producer 道记录，是不是本地专用判不出来，不代")
+            continue
+        req = {"kind": "pick", "id": iid, "title": f"{run} {sid} 首帧", "adult": sn in adult,
+               "route": "local_only" if sn in local else None,
+               "candidates": [{"adult": c["take"].get("adult"),
+                               "route": "local_only" if (c["take"].get("route") == "local_only" or x.startswith(LOCAL_LANE_PREFIX))
+                               else c["take"].get("route"), "lane": x} for c, x in zip(cands, cl)]}
+        nr = never_reason(req)
+        if nr:
+            skip(iid, nr, {"title": req["title"]})
+            continue
+        first_ok = min((c["at"] for c in cands if c["at"]), default=None)
+        if first_ok is None:
+            skip(iid, "过检版本没有时间戳，算不了等了多久，不代")
+            continue
+        waited = (now - first_ok) / 60
+        if waited < float(cfg["timeout_min"]):
+            continue
+        best = frame_choose(cands)
+        meta = {"by": "delegate", "label": FRAME_LABEL, "ledger": FRAME_LEDGER, "via": "delegate:L-142", "n": best["n"], "at": _now(),
+                "score": best["score"], "why": f"出图检测通过 {waited:.0f} 分钟项目方没定（门槛 {cfg['timeout_min']} 分钟）"}
+        row = {"event": "frame_pick", "item": iid, "kind": "first", "run": run, "shot": sid, "choice": best["n"], "label": FRAME_LABEL,
+               "score": best["score"], "ledger": FRAME_LEDGER, "waited_min": round(waited, 1),
+               "scores": [{k: c[k] for k in ("n", "score", "q1", "bundle", "blocking")} for c in cands],
+               "reason": f"按契约分（Q1 身份 + 合并看图逐条通过率）+ bundle 顺序选 v{best['n']}（{best['score']}）；{meta['why']}"}
+        if dry:
+            out.append({**row, "dry": True, "enabled": bool(cfg.get("enabled"))})
+            continue
+        try:
+            res = (lock_fn or _default_frame_lock)(root, sid, best["n"], meta, tj)
+        except Exception as e:  # noqa: BLE001  # 定稿失败（坏图 / 剧不对 / 接口不收）：只记一次，不重试刷屏
+            skip(iid, f"定稿没成：{type(e).__name__}: {e}"[:300])
+            continue
+        seen = _read_json(Path(root) / FRAME_SEEN_REL, {})
+        seen[iid] = {"n": best["n"], "at": _now(), "score": best["score"]}
+        _atomic_json(Path(root) / FRAME_SEEN_REL, seen)
+        ent = log(root, {**row, "via": "delegate:L-142", "result": res})
+        try:
+            (live_fn or _frame_live)(root, f"🖼 首帧代选（L-142，{FRAME_LABEL}）：{run} {sid} → v{best['n']}（契约分 {best['score']}，"
+                                           f"过检后等了 {waited:.0f} 分钟）" + ("；已排定稿档重出（L-147）" if (res or {}).get("final_job") else ""))
+        except OSError:
+            pass
+        out.append(ent)
+    return out
+
+
+def _frame_live(root: Path, line: str) -> None:
+    sp = importlib.util.spec_from_file_location("report_issue_for_delegate", _CODE_ROOT / "tools" / "master" / "report_issue.py")
+    m = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    m._insert_live(f"{time.strftime('%H:%M')} {line}", Path(root) / "docs" / "master" / "V2_LIVE.md")
+
+
 # ------------------------------------------------------------------ 一拍
-def tick(root: Path = REPO, apply_fn=None, spawn=None, sync_looks=True) -> dict:
+def tick(root: Path = REPO, apply_fn=None, spawn=None, sync_looks=True, frame_lock=None) -> dict:
+    frames, ferr = [], None
+    try:                            # ④ 首帧超时代选（L-142 常设授权，不受 L-136 开关 / 到期影响）
+        frames = frame_tick(root, lock_fn=frame_lock)
+    except Exception as e:  # noqa: BLE001  一类出错不拖累另一类
+        ferr = f"frames: {e!r}"[:300]
+        log(root, {"event": "error", "where": "frames", "error": repr(e)[:300]})
     ok, why = active(root)
     if not ok:
-        return {"active": False, "why": why}
+        return {"active": False, "why": why, "frames": frames, "errors": [ferr] if ferr else []}
     if sync_looks:
         try:                        # 项目方睡着、网页没开时 inbox 不会被读：先把“确认本集造型”投进通知
             from ns_api import look_confirm as LC  # noqa: PLC0415
             LC.sync_picks(Path(root))
         except Exception:  # noqa: BLE001
             pass
-    out = {"active": True, "picks": [], "gates": [], "errors": []}
+    out = {"active": True, "picks": [], "gates": [], "frames": frames, "errors": [ferr] if ferr else []}
     for name, fn in (("picks", lambda: pick_tick(root, apply_fn)), ("gates", lambda: gate_tick(root, spawn))):
         try:
             out[name] = fn()
         except Exception as e:  # noqa: BLE001  一类出错不拖累另一类
             out["errors"].append(f"{name}: {e!r}"[:300])
             log(root, {"event": "error", "where": name, "error": repr(e)[:300]})
-    if out["picks"] or out["gates"] or out["errors"]:
+    if out["picks"] or out["gates"] or out["frames"] or out["errors"]:
         render_page(root)
     return out
 
@@ -673,5 +1016,7 @@ if __name__ == "__main__":
         print(json.dumps(tick(REPO), ensure_ascii=False, indent=1, default=str))
     elif cmd == "page":
         print(render_page(REPO))
+    elif cmd == "frames":       # W18 / L-142：首帧超时代选；frames --dry 只列会代选的镜
+        print(json.dumps(frame_tick(REPO, dry="--dry" in sys.argv), ensure_ascii=False, indent=1, default=str))
     else:
         print(json.dumps(status(REPO), ensure_ascii=False, indent=1))

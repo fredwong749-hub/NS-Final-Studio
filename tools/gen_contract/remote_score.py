@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import time
 import uuid
@@ -395,7 +396,7 @@ def full_score(host: str, items: list[dict], timeout: float = 900, label: str | 
         known = set(json.loads(kp.read_text(encoding="utf-8")))
     except (OSError, ValueError):
         known = set()
-    sha_of, req_items = {}, []
+    sha_of, req_items, need_up = {}, [], []
     for it in items:
         rows = []
         for r in it.get("rows") or []:
@@ -410,8 +411,9 @@ def full_score(host: str, items: list[dict], timeout: float = 900, label: str | 
              "scene": sha_of[sc] if sc else None}
         if not it.get("host_path"):
             f = Path(it["file"])
-            e["b64"] = base64.b64encode((f if f.is_absolute() else root / f).read_bytes()).decode()
+            need_up.append((e, f if f.is_absolute() else root / f))
         req_items.append(e)
+    up_dir, upload = _bulk_upload(host, need_up)          # W21：本机图走独立连接传（不经命令主连接）；失败 → 原 base64-stdin 路径
     code = {}      # K-OPS-F18：度量代码不随请求下发（服务器只跑部署版；口径一致靠发版，不靠覆盖服务器上的文件）
     rev = {v: k for k, v in sha_of.items()}
     send = {s for s in sha_of.values() if s not in known}
@@ -424,6 +426,12 @@ def full_score(host: str, items: list[dict], timeout: float = 900, label: str | 
         d = _full_call(host, cmd, req_items, code, rev, send, known, root, timeout, faces)
     finally:
         _hb_done(hb)
+        if up_dir:                                        # 传上去的图打完就删（小命令，走主连接；删失败只留垃圾，不影响结果）
+            try:
+                ssh(host, f"rm -rf {up_dir}", timeout=120)
+            except Exception:  # noqa: BLE001   arch-ok: 清理失败不改变打分结果
+                pass
+    d["upload"] = upload
     known = d.pop("_known", known)
     kp.parent.mkdir(parents=True, exist_ok=True)
     kp.write_text(json.dumps(sorted(known)), encoding="utf-8")
@@ -436,6 +444,42 @@ def full_score(host: str, items: list[dict], timeout: float = 900, label: str | 
         if isinstance(v, dict) and v.get("Q7"):
             v["Q7"]["file"] = it.get("scene")
     return d
+
+
+BULK_MIN_BYTES = 1 << 20      # W21：本机图合计 ≥ 1 MB 才走独立连接（每次 = 一条新跳板连接；~10–27 次 / 时，见 data/netfix/rssh_calls.jsonl 15:xx）
+
+
+def _bulk_upload(host: str, need: list) -> tuple[str | None, dict]:
+    """W21 NETFIX-BULK（ISS-1103-150939，运维 FONG-QUICK：大文件不要走 -t）：full_score 原来把本机图 base64 塞进 ssh stdin，
+    走命令主连接（挂在 base-a 一条 TCP 上）→ 几 MB 图把小命令堵住、打分 1800 s 超时。改为先经 rssh.bulk_put（sftp，<host>-hk 单独一条连接）
+    传到 R/up/<批>/，请求里只带 host_path；打分命令本身仍走主连接。
+    传不了（不在笔记本 / sftp 失败 / 超时）→ 这批全部退回 base64-stdin 原路径，mode 如实记 b64_fallback（不冒充走了独立连接）。
+    → (远端目录 | None, {"mode": none|sftp-hk|b64|b64_fallback, ...})"""
+    import base64
+    if not need:
+        return None, {"mode": "none"}
+    total = sum(Path(f).stat().st_size for _, f in need)
+    if total < int(os.environ.get("NS_BULK_MIN_BYTES", BULK_MIN_BYTES)):   # 小批不值得多一条跳板握手（运维：跳板每小时新建 < 50）
+        for e, f in need:
+            e["b64"] = base64.b64encode(Path(f).read_bytes()).decode()
+        return None, {"mode": "b64", "bytes": total}
+    up_dir = f"{R}/up/fsu_{time.strftime('%H%M%S')}{uuid.uuid4().hex[:4]}"
+    names = [e["id"].replace("/", "_").replace(":", "_").replace("|", "_") + ".png" for e, _ in need]
+    why = None
+    try:
+        r = _rssh().bulk_put(host, [(f, n) for (_, f), n in zip(need, names)], up_dir,
+                             timeout=max(120, 60 + 30 * len(need)))
+    except Exception as ex:  # noqa: BLE001   arch-ok: 独立传输出任何错都退回原路径（下面如实记 b64_fallback）
+        r, why = None, repr(ex)[:200]
+    if r is not None and r.returncode == 0:
+        for (e, _), n in zip(need, names):
+            e["host_path"] = f"{up_dir}/{n}"
+        return up_dir, {"mode": "sftp-hk", "files": len(need), "dir": up_dir}
+    if r is not None:
+        why = f"rc={r.returncode} " + (r.stderr or b"").decode("utf-8", "replace")[-200:]
+    for e, f in need:
+        e["b64"] = base64.b64encode(Path(f).read_bytes()).decode()
+    return (up_dir if r is not None else None), ({"mode": "b64_fallback", "why": why} if why else {"mode": "b64"})
 
 
 def _hb_start(host: str, items: list[dict], label: str | None):

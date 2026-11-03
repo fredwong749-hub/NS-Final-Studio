@@ -14,6 +14,7 @@ from pathlib import Path
 
 from . import image_params as IP
 from . import workflows as W
+from . import render_paths as RP   # W33
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -88,7 +89,7 @@ def _run(client, shot_id: str, stage: str, job: dict, seed: int, timeout_s: floa
     entry, secs = client.run(wf, timeout_s=timeout_s)
     client.last_image_wf = wf
     item = next(f for f in client.output_files(entry) if f["filename"].endswith(".png"))
-    rel_dir = rel_dir or f"renders/{P.shot_dir(shot_id).relative_to(P.RENDERS).as_posix()}/takes"
+    rel_dir = rel_dir or RP.shot_take_rel_dir(shot_id)   # W33：带剧名前缀
     # 总调度 11-01：文件名防撞——n 只是开工时的估计（takes.json 被改写 / 并发时会重复），文件名再带一段随机串，绝不覆盖已有文件
     import uuid as _uuid
     raw = f"{rel_dir}/{stage}_{n:03d}_{_uuid.uuid4().hex[:8]}_raw.png"

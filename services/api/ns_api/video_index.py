@@ -28,11 +28,20 @@ STATES = ("rendering", "queued", "pending_review", "final", "need_frames", "todo
 def _url(rel: str | None) -> str | None:
     from ns_api import v1_guard
     from ns_render import pipeline as _P
-    rel = v1_guard.scoped(rel, data_dir=_P.DATA)   # V1 的文件不给 V2 页面（L-126）
+    from ns_render import render_paths as RPS
     if not rel:
         return None
-    r = rel.replace("\\", "/")
-    return "/files/" + (r[5:] if r.startswith("data/") else r.lstrip("/"))
+    r = rel.replace("\\", "/").lstrip("/")
+    r = r[5:] if r.startswith("data/") else r
+    if RPS.is_unprefixed(r):   # W36（同 frames_index W34）：旧口径 renders/epNN/… 先解析到本剧已迁移的位置
+        try:
+            r = RPS.resolve_rel(r, data=_P.DATA).resolve().relative_to(Path(_P.DATA).resolve()).as_posix()
+        except (ValueError, OSError):  # arch-ok: 解析不出 → 按原 rel 交给 v1_guard（V1 口径照旧挡）
+            pass
+    r = v1_guard.scoped(r, data_dir=_P.DATA)   # V1 的文件不给 V2 页面（L-126）
+    if not r:
+        return None
+    return "/files/" + r.lstrip("/")
 
 
 def _ts(s) -> float | None:

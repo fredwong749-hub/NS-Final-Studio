@@ -459,7 +459,16 @@ def tick(root: Path = ROOT, cfg: dict | None = None, runs: dict | None = None, s
                     _fail(root, j, cfg, f"起裁图子进程失败：{e!r}"[:300], rec)
             jobs = [j for j in jobs if not (j.get("kind") == "item" and is_crop_job(j))]
             pend = [j for j in jobs if j.get("kind") in AJ.RENDER_KINDS and j.get("state") == "pending"]
-            if not dry:                                # W6：上次没收尾留下够数的过检候选 → 直接接管，不占道重出
+            # W6c（A6b P2）：身份核不上的子进程还没确认退出（lane_suspect 还在）——即便被人工 requeue 成 pending，也不起新子进程、不 salvage
+            susp = [j["id"] for j in pend if j.get("lane_suspect")]
+            if susp:
+                rec.setdefault("suspect_waiting", []).extend(susp)
+                pend = [j for j in pend if not j.get("lane_suspect")]
+            back = [j for j in pend if _backing_off(j)]  # W6c 追加：上次候选没测出（看图服务不可用）→ 退避期内不起子进程
+            if back:
+                rec.setdefault("unmeasured_backoff", []).extend({"id": j["id"], "retry_after": j.get("retry_after")} for j in back)
+                pend = [j for j in pend if j not in back]
+            if not dry:                               # W6：上次没收尾留下够数的过检候选 → 直接接管，不占道重出
                 pend = [j for j in pend if not try_salvage(root, j, cfg, rec, "上次子进程没收尾")]
             gated = [j for j in pend if j.get("kind") == "sheet" and not AJ.registered_face(root, run, (j.get("spec") or {}).get("cid") or "")]
             if gated:                                  # ISS-1103-004547-ca20：脸没登记，设定图不派
@@ -557,7 +566,9 @@ def _fail(root: Path, j: dict, cfg: dict, why: str, rec: dict, final: bool = Fal
     if not retry:
         try:
             AJ._report(root, j["run"], j.get("episode") or 0, "8 资产就绪", f"资产作业 {j['id']}（{j.get('who')}）连续失败：{why}", True,
-                       "看 data/pipeline/asset_jobs/<run>/<job>.json 的 log；修好后把 state 改回 pending")
+                       ("内容真不过：要项目方挑场景底图（owner_pick 待办 " + str(j.get("pick_id")) + "）；或总调度 asset_jobs.py requeue 重排"
+                        if j.get("kind") == "scene" and "张不过" in why and not str(why).startswith("没有候选过检（0 张不过")
+                        else "看 data/pipeline/asset_jobs/<run>/<job>.json 的 log；修好后把 state 改回 pending"))
         except Exception:  # noqa: BLE001  登记卡点失败不影响作业状态
             pass
 
@@ -634,7 +645,7 @@ def _child_save(root: Path, job: dict) -> bool:
 
 def _start(root: Path, j: dict, lane: str | None, spawn, rec: dict) -> None:
     jp = AJ.job_path(root, j["run"], j["id"])
-    j.update(state="running", lane=lane, attempts=int(j.get("attempts") or 0) + 1, started_at=AJ._now(), error=None)
+    j.update(state="running", lane=lane, attempts=int(j.get("attempts") or 0) + 1, started_at=AJ._now(), error=None, retry_after=None)
     AJ.log(j, f"起子进程（道 {lane or 'CPU'}，第 {j['attempts']} 次）")
     AJ.save_job(root, j)
     p = (spawn or _spawn)(j, jp, lane)
@@ -786,22 +797,28 @@ def reject_summary(recs: list[dict]) -> str:
     c = Counter()
     for r in recs:
         for k, v in (r.get("label") or {}).items():
-            if v not in ("pass", "na"):
-                c[LABEL_ZH.get(k, k)] += 1
+            if v not in ("pass", "na"):     # W6c 追加：untested = 没测出（服务没出结论），不写成“不过”
+                c[(LABEL_ZH.get(k, k), "没测出" if v == "untested" else "不过")] += 1
         qs = (r.get("vlm") or {}).get("questions") or []
         for it in (r.get("vlm") or {}).get("items") or []:
             n = int(it.get("n") or 0)
             if not it.get("ok") and 0 < n <= len(qs):
-                c[f"“{qs[n - 1][:24]}”"] += 1
+                c[(f"“{qs[n - 1][:24]}”", "不过")] += 1
     if not c:
         return ""
-    return f"{len(recs)} 张候选里：" + "，".join(f"{k} 不过 {v} 张" for k, v in c.most_common(6)) + "。逐张："
+    return f"{len(recs)} 张候选里：" + "，".join(f"{k} {verb} {v} 张" for (k, verb), v in c.most_common(6)) + "。逐张："
 
 
 def q9_queue_timeout(post: dict) -> bool:
     """Q9 没拿到看图结果（服务排队 / 未跑，evidence 里没有 model）= 不是图的问题，应重试"""
     q9 = next((i for i in (post or {}).get("items") or [] if i.get("id") == "Q9"), None)
     return bool(q9 and q9.get("status") in ("untested", None) and not (q9.get("evidence") or {}).get("model"))
+
+
+def is_infra_error(e: BaseException) -> bool:
+    """基础设施错（出图机连不上 / 隧道断 / 超时）：不是内容不过，作业退避重试、不计 attempts（W31，ISS-1103-155905-9a0f）"""
+    return type(e).__name__ in ("ComfyUnavailable", "ConnectionRefusedError", "ConnectionResetError", "TimeoutError") or (
+        isinstance(e, OSError) and not isinstance(e, FileNotFoundError))
 
 
 class Q9Timeout(RuntimeError):
@@ -1154,6 +1171,20 @@ def _kill(pid: int) -> None:
         pass
 
 
+UNMEASURED_BACKOFF_S = 300     # 没测出（看图 / 人数服务不可用）→ 作业退避 5 分钟再起（W6c 追加）
+
+
+def _backing_off(j: dict, now: float | None = None) -> bool:
+    """作业还在“没测出”退避期内（retry_after 没到）"""
+    ra = j.get("retry_after")
+    if not ra:
+        return False
+    try:
+        return time.mktime(time.strptime(str(ra)[:19], "%Y-%m-%dT%H:%M:%S")) > (time.time() if now is None else now)
+    except (TypeError, ValueError):   # arch-ok: 格式不对 = 不退避
+        return False
+
+
 def run_job(jp: Path, lane: str, root: Path = ROOT, renderer=None, cfg: dict | None = None) -> dict:
     """子进程主体：按需要的候选数出图（最多 2 倍种子），通过的投待办通知；收尾释放道"""
     cfg = cfg or config(root)
@@ -1165,26 +1196,43 @@ def run_job(jp: Path, lane: str, root: Path = ROOT, renderer=None, cfg: dict | N
     rejects: list[str] = []
     reject_recs: list[dict] = []
     timeouts = 0
+    unmeasured: list[str] = []          # W6c 追加：没测出的候选（看图 / 人数服务没出结论）——不算不过、不计 attempts
+    streak = 0                          # 连续没测出的张数：服务挂了就别再烧 GPU 出新种子
+    AC = import_dep("asset_checks", root=ROOT)
     try:
         for i in range(need * 2):
             if len(passed) >= need or (job.get("state") == "failed" and job.get("final")):   # 被 tick 定案：不再出新种子
+                break
+            if streak >= int(cfg.get("unmeasured_streak") or 2):
+                AJ.log(job, f"连续 {streak} 张候选没测出（看图服务不可用），不再出新种子，等退避后重试")
                 break
             seed = base + i
             try:
                 r = (renderer or render_one)(job, lane, seed, root)
             except Exception as e:  # noqa: BLE001  一张失败记下继续下一粒种子
-                timeouts += isinstance(e, Q9Timeout)
+                infra = isinstance(e, Q9Timeout) or is_infra_error(e)   # W31：ComfyUnavailable（连不上出图机）同口径：未测≠不过
+                timeouts += infra
+                streak = streak + 1 if infra else streak
                 errors.append(f"seed {seed}: {type(e).__name__}: {e}"[:200])
                 AJ.log(job, errors[-1])
                 _child_save(root, job)
                 if "preflight 不过" in str(e):
                     break                                          # 编译 / 前置契约不过 = 换种子也没用
                 continue
-            job.setdefault("candidates", []).append({"seed": seed, "passed": r.get("passed"), "label": r.get("label"), "file": r.get("review_file") or r.get("file"),
-                                                     "thumb": r.get("thumb"), "sha256": r.get("sha256")})
+            um = [] if r.get("passed") else AC.unmeasured_keys(r.get("label"), r.get("vlm"))
+            cand = {"seed": seed, "passed": r.get("passed"), "label": r.get("label"), "file": r.get("review_file") or r.get("file"),
+                    "thumb": r.get("thumb"), "sha256": r.get("sha256")}
+            if um:
+                cand["unmeasured"] = um
+            job.setdefault("candidates", []).append(cand)
             _child_save(root, job)
+            streak = streak + 1 if um else 0
             if r.get("passed"):
                 passed.append(r)
+            elif um:
+                unmeasured.append(f"seed {seed}：{'、'.join(f'{k}=untested（{LABEL_ZH.get(k, k)}）' for k in um)}")
+                AJ.log(job, "候选没测出（看图服务没出结论，不算不过）：" + unmeasured[-1])
+                _child_save(root, job)
             else:
                 reject_recs.append(r)
                 rejects.append(f"seed {seed}：{reject_reason(r)}"[:400])
@@ -1194,10 +1242,19 @@ def run_job(jp: Path, lane: str, root: Path = ROOT, renderer=None, cfg: dict | N
             AJ.log(job, "作业已被 tick 定案（身份核不上），子进程只补写候选，不投待办、不改状态；由 tick 核验本进程退出后接管")
         elif passed:
             job = deliver(root, jp, job, passed)
-        elif timeouts and not rejects and timeouts == len(errors):
-            job.update(state="pending", error=f"本地看图复核排队超时 {timeouts} 次，重排（不算失败）")
+        elif (unmeasured or timeouts) and timeouts == len(errors) and (unmeasured or not rejects):
+            # 没拿到结论 = 基础设施问题：回 pending 退避重试，不计 attempts、不判 failed（W6c 追加；与 producer Q9 口径一致）
+            back = int(cfg.get("unmeasured_backoff_s") or UNMEASURED_BACKOFF_S)
+            if unmeasured and not rejects and not timeouts:
+                why = f"看图服务不可用，等待重试（{len(unmeasured)} 张候选没测出，{back // 60} 分钟后重试，不算失败）"
+            elif unmeasured:
+                why = (f"看图服务不可用，等待重试（{len(unmeasured)} 张没测出" + (f"、{len(rejects)} 张不过" if rejects else "")
+                       + (f"、本地看图复核排队超时 {timeouts} 次" if timeouts else "") + f"，{back // 60} 分钟后重试，不算失败）")
+            else:
+                why = f"本地看图复核排队超时 {timeouts} 次，重排（不算失败）"
+            job.update(state="pending", error=why, retry_after=time.strftime(AJ.TS, time.localtime(time.time() + back)))
             job["attempts"] = max(0, int(job.get("attempts") or 1) - 1)
-            AJ.log(job, job["error"])
+            AJ.log(job, why + " ｜ " + " ｜ ".join((unmeasured + rejects)[-6:])[:800])
         else:
             why = rejects + errors
             job.update(state="failed", error=f"没有候选过检（{len(rejects)} 张不过、{len(errors)} 张出错）：" + reject_summary(reject_recs)

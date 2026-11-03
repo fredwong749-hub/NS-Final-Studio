@@ -206,3 +206,4 @@
 - v3：加入阶段证据表（sop_gate 按它实现）、复盘门、代码 agent ≤ 4、待拍板事项。
 - v3 定稿（04:2x）项目方点选：①ep01 首帧系统代选、事后可改（L-142）；②结构化控制从 ep02 起逐项 A/B 上线（L-143）；③harness 余下三件 ep01 完成后做（L-144）。
 - v4.1（11-03 11:10，总调度 MASTER-WSL，依据 L-160 全权授权）：今日执行序 = ①G2–G7 复审收齐（G2 ✅）→ ②拼树 cut B（sv-20261103-02）→ ③deploy --verify 两台 → ④按 L-152：停笔记本旧 V1 producer、起 V2 producer/night、停 bench2/bakeoff 实验、退役 video10_srv（只停不删）→ ⑤ep01 出图→检测→首帧系统代选（L-142）+总调度亲审→尾帧→视频→整集预览→RETRO_ep01 → ⑥ep02 整集返修（L-158/159）跟进。期间 CODER-PS 做 UI 溢出/409/GPU 卡死自愈/b589 残留。
+- v4.2（11-03 13:17，L-163）：并行加一条“自动化入码”线：W17 RELEASE-AUTO / W18 PRODUCER-LIFECYCLE / W19 WATCHDOG-CODE + CODER-PS 自动重开预算；完成后总调度巡检 cron 降频，常驻自跑。

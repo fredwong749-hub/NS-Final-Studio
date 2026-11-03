@@ -1,0 +1,8 @@
+{
+ "schema": "nsfs.smoke_preset/1",
+ "_doc": "W26 冒烟门低参数（RSI 实施包 §4）。image / video 是冒烟想要的出图 / 视频参数；output 是 G6 判定的成片规格（ns_post.assemble 固定 1080×1920 / 24 fps）。现状（2026-11-03 基线）：现有 preset 机制只有全局 config/render_quality.json（frame_redo_preset / image_presets）+ producer 驳回重出 rung.preset，没有按剧覆盖入口；冒烟脚本不改渲染代码、不改全局配置，所以 image / video 段目前不生效，eval/smoke.py 把“未生效”写进 notes。按剧 preset 入口做好后由总调度 / 诊断线在这里接上。",
+ "image": {"preset": "smoke_low", "width": 512, "height": 896, "steps": 4},
+ "video": {"seconds_cap": 6, "steps": 4, "height": 640},
+ "output": {"width": 1080, "height": 1920, "fps": 24, "duration_tol_s": 2.0},
+ "gate_timeout_s": {"G4": 1500}
+}

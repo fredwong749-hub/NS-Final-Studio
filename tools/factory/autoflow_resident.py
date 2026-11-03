@@ -6,6 +6,7 @@
   - 推进 = 对 run_dir 里写手已交稿（.done）的集起 `autoflow.py run --source daemon`（与 HOLLYWOOD watch 同一实现，跨进程推进锁在 autoflow 里）；
   - 不写任何 control / 暂停字段（不清别人的暂停，A-09 ③ / K-OPS-F26）；
   - 每拍再调一次 tools/pipeline/asset_worker.tick（阶段 A 资产作业：缺口 → 作业 → 候选 → 待办通知；M-AUTOPIPE-01，AUTOPIPE-A 11-03）；
+  - 每 30 分钟跑一轮看门狗 tools/master/watchdog.run（W19，L-163：总调度巡检规则写成代码；连续 3 轮出错登记 P0）；
   - 心跳 data/factory/autoflow_resident.json（pid / t / 在推进的剧 / 最近一次起的集），SENTINEL 按心跳年龄判掉线。
 用法：.venv/Scripts/python.exe tools/factory/autoflow_resident.py [--interval 30] [--once]；拉起 / 重启：ops/restart_autoflow.ps1
 """
@@ -124,7 +125,54 @@ def tick(procs: dict, af=None, runs_mod=None, spawn=None) -> dict:
                 continue
             procs[key] = spawn(rd, ep)
             started.append(f"{run} ep{int(ep):02d}")
-    return {"runs": runs, "started": started, "assets": asset_tick(runs), "dispatch": dispatch_tick(), "hollywood": hollywood_tick(runs)}
+    return {"runs": runs, "started": started, "assets": asset_tick(runs), "dispatch": dispatch_tick(), "hollywood": hollywood_tick(runs),
+            "watchdog": watchdog_tick()}
+
+
+WATCHDOG_RETRY_S = 1800        # 看门狗一轮出错后隔多久再试（与正常间隔同；连续 WATCHDOG_FAIL_STREAK 轮出错 → 登记 P0）
+WATCHDOG_FAIL_STREAK = 3
+_WD = {"next": 0.0}            # 本进程内的下一轮时刻；重启后按 data/master/watchdog_last.json 的 t 续上（watchdog.due）
+
+
+def watchdog_tick(wd=None, now: float | None = None) -> dict:
+    """W19 WATCHDOG-CODE：到点（config/master/watchdog.json every_s，默认 30 分钟）跑一轮 tools/master/watchdog.run（每次重新加载）。
+    没到点 = {}；跑了 = {ran, findings, registered, escalate}；载入 / 运行出错 = {error, phase}（同 asset_tick 口径，run_loop 计连续轮数）。
+    规则自身的错误在 watchdog 内部记进 errors，不算本轮失败"""
+    now = now or time.time()
+    if now < _WD["next"]:
+        return {}
+    try:
+        wd = wd or _load("watchdog_for_resident", "tools/master/watchdog.py")
+    except BaseException as e:  # noqa: BLE001  载入失败：本轮不巡检（失败关闭），常驻不退
+        if isinstance(e, (KeyboardInterrupt, SystemExit)):
+            raise
+        _WD["next"] = now + WATCHDOG_RETRY_S
+        return {"error": repr(e)[:300], "phase": "load"}
+    try:
+        left = wd.due(now=now)
+        if left > 0:
+            _WD["next"] = now + min(left, WATCHDOG_RETRY_S)
+            return {}
+        _WD["next"] = now + WATCHDOG_RETRY_S
+        r = wd.run(now=now)
+        return {"ran": True, "findings": r.get("findings"), "registered": r.get("registered") or [], "escalate": len(r.get("escalate") or []),
+                "rule_errors": len(r.get("errors") or [])}
+    except Exception as e:  # noqa: BLE001  一轮出错只记，不退出常驻
+        _WD["next"] = now + WATCHDOG_RETRY_S
+        return {"error": repr(e)[:300], "phase": "run"}
+
+
+def report_watchdog_stuck(err: dict, streak: int, runs: list[str], reporter=None) -> str | None:
+    """看门狗连续出错 ≥ WATCHDOG_FAIL_STREAK 轮：登记一次 P0（who=resident，阻断）；写法同 report_asset_stuck"""
+    try:
+        rep = reporter or _load("report_issue_for_resident", "tools/master/report_issue.py").report
+        rec = rep(run=(runs or ["-"])[0], episode=0, step="看门狗", who="resident", blocking=True,
+                  what=f"P0 看门狗 tools/master/watchdog.py 连续 {streak} 轮出错（phase={err.get('phase')}），巡检规则没人跑：{str(err.get('error'))[:200]}",
+                  fix_hint="手动跑 .venv/Scripts/python.exe tools/master/watchdog.py run --dry 看报错；修好后下一轮自动恢复（每轮重新加载）")
+        return rec.get("id")
+    except Exception as e:  # noqa: BLE001  登记失败不拖垮常驻
+        life(f"登记看门狗卡点失败：{e!r}")
+        return None
 
 
 def hollywood_tick(runs: list[str] | None = None, ht=None) -> dict:
@@ -245,6 +293,7 @@ def run_loop(interval: int, once: bool, tick_fn=None, sleep=time.sleep, max_tick
     n = 0
     streak = 0
     issue_id = None
+    wd_streak, wd_issue = 0, None
     reason = "未知"
     try:
         while True:
@@ -271,6 +320,20 @@ def run_loop(interval: int, once: bool, tick_fn=None, sleep=time.sleep, max_tick
                     if a.get("reloaded_deps"):
                         hb["reloaded_deps"] = a["reloaded_deps"]       # A12 P2-3：心跳里看得到上拍重载了谁
                         life(f"第 {n} 拍 asset_worker 重载依赖：{a['reloaded_deps']}")
+                w = r.get("watchdog") or {}
+                if w.get("error"):
+                    wd_streak += 1
+                    hb.update(watchdog_error=w["error"], watchdog_error_streak=wd_streak)
+                    life(f"第 {n} 拍看门狗出错（连续 {wd_streak} 轮，已继续）：{w['error']}")
+                    if wd_streak >= WATCHDOG_FAIL_STREAK and wd_issue is None:
+                        wd_issue = report_watchdog_stuck(w, wd_streak, r.get("runs") or [], reporter=reporter) or "登记失败"
+                    if wd_issue:
+                        hb["watchdog_issue"] = wd_issue
+                elif w.get("ran"):
+                    if wd_streak >= WATCHDOG_FAIL_STREAK:
+                        life(f"第 {n} 拍看门狗恢复（此前连续 {wd_streak} 轮出错，卡点 {wd_issue}）")
+                    wd_streak, wd_issue = 0, None
+                    hb["watchdog"] = {"at": hb["at"], **{k: w.get(k) for k in ("findings", "registered", "escalate", "rule_errors")}}
                 hb.setdefault("state", "ok")
                 _write_hb(hb)
             except (KeyboardInterrupt, SystemExit):

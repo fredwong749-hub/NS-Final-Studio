@@ -10,10 +10,20 @@
  "promote": {
   "auto": true,
   "stage": "出图",
-  "_decision": "L-154（项目方 11-03 05:0x “出图自动启动”）：任一集剧本 / 导入闸门 / 资产就绪（整集，L-140 不变）/ 提示词（整集）都过 → producer 自动 preparing→producing，写 runs.json status_history 审计"
+  "_decision": "L-154（项目方 11-03 05:0x “出图自动启动”）：任一集剧本 / 导入闸门 / 资产就绪（整集，L-140 不变）/ 提示词（整集）都过 → producer 自动 preparing→producing，写 runs.json status_history 审计",
+  "_auto_w18": "W18（11-03）：auto 的读取方 = producer.maybe_promote（producer 在跑时每分钟）+ resident_sync.lifecycle_tick（producer 还没起时，每 60 s）；两处都按 sop_gate.promote（judge 出图）判，auto=true 才写 runs.json（status_history by=auto:<谁>），写了同时在 V2_LIVE 记一行；判不可进不动"
  },
  "_prodmerge": "PRODMERGE-O 11-03（PLAN_V2_MASTER v4 1-4 / 1-5）：prompt_probe 改为本模块 compile_preflight（唯一编译入口 build_first + preflight.check，隔离子进程，按剧环境 runs.run_env），不再调 golden_v2；probe_lane = preflight I12 判本地专用资产用的道。promote = runs.json preparing → producing 的规则：任一集 judge(stage) 通过即可提升；auto=false 时 producer 只在日志里报“可以提升”，由总调度 sop_gate.py promote --apply（auto=true 时 producer 每拍自动提升并写 status_history）。",
  "_observe_note": "L-156 项目方 11-03 07:3x 点选：清空、全部 enforce（总调度 MASTER-WSL 执行）",
  "whole_episode_prompts": true,
- "_whole_episode_prompts": "L-140（项目方 11-03 03:1x 否决按镜出图）不变：任何镜进“出图”及以后，提示词阶段按整集判；L-154 自动提升与 L-155 分道并行都在这条之后"
+ "_whole_episode_prompts": "L-140（项目方 11-03 03:1x 否决按镜出图）不变：任何镜进“出图”及以后，提示词阶段按整集判；L-154 自动提升与 L-155 分道并行都在这条之后",
+ "lifecycle": {
+  "apply": true,
+  "hb_stale_min": 5,
+  "grace_min": 10,
+  "max_fails": 3,
+  "health_max_age_min": 15,
+  "laptop_ps1": "ops/autostart/restart_producer.ps1",
+  "_doc": "W18 PRODUCER-LIFECYCLE（tools/autopilot/resident_sync.py lifecycle_tick，loop 里独立线程 60 s 一拍）：primary 某集阶段 ∈ {出图, 出图检测, 尾帧, 视频} 且 producer 心跳 > hb_stale_min 分钟 → 笔记本 restart_producer.ps1 / 负责该集出图分区的服务器 request_restart（mode=producer-only）；阶段 ≥ 尾帧 → 该集视频分区服务器 night（mode=all）。起后 grace_min 分钟内不重复起；连续 max_fails 次起不来 → report_issue P0。服务器 health 记录超过 health_max_age_min 分钟 = 判不了、不起。apply=false = 只算计划写日志（resident_sync.py lifecycle --dry 同口径）；总调度在 cut B deploy 后改 true"
+ }
 }

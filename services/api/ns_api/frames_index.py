@@ -23,32 +23,62 @@ STATUS = ("missing", "new", "best", "final")
 STAGES = (("first", "image"), ("last", "last"))
 
 
-def _url(rel: str | None) -> str | None:
+def _url(rel: str | None, run: str | None = None) -> str | None:
+    """版本文件 rel（相对 data/）→ /files/ 地址。W34：先经 render_paths.resolve_rel 把旧口径 renders/epNN/…
+    解析到本剧已迁移的位置 renders/<run>/epNN/…（迁移前 / 写入方旧代码留下的 rel 也能出图）；
+    解析后仍不在本剧目录下（= V1 文件）→ v1_guard 挡掉（L-126）"""
     from ns_api import v1_guard
     from ns_render import pipeline as _P
-    rel = v1_guard.scoped(rel, data_dir=_P.DATA)   # NAVIA：V1 的文件不给 V2 页面（L-126）
+    from ns_render import render_paths as RPS
     if not rel:
         return None
-    r = rel.replace("\\", "/")
-    if r.startswith("data/"):
-        return "/files/" + r[5:]
-    # takes.json 里的 file 相对 data/ 目录（renders/ep01/…）
+    r = rel.replace("\\", "/").lstrip("/")
+    r = r[5:] if r.startswith("data/") else r
+    if RPS.is_unprefixed(r):
+        try:
+            q = RPS.resolve_rel(r, data=_P.DATA, run=run)
+            r = q.resolve().relative_to(Path(_P.DATA).resolve()).as_posix()
+        except (ValueError, OSError):  # arch-ok: 解析不出新位置 = 按原 rel 交给 v1_guard（V1 口径照旧挡掉）
+            pass
+    r = v1_guard.scoped(r, data_dir=_P.DATA)   # NAVIA：V1 的文件不给 V2 页面（L-126）
+    if not r:
+        return None
+    # takes.json 里的 file 相对 data/ 目录（renders/<run>/ep01/…）
     return "/files/" + r.lstrip("/")
 
 
-def _script_chars() -> dict[str, list[str]]:
-    """shot_id → 在画 / 局部的人物 id（剧本 **人物** 行，与出图同口径）；读不到 → {}"""
-    f = ROOT / "data" / "import" / "script_v2.json"
+def _script_path(run: str | None):
+    """本剧导入稿（tools/autopilot/runs.py script_path）；非 legacy 剧解析到 V1 的 data/import/script_v2.json → None（L-126，不读 V1）"""
+    from ns_agent import run_paths as RPA
+    if run is None:
+        run = RPA.current_run(ROOT)
+    m = RPA.runs_module(ROOT)
+    if m is None or not run:
+        return None
+    f = Path(m.script_path(run, ROOT))
+    if not m.is_legacy(run, ROOT) and f.resolve() == (ROOT / "data" / "import" / "script_v2.json").resolve():
+        return None
+    return f
+
+
+def _script_chars(run: str | None = None) -> dict[str, list[str]]:
+    """shot_id → 在画 / 局部的人物 id（本剧剧本 **人物** 行，与出图同口径）；读不到 → {}。
+    W34：按剧读该剧导入稿（V2 = data/import/runs/<run>/script_v2.json），不再读全局 data/import/script_v2.json（V1 人物 lin_wan）"""
     try:
+        f = _script_path(run)
+        if f is None:
+            return {}
         doc = json.loads(f.read_text(encoding="utf-8"))
         from ns_agent import asset_refs as AR
+        from ns_agent import cast_table as CT
+        name_id = CT.char_ids(run)
     except Exception:  # noqa: BLE001  剧本 / 资产模块读不到：人物筛选就没有数据，不影响出图页本身  # arch-ok: 剧本读不到 = 人物筛选没有数据（返回空映射），出图页本身照常显示
         return {}
     out: dict[str, list[str]] = {}
     for ep in doc.get("episodes") or []:
         n = int(ep.get("number") or 0)
         for sh in ep.get("shots") or []:
-            ids = [AR.NAME_ID.get(nm, nm) for nm, _pr in AR.cast_on_screen(sh)]
+            ids = [name_id.get(nm, nm) for nm, _pr in AR.cast_on_screen(sh)]
             out[f"ep{n:02d}-S{int(sh.get('index') or 0)}"] = list(dict.fromkeys(ids))
     return out
 
@@ -97,29 +127,34 @@ def _edits_by_cell() -> dict[tuple[str, str], dict]:
         return {}
 
 
-def _cell(takes: dict, stage: str, gen: dict | None, edit: dict | None = None) -> dict:
+def _cell(takes: dict, stage: str, gen: dict | None, edit: dict | None = None, run: str | None = None) -> dict:
     act = (takes.get("active") or {}).get(stage)
     lst = [t for t in takes.get("takes") or [] if t.get("stage") == stage]
     cur = next((t for t in lst if t.get("n") == act), None)
     locked = bool((takes.get("locked") or {}).get(stage)) or bool(cur and cur.get("locked"))
     # 项目方 17:0x（ep07-S3 尾帧 #19 Q1 fail 是陌生人，却当“新”给他看）：只有通过验收的版本才算“新”；没通过的留在系统里自动重出
-    live = [t for t in lst if _passing(t)]
+    # W34：被 merge_pull 等并回本剧 takes.json 的 V1 版本（文件只在 V1 目录，v1_guard 不给地址）不算“新”，否则它的 n 更大会把本剧真版本挡住
+    live = [t for t in lst if _passing(t) and _url(t.get("file"), run)]
     bad_after = [t for t in lst if not _passing(t) and not t.get("quarantined") and (act is None or (t.get("n") or 0) > act)]
     new_n, new_url = None, None
     if live:
         top = max(live, key=lambda t: t.get("n") or 0)
         if act is None or (top.get("n") or 0) > act:
-            new_n, new_url = top.get("n"), _url(top.get("file"))
+            new_n, new_url = top.get("n"), _url(top.get("file"), run)
     state = "none" if not cur else ("final" if locked else "current")
-    return {"n": act if cur else None, "url": _url(cur.get("file")) if cur else None, "state": state, "new_n": new_n, "new_url": new_url, "gen": gen,
+    return {"n": act if cur else None, "url": _url(cur.get("file"), run) if cur else None, "state": state, "new_n": new_n, "new_url": new_url, "gen": gen,
             "sys_retry": len(bad_after), "edit": edit}
 
 
-def build(ep: int | None = None, status: str | None = None, char: str | None = None, *, renders: Path | None = None) -> dict:
+def build(ep: int | None = None, status: str | None = None, char: str | None = None, *, renders: Path | None = None,
+          run: str | None = None) -> dict:
+    """run 不给 = 本进程当前剧（RENDERS）；给了 = 该剧渲染根 + 该剧剧本（V1 文件仍由 v1_guard 挡）"""
     from ns_render import pipeline as P
     from ns_api import shot_status as SS
+    if run and renders is None:
+        renders = P._run_renders(run)
     base = renders or P.RENDERS
-    chars = _script_chars()
+    chars = _script_chars(run)
     jobs = _jobs_by_shot()
     edits = _edits_by_cell()
     eps: dict[int, list[dict]] = {}
@@ -139,8 +174,8 @@ def build(ep: int | None = None, status: str | None = None, char: str | None = N
             takes = json.loads((d / "takes.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):  # arch-ok: 这一镜的 takes.json 读坏：跳过这一镜，其余照常显示
             continue
-        first = _cell(takes, "image", jobs.get((sid, "image")), edits.get((sid, "image")))
-        last = _cell(takes, "last", jobs.get((sid, "last")), edits.get((sid, "last")))
+        first = _cell(takes, "image", jobs.get((sid, "image")), edits.get((sid, "image")), run)
+        last = _cell(takes, "last", jobs.get((sid, "last")), edits.get((sid, "last")), run)
         try:
             kind = SS.tags_for(sid, None, takes).get("main")
         except Exception:  # noqa: BLE001  状态标签是锦上添花；算不出就不标  # arch-ok: 状态标签算不出就不标，调用方 tag 为空
@@ -165,7 +200,9 @@ def build(ep: int | None = None, status: str | None = None, char: str | None = N
 
 
 @router.get("/api/frames-index")
-def frames_index(ep: int | None = None, status: str | None = None, char: str | None = None):
+def frames_index(ep: int | None = None, status: str | None = None, char: str | None = None, run: str | None = None):
     if status and status not in STATUS:
         raise HTTPException(422, f"status 只能是 {' | '.join(STATUS)}")
-    return build(ep, status, char)
+    if run is not None and not re.fullmatch(r"[A-Za-z0-9_\-]+", run):
+        raise HTTPException(422, "run 只能是剧名（字母数字下划线横线）")
+    return build(ep, status, char, run=run)

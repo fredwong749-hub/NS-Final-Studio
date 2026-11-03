@@ -308,7 +308,8 @@ def build_first(project: str, ep, shot, g, *, bible=None, model: str = "qwen_ima
     full, c, sr, plan = compile_frame(ep, shot, g, project, bible=bible, model=model, mode=mode, **plan_kw)
     body = full[len(plan.prompt_prefix):]
     if prompt_override:
-        body = prompt_override if ST.preset_suffix() in prompt_override else f"{prompt_override}，{ST.image_suffix()}"
+        seg_in, seg_src = ST.segment_of(shot)       # P1-1（REVIEW-G4）：改稿路径按本剧本段取后缀（与 :323 同一函数），不再取当前剧缺省段
+        body = prompt_override if ST.preset_suffix(project, seg_in) in prompt_override else f"{prompt_override}，{ST.image_suffix(project, seg_in)}"
         body = with_note(body, shot_language_note(project, shot, mode) + plan.prompt_note + outer_items_note(project, ep, shot, sr, body)
                          + ("" if mode == "sheet" else eyeline_note(shot, sr, body))
                          + garment_detail_note(project, ep, shot, sr, body) + blocking_note(shot, body))

@@ -1,0 +1,130 @@
+"""W23 VQA-ROUTE：看图客户端路由（本机 8870 优先 → 8871 隧道 → 未测）、超时 = 未测、route.jsonl。全用桩，不连真服务。"""
+from __future__ import annotations
+
+import json
+import socket
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "services" / "agent"))
+
+from ns_agent.vqa import client as C  # noqa: E402
+from ns_agent.vqa import contract  # noqa: E402
+
+REQ = {"system": "s", "text": "t", "images": [{"path": "nope.png", "max_pixels": 1000}]}
+
+
+@pytest.fixture
+def env(monkeypatch, tmp_path):
+    monkeypatch.delenv("OFFLINE_SELF", raising=False)
+    monkeypatch.delenv("VQA_LAN", raising=False)
+    monkeypatch.delenv("VQA_URL", raising=False)
+    monkeypatch.setattr(C, "CACHE", tmp_path / "cache")
+    monkeypatch.setattr(C, "ROUTE_LOG", tmp_path / "route.jsonl")
+    monkeypatch.setattr(C, "_rcfg", lambda: {"queue_max": 3, "busy_wait_s": 0.3, "poll_s": 0.1,
+                                             "timeouts": {"image": 240, "ask": 30}})
+    monkeypatch.setattr(C.time, "sleep", lambda s: None)
+    st = {"health": {}, "posts": []}
+
+    def up(u):
+        h = st["health"].get(u.rsplit(":", 1)[1])
+        C._HEALTH.pop(u, None)
+        if h is None:
+            return False
+        C._HEALTH[u] = h() if callable(h) else h
+        return True
+
+    def post(u, body, t):
+        st["posts"].append((u, t, body))
+        r = st.get("post")
+        if isinstance(r, BaseException):
+            raise r
+        return r or {"text": "{}", "model": "m"}
+
+    monkeypatch.setattr(C, "_local_up", up)
+    monkeypatch.setattr(C, "_post_local", post)
+    st["log"] = lambda: [json.loads(x) for x in (tmp_path / "route.jsonl").read_text(encoding="utf-8").splitlines()]
+    return st
+
+
+def test_local_up_only_local(env):
+    env["health"] = {"8870": {"loaded": True, "queue": 1}, "8871": {"loaded": True, "queue": 0}}
+    r = C.generate(dict(REQ), refresh=True, kind="image")
+    assert "error" not in r and r["route"] == "local"
+    assert [u for u, _, _ in env["posts"]] == ["http://127.0.0.1:8870"]
+    assert env["posts"][0][1] == 240 * 2                   # 超时 = timeouts[image] ×（排队+1）
+    row = env["log"]()[-1]
+    assert row["route"] == "local" and row["ok"] is True and row["kind"] == "image" and {"at", "ms"} <= set(row)
+
+
+def test_local_down_uses_tunnel(env):
+    env["health"] = {"8871": {}}
+    r = C.generate(dict(REQ), refresh=True)
+    assert "error" not in r and env["posts"][0][0].endswith(":8871")
+    assert env["log"]()[-1]["route"] == "tunnel"
+
+
+def test_local_not_loaded_uses_tunnel(env):
+    env["health"] = {"8870": {"loaded": False, "queue": 0}, "8871": {"queue": 0}}
+    C.generate(dict(REQ), refresh=True)
+    assert env["posts"][0][0].endswith(":8871")
+
+
+def test_both_down_untested(env):
+    r = C.generate(dict(REQ), refresh=True)
+    assert r["status"] == "untested" and r["reason"] == "服务不可用" and not env["posts"]
+    assert env["log"]()[-1] == {**env["log"]()[-1], "route": "none", "ok": False}
+    v = C._finish(REQ, r, "image", "x.png")
+    st, _, ev = contract._item(v, False)
+    assert st == "untested" and not ev.get("model")         # accept.q9_timeout 口径：evidence 无 model → retry 不判 fail
+
+
+@pytest.mark.parametrize("exc", [TimeoutError("timed out"), socket.timeout("timed out")])
+def test_timeout_untested(env, exc):
+    env["health"] = {"8870": {"loaded": True, "queue": 0}}
+    env["post"] = exc
+    r = C.generate(dict(REQ), refresh=True, kind="ask")
+    assert r["status"] == "untested" and r["reason"] == "超时"
+    assert env["posts"][0][1] == 60                         # 至少 60 s（配置 30 也抬到 60）
+    row = env["log"]()[-1]
+    assert row["route"] == "local" and row["ok"] is False and row["reason"] == "超时"
+
+
+def test_connection_drop_untested(env):
+    env["health"] = {"8870": {"loaded": True, "queue": 0}}
+    env["post"] = ConnectionResetError("reset")
+    assert C.generate(dict(REQ), refresh=True)["reason"] == "服务不可用"
+
+
+def test_local_busy_waits_not_tunnel(env):
+    env["health"] = {"8870": {"loaded": True, "queue": 9}, "8871": {"queue": 0}}
+    r = C.generate(dict(REQ), refresh=True)
+    assert r["status"] == "untested" and r["reason"] == "本机忙" and not env["posts"]   # 不切隧道
+
+
+def test_local_busy_then_frees(env):
+    qs = iter([5, 5, 1])
+    env["health"] = {"8870": lambda: {"loaded": True, "queue": next(qs)}, "8871": {"queue": 0}}
+    r = C.generate(dict(REQ), refresh=True)
+    assert "error" not in r and env["posts"][0][0].endswith(":8870")
+
+
+def test_timeout_capped_by_wait_s(env):
+    env["health"] = {"8870": {"loaded": True, "queue": 2}}
+    C.generate(dict(REQ), refresh=True, kind="image", wait_s=60)
+    assert env["posts"][0][1] == 180
+
+
+def test_cache_hit_no_route(env):
+    env["health"] = {"8870": {"loaded": True, "queue": 0}}
+    C.generate(dict(REQ), refresh=True)
+    n = len(env["log"]())
+    assert C.generate(dict(REQ))["cached"] and len(env["log"]()) == n and len(env["posts"]) == 1
+
+
+def test_route_cfg_present():
+    rc = json.loads((ROOT / "config" / "vqa.json").read_text(encoding="utf-8"))["route"]
+    assert all(v >= 60 for v in rc["timeouts"].values()) and rc["queue_max"] > 0 and rc["busy_wait_s"] > 0

@@ -26,6 +26,7 @@ import time
 
 from ns_agent.compiler import compile_shot
 from ns_render import pipeline as P
+from ns_render import render_paths as RP   # W33
 from ns_render.comfy_client import ComfyClient, ComfyUnavailable
 
 
@@ -40,7 +41,7 @@ def migrate_legacy(shot_id: str):
     if not (d / "frame.png").exists() or (d / "takes.json").exists():
         return
     comp = json.loads((d / "compiled.json").read_text(encoding="utf-8")) if (d / "compiled.json").exists() else {}
-    rel = f"renders/{d.relative_to(P.RENDERS).as_posix()}/takes/image_001.png"
+    rel = f"{RP.take_rel_dir(d, P.DATA, P.RENDERS)}/image_001.png"   # W33
     (P.DATA / rel).parent.mkdir(parents=True, exist_ok=True)
     (P.DATA / rel).write_bytes((d / "frame.png").read_bytes())
     take = P.Take(n=1, stage="image", file=rel, seed=im.get("seed", 0), prompt=comp.get("image_prompt", ""),

@@ -86,6 +86,8 @@ export function badOf(s: ShotSummary, d: ShotDetail | undefined, stage: Stage): 
  *  首帧 / 尾帧：定稿版 = 自动定稿那一版；视频：当前视频 = 自动定稿那一版且还没“通过”。摘要 auto_locked 优先，没有再看详情 locked_by */
 export function autoLockOf(s: ShotSummary, d: ShotDetail | undefined, stage: Stage): number | null {
   if (stage === "video" && s.review.state === "passed") return null;
+  const dl = delegateLockOf(d, stage); // W18b P1-6：系统代选（L-142）与自动定稿并列，都不算项目方定稿、可改
+  if (dl != null) return dl;
   const v = s.auto_locked?.[stage];
   if (v != null) return v;
   if (s.auto_locked) return null; // 后端给了这个字段：以它为准
@@ -95,6 +97,17 @@ export function autoLockOf(s: ShotSummary, d: ShotDetail | undefined, stage: Sta
   const cur = stage === "video" ? tk?.active?.video : tk?.locked?.[stage];
   return cur === lb.n ? lb.n : null;
 }
+
+/** W18b P1-6：首帧超时代选（L-142，takes.json locked_by.by === "delegate"）→ 版本号；只看详情（摘要 auto_locked 只认 auto） */
+export const DELEGATE_LABEL = "系统代选·可改";
+export function delegateLockOf(d: ShotDetail | undefined, stage: Stage): number | null {
+  const tk = d?.takes as { locked_by?: Record<string, { by?: string; n?: number } | null>; locked?: Record<string, number | null> } | undefined;
+  const lb = tk?.locked_by?.[stage];
+  if (lb?.by !== "delegate" || lb.n == null) return null;
+  return tk?.locked?.[stage] === lb.n ? lb.n : null;
+}
+/** 这一格“非项目方定稿”的说法：系统代选·可改 / 自动定稿·待复审 */
+export const autoWord = (d: ShotDetail | undefined, stage: Stage) => (delegateLockOf(d, stage) != null ? DELEGATE_LABEL : AUTO_LONG);
 
 /** 当前显示的版本号（行格里的 #n） */
 const shownN = (s: ShotSummary, stage: Stage) => (stage === "image" ? s.first_frame_take : stage === "last" ? s.last_frame_take : null);
@@ -240,7 +253,7 @@ export function shotStatus(s: ShotSummary, st: Studio, sop?: SopShot): ShotStatu
   }
   if (fFirst === "bad") return make("bad_first", [{ text: badOf(s, d, "image") ?? "坏图" }, ...why], { title: `首帧 #${s.first_frame_take ?? "?"} 是${badOf(s, d, "image")}。直接重出首帧` });
   if (fFirst === "stale") return make("stale_first", why, { title: `首帧已过期：${why1("image") || "上游改过"}。直接重出首帧（要先改再出：⋯ → 进精修）` });
-  if (fFirst === "auto") return make("auto_first", why, { text: `首帧 #${s.first_frame_take ?? "?"} 是${AUTO_LONG}` });
+  if (fFirst === "auto") return make("auto_first", why, { text: `首帧 #${s.first_frame_take ?? "?"} 是${autoWord(d, "image")}` });
   // UIRSI2 L-116：当前首帧 / 尾帧机签通过（契约 + Q9 本地看图过、机签 mode=auto、不在待抽检里，口径 /api/owner/queue machine_signed）
   // → 灰字“机签通过 vN”，当作已通过往下走；只有抽检样本进“待你看”队列。手动“用这张 / 不要”仍在（不提示）
   const mFirst = s.first_frame_take != null && machineSignedN(s.id, "image") === s.first_frame_take;
@@ -256,7 +269,7 @@ export function shotStatus(s: ShotSummary, st: Studio, sop?: SopShot): ShotStatu
   }
   if (fLast === "bad") return make("bad_last", [{ text: badOf(s, d, "last") ?? "坏图" }, ...why], { title: `尾帧是${badOf(s, d, "last")}。由定稿首帧重出尾帧` });
   if (fLast === "stale") return make("stale_last", why, { title: `尾帧已过期：${why1("last") || "首帧定稿换了版本"}。由定稿首帧直接重出尾帧` });
-  if (fLast === "auto") return make("auto_last", why, { text: `尾帧 #${s.last_frame_take ?? "?"} 是${AUTO_LONG}` });
+  if (fLast === "auto") return make("auto_last", why, { text: `尾帧 #${s.last_frame_take ?? "?"} 是${autoWord(d, "last")}` });
   if (fLast !== "locked" && mLast && !s.video) return make("machine_last", why, { text: `机签通过 v${s.last_frame_take}` });
   if (fLast !== "locked" && !mLast && s.last_frame_target && inSpotQueue(s.id, "last", s.last_frame_take))
     return make("review_last", why, { text: `机签通过 v${s.last_frame_take} · 抽检样本，在“待你看”里` });

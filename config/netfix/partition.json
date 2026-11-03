@@ -59,11 +59,19 @@
  "_work_stealing_note": "跨机接手别人分区的对象：没有跨机共享锁，不安全，先不做（见 tools/netfix/dispatch.py steal_plan 的评估；只有笔记本两台都连得上时才能做两阶段：先撤 A 的 only、确认 A 无租约，再加给 B）。",
  "note_ep10_move": "11-02 01:4x 总调度定（L-100 后续）：笔记本 4080 改专用看图卡，laptop:0 停派；ep10 图片分区移到 gpu33（[1,3,5,7,10]），ep10 视频仍归 gpu36。FACTORY 执行：先同步笔记本 ep10 出图状态到 gpu33，再推本文件 + server-control。",
  "retired_lanes": [
-  "gpu36:2"
+  "gpu36:2",
+  "gpu33:0"
  ],
  "_retired_lanes_note": "退役的道：所有 producer 一律 hold（render_endpoints 里还登记着 gpu36:2，不 hold 会被派单）。gpu36:2 = L-100 改看图卡（11-02 03:1x NETFIX）。",
  "_lent_lanes": {},
- "_temp_holds": {},
+ "_temp_holds": {
+  "gpu33:0": {
+   "why": "ASSET-WORKER scene-sk_rooftop_bar",
+   "at": "2026-11-04T01:10:33",
+   "by": "ASSET-WORKER",
+   "expires_at": "2026-11-04T02:40:33"
+  }
+ },
  "_images_history": [
   {
    "at": "2026-11-02T08:08:08",
@@ -291,5 +299,7 @@
    "why": "L-124 + 总调度 17:0x 批：帧在哪台出、视频就在哪台出。ep02/04/06 出图 16:31 已划给 gpu33，视频跟着划；gpu36 只做 ep08/09/10 视频。核对：gpu36 上 ep04/06 视频 17:04 已 EP_RESOLVED（无在出单），ep02 没有视频",
    "by": "FACTORY（总调度 fredw-2b 17:0x 批准）"
   }
- ]
+ ],
+ "note_L165": "L-165 总调度 11-03 14:06：项目方“GPU 一直空闲”，不等 cut B：笔记本 4080 先出 ep01；服务器 code-only 推送 + 热重启后再按原分区（gpu33 加回 1）",
+ "note_L177": "11-03 18:0x 总调度：换代完成（sv-20261103-02 两台 + gpu33 producer 已起），ep01 交还 gpu33 本地出图/打分；笔记本不再出图（L-165 的临时分区撤销）"
 }

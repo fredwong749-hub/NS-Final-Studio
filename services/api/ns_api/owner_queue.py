@@ -19,6 +19,7 @@
   “机签通过”：每镜首帧 / 尾帧的当前版本过契约（含 Q9 本地看图）且机签开关 mode=auto、不在待抽检里、抽检没判不过 → machine_signed，
              画布 / 单集页显示“● 机签通过 vN”（灰字），不再提示项目方点“用这张 / 不要”。
 规则 K-UI-053；data_parity D-QUEUE 核对“页面待你看数 = 队列数 = 各来源现算数”。
+通知直说（L-172 分期 1，11-03）：每条多带 say_what / why / actions[] / block_level（见 humanize），前端卡片只读这四个字段。
 """
 from __future__ import annotations
 
@@ -475,6 +476,238 @@ def machine_signed(root: Path, scan: dict | None = None) -> dict:
     return out
 
 
+# ------------------------------------------------------------------ 通知直说（PLAN_OWNER_CHAT 分期 1，L-172 / L-174；项目方 11-03 16:0x：“一旦需要我做什么就直接谈信息出来”）
+# 每条待办多四个字段，前端卡片只读这四个：
+#   say_what     一句“要你做什么”（动词开头、不出现内部 id、≤2 行）
+#   why          一行“为什么找你”
+#   actions[]    ≤3 个按钮 = 现有后端入口（method/path/body 或 href），不另起登记链：
+#                {key, label, style: primary|secondary|link, method: POST|LINK, path, body, href, needs_reason, ask}
+#   block_level  red = 生产线卡在这等你 · yellow = 等你一下，系统先往下走 · grey = 只读告知（没有按钮）
+LEVEL_LABEL = {"red": "卡住了，要你定", "yellow": "等你一下", "grey": "只是告诉你，不用做事"}
+LEVEL_ORDER = {"red": 0, "yellow": 1, "grey": 2}
+KIND_ORDER = {"decide": 0, "gate": 1, "look": 2, "face": 3, "scene": 4, "sheet": 5, "item": 6, "frame": 7, "voice": 8, "pick": 9, "spot": 10, "info": 11}
+CONSEQUENCE = {"spend": "不批准就不花这笔钱，相关的事停在这里", "license": "不批准就不下载，对应功能先不用",
+               "delete": "不批准文件原样保留、不会删", "overturn": "不批准就沿用你之前定的", "import_season": "不批准新一季先不导入"}
+_SCRUB = [(re.compile(r"[（(]\s*seed\s*\d+\s*[）)]"), ""), (re.compile(r"\bpick:[\w:.\-]+"), ""), (re.compile(r"\b(?:ch|sk|lead)_[A-Za-z0-9_]+"), ""),
+          (re.compile(r"\bs\d{3,4}\b"), ""), (re.compile(r"`[^`]*`"), ""), (re.compile(r"(?:data|tools|docs)/[\w./\-]+"), ""),
+          (re.compile(r"\s{2,}"), " "), (re.compile(r"\s+([，。；：）])"), r"\1")]
+
+
+def plain(s) -> str:
+    """去掉内部 id / seed / 路径 / 反引号（文案规范：不出现系统内部 id）"""
+    s = str(s or "")
+    for rx, rep in _SCRUB:
+        s = rx.sub(rep, s)
+    return s.strip(" ，、")
+
+
+def _act(key: str, label: str, *, style: str = "secondary", path: str | None = None, body: dict | None = None, href: str | None = None,
+         needs_reason: bool = False, ask: str | None = None) -> dict:
+    a = {"key": key, "label": label, "style": style, "method": "LINK" if href else "POST", "path": path, "body": body, "href": href,
+         "needs_reason": needs_reason}
+    if ask:
+        a["ask"] = ask
+    return a
+
+
+def _ep_word(ep) -> str:
+    try:
+        return f"第 {int(ep)} 集" if ep not in (None, "") else ""
+    except (TypeError, ValueError):
+        return ""
+
+
+def _sid_word(sid: str | None) -> str:
+    """ep01-S03 → 第 1 集第 3 镜"""
+    m = re.match(r"ep(\d+)-S(\d+)", str(sid or ""))
+    return f"第 {int(m.group(1))} 集第 {int(m.group(2))} 镜" if m else ""
+
+
+def _pick_kind(it: dict) -> str:
+    """pick 条目的细类：face / scene / sheet / item / look / voice / frame（镜头版本）/ pick（其它）"""
+    parts = str(it.get("id", "")).split(":")
+    if len(parts) >= 3 and parts[0] == "pick" and parts[1] in ("face", "scene", "sheet", "item", "look", "voice", "voice_v2"):
+        return "voice" if parts[1] == "voice_v2" else parts[1]
+    if str(it.get("id", "")).startswith("v2cast-"):
+        return "scene" if str(it["id"])[7:].startswith("sk_") else "face"
+    if any(c.get("sid") for c in it.get("candidates") or []):
+        return "frame"
+    if any(c.get("audio") for c in it.get("candidates") or []):
+        return "voice"
+    return "pick"
+
+
+def _name_in(title: str) -> str:
+    for rx in (r"挑单品\s*(\S+?)\s*的", r"挑(?:一个|一张|一段|一条)?\s*(\S+?)\s*(?:造型|的)", r"已自动选用：\s*(\S+?)\s*(?:造型|单品|的)", r"^(\S+?)\s*的"):
+        m = re.search(rx, title or "")
+        if m and m.group(1) not in ("一个", "一张", "一段"):
+            return m.group(1)
+    return ""
+
+
+def _strip_pick(title: str) -> str:
+    """去掉标题开头的“挑一张：/ 挑：/ 挑”"""
+    return re.sub(r"^挑(?:一张|一个|一段|一条)?\s*[：:]?\s*", "", title or "").strip()
+
+
+def _gate_say(it: dict, title: str) -> str:
+    m = re.search(r"《(.+?)》", title or "")
+    name = f"《{m.group(1)}》" if m else "这部剧"
+    key = str(it.get("id", "")).split(":")[-1]
+    if "定方向" in title:
+        return f"定一下{name}故事线的方向：用这版、修改，或换个方向重写"
+    if key == "P1" or "故事线" in title:
+        return f"看一下{name}的故事线，满意就点“用这版”"
+    m2 = re.search(r"第\s*(\d+)\s*集", title or "")
+    ep = f"第 {m2.group(1)} 集" if m2 else _ep_word(key[2:] if key.startswith("ep") else None) or "这一集"
+    return f"看一下{name}{ep}的稿子，满意就点“用这版”"
+
+
+def _rec_label(it: dict) -> str:
+    rec = (it.get("recommend") or {}).get("choice")
+    c = next((c for c in it.get("candidates") or [] if str(c.get("key")) == str(rec)), None)
+    if not c:
+        return ""
+    try:
+        return f"第 {[str(x.get('key')) for x in it['candidates']].index(str(rec)) + 1} 张"
+    except (ValueError, KeyError):
+        return plain(c.get("label") or "")
+
+
+def _pick_actions(it: dict, rec: str | None, *, revise: bool, link_label: str | None = None) -> list[dict]:
+    out = []
+    path = it.get("pick_api") or "/api/owner/decide"
+    if rec:
+        out.append(_act("use_rec", f"用推荐（{_rec_label(it) or rec}）", style="primary", path=path, body={"id": it["id"], "choice": rec}))
+    if it.get("pick_api") and revise:
+        out.append(_act("revise", "都不行，写一句怎么改", path=it["pick_api"], body={"id": it["id"], "choice": "revise"}, needs_reason=True, ask="想怎么改？一句话"))
+    if it.get("link") and link_label:
+        href = str(it["link"])
+        out.append(_act("open", link_label, style="link", href=href if href.startswith("#") or href.startswith("/") or href.startswith("http") else "/" + href))
+    return out[:3]
+
+
+def humanize(it: dict, delegate_on: bool = False) -> dict:
+    """算出 say_what / why / actions / block_level；任何一条算不出都退回通用文案，绝不让通知中心因文案出错而空掉"""
+    try:
+        return _humanize(it, delegate_on)
+    except Exception as e:  # noqa: BLE001
+        _warn(f"文案没算出（{it.get('id')}）：{e!r}")
+        return {"say_what": "处理：" + plain(it.get("title") or it.get("id")), "why": plain(it.get("detail") or "")[:80],
+                "actions": [], "block_level": "yellow", "level_label": LEVEL_LABEL["yellow"], "sub_kind": it.get("kind")}
+
+
+def _humanize(it: dict, delegate_on: bool) -> dict:
+    kind = it.get("kind")
+    title, detail = plain(it.get("title") or ""), plain(it.get("detail") or "")
+    ep = _ep_word(it.get("episode"))
+    rec = (it.get("recommend") or {}).get("choice")
+    rec_why = plain((it.get("recommend") or {}).get("why") or "")
+    level, sub, acts = "yellow", kind, []
+    if kind == "decide":
+        cat = it.get("category") or ""
+        say = f"需要你批准：{title}。{CONSEQUENCE.get(cat, '不批准就不做')}。"
+        why = detail[:120] or f"{CATEGORIES.get(cat, '这类事')}系统不会替你定"
+        acts = [_act("approve", "批准", style="primary", path="/api/owner/decide", body={"id": it["id"], "choice": "approve"}),
+                _act("revise", "要求修改（写一句）", path="/api/owner/decide", body={"id": it["id"], "choice": "reject"}, needs_reason=True,
+                     ask="要求怎么改？写一句理由（这次先不批准，按这句话改）")]
+        if it.get("link"):
+            acts.append(_act("open", "去对应页面看", style="link", href=str(it["link"])))
+        level = "red"
+    elif kind == "gate":
+        say = _gate_say(it, title)
+        why = detail[:120]
+        href = str(it.get("link") or "#/queue")
+        acts = [_act("open_use", "去看 · 用这版", style="primary", href=href), _act("open_edit", "修改", style="link", href=href)]
+        level = "red"
+    elif kind == "spot":
+        say = f"看一眼{_sid_word(it.get('sid'))}第 {it.get('n')} 版{STAGE_WORD.get(str(it.get('stage')), '')}：系统已自动通过，核对一下"
+        why = "每 10 张机签通过的图抽 1 张给你看；没问题就过，有问题系统按你的理由重出"
+        acts = [_act("pass", "没问题", style="primary", path="/api/owner/decide", body={"id": it["id"], "choice": "pass"}),
+                _act("fail", "有问题（写原因）", path="/api/owner/decide", body={"id": it["id"], "choice": "fail"}, needs_reason=True, ask="哪里不对？一句话")]
+    elif kind == "pick":
+        sub = _pick_kind(it)
+        n = len(it.get("candidates") or [])
+        name = _name_in(title)
+        auto = bool(it.get("auto_picked")) or title.startswith("已自动选用")
+        if sub == "look":
+            people = "、".join(str(p.get("name") or p.get("display_name") or "") for p in it.get("people") or [] if isinstance(p, dict)) or title.split("：", 1)[-1]
+            say = f"确认{ep}的造型：{people}（点一下就行）"
+            why = "造型确认后这一集才开始出首帧；想换造型去资产页"
+            acts = [_act("confirm", "确认本集造型", style="primary", path=it.get("pick_api") or "/api/owner/decide", body={"id": it["id"], "choice": rec or "confirm"}),
+                    _act("open", "去资产页换造型", style="link", href=str(it.get("link") or "#/assets"))]
+            level = "red"
+        elif sub == "face":
+            say = (f"挑{name}的身份脸：{n} 张候选" if name else f"挑身份脸：{_strip_pick(title) or '这个人'}（{n} 张候选）") + (f"，推荐{_rec_label(it)}" if rec else "")
+            why = f"{ep or '这一集'}要用这个人，没有身份脸出不了图"
+            acts = _pick_actions(it, rec, revise=True, link_label="看候选大图")
+            level = "red"
+        elif sub == "scene":
+            say = f"挑场景底图：{_strip_pick(title)}（{n} 张候选）" if _strip_pick(title) else f"挑场景底图（{n} 张候选）"
+            why = f"{ep or '这一集'}在这个场景拍，没有底图出不了图"
+            acts = _pick_actions(it, rec, revise=True, link_label="看候选大图")
+            level = "red"
+        elif sub in ("sheet", "item"):
+            what = "造型设定图" if sub == "sheet" else "单品图"
+            if auto:
+                say = f"不用你做事：系统已替{name or '这个人'}选好{what}，想换再点别的"
+                why = rec_why or "身份脸和造型已定，系统按分数自动选用，流程没停"
+                acts = _pick_actions(it, None, revise=True, link_label="看候选大图")
+                level = "yellow"
+            else:
+                say = (f"挑{name}的{what}：{n} 张候选" if name else f"挑{what}：{_strip_pick(title)}（{n} 张候选）") + (f"，推荐{_rec_label(it)}" if rec else "")
+                why = "设定图定了才能裁单品、出首帧" if sub == "sheet" else "单品图定了首帧的穿戴才前后一致"
+                acts = _pick_actions(it, rec, revise=True, link_label="看候选大图")
+                level = "red"
+        elif sub == "frame":
+            sid = next((c.get("sid") for c in it.get("candidates") or [] if c.get("sid")), None)
+            stage = STAGE_WORD.get(str(next((c.get("stage") for c in it.get("candidates") or [] if c.get("stage")), "image")), "首帧")
+            say = f"挑{_sid_word(sid)}的{stage}：{n} 张候选" + (f"，推荐{_rec_label(it)}（{rec_why}）" if rec else "")
+            why = "30 分钟没挑系统按你的授权代选，之后可改" if delegate_on else "挑定这一镜才接着出下一步"
+            acts = _pick_actions(it, rec, revise=True, link_label="都不行，去这一镜重出") or \
+                ([_act("open", "去这一镜挑", style="link", href=f"#{sid}")] if sid else [])
+            if sid and not any(a["key"] == "open" for a in acts):
+                acts.append(_act("open", "都不行，去这一镜重出", style="link", href=f"#{sid}"))
+            level = "yellow" if delegate_on else "red"
+        elif sub == "voice":
+            say = f"挑{name or _strip_pick(title) or '这个人'}的声音：{n} 个候选，试听后点“用这个”"
+            why = detail[:100] or "声音选定后配音才开始"
+            acts = _pick_actions(it, rec, revise=True, link_label="去声音页")
+        else:
+            say = f"挑一张：{_strip_pick(title)}（{n} 张候选）" if _strip_pick(title) else f"挑一张（{n} 张候选）"
+            why = detail[:120]
+            acts = _pick_actions(it, rec, revise=True, link_label="看候选")
+    else:
+        say, why = f"处理：{title}", detail[:120]
+    say = say.replace("：：", "：").strip()
+    return {"say_what": say[:160], "why": why[:160], "actions": acts[:3], "block_level": level, "level_label": LEVEL_LABEL[level], "sub_kind": sub}
+
+
+def sort_key(it: dict) -> tuple:
+    """要你做的在前（按阻塞程度），只读在后；同级按类型（拍板 → 稿子 → 资产 → 镜头 → 抽检）"""
+    return (LEVEL_ORDER.get(it.get("block_level"), 1), KIND_ORDER.get(it.get("sub_kind") or it.get("kind"), 9), str(it.get("at") or ""))
+
+
+def delegate_on(root: Path) -> bool:
+    try:
+        from ns_api import owner_delegate as OD  # noqa: PLC0415
+        return bool(OD.active(root)[0])
+    except Exception:  # noqa: BLE001  代选状态读不出 = 当没开（不许诺“30 分钟代选”）
+        return False
+
+
+def enrich(items: list[dict], root: Path) -> list[dict]:
+    on = delegate_on(root)
+    for it in items:
+        it.update(humanize(it, on))
+    items.sort(key=sort_key)
+    return items
+
+
+def level_counts(items: list[dict]) -> dict:
+    return {k: sum(1 for x in items if x.get("block_level") == k) for k in LEVEL_ORDER}
+
+
 # ------------------------------------------------------------------ 汇总
 def build(root: Path = REPO, now: float | None = None) -> dict:
     now = now or time.time()
@@ -514,6 +747,7 @@ def _build(root: Path, now: float, _errors: list[str]) -> dict:
         _auto_pick(root, a)
     for x in items:
         x["kind_label"] = KIND_LABEL.get(x["kind"], x["kind"])
+    enrich(items, root)      # 通知直说：say_what / why / actions / block_level，并按阻塞程度排序
     today = time.strftime("%Y-%m-%d", time.localtime(now))
     policy_today = sum(1 for d in decisions(root) if d.get("by") == "POLICY" and str(d.get("at", "")).startswith(today))
     signed_today = sum(1 for r in _rows(_paths(root)["signed"]) if str(r.get("at", "")).startswith(today))
@@ -528,6 +762,7 @@ def _build(root: Path, now: float, _errors: list[str]) -> dict:
                            "policy": policy_today, "redo": scan["redo"], **{f"n_{k}": v for k, v in scan["by_stage"].items()},
                            "agreement": st.get("agreement"), "agreement_n": st.get("n"),
                            "total": sum(scan["by_stage"].values()) + policy_today},
+            "levels": level_counts(items), "level_label": LEVEL_LABEL,
             "master_waits": master_waits, "machine_signed": machine_signed(root, scan), "autosign_mode": autosign_mode(root),
             "source_errors": errs, "complete": not errs, "status": "error" if errs else "ok",
             "status_label": ("队列读取失败：" + "、".join(dict.fromkeys(_src_name(e) for e in errs))) if errs else ""}

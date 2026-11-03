@@ -16,6 +16,7 @@ import json
 from pathlib import Path
 
 from . import pipeline as P
+from . import render_paths as RP   # W33
 from . import workflows as W
 from .comfy_client import ComfyError, remote_info
 
@@ -196,7 +197,7 @@ def render_final(client, script, shot_id: str, stage: str, *, parent: int | None
                       pass2_steps=pass2_steps(cfg), pass2_seed_offset=int(cfg.get("pass2_seed_offset", 1)))
     entry, secs = client.run(wf, timeout_s=float(cfg.get("timeout_s", 1800)))
     item = next(f for f in client.output_files(entry) if f["filename"].endswith(".png"))
-    rel_dir = f"renders/{P.shot_dir(shot_id).relative_to(P.RENDERS).as_posix()}/takes"
+    rel_dir = RP.shot_take_rel_dir(shot_id)   # W33：带剧名前缀
     tag = FE.unique_tag(job)
     raw, rel = f"{rel_dir}/{stage}_{n:03d}_{tag}_final_raw.png", f"{rel_dir}/{stage}_{n:03d}_{tag}_final.png"
     client.download(item, P.DATA / raw)

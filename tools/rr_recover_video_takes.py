@@ -21,6 +21,7 @@ for p in ("services/render_router", "packages/schema", "services/api"):
 from ns_render import endpoints as EP  # noqa: E402
 from ns_render import motion_qc as MQ  # noqa: E402
 from ns_render import pipeline as P  # noqa: E402
+from ns_render import render_paths as RP  # noqa: E402  W33
 from ns_schema.edits import Take  # noqa: E402
 
 
@@ -53,7 +54,7 @@ def recover(jid: str, wait_s: float) -> dict:
     d = P.shot_dir(shot)
     with P.shot_lock(shot):
         n = P._next_n(shot, "video")
-    base = f"renders/{d.relative_to(P.RENDERS).as_posix()}/takes/video_{n:03d}_{jid}"
+    base = f"{RP.take_rel_dir(d, P.DATA, P.RENDERS)}/video_{n:03d}_{jid}"   # W33
     dst = P.DATA / f"{base}.mp4"
     dst.parent.mkdir(parents=True, exist_ok=True)
     q = urllib.parse.urlencode({"filename": item["filename"], "subfolder": item.get("subfolder", ""),

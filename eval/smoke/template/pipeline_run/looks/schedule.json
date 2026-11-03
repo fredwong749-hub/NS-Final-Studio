@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "character_defaults": {
+    "lin_wan": "lin_wan-default",
+    "gu_chen": "gu_chen-default",
+    "chen_yu": "chen_yu-default",
+    "ch_a_lan": "ch_a_lan-default"
+  },
+  "episodes": {},
+  "shot_overrides": {},
+  "shot_characters": {}
+}

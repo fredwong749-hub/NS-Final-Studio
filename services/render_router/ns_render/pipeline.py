@@ -36,6 +36,7 @@ from ns_schema.script import ScriptImport
 from . import refs as R
 from . import workflows as W
 from . import comfy_client as CC
+from . import render_paths as _RP   # W33：版本文件相对路径带剧名前缀
 from .comfy_client import ComfyClient, ComfyError, ComfyUnavailable
 
 ROOT = Path(os.environ.get("NS_PROJECT_ROOT") or Path(__file__).resolve().parents[3])  # T42：子进程可指向 projects/<slug>
@@ -898,7 +899,7 @@ def _run_candidates(client, shot_id: str, stage: str, c: CompiledShot, *, build_
                     rounds: int, plan_for_round, meta: dict) -> Take:
     """多轮多候选的公共循环：出图 → 调色 → 质检 → 评分；全部留档，最高分设为当前"""
     d = shot_dir(shot_id)
-    rel_dir = f"renders/{d.relative_to(RENDERS).as_posix()}/takes"
+    rel_dir = _RP.take_rel_dir(d, DATA, RENDERS)   # W33：带剧名前缀
     errors, tries, last_err = 0, 0, None
     best: Take | None = None
     missing: list[str] = []
@@ -1020,7 +1021,7 @@ def render_image(client: ComfyClient, script: ScriptImport, shot_id: str, *, see
 
     def compose(rnd: int) -> dict | None:
         """文生图出 n_compose 张构图 → 裸露质检 → 看图模型核对剧本 → 取最好的一张"""
-        rel_dir = f"renders/{shot_dir(shot_id).relative_to(RENDERS).as_posix()}/takes"
+        rel_dir = _RP.take_rel_dir(shot_dir(shot_id), DATA, RENDERS)   # W33
         results = []
         for j in range(n_compose):
             s_ = fixed if fixed is not None and rnd == 1 and j == 0 else seed_for(shot_id + "/compose", rnd * 100 + j)
@@ -1207,7 +1208,7 @@ def refine_image(client: ComfyClient, script: ScriptImport, shot_id: str, *, see
                        init_image=init, denoise=REFINE_DENOISE)
     entry, secs = client.run(wf, timeout_s=timeout_s)
     item = next(f for f in client.output_files(entry) if f["filename"].endswith(".png"))
-    rel_dir = f"renders/{shot_dir(shot_id).relative_to(RENDERS).as_posix()}/takes"
+    rel_dir = _RP.take_rel_dir(shot_dir(shot_id), DATA, RENDERS)   # W33
     raw, rel = f"{rel_dir}/image_{n:03d}_raw.png", f"{rel_dir}/image_{n:03d}.png"
     client.download(item, DATA / raw)
     gr = None
@@ -1294,7 +1295,7 @@ def render_last_frame(client: ComfyClient, script: ScriptImport, shot_id: str, s
     plate_line = LAST_ROLE_PLATE.format(i=2, name=plate.character) if plate else ""
     prompt = _last_prompt_with_plate(c.last_prompt, plate_line)
     active_first = load_takes(shot_id)["active"].get("image")
-    refs = [f"data/renders/{d.relative_to(RENDERS).as_posix()}/frame.png (image v{active_first})"] +         ([plate.path.relative_to(ROOT).as_posix()] if plate else [])
+    refs = [f"data/{_RP.shot_rel_dir(d, DATA, RENDERS)}/frame.png (image v{active_first})"] +         ([plate.path.relative_to(ROOT).as_posix()] if plate else [])
     if score_fn is _DEFAULT:
         score_fn = _default_score(client, c, plate.path if plate else None, last=True, first=first_png)
 
@@ -1365,7 +1366,7 @@ def render_video(client: ComfyClient, script: ScriptImport, shot_id: str, *, see
         try:
             entry, secs = client.run(wf, timeout_s=timeout_s)
             item = next(f for f in client.output_files(entry) if f["filename"].endswith(".mp4"))
-            base = f"renders/{d.relative_to(RENDERS).as_posix()}/takes/video_{n:03d}"
+            base = f"{_RP.take_rel_dir(d, DATA, RENDERS)}/video_{n:03d}"   # W33
             client.download(item, DATA / f"{base}.mp4")
             lf = extract_last_frame(DATA / f"{base}.mp4", DATA / f"{base}_last.png")
             take = Take(n=n, stage="video", file=f"{base}.mp4", seed=s, prompt=c.video_prompt,

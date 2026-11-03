@@ -60,7 +60,9 @@
    "_doc": "L-125 / L-126：V2 完全切割——不设 inherits；参考只认 assets_v2/manifest.json（asset_refs 资产包模式）；派生参考图在本剧 images/ 下，只在笔记本生成",
    "run_dir": "data/pipeline/runs/series10_v2",
    "assets_manifest": "assets_v2/manifest.json",
-   "female": ["lead_f"],
+   "female": [
+    "lead_f"
+   ],
    "lead": "lead_f",
    "_female_doc": "OVERSIGHT-F P1-5b（PROMPTFIX 20:3x）：女性角色 / 女主的唯一来源（ns_agent.cast_table）；V2 剧本新增女性角色时在这里加 id",
    "_looks_doc": "ISS-1103-032336-3aff（W2 11-03）：资产包模式造型唯一来源 = assets_manifest 清单 looks（asset_refs.manifest_looks：部件带 item_id，S8/S9 服装 / 鞋单品图进参考槽、I4 可核）。不设 looks_file——写作链 <run_dir>/P1_looks.json 只是文字（人物页显示、asset_jobs 设定图规格直接读它），设了会让 load_looks 走文字分支、部件丢 item_id。tests/test_w2_merge_img.py 守住",
@@ -68,6 +70,11 @@
    "shot_looks_file": "data/pipeline/runs/series10_v2/assets/shot_looks.json",
    "crop_dir": "data/pipeline/runs/series10_v2/images/refcrops",
    "board_dir": "data/pipeline/runs/series10_v2/images/refboards"
+  },
+  "smoke_v2": {
+   "inherits": "series10_v2",
+   "_doc": "R1 11-03 16:1x（RSI 实施包 Phase R 冒烟剧，eval/run_smoke.ps1）：继承 series10_v2 的资产包/角色/女主，只换 run_dir；不另造资产库",
+   "run_dir": "data/pipeline/runs/smoke_v2"
   }
  },
  "models": {

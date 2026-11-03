@@ -89,6 +89,7 @@ def test_resident_spawns_next_episode(AF, tmp_path, monkeypatch):
     # REVIEW-G2 P1-1：不许写真实 data/factory（派单器 state / hollywood 锁）
     monkeypatch.setattr(RES, "dispatch_tick", lambda *a, **k: {}, raising=False)
     monkeypatch.setattr(RES, "hollywood_tick", lambda *a, **k: {}, raising=False)
+    monkeypatch.setattr(RES, "watchdog_tick", lambda *a, **k: {}, raising=False)   # W19：看门狗不许跑真数据
     spawned = []
 
     class P:

@@ -286,6 +286,15 @@
    "_calib": "data/acting/mp_features_v1.json（总调度标 100 张：71 看镜头 / 29 没看）奇偶两折留出：召回 27/37、25/34（≈0.73），误报 0/13、1/16；全集 52/71、1/29。高置信度才记 eye_contact defect（看图模型判 defect 的照常算）"
   }
  },
+ "route": {
+  "_doc": "W23 VQA-ROUTE（总调度 11-03）：每次调用先探本机 8870 /health（loaded=true 且 queue < queue_max）→ 只用本机；本机忙（queue ≥ queue_max）就等最多 busy_wait_s，不切隧道（隧道是瓶颈）；本机不在 / 未 loaded 才用 8871 隧道（服务器上用 model.lan_url）；都不在 / 超时 = untested（reason 服务不可用 / 超时 / 本机忙），绝不判 fail。timeouts = 本机实测 P95×2、至少 60 s（11-03 近 3 天 gpu0 缓存：整张复核 n=308 P50 54 s P95 118 s；短问 n=255 P95 17.5 s），HTTP 超时 = timeouts[kind] ×（排队数+1），不超过调用方 wait_s+120。每次调用记 log（route local|tunnel|none）",
+  "queue_max": 6,
+  "busy_wait_s": 600,
+  "poll_s": 10,
+  "health_timeout_s": 3,
+  "timeouts": {"image": 240, "video": 300, "ask": 60},
+  "log": "data/vqa/route.jsonl"
+ },
  "upscale_4k": {
   "_doc": "R11-7：只对已批准（预览 / 定稿）的片做，后处理一步，不进出片循环。引擎 = gpu33 SeedVR2 3B（scripts/upscale_4k.py，本机 services/post/ns_post/upscale4k.py）。",
   "engine": "seedvr2_3b",

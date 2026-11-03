@@ -739,3 +739,10 @@
 - 2026-11-03 12:14 W15 ARCH-FIX（Orca，Opus）：cut B dry 的 arch_scan 18 处退化修到 0（基线未动）；284 passed。
 - 2026-11-03 12:17 CODER-PS：L-159 执行（ep02 草稿挪回、STRUCT-O 提示避开 lens 中文名）、story_runs 409 双入口封堵（tests/test_story_runs_409.py）、V1 名清理 + kb-20261103-2b54fc9c、push_check tier2 PASS；总调度复核通过。
 - 2026-11-03 12:23 W16 NIGHT-FIX（Orca，Opus）：night.py/assemble_episode 按 run 参数化，V2 finalize 可达合成（REVIEW-G4b P0-1）；tests/test_night_v2_finalize.py 6 条；311 passed。
+- 2026-11-03 12:25 CODER-PS：A 一键出片弹层视口收边 + plainWords 扩词；D tools/autopilot/lane_heal.py 道上卡单自愈（超时 interrupt+换道、过期锁登记）+ master_check ⑦ 自愈计数。入 sv-20261103-03。
+- 2026-11-03 13:00 W13 CUTB-PREP（Orca，Opus）：cut B 树 9b1a00a5（349 文件）+ LIST_cutB.txt；陈旧测试按口径修绿；dry #2 六闸绿。
+- 2026-11-03 13:28 CODER-PS：autoflow_agent.auto_reopen（非结构项未试满 → 自动重置补丁预算，AUTO_REOPEN_MAX=3；tests/test_auto_reopen.py）。随 sv-03。
+- 2026-11-03 13:58 W19 WATCHDOG-CODE（Orca，Opus）：tools/master/watchdog.py（9 规则）+ resident watchdog_tick（30 分钟）+ master_check ⑧；tests/test_watchdog.py 18 例。resident 已重启生效。关闭 6 条已解决阻断卡点。
+- 2026-11-03 14:00 CODER-PS：L-164 segment_fix.SEG_RE 放宽 + autoflow_agent.duration_tolerated（tests/test_fact_duration_tol.py）；ep02 13:55 imported。总调度复核 19 passed。
+- 2026-11-03 14:02 W17 RELEASE-AUTO（Orca，Opus）：release_tick.py + system_version handover/release 子命令 + xdist 自愈退串行 + resident release_thread + config/pipeline/release.json；tests/test_release_auto.py 19。待 A17 审计；随 sv-03。
+- 2026-11-03 14:20 W18 PRODUCER-LIFECYCLE（Orca，Opus）：resident_sync.lifecycle_tick / producer.maybe_promote auto / owner_delegate.frame_tick（L-142）；开关默认关；tests/test_producer_lifecycle.py 27。A17 判 W17 可启用（P1×5 → W17b）。

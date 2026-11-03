@@ -409,6 +409,8 @@ def test_v7_asr_windows_from_tokens():
 def test_vqa_gate_skips_vlm_when_contract_already_fails(monkeypatch, enf):
     """P0 吞吐：Q2–Q8 已不过的图不排队看图（反正要重出）；Q1 不算（转角放宽 / 后脑复核要看图）"""
     import producer as PR
+    from ns_agent.vqa import client as C
+    monkeypatch.setattr(C, "_local_up", lambda u: False)    # W22：不探测真看图服务 127.0.0.1:8870（网络守卫抓到）
     calls = []
     monkeypatch.setattr(VQ, "inspect_for", lambda *a, **k: calls.append(1) or {"defects": [], "checks": {}})
     pf = {"ok": False, "blocking": ["Q2"], "items": [{"id": "Q2", "status": "fail"}], "reasons": []}

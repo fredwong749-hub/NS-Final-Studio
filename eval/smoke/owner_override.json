@@ -1,0 +1,7 @@
+{
+ "schema": "nsfs.smoke_owner_override/1",
+ "run": "smoke_v2",
+ "_doc": "W26 G8：只对 smoke_v2 的自动定稿 / 代选覆盖（不改主剧 config/pipeline/owner_delegate.json、config/render_quality.json auto_final_on_lock_runs）。现状（2026-11-03 基线）：owner_delegate.frame_tick 只读 config/pipeline/owner_delegate.json、final_tier 只读 render_quality.json，没有读本文件的入口——eval/smoke.py 把“覆盖未生效”写进 notes，G8 仍按实际等项目方点位脚本判定。",
+ "auto_final_on_lock": false,
+ "first_frame_delegate": {"enabled": true, "timeout_min": 0}
+}

@@ -24,6 +24,7 @@ from ns_schema import h3_lint as _L
 from ns_schema.h3_lint import ALIGN_PREFIX, alignment_line, frames_for_seconds
 
 from . import pipeline as P
+from . import render_paths as RP   # W33
 from . import workflows as W
 from . import comfy_client as CC
 from . import motion_qc as MQ
@@ -502,7 +503,7 @@ def render(client, script, shot_id: str, *, seed: int | None = None, steps: int 
     item = next(f for f in client.output_files(entry) if f["filename"].endswith(".mp4"))
     # 文件名带任务 id：两条道同时出同一镜视频时 n 可能相同，不能互相覆盖（F3 审计；_add_take 会顺延 n）
     from .frame_edit import unique_tag
-    base = f"renders/{d.relative_to(P.RENDERS).as_posix()}/takes/video_{n:03d}_{unique_tag(job)}"
+    base = f"{RP.take_rel_dir(d, P.DATA, P.RENDERS)}/video_{n:03d}_{unique_tag(job)}"   # W33
     for i in range(3):   # 隧道抖动时重试下载（prompt 已跑完，不重渲）
         try:
             client.download(item, P.DATA / f"{base}.mp4")

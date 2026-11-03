@@ -1,5 +1,5 @@
 {
- "kb_version": "kb-20261103-2b54fc9c",
+ "kb_version": "kb-20261103-6246e5ad",
  "n": 668,
  "by_domain": {
   "render": 101,
@@ -712,8 +712,8 @@
    "check": "tests/test_remote_preflight.py::test_night_stall_detected",
    "evidence": [
     {
-     "src": "data/pipeline/runs/series10_v1/video/night.pid",
-     "note": "内容 18588（05:43 写），实际 night.py 16:04 重启为新进程；离线期间 night.py 卡住无任何报警（总调度 11-01 派单）"
+     "src": "data/pipeline/runs/series10_v1/video/night_state.json",
+     "note": "night.pid 内容 18588（05:43 写），实际 night.py 16:04 重启为新进程；离线期间 night.py 卡住无任何报警（总调度 11-01 派单）"
     }
    ],
    "confidence": "medium",

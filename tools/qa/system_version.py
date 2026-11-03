@@ -14,6 +14,9 @@ decision_propagation、push_check / push_gate、resident_sync 的分级推送与
   （cut 末尾：推前密钥扫描 → git push origin <分支> --follow-tags；命中不推并报警，推送失败不影响发版——项目方 23:0x 授权，仅限发版流程）
   rollback SV                  只生成回退命令和差异预览（git checkout <tag> -- <跟踪文件> → deploy），不执行；执行要总调度确认
   status                       当前版本、HEAD 之后未入版的改动数
+  release [--build-tree-only]  W17：按 data/system_versions/release_request.json 跑一次发版流水线（逻辑在 tools/autopilot/release_tick.py，
+                               resident_sync loop 每拍自动跑）：复审全可入 → 按清单拼树（path@blob）→ cut --dry --tree → cut --tree → deploy --verify
+  handover --dry|--apply       W17 / L-152 换代：笔记本 restart_producer.ps1 → 服务器 request_restart → 停 bench2 / bakeoff（只停不删）→ V2_LIVE
 闸门任一不过就不发版并写明原因。不删文件。
 """
 from __future__ import annotations
@@ -134,8 +137,70 @@ def collection_problems(out: str) -> list[str]:
     return probs
 
 
-def gates(changed: list[str], run_tests: bool = True, root: Path | None = None, env: dict | None = None) -> list[dict]:
-    """全部闸门；root / env = 冻结快照目录与快照的 PYTHONPATH（K-OPS-F08：闸门只对快照跑，不对活的工作树跑）"""
+# ---------------------------------------------------------------- W22（ISS-1103-145040）：pytest 闸门的输出口径
+SUMMARY_RE = re.compile(r"^=*\s*(?:\d+ (?:failed|passed|skipped|errors?|xfailed|xpassed|deselected|warnings?)[, ]*)+.*?in [\d.]+s.*$", re.M)
+
+
+def norm_nl(s: str) -> str:
+    """Windows 子进程写文件是 \\r\\n：re.M 的 $ 不认 \\r → 没有“ - 原因”的 FAILED 行匹配不到（dry #9 没判 flaky 的根因）"""
+    return (s or "").replace("\r\n", "\n").replace("\r", "\n")
+
+
+def failed_lines(out: str) -> list[str]:
+    """全部 `FAILED ...` / `ERROR ...` 简报行（去重、保序）"""
+    seen, res = set(), []
+    for ln in norm_nl(out).splitlines():
+        ln = ln.strip()
+        if re.match(r"^(FAILED|ERROR) \S", ln) and ln not in seen:
+            seen.add(ln)
+            res.append(ln)
+    return res
+
+
+def failed_ids(out: str) -> list[str]:
+    """失败用例的 nodeid（FAILED 行，可能带也可能不带“ - 原因”）"""
+    return sorted({m.group(1) for m in re.finditer(r"^FAILED (\S+?)(?: - .*)?\s*$", norm_nl(out), re.M)})
+
+
+def summary_line(out: str) -> str:
+    ms = SUMMARY_RE.findall(norm_nl(out))
+    return ms[-1].strip("= ").strip() if ms else tail(out, 1)
+
+
+def pytest_detail(summary: str, failed: list[str], flaky: list[str], rerun: dict | None, log_rel: str | None) -> str:
+    """gates[].detail：首跑的全部 FAILED 行 + 首跑合计行 + flaky 名单 + 串行重跑结果 + 完整输出文件"""
+    parts = list(failed) + [summary]
+    if rerun and not flaky:
+        parts.append(f"串行重跑仍不过（code {rerun['code']}）：{rerun.get('still_failed') or rerun['ids']}")
+    if flaky:
+        parts.append(f"并行偶发、串行通过（flaky）：{flaky}")
+    if log_rel:
+        parts.append(f"完整输出：{log_rel}")
+    return " ⏎ ".join(p for p in parts if p)
+
+
+def write_pytest_log(out: str, sv: str, log_dir: Path | None = None) -> str | None:
+    """完整 pytest 输出落盘 data/system_versions/<sv>_pytest_<n>.txt（n 从 1 递增：同一 sv 的 dry / 正式 cut 各留一份）"""
+    d = Path(log_dir or DATA)
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        k = 1
+        while (d / f"{sv}_pytest_{k}.txt").exists():
+            k += 1
+        f = d / f"{sv}_pytest_{k}.txt"
+        f.write_text(out, encoding="utf-8")
+    except OSError:  # arch-ok: 落盘失败不拦闸门（detail 里仍有 FAILED 行）
+        return None
+    try:
+        return f.resolve().relative_to(ROOT.resolve()).as_posix()
+    except ValueError:  # arch-ok: 测试里 log_dir 在临时目录
+        return str(f)
+
+
+def gates(changed: list[str], run_tests: bool = True, root: Path | None = None, env: dict | None = None,
+          sv: str | None = None, log_dir: Path | None = None) -> list[dict]:
+    """全部闸门；root / env = 冻结快照目录与快照的 PYTHONPATH（K-OPS-F08：闸门只对快照跑，不对活的工作树跑）；
+    sv 给了 = 完整 pytest 输出落盘 log_dir（默认 data/system_versions）/<sv>_pytest_<n>.txt（W22）"""
     rows = []
     root = root or ROOT
     _sh0 = globals()["sh"]
@@ -167,25 +232,369 @@ def gates(changed: list[str], run_tests: bool = True, root: Path | None = None, 
     add("propagation", "decision_propagation（K-OPS-D02）", code == 0, tail(out, 1)[:300])
     if run_tests:
         tests = pick_tests(changed, root)
-        code, out = sh([PY, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-n", str(min(12, os.cpu_count() or 4)), *tests], 2400)
-        flaky = []
+        n = pytest_n()      # L-162 总调度 11-03：xdist 12 worker 在本机僵死两次，允许用 NS_CUT_PYTEST_N 降并行
+        stall_s = xdist_stall_s()
+
+        def _pyt(nn: int) -> list[str]:     # nn <= 0 → 完全不传 -n（进程内串行，不起 xdist worker）
+            # W22：-rf = 每个失败用例一行 FAILED（闸门 detail 全部记下，不再只留尾 2 行）
+            return [PY, "-m", "pytest", "-q", "-rf", "-p", "no:cacheprovider", *(["-n", str(nn)] if nn > 0 else []), *tests]
+
+        def _tmo(nn: int) -> int:           # 串行按文件数放大超时（≥ 3600 s，每个文件 30 s）
+            return 2400 if nn > 0 else max(3600, 30 * len(tests))
+
+        def _stall(nn: int) -> float | None:  # W22（ISS-1103-145040）：串行一律不判僵死，只认超时（dry #8 被误杀）
+            return stall_s if nn > 0 else None
+        # W17：xdist 僵死自愈——stall_s 内整棵进程树 CPU 合计 < 1 s 且没有新输出（像 cut B dry #2/#3）→ 杀掉，退到 -n 0 串行重跑一次
+        code, out, wst = run_watched(_pyt(n), _tmo(n), cwd=root, env=env or ENV, stall_s=_stall(n))
+        out = norm_nl(out)
+        heal = None
+        if wst.get("stalled") and n > 0:
+            n2 = 0
+            heal = {"n": n, "stalled_after_s": wst.get("elapsed_s"), "cpu_s": wst.get("cpu_delta"), "window_s": stall_s, "retry_n": n2}
+            code, out, w2 = run_watched(_pyt(n2), _tmo(n2), cwd=root, env=env or ENV, stall_s=_stall(n2))
+            out = norm_nl(out)
+            heal.update(retry_stalled=bool(w2.get("stalled")), retry_code=code)
+            out = (f"xdist 僵死自愈：-n {n} 在 {heal['window_s']} s 内进程树 CPU {heal['cpu_s']} s 且无新输出，已杀掉，以 -n {n2} 重试"
+                   + ("（重试仍僵死）" if w2.get("stalled") else "") + "\n" + out)
+        first_failed, first_sum = failed_lines(out), summary_line(out)
+        flaky, rerun = [], None
         if code != 0:   # 并行下的偶发（story_runs 等）：失败的用例串行重跑一次，仍红才算不过
-            failed = sorted(set(re.findall(r"^FAILED (\S+?)(?: - |$)", out, re.M)))
+            failed = failed_ids(out)
             coll = collection_problems(out)
             if failed:
-                c2, o2 = sh([PY, "-m", "pytest", "-q", "-p", "no:cacheprovider", *failed], 1200)
+                c2, o2 = sh([PY, "-m", "pytest", "-q", "-rf", "-p", "no:cacheprovider", *failed], 1200)
+                o2 = norm_nl(o2)
+                rerun = {"ids": failed, "code": c2, "still_failed": failed_ids(o2) if c2 != 0 else [], "summary": summary_line(o2)}
+                out = out + "\n---- 失败用例串行重跑（code " + str(c2) + "）----\n" + o2
                 if c2 == 0:
-                    flaky, code, out = failed, 0, out + "\n串行重跑通过：" + "，".join(failed)
+                    flaky, code = failed, 0
+                    out += "\n串行重跑通过：" + "，".join(failed)
             elif coll:      # K-OPS-F08：收集阶段出错（没有 FAILED 行）——报出具体文件，整组串行重跑一次
-                c2, o2 = sh([PY, "-m", "pytest", "-q", "-p", "no:cacheprovider", *tests], 2400)
+                c2, o2 = sh([PY, "-m", "pytest", "-q", "-rf", "-p", "no:cacheprovider", *tests], 2400)
                 out = out + "\n收集问题：" + "；".join(coll) + ("\n串行重跑通过" if c2 == 0 else "\n串行重跑仍不过：" + tail(o2, 3))
                 code = c2
         m = re.search(r"(\d+) passed", out)
+        log_rel = write_pytest_log(out, sv, log_dir) if sv else None
         add("pytest", f"定向 pytest（{len(tests)} 个文件：改动涉及 + smoke）", code == 0,
-            tail(out, 2) + (f" ⏎ 并行偶发、串行通过：{flaky}" if flaky else ""))
+            pytest_detail(first_sum, first_failed, flaky, rerun, log_rel))
         rows[-1]["passed"] = int(m.group(1)) if m else 0
         rows[-1]["files"] = tests
+        rows[-1]["n"] = n
+        rows[-1]["failed"] = first_failed
+        rows[-1]["flaky"] = flaky
+        if rerun:
+            rows[-1]["rerun"] = rerun
+        if log_rel:
+            rows[-1]["log"] = log_rel
+        if heal:
+            rows[-1]["xdist_heal"] = heal
     return rows
+
+
+# ---------------------------------------------------------------- W17 发版配置 / xdist 僵死自愈 / 按清单拼树
+RELEASE_CFG_REL = "config/pipeline/release.json"
+RELEASE_DEFAULTS = {"enabled": True, "pytest_n": 4, "xdist_stall_min": 10, "hosts": ["gpu33", "gpu36"], "every_s": 60}
+
+
+def release_cfg(root: Path | None = None) -> dict:
+    """config/pipeline/release.json（W17 RELEASE-AUTO）；读不到 = 默认值"""
+    try:
+        d = json.loads(((root or ROOT) / RELEASE_CFG_REL).read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # arch-ok: 没有配置 = 默认值（enabled=true、pytest_n=4）
+        d = {}
+    return {**RELEASE_DEFAULTS, **d}
+
+
+def pytest_n() -> int:
+    """cut 定向 pytest 的 xdist 并行数：NS_CUT_PYTEST_N（release_tick 按 release.json pytest_n 设）> min(12, CPU 数)；
+    ≤ 0 = 不传 -n（进程内串行）"""
+    v = os.environ.get("NS_CUT_PYTEST_N")
+    return max(0, int(v)) if v not in (None, "") else min(12, os.cpu_count() or 4)
+
+
+def xdist_stall_s() -> float:
+    v = os.environ.get("NS_CUT_XDIST_STALL_S")
+    return float(v) if v else float(release_cfg().get("xdist_stall_min") or 10) * 60
+
+
+def _proc_table() -> list[tuple[int, int, float]] | None:
+    """[(pid, ppid, CPU 秒)]：Windows 一次 CIM 查询；Linux 读 /proc；取不到 = None（不判僵死）"""
+    if os.name == "nt":
+        ps = ("Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,KernelModeTime,UserModeTime | ConvertTo-Json -Compress")
+        try:
+            r = subprocess.run(["powershell.exe", "-NoProfile", "-Command", ps], capture_output=True, timeout=60,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            d = json.loads(r.stdout.decode("utf-8", "replace") or "[]")
+        except (OSError, subprocess.TimeoutExpired, ValueError):  # arch-ok: 拿不到进程表 = 本次不判僵死
+            return None
+        d = [d] if isinstance(d, dict) else d or []
+        return [(int(x.get("ProcessId") or 0), int(x.get("ParentProcessId") or 0),
+                 (float(x.get("KernelModeTime") or 0) + float(x.get("UserModeTime") or 0)) / 1e7) for x in d]
+    out = []
+    tck = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
+    for p in Path("/proc").glob("[0-9]*"):
+        try:
+            st = (p / "stat").read_text().rsplit(")", 1)[1].split()
+            out.append((int(p.name), int(st[1]), (int(st[11]) + int(st[12])) / tck))
+        except (OSError, IndexError, ValueError):  # arch-ok: 进程已退出 / 读不到，跳过
+            continue
+    return out
+
+
+def proc_tree_cpu(pid: int, table=None) -> float | None:
+    """pid 的所有子孙进程（xdist worker 等）CPU 秒合计；进程表取不到 = None"""
+    rows = table if table is not None else _proc_table()
+    if rows is None:
+        return None
+    kids = defaultdict(list)
+    for p, pp, c in rows:
+        kids[pp].append((p, c))
+    tot, stack, seen = 0.0, [pid], {pid}
+    while stack:
+        for p, c in kids.get(stack.pop(), []):
+            if p not in seen:
+                seen.add(p)
+                tot += c
+                stack.append(p)
+    return round(tot, 3)
+
+
+# W37（cut C 前置 P0）：_kill_tree 身份核对。旧实现 `taskkill /PID <pid> /T /F` 按 ParentProcessId 连带杀子孙；Windows pid 会复用，
+# 某个更早出生的别人进程（其父 pid 恰好被复用到我们树里）会被 /T “领养”后一起杀掉——11-03 :8800 api_watchdog / autoflow_resident
+# 两次被外部 /F 杀的机制（ISS-1103-172328 / 172950；CUTC_PRECHECK ⑦-1）。
+KILL_TREE_RULE = (
+    "杀前核对：根进程 (pid, 创建时间, 命令行) 必须与 run_watched 启动时记录一致——创建时间落在 [Popen 前 - 2s, Popen 后 + 2s]，"
+    "命令行含启动 argv[0] 的文件名；不一致 = 不杀根、记日志。子孙只按自己算的树杀（不用 /T）：某进程算作子进程当且仅当 "
+    "ParentProcessId == 父 pid 且 创建时间 ≥ 父的创建时间 且 ≥ 启动时刻 - 2s；比父早出生的 = pid 复用领养的别人进程，不杀、记日志。"
+    "进程表取不到 = 只杀我们持有句柄的根进程（Popen.kill），不碰任何别的 pid。最后逐个 taskkill /PID n /F（无 /T）。"
+)
+_TICKS_EPOCH = 621355968000000000  # .NET DateTime ticks 的 1970-01-01（UTC）
+_BORN_SLACK_S = 2.0
+
+
+def _kill_log(msg: str) -> None:
+    print(f"[_kill_tree] {msg}", file=sys.stderr, flush=True)
+
+
+def _ident_table() -> dict[int, dict] | None:
+    """{pid: {ppid, born(unix 秒), cmd}}；取不到 = None"""
+    if os.name == "nt":
+        ps = ("Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine,ExecutablePath,"
+              "@{n='Born';e={if($_.CreationDate){$_.CreationDate.ToUniversalTime().Ticks}else{0}}} | ConvertTo-Json -Compress")
+        try:
+            r = subprocess.run(["powershell.exe", "-NoProfile", "-Command", ps], capture_output=True, timeout=60,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            d = json.loads(r.stdout.decode("utf-8", "replace") or "[]")
+        except (OSError, subprocess.TimeoutExpired, ValueError) as e:
+            _kill_log(f"进程表取不到（{e!r}）→ 只杀持有句柄的根进程")
+            return None
+        d = [d] if isinstance(d, dict) else d or []
+        out = {}
+        for x in d:
+            b = int(x.get("Born") or 0)
+            out[int(x.get("ProcessId") or 0)] = {
+                "ppid": int(x.get("ParentProcessId") or 0),
+                "born": (b - _TICKS_EPOCH) / 1e7 if b else 0.0,
+                "cmd": str(x.get("CommandLine") or x.get("ExecutablePath") or "")}
+        return out
+    try:
+        boot = float(next(ln.split()[1] for ln in Path("/proc/stat").read_text().splitlines() if ln.startswith("btime")))
+        tck = os.sysconf("SC_CLK_TCK")
+    except (OSError, StopIteration, ValueError, IndexError) as e:
+        _kill_log(f"/proc/stat 读不到（{e!r}）→ 只杀持有句柄的根进程")
+        return None
+    out = {}
+    for p in Path("/proc").glob("[0-9]*"):
+        try:
+            st = (p / "stat").read_text().rsplit(")", 1)[1].split()
+            cl = (p / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")
+            out[int(p.name)] = {"ppid": int(st[1]), "born": boot + int(st[19]) / tck, "cmd": cl}
+        except (OSError, IndexError, ValueError):  # arch-ok: 进程已退出 / 读不到，跳过
+            continue
+    return out
+
+
+def _cmd_mark(argv: list[str]) -> str:
+    return os.path.basename(str(argv[0])).lower() if argv else ""
+
+
+def kill_plan(ident: dict, table: dict[int, dict]) -> tuple[list[int], list[str]]:
+    """纯函数：按 KILL_TREE_RULE 算出可杀的 pid（子孙在前、根在后）和拒杀日志。
+    ident = run_watched 启动时记录 {pid, t0, t1, argv}；table = _ident_table() 的结果"""
+    root, refused = int(ident["pid"]), []
+    t0 = float(ident["t0"]) - _BORN_SLACK_S
+    t1 = float(ident["t1"]) + _BORN_SLACK_S
+    mark = _cmd_mark(ident.get("argv") or [])
+    r = table.get(root)
+    root_ok = False
+    if r is None:
+        refused.append(f"根 pid {root} 已不在进程表")
+    elif not (t0 <= r["born"] <= t1):
+        refused.append(f"根 pid {root} 创建时间 {r['born']:.1f} 不在启动窗口 [{t0:.1f}, {t1:.1f}]（pid 复用）：{r['cmd'][:120]}")
+    elif mark and mark not in r["cmd"].lower():
+        refused.append(f"根 pid {root} 命令行不含启动程序 {mark}：{r['cmd'][:120]}")
+    else:
+        root_ok = True
+    kids: dict[int, list[int]] = defaultdict(list)
+    for pid, x in table.items():
+        kids[x["ppid"]].append(pid)
+    # 根身份不符时它的“子进程”也不认（那是别人的树）；根已退出时，孤儿子孙仍按 ppid + 启动后出生认领
+    parent_born = {root: (r["born"] if root_ok else t0)} if (root_ok or r is None) else {}
+    order, stack, seen = [], list(parent_born), {root}
+    while stack:
+        par = stack.pop()
+        for k in kids.get(par, []):
+            if k in seen:
+                continue
+            seen.add(k)
+            kb = table[k]["born"]
+            if kb < parent_born[par] or kb < t0:
+                refused.append(f"pid {k} 比父 {par} 早出生（{kb:.1f} < {parent_born[par]:.1f}）= pid 复用领养的别人进程，不杀：{table[k]['cmd'][:120]}")
+                continue
+            parent_born[k] = kb
+            order.append(k)
+            stack.append(k)
+    pids = list(reversed(order)) + ([root] if root_ok else [])
+    return pids, refused
+
+
+def _kill_tree(pr: subprocess.Popen, ident: dict | None = None, table_fn=None, killer=None) -> dict:
+    """按 KILL_TREE_RULE 杀 pr 的进程树；返回 {killed, refused}。ident 缺省 = 只认 pr 本身（我们持有句柄，pid 不会被复用）"""
+    ident = ident or {"pid": pr.pid, "t0": 0.0, "t1": time.time(), "argv": []}
+    if os.name != "nt" and killer is None and table_fn is None:
+        # POSIX：start_new_session=True 时根即进程组长；未 wait 的子进程 pid 不会被复用，进程组只含本次启动的子孙
+        try:
+            os.killpg(pr.pid, 9)
+            return {"killed": [pr.pid], "refused": [], "how": "killpg"}
+        except OSError:  # arch-ok: 进程组已不在，退回只杀本进程
+            pr.kill()
+            return {"killed": [pr.pid], "refused": [], "how": "kill"}
+    table = (table_fn or _ident_table)()
+    if table is None:
+        pr.kill()
+        return {"killed": [pr.pid], "refused": ["进程表取不到：只杀根（句柄）"], "how": "handle"}
+    pids, refused = kill_plan(ident, table)
+    for m in refused:
+        _kill_log(m)
+    if killer is not None:
+        killer(pids)
+    elif pids:
+        args = ["taskkill", "/F"]
+        for p in pids:
+            args += ["/PID", str(p)]
+        subprocess.run(args, capture_output=True, timeout=60)
+    if pr.pid not in pids and pr.poll() is None:
+        pr.kill()  # 句柄还在 = 一定是我们的根；身份核对没过也只用句柄杀它自己
+    return {"killed": pids, "refused": refused, "how": "plan"}
+
+
+def run_watched(cmd: list[str], timeout: int, cwd: Path | None = None, env: dict | None = None, stall_s: float | None = 600,
+                poll_s: float = 30, cpu_fn=proc_tree_cpu, clock=time.time, sleep=time.sleep) -> tuple[int, str, dict]:
+    """跑命令并看着它：stall_s 窗口内进程树 CPU 增量 < 1 s 且输出没有变长 = 僵死 → 杀整棵树，返回 stalled=True；超时 → 124。
+    stall_s=None = 不判僵死、只认超时（W22：串行 pytest 等网络 10 分钟 CPU 不动是“慢”，不是僵死）"""
+    fd, fn = tempfile.mkstemp(prefix="nsfs_watch_", suffix=".out")
+    os.close(fd)
+    t0, samples, info = clock(), [], {"stalled": False}
+    try:
+        with open(fn, "wb") as fo:
+            kw = {"start_new_session": True} if os.name != "nt" else {}
+            t_spawn = time.time()
+            pr = subprocess.Popen(cmd, cwd=cwd or ROOT, env=env or ENV, stdin=subprocess.DEVNULL, stdout=fo, stderr=subprocess.STDOUT, **kw)
+            ident = {"pid": pr.pid, "t0": t_spawn, "t1": time.time(), "argv": list(cmd)}
+            while True:
+                try:
+                    code = pr.wait(timeout=poll_s)
+                    break
+                except subprocess.TimeoutExpired:
+                    pass
+                now = clock()
+                if now - t0 > timeout:
+                    info["kill"] = _kill_tree(pr, ident)
+                    pr.wait(timeout=60)
+                    code = 124
+                    info["timeout"] = True
+                    break
+                if stall_s is None:
+                    continue
+                c = cpu_fn(pr.pid)
+                if c is None:
+                    continue
+                try:
+                    osz = os.path.getsize(fn)
+                except OSError:  # arch-ok: 读不到输出大小 = 按没变
+                    osz = -1
+                samples.append((now, c, osz))
+                old = [s for s in samples if s[0] <= now - stall_s]
+                if old and c - old[-1][1] < 1.0 and osz == old[-1][2]:
+                    info["kill"] = _kill_tree(pr, ident)
+                    pr.wait(timeout=60)
+                    info.update(stalled=True, elapsed_s=round(now - t0, 1), cpu_delta=round(c - old[-1][1], 3))
+                    code = 125
+                    break
+                samples = [s for s in samples if s[0] > now - stall_s - 3 * poll_s] or samples[-1:]
+        out = Path(fn).read_bytes().decode("utf-8", "replace")
+        if info.get("timeout"):
+            out += f"\n超时 {timeout}s：{' '.join(cmd)[:120]}"
+        return code, out, info
+    finally:
+        Path(fn).unlink(missing_ok=True)
+
+
+def _git_at(repo: Path, env: dict, *a, input_text: str | None = None) -> str:
+    r = subprocess.run(["git", *a], cwd=repo, env=env, input=input_text, capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=900)
+    if r.returncode != 0:
+        raise RuntimeError(f"git {' '.join(a)[:80]} 失败：{(r.stdout + r.stderr)[-400:]}")
+    return r.stdout
+
+
+BLOB_ITEM = re.compile(r"^(?P<path>.+)@(?P<blob>[0-9a-f]{7,40})$")
+
+
+def read_list(list_path: Path) -> list[str]:
+    """清单：一行一项，# 开头 / 空行跳过；`path@blob` = 用这个 blob（例：决策表复审通过时的版本），不用工作树此刻的内容"""
+    return [ln.strip() for ln in list_path.read_text(encoding="utf-8-sig").splitlines() if ln.strip() and not ln.strip().startswith("#")]
+
+
+def build_tree_from_list(list_path: Path, base: str = "HEAD", repo: Path | None = None) -> dict:
+    """CUT_PLAN_sv17 §1：临时 GIT_INDEX_FILE ← read-tree base → 清单逐项 add（path@blob 走 update-index --cacheinfo；
+    工作树没有、base 里有 = 删除）→ write-tree。不碰仓库的 index / HEAD；任何一项不成立就抛错（不跳过、不 -f）"""
+    repo = repo or ROOT
+    items = read_list(Path(list_path))
+    if not items:
+        raise RuntimeError(f"清单为空：{list_path}")
+    fd, idx = tempfile.mkstemp(prefix="nsfs_release_index_")
+    os.close(fd)
+    Path(idx).unlink(missing_ok=True)
+    env = {**ENV, "GIT_INDEX_FILE": idx}
+    try:
+        _git_at(repo, env, "read-tree", base)
+        add, rm, blobs = [], [], []
+        for it in items:
+            m = BLOB_ITEM.match(it)
+            if m:
+                path, blob = m.group("path"), m.group("blob")
+                if _git_at(repo, env, "cat-file", "-t", blob).strip() != "blob":
+                    raise RuntimeError(f"清单项 {it}：{blob} 不是 blob")
+                full = _git_at(repo, env, "rev-parse", blob).strip()
+                ls = _git_at(repo, env, "ls-tree", base, "--", path).split()
+                mode = ls[0] if ls else "100644"
+                _git_at(repo, env, "update-index", "--add", "--cacheinfo", f"{mode},{full},{path}")
+                blobs.append({"path": path, "blob": full})
+            elif (repo / it).exists():
+                add.append(it)
+            elif _git_at(repo, env, "ls-files", "--", it).strip():
+                rm.append(it)
+            else:
+                raise RuntimeError(f"清单项 {it}：工作树没有、{base} 里也没有")
+        for i in range(0, len(add), 200):
+            _git_at(repo, env, "add", "--", *add[i:i + 200])
+        for i in range(0, len(rm), 200):
+            _git_at(repo, env, "rm", "--cached", "-q", "--", *rm[i:i + 200])
+        tree = _git_at(repo, env, "write-tree").strip()
+        return {"tree": tree, "base": base, "items": len(items), "added": len(add), "removed": rm, "blobs": blobs}
+    finally:
+        Path(idx).unlink(missing_ok=True)
 
 
 def staged_problems(env: dict | None = None) -> list[str]:
@@ -544,6 +953,49 @@ def cut_lock(active: bool, sv: str | None = None, note: str = "") -> dict:
     return rec
 
 
+CUT_LOCK_RENEW_S = 5 * 60
+
+
+def cut_lock_renew(sv: str | None, pid: int | None = None) -> bool:
+    """W17b P1-4（A17 第 28 轮）：cut 进行中续期 cut_lock（expires_t = 现在 + TTL）。只续自己的锁（active、同 sv、同 pid）；
+    别人的锁 / 已结束的锁不动。不写 lock_history（start / end 事件不变）"""
+    try:
+        d = json.loads(CUT_LOCK.read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # arch-ok: 锁文件读不到 = 不续（cut 结束时 cut_lock(False) 会重写）
+        return False
+    if not d.get("active") or d.get("sv") != sv or int(d.get("pid") or 0) != int(pid or os.getpid()):
+        return False
+    d["expires_t"] = time.time() + CUT_LOCK_TTL_S
+    d["renewed_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    tmp = CUT_LOCK.with_suffix(".renew.tmp")
+    tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, CUT_LOCK)
+    return True
+
+
+def start_cut_lock_renewer(sv: str | None, every_s: float = CUT_LOCK_RENEW_S):
+    """后台线程每 every_s 续期一次；返回 stop()。stop() 与续期互斥：stop() 返回后不会再有续期写入
+    （否则续期可能盖掉随后 cut_lock(False) 写的 active=false）"""
+    import threading
+    ev, mu, pid = threading.Event(), threading.Lock(), os.getpid()
+
+    def _loop():
+        while not ev.wait(every_s):
+            with mu:
+                if ev.is_set():
+                    return
+                try:
+                    cut_lock_renew(sv, pid)
+                except OSError:  # arch-ok: 续期失败下一轮再试（最坏 = 退回 45 分钟 TTL 的旧行为）
+                    pass
+
+    def stop() -> None:
+        with mu:
+            ev.set()
+    threading.Thread(target=_loop, name=f"cut_lock_renew:{sv}", daemon=True).start()
+    return stop
+
+
 def cut_locked(now: float | None = None) -> dict | None:
     try:
         d = json.loads(CUT_LOCK.read_text(encoding="utf-8"))
@@ -594,6 +1046,10 @@ HARDLINK_TOP = ("data", "assets", "golden")
 JUNCTION_OK = ("node_modules", "models_cache", "apps/web/dist")
 
 
+# W22 P0：快照不带 pid / 锁 / 常驻心跳文件——快照里的测试读到它们就会拿到生产进程的 pid（15:30 autoflow_resident 被杀）
+LIVE_PID_RE = re.compile(r"(\.pid|\.pid\.json|\.lock|_pid\.json)$|^autoflow_resident\.json$|^api_restart\.json$", re.I)
+
+
 def _hardlink_tree(src: Path, dst: Path) -> int:
     n = 0
     for dp, dns, fns in os.walk(src):
@@ -601,6 +1057,8 @@ def _hardlink_tree(src: Path, dst: Path) -> int:
         rel = Path(dp).relative_to(src)
         (dst / rel).mkdir(parents=True, exist_ok=True)
         for f in fns:
+            if LIVE_PID_RE.search(f):
+                continue
             try:
                 os.link(Path(dp) / f, dst / rel / f)
                 n += 1
@@ -667,9 +1125,11 @@ def cut(base: str | None = None, dry: bool = False, sv: str | None = None, run_t
         return {"ok": False, "reason": "相对上一版没有任何改动，不发版"}
     os.environ["NS_FREEZE_EXEMPT"] = "1"              # SYSARCH 冻结锁第 2 层：cut 自己和它起的子进程（git / pytest / compile）豁免
     cut_lock(True, sv, "预冻结：等冻结目录 60 s 无改动")
+    renew_stop = start_cut_lock_renewer(sv)           # W17b P1-4：cut 可能超过 45 分钟 TTL（xdist 自愈 ≈ 78 分钟），跑多久续多久
     if not tree:
         q = quiet_since(60)
         if not q.get("ok"):
+            renew_stop()
             cut_lock(False, sv, "预冻结超时：冻结目录一直有人在改")
             return {"ok": False, "id": sv, "prev": prev, "reason": f"预冻结 10 分钟内冻结目录没安静下来（最后改动 {q.get('last_file')}）"}
     idx_fd, idx_name = tempfile.mkstemp(prefix="nsfs_cut_index_")
@@ -691,8 +1151,14 @@ def cut(base: str | None = None, dry: bool = False, sv: str | None = None, run_t
         frozen = [x for x in gitx(ienv, "diff", "--cached", "--name-only", "HEAD").split("\n") if x]
         snap = build_snapshot(tree, SNAP_BASE / sv)
         rep.update(tree=tree, snapshot={k: v for k, v in snap.items() if k != "env"}, frozen_files=len(frozen))
-        g = gates(frozen or files, run_tests, root=Path(snap["dir"]), env=snap["env"])
+        g = gates(frozen or files, run_tests, root=Path(snap["dir"]), env=snap["env"], sv=sv)
         rep["gates"] = g
+        plog = next((x["log"] for x in g if x.get("log")), None)
+        if plog:                                         # W22：cut_lock note 引用完整 pytest 输出
+            rep["pytest_log"] = plog
+        heal = next((x["xdist_heal"] for x in g if x.get("xdist_heal")), None)
+        if heal:                                         # W17：xdist 僵死自愈记进 cut 报告
+            rep["xdist_heal"] = heal
         fails = [x for x in g if not x["ok"]]
         if fails:
             rep.update(ok=False, reason="闸门不过：" + "；".join(f"{x['name']}：{x['detail'][:200]}" for x in fails))
@@ -754,8 +1220,10 @@ def cut(base: str | None = None, dry: bool = False, sv: str | None = None, run_t
                    untracked_code_after_cut=late[:50])
         return rep
     finally:
+        renew_stop()
         idx_file.unlink(missing_ok=True)
-        cut_lock(False, sv, "cut 结束：" + ("成功" if rep.get("ok") else str(rep.get("reason") or "失败")[:200]))
+        cut_lock(False, sv, "cut 结束：" + ("成功" if rep.get("ok") else str(rep.get("reason") or "失败")[:200])
+                 + (f"；pytest 完整输出 {rep['pytest_log']}" if rep.get("pytest_log") else ""))
 
 
 PUSH_SECRET_RE = re.compile(r"(sk-[A-Za-z0-9]{24,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[0-9A-Z]{16}|"
@@ -1276,6 +1744,22 @@ def verify(sv: str | None = None, hosts: list[str] | None = None, shot: int | No
     return res
 
 
+def _write_report(path: str, out: dict) -> None:
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(out, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+    os.replace(tmp, p)
+
+
+def load_release_tick():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ns_release_tick", ROOT / "tools/autopilot/release_tick.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
 def status() -> dict:
     t = sv_tags()
     return {"current": t[-1] if t else None, "versions": t, "pending": len(pending_changes()),
@@ -1290,6 +1774,7 @@ def main(argv=None) -> int:
     c.add_argument("--dry", action="store_true")
     c.add_argument("--id")
     c.add_argument("--tree", default=None, help="用指定的 git 树代替冻结工作树（总调度批准的快照修补）")
+    c.add_argument("--report-json", default=None, help="完整 cut 报告另写到这个文件（release_tick 读）")
     d = sp.add_parser("deploy")
     d.add_argument("sv", nargs="?")
     d.add_argument("--hosts")
@@ -1302,6 +1787,7 @@ def main(argv=None) -> int:
     d.add_argument("--verify-run", default=None, help="verify 时 golden 用的剧（NS_RUN；不给 = 服务器当前剧）")
     d.add_argument("--manifest-prefix", default=None, help="verify：assets_v2/manifest.json 的 sha 必须以此开头")
     d.add_argument("--no-verify", action="store_true", help="跳过部署后 verify（只给回退流程用）")
+    d.add_argument("--report-json", default=None, help="完整 deploy 报告另写到这个文件（release_tick 读）")
     v = sp.add_parser("verify")
     v.add_argument("sv", nargs="?")
     v.add_argument("--hosts")
@@ -1313,6 +1799,13 @@ def main(argv=None) -> int:
     r.add_argument("sv")
     sp.add_parser("status")
     sp.add_parser("lock-status")
+    ho = sp.add_parser("handover", help="L-152 换代（W17）：--dry 只列将做的步骤；--apply 执行（条件不满足不动）")
+    hg = ho.add_mutually_exclusive_group(required=True)
+    hg.add_argument("--dry", action="store_true")
+    hg.add_argument("--apply", action="store_true")
+    ho.add_argument("--force", action="store_true", help="--apply 时不看“已换代过”记录（条件仍要满足）")
+    rl = sp.add_parser("release", help="W17：按 data/system_versions/release_request.json 跑一次发版流水线（= release_tick 一拍）")
+    rl.add_argument("--build-tree-only", action="store_true", help="只按清单拼树、打印 tree，不跑 cut")
     a = ap.parse_args(argv)
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -1321,6 +1814,8 @@ def main(argv=None) -> int:
     if a.cmd == "cut":
         out = cut(a.base, a.dry, a.id, tree=a.tree)
         record_cut(out, a.dry)
+        if a.report_json:
+            _write_report(a.report_json, out)
         print(json.dumps({k: v for k, v in out.items() if k != "gates"}, ensure_ascii=False, indent=1)[:4000])
         for gg in out.get("gates", []):
             print(f"  {'✅' if gg['ok'] else '❌'} {gg['name']}：{gg['detail'][:200]}")
@@ -1329,6 +1824,8 @@ def main(argv=None) -> int:
         out = deploy(a.sv, a.hosts.split(",") if a.hosts else None, not a.no_restart, a.allow_old, a.urgent, a.hotfix_of,
                      hold_data=[x for x in (a.hold_data or "").split(",") if x], verify_shot=a.verify_shot,
                      verify_run=a.verify_run, manifest_prefix=a.manifest_prefix, run_verify=not a.no_verify)
+        if a.report_json:
+            _write_report(a.report_json, out)
         print(json.dumps(out, ensure_ascii=False, indent=1)[:6000])
         ok = bool(out["hosts"]) and all(x.get("ok") for x in out["hosts"].values())
         return 0 if ok and (a.no_verify or (out.get("verify") or {}).get("ok")) else 1
@@ -1343,6 +1840,19 @@ def main(argv=None) -> int:
     if a.cmd == "rollback":
         print(json.dumps(rollback(a.sv), ensure_ascii=False, indent=1))
         return 0
+    if a.cmd in ("handover", "release"):      # W17：逻辑在 tools/autopilot/release_tick.py（调用本模块，不复制）
+        RT = load_release_tick()
+        if a.cmd == "handover":
+            out = RT.handover_once(apply=bool(a.apply), sv=sys.modules[__name__], force=a.force)
+            print(RT.format_handover(out))
+            return 0 if out.get("ok", True) else 1
+        if a.build_tree_only:
+            req = RT.read_request()
+            out = build_tree_from_list(ROOT / req["list"], req.get("base") or "HEAD") if req else {"error": "没有 release_request.json"}
+        else:
+            out = RT.release_once(sv=sys.modules[__name__])
+        print(json.dumps(out, ensure_ascii=False, indent=1)[:6000])
+        return 0 if not out.get("error") and out.get("status") != "failed" else 1
     print(json.dumps(status(), ensure_ascii=False, indent=1))
     return 0
 

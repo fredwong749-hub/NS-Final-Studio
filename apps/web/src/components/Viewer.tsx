@@ -211,6 +211,10 @@ export function Viewer() {
                     ((d.takes as { locked_by?: Record<string, { by?: string; n?: number } | null> }).locked_by?.[p.stage]?.by === "auto" &&
                     (d.takes as { locked_by?: Record<string, { by?: string; n?: number } | null> }).locked_by?.[p.stage]?.n === t.n ? (
                       <span className="chip chip-warn" title="整集出片“自动测试定稿”出的，你还没复审：不算已定稿">自动定稿·待复审</span>
+                    ) : (d.takes as { locked_by?: Record<string, { by?: string; n?: number } | null> }).locked_by?.[p.stage]?.by === "delegate" &&
+                      (d.takes as { locked_by?: Record<string, { by?: string; n?: number } | null> }).locked_by?.[p.stage]?.n === t.n ? (
+                      /* W18b P1-6：首帧超时代选（L-142）——不算你定稿，可改：换版本 / 解锁走原定稿入口 */
+                      <span className="chip chip-warn" title="出图检测通过后你 30 分钟没定，系统按契约分代选（L-142）：不算你定稿，可改（换一版定稿或解锁）">系统代选·可改</span>
                     ) : (
                       <span className="chip chip-ok">已定稿</span>
                     ))}

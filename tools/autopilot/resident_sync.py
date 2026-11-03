@@ -15,6 +15,7 @@ fwd.py 把 1818x 转到本机 8188/8189/8191），笔记本只做控制面。复
   alive HOST                常驻进程（fwd / producer / night）在不在
   auto                      无人值守：等跳板 TCP 恢复 → switch → loop
   health HOST               服务器侧每张卡利用率 / 队列 / producer 心跳 / night 心跳；空闲但有活 ≥ 10 分钟写报警
+  lifecycle [--dry|--apply] W18：主剧阶段 ≥ 出图 → 自动起 producer（笔记本 restart_producer.ps1 / 服务器 request_restart）；≥ 尾帧 → night
   loop                      常驻：5 分钟一次 health；20 分钟两台各 pull 一次；代码有改动就 push --code-only + restart
 不删任何文件（两边都不删）。日志 ops/logs/resident_sync.log，状态 data/autopilot/resident_sync.json。
 """
@@ -997,6 +998,334 @@ def factory_sync_thread(every_s: int | None = None) -> None:
         time.sleep(max(1.0, every_s - (time.time() - t0)))
 
 
+RELEASE_TICK = True                # W17 RELEASE-AUTO：发版流水线每拍检查（开关以 config/pipeline/release.json enabled 为准）
+
+
+def release_thread(every_s: int | None = None) -> None:
+    """W17：tools/autopilot/release_tick.tick()——release_request.json 复审全过 → 拼树 → cut --dry → cut → deploy --verify，
+    deployed + handover → L-152 换代。cut / deploy 都是子进程，可能跑几个小时，所以单独线程，不拖 health / 重启队列"""
+    import release_tick as RT
+    last = None
+    while True:
+        t0 = time.time()
+        every = every_s or 60
+        try:
+            every = every_s or int(RT.load_sv().release_cfg().get("every_s") or 60)
+            r = RT.tick(rs=sys.modules[__name__])
+            sig = json.dumps(r, ensure_ascii=False, sort_keys=True, default=str)
+            if sig != last and (r.get("release") or {}).get("status") not in ("idle", "disabled", None):
+                log("release_tick", sig[:600])
+            last = sig
+        except Exception as e:  # noqa: BLE001
+            log("release_tick error", repr(e)[:300])
+        time.sleep(max(1.0, every - (time.time() - t0)))
+
+
+# ---------------------------------------------------------------- W18 PRODUCER-LIFECYCLE：主剧到“出图”就自动起 producer / night（L-154 / C-16）
+# 每拍：runs.json primary（preparing / producing）的 sop_gate 唯一阶段视图 →
+#   ① 有一集已到“出图”且 status=preparing → sop_gate.promote（与 producer.maybe_promote 同一规则；promote.auto=true 才写，status_history by=auto:…）
+#   ② producer：本集阶段 ∈ {出图, 出图检测, 尾帧, 视频} → 笔记本（restart_producer.ps1）+ 负责该集出图分区的服务器（request_restart）
+#   ③ night：本集阶段 ≥ 尾帧（未完成）→ 负责该集视频分区的服务器
+#   心跳新鲜（≤ hb_stale_min）= 在跑，不动（幂等）；起过后 grace_min 内不重复起；连续 max_fails 次起不来 → report_issue（P0，阻断，只报一次）。
+#   阶段 < 出图一律不起（C-16）；阶段 < 尾帧 night 不起——服务器请求带 mode=producer-only（restart_queue 按 mode 执行之前退化为 all，见交付说明）。
+#   开关：config/pipeline/sop_gate.json lifecycle.apply（默认 false = 只算计划、写日志，不起不写；总调度在 cut B deploy 后放开）。
+LIFECYCLE_TICK = True
+LIFECYCLE_STATE = ROOT / "data/autopilot/lifecycle.json"
+LC_PRODUCER_STAGES = ("出图", "出图检测", "尾帧", "视频")
+LC_NIGHT_FROM = "尾帧"
+LC_DEFAULT = {"apply": False, "hb_stale_min": 5, "grace_min": 10, "max_fails": 3, "health_max_age_min": 15,
+              "laptop_ps1": "ops/autostart/restart_producer.ps1"}
+LC_WHO = "resident_sync.lifecycle"
+
+
+def lifecycle_cfg(root: Path = ROOT) -> dict:
+    d = jl(Path(root) / "config/pipeline/sop_gate.json", {}) or {}
+    return {**LC_DEFAULT, **(d.get("lifecycle") or {}), "_promote": d.get("promote") or {}}
+
+
+def _lc_mod(root: Path, rel: str, name: str):
+    import importlib.util as _u
+    key = f"{name}:{Path(root).resolve()}"
+    if key not in _LC_MODS:
+        sp = _u.spec_from_file_location(name, Path(root) / rel if (Path(root) / rel).is_file() else ROOT / rel)
+        m = _u.module_from_spec(sp)
+        sp.loader.exec_module(m)
+        _LC_MODS[key] = m
+    return _LC_MODS[key]
+
+
+_LC_MODS: dict = {}
+
+
+def lifecycle_stage(root: Path, run: str) -> dict:
+    """{status, legacy, episodes: [{episode, stage, stage_index}], stages} —— 只读 sop_gate.stage_view（唯一阶段口径）"""
+    sg = _lc_mod(root, "tools/master/sop_gate.py", "ns_sop_gate_lc")
+    reg = (jl(Path(root) / "config/pipeline/runs.json", {}) or {}).get("runs") or {}
+    v = sg.stage_view(run, Path(root))
+    return {"status": (reg.get(run) or {}).get("status"), "legacy": bool(v.get("legacy")), "stages": list(v.get("stages") or sg.STAGES),
+            "episodes": [{"episode": e["episode"], "stage": e["stage"], "stage_index": e["stage_index"]} for e in v.get("episodes") or []]}
+
+
+def lifecycle_partition(root: Path = ROOT) -> dict:
+    d = jl(Path(root) / "config/netfix/partition.json", {}) or {}
+    return {k: {h: [int(x) for x in eps] for h, eps in (d.get(k) or {}).items() if h != "laptop"} for k in ("images", "video")}
+
+
+def lifecycle_want(st: dict, part: dict) -> dict:
+    """纯函数：→ {producer_eps, night_eps, targets: {目标: {kind, host, eps, mode}}}；目标 = laptop:producer / <host>:producer / <host>:night"""
+    stages = st["stages"]
+    p_idx = {stages.index(s) for s in LC_PRODUCER_STAGES if s in stages}
+    n_from = stages.index(LC_NIGHT_FROM) if LC_NIGHT_FROM in stages else 6
+    prod = sorted(e["episode"] for e in st["episodes"] if e["stage_index"] in p_idx)
+    night = sorted(e["episode"] for e in st["episodes"] if n_from <= e["stage_index"] < len(stages))
+    t: dict[str, dict] = {}
+    if prod:
+        t["laptop:producer"] = {"kind": "producer", "host": "laptop", "eps": prod, "mode": None}
+    for h, eps in sorted((part.get("images") or {}).items()):
+        mine = sorted(set(eps) & set(prod))
+        if mine:
+            t[f"{h}:producer"] = {"kind": "producer", "host": h, "eps": mine}
+    for h, eps in sorted((part.get("video") or {}).items()):
+        mine = sorted(set(eps) & set(night))
+        if mine:
+            t[f"{h}:night"] = {"kind": "night", "host": h, "eps": mine}
+    for k, v in t.items():                       # 服务器一次重启 = producer + night 同起（resident_restart.sh all）；该机没有该起 night 的集 → producer-only
+        if v["host"] != "laptop":
+            v["mode"] = "all" if f"{v['host']}:night" in t else "producer-only"
+    return {"producer_eps": prod, "night_eps": night, "targets": t}
+
+
+def lifecycle_heartbeats(root: Path, run: str, hosts, now: float | None = None, max_age_min: float = 15) -> dict:
+    """{目标: 心跳分钟数 | None=没有心跳 | "unknown"=服务器健康记录过期（判不了，不起）}。
+    笔记本 = runs.producer_dir(run)/heartbeat.json（exited / draining 的不算在跑）；服务器 = health() 写进 STATE 的 producer / night 年龄。
+    口径（W18b P1-1）：笔记本心跳 state 不是 draining / exited（含没写 state、running、paused 等）且年龄 ≤ hb_stale_min（默认 5 分钟，
+    ≥ producer 一拍最长时长：import_err 重试单次就能超 2 分钟）→ lifecycle_tick 判 running、不动；draining / exited → 这里返回 None（= 没有心跳）"""
+    now = now or time.time()
+    out: dict = {}
+    pd = Path(root) / producer_rel(run)
+    hb = jl(pd / "heartbeat.json", {}) or {}
+    live = hb.get("t") and not hb.get("exited") and hb.get("state") not in ("exited", "draining") and hb.get("run") in (None, run)
+    out["laptop:producer"] = round((now - float(hb["t"])) / 60, 1) if live else None
+    st = jl(Path(root) / "data/autopilot/resident_sync.json", {}) or {}
+    for h in hosts:
+        hh = (st.get(h) or {}).get("health") or {}
+        try:
+            age = (now - time.mktime(time.strptime(hh["at"], "%Y-%m-%d %H:%M:%S"))) / 60
+        except (KeyError, ValueError, TypeError):
+            age = None
+        if age is None or age > max_age_min:
+            out[f"{h}:producer"] = out[f"{h}:night"] = "unknown"
+            continue
+        pa = hh.get("producer_hb_age_min")
+        out[f"{h}:producer"] = None if (pa is None or hh.get("producer_run_mismatch")) else float(pa)
+        na = hh.get("night_state_age_min")
+        out[f"{h}:night"] = None if na is None else float(na)
+    return out
+
+
+def _laptop_start(root: Path, ps1: str, run: str) -> dict:
+    try:
+        r = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(Path(root) / ps1), "-Run", run], cwd=root,
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600, stdin=subprocess.DEVNULL)
+        out = ((r.stdout or "") + (r.stderr or "")).strip()
+        return {"ok": r.returncode == 0 and "restarted" in out, "rc": r.returncode, "out": out[-300:]}
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"[:300]}
+
+
+def _server_start(host: str, reason: str, mode: str) -> dict:
+    """DJ-20：服务器只写重启请求（restart_queue 合并 / 排空后执行）；请求带 mode，同一台已有待办请求就不重复写"""
+    import restart_queue as RQ
+    if RQ.pending(host):
+        return {"ok": True, "dedup": True, "pending": [r.get("id") for r in RQ.pending(host)]}
+    rec = {"id": __import__("uuid").uuid4().hex[:12], "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "t": time.time(), "host": host,
+           "reason": reason, "by": LC_WHO, "urgent": False, "mode": mode}
+    RQ._append(RQ.REQ, rec)
+    return {"ok": True, "request": rec["id"], "mode": mode}
+
+
+def _rq_state(host: str, req_id: str | None) -> dict:
+    """W18b P1-2：restart_queue 里 lifecycle 自己那条请求的状态 → {pending: 该机还有没执行的请求, done_t: req_id 被执行（restart_done 记录）的时间 | None}"""
+    import restart_queue as RQ
+    done_t = None
+    if req_id:
+        for d in RQ._lines(RQ.DONE):
+            if req_id in (d.get("request_ids") or []):
+                try:
+                    done_t = time.mktime(time.strptime(str(d.get("at"))[:19], "%Y-%m-%dT%H:%M:%S"))
+                except ValueError:
+                    done_t = time.time()                 # 时间坏了：按“刚执行”算（多等一个 grace，不提前算失败）
+    return {"pending": bool(RQ.pending(host)), "done_t": done_t}
+
+
+def _lc_live(root: Path, line: str) -> None:
+    try:
+        _lc_mod(root, "tools/master/report_issue.py", "ns_report_issue_lc")._insert_live(f"{time.strftime('%H:%M')} {line}",
+                                                                                           Path(root) / "docs/master/V2_LIVE.md")
+    except OSError:  # arch-ok: V2_LIVE 写不进去不拦生命周期（lifecycle.json 是权威）
+        pass
+
+
+def _lc_issue(root: Path, run: str, ep: int, target: str, what: str) -> str | None:
+    ri = _lc_mod(root, "tools/master/report_issue.py", "ns_report_issue_lc")
+    rec = ri.report(run, ep, "生命周期:" + target, LC_WHO, what, True,
+                    "看 ops/logs/resident_sync.log lifecycle 行 + 目标机日志；修好后删 data/autopilot/lifecycle.json 里该目标的 attempts",
+                    issues=Path(root) / "data/pipeline/issues.jsonl", live=Path(root) / "docs/master/V2_LIVE.md")
+    return rec.get("id")
+
+
+def lifecycle_tick(root: Path = ROOT, dry: bool | None = None, now: float | None = None, stage_fn=None, hb_fn=None,
+                   laptop_fn=None, server_fn=None, promote_fn=None, issue_fn=None, live_fn=None, rq_fn=None) -> dict:
+    """一拍。dry=None → 按 lifecycle.apply 决定（apply=false 即 dry）。返回完整计划 + 每个目标的动作（dry 下 would_*）。
+    W18b P1-2：服务器目标的 attempts 数的是“restart_queue 真执行过、执行后 grace_min 仍没有心跳”的次数，不是写了几次请求——
+    该机还有待办请求 = queued（不计数、不再写）；执行了还在 grace 内 = waiting；连续 max_fails 次执行后仍没心跳才登记 P0"""
+    root = Path(root)
+    cfg = lifecycle_cfg(root)
+    dry = (not cfg.get("apply")) if dry is None else dry
+    now = now or time.time()
+    run = str((jl(root / "config/pipeline/runs.json", {}) or {}).get("primary") or "")
+    out: dict = {"run": run, "dry": dry, "at": time.strftime("%F %T", time.localtime(now)), "actions": {}}
+    if not run:
+        out["skip"] = "runs.json 没有 primary"
+        return out
+    st = (stage_fn or lifecycle_stage)(root, run)
+    out["status"], out["episodes"] = st.get("status"), st.get("episodes")
+    if st.get("legacy"):
+        out["skip"] = f"{run} 是 legacy（V1 不走 V2 生命周期）"
+        return out
+    if st.get("status") not in ("preparing", "producing"):
+        out["skip"] = f"runs.json status={st.get('status')}（只有 preparing / producing 会自动起；paused / archived = 项目方 / 总调度停的，不动）"
+        return out
+    want = lifecycle_want(st, lifecycle_partition(root))
+    out.update(producer_eps=want["producer_eps"], night_eps=want["night_eps"])
+    if not want["targets"]:
+        out["skip"] = "没有任何一集到“出图”（C-16：阶段 < 出图 不起 producer / night）"
+        return out
+    # ① promote（preparing → producing）
+    if st["status"] == "preparing":
+        auto = bool((cfg.get("_promote") or {}).get("auto"))
+        try:
+            if promote_fn:
+                res = promote_fn(run, root, apply=auto and not dry)
+            else:
+                sg = _lc_mod(root, "tools/master/sop_gate.py", "ns_sop_gate_lc")
+                res = sg.promote(run, root, by=f"auto:{LC_WHO}", apply=auto and not dry)
+        except Exception as e:  # noqa: BLE001  # arch-ok: 判不了 = 不提升、不起（失败关闭）
+            res = {"promote": False, "why": f"promote 出错：{type(e).__name__}: {e}"[:300]}
+        out["promote"] = {k: res.get(k) for k in ("promote", "applied", "episodes", "why")} | {"auto": auto}
+        if res.get("applied"):
+            (live_fn or _lc_live)(root, f"✅ 自动提升（{LC_WHO}，L-154）：{run} preparing → producing，{res.get('why')}")
+        elif not res.get("promote"):
+            out["skip"] = f"{run} 仍 preparing 且 sop_gate.promote 判不可进：{str(res.get('why'))[:200]}（不起）"
+            return out
+        elif not dry and not auto:
+            out["skip"] = f"{run} 可提升但 promote.auto=false（等总调度 sop_gate.py promote --apply），不起"
+            return out
+    # ②③ 起 producer / night
+    hosts = sorted({v["host"] for v in want["targets"].values() if v["host"] != "laptop"})
+    hbs = (hb_fn or lifecycle_heartbeats)(root, run, hosts, now, float(cfg["health_max_age_min"]))
+    sd = jl(LIFECYCLE_STATE if root == ROOT else root / "data/autopilot/lifecycle.json", {}) or {}
+    started_hosts: dict = {}                   # host → 本拍 / 待办的请求 id（None = 这台这拍已处理，不再写）
+    for tgt, v in want["targets"].items():
+        rec = sd.setdefault(tgt, {})
+        hb = hbs.get(tgt)
+        a = {"kind": v["kind"], "host": v["host"], "eps": v["eps"], "hb_age_min": hb, "attempts": int(rec.get("attempts") or 0)}
+        if hb == "unknown":
+            a["action"] = "unknown"
+            a["why"] = f"{v['host']} 健康记录超过 {cfg['health_max_age_min']} 分钟没更新（ssh / health 不通），判不了，不起"
+        elif hb is not None and hb <= float(cfg["hb_stale_min"]):
+            a["action"] = "running"
+            if rec.get("attempts") or rec.get("issue"):
+                rec.update(attempts=0, issue=None, recovered_at=time.strftime("%F %T", time.localtime(now)))
+            if not dry:
+                rec.pop("req_id", None), rec.pop("req_counted", None)
+        elif v["host"] != "laptop" and v["host"] in started_hosts:
+            a["action"] = "merged"
+            a["why"] = f"同一台 {v['host']} 这拍已经起过 / 有待办请求（一次重启 producer + night 同起）"
+            if started_hosts[v["host"]] and not dry:
+                rec.update(req_id=started_hosts[v["host"]], req_counted=False, last_try=now)
+        else:
+            q = None
+            if v["host"] != "laptop":                       # P1-2：先看 restart_queue 里的真实执行情况
+                try:
+                    q = (rq_fn or _rq_state)(v["host"], rec.get("req_id"))
+                except Exception as e:  # noqa: BLE001  # arch-ok: 队列读不了 = 当作还在排队（不写新请求、不计失败）
+                    q = {"pending": True, "error": f"{type(e).__name__}: {e}"[:200]}
+                if rec.get("req_id") and q.get("done_t") is not None and not rec.get("req_counted"):
+                    if now - float(q["done_t"]) < float(cfg["grace_min"]) * 60:
+                        q = {**q, "grace": True}
+                    elif not dry:
+                        rec.update(attempts=int(rec.get("attempts") or 0) + 1, req_counted=True)
+                        a["attempts"] = rec["attempts"]
+            if q and q.get("pending"):
+                a["action"] = "queued"
+                a["why"] = (f"{v['host']} 还有没执行的重启请求（restart_queue 30 分钟间隔 / 排空中），等它执行，不计失败、不再写请求"
+                            + (f"；{q['error']}" if q.get("error") else ""))
+                started_hosts[v["host"]] = None
+            elif q and q.get("grace"):
+                a["action"] = "waiting"
+                a["why"] = f"restart_queue {round((now - float(q['done_t'])) / 60, 1)} 分钟前执行了重启，{cfg['grace_min']} 分钟内等心跳"
+                started_hosts[v["host"]] = None
+            elif v["host"] == "laptop" and rec.get("last_try") and now - float(rec["last_try"]) < float(cfg["grace_min"]) * 60:
+                a["action"] = "waiting"
+                a["why"] = f"{round((now - float(rec['last_try'])) / 60, 1)} 分钟前刚起过，{cfg['grace_min']} 分钟内不重复起"
+            elif int(rec.get("attempts") or 0) >= int(cfg["max_fails"]):
+                a["action"] = "gave_up"
+                if not rec.get("issue") and not dry:
+                    what = "自动拉起" if v["host"] == "laptop" else "restart_queue 真执行重启"
+                    rec["issue"] = (issue_fn or _lc_issue)(root, run, min(v["eps"]), tgt,
+                                                            f"【P0】{tgt} 连续 {rec['attempts']} 次{what}后仍没有心跳（第 {v['eps']} 集到“出图”以后等它）")
+                a["issue"] = rec.get("issue")
+                if v["host"] != "laptop":
+                    started_hosts[v["host"]] = None
+            else:
+                reason = (f"W18 生命周期：{run} 第 {v['eps']} 集已到“{'出图' if v['kind'] == 'producer' else LC_NIGHT_FROM}”以后，"
+                          f"{tgt} {'没有心跳' if hb is None else f'心跳 {hb} 分钟没更新'}")
+                if v["host"] == "laptop":
+                    a["how"] = f"powershell -File {cfg['laptop_ps1']} -Run {run}（restart_producer.ps1：先暂停排空 → 停旧 → serve --run {run} → 恢复）"
+                else:
+                    a["how"] = (f"resident_sync.request_restart({v['host']!r}, mode={v['mode']}) → restart_queue 排空后执行 "
+                                f"ops/offline/resident_restart.sh {v['host']} {v['mode']}")
+                if dry:
+                    a["action"] = "would_start"
+                    if v["host"] != "laptop":
+                        started_hosts[v["host"]] = None
+                elif v["host"] == "laptop":
+                    r = (laptop_fn or _laptop_start)(root, cfg["laptop_ps1"], run)
+                    rec.update(attempts=int(rec.get("attempts") or 0) + 1, last_try=now, last_result=r)
+                    a.update(action="started", result=r, attempts=rec["attempts"])
+                    (live_fn or _lc_live)(root, f"{'✅' if r.get('ok') else '❌'} 自动拉起（{LC_WHO}）{tgt}：{reason}（第 {rec['attempts']} 次）")
+                else:                                       # 只写请求：attempts 不加（等 restart_queue 执行后再看心跳）
+                    r = (server_fn or _server_start)(v["host"], reason, v["mode"])
+                    rid = r.get("request") or ((r.get("pending") or [None])[-1] if r.get("dedup") else None)
+                    rec.update(last_try=now, last_result=r, req_id=rid, req_counted=False)
+                    a.update(action="requested", result=r, attempts=int(rec.get("attempts") or 0))
+                    started_hosts[v["host"]] = rid
+                    (live_fn or _lc_live)(root, f"{'✅' if r.get('ok') else '❌'} 自动拉起（{LC_WHO}）{tgt}：{reason}"
+                                                f"（已写重启请求，restart_queue 执行后算第 {int(rec.get('attempts') or 0) + 1} 次）")
+        out["actions"][tgt] = a
+    if not dry:
+        js(LIFECYCLE_STATE if root == ROOT else root / "data/autopilot/lifecycle.json", sd)
+    return out
+
+
+def lifecycle_thread(every_s: int = 60) -> None:
+    """独立线程（不拖 health / 重启队列）：每 60 s 一拍；计划变了才写日志"""
+    last = None
+    while True:
+        t0 = time.time()
+        try:
+            r = lifecycle_tick()
+            sig = json.dumps({k: r.get(k) for k in ("skip", "status", "producer_eps", "night_eps")}
+                             | {"a": {t: a.get("action") for t, a in (r.get("actions") or {}).items()}}, ensure_ascii=False, sort_keys=True)
+            if sig != last:
+                log("lifecycle", json.dumps(r, ensure_ascii=False, default=str)[:900])
+            last = sig
+        except Exception as e:  # noqa: BLE001
+            log("lifecycle error", repr(e)[:300])
+        time.sleep(max(5.0, every_s - (time.time() - t0)))
+
+
 def loop(pull_every_s: int = 1200, health_every_s: int = 300):
     """5 分钟一次健康 / 报警；20 分钟一次并回；代码有改动 → 推代码 + 服务器热重启（每台独立，一台断连不影响另一台）"""
     last_pull = {h: 0.0 for h in HOSTS}
@@ -1008,6 +1337,12 @@ def loop(pull_every_s: int = 1200, health_every_s: int = 300):
     if FACTORY_SYNC_EVERY_S:             # FACTORY 11-02：参考板一变就重建期望 refs 表并补推（sync.py auto，没变化什么都不做），独立线程、失败只记日志
         import threading
         threading.Thread(target=factory_sync_thread, name="factory_sync_auto", daemon=True).start()
+    if RELEASE_TICK:                     # W17：发版流水线（复审通过标记 → 拼树 → dry → cut → deploy --verify → 换代 L-152）
+        import threading
+        threading.Thread(target=release_thread, name="release_tick", daemon=True).start()
+    if LIFECYCLE_TICK:                   # W18：主剧到“出图”自动起 producer / night（开关 sop_gate.json lifecycle.apply，默认只算计划）
+        import threading
+        threading.Thread(target=lifecycle_thread, name="lifecycle_tick", daemon=True).start()
     while True:
         for h in HOSTS:
             try:
@@ -1474,6 +1809,9 @@ def main(argv):
         log("video_up", "两台视频常驻已起（只派重编后 jobs.json 里的 Pika 变体）")
     elif cmd == "health":
         print(json.dumps(health(argv[1]), ensure_ascii=False, indent=1))
+    elif cmd == "lifecycle":     # W18：lifecycle [--dry|--apply]（不给 = 按 sop_gate.json lifecycle.apply）
+        dry = True if "--dry" in argv else (False if "--apply" in argv else None)
+        print(json.dumps(lifecycle_tick(dry=dry), ensure_ascii=False, indent=1, default=str))
     elif cmd == "loop":
         loop()
     else:

@@ -12,6 +12,7 @@
   ⑥ resident / asset_worker / :8800 / producer 心跳 ← data/factory/autoflow_resident.json、data/pipeline/asset_jobs/worker.json、GET /api/progress、
      各剧 producer 目录 heartbeat.json（带 run 身份：为哪部剧在跑；归档剧还在跑 → ⚠）
   ⑦ GPU 道占用                    ← data/sentinel/gpu_samples.jsonl（SENTINEL nvidia-smi 采样）+ data/state/netfix/partition.json（挂道 / 借道 / 退役）
+  ⑧ 看门狗最近一轮                ← data/master/watchdog_last.json（tools/master/watchdog.py，W19；resident 每 30 分钟跑一轮）
 """
 from __future__ import annotations
 
@@ -278,15 +279,35 @@ def sec_gpu(root: Path, now: float) -> list[str]:
     return out
 
 
+WATCHDOG_STALE_S = 3600           # 看门狗每 30 分钟一轮；超过 1 小时没跑 = resident 没挂上 / 跑挂了
+
+
+def sec_watchdog(root: Path, now: float) -> list[str]:
+    """W19：看门狗最近一轮的结论（命中按规则计数、新登记、⏫ 升级、规则自身出错）；1 小时没跑 → ⚠"""
+    d = _j(root / "data/master/watchdog_last.json", None)
+    if not d:
+        return ["  ⚠ 看门狗还没跑过（tools/master/watchdog.py run；resident 每 30 分钟调一次）"]
+    t = d.get("t")
+    flag = "⚠ " if not isinstance(t, (int, float)) or now - t > WATCHDOG_STALE_S else ""
+    by = "、".join(f"规则{k}×{v}" for k, v in sorted((d.get("by_rule") or {}).items())) or "0 命中"
+    out = [f"  {flag}{_age(t, now)}：{by}；新登记 {len(d.get('registered') or [])} 条"
+           + (f"（{'、'.join((d.get('registered') or [])[:4])}）" if d.get("registered") else "")
+           + f"；⏫ {len(d.get('escalate') or [])} 条；不重登 {d.get('held') or 0} 条"]
+    for e in (d.get("errors") or [])[:2]:
+        out.append(f"  ⚠ 看门狗规则出错：{str(e)[:110]}")
+    return out
+
+
 SECTIONS = [("① 每集 SOP 阶段 / 复盘", "eps"), ("② 未关卡点", "issues"), ("③ 未复审交付", "deliv"), ("④ 开关 vs 决策", "sw"),
-            ("⑤ 待处理请求", "req"), ("⑥ 心跳", "hb"), ("⑦ GPU 道", "gpu")]
+            ("⑤ 待处理请求", "req"), ("⑥ 心跳", "hb"), ("⑦ GPU 道", "gpu"),
+            ("⑧ 看门狗最近一轮", "wd")]
 
 
 def build(root: Path = ROOT, now: float | None = None, api=None) -> dict:
     now = now or time.time()
     fns = {"eps": lambda: sec_episodes(root, now), "issues": lambda: sec_issues(root), "deliv": lambda: sec_deliveries(root),
            "sw": lambda: sec_switches(root), "req": lambda: sec_requests(root), "hb": lambda: sec_heartbeats(root, now, api),
-           "gpu": lambda: sec_gpu(root, now)}
+           "gpu": lambda: sec_gpu(root, now), "wd": lambda: sec_watchdog(root, now)}
     out = {}
     for title, k in SECTIONS:
         try:

@@ -160,3 +160,45 @@ p.oq-fail { margin: 14px 0 0; font-size: 13px; }
 /* W5b：卡片右栏窄，“要求修改”输入框 + 提交按钮上下排，不再挤出卡片 */
 .oq-two .oq-rev { display: flex; flex-direction: column; align-items: stretch; width: 100%; min-width: 0; }
 .oq-two .oq-rev input { min-width: 0; width: 100%; box-sizing: border-box; }
+
+/* 通知直说（L-172 分期 1，A-G3 11-03）：颜色只表阻塞程度（红 = 卡住要你定、黄 = 等你一下、灰 = 只读告知）；卡片 = 一句要你做什么 + 为什么 + ≤3 个按钮 */
+.oq-dot.red { background: var(--c-bad, #d9534f); }
+.oq-dot.yellow { background: var(--c-warn, #d6a23a); }
+.oq-dot.grey { background: rgba(233, 230, 224, .35); }
+.oq-it.lv-red { border-left: 3px solid var(--c-bad, #d9534f); }
+.oq-it.lv-yellow { border-left: 3px solid var(--c-warn, #d6a23a); }
+.oq-it.lv-grey { border-left: 3px solid rgba(255, 255, 255, .15); opacity: .8; }
+.oq-it.oq-ro { grid-template-columns: 34px 1fr; cursor: default; }
+.oq-it.oq-ro:hover { background: none; }
+.oq-no .oq-dot { margin-right: 6px; vertical-align: middle; }
+.oq-say { margin: 0 0 6px; font-size: 15.5px; font-weight: 500; line-height: 1.4; }
+.oq-say.ro { color: var(--oq-t2); font-weight: 400; }
+.oq-acts3 { display: grid; gap: 6px; }
+.oq-acts3 .oq-rev { display: flex; flex-direction: column; gap: 6px; }
+.oq-acts3 .oq-rev input { width: 100%; box-sizing: border-box; padding: 6px 8px; border-radius: 2px; border: 1px solid var(--oq-line2); background: transparent; color: inherit; font: inherit; }
+.oq-chat-mount:empty { display: none; }
+.oq-chat-mount { margin: 10px 0; }
+@media (max-width: 720px) {
+  .oq-page { padding: 0 12px 40px; }
+  .oq-head { flex-direction: column; align-items: flex-start; gap: 10px; padding-top: 14px; }
+  .oq-head h1 { font-size: 19px; }
+  .oq-r { margin-left: 0; text-align: left; }
+  .oq-flt { justify-content: flex-start; flex-wrap: wrap; gap: 10px 14px; }
+  .oq-kh { display: none; }
+  .oq-it, .oq-it.oq-gate, .oq-it.oq-pickapi, .oq-it.oq-ro { grid-template-columns: 1fr; gap: 10px 0; margin-left: 0; padding: 14px 0 14px 10px; }
+  .oq-no { font-size: 12px; }
+  .oq-strip { max-width: 100%; width: auto; overflow-x: auto; }
+  .oq-why { max-width: none; }
+  .oq-acts, .oq-acts3 { grid-template-columns: 1fr; }
+  .oq-acts button, .oq-acts a.oq-go { height: 40px; font-size: 14px; }
+  .oq-pk { grid-column: 1; }
+  .oq-pk-c { flex: 1 1 100%; max-width: none; }
+  .oq-pk-rv input { max-width: none; }
+  .oq-rv { grid-template-columns: 1fr; height: auto; overflow: visible; }
+  .oq-media { padding: 10px; }
+  .oq-cell img, .oq-cell video, .oq-media.grid .oq-cell img { max-height: 60vh; }
+  .oq-side { border-left: 0; border-top: 1px solid var(--oq-line); padding: 14px 12px 20px; }
+  .oq-acts.sticky { position: static; }
+  .oq-done { grid-template-columns: 1fr auto; }
+  .oq-done .oq-no { display: none; }
+}

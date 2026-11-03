@@ -88,7 +88,8 @@ def two_person_board(sr, plan):
     """总调度 11-01：双人镜两张脸各占一槽（Q1），其余（两人的造型图 / 景别可见单品 / 场景底图）合成一张参考板占第 3 槽，
     服装与鞋不再只靠文字（项目方头号抱怨）。参考板 = ns_agent.asset_refs.make_board（脸不进板；设定图已去头）"""
     from ns_agent import asset_refs as AR
-    faces = [sl for sl in plan.slots if sl.kind == "face"]
+    # W20（ep01-S1 三人镜）：三张脸被 asset_refs 合成一个 faceboard 槽；只认 kind=="face" 会把脸板丢掉 → preflight I2 挡。脸板同样是脸槽
+    faces = [sl for sl in plan.slots if sl.kind in ("face", "faceboard")]
     tiles = [(r.file, r.label) for r in sr.refs if r.role != "face" and r.file][:6]
     if not tiles or len(faces) + 1 > plan.capacity:
         return plan
@@ -463,6 +464,7 @@ class Orchestrator:
             r = self.rec(sid, stage)
             rec["refs"] = j.get("refs")
             rec["variant"] = j.get("variant")
+            rec["run"] = PROJECT                      # W28（C-14）：state.json 全局按镜号存，条目带剧名，producer adopt 只认本剧
             if rec.get("rescored") and (rec.get("postflight") or {}).get("ok"):
                 self.st.setdefault("_rescued", []).append(f"{sid}:{stage}:s{rec['seed']}")
             r["attempts"].append(rec)

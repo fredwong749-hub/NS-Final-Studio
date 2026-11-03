@@ -1,0 +1,273 @@
+{
+  "version": 2,
+  "items": [
+    {
+      "id": "kw-evening-gown",
+      "slot": "outfit",
+      "name": "黑色晚礼服",
+      "description": "黑色晚礼服",
+      "character": "lin_wan",
+      "trigger": null,
+      "lora_file": null,
+      "lora_strength": null,
+      "keywords": [
+        "黑色晚礼服"
+      ],
+      "reference_images": [],
+      "prompt_policy": "always",
+      "removable": true,
+      "source": "keyword",
+      "needs_review": true,
+      "notes": [
+        "剧本原文出现但无 LoRA；描述取原文短语，请确认"
+      ],
+      "images": [],
+      "tags": [],
+      "version": 1
+    },
+    {
+      "id": "kw-string-thong",
+      "slot": "outfit",
+      "name": "黑色漆皮string丁字裤",
+      "description": "黑色漆皮string丁字裤",
+      "character": "lin_wan",
+      "trigger": null,
+      "lora_file": null,
+      "lora_strength": null,
+      "keywords": [
+        "string丁字裤"
+      ],
+      "reference_images": [],
+      "prompt_policy": "always",
+      "removable": true,
+      "source": "keyword",
+      "needs_review": true,
+      "notes": [
+        "剧本原文出现但无 LoRA；描述取原文短语，请确认"
+      ],
+      "images": [],
+      "tags": [],
+      "version": 1
+    },
+    {
+      "id": "kw-mini-skirt",
+      "slot": "outfit",
+      "name": "超短裙",
+      "description": "超短裙",
+      "character": "lin_wan",
+      "trigger": null,
+      "lora_file": null,
+      "lora_strength": null,
+      "keywords": [
+        "超短裙"
+      ],
+      "reference_images": [],
+      "prompt_policy": "always",
+      "removable": true,
+      "source": "keyword",
+      "needs_review": true,
+      "notes": [
+        "剧本原文出现但无 LoRA；描述取原文短语，请确认"
+      ],
+      "images": [],
+      "tags": [],
+      "version": 1
+    },
+    {
+      "id": "kw-suit-skirt",
+      "slot": "outfit",
+      "name": "西装裙",
+      "description": "西装裙",
+      "character": "lin_wan",
+      "trigger": null,
+      "lora_file": null,
+      "lora_strength": null,
+      "keywords": [
+        "西装裙"
+      ],
+      "reference_images": [],
+      "prompt_policy": "always",
+      "removable": true,
+      "source": "keyword",
+      "needs_review": true,
+      "notes": [
+        "剧本原文出现但无 LoRA；描述取原文短语，请确认"
+      ],
+      "images": [],
+      "tags": [],
+      "version": 1
+    },
+    {
+      "id": "kw-pencil-skirt",
+      "slot": "outfit",
+      "name": "及膝铅笔裙",
+      "description": "及膝铅笔裙",
+      "character": "lin_wan",
+      "trigger": null,
+      "lora_file": null,
+      "lora_strength": null,
+      "keywords": [
+        "铅笔裙"
+      ],
+      "reference_images": [],
+      "prompt_policy": "always",
+      "removable": true,
+      "source": "keyword",
+      "needs_review": true,
+      "notes": [
+        "剧本原文出现但无 LoRA；描述取原文短语，请确认"
+      ],
+      "images": [],
+      "tags": [],
+      "version": 1
+    },
+    {
+      "id": "kw-black-stockings",
+      "slot": "other",
+      "name": "黑色丝袜",
+      "description": "黑色丝袜",
+      "character": "lin_wan",
+      "trigger": null,
+      "lora_file": null,
+      "lora_strength": null,
+      "keywords": [
+        "黑色丝袜",
+        "黑丝"
+      ],
+      "reference_images": [],
+      "prompt_policy": "always",
+      "removable": true,
+      "source": "keyword",
+      "needs_review": true,
+      "notes": [
+        "剧本原文出现但无 LoRA；描述取原文短语，请确认"
+      ],
+      "images": [],
+      "tags": [],
+      "version": 1
+    },
+    {
+      "id": "kw-tongue-stud",
+      "slot": "accessory",
+      "name": "舌钉",
+      "description": "舌钉",
+      "character": "lin_wan",
+      "trigger": null,
+      "lora_file": null,
+      "lora_strength": null,
+      "keywords": [
+        "舌钉"
+      ],
+      "reference_images": [],
+      "prompt_policy": "when_in_shot",
+      "removable": true,
+      "source": "keyword",
+      "needs_review": true,
+      "notes": [
+        "剧本原文出现但无 LoRA；描述取原文短语，请确认"
+      ],
+      "images": [],
+      "tags": [],
+      "version": 1
+    },
+    {
+      "id": "kw-tattoo-mandala",
+      "slot": "other",
+      "name": "阴阜曼陀罗纹身",
+      "description": "阴阜曼陀罗纹身",
+      "character": "lin_wan",
+      "trigger": null,
+      "lora_file": null,
+      "lora_strength": null,
+      "keywords": [
+        "曼陀罗"
+      ],
+      "reference_images": [],
+      "prompt_policy": "when_in_shot",
+      "removable": false,
+      "source": "keyword",
+      "needs_review": true,
+      "notes": [
+        "剧本原文出现但无 LoRA；描述取原文短语，请确认"
+      ],
+      "images": [],
+      "tags": [],
+      "version": 1
+    },
+    {
+      "id": "kw-tattoo-snake",
+      "slot": "other",
+      "name": "大腿黑蛇纹身",
+      "description": "大腿黑蛇纹身",
+      "character": "lin_wan",
+      "trigger": null,
+      "lora_file": null,
+      "lora_strength": null,
+      "keywords": [
+        "黑蛇"
+      ],
+      "reference_images": [],
+      "prompt_policy": "when_in_shot",
+      "removable": false,
+      "source": "keyword",
+      "needs_review": true,
+      "notes": [
+        "剧本原文出现但无 LoRA；描述取原文短语，请确认"
+      ],
+      "images": [],
+      "tags": [],
+      "version": 1
+    },
+    {
+      "id": "kw-tattoo-chen",
+      "slot": "other",
+      "name": "乳下“沉”字纹身",
+      "description": "乳下“沉”字纹身",
+      "character": "lin_wan",
+      "trigger": null,
+      "lora_file": null,
+      "lora_strength": null,
+      "keywords": [
+        "“沉”字",
+        "乳下“沉”"
+      ],
+      "reference_images": [],
+      "prompt_policy": "when_in_shot",
+      "removable": false,
+      "source": "keyword",
+      "needs_review": true,
+      "notes": [
+        "剧本原文出现但无 LoRA；描述取原文短语，请确认"
+      ],
+      "images": [],
+      "tags": [],
+      "version": 1
+    },
+    {
+      "id": "kw-tattoo-feather",
+      "slot": "other",
+      "name": "背部黑羽纹身",
+      "description": "背部黑羽纹身",
+      "character": "lin_wan",
+      "trigger": null,
+      "lora_file": null,
+      "lora_strength": null,
+      "keywords": [
+        "背羽",
+        "黑羽"
+      ],
+      "reference_images": [],
+      "prompt_policy": "when_in_shot",
+      "removable": false,
+      "source": "keyword",
+      "needs_review": true,
+      "notes": [
+        "剧本原文出现但无 LoRA；描述取原文短语，请确认"
+      ],
+      "images": [],
+      "tags": [],
+      "version": 1
+    }
+  ],
+  "decor_states": []
+}

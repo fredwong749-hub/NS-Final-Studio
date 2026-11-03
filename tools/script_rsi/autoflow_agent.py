@@ -983,7 +983,7 @@ def post_step(run_dir: Path, ep: int, st, import_mode: str, RCH=None, ctx: dict 
     final_p = run_dir / f"P4_ep{ep:02d}.final.md"
     cur = RL.split_doc(final_p.read_text(encoding="utf-8"))[1][0] if final_p.exists() else base
     ag = st.d.setdefault("agent", {"processed": [], "used": {}, "fact_devs": None})
-    fitems = AF.fact_items(ag.get("fact_devs") or [])
+    fitems = AF.fact_items(duration_tolerated(ag.get("fact_devs") or [], cur))      # L-164：目标时长在容差内的偏差不当事实缺口
     fails = fitems + AF.all_fails(pre, cur, ep, wd)
     # 已回来的补丁先处理
     step_base = f"patch_ep{ep:02d}"
@@ -1136,7 +1136,7 @@ def post_step(run_dir: Path, ep: int, st, import_mode: str, RCH=None, ctx: dict 
         if kk and prev.get("base_sha") == _sha(cur) and txt is not None:
             d, err = H._json_block(txt)
             if d is not None and "deviations" in d:
-                ag["fact_devs"] = R5.drop_wardrobe(d.get("deviations") or [])
+                ag["fact_devs"] = duration_tolerated(R5.drop_wardrobe(d.get("deviations") or []), cur)   # L-164 时长容差
                 st.save()
                 if ag["fact_devs"]:
                     st.stage("factcheck", "事实核对", "deviation", "api_model", deviations=ag["fact_devs"][:6])
@@ -1269,6 +1269,64 @@ def reopen(run_dir: Path, ep: int, why: str, by: str = "HOLLYWOOD") -> dict:
     return {"ok": True, "used_before": before, "patch_base": ag["patch_base"]}
 
 
+DUR_TOL_S, DUR_TOL_PCT = 4, 0.05      # L-164（MASTER-WSL 13:28）：事实表“目标时长”给 ±4 秒 / 5% 容差（取大），时长归 QW-T 系列管
+DUR_LINE = re.compile(r"^\*\*时长\*\*\s*[：:]\s*(\d+(?:\.\d+)?)\s*秒", re.M)
+TARGET_RE = re.compile(r"目标时长\s*(\d+(?:\.\d+)?)\s*秒")
+
+
+def duration_tolerated(devs: list, cur: str) -> list:
+    """L-164：factcheck 把“目标时长 N 秒”当硬事实（ep02 63 vs 66 秒，写手补 3 秒又撞 RL-T2 单拍 ≤2.6 s，补丁试满）。
+    偏差只讲时长（改写稿里一栏提到时长 / 秒，且事实表那条带“目标时长 N 秒”）、而现稿各镜 **时长** 之和与 N 差在容差内 → 去掉这条。
+    超出容差的照旧作为事实缺口；不是时长的偏差不受影响。现稿读不到时长行 → 不去（不猜）"""
+    durs = [float(x) for x in DUR_LINE.findall(cur or "")]
+    if not durs:
+        return list(devs or [])
+    total = sum(durs)
+    out = []
+    for d in devs or []:
+        m = TARGET_RE.search(str(d.get("ref") or ""))
+        found = str(d.get("found") or "")
+        if m and "时长" in found and "秒" in found:
+            tgt = float(m.group(1))
+            if abs(total - tgt) <= max(DUR_TOL_S, DUR_TOL_PCT * tgt):
+                continue
+        out.append(d)
+    return out
+
+
+AUTO_REOPEN_MAX = 3      # L-163：自上次人工 reopen 起，同一集最多自动重开几次补丁预算；再耗尽 → 照旧诊断 + 卡点交总调度
+
+
+def auto_reopen(run_dir: Path, ep: int, st, fails: list, diag: dict) -> dict | None:
+    """L-163（项目方 13:17“把所有自动化写在代码上，少用 Agent 来推”；MASTER-WSL 13:17 派 CODER-PS）：
+    补丁环耗尽时，若还有**非结构项且没试满 ITEM_TRIES**（从没出过包 / 预算被别的项耗光）→ 自动重开：只重置预算基线（patch_base），
+    **不清逐项尝试计数**——试满的项不会被再派（避免空转），下一轮只补还有机会的项。今天 05:43 / 06:3x 总调度手工做的就是这件事。
+    不自动的情况（返回 None，照旧交总调度）：剩余项全试满（写手修不好或检查误判，要人看）、只剩结构项（L-158 整集返修已管）、
+    自动重开已满 AUTO_REOPEN_MAX 次、或上次自动重开后失败项没有变少（没进展不空转）"""
+    ag = st.d.setdefault("agent", {"processed": [], "used": {}, "fact_devs": None})
+    used = ag.get("used") or {}
+    hist = st.d.setdefault("agent_history", [])
+    last_manual = max((i for i, h in enumerate(hist) if h.get("step") == "reopen"), default=-1)
+    autos = [h for h in hist[last_manual + 1:] if h.get("step") == "auto_reopen"]
+    structural = set(diag.get("structural") or []) | set(AF.STRUCTURAL)
+    eligible = [f"{d}#{u['id']}" for d, u in fails
+                if f"{d}#{u['id']}" not in structural and used.get(f"{d}#{u['id']}", 0) < AF.ITEM_TRIES]
+    if not eligible or len(autos) >= AUTO_REOPEN_MAX:
+        return None
+    if autos and len(fails) >= int(autos[-1].get("fails") or 0):
+        return None
+    ag["patch_base"] = attempts(run_dir, f"patch_ep{ep:02d}")
+    rec = {"step": "auto_reopen", "accepted": True, "by": "autoflow", "fails": len(fails), "eligible": eligible,
+           "patch_base": ag["patch_base"], "n": len(autos) + 1,
+           "note": f"L-163 自动重开补丁预算（第 {len(autos) + 1}/{AUTO_REOPEN_MAX} 次）：还有机会的项 {', '.join(eligible[:6])}；"
+                   f"试满的项不再派（{', '.join(diag.get('tried_out') or []) or '无'}）"[:300]}
+    hist.append(rec)
+    st.set(verdict="reopened", awaiting=None,
+           next_action=f"补丁预算自动重开（L-163，第 {rec['n']}/{AUTO_REOPEN_MAX} 次），下一拍先补 {', '.join(eligible[:4])}")
+    st.save()
+    return {k: rec[k] for k in ("n", "eligible", "patch_base", "fails")}
+
+
 def patch_budget_used(run_dir: Path, ep: int, ag: dict) -> int:
     """这一轮补丁环已出的包数 = patch_epNN_a*.json 文件数 − 上次 reopen 的基线（K211-F）"""
     return attempts(run_dir, f"patch_ep{ep:02d}") - int(ag.get("patch_base") or 0)
@@ -1293,7 +1351,7 @@ def patch_diagnosis(run_dir: Path, ep: int, st, fails: list, k: int, why: str) -
     plan = []
     if never:
         plan.append(f"{len(never)} 项从没出过补丁包（{', '.join(never[:6])}）：预算被别的项耗尽，不是写手修不好 → "
-                    f"总调度确认后 `autoflow.py reopen --episode {ep} --why ...` 重开预算（基线重置），下一轮先补这些项")
+                    f"daemon 自动重开预算（L-163 auto_reopen，最多 {AUTO_REOPEN_MAX} 次、要有进展），下一轮先补这些项；自动重开用满才交总调度")
     if tried_out:
         plan.append(f"{len(tried_out)} 项试满 ITEM_TRIES={AF.ITEM_TRIES} 仍失败（{', '.join(tried_out[:6])}）："
                     "先核对检查代码是否误判 V2 写法（看 why 里引用的原文），再看补丁包有没有给目标行 + 正确写法；误判 → 修检查 + 加测试，不是再出包")
@@ -1321,6 +1379,11 @@ def patch_exhausted(run_dir: Path, ep: int, st, fails: list, k: int, why: str) -
     wd = run_dir / f"work_ep{ep:02d}"
     wd.mkdir(exist_ok=True)
     AF.write_json(wd / "patch_diag.json", diag)
+    ar = auto_reopen(run_dir, ep, st, fails, diag)       # L-163：预算被别的项耗尽 / 有项从没出过包 → 自动重开预算，不交总调度
+    if ar:
+        diag["auto_reopen"] = ar
+        AF.write_json(wd / "patch_diag.json", diag)
+        return diag
     reported = ag.setdefault("exhausted_reports", [])
     issue_id = next((r.get("issue") for r in reported if r.get("k") == k), None)
     if issue_id is None:

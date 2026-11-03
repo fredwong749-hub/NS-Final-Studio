@@ -117,3 +117,13 @@ def test_rule_wired_into_gate_and_autoflow():
     ag = (ROOT / "tools/script_rsi/autoflow_agent.py").read_text(encoding="utf-8")
     assert "segment_issues(ep_md, episode" in pa and "QW-S1" in (ROOT / "tools/script_rsi/segment_fix.py").read_text(encoding="utf-8")
     assert ag.count("segment_fix(run_dir, ") == 3 and 'segment_fix(run_dir, q, st, "intake_full_p4"' in ag       # 收稿 / 写手稿 / 补丁环三处都先补标
+
+
+def test_mark_with_suffix_is_recognized():
+    """L-164：P2 写“【幻想段·开场 5 秒】”（标记带补充说明）——原来认不出、缺省成现实段，ep02 镜1 QW-S2 / factcheck 两头死锁"""
+    assert SF.seg_of_text("【幻想段·开场 5 秒】跨年天台") == "fantasy"
+    assert SF.seg_of_text("【现实段：楼下街口】") == "reality"
+    assert SF.seg_of_text("【幻想段】") == "fantasy" and SF.seg_of_text("段落=现实") == "reality"
+    assert SF.seg_of_text("【人物】祁念") is None
+    p2 = {"beats": [{"id": "B1", "summary": "【幻想段·开场 5 秒】天台"}, {"id": "B2", "summary": "黎岸递酒"}]}
+    assert SF.beat_segments(p2) == {"B1": "fantasy", "B2": "fantasy"}

@@ -6,6 +6,8 @@ import base64
 import hashlib
 import json
 import os
+import sys
+import socket
 import subprocess
 import time
 import urllib.error
@@ -52,12 +54,75 @@ def _key(req: dict) -> str:
     return h.hexdigest()[:24]
 
 
+_HEALTH: dict[str, dict] = {}       # url → 最近一次 /health 的 JSON（_local_up 顺手存；路由读 loaded / queue）
+
+
+def _rcfg() -> dict:
+    return cfg().get("route") or {}
+
+
 def _local_up(url: str) -> bool:
+    """W23：/health 通 = True，并把回包（loaded / queue）存进 _HEALTH 供路由判断。tools/vqa/*_ab.py、测试会把它换成 lambda
+    强制走隧道——那时 _HEALTH 没有记录，路由按"已加载、不排队"处理"""
+    _HEALTH.pop(url, None)
     try:
-        with urllib.request.urlopen(url + "/health", timeout=3):
+        with urllib.request.urlopen(url + "/health", timeout=float(_rcfg().get("health_timeout_s", 3))) as r:
+            try:
+                h = json.loads(r.read() or b"{}")
+            except ValueError:
+                h = {}
+            _HEALTH[url] = h if isinstance(h, dict) else {}
             return True
-    except (OSError, urllib.error.URLError):
+    except (OSError, urllib.error.URLError) as e:
+        print(f"[vqa.client] health 探测失败 {url}: {e!r}", file=sys.stderr, flush=True)
         return False
+
+
+def _ready(url: str) -> tuple[bool, int]:
+    """→ (在且已加载, 排队数)。不在 / loaded=false → (False, 0)"""
+    if not _local_up(url):
+        return False, 0
+    h = _HEALTH.get(url) or {}
+    if h.get("loaded") is False:
+        return False, 0
+    try:
+        return True, int(h.get("queue") or 0)
+    except (TypeError, ValueError):
+        return True, 0
+
+
+ROUTE_LOG = ROOT / "data" / "vqa" / "route.jsonl"
+
+
+def _log_route(route: str, ms: float, ok: bool, kind: str, reason: str = "") -> None:
+    """W23：每次调用（缓存命中除外）追加一行 {at, route: local|tunnel|lan|none, ms, ok, kind}，总调度看路由占比"""
+    f = ROUTE_LOG
+    if f == ROOT / "data" / "vqa" / "route.jsonl":
+        if os.environ.get("PYTEST_CURRENT_TEST"):          # 测试不写真日志（测试里把 ROUTE_LOG 换成 tmp 路径）
+            return
+        f = ROOT / (_rcfg().get("log") or "data/vqa/route.jsonl")
+    row = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "route": route, "ms": int(ms), "ok": bool(ok), "kind": kind}
+    if reason:
+        row["reason"] = reason
+    try:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        with open(f, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError as e:
+        print(f"[vqa.client] 路由日志写失败 {f}: {e!r}", file=sys.stderr, flush=True)
+
+
+def _untested(reason: str, detail: str = "") -> dict:
+    """看图没跑成 ≠ 图有问题：带 error（contract._item → Q9 untested、evidence 无 model → accept.q9_timeout 认作 retry）"""
+    return {"error": f"看图未测：{reason}" + (f"（{detail}）" if detail else ""), "status": "untested", "reason": reason}
+
+
+def _to_bytes(body: dict) -> None:
+    """隧道 / 内网那头是 gpu36，读不到本机路径：先缩图转字节（20:xx gpu36 FileNotFoundError）"""
+    for im in body["images"]:
+        if "path" in im and Path(im["path"]).exists():
+            im["b64"] = base64.b64encode(_shrink(Path(im["path"]), im.get("max_pixels"))).decode()
+            im.pop("path")
 
 
 def _post_local(url: str, body: dict, timeout: float) -> dict:
@@ -106,8 +171,38 @@ def _post_ssh(body: dict, timeout: float) -> dict:
         return {"error": (p.stdout or b"")[:300].decode("utf-8", "replace")}
 
 
-def generate(req: dict, *, wait_s: float = 1800, refresh: bool = False, label: str = "") -> dict:
-    """req = rubric.build_*_request(...) → {text, seconds, gpu, cached, key} 或 {error}"""
+def _pick(url: str, wait_s: float) -> tuple[str | None, str, int, str]:
+    """W23 路由 → (url, route, 排队数, 未测原因)。本机 8870 在且已加载 → 只用本机（忙就等，不切隧道）；
+    本机不在 / 未加载 → 8871 隧道（tools/vqa/tunnel.ps1 → gpu36:8870）；服务器上（OFFLINE_SELF / VQA_LAN=1）→ model.lan_url；都不在 → 未测"""
+    rc = _rcfg()
+    up, q = _ready(url)
+    if up:
+        qmax = int(rc.get("queue_max", 6))
+        if q < qmax:
+            return url, "local", q, ""
+        t_end = time.monotonic() + min(float(rc.get("busy_wait_s", 600)), wait_s)
+        while time.monotonic() < t_end:              # 本机忙：排队等，不去挤隧道
+            time.sleep(max(0.0, min(float(rc.get("poll_s", 10)), t_end - time.monotonic())))
+            up, q = _ready(url)
+            if not up:
+                break
+            if q < qmax:
+                return url, "local", q, ""
+        if up:
+            return None, "none", q, "本机忙"
+    alt = url.rsplit(":", 1)[0] + ":" + str(int(url.rsplit(":", 1)[1].split("/")[0]) + 1)
+    up, q = _ready(alt)
+    if up:
+        return alt, "tunnel", q, ""
+    lan = _lan_url()                                  # NETFIX 11-01（K-OPS-N03）：gpu33 常驻 producer 走 gpu36 内网入口
+    if lan:
+        return lan, "lan", 0, ""
+    return None, "none", 0, "服务不可用"
+
+
+def generate(req: dict, *, wait_s: float = 1800, refresh: bool = False, label: str = "", kind: str = "ask") -> dict:
+    """req = rubric.build_*_request(...) → {text, seconds, gpu, cached, key} 或 {error}。
+    W23：服务都不在 / 超时 / 本机忙等满 → {error, status: untested, reason}（调用方按 untested 处理，绝不判 fail）；kind = image | video | ask 定超时"""
     key = _key(req)
     CACHE.mkdir(parents=True, exist_ok=True)
     cf = CACHE / f"{key}.json"
@@ -116,44 +211,38 @@ def generate(req: dict, *, wait_s: float = 1800, refresh: bool = False, label: s
     body = {"system": req.get("system"), "text": req["text"], "key": key, "wait_s": wait_s, "label": label,
             "max_new_tokens": int((cfg().get("model") or {}).get("max_new_tokens", 900)),
             "images": [{k: v for k, v in im.items()} for im in req["images"]], "refresh": refresh}
-    url = _url()
-    if not _local_up(url):
-        # VQAGATE 11-01：本机服务（8870，笔记本 4080）没起时，先试常驻 ssh 隧道 127.0.0.1:8871 → gpu36:8870（tools/vqa/tunnel.ps1；
-        # 一条长连接，免得每张图都走一次跳板握手），再退回单次 ssh 管道
-        alt = url.rsplit(":", 1)[0] + ":" + str(int(url.rsplit(":", 1)[1].split("/")[0]) + 1)
-        url = alt if _local_up(alt) else None
-        if not url:                     # NETFIX 11-01（K-OPS-N03）：在服务器上跑（gpu33 常驻 producer）时走 gpu36 内网入口
-            url = _lan_url()
-        if url:                       # 隧道那头是 gpu36，读不到本机路径：和 ssh 管道一样先缩图转字节（20:xx gpu36 FileNotFoundError）
-            for im in body["images"]:
-                if "path" in im and Path(im["path"]).exists():
-                    im["b64"] = base64.b64encode(_shrink(Path(im["path"]), im.get("max_pixels"))).decode()
-                    im.pop("path")
-    if not url and (os.environ.get("OFFLINE_SELF") or os.environ.get("VQA_LAN") == "1"):
-        # 服务器上（gpu33 没有到 gpu36 的密钥，DEBUG-RSI 11-02）：ssh 退路永远走不通 → 只重试内网入口，不走 ssh
-        m = cfg().get("model") or {}
-        u = m.get("lan_url")
-        for _ in range(3):
-            if u and _local_up(u):
-                url = u
-                break
-            time.sleep(10)
-        if not url:
-            return {"error": "内网看图入口不可达（服务器上不走 ssh 退路）"}
-        for im in body["images"]:
-            if "path" in im and Path(im["path"]).exists():
-                im["b64"] = base64.b64encode(_shrink(Path(im["path"]), im.get("max_pixels"))).decode()
-                im.pop("path")
-    res = _post_local(url, body, wait_s + 120) if url else _post_ssh(body, wait_s + 120)
-    if "error" not in res:
+    t0 = time.monotonic()
+    url, route, q, why = _pick(_url(), wait_s)
+    if not url:
+        _log_route("none", (time.monotonic() - t0) * 1000, False, kind, why)
+        return _untested(why, f"排队 {q}" if why == "本机忙" else "8870 / 8871 都不通")
+    if route != "local":
+        _to_bytes(body)
+    tmo = max(60.0, float((_rcfg().get("timeouts") or {}).get(kind, 240)))
+    timeout = min(wait_s + 120, tmo * (q + 1))
+    try:
+        res = _post_local(url, body, timeout)
+    except (TimeoutError, socket.timeout) as e:
+        _log_route(route, (time.monotonic() - t0) * 1000, False, kind, "超时")
+        return _untested("超时", f"{route} {int(timeout)} s：{e!r}"[:160])
+    except (OSError, urllib.error.URLError, ValueError) as e:
+        _log_route(route, (time.monotonic() - t0) * 1000, False, kind, "服务不可用")
+        return _untested("服务不可用", f"{route}：{e!r}"[:160])
+    ok = "error" not in res
+    _log_route(route, (time.monotonic() - t0) * 1000, ok, kind, "" if ok else str(res.get("error"))[:80])
+    if ok:
         res["key"] = key
+        res["route"] = route
         cf.write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
     return res
 
 
 def _finish(req: dict, res: dict, kind: str, subject: str) -> dict:
     if "error" in res:
-        return {"kind": kind, "subject": subject, "error": res["error"], "checks": {}, "defects": [], "unsure": []}
+        out = {"kind": kind, "subject": subject, "error": res["error"], "checks": {}, "defects": [], "unsure": []}
+        if res.get("status") == "untested":
+            out.update(status="untested", reason=res.get("reason"))
+        return out
     v = rubric.parse(res.get("text", ""))
     v.update(kind=kind, subject=subject, model=res.get("model"), seconds=res.get("seconds"), key=res.get("key"),
              cached=res.get("cached"), version=cfg().get("version"), at=time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -167,7 +256,7 @@ def inspect_image(subject: str, prompt: str, references: list[str] | None = None
     """出图复核：→ 规范化判定（rubric.parse 的字段 + kind / subject / model / seconds / key）"""
     req = rubric.build_image_request(subject, prompt, references, extra_refs=kw.pop("extra_refs", None),
                                      spec=kw.pop("spec", None))
-    return _finish(req, generate(req, **kw), "image", str(subject))
+    return _finish(req, generate(req, **{"kind": "image", **kw}), "image", str(subject))
 
 
 def sample_frames(video: str | Path, n: int | None = None, out_dir: Path | None = None) -> list[str]:
@@ -196,6 +285,6 @@ def sample_frames(video: str | Path, n: int | None = None, out_dir: Path | None 
 def inspect_video(video: str | Path, prompt: str, references: list[str] | None = None, **kw) -> dict:
     frames = sample_frames(video, kw.pop("n", None))
     req = rubric.build_video_request(frames, prompt, references)
-    v = _finish(req, generate(req, **kw), "video", str(video))
+    v = _finish(req, generate(req, **{"kind": "video", **kw}), "video", str(video))
     v["frames"] = frames
     return v

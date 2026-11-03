@@ -4,22 +4,33 @@
 // · 每项一键决定（1 / 2 / 3，挑选 1–N，↵ 选推荐要先打开审核），← → / ↑ ↓ 换项，空格或双击打开审核视图，Esc 返回，Z 撤销上一个。
 // · 登录即本人：POST /api/owner/decide 带 by=owner，服务器从登录会话认人、自动记审计；理由选填（点选词 + 一句）。
 // · 队列读不到（接口失败或来源坏了）→ 写“队列读取失败：<来源>”，不显示“没有需要你看的”（SYSARCH / 总调度）。
+// · 通知直说（L-172 分期 1，A-G3 11-03；项目方：“一旦需要我做什么就直接谈信息出来”）：每张卡 = 一句“要你做什么”（say_what）+ 为什么（why）
+//   + ≤3 个按钮（actions，打现有入口）；分组按阻塞程度（红 卡住要你定 / 黄 等你一下 / 灰 只读告知）；手机宽度可用；顶部留 chat 助手挂点（W30）。
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useStudio } from "../../store";
-import { decideItem, pickItem, queueFailText, undoItem, useOwnerQueue, type OwnerQueue, type QueueItem } from "../ownerQueue";
+import { decideItem, pickItem, queueFailText, undoItem, useOwnerQueue, type BlockLevel, type OwnerQueue, type QueueAction, type QueueItem } from "../ownerQueue";
 import "../ownerqueue.css";
 import { LookPeople } from "../OwnerDecision";
 import { editReason, itemSentence, twoActs } from "../queueActs";
-import { plainText } from "../plainWords"; // W5b：卡片标题 / 候选名过人话词典（词典只在 v3/plainWords.ts） // W5 UIUX：每条只有“批准 / 用这张”+“修改”
+import { plainText } from "../plainWords";
+import OwnerChatPanel from "./OwnerChatPanel"; // W30：chat 助手（分期 2 只读问答），挂在 oq-head 之后 // W5b：卡片标题 / 候选名过人话词典（词典只在 v3/plainWords.ts） // W5 UIUX：每条只有“批准 / 用这张”+“修改”
 
-// W5 UIUX 11-03：分组名改大白话；C-20 🔴批准 🟡点开看 🟢告知
-const GROUPS: { kind: QueueItem["kind"]; title: string; sub: string; mark: string }[] = [
-  { kind: "decide", title: "要你批准", sub: "花钱、删除、推翻以前的决定、导入新一季——系统不会替你定", mark: "🔴" },
-  { kind: "gate", title: "稿子写好了，等你看", sub: "故事线、大纲、剧本；点一条去那一页看，看完点“用这版”或“修改”", mark: "🟡" },
-  { kind: "pick", title: "挑一张", sub: "候选都已过了系统检查；标“推荐”的是系统建议", mark: "🟡" },
-  { kind: "spot", title: "抽查一下", sub: "系统已自动通过的图，每 10 张抽 1 张给你看一眼；没问题点“批准”", mark: "🟢" },
+// 通知直说：分组只按阻塞程度（颜色只表阻塞程度）；同级里后端已按类型排好（拍板 → 稿子 → 资产 → 镜头 → 抽检）
+const LEVELS: { lv: BlockLevel; title: string; sub: string; mark: string }[] = [
+  { lv: "red", title: "卡住了，要你定", sub: "不点，这一步就停在这里；点完系统自己往下走", mark: "🔴" },
+  { lv: "yellow", title: "等你一下", sub: "系统先往下走，你有空再点；里面也有已经替你选好、可以改的", mark: "🟡" },
+  { lv: "grey", title: "只是告诉你，不用做事", sub: "系统正在处理，处理完会自己消失", mark: "⚪" },
 ];
+const levelOf = (it: QueueItem): BlockLevel => it.block_level ?? (it.kind === "info" ? "grey" : it.kind === "decide" || it.kind === "gate" ? "red" : "yellow");
+const KIND_ORDER: Record<string, number> = { decide: 0, gate: 1, look: 2, face: 3, scene: 4, sheet: 5, item: 6, frame: 7, voice: 8, pick: 9, spot: 10, info: 11 };
+const LV_ORDER: Record<BlockLevel, number> = { red: 0, yellow: 1, grey: 2 };
+/** 打开一个链接动作：页面内锚点换 hash；审核页 / 外部文件开新页 */
+function openHref(href: string) {
+  if (href.startsWith("#")) location.hash = href;
+  else window.open(href, "_blank", "noreferrer");
+}
 const REASONS: Record<QueueItem["kind"], string[]> = {
+  info: [],
   gate: [],
   decide: ["同意系统建议", "要先看更多", "以后都这样处理"],
   spot: ["身份不像", "造型不对", "手 / 肢体坏", "场景不对", "画面假"],
@@ -51,7 +62,7 @@ function Strip({ item, h = 150, onPick, chosen }: { item: QueueItem; h?: number;
 }
 
 /** 统一入口的挑选卡：每个候选内嵌可播放的音频 / 可点开大图的缩略图，点“用这个”一次选定（L-123：只有“用这个 / 修改”） */
-function PickCards({ item, onPick, onRevise }: { item: QueueItem; onPick: (k: string) => Promise<void>; onRevise: (reason: string) => Promise<void> }) {
+function PickCards({ item, onPick, onRevise, hideRevise }: { item: QueueItem; onPick: (k: string) => Promise<void>; onRevise: (reason: string) => Promise<void>; hideRevise?: boolean }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [rev, setRev] = useState(false);
   const [txt, setTxt] = useState("");
@@ -103,6 +114,7 @@ function PickCards({ item, onPick, onRevise }: { item: QueueItem; onPick: (k: st
           );
         })}
       </div>
+      {hideRevise ? null : (
       <div className="oq-pk-rv">
         {rev ? (
           <>
@@ -115,6 +127,53 @@ function PickCards({ item, onPick, onRevise }: { item: QueueItem; onPick: (k: st
           <button onClick={() => setRev(true)}>修改</button>
         )}
       </div>
+      )}
+    </div>
+  );
+}
+
+/** 通知直说：后端给的 ≤3 个按钮（actions）。primary = 主按钮；needs_reason = 展开一行输入框，写了才能提交；LINK = 去那一页 */
+function Actions({ item, acts, onAct, onOpen }: { item: QueueItem; acts: QueueAction[]; onAct: (a: QueueAction, reason: string) => void; onOpen?: () => void }) {
+  const [ask, setAsk] = useState<string | null>(null);
+  const [txt, setTxt] = useState("");
+  useEffect(() => (setAsk(null), setTxt("")), [item.id]);
+  return (
+    <div className="oq-acts oq-acts3" onClick={(e) => e.stopPropagation()}>
+      {acts.slice(0, 3).map((a, i) => {
+        const cls = a.style === "primary" ? "oq-main" : "";
+        if (a.method === "LINK" && a.href)
+          return (
+            <a key={a.key} className={`${cls} oq-go`} data-act={a.key} href={a.href} target={a.href.startsWith("#") ? undefined : "_blank"} rel="noreferrer" title={a.label}>
+              <span>{a.label}</span>
+              {i < 2 ? <kbd>{i + 1}</kbd> : null}
+            </a>
+          );
+        if (a.needs_reason)
+          return ask === a.key ? (
+            <span key={a.key} className="oq-rev">
+              <input autoFocus value={txt} onChange={(e) => setTxt(e.target.value)} onKeyDown={(e) => (e.stopPropagation(), e.key === "Enter" && txt.trim() && onAct(a, txt.trim()))} placeholder={a.ask ?? "写一句话"} />
+              <button data-act={a.key} disabled={!txt.trim()} onClick={() => onAct(a, txt.trim())}>
+                <span>提交：{a.label.replace(/（.*?）$/, "")}</span>
+              </button>
+            </span>
+          ) : (
+            <button key={a.key} className={cls} data-act={a.key} onClick={() => setAsk(a.key)} title={a.ask ?? a.label}>
+              <span>{a.label}</span>
+              {i < 2 ? <kbd>{i + 1}</kbd> : null}
+            </button>
+          );
+        return (
+          <button key={a.key} className={cls} data-act={a.key} onClick={() => onAct(a, "")} title={a.label}>
+            <span>{a.label}</span>
+            {i < 2 ? <kbd>{i + 1}</kbd> : null}
+          </button>
+        );
+      })}
+      {onOpen && (
+        <a className="oq-rs" onClick={onOpen}>
+          看详情 ›
+        </a>
+      )}
     </div>
   );
 }
@@ -301,9 +360,9 @@ function Review({ item, pos, total, onBack, onPrev, onNext, onDecide }: { item: 
         </div>
       </section>
       <aside className="oq-side">
-        <div className="oq-k">{item.category_label}</div>
-        <h2>{plainText(item.title)}</h2>
-        <p className="oq-why">{plainText(item.detail)}</p>
+        <div className="oq-k">{item.level_label ?? item.category_label}</div>
+        <h2>{item.say_what ?? plainText(item.title)}</h2>
+        <p className="oq-why">{item.why ?? plainText(item.detail)}</p>
         {scores.length > 0 && (
           <>
             <h4>
@@ -365,16 +424,23 @@ export default function OwnerQueuePage() {
   const st = useStudio();
   const { q, err } = useOwnerQueue();
   const fail = queueFailText(q, err);
-  const [flt, setFlt] = useState<"all" | QueueItem["kind"]>("all");
+  const [flt, setFlt] = useState<"all" | BlockLevel>("all");
   const [sel, setSel] = useState(0);
   const [open, setOpen] = useState<string | null>(null);
   const [done, setDone] = useState<Done[]>([]);
   const [ack, setAck] = useState<Record<string, Ack>>({});
   const items = useMemo(() => {
     const all = q?.items ?? [];
-    const order = GROUPS.map((g) => g.kind);
-    return all.filter((x) => flt === "all" || x.kind === flt).sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind));
+    const ord = (x: QueueItem) => LV_ORDER[levelOf(x)] * 100 + (KIND_ORDER[x.sub_kind ?? x.kind] ?? 50);
+    return all.filter((x) => flt === "all" || levelOf(x) === flt).sort((a, b) => ord(a) - ord(b));
   }, [q, flt]);
+  const readonly = useMemo(() => (flt === "all" || flt === "grey" ? q?.readonly ?? [] : []), [q, flt]);
+  const levelCounts = useMemo(() => {
+    const c: Record<BlockLevel, number> = { red: 0, yellow: 0, grey: 0 };
+    for (const x of q?.items ?? []) c[levelOf(x)]++;
+    c.grey += q?.readonly?.length ?? 0;
+    return c;
+  }, [q]);
   const cur = items[Math.min(sel, Math.max(0, items.length - 1))];
   const opened = open ? items.find((x) => x.id === open) ?? null : null;
 
@@ -407,6 +473,19 @@ export default function OwnerQueuePage() {
       }
     },
     [st, open, items, sel],
+  );
+  /** 通知直说：按钮 → 现有入口。LINK 直接去；POST 走 decide()（它按 pick_api 分派到 /api/owner/pick 或 /api/owner/decide，口径不变） */
+  const runAction = useCallback(
+    (it: QueueItem, a: QueueAction, reason = "") => {
+      if (a.method === "LINK") {
+        if (a.href) openHref(a.href);
+        return;
+      }
+      const choice = a.body?.choice;
+      if (!choice) return;
+      void decide(it, choice, reason);
+    },
+    [decide],
   );
   const undo = useCallback(async () => {
     const last = done[0];
@@ -455,6 +534,17 @@ export default function OwnerQueuePage() {
         // W5 UIUX：1 = 批准 / 用这张；2 = 修改（打开详情写一句话）
         const it = opened ?? cur;
         if (!it) return;
+        const acts3 = it.actions ?? [];
+        if (acts3.length && !opened) {
+          // 通知直说：1 / 2 = 卡片上第 1 / 第 2 个按钮；要写理由的按钮打开详情去写
+          const a3 = acts3[e.key === "1" ? 0 : 1];
+          e.preventDefault();
+          e.stopPropagation();
+          if (!a3) return;
+          if (a3.needs_reason) setOpen(it.id);
+          else runAction(it, a3);
+          return;
+        }
         const a = twoActs(it);
         e.preventDefault();
         e.stopPropagation();
@@ -470,7 +560,7 @@ export default function OwnerQueuePage() {
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [items, sel, open, opened, cur, decide, undo]);
+  }, [items, sel, open, opened, cur, decide, undo, runAction]);
 
   if (opened) {
     const pos = items.indexOf(opened);
@@ -500,16 +590,20 @@ export default function OwnerQueuePage() {
         {q && q.count > 0 && !fail && (
           <div className="oq-r">
             <div className="oq-flt">
-              {(["all", "gate", "decide", "spot", "pick"] as const).map((k) => (
+              {(["all", "red", "yellow", "grey"] as const).map((k) => (
                 <a key={k} className={flt === k ? "on" : ""} onClick={() => (setFlt(k), setSel(0))}>
-                  {k === "all" ? `全部 ${q.count}` : `${GROUPS.find((g) => g.kind === k)!.title} ${q.counts[k] ?? 0}`}
+                  {k === "all" ? `全部 ${q.count}` : `${LEVELS.find((g) => g.lv === k)!.mark} ${LEVELS.find((g) => g.lv === k)!.title} ${levelCounts[k]}`}
                 </a>
               ))}
             </div>
-            <div className="oq-kh">← → 换一条 · 1 批准 / 用这张 · 2 修改 · 空格 看详情 · Z 撤销上一个</div>
+            <div className="oq-kh">← → 换一条 · 1 / 2 = 卡片上第 1 / 第 2 个按钮 · 空格 看详情 · Z 撤销上一个</div>
           </div>
         )}
       </header>
+      {/* W30：chat 助手挂点（owner-chat-mount）——OwnerChatPanel 由 W30 做，分期 2 只读问答，分期 3 接动作 */}
+      <div id="owner-chat-mount" className="oq-chat-mount">
+        <OwnerChatPanel />
+      </div>
       <DelegateBanner />
       {fail && q && q.count > 0 ? (
         <p className="oq-fail" role="alert">
@@ -519,20 +613,24 @@ export default function OwnerQueuePage() {
       {!q || fail && !q.count || q.count === 0 ? (
         <Empty q={q} fail={fail} />
       ) : (
-        GROUPS.filter((g) => items.some((x) => x.kind === g.kind)).map((g) => (
-          <section key={g.kind} className="oq-group" aria-label={g.title}>
+        LEVELS.filter((g) => items.some((x) => levelOf(x) === g.lv)).map((g) => (
+          <section key={g.lv} className="oq-group" aria-label={g.title}>
             <div className="oq-grp">
-              <i className={`oq-dot ${g.kind === "decide" ? "a" : "n"}`} />
+              <i className={`oq-dot ${g.lv}`} />
               <h2>
                 <span aria-hidden>{g.mark}</span> {g.title}
               </h2>
               <span>{g.sub}</span>
             </div>
             {items
-              .filter((x) => x.kind === g.kind)
+              .filter((x) => levelOf(x) === g.lv)
               .map((it) => {
                 const i = items.indexOf(it);
                 const k = ack[it.id];
+                const lv = levelOf(it);
+                const acts3 = it.actions ?? [];
+                const say = it.say_what ?? plainText(it.title);
+                const why = it.why ?? itemSentence(it);
                 if (k && !k.err)
                   return (
                     <article key={it.id} className="oq-it oq-ack" data-id={it.id} role="status">
@@ -540,30 +638,32 @@ export default function OwnerQueuePage() {
                       <div className="oq-tx">
                         <h3>已收到，系统处理中</h3>
                         <p className="oq-why">
-                          {it.title} · {k.label} · {k.at}。处理完这一条会自己消失。
+                          {say} · {k.label} · {k.at}。处理完这一条会自己消失。
                         </p>
                       </div>
                     </article>
                   );
-                return (
-                  it.kind === "gate" ? (
-                    <article key={it.id} className={`oq-it oq-gate${i === Math.min(sel, items.length - 1) ? " sel" : ""}`} data-id={it.id} onClick={() => it.link && (location.hash = it.link)}>
+                const selCls = i === Math.min(sel, items.length - 1) ? " sel" : "";
+                if (it.kind === "gate")
+                  return (
+                    <article key={it.id} className={`oq-it oq-gate lv-${lv}${selCls}`} data-id={it.id} onClick={() => it.link && (location.hash = it.link)}>
                       <span className="oq-no">{String(i + 1).padStart(2, "0")}</span>
                       <div className="oq-tx">
-                        <h3>{plainText(it.title)}</h3>
-                        <p className="oq-why">{itemSentence(it)}</p>
+                        <h3 className="oq-say">{say}</h3>
+                        <p className="oq-why">{why}</p>
                       </div>
-                      <TwoActs item={it} onDecide={(c, r) => void decide(it, c, r)} />
+                      {acts3.length ? <Actions item={it} acts={acts3} onAct={(a, r) => runAction(it, a, r)} /> : <TwoActs item={it} onDecide={(c, r) => void decide(it, c, r)} />}
                     </article>
-                  ) : (
-                  <article key={it.id} className={`oq-it${it.pick_api ? " oq-pickapi" : ""}${i === Math.min(sel, items.length - 1) ? " sel" : ""}`} data-id={it.id} onClick={() => setSel(i)} onDoubleClick={() => !it.pick_api && (setSel(i), setOpen(it.id))}>
+                  );
+                return (
+                  <article key={it.id} className={`oq-it lv-${lv}${it.pick_api ? " oq-pickapi" : ""}${selCls}`} data-id={it.id} onClick={() => setSel(i)} onDoubleClick={() => !it.pick_api && (setSel(i), setOpen(it.id))}>
                     <span className="oq-no">{String(i + 1).padStart(2, "0")}</span>
                     {it.pick_api ? null : <Strip item={it} />}
                     <div className="oq-tx">
-                      <h3>{plainText(it.title)}</h3>
-                      <p className="oq-why">{itemSentence(it)}</p>
+                      <h3 className="oq-say">{say}</h3>
+                      <p className="oq-why">{why}</p>
                       {k?.err ? <p className="oq-fail" role="alert">刚才没收到（{k.err}），请再点一次。</p> : null}
-                      {it.recommend ? (
+                      {it.recommend && !it.say_what ? (
                         <p className="oq-rec">
                           <i className="oq-dot n" />
                           <b>系统推荐：</b>
@@ -574,7 +674,7 @@ export default function OwnerQueuePage() {
                           （{it.recommend.why}）
                         </p>
                       ) : null}
-                      {it.link ? (
+                      {it.link && !acts3.some((a) => a.method === "LINK") ? (
                         <p className="oq-src">
                           <a href={it.link} onClick={(e) => e.stopPropagation()}>
                             去对应页面看 ›
@@ -585,6 +685,7 @@ export default function OwnerQueuePage() {
                     {it.pick_api ? (
                       <PickCards
                         item={it}
+                        hideRevise={acts3.length > 0}
                         onPick={(k) => decide(it, k)}
                         onRevise={async (r) => {
                           try {
@@ -595,15 +696,37 @@ export default function OwnerQueuePage() {
                           }
                         }}
                       />
-                    ) : (
+                    ) : null}
+                    {acts3.length ? (
+                      <Actions item={it} acts={acts3} onAct={(a, r) => runAction(it, a, r)} onOpen={it.pick_api ? undefined : () => (setSel(i), setOpen(it.id))} />
+                    ) : it.pick_api ? null : (
                       <TwoActs item={it} onDecide={(c, r) => void decide(it, c, r)} onOpen={() => (setSel(i), setOpen(it.id))} />
                     )}
                   </article>
-                  )
                 );
               })}
           </section>
         ))
+      )}
+      {readonly.length > 0 && (
+        <section className="oq-group" aria-label="只是告诉你">
+          <div className="oq-grp">
+            <i className="oq-dot grey" />
+            <h2>
+              <span aria-hidden>⚪</span> 只是告诉你，不用做事
+            </h2>
+            <span>系统正在处理，处理完会自己消失</span>
+          </div>
+          {readonly.map((it) => (
+            <article key={it.id} className="oq-it oq-ro lv-grey" data-id={it.id}>
+              <span className="oq-no">·</span>
+              <div className="oq-tx">
+                <h3 className="oq-say ro">{it.say_what ?? plainText(it.title)}</h3>
+                {it.why ? <p className="oq-why">{it.why}</p> : null}
+              </div>
+            </article>
+          ))}
+        </section>
       )}
       {done.length > 0 && (
         <section className="oq-group" aria-label="刚处理">

@@ -429,7 +429,8 @@ def test_accept_retry_is_capped_on_rescore(tmp_path, monkeypatch):
     pr.frames = NS(_postflight=lambda *a: {"ok": True, "accept_retry": True, "score_infra": True})
     o = {"id": f"{RUN}/first:ep01-S1", "shot": "ep01-S1", "kind": "first"}
     pr._rescore_one(o, 1)
-    assert [ev for ev, _ in pr._logs][-1] == "score_infra"                  # 第 1 次：retry，不计次
+    assert "score_infra" in [ev for ev, _ in pr._logs][-2:]                 # 第 1 次：retry，不计次（W20 之后紧跟一条 score_chain_down 熔断记录）
+    pr._score_down_until = 0                                                 # W20 熔断期不派只重打分：测试里手动解除，验证第 2 次的计次口径
     pr._rescore_one(o, 1)
     led = pr.ledger()[o["id"]]
     assert [ev for ev, _ in pr._logs][-1] == "rescore" and led["accept_rechecks"] == 2 and led["reason"].startswith("重打分后") and led.get("final") != "passed"

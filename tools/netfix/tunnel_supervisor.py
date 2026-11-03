@@ -257,7 +257,7 @@ class Supervisor:
 
     def ssh_cmd(self, h: str) -> list[str]:
         hc = self.c["hosts"][h]
-        route = self.pick_route()
+        route = self.lane_route(h)                  # r5：道配了 route（hk）就固定走它（独立连接，不挂底座）；该路被判坏时临时走 pick_route
         target = hc.get("ssh_host", h) + (self.c.get("routes") or {}).get(route, {}).get("suffix", "")
         if hc.get("kind") == "base":                # r2/r3：底座隧道连跳板本身；base-a 固定香港、base-b 固定直连（互为备份，不再一条单点）
             target = (self.c.get("routes") or {}).get(hc.get("route") or route, {}).get("relay", "194relay")
@@ -273,6 +273,9 @@ class Supervisor:
         extra = ["-o", "LogLevel=VERBOSE"] if hc.get("kind") == "base" else []   # r3：底座记通道开关明细，查 no_banner 根因
         if hc.get("via") == "t":                    # 内层经底座：保活放宽到 15 s × 6 = 90 s，底座短暂卡顿不连带把道杀掉（13:2x 抖动事故）
             extra += ["-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=6"]
+        elif self.is_lane(h):                       # r5 运维 FONG-QUICK：独立跳板连接保活 15 s × 3（extra 在 ssh_opts 前，先出现的生效）
+            ka, kn = self.c.get("lane_keepalive") or [15, 3]
+            extra += ["-o", f"ServerAliveInterval={ka}", "-o", f"ServerAliveCountMax={kn}"]
         if cfg:                                     # K-OPS-N08：项目 ssh 配置（香港中转主路 / 直连备用），相对路径 + cwd=ROOT（路径有空格）
             cmd = [self.c["ssh_exe"], "-F", cfg, *extra, *self.c["ssh_opts"], "-o", f"Tag={self.host_tag(h)}"]   # extra 在前：ssh 同名选项先出现的生效
         else:
@@ -281,6 +284,17 @@ class Supervisor:
         for lp, rp in hc["forwards"]:
             cmd += ["-L", f"127.0.0.1:{lp}:{rp}" if isinstance(rp, str) else f"127.0.0.1:{lp}:127.0.0.1:{rp}"]
         return cmd + [target]
+
+    def is_lane(self, h: str) -> bool:
+        """r5：自己在跳板上握手的道连接（不是底座、不挂底座、不是 WSL 主连接）"""
+        hc = self.c["hosts"][h]
+        return hc.get("kind") not in ("base", "wsl_mux") and hc.get("via") != "t"
+
+    def lane_route(self, h: str) -> str:
+        r = self.c["hosts"][h].get("route")
+        if r and r in (self.c.get("routes") or {}) and now() >= self.route_bad_until.get(r, 0):
+            return r
+        return self.pick_route()
 
     def bases(self) -> list[str]:
         return [k for k, v in self.c["hosts"].items() if v.get("kind") == "base"]
@@ -342,6 +356,11 @@ class Supervisor:
                         kill(pid)
                         self.log("ADOPT kill own ssh with stale forwards", hh, pid)
                         continue
+                    want_r = self.c["hosts"][hh].get("route")
+                    if self.is_lane(hh) and want_r and _route_of(cmd) not in (want_r, "direct"):   # r5：配置改成独立香港连接，旧的经底座（-t）道不认领，按新配置重起
+                        kill(pid)
+                        self.log("ADOPT kill own ssh on stale route", hh, pid, _route_of(cmd), "→", want_r)
+                        continue
                     if st["pid"] is None and pid_alive(pid):          # 上一个监管进程起的：认领，不打断
                         st.update(pid=pid, since_t=now() - self.c.get("listen_grace_s", 45), state="up", up_since_t=now(),
                                   route=_route_of(cmd), base=_base_of(cmd))   # 认领时按命令行目标认路 / 认底座   # 认领的按“通”算，卡死要连续 hang_rounds 轮（23:44 一轮就杀的教训）
@@ -371,7 +390,7 @@ class Supervisor:
         cmd = self.ssh_cmd(h)
         p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, cwd=str(ROOT),
                              stderr=open(self.dir / f"ssh_{h}.err.log", "ab"), creationflags=NOWIN)
-        st["route"] = "t" if hc.get("via") == "t" else (hc.get("route") or self.pick_route())
+        st["route"] = "t" if hc.get("via") == "t" else (hc.get("route") or self.pick_route()) if hc.get("kind") == "base" else self.lane_route(h)
         if hc.get("via") == "t":
             st["base"] = self.pick_base(h) or hc.get("base")
         st.update(pid=p.pid, since_t=now(), up_since_t=None, state="connecting", hang=0, probe_t=0.0, _io=None)
@@ -397,7 +416,7 @@ class Supervisor:
                 self.route_bad_until[r] = now() + self.c.get("route_bad_s", 600)
                 self.route_fails[r] = 0
                 self.log("ROUTE bad", r, f"连续失败 → {self.c.get('route_bad_s', 600)} s 内走备用")
-        if self.c["hosts"][h].get("kind") == "base":   # 运维 FONG-QUICK：快速失败 15 s 起翻倍、最多 5 分钟；跑够 60 s 再断 = 重置 15 s；不许更快
+        if self.c["hosts"][h].get("kind") == "base" or self.is_lane(h):   # r5：独立道连接同样在跳板握手 → 同一退避规则。运维 FONG-QUICK：快速失败 15 s 起翻倍、最多 5 分钟；跑够 60 s 再断 = 重置 15 s；不许更快
             up_s = st.get("_last_up_s", 0)
             st["_wait"] = 15 if (up_s >= 60 or not st.get("_wait")) else min(st["_wait"] * 2, 300)
             st["next_try_t"] = now() + st["_wait"]
@@ -812,15 +831,66 @@ def ensure(conf: Path, state_dir: Path) -> str:
     return "started"
 
 
+def _dry(conf: Path, status: dict) -> "Supervisor":
+    """plan 用：只读配置 + 现状快照，不起 ssh、不写日志 / 状态（假定各路入口通、底座按快照）"""
+    s = Supervisor.__new__(Supervisor)
+    s.conf_path, s.c = Path(conf), jl(Path(conf), {})
+    s.tag, s.route_bad_until, s.route_fails = s.c.get("tag_prefix", "nsnetfix"), {}, {}
+    s.relay = {"routes": {r: {"up": True} for r in (s.c.get("routes") or {})}}
+    sh = status.get("hosts") or {}
+    s.hosts = {h: {"state": (sh.get(h) or {}).get("state", "up") if s.c["hosts"][h].get("kind") == "base" else "up"} for h in s.c["hosts"]}
+    return s
+
+
+def plan(new_conf: Path, cur_conf: Path = CONF, state_dir: Path = STATE_DIR) -> list[str]:
+    """r5 dry：新配置相对当前配置（+ 运行快照）会变更哪些连接。只打印，不动任何进程 / 文件"""
+    status = jl(Path(state_dir) / "net_status.json", {}) or {}
+    cur, new = _dry(cur_conf, status), _dry(new_conf, status)
+    run = status.get("hosts") or {}
+    out, relay_n = [], {}
+    for tag, s in (("cur", cur), ("new", new)):
+        relay_n[tag] = sorted(h for h, v in s.c["hosts"].items() if v.get("kind") == "base" or s.is_lane(h))
+    for h in list(cur.c["hosts"]) + [h for h in new.c["hosts"] if h not in cur.c["hosts"]]:
+        r = run.get(h) or {}
+        now_s = f"[运行中 {r.get('state')} route={r.get('route')} base={r.get('base')} pid={r.get('pid')}]"
+        if h not in new.c["hosts"]:
+            out.append(f"REMOVE  {h} {now_s}")
+            continue
+        nc = new.ssh_cmd(h)
+        if h not in cur.c["hosts"]:
+            out.append(f"ADD     {h} → {nc[-1]}")
+            continue
+        cc = cur.ssh_cmd(h)
+        if cc == nc:
+            out.append(f"KEEP    {h} → {nc[-1]} {now_s}")
+            continue
+        def _ka(cmd):                                # ssh 同名选项先出现的生效
+            eff = {}
+            for i, x in enumerate(cmd[:-1]):
+                k = cmd[i + 1].split("=", 1)
+                if x == "-o" and k[0] in ("ServerAliveInterval", "ServerAliveCountMax"):
+                    eff.setdefault(k[0], k[1])
+            return f"{eff.get('ServerAliveInterval')}s×{eff.get('ServerAliveCountMax')}"
+        out.append(f"RESPAWN {h}: {cc[-1]} → {nc[-1]}  保活 {_ka(cc)} → {_ka(nc)} {now_s}")
+    out.append(f"跳板上握手的长连接：{len(relay_n['cur'])} → {len(relay_n['new'])}（{', '.join(relay_n['new'])}）；"
+               f"同时握手上限 max_connecting={new.c.get('max_connecting', 2)}")
+    out.append("切换（总调度，producer 空闲时）：cp <新配置> config/netfix/tunnels.json → tunnel_supervisor.py stop → 等心跳过期 → ensure；"
+               "新实例认领 KEEP 的连接不打断，RESPAWN 的旧 ssh（经底座 -t）在 adopt 时被杀并按新配置重起")
+    return out
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["serve", "ensure", "status", "stop"])
+    ap.add_argument("cmd", choices=["serve", "ensure", "status", "stop", "plan"])
     ap.add_argument("--conf", default=str(CONF))
     ap.add_argument("--state-dir", default=str(STATE_DIR))
     ap.add_argument("--max-s", type=float, default=None)
     a = ap.parse_args(argv)
     sd = Path(a.state_dir)
     sd.mkdir(parents=True, exist_ok=True)
+    if a.cmd == "plan":                              # r5 dry：--conf = 新配置；对照当前生产配置 + 运行快照
+        print("\n".join(plan(Path(a.conf), CONF, sd)))
+        return 0
     if a.cmd == "serve":
         f = lock(sd)
         if f is None:

@@ -162,6 +162,7 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "anon: 这个用例以“未登录”身份请求（不套用默认的项目方登录会话）")
     config.addinivalue_line("markers", "real_clip: 这个用例要加载真 CLIP（默认换成假向量，见 _fake_clip）")
     config.addinivalue_line("markers", "real_data: 这个用例确实要读写真实 data/（只放行这一个用例；ITERAUDIT K-OPS-Q03）")
+    config.addinivalue_line("markers", "live: 这个用例要连真服务（8870/8871/1818x/服务器）；默认 skip，NS_TEST_LIVE=1 才跑（W22 网络守卫）")
 
 
 # ---------------------------------------------------------------- ITERAUDIT 11-01：真实数据写保护（规则 K-OPS-Q03）
@@ -245,6 +246,10 @@ def _real_data_optin(request, monkeypatch):
 def pytest_sessionfinish(session, exitstatus):
     import json
     import time
+    wo = getattr(session.config, "workeroutput", None)     # W22：xdist worker 把网络守卫拦截记录交给主进程
+    if wo is not None:
+        wo["net_violations"] = list(globals().get("NET_VIOLATIONS", []))[:200]
+        wo["proc_violations"] = [{k: v for k, v in x.items() if k != "stack"} for x in _PG.VIOLATIONS][:200]
     deadline = time.time() + 10
     leftover = []
     for t in _threading.enumerate():
@@ -259,7 +264,9 @@ def pytest_sessionfinish(session, exitstatus):
     viol = [{k: v for k, v in x.items() if k != "stack"} for x in _RDG.VIOLATIONS]
     rep = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "violations": viol, "leftover_threads": leftover,
            "sentinels_changed": changed, "guard_off": _GUARD_OFF,
-           "ok": not (viol or leftover or changed or _GUARD_OFF)}
+           "net_violations": [dict(x) for x in globals().get("NET_VIOLATIONS", [])][:100],
+           "proc_violations": [{k: v for k, v in x.items() if k != "stack"} for x in _PG.VIOLATIONS][:100],
+           "ok": not (viol or leftover or changed or _GUARD_OFF or _PG.VIOLATIONS)}
     try:
         out = _Path(__file__).resolve().parents[1] / "data" / "qa" / "test_guard_last.json"
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -375,3 +382,126 @@ def _fresh_module_registries(monkeypatch):
         if isinstance(getattr(m, attr, None), dict):
             monkeypatch.setattr(m, attr, {})
     yield
+
+
+# ---------------------------------------------------------------- W22 TEST-HERMETIC（ISS-1103-145040）：测试不许连网
+# 根因（11-03 cut dry #8）：串行 pytest 跑到 93%，几个用例去连 127.0.0.1:8870/8871（看图）/ 1818x（出图隧道）/ 服务器，
+# 等网络 10 分钟 CPU 不动，被 run_watched 当僵死杀掉。修法：本进程里 socket connect 到下面放行范围以外的地址一律抛 RuntimeError
+# 并记账（吞掉异常也会在会话结束报出）。放行：127.0.0.1:8800、本进程自己 bind 过的回环端口（假服务 / socketpair）、
+# 回环上的系统临时端口（≥ 32768，子进程起的假服务用 port 0 拿到的都在这里）、AF_UNIX。
+# 确实要连真服务的用例：标 @pytest.mark.live（默认 skip；NS_TEST_LIVE=1 才跑；cut 闸门不跑 live）。
+import socket as _socket  # noqa: E402
+
+NET_ALLOW = {("127.0.0.1", 8800)}
+_LOOPBACK = {"127.0.0.1", "localhost", "::1", "0.0.0.0", ""}
+NET_VIOLATIONS: list = []
+_NET_STATE = {"bound": set(), "orig": None, "allow_depth": 0, "test": None}
+_NET_OFF = os.environ.get("NS_TEST_NET_GUARD") == "off"
+
+
+def _net_allowed(addr) -> bool:
+    if _NET_STATE["allow_depth"] > 0:
+        return True
+    if not isinstance(addr, tuple) or len(addr) < 2:
+        return True                                   # AF_UNIX 等非 IP 地址
+    host, port = str(addr[0]).lower(), int(addr[1])
+    if (host, port) in NET_ALLOW or (host in ("localhost",) and ("127.0.0.1", port) in NET_ALLOW):
+        return True
+    if host in _LOOPBACK or host.startswith("127."):
+        return port in _NET_STATE["bound"] or port >= 32768
+    return False
+
+
+def _net_block(addr):
+    NET_VIOLATIONS.append({"addr": f"{addr[0]}:{addr[1]}" if isinstance(addr, tuple) else str(addr),
+                           "test": _NET_STATE["test"] or os.environ.get("PYTEST_CURRENT_TEST", "?").split(" ")[0]})
+    raise RuntimeError(f"测试里不许连网：connect {addr}（tests/conftest.py 网络守卫；要连真服务的用例标 @pytest.mark.live）")
+
+
+def _net_install():
+    if _NET_STATE["orig"] is not None or _NET_OFF:
+        return
+    S = _socket.socket
+    orig = {"connect": S.connect, "connect_ex": S.connect_ex, "bind": S.bind}
+    _NET_STATE["orig"] = orig
+
+    def connect(self, addr):
+        if not _net_allowed(addr):
+            _net_block(addr)
+        return orig["connect"](self, addr)
+
+    def connect_ex(self, addr):
+        if not _net_allowed(addr):
+            _net_block(addr)
+        return orig["connect_ex"](self, addr)
+
+    def bind(self, addr):
+        r = orig["bind"](self, addr)
+        try:
+            a = self.getsockname()
+            if isinstance(a, tuple) and len(a) >= 2:
+                _NET_STATE["bound"].add(int(a[1]))
+        except OSError:
+            pass
+        return r
+    S.connect, S.connect_ex, S.bind = connect, connect_ex, bind
+
+
+def _net_uninstall():
+    orig = _NET_STATE["orig"]
+    if orig is None:
+        return
+    for k, v in orig.items():
+        setattr(_socket.socket, k, v)
+    _NET_STATE["orig"] = None
+
+
+_net_install()
+
+# W22 P0（总调度 11-03 15:5x）：进程守卫——测试里不许 taskkill / Stop-Process / os.kill 不是本测试创建的进程
+# （15:30:15 autoflow_resident 25996 在真 cut 的 pytest 阶段被外部 /F 杀掉；快照 data/ 硬链接真实数据，pid 文件指向生产进程）
+import proc_guard as _PG  # noqa: E402
+
+if os.environ.get("NS_TEST_PROC_GUARD") != "off":
+    _PG.install()
+
+
+def pytest_collection_modifyitems(config, items):
+    if os.environ.get("NS_TEST_LIVE") == "1":
+        return
+    skip = pytest.mark.skip(reason="live：要连真服务，默认不跑（NS_TEST_LIVE=1 才跑；cut 闸门不跑）")
+    for it in items:
+        if "live" in it.keywords:
+            it.add_marker(skip)
+
+
+@pytest.fixture(autouse=True)
+def _net_guard_per_test(request):
+    _NET_STATE["test"] = request.node.nodeid
+    _PG._STATE["test"] = request.node.nodeid
+    live = "live" in request.keywords
+    if live:
+        _NET_STATE["allow_depth"] += 1
+    yield
+    if live:
+        _NET_STATE["allow_depth"] -= 1
+    _NET_STATE["test"] = None
+    _PG._STATE["test"] = None
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_testnodedown(node, error):
+    NET_VIOLATIONS.extend(getattr(node, "workeroutput", {}).get("net_violations", []))
+    _PG.VIOLATIONS.extend(getattr(node, "workeroutput", {}).get("proc_violations", []))
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    w = terminalreporter.write_line
+    w(f"[net-guard] 测试连网被拦 {len(NET_VIOLATIONS)} 次" + ("（守卫已关 NS_TEST_NET_GUARD=off）" if _NET_OFF else ""))
+    for x in NET_VIOLATIONS[:30]:
+        w(f"[net-guard]   connect {x['addr']} ← {x['test']}")
+    w(f"[proc-guard] 测试想杀别人的进程 {len(_PG.VIOLATIONS)} 次（已拦下）")
+    for x in _PG.VIOLATIONS[:30]:
+        w(f"[proc-guard]   {x['what'][:160]} ← {x['test']}：{x['why'][:160]}")
+

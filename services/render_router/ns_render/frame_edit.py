@@ -17,6 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from . import pipeline as P
+from . import render_paths as RP   # W33
 from . import workflows as W
 from .comfy_client import ComfyError, input_image, remote_info
 
@@ -296,7 +297,7 @@ def edit_frame(client, script, shot_id: str, stage: str, *, mode: str, parent: i
                      init_image=init, denoise=denoise)
     entry, secs = client.run(wf, timeout_s=timeout_s)
     item = next(f for f in client.output_files(entry) if f["filename"].endswith(".png"))
-    rel_dir = f"renders/{P.shot_dir(shot_id).relative_to(P.RENDERS).as_posix()}/takes"
+    rel_dir = RP.shot_take_rel_dir(shot_id)   # W33：带剧名前缀
     # 文件名带任务 id（无任务时随机）：两条 GPU 道同时给同一镜同一阶段出图会拿到同一个 n，不能互相覆盖（F3 审计）
     rel = f"{rel_dir}/{stage}_{n:03d}_{unique_tag(job)}.png"
     client.download(item, P.DATA / rel)

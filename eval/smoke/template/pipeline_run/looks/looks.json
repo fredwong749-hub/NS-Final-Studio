@@ -1,0 +1,65 @@
+{
+  "version": 2,
+  "looks": [
+    {
+      "id": "lin_wan-default",
+      "character": "lin_wan",
+      "name": "默认",
+      "items": {},
+      "decor_state": null,
+      "reference_images": [],
+      "needs_review": true,
+      "notes": [
+        "剧本没有该角色的角色锁（数据C 未入库），造型待人工填写"
+      ],
+      "label": null,
+      "preview_image": null,
+      "version": 1
+    },
+    {
+      "id": "gu_chen-default",
+      "character": "gu_chen",
+      "name": "默认",
+      "items": {},
+      "decor_state": null,
+      "reference_images": [],
+      "needs_review": true,
+      "notes": [
+        "剧本没有该角色的角色锁（数据C 未入库），造型待人工填写"
+      ],
+      "label": null,
+      "preview_image": null,
+      "version": 1
+    },
+    {
+      "id": "chen_yu-default",
+      "character": "chen_yu",
+      "name": "默认",
+      "items": {},
+      "decor_state": null,
+      "reference_images": [],
+      "needs_review": true,
+      "notes": [
+        "剧本没有该角色的角色锁（数据C 未入库），造型待人工填写"
+      ],
+      "label": null,
+      "preview_image": null,
+      "version": 1
+    },
+    {
+      "id": "ch_a_lan-default",
+      "character": "ch_a_lan",
+      "name": "默认",
+      "items": {},
+      "decor_state": null,
+      "reference_images": [],
+      "needs_review": true,
+      "notes": [
+        "剧本没有该角色的角色锁（数据C 未入库），造型待人工填写"
+      ],
+      "label": null,
+      "preview_image": null,
+      "version": 1
+    }
+  ]
+}

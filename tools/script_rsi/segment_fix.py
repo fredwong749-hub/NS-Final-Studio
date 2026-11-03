@@ -19,7 +19,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 AUDIT = "segment_fix.jsonl"
-SEG_RE = re.compile(r"【(幻想|现实)段?】|段落\s*[=：:]\s*(幻想|现实)")
+# L-164（11-03 13:3x）：标记后面允许带补充说明（P2 写法“【幻想段·开场 5 秒】”）。原来只认紧凑的【幻想段】，
+# ep02 B1 没认出来 → 缺省现实段 → P4 镜1 标幻想段被 QW-S2 挡、标现实段被 factcheck（事实表“天台=幻想段”）挡，两头死锁、补丁试满
+SEG_RE = re.compile(r"【(幻想|现实)段?(?:[·・：:｜|，,\s][^】]{0,24})?】|段落\s*[=：:]\s*(幻想|现实)")
 SHOT_HEAD = re.compile(r"^\*\*镜(\d+)｜img\*\*")
 SCENE_LINE = re.compile(r"^(\*\*场景\*\*\s*[：:]\s*)(sk_[a-z0-9_]+)?(\s*｜\s*)?(.*)$")
 DLG_LINE = re.compile(r"^\*\*(对白|旁白|独白)\*\*")

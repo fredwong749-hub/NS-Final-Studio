@@ -814,7 +814,7 @@ def test_autoflow_resident_single_instance_and_status_filter(tmp_path, monkeypat
             return None
     # W13 CUTB-PREP 11-03（REVIEW-G6）：tick 后来又挂了 asset_tick / dispatch_tick / hollywood_tick 三相，本用例只测写作推进；
     # 不打桩它们会写真实 data/factory/*（real-data-guard 记 6 次 → pytest 退出码 1）。同 tests/test_epchain_o.py:90 的打法，断言不变
-    for ph in ("asset_tick", "dispatch_tick", "hollywood_tick"):
+    for ph in ("asset_tick", "dispatch_tick", "hollywood_tick", "watchdog_tick"):   # W19：看门狗同理
         monkeypatch.setattr(AR, ph, lambda *a, **k: {}, raising=False)
     r = AR.tick({}, af=AF, runs_mod=RN, spawn=lambda d, ep: spawned.append((d, ep)) or Pr())
     assert r["started"] == ["v2 ep01"] and spawned == [(rd, 1)]

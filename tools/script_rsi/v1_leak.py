@@ -88,7 +88,9 @@ def vocab(root: Path = ROOT, current: str | None = None) -> dict:
             except (OSError, ValueError) as e:      # 读不到旧季登记 = 词表不全：报出来，不当作 0 命中
                 raise RuntimeError(f"读不到旧季登记 {cand}：{e!r}") from e
             for c in d.get("characters") or []:
-                names.add(c.get("name", "")); ids.add(c.get("char_id", ""))
+                names.add(c.get("name", ""))
+                if not str(c.get("char_id", "")).startswith("lead_"):    # 女主 id lead_f 是 V2 固定 id（asset_refs series10_v2.lead），smoke_v2 等旧 run 里出现也不算旧内容
+                    ids.add(c.get("char_id", ""))
             for s in d.get("scenes") or []:
                 scenes.add(s.get("scene_id", "")); scenes.add(s.get("name", ""))
             if d.get("title"):

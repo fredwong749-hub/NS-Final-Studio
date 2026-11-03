@@ -19,10 +19,30 @@ export interface QueueScore {
   status: string;
   detail: string;
 }
+/** 通知直说（L-172 分期 1）：每条待办的按钮 = 现有后端入口，不另起登记链。method=LINK 时用 href；POST 时 path + body（body.choice 就是要提交的 choice） */
+export interface QueueAction {
+  key: string;
+  label: string;
+  style: "primary" | "secondary" | "link";
+  method: "POST" | "LINK";
+  path?: string | null;
+  body?: { id: string; choice: string } | null;
+  href?: string | null;
+  needs_reason: boolean;
+  ask?: string;
+}
+export type BlockLevel = "red" | "yellow" | "grey";
 export interface QueueItem {
   id: string;
-  kind: "gate" | "decide" | "spot" | "pick";
+  kind: "gate" | "decide" | "spot" | "pick" | "info";
   kind_label: string;
+  /** 通知直说（L-172）：一句“要你做什么”/ 为什么找你 / ≤3 个按钮 / 阻塞程度（red 卡住 · yellow 等你 · grey 只读） */
+  say_what?: string;
+  why?: string;
+  actions?: QueueAction[];
+  block_level?: BlockLevel;
+  level_label?: string;
+  sub_kind?: string;
   category: string;
   category_label: string;
   title: string;
@@ -62,6 +82,9 @@ export interface OwnerQueue {
   count: number;
   counts: Record<"gate" | "decide" | "spot" | "pick", number>;
   items: QueueItem[];
+  /** 通知直说：按阻塞程度计数；readonly = 只读告知（灰、无按钮、不进 count） */
+  levels?: Record<BlockLevel, number>;
+  readonly?: QueueItem[];
   auto_today: { passed: number; rejected: number; signed: number; policy: number; redo: number; n_image: number; n_last: number; n_video: number; agreement?: number | null; agreement_n?: number | null; total: number };
   master_waits: { n: number; title: string };
   machine_signed: Record<string, { image?: number; last?: number }>;

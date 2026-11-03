@@ -298,3 +298,34 @@ def test_golden_first_frame_delegated_and_revisable(env, monkeypatch):
     c = _client(monkeypatch, {"name": "fred", "role": "owner"})
     c.post("/api/owner/pick", json={"id": gid, "choice": "revise", "reason": "换一张"})
     assert OP.state_of(root, gid)["state"] == "revise_requested" and gid in {i["id"] for i in OQ.pick_items(root, OQ._closed(root, 0))[0]}
+
+
+# ---- W29：首帧代选真能代（P1-7 / P2-8 / P2-9）----
+def test_w29_real_lane_shapes_only_laptop_is_local_only():
+    """P1-7：真实 ep01 takes.json 的 producer.lane 形状是 gpu33:x / gpu36:x（laptop:x 是 L-165 分区后才有）；
+    只有 laptop: 前缀判本地专用，gpu 道不误判"""
+    for lane, local in (("gpu33:3", False), ("gpu36:0", False), ("gpu33:0", False), ("laptop:0", True)):
+        got = OD._cand_lane({"n": 1, "producer": {"lane": lane}}, {})
+        assert got == lane
+        assert got.startswith(OD.LOCAL_LANE_PREFIX) is local
+
+
+def test_w29_owner_marks_ignores_rows_before_run_created(tmp_path):
+    """P2-8：audit / decisions 无剧名，本剧创建前的行不算；之后的行、无法解析时间的行仍算"""
+    a = tmp_path / "data" / "audit"
+    a.mkdir(parents=True)
+    old = {"at": "2026-11-01T17:37:00", "user": "fred", "method": "POST", "path": "/api/shots/ep01-S1/takes/image/2/lock"}
+    new = {"at": "2026-11-03T10:00:00", "user": "fred", "method": "POST", "path": "/api/shots/ep01-S2/takes/image/1/lock"}
+    odd = {"user": "fred", "method": "POST", "path": "/api/shots/ep01-S3/takes/image/1/unlock"}
+    (a / "x.jsonl").write_text("\n".join(json.dumps(r) for r in (old, new, odd)), encoding="utf-8")
+    assert set(OD._owner_marks(tmp_path)) == {"ep01-S1", "ep01-S2", "ep01-S3"}
+    assert set(OD._owner_marks(tmp_path, "2026-11-02T18:28:50")) == {"ep01-S2", "ep01-S3"}
+
+
+def test_w29_auto_locked_summary_recognizes_delegate():
+    """P2-9：摘要 _auto_locked 认 locked_by.by=="delegate"（与 auto 同状态）"""
+    from ns_api import app as A
+    t = {"locked": {"image": 2}, "locked_by": {"image": {"by": "delegate", "n": 2}}}
+    assert A._auto_locked(t, {}) == {"image": 2}
+    t["locked"]["image"] = 3
+    assert A._auto_locked(t, {}) == {}

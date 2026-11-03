@@ -26,12 +26,45 @@
   },
   "series10_v2": {
    "priority": 0,
-   "status": "preparing",
+   "status": "producing",
    "source": "v2-plan",
    "created_at": "2026-11-02T18:28:50",
    "note": "L-125（项目方 11-02 18:2x）：第一季 Version 2 从零重做；不设 inherits（不继承 V1 任何资产 / 覆盖），参考只认 assets_v2/manifest.json（docs/master/V2_PLAN.md）",
    "assets_manifest": "assets_v2/manifest.json",
-   "episode": 1
+   "episode": 4,
+   "status_history": [
+    {
+     "at": "2026-11-03T14:06:04",
+     "from": "preparing",
+     "to": "producing",
+     "by": "MASTER-WSL L-165",
+     "why": "sop_gate.promote：第 [1] 集已可进“出图”"
+    }
+   ]
+  },
+  "smoke_v2": {
+   "priority": 50,
+   "status": "paused",
+   "source": "eval-smoke",
+   "created_at": "2026-11-03T16:30:00",
+   "assets_manifest": "assets_v2/manifest.json",
+   "note": "W26 SMOKE-GATE（RSI 实施包 §4）：冒烟门专用迷你剧（eval/run_smoke.ps1 每次从 eval/smoke 模板重建 data/**/smoke_v2）；平时 paused（常驻进程不碰），只在 G4 窗口由冒烟脚本经 runs.set_status 临时翻 producing、结束翻回 paused；不是生产剧",
+   "status_history": [
+    {
+     "at": "2026-11-03T16:56:02",
+     "from": "paused",
+     "to": "producing",
+     "by": "eval/smoke.py（W26）",
+     "why": "冒烟 G4 窗口：临时放行 producer"
+    },
+    {
+     "at": "2026-11-03T17:21:02",
+     "from": "producing",
+     "to": "paused",
+     "by": "eval/smoke.py（W26）",
+     "why": "冒烟 G4 窗口结束：翻回 paused（常驻进程不碰）"
+    }
+   ]
   }
  },
  "legacy_unprefixed_run": "series10_v1",

@@ -8,6 +8,12 @@ $Root = "D:\NS-Final Studio"
 $Py = Join-Path $Root ".venv\Scripts\python.exe"
 $Logs = Join-Path $Root "ops\logs"
 $Tick = Join-Path $Root "data\autopilot\flow\last_tick.json"
+$AfHb = Join-Path $Root "data\factory\autoflow_resident.json"
+$AfLock = Join-Path $Root "data\factory\autoflow_resident.lock"
+$AfRestart = Join-Path $Root "ops\restart_autoflow.ps1"
+$afNext = [datetime]::MinValue
+$RelLock = Join-Path $Root "data\system_versions\release_lock.json"
+$CutLock = Join-Path $Root "data\system_versions\cut_lock.json"
 New-Item -ItemType Directory -Force $Logs | Out-Null
 function Log($m) { Add-Content -Path (Join-Path $Logs "resident_guard.log") -Value ("{0} {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $m) -Encoding utf8 }
 
@@ -25,14 +31,61 @@ function TickStale {
   if (-not (Test-Path $Tick)) { return $true }
   return (((Get-Date) - (Get-Item $Tick).LastWriteTime).TotalMinutes -gt 25)
 }
+# W17b P1-2（A17 第 28 轮）：release（cut / deploy 是 resident_sync 的子进程）进行中不杀进程树，等它跑完再判。
+# 进行中 = release_lock.json 的 pid 还活着且未过 6 h TTL（与 release_tick.LOCK_TTL_S 同），或 cut_lock.json active 且未到期（cut 期间每 5 分钟续期）
+function ReleaseBusy {
+  try {
+    if (Test-Path $RelLock) {
+      $r = Get-Content $RelLock -Raw -Encoding utf8 | ConvertFrom-Json
+      $age = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - [double]$r.t
+      if ($r.pid -and $age -lt 6 * 3600 -and (Get-Process -Id ([int]$r.pid) -ErrorAction SilentlyContinue)) { return "release_lock pid $($r.pid)（$($r.what)）" }
+    }
+    if (Test-Path $CutLock) {
+      $c = Get-Content $CutLock -Raw -Encoding utf8 | ConvertFrom-Json
+      if ($c.active -and [double]$c.expires_t -gt [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) { return "cut_lock active（$($c.sv)，pid $($c.pid)）" }
+    }
+  } catch { return $null }       # 锁文件坏 / 读不到 = 不算进行中（退回旧行为）
+  return $null
+}
+
+# ISS-1103-172950-44d8：autoflow_resident 被外部杀过两次、看门狗跑在它里面救不了自己 → 本守护兜底。
+# 心跳 data/factory/autoflow_resident.json 的 at 超过 3 分钟没拍，且锁里记的 pid 不在 → 调 ops/restart_autoflow.ps1（它只停锁里记的 pid，不按命令行杀）。
+# 一轮最多一次；失败后 3 分钟内不再试。
+function AutoflowDown {
+  try {
+    if (-not (Test-Path $AfHb)) { return $false }
+    $at = [datetime]::Parse(((Get-Content $AfHb -Raw -Encoding utf8 | ConvertFrom-Json).at))
+    if (((Get-Date) - $at).TotalMinutes -le 3) { return $false }
+  } catch { return $false }
+  try {
+    if (Test-Path $AfLock) {
+      $lp = [int]((Get-Content $AfLock -Raw -Encoding utf8 | ConvertFrom-Json).pid)
+      if ($lp -and (Get-Process -Id $lp -ErrorAction SilentlyContinue)) { return $false }
+    }
+  } catch { }
+  return $true
+}
+function AutoflowGuard {
+  if ((Get-Date) -lt $afNext) { return }
+  if (-not (AutoflowDown)) { return }
+  $script:afNext = (Get-Date).AddMinutes(3)
+  Log "autoflow_resident 心跳超过 3 分钟没拍且锁里 pid 不在：调 ops/restart_autoflow.ps1"
+  try { & powershell -NoProfile -ExecutionPolicy Bypass -File $AfRestart | Out-Null; Log "restart_autoflow.ps1 退出码 $LASTEXITCODE" } catch { Log "restart_autoflow.ps1 调用失败：$($_.Exception.Message)" }
+}
 
 Log "守护启动 pid $PID"
 while ($true) {
+  AutoflowGuard
   $p = Procs
   if ($p -and (TickStale)) {
-    Log "last_tick.json 超过 25 分钟没更新：判 loop 卡死，杀进程树重拉"
-    foreach ($x in $p) { & taskkill /PID $x.ProcessId /T /F | Out-Null }
-    $p = $null
+    $busy = ReleaseBusy
+    if ($busy) {
+      Log "last_tick.json 超过 25 分钟没更新，但 release 进行中（$busy）：不杀，等它跑完"
+    } else {
+      Log "last_tick.json 超过 25 分钟没更新：判 loop 卡死，杀进程树重拉"
+      foreach ($x in $p) { & taskkill /PID $x.ProcessId /T /F | Out-Null }
+      $p = $null
+    }
   }
   if (-not $p -and (Get-Date) -ge $next) {
     Start-Process -WindowStyle Hidden -WorkingDirectory $Root -FilePath $Py -ArgumentList @("-u", "tools/autopilot/resident_sync.py", "loop") `

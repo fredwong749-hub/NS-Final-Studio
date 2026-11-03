@@ -1,4 +1,5 @@
 {
- "_doc": "现行生产运行 ID（WORKFLOW 11-02，总调度 02:0x：episode_pipeline 与 producer 都从这里读 RUN_ID，换一部剧只改这一处；DISTILL 冷启动演练 ①）",
- "run_id": "series10_v2"
+ "_doc": "派生文件，勿手改（PRODMERGE-O 11-03 / PLAN_V2_MASTER v4 1-3）：当前剧只认 config/pipeline/runs.json 的 primary；本文件由 tools/autopilot/runs.py sync_run_ptr 按它重写，只给旧读法兼容",
+ "run_id": "series10_v2",
+ "derived_from": "config/pipeline/runs.json#primary"
 }

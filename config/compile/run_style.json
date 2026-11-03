@@ -21,6 +21,27 @@
    "shot_language": {"lens": "auto", "composition": "script", "lighting": "script", "fusion": true, "_l149": "⤴ L-149（项目方 11-03 05:0x）：镜头句（焦段光圈，不写品牌）与 L-110 融合句 V2 现在开；L-148：灯光以每镜剧本为准", "_doc": "MERGE-IMG-O 11-03（ISS-1103-023528-2869）：首帧镜头语言模板 v2 段（ns_agent/shot_language.py，顺序 = shot_spec_v2.yaml image_compile.order）。构图 / 灯光取剧本本镜【构图】【灯光】原文（L-111，写作方已写）；镜头句（lenses.yaml 是 V1 的品牌镜头组，V2 去品牌后只剩焦段光圈）与 L-110 融合句会改变 V2 画面观感，暂关，等总调度定"},
    "post_lut": true,
    "decision": "L-130（项目方 11-02 21:1x 选定）：幻想段 v2_editorial_fantasy_c、现实段 v2_editorial_reality_c2，替换临时风格句；风格句单一来源 = render_quality.json 对应预设的 style_suffix；段落标记取自剧本节拍（【幻想段】/【现实段】），没标记按 default_segment 并告警；LUT 走后期（post_lut）"
+  },
+  "smoke_v2": {
+   "bible": "config/compile/bible_series10_v2.toml",
+   "segments": {
+    "fantasy": {
+     "preset": "v2_editorial_fantasy_c",
+     "label": "幻想段 · 黄金时刻",
+     "post_lut": "config/post/luts/v2_fantasy_c.cube",
+     "camera": "bolt_push_settle"
+    },
+    "reality": {
+     "preset": "v2_editorial_reality_c2",
+     "label": "现实段 · 直闪纪实第 2 版",
+     "post_lut": "config/post/luts/v2_reality_c2.cube",
+     "camera": "handheld_follow（只限走动镜）"
+    }
+   },
+   "default_segment": "reality",
+   "shot_language": {"lens": "auto", "composition": "script", "lighting": "script", "fusion": true},
+   "post_lut": true,
+   "decision": "W26b SMOKE R2（11-03）：冒烟门专用迷你剧，与 series10_v2 同 bible（同一文件引用，不复制）/ 同段落预设 / 同后缀；series10_v2 条目改了这里要跟着改（eval/test_smoke_harness.py 有对齐测试）"
   }
  },
  "v1_style_phrases": [

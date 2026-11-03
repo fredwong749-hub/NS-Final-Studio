@@ -2,24 +2,24 @@
 不另写出图链）。新角色没有身份参考 -> 文生图；成人造型一律拒绝。
 过渡期原型：正式形态是 tools/pipeline/asset_worker.py（阶段 A 资产作业，M-AUTOPIPE-01）。preflight 走正式的设定候选模式
 （mode=setting_candidate + asset_stage），不再在脚本里豁免 I2 / I3。
+W14 COMPILE-P1（REVIEW-G4 P1-2，L-137 / PRODMERGE-O 一本账）：--render 已退役（退出码 3，指向 producer / asset_worker），
+本脚本只编译 + preflight，不出图、不写 data/ab、data/review_pages、不自己判定。
     python tools/promptfix/cast_v2.py ch_tang_yao --compile
-    python tools/promptfix/cast_v2.py ch_tang_yao --render --lane gpu36:0 --seed 1001
+    python tools/promptfix/cast_v2.py ch_tang_yao --check        # preflight 不过 → 退出码 1
 """
 from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import golden_v2 as G
 
 ROOT, PROJECT = G.ROOT, G.PROJECT
-OUT = ROOT / "data" / "review_pages" / "v2_cast"
-AB = ROOT / "data" / "ab" / "v2_cast"
+RETIRED = ("--render 已退役（REVIEW-G4 P1-2，L-137 / PRODMERGE-O）：出图走 tools/autopilot/producer.py --run <剧>"
+           "（设定候选走 tools/pipeline/asset_worker.py 资产作业），验收走 ns_agent.gen_contract.accept；本脚本只 --compile / --check")
 
 CAST = {
     "ch_tang_yao": dict(
@@ -89,106 +89,24 @@ def compile_job(cid):
     return job
 
 
-def _ask(text, image, label, px=1400000):
-    from ns_agent.vqa import client as C
-    return C.generate({"system": "你是严谨的看图核对员，只描述看到的，用中文。", "text": text,
-                       "images": [{"path": image, "max_pixels": px}]}, wait_s=600, label=label)
-
-
-def vlm_check(image, cid):
-    head = "逐条核对，每条答“符合 / 不符合 + 一句理由”，最后一行写“总结：全部符合”或“总结：有不符合”。\n"
-    if cid == SCENE_ID:
-        q = head + "1. 画面里没有人；2. 是纯白无缝弧形背景幕的影棚；3. 有环形灯和一把透明亚克力椅；4. 没有文字、水印、logo；5. 画面干净无杂物。"
-    else:
-        c = CAST[cid]
-        q = head + (f"1. 画面里只有一个人，是{c['sex']}，接近正脸、目光落在画面右侧，胸像构图；2. 外观明显是成年人（大约{c['age']}岁，不像未成年）；"
-                    "3. 背景是中性纯色，没有场景杂物；4. 画面里没有文字、水印、logo、品牌标志；5. 没有裸露，穿着日常；6. 五官清晰自然、没有畸形。")
-    r = _ask(q, image, "cast_v2")
-    t = r.get("text") or ""
-    ok = ("总结：全部符合" in t) and ("不符合" not in t.split("总结")[0])
-    return {"status": "pass" if ok else ("untested" if r.get("error") else "fail"), "text": t, "error": r.get("error")}
-
-
-def age_check(image, cid):
-    """年龄观感：单独问一次本地看图，只要有“像未成年”就作废"""
-    if cid == SCENE_ID:
-        return {"status": "na", "text": "场景无人物"}
-    r = _ask("这张图里的人看起来是成年人还是未成年人？只回答第一行：“成年”或“像未成年”，第二行一句理由。", image, "cast_v2_age", 1000000)
-    t = (r.get("text") or "").strip()
-    first = t.splitlines()[0] if t else ""
-    return {"status": "pass" if first.startswith("成年") else ("untested" if r.get("error") else "fail"), "text": t}
-
-
-def ocr_check(image):
-    """OCR：本地看图读字（本地口径，图不出自有机器）"""
-    r = _ask("逐字读出这张图里所有可见的文字、字母、数字、logo 或品牌标志。没有就只回答“无”。", image, "cast_v2_ocr")
-    t = (r.get("text") or "").strip()
-    return {"status": "pass" if t.startswith("无") and len(t) < 12 else ("untested" if r.get("error") else "fail"), "text": t}
-
-
-def render(cid, lane, seed):
-    from ns_render import unified_frame as UF
-    from ns_render.comfy_client import ComfyClient
-    import ns_render.pipeline as P
-    sys.path.insert(0, str(ROOT / "tools" / "factory"))
-    import hosts as H
-    job = compile_job(cid)
-    pf = preflight(job, lane, cid)
-    # 设定候选模式（mode=setting_candidate，AUTOPIPE-A 11-03）：I2 / I3（场景：I5）由 preflight 按规则判 na，不再在这里手工豁免；其余项必须全过
-    if not pf.ok:
-        raise SystemExit("preflight 不过：" + "；".join(pf.reasons()))
-    waived = [f"{i.id} {i.detail}" for i in pf.items if (i.evidence or {}).get("mode") == "setting_candidate"]
-    client = ComfyClient(H.lane_url(lane, from_host="laptop"))
-    client.client_id = "castS-" + client.client_id
-    client.server_tag = H.host_of(lane) if H.host_of(lane) != "gpu33" else None
-    client.ns_tag = {"agent": "CAST-S", "kind": "v2_cast", "label": "V2 配角设定候选", "obj": f"v2cast-{cid}"}
-    job = {**job, "seed_policy": {"policy": "manual"}, "lane": lane}
-    AB.mkdir(parents=True, exist_ok=True)
-    rel_dir = AB.relative_to(P.DATA).as_posix()
-    take, eff, _ = UF._run(client, "v2cast-S1", "image", job, seed, rel_dir=rel_dir, prefix="ns_ab/v2_cast/" + cid)
-    img = str(P.DATA / take.file)
-    host = H.host_of(lane)
-    post = G.ensure_q9(UF._postflight(take.file, job, host), img, job)
-    if cid == SCENE_ID:
-        an = {"status": "pass", "note": "空镜，无人物，跳过人数检查"}
-    else:
-        import anomaly as A
-        an = A.check(img, [{"name": CAST[cid]["name"], "presence": "在画", "faced": True, "x": "中"}], host="gpu36")
-    vl, ag, oc = vlm_check(img, cid), age_check(img, cid), ocr_check(img)
-    items = {i.get("id"): i for i in (post or {}).get("items") or []}
-    q9 = str((items.get("Q9") or {}).get("status"))
-    lab = {"identity": "na", "count": {"pass": "pass", "fail": "fail"}.get(str(an.get("status")), "untested"),
-           "q9": {"pass": "pass", "na": "pass", "fail": "fail"}.get(q9, "untested"),
-           "prompt_vlm": vl["status"], "ocr": oc["status"], "age": ag["status"]}
-    ok = all(v in ("pass", "na") for v in lab.values())
-    rec = dict(at=time.strftime("%Y-%m-%dT%H:%M:%S"), id=cid, lane=lane, seed=seed, file=take.file, prompt=take.prompt, refs=job["refs"],
-               label=lab, preflight_waived=waived, passed=ok, postflight=post, anomaly=an, vlm=vl, age=ag, ocr=oc)
-    with (AB / "takes.jsonl").open("a", encoding="utf-8") as f:
-        f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
-    if ok:
-        OUT.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(img, OUT / f"{cid}_s{seed}.png")
-        G._atomic_write(OUT / f"{cid}_s{seed}.json", json.dumps(rec, ensure_ascii=False, indent=1, default=str))
-    return rec
-
-
-def main():
+def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cid")
-    ap.add_argument("--render", action="store_true")
-    ap.add_argument("--lane", default="gpu36:0")
-    ap.add_argument("--seed", type=int, default=1001)
-    a = ap.parse_args()
+    ap.add_argument("cid", choices=sorted([*CAST, SCENE_ID]))
+    ap.add_argument("--compile", action="store_true", help="编译 + preflight，打印提示词与结论（缺省）")
+    ap.add_argument("--check", action="store_true", help="编译 + preflight，不过 → 退出码 1")
+    ap.add_argument("--render", action="store_true", help="已退役（退出码 3）")
+    ap.add_argument("--lane", default="gpu36:0", help="preflight I12 判本地专用资产用的道（不出图）")
+    ap.add_argument("--seed", type=int, help="已无用（保留参数兼容）")
+    a = ap.parse_args(argv)
     if a.render:
-        r = render(a.cid, a.lane, a.seed)
-        print(json.dumps({k: r[k] for k in ("file", "seed", "label", "passed")}, ensure_ascii=False))
-        return 0 if r["passed"] else 1
+        sys.stderr.write(RETIRED + chr(10))
+        return 3
     job = compile_job(a.cid)
     pf = preflight(job, a.lane, a.cid)
     print(job["prompt"])
     print(json.dumps({"refs": job["refs"], "preset": job.get("preset"), "ok": pf.ok, "fail": pf.reasons(),
                       "trace": job["compile_trace"]}, ensure_ascii=False, indent=1))
-    return 0
+    return 1 if (a.check and not pf.ok) else 0
 
 
 if __name__ == "__main__":

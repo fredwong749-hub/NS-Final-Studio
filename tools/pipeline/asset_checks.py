@@ -236,6 +236,24 @@ def q9_asset(post: dict, stage: str) -> dict:
     return out
 
 
+# ------------------------------------------------------------------ 没测出 ≠ 不过（总调度 11-03 W6c 追加，与 producer Q9 口径一致：ns_agent/gen_contract/accept.q9_timeout）
+# 事故：series10_v2 face-ch_li_an / face-ch_zhou_xu 11-03 15:14–15:24 隧道断、人数检查服务不在 → 每张 count=untested，
+# 作业被判 failed“人数 不过 N 张”。没拿到结论是基础设施问题，不是候选的问题：该候选标 unmeasured，作业退避后重排，不计 attempts。
+INFRA_KEYS = ("count", "anomaly")                 # 只要服务在就一定出结论的检查：untested = 服务没跑成
+VLM_KEYS = ("prompt_vlm", "age", "ocr")           # 看图一问三答：只有看图服务本身报错（vlm.error）时才算没测出
+
+
+def unmeasured_keys(label: dict | None, vlm: dict | None = None) -> list[str]:
+    """候选里“没测出”的检查项（基础设施没出结论）。任一项明确 fail = 真不过，返回 []（照常按不过算）"""
+    lab = label or {}
+    if any(v == "fail" for v in lab.values()):
+        return []
+    keys = [k for k in INFRA_KEYS if lab.get(k) == "untested"]
+    if (vlm or {}).get("error"):
+        keys += [k for k in VLM_KEYS if lab.get(k) == "untested"]
+    return keys
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cmd", choices=["age", "ocr", "bundle"])

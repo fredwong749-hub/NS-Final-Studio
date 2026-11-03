@@ -63,6 +63,7 @@ from pydantic import BaseModel, Field
 from ns_api import jobs as J
 from ns_api import llm_config as LLMC
 from ns_render import pipeline as P
+from ns_render import render_paths as RP   # W33
 
 router = APIRouter(tags=["edits"])
 REPO = Path(__file__).resolve().parents[3]
@@ -1089,7 +1090,7 @@ def _save_take_result(it: dict, ctx: dict, c_, res: dict, plan: dict, job: dict)
     src_take = ctx["take"]
     with P.shot_lock(shot):
         n = P._next_n(shot, stage)
-    rel_dir = f"renders/{P.shot_dir(shot).relative_to(P.RENDERS).as_posix()}/takes"
+    rel_dir = RP.take_rel_dir(P.shot_dir(shot), P.DATA, P.RENDERS)   # W33
     rel = f"{rel_dir}/{stage}_{n:03d}_{FE.unique_tag(job)}.png"
     dest = P.DATA / rel
     dest.parent.mkdir(parents=True, exist_ok=True)

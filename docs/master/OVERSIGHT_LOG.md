@@ -4,6 +4,209 @@
 
 ---
 
+## 第 30 轮（A18b · Fable，Orca 工人 task_1633ece01376，总调度派）· 11-03 15:1x–15:3x · W18b LIFECYCLE-P0 复审（只审不改，25 分钟时间盒；两个开关仍默认关）
+
+### 复核范围
+第 29 轮 P0-1 / P1-1 / P1-2 / P1-3 / P1-4 / P1-6 / P2-3 原文 ↔ W18b 交付：services/api/ns_api/owner_delegate.py:566-842（LOCAL_LANE_PREFIX / _Unknown / _owner_marks / _owner_touched / _script_flags / _producer_lanes / _cand_lane / frame_tick）、tools/autopilot/resident_sync.py:1036（LC_DEFAULT）/ :1098-1125（lifecycle_heartbeats）/ :1138-1160（_server_start / _rq_state）/ :1225-1310（lifecycle_tick 服务器分支）、config/pipeline/sop_gate.json lifecycle、config/pipeline/owner_delegate.json first_frame、apps/web/src/v3/status.ts:85-110 + :256-272、apps/web/src/components/Viewer.tsx:210-218、services/api/ns_api/app.py:296（_auto_locked）、tests/test_producer_lifecycle.py（W18b 新增 12 条）、tests/test_owner_delegate.py。
+
+### 实跑结果（出处；全部只读，真实 data/ 零写入）
+- `PYTHONUTF8=1 .venv/Scripts/python.exe -m pytest tests/test_producer_lifecycle.py tests/test_owner_delegate.py tests/test_sop_gate_promote.py tests/test_w17b_release_p1.py -q`：**72 passed**（12.7 s，1 个 FastAPI on_event 弃用警告）。
+- `resident_sync.py lifecycle --dry`（15:16:21，真实状态）：run=series10_v2 status=producing；ep01=出图(4) / ep02=资产就绪(2) / ep03=导入闸门(1)；唯一目标 laptop:producer hb_age 0.4 min → running（不起）；服务器无目标。data/autopilot/lifecycle.json 未产生 ✅。
+- `owner_delegate.py frames --dry`（真实状态，first_frame.enabled=false）：**dry 不再被开关短路**，返回 4 行 skip：ep01-S1 / ep01-S3 "网页定稿过首帧（fred 2026-11-01）"、ep01-S6 "#/queue 有项目方动作（spot:ep01-S6:last:3 2026-11-02T12:46）"、ep02-S1 "网页定稿过首帧（? 2026-10-31）"；其余 ep01 11 镜 / ep02 7 镜静默跳过。delegate_seen.json / delegate_frames.json 未产生，delegate_log.jsonl mtime 不变（03:49:36）✅。
+- 临时脚本（Windows Temp，-I，只读）逐镜探真实数据：ep01 全部 11 镜 **cands=[]**（pf.ok=True 的旧版本没有 Q9 项，新版本 Q9=untested / accept_retry）→ 现在没有任何镜到"过检"门槛；`_script_flags(series10_v2, 1/2)` 正常返回 adult=∅ local=∅（导入稿 data/import/runs/series10_v2/script_v2.json 有 adult / h3_check / index 字段）；`_producer_lanes` = {}（attempts.json 没有 take+lane 的 history）；ep01 11 镜里只有 7 个新版本 take.producer.lane 有值（gpu36:0 / gpu36:1 / gpu33:0 / gpu33:3），S1 / S2 / S4 / S6 的全部 take 没有道记录。
+- tsc：`npx tsc --noEmit -p apps/web` rc=0 ✅。
+
+### 必查 1 · P0-1 失败关闭整集 ✅
+- `ep_set()`（:762-768）按集缓存：fn 抛异常 → `cache[ep] = "<Type>: msg"`（字符串），不再是 `{sn}`；调用处 `isinstance(adult, str)` → skip "第 N 集整集不代"（:790-796），同集后续镜命中同一缓存字符串 → 同样 skip。缓存是 frame_tick 每次调用新建（:757-758），下一拍重新判定、仍失败仍关，不是只关一拍。
+- 默认判定改为 `_script_flags`（:647-663）：导入稿不存在 → `Path.read_text` 抛 FileNotFoundError；没有这一集 → LookupError；镜号坏 → ValueError；全部走异常路径 → 整集 skip。不再用 sop_gate.adult_shots_of（读不到返回空集 = 放行）。
+- 成人 / 本地专用两次独立判定（:790 / :795），任一失败整集关。
+- 测试：test_frame_adult_unknown_closes_whole_episode（S4 + S6 都 skip、原因含"整集不代"）、test_frame_missing_import_doc_closes_episode（导入稿删掉 → 不代）均绿；第 29 轮复现场景（adult_fn 抛异常 → S6 被代选）已不成立。
+
+### 必查 2 · P1-3 本地专用 ✅ 判定本身 / ⚠ 副作用 P1-7
+- 三路都不代：候选道以 `laptop:` 开头 → req.candidates[].route="local_only" → never_reason（:807-811）；候选没道记录（take.producer.lane 无、账本也无）→ skip "判不出来"（:803-806）；账本读不了 / 不是对象 → lanes_err → skip（:798-801）；镜级 H3 校验"本地生成 / 占位 / 暂缓" 或 route=local_only → req.route="local_only" → never_reason。tests：test_frame_laptop_lane_candidate_never / test_frame_take_producer_lane_laptop_never / test_frame_unknown_lane_fails_closed / test_frame_h3_local_only_shot_never 绿。
+- **P1-7（新）· "lane 以 laptop: 开头 = 本地专用" 与 L-165 分区冲突，ep01 代选永远不触发**：config/netfix/partition.json images.laptop=[1]（note_L165：笔记本 4080 先出 ep01），tools/netfix/dispatch.py:4 "笔记本 producer 只派 laptop:0"；而 producer.py:474（L-128）本地专用作业许的是"项目方自有机器的道（笔记本 + gpu33 + gpu36）"，不是笔记本独占。所以 ep01 今后每个首帧版本都带 lane=laptop:0 → never_reason "候选里有成人 / 本地专用资产" → L-142 原文"ep01 首帧由系统代选"在当前分区下一条也不会代。方向只偏保守（不会误代），但功能等于关着。另：S1 / S2 / S4 / S6 的旧版本没有道记录 → 即便过检也永远 "判不出来"。建议：候选级只用镜级 H3 / route 判（_script_flags 的 local 已覆盖同一口径），去掉 LOCAL_LANE_PREFIX 规则；或 Take 落 route 字段后按 route 判。
+- 实跑佐证：当前 ep01 没有过检候选，frames --dry 看不出这条；用 partition + dispatch 代码推导。
+
+### 必查 3 · P1-4 项目方动过 ✅ 判定 / ⚠ 跨剧偏保守 P2-8
+- `_owner_marks`（:584-627）：data/audit/*.jsonl 里 POST `/api/shots/<sid>/takes/(image|first)/<n>/(lock|unlock)`（FRAME_AUDIT_RE 与 frame_jobs.py:503 / :547 真实路由一致）→ 网页定稿 / 解锁都算；data/owner_queue/decisions.jsonl 里提到该镜、且 by≠delegate / via 不以 delegate 开头的任何动作 → 算；目录 / 文件不存在 = 无记录；read_text OSError → _Unknown → frame_tick marks_err → **每镜 skip "按动过算，不代"**（:772-775 / :782-784）。`_owner_touched` 另加 locked_by.by ∉ {None, delegate} 分支（:636-638）。tests：test_frame_web_unlocked_once_not_picked（S4 解锁 → 只代 S5）、test_frame_owner_queue_action_not_picked、test_frame_owner_marks_unreadable_fails_closed、…_ignores_s10_vs_s1（`(?!\d)` 防 S1 误匹配 S10）绿。
+- 跨剧：audit / decisions 不带剧名。真实数据：series10_v2 created_at=2026-11-02T18:28，而 ep01-S1 / S3 的 lock 记录是 11-01 17:37、ep02-S1 是 10-31、ep01-S6 的 spot 决定是 11-02 12:46（且说的是"第 8 版首帧"，本剧 S6 只有 2 版）→ 全部是上一剧的痕迹。方向只偏保守（只会多 skip，不会误代）✅；代价：series10_v2 的 ep01-S1 / S3 / S6、ep02-S1 永远不代。P2-8，建议按 runs.json created_at 过滤 audit / decisions 的 at。
+
+### 必查 4 · P1-6 "系统代选·可改" ✅（#/queue 本身仍无条目，P2-9）
+- status.ts:103-110 `delegateLockOf`：locked_by[stage].by==="delegate" 且 locked[stage]===n → 版本号；`autoLockOf` 先查它再查 auto（:89-90）→ frameState 回 "auto"（:129）→ 与 auto 同状态 `auto_first`（:256）/ `auto_last`（:268），文案 `autoWord` = "系统代选·可改"。Canvas.tsx:224-226 把 auto_first 并入 lockFirstList / toReview0、ReviewRow.tsx:375 / :624 同一换版入口 → 可改 ✅。Viewer.tsx:214-217 查看器 chip "系统代选·可改" ✅。tsc rc=0 ✅。
+- 残留 P2-9：(a) 只有 ShotDetail 在手时认得出（摘要 app.py:296 `_auto_locked` 只认 by=="auto"），detail 没加载的列表里会先显示普通"已定稿"；(b) #/queue（OwnerQueuePage ← GET /api/owner/queue，owner_queue.py）没有任何 L-142 / delegate 条目，"事后可在 #/queue 修改"落在画布审片行而不是 #/queue 页。要不要按 L-142 字面补 #/queue 条目，由总调度定。
+
+### 必查 5 · P1-1 / P1-2 ✅
+- hb_stale_min：resident_sync.py:1036 LC_DEFAULT=5，sop_gate.json lifecycle.hb_stale_min=5，docstring（:1101-1103）同口径；test_hb_stale_default_is_5_in_code_and_config + test_stale_heartbeat_over_5min_restarts（2.5 min running / 5.5 min 拉起）绿。
+- 服务器 attempts：首次 → `requested`，`req_id` 记下、`req_counted=False`、attempts 不加（:1289-1295）；队列未执行（RQ.pending 非空）→ `queued`，不写新请求不计数（:1256-1260）；restart_done.jsonl 的 request_ids 含该 req_id 才有 done_t（_rq_state :1147-1157）；done 后 grace_min 内 → `waiting`；过 grace 仍无心跳且 req_counted=False → attempts+1、req_counted=True（:1250-1254）→ 同拍写下一条请求；3 次 → gave_up → `_lc_issue` 只在 rec["issue"] 为空时登记一次（:1270-1275）。队列读不了 → 当作 pending（不写不计，:1246-1248）。心跳变新 → running → attempts / issue / req_id 归零（:1236-1240）。tests：test_server_only_requests_never_count_or_report_p0（6 拍 66 min 只 1 条请求、attempts=0、无 issue）、test_server_attempt_counted_only_after_queue_executed_and_grace、test_grace_then_three_failures_report_p0_once 绿。
+- 笔记本仍按"起了就算一次"（:1283-1286），与第 29 轮口径一致。
+
+### 必查 6 · P2-3 ✅
+- `if not cfg.get("enabled") and not dry: return []`（:741）→ dry 不受开关短路；dry 下 skip 走 out.append（:751-755），frame_pick 行 `{**row, dry, enabled}` 后 continue（:823-825），不调 lock_fn、不写 FRAME_SEEN / log / V2_LIVE。真实实跑 3 个落盘文件 mtime / 存在性不变。test_frame_dry_ignores_enabled_and_writes_nothing 绿（并断言非 dry 仍受开关）。
+
+### P2（记录）
+- P2-8 跨剧 audit / decisions 偏保守（见必查 3）。
+- P2-9 #/queue 无条目 + 摘要 _auto_locked 不认 delegate（见必查 4）。
+- 第 29 轮 P1-5（L-142 "总调度亲审" vs 30 分钟超时）、P2-1 / P2-2 / P2-4 / P2-5 / P2-6 / P2-7 本轮未动，仍待总调度记账 / 裁定。
+
+### ✅ 核对通过（有出处）
+- 失败关闭原则贯穿：成人 / 本地专用 / 道记录 / 项目方痕迹 / 渲染根 / 导入稿 读不了 → 一律不代，frames --dry 真实数据零 frame_pick 行。
+- never_reason 仍写死（test_never_reason_still_hard_coded）；lifecycle.apply=false / first_frame.enabled=false 未动（test_hb_stale_default… 断言 apply=False）。
+- 本轮没有改动任何代码 / 配置 / 真实 data/（只写本日志；临时脚本放 Windows Temp）。
+
+### 给总调度的问题（需你定）
+1. P1-7：L-165 下 ep01 全在 laptop:0 出图 → 按当前规则 ep01 一条也不代。要 L-142 真生效，必须先改 LOCAL_LANE_PREFIX 规则（建议改镜级 H3 / route 判定）。
+2. P2-9：L-142 字面"在 #/queue 修改"要不要补 #/queue 条目，还是认画布审片行为准（记 L-xxx）。
+
+### 结论
+**first_frame.enabled 可否开：是（无 P0）**——P0-1 已修实证；P1-3 / P1-4 / P1-6 已落；但在当前 L-165 分区下开了也不会代任何 ep01 镜（P1-7），要 L-142 真生效需先修 P1-7。
+**lifecycle.apply 可否开：是（无 P0）**——P1-1 / P1-2 已修实证；当前真实状态下开了只会判 laptop running、不动；服务器两台 20 小时旧心跳的状态（第 29 轮已记）一旦某集分区落到服务器会按新规则写请求、计数只在队列真执行后。
+
+---
+
+## 第 29 轮（A18 · Fable，Orca 工人 task_973f21445705，总调度派）· 11-03 14:24–14:4x · W18 PRODUCER-LIFECYCLE 独立审计（只审不改，40 分钟时间盒；开关默认关）
+
+### 复核范围
+tools/autopilot/resident_sync.py:1024-1289（lifecycle_cfg / lifecycle_stage / lifecycle_want / lifecycle_heartbeats / _server_start / lifecycle_tick / lifecycle_thread / loop）、tools/autopilot/producer.py maybe_promote（:1930-1949）+ ctrl（:1917-1928）+ 心跳写入（:2069，TICK_S=20）+ pid 单实例守卫（:3440-3462）、tools/autopilot/restart_queue.py（**审计中 14:24:07 被改**：新增 norm_mode / merged_mode，process 已按 merged_mode 调 rs.restart(host, mode)；下文按新版本判）、tools/master/sop_gate.py（judge / promote_check / promote / stage_view / status / shot_frames / check_assets / check_prompts）、services/api/ns_api/owner_delegate.py:530-710（frame_candidates / frame_choose / _owner_touched / _default_frame_lock / frame_tick / tick / _loop）+ never_reason（:200-217）+ _skip_once（:188）、frame_jobs.lock_take（:504-530）、render_router/ns_render/frame_edit.unlock（:131）、config/pipeline/sop_gate.json lifecycle{} / promote{}、config/pipeline/owner_delegate.json first_frame{}、config/render_quality.json auto_final_on_lock_runs、config/netfix/partition.json、tests/test_producer_lifecycle.py（28 条）、MASTER_PICTURE L-142 / L-147 / L-152 / L-157 / L-160 / L-163、OWNER_CANON C-10 / C-11 / C-16 / C-22。
+
+### 实跑结果（出处）
+- `pytest tests/test_producer_lifecycle.py tests/test_owner_delegate.py tests/test_sop_gate_promote.py -q`：**48 passed**（4.1 s；real-data-guard 写真实数据 0 次）。
+- `resident_sync.py lifecycle --dry`（14:27:02，真实状态）：run=series10_v2 status=producing；ep01=出图(4) / ep02=资产就绪(2) / ep03=剧本(0)；producer_eps=[1] night_eps=[]；唯一目标 laptop:producer hb_age 0.7 min → **running**（不起）；服务器无目标（ep01 出图分区=laptop，L-165）。不带 `-X utf8` 直接跑 cp1252 崩（WSL 下 PYTHONUTF8 不透传，不是业务问题；restart_queue.py status 同样）。
+- `owner_delegate.frame_tick(dry=True)`（真实状态）：返回 `[]`——因为 first_frame.enabled=false 时 **dry 先于开关被短路**（:626-627），dry 看不到"会代哪些镜"，config `_switch` 写的"frames --dry 先看"在开关关着时不成立（P2-3）。
+- 临时目录构造（scratchpad 脚本，打桩 laptop_fn / server_fn / lock_fn，不起进程不写真实数据）：
+  · 阶段=提示词 → skip"没有任何一集到出图"，laptop / server 调用 0 ✅
+  · 阶段=出图、全部无心跳 → laptop:producer started + gpu33:producer started(mode=producer-only)，night_eps=[]、不起 night ✅；lifecycle.json 写入、V2_LIVE 2 行（打桩）
+  · 真 sop_gate.stage_view 于临时目录（只有 P4_ep01.md + 空 autoflow）→ ep01=导入闸门 → 不起 ✅
+  · 成人镜 S3（adult_fn 返回 {3}）→ skip"成人相关（只能项目方本人）"✅；普通镜 S4 同分 v1/v2 → 取 v1 ✅，标 "系统代选·可改" ✅
+  · **adult_fn 抛异常（剧本读不到）→ 同集第二个镜 S6 被代选了 ❌**（见 P0-1）
+  · frame_tick(dry=True) 仍写 data/owner_queue/delegate_seen.json + delegate_log.jsonl（skip 记录）（P2-3）
+- 当前 data/autopilot/resident_sync.json health（14:23）：gpu33 / gpu36 producer_hb_age_min=1188.5（paused=true，20 小时旧心跳）、night_state_age_min≈2.99e7（没有 night_state）→ lifecycle 读到的是 **数字而不是 None**，一旦某集到出图/尾帧且分区在服务器，会立即请求重启（这是预期行为，但要知道现在两台服务器就是这个状态）。
+
+### 必查 1 · 不抢跑 ✅（有一处口径说明）
+- 阶段来源 = `sop_gate.stage_view`（唯一阶段模型，:1057-1063），不是别处；producer 起条件 stage ∈ {出图,出图检测,尾帧,视频}（LC_PRODUCER_STAGES）、night ≥ 尾帧（LC_NIGHT_FROM）、legacy / 非 preparing|producing 一律 skip（:1180-1186）。
+- preparing 自动 promote：`sop_gate.promote → promote_check → judge(ep, 出图)`（:655-682）；judge 只看 evaluate 前 4 个阶段的证据 + 上一集复盘 done，**不读 observe_stages**（observe 只在 require 里生效）→ 正是 A1b 第 24 轮的 enforce 口径；资产缺口（check_assets gaps）/ 探针未过或过期（check_prompts fingerprint）→ judge 不过 → 不提升、不起（test_promote_not_ok_does_not_start ✅）。promote.auto=false → 只报不写（:1197-1199）。
+- 口径说明（P2-1）：stage_view 的"阶段"是 current_stage（第一个没过的阶段），**不含上一集复盘**；judge(出图) 含复盘。ep N 四阶段都过但 ep N-1 复盘没 done 时：stage_view 说 ep N=出图 → lifecycle 会起 producer，但 promote / 每镜 require 都挡 → producer 起来空转。不抢跑（不派单），只是"起了没活干"。
+
+### 必查 2 · 不误起 / 不重复起
+- **P1-1 · hb_stale_min=2 与 producer 一拍最长时长没对齐**：心跳在 tick 末尾写（producer.py:2069），TICK_S=20，但一拍内含导入 / consistency / raise_gates / 打分登记，`import_err` 重试 sleep 30·(k+1)（:1708）单次就能超 2 分钟；服务器健康报警用的是 ≥10 分钟（:726）。心跳 >2 min 即触发 restart_producer.ps1：先运维暂停 ≤180 s 等 inflight=0、不满也杀（ps1:20-33）→ 在途单靠租约过期重派。误触发不丢数据但白跑一轮（11-01 04:42 事故同类）。建议 hb_stale_min ≥ 5（或 ≥ 3×实测最长 tick），放开前用 ops/logs/producer_series10_v2 实测一拍上限。
+- draining / 刚重启窗口：笔记本 state ∈ {exited, draining} → None → "没有心跳" → 起（:1105-1107）。lifecycle 自己起的受 grace 10 min 保护（last_try，:1239）；**别人**（deploy / release_tick / 人工 ps1）正在 drain 时 lifecycle 会并发再跑一次 ps1。后果有界：producer `acquire_pidfile` O_EXCL + 心跳新鲜判活（:3440-3462）→ 不会双实例；只是多杀一次 / 多等 3 分钟。P2-2。
+- grace 10 min ✅（test_grace_then_three_failures_report_p0_once）；连续 3 次只登记一次 ✅（rec["issue"] 判空，:1225-1228；dry 不登记）。
+- **P1-2 · 服务器目标的 attempts 数的是"写了请求"不是"重启了"**：`_server_start` 只追加 restart_requests.jsonl 并立刻 ok=True（:1133-1139；已有待办还 dedup ok）；restart_queue 30 分钟 gap（RESTART_MIN_GAP_S）内不执行。时间线：t0 请求(1) → t10 dedup(2) → t20 dedup(3) → t30 gave_up → **P0 issue**，而队列可能 t30 才刚执行。假 P0 + 之后 attempts 不归零（只有心跳变新才 reset）。建议：服务器目标在 RQ.pending(host) 非空时记 waiting 不计 attempts，或 attempts 只在 restart_done 出现该请求 id 后才算一次失败。
+- restart_queue mode（W18 自述"process 忽略 mode 一律 all"）：**14:24:07 的新版本已修**——request(mode=) / norm_mode / merged_mode（全同 mode 才保留，否则 all）/ process 记 mode + modes_requested 并 `rs.restart(host, rec["mode"])`；resident_restart.sh producer-only 确实不起 night（sh:24-37）。剩余口径（P2-4）：没写 mode 的旧请求 / 别人的请求 norm 成 all（"宁可全起"），restart_guarded 代码变更重启也是 DEFAULT_MODE=all → "阶段 < 尾帧 night 不起"只是 lifecycle 自己请求的属性，不是系统不变量；night 早起的后果有界（night 只派已定稿 + sop_gate 视频闸门过的镜）。另：同一台 producer 在跑、night 没起 → 请求 mode=all 整机重启（排空 ≤90 s 后照重启，RQ:63-66）→ 在途出图单被打断一次，是 DJ-20 既定代价，记一笔。
+- 没有"人工 hold"：总调度 / 运维有意停掉某台 producer（不改 runs.json status）时，apply=true 下 2 分钟内会被拉起；只有 runs.json paused / archived 能停它。P2-5，建议 lifecycle.hold:[目标] 或认 data/autopilot/lifecycle.json 里的 hold 字段。
+
+### 必查 3 · 首帧代选（L-142）
+- 触发 = 出图检测通过（postflight ok + Q9 pass + 没 master_reject/bad/quarantined/accept_retry，与 sop_gate.shot_frames 同口径 ✅）+ 自最早过检版本起 timeout_min(30) 无人定稿（:655-663）；候选只取"通过"的（C-09 ✅，test_frame_pick…：v3 没过不参选）。选择 = (-blocking, Q1+bundle 通过率, -n) 取 max → 同分取小版本号 ✅。
+- **P0-1 · 成人镜失败关闭只关一个镜**（:640-644）：`adult_shots_of` 抛异常时 `adult_cache[ep] = {sn}` 只把**当前镜**当成人，同一集后面的镜（同一拍 / 以后每拍都命中缓存前的那一次）按"非成人"继续代选。实跑：adult_fn 抛异常 → ep01-S6 被代选定稿。导入稿读不到 / 剧本解析错时，成人镜首帧会被系统定稿 → 进尾帧 / 视频链；与 never"成人镜头渲染只能项目方触发"、C-22 冲突（L-147 打开后还会自动排定稿档重出）。tests 只测一个镜（test_frame_adult_unknown_fails_closed），所以绿。修法一行：异常时 `adult_cache[ep] = None` 并整集 continue。**first_frame.enabled 放开前必修。**
+- **P1-3 · "本地专用候选"判不出来**：never_reason 看 `candidates[].adult / route`（:208-210），但 takes.json 的 Take 记录没有 route / adult 字段（render_router/ns_render/pipeline.py:1223 Take(...) 无此字段；route 只在 producer 的 job 上，:1652）→ 候选级检查恒为空，只有镜级 adult_shots_of 生效。test_frame_local_only_candidate_never 用夹具 route="local_only" 绿，真实数据永远不带。非成人但 local_only（H3 校验标本地生成）镜会被代选。建议：镜级用 producer.local_only_shots(script) 同口径，或 Take 落 route。
+- **P1-4 · "项目方动过的不代"实际判不到**：`_owner_touched` 靠 `locked_history[].stage=="image"`（:586-588），但只有 tools/debug/unlock_owner.py 写 locked_history；网页解锁 frame_edit.unlock（:131-140）只 pop locked / locked_src，不留痕 → 项目方自己锁过又解锁的镜，30 分钟后被系统定稿（推翻项目方决定，never 第 4 条）。seen_row 分支只覆盖"系统代选过被撤"的情况。建议 frame_edit.unlock 写 locked_history（by / at），或 frame_tick 查 data/audit 里该镜的 lock/unlock 写请求。
+- **P1-5 · L-142 原文 ≠ 代码触发条件**：MASTER_PICTURE L-142 = "过检 **+ 总调度亲审后**，项目方事后可在 #/queue 修改"；代码 = 过检 + 30 分钟无人点，没有总调度亲审步骤。L-160 给总调度全权，可以裁定"30 分钟超时 = 亲审的替代"，但要在 L-xxx 记一笔，否则是按 owner_delegate.json 的 _doc 而不是账本在跑。
+- **P1-6 · "系统代选·可改"在 #/queue 没有呈现**：label 只写进 takes.json locked_by.image（by="delegate"）；apps/web 全库没有"系统代选"/ "delegate:L-142" 字样，status.ts / Viewer.tsx 只认 `locked_by.by === "auto"`（自动定稿·待复审）→ 网页把它显示成普通定稿，#/queue 没有条目、没有"改"入口（只能去画布换版本）。L-142"事后可在 #/queue 修改"、C-10"要他拍板的进 #/queue"未落实；汇总页 render_page 的 acts 也不含 frame_pick 事件（只过滤 pick/gate_*）。
+- 写 delegate_log（log()，event=frame_pick）+ delegate_frames.json + V2_LIVE（_frame_live）✅；与 L-136 无关 ✅：tick() 在 active() 之前先跑 frame_tick（:712-714），test_frame_runs_even_when_l136_inactive 绿。
+- L-147 接线 ✅：_default_frame_lock → frame_jobs.lock_take（画布同入口）→ FT.auto_final_on_lock；render_quality.json auto_final_on_lock=false、auto_final_on_lock_runs.series10_v2=false（等共用验收并回）→ 现在代选只定稿不排定稿档；final_job=false 时 V2_LIVE 不写"已排定稿档"。防写错剧守卫（P.shot_dir(sid)/takes.json 必须 == 扫到的文件）✅。
+- :8800 后台每拍 importlib.reload 本模块（:844-850）→ 改 owner_delegate.json first_frame.enabled=true 即生效，无需重启；**反过来说 P0-1 的修法落盘也即生效**。
+
+### P2（记录）
+- P2-1 stage_view 不含上一集复盘 → producer 可能空起（见必查 1）。
+- P2-2 别人 drain 时 lifecycle 并发跑 ps1（pid 守卫兜底，不双起）。
+- P2-3 frame_tick(dry) 被 enabled 短路、且 dry 仍写 seen/log；建议 dry 跳过 enabled 判断并不落盘。
+- P2-4 mode=all 的其它来源（见必查 2）。
+- P2-5 没有人工 hold。
+- P2-6 L-165（笔记本先出 ep01、gpu33 加回 1）只在 partition.json note_L165，MASTER_PICTURE 没有 L-165 行（账本缺项）。
+- P2-7 restart_queue.py 14:24 的 mode 改动没有对应测试（tests 里 merged_mode/norm_mode 只在 test_w17b_release_p1.py 被引用），属 cut B 未复审代码。
+
+### ✅ 核对通过（有出处）
+- C-16 阶段 < 出图不起：lifecycle_want 按 stage_index（:1072-1077）+ 实跑 S1 / S2b。
+- promote 两处写者（producer.maybe_promote、lifecycle_tick）都走 sop_gate.promote，auto=true 才写，status_history by=auto:*（test_promote_default_path_writes_status_history_auto）。幂等：翻一次后 status=producing，promote_check 直接 False。
+- 服务器 health 过期 >15 min = unknown 不起（:1113-1116；test_server_health_stale_is_unknown_not_started）；producer_run_mismatch → 当无心跳 → 起（ISS-1103-033310 口径）。
+- 同一台一拍只起一次（started_hosts，merged）；laptop 走 restart_producer.ps1 -Run <run>，ps1 respect 原暂停（wasPaused 不 resume）。
+- lifecycle 线程独立、异常只记日志（:1272-1286）；dry 不写 lifecycle.json、不报 issue、不写 V2_LIVE（test_dry_plans_without_acting_or_writing）。
+- never_reason 仍写死，改 json 打不开（test_never_reason_still_hard_coded）。
+
+### 给总调度的问题（需你定）
+1. P1-5：L-142"总调度亲审"是否以"30 分钟超时"替代？要记 L-xxx。
+2. P1-1：hb_stale_min 2 → 5？要不要先实测一拍上限。
+
+### 结论
+**lifecycle.apply 可否开：否**——P1-1（2 分钟误判拉起）、P1-2（服务器 attempts 假 P0）先修；无 P0。修后可开（当前真实状态下开了也只会判 laptop running、不动）。
+**first_frame.enabled 可否开：否 + P0-1**（成人镜失败关闭只关一个镜，剧本读不到时成人镜会被系统定稿）；同批修 P1-3 / P1-4 / P1-6，P1-5 由总调度记账裁定。
+
+---
+
+## 第 28 轮（A17 · Fable，Orca 工人 task_5f3582fae349，总调度 MASTER-WSL 派）· 11-03 14:06–14:2x · W17 RELEASE-AUTO 独立审计（只审不改，45 分钟时间盒）
+
+### 复核范围
+tools/autopilot/release_tick.py（release_once / acquire_lock / CliRunner / handover_once / tick）、tools/qa/system_version.py W17 段（gates:170-212、release_cfg / pytest_n / xdist_stall_s / _proc_table / proc_tree_cpu / run_watched:214-333、build_tree_from_list:351-389、cut_lock:731-753、deploy:1289-1325、main handover/release:1538-1593）、config/pipeline/release.json、resident_sync.py release_thread/loop:1000-1036、ops/autostart/resident_guard.ps1、ops/autostart/restart_producer.ps1、tests/test_release_auto.py、OWNER_CANON C-25、MASTER_PICTURE L-152 / L-160 / L-162 / L-163。
+
+### 实跑结果（出处）
+- `PYTHONUTF8=1 .venv/Scripts/python.exe -m pytest tests/test_release_auto.py tests/test_system_version.py tests/test_sv_verify_lock.py -q`：**56 passed，17.11 s**，real-data-guard 写真实数据 0 次。
+- `system_version.py handover --dry`（真仓库，只读）：条件 ❌deployed（release_result 不存在）❌handover_requested ✅stage（series10_v2 ep1 在“出图”≥“出图”）✅not_attempted；列出 4 步；没拿锁、没动任何进程 / 文件（release_tick.py:456-460 只在 apply 时往下走）。**注意：stage 条件此刻已经满足——第一份 deploy=true + handover=true 的请求一旦 done，换代会在同一拍自动执行（tick:563-565）。**
+- 临时 git 仓 + 假 `tools/qa/system_version.py`（走真 CliRunner 子进程、真 build_tree_from_list、真 O_EXCL 锁、真 report_issue 到临时 issues/LIVE），9 个场景：
+  - 绿路：cut --dry → cut → deploy 三次调用，子进程环境 NS_CUT_PYTEST_N=4 / NS_CUT_XDIST_STALL_S=600.0（来自 release.json），结果 done / deployed=True，CHANGELOG + V2_LIVE 各一行，锁释放；同一请求再跑 = already。
+  - dry 绿、真 cut 红：failed step=cut，issue `release:cut`（blocking），不 deploy；再跑 = already（不重复登记）；**只改请求 `at` 字段** → sha 变 → 从头再跑一遍 dry+cut、再登记一条 issue（见 P2-7）。
+  - deploy 子进程 rc=0 但 verify.ok=false：failed step=deploy（release_tick.py:220 自己重算 ok，不信 rc）。deploy_guard SystemExit（无报告）：failed “没拿到报告（rc=1）”。cut 崩溃无报告：同样 failed。
+  - 锁被活 pid 持有：busy、零调用；锁 pid 已死：接管、跑完；result status=running 同 sha 且无锁（上次中途崩）：从头重跑。清单项不存在：failed step=tree + issue。deploy=false：done / deployed=False。
+- 真机进程树（14:10，总调度手工 `cut --dry --tree 9b1a00a5` 正在跑）：30004 venv stub（0 CPU / 4 MB）→ 12528 真 python（97 CPU-s）→ 3636 pytest stub（0 CPU / 4 MB）→ 13604 真 pytest（361 CPU-s / 311 MB，无 -n，14:03:59 起，14:10 仍在跑）。证实 W17 自述“7 MB / 0 CPU 的是 stub”，proc_tree_cpu(stub) 统计子孙 = 真 python + worker，正确；串行跑 7 分钟持续吃 CPU，10 分钟“CPU 增量 < 1 s”窗口不会误杀正常慢测试。历史：-n 12 并行 815 用例 40–68 s（index.json sv-20261102-14/16、sv-20261103-01），串行超时 max(3600, 30×文件数) 够。
+
+### P0（立即退回）
+无。
+
+### P1（启用前修，或启用后第一份真实请求前修）
+
+**P1-1 · cut / deploy 超时只杀 stub，不杀真进程（release_tick.py:195-199）**
+- 说：cut_timeout_s 14400 / deploy_timeout_s 10800 超时 → rc=124、失败登记。
+- 实际：`subprocess.run(..., timeout=)` 超时只 kill 直接子进程 = `.venv\Scripts\python.exe` 启动器 stub（真机进程树已证实两层）；真正的 `system_version.py cut` 孤儿继续跑，可能在 release 已记 failed、issue 已登记之后仍 commit / tag / push，deploy 同理可能在“失败”之后继续推服务器。system_version 自己的 `_kill_tree`（:282）就是为这件事写的 taskkill /T，但 CliRunner 没用。
+- 建议：CliRunner._run 改 Popen + 超时 `_kill_tree`（Windows taskkill /T /F），或复用 run_watched。
+
+**P1-2 · resident_guard / 重启 resident_sync 会把正在跑的 release 杀一半（resident_guard.ps1:36-40；release_tick 跑在 resident_sync 守护线程里）**
+- 说：resident_sync loop 需要重启才生效。
+- 实际：守护按 `data/autopilot/flow/last_tick.json`（autoflow core 线程写）超过 25 分钟没更新判卡死 → `taskkill /PID /T /F` 整棵树；任何手工重启 resident_sync（启用 W17 本身、以后每次 resident_sync 改代码）也是同一动作。release 的 cut / deploy 都是它的子进程：cut 中途死 = cut_lock 挂到 45 分钟 TTL、快照目录残留、release_lock pid 死 → 下一拍从头重跑；deploy 中途死 = 服务器可能半推（deploy_host 自带 sha 校验，但 restart 请求 / verify 未做），result 停在 running → 下一拍从头重跑 → cut 报“相对上一版没有改动”→ failed + 一条假 issue，而已切出的版本不会被自动 deploy。重启路径没有任何“等 release 完”的判断。
+- 今天启用时：当前 resident_sync（pid 14308，11-02 19:48 起，老代码无 release_thread）里没有 release 在跑；总调度手工 cut（pid 30004，父进程是 shell 50476）不是它的子进程，重启 resident 不影响它。启用动作本身安全。
+- 建议：守护和手工重启前看 `data/system_versions/release_lock.json`（活 pid）与 cut_lock active，有就不杀、等；或把 release_thread 拆成独立进程 / 计划任务，不随 resident_sync 生死。
+
+**P1-3 · 请求没有“必须齐哪些复审组”的清单（release_tick.py:100-124；release.json 无 required_groups）**
+- 实际：validate_request 只要求 reviews 非空且每项有 group；review_blockers 只看列出的组。一份只写 `[{"group":"G2","verdict":"可入"}]` 的请求就能全自动 cut + deploy + 换代。L-157 要求 G2–G7 逐组 Fable 复审无 P0 才 cut B。现在唯一防线是写请求的人（总调度）自觉。
+- 建议：release.json 加 `required_groups: ["G2","G3","G4","G5","G6","G7"]`，release_once 缺组 = not_approved。
+
+**P1-4 · cut_lock TTL 45 分钟（system_version.py:622）< 一次 cut 可能的时长，手工 cut 与自动 release 会撞**
+- 实际：cut_lock 只在开始时写一次 expires_t（:735），不续期；而 W17 自己给 cut 的超时是 4 小时，xdist 僵死自愈路径 = 10 分钟 stall + 串行重跑（最长 4050 s）≈ 78 分钟。release_once 判“有人在 cut”只靠 `cut_locked()`（:296）。总调度手工 cut 跑过 45 分钟后，release_thread 下一拍会并行再起一个 cut：两者 `next_id()` 算出同一个 sv 号 → 同一个快照目录 SNAP_BASE/sv、同一个 docs/system_versions/<sv>.md；HEAD 由 update-ref CAS 保护只会成一个，但另一个的报告 / 快照 / index.json 会互相覆盖。今天 13:42 / 13:55 / 14:00 三次手工 cut 都在跑，这个窗口是真实的。
+- 建议：CUT_LOCK_TTL_S ≥ cut_timeout_s，或 cut 期间每道闸门后续期；release_once 另看 lock_history 最近一条 start 无 end。
+
+**P1-5 · handover 一步失败不停，继续做后面的步（release_tick.py:474-513）**
+- 说：“每步写 V2_LIVE，失败 report_issue”。
+- 实际：① 笔记本 restart_producer.ps1 失败（例如 V2 producer 没起来，脚本不打印 restarted → ok=False）后，② 仍向两台服务器投 restart 请求、③ 仍 kill bench2 / bakeoff。L-152 口径是“起 V2 之后再停旧”；现在是“不管 V2 起没起都停旧、都重启服务器”。每步失败确实都登记 issue，attempted=True 在第 ① 步之前就写（:470-472）所以严格只试一次（--force 重做），这两点都对。
+- 建议：任一步 ok=False 即 break，后面的步记 skipped。
+
+### P2（记录，下轮跟）
+
+**P2-6 · proc_tree_cpu 不含根进程自己的 CPU（system_version.py:264-279）**：在 venv stub 下正确（根 = stub，0 CPU）。若 PY 不是 stub（.venv 不在 → sys.executable；或 Linux），`-n 0` 串行 pytest 没有子孙 → 树 CPU 恒 0 → 10 分钟后被当僵死杀掉（code 125），而且这正是自愈重试用的 -n 0 路径。建议把根进程自己的 CPU 也加进去（对 stub 加 0 无害）。Windows PID 复用会把无关进程算成子孙 → 只会高估 CPU（漏判，安全方向）。
+
+**P2-7 · “同一请求只跑一次”= 内容 sha，改 `at` 就重跑**：按设计（“改请求才会再跑”）。红了改 at 重跑 = 全套闸门再跑一遍，不绕闸门；但对已 done 的请求改 at 会再 cut 一次 → “没有改动”failed + 假 issue。建议 done 后对同一 list+reviews（忽略 at）直接 already。
+
+**P2-8 · 中途异常后 result 停在 running，下一拍从头重跑**（release_tick.py:273-275、303-354）：真 cut 已 commit 之后任何异常（例如 report_issue 写文件 OSError、_wj 失败）都会让下一拍重新 cut → “相对上一版没有改动”→ failed，已切的版本永远不会被自动 deploy。建议 running 态按 step 续跑（已有 sv 就直接 deploy）。
+
+**P2-9 · Windows `_pid_alive` 用子串判断（release_tick.py:131-134）**：`str(pid) in tasklist 输出`，pid 123 会匹配 1234 或内存列数字 → 锁持有者已死仍判活 → 锁要等 6 小时 TTL。另：LOCK_TTL_S 6 h < cut 4 h + deploy 3 h，TTL 到期即判 stale（:156 是 or），手工 `system_version.py release` 可能在合法长 release 第 6 小时抢锁（release_thread 自己是串行的，不会自撞）。
+
+**P2-10 · 停 bakeoff 的 bash -c 外壳会报 STILL**（release_tick.py:499-509）：`kill -TERM` 发给正在等前台子进程的 bash，bash 要等子进程退出后才死，5 s 后 `kill -0` 仍在 → result=STILL → r3.ok=False → 登记 issue，虽然 `python run.py gen` 本身也匹配并被 TERM 了。建议 STILL 的再等 10 s 复查一次，或对 bash 外壳按子进程状态判。
+
+**P2-11 · release_thread 的模块快照**：release_thread 进程内缓存 system_version（RT._MODS），release_cfg / build_tree / cut_locked 用启动时的代码，cut / deploy 走子进程用磁盘代码；release.json 改了立即生效，release_tick.py / system_version.py 的 in-process 部分改了要重启（又回到 P1-2）。
+
+### ✅ 核对通过（有出处）
+- 绝不绕闸门：dry 绿真 cut 红 → 停（临时仓 B 场景；release_tick.py:320-329）；deploy 失败 / verify 不过 / 无报告 → 停（:218-225、:200-203）；每条 failed 都走 fail() → report_issue blocking（:306-311），invalid 也登记（:287），not_approved 按设计不登记（还在审）。没有任何把 ok=false 当成功的路径：cut 看报告 ok，deploy 重算 ok = rc==0 ∧ 所有 host ok ∧ verify ok。
+- 并发：release_lock O_EXCL + pid 活检 + TTL（:146-164）；cut_lock 活跃 = busy 不写结果（:296-298，test_cut_lock_active_means_wait）；release_thread 单线程、tick 阻塞到 release 结束，没有两拍重入；请求文件被同时写 = 后写赢，release 读一次 bytes 钉 sha，中途改了下一拍再跑新的。
+- handover：--dry 不拿锁、不执行（:456-460，真机实跑）；--apply 条件不满足不动（test_handover_conditions_not_met）；attempted 在动手前写、--force 才重做；只停不删（kill 命令只有 kill/sleep/echo，:499；test 断言无 rm）；protect = DEFAULT_PROTECT（producer / night / fwd / ComfyUI main.py --listen / resident_sync / sshd）+ release.json（uvicorn / audio_post）+ sentinel S16；legacy 匹配很窄（bench2\.py；run\.py gen --models=|score_srv\.py 且 cwd 含 /bakeoff/），clip_srv / ns_vqa 不会命中；score_srv 只在 tools/bakeoff 用，不是生产 VQA。restart_producer.ps1 只在成功时打印 restarted，_laptop_restart 以此判 ok（:447）。
+- xdist 自愈：stub 孙进程统计正确（真机进程树证实）；stall 窗口 10 分钟 + 每 30 s 采样，比较的是“≥10 分钟前那次采样到现在的 CPU 增量”，串行慢测试持续吃 CPU 不会被误杀；超时并行 2400 s / 串行 ≥3600 s，历史并行 40–68 s；僵死 → 杀整棵树（taskkill /T）→ -n 0 重跑一次，记 cut 报告 xdist_heal（:181-190、:897-899）。
+- resident 线程：每拍异常捕获、记日志、继续（resident_sync.py:1018-1019），失败关闭；不与 asset / autoflow tick 抢锁（release_lock 只有 release / handover 用，cut_lock 别人只读）；enabled 以 release.json 为准（RELEASE_TICK=True 常开）。
+- AUTO_CODE_PUSH=False（resident_sync.py:850）：主 loop 不再推代码 / 重启，与 deploy 不冲突。
+
+### 给总调度的问题（需你定）
+1. P1-3：required_groups 是否就按 L-157 的 G2–G7？cut B 之后的小版本（例如只改 tools/qa）是否允许少组？
+2. P1-2：启用 W17 的 resident 重启请等当前手工 cut sv-20261103-02 结束后做（虽然不是它的子进程，但 cut_lock 活跃时 release_thread 也只会 busy），并确认以后 resident_sync 重启流程先看 release_lock。
+
+**结论：W17 可否启用（resident 重启后让它接管发版）：是。P0 = 0；P1 = 5（P1-1 超时只杀 stub、P1-2 重启杀 release、P1-3 无必需复审组清单、P1-4 cut_lock 45 分钟撞手工 cut、P1-5 换代一步失败不停）。建议：现在就可重启 resident 让 release_thread 空转（无请求 = idle）；写第一份真实 release_request 前先修 P1-1 / P1-3 / P1-5（三处都是十行以内），P1-2 / P1-4 可随下一版。**
+
+---
+
+
 ## REVIEW-G4b cut B · 11-03 11:2x–12:0x · G4 视频 / 后期 / 配音（33 文件）发版前复审（Fable，只读；L-153 / L-157）
 
 **派单口径说明**：上一位 REVIEW-G4 审的是出图编译子集；本轮按 CUT_PLAN_sv17 §4 **G4 = tools/series10_video|bgm|v2style|voice10|vidlab/*、services/post/*、config/music_v2.json、video_policy.json**（33 个）逐文件 diff / 新文件通读。

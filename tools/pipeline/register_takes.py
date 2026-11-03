@@ -205,7 +205,8 @@ def register(item: dict, *, label: str, dry: bool = False) -> dict:
     with P.shot_lock(shot):
         n = P._next_n(shot, stage)
         # 总调度 11-01：文件名防撞——带内容哈希前 8 位，takes.json 被改写后 n 重复也不会覆盖别的版本的文件
-        rel = f"renders/{P.shot_dir(shot).relative_to(P.RENDERS).as_posix()}/takes/{stage}_{n:03d}_pipeline_{sha[:8]}{src.suffix.lower()}"
+        from ns_render import render_paths as RP   # W33
+        rel = f"{RP.take_rel_dir(P.shot_dir(shot), P.DATA, P.RENDERS)}/{stage}_{n:03d}_pipeline_{sha[:8]}{src.suffix.lower()}"   # W33
         dest = P.DATA / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dest)

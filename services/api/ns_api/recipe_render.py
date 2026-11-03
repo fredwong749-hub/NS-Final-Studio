@@ -19,6 +19,7 @@ from ns_render import comfy_client as CC
 from ns_render import h3_video as HV
 from ns_render import motion_qc as MQ
 from ns_render import pipeline as P
+from ns_render import render_paths as RP   # W33
 from ns_render import workflows as W
 from ns_render.comfy_client import ComfyError
 from ns_schema.edits import Take
@@ -139,7 +140,7 @@ def render_graph(client, shot_id: str, graph: dict, *, plan_hash: str, recipe_id
     secs_run = round(time.monotonic() - t0, 1)
     item = next(f for f in client.output_files(entry) if f["filename"].endswith(".mp4"))
     from ns_render.frame_edit import unique_tag
-    base = f"renders/{d.relative_to(P.RENDERS).as_posix()}/takes/video_{n_take:03d}_{unique_tag(job)}"
+    base = f"{RP.take_rel_dir(d, P.DATA, P.RENDERS)}/video_{n_take:03d}_{unique_tag(job)}"   # W33
     for i in range(3):
         try:
             client.download(item, P.DATA / f"{base}.mp4")

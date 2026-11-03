@@ -49,5 +49,11 @@
  "interval_s": 60,
  "show_hours": 72,
  "by": "总调度代选",
- "via": "delegate:L-136"
+ "via": "delegate:L-136",
+ "first_frame": {
+  "enabled": true,
+  "timeout_min": 30,
+  "_doc": "W18 / L-142（项目方 11-03 04:2x 点选：首帧由系统代选、事后可在 #/queue 修改）：主剧首帧有版本过“出图检测”（postflight ok + Q9 pass + 没驳回）且项目方 timeout_min 分钟内没定稿 → owner_delegate.frame_tick 按契约分（Q1 身份 + 合并看图逐条通过率）+ bundle 顺序定稿，takes.json locked_by.image 标“系统代选·可改”，写 delegate_log.jsonl / delegate_frames.json / V2_LIVE。不受上面 L-136 enabled / 到期影响；成人镜 / 成人或本地专用候选 / 项目方动过的镜一律不代（代码写死）。定稿走 frame_jobs.lock_take → L-147 定稿档开关在 config/render_quality.json auto_final_on_lock_runs",
+  "_switch": "W18 交付时默认 false：:8800 后台线程每拍 importlib.reload 本模块，代码一落盘就生效，未经 cut B 复审先不放开；总调度改 true 即按 L-142 自动代选（frames --dry 先看会代哪些镜）"
+ }
 }

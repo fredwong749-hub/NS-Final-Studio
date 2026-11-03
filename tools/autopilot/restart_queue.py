@@ -7,6 +7,9 @@ data/autopilot/restart_requests.jsonl 追加一条请求；resident_sync 每拍�
   · 紧急请求（urgent=true）可以插队（不受 30 分钟限制），但审计里写明“紧急插队”与原因；
   · 合并：同一台所有待办请求一次执行，结果写 data/autopilot/restart_done.jsonl（请求 id 列表、谁请求的、原因、是否插队、耗时）。
 请求文件只追加，不改不删。
+  · W17b（A17 / W18）：请求可带 mode（producer-only / night-only / all；别名 night = night-only），process 按合并后的 mode 执行
+    resident_restart.sh <host> <mode>，不再一律 all。合并规则：全部同一 mode → 该 mode；混合 / 有 all / 没写 mode（老请求）/ 不认识 → all。
+    命令行 request 加 [--mode producer-only|night-only|all]。
 
     from restart_queue import request
     request("gpu36", "system_version deploy sv-20261102-0215", by="FACTORY", urgent=False)
@@ -46,9 +49,27 @@ def _append(p: Path, rec: dict) -> None:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
-def request(host: str, reason: str, by: str, urgent: bool = False) -> dict:
+MODES = ("producer-only", "night-only", "all")
+MODE_ALIAS = {"night": "night-only", "producer": "producer-only", "": "all"}
+
+
+def norm_mode(m) -> str:
+    """请求里的 mode → resident_restart.sh 认识的 mode；没写 / 不认识 = all（宁可全起，不漏起）"""
+    m = MODE_ALIAS.get(m.strip(), m.strip()) if isinstance(m, str) else "all"
+    return m if m in MODES else "all"
+
+
+def merged_mode(todo: list[dict]) -> str:
+    """同一台多条待办合并成一次重启：全部同一 mode → 该 mode；否则 all（producer-only + night-only 也 = all）"""
+    ms = {norm_mode(r.get("mode")) for r in todo}
+    return ms.pop() if len(ms) == 1 else "all"
+
+
+def request(host: str, reason: str, by: str, urgent: bool = False, mode: str | None = None) -> dict:
     rec = {"id": uuid.uuid4().hex[:12], "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "t": time.time(), "host": host,
            "reason": reason, "by": by, "urgent": bool(urgent)}
+    if mode is not None:
+        rec["mode"] = norm_mode(mode)
     _append(REQ, rec)
     return rec
 
@@ -135,7 +156,8 @@ def process(host: str, rs=None, now: float | None = None) -> dict | None:
     t0 = time.time()
     rec = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "host": host, "request_ids": [r["id"] for r in todo],
            "by": sorted({r.get("by") or "?" for r in todo}), "reasons": [r.get("reason") for r in todo][:20],
-           "urgent_jump": bool(urgent and not gap_ok), "since_last_restart_min": round((now - last) / 60, 1) if last else None}
+           "urgent_jump": bool(urgent and not gap_ok), "since_last_restart_min": round((now - last) / 60, 1) if last else None,
+           "mode": merged_mode(todo), "modes_requested": sorted({str(r.get("mode")) for r in todo})}
     try:
         # A-09（V2_READINESS）：重启前已经被别人暂停（运维 / 部署 / 人工）→ 不再 pause、重启后也不 resume（以前无条件 resume，
         # 把别人的全局暂停清掉了）；只解自己设的暂停
@@ -145,7 +167,7 @@ def process(host: str, rs=None, now: float | None = None) -> dict | None:
             rs.ssh(host, f"cd {rs.R} && {rs.PY[host]} tools/autopilot/producer.py pause --by RESTART_QUEUE --note '重启前排空'",
                    timeout=120, tries=3)
         rec.update(drain(host, rs))
-        rec["restart_out"] = str(rs.restart(host)).strip()[-300:]
+        rec["restart_out"] = str(rs.restart(host, rec["mode"])).strip()[-300:]
         if not pre:
             rs.ssh(host, f"cd {rs.R} && {rs.PY[host]} tools/autopilot/producer.py resume --by RESTART_QUEUE --note '重启完成'",
                    timeout=120, tries=3)
@@ -159,7 +181,7 @@ def process(host: str, rs=None, now: float | None = None) -> dict | None:
         st.setdefault(host, {})["last_restart"] = time.time()
         rs.js(rs.STATE, st)
         _append(DONE, rec)                              # 失败的不记 done：请求留着，下一拍再试
-    rs.log("restart_queue", host, json.dumps({k: rec.get(k) for k in ("request_ids", "by", "urgent_jump", "drained", "ok", "secs")},
+    rs.log("restart_queue", host, json.dumps({k: rec.get(k) for k in ("request_ids", "by", "mode", "urgent_jump", "drained", "ok", "secs")},
                                               ensure_ascii=False))
     return rec
 
@@ -171,12 +193,13 @@ def main(argv=None) -> int:
     ap.add_argument("--by", default="")
     ap.add_argument("--reason", nargs="*", default=[])
     ap.add_argument("--urgent", action="store_true")
+    ap.add_argument("--mode", choices=[*MODES, "night", "producer"], default=None)
     a = ap.parse_args(argv)
     if a.cmd == "request":
         if not a.host or not a.by:
             print("用法：request <host> --by <谁> --reason <原因> [--urgent]")
             return 2
-        print(json.dumps(request(a.host, " ".join(a.reason), a.by, a.urgent), ensure_ascii=False))
+        print(json.dumps(request(a.host, " ".join(a.reason), a.by, a.urgent, a.mode), ensure_ascii=False))
     else:
         print(json.dumps({"pending": pending(), "done_last": _lines(DONE)[-5:]}, ensure_ascii=False, indent=1)[:4000])
     return 0

@@ -28,18 +28,19 @@ Host 194relay
     User fong
     IdentityFile ~/.ssh/id_rsa_gpu33
     IdentityFile ~/.ssh/id_ed25519_gpu36
+# r5 W21（11-03）：gpu33-hk / gpu36-hk 不用 ProxyJump——两跳 ProxyJump 的第二跳按 PATH 找 "ssh"，从 WSL / 部分环境起时拿到 C:\Windows\System32\OpenSSH\ssh.exe，它读不了 MSYS 路径 "/d/..." 的 known_hosts → 报 "No ED25519 host key is known for 47.243.63.181"（47.243.63.181 的 ed25519 早已登记，keyscan 复核指纹一致）。改为显式 Git ssh（/usr/bin/ssh）逐跳 ProxyCommand，指纹校验照旧 StrictHostKeyChecking yes。
 Host gpu33-hk
     HostName 10.0.0.33
     User root
     HostKeyAlias gpu33
     IdentityFile ~/.ssh/id_rsa_gpu33
-    ProxyJump 194relay-hk
+    ProxyCommand /usr/bin/ssh -F "/d/NS-Final Studio/config/netfix/ssh_config" -o "ProxyCommand=/usr/bin/ssh -F \"/d/NS-Final Studio/config/netfix/ssh_config\" -W %%h:%%p hkjump" -W %h:%p 194relay-hk
 Host gpu36-hk
     HostName 10.0.0.36
     User root
     HostKeyAlias gpu36
     IdentityFile ~/.ssh/id_ed25519_gpu36
-    ProxyJump 194relay-hk
+    ProxyCommand /usr/bin/ssh -F "/d/NS-Final Studio/config/netfix/ssh_config" -o "ProxyCommand=/usr/bin/ssh -F \"/d/NS-Final Studio/config/netfix/ssh_config\" -W %%h:%%p hkjump" -W %h:%p 194relay-hk
 Host gpu33
     HostName 10.0.0.33
     User root

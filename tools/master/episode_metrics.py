@@ -680,6 +680,146 @@ def automation(af: dict, jobs: list[dict], inter: dict) -> dict:
     return {"total_steps": len(steps), "system_steps": by.get("system", 0), "ratio": ratio(by.get("system", 0), len(steps)), "by_actor": by, "steps": steps}
 
 
+# ---------- PLAN §1.3 每集头条指标（W24 RETRO-AUTO）----------
+PRODUCER_MANUAL_EV = ("master_approve", "approve", "uncap", "unwait", "reject")     # 总调度 / 人工对单个对象动手（producer.py 子命令落的事件）
+PLAN_TARGETS = {"automation_ratio": (">=", 0.6), "interventions": ("<=", 20), "gpu_util": (">=", 0.4)}   # PLAN_V2_MASTER §1.3（ep02 起）
+
+
+def _ep_of_obj(obj: str) -> int | None:
+    m = re.search(r"ep(\d{2})", str(obj or ""))
+    return int(m.group(1)) if m else None
+
+
+def _ep_windows(P: Paths, ep: int) -> tuple[datetime | None, datetime | None]:
+    """本集时间窗：autoflow_epNN.started → 下一集 autoflow started（没有就开放）。用来归属不带集号的记录（资产挑选等）"""
+    a = ts((jload(P.run_dir / f"autoflow_ep{ep:02d}.json", {}) or {}).get("started"))
+    b = ts((jload(P.run_dir / f"autoflow_ep{ep + 1:02d}.json", {}) or {}).get("started"))
+    return a, b
+
+
+def _belongs(rec_ep: int | None, at: datetime | None, ep: int, w: tuple) -> bool:
+    if rec_ep is not None:
+        return rec_ep == ep
+    return bool(at and w[0] and at >= w[0] and (w[1] is None or at < w[1]))
+
+
+def _median(xs: list[float]) -> float | None:
+    xs = sorted(xs)
+    if not xs:
+        return None
+    m = len(xs) // 2
+    return round(xs[m] if len(xs) % 2 else (xs[m - 1] + xs[m]) / 2, 2)
+
+
+def headline(root: Path, run: str, ep: int, nulls: Nulls | None = None) -> dict:
+    """PLAN_V2_MASTER §1.3 的六项（结构化，RETRO 两集对比表读这里）：
+      automation_ratio = 无人工介入的对象 / 全部对象（对象 = producer 首帧 / 尾帧 / 视频 obj + 项目方挑过的资产对象）
+      interventions    = owner_queue/decisions.jsonl 本集条数 + producer 日志 master_approve/approve/uncap/unwait/reject 事件
+      gpu_util         = producer 日志 rendered.gpu_s 合计 ÷（墙钟 × 用到的道数）；墙钟 = 本集第一条 dispatch → 最后一条 rendered
+      hollywood_median = metrics/hollywood_epNN.jsonl 每行 mean 的中位数
+      one_pass         = 首帧 / 尾帧 / 视频：第一版（take 最小的 adopt）就 ok 的对象比例
+      issues           = issues.jsonl 本集卡点（不含 who=RETRO 的复盘跟进项）"""
+    nulls = nulls or Nulls()
+    P = Paths(root, run)
+    w = _ep_windows(P, ep)
+    plog = jlines(root / "data" / "producer" / "runs" / run / "log.jsonl")
+    if not plog:
+        nulls.add("headline.producer", f"data/producer/runs/{run}/log.jsonl 不存在或为空")
+    objs: set[str] = set()
+    manual: dict[str, list[str]] = {}
+    adopts: dict[str, list[dict]] = {}
+    gpu_s, lanes, t_first, t_last = 0.0, set(), None, None
+    n_inter = 0
+    for d in plog:
+        obj = str(d.get("obj") or "")
+        if _ep_of_obj(obj) != ep:
+            continue
+        at = ts(d.get("ts"))
+        kind = obj.split(":")[0] if ":" in obj else ""
+        if kind in ("first", "last", "video"):
+            objs.add(obj)
+        ev = d.get("ev")
+        if ev in PRODUCER_MANUAL_EV:
+            n_inter += 1
+            objs.add(obj)
+            manual.setdefault(obj, []).append(ev)
+        elif ev == "adopt" and kind in ("first", "last", "video"):
+            adopts.setdefault(obj, []).append(d)
+        elif ev == "dispatch":
+            t_first = dmin(t_first, at)
+        elif ev == "rendered":
+            gpu_s += float(d.get("gpu_s") or 0)
+            if d.get("lane"):
+                lanes.add(d["lane"])
+            t_last = dmax(t_last, at)
+    dec = [d for d in jlines(root / "data" / "owner_queue" / "decisions.jsonl")
+           if ((d.get("applied") or {}).get("run") in (None, run))
+           and _belongs(_ep_of_obj(d.get("id")), ts(d.get("at")), ep, w)]
+    for d in dec:
+        o = f"owner:{(d.get('applied') or {}).get('object') or d.get('id')}"
+        objs.add(o)
+        manual.setdefault(o, []).append(str(d.get("kind") or "decision"))
+    n_inter += len(dec)
+    one_pass = {}
+    for kind in ("first", "last", "video"):
+        rows = {o: sorted(v, key=lambda x: int(x.get("take") or 0)) for o, v in adopts.items() if o.startswith(kind + ":")}
+        ok = sum(1 for v in rows.values() if v and v[0].get("ok") is True)
+        one_pass[kind] = {"objects": len(rows), "one_pass": ok, "rate": ratio(ok, len(rows))}
+        if not rows:
+            nulls.add(f"headline.one_pass.{kind}", "producer 日志里本集没有这一类 adopt")
+    wall = secs(t_first, t_last)
+    gpu = {"gpu_s": round(gpu_s, 1), "wall_s": wall, "lanes": sorted(lanes),
+           "ratio": ratio(gpu_s, (wall or 0) * max(1, len(lanes))) if wall else None,
+           "basis": "producer 日志 rendered.gpu_s 合计 ÷（本集 dispatch→rendered 墙钟 × 用到的道数）"}
+    if gpu["ratio"] is None:
+        nulls.add("headline.gpu_util", "producer 日志里本集没有 dispatch→rendered 墙钟")
+    hw = [float(r["mean"]) for r in jlines(P.hollywood(ep)) if isinstance(r.get("scores"), dict) and r.get("mean") is not None]
+    iss = [d for d in jlines(P.issues) if d.get("event") == "open" and d.get("run") == run and d.get("episode") in (ep, str(ep))
+           and d.get("who") != "RETRO"]
+    closed = {d.get("id") for d in jlines(P.issues) if d.get("event") == "close"}
+    n_obj = len(objs)
+    out = {"automation_ratio": ratio(n_obj - len(manual), n_obj), "objects": n_obj, "manual_objects": len(manual),
+           "interventions": n_inter, "interventions_detail": {"owner_decisions": len(dec), "producer_manual_events": n_inter - len(dec)},
+           "gpu_util": gpu["ratio"], "gpu": gpu, "hollywood_median": _median(hw), "hollywood_n": len(hw),
+           "one_pass": one_pass, "one_pass_first": one_pass["first"]["rate"], "one_pass_last": one_pass["last"]["rate"],
+           "one_pass_video": one_pass["video"]["rate"],
+           "issues": len(iss), "issues_open": sum(1 for d in iss if d.get("id") not in closed), "issues_closed": sum(1 for d in iss if d.get("id") in closed),
+           "targets": {k: f"{op} {v}" for k, (op, v) in PLAN_TARGETS.items()}}
+    return out
+
+
+HEADLINE_ROWS = [   # (标签, headline 键, 方向)：RETRO“两集对比”逐项判 ≥（本集不能比上一集差）
+    ("自动化率", "automation_ratio", "higher"),
+    ("人工介入次数", "interventions", "lower"),
+    ("GPU 占用", "gpu_util", "higher"),
+    ("好莱坞分中位数", "hollywood_median", "higher"),
+    ("首帧一次过率", "one_pass_first", "higher"),
+    ("尾帧一次过率", "one_pass_last", "higher"),
+    ("视频一次过率", "one_pass_video", "higher"),
+    ("卡点数", "issues", "lower"),
+]
+
+
+def compare_headline(prev: dict | None, cur: dict) -> list[dict]:
+    """逐项：ok = 本集不比上一集差（持平算过）；任一边是 null = n/a（不算过也不算退步，RETRO 里列出来）"""
+    a, b = (prev or {}).get("headline") or {}, cur.get("headline") or {}
+    rows = []
+    for label, key, better in HEADLINE_ROWS:
+        va, vb = a.get(key), b.get(key)
+        if isinstance(va, (int, float)) and isinstance(vb, (int, float)):
+            ok = vb >= va if better == "higher" else vb <= va
+            verdict = "same" if vb == va else ("better" if ok else "worse")
+        else:
+            verdict = "n/a"
+        tgt = PLAN_TARGETS.get(key)
+        met = None
+        if tgt and isinstance(vb, (int, float)):
+            met = vb >= tgt[1] if tgt[0] == ">=" else vb <= tgt[1]
+        rows.append({"label": label, "key": key, "a": va, "b": vb, "verdict": verdict,
+                     "target": f"{tgt[0]} {tgt[1]}" if tgt else None, "target_met": met})
+    return rows
+
+
 # ---------- 汇总 ----------
 def collect(root: Path, run: str, ep: int) -> dict:
     P = Paths(root, run)
@@ -726,6 +866,7 @@ def collect(root: Path, run: str, ep: int) -> dict:
         "quality": quality,
         "automation": automation(af, jobs, inter),
         "gpu": gpu,
+        "headline": headline(root, run, ep, nulls),
         "nulls": nulls.items,
     }
     return summary
@@ -905,6 +1046,12 @@ def write_compare(root: Path, run: str, a: int, b: int) -> tuple[Path, list[dict
     return out, rows
 
 
+def _headline_line(h: dict) -> str:
+    return (f"§1.3 头条：自动化率 {h.get('automation_ratio')}（{h.get('manual_objects')}/{h.get('objects')} 个对象有人工）；人工介入 {h.get('interventions')}；"
+            f"GPU {h.get('gpu_util')}；好莱坞中位 {h.get('hollywood_median')}（n={h.get('hollywood_n')}）；一次过 首帧 {h.get('one_pass_first')} / "
+            f"尾帧 {h.get('one_pass_last')} / 视频 {h.get('one_pass_video')}；卡点 {h.get('issues')}（未关 {h.get('issues_open')}）")
+
+
 def brief(s: dict) -> str:
     mc, t, it, im = s["model_calls"], s["time"], s["interventions"], s["success"]["images"]["all"]
     return "\n".join([
@@ -914,6 +1061,7 @@ def brief(s: dict) -> str:
         f"时间：P1 {t['writing_p1']['h']}h，P2→导入 {t['writing_p2_to_import']['h']}h，阶段 A {t['stage_a_assets'].get('h')}h（{t['stage_a_assets'].get('status')}），阶段 B {t['stage_b_golden'].get('h')}h（{t['stage_b_golden'].get('status')}），项目方等待 {round(t['owner_wait_total_s'] / 60)}min",
         f"出图：{im['takes']} 张候选，通过 {im['passed']}（{im['pass_rate']}），每张通过图 {im['takes_per_pass']} 次；preflight 挡掉 {im['preflight_blocked_attempts']} 次",
         f"自动化 {s['automation']['ratio']}（{s['automation']['by_actor']}）；GPU 占用 {s['gpu']['overall']}；好莱坞分 {s['quality']['hollywood']['mean']}",
+        *([_headline_line(s["headline"])] if s.get("headline") else []),
         f"空缺 {len(s['nulls'])} 项（见 nulls[]）",
     ])
 

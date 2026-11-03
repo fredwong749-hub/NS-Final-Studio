@@ -1,0 +1,182 @@
+[
+ {
+  "name": "祁念",
+  "char_id": "lead_f",
+  "marker": "灰绿色眼睛与空气感碎刘海（雾蓝色及腰长直发）",
+  "looks": [
+   {
+    "id": "O1",
+    "use": "幻想的外壳也是现实的盔甲——第 2 集起才出现：跨年夜、公寓、后台、晚宴、T 台的外层；第 6 集脱下它是她主动的一夜，第 10 集把它留在晾衣架上走进弄堂：ep02、ep03、ep05、ep06、ep07、ep08、ep09",
+    "zh": "服装=黑色漆皮双排扣长风衣（系腰带）｜鞋=SH1 或 SH2｜饰品=无",
+    "en": "a black patent leather double-breasted trench coat belted at the waist"
+   },
+   {
+    "id": "O2",
+    "use": "幻想（被选中、被接住的夜晚）——只在亲密镜，在项目方自有机器生成：ep03",
+    "zh": "服装=黑色漆皮绑带内衣套装（项圈式挂脖、金属环扣）｜鞋=SH2｜饰品=只在亲密镜：J1",
+    "en": "a black patent leather strap lingerie set with a halter collar and metal ring hardware, black patent leather strappy open-toe heeled sandals"
+   },
+   {
+    "id": "O3",
+    "use": "幻想的反面（她主动选人、带刺的那一夜）——只在亲密镜，在项目方自有机器生成：ep06",
+    "zh": "服装=黑色漆皮铆钉绑带连体（含铆钉项圈、肩带）｜鞋=SH1｜饰品=只在亲密镜：J2",
+    "en": "a black patent leather studded strap bodysuit with a spiked collar and shoulder straps, clear pointed-toe stiletto heels"
+   },
+   {
+    "id": "O4",
+    "use": "现实的工作装（自带透明尖头细高跟，凡穿它鞋都是 SH1）——试镜、弄堂、后台、晚宴车后座、公寓摊牌、最后一集只穿它下楼；第 1 集邀请卡塞进鞋尖、第 10 集朝阳穿过鞋面是幻想本身：ep01、ep02、ep04、ep05、ep07、ep08、ep10",
+    "zh": "服装=日常全身装：黑色漆皮抹胸紧身短裙 + 黑色薄透丝袜 + 透明尖头细高跟（全身参考照）｜鞋=SH1 或 SH2｜饰品=无",
+    "en": "a black patent leather strapless bodycon mini dress with sheer black tights and clear pointed-toe stiletto heels"
+   }
+  ],
+  "schedule": [
+   {
+    "episode": 1,
+    "outfit": "O4",
+    "shoes": "SH1"
+   },
+   {
+    "episode": 2,
+    "outfit": "O1+O4",
+    "shoes": "SH1"
+   },
+   {
+    "episode": 3,
+    "outfit": "O1",
+    "shoes": "SH2",
+    "intimate_outfit": "O2"
+   },
+   {
+    "episode": 4,
+    "outfit": "O4",
+    "shoes": "SH1"
+   },
+   {
+    "episode": 5,
+    "outfit": "O1+O4",
+    "shoes": "SH1"
+   },
+   {
+    "episode": 6,
+    "outfit": "O1",
+    "shoes": "SH1",
+    "intimate_outfit": "O3"
+   },
+   {
+    "episode": 7,
+    "outfit": "O1+O4",
+    "shoes": "SH1"
+   },
+   {
+    "episode": 8,
+    "outfit": "O1+O4",
+    "shoes": "SH1"
+   },
+   {
+    "episode": 9,
+    "outfit": "O1",
+    "shoes": "SH1"
+   },
+   {
+    "episode": 10,
+    "outfit": "O4",
+    "shoes": "SH1"
+   }
+  ]
+ },
+ {
+  "name": "黎岸",
+  "char_id": "ch_li_an",
+  "marker": "左手无名指一圈浅浅的戒痕",
+  "looks": [
+   {
+    "id": "A",
+    "use": "跨年酒吧、清晨影棚、网约车后座、公寓摊牌、发布会前排（外场）：ep02、ep06、ep07、ep08、ep09",
+    "zh": "服装=黑色羊绒大衣、深灰三件套西装、白衬衫｜鞋=黑色牛津皮鞋｜饰品=银灰色钢带腕表",
+    "en": "a black cashmere overcoat over a charcoal three-piece suit and white shirt, black oxford shoes, a steel-band wristwatch"
+   },
+   {
+    "id": "B",
+    "use": "公寓深夜（私下）：ep03",
+    "zh": "服装=酒红色丝质睡袍、黑色睡裤｜鞋=黑色皮质室内拖鞋｜饰品=银灰色钢带腕表",
+    "en": "a wine-red silk robe over black pajama trousers, black leather house slippers, a steel-band wristwatch"
+   }
+  ]
+ },
+ {
+  "name": "江予白",
+  "char_id": "ch_jiang_yubai",
+  "marker": "右手腕缠两圈的黑色相机皮带",
+  "looks": [
+   {
+    "id": "A",
+    "use": "影棚（试镜拍摄、深夜、白天交易）：ep01、ep06、ep07",
+    "zh": "服装=驼色皮夹克、黑色圆领T恤、黑色工装裤｜鞋=黑色短靴｜饰品=右手腕缠两圈的黑色相机皮带",
+    "en": "a camel leather jacket over a black crew-neck t-shirt with black cargo trousers, black ankle boots, a black camera strap wound twice around the right wrist"
+   },
+   {
+    "id": "B",
+    "use": "发布会后台（彩排与正式）：ep05、ep09",
+    "zh": "服装=白色敞领衬衫、黑色西裤｜鞋=黑色德比皮鞋｜饰品=右手腕缠两圈的黑色相机皮带",
+    "en": "a white open-collar shirt with black tailored trousers, black derby shoes, a black camera strap wound twice around the right wrist"
+   }
+  ]
+ },
+ {
+  "name": "周序",
+  "char_id": "ch_zhou_xu",
+  "marker": "左颈侧一颗痣",
+  "looks": [
+   {
+    "id": "A",
+    "use": "开夜车（跨年夜楼下、网约车内）：ep02、ep07",
+    "zh": "服装=藏青色冲锋衣、灰色连帽卫衣、深色牛仔裤｜鞋=黑色跑鞋｜饰品=无",
+    "en": "a navy shell jacket over a grey hoodie with dark jeans, black running shoes"
+   },
+   {
+    "id": "B",
+    "use": "弄堂阁楼（在家与清晨带行李离开，故事线写黑色棉服）：ep04、ep10",
+    "zh": "服装=黑色棉服、灰色长袖T恤、黑色休闲裤｜鞋=灰色棉拖鞋｜饰品=无",
+    "en": "a black padded jacket over a grey long-sleeve t-shirt with black casual trousers, grey cotton slippers"
+   }
+  ]
+ },
+ {
+  "name": "卓琳",
+  "char_id": "ch_zhuo_lin",
+  "marker": "鲜红色长指甲",
+  "looks": [
+   {
+    "id": "A",
+    "use": "试镜、发布会彩排、影棚白天交易、公寓门口递刀（工作）：ep01、ep05、ep07、ep08",
+    "zh": "服装=酒红色西装套装、黑色丝质吊带衫｜鞋=黑色丝绒细高跟｜饰品=金色细链手包、鲜红色长指甲",
+    "en": "a wine-red tailored suit over a black silk camisole, black velvet stiletto pumps, a small gold-chain clutch, long bright red nails"
+   },
+   {
+    "id": "B",
+    "use": "发布会当晚（后台）：ep09",
+    "zh": "服装=黑色长款羽绒大衣（敞开）、黑色高领针织连衣裙｜鞋=黑色漆皮粗跟短靴｜饰品=金色细链手包、鲜红色长指甲",
+    "en": "a long black puffer coat worn open over a black high-neck knit dress, black patent block-heel ankle boots, a small gold-chain clutch, long bright red nails"
+   }
+  ]
+ },
+ {
+  "name": "唐瑶",
+  "char_id": "ch_tang_yao",
+  "marker": "右锁骨下一颗痣",
+  "looks": [
+   {
+    "id": "A",
+    "use": "试镜（影棚白幕，并排量尺）：ep01",
+    "zh": "服装=白色棉质吊带背心、银灰色缎面高腰短裤｜鞋=银色细带高跟凉鞋｜饰品=银色细手链",
+    "en": "a white cotton camisole with silver-grey satin high-waisted shorts, silver thin-strap heeled sandals, a thin silver chain bracelet"
+   },
+   {
+    "id": "B",
+    "use": "发布会后台（替补号衣袋、候场，鞋由卓琳统一配，对应 ep9 换鞋戏）：ep05、ep09",
+    "zh": "服装=白色缎面吊带长裙、印着替补号码的黑色衣袋挂在肩上｜鞋=黑色漆皮细带露趾高跟凉鞋（卓琳统一配）｜饰品=银色细手链",
+    "en": "a white satin slip gown with a black numbered garment bag over one shoulder, black patent leather strappy open-toe heeled sandals, a thin silver chain bracelet"
+   }
+  ]
+ }
+]

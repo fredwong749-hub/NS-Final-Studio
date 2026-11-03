@@ -216,6 +216,53 @@ def run_retry(host: str, cmd: str, input: bytes | str | None = None, timeout: fl
     return res
 
 
+GIT_BIN = "C:/Program Files/Git/usr/bin"
+
+
+def bulk_put(host: str, files: list, remote_dir: str, timeout: float = 600) -> subprocess.CompletedProcess | None:
+    """W21 NETFIX-BULK（运维 FONG-QUICK：大文件不要走 -t，用 gpu36-hk / gpu33-hk 单独传）：
+    Git sftp 经 <host>-hk 单独一条连接（hkjump → 194relay → 服务器），不占命令主连接 / 底座 base-a。
+    files = [(本机路径, 远端文件名)] → 全部 put 进 remote_dir（不存在就建）。
+    只在笔记本（Windows、非 OFFLINE_SELF）且 NS_BULK_UPLOAD != off 时做；否则返回 None（调用方退回原路径）。
+    连接 / 传输失败 → rc != 0（调用方退回原路径，不当成功）。"""
+    if os.name != "nt" or os.environ.get("OFFLINE_SELF") or os.environ.get("NS_BULK_UPLOAD", "").lower() in ("off", "0", "no"):
+        return None
+    h = host.split("@", 1)[-1]
+    if h not in SOCK:
+        return None
+    sftp, ssh = f"{GIT_BIN}/sftp.exe", f"{GIT_BIN}/ssh.exe"
+    if not Path(sftp).exists():
+        return None
+    q = lambda x: '"' + str(x).replace("\\", "/").replace('"', '') + '"'
+    parent = remote_dir.rstrip("/").rsplit("/", 1)[0]
+    lines = [f"-mkdir {q(parent)}", f"-mkdir {q(remote_dir)}"] + [f"put {q(Path(lp).resolve())} {q(remote_dir.rstrip('/') + '/' + rn)}" for lp, rn in files]
+    t0 = time.time()
+    try:
+        res = subprocess.run([sftp, "-F", "config/netfix/ssh_config", "-S", ssh, "-o", "BatchMode=yes", "-b", "-", f"{h}-hk"],
+                             input=("\n".join(lines) + "\n").encode("utf-8"), capture_output=True, timeout=timeout, cwd=str(ROOT),
+                             creationflags=NOWIN)
+    except subprocess.TimeoutExpired:
+        _bulk_note(h, 124, time.time() - t0, len(files))
+        return subprocess.CompletedProcess(["sftp", h], 124, b"", f"bulk_put 超时 {timeout}s".encode("utf-8"))
+    except OSError as e:
+        return subprocess.CompletedProcess(["sftp", h], 255, b"", repr(e).encode("utf-8"))
+    _bulk_note(h, res.returncode, time.time() - t0, len(files))
+    return res
+
+
+BULK_CALLS = ROOT / "data/netfix/bulk_calls.jsonl"
+
+
+def _bulk_note(host: str, rc: int, dur: float, n: int) -> None:
+    """独立传输一次一行（不混进 rssh_calls.jsonl：那里统计的是命令主连接成功率）"""
+    try:
+        with open(BULK_CALLS, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"t": round(time.time(), 1), "host": host, "rc": rc, "ok": rc == 0, "dur": round(dur, 2), "files": n,
+                                "via": f"{host}-hk"}) + "\n")
+    except OSError:   # arch-ok: 指标落盘失败不影响传输本身
+        pass
+
+
 def status() -> dict:
     try:
         d = json.loads(STATUS.read_text(encoding="utf-8"))

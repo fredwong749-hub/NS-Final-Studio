@@ -8,6 +8,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1438,3 +1439,147 @@ def test_child_cannot_overwrite_settled_state(root, monkeypatch):
     assert any("不投待办" in x for x in s["log"]) and out["state"] == "failed"
     reqs = _j(root / "data/owner_queue/requests.json") if (root / "data/owner_queue/requests.json").exists() else []
     assert not any(x.get("id") == j["pick_id"] for x in reqs)
+
+
+def test_requeued_suspect_job_not_restarted_while_child_alive(root, monkeypatch):
+    """W6c：身份核不上定案后被人工 requeue 成 pending，可疑子进程还活着 → 不起新子进程、不 salvage；确认退出后才放道、正常接手"""
+    _delegate(root, False)
+    alive = {"v": True}
+    j, killed = _unverified_job(root, monkeypatch, alive)
+    ln = FakeLanes()
+    started = []
+    tk = lambda: AW.tick(root, cfg={**AW.config(root), "render": True}, runs={RUN: 1}, spawn=lambda *a: started.append(a),
+                         lanes=lambda c, u: ["gpu36:0"], check=lambda run, ep: {"ready": False, "gaps": []}, ln=ln)
+    tk()
+    AJ.requeue(root, RUN, j["id"], "测试：人工重排")
+    (AJ.jobs_dir(root, RUN) / "_recheck").unlink(missing_ok=True)   # 本用例 check 不报缺口：别让重生成把作业当“缺口已不在”收掉
+    s = AJ.load_job(AJ.job_path(root, RUN, j["id"]))
+    assert s["state"] == "pending" and s["lane_suspect"] == "gpu33:0"
+    r = tk()
+    s = AJ.load_job(AJ.job_path(root, RUN, j["id"]))
+    assert started == [] and not r.get("salvaged") and j["id"] in r.get("suspect_waiting", [])
+    assert s["state"] == "pending" and s["lane_suspect"] == "gpu33:0" and not ln.released and killed == []
+    alive["v"] = False
+    r = tk()
+    s = AJ.load_job(AJ.job_path(root, RUN, j["id"]))
+    assert ("gpu33:0", AW.BY, "hold") in ln.released and "lane_suspect" not in s
+    assert r["salvaged"][0]["id"] == j["id"] and s["state"] == "awaiting_pick" and started == []
+
+
+# ------------------------------------------------------------------ W6c 追加（总调度 11-03）：count=untested = 没测出，不能判不过
+def _untested_render(root, count="untested", vlm_error=None, extra=None):
+    """出图替身：候选落盘，但人数检查（anomaly）没跑成 → count=untested（隧道断 / 服务不在）"""
+    def render(job, lane, seed, _r):
+        rd = AW.review_dir(root, job)
+        rd.mkdir(parents=True, exist_ok=True)
+        f = rd / f"{job['id']}_s{seed}.png"
+        f.write_bytes(f"png-{job['id']}-{seed}".encode())
+        rel = str(f.relative_to(root)).replace("\\", "/")
+        lab = {"identity": "na", "count": count, "q9": "pass", "prompt_vlm": "pass", "ocr": "pass", "age": "pass", **(extra or {})}
+        return {"seed": seed, "passed": False, "label": lab, "file": rel, "anomaly": {"status": "error", "note": "连不上 gpu36"},
+                "vlm": {"error": vlm_error, "items": []}, "postflight": {"items": []}}
+    return render
+
+
+def test_unmeasured_keys_only_for_infra_gaps():
+    assert AC.unmeasured_keys({"count": "untested", "q9": "pass", "age": "pass"}) == ["count"]
+    assert AC.unmeasured_keys({"count": "untested", "age": "fail"}) == []                       # 有一项明确 fail = 真不过
+    assert AC.unmeasured_keys({"count": "pass", "prompt_vlm": "untested"}) == []                 # 看图答漏项但服务没报错：不算没测出
+    assert AC.unmeasured_keys({"count": "pass", "prompt_vlm": "untested", "age": "untested"}, {"error": "timeout"}) == ["prompt_vlm", "age"]
+    assert AC.unmeasured_keys({"count": "pass", "age": "pass"}) == []
+
+
+def test_count_untested_does_not_fail_job_and_backs_off(root):
+    """15:14–15:24 face-ch_li_an 复现：每张 count=untested → 作业不 failed、不计 attempts、退避 5 分钟、候选标 unmeasured"""
+    AJ.generate(RUN, 1, root, check=fake_check(root))
+    jp = AJ.job_path(root, RUN, "face-ch_zhuo_lin")
+    j0 = AJ.load_job(jp)
+    j0.update(state="running", attempts=1)
+    AJ.save_job(root, j0)
+    cfg = {**AW.config(root), "candidates": {"face": 2}}
+    j = AW.run_job(jp, "gpu36:0", root, renderer=_untested_render(root), cfg=cfg)
+    assert j["state"] == "pending" and j["attempts"] == 0 and not j.get("final")
+    assert "看图服务不可用，等待重试" in j["error"] and "不过" not in j["error"]
+    assert AW._backing_off(j) and not AW._backing_off(j, now=time.time() + 301)
+    assert len(j["candidates"]) == 2 and all(c["unmeasured"] == ["count"] and not c["passed"] for c in j["candidates"])   # 连续 2 张没测出就停，不烧 4 粒种子
+    assert not (root / "data/pipeline/issues.jsonl").exists() or "连续失败" not in (root / "data/pipeline/issues.jsonl").read_text(encoding="utf-8")
+    # 混合：1 张真不过 + 没测出 → 仍退避重试，不 failed
+    j1 = AJ.load_job(jp)
+    j1.update(state="running", attempts=1, candidates=[])
+    AJ.save_job(root, j1)
+    seq = iter([_untested_render(root, count="fail"), _untested_render(root), _untested_render(root), _untested_render(root)])
+    j1 = AW.run_job(jp, "gpu36:0", root, renderer=lambda *a: next(seq)(*a), cfg=cfg)
+    assert j1["state"] == "pending" and j1["attempts"] == 0 and "1 张不过" in j1["error"] and "没测出" in j1["error"]
+    # 全部真不过（count=fail）照旧 failed
+    j2 = AJ.load_job(jp)
+    j2.update(state="running", attempts=1, candidates=[])
+    AJ.save_job(root, j2)
+    j2 = AW.run_job(jp, "gpu36:0", root, renderer=_untested_render(root, count="fail"), cfg=cfg)
+    assert j2["state"] == "failed" and "人数 不过" in j2["error"]
+
+
+def test_unmeasured_job_waits_backoff_then_retries_in_tick(root):
+    """tick：没测出的作业退避期内不起子进程（不占道）；退避过了再起，服务恢复后正常过检投待办，attempts 不被没测出那轮吃掉"""
+    cfg = AW.config(root)
+    check = fake_check(root)
+    ln = FakeLanes()
+    state = {"down": True}
+
+    def spawn(job, jp, lane):
+        if job["kind"] == "voice":
+            return SimpleNamespace(pid=0, poll=lambda: 0)
+        AW.run_job(jp, lane, root, renderer=_untested_render(root) if state["down"] else fake_renderer(root), cfg=cfg)
+        return SimpleNamespace(pid=0, poll=lambda: 0)
+    lanes = lambda c, in_use: ["gpu36:0", "gpu36:1"]   # noqa: E731
+    for _ in range(4):                                                                 # 头一拍只生成作业；道按顺序派
+        AW.tick(root, cfg=cfg, spawn=spawn, lanes=lanes, check=check, ln=ln)
+        j = AJ.load_job(AJ.job_path(root, RUN, "face-ch_zhuo_lin"))
+        if j.get("retry_after"):
+            break
+    assert j["state"] == "pending" and j["attempts"] == 0 and j.get("retry_after"), j["log"]
+    starts = sum(1 for l in j["log"] if "起子进程" in l)
+    rec = AW.tick(root, cfg=cfg, spawn=spawn, lanes=lanes, check=check, ln=ln)      # 退避期内：不起
+    j = AJ.load_job(AJ.job_path(root, RUN, "face-ch_zhuo_lin"))
+    assert sum(1 for l in j["log"] if "起子进程" in l) == starts and j["state"] == "pending"
+    assert any(x["id"] == "face-ch_zhuo_lin" for x in rec.get("unmeasured_backoff") or [])
+    for jj in AJ.list_jobs(root, RUN):                                                 # 退避到期 + 服务恢复
+        if jj.get("retry_after"):
+            jj["retry_after"] = "2000-01-01T00:00:00"
+            AJ.save_job(root, jj)
+    state["down"] = False
+    for _ in range(4):
+        AW.tick(root, cfg=cfg, spawn=spawn, lanes=lanes, check=check, ln=ln)
+        j = AJ.load_job(AJ.job_path(root, RUN, "face-ch_zhuo_lin"))
+        if j["state"] != "pending":
+            break
+    assert j["state"] == "awaiting_pick" and j["attempts"] == 1 and not j.get("retry_after")
+
+
+def test_comfy_unavailable_backs_off_not_failed_scene_w31(root):
+    """ISS-1103-155905-9a0f 复现：出图机连不上（ComfyUnavailable）+ 看图排队超时 → 退避重排、不计 attempts、不 failed、不登记卡点；
+    真不过（内容）才 failed，并且卡点写“要项目方挑场景底图”"""
+    class ComfyUnavailable(RuntimeError):
+        pass
+    AJ.generate(RUN, 1, root, check=fake_check(root))
+    sc = next(j for j in AJ.list_jobs(root, RUN) if j["kind"] == "scene")
+    jp = AJ.job_path(root, RUN, sc["id"])
+    j0 = AJ.load_job(jp)
+    j0.update(state="running", attempts=2)
+    AJ.save_job(root, j0)
+    cfg = {**AW.config(root), "candidates": {"scene": 2}}
+    seq = iter([AW.Q9Timeout("排队超时"), ComfyUnavailable("/prompt: [WinError 10061] refused"), ComfyUnavailable("x"), ComfyUnavailable("y")])
+
+    def boom(*a):
+        raise next(seq)
+    j = AW.run_job(jp, "gpu33:0", root, renderer=boom, cfg=cfg)
+    assert j["state"] == "pending" and j["attempts"] == 1 and AW._backing_off(j) and not j.get("final"), j["log"]
+    issues = root / "data/pipeline/issues.jsonl"
+    assert not issues.exists() or "连续失败" not in issues.read_text(encoding="utf-8")
+    # 真不过 → failed；_fail 终局的卡点 hint 指向项目方挑场景底图
+    j1 = AJ.load_job(jp)
+    j1.update(state="running", attempts=2, candidates=[], retry_after=None)
+    AJ.save_job(root, j1)
+    j1 = AW.run_job(jp, "gpu33:0", root, renderer=_untested_render(root, count="fail"), cfg=cfg)
+    assert j1["state"] == "failed"
+    AW._fail(root, j1, cfg, j1["error"], {"failed": []}, final=True)
+    assert "项目方挑场景底图" in issues.read_text(encoding="utf-8")

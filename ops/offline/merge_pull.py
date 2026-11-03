@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import time
 import sys
@@ -304,6 +305,113 @@ def _quarantine_current(dst: Path, cleared: list) -> list:
     return moved
 
 
+# ---- W36：并回按剧过滤（C-14 / L-126；规则与 producer.foreign_reasons 同口径，失败关闭）----
+def _jl(p: Path, d):
+    try:
+        return json.loads(Path(p).read_text(encoding="utf-8"))
+    except (OSError, ValueError):   # arch-ok: 读不到 = 缺省（角色表空 → role 规则不否决，但无正向证据照样拒）
+        return d
+
+
+def target_run(run: str | None) -> str | None:
+    """本次并回写进哪一剧：路径带剧名 → 它；不带（服务器旧代码写的 renders/epNN/…）→ runs.json primary；primary 是 legacy（V1）→ None（不过滤，旧行为）"""
+    cfg = _jl(ROOT / "config/pipeline/runs.json", {}) or {}
+    if run:
+        return None if run == cfg.get("legacy_unprefixed_run") else run
+    prim = cfg.get("primary")
+    return None if (not prim or prim == cfg.get("legacy_unprefixed_run")) else prim
+
+
+def run_roles(run: str, root: Path | None = None) -> set:
+    """本剧角色表：P1_looks.json[].char_id ∪ P1_storyline.json characters[].char_id ∪ runs.json assets_manifest.characters"""
+    root = root or ROOT
+    rd = root / "data/pipeline/runs" / run
+    ids: set = set()
+    for c in _jl(rd / "P1_looks.json", []) or []:
+        if isinstance(c, dict) and c.get("char_id"):
+            ids.add(c["char_id"])
+    for c in (_jl(rd / "P1_storyline.json", {}) or {}).get("characters") or []:
+        if isinstance(c, dict) and c.get("char_id"):
+            ids.add(c["char_id"])
+    man = ((((_jl(root / "config/pipeline/runs.json", {}) or {}).get("runs") or {}).get(run)) or {}).get("assets_manifest")
+    if man:
+        ids |= set((_jl(root / man, {}) or {}).get("characters") or {})
+    return ids
+
+
+def _identity_ids(t: dict) -> set:
+    out: set = set()
+    for pf in (t.get("postflight"), (t.get("params") or {}).get("postflight")):
+        if not isinstance(pf, dict):
+            continue
+        for it in pf.get("items") or []:
+            if isinstance(it, dict) and it.get("id") == "Q1":
+                ev = it.get("evidence") or {}
+                out |= {k for k in (ev.get("sims") or {}) if isinstance(k, str)}
+                ref = ev.get("ref") or {}
+                if isinstance(ref, dict):
+                    out |= {x for x in list(ref) + list(ref.values()) if isinstance(x, str)}
+    return out
+
+
+def foreign_why(t: dict, run: str, roles: set) -> str | None:
+    """拒绝规则（失败关闭）：一条 take 只有同时满足 ①无否决 ②有本剧的正向证据 才并入。
+    否决：role = 身份项角色不在本剧角色表；origin = params.origin.run==assetmaster/frames_v2 且 src_run != 本剧；
+          path = file 在 renders/<别的剧>/ 下。
+    正向证据（任一）：file 在 renders/<本剧>/ 下 | params.origin.run / src_run == 本剧 | producer.run（或 producer.tag.run）== 本剧 |
+          file 是旧口径 renders/epNN/…（服务器 cut C 部署前）且 postflight 身份项非空、全在本剧角色表。
+    返回 None = 接受；否则返回拒绝原因"""
+    f = str(t.get("file") or "").replace("\\", "/").lstrip("./")
+    f = f[5:] if f.startswith("data/") else f
+    o = (t.get("params") or {}).get("origin") or {}
+    pr = t.get("producer") or {}
+    bad = sorted(_identity_ids(t) - roles) if roles else []
+    if bad:
+        return f"role：身份项角色 {','.join(bad)} 不在本剧角色表"
+    if o.get("run") == "assetmaster/frames_v2" and o.get("src_run") != run:
+        return "origin：从全局 frames_v2 认领，不带本剧剧名"
+    if f.startswith("renders/") and not f.startswith(f"renders/{run}/") and not re.match(r"renders/(ep\d+|_h3_keyframes)/", f):
+        return f"path：文件在别的剧目录下（{t.get('file')}）"
+    if f.startswith(f"renders/{run}/"):
+        return None
+    if run in (o.get("run"), o.get("src_run"), pr.get("run"), (pr.get("tag") or {}).get("run")):
+        return None
+    ids = _identity_ids(t)
+    if re.match(r"renders/(ep\d+|_h3_keyframes)/", f) and ids and ids <= roles:
+        return None
+    return f"无法判定为本剧（file={t.get('file')}，无 origin/producer 剧名，身份项={sorted(ids) or '无'}）→ 失败关闭"
+
+
+def filter_remote(r: dict, run: str | None, roles: set | None = None) -> tuple[dict, list]:
+    """服务器 takes.json 并回前过滤 → (只含本剧 take 的 r, 被拒清单)。active / locked 只保留指向被接受版本的键；
+    被拒的 take 绝不改写本地 active / locked（指针直接丢弃，不进合并）。run=None（legacy）不过滤"""
+    if not run:
+        return r, []
+    roles = run_roles(run) if roles is None else roles
+    keep, rej = [], []
+    for t in r.get("takes") or []:
+        why = foreign_why(t, run, roles)
+        (rej if why else keep).append({"stage": t.get("stage"), "n": t.get("n"), "file": t.get("file"), "why": why} if why else t)
+    ok = {(t.get("stage"), t.get("n")) for t in keep}
+    out = {**r, "takes": keep}
+    for key in ("active", "locked"):
+        if isinstance(r.get(key), dict):
+            out[key] = {st: n for st, n in r[key].items() if isinstance(n, dict) or (st, n) in ok}
+    return out, rej
+
+
+def log_rejects(run: str, shot: str, host: str | None, rej: list) -> None:
+    """被拒的 take 只记不删：data/quarantine/<run>/merge_rejects_<ts>.jsonl"""
+    if not rej:
+        return
+    d = ROOT / "data/quarantine" / run
+    d.mkdir(parents=True, exist_ok=True)
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    with open(d / f"merge_rejects_{ts}.jsonl", "a", encoding="utf-8") as fh:
+        for x in rej:
+            fh.write(json.dumps({"at": ts, "host": host, "shot": shot, **x}, ensure_ascii=False) + "\n")
+
+
 def merge_takes(src: Path, dst: Path, dry: bool = False, host: str | None = None, ep: int | None = None) -> str:
     """data/renders/**/takes.json 按版本（stage, n）逐条合并（UIRSI r42，总调度 01:3x）：
       · 服务器有、本地没有的版本 → 收；本地有、服务器没有的 → 留；
@@ -311,11 +419,18 @@ def merge_takes(src: Path, dst: Path, dry: bool = False, host: str | None = None
       · 顶层（active / locked / master_gate …）同理按键合并；但服务器的 active / locked 若指向本地已隔离的版本，保留本地的值；
       · restore_log 等本地独有的顶层键保留"""
     r = json.loads(src.read_text(encoding="utf-8"))
+    sid_run = _sid_run_of(dst)
+    trun = target_run(sid_run[1]) if sid_run else None        # W36：仓库内 takes.json 才按剧过滤（测试临时目录不动）
+    if trun:
+        r, rej = filter_remote(r, trun)
+        log_rejects(trun, sid_run[0], host, rej) if not dry else None
+        merge_takes.last_rejects = rej
+    else:
+        merge_takes.last_rejects = []
     stages = own_stages(host, ep) if host and ep else None
     base_p = (PULL / "_base" / host / dst.relative_to(ROOT)
               if host and dst.is_relative_to(ROOT) and not os.environ.get("PYTEST_CURRENT_TEST") else None)   # 测试不读写真机祖先
     base = json.loads(base_p.read_text(encoding="utf-8")) if base_p and base_p.exists() else None
-    sid_run = _sid_run_of(dst)
     if sid_run and not dry:                  # K-OPS-W29：仓库内的 takes.json 只经 mutate_takes 写（锁里现读本地再并，不会盖掉并发写入）
         sys.path.insert(0, str(ROOT / "services/render_router"))
         from ns_render import pipeline as P
@@ -325,10 +440,10 @@ def merge_takes(src: Path, dst: Path, dry: bool = False, host: str | None = None
             o, a, u, _rm = merge_takes_docs(r, local if local.get("takes") is not None else {"takes": []}, stages, base)
             cnt.update(a=a, u=u, cleared=o.pop("_cleared", []))
             return o
-        P.mutate_takes(sid_run[0], _fn, op="merge_pull.merge_takes", by="ops/offline/merge_pull.py", run=sid_run[1])
+        P.mutate_takes(sid_run[0], _fn, op="merge_pull.merge_takes", by="ops/offline/merge_pull.py", run=trun or sid_run[1])
         _save_base(base_p, r)
         moved = _quarantine_current(dst, cnt.get("cleared") or [])
-        return f"takes+{cnt.get('a', 0)}~{cnt.get('u', 0)}" + (f" cleared={cnt['cleared']} moved={moved}" if cnt.get("cleared") else "")
+        return f"takes+{cnt.get('a', 0)}~{cnt.get('u', 0)}" + (f" rejected={len(merge_takes.last_rejects)}" if merge_takes.last_rejects else "") + (f" cleared={cnt['cleared']} moved={moved}" if cnt.get("cleared") else "")
     l = json.loads(dst.read_text(encoding="utf-8")) if dst.exists() else {"takes": []}
     out, added, updated, _remap = merge_takes_docs(r, l, stages, base)
     cleared = out.pop("_cleared", [])
@@ -343,7 +458,7 @@ def merge_takes(src: Path, dst: Path, dry: bool = False, host: str | None = None
         moved = _quarantine_current(dst, cleared)
         if cleared:
             return f"takes+{added}~{updated} cleared={cleared} moved={moved}"
-    return f"takes+{added}~{updated}"
+    return f"takes+{added}~{updated}" + (f" rejected={len(merge_takes.last_rejects)}" if merge_takes.last_rejects else "")
 
 
 OWNER_KEYS = ("locked", "locked_src", "locked_history", "master_gate")   # 项目方决定：笔记本为准（A-12）

@@ -1,0 +1,7 @@
+{
+ "_doc": "W26b SMOKE R2：smoke_v2 的本集造型排期（合并进 data/looks/hub_episode_looks.json 的 smoke_v2 键，只动这一键）；格式与造型 id 照 series10_v2 ep01（lead_f 1=O4、ch_tang_yao 1=A；P1_looks 祁念 schedule ep1 outfit=O4）",
+ "smoke_v2": {
+  "lead_f": {"1": "O4", "_by": "smoke_harness"},
+  "ch_tang_yao": {"1": "A", "_by": "smoke_harness"}
+ }
+}
