@@ -21,6 +21,9 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+import runs as RUNS  # noqa: E402
+_LEGACY = RUNS.legacy_run(ROOT)   # I-16：第一季专用历史工具（入口 gate_legacy_tool 要求显式 --run）
 for _p in (ROOT / "tools" / "pipeline", ROOT / "packages" / "schema", ROOT / "services" / "agent", ROOT / "services" / "api",
            ROOT / "services" / "recipes"):
     if str(_p) not in sys.path:
@@ -58,7 +61,7 @@ def episode_eval(pre: str, chunk: str, ep: int, wd: Path, compiled: bool, si=Non
         si = si or IJ.load_import()
         pe = next((e for e in si.episodes if e.number == ep), None)
         if pe is not None and [s.index for s in pe.shots] == [s.index for s in shots]:
-            imgs = [IJ.frame_prompt(pe, s, si.globals, [], "series10_v1")[0] for s in sorted(pe.shots, key=lambda s: s.index)]
+            imgs = [IJ.frame_prompt(pe, s, si.globals, [], _LEGACY)[0] for s in sorted(pe.shots, key=lambda s: s.index)]
     cc = RC6.code_checks(chunk, shots, blocks, RL.block_text(chunk, "head"), codes, imgs=imgs)
     if RC6.uses_v2(blocks):        # 第二季起的镜头块 v2 + 【灯光】（K-WRT-805 / 806）
         cc["v2"] = RC6.v2_checks(shots, blocks, pre + RL.block_text(chunk, "head"))
@@ -166,6 +169,7 @@ def gate(path: Path, eps: list[int] | None = None) -> dict:
 
 
 def main(argv=None) -> int:
+    argv = RUNS.gate_legacy_tool(argv, __file__)
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:  # noqa: BLE001

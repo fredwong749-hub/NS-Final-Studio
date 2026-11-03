@@ -53,8 +53,32 @@ class Voice:
         return f"{self.engine}:{self.name or self.sid}"
 
 
-def load_voice_config(path: Path = VOICES_JSON) -> dict:
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+class VoiceRunRequired(TtsError):
+    """当前剧是资产包模式（V2），调用方没传 run 就要读音色表——失败关闭，不退回 V1 的 config/voices.json（L-126，和 run_style 同口径）"""
+
+
+def _current_run() -> str | None:
+    import sys as _sys
+    _sys.path.insert(0, str(ROOT / "services" / "agent"))
+    from ns_agent import run_paths as RP
+    return RP.current_run(ROOT)
+
+
+def load_voice_config(path: Path | None = None, *, run: str | None = None) -> dict:
+    """按剧取音色表（OVERSIGHT-F P1-13a / 第 14 轮）：
+    - run 给了：资产包模式的剧（V2）只用 config/voices_v2.json 启用的音色（sha 校验，没登记报错），legacy 剧 = config/voices.json；
+    - run 没给、读的是本仓库 config/voices.json：当前剧是资产包模式 → VoiceRunRequired（失败关闭）；legacy → 照旧；
+    - path 指向别的文件（测试 / 沙箱）：照旧读那个文件。"""
+    if run is not None:
+        from .run_media import voice_config
+        return voice_config(run)
+    p = Path(path) if path is not None else VOICES_JSON
+    if p.resolve() == VOICES_JSON.resolve():
+        from .run_media import is_asset_pack_run
+        cur = _current_run()
+        if is_asset_pack_run(cur, ROOT):
+            raise VoiceRunRequired(f"当前剧 {cur} 是资产包模式：音色必须按剧取（load_voice_config(run=...)），不读 V1 的 config/voices.json")
+    return json.loads(p.read_text(encoding="utf-8"))
 
 
 def voice_for(cfg: dict, speaker: str, *, voiceover: bool = False, speed_factor: float = 1.0) -> list[Voice]:
@@ -66,6 +90,9 @@ def voice_for(cfg: dict, speaker: str, *, voiceover: bool = False, speed_factor:
         return [v for m in members for v in voice_for(cfg, m, speed_factor=speed_factor)]
     c = chars.get(speaker)
     if c is None:
+        un = (cfg.get("unvoiced") or {}).get(speaker)
+        if un:   # V2 人物表里有、但项目方还没选音色的人：报错，不拿女主或别人顶替（总调度 22:4x）
+            raise TtsError(un)
         raise TtsError(f"no voice for speaker {speaker!r}: add it to config/voices.json")
     speed = float(c.get("vo_speed", c.get("speed", 1.0)) if voiceover else c.get("speed", 1.0))
     engine = c.get("engine") or "kokoro"
@@ -79,15 +106,21 @@ def voice_for(cfg: dict, speaker: str, *, voiceover: bool = False, speed_factor:
     return [Voice(speaker, int(c["sid"]), c.get("voice", ""), round(speed * speed_factor, 3), model)]
 
 
-def default_voiceover_speaker(cfg: dict | None = None) -> str:
-    """独白 / 旁白默认说话人（config/voices.json voiceover_speaker；没写或不在 characters 里时退回 lin_wan）"""
+def default_voiceover_speaker(cfg: dict | None = None, *, run: str | None = None) -> str:
+    """独白 / 旁白默认说话人（音色表的 voiceover_speaker）。只有 V1 音色表（含 lin_wan）没写时才退回 lin_wan；
+    V2（按剧取的音色表里没有 lin_wan）没写或写错 → TtsError，不许退回 V1 的人（OVERSIGHT-F 第 14 轮）"""
     if cfg is None:
         try:
-            cfg = load_voice_config()
+            cfg = load_voice_config(run=run) if run is not None else load_voice_config()
         except (OSError, ValueError):
             cfg = {}
+    chars = (cfg or {}).get("characters") or {}
     sp = (cfg or {}).get("voiceover_speaker")
-    return sp if sp and sp in ((cfg or {}).get("characters") or {}) else "lin_wan"
+    if sp and sp in chars:
+        return sp
+    if chars and "lin_wan" not in chars:
+        raise TtsError(f"音色表没有可用的 voiceover_speaker（{sp!r}），不退回 lin_wan")
+    return "lin_wan"
 
 
 # ---------------- WAV helpers (stdlib) ----------------
@@ -182,6 +215,7 @@ class KokoroBackend(_Worker):
         # 所以 Kokoro 模型目录到真要合成 Kokoro 句子时才必需；服务器上没下 Kokoro 也能合成成片
         kw.setdefault("require_model", False)
         super().__init__(cfg, "tts_model", **kw)
+        self.cfg = cfg          # synthesize_cached 转远程克隆时用同一份（按剧取的）音色表
 
     def synthesize(self, items: list[tuple[str, Voice, Path]]) -> None:
         if not items:
@@ -432,7 +466,7 @@ class FakeAsr:
 
 
 def tts_preflight(cfg: dict | None = None, *, speakers: "list[str] | None" = None,
-                  root: Path | None = None) -> list[str]:
+                  root: Path | None = None, run: str | None = None) -> list[str]:
     """VOICE10 2026-11-01（K-EDT-021）：合成前一次查完本机配音的全部前提，返回缺什么（空 = 齐）。
     night.py tts_missing 调它：缺了就 hold_tts（不耗版本号、不耗自动重试），不再等合成器跑到一半才报错。
     查：speech 解释器、Kokoro / SenseVoice 模型目录、每个要用到的说话人（默认 = 全部 characters）有音色条目，
@@ -440,10 +474,12 @@ def tts_preflight(cfg: dict | None = None, *, speakers: "list[str] | None" = Non
     不查网络（gpu36 ssh 断开由隧道看门狗管，失败走 assemble_failed 的自动重试）。"""
     root = Path(root or ROOT)
     if cfg is None:
-        try:
-            cfg = load_voice_config(root / "config" / "voices.json")
-        except (OSError, ValueError) as e:
-            return [f"config/voices.json 读不了：{e}"]
+        try:   # 按剧取：run 给了走 run；没给且当前剧是资产包模式 → 报缺（不退回 V1 的音色表，OVERSIGHT-F 第 14 轮）
+            cfg = load_voice_config(run=run) if run is not None else load_voice_config(root / "config" / "voices.json")
+        except TtsError as e:
+            return [f"音色表读不了：{e}"]
+        except (OSError, ValueError, RuntimeError) as e:
+            return [f"音色表读不了：{e}"]
     out: list[str] = []
     sp = cfg.get("speech_python") or {}
     if not _setting(cfg, "speech_python", "env", "default"):
@@ -506,7 +542,8 @@ def synthesize_cached(backend: TtsBackend, requests: list[tuple[str, Voice]], ca
     cache_dir.mkdir(parents=True, exist_ok=True)
     if getattr(backend, "name", "") == "kokoro" and not isinstance(backend, RoutedTts) \
             and any(v.engine != "kokoro" for _, v in requests):
-        backend = RoutedTts(backend, load_voice_config())  # 旁白克隆音色走远程后端；Kokoro 句子缓存键不变
+        # 旁白克隆音色走远程后端；Kokoro 句子缓存键不变。音色表用建 backend 时那份（按剧取的），不再自己读 V1 的
+        backend = RoutedTts(backend, getattr(backend, "cfg", None) or load_voice_config())
     paths, todo, queued = [], [], set()
     for text, voice in requests:
         p = cache_dir / f"{clip_key(text, voice, backend.name)}.wav"

@@ -226,7 +226,20 @@ def sec_heartbeats(root: Path, now: float, api=None) -> list[str]:
     return [f"  resident pid {rh.get('pid')} 第{rh.get('tick')}拍 {_age(rh.get('t') or rh.get('at'), now)}"
             f"{'（错误：' + str(rh.get('error'))[:60] + '）' if rh.get('error') else ''}；"
             f"asset_worker {_age(wh.get('at'), now)}（render={cfg.get('render')} golden={cfg.get('golden')}）；"
-            f":8800 {(api or _api_ok)()}"] + sec_producers(root, now)
+            f":8800 {(api or _api_ok)()}"] + sec_resident_assets(rh) + sec_producers(root, now)
+
+
+def sec_resident_assets(rh: dict) -> list[str]:
+    """W12 RESIDENT-RELOAD：resident 心跳里的资产线状态。连续出错 ≥3 拍 resident 写 state=reload_failed / asset_failed + 卡点 id；
+    以前 ⑥ 只显示“心跳 N 分钟前”，资产 tick 每拍 AttributeError 也看不出来"""
+    st, n = rh.get("state"), rh.get("asset_error_streak") or 0
+    if st in ("reload_failed", "asset_failed"):
+        why = "新旧代码对不上 / 依赖重载失败" if st == "reload_failed" else "资产 tick 出错"
+        return [f"  ⚠ resident 资产线停了（state={st}：{why}，连续 {n} 拍，卡点 {rh.get('asset_issue') or '?'}）："
+                f"{str(rh.get('asset_error') or '')[:100]} → 修代码后下一拍自动恢复；不恢复 → 受控重启 ops/restart_autoflow.ps1"]
+    if rh.get("asset_error"):
+        return [f"  resident 资产 tick 本拍出错（连续 {n} 拍，未到登记线）：{str(rh['asset_error'])[:100]}"]
+    return []
 
 
 def sec_gpu(root: Path, now: float) -> list[str]:
@@ -250,6 +263,18 @@ def sec_gpu(root: Path, now: float) -> list[str]:
         cells.append(" ".join(busy) + f"（{_age(r.get('t'), now)}）")
     out = ["  " + "；".join(cells) if cells else "  没有 GPU 采样"]
     out.append(f"  退役 {sorted(part.get('retired_lanes') or [])} 借出 {sorted(part.get('_lent_lanes') or {})} 挂道 {sorted(part.get('_temp_holds') or {})}")
+    hc = {"healed": 0, "reported": 0}                 # ASSIGN D（11-03）：tools/autopilot/lane_heal.py 的日志，近 24 小时
+    lp = root / "data/producer/lane_heal.jsonl"
+    if lp.is_file():
+        for ln in lp.read_text(encoding="utf-8", errors="replace").splitlines()[-2000:]:
+            try:
+                r = json.loads(ln)
+                t = time.mktime(time.strptime(r["at"], "%Y-%m-%d %H:%M:%S"))
+            except (ValueError, KeyError):   # arch-ok: 坏行跳过
+                continue
+            if now - t <= 86400:
+                hc["healed" if r.get("event") == "healed" else "reported"] += 1
+    out.append(f"  卡死已自愈 {hc['healed']} 次 · 登记未自动处理 {hc['reported']} 次（近 24 小时，lane_heal）")
     return out
 
 

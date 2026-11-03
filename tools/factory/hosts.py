@@ -101,6 +101,26 @@ def server_root(host: str, d: dict | None = None) -> str:
     return v
 
 
+def video_root(host: str | None = None, d: dict | None = None) -> str:
+    """视频 worker（vidgen / night 远端命令 / 同步）的服务器代码根。PRODMERGE-O 11-03：= system_version 发版部署目录
+    （hosts.json video_root，与 repo 相同；/root/work/fredw/video10_srv 退役）。host=None：所有登记了 video_root 的机器必须一致，否则 raise"""
+    d = d or load()
+    if host:
+        v = _host(host, d).get("video_root")
+        if not v:
+            raise HostsError(f"{host} 没登记 video_root")
+        return v
+    vals = {h: v.get("video_root") for h, v in (d.get("hosts") or {}).items() if v.get("video_root")}
+    if not vals or len(set(vals.values())) != 1:
+        raise HostsError(f"各机器 video_root 不一致或没登记：{vals}")
+    return next(iter(vals.values()))
+
+
+def video_code_managed(host: str, d: dict | None = None) -> bool:
+    """video_root 就是发版部署目录 → 代码只由 system_version deploy 下发，series10_video/deploy.push 只推作业 / 输入图 / 模型"""
+    return video_root(host, d).rstrip("/") == server_root(host, d).rstrip("/")
+
+
 def aliases(host: str, d: dict | None = None) -> list[str]:
     return list(_host(host, d).get("aliases") or [])
 

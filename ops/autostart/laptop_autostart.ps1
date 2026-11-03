@@ -30,8 +30,10 @@ Log "infra_watchdog ensured"
 if (-not (Test-Port 8800)) {
   # 出图默认走 gpu3 GPU0 ComfyUI（隧道 18188）；视频 / 按卡选择见 config\render_endpoints.json（W2）
   $env:NS_COMFY_URL = "http://127.0.0.1:18188"
+  # RESTARTFIX-O（ISS-1103-011049-7420）：经看门狗起（和 ops/restart_api.ps1 同一条路）——看门狗给子进程设 NS_API_MANAGED=1，
+  # 只有这样的正式实例才跑启动副作用（任务恢复 / owner_pick 补执行等）；直接 uvicorn 起的实例不跑
   Start-Process -WindowStyle Hidden -WorkingDirectory $Root -FilePath (Join-Path $Root ".venv\Scripts\python.exe") `
-    -ArgumentList "-m", "uvicorn", "ns_api.app:app", "--port", "8800", "--host", "127.0.0.1" `
+    -ArgumentList "tools/factory/api_watchdog.py", "--by", "laptop_autostart", "--", "-m", "uvicorn", "ns_api.app:app", "--port", "8800", "--host", "127.0.0.1" `
     -RedirectStandardOutput (Join-Path $Root "data\api_8800.out.log") -RedirectStandardError (Join-Path $Root "data\api_8800.err.log")
   Log "api started"
 } else { Log "api already up" }

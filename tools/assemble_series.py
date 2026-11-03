@@ -177,7 +177,11 @@ def compose(ep: int, sources: dict, work: Path, variant: str, *, preview: bool =
     from ns_post.assemble import Settings, assemble_episode, load_episode  # noqa: E402
     from ns_post.tts import KokoroBackend, RoutedTts, SenseVoiceAsr, Voice, load_voice_config  # noqa: E402
 
-    cfg = load_voice_config()
+    from ns_post import run_media as RM  # noqa: E402  OVERSIGHT-F P1-13a：配乐 / 音色按剧取（V2 只认 music_v2.json / voices_v2.json）
+    run = run or RUN_ID
+    cfg = load_voice_config(run=run)
+    mdir = RM.music_dir(run, ROOT)
+    RM.check_episode_music(run, ep, mdir, ((cut_edit or {}).get("bgm") or {}).get("file"), ROOT)
     kokoro = KokoroBackend(cfg, num_threads=4)
     tts, cache_dir, n_cached = kokoro, Path(cache_dir or ROOT / "data/cache/tts"), 0
     if preview:
@@ -196,8 +200,8 @@ def compose(ep: int, sources: dict, work: Path, variant: str, *, preview: bool =
                     kokoro.synthesize([(text, Voice(v.speaker, 58 if male else 3, "", v.speed), path)])
         tts = RoutedTts(kokoro, cfg, remote=_FallbackTts())
     settings = Settings(threads=8, bgm=bgm, deliver_4k="off", dialogue_source=dialogue_source,
-                        music_dir=str(ROOT / "data/music/series10"))
-    episode = load_episode(RUNS.script_path(run or RUN_ID, ROOT), ep)   # OVERSIGHT-F P1-4c：按剧取导入稿（成片 / 预览 / CUTEDIT 都走这里）
+                        music_dir=str(mdir))
+    episode = load_episode(RUNS.script_path(run, ROOT), ep)   # OVERSIGHT-F P1-4c：按剧取导入稿（成片 / 预览 / CUTEDIT 都走这里）
     tl = assemble_episode(episode, work, tts=tts, cache_dir=cache_dir, asr=SenseVoiceAsr(cfg, num_threads=4),
                           settings=settings, voices_cfg=cfg, allow_laptop_video=False,
                           keep_work=bool(os.environ.get("ASM_KEEP_WORK")), sources=sources, variant=variant,

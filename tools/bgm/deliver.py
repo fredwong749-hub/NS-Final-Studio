@@ -1,4 +1,5 @@
-"""BGM 交付（agent 与界面“换用这一版”共用）：候选 flac → data/music/series10/epNN.wav + epNN.json（合成格式）+ meta.json 记录。"""
+"""BGM 交付（agent 与界面“换用这一版”共用）：候选 flac → <本剧 BGM 目录>/epNN.wav + epNN.json（合成格式）+ meta.json 记录。
+本剧 BGM 目录 = out_dir()：V1 = data/music/series10；V2 = data/music/<剧>（曲库模式，写入方 tools/bgm/bgm_library.py）。"""
 from __future__ import annotations
 
 import hashlib
@@ -29,8 +30,39 @@ def load_cfg() -> dict:
     return json.loads((ROOT / "config" / "bgm.json").read_text(encoding="utf-8"))
 
 
-def out_dir(cfg: dict | None = None) -> Path:
-    return ROOT / (cfg or load_cfg())["output"]["dir"]
+def current_run() -> str | None:
+    """当前剧（NS_RUN / runs.json primary，经 ns_agent.run_paths）；没有登记表 = None（旧行为）"""
+    import sys as _sys
+    p = str(ROOT / "services" / "agent")
+    if p not in _sys.path:
+        _sys.path.insert(0, p)
+    from ns_agent import run_paths as RP   # noqa: PLC0415
+    return RP.current_run(ROOT)
+
+
+def is_legacy_run(run: str | None) -> bool:
+    import sys as _sys
+    p = str(ROOT / "services" / "agent")
+    if p not in _sys.path:
+        _sys.path.insert(0, p)
+    from ns_agent import run_paths as RP   # noqa: PLC0415
+    m = RP.runs_module(ROOT)
+    return m is None or not (ROOT / "config/pipeline/runs.json").is_file() or bool(m.is_legacy(run, ROOT))
+
+
+def out_dir(cfg: dict | None = None, run: str | None = None) -> Path:
+    """本剧的集级 BGM 目录（MERGE-VID-O，L-118 / L-131：不再写死 data/music/series10）：
+    legacy 剧（V1）= config/bgm.json output.dir（data/music/series10）；其它剧 = ns_post.run_media.music_dir(<剧>)
+    （data/music/<剧>，先校验 config/music_v2.json 曲库，不符 → V2MediaError 失败关闭）。run 不给 = 当前剧"""
+    run = run or current_run()
+    if run is None or is_legacy_run(run):
+        return ROOT / (cfg or load_cfg())["output"]["dir"]
+    import sys as _sys
+    p = str(ROOT / "services" / "post")
+    if p not in _sys.path:
+        _sys.path.insert(0, p)
+    from ns_post import run_media as RM   # noqa: PLC0415
+    return RM.music_dir(run, ROOT)
 
 
 def ffmpeg() -> str:
@@ -91,20 +123,33 @@ def loudnorm(src: Path, dst: Path, lufs: float = -16.0, tp: float = -1.0, lra: f
     print("WARN", warn, file=_sys.stderr, flush=True)
     import tempfile
     gain = max(0.0, -dev) + 1.0
-    tries = []
+    # best = (|偏差|, 限幅增益, 报告)：交付偏差最小的那一次，不是最后一次（OVERSIGHT-F P2）；第 1 遍（不限幅，增益 None）也算候选
+    tries, best, last = [], (abs(dev), None, rep), None
     with tempfile.TemporaryDirectory(prefix="bgm_prelimit_") as td:   # 中间文件放系统临时目录，不落 data/music
         lim = Path(td) / "prelimit.wav"
         for _ in range(5):        # 限幅会吃掉一部分响度：按剩余偏差加增益，最多 5 次
             _prelimit(ff, src, lim, gain, tp)
-            rep2 = _loudnorm_2pass(ff, lim, dst, lufs, tp, lra)
-            dev2 = rep2["output_i"] - lufs
-            tries.append({"prelimit_gain_db": round(gain, 2), "output_i": rep2["output_i"]})
-            if abs(dev2) <= LEVEL_TOL_LU:
+            r = _loudnorm_2pass(ff, lim, dst, lufs, tp, lra)
+            last = gain
+            d = r["output_i"] - lufs
+            tries.append({"prelimit_gain_db": round(gain, 2), "output_i": r["output_i"]})
+            if abs(d) < best[0]:
+                best = (abs(d), gain, r)
+            if abs(d) <= LEVEL_TOL_LU:
                 break
-            gain += max(0.0, -dev2) + 1.0
+            gain += max(0.0, -d) + 1.0
+        if best[1] != last:       # 最后写出的不是最好的那次 → 按最好那次重写 dst（None = 第 1 遍：不限幅直接两遍 loudnorm）
+            if best[1] is None:
+                _loudnorm_2pass(ff, src, dst, lufs, tp, lra)
+            else:
+                _prelimit(ff, src, lim, best[1], tp)
+                _loudnorm_2pass(ff, lim, dst, lufs, tp, lra)
+    rep2 = best[2]
+    dev2 = rep2["output_i"] - lufs
     rep2.update(level_dev_lu=round(dev2, 2), level_ok=abs(dev2) <= LEVEL_TOL_LU, level_warn=warn,
                 redo={"why": "level_dev", "first": {k: rep[k] for k in ("output_i", "output_tp", "normalization_type")},
-                      "tries": tries})
+                      "tries": tries, "kept_gain_db": None if best[1] is None else round(best[1], 2),
+                      "kept": "first_pass" if best[1] is None else "prelimit"})
     if not rep2["level_ok"]:
         print("WARN", f"重做后仍偏离 {dev2:+.2f} LU：level_ok=False", file=_sys.stderr, flush=True)
     return rep2
@@ -182,6 +227,11 @@ def choose(ep: int, chosen_id: str, *, by: str, reason: str) -> dict:
     state = jload(mp)
     if not state:
         raise ValueError(f"第 {ep} 集还没有配乐记录")
+    if state.get("mode") == "library":       # V2：配乐来自曲库（tools/bgm/bgm_library.py），换用 = 按指定曲目重铺整集
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import bgm_library as LB   # noqa: PLC0415
+        return LB.deliver_episode(state.get("run") or current_run(), ep, track=chosen_id, by=by, reason=reason)
     deliver(ep, state, cfg, chosen_id, reason, by)
     jsave(mp, state)
     return state

@@ -421,13 +421,13 @@ def _commit_takes(p: Path, doc: dict, seq: int, *, op: str, by: str, op_id, run,
 
 
 def mutate_takes(shot_id: str, fn, *, op: str, by: str, op_id: str | None = None, run: str | None = None,
-                 expect_seq: int | None = None) -> dict:
+                 expect_seq: int | None = None, path: Path | None = None) -> dict:
     """takes.json 的唯一写入口：本进程每镜锁 + 跨进程 takes.json.lock 里读-改-写。
     - expect_seq 给了且和文件 seq（缺省 0）不等 → TakesConflict，不写；
     - op_id 已在 last_ops 里 → 视为重放，原样返回、不再执行 fn（幂等）；
     - fn(doc) 原地改或返回新 doc；写前把旧文件备份到 .takes_bak/takes.<seq>.<时间>.json（留 10 份，更旧的移到 data/_quarantine/takes_bak/）；
     - seq+1，last_op={seq, op, by, op_id, at(+09:00)}，last_ops 留最近 50 条。返回写入后的 doc"""
-    p = takes_path(shot_id, run)
+    p = Path(path) if path else takes_path(shot_id, run)   # path：调用方开算时钉死的文件（A-04：_pf_write 也走这里）
     with shot_lock(shot_id), _file_lock(p.with_name("takes.json.lock")):
         doc = _read_json(p, {"takes": [], "active": {}})
         seq = int(doc.get("seq") or 0)
@@ -798,8 +798,11 @@ def compile_with_edits(script: ScriptImport, shot_id: str, loras: set[str], meth
     edit = load_edit(shot_id)
     ee = load_episode_edit(ep.number)
     bf, bl = boost_text(ee.boost_first, edit.boost_first), boost_text(ee.boost_last, edit.boost_last)
+    leg, cur = _legacy_and_primary()
+    # MERGE-VID-O（ISS-1103-024206-0474）：H3 运镜规范化按本剧取词表（compile_shot 把 framing_project 传给 normalize_video_prompt）；
+    # legacy 剧（V1）照旧不传，行为不变
     c = compile_shot(ep, s, script.globals, loras, boost_first=bf, boost_last=bl, soundscape=edit.soundscape,
-                     music=edit.music, episode_music=ee.music)
+                     music=edit.music, episode_music=ee.music, framing_project=cur if cur and cur != leg else None)
     looks = shot_looks_map(shot_id)
     for lk in looks.values():
         lk["makeup_design"] = R.makeup_design(lk.get("makeup", []), c.image_body)

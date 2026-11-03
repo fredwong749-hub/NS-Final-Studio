@@ -1,0 +1,35 @@
+/* W5 UIUX 11-03：顶部步骤条两行——第一行“① 剧本”，第二行“完成 N · 进行 M · 卡住 K”（集数）。任何宽度都显示计数（以前 ≤1440 宽藏掉了） */
+:root .v3-top-grid .v3-step {
+  display: inline-grid;
+  grid-template-columns: auto auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 5px;
+  row-gap: 0;
+  height: 40px;
+  padding: 2px 10px 2px 6px;
+  border-radius: 8px;
+}
+:root .v3-top-grid .v3-step > .v3-sdot { grid-row: 1; grid-column: 1; }
+:root .v3-top-grid .v3-step > span { grid-row: 1; grid-column: 2; line-height: 1.2; }
+:root .v3-top-grid .v3-step > small.v3-step-n,
+:root .v3-top-grid .v3-step.on > small.v3-step-n,
+:root .v3-top-grid .v3-step:not(.on) > small.v3-step-n {
+  display: block;
+  grid-row: 2;
+  grid-column: 1 / -1;
+  font-size: 10.5px;
+  line-height: 1.25;
+  text-align: center;
+  color: var(--c-text-3, #8a8a8a);
+  white-space: nowrap;
+}
+.v3-step-cnt .c-doing { color: var(--c-info, #4a90e2); }
+.v3-step-cnt .c-blocked { color: var(--c-warn-text, var(--c-warn, #d6a23a)); font-weight: 600; }
+:root .v3-top-grid .v3-step.has-block { border-color: color-mix(in srgb, var(--c-warn, #d6a23a) 45%, transparent); }
+:root .v3-top-grid .v3-steps li + li::before { content: "›"; color: var(--c-text-3, #777); margin: 0 1px; align-self: center; }
+:root .v3-top-grid .v3-steps li { display: inline-flex; align-items: center; }
+@media (max-width: 1340px) {
+  :root .v3-top-grid .v3-step { padding: 2px 6px 2px 4px; }
+  :root .v3-top-grid .v3-steps li + li::before { display: none; }
+}

@@ -1,7 +1,7 @@
 """BAKEOFF（2026-10-31）：出图模型真人质感对决——固定、可复现的对照协议。以后有新模型：在 MODELS 里加一行，重跑 gen/score/page。
 
 协议（docs/ep02_iter/image_bakeoff.md §2，GEN_CONTRACT v1 对齐）：
-  - 8 个镜头（SHOTS）：林晚近景×2、特写×1、全身×1、男主单人×1、阿岚×1、双人×1、场景空镜×1，取自 series10_v1 first_frame_jobs.json。
+  - 8 个镜头（SHOTS）：林晚近景×2、特写×1、全身×1、男主单人×1、阿岚×1、双人×1、场景空镜×1，取自 第一季（legacy run） first_frame_jobs.json。
   - 提示词：剧本原文内容不改；只做系统层处理：去掉旧参考图注释和已证伪触发词（lnwan_qi，契约 I8），旧系统后缀（奶油虚化/浓郁饱和，契约 I7 禁止）
     换成当前默认预设徕卡 S★ 后缀；按模型的参考写法（<imageN> / 图N）重写参考图注释。
   - 两组：contract = 契约输入（身份脸 > 造型设定图 > 场景，按模型槽位，I9）；text = 仅文字对照。没有参考槽的模型只跑 text。
@@ -38,12 +38,15 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ON_SERVER = not hasattr(os, "startfile")
 ROOT = HERE.parents[1] if not ON_SERVER else HERE          # 服务器上 srv/ 目录平铺
+sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+import runs as RUNS  # noqa: E402
+_LEGACY = RUNS.legacy_run(ROOT)   # I-16：第一季专用历史工具（入口 gate_legacy_tool 要求显式 --run）
 AB = (ROOT / "data/ab/image_bakeoff") if not ON_SERVER else HERE
 PLAN = AB / "plan.json"
 HOST, SRV = "gpu36", "/root/work/fredw/bakeoff/srv"
 COMFY_IN = "/root/work/fredw/comfy/ComfyUI/input"
 COMFY_OUT = "/root/work/fredw/comfy/output"
-RUN = "data/pipeline/runs/series10_v1"
+RUN = ("data/pipeline/runs/" + _LEGACY)
 
 PW, PH = 768, 1344
 BW, BH = 1152, 2016
@@ -248,7 +251,7 @@ def prep():
     sys.path.insert(0, str(ROOT / "tools/pipeline"))
     from ns_agent.asset_refs import face_of, plan_for, record    # REFLOCK
     for c in list(FACE):                                  # 身份脸统一从资产中心取（face_overrides > config faces），取不到才用默认
-        FACE[c] = face_of("series10_v1", c) or FACE[c]   # REFLOCK 资产参考解析器（契约 I2–I5、I9）
+        FACE[c] = face_of(_LEGACY, c) or FACE[c]   # REFLOCK 资产参考解析器（契约 I2–I5、I9）
     rec_cache, casts, shot_rec = {}, {}, {}
     script = json.loads((ROOT / "data/import/script_v2.json").read_text(encoding="utf-8"))
     for sid, src, cat, chars, looks, scene in SHOTS:
@@ -258,7 +261,7 @@ def prep():
         shot = next(x for x in ep["shots"] if x["index"] == shn)
         casts[src] = shot.get("cast") or []
         if chars and sid != "B8":                # 每镜一份完整资产记录（最大 4 槽），给本机 postflight 的 Q2 / Q7 用（各组同一标准）
-            _sr, _pl = plan_for("series10_v1", ep, shot, capacity=4)
+            _sr, _pl = plan_for(_LEGACY, ep, shot, capacity=4)
             shot_rec[sid] = record(_sr, _pl)
         if sid == "B8":                                      # 空镜：用 ep01-S1 的【场景】段，景别首句由系统模板给
             m = re.search(r"【场景】(.*?)(，面部清晰对焦|，专业电影镜头画面感)", j["prompt"])
@@ -291,7 +294,7 @@ def prep():
                     rr, dropped = plan_slots(chars, looks, scene, m["slots"], m["fam"])
                     refs, prefix = [dict(role=r["role"], path=r["path"]) for r in rr], ref_lines(rr, "图{n}")
                 else:                                    # 有资产参考 = REFLOCK plan_for（脸 + 去头设定图 / 参考板 + 单品 + 场景，按槽位）
-                    _, pl = plan_for("series10_v1", ep, shot, capacity=m["slots"])
+                    _, pl = plan_for(_LEGACY, ep, shot, capacity=m["slots"])
                     refs = [dict(role=sl.kind, path=f) for sl, f in zip(pl.slots, pl.files)]
                     prefix = pl.prompt_prefix
                     rec_cache[(sid, mk)] = record(_, pl)
@@ -778,6 +781,7 @@ def pull():
 
 
 def main(argv):
+    argv = RUNS.gate_legacy_tool(argv, __file__)
     cmd = argv[0] if argv else ""
     if cmd == "prep":
         prep()

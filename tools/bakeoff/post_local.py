@@ -15,11 +15,15 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+import runs as RUNS  # noqa: E402
+_LEGACY = RUNS.legacy_run(ROOT)   # I-16：第一季专用历史工具（入口 gate_legacy_tool 要求显式 --run）
 AB = ROOT / "data/ab/image_bakeoff"
 sys.path.insert(0, str(ROOT / "services/agent"))
 
 
 def main(argv):
+    argv = RUNS.gate_legacy_tool(argv, __file__)
     from ns_agent.gen_contract import postflight
     plan = json.loads((AB / "plan.json").read_text(encoding="utf-8"))
     res = json.loads((AB / "results.json").read_text(encoding="utf-8"))
@@ -36,7 +40,7 @@ def main(argv):
         if not it or not img.exists() or "remote" not in r:
             continue
         rec = plan.get("shot_rec", {}).get(it["shot"]) if it["kind"] != "edit" else None
-        req = {"kind": "image", "project": "series10_v1", "shot_id": it["src"] if it["kind"] != "edit" else "ep05-S5",
+        req = {"kind": "image", "project": _LEGACY, "shot_id": it["src"] if it["kind"] != "edit" else "ep05-S5",
                "cast": plan.get("casts", {}).get(it["src"], []) if it["kind"] != "edit" else [{"name": "林晚", "presence": "在画", "x": "中"}],
                "asset_refs": rec or {}}
         try:

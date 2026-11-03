@@ -63,9 +63,15 @@ def _episode(epn: int) -> dict:
 def _resolved(ep: dict):
     """{shot index: [(SpokenLine, [Voice...], cfg)]} for the whole episode (speaker rules need the whole episode)."""
     speakers, tts = _post()
-    cfg = tts.load_voice_config()
+    from ns_api import run_paths as RP  # noqa: PLC0415  OVERSIGHT-F P1-13a：音色按剧取（V2 只用 voices_v2.json 启用的音色）
+    cfg = tts.load_voice_config(run=RP.current_run())
     out: dict[int, list] = {}
-    for ln in speakers.resolve_episode(ep, cfg.get("line_overrides")):
+    try:
+        resolved = speakers.resolve_episode(ep, cfg.get("line_overrides"), narrator=tts.default_voiceover_speaker(cfg),
+                                            cast=speakers.Cast.from_cfg(cfg))
+    except speakers.UnresolvedSpeaker as e:
+        raise HTTPException(422, str(e)) from e
+    for ln in resolved:
         try:
             vs = tts.voice_for(cfg, ln.speaker, voiceover=ln.kind == "voiceover")
         except tts.TtsError:
@@ -145,7 +151,7 @@ def shot_audio_clip(shot_id: str, i: int):
     lines = _lines(shot_id)
     if not 0 <= i < len(lines):
         raise HTTPException(404, "没有这一句")
-    ln, vs, _cfg = lines[i]
+    ln, vs, cfg = lines[i]          # cfg = _resolved 按剧取的那份音色表（同一个函数里不再混用第二份）
     if len(vs) != 1:
         raise HTTPException(409, "这一句现在不能单独试听")
     cache = _cache_dir()
@@ -156,7 +162,7 @@ def shot_audio_clip(shot_id: str, i: int):
         _, tts = _post()
         try:
             with _lock:
-                backend = tts.KokoroBackend(tts.load_voice_config(), num_threads=4)
+                backend = tts.KokoroBackend(cfg, num_threads=4)
                 [clip] = tts.synthesize_cached(backend, [(ln.text, vs[0])], cache)
         except tts.TtsUnavailable as e:
             raise HTTPException(503, f"这台电脑上的配音模型没装好，暂时不能试听（{e}）")

@@ -7,8 +7,12 @@
 //   · 历史 GET /api/image-workshop/history + 本镜现有版本（GET /api/shots/{id} 的 takes）；质检 = 出图时的 postflight 契约
 //   · “采用到镜头 / 采用为资产”等结构问题 #16（一本账，sv-11）上线前禁用；“设为候选”只是本机标记
 // 设计稿：data/review_pages/filmui/image_edit.html（风格 A）。
+// NAVFLOW-F 11-03（L-146，项目方：“image editor 在 V1 你做了半成品，在 V2 直接没有了”）：挂回 ②资产（资产中心左栏）和 ④出图（出图页抽屉“到图像编辑器里改”）；
+//   “修改”= 全站同一个口语化一句话入口（Verdict → EditBox → /api/shots/{id}/frame-edit → prompt_rewrite → Qwen-Image-Edit，L-119 / L-120），不另写；
+//   界面文字去掉技术词；后端 /api/shots、/api/image-workshop 都按当前剧取路径，不需要别的参数。
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
 import { FilmStrip, type FilmFrame } from "./FilmOverview";
+import { Verdict } from "../Verdict";
 import "../imageedit.css";
 
 type Base = { id: string; name: string; license: string; state: string; state_detail: string; presets: { id: string; label: string }[]; submit: string | null; size: number[]; max_refs: number; mode?: string | null };
@@ -32,6 +36,7 @@ async function getJson<T>(url: string): Promise<T | null> {
 export default function ImageEditPage() {
   const [shot, setShot] = useState(() => q().get("shot") ?? "ep01-S1");
   const session = q().get("session");
+  const stage: "first" | "last" = q().get("stage") === "last" ? "last" : "first"; // 从出图页抽屉带进来：首帧 / 尾帧
   const [bases, setBases] = useState<Base[] | null>(null);
   const [baseErr, setBaseErr] = useState<string | null>(null);
   const [base, setBase] = useState("qwen21");
@@ -54,7 +59,7 @@ export default function ImageEditPage() {
 
   // 基座
   useEffect(() => {
-    getJson<{ bases: Base[] }>("/api/image-workshop/bases").then((d) => (d ? setBases(d.bases) : (setBaseErr("基座列表接口还没生效（:8800 重启后出现）；现在只能用 Qwen-Image 2.1"), setBases(null))));
+    getJson<{ bases: Base[] }>("/api/image-workshop/bases").then((d) => (d ? setBases(d.bases) : (setBaseErr("出图模型列表还没读到（后台重启后出现）；现在用默认模型出图"), setBases(null))));
   }, []);
   // 本镜上下文：编译提示词、现有版本、参考图
   const loadShot = useCallback(async () => {
@@ -70,7 +75,7 @@ export default function ImageEditPage() {
     })).slice(-8);
     const refs: RefImg[] = [...(r?.characters ?? []).flatMap((c) => c.effective?.images ?? []), ...(r?.scene?.images ?? [])];
     setShotData({ prompt: d?.compiled?.image_prompt ?? d?.script?.img_prompt ?? "", items, refs, active });
-    setWs((h?.items ?? []).map((x) => ({ key: `w${x.id}`, src: x.url, label: `工坊 s${String(x.seed).slice(-4)}`, seed: x.seed, origin: "workshop" as const, prompt: x.prompt, refs: x.refs, checks: x.postflight?.items, created: x.created_at, seconds: x.seconds })));
+    setWs((h?.items ?? []).map((x) => ({ key: `w${x.id}`, src: x.url, label: `试出 s${String(x.seed).slice(-4)}`, seed: x.seed, origin: "workshop" as const, prompt: x.prompt, refs: x.refs, checks: x.postflight?.items, created: x.created_at, seconds: x.seconds })));
   }, [shot]);
   useEffect(() => { loadShot(); }, [loadShot]);
   useEffect(() => { if (!a && shotData) setA(shotData.items.find((x) => x.active)?.key ?? shotData.items[shotData.items.length - 1]?.key ?? null); }, [shotData, a]);
@@ -128,16 +133,24 @@ export default function ImageEditPage() {
   return (
     <div className="ie">
       <div className="ie-hd">
-        <h1>图像工坊</h1>
-        <label className="ie-shot">镜头 <input value={shot} onChange={(e) => setShot(e.target.value.trim())} onKeyDown={(e) => e.key === "Enter" && (location.hash = `#/image-edit?shot=${shot}`, setA(null), loadShot())} /></label>
-        <span className="ie-src">{session ? `会话 ${session}：会话接口（UIRSI2 edit_session）上线前按镜头上下文打开` : "从镜头上下文打开（提示词、参考图都取自本镜编译结果）"}</span>
+        <h1>图像编辑器</h1>
+        <label className="ie-shot">镜头 <input value={shot} onChange={(e) => setShot(e.target.value.trim())} onKeyDown={(e) => e.key === "Enter" && (location.hash = `#/image-edit?shot=${shot}&stage=${stage}`, setA(null), loadShot())} /></label>
+        <span className="ie-src">{session ? "从会话打开：按这一镜的上下文显示" : `这一镜的${stage === "last" ? "尾帧" : "首帧"}：提示词、参考图都是系统为它准备的`}</span>
         <span className="ie-sp" />
-        <button className="ie-btn" disabled title="等结构问题 #16（两台 takes 统一成一本账）上线，约 sv-11">采用到镜头 · 等一本账上线</button>
-        <button className="ie-btn" disabled title="等一本账 + FACTORY 资产目标状态（影响 N 镜确认）">采用为资产 · 等一本账上线</button>
+        {/* L-123：只有“用这张 / 修改”两个动作——和出图页、画布同一个入口（一句话 → 系统改写提示词 → 出修改版，失败就不出图） */}
+        {A && A.origin === "shot" && A.n != null ? (
+          <span className="ie-verdict" onClick={() => window.setTimeout(loadShot, 1200)}>
+            <Verdict shot={shot} stage={stage} n={A.n} size="md" />
+          </span>
+        ) : (
+          <span className="ie-note">在下面片条里点一张镜头版本，就能“用这张”或“修改”</span>
+        )}
+        <button className="ie-btn" disabled title="编辑器里试出的图直接设为镜头当前版——这一步还在接通中，先用“修改”出改好的版本">采用到镜头（接通中）</button>
+        <button className="ie-btn" disabled title="把试出的图登记为资产（设定图 / 单品）——这一步还在接通中">采用为资产（接通中）</button>
       </div>
       <div className="ie-ws">
         <aside className="ie-l">
-          <h4>基座<span>来自 IMGLAB</span></h4>
+          <h4>出图模型<span>亮绿点的能用</span></h4>
           {baseErr && <p className="ie-note">{baseErr}</p>}
           {(bases ?? [{ id: "qwen21", name: "Qwen-Image 2.1（S★ R0）", state: "ready", state_detail: "生产在用", submit: "frame_jobs_ab", license: "", presets: [], size: [768, 1344], max_refs: 10 } as Base]).map((x) => {
             const ok = x.state === "ready";
@@ -152,8 +165,8 @@ export default function ImageEditPage() {
           <h4>生成</h4>
           <div className="ie-row"><span>张数</span><span className="ie-seg">{[1, 2, 4].map((n) => <button key={n} className={count === n ? "on" : ""} onClick={() => setCount(n)}>{n}</button>)}</span></div>
           <div className="ie-row"><span>种子</span><input className="ie-in" placeholder="随机" value={seed} onChange={(e) => setSeed(e.target.value.replace(/\D/g, ""))} /><label className="ie-chk"><input type="checkbox" checked={lock} onChange={(e) => setLock(e.target.checked)} />锁定</label></div>
-          <div className="ie-row"><span>预设</span><span className="ie-v">{cur?.presets?.[0]?.label ?? "S★ R0（L-087）"} · 预览档</span></div>
-          <p className="ie-note">P1：出图用本镜编译好的提示词和参考图；结果进“工坊”实验区，不改镜头的当前版本。局部重绘、修手、换参考随编辑会话接口开放。</p>
+          <div className="ie-row"><span>预设</span><span className="ie-v">{cur?.presets?.[0]?.label ?? "默认"} · 预览档</span></div>
+          <p className="ie-note">这里出的图先放在“试出”区，不改镜头的当前版本；要改当前版本，用上面的“修改”写一句话。</p>
         </aside>
         <section className="ie-mid">
           <div className="ie-stage">
@@ -172,12 +185,12 @@ export default function ImageEditPage() {
             {A && !A.pending && <button className="ie-lnk" onClick={() => setCand((c) => (c.includes(A.key) ? c.filter((k) => k !== A.key) : [...c, A.key]))}>{cand.includes(A.key) ? "取消候选" : "★ 设为候选"}</button>}
           </div>
           <div className="ie-prompt">
-            <div className="ie-pt"><b>提示词</b><span>来自 {shot} 编译结果（只读；改写随编辑会话开放）</span></div>
+            <div className="ie-pt"><b>提示词</b><span>系统为 {shot} 写好的（只读；要改画面，用“修改”写一句话，系统会改写提示词）</span></div>
             <textarea readOnly value={shotData?.prompt ?? ""} />
             <button className="ie-go" disabled={busy || !canSubmit} onClick={generate}><b>出图</b><span>{cur?.name ?? "Qwen-Image 2.1"} · {count} 张</span></button>
           </div>
           <div className="ie-hist">
-            <div className="ie-ht"><span>出图历史 · 工坊新图在左，本镜版本在右</span><span>{pend.length ? `${pend.length} 张在路上` : ""}</span></div>
+            <div className="ie-ht"><span>出图历史 · 试出的图在左，镜头版本在右</span><span>{pend.length ? `${pend.length} 张在路上` : ""}</span></div>
             <div className="ie-scroll"><FilmStrip frames={frames} H={92} thumbW={240} onFrame={pick} /></div>
           </div>
         </section>
@@ -185,7 +198,7 @@ export default function ImageEditPage() {
           <nav className="ie-tabs">{([["ref", "参考图"], ["qc", "质检"], ["meta", "元数据"], ["tree", "版本"]] as const).map(([k, t]) => <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{t}</button>)}</nav>
           {tab === "ref" && (
             <div className="ie-refs">
-              <p className="ie-note">本镜编译带入的参考图（身份脸 / 设定图 / 单品 / 场景）。从资产库换参考随编辑会话开放。</p>
+              <p className="ie-note">系统给这一镜准备的参考图（身份脸 / 设定图 / 单品 / 场景）。要换参考，到资产中心改人物的造型和单品。</p>
               {(shotData?.refs ?? []).map((r) => (
                 <figure key={r.file}><img src={files(r.file) ?? ""} alt="" /><figcaption>{r.label}</figcaption></figure>
               ))}
@@ -198,7 +211,7 @@ export default function ImageEditPage() {
           )}
           {tab === "meta" && A && (
             <dl className="ie-meta">
-              <dt>来源</dt><dd>{A.origin === "shot" ? "镜头版本（takes.json）" : "图像工坊（data/ab/workshop）"}</dd>
+              <dt>来源</dt><dd>{A.origin === "shot" ? "镜头版本" : "编辑器试出的图"}</dd>
               <dt>种子</dt><dd className="mono">{A.seed ?? "—"}</dd>
               <dt>时间</dt><dd className="mono">{A.created?.replace("T", " ") ?? "—"}</dd>
               <dt>用时</dt><dd className="mono">{A.seconds ? `${A.seconds} s` : "—"}</dd>
@@ -210,11 +223,11 @@ export default function ImageEditPage() {
               {(shotData?.items ?? []).map((x) => (
                 <button key={x.key} className={`ie-nd${a === x.key ? " on" : ""}`} onClick={() => setA(x.key)}>{x.src && <img src={x.src} alt="" />}<span>{x.label}</span></button>
               ))}
-              {ws.length > 0 && <div className="ie-branch">└ 图像工坊（从 v{shotData?.active ?? "?"} 的上下文出）</div>}
+              {ws.length > 0 && <div className="ie-branch">└ 编辑器试出的图（从当前版 v{shotData?.active ?? "?"} 的提示词和参考出）</div>}
               {ws.map((x) => (
                 <button key={x.key} className={`ie-nd sub${a === x.key ? " on" : ""}`} onClick={() => setA(x.key)}>{x.src && <img src={x.src} alt="" />}<span>{x.label}{cand.includes(x.key) ? " ★" : ""}</span></button>
               ))}
-              <p className="ie-note">镜头版本的 parent 字段现在为空，按时间排；一本账上线后显示真实分支。</p>
+              <p className="ie-note">按时间先后排列。</p>
             </div>
           )}
         </aside>

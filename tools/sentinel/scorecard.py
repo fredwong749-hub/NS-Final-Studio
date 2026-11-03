@@ -81,8 +81,14 @@ def score_run() -> str:
 
 
 def stage_of(run: str) -> tuple[str, dict]:
-    """run 当前走到哪一段：stage_status.json 里最靠后的 doing / done（S1 剧本 → S2 资产 → S3 出图 → S4 视频 → S5 成片）"""
+    """run 当前走到哪一段（S1 剧本 → S2 资产 → S3 出图 → S4 视频 → S5 成片）。
+    PRODMERGE-O 11-03（C-6）：非 legacy 剧读唯一阶段模型 tools/master/sop_gate.stage_view（stage_status.json 没有写入方，退役）；
+    legacy 剧（V1 冻结）仍读旧 stage_status.json"""
     from tools.autopilot import runs as RUNS
+    if not RUNS.is_legacy(run):
+        from tools.master import sop_gate as SG
+        v = SG.stage_view(run)
+        return (v.get("legacy_stage") or "S1"), {"source": "sop_gate", "stage": v.get("stage"), "episodes": v.get("episodes")}
     st = jl((RUNS.run_dir(run) / "stage_status.json").relative_to(ROOT)) or {}
     order = ["S1", "S2", "S3", "S4", "S5"]
     cur = max((k for k in order if (st.get(k) or {}).get("state") in ("doing", "done")), key=order.index, default="S1")
@@ -237,13 +243,15 @@ def workflow_score(c: dict) -> dict:
             fb_new_stale.append(d.get("id"))
     n_fb = len(list((ROOT / "data/feedback/items").glob("fb-*.json"))) or 1
     waits = []                                       # S13 现在只看 V1 producer 登记表（已归档），主 run 写作段没有等人对象；V2 进出图段后改按 run 拆
-    parts = {"unattended": 0.0 if s26 else 1.0,
+    s28 = _open_keys("S28:")
+    parts = {"q10_detector": 0.0 if s28 else 1.0,
+             "unattended": 0.0 if s26 else 1.0,
              "review_chain": 0.0 if s27 else 1.0,
              "no_dup": max(0.0, 1 - len(dup) / c["dup_zero_at"]),
              "auto_requeue": 1 - len(fb_new_stale) / n_fb}
     r = _combine(parts, c["workflow_weights"], c["workflow_unmeasured"], c["cap_when_unmeasured"])
     r.update(src=f"tools/sentinel/scorecard.py workflow_score（{run}）",
-             evidence={"run": run, "s26_open": s26, "s27_open": s27, "s13_wait_open": waits, "dup_render_tickets": dup, "feedback_new_over_30min": fb_new_stale})
+             evidence={"run": run, "s26_open": s26, "s27_open": s27, "s28_open": s28, "s13_wait_open": waits, "dup_render_tickets": dup, "feedback_new_over_30min": fb_new_stale})
     return r
 
 
@@ -265,7 +273,8 @@ def gpu_score(c: dict) -> dict:
              "rssh": None if n < 10 else min(1.0, (ok / n) / c["rssh_target"]),
              "deploy_stop": 1.0 if worst <= c["deploy_stop_max_s"] else max(0.0, c["deploy_stop_max_s"] / worst),
              "resident": 0.0 if _open_keys("S25:") else 1.0,
-             "lend_expiry": 0.0 if _open_keys("S18:") else 1.0}
+             "lend_expiry": 0.0 if _open_keys("S18:") else 1.0,
+             "q10_detector": 0.0 if _open_keys("S28:") else 1.0}
     r = _combine(parts, c["gpu_weights"], c["gpu_unmeasured"], c["cap_when_unmeasured"])
     r.update(src="tools/sentinel/scorecard.py gpu_score",
              evidence={"run": run, "stage": stage, "expected_occupancy": expect, "gpu24_pct": known, "productive_pct_of_known": pk, "rssh_ok_n": [ok, n], "deploy_pause_worst_s": round(worst),

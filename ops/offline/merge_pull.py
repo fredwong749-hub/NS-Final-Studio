@@ -170,7 +170,7 @@ def merge_objects(rel: str, src: Path, dst: Path, host: str) -> int:
     if n:
         backup(rel)
         dst.parent.mkdir(parents=True, exist_ok=True)
-        dst.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+        _atomic_json(dst, out)          # A-12：原子写
     return n
 
 
@@ -248,7 +248,9 @@ def merge_takes_docs(r: dict, l: dict, stages: set | None = None, base: dict | N
     out_takes += [t for k, t in lt.items() if k not in seen]
     out_takes.sort(key=lambda t: (str(t.get("stage")), int(t.get("n") or 0)))
     quarantined = {(t.get("stage"), t.get("n")) for t in out_takes if t.get("quarantined")}
-    out = {**l, **{k: v for k, v in r.items() if k != "takes"}}
+    # A-12（FACTORY 21:3x）：项目方的决定（定稿 locked / locked_src / locked_history、master_gate）以笔记本为准——服务器只是执行端，
+    # 以前顶层按“服务器覆盖”合并，服务器上的旧值会盖掉笔记本上项目方刚点的定稿
+    out = {**l, **{k: v for k, v in r.items() if k != "takes" and not (k in OWNER_KEYS and k in l)}}
     cleared = []
     for key in ("active", "locked"):
         sv, lv = dict(r.get(key) or {}), dict(l.get(key) or {})
@@ -262,7 +264,7 @@ def merge_takes_docs(r: dict, l: dict, stages: set | None = None, base: dict | N
         sv = {st: remap.get((st, n), n) if not isinstance(n, dict) else n for st, n in sv.items()}   # 远端换了号的版本，指针跟着换
         if not sv and not lv:
             continue
-        merged = {**lv, **sv}
+        merged = {**sv, **lv} if key in OWNER_KEYS else {**lv, **sv}      # 定稿：笔记本有就以笔记本为准（A-12）
         for stage, n in list(merged.items()):
             if (stage, n) in quarantined:
                 if lv.get(stage) is not None and (stage, lv.get(stage)) not in quarantined:
@@ -344,6 +346,18 @@ def merge_takes(src: Path, dst: Path, dry: bool = False, host: str | None = None
     return f"takes+{added}~{updated}"
 
 
+OWNER_KEYS = ("locked", "locked_src", "locked_history", "master_gate")   # 项目方决定：笔记本为准（A-12）
+
+
+def _atomic_json(p: Path, obj) -> None:
+    """A-12：先写同目录临时文件再 os.replace（读方不会读到半截文件）"""
+    import os as _os
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + f".{_os.getpid()}.tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
+    _os.replace(tmp, p)
+
+
 def _save_base(base_p: Path | None, r: dict) -> None:
     """记下这次从该台收下的 takes.json（下次三方比较的祖先）"""
     if base_p is None:
@@ -415,7 +429,7 @@ def merge_file(host: str, rel: str, src: Path, att: dict | None = None, dry: boo
                     l_.setdefault("pending_shots", {})[e] = s_["pending_shots"][e]
         if not dry:
             backup(rel)
-            dst.write_text(json.dumps(l_, ensure_ascii=False, indent=1), encoding="utf-8")
+            _atomic_json(dst, l_)       # A-12：原子写
         return "night_state"
     bad = pulled_problem(src, dst)
     if bad:
@@ -449,7 +463,7 @@ def flush_attempts(att: dict, dry: bool = False) -> int:
     cur.update(att)
     if not dry:
         backup("data/producer/attempts.json")
-        p.write_text(json.dumps(cur, ensure_ascii=False, indent=1), encoding="utf-8")
+        _atomic_json(p, cur)            # A-12：原子写（共享账本 attempts.json）
     return len(att)
 
 

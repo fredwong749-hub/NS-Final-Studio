@@ -37,6 +37,9 @@
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
+import importlib.util
 import json
 import os
 import re
@@ -160,14 +163,22 @@ def registry_tables(registry: dict | None) -> tuple[list[dict], list[dict], list
             used.append(label)
 
     registry = registry or {}
-    if PRODUCTION_SCRIPT.exists():
+    # HEADER-O 11-03（ISS-1103-011343-a0ff，L-126）：生产登记按剧取——V1（legacy / 没有 runs.json 的临时根）= data/import/script_v2.json；
+    # 其它剧 = 本剧导入稿 data/import/runs/<run>/script_v2.json（没有就不并，不回退 V1）
+    run, legacy, m = run_info(registry.get("run"))
+    prod = PRODUCTION_SCRIPT if legacy else Path(m.import_path(run, REPO))
+    if prod.exists():
         try:
-            g = json.loads(PRODUCTION_SCRIPT.read_text(encoding="utf-8")).get("globals") or {}
-            add(g.get("character_registry"), g.get("scene_library"), "data/import/script_v2.json")
+            g = json.loads(prod.read_text(encoding="utf-8")).get("globals") or {}
+            add(g.get("character_registry"), g.get("scene_library"),
+                "data/import/script_v2.json" if legacy else prod.relative_to(REPO).as_posix())
         except (OSError, ValueError):
             pass
     for ref in registry.get("from") or []:
-        g = _import_globals(resolve_draft(ref))
+        p = resolve_draft(ref)
+        if not legacy and _is_v1_source(p, m):
+            raise HeaderMissing(f"剧 {run} 的登记来源指向 V1 的文件 {ref}（L-126 完全切割，不继承 V1 人物 / 场景）")
+        g = _import_globals(p)
         add(g.character_registry, g.scene_library, ref)
     sid, before = registry.get("session"), registry.get("before")
     if sid and before and (STORE / sid / "session.json").exists():
@@ -191,11 +202,115 @@ def _table(label: str, cols: tuple, fields: tuple, rows: list[dict]) -> str:
     return "\n".join(out)
 
 
-def script_header(cfg: dict | None = None, registry: dict | None = None) -> tuple[str, str | None]:
+_RUN_SCOPE: "contextvars.ContextVar[str | None]" = contextvars.ContextVar("script_chat_run", default=None)
+
+
+@contextlib.contextmanager
+def run_scope(run: str | None):
+    """本段代码里没显式给 run 的 script_header / registry_tables / build_system_prompt 都按这部剧取（autoflow 一次处理一个 run_dir）"""
+    tok = _RUN_SCOPE.set(run)
+    try:
+        yield
+    finally:
+        _RUN_SCOPE.reset(tok)
+
+
+class HeaderMissing(RuntimeError):
+    """非 V1 剧找不到本剧的全局头数据（P1_storyline）或读到了 V1 来源：失败关闭，不回退 V1 导入稿（L-126）"""
+
+
+def run_info(run: str | None = None) -> tuple[str | None, bool, object]:
+    """(剧, 是否 V1 口径, tools/autopilot/runs.py 模块)。经 ns_agent.run_paths（唯一入口）：
+    REPO 下没有 config/pipeline/runs.json（测试临时根）/ legacy 剧（series10_v1）→ V1 口径（旧行为不变）；
+    run 不给 = 当前剧（NS_RUN / primary）"""
+    from ns_agent import run_paths as RP  # noqa: PLC0415
+    if not (REPO / "config" / "pipeline" / "runs.json").is_file():
+        return run, True, None
+    m = RP.runs_module(REPO)
+    if m is None:
+        return run, True, None
+    r = run or _RUN_SCOPE.get() or m.current_run(REPO)
+    return r, bool(m.is_legacy(r, REPO)), m
+
+
+def run_for_dir(run_dir: Path | str | None) -> str | None:
+    """data/pipeline/runs/<run>/ 下的目录 / 文件 → <run>；别处（测试临时目录等）→ None（= 当前剧）"""
+    if not run_dir:
+        return None
+    try:
+        rel = Path(run_dir).resolve().relative_to((REPO / "data" / "pipeline" / "runs").resolve())
+    except ValueError:
+        return None
+    return rel.parts[0] if rel.parts else None
+
+
+def _is_v1_source(p: Path, m) -> bool:
+    legacy = m.legacy_run(REPO)
+    p = p.resolve()
+    return p == PRODUCTION_SCRIPT.resolve() or Path(m.run_dir(legacy, REPO)).resolve() in p.parents
+
+
+def _cell(v) -> str:
+    return str(v if v is not None else "").replace("|", "／").replace("\n", " ").strip()
+
+
+def run_header(run: str, m) -> tuple[str, str]:
+    """非 V1 剧的全局头：只从本剧 P1_storyline.json（人物 / 场景）+ P1_looks.json（标志特征）+ 本剧资产包清单推导。
+    没有 P1_storyline → HeaderMissing（失败关闭）"""
+    d = Path(m.run_dir(run, REPO))
+    sl = d / "P1_storyline.json"
+    if not sl.is_file():
+        raise HeaderMissing(f"剧 {run} 还没有 data/pipeline/runs/{run}/P1_storyline.json：全局头只按本剧推导，不回退 V1 导入稿（L-126）")
+    story = json.loads(sl.read_text(encoding="utf-8"))
+    story = story.get("obj", story) if isinstance(story, dict) else {}
+    lk = d / "P1_looks.json"
+    looks = json.loads(lk.read_text(encoding="utf-8")) if lk.is_file() else []
+    looks = {x.get("char_id") or x.get("name"): x for x in (looks if isinstance(looks, list) else []) if isinstance(x, dict)}
+    mp = m.asset_manifest(run, REPO)
+    man = json.loads(Path(mp).read_text(encoding="utf-8")) if mp and Path(mp).is_file() else {}
+    chars, scenes = story.get("characters") or [], story.get("scenes") or []
+
+    def rel(p):
+        try:
+            return Path(p).resolve().relative_to(REPO.resolve()).as_posix()
+        except ValueError:
+            return str(p)
+    srcs = [rel(sl)] + ([rel(lk)] if lk.is_file() else []) + ([rel(mp)] if man else [])
+    out = [f"# 《{story.get('title') or run}》（{run}）", "",
+           f"来源：{' + '.join(srcs)}（全局头按本剧推导，HEADER-O / L-126：不读 V1 导入稿）", "",
+           "**每条prompt统一前缀（角色锁）**", "", "```Plain Text"]
+    for c in chars:
+        lo = looks.get(c.get("char_id")) or looks.get(c.get("name")) or {}
+        mark = f"；标志={lo['marker']}" if lo.get("marker") else ""
+        out.append(f"【{c.get('name')}】{c.get('age') or ''}岁成年{c.get('gender') or ''}性，{c.get('zh_look') or ''}{mark}")
+    out += ["```", ""]
+    if man:
+        out += [f"**资产包已登记（{rel(mp)}）**", "", "```Plain Text"]
+        for cid, cv in (man.get("characters") or {}).items():
+            out.append(f"  人物 {cid} {cv.get('display_name') or ''} 造型 {'、'.join((cv.get('looks') or {}).keys()) or '无'}")
+        for sid in (man.get("scenes") or {}):
+            out.append(f"  场景 {sid}")
+        out += ["```", ""]
+    out.append(_table("全剧人物表", _CHAR_COLS, _CHAR_FIELDS,
+                      [{"name": _cell(c.get("name")), "char_id": _cell(c.get("char_id")), "zh": _cell(c.get("zh_look")),
+                        "en": _cell(c.get("en_phrase")), "voice": _cell(c.get("voice_phrase"))} for c in chars]))
+    out += ["", _table("全剧场景表", _SCENE_COLS, _SCENE_FIELDS,
+                       [{k: _cell(s.get(k)) for k in _SCENE_FIELDS} for s in scenes])]
+    return "\n".join(out).rstrip() + "\n", srcs[0]
+
+
+def script_header(cfg: dict | None = None, registry: dict | None = None,
+                  run: str | None = None) -> tuple[str, str | None]:
     """当前剧本全局头（角色锁 / 统一后缀 / 触发词表），到第一个 `## ep` 为止；
-    后面原样并入继承的全剧人物表 / 全剧场景表（registry_tables；全局头原文已有的角色 / 场景不重复）"""
+    后面原样并入继承的全剧人物表 / 全剧场景表（registry_tables；全局头原文已有的角色 / 场景不重复）。
+    HEADER-O 11-03（ISS-1103-011343-a0ff，L-126）：按剧推导——V1 剧（legacy / 临时根）原样走导入来源；
+    其它剧只读本剧 P1 + 资产包清单（run_header），找不到 → HeaderMissing，不回退 V1"""
     cfg = cfg or load_config()
     registry = registry if registry is not None else cfg.get("registry")
+    run, legacy, rmod = run_info(run or cfg.get("run") or (registry or {}).get("run"))
+    if not legacy:
+        head, src = run_header(run, rmod)
+        return head + registry_block(head, {**(registry or {}), "run": run}), src
     # K-OPS-Q31（CLEANUP 11-01）：全局头来源先从现行导入记录推导（PRODUCTION_SCRIPT 的 sources，sha 一致、带全局头的最新一份），
     # 导入新稿后自动跟上；推导不出来（或 header_sources_mode = "config"）才回退到配置 header_sources
     derived = []
@@ -209,7 +324,7 @@ def script_header(cfg: dict | None = None, registry: dict | None = None) -> tupl
             text = p.read_text(encoding="utf-8")
             m = EP_HEAD_RE.search(text)
             head = (text[: m.start()] if m else text).rstrip() + "\n"
-            return head + registry_block(head, registry), rel
+            return head + registry_block(head, {**(registry or {}), "run": run} if rmod is not None else registry), rel
     return "", None
 
 
@@ -234,13 +349,7 @@ APPX_HEAD_RE = re.compile(r"^## \[(.+?)\]\s*$", re.M)
 APPX_TRIG_RE = re.compile(r"^> 触发[:：]\s*(.+)$", re.M)
 
 
-def appendix_sections(cfg: dict | None = None) -> list[dict]:
-    """附录按节切分：`## [节名]` + `> 触发：词、词`（“全部”= 每次都带）"""
-    cfg = cfg or load_config()
-    rel = cfg.get("appendix")
-    if not rel or not (REPO / rel).exists():
-        return []
-    text = (REPO / rel).read_text(encoding="utf-8")
+def _split_appendix(text: str) -> list[dict]:
     heads = list(APPX_HEAD_RE.finditer(text))
     out = []
     for i, m in enumerate(heads):
@@ -248,6 +357,39 @@ def appendix_sections(cfg: dict | None = None) -> list[dict]:
         t = APPX_TRIG_RE.search(body)
         trig = [w.strip() for w in re.split(r"[、,，]", t.group(1)) if w.strip()] if t else ["全部"]
         out.append({"name": m.group(1), "triggers": trig, "text": body})
+    return out
+
+
+def run_parts(cfg: dict | None = None, run: str | None = None) -> dict:
+    """本剧专属规则（config/script_chat.json run_parts.<run>：system 文件列表 + appendix 文件）。
+    HEADER-O 11-03（L-126）：通用规则只写通用写法，V1 专属条款按剧注入；没有 runs.json 的临时根 = legacy_default"""
+    cfg = cfg or load_config()
+    rp = cfg.get("run_parts") or {}
+    r, legacy, m = run_info(run or cfg.get("run"))
+    key = r if m is not None else (r or rp.get("legacy_default"))
+    v = rp.get(key) if key and not str(key).startswith("_") else None
+    return v if isinstance(v, dict) else {}
+
+
+def appendix_sections(cfg: dict | None = None) -> list[dict]:
+    """附录按节切分：`## [节名]` + `> 触发：词、词`（“全部”= 每次都带）。
+    本剧专属附录（run_parts.<run>.appendix）同名节合并：触发词取并集、条目接在通用条目后；新节追加"""
+    cfg = cfg or load_config()
+    rel = cfg.get("appendix")
+    out = _split_appendix((REPO / rel).read_text(encoding="utf-8")) if rel and (REPO / rel).exists() else []
+    extra = run_parts(cfg).get("appendix")
+    if extra and (REPO / extra).exists():
+        by = {x["name"]: x for x in out}
+        for sec in _split_appendix((REPO / extra).read_text(encoding="utf-8")):
+            cur = by.get(sec["name"])
+            if cur is None:
+                out.append(sec)
+                by[sec["name"]] = sec
+                continue
+            cur["triggers"] = cur["triggers"] + [w for w in sec["triggers"] if w not in cur["triggers"]]
+            body = APPX_TRIG_RE.sub("", sec["text"].split("\n", 1)[1] if "\n" in sec["text"] else "", count=1).strip()
+            if body:
+                cur["text"] = cur["text"] + "\n" + body
     return out
 
 
@@ -295,6 +437,65 @@ SCENE_TABLE_RE = re.compile(r"^\*\*全剧场景表\*\*[^\n]*\n(?:[ \t]*\n)?(?:[ 
 CHARACTER_TABLE_RE = re.compile(r"^\*\*全剧人物表\*\*[^\n]*\n(?:[ \t]*\n)?(?:[ \t]*\|[^\n]*(?:\n|$))+", re.M)
 
 
+CAMERA_BLOCK_HEAD = "【本剧启用的运镜（config/director/camera_moves.yaml 自动注入，唯一来源；不在这张表里的运镜一律不写）】"
+CAMERA_ROW_RE = re.compile(r"^- `([a-z0-9_]+)`｜", re.M)
+
+
+def camera_moves_block(run: str | None = None) -> tuple[str, list[str]]:
+    """HEADER-O 11-03：写手包的运镜表按 camera_moves.yaml 现场生成（enabled 且本剧可用，ns_agent.camera_norm.enabled_ids），
+    规则文件里不再手写运镜清单。→ (文本, 运镜 id 列表)"""
+    from ns_agent import camera_norm as CN  # noqa: PLC0415
+    r, _legacy, _m = run_info(run)
+    ids = CN.enabled_ids(r)
+    lines = [CAMERA_BLOCK_HEAD,
+             "- **镜头运动** 字段写中文名；motion 行的英文运镜指令、H3 的运镜句照抄该行“H3 写法”（按剧运镜可带速度词、不以 The camera 开头）。"]
+    for mid in ids:
+        mv = CN.move(mid) or {}
+        extra = []
+        if mv.get("only_when") or mv.get("requires"):
+            extra.append("只在：" + "、".join(str(x) for x in ([mv.get("only_when")] if mv.get("only_when") else []) + list(mv.get("requires") or [])))
+        if mv.get("conflicts"):
+            extra.append("不和：" + "、".join(str(x) for x in mv["conflicts"]) + " 同镜")
+        en_alias = "、".join(a for a in mv.get("aliases") or [] if a.isascii())
+        lines.append(f"- `{mid}`｜{mv.get('zh') or mid}｜{mv.get('en') or ''}"
+                     + (f"｜英文别名：{en_alias}" if en_alias else "")
+                     + f"｜H3 写法：{(mv.get('template') or '').strip()}"
+                     + (f"｜{'；'.join(extra)}" if extra else ""))
+    return "\n".join(lines), ids
+
+
+TIMELINE_BLOCK_HEAD = "【本剧时间轴硬规则（sysimpl-v2 一律 strict；系统按 RL-T1–T8 / SS-M1–M8 校验，缺一项这一镜就不导入、不编译）】"
+
+
+def timeline_block(run: str | None = None) -> str:
+    """TIMELINE-O 11-03（项目方：“MiniMax 的提示词……是需要时间轴的”）：V2 剧及所有新剧的写手包按剧注入时间轴硬规则；
+    数字取自校验代码（ns_schema.shot_spec，ns_recipes.lint 同一份常量），不手抄。legacy 剧（V1）/ 认不出剧 → 空串（旧规则不变）"""
+    from ns_schema import shot_spec as SS  # noqa: PLC0415
+    r, legacy, _m = run_info(run)
+    if legacy or not SS.run_strict(r):
+        return ""
+    return "\n".join([
+        TIMELINE_BLOCK_HEAD,
+        f"- 每镜必写 **分拍**（**表演节拍** 同文）：每拍 1.5–2 秒（最长 {SS.BEAT_MAX_S:g} 秒），从 0 连续写到镜长，最后一拍的止 = 镜长；"
+        "每拍格式 `t0–t1秒｜<动作>｜视线=<看向谁/什么>｜表情=<具体部位的变化>｜反应=<另一在画角色的可见反应，单人写 —>｜"
+        "运镜=<这一拍镜头在做什么：固定 / 小幅推近 / 继续推近…>｜声音=<…>`。动作、运镜、视线、表情都按拍写起止，不许整镜一句话。",
+        "- H3 的 integrated_multimodal_description 按 **分拍** 逐拍写，用自然英文写时间顺序（L-141，项目方按官方写法定）："
+        "第一拍以 `In the first <N> seconds,` 开头（N = 第一拍的止，写英文数字，如 two）；之后每拍以 `Then, around the <序数> second,` 开头"
+        "（序数 = 该拍起点所在的第几秒：起点 2 秒 → third，起点 4 秒 → fifth，起点 2.3 秒 → third）；最后一拍写到 `… as the shot ends`。"
+        "拍数、拍序和 **分拍** 一一对应。例（6 秒、三拍 0–2 / 2–4 / 4–6）：`In the first two seconds, … Then, around the third second, … "
+        "Then, around the fifth second, … as the shot ends.`",
+        "- `At MM:SS.mmm,` 只用于切镜（官方 base-en §4.2：`[Shot 2] At 00:03.500, the camera cuts to...`，严格递增、[Shot 1] 不写时间）；"
+        "镜内一律不写 At 时间码、也不写 At the N-second mark。本段优先于附录 sysimpl-v2 里“每拍以 `At 00:SS.mmm,` 开头”的旧写法。",
+        "- 每拍英文都写视线落点（eyes / gaze / looks / glances + 具体对象）和表情部位（brows / lips / mouth / jaw / eyelids / lashes / blink / smile…）；"
+        "≥2 人在画时每拍写另一人的可见反应；运镜句照【本剧启用的运镜】的 H3 写法写在镜内"
+        "（官方 base-en §4.3：Camera motion should be written as a natural English action within the shot）。",
+        "- 第一拍第一句用 already / still / continues / mid- 写第 0 秒已在进行的动作；最后一拍写 as the shot ends 的进行中动作，"
+        "不写 settles / freezes / holds the pose（FL2VA 的 settles into … Picture 2 句单独成句，不算）。",
+        "- 剧本没写 **分拍**、H3 没有镜内时间顺序、拍数 / 拍序和 **分拍** 对不上、或镜内出现 At 时间码：系统判“缺时间轴”（RL-T8 / RL-T9），"
+        "这一镜不导入、不编译，打回补丁环。",
+    ])
+
+
 def build_system_prompt(cfg: dict | None = None, context: str | None = None,
                         appendix_budget: int | None = None) -> tuple[str, list[dict]]:
     """核心规则（每次都带）+ 按 context（原稿 / 用户消息）触发词挑选的附录节 + 格式契约 + 剧本全局头。
@@ -310,6 +511,18 @@ def build_system_prompt(cfg: dict | None = None, context: str | None = None,
         text = (REPO / rel).read_text(encoding="utf-8").strip()
         parts.append({"name": Path(rel).name, "path": rel, "chars": len(text)})
         chunks.append(text)
+    for rel in run_parts(cfg).get("system") or []:      # 本剧专属规则（V1：林晚 / lnwan01 / 系统角色锁等），接在通用规则后
+        if (REPO / rel).exists():
+            text = (REPO / rel).read_text(encoding="utf-8").strip()
+            parts.append({"name": f"本剧专属·{Path(rel).name}", "path": rel, "chars": len(text)})
+            chunks.append(text)
+    cam, _ids = camera_moves_block(cfg.get("run"))
+    parts.append({"name": "本剧启用的运镜（camera_moves.yaml）", "path": "config/director/camera_moves.yaml", "chars": len(cam)})
+    chunks.append(cam)
+    tl = timeline_block(cfg.get("run"))
+    if tl:
+        parts.append({"name": "本剧时间轴硬规则（sysimpl-v2 strict，TIMELINE-O）", "path": "services/recipes/ns_recipes/lint.py", "chars": len(tl)})
+        chunks.append(tl)
     budget = pv.get("appendix_budget") if appendix_budget is None else appendix_budget
     used = 0
     secs = appendix_sections(cfg)   # 命中触发词的节先占预算，“全部”类后带
@@ -333,7 +546,104 @@ def build_system_prompt(cfg: dict | None = None, context: str | None = None,
         parts.append({"name": "剧本全局头" + ("（精简）" if cfg.get("header_mode") == "compact" else ""),
                       "path": src, "chars": len(header)})
         chunks.append("【当前剧本全局头（角色锁、统一后缀、触发词表；只读参考，照此写，不要输出它）】\n" + header)
-    return "\n\n========\n\n".join(chunks), parts
+    system = "\n\n========\n\n".join(chunks)
+    run, legacy, _m = run_info(cfg.get("run"))
+    if not legacy:
+        assert_no_v1(system, run, "写手包", cfg)          # 只检查不改写：非 V1 剧出现 V1 id → HeaderMissing
+    return system, parts
+
+
+GUARD_JSON = REPO / "config" / "v1_guard.json"
+
+
+def _guard_cfg() -> dict:
+    if not GUARD_JSON.is_file():
+        raise HeaderMissing(f"缺少 {GUARD_JSON}：V1 内容词表必须在配置里（失败关闭）")
+    return json.loads(GUARD_JSON.read_text(encoding="utf-8"))
+
+
+def _v1_leak():
+    p = REPO / "tools" / "script_rsi" / "v1_leak.py"
+    sp = importlib.util.spec_from_file_location("v1_leak_for_script_chat", p)
+    mod = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(mod)
+    return mod
+
+
+def own_text(run: str | None) -> str:
+    """本剧自己的 P1_storyline / P1_looks / P0_brief 原文（白名单来源：本剧合法用到的词）"""
+    if not run:
+        return ""
+    d = REPO / "data" / "pipeline" / "runs" / run
+    return "\n".join((d / f).read_text(encoding="utf-8") for f in ("P1_storyline.json", "P1_looks.json", "P0_brief.json")
+                     if (d / f).is_file())
+
+
+def v1_vocab(run: str | None) -> tuple[set[str], list[str]]:
+    """(旧剧内容词, 放行短语)。词 = V1 导入稿 id + v1_leak 词表（旧剧 = 除本剧外的所有剧含第二季：人物 / id / 场景 / 剧名，
+    本剧退回稿，V1 风格短语）+ config/v1_guard.json extra_ids / props；本剧 P1 里出现的词从词表剔除（白名单）"""
+    g = _guard_cfg()
+    words = v1_ids() | set(g.get("extra_ids") or [])
+    v = _v1_leak().vocab(REPO, current=run)
+    for k in ("names", "char_ids", "scenes", "titles", "props", "style"):
+        words |= set(v.get(k) or [])
+    own = own_text(run)
+    weak = set((g.get("weak_props") or {}).get("items") or [])
+    words = {w for w in words if w and len(w) >= 2 and w not in own and w not in weak}
+    allow = [a for a in list(v.get("allow_text") or []) + list((g.get("allow_phrases") or {}).get("items") or []) if a and len(a) >= 2]
+    return words, allow
+
+
+def weak_props(run: str | None) -> set[str]:
+    """K211-F 11-03（REVIEW-A P1③）：config/v1_guard.json weak_props——常用词（名单 / 验收 / 图纸 / 老公），只在文字里另有 V1 专名时才算旧剧内容"""
+    return {w for w in (( _guard_cfg().get("weak_props") or {}).get("items") or []) if w and len(w) >= 2 and w not in own_text(run)}
+
+
+def _word_hits(words, body: str) -> list[str]:
+    out = []
+    for w in words:
+        if w.isascii():
+            if re.search(r"(?<![A-Za-z0-9_])" + re.escape(w) + r"(?![A-Za-z0-9_])", body):
+                out.append(w)
+        elif w in body:
+            out.append(w)
+    return out
+
+
+def v1_hits(text: str, run: str | None) -> list[str]:
+    words, allow = v1_vocab(run)
+    body = text or ""
+    for a in sorted(allow, key=len, reverse=True):
+        body = body.replace(a, " ")
+    out = _word_hits(words, body)
+    if out:                                   # 已有 V1 专名 / 道具词 → 常用弱词也一并报出，写手包好定位
+        out += _word_hits(weak_props(run), body)
+    return sorted(set(out))
+
+
+def assert_no_v1(text: str, run: str | None = None, what: str = "写手包", cfg: dict | None = None) -> None:
+    """只检查、绝不改写（写手包 / 作业包出口）：非 V1 剧出现旧剧内容（V1 / 第二季人物、id、场景、剧名、道具词、V1 风格短语）
+    → HeaderMissing（失败关闭）。本剧 P1 里合法用到的词放行"""
+    r, legacy, _m = run_info(run)
+    if legacy:
+        return
+    left = v1_hits(text, r)
+    if left:
+        raise HeaderMissing(f"剧 {r} 的{what}里有旧剧内容：{'、'.join(left)}（L-126；词表 config/v1_guard.json）")
+
+
+def v1_ids(cfg: dict | None = None) -> set[str]:
+    """V1 导入稿（data/import/script_v2.json）里全部人物名 / 人物 id / 场景 id + config/v1_guard.json extra_ids（lnwan01 等）"""
+    out = set(_guard_cfg().get("extra_ids") or []) if GUARD_JSON.is_file() else set()
+    try:
+        g = json.loads(PRODUCTION_SCRIPT.read_text(encoding="utf-8")).get("globals") or {}
+    except (OSError, ValueError):
+        g = {}
+    for c in g.get("character_registry") or []:
+        out |= {c.get("name"), c.get("char_id")}
+    for e in g.get("scene_library") or []:
+        out.add(e.get("scene_id"))
+    return {x for x in out if x}
 
 
 def prompt_for(user_text: str, context: str | None = None, cfg: dict | None = None) -> tuple[str, list[dict]]:

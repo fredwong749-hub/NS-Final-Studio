@@ -10,13 +10,16 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+import runs as RUNS  # noqa: E402
+_LEGACY = RUNS.legacy_run(ROOT)   # I-16：第一季专用历史工具（入口 gate_legacy_tool 要求显式 --run）
 sys.path.insert(0, str(ROOT / "services" / "agent"))
 from PIL import Image  # noqa: E402
 
 from ns_agent import asset_refs as AR  # noqa: E402
 from ns_agent.gen_contract import postflight as Q  # noqa: E402
 
-P = "series10_v1"
+P = _LEGACY
 OUT = ROOT / "data/review_pages/asset_reflock/calibration.json"
 
 
@@ -29,6 +32,7 @@ def front(cid, lk):
 
 
 def main():
+    RUNS.gate_legacy_tool(None, __file__)
     t0 = time.time()
     res = {"shoes": [], "skirt": [], "sheet": [], "texture": [], "scene": []}
     S01 = Q._ref_crop(im("assets/characters/lin_wan/items/shoes/S01_side45_s0.png"))
@@ -53,7 +57,7 @@ def main():
         res["skirt"].append({"case": lab, "file": p, "positive": pos, **{k: v for k, v in r.items() if k != "box"}})
         print("skirt", lab, r["clip"], r["hist"], flush=True)
     # 设定图 vs 现有首帧（造型层面区分度；首帧服装靠文字，只看分布）
-    d = json.loads((ROOT / "data/pipeline/runs/series10_v1/assets/first_frame_jobs.json").read_text(encoding="utf-8"))
+    d = json.loads((ROOT / ("data/pipeline/runs/" + _LEGACY + "/assets/first_frame_jobs.json")).read_text(encoding="utf-8"))
     import collections
     per = collections.defaultdict(list)
     dry = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8")) if len(sys.argv) > 1 else d

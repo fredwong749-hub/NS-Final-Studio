@@ -6,7 +6,46 @@
 // 字幕时间存成“相对本镜在成片里的起点”，别的镜头裁切 / 换序后字幕仍跟着本镜走。不烧字幕（L-002）；界面只有正向动作（L-123）。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStudio } from "../../store";
+import { PIPE_CELL_WORD, usePipelineStatus } from "../NavTabs.helpers"; // NAVFLOW-F：本集卡在哪一步（sop_gate）
 import "./cutedit.css";
+
+/** NAVFLOW-F 11-03（REVIEW-D P1）：剪辑工程读不到时分两种——
+ *  · 404 = 这一集还没到成片这一步：大白话 + 本集停在哪一步（后端 plain，不显示 sop_gate 原文）
+ *  · 其他（500 / 断网 / 超时）= 真故障：写“暂时读不到”+ 再试，不冒充“还没到” */
+function CutNotReady({ ep, err, retry }: { ep: number; err: string; retry: () => void }) {
+  const { v } = usePipelineStatus();
+  const code = Number(/^(\d{3})/.exec(err)?.[1] ?? 0);
+  const notReady = code === 404;
+  if (!notReady) {
+    return (
+      <div className="ce-root ce-err" role="alert">
+        <b>剪辑工程暂时读不到</b>
+        <p>{code ? (code >= 500 ? "后台处理这一集的成片时出了错，已记录；" : `后台没有接受这个请求（${code}）；`) : "网络没通，"}稍后再试一次，已经剪好的内容不会丢。</p>
+        <p>
+          <button type="button" className="ce-btn" onClick={retry}>
+            再试一次
+          </button>
+        </p>
+      </div>
+    );
+  }
+  const row = v?.episodes.find((e) => e.episode === ep);
+  const stuck = row ? (["script", "assets", "board", "frames", "video", "cut"] as const).find((k) => row.cells[k]?.state !== "done") : null;
+  const stepName = stuck ? v!.steps.find((s) => s.id === stuck)?.label : null;
+  const cell = stuck && row ? row.cells[stuck] : null;
+  return (
+    <div className="ce-root ce-err" role="status">
+      <b>第 {ep} 集还不能剪</b>
+      <p>{err.replace(/^\d{3}\s*/, "") || `第 ${ep} 集的视频还没全部出来`}</p>
+      {row && stepName && cell && (
+        <p>
+          这一集现在停在 <b>{stepName}</b>（{PIPE_CELL_WORD[cell.state]}）{cell.plain ? `：${cell.plain}` : ""}
+        </p>
+      )}
+      <p>视频全部通过后，系统会自动拼出整集预览，这里就能裁切、换序、配乐、导出定稿。</p>
+    </div>
+  );
+}
 
 interface Seg {
   shot: string;
@@ -89,6 +128,7 @@ interface Proj {
   history?: HistItem[];
   subtitles: Sub[];
   subtitles_edited: boolean;
+  music_error?: string | null;
 }
 
 const MIN_KEEP = 0.2;
@@ -585,7 +625,8 @@ export default function CutEditor({ ep, onExported }: { ep: number; onExported?:
     }
   };
 
-  if (err) return <div className="ce-root ce-err">剪辑工程读不到：{err}</div>;
+  // NAVFLOW-F 11-03（L-146）：没有整集时间线 = 这一集还没到成片这一步；写大白话 + 这集卡在哪一步（后端 /api/pipeline/status），不露命令行
+  if (err) return <CutNotReady ep={ep} err={err} retry={load} />;
   if (!proj || !bgm) return <div className="ce-root ce-skel" />;
   const selSeg = segs.find((s) => s.index === sel) ?? null;
   const selLay = lay.find((x) => x.s.index === sel);
@@ -729,9 +770,12 @@ export default function CutEditor({ ep, onExported }: { ep: number; onExported?:
 
           <div className="ce-bgm">
             <b>集级配乐</b>
+            {proj.music_error && <div className="ce-note">曲库暂时读不到，换曲先用不了：{proj.music_error}</div>}
+            {!proj.music_error && !proj.music_choices.length && <div className="ce-dim">这一集还没有可选的配乐</div>}
             <label>
               <span>曲目</span>
               <select value={bgm.file ?? ""} onChange={(e) => setBgmF({ file: e.target.value })}>
+                {!bgm.file && <option value="">选一条配乐</option>}
                 {proj.music_choices.map((m) => (
                   <option key={m.file} value={m.file}>
                     {m.name}

@@ -110,8 +110,10 @@ def plan_episode(ep: dict) -> list[dict]:
         CN = _cn()
         size = size_of(s)
         writer_mid = CN.match_zh(cam_src)
-        ok = lambda mid: CN.is_enabled(mid) and (not size or size in ((CN.move(mid) or {}).get("sizes") or []))   # noqa: E731
-        if big:
+        ok = lambda mid: CN.is_enabled(mid, motion=motion) and (not size or size in ((CN.move(mid) or {}).get("sizes") or []))   # noqa: E731
+        if big and writer_mid == "handheld_follow" and ok("handheld_follow"):
+            move, why_m = "handheld_follow", "走动镜：沿用写作方手持跟拍（V2 按剧运镜，只用在走动镜上）"
+        elif big:
             move, why_m = "static", "本镜有大动作：不叠运镜（Pika P10 大动作变软；一镜一个主动作）"
         elif spk:
             move, why_m = ("push_in" if (lvl or 0) >= 2 and ok("push_in") else "static"), "对白镜：固定或小幅推近，保脸部清晰和口型（Pika P10）"

@@ -35,9 +35,16 @@ def build_graph(job: dict, seed: int, upload, prefix: str, size=(768, 1344), ove
     names = [upload(ROOT / r if not Path(r).is_absolute() else Path(r)) for r in job["refs"]]
     # PRODUCER：总调度驳回重出可指定预设（如 frame_v9_heavy）；overrides 只给 scope=ab 实验用（RESEARCH 11-01），生产调用不传
     eff = IP.resolve(job.get("preset") or preset_id(), {"style_suffix": "", **(overrides or {})})
-    wf = W.qwen_edit(job["prompt"], "", names, size[0], size[1], seed, prefix, m=W.QwenModel(), loras=[],
+    wf = W.qwen_edit(job["prompt"], job.get("negative") or "", names, size[0], size[1], seed, prefix, m=W.QwenModel(), loras=[],   # W-40
                      ref_resolution=0, crop=False)
     wf = IP.apply(wf, eff, set())
+    # CARRYOVER 第 11 项（MERGE-IMG-O 11-03）：图先按 Turbo 默认模型建（negative_for 把负面词清空），预设换成 Base（cfg>1）时
+    # 负面分支真正参与采样 → 把作业负面词（含未成年人外观硬负面）写回编码器；Turbo 照旧不送
+    cfg_ = float(((wf.get("38") or {}).get("inputs") or {}).get("cfg") or 1.0)
+    if eff and eff.get("unet") != "turbo" and cfg_ > 1.0:
+        for n in wf.values():
+            if "TextEncodeQwenImage" in n.get("class_type", "") and "negative_prompt" in n.get("inputs", {}):
+                n["inputs"]["negative_prompt"] = job.get("negative") or ""
     sent = next((n["inputs"].get("prompt") for n in wf.values() if "TextEncodeQwenImage" in n.get("class_type", "")), job["prompt"])
     return wf, eff, sent
 
@@ -296,20 +303,21 @@ def _pf_write(shot_id: str, stage: str, n: int, pf: dict, ctx: dict | None = Non
     把临时数据写进了真实 data/renders/ep01/S1/takes.json）；expect_file：版本文件不一致就不写（不是同一版）"""
     from . import pipeline as P
     path = Path(path) if path else P.shot_dir(shot_id) / "takes.json"
-    with P.shot_lock(shot_id):
-        data = P._read_json(path, None)
-        if not data:
-            return
+    if not P._read_json(path, None):
+        return
+
+    def fn(data):                                # A-04：takes.json 只经 mutate_takes 写（锁 + seq + 备份 + last_op）
         t = next((x for x in data["takes"] if x["stage"] == stage and x["n"] == n), None)
         if t is None or (expect_file and t.get("file") != expect_file):
-            return
+            return data
         c = dict(t.get("contract") or {})
         c["postflight"] = pf                     # 兼容旧读者（镜像）
         if ctx is not None:
             c["pf_ctx"] = ctx
         t["contract"] = c
         t["postflight"] = pf                     # A-03：唯一字段（pf_of 先读它）
-        P._write_json(path, data)
+        return data
+    P.mutate_takes(shot_id, fn, op="postflight_write", by="unified_frame._pf_write", path=path)
 
 
 def mark_pending(shot_id: str, stage: str, n: int, ctx: dict) -> None:

@@ -39,7 +39,7 @@ def run_dir() -> Path:
             return json.loads(Path(p).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return {}
-    run = (_j(ROOT / "config/pipeline/run.json") or {}).get("run_id")     # 总调度 02:0x：RUN_ID 从配置读（和 producer 对齐）
+    run = (_j(ROOT / "config/pipeline/runs.json") or {}).get("primary")         or (_j(ROOT / "config/pipeline/run.json") or {}).get("run_id")     # PRODMERGE-O：当前剧只认 runs.json（run.json 只在没有登记表时兜底）
     if run:
         return ROOT / "data/pipeline/runs" / run
     cfg = _j(ROOT / "config/recipes/asset_refs.json") or {}

@@ -12,7 +12,7 @@
   v7 单脸参考    双人镜：只挂主角脸参考，另一人只用文字；单人林晚镜：v3 + @identity lin_wan_qi 0.6（量 LoRA 在 S★ 里的作用）
 打分：身份（gpu33 原地 ArcFace，tools/series10_imggen/score_remote.py）+ “塑料感”代理指标（本机 cv2）：
   脸部高频能量（脸框内 灰度 − 高斯模糊σ2 的绝对值均值，越低越“磨皮 / 塑料”）、全图 Laplacian 方差（清晰度）、平均饱和度。
-输出：data/pipeline/runs/series10_v1/images/imgfix/<镜>/<变体>.png，对照页 data/review_pages/series10_imgfix/index.html
+输出：data/pipeline/runs/<legacy run>/images/imgfix/<镜>/<变体>.png，对照页 data/review_pages/series10_imgfix/index.html
 """
 from __future__ import annotations
 
@@ -29,6 +29,9 @@ import cv2
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+import runs as RUNS  # noqa: E402
+_LEGACY = RUNS.legacy_run(ROOT)   # I-16：第一季专用历史工具（入口 gate_legacy_tool 要求显式 --run）
 for p in ("services/render_router", "services/agent", "packages/schema", "tools/pipeline", "tools/series10_imggen"):
     sys.path.insert(0, str(ROOT / p))
 from ns_render import image_params as IP  # noqa: E402
@@ -36,7 +39,7 @@ from ns_render import workflows as W  # noqa: E402
 import imggen as IG  # noqa: E402
 import refkit as RK  # noqa: E402
 
-RUN = ROOT / "data/pipeline/runs/series10_v1"
+RUN = ROOT / ("data/pipeline/runs/" + _LEGACY)
 OUT = RUN / "images/imgfix"
 PAGE = ROOT / "data/review_pages/series10_imgfix/index.html"
 LANES = {"gpu33:0": "http://127.0.0.1:18188", "gpu33:1": "http://127.0.0.1:18189", "gpu33:3": "http://127.0.0.1:18191"}
@@ -144,7 +147,7 @@ def reflock(job, assets):
     shot = next(x for x in ep.shots if f"ep{n:02d}-S{x.index}" == job["shot"])
     g = IJ.merged_globals(si.globals, IJ.production_globals())
     faces = [r for r in job["refs"] if "face_ref" in r]
-    p, c, sr, plan = IJ.frame_prompt_full(ep, shot, g, faces, "series10_v1", assets=assets)
+    p, c, sr, plan = IJ.frame_prompt_full(ep, shot, g, faces, _LEGACY, assets=assets)
     return p, (list(plan.files) if plan else faces)
 
 
@@ -396,6 +399,7 @@ border-radius:8px;padding:6px;min-width:230px;max-width:230px}.card img{width:10
 
 
 if __name__ == "__main__":
+    RUNS.gate_legacy_tool(None, __file__)        # I-16：page 和出图两条路都要显式 --run
     if len(sys.argv) > 1 and sys.argv[1] == "page":
         r = json.loads((OUT / "results.json").read_text(encoding="utf-8"))
         score(r)

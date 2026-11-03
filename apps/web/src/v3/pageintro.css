@@ -1,0 +1,95 @@
+/* W5 UIUX 11-03：每页顶部一句话 + 404 + 全部页面索引 */
+.pg-intro {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0;
+  padding: 6px 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--fg-2, #a8a8a8);
+  border-bottom: 1px solid var(--line-1, rgba(127, 127, 127, 0.18));
+  background: var(--bg-1, transparent);
+  flex-wrap: wrap;
+}
+.pg-intro b {
+  color: var(--fg-1, inherit);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pg-intro span {
+  min-width: 0;
+  flex: 1 1 320px;
+}
+.pg-intro-todo {
+  white-space: nowrap;
+  color: var(--warn, #d9a030);
+  text-decoration: none;
+  font-weight: 600;
+}
+.pg-intro-todo:hover {
+  text-decoration: underline;
+}
+
+.pg-404 {
+  max-width: 920px;
+  margin: 24px auto;
+  padding: 0 16px;
+}
+.pg-404 h1 {
+  font-size: 22px;
+  margin: 0 0 8px;
+}
+.pg-404 p {
+  color: var(--fg-2, #a8a8a8);
+  line-height: 1.7;
+}
+.pg-404-next a {
+  font-weight: 600;
+}
+
+.pg-all {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px 20px;
+  margin-top: 12px;
+}
+.pg-all h3 {
+  font-size: 13px;
+  margin: 0 0 6px;
+  color: var(--fg-2, #a8a8a8);
+  font-weight: 600;
+}
+.pg-all ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.pg-all li {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--line-1, rgba(127, 127, 127, 0.18));
+}
+.pg-all li a {
+  font-weight: 600;
+  text-decoration: none;
+}
+.pg-all li a:hover {
+  text-decoration: underline;
+}
+.pg-all-intro {
+  font-size: 12px;
+  color: var(--fg-2, #a8a8a8);
+}
+.pg-all small {
+  font-size: 11px;
+  color: var(--fg-3, #808080);
+}
+.pg-all.compact li {
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}

@@ -337,10 +337,13 @@ def _cand_ok(root: Path, c: dict) -> tuple[bool, dict | None]:
 
 def pick_items(root: Path, closed: set[str]) -> tuple[list[dict], list[dict]]:
     """返回（进队列的挑选, 系统自动选掉的挑选）"""
+    from ns_api import owner_pick as OP   # 统一入口 POST /api/owner/pick（INBOXPICK-S）
     out, auto = [], []
+    closed = (closed | OP.hidden_ids(root)) - OP.delegated_ids(root)       # 已收下 / 处理中 / 已生效的挑选不再出现；L-136 代选的留着（显示“已代选，可修改”）
     for r in requests(root):
         if r.get("kind") != "pick" or str(r["id"]) in closed:
             continue
+        via_pick = OP.wired(str(r["id"]))
         cands = []
         for i, c in enumerate(r.get("candidates") or []):
             if not isinstance(c, dict):
@@ -349,10 +352,13 @@ def pick_items(root: Path, closed: set[str]) -> tuple[list[dict], list[dict]]:
             if not ok:
                 continue
             key = str(c.get("key") or i + 1)
-            cands.append({"key": key, "label": c.get("label") or key, "url": _file_url(c.get("file") or (t or {}).get("file")),
-                          "kind": "video" if str(c.get("stage")) == "video" else "image", "scores": _scores(t),
+            audio = OP.audio_for(root, str(r["id"]), key) or _file_url(c.get("audio"))
+            url = c.get("thumb_url") or _file_url(c.get("file") or (t or {}).get("file"))   # V2CUT-O：候选可直接给接口地址（V2 资产 /api/v2/asset-file）
+            cands.append({"key": key, "label": c.get("label") or key, "url": audio or url,
+                          "kind": "audio" if audio else "video" if str(c.get("stage")) == "video" else "image", "scores": _scores(t),
+                          "audio": audio, "thumb": _file_url(c.get("thumb")) or url, "full": url,
                           "sid": c.get("sid"), "stage": c.get("stage"), "n": c.get("n"), "score": c.get("score")})
-        if len(cands) <= 1:
+        if len(cands) <= 1 and not (via_pick and cands):
             auto.append({"id": str(r["id"]), "kind": "pick", "only": cands[0]["key"] if cands else None, "apply": r.get("apply"),
                          "cand": cands[0] if cands else None})
             continue
@@ -362,8 +368,12 @@ def pick_items(root: Path, closed: set[str]) -> tuple[list[dict], list[dict]]:
                     "detail": r.get("detail") or "", "source": r.get("source") or r.get("by") or "", "at": r.get("at") or "",
                     "media": [{"url": c["url"], "kind": c["kind"], "label": c["label"], "key": c["key"]} for c in cands],
                     "candidates": cands, "scores": next((c["scores"] for c in cands if c["key"] == rec), []),
-                    "options": [{"key": c["key"], "label": c["label"]} for c in cands] + [{"key": "later", "label": "稍后"}],
-                    "recommend": {"choice": rec, "why": r.get("why") or "系统推荐（契约分最高）"}, "apply": r.get("apply"), "link": r.get("link")})
+                    "options": [{"key": c["key"], "label": c["label"]} for c in cands] + ([] if via_pick else [{"key": "later", "label": "稍后"}]),
+                    "recommend": {"choice": rec, "why": r.get("why") or "系统推荐（契约分最高）"}, "apply": r.get("apply"), "link": r.get("link"),
+                    # 统一入口：有 pick_api 的条目，前端点“用这个”直接 POST 到它，选定后真正生效（voice_v2 已接；图片类等资产线接）
+                    "pick_api": "/api/owner/pick" if via_pick else None, "pick_state": OP.state_of(root, str(r["id"])) if via_pick else None,
+                    # V2CUT-O 11-03：确认本集造型（look）一条列出全部人物：人名 / 本集造型 / 缩略图（look_confirm.sync_picks 投递）
+                    **({"people": r["people"], "run": r.get("run"), "episode": r.get("episode")} if r.get("people") else {})})
     return out, auto
 
 
@@ -619,6 +629,8 @@ def decide(root: Path, item_id: str, choice: str, reason: str, user: str, spot_f
     it = _find(root, item_id)
     if not it:
         raise HTTPException(404, f"队列里没有 {item_id}（可能已经处理过）")
+    if it.get("pick_api"):
+        raise HTTPException(409, f"{item_id} 要走统一入口 {it['pick_api']}（选定后才会真的生效），不能只记一笔")
     keys = {o["key"] for o in it.get("options") or []}
     if choice not in keys:
         raise HTTPException(400, f"{item_id} 只能选：{'、'.join(sorted(keys))}")
@@ -653,6 +665,8 @@ def undo(root: Path, item_id: str, user: str) -> dict:
     last = next((d for d in reversed(decisions(root)) if d.get("id") == item_id), None)
     if not last or last.get("choice") == "undo":
         raise HTTPException(404, f"{item_id} 没有可撤销的决定")
+    if str(last.get("via") or "").startswith("owner_pick"):     # owner_pick / owner_pick:startup / owner_pick:cli（RESTARTFIX-O）
+        raise HTTPException(409, "这个选择已经写进配置并生效，撤不回；要换请告诉总调度")
     if last.get("kind") == "spot" and last.get("choice") in ("pass", "fail"):
         raise HTTPException(409, "抽检结论已经交给机签统计，撤不回；需要改判请告诉总调度")
     try:

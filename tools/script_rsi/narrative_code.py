@@ -174,7 +174,7 @@ def cmd_dist(a) -> int:
             if p.exists():
                 t = p.read_text(encoding="utf-8")
                 if not name.endswith(".final.md"):
-                    header, _ = SC.script_header(registry={})
+                    header, _ = SC.script_header(registry={}, run=SC.run_for_dir(run))
                     t = header + "\n---\n\n" + t[t.find("## ep"):]
                 sh, bl = _episode_material(t, ep)
                 rows["S2"][ep] = episode_checks(sh, bl)

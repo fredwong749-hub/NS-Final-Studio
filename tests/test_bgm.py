@@ -282,7 +282,6 @@ def test_loudnorm_level_check_redoes_spiky_track(tmp_path):
     import pytest
     if not shutil.which("ffmpeg"):
         pytest.skip("没有 ffmpeg")
-    from tools.bgm import deliver as D
     sr = 48000
     rng = np.random.default_rng(0)
     t = np.arange(sr * 12) / sr
@@ -302,3 +301,52 @@ def test_loudnorm_level_check_redoes_spiky_track(tmp_path):
     assert rep["level_ok"], rep                             # 重做后到位
     assert abs(rep["output_i"] + 16.0) <= D.LEVEL_TOL_LU
     assert rep.get("redo"), "这条应当触发重做"
+
+
+def test_loudnorm_redo_keeps_smallest_deviation(tmp_path, monkeypatch):
+    """OVERSIGHT-F P2：重做循环保留偏差最小的那一次（不是最后一次），并用那次的增益重写交付文件；仍不到位 → level_ok=False"""
+    outs = iter([-20.0, -17.5, -16.7, -15.2, -16.9, -17.1, -16.7])   # 首遍 + 5 次重做 + 按最好那次重写
+    calls = {"loud": [], "lim": []}
+
+    def fake_2pass(ff, src, dst, lufs, tp, lra):
+        o = next(outs)
+        calls["loud"].append(o)
+        return {"input_i": -22.0, "input_tp": -0.3, "output_i": o, "output_tp": -1.5, "normalization_type": "dynamic"}
+
+    monkeypatch.setattr(D, "_loudnorm_2pass", fake_2pass)
+    monkeypatch.setattr(D, "_prelimit", lambda ff, src, dst, gain, tp: calls["lim"].append(round(gain, 2)))
+    monkeypatch.setattr(D, "ffmpeg", lambda: "ffmpeg")
+    rep = D.loudnorm(tmp_path / "in.wav", tmp_path / "out.flac", -16.0, -1.0)
+    assert rep["output_i"] == -16.7 and rep["level_dev_lu"] == -0.7
+    assert rep["level_ok"] is False
+    assert len(rep["redo"]["tries"]) == 5
+    assert rep["redo"]["kept_gain_db"] == calls["lim"][1]        # 第 2 次重做的增益
+    assert calls["lim"][-1] == calls["lim"][1]                   # 最后按最好那次重写了交付文件
+    assert "level_warn" in rep
+
+
+def test_loudnorm_in_tolerance_no_redo(tmp_path, monkeypatch):
+    monkeypatch.setattr(D, "_loudnorm_2pass", lambda *a: {"input_i": -18, "input_tp": -2, "output_i": -16.3, "output_tp": -1.5,
+                                                         "normalization_type": "linear"})
+    monkeypatch.setattr(D, "_prelimit", lambda *a: (_ for _ in ()).throw(AssertionError("不该重做")))
+    monkeypatch.setattr(D, "ffmpeg", lambda: "ffmpeg")
+    rep = D.loudnorm(tmp_path / "in.wav", tmp_path / "out.flac", -16.0, -1.0)
+    assert rep["level_ok"] and "redo" not in rep
+
+
+def test_loudnorm_first_pass_counts_as_candidate(tmp_path, monkeypatch):
+    """OVERSIGHT-F 第 14 轮：第 1 遍（不限幅）也是候选；重做都不如它时保留第 1 遍，并按不限幅重写交付文件"""
+    outs = iter([-16.6, -15.0, -17.5, -15.2, -17.0, -18.0, -16.6])
+    calls = {"src": [], "lim": []}
+
+    def fake_2pass(ff, src, dst, lufs, tp, lra):
+        calls["src"].append(Path(src).name)
+        return {"input_i": -17.0, "input_tp": -0.5, "output_i": next(outs), "output_tp": -1.5, "normalization_type": "dynamic"}
+
+    monkeypatch.setattr(D, "_loudnorm_2pass", fake_2pass)
+    monkeypatch.setattr(D, "_prelimit", lambda ff, src, dst, gain, tp: calls["lim"].append(gain))
+    monkeypatch.setattr(D, "ffmpeg", lambda: "ffmpeg")
+    rep = D.loudnorm(tmp_path / "in.wav", tmp_path / "out.flac", -16.0, -1.0)
+    assert rep["redo"]["kept"] == "first_pass" and rep["redo"]["kept_gain_db"] is None
+    assert rep["output_i"] == -16.6 and rep["level_ok"] is False
+    assert len(calls["lim"]) == 5 and calls["src"][-1] == "in.wav"     # 最后一次按不限幅从原文件重写

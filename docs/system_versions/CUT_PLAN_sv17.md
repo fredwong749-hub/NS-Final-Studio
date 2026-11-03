@@ -523,3 +523,24 @@ knowledge/generated/index.json
 | 快照 G1+G2 | syntax_guard PASS（907） | — | — |
 | 快照 G1+G2+G3（不含 accept.py 时） | syntax_guard FAIL | asset_worker.py:739 import gen_contract.accept | 已把 accept.py 归入 G3；补上后 G1..G3 PASS（936） |
 
+
+
+### G2/G3 补入（REVIEW-G2 P1-2，总调度 10:50 并入）
+G2 += tools/script_rsi/hollywood.py、tools/knowledge/compile.py、tests/test_fact_patch_guide.py、packages/schema/ns_schema/h3_lint.py、tools/pipeline/hard_constraints.py；G3 += tests/test_w7_import_followup.py。真 cut B 前按 §4 归组规则再跑一次 `git status --porcelain -uall` 核对。
+
+## 7. cut B 实跑记录（W13 CUTB-PREP，11-03 11:3x–12:5x，Opus 工人；没 commit / tag / push / deploy）
+
+- 清单：`docs/system_versions/LIST_cutB.txt`（349 项，一行一个路径，可直接 `xargs git add`）。= §4 G2–G7 + §G2/G3 补入 + REVIEW-G3（4 项 + hosts.py / hosts.json）+ A-G7（7 项）+ REVIEW-G5/G6 / G4b 补入 + CODER-PS 12:08 交付 + `git status --porcelain -uall` 按归组规则新冒出的（当日 docs、sop_gate.json、ops/*、runs.py、master_check / sop_gate.py、acting_lints / writer_lints / ownership.yaml、lane_heal.py + json + 测试、test_struct_full_rewrite / test_night_v2_finalize / test_story_runs_409 等）。LIST 文件本身被 `.gitignore:87 /docs/**/*.txt` 忽略，不进树
+- 不进：仓库根误建的 `series10_v2/`（autoflow.json / autoflow_ep02.json / autoflow.log / work_ep02，06:33，疑似 autoflow 按 cwd 相对路径写盘——没删，留给负责人查）；vendor/_eval、data/、隔离区
+- 拼树：§1 方法，临时索引 `C:\Users\fredw\AppData\Local\Temp\nsfs_cutB.idx`，用 Windows git.exe（WSL git 在 /mnt/d 上太慢）
+- 第 1 轮 tree `9b0f958763b1cbec0fa4530d712ea62cac8ab7ef`（336 项）`cut --dry`：syntax_guard ✅（963 文件）/ compile --check ✅ / VQA ✅ / decision_check ✅（✅86 ❌0 ⏳1）/ propagation ✅；**arch_scan ❌ 18 处退化**（业务代码 silent_read / nonatomic_json / hard_run / unowned 等，已报总调度 → W15 修到 0，不改基线）；**pytest ❌ 4 failed / 1908 passed**（132 文件）
+- pytest 红项定性（快照 -n 12 复跑 5 红）：
+  | 测试 | 定性 | 处理 |
+  |---|---|---|
+  | test_voice10_fix::test_cosy_setup_dry_run | 环境：PATH 的 bash = System32 WSL 入口，读不到 `D:/…` 脚本 → 127 | 同 truncated_stdin 口径：优先 Git bash，只有 WSL 入口才 skip 并写原因；本机 Git bash 真跑 13/13 |
+  | test_restart_api_ps1::…preflight_is_not_killed | 时序过严（串行也红）：pwsh 冷启动 + 拿锁比假 API 的 6 s 慢，第一次探针就看到 | 15 s / 30 s / 50 s，断言不变；串行 2/2 过 |
+  | test_merge_vid_o::test_build_base_keeps_v2_scoped_camera_move | 数据态陈旧：ep01-S8 重导后运镜句改成句中小写 | 不分大小写替换，仍断言换进去；23/23 |
+  | test_v2cut_o::test_ref_switch_only_registered_scenes_for_v2、test_frame_jobs_w2::test_chain_regen_instruct_lock_last_stale | 并行偶发（快照串行过） | 不改，cut 自带串行重跑口径 |
+- 按复审另修（只改测试）：test_v2cut_o 3 条（场景库 / 注册表 → “全是本剧登记、不含 V1 id”；造型动作 → 读 look_confirm.episode_state 两态）；test_promptfix_v2 2 条（参考图允许本剧 crop_dir / board_dir = preflight I11 同口径；L-130 比去标记后的 scene_detail）；test_factory a12（Git bash / WSL 入口 skip 口径，本机 Git bash 真跑过）+ resident 用例打桩 asset_tick / dispatch_tick / hollywood_tick（real-data-guard）；test_prodmerge_o:277 改 L-161 口径（fanout 进版关）
+- 第 2 轮 tree **`9b1a00a56a87a009f9a8483c9d952d0736663925`**（349 项，含 W15 / W16 / CODER-PS 12:08）12:24 起跑，pytest -n 12 worker 内存压力下僵死 27 分钟，总调度 taskkill；重跑由总调度在机器空出后执行。kill 前六道闸门已全绿：syntax_guard ✅（967 文件）/ compile --check ✅（kb-20261103-2b54fc9c，668 条）/ **arch_scan ✅ 0 处退化** / VQA ✅ / decision_check ✅（✅86 ❌0 ⏳1）/ propagation ✅；pytest 被杀前进度 96%，可见 1 个 F（名字没输出出来，待总调度重跑定性）。cut_lock 12:58 已正常释放（active=false）
+- 本节写于 tree 9b1a00a5 之后：按 LIST 重拼会多带本节文档改动，tree hash 随之变

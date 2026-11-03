@@ -509,6 +509,8 @@
     },
     {
       "id": "v2_editorial_fantasy_a",
+      "archived": true,
+      "archived_note": "L-129 / L-130：项目方选了 v2_editorial_fantasy_c + v2_editorial_reality_c2，本候选归档（不删）",
       "label": "V2 幻想 A · 霓虹宝石（候选，待项目方挑）",
       "tier": "preview",
       "run": "series10_v2",
@@ -541,6 +543,8 @@
     },
     {
       "id": "v2_editorial_fantasy_b",
+      "archived": true,
+      "archived_note": "L-129 / L-130：项目方选了 v2_editorial_fantasy_c + v2_editorial_reality_c2，本候选归档（不删）",
       "label": "V2 幻想 B · 胭脂红金（候选，待项目方挑）",
       "tier": "preview",
       "run": "series10_v2",
@@ -573,6 +577,9 @@
     },
     {
       "id": "v2_editorial_fantasy_c",
+      "selected": true,
+      "selected_for": "series10_v2 幻想段",
+      "decision": "L-129 / L-130 项目方 11-02 21:2x 挑定（总调度转）：V2 幻想段调色定稿",
       "label": "V2 幻想 C · 黄金时刻（候选，待项目方挑）",
       "tier": "preview",
       "run": "series10_v2",
@@ -596,7 +603,7 @@
           "amount": 0.6,
           "threshold": 2
         },
-        "style_suffix": "时尚杂志大片，日落黄金时刻的低角度暖阳，橙粉色天空，逆光勾边与镜头光晕，色彩明艳温暖，肤色金润，70mm电影胶片质感"
+        "style_suffix": "时尚杂志大片，色彩明艳温暖，肤色金润，70mm电影胶片质感，Leica lens rendering with crisp sharpness and fine micro-contrast, ARRI Alexa cinema latitude with natural true-to-life skin tones, Kodak film color with fine organic grain"
       },
       "post_lut": "config/post/luts/v2_fantasy_c.cube",
       "lang": "fantasy",
@@ -605,6 +612,8 @@
     },
     {
       "id": "v2_editorial_reality_a",
+      "archived": true,
+      "archived_note": "L-129 / L-130：项目方选了 v2_editorial_fantasy_c + v2_editorial_reality_c2，本候选归档（不删）",
       "label": "V2 现实 A · 阴天冷青（候选，待项目方挑）",
       "tier": "preview",
       "run": "series10_v2",
@@ -637,6 +646,8 @@
     },
     {
       "id": "v2_editorial_reality_b",
+      "archived": true,
+      "archived_note": "L-129 / L-130：项目方选了 v2_editorial_fantasy_c + v2_editorial_reality_c2，本候选归档（不删）",
       "label": "V2 现实 B · 夜街混合光（候选，待项目方挑）",
       "tier": "preview",
       "run": "series10_v2",
@@ -669,6 +680,8 @@
     },
     {
       "id": "v2_editorial_reality_c",
+      "archived": true,
+      "archived_note": "L-129 / L-130：项目方选了 v2_editorial_fantasy_c + v2_editorial_reality_c2，本候选归档（不删）",
       "label": "V2 现实 C · 直闪纪实（候选，待项目方挑）",
       "tier": "preview",
       "run": "series10_v2",
@@ -701,6 +714,8 @@
     },
     {
       "id": "v2_editorial_fantasy_b2",
+      "archived": true,
+      "archived_note": "L-129 / L-130：项目方选了 v2_editorial_fantasy_c + v2_editorial_reality_c2，本候选归档（不删）",
       "label": "V2 幻想 B · 胭脂红金（第 2 版）（候选，待项目方挑）",
       "tier": "preview",
       "run": "series10_v2",
@@ -733,6 +748,9 @@
     },
     {
       "id": "v2_editorial_reality_c2",
+      "selected": true,
+      "selected_for": "series10_v2 现实段",
+      "decision": "L-129 / L-130 项目方 11-02 21:2x 挑定（总调度转）：V2 现实段调色定稿",
       "label": "V2 现实 C · 直闪纪实（第 2 版）（候选，待项目方挑）",
       "tier": "preview",
       "run": "series10_v2",
@@ -756,7 +774,7 @@
           "amount": 0.6,
           "threshold": 2
         },
-        "style_suffix": "纪实杂志快照，夜里用相机机顶闪光灯正面直闪，人物被闪光打得很亮，身后墙面上有一道清晰锐利的黑色硬阴影，背景迅速坠入黑暗，高反差，白平衡偏冷，真实皮肤质感，轻微颗粒"
+        "style_suffix": "纪实杂志快照，高反差，真实皮肤质感，轻微颗粒，Leica lens rendering with crisp sharpness and fine micro-contrast, ARRI Alexa cinema latitude with natural true-to-life skin tones, Kodak film color with fine organic grain"
       },
       "post_lut": "config/post/luts/v2_reality_c2.cube",
       "lang": "reality",
@@ -766,6 +784,8 @@
   ],
   "user_presets": [],
   "auto_final_on_lock": false,
+  "auto_final_on_lock_runs": {"series10_v2": false, "_series10_v2": "等共用验收并回后再开（L-147）：定稿档必须过与预览版同样的检测，现行 render_final 不做检测，总调度 11-03 裁定先关，并回完成后由总调度打开"},
+  "_auto_final_on_lock_runs": "⤴ L-147（项目方 11-03 05:0x）：V2 打开定稿档——首帧定稿后自动用 final_base_2pass（Base 35 步 cfg 3，负面词生效）重出一张；按剧覆盖全局 auto_final_on_lock（final_tier.auto_final_on_lock(run)），V1 不变。L-148（同时）：v2_editorial_fantasy_c / reality_c2 后缀删掉灯光与时间描述（日落暖阳 / 机顶直闪 / 白平衡偏冷…），灯光以每镜剧本【灯光】为准，后缀只留质感",
   "auto_final_on_lock_note": "项目方 2026-10-31 选出图配置 C（Turbo + texture_fix VAE + krea2 0.5 + lin_wan 0.6），定稿档原为 Base 两段式（E，未选）→ 暂时关闭，待“徕卡锐利”方案定稿后改定稿档再开。true = 每次定稿首帧 / 尾帧（预览版）自动排一个定稿档任务；默认 false，由 lock body {final:true} 或 POST …/takes/{stage}/{n}/final 显式触发",
   "prompt_guard": {
     "note": "FIX（ep02_iter P0，2026-10-31）：编译器系统后缀条件化 + 在画角色判定 + 视频身份 LoRA 规则（ns_agent.compiler.prompt_guard；缺键用代码 DEFAULT_PROMPT_GUARD，值相同）。只改系统后缀，不改剧本原文。",

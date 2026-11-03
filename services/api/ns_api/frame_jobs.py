@@ -557,7 +557,11 @@ def unlock_take(shot_id: str, stage: str, n: int):
 def _start_postflight_sweeper():
     import os
     import sys as _sys
-    if "pytest" in _sys.modules or os.environ.get("NS_POSTFLIGHT_SWEEP") == "0":
+    # RESTARTFIX-O（OVERSIGHT 第 17 轮 P2-1）：重启前的备用端口预检实例（NS_API_PREFLIGHT）也不起——它会写真实 takes.json、与真 API 并发
+    if "pytest" in _sys.modules or os.environ.get("NS_POSTFLIGHT_SWEEP") == "0" or os.environ.get("NS_API_PREFLIGHT"):
+        return
+    from ns_api import instance as _INST   # ISS-1103-011049-7420：只在看门狗管理的正式实例上扫（TestClient / 手起 / 进程内导入都不扫）
+    if not _INST.startup_side_effects_allowed():
         return
     from ns_render import unified_frame as _UF
     _UF.start_sweeper()

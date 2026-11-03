@@ -32,9 +32,9 @@ import numpy as np
 from .ffmpeg import FFmpeg, parse_loudnorm
 from .music import (find_music, fit_length, h3_music_shots, ignored_edits, level_curve, load_stems, normalise_rms,
                     read_edit_music, resolve_cues, stale_timeline)
-from .speakers import SpokenLine, resolve_episode
+from .speakers import Cast, SpokenLine, resolve_episode
 from . import director as DIRP   # DIRECTOR 11-02（总调度批准，CONSENT VIDEO10/WORKFLOW → DIRECTOR）：导演层落点，开关 config/post/director.json
-from .tts import (CACHE_DIR, AsrBackend, TtsBackend, Voice, asr_limit, char_error_rate, load_voice_config,
+from .tts import (CACHE_DIR, AsrBackend, TtsBackend, Voice, asr_limit, char_error_rate, default_voiceover_speaker, load_voice_config,
                   synthesize_cached, voice_for, wav_duration)
 
 ROOT = Path(os.environ.get("NS_PROJECT_ROOT") or Path(__file__).resolve().parents[3])  # T42：子进程可指向 projects/<slug>
@@ -1068,7 +1068,7 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
                      ff: FFmpeg | None = None, settings: Settings = Settings(), voices_cfg: dict | None = None,
                      data: Path = DATA, cache_dir: Path = CACHE_DIR, sources: dict[int, dict] | None = None,
                      allow_laptop_video: bool = False, keep_work: bool = False, log=print,
-                     variant: str = "", cut_edit: dict | None = None) -> dict:
+                     variant: str = "", cut_edit: dict | None = None, run: str | None = None) -> dict:
     """Build out_dir/epXX.mp4 and out_dir/epXX.timeline.json; returns the timeline dict.
     variant（AUD）：非空时作为对照版另存 <stem>_<variant>.mp4 + <stem>_<variant>.timeline.json，不碰原版、不建别名。
     cut_edit（CUTEDIT，成片页剪辑工程 cut_project.json 归一后的覆写；None = 行为完全不变）：
@@ -1077,7 +1077,8 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
     manual_trims = normalise_cut_trims(cut_edit)
     bgm_edit = dict((cut_edit or {}).get("bgm") or {})
     ff = ff or FFmpeg.discover()
-    cfg = voices_cfg or load_voice_config()
+    # 音色表：调用方按剧传（compose / cut_export 传 load_voice_config(run=...)）；不传时 V2 会 VoiceRunRequired（失败关闭）
+    cfg = voices_cfg or (load_voice_config(run=run) if run is not None else load_voice_config())
     ep = int(episode["number"])
     s = resolve_settings(settings, ep)      # FIX：合成硬规则 / h3_music 等 None → config/render_quality.json post.*
     if DIRP.enabled("shot_music_off") and s.h3_music != "keep":   # K-EDT-820：停掉镜头级配乐（H3 轨只留对白）
@@ -1129,7 +1130,8 @@ def assemble_episode(episode: dict, out_dir: Path, *, tts: TtsBackend, asr: AsrB
     color_match = color_match_enabled(ep, s)
 
     # 1. lines + TTS
-    lines = resolve_episode(episode, cfg.get("line_overrides"))
+    lines = resolve_episode(episode, cfg.get("line_overrides"), narrator=default_voiceover_speaker(cfg),
+                            cast=Cast.from_cfg(cfg))   # 旁白 / 说话人表都按本剧音色表取（V2 = cast_table 人物表）
     # V2（项目方 10-31 原话：选项 "A. 去掉"——ep02 不保留林晚内心独白）：post.voiceover_drop 按集列出去掉独白的镜头
     drop_vo = voiceover_drop_shots(ep, s)
     if drop_vo:

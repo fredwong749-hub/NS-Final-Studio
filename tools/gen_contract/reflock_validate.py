@@ -3,7 +3,7 @@
 出完在 gpu33 上原地跑 score_remote（身份 / 景别 / 文字）+ hands_remote（坏手），本机跑 Q2 / Q4 / Q7，生成契约逐项结果表 + 接触印样。
 
     .venv/Scripts/python.exe tools/gen_contract/reflock_validate.py [--render] [--score] [--page]
-输出：data/pipeline/runs/series10_v1/images/reflock_val/、data/review_pages/asset_reflock/
+输出：data/pipeline/runs/<legacy run>/images/reflock_val/、data/review_pages/asset_reflock/
 """
 from __future__ import annotations
 
@@ -15,10 +15,13 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+import runs as RUNS  # noqa: E402
+_LEGACY = RUNS.legacy_run(ROOT)   # I-16：第一季专用历史工具（入口 gate_legacy_tool 要求显式 --run）
 for p in ("services/agent", "packages/schema", "tools/pipeline", "tools/prompt_v2", "tools/ab", "services/render_router"):
     sys.path.insert(0, str(ROOT / p))
 
-RUN = ROOT / "data/pipeline/runs/series10_v1"
+RUN = ROOT / ("data/pipeline/runs/" + _LEGACY)
 OUT = RUN / "images" / "reflock_val"
 PAGE = ROOT / "data/review_pages/asset_reflock"
 URL = "http://127.0.0.1:18189"
@@ -53,17 +56,17 @@ def build_jobs() -> list[dict]:
         faces = [cf[n] for n in on if n in cf]
         for variant in ("asset", "noasset"):
             if variant == "asset":
-                prompt, c, sr, plan = IJ.frame_prompt_full(ep, shot, g, [], "series10_v1", bible)
+                prompt, c, sr, plan = IJ.frame_prompt_full(ep, shot, g, [], _LEGACY, bible)
                 refs, rec = plan.files, AR.record(sr, plan)
             else:
-                prompt, c, _, _ = IJ.frame_prompt_full(ep, shot, g, faces, "series10_v1", bible, assets=False)
+                prompt, c, _, _ = IJ.frame_prompt_full(ep, shot, g, faces, _LEGACY, bible, assets=False)
                 refs, rec = faces, None
             for seed in SEEDS:
                 key = f"{sid}_{variant}_s{seed}"
                 graph = IJ.with_loras(PC.graph(prompt, ["@upload:" + r for r in refs], seed, f"reflock_val/{key}"), c.image_loras)
                 j = {"id": key, "shot": sid, "ep": 1, "variant": variant, "seed": seed, "prompt": prompt, "refs": refs,
                      "asset_refs": rec, "cast": IJ.cast_of(shot), "loras": [[f, w] for f, w in c.image_loras],
-                     "compiled_by": "tools/pipeline/image_jobs.py → ns_agent.compiler.compile_shot", "framing_project": "series10_v1",
+                     "compiled_by": "tools/pipeline/image_jobs.py → ns_agent.compiler.compile_shot", "framing_project": _LEGACY,
                      "graph": graph, "out": str((OUT / f"{key}.png").relative_to(ROOT)).replace("\\", "/")}
                 jobs.append(j)
     return jobs
@@ -182,6 +185,7 @@ def post(jobs):
 
 
 def main():
+    RUNS.gate_legacy_tool(None, __file__)
     sys.stdout.reconfigure(encoding="utf-8")
     OUT.mkdir(parents=True, exist_ok=True)
     jobs = build_jobs()

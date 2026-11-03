@@ -192,7 +192,8 @@ checks:
       - '大光圈、浓郁(饱和)?暖调'
       - '浓郁饱和(的)?暖(色)?调'
       - '奶油(般)?(虚化|焦外|柔焦)(光斑)?(?!\s*/)'
-    new_terms: ['S★', 'leica_sstar', '50mm f/2']
+    # ⤴ MERGE-IMG-O 11-03（ISS-1103-030156-9fcb）：L-126 / L-130 之后写作规则不再写死 V1 的 S★ 后缀，改写“按本剧风格配置 config/compile/run_style.json”——这就是本条决定在写作规则里的新口径（V1 默认预设仍 = leica_sstar，由上面的 json 检查锁）
+    new_terms: ['S★', 'leica_sstar', '50mm f/2', 'run_style\.json', '本剧风格配置']
     propagate: [config/script_chat_rules.md, config/script_chat_rules_appendix.md, docs/owner_requirements_for_writer.md]
     stale_allow: [docs/script_chat_rules_audit.md, docs/uimaster/LOCKS.md, docs/master/MASTER_PICTURE.md, 'docs/audit/*', 'docs/ep02_iter/*', config/gen_contract.json,
                   docs/production_issues.md, docs/qa_issues.md, 'docs/design/*']   # 审计 / 授权日志 / 账本 / ep02 历史 / 契约 I7 禁用词定义本身 / 10-29 问题日志 / T59 设计稿样例数据
@@ -396,7 +397,7 @@ checks:
       - '"?enforce"?\s*[=:]\s*false'
       - 'BLOCK\s*=\s*False'
     new_terms: ['转拦截', 'enforce"?\s*[:=]\s*true', '先于视频', '闸门先于', '命中就重出']
-    stale_allow: [docs/ITERATION_PROTOCOL.md, knowledge/rules/ops_decisions.yaml, 'docs/series10_video/ep*_review.md', 'docs/audit/*', docs/master/MASTER_PICTURE.md, docs/master/TODO_BOARD.md]   # 决定本身的记录 / 审片当时的快照
+    stale_allow: [docs/ITERATION_PROTOCOL.md, knowledge/rules/ops_decisions.yaml, 'docs/series10_video/ep*_review.md', 'docs/audit/*', docs/master/MASTER_PICTURE.md, docs/master/TODO_BOARD.md]   # 决定本身的记录 / 审片当时的快照；⤴ W11 11-03：V2_LIVE.md（report_issue 自动卡点流水）改由 decision_propagation.LOG_STREAMS 统一不扫，不在单条决定里放过
     propagate: [docs/REQUIREMENTS.md, docs/vqa/STATE.md, docs/acting/STATE.md, docs/GEN_CONTRACT.md, docs/SOP_production.md,
                 config/vqa.json, knowledge/rules/vqa.yaml, knowledge/rules/acting.yaml]
   - id: D-VQA-02
@@ -600,3 +601,118 @@ checks:
     title: 每个 run 每个角色的身份脸（asset_refs.face_of）= 项目方定的那张；子 run 继承的角色 = 父 run
     type: cmd
     cmd: [tools/qa/identity_face_check.py]
+  # ---------------- H3 时间码只用于切镜，镜内自然英文分拍（TIMELINE-O；L-141）
+  - id: D-PRM-141
+    decision: L-141（项目方 11-03 03:2x 拍板 ISS-6b8d：“按官方写法来”——At MM:SS.mmm 只用于切镜，镜内分拍写自然英文时间顺序）
+    title: lint 有 RL-T9（镜内不许 At 时间码），写手包注入 L-141 写法
+    type: grep_present
+    pattern: 'RL-T9'
+    paths: [services/recipes/ns_recipes/lint.py]
+
+  # ---------------- V2 决策补登（MERGE-OPS-O 11-03，L-137 授权；原文见 docs/master/MASTER_PICTURE.md §1）
+  - id: D-V2-127
+    decision: L-127（项目方 11-02 19:0x：V2 方向——00 后模特 × 金钱与爱情 × 3 个男人；Fable 写；时尚杂志艳丽浓郁、4K、Vogue 式子弹时间运镜；都市 BGM；上海时尚音色）
+    title: V2 方向原话落在 docs/v2/DIRECTION_V2.md（决定 L-127）
+    type: grep_present
+    pattern: 'L-127'
+    paths: [docs/v2/DIRECTION_V2.md]
+  - id: D-V2-129
+    decision: L-129（项目方 11-02 21:2x 运镜页：幻想段 bolt_push_settle、现实段 handheld_follow；orbit_slowmo 没选中停用；2.5D 视差不用）
+    title: camera_moves.yaml 里 orbit_slowmo 按 L-129 停用
+    type: grep_present
+    pattern: 'disabled_by: "L-129'
+    paths: [config/director/camera_moves.yaml]
+  - id: D-V2-130
+    decision: L-130（项目方 11-02 21:2x 调色页：幻想段 fantasy C 黄金时刻，现实段 reality C 第 2 版）
+    title: run_style.json 记了 L-130 选定的两套调色
+    type: grep_present
+    pattern: 'L-130'
+    paths: [config/compile/run_style.json]
+  - id: D-V2-131
+    decision: L-131（项目方 11-02 21:3x 配乐页选定 A 外滩夜光 / B 静安秀场 / C 海派霓虹 三条）
+    title: config/music_v2.json 是 L-131 的 V2 曲库
+    type: json
+    file: config/music_v2.json
+    path: [decision]
+    op: eq
+    value: L-131
+  - id: D-V2-132
+    decision: L-132（项目方 11-02 21:2x 音色页：lead_f=b、m1=b、m2=c、m3=c）
+    title: voices_v2.json 记了 L-132 选定的 4 个音色
+    type: grep_present
+    pattern: 'L-132'
+    paths: [config/voices_v2.json]
+  - id: D-V2-133
+    decision: L-133（项目方 11-02 21:3x：“缺信息就按已有设定写成具体内容”）
+    title: 好莱坞写手模板红线用 L-133 原句
+    type: grep_present
+    pattern: '缺信息就按已有设定写成具体内容'
+    paths: [config/prompts/hollywood_writer.md]
+  - id: D-V2-134
+    decision: L-134（项目方 11-02 21:5x：#/queue 是统一待办通知中心，点一条跳到对应页面）
+    title: /api/owner/inbox 已挂到 API
+    type: grep_present
+    pattern: 'owner_inbox'
+    paths: [services/api/ns_api/app.py]
+  - id: D-V2-135
+    decision: L-135（项目方“你决定就好”：周序沿用 m2_c；卓琳、唐瑶各出 3 个候选进待办）
+    title: voices_v2.json 里周序映射到 m2
+    type: grep_present
+    pattern: '"ch_zhou_xu": "m2"'
+    paths: [config/voices_v2.json]
+  - id: D-V2-136
+    decision: L-136（项目方 11-03 02:2x：“你代替我选择”→ 系统代选模式；成人镜头 / 删除 / 花钱 / 推翻旧决定不在授权内）
+    title: 代选模式开关 config/pipeline/owner_delegate.json 记账 L-136
+    type: grep_present
+    pattern: '"ledger": "L-136"'
+    paths: [config/pipeline/owner_delegate.json]
+  - id: D-V2-137
+    decision: L-137（项目方 11-03 03:1x：V2 并回 V1 系统，以 V1 编译 / 契约 / 调度为主干）
+    title: 导入闸门执行 v1_leak（assert_no_v1）、派单按剧（V2 primary 有专属 control）
+    type: grep_present
+    pattern: 'def v1_gate'
+    paths: [tools/import_script.py]
+  - id: D-V2-137b
+    decision: L-137
+    title: dispatch.py 按 legacy_unprefixed_run 区分旧路径格（V2 primary 不再被 extra_runs 排除）
+    type: grep_present
+    pattern: 'def legacy_run_id'
+    paths: [tools/netfix/dispatch.py]
+  - id: D-V2-138
+    decision: L-138（项目方 11-03 03:1x：无头 Claude 自动派单器“做完测过就开”，限 2 并发、只写交稿文件）
+    title: agent_dispatcher.json 记 L-138 批准
+    type: grep_present
+    pattern: 'L-138'
+    paths: [config/pipeline/agent_dispatcher.json]
+  - id: D-V2-139
+    decision: L-139（项目方 11-03 03:1x：设定图 / 单品裁图只在代选模式开着时自动，平时由项目方在 #/queue 挑）
+    title: asset_jobs.py 的自动登记受 L-139 约束
+    type: grep_present
+    pattern: 'L-139'
+    paths: [tools/pipeline/asset_jobs.py]
+  - id: D-V2-140
+    decision: L-140（项目方 11-03 03:1x：出图维持整集就绪再出，不做按镜就绪；撤回按镜出图与 5 道并行）
+    title: asset_worker max_parallel 回到 2
+    type: json
+    file: config/pipeline/asset_worker.json
+    path: [max_parallel]
+    op: eq
+    value: 2
+  - id: D-V2-142
+    decision: L-142（项目方 11-03 04:2x：ep01 首帧由系统代选——过检 + 总调度亲审后；项目方事后可在 #/queue 修改）
+    title: 计划 v3 定稿记了 L-142；代选走 L-136 同一开关（owner_delegate.py），不另开入口
+    type: grep_present
+    pattern: 'L-142'
+    paths: [docs/master/PLAN_V2_MASTER.md]
+  - id: D-V2-143
+    decision: L-143（项目方 11-03 04:2x：IMGLAB 结构化控制 ControlNet pose/depth、Face/HandDetailer、PuLID、IC-Light ep01 不上；ep02 起逐项 A/B、指标证明才留）
+    title: 生产出图工作流（ns_render/workflows.py）不含结构化控制节点
+    type: grep_absent
+    pattern: 'ControlNet|PuLID|IC-Light|FaceDetailer|HandDetailer'
+    paths: [services/render_router/ns_render/workflows.py]
+  - id: D-V2-144
+    decision: L-144（项目方 11-03 04:2x：harness 余下 switch / deliver 复审门 / brief 在 ep01 完成后做；期间复审由总调度手工派 Fable）
+    title: 计划 v3 定稿记了 L-144（ep01 完成后再做 harness 余下三件）
+    type: grep_present
+    pattern: 'L-144'
+    paths: [docs/master/PLAN_V2_MASTER.md]

@@ -133,31 +133,84 @@ def split_obj(s: str) -> tuple[str | None, str]:
     return None, s
 
 
-def extra_runs() -> list[tuple[str, int]]:
-    """除 primary 外正在生产的 run（按 priority 升序）"""
+def legacy_run_id() -> str | None:
+    """用不带前缀旧路径（data/producer/control.json、data/autopilot/ready_episodes.json）的那部剧 = runs.json legacy_unprefixed_run
+    （K-OPS-F24）；没写 → 退回 primary（老登记表 / 测试夹具的旧行为）"""
     d = jl(RUNS, {}) or {}
-    prim = d.get("primary")
+    return d.get("legacy_unprefixed_run") or d.get("primary")
+
+
+def extra_runs() -> list[tuple[str, int]]:
+    """除旧路径那部剧（legacy，run_id=None 的那一格）外正在生产的 run（按 priority 升序）。
+    MERGE-OPS-O（carryover 第 14 项，L-137）：以前按“不是 primary”排除，V2 当上 primary 后既不是 legacy 格、又被这里排除 → 没有专属 control"""
+    d = jl(RUNS, {}) or {}
+    leg = legacy_run_id()
     out = [(r, int((v or {}).get("priority", 10))) for r, v in (d.get("runs") or {}).items()
-           if r != prim and (v or {}).get("status") in LIVE_RUN_STATUS]
+           if r != leg and (v or {}).get("status") in LIVE_RUN_STATUS]
     return sorted(out, key=lambda x: x[1])
 
 
+NO_CONTROL_STATUS = ("archived",)   # 归档的剧不准备 control
+
+
 def paused_runs() -> list[str]:
-    """runs.json 里登记了、但 status 不是 producing 的非主剧（K-OPS-F20）"""
+    """runs.json 里登记了、但 status 不是 producing 的非 legacy 剧（K-OPS-F20；V2 primary 也在内，MERGE-OPS-O）"""
     d = jl(RUNS, {}) or {}
-    prim = d.get("primary")
-    return sorted(r for r, v in (d.get("runs") or {}).items() if r != prim and (v or {}).get("status") not in LIVE_RUN_STATUS)
+    leg = legacy_run_id()
+    return sorted(r for r, v in (d.get("runs") or {}).items() if r != leg and (v or {}).get("status") not in LIVE_RUN_STATUS)
 
 
-def pause_run_control(run: str) -> dict | None:
+def pause_run_control(run: str, host: str | None = None, laptop_ctrl: dict | None = None, part: dict | None = None) -> dict | None:
     """K-OPS-F20（总调度 11-02 17:0x）：暂停状态只有一个来源 = runs.json。status 不是 producing 的 run，把它的 control 写成
-    paused=true + reason_kind=owner（16:07 gpu36 第二季 control 被重算成 paused=false，暂停后又派单）。没有 control 文件 = 没起，不写"""
+    paused=true + reason_kind=owner（16:07 gpu36 第二季 control 被重算成 paused=false，暂停后又派单）。
+    MERGE-OPS-O（L-137）：开派前就要有 control——没有 control 文件、给了 host、剧没归档 → 按本机分区先算好 only / hold_lanes，
+    以 paused=true 写出（status 改成 producing 后下一拍 server-control 直接按分区放开）。没给 host 时保持旧行为：没有文件不写"""
     p = run_control_path(run)
     c = jl(p, None)
-    if not isinstance(c, dict) or (c.get("paused") and c.get("reason_kind") == "owner"):
-        return None
     st = ((jl(RUNS, {}) or {}).get("runs") or {}).get(run, {}).get("status")
+    if not isinstance(c, dict):
+        if host is None or st in NO_CONTROL_STATUS:
+            return None
+        f = control_for(host, laptop_ctrl or {}, run_ready(run), part, runs=[], run_id=run)
+        return apply(p, {**f, "paused": True, "paused_by": "runs.json", "reason_kind": "owner",
+                         "note": f"config/pipeline/runs.json status={st}（开派前预备的 control，MERGE-OPS-O）"})
+    if c.get("paused") and c.get("reason_kind") == "owner":
+        return None
     return apply(p, {"paused": True, "paused_by": "runs.json", "reason_kind": "owner", "note": f"config/pipeline/runs.json status={st}"})
+
+
+def prepare_run_controls(host: str, laptop_ctrl: dict | None = None, part: dict | None = None) -> dict:
+    """本机每部非 legacy、没归档的剧都有一份 control（MERGE-OPS-O）：在产的剧由 server-control 正常写；
+    其余（preparing / paused）没有文件时先预备一份 paused 的。→ {run: 是否新写}"""
+    out = {}
+    for r in paused_runs():
+        out[r] = bool(pause_run_control(r, host=host, laptop_ctrl=laptop_ctrl, part=part))
+    return out
+
+
+def laptop_run_controls(laptop_ctrl: dict | None, part: dict | None = None, write: bool = True) -> dict:
+    """笔记本侧各剧 control（MERGE-OPS-O，L-137）：在产的非 legacy 剧按分区写 only / hold_lanes；
+    之前是 runs.json 暂停的（paused_by=runs.json）在转为 producing 后放开（跟随笔记本全局暂停）；别人（项目方 / 总调度）的暂停不动。
+    没在产的剧没有文件时预备一份 paused 的。→ {run: 动作}"""
+    part = part or partition()
+    lc = laptop_ctrl or {}
+    gp, by = global_pause(lc, part)
+    out = {}
+    for r, _p in extra_runs():
+        p = run_control_path(r)
+        c = jl(p, {}) or {}
+        f = control_for("laptop", lc, run_ready(r), part, runs=[], run_id=r)
+        if c.get("paused_by") == "runs.json" or not c:
+            f.update(paused=gp, paused_by=(f"GLOBAL:{by}" if gp else None), reason_kind=("global" if gp else None),
+                     note=(f"跟随笔记本全局暂停（{by}）" if gp else "runs.json status=producing：按分区派"))
+        keys = ("only", "hold_lanes", "paused", "paused_by")
+        if any(c.get(k) != {**c, **f}.get(k) for k in keys):     # dispatch_by 的时间戳每拍都变，不算改动
+            if write:
+                apply(p, f)
+            out[r] = "written"
+    if write:
+        out.update({r: "prepared" for r, v in prepare_run_controls("laptop", lc, part).items() if v})
+    return out
 
 
 def run_ready(run: str) -> dict:
@@ -554,6 +607,12 @@ def reconcile(now_t: float | None = None, write: bool = True) -> dict:
         if (lc.get("only"), lc.get("hold_lanes")) != (f["only"], f["hold_lanes"]):
             apply(CONTROL, f)
             res["laptop_control"] = {"only": len(f["only"]), "hold": f["hold_lanes"]}
+        try:                                         # MERGE-OPS-O：非 legacy 剧（V2 primary）笔记本侧 control
+            rc_ = laptop_run_controls(jl(CONTROL, {}) or {}, part)
+            if rc_:
+                res["run_controls"] = rc_
+        except Exception as e:  # noqa: BLE001  # arch-ok: 各剧 control 写失败不挡主剧派单，结果里上报
+            res["run_controls_err"] = repr(e)[:200]
     return res
 
 
@@ -613,6 +672,9 @@ def main(argv=None) -> int:
                   "ready_eps", f["dispatch_by"]["ready_eps"], "hold", f["hold_lanes"])
         return 0
     if a.cmd == "apply-laptop":
+        runs_done = laptop_run_controls(jl(CONTROL, {}), part, write=not a.dry)   # MERGE-OPS-O：笔记本侧各剧 control
+        if runs_done:
+            print(json.dumps({"runs": runs_done}, ensure_ascii=False))
         new = apply(CONTROL, control_for("laptop", jl(CONTROL, {}), ready, part), dry=a.dry)
         print(json.dumps({k: new.get(k) for k in ("paused", "paused_by", "hold_lanes")}, ensure_ascii=False), "only", len(new["only"]))
         return 0
@@ -630,8 +692,8 @@ def main(argv=None) -> int:
             apply(run_control_path(run_id), f)
         out[run_id or "primary"] = f if run_id is None else {"only_n": len([x for x in f["only"] if x != NONE]), "path": str(run_control_path(run_id))}
     if a.write:
-        for r in paused_runs():          # K-OPS-F20：暂停中的 run 不重算 control，但要写成 paused（不留旧的 paused=false）
-            out[r] = {"paused_by_runs_json": bool(pause_run_control(r))}
+        for r in paused_runs():          # K-OPS-F20：暂停中的 run 不重算 control，但要写成 paused（不留旧的 paused=false）；
+            out[r] = {"paused_by_runs_json": bool(pause_run_control(r, host=a.host, laptop_ctrl=lc, part=part))}   # MERGE-OPS-O：没有就预备
     prim = out.get("primary") or {}
     print(json.dumps(prim if "only" in prim else out, ensure_ascii=False))
     if len(out) > 1 or rc:

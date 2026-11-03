@@ -378,3 +378,47 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-F33
+    domain: ops
+    link: [P5-P6]
+    title: 不走 ComfyUI 的 GPU 任务（SeedVR2 放大 / TTS / ACE-Step 等）占卡一律用 lanes.py hold 挂道，不能 lend；空闲回收（sweep --idle）回收借道前先查这张卡上有没有非 ComfyUI 进程占显存，有就不回收并告警
+    when: 借道 / 挂道给非 ComfyUI 任务；idle_sweep 回收借道
+    then: lanes.lend(job_kind≠comfy) 抛 LendRefused；hold 记 by；idle_sweep 调 gpu_foreign_procs（nvidia-smi --id + /proc cmdline，排除本道 ComfyUI），有进程或探测失败 → 记 idle_release_blocked、不回收
+    check: tests/test_factory.py::test_k_ops_f33_non_comfy_must_hold_and_idle_sweep_checks_gpu
+    evidence:
+      - {src: docs/master/V2_LIVE.md, note: "11-02 晚：gpu33:1 借给 STYLE-V2 跑 SeedVR2（不走 ComfyUI，队列看着空），空闲回收收走后又给了 PROMPTFIX 的金样首帧，两边撞卡爆显存"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+
+  - id: K-OPS-F34
+    domain: ops
+    link: [P5-P6]
+    title: :8800 重启一律“先验新、再停旧”，失败必须留痕 + 告警、能保留旧进程就保留；自动重启有总开关，结局以 restart_events 为准
+    when: ops/restart_api.ps1 被任何人 / API_GUARD 调用；api_restart_guard 判断重启成败；API 不在
+    then: >-
+      restart_api.ps1 先在备用端口 8801 完整起一份新代码、探针 200 才停旧进程（预检失败 / 备用端口被占 / 主端口被别的进程占 → exit 4，旧进程不杀）；
+      停旧后端口 90 s 不放 → exit 2；新进程 90 s 不起 → exit 3；所有失败写 restart_failed（stage / old_kept）+ alerts.jsonl A-API-RESTART-FAIL。
+      端口占用判断 = netstat 视图 / 能连上 / 绑不上任一成立。api_restart_guard：data/ops/api_guard_auto.json 的 enabled 不是 true 就不自动执行重启（只排队）；
+      跑脚本输出写文件不接管道（新服务继承句柄会让管道永远等不到 EOF）；成败只看本次新写的 restart_done / restart_failed；
+      请求之后已有成功启动（含手动）即视为满足；API 不在 → A-API-DOWN，守护自己弄挂的（最后一条 restart_failed 且 old_kept=false、30 分钟内）补起一次。
+    check: tests/test_restart_api_ps1.py
+    evidence:
+      - {src: data/ops/restart_events.jsonl, note: "11-02 21:25 / 21:56 API_GUARD 重启只有 restart_requested 没有 restart_done，旧进程已停新进程没起来；21:58 :8800 上残留属主 PID 0 的监听"}
+      - {src: data/autopilot/restart_done.jsonl, note: "19:24 后 laptop-api 没有一次 ok：20:07 / 21:45 两拍重启已成功但守护管道等不到 EOF 卡满 360 s 记失败，请求一直挂着，空闲 10 分钟就再杀一次健康的 API（20:28 不明结束大概率也是这个）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+
+  - id: K-OPS-F35
+    domain: ops
+    link: [P5-P6]
+    title: lanes.py 的 release 只清调用方自己的那条（按 by / to / client_prefix 匹配），lend 碰到有效 hold 拒绝并报出 hold 的 why，hold 也进审计
+    when: 借道 / 挂道 / 放道；idle_sweep 收回借道
+    then: release(lane, by=自己)；不带 by 只放借道、不动别人的 hold；道上两类都空了才从 retired_lanes 拿掉；lend 遇未过期 hold → LendRefused；hold 记 lane_loans.jsonl（by 用调用方传入的名字，CLI 不写 --by 记 unknown，不写死 DEBUG-RSI）；idle_sweep 只 release(kind=lend)
+    check: tests/test_factory.py::test_k_ops_f35_release_only_own_and_lend_respects_hold
+    evidence:
+      - {src: data/debug/lane_loans.jsonl, note: "11-02 20:49 STYLE-V2 hold gpu33:0 跑 SeedVR2 4K；20:53:44 PROMPTFIX lend 同一条道，20:55:06 PROMPTFIX release 把 STYLE-V2 的 hold 一起清了"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

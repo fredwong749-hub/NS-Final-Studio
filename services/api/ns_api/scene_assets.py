@@ -63,9 +63,14 @@ def _script(store: LookStore | None = None):
 
 
 def scenes_json() -> dict[str, dict]:
-    try:
-        d = json.loads((root() / "data" / "scenes.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    """data/scenes.json（state_timeline 推断的场景分组）。资产包剧（V2，清单模式）不读它：这份文件是 V1 状态表的产物，
+    读了就会把 V1 的“深夜写字楼办公区角落”当成 V2 场景名（UIFIX-F 11-03，L-126）"""
+    if _RP.manifest_scene_ids() is not None:
+        return {}
+    try:                            # V2CUT-O 11-03：按当前剧取场景表（V1 = data/scenes.json，其它剧 = data/import/runs/<run>/scenes.json）
+        from ns_agent import run_paths as _RPA
+        d = json.loads(_RPA.scenes_json(root()).read_text(encoding="utf-8"))
+    except (OSError, ValueError, RuntimeError):
         return {}
     return {s["scene_id"]: s for s in (d.get("scenes") or []) if isinstance(s, dict) and s.get("scene_id")} \
         if isinstance(d, dict) else {}

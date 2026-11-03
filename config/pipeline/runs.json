@@ -30,7 +30,8 @@
    "source": "v2-plan",
    "created_at": "2026-11-02T18:28:50",
    "note": "L-125（项目方 11-02 18:2x）：第一季 Version 2 从零重做；不设 inherits（不继承 V1 任何资产 / 覆盖），参考只认 assets_v2/manifest.json（docs/master/V2_PLAN.md）",
-   "assets_manifest": "assets_v2/manifest.json"
+   "assets_manifest": "assets_v2/manifest.json",
+   "episode": 1
   }
  },
  "legacy_unprefixed_run": "series10_v1",

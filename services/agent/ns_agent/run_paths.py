@@ -86,3 +86,44 @@ def renders_dir(root) -> Path:
 def asset_manifest(root) -> Path | None:
     root, m, run, _legacy = _ctx(root)
     return Path(m.asset_manifest(run, root)) if m is not None and m.asset_manifest(run, root) else None
+
+
+# ------------------------------------------------------------------ 状态表 / 场景表按剧存放（V2CUT-O 11-03，L-126）
+class TimelineMissing(FileNotFoundError):
+    """当前剧（非 V1）的状态表 / 场景表还没生成：直接报错，不许退回读 V1 的 data/state_timeline.json / data/scenes.json"""
+
+
+def state_dir(root, run: str | None = None) -> Path:
+    """状态表 / 场景表所在目录：没有 runs.json 的临时根 / legacy 剧（V1）= data/（V1 全局文件，原样保留）；
+    其它剧 = 本剧导入稿所在目录 data/import/runs/<run>/（由 tools/build_state_timeline.py 按本剧导入稿生成）。
+    run 不给 = 当前剧（NS_RUN / primary）"""
+    root, m, cur, legacy = _ctx(root)
+    if m is not None and run:
+        legacy = bool(m.is_legacy(run, root))
+    run = run or cur
+    if m is None or legacy:
+        return root / "data"
+    d = Path(m.import_path(run, root)).parent
+    return _guard(root, d, legacy, ("data", "data/import"))
+
+
+def timeline_json(root, run: str | None = None) -> Path:
+    return state_dir(root, run) / "state_timeline.json"
+
+
+def scenes_json(root, run: str | None = None) -> Path:
+    return state_dir(root, run) / "scenes.json"
+
+
+def is_legacy_run(root) -> bool:
+    """当前剧是不是 V1（或没有 runs.json 的临时根）"""
+    return _ctx(root)[3]
+
+
+def require_state(root, which: str = "timeline") -> Path:
+    """当前剧的状态表（which=timeline）/ 场景表（which=scenes）路径；非 V1 剧且文件不存在 → TimelineMissing（失败关闭）"""
+    p = timeline_json(root) if which == "timeline" else scenes_json(root)
+    if not is_legacy_run(root) and not p.is_file():
+        raise TimelineMissing(f"当前剧 {current_run(root)} 还没有 {p.name}（{p}）：先跑 "
+                              f"python tools/build_state_timeline.py --run {current_run(root)}；不读 V1 的 data/{p.name}")
+    return p

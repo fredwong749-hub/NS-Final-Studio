@@ -328,9 +328,11 @@ def check_preview(root: Path, run: str, ep: int) -> dict:
 
 
 def evaluate(run: str, ep: int, root: Path = ROOT, shot: int | None = None) -> list[dict]:
-    """九个阶段逐一判（不短路，status 要看全貌）"""
+    """九个阶段逐一判（不短路，status 要看全貌）。L-140（整集就绪才出图）：config whole_episode_prompts=true 时，
+    提示词阶段永远按整集判（给了镜号也一样）——按镜进“出图”前，本集每个非成人镜都要编译 + preflight 过"""
+    p_shot = None if config(root).get("whole_episode_prompts", True) else shot
     return [check_script(root, run, ep), check_import(root, run, ep), check_assets(root, run, ep),
-            check_prompts(root, run, ep, shot), check_images(root, run, ep, shot), check_image_qc(root, run, ep, shot),
+            check_prompts(root, run, ep, p_shot), check_images(root, run, ep, shot), check_image_qc(root, run, ep, shot),
             check_lasts(root, run, ep, shot), check_video(root, run, ep), check_preview(root, run, ep)]
 
 

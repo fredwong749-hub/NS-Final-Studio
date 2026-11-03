@@ -33,7 +33,12 @@ def script_key(script_json: Path) -> list | None:
 
 def in_tests() -> bool:
     """pytest 正在跑测试：后台写快照的线程会活过测试结束、写到真实 data/（ITERAUDIT 真实数据写保护 11-01 抓到）→ 测试里不写"""
-    return bool(os.environ.get("PYTEST_CURRENT_TEST")) or os.environ.get("NS_NO_API_SNAPSHOT") == "1"
+    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("NS_NO_API_SNAPSHOT") == "1":
+        return True
+    # ISS-1103-014614-86aa：非正式实例（TestClient / data_parity --inproc / check_wiring 进程内导入、手起 uvicorn）也不写
+    # data/cache/api_snapshots/*（summary.json、shot_cache.pkl 等）——只有看门狗管理的正式实例写（ns_api.instance 同口径）
+    from ns_api import instance as _INST  # noqa: PLC0415
+    return not _INST.startup_side_effects_allowed()
 
 
 def save(data_dir: Path, name: str, body: bytes, script_json: Path) -> None:

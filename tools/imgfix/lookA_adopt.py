@@ -17,6 +17,9 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+import runs as RUNS  # noqa: E402
+_LEGACY = RUNS.legacy_run(ROOT)   # I-16：第一季专用历史工具（入口 gate_legacy_tool 要求显式 --run）
 for _p in ("packages/schema", "services/agent", "services/api", "services/render_router"):
     if str(ROOT / _p) not in sys.path:
         sys.path.insert(0, str(ROOT / _p))
@@ -25,10 +28,10 @@ CAND = ROOT / "data/assetmaster/sheets_v2/candidates/lookA_sleeve_fix/lin_wan_lo
 OLD = ROOT / "data/assetmaster/sheets_v2/adopted/lin_wan_lookA_v2_s202.png"
 NEW = ROOT / "data/assetmaster/sheets_v2/adopted/lin_wan_lookA_v2_s202_sleevefix.png"
 QUAR = ROOT / "data/_quarantine/imgfix_lookA_sleeve_20261102"
-SC = ROOT / "data/pipeline/runs/series10_v1/assets/sheets_chosen.json"
+SC = ROOT / ("data/pipeline/runs/" + _LEGACY + "/assets/sheets_chosen.json")
 CHECKS = ROOT / "data/assetmaster/sheet_item_checks.json"
 HOLD = ROOT / "data/autopilot/lookA_hold.json"
-PJ = "series10_v1"
+PJ = _LEGACY
 STAMP = "20261102"
 
 
@@ -39,7 +42,7 @@ def adopt(by: str):
     from ns_api import character_hub as H
     QUAR.mkdir(parents=True, exist_ok=True)
     shutil.copy2(OLD, QUAR / OLD.name)                       # 旧图隔离副本（原文件不动：别处按路径引用）
-    for f in (ROOT / "data/pipeline/runs/series10_v1/images/refcrops").glob("lin_wan_lookA_v2_s202_*"):
+    for f in (ROOT / ("data/pipeline/runs/" + _LEGACY + "/images/refcrops")).glob("lin_wan_lookA_v2_s202_*"):
         (QUAR / "refcrops").mkdir(exist_ok=True)
         shutil.copy2(f, QUAR / "refcrops" / f.name)
     shutil.copy2(SC, SC.with_name(f"sheets_chosen.before_imgfix_sleeve_{STAMP}.json"))
@@ -98,6 +101,7 @@ def release(by: str):
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8")
+    RUNS.gate_legacy_tool(None, __file__)        # I-16：必须显式 --run（只认第一季）
     a = sys.argv
     by = a[a.index("--by") + 1] if "--by" in a else "IMGFIX"
     {"adopt": adopt, "reject": reject, "release": release}[a[1]](by)

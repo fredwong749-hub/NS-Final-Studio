@@ -6,6 +6,11 @@
 set -u
 SELF=$1; MODE=${2:-all}; OFF=/root/work/fredw/offline_20261101
 R=$OFF/repo
+# PRODMERGE-O 11-03（PLAN_V2_MASTER v4 1-5）：按剧起——RUN = 本机 runs.json 的 primary（当前剧唯一来源），producer / night 都带 --run；
+# 读不到 = 不起（失败关闭，不回退 V1）。视觉模型目录用发版部署目录 $R/models_cache/vision（video10_srv 退役）
+RUN=$($OFF/venv/bin/python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8")).get("primary") or "")' $R/config/pipeline/runs.json 2>/dev/null)
+[ -n "$RUN" ] || [ "$MODE" = "all" ] || { echo "runs.json 读不到 primary：不起 producer / night（失败关闭）"; exit 2; }
+VISION=$R/models_cache/vision
 # 第二季等额外剧的 producer（ensure_runs.sh，K-OPS-W25）：night-only 以外的模式先停、最后再按 runs.json 起
 [ "$MODE" != "night-only" ] && bash $R/ops/offline/ensure_runs.sh $SELF stop
 for n in night producer; do
@@ -22,11 +27,11 @@ if [ "$MODE" = "producer-only" ]; then
   printf '#!/bin/sh\nexec %s/venv/bin/python "$@"\n' "$OFF" > .venv/Scripts/python.exe; chmod +x .venv/Scripts/python.exe
   rm -f $OFF/STOP
   export TZ=Asia/Tokyo OFFLINE_SELF=$SELF OFFLINE_ALIASES=$([ $SELF = gpu36 ] && echo gpu33) PATH=$OFF/bin:$PATH PYTHONUTF8=1 PYTHONIOENCODING=utf-8
-  export NS_QC_VISION_DIR=/root/work/fredw/video10_srv/models_cache/vision
+  export NS_QC_VISION_DIR=$VISION
   alive() { [ -f "$1" ] && kill -0 "$(cat "$1")" 2>/dev/null; }
   alive $OFF/run/fwd.pid      || { setsid nohup $OFF/venv/bin/python -u $OFF/fwd.py </dev/null >>$OFF/logs/fwd.out 2>&1 & echo $! >$OFF/run/fwd.pid; }
   sleep 1
-  alive $OFF/run/producer.pid || { setsid nohup $OFF/venv/bin/python -u tools/autopilot/producer.py serve </dev/null >>$OFF/logs/producer.out 2>&1 & echo $! >$OFF/run/producer.pid; }
+  alive $OFF/run/producer.pid || { setsid nohup $OFF/venv/bin/python -u tools/autopilot/producer.py serve --run $RUN </dev/null >>$OFF/logs/producer.out 2>&1 & echo $! >$OFF/run/producer.pid; }
   sleep 3
   for n in fwd producer; do echo "$n pid $(cat $OFF/run/$n.pid) $(alive $OFF/run/$n.pid && echo alive || echo DEAD)"; done
   echo "night not started (producer-only)"
@@ -37,11 +42,11 @@ elif [ "$MODE" = "night-only" ]; then
   printf '#!/bin/sh\nexec %s/venv/bin/python "$@"\n' "$OFF" > .venv/Scripts/python.exe; chmod +x .venv/Scripts/python.exe
   rm -f $OFF/STOP
   export TZ=Asia/Tokyo OFFLINE_SELF=$SELF OFFLINE_ALIASES=$([ $SELF = gpu36 ] && echo gpu33) PATH=$OFF/bin:$PATH PYTHONUTF8=1 PYTHONIOENCODING=utf-8
-  export NS_QC_VISION_DIR=/root/work/fredw/video10_srv/models_cache/vision
+  export NS_QC_VISION_DIR=$VISION
   alive() { [ -f "$1" ] && kill -0 "$(cat "$1")" 2>/dev/null; }
   alive $OFF/run/fwd.pid   || { setsid nohup $OFF/venv/bin/python -u $OFF/fwd.py </dev/null >>$OFF/logs/fwd.out 2>&1 & echo $! >$OFF/run/fwd.pid; }
   sleep 1
-  alive $OFF/run/night.pid || { setsid nohup $OFF/venv/bin/python -u tools/series10_video/night.py </dev/null >>$OFF/logs/night.out 2>&1 & echo $! >$OFF/run/night.pid; }
+  alive $OFF/run/night.pid || { setsid nohup $OFF/venv/bin/python -u tools/series10_video/night.py --run $RUN </dev/null >>$OFF/logs/night.out 2>&1 & echo $! >$OFF/run/night.pid; }
   sleep 3
   for n in fwd night; do echo "$n pid $(cat $OFF/run/$n.pid) $(alive $OFF/run/$n.pid && echo alive || echo DEAD)"; done
   echo "producer not started (night-only：出图归笔记本)"

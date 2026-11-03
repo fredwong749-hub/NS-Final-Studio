@@ -42,6 +42,7 @@ LANES = {k: (v["url"], v["host"], v["outdir"]) for k, v in CFG["lanes"].items()
          if not os.environ.get("V2STYLE_LANES") or k in os.environ["V2STYLE_LANES"].split(",")}   # 卡被 4K 占用时可只用部分道
 VS = CFG["video_score"]
 SRV, SRV_REPO, SCORE_HOST = VS["dir"], VS["repo"], VS["host"]
+PICKED = {"whip_orbit__F_full_s20261131", "whip_orbit__F_full_s20261132", "handheld_follow__R_full_s20261131"}   # L-129 / L-130 项目方已选
 FRAMES = 124            # 17k+5 网格，约 5.2 s @24fps
 MAX_ARMS = 20
 
@@ -329,6 +330,9 @@ def page() -> None:
          ".c img{width:300px}.sm{color:#999;font-size:12px}.ok{color:#7c7}.no{color:#d77}.lang{display:grid;grid-template-columns:1fr 1fr;gap:24px}"
          "@media(max-width:1500px){.lang{grid-template-columns:1fr}}</style></head><body>",
          "<h1>V2 运镜 A/B（Pika：MiniMax H3 + Pika Flex，只给首帧）</h1>",
+         "<div style='background:#2a2410;border:1px solid #a88a2a;padding:10px 14px;border-radius:6px;margin:10px 0'>"
+         "<b>项目方已选（L-129 / L-130）</b>：幻想段 = 高速环绕急停（bolt_push_settle，外滩全身 seed 20261131、20261132）；"
+         "现实段 = 手持跟拍（弄堂走动 seed 20261131）。2.5D 视差实验项目方判“效果很差”，不用。</div>",
          "<p class=sm>左 = 幻想段运镜（参照 Vogue China 子弹时间、高速环绕、慢动作急推），右 = 现实段（手持跟拍）。每种运镜 3 条：两张首帧 + 同首帧换 seed。"
          "调研出处见 camera_moves.yaml 对应条目。只放运镜执行到位、通过 AB1–AB5 的片。</p>"]
     o.append("<div class=lang>")
@@ -341,12 +345,22 @@ def page() -> None:
             stab = res.get("_moves", {}).get(mv, {})
             o.append(f"<h3>{html.escape(zh)} <span class=sm>{mv}</span></h3><div class=sm>{html.escape(stab.get('note', ''))}</div><div class=row>")
             for v in items:
-                o.append(f"<div class=c><video controls loop muted preload=metadata src='{rel(v['mp4'])}'></video>"
-                         f"<div class=sm>{v['first']} · seed {v['seed']}</div></div>")
+                pk = v["id"] in PICKED
+                sty = " style='outline:2px solid #c9a227'" if pk else ""
+                o.append(f"<div class=c{sty}><video controls loop muted preload=metadata src='{rel(v['mp4'])}'></video>"
+                         f"<div class=sm>{'【项目方已选】' if pk else ''}{v['first']} · seed {v['seed']}</div></div>")
             if not items:
                 o.append("<div class=sm>（这一种没有稳定出效果的片，不放）</div>")
             o.append("</div>")
         o.append("</div>")
+    px = [v for k, v in res.items() if not k.startswith("_") and v.get("move") == "parallax_bt" and v.get("show")]
+    if px:   # 2.5D 视差子弹时间（实验，tools/v2style/parallax_bt.py；不是 Pika 出的）
+        note = (res.get("_moves", {}).get("parallax_bt") or {}).get("note", "")
+        o.append(f"</div><h2>实验：后期 2.5D 视差子弹时间</h2><div class=sm>{html.escape(note)}</div><div class=row>")
+        for v in px:
+            o.append(f"<div class=c><video controls loop muted preload=metadata src='{rel(v['mp4'])}'></video>"
+                     f"<div class=sm>实验（项目方：效果很差，不用）· {v['first']} · {v['variant']}</div></div>")
+        o.append("</div><div>")
     o.append("</div></body></html>")
     PAGE.parent.mkdir(parents=True, exist_ok=True)
     PAGE.write_text("\n".join(o), encoding="utf-8")

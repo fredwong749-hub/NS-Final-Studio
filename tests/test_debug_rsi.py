@@ -161,9 +161,9 @@ def test_e05_pool_larger_than_lanes_and_backlog_blocks_dispatch(tmp_path, monkey
 def test_e05_scoring_cleared_in_finally():
     src = (ROOT / "tools/autopilot/producer.py").read_text(encoding="utf-8")
     body = src.split("def _run_one(", 1)[1].split("\n    def ", 1)[0]
-    assert "self.scoring.add(oid)" in body
+    assert "self.scoring.add(slot)" in body          # PRODMERGE-O：在途键 = slot（分道并行的额外种子 “对象#k”；平常 slot == oid）
     fin = body.split("finally:", 1)[1]
-    assert "self.scoring.discard(oid)" in fin
+    assert "self.scoring.discard(slot)" in fin
 
 
 def test_e05_backlog_scales_with_vlm_instances(monkeypatch):
@@ -845,7 +845,8 @@ def test_y04_idle_sweep(tmp_path):
           "gpu36:0": {"ok": True, "busy": False, "last_end": t0 - 3 * 60},           # 3 分钟前刚出完 → 不收
           "gpu36:1": {"ok": False}}                                                  # 探测失败 → 不动
     called = []
-    gone = LN.idle_sweep(10, probe=lambda l: (called.append(l), st[l])[1], part=part, now=t0)
+    gone = LN.idle_sweep(10, probe=lambda l: (called.append(l), st[l])[1], part=part, now=t0,
+                         gpu_probe=lambda l: {"ok": True, "procs": []})   # K-OPS-F33：卡上没有借道人进程（FACTORY 替 DEBUG-RSI 补）
     assert gone == ["gpu33:1"] and "gpu33:0" not in called
     d = json.loads(part.read_text(encoding="utf-8"))
     assert "gpu33:1" not in d["_lent_lanes"] and "gpu33:1" not in d["retired_lanes"] and "gpu33:3" in d["retired_lanes"]

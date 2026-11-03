@@ -188,6 +188,10 @@ function Drawer({ shot, stage, onClose, onChanged }: { shot: Shot; stage: "first
         <a className="fp-link" href={`#${shot.id}`}>
           在画布里打开这一镜
         </a>
+        {/* NAVFLOW-F L-146：④出图的“修改”入口之一——到图像编辑器里看参考图、出几张候选、A/B 对比、写一句话修改 */}
+        <a className="fp-link" href={`#/image-edit?shot=${encodeURIComponent(shot.id)}&stage=${stage}`} title="图像编辑器：参考图、出候选、并排对比、写一句话修改">
+          到图像编辑器里改
+        </a>
       </div>
       <EditLog shot={shot.id} stage={stage} />
       <p className="fp-note">{c.new_n ? `这是新出的一版（#${c.new_n}），点“用这张”才会设为当前。` : c.state === "final" ? "已定稿。" : c.state === "current" ? "当前版。" : ""}</p>
@@ -267,7 +271,12 @@ export default function FramesPage() {
         (status || char ? (
           <Empty icon="○" title="没有符合的镜头" sub="换个筛选条件，或者选“全部”。" />
         ) : (
-          <Empty icon="○" title="这部剧还没有镜头，先去剧本" sub="剧本分镜出来后，这里按集显示每镜的首帧和尾帧。" action={<a className="v3-btn" href="#/script-create">去剧本</a>} />
+          <Empty
+            icon="○"
+            title={ep && ep !== "all" ? `第 ${ep} 集还没有镜头` : "这部剧还没有镜头"}
+            sub={`${ep && ep !== "all" ? "这一集" : "剧本"}的分镜导入后，系统会自动出首帧和尾帧，出来就显示在这里，不用你操作。现在可以去看剧本写到哪了。`}
+            action={<a className="v3-btn" href={`#/script-create${ep && ep !== "all" ? `?ep=${ep}` : ""}`}>去看剧本</a>}
+          />
         ))}
       {d.episodes.map((e, i) => {
         const shut = open[e.ep] === undefined ? i >= 1 && !filtered : !open[e.ep];

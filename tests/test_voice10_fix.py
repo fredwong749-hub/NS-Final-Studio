@@ -205,9 +205,16 @@ def test_cosy_setup_dry_run(tmp_path):
     import shutil
     import subprocess
     import pytest
-    bash = shutil.which("bash")
+    # W13 CUTB-PREP 11-03：环境口径，与 tests/test_system_version.py::test_verified_install_refuses_truncated_stdin 同一条（A-G1 第 22 轮 #4）：
+    # Windows 上用 Git bash；PATH 里的 System32 / WindowsApps bash.exe 是 WSL 入口，收到 D:/… 脚本路径 → “No such file or directory”，
+    # returncode 127（cut B --dry 快照实测）。只有 WSL 入口时 skip 并写明原因；有 Git bash 照常真跑，断言不变。
+    git_bash = r"C:\Program Files\Git\bin\bash.exe"
+    bash = git_bash if os.name == "nt" and os.path.isfile(git_bash) else shutil.which("bash")
     if not bash:
         pytest.skip("no bash")
+    low = bash.replace("/", "\\").lower()
+    if os.name == "nt" and ("\\system32\\" in low or "\\windowsapps\\" in low):
+        pytest.skip(f"只有 WSL 入口 bash（{bash}），它读不到 Windows 路径；装 Git for Windows 后本测试会真跑")
     lock, binp = tmp_path / "lock", tmp_path / "bin"
     lock.mkdir()
     binp.mkdir()

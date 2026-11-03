@@ -17,8 +17,17 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-PROP_LINE = ("门卡", "束腰", "九环", "阴环", "乳环", "铁珠", "钢珠", "穿孔", "纹身", "舌钉", "水晶甲", "银戒", "红绳", "图纸", "名单", "验收",
-             "投名状", "预约单", "续约单", "两碗汤", "九串", "漆皮之下", "老公", "衣帽间推拉门")
+GUARD = ROOT / "config" / "v1_guard.json"     # HEADER-O 11-03：道具词 / 额外 id / 放行短语统一放配置（只用来检查，不改写）
+
+
+def guard_cfg(root: Path = ROOT) -> dict:
+    p = root / "config" / "v1_guard.json"
+    if not p.is_file():
+        raise RuntimeError(f"缺少 {p}：V1 内容词表必须在配置里（失败关闭）")
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
+PROP_LINE = tuple(guard_cfg().get("props") or ())
 
 
 def _json(p: Path):
@@ -32,6 +41,39 @@ def old_runs(current: str | None, root: Path = ROOT) -> list[str]:
     sys.path.insert(0, str(root / "tools" / "autopilot"))
     import runs as RN
     return sorted(r for r in (RN.registry(root).get("runs") or {}) if r != current)
+
+
+def _strings(o) -> list[str]:
+    if isinstance(o, str):
+        return [o]
+    if isinstance(o, dict):
+        return [x for v in o.values() for x in _strings(v)]
+    if isinstance(o, list):
+        return [x for v in o for x in _strings(v)]
+    return []
+
+
+def run_style_text(root: Path, current: str | None) -> str:
+    """本剧风格 bible 的正文（白名单来源，MERGE-OPS-O 11-03；项目方 04:3x“徕卡级锐利风格是我要的”、L-145 徕卡 + ARRI + Kodak）：
+    config/compile/run_style.json runs.<本剧> 条目里的全部字符串值 + 它登记的 bible（toml）里的全部字符串值。
+    只取解析后的值，不取注释（注释里写“不回落到 V1 的 Leica 模板”这种话不算放行）。V1 风格短语（v1_style_phrases）
+    只有在这里出现的才放行；“S★ / R0 / 暖调通透”这类 V1 参数标记本剧 bible 不写，照拦。没有本剧 / 没登记 → 空串（全拦）"""
+    if not current:
+        return ""
+    rs = root / "config" / "compile" / "run_style.json"
+    try:
+        ent = ((json.loads(rs.read_text(encoding="utf-8")).get("runs") or {}).get(current) or {}) if rs.exists() else {}
+    except (OSError, ValueError) as e:                     # 风格表读不到 = 不放行任何风格词（更严），报出来
+        raise RuntimeError(f"读不到 {rs}：{e!r}") from e
+    out = _strings({k: v for k, v in ent.items() if k != "bible"})
+    b = ent.get("bible")
+    if b and (root / b).is_file():
+        import tomllib
+        try:
+            out += _strings(tomllib.loads((root / b).read_text(encoding="utf-8")))
+        except (OSError, ValueError) as e:
+            raise RuntimeError(f"读不到本剧风格 bible {b}：{e!r}") from e
+    return chr(10).join(out)
 
 
 def vocab(root: Path = ROOT, current: str | None = None) -> dict:
@@ -84,7 +126,9 @@ def vocab(root: Path = ROOT, current: str | None = None) -> dict:
     clean = lambda xs: sorted(x for x in xs if x and len(x) >= 2)
     rs = root / "config" / "compile" / "run_style.json"     # V1 风格短语（S★ / 徕卡暖调这一组，PROMPTFIX 20:4x）：V2 稿 / 编译提示词出现即命中
     style = (json.loads(rs.read_text(encoding="utf-8")).get("v1_style_phrases") or []) if rs.exists() else []
-    return {"names": clean(names), "char_ids": clean(ids), "scenes": clean(scenes), "titles": clean(titles), "props": list(PROP_LINE),
+    own_style = run_style_text(root, current)              # MERGE-OPS-O（L-127 / L-145）：本剧风格 bible 里正当使用的画风词不算旧内容
+    style = [w for w in style if w.lower() not in own_style.lower()]     # 英文词不分大小写（Leica / leica）
+    return {"names": clean(names), "char_ids": clean(ids), "scenes": clean(scenes), "titles": clean(titles), "props": list(guard_cfg(root).get("props") or []),
             "style": clean(style), "allow_text": sorted(allow)}
 
 
@@ -101,19 +145,6 @@ def scan(text: str, v: dict) -> list[dict]:
                 i = body.find(w)
                 hits.append({"kind": kind, "word": w, "count": n, "context": body[max(0, i - 15):i + len(w) + 15].replace("\n", " ")})
     return hits
-
-
-def redact(text: str, v: dict) -> str:
-    """把旧剧内容词换成中性占位（给 V2 写作包用：旧规则里的举例保留规则意思，不带旧剧内容进来）；项目方指定的 V2 造型名整串保留"""
-    keep = {f"@@KEEP{i}@@": a for i, a in enumerate(v.get("allow_text") or []) if a}
-    for k, a in keep.items():
-        text = text.replace(a, k)
-    rep = [(w, "<char_id>") for w in v["char_ids"]] + [(w, "<scene_id>") for w in v["scenes"] if w.startswith("sk_")] +           [(w, "某剧") for w in v["titles"]] + [(w, "某场景") for w in v["scenes"] if not w.startswith("sk_")] +           [(w, "某角色") for w in v["names"]] + [(w, "某道具") for w in v["props"]]
-    for w, r in sorted(rep, key=lambda x: -len(x[0])):        # 长词先换（场景名里含人名等）
-        text = text.replace(w, r)
-    for k, a in keep.items():
-        text = text.replace(k, a)
-    return text
 
 
 def main(argv=None) -> int:

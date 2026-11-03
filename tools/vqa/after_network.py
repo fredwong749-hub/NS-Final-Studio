@@ -26,7 +26,16 @@ ROOT = Path(__file__).resolve().parents[2]
 PY = str(ROOT / ".venv/Scripts/python.exe")
 OUT = ROOT / "data/vqa/gate_scan"
 CFG = ROOT / "config/vqa.json"
-DEST = "/root/work/fredw/video10_srv"
+def _video_root() -> str:
+    """PRODMERGE-O 11-03：服务器视频代码根只从 config/factory/hosts.json video_root 取（= 发版部署目录，video10_srv 退役）"""
+    import importlib.util as _u
+    sp = _u.spec_from_file_location("hosts_video_root", Path(__file__).resolve().parents[2] / "tools" / "factory" / "hosts.py")
+    m = _u.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m.video_root()
+
+
+DEST = _video_root()
 PUSH = ["tools/series10_video/score_clip.py", "config/vqa.json", "config/prompts/vqa_inspect.md",
         "services/agent/ns_agent/__init__.py"]
 PUSH_DIRS = ["services/agent/ns_agent/vqa"]
@@ -93,6 +102,9 @@ def open_video_gate(miss: list[str]) -> None:
 
 
 def push() -> None:
+    if DEST.rstrip("/").endswith("/repo"):          # PRODMERGE-O：视频代码根已是发版部署目录，代码只走 system_version deploy
+        say(f"{DEST} 是发版部署目录：score_clip / vqa 代码随 system_version deploy 下发，本工具不再直接推代码（会覆盖已发版代码）")
+        return
     if subprocess.run([PY, str(ROOT / "tools/qa/thread_guard.py")]).returncode != 0:
         say("thread_guard 没过（K-OPS-V13），不推")
         return

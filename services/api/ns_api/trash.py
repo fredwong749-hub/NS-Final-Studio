@@ -258,7 +258,8 @@ def _is_current_asset_image(aid: str, f: str) -> bool:
     except Exception:  # noqa: BLE001
         pass
     try:
-        scenes = json.loads((P.DATA / "scenes.json").read_text(encoding="utf-8"))
+        from ns_agent import run_paths as _RPA      # V2CUT-O：场景表按当前剧取（临时根 = <data>/scenes.json）
+        scenes = json.loads(_RPA.scenes_json(P.DATA.parent).read_text(encoding="utf-8"))
         return f in json.dumps(scenes.get(aid) if isinstance(scenes, dict) else None, ensure_ascii=False)
     except (OSError, ValueError):
         return False

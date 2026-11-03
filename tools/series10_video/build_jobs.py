@@ -1,4 +1,4 @@
-"""VIDEO10（2026-10-31）：series10_v1 视频作业编译——Shot Spec → 配方引擎 → ComfyUI 图（笔记本端，纯编译，不提交）。
+"""VIDEO10（2026-10-31）：series10 视频作业编译（MERGE-VID-O 11-03 起按剧：--run <剧> / NS_RUN / 当前剧，run_ctx.resolve；L-137）——Shot Spec → 配方引擎 → ComfyUI 图（笔记本端，纯编译，不提交）。
 
 提示词 / 图一律由系统编译器生成（K-PRM-301，不手拼）：
   P4_epNN.md ─(tools/pipeline/p4_adapter.check_p4：拼现行全局头 + 真实导入器 + spec_import)→ Shot Spec v2
@@ -34,17 +34,48 @@ from p4_adapter import check_p4  # noqa: E402
 from ns_recipes import compiler as C  # noqa: E402
 from ns_recipes import registry as R  # noqa: E402
 
-RUN = ROOT / "data/pipeline/runs/series10_v1"
-VID = RUN / "video"
-IMG_STATE = RUN / "images/state.json"
-CHOICE = VID / "recipe_choice.json"
-NAME2ID = {"林晚": "lin_wan", "顾沉": "gu_chen", "陈宇": "chen_yu", "阿岚": "ch_a_lan"}
+import run_ctx as RC  # noqa: E402
+
+# MERGE-VID-O（ISS-1103-024206-3737，L-137）：剧不再写死 series10_v1——set_run(<剧>) 换全部路径；导入时按 run_ctx.resolve() 取当前剧
+RUN_ID: str | None = None
+RUN = VID = IMG_STATE = CHOICE = FRAMES_OK = None   # set_run 填
+RENDERS: Path | None = None   # 相对 ROOT：V1 = data/renders，其它剧 = data/renders/<剧>
+NAME2ID_V1 = {"林晚": "lin_wan", "顾沉": "gu_chen", "陈宇": "chen_yu", "阿岚": "ch_a_lan"}   # 只给 legacy 剧（V1）用
+NAME2ID = dict(NAME2ID_V1)
 # 换参考（身份低时）：从本角色 series10 造型设定图（项目方流程出的四栏图）里裁出的正脸，只含头脸
 ALT_SHEET = {"lin_wan": "images/sheets/lin_wan/lin_wan_lookA_s202.png", "gu_chen": "images/sheets/gu_chen/gu_chen_lookA_s101.png",
              "chen_yu": "images/sheets/chen_yu/chen_yu_lookA_s202.png", "ch_a_lan": "images/sheets/ch_a_lan/ch_a_lan_lookA_s1108.png"}
 # 主机按整集分（成片在出片那台机器上合成，片段不跨机）；ep09 有 328 帧长镜头 → gpu36（长镜头道 gpu36:2）
-HOST_OF_EP = {1: "gpu33", 2: "gpu36", 3: "gpu33", 4: "gpu36", 5: "gpu33", 6: "gpu36", 7: "gpu33", 8: "gpu36",
-              9: "gpu36", 10: "gpu33"}
+HOST_OF_EP_V1 = {1: "gpu33", 2: "gpu36", 3: "gpu33", 4: "gpu36", 5: "gpu33", 6: "gpu36", 7: "gpu33", 8: "gpu36",
+                 9: "gpu36", 10: "gpu33"}
+HOST_OF_EP = dict(HOST_OF_EP_V1)
+
+
+def set_run(run: str) -> str:
+    """切到这部剧的视频目录 / 渲染目录 / 人物表（失败关闭：run_ctx 校验登记表 + 视频政策 scope_runs）"""
+    global RUN_ID, RUN, VID, IMG_STATE, CHOICE, FRAMES_OK, RENDERS, NAME2ID, HOST_OF_EP
+    RUN_ID = run
+    RUN = RC.run_dir(run)
+    VID = RUN / "video"
+    IMG_STATE = RUN / "images/state.json"
+    CHOICE = VID / "recipe_choice.json"
+    FRAMES_OK = VID / "frames_ok.json"
+    RENDERS = Path(RC.renders_dir(run)).relative_to(RC.ROOT)   # 相对仓库根（测试换 ROOT 时跟着走）
+    legacy = RC.is_legacy(run)
+    NAME2ID = dict(NAME2ID_V1) if legacy else None      # 非 V1：按本剧人物表（name_ids）取，不用 V1 的人名表
+    HOST_OF_EP = dict(HOST_OF_EP_V1) if legacy else {}  # 非 V1：只认 video/hosts.json（night 由 partition 生成），没有就不派
+    global VIDEO_HOLD     # 按镜 hold 按剧分开（镜号 ep01-S8 跨剧同名，V1 的 hold 不许挡 V2）
+    VIDEO_HOLD = ROOT / "data" / "autopilot" / ("video_hold.json" if legacy else f"runs/{run}/video_hold.json")
+    return run
+
+
+def name_ids() -> dict:
+    """人名 → char_id：V1 = 写死的四人；其它剧 = 本剧资产清单 / P1 人物表（ns_agent.cast_table，失败关闭不退回 V1）"""
+    if NAME2ID is not None:
+        return NAME2ID
+    from ns_agent import cast_table as CT
+    sc = CT.speaker_cast(RUN_ID) or {}
+    return {**CT.char_ids(RUN_ID), **(sc.get("names") or {})}
 VALIDATE = {"shots": {"ep01-S5": "单人近景", "ep01-S6": "双人对白", "ep10-S5": "走动全身"},
             "seeds": [20261101, 20261102],
             "arms": {"pdd": "ref2va_pdd2", "b24": "two_person_ref2va"}}  # i2v 组撤掉：项目方判首帧不合格（10-31 夜），对照只走不依赖首帧的 Ref2VA
@@ -77,28 +108,31 @@ def rel(p: Path) -> str:
     return str(Path(p).resolve().relative_to(ROOT)).replace("\\", "/")
 
 
-def load_specs(eps=range(1, 11), source: str | None = None) -> dict:
-    """source = "import"（默认，10-31 23:50 起 series10 已整份导入 data/import/script_v2.json，ep09 镜号以导入为准）
-    或 "p4"（runs 目录的 P4 稿经 p4_adapter.check_p4 生成）"""
+def load_specs(eps=None, source: str | None = None) -> dict:
+    """source = "import"（默认：本剧导入稿 runs.script_path(<剧>)；V1 = data/import/script_v2.json，V2 = data/import/runs/<剧>/script_v2.json）
+    或 "p4"（runs 目录的 P4 稿经 p4_adapter.check_p4 生成；V1 在 epNN/ 下，其它剧在剧目录根）。eps 不给 = 导入稿里有的全部集"""
     source = source or ("p4" if "--from-p4" in sys.argv else "import")
     out = {}
     if source == "import":
         from ns_recipes.spec_import import specs_from_import
-        from ns_render import pipeline as P
-        si = P.load_script()
-        for n in eps:
+        from ns_schema.script import ScriptImport
+        si = ScriptImport.model_validate_json(RC.script_path(RUN_ID).read_text(encoding="utf-8"))
+        have = [e.number for e in si.episodes]
+        for n in (eps if eps is not None else have):
+            if n not in have:
+                continue
             for s in specs_from_import(si, n):
                 out[s.id] = s
         return out
-    for n in eps:
-        md = (RUN / f"ep{n:02d}" / f"P4_ep{n:02d}.md").read_text(encoding="utf-8")
+    for n in (eps if eps is not None else range(1, 11)):
+        f = (RUN / f"ep{n:02d}" / f"P4_ep{n:02d}.md") if RC.is_legacy(RUN_ID) else (RUN / f"P4_ep{n:02d}.md")
+        if eps is None and not f.is_file():
+            continue
+        md = f.read_text(encoding="utf-8")
         rep, _shots, specs, _raw = check_p4(md, n)
         for s in specs:
             out[s.id] = s
     return out
-
-
-FRAMES_OK = VID / "frames_ok.json"
 
 
 def _vq():
@@ -113,14 +147,17 @@ def _vq():
 
 
 def _q9_ok(pf: dict) -> bool:
+    """看图闸门先于视频（ISS-1103-024206-4b21，gate.video_requires_q9=true）：看图模块载不进来 = 判不过（失败关闭，原来是放行）"""
     VQ = _vq()
-    return True if VQ is None else VQ.q9_passed(pf)
+    return False if VQ is None else VQ.q9_passed(pf)
 
 
 def _q9_ok_file(file: str) -> bool:
     """frames_ok.json（ASSETMASTER 通知）的首帧没有 postflight：按图片查本地看图判定（data/vqa/index.json）"""
     VQ = _vq()
-    if VQ is None or not VQ.enforced():
+    if VQ is None:
+        return False          # 失败关闭（同 _q9_ok）
+    if not VQ.enforced():
         return True
     st, _d, _ev = VQ.q9(VQ.cached_for(ROOT / file))
     return VQ.q9_passed({"items": [{"id": "Q9", "status": st}]})
@@ -134,7 +171,7 @@ def passed_frames() -> dict:
     out = {}
     rows = _accept_rows()
     ANOMALY_SKIPPED.clear()
-    for tj in sorted((ROOT / "data/renders").glob("ep*/S*/takes.json")):
+    for tj in sorted((ROOT / RENDERS).glob("ep*/S*/takes.json")):      # 本剧渲染根（V1 = data/renders，V2 = data/renders/<剧>）
         try:
             d = json.loads(tj.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -239,7 +276,7 @@ def passed_lasts() -> dict:
     项目方定稿锁 locked.last 优先（定稿就是定稿），其次当前尾帧且过契约；文件不在就不算。
     L-124 ep01-S1（总调度 16:4x）：以前这里根本没有 @last_frame 的映射，S1 七个变体提交全报 KeyError '@last_frame'，一条片都没有"""
     out = {}
-    for tj in sorted((ROOT / "data/renders").glob("ep*/S*/takes.json")):
+    for tj in sorted((ROOT / RENDERS).glob("ep*/S*/takes.json")):
         try:
             d = json.loads(tj.read_text(encoding="utf-8"))
         except (OSError, ValueError):   # arch-ok: 读不到这一镜 = 没有尾帧，对应变体标 no_last_frame 不提交（失败关闭）
@@ -273,6 +310,8 @@ def alt_crops() -> dict:
     import cv2
     from ns_qc import face as QF
     out = {}
+    if not RC.is_legacy(RUN_ID):
+        return out            # 换参考裁切只有 V1 的设定图（ALT_SHEET）；其它剧不退回 V1 的脸（L-126）
     d = VID / "refs_alt"
     d.mkdir(parents=True, exist_ok=True)
     m = None
@@ -311,11 +350,22 @@ def alt_crops() -> dict:
     return out
 
 
+class RecipeChoiceMissing(RuntimeError):
+    """本剧没有 recipe_choice.json，视频政策也给不出默认配方：失败关闭（不退回 L-088 之前的 i2va_pdd2）"""
+
+
 def recipe_choice() -> dict:
+    """本剧 video/recipe_choice.json；没有 → 按 video_policy.json pika_only.allowed 派生（L-137：V1 的 Pika Flex 默认原样用在 V2，
+    与 state_snapshot.init_run 同一口径）；政策也没有 → RecipeChoiceMissing"""
     if CHOICE.exists():
         return json.loads(CHOICE.read_text(encoding="utf-8"))
-    return {"face_default": "i2va_pdd2", "ref_default": "two_person_ref2va", "noface_default": "i2va_pdd2",
-            "decided": True, "rule": "K-REN-301"}
+    pol = (C.video_policy().get("pika_only") or {})
+    allowed = (pol.get("allowed") or [None])[0] if pol.get("enabled") else None
+    if not allowed or RUN_ID not in (C.video_policy().get("scope_runs") or []):
+        raise RecipeChoiceMissing(f"{RUN_ID} 没有 {CHOICE} 且 video_policy.json 给不出默认配方（失败关闭）")
+    return {"face_default": allowed, "ref_default": allowed, "noface_default": allowed, "decided": True,
+            "rule": "K-REN-301 / L-088 / L-137（MERGE-VID-O：本剧没有 recipe_choice.json，按 config/pipeline/video_policy.json 派生）",
+            "decided_by": "config 默认（video_policy.pika_only.allowed）", "derived": True}
 
 
 def compile_variant(spec, reg, rid, attempt, variant, frames_of, *, seed=None, extra=None):
@@ -370,7 +420,7 @@ def compile_variant(spec, reg, rid, attempt, variant, frames_of, *, seed=None, e
     ffp = (frames_of.get(spec.id) or {}).get("postflight")
     try:
         from ns_agent.gen_contract import preflight as PF
-        pf = PF("video", {"model": rid, "project": "series10_v1", "shot_id": spec.id,
+        pf = PF("video", {"model": rid, "project": RUN_ID, "shot_id": spec.id,
                           "cast": [{"name": c.name, "presence": c.presence, "x": c.screen_x, "depth": c.depth}
                                    for c in spec.characters_on_screen],
                           "prompt": plan["prompt"]["text"], "refs": list(inputs.values()), "loras": loras,
@@ -409,8 +459,9 @@ def score_refs(spec, reg) -> dict:
     旧写法读配方 ref2va_pdd2 的 identity_crops，L-122 换脸后还是旧脸（帧打分已是新脸，两套口径分叉）"""
     from ns_agent import asset_refs as AR
     out = {}
+    ids = name_ids()
     for c in spec.faces:
-        cid = NAME2ID.get(c.name)
+        cid = ids.get(c.name)
         f = AR.face_of(RUN.name, cid) if cid else None
         if f:
             out[c.name] = f
@@ -418,9 +469,11 @@ def score_refs(spec, reg) -> dict:
 
 
 def build_all(validate_only=False) -> dict:
+    if RUN_ID is None:
+        raise RC.VideoRunError(_RUN_ERR or "build_jobs 没有设剧（set_run）")
     holds = video_holds()
     reg = R.load()
-    specs = load_specs()
+    specs = (sys.path.append(str(ROOT)) if str(ROOT) not in sys.path else None) or __import__("tools.master.sop_gate", fromlist=["_"]).filter_video_specs(RUN_ID, load_specs())  # HARNESS-O：SOP 阶段闸门（没过“视频”闸门的集不编作业）
     frames_of = chosen_frames() if validate_only else passed_frames()
     LASTS_OF.clear()
     LASTS_OF.update(passed_lasts())
@@ -429,7 +482,9 @@ def build_all(validate_only=False) -> dict:
     (VID / "specs").mkdir(exist_ok=True)
     (VID / "prompts").mkdir(exist_ok=True)
     ch = recipe_choice()
-    crops = (reg.resolve("ref2va_pdd2").get("ref2va") or {}).get("identity_crops") or {}
+    # 配方里的身份裁切是 V1 的脸：只给 legacy 剧；其它剧的身份槽只走 asset_refs.face_of（compiler.ref_slots，L-126）
+    crops = ((reg.resolve("ref2va_pdd2").get("ref2va") or {}).get("identity_crops") or {}) if RC.is_legacy(RUN_ID) else {}
+    ids = name_ids()
     shots = []
     for sid, spec in specs.items():
         (VID / "specs" / f"{sid}.spec.json").write_text(spec.model_dump_json(indent=1, by_alias=True), encoding="utf-8")
@@ -437,7 +492,7 @@ def build_all(validate_only=False) -> dict:
             continue
         meta = shot_meta(spec)
         hosts = json.loads((VID / "hosts.json").read_text(encoding="utf-8")) if (VID / "hosts.json").exists() else {}
-        meta["host"] = hosts.get(str(spec.episode)) or HOST_OF_EP[spec.episode]   # night.py 按卡空闲情况分集
+        meta["host"] = hosts.get(str(spec.episode)) or HOST_OF_EP.get(spec.episode)   # night.py 按卡空闲情况分集；非 V1 没有 hosts.json = None（不派）
         meta["first_frame"] = (frames_of.get(sid) or {}).get("file")
         meta["first_frame_status"] = (frames_of.get(sid) or {}).get("status")
         # DATAALIGN（register_takes from_first）：输入 JPEG 名里的 sha8 = 源 PNG 的 sha256 前 8 位；这里把源文件和版本号也写明
@@ -454,7 +509,7 @@ def build_all(validate_only=False) -> dict:
             # 没有通过的首帧，或首帧路线身份不过 → 纯 Ref2VA 24 步（脸部裁切）。Ref2VA + PDD 两段式不用（景别 4/5 退成全景）
             ref = ch.get("ref_default", "two_person_ref2va")
             idc = {"ref2va.identity_crops": crops, "ref2va.look_refs": True}   # REFLOCK 11-01：Ref2VA 必带造型参考（I3）
-            alt_map = {c.name: alts.get(NAME2ID.get(c.name, ""), crops.get(c.name)) for c in spec.faces}
+            alt_map = {c.name: alts.get(ids.get(c.name, ""), crops.get(c.name)) for c in spec.faces}
             alt_crop = {"ref2va.identity_crops": {**crops, **{k: v for k, v in alt_map.items() if v}}, "ref2va.look_refs": True}
             if sid in frames_of:
                 d = ch["face_default"]
@@ -501,7 +556,7 @@ def build_all(validate_only=False) -> dict:
                 split.append(mm)
         shots = split
     shots.sort(key=lambda m: (m["ep"], m["idx"]))
-    out = {"schema": "series10_video.jobs/1", "built_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    out = {"schema": "series10_video.jobs/1", "run": RUN_ID, "built_at": time.strftime("%Y-%m-%d %H:%M:%S"),
            "built_by": "tools/series10_video/build_jobs.py", "recipe_choice": ch,
            "validate": VALIDATE if validate_only else None, "anomaly_skipped": dict(ANOMALY_SKIPPED), "shots": shots}
     blob = json.dumps(out, ensure_ascii=False, indent=1)
@@ -513,6 +568,17 @@ def build_all(validate_only=False) -> dict:
             "not_ready": bad, "sha": hashlib.sha256(blob.encode()).hexdigest()[:12]}
 
 
+try:
+    set_run(RC.resolve())
+except RC.VideoRunError as _e:     # 导入时认不出剧：不炸导入方（night / 测试会 set_run），build_all 前再报（失败关闭）
+    _RUN_ERR = str(_e)
+else:
+    _RUN_ERR = None
+
+
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8")
+    set_run(RC.resolve())          # 失败关闭：--run / NS_RUN / 当前剧，必须登记且有视频政策
+    if "--validate" in sys.argv and not RC.is_legacy(RUN_ID):
+        raise SystemExit("--validate 是 V1 的 S10V-1 对照（IMGGEN 旧首帧），只给 legacy 剧")
     print(json.dumps(build_all("--validate" in sys.argv), ensure_ascii=False, indent=1))

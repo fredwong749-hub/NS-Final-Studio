@@ -64,6 +64,17 @@ export function p1InReview(d: AFlow | null | undefined): boolean {
 
 const getJson = <T,>(url: string) => fetch(`${url}?t=${Date.now()}`).then((r) => (r.ok ? (r.json() as Promise<T>) : null)).catch(() => null);
 
+/** 项目方拍板前要知道的“还没写完”的地方：文字从 /status 的 p1_owner_hold_fields（如 episodes[2].logline）生成，不写死是哪一集 */
+const HOLD_FIELD: Record<string, string> = { logline: "一句简介", title: "标题", owner_line: "一句话", premise: "总简介" };
+export function holdText(fields?: string[] | null): string {
+  if (!fields?.length) return "";
+  const parts = fields.map((f) => {
+    const m = /^episodes\[(\d+)\]\.(\w+)$/.exec(f);
+    return m ? `第 ${Number(m[1]) + 1} 集${HOLD_FIELD[m[2]] ?? "内容"}` : "有一处内容";
+  });
+  return `${[...new Set(parts)].join("、")}还没写完，你点“用这版”后写手会自动补上，不影响你选的这版。`;
+}
+
 /** 取这部剧的写作状态（8 秒刷新）；没开始写作流程返回 null */
 export function useAutoflow(runId: string): { d: AFlow | null; reload: () => void } {
   const [d, setD] = useState<AFlow | null>(null);
@@ -95,6 +106,9 @@ export function P1Gate({ run, d, hasStory, onChanged }: { run: string; d: AFlow;
   const failed = d.p1_review?.latest?.passed === false || d.verdict === "p1_review_failed";
   const opts = d.p1_review?.revise_options ?? [];
   const od = d.p1_review?.owner_direction;
+  // 取值顺序：后端的 fill_note → 从 next_action 里截出“写手会自动补上”那一句 → 按 p1_owner_hold_fields 生成
+  const fromNext = (d.next_action ?? "").split("。").find((x) => x.includes("写手会自动补上"));
+  const holdNote = od?.fill_note || (fromNext ? `${fromNext}。` : "") || holdText(d.p1_owner_hold_fields);
   const send = (body: { action: "approve" | "revise" | "redirect"; note?: string; options?: string[] }, ok: string) => {
     setBusy(true);
     fetch(`/api/script-autoflow/${encodeURIComponent(run)}/gate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "P1", ...body }) })
@@ -138,6 +152,7 @@ export function P1Gate({ run, d, hasStory, onChanged }: { run: string; d: AFlow;
           <i className="af-dot amber" aria-hidden /> {od?.why ? `${od.why}，总调度转给你定方向` : "这一版没到门槛，总调度转给你定方向"}
         </p>
       )}
+      {!mode && holdNote && <p className="af-muted af-dirnote af-holdnote">{holdNote}</p>}
       {mode === "revise" && direction ? (
         <div className="af-rev">
           <div className="af-quick">

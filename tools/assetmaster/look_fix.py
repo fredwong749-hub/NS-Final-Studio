@@ -19,9 +19,12 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+import runs as RUNS  # noqa: E402
+_LEGACY = RUNS.legacy_run(ROOT)   # I-16：第一季专用历史工具（入口 gate_legacy_tool 要求显式 --run）
 sys.path[:0] = [str(ROOT / "tools" / "pipeline"), str(ROOT / "services" / "api"), str(ROOT / "services" / "agent"),
                 str(ROOT / "tools" / "assetmaster"), str(ROOT / "services" / "recipes"), str(ROOT / "services" / "schema")]
-RUN = ROOT / "data" / "pipeline" / "runs" / "series10_v1"
+RUN = ROOT / "data" / "pipeline" / "runs" / _LEGACY
 KEEP = ("**对白**", "**独白**", "**旁白**", "**VO**", "**sound**", "**时长**", "**衔接**", "**人物**", "**站位**")
 
 SYS_EXTRA = """
@@ -84,7 +87,7 @@ def run_ep(ep: int, extra: list[str], dry: bool, budget: float) -> dict:
     msgs = [{"role": "user", "content": user}]
     for rnd in range(3):
         res = RC.call_llm(sysmsg, msgs, max_tokens=24000, reasoning=False, tag="assetmaster-lookfix", budget=budget,
-                          meta={"link": "P3-P4-lookfix", "round": rnd, "run": f"series10_v1/ep{ep:02d}"})
+                          meta={"link": "P3-P4-lookfix", "round": rnd, "run": f"{_LEGACY}/ep{ep:02d}"})
         txt = res["content"]
         (d / "raw").mkdir(exist_ok=True)
         (d / "raw" / f"P3-P4.lookfix.r{rnd}.txt").write_text(txt, encoding="utf-8")
@@ -124,6 +127,7 @@ def run_ep(ep: int, extra: list[str], dry: bool, budget: float) -> dict:
 
 
 def main(argv=None) -> int:
+    argv = RUNS.gate_legacy_tool(argv, __file__)
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser()
     ap.add_argument("--ep", type=int, action="append", required=True)

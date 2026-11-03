@@ -200,7 +200,12 @@ IDM_PY = "/root/work/fredw/venv_idm/bin/python"
 def shot_meta_for(path: Path) -> dict:
     """V6 / V7 需要的镜头信息（在画人数、对白、独白、说话人参考）：按文件名的镜号从 jobs.json / validate_jobs.json 取"""
     sid = path.name.split("__")[0]
-    vid = ROOT / "data/pipeline/runs/series10_v1/video"
+    # MERGE-VID-O：片子在 <剧>/video/clips/epNN/ 下 → 作业就在同一部剧的 video/；认不出时按 NS_RUN（不默认第一季）
+    vid = path.resolve().parents[2] if path.resolve().parent.parent.name == "clips" else None
+    if vid is None and __import__("os").environ.get("NS_RUN"):
+        vid = ROOT / f"data/pipeline/runs/{__import__('os').environ['NS_RUN']}/video"
+    if vid is None:
+        return {}
     for jf in ("jobs.json", "validate_jobs.json"):
         try:
             for sh in json.loads((vid / jf).read_text(encoding="utf-8"))["shots"]:

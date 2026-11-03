@@ -33,7 +33,7 @@ rules:
     link: P3-P4
     title: 模板改写不变量（代码校验，不满足整轮作废）
     when: hollywood.py gate()
-    then: I1 台词 / 🎙 逐字同序；I2 集头逐字（剧情 / 人物卡 / 造型）；I3 场景 id、出场人物不新增；I4 6 ≤ 镜数 ≤ shot_cap（D-SCR-06）；I5 集时长 60–120 秒（项目方 11-01 21:4x，D-SCR-08；⤴ 旧 60–75），系统按 6 秒一镜算好镜数与每镜秒数给写作方；I6 p4_adapter lint 每个码不比原稿多；I7 P4 阻断 = 0（集头“造型｜”行上的人物卡冻结项单列，不算）；I8 只报告：QW-W11（K-WRT-702）要求降到 0；人物卡唯一例外 ep01 林晚“深灰西装裙→深灰铅笔裙”（项目方 21:4x，D-SCR-08b，系统逐字替换）。SS-M2 分拍末段时间码机械补到镜长；集级 QW-W5 按镜号转 --force-shot。只差 I6 / I7 时先用 qwen_repair_loop 按变多的 QW 码逐镜返修再复检
+    then: I1 台词 / 🎙 逐字同序；I2 集头逐字（剧情 / 人物卡 / 造型）；I3 场景 id、出场人物不新增；I4 6 ≤ 镜数 ≤ shot_cap（D-SCR-06）；I5 集时长 60–120 秒（项目方 11-01 21:4x，D-SCR-08；⤴ 旧 60–75），系统按 6 秒一镜算好镜数与每镜秒数给写作方；I6 p4_adapter lint 每个码不比原稿多；I7 P4 阻断 = 0（集头“造型｜”行上的人物卡冻结项单列，不算）；I8 只报告：QW-W11（K-WRT-702）要求降到 0；人物卡唯一例外见 hollywood.HEAD_EXCEPTIONS（V1 ep01 一处服装改名）（项目方 21:4x，D-SCR-08b，系统逐字替换）。SS-M2 分拍末段时间码机械补到镜长；集级 QW-W5 按镜号转 --force-shot。只差 I6 / I7 时先用 qwen_repair_loop 按变多的 QW 码逐镜返修再复检
     params: {dur_window: [60, 120], shot_s: 6, zero_codes: [QW-W11]}
     evidence:
       - {src: tools/validate_qwen_script.py QW-E3, note: 现行集长 50–75 秒}
@@ -130,7 +130,7 @@ rules:
     check: [tests/test_hollywood_r5.py]
     domain: writer
     link: P3-P4
-    title: 剧情事实核对口径：每集服装 / 造型不是剧情事实；身份、名字、年龄、发色发型、脸（林晚 L-086）、水晶甲等固定特征、人物关系、已发生剧情是事实
+    title: 剧情事实核对口径：每集服装 / 造型不是剧情事实；身份、名字、年龄、发色发型、脸（身份脸）、标志物等固定特征、人物关系、已发生剧情是事实
     when: HOLLYWOOD 事实表抽取 / 整集核对 / 补丁核对（hollywood_r5.check_facts / check_patch_facts，autoflow 续季）
     then: 事实核对提示词（hollywood_facts.md）写明服装不进 settings；代码 drop_wardrobe 再滤掉只涉及服装的偏差，固定特征被改（同一分句有特征词 + 改 / 变 / 缺 / 未出现）照旧算偏差；同一集没写换装却变衣服由 rubric_code consistency#4 / #5 代码判定；新造型的设定图走 IMGFIX 资产流程，作业编译缺资产要拦下开工单
     evidence:
@@ -274,7 +274,7 @@ rules:
     domain: writer
     link: P3-P4
     title: 独角戏集（全集只有一个人在画）conflict#1 改判“内在冲突”：外部压力源入画 + 主角在压力下做出可见选择
-    when: rubric_code conflict#1（总调度 11-02 定；S2 ep06 林晚独角戏，顾沉只以文字消息出现）
+    when: rubric_code conflict#1（总调度 11-02 定；S2 ep06 女主独角戏，男主只以文字消息出现）
     then: is_solo = 全集“在画 / 局部”人物名恰好 1 个；solo_conflict ① 某镜出现画外具名人物（人物行写 画外）或手机消息 / 来电 / 门铃 / 敲门 / 屏幕文字，② 之后某镜分拍有选择动作（放下 / 拿起 / 回复 / 删掉 / 关掉 / 扣下 / 走向 / 推开 / 按下 / 拒接 / 点开 / 离开…）；非独角戏集仍判同框或 ≥2 说话人。第一季 10 集 + 第二季 ep01–05 回归：无一集被判为独角戏，判定不变
     targets: [{kind: writer_prompt, section: 分拍与动作}]
     writer_text: 整集只有一个人出镜的独角戏：要让外部压力进画面——对方以画外人物、手机消息、来电、门铃、敲门或屏幕文字出现（人物行写“<名>（画外）”）；压力出现之后，主角要做一个看得见的选择动作（扣下手机、删掉、拒接、拿起、推门离开…），不能只写凝视和停顿。
@@ -418,7 +418,7 @@ rules:
     when: 每个同场换机位 / 接力镜的 **衔接** 行
     then: scene_lock.check_episode H24：“承：<视线|动作|声音>｜<内容>”，写“环境”或空内容 = 不过；换场可写“承：无”
     targets: [{kind: writer_prompt, section: 镜头字段}]
-    writer_text: 同一场里换机位或接力的镜，衔接行写清上一镜交过来的是什么：视线（谁看向哪）、动作（手上正在做的事）或声音（哪一声响）——“承：视线｜林晚看向门口”。不要写“承：环境”。
+    writer_text: 同一场里换机位或接力的镜，衔接行写清上一镜交过来的是什么：视线（谁看向哪）、动作（手上正在做的事）或声音（哪一声响）——“承：视线｜女主 A看向门口”。不要写“承：环境”。
     evidence:
       - {src: docs/master/CONSISTENCY_PLAN.md, note: "§3 提示层：场景定稿行、衔接点、去重复环境句（L-118）"}
     confidence: medium
@@ -432,7 +432,7 @@ rules:
     when: 同一场景的各镜 img
     then: scene_lock.check_episode H25：img 里不带人名的环境分句（光 / 灯 / 窗 / 墙 / 背景 / 虚化 / 霓虹…）和本场前面某镜的环境分句二字片段重合 ≥ 0.6 = 重复
     targets: [{kind: writer_prompt, section: 镜头字段}]
-    writer_text: 同一场里不要每镜都重写一遍环境（例如每镜都写“落地窗外霓虹虚化成光斑”）。场景长什么样由场景定稿行交代；img 只写本镜的人物、动作、机位和这一镜独有的东西。人物扶、靠场景物件的接触分句照写。img 里 QW-W9 要求的光线句照写，但写成带人名的句子（“暖黄顶灯从上方落在林晚的肩上”），不写成和前镜一样的纯环境句。
+    writer_text: 同一场里不要每镜都重写一遍环境（例如每镜都写“落地窗外霓虹虚化成光斑”）。场景长什么样由场景定稿行交代；img 只写本镜的人物、动作、机位和这一镜独有的东西。人物扶、靠场景物件的接触分句照写。img 里 QW-W9 要求的光线句照写，但写成带人名的句子（“暖黄顶灯从上方落在女主 A的肩上”），不写成和前镜一样的纯环境句。
     evidence:
       - {src: docs/master/CONSISTENCY_PLAN.md, note: "§3 提示层：场景定稿行、衔接点、去重复环境句（L-118）"}
     confidence: medium

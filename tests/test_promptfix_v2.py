@@ -18,6 +18,26 @@ V2 = "series10_v2"
 need_v2 = pytest.mark.skipif(not AR.manifest_rel(V2) or not (ROOT / AR.manifest_rel(V2)).is_file(), reason="V2 资产包清单缺")
 
 
+def _golden(monkeypatch):
+    """golden_v2 必须指定镜号（ISS-1103-005000-2af2）：取当前剧第 1 集里第一个 golden 认的女主单人镜（非成人），不写死镜号"""
+    sys.path.insert(0, str(ROOT / "tools" / "promptfix"))
+    import golden_v2 as GV
+    from ns_agent import cast_table as CT
+    lead = CT.lead_id()
+    names = (CT.speaker_cast(V2) or {}).get("names") or {}
+    for n in range(1, 60):
+        try:
+            _s, _e, sh = GV.load_imported(n)
+        except (SystemExit, StopIteration):
+            continue
+        if {names.get(c.name, c.name) for c in sh.cast if c.visible} != {lead}:   # 金样口径：女主单人镜
+            continue
+        monkeypatch.setattr(GV, "SHOT", n)
+        monkeypatch.setattr(GV, "SID", f"{V2}-ep01-S{n}")
+        return GV
+    pytest.skip("当前剧第 1 集没有 golden 可出的镜")
+
+
 # ---------------------------------------------------------------- I-14 run_paths
 def test_run_paths_sandbox_is_legacy(tmp_path):
     assert RP.script_json(tmp_path) == tmp_path / "data/import/script_v2.json"
@@ -152,7 +172,7 @@ def test_no_brand_slot_line():
     sr = AR.ShotRefs("ep01-S1", V2, "全景", None, ["feet"], "lead_f", [{"character": "lead_f", "name": "女主", "presence": "在画"}],
                      [AR.Ref("item", "lead_f", sh2, "鞋：黑色漆皮细带露趾高跟凉鞋", 2, "feet", "manifest", "SH2", "O4")], [], [])
     plan = AR.plan_slots(sr, capacity=3)
-    assert plan.slots[0].line.endswith(AR.NO_BRAND_NOTE)
+    assert "没有任何标志和文字" in plan.slots[0].line          # W-40 起句尾还接 render_prompt（普通细跟…），不再只是 NO_BRAND_NOTE
     assert not AR.brand_hits(plan.prompt_prefix)
 
 
@@ -218,12 +238,18 @@ def test_p15b_she_resolves_to_lead_f(v2_env):
 
 
 @need_v2
-def test_p15b_v2_compile_refs_all_from_assets_v2(v2_env):
-    sys.path.insert(0, str(ROOT / "tools" / "promptfix"))
-    import golden_v2 as GV
+def test_p15b_v2_compile_refs_all_from_assets_v2(v2_env, monkeypatch):
+    GV = _golden(monkeypatch)
     job = GV.compile_job()
     assert job["compile_trace"]["faces"] == ["lead_f"]
-    assert job["refs"] and all(f.startswith("assets_v2/") for f in job["refs"]), job["refs"]
+    # W13 CUTB-PREP 11-03：数据态陈旧（不是放宽）。原断言“全部以 assets_v2/ 开头”写于 03:08，那时 O4 还没设定图；
+    # O4 设定图登记后 asset_refs.sheet_crop 会按本剧 crop_dir 裁去头半身参考（源图仍在 assets_v2）。性质：每张参考要么在
+    # assets_v2/，要么在 V2 自己的派生目录（crop_dir / board_dir，= preflight I11 认的同一口径），不进任何别剧目录。
+    pc = AR.project_cfg(V2)
+    own = ("assets_v2/",) + tuple(str(x).rstrip("/") + "/" for x in (pc.get("crop_dir"), pc.get("board_dir")) if x)
+    assert all(V2 in o for o in own[1:]), own                                    # 派生目录确是本剧的
+    assert job["refs"] and all(str(f).startswith(own) for f in job["refs"]), job["refs"]
+    assert not [f for f in job["refs"] if "series10_v1" in str(f) or str(f).startswith("data/refcrops")], job["refs"]
     assert "lin_wan" not in json.dumps(job["asset_refs"], ensure_ascii=False)
 
 
@@ -265,7 +291,7 @@ def test_p16b_make_board_refuses_new_board_for_archived_run(monkeypatch):
 def test_v2_style_suffix_from_run_style_not_v1(v2_env, monkeypatch):
     from ns_agent.gen_contract import style as ST
     suf = ST.preset_suffix()
-    assert suf and "时尚杂志" in suf and not ST.v1_style_hits(suf)
+    assert suf and not ST.v1_style_hits(suf) and "时尚杂志大片质感，色彩艳丽、浓郁、高饱和" not in suf   # L-130：临时句已换掉
     assert not ST.banned_hits(suf)
     monkeypatch.setattr(ST, "run_style_cfg", lambda: {})
     with pytest.raises(ST.StyleMissing):                          # V2 没登记风格 → 失败关闭，不退回 S★
@@ -273,14 +299,14 @@ def test_v2_style_suffix_from_run_style_not_v1(v2_env, monkeypatch):
 
 
 @need_v2
-def test_v2_compiled_prompt_has_no_v1_style(v2_env):
-    sys.path.insert(0, str(ROOT / "tools" / "promptfix"))
-    import golden_v2 as GV
+def test_v2_compiled_prompt_has_no_v1_style(v2_env, monkeypatch):
+    GV = _golden(monkeypatch)
     from ns_agent.gen_contract import style as ST
     job = GV.compile_job()
     assert not ST.v1_style_hits(job["prompt"]), ST.v1_style_hits(job["prompt"])
-    assert "Leica" not in job["prompt"] and "徕卡" not in job["prompt"]
-    assert ST.preset_suffix() in job["prompt"]
+    # ⤴ L-145（项目方 11-03 04:3x“徕卡级锐利风格是我要的”）：V2 后缀用英文 Leica / ARRI / Kodak 质感句；V1 S★ 原句（中文徕卡 / 50mm f/2 / 暖调通透）照挡
+    assert "徕卡" not in job["prompt"] and "50mm f/2" not in job["prompt"] and "暖调通透" not in job["prompt"]
+    assert any(x in job["prompt"] for x in ST.run_suffixes())          # 分段剧：本镜那一段的风格句（L-130）
 
 
 @need_v2
@@ -297,3 +323,146 @@ def test_v1_leak_vocab_has_style_phrases():
     v = VL.vocab(ROOT, "series10_v2")
     assert "徕卡" in v["style"] and "暖调通透" in v["style"]
     assert any(h["kind"] == "style" for h in VL.scan("徕卡M 50mm f/2镜头，暖调通透", v))
+
+
+# ---------------------------------------------------------------- V2 编译完全不读 V1 visual_bible（总调度 21:1x，L-126）
+@need_v2
+def test_v2_compile_never_opens_v1_visual_bible(v2_env, monkeypatch):
+    from ns_agent import bible as B
+    B._BIBLE_CACHE.clear()
+    B._SRC_CACHE.clear()
+    opened = []
+    real_rt, real_rb = Path.read_text, Path.read_bytes
+
+    def rt(self, *a, **k):
+        opened.append(str(self))
+        return real_rt(self, *a, **k)
+
+    def rb(self, *a, **k):
+        opened.append(str(self))
+        return real_rb(self, *a, **k)
+    monkeypatch.setattr(Path, "read_text", rt)
+    monkeypatch.setattr(Path, "read_bytes", rb)
+    GV = _golden(monkeypatch)
+    job = GV.compile_job()
+    assert not [f for f in opened if f.replace("\\", "/").endswith("config/visual_bible.toml")]
+    assert any(f.replace("\\", "/").endswith("config/compile/bible_series10_v2.toml") for f in opened)
+    p = job["prompt"]
+    assert "光比1:4" not in p                                      # V1 布光风格去掉
+    assert "面部清晰对焦" in p                                      # 技术句保留（来自 V2 自己的规则文件；漆皮句随镜头内容触发，金样已不写死服装）
+    B._BIBLE_CACHE.clear()
+    B._SRC_CACHE.clear()
+
+
+@need_v2
+def test_v2_bible_missing_entry_fails_closed(v2_env, monkeypatch, tmp_path):
+    from ns_agent import bible as B
+    rs = json.loads((ROOT / "config/compile/run_style.json").read_text(encoding="utf-8"))
+    assert rs["runs"][V2]["bible"] == "config/compile/bible_series10_v2.toml"
+    b = B.load_bible(ROOT)
+    assert not b.characters and "光比" not in "".join(r.term for r in b.shot_rules)
+    assert all("Leica" not in x for x in (b.image_style_fallback, b.video_style))
+
+
+# ---------------------------------------------------------------- W-40：SH2 品牌 logo 永远不进出图
+@need_v2
+def test_w40_sh2_uses_render_reference_not_logo_original():
+    mf = json.loads((ROOT / AR.manifest_rel(V2)).read_text(encoding="utf-8"))
+    sh2 = mf["characters"]["lead_f"]["items"]["SH2"]
+    assert sh2.get("render_file") and sh2["render_file"] != sh2["file"]
+    assert AR.item_image("SH2", V2) == sh2["render_file"]                 # 出图用去 logo 的版本
+    assert AR.manifest_violations(V2, [sh2["file"]])                      # 带 logo 的原图不许进参考槽
+    assert AR.manifest_violations(V2, [sh2["render_file"]]) == []
+
+
+@need_v2
+def test_w40_slot_line_negative_and_vqa_check():
+    sh2 = AR.item_image("SH2", V2)
+    sr = AR.ShotRefs("ep01-S1", V2, "全景", None, ["feet"], "lead_f", [{"character": "lead_f", "name": "女主", "presence": "在画"}],
+                     [AR.Ref("item", "lead_f", sh2, "鞋：黑色漆皮细带露趾高跟凉鞋", 2, "feet", "manifest", "SH2", "O4")], [], [])
+    plan = AR.plan_slots(sr, capacity=3)
+    assert "普通细跟" in plan.slots[0].line and "没有任何标志和文字" in plan.slots[0].line
+    assert "品牌logo" in AR.brand_negative(V2, plan)
+    vq = json.loads((ROOT / "config/vqa.json").read_text(encoding="utf-8"))
+    assert vq["checks"]["brand_logo"]["blocking"] is True
+    assert '"brand_logo"' in (ROOT / "config/prompts/vqa_inspect.md").read_text(encoding="utf-8")
+
+
+def test_w40_negative_reaches_graph_only_when_cfg_above_one():
+    from ns_render import workflows as W
+    m = W.QwenModel()
+    neg = W.negative_for(m, "品牌logo")
+    assert neg == ("" if W.effective_cfg(m) <= 1.0 else "品牌logo")      # Turbo cfg=1 丢负面词：所以主防线是参考图 + 正向句 + 出图后判
+
+
+
+# ---------------------------------------------------------------- L-130：幻想段 / 现实段风格按段取
+@need_v2
+def test_l130_segment_styles(v2_env):
+    from ns_agent.gen_contract import style as ST
+    rq = json.loads((ROOT / "config/render_quality.json").read_text(encoding="utf-8"))
+    by = {p["id"]: p["params"]["style_suffix"] for p in rq["image_presets"] if p["id"].startswith("v2_editorial")}
+    fan, rea = by["v2_editorial_fantasy_c"], by["v2_editorial_reality_c2"]
+    assert ST.preset_suffix(V2, "fantasy") == fan and ST.preset_suffix(V2, "reality") == rea
+    assert ST.preset_suffix(V2, None) == rea                                   # 没标记 → 默认现实段
+    assert ST.segment_of({"scene_detail": "【幻想段】外滩日落"})[0] == "fantasy"
+    assert ST.segment_of({"img_prompt": "【现实段】出租屋"})[0] == "reality"
+    assert ST.segment_of({"img_prompt": "中景，她坐着"})[0] is None
+    assert set(ST.run_suffixes(V2)) == {fan, rea}
+
+
+@need_v2
+def test_l130_compiled_prompt_by_segment(v2_env, monkeypatch):
+    """同一镜：场景细节标【幻想段】→ 幻想段预设、标记不进提示词；没标记 → 现实段 + 告警（镜头取当前剧导入稿，不用夹具）"""
+    GV = _golden(monkeypatch)
+    from ns_agent import frame_job as FJ
+    from ns_agent.gen_contract import style as ST
+    sc, ep, sh = GV.load_imported(GV.SHOT)
+    base = (sh.scene_detail or "").replace("【幻想段】", "").replace("【现实段】", "")
+    job = FJ.build_first(V2, ep, sh.model_copy(update={"scene_detail": "【幻想段】" + base}), sc.globals)
+    assert job["preset"] == "v2_editorial_fantasy_c" and job["style_segment"] == "fantasy" and not job["style_warning"]
+    assert ST.preset_suffix(V2, "fantasy") in job["prompt"]
+    assert "时尚杂志大片质感，色彩艳丽、浓郁、高饱和" not in job["prompt"]
+    job2 = FJ.build_first(V2, ep, sh.model_copy(update={"scene_detail": base}), sc.globals)
+    assert job2["style_segment"] == "reality" and job2["style_warning"]
+    assert ST.preset_suffix(V2, "reality") in job2["prompt"]
+    i7 = next(i for i in GV.preflight(job2, "gpu33:0").items if i.id == "I7")
+    assert i7.status == "pass", i7.detail
+
+
+@need_v2
+def test_l130_segment_marker_never_in_prompt(v2_env, monkeypatch):
+    """ISS-1103-005241-bf53：带 scene_id 的镜，场景细节 / img / motion 里的【幻想段】只用来判段（调色 + 元数据），
+    首帧 / 尾帧 / 视频提示词一律不含标记"""
+    GV = _golden(monkeypatch)
+    from ns_agent import compiler as C
+    from ns_agent import frame_job as FJ
+    sc, ep, sh = GV.load_imported(GV.SHOT)
+    assert sh.scene_id, "本测试要求镜头带 scene_id"
+    mk = "【" + "幻想段】"
+    sh2 = sh.model_copy(update={"scene_detail": mk + (sh.scene_detail or ""), "img_prompt": mk + sh.img_prompt,
+                                "motion_prompt": mk + (sh.motion_prompt or "")})
+    job = FJ.build_first(V2, ep, sh2, sc.globals)
+    assert job["style_segment"] == "fantasy" and job["compile_trace"]["style_segment"] == "fantasy"   # 元数据照样判段
+    # W13 CUTB-PREP 11-03：数据态陈旧（不是放宽）。04:50 重导后导入稿 ep01-S8 的 scene_detail 本身带【现实段】，原断言拿“原始”
+    # scene_detail 去 prompt 里找，等于要求标记进提示词，与本测试守的 L-130 自相矛盾。改为比去标记后的场景细节（编译器同一函数）。
+    from ns_agent.gen_contract import style as ST
+    assert "本镜场景：" in job["prompt"] and (ST.strip_segment_marks(sh.scene_detail) or "").strip() in job["prompt"]   # 场景细节保留，只去标记
+    assert "【现实段】" not in job["prompt"]
+    for k in ("prompt", "last_prompt"):
+        assert mk not in (job.get(k) or ""), k
+    c = C.compile_shot(ep, sh2, sc.globals, set())
+    for k in ("image_prompt", "last_prompt", "video_prompt", "legacy_video_prompt"):
+        assert mk not in (getattr(c, k, "") or ""), k
+
+
+# ---------------------------------------------------------------- OVERSIGHT-F 第 12 轮 P2-2：守卫覆盖 renders / 共用默认目录
+def test_p12_guard_covers_renders_and_shared_dirs():
+    assert AR._run_of_path(ROOT / "data/renders/series10_v2/ep01/S1/x.png") == V2
+    assert AR._run_of_path(ROOT / "data/renders/ep01/S1/x.png") == "series10_v1"           # legacy 不带前缀
+    assert AR._run_of_path(ROOT / "data/refcrops/x.png", "series10_s2") == "series10_s2"
+    with pytest.raises(AR.DerivedWriteRefused):
+        AR._guard_derived_write("series10_s2", ROOT / "data/refcrops/p12_probe.png")       # 暂停的剧写共用目录 → 拦
+    with pytest.raises(AR.DerivedWriteRefused):
+        AR._guard_derived_write(None, ROOT / "data/refboards/p12_probe.png")               # 共用目录不知道是哪部剧 → 拦
+    AR._guard_derived_write(V2, ROOT / "data/renders/series10_v2/ep01/S1/x.png")             # 制作中的剧 → 放行

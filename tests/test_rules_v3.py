@@ -311,7 +311,10 @@ def _six(tmp_path, bad_shot, i=2, **ep_kw):
     ({"dialogue": f"（她）“{LINE}”"}, "QW-D1", "block"),
     ({"dialogue": f"（林晚，旁白）“{LINE}”"}, "QW-D1", "block"),
     ({"vo": "**🎙（她，镜尾）**：占位独白。", "cue": "延续，强度1，对白避让，独白避让"}, "QW-D2", "block"),
-    ({"motion": "lnwan01，camera pan left 缓慢左摇，占位动作，眼神占位——中景，林晚占位结束状态"}, "QW-C4", "warn"),
+    # QW-C4 要用词表里 enabled 的运镜（config/director/camera_moves.yaml 是唯一来源，PROMPTFIX 11-02 22:2x 起 validate 不再另存词表）；
+    # pan 在词表里 enabled:false（Pika 横摇方向不受控），写 pan 现在报 QW-C1“不在词表”而不是 QW-C4。H3 正文是 push in → motion 写 static
+    ({"motion": "lnwan01，static shot 固定机位，占位动作，眼神占位——中景，林晚占位结束状态"}, "QW-C4", "warn"),
+    ({"motion": "lnwan01，camera pan left 缓慢左摇，占位动作，眼神占位——中景，林晚占位结束状态"}, "QW-C1", "warn"),   # 词表里 disabled 的运镜
     ({"h3_text": h3(en="a young adult woman")}, "H3-X1", "block"),
     ({"h3_text": h3(outfit="a placeholder outfit")}, "H3-X1", "block"),
     ({"h3_text": h3(voice="a soft voice at a slow pace")}, "H3-X3", "block"),

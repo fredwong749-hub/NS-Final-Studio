@@ -21,7 +21,7 @@ SLO_TITLE = {
     "S14": "RSI 线分数（2 小时无新分 / 连续不升）",
     "GPU24": "GPU 24 小时等待任务原因",
     "S15": "编排器 tick 存活", "S16": "笔记本常驻进程清单",
-    "S17": "单镜出图速率", "S18": "临时挂道到期", "S21": "读旧状态路径（state_legacy_read）", "S22": "冻结期间改文件", "S23": "笔记本侧出图道可达率", "S24": "API 响应时间", "S25": "常驻 CLIP", "S26": "写作推进常驻服务心跳", "S27": "P1 评审汇总", "SC": "SCORECARD 七项不到 100 分", "S20": "scratchpad 里跑的进程（K-OPS-Y04）", "G26": "声明 vs 实际（hosts.json）", "S19": "产能见底（ready 不够、没有下一批）",
+    "S17": "单镜出图速率", "S18": "临时挂道到期", "S21": "读旧状态路径（state_legacy_read）", "S22": "冻结期间改文件", "S23": "笔记本侧出图道可达率", "S24": "API 响应时间", "S25": "常驻 CLIP", "S26": "写作推进常驻服务心跳", "S27": "P1 评审汇总", "S28": "Q10 人数检测服务", "SC": "SCORECARD 七项不到 100 分", "S20": "scratchpad 里跑的进程（K-OPS-Y04）", "G26": "声明 vs 实际（hosts.json）", "S19": "产能见底（ready 不够、没有下一批）",
 }
 
 
@@ -751,6 +751,15 @@ def j_ui_measure(m: dict, owner: str) -> list[dict]:
         f["owner_loop"] = owner
         out.append(f)
     return out
+
+
+def j_q10(fails: int, last: dict, cfg: dict) -> list[dict]:
+    """连续 fail_n 次失败（不通，或 loaded 不是 true）→ 违约：两台首帧都会卡在 Q10（失败关闭）"""
+    why = last.get("err") or ("loaded=" + str(last.get("loaded")) if last.get("ok") else "不通")
+    f = F("S28", "q10_detector", fails >= cfg["fail_n"], f"Q10 人数检测服务（{cfg['url']}，从 {cfg['from_host']} 测）连续 {fails} 次失败：{why}——两台首帧会全卡在 Q10",
+          fails=fails, last=last)
+    f["owner_loop"] = cfg.get("owner_loop")
+    return [f]
 
 
 def now() -> float:

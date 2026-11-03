@@ -58,10 +58,32 @@ def _cli_error(e: SystemExit) -> HTTPException:
     return HTTPException(409, msg)
 
 
+def _asset_run(root: Path) -> str | None:
+    """资产包剧（非 V1、有清单）的 run；口径 = sop._current_run"""
+    from ns_api import sop as SOP
+    return SOP._current_run(Path(root))
+
+
 def decide(body: OwnerDecision, *, root: Path, gpu3_root: Path, look_store=None) -> dict:
     """执行一条项目方决定（调用方已核过 by=owner + 原话）。→ {gate, record}"""
     q = body.quote.strip()
     g = body.gate
+    if g == "look" and _asset_run(root):
+        # V2CUT-O 11-03：资产包剧（V2）按集确认全部人物（ns_api.look_confirm，和通知中心同一个后端，确认后两边同时消失）
+        from ns_api import look_confirm as LC
+        from ns_agent.looks import parse_episode_list
+        run = _asset_run(root)
+        try:
+            eps = parse_episode_list((body.episodes or "").strip())
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        if not eps:
+            raise HTTPException(400, "确认造型要给 episodes")
+        try:
+            recs = [LC.confirm(Path(root), run, int(n), "owner", q, via="canvas") for n in eps]
+        except ValueError as e:
+            raise HTTPException(409, str(e)) from e
+        return {"gate": g, "record": {"episodes": [r["episode"] for r in recs], "looks": {r["episode"]: r["names"] for r in recs}}}
     if g == "look":
         if not body.character or not (body.episodes or "").strip():
             raise HTTPException(400, "确认造型要给 character 和 episodes")

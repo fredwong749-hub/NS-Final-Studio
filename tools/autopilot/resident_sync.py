@@ -347,6 +347,13 @@ def push_gate(tier: int = 2, code_only: bool = False) -> dict:
     return {"passed": t0}
 
 
+def atomic_install_cmd(dest: str) -> str:
+    """A-12（FACTORY 11-02 21:3x）：临时目录 $T 里解好的文件逐个 mv 到仓库（同一文件系统 rename = 原子替换），
+    读方永远读到整份旧文件或整份新文件；以前 cp -a 原地覆盖，takes.json 等可能被读到写了一半。最后清掉空的临时目录"""
+    return (f'(cd $T && find . -type f -print0 | while IFS= read -r -d "" f; do mkdir -p "{dest}/$(dirname "$f")"; '
+            f'mv -f "$f" "{dest}/$f"; done); rm -rf $T')
+
+
 def push(host: str, code_only: bool = False, tier: int = 2, yes: bool = False, batch_mb: float = 2.0,
          gate: bool = True) -> dict:
     """tier=1：只推代码 / 小配置 / 身份脸 / 作业清单（目标 ≤ 10 MB）；tier=2：再推大文件与生产数据（低优先级、可中断续推）。
@@ -375,7 +382,7 @@ def push(host: str, code_only: bool = False, tier: int = 2, yes: bool = False, b
         for i, b in enumerate(batches(todo, loc)):
             blob = tar_bytes(b)
             # 先解到临时目录再搬进 repo：一批传到一半断了不会留下截断文件（K-OPS-W02）
-            ssh(host, f"set -e; T=$(mktemp -d {OFF}/.push.XXXXXX); tar xf - -C $T; cp -a $T/. {R}/; rm -rf $T; echo ok",
+            ssh(host, f"set -e; T=$(mktemp -d {OFF}/.push.XXXXXX); tar xf - -C $T; " + atomic_install_cmd(R) + "; echo ok",
                 data=blob, timeout=BATCH_TIMEOUT_S)
             sent_total += len(b)
             log("push", host, f"tier{tier} batch {i + 1}", len(b), "files", f"{len(blob) / 1e6:.2f} MB")
@@ -630,7 +637,7 @@ for g, port in LANES.items():
     except Exception:
         out["queues"][g] = None
 try:
-    out["hb"] = json.load(open(R + "/data/producer/heartbeat.json"))
+    out["hb"] = json.load(open(R + "/__PD__/heartbeat.json"))
 except Exception:
     out["hb"] = None
 try:
@@ -652,7 +659,7 @@ try:
 except Exception:
     out["disp"] = 0
 try:
-    out["ctrl"] = json.load(open(R + "/data/producer/control.json"))
+    out["ctrl"] = json.load(open(R + "/__PD__/control.json"))
 except Exception:
     out["ctrl"] = {}
 print(json.dumps(out))
@@ -669,10 +676,26 @@ def _lanes_from_hosts() -> dict[str, dict[str, int]]:
 LANES = _lanes_from_hosts()
 
 
+def producer_rel(run: str) -> str:
+    """该剧 producer 目录（相对项目根）：legacy 剧 = data/producer，其它 = data/producer/runs/<run>（= runs.producer_dir）"""
+    return "data/producer" if _RUNS.is_legacy(run) else f"data/producer/runs/{run}"
+
+
+def producer_run_mismatch(hb: dict, run: str) -> str | None:
+    """ISS-1103-033310-5833：心跳里的 run 身份和应跑的剧对不上 → 返回人话原因；None = 对得上（或心跳是空的，交给心跳超时报警）"""
+    if not hb or hb.get("exited"):
+        return None
+    got = hb.get("run")
+    if not got:
+        return f"心跳没有 run 身份（旧代码，按启动时缓存的剧在跑），应为 {run}：需要 restart 一次"
+    return None if got == run else f"在为 {got} 跑，应为 {run}"
+
+
 def health(host: str) -> dict:
     """服务器侧健康：每张卡利用率、本机 ComfyUI 队列、producer 心跳、night_state 更新时间、可派镜数；
     空闲但有活 ≥ 10 分钟 → data/qa/alerts.jsonl（与 infra_watchdog 同一报警文件 / 同一开关语义）"""
-    probe = REMOTE_HEALTH.replace("__RUN__", RUN_ID).replace("__R__", R).replace("__HOST__", host).replace("__LANES__", json.dumps(LANES[host]))
+    probe = (REMOTE_HEALTH.replace("__RUN__", RUN_ID).replace("__R__", R).replace("__HOST__", host).replace("__LANES__", json.dumps(LANES[host]))
+             .replace("__PD__", producer_rel(RUN_ID)))     # ISS-1103-033310-5833：看主剧自己的 producer 目录，不看 V1 的 data/producer
     raw = ssh(host, "python3 -", data=probe.encode(), timeout=120, tries=2).decode("utf-8", "replace")
     d = json.loads([ln for ln in raw.splitlines() if ln.startswith("{")][-1])
     gpus, kv = d["gpus"], d
@@ -688,7 +711,7 @@ def health(host: str) -> dict:
     idle_min = (time.time() - hs["idle_since"]) / 60 if hs.get("idle_since") else 0
     res = {"host": host, "lanes": lanes, "gpu2_broken_skipped": host == "gpu33", "dispatchable": disp,
            "producer_hb_age_min": round((now - float(hb.get("t") or 0)) / 60, 1) if hb else None,
-           "producer_paused": hb.get("paused"), "night_state_age_min": round((now - int(d.get("ns") or 0)) / 60, 1),
+           "producer_paused": hb.get("paused"), "producer_run": hb.get("run"), "night_state_age_min": round((now - int(d.get("ns") or 0)) / 60, 1),
            "idle_min": round(idle_min, 1), "at": time.strftime("%F %T")}
     hs["health"] = res
     js(STATE, st)
@@ -701,6 +724,9 @@ def health(host: str) -> dict:
     res["producer_expected"] = prod_expected
     W.alert(ws, f"A-RESIDENT-PROD-{host}", prod_expected and (res["producer_hb_age_min"] is None or res["producer_hb_age_min"] >= 10), "crit",
             f"{host} 常驻 producer 心跳 {res['producer_hb_age_min']} 分钟没更新")
+    wrong = producer_run_mismatch(hb, RUN_ID)
+    res["producer_run_mismatch"] = wrong
+    W.alert(ws, f"A-RESIDENT-PROD-RUN-{host}", bool(wrong), "crit", f"{host} 常驻 producer {wrong}")
     W.alert(ws, f"A-RESIDENT-NIGHT-{host}", res["night_state_age_min"] >= 20, "crit",
             f"{host} 常驻 night.py 的 night_state.json {res['night_state_age_min']} 分钟没更新（卡住或已退出）")
     js(W.STATE, ws)
@@ -894,7 +920,7 @@ AUTOFLOW_TIMEOUT_S = 1200         # 最长一拍约 2 + 10 + 6 分钟（交稿�
 AUTOFLOW_LOG_EVERY = 30           # 正常拍每 30 拍记一行日志；失败 / 超时 / 输出变化每次都记
 # 04:2x 总调度：一拍串行会被 :8800 守护 / line3 打分拖住（04:17:49 那拍卡在 api_restart_guard，last_tick 停 4 分钟）
 # → 拆成三条线各自线程 + 子进程（tools/autopilot/tick_parts.py），core 每 60 s 必写 last_tick，line3 / api 上一次没完就跳过
-AUTOFLOW_PARTS = {"core": 1200, "line3": 900, "api": 600}      # 线 → 子进程超时（s）
+AUTOFLOW_PARTS = {"core": 1200, "line3": 900, "api": 960}      # 线 → 子进程超时（s）；api 必须 > flow.api_restart_tick 900 > ps1 600（RESTARTFIX-O：外层先超时 taskkill /T 会连刚起的 API 一起杀）
 
 
 def autoflow_tick_once(timeout_s: int = AUTOFLOW_TIMEOUT_S, dry: bool = False, part: str | None = None) -> dict:
@@ -1063,7 +1089,7 @@ def push_frames(host: str, batch_mb: float = 2.0) -> dict:
     BATCH = int(batch_mb * 1024 * 1024)
     sent = 0
     for b in batches(todo, loc):
-        ssh(host, f"set -e; T=$(mktemp -d {OFF}/.push.XXXXXX); tar xf - -C $T; cp -a $T/. {R}/; rm -rf $T; echo ok",
+        ssh(host, f"set -e; T=$(mktemp -d {OFF}/.push.XXXXXX); tar xf - -C $T; " + atomic_install_cmd(R) + "; echo ok",
             data=tar_bytes(b), timeout=BATCH_TIMEOUT_S)
         sent += len(b)
     st = jl(STATE, {}) or {}
@@ -1165,7 +1191,7 @@ def verify_sha(host: str, files: list[str] | None = None, fix: bool = True) -> d
     if bad and fix:
         loc = {f: ((ROOT / f).stat().st_size, (ROOT / f).stat().st_mtime) for f in bad}
         for b in batches(bad, loc):
-            ssh(host, f"set -e; T=$(mktemp -d {OFF}/.push.XXXXXX); tar xf - -C $T; cp -a $T/. {R}/; rm -rf $T; echo ok",
+            ssh(host, f"set -e; T=$(mktemp -d {OFF}/.push.XXXXXX); tar xf - -C $T; " + atomic_install_cmd(R) + "; echo ok",
                 data=tar_bytes(b), timeout=BATCH_TIMEOUT_S)
         again = verify_sha(host, bad, fix=False)
         fixed = [f for f in bad if f not in again["mismatch"]]
@@ -1199,7 +1225,7 @@ def push_required(host: str, batch_mb: float = 2.0) -> dict:
     bl = batches(todo, loc)
     for i, b in enumerate(bl):
         log("push_required", host, f"batch {i + 1}/{len(bl)} 开始", len(b), "files", f"{sum(loc[f][0] for f in b) / 1e6:.2f} MB")   # 心跳
-        ssh(host, f"set -e; T=$(mktemp -d {OFF}/.push.XXXXXX); tar xf - -C $T; cp -a $T/. {R}/; rm -rf $T; echo ok",
+        ssh(host, f"set -e; T=$(mktemp -d {OFF}/.push.XXXXXX); tar xf - -C $T; " + atomic_install_cmd(R) + "; echo ok",
             data=tar_bytes(b), timeout=BATCH_TIMEOUT_S)
         sent += len(b)
         log("push_required", host, f"batch {i + 1}/{len(bl)} 完成，累计 {sent} 个")

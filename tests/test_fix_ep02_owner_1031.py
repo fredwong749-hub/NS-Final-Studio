@@ -24,7 +24,7 @@ PROMPT = (alignment_line(192) + "\n\nintegrated_multimodal_description: " + BODY
 def test_rules_say_normal_pace():
     rules = (ROOT / "config" / "script_chat_rules.md").read_text(encoding="utf-8")
     assert "正常或偏慢速度" not in rules and "动作量按正常速度在 N 秒内做完，并留出最后约 1 秒仍在进行的动作" in rules
-    app = (ROOT / "config" / "script_chat_rules_appendix.md").read_text(encoding="utf-8")
+    app = (ROOT / "config" / "script_chat_rules_appendix.md").read_text(encoding="utf-8") + (ROOT / "config" / "script_chat_runs" / "series10_v1_appendix.md").read_text(encoding="utf-8")   # HEADER-O：林晚声线移到 V1 专属附录
     prod = (ROOT / "docs" / "production_rules_v3.md").read_text(encoding="utf-8")
     assert "语速偏慢" not in app and "语速偏慢" not in prod and "自然语速" in app and "自然语速" in prod
     assert "中高音区" in app and "甜而带气声" in app            # 音色音区不动

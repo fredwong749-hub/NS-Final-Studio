@@ -338,6 +338,7 @@ def missing_fields(spec: ShotSpec) -> list[MissingField]:
 
 
 BEAT_MAX_S = 2.5   # sysimpl-v2：每拍 1.5–2 秒，最长 2.5 秒
+ALIGN_TOL_S = 0.4  # TIMELINE-O：H3 分拍时间码与 **分拍** 起点允许的偏差（台词拍按 **台词时段** 起点写，常差 0.2–0.3 秒）
 
 
 TIMING_LINT_CFG = __import__("pathlib").Path(__file__).resolve().parents[3] / "config" / "recipes" / "timing_lint.json"
@@ -354,10 +355,51 @@ def timing_lint_level(episode: int | None = None) -> str:
     return "error" if c.get("timing_lint_level") == "error" else "warn"
 
 
+import contextlib as _contextlib  # noqa: E402
+import contextvars as _contextvars  # noqa: E402
+
+# TIMELINE-O 11-03（项目方：“MiniMax 的提示词，运动……是需要时间轴的”）：V2 剧及所有新剧，稿件盖了 sysimpl-v2 及以上的章 →
+# 时间轴一律 strict（不再看 timing_lint.json 的 warn 开关）。只有 legacy 剧（timing_lint.json legacy_runs，= series10_v1）
+# 和认不出剧的稿件（测试临时文件）仍按开关走。剧的来源：spec.source.script_file 路径（data/{pipeline,import}/runs/<run>/），
+# 认不出时用 timeline_run(<run>) 设的当前剧（p4_adapter.check_p4 的临时文件，按 autoflow run_scope）。
+_TL_RUN: "_contextvars.ContextVar[str | None]" = _contextvars.ContextVar("shot_spec_timeline_run", default=None)
+_RUN_PATH_RE = re.compile(r"data[\\/](?:pipeline|import)[\\/]runs[\\/]([^\\/]+)[\\/]")
+
+
+@_contextlib.contextmanager
+def timeline_run(run: str | None):
+    tok = _TL_RUN.set(run)
+    try:
+        yield
+    finally:
+        _TL_RUN.reset(tok)
+
+
+def spec_run(spec: ShotSpec) -> str | None:
+    m = _RUN_PATH_RE.search(spec.source.script_file or "")
+    return m.group(1) if m else _TL_RUN.get()
+
+
+def run_strict(run: str | None) -> bool:
+    """这部剧的时间轴是否一律 strict：认得出剧、且不在 timing_lint.json legacy_runs 里 → True"""
+    if not run:
+        return False
+    try:
+        legacy = json.loads(TIMING_LINT_CFG.read_text(encoding="utf-8")).get("legacy_runs")
+    except (OSError, ValueError):
+        legacy = None   # 配置读不了 = 认不准是不是 legacy 剧 → 不强判 strict，回到 timing_lint_level 开关（同“认不出剧”口径）
+    return isinstance(legacy, list) and run not in legacy
+
+
 def rules_at_least(spec: ShotSpec, n: int) -> bool:
-    """写作规则 ≥ sysimpl-vN，且开关为 error 时才按 v2 严格要求（开关默认 warn，见 timing_lint_level）"""
+    """写作规则 ≥ sysimpl-vN，且（本剧一律 strict：V2 / 新剧；或开关为 error）时按 v2 严格要求"""
     m = re.search(r"sysimpl-v(\d+)", spec.source.rules_version or "")
-    return bool(m and int(m.group(1)) >= n) and timing_lint_level(spec.episode) == "error"
+    if run_strict(spec_run(spec)):
+        # V2 / 新剧只按 ≥ sysimpl-v2 写过：没盖章（补丁环只拿镜头区校验，章在文件头）也按 strict；只有明确盖了更低版本的章才放过
+        return not (m and int(m.group(1)) < n)
+    if not (m and int(m.group(1)) >= n):
+        return False
+    return timing_lint_level(spec.episode) == "error"
 
 
 def beat_slots(spec: ShotSpec, strict: bool) -> list[MissingField]:
@@ -369,6 +411,8 @@ def beat_slots(spec: ShotSpec, strict: bool) -> list[MissingField]:
         tag = f"分拍 {b.t0:g}–{b.t1:g}秒"
         if b.t1 - b.t0 > BEAT_MAX_S + 1e-6:
             out.append(_m(spec, "motion.beats", "SS-M4", "warn", f"{tag} 长 {b.t1 - b.t0:.1f}s，超过 {BEAT_MAX_S}s", "sysimpl-v2"))
+        if strict and not (b.camera or "").strip():   # TIMELINE-O：运镜也按拍写（运镜=固定 / 小幅推近 / 继续推近…）
+            out.append(_m(spec, "motion.beats", "SS-M8", sev, f"{tag} 缺 运镜=", "sysimpl-v2"))
         if not strict and not (b.gaze or b.expression or b.reaction):
             continue   # v1 分拍没有这些槽位：只在整拍都缺时不重复报
         if not spec.faces:

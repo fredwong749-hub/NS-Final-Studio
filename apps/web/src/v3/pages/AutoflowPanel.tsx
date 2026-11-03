@@ -1,7 +1,7 @@
 // V2-WALK W-01 / W-07：新建剧本页的“写作流程”面板（唯一的写作入口 = /api/script-autoflow；下方提纲表单只负责写提纲，不再单独起写作）。
 // 版式参考小云雀：步骤 tab（故事线 · 造型表 · 各集）、结果卡下固定两个按钮（用这版 / 修改）、提交前显示花费；每集只有三种状态（写作中 / 等你看 / 完成）+ 一键重试。
 // 界面只写中文大白话：英文状态词一律翻译；颜色只用灰 / 琥珀 / 绿；规则编号、文件名收进“详情”。
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStudio } from "../../store";
 import { useLiveEvent } from "../live";
 import { P1Gate, ReviewBlock, canShowP1, p1Round, p1Status } from "./P1Review";
@@ -14,7 +14,8 @@ export type AFlow = {
   run?: string; episode?: number; verdict: string; next_action?: string | null; running?: boolean; stages?: AStage[]; score_trajectory?: AScore[];
   usd_total?: number | null; budget_usd?: number | null; import_mode?: string; episodes?: Record<string, AEp>; latest_episode?: number; writer_backend?: string;
   owner_gates?: { enabled?: boolean; gates?: Record<string, Gate> };
-  p1_review?: { latest?: Review | null; rounds?: Review[]; threshold?: { min_mean?: number; max_rounds?: number; judges?: number }; revise_options?: string[]; owner_direction?: { at?: string; by?: string; why?: string; round?: number; mean?: number; totals?: number[] } };
+  p1_owner_hold_fields?: string[] | null;
+  p1_review?: { latest?: Review | null; rounds?: Review[]; threshold?: { min_mean?: number; max_rounds?: number; judges?: number }; revise_options?: string[]; owner_direction?: { fill_note?: string | null; at?: string; by?: string; why?: string; round?: number; mean?: number; totals?: number[] } };
 };
 export type Review = { n: number; passed: boolean; why?: string[]; totals?: number[]; mean?: number; item_mean?: Record<string, number>; top_fixes?: string[] };
 type Story = {
@@ -93,12 +94,33 @@ export function AutoflowPanel() {
         .catch(() => setRuns([])),
     [],
   );
+  // 通知中心深链接（#/script-create?new=1&flow=<run>&anchor=story|eps）：打开就选中那部剧、切到那一页、滚到面板
+  const fromHash = () => new URLSearchParams(location.hash.split("?")[1] ?? "");
   useEffect(() => {
-    void loadRuns();
+    void loadRuns(fromHash().get("flow") || undefined);
     const on = (e: Event) => void loadRuns((e as CustomEvent<string>).detail);
+    const onHash = () => {
+      const q = fromHash();
+      if (q.get("flow")) void loadRuns(q.get("flow")!);
+    };
     window.addEventListener(FLOW_EVENT, on);
-    return () => window.removeEventListener(FLOW_EVENT, on);
+    window.addEventListener("hashchange", onHash);
+    return () => {
+      window.removeEventListener(FLOW_EVENT, on);
+      window.removeEventListener("hashchange", onHash);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadRuns]);
+  const anchorDone = useRef("");
+  useEffect(() => {
+    const q = fromHash();
+    const key = `${q.get("flow")}|${q.get("anchor")}`;
+    if (!d || !q.get("flow") || q.get("flow") !== run || anchorDone.current === key) return;
+    anchorDone.current = key;
+    setTab(q.get("anchor") === "eps" ? "eps" : "story");
+    window.setTimeout(() => document.querySelector(".af")?.scrollIntoView({ block: "start" }), 150);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [d, run]);
 
   const load = useCallback(() => {
     if (!run) return;

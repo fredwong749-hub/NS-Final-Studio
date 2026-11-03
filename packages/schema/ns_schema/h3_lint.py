@@ -325,7 +325,7 @@ def lint_h3(prompt: str, frames: int | None = None, intimate: bool = False, *, s
     if intimate:
         probs = []
         if n_spk > 1:
-            probs.append(f"亲密镜只让林晚发声，现有 {n_spk} 个说话人")
+            probs.append(f"亲密镜只让女主发声，现有 {n_spk} 个说话人")
         male = sorted({h.group(0).lower() for h in MALE_SOUND_RE.finditer(sound)})
         if male:
             probs.append(f"soundscape 里写了男性声音：{'、'.join(male)}")

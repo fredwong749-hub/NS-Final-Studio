@@ -94,9 +94,9 @@ rules:
     link: [P1-P2, P2-P3, P3-P4]
     title: 剧情不得改变已锁定角色的外貌锚点（发色、发型、标志物），系统机检 HC-07
     when: 写大纲 / 剧本 / 分镜；修订 storyline
-    then: tools/pipeline/hard_constraints.check_look_lock：改 / 换 / 剪 / 染 + 头发 / 发色 / 发型、dye / cut her hair、new hair color 等改变动作 → block；已作废的标志物写法（林晚：痣 / mole）→ block；描述锁定发色本身的“真实染发色”不算
+    then: tools/pipeline/hard_constraints.check_look_lock：改 / 换 / 剪 / 染 + 头发 / 发色 / 发型、dye / cut her hair、new hair color 等改变动作 → block；已作废的标志物写法（如 V1 女主的痣 / mole，按剧配置）→ block；描述锁定发色本身的“真实染发色”不算
     targets: [{kind: writer_prompt, section: 身份锚点}]
-    writer_text: 剧情不改变已锁定角色的外貌锚点：不改发色、不剪发、不换发型、不改标志物（林晚的标志物是钻石水晶甲）；需要“为他改变”的情节点，换成不改变外貌的等效动作。
+    writer_text: 剧情不改变已锁定角色的外貌锚点：不改发色、不剪发、不换发型、不改标志物（标志物以全局头角色锁为准）；需要“为他改变”的情节点，换成不改变外貌的等效动作。
     evidence:
       - {src: data/pipeline/runs/series10_v1/owner_decisions.json, quote: "让写作模型改掉这段剧情（推荐）：保证 10 集里林晚的形象一致"}
       - {src: data/pipeline/runs/series10_v1/P1_hairfix.report.json, note: "第 0 轮 HC-07 拦下 owner_line 里的“改发色”（来自 P0 Brief），先改 Brief 再改 storyline 后通过"}
@@ -140,7 +140,7 @@ rules:
     link: P4-P6
     title: 不加载 LoRA 的出图作业，提示词里去掉全部 LoRA 触发词
     when: 系统自己拼的出图作业（不走 ns_agent.compiler），graph 里没有 LoRA 节点
-    then: 去掉登记过的触发词（script_v2 globals.lora_triggers + lnwan01 / lnwan_qi / pose_），逐条记 triggers_removed；走生产编译器时由编译器处理
+    then: 去掉登记过的触发词（script_v2 globals.lora_triggers + 视频角色触发词 / pose_），逐条记 triggers_removed；走生产编译器时由编译器处理
     evidence:
       - {src: data/pipeline/runs/series10_v1/assets/first_frame_jobs.json, note: "PROMPT 审核：16 条混入视频触发词 lnwan01；同批还有 hh12clear 6、ptxcorset 2、pose_ 1"}
     confidence: high
@@ -178,3 +178,19 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-WRT-213
+    enforced: true    # K211-F 11-03：tools/pipeline/p4_adapter.segment_issues → tools/script_rsi/segment_fix（QW-S1 漏标 block / QW-S2 不一致）；收稿时确定性补标
+    check: [tests/test_segment_fix.py]
+    domain: writer
+    link: P3-P4
+    title: 每一镜都标段落（【幻想段】/【现实段】），段落跟 P2 节拍 / P3 场景走
+    when: V2 及以后的剧，写每一镜的 **场景** 行
+    then: "**场景** 行细节开头写 【幻想段】 或 【现实段】（例：**场景**：sk_xxx｜【幻想段】<场景里的一处>，<一盏灯亮起>）；这一镜属哪段看它对应的 P3 场景 / P2 节拍的标记（没标的节拍继承上一拍，开头缺省现实段）；漏标 = 导入阻断 QW-S1，标反 = QW-S2；系统收稿时会按 P3 确定性补标，但写手自己要写"
+    targets: [{kind: writer_prompt, section: 镜头字段}]
+    writer_text: "每一镜的 **场景** 行细节开头写 【幻想段】 或 【现实段】（例：**场景**：sk_xxx｜【幻想段】<场景里的一处>，<一盏灯亮起>），按这一镜对应的 P2 节拍 / P3 场景的段落标记写，没标的节拍跟上一拍。调色（幻想 C 黄金时刻 / 现实冷调）和运镜（bolt_push_settle 只在幻想段）都按这个标记走：漏标 = 整镜按现实段出，幻想段白写。 [REVIEW-B P1-2 / ep01 镜2 镜3]"
+    evidence:
+      - {src: data/pipeline/runs/series10_v2/P4_ep01.final.md, note: "ep01 11 镜没有一镜标段落；P2 B2【幻想段】对应镜 2 / 3，导入后按缺省现实段出图，fantasy_c 调色与 bolt_push_settle 都没用上（REVIEW-B P1-2）"}
+      - {src: services/agent/ns_agent/gen_contract/style.py segment_of, note: "出图侧只认镜头字段里的【幻想段】/【现实段】/ 段落=，没标 → default_segment + style_warning"}
+    confidence: high
+    status: 确认
+    date: 2026-11-03

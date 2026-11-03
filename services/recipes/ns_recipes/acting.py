@@ -22,7 +22,7 @@ MICRO = ["{p} brows lifting slightly as {s} blinks",
          "{p} brows drawing together for a moment as {s} blinks twice",
          "the corners of {p} mouth tightening briefly"]
 PRON = {"his": ("his", "he"), "he": ("his", "he"), "her": ("her", "she"), "she": ("her", "she")}
-BEAT = re.compile(r"\bAt \d{2}:\d{2}(?:\.\d+)?,")
+BEAT = re.compile(r"\bAt \d{2}:\d{2}(?:\.\d+)?,|\b(?:[Tt]hen,?\s+)?(?:[Aa]round|[Bb]y)\s+the\s+\w+\s+second\b,?")   # L-141：自然语言分拍也认
 
 
 def _subject(seg: str) -> tuple[str, str] | None:

@@ -289,6 +289,7 @@ moves:
     split: null
     enabled: false
     ab: {status: pass, exp: v2_style_cam, arms: 3, pass: 3, note: "AB1–AB5 3/3 过；背景横向机位轨迹 |tx| 0.10 / 0.29 / 0.31（一致性 0.98–0.99），主体角度可见变化；实际幅度约 20–40°（提示词写半圈，做不到），方向随 seed 左右不定"}
+    disabled_by: "L-129（项目方 11-02 21:1x 只选了 bolt_push_settle）：orbit_slowmo 改回 enabled:false"
     reason: "V2 Pika A/B 3/3 稳定执行（小–中幅环绕），待启用：①模板含速度词（slowly / slow motion），与现行词表规则冲突（K-PRM-101 不写速度词、tests/test_director.py test_vocab_schema 守）——V2 是否放开速度词由总调度定；②编译层 camera_norm EN_MOVES 不认这个 id（会识别成 arc 退回固定），启用时同步改"
   - id: bolt_push_settle
     zh: 高速急推急停（机械臂式）
@@ -301,8 +302,9 @@ moves:
     moods: [幻想段, 登场, 爆点]
     conflicts: [push_in, arc, orbit_slowmo, pull_out]
     split: null
-    enabled: false
+    enabled: true
     ab: {status: pass, exp: v2_style_cam, arms: 3, pass: 3, note: "3/3 前 1.2 s 机位运动 0.19–0.22/s、1.5 s 后 0.03–0.08/s（先快后停）；落幅中景 / 近景（AB5 景别变化是本运镜目的，不计）；AB1–AB4 全过，SFace 0.64–0.68。实际是“高速推近 + 急停”，横向环绕量很小（|tx| ≤ 0.13）"}
+    enabled_by: "L-129 项目方选定（= whip_orbit 高速环绕急停）；总调度 21:0x：V2 按剧例外（只对 runs:[series10_v2] 的运镜放开速度词 / 不强制 The camera 开头），PROMPTFIX 启用"
     reason: "V2 Pika A/B 3/3 稳定（高速推近后急停定住；名字按实际效果写），待启用：①模板不以 The camera 开头且含速度词（fast / super slow motion），与现行词表规则冲突（K-PRM-101、test_vocab_schema）——V2 是否放开由总调度定；②camera_norm 现会识别成 arc 退回，启用时同步加英文识别"
   - id: slowmo_snap_push
     zh: 慢动作急推
@@ -339,8 +341,11 @@ moves:
     params: {lens: "35mm"}
     sizes: [中全景, 全景]
     moods: [现实段, 走动]
+    only_when: walking   # 只限走动镜（总调度 20:4x）
     conflicts: [static, push_in]
     split: null
-    enabled: false
+    enabled: true
+    requires: [走动]        # 总调度 21:0x：只用在人物走动的镜头上（静坐镜 1/1 退化成平稳推近）
     ab: {status: partial, exp: v2_style_cam, arms: 3, pass: 2, note: "走动镜 2/2：机位随人后退、轻微晃动（背景运动一致性 0.82 / 0.91，比稳定运镜的 0.98 低 = 有手持感），AB1–AB5 过；静坐镜 1/1 退化成平稳推近（一致性 0.99、缩放 0.21），J4 1.43（软项）"}
-    reason: 只在人物走动的镜头上稳定；静坐镜不出手持感。V1 规则不用 Shake（camera_language.md §1）是否适用 V2 现实段待总调度定；定之前不 enabled
+    enabled_by: "总调度 21:0x：V2 按剧例外（只对 runs:[series10_v2] 的运镜放开速度词 / 不强制 The camera 开头），PROMPTFIX 启用"
+    reason: "总调度 20:4x 定：V1“不用 Shake”是 V1 画风规则，V2 不继承；V2 现实段可用，只限人物走动的镜头（moods 含“走动”），静止镜不用。A/B 走动镜 2/2 稳定。待启用：模板不以 The camera 开头，等 PROMPTFIX 按剧例外（runs:[series10_v2]）改好 camera_norm 和测试后，和 orbit_slowmo / bolt_push_settle 一起设 enabled；“只限走动镜”须在编译层按本镜动作判（camera_norm.BIG_ACTION 一类），不满足退回 static"

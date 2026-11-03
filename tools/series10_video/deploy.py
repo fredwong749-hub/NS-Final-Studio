@@ -21,8 +21,23 @@ import tarfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-VID_REL = "data/pipeline/runs/series10_v1/video"
-DEST = "/root/work/fredw/video10_srv"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import run_ctx as RC  # noqa: E402
+
+# MERGE-VID-O（L-137）：按剧（--run / NS_RUN / 当前剧；失败关闭）。V1 进程文件仍是 run/vidgen.pid，其它剧 run/vidgen_<剧>.pid
+RUN_ID = RC.resolve()
+VID_REL = RC.vid_rel(RUN_ID)
+PID = "run/vidgen.pid" if RC.is_legacy(RUN_ID) else f"run/vidgen_{RUN_ID}.pid"
+def _video_root() -> str:
+    """PRODMERGE-O 11-03：服务器视频代码根只从 config/factory/hosts.json video_root 取（= 发版部署目录，video10_srv 退役）"""
+    import importlib.util as _u
+    sp = _u.spec_from_file_location("hosts_video_root", Path(__file__).resolve().parents[2] / "tools" / "factory" / "hosts.py")
+    m = _u.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m.video_root()
+
+
+DEST = _video_root()
 PY = "/root/work/fredw/venv_idm/bin/python"
 CODE_FILES = ["config/pipeline/video_policy.json", "config/vqa.json", "config/prompts/vqa_inspect.md", "services/agent/ns_agent/__init__.py",
               "config/render_quality.json", "tools/motion_judder.py", "tools/ep02_director/review.py", "tools/lab_ep02/lab_score.py",
@@ -97,6 +112,20 @@ def thread_guard_ok() -> bool:
     return r.returncode == 0
 
 
+def push_plan(host: str, files: list[str], managed=None) -> tuple[list[str], list[str]]:
+    """PRODMERGE-O：DEST 是发版部署目录时（hosts.video_code_managed）代码只由 system_version deploy 下发——这里去掉代码文件 / 目录，
+    只推作业 json、输入图、视觉模型（否则会用笔记本工作树覆盖已发版的代码）；仍是独立镜像目录时照旧连代码一起推"""
+    if managed is None:
+        import importlib.util as _u
+        sp = _u.spec_from_file_location("hosts_push_plan", ROOT / "tools" / "factory" / "hosts.py")
+        m = _u.module_from_spec(sp)
+        sp.loader.exec_module(m)
+        managed = m.video_code_managed(host)
+    if not managed:
+        return files, list(CODE_DIRS)
+    return [f for f in files if f not in CODE_FILES], []
+
+
 def push(host, jobs_file="jobs.json", with_vision=None):
     if not thread_guard_ok():
         return False
@@ -110,8 +139,9 @@ def push(host, jobs_file="jobs.json", with_vision=None):
     if with_vision or have != "2":
         files += VISION
     files = [f for f in files if not f.startswith(VID_REL + "/control_")]
-    blob = build_tar(files, CODE_DIRS)
-    print(f"推送 {len(files)} 个文件 + {len(CODE_DIRS)} 个目录，{len(blob) / 1e6:.1f} MB → {host}:{DEST}")
+    files, dirs = push_plan(host, files)
+    blob = build_tar(files, dirs)
+    print(f"推送 {len(files)} 个文件 + {len(dirs)} 个目录，{len(blob) / 1e6:.1f} MB → {host}:{DEST}")
     pre = ""
     if host == "gpu36":
         pre = ("mkdir -p /root/work/fredw/tools_bin && ln -sf /root/work/fredw/venv/lib/python3.12/site-packages/imageio_ffmpeg/"
@@ -132,27 +162,29 @@ def control(host, js: str):
 
 def start(host):
     cmd = (f"cd {DEST} || exit 1; mkdir -p run {VID_REL}; "
-           f"if [ -f run/vidgen.pid ] && kill -0 $(cat run/vidgen.pid) 2>/dev/null; then echo ALREADY $(cat run/vidgen.pid); exit 0; fi; "
-           f"PYTHONUTF8=1 nohup {PY} -u tools/series10_video/vidgen.py run {host} >> {VID_REL}/vidgen_{host}.out 2>&1 < /dev/null & "
-           f"echo $! > run/vidgen.pid; echo STARTED $(cat run/vidgen.pid)")
+           f"if [ -f {PID} ] && kill -0 $(cat {PID}) 2>/dev/null; then echo ALREADY $(cat {PID}); exit 0; fi; "
+           f"PYTHONUTF8=1 NS_RUN={RUN_ID} nohup {PY} -u tools/series10_video/vidgen.py run {host} --run {RUN_ID} "
+           f">> {VID_REL}/vidgen_{host}.out 2>&1 < /dev/null & "
+           f"echo $! > {PID}; echo STARTED $(cat {PID})")
     print(ssh(host, cmd).stdout.decode(errors="replace").strip())
 
 
 def stop(host):
-    cmd = (f"cd {DEST} || exit 1; if [ -f run/vidgen.pid ] && kill -0 $(cat run/vidgen.pid) 2>/dev/null; then "
-           f"pid=$(cat run/vidgen.pid); kill $pid; for i in $(seq 20); do kill -0 $pid 2>/dev/null || break; sleep 1; done; "
-           f"kill -0 $pid 2>/dev/null && kill -9 $pid; echo STOPPED $pid; else echo NOT_RUNNING; fi; rm -f run/vidgen.pid")
+    cmd = (f"cd {DEST} || exit 1; if [ -f {PID} ] && kill -0 $(cat {PID}) 2>/dev/null; then "
+           f"pid=$(cat {PID}); kill $pid; for i in $(seq 20); do kill -0 $pid 2>/dev/null || break; sleep 1; done; "
+           f"kill -0 $pid 2>/dev/null && kill -9 $pid; echo STOPPED $pid; else echo NOT_RUNNING; fi; rm -f {PID}")
     print(ssh(host, cmd).stdout.decode(errors="replace").strip())
 
 
 def status(host):
-    cmd = (f"cd {DEST} || exit 1; [ -f run/vidgen.pid ] && kill -0 $(cat run/vidgen.pid) 2>/dev/null && echo RUNNING $(cat run/vidgen.pid) || echo NOT_RUNNING; "
+    cmd = (f"cd {DEST} || exit 1; [ -f {PID} ] && kill -0 $(cat {PID}) 2>/dev/null && echo RUNNING $(cat {PID}) || echo NOT_RUNNING; "
            f"tail -15 {VID_REL}/vidgen_{host}.log 2>/dev/null; tail -5 {VID_REL}/vidgen_{host}.out 2>/dev/null; "
            f"nvidia-smi --query-gpu=index,utilization.gpu,memory.used,power.draw --format=csv,noheader")
     print(ssh(host, cmd).stdout.decode(errors="replace").strip())
 
 
 def main(argv):
+    argv = RC.strip_run(argv)
     if len(argv) < 2 or argv[0] not in ("push", "control", "start", "stop", "status") or argv[1] not in ("gpu33", "gpu36"):
         print(__doc__)
         return 2

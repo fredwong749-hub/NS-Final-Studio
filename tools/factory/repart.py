@@ -40,9 +40,10 @@ def moved(old: dict, new: dict) -> dict:
 TAKES_PY = r'''
 import json, os, sys
 R, eps = sys.argv[1], [int(x) for x in sys.argv[2].split(",") if x]
+RD = sys.argv[3]
 have = []
 for e in eps:
-    d = os.path.join(R, "data/renders", "ep%02d" % e)
+    d = os.path.join(R, RD, "ep%02d" % e)
     n = 0
     for s in (os.listdir(d) if os.path.isdir(d) else []):
         try:
@@ -61,8 +62,27 @@ print(json.dumps(have))
 '''
 
 
-def have_takes(hosts: list[str], eps: list[int], run=None) -> dict:
-    """{host: {本机有版本的集}}（只数要换主机的那些集；连不上的机器当作“有”，宁可拒绝也不误放）"""
+def renders_rels(root: Path | None = None) -> list[tuple[str, str]]:
+    """MERGE-OPS-O（carryover 第 14 项，L-137）：要数版本的各剧渲染根 [(run, 相对仓库的目录)]。分区按集、所有剧共用，
+    所以每部没归档的剧都要数（runs.renders_dir：legacy = 旧根，其它剧 = 带剧号的根）。归档 / 冻结的剧不再出图，不挡改分区。
+    登记表读不出 → 抛错（失败关闭：apply 不改分区）"""
+    root = root or ROOT
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from tools.autopilot import runs as RN
+    reg = RN.registry(root, strict=True)
+    out = []
+    for r, v in (reg.get("runs") or {}).items():
+        if (v or {}).get("status") == "archived":
+            continue
+        rel = Path(RN.renders_dir(r, root)).resolve().relative_to(Path(root).resolve()).as_posix()
+        if rel not in [x for _r, x in out]:
+            out.append((r, rel))
+    return out
+
+
+def have_takes(hosts: list[str], eps: list[int], renders_rel: str, run=None) -> dict:
+    """{host: {本机有版本的集}}（只数要换主机的那些集；连不上的机器当作“有”，宁可拒绝也不误放）。renders_rel = 哪部剧的渲染根"""
     import base64
     if run is None:
         import rssh
@@ -72,7 +92,7 @@ def have_takes(hosts: list[str], eps: list[int], run=None) -> dict:
     out = {}
     code = base64.b64encode(TAKES_PY.encode()).decode()
     for h in hosts:
-        r = run(h, f'python3 -c "$(echo {code} | base64 -d)" {H.server_root(h)} {",".join(map(str, eps))}', timeout=120, tries=3, text=True)
+        r = run(h, f'python3 -c "$(echo {code} | base64 -d)" {H.server_root(h)} {",".join(map(str, eps))} {renders_rel}', timeout=120, tries=3, text=True)
         try:
             out[h] = set(json.loads((r.stdout or "").strip().splitlines()[-1]))
         except (ValueError, IndexError):   # arch-ok: 数不出来 → 当作这台全有，repart_check 会把要搬走的集都拦下
@@ -80,7 +100,7 @@ def have_takes(hosts: list[str], eps: list[int], run=None) -> dict:
     return out
 
 
-def check(old: dict, new: dict, run=None) -> list[str]:
+def check(old: dict, new: dict, run=None, renders: list[tuple[str, str]] | None = None) -> list[str]:
     mv = moved(old.get("images", {}), new["images"])
     for h, eps in moved(old.get("video", {}), new["video"]).items():
         mv.setdefault(h, [])
@@ -90,7 +110,10 @@ def check(old: dict, new: dict, run=None) -> list[str]:
     eps = sorted({e for v in mv.values() for e in v})
     hosts = sorted(set(new["images"]) | set(old.get("images", {})))
     hosts = [h for h in hosts if h != "laptop"]
-    return _lanes_mod().repart_check(mv, have_takes(hosts, eps, run=run))
+    probs = []
+    for run_name, rel in (renders if renders is not None else renders_rels()):     # MERGE-OPS-O：每部剧分别过 repart_check
+        probs += [f"[{run_name}] {x}" for x in _lanes_mod().repart_check(mv, have_takes(hosts, eps, rel, run=run))]
+    return probs
 
 
 def apply(new_images: dict, new_video: dict, why: str, by: str, dry: bool = False, run=None) -> dict:

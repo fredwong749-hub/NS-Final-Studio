@@ -63,7 +63,7 @@
    "female": ["lead_f"],
    "lead": "lead_f",
    "_female_doc": "OVERSIGHT-F P1-5b（PROMPTFIX 20:3x）：女性角色 / 女主的唯一来源（ns_agent.cast_table）；V2 剧本新增女性角色时在这里加 id",
-   "looks_file": "data/pipeline/runs/series10_v2/assets/P1_looks.json",
+   "_looks_doc": "ISS-1103-032336-3aff（W2 11-03）：资产包模式造型唯一来源 = assets_manifest 清单 looks（asset_refs.manifest_looks：部件带 item_id，S8/S9 服装 / 鞋单品图进参考槽、I4 可核）。不设 looks_file——写作链 <run_dir>/P1_looks.json 只是文字（人物页显示、asset_jobs 设定图规格直接读它），设了会让 load_looks 走文字分支、部件丢 item_id。tests/test_w2_merge_img.py 守住",
    "sheets_file": "data/pipeline/runs/series10_v2/assets/sheets_chosen.json",
    "shot_looks_file": "data/pipeline/runs/series10_v2/assets/shot_looks.json",
    "crop_dir": "data/pipeline/runs/series10_v2/images/refcrops",

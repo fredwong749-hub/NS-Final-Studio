@@ -470,7 +470,8 @@ def load_timeline_index(root=None) -> dict[str, dict]:
     """读 <root>/data/state_timeline.json（按 mtime 缓存）；没有 / 读不了 → {}（字段按同一规则现算）"""
     try:
         from .bible import project_root
-        p = project_root(root) / "data" / "state_timeline.json"   # 不 import state_timeline：只读 JSON
+        from .run_paths import timeline_json
+        p = timeline_json(project_root(root))   # 不 import state_timeline：只读 JSON；V2CUT-O：按当前剧取（V2 = data/import/runs/<run>/）
         mt = p.stat().st_mtime
         hit = _TL_CACHE.get(str(p))
         if hit and hit[0] == mt:

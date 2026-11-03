@@ -11,8 +11,11 @@ import type { EpisodeLooks, RenderBackend, SopStage } from "../types";
 import { framesLocked, scriptGaps, videoCounts } from "./status";
 import { FILTER_LABEL, isInterrupted, type Filter } from "../util";
 import { useSop } from "./sop.helpers";
-import { fmtEta, pickDot, useEpisodePreviews, useFramesCounts, useVideosSummary, type NavDot } from "./NavTabs.helpers";
+import { fmtEta, pickDot, useEpisodePreviews, useFramesCounts, usePipelineStatus, useVideosSummary, type NavDot, type PipeStepId } from "./NavTabs.helpers";
 import "./navia.css";
+import "./pipeline.css"; // NAVFLOW-F L-146：六步“完成 x/10 集”、剧名下拉
+import "./stepbar.css"; // W5 UIUX：步骤条两行（步骤名 + 完成 / 进行 / 卡住 集数）
+import "./overview_now.css"; // W5b：卡点读不到横幅（.sb-banner）
 import { Pop } from "./widgets";
 import { loadReadiness } from "./Materials.helpers";
 import { openMaterials } from "./MaterialsDrawer.helpers";
@@ -24,51 +27,63 @@ import { Brand } from "../ds/Brand";
 // momoso 标识（项目方挑定候选 2 · 双环）
 import { setFbDrawer } from "./feedback";
 import { SystemStatusButton, SystemStatusHidden } from "./SystemStatus"; // UIFIX-S：顶栏右侧只放“待你看”和“系统状态”
-import { queueFailText, useOwnerQueue } from "./ownerQueue"; // UIRSI2 L-116 待你看队列
+import { queueFailText, useOwnerQueue, useTabBadge } from "./ownerQueue"; // UIRSI2 L-116 待你看队列
 import { FeedbackToggle } from "./FeedbackLayer"; // UIRSI2 反馈模式（后端 FEEDBACK）
+import { FALLBACK_TEXT, focusEp, stepHref, useStepbar } from "./stepbar"; // W5 UIUX：步骤条“完成 / 进行中 / 卡住”集数（GET /api/sop/stepbar）
 
 /** 新页面路由（W4c 的页面挂在 #/…） */
 
 type Target = View | "#/projects" | "#/script-chat" | V3Page | `#/${string}` | "canvas" | "canvas-video" | "materials" | "classic" | "table" | "storyboard" | "jobs" | "play" | "help";
+// W5 UIUX 11-03（L-155 / L-146）：主导航只留【步骤条】【待办】【资产 = 步骤②】【设置 ▾】。原“工具 ▾”里的每一项都还在，
+// 收进“设置 ▾”：常用二级页在前，工程页归“高级”（功能一个不删，只移位；全部页面表见 v3/pageMap.ts 和 #/settings 页底）。
 const TOOLS: { group: string; items: [Target, string, string][] }[] = [
+  {
+    group: "设置",
+    items: [
+      ["#/settings", "项目设置", "风格、写实强度、负面词、配乐处理、成人判定等：当前值、来源，能改的直接改（可撤销）；页底有全部页面"],
+      ["#/overview", "全剧总览", "每集走到哪一步、系统在做什么、卡在哪、谁在处理（1）"],
+    ],
+  },
   {
     group: "剧本",
     items: [
       // UIRSI：新建剧本 = 故事提纲 → 写作链 P1–P4 自动写 → 每段可看可改 → 送导入（你确认）
-      ["#/script-create?new=1", "新建剧本", "① 故事提纲 → 自动写故事线 · 大纲 · 剧本 · 分镜 → 送导入（你确认）"],
-      ["#/script-chat", "写作对话", "和写作模型对话写剧本：新对话 / 继续下一集 / 按校验返修"],
-      ["#/script-ab", "剧本 A/B 对比", "两份剧本（或同一提纲两个模型）逐镜并排：首帧 / 尾帧 / 视频 / 提示词，选 A / 选 B，整集连播"],
-      ["#/script-create?tab=import", "剧本导入", "② 候选稿 / 粘贴 / 上传 → 校验 → 你确认后导入"],
+      ["#/script-create?new=1", "新建剧本", "给故事提纲 → 自动写故事线 · 大纲 · 剧本 · 分镜 → 你确认后导入"],
+      ["#/script-chat", "写作对话", "和写作模型对话写剧本：新对话 / 继续下一集 / 按检查结果返修"],
+      ["#/script-create?tab=import", "剧本导入", "候选稿 / 粘贴 / 上传 → 检查 → 你确认后导入"],
       ["materials", "本集资料清单", "缺什么、谁来补、补完没有"],
     ],
   },
   {
-    group: "资产与设置",
+    group: "资产与声音",
     items: [
-      ["#/assets", "资产中心", "角色 · 形象 · 衣橱 · 道具 · 场景 · 风格 · 音色 · 提示词模板；版本、反查、影响面与重出"],
+      ["#/assets", "资产中心", "人物 · 造型 · 单品 · 场景 · 风格 · 音色；版本、反查、影响面与重出"],
       ["#/assets?type=people", "新建人物 · 上传参考照片", "资产中心 · 人物登记"],
-      ["#/sound", "声音", "人物音色 · 旁白 · 每镜台词逐句听 · 整集配乐（波形 + 按镜头跳）"],
-      ["#/settings", "项目设置", "风格、写实强度、负面词、配乐处理、成人判定等：当前值、来源，能改的直接改（可撤销）"],
-      ["#/models", "模型与 API", "写作模型、出图 / 视频节点、连通测试"],
+      ["#/assets?type=pack", "资产包清单", "这部剧登记在册的身份脸 / 造型 / 鞋 / 饰品（只读）"],
+      ["#/image-edit", "图像编辑器", "选一镜：看参考图、出几张候选、左右对比、写一句话修改"],
+      ["#/sound", "声音", "人物音色 · 旁白 · 每镜台词逐句听 · 整集配乐"],
     ],
   },
   {
     group: "查看",
     items: [
-      ["#/v1-library", "Version 1 视频库（只读）", "第一版冻结后的视频，只能看，不会进入 Version 2"],
-      ["#/overview", "全剧总览", "10 集 × 每一镜：首尾帧 / 视频 / 通过进度，镜与镜、集与集怎么接（1）"],
       ["canvas", "画布（审片 / 精修）", "一镜一行；L / Enter / 双击进精修"],
       ["play", "串播审片", "按顺序播放本集视频（R）"],
       ["table", "表格视图", "全部镜头一张表（T）"],
       ["storyboard", "分镜表", "本集剧本分镜字段一镜一行，缺的标红，可导出 CSV"],
-      ["#/cut", "成片", "本集成片版本、播放、对比、合成、交付确认（5）"],
+      ["#/cut", "成片 · 剪辑器 · 整集预览", "本集整集预览、剪辑器、成片版本、对比、交付确认（5）"],
     ],
   },
   {
-    group: "运行",
+    group: "高级",
     items: [
-      ["jobs", "任务队列", "排队 / 运行 / 失败的生成任务"],
+      ["#/models", "模型与 API", "写作模型、出图 / 视频节点、连通测试"],
+      ["#/script-ab", "剧本 A/B 对比", "两份剧本逐镜并排：首帧 / 尾帧 / 视频 / 提示词，选 A / 选 B，整集连播"],
+      ["#/audit", "操作记录", "每个选择、导入、定稿：谁 · 什么时候 · 对哪个"],
       ["#/trash", "回收站", "删掉的东西都在这里，可以找回"],
+      ["#/v1-library", "第一版视频库（只读）", "第一版冻结后的视频，只能看，不会进入现在这一版"],
+      ["#/assets-v1", "资产中心（旧地址）", "旧收藏地址，打开的就是资产中心"],
+      ["jobs", "任务队列", "排队 / 运行 / 失败的生成任务"],
       ["help", "快捷键", "全部快捷键（?）"],
     ],
   },
@@ -78,16 +93,71 @@ const TOOLS: { group: string; items: [Target, string, string][] }[] = [
 // UX5（D2）：每一步点进去 = 这一步该做的事——① 本集资料清单（缺什么、谁补）；② 资产中心；③ 画布（首尾帧）；
 // ④ 画布 + 只看待审；⑤ 成片页（以前 ① 去写新剧本、③④ 同一处、⑤ 去旧总览）
 type TabId = SopStage | "OV" | "SB";
-// NAVIA：七个一级入口，同一层级同一种样式，按工作流排：总览（全剧）→ 剧本 → 资产 → 分镜（每集一镜一行）→ 出图 → 视频 → 成片
-const STEPS: { id: TabId; label: string; to: Target; hint: string }[] = [
-  { id: "OV", label: "总览", to: "#/overview", hint: "全剧胶片总览：每集每镜一格（1）" },
-  { id: "S1", label: "剧本", to: "#/script-create", hint: "剧本库：全部剧本与每集" },
-  { id: "S2", label: "资产", to: "#/assets", hint: "资产中心" },
-  { id: "SB", label: "分镜", to: "canvas", hint: "每集一镜一行的画布（默认上次看的集，页内范围条切集）" },
-  { id: "S3", label: "出图", to: "#/frames", hint: "出图：全部集每镜的首帧 / 尾帧（画布在“查看”菜单里）" },
-  { id: "S4", label: "视频", to: "#/videos", hint: "全部镜头的视频" },
-  { id: "S5", label: "成片", to: "#/cut", hint: "每集整集预览与成片版本" },
+// NAVFLOW-F 11-03（项目方 L-146）：按生产流程排的六步 ①剧本 › ②资产 › ③分镜 › ④出图 › ⑤视频 › ⑥成片，每步下“完成 x/10 集”
+// （GET /api/pipeline/status，sop_gate 判定）；上一步没有任何一集通过时这一步不亮。全剧总览挪到品牌（点 momoso）和工具菜单。
+// 声音并入②资产（资产中心左栏 + 工具菜单）。pipe = 后端六步 id；id 仍是旧圆点口径（圆点做悬停补充，不另算状态）。
+const STEPS: { id: TabId; pipe: PipeStepId; label: string; to: Target; hint: string }[] = [
+  { id: "S1", pipe: "script", label: "剧本", to: "#/script-create", hint: "剧本库：全部剧本与每集" },
+  { id: "S2", pipe: "assets", label: "资产", to: "#/assets", hint: "资产中心（人物 · 造型 · 单品 · 场景 · 声音 · 资产包清单）" },
+  { id: "SB", pipe: "board", label: "分镜", to: "canvas", hint: "每集一镜一行的画布（默认上次看的集，页内范围条切集）" },
+  { id: "S3", pipe: "frames", label: "出图", to: "#/frames", hint: "出图：全部集每镜的首帧 / 尾帧（画布在“查看”菜单里）" },
+  { id: "S4", pipe: "video", label: "视频", to: "#/videos", hint: "全部镜头的视频" },
+  { id: "S5", pipe: "cut", label: "成片", to: "#/cut", hint: "每集整集预览、成片版本与剪辑器" },
 ];
+
+const NUMS = ["①", "②", "③", "④", "⑤", "⑥"];
+
+/** NAVFLOW-F：顶栏左侧的剧名下拉（GET /api/script-library：当前剧 + 其他在写的剧 + 历史剧本）。
+ *  当前剧 = 登记表 primary，网页里只显示它的图和任务；别的剧点进去是它的剧本页（看 / 写），不切换 primary（切主剧由总调度在登记表里定）。 */
+type LibRow = { run: string; title: string; season: number; episodes: number; state_text: string; primary: boolean };
+function RunPicker() {
+  const [lib, setLib] = useState<{ current: LibRow[]; history: LibRow[] } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      fetch("/api/script-library")
+        .then((r) => (r.ok ? (r.json() as Promise<{ current: LibRow[]; history: LibRow[] }>) : null))
+        .then((d) => alive && d && setLib(d), () => undefined);
+    const first = window.setTimeout(load, 900);
+    const t = window.setInterval(load, 60000);
+    return () => {
+      alive = false;
+      window.clearTimeout(first);
+      window.clearInterval(t);
+    };
+  }, []);
+  const cur = lib?.current.find((r) => r.primary) ?? lib?.current[0] ?? null;
+  const dot = (r: LibRow) => (r.state_text.includes("成片") && !r.state_text.includes("0/") ? "d-green" : r.state_text.includes("暂停") ? "d-yellow" : "d-blue");
+  return (
+    <Pop label={<span className="v3-run" title={cur ? `当前剧：${cur.title}（第 ${cur.season} 季 · ${cur.episodes} 集 · ${cur.state_text}）\n点开：看别的剧 / 历史剧本` : "正在读剧目"}><b>{cur ? cur.title : "…"}</b><small>▾</small></span>} btnClass="v3-run-btn" align="left">
+      {(close) => (
+        <div className="v3-runlist">
+          <h4>当前在做</h4>
+          {(lib?.current ?? []).map((r) => (
+            <button key={r.run} className={`v3-runrow${r.primary ? " on" : ""}`} onClick={() => ((location.hash = r.primary ? "#/overview" : `#/script-create?run=${encodeURIComponent(r.run)}`), close())} title={r.primary ? "当前剧：打开全剧总览" : "打开这部剧的剧本页（图和任务只显示当前剧）"}>
+              <span>
+                <i className={`dot ${dot(r)}`} /> {r.title}
+              </span>
+              <span className="v3-muted">第 {r.season} 季 · {r.episodes} 集</span>
+              <small>{r.state_text}{r.primary ? " · 当前剧" : ""}</small>
+            </button>
+          ))}
+          {(lib?.history ?? []).length > 0 && <h4>历史剧本（只读）</h4>}
+          {(lib?.history ?? []).map((r) => (
+            <button key={r.run} className="v3-runrow" onClick={() => ((location.hash = "#/v1-library"), close())} title="只能看视频库，不会进入当前剧">
+              <span>
+                <i className="dot" /> {r.title}
+              </span>
+              <span className="v3-muted">第 {r.season} 季 · {r.episodes} 集</span>
+              <small>{r.state_text} · 视频库</small>
+            </button>
+          ))}
+          {!lib && <p className="v3-muted small" style={{ margin: 8 }}>正在读剧目…</p>}
+        </div>
+      )}
+    </Pop>
+  );
+}
 
 /** UX5：本集资料不全的镜头数（和审片行角标同一个接口），60 s 刷新 */
 function useReadyCount(n: number): { bad: number; total: number } | null {
@@ -183,18 +253,19 @@ async function tickProduction(notify: (m: string, k?: "ok" | "err") => void) {
 /** UIRSI2 L-116：顶栏常驻“待你看 ● N”——有必须拍板的事 = 琥珀点，其余 = 灰点；队列读取失败 = 琥珀点 + “!”（不显示成 0）。点开 = #/queue 阵列页 */
 function OwnerQueueButton({ on }: { on: boolean }) {
   const { q, err } = useOwnerQueue();
+  useTabBadge();   // L-134：有新通知时浏览器标签页标题上显示数字
   const fail = queueFailText(q, err);
   const n = q?.count ?? 0;
-  const amber = !!fail || (q?.counts.decide ?? 0) > 0;
+  const amber = !!fail || (q?.counts.decide ?? 0) > 0 || (q?.counts.gate ?? 0) > 0;
   const title = fail
     ? fail
     : q
-      ? `待你看 ${n} 项：必须你拍板 ${q.counts.decide} · 机签抽检 ${q.counts.spot} · 审美挑选 ${q.counts.pick}
-今天系统自动处理 ${q.auto_today.total} 项，不进队列`
-      : "正在读待你看队列";
+      ? `待办 ${n} 项：等你看的稿子 ${q.counts.gate ?? 0} · 要你拍板 ${q.counts.decide} · 抽检 ${q.counts.spot} · 挑图 ${q.counts.pick}
+今天系统自动处理 ${q.auto_today.total} 项，不用你管`
+      : "正在读待办";
   return (
     <button className={`v3-oq${on ? " on" : ""}`} data-oq-count={fail ? "error" : String(n)} onClick={() => (location.hash = "#/queue")} title={title}>
-      待你看 <span className={`v3-dot d-${amber ? "yellow" : "gray"}`} aria-hidden /> <b>{fail ? "!" : q ? n : "…"}</b>
+      待办 <span className={`v3-dot d-${amber ? "yellow" : "gray"}`} aria-hidden /> <b>{fail ? "!" : q ? n : "…"}</b>
     </button>
   );
 }
@@ -357,6 +428,8 @@ export function TopBarV3({ page }: { page: V3Page | null }) {
   const vs = useVideosSummary();
   const fc = useFramesCounts();
   const pv = useEpisodePreviews(episodes?.length ?? 0);
+  const pipe = usePipelineStatus(); // NAVFLOW-F L-146：六步“完成 x/10 集”+ 亮不亮（后端 sop_gate 判定）
+  const stepbar = useStepbar(); // W5：完成 / 进行中 / 卡住 集数 + 卡点（同一个 sop_gate 判定）
   const dots: Record<TabId, NavDot> = {
     OV: pickDot(false, (vs?.rendering ?? 0) > 0, !vs, "", vs ? `全剧 ${vs.total} 镜 · 视频已定稿 ${vs.final}` : "全剧总览"),
     SB: pickDot(!!gaps?.size, false, !gaps, n ? `${n} 镜` : "", gaps ? (gaps.size ? `本集 ${gaps.size} 镜分镜字段待补` : "本集分镜字段齐全") : "本集分镜"),
@@ -373,45 +446,72 @@ export function TopBarV3({ page }: { page: V3Page | null }) {
       : pickDot(false, false, !cuts?.n, cuts?.n ? `${cuts.n} 版` : "", cuts ? (cuts.n ? `本集 ${cuts.n} 版成片` : "本集还没成片") : "还在读"),
   };
   const cur = sop?.stage === "done" ? null : sop?.stage ?? null;
-  const onCanvas = !page && view === "episode";
+  const onCanvas = !page && view === "episode" && !/^#\/[^?]/.test(location.hash); // W5：404 页（未知 #/…）不算在画布上
 
   // UXF4（审查 #1 / #3）：顶栏三段网格（左：集 + 整集出片｜中：步骤条｜右：卡 · 队列 · 工具），步骤条居中不随两边宽度变；
   // 每步的副文字固定占位（读数据时显示骨架），首屏不再跳
   return (
+    <>
     <header className="v3-top v3-top-grid">
       <div className="v3-top-l">
       {/* 项目方 2026-10-31：产品名改为 momoso Agentic Drama Studio；窄屏只写 momoso，悬停看全称 */}
-      <a className="v3-brand" href={`#ep${String(epNum).padStart(2, "0")}`} title="momoso Agentic Drama Studio · 回到画布">
+      {/* NAVFLOW-F L-146：品牌 = 全剧总览（各集进度矩阵）；画布在工具菜单“查看”里 */}
+      <a className={`v3-brand${page === "#/overview" ? " on" : ""}`} href="#/overview" title="momoso Agentic Drama Studio · 全剧总览（各集进度矩阵，快捷键 1）">
         <Brand mode="full" size={22} className="v3-brand-full" />
         <Brand mode="word" size={22} className="v3-brand-short" />
       </a>
+      {/* NAVFLOW-F L-146：剧名下拉（当前剧 + 其他剧 + 历史剧本） */}
+      <RunPicker />
       {/* UIRSI：新建剧本的入口一直在顶栏（UX5 D2 把步骤①改去资料清单后，这个入口只剩工具菜单里一行，项目方找不到） */}
       <a className={`v3-new${page === "#/script-create" ? " on" : ""}`} href="#/script-create?new=1" title="新建剧本：给故事提纲，写作模型自动写故事线 → 大纲 → 剧本 → 分镜，你确认后导入（N）">
         ＋ 新建剧本
       </a>
-      {/* UIRSI B4：声音一级入口（音色 · 旁白 · 对白 · 配乐） */}
-      <a className={`v3-new v3-sound${page === "#/sound" ? " on" : ""}`} href={`#/sound?ep=${epNum}`} title="声音：人物音色、旁白、每镜台词逐句听、整集配乐">
-        ♪ 声音
-      </a>
+      {/* UIRSI B4 的 ♪ 声音入口：L-146 并入 ②资产（资产中心左栏“声音 · 音色”+ 工具菜单），顶栏不再单放 */}
       </div>
       {hint && (
         <div className="v3-hintstrip" role="status" aria-live="polite" style={{ position: "fixed", top: 54, left: "50%", transform: "translateX(-50%)", zIndex: 70, pointerEvents: "none", background: "var(--bg-3)", border: "1px solid var(--line-2)", borderLeft: "3px solid var(--warn, #e0a030)", padding: "6px 14px", borderRadius: 6, boxShadow: "0 4px 16px rgba(0,0,0,.4)", fontSize: 13 }}>
           {hint}
         </div>
       )}
-      <ol className="v3-steps" aria-label="本集制作步骤">
+      {/* W5 UIUX 11-03：每步写“完成 N · 进行 M · 卡住 K”（集数，来自 GET /api/sop/stepbar = sop_gate 判定 + 卡点登记）；
+          点一步 = 去那一页，并带上当前剧和最该看的那一集（卡住的 > 进行中的 > 当前集） */}
+      <ol className="v3-steps" aria-label="生产步骤">
         {STEPS.map((s, i) => {
           const here = page ? s.to === page : onCanvas ? s.id === "SB" : false; // 当前所在的页面
+          const sb = stepbar.v?.steps.find((x) => x.id === s.pipe) ?? null;
+          const ps = pipe.v;
+          const lit = sb ? sb.done + sb.doing + sb.blocked > 0 || (ps ? ps.lit[s.pipe] : true) : ps ? ps.lit[s.pipe] : true;
+          const tot = stepbar.v?.episodes_total ?? ps?.episodes_total ?? 0;
+          const cnt = sb ? (
+            <small className="v3-step-n pipe v3-step-cnt">
+              <span className="c-done">完成 {sb.done}</span>
+              {sb.doing ? <span className="c-doing"> · 进行 {sb.doing}</span> : null}
+              {sb.blocked ? <span className="c-blocked"> · 卡住 {sb.blocked}</span> : null}
+            </small>
+          ) : stepbar.err ? null : (
+            <small className="v3-step-n">…</small>
+          );
+          const ep = focusEp(stepbar.v, s.pipe, epNum);
+          const title = `${NUMS[i]} ${s.label}${sb ? `：共 ${tot} 集，完成 ${sb.done} 集 · 进行中 ${sb.doing} 集 · 卡住 ${sb.blocked} 集 · 未开始 ${sb.todo} 集` : ""}${!lit ? "（上一步还没有任何一集通过，这一步还没开始）" : ""}${(sub as Record<string, string>)[s.id] ? `
+本集：${(sub as Record<string, string>)[s.id]}` : ""}
+${dots[s.id].title}
+点击：${s.hint}（打开第 ${ep} 集）${s.id === "S5" && dlgSrc ? `
+成片对白：${dlgSrc.label}（${dlgSrc.hint}）` : ""}${s.id === "S4" && n ? `
+有视频 ${vids} · 通过 ${passed} · 生成中 ${vidRunning} · 待办 ${oq?.count ?? "…"}` : ""}${cur === s.id ? "（本集停在这一步）" : ""}`;
+          const open = () => {
+            if (ep !== epNum) st.gotoEpisode(ep);
+            if (s.to === "canvas") return go("canvas");
+            location.hash = stepHref(s.pipe, ep, stepbar.v?.run ?? null);
+          };
           return (
             <li key={s.id}>
-              <button className={`v3-step${here ? " on" : ""}`} onClick={() => go(s.to)} title={`${i + 1} ${s.label}${(sub as Record<string, string>)[s.id] ? ` · ${(sub as Record<string, string>)[s.id]}` : ""}
-${dots[s.id].title}
-点击：${s.hint}${s.id === "S5" && dlgSrc ? `
-成片对白：${dlgSrc.label}（${dlgSrc.hint}）` : ""}${s.id === "S4" && n ? `
-有视频 ${vids} · 通过 ${passed} · 生成中 ${vidRunning} · 待你看 ${oq?.count ?? "…"}（顶栏“待你看”）` : ""}${cur === s.id ? "（本集停在这一步）" : ""}`}>
-                <i className={`v3-sdot ${dots[s.id].cls}`} aria-hidden="true" />
-                <span>{s.label}</span>
-                {dots[s.id].text && <small className="v3-step-n">{dots[s.id].text}</small>}
+              <button className={`v3-step${here ? " on" : ""}${lit ? "" : " unlit"}${sb?.blocked ? " has-block" : ""}`} data-step={s.pipe} onClick={open} title={title}>
+                <i className={`v3-sdot ${sb ? (sb.blocked ? "d-yellow" : sb.doing ? "d-breathe" : sb.done && !sb.todo ? "d-green" : "d-gray") : dots[s.id].cls}`} aria-hidden="true" />
+                <span>
+                  <em className="v3-step-num">{NUMS[i]}</em>
+                  {s.label}
+                </span>
+                {cnt}
               </button>
             </li>
           );
@@ -419,15 +519,15 @@ ${dots[s.id].title}
       </ol>
       <div className="v3-top-r">
       <OwnerQueueButton on={page === "#/queue"} />
-      <FeedbackToggle />
-      {/* UIFIX-S：顶栏右侧只放“待你看 N”和“系统状态”；实时 / 连接 / 卡 / 渲染任务 / 悬停出声 都在系统状态面板里（功能不删） */}
+      {/* NAVFLOW-F L-146：反馈开关收进“工具”菜单（功能不删）；顶栏右侧 = 待你决定 · 系统状态 · 工具 */}
+      {/* UIFIX-S：实时 / 连接 / 卡 / 渲染任务 / 悬停出声 都在系统状态面板里（功能不删） */}
       <SystemStatusButton />
       <SystemStatusHidden
         onOpenJobsPage={() => go("jobs")}
         alert={offline}
         extraTitle={[prodOn ? `整集出片进行中：${pDone}/${pTotal} 步完成；画布队列 生成中 ${running} · 排队 ${queued}` : "", offline ? `${backend!.url} 连不上：${backend!.error ?? ""}` : "", interrupted ? `中断 ${interrupted}：API 重启时打断，不是画面问题，可重试` : ""].filter(Boolean).join("\n")}
       />
-      <Pop label={<>工具 ▾</>} btnClass="v3-btn" align="right" title="剧本、资产、模型配置、旧视图与运行工具">
+      <Pop label={<>设置 ▾</>} btnClass="v3-btn v3-settings-btn" align="right" title="项目设置、剧本 / 资产工具、查看方式；工程页在“高级”里（功能都在，只是收起来）">
         {(close) => (
           <div className="v3-tools">
             {TOOLS.map((g) => (
@@ -439,13 +539,18 @@ ${dots[s.id].title}
                     <small>{hint}</small>
                   </button>
                 ))}
-                {g.group === "运行" && (
+                {g.group === "高级" && (
+                  <div className="v3-tools-fb" title="反馈模式：打开后点页面上任何一处，写一句话提交">
+                    <FeedbackToggle />
+                  </div>
+                )}
+                {g.group === "高级" && (
                   <button data-tool="feedback-list" onClick={() => (setFbDrawer(true), close())} title="你提过的所有反馈：处理进度、被打回的、已修的">
                     <span>反馈列表</span>
                     <small>看每条反馈处理到哪一步</small>
                   </button>
                 )}
-                {g.group === "运行" && (
+                {g.group === "高级" && (
                   <button data-tool="tick" onClick={() => (void tickProduction(st.notify), close())} title="立即推进一步（后台每 20 秒自动推进）">
                     <span>立即推进一步</span>
                     <small>不等 20 秒，马上让整集出片往下走一步</small>
@@ -497,6 +602,13 @@ ${dots[s.id].title}
       </div>
       {auditOpen && <AuditDrawer onClose={() => setAuditOpen(false)} />}
     </header>
+    {/* W5b（A5 P1-1）：步骤条的数读的是旧接口 / 卡点读不到 → 顶栏下面挂醒目横幅，不许让人以为“没卡住” */}
+    {stepbar.v?.fallback || stepbar.v?.issues_error ? (
+      <div className="sb-banner slim sb-top" role="alert">
+        ⚠ {stepbar.v.fallback ? FALLBACK_TEXT : `卡点读不到：${stepbar.v.issues_error}`}
+      </div>
+    ) : null}
+    </>
   );
 }
 

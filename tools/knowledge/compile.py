@@ -334,6 +334,56 @@ def _count_links(rules):
     return dict(sorted(out.items()))
 
 
+GENERIC_WRITER_FILES = ("config/script_chat_rules.md", "config/qwen_writer_system_prompt.txt", "config/script_chat_rules_appendix.md")
+
+
+def concrete_ids(root: Path = ROOT) -> set[str]:
+    """所有具体剧的人物 id / 场景 id（HEADER-O 11-03，ISS-1103-042507-5b09）：每部剧 P1_storyline（含退回稿）+ 各导入稿 globals
+    + config/v1_guard.json extra_ids（lnwan01 等）。V1、V2、第二季一视同仁"""
+    out: set[str] = set()
+    for p in list((root / "data" / "pipeline" / "runs").glob("*/P1_storyline.json")) +             list((root / "data" / "pipeline" / "runs").glob("*/_rejected_*/writer_out_P1_a1.json")):
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            print(f"[knowledge.compile] {p} 读不出：{e}（这份稿的 id 不计入）", file=sys.stderr)
+            continue
+        out |= {c.get("char_id") for c in d.get("characters") or []} | {s.get("scene_id") for s in d.get("scenes") or []}
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from tools.autopilot import runs as RN   # 各剧导入稿只经 runs.import_path 取（K-OPS-F24），不写死路径
+    for p in [q for q in (RN.import_path(r, root) for r in RN.list_runs(root, status=None)) if q.is_file()]:
+        try:
+            g = json.loads(p.read_text(encoding="utf-8")).get("globals") or {}
+        except (OSError, ValueError) as e:
+            print(f"[knowledge.compile] {p} 读不出：{e}（这部剧的 id 不计入）", file=sys.stderr)
+            continue
+        out |= {c.get("char_id") for c in g.get("character_registry") or []} | {s.get("scene_id") for s in g.get("scene_library") or []}
+    gp = root / "config" / "v1_guard.json"
+    if gp.exists():
+        out |= set(json.loads(gp.read_text(encoding="utf-8")).get("extra_ids") or [])
+    return {x for x in out if x and len(x) >= 3}
+
+
+def concrete_id_check(rules: list[dict], root: Path = ROOT) -> list[str]:
+    """通用写作规则（knowledge writer_text + 通用规则文件）里不许写具体剧的 id——例子一律用 sk_xxx / ch_xxx 这类占位"""
+    ids = concrete_ids(root)
+    if not ids:
+        return []
+    rx = re.compile(r"(?<![A-Za-z0-9_])(" + "|".join(re.escape(i) for i in sorted(ids, key=len, reverse=True)) + r")(?![A-Za-z0-9_])")
+    errs = []
+    for e in rules:
+        hit = sorted(set(rx.findall(e.get("writer_text") or "")))
+        if hit:
+            errs.append(f"{e['id']}: writer_text 写死了具体剧的 id {hit}（通用规则只用占位，如 sk_xxx / ch_xxx）")
+    for rel in GENERIC_WRITER_FILES:
+        p = root / rel
+        if p.exists():
+            hit = sorted(set(rx.findall(p.read_text(encoding="utf-8"))))
+            if hit:
+                errs.append(f"{rel}: 通用写作规则写死了具体剧的 id {hit}")
+    return errs
+
+
 def build(root: Path = ROOT) -> tuple[dict[Path, str], list[str], str]:
     rules = load_rules(KB / "rules")
     settings = load_yaml(KB / "settings.yaml")
@@ -342,6 +392,7 @@ def build(root: Path = ROOT) -> tuple[dict[Path, str], list[str], str]:
         errs += consistency(active(rules), root)
     errs += ledger_check(rules, root)
     errs += scene_alias_check(root)
+    errs += concrete_id_check(active(rules), root)
     templates = "".join(p.read_text(encoding="utf-8") for p in sorted((KB / "prompts").rglob("*.md")))
     ver = kb_version(rules, settings, templates)
     if errs:

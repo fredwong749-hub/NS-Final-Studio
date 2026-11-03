@@ -249,3 +249,8 @@ gpu36 的 bakeoff 启动命令是 `(run.py gen ...; score_srv.py) &` 子 shell �
 5. video10_srv 写死：`night.py:41`、`deploy.py:31`、`sync.py:24`、`tools/vqa/after_network.py:29`、`config/factory/hosts.json:8,68`、`config/v2style.json:28`、`resident_restart.sh:25,40`、`ensure_runs.sh:32`（模型目录）。
 6. ~~`producer.py:77` RUN_ID 导入时读 run.json~~：PRODMERGE-O 已改（RUN_ID 只是兼容名；Paths / ctrl / main 一律现读 runs.json；`--run` 必须是 runs.json 登记的剧，否则退出码 2）。
 7. 笔记本 producer.py 与服务器 repo 的 md5 不同（笔记本工作树有未提交改动），sv-17 之前不可对比。
+
+## 9. PRODMERGE-O 第 2 轮已改（随 sv-17 发版，总调度 11-03）
+- 第 8 节阻碍 1 / 3 / 5 已在代码里改：restart_producer.ps1 按剧（-Run 默认 runs.json primary，目录走 producer_dir，pause / resume / serve 带 --run）；resident_restart.sh 起 producer / night 带 `--run <primary>`（读不到 primary 不起）；hosts.json video_root、v2style.json、night / deploy / sync / after_network 的 DEST 统一为发版部署目录 `/root/work/fredw/offline_20261101/repo`（deploy.push 对该目录只推作业 / 输入图 / 模型，不推代码；after_network --push 拒绝推代码）。
+- **部署前必须先做（总调度）**：两台把视觉模型拷进发版目录：`rsh gpu33 "mkdir -p $R/models_cache && cp -a /root/work/fredw/video10_srv/models_cache/vision $R/models_cache/"`（gpu36 同），否则 NS_QC_VISION_DIR=$R/models_cache/vision 找不到 YuNet / SFace。拷完再停旧 vidgen、按第 5 节在 $R 起。video10_srv 目录只隔离不删。
+- resident_restart.sh 的 all 模式调服务器本地 `$OFF/start.sh`（不在仓库内），里面的 producer / night 起法没改，部署时用 producer-only / night-only 两个模式。

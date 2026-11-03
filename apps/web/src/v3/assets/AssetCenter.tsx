@@ -24,6 +24,8 @@ import ScenesTab from "../pages/ScenesTab";
 import { lazy } from "react";
 
 const PeoplePage = lazy(() => import("../../components/PeoplePage"));
+// NAVFLOW-F 11-03（L-146）：只读的资产包清单页（V2AssetsPage）并入资产中心左栏（?type=pack），不删
+const PackPage = lazy(() => import("./V2AssetsPage"));
 import { PeopleHub, PeopleNav } from "./PeopleHub";
 import { useHubList } from "./PeopleHub.helpers";
 import { isQuarantined, loadQuarantine } from "./hub_api"; // ASSETUX：人物资产页
@@ -167,10 +169,20 @@ export default function AssetCenter() {
         ) : (
           <PeopleNav list={hubList} cur={hubCid} onPick={(cid) => go("people-hub", cid)} />
         )}
-        {/* FILMUI：图像工坊（选基座 · 参考图 · 出图 · 历史 · 对比；项目方 12:5x） */}
+        {/* NAVFLOW-F L-146：资产包清单（这部剧登记在册的身份脸 / 造型 / 鞋 / 饰品，只读；原 V2 资产页） */}
+        <button className={`ac-nav-i${route.type === "pack" ? " on" : ""}`} onClick={() => go("pack")} title="这部剧登记在册的资产：身份脸、整套造型、鞋、身体饰品（只读；成人类只给文字）">
+          <span>资产包清单</span>
+          <small>登记在册</small>
+        </button>
+        {/* FILMUI：图像编辑器（选基座 · 参考图 · 出图 · 历史 · 对比 · 写一句话修改；项目方 12:5x / L-146） */}
         <a className="ac-nav-i ac-nav-ws" href="#/image-edit">
-          <span>图像工坊</span>
+          <span>图像编辑器</span>
           <small>出图 · 修图</small>
+        </a>
+        {/* NAVFLOW-F L-146：声音并入②资产——整页（音色 · 旁白 · 对白 · 配乐）在这里进；左栏下面“声音 · 音色”是音色卡片 */}
+        <a className="ac-nav-i" href={`#/sound?ep=${ep}`} title="人物音色、旁白、每镜台词逐句听、整集配乐">
+          <span>声音</span>
+          <small>音色 · 旁白 · 配乐</small>
         </a>
         <div className="ac-nav-g">其他资产</div>
         {TREE.filter((t) => OTHER_NODES.has(t.id)).map((t) => (
@@ -210,11 +222,11 @@ export default function AssetCenter() {
                   {charCard?.name ?? route.char}
                 </>
               ) : (
-                route.type === "sheets" ? "挑设定图" : route.type === "people" ? "新建人物 · 上传参考" : node.id === "all" ? "全部资产" : node.label
+                route.type === "sheets" ? "挑设定图" : route.type === "people" ? "新建人物 · 上传参考" : route.type === "pack" ? "资产包清单" : node.id === "all" ? "全部资产" : node.label
               )}
             </h1>
           </div>
-          {!route.char && route.type !== "people" && route.type !== "sheets" && !["loras", "template"].includes(node.id) && (
+          {!route.char && route.type !== "people" && route.type !== "sheets" && route.type !== "pack" && !["loras", "template"].includes(node.id) && (
             <div className="ac-tools">
               <input className="ds-input ac-search" placeholder="搜名字、角色、槽位…" value={q} onChange={(e) => (setQ(e.target.value), writeRoute({ q: e.target.value }, false))} aria-label="搜资产" />
               <Seg
@@ -275,6 +287,10 @@ export default function AssetCenter() {
               <Skel h={360} r="var(--r-l)" />
             )}
           </>
+        ) : route.type === "pack" ? (
+          <Suspense fallback={<Skel h={320} />}>
+            <PackPage />
+          </Suspense>
         ) : route.type === "people" && !route.char ? (
           <Suspense fallback={<Skel h={320} />}>
             <PeoplePage />

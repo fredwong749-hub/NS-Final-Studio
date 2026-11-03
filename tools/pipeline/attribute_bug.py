@@ -75,19 +75,33 @@ def find_rule(rid: str) -> dict:
 _SPEC_CACHE: dict = {}
 
 
-def violations(episode: int | None) -> collections.Counter:
-    """生产剧本这一集按现行校验器数违规（SS-* / RL-T*）"""
+def script_for(run: str | None = None) -> Path:
+    """MERGE-OPS-O（carryover 第 8 项，L-137）：按剧取导入稿（runs.script_path：V1 = data/import/script_v2.json，
+    其它剧 = data/import/runs/<run>/script_v2.json）。不给 run = 当前剧（NS_RUN / primary）"""
+    return _runs().script_path(run, ROOT)
+
+
+def _runs():
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from tools.autopilot import runs as RN
+    return RN
+
+
+def violations(episode: int | None, run: str | None = None) -> collections.Counter:
+    """这部剧导入稿这一集按现行校验器数违规（SS-* / RL-T*）"""
     if not episode:
         return collections.Counter()
-    if episode in _SPEC_CACHE:
-        return _SPEC_CACHE[episode]
+    key = (run, episode)
+    if key in _SPEC_CACHE:
+        return _SPEC_CACHE[key]
     from ns_recipes.lint import timeline_for_spec
     from ns_recipes.spec_import import specs_from_import
     from ns_schema.script import ScriptImport
     from ns_schema.shot_spec import check_sequence, missing_fields
     c: collections.Counter = collections.Counter()
     try:
-        si = ScriptImport.model_validate_json((ROOT / "data" / "import" / "script_v2.json").read_text(encoding="utf-8"))
+        si = ScriptImport.model_validate_json(script_for(run).read_text(encoding="utf-8"))
         specs = specs_from_import(si, episode)
         for s in specs:
             for m in missing_fields(s):
@@ -99,11 +113,11 @@ def violations(episode: int | None) -> collections.Counter:
         c["_shots"] = len(specs)
     except Exception as e:  # noqa: BLE001
         c["_error:" + type(e).__name__] = 1
-    _SPEC_CACHE[episode] = c
+    _SPEC_CACHE[key] = c
     return c
 
 
-def attribute(bug: str, episode: int | None = None) -> dict:
+def attribute(bug: str, episode: int | None = None, run: str | None = None) -> dict:
     attr = load_attr()
     ms = match(bug, attr)
     if not ms:
@@ -111,7 +125,7 @@ def attribute(bug: str, episode: int | None = None) -> dict:
                 "note": attr["fallback"]["note"]}
     sym = ms[0][1]
     rules = [find_rule(r) for r in sym.get("rules") or []]
-    viol = violations(episode)
+    viol = violations(episode, run)
     links = []
     for cand in sym["links"]:
         lk = cand["link"]
@@ -146,7 +160,7 @@ def _next_id(abbr: str) -> str:
     return f"K-{abbr}-I{n:02d}"
 
 
-def write_draft(res: dict, episode: int | None) -> Path | None:
+def write_draft(res: dict, episode: int | None, run: str | None = None) -> Path | None:
     d = res.get("draft")
     if not res.get("primary_link"):
         d = d or {"domain": "review", "title": f"待归因：{res['bug']}", "when": "审片发现", "then": "总调度指定连接后补规则"}
@@ -158,7 +172,7 @@ def write_draft(res: dict, episode: int | None) -> Path | None:
     if res.get("owner_quote") and "writer_requests" in res["owner_quote"]:
         ev.append({"src": "docs/ep02_iter/writer_requests.md", "quote": res["owner_quote"][:30]})
     if prim and prim["violations"]:
-        ev.append({"src": "data/import/script_v2.json", "note": f"ep{episode:02d} 现行校验违规 {prim['violations']}（tools/pipeline/attribute_bug.py）"})
+        ev.append({"src": script_for(run).relative_to(ROOT).as_posix(), "note": f"ep{episode:02d} 现行校验违规 {prim['violations']}（tools/pipeline/attribute_bug.py）"})
     entry = {"id": _next_id(DOMAIN_ABBR.get(d.get("domain", "review"), "REV")), "domain": d.get("domain", "review"),
              "link": [x["link"] for x in res["links"][:2]] if res["links"] else None,
              "title": d["title"], "when": d["when"], "then": d["then"],
@@ -198,13 +212,15 @@ def main(argv=None) -> int:
     ap.add_argument("--episode", type=int)
     ap.add_argument("--write", action="store_true", help="草案写进 knowledge/inbox/")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--run", default=None, help="哪部剧的导入稿（不给 = 当前剧 NS_RUN / primary；MERGE-OPS-O）")
     a = ap.parse_args(argv)
     bugs = (V1_BUGS if a.v1_demo else []) + a.bugs
     res = []
     for b in bugs:
-        r = attribute(b, a.episode)
+        r = attribute(b, a.episode, a.run)
+        r["run"] = a.run or _runs().current_run(ROOT)
         if a.write:
-            p = write_draft(r, a.episode)
+            p = write_draft(r, a.episode, a.run)
             r["draft_path"] = p.relative_to(ROOT).as_posix() if p else None
         res.append(r)
     if a.write and (ROOT / "tools" / "knowledge" / "compile.py").exists():

@@ -40,7 +40,13 @@ def candidates(codes: set) -> list[tuple[str, dict]]:
 _SCRIPT = {}
 
 
-def current_rec(sid: str, project: str = "series10_v1") -> dict | None:
+def current_rec(sid: str, project: str | None = None) -> dict | None:
+    if project is None:                          # I-16：不写剧名，按本进程的剧（NS_RUN → primary）
+        import sys as _s
+        if str(ROOT) not in _s.path:
+            _s.path.insert(0, str(ROOT))
+        from tools.autopilot import runs as _RN
+        project = _RN.current_run()
     from ns_agent import asset_refs as AR
     from ns_render import pipeline as P
     if "s" not in _SCRIPT:
@@ -98,9 +104,9 @@ def write_back(sid: str, stage: str, n: int, pf: dict, why: str, plan: str | Non
     """写回一个版本：新 postflight + 追加 rescore_history（DATAALIGN 11-01：以前每次覆盖 rescored，04:49 之前“曾通过”的记录丢了）"""
     if P is None:
         from ns_render import pipeline as P
-    path = P.shot_dir(sid) / "takes.json"
-    with P.shot_lock(sid):
-        d = P._read_json(path, None)
+    out: dict = {}
+
+    def fn(d):                                   # A-04：takes.json 只经 mutate_takes 写
         t = next(x for x in d["takes"] if x["stage"] == stage and x["n"] == n)
         old = t.get("postflight") or {}
         hist = list(old.get("rescore_history") or [])
@@ -113,8 +119,10 @@ def write_back(sid: str, stage: str, n: int, pf: dict, why: str, plan: str | Non
         c = dict(t.get("contract") or {})
         c["postflight"] = {**pf, "status": "done"}
         t["contract"] = c
-        P._write_json(path, d)
-    return ent
+        out["ent"] = ent
+        return d
+    P.mutate_takes(sid, fn, op="rescore", by="tools/gen_contract/rescore_takes.py")
+    return out["ent"]
 
 
 def flips(plan: dict) -> list[dict]:

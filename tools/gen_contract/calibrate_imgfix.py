@@ -1,7 +1,7 @@
 """契约阈值标定第二轮（总调度 11-01）：用总调度亲审认可的 IMGGEN 对照图作标定集。
   Q4（质感，脸框区域）：可接受 = v9 / v10 / v10L；不可接受 = v0（塑料、糊）
   Q2（造型）：穿对 = vR / v10（挂了造型参考）；穿错 = v0 / v3 / vN（只靠文字）
-图：data/pipeline/runs/series10_v1/images/imgfix/<镜>/<变体>（results.json 的 file = 最终交付图，S★ 为 post 后）。
+图：data/pipeline/runs/<legacy run>/images/imgfix/<镜>/<变体>（results.json 的 file = 最终交付图，S★ 为 post 后）。
 脸框：最终图 scp 到 gpu33 原地 score_remote（tools/gen_contract/remote_score.py）。
 输出：data/review_pages/asset_reflock/calibration_imgfix.json
 
@@ -14,10 +14,13 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+import runs as RUNS  # noqa: E402
+_LEGACY = RUNS.legacy_run(ROOT)   # I-16：第一季专用历史工具（入口 gate_legacy_tool 要求显式 --run）
 for p in ("services/agent", "packages/schema", "services/render_router", "tools/pipeline", "tools/prompt_v2", "tools/gen_contract"):
     sys.path.insert(0, str(ROOT / p))
 
-FX = ROOT / "data/pipeline/runs/series10_v1/images/imgfix"
+FX = ROOT / ("data/pipeline/runs/" + _LEGACY + "/images/imgfix")
 OUT = ROOT / "data/review_pages/asset_reflock/calibration_imgfix.json"
 GOOD4, BAD4 = ("v9", "v10", "v10L"), ("v0",)
 RIGHT2, WRONG2 = ("vR", "v10"), ("v0", "v3", "vN")
@@ -31,6 +34,7 @@ def jl(p, d=None):
 
 
 def main():
+    RUNS.gate_legacy_tool(None, __file__)
     sys.stdout.reconfigure(encoding="utf-8")
     from PIL import Image
     from ns_agent.gen_contract import postflight as PO
@@ -73,9 +77,9 @@ def main():
                 continue
             n = int(shot[2:4])
             __import__("os").environ.setdefault("NS_ALLOW_P4_SOURCE", "1")   # CLEANUP 11-01（K-OPS-Q24，总调度 r2：P4 旧来源迁到导入稿）：标定 / 对照实验复现当时 P4 稿出的图，属调研用途
-            si, ep = IJ.load_episode(ROOT / f"data/pipeline/runs/series10_v1/ep{n:02d}/P4_ep{n:02d}.md")
+            si, ep = IJ.load_episode(ROOT / f"data/pipeline/runs/{_LEGACY}/ep{n:02d}/P4_ep{n:02d}.md")
             s = next(x for x in ep.shots if f"ep{n:02d}-S{x.index}" == shot)
-            sr, plan = AR.plan_for("series10_v1", ep, s)
+            sr, plan = AR.plan_for(_LEGACY, ep, s)
             loc = PO.measure_local(f, AR.record(sr, plan), None)
             for r in loc["Q2"]:
                 rows.append({"key": k, "shot": shot, "vid": vid, "label": "right" if vid in RIGHT2 else "wrong",

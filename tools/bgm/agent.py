@@ -28,10 +28,11 @@ import remote as RM  # noqa: E402
 from brief import ROOT, ep_dir, load_cfg, make_brief  # noqa: E402
 from brief_schema import VOCAL_RE, _named, lyrics_tags  # noqa: E402
 
-LOG = ROOT / "data" / "music" / "series10" / "agent.log"
+LOG = ROOT / "data" / "music" / "series10" / "agent.log"   # legacy（V1）；main 按剧改成本剧 BGM 目录下的 agent.log（MERGE-VID-O）
 
 
 def log(*a):
+    global LOG
     line = f"{time.strftime('%H:%M:%S')} " + " ".join(str(x) for x in a)
     print(line, flush=True)
     LOG.parent.mkdir(parents=True, exist_ok=True)
@@ -359,6 +360,22 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     cfg = load_cfg()
     eps = parse_eps(a.eps)
+    # MERGE-VID-O（L-118 / L-131 / L-137）：按剧。--run 给的是剧目录（data/pipeline/runs/<剧>）或剧名；
+    # legacy 剧（V1）照旧 ACE-Step 生成；其它剧（V2）配乐只许来自 config/music_v2.json 曲库 → tools/bgm/bgm_library.py（剪辑锁定后铺整集）
+    run = Path(a.run).name
+    global LOG
+    if not D.is_legacy_run(run):
+        import bgm_library as LB   # noqa: PLC0415
+        LOG = D.out_dir(cfg, run) / "agent.log"
+        bad = 0
+        for ep in eps:
+            try:
+                st = LB.deliver_episode(run, ep)
+                log(f"{run} ep{ep:02d} 曲库配乐：{st.get('status')} {(st.get('chosen') or {}).get('id') or ''}")
+            except Exception as e:  # noqa: BLE001
+                bad += 1
+                log(f"{run} ep{ep:02d} 失败：{type(e).__name__}: {e}")
+        return 1 if bad else 0
     if a.status:
         for ep in eps:
             st = jload(ep_dir(cfg, ep) / "meta.json", {}) or {}

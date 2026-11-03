@@ -165,7 +165,7 @@ rules:
     title: 旁白 / 独白默认说话人 = narrator（QAg 深夜电台·温柔，项目方选定）；角色对白音色见 K-EDT-016（series10 cosyvoice3 候选，L-078 系统自动选；⤴ 原“对白兜底仍用 Kokoro”已被取代，CLEANUP 11-01）
     when: 合成任一集的 🎙 旁白 / 内心独白
     then: config/voices.json voiceover_speaker = narrator（ns_post.speakers 读配置，不再写死 lin_wan）；narrator = Qwen3-TTS VoiceDesign 文字设计的合成声（不克隆真人），参考音频固定在 data/assets/voices/narrator_qag/；换音色仍属项目方闸门
-    director_text: 旁白听感应为二十多岁、温暖的电台主播式女声；听到旧的 Kokoro 林晚音色读旁白，记到 P4-P9
+    director_text: 旁白听感应为二十多岁、温暖的电台主播式女声；听到旧的 Kokoro 女主音色（V1 遗留）读旁白，记到 P4-P9
     targets:
       - {kind: director_prompt, section: 判定标准}
     evidence:

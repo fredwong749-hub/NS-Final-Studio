@@ -11,17 +11,16 @@ items:
     owner: VQAGATE
     drift: {kind: json, file: config/vqa.json, path: [judge, enforce]}
   video_requires_q9:
-    value: false
-    target: true
-    source: L-081（视频只派过了看图检查的首帧）；按设计等 80 镜回扫后打开（D-VQA-02 ⏳）
+    value: true
+    source: L-081（视频只派过了看图检查的首帧）；L-137（项目方 11-03 03:1x：V2 并回 V1，看图闸门先于视频）由 MERGE-VID-O 打开（ISS-1103-024206-4b21）
     enforced_by: config/vqa.json gate.video_requires_q9
     status: drift_checked
     owner: VQAGATE
     drift: {kind: json, file: config/vqa.json, path: [gate, video_requires_q9]}
-    plan: 回扫完成后 VQAGATE 同时把 value 与 vqa.json 改成 true（drift_check 保证两边一起改）
+    plan: 已打开（11-03 MERGE-VID-O，与 vqa.json 一起改）
   blocking_checks:
-    value: [continuity_break, extra_person, eye_contact, framing_mismatch, hair_mismatch, underage_look]
-    source: GATE_CALIBRATION（标定一致率 ≥0.93 的项才拦）；L-090 不看镜头；01:02 ep05-S3 驳回（局部特写拉成人像、发色丢 → framing / hair）
+    value: [brand_logo, continuity_break, extra_person, eye_contact, framing_mismatch, hair_mismatch, underage_look]
+    source: GATE_CALIBRATION（标定一致率 ≥0.93 的项才拦）；L-090 不看镜头；01:02 ep05-S3 驳回（局部特写拉成人像、发色丢 → framing / hair）；brand_logo = W-40（总调度 11-02 21:1x 直接定阻断：出图永远不画品牌标志，K-REN-959，未走标定）
     enforced_by: config/vqa.json checks.<id>.blocking
     status: drift_checked
     owner: VQAGATE

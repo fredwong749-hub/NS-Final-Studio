@@ -380,6 +380,19 @@ def beats_to_duration(block: str, seconds: int) -> tuple[str, str]:
 
 # ------------------------------------------------------------------ 不变量 / lint
 
+def worse_detail(worse: dict, L: dict) -> str:
+    """I6 的 detail：不只写“TL-10 0→1”，把变多那条码在候选稿里的 lint 原文一起带上（K211-F 11-03：a17 只因 H3 末拍一个 'settle' 撞 RL-T6 被拒，
+    写手包里只看到“TL-10 0→1”，下一包没法改对）。原文从 shot_block（阻断）和 zero_detail 里找带 [码] 的那条"""
+    if not worse:
+        return "无变多"
+    msgs = list(L.get("shot_block") or []) + list(L.get("zero_detail") or [])
+    parts = []
+    for c, (a, b) in worse.items():
+        hit = next((m for m in msgs if f"[{c}]" in m), "")
+        parts.append(f"{c} {a}→{b}" + (f"（{hit[:220]}）" if hit else ""))
+    return "变多：" + "；".join(parts)
+
+
 def lint(chunk: str, ep: int) -> dict:
     """p4_adapter.check_p4（导入关口同款，写作链路级别 + Spec）→ 每码计数、P4 阻断（人物卡冻结项单列）"""
     import p4_adapter as P4
@@ -433,7 +446,7 @@ def gate(pre: str, orig: str, cand: str, ep: int, base_lint: dict, wd: Path) -> 
         f"{tot} 秒（项目方 11-01：60–120 秒，D-SCR-08）")
     L = lint(cand, ep)
     worse = {c: (base_lint["codes"].get(c, 0), n) for c, n in L["codes"].items() if n > base_lint["codes"].get(c, 0)}
-    add("I6", "lint 每个码不比原稿多", not worse, "无变多" if not worse else "变多：" + "；".join(f"{c} {a}→{b}" for c, (a, b) in worse.items()))
+    add("I6", "lint 每个码不比原稿多", not worse, worse_detail(worse, L))
     add("I7", "P4 阻断 = 0（人物卡冻结项除外）", not L["shot_block"], "0" if not L["shot_block"] else "；".join(L["shot_block"])[:600])
     zero = zero_hits(L)
     # I8 只报告、不作废：K-WRT-702 新 lint 要求降到 0，降不到的镜列给总调度（总调度 r2 第 2 条）

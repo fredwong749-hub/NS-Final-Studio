@@ -57,11 +57,44 @@ def _sources_from(timeline: Path) -> dict[int, dict]:
     return out
 
 
+def guard_asset_pack_run() -> str | None:
+    """OVERSIGHT-F 第 14 轮：本工具是 V1 的手动合成（--script 指定导入稿、配乐 / 音色走 V1 默认）。当前剧是资产包模式（V2）
+    → 返回拒绝原因（main 退出 2），提示改用 tools/assemble_series.py（按剧取导入稿 / 配乐 / 音色）"""
+    from ns_post import run_media as RM
+    from ns_post.tts import _current_run
+    run = _current_run()
+    if RM.is_asset_pack_run(run, ROOT):
+        return (f"当前剧 {run} 是资产包模式（V2）：tools/assemble_episode.py 只给 V1 用，"
+                f"请改用 tools/assemble_series.py（按剧取导入稿、配乐曲库 config/music_v2.json、音色 config/voices_v2.json）")
+    return None
+
+
+def resolve_run_inputs(run: str, a) -> str | None:
+    """W16 / REVIEW-G4b P0-1：显式 --run 时按剧解析输入（C-14，不写 V1/V2 分支）：导入稿 = runs.script_path(run)、
+    音色 = load_voice_config(run=run)（资产包剧只认 voices_v2.json）、配乐 = run_media.music_dir(run)。
+    资产包剧的画面只认 --sources-from（night 由 producer→takes.json 汇成的 manifest 生成，L-151 一本账）；
+    没给 → 返回拒绝原因（find_source 只认 V1 data/renders，不能拿来顶）。就地改 a，返回 None = 可以合成"""
+    from ns_post import run_media as RM
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from tools.autopilot import runs as RUNS
+    pack = RM.is_asset_pack_run(run, ROOT)
+    if pack and not a.sources_from:
+        return f"剧 {run} 是资产包模式：--run 合成必须给 --sources-from（按 takes.json 汇出的时间轴），不按 V1 data/renders 找片"
+    if a.script is None:
+        a.script = str(RUNS.script_path(run, ROOT))
+    if a.music_dir is None and not a.no_bgm and pack:
+        a.music_dir = str(RM.music_dir(run, ROOT))
+    return None
+
+
 def main() -> int:
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("episodes", nargs="+", type=_ep)
-    ap.add_argument("--script", default=str(ROOT / "data" / "import" / "script_v2.json"))
+    ap.add_argument("--run", default=None,
+                    help="按剧合成（导入稿 / 音色 / 配乐按剧取；night.py 传 --run）；不给 = 旧行为，当前剧是资产包模式时拒绝")
+    ap.add_argument("--script", default=None, help="导入稿（默认：按剧取 runs.script_path；--run 给了用该剧，否则当前剧）")
     ap.add_argument("--out", default=str(ROOT / "data" / "episodes"))
     ap.add_argument("--no-asr", action="store_true", help="skip the SenseVoice round-trip check")
     ap.add_argument("--fake-tts", action="store_true", help="tones instead of speech (pipeline test)")
@@ -105,8 +138,17 @@ def main() -> int:
     ap.add_argument("--sources-from", default=None,
                     help="用这份 timeline.json 里每镜的 file / file_4k（同一批 take），不按 takes.json 当前版本找")
     a = ap.parse_args()
+    why = resolve_run_inputs(a.run, a) if a.run else guard_asset_pack_run()
+    if why:
+        print(why, file=sys.stderr)
+        return 2
+    if a.script is None:   # 没给 --run：当前剧（guard 已保证不是资产包剧）的导入稿，按 runs.script_path 取（不写死路径）
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+        from tools.autopilot import runs as RUNS
+        a.script = str(RUNS.script_path(None, ROOT))
 
-    cfg = load_voice_config()
+    cfg = load_voice_config(run=a.run) if a.run else load_voice_config()
     tts = FakeTts() if a.fake_tts else KokoroBackend(cfg, num_threads=a.threads)
     asr = None if (a.no_asr or a.fake_tts) else SenseVoiceAsr(cfg, num_threads=a.threads)
     settings = Settings(threads=a.x264_threads, target_lufs=a.lufs, h3_gain_db=a.h3_gain_db, bgm=not a.no_bgm,
@@ -118,7 +160,13 @@ def main() -> int:
     for ep in a.episodes:
         episode = load_episode(Path(a.script), ep)
         if a.lines_only or a.tts_only:
-            lines = resolve_episode(episode, cfg.get("line_overrides"))
+            if a.run:   # W16：按剧的说话人表 / 旁白（与 ns_post.assemble 合成路径同口径）
+                from ns_post.speakers import Cast
+                from ns_post.tts import default_voiceover_speaker
+                lines = resolve_episode(episode, cfg.get("line_overrides"), narrator=default_voiceover_speaker(cfg),
+                                        cast=Cast.from_cfg(cfg))
+            else:
+                lines = resolve_episode(episode, cfg.get("line_overrides"))
             for ln in lines:
                 vs = voice_for(cfg, ln.speaker, voiceover=ln.kind == "voiceover")
                 print(f"ep{ep:02d}-{ln.key:7} {ln.kind:9} {ln.speaker:12} "

@@ -71,7 +71,7 @@ items:
     owner: SENTINEL
   S8_vlm_sample:
     value: {per_hour: 10, every_s: 360, defects: {eye_contact: 看镜头, Q1: 身份, Q2: 缺件, composite: 合成感}, owner_loop: VQAGATE,
-            composite_max: null}
+            composite_max: null}   # ⤴ MERGE-IMG-O 11-03（总调度定，继续留空、不设闸门）：data/ab/imgfix/blend_metric_calibration.json n=20 的确定性指标 AUC 0.52–0.63（95% CI 都含 0.5），blend_vlm_pairs 看图配对 7/16 正确（低于随机），没有能分辨“贴图感”的检测器；有检测器再标定后填
     note: composite_max = 首帧“人物和背景不融合、像抠图贴上去”的合成感线（项目方 11-02 先发现，探针缺口）；IMGFIX 出确定性指标 + VLM 判定题、VQAGATE 接进契约后填值（null = 未启用，不判）。judge 结果字段约定 composite = {score, verdict}
     source: SLO.md S8；01:3x s20261304 顾沉看镜头被总调度目检发现、自动检查漏检；判定复用 tools/vqa/gaze_regression.py:judge
     enforced_by: tools/sentinel/probes.py:p_s8
@@ -267,10 +267,10 @@ items:
       ui_feedback_zero_at: 5
       ui_measure_every_s: 3600
       ui_measure_max_age_s: 5400
-      workflow_weights: {unattended: 35, review_chain: 25, no_dup: 25, auto_requeue: 15}
+      workflow_weights: {unattended: 30, review_chain: 25, no_dup: 20, auto_requeue: 15, q10_detector: 10}
       workflow_unmeasured: [每集完成自动回报, 第二季暂停状态只认一个来源]
       dup_zero_at: 5
-      gpu_weights: {productive: 40, rssh: 20, deploy_stop: 15, resident: 15, lend_expiry: 10}
+      gpu_weights: {productive: 35, rssh: 20, deploy_stop: 15, resident: 10, lend_expiry: 10, q10_detector: 10}
       gpu_unmeasured: [没有因分区错误或旁路导致的重复出图（分区唯一来源落地后接 S17 按分区拆）]
       gpu_productive_target_pct: 80
       gpu_expected_by_stage: {S1: 0, S2: 0.3, S3: 0.8, S4: 0.8, S5: 0.5}
@@ -294,5 +294,12 @@ items:
     source: 总调度 11-02 20:10：P1 评审链路——评审交齐（judge_k/out/p1_review.json.done 都在）后 5 分钟内要自动汇总（该轮 RESULT.json 生成且晚于最后一份交卷）
     note: 轮次目录 = judge_p1/（第 1 轮）与 judge_p1/rN/；run 取 runs.primary_run()（现为 series10_v2）
     enforced_by: tools/sentinel/probes.py:p_s27
+    status: code_reads
+    owner: SENTINEL
+  S28_q10_detector:
+    value: {from_host: gpu33, url: "http://10.0.0.36:8893/health", need_loaded: true, fail_n: 2, every_s: 60, owner_loop: FACTORY}
+    source: 总调度 11-02 20:4x：Q10 人数检测依赖 gpu36 常驻检测服务（内网 10.0.0.36:8893）；它或 lan_proxy 一停，两台首帧全卡在 Q10（失败关闭，设计如此，但要尽早发现）——从 gpu33 测 /health 且 loaded=true，连续 2 次失败开单派 FACTORY；计入 SCORECARD GPU / 工作流两项
+    note: 并进 gpu33 每拍那一次合并只读调用（remote_probe 第 6 个参数 = 要测的内网 URL），超时 4 s
+    enforced_by: tools/sentinel/probes.py:p_s28
     status: code_reads
     owner: SENTINEL

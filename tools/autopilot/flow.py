@@ -934,7 +934,7 @@ def line3_tick(root: Path = ROOT, apply: bool = True, timeout_s: int = 600) -> d
     return {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "ran": ran}
 
 
-def api_restart_tick(root: Path = ROOT, dry: bool = False, timeout_s: int = 360) -> dict:
+def api_restart_tick(root: Path = ROOT, dry: bool = False, timeout_s: int = 900) -> dict:   # RESTARTFIX-O：守护一拍最长 = vite build 240 + ps1 600 + 余量
     """UIRSI 的 :8800 空闲才重启守护（tools/uirsi/api_restart_guard.py tick；接 WORKFLOW 重启队列，decider=code）——子进程跑，慢也不拖住状态刷新"""
     g = root / "tools/uirsi/api_restart_guard.py"
     if not g.exists():

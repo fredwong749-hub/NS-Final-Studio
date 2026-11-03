@@ -20,6 +20,10 @@ BIG_ACTION = re.compile(r"站起|起身|走向|走到|走开|转身|推门|开�
 CAM = re.compile(r"The camera ([^.,;]*?)(?=( as |,|\.|;|$))")
 # 英文运镜句 → 词表 id（顺序 = 优先级）
 EN_MOVES = [
+    # V2 按剧运镜（runs:[series10_v2]，总调度 21:0x 定）：模板原句识别成自己的 id，不退回 arc / 固定；放在通用规则前
+    (r"\brobotic high-speed camera move\b|\bwhips in a fast, tight arc\b", "bolt_push_settle"),
+    (r"\borbits? slowly around\b|\bslow-motion orbit\b", "orbit_slowmo"),
+    (r"\bhandheld documentary camera\b|\bfollows her at shoulder height\b", "handheld_follow"),
     (r"\bwhip[- ]pans?\b", "whip_pan"), (r"\bfocus (?:pulls?|racks?)\b|\brack focus\b", "focus_pull"),
     (r"\bslow motion\b", "slow_motion"), (r"\bforeground\b", "foreground_pass"),
     (r"\b(?:arcs?|orbits?|arc shot)\b", "arc"), (r"\b(?:pulls? out|dollies out|zooms? out)\b", "pull_out"),
@@ -46,13 +50,51 @@ def move(mid: str) -> dict | None:
     return _cache["by"].get(mid)
 
 
-def enabled_ids() -> list[str]:
-    return [m["id"] for m in vocab().get("moves") or [] if m.get("enabled")]
+WALK = re.compile(r"走|行走|走动|走向|走到|走过|迈步|跟着她|walks?|walking|strides?", re.I)
 
 
-def is_enabled(mid: str | None) -> bool:
+def current_run() -> str | None:
+    """当前剧（NS_RUN / runs.json primary，经 tools/autopilot/runs.py；没有登记表 = None）"""
+    import os
+    if os.environ.get("NS_RUN"):
+        return os.environ["NS_RUN"]
+    p = ROOT / "tools" / "autopilot" / "runs.py"
+    if not (ROOT / "config" / "pipeline" / "runs.json").is_file() or not p.is_file():
+        return None
+    import importlib.util
+    sp = importlib.util.spec_from_file_location("runs_for_camera_norm", p)
+    m = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m.current_run(ROOT)
+
+
+def run_ok(m: dict | None, run: str | None = None) -> bool:
+    """按剧运镜（runs: [...]）只在列出的剧里可用；没写 runs = 所有剧"""
+    if not m:
+        return False
+    rs = m.get("runs")
+    # OVERSIGHT-F 第 12 轮：只认调用方显式传入的剧（不读进程上下文），没传 = 按剧运镜不可用（失败关闭）
+    return not rs or (run is not None and run in rs)
+
+
+def run_scoped(mid: str | None) -> bool:
+    """按剧例外（总调度 21:0x）：标了 runs 的运镜模板允许带速度词、可不以 The camera 开头（K-PRM-101 只对其余运镜）"""
     m = move(mid) if mid else None
-    return bool(m and m.get("enabled") and m.get("template"))
+    return bool(m and m.get("runs"))
+
+
+def enabled_ids(run: str | None = None) -> list[str]:
+    return [m["id"] for m in vocab().get("moves") or [] if m.get("enabled") and run_ok(m, run)]
+
+
+def is_enabled(mid: str | None, run: str | None = None, motion: str | None = None) -> bool:
+    """enabled + 有模板 + 本剧可用；requires: [走动] 的（handheld_follow）只在动作里有走动时可用（给了 motion 才判）"""
+    m = move(mid) if mid else None
+    if not (m and m.get("enabled") and m.get("template") and run_ok(m, run)):
+        return False
+    if "走动" in (m.get("requires") or []) and motion is not None and not WALK.search(motion):
+        return False
+    return True
 
 
 def match_zh(text: str) -> str | None:
@@ -83,7 +125,7 @@ def fallback(mid: str | None, big_action: bool) -> tuple[str, str]:
     """disabled / 词表外 → (退回的 id, 原因)"""
     m = move(mid) if mid else None
     why = f"{mid}：" + ((m or {}).get("reason") or "词表外运镜") if mid else "没认出运镜"
-    if mid == "arc" and not big_action and is_enabled("push_in"):
+    if mid in ("arc", "orbit_slowmo") and not big_action and is_enabled("push_in"):   # 别的剧用不了 V2 环绕 → 同 arc 退回
         return "push_in", why
     return "static", why
 
@@ -95,19 +137,21 @@ def enabled() -> bool:
         return True
 
 
-def norm_clause_info(c: str, big_action: bool) -> tuple[str, str, str | None]:
+def norm_clause_info(c: str, big_action: bool, run: str | None = None) -> tuple[str, str, str | None]:
     """→ (新句子不含 “The camera ” 前缀, 词表 id, 退回原因或 None)"""
     raw = c.strip()
     mid = match_en(raw)
     d = "left" if re.search(r"\bleft\b", raw, re.I) else "right"
     why = None
-    if mid is None or not is_enabled(mid):
+    if mid and run_scoped(mid) and is_enabled(mid, run):
+        return raw, mid, None                    # 本剧可用的按剧运镜：写作方照词表模板写的原句保留（速度词是它的一部分）
+    if mid is None or not is_enabled(mid, run):
         mid, why = fallback(mid, big_action)
     return clause(mid, d)[len("The camera "):], mid, why
 
 
-def norm_clause(c: str, big_action: bool) -> str:
-    return norm_clause_info(c, big_action)[0]
+def norm_clause(c: str, big_action: bool, run: str | None = None) -> str:
+    return norm_clause_info(c, big_action, run)[0]
 
 
 def denormalize(text: str, changes: list[dict]) -> str:
@@ -117,7 +161,7 @@ def denormalize(text: str, changes: list[dict]) -> str:
     return text
 
 
-def normalize_video_prompt(text: str, motion_body: str = "") -> tuple[str, list[dict]]:
+def normalize_video_prompt(text: str, motion_body: str = "", run: str | None = None) -> tuple[str, list[dict]]:
     """→ (规范化后的提示词, 改动记录 [{rule, from, to, move, why, vocab}])"""
     if not text or not enabled():
         return text, []
@@ -125,7 +169,7 @@ def normalize_video_prompt(text: str, motion_body: str = "") -> tuple[str, list[
     changes = []
 
     def sub(m):
-        new, mid, why = norm_clause_info(m.group(1), big)
+        new, mid, why = norm_clause_info(m.group(1), big, run)
         if new != m.group(1).strip():
             changes.append({"rule": "K-REN-801", "from": "The camera " + m.group(1).strip(), "to": "The camera " + new,
                             "move": mid, "why": why or "按词表模板（小幅、去速度词）", "vocab": vocab().get("version")})

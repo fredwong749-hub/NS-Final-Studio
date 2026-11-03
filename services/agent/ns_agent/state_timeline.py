@@ -3,7 +3,7 @@
 
     from ns_agent.state_timeline import build, write
     timeline, scenes = build()            # 纯计算（读项目文件，不写）
-    write()                               # → data/state_timeline.json + data/scenes.json
+    write()                               # → 当前剧的 state_timeline.json + scenes.json（timeline_path / scenes_path；V1 = data/ 下）
 
 只读：script_v2.json、data/looks/*.json、config/visual_bible.toml、comfy/models.lock、
 data/renders_gpu3/LORA_REGISTRY.json、data/import/s1_gate.json、assets/scenes/<scene_id>/manifest.json。
@@ -276,10 +276,22 @@ VERSION_IN_NAME = re.compile(r"(?<![A-Za-z])v(\d+)(?=(?:\.\d+)*\.md$|[ ）)])")
 S2_WAIVERS = Path("config") / "s2_waivers.json"
 
 
-def waived(root: Path, ep: int, what: str) -> dict | None:
-    """项目方一次性豁免（只作用于登记的那一集、那一项）：config/s2_waivers.json
-    {"waivers": [{"episode": 2, "skip": ["plate"], "owner_quote": "…", "scope": "…", "by": "owner", "at": "…", "revoked": false}]}
+def _waiver_run(root: Path, run: str | None = None) -> tuple[str | None, bool]:
+    """(剧, 是否 V1 口径)：run 不给 = 当前剧；临时根 / 没有登记表 = (run, True)"""
+    from . import run_paths as RP
+    _r, m, cur, legacy = RP._ctx(Path(root))
+    if run is None or m is None:
+        return (run or cur), legacy
+    return run, bool(m.is_legacy(run, Path(root)))
+
+
+def waived(root: Path, ep: int, what: str, run: str | None = None) -> dict | None:
+    """项目方一次性豁免（只作用于登记的那一剧、那一集、那一项）：config/s2_waivers.json
+    {"waivers": [{"run": "series10_v1", "episode": 2, "skip": ["plate"], "owner_quote": "…", "scope": "…", "by": "owner", "at": "…", "revoked": false}]}
+    MERGE-OPS-O（carryover 第 12 项，L-137）：按剧 + 集匹配。条目带 run → 只对该剧有效；不带 run 的老条目只对 V1（legacy）有效，
+    V2 ep02 不会再误用 V1 的豁免。run 不给 = 当前剧（NS_RUN / primary）。
     只由 tools/s2_waiver.py（项目方本人运行）写；没有就不豁免"""
+    cur, legacy = _waiver_run(root, run)
     try:
         data = json.loads((root / S2_WAIVERS).read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -287,6 +299,9 @@ def waived(root: Path, ep: int, what: str) -> dict | None:
     ws = data.get("waivers") if isinstance(data, dict) else None    # 封板修复：格式不对 = 没有豁免，不崩
     for w in ws if isinstance(ws, list) else []:
         if not isinstance(w, dict):
+            continue
+        wr = w.get("run")
+        if not (wr == cur if wr else legacy):
             continue
         if (w.get("episode") == ep and what in (w.get("skip") or []) and w.get("by") == "owner"
                 and (w.get("owner_quote") or "").strip() and not w.get("revoked")):
@@ -589,7 +604,9 @@ def input_hashes(root: str | Path | None = None) -> dict[str, str | None]:
     """时间线 source_hashes：bible_version 的输入 + 母版、脸部参考、LoRA 注册表、S1 闸门记录"""
     root = project_root(root)
     out: dict[str, str | None] = dict(source_hashes(root))
-    for p in sorted((root / "assets" / "characters").glob("*/plates/master.png")):
+    from . import run_paths as RP
+    # V2CUT-O（L-126）：assets/characters/*/plates/master.png 是 V1 角色母版，非 V1 剧的状态表不记它们
+    for p in sorted((root / "assets" / "characters").glob("*/plates/master.png")) if RP.is_legacy_run(root) else []:
         out[f"master/{p.parent.parent.name}"] = _sha_cached(p)
     out["face_reference"] = _sha_cached(root / "config" / "face_reference.json")
     for rel in LORA_REGISTRIES:
@@ -676,6 +693,7 @@ def build(root: str | Path | None = None, previous: dict | None = None) -> tuple
                                     "assets_locked_version": assets_locked}
 
     shots_out: list[dict] = []
+    v1_cast = RP.is_legacy_run(root)
     prev: dict | None = None
     prop_cands = G.prop_candidates(res.items)
     img_text: dict[str, str] = {}
@@ -688,7 +706,8 @@ def build(root: str | Path | None = None, previous: dict | None = None) -> tuple
                 seg_order.append(grp["segment_id"])
                 seg_props = {}
             present = dict(res.characters(s))
-            slugs = (["lin_wan"] if "lin_wan" in CHARACTERS else []) + [c for c in present if c != "lin_wan"]
+            # V2CUT-O（L-126）：“每镜都列林晚”只对 V1 有效；其它剧只列本镜真正入镜的角色
+            slugs = (["lin_wan"] if "lin_wan" in CHARACTERS and v1_cast else []) + [c for c in present if c != "lin_wan" or not v1_cast]
             chars = {c: character_state(ctx, s, c, c in present, present.get(c)) for c in slugs}
 
             # 所需 LoRA：镜头触发词 + 造型里本镜生效、带触发词的单品
@@ -893,11 +912,15 @@ def gpu3_stats(shots: list[dict], scenes: list[dict]) -> dict:
 
 
 def timeline_path(root: Path) -> Path:
-    return root / "data" / "state_timeline.json"
+    """状态表路径按当前剧（V2CUT-O 11-03，L-126）：V1 / 临时根 = data/state_timeline.json；其它剧 = data/import/runs/<run>/state_timeline.json"""
+    from . import run_paths as RP
+    return RP.timeline_json(Path(root))
 
 
 def scenes_path(root: Path) -> Path:
-    return root / "data" / "scenes.json"
+    """场景表路径按当前剧（同上）：V1 / 临时根 = data/scenes.json；其它剧 = data/import/runs/<run>/scenes.json"""
+    from . import run_paths as RP
+    return RP.scenes_json(Path(root))
 
 
 def _replace_retry(tmp, p: Path, tries: int = 20) -> None:
@@ -952,7 +975,8 @@ def _plate_files(root: Path) -> list[Path]:
 def input_files(root: Path) -> list[Path]:
     """时间线的全部输入文件（stat 键用于缓存 / 重建后复核）"""
     from . import run_paths as RP                         # I-14
-    return [root / "config" / "visual_bible.toml", RP.script_json(root),
+    from .bible import bible_path
+    return [bible_path(root), RP.script_json(root),
             *sorted(RP.looks_dir(root).glob("*.json")), root / "comfy" / "models.lock",
             root / LORA_REGISTRIES[1], root / "config" / "shot_ownership.json",
             root / "config" / "face_reference.json",

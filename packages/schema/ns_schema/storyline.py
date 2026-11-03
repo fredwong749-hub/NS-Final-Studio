@@ -162,7 +162,7 @@ def check_storyline(data, *, registry_chars: list[dict] | None = None, registry_
         if c.age < 18:
             rep.add("SL-02", "block", f"{c.name} 年龄 {c.age}：全部角色必须是成年人（≥18）", f + ".age")
         if not CHAR_ID_RE.match(c.char_id):
-            rep.add("SL-03", "block", f"{c.name} 的 char_id「{c.char_id}」不合法（lin_wan/gu_chen/chen_yu 或 ch_<小写英文数字下划线>，例 ch_a_lan）", f + ".char_id")
+            rep.add("SL-03", "block", f"{c.name} 的 char_id「{c.char_id}」不合法（写 ch_<小写英文数字下划线> 或 lead_<小写字母>；已登记角色照抄全局头的 id）", f + ".char_id")
         bad_names = [n for n in names] + [x.char_id for x in s.characters]
         p = en_problems(c.en_phrase, bad_names)
         if p:

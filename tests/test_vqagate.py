@@ -168,10 +168,11 @@ def test_auto_current_requires_q9(monkeypatch, enf):
 
 
 def test_contradictory_eye_contact_downgraded(enf):
+    # 总调度 11-02 21:xx：自相矛盾不再降成拿不准放过，改记 untested + 待重问（Q9 挡，见 test_eye_contradiction_untested_and_reask）
     v = {"checks": {"eye_contact": {"s": "defect", "e": "两人均未看镜头，原文不允许看镜头"}}, "defects": ["eye_contact"],
          "people": [{"gaze": "看画面右"}, {"gaze": "看林晚"}]}
     VQ.sanitize(v)
-    assert v["defects"] == [] and "eye_contact" in v["unsure"]
+    assert v["defects"] == [] and v["checks"]["eye_contact"]["s"] == "untested" and v["contradiction"] == ["eye_contact"]
     v = {"checks": {"eye_contact": {"s": "defect", "e": "顾沉直视镜头"}}, "defects": ["eye_contact"], "people": [{"gaze": "看镜头"}]}
     VQ.sanitize(v)
     assert v["defects"] == ["eye_contact"]
@@ -1115,6 +1116,10 @@ def test_accept_gate_defers_count_on_gpu33(monkeypatch):
     monkeypatch.setenv("OFFLINE_SELF", "gpu36")
     VQ.accept_gate("ep02-S1", "image", "x.png", {"ok": True, "blocking": [], "items": []})
     assert seen["defer"] is False
+    monkeypatch.setenv("OFFLINE_SELF", "gpu33")                          # 配了常驻检测服务（gpu36 内网入口）：gpu33 上也不推迟
+    monkeypatch.setattr("ns_agent.gen_contract.cfg", lambda: {"image_thresholds": {"Q10_accept": {"enabled": True, "count_host": "http://10.0.0.36:8893"}}})
+    VQ.accept_gate("ep01-S1", "image", "x.png", {"ok": True, "blocking": [], "items": []})
+    assert seen["defer"] is False
 
 
 def test_v2_identity_is_fail_closed(monkeypatch, tmp_path):
@@ -1260,3 +1265,30 @@ def test_anomaly_refless_stranger_is_untested_and_blocks(monkeypatch):
     pf = {"ok": True, "blocking": [], "items": []}
     ACC.apply(pf, lab_)
     assert pf["ok"] is False and "Q10" in pf["blocking"]                 # 未测 = 阻断，不是 pass
+
+
+def test_eye_contradiction_untested_and_reask(monkeypatch, enf):
+    """总调度 11-02 21:xx（V2 金样 image_000_90d1cc8e：Q9 判“演员看镜头”，证据却是“右眼瞳孔朝向画面右，未看镜头”）：
+    结论与证据矛盾 → Q9 untested（不是 fail 也不是 pass），只问视线重问一次；重问自洽 → 按回答定；仍矛盾 / 看不清 → 保持 untested；
+    反向矛盾（判 ok、证据说直视镜头）同样处理；gaze_mp 高置信度命中直接定 defect"""
+    from ns_agent.vqa import client as C
+    def golden():
+        return {"checks": {"eye_contact": {"s": "defect", "e": "右眼瞳孔朝向画面右，未看镜头"}}, "defects": ["eye_contact"], "unsure": []}
+    st, d, ev = VQ.q9(golden())                                          # 唯一出口自己会查矛盾
+    assert st == "untested" and "矛盾" in d and ev["contradiction"] == ["eye_contact"]
+    v = golden(); VQ.sanitize(v)
+    monkeypatch.setattr(C, "generate", lambda req, **k: {"text": '{"gaze": "没看镜头", "e": "瞳孔朝向画面右侧"}'})
+    assert VQ.reask_eye(v, "x.png") and VQ.q9(v)[0] == "pass" and v["checks"]["eye_contact"]["s"] == "ok"
+    v = golden(); VQ.sanitize(v)
+    monkeypatch.setattr(C, "generate", lambda req, **k: {"text": '{"gaze": "看镜头", "e": "瞳孔朝向画面右，未看镜头"}'})
+    assert VQ.reask_eye(v, "x.png") is None and VQ.q9(v)[0] == "untested"           # 重问仍矛盾
+    v = golden(); VQ.sanitize(v)
+    monkeypatch.setattr(C, "generate", lambda req, **k: {"text": '{"gaze": "看镜头", "e": "双眼瞳孔正对镜头"}'})
+    assert VQ.reask_eye(v, "x.png") and VQ.q9(v)[0] == "fail"                       # 重问自洽：真看镜头
+    monkeypatch.setattr(C, "generate", lambda req, **k: {"error": "服务没起"})
+    v = golden(); VQ.sanitize(v)
+    assert VQ.reask_eye(v, "x.png") is None and VQ.q9(v)[0] == "untested"
+    rev = {"checks": {"eye_contact": {"s": "ok", "e": "女主瞳孔直视镜头"}}, "defects": [], "unsure": []}
+    assert VQ.q9(rev)[0] == "untested"                                    # 反向矛盾也不放过
+    ok_ = {"checks": {"eye_contact": {"s": "defect", "e": "女主右眼瞳孔朝向镜头"}}, "defects": ["eye_contact"], "unsure": []}
+    assert VQ.q9(ok_)[0] == "fail"                                        # 不矛盾的看镜头照拦

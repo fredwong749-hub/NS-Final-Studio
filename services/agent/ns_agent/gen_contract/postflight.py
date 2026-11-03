@@ -112,7 +112,8 @@ def q1a_item(image, boxes: dict, all_boxes: list, t1a: dict) -> tuple[str, str, 
         per[c] = f
         bad += HA.judge(c, f, cards[c])
     ok_txt = "头发符合人物卡（" + "、".join(f"{cards[c].get('name', c)} 蓝 {f['hair_blue']:.2f} / 下长 {f['below']:.2f}" for c, f in per.items()) + "）"
-    return ("fail" if bad else "pass"), ("；".join(bad) if bad else ok_txt), {"per_person": per, "q1a_mode": "seg", "boxes": todo}
+    return ("fail" if bad else "pass"), ("；".join(bad) if bad else ok_txt), {"per_person": per, "q1a_mode": "seg", "boxes": todo,
+                                                                         "cards": {c: cards[c] for c in todo}}
 
 
 def apply_bank(sims: dict, t1: dict) -> dict:
@@ -341,6 +342,8 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
     described = {c["character"] for c in rec.get("characters") or [] if c.get("face_described")}
     # Q1
     t1 = th.get("Q1_identity") or {}
+    from . import cards as _CARDS
+    _proj = req.get("framing_project") or req.get("project")
     big_unexpected = [f for f in (remote or {}).get("faces") or []
                       if (f.get("h_ratio") or 0) >= t1.get("min_face_ratio", 0.04)] if (not face_visible or not expect) else []
     partial_unfaced = (bool(req.get("cast")) and not expect and not described
@@ -419,7 +422,7 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
                 continue
             sims = {c: v[0] for c, v in f["sims"].items()}
             # 认出 = 像本镜 cast 里某个角色 ≥ recognize_floor（在画者另一张脸 = 镜像 / 重复人物，只记录待目检；“外国脸 / 陌生人”才挡）
-            ok = [c for c in allowed if c in sims and sims[c] >= (t1.get(c, t1.get("default", 0.6)) if c in described and c not in got else floor)]
+            ok = [c for c in allowed if c in sims and sims[c] >= (_CARDS.identity_line(c, t1, _proj) if c in described and c not in got else floor)]
             if ok:
                 me = max(ok, key=sims.get)
                 pres = next((c.get("presence") for c in req.get("cast") or [] if NAME_ID.get(c.get("name"), c.get("name")) == me), None)
@@ -469,6 +472,8 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
         # Q1a（VQAGATE 11-02 P0，ep06-S2 v6 顾沉长出林晚的蓝色长发）：逐人头发属性，确定性分割判；上线即阻断
         t1a = th.get("Q1a_attr") or {}
         if t1a.get("enabled"):
+            # ISS-1103-024206-c8c0：人物卡按剧取（资产包模式的剧从 P1 人物表生成，不再只有 V1 三个人）
+            t1a = {**t1a, "cards": _CARDS.q1a_cards(_proj, t1a)}
             st, d, ev = q1a_item(image, q1_boxes, [f.get("bbox") for f in faces if f.get("bbox")], t1a)
             add("Q1a", st, d, **ev)
     # Q2
@@ -760,3 +765,9 @@ class _Callable(types.ModuleType):
 
 
 sys.modules[__name__].__class__ = _Callable
+
+
+def accept(*a, **kw):
+    """共用验收（PRODMERGE-O 11-03，L-151）：golden 的 bundle 判定 + retry 三态并进契约，实现在 gen_contract/accept.py"""
+    from . import accept as _ACC
+    return _ACC.accept(*a, **kw)

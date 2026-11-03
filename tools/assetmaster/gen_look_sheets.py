@@ -20,9 +20,12 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+import runs as RUNS  # noqa: E402
+_LEGACY = RUNS.legacy_run(ROOT)   # I-16：第一季专用历史工具（入口 gate_legacy_tool 要求显式 --run）
 for p in ("services/render_router", "services/agent", "packages/schema", "tools/pipeline", "tools/series10_imggen"):
     sys.path.insert(0, str(ROOT / p))
-RUN = ROOT / "data/pipeline/runs/series10_v1"
+RUN = ROOT / ("data/pipeline/runs/" + _LEGACY)
 OUT = ROOT / "data/assetmaster/sheets_v2"
 RES = Path(__import__("os").environ.get("AM_SHEETS_RES") or ROOT / "data/assetmaster/sheets_v2.json")
 MANUAL = ROOT / "data/assetmaster/look_sheet_refs.json"
@@ -192,7 +195,7 @@ def _atomic_json(p: Path, d) -> None:
     tmp.replace(p)
 
 
-def prewarm(sheet_rel: str, project: str = "series10_v1") -> list[str]:
+def prewarm(sheet_rel: str, project: str = _LEGACY) -> list[str]:
     """新设定图的裁切先全部生成好（指针切换前，没有任何作业引用这些新文件名 → 等价于原子换入）"""
     from ns_agent import asset_refs as AR
     out = []
@@ -257,6 +260,7 @@ def adopt(a):
 
 
 def main(argv=None) -> int:
+    argv = RUNS.gate_legacy_tool(argv, __file__)
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["gen", "adopt", "pick", "refs"])

@@ -119,12 +119,18 @@ def outlines(run: str) -> dict[int, dict]:
 
 
 def scene_catalog(run: str) -> dict[str, dict]:
-    """scene_id → {name, time}：P1 故事线 scenes 表；缺的用 data/scenes.json"""
+    """scene_id → {name, time}：P1 故事线 scenes 表；缺的用本剧的场景表（V2CUT-O：按剧存放，V1 = data/scenes.json，
+    其它剧 = data/import/runs/<run>/scenes.json；不拿 V1 的场景表补别的剧）"""
+    try:
+        from ns_agent import run_paths as _RPA
+        sj = _RPA.scenes_json(REPO, run)
+    except Exception:  # noqa: BLE001  # arch-ok: 解析不出 = 不补（不回退 V1）
+        sj = None
     cat: dict[str, dict] = {}
     for s in (_rj(_run_dir(run) / "P1_storyline.json", {}) or {}).get("scenes") or []:
         if isinstance(s, dict) and s.get("scene_id"):
             cat[s["scene_id"]] = {"name": s.get("name") or s["scene_id"], "time": s.get("time_of_day")}
-    for s in (_rj(REPO / "data" / "scenes.json", {}) or {}).get("scenes") or []:
+    for s in ((_rj(sj, {}) if sj else {}) or {}).get("scenes") or []:
         if isinstance(s, dict) and s.get("scene_id") and s["scene_id"] not in cat:
             cat[s["scene_id"]] = {"name": s.get("place") or s["scene_id"], "time": None}
     return cat

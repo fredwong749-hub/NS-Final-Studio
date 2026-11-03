@@ -252,9 +252,34 @@ def _build(root: Path, path: Path, data: dict) -> Bible:
     )
 
 
+class V1BibleRefused(RuntimeError):
+    """资产包模式（V2）的剧没有登记自己的编译规则文件——不退回 V1 的 visual_bible（L-126）"""
+
+
+def bible_path(root: str | Path | None = None) -> Path:
+    """本剧编译规则文件：资产包模式（V2）= config/compile/run_style.json runs.<剧>.bible（只有技术纠正规则）；
+    没登记 → V1BibleRefused（失败关闭）；其它剧 = config/visual_bible.toml（PROMPTFIX 21:1x，总调度：V2 编译完全不读 V1 圣经）"""
+    root = project_root(root)
+    try:
+        from . import run_paths as RP
+        from . import asset_refs as AR
+        run = RP.current_run(root)
+        if run and AR.project_cfg(run) and AR.manifest_rel(run):
+            rs = root / "config" / "compile" / "run_style.json"
+            ent = ((json.loads(rs.read_text(encoding="utf-8")).get("runs") or {}).get(run) or {}) if rs.is_file() else {}
+            if not ent.get("bible"):
+                raise V1BibleRefused(f"{run} 是资产包模式，config/compile/run_style.json 没有它的 bible；不读 V1 visual_bible（L-126）")
+            return root / ent["bible"]
+    except V1BibleRefused:
+        raise
+    except ImportError:   # arch-ok: 沙箱里没有 ns_agent 其它模块时按旧路径（只影响没有资产包配置的旧剧）
+        pass
+    return root / "config" / "visual_bible.toml"
+
+
 def load_bible(root: str | Path | None = None, path: str | Path | None = None) -> Bible:
     root = project_root(root)
-    path = Path(path) if path else root / "config" / "visual_bible.toml"
+    path = Path(path) if path else bible_path(root)
     try:
         st = path.stat()
         key = (st.st_mtime_ns, st.st_size)
@@ -323,7 +348,7 @@ def _stat_key(paths: list[Path]):
 def source_hashes(project_root_: str | Path | None = None) -> dict[str, str | None]:
     """bible_version 的全部输入（gpu3 可据此判断是哪一份输入变了）"""
     root = project_root(project_root_)
-    bible = root / "config" / "visual_bible.toml"
+    bible = bible_path(root)                              # V2 = 本剧规则文件（不读 V1 圣经）
     from . import run_paths as RP                         # I-14
     script = RP.script_json(root)
     own = root / "config" / "shot_ownership.json"

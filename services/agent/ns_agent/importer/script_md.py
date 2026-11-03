@@ -29,8 +29,27 @@ LINE_RE = re.compile(r"(?P<parens>(?:（[^）]*）\s*)*)(?:[：:]\s*)?(?:(?P<nam
 CODE_BLOCK_RE = re.compile(r"```[^\n]*\n(.*?)```", re.S)
 MD_ESCAPE_RE = re.compile(r"\\([!-/:-@\[-`{-~])")   # Markdown 反斜杠转义（ASCII 标点）
 
-# 挂在镜头上的附加字段；其它不认识的字段挂在集上
-SHOT_EXTRA_LABELS = {"对白屏幕上", "motion补充", "口型", "口型内容", "字幕卡"}
+# 挂在镜头上的附加字段；其它不认识的字段挂在集上（比对用 _split_label 的 base：带括注的 label 同样认，label 原样保留）
+# W7（11-03，A2 第 18 轮 P1-①）：W2 之前的旧集合。V1 / S2 等已归档剧编译冻结用它（ns_agent.frame_job.freeze_archived_extras）
+LEGACY_SHOT_EXTRA_LABELS = frozenset({"对白屏幕上", "motion补充", "口型", "口型内容", "字幕卡"})
+
+
+def _shot_spec_labels() -> frozenset:
+    """镜头语言 v2 七段的 md_label（config/director/shot_spec_v2.yaml 单一来源；A2 第 18 轮 F3：原来只手写收了四段）"""
+    f = Path(__file__).resolve().parents[4] / "config" / "director" / "shot_spec_v2.yaml"
+    try:
+        import yaml
+        segs = (yaml.safe_load(f.read_text(encoding="utf-8")) or {}).get("segments") or []
+    except (OSError, ImportError, ValueError):   # arch-ok: 读不到 = 用下面同内容的兜底（test_w7 断言两者一致）
+        segs = []
+    labs = {str(sg.get("md_label") or "").strip("*：: ") for sg in segs if isinstance(sg, dict)} - {""}
+    return frozenset(labs or SHOT_SPEC_FALLBACK)
+
+
+SHOT_SPEC_FALLBACK = ("机位与景别", "镜头", "构图", "灯光", "运镜", "表演节拍", "声音")
+# ISS-1103-031008-8c50（MERGE-IMG-O 11-03，L-148）：镜头语言 v2 七段 + 光线 / 分拍 归到本镜 extras（原来落进集级 extras，
+# 编译 shot_language / frame_job.first_beat_gaze 拿不到），label 不变
+SHOT_EXTRA_LABELS = set(LEGACY_SHOT_EXTRA_LABELS) | set(_shot_spec_labels()) | {"光线", "分拍"}
 # v3 每镜的 **H3提示词**：SOP §9A.1 官方 FL2VA 全文，多行（含空行），原样保留到下一个 **字段** / 镜头 / 集标题
 H3_LABELS = {"H3提示词", "H3 提示词"}
 H3_CHECK_LABELS = {"H3校验", "H3 校验"}   # 如 **H3校验**：暂缓（露骨内容）→ Shot.h3_check（原文）

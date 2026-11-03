@@ -1,7 +1,7 @@
 /* fredw-92/EB 整集出片 */
 .v3-prod { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; flex: none; }
 .v3-prod .v3-btn { height: 30px; padding: 0 var(--sp-2); }
-.v3-prod-dlg { display: flex; flex-direction: column; gap: var(--sp-2); width: 280px; padding: var(--sp-1); }
+.v3-prod-dlg { display: flex; flex-direction: column; gap: var(--sp-2); width: min(280px, calc(100vw - 48px)); padding: var(--sp-1); }
 .v3-prod-dlg fieldset { border: 1px solid var(--c-line-2); border-radius: var(--r-1); padding: var(--sp-1) var(--sp-2); display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-4); margin: 0; }
 .v3-prod-dlg legend { font-size: var(--fs-s); color: var(--c-text-2); padding: 0 var(--sp-1); }
 .v3-prod-dlg label { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-s); cursor: pointer; }
@@ -33,7 +33,7 @@
 .v3-prod-detail td { padding: 2px var(--sp-2) 2px 0; white-space: nowrap; }
 
 /* fredw-92/UXF2：开始前确认（影响面） */
-.v3-prod-dlg:has(.v3-prod-sum) { width: 380px; }
+.v3-prod-dlg:has(.v3-prod-sum) { width: min(380px, calc(100vw - 48px)); }
 .v3-prod-sum { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-2) var(--sp-2); border-radius: var(--r-1); background: var(--c-sunken); font-size: var(--fs-s); }
 .v3-prod-sum p { margin: 0; line-height: 1.45; }
 .v3-prod-sum .k { display: inline-block; min-width: 3em; margin-right: var(--sp-1); color: var(--c-text-2); }

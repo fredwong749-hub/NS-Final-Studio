@@ -7,7 +7,10 @@ import re
 from . import ROOT, cfg
 
 NO_TEXT = "无字幕、无文字、无水印"
-SKIN = ("皮肤", "肌肤", "脸", "面部", "skin", "face")
+# 空镜 / 单品设定候选的系统后缀句尾（AUTOFIX-O 11-03，ISS-1103-004550-8787）：人像风格后缀（直闪打亮人物 / 皮肤质感）不许进空镜；
+# 时间 / 光线由 tools/pipeline/asset_jobs.scene_suffix 从 P1 / P4 场景表拼在前面；preflight I7 在 mode=setting_candidate + asset_stage∈{scene,item} 时认这一句
+EMPTY_SUFFIX = "写实空镜摄影，画面中没有任何人物，真实材质与自然光影，轻微颗粒"
+SKIN =("皮肤", "肌肤", "脸", "面部", "skin", "face")
 
 
 def preset() -> dict:
@@ -38,10 +41,74 @@ def _manifest_mode(run: str | None) -> bool:
     return bool(run and AR.project_cfg(run) and AR.manifest_rel(run))
 
 
-def preset_suffix(run: str | None = None) -> str:
-    """按剧取风格后缀（config/compile/run_style.json）；资产包模式的剧没登记 → StyleMissing；旧剧 → render_quality 默认预设"""
+SEGMENT_MARKS = {"fantasy": ("【幻想段】", "【幻想】", "幻想段"), "reality": ("【现实段】", "【现实】", "现实段")}
+
+
+def segment_of(shot) -> tuple[str | None, str | None]:
+    """L-130：镜头属于幻想段还是现实段（剧本节拍 / 字段里的段落标记：【幻想段】/【现实段】，或 extras 段落= / segment=）。
+    → (fantasy | reality | None, 来源)；None = 没标记（调用方按剧的 default_segment 取并告警）"""
+    g = (lambda o, k: o.get(k) if isinstance(o, dict) else getattr(o, k, None))
+    ex = g(shot, "extras") or {}
+    for k in ("段落", "segment"):
+        v = str((ex.get(k) if isinstance(ex, dict) else "") or g(shot, k) or "")
+        if "幻想" in v or v == "fantasy":
+            return "fantasy", f"字段 {k}"
+        if "现实" in v or v == "reality":
+            return "reality", f"字段 {k}"
+    text = "；".join(str(g(shot, k) or "") for k in ("beats", "img_prompt", "motion_prompt", "scene_detail", "h3_check"))
+    if isinstance(ex, dict):
+        text += "；" + "；".join(str(v) for v in ex.values())
+    hits = {seg: min([text.find(m) for m in marks if m in text] or [10 ** 9]) for seg, marks in SEGMENT_MARKS.items()}
+    seg = min(hits, key=hits.get)
+    return (seg, "剧本段落标记") if hits[seg] < 10 ** 9 else (None, None)
+
+
+_MARK_RE = re.compile(r"【(?:幻想|现实)段?】")
+
+
+def strip_segment_marks(text: str | None) -> str | None:
+    """段落标记只给编译器判段，不进出图提示词"""
+    return _MARK_RE.sub("", text) if text else text
+
+
+def _preset_suffix_by_id(pid: str) -> str:
+    rq = json.loads((ROOT / "config" / "render_quality.json").read_text(encoding="utf-8"))
+    p = next((x for x in rq.get("image_presets") or [] if x.get("id") == pid), None)
+    if not p or not (p.get("params") or {}).get("style_suffix"):
+        raise StyleMissing(f"render_quality.json 没有预设 {pid} 或它没有 style_suffix")
+    return p["params"]["style_suffix"].strip()
+
+
+def segment_preset(run: str | None, segment: str | None) -> tuple[str | None, str | None, bool]:
+    """→ (预设 id, 实际段落, 是否按缺省段落取)；本剧没有分段风格 → (None, None, False)"""
+    ent = ((run_style_cfg().get("runs") or {}).get(run or "") or {})
+    segs = ent.get("segments") or {}
+    if not segs:
+        return None, None, False
+    seg = segment if segment in segs else (ent.get("default_segment") or "reality")
+    return segs[seg]["preset"], seg, segment not in segs
+
+
+def run_suffixes(run: str | None = None) -> list[str]:
+    """本剧所有可能的风格后缀（分段剧 = 各段预设的 style_suffix）——with_note / preflight I7 认哪一句都算"""
     r = run or _run()
     ent = ((run_style_cfg().get("runs") or {}).get(r or "") or {})
+    if ent.get("segments"):
+        return [_preset_suffix_by_id(v["preset"]) for v in ent["segments"].values()]
+    try:
+        return [preset_suffix(r)]
+    except StyleMissing:
+        return []
+
+
+def preset_suffix(run: str | None = None, segment: str | None = None) -> str:
+    """按剧取风格后缀（config/compile/run_style.json）：分段剧（V2，L-130）按幻想 / 现实段取 render_quality 对应预设的 style_suffix；
+    资产包模式的剧没登记 → StyleMissing；旧剧 → render_quality 默认预设"""
+    r = run or _run()
+    ent = ((run_style_cfg().get("runs") or {}).get(r or "") or {})
+    pid, _seg, _dflt = segment_preset(r, segment)
+    if pid:
+        return _preset_suffix_by_id(pid)
     if ent.get("suffix"):
         return ent["suffix"].strip()
     if _manifest_mode(r):
@@ -57,9 +124,9 @@ def v1_style_hits(prompt: str, run: str | None = None) -> list[str]:
     return [w for w in run_style_cfg().get("v1_style_phrases") or [] if w and w in (prompt or "")]
 
 
-def image_suffix(run: str | None = None) -> str:
-    """编译器 image_style 参数用：本剧风格后缀 + 无字幕句（Q6）"""
-    s = preset_suffix(run)
+def image_suffix(run: str | None = None, segment: str | None = None) -> str:
+    """编译器 image_style 参数用：本剧（本段）风格后缀 + 无字幕句（Q6）"""
+    s = preset_suffix(run, segment)
     return f"{s}，{NO_TEXT}" if s else NO_TEXT
 
 

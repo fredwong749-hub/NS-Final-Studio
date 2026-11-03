@@ -171,6 +171,29 @@ def _camera_norm():
 _CN_MOD = None
 
 
+def video_run(spec) -> str | None:
+    """MERGE-VID-O（ISS-1103-024206-0474）：本镜所属的剧——剧本来源路径（data/{pipeline,import}/runs/<run>/，shot_spec.spec_run）
+    → 认不出时用当前剧（NS_RUN / runs.json primary，camera_norm.current_run）。运镜词表按剧条目（runs: [...]）据此判可用"""
+    run = None
+    if getattr(spec, "source", None) is not None:
+        try:
+            from ns_schema.shot_spec import spec_run
+            run = spec_run(spec)
+        except (ImportError, AttributeError):
+            run = None
+        if not run:      # V1 合并稿（x_series10_v1_ep01-10.md）不在 runs/<run>/ 下：按登记剧名出现在文件名里认
+            import json as _json
+            from pathlib import Path as _P
+            f = _P(__file__).resolve().parents[3] / "config" / "pipeline" / "runs.json"
+            src = str(getattr(spec.source, "script_file", "") or "")
+            try:
+                names = sorted((_json.loads(f.read_text(encoding="utf-8")).get("runs") or {}), key=len, reverse=True)
+            except (OSError, ValueError):
+                names = []
+            run = next((r for r in names if src and r in src), None)
+    return run or _camera_norm().current_run()
+
+
 def _shot_music_off() -> bool:
     """config/post/director.json shot_music_off（DIRECTOR K-EDT-820）；读不到按开（不配镜头级音乐）"""
     import json as _json
@@ -182,6 +205,12 @@ def _shot_music_off() -> bool:
         return True
 
 
+def _beat_mark() -> str:
+    """第一个拍界：L-141 自然语言分拍（Then, around the third second）/ 旧稿 At 00:SS（与 lint.BEAT_MARK_PAT 同一份）"""
+    from .lint import BEAT_MARK_PAT
+    return BEAT_MARK_PAT
+
+
 def build_base(spec: ShotSpec, recipe: dict, mode: str, frames: int, attempt: int = 1) -> dict:
     """I2VA / FL2VA 提示词。→ {text, fields, notes}"""
     if not spec.h3.text:
@@ -190,6 +219,14 @@ def build_base(spec: ShotSpec, recipe: dict, mode: str, frames: int, attempt: in
     body = f.get("integrated_multimodal_description")
     if not body:
         raise NeedsWriter(f"{spec.id} H3 正文缺 integrated_multimodal_description")
+    # TIMELINE-O 11-03：V2 / 新剧（稿件 ≥ sysimpl-v2）失败关闭——H3 正文没有按 **分拍** 写镜内时间顺序（L-141：自然英文 In the first … /
+    # Then, around the … second；At MM:SS.mmm 只用于切镜，官方 base-en §4.2），或拍数 / 拍序和 **分拍** 对不上，就不编译，交写作方补（补丁环 TL-<镜>），不静默生成整句
+    from ns_schema.shot_spec import rules_at_least
+    if getattr(spec, "source", None) is not None and rules_at_least(spec, 2):   # 测试替身 / 非 ShotSpec 不判
+        from .lint import missing_timeline
+        why = missing_timeline(spec.h3.text, spec)
+        if why:
+            raise NeedsWriter(f"{spec.id} 缺时间轴：{why}")
     notes = []
     if mode == "i2va":
         body, n = to_i2va_body(body)
@@ -204,7 +241,8 @@ def build_base(spec: ShotSpec, recipe: dict, mode: str, frames: int, attempt: in
         if gone:
             notes.append("删去景别外造型分句（prompt.hide_offframe_parts）：" + " | ".join(gone))
     # DIRECTOR 11-02（总调度批复 r2 第 1 条，K-REN-801）：运镜句确定性规范化到 Pika 稳定范围，改动记进 notes（jobs.json prompt_notes）
-    body, cam_changes = _camera_norm().normalize_video_prompt(body, getattr(getattr(spec, "motion", None), "text", "") or "")
+    body, cam_changes = _camera_norm().normalize_video_prompt(body, getattr(getattr(spec, "motion", None), "text", "") or "",
+                                                              run=video_run(spec))   # MERGE-VID-O：按本镜所属的剧取运镜（ISS-0474）
     for ch in cam_changes:
         notes.append(f"{ch['rule']} 运镜规范化：{ch['from']} → {ch['to']}")
     # ACTING 11-01（R11-2 / R11-8）：开头即动 + 视线落点，两句系统固定提示（_base.yaml prompt.open_motion_cue / eyeline_cue），
@@ -212,14 +250,14 @@ def build_base(spec: ShotSpec, recipe: dict, mode: str, frames: int, attempt: in
     for key in ("open_motion_cue", "eyeline_cue", "outfit_cue"):   # outfit_cue：VIDEO-RCA 11-01 服装保持（待验 VRCA-E5）
         c2 = ((recipe.get("prompt") or {}).get(key) or "").strip()
         if c2 and c2 not in body:
-            m = re.search(r"\bAt (?:\d{1,2}:\d{2}|the \d)", body)
+            m = re.search(_beat_mark(), body)
             body = (body[:m.start()] + c2 + " " + body[m.start():]) if m else (body.rstrip() + " " + c2)
             notes.append(f"插入系统提示句（prompt.{key}）")
     cue = (recipe.get("prompt") or {}).get("min_motion_cue")
     if cue:
         # VIDEO10 11-01（ep01-S2 固定机位微表演，4 个 seed 动作量 0.34–0.44 < 0.5）：系统层“最低动作”提示句，
         # 只描述物理（呼吸、重心、眨眼、动作做完整），不加剧情内容；放在第一个分拍时间码之前（没有时间码就放句末）
-        m = re.search(r"\bAt (?:\d{1,2}:\d{2}|the \d)", body)
+        m = re.search(_beat_mark(), body)
         body = (body[:m.start()] + cue.strip() + " " + body[m.start():]) if m else (body.rstrip() + " " + cue.strip())
         notes.append("插入最低动作提示句（prompt.min_motion_cue）")
     # K-PRM-310（VIDLAB 11-02，vl_r1 ACT2）：每个分拍句末补一个物理微表情分句（眉 / 眨眼 / 呼吸 / 嘴角），只对近景单人镜，开关默认关

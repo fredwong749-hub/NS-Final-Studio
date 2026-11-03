@@ -2,7 +2,7 @@
 
 每 5 秒重写 data/review_pages/v2_live/index.html（页面自带 meta refresh 5 s）：
 - 总调度进展日志：docs/master/V2_LIVE.md（总调度和各 agent 追加，最新在上）
-- V2 阶段闸门表：docs/master/V2_PLAN.md 的 S1–S9（状态读 data/pipeline/runs/series10_v2/stage_status.json，没有就显示“未开始”）
+- 阶段表：唯一阶段模型 tools/master/sop_gate.stage_view 的九阶段（当前主剧，PRODMERGE-O）
 - runs.json 里各剧状态、七项分数（data/rsi/scores.jsonl 最新）、V2 资产包清单条数、assets_v2/inbox 收到的文件
 只读，不连服务器，不调模型。用法：python tools/monitor/v2_live.py [--once]
 """
@@ -17,8 +17,35 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "data" / "review_pages" / "v2_live" / "index.html"
-STAGES = [("S1", "剧本"), ("S2", "导入"), ("S3", "资产（你挑定后锁定）"), ("S4", "编译"), ("S5", "首帧"),
-          ("S6", "尾帧"), ("S7", "视频"), ("S8", "整集"), ("S9", "成片")]
+# PRODMERGE-O 11-03（C-6）：阶段表读唯一阶段模型 tools/master/sop_gate.stage_view（九阶段），stage_status.json 退役（没有写入方）
+SOP_STAGES = ["剧本", "导入闸门", "资产就绪", "提示词", "出图", "出图检测", "尾帧", "视频", "整集预览"]
+STAGES = [(s, s) for s in SOP_STAGES]
+
+
+def sop_stage_rows(run: str | None, view=None) -> dict:
+    """{阶段: {state: done|doing|todo, text}}：全部已开工集都过 = done；有集停在这里 = doing（写卡点）；否则 todo"""
+    if not run:
+        return {}
+    try:
+        if view is None:
+            import importlib.util as _u
+            sp = _u.spec_from_file_location("sop_gate_for_v2_live", ROOT / "tools" / "master" / "sop_gate.py")
+            m = _u.module_from_spec(sp)
+            sp.loader.exec_module(m)
+            view = m.stage_view(run, ROOT)
+    except Exception as e:  # noqa: BLE001  # arch-ok: 进度页只读展示，读不出写原因
+        return {SOP_STAGES[0]: {"state": "wait", "text": f"阶段模型读不出：{e!r}"[:120]}}
+    eps = view.get("episodes") or []
+    out = {}
+    for s in SOP_STAGES:
+        here = [e for e in eps if e["stage"] == s]
+        if eps and all(s in e["passed"] for e in eps):
+            out[s] = {"state": "done", "text": f"{len(eps)} 集都过"}
+        elif here:
+            out[s] = {"state": "doing", "text": "；".join(f"ep{e['episode']:02d}：{e['why']}" for e in here)[:160]}
+        else:
+            out[s] = {"state": "todo", "text": "未开始"}
+    return out
 
 
 def _rj(p: Path, default):
@@ -47,7 +74,7 @@ def _scores() -> dict:
 
 def render() -> str:
     runs = (_rj(ROOT / "config" / "pipeline" / "runs.json", {}) or {})
-    st = _rj(ROOT / "data" / "pipeline" / "runs" / "series10_v2" / "stage_status.json", {}) or {}
+    st = sop_stage_rows(runs.get("primary"))
     man = _rj(ROOT / "assets_v2" / "manifest.json", {}) or {}
     inbox = sorted(p.name for p in (ROOT / "assets_v2" / "inbox").glob("*") if p.is_file()) if (ROOT / "assets_v2" / "inbox").is_dir() else []
     try:

@@ -113,7 +113,8 @@ def _seg_from_shot(sh: dict) -> dict:
 def init_project(n: int) -> dict:
     tlp = base_timeline(n)
     if tlp is None:
-        raise HTTPException(404, f"第 {n} 集还没有装配好的时间线（先装配一次：tools/assemble_series.py ep{n:02d}）")
+        # NAVFLOW-F 11-03：界面只说大白话（不露命令行）；具体卡在哪一步由 /api/pipeline/status 给
+        raise HTTPException(404, f"第 {n} 集的视频还没全部出来，系统拼出整集预览后这里才能剪")
     tl = _jl(tlp, {}) or {}
     bgm = tl.get("bgm") or {}
     speech = [{"kind": s.get("kind"), "shot": s.get("shot"), "speaker": s.get("speaker_name") or s.get("speaker"),
@@ -341,10 +342,51 @@ def srt_cues(tl: dict, proj: dict) -> list[tuple[float, float, str]]:
     return sorted(out)
 
 
+_lib_cache: dict[tuple, list[dict]] = {}
+
+
+def _rm():
+    """ns_post.run_media（按剧取配乐 / 音色的唯一入口）；API 进程里先把 services/post 放进 sys.path（同 bgm_api）"""
+    if str(CODE / "services" / "post") not in sys.path:
+        sys.path.insert(0, str(CODE / "services" / "post"))
+    from ns_post import run_media   # noqa: PLC0415
+    return run_media
+
+
+def _v2_library_choices(run: str) -> list[dict]:
+    """资产包模式（V2）：曲库 config/music_v2.json 的曲目（逐条 sha 校验，按文件 mtime 缓存）+ 本剧配乐目录里的 ep*.wav"""
+    RM = _rm()   # 按剧取配乐的唯一入口（STYLE-V2，OVERSIGHT-F P1-13a）
+    cfg = P.ROOT / "config" / "music_v2.json"
+    key = (run, str(P.ROOT), cfg.stat().st_mtime if cfg.is_file() else 0)
+    if key not in _lib_cache:
+        lib = RM.music_library(run, P.ROOT)
+        _lib_cache.clear()
+        _lib_cache[key] = [{"file": t["file"], "url": file_url(t["file"]), "name": f"{t.get('use') or ''} · {t.get('theme') or t['id']}".strip(" ·"),
+                            "duration_s": t.get("duration_s"), "bpm": t.get("bpm"), "mine": False, "library_track": t["id"]}
+                           for t in lib.values()]
+    out = [dict(x) for x in _lib_cache[key]]
+    d = RM.music_dir(run, P.ROOT)
+    for w in sorted(d.glob("ep*.wav")) if d.is_dir() else []:
+        meta = _jl(w.with_suffix(".json"), {}) or {}
+        out.append({"file": _rel(w), "url": file_url(_rel(w)), "name": w.stem, "duration_s": meta.get("duration_s"),
+                    "bpm": meta.get("bpm"), "mine": False, "library_track": meta.get("library_track")})
+    return out
+
+
 def music_choices(n: int, proj: dict | None = None) -> list[dict]:
-    """可换的配乐 = 本集配乐所在目录里的 ep*.wav（目录由装配定，跟着剧走；不写死某部剧的配乐目录）。
-    本集还没有配乐 → 空（界面写“这一集还没有配乐”）"""
+    """可换的配乐。V2（资产包模式）只列曲库（config/music_v2.json）+ 本剧配乐目录——导出时 run_media.check_episode_music
+    只认这两处，列别的选了会在导出时报错；V1 = 本集配乐所在目录里的 ep*.wav。本集还没有配乐且没有曲库 → 空。"""
     cur = ((proj or {}).get("bgm") or {}).get("file")
+    try:
+        RM = _rm()
+        run = _RP.current_run(P.ROOT)
+        if RM.is_asset_pack_run(run, P.ROOT):
+            out = _v2_library_choices(run)
+            for x in out:
+                x["mine"] = x["file"] == cur
+            return out
+    except ImportError:   # arch-ok: 没有 run_media（旧部署）→ 按旧规则列本集配乐目录
+        pass
     d = (P.ROOT / cur).parent if cur else None
     out = []
     for w in sorted(d.glob("ep*.wav")) if d and d.is_dir() else []:
@@ -355,6 +397,10 @@ def music_choices(n: int, proj: dict | None = None) -> list[dict]:
 
 
 def _view(n: int, proj: dict) -> dict:
+    try:
+        mc, merr = music_choices(n, proj), None
+    except Exception as e:  # noqa: BLE001 — arch-ok: 曲库校验失败（sha 不符 / 没登记）→ 换曲列表为空并把原因显示在页面上，不挡剪辑
+        mc, merr = [], f"{type(e).__name__}: {e}"
     segs = []
     t = 0.0
     for s in proj["segments"]:
@@ -362,7 +408,7 @@ def _view(n: int, proj: dict) -> dict:
         segs.append(s | {"url": file_url(s.get("file")), "start_s": round(t, 3), "length_s": ln})
         t += ln
     subs = subtitles_of(proj)
-    return proj | {"segments": segs, "duration_s": round(t, 3), "music_choices": music_choices(n, proj),
+    return proj | {"segments": segs, "duration_s": round(t, 3), "music_choices": mc, "music_error": merr,
                    "subtitles": subs if subs is not None else seed_subtitles(proj), "subtitles_edited": subs is not None,
                    "bgm_url": file_url((proj.get("bgm") or {}).get("file")),
                    "speech": [x | {"urls": [file_url(f) for f in x.get("files") or []]} for x in proj.get("speech") or []],
@@ -536,6 +582,9 @@ def put_project(n: int, body: ProjEdit):
                 if not f or not f.startswith("data/") or ".." in f or not (P.ROOT / f).is_file():
                     raise HTTPException(422, f"配乐文件不在 data/ 下或不存在：{b['file']}")
                 b["file"] = f
+                allowed = {x["file"] for x in music_choices(n, proj)}
+                if allowed and f not in allowed:
+                    raise HTTPException(422, f"这条配乐不在本剧可用的曲目里：{f}")
             lim = {"offset_s": (0.0, 1e9, 3), "gain_db": (-30.0, 6.0, 2), "fade_in_s": (0.0, 10.0, 2), "fade_out_s": (0.0, 10.0, 2)}
             for k, v in b.items():
                 if k in lim:

@@ -500,7 +500,9 @@ def v2_checks(shots: list, blocks: list[str], scene_text: str = "") -> dict:
             probs.append("没写色温（K 值或暖 / 冷）")
         if probs:
             light_bad.append(f"镜{s.index}：" + "、".join(probs))
-    return {1: (not miss and not order_bad, f"缺段：{miss[:8] or '无'}；段顺序不对的镜：{order_bad or '无'}"),
+    # 缺段清单不截断（CODER-PS 11-03 12:2x）：原来 miss[:8] 只列前 2 镜，L-158 整集返修包把这句当判定原文给写手，
+    # 写手按“只改点名的镜”执行 → 每次只补 2 镜，ep02 镜5–11 两次返修用满上限仍缺。返修要一次补全，清单必须全量
+    return {1: (not miss and not order_bad, f"缺段：{miss or '无'}；段顺序不对的镜：{order_bad or '无'}"),
             2: (not light_bad, f"灯光问题：{light_bad[:8] or '无'}")}
 
 
@@ -557,12 +559,24 @@ HAND_ON_MIRROR = re.compile(
     r"|(hand|palm|fingertips?|knuckles?)[^.,;]{0,40}\b(on|against)\b (the )?(mirror|glass|window)(?! ?(frame|edge|border|sill|cabinet))", re.I)
 HAND_ACT = re.compile(r"(掌心|手掌|指尖|指节|手指|(?<![一二三四五六七八九十对双])手(?![机表帕套段法艺术]))[^，；｜]{0,8}"
                       r"(抬|收|按|握|拨|推|拿|放|递|攥|松|捏|摸|扶|撑|压|点|划|塞|抽|翻|捻|揉|抓|勾|贴|折|拉|扣|捧|托)")
+# K211-F 11-03（series10_v2 ep01 镜7 实测误判）：V2 分拍写法里“右手已经把相机放进包里”是首帧状态、“手指到镜尾还在收紧”是上一拍动作的延续，
+# 都不是这一拍新起的手部动作；手名到动词之间出现这些词就不算一处（“没有抬手”这类否定同理）
+HAND_STATE = re.compile(r"已经|早已|仍在|还在|仍旧|依旧|照旧|一直|始终|保持|维持|停在|没有|不再|不动|到镜尾")
+
+
+def hand_action(beat_text: str) -> str | None:
+    """这一拍动作段里第一处“新起的手部动作”原文；状态 / 延续 / 否定写法（HAND_STATE）不算。没有 → None"""
+    for m in HAND_ACT.finditer(beat_text.split("｜")[0]):
+        if not HAND_STATE.search(m.group(0)):
+            return m.group(0)
+    return None
 
 
 def mirror_hand_checks(shots: list, blocks: list[str]) -> dict:
     """→ {1: 镜面场景手不碰反光面, 2: ≤8 秒的镜手部动作 ≤2 处}（K-WRT-211）。
     ① 本镜 img / **场景** 行有镜面 / 玻璃 / 落地窗等反光面，且 分拍 / 表演节拍 / motion / H3 写了手贴 / 按 / 扶 / 抵在反光面上（镜框、镜边、镜柜不算）；
-    ② 镜长 ≤8 秒的镜，分拍里带手部动作（手 / 掌 / 指 + 抬收按握拨推拿放递…）的拍超过 2 拍。"""
+    ② 镜长 ≤8 秒的镜，分拍里带新起手部动作（手 / 掌 / 指 + 抬收按握拨推拿放递…；“已经…”首帧状态 / “还在…”延续 / 否定不算）的拍超过 2 拍。
+    失败原因里写出命中的拍和原文，补丁包能直接定位到行（之前只写“镜7（3 拍）”，写手不知道改哪一拍）。"""
     touch, busy = [], []
     for s, b in zip(shots, blocks):
         lines = b.split("\n")
@@ -573,7 +587,9 @@ def mirror_hand_checks(shots: list, blocks: list[str]) -> dict:
             if m:
                 touch.append(f"镜{s.index}“{m.group(0)[:20]}”")
         if int(s.duration or 0) <= 8:
-            n = sum(1 for _a, _e, t in _beats(b) if HAND_ACT.search(t.split("｜")[0]))
-            if n > 2:
-                busy.append(f"镜{s.index}（{n} 拍）")
-    return {1: (not touch, f"镜面场景手碰反光面：{touch[:8] or '无'}"), 2: (not busy, f"≤8 秒镜手部动作超过 2 拍：{busy[:8] or '无'}")}
+            hits = [(a, e, h) for a, e, t in _beats(b) if (h := hand_action(t))]
+            if len(hits) > 2:
+                busy.append(f"镜{s.index}（{len(hits)} 拍：" + "、".join(f"{a:g}–{e:g}秒“{h}”" for a, e, h in hits) + "）")
+    hint = ("；改法：只改这一镜 **分拍** / **表演节拍**（及对应 H3 正文），留 ≤2 拍手部动作，其余拍改写成视线 / 呼吸 / 肩线 / 表情；"
+            "“已经…”写首帧状态、“到镜尾还在…”写延续都不算新动作" if busy else "")
+    return {1: (not touch, f"镜面场景手碰反光面：{touch[:8] or '无'}"), 2: (not busy, f"≤8 秒镜手部动作超过 2 拍：{busy[:8] or '无'}{hint}")}

@@ -86,3 +86,9 @@ rules:
   - 运镜只用 config/director/camera_moves.yaml enabled 的（K-REN-801）
   - 首帧只用 ①②③④（运镜 / 表演 / 声音不进首帧）；视频用全部
   - 灯光的主光方向与构图里光源方向一致（与 IMGFIX 融合契约：接触阴影方向一致）
+image_compile:   # MERGE-IMG-O 11-03（ISS-1103-023528-2869，L-137）：首帧编译接入唯一入口 frame_job.build_first（ns_agent/shot_language.py）
+  order: [lens, composition, lighting, fusion]   # 固定输出顺序：② 镜头 → ③ 构图 → ④ 灯光 → L-110 融合契约句；① 景别首句已由编译器写在正文最前
+  position: "正文与【场景】段之后、造型 / 视线 / 站位补句与风格后缀之前（frame_job.with_note 同一位置）"
+  switches: "config/compile/run_style.json runs.<剧>.shot_language（lens: off|script|auto；composition: off|script；lighting: off|script|auto；fusion: true|false）；没有条目的剧全关，旧剧提示词不变"
+  fusion_source: "data/ab/imgfix/blend_ab.jsonl 臂 A 原句（IMGFIX 11-02 融合 A/B；中英同句）"
+  fusion_zh: "人物和场景是同一次拍摄：人物的主光方向和色温跟场景里的光源一致，环境光染到皮肤和衣服上；手和身体与桌面、椅子、地面接触的地方有柔和的接触阴影，方向和主光一致；人物和背景在同一个景深里，背景虚化连续；人物轮廓没有白边和抠图边，发丝和背景自然过渡；整张画面同一次调色、同一种颗粒，灯光周围有一点空气感（the subject and the set are lit as one shot: the key light direction and color temperature match the practical lights in the scene, with ambient color spill on skin and clothes; soft contact shadows where hands and body touch the table, chair or floor, falling the same way as the key light; one continuous depth of field; no cutout edges or halos around the figure, hair blending naturally into the background; one unified color grade and film grain, a little atmospheric haze around the lamps）"

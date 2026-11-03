@@ -20,13 +20,16 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+import runs as RUNS  # noqa: E402
+_LEGACY = RUNS.legacy_run(ROOT)   # I-16：第一季专用历史工具（入口 gate_legacy_tool 要求显式 --run）
 for p in ("services/agent", "packages/schema", "tools/pipeline"):
     sys.path.insert(0, str(ROOT / p))
 
 from ns_agent import asset_refs as AR  # noqa: E402
 
-P = "series10_v1"
-RUN = ROOT / "data/pipeline/runs/series10_v1"
+P = _LEGACY
+RUN = ROOT / ("data/pipeline/runs/" + _LEGACY)
 HEELS = ("高跟", "细跟", "细高跟", "stiletto", "heel")
 FLATS = ("球鞋", "帆布鞋", "拖鞋", "平底鞋", "短靴", "马丁靴", "皮鞋")
 SERIES_EPS = set(range(1, 11))
@@ -167,11 +170,12 @@ def revision_requests(rep: dict) -> list[dict]:
             continue
         out.append({"where": i["where"], "kind": i["kind"], "problem": i["detail"], "fix": i["fix"],
                     "constraints": ["台词 / 旁白 / 🎙 一字不动", "只改造型行与 img / motion 正文里的服装、鞋、饰品描写",
-                                    "按 P1 登记原文（data/pipeline/runs/series10_v1/P1_looks.json）", "成年人与锁定外貌（HC-07）照旧"]})
+                                    ("按 P1 登记原文（data/pipeline/runs/" + _LEGACY + "/P1_looks.json）"), "成年人与锁定外貌（HC-07）照旧"]})
     return out
 
 
 def main():
+    RUNS.gate_legacy_tool(None, __file__)
     sys.stdout.reconfigure(encoding="utf-8")
     src = sys.argv[sys.argv.index("--source") + 1] if "--source" in sys.argv else "script_v2"
     rep = audit(src)

@@ -36,11 +36,55 @@ def final_cfg(path: Path | None = None) -> dict:
     return quality(path)["tiers"]["final"]
 
 
-def auto_final_on_lock(path: Path | None = None) -> bool:
+def auto_final_on_lock(path: Path | None = None, run: str | None = None) -> bool:
+    """定稿后是否自动排定稿档。L-147（项目方 11-03 05:0x）：按剧覆盖——render_quality.json auto_final_on_lock_runs.<剧>
+    优先于全局 auto_final_on_lock（V2 = true，V1 仍 false）。run 不给 = 当前剧（NS_RUN / runs.current_run）"""
     try:
-        return bool(quality(path).get("auto_final_on_lock"))
+        q = quality(path)
     except (OSError, ValueError):
         return False
+    per = q.get("auto_final_on_lock_runs") or {}
+    r = run or _current_run()
+    if r and r in per:
+        return bool(per[r])
+    return bool(q.get("auto_final_on_lock"))
+
+
+ACCEPT_FN = None   # 测试注入：(file_rel, job, host, shot, run) → postflight
+
+
+def final_accept(script, shot_id: str, stage: str, file_rel: str) -> dict | None:
+    """定稿档版本过与预览版同一份共用验收（ns_agent.gen_contract.accept：postflight + Q9 + 合并看图 + 三态）。
+    不是资产包剧（V1）→ None（口径不变，按原逻辑接替定稿）。验收出错 → ok=False（失败关闭：不接替定稿）"""
+    run = _current_run()
+    try:
+        from ns_agent.gen_contract import accept as ACC
+        if ACCEPT_FN is None and not ACC.enabled(run):
+            return None
+        from ns_agent import frame_job as FJ
+        ep, shot = P.find_shot(script, shot_id)
+        job = FJ.build_first(run, ep, shot, script.globals)
+        fn = ACCEPT_FN or (lambda f, j, h, sh, r: ACC.accept(f, j, h, sh, r))
+        pf = fn(file_rel, job, None, shot, run)
+        if pf.get("accept_retry"):
+            pf["ok"] = False
+        return pf
+    except Exception as e:  # noqa: BLE001  # arch-ok: 验收判不了 = 不接替定稿（失败关闭），原因写进版本
+        return {"ok": False, "error": f"共用验收出错：{type(e).__name__}: {e}"[:300], "items": []}
+
+
+def _current_run() -> str | None:
+    import os
+    if os.environ.get("NS_RUN"):
+        return os.environ["NS_RUN"]
+    try:
+        import importlib.util as U
+        sp = U.spec_from_file_location("runs_ft", P.ROOT / "tools" / "autopilot" / "runs.py")
+        m = U.module_from_spec(sp)
+        sp.loader.exec_module(m)
+        return m.current_run(P.ROOT)
+    except Exception:  # noqa: BLE001 — 读不到当前剧 = 按全局开关
+        return None
 
 
 def final_model(cfg: dict) -> W.QwenModel:
@@ -183,6 +227,12 @@ def render_final(client, script, shot_id: str, stage: str, *, parent: int | None
                   deps={k: v for k, v in (src_take.get("deps") or {}).items() if not k.startswith("preset:")} or None,
                   scene_plate=src_take.get("scene_plate") if stage == "image" else None)
     P._add_take(shot_id, take, activate=False)
+    pf = final_accept(script, shot_id, stage, rel)        # PRODMERGE-O（L-147）：定稿档挂在共用验收之后
+    if pf is not None:
+        FE.annotate(shot_id, stage, take.n, postflight=pf)
+        if not pf.get("ok"):                              # 没过（或 retry 没拿到结论）：只留版本，不接替定稿、不设为当前
+            P._clear_error(shot_id)
+            return next(t for t in P.load_takes(shot_id)["takes"] if t["stage"] == stage and t["n"] == take.n)
     was_locked = (P.load_takes(shot_id).get("locked") or {}).get(stage) == src_take["n"]
     if lock if lock is not None else was_locked:
         FE.lock(shot_id, stage, take.n)

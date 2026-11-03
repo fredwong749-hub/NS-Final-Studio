@@ -68,6 +68,12 @@ class PreviewBody(BaseModel):
     text: str | None = None
 
 
+
+def _voice_cfg(tts):
+    """按剧取音色表（OVERSIGHT-F 第 14 轮：V2 下不读 V1 的 config/voices.json；Kokoro 试听只用其中的模型目录）"""
+    from ns_api import run_paths as RP  # noqa: PLC0415
+    return tts.load_voice_config(run=RP.current_run())
+
 @router.post("/api/voices/preview")
 def preview(body: PreviewBody):
     cfg = _cfg()
@@ -84,7 +90,7 @@ def preview(body: PreviewBody):
     tts = _post()
     voice = tts.Voice(speaker=body.cid or f"sid{sid}", sid=int(sid), speed=speed)
     try:
-        backend = tts.KokoroBackend(tts.load_voice_config(), num_threads=4)
+        backend = tts.KokoroBackend(_voice_cfg(tts), num_threads=4)
         [path] = tts.synthesize_cached(backend, [(text, voice)])
     except tts.TtsUnavailable as e:
         raise HTTPException(503, f"这台电脑上的配音模型没装好，暂时不能试听（{e}）")
@@ -280,7 +286,7 @@ def _current(cid: str, ch: dict | None, text: str) -> dict:
     voice = tts.Voice(speaker=cid, sid=int(ch["sid"]), speed=float(ch.get("speed") or 1.0))
     label = f"旧 Kokoro {ch.get('voice')}"
     try:
-        backend = tts.KokoroBackend(tts.load_voice_config(), num_threads=4)
+        backend = tts.KokoroBackend(_voice_cfg(tts), num_threads=4)
         [path] = tts.synthesize_cached(backend, [(text, voice)])
     except tts.TtsError as e:  # TtsUnavailable 是它的子类
         return {"kind": "kokoro", "voice": ch.get("voice"), "label": label, "error": f"本机合成没成功：{e}"}

@@ -27,6 +27,29 @@ def enabled(run_dir: Path) -> bool:
 OWNER_CHOICES = "用这版 / 修改（修改里可以选换个方向重写）"      # L-123：只有两选，换方向在“修改”里（W-39）
 
 
+FIELD_LABEL = {"logline": "一句简介", "title": "标题", "owner_line": "一句话", "carry_out": "结尾状态", "premise": "故事前提"}
+
+
+def _field_zh(path: str) -> str:
+    import re
+    m = re.match(r"episodes\[(\d+)\]\.(\w+)$", path)
+    if m:
+        return f"第 {int(m.group(1)) + 1} 集{FIELD_LABEL.get(m.group(2), '的一处文字')}"
+    return FIELD_LABEL.get(path, "故事线里的一处文字")
+
+
+def fill_note(fields: list[str]) -> str:
+    """给项目方的一句话（总调度 11-02）：“第 3 集一句简介还没写完，写手会自动补上，不影响你选的这版。”（单一来源）"""
+    return "、".join(dict.fromkeys(_field_zh(f) for f in fields)) + "还没写完，写手会自动补上，不影响你选的这版。"
+
+
+def pending_fill_note(run_dir: Path) -> str | None:
+    """这一稿还有占位词要补（autoflow_ep01.json 的 p1_owner_hold_fields）→ 那句话；没有 = None"""
+    sp = run_dir / "autoflow_ep01.json"
+    f = (json.loads(sp.read_text(encoding="utf-8")).get("p1_owner_hold_fields") if sp.exists() else None) or []
+    return fill_note(f) if f else None
+
+
 def owner_direction_text(run_dir: Path) -> str:
     """给项目方看的一句大白话（W-39：不带内部编号）：“四轮评审都在 32 分左右，没到 34”"""
     sp = run_dir / "judge_p1" / "STATE.json"
@@ -143,8 +166,12 @@ def set_status(run_dir: Path, key: str, status: str, **extra) -> dict:
     return g
 
 
-def act(run_dir: Path, key: str, action: str, note: str = "", by: str = "项目方", options: list[str] | None = None) -> dict:
-    """网页按钮：approve =“用这版”；revise =“修改”（一句话）。先收下，推进由 autoflow 异步处理"""
+def act(run_dir: Path, key: str, action: str, note: str = "", by: str = "项目方", options: list[str] | None = None,
+        delegate: dict | None = None) -> dict:
+    """网页按钮：approve =“用这版”；revise =“修改”（一句话）。先收下，推进由 autoflow 异步处理。
+    delegate（L-136 代选钩子，只由 ns_api.owner_delegate 传）：审计记“总调度代选”，不记成项目方放行；代选不能“换方向”"""
+    if delegate is not None and action == "redirect":
+        raise PermissionError("代选不能“换方向”（L-136：只有项目方本人）")
     if action not in ACTIONS:
         raise ValueError(f"只认 {ACTIONS}（L-123：没有“不要”）")
     opts = [x for x in (options or []) if x in REVISE_OPTIONS]
@@ -171,13 +198,20 @@ def act(run_dir: Path, key: str, action: str, note: str = "", by: str = "项目�
     if action == "approve":
         g.update(status="approved", at=now, by=by)
         if od:
-            g.update(below_threshold=True, released_by_owner=True, round=od.get("round"), mean=od.get("mean"))
-            extra_hist = {"audit": "低于门槛、项目方放行", "round": od.get("round"), "mean": od.get("mean")}
+            if delegate is not None:
+                g.update(below_threshold=True, released_by_owner=False, released_by_delegate=True, round=od.get("round"), mean=od.get("mean"))
+                extra_hist = {"audit": "低于门槛、总调度代选放行（L-136）", "round": od.get("round"), "mean": od.get("mean")}
+            else:
+                g.update(below_threshold=True, released_by_owner=True, round=od.get("round"), mean=od.get("mean"))
+                extra_hist = {"audit": "低于门槛、项目方放行", "round": od.get("round"), "mean": od.get("mean")}
     elif action == "redirect":
         g.update(status="redirect_requested", note=note.strip()[:4000], at=now, by=by, handled=False)
         extra_hist = {"audit": "项目方换方向（回到 P0 Brief）"}
     else:
         g.update(status="revise_requested", note=note.strip()[:2000], at=now, by=by, handled=False)
+    if delegate is not None:
+        g["delegate"] = delegate
+        extra_hist = {**extra_hist, "via": delegate.get("via"), "delegate": delegate}
     d.setdefault("history", []).append({"at": now, "key": key, "action": action, "by": by, "note": note.strip()[:300], **extra_hist})
     d["enabled"] = True
     _write(run_dir, d)

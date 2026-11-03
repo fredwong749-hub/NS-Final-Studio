@@ -1,8 +1,12 @@
 // UIPIXEL：场景显示名（界面不显示 sk_office_night/plate.png 这种 id / 路径）。
-// 名字来自资产库 /api/assets/scenes（整页共用一次请求）；资产库还没起名的，按 id 里的词拼一个中文名兜底。
+// 名字只来自当前剧的场景登记 /api/assets/scenes（整页共用一次请求）；登记里没有的显示“场景未登记：<id>”。
+// UIFIX-F 11-03：去掉了按 id 单词拼中文名的 WORD 表（V1 词汇，拼出过“办公室夜”）；纯函数在 sceneLabel.pure.ts，有 node 测试。
 import { useEffect, useState } from "react";
 import { loadScenes, sceneName } from "./pages/scenes_api";
 import { onLive } from "./live";
+import { resolveSceneLabel } from "./sceneLabel.pure";
+
+export { sceneIdOf, looksInternal, plateMatchesScene, sopSceneId, unregisteredLabel } from "./sceneLabel.pure";
 
 let names: Map<string, string> | null = null;
 let loading: Promise<Map<string, string>> | null = null;
@@ -35,29 +39,11 @@ function load(): Promise<Map<string, string>> {
   return loading ?? Promise.resolve(names ?? new Map());
 }
 
-const WORD: Record<string, string> = {
-  office: "办公室", night: "夜", day: "日", elevator: "电梯", closet: "衣帽间", dining: "餐厅", rental: "出租屋", entry: "玄关",
-  taxi: "出租车", home: "家", kitchen: "厨房", studio: "工作室", alley: "街巷", ballroom: "酒会厅", apartment: "公寓", bedroom: "卧室",
-  bathroom: "浴室", car: "车内", street: "街道", bar: "酒吧", hotel: "酒店", room: "房间", corridor: "走廊", lobby: "大堂", gu: "顾沉", chen: "", guchen: "顾沉",
-};
-
-/** id / 路径 → 场景 id（"sk_office_night/plate.png" → "sk_office_night"） */
-export const sceneIdOf = (v: string) => v.replace(/\\/g, "/").split("/").find((p) => /^sk_/.test(p)) ?? v.replace(/\.(png|jpe?g|webp)$/i, "").split("/")[0];
-
-/** 看起来像内部 id / 路径（不是给人看的名字） */
-export const looksInternal = (v: string | null | undefined) => !!v && (/[/\\]|\.(png|jpe?g|webp|json)$/i.test(v) || /^[a-z0-9]+(_[a-z0-9]+)+$/i.test(v));
-
-/** 同步取名（名字表还没到时先用兜底名） */
+/** 同步取名（名字表还没到时显示“场景未登记：id”，到了会重渲染） */
 export function sceneLabel(v: string | null | undefined): string | null {
   if (!v) return null;
-  if (!looksInternal(v)) return v;
-  const id = sceneIdOf(v);
   if (!names?.size) void load();
-  const hit = names?.get(id);
-  if (hit && !looksInternal(hit)) return hit;
-  const parts = id.replace(/^sk_/, "").split("_").map((w) => WORD[w.toLowerCase()] ?? null);
-  const zh = parts.filter((x) => x !== null).join("");
-  return zh && parts.every((x) => x !== null) ? zh : "未命名场景";
+  return resolveSceneLabel(v, names);
 }
 
 /** 组件里用：名字表到了会重渲染 */

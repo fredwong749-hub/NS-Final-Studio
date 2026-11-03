@@ -11,6 +11,7 @@ import { Button, Empty, LoadError, Seg, Skel, Tag } from "../../ds";
 import { useMe } from "../../projects/AuthGate.helpers";
 import "./pages.css";
 import "./settings.css";
+import { AllPages } from "../PageIntro"; // W5 UIUX：设置页底部 = 全部页面（导航收敛后，旧页面都从这里也能进）
 
 type Status = "edit" | "readonly" | "merged";
 type Opt = [string | boolean, string];
@@ -398,6 +399,14 @@ export function ProjectSettingsPage() {
             </section>
           );
         })}
+      {/* W5 UIUX 11-03（L-146 旧功能不删只移位）：全部页面索引——顶部只留步骤条 / 待办 / 设置，其余页面都能从这里点进去 */}
+      <section className="v3p-card pset-group" aria-label="全部页面" id="all-pages">
+        <div className="v3p-card-head">
+          <h2>全部页面</h2>
+          <span className="v3p-muted v3p-small">顶部导航收起来的页面都在这里；工程页在“设置 › 高级”</span>
+        </div>
+        <AllPages />
+      </section>
     </div>
   );
 }

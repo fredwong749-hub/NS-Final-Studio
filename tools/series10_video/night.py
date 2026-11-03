@@ -14,6 +14,7 @@
 
     .venv/Scripts/python.exe tools/series10_video/night.py            # 常驻
     .venv/Scripts/python.exe tools/series10_video/night.py --once
+    .venv/Scripts/python.exe tools/series10_video/night.py --run series10_v2      # MERGE-VID-O：按剧（不给 = NS_RUN / 当前剧）
 """
 from __future__ import annotations
 
@@ -26,15 +27,33 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).parent))
-VID_REL = "data/pipeline/runs/series10_v1/video"
+import os  # noqa: E402
+import run_ctx as RC  # noqa: E402
+
+# MERGE-VID-O（ISS-1103-024206-3737，L-137）：按剧（--run / NS_RUN / 当前剧；没登记 / 没视频政策 → 失败关闭）。
+# 子进程（build_jobs / deploy / sync / register_takes / upscale_preview / episode_report / assemble）一律继承 NS_RUN
+RUN_ID = RC.resolve()
+os.environ["NS_RUN"] = RUN_ID
+LEGACY = RC.is_legacy(RUN_ID)
+VID_REL = RC.vid_rel(RUN_ID)
 VID = ROOT / VID_REL
-DEST = "/root/work/fredw/video10_srv"
+PIDF = "run/vidgen.pid" if LEGACY else f"run/vidgen_{RUN_ID}.pid"
+def _video_root() -> str:
+    """PRODMERGE-O 11-03：服务器视频代码根只从 config/factory/hosts.json video_root 取（= 发版部署目录，video10_srv 退役）"""
+    import importlib.util as _u
+    sp = _u.spec_from_file_location("hosts_video_root", Path(__file__).resolve().parents[2] / "tools" / "factory" / "hosts.py")
+    m = _u.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m.video_root()
+
+
+DEST = _video_root()
 PY = str(ROOT / ".venv/Scripts/python.exe")
 STATE = VID / "night_state.json"
 CTRL = VID / "night_control.json"
 LOG = VID / "night.log"
-STATUS = ROOT / "docs/series10_video/STATUS.md"
-EPS_OUT = ROOT / "data/episodes/series10"
+STATUS = ROOT / ("docs/series10_video/STATUS.md" if LEGACY else f"docs/series10_video/{RUN_ID}/STATUS.md")
+EPS_OUT = RC.episodes_out(RUN_ID)        # V1 = data/episodes/series10（原样），其它剧 = data/episodes/<剧>
 # 道归属（总调度 10-31 夜）：gpu33 三道 = 出图优先（让道模式）；gpu36:0/1 = BAKEOFF（让道模式，可写 hold 文件借用）；gpu36:2 = 视频
 DEFAULT_CTRL = {"force_eps": [], "shared_lanes": ["gpu33:0", "gpu33:1", "gpu33:3", "gpu36:0", "gpu36:1"],
                 "hold_lanes": [], "per_lane": 2, "yield_s": 180, "bgm": "auto"}
@@ -94,8 +113,15 @@ def lane_load(host) -> dict:
     return out
 
 
-def specs_by_ep():
+def _B():
     import build_jobs as B
+    if B.RUN_ID != RUN_ID:
+        B.set_run(RUN_ID)
+    return B
+
+
+def specs_by_ep():
+    B = _B()
     sp = B.load_specs(source="import")
     eps = {}
     for sid, s in sp.items():
@@ -104,7 +130,7 @@ def specs_by_ep():
 
 
 def ready_eps(eps_specs, ctrl) -> list[int]:
-    import build_jobs as B
+    B = _B()
     pf = B.passed_frames()
     ok = jl(B.FRAMES_OK, {}) or {}
     done = set(ok.get("_episodes_done") or []) | set(ctrl.get("force_eps") or [])
@@ -120,7 +146,7 @@ def ready_eps(eps_specs, ctrl) -> list[int]:
 
 def ready_shots(eps_specs, ctrl) -> dict[int, list[str]]:
     """→ {集: [首帧已过契约的镜]}（逐镜派单用；force_eps 的集全部镜都算就绪）"""
-    import build_jobs as B
+    B = _B()
     pf = B.passed_frames()
     force = set(ctrl.get("force_eps") or [])
     out = {}
@@ -135,7 +161,7 @@ def pick_host(st) -> str:
     """可用道多、已派镜头少的那台（gpu36:2 视频专用道算 1；让道道只在空闲时算）"""
     score = {}
     for h in _hosts_here():      # A-07：服务器上只管本机（原来 resident_prep 就地改源码）
-        busy = ssh(h, f"cd {DEST} 2>/dev/null && [ -f run/vidgen.pid ] && kill -0 $(cat run/vidgen.pid) 2>/dev/null && "
+        busy = ssh(h, f"cd {DEST} 2>/dev/null && [ -f {PIDF} ] && kill -0 $(cat {PIDF}) 2>/dev/null && "
                       f"grep -q validate_jobs {VID_REL}/control_{h}.json && echo VALIDATING", 60)
         if "VALIDATING" in busy:
             continue
@@ -151,6 +177,7 @@ def pick_host(st) -> str:
 
 def dispatch_hosts(hosts_touched: set, st, ctrl) -> bool:
     """重新编译 jobs.json（只给首帧过契约的镜出变体），推到涉及的主机，更新 control 的集列表，编排器没跑就起"""
+    if not ((sys.path.append(str(ROOT)) if str(ROOT) not in sys.path else None) or __import__("tools.master.sop_gate", fromlist=["_"]).video_dispatch_ok(VID_REL, ROOT)): return False  # HARNESS-O：SOP 阶段闸门  # noqa: E701
     rc, out = run([PY, "tools/series10_video/build_jobs.py"], 1800)
     log("build_jobs", rc, out.strip()[-300:].replace("\n", " "))
     if rc:
@@ -218,7 +245,17 @@ def ep_resolved(ep, host) -> tuple[bool, dict]:
 
 def voices_ok() -> bool:
     """总调度 11-01：config/voices.json 还是旧 60 集的 Kokoro 演员表（林晚 = zf_067 等），series10 声音没重做前不合成成片。
-    voices.json 顶层 "series" 标成 "series10_v1"（由声音负责方改）后才放行。"""
+    voices.json 顶层 "series" 标成 "series10_v1"（由声音负责方改）后才放行。
+    MERGE-VID-O：非 V1 剧按 ns_post.run_media.voice_config(<剧>)（config/voices_v2.json，L-132）——取不到 / sha 不符 → 不合成"""
+    if not LEGACY:
+        try:
+            if str(ROOT / "services" / "post") not in sys.path:
+                sys.path.insert(0, str(ROOT / "services" / "post"))
+            from ns_post import run_media as RM
+            return (RM.voice_config(RUN_ID, ROOT) or {}).get("series") == RUN_ID
+        except Exception as e:  # noqa: BLE001  # arch-ok: 音色没登记 = 不合成（hold_voices，失败关闭）
+            log("VOICES", RUN_ID, str(e)[:200])
+            return False
     v = jl(ROOT / "config/voices.json", {}) or {}
     return v.get("series") == "series10_v1"
 
@@ -233,7 +270,13 @@ def tts_missing() -> str | None:
         if str(ROOT / "services" / "post") not in sys.path:
             sys.path.insert(0, str(ROOT / "services" / "post"))
         from ns_post.tts import tts_preflight
-        miss = tts_preflight(root=ROOT)
+        from ns_post import run_media as RM
+        # W16 / REVIEW-G4b P0-1：音色表按剧取（C-14；旧写法不传 run → 资产包剧 VoiceRunRequired → 每集永远 hold_tts）
+        try:
+            cfg = RM.voice_config(RUN_ID, ROOT)
+        except (RM.V2MediaError, OSError, ValueError, RuntimeError) as e:  # arch-ok: 音色表读不了 = hold_tts（失败关闭）
+            return f"音色表读不了：{e}"
+        miss = tts_preflight(cfg, root=ROOT, run=RUN_ID)
         return "；".join(miss) if miss else None
     except ImportError:
         pass
@@ -333,7 +376,7 @@ def finalize(ep, host, st, ctrl):
                 log("ASSEMBLE_WAIT", f"ep{ep:02d}", msg)
             st["eps"][str(ep)].update(status="rendering", wait_msg=msg)
             return
-    out = ssh(host, f"cd {DEST} && PYTHONUTF8=1 /root/work/fredw/venv_idm/bin/python tools/series10_video/vidgen.py proxies {host} {ep}", 1800)
+    out = ssh(host, f"cd {DEST} && PYTHONUTF8=1 /root/work/fredw/venv_idm/bin/python tools/series10_video/vidgen.py proxies {host} {ep} --run {RUN_ID}", 1800)
     log("proxies", f"ep{ep:02d}", out.strip()[-200:])
     run([PY, "tools/series10_video/sync.py"], 3600)
     man = jl(VID / "episodes" / f"ep{ep:02d}" / "manifest.json", {}) or {}
@@ -350,13 +393,18 @@ def finalize(ep, host, st, ctrl):
         st["eps"][str(ep)]["status"] = "rendering"
         return
     bgm = ctrl.get("bgm", "auto")
-    music = ROOT / "data/music/series10" / f"ep{ep:02d}.wav"
+    try:
+        mdir = RC.music_dir(RUN_ID)     # MERGE-VID-O / L-118：集级 BGM 按剧（V2 = data/music/<剧>，曲库 config/music_v2.json）
+    except Exception as e:  # noqa: BLE001  # arch-ok: 曲库校验不过 = 本集不配乐（--no-bgm），不退回 V1 的配乐
+        log("BGM", f"ep{ep:02d}", str(e)[:200])
+        mdir = None
+    music = (mdir / f"ep{ep:02d}.wav") if mdir else Path("/nonexistent")
     args = [PY, "tools/assemble_episode.py", f"ep{ep:02d}", "--out", str(EPS_OUT / "_work"), "--sources-from", str(tlp),
-            "--variant", ver, "--dialogue-source", "h3"]
+            "--variant", ver, "--dialogue-source", "h3", "--run", RUN_ID]   # W16：合成器按剧取导入稿 / 音色 / 配乐（C-14）
     if bgm == "off" or (bgm == "auto" and not music.exists()):
         args.append("--no-bgm")   # data/music/epNN.wav 是旧剧（《为他而骚》）的 BGM，不能用在 series10
     else:
-        args += ["--music-dir", "data/music/series10"]   # BGM10 的整集 BGM（tools/bgm/agent.py）
+        args += ["--music-dir", str(mdir.relative_to(ROOT)).replace("\\", "/")]   # 整集 BGM（V1：tools/bgm/agent.py；V2：tools/bgm/bgm_library.py）
     t_asm = time.time()
     rc, out = run(args, 5400)
     log("assemble", f"ep{ep:02d}", rc, out.strip()[-300:].replace("\n", " "))
@@ -392,13 +440,45 @@ def finalize(ep, host, st, ctrl):
                               resolved_sig=ep_sig(ep, host),
                               director={k: director.get(k) for k in ("film_score", "film_score_post", "lip_redo", "errors", "steps", "delivery_gate")} if director else None,
                               lip_redo=[r.get("shot") for r in director.get("lip_redo") or []] if director else [])
+    if final and not LEGACY:
+        bgm_after_assembly(ep, ver, used_bgm="--no-bgm" not in args, st=st)
+
+
+BGM_AUTO_MAX = 2    # 同一份剪辑签名最多自动重合成 2 次（一次确认签名 L5，一次带 BGM）
+
+
+def bgm_after_assembly(ep: int, ver: str, used_bgm: bool, st: dict) -> dict:
+    """MERGE-VID-O（L-118 / L-131）：V2 集级 BGM 的写入点。合成后按本剧时间轴判剪辑锁定（tools/bgm/bgm_library.py，L1–L5）：
+    只差 L5（签名要连续两版一致）→ 自动再合成一次确认；锁定且曲库配乐已交付、而这一版没带 BGM → 再合成一次带上 BGM。
+    同一签名最多 BGM_AUTO_MAX 次，防循环"""
+    x = st["eps"][str(ep)]
+    tlj = EPS_OUT / f"ep{ep:02d}_{ver}.timeline.json"
+    if not tlj.exists():
+        return {}
+    rc, out = run([PY, "tools/bgm/bgm_library.py", "--run", RUN_ID, "--ep", str(ep), "--timeline", str(tlj)], 1800)
+    try:
+        res = json.loads([ln for ln in out.splitlines() if ln.startswith("{")][-1])
+    except (IndexError, ValueError):
+        res = {"error": f"library.py rc={rc}: {out.strip()[-200:]}"}
+    log("BGM_LIB", f"ep{ep:02d}", json.dumps(res, ensure_ascii=False)[:300])
+    lock = res.get("lock") or {}
+    auto = x.setdefault("bgm_auto", {})
+    n = int(auto.get(lock.get("sig") or "-", 0))
+    want = (res.get("status") == "delivered" and not used_bgm) or (not lock.get("locked") and lock.get("fails") == ["L5"])
+    if want and n < BGM_AUTO_MAX:
+        auto[lock.get("sig") or "-"] = n + 1
+        x["status"] = "rendering"          # 下一轮 EP_RESOLVED → finalize 重合成（版本号照常递增）
+        x["resolved_sig"] = None
+        log("BGM_REASSEMBLE", f"ep{ep:02d}", "确认剪辑签名" if res.get("status") != "delivered" else "带上集级 BGM")
+    x["bgm"] = res
+    return res
 
 
 def write_status(st):
     rc = jl(VID / "recipe_choice.json", {}) or {}   # 配方口径从 recipe_choice.json 读（D-VID-01 改 Pika Flex 后自动跟着走）
     rtxt = "、".join(f"{k} = {v}" for k, v in rc.items() if k.endswith("_default")) or "（recipe_choice.json 读不到）"
-    L = ["# series10 视频 · 夜间进度（night.py 自动写；交总调度）", "", f"更新：{time.strftime('%Y-%m-%d %H:%M:%S')}", "",
-         f"当前配方（data/pipeline/runs/series10_v1/video/recipe_choice.json）：{rtxt}", "",
+    L = [f"# {RUN_ID} 视频 · 夜间进度（night.py 自动写；交总调度）", "", f"更新：{time.strftime('%Y-%m-%d %H:%M:%S')}", "",
+         f"当前配方（{VID_REL}/recipe_choice.json）：{rtxt}", "",
          "成片输入：原片（video/clips/）或其放大版 `_sr1080.mp4`；540×960 代理只给审片页（K-EDT-V10）", "",
          "| 集 | 主机 | 状态 | 成片 | 审阅 |", "|---|---|---|---|---|"]
     for e in range(1, 11):
@@ -502,7 +582,9 @@ def partition_hosts(part: dict | None = None) -> dict:
             part = _D.read_partition()
         except Exception:  # noqa: BLE001  # arch-ok: 分区读不到 → 本轮不改 hosts.json（下一轮再读）
             return {}
-    return {str(e): h for h, eps in ((part or {}).get("video") or {}).items() for e in eps}
+    # MERGE-VID-O：分区若按剧登记（partition.runs.<剧>.video）就用本剧的；没有 = 全局 video 分区（按集号分机，同一规则）
+    vid = (((part or {}).get("runs") or {}).get(RUN_ID) or {}).get("video") or (part or {}).get("video") or {}
+    return {str(e): h for h, eps in vid.items() for e in eps}
 
 
 def sync_hosts_from_partition(part: dict | None = None) -> dict:
@@ -545,7 +627,7 @@ def loop_once(st):
             log("READY", {f"ep{e:02d}": len(v) for e, v in rs.items()})
     run([PY, "tools/series10_video/sync.py"], 1800)
     # DATAALIGN 11-01：过门的镜登记进 takes.json（/api/progress、集摘要、画布才读得到）；按 sha256 去重，重复调无害
-    rc, out = run([PY, "tools/pipeline/register_takes.py", "--video10", "data/pipeline/runs/series10_v1/video",
+    rc, out = run([PY, "tools/pipeline/register_takes.py", "--video10", VID_REL,
                    "--label", "VIDEO10 预览片"], 1800)
     if rc:
         log("register_takes", rc, out.strip()[-200:].replace("\n", " "))
@@ -569,6 +651,7 @@ def loop_once(st):
 
 def main(argv):
     sys.stdout.reconfigure(encoding="utf-8")
+    log("RUN", RUN_ID, VID_REL)
     st = jl(STATE, None) or {"eps": {}, "pending_shots": {}, "started": time.time()}
     while True:
         try:

@@ -5,7 +5,7 @@
 
 描述只用写作模型 P1 的字段原样拼接（不改写、不评价）：
     instruct = "<gender_en>, <age> years old, <voice_phrase>"   ← P1_storyline.json characters[].gender / age / voice_phrase
-两句试听台词 = 这个人物在 series10_v1 P3 里最长的两句 dialogue（按可读字数，等长取靠前的；机械规则）。
+两句试听台词 = 这个人物在 第一季（legacy run） P3 里最长的两句 dialogue（按可读字数，等长取靠前的；机械规则）。
 ref 文本 = 这个人物全部 dialogue 按剧本顺序拼接（ns_post.speakers.tts_text 清洗），够 ~60 字就停。
 
     python tools/voice10/voice10.py plan  [--extra cid:N ...]   写 data/assets/voices/<cid>_cand/<cN>/meta.json（待生成）
@@ -28,7 +28,10 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-RUN = ROOT / "data" / "pipeline" / "runs" / "series10_v1"
+sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+import runs as RUNS  # noqa: E402
+_LEGACY = RUNS.legacy_run(ROOT)   # I-16：第一季专用历史工具（入口 gate_legacy_tool 要求显式 --run）
+RUN = ROOT / "data" / "pipeline" / "runs" / _LEGACY
 VOICES = ROOT / "data" / "assets" / "voices"
 sys.path.insert(0, str(ROOT / "services" / "post"))
 from ns_post.speakers import tts_text  # noqa: E402
@@ -128,7 +131,7 @@ def plan(extra: dict[str, int]) -> None:
                            "language": "Chinese", "seed": BASE_SEED + 100 * k + len(c["cid"]),
                            "note": "文字描述设计的合成声，不克隆任何真人"},
                 "ref_wav": "ref.wav", "ref_text": c["ref_text"],
-                "ref_text_source": "series10_v1 P3 该人物 dialogue（tts_text 清洗，逐字）：" + "、".join(c["ref_line_ids"]),
+                "ref_text_source": (_LEGACY + " P3 该人物 dialogue（tts_text 清洗，逐字）：") + "、".join(c["ref_line_ids"]),
                 "clone": {"engine": "cosyvoice3_zs",
                           "model": "Fun-CosyVoice3-0.5B-2512（Apache-2.0）zero-shot，prompt = 本 ref.wav + ref_text",
                           "weights": "FunAudioLLM/Fun-CosyVoice3-0.5B-2512@29e01c4e8d000f4bcd70751be16fa94bf3d85a18",
@@ -359,7 +362,7 @@ def autopick(dry: bool) -> None:
     lst.append({"date": "2026-11-01", "topic": "series10 角色音色（自动选）", "quote": OWNER_QUOTE,
                 "replaces": "2026-11-01 一键答复“重做候选我来挑”（待你挑）",
                 "done": "QAg 同法（Qwen3-TTS VoiceDesign + Fun-CosyVoice3）每人 4 个候选，按自动检查选定并写 config/voices.json"
-                        "（series=series10_v1；旁白仍 QAg）：" + "；".join(f"{c['name']}={b['cand']}" for c, b, _ in picks)
+                        + "（series=" + _LEGACY + "；旁白仍 QAg）：" + "；".join(f"{c['name']}={b['cand']}" for c, b, _ in picks)
                         + "；其余候选留在声音页可一键换",
                 "at": now, "by": "VOICE10"})
     nl = "\n"
@@ -377,6 +380,7 @@ def drop() -> None:
 
 
 if __name__ == "__main__":
+    RUNS.gate_legacy_tool(None, __file__)        # I-16：必须显式 --run（只认第一季）
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["plan", "run", "check", "drop", "cast", "autopick"])
     ap.add_argument("--extra", nargs="*", default=[], help="cid:N 再补 N 个候选")

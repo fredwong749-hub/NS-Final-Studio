@@ -12,17 +12,19 @@ import { Pop } from "./widgets";
 import { frameState } from "./status";
 import { cardName, cardTip, laneState, useLanes } from "./edit/lanes";
 import { useSop } from "./sop.helpers";
+import { isLookWaiting, lookWaitText } from "./OwnerDecision.helpers";
 import { autoFinalText, useRenderSettings } from "./edit/ImageParams.helpers";
 import "./produce.css";
 import { AUTO_LONG, AUTO_SHORT } from "./words";
 import { errSummary } from "../components/Drawer.helpers";
+import { plainText } from "./plainWords";
 import { useProduceView, views, subs, type ProduceView, type ProduceStage, type Stage, type StageState } from "./EpisodeProduce.helpers";
 export type { ProduceView, ProduceStage } from "./EpisodeProduce.helpers";
 
 const STAGE_LABEL: Record<Stage, string> = { first: "首帧", last: "尾帧", video: "视频" };
 const STATE_LABEL: Record<StageState, string> = {
   pending: "等前一步",
-  ready: "待派道",
+  ready: "等分配显卡",
   queued: "排队",
   running: "生成中",
   review: "等你定稿",
@@ -102,7 +104,7 @@ const short = (id: string) => id.split("-")[1] ?? id;
 const stageTitle = (st: Stage, x?: ProduceStage) =>
   !x
     ? `${STAGE_LABEL[st]}：本次不出`
-    : `${STAGE_LABEL[st]}：${x.no_lane ? "无卡可出" : x.auto_review ? AUTO_LONG : STATE_LABEL[x.state]}${x.step === "final" ? "（定稿档）" : ""}${x.gpu != null ? ` · ${cardName(x.gpu)}` : ""}${x.take != null ? ` · v${x.take}` : ""}${x.locked_by === "auto" ? ` · ${AUTO_LONG}` : ""}${x.reason ? `\n${x.reason}` : ""}${x.error && x.state === "failed" ? `\n${x.error}` : ""}`;
+    : `${STAGE_LABEL[st]}：${x.no_lane ? "无卡可出" : x.auto_review ? AUTO_LONG : STATE_LABEL[x.state]}${x.step === "final" ? "（定稿档）" : ""}${x.gpu != null ? ` · ${cardName(x.gpu)}` : ""}${x.take != null ? ` · v${x.take}` : ""}${x.locked_by === "auto" ? ` · ${AUTO_LONG}` : ""}${x.reason ? `\n${plainText(x.reason)}` : ""}${x.error && x.state === "failed" ? `\n${plainText(x.error)}` : ""}`;
 
 /** 片段条每个镜头上的三个小点（首帧 · 尾帧 · 视频）；本集没有整集出片时不显示 */
 export function ProduceClipDots({ ep, shotId }: { ep: number; shotId: string }) {
@@ -249,12 +251,15 @@ function ProduceForm({ ep, close }: { ep: number; close: () => void }) {
   const nRun = plan?.jobs ?? 0;
   // UXF4（审查 N6）：本集还没过的关口（与“待你决定”同一份 SOP 数据）——只提示，不拦（项目方可以测试着出）
   const gates: string[] = [];
-  const looks = (sop?.episode === ep ? sop.owner_actions : []).filter((a) => a.gate === "look" && (a.episodes ?? []).includes(ep));
+  const looksAll = (sop?.episode === ep ? sop.owner_actions : []).filter((a) => a.gate === "look" && (a.episodes ?? []).includes(ep));
+  // UIFIX-F 11-03：身份脸没选定的人不算“待确认造型”，单独一句（造型确认属于资产阶段）
+  const looks = looksAll.filter((a) => !isLookWaiting(a));
   if (looks.length) gates.push(`确认造型 ×${looks.length}（${looks.map((a) => a.character_name ?? a.character).join("、")}）：造型没确认的镜头不进分镜`);
+  for (const a of looksAll.filter(isLookWaiting)) gates.push(lookWaitText(a));
   const g4 = sop?.episode === ep ? sop.gates.find((g) => g.id === "G4") : undefined;
   const g4Ep = (g4 as { sample_episode?: number } | undefined)?.sample_episode;
   if (g4 && g4.status !== "passed" && (sop as { g4_required?: boolean } | null)?.g4_required !== false)
-    gates.push(g4Ep === ep ? "G4 样片还没锁定：这一集就是样片，出完由你看片锁定" : `G4 样片（第 ${g4Ep ?? 1} 集）还没锁定：其余各集先不放量出视频`);
+    gates.push(g4Ep === ep ? "样片还没锁定：这一集就是样片，出完由你看片锁定" : `样片（第 ${g4Ep ?? 1} 集）还没锁定：其余各集先不放量出视频`);
   const freeN = plan?.free_lanes?.length;
 
   return (
@@ -308,7 +313,7 @@ function ProduceForm({ ep, close }: { ep: number; close: () => void }) {
                 <b>还差 {gates.length} 个关口</b>（可以先测试着出，正式出片前要过）
                 <ul>
                   {gates.map((g) => (
-                    <li key={g}>{g}</li>
+                    <li key={g}>{plainText(g)}</li>
                   ))}
                 </ul>
               </div>
@@ -358,18 +363,18 @@ function ProduceForm({ ep, close }: { ep: number; close: () => void }) {
                       <b>{cardName(l.gpu)}</b>
                       <small>
                         {l.image_pref ? "出图卡" : "视频优先"}
-                        {x ? ` · ${laneState(x)}` : ""}
+                        {x ? ` · ${plainText(laneState(x))}` : ""}
                         {free === false && !plan.local ? " · 不计入预计" : ""}
                       </small>
                     </li>
                   );
                 })}
-                {!shown.length && <li>道表读不到：按默认的卡出</li>}
+                {!shown.length && <li>读不到显卡列表：按默认的卡出</li>}
               </ul>
             </div>
             {locked.length > 0 && (
               <p className="v3-prod-warn">
-                {locked.map((l) => cardName(l.gpu)).join("、")} 正被 LoRA 训练 / 写作模型占着：不会往上派活，预计里也没算它们。
+                {locked.map((l) => cardName(l.gpu)).join("、")} 正被别的任务（模型训练 / 写剧本）占着：不会往上派活，预计里也没算它们。
               </p>
             )}
             {!!plan.too_long?.length && (
@@ -391,7 +396,7 @@ function ProduceForm({ ep, close }: { ep: number; close: () => void }) {
         <button
           className={`v3-btn ${gates.length ? "" : "primary"}`}
           disabled={busy || !picked.length || !plan || nRun === 0}
-          title={gates.length ? `还差：${gates.join("；")}` : undefined}
+          title={gates.length ? `还差：${plainText(gates.join("；"))}` : undefined}
           onClick={() => void start()}
         >
           {busy ? "提交中…" : plan ? (nRun ? `${gates.length ? "仍然开始（测试）" : "开始"}（${nRun} 步，约 ${fmt(plan.eta_s)}）` : "没有要出的") : "开始"}
@@ -449,7 +454,7 @@ function ProduceStrip({ v }: { v: ProduceView }) {
         </span>
       }
       btnClass="v3-prod-stripbtn"
-      title="整集出片进度：每镜三个点 = 首帧 · 尾帧 · 视频；点开看每条道在跑什么"
+      title="整集出片进度：每镜三个点 = 首帧 · 尾帧 · 视频；点开看每张卡在跑什么"
     >
       {() => (
         <div className="v3-prod-detail">
@@ -457,7 +462,7 @@ function ProduceStrip({ v }: { v: ProduceView }) {
             整集出片 · {v.state === "running" ? "进行中" : v.state === "waiting" ? "等待中" : v.state === "done" ? "已完成" : "已取消"}
             {running ? ` · 预计还要 ${fmt(v.eta_s)}` : ""}
           </b>
-          <h4>渲染道</h4>
+          <h4>显卡</h4>
           <ul>
             {lanes.map((l) => (
               <li key={String(l.gpu)} title={cardTip(l.gpu)}>
@@ -497,7 +502,7 @@ function ProduceStrip({ v }: { v: ProduceView }) {
               <ul>
                 {v.failures.map((f) => (
                   <li key={`${f.shot_id}/${f.stage}`}>
-                    <span title={f.error ?? f.reason ?? undefined}>{short(f.shot_id)} {STAGE_LABEL[f.stage]}：{errSummary(f.reason ?? f.error)}</span>
+                    <span title={f.error ?? f.reason ?? undefined}>{short(f.shot_id)} {STAGE_LABEL[f.stage]}：{plainText(errSummary(f.reason ?? f.error))}</span>
                   </li>
                 ))}
               </ul>

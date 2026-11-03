@@ -812,6 +812,10 @@ def test_autoflow_resident_single_instance_and_status_filter(tmp_path, monkeypat
     class Pr:
         def poll(self):
             return None
+    # W13 CUTB-PREP 11-03（REVIEW-G6）：tick 后来又挂了 asset_tick / dispatch_tick / hollywood_tick 三相，本用例只测写作推进；
+    # 不打桩它们会写真实 data/factory/*（real-data-guard 记 6 次 → pytest 退出码 1）。同 tests/test_epchain_o.py:90 的打法，断言不变
+    for ph in ("asset_tick", "dispatch_tick", "hollywood_tick"):
+        monkeypatch.setattr(AR, ph, lambda *a, **k: {}, raising=False)
     r = AR.tick({}, af=AF, runs_mod=RN, spawn=lambda d, ep: spawned.append((d, ep)) or Pr())
     assert r["started"] == ["v2 ep01"] and spawned == [(rd, 1)]
     procs = {("v2", 1): Pr()}
@@ -839,7 +843,9 @@ def test_expected_table_only_live_runs(tmp_path, monkeypatch):
 def test_assemble_compose_reads_run_script():
     """OVERSIGHT-F P1-4c：compose 按剧取导入稿（V2 run 下读不到 V1 剧本），plan 同口径"""
     src = (ROOT / "tools/assemble_series.py").read_text(encoding="utf-8")
-    assert 'load_episode(RUNS.script_path(run or RUN_ID, ROOT), ep)' in src and "run: str | None = None) -> tuple[dict, int]" in src
+    assert ('load_episode(RUNS.script_path(run or RUN_ID, ROOT), ep)' in src
+            or ("run = run or RUN_ID" in src and 'load_episode(RUNS.script_path(run, ROOT), ep)' in src))   # P1-13a 后改成先归一 run
+    assert "run: str | None = None) -> tuple[dict, int]" in src
     assert 'ROOT / "data/import/script_v2.json"' not in src
     sys.path.insert(0, str(ROOT / "tools/autopilot"))
     import runs as RN
@@ -909,3 +915,196 @@ def test_api_watchdog_and_restart_caller(tmp_path):
     assert "restart_events.jsonl" in ps1 and "parent_chain" in ps1 and "tools/factory/api_watchdog.py" in ps1 and "[string]$By" in ps1
     app_src = (ROOT / "services/api/ns_api/app.py").read_text(encoding="utf-8")
     assert '_lifecycle("api_shutdown")' in app_src and '_lifecycle("api_startup")' in app_src
+
+
+def test_k_ops_f33_non_comfy_must_hold_and_idle_sweep_checks_gpu(tmp_path):
+    """K-OPS-F33（总调度 21:1x，gpu33:1 SeedVR2 撞金样首帧爆显存）：不走 ComfyUI 的 GPU 任务不许 lend（必须 hold）；
+    空闲回收前先查卡上有没有非 ComfyUI 进程占显存，有就不回收并记 idle_release_blocked"""
+    import json as _j
+    import importlib.util as _u
+    sp = _u.spec_from_file_location("debug_lanes_t", ROOT / "tools/debug/lanes.py")
+    L = _u.module_from_spec(sp)
+    sp.loader.exec_module(L)
+    part = tmp_path / "partition.json"
+    part.write_text(_j.dumps({"retired_lanes": [], "_lent_lanes": {}, "_temp_holds": {}}), encoding="utf-8")
+    import pytest
+    with pytest.raises(L.LendRefused):
+        L.lend("gpu33:1", "STYLE-V2", 30, "stylev2-", "STYLE-V2", part=part, job_kind="seedvr2")
+    L.lend("gpu33:1", "PROMPTFIX", 30, "promptfix-", "PROMPTFIX", part=part, now=1000.0)
+    idle = lambda lane: {"ok": True, "busy": False, "last_end": None}
+    busy_gpu = lambda lane: {"ok": True, "procs": [{"pid": 7, "mib": 9000, "cmd": "python seedvr2.py"}]}
+    assert L.idle_sweep(10, probe=idle, part=part, now=1000.0 + 3600, gpu_probe=busy_gpu) == []      # 卡上有人 → 不回收
+    assert "idle_release_blocked" in (tmp_path / "lane_loans.jsonl").read_text(encoding="utf-8")
+    assert L.idle_sweep(10, probe=idle, part=part, now=1000.0 + 3600, gpu_probe=lambda lane: {"ok": False, "procs": []}) == []  # 探测失败也不收
+    assert L.idle_sweep(10, probe=idle, part=part, now=1000.0 + 3600, gpu_probe=lambda lane: {"ok": True, "procs": []}) == ["gpu33:1"]
+
+
+def test_a12_atomic_sync_writes(tmp_path):
+    """A-12：推送解包后逐个 mv（原子替换），不再 cp -a 原地覆盖；merge_pull 共享账本原子写。用真 bash 验 mv 安装"""
+    import shutil
+    import subprocess
+    src = (ROOT / "tools/autopilot/resident_sync.py").read_text(encoding="utf-8")
+    assert "cp -a $T/. {R}/" not in src and src.count("atomic_install_cmd(R)") == 4
+    mp = (ROOT / "ops/offline/merge_pull.py").read_text(encoding="utf-8")
+    assert "def _atomic_json(" in mp and mp.count("_atomic_json(") >= 4
+    # W13 CUTB-PREP 11-03：环境口径，与 tests/test_system_version.py::test_verified_install_refuses_truncated_stdin 同一条（A-G1 第 22 轮 #4）：
+    # Windows 上用 Git bash；PATH 里的 System32 / WindowsApps bash.exe 是 WSL 入口，收到 C:/… 路径找不到目录，`while read` 卡住
+    # → 60 s TimeoutExpired（W13 实测，真实工作树）。只有 WSL 入口时 skip 并写明原因；有 Git bash 照常真跑，断言不变。
+    import os
+    git_bash = r"C:\Program Files\Git\bin\bash.exe"
+    bash = git_bash if os.name == "nt" and os.path.isfile(git_bash) else shutil.which("bash")
+    if not bash:
+        return
+    low = bash.replace("/", "\\").lower()
+    if os.name == "nt" and ("\\system32\\" in low or "\\windowsapps\\" in low):
+        import pytest
+        pytest.skip(f"只有 WSL 入口 bash（{bash}），它读不到 Windows 临时目录；装 Git for Windows 后本测试会真跑")
+    sys.path.insert(0, str(ROOT / "tools/autopilot"))
+    import importlib.util as _u
+    sp = _u.spec_from_file_location("rsync_t", ROOT / "tools/autopilot/resident_sync.py")
+    RS = _u.module_from_spec(sp)
+    try:
+        sp.loader.exec_module(RS)
+    except Exception:  # noqa: BLE001  导入期依赖网络 / 配置时只做静态检查
+        return
+    T = tmp_path / "T"
+    (T / "data/renders/ep01/S1").mkdir(parents=True)
+    (T / "data/renders/ep01/S1/takes.json").write_text("new", encoding="utf-8")
+    dest = tmp_path / "repo"
+    (dest / "data/renders/ep01/S1").mkdir(parents=True)
+    (dest / "data/renders/ep01/S1/takes.json").write_text("old", encoding="utf-8")
+    cmd = f"T={T.as_posix()}; " + RS.atomic_install_cmd(dest.as_posix())
+    subprocess.run([bash, "-c", cmd], check=True, timeout=60)
+    assert (dest / "data/renders/ep01/S1/takes.json").read_text(encoding="utf-8") == "new" and not T.exists()
+
+
+def test_a12_owner_decisions_laptop_wins():
+    """A-12：takes.json 合并时项目方的决定（locked / master_gate）以笔记本为准，服务器的旧值不能盖掉；active 仍按服务器"""
+    import importlib.util as _u
+    sp = _u.spec_from_file_location("merge_pull_t", ROOT / "ops/offline/merge_pull.py")
+    MP = _u.module_from_spec(sp)
+    sp.loader.exec_module(MP)
+    takes = [{"stage": "image", "n": 1, "file": "a.png"}, {"stage": "image", "n": 2, "file": "b.png"}]
+    local = {"takes": takes, "active": {"image": 1}, "locked": {"image": 2}, "master_gate": {"image": "approved"}}
+    remote = {"takes": takes, "active": {"image": 2}, "locked": {"image": 1}, "master_gate": {"image": "pending"}}
+    out, *_ = MP.merge_takes_docs(remote, local, None, None)
+    assert out["locked"] == {"image": 2} and out["master_gate"] == {"image": "approved"} and out["active"] == {"image": 2}
+
+
+def test_i16_require_run_and_parity_uses_current_run(monkeypatch):
+    """I-16：离线工具必须显式 --run（或 NS_RUN），不再默认第一季；data_parity 按当前剧比较"""
+    sys.path.insert(0, str(ROOT / "tools/autopilot"))
+    import runs as RN
+    import pytest
+    monkeypatch.delenv("NS_RUN", raising=False)
+    with pytest.raises(RN.RunNotGiven):
+        RN.require_run([])
+    assert RN.require_run(["--run", "series10_v2"]) == "series10_v2" and RN.require_run(["--run=x"]) == "x"
+    monkeypatch.setenv("NS_RUN", "y")
+    assert RN.require_run([]) == "y"
+    dp = (ROOT / "tools/qa/data_parity.py").read_text(encoding="utf-8")
+    assert "series10_v1" not in dp and "_runs().script_path(RUN, ROOT)" in dp
+
+
+def test_p2_lifecycle_not_written_by_tests_or_preflight(monkeypatch, tmp_path):
+    """OVERSIGHT-F 第 12 轮 P2-1：TestClient 也触发 startup/shutdown → pytest 在跑、P.DATA 被换掉、重启预检实例都不写真实 api_lifecycle.jsonl"""
+    from ns_api import app as A
+    assert A._lifecycle_should_log() is False                       # PYTEST_CURRENT_TEST 在
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.delenv("NS_API_PREFLIGHT", raising=False)
+    monkeypatch.setattr(A.P, "DATA", tmp_path / "data")
+    assert A._lifecycle_should_log() is False                       # 数据目录不是仓库 data/
+    monkeypatch.setattr(A.P, "DATA", A.P.ROOT / "data")
+    assert A._lifecycle_should_log() is True                        # 真服务才记（只判断，不写）
+    monkeypatch.setenv("NS_API_PREFLIGHT", "1")
+    assert A._lifecycle_should_log() is False
+    calls = []
+    monkeypatch.setattr("builtins.open", lambda *a, **k: calls.append(a) or (_ for _ in ()).throw(AssertionError("不该写")))
+    A._lifecycle("api_startup")
+    assert not calls
+
+
+def test_k_ops_f35_release_only_own_and_lend_respects_hold(tmp_path):
+    """K-OPS-F35（STYLE-V2 11-02 20:53/20:55）：release 只清调用方自己的那条；lend 碰到有效 hold 拒绝并报 why；hold 进审计；idle 收回不碰 hold"""
+    sys.path.insert(0, str(ROOT / "tools" / "debug"))
+    import pytest
+    import lanes as LN
+    part = tmp_path / "partition.json"
+    part.write_text(json.dumps({"retired_lanes": []}), encoding="utf-8")
+    t0 = 1_800_000_000.0
+    LN.hold("gpu33:0", 60, "SeedVR2 4K", part=part, now=t0, by="STYLE-V2")
+    with pytest.raises(LN.LendRefused, match="STYLE-V2.*SeedVR2"):
+        LN.lend("gpu33:0", "PROMPTFIX", 30, "pf", "PROMPTFIX", part=part, now=t0 + 60)
+    LN.lend("gpu33:0", "PROMPTFIX", 30, "pf", "PROMPTFIX", part=part, now=t0 + 61 * 60)   # hold 过期后可以借
+    d = json.loads(part.read_text(encoding="utf-8"))
+    assert "gpu33:0" in d["_lent_lanes"] and "gpu33:0" in d["_temp_holds"]               # 过期的 hold 还在（等 sweep 清），借道也在
+    # 同一条道：STYLE-V2 hold（新）+ PROMPTFIX 借道 → PROMPTFIX release 只清自己的借道
+    LN.hold("gpu36:1", 60, "SeedVR2", part=part, now=t0, by="STYLE-V2")
+    d = json.loads(part.read_text(encoding="utf-8"))
+    d["_lent_lanes"]["gpu36:1"] = {"to": "PROMPTFIX", "by": "PROMPTFIX", "client_prefix": "pf", "at": "2027-01-15T08:00:00"}
+    part.write_text(json.dumps(d), encoding="utf-8")
+    LN.release("gpu36:1", part=part, by="PROMPTFIX")
+    d = json.loads(part.read_text(encoding="utf-8"))
+    assert "gpu36:1" not in d["_lent_lanes"] and d["_temp_holds"]["gpu36:1"]["by"] == "STYLE-V2" and "gpu36:1" in d["retired_lanes"]
+    LN.release("gpu36:1", part=part)                                                     # 不带 by 只放借道，别人的 hold 不动
+    assert "gpu36:1" in json.loads(part.read_text(encoding="utf-8"))["_temp_holds"]
+    LN.release("gpu36:1", part=part, by="STYLE-V2")                                      # 本人放
+    d = json.loads(part.read_text(encoding="utf-8"))
+    assert "gpu36:1" not in d["_temp_holds"] and "gpu36:1" not in d["retired_lanes"]
+    au = [json.loads(x) for x in (tmp_path / "lane_loans.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert any(a["ev"] == "hold" and a["by"] == "STYLE-V2" and a["why"] == "SeedVR2 4K" for a in au)
+    assert any(a["ev"] == "release_noop" and a.get("kept", {}).get("_temp_holds") == "STYLE-V2" for a in au)
+
+
+I16_LEGACY_TOOLS = ["assetmaster/frames_v2.py", "assetmaster/gen_look_sheets.py", "assetmaster/look_fix.py", "bakeoff/post_local.py",
+                    "bakeoff/run.py", "gen_contract/calibrate_imgfix.py", "gen_contract/calibrate_q.py", "gen_contract/look_audit.py",
+                    "gen_contract/reflock_page.py", "gen_contract/reflock_v9.py", "gen_contract/reflock_validate.py",
+                    "series10_imggen/imgfix_ab.py", "qa/defect_hunt.py", "script_rsi/rubric_audit.py", "voice10/voice10.py",
+                    "imgfix/lookA_adopt.py"]
+
+
+def test_i16_legacy_tools_gated_and_no_hard_run():
+    """I-16：第一季专用历史离线工具一律走 runs.gate_legacy_tool（必须显式 --run，只认 legacy run），源码字符串里不再写死剧名"""
+    import ast
+    for rel in I16_LEGACY_TOOLS + ["script_rsi/hollywood_r5.py"]:
+        src = (ROOT / "tools" / rel).read_text(encoding="utf-8")
+        strs = [n.value for n in ast.walk(ast.parse(src)) if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+        assert not any("series10_v1" in s for s in strs), rel
+        if rel in I16_LEGACY_TOOLS:
+            assert src.count("RUNS.gate_legacy_tool(") == 1, rel          # 只调一次（第二次会因 --run 已剥掉而误报）
+
+
+def test_i16_gate_legacy_tool(monkeypatch, tmp_path):
+    import pytest
+    sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+    import runs as RUNS
+    (tmp_path / "config/pipeline").mkdir(parents=True)
+    (tmp_path / "config/pipeline/runs.json").write_text(json.dumps({"primary": "v2", "legacy_unprefixed_run": "v1", "runs": {"v1": {}, "v2": {}}}), encoding="utf-8")
+    monkeypatch.delenv("NS_RUN", raising=False)
+    with pytest.raises(RUNS.RunNotGiven, match="--run"):
+        RUNS.gate_legacy_tool(["page"], "x.py", root=tmp_path)                       # 不给 → 退出
+    with pytest.raises(RUNS.RunNotGiven, match="第一季.*v2"):
+        RUNS.gate_legacy_tool(["--run", "v2", "page"], "x.py", root=tmp_path)        # 给的不是 legacy → 退出
+    assert RUNS.gate_legacy_tool(["--run", "v1", "page", "--by", "Z"], "x.py", root=tmp_path) == ["page", "--by", "Z"]
+    assert RUNS.gate_legacy_tool(["--run=v1", "a"], "x.py", root=tmp_path) == ["a"]
+    monkeypatch.setenv("NS_RUN", "v1")
+    monkeypatch.setattr(sys, "argv", ["x.py", "plan"])
+    assert RUNS.gate_legacy_tool(None, "x.py", root=tmp_path) == ["plan"] and sys.argv == ["x.py", "plan"]
+
+
+def test_restartfix_lanes_cli_release_without_by_warns(monkeypatch, capsys):
+    """RESTARTFIX-S P2-3：release 不带 --by 而道上有别人的 hold → CLI 提示“没有清理任何 hold，请加 --by”；带 --by 不提示"""
+    import importlib
+    sys_path = str(Path(__file__).resolve().parents[1] / "tools" / "debug")
+    if sys_path not in sys.path:
+        sys.path.insert(0, sys_path)
+    L = importlib.import_module("lanes")
+    seen = []
+    monkeypatch.setattr(L, "release", lambda lane, part=None, by=None, kind=None: seen.append(by) or {"_temp_holds": {lane: {"by": "STYLE-V2"}}})
+    assert L.main(["release", "gpu3"]) == 0
+    assert "没有清理任何 hold，请加 --by" in capsys.readouterr().out
+    assert L.main(["release", "gpu3", "--by", "STYLE-V2"]) == 0
+    assert "没有清理任何 hold" not in capsys.readouterr().out
+    monkeypatch.setattr(L, "release", lambda lane, part=None, by=None, kind=None: {"_lent_lanes": {}})
+    L.main(["release", "gpu3"])
+    assert "没有清理任何 hold" not in capsys.readouterr().out

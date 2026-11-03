@@ -23,7 +23,7 @@ import { useEdit } from "./edit/state";
 import { Pop, StatusLine } from "./widgets";
 import { apiV1 } from "./api_v1";
 import { PlayShotLines } from "./sound/ShotLines";
-import { sceneLabel } from "./sceneLabel";
+import { plateMatchesScene, sceneLabel, sopSceneId } from "./sceneLabel";
 import { useFlash } from "./live";
 import "../ds/live.css";
 import { MissBadge, StoryboardGrid } from "./StoryboardDetails";
@@ -293,20 +293,22 @@ function VideoTile({ s, st }: { s: ShotSummary; st: Studio }) {
   );
 }
 
-/** 本镜场景（v3.1 追加）：id 取 state_timeline 的 scene_id（SOP 接口带出），名称优先 scene_library（S-back 加好后摘要里有就用），其次 data/scenes.json 的场景名，
- *  再次剧本的地点（visual_spec.scene.place），最后 scene_id；底图缩略图取 /api/shots/{id}/refs 的当前生效底图（按镜缓存） */
-const plateCache = new Map<string, Promise<string | null | false>>();
+/** 本镜场景（v3.1 追加；UIFIX-F 11-03 改）：id 只按“剧本 **场景**（storyboard.scene_id）> SOP 带出且属于当前剧本的状态表 > 剧本地点”取，
+ *  名称只从当前剧的场景登记取（v3/sceneLabel，登记没有 = “场景未登记：id”）。不再读 data/scenes.json（那是 V1 状态表的产物，
+ *  V2 第 1 集曾因此显示“办公室夜 / 深夜写字楼办公区角落”）。底图缩略图取 /api/shots/{id}/refs 的当前生效底图（按镜缓存），
+ *  底图所属场景与本镜场景不一致（V1 残留）时不显示 */
+const plateCache = new Map<string, Promise<{ url: string | null; plate_id: string | null } | null | false>>();
 let plateN = 0;
-/** → 底图地址 / null（后端说没有）/ false（请求失败，K-UI-D01：不能说成“无底图”；失败不缓存，下次再取） */
-function plateUrl(shot: string): Promise<string | null | false> {
+/** → {url, plate_id} / null（后端说没有）/ false（请求失败，K-UI-D01：不能说成“无底图”；失败不缓存，下次再取） */
+function plateUrl(shot: string): Promise<{ url: string | null; plate_id: string | null } | null | false> {
   let p = plateCache.get(shot);
   if (!p) {
     // UIRSI r12（W-02）：场景底图缩略图不抢首屏——1.5 s 后再错开取（以前 11 镜同时发，排队 4–7 s）
     const delay = 3000 + (plateN++ % 24) * 150;
     p = new Promise((r) => setTimeout(r, delay)).then(() => apiV1.shotRefs(shot)).then(
       (r) => {
-        const e = r.scene?.effective;
-        return e && typeof e === "object" ? e.url ?? null : null;
+        const e = r.scene?.effective as { url?: string | null; plate_id?: string | null; default_plate?: string | null } | null | undefined;
+        return e && typeof e === "object" ? { url: e.url ?? null, plate_id: e.plate_id ?? e.default_plate ?? null } : null;
       },
       () => {
         plateCache.delete(shot);
@@ -317,31 +319,13 @@ function plateUrl(shot: string): Promise<string | null | false> {
   }
   return p;
 }
-/** data/scenes.json（state_timeline 的场景分组）scene_id → 名称：经项目文件接口读一次，整页共用 */
-let sceneNames: Promise<Map<string, string>> | null = null;
-function loadSceneNames(): Promise<Map<string, string>> {
-  if (!sceneNames)
-    sceneNames = new Promise((r) => setTimeout(r, 3000)) // UIRSI r12：场景名不抢首屏
-      .then(() => fetch("/api/projects"))
-      .then((r) => (r.ok ? r.json() : []))
-      .then((ps: { slug: string; is_default?: boolean }[]) => {
-        const slug = (ps.find((p) => p.is_default) ?? ps[0])?.slug;
-        if (!slug) return null;
-        return fetch(`/api/projects/${encodeURIComponent(slug)}/file/data/scenes.json`).then((r) => (r.ok ? r.json() : null));
-      })
-      .then((d: { scenes?: { scene_id: string; place?: string; name?: string }[] } | null) => new Map((d?.scenes ?? []).map((x) => [x.scene_id, x.name || x.place || x.scene_id] as [string, string])))
-      .catch(() => new Map<string, string>());
-  return sceneNames;
-}
 
 function useShotScene(s: ShotSummary, d: { visual_spec?: Record<string, unknown> | null } | undefined, sop?: SopShot) {
   // undefined = 还在读；null = 后端说没有；false = 读不到
-  const [plate, setPlate] = useState<string | null | false | undefined>(undefined);
-  const [names, setNames] = useState<Map<string, string> | null>(null);
+  const [plateInfo, setPlateInfo] = useState<{ url: string | null; plate_id: string | null } | null | false | undefined>(undefined);
   useEffect(() => {
     let alive = true;
-    void plateUrl(s.id).then((u) => alive && setPlate(u));
-    void loadSceneNames().then((m) => alive && setNames(m));
+    void plateUrl(s.id).then((u) => alive && setPlateInfo(u));
     return () => {
       alive = false;
     };
@@ -349,10 +333,12 @@ function useShotScene(s: ShotSummary, d: { visual_spec?: Record<string, unknown>
   const vs = (d?.visual_spec?.scene ?? null) as Record<string, unknown> | string | null;
   const x = s as { scene_name?: string | null; scene?: { name?: string } | null };
   const lib = x.scene_name ?? x.scene?.name;
-  const id = (sop as { scene_id?: string | null } | undefined)?.scene_id ?? (vs && typeof vs === "object" && typeof vs.id === "string" ? vs.id : null);
+  const id = storyboardOf(s, d as Parameters<typeof storyboardOf>[1])?.scene_id ?? sopSceneId(sop) ?? (vs && typeof vs === "object" && typeof vs.id === "string" ? vs.id : null);
   const place = vs && typeof vs === "object" && typeof vs.place === "string" ? vs.place : typeof vs === "string" ? vs : null;
   const time = vs && typeof vs === "object" && typeof vs.time_of_day === "string" ? vs.time_of_day : null;
-  return { id, name: sceneLabel(lib || (id ? names?.get(id) : null) || place || id || null), time, plate };
+  // 底图属于别的场景（例如 V1 的 sk_office_night 挂到 V2 的 sk_white_cyc 镜上）→ 当作没有底图
+  const plate = plateInfo && typeof plateInfo === "object" ? (plateMatchesScene(plateInfo.plate_id, id) ? plateInfo.url : null) : plateInfo;
+  return { id, name: sceneLabel(lib || id || place || null), time, plate };
 }
 
 function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; sop?: SopShot; selected: boolean; inMulti: boolean; dim: boolean }) {

@@ -25,6 +25,7 @@ def judge(path: Path, shot: str) -> dict:
     faces = VQ.gaze_mp(path)
     VQ.merge_gaze(v, faces, prompt)
     VQ.recheck_gaze_band(v, faces, path, prompt)
+    VQ.reask_eye(v, path)                 # 看镜头结论与证据矛盾 → 只问视线重问一次（与生产同口径）
     VQ.sanitize(v)
     checks = v.get("checks") or {}
     return {"eye_contact": "eye_contact" in (v.get("defects") or []), "evidence": checks.get("eye_contact"),

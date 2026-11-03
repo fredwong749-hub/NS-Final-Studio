@@ -18,6 +18,7 @@ parts 里的 null = 这一件恢复继承；给了 look 而没给 parts = 整套
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Literal
 
@@ -71,8 +72,48 @@ def _shot(store: LookStore, shot_id: str):
         raise HTTPException(404, f"没有这个镜头：{shot_id}") from e
 
 
+def _legacy() -> bool:
+    """当前剧是 V1（或没有 runs.json 的临时根）"""
+    from ns_agent import run_paths as _RPA
+    try:
+        return _RPA.is_legacy_run(project_root())
+    except Exception:  # noqa: BLE001  # arch-ok: 认不出当前剧 = 按非 V1 处理（更严）
+        return False
+
+
+def _run_script():
+    """当前剧的导入稿（ns_agent.run_paths 唯一入口）；没有 / 读不了 → None（不回退 V1 的 data/import/script_v2.json）"""
+    from ns_agent import run_paths as _RPA
+    from ns_schema.script import ScriptImport
+    try:
+        f = _RPA.script_json(project_root())
+        return ScriptImport.model_validate_json(f.read_text(encoding="utf-8")) if f.is_file() else None
+    except Exception as e:  # noqa: BLE001 —— 读不了 / 校验不过 = None（调用方按“本剧没有登记场景”处理），如实记下
+        print(f"[ref_switch] 当前剧导入稿读不了：{e} → 按无导入稿", file=sys.stderr)
+        return None
+
+
+def run_scene_registry(script=None) -> dict[str, str | None]:
+    """V2CUT-O 11-03（L-126）：非 V1 剧本剧登记过的场景 → 登记的底图（资产包清单 scenes.<id>.base；没登记底图 = None）。
+    登记 = 本剧导入稿的 scene_library 或本剧资产包清单 scenes；V1 的 assets/scenes 目录 / data/scenes.json 一律不算"""
+    from ns_api import run_paths as _RP
+    script = script if script is not None else _run_script()
+    reg: dict[str, str | None] = {e.scene_id: None for e in (getattr(getattr(script, "globals", None), "scene_library", None) or [])}
+    for sid, sc in ((_RP.manifest(project_root()) or {}).get("scenes") or {}).items():
+        base = sc.get("base") if isinstance(sc, dict) else None
+        f = (base.get("file") if isinstance(base, dict) else base) or None
+        reg[sid] = f if f and (project_root() / f).is_file() else None
+    return reg
+
+
 def scene_map(res: Resolver) -> dict[str, str]:
-    """shot_id → scene_id（与 state_timeline / Resolver.scene_of 同一口径）"""
+    """shot_id → scene_id（与 state_timeline / Resolver.scene_of 同一口径）。
+    V2CUT-O：非 V1 剧只认当前剧导入稿每镜写明的 **场景**，且该场景本剧登记过；没登记 = 不返回（不按镜号借 V1 的分组）"""
+    if not _legacy():
+        script = _run_script()
+        reg = run_scene_registry(script)
+        return {s.id: s.scene_id for e in (script.episodes if script else []) for s in e.shots
+                if getattr(s, "scene_id", None) and s.scene_id in reg}
     from ns_agent.state_timeline import group_scenes
     return {r["shot_id"]: r["scene_id"] for r in group_scenes(res.script, lambda s: {c for c, _ in res.characters(s)})}
 
@@ -87,10 +128,16 @@ def _thumb(rel: str | None) -> str | None:
 
 
 def plate_options(scene_id: str | None) -> list[dict]:
-    """本场景的底图候选（assets/scenes/<scene_id>/ 下的图片）+ “不用底图”"""
+    """本场景的底图候选（assets/scenes/<scene_id>/ 下的图片）+ “不用底图”。
+    V2CUT-O：非 V1 剧只列本剧登记的那一张底图（没登记 = 只有“不用底图”）"""
     base = project_root() / "assets" / "scenes"
     out = []
-    if scene_id and (base / scene_id).is_dir():
+    if not _legacy():
+        f = run_scene_registry().get(scene_id) if scene_id else None
+        if f:
+            from ns_api import v2_assets as V2      # 资产包文件只经 /api/v2/asset-file 发
+            out.append({"plate_id": f, "scene_id": scene_id, "name": Path(f).stem, "url": V2._url(f) if f.startswith("assets_v2/") else _thumb(f)})
+    elif scene_id and (base / scene_id).is_dir():
         for p in sorted((base / scene_id).iterdir()):
             if p.is_file() and p.suffix.lower() in IMAGE_EXT and "_face_" not in p.stem:
                 rel = p.relative_to(base).as_posix()
@@ -103,6 +150,8 @@ def plate_options(scene_id: str | None) -> list[dict]:
 def _default_plate(scene_id: str | None) -> str | None:
     if not scene_id:
         return None
+    if not _legacy():                       # V2CUT-O：非 V1 剧只认本剧登记的底图，不看 V1 的 assets/scenes/<id>/
+        return run_scene_registry().get(scene_id)
     from ns_agent.state_timeline import plate_info
     info = plate_info(project_root(), scene_id)
     return info["plate"] if info.get("plate_sha256") else None
@@ -158,11 +207,14 @@ def shot_refs_view(store: LookStore, shot_id: str) -> dict:
         })
     plate, psrc = RO.effective_scene(canvas, shot.episode, scene_id, shot_id)
     default_plate = _default_plate(scene_id)
-    eff = plate or (default_plate and Path(default_plate).relative_to("assets/scenes").as_posix())
+    v2url = lambda p: __import__("ns_api.v2_assets", fromlist=["_url"])._url(p)   # noqa: E731
+    eff = plate or (default_plate if not _legacy() else
+                    default_plate and Path(default_plate).relative_to("assets/scenes").as_posix())
     return {
         "shot_id": shot_id, "episode": shot.episode, "scene_id": scene_id,
         "characters": chars,
-        "scene": {"effective": {"plate_id": eff, "url": None if eff in (None, "none") else _thumb(f"assets/scenes/{eff}"),
+        "scene": {"effective": {"plate_id": eff, "url": None if eff in (None, "none") else
+                                (v2url(eff) if str(eff).startswith("assets_v2/") else _thumb(f"assets/scenes/{eff}")),
                                 "source": psrc, "default_plate": default_plate},
                   "options": plate_options(scene_id)},
         "ref_group": {"files": group["files"], "count": group["count"], "limit": group["limit"]},
@@ -174,7 +226,10 @@ def _asset_script():
     try:
         from ns_api import ref_switch_assets as RA
         from ns_schema.script import ScriptImport
-        f = P.DATA / "import" / "script_v2.json"            # 当前项目数据目录里的剧本（测试的临时项目没有 → 旧造型库）
+        from ns_agent import run_paths as _RPA
+        # V2CUT-O 11-03：当前剧的导入稿（V2 = data/import/runs/<run>/script_v2.json）；以前写死 V1 的 data/import/script_v2.json，
+        # V2 镜头拿到的是 V1 剧本的 sk_office_night / 林晚。测试的临时项目没有 runs.json → <data>/import/script_v2.json（旧行为）
+        f = _RPA.script_json(P.DATA.parent)
         if not f.exists():
             return None
         script = ScriptImport.model_validate_json(f.read_text(encoding="utf-8"))

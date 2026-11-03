@@ -172,6 +172,21 @@ def _alive(run_id: str) -> bool:
     return bool(t and t.is_alive())
 
 
+AUTOFLOW_REFUSE = "这部剧由自动写作流程管着（整季推进），这里只读；要返修请交给总调度"
+
+
+def _guard_writable(d: Path, run_id: str) -> None:
+    """L-159 双入口：retry / edit / resume 在动任何文件之前统一判断。
+    09:57 事故：retry 先把 P4 挪进 superseded 再在 _start 里 409，文件被挪走、状态卡在 queued。
+    所以三个拒绝条件（整季子目录、autoflow 管着、测试期写作走写手）都必须在第一次写盘前查完"""
+    if series_eps(d):
+        raise HTTPException(409, "整季运行由 SERIES 写作线负责，这里只读（要返修请交给总调度）")
+    if any(d.glob("autoflow_ep*.json")):
+        raise HTTPException(409, AUTOFLOW_REFUSE)
+    if _alive(run_id):
+        raise HTTPException(409, "正在写作中")
+
+
 def _stage_rows(d: Path, st: dict | None, ep: int | None) -> list[dict]:
     rows = [{"node": "P0", "label": NODE_LABEL["P0"], "link": None, "file": "P0_brief.json",
              "status": "ok" if (d / "P0_brief.json").exists() else "missing", "issues": []}]
@@ -478,7 +493,7 @@ def _ctx_upto(d: Path, link: str) -> dict:
         raise HTTPException(409, "提纲本身没过校验，先改提纲")
     try:
         from ns_api import script_chat as SC
-        rc, rs, _ = SC.registry_tables({"from": brep.obj.registry_from})
+        rc, rs, _ = SC.registry_tables({"from": brep.obj.registry_from, "run": SC.run_for_dir(d)})
     except Exception:  # noqa: BLE001
         rc, rs = [], []
     ctx = {"brief": brep.obj, "episode": ep, "registry_chars": rc, "registry_scenes": rs}
@@ -509,10 +524,7 @@ def _supersede(d: Path, links: list[str], why: str) -> list[str]:
 @router.put("/api/story-runs/{run_id}/artifact/{node}")
 def edit_artifact(run_id: str, node: str, body: EditBody):
     d = _run_dir(run_id)
-    if series_eps(d):
-        raise HTTPException(409, "整季运行由 SERIES 写作线负责，这里只读（要返修请交给总调度）")
-    if _alive(run_id):
-        raise HTTPException(409, "正在写作，写完或停下后再改")
+    _guard_writable(d, run_id)
     if node == "P0":
         raise HTTPException(422, "提纲请新建一次运行（提纲是这次运行的起点）")
     if node not in LINK_OF:
@@ -563,10 +575,9 @@ def _ensure_state(d: Path) -> dict:
 @router.post("/api/story-runs/{run_id}/retry")
 def retry(run_id: str, body: RetryBody | None = None):
     d = _run_dir(run_id)
-    if series_eps(d):
-        raise HTTPException(409, "整季运行由 SERIES 写作线负责，这里只读（要返修请交给总调度）")
-    if _alive(run_id):
-        raise HTTPException(409, "正在写作中")
+    _guard_writable(d, run_id)
+    if writer_backend() == "claude_agent":    # 先拒再动文件（原来 _start 里才拒，superseded 已经挪了）
+        raise HTTPException(409, AGENT_REFUSE)
     st = _ensure_state(d)
     body = body or RetryBody()
     rows = _stage_rows(d, st, st.get("episode"))
@@ -588,10 +599,9 @@ def retry(run_id: str, body: RetryBody | None = None):
 @router.post("/api/story-runs/{run_id}/resume")
 def resume(run_id: str, body: RetryBody | None = None):
     d = _run_dir(run_id)
-    if series_eps(d):
-        raise HTTPException(409, "整季运行由 SERIES 写作线负责，这里只读（要返修请交给总调度）")
-    if _alive(run_id):
-        raise HTTPException(409, "正在写作中")
+    _guard_writable(d, run_id)
+    if writer_backend() == "claude_agent":    # 先拒再动文件（原来 _start 里才拒，superseded 已经挪了）
+        raise HTTPException(409, AGENT_REFUSE)
     st = _ensure_state(d)
     if body and body.upto in ("P1", "P2", "P3", "P4"):
         st["upto"] = body.upto

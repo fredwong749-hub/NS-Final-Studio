@@ -137,3 +137,43 @@ rules:
     confidence: medium   # 文字层确定；参考图里的 logo 仍可能被照搬，待去 logo 资产
     status: 确认
     date: 2026-11-02
+
+  - id: K-REN-960
+    domain: render
+    link: [P6-P7]
+    title: 出图风格后缀按剧取；V2 不许出现 V1 的风格短语（S★ / 徕卡暖调 / Leica 镜头句）
+    when: gen_contract.style.preset_suffix / image_suffix（config/compile/run_style.json）、compiler.lens_term、preflight I7、tools/script_rsi/v1_leak.py（style 类）
+    then: 资产包模式的剧编译完全不读 V1 的 config/visual_bible.toml，改读 run_style.json runs.<剧>.bible（V2 = config/compile/bible_series10_v2.toml：只有技术纠正句——漆皮材质、近景面部对焦、暗场细节（去掉 V1 布光“光比1:4”）、安全镜衣装、真人皮肤；人物表为空），没登记 → V1BibleRefused（失败关闭）；风格：剧在 run_style.json 有条目 → 用它（V2 临时句“时尚杂志大片质感，色彩艳丽、浓郁、高饱和，4K 电影级画质”，等 STYLE-V2 定稿替换）；资产包模式的剧没条目 → StyleMissing（失败关闭，不退回 S★）；V2 不补 visual_bible 的 Leica 镜头句；V2 提示词含 v1_style_phrases 任一 → I7 fail，v1_leak 记 style 命中
+    check: [tests/test_promptfix_v2.py]
+    evidence:
+      - {src: data/_quarantine/20261102_v2_golden_v1style/MANIFEST.json, note: "第一张 V2 金样测试首帧的提示词带“专业电影画面，徕卡M 50mm f/2镜头…暖调通透，干净真实”（V1 S★），总调度 20:4x 定为 V1 内容泄漏"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+
+  - id: K-REN-961
+    domain: render
+    link: [P4-P7]
+    title: 运镜词表按剧例外——标了 runs 的运镜（V2）模板可带速度词、可不以 The camera 开头；其余照旧守 K-PRM-101
+    when: config/director/camera_moves.yaml（runs / requires）、services/agent/ns_agent/camera_norm.py（run_ok / run_scoped / is_enabled）、tools/director/cut_plan.py、tests/test_director.py test_vocab_schema
+    then: 按剧运镜只在列出的剧可用；camera_norm 认得 orbit_slowmo / bolt_push_settle / handheld_follow 的模板原句并原样保留（不退回 arc / 固定）；别的剧遇到这些运镜按 arc 规则退回；requires:[走动] 的只在动作里有走动时可用（handheld_follow）
+    check: [tests/test_director.py]
+    evidence:
+      - {src: config/director/camera_moves.yaml, note: "STYLE-V2 Pika A/B：orbit_slowmo 3/3、bolt_push_settle 3/3 过；handheld_follow 走动镜 2/2、静坐镜 1/1 退化；总调度 21:0x 定启用前两个、handheld 限走动镜"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02
+
+  - id: K-REN-962
+    domain: render
+    link: [P4-P7]
+    title: V2 风格按段取（L-130）+ 运镜词表单一来源（QW-C1 读 camera_moves.yaml）+ 品牌标志三道防线（W-40）
+    when: gen_contract.style（segment_of / segment_preset / run_suffixes）、frame_job.build_first（job.preset / style_segment / style_warning）、tools/validate_qwen_script.py（camera_vocab / motion_move）、asset_refs（render_file / brand_negative）、config/vqa.json brand_logo
+    then: 幻想段 = render_quality 预设 v2_editorial_fantasy_c 的 style_suffix，现实段 = v2_editorial_reality_c2（run_style.json segments 只登记预设 id，风格句单一来源 = render_quality）；段落标记【幻想段】/【现实段】取自剧本节拍 / 字段，编译时剥掉；没标记按 default_segment（现实）并在 compile_trace.style_warning 告警；job.preset 随段切换。QW-C1 只认 camera_moves.yaml 里 enabled 且对本剧可用的运镜（写法 = id / 英文名 / 英文别名），不另存词表。SH2：参考槽只送 render_file（鞋垫品牌字已修掉），原图只展示；槽位句正向写“普通细跟、没有任何装饰金属和字母造型”；负面词带品牌标志（只在 cfg>1 预设生效）；出图后 Q9 brand_logo 阻断（gates.yaml blocking_checks 同步）
+    check: [tests/test_promptfix_v2.py, tests/test_qw_c1_vocab.py, tests/test_director.py, tests/test_vqa.py]
+    evidence:
+      - {src: config/compile/run_style.json, note: "L-130 项目方 21:1x 选定 fantasy_c / reality_c2；L-129 选 bolt_push_settle、handheld_follow 只限走动镜、orbit_slowmo 关"}
+      - {src: data/ab/v2_golden/takes.jsonl, note: "幻想段金样 4 次出图：前 3 次 Q9 eye_contact（第 3 次证据自相矛盾“右眼朝画面右，未看镜头”仍判缺陷），第 4 次五项全过（image_000_ecc57bc6）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

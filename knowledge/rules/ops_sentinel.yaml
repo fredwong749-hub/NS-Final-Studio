@@ -206,3 +206,15 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-02
+  - id: K-OPS-S19
+    domain: ops
+    link: [P5-P6]
+    title: 失败关闭的依赖服务要有存活探针——Q10 人数检测服务（gpu36 内网 :8893）从 gpu33 测 /health 且 loaded=true，连续 2 次失败开单派 FACTORY，并计入 SCORECARD GPU / 工作流
+    when: 首帧验收依赖的常驻检测服务、lan_proxy 改动或重启
+    then: SENTINEL S28 并进 gpu33 每拍的合并只读调用测内网 URL；检测服务停是失败关闭（首帧全卡 Q10），必须在两拍内发现
+    check: tests/test_sentinel.py::test_q10_detector
+    evidence:
+      - {src: docs/master/SLO.md, note: "11-02 20:4x 总调度：Q10 人数检测改由 gpu36 常驻服务承担，服务或 lan_proxy 一停两台首帧全卡"}
+    confidence: high
+    status: 确认
+    date: 2026-11-02

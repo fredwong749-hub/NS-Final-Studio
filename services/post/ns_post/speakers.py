@@ -18,7 +18,7 @@ voice; was 林晚's own voice before). line_overrides still win per line.
 """
 
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 from .tts import default_voiceover_speaker
 
@@ -46,6 +46,35 @@ MALE_NAMES = (("顾沉", "gu_chen"), ("陈宇", "chen_yu"))
 DEFAULT_MALE = "gu_chen"
 LEAD = "lin_wan"  # female lead: 她 / unnamed turns in dialogue
 SILENT_MARKERS = ("留白", "无对白", "无——")
+
+
+@dataclass(frozen=True)
+class Cast:
+    """说话人表。V1 = 本文件的常量（顾沉 / 陈宇 / 林晚 / 阿岚）；V2 = 按剧的音色表 cfg["cast"]
+    （ns_post.run_media.voice_config ← ns_agent.cast_table.speaker_cast ← P1 人物表），不另起表"""
+    named: tuple = NAMED
+    males: frozenset = frozenset(MALES)
+    male_names: tuple = MALE_NAMES
+    default_male: str | None = DEFAULT_MALE
+    lead: str = LEAD
+    lead_label: str = "林晚"
+    extra: dict = field(default_factory=dict)
+
+    @classmethod
+    def from_cfg(cls, cfg: dict | None) -> "Cast":
+        """音色表里有 cast（V2）就用它；没有 = V1 常量"""
+        c = (cfg or {}).get("cast")
+        if not c:
+            return V1_CAST
+        names = sorted(((n, cid) for n, cid in c["names"].items() if not re.fullmatch(r"[a-z0-9_]+", n)),
+                       key=lambda x: -len(x[0]))
+        males = frozenset(c.get("male") or [])
+        lead_name = next((n for n, cid in names if cid == c["lead"]), c["lead"])
+        return cls(named=tuple(names), males=males, male_names=tuple((n, cid) for n, cid in names if cid in males),
+                   default_male=None, lead=c["lead"], lead_label=lead_name, extra={"source": c.get("source")})
+
+
+V1_CAST = Cast()
 
 
 @dataclass(frozen=True)
@@ -89,19 +118,19 @@ def speakable(text: str) -> bool:
     return any(ch.isalnum() for ch in t)
 
 
-def speaker_from_note(note: str | None) -> tuple[str | None, str]:
+def speaker_from_note(note: str | None, cast: Cast = V1_CAST) -> tuple[str | None, str]:
     """(speaker id or None for "he"/unknown, kind) where kind is named | her | him | none."""
     if not note:
         return None, "none"
     hits = []
-    for token, sid in NAMED:
+    for token, sid in cast.named:
         i = note.find(token)
         if i >= 0:
             hits.append((i, -len(token), sid, "named"))
     for token in HER:
         i = note.find(token)
         if i >= 0:
-            hits.append((i, -len(token), LEAD, "her"))
+            hits.append((i, -len(token), cast.lead, "her"))
     for token in HIM:
         i = note.find(token)
         if i >= 0:
@@ -112,15 +141,15 @@ def speaker_from_note(note: str | None) -> tuple[str | None, str]:
     return sid, kind
 
 
-def shot_males(shot: dict) -> list[str]:
+def shot_males(shot: dict, cast: Cast = V1_CAST) -> list[str]:
     """Named males mentioned in the shot (notes first, then prompts), in order of first mention."""
     found: list[str] = []
     for line in shot.get("dialogue") or []:
-        sid, kind = speaker_from_note(line.get("speaker_note"))
-        if kind == "named" and sid in MALES and sid not in found:
+        sid, kind = speaker_from_note(line.get("speaker_note"), cast)
+        if kind == "named" and sid in cast.males and sid not in found:
             found.append(sid)
     text = " ".join(str(shot.get(k) or "") for k in ("dialogue_raw", "img_prompt", "motion_prompt"))
-    hits = sorted((text.find(tok), sid) for tok, sid in MALE_NAMES if tok in text)
+    hits = sorted((text.find(tok), sid) for tok, sid in cast.male_names if tok in text)
     for _, sid in hits:
         if sid not in found:
             found.append(sid)
@@ -150,19 +179,25 @@ def _segments(line: dict) -> list[tuple[str | None, str, str]]:
     return out
 
 
+class UnresolvedSpeaker(ValueError):
+    """V2：“他”找不到是谁（本镜 / 本集都没出现过男性人物）——不猜、不退回 V1 的顾沉"""
+
+
 def resolve_episode(episode: dict, overrides: dict[str, str] | None = None,
-                    narrator: str | None = None) -> list[SpokenLine]:
+                    narrator: str | None = None, cast: Cast | None = None) -> list[SpokenLine]:
     """All spoken lines of an episode in script order (per shot: dialogue lines, then the voiceover).
-    narrator: voiceover speaker; None = config/voices.json "voiceover_speaker" (fallback lin_wan)."""
+    narrator: voiceover speaker; None = config/voices.json "voiceover_speaker" (fallback lin_wan).
+    cast: 说话人表；None = V1 常量。V2 由调用方传 Cast.from_cfg(按剧的音色表)。"""
     overrides = overrides or {}
+    cast = cast or V1_CAST
     narrator = narrator or default_voiceover_speaker()
     ep = int(episode.get("number", 0))
     last_male = None
     lines: list[SpokenLine] = []
     for shot in episode.get("shots") or []:
         idx = int(shot["index"])
-        males = shot_males(shot)
-        shot_male = males[0] if males else (last_male or DEFAULT_MALE)
+        males = shot_males(shot, cast)
+        shot_male = males[0] if males else (last_male or cast.default_male)
         speakers: list[str] = []
         open_quote = False
         n = 0
@@ -173,7 +208,7 @@ def resolve_episode(episode: dict, overrides: dict[str, str] | None = None,
                     open_quote = text.count("“") > text.count("”") or (open_quote and "”" not in text)
                 if not speakable(text):
                     continue
-                sid, kind = speaker_from_note(note)
+                sid, kind = speaker_from_note(note, cast)
                 if kind == "named":
                     how = f"note:{note}"
                 elif kind == "her":
@@ -188,14 +223,17 @@ def resolve_episode(episode: dict, overrides: dict[str, str] | None = None,
                 elif len(speakers) >= 2 and speakers[-1] != speakers[-2]:
                     sid, how = speakers[-2], "alternating turns"
                 elif speakers:
-                    sid = shot_male if speakers[-1] == LEAD else LEAD
+                    sid = shot_male if speakers[-1] == cast.lead else cast.lead
                     how = "alternating turns"
                 else:
-                    sid, how = LEAD, "no note: 林晚"
+                    sid, how = cast.lead, f"no note: {cast.lead_label}"
+                if sid is None:      # 只有 V2（default_male = None）会到这里
+                    raise UnresolvedSpeaker(f"ep{ep:02d}-S{idx} 第 {n + 1} 句：“他”是谁判断不了（本镜 / 本集都没出现男性人物），"
+                                            f"请在剧本说话人注里写名字，或在 line_overrides 指定")
                 key = f"ep{ep:02d}-S{idx}#{n}"
                 if key in overrides:
                     sid, how = overrides[key], "config line_overrides"
-                if sid in MALES:
+                if sid in cast.males:
                     last_male = sid
                 speakers.append(sid)
                 lines.append(SpokenLine("dialogue", idx, n, sid, tts_text(text), note or "", raw, how))

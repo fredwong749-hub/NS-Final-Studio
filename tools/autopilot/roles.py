@@ -121,9 +121,12 @@ def table_md() -> str:
     return "\n".join(lines) + "\n"
 
 
-def attribute_bug(symptoms: list[str], episode: int | None = None, write: bool = True) -> dict:
-    """CHAINSPEC 归因（确定性，不调 LLM）：审片 / 项目方反馈 → 连接 → 规则草案 knowledge/inbox/"""
+def attribute_bug(symptoms: list[str], episode: int | None = None, write: bool = True, run: str | None = None) -> dict:
+    """CHAINSPEC 归因（确定性，不调 LLM）：审片 / 项目方反馈 → 连接 → 规则草案 knowledge/inbox/。
+    run = 哪部剧的导入稿（不给 = 当前剧，MERGE-OPS-O）"""
     cmd = [str(ROOT / PY), str(ROOT / "tools" / "pipeline" / "attribute_bug.py"), *symptoms]
+    if run:
+        cmd += ["--run", run]
     if episode:
         cmd += ["--episode", str(episode)]
     if write:

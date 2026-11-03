@@ -337,6 +337,7 @@ h1{{font-size:22px}}h2{{font-size:18px;margin-top:32px;border-bottom:1px solid #
 td{{padding:2px 6px;border-bottom:1px solid #eee;vertical-align:top}}td:first-child{{color:#666;white-space:nowrap;width:110px}}
 .cap{{font-size:12px;color:#555}}.fail{{color:#b00}}.ok{{color:#070}}.note{{font-size:14px}}</style></head><body>
 <h1>V2 整季主题配乐候选（3 主题 × 幻想 / 现实）</h1>
+<div style='background:#2a2410;border:1px solid #a88a2a;padding:10px 14px;border-radius:6px;margin:10px 0'><b>项目方已选（L-131）</b>：A 外滩夜光 · 现实编配（cover 0.5）、B 静安秀场 · 现实编配（cover 0.55）→ 现实段；C 海派霓虹 · 幻想编配 → 幻想段。曲库登记在 config/music_v2.json。其余候选已归档（不删），下面保留供对照。</div>
 <p class="note">生成 {e(d['generated_at'])}，作业 {e(d['job'])}；响度已统一到 {d['output']['lufs']} LUFS / {d['output']['true_peak_db']} dBTP / 48 kHz，可直接 A/B。
 集级配乐仍按 L-118（剪辑锁定后按整集配），这里只定整季主题。</p>
 <div class="note">{STYLE_NOTE}</div>"""]

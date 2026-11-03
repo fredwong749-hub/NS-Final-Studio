@@ -53,7 +53,8 @@ def _save(rows: list[dict]) -> None:
 def _url(rel: str | None) -> str | None:
     if not rel or not (ROOT / rel).is_file():
         return None
-    return f"/api/v2/asset-file?path={rel}&v={int((ROOT / rel).stat().st_mtime)}"
+    from urllib.parse import quote          # V2CUT-O：文件名里有 #（sk_white_cyc_base_sk_white_cyc#2.png）不编码会被当成锚点截断
+    return f"/api/v2/asset-file?path={quote(rel, safe='/')}&v={int((ROOT / rel).stat().st_mtime)}"
 
 
 def _card(aid: str, kind: str, name: str, file: str | None, adult: bool, route: str | None, edit: dict | None, note: str = "") -> dict:
@@ -80,6 +81,10 @@ def registered_files(man: dict | None = None) -> dict[str, bool]:
         for it in (ch.get("items") or {}).values():
             if it.get("file"):
                 out[it["file"]] = bool(it.get("adult") or it.get("route") == "local_only")
+    for sc in (man.get("scenes") or {}).values():        # AUTOFIX-O 11-03：场景底图（scenes[sid].base）也是登记文件，以前漏了 → 404
+        b = (sc or {}).get("base") if isinstance(sc, dict) else None
+        if isinstance(b, dict) and b.get("file"):
+            out[b["file"]] = bool(b.get("adult") or b.get("route") == "local_only")
     return out
 
 

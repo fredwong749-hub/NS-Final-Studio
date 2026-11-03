@@ -1,10 +1,10 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { ConfirmDialog, HelpDialog, Palette, RejectDialog, Toasts } from "./components/Dialogs";
+import { ConfirmDialog, HelpDialog, Palette, Toasts } from "./components/Dialogs";
 import { Drawer } from "./components/Drawer";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ReviewMode } from "./components/ReviewMode";
 import { Viewer } from "./components/Viewer";
-import { nextUnreviewed, useKeymap } from "./keymap";
+import { useKeymap } from "./keymap";
 import { StudioProvider, useStudio } from "./store";
 import { useHash } from "./projects/route";
 import { CanvasV3 } from "./v3/Canvas";
@@ -27,14 +27,17 @@ applyUiStyle();
 window.addEventListener("hashchange", () => applyUiStyle());
 import { LiveBridge } from "./v3/LiveBridge";
 import { FeedbackHost } from "./v3/FeedbackLayer"; // UIRSI2 反馈模式：高亮 / 点选 / 弹框 / 列表抽屉
+import { NotFound, PageIntro } from "./v3/PageIntro"; // W5 UIUX：每页顶部一句话 + 404
 
 // fredw-92/W4a：v3 新页面（W4c），挂在 #/script-create、#/models、#/assets
 const V3_PAGE_COMP: Record<V3Page, ReturnType<typeof lazy>> = {
   "#/script-create": lazy(() => import("./v3/pages/ScriptFlowPage")), // UX6（D5）：① 创作 + ② 导入 合成一页
   "#/models": lazy(() => import("./v3/pages/ModelsPage")),
   "#/cut": lazy(() => import("./v3/pages/CutPage")), // UX5（D1）：⑤ 成片页
-  "#/assets": lazy(() => import("./v3/assets/V2AssetsPage")), // V2 资产页（20:10 总调度）：只读 assets_v2/manifest.json；成人类只给文字卡
-  "#/assets-v1": lazy(() => import("./v3/assets/AssetCenter")), // 旧资产中心（V1 / 人物页 PeopleHub 等），不删，换到这里
+  // NAVFLOW-F 11-03（项目方 L-146：“#/assets 这里很多 v1 半成品也没有了”）：#/assets 换回资产中心（人物页 / 造型 / 单品 / 场景 / 声音 / 图像编辑器），
+  // 后端 character-hub 已按当前剧（primary）取人物和资产包；只读的资产包清单页（V2AssetsPage）保留为资产中心左栏“资产包清单”（?type=pack）
+  "#/assets": lazy(() => import("./v3/assets/AssetCenter")),
+  "#/assets-v1": lazy(() => import("./v3/assets/AssetCenter")), // 旧地址保留（有人收藏过），同一个页面
   "#/trash": lazy(() => import("./v3/pages/TrashRoute")), // EDITDEL 回收站
   "#/audit": lazy(() => import("./v3/pages/AuditRoute")), // 操作记录（独立页）
   "#/script-ab": lazy(() => import("./v3/pages/ScriptABPage")), // 回退补回：剧本 A/B 对比
@@ -77,7 +80,7 @@ function BootError({ err, retry, slim }: { err: string; retry: () => Promise<unk
         <summary>技术细节</summary>
         <p>请求 /api/episodes 失败：{err}</p>
         <p>
-          后台地址 127.0.0.1:8800。手动启动：<code>uv run uvicorn ns_api.app:app --port 8800</code>
+          后台地址 127.0.0.1:8800。一直连不上就告诉总调度“后台没响应”，由他重启（不用你敲命令）。
         </p>
       </details>
     </div>
@@ -107,7 +110,10 @@ function Shell() {
   const st = useStudio();
   useKeymap(st);
   const { episodes, loadError, refreshEpisodes } = st;
-  const page = pageOf(useHash());
+  const hash = useHash();
+  const page = pageOf(hash);
+  // W5 UIUX：#/ 开头但不是任何页面的地址 = 404（以前会静默掉进画布，看不出打错了）。#/、#/? 仍是画布；#/projects、#/inbox 由 Root 自动跳转
+  const unknown = !page && /^#\/[^?]/.test(hash) && !/^#\/(projects|inbox)(\/|\?|$)/.test(hash);
 
   // UX4（审查 R8）：连不上后台时写人话、自动重连并计次；命令行收进“技术细节”。
   // 资产 / 模型 / 剧本创作等独立页面不依赖集列表：照常显示页面，只在顶部挂一条提示。
@@ -139,7 +145,9 @@ function Shell() {
 
   // UIRSI 重构：只有一个外壳——新页面（#/…）或分镜画布（审片 / 精修）。旧镜头行 + 检查器、旧总览、旧资产库、人物管理、节点画布已下线。
   const Page = page ? V3_PAGE_COMP[page] : null;
-  const body = Page ? (
+  const body = unknown ? (
+    <NotFound hash={hash} />
+  ) : Page ? (
     <main className="v3-page">
       <ErrorBoundary name="页面">
         <Suspense fallback={<div className="empty">加载中…</div>}>
@@ -157,7 +165,8 @@ function Shell() {
     <div className="app v3-app">
       <StaleBanner />
       <TopBarV3 page={page} />
-      {(!page || page === "#/cut" || page === "#/videos" || page === "#/frames") && <EpisodeScope page={page} />}
+      {!unknown && <PageIntro page={page} />}
+      {!unknown && (!page || page === "#/cut" || page === "#/videos" || page === "#/frames") && <EpisodeScope page={page} />}
       {body}
       <ErrorBoundary name="底部抽屉">
         <Drawer />
@@ -169,13 +178,7 @@ function Shell() {
         <Viewer />
       </ErrorBoundary>
       <ConfirmDialog />
-      <RejectDialog
-        onDone={() => {
-          if (!st.reviewMode) return;
-          const n = nextUnreviewed(st);
-          if (n) st.select(n);
-        }}
-      />
+      {/* W5 UIUX 11-03（L-123）：“打回”弹框已摘掉——全站只有“用这张 / 修改”，没有任何入口再打开它（store.setRejectFor 只被置空） */}
       <HelpDialog />
       <ErrorBoundary name="资料清单">
         <MaterialsDrawerHost />

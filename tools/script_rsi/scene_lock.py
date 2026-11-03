@@ -178,7 +178,7 @@ def main(argv=None) -> int:
             chunk = chunks[0]
         else:
             from ns_api import script_chat as SC
-            pre = SC.script_header(registry={})[0] + "\n---\n\n"
+            pre = SC.script_header(registry={}, run=SC.run_for_dir(f))[0] + "\n---\n\n"
             chunk = (t[t.find("## ep"):] if "## ep" in t else t).rstrip() + "\n\n---\n"
         wd = ROOT / "data" / "rsi" / "_scene_check" / f"ep{a.episode:02d}"
         wd.mkdir(parents=True, exist_ok=True)

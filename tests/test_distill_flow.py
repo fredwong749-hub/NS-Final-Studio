@@ -489,3 +489,9 @@ def test_tick_parts_independent(tmp_path):
     assert st["global"]["api_restart_at"] and st["global"]["line3_tick_at"]
     with pytest.raises(ValueError):
         FL.tick_part("nope", root)
+
+
+
+@pytest.fixture(autouse=True)
+def _inbox_tmp(tmp_path, monkeypatch):
+    monkeypatch.setenv("NSFS_INBOX_DIR", str(tmp_path / "inbox_env"))     # 派人请求不碰真实 data/master/

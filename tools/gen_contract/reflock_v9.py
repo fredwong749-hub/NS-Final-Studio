@@ -16,10 +16,13 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+import runs as RUNS  # noqa: E402
+_LEGACY = RUNS.legacy_run(ROOT)   # I-16：第一季专用历史工具（入口 gate_legacy_tool 要求显式 --run）
 for p in ("services/render_router", "services/agent", "packages/schema", "tools/pipeline", "tools/series10_imggen", "tools/gen_contract"):
     sys.path.insert(0, str(ROOT / p))
 
-RUN = ROOT / "data/pipeline/runs/series10_v1"
+RUN = ROOT / ("data/pipeline/runs/" + _LEGACY)
 OUT = RUN / "images" / "reflock_val" / "v9"
 STATE = OUT / "state.json"
 LANE, URL = "gpu33:1", "http://127.0.0.1:18189"
@@ -50,18 +53,18 @@ def jobs():
         vs = [("vR", {}), ("vN", None)] + ([("vRb", {"two_person": "both_faces"})] if len(on) > 1 else [])
         for vid, kw in vs:
             if kw is None:
-                prompt, c, _, _ = IJ.frame_prompt_full(ep, shot, g, faces, "series10_v1", bible, assets=False)
+                prompt, c, _, _ = IJ.frame_prompt_full(ep, shot, g, faces, _LEGACY, bible, assets=False)
                 refs, rec = faces, None
             else:
-                prompt, c, _, _ = IJ.frame_prompt_full(ep, shot, g, [], "series10_v1", bible)     # 正文 + S★ 后缀
-                sr, plan = AR.plan_for("series10_v1", ep, shot, "qwen_image_2.1", **kw)
-                body = prompt[len(AR.plan_for("series10_v1", ep, shot, "qwen_image_2.1")[1].prompt_prefix):]
+                prompt, c, _, _ = IJ.frame_prompt_full(ep, shot, g, [], _LEGACY, bible)     # 正文 + S★ 后缀
+                sr, plan = AR.plan_for(_LEGACY, ep, shot, "qwen_image_2.1", **kw)
+                body = prompt[len(AR.plan_for(_LEGACY, ep, shot, "qwen_image_2.1")[1].prompt_prefix):]
                 prompt, refs, rec = plan.prompt_prefix + body, plan.files, AR.record(sr, plan)
             for seed in SEEDS:
                 out.append({"id": f"{sid}_{vid}_s{seed}", "shot": sid, "variant": vid, "seed": seed, "prompt": prompt,
                             "refs": refs, "asset_refs": rec, "cast": IJ.cast_of(shot), "loras": [["krea2_film_texture_qwen21.safetensors", 0.5]],
                             "compiled_by": "tools/pipeline/image_jobs.py → ns_agent.compiler.compile_shot",
-                            "framing_project": "series10_v1", "recipe": "v9：leica_sstar（imgfix_ab.build sstar，无 lin_wan_qi）"})
+                            "framing_project": _LEGACY, "recipe": "v9：leica_sstar（imgfix_ab.build sstar，无 lin_wan_qi）"})
     return out
 
 
@@ -132,6 +135,7 @@ def score(js):
 
 
 def main():
+    RUNS.gate_legacy_tool(None, __file__)
     sys.stdout.reconfigure(encoding="utf-8")
     js = jobs()
     OUT.mkdir(parents=True, exist_ok=True)

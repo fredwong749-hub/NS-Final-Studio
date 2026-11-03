@@ -130,7 +130,8 @@ def p1_review(d: Path) -> dict | None:
     od = state.get("owner_direction")
     return {"rounds": rounds, "latest": rounds[-1] if rounds else None,
             "threshold": {k: cfg.get(k) for k in ("min_mean", "min_item_mean", "max_rounds", "judges")},
-            "owner_direction": ({**{k: od.get(k) for k in ("at", "round", "mean", "totals", "sha")}, "by": "总调度", "why": _og().owner_direction_text(d)}      # W-39：给项目方看的不带内部编号（审计原文在 STATE.json）
+            "owner_direction": ({**{k: od.get(k) for k in ("at", "round", "mean", "totals", "sha")}, "by": "总调度", "why": _og().owner_direction_text(d),
+                                 "fill_note": _og().pending_fill_note(d)}                 # 占位词提示（来源 fill_note，没有 = null）      # W-39：给项目方看的不带内部编号（审计原文在 STATE.json）
                                 if (od and _og().owner_direction(d)) else None),          # 总调度转项目方定方向（只对当时那一稿有效）
             "revise_options": list(_og().REVISE_OPTIONS)}
 

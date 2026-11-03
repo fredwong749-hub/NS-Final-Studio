@@ -42,6 +42,15 @@ WATCH = [ROOT / "services/api", ROOT / "services/render_router", ROOT / "service
 COMPILE_DIRS = [ROOT / "services/api", ROOT / "services/render_router", ROOT / "services/agent"]
 ALERTS = ROOT / "data/qa/alerts.jsonl"
 WEB = ROOT / "apps/web"
+# 总调度 22:0x 止血开关：文件不存在或 enabled 不是 true → 守护不自动执行重启（只排队、只告警）。打开由总调度写 {"enabled": true, "by": "..."}
+AUTO_SWITCH = ROOT / "data/ops/api_guard_auto.json"
+
+
+def auto_enabled() -> bool:
+    try:
+        return json.loads(AUTO_SWITCH.read_text(encoding="utf-8-sig")).get("enabled") is True
+    except (OSError, ValueError, AttributeError):   # arch-ok: 读不到开关 = 关（宁可不自动重启）
+        return False
 
 
 def _newest(d: Path, exts: tuple[str, ...]) -> float:
@@ -166,8 +175,12 @@ def tick(dry: bool = False) -> dict:
         act["dist"] = refresh_dist(dry)
     except Exception as e:  # noqa: BLE001 — dist 刷新失败不拦重启判断
         act["dist"] = {"error": repr(e)[:200]}
+    rv = revive_check(dry)          # 22:0x：API 不在先处理（告警 / 补起一次），不再把“读不到 /api/jobs”当成“不重启”就静默
+    if rv is not None:
+        act["api_down"] = rv
+        return act
     files = changed_since_up()
-    todo = RQ.pending(HOST)
+    todo = covered_filter(RQ.pending(HOST))
     if files and not todo:
         reason = "后端改动合入：" + "、".join(files[:6]) + (f" 等 {len(files)} 个" if len(files) > 6 else "")
         act["requested"] = reason
@@ -196,23 +209,162 @@ def tick(dry: bool = False) -> dict:
     act["would_restart"] = [r.get("id") for r in todo]
     if dry:
         return act
-    t0 = time.time()
+    if not auto_enabled():   # 总调度 22:0x 止血：今晚三次自动重启把 :8800 弄挂；开关打开前只排队、不执行“杀旧起新”
+        act["skip"] = f"自动重启已停用（止血，开关 data/ops/{AUTO_SWITCH.name}）；待办 {len(todo)} 条留在队列，等人工或开关打开"
+        return act
     rec = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "host": HOST, "request_ids": [r["id"] for r in todo],
            "by": sorted({r.get("by") or "?" for r in todo}), "reasons": [r.get("reason") for r in todo][:20],
            "urgent_jump": bool(urgent and gap < MIN_GAP_S), "since_last_restart_min": round(gap / 60, 1)}
-    try:
-        p = subprocess.run(["pwsh", "-NoProfile", "-File", str(ROOT / "ops/restart_api.ps1")], capture_output=True, timeout=300,
-                           cwd=str(ROOT))
-        rec["restart_out"] = (p.stdout.decode("utf-8", "replace") + p.stderr.decode("utf-8", "replace")).strip()[-300:]
-        rec["ok"] = p.returncode == 0 and bool(_marker().get("up_at"))
-    except Exception as e:  # noqa: BLE001
-        rec["ok"] = False
-        rec["error"] = repr(e)[:300]
-    rec["secs"] = round(time.time() - t0, 1)
+    rec.update(run_restart_ps1(by="API_GUARD"))
     if rec["ok"]:
-        RQ._append(RQ.DONE, rec)       # 失败不记 done：请求留着，下一拍再试
+        RQ._append(RQ.DONE, rec)       # 失败不记 done：请求留着；失败已由 restart_api.ps1 写 restart_failed + 开告警
     act["restart"] = rec
     return act
+
+
+# ---------------------------------------------------------------- 22:0x 总调度：结果以 restart_events 为准 + 挂了告警 / 补起一次
+EVENTS = ROOT / "data/ops/restart_events.jsonl"
+PS1_LOG = ROOT / "ops/logs/api_restart_guard_ps1.log"
+# restart_api.ps1 最长：/api/jobs 10 + 预检 60+30 + 端口 240（RESTARTFIX-O：90→240）+ 起来 180 + 进程快照 / 停树 ≈ 20 → ≈ 540 s；
+# vite build 240 + 本值 < flow.api_restart_tick（900）< resident_sync AUTOFLOW_PARTS["api"]（960）——外层先超时会 taskkill /T 把正在跑的 ps1 一起杀掉
+# （看门狗经 api_watchdog.py --detach 起，已不在这棵树里）；test_restartfix_o_timeout_chain 核这条链
+PS1_TIMEOUT_S = 600
+PS1_WORST_S = 10 + 60 + 30 + 240 + 180 + 20
+
+
+def _events_from(offset: int) -> list[dict]:
+    try:
+        with open(EVENTS, "rb") as f:
+            f.seek(offset)
+            raw = f.read().decode("utf-8-sig", "replace")
+    except OSError:   # arch-ok: 事件文件读不到 = 没有事件（revive_check 按“没有可补起的故障”处理，宁可不补）
+        return []
+    out = []
+    for ln in raw.splitlines():
+        ln = ln.strip().lstrip("﻿")
+        if ln:
+            try:
+                out.append(json.loads(ln))
+            except ValueError:   # arch-ok: 坏行跳过
+                pass
+    return out
+
+
+def outcome(events: list[dict]) -> dict:
+    """本次 restart_api.ps1 的结局（只看它跑之后新写的事件）：restart_done 且 up_at 有值 = 成功；restart_failed = 失败（带 stage / old_kept）；
+    都没有 = 没跑完（被杀 / 超时）——不再拿管道 EOF / 退出码当准（19:24 后多次“已成功却记失败”，请求一直挂着反复重启）"""
+    for e in reversed(events):
+        if e.get("event") == "restart_done":
+            return {"ok": bool(e.get("up_at")), "up_at": e.get("up_at"), "stage": None if e.get("up_at") else "not_up"}
+        if e.get("event") == "restart_failed":
+            return {"ok": False, "stage": e.get("stage"), "why": e.get("why"), "old_kept": e.get("old_kept")}
+        if e.get("event") == "restart_skipped":      # RESTARTFIX-S：lock_busy（别人在重启，没动）/ already_healthy（补起时 API 已被拉起，没动）
+            return {"ok": e.get("stage") == "already_healthy", "stage": e.get("stage"), "why": e.get("why")}
+    return {"ok": False, "stage": "unfinished"}
+
+
+def run_restart_ps1(by: str, force: bool = False, runner=None) -> dict:
+    """跑 ops/restart_api.ps1：输出写文件（不接管道——新起的 API 会继承 pwsh 的句柄，接管道就一直等不到 EOF，
+    20:07 / 21:45 两拍就是这样卡满 360 s、明明起来了却记失败，tests/test_restart_api_ps1.py 复现过）；结局读 restart_events"""
+    runner = runner or subprocess.run
+    t0 = time.time()
+    try:
+        off = EVENTS.stat().st_size
+    except OSError:
+        off = 0
+    cmd = ["pwsh", "-NoProfile", "-File", str(ROOT / "ops/restart_api.ps1"), "-By", by] + (["-Force", "-Revive"] if force else [])   # force 只有补起用：-Revive 让脚本停旧进程之前再测一次，已健康就不动
+    res: dict = {}
+    try:
+        PS1_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(PS1_LOG, "ab") as f:
+            p = runner(cmd, stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT, timeout=PS1_TIMEOUT_S, cwd=str(ROOT))
+        res["rc"] = getattr(p, "returncode", None)
+    except subprocess.TimeoutExpired:
+        res["rc"] = "timeout"
+    except Exception as e:  # noqa: BLE001
+        res["rc"] = "error"
+        res["error"] = repr(e)[:300]
+    evs = _events_from(off)
+    res.update(outcome(evs))
+    if res["stage"] == "unfinished":
+        # RESTARTFIX-O P2-4：脚本被超时杀 / 中途死掉——看它是否已走到停旧（stopping_old / port_residual）；
+        # 走到了 = 旧进程已停、新的未必起来 → 补写 restart_failed(old_kept=false)，让下一拍 revive_check 能补起；没走到 = 旧进程还在
+        stopped = any(e.get("event") in ("stopping_old", "old_stopped", "port_residual") for e in evs)
+        res["old_kept"] = not stopped
+        RQ._append(EVENTS, {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "event": "restart_failed",
+                            "stage": "ps1_unfinished_after_stop" if stopped else "ps1_unfinished_before_stop",
+                            "why": f"restart_api.ps1 没跑完（rc={res['rc']}）", "old_kept": not stopped, "by": "api_restart_guard"})
+        _alert("A-API-RESTART-FAIL", "crit", f":8800 重启脚本没跑完（rc={res['rc']}，{'已停旧进程' if stopped else '还没停旧进程'}），没有 restart_done / restart_failed，请人工核对 API 状态")
+    res["secs"] = round(time.time() - t0, 1)
+    return res
+
+
+def _alert(aid: str, level: str, msg: str, dedupe_s: int = 1800) -> None:
+    """data/qa/alerts.jsonl（infra_watchdog 同格式）；同 id 同消息 dedupe_s 内只记一次"""
+    now = time.time()
+    for r in reversed(RQ._lines(ALERTS)[-200:]):
+        if r.get("id") == aid and r.get("msg") == msg and now - float(r.get("t") or 0) < dedupe_s:
+            return
+    RQ._append(ALERTS, {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "t": now, "id": aid, "state": "open", "level": level,
+                        "msg": msg, "by": "api_restart_guard"})
+
+
+API_UP_TIMEOUT_S = 25      # ISS-1103-014614-9db2(5)：/api/season 首算最多等 SEASON_FIRST_WAIT_S（20 s），5 s 会把刚起、正在首算的 API 误报 A-API-DOWN
+
+
+def api_up(get=None) -> bool:
+    get = get or _get
+    for i in range(2):
+        try:
+            get("/api/season", timeout=API_UP_TIMEOUT_S)
+            return True
+        except Exception:  # noqa: BLE001 — 连不上 / 超时 / 非 200 都算不在
+            if i == 0:
+                time.sleep(3)
+    return False
+
+
+def covered_filter(todo: list[dict], up_at: float | None = None) -> list[dict]:
+    """请求之后已经有一次成功启动（标记文件 up_at，手动重启也算）→ 这条请求已被满足，不再触发重启。
+    （20:14 / 20:26 的请求在 21:15、21:34、22:02 的手动重启后仍算“待办”，自动开关一开会再白杀一次）"""
+    up = _ts(_marker().get("up_at")) if up_at is None else up_at
+    return [r for r in todo if not (up and float(r.get("t") or _ts(r.get("at"))) < up)]
+
+
+REVIVE_WINDOW_S = 1800
+
+
+def revive_check(dry: bool = False, up=None, events=None, now: float | None = None) -> dict | None:
+    """:8800 不在时：开告警 A-API-DOWN；若是守护自己的重启弄挂的（30 分钟内最后一条重启结局是 restart_failed 且 old_kept=false），
+    且这之后没补起过，且开关打开 → 补起一次（-Force：旧进程本来就不在，脚本里先验新代码、等端口再起）。返回 None = API 在"""
+    if (up or api_up)():
+        return None
+    now = now or time.time()
+    r: dict = {"api": "down"}
+    _alert("A-API-DOWN", "crit", ":8800 连不上（/api/season 两次失败）") if not dry else None
+    evs = events if events is not None else _events_from(0)[-300:]
+    last_fail = next((e for e in reversed(evs) if e.get("event") in ("restart_failed", "restart_done")), None)
+    # P1-1（OVERSIGHT 第 16 轮）：窗口内出现过任何一次 revive_attempt 就不再补（补起自己失败会写新的 restart_failed，不能只看最后一条）
+    # RESTARTFIX-O P2-3：补起什么都没做（lock_busy = 别人在重启 / 停旧之前就被杀）会写 revive_released，把这次额度还回来
+    inwin = lambda kind: sum(1 for e in evs if e.get("event") == kind and now - _ts(e.get("at")) < REVIVE_WINDOW_S)
+    revived = inwin("revive_attempt") > inwin("revive_released")
+    eligible = bool(not revived and last_fail and last_fail.get("event") == "restart_failed" and last_fail.get("old_kept") is False
+                    and now - _ts(last_fail.get("at")) < REVIVE_WINDOW_S)
+    r["revive_eligible"] = eligible
+    if not eligible:
+        r["skip"] = "不补起：不是守护重启弄挂的 / 已补起过 / 超过 30 分钟——等人工"
+        return r
+    if dry or not auto_enabled():
+        r["skip"] = "可补起，但" + ("dry" if dry else "自动开关关着") + "——等人工"
+        return r
+    RQ._append(EVENTS, {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "event": "revive_attempt", "by": "API_GUARD"})
+    r["revive"] = run_restart_ps1(by="API_GUARD（补起）", force=True)
+    if r["revive"].get("stage") in REVIVE_VOID_STAGES:
+        RQ._append(EVENTS, {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "event": "revive_released", "stage": r["revive"].get("stage"), "by": "API_GUARD"})
+    return r
+
+
+REVIVE_VOID_STAGES = ("lock_busy", "ps1_unfinished_before_stop")      # 补起没碰任何进程：不消耗额度
 
 
 def main(argv=None) -> int:

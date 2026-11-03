@@ -49,6 +49,17 @@ ADULT_KEYWORDS = (
     "塞入", "胸口睡", "舌钉",
 )
 
+# “裸”按语境判断（总调度 11-02）：妆容 / 颜色类词里的“裸”不算成人；裸体 / 裸露 / 全裸 等照样命中；其余单字“裸”仍判成人（失败关闭）
+NUDE_BENIGN = ("裸妆", "裸色", "裸粉", "裸感", "裸粉美甲", "裸色丝袜")
+
+
+def _keyword_hit(k: str, text: str) -> bool:
+    if k == "裸":
+        for w in sorted(NUDE_BENIGN, key=len, reverse=True):
+            text = text.replace(w, "")
+    return k in text
+
+
 # 人工强制判为成人的镜头（QC 反复检出裸露、关键词没覆盖到的），见 config/adult_overrides.json
 ADULT_OVERRIDES_PATH = Path(os.environ.get("NS_PROJECT_ROOT") or Path(__file__).resolve().parents[3]) / "config" / "adult_overrides.json"  # T42
 
@@ -516,7 +527,7 @@ def classify_adult(ep: Episode, shot: Shot, bible: Bible | None = None) -> list[
     text = " ".join(filter(None, [shot.img_prompt, shot.motion_prompt, shot.sound,
                                   shot.voiceover.text if shot.voiceover else "",
                                   *(e.text for e in shot.extras)]))
-    reasons += [f"关键词:{k}" for k in ADULT_KEYWORDS if k in text]
+    reasons += [f"关键词:{k}" for k in ADULT_KEYWORDS if _keyword_hit(k, text)]
     if shot.id in (forced := _forced_adult(b)):
         reasons.append(f"人工指定:{forced[shot.id]}")
     return reasons
@@ -630,11 +641,20 @@ SCENE_SEGMENT_FIELDS = (("名称", "name"), ("空间描述", "space"), ("时段"
                         ("固定陈设", "fixtures"))
 
 
+def _no_segment_marks(text: str | None) -> str | None:
+    """L-130（ISS-1103-005241-bf53）：【幻想段】/【现实段】段落标记只给调色 / 元数据用（frame_job 用 style.segment_of 读剧本原字段判段），
+    编译器产出的任何提示词里都不许出现。标记写法只有一个来源：gen_contract.style.strip_segment_marks（懒加载，避免循环导入）"""
+    if not text:
+        return text
+    from .gen_contract import style as _ST
+    return _ST.strip_segment_marks(text)
+
+
 def scene_segment(shot: Shot, g: ScriptGlobals) -> str:
     """S3（fredw-92/S-back）：首帧提示词的【场景】段。冒号前是系统字段名，冒号后逐字取剧本场景表（ScriptGlobals.scene_library）
     与本镜 **场景** 行的细节，不加任何词；剧本没写场景 → ""（旧剧本提示词不变）"""
     sid = getattr(shot, "scene_id", None)
-    detail = (getattr(shot, "scene_detail", None) or "").strip()
+    detail = (_no_segment_marks(getattr(shot, "scene_detail", None)) or "").strip()   # L-130：段落标记不进出图提示词
     if not sid:
         return ""
     entry = next((e for e in getattr(g, "scene_library", None) or [] if e.scene_id == sid), None)
@@ -680,7 +700,7 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
     # 只给 legacy_video_prompt（死字段，不进 H3）用，保持旧口径
     vid_kept = [t for t in shot.motion_triggers if t in by_trigger and by_trigger[t].file in available_loras]
 
-    img_body = _strip_triggers(shot.img_prompt, shot.img_triggers)
+    img_body = _no_segment_marks(_strip_triggers(shot.img_prompt, shot.img_triggers)) or ""      # L-130：标记不进正文
     reasons = classify_adult(ep, shot, b)
     lock_names = [c.name for c in g.character_locks]
     names = present_characters(shot, img_body, lock_names + [c.name for c in b.characters if c.name not in lock_names], b)
@@ -788,7 +808,7 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
                            if t not in first_own and not (subject in ("part", "object") and FR.FACE_TERM_RE.search(t))),
                          *materials, boost_first, lens_term(image_style, b), image_style)
 
-    motion_body = _strip_triggers(shot.motion_prompt, shot.motion_triggers)
+    motion_body = _no_segment_marks(_strip_triggers(shot.motion_prompt, shot.motion_triggers)) or ""
     # 声音段：画布修改 > 剧本 v3 的 H3 英文声音 > 剧本 sound 行（去掉人声）；音乐：镜头修改 > 整集 > N/A
     if soundscape:
         v_sound, v_sound_src = soundscape, "edit"
@@ -823,7 +843,7 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
         lips_added, h3_text = new != h3_text, new
     # DIRECTOR 11-02（总调度批复 r2 第 1 条，CONSENT → DIRECTOR）：运镜句确定性规范化到 Pika 稳定范围（K-REN-801），改动记进 h3_norm
     from . import camera_norm as CN
-    h3_text, h3_norm = CN.normalize_video_prompt(h3_text, motion_body)
+    h3_text, h3_norm = CN.normalize_video_prompt(h3_text, motion_body, run=framing_project)   # 显式传本镜所属的剧（K-REN-961）
     legacy_video_prompt = _join("，".join(vid_kept), motion_body, g.motion_suffix, video_style, b.video_tail) \
         + soundscape_block(v_sound, v_music)
 
@@ -842,6 +862,9 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
                         *last_materials, boost_last, lens_term(image_style, b), image_style) \
         if end or boost_last else ""
 
+    # L-130 单一出口：上面各段（场景表字段、导演加强等）万一带了段落标记，出口再清一次——首帧 / 尾帧 / 视频提示词一律不含
+    image_prompt, last_prompt = _no_segment_marks(image_prompt) or "", _no_segment_marks(last_prompt) or ""
+    h3_text, legacy_video_prompt = _no_segment_marks(h3_text) or "", _no_segment_marks(legacy_video_prompt) or ""
     safe_negative = "" if reasons else b.safe_negative
     return CompiledShot(
         shot_id=shot.id, adult=bool(reasons), adult_reasons=reasons,

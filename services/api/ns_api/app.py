@@ -95,7 +95,22 @@ app.include_router(MG.router)
 from ns_api import jobs as JOBS  # noqa: E402  v1 共享任务队列（按 GPU 分道；GET /api/jobs/{id}、cancel）——W2/W3 共用，只挂一次
 if not any(getattr(r, "path", "") == "/api/jobs/{job_id}" for r in app.routes):
     app.include_router(JOBS.router)
-app.router.on_startup.append(JOBS.restore)   # 上次没跑完的任务标 failed（“API 重启中断”），不悄悄丢
+_PREFLIGHT = bool(os.environ.get("NS_API_PREFLIGHT"))   # 重启前备用端口预检实例（ops/restart_api.ps1 设）：不跑会改真数据 / 重派任务的启动任务（RESTARTFIX-S P2-2）
+from ns_api import instance as INSTANCE  # noqa: E402
+# RESTARTFIX-O（ISS-1103-011049-7420）：会改真数据 / 重派任务的启动副作用只在看门狗管理的正式实例（NS_API_MANAGED=1 + 单实例锁）上跑；
+# TestClient（decision_check 每 10 分钟一次）/ 手起 uvicorn / 预检 / pytest 都不跑。_SIDE_EFFECTS 为假时 _PREFLIGHT 口径的分支一并跳过
+_SIDE_EFFECTS = INSTANCE.startup_side_effects_allowed()
+_PREFLIGHT = _PREFLIGHT or not _SIDE_EFFECTS
+
+
+@app.get("/api/_instance")
+def instance_info():
+    """本进程身份（pid / token / 是否正式实例）；owner_pick replay 用 token 确认自己就是 :8800 上服务的那一份"""
+    return INSTANCE.info()
+
+
+if not _PREFLIGHT:
+    app.router.on_startup.append(JOBS.restore)   # 上次没跑完的任务标 failed（“API 重启中断”），不悄悄丢
 from ns_api import frame_jobs as FJ  # noqa: E402  §C 出图与精修循环（W2）：frame-jobs / 定稿 lock·unlock
 app.include_router(FJ.router)
 from ns_render import frame_edit as FE  # noqa: E402
@@ -183,9 +198,16 @@ from ns_api import factory_health as FHEALTH  # noqa: E402  UIRSI r42 生产健�
 app.include_router(FHEALTH.router)
 from ns_api import owner_queue as OWNERQ  # noqa: E402  UIRSI2 L-116 待你看队列：GET /api/owner/queue、POST /api/owner/decide
 app.include_router(OWNERQ.router)
+from ns_api import owner_inbox as OWNERINBOX  # noqa: E402  L-134 待办通知中心：GET /api/owner/inbox（待你看队列 + 写作闸门，顶栏数字同源）
+app.include_router(OWNERINBOX.router)
+from ns_api import owner_pick as OWNERPICK  # noqa: E402  INBOXPICK-S 待办中心里直接挑选并生效：POST /api/owner/pick（按 id 类型分派）
+app.include_router(OWNERPICK.router)
 from ns_api import image_workshop as IWS  # noqa: E402  FILMUI 图像工坊：/api/image-workshop/bases · history（只读）· jobs（非 Qwen 先 501）
 app.include_router(IWS.router)
-app.router.on_startup.append(EPROD.resume_on_startup)   # 在 JOBS.restore 之后：被重启打断的任务按可恢复错误重试
+from ns_api import pipeline_status as PSTAT  # noqa: E402  NAVFLOW-F L-146 各集进度矩阵：GET /api/pipeline/status（只读，转调 tools/master/sop_gate.status）
+app.include_router(PSTAT.router)
+if not _PREFLIGHT:
+    app.router.on_startup.append(EPROD.resume_on_startup)   # 在 JOBS.restore 之后：被重启打断的任务按可恢复错误重试
 VJ.get_script = lambda: _script
 
 
@@ -196,7 +218,8 @@ def _video_done(shot_id: str, take):
 
 VJ.on_done = _video_done
 VJ.on_qc_changed = lambda: _summary_cache.invalidate()
-PJ.resume_on_startup()
+if not _PREFLIGHT:
+    PJ.resume_on_startup()
 _script = P.load_script()
 
 
@@ -830,7 +853,7 @@ def _cache_global_sig(ctx) -> tuple:
     root = Path(P.ROOT)
     dirs = [root / "data" / "looks", root / "config", root / "config" / "recipes"]
     pj = ctx.cast.project
-    files = [root / "data" / "scenes.json", root / "data" / "state_timeline.json", root / SOP.OWNER_GATES]
+    files = [*(f for f in reversed(SOP.state_files(root)) if f), root / SOP.OWNER_GATES]   # V2CUT-O：状态表 / 场景表按当前剧
     if pj:   # 本剧资产登记只看镜头卡真正读的两份（出图作业表等频繁写的文件不进签名）
         files += [root / "data" / "pipeline" / "runs" / pj / "assets" / f for f in ("shot_looks.json", "sheets_chosen.json")]
     try:
@@ -1054,8 +1077,12 @@ _slow_cache = EF.KeyedCache(ttl_s=10.0)
 
 def _inputs_sig(root: Path | None = None) -> tuple:
     root = Path(root or P.ROOT)
-    files = (P.DATA / "import" / "script_v2.json", root / "data" / "state_timeline.json", root / "data" / "scenes.json",
-             root / SOP.OWNER_GATES, root / "data" / "looks" / "schedule.json")
+    # UIFIX-F 11-03：剧本按当前剧取（以前写死 V1 的 data/import/script_v2.json）；造型确认入口看身份脸 / 清单 / 排期，
+    # 所以清单与排期文件也进签名（挑了身份脸就立刻重算，不等 10 s）
+    # V2CUT-O 11-03：状态表 / 场景表也按当前剧（V2 = data/import/runs/<run>/），不再盯 V1 的 data/ 全局文件
+    files = (SOP.script_file(root) or P.DATA / "import" / "script_v2.json", *(f for f in SOP.state_files(root) if f),
+             root / SOP.OWNER_GATES, root / "data" / "looks" / "schedule.json",
+             *SOP.asset_state_files(root))
 
     def mt(f: Path):
         try:
@@ -1926,12 +1953,12 @@ def _record_look_hash(shot_id: str, stage: str, n: int):
     """渲染完成后把本镜造型哈希写进 take（用于「造型已改」过期判定）"""
     try:
         h = default_store().shot_looks(shot_id).look_hash
-        with P.shot_lock(shot_id):   # F4：与 frame_edit / 定稿同一把每镜锁（读-改-写 takes.json）
-            data = P.load_takes(shot_id)
+        def fn(data):                # A-04：takes.json 只经 mutate_takes 写（同一把每镜锁 + 跨进程锁）
             for t in data["takes"]:
                 if t["stage"] == stage and t["n"] == n:
                     t["look_hash"] = h
-            P._write_json(P.shot_dir(shot_id) / "takes.json", data)
+            return data
+        P.mutate_takes(shot_id, fn, op="record_look_hash", by="api._record_look_hash")
     except Exception:
         pass
 
@@ -2072,6 +2099,8 @@ async def _start_loop_watchdog():
         anyio.to_thread.current_default_thread_limiter().total_tokens = int(os.environ.get("NS_THREADPOOL") or 100)
     except Exception:  # noqa: BLE001
         pass
+    if _PREFLIGHT:      # RESTARTFIX-O（OVERSIGHT 第 17 轮 P2-1 轻）：重启前预检实例不往真实 loop_lag.jsonl 追加
+        return
     LW.start(P.ROOT / "data" / "qa" / "loop_lag.jsonl")
 
 
@@ -2103,16 +2132,29 @@ if WEB_DIST.exists():
 
 # 总调度 20:5x（:8800 在 20:28 后被直接结束、没有任何留痕）：启动 / 正常关闭各记一行 data/ops/api_lifecycle.jsonl；
 # 强制结束触发不了这里，由父进程侧看门狗 tools/factory/api_watchdog.py 记“exited”（退出码 + 运行时长）
+def _lifecycle_should_log() -> bool:
+    """只有真实服务才记：pytest 在跑（PYTEST_CURRENT_TEST）或数据目录被换掉（P.DATA 不是仓库 data/）都不记"""
+    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("NS_API_PREFLIGHT"):   # 重启前备用端口预检实例也不记
+        return False
+    try:
+        return Path(P.DATA).resolve() == (Path(P.ROOT) / "data").resolve()
+    except (OSError, TypeError, AttributeError):   # arch-ok: 判断不了就不记，不影响服务
+        return False
+
+
 def _lifecycle(event: str) -> None:
     import json as _j
     import os as _o
     import time as _t
+    if not _lifecycle_should_log():   # OVERSIGHT-F 第 12 轮 P2-1：测试（TestClient 也会触发 startup/shutdown）不写真实留痕
+        return
     try:
         d = P.ROOT / "data" / "ops"
         d.mkdir(parents=True, exist_ok=True)
         with open(d / "api_lifecycle.jsonl", "a", encoding="utf-8") as f:
-            f.write(_j.dumps({"at": _t.strftime("%Y-%m-%dT%H:%M:%S"), "event": event, "pid": _o.getpid(), "ppid": _o.getppid()},
-                             ensure_ascii=False) + "\n")
+            # RESTARTFIX-O：带上是否正式实例 + 原因，事后一眼分得清“真服务”和“进程内导入 / 手起”的实例
+            f.write(_j.dumps({"at": _t.strftime("%Y-%m-%dT%H:%M:%S"), "event": event, "pid": _o.getpid(), "ppid": _o.getppid(),
+                              "managed": _SIDE_EFFECTS, "why_not": INSTANCE.why_not()}, ensure_ascii=False) + "\n")
     except OSError:   # arch-ok: 留痕失败不影响服务
         pass
 

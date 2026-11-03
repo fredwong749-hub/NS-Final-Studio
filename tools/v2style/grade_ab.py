@@ -139,7 +139,15 @@ def gen() -> None:
     lk_ = threading.Lock()
 
     def worker(lane: str, url: str):
-        names = [upload(url, r) for r in refs]
+        for k in range(5):        # 隧道偶发断连（NETFIX 重连约 20 s）：上传重试
+            try:
+                names = [upload(url, r) for r in refs]
+                break
+            except OSError as e:
+                if k == 4:
+                    raise
+                print("upload retry", lane, repr(e)[:80], flush=True)
+                time.sleep(20)
         while True:
             with lk_:
                 if not tasks:
@@ -303,6 +311,9 @@ def page() -> None:
          ".sm{color:#999;font-size:12px}.cand{margin:14px 0 22px}.lang{display:grid;grid-template-columns:1fr 1fr;gap:24px}"
          "@media(max-width:1500px){.lang{grid-template-columns:1fr}}</style></head><body>",
          "<h1>V2 调色预设候选（幻想 / 现实 两套视觉语言并排）</h1>",
+         "<div style='background:#2a2410;border:1px solid #a88a2a;padding:10px 14px;border-radius:6px;margin:10px 0'>"
+         "<b>项目方已选（L-129 / L-130）</b>：幻想段 = 幻想 C · 黄金时刻（v2_editorial_fantasy_c）；"
+         "现实段 = 现实 C · 直闪纪实（第 2 版）（v2_editorial_reality_c2）。其余候选已归档（不删），下面保留供对照。</div>",
          "<p class=sm>主题：上海时尚模特的幻想和现实的挣扎。左 = 幻想段（时尚大片、艳丽浓郁），右 = 现实段（冷一些、纪实手持感，仍是杂志质感）。"
          "每套 3 个候选，每个候选同一组 3 张中性样张（同 seed，只换风格后缀 + LUT）。点图看 4K 原图（2160×3840）。"
          "参考只用 V2 女主身份脸 + O1 风衣。</p><div class=lang>"]
@@ -311,7 +322,9 @@ def page() -> None:
         for look, lk in L.LOOKS.items():
             if lk["lang"] != lang or look in HIDDEN_LOOKS:
                 continue
-            o.append(f"<div class=cand><b>{html.escape(lk['label'])}</b>　<span class=sm>预设 v2_editorial_{look} · LUT v2_{look}.cube</span>"
+            picked = look in ("fantasy_c", "reality_c2")
+            sty = " style='outline:2px solid #c9a227;padding:6px'" if picked else ""
+            o.append(f"<div class=cand{sty}><b>{'【项目方已选】' if picked else ''}{html.escape(lk['label'])}</b>　<span class=sm>预设 v2_editorial_{look} · LUT v2_{look}.cube</span>"
                      f"<div class=sm>风格后缀：{html.escape(L.SUFFIX[look])}</div><div class=row>")
             for sc in SCENES[lang]:
                 v = res.get(f"{look}/{sc}") or {}

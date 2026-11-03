@@ -61,6 +61,19 @@ def _cid(name: str) -> str:
     return AR.NAME_ID.get(name, name)
 
 
+def _plate_id(f: str) -> str:
+    """底图 → plate_id：V1 assets/scenes 下 = 相对 assets/scenes；资产包（assets_v2/…，本剧清单登记）= 原路径（V2CUT-O）"""
+    p = Path(f).as_posix()
+    return p[len("assets/scenes/"):] if p.startswith("assets/scenes/") else p
+
+
+def _plate_url(pid: str) -> str | None:
+    if pid.startswith("assets_v2/"):
+        from ns_api import v2_assets as V2      # 资产包文件只经 /api/v2/asset-file 发（清单外 / 成人类不发）
+        return V2._url(pid)
+    return _thumb(f"assets/scenes/{pid}")
+
+
 def view(script, shot_id: str) -> dict:
     project = project_of(script)
     ep, shot = _find(script, shot_id)
@@ -107,10 +120,10 @@ def view(script, shot_id: str) -> dict:
     scene_file = next((s.file for s in plan.slots if s.kind == "scene"), None) or \
         next((d["file"] for d in plan.dropped if d.get("role") == "scene"), None)
     sov = scene_ovs.get(shot_id)
-    eff = "none" if sov == "none" else (sov or (Path(scene_file).relative_to("assets/scenes").as_posix() if scene_file else None))
+    eff = "none" if sov == "none" else (sov or (_plate_id(scene_file) if scene_file else None))
     return {"shot_id": shot_id, "episode": int(AR.g(ep, "number")), "scene_id": AR.g(shot, "scene_id"),
             "characters": chars,
-            "scene": {"effective": {"plate_id": eff, "url": None if eff in (None, "none") else _thumb(f"assets/scenes/{eff}"),
+            "scene": {"effective": {"plate_id": eff, "url": None if eff in (None, "none") else _plate_url(eff),
                                     "source": "shot" if sov else "default", "default_plate": scene_file},
                       "options": plate_options(sdir)},
             "ref_group": {"files": plan.files, "count": len(plan.files), "limit": plan.capacity},

@@ -28,6 +28,7 @@ import { filmOn } from "../uiStyle";
 import { dotOf, statusWord, DOT_TITLE, type MainStatus } from "./seasonDot";
 import { Pop } from "../widgets";
 import { countKinds, hasKind, tagsTitle, type ShotStatusTags, type TagKind } from "../StatusTags.helpers";
+import { NowPanel, PipelineMatrix } from "../PipelineMatrix"; // NAVFLOW-F L-146：各集进度矩阵；W5：首页“现在”四问
 
 type SShot = { id: string; index: number; size: string | null; scene_id: string | null; scene: string | null; link: string | null; carry: string | null; cast: { name: string; presence: string }[]; switch: string[]; seconds: number | null; adult: boolean; img?: string; lens?: string | null; lens_actual?: string | null; lens_plan?: string | null; camera_move?: string | null; lighting_sources?: string[]; lighting_name?: string | null; video?: string | null; video_old?: string | null; cand_url: string | null; cand_n: number; old_script_n?: number; first_old?: boolean; last_old?: boolean; status?: ShotStatusTags };
 /** UIRSI r40：板块状态（后端 ns_api/shot_status.episode_blocks；口径同镜头格标签） */
@@ -166,9 +167,12 @@ export default function SeasonPage() {
     for (const e of d ?? []) for (const s of e.shots) if (s.scene_id && !m.has(s.scene_id)) m.set(s.scene_id, BANDS[m.size % BANDS.length]);
     return m;
   }, [d]);
+  // W5 UIUX：“现在”四问和进度矩阵不依赖每镜数据（/api/season 慢 / 读不到时照样先出来）
   if (err && !d)
     return (
       <div className="v3p-page">
+        <NowPanel />
+        <PipelineMatrix />
         {err === "starting" ? (
           <Empty icon="▦" title="全剧总览正在启用，约 1 分钟" sub="不用操作，好了这里会自己出来（每 15 秒自动再试）。" />
         ) : (
@@ -176,7 +180,15 @@ export default function SeasonPage() {
         )}
       </div>
     );
-  if (!d) return <div className="v3p-page"><Skel h={480} /></div>;
+  if (!d)
+    return (
+      <div className="v3p-page">
+        <NowPanel />
+        <PipelineMatrix />
+        <p className="v3p-muted">每镜的图正在读（通常十几秒）…</p>
+        <Skel h={320} />
+      </div>
+    );
   const all = d.flatMap((e) => e.shots);
   const cnt = (f: (s: ShotSummary) => boolean) => all.filter((x) => { const s = byId.get(x.id); return s ? f(s) : false; }).length;
   const total = all.length;
@@ -238,6 +250,10 @@ export default function SeasonPage() {
           )}
         </Pop>
       </header>
+      {/* NAVFLOW-F 11-03（项目方 L-146）：总览顶部 = 各集进度矩阵（每行一集 × 六步，✓ ● ⚠ ·；状态来自后端 sop_gate，点格子跳对应页面和集）。
+          下面每镜一格的胶片总览原样保留 */}
+      <NowPanel />
+      <PipelineMatrix />
       {/* r43（§二）：总进度改成一行灰字 + 一条细的单色总进度线；原 7 段彩色条在“显示细节”里 */}
       {detail ? <LiveProgress run={null} title="全剧进度" /> : <Totals p={prog} />}
       <div className="sea-legend" aria-label="图例">

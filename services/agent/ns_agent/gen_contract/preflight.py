@@ -155,6 +155,35 @@ def manifest_missing_faces(faced: list, proj: str | None = None) -> list[str]:
     return [c for c in faced if c and not AR.face_of(proj, c)]
 
 
+def sheet_gaps(subject, zones, characters, warnings) -> list[dict]:
+    """I3 设定图口径的唯一实现（preflight I3 与 tools/master/episode_ready 共用，ISS-1103-030746-664a）：
+    露脸（在画、不是背影、不是局部只送部位单品）且景别里看得到服装的人，造型只有清单单品图（asset_refs 告警“造型参考用清单单品图”）
+    = 缺设定图。→ [{character, look, kind, detail}]，detail 统一写“<名> 造型<id> 没有设定图”（asset_jobs 按它排 sheet 作业）。
+    config/gen_contract.json I3_require_sheet=false 时不判（回退旧口径）"""
+    from . import cfg as _cfg
+    if not _cfg().get("I3_require_sheet", True):
+        return []
+    if subject in ("part", "object") or not (set(zones or []) - {"face"}):
+        return []
+    out = []
+    for w in warnings or []:
+        if w.get("kind") != "造型参考用清单单品图":
+            continue
+        ch = next((c for c in characters or [] if c.get("name") == w.get("character")), None)
+        if not ch or ch.get("presence", "在画") != "在画" or ch.get("back_view") or ch.get("wardrobe_scope") is not None:
+            continue
+        out.append({"character": ch.get("name"), "cid": ch.get("character"), "look": ch.get("look"), "kind": "资产缺图",
+                    "detail": f"{ch.get('name')} 造型{ch.get('look')} 没有设定图"})
+    return out
+
+
+def _faceboard_ok(s: dict) -> bool:
+    """脸板合规：每格都是 role=face 且标了角色 id，同一角色不重复（ISS-1103-023528-1509）"""
+    ms = s.get("members") or []
+    ids = [m.get("character") for m in ms]
+    return bool(ms) and all(m.get("role") == "face" and m.get("character") for m in ms) and len(set(ids)) == len(ids)
+
+
 def _kinds(rec: dict, *kinds) -> list[dict]:
     return [m for m in (rec.get("missing") or []) if m.get("kind") in kinds]
 
@@ -221,15 +250,26 @@ def check(req: dict) -> ContractResult:
                 add("I2", "fail", "身份脸参考不是当前身份脸（只认 asset_refs.face_of）：" + "；".join(stale_face_slots(slots, req.get('framing_project') or req.get('project'))))
             elif two and len(face_ids) < 2:
                 add("I2", "fail", f"提示词写了两张脸都入画，但身份脸参考只有 {len(face_ids)} 张（K-AST-263 / K-REN-705）")
-            elif need_face and not faces:
+            elif need_face and rec.get("primary") not in face_ids:
                 add("I2", "fail", f"主体角色 {rec.get('primary')} 脸可见，但没有身份脸参考槽")
             else:
-                add("I2", "pass" if faces else "na", f"{len(faces)} 张身份脸参考", files=[s["file"] for s in faces])
+                # 脸板逐格计人（ISS-1103-023528-1509）：三人镜 = 一块脸板三张身份脸
+                n_id = len([x for x in face_ids if x])
+                add("I2", "pass" if n_id else "na", f"{n_id} 张身份脸参考" + ("（脸板）" if any(s.get("kind") == "faceboard" for s in slots) else ""),
+                    files=[s["file"] for s in faces] + [m.get("file") for s in slots if s.get("kind") == "faceboard"
+                                                        for m in s.get("members") or [] if m.get("role") == "face"],
+                    characters=sorted(x for x in face_ids if x))
             # I3
             m = _kinds(rec, "造型未登记") + [x for x in _kinds(rec, "资产缺图") if x.get("detail", "").endswith("没有设定图")]
             sheets = [mm for s in slots for mm in s.get("members") or [] if mm.get("role") == "sheet"]
+            # ISS-1103-024205-8856（MERGE-IMG-O 11-03）：露脸、景别里看得到服装的人没有造型设定图（只有清单单品图 / 文字）→ fail。
+            # 原来 V2 资产包“设定图在 S3 才出”时按单品图放行，S8 近景“设定图 0 张”照样 pass、首帧没有任何服装约束（C-16：资料齐全才出）
+            no_sheet = sheet_gaps(rec.get("subject"), rec.get("zones"), rec.get("characters"), rec.get("warnings"))
             if m:
                 add("I3", "fail", "；".join(x["detail"] for x in m))
+            elif no_sheet:
+                add("I3", "fail", "造型没有设定图（只有清单单品图 / 文字，资料不齐不出）：" + "；".join(x["detail"] for x in no_sheet),
+                    no_sheet=[x.get("character") for x in no_sheet])
             else:
                 looks = {ch["name"]: ch.get("look") for ch in rec.get("characters") or []}
                 add("I3", "pass", f"造型：{looks}；设定图 {len(sheets)} 张", looks=looks)
@@ -255,7 +295,8 @@ def check(req: dict) -> ContractResult:
                 bad.append(f"参考 {len(slots)} 张 > {rec.get('model')} 槽位 {cap}")
             if refs != files_in_slots:
                 bad.append("实际送进模型的参考图与槽位规划不一致")
-            if any(int(s.get("faces") or 0) > 1 for s in slots):
+            # 脸板（K-AST-263：露脸 ≥3 人且槽位不够，每格一张标了名字的身份脸）不算“同一槽两张脸”；其它槽仍只许一张
+            if any(int(s.get("faces") or 0) > 1 and not (s.get("kind") == "faceboard" and _faceboard_ok(s)) for s in slots):
                 bad.append("同一参考槽里有两张脸")
             n_face_slots = sum(1 for s in slots if s.get("kind") == "face")
             two_mode = rec.get("two_person") or (__import__("ns_agent.asset_refs", fromlist=["x"])._cfg().get("two_person") or "primary_face_only")
@@ -286,7 +327,10 @@ def check(req: dict) -> ContractResult:
         add("I6", "fail" if bad else "pass", "；".join(bad) if bad else "编译器输出 + 参考逐一标注")
         # I7
         _p7 = req.get("framing_project") or req.get("project")
-        suf = ST.preset_suffix(_p7 if _p7 and ST._manifest_mode(_p7) else None)
+        _sufs = ST.run_suffixes(_p7) if _p7 and ST._manifest_mode(_p7) else [ST.preset_suffix()]
+        if str(req.get("mode") or "") == SETTING_CANDIDATE and str(req.get("asset_stage")) in EMPTY_STAGES:
+            _sufs = [ST.EMPTY_SUFFIX]     # 空镜 / 单品设定候选：只认空镜后缀（人像风格后缀不许进空镜，ISS-1103-004550-8787）；禁用词 / V1 短语照查
+        suf = next((x for x in _sufs if x and x in prompt), _sufs[0] if _sufs else "")   # 分段剧（L-130）：哪一段的句子都算
         hits = ST.banned_hits(prompt)
         bad = []
         if hits:
@@ -402,9 +446,39 @@ def check(req: dict) -> ContractResult:
     HC = _hc()
     iss = [x for x in HC.check_text(prompt) + HC.check_look_lock(prompt) if x.get("level") == "block"]
     add("I10", "fail" if iss else "pass", "；".join(x["message"] for x in iss) if iss else "成年人 / 锁定外貌检查通过")
+    apply_asset_stage(req, items)
     order = {k: n for n, k in enumerate(TITLES)}
     items.sort(key=lambda i: order.get(i.id, 99))
     return ContractResult("preflight", str(req.get("shot_id") or req.get("id") or "?"), items, c.get("version", ""))
+
+
+# 设定候选模式 mode=setting_candidate（AUTOPIPE-A 11-03，总调度 M-AUTOPIPE-01 阶段 A；CAST-S 卡点 ISS-1103-001014-c7ea）：
+# 文生图出“本作业要产出的那张资产”时，对应的那几项按定义不可能满足，由系统按下表判 na（detail / evidence 保留原判），其余各项照查；
+# 不认脚本自己豁免。只有作业显式写 mode="setting_candidate" + asset_stage（tools/pipeline/asset_worker.py 写）才生效；
+# 写了 mode 但 asset_stage 缺 / 不认识 = 失败关闭（I2 fail）。Q9 在这个模式下单独一档（tools/pipeline/asset_checks.q9_asset：
+# face / sheet 是证件式近正脸胸像 / 全身设定图，接受视线偏一侧，“看镜头”不判；未成年外观任何时候都不过）。
+SETTING_CANDIDATE = "setting_candidate"
+ASSET_STAGE_WAIVE = {
+    "face": ("I2", "I3"),       # 新人物身份脸：没有身份脸（I2）、清单里还没有这个人的造型（I3）
+    "sheet": ("I3", "I4"),      # 配角造型设定图：造型 / 单品都是它的产出（单品图之后从设定图裁，ISS-1103-013228-cab4 总调度定 A）；I2 照查——身份脸必须已登记并送进去（ISS-1103-004547-ca20）
+    "scene": ("I5",),           # 场景底图：场景参考就是要产出的
+    "item": ("I3", "I4"),       # 单品图：造型 / 单品图就是要产出的
+}
+EMPTY_STAGES = ("scene", "item")   # 画面里不该有人的设定候选：I7 只认空镜后缀 ST.EMPTY_SUFFIX
+
+
+def apply_asset_stage(req: dict, items: list) -> None:
+    if str(req.get("mode") or "") != SETTING_CANDIDATE:
+        return
+    stage = req.get("asset_stage")
+    waive = ASSET_STAGE_WAIVE.get(str(stage))
+    if waive is None:
+        items.append(Item("I2", TITLES["I2"], "fail", f"mode={SETTING_CANDIDATE} 但 asset_stage={stage!r} 不是设定候选模式认识的类型 {sorted(ASSET_STAGE_WAIVE)}（失败关闭）"))
+        return
+    for it in items:
+        if it.id in waive and it.status not in ("pass", "na"):
+            it.evidence = {**(it.evidence or {}), "mode": SETTING_CANDIDATE, "asset_stage": stage, "original_status": it.status, "original_detail": it.detail}
+            it.status, it.detail = "na", f"设定候选模式（asset_stage={stage}）：{it.title}是本作业要产出的，按规则不查；原判：{it.detail}"
 
 
 def enforce(req: dict) -> ContractResult:

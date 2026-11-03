@@ -12,8 +12,13 @@ export default function Root() {
   const hash = useHash();
   const retired = RETIRED.test(hash);
   useEffect(() => {
-    if (retired) history.replaceState(null, "", `${location.pathname}${location.search}#/script-create`), window.dispatchEvent(new HashChangeEvent("hashchange"));
-  }, [retired]);
+    // W5 UIUX 11-03：#/inbox 是旧“待办”地址 → 跳到现在的待办 #/queue（L-134）；#/projects → ① 剧本
+    if (retired) history.replaceState(null, "", `${location.pathname}${location.search}${hash.startsWith("#/inbox") ? "#/queue" : "#/script-create"}`), window.dispatchEvent(new HashChangeEvent("hashchange"));
+  }, [retired, hash]);
+  // W5 UIUX 11-03：首页（不带 # 的 /）= 全剧总览，30 秒内看懂“现在在哪、卡在哪、要我做什么”；画布仍是 #/ 和 #epNN
+  useEffect(() => {
+    if (!hash || hash === "#") history.replaceState(null, "", `${location.pathname}${location.search}#/overview`), window.dispatchEvent(new HashChangeEvent("hashchange"));
+  }, [hash]);
   return (
     <AuthGate>
       <App />

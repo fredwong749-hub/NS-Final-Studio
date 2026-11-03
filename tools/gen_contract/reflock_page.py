@@ -12,12 +12,15 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+import runs as RUNS  # noqa: E402
+_LEGACY = RUNS.legacy_run(ROOT)   # I-16：第一季专用历史工具（入口 gate_legacy_tool 要求显式 --run）
 sys.path.insert(0, str(ROOT / "services" / "agent"))
 from ns_agent import asset_refs as AR  # noqa: E402
 from ns_agent.gen_contract import report as RP  # noqa: E402
 
 PAGE = ROOT / "data/review_pages/asset_reflock"
-VAL = ROOT / "data/pipeline/runs/series10_v1/images/reflock_val/v9"   # 第二轮：v9 配方（总调度 11-01）
+VAL = ROOT / ("data/pipeline/runs/" + _LEGACY + "/images/reflock_val/v9")   # 第二轮：v9 配方（总调度 11-01）
 E = html.escape
 VLAB = {"vR": "有资产参考（REFLOCK 槽位）", "vRb": "有资产参考 + 双人两脸各一槽", "vN": "无资产参考（只挂脸）", "asset": "有资产参考", "noasset": "无资产参考"}
 MARK = {"pass": ("通过", "ok"), "fail": ("不通过", "bad"), "na": ("不适用", "na"), "untested": ("未测", "bad")}
@@ -41,6 +44,7 @@ def table(items):
 
 
 def main():
+    RUNS.gate_legacy_tool(None, __file__)
     sys.stdout.reconfigure(encoding="utf-8")
     jobs = jl(VAL / "jobs.json", [])
     st = jl(VAL / "state.json", {})
@@ -50,7 +54,7 @@ def main():
                      f"<td>{r['sat_mean']}</td><td class={'ok' if r['pass'] else 'bad'}>{'过' if r['pass'] else '不过'}</td></tr>"
                      for r in cal2.get("q4_full") or [])
     audit = jl(PAGE / "look_audit.json", {})
-    revs = jl(ROOT / "data/pipeline/runs/series10_v1/assets/look_revisions.json", {})
+    revs = jl(ROOT / ("data/pipeline/runs/" + _LEGACY + "/assets/look_revisions.json"), {})
     out = []
     # ---------------- 验证：每镜 有资产 vs 无资产
     md_rows, sheet_entries, comp = [], [], []
@@ -117,7 +121,7 @@ def main():
                        f"<td>{E(r['proposal'].get('registry_note', ''))}</td><td>{'通过' if r['ok'] else E(str(r['checks']))}</td></tr>"
                        for r in revs.get("revisions") or [])
     # 资产来源
-    inv = AR.look_inventory("series10_v1")
+    inv = AR.look_inventory(_LEGACY)
     stc = {"wardrobe": ("衣橱产品图", "ok"), "sheet_only": ("仅设定图", "warn"), "missing": ("资产缺图", "bad"), "identity": ("身份", "na")}
     inv_rows = "".join(f"<tr><td>{E(lk['name'])}</td><td>{E(lk['look'])}</td><td>{E(p['label'])}</td><td>{E(p['slot'])}</td>"
                        f"<td class={stc[p['status']][1]}>{stc[p['status']][0]}</td><td>{E(p['item_id'] or '')}</td>"

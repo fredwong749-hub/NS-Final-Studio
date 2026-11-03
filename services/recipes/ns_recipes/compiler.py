@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import json
+import sys
 from pathlib import Path
 import hashlib
 
@@ -89,8 +90,15 @@ def _first_frame_looks(spec: ShotSpec) -> dict:
     import json
     from .registry import ROOT
     ep, s = spec.id.split("-")
+    # MERGE-VID-O：按本镜所属的剧取渲染根（legacy = data/renders；其它剧 = data/renders/<剧>，不读 V1 的首帧造型）
+    run = spec_policy_run(spec)
     try:
-        d = json.loads((ROOT / "data" / "renders" / ep / s / "takes.json").read_text(encoding="utf-8"))
+        legacy = json.loads(RUNS_PATH.read_text(encoding="utf-8")).get("legacy_unprefixed_run")
+    except (OSError, ValueError):
+        legacy = None
+    rdir = ROOT / "data" / "renders" if (run is None or run == legacy) else ROOT / "data" / "renders" / run
+    try:
+        d = json.loads((rdir / ep / s / "takes.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     n = (d.get("active") or {}).get("image")
@@ -196,11 +204,40 @@ def video_policy() -> dict:
         return {}
 
 
-def policy_applies(spec) -> bool:
-    """政策只管登记的项目（video_policy.scope_source_contains 出现在剧本来源路径里，例 series10_v1）；旧项目 / 测试夹具不受影响"""
-    key = video_policy().get("scope_source_contains")
+class PolicyMissing(CompileError):
+    """MERGE-VID-O（L-137）：镜头属于 runs.json 登记的剧，但 video_policy.json 没有这部剧的视频政策 / 政策文件读不到 → 失败关闭"""
+
+
+RUNS_PATH = POLICY_PATH.parent / "runs.json"
+
+
+def registered_runs() -> list[str]:
+    try:
+        return sorted((json.loads(RUNS_PATH.read_text(encoding="utf-8")).get("runs") or {}), key=len, reverse=True)
+    except (OSError, ValueError) as e:
+        print(f"[ns_recipes.compiler] {RUNS_PATH} 读不出：{e} → 按无登记剧", file=sys.stderr)
+        return []
+
+
+def spec_policy_run(spec) -> str | None:
+    """镜头属于哪部登记的剧：剧本来源路径（ShotSpec.source.script_file）里出现的 runs.json 剧名（最长优先）；都不是 → None"""
     src = str(getattr(getattr(spec, "source", None), "script_file", "") or "")
-    return bool(key) and key in src
+    return next((r for r in registered_runs() if src and r in src), None)
+
+
+def policy_applies(spec) -> bool:
+    """政策按剧生效（MERGE-VID-O 11-03，L-137：V1 的视频链原样在 V2 生效）：
+    镜头属于 video_policy.scope_runs 里的剧 → True；属于 runs.json 登记的剧却不在 scope_runs / 政策文件读不到 → PolicyMissing（失败关闭）；
+    不属于任何登记的剧（旧 60 集项目、测试夹具）→ False，按配方 id 照常编译"""
+    run = spec_policy_run(spec)
+    if run is None:
+        return False
+    pol = video_policy()
+    if not pol:
+        raise PolicyMissing(f"{getattr(spec, 'id', '?')} 属于 {run}，但读不到 config/pipeline/video_policy.json（失败关闭）")
+    if run not in (pol.get("scope_runs") or []):
+        raise PolicyMissing(f"{getattr(spec, 'id', '?')} 属于 {run}，video_policy.json scope_runs 里没有这部剧的视频政策（先登记，失败关闭）")
+    return True
 
 
 def hold_reason(registry: Registry, rid: str, overlays: list[str], spec=None) -> str | None:

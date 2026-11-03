@@ -98,5 +98,5 @@ def check_look_lock(text: str, extra_banned: list[str] | None = None) -> list[di
     bad = [w for w in extra_banned or [] if w and (re.search(rf"\b{re.escape(w)}s?\b", text or "", re.I) if w.isascii()
                                                    else w in (text or ""))]
     if bad:
-        out.append({"rule": "HC-07", "level": "block", "message": f"出现已作废的标志物写法：{bad}（林晚标志物 = 钻石水晶甲）"})
+        out.append({"rule": "HC-07", "level": "block", "message": f"出现已作废的标志物写法：{bad}（标志物以全局头角色锁为准）"})
     return out

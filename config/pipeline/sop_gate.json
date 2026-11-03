@@ -1,19 +1,19 @@
 {
  "_doc": "SOP 阶段闸门（tools/master/sop_gate.py，HARNESS-O 11-03）。enabled=false 时 require 永远放行（只给排查用）。observe_stages = 进入这些阶段时只记违规（data/pipeline/sop_gate/violations.jsonl，master_check 显示）不抛错；其余阶段一律 enforce（抛 SopGateError，失败关闭）。retro_enforce = 第 N 集复盘没 done 时，第 N+1 集进“出图”及以后一律 enforce（不受 observe 影响）。prompt_probe = 提示词证据的逐镜探针（第一个参数是相对仓库的脚本，{shot}/{ep} 会替换；默认 golden_v2 --summary：唯一编译入口 + preflight，不出图）。",
  "enabled": true,
- "observe_stages": [
-  "资产就绪",
-  "提示词",
-  "出图"
- ],
+ "observe_stages": [],
  "retro_enforce": true,
  "prompt_probe": "build_first+preflight",
  "probe_timeout_s": 900,
  "_master": "11-03 03:5x HARNESS-O 首版：总调度要求“sop_gate 不能挡住第 1 集正常往下走”。第 1 集实测卡在导入闸门（02:52 TIMELINE-O 严格时间轴把 gate/import 改成 reopened，11 项 TL-）→ 出图侧（资产就绪 / 提示词 / 出图）先 observe，出图检测 / 尾帧 / 视频 / 整集预览 enforce。第 1 集过导入闸门后由总调度把 observe_stages 清空。",
  "probe_lane": "gpu36:0",
  "promote": {
-  "auto": false,
-  "stage": "出图"
+  "auto": true,
+  "stage": "出图",
+  "_decision": "L-154（项目方 11-03 05:0x “出图自动启动”）：任一集剧本 / 导入闸门 / 资产就绪（整集，L-140 不变）/ 提示词（整集）都过 → producer 自动 preparing→producing，写 runs.json status_history 审计"
  },
- "_prodmerge": "PRODMERGE-O 11-03（PLAN_V2_MASTER v4 1-4 / 1-5）：prompt_probe 改为本模块 compile_preflight（唯一编译入口 build_first + preflight.check，隔离子进程，按剧环境 runs.run_env），不再调 golden_v2；probe_lane = preflight I12 判本地专用资产用的道。promote = runs.json preparing → producing 的规则：任一集 judge(stage) 通过即可提升；auto=false 时 producer 只在日志里报“可以提升”，由总调度 sop_gate.py promote --apply（auto=true 时 producer 每拍自动提升并写 status_history）。"
+ "_prodmerge": "PRODMERGE-O 11-03（PLAN_V2_MASTER v4 1-4 / 1-5）：prompt_probe 改为本模块 compile_preflight（唯一编译入口 build_first + preflight.check，隔离子进程，按剧环境 runs.run_env），不再调 golden_v2；probe_lane = preflight I12 判本地专用资产用的道。promote = runs.json preparing → producing 的规则：任一集 judge(stage) 通过即可提升；auto=false 时 producer 只在日志里报“可以提升”，由总调度 sop_gate.py promote --apply（auto=true 时 producer 每拍自动提升并写 status_history）。",
+ "_observe_note": "L-156 项目方 11-03 07:3x 点选：清空、全部 enforce（总调度 MASTER-WSL 执行）",
+ "whole_episode_prompts": true,
+ "_whole_episode_prompts": "L-140（项目方 11-03 03:1x 否决按镜出图）不变：任何镜进“出图”及以后，提示词阶段按整集判；L-154 自动提升与 L-155 分道并行都在这条之后"
 }

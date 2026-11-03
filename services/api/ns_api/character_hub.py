@@ -186,7 +186,98 @@ def url(rel: str | None) -> str | None:
         return f"/files/{rel[5:]}?v={v}"
     if rel.startswith("assets/"):
         return f"/api/assets/file?path={rel}&v={v}"
+    if rel.startswith("assets_v2/"):
+        # NAVFLOW-F 11-03（L-146）：V2 资产包的图走 /api/v2/asset-file（只发清单登记的、非成人的文件；成人类 = 没有图，网页只给文字）
+        from urllib.parse import quote
+        if _v2_adult(rel):
+            return None
+        return f"/api/v2/asset-file?path={quote(rel, safe='/')}&v={v}"
     return None
+
+
+def _v2_adult(rel: str) -> bool:
+    """清单里登记为成人类 / 仅本地的文件 → True；没登记 → True（不发）"""
+    try:
+        from ns_api import v2_assets as V2
+        reg = V2.registered_files()
+    except Exception:  # noqa: BLE001  清单读不了 = 一律不发（失败关闭）
+        return True
+    return reg.get(rel, True)
+
+
+ADULT_LOCAL = "成人类：仅本地，项目方触发"
+
+
+def _manifest_look(project: str, cid: str, look: str) -> dict:
+    try:
+        return ((((R.manifest(project) or {}).get("characters") or {}).get(cid) or {}).get("looks") or {}).get(look) or {}
+    except Exception:  # noqa: BLE001  清单读坏 → 当没有
+        return {}
+
+
+def _manifest_fill_parts(project: str, cid: str, look: str, parts: list[dict]) -> None:
+    """NAVFLOW-F 11-03：资产包模式下，P1_looks 的部件文字还没对上单品时，用清单这套造型登记的单品图补上（只影响人物页显示，
+    不写任何文件；出图解析仍走 ns_agent.asset_refs）。成人类单品：有登记、没有图 → status 不变，标 local_only"""
+    lk = _manifest_look(project, cid, look)
+    items = lk.get("items") or {}
+    if not items:
+        return
+    adult = bool(lk.get("adult") or lk.get("route") == "local_only")
+    for p in parts:
+        if p.get("slot") == "marker":
+            continue
+        if p.get("item_id"):
+            if adult and p["item_id"] in items:
+                p["local_only"] = True       # 清单已对上单品但是成人类：网页没有图，只写“仅本地”
+            continue
+        slot = p.get("slot")
+        cand = [(iid, it) for iid, it in items.items() if isinstance(it, dict) and (it.get("slot") or "outfit") == slot]
+        if not cand:
+            continue
+        iid, it = cand[0]
+        f = it.get("file")
+        p["item_id"] = iid
+        p["item_file"] = f
+        p["item_name"] = it.get("name") or iid
+        p["item_image"] = _img(f) if f else None
+        if adult:
+            p["local_only"] = True
+        elif p["item_image"]:
+            p["status"] = "wardrobe"
+
+
+def _manifest_items(project: str, cid: str, looks_of: dict[str, list[dict]]) -> list[dict]:
+    """资产包模式：清单里这个人物的单品（鞋 / 身体饰品 / 每套造型的衣服）作为只读单品卡列在衣橱里（source=manifest，
+    形状同 _item_dict）。成人类只给名字，不给图"""
+    try:
+        ch = ((R.manifest(project) or {}).get("characters") or {}).get(cid) or {}
+    except Exception:  # noqa: BLE001
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    def add(iid: str, it, slot: str, adult: bool, look: str | None):
+        if iid in seen or not isinstance(it, dict):
+            return
+        seen.add(iid)
+        f = it.get("file")
+        img = None if adult else _img(f)
+        cat = next((k for k, v in CATS.items() if v[0] == slot and k not in TAG_CATS), "accessory")
+        if look:
+            looks_of.setdefault(iid, []).append({"look": look, "part": it.get("name") or iid})
+        out.append({"id": iid, "slot": slot, "slot_name": SLOT_NAME.get(slot, slot), "zone": R.zone_of(slot, it.get("name") or ""),
+                    "cat": cat, "note": ADULT_LOCAL if adult else "", "name": it.get("name") or iid, "image": img,
+                    "images": 1 if f else 0, "gallery": [{**img, "version": 1}] if img else [], "regen": [], "tags": ["资产包"],
+                    "source": "manifest", "created_at": None, "uploaded_by": it.get("by") or None,
+                    "looks": looks_of.get(iid, []), "version": 1, "local_only": adult})
+    for lid, lk in (ch.get("looks") or {}).items():
+        adult = bool(lk.get("adult") or lk.get("route") == "local_only")
+        for iid, it in (lk.get("items") or {}).items():
+            add(iid, it, (it.get("slot") if isinstance(it, dict) and it.get("slot") in SLOT_NAME else "outfit"), adult, lid)
+    for iid, it in (ch.get("items") or {}).items():
+        if isinstance(it, dict):
+            add(iid, it, (it.get("slot") if it.get("slot") in SLOT_NAME else "accessory"), bool(it.get("adult") or it.get("route") == "local_only"), None)
+    return out
 
 
 def _img(rel: str | None, **extra) -> dict | None:
@@ -203,6 +294,13 @@ def _p1(project: str) -> list[dict]:
     """人物表按继承链合并（K-OPS-W18 / W19，WORKFLOW 11-02）：父季在前，子季同一人物的同 id 造型覆盖、新造型追加、新人物追加。
     第一季（无 inherits）只有自己这一层，行为不变；子季没写 looks_file 也能看到父季人物（否则 ?project=series10_s2 林晚 404）"""
     files = R.chain_files(project, "looks_file") or [_root() / (R.project_cfg(project).get("looks_file") or "")]
+    # NAVFLOW-F 11-03（ISS-1103-032336-3aff 之后）：资产包模式下 asset_refs.json 的 looks_file 故意指向不存在的文件，
+    # 让出图解析只认清单（manifest_looks）。人物页的“人物表”只是显示用，这里单独回落到写作链落的 <run>/P1_looks.json，
+    # 不改出图配置、不影响 ns_agent.asset_refs 的任何判定。
+    if R.manifest_rel(project) and not any(p.is_file() for p in files):
+        alt = _run_dir(project) / "P1_looks.json"
+        if alt.is_file():
+            files = [alt]
     out: list[dict] = []
     idx: dict[str, dict] = {}
     for p in reversed(files):
@@ -478,13 +576,20 @@ def character(project: str, cid: str, store: LookStore, all_items: bool = False)
     looks = []
     wd = {i.id for i in store.wardrobe().items}
     quar = (R.quarantine(project).get(cid) or {})          # 解析层按 run 继承（K-OPS-W19），与出图同一入口
+    manifest_mode = bool(R.manifest_rel(project))          # NAVFLOW-F 11-03：资产包模式下用清单单品补人物页显示（不写文件）
+    p1_use = {str(x.get("id")): str(x.get("use") or "") for x in (c.get("looks") or []) if isinstance(x, dict)}   # 写作链造型表里“这套什么时候穿”
     for lk in inv:
+        if manifest_mode:
+            _manifest_fill_parts(project, cid, lk["look"], lk["parts"])
+            # 清单造型的 use 字段是出图路线（server_ok / local_only），不是人话：人物页改显示造型表的“什么时候穿”，没有就写大白话
+            if lk.get("use") in ("server_ok", "local_only", ""):
+                lk["use"] = p1_use.get(lk["look"]) or ("成人类：仅本地，项目方触发" if lk.get("use") == "local_only" else "")
         parts = []
         for p in lk["parts"]:
             if p["slot"] == "marker":
                 continue
             parts.append({**p, "slot_name": SLOT_NAME.get(p["slot"], p["slot"]),
-                          "item_name": R.item_name(p["item_id"]) if p["item_id"] and p["item_id"] in wd else None,
+                          "item_name": p.get("item_name") or (R.item_name(p["item_id"]) if p["item_id"] and p["item_id"] in wd else None),
                           "item_image": _img(p["item_file"]), "extra": False,
                           "quarantine": _quar(quar, lk["look"], p["label"])})
             if p["item_id"]:
@@ -506,6 +611,8 @@ def character(project: str, cid: str, store: LookStore, all_items: bool = False)
     in_play = [i for i in items_all if i.id in looks_of or i.source == "hub_upload" or i.id in adopted]
     shown = items_all if all_items else in_play
     items = sorted((_item_dict(i, looks_of) for i in shown), key=lambda x: (x["source"] != "hub_upload", x["slot"], x["name"]))
+    if manifest_mode:
+        items = _manifest_items(project, cid, looks_of) + items   # 清单单品（只读）排在前面
     voices = _rjson(_root() / "config" / "voices.json", {})
     vc = (voices.get("characters") or {}).get(cid) if isinstance(voices.get("characters"), dict) else None
     faces = _face_candidates(project, cid)

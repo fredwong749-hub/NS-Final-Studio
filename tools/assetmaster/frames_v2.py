@@ -26,16 +26,19 @@ import traceback
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+import runs as RUNS  # noqa: E402
+_LEGACY = RUNS.legacy_run(ROOT)   # I-16：第一季专用历史工具（入口 gate_legacy_tool 要求显式 --run）
 for p in ("services/render_router", "services/agent", "services/api", "packages/schema", "tools/pipeline", "tools/series10_imggen",
           "tools/gen_contract", "services/recipes"):
     sys.path.insert(0, str(ROOT / p))
 
-RUN = ROOT / "data/pipeline/runs/series10_v1"
+RUN = ROOT / ("data/pipeline/runs/" + _LEGACY)
 OUT = ROOT / "data/assetmaster/frames_v2"
 STATE = Path(__import__("os").environ.get("AM_FRAMES_STATE") or OUT / "state.json")
 LOG = OUT / "frames_v2.log"
 PAGES = ROOT / "data/review_pages/series10_frames_v2"
-PROJECT = "series10_v1"
+PROJECT = _LEGACY
 SEEDS = (20261101, 20261102, 20261103, 20261104)        # 首次 + 最多 3 次重出（只换 seed）
 LANES_ALL = {"gpu33:0": "http://127.0.0.1:18188", "gpu33:1": "http://127.0.0.1:18189", "gpu33:3": "http://127.0.0.1:18191",
              "gpu36:0": "http://127.0.0.1:18288", "gpu36:1": "http://127.0.0.1:18289", "gpu36:2": "http://127.0.0.1:18290"}
@@ -676,6 +679,7 @@ def parse_eps(s):
 
 
 def main(argv=None) -> int:
+    argv = RUNS.gate_legacy_tool(argv, __file__)
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["run", "jobs", "page", "rescore"])

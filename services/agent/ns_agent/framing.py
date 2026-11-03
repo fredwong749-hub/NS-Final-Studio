@@ -100,6 +100,57 @@ def visible(fragment: str, size: str | None) -> bool:
     return True
 
 
+# ISS-1103-024205-8856（MERGE-IMG-O 11-03，L-137）：近景 / 特写里“看得见的上身件”不能因为同一件衣服名里带“裙 / 袜”被整句删掉。
+# 例：V2 ep01-S8 近景“祁念穿黑色漆皮抹胸紧身短裙、黑色薄透丝袜”——抹胸（上身）在胸部以上构图里看得见，K-REN-707 原先整句删，
+# 首帧提示词一个服装词都没有。规则：分句里有上身件词 → 这一句按单品拆开（+ / 配 / 和 / 与 / 及），只删看不见的单品，保留上身件。
+# 强上身词：出现即算上身入画（抹胸裙 / 吊带裙 / 连衣裙的上身在胸像里看得见）；弱上身词：后面紧跟 裙 / 裤 / 袜 时是下装（西装裙、针织裤）
+UPPER_STRONG = ("抹胸", "吊带", "连衣", "礼服", "旗袍", "胸衣", "文胸", "上衣", "衬衫", "背心", "外套", "夹克", "毛衣", "T恤", "卫衣",
+                "风衣", "大衣", "马甲", "领口", "衣领", "开衫", "披肩", "斗篷", "浴袍", "睡袍")
+UPPER_WEAK = ("西装", "针织", "皮衣")
+NOT_UPPER = ("吊带袜", "连裤袜", "连体袜")
+ITEM_SPLIT_RE = re.compile(r"(\s*(?:\+|＋|搭配|配|和|与|及)\s*)")
+WEAR_PREFIX_RE = re.compile(r"^(.*?(?:穿着|穿|换上|换成|外罩))")
+
+
+def keep_upper_enabled() -> bool:
+    """config/recipes/image_framing.json close_keep_upper（缺省 true；false = 回退 K-REN-707 旧行为：带裙 / 袜字的整句删）"""
+    return bool(_cfg().get("close_keep_upper", True))
+
+
+def upper_garment(fragment: str) -> bool:
+    """分句里有看得见的上身件（抹胸 / 衬衫 / 外套 …）"""
+    t = fragment or ""
+    for w in NOT_UPPER:
+        t = t.replace(w, "")
+    if any(w in t for w in UPPER_STRONG):
+        return True
+    return any(re.search(re.escape(w) + r"(?![裙裤袜])", t) for w in UPPER_WEAK)
+
+
+def visible_items(fragment: str, size: str | None) -> str:
+    """把一句并列造型按单品拆开，只留该景别看得见的单品与上身件（保留“穿 / 换上”前缀）；一件都不剩 → ""。
+    “黑色漆皮抹胸紧身短裙 + 黑色薄透丝袜 + 透明尖头细高跟”近景 → “黑色漆皮抹胸紧身短裙”"""
+    toks = ITEM_SPLIT_RE.split(fragment or "")
+    items, seps = toks[0::2], [""] + toks[1::2]
+    out, prefix = "", ""
+    for i, (it, sep) in enumerate(zip(items, seps)):
+        if not it.strip():
+            continue
+        if visible(it, size) or upper_garment(it):
+            if not out and prefix and not WEAR_PREFIX_RE.match(it):
+                it = prefix + it.lstrip()
+            out += (sep if out else "") + it
+        elif i == 0:
+            m = WEAR_PREFIX_RE.match(it)
+            prefix = m.group(1) if m else ""
+    return out
+
+
+def visible_garment(fragment: str, size: str | None) -> bool:
+    """filter_parts 的保留判定：看得见，或（开关开时）含看得见的上身件"""
+    return visible(fragment, size) or (keep_upper_enabled() and upper_garment(fragment))
+
+
 def keep_subject_enabled() -> bool:
     """K-REN-901（IMGLAB 11-02，ep06-S2 v6 顾沉长出林晚的蓝色长发）：删句保主语开关。
     config/recipes/image_framing.json keep_subject（缺省 true；false = 回退旧行为：整句删，主语跟着丢）"""
@@ -143,7 +194,9 @@ def filter_parts(text: str, size: str | None, sep: str = "，", subjects=()) -> 
     head = m.group(1) if m else ""
     body = (text or "")[len(head):]
     parts = [p for p in re.split(r"[，,、；;]", body) if p.strip()]
-    keep = _keep_with_subject(parts, lambda p: visible(p, size), subjects)
+    if keep_upper_enabled():      # ISS-1103-024205-8856：含上身件的分句只删其中看不见的单品
+        parts = [(visible_items(p, size) or p) if (not visible(p, size) and upper_garment(p)) else p for p in parts]
+    keep = _keep_with_subject(parts, lambda p: visible_garment(p, size), subjects)
     return head + sep.join(keep) if keep else ""
 
 

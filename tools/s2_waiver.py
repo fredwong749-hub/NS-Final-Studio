@@ -4,6 +4,7 @@ S2 一次性豁免（项目方本人运行）：只对指定的一集、指定�
 
     python tools/s2_waiver.py --episode 2 --skip plate --quote "项目方原话" --scope "ep02 本次端到端测试渲染"
     python tools/s2_waiver.py --episode 2 --revoke          # 撤销
+    --run series10_v2                                         # 哪部剧（不给 = 当前剧 NS_RUN / primary；豁免按剧 + 集，MERGE-OPS-O）
 
 只记录项目方本人的决定：必须有原话；Claude / agent 会话不代为运行。
 """
@@ -21,6 +22,16 @@ CFG = ROOT / "config" / "s2_waivers.json"
 SKIPPABLE = ("plate",)
 
 
+def current_run() -> str | None:
+    """当前剧（tools/autopilot/runs.current_run）；登记表读不出 → None（写出的条目不带剧号 = 只对 V1 有效）"""
+    try:
+        sys.path.insert(0, str(ROOT))
+        from tools.autopilot import runs as RN
+        return RN.current_run(ROOT)
+    except Exception:  # noqa: BLE001  arch-ok: 没有登记表 = 旧行为
+        return None
+
+
 def main() -> int:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser()
@@ -29,7 +40,9 @@ def main() -> int:
     ap.add_argument("--quote", default="", help="项目方原话（必填，撤销除外）")
     ap.add_argument("--scope", default="", help="有效范围，例如“ep02 本次端到端测试渲染”")
     ap.add_argument("--revoke", action="store_true")
+    ap.add_argument("--run", default=None, help="哪部剧（不给 = 当前剧）；豁免只对这部剧的这一集有效")
     a = ap.parse_args()
+    run = a.run or current_run()
     if a.episode < 1:
         ap.error("--episode 必须 ≥ 1")
     data = json.loads(CFG.read_text(encoding="utf-8")) if CFG.exists() else {"waivers": []}
@@ -39,14 +52,14 @@ def main() -> int:
     if a.revoke:
         n = 0
         for w in data["waivers"]:
-            if w.get("episode") == a.episode and not w.get("revoked"):
+            if w.get("episode") == a.episode and not w.get("revoked") and w.get("run") == run:
                 w["revoked"], w["revoked_at"] = True, now
                 n += 1
-        print(f"撤销 ep{a.episode:02d} 的豁免 {n} 条")
+        print(f"撤销 {run} ep{a.episode:02d} 的豁免 {n} 条")
     else:
         if not a.quote.strip() or not a.skip:
             ap.error("需要 --skip 和项目方原话 --quote")
-        data["waivers"].append({"episode": a.episode, "skip": a.skip, "owner_quote": a.quote.strip(),
+        data["waivers"].append({"run": run, "episode": a.episode, "skip": a.skip, "owner_quote": a.quote.strip(),
                                 "scope": a.scope.strip() or f"ep{a.episode:02d}", "by": "owner", "at": now,
                                 "revoked": False})
         print(f"ep{a.episode:02d} 豁免 {a.skip}：{a.quote.strip()}")

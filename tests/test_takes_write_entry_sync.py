@@ -59,3 +59,51 @@ def test_no_direct_takes_writes_in_sync_chain():
     assert "_save_takes(" not in rt and "P.mutate_takes(" in rt
     rd = (ROOT / "ops/offline/resolve_dup_takes.py").read_text(encoding="utf-8")
     assert "P.mutate_takes(" in rd and "takes_cli.py replace" in rd and "MP.backup(rel)" not in rd
+
+
+def test_a04_no_direct_takes_json_writes_anywhere():
+    """A-04（V2_READINESS，FACTORY 21:3x）：takes.json 只经 ns_render.pipeline 的写入口落盘（mutate_takes / _save_takes → _commit_takes）。
+    扫 services / tools / ops 的源码（不含测试）：直接对 takes.json（或指向它的变量）write_text / _write_json / os.replace / open(w) 的一律不许"""
+    import ast
+    def S(n, t):
+        return ast.get_source_segment(t, n) or ""
+
+    import re as _re
+    _tj = _re.compile(r"""(?:^|[/"'\s])takes\.json""")         # 只认文件名正好是 takes.json（bad_takes.json 之类报告文件不算）
+
+    def tk(e):
+        e = e.lower()
+        return bool(_tj.search(e)) or "takes_path(" in e
+    allow = {("services/render_router/ns_render/pipeline.py", "_commit_takes")}
+    bad = []
+    for top in ("services", "tools", "ops"):
+        for p in (ROOT / top).rglob("*.py"):
+            if "_quarantine" in p.parts or "tests" in p.parts:
+                continue
+            t = p.read_text(encoding="utf-8", errors="replace")
+            if "takes" not in t:
+                continue
+            try:
+                tree = ast.parse(t)
+            except SyntaxError:
+                continue
+            rel = p.relative_to(ROOT).as_posix()
+            for fn in [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+                if (rel, fn.name) in allow:
+                    continue
+                names = {x.id for n in ast.walk(fn) if isinstance(n, ast.Assign) and tk(S(n.value, t)) for x in n.targets if isinstance(x, ast.Name)}
+                for n in ast.walk(fn):
+                    if not isinstance(n, ast.Call):
+                        continue
+                    f = n.func
+                    nm = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
+                    tgt = None
+                    if nm in ("write_text", "write_bytes") and isinstance(f, ast.Attribute):
+                        tgt = f.value
+                    elif nm in ("_write_json", "write_json", "js", "_js", "write_atomic", "_atomic_json", "atomic_write_json") and n.args:
+                        tgt = n.args[0]
+                    elif nm == "replace" and isinstance(f, ast.Attribute) and S(f.value, t) == "os" and len(n.args) == 2:
+                        tgt = n.args[1]
+                    if tgt is not None and (tk(S(tgt, t)) or (isinstance(tgt, ast.Name) and tgt.id in names)):
+                        bad.append(f"{rel}:{n.lineno} {fn.name}")
+    assert not bad, bad

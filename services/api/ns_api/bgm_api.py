@@ -29,7 +29,15 @@ def _deliver():
 
 
 def music_dir() -> Path:
-    """series10 的配乐目录（有就用它；旧剧 data/music 已隔离）"""
+    """当前剧的集级配乐目录（OVERSIGHT-F P1-13a：按剧取）：资产包模式的剧（V2）= data/music/<run>（先校验 config/music_v2.json 曲库），
+    legacy = series10 的目录（有就用它；旧剧 data/music 已隔离）"""
+    from ns_api import run_paths as RP  # noqa: PLC0415
+    if str(REPO / "services" / "post") not in sys.path:
+        sys.path.insert(0, str(REPO / "services" / "post"))
+    from ns_post import run_media as RM  # noqa: PLC0415
+    run = RP.current_run()
+    if RM.is_asset_pack_run(run, REPO):
+        return RM.music_dir(run, REPO)
     d = REPO / "data" / "music" / "series10"
     return d if d.is_dir() else REPO / "data" / "music"
 
@@ -38,8 +46,21 @@ def file_url(p: Path) -> str:
     return "/files/" + p.relative_to(REPO / "data").as_posix() + f"?v={int(p.stat().st_mtime)}"
 
 
+def _ep_dir(ep: int) -> Path:
+    """本剧本集的配乐候选目录（OVERSIGHT-F 第 14 轮：按剧取，不写死 data/music/series10/epNN）"""
+    return music_dir() / f"ep{ep:02d}"
+
+
+def _is_v2() -> bool:
+    from ns_api import run_paths as RP  # noqa: PLC0415
+    if str(REPO / "services" / "post") not in sys.path:
+        sys.path.insert(0, str(REPO / "services" / "post"))
+    from ns_post import run_media as RM  # noqa: PLC0415
+    return RM.is_asset_pack_run(RP.current_run(), REPO)
+
+
 def _meta(ep: int) -> dict:
-    p = REPO / "data" / "music" / "series10" / f"ep{ep:02d}" / "meta.json"
+    p = _ep_dir(ep) / "meta.json"
     try:
         return json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -52,7 +73,7 @@ def candidates(ep: int):
     if not st:
         raise HTTPException(404, f"第 {ep} 集还没有配乐候选")
     chosen = (st.get("chosen") or {}).get("id")
-    base = REPO / "data" / "music" / "series10" / f"ep{ep:02d}" / "cands"
+    base = _ep_dir(ep) / "cands"
     rows, hidden = [], 0
     for c in st.get("candidates") or []:
         f = base / f"{c['id']}.flac"
@@ -94,6 +115,8 @@ def require_owner(request: Request) -> dict:
 @router.post("/api/music/{ep}/choose")
 def choose(ep: int, body: ChooseBody, request: Request):
     u = require_owner(request)            # 换用与撤销同一道检查，先于任何读写
+    if _is_v2():   # V2 的集级配乐只从曲库取（L-131 config/music_v2.json），换曲在成片页；tools/bgm/deliver 会写 V1 目录，V2 不许走
+        raise HTTPException(409, "这部剧的配乐从 V2 曲库里选（成片页换曲），这里不能换")
     from ns_api.auth import audit_line  # noqa: PLC0415
     st = _meta(ep)
     if not st:

@@ -233,3 +233,31 @@ def test_resend_with_old_base_from_same_window_is_not_an_override(env):
     other = c.put("/api/episodes/97/cut-project", json={"rev": base, "client": "tabB",
                                                        "subtitles": [{"shot": 2, "text": "二", "d0": 0.2, "d1": 1.2}]}).json()
     assert other["history"][-1]["overrode"][0]["prev_value"][0]["text"] == "一（改）"
+
+
+def test_v2_music_choices_only_library_and_run_dir(env, monkeypatch):
+    """STYLE-V2 → CUTEDIT（P1-13a）：资产包模式的剧，换曲列表只列曲库 + 本剧配乐目录；选列表外的曲子 → 422（导出时也会被拒）"""
+    c, root, fin = env
+    RM = CP._rm()
+    lib_file = root / "data" / "music" / "v2_style" / "A.flac"
+    lib_file.parent.mkdir(parents=True)
+    lib_file.write_bytes(b"x")
+    rdir = root / "data" / "music" / "series10_v2"
+    rdir.mkdir(parents=True)
+    (rdir / "ep97.wav").write_bytes(b"x")
+    monkeypatch.setattr(CP._RP, "current_run", lambda root=None: "series10_v2")
+    monkeypatch.setattr(RM, "is_asset_pack_run", lambda run, root=None: True)
+    monkeypatch.setattr(RM, "music_library", lambda run, root=None: {"v2_A": {"id": "v2_A", "file": "data/music/v2_style/A.flac", "use": "现实段", "theme": "外滩夜光", "duration_s": 48.0}})
+    monkeypatch.setattr(RM, "music_dir", lambda run, root=None: rdir)
+    CP._lib_cache.clear()
+    j = c.get("/api/episodes/97/cut-project").json()
+    assert {m["file"] for m in j["music_choices"]} == {"data/music/v2_style/A.flac", "data/music/series10_v2/ep97.wav"}
+    assert j["music_error"] is None
+    r = c.put("/api/episodes/97/cut-project", json={"rev": j["rev"], "bgm": {"file": "data/music/series10/ep96.wav"}})
+    assert r.status_code == 422                                              # V1 曲子不在 V2 可用曲目里
+    r = c.put("/api/episodes/97/cut-project", json={"rev": j["rev"], "bgm": {"file": "data/music/v2_style/A.flac"}})
+    assert r.status_code == 202 and r.json()["bgm"]["file"] == "data/music/v2_style/A.flac"
+    monkeypatch.setattr(RM, "music_library", lambda run, root=None: (_ for _ in ()).throw(RM.V2MediaError("曲库文件 sha 不符")))
+    CP._lib_cache.clear()
+    j = c.get("/api/episodes/97/cut-project").json()
+    assert j["music_choices"] == [] and "sha 不符" in j["music_error"]       # 曲库坏了：页面照开，原因写出来

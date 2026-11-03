@@ -68,3 +68,59 @@ export function useEpisodePreviews(total: number): PreviewSummary | null {
   }, [total]);
   return v;
 }
+
+// ---------------------------------------------------------------- NAVFLOW-F 11-03（L-146）：各集生产进度（唯一来源 GET /api/pipeline/status，后端转调 sop_gate）
+export type PipeStepId = "script" | "assets" | "board" | "frames" | "video" | "cut";
+export type PipeCellState = "done" | "doing" | "blocked" | "todo";
+export type PipeCell = { state: PipeCellState; plain: string; why: string }; // plain = 页面显示的大白话；why = sop_gate 原文（只给开发者，页面不显示）
+export type PipeEpisode = { episode: number; cells: Record<PipeStepId, PipeCell>; stage: string; plain: string; why: string; retro?: string | null };
+export type PipeStatus = {
+  run: string;
+  title: string;
+  episodes_total: number;
+  steps: { id: PipeStepId; label: string }[];
+  episodes: PipeEpisode[];
+  done: Record<PipeStepId, number>;
+  lit: Record<PipeStepId, boolean>;
+};
+/** 六步对应的页面（点格子 / 点步骤去哪）；集号由调用方拼 */
+export const PIPE_STEP_TO: Record<PipeStepId, (ep: number) => string> = {
+  script: (ep) => `#/script-create?ep=${ep}`,
+  assets: () => "#/assets",
+  board: (ep) => `#ep${String(ep).padStart(2, "0")}`,
+  frames: (ep) => `#/frames?ep=${ep}`,
+  video: (ep) => `#/videos?ep=${ep}`,
+  cut: () => "#/cut",
+};
+export const PIPE_CELL_GLYPH: Record<PipeCellState, string> = { done: "✓", doing: "●", blocked: "⚠", todo: "·" };
+export const PIPE_CELL_WORD: Record<PipeCellState, string> = { done: "完成", doing: "进行中", blocked: "卡住", todo: "未开始" };
+
+let _pipeCache: { at: number; v: PipeStatus | null; err: string | null } | null = null;
+const _pipeSubs = new Set<() => void>();
+async function _pipeLoad(run: string | null) {
+  try {
+    const r = await fetch(`/api/pipeline/status${run ? `?run=${encodeURIComponent(run)}` : ""}`);
+    if (!r.ok) {
+      const d = (await r.json().catch(() => ({}))) as { detail?: string };
+      _pipeCache = { at: Date.now(), v: null, err: r.status === 404 ? "进度接口还没生效（后台重启后出现）" : d.detail ?? `HTTP ${r.status}` };
+    } else _pipeCache = { at: Date.now(), v: (await r.json()) as PipeStatus, err: null };
+  } catch (e) {
+    _pipeCache = { at: Date.now(), v: null, err: String((e as Error).message ?? e) };
+  }
+  _pipeSubs.forEach((f) => f());
+}
+/** 顶栏和总览矩阵共用一份（30 s 刷新；多处挂载只请求一次）。读不到 → {v:null, err} 页面写明，不猜 */
+export function usePipelineStatus(run: string | null = null): { v: PipeStatus | null; err: string | null; reload: () => void } {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const f = () => setTick((n) => n + 1);
+    _pipeSubs.add(f);
+    if (!_pipeCache || Date.now() - _pipeCache.at > 30000) void _pipeLoad(run);
+    const t = window.setInterval(() => void _pipeLoad(run), 30000);
+    return () => {
+      _pipeSubs.delete(f);
+      window.clearInterval(t);
+    };
+  }, [run]);
+  return { v: _pipeCache?.v ?? null, err: _pipeCache?.err ?? null, reload: () => void _pipeLoad(run) };
+}

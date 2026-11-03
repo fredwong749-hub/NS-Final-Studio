@@ -72,6 +72,90 @@ CODE_ROUNDS = 4                 # 代码判定补丁最多几轮（每轮修 1�
 STATUS = "autoflow.json"
 LINKS = [("P0-P1", "P1", "故事线"), ("P1-P2", "P2", "分集大纲"), ("P2-P3", "P3", "单集剧本"), ("P3-P4", "P4", "分镜")]
 
+# EPCHAIN-O 11-03：派人请求的建议模型（写和评不能是同一个模型；总调度按 inbox/requests/ 里的 suggested_model 派 agent）
+MODEL_PLAN = {"writer": "fable", "reviewer": "sonnet", "judges": ["sonnet", "haiku", "opus"]}
+
+# ------------------------------------------------------------------ 计量（METRICS，docs/master/METRICS_SPEC.md）
+
+METRICS_SCHEMA = "nsfs.metrics.stage/1"
+# 还在进行中的状态（不出计量行）；其余状态 = 这一段到了一个结果，出一行
+OPEN_STATUSES = {"running", "awaiting_writer", "awaiting_reviewer", "awaiting_owner", "awaiting_judges", "repair_requested",
+                 "needs_patch", "revising", "held_by_p1_gate", "deviation", "reopened", "waiting_p1_review", "owner_direction"}
+OK_RESULTS = {"ok", "reused", "approved", "passed", "imported", "reimported", "dry_run_ok", "ready", "generated", "importable"}
+# 每段对应的写作包 step 前缀（数尝试次数 = writer_tasks/<前缀>_a*.json 个数）和角色
+STAGE_STEP = {"P1": ("P1", "writer"), "P1L": ("P1_looks", "writer"), "P2": ("P2_ep{ep:02d}", "writer"), "P3": ("P3_ep{ep:02d}", "writer"),
+              "P4": ("P4_ep{ep:02d}", "writer"), "code": ("patch_ep{ep:02d}", "writer"), "EPG": ("revise_ep{ep:02d}", "writer"),
+              "facts": ("facts_ep{ep:02d}", "reviewer"), "factcheck": ("factcheck_ep{ep:02d}", "reviewer")}
+SEASON_STAGES = {"P0", "P1", "P1L", "P1G", "P1R"}       # 整季只做一次的段：第 2 集起是沿用（carried），不算本集的人工 / agent 工作
+
+
+def metrics_by(decider: str, sid: str, backend: str | None, packets: int) -> str:
+    """由谁完成：code / agent:<模型> / api / owner（claude_agent 后端下 api_model = agent；段里出过写作包也算 agent 做的）"""
+    if decider == "owner":
+        return "owner"
+    if sid == "P1R" or decider == "judge":
+        return "agent:" + "+".join(MODEL_PLAN["judges"])
+    role = STAGE_STEP.get(sid, (None, "writer"))[1]
+    if decider == "api_model" or packets:
+        return f"agent:{MODEL_PLAN[role]}" if (backend or "claude_agent") == "claude_agent" else "api"
+    return "code"
+
+
+def done_model(run_dir: Path, step: str) -> str | None:
+    """这一步最近一次交稿的 .done 里写的实际模型（第 2 行 `model: <id>`，METRICS_SPEC §A）；没写 = None"""
+    best = None
+    for p in (run_dir / "writer_out").glob(f"{step}_a*.done"):
+        m = re.search(r"_a(\d+)\.[a-z]+\.done$", p.name)
+        if m and (best is None or int(m.group(1)) > best[0]):
+            best = (int(m.group(1)), p)
+    if best is None:
+        return None
+    try:
+        lines = best[1].read_text(encoding="utf-8").splitlines()[:5]
+        via = "(dispatcher)" if lines and lines[0].strip() == "agent_dispatcher" else ""     # 派单器交的稿：by = agent:<模型>(dispatcher)
+        for ln in lines:
+            if ln.strip().lower().startswith("model:"):
+                m = ln.split(":", 1)[1].strip()
+                return (m + via) if m else None
+    except OSError:   # arch-ok: .done 读不了 = 退回建议模型
+        return None
+    return None
+
+
+def season_last_episode(run_dir: Path) -> int:
+    """整季最后一集：P1_storyline.json 的 episodes（最大集号）；没有 P1 → P0 Brief 的 episodes.to；都读不到 = 0（不开新集）"""
+    try:
+        eps = json.loads((run_dir / "P1_storyline.json").read_text(encoding="utf-8")).get("episodes") or []
+        nums = [int(e.get("episode") or e.get("number") or 0) for e in eps if isinstance(e, dict)]
+        if nums and max(nums) > 0:
+            return max(nums)
+    except (OSError, ValueError, TypeError, AttributeError):    # arch-ok: 读不到 P1 → 退到 Brief
+        pass
+    try:
+        return int((json.loads((run_dir / "P0_brief.json").read_text(encoding="utf-8")).get("episodes") or {}).get("to") or 0)
+    except (OSError, ValueError, TypeError, AttributeError):    # arch-ok: 都读不到 = 不开新集（失败关闭）
+        return 0
+
+
+def next_episodes(run_dir: Path) -> list[int]:
+    """EPCHAIN-O 11-03（项目方 02:1x：按集流水）：第 N 集已导入（verdict=imported）而第 N+1 集还没有状态文件 → 开第 N+1 集
+    （推进一次即出 P2 包）。只看写作状态，不看出图（第 N 集出图不挡第 N+1 集写作）；到 P1_storyline 最后一集为止。
+    P1 / 项目方闸门不在这里判：packet() 里 P1 没过项目方闸门照样不出 P2–P4 包"""
+    last = season_last_episode(run_dir)
+    out = []
+    for f in sorted(run_dir.glob("autoflow_ep*.json")):
+        m = re.fullmatch(r"autoflow_ep(\d+)", f.stem)
+        if not m:
+            continue
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):   # arch-ok: 正在被原子替换 / 坏文件：这一拍不开下一集，下一拍再看
+            continue
+        n = int(m.group(1))
+        if d.get("verdict") == "imported" and n + 1 <= last and not (run_dir / f"autoflow_ep{n + 1:02d}.json").exists():
+            out.append(n + 1)
+    return out
+
 
 # ------------------------------------------------------------------ 状态（页面 / flow.py 读）
 
@@ -87,11 +171,51 @@ class Status:
 
     def stage(self, sid: str, name: str, status: str, decider: str, **kw):
         rec = next((s for s in self.d["stages"] if s["id"] == sid), None)
-        if rec is None:
+        new = rec is None
+        if new:
             rec = {"id": sid, "name": name}
             self.d["stages"].append(rec)
+        prev = rec.get("status")
+        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        reopened = prev is not None and not self._open(sid, prev) and self._open(sid, status)    # 有结果后又退回进行中（补丁环待修等）
+        if new or reopened or not rec.get("started_at"):
+            rec["started_at"] = now                                                              # 计量：这一段（这一轮）的开始时间
         rec.update({"status": status, "decider": decider, "at": time.strftime("%F %T"), **kw})
+        if not self._open(sid, status) and (new or prev != status):
+            self._metric(rec, sid, name, status, decider, kw, now)
         self.save()
+
+    @staticmethod
+    def _open(sid: str, status) -> bool:
+        return status in OPEN_STATUSES and not (sid == "P1R" and status == "owner_direction")
+
+    def _metric(self, rec: dict, sid: str, name: str, status: str, decider: str, kw: dict, now: str) -> None:
+        """一段到了结果 → <run>/metrics/epNN.jsonl 追加一行（字段见 docs/master/METRICS_SPEC.md）；写失败不影响推进"""
+        try:
+            base = STAGE_STEP.get(sid, (None,))[0]
+            packets = len(list((self.run_dir / "writer_tasks").glob(base.format(ep=self.ep) + "_a*.json"))) if base else 0
+            carried = self.ep > 1 and sid in SEASON_STAGES
+            started = rec.get("started_at") or now
+            t0, t1 = time.mktime(time.strptime(started, "%Y-%m-%dT%H:%M:%S")), time.mktime(time.strptime(now, "%Y-%m-%dT%H:%M:%S"))
+            by = "code" if carried else metrics_by(decider, sid, self.d.get("writer_backend"), packets)
+            model_source = None
+            if by.startswith("agent:") and base:                  # METRICS-F 定稿：by 取 .done 第 2 行 “model: <id>” 的实际模型，没有才用建议模型
+                real = done_model(self.run_dir, base.format(ep=self.ep))
+                by, model_source = (f"agent:{real}", "done") if real else (by, "suggested")
+            line = {"schema": METRICS_SCHEMA, "run": self.run_dir.name, "episode": self.ep, "stage": sid, "name": name,
+                    "started_at": started, "ended_at": now, "duration_s": max(0, int(t1 - t0)),
+                    "by": by, **({"model_source": model_source} if model_source else {}),
+                    "attempts": 0 if carried else max(1, packets, int(kw.get("attempt") or 0) if str(kw.get("attempt") or "0").isdigit() else 1),
+                    "result": status, "ok": status in OK_RESULTS, "carried": carried, "decider": decider,
+                    "writer_backend": self.d.get("writer_backend")}
+            if kw.get("usd") is not None:
+                line["usd"] = kw.get("usd")
+            p = self.run_dir / "metrics" / f"ep{self.ep:02d}.jsonl"
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with open(p, "a", encoding="utf-8") as f:
+                f.write(json.dumps(line, ensure_ascii=False) + "\n")
+        except (OSError, ValueError, TypeError, OverflowError) as e:     # 计量写不进去只打印，不挡写作推进
+            print(f"[metrics] {self.run_dir.name} ep{self.ep:02d} {sid} 写计量失败：{e!r}")
 
     def set(self, **kw):
         self.d.update(kw)
@@ -129,7 +253,7 @@ def extra_system() -> str:
     w = (H.PROMPTS / "hollywood_writer.md").read_text(encoding="utf-8")
     tpl = w[w.find("## 一、模板原文"):w.find("## 二、")] if "## 一、模板原文" in w else w
     wk = (ROOT / "config" / "recipes" / "writer_knowledge.md").read_text(encoding="utf-8")
-    return ("【项目方 11-01 好莱坞模板（原文；红线：不改给定的剧情事实和人物设定，缺信息标“未提供”，不编剧情）】\n" + tpl
+    return ("【项目方 11-01 好莱坞模板（原文；红线：不改给定的剧情事实和人物设定，缺信息就按已有设定写成具体内容（项目方 11-02 21:3x））】\n" + tpl
             + "\n" + PLACEHOLDER_OVERRIDE + "\n\n========\n\n" + wk)      # 模板原文不改（等项目方定），紧接覆盖说明（OVERSIGHT-F P1-8a）
 
 
@@ -138,10 +262,29 @@ ITEM_TRIES = 2
 SCORE_RESERVE = 0.2      # 总调度 03:0x 断点①：补丁 / 拆镜花钱前先给新尺子打分留出这笔（S2 ep01/04/05 实测补丁把钱用光、没打成分）
 
 
+def fact_id(d: dict) -> str:
+    """事实偏差的稳定 id：按 kind + 事实表引用算哈希（K211-F 11-03）。之前按位置编 F1 / F2，每轮事实核对重排后另一条偏差顶着同一个 F1，
+    尝试次数被算到一起（ep01 实测：a15 的 F1 = 存储卡，a16 的 F1 = 卓琳号码，两条合计 2 次 → “试满”误判）"""
+    import hashlib
+    return "F" + hashlib.sha1(f"{d.get('kind', '')}|{(d.get('ref') or '')[:200]}".encode("utf-8")).hexdigest()[:6]
+
+
 def fact_items(devs: list) -> list[tuple[str, dict]]:
     """断点③：整集事实核对的偏差也作为补丁目标（S2 ep05：P4 把林晚换成另一套造型，与上游事实表不符）"""
-    return [("fact", {"id": f"F{i + 1}", "why": f"{d.get('kind', '')}｜事实表：{d.get('ref', '')}｜改写稿里：{d.get('found', '')}"[:400]})
-            for i, d in enumerate(devs or [])]         # 镜数等结构项：逐行补丁改不了（不能增删镜），只能在 P4 首稿写对
+    return [("fact", {"id": fact_id(d), "why": f"{d.get('kind', '')}｜事实表：{d.get('ref', '')}｜改写稿里：{d.get('found', '')}"[:400]})
+            for d in (devs or [])]                     # 镜数等结构项：逐行补丁改不了（不能增删镜），只能在 P4 首稿写对
+
+
+FACT_PATCH_GUIDE = (
+    "  【怎么补（事实类缺口一律画面化，总调度 11-03 裁定）】\n"
+    "  · 要补的信息：上面“事实表”那一条——观众要能从画面 / 动作 / 已有台词里看出来，不是加一句解释。\n"
+    "  · 禁止：① 不加屏幕文字 / 纸面文字 / 字幕来交代（手机屏上打出名字、联系人卡片、便签字样）——镜头描述里出现原稿没有的引号文字会被 HW-F1（F0 新屏幕文字）拦下；"
+    "② 不在 img / 视线= / 结束状态里写不在画的人物名字（“视线=画外的卓琳”）——人物行没有的人出现名字 = QW-CH4 阻断，画外落点写方位 + 物（“视线=画面左侧白幕前的方向”）；"
+    "③ 不新增台词、不改说话人 / 台词条数（F1），不拉长镜长、不让台词溢出镜尾（SS-A3）。\n"
+    "  · 画面化写法（选一种，写进这一镜的 分拍 / 表演节拍 / motion / H3）：A. 边做这个动作边抬眼看向信息来源的人——那人在画就写名字和反应，不在画就写方位 + 他手里的实物；"
+    "B. 照着对方递过来 / 留在桌上的实物（名片、卡片、纸条）做动作，实物在前一镜已经出现过；C. 屏幕上出现对方的头像照片 / 刚才那张卡的照片（只有画面，没有文字），"
+    "并让人物的视线在屏幕和那个人之间来回一次。\n"
+    "  · I6 不变量：补丁后每个 lint 码的数量都不能比当前稿多（QW-CH4 / SS-A3 / HW-F1 从 0 变 1 就整包作废）；只改必需的行，别的行逐字不动。")
 
 
 def camera_brief() -> str:
@@ -184,6 +327,8 @@ def patch_chain(RCH):
             pr["system"] = pr["system"] + "\n\n========\n\n" + extra
         else:
             pr["system"] = pr["system"] + "\n\n========\n\n" + extra.split("========")[0]
+        from ns_api import script_chat as SC
+        SC.assert_no_v1(pr["system"], what=f"{link} 写手包")     # HEADER-O（L-126）：非 V1 剧写手包出口只检查不改写，出现 V1 id 即失败（run 取 run_scope）
         return pr
 
     def chain():
@@ -204,7 +349,7 @@ def run_links(RCH, run_dir: Path, episode: int, st: Status, tag: str, budget: fl
     brief = brep.obj
     try:
         from ns_api import script_chat as SC
-        rc, rs, _ = SC.registry_tables({"from": brief.registry_from})
+        rc, rs, _ = SC.registry_tables({"from": brief.registry_from, "run": SC.run_for_dir(run_dir)})
     except Exception:  # noqa: BLE001
         rc, rs = [], []
     ctx = {"brief": brief, "episode": episode, "registry_chars": rc, "registry_scenes": rs}
@@ -317,8 +462,12 @@ def patch_user(ep, pre, chunk, facts, targets, note="") -> str:
     for d, u in targets:
         if d == "p4":
             tg.append(f"- 导入校验阻断：{u['why']}")
+            if str(u.get("id") or "").startswith("TL-"):      # TIMELINE-O：时间轴补丁只补时间轴（p4_adapter.TIMELINE_PATCH_SCOPE）
+                import p4_adapter as _P4
+                tg.append(f"  {_P4.TIMELINE_PATCH_SCOPE}")
         elif d == "fact":
             tg.append(f"- 剧情事实偏差（按事实表改回，只改表达相关的行）：{u['why']}")
+            tg.append(FACT_PATCH_GUIDE)              # K211-F 11-03：a16 把“卓琳”打进手机屏幕 + 视线写画外人名 → QW-CH4 0→1 被 I6 拒；以后事实缺口都附画面化指引
         elif d not in rub:          # v2 镜头块 / 灯光等非清单条目：给原因原文
             tg.append(f"- {d}#{u.get('id')}：{u['why']}")
         else:
@@ -328,8 +477,10 @@ def patch_user(ep, pre, chunk, facts, targets, note="") -> str:
              f"【改写边界】{R5.PATCH_RULE}", "",
              f"【ep{ep:02d} 集头（只读，不许改）】", RL.block_text(chunk, "head"), "",
              "【镜头区，逐行编号（L 行号｜原文）】", *[f"L{n}｜{t}" for n, _, t in nl], "",
+             "【集头可改的行（只有人物造型行；line 写 \"造型｜<人名>\"，新文本仍以 **造型｜<人名>**： 开头；集头其他行不许改）】",
+             *[f"造型｜{name}｜{t}" for name, (_, t) in R5.head_look_lines(chunk).items()], "",
              "【本次只修这 1–2 条】", *tg, "",
-             "只输出一个 ```json：{\"patches\": [{\"line\": 行号, \"new\": \"这一行的完整新文本\"}]}；只改必需的行（1–14 行），"
+             "只输出一个 ```json：{\"patches\": [{\"line\": 行号 或 \"造型｜<人名>\", \"new\": \"这一行的完整新文本\"}]}；只改必需的行（1–14 行），"
              "每行整行替换、保留原来的字段标签和 H3 的字段名 / 时间码；台词说话人和条数不变；不要复制或新增 H3 字段行。"]
     if note:
         parts += ["", f"上一次的补丁没有被采用：{note}"]
@@ -365,6 +516,31 @@ def structural_fix(writer, fact_cl, facts, pre, base, cur, fails, ep, base_lint,
     return (c, f2, {"structural": "split", "accepted": True, "shots": [n, len(H.episode_obj(pre, c, ep, wd).shots)], "code_fails": len(f2)}) if ok else (cur, fails, {"structural": "split", "accepted": False, "note": f"失败项 {len(fails)} → {len(f2)}"})
 
 
+def ready_after_import(run: str, episode: int, st: "Status") -> None:
+    """导入成功后跑一次 tools/master/episode_ready.py（SOP 第 8 步）：每个资产缺口登记一次卡点（阻断），并用大白话写进 next_action。
+    只做检查和登记，不改推进逻辑；检查本身出错不影响导入结果。"""
+    try:
+        ER = _load("episode_ready", "tools/master/episode_ready.py")
+        RI = _load("report_issue", "tools/master/report_issue.py")
+        res = ER.check(run, episode)
+        st.stage("asset_ready", "资产就绪检查", "ok" if res["ready"] else "gaps", "code", gaps=len(res["gaps"]))
+        if not res["ready"]:
+            for g in res["gaps"]:
+                sh = f"（镜 {','.join(str(x) for x in g['shots'])}）" if g.get("shots") else ""
+                RI.report(run, episode, "8 资产就绪", "autoflow", f"{g['who']}：{g['what']}{sh}", True, f"由{g['owner']}补")
+            st.set(next_action="出图前先补齐资产：" + "；".join(ER.plain_lines(res)))
+    except Exception as e:      # 检查失败只记一笔，不挡导入
+        st.stage("asset_ready", "资产就绪检查", "check_failed", "code", error=str(e)[:200])
+        return
+    try:                        # M-AUTOPIPE-01 阶段 A（AUTOPIPE-A 11-03）：每个缺口生成一个资产作业（幂等），全部就绪时生成阶段 B 作业；由常驻服务执行
+        AJ = _load("asset_jobs", "tools/pipeline/asset_jobs.py")
+        g = AJ.generate(run, episode, res=res)
+        st.stage("asset_jobs", "资产作业", "ready" if g.get("ready") else "generated", "code",
+                 created=len(g.get("created") or []), existing=len(g.get("existing") or []), golden=g.get("golden"))
+    except Exception as e:      # 作业生成失败只记一笔（常驻服务每拍会再试）
+        st.stage("asset_jobs", "资产作业", "failed", "code", error=str(e)[:200])
+
+
 def run_post(run_dir: Path, episode: int, st: Status, budget: float, import_mode: str, owner_ok: bool) -> dict:
     from ns_api import script_chat as SC
     import policy as POL
@@ -374,7 +550,7 @@ def run_post(run_dir: Path, episode: int, st: Status, budget: float, import_mode
     calls.mkdir(exist_ok=True)
     p4 = (run_dir / f"P4_ep{episode:02d}.md").read_text(encoding="utf-8")
     body = p4[p4.find("## ep"):] if "## ep" in p4 else p4
-    header, _ = SC.script_header(registry={})
+    header, _ = SC.script_header(registry={}, run=SC.run_for_dir(run_dir))   # HEADER-O：按本剧推导（L-126）
     pre = header + "\n---\n\n"
     base = body.rstrip() + "\n\n---\n"
     H.ZERO_CODES[:] = ["QW-W11"]
@@ -563,6 +739,8 @@ def run_post(run_dir: Path, episode: int, st: Status, budget: float, import_mode
     out = (r.stdout.decode("utf-8", "replace").strip().splitlines() or [""])[-1]
     st.stage("import", "导入", "imported" if r.returncode == 0 else "import_failed", "code", staged=H.RC._rel(staged), sha256=sha, out=out[:300])
     st.set(verdict="imported" if r.returncode == 0 else "import_failed")
+    if r.returncode == 0:
+        ready_after_import(run_dir.name, episode, st)
     return st.d
 
 
@@ -671,8 +849,10 @@ def cmd_run(a) -> int:
         advance_log(run_dir, src, a.episode, note="开始")
         try:
             d = AG.run(run_dir, a.episode, a.import_mode)
+            clear_run_error(run_dir, a.episode)
         except Exception as e:
             advance_log(run_dir, src, a.episode, verdict="error", note=repr(e)[:300])
+            record_run_error(run_dir, a.episode, e)        # K211-F（REVIEW-A P1③）：同一错误连续 3 次 → 登记卡点 + halted_error，daemon 不再空转重试
             raise
         finally:
             lk.unlink(missing_ok=True)
@@ -703,7 +883,9 @@ def cmd_run(a) -> int:
     RCH = _load("run_chain", "tools/pipeline/run_chain.py")
     patch_chain(RCH)
     tag = f"autoflow-{run_dir.name}-ep{a.episode:02d}"     # 按集记账（P1 故事线记在第一集）
-    ctx = run_links(RCH, run_dir, a.episode, st, tag, a.budget)
+    from ns_api import script_chat as SC
+    with SC.run_scope(SC.run_for_dir(run_dir)):     # HEADER-O：P3-P4 写手包 / 全局头按本剧取（L-126）
+        ctx = run_links(RCH, run_dir, a.episode, st, tag, a.budget)
     st.set(usd_links=round(RCH.spent(tag), 4))
     if not ctx:
         st.set(verdict="stopped_in_chain", next_action="看失败段的校验报告，一键返修（续跑）")
@@ -753,7 +935,7 @@ def locked_face() -> str:
     reg = json.loads((ROOT / "config/pipeline/runs.json").read_text(encoding="utf-8"))
     return AR.face_of(reg.get("primary"), "lin_wan") or "（读不到当前身份脸）"
 HARD_RULES = ("系统硬约束：全部人物为成年人（≥22 岁）；一切亲密情节双方自愿；人物均为虚构，非真实人物；亲密内容在剧本里按平台规则写，"
-              "亲密镜头只在本地生成；不改第一季已定的剧情事实和人物设定（人物、关系、造型、林晚身份脸）；缺信息标“未提供”，不编造。" + PLACEHOLDER_OVERRIDE)
+              "亲密镜头只在本地生成；不改第一季已定的剧情事实和人物设定（人物、关系、造型、林晚身份脸）；缺信息就按已有设定写成具体内容（项目方 11-02 21:3x），不编造。" + PLACEHOLDER_OVERRIDE)
 
 
 def sequel_materials(prev_eps: list[int], material_md: Path | None, material_eps: list[int]) -> str:
@@ -812,6 +994,66 @@ def cmd_sequel_brief(a) -> int:
     return 0 if rep.ok else 1
 
 
+RUN_ERROR_HALT = 3        # 同一个错误连续几次推进都抛 → 登记卡点、verdict=halted_error、daemon 不再重试（K211-F 11-03，REVIEW-A P1③）
+
+
+def record_run_error(run_dir: Path, ep: int, exc: BaseException) -> dict:
+    """autoflow run 抛异常：记进 autoflow_epNN.json run_error（key = 异常文本前 160 字，count 连续次数）；
+    连续 RUN_ERROR_HALT 次同一错误 → report_issue 登记一次（阻断）+ verdict=halted_error（pending_done 不再推进这一集，直到错误消失 / 人工 reopen）。
+    之前 ep02 的 HeaderMissing（顾沉）每 30 秒重试一次、几十条 error 没人接"""
+    st = Status(run_dir, ep, 0.0)
+    key = f"{type(exc).__name__}: {exc}"[:160]
+    re_ = st.d.get("run_error") or {}
+    count = (int(re_.get("count") or 0) + 1) if re_.get("key") == key else 1
+    rec = {"key": key, "count": count, "at": time.strftime("%F %T"), "issue": re_.get("issue") if re_.get("key") == key else None}
+    if count >= RUN_ERROR_HALT and not rec["issue"]:
+        try:
+            RI = _load("report_issue", "tools/master/report_issue.py")
+            r = RI.report(run_dir.name, ep, "3", "autoflow run", f"推进连续 {count} 次抛同一错误，已停重试：{key}", True,
+                          fix_hint="修掉错误根因（见 autoflow.log）后 `autoflow.py reopen --episode N --why ...`，或等下一次 .done 事件；错误不再出现会自动清掉",
+                          issues=RI.ISSUES, live=RI.LIVE)
+            rec["issue"] = r["id"]
+        except Exception as e2:  # noqa: BLE001  登记失败不能把错误处理再弄崩
+            rec["issue"] = f"登记失败：{e2!r}"[:120]
+        st.set(verdict="halted_error", next_action=f"推进连续 {count} 次抛同一错误，已停重试，卡点 {rec['issue']}：{key[:120]}")
+    st.set(run_error=rec)
+    return rec
+
+
+def clear_run_error(run_dir: Path, ep: int) -> None:
+    p = run_dir / f"autoflow_ep{ep:02d}.json"
+    if not p.exists():
+        return
+    d = json.loads(p.read_text(encoding="utf-8"))
+    if d.get("run_error"):
+        d.pop("run_error", None)
+        write_json(p, d)
+
+
+IMPORT_RETRY_INPUTS = ("tools/import_script.py", "tools/script_rsi/v1_leak.py", "config/v1_guard.json", "config/compile/run_style.json",
+                      "tools/autopilot/producer.py")
+
+
+def import_retry_sig(run: str | None = None) -> str:
+    """MERGE-OPS-O（ISS-1103-044539-f93d）：导入失败后什么时候值得自动重试——导入器 / 守卫词表 / 本剧风格 bible 变了。
+    = 这些文件内容的指纹（本剧 bible 按 run_style.json runs.<剧>.bible 取）"""
+    import hashlib
+    rels = list(IMPORT_RETRY_INPUTS)
+    try:
+        ent = (json.loads((ROOT / "config/compile/run_style.json").read_text(encoding="utf-8")).get("runs") or {}).get(run) or {}
+        if ent.get("bible"):
+            rels.append(ent["bible"])
+    except (OSError, ValueError):  # arch-ok: 风格表读不到 = 指纹里记缺失（下面统一处理），不是放行
+        pass
+    h = hashlib.sha256()
+    for rel in rels:
+        try:
+            h.update(rel.encode() + b"\0" + (ROOT / rel).read_bytes())
+        except OSError:  # arch-ok: 文件不在也是一种状态，编进指纹
+            h.update(rel.encode() + b"\0<missing>")
+    return h.hexdigest()[:16]
+
+
 def pending_done(run_dir: Path) -> list[int]:
     """哪几集“写手已交稿（awaiting.output 的 .done 在）但还没推进”——.done 守护据此推进"""
     eps = []
@@ -820,8 +1062,14 @@ def pending_done(run_dir: Path) -> list[int]:
         aw = d.get("awaiting") or {}
         out = aw.get("output")
         ep = int(d.get("episode") or int(f.stem[-2:]))
+        if d.get("verdict") == "halted_error":                 # 同一错误连续抛满 RUN_ERROR_HALT 次：停重试，等卡点处理（reopen 会改 verdict）
+            continue
         if out and (ROOT / (out + ".done")).exists():
             eps.append(ep)
+        elif d.get("verdict") == "reopened":                    # K211-F 11-03（总调度裁定）：补丁预算重开的集下一拍自动接手，不靠手工 autoflow run
+            eps.append(ep)
+        elif d.get("verdict") == "import_failed" and d.get("import_fail_sig") != import_retry_sig(d.get("run") or run_dir.name):
+            eps.append(ep)                                       # MERGE-OPS-O：导入器 / 词表 / bible 修过 → 下一拍自动重导；没变不空转
         elif d.get("verdict") == "awaiting_p1_judges":         # 三评委都交了（.done 齐）→ 推进一次：自动 p1_collect + 按门槛分流
             sp = run_dir / "judge_p1" / "STATE.json"
             if sp.exists():
@@ -834,6 +1082,8 @@ def pending_done(run_dir: Path) -> list[int]:
                         AG = _load("autoflow_agent", "tools/script_rsi/autoflow_agent.py")
                         if rounds[-1].get("collected_sig") != AG.judge_done_sig(jd):     # 同一组 .done 收过、没收齐（坏稿）→ 不空转，等评委重交
                             eps.append(ep)
+    # EPCHAIN-O 11-03：按集流水——第 N 集导入后开第 N+1 集（常驻服务每拍调本函数，同一入口 resident → autoflow run，推进锁照用）
+    eps += [n for n in next_episodes(run_dir) if n not in eps]
     return eps
 
 
@@ -882,6 +1132,7 @@ def main(argv=None) -> int:
     rv.add_argument("--fix", action="append", default=[])
     rv.add_argument("--by", default="")
     rv.add_argument("--replace", action="store_true", help="替换本轮旧的追加意见（旧的留档）")
+    rv.add_argument("--owner-took-over", action="store_true", help="事后补记“项目方已接手”（只认 owner_gates 历史里转交之后的 revise；21:40 P1_a5 事故修复用）")
     rv.add_argument("--escalate-owner", action="store_true", help="总调度动作：把当前这一稿（低于门槛）连同评分转给项目方定方向")
     rv.add_argument("--why", default="")
     rv.add_argument("--token-file", default="", help="总调度令牌文件（--escalate-owner 必须带；摘要对上 config/master/escalate.sha256 才放行）")
@@ -901,6 +1152,12 @@ def main(argv=None) -> int:
     t.add_argument("--allow-api", action="store_true", help="writer_backend=claude_agent 时也允许调外部写作 API")
     s = sub.add_parser("status")
     s.add_argument("--run-dir", required=True)
+    cp = sub.add_parser("camera-patch", help="只改运镜的小返修包（某集某镜换成 camera_moves.yaml 里的某个运镜；走 packet()，交写手）")
+    cp.add_argument("--run-dir", required=True)
+    cp.add_argument("--episode", type=int, required=True)
+    cp.add_argument("--shot", type=int, required=True)
+    cp.add_argument("--move", required=True, help="camera_moves.yaml 的 id，如 bolt_push_settle")
+    cp.add_argument("--why", default="")
     n = sub.add_parser("narrative-patch", help="N05 叙事补丁包：相邻 3 集结尾类型重复的集，请写手改结尾类型（剧情事实不变）")
     n.add_argument("--run-dir", required=True)
     n.add_argument("--episode", type=int, required=True)
@@ -917,6 +1174,23 @@ def main(argv=None) -> int:
         rd = Path(a.run_dir) if Path(a.run_dir).is_absolute() else ROOT / a.run_dir
         print(json.dumps(AG.reopen(rd, a.episode, a.why, a.by), ensure_ascii=False))
         return 0
+    if a.cmd == "camera-patch":
+        AG = _load("autoflow_agent", "tools/script_rsi/autoflow_agent.py")
+        rd = Path(a.run_dir) if Path(a.run_dir).is_absolute() else ROOT / a.run_dir
+        t0 = time.time()
+        while (lk := acquire_advance_lock(rd, a.episode, "camera_patch")) is None:     # 和常驻服务 / 网页推进互斥（都写同一个状态文件）
+            if time.time() - t0 > 60:
+                print(json.dumps({"ok": False, "why": "这一集正在被别的入口推进，60 秒内没拿到推进锁，稍后再试"}, ensure_ascii=False))
+                return 2
+            time.sleep(0.5)
+        try:
+            out = AG.camera_patch(rd, a.episode, a.shot, a.move, a.why)
+        finally:
+            lk.unlink(missing_ok=True)
+        advance_log(rd, "camera_patch", a.episode, verdict="camera_queued" if out.get("queued") else ("camera_packet" if out.get("ok") else "error"),
+                    note=json.dumps({k: out.get(k) for k in ("packet", "why")}, ensure_ascii=False)[:300])
+        print(json.dumps(out, ensure_ascii=False))
+        return 0 if out.get("ok") else 2
     if a.cmd == "narrative-patch":
         AG = _load("autoflow_agent", "tools/script_rsi/autoflow_agent.py")
         rd = Path(a.run_dir) if Path(a.run_dir).is_absolute() else ROOT / a.run_dir
@@ -940,6 +1214,12 @@ def main(argv=None) -> int:
             AG.review_add_fixes(rd, a.fix, a.by, replace=a.replace)
         if a.normalize:
             AG.review_state_normalize(rd)
+        if a.owner_took_over:
+            if not a.by:
+                print("补记要写 --by")
+                return 2
+            t = AG.review_repair_took_over(rd, a.by)
+            advance_log(rd, "cli", 1, verdict="owner_took_over", note=f"补记项目方接手：{json.dumps(t, ensure_ascii=False)}"[:300])
         if a.escalate_owner:
             r = escalate_and_advance(rd, a.by, a.why, a.token_file or None, AG=AG)     # W-38：转完立刻推进一次，状态文件和日志一致
             print(json.dumps({"verdict": r["verdict"], "next_action": r["next_action"]}, ensure_ascii=False))

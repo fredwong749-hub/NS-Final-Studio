@@ -5,7 +5,7 @@
   "gpu33": {
    "ssh": "gpu33",
    "repo": "/root/work/fredw/offline_20261101/repo",
-   "video_root": "/root/work/fredw/video10_srv",
+   "video_root": "/root/work/fredw/offline_20261101/repo",
    "python": "/root/work/fredw/offline_20261101/venv/bin/python",
    "comfy_root": "/root/claude-kimi-ns-studio-v1/ComfyUI",
    "aliases": [],
@@ -65,7 +65,7 @@
   "gpu36": {
    "ssh": "gpu36",
    "repo": "/root/work/fredw/offline_20261101/repo",
-   "video_root": "/root/work/fredw/video10_srv",
+   "video_root": "/root/work/fredw/offline_20261101/repo",
    "python": "/root/work/fredw/offline_20261101/venv/bin/python",
    "comfy_root": "/root/work/fredw/comfy",
    "aliases": [

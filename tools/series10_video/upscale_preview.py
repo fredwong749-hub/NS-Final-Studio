@@ -20,7 +20,10 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-VID = ROOT / "data/pipeline/runs/series10_v1/video"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import run_ctx as RC  # noqa: E402
+
+VID = RC.vid_dir(RC.resolve())          # MERGE-VID-O：按剧（night 传 NS_RUN；服务器侧必须显式给）
 UNSHARP = "unsharp=5:5:0.6:5:5:0.0"
 
 

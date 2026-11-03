@@ -1,5 +1,5 @@
 // fredw-92/W4a：v3 小部件——下拉 / 小窗、状态点、“为什么卡住”
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { DOT_LABEL, type Dot, type ShotStatus } from "./status";
 
 /** 点按钮开一个小窗；点外面或 Esc 关闭 */
@@ -31,12 +31,38 @@ export function Pop({
       window.removeEventListener("keydown", esc, true);
     };
   }, [open]);
+  // UI-FIX 11-03（项目方 10:4x 截图：“一键出片·第 1 集”小窗右侧被截断）：所有小窗打开后按视口收边——
+  // 超出右 / 左边就平移回来，超出底部就限高滚动；16px 边距（手机宽同样适用）。不靠每个调用方自己选 align
+  const popRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = popRef.current;
+    if (!open || !el) return;
+    const fit = () => {
+      el.style.transform = "";
+      el.style.maxHeight = "";
+      const r = el.getBoundingClientRect();
+      const vw = document.documentElement.clientWidth || window.innerWidth;
+      const vh = window.innerHeight;
+      const G = 16;
+      let dx = 0;
+      if (r.right > vw - G) dx = vw - G - r.right;
+      if (r.left + dx < G) dx = G - r.left;
+      if (dx) el.style.transform = `translateX(${Math.round(dx)}px)`;
+      if (r.top >= 0 && r.bottom > vh - G) {
+        el.style.maxHeight = `${Math.max(160, Math.floor(vh - G - r.top))}px`;
+        el.style.overflowY = "auto";
+      }
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [open]);
   return (
     <div className={`v3-popwrap ${className}`} ref={ref} onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
       <button className={`${btnClass}${open ? " open" : ""}`} onClick={() => setOpen((v) => !v)} title={title}>
         {label}
       </button>
-      {open && <div className={`v3-pop v3-pop-${align}`}>{children(() => setOpen(false))}</div>}
+      {open && <div ref={popRef} className={`v3-pop v3-pop-${align}`}>{children(() => setOpen(false))}</div>}
     </div>
   );
 }

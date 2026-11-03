@@ -81,7 +81,12 @@ def test_vocab_schema():   # 词表每条必有字段；enabled 的必须有模�
     assert len(ids) == len(set(ids)) and "static" in ids
     for m in v["moves"]:
         assert {"zh", "en", "aliases", "enabled", "reason", "ab", "conflicts", "split"} <= set(m), m["id"]
-        if m["enabled"]:
+        if m["enabled"] and m.get("runs"):
+            # 按剧例外（总调度 11-02 21:0x）：标了 runs 的运镜（V2）模板可带速度词、可不以 The camera 开头；
+            # 仍须有模板和 A/B 结果（pass；partial 只在 requires 限定了可用镜头时允许，例 handheld_follow 只用在走动镜）
+            assert m["template"], m["id"]
+            assert m["ab"]["status"] == "pass" or (m["ab"]["status"] == "partial" and m.get("requires")), m["id"]
+        elif m["enabled"]:                                   # 其余运镜照旧守 K-PRM-101
             assert m["template"] and m["template"].startswith("The camera") and m["ab"]["status"] in ("baseline", "pass"), m["id"]
             assert "slow" not in m["template"].lower()
         for c in m["conflicts"]:
@@ -194,14 +199,14 @@ def test_finish_disabled_is_noop(monkeypatch, capsys):
 def test_camera_norm_mapping(monkeypatch):   # K-REN-801：按词表 enabled 判定（不写死）
     sys.path.insert(0, str(ROOT / "services" / "agent"))
     from ns_agent import camera_norm as CN
-    monkeypatch.setattr(CN, "is_enabled", lambda mid: mid in ("static", "push_in"))
+    monkeypatch.setattr(CN, "is_enabled", lambda mid, *_a, **_k: mid in ("static", "push_in"))
     f = lambda c, big=False: CN.norm_clause(c, big)   # noqa: E731
     assert f("pulls out with small amplitude") == "holds a static shot"
     assert f("performs an arc shot with small amplitude") == "pushes in with small amplitude"
     assert f("performs an arc shot with small amplitude", True) == "holds a static shot"
     assert f("pushes in slowly with medium amplitude") == "pushes in with small amplitude"
     assert f("tilts up at slow speed") == "holds a static shot"            # tilt_up 未通过 A/B → 固定
-    monkeypatch.setattr(CN, "is_enabled", lambda mid: mid in ("static", "push_in", "tilt_up"))
+    monkeypatch.setattr(CN, "is_enabled", lambda mid, *_a, **_k: mid in ("static", "push_in", "tilt_up"))
     assert f("tilts up at slow speed") == "tilts up with small amplitude"  # 通过后按模板
     monkeypatch.setattr(CN, "enabled", lambda: True)
     t, ch = CN.normalize_video_prompt("x. The camera pulls out with small amplitude as she sits. y", "")
@@ -349,3 +354,28 @@ def test_camera_ab_ab6_exec_accuracy():   # AB6：VIDLAB 执行准确度 < 0.5 �
     j = CA.judge(good, cx={"move": "truck_right", "acc": 0.1, "rot_deg": 2.2})
     assert j["pass"] is False and j["fails"][0].startswith("AB6") and j["m"]["exec_acc"] == 0.1
     assert CA.judge(good, cx={"move": "push_in", "acc": 1.0})["pass"] is True
+
+
+
+# ---- V2 按剧运镜（总调度 11-02 21:0x）：camera_norm 认得新 id，不退回 arc / 固定；别的剧照旧
+def test_v2_run_scoped_moves(monkeypatch):
+    """L-129：bolt_push_settle（whip_orbit）启用、handheld_follow 只用于走动镜、orbit_slowmo 改回 disabled；
+    OVERSIGHT-F 第 12 轮：按剧运镜只认显式传入的剧（不读进程上下文 NS_RUN），没传剧 = 不可用"""
+    import importlib.util
+    sp = importlib.util.spec_from_file_location("cn_v2", ROOT / "services/agent/ns_agent/camera_norm.py")
+    CN = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(CN)
+    V2 = "series10_v2"
+    bolt = CN.move("bolt_push_settle")["template"]
+    orbit = CN.move("orbit_slowmo")["template"]
+    assert CN.match_en(bolt) == "bolt_push_settle" and CN.match_en(orbit) == "orbit_slowmo"
+    assert CN.is_enabled("bolt_push_settle", V2) and not CN.is_enabled("orbit_slowmo", V2)
+    monkeypatch.setenv("NS_RUN", V2)                                            # 进程上下文不算数
+    assert not CN.is_enabled("bolt_push_settle") and not CN.is_enabled("bolt_push_settle", "series10_v1")
+    assert CN.is_enabled("handheld_follow", V2, motion="她走向窗边") and not CN.is_enabled("handheld_follow", V2, motion="她坐着不动")
+    o = orbit[len("The camera "):]
+    _n, mid, why = CN.norm_clause_info(o, False, V2)                            # V2 也没选 orbit_slowmo → 按 arc 退回
+    assert mid in ("push_in", "static") and why
+    txt = "The camera orbits slowly around her as she turns."
+    out_v2, _ = CN.normalize_video_prompt(txt, "", run=V2)
+    assert "orbits slowly" not in out_v2

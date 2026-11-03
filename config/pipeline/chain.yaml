@@ -429,7 +429,7 @@ rules:
   - {id: SL-02, link: P0-P1, node: P1, level: block, check: check_storyline, confidence: high, evidence: "config/script_chat_rules.md ★ 最高优先级：全部角色为虚构成年人",
      writer_text: "每个角色 age 写整数，全部 ≥18"}
   - {id: SL-03, link: P0-P1, node: P1, level: block, check: check_storyline, confidence: high, evidence: "script_chat_rules.md §2P 角色id 格式（QW-P*）",
-     writer_text: "char_id 只用 lin_wan / gu_chen / chen_yu / ch_a_lan，或 ch_<小写英文数字下划线>；名字和 id 全剧唯一"}
+     writer_text: "char_id 写 ch_<小写英文数字下划线>（项目方给女主指定固定 id 时用 lead_<小写字母>；已登记角色照抄全局头的 id）；名字和 id 全剧唯一"}
   - {id: SL-04, link: P0-P1, node: P1, level: block, check: check_storyline, confidence: high, evidence: "script_chat_rules.md §2P；chain_audit A1/B1 族裔丢失",
      writer_text: "en_phrase 是英文身份短语：年龄、性别、族裔、发型发色、脸 / 肤色 / 体型；不写服装、人名、触发词、否定词、双引号"}
   - {id: SL-05, link: P0-P1, node: P1, level: block, check: check_storyline, confidence: high, evidence: "script_chat_rules.md §2P VOICE；K-PRM-010",

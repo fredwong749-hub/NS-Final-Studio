@@ -135,7 +135,8 @@ def test_compile_blocks_untimed_prompt_only_for_v2_specs(strict_on):
     sp_v2 = _spec("rules_v2+sysimpl-v2", dur=6.0)
     sp_v2.h3.text = old
     p2 = C.compile_shot(sp_v2, reg)
-    assert p2["status"] == "lint_error" and "RL-T1" in {i["code"] for i in p2["lint"] if i["level"] == "error"}
+    # TIMELINE-O 11-03：v2 稿缺时间轴改为在 build_base 失败关闭（needs_writer “缺时间轴”），不再编出整句再由 lint 拦
+    assert p2["status"] == "needs_writer" and "缺时间轴" in p2["reason"]
 
 
 def test_writer_system_prompt_carries_sysimpl_v2():

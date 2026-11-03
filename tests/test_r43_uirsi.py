@@ -157,7 +157,27 @@ def _guard(monkeypatch, tmp_path):
     (tmp_path / "svc" / "ok.py").write_text("x = 1" + chr(10), encoding="utf-8")
     monkeypatch.setattr(G, "COMPILE_DIRS", [tmp_path / "svc"])
     monkeypatch.setattr(G, "ALERTS", tmp_path / "alerts.jsonl")
+    # 22:0x 止血后：开关文件 / 重启事件 / 脚本日志都换到临时目录；API 默认“在”（revive_check 不介入）
+    monkeypatch.setattr(G, "AUTO_SWITCH", tmp_path / "api_guard_auto.json")
+    G.AUTO_SWITCH.write_text('{"enabled": true, "by": "pytest"}', encoding="utf-8")
+    monkeypatch.setattr(G, "EVENTS", tmp_path / "restart_events.jsonl")
+    monkeypatch.setattr(G, "PS1_LOG", tmp_path / "ps1.log")
+    monkeypatch.setattr(G, "api_up", lambda get=None: True)
     return G
+
+
+def _fake_ps1(G, calls, event=None):
+    """假 restart_api.ps1：记下命令，并像真脚本一样往 restart_events 追加结局（默认 restart_done + up_at）"""
+    event = event or {"event": "restart_done", "up_at": "2026-11-02T22:00:00"}
+
+    class R:
+        returncode = 0
+
+    def run(cmd, *a, **k):
+        calls.append((cmd,))
+        G.RQ._append(G.EVENTS, dict(event, at="2026-11-02T22:00:00"))
+        return R()
+    return run
 
 
 def test_guard_waits_when_busy_and_dedupes(monkeypatch, tmp_path):
@@ -177,17 +197,224 @@ def test_guard_restarts_when_idle(monkeypatch, tmp_path):
     monkeypatch.setattr(G, "changed_since_up", lambda: [])
     G.RQ.request(G.HOST, "test", by="UIRSI")
     monkeypatch.setattr(G, "busy", lambda: 0)
-
-    class R:
-        returncode = 0
-        stdout = b"stopped x  up y"
-        stderr = b""
     calls = []
-    monkeypatch.setattr(G.subprocess, "run", lambda *a, **k: calls.append(a) or R())
+    monkeypatch.setattr(G.subprocess, "run", _fake_ps1(G, calls))
     a = G.tick()
     assert a["restart"]["ok"] and calls and "restart_api.ps1" in " ".join(calls[0][0])
     assert G.RQ.pending(G.HOST) == []             # 写进 done
     assert G.tick()["skip"] == "没有待办"
+
+
+
+def test_guard_stop_bleed_switch_off_never_runs_restart(monkeypatch, tmp_path):
+    """K-OPS-F34 止血：开关文件不存在 / enabled 不是 true → 只排队、不执行 restart_api.ps1"""
+    G = _guard(monkeypatch, tmp_path)
+    G.AUTO_SWITCH.unlink()
+    monkeypatch.setattr(G, "changed_since_up", lambda: [])
+    G.RQ.request(G.HOST, "test", by="UIRSI")
+    monkeypatch.setattr(G, "busy", lambda: 0)
+    calls = []
+    monkeypatch.setattr(G.subprocess, "run", _fake_ps1(G, calls))
+    a = G.tick()
+    assert "止血" in a["skip"] and not calls and len(G.RQ.pending(G.HOST)) == 1
+    G.AUTO_SWITCH.write_text('{"enabled": "yes"}', encoding="utf-8")     # 不是 true 也算关
+    assert "止血" in G.tick()["skip"] and not calls
+
+
+def test_guard_failed_restart_not_marked_done_and_old_kept(monkeypatch, tmp_path):
+    """脚本报 restart_failed（端口被占 / 新代码起不来，旧进程保留）→ ok=false、不记 done、请求留着；结局以 restart_events 为准，不看退出码"""
+    G = _guard(monkeypatch, tmp_path)
+    monkeypatch.setattr(G, "changed_since_up", lambda: [])
+    G.RQ.request(G.HOST, "test", by="UIRSI")
+    monkeypatch.setattr(G, "busy", lambda: 0)
+    calls = []
+    monkeypatch.setattr(G.subprocess, "run", _fake_ps1(G, calls, {"event": "restart_failed", "stage": "port_foreign", "old_kept": True}))
+    r = G.tick()["restart"]
+    assert r["ok"] is False and r["stage"] == "port_foreign" and r["old_kept"] is True
+    assert len(G.RQ.pending(G.HOST)) == 1 and not (tmp_path / "done.jsonl").exists()
+
+
+def test_guard_unfinished_script_alerts(monkeypatch, tmp_path):
+    """脚本既没写 restart_done 也没写 restart_failed（被杀 / 超时）→ crit 告警 A-API-RESTART-FAIL"""
+    import json as _j
+    G = _guard(monkeypatch, tmp_path)
+
+    def boom(cmd, *a, **k):
+        raise G.subprocess.TimeoutExpired(cmd, 1)
+    r = G.run_restart_ps1("pytest", runner=boom)
+    assert r["ok"] is False and r["stage"] == "unfinished" and r["rc"] == "timeout"
+    al = [_j.loads(x) for x in (tmp_path / "alerts.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert al[-1]["id"] == "A-API-RESTART-FAIL" and al[-1]["level"] == "crit"
+
+
+def test_guard_covered_requests_do_not_retrigger(monkeypatch, tmp_path):
+    """请求之后已经有过一次成功启动（手动重启也算）→ 不再触发重启（20:14 / 20:26 的旧请求 22:02 后还算待办的问题）"""
+    G = _guard(monkeypatch, tmp_path)
+    old = {"id": "a", "t": 100.0}
+    new = {"id": "b", "t": 300.0}
+    assert G.covered_filter([old, new], up_at=200.0) == [new]
+    assert G.covered_filter([old], up_at=0.0) == [old]
+
+
+def test_guard_api_down_alerts_and_revives_once(monkeypatch, tmp_path):
+    """:8800 不在：开 A-API-DOWN；是守护自己的重启弄挂的（最后一条 restart_failed 且 old_kept=false、30 分钟内）→ 补起一次（-Force）；
+    已补起过 / 不是守护弄挂的 / 开关关着 → 只告警等人工"""
+    import json as _j
+    import time as _t
+    G = _guard(monkeypatch, tmp_path)
+    now = _t.time()
+    at = _t.strftime("%Y-%m-%dT%H:%M:%S", _t.localtime(now - 60))
+    failed = {"event": "restart_failed", "stage": "port_busy", "old_kept": False, "at": at}
+    calls = []
+    monkeypatch.setattr(G.subprocess, "run", _fake_ps1(G, calls))
+    r = G.revive_check(up=lambda: False, events=[failed], now=now)
+    assert r["revive_eligible"] and calls and "-Force" in calls[0][0] and r["revive"]["ok"]
+    al = [_j.loads(x) for x in (tmp_path / "alerts.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert any(a["id"] == "A-API-DOWN" for a in al)
+    calls.clear()
+    r2 = G.revive_check(up=lambda: False, events=[failed, {"event": "revive_attempt", "at": at}], now=now)
+    assert not r2["revive_eligible"] and not calls                   # 只补一次
+    kept = dict(failed, old_kept=True)
+    assert not G.revive_check(up=lambda: False, events=[kept], now=now)["revive_eligible"]
+    G.AUTO_SWITCH.unlink()
+    r3 = G.revive_check(up=lambda: False, events=[failed], now=now)
+    assert r3["revive_eligible"] and "开关关着" in r3["skip"] and not calls
+    assert G.revive_check(up=lambda: True) is None
+
+def test_guard_revive_never_twice_even_if_revive_itself_fails(monkeypatch, tmp_path):
+    """RESTARTFIX-S P1-1：补起自己失败会写新的 restart_failed（成了“最后一条”）→ 窗口内任何一次 revive_attempt 都不再补第二次"""
+    import time as _t
+    G = _guard(monkeypatch, tmp_path)
+    now = _t.time()
+    ts = lambda dt: _t.strftime("%Y-%m-%dT%H:%M:%S", _t.localtime(now - dt))
+    calls = []
+    fail = {"event": "restart_failed", "stage": "not_up", "old_kept": False}
+    monkeypatch.setattr(G.subprocess, "run", _fake_ps1(G, calls, event=dict(fail)))
+    evs = [dict(fail, at=ts(300))]
+    r = G.revive_check(up=lambda: False, events=evs, now=now)
+    assert r["revive_eligible"] and len(calls) == 1 and "-Revive" in calls[0][0] and not r["revive"]["ok"]
+    # 补起后事件日志：revive_attempt（刚写）+ 补起自己的 restart_failed 在最后 → 每拍都不能再补
+    evs += [{"event": "revive_attempt", "at": ts(100)}, dict(fail, at=ts(90))]
+    for k in range(3):
+        r2 = G.revive_check(up=lambda: False, events=evs, now=now + 60 * k)
+        assert not r2["revive_eligible"]
+    assert len(calls) == 1
+    # 窗口外（31 分钟前的 revive_attempt）不再挡：新的故障可以补
+    old = [{"event": "revive_attempt", "at": ts(31 * 60)}, dict(fail, at=ts(60))]
+    assert G.revive_check(up=lambda: False, events=old, now=now)["revive_eligible"]
+    # 真的经 run_restart_ps1 → 事件文件：revive_attempt 落盘后再 revive_check 不读 events 参数也不再补
+    calls.clear()
+    G.EVENTS.write_text("", encoding="utf-8")
+    G.RQ._append(G.EVENTS, dict(fail, at=ts(120)))
+    assert G.revive_check(up=lambda: False, now=now)["revive_eligible"] and len(calls) == 1
+    assert not G.revive_check(up=lambda: False, now=now)["revive_eligible"] and len(calls) == 1
+
+
+def test_restartfix_o_unfinished_after_stop_becomes_revivable(monkeypatch, tmp_path):
+    """RESTARTFIX-O P2-4：ps1 停旧之后被超时杀（只有 stopping_old，没有结局）→ 守护补写 restart_failed(old_kept=false)，下一拍可补起；
+    停旧之前被杀 → old_kept=true，不补起"""
+    import time as _t
+    G = _guard(monkeypatch, tmp_path)
+
+    def killed_after_stop(cmd, *a, **k):
+        G.RQ._append(G.EVENTS, {"event": "stopping_old", "at": _t.strftime("%Y-%m-%dT%H:%M:%S")})
+        raise G.subprocess.TimeoutExpired(cmd, 1)
+    r = G.run_restart_ps1("pytest", runner=killed_after_stop)
+    assert r["stage"] == "unfinished" and r["old_kept"] is False
+    evs = G._events_from(0)
+    assert evs[-1]["event"] == "restart_failed" and evs[-1]["stage"] == "ps1_unfinished_after_stop" and evs[-1]["old_kept"] is False
+    calls = []
+    monkeypatch.setattr(G.subprocess, "run", _fake_ps1(G, calls))
+    assert G.revive_check(up=lambda: False, now=_t.time())["revive_eligible"] and len(calls) == 1
+    G.EVENTS.write_text("", encoding="utf-8")
+
+    def killed_before_stop(cmd, *a, **k):
+        raise G.subprocess.TimeoutExpired(cmd, 1)
+    r = G.run_restart_ps1("pytest", runner=killed_before_stop)
+    assert r["old_kept"] is True and G._events_from(0)[-1]["stage"] == "ps1_unfinished_before_stop"
+    assert not G.revive_check(up=lambda: False, now=_t.time())["revive_eligible"]
+
+
+def test_restartfix_o_revive_lock_busy_does_not_consume_quota(monkeypatch, tmp_path):
+    """RESTARTFIX-O P2-3：补起撞上别人在重启（exit 5 / lock_busy，什么都没做）→ 写 revive_released，额度还回来；真做了事（not_up）才算用掉"""
+    import time as _t
+    G = _guard(monkeypatch, tmp_path)
+    now = _t.time()
+    G.RQ._append(G.EVENTS, {"event": "restart_failed", "stage": "port_busy", "old_kept": False,
+                            "at": _t.strftime("%Y-%m-%dT%H:%M:%S", _t.localtime(now - 60))})
+    calls = []
+    monkeypatch.setattr(G.subprocess, "run", _fake_ps1(G, calls, {"event": "restart_skipped", "stage": "lock_busy"}))
+    r = G.revive_check(up=lambda: False, now=now)
+    assert r["revive"]["stage"] == "lock_busy" and G._events_from(0)[-1]["event"] == "revive_released"
+    monkeypatch.setattr(G.subprocess, "run", _fake_ps1(G, calls, {"event": "restart_failed", "stage": "not_up", "old_kept": False}))
+    assert G.revive_check(up=lambda: False, now=now + 60)["revive_eligible"] and len(calls) == 2
+    assert not G.revive_check(up=lambda: False, now=now + 120)["revive_eligible"] and len(calls) == 2
+
+
+def test_restartfix_o_timeout_chain():
+    """RESTARTFIX-O：FreeWaitS 240 后超时链 ps1 最长 < PS1_TIMEOUT_S；vite build 240 + PS1_TIMEOUT_S < flow.api_restart_tick < resident_sync 的 api 线
+    （外层先超时会 taskkill /T 把刚起的 API 一起杀）"""
+    import inspect
+    import re
+    import sys as _s
+    _s.path.insert(0, str(ROOT / "tools" / "uirsi"))
+    _s.path.insert(0, str(ROOT / "tools" / "autopilot"))
+    import api_restart_guard as G
+    import flow as FL
+    ps1 = (ROOT / "ops" / "restart_api.ps1").read_text(encoding="utf-8-sig")
+    fw = int(re.search(r"\[int\]\$FreeWaitS = (\d+)", ps1).group(1))
+    assert fw >= 240 and G.PS1_WORST_S >= 10 + 60 + 30 + fw + 180 and G.PS1_WORST_S < G.PS1_TIMEOUT_S
+    flow_t = inspect.signature(FL.api_restart_tick).parameters["timeout_s"].default
+    rs = (ROOT / "tools" / "autopilot" / "resident_sync.py").read_text(encoding="utf-8")
+    api_t = int(re.search(r'AUTOFLOW_PARTS = \{[^}]*"api": (\d+)', rs).group(1))
+    assert 240 + G.PS1_TIMEOUT_S < flow_t < api_t, (G.PS1_TIMEOUT_S, flow_t, api_t)
+
+
+def test_restartfix_o_postflight_sweeper_skipped_in_preflight():
+    """RESTARTFIX-O P2-1：预检实例（NS_API_PREFLIGHT=1）不起 postflight 扫描线程（会写真实 takes.json）；静态 + 行为两层"""
+    import os
+    import subprocess as sp
+    import sys as _s
+    src = (ROOT / "services" / "api" / "ns_api" / "frame_jobs.py").read_text(encoding="utf-8")
+    body = src[src.index("def _start_postflight_sweeper"):]
+    body = body[:body.index("_UF.start_sweeper()")]
+    assert 'os.environ.get("NS_API_PREFLIGHT")' in body
+    code = ("import sys\nsys.modules.pop('pytest', None)\n"
+            "import ns_render.unified_frame as U\ncalled = []\nU.start_sweeper = lambda *a, **k: called.append(1)\n"
+            "from ns_api import frame_jobs\nprint('SWEEP', len(called))")
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(ROOT / "services" / "api"), str(ROOT / "services" / "render_router"), str(ROOT / "packages")]),
+               PYTHONIOENCODING="utf-8", NS_API_PREFLIGHT="1", NS_NO_API_SNAPSHOT="1")
+    env.pop("PYTEST_CURRENT_TEST", None)
+    env.pop("NS_POSTFLIGHT_SWEEP", None)
+    r = sp.run([_s.executable, "-c", code], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=170)
+    assert "SWEEP 0" in r.stdout, (r.stdout[-300:], r.stderr[-600:])
+    ps1 = (ROOT / "ops" / "restart_api.ps1").read_text(encoding="utf-8-sig")
+    assert '$env:NS_POSTFLIGHT_SWEEP = "0"' in ps1 and '$env:NS_NO_API_SNAPSHOT = "1"' in ps1
+
+
+def test_guard_outcome_skipped_events():
+    """restart_skipped：lock_busy = 没动（不算成功）；already_healthy = 补起时 API 已被别人拉起（算好）"""
+    import api_restart_guard as G
+    assert G.outcome([{"event": "restart_skipped", "stage": "lock_busy"}]) == {"ok": False, "stage": "lock_busy", "why": None}
+    assert G.outcome([{"event": "restart_skipped", "stage": "already_healthy"}])["ok"] is True
+
+
+def test_app_preflight_skips_startup_tasks():
+    """RESTARTFIX-S P2-2：预检实例（NS_API_PREFLIGHT=1）不挂 JOBS.restore / EPROD.resume_on_startup、不跑 PJ.resume_on_startup（预检实例与真 API 同时在线，restore 会把真 API 在跑的任务文件标 failed）"""
+    import os
+    import subprocess as sp
+    import sys as _s
+    code = ("from ns_api import app as A\nfrom ns_api import jobs, episode_produce as E\n"
+            "fs = list(A.app.router.on_startup)\n"
+            "print(int(jobs.restore in fs), int(E.resume_on_startup in fs))")
+    outs = {}
+    for flag in ("1",):      # 不跑“没设”的对照：真服务路径的 PJ.resume_on_startup() 在导入时就会推进真项目
+        env = dict(os.environ, PYTHONPATH=str(ROOT / "services" / "api"), PYTHONIOENCODING="utf-8")
+        env.pop("PYTEST_CURRENT_TEST", None)
+        env["NS_API_PREFLIGHT"] = flag
+        r = sp.run([_s.executable, "-c", code], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=170)
+        outs[flag] = r.stdout.strip().splitlines()[-1] if r.stdout.strip() else r.stderr[-300:]
+    assert outs["1"] == "0 0", outs
 
 
 # ---------------------------------------------------------------- UIRSI2 L-116 待你看队列（K-UI-053，data_parity D-QUEUE）
@@ -348,12 +575,7 @@ def test_guard_compile_gate_blocks_broken_restart(monkeypatch, tmp_path):
     monkeypatch.setattr(G, "busy", lambda: 0)
     (tmp_path / "svc" / "half.py").write_text('x = "\n', encoding="utf-8")
     calls = []
-
-    class R:
-        returncode = 0
-        stdout = b""
-        stderr = b""
-    monkeypatch.setattr(G.subprocess, "run", lambda *a, **k: calls.append(a) or R())
+    monkeypatch.setattr(G.subprocess, "run", _fake_ps1(G, calls))
     a = G.tick()
     assert "编译不过" in a["skip"] and not calls and len(G.RQ.pending(G.HOST)) == 1
     assert "half.py" in a["compile_fail"][0]

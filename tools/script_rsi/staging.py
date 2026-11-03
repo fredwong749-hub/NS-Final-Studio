@@ -92,7 +92,7 @@ def why(row: dict) -> str:
 def season_dist(paths: list[Path]) -> dict:
     """多份稿 → 分布（每集、整季）"""
     from ns_api import script_chat as SC
-    header, _ = SC.script_header(registry={})
+    header, _ = SC.script_header(registry={}, run=SC.run_for_dir(paths[0]) if paths else None)
     per, tot = {}, {"shots": 0, "ok": 0, "no_contact": 0, "frontal": 0, "tight_pair": 0}
     for p in paths:
         t = p.read_text(encoding="utf-8")
@@ -115,7 +115,7 @@ def supplement(paths: list[Path]) -> list[dict]:
     交编译层负责方（ns_agent，IMGFIX）在首帧编译时补一句“<人名>的手扶着 / 靠着 <陈设>”；已定稿（已过闸 / 已批）的镜由编译层按生产状态跳过"""
     from ns_api import script_chat as SC
     from ns_agent.importer.script_md import import_script
-    header, _ = SC.script_header(registry={})
+    header, _ = SC.script_header(registry={}, run=SC.run_for_dir(paths[0]) if paths else None)
     out = []
     for p in paths:
         t = p.read_text(encoding="utf-8")

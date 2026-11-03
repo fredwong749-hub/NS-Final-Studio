@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from ns_agent import asset_refs as AR
 from ns_agent import compiler as C
+import re
 
 
 def retrigger(shot, g):
@@ -33,24 +34,60 @@ def retrigger(shot, g):
                                    "motion_triggers": mt or list(shot.motion_triggers)})
 
 
+def freeze_archived_extras(project: str | None, shot):
+    """W7（11-03，A2 第 18 轮 P1-①）：已归档剧（runs.json status=archived / frozen，如 series10_v1）编译冻结。
+    W2 起导入器把 构图 / 灯光 / 光线 / 分拍 / 镜头语言 v2 七段收进 shot.extras；V1 源稿每镜也写了 光线 / 分拍，
+    重导后 first_beat_gaze / 镜头语言段会换内容（ep01-S6 视线「林晚的脸」→「走廊暗处」等）。归档剧只读，提示词不许变：
+    这里把 shot.extras 过滤回 W2 之前的旧集合（importer.script_md.LEGACY_SHOT_EXTRA_LABELS，按去括注的 base 比），
+    新旧导入稿编出的 prompt_sha 都和 W2 之前一样。非归档剧原样返回（同一个对象）"""
+    if not project or not AR._archived(project):
+        return shot
+    from ns_agent.importer.script_md import LEGACY_SHOT_EXTRA_LABELS, _split_label
+    ex = AR.g(shot, "extras") or []
+    keep = [e for e in ex if _split_label(str(AR.g(e, "label") or ""))[0] in LEGACY_SHOT_EXTRA_LABELS]
+    if len(keep) == len(ex):
+        return shot
+    if isinstance(shot, dict):
+        return {**shot, "extras": keep}
+    return shot.model_copy(update={"extras": keep})
+
+
 def compile_frame(ep, shot, g, project: str | None, *, bible=None, available=None, assets: bool | None = None,
-                  model: str = "qwen_image_2.1", legacy_refs: list[str] | None = None, role_lines=None, **plan_kw):
-    """→ (提示词, CompiledShot, ShotRefs | None, SlotPlan | None)。assets=False 只给对照实验（旧做法：只挂脸）"""
+                  model: str = "qwen_image_2.1", legacy_refs: list[str] | None = None, role_lines=None, mode: str = "shot",
+                  **plan_kw):
+    """→ (提示词, CompiledShot, ShotRefs | None, SlotPlan | None)。assets=False 只给对照实验（旧做法：只挂脸）。
+    mode="sheet"（造型设定图：正面全身站立）：不加单人朝向句（四分之三侧脸 / 眼睛看着…）、不补视线句、不加镜头语言段——
+    这些是剧情镜的表演 / 摄影要求，和设定图“正面站立、目视前方”冲突（MERGE-IMG-O 11-03 第 6 项）"""
     from ns_agent.bible import load_bible
     from ns_agent.gen_contract import style as ST
+    shot = freeze_archived_extras(project, shot)          # W7：归档剧编译冻结
     use_assets = bool(project and AR.project_cfg(project)) if assets is None else assets
     if use_assets:
         g, _removed = AR.locks_without_wardrobe(g)          # K-AST-232
-    c = C.compile_shot(ep, retrigger(shot, g), g, set(available or ()), image_style=ST.image_suffix(project),   # 按剧取风格（L-126）
+    seg, _src = ST.segment_of(shot)
+    c = C.compile_shot(ep, retrigger(shot, g), g, set(available or ()), image_style=ST.image_suffix(project, seg),   # 按剧 / 按段取风格（L-126 / L-130）
                        bible=bible or load_bible(), framing_project=project)
     if not use_assets:
         return (role_lines(legacy_refs or []) if role_lines else "") + c.image_prompt, c, None, None
     # 资产规划用编译器真正保留的触发词判主体（LoRA 不可用被剥掉的鞋触发词不算证据），与编译器同口径（REFLOCK 11-01）
     plan_kw.setdefault("kept_triggers", [t for t in (AR.g(shot, "img_triggers") or []) if t not in (c.dropped_triggers or [])])
-    sr, plan = AR.plan_for(project, ep, shot, model, **plan_kw)
-    note = (plan.prompt_note + outer_items_note(project, ep, shot, sr, c.image_prompt) + eyeline_note(shot, sr, c.image_prompt)
+    sheet = mode == "sheet"
+    sr, plan = AR.plan_for(project, ep, shot, model, turn=not sheet, **plan_kw)
+    note = (shot_language_note(project, shot, mode) + plan.prompt_note + outer_items_note(project, ep, shot, sr, c.image_prompt)
+            + ("" if sheet else eyeline_note(shot, sr, c.image_prompt))
             + garment_detail_note(project, ep, shot, sr, c.image_prompt) + blocking_note(shot, c.image_prompt))
+    # L-130：段落标记在编译器出口统一清掉（compiler._no_segment_marks，ISS-1103-005241-bf53）；这里原来的 model_copy 分支对
+    # dataclass 的 CompiledShot 从不生效，有 scene_id 的镜标记就漏进了“本镜场景：”
     return plan.prompt_prefix + with_note(c.image_prompt, note), c, sr, plan
+
+
+def shot_language_note(project: str | None, shot, mode: str = "shot") -> str:
+    """ISS-1103-023528-2869：镜头语言模板 v2 首帧段（② 镜头 → ③ 构图 → ④ 灯光 → L-110 融合句，固定顺序，按剧开关），
+    放在正文 + 【场景】之后、其余补句之前；设定图模式不加"""
+    if mode == "sheet":
+        return ""
+    from ns_agent import shot_language as SL
+    return SL.image_note(project, shot)
 
 
 def blocking_note(shot, body: str) -> str:
@@ -96,15 +133,18 @@ def outer_items(project: str, ep, shot, sr=None, body: str | None = None) -> lis
                and AR.part_active(x, n_ep, img)]
         # K-REN-707（开关 close_no_lower）：特写 / 近景 / 中近景不补看不见的下半身单品 / 描述（露出长腿、裙、鞋）
         if AR.FR.close_no_lower() and _size in AR.FR.CLOSE_NO_LOWER:
-            vis = [x for x in vis if AR.FR.visible(AR._short(x.label), _size)]
+            vis = [x for x in vis if AR.FR.visible_garment(AR._short(x.label), _size)]
         if any(x.extra and x.slot == "shoes" for x in vis):
             vis = [x for x in vis if not (x.slot == "shoes" and not x.extra)]
         names = []
         for x in sorted(vis, key=lambda x: AR.ZONE_ORDER.get(x.zone, 9)):
             orig = AR._short(x.label)
+            if AR.FR.close_no_lower() and _size in AR.FR.CLOSE_NO_LOWER and not AR.FR.visible(orig, _size):
+                orig = AR.FR.visible_items(orig, _size) or orig    # ISS-1103-024205-8856：一体件只补看得见的那部分（近景不补丝袜 / 高跟）
             lab = GARMENT_ALIAS.get(orig, orig)
             text = body if body is not None else img          # 出图正文（编译器会按景别删掉剧本里的服装词）没写到才补
-            if orig and orig not in text and lab not in names:
+            core = orig.split("：", 1)[-1].strip()           # “日常全身装：黑色漆皮抹胸紧身短裙”：正文写了冒号后的单品名就算写到
+            if orig and orig not in text and core not in text and lab not in names:
                 names.append(lab)
         if names:
             out.append((name, lid, names))
@@ -244,8 +284,9 @@ def with_note(body: str, note: str) -> str:
     if not note:
         return body
     from ns_agent.gen_contract import style as ST
-    suf = ST.image_suffix()
-    i = body.rfind(suf) if suf else -1
+    i = -1
+    for s_ in [ST.image_suffix()] if not ST._manifest_mode(ST._run()) else [f"{x}，{ST.NO_TEXT}" for x in ST.run_suffixes()]:
+        i = max(i, body.rfind(s_) if s_ else -1)            # 分段剧：哪一段的风格后缀都认（L-130）
     if i > 0:
         head = body[:i].rstrip("，, ")
         return f"{head}，{note.rstrip('。')}，{body[i:]}"
@@ -258,25 +299,36 @@ def cast_of(shot) -> list[dict]:
 
 
 def build_first(project: str, ep, shot, g, *, bible=None, model: str = "qwen_image_2.1", prompt_override: str | None = None,
-                **plan_kw) -> dict:
+                mode: str = "shot", **plan_kw) -> dict:
     """首帧作业（= 生成契约请求的超集）。prompt_override：画布一次性整段替换的正文（槽位标注照加在前面）"""
     from ns_agent.gen_contract import style as ST
     n = int(AR.g(ep, "number"))
+    shot = freeze_archived_extras(project, shot)          # W7：归档剧编译冻结（eyeline / 镜头语言段读同一份）
     sid = f"ep{n:02d}-S{AR.g(shot, 'index')}"
-    full, c, sr, plan = compile_frame(ep, shot, g, project, bible=bible, model=model, **plan_kw)
+    full, c, sr, plan = compile_frame(ep, shot, g, project, bible=bible, model=model, mode=mode, **plan_kw)
     body = full[len(plan.prompt_prefix):]
     if prompt_override:
         body = prompt_override if ST.preset_suffix() in prompt_override else f"{prompt_override}，{ST.image_suffix()}"
-        body = with_note(body, plan.prompt_note + outer_items_note(project, ep, shot, sr, body) + eyeline_note(shot, sr, body)
+        body = with_note(body, shot_language_note(project, shot, mode) + plan.prompt_note + outer_items_note(project, ep, shot, sr, body)
+                         + ("" if mode == "sheet" else eyeline_note(shot, sr, body))
                          + garment_detail_note(project, ep, shot, sr, body) + blocking_note(shot, body))
     job = {"id": sid, "shot": sid, "ep": n, "index": AR.g(shot, "index"), "stage": "image", "model": model,
-            "prompt": plan.prompt_prefix + body, "refs": plan.files, "asset_refs": AR.record(sr, plan), "cast": cast_of(shot),
+            "prompt": plan.prompt_prefix + ST.strip_segment_marks(body), "refs": plan.files, "asset_refs": AR.record(sr, plan), "cast": cast_of(shot),
             "loras": [["krea2_film_texture_qwen21.safetensors", 0.5]],
             "compiled_by": "ns_agent.frame_job.build_first → ns_agent.compiler.compile_shot", "framing_project": project,
             "recipe": "frame_v9（K-REN-134 唯一出图路径）", "last_prompt": c.last_prompt,
             "face_files": [s.file for s in plan.slots if s.kind == "face"], "compiler_inputs_sha": c.inputs_sha,
             "blocking": AR.blocking_of(shot), "last_faces": last_face_plan(project, shot, c.last_prompt, plan)}
     job["route"], job["route_reasons"] = AR.plan_route(project, sr, plan)      # K-REN-958：本地专用资产 → 只许自有机器的道（L-128）
+    seg_in, seg_src = ST.segment_of(shot)                                      # L-130：幻想 / 现实段 → 风格预设
+    pid, seg, dflt = ST.segment_preset(project, seg_in)
+    if pid:
+        job["preset"], job["style_segment"] = pid, seg
+        job["style_warning"] = (f"本镜没有幻想 / 现实段标记，按缺省 {seg} 段出（L-130，写作侧应在节拍里标【幻想段】/【现实段】）"
+                                if dflt else None)
+    # CARRYOVER 第 11 项（MERGE-IMG-O 11-03）：负面词 = 编译器负面词（剧本 base_negative + bible style / safe 负面 + 未成年人外观硬负面）
+    # ∪ W-40 品牌负面词。原来直接覆盖成 brand_negative（V2 多为空），硬负面词进不了作业。硬负面永远在（job_negative 兜底）
+    job["negative"] = job_negative(c.image_negative, AR.brand_negative(project, plan))
     job["adult_reasons"] = AR.plan_adult(project, sr, plan)                    # L-128 不变项：成人画面作业只由项目方触发
     job["adult"] = bool(job["adult_reasons"])
     job["compile_trace"] = trace_of(job)
@@ -304,12 +356,41 @@ def trace_of(job: dict) -> dict:
             "prompt_sha": _sha16(job.get("prompt") or ""), "refs": refs,
             "refs_sha": _sha16(json.dumps([r["sha"] or r["file"] for r in refs])),
             "compiler_inputs_sha": job.get("compiler_inputs_sha"), "blocking": job.get("blocking"),
-            "faces": [s.get("character") for s in ar.get("slots") or [] if s.get("kind") in ("face", "faceboard")],
-            "last_faces": job.get("last_faces"), "route": job.get("route"), "route_reasons": job.get("route_reasons"), "adult": job.get("adult"),
+            "faces": face_ids(ar.get("slots") or []),
+            "last_faces": job.get("last_faces"), "style_preset": job.get("preset"), "style_segment": job.get("style_segment"),
+            "style_warning": job.get("style_warning"), "route": job.get("route"), "route_reasons": job.get("route_reasons"), "adult": job.get("adult"),
             "conflicts": [w for w in ar.get("warnings") or [] if w.get("kind") == "cast_face_conflict"],
             "wardrobe_scope": {c.get("name"): c.get("wardrobe_scope") for c in ar.get("characters") or []
                                if c.get("wardrobe_scope") is not None},
             "rules": ["K-REN-950", "K-REN-951", "K-REN-952", "K-REN-953", "K-REN-954", "K-REN-955", "K-REN-957"]}
+
+
+def job_negative(*parts: str) -> str:
+    """作业负面词：各段去重拼接（、分隔），硬负面（compiler.MINOR_GUARD）保证在。Turbo（cfg 1）采样时不送（workflows.negative_for），
+    但作业 / take 记录里始终带着，定稿档（cfg>1）与改用 Base 的预设照样生效"""
+    seen: list[str] = []
+    for p in parts:
+        for w in re.split(r"[、，,]", p or ""):
+            w = w.strip()
+            if w and w not in seen:
+                seen.append(w)
+    if C.MINOR_GUARD not in seen:
+        seen.append(C.MINOR_GUARD)
+    return "、".join(seen)
+
+
+def face_ids(slots: list[dict]) -> list[str]:
+    """送了身份脸的角色（按在画人物逐人）：face 槽的角色 + 脸板每一格的角色（ISS-1103-023528-1509：原来脸板只记第一格 → 三人镜只认一张脸）"""
+    out: list[str] = []
+    for s in slots:
+        if s.get("kind") == "face":
+            ids = [s.get("character")]
+        elif s.get("kind") == "faceboard":
+            ids = [m.get("character") for m in s.get("members") or [] if m.get("role") == "face"] or [s.get("character")]
+        else:
+            continue
+        out += [i for i in ids if i and i not in out]
+    return out
 
 
 TURN_WORDS = ("转身", "回头", "转过脸", "抬起头", "抬头", "正面")
@@ -320,7 +401,7 @@ def last_face_plan(project: str, shot, last_prompt: str | None, plan) -> list[di
     表情 / 转身）→ 尾帧必须送这个人的身份脸（asset_refs.face_of）。返回 [{character, file, why}]"""
     if not AR.pf_on("last_face_guard") or not last_prompt:
         return []
-    have = {s.character for s in plan.slots if s.kind in ("face", "faceboard")}
+    have = set(face_ids([{"kind": s.kind, "character": s.character, "members": s.members} for s in plan.slots]))
     on = AR.cast_on_screen(shot)
     names = [n for n, _ in on]
     txt = last_prompt.replace("眼睛为真实人眼大小", "")
@@ -603,6 +684,7 @@ def compile_frame_v2(ep, shot, g, project: str, cont: dict, *, bible=None, avail
     """
     from ns_agent.bible import load_bible
     from ns_agent.gen_contract import style as ST
+    shot = freeze_archived_extras(project, shot)          # W7：归档剧编译冻结
     rows = load_plugins(plugins_path)
     g2, _removed = AR.locks_without_wardrobe(g)
     c = C.compile_shot(ep, retrigger(shot, g2), g2, set(available or ()), image_style=ST.image_suffix(),

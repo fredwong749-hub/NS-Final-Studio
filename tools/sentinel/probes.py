@@ -69,8 +69,8 @@ class Ctx:
 
     def remote(self, host: str) -> dict | None:
         if host not in self._remote:
-            self._remote[host] = remote_batch(host, self.c("S6_config_parity"), float(self.cfg["remote_timeout_s"]["value"]),
-                                              host == VQA_HOST)
+            self._remote[host] = remote_batch(host, dict(self.c("S6_config_parity"), _q10=self.c("S28_q10_detector")),
+                                              float(self.cfg["remote_timeout_s"]["value"]), host == VQA_HOST)
             if self._remote[host] is None:
                 self.errors[host] = "远程采样失败（主连接不在 / 超时）"
             rc = self.mem.setdefault("remote_calls", {}).setdefault(host, {"ok": 0, "n": 0, "hist": []})
@@ -110,7 +110,9 @@ def remote_batch(host: str, parity: dict, timeout: float, vqa: bool) -> dict | N
     else:
         ports = ",".join(str(p) for ln, p in COMFY_PORTS.items() if ln.startswith(host))
         broken, root = "-", parity["server_root"]
-    cmd = f"timeout {int(timeout) - 8} nice -n 19 python3 - {root} {files} {1 if vqa else 0} {ports or '-'} {broken}"
+    q10 = parity.get("_q10") or {}
+    lan = q10.get("url") if q10.get("from_host") == host else "-"
+    cmd = f"timeout {int(timeout) - 8} nice -n 19 python3 - {root} {files} {1 if vqa else 0} {ports or '-'} {broken} {lan}"
     try:
         r = rssh.run(host, cmd, input=(ROOT / "tools/sentinel/remote_probe.py").read_bytes(), timeout=timeout)
     except subprocess.TimeoutExpired:  # arch-ok: None = 远程未测，Ctx.remote 记 errors[host]，依赖它的探针本拍不出 finding
@@ -361,12 +363,25 @@ def p_s5(ctx: Ctx) -> list[dict]:
 
 
 # ================================================================== S6
+def override_phases() -> dict:
+    """每台服务器的临时覆盖阶段 {host: {"phase": …}}。MERGE-OPS-O（carryover 第 14 项）：阶段在 data/netfix/override_state.json 的
+    hosts（dict，dispatch.reconcile 写）；以前读 data/state/netfix/override.json 的 hosts——那是主机名列表 → 11-02 12:41 起每拍
+    AttributeError 'list'.get。格式不对 = 没有覆盖阶段（记 UNKNOWN，不崩）"""
+    st = jl("data/netfix/override_state.json", {}) or {}
+    hs = st.get("hosts") if isinstance(st, dict) else None
+    if not isinstance(hs, dict):
+        if hs is not None:
+            UNKNOWN["data/netfix/override_state.json"] = f"hosts 不是对象（{type(hs).__name__}）"
+        return {}
+    return {h: v for h, v in hs.items() if isinstance(v, dict)}
+
+
 def p_s6(ctx: Ctx) -> list[dict]:
     from tools.autopilot import policy
     c = ctx.c("S6_config_parity")
     files = parity_files(c)
     lap = {f: sha_file(ROOT / f) for f in files}
-    ov = (read_state("netfix/override", {}) or {}).get("hosts") or {}
+    ov = override_phases()
     ar = jl("data/autopilot/assets_ready.json", {}) or {}
     out = p_identity(ctx)
     for h in HOSTS:
@@ -1136,13 +1151,29 @@ def p_s27(ctx: Ctx) -> list[dict]:
     return J.j_review_chain(review_rounds(base, int(c["judges"])), ctx.now, c)
 
 
+# ================================================================== S28 Q10 人数检测服务（总调度 20:4x）
+def p_s28(ctx: Ctx) -> list[dict]:
+    c = ctx.c("S28_q10_detector")
+    r = ctx.remote(c["from_host"])
+    if not r:
+        return []                              # 远程采样失败归 S0，不算检测服务失败
+    res = (r.get("lan_health") or {}).get(c["url"])
+    if res is None:
+        return []
+    good = bool(res.get("ok")) and (res.get("loaded") is True or not c.get("need_loaded"))
+    m = ctx.mem.setdefault("q10", {"fails": 0})
+    m["fails"] = 0 if good else m["fails"] + 1
+    m["last"] = res
+    return J.j_q10(m["fails"], res, c)
+
+
 PROBES = {"S1": p_s1, "S2": p_s2, "S3": p_s3, "S4": p_s4, "S5": p_s5, "S6": p_s6, "S7": p_s7, "S8": p_s8, "S9": p_s9,
-          "S10": p_s10, "S11": p_s11, "S12": p_s12, "S13": p_s13, "S14": p_s14, "GPU24": p_gpu24, "S15": p_s15, "S16": p_s16, "S17": p_s17, "S18": p_s18, "S19": p_s19, "G26": p_g26, "S20": p_s20, "S21": p_s21, "S22": p_s22, "S23": p_s23, "S24": p_s24, "S25": p_s25, "SC": p_scorecard, "S26": p_s26, "S27": p_s27,
+          "S10": p_s10, "S11": p_s11, "S12": p_s12, "S13": p_s13, "S14": p_s14, "GPU24": p_gpu24, "S15": p_s15, "S16": p_s16, "S17": p_s17, "S18": p_s18, "S19": p_s19, "G26": p_g26, "S20": p_s20, "S21": p_s21, "S22": p_s22, "S23": p_s23, "S24": p_s24, "S25": p_s25, "SC": p_scorecard, "S26": p_s26, "S27": p_s27, "S28": p_s28,
           "CTRL": p_ctrl_history}
 CFG_OF = {"S1": "S1_lane_util_min", "S2": "S2_gpu_all_idle_s", "S3": "S3_score_p50_s", "S4": "S4_recover_s", "S5": "S5_release",
           "S6": "S6_config_parity", "S7": "S7_pause_max_s", "S8": "S8_vlm_sample", "S9": "S9_ui_rules", "S10": "S10_rules_green",
           "S11": "S11_stage_stuck_s", "S12": "S12_script_ruler", "S13": "S13_human_wait",
           "S14": "S14_rsi_lines", "GPU24": "GPU24_alloc",
           "S15": "S15_flow_tick", "S16": "S16_laptop_procs", "S17": "S17_shot_render_rate", "S18": "S18_temp_holds", "S19": "S19_capacity_floor", "G26": "G26_decl_vs_actual", "S20": "S20_scratchpad_procs",
-          "S21": "S21_state_legacy_read", "S22": "S22_freeze_drift", "S23": "S23_laptop_lane_reach", "S24": "S24_api_latency", "S25": "S25_clip_resident", "SC": "SC_scorecard", "S26": "S26_autoflow_resident", "S27": "S27_p1_review_chain",
+          "S21": "S21_state_legacy_read", "S22": "S22_freeze_drift", "S23": "S23_laptop_lane_reach", "S24": "S24_api_latency", "S25": "S25_clip_resident", "SC": "SC_scorecard", "S26": "S26_autoflow_resident", "S27": "S27_p1_review_chain", "S28": "S28_q10_detector",
           "CTRL": "CTRL_history"}

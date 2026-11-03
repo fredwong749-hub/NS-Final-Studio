@@ -106,7 +106,7 @@ rules:
     when: 有在画角色的镜头的分拍行
     then: 每拍 视线= 写画内的人（名字或部位）、物件，或画外有名有姓的声源；视线变化写成动作（从 A 移到 B）。没有落点，出图 / 出片默认对着镜头（项目方 R11-2、R11-8）
     targets: [{kind: writer_prompt, section: 分拍与动作}, {kind: director_prompt, section: 判定标准}]
-    writer_text: 每一拍的 视线= 都写具体落点——画内的人（名字或部位，如“顾沉的手”）、物件（“汤碗边缘”），或画外有名有姓的声源；视线变化写成动作（“视线从手机移到他脸上”）。不写“看着前方 / 远处 / 虚空”，也不只写方向（“对面 / 画外 / 一旁 / 上方”要写成“对面的陈宇 / 画外门口的顾沉”）；跨镜视线方向保持一致，翻转要写明。
+    writer_text: 每一拍的 视线= 都写具体落点——画内的人（名字或部位，如“男主 B的手”）、物件（“汤碗边缘”），或画外有名有姓的声源；视线变化写成动作（“视线从手机移到他脸上”）。不写“看着前方 / 远处 / 虚空”，也不只写方向（“对面 / 画外 / 一旁 / 上方”要写成“对面的男配 C / 画外门口的男主 B”）；跨镜视线方向保持一致，翻转要写明。
     director_text: 演员视线没有落点（空看、对着镜头）→ fail，action=reseed，issues 写“视线无落点 / 看镜头（R11-2）”。
     lint: [QW-A1]
     check: [tools/qa/acting_lints.py, tests/test_acting_lints.py]
@@ -124,7 +124,7 @@ rules:
     when: 分拍、img、motion、H3 任一处
     then: 不写“看向镜头 / 直视镜头 / 对着镜头笑 / 视线越过镜头 / 看着观众”，H3 不写 looks into the camera / at the lens / at the viewer；直视镜头是打破第四面墙的手法，本剧不用（项目方 R11-2）
     targets: [{kind: writer_prompt, section: 镜头字段}]
-    writer_text: 任何字段都不写演员看镜头——不写“看向镜头、直视镜头、对着镜头笑、视线越过镜头、看着观众”，H3 也不写 looks into the camera / at the lens / at the viewer。近景要“看向镜头一侧”时，写成看向画外具体的人（“看向画外左侧的顾沉”）。
+    writer_text: 任何字段都不写演员看镜头——不写“看向镜头、直视镜头、对着镜头笑、视线越过镜头、看着观众”，H3 也不写 looks into the camera / at the lens / at the viewer。近景要“看向镜头一侧”时，写成看向画外具体的人（“看向画外左侧的男主 B”）。
     lint: [QW-A2, RL-E2]
     check: [tools/qa/acting_lints.py, services/recipes/ns_recipes/lint.py, tests/test_acting_lints.py, tests/test_acting_system.py]
     evidence:
@@ -173,7 +173,7 @@ rules:
     when: 人物行 ≥2 人“在画”
     then: 每拍除主角外，每个在画的人在 反应= 里写“名字：视线落点 + 表情”（多人用；分隔）；H3 正文按官方多人写法，每个在画的人各一句，主语是这个人，跟视线和表情（项目方 R11-9）
     targets: [{kind: writer_prompt, section: 分拍与动作}, {kind: writer_prompt, section: H3 正文}, {kind: director_prompt, section: 判定标准}]
-    writer_text: 画面里有两个及以上在画的人时，每一拍除了主角，其他每个人都在 反应= 里写“名字：视线落点 + 表情”（例：反应=顾沉：视线落在她手上，下颌绷紧；三人时用“；”接着写下一个人）；H3 正文里每个在画的人各写一句，主语是这个人，写他看向谁 / 什么和脸上的变化（例：“He glances at her hand, his jaw tightening.”）。
+    writer_text: 画面里有两个及以上在画的人时，每一拍除了主角，其他每个人都在 反应= 里写“名字：视线落点 + 表情”（例：反应=男主 B：视线落在她手上，下颌绷紧；三人时用“；”接着写下一个人）；H3 正文里每个在画的人各写一句，主语是这个人，写他看向谁 / 什么和脸上的变化（例：“He glances at her hand, his jaw tightening.”）。
     director_text: 多人镜里有在画的人没有视线或表情（脸空、眼神空）→ fail，action=reseed，issues 写“第二人无表情 / 视线（R11-9）”。
     lint: [QW-A5, RL-E1]
     check: [tools/qa/acting_lints.py, services/recipes/ns_recipes/lint.py, tests/test_acting_lints.py, tests/test_acting_system.py]
@@ -190,9 +190,9 @@ rules:
     link: P3-P4
     title: 脸 / 身体朝向不写“正面朝镜头 / 面向镜头 / 正对镜头”，写成朝向画里的人或物
     when: img、分拍、motion、H3 任一处写人物朝向
-    then: 朝向写相对画里的人或物（“四分之三侧脸朝向顾沉”“身体朝向窗边”），不写正面朝镜头 / 面向镜头 / 正对镜头 / 朝着镜头，H3 不写 facing the camera / toward the camera / front view；“侧面朝向镜头 / 背对镜头”是侧面和背面，不算（项目方 11-01 18:2x“所有图片不要看镜头”）
+    then: 朝向写相对画里的人或物（“四分之三侧脸朝向男主 B”“身体朝向窗边”），不写正面朝镜头 / 面向镜头 / 正对镜头 / 朝着镜头，H3 不写 facing the camera / toward the camera / front view；“侧面朝向镜头 / 背对镜头”是侧面和背面，不算（项目方 11-01 18:2x“所有图片不要看镜头”）
     targets: [{kind: writer_prompt, section: 镜头字段}, {kind: director_prompt, section: 判定标准}]
-    writer_text: 写人物朝向时，朝向画里的人或物（“四分之三侧脸朝向顾沉”“身体朝向窗边的灯”），不写“正面朝镜头 / 面向镜头 / 正对镜头 / 朝着镜头”——出图模型会把“正面朝镜头”画成直视镜头；H3 同样不写 facing the camera / toward the camera / front view。
+    writer_text: 写人物朝向时，朝向画里的人或物（“四分之三侧脸朝向男主 B”“身体朝向窗边的灯”），不写“正面朝镜头 / 面向镜头 / 正对镜头 / 朝着镜头”——出图模型会把“正面朝镜头”画成直视镜头；H3 同样不写 facing the camera / toward the camera / front view。
     director_text: 首帧或印样里在画的人正脸直视镜头（眼睛对着镜头）→ fail，action=reseed，issues 写“看镜头（D-SCR-07）”；第 2 次仍看镜头 → action=owner（回剧本查 img 是否写了朝向镜头 / 没写视线落点）。
     lint: [QW-A6, RL-E3]
     check: [tools/qa/acting_lints.py, tests/test_acting_lints.py, services/recipes/ns_recipes/lint.py]
@@ -211,7 +211,7 @@ rules:
     when: 人物行有“在画”的人的镜头的 img
     then: img 里每个在画的人各写一句视线落点（看画里的谁或什么）；闭眼、背对写明即可；不写“看着前方 / 远处”。首帧看镜头时片头 91% 看镜头（视频继承首帧视线），所以首帧这句最要紧
     targets: [{kind: writer_prompt, section: 镜头字段}]
-    writer_text: img 是首帧的唯一来源，每个在画的人都写一句视线落点——看画里的谁或什么（“林晚的视线落在顾沉的手上；顾沉垂眼看着文件”）；闭眼、背对写明即可；不写“看着前方 / 远处”。首帧里谁没写视线，出图就默认让他看镜头，视频会接着看镜头。落点在画外时，img 写方位 + 物（“视线投向画面右侧的门口”），不写画外角色的名字（人物行标画外的人不能出现在 img 和结束状态（motion 里 —— 之后那段），QW-CH4）；分拍 视线= 可以写“画外门口的顾沉”。
+    writer_text: img 是首帧的唯一来源，每个在画的人都写一句视线落点——看画里的谁或什么（“女主 A的视线落在男主 B的手上；男主 B垂眼看着文件”）；闭眼、背对写明即可；不写“看着前方 / 远处”。首帧里谁没写视线，出图就默认让他看镜头，视频会接着看镜头。落点在画外时，img 写方位 + 物（“视线投向画面右侧的门口”），不写画外角色的名字（人物行标画外的人不能出现在 img 和结束状态（motion 里 —— 之后那段），QW-CH4）；分拍 视线= 可以写“画外门口的男主 B”。
     lint: [QW-A7, QW-CH4]
     check: [tools/qa/acting_lints.py, tests/test_acting_lints.py]
     evidence:

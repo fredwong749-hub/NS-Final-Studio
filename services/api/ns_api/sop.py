@@ -1,7 +1,7 @@
 """
 SOP 阶段 S1–S5 与关口 G1–G5（docs/SOP_production.md「★ 阶段闸门与资源优先级」、docs/SOP_parameters.md）。
 
-只读：读 data/state_timeline.json、data/scenes.json（tools/build_state_timeline.py 生成）、data/looks/schedule.json、
+只读：读当前剧的 state_timeline.json、scenes.json（V1 = data/ 下，其它剧 = data/import/runs/<run>/；tools/build_state_timeline.py 生成）、data/looks/schedule.json、
 gpu3 镜像（renders_gpu3/epXX/qa.json、continuity_sheet.jpg、epXX_final.mp4）、项目方关口记录 data/sop/owner_gates.json
 （只由 tools/sop_owner.py 写）。**这里从不接受、确认或锁定任何关口**；项目方的关口只给出要跑的命令。
 
@@ -97,17 +97,32 @@ class Inputs:
     def __init__(self, root: Path, gpu3_root: Path, orchestrator_dir: Path | None = None):
         self.root, self.gpu3_root = Path(root), Path(gpu3_root)
         self.orch = orchestrator_dir or self.root / "data" / "orchestrator"
-        self.timeline = _read(self.root / "data" / "state_timeline.json")
-        self.scenes = _read(self.root / "data" / "scenes.json")
+        # V2CUT-O 11-03（L-126）：状态表 / 场景表按当前剧取（V2 = data/import/runs/<run>/），不读 V1 的 data/ 全局文件；
+        # 当前剧的文件不存在 → timeline=None → 阻塞项 timeline_missing（报错，不回退）
+        self.timeline_file, self.scenes_file = state_files(self.root)
+        self.timeline = _read(self.timeline_file) if self.timeline_file else None
+        self.scenes = _read(self.scenes_file) if self.scenes_file else None
         self.schedule = _read(self.root / "data" / "looks" / "schedule.json", {}) or {}
         self.owner_gates = _read(self.root / OWNER_GATES, {}) or {}
         self.tl_shots = {s.get("shot_id"): s for s in (self.timeline or {}).get("shots") or [] if isinstance(s, dict)}
         self.scene_by_id = {s.get("scene_id"): s for s in (self.scenes or {}).get("scenes") or [] if isinstance(s, dict)}
         self._qa: dict[int, dict | None] = {}
         self.stale = timeline_stale(self.root, self.timeline, self.scenes)
+        self.timeline_foreign = timeline_foreign(self.stale)   # 状态表属于别的剧本：它的 scene_id / 底板不显示
         self.script = load_script(self.root)
+        self.script_scenes = script_scene_ids(self.script)     # 本镜场景 id 的第一来源 = 当前剧剧本
         self.ep_versions = episode_versions(self.script)       # D-1：合并导入后各集剧本版本不同，S1 按集判
         self.source_drift = source_drift(self.root, self.timeline, self.script)
+        self._asset_state: dict[tuple[str, int], dict] = {}
+        self._look_states: dict[int, dict] | None = None
+
+    def look_asset_state(self, char: str, name: str, ep: int) -> dict:
+        """「确认造型」入口的前置：人物的身份脸 / 清单名 / 本集排期（tools/master/episode_ready.character_gaps，
+        与开工前检查同一份代码）。不是资产包剧（V1 / 临时根）→ ready。→ {ready, wait: 给项目方看的一句话 | None, gaps}"""
+        key = (char, ep)
+        if key not in self._asset_state:
+            self._asset_state[key] = look_asset_state(self.root, char, name, ep)
+        return self._asset_state[key]
 
     def ep_dir(self, n: int) -> Path:
         return self.gpu3_root / f"ep{n:02d}"
@@ -131,6 +146,15 @@ class Inputs:
         return (self.ep_dir(n) / "continuity_sheet.jpg").is_file()
 
 
+def state_files(root: Path) -> tuple[Path | None, Path | None]:
+    """当前剧的 (状态表, 场景表) 路径（ns_agent.run_paths 唯一入口）；解析失败 → (None, None)，不回退 V1 的 data/ 全局文件"""
+    try:
+        from ns_agent import run_paths as _RPA
+        return Path(_RPA.timeline_json(root)), Path(_RPA.scenes_json(root))
+    except Exception:  # noqa: BLE001  # arch-ok: 解析不出当前剧 = 当作没有状态表（失败关闭）
+        return None, None
+
+
 def timeline_stale(root: Path, timeline: dict | None, scenes: dict | None) -> list[str]:
     """状态表记的输入哈希（剧本 script_sha、source_hashes、底板 sha）与磁盘不一致 → 变了的输入名"""
     if timeline is None:
@@ -142,16 +166,113 @@ def timeline_stale(root: Path, timeline: dict | None, scenes: dict | None) -> li
         return [f"check_failed:{type(e).__name__}"]
 
 
-def load_script(root: Path):
-    """data/import/script_v2.json → ScriptImport；没有 / 读不了 → None（SOP 退回状态表的整份版本）"""
-    p = root / "data" / "import" / "script_v2.json"
+def script_file(root: Path) -> Path | None:
+    """当前剧的导入稿（K-OPS-F24 / L-126：按 runs.json 取，V2 = data/import/runs/<run>/script_v2.json；
+    没有 runs.json 的临时根 = data/import/script_v2.json）。解析到 V1 路径而当前剧不是 V1 → None（不回退）"""
     try:
-        if p.is_file():
+        from ns_agent import run_paths as _RPA
+        return Path(_RPA.script_json(root))
+    except Exception:  # noqa: BLE001 — V1PathError 等：不回退 V1 文件
+        return None
+
+
+def load_script(root: Path):
+    """当前剧导入稿 → ScriptImport；没有 / 读不了 → None（SOP 退回状态表的整份版本）。
+    UIFIX-F 11-03：以前写死 data/import/script_v2.json（V1 的文件），V2 主剧时 SOP 拿的是 V1 剧本"""
+    p = script_file(root)
+    try:
+        if p is not None and p.is_file():
             from ns_schema.script import ScriptImport
             return ScriptImport.model_validate_json(p.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         pass
     return None
+
+
+def script_scene_ids(script) -> dict[str, str | None]:
+    """shot_id → 剧本 **场景** 的场景 id（旧剧本没写 = None）"""
+    if script is None:
+        return {}
+    return {s.id: getattr(s, "scene_id", None) for e in script.episodes for s in e.shots}
+
+
+def timeline_foreign(stale: list[str]) -> bool:
+    """状态表是按另一份剧本生成的（script_sha 对不上，或者根本算不出）→ 它的 scene_id / 人物 / 底板都属于别的剧本，
+    一律不拿来显示（UIFIX-F 11-03：V2 第 1 集分镜页出现 V1 的“办公室夜 / 深夜写字楼办公区角落”就是这么来的；L-126 完全切割）"""
+    return any(x == "script" or x.startswith("check_failed:") for x in stale)
+
+
+def shot_scene(inp: "Inputs", shot_id: str, tl: dict | None) -> tuple[str | None, str | None]:
+    """本镜场景 id 的唯一取法：剧本 **场景**（当前剧）> 状态表（只有状态表属于当前剧本时）> None。→ (scene_id, 来源)"""
+    # 只带部分字段的输入替身（测试 / 旧调用方）：没有剧本场景表 = 空；没有 timeline_foreign = 按“别的剧本”处理（失败关闭）
+    sid = (getattr(inp, "script_scenes", None) or {}).get(shot_id)
+    if sid:
+        return sid, "script"
+    if tl is not None and not getattr(inp, "timeline_foreign", True) and tl.get("scene_id"):
+        return tl.get("scene_id"), "timeline"
+    return None, None
+
+
+def _episode_ready_module():
+    """tools/master/episode_ready.py（开工前资产就绪检查）——只此一处加载，口径不复制"""
+    import importlib.util
+    p = Path(__file__).resolve().parents[3] / "tools" / "master" / "episode_ready.py"
+    spec = importlib.util.spec_from_file_location("ns_tools_master_episode_ready", p)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _current_run(root: Path) -> str | None:
+    """当前剧 run 名（资产包剧才有意义）；没有 runs.json / 旧剧（V1）→ None"""
+    try:
+        from ns_agent import run_paths as _RPA
+        m = _RPA.runs_module(root)
+        run = _RPA.current_run(root)
+        if not run or m is None or m.is_legacy(run, root) or not m.asset_manifest(run, root):
+            return None
+        return run
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def asset_state_files(root: Path) -> list[Path]:
+    """look_asset_state 读的文件（给 API 缓存签名用）：资产包清单 + 按集排期；不是资产包剧 → 空"""
+    run = _current_run(root)
+    if run is None:
+        return []
+    try:
+        from ns_agent import run_paths as _RPA
+        m = _RPA.runs_module(root)
+        mp = m.asset_manifest(run, root)
+    except Exception:  # noqa: BLE001
+        mp = None
+    return [p for p in (mp, root / "data" / "looks" / "hub_episode_looks.json") if p]
+
+
+def look_asset_state(root: Path, char: str, name: str, ep: int) -> dict:
+    """人物在本集的资产是否齐到可以确认造型（身份脸、清单 display_name、本集排期；
+    UIFIX-F 11-03：口径 = tools/master/episode_ready.character_gaps，不另写）。
+    不是资产包剧 → ready；算不出（模块缺 / 异常）→ 不就绪并写明原因（失败关闭，不装作就绪）"""
+    run = _current_run(root)
+    if run is None:
+        return {"ready": True, "wait": None, "gaps": []}
+    try:
+        er = _episode_ready_module()
+        cid = er.resolve_cid(run, char, name)
+        gaps = er.character_gaps(run, cid, name, ep)
+    except Exception as e:  # noqa: BLE001
+        return {"ready": False, "wait": f"{name}的资产状态读不出来（{type(e).__name__}），先不确认造型", "gaps": []}
+    if not gaps:
+        return {"ready": True, "wait": None, "gaps": []}
+    kinds = {g["kind"] for g in gaps}
+    if "face" in kinds:
+        wait = f"{name}的形象还在出候选，选定后再确认造型"
+    elif "name" in kinds:
+        wait = f"{name}还没登记进资产清单，登记后再确认造型"
+    else:
+        wait = f"{name}本集的造型排期还没做，排好后再确认造型"
+    return {"ready": False, "wait": wait, "gaps": gaps}
 
 
 def episode_versions(script) -> dict[int, str]:
@@ -216,7 +337,7 @@ def s1_gate(inp: Inputs) -> dict:
     tl = inp.timeline
     if tl is None:
         return {"passed": False, "known": False, "script": None,
-                "blockers": [_b("timeline_missing", "S1", "还没有 data/state_timeline.json（状态表）", "laptop", CLI_TIMELINE)]}
+                "blockers": [_b("timeline_missing", "S1", "还没有本剧的状态表（state_timeline.json）", "laptop", CLI_TIMELINE)]}
     g = tl.get("s1_gate") or {}
     ver = (tl.get("source") or {}).get("script")
     errs, g3 = g.get("validator_errors"), bool(g.get("g3_accepted"))
@@ -316,6 +437,9 @@ def _plan_confirmed(p) -> bool:
 def episode_unconfirmed(inp: Inputs) -> dict[int, list[str]]:
     """集 → 造型未经项目方确认的角色。本集须确认的角色 = 本集状态表镜头里入镜的角色 + 有集计划的角色；
     没有计划 = 未确认；确认须有原话（内容哈希由状态表核，见 ns_agent.looks.Resolver.episode_confirmed）"""
+    als = asset_look_states(inp)
+    if als is not None:       # V2CUT-O：资产包剧按集确认记录（look_confirm.json，绑定造型快照）
+        return {n: [p["display_name"] for p in st["people"]] or ["<角色>"] for n, st in als.items() if not st["confirmed"]}   # 给人看：人名不给 id
     plans = inp.schedule.get("episodes") or {}
     present: dict[int, list[str]] = {}
     for s in inp.tl_shots.values():
@@ -352,6 +476,24 @@ def episode_unconfirmed(inp: Inputs) -> dict[int, list[str]]:
         if chars:
             out[n] = chars
     return out
+
+
+def asset_look_states(inp: Inputs) -> dict[int, dict] | None:
+    """V2CUT-O 11-03：资产包剧（V2 等）的“确认造型”按集算（ns_api.look_confirm.episode_state，和通知中心同一份代码）：
+    每集一条，带全部人物的 display_name / 本集造型 / 缩略图。不是资产包剧（V1 / 临时根）→ None（保持逐角色旧口径）"""
+    root = getattr(inp, "root", None)
+    if root is None or getattr(inp, "script", None) is None or _current_run(root) is None             or not (Path(root) / "config" / "pipeline" / "runs.json").is_file():   # 没有登记表的临时根：保持逐角色旧口径
+        return None
+    if getattr(inp, "_look_states", None) is None:
+        try:
+            from ns_api import look_confirm as LC
+            run = _current_run(inp.root)
+            inp._look_states = {e.number: LC.episode_state(inp.root, run, e.number) for e in inp.script.episodes}
+        except Exception as e:  # noqa: BLE001  算不出 = 每集都不就绪，原因写明（失败关闭）
+            inp._look_states = {x.number: {"episode": x.number, "people": [], "confirmed": False, "ready": False,
+                                           "waits": [f"本集造型读不出来（{type(e).__name__}），先不确认"], "pick_id": None}
+                                for x in inp.script.episodes}
+    return inp._look_states
 
 
 def unconfirmed_looks(inp: Inputs) -> dict[str, list[int]]:
@@ -417,7 +559,7 @@ S2_ACTORS = {"lora": "gpu3", "missing_ref": "laptop", "ref_unresolved": "laptop"
 
 def s2_blockers(inp: Inputs, tl: dict | None, ep: int) -> list[dict]:
     if inp.timeline is None:
-        return [_b("timeline_missing", "S2", "还没有状态表 data/state_timeline.json", "laptop", CLI_TIMELINE)]
+        return [_b("timeline_missing", "S2", "还没有本剧的状态表（state_timeline.json）", "laptop", CLI_TIMELINE)]
     if inp.stale:
         return [_stale_blocker(inp, "S2")] + _s2_from_timeline(inp, tl, ep)
     return _s2_from_timeline(inp, tl, ep)
@@ -438,6 +580,8 @@ def _s2_from_timeline(inp: Inputs, tl: dict | None, ep: int) -> list[dict]:
     out = []
     ep_unconf = episode_unconfirmed(inp).get(ep)
     raw = list(raw)
+    if asset_look_states(inp) is not None:   # V2CUT-O：资产包剧“造型确认”只认 look_confirm 记录（状态表按旧造型库算的不作数）
+        raw = [c for c in raw if not str(c).startswith("look_unconfirmed")]
     if ep_unconf and not any(str(c).startswith("look_unconfirmed") for c in raw):
         raw.append(f"look_unconfirmed:ep{ep:02d}")       # 状态表说已确认，但计划缺原话 / 缺角色
     for code in raw:
@@ -492,6 +636,7 @@ def shot_status(inp: Inputs, *, shot_id: str, ep: int, index: int, s1: dict, rea
     # S2
     tl = inp.tl_shots.get(shot_id)
     stages["S2"] = s2_blockers(inp, tl, ep)
+    scene_id, scene_src = shot_scene(inp, shot_id, tl)   # 剧本 > 属于当前剧本的状态表 > 无（不拿别的剧本的场景）
     # S3：首尾帧同链、帧闸门、衔接；非首集还要 G4
     if readiness is not None:
         for k in S3_ITEMS:
@@ -542,7 +687,7 @@ def shot_status(inp: Inputs, *, shot_id: str, ep: int, index: int, s1: dict, rea
             "stages": {k: {"passed": not v, "blockers": v, **({"warnings": s4_warn} if k == "S4" else {})}
                        for k, v in stages.items() if k != "S5"},
             "frames_owner": frames_owner, "ahead_of_gate": ahead,
-            "s2_ready": (tl or {}).get("s2_ready"), "scene_id": (tl or {}).get("scene_id"),
+            "s2_ready": (tl or {}).get("s2_ready"), "scene_id": scene_id, "scene_id_source": scene_src,
             "required_loras": (tl or {}).get("required_loras") or []}
 
 
@@ -605,15 +750,35 @@ def owner_actions(inp: Inputs, s1: dict, gate_list: list[dict], ep_states: dict[
         acts.append({"gate": "G3", "stage": "S1", "title": "采纳 v3 剧本加强",
                      "why": "S1 出口闸门：没有项目方采纳，全部镜头停在 S1",
                      "cli": CLI_S1_ACCEPT, "actionable": not upstream, "waiting_on": upstream})
-    for char, eps in sorted(unconfirmed_looks(inp).items()):
+    als = asset_look_states(inp)
+    for n, st in sorted((als or {}).items()):
+        if st["confirmed"]:
+            continue
+        # V2CUT-O 11-03：资产包剧每集一条，全部人物 + 本集造型 + 缩略图；和通知中心（/api/owner/inbox 的 pick:look）同一份记录，
+        # 哪边确认了两边同时消失。标题 / 文案只用人名，不出现角色 id
+        names = "、".join(p["display_name"] for p in st["people"]) or "本集人物"
+        wait = st["waits"][0] if st["waits"] else None
+        acts.append({"gate": "look", "stage": "S2", "title": f"确认第 {n} 集造型：{names}",
+                     "character_name": names, "character": None, "episode": n, "episodes": [n], "per_episode": True,
+                     "people": st["people"], "pick_id": st["pick_id"],
+                     "why": f"S2：第 {n} 集的造型没有项目方确认，镜头不进入第 3 阶段（出图）。一次确认本集全部人物", "cli": None,
+                     "asset_ready": bool(st["ready"]), "asset_wait": wait,
+                     "actionable": bool(st["ready"]), "waiting_on": [] if st["ready"] else list(st["waits"])})
+    for char, eps in sorted(unconfirmed_looks(inp).items()) if als is None else []:
         name = char_name(char)
+        # UIFIX-F 11-03：造型确认属于资产阶段——身份脸还没选定 / 清单没登记 / 本集没排期的人，入口不开（asset_ready=False，
+        # 网页改成一句“X的形象还在出候选，选定后再确认造型”），口径 = tools/master/episode_ready
+        st = inp.look_asset_state(char, name, eps[0])
         acts.append({"gate": "look", "stage": "S2", "title": f"确认造型：{name}（{len(eps)} 集）",
                      "character_name": name,
                      "why": "S2：本集造型没有项目方确认，镜头不进入第 3 阶段（出图）。可只确认看过的集，例如先确认第 "
                             f"{eps[0]} 集", "episodes": eps, "character": char,
                      "cli": cli_look(str(eps[0]), char), "cli_all": cli_look(ep_ranges(eps), char),
-                     "actionable": True, "waiting_on": []})
+                     "asset_ready": bool(st["ready"]), "asset_wait": st["wait"],
+                     "actionable": bool(st["ready"]), "waiting_on": [] if st["ready"] else [st["wait"]]})
     for sc in (inp.scenes or {}).get("scenes") or []:
+        if inp.timeline_foreign:
+            break                          # scenes.json 属于别的剧本（V1）：它的底板不列进“待你决定”
         if sc.get("plate_status") == "candidate":
             acts.append({"gate": "plate", "stage": "S2", "title": f"确认场景底板 {sc.get('scene_id')}（{sc.get('place') or ''}）",
                          "why": f"第 3 阶段（出图）只能用项目方确认的底板；用到它的镜头 {len(sc.get('shots') or [])} 个",
@@ -699,9 +864,46 @@ def h3_override_actions(shot_rows: list[dict]) -> list[dict]:
              "cli": None, "actionable": True, "waiting_on": []}]
 
 
+def _sop_gate_module():
+    """tools/master/sop_gate.py（唯一阶段模型，PRODMERGE-O 11-03 / PLAN_V2_MASTER v4 1-3）——只此一处加载"""
+    import importlib.util
+    p = Path(__file__).resolve().parents[3] / "tools" / "master" / "sop_gate.py"
+    spec = importlib.util.spec_from_file_location("ns_tools_master_sop_gate", p)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def sop_gate_view(root: Path) -> dict | None:
+    """资产包剧（V2）：本页的阶段读 sop_gate.stage_view（九阶段），不再用本模块的 S1–S5 自判；V1 / 临时根 → None（旧口径）"""
+    run = _current_run(root)
+    if not run:
+        return None
+    try:
+        return _sop_gate_module().stage_view(run, root)
+    except Exception as e:  # noqa: BLE001  # arch-ok: 阶段模型读不出 = 页面显示原因，不回退成本模块自判
+        return {"run": run, "error": f"{type(e).__name__}: {e}"[:200], "episodes": [], "stage": None, "legacy_stage": None}
+
+
 def project_summary(slug: str, name: str, ev: dict, inp: Inputs) -> dict:
     shots = ev["shots"]
     tl = inp.timeline or {}
+    out = _project_summary_v1(slug, name, ev, inp, shots, tl)
+    sg = sop_gate_view(inp.root)
+    if sg is None:
+        return out
+    st = sg.get("legacy_stage") or "S1"
+    by_ep = {e["episode"]: e for e in sg.get("episodes") or []}
+    out.update(stage=st, stage_label=STAGE_LABEL.get(st, "完成"), stage_source="sop_gate", sop_gate=sg, sop_stage=sg.get("stage"))
+    for e in out["episodes"]:
+        g = by_ep.get(e["episode"])
+        if g:
+            e.update(stage=g["legacy_stage"], stage_label=STAGE_LABEL.get(g["legacy_stage"], "完成"),
+                     sop_stage=g["stage"], sop_why=g["why"], pending_owner=g["pending_owner"])
+    return out
+
+
+def _project_summary_v1(slug: str, name: str, ev: dict, inp: Inputs, shots: list, tl: dict) -> dict:
     return {
         "slug": slug, "name": name, "stage": ev["stage"], "stage_label": STAGE_LABEL.get(ev["stage"], "完成"),
         "stages": [{"id": k, "label": lbl, "shots_here": sum(1 for s in shots if s["stage"] == k),
@@ -721,3 +923,238 @@ def project_summary(slug: str, name: str, ev: dict, inp: Inputs) -> dict:
                      "provisional": tl.get("provisional"), "bible_version": tl.get("bible_version")},
         "never_auto_accept": "系统从不替项目方接受任何关口：所有项目方关口只能由项目方本人跑上面的命令",
     }
+
+
+# ---------------------------------------------------------------- W5 UIUX 11-03（L-146 / L-155）：顶部步骤条 + 总览进度矩阵的只读聚合
+# GET /api/sop/stepbar?run=  → {run, title, episodes_total, steps:[{id,label,stages,done,doing,blocked,todo}],
+#                               episodes:[{episode, stage, plain, cells:{step:{state, plain, owner, issues:[…]}}}],
+#                               now:{focus, doing:[…], blocked:[…]}, issues_open, unplaced}
+# 阶段判定只有一个来源：tools/master/sop_gate.py（经 ns_api.pipeline_status 折成六步，这里不另算）；
+# 卡点只有一个来源：tools/master/report_issue.load() 的未关项（按集 + SOP 步骤号落到六步上；阻断项把“进行中”标成“卡住”）。
+# 只读：不写任何文件。页面只显示 plain / owner（大白话），sop_gate 原文与卡点原文不上页面。
+import importlib.util as _ilu  # noqa: E402
+import re as _re  # noqa: E402
+import time as _time  # noqa: E402
+
+from fastapi import APIRouter as _APIRouter, HTTPException as _HTTPException  # noqa: E402
+
+from ns_api import pipeline_status as _PSTAT  # noqa: E402
+
+_REPORT_ISSUE_FILE = Path(__file__).resolve().parents[3] / "tools" / "master" / "report_issue.py"
+_ri_mod = None
+STEP_IDS = tuple(sid for sid, _l, _s in _PSTAT.STEPS)
+STEP_STAGES = {sid: list(stages) for sid, _l, stages in _PSTAT.STEPS}           # 六步 ↔ sop_gate.STAGES（唯一来源）
+_STAGE_TO_STEP = {st: sid for sid, _l, stages in _PSTAT.STEPS for st in stages}
+# docs/master/PIPELINE_SOP_V2.md 的步骤号 → 六步（0–7 写作与导入 = ①剧本；8 资产就绪 = ②资产；9 金样首帧 = ④出图；10 尾帧→视频→成片 = ⑤视频）
+_SOP_STEP_NO = {0: "script", 1: "script", 2: "script", 3: "script", 4: "script", 5: "script", 6: "script", 7: "script",
+                8: "assets", 9: "frames", 10: "video"}
+_STEP_WORDS = (("补丁", "script"), ("导入", "script"), ("delegate", "script"), ("P1", "script"), ("剧本", "script"),
+               ("资产", "assets"), ("提示词", "board"), ("分镜", "board"), ("金样", "frames"), ("首帧", "frames"),
+               ("尾帧", "frames"), ("出图", "frames"), ("视频", "video"), ("成片", "cut"), ("整集", "cut"))
+# 每一步“在做的时候”默认是谁在做（只用于显示负责方；卡点有登记人时以登记人为准）
+STEP_OWNER = {"script": "写手 + 系统检查", "assets": "系统 · 资产作业", "board": "系统 · 准备画面说明",
+              "frames": "系统 · 出图", "video": "系统 · 出视频", "cut": "系统 · 拼整集"}
+_ID_TOKEN = _re.compile(r"[A-Za-z0-9]*[_\-=/.:][A-Za-z0-9_\-=/.:]*[A-Za-z0-9]")
+_stepbar_cache: dict[str, tuple[float, dict]] = {}
+STEPBAR_TTL_S = 20.0
+
+
+def _report_issue():
+    """tools/master/report_issue.py 按文件路径加载一次（不改 sys.path，只调 load()）"""
+    global _ri_mod
+    if _ri_mod is None:
+        spec = _ilu.spec_from_file_location("ns_tools_master_report_issue", _REPORT_ISSUE_FILE)
+        if spec is None or spec.loader is None:
+            raise FileNotFoundError(str(_REPORT_ISSUE_FILE))
+        mod = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _ri_mod = mod
+    return _ri_mod
+
+
+def issue_step(step) -> str | None:
+    """卡点的 step 字段（“8 资产就绪” / “6 补丁环” / “delegate” / “9”）→ 六步 id；认不出 → None"""
+    s = str(step or "").strip()
+    for st, sid in _STAGE_TO_STEP.items():
+        if st in s:
+            return sid
+    m = _re.match(r"(\d+)", s)
+    if m and int(m.group(1)) in _SOP_STEP_NO:
+        return _SOP_STEP_NO[int(m.group(1))]
+    for w, sid in _STEP_WORDS:
+        if w in s:
+            return sid
+    return None
+
+
+def owner_label(who: str | None) -> str:
+    """登记人（agent 代号）→ 项目方看得懂的负责方"""
+    w = str(who or "")
+    u = w.upper()
+    if not w:
+        return "系统"
+    if "项目方" in w or "OWNER" in u:
+        return "你"
+    if "MASTER" in u or "总调度" in w or "WATCHDOG" in u:
+        return "总调度"
+    if "WRITER" in u or "写手" in w or "SCRIPT" in u or "DELEGATE" in u:
+        return "写手 / 总调度"
+    if "ASSET" in u:
+        return "系统 · 资产作业"
+    if "GOLDEN" in u or "IMG" in u or "FRAME" in u:
+        return "系统 · 出图"
+    if "VID" in u:
+        return "系统 · 出视频"
+    return "工程师（" + w + "）"
+
+
+def issue_plain(what: str | None, limit: int = 40) -> str:
+    """卡点原文 → 一句短话：去掉文件名 / 作业 id / 代码编号（含 _ - = / . 的英文串），只留第一句"""
+    t = _re.sub(r"【[^】]*】", "", str(what or ""))                    # 【登记人批注】不上页面
+    t = _ID_TOKEN.sub("", t)
+    t = _re.sub(r"\bep0*(\d+)\b", r"第\1集", t)
+    t = _re.sub(r"\s*[/，,=]\s*(?=[，,/=）)】：:；;]|$)", "", t)              # 去掉 id 删掉后留下的孤立标点
+    t = _re.sub(r"（[\s/，,=]*）|\([\s/，,=]*\)", "", t)
+    t = _re.sub(r"\s+", " ", t).strip(" ：:；;，,/=")
+    t = _re.sub(r"\s*（\s*", "（", t)
+    for sep in ("：", "；", "。"):
+        i = t.find(sep)
+        if i >= 6:
+            t = t[:i]
+            break
+    if t.count("（") > t.count("）"):                                   # 截断后括号没合上 → 去掉没合上的那段
+        t = t[: t.rfind("（")]
+    t = t.strip(" ，,") or "有一处卡住了，总调度在看"
+    return t if len(t) <= limit else t[: limit - 1] + "…"
+
+
+def open_issues(run: str, issues: list[dict] | None = None) -> list[dict]:
+    """本剧未关的卡点（report_issue.load 折叠后的当前状态）"""
+    rows = issues if issues is not None else _report_issue().load()
+    return [i for i in rows if i.get("status") != "closed" and str(i.get("run") or "") == run]
+
+
+def latest_first(rows: list[dict]) -> list[dict]:
+    """A5 P1-2 / P2-4：同一卡点（同 id）只留最新一条，再按 阻断优先 + 时间降序（最新在前）排；
+    同一句话（issue_plain 相同）的重复登记也只留最新一条（详情列表不再一样的话刷 5 遍）"""
+    by_id: dict[str, dict] = {}
+    anon: list[dict] = []
+    for x in rows:
+        k = str(x.get("id") or "")
+        if not k:
+            anon.append(x)
+        elif k not in by_id or str(x.get("time") or "") >= str(by_id[k].get("time") or ""):
+            by_id[k] = x
+    out = sorted([*by_id.values(), *anon], key=lambda x: str(x.get("time") or ""), reverse=True)
+    out = sorted(out, key=lambda x: not x.get("blocking"))               # 稳定排序：阻断在前，组内仍是最新在前
+    seen: set[tuple[bool, str]] = set()
+    uniq = []
+    for x in out:
+        k2 = (bool(x.get("blocking")), issue_plain(x.get("what"), 60))
+        if k2 in seen:
+            continue
+        seen.add(k2)
+        uniq.append(x)
+    return uniq
+
+
+def stepbar_view(pipe: dict, issues: list[dict]) -> dict:
+    """纯函数（tests 用）：pipeline_status 的六步矩阵 + 本剧未关卡点 → 步骤条计数 + 每格（状态 / 一句话 / 负责方 / 卡点）+ 首页“现在”"""
+    by_cell: dict[tuple[int, str], list[dict]] = {}
+    unplaced = 0
+    for i in issues:
+        sid = issue_step(i.get("step"))
+        try:
+            ep = int(i.get("episode"))
+        except (TypeError, ValueError):
+            ep = 0
+        if not sid or ep <= 0:
+            unplaced += 1
+            continue
+        by_cell.setdefault((ep, sid), []).append(i)
+    eps = []
+    for e in pipe.get("episodes") or []:
+        n = int(e["episode"])
+        cells = {}
+        for sid in STEP_IDS:
+            c = dict((e.get("cells") or {}).get(sid) or {"state": "todo", "plain": "还没到这一步"})
+            c.pop("why", None)                                   # sop_gate 原文只给开发者，不进这个接口
+            its = latest_first(by_cell.get((n, sid)) or [])
+            stale = 0
+            if c["state"] == "done":                                    # 已完成的格子不再挂过时的“挡路”（那些单子总调度去关）
+                stale = sum(1 for x in its if x.get("blocking"))
+                its = [x for x in its if not x.get("blocking")]
+            blocking = [x for x in its if x.get("blocking")]            # 已按时间降序：blocking[0] = 最新一条阻断
+            if blocking and c["state"] in ("doing", "blocked"):         # 正在这一步 + 有阻断卡点 = 卡住
+                c["state"] = "blocked"
+                c["block"] = issue_plain(blocking[0].get("what"))        # 格子第二行：卡点一句话（sop_gate 的那句仍是第一行）
+                c["owner"] = owner_label(blocking[0].get("who"))
+            elif blocking and c["state"] == "todo":                     # 还没到这一步，但已知前面有坑：不标红，只提醒
+                c["ahead"] = True
+                c["block"] = "已知要先解决：" + issue_plain(blocking[0].get("what"), 30)
+                c["owner"] = owner_label(blocking[0].get("who"))
+            else:
+                c["owner"] = "" if c["state"] in ("done", "todo") else STEP_OWNER[sid]
+            c.setdefault("ahead", False)
+            c.setdefault("block", "")
+            c["issues"] = [{"id": x.get("id"), "text": issue_plain(x.get("what"), 60), "owner": owner_label(x.get("who")),
+                            "blocking": bool(x.get("blocking")), "at": x.get("time")} for x in its[:5]]
+            c["issues_more"] = max(0, len(its) - 5)
+            c["stale"] = stale
+            cells[sid] = c
+        eps.append({"episode": n, "stage": e.get("stage"), "plain": e.get("plain") or "", "retro": e.get("retro"), "cells": cells})
+    labels = {s["id"]: s["label"] for s in pipe.get("steps") or []}
+    steps = []
+    for sid in STEP_IDS:
+        cnt = {k: sum(1 for e in eps if e["cells"][sid]["state"] == k) for k in ("done", "doing", "blocked", "todo")}
+        steps.append({"id": sid, "label": labels.get(sid, sid), "stages": STEP_STAGES[sid], **cnt})
+    # 首页“现在在哪”：最前面一集还没完成的（有动静的优先），它停在哪一步、一句话
+    live = [e for e in eps if any(e["cells"][s]["state"] in ("doing", "blocked") for s in STEP_IDS)]
+    focus = None
+    if live:
+        f = live[0]
+        sid = next(s for s in STEP_IDS if f["cells"][s]["state"] in ("doing", "blocked"))
+        focus = {"episode": f["episode"], "step": sid, "label": labels.get(sid, sid), "state": f["cells"][sid]["state"],
+                 "plain": f["cells"][sid]["plain"], "block": f["cells"][sid]["block"], "owner": f["cells"][sid]["owner"]}
+    doing = [{"episode": e["episode"], "step": s, "label": labels.get(s, s), "plain": e["cells"][s]["plain"], "owner": e["cells"][s]["owner"]}
+             for e in eps for s in STEP_IDS if e["cells"][s]["state"] == "doing"]
+    blocked = [{"episode": e["episode"], "step": s, "label": labels.get(s, s), "plain": e["cells"][s]["plain"], "block": e["cells"][s]["block"],
+                "owner": e["cells"][s]["owner"],
+                "n_issues": len(e["cells"][s]["issues"]) + e["cells"][s]["issues_more"]}
+               for e in eps for s in STEP_IDS if e["cells"][s]["state"] == "blocked"]
+    return {"run": pipe.get("run"), "title": pipe.get("title"), "episodes_total": pipe.get("episodes_total") or len(eps),
+            "steps": steps, "episodes": eps, "now": {"focus": focus, "doing": doing[:8], "blocked": blocked[:8]},
+            "issues_open": len(issues), "unplaced": unplaced}
+
+
+def stepbar(run: str | None = None) -> dict:
+    key = run or ""
+    hit = _stepbar_cache.get(key)
+    if hit and _time.time() - hit[0] < STEPBAR_TTL_S:
+        return hit[1]
+    pipe = _PSTAT.pipeline_status(run)                                 # 404 / 503 原样抛（sop_gate 读不到不猜）
+    try:
+        issues = open_issues(pipe["run"])
+        issues_err = None
+    except Exception as e:  # noqa: BLE001  卡点表读不到：矩阵照常给，页面写明“卡点读不到”
+        issues, issues_err = [], f"卡点登记读不到：{type(e).__name__}"
+    out = stepbar_view(pipe, issues)
+    out["issues_error"] = issues_err
+    _stepbar_cache[key] = (_time.time(), out)
+    return out
+
+
+router = _APIRouter(tags=["sop-stepbar"])
+
+
+@router.get("/api/sop/stepbar")
+def api_stepbar(run: str | None = None):
+    try:
+        return stepbar(run)
+    except _HTTPException:
+        raise
+
+
+# 注册：app.py 已 include pipeline_status.router（第 208 行附近），本模块在那之前被 import（第 43 行）——
+# 把只读聚合挂到同一个 router 上，不改 app.py（W5 的可改范围只有 sop.py）。以后合并时可改成 app.include_router(SOP.router)。
+_PSTAT.router.include_router(router)

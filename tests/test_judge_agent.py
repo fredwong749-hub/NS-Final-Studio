@@ -153,3 +153,9 @@ def _agent():
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m
+
+
+
+@pytest.fixture(autouse=True)
+def _inbox_tmp(tmp_path, monkeypatch):
+    monkeypatch.setenv("NSFS_INBOX_DIR", str(tmp_path / "inbox_env"))     # 派人请求不碰真实 data/master/

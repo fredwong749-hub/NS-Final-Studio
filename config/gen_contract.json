@@ -41,13 +41,21 @@
   "creamy",
   "soft focus",
   "oily",
-  "glossy skin"
+  "glossy skin",
+  "塑料感",
+  "塑料皮肤",
+  "磨皮",
+  "plastic skin",
+  "airbrushed",
+  "beauty filter"
  ],
  "suffix_banned_note": "I7：旧头 / visual_bible fallback_suffix 里的“奶油般柔焦虚化”“浓郁饱和的暖色调电影调色”“色彩丰富艳丽”会让皮肤发油发糊（项目方批评“油光、假”）。剧本正文里写服装材质的“漆皮光泽”不在此列——只查系统后缀段（提示词最后一个“【场景】”段之后 / 预设后缀位置）与整句“油光落皮肤”类写法",
  "require_ref_lines": true,
  "image_thresholds": {
   "Q1_identity": {
    "lin_wan": 0.7,
+   "lead": 0.7,
+   "_lead": "MERGE-IMG-O 11-03（CARRYOVER 第 10 项）：本剧主角（cast_table.lead_id；V2 = lead_f）的单人身份线，键名不再写死 lin_wan（gen_contract.cards.identity_line：<cid> > lead > default）",
    "default": 0.6,
    "other_floor": 0.4,
    "other_margin": 0.05,
@@ -55,7 +63,8 @@
    "min_face_ratio": 0.04,
    "bank": {"k": 3, "anchor_min": 0.50, "_doc": "身份库 top-k（VQAGATE 11-02，L-098）：有效分 = 锚（L-086）+ 库帧前 k 个平均；锚 < anchor_min 时只用锚。入库：过契约、未驳回、单脸、对 L-086 ≥0.60，正脸 / 侧脸各最多 8 张滚动（tools/identity/bank.py）"}, "bands": {"default": [[0.10, "近中景及以上", 0.60, 0.50], [0.0, "小脸", 0.50, 0.40]]}, "_bands": "K-REV-V18 修订（总调度 11-02 亲审 data/review_pages/q1_band/：0.55–0.70 带 20 张里 19 张是同一林晚，低分来自四分之三侧脸 / 侧脸，03-S2 v14 0.577 脸圆发糊不合格）：林晚等主角 0.70 单线退役，改三段——≥ 通过线过；复核下限到通过线交本地看图与 L-086 左右并排复核（同一人、画风 / 质感、清晰度三项全过）；< 复核下限直接不过。小脸（脸高 < 0.10）下移 0.10。特写暂不另设（没有标定数据支持更严）", "size_tiers": [[0.27, "特写", 0.55], [0.10, "近中景", 0.50], [0.04, "小脸", 0.40]], "_size_tiers": "VQAGATE 11-02 人物一致性闸门（K-REV-V18）：cast 写不露脸 / 本镜没有在画角色、画面里却出了够大的脸时用的分档线（ArcFace buffalo_l 余弦，对 L-086 身份脸）。标定 data/vqa/idgate_calib/：林晚正例 73 张最低 0.669；ep02-S10 换人 3 张 0.240–0.258（GATE_CALIBRATION §15）", "yaw_relax": {"enabled": false, "_enabled": "K-REV-V18 修订（11-02）后由三段判定 + 复核带取代", 
     "characters": [
-     "lin_wan"
+     "lin_wan",
+     "@lead"
     ],
     "tiers": [
      [
@@ -143,10 +152,10 @@
     "_note": "发型锁（只记录，待校准）：裁脸框上 0.8 / 下 1.8 脸高、左右 1.6 脸宽，CLIP 句对"
    }
   },
-  "Q10_accept": {"enabled": true, "count_host": "", "_doc": "VQAGATE 11-02（ALIGNMENT 第 8 步，总调度：出图后验收作为闸门，不再只记录）：tools/vqa/accept.py 四项标签 → Q10，全过才算过。identity = Q1（ArcFace 对 face_of）；outfit = Q2 + Q1a（对造型登记，K-REV-V20）；prompt = 本地 Qwen3-VL 按编译稿核人数 / 左右 / 动作 / 场景；count = anomaly judge（人工回归集 19/19）。count_host 空 = 本机（服务器上 rssh 调本机即本机执行）；检测器 / 看图没跑成 = untested，挡并记 score_infra（只重打分不重出）"},
+  "Q10_accept": {"enabled": true, "count_host": "http://10.0.0.36:8893", "_doc": "VQAGATE 11-02（ALIGNMENT 第 8 步，总调度：出图后验收作为闸门，不再只记录）：tools/vqa/accept.py 四项标签 → Q10，全过才算过。identity = Q1（ArcFace 对 face_of）；outfit = Q2 + Q1a（对造型登记，K-REV-V20）；prompt = 本地 Qwen3-VL 按编译稿核人数 / 左右 / 动作 / 场景；count = anomaly judge（人工回归集 19/19）。count_host 空 = 本机（服务器上 rssh 调本机即本机执行）；检测器 / 看图没跑成 = untested，挡并记 score_infra（只重打分不重出）"},
   "Q1d_anomaly": {"enabled": false, "host": "gpu36", "timeout_s": 120, "_doc": "VQAGATE 11-02 Q1d（总调度：detector 先记日志、不拦，亲审命中样本 + 标定后再阻断）：接 tools/vqa/anomaly.py check()。默认关：anomaly.check 走 rssh 连 gpu36，gpu33 的 producer 没有到 gpu36 的密钥；要先给检测器服务器上能直达的入口。开了也只写 Q1d 项（status 恒 na），判定在 evidence.verdict"},
   "Q1x_scene": {"enabled": true, "k": 3, "pass": 0.6, "review_min": 0.5, "small_face": 0.1, "_doc": "VQAGATE 11-02 Q1x（总调度批准，阈值暂定、每周随首帧增多重算）：同场其他镜头当前首帧同一角色脸取最像 3 张余弦平均。标定（GATE_CALIBRATION §20）：林晚同场跨镜两两 1656 对最低 0.614 / 1% 分位 0.662，取最像 3 张平均最低 0.790；ep02-S10 换人对同场林晚 0.239–0.318。< review_min 不过；review_min–pass 记复核带只记录；小脸两线各降 0.10"},
-  "Q1a_attr": {"enabled": true, "cards": {"lin_wan": {"name": "林晚", "blue_min": 0.2, "min_hair_px": 0.15, "gender": "女", "hair_colors": ["蓝", "灰银"], "hair_lengths": ["长", "及肩"]}, "gu_chen": {"name": "顾沉", "hair_short": true, "below_max": 0.15, "blue_max": 0.45, "gender": "男", "hair_colors": ["黑", "棕"], "hair_lengths": ["短"]}, "chen_yu": {"name": "陈宇", "hair_short": true, "below_max": 0.15, "blue_max": 0.45, "gender": "男", "hair_colors": ["黑", "棕"], "hair_lengths": ["短"]}}, "_doc": "VQAGATE 11-02 P0（K-REV-V19）：逐人头发属性。确定性：MediaPipe selfie_multiclass 分割 + 头顶连通域，hair_blue = 头发蓝色占比、below = 下巴以下头发面积 / 脸框面积。标定 106 张（GATE_CALIBRATION §18）：男性 below 正常最高 0.026 / 长发最低 0.266 → 0.15；男性 hair_blue 正常最高 0.266（冷光黑发）/ 蓝发最低 0.577 → 0.45；林晚 hair_blue 正常最低 0.317 / 灰银发 0.052 → 0.20。6 错例全拦、184 张正常零误拦（样本内）。VLM 逐人问答见 hair_colors / hair_lengths / gender / nails_ok（雾霾蓝看图可能答灰银，林晚两种都收；林晚指甲看图误报多（ep06-S8 长透明甲答成短闪片甲），不判；男性长美甲记日志、不拦：ep06-S8 看图把旁边林晚的手算到顾沉身上（误报），ep06-S1 v8 靠发色 / 发长已拦）。分割不可用（gpu33 未装 mediapipe）时由看图逐人问答单独判，q1a_mode=vlm_only 并报警"},
+  "Q1a_attr": {"enabled": true, "cards_by_run": {}, "_cards_by_run": "MERGE-IMG-O 11-03（ISS-1103-024206-c8c0）：cards 只给旧剧（V1）；资产包模式的剧人物卡由 gen_contract/cards.py 从本剧 P1 人物表（gender / zh_look 发色发长）+ 清单角色自动生成，阈值沿用 §18 标定；cards_by_run.<剧>.<cid> 逐项覆盖", "cards": {"lin_wan": {"name": "林晚", "blue_min": 0.2, "min_hair_px": 0.15, "gender": "女", "hair_colors": ["蓝", "灰银"], "hair_lengths": ["长", "及肩"]}, "gu_chen": {"name": "顾沉", "hair_short": true, "below_max": 0.15, "blue_max": 0.45, "gender": "男", "hair_colors": ["黑", "棕"], "hair_lengths": ["短"]}, "chen_yu": {"name": "陈宇", "hair_short": true, "below_max": 0.15, "blue_max": 0.45, "gender": "男", "hair_colors": ["黑", "棕"], "hair_lengths": ["短"]}}, "_doc": "VQAGATE 11-02 P0（K-REV-V19）：逐人头发属性。确定性：MediaPipe selfie_multiclass 分割 + 头顶连通域，hair_blue = 头发蓝色占比、below = 下巴以下头发面积 / 脸框面积。标定 106 张（GATE_CALIBRATION §18）：男性 below 正常最高 0.026 / 长发最低 0.266 → 0.15；男性 hair_blue 正常最高 0.266（冷光黑发）/ 蓝发最低 0.577 → 0.45；林晚 hair_blue 正常最低 0.317 / 灰银发 0.052 → 0.20。6 错例全拦、184 张正常零误拦（样本内）。VLM 逐人问答见 hair_colors / hair_lengths / gender / nails_ok（雾霾蓝看图可能答灰银，林晚两种都收；林晚指甲看图误报多（ep06-S8 长透明甲答成短闪片甲），不判；男性长美甲记日志、不拦：ep06-S8 看图把旁边林晚的手算到顾沉身上（误报），ep06-S1 v8 靠发色 / 发长已拦）。分割不可用（gpu33 未装 mediapipe）时由看图逐人问答单独判，q1a_mode=vlm_only 并报警"},
   "Q3_framing": {
    "bands": [
     0.45,

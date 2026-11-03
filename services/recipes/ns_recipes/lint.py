@@ -106,11 +106,42 @@ STAMP_RE = re.compile(r"\bAt (\d{1,2}):(\d{2}(?:\.\d{1,3})?),\s*")
 STAMP_NL_RE = re.compile(r"\bAt the (\d{1,2}(?:\.\d{1,2})?)-second mark,\s*")
 
 
+# L-141（项目方 11-03 03:2x 拍板 ISS-6b8d：按官方写法来）：`At MM:SS.mmm` 只用于切镜（`[Shot N] At 00:03.500, the camera cuts to…`，
+# base-en §4.2）；镜内分拍改写自然英文的时间顺序：第一拍 “In the first two seconds, …”，之后每拍 “Then, around the third second, …”
+# （序数 = 该拍起点所在的第几秒，起点 t0 → 第 ⌊t0⌋+1 秒），最后一拍写到 “… as the shot ends”。
+ORDINALS = {w: i for i, w in enumerate(("first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth",
+                                        "tenth", "eleventh", "twelfth", "thirteenth", "fourteenth", "fifteenth"), 1)}
+NUM_WORDS = {w: i for i, w in enumerate(("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"), 1)}
+_ORD = r"(" + "|".join(ORDINALS) + r"|\d{1,2}(?:st|nd|rd|th))"
+NL_BEAT_RE = re.compile(r"\b(?:[Tt]hen,?\s+)?(?:[Aa]round|[Bb]y)\s+the\s+" + _ORD + r"\s+second\b,?\s*")
+NL_FIRST_RE = re.compile(r"\b[Ii]n the first (" + "|".join(NUM_WORDS) + r"|\d{1,2}(?:\.\d)?) seconds?\b,?\s*")
+CUT_RE = re.compile(r"\[Shot (\d+)\]\s*At (\d{1,2}):(\d{2}(?:\.\d{1,3})?),")
+BEAT_MARK_PAT = (r"\bAt (?:\d{1,2}:\d{2}|the \d)|\b(?:[Tt]hen,?\s+)?(?:[Aa]round|[Bb]y)\s+the\s+" + _ORD + r"\s+second\b")
+
+
+def _ord(s: str) -> int:
+    s = s.lower()
+    return ORDINALS.get(s) or int(re.match(r"\d+", s).group(0))
+
+
+def nl_beats(text: str) -> list[tuple[int, int, float]]:
+    """镜内自然语言分拍标记 → [(start, end, 该拍起点秒 = 序数 − 1)]"""
+    return [(m.start(), m.end(), float(_ord(m.group(1)) - 1)) for m in NL_BEAT_RE.finditer(text)]
+
+
 def find_stamps(text: str) -> list[tuple[int, int, float]]:
-    """→ [(start, end, 秒)]：两种分拍写法都认（官方时间码 `At 00:SS.mmm,` / 自然语言 `At the N-second mark,`）"""
+    """→ [(start, end, 秒)]：拍界都认——自然语言分拍（L-141 现行）、`At 00:SS.mmm,`（切镜；V1 旧稿镜内也这么写）、`At the N-second mark,`"""
     out = [(m.start(), m.end(), int(m.group(1)) * 60 + float(m.group(2))) for m in STAMP_RE.finditer(text)]
     out += [(m.start(), m.end(), float(m.group(1))) for m in STAMP_NL_RE.finditer(text)]
+    out += nl_beats(text)
     return sorted(out)
+
+
+def in_shot_timecodes(text: str) -> list[str]:
+    """不在 `[Shot N]` 后面的 `At MM:SS.mmm` / `At the N-second mark`（L-141：镜内不许用 At 时间码）"""
+    cut_pos = {m.start(2) - 3 for m in CUT_RE.finditer(text)}
+    bad = [m.group(0).strip() for m in STAMP_RE.finditer(text) if m.start() not in cut_pos]
+    return bad + [m.group(0).strip() for m in STAMP_NL_RE.finditer(text)]
 
 
 GAZE_RE = re.compile(r"\b(eyes?|gaze[sd]?|gazing|look(?:s|ed|ing)?|glanc\w*|eyeline|star(?:e|es|ed|ing)|watch\w*|"
@@ -167,7 +198,7 @@ def lint_timeline(text: str, duration: float, *, sexes: list[str] | None = None,
     body = (m.group(1) if m else text or "").strip()
     stamps = [x[2] for x in find_stamps(re.sub(r"<d>.*?</d>", "", body, flags=re.S))]
     if not stamps:
-        out.append(_issue(lv, "RL-T1", f"正文没有按秒分拍（{duration:.2f}s 镜头应每 1.5–2 秒一个 `At 00:SS.mmm,`）"))
+        out.append(_issue(lv, "RL-T1", f"正文没有按秒分拍（{duration:.2f}s 镜头应每 1.5–2 秒一拍：In the first two seconds, … Then, around the third second, …；L-141）"))
     else:
         if any(b <= a for a, b in zip(stamps, stamps[1:])) or stamps[0] <= 0:
             out.append(_issue(lv, "RL-T1", f"分拍时间不是严格递增或从 0 开始：{stamps}"))
@@ -223,7 +254,114 @@ def timeline_for_spec(text: str, spec, frames: int, fps: int = 24, strict: bool 
     sexes = [s for s in (_sex(c.en_phrase) for c in (spec.faces if spec is not None else [])) if s]
     slow_ok = bool(spec is not None and spec.camera.speed == "slow")
     faces = spec is None or bool(spec.faces)
-    return lint_timeline(text, frames / fps, sexes=sexes, strict=strict, allow_slow=slow_ok, faces=faces)
+    out = lint_timeline(text, frames / fps, sexes=sexes, strict=strict, allow_slow=slow_ok, faces=faces)
+    if spec is not None and strict:      # L-141 的拍序 / 切镜规则只对 strict（V2 / 新剧）生效，V1 旧稿不动
+        out += timeline_alignment(text, spec, strict=strict)
+    return out
+
+
+# ---------------------------------------------------------------------------------------------
+# TIMELINE-O 11-03 / L-141（项目方 03:2x 拍板 ISS-6b8d：按官方写法来）：
+# 官方 base-en §4.2 “Do not add a timestamp to the first shot… begin each one with a strictly increasing cut time”——
+# `At MM:SS.mmm` 只用于切镜（`[Shot N] At …, the camera cuts to …`）。镜内分拍用自然英文写时间顺序，
+# 拍序 / 拍数必须和剧本 **分拍** 一一对上（RL-T8）；镜内出现 At 时间码、切镜缺 At 或不递增（RL-T9）。
+# ---------------------------------------------------------------------------------------------
+from ns_schema.shot_spec import ALIGN_TOL_S  # noqa: E402,F401  写手包同一份常量（自然语言序数按秒取整，对齐容差见 NL_TOL_S）
+NL_TOL_S = 1.0     # “around the third second” = 第 3 秒（2–3 s）；该拍起点与序数所指秒的起点相差 ≤ 1 秒
+NEXT_CUT_RE = re.compile(r"\[Shot (\d+)\](?!\s*At \d{1,2}:\d{2})")
+
+
+def h3_body(text: str) -> str:
+    m = re.search(r"(?:integrated_multimodal_description|detailed_description):\s*(.*?)(?=^\s*overall_soundscape:|\Z)",
+                  text or "", re.S | re.M)
+    return (m.group(1) if m else text or "").strip()
+
+
+def _ord_word(t0: float) -> str:
+    k = int(t0) + 1
+    return next((w for w, i in ORDINALS.items() if i == k), f"{k}th")
+
+
+def nl_example(beats) -> str:
+    """按 **分拍** 生成的拍序示例（写手包 / 报错提示用）"""
+    if not beats:
+        return ""
+    first = beats[0].t1
+    n = next((w for w, i in NUM_WORDS.items() if i == round(first)), f"{first:g}")
+    return " … ".join([f"In the first {n} seconds, …"] + [f"Then, around the {_ord_word(b.t0)} second, …" for b in beats[1:]]
+                      + ["… as the shot ends."])
+
+
+def cut_issues(body: str, lv: str) -> list[dict]:
+    """RL-T9：镜内不许有 At 时间码；`[Shot N≥2]` 必须以 `At MM:SS.mmm,` 开头，时间严格递增（官方 §4.2）"""
+    out = []
+    bad = in_shot_timecodes(body)
+    if bad:
+        out.append(_issue(lv, "RL-T9", f"镜内用了 At 时间码 {bad[:3]}（L-141：At MM:SS.mmm 只用于切镜，镜内分拍写 In the first … / Then, around the … second）"))
+    for m in NEXT_CUT_RE.finditer(body):
+        if int(m.group(1)) >= 2:
+            out.append(_issue(lv, "RL-T9", f"[Shot {m.group(1)}] 切镜没写 `At MM:SS.mmm,`（官方 §4.2）"))
+    cuts = [int(m.group(2)) * 60 + float(m.group(3)) for m in CUT_RE.finditer(body)]
+    if any(b <= a for a, b in zip(cuts, cuts[1:])) or (cuts and cuts[0] <= 0):
+        out.append(_issue(lv, "RL-T9", f"切镜时间不是严格递增：{cuts}"))
+    return out
+
+
+def timeline_alignment(text: str, spec, strict: bool = True) -> list[dict]:
+    """RL-T8（L-141）：H3 镜内自然语言分拍 ↔ 剧本 **分拍**：第一拍 “In the first N seconds”（N ≈ 第一拍止），
+    之后每拍 “around / by the <序数> second”，个数 = 分拍数 − 1、序数严格递增、所指秒起点与该拍 t0 相差 ≤ NL_TOL_S；
+    最后一拍写到 “as the shot ends”。外加 RL-T9 切镜规则。剧本没写 **分拍** / H3 没有分拍 = 缺时间轴"""
+    lv = "error" if strict else "warn"
+    beats = sorted(getattr(getattr(spec, "motion", None), "beats", None) or [], key=lambda b: b.t0)
+    body = re.sub(r"<d>.*?</d>", " ", h3_body(text), flags=re.S)
+    if not beats:
+        return [_issue(lv, "RL-T8", f"缺时间轴：剧本没有 **分拍**（{spec.duration_s:g}s 镜头每 1.5–2 秒一拍，动作 / 运镜 / 视线 / 表情都写起止）")]
+    out = cut_issues(body, lv)
+    marks = nl_beats(body)
+    want = [b.t0 for b in beats[1:]]
+    fm = NL_FIRST_RE.search(body)
+    if not marks and not fm:
+        return out + [_issue(lv, "RL-T8", f"缺时间轴：H3 正文没有按 **分拍** 写镜内时间顺序（{len(beats)} 拍，应写：{nl_example(beats)}）")]
+    if not fm or (marks and fm.start() > marks[0][0]):
+        out.append(_issue(lv, "RL-T8", f"第一拍没写 “In the first … seconds,”（应写：{nl_example(beats)}）"))
+    else:
+        g = fm.group(1).lower()
+        n = NUM_WORDS.get(g) or float(g)
+        if abs(n - beats[0].t1) > NL_TOL_S + 1e-6:
+            out.append(_issue(lv, "RL-T8", f"第一拍写 In the first {g} seconds，**分拍** 第一拍到 {beats[0].t1:g} 秒"))
+    ts = [x[2] for x in marks]
+    if len(ts) != len(want):
+        out.append(_issue(lv, "RL-T8", f"H3 镜内分拍 {len(ts) + 1} 拍，**分拍** {len(beats)} 拍（应写：{nl_example(beats)}）"))
+    else:
+        if any(b <= a for a, b in zip(ts, ts[1:])):
+            out.append(_issue(lv, "RL-T8", f"镜内分拍序数不是严格递增：{[int(t) + 1 for t in ts]}"))
+        bad = [(a, b) for a, b in zip(ts, want) if abs(a - b) > NL_TOL_S + 1e-6]
+        if bad:
+            out.append(_issue(lv, "RL-T8", "镜内分拍和 **分拍** 起点对不上：" + "；".join(
+                f"around the {_ord_word(a)} second ↔ 分拍 {b:g}s（应写 {_ord_word(b)}）" for a, b in bad)))
+    tail = body[marks[-1][1]:] if marks else body
+    if "as the shot ends" not in tail:
+        out.append(_issue(lv, "RL-T8", "最后一拍没写到 “… as the shot ends”"))
+    return out
+
+
+def missing_timeline(text: str, spec) -> str | None:
+    """编译用（失败关闭）：缺时间轴 / 与分拍对不上 → 原因；齐了 → None"""
+    iss = [i for i in timeline_alignment(text, spec, strict=True) if i["level"] == "error"]
+    return "；".join(i["message"] for i in iss) or None
+
+
+def timeline_gate(spec) -> list[dict]:
+    """导入闸门 / 补丁环用：本镜 H3 时间轴全部 strict 检查（RL-T1–T7 + RL-T8 对齐），只返回 error。
+    只对 rules_at_least(spec, 2)（V2 / 新剧且稿件 ≥ sysimpl-v2）的镜头生效"""
+    from ns_schema.shot_spec import rules_at_least
+    if not rules_at_least(spec, 2):
+        return []
+    text = (spec.h3.text or "") if getattr(spec, "h3", None) else ""
+    if not text.strip():
+        return []      # 缺 H3 由 SS-H1 报
+    out = timeline_for_spec(text, spec, spec.frames, 24, strict=True)
+    return [i for i in out if i["level"] == "error"]
 
 
 # ACTING 11-01（项目方 R11-9 原话：“当画面出现超过一个人,第二个等,他们面部表情,眼神是没有,这是剧本提示词的错误,写入剧本镜头规则
@@ -271,7 +409,8 @@ def lint_people_eyeline(text: str, spec, p: dict) -> list[dict]:
         out.append(_issue("error", "RL-E3", f"编译稿含朝向镜头的系统句：“{fc.group(0)}”（K-REN-702：首帧 / 正文朝镜头 → 片头看镜头 49/54）"))
     # VIDEO-RCA r4（K-WRT-704 编译层）：在画人物穿外层衣物 + 分拍里有全身姿态切换（坐→站…）→ warn RL-P1，
     # 计划里标“建议拆镜”：这一镜停在准备起身，下一镜从站定开始（编译器不改镜头结构，交写作方 / DIRECTOR cut_plan）
-    beats_txt = body[body.find("At 00:"):] if "At 00:" in body else ""
+    _bm = re.search(BEAT_MARK_PAT, body)       # 第一个拍界（L-141 自然语言 / 旧稿 At 00:）之后 = 分拍动作段
+    beats_txt = body[_bm.start():] if _bm else ""
     if POSE_CHANGE_RE.search(beats_txt) and OUTER_EN_RE.search(body.split(". ", 1)[0]):
         out.append(_issue("warn", "RL-P1", f"穿外层衣物的人在本镜做“{POSE_CHANGE_RE.search(beats_txt).group(0)}”：外套会变形（VIDEO-RCA 10/10），"
                                            "建议拆成站定起始的下一镜（K-WRT-704 / QW-W12）"))

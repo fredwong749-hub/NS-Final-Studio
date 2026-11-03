@@ -199,31 +199,52 @@ def _job_view(n: int) -> dict | None:
     return {k: v for k, v in j.items() if k != "proc"} | {"log_tail": tail}
 
 
+CODE = Path(__file__).resolve().parents[3]   # 代码根（P.ROOT 可被 NS_PROJECT_ROOT 指到别处）
+
+
+def _asset_pack_run() -> str | None:
+    """当前剧是资产包模式（V2）→ 剧名；V1 / 判不了 → None。按剧取配乐 / 音色的唯一入口 ns_post.run_media（同 cut_project）"""
+    from ns_api import cut_project as CP   # noqa: PLC0415
+    from ns_api import run_paths as RP     # noqa: PLC0415
+    run = RP.current_run(P.ROOT)
+    return run if CP._rm().is_asset_pack_run(run, P.ROOT) else None
+
+
 def _command(n: int, variant: str, body: CutBody) -> list[str]:
+    """V2（资产包模式）：tools/assemble_series.py → build → compose（配乐 / 音色走 run_media，只认 music_v2 / voices_v2，
+    不碰 V1 的 data/music/series10 和 voices.json；产物写当前剧的 renders/epNN/_final）。
+    V1：照旧 tools/assemble_episode.py（V1 已冻结，行为不变）。"""
+    if _asset_pack_run():
+        cmd = [sys.executable, str(CODE / "tools" / "assemble_series.py"), f"ep{n:02d}", "--variant", variant]
+        if body.dialogue_source in ("tts", "h3"):   # assemble_series 只收 tts / h3；“自动”= 它的默认（h3 回听不合格整镜 TTS 兜底）
+            cmd += ["--dialogue-source", body.dialogue_source]
+        return cmd
     cmd = [sys.executable, str(P.ROOT / "tools" / "assemble_episode.py"), f"ep{n:02d}", "--variant", variant]
     if body.dialogue_source:
         cmd += ["--dialogue-source", body.dialogue_source]
     return cmd
 
 
-@router.post("/api/episodes/{n}/cut-job")
+@router.post("/api/episodes/{n}/cut-job", status_code=202)
 def start_cut(n: int, body: CutBody | None = None):
+    """合成新版本：先收下（202，立即返回任务），后台子进程合成；同一集已在合成 → 原样返回那个任务（不重复起、不退回）"""
     b = body or CutBody()
     if b.dialogue_source not in (None, "tts", "h3", "auto"):
         raise HTTPException(422, "dialogue_source 只能是 tts | h3 | auto")
     with _lock:
         cur = _job_view(n)
         if cur and cur["state"] == "running":
-            raise HTTPException(409, f"第 {n} 集正在合成（{cur['variant']}），等它跑完")
+            return cur
         variant = "UI" + time.strftime("%m%d-%H%M%S")
         logs = P.DATA / "logs"
         logs.mkdir(parents=True, exist_ok=True)
         log = logs / f"cut_ep{n:02d}_{variant}.log"
         cmd = _command(n, variant, b)
         fh = open(log, "w", encoding="utf-8")  # noqa: SIM115 — 子进程写完由系统关
-        proc = subprocess.Popen(cmd, cwd=str(P.ROOT), stdout=fh, stderr=subprocess.STDOUT)
+        proc = subprocess.Popen(cmd, cwd=str(CODE), stdout=fh, stderr=subprocess.STDOUT)
         JOBS[n] = {"episode": n, "variant": variant, "state": "running", "started_at": P.now(), "finished_at": None,
-                   "by": b.by or "canvas", "cmd": cmd[1:], "log": str(log), "proc": proc}
+                   "by": b.by or "canvas", "cmd": cmd[1:], "log": str(log), "proc": proc,
+                   "engine": "compose" if cmd[1].endswith("assemble_series.py") else "assemble_episode"}
         return _job_view(n)
 
 

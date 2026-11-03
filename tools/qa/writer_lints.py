@@ -197,7 +197,7 @@ def check_shot(sh, ep, img: str, size: str | None, fields: dict | None = None) -
             out.append(_issue("QW-W13", f"{'、'.join(part_people)} 在 cast 里写局部（不露脸），但" +
                               (f"景别「{size}」会拍到脸" if wide else f"结束状态写到「{endface.group(0)}」") +
                               "：要露脸就把 cast 改成“在画”；不露脸就写局部特写（只拍手 / 腰）或背影，结束状态也不写脸", "cast"))
-    # QW-W14（K-WRT-212，fb-0004 ep04-S10：视线落在“窗玻璃上自己的倒影”→ 画面多出一个陈宇）：两人以上在画的镜头不写倒影 / 映出
+    # QW-W14（K-WRT-212，fb-0004 ep04-S10：视线落在“窗玻璃上自己的倒影”→ 画面多出一个同角色）：两人以上在画的镜头不写倒影 / 映出
     if len(on) >= 2 and re.search(r"倒影|映出|映着|镜中|镜里", (img or "") + (getattr(sh, "motion_prompt", None) or "")):
         out.append(_issue("QW-W14", "两人以上在画的镜头写了倒影 / 映出：生成模型会把倒影画成多出来的真人；视线落点改成实物（窗外、床沿、手机）", "img"))
     # QW-W11 对身上正穿着的衣服做整理动作（K-WRT-702）：分拍字段 + H3 正文的分拍段（At 00:0x 之后）

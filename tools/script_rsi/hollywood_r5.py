@@ -178,6 +178,16 @@ def fact_drift_lint(orig: str, cand: str) -> list[str]:
     return out
 
 
+SOFT_CHECKS = ("I7", "I8")      # 只报告、不作废：I7 P4 阻断由补丁环 / 导入闸门自己判，I8 report_only（K211-F 11-03：hard 口径单一来源）
+
+
+def hard_checks(g: dict, auto_fixable: tuple = ()) -> list[dict]:
+    """gate5 结果里让候选稿作废的失败项（REVIEW-A P0：autoflow_agent.post_step 与 r5 轮回同一口径）。
+    auto_fixable = 调用方自己有一轮代码 / 格式修复能处理的码（r5 的 format_repair 管 I6 / W11），不算硬"""
+    skip = set(SOFT_CHECKS) | set(auto_fixable)
+    return [x for x in g.get("checks") or [] if not x.get("ok") and not x.get("report_only") and x.get("id") not in skip]
+
+
 def gate5(pre, orig, cand, ep, base_lint, wd, facts=None, fact_client=None) -> dict:
     g = H.gate(pre, orig, cand, ep, base_lint, wd)
     A = H.episode_obj(pre, orig, ep, wd)
@@ -436,7 +446,7 @@ def run_episode(a) -> int:
                 fix = [x for x in fix if x not in H.EPISODE_CODES]
                 force = [f"ep{ep:02d}-S{m.group(1)}=QW-W5:{x.split('：', 1)[-1][:200]}" for x in (g.get("lint") or {}).get("shot_block", [])
                          for m in [re.search(r"\[QW-W5\] 镜(\d+)", x)] if m]
-                hard = [x["id"] for x in g["checks"] if not x["ok"] and x["id"] not in ("I6", "I7", "W11")]
+                hard = [x["id"] for x in hard_checks(g, auto_fixable=("I6", "W11"))]     # I6 / W11 先交 format_repair 修一轮，不算硬（口径同 autoflow_agent）
                 if not g["ok"] and not hard and (fix or force):
                     guard()
                     c = H.format_repair(pre, c, ep, fix, writers[i], wd, f"r{r}d{i}", force)
@@ -776,15 +786,45 @@ def numbered_lines(chunk: str) -> list[tuple[int, int, str]]:
     return out
 
 
+HEAD_LOOK_KEY = re.compile(r"^(?:L)?造型｜(.+)$")
+
+
+def head_look_lines(chunk: str) -> dict[str, tuple[int, str]]:
+    """集头里的人物造型行：{人名: (在 chunk 里的下标, 原文)}（总调度 11-02：补丁可以改这些行，其余集头仍逐字）"""
+    seg = RL.segment(chunk)
+    start = seg["shots"][0][1] if seg["shots"] else len(seg["lines"])
+    out = {}
+    for i in range(start):
+        t = seg["lines"][i].rstrip("\n")
+        m = re.match(r"^\*\*造型｜([^*]+)\*\*：", t)
+        if m:
+            out[m.group(1).strip()] = (i, t)
+    return out
+
+
 def apply_patches(chunk: str, patches: list, nl) -> tuple[str | None, list, str]:
     by = {n: (i, t) for n, i, t in nl}
+    looks = head_look_lines(chunk)
     lines = RL.segment(chunk)["lines"]
     changed = []
     if not patches or len(patches) > 14:
         return None, [], f"补丁条数 {len(patches or [])}（应为 1–14）"
     for pch in patches:
+        key = pch.get("line")
+        m = HEAD_LOOK_KEY.match(str(key).strip()) if isinstance(key, str) and not str(key).strip().lstrip("L").isdigit() else None
+        if m:                                           # 集头人物造型行：line 写 "造型｜<人名>"，新文本必须仍以 **造型｜<人名>**： 开头
+            name = m.group(1).strip()
+            if name not in looks:
+                return None, [], f"集头没有「造型｜{name}」这一行（有：{'、'.join(looks) or '无'}）"
+            new = str(pch.get("new"))
+            i, old = looks[name]
+            if "\n" in new or not new.startswith(f"**造型｜{name}**："):
+                return None, [], f"造型｜{name} 的新文本必须以 **造型｜{name}**： 开头、单行"
+            lines[i] = new + "\n"
+            changed.append({"line": f"造型｜{name}", "old": old, "new": new})
+            continue
         try:
-            n, new = int(pch.get("line")), str(pch.get("new"))
+            n, new = int(str(key).strip().lstrip("L")), str(pch.get("new"))
         except (TypeError, ValueError):
             return None, [], f"补丁格式不对：{pch}"
         if n not in by:
@@ -792,7 +832,7 @@ def apply_patches(chunk: str, patches: list, nl) -> tuple[str | None, list, str]
         if "\n" in new or not new.strip():
             return None, [], f"行 {n} 的新文本不能为空或含换行"
         i, old = by[n]
-        if old.startswith("**镜") and new.split("｜")[0] != old.split("｜")[0]:
+        if re.match(r"\*\*镜\d+｜", old) and new.split("｜")[0] != old.split("｜")[0]:      # 22:34：原来 startswith("**镜") 把 **镜头运动** 行也当成标题行
             return None, [], f"行 {n} 是镜头标题行，镜号不能改"
         lines[i] = new + "\n"
         changed.append({"line": n, "old": old, "new": new})
@@ -841,7 +881,7 @@ def user_patch(ep, pre, chunk, facts, targets, note="") -> str:
              "【镜头区，逐行编号（L 行号｜原文）】", *[f"L{n}｜{t}" for n, _, t in nl], "",
              "【本次只修这 1–2 条清单条目】", *tg, "",
              "只输出一个 ```json：{\"patches\": [{\"line\": 行号, \"new\": \"这一行的完整新文本\"}]}；只改为满足上面条目所必需的行（1–14 行），"
-             "每行整行替换、保留原来的字段标签（如 **分拍**：、**对白**：、H3 里的 At 00:0X 时间码）；台词说话人和条数不变。"]
+             "每行整行替换、保留原来的字段标签（如 **分拍**：、**对白**：、H3 里的分拍标记 In the first … / Then, around the … second；L-141 起镜内不写 At 时间码）；台词说话人和条数不变。"]
     if note:
         parts += ["", f"上一次的补丁没有被采用：{note}"]
     return "\n".join(parts)
@@ -956,7 +996,9 @@ def cmd_jobs_dry(a) -> int:
     cur = next(e for e in si.episodes if e.number == ep)
     cand = next(e for e in import_script(Path(a.file)).episodes if e.number == ep)
     g = si.globals
-    proj = "series10_v1"
+    sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+    import runs as RUNS
+    proj = RUNS.legacy_run(ROOT)      # I-16：IJ.load_import() 读的就是 legacy run 的导入稿，取景口径跟它同一部剧（不写死剧名）
     cs, ns = {s.id: s for s in cur.shots}, {s.id: s for s in cand.shots}
     rows = []
     for sid in sorted(set(cs) | set(ns), key=lambda x: int(x.split("-S")[1])):

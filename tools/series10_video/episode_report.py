@@ -16,7 +16,12 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).parent))
 from report import contract  # noqa: E402
 
-VID = ROOT / "data/pipeline/runs/series10_v1/video"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import run_ctx as RC  # noqa: E402
+
+RUN_ID = RC.resolve()                    # MERGE-VID-O：按剧（night 传 NS_RUN）
+VID = RC.vid_dir(RUN_ID)
+_SUB = "" if RC.is_legacy(RUN_ID) else f"{RUN_ID}/"     # 非 V1 的审阅文档 / 页面放本剧子目录，不覆盖 V1
 # K-REV-302：项目方授权的是“预览”不是“成片”。闸门全过的镜只能叫“预览·V6/V7 未测”，不得写“契约通过”
 LABEL = {"done": "预览", "best_effort": "未达契约（尽力版，不进合成）", "waiting_frame": "等首帧", "blocked": "阻断"}
 CAUSE = {"身份偏离": "身份：首帧路线跟首帧身份走（K-REN-R04）/ Ref2VA 男角弱（K-REN-301）→ 阶梯 r24 → alt",
@@ -30,7 +35,7 @@ def main(ep: int, host: str, ver: str = "v1"):
     st = json.loads((VID / f"state_{host}.json").read_text(encoding="utf-8"))
     man = json.loads((VID / "episodes" / f"ep{ep:02d}" / "manifest.json").read_text(encoding="utf-8")) \
         if (VID / "episodes" / f"ep{ep:02d}" / "manifest.json").exists() else {"shots": []}
-    final = ROOT / f"data/episodes/series10/ep{ep:02d}_{ver}.mp4"
+    final = RC.episodes_out(RUN_ID) / f"ep{ep:02d}_{ver}.mp4"
     shots = sorted(((sid, r) for sid, r in st["shots"].items() if int(sid[2:4]) == ep), key=lambda kv: int(kv[0].split("-S")[1]))
     fails = Counter()
     n_pass = n_be = n_wait = renders = 0
@@ -73,10 +78,10 @@ def main(ep: int, host: str, ver: str = "v1"):
           f" / {n_pass}/{len(shots)}", "", "## 问题与根因（按不合格项计数）", ""]
     L += [f"- {k} × {v}：{CAUSE.get(k, '—')}" for k, v in fails.most_common()] or ["- 无"]
     L += ["", "## 未测项", "", "- V6 / V7：检测器接上前打分的镜为“未测”；V8 只测了景别，造型未测；发色只记录（K-REV-303）", ""]
-    doc = ROOT / f"docs/series10_video/ep{ep:02d}_review.md"
+    doc = ROOT / f"docs/series10_video/{_SUB}ep{ep:02d}_review.md"
     doc.parent.mkdir(parents=True, exist_ok=True)
     doc.write_text("\n".join(L + body) + "\n", encoding="utf-8")
-    page = ROOT / f"data/review_pages/series10_video/ep{ep:02d}/index.html"
+    page = ROOT / f"data/review_pages/series10_video/{_SUB}ep{ep:02d}/index.html"
     page.parent.mkdir(parents=True, exist_ok=True)
     if final.exists():
         shutil.copy2(final, page.parent / final.name)

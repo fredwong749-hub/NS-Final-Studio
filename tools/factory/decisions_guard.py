@@ -41,6 +41,12 @@ def _bad_json(p: Path) -> str | None:
 def run_id(root: Path) -> str | None:
     """现行主剧：§10 起 run.json 在 data/state/pipeline/run.json（兼容期旧位置 config/pipeline/run.json 也认，读旧会留痕）"""
     import importlib.util
+    try:                                   # PRODMERGE-O 11-03：当前剧只认 runs.json 的 primary（run.json 是派生指针，只在没有登记表时兜底）
+        reg = json.loads((Path(root) / "config/pipeline/runs.json").read_text(encoding="utf-8"))
+        if reg.get("primary"):
+            return str(reg["primary"]).strip()
+    except (OSError, ValueError):          # arch-ok: 没有登记表 → 走下面的旧读法
+        pass
     try:
         spec = importlib.util.spec_from_file_location("ns_state_paths_dg", Path(__file__).resolve().parent / "state_paths.py")
         m = importlib.util.module_from_spec(spec)

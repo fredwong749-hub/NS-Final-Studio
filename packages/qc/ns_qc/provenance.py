@@ -13,10 +13,15 @@ from .thresholds import judge, judge_bool
 
 def current_bible_version(root: Path) -> tuple[str | None, str]:
     p = root / "data" / "state_timeline.json"
+    try:                                        # V2CUT-O 11-03：状态表按当前剧取（V2 = data/import/runs/<run>/）
+        from ns_agent.run_paths import timeline_json  # type: ignore
+        p = timeline_json(root)
+    except Exception:  # noqa: BLE001  — 没有 ns_agent（gpu3 侧）：用旧位置
+        pass
     try:
         v = json.loads(p.read_text(encoding="utf-8")).get("bible_version")
         if v:
-            return v, "data/state_timeline.json bible_version"
+            return v, f"{p.name} bible_version"
     except (OSError, ValueError):
         pass
     try:  # laptop helper (same function gpu3 stamps with)

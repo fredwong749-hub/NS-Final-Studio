@@ -55,6 +55,13 @@ def test_agent_gate_wiring():
     assert "if not ep_gate(run_dir, ep, st):" in ag and "awaiting_owner_p1" in ag
 
 
+@pytest.fixture(autouse=True)
+def _inbox_tmp(tmp_path, monkeypatch):
+    """派人请求（judge_request / review_request）一律写到临时目录，不碰真实 data/master/"""
+    monkeypatch.setenv("NSFS_INBOX_DIR", str(tmp_path / "inbox_env"))
+    return tmp_path / "inbox_env"
+
+
 @pytest.fixture()
 def api(tmp_path, monkeypatch):
     sys.path.insert(0, str(ROOT / "services" / "api"))
@@ -644,6 +651,7 @@ def test_approve_triggers_placeholder_fill(api, tmp_path):
     ctx["storyline"] = obj
     assert not AG.p1_gate(RCH, d, 1, st, ctx, canon)                    # 还没点“用这版”：等项目方
     assert "第 1 集一句简介还没写完，写手会自动补上，不影响你选的这版" in st.d["next_action"]
+    assert api.status("fill1")["p1_review"]["owner_direction"]["fill_note"] == "第 1 集一句简介还没写完，写手会自动补上，不影响你选的这版。"
     assert not (d / "writer_tasks" / "P1_fill_a1.json").exists()
     api.gate("fill1", api.GateBody(key="P1", action="approve"), LOGGED_IN)
     assert not AG.p1_gate(RCH, d, 1, st, ctx, canon)
@@ -722,3 +730,244 @@ def test_fill_value_must_be_substantial(api, tmp_path):
         assert new is None and any("太短或是空话" in p or "没补" in p for p in probs), v
     new, probs = AG.fill_check(RCH, s, json.dumps({"fields": {"episodes[0].logline": "她把鞋留在门口"}}, ensure_ascii=False), f, ctx)
     assert new is not None and probs == []
+
+
+
+def test_owner_revise_in_direction_marks_took_over_via_gate(api, tmp_path):
+    """21:40 P1_a5 事故：p1_gate 以前先把 P1_storyline.json 改名再查 owner_direction → 永远 None → 没记 owner_took_over → 新稿按轮数上限判死。
+    现在：改名前查；记 owner_took_over（by、how）；返修包最前面带上一轮评委共同意见；事后补记工具只认 owner_gates 历史"""
+    AG = _load("autoflow_agent_t21", "tools/script_rsi/autoflow_agent.py")
+    AF = _load("autoflow_t21", "tools/script_rsi/autoflow.py")
+    AG.live_note = lambda text: None
+    d, s, ctx = _fill_run(api, tmp_path, "took1")
+    canon = d / "P1_storyline.json"
+    sp = d / "judge_p1" / "STATE.json"
+    stt = json.loads(sp.read_text(encoding="utf-8"))
+    stt["rounds"][-1]["dir"] = str(d / "judge_p1" / "r4")          # 绝对路径：ROOT / 绝对路径 = 绝对路径
+    (d / "judge_p1" / "r4").mkdir()
+    (d / "judge_p1" / "r4" / "RESULT.json").write_text(json.dumps({"mean": 32, "top_fixes": ["第 6 集定时连拍逻辑"]}, ensure_ascii=False), encoding="utf-8")
+    sp.write_text(json.dumps(stt), encoding="utf-8")
+    AG.review_escalate_owner(d, by="总调度", token_file=_token(AG, tmp_path))
+    AG.review_add_fixes(d, ["第 9 集交卡要有完整节拍", "鞋的排期和正文一致"], by="总调度")
+    with pytest.raises(PermissionError):
+        AG.review_repair_took_over(d, by="HOLLYWOOD")             # 项目方还没点修改：不能补记
+    api.gate("took1", api.GateBody(key="P1", action="revise", options=["人物动机弱"], note="人物更立体"), LOGGED_IN)
+    RCH = AG._load("run_chain", "tools/pipeline/run_chain.py")
+    st = AF.Status(d, 1, 0.0)
+    ctx["storyline"] = s
+    assert not AG.p1_gate(RCH, d, 1, st, ctx, canon)
+    took = json.loads(sp.read_text(encoding="utf-8"))["owner_took_over"]
+    assert took and took["how"] == "p1_gate" and took["by"] == "owner" and "人物更立体" in took["note"]
+    pk = json.loads((d / "writer_tasks" / "P1_a1.json").read_text(encoding="utf-8"))
+    u = pk["user"]
+    assert u.index("【最先改：评委共同意见】") < u.index("第 6 集定时连拍逻辑") < u.index("【项目方修改意见（原话）】")
+    assert "第 9 集交卡要有完整节拍" in u
+    # 事后补记：已经记过就原样返回
+    assert AG.review_repair_took_over(d, by="HOLLYWOOD")["how"] == "p1_gate"
+
+
+def test_repair_took_over_from_gate_history(api, tmp_path):
+    """旧代码留下的局面：项目方点过修改（owner_gates 历史有），STATE.json 却没 owner_took_over → review-state --owner-took-over 补记；没转交过 → 拒"""
+    AG = _load("autoflow_agent_t22", "tools/script_rsi/autoflow_agent.py")
+    AG.live_note = lambda text: None
+    d = _od_run(api, tmp_path, "took2")
+    with pytest.raises(PermissionError):
+        AG.review_repair_took_over(d, by="HOLLYWOOD")
+    AG.review_escalate_owner(d, by="总调度", token_file=_token(AG, tmp_path))
+    api.gate("took2", api.GateBody(key="P1", action="revise", note="再改一稿"), LOGGED_IN)
+    t = AG.review_repair_took_over(d, by="HOLLYWOOD")
+    assert t["how"] == "repair" and "补记" in t["by"] and t["note"] == "再改一稿"
+
+
+
+def test_judge_request_written_on_pack(api, tmp_path, monkeypatch):
+    """总调度 11-02：评审包一出，除了 V2_LIVE.md，还往 data/master/inbox/judge_request.json 写一份派评委请求（只写不读）"""
+    AG = _load("autoflow_agent_t23", "tools/script_rsi/autoflow_agent.py")
+    AF = _load("autoflow_t23", "tools/script_rsi/autoflow.py")
+    AG.live_note = lambda text: None
+    inbox = tmp_path / "inbox_env" / "judge_request.json"           # autouse 把派人请求导到临时目录
+    d, s, ctx = _fill_run(api, tmp_path, "jr1")
+    (d / "judge_p1" / "STATE.json").unlink()                        # 从零：第 1 轮
+    AG.review_mark_took_over(d, "项目方接手", by="owner", how="p1_gate")
+    st = AF.Status(d, 1, 0.0)
+    assert not AG._p1_review(None, d, 1, st, ctx, d / "P1_storyline.json", s)
+    req = json.loads(inbox.read_text(encoding="utf-8"))
+    assert req["run"] == "jr1" and req["round"] == 1 and req["judges"] == 3 and req["reference_only"] is True
+    assert len(req["packets"]) == 3 and all(p.endswith("p1_review_task.json") for p in req["packets"])
+    assert not any(f.name.endswith(".tmp") for f in inbox.parent.iterdir())
+
+
+def test_reviewer_packet_writes_review_request(api, tmp_path, monkeypatch):
+    """总调度 11-02：reviewer 包（事实表 / 事实核对）一出，往 data/master/inbox/review_request.json 写派人请求（只写不读）"""
+    AG = _load("autoflow_agent_t24", "tools/script_rsi/autoflow_agent.py")
+    AF = AG.AF
+    inbox = tmp_path / "inbox_env" / "review_request.json"
+    rd = tmp_path / "rv"
+    rd.mkdir()
+    st = AF.Status(rd, 1, 0.0)
+    AG.packet(rd, st, "facts_ep01", "reviewer", 1, "facts", "sys", "user", "facts_json", [], 1)
+    req = json.loads(inbox.read_text(encoding="utf-8"))
+    assert req["step"] == "facts_ep01" and req["episode"] == 1 and req["packet"].endswith("facts_ep01_a1.json")
+    inbox.unlink()
+    AG.packet(rd, st, "P1_x", "writer", 1, "P0-P1", "sys", "user", "json", [], 1)       # 写手包不写
+    assert not inbox.exists()
+
+
+def _cam_doc(move2="推近"):
+    blk = lambda n, mv: (f"**镜{n}｜img**：中景，祁念站在白幕中央\n**机位与景别**：中景\n**镜头运动**：{mv}｜幅度=小｜速度=正常\n"
+                         f"**运镜**：{mv}｜小幅\n**对白**：无\n\n")
+    return "## ep01｜T\n\n" + blk(1, "固定镜头") + blk(2, move2) + blk(3, "固定镜头")
+
+
+def test_camera_check_only_that_shot_and_vocab():
+    """运镜补丁收稿：只许改那一镜；镜头运动要写成 camera_moves.yaml 里这个运镜认的写法（id / zh / aliases）"""
+    AG = _load("autoflow_agent_t25", "tools/script_rsi/autoflow_agent.py")
+    names = AG.camera_names("bolt_push_settle")
+    assert "bolt_push_settle" in names and "高速急推急停（机械臂式）" in names
+    old = _cam_doc()
+    assert AG._shot_move(old, 2) == "推近"
+    good = _cam_doc("高速急推急停（机械臂式）")
+    assert AG.camera_check(old, good, 2, "bolt_push_settle") == ""
+    assert "镜头运动写成了" in AG.camera_check(old, _cam_doc("急推"), 2, "bolt_push_settle")
+    touched = good.replace("**镜3｜img**：中景", "**镜3｜img**：近景")
+    assert "以外的行" in AG.camera_check(old, touched, 2, "bolt_push_settle")
+    assert AG.camera_check(old, good, 9, "bolt_push_settle") == "找不到镜9"
+
+
+def test_camera_patch_queues_behind_patch_loop(api, tmp_path):
+    """总调度 11-02：补丁环还在跑（没进补丁环 / 有没处理完的 patch 包）→ 运镜包只排队，不同时出；补丁环空闲后从队列出包（target cam#2）"""
+    AG = _load("autoflow_agent_t26", "tools/script_rsi/autoflow_agent.py")
+    AF = AG.AF
+    AG.live_note = lambda text: None
+    rd = tmp_path / "cam1"
+    rd.mkdir()
+    r = AG.camera_patch(rd, 1, 2, "bolt_push_settle", "幻想段")
+    assert r["queued"] and r["queue"][0]["shot"] == 2                       # 还没 final.md：排队
+    assert not list((rd / "writer_tasks").glob("patch_ep01_a*.json")) if (rd / "writer_tasks").exists() else True
+    (rd / "P4_ep01.final.md").write_text("头\n---\n\n" + _cam_doc(), encoding="utf-8")
+    st = AF.Status(rd, 1, 0.0)
+    AG.packet(rd, st, "patch_ep01", "writer", 1, "patch", "s", "u", "patches_json", [], 1, {"targets": ["fact#1"]})   # 补丁环里有一个没处理完的包
+    r = AG.camera_patch(rd, 1, 2, "bolt_push_settle", "幻想段")
+    assert r["queued"] and len(r["queue"]) == 1                             # 同一镜不重复排队
+    assert len(list((rd / "writer_tasks").glob("patch_ep01_a*.json"))) == 1  # 没有同时出第二个包
+    st = AF.Status(rd, 1, 0.0)
+    st.d["agent"]["processed"].append("patch_ep01_a1")                      # 补丁环处理完
+    AG.RL.split_doc = lambda t: (t.split("---", 1)[0], [t.split("---", 1)[1].lstrip("\n")])
+    out = AG._camera_from_queue(rd, 1, st)
+    pk = json.loads((rd / "writer_tasks" / "patch_ep01_a2.json").read_text(encoding="utf-8"))
+    assert out["now"] == "推近" and pk["targets"] == ["cam#2"] and pk["camera_move"] == "bolt_push_settle"
+    assert "高速急推急停" in pk["user"] and st.d["agent"]["camera_queue"] == []
+
+
+def test_full_p4_intake_keeps_camera_queue():
+    """整集稿替换旧稿时重置补丁环状态，但排队的运镜包不能丢"""
+    src = (ROOT / "tools/script_rsi/autoflow_agent.py").read_text(encoding="utf-8")
+    i = src.index('st.d["agent"] = {"processed": stale')
+    # K211-F 11-03：重置挪进 adopt_full_p4（chain_step / intake_full_p4 共用），旧状态先取成 old_ag 再带过去
+    assert '"camera_queue": old_ag.get("camera_queue") or []' in src[i:i + 400] and 'old_ag = st.d.get("agent") or {}' in src[i - 200:i]
+
+
+def test_inbox_isolated_and_master_guarded():
+    """OVERSIGHT-F 第 14 轮 P2：conftest 全局把 NSFS_INBOX_DIR 设到临时目录；data/master 在 real-data-guard 监视范围内"""
+    import os
+    sys.path.insert(0, str(ROOT / "tools" / "qa"))
+    import real_data_guard as RG
+    d = os.environ.get("NSFS_INBOX_DIR")
+    assert d and not RG.is_real(d)
+    assert RG.is_real(ROOT / "data" / "master" / "inbox" / "judge_request.json")
+
+
+def test_patch_may_change_only_look_lines_in_head():
+    """总调度 11-02：补丁可以改集头的人物造型行（**造型｜人名**），其余集头逐字（I2）；行数 / 人名不能变"""
+    AG = _load("autoflow_agent_t27", "tools/script_rsi/autoflow_agent.py")
+    old = "## ep01《量尺》\n**剧情**：甲\n**造型｜唐瑶**：服装=白色吊带｜甲=短款\n**镜1｜img**：中景\n"
+    ok = old.replace("甲=短款", "甲=短款｜其他=右锁骨下一颗痣")
+    assert AG.head_only_look_lines(old, ok)
+    assert not AG.head_only_look_lines(old, old.replace("**剧情**：甲", "**剧情**：乙"))           # 剧情行不许改
+    assert not AG.head_only_look_lines(old, old.replace("**造型｜唐瑶**", "**造型｜卓琳**"))       # 人名不许改
+    assert not AG.head_only_look_lines(old, old.replace("**剧情**：甲\n", "**剧情**：甲\n多一行\n"))
+    assert not AG.head_only_look_lines(old, old)
+
+
+def test_full_draft_not_taken_during_patch_loop(tmp_path):
+    """补丁环正在等补丁（有 final.md 且最后一个 patch 包没处理）→ 整集稿不收（文件留档），免得绕过补丁环逐条校验"""
+    AG = _load("autoflow_agent_t28", "tools/script_rsi/autoflow_agent.py")
+    rd = tmp_path / "pl"
+    (rd / "writer_tasks").mkdir(parents=True)
+    st = AG.AF.Status(rd, 1, 0.0)
+    st.d["agent"] = {"processed": [], "used": {}, "fact_devs": None}
+    assert not AG.patch_loop_active(rd, 1, st)                           # 没 final.md
+    (rd / "P4_ep01.final.md").write_text("x", encoding="utf-8")
+    (rd / "writer_tasks" / "patch_ep01_a1.json").write_text("{}", encoding="utf-8")
+    assert AG.patch_loop_active(rd, 1, st)
+    st.d["agent"]["processed"].append("patch_ep01_a1")
+    assert not AG.patch_loop_active(rd, 1, st)
+
+
+def test_patch_can_address_head_look_line():
+    """总调度 11-02：patches 的 line 可以写 "造型｜<人名>" 改集头人物造型行；新文本必须仍以 **造型｜<人名>**： 开头；人名不存在 / 其他集头行不可改"""
+    AG = _load("autoflow_agent_t29", "tools/script_rsi/autoflow_agent.py")
+    R5 = AG.R5
+    chunk = ("## ep01《量尺》\n**剧情**：甲\n**造型｜唐瑶**：服装=白色吊带｜甲=短款\n**造型｜祁念**：服装=黑裙\n\n"
+             "**镜1｜img**：中景，祁念\n**分拍**：0–2秒｜她抬头\n\n**镜2｜img**：近景，祁念\n**分拍**：0–2秒｜她低头\n")
+    nl = R5.numbered_lines(chunk)
+    assert all(not t.startswith("**造型｜") for _, _, t in nl)                      # 镜头区编号里没有集头
+    assert set(R5.head_look_lines(chunk)) == {"唐瑶", "祁念"}
+    c, changed, err = R5.apply_patches(chunk, [{"line": "造型｜唐瑶", "new": "**造型｜唐瑶**：服装=白色吊带｜甲=短款｜其他=右锁骨下一颗痣"}], nl)
+    assert err == "" and "右锁骨下一颗痣" in c and changed[0]["line"] == "造型｜唐瑶"
+    assert AG.head_only_look_lines(chunk, c)
+    assert R5.apply_patches(chunk, [{"line": "造型｜卓琳", "new": "**造型｜卓琳**：x"}], nl)[0] is None
+    assert R5.apply_patches(chunk, [{"line": "造型｜唐瑶", "new": "**剧情**：乙"}], nl)[0] is None
+    c2, _, err2 = R5.apply_patches(chunk, [{"line": "L1", "new": "**镜1｜img**：中景，祁念与唐瑶"}], nl)        # "L1" 也认
+    assert err2 == "" and "祁念与唐瑶" in c2
+    user = AG.AF.patch_user(1, "头\n---\n\n", chunk, {"lines": []}, [("v3", {"id": "1", "why": "x"})], "")
+    assert "造型｜唐瑶｜**造型｜唐瑶**" in user and '"造型｜<人名>"' in user
+
+
+def test_patch_reject_note_names_new_failures():
+    """22:26 patch_ep01_a1 被拒时只说“失败项没有变少（1 → 1）”，写手不知道是 k211#2 新冒出来的：拒收说明要点名新失败项"""
+    src = (ROOT / "tools/script_rsi/autoflow_agent.py").read_text(encoding="utf-8")
+    i = src.index("补丁后失败项没有变少（{len(fails)} → {len(f2)}）\"")
+    assert "补丁引入了新的失败项" in src[i:i + 300]
+
+
+def test_patch_can_change_camera_move_line():
+    """22:34 patch_ep01_a3 被拒“行 37 是镜头标题行”：**镜头运动** 行不是镜头标题行（标题行是 **镜N｜）"""
+    AG = _load("autoflow_agent_t30", "tools/script_rsi/autoflow_agent.py")
+    R5 = AG.R5
+    chunk = "## ep01《量尺》\n**剧情**：甲\n\n**镜1｜img**：中景\n**镜头运动**：推近｜幅度=小｜速度=正常\n**分拍**：0–2秒｜她抬头\n"
+    nl = R5.numbered_lines(chunk)
+    n = next(k for k, _, t in nl if t.startswith("**镜头运动**"))
+    c, _, err = R5.apply_patches(chunk, [{"line": n, "new": "**镜头运动**：高速急推急停（机械臂式）｜幅度=大｜速度=快"}], nl)
+    assert err == "" and "高速急推急停" in c
+    t = next(k for k, _, t in nl if t.startswith("**镜1｜"))
+    assert R5.apply_patches(chunk, [{"line": t, "new": "**镜2｜img**：中景"}], nl)[0] is None        # 真标题行改镜号仍拒
+
+
+def test_v2_primary_run_imports_run_scoped():
+    """22:34 series10_v2 import_failed：V2 是主剧但不是旧版单一导入稿 → 按剧导入（import_staged_run），不走只认收件箱目录的接口"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("producer_t", ROOT / "tools/autopilot/producer.py")
+    P = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(P)
+    RN = P._runs()
+    legacy = RN.legacy_run(ROOT)
+    assert P.run_scoped_import("series10_v2", ROOT) and P.run_scoped_import("series10_s2", ROOT)
+    assert not P.run_scoped_import(legacy, ROOT) and not P.run_scoped_import(None, ROOT)
+    assert RN.import_path("series10_v2", ROOT).as_posix().endswith("data/import/runs/series10_v2/script_v2.json")
+
+
+def test_run_import_path_only_own_run_dir():
+    """V2 的 P4_epNN.final.md 是合法导入候选；V1 路径、别的剧、run 目录以外、非 .md 一律拒绝"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("producer_t2", ROOT / "tools/autopilot/producer.py")
+    P = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(P)
+    ok = P.run_import_path_ok
+    assert ok("series10_v2", "data/pipeline/runs/series10_v2/P4_ep01.final.md", ROOT)
+    assert not ok("series10_v2", "data/pipeline/runs/series10_v1/P4_ep01.final.md", ROOT)
+    assert not ok("series10_v2", "data/staging_v3/anything.md", ROOT)
+    assert not ok("series10_v2", "data/pipeline/runs/series10_v2/../series10_v1/x.md", ROOT)
+    assert not ok("series10_v2", "data/pipeline/runs/series10_v2/P4_ep01.md.report.json", ROOT)
+    assert not ok("series10_v1", "data/pipeline/runs/series10_v1/P4_ep01.final.md", ROOT)
+    assert not ok(None, "data/pipeline/runs/series10_v2/P4_ep01.final.md", ROOT)

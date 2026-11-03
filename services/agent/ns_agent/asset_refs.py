@@ -22,6 +22,7 @@ import json
 import re
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
+import os
 from pathlib import Path
 
 from ns_agent import framing as FR
@@ -171,7 +172,10 @@ def zone_of(slot: str, label: str) -> str:
     if slot == "marker":
         return "face"
     if slot == "outfit":
-        if any(w in t for w in ("长裙", "浴袍", "连衣裙", "围裙", "工装", "连体", "睡裙")):
+        # ISS-1103-024205-8856：全身装 / 抹胸裙 / 吊带裙 / 礼服 / 旗袍 是上下一体的一件（V2 O4“日常全身装：…抹胸紧身短裙 + …”
+        # 原先因含“裙”判成 lower，近景不送造型参考）→ body（近景及更远都可见）
+        if any(w in t for w in ("长裙", "浴袍", "连衣裙", "围裙", "工装", "连体", "睡裙", "全身装", "抹胸", "吊带裙", "礼服", "旗袍")) \
+                and "吊带袜" not in t:
             return "body"
         if any(w in t for w in ("裙", "裤")):
             return "lower"
@@ -354,7 +358,9 @@ def manifest_looks(project) -> dict[str, dict[str, Look]]:
     out: dict[str, dict[str, Look]] = {}
     for cid, c in ((manifest(project) or {}).get("characters") or {}).items():
         for lid, lk in (c.get("looks") or {}).items():
-            parts = [LookPart("outfit", it.get("name") or iid, zone_of("outfit", it.get("name") or ""), iid)
+            def _slot(it):       # 单品自带 slot（shoes / accessory / nails）就按该部件挂（SH1 透明高跟接进 O4，I4 才认得到鞋）
+                return it.get("slot") if it.get("slot") in ("outfit", "shoes", "accessory", "nails") else "outfit"
+            parts = [LookPart(_slot(it), it.get("name") or iid, zone_of(_slot(it), it.get("name") or ""), iid)
                      for iid, it in (lk.get("items") or {}).items() if isinstance(it, dict)]
             out.setdefault(cid, {})[lid] = Look(cid, lid, "服装=" + (lk.get("name") or lid), lk.get("en") or "", lk.get("route") or "", parts)
     return out
@@ -381,11 +387,19 @@ def load_looks(project: str) -> dict[str, dict[str, Look]]:
                         hit["looks"][ids[lk["id"]]] = lk
                     else:
                         hit.setdefault("looks", []).append(lk)
-    if not data:
-        return manifest_looks(project) if manifest_rel(project) else {}
-    imap = item_map(project)
     out: dict[str, dict[str, Look]] = {}
-    data = list(data) + hub_extra_looks(project, data)     # 资产中心“＋ 新造型”（id 与 P1 重复时以 P1 为准）
+    if not data:
+        if not manifest_rel(project):
+            return {}
+        # W7（A2 第 18 轮 F6）：资产包模式（V2，不设 looks_file）造型取清单；资产中心“＋ 新造型”原来在这条分支被跳过，
+        # 编译看不到——现在同样追加（id 与清单重复时以清单为准），追加的造型照常走 item_map / 外搭登记
+        out = manifest_looks(project)
+        data = hub_extra_looks(project, [{"char_id": cid, "looks": [{"id": lid} for lid in lks]} for cid, lks in out.items()])
+        if not data:
+            return out
+    else:
+        data = list(data) + hub_extra_looks(project, data)     # 资产中心“＋ 新造型”（id 与 P1 重复时以 P1 为准）
+    imap = item_map(project)
     for c in data:
         cid = c.get("char_id") or NAME_ID.get(c.get("name"), c.get("name"))
         for lk in c.get("looks") or []:
@@ -672,12 +686,15 @@ def sheet_crop(project: str, sheet: str, panel: str, zone: str | None = None) ->
     lay = (_cfg().get("sheet_layout") or {})
     src = ROOT / sheet
     tag = f"{Path(sheet).stem}_{panel}" + (f"_{zone}" if zone else "") + ("2" if zone == "hand" else "")   # hand2：W5 重裁版
-    out = ROOT / pc.get("crop_dir", "data/refcrops") / f"{tag}.png"
-    srv = _derived_on_server(out)                               # 服务器：有就用、没有就挡，绝不本地生成（K-OPS-F23）
+    real = ROOT / pc.get("crop_dir", "data/refcrops") / f"{tag}.png"
+    srv = _derived_on_server(real)                              # 服务器：有就用、没有就挡，绝不本地生成（K-OPS-F23）
     if srv:
         return srv
+    out, writable = derived_target(pc.get("crop_dir", "data/refcrops"), f"{tag}.png")
+    if not writable and out.stat().st_mtime < src.stat().st_mtime:      # 真实缓存过期：沙盒里重生成，不动真实目录
+        out, writable = Path(DERIVED_OUT) / pc.get("crop_dir", "data/refcrops") / f"{tag}.png", True
     if out.is_file() and out.stat().st_mtime >= src.stat().st_mtime:
-        if out.name not in _derived_index(out.parent) and derived_writable(project):   # 账本之前生成的缓存：笔记本上补登记
+        if writable and out.name not in _derived_index(out.parent) and derived_writable(project):   # 账本之前生成的缓存：笔记本上补登记
             record_derived(out, project)                        # （已归档 / 冻结的剧不写——V1 树只读，FACTORY 20:4x）
         return rel(out)
     im = Image.open(src).convert("RGB")
@@ -694,7 +711,7 @@ def sheet_crop(project: str, sheet: str, panel: str, zone: str | None = None) ->
     elif not zone:
         box = (x0, 0, x1, H)
     elif zone == "hand":
-        _guard_derived_write(project, out)
+        _guard_derived_write(project, real)    # 按逻辑目标判（写到沙盒时也照样拦已归档的剧）
         out.parent.mkdir(parents=True, exist_ok=True)
         _hand_pair(im, _person_box(im, x0 + 4, x1 - 4)).save(out)
         record_derived(out, project)
@@ -706,7 +723,7 @@ def sheet_crop(project: str, sheet: str, panel: str, zone: str | None = None) ->
         y0, y1 = by0 + int(t * h), by0 + int(btm * h)
         pad = int(0.06 * h) if zone == "feet" else int(0.02 * h)
         box = (max(x0, bx0 - pad), max(0, y0 - pad), min(x1, bx1 + pad), min(H, y1 + pad))
-    _guard_derived_write(project, out)
+    _guard_derived_write(project, real)    # 按逻辑目标判（写到沙盒时也照样拦已归档的剧）
     out.parent.mkdir(parents=True, exist_ok=True)
     im.crop(box).save(out)
     record_derived(out, project)
@@ -749,7 +766,9 @@ def manifest_entries(project) -> dict:
     out = {}
 
     def put(e):
-        if isinstance(e, dict) and e.get("file"):
+        if isinstance(e, dict) and e.get("render_file"):          # 出图用参考代替原图（带 logo 的原图不许进参考槽，W-40）
+            out[e["render_file"]] = e.get("render_sha256") or ""
+        elif isinstance(e, dict) and e.get("file"):
             out[e["file"]] = e.get("sha256") or ""
     for c in (d.get("characters") or {}).values():
         put(c.get("face"))
@@ -780,7 +799,10 @@ def _sha_ok(f: str, want: str) -> bool:
 
 
 def _manifest_file(e):
-    """清单条目 → 文件（文件在且 sha 对上）；否则 None"""
+    """清单条目 → 文件（文件在且 sha 对上）；否则 None。条目有 render_file（出图用参考，例 SH2 去掉鞋垫品牌字的版本，W-40）
+    → 出图一律用它，原图 file 只给资产页展示；render_file 登记了但 sha 不对 → None（不退回带 logo 的原图）"""
+    if isinstance(e, dict) and e.get("render_file"):
+        return e["render_file"] if _sha_ok(e["render_file"], e.get("render_sha256") or "") else None
     if isinstance(e, dict) and e.get("file") and _sha_ok(e["file"], e.get("sha256") or ""):
         return e["file"]
     return None
@@ -824,6 +846,22 @@ def manifest_violations(project, files) -> list:
 NO_BRAND_NOTE = "（只取款式与材质，表面光洁、没有任何标志和文字）。"
 
 
+BRAND_NEGATIVE = "品牌logo、品牌字母、商标、鞋垫印字、鞋跟做成字母形状、金属字母装饰、任何文字"
+
+
+def brand_negative(project, plan) -> str:
+    """W-40：本镜参考里有 no_brand 单品 → 负面词加品牌标志相关词。注意：Turbo（cfg=1）负面词不生效（workflows.negative_for 丢弃），
+    真正起作用的是去 logo 的出图参考 + 正向“普通细跟、无装饰金属”+ 出图后 Q9 brand_logo / Q6 OCR 判不过"""
+    if not manifest_rel(project):
+        return ""
+    meta = manifest_meta(project)
+    for s in (plan.slots if plan is not None else None) or []:
+        for m in s.members or [{"file": s.file}]:
+            if (meta.get(rel(m.get("file") or "")) or {}).get("no_brand"):
+                return BRAND_NEGATIVE
+    return ""
+
+
 def brand_hits(text: str) -> list[str]:
     """K-REN-959：提示词里的品牌字样（config/compile/brand_words.json，大小写不敏感；LV 这类短词按词边界）"""
     try:
@@ -852,10 +890,12 @@ def manifest_meta(project) -> dict:
         for iid, it in (c.get("items") or {}).items():
             if isinstance(it, dict):
                 m = {"cid": cid, "item": iid, "kind": it.get("slot") or "item", "route": it.get("route") or "server_ok",
-                     "adult": bool(it.get("adult")), "no_brand": bool(it.get("no_brand")), "name": it.get("name")}
+                     "adult": bool(it.get("adult")), "no_brand": bool(it.get("no_brand")), "name": it.get("name"),
+                     "render_prompt": it.get("render_prompt") or ""}
                 out[f"item:{cid}:{iid}"] = m
-                if it.get("file"):
-                    out[it["file"]] = m
+                for k in ("file", "render_file"):
+                    if it.get(k):
+                        out[it[k]] = m
         for lid, lk in (c.get("looks") or {}).items():
             lm = {"cid": cid, "look": lid, "kind": "look", "route": lk.get("route") or "server_ok", "adult": bool(lk.get("adult")),
                   "name": lk.get("name")}
@@ -962,20 +1002,54 @@ def derived_writable(project: str | None) -> bool:
     return ((d.get("runs") or {}).get(project or "") or {}).get("status") in WRITABLE_RUN_STATUS
 
 
-def _run_of_path(out: Path) -> str | None:
-    """写入目标所属的剧：仓库里 data/pipeline/runs/<剧>/… 或 data/renders/<剧>/…；不在仓库剧目录下（测试临时目录等）→ None"""
+SHARED_DERIVED_DIRS = (("data", "refcrops"), ("data", "refboards"))   # 没配 crop_dir / board_dir 的剧共用的根级默认目录
+# 派生参考图（refboards / refcrops）的写出根（总调度 11-03：输出跟随数据根或 tmp，测试不许写真实目录）。
+# None = 仓库根（生产照旧写 crop_dir / board_dir）；设了（环境变量 NS_DERIVED_ROOT，或测试沙盒 tests/conftest.py 的 _SANDBOX_ROOTS 打补丁）
+# = 新生成的图和账本只写到 <DERIVED_OUT>/<crop_dir|board_dir>/ 下；真实目录里已有的同名图照常只读复用（不补账本）
+DERIVED_OUT: Path | None = Path(os.environ["NS_DERIVED_ROOT"]) if os.environ.get("NS_DERIVED_ROOT") else None
+
+
+def derived_target(subdir: str, name: str) -> tuple[Path, bool]:
+    """→ (该用的文件路径, 能不能写)。DERIVED_OUT 没设：仓库内 subdir/name，可写。设了：真实目录已有就只读用它，
+    否则用 DERIVED_OUT 下的同一相对路径（可写）。cache key 不变，所以两边是同一张图的同一个名字"""
+    real = ROOT / subdir / name
+    if DERIVED_OUT is None:
+        return real, True
+    if real.is_file():
+        return real, False
+    return Path(DERIVED_OUT) / subdir / name, True
+
+
+def _run_of_path(out: Path, project: str | None = None) -> str | None:
+    """写入目标所属的剧（OVERSIGHT-F 第 12 轮：docstring 与代码对齐）：
+      data/pipeline/runs/<剧>/…                → <剧>
+      data/renders/<剧>/…（<剧> 在 runs.json 里） → <剧>；data/renders/epNN/…（legacy 剧不带前缀）→ legacy 剧
+      data/refcrops/…、data/refboards/…（共用默认目录）→ 调用方给的 project
+    不在仓库里（测试临时目录等）→ None（不拦）"""
     try:
         rp = Path(out).resolve().relative_to(ROOT.resolve()).parts
     except ValueError:
         return None
     if len(rp) > 3 and rp[:3] == ("data", "pipeline", "runs"):
         return rp[3]
+    if len(rp) > 2 and rp[:2] == ("data", "renders"):
+        reg = _runs_registry()
+        if rp[2] in (reg.get("runs") or {}):
+            return rp[2]
+        return reg.get("legacy_unprefixed_run") or project or ""
+    if any(tuple(rp[:2]) == d for d in SHARED_DERIVED_DIRS):
+        return project or ""
     return None
+
+
+def _runs_registry() -> dict:
+    f = ROOT / "config" / "pipeline" / "runs.json"
+    return json.loads(f.read_text(encoding="utf-8")) if f.is_file() else {}
 
 
 def _guard_derived_write(project: str | None, out: Path) -> None:
     """按写入目标判（FACTORY 21:0x：按剧名一刀切会把测试临时目录也拦了）：目标在仓库某部剧的目录下，那部剧必须在制作中"""
-    run = _run_of_path(out)
+    run = _run_of_path(out, project)
     if run is None:
         return
     if not derived_writable(run):
@@ -1700,12 +1774,13 @@ def make_board(project: str, tiles: list[tuple[str, str]]) -> str:
     bc = _cfg().get("board") or {}
     T, LH = int(bc.get("tile", 512)), int(bc.get("label_h", 60))
     key = hashlib.sha1(json.dumps([[f, l, sha_file(ROOT / f)] for f, l in tiles], ensure_ascii=False).encode()).hexdigest()[:12]
-    out = ROOT / project_cfg(project).get("board_dir", "data/refboards") / f"board_{key}.png"
-    srv = _derived_on_server(out)                               # 服务器：只用 sha 账本对得上的那张，绝不本地生成
+    real = ROOT / project_cfg(project).get("board_dir", "data/refboards") / f"board_{key}.png"
+    srv = _derived_on_server(real)                              # 服务器：只用 sha 账本对得上的那张，绝不本地生成
     if srv:
         return srv
+    out, writable = derived_target(project_cfg(project).get("board_dir", "data/refboards"), f"board_{key}.png")
     if out.is_file():
-        if out.name not in _derived_index(out.parent) and derived_writable(project):   # 已归档剧（V1）目录只读，不补账本
+        if writable and out.name not in _derived_index(out.parent) and derived_writable(project):   # 已归档剧（V1）目录只读，不补账本
             record_derived(out, project)
         return rel(out)                                     # 服务器上没有 → 抛 DerivedRefMissing（K-OPS-F23）
     n = len(tiles)
@@ -1729,7 +1804,7 @@ def make_board(project: str, tiles: list[tuple[str, str]]) -> str:
         board.paste(im, (x + (T - im.width) // 2, y + (T - im.height) // 2))
         d.rectangle([x, y, x + T - 1, y + T + LH - 1], outline=(200, 200, 200), width=2)
         d.text((x + 10, y + T + 12), f"{CIRCLED[i]} {label}"[:22], fill=(20, 20, 20), font=font)
-    _guard_derived_write(project, out)
+    _guard_derived_write(project, real)    # 按逻辑目标判（写到沙盒时也照样拦已归档的剧）
     out.parent.mkdir(parents=True, exist_ok=True)
     board.save(out)
     record_derived(out, project)
@@ -1832,7 +1907,8 @@ def plan_slots(sr: ShotRefs, model: str = "qwen_image_2.1", capacity: int | None
     slots: list[Slot] = []
     for n, gr in enumerate(groups, 1):
         r0 = gr[0]
-        members = [{"file": r.file, "label": r.label, "role": r.role, "source": r.source, "item_id": r.item_id,
+        # ISS-1103-023528-1509：每个成员带角色 id（脸板逐格标是谁的脸；preflight I2 / I9、trace.faces、尾帧补脸都按它认人）
+        members = [{"file": r.file, "label": r.label, "role": r.role, "source": r.source, "item_id": r.item_id, "character": r.character,
                     "look_id": r.look_id, "zone": r.zone, "focus": r.focus,
                     "secondary": bool(r.character and r.character != sr.primary)} for r in gr]
         if len(gr) == 1:
@@ -1848,8 +1924,11 @@ def plan_slots(sr: ShotRefs, model: str = "qwen_image_2.1", capacity: int | None
         s.line = _line(sr.project, s)
         if manifest_rel(sr.project):                    # K-REN-959：带品牌 logo 的参考只取款式（正向写法；cfg=1 负面词不生效）
             meta = manifest_meta(sr.project)
-            if any((meta.get(rel(m.get("file") or "")) or {}).get("no_brand") for m in members):
-                s.line = s.line.rstrip("。") + NO_BRAND_NOTE
+            nb = [meta.get(rel(m.get("file") or "")) or {} for m in members]
+            nb = [x for x in nb if x.get("no_brand")]
+            if nb:
+                extra = "".join(f"；{x['render_prompt']}" for x in nb if x.get("render_prompt"))
+                s.line = s.line.rstrip("。") + (NO_BRAND_NOTE[:-2] + extra + "）。" if extra else NO_BRAND_NOTE)
         slots.append(s)
     _apply_sheet_gaps(sr.project, slots)
     prefix = "".join(s.line for s in slots)
@@ -1965,7 +2044,8 @@ def plan_slots_v2(sr: ShotRefs, model: str = "qwen_image_2.1", capacity: int | N
 def plan_for(project: str, ep, shot, model: str = "qwen_image_2.1", **kw) -> tuple[ShotRefs, SlotPlan]:
     sr = resolve_shot(project, ep, shot, kept_triggers=kw.get("kept_triggers"), two_person=kw.get("two_person"))
     plan = plan_slots(sr, model, kw.get("capacity"))
-    _apply_single_turn(plan, single_turn_line(sr, shot))
+    if kw.get("turn", True):                     # turn=False：设定图模式（正面站立），不加单人朝向句（MERGE-IMG-O 11-03）
+        _apply_single_turn(plan, single_turn_line(sr, shot))
     return sr, plan
 
 

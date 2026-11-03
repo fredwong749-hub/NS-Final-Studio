@@ -153,7 +153,7 @@ rules:
     when: H3 正文
     then: 人物用 (S1)+外貌指代；运镜用官方词表写成句中动作
     targets: [{kind: writer_prompt, section: H3 正文}]
-    writer_text: H3 正文不写人名和触发词（lnwan01 等）；每镜一个官方运镜，写成句中动作（The camera pushes in with small amplitude at slow speed as …）。
+    writer_text: H3 正文不写人名和触发词（全局头触发词表里的词）；每镜一个官方运镜，写成句中动作（The camera pushes in with small amplitude at slow speed as …）。
     evidence:
       - {src: docs/ep02_iter/refactor_proposal.md §3.2, quote: "不出现人名（H3 不认识名字）"}
     confidence: high

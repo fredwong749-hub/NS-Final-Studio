@@ -207,7 +207,7 @@ def run(brief_path: Path, episode: int, out_dir: Path, *, upto: str = "P4", tag:
                                            encoding="utf-8")
     try:
         from ns_api import script_chat as SC
-        rc, rs, _ = SC.registry_tables({"from": brief.registry_from})
+        rc, rs, _ = SC.registry_tables({"from": brief.registry_from, "run": SC.run_for_dir(out_dir)})
     except Exception:  # noqa: BLE001
         rc, rs = [], []
     ctx = {"brief": brief, "episode": episode, "registry_chars": rc, "registry_scenes": rs}

@@ -48,6 +48,7 @@ def _item(v: dict | None, video: bool) -> tuple[str, str, dict]:
         return "untested", "没有本地看图复核结果（服务排队 / 未跑）", {}
     if v.get("error"):
         return "untested", f"本地看图复核失败：{v['error']}", {"key": v.get("key")}
+    sanitize(v)                        # 唯一出口：不管哪条路径来的看图结果，都先查“结论与证据矛盾”（总调度 11-02 21:xx）
     checks = _all_checks()
     defects = [d for d in v.get("defects") or [] if d in checks]
     # 只有 defect（高置信度）且该项 blocking 才拦；unsure = 低置信度只记录。enforce 关掉时只有 underage_look 拦（HC-07）
@@ -58,6 +59,9 @@ def _item(v: dict | None, video: bool) -> tuple[str, str, dict]:
           "record_only": bool(record and not blocking)}
     if blocking:
         return "fail", _fmt(blocking, v) + ("；另有只记录项：" + _fmt(record, v) if record else ""), ev
+    if v.get("contradiction"):
+        ev["contradiction"] = v["contradiction"]
+        return "untested", "看图模型的结论与证据矛盾、重问后仍未定：" + _fmt(list(v["contradiction"]), v), ev
     if record:
         ev["would_fail"] = True
         return "na", "只记录（不阻断，待标定）：" + _fmt(record, v), ev
@@ -230,19 +234,66 @@ def sanitize(v: dict) -> None:
     _sanitize_eye(v)
 
 
+_POS_EYE = ("直视镜头", "正对镜头", "看向镜头", "看着镜头", "盯着镜头", "瞳孔朝向镜头", "朝向镜头", "眼神对镜", "与镜头对视", "看镜头")
+_DIR_AWAY = re.compile(r"(朝向|看向|望向|看着|视线(朝|向|落在)?)\s*(画面)?(左|右|上|下|外|远处|别处|对岸|窗外|地面|他|她|对方|手机|桌面|侧面)")
+
+
+def eye_contradiction(c: dict) -> bool:
+    """eye_contact 的结论和证据互相矛盾（总调度 11-02 21:xx：V2 金样 image_000_90d1cc8e 判“看镜头”，证据写“右眼瞳孔朝向画面右，未看镜头”）：
+    判 defect 但证据只说没看 / 朝别处；或判 ok 但证据只说看镜头"""
+    e = str(c.get("e") or "")
+    neg = any(n in e for n in _NEG_EYE) or bool(_DIR_AWAY.search(e))
+    pos = any(k in e for k in _POS_EYE) and not any(n in e for n in _NEG_EYE)
+    if c.get("s") == "defect":
+        return neg and not pos
+    if c.get("s") == "ok":
+        return pos and not neg
+    return False
+
+
 def _sanitize_eye(v: dict) -> None:
-    """看图模型自相矛盾的 eye_contact defect（ep03-S4：判 defect、证据却写“两人均未看镜头”；people[].gaze 也没有“看镜头”）
-    → 降成 unsure（低置信度，不挡）。gaze_mp 高置信度命中会在 merge_gaze 里重新记 defect"""
+    """看图模型自相矛盾的 eye_contact（ep03-S4：判 defect、证据却写“两人均未看镜头”；V2 金样 90d1cc8e：判看镜头、证据“朝向画面右，未看镜头”）
+    → 改记 untested（不再降成拿不准放过）+ 登记 v["contradiction"]，由 reask_eye 重问一次；gaze_mp 高置信度命中会在 merge_gaze 里直接定 defect"""
     c = (v.get("checks") or {}).get("eye_contact") or {}
-    if c.get("s") != "defect":
+    if c.get("s") not in ("defect", "ok"):
         return
     e = str(c.get("e") or "")
     looks = any("镜头" in str((p or {}).get("gaze") or "") and not any(n in str((p or {}).get("gaze")) for n in ("不", "未", "没"))
                 for p in v.get("people") or [] if isinstance(p, dict))
-    if any(n in e for n in _NEG_EYE) or (v.get("people") and not looks and not any(k in e for k in ("直视", "正对镜头", "盯", "看向镜头", "看镜头"))):
-        c.update(s="unsure", e=f"（自相矛盾，降为拿不准）{e}"[:300])
+    people_say_no = c.get("s") == "defect" and v.get("people") and not looks and not any(k in e for k in _POS_EYE)
+    if eye_contradiction(c) or people_say_no:
+        c.update(s="untested", e=f"（结论 {c.get('s')} 与证据矛盾，待重问）{e}"[:300], orig_s=c.get("s"))
         v["defects"] = [d for d in v.get("defects") or [] if d != "eye_contact"]
-        v["unsure"] = sorted(set(v.get("unsure") or []) | {"eye_contact"})
+        v["unsure"] = [u for u in v.get("unsure") or [] if u != "eye_contact"]
+        v["contradiction"] = sorted(set(v.get("contradiction") or []) | {"eye_contact"})
+
+
+REASK_Q = ("只看【待检】图里人物的眼睛和瞳孔方向，回答这个人是不是在看镜头（看向观众）。只输出 JSON："
+           '{"gaze": "看镜头|没看镜头|看不清", "e": "一句依据：眼睛 / 瞳孔朝哪个方向"}。结论必须和依据一致。')
+
+
+def reask_eye(v: dict | None, image) -> str | None:
+    """eye_contact 证据与结论矛盾时重问一次（只问视线，K-REV-V01 本地看图）：回答自洽 → 按回答定（看镜头 = defect / 没看 = ok），
+    消掉矛盾；仍矛盾 / 看不清 / 没跑成 → 保持 untested（Q9 挡）。→ 说明或 None"""
+    if not v or "eye_contact" not in (v.get("contradiction") or []):
+        return None
+    from . import client
+    res = client.generate({"system": "你是画面质检员，只看图、只报事实，只输出 JSON。", "text": REASK_Q,
+                           "images": [{"path": str(image), "label": "【待检】", "max_pixels": 600000}]}, wait_s=900, refresh=True)
+    d = rubric_loads(res.get("text", "")) if "error" not in res else None
+    c = v.setdefault("checks", {}).setdefault("eye_contact", {})
+    if not d or d.get("gaze") not in ("看镜头", "没看镜头"):
+        c["reask"] = d or {"error": res.get("error")}
+        return None
+    ans = {"s": "defect" if d["gaze"] == "看镜头" else "ok", "e": str(d.get("e") or "")}
+    if eye_contradiction(ans):
+        c["reask"] = d
+        return None
+    c.update(s=ans["s"], e=f"（重问）{ans['e']}"[:300], reask=d)
+    v["contradiction"] = [x for x in v.get("contradiction") or [] if x != "eye_contact"]
+    if ans["s"] == "defect":
+        v["defects"] = sorted(set(v.get("defects") or []) | {"eye_contact"})
+    return f"eye_contact 重问后定为 {ans['s']}：{ans['e'][:60]}"
 
 
 def refresh_gaze(v: dict, image, prompt: str) -> None:
@@ -288,6 +339,7 @@ def merge_gaze(v: dict, faces: list[dict] | None, prompt: str) -> None:
     if not hits or rubric.spec_from_prompt(prompt).get("camera_ok") == "允许":
         return
     c = v.setdefault("checks", {})
+    v["contradiction"] = [x for x in v.get("contradiction") or [] if x != "eye_contact"]    # 确定性高置信度命中直接定，不再待重问
     if (c.get("eye_contact") or {}).get("s") != "defect":
         c["eye_contact"] = {"s": "defect", "e": f"gaze_mp 虹膜测得 {len(hits)} 张脸正对镜头（|{A}×yaw+eye_x|≤{T}）"
                                                 + (f"；看图模型原判 {c['eye_contact']['s']}" if c.get("eye_contact") else "")}
@@ -344,7 +396,8 @@ def q1_yaw_relax(pf: dict, v: dict | None) -> str | None:
         return None                                    # 只处理“单脸、唯一不过原因是分数线”的情形
     cid, sim = next(iter(sims.items()))
     faces = ((v.get("gaze_mp") or {}).get("faces")) or []
-    if cid not in (yr.get("characters") or []) or sim is None or len(faces) != 1:
+    from ns_agent.gen_contract.cards import is_lead_listed     # CARRYOVER 第 10 项：名单里 "@lead" = 本剧主角（V2 lead_f）
+    if not is_lead_listed(cid, yr.get("characters") or []) or sim is None or len(faces) != 1:
         return None
     if yr.get("require_vlm_identity_ok", True) and ((v.get("checks") or {}).get("identity_drift") or {}).get("s") != "ok":
         return None
@@ -527,7 +580,8 @@ def q1a_vlm(pf: dict, image) -> str | None:
         return None
     from ns_agent.gen_contract import cfg as GC
     from . import hair_attr as HA
-    cards = ((GC().get("image_thresholds") or {}).get("Q1a_attr") or {}).get("cards") or {}
+    # ISS-1103-024206-c8c0：用 postflight 判 Q1a 时那份按剧人物卡（evidence.cards）；旧记录没有时退回 config cards
+    cards = {**(((GC().get("image_thresholds") or {}).get("Q1a_attr") or {}).get("cards") or {}), **(ev.get("cards") or {})}
     bad, asked = [], {}
     for cid, box in (ev.get("boxes") or {}).items():
         try:
@@ -756,7 +810,8 @@ def q1_needs_vlm(pf: dict) -> bool:
     floor = min((t for _lim, t in yr.get("tiers") or []), default=None)
     if len(sims) == 1 and "；" not in detail and not ev.get("strangers") and floor is not None:
         cid, sim = next(iter(sims.items()))
-        return cid in (yr.get("characters") or []) and sim is not None and sim >= floor
+        from ns_agent.gen_contract.cards import is_lead_listed
+        return is_lead_listed(cid, yr.get("characters") or []) and sim is not None and sim >= floor
     return False
 
 

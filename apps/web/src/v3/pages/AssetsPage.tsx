@@ -17,6 +17,7 @@ import type { PartKey } from "../api_v1";
 import { lookImage, lookLetter, lookTitle as sharedLookTitle, bumpLooks } from "../looks";
 import { useSop } from "../sop.helpers";
 import { OwnerDecisionDialog } from "../OwnerDecision";
+import { isLookWaiting, lookWaitText, useOwnerDecisionApi } from "../OwnerDecision.helpers";
 import type { SopOwnerAction } from "../../types";
 import { LoadError } from "../../ds"; // UX5（D4）
 import "./pages.css";
@@ -877,10 +878,13 @@ function ShotList({ ch, u, look, ep }: { ch: CharacterAssets; u: Usage; look: st
  *  勾“我是项目方本人”+ 原话，POST /api/sop/owner-decision）；这里不另写确认逻辑 */
 export function LookConfirm({ charId, ep }: { charId: string; ep: number }) {
   const { sop } = useSop();
+  const api = useOwnerDecisionApi(); // UIFIX-F 11-03：后端没有确认接口 → 入口不显示
   const [open, setOpen] = useState<SopOwnerAction | null>(null);
   if (!sop) return <span className="v3p-muted v3p-small">读取确认状态…</span>;
   const a = (sop.owner_actions ?? []).find((x) => x.gate === "look" && x.character === charId);
   if (!a) return <span className="v3p-ok v3p-small" title="本集这个角色的造型已经由项目方确认过（或不需要确认）">✓ 第 {ep} 集造型已确认</span>;
+  if (isLookWaiting(a)) return <span className="v3p-muted v3p-small">{lookWaitText(a)}</span>; // 造型确认属于资产阶段：身份脸没选定不开入口
+  if (api === false) return null;
   return (
     <>
       <button className="btn-mini on v3p-confirm" onClick={() => setOpen(a)} title={`${a.why}

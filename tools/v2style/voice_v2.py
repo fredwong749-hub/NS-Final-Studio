@@ -103,6 +103,28 @@ ROLES = {
             ("c", "上海口音普通话 + 沪语词（ref）", REF_WU,
              "男性，28岁，温和柔软的中音，说带一点上海口音的普通话，吴语腔调轻柔，斯文有礼，语速平缓"),
         ]},
+    "zhuo_lin": {
+        "label": "卓琳 · zhuo_lin（配角·经纪人，待选）", "gender": "female", "char_id": "ch_zhuo_lin",
+        "persona": "35 岁经纪人（前模特）：干脆明亮的女中音，上海腔，语速快、利落、带刀。（P1 voice_phrase：crisp bright alto, fast clipped Shanghai cadence, brisk pace）",
+        "cands": [
+            ("a", "普通话（标准）", REF_STD,
+             "female, 35 years old, a crisp, bright alto voice, fast and clipped, brisk confident agent tone, sharp articulation, standard Mandarin, fast pace"),
+            ("b", "上海口音普通话 + 沪语词（ref）", REF_WU,
+             "女性，35岁，干脆明亮的女中音，说带明显上海口音的普通话，吴语腔调利落，语速快、咬字脆，干练强势"),
+            ("c", "上海口音普通话 + 沪语词（ref）", REF_WU,
+             "女性，35岁，清脆爽利的偏低女声，说带上海口音的普通话，沪语味重，语速很快，精明老练、带点冷幽默"),
+        ]},
+    "tang_yao": {
+        "label": "唐瑶 · tang_yao（配角·替补模特，待选）", "gender": "female", "char_id": "ch_tang_yao",
+        "persona": "24 岁替补模特：清亮的轻女高音，急切、想抓住机会。（P1 voice_phrase：clear light soprano, quick eager tone, brisk pace）",
+        "cands": [
+            ("a", "普通话（标准）", REF_STD,
+             "female, 24 years old, a clear, light soprano voice, quick and eager, slightly anxious earnest tone, bright and youthful, standard Mandarin, brisk pace"),
+            ("b", "上海口音普通话 + 沪语词（ref）", REF_WU,
+             "女性，24岁，清亮的轻女高音，说带一点上海口音的普通话，语气急切、带点紧张和期待，语速偏快"),
+            ("c", "上海口音普通话 + 沪语词（ref）", REF_WU,
+             "女性，24岁，清透轻盈的高音，说带上海口音的普通话，吴语腔调，急急切切、想表现自己，语速快"),
+        ]},
 }
 
 
@@ -117,8 +139,28 @@ def _w(p: Path, d) -> None:
     os.replace(tmp, p)
 
 
+ONLY: set[str] | None = None   # --roles：只处理这些角色（加配角时不碰已选的主角）
+
+
+def load_roles_file(path: Path | str) -> list[str]:
+    """--roles-file（AUTOPIPE-A 11-03，阶段 A 音色作业）：从作业文件追加角色 {role: {label, gender, char_id, persona, cands: [[cand, accent, ref, instruct]]}}；
+    ref 写 "std" / "wu" 用上面的两段设计文本。已有同名角色不覆盖（ROLES 里写死的主角优先）"""
+    d = _j(Path(path))
+    added = []
+    for role, r in (d or {}).items():
+        if role in ROLES:
+            continue
+        cands = [(c[0], c[1], {"std": REF_STD, "wu": REF_WU}.get(c[2], c[2]), c[3]) for c in r.get("cands") or []]
+        ROLES[role] = {"label": r.get("label") or role, "gender": r.get("gender") or "female", "char_id": r.get("char_id"),
+                       "persona": r.get("persona") or "", "cands": cands}
+        added.append(role)
+    return added
+
+
 def cands():
     for role in ROLES:
+        if ONLY and role not in ONLY:
+            continue
         for cd in sorted((OUT / role).glob("*")):
             if (cd / "meta.json").exists():
                 yield cd, _j(cd / "meta.json")
@@ -126,6 +168,8 @@ def cands():
 
 def plan() -> None:
     for ri, (role, r) in enumerate(ROLES.items()):
+        if ONLY and role not in ONLY:
+            continue
         for ci, (cid, accent, ref_text, instruct) in enumerate(r["cands"]):
             cd = OUT / role / cid
             if (cd / "meta.json").exists():
@@ -274,6 +318,7 @@ def page() -> None:
 section{{margin:28px 0}}.c{{display:inline-block;vertical-align:top;width:330px;margin:8px;padding:12px;background:#fff;border:1px solid #ddd;border-radius:8px}}
 h3{{margin:0 0 6px}}p{{margin:6px 0}}audio{{width:300px}}small{{color:#666}}.n{{color:#333;font-size:13px}}.p{{color:#555}}</style>
 <h1>V2 音色候选（上海风格 · 时尚感）</h1>
+<div style='background:#2a2410;border:1px solid #a88a2a;padding:10px 14px;border-radius:6px;margin:10px 0'><b>项目方已选（L-132）</b>：lead_f = 候选 b，m1 = 候选 b，m2 = 候选 c，m3 = 候选 c（登记在 config/voices_v2.json）。其余候选已归档（不删），下面保留供对照。</div>
 <p>每个候选读同一组中性句：“{LINES[0]}”“{LINES[1]}”。全部为文字描述设计的合成声，不克隆任何真人；与 V1 音色无关。
 本页只列通过自动检查的候选（回听 CER ≤ 0.2、音高在性别范围、HNR ≥ 3 dB、无削波）。待项目方挑选，未启用。</p>
 {''.join(secs)}""", encoding="utf-8")
@@ -286,12 +331,84 @@ h3{{margin:0 0 6px}}p{{margin:6px 0}}audio{{width:300px}}small{{color:#666}}.n{{
     print("page", PAGE, "failed:", failed)
 
 
+def support_note(roles: list[dict]) -> str:
+    """配角区块说明：名字从角色定义的 label 取（不写死人名；AUTOFIX-O 11-03 P2）"""
+    names = [str(r.get("label") or "").split(" · ")[0] for r in roles if r.get("label")]
+    if not names:
+        return "没有待选的配角音色（都已选定）。"
+    return f"{'、'.join(names)}的音色候选，都过了自动检查；每人至少一个带上海腔。待项目方挑选，未启用。"
+
+
+def page_extra() -> None:
+    """配角（待选）：只往试听页追加一个区块、往 voices_v2.json 追加 roles 条目（status 待选、不启用）；已选的主角和 cast_voice 不动"""
+    cfgp = ROOT / "config" / "voices_v2.json"
+    cfg = _j(cfgp)
+    media = PAGE.parent / "voice"
+    media.mkdir(parents=True, exist_ok=True)
+    secs, failed = [], []
+    done_roles = []
+    for role in ROLES:
+        if role not in ONLY:
+            continue
+        if ((cfg.get("roles") or {}).get(role) or {}).get("selected"):
+            done_roles.append(role)                   # AUTOFIX-O 11-03（ISS-1103-004549-cb05）：已选定的槽不再写回 support_candidates
+            continue
+        r = ROLES[role]
+        rows, regc = [], []
+        for cd, m in cands():
+            if m["role"] != role:
+                continue
+            c = m.get("checks") or {}
+            if not c.get("pass"):
+                failed.append(f"{role}/{m['cand']}")
+                continue
+            it = c["items"]
+            for f in ("sample", "ref"):
+                shutil.copy2(cd / f"{f}.wav", media / f"{role}_{m['cand']}_{f}.wav")
+            shanghai = "上海" in m["accent"]
+            regc.append({"cand": m["cand"], "dir": str(cd.relative_to(ROOT)).replace(os.sep, "/"), "accent": m["accent"],
+                         "shanghai_accent": shanghai, "instruct": m["design"]["instruct"], "seed": m["design"]["seed"],
+                         "ref_sha256": m["ref_sha256"], "f0_hz": it["f0_hz"]["value"], "cer": it["cer"]["value"],
+                         "duration_s": it["duration_s"]["value"], "enabled": False, "status": "待选"})
+            rows.append(
+                f"<div class=c><h3>{role} · 候选 {m['cand']}</h3>"
+                f"<p><b>口音：</b>{html.escape(m['accent'])}</p>"
+                f"<p><b>设计描述：</b>{html.escape(m['design']['instruct'])}（seed {m['design']['seed']}）</p>"
+                f"<p>试听（两句）：<br><audio controls preload=none src=\"voice/{role}_{m['cand']}_sample.wav\"></audio></p>"
+                f"<p>设计原声（ref）：<small>{html.escape(m['ref_text'])}</small><br>"
+                f"<audio controls preload=none src=\"voice/{role}_{m['cand']}_ref.wav\"></audio></p>"
+                f"<p class=n>f0 {it['f0_hz']['value']} Hz · CER {it['cer']['value']} · 时长 {it['duration_s']['value']} s · "
+                f"HNR {it['hnr_db']['value']} dB · 峰值 {it['clipping']['value']['peak']}</p></div>")
+        secs.append(f"<h3 style='margin-top:18px'>{html.escape(r['label'])}</h3><p class=p>{html.escape(r['persona'])}</p>"
+                    + ("".join(rows) or "<p>（暂无过检候选）</p>"))
+        cfg.setdefault("support_candidates", {"status": "待选", "enabled": False, "roles": {}})["roles"][role] = {"persona": r["persona"], "char_id": r["char_id"], "status": "待选", "enabled": False,
+                              "candidates": regc, "selected": None}
+    block = ("<!--SUPPORT-BEGIN--><section id=support><h2>配角（待选）</h2>"
+             "<div style='background:#10242a;border:1px solid #2a8aa8;padding:10px 14px;border-radius:6px;margin:10px 0'>"
+             + html.escape(support_note([ROLES[x] for x in ONLY if x in ROLES and x not in done_roles])) + "</div>"
+             + "".join(secs) + "</section><!--SUPPORT-END-->")
+    t = PAGE.read_text(encoding="utf-8")
+    if "<!--SUPPORT-BEGIN-->" in t:
+        a, b = t.index("<!--SUPPORT-BEGIN-->"), t.index("<!--SUPPORT-END-->") + len("<!--SUPPORT-END-->")
+        t = t[:a] + block + t[b:]
+    else:
+        t = t.rstrip() + chr(10) + block + chr(10)
+    PAGE.write_text(t, encoding="utf-8")
+    _w(cfgp, cfg)
+    print("page_extra ok failed:", failed)
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["plan", "push", "design", "clone", "pull", "check", "page", "status"])
     ap.add_argument("--host", default="gpu33")
     ap.add_argument("--file", default="sample.wav")
+    ap.add_argument("--roles", default="", help="逗号分隔，只处理这些角色，如 zhuo_lin,tang_yao")
+    ap.add_argument("--roles-file", default="", help="作业提供的角色定义 JSON（阶段 A 音色作业，asset_worker 写）")
     a = ap.parse_args()
+    if a.roles_file:
+        load_roles_file(a.roles_file)
+    ONLY = set(filter(None, a.roles.split(","))) or None
     if a.cmd == "plan":
         plan()
     elif a.cmd == "push":
@@ -308,5 +425,7 @@ if __name__ == "__main__":
         print(sh(a.host, f"cd {REMOTE} && tail -5 *.log; tail -3 *.err; ls out/*/*"))
     elif a.cmd == "check":
         check()
+    elif ONLY:
+        page_extra()
     else:
         page()

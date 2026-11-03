@@ -116,6 +116,13 @@ def prompt_sha(job: dict) -> str:
     return hashlib.sha256((job.get("prompt") or "").encode()).hexdigest()[:16]
 
 
+def _current_run() -> str:
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from tools.autopilot import runs as _RN
+    return _RN.current_run()
+
+
 def dryrun(eps: list[int], only: set[str] | None = None, rec: Recorder | None = None) -> dict:
     """→ {"shots": {sid: {"ok", "reasons", "refs"}}, "files": {rel: sha|None}, "blocked": n, "missing": [rel]}"""
     from ns_agent import frame_job as FJ
@@ -123,7 +130,7 @@ def dryrun(eps: list[int], only: set[str] | None = None, rec: Recorder | None = 
     from ns_render import unified_frame as UF
     rec = rec or Recorder()
     script = P.load_script()
-    project = UF.project_for(script) or os.environ.get("NS_RUN_ID") or "series10_v1"   # 与 producer 同口径：project_for 认不出 → 用本剧 run_id（第二季）
+    project = UF.project_for(script) or os.environ.get("NS_RUN_ID") or _current_run()   # 与 producer 同口径；I-16：不写剧名
     res: dict = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "root": str(ROOT), "project": project, "eps": eps, "shots": {}}
     need: set[str] = set()
     for sid in shots_for(script, eps, only):

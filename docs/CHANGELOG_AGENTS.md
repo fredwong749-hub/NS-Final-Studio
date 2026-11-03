@@ -728,3 +728,14 @@
 - 2026-11-03 05:41 W9 ASSET-ITEMS（Orca，Opus）：asset_jobs item 规格改 V1 式白底物件图（去穿戴位置/美甲甲片/颜色材质）、item 编译跳过 shot-language 与 L-110 融合段（守卫）、asset_checks item 走物件契约（brand_logo/underage 阻断不变）、拒绝理由人话；祁念 O4 饰品/鞋/服装伪作业关闭；卓琳 acc1/nails1/outfit1、江予白 acc1 awaiting_pick。89 passed。待 A9 审计；未入版。
 - 2026-11-03 05:46 W5b UIUX-FIX（Orca，Opus；A5 P0/P1）：fallback 不说假话横幅；sop.py stepbar 去重/降序/最新阻断；#/queue decide 类改“要求修改 + 理由”；v3/plainWords.ts 人话词典；topbar_check/shoot_w5 健壮化。138 passed、build 0。未入版。
 - 2026-11-03 05:50 W11 RELEASE-PREP（Orca，Opus）：arch_scan 退化 4 处修；decision_propagation LOG_STREAMS；truncated_stdin 测试 Git bash/skip；sop_gate 按 run；master_check ④ enabled；tests/test_sop_gate_promote.py；CUT_PLAN §4 更新；cut A 树 9741c3be --dry ok=true。待 A-G1b 复核后 cut。
+- 2026-11-03 06:18 W12 RESIDENT-RELOAD（Orca，Opus）：asset_worker RELOAD_DEPS/sync_deps 版本戳；autoflow_resident 连续 3 拍失败登记 P0 + 心跳 state；master_check ⑥ sec_resident_assets。149 passed。A9 判 W9 可入版（P1×2 → W6c+）；A-G1b 判 cut A 可发。
+- 2026-11-03 06:28 发版 sv-20261103-01（总调度 MASTER-WSL；K-OPS-V01）：cut A = G1 harness（sop_gate / master_check / report_issue / episode_retro / episode_metrics / quarantine 守卫 / system_version / decision_propagation LOG_STREAMS / runs.py / 决策表 D-CLN-05）+ 当夜 master 文档；tree 19df6197，commit 6125b3e，tag 已推 origin；七道闸门全绿（Fable A-G1 / A-G1b 复审）；只入 git，不 deploy。剩余工作树 ≈320 文件为 cut B（G2–G7），待各组复审。
+- 2026-11-03 06:39 W6c+ ASSET-P1P2（Orca，Opus）：plan_items_from_sheet 先查项目方上传单品不重画；scene 编译去融合句；判词器补漏/bundle 整段/定案状态/先核验后 salvage。248 passed。A12 判 W12 可入版可重启 → resident 已重启。
+- 2026-11-03 11:13 W12b RELOAD-PYC（Orca，Opus）：importlib.reload 前删 __pycache__（A12 P1-1）；import_dep 懒加载记戳；心跳 reloaded_deps。test_infra_resident 18 passed；resident 已重启生效。
+- 2026-11-03 11:14 A-G3 / A-G7（Orca，Fable）cut B 分组复审：均无 P0；漏项与陈旧断言 → W13 CUTB-PREP。
+- 2026-11-03 11:34 A-G4（Orca，Fable）出图编译子集复审：P0=0；P1×2 → W14 排队；视频组 → A-G4b。
+- 2026-11-03 11:40 A-G5 / A-G6（Orca，Fable）cut B 分组复审：均无 P0；fanout.enabled=false 进版（L-161）；漏项与测试修绿 → W13。
+- 2026-11-03 12:03 A-G4b（Orca，Fable）视频组复审：P0=1 night.py V2 finalize 死路 → W16 NIGHT-FIX；陈旧测试 → W13。
+- 2026-11-03 12:14 W15 ARCH-FIX（Orca，Opus）：cut B dry 的 arch_scan 18 处退化修到 0（基线未动）；284 passed。
+- 2026-11-03 12:17 CODER-PS：L-159 执行（ep02 草稿挪回、STRUCT-O 提示避开 lens 中文名）、story_runs 409 双入口封堵（tests/test_story_runs_409.py）、V1 名清理 + kb-20261103-2b54fc9c、push_check tier2 PASS；总调度复核通过。
+- 2026-11-03 12:23 W16 NIGHT-FIX（Orca，Opus）：night.py/assemble_episode 按 run 参数化，V2 finalize 可达合成（REVIEW-G4b P0-1）；tests/test_night_v2_finalize.py 6 条；311 passed。

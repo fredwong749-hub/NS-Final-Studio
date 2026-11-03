@@ -88,16 +88,22 @@ def sha_file(p: Path) -> str | None:
         return None
 
 
+def _state(root: Path, name: str) -> Path:
+    """V2CUT-O 11-03：状态表 / 场景表按当前剧取（V1 = data/，其它剧 = data/import/runs/<run>/），不回退 V1 全局文件"""
+    from ns_agent import run_paths as RP
+    return RP.state_dir(root) / name
+
+
 def timeline_provisional(root: Path) -> bool:
     """S1 闸门：state_timeline.json 缺失或 provisional 都当作未通过"""
-    t = _read(root / "data" / "state_timeline.json", None)
+    t = _read(_state(root, "state_timeline.json"), None)
     return not isinstance(t, dict) or bool(t.get("provisional", True))
 
 
 def load_scenes_doc(root: Path) -> dict:
-    d = _read(root / "data" / "scenes.json", None)
+    d = _read(_state(root, "scenes.json"), None)
     if d is None:
-        raise SystemExit(f"没有 {root / 'data' / 'scenes.json'}：先跑 tools/build_state_timeline.py")
+        raise SystemExit(f"没有 {_state(root, 'scenes.json')}：先跑 tools/build_state_timeline.py")
     return d if isinstance(d, dict) else {"scenes": d}
 
 
@@ -163,7 +169,7 @@ def scene_jobs(root: Path = ROOT, draft: bool = False) -> tuple[dict, list[dict]
     doc = load_scenes_doc(root)
     texts, suffix = shot_texts(root)
     scenes_sha = doc.get("scenes_sha") or ""
-    scenes_file_sha = sha_file(root / "data" / "scenes.json")
+    scenes_file_sha = sha_file(_state(root, "scenes.json"))
     built_from = {"scenes_sha": scenes_sha, "scenes_json_sha256": scenes_file_sha,
                   "bible_version": doc.get("bible_version"), "provisional": bool(doc.get("provisional", True)),
                   "draft": draft}

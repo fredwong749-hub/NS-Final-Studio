@@ -19,7 +19,7 @@ import { LiveProgress } from "../ds/StageProgress";
 import { useSop } from "./sop.helpers";
 import { DOT_LABEL, episodeCounts, frameState, sceneOf, scriptGaps, shotMeta, shotStatus, videoBlock } from "./status";
 import { OwnerDecisionDialog } from "./OwnerDecision";
-import { actionTitle } from "./OwnerDecision.helpers";
+import { actionTitle, chipVisible, isLookWaiting, lookWaitText, useOwnerDecisionApi } from "./OwnerDecision.helpers";
 import { useUi } from "./ui.helpers";
 import { Pop, StatusDot, StatusLine } from "./widgets";
 import { useSbUi } from "./StoryboardDetails.helpers";
@@ -36,9 +36,21 @@ const short = (id: string) => id.split("-")[1];
 function DecideBar() {
   const { sop } = useSop();
   const [open, setOpen] = useState<SopOwnerAction | null>(null);
-  const acts = sop?.owner_actions ?? [];
+  const api = useOwnerDecisionApi(); // UIFIX-F 11-03：后端没有确认接口 → 可点的入口整个不显示
+  const all = sop?.owner_actions ?? [];
+  // UIFIX-F 11-03：造型确认属于资产阶段——身份脸没选定的人不给“确认造型”芯片，改成一句话
+  const waits = all.filter(isLookWaiting);
+  const acts = all.filter((a) => chipVisible(a, api));
   const now = acts.filter((a) => a.actionable).length;
-  if (!now) return null; // 规格 §3：没有要你拍板的事就不显示（未到的关口在“为什么卡住”里看）
+  if (!now && !waits.length) return null; // 规格 §3：没有要你拍板的事就不显示（未到的关口在“为什么卡住”里看）
+  if (!now)
+    return (
+      <div className="v3-decide">
+        {waits.map((a, i) => (
+          <small key={i} className="v3-decide-wait">{lookWaitText(a)}</small>
+        ))}
+      </div>
+    );
   const chip = (a: SopOwnerAction, i: number, close?: () => void) => (
     <button
       key={i}
@@ -56,7 +68,14 @@ function DecideBar() {
         <b>待你决定 {now}</b>
         <span className="v3-decide-chips">{acts.map((a, i) => chip(a, i))}</span>
         <Pop label={<>查看 ▾</>} btnClass="v3-decide-chip v3-decide-more" title="全部待你决定的事">
-          {(close) => <div className="v3-decide-list">{acts.map((a, i) => chip(a, i, close))}</div>}
+          {(close) => (
+            <div className="v3-decide-list">
+              {acts.map((a, i) => chip(a, i, close))}
+              {waits.map((a, i) => (
+                <small key={`w${i}`} className="v3-decide-wait">{lookWaitText(a)}</small>
+              ))}
+            </div>
+          )}
         </Pop>
       </div>
       {open && <OwnerDecisionDialog a={open} onClose={() => setOpen(null)} />}

@@ -29,7 +29,7 @@ if [ "$ACT" = "stop" ]; then
 fi
 [ -f $OFF/STOP ] && { echo "STOP 存在：不起额外剧 producer"; exit 0; }
 export TZ=Asia/Tokyo OFFLINE_SELF=$SELF OFFLINE_ALIASES=$([ $SELF = gpu36 ] && echo gpu33) PATH=$OFF/bin:$PATH PYTHONUTF8=1 PYTHONIOENCODING=utf-8
-export NS_QC_VISION_DIR=/root/work/fredw/video10_srv/models_cache/vision
+export NS_QC_VISION_DIR=$OFF/repo/models_cache/vision   # PRODMERGE-O：发版部署目录（video10_srv 退役）
 for run in $RUNS; do
   d=data/producer/runs/$run; mkdir -p $d
   if alive $d/serve.pid; then echo "producer[$run] pid $(cat $d/serve.pid) alive"; continue; fi

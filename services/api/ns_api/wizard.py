@@ -173,6 +173,14 @@ def validate_script(ctx: ProjectContext, write_import: bool = True) -> dict:
     })
     report["warnings"] = warnings
     report["ok"] = not report["fatal"]
+    prod_run = production_import_run(ctx) if write_import and report["ok"] else None
+    if prod_run is not None:
+        # PRODMERGE-O（REVIEW_GLOBAL_OPUS C-9）：生产导入稿（仓库 data/import/ 下：V1 旧路径或登记剧的按剧路径）不许向导直接写，
+        # 一律走正规导入闸门 producer.py import-staged（import_script：V1 泄漏守卫 + strict lint + 按剧合并）
+        report["import_staged"] = import_staged(files["script"], prod_run)
+        report["ok"] = bool(report["import_staged"]["ok"])
+        write_json(ctx.import_dir / "validation.json", {**report, "at": now()})
+        return report
     if write_import and report["ok"]:
         ctx.import_dir.mkdir(parents=True, exist_ok=True)
         ctx.script_json.write_text(result.model_dump_json(indent=2), encoding="utf-8", newline="\n")
@@ -184,6 +192,57 @@ def validate_script(ctx: ProjectContext, write_import: bool = True) -> dict:
         schedule_rebuild(ctx.root)
     write_json(ctx.import_dir / "validation.json", {**report, "at": now()})
     return report
+
+
+def _runs_mod():
+    import importlib.util as _u
+    sp = _u.spec_from_file_location("runs_for_wizard", REPO / "tools" / "autopilot" / "runs.py")
+    m = _u.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m
+
+
+def production_import_run(ctx: ProjectContext) -> str | None:
+    """向导要写的导入稿是不是生产导入稿：落在仓库 data/import/ 下（V1 旧路径或任何登记剧的按剧路径）→ 该剧 id
+    （旧路径 = legacy 剧）；向导自己的项目沙箱（projects/<slug>/…）→ None（照旧写，不进生产）"""
+    try:
+        target = Path(ctx.script_json).resolve()
+        base = (REPO / "data" / "import").resolve()
+    except OSError:
+        return None
+    if base not in target.parents:
+        return None
+    R = _runs_mod()
+    for run in (R.registry(REPO).get("runs") or {}):
+        if R.import_path(run, REPO).resolve() == target:
+            return run
+    return R.legacy_run(REPO)
+
+
+def import_staged(script: Path | None, run: str, by: str = "wizard", runner=None) -> dict:
+    """转调 producer.py import-staged（唯一正规导入入口）；legacy 剧（V1 只读冻结）一律拒绝。runner(cmd) → (rc, out)：测试注入"""
+    import subprocess
+    import sys
+    R = _runs_mod()
+    if R.is_legacy(run, REPO):
+        return {"ok": False, "run": run, "why": f"{run} 是 legacy 剧（V1 只读冻结），向导不能写它的导入稿"}
+    if script is None or not Path(script).is_file():
+        return {"ok": False, "run": run, "why": "没有剧本文件"}
+    try:
+        rel = Path(script).resolve().relative_to(REPO.resolve()).as_posix()
+    except ValueError:
+        return {"ok": False, "run": run, "why": "剧本文件不在仓库内，import-staged 只收仓库内的写作产物"}
+    sha = hashlib.sha256(Path(script).read_bytes()).hexdigest()
+    py = REPO / ".venv" / "Scripts" / "python.exe"
+    cmd = [str(py) if py.is_file() else sys.executable, str(REPO / "tools" / "autopilot" / "producer.py"), "import-staged",
+           "--obj", rel, "--reason", sha, "--note", "wizard（向导导入，PRODMERGE-O）", "--by", by, "--run", run]
+    if runner:
+        rc, out = runner(cmd)
+    else:
+        p = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800)
+        rc, out = p.returncode, (p.stdout or "") + (p.stderr or "")
+    tail = [x for x in out.splitlines() if x.strip()]
+    return {"ok": rc == 0, "run": run, "rc": rc, "out": (tail[-1] if tail else "")[:400], "cmd": "producer.py import-staged"}
 
 
 def load_import(ctx: ProjectContext) -> ScriptImport | None:

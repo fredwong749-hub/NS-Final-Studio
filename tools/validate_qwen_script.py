@@ -81,10 +81,9 @@ RULES: dict[str, tuple[str, str]] = {
     "QW-E2": ("block", "镜号从 1 连续递增；镜数 6 ≤ n ≤ max(8, 说话轮次 + 独白段数, ⌈各镜时长之和 ÷ 6⌉)（K1 + G29：单镜 ≤6 秒要装得下总时长）"),
     "QW-E3": ("block", "各镜 `**时长**` 之和 60–120 秒，超出不过（项目方 11-01 21:4x：“改成 60–120 秒”，L-092 / D-SCR-08）"),
     "QW-F0": ("block", "每行都要属于一个字段：`**标签**：值` 一行写完，不要写无标签的散行"),
-    "QW-C1": ("warn", "motion 在触发词之后以英文运镜指令开头，只从 camera push in / pull out / zoom in / zoom out / "
-                      "pan left / pan right / truck left / truck right / tilt up / tilt down / pedestal up / pedestal down / "
-                      "arc shot / tracking shot、`static shot` 中选（如 `camera push in <中文运镜词>，`、`static shot，`；"
-                      "旧写法 static camera 过渡期仍认）"),
+    "QW-C1": ("warn", "motion 在触发词之后以英文运镜指令开头，运镜只从 config/director/camera_moves.yaml 里 enabled、且本剧可用的"
+                      "运镜中选（写运镜 id、英文名或英文别名，如 `camera push in <中文运镜词>，`、`static shot，`；词表是唯一来源，"
+                      "这里不另列）"),
     "QW-C2": ("warn", "img 写出景别词（远景/全景/中景/近景/特写/极近特写…）"),
     "QW-C3": ("warn", "motion 至少一个可观察的表情线索短句（眼神/嘴角/睫毛/呼吸/抿/笑…，≤28 字）"),
     "QW-S1": ("warn", "`【H3 audio】` 与 H3 提示词里的 `overall_soundscape` 逐字一致"),
@@ -116,7 +115,7 @@ RULES: dict[str, tuple[str, str]] = {
                       "trigger 只用英文字母、数字、下划线"),
     "QW-P1": ("block", "人物表写成 `**全剧人物表**：` / `**本集人物表**：` + 表头 `| 角色 | 角色id | 中文外貌句 | EN外貌短语 | "
                        "VOICE声线短语 |` + 分隔行 + 每人一行 5 格（格内不用 |）"),
-    "QW-P2": ("block", "角色名全剧唯一；角色id 用已有 slug（lin_wan、gu_chen、chen_yu、ch_a_lan）或 "
+    "QW-P2": ("block", "角色名全剧唯一；角色id 照抄全局头已登记的 id，新角色写 "
                        "`ch_<小写英文数字下划线>`（V2 女主等项目方指定资产的角色可用 `lead_<…>`，如 lead_f），一个 id 只对应一个角色名"),
     "QW-P3": ("block", "EN外貌短语：一条英文名词短语，只写身份（年龄、性别、发色长度与刘海、脸 / 肤色 / 体型），不写服装；"
                        "无中文、无否定词、无双引号、不含人名和触发词"),
@@ -289,7 +288,7 @@ def check_shot(shot, ep, triggers: set[str], names: list[str]) -> list[dict]:
         if CUT_RE.search(mo):
             out.append(_issue("S1-W1", f"motion 出现剪辑词：{CUT_RE.search(mo).group(0)}", field="motion"))
         body = _strip_trig(mo)
-        if not (MOVE_EN.match(body) or STATIC_SHOT_RE.match(body)):
+        if not (MOVE_EN.match(body) or STATIC_SHOT_RE.match(body) or motion_move(mo)):
             out.append(_issue("QW-C1", "motion 触发词后不是英文运镜指令开头（画布取不到“运镜”）", field="motion"))
         clauses = [c.strip(" 、") for t in (_strip_trig(mo), _strip_trig(shot.img_prompt))
                    for c in CLAUSE_SPLIT.split(t)]
@@ -440,11 +439,47 @@ def check_scenes(imp, text: str, require: bool) -> tuple[list[dict], dict[int, l
 
 SIZE_RANK = {"大远景": 0, "远景": 1, "大全景": 2, "全景": 2, "中全景": 3, "全身": 3, "中景": 4, "中近景": 5, "近景": 6,
              "特写": 7, "大特写": 8, "极近特写": 8, "极近": 8}
-OFFICIAL_MOVES = {   # QW-C1 词表 → 运镜类型（与 h3_lint.camera_moves 的类型同名，QW-C4 比对）
-    "push in": "push in", "pull out": "pull out", "zoom in": "zoom", "zoom out": "zoom", "pan left": "pan",
-    "pan right": "pan", "truck left": "truck", "truck right": "truck", "tilt up": "tilt", "tilt down": "tilt",
-    "pedestal up": "pedestal", "pedestal down": "pedestal", "arc shot": "arc", "tracking shot": "tracking",
-    "static shot": "static", "static camera": "static"}
+# QW-C1 运镜词表：唯一来源 = config/director/camera_moves.yaml（总调度 11-02 21:5x：不另存一份词表）。
+# 只认 enabled、并且对本剧可用（camera_norm.is_enabled(id, run)：标了 runs 的按剧运镜只在列出的剧里）的运镜；
+# 写法 = 运镜 id（例 bolt_push_settle）或它的英文别名 / 英文名。下面是“运镜 id → h3_lint.camera_moves 类型名”的映射（QW-C4 / QW-K2 用），
+# 不是词表；id 不在这里 = 没有对应的 H3 类型（按剧运镜），QW-C4 不比
+MOVE_TYPE = {"push_in": "push in", "pull_out": "pull out", "zoom_in": "zoom", "pan": "pan", "truck": "truck", "tilt_up": "tilt",
+             "tilt_down": "tilt", "pedestal_up": "pedestal", "arc": "arc", "static": "static"}
+_RUN: dict = {"run": None}
+
+
+def _camera_norm():
+    import importlib.util
+    sp = importlib.util.spec_from_file_location("cn_validate", ROOT / "services" / "agent" / "ns_agent" / "camera_norm.py")
+    m = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m
+
+
+def camera_vocab(run: str | None = None) -> dict[str, str]:
+    """英文写法（小写）→ 运镜 id；只含 camera_moves.yaml 里 enabled 且对本剧可用的运镜（run 显式传；不传按 validate 解析出的剧）"""
+    CN = _camera_norm()
+    r = run if run is not None else _RUN["run"]
+    out = {}
+    for m in CN.vocab().get("moves") or []:
+        if not CN.is_enabled(m["id"], r):
+            continue
+        for a in [m["id"], (m.get("en") or "").lower(), *[x for x in m.get("aliases") or [] if x.isascii()]]:
+            if a:
+                out[a.lower()] = m["id"]
+    return out
+
+
+def run_of_path(path) -> str | None:
+    """剧本属于哪部剧：路径里出现 runs.json 登记的剧名（data/import/runs/<剧>/、data/pipeline/runs/<剧>/）；否则 legacy 剧"""
+    import json as _json
+    f = ROOT / "config" / "pipeline" / "runs.json"
+    if not f.is_file():
+        return None
+    reg = _json.loads(f.read_text(encoding="utf-8"))
+    parts = set(Path(path).resolve().parts)
+    hit = [r for r in (reg.get("runs") or {}) if r in parts]
+    return hit[0] if hit else reg.get("legacy_unprefixed_run")
 ORIENT_WORDS = {"back": ("背影", "背对", "背抵", "后脑"), "side": ("侧脸", "侧影", "侧面")}   # ns_render/refs.py 认得的词
 TRANSITION_RE = re.compile(r"次日|第二天|翌日|闪回|回忆|梦境|数日后|几天后|一周后|当晚|(?:^|[，,。；;（(])周[一二三四五六日天]")
 CUE_ACTIONS = ("进入", "延续", "渐强", "推到高点", "撤到静默", "落下", "重音")
@@ -467,13 +502,20 @@ def size_of(text: str) -> str | None:
     return best[1] if best else None
 
 
-def motion_move(motion: str) -> str | None:
-    """motion 触发词后的英文运镜（QW-C1 词表里的写法；不在表里返回 None）"""
+def motion_move(motion: str, run: str | None = None) -> str | None:
+    """motion 触发词后的英文运镜 → 运镜 id（camera_moves.yaml 本剧可用的写法；不在表里返回 None）"""
+    voc = camera_vocab(run)
+    for tok in re.split(r"[，,]", motion or ""):                 # 运镜 id（bolt_push_settle）长得像触发词，会被 _strip_trig 剥掉：先按句首逗号段认
+        t = tok.strip().lower()
+        if t in voc and "_" in t:
+            return voc[t]
+        if not re.fullmatch(r"[a-z0-9_]+", t):
+            break
     body = _strip_trig(motion or "").lower()
     body = re.sub(r"^camera\s+", "", body)
-    for mv in sorted(OFFICIAL_MOVES, key=len, reverse=True):
-        if body.startswith(mv):
-            return mv
+    for w in sorted(voc, key=len, reverse=True):
+        if body.startswith(w):
+            return voc[w]
     return None
 
 
@@ -817,10 +859,11 @@ def check_v3(imp, text: str, require: bool) -> tuple[list[dict], dict[int, list[
             # ---- 运镜 / 景别 / 朝向
             mv = motion_move(sh.motion_prompt)
             if sh.motion_prompt and mv is None and MOVE_EN.match(_strip_trig(sh.motion_prompt)):   # 能认出运镜但不在词表
-                out.append(_issue("QW-C1", "motion 的英文运镜不在 QW-C1 词表里", field="motion"))
+                out.append(_issue("QW-C1", "motion 的英文运镜不在运镜词表里（config/director/camera_moves.yaml 里 enabled、且本剧可用的）",
+                                  field="motion"))
             if mv and sh.h3_prompt:
                 found = L.camera_moves(L._description(sh.h3_prompt))
-                if found and OFFICIAL_MOVES[mv] not in found:
+                if found and MOVE_TYPE.get(mv) and MOVE_TYPE[mv] not in found:
                     out.append(_issue("QW-C4", f"motion 运镜 {mv} 与 H3 正文的运镜（{'、'.join(found)}）不是同一种", field="motion"))
             if sh.motion_prompt and end:
                 es = next((w for w in sorted(SIZE_RANK, key=len, reverse=True) if end.startswith(w)), None)
@@ -828,7 +871,7 @@ def check_v3(imp, text: str, require: bool) -> tuple[list[dict], dict[int, list[
                     out.append(_issue("QW-K1", f"结束状态没有以景别词开头：{end[:16]}", field="motion"))
                 a = size_of(img)
                 if es and a:
-                    diff, cap = abs(SIZE_RANK[a] - SIZE_RANK[es]), (0 if mv and OFFICIAL_MOVES[mv] in
+                    diff, cap = abs(SIZE_RANK[a] - SIZE_RANK[es]), (0 if mv and MOVE_TYPE.get(mv) in
                                                                       ("static", "pan", "tilt", "truck") else 1)
                     if diff > cap:
                         out.append(_issue("QW-K2", f"img 景别 {a} → 结束状态 {es} 相差 {diff} 档（{mv or '运镜'} 最多 {cap} 档）",
@@ -938,12 +981,49 @@ def _episode_lines(episodes, ep):
     return ep.source_line, (min(nxt) if nxt else 10 ** 9)
 
 
+V2_SHOT_MAX_S = 6.0          # 项目方定律：单镜不超过 6 秒（V1 视频链规则，L-137 原样带进 V2）
+V2_HARD_RULES = ("QW-T1", "QW-C1")
+
+
+def hard_run(run: str | None) -> bool:
+    """MERGE-VID-O（L-137）：非 legacy 剧（V2 及以后的新剧）——QW-T1（单镜 ≤6 秒）/ QW-C1（运镜在本剧词表里）判 block，
+    而且不可交补丁环（补丁环不能改镜数 / 时长；运镜不在词表 = 视频端会被改回固定机位）。legacy（V1）/ 认不出剧 → 保持旧级别"""
+    if not run:
+        return False
+    import json as _json
+    f = ROOT / "config" / "pipeline" / "runs.json"
+    if not f.is_file():
+        return False
+    legacy = _json.loads(f.read_text(encoding="utf-8")).get("legacy_unprefixed_run")
+    return bool(legacy) and run != legacy
+
+
+def _apply_hard_rules(ep, ep_issues: list, shot_issues: dict) -> list[dict]:
+    """V2：去掉 QW-T1 的集级 warn，按镜加 QW-T1 block（>6 秒，台词多也不放宽）；QW-C1 升 block。→ 硬阻断清单"""
+    ep_issues[:] = [i for i in ep_issues if i["rule_id"] != "QW-T1"]
+    hard = []
+    for s in ep.shots:
+        iss = shot_issues.setdefault(s.id, [])
+        for i in iss:
+            if i["rule_id"] == "QW-C1":
+                i["level"] = "block"
+        if s.duration and float(s.duration) > V2_SHOT_MAX_S + 1e-6:
+            iss.append(_issue("QW-T1", f"镜{s.index} 时长 {s.duration} 秒，超过单镜上限 {V2_SHOT_MAX_S:g} 秒（V2 硬规则，L-137）："
+                                       "多出来的时间拆成新镜，不拉长这一镜", level="block", field="时长"))
+        hard += [{"shot": s.id, "rule_id": i["rule_id"], "detail": i["detail"]} for i in iss
+                 if i["rule_id"] in V2_HARD_RULES and i["level"] == "block"]
+    return hard
+
+
 def validate(path: Path, episode: int | None = None, names: list[str] | None = None,
-             require_scenes: bool = False, require_v3: bool = False) -> dict:
+             require_scenes: bool = False, require_v3: bool = False, run: str | None = None) -> dict:
+    _RUN["run"] = run or run_of_path(path)            # QW-C1 按剧取运镜词表（camera_moves.yaml runs）
+    hard_on = hard_run(_RUN["run"])
     imp = import_script(Path(path))
     triggers = {t.trigger for t in imp.globals.lora_triggers}
     eps = [e for e in imp.episodes if episode is None or e.number == episode]
-    report = {"script": str(path), "episodes": [], "counts": {}, "blocking": 0, "warnings": 0}
+    report = {"script": str(path), "episodes": [], "counts": {}, "blocking": 0, "warnings": 0, "run": _RUN["run"],
+              "hard_blocks": []}
     counts: collections.Counter = collections.Counter()
     text = Path(path).read_text(encoding="utf-8")
     sc_glob, sc_eps, sc_shots = check_scenes(imp, text, require_scenes)
@@ -966,12 +1046,15 @@ def validate(path: Path, episode: int | None = None, names: list[str] | None = N
             m = re.match(r"第 (\d+) 行无法归属：(.*)", w)
             if m and lo <= int(m.group(1)) < hi:
                 ep_issues.append(_issue("QW-F0", f"第 {m.group(1)} 行无法归属：{m.group(2)}"))
+        shot_iss = {s.id: check_shot(s, ep, triggers, names or []) + sc_shots.get(s.id, []) for s in ep.shots}
+        if hard_on:
+            report.setdefault("hard_blocks", []).extend(_apply_hard_rules(ep, ep_issues, shot_iss))
         ep_rep = {"number": ep.number, "title": ep.title, "issues": ep_issues, "shots": [],
                   "repair": repair_request(ep.number, None, [i for i in ep_issues if i["level"] == "block"], scope=False)
                   if any(i["level"] == "block" for i in ep_issues) else ""}
         all_issues = list(ep_issues)
         for s in ep.shots:
-            iss = check_shot(s, ep, triggers, names or []) + sc_shots.get(s.id, [])
+            iss = shot_iss[s.id]
             all_issues += iss
             ep_rep["shots"].append({"id": s.id, "index": s.index, "duration": s.duration,
                                     "frames": L.frames_for_seconds(s.duration or 10), "issues": iss,

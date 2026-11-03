@@ -64,7 +64,7 @@ def best_chunk(run_dir: Path, ep: int) -> tuple[str, str] | None:
                 pre, ch = RL.split_doc(t)
                 return pre, ch[0]
             body = t[t.find("## ep"):] if "## ep" in t else t
-            header, _ = SC.script_header(registry={})
+            header, _ = SC.script_header(registry={}, run=SC.run_for_dir(run_dir))
             return header + "\n---\n\n", body.rstrip() + "\n\n---\n"
     return None
 

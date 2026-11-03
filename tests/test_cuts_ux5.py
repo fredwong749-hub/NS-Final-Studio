@@ -85,8 +85,9 @@ def test_cut_job_always_variant_and_no_concurrency(client, tmp_path):
     assert cmd[cmd.index("--variant") + 1] == j["variant"]                 # 一律另存对照版，不覆盖原成片
     assert cmd[cmd.index("--dialogue-source") + 1] == "h3"
     assert "--upscale-4k" not in cmd                                        # 不碰 GPU
-    assert client.post("/api/episodes/2/cut-job").status_code == 409        # 同集同时只跑一个
-    assert client.post("/api/episodes/3/cut-job").status_code == 200        # 别的集可以
+    again = client.post("/api/episodes/2/cut-job")                           # 同集同时只跑一个：原样返回那个任务（202 收下，不退回）
+    assert again.status_code == 202 and again.json()["variant"] == j["variant"] and len(FakeProc.started) == 1
+    assert client.post("/api/episodes/3/cut-job").status_code == 202        # 别的集可以
     assert (tmp_path / "data" / "episodes" / "ep02_v1.mp4").read_text(encoding="utf-8") == "x"
 
 
@@ -97,4 +98,4 @@ def test_cut_job_status_and_validation(client):
     client.post("/api/episodes/2/cut-job", json={})
     C.JOBS[2]["proc"].returncode = 0
     assert client.get("/api/episodes/2/cut-job").json()["state"] == "done"
-    assert client.post("/api/episodes/2/cut-job").status_code == 200        # 跑完可以再合成
+    assert client.post("/api/episodes/2/cut-job").status_code == 202        # 跑完可以再合成

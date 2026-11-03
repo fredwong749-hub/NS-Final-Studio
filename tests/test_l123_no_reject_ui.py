@@ -72,3 +72,30 @@ def test_frames_page_wired_to_topbar_and_old_canvas_kept():
     assert '["canvas", "画布（审片 / 精修）"' in top                                            # 旧画布入口保留
     fp = read("v3/pages/FramesPage.tsx")
     assert "/api/frames-index" in fp and "SafeImg" in fp and "onError" in fp and "<Verdict" in fp
+
+
+def test_owner_queue_cards_only_use_and_edit():
+    """W5 UIUX 11-03（L-134 + L-123）：#/queue 的每类卡片（闸门 / 拍板 / 抽检 / 挑选 / 详情）只有“批准 / 用这张”+“修改”；
+    后端的“不同意 / 稍后”不渲染成按钮；全局“打回”弹框不再挂载"""
+    q = code_only(read("v3/pages/OwnerQueuePage.tsx"))
+    for w in GONE + ("不同意", "稍后", "打回", "RejectDialog", "item.options.map("):
+        assert w not in q, f"OwnerQueuePage 还有：{w}"
+    qa = read("v3/queueActs.ts")
+    assert '"批准"' in qa and '"修改"' in qa and '"用这张"' in qa and "LATER" in qa
+    app = code_only(read("App.tsx"))
+    assert "<RejectDialog" not in app and "RejectDialog," not in app
+
+
+def test_queue_decide_edit_means_request_change_with_reason():
+    """W5b（A5 P2-2）：拍板类（decide）的第二个按钮 = “要求修改 + 一句话理由”，不是“不要了”。
+    后端字段（POST /api/owner/decide）：choice = 反向选项 reject，reason = “要求修改：<那句话>”；必须写了那句话才能提交"""
+    qa = read("v3/queueActs.ts")
+    assert 'label: "要求修改"' in qa and 'prefix: "要求修改："' in qa and 'submit: "提交：要求修改"' in qa
+    assert 'it.kind === "decide"' in qa and "DECIDE_EDIT.label" in qa
+    assert "export function editReason(" in qa and 'it.kind !== "decide" || !NEG.includes(choice) || !r' in qa
+    q = code_only(read("v3/pages/OwnerQueuePage.tsx"))
+    assert "editReason(it, choice, reason)" in q                                                # 提交前统一加前缀
+    assert "edit.ask ??" in q and "edit.submit ??" in q and "{edit.label}" in q                 # 按钮 / 提示 / 提交文案都跟 queueActs 走
+    assert 'disabled={!(said || txt.trim())}' in q                                               # 不写理由交不了
+    src = (ROOT / "services" / "api" / "ns_api" / "owner_queue.py").read_text(encoding="utf-8")
+    assert '{"key": "reject", "label": "不同意"}' in src and "reason: str = \"\"" in src          # 后端口径没变：choice=reject + reason

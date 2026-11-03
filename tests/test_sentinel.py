@@ -516,3 +516,10 @@ def test_ui_measure_tickets():
     assert fs["S9:sc/#/settings:jargon"]["violated"] and not fs["S9:sc/#/settings:clean"]["violated"]
     assert fs["S9:sc/#/overview:clean"]["violated"] and "S9:sc/#/cut:jargon" not in fs
 
+
+def test_q10_detector():
+    c = C["S28_q10_detector"]
+    assert not J.j_q10(1, {"ok": False, "err": "refused"}, c)[0]["violated"]          # 1 次失败不报
+    f = J.j_q10(2, {"ok": True, "loaded": False}, c)[0]
+    assert f["violated"] and "loaded=False" in f["title"] and f["owner_loop"] == "FACTORY"
+    assert not J.j_q10(0, {"ok": True, "loaded": True}, c)[0]["violated"]

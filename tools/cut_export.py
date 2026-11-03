@@ -131,9 +131,12 @@ def main(argv=None) -> int:
     th.start()
     t0 = time.time()
     try:
-        cfg = load_voice_config()
+        from ns_post import run_media as RM  # noqa: E402  OVERSIGHT-F P1-13a：配乐 / 音色按剧取
+        run = RP.current_run(ROOT)
+        cfg = load_voice_config(run=run)
         variant = f"cut_r{rev}"
         bgm_file = (proj.get("bgm") or {}).get("file")   # 配乐目录跟着工程里的那条配乐（装配时定的），不写死某部剧的目录
+        RM.check_episode_music(run, ep, RM.music_dir(run, ROOT), bgm_file, ROOT)   # V2：工程里的配乐必须来自曲库 / 本剧目录
         settings = Settings(threads=8, bgm=bool(bgm_file), deliver_4k="off",
                             dialogue_source=proj.get("dialogue_source") or "h3",
                             music_dir=str((ROOT / bgm_file).parent) if bgm_file else None)

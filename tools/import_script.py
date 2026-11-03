@@ -15,15 +15,16 @@ ROOT = Path(__file__).resolve().parent.parent
 LIB = ROOT / "script play lib"
 
 
-def merge_into(base_path: Path, new):
+def merge_into(base_path: Path, new, single_source: bool = False):
     """把新稿的集按集号替换进底稿（ScriptImport）；底稿其余集原样保留。
-    全局头（角色锁 / 触发词 / 后缀等）用新稿的（新稿带完整全局头时）；来源列表合并；“缺少集数”类警告去掉。"""
+    全局头（角色锁 / 触发词 / 后缀等）用新稿的（新稿带完整全局头时）；来源列表合并；“缺少集数”类警告去掉。
+    single_source=True（非 V1 剧，ISS-1103-044539-f93d）：全局头只用新稿的，见 merge_globals"""
     from ns_schema.script import ScriptImport
     base = ScriptImport.model_validate_json(base_path.read_text(encoding="utf-8"))
     new_eps = {e.number: e for e in new.episodes}
     episodes = [new_eps.pop(e.number, e) for e in base.episodes] + sorted(new_eps.values(), key=lambda e: e.number)
     replaced = sorted(new_eps_all := {e.number for e in new.episodes})
-    g = merge_globals(base.globals, new.globals, new_eps_all)
+    g = merge_globals(base.globals, new.globals, new_eps_all, single_source=single_source)
     # 封板修复：只去掉“缺少集数”里与本次替换无关的那类；新稿里同一集号重复要提示
     warnings = [w for w in new.warnings if not w.startswith("缺少集数")]
     if len(new.episodes) != len(new_eps_all):
@@ -65,11 +66,14 @@ def registry_drift(base_g, new_g, replaced: set[int]) -> list[str]:
     return out
 
 
-def merge_globals(base, new, replaced: set[int] | frozenset = frozenset()):
+def merge_globals(base, new, replaced: set[int] | frozenset = frozenset(), single_source: bool = False):
     """封板修复 P0：逐字段合并全局头——新稿非空才覆盖（单集稿常没有角色锁 / 后缀 / 基础负面，旧逻辑会整份清空）；
     触发词按 trigger 合并（新稿优先）；装饰自查表按集覆盖。
     人物表 / 场景表（fredw-92 2026-10-31 定：全剧一份、逐集继承）：先登记的为准——底稿登记仍有效（base_registered）就保留，
-    只有定义它的集全部被这次替换时才用新稿的；新角色 / 新场景追加"""
+    只有定义它的集全部被这次替换时才用新稿的；新角色 / 新场景追加。
+    single_source=True（MERGE-OPS-O，ISS-1103-044539-f93d：非 V1 剧重导时底稿 motion_suffix / image_suffix 的“徕卡”原样回流）：
+    后缀 / 基础负面 / 装饰区间 / 日常穿搭 / 角色锁 / 基准图 / 触发词只取新稿（= 当前集头），底稿旧值不回流；
+    人物表 / 场景表照旧逐集继承（别的集的登记还要用），之后由 scope_globals 只留本剧登记，再过 v1_gate"""
     def by_key(attr, key):   # 列表按键合并，新稿优先；底稿顺序在前
         d = {key(x): x for x in getattr(base, attr)}
         d.update({key(x): x for x in getattr(new, attr)})
@@ -82,7 +86,10 @@ def merge_globals(base, new, replaced: set[int] | frozenset = frozenset()):
             if o is None or not base_registered(o, replaced):
                 d[key(x)] = x
         return list(d.values())
-    pick = lambda k: getattr(new, k) or getattr(base, k)   # noqa: E731
+    pick = (lambda k: getattr(new, k)) if single_source else (lambda k: getattr(new, k) or getattr(base, k))   # noqa: E731
+    if single_source:
+        def by_key(attr, key):   # noqa: F811  单一来源：只用新稿
+            return list(getattr(new, attr))
     return base.model_copy(update={
         **{k: pick(k) for k in ("motion_suffix", "image_suffix", "base_negative", "decor_schedule", "daily_outfit")},
         "character_locks": by_key("character_locks", lambda c: c.name),   # 单集稿只写一条角色锁时不丢其余角色
@@ -90,7 +97,7 @@ def merge_globals(base, new, replaced: set[int] | frozenset = frozenset()):
         "lora_triggers": by_key("lora_triggers", lambda t: t.trigger),
         "scene_library": registry("scene_library", lambda e: e.scene_id),   # S1：场景表按场景 id 合并（先登记为准）
         "character_registry": registry("character_registry", lambda e: e.name),   # R3：人物表按角色名合并（先登记为准）
-        "decor_tables": {**base.decor_tables, **new.decor_tables}})
+        "decor_tables": dict(new.decor_tables) if single_source else {**base.decor_tables, **new.decor_tables}})
 
 
 def _src_key(path: str) -> str:
@@ -173,6 +180,134 @@ def default_out() -> Path:
     return _runs().script_path(None, ROOT)
 
 
+def target_run(out: Path) -> str | None:
+    """V2CUT-O（11-03，L-126）：输出路径是哪个非 V1 剧的导入稿（runs.import_path）→ 剧名；V1 / 临时输出 / 登记表读不出 → None"""
+    try:
+        RN = _runs()
+        names = list((RN.registry(ROOT).get("runs") or {}))
+    except Exception:  # noqa: BLE001  # arch-ok: 没有登记表（沙箱）= 不按剧收口
+        return None
+    o = Path(out).resolve()
+    return next((r for r in names if not RN.is_legacy(r, ROOT) and RN.import_path(r, ROOT).resolve() == o), None)
+
+
+def _jl(p: Path) -> dict:
+    import json
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):  # arch-ok: 读不到 = 本剧没登记（场景 / 角色 / 触发词按空集收口，更严，不是放行）
+        return {}
+
+
+def run_registered(run: str) -> tuple[set[str], set[str]]:
+    """本剧自己登记过的场景 id / 角色（中文名 + char_id）：只读本剧的 P1（data/pipeline/runs/<run>/P1_storyline.json）
+    和本剧资产包清单（runs.asset_manifest）。绝不读 V1 的全局表 / V1 导入稿"""
+    RN = _runs()
+    p1 = _jl(RN.run_dir(run, ROOT) / "P1_storyline.json")
+    scenes = {s["scene_id"] for s in p1.get("scenes") or [] if isinstance(s, dict) and s.get("scene_id")}
+    chars = {v for c in p1.get("characters") or [] if isinstance(c, dict) for v in (c.get("name"), c.get("char_id")) if v}
+    mp = RN.asset_manifest(run, ROOT)
+    man = _jl(Path(mp)) if mp else {}
+    scenes |= set((man.get("scenes") or {}))
+    for cid, c in (man.get("characters") or {}).items():
+        chars |= {cid} | ({c["display_name"]} if isinstance(c, dict) and c.get("display_name") else set())
+    return scenes, chars
+
+
+def scope_globals(result, scenes_ok: set[str], chars_ok: set[str]) -> list[str]:
+    """非 V1 剧导入稿的全局登记只留本剧自己的（L-126 完全切割）：
+    - 场景表 / 人物表：本剧某集“本集场景表 / 本集人物表”定义过的（defined_in 有集号），或本剧 P1 / 资产包清单登记过的；
+      只在“全剧表”（全局头，defined_in 只有 None）出现、本剧又没登记的 = 别的剧带进来的，丢掉；
+    - 角色锁 / 触发词 / 日常穿搭：属于被丢掉角色的（角色锁按名字；触发词、日常穿搭原文提到该角色名）一并丢掉。
+    → 丢掉了什么（写进导入警告）"""
+    g = result.globals
+    own = lambda e: any(n is not None for n in (e.defined_in or []))          # noqa: E731
+    keep_s = [e for e in g.scene_library if own(e) or e.scene_id in scenes_ok]
+    keep_c = [e for e in g.character_registry if own(e) or e.name in chars_ok or (e.char_id and e.char_id in chars_ok)]
+    drop_s = [e.scene_id for e in g.scene_library if e not in keep_s]
+    drop_c = [e for e in g.character_registry if e not in keep_c]
+    names = {e.name for e in drop_c}
+    kept_names = {e.name for e in keep_c} | {x for x in chars_ok}
+    locks = [c for c in g.character_locks if c.name in kept_names and c.name not in names]
+    drop_l = [c.name for c in g.character_locks if c not in locks]
+    names |= set(drop_l)
+    trig = [t for t in g.lora_triggers if not any(n and n in t.description for n in names)]
+    drop_t = [t.trigger for t in g.lora_triggers if t not in trig]
+    daily = "" if any(n and n in g.daily_outfit for n in names) else g.daily_outfit
+    g.scene_library, g.character_registry, g.character_locks, g.lora_triggers, g.daily_outfit = keep_s, keep_c, locks, trig, daily
+    # 警告只记个数，不把别剧的 id / 名字写进本剧导入稿（V1 泄漏扫描也扫导入稿）；明细打到导入输出里
+    out = []
+    if drop_s:
+        out.append(f"本剧没登记的场景 {len(drop_s)} 个不进导入稿（L-126，全局头带进来的别剧登记）")
+    if drop_c or drop_l:
+        out.append(f"本剧没登记的角色 {len({e.name for e in drop_c} | set(drop_l))} 个不进导入稿（L-126）")
+    if drop_t:
+        out.append(f"属于这些角色的触发词 {len(drop_t)} 个不进导入稿")
+    if drop_s or drop_c or drop_l or drop_t:
+        print(f"按剧收口丢掉：场景 {drop_s}；角色 {sorted({e.name for e in drop_c} | set(drop_l))}；触发词 {drop_t}")
+    return out
+
+
+def run_triggers(run: str) -> set[str]:
+    """MERGE-OPS-O（ISS-1103-024206-9974，L-137）：本剧登记过的 LoRA 触发词。只认本剧自己的登记：
+    runs.json 该剧条目 lora_triggers、本剧资产包清单 lora_triggers（字符串或 {trigger}）、
+    config/auto_lora_triggers.json 里属于本剧登记角色的条目。剧本全局头里的“LoRA 触发词表”不算登记（V1 全局头会把 V1 道具词带进来）"""
+    RN = _runs()
+    out: set[str] = set()
+
+    def add(xs):
+        for x in xs or []:
+            t = x.get("trigger") if isinstance(x, dict) else x
+            if isinstance(t, str) and t:
+                out.add(t)
+    add(((RN.registry(ROOT).get("runs") or {}).get(run) or {}).get("lora_triggers"))
+    mp = RN.asset_manifest(run, ROOT)
+    add((_jl(Path(mp)) if mp else {}).get("lora_triggers"))
+    _scenes, chars = run_registered(run)
+    for name, es in ((_jl(AUTO_TRIGGERS).get("characters")) or {}).items():
+        if name in chars:
+            add(es if isinstance(es, list) else [es])
+    return out
+
+
+def scope_triggers(result, allowed: set[str]) -> list[str]:
+    """非 V1 剧：globals.lora_triggers 只留本剧登记的触发词；每镜 img_triggers / motion_triggers 里没登记的一并去掉。→ 警告"""
+    g = result.globals
+    drop = sorted({t.trigger for t in g.lora_triggers if t.trigger not in allowed})
+    g.lora_triggers = [t for t in g.lora_triggers if t.trigger in allowed]
+    n_shot = 0
+    for ep in result.episodes:
+        for s in ep.shots:
+            for attr in ("img_triggers", "motion_triggers"):
+                cur = list(getattr(s, attr, None) or [])
+                keep = [t for t in cur if t in allowed]
+                if len(keep) != len(cur):
+                    n_shot += len(cur) - len(keep)
+                    setattr(s, attr, keep)
+    if not drop and not n_shot:
+        return []
+    print(f"按剧收口丢掉未登记触发词：{drop}（镜头引用 {n_shot} 处）")
+    return [f"本剧没登记的触发词 {len(drop)} 个不进导入稿（镜头引用 {n_shot} 处，L-126 / ISS-1103-024206-9974）"]
+
+
+def v1_gate(result, run: str) -> str:
+    """CLEAN_CUT“交稿须 v1_leak 0 命中”的导入执行点（ISS-1103-024206-9974）：整份导入稿（按剧收口之后、写盘之前）
+    过 script_chat.assert_no_v1（词表 config/v1_guard.json，与写手包 / 成稿出口同一份）。命中 → 原因（拒绝导入）；没命中 / V1 → 空串。
+    闸门自身出错 = 失败关闭"""
+    try:
+        from ns_api import script_chat as SC
+    except Exception as e:  # noqa: BLE001  # arch-ok: 读不到闸门 = 不放行
+        return f"v1_leak 闸门不可用：{type(e).__name__}: {e}"
+    try:
+        SC.assert_no_v1(result.model_dump_json(), run=run, what="导入稿")
+    except SC.HeaderMissing as e:
+        return str(e)
+    except Exception as e:  # noqa: BLE001  # arch-ok: 闸门出错 = 不放行
+        return f"v1_leak 闸门出错：{type(e).__name__}: {e}"
+    return ""
+
+
 OLD_DOC_DIR = "script play lib"      # 第一季（V1）剧本 / image 提示词文档所在目录
 
 
@@ -209,6 +344,13 @@ def main():
         print("拒绝导入：" + "；".join(bad))
         return 2
 
+    run = target_run(args.out)
+    if run and args.merge_base is not None:
+        legacy_in = _runs().import_path(_runs().legacy_run(ROOT), ROOT).resolve()
+        if Path(args.merge_base).resolve() == legacy_in:
+            print(f"拒绝导入：{args.merge_base} 是 V1 的导入稿，不能当 {run} 的合并底稿（L-126）")
+            return 2
+
     result = import_script(args.script, args.image_doc)
     # 剧本源文件记下版本与它提供的集（合并导入后 S1 闸门按集判版本）；版本优先 --source-version，否则文件名里的 vN
     import re as _re
@@ -217,8 +359,16 @@ def main():
         if Path(s.path).resolve() == args.script.resolve():
             s.version, s.episodes = ver, [e.number for e in result.episodes]
     if args.merge_base is not None:
-        result = merge_into(args.merge_base, result)
+        result = merge_into(args.merge_base, result, single_source=bool(run))   # 非 V1 剧：全局头单一来源（当前集头）
+    if run:                         # V2CUT-O：非 V1 剧的场景表 / 人物表只留本剧登记的（全局头带进来的别剧登记丢掉）
+        result.warnings += scope_globals(result, *run_registered(run))
+        result.warnings += scope_triggers(result, run_triggers(run))      # MERGE-OPS-O：触发词只取本剧登记
     n_auto = auto_triggers(result)
+    if run:                         # MERGE-OPS-O（ISS-1103-024206-9974）：v1_leak 0 命中才写导入稿
+        why = v1_gate(result, run)
+        if why:
+            print(f"拒绝导入（v1_leak block）：{why}")
+            return 3
     if n_auto:
         print(f"系统自动补 LoRA 触发词 {n_auto} 处（config/auto_lora_triggers.json）")
     # 成人分类写进每个镜头（合并后对全部集重算，判定规则变了也能刷新）：笔记本与 gpu3 共用同一判定（docs/TASKS.md 规则 7）
@@ -244,12 +394,16 @@ def main():
         for w in result.warnings:
             print(f"  - {w}")
     # T51：导入后重建每镜人物状态时间线 + 场景分组（gpu3 读取），并存本规则版本的编译快照（tools/bible_diff.py）
-    if args.out.resolve() == (ROOT / "data" / "import" / "script_v2.json").resolve() and not args.no_timeline:
+    if (run or args.out.resolve() == (ROOT / "data" / "import" / "script_v2.json").resolve()) and not args.no_timeline:
         try:
+            import os as _os
+            if run:                 # V2CUT-O：按本剧导入稿重建本剧自己的状态表（data/import/runs/<run>/），不碰 V1 全局文件
+                _os.environ["NS_RUN"] = run
             from ns_agent import state_timeline as T
             from ns_agent.prompt_snapshot import save_snapshot
             tl, _ = T.write(ROOT)
-            save_snapshot(ROOT)
+            if not run:             # 编译快照目录 data/bible_versions 是 V1 全局产物：非 V1 剧不写
+                save_snapshot(ROOT)
             print(f"\n时间线 -> {T.timeline_path(ROOT)}（bible_version {tl['bible_version']}，"
                   f"剧本 {tl['source']['script']}，provisional={tl['provisional']}）")
         except Exception as e:  # noqa: BLE001 — 导入结果已写好，时间线失败只提示

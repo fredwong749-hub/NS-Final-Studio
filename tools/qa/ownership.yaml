@@ -60,7 +60,8 @@ owners:
               "apps/web/src/v3/pages/**", "apps/web/src/v3/SystemStatus*", "apps/web/e2e/uirsi/**", "docs/uirsi/**",
               "services/api/ns_api/takes_ui.py", "services/api/ns_api/shot_audio.py", "services/api/ns_api/story_runs.py",
               "tools/uirsi/**", "tests/test_ui_copy_uirsi.py", "tests/test_takes_ui_uirsi.py",
-              "tests/test_owner_headers.py", "services/canvas_api/**", "tests/test_r43_uirsi.py", "tests/test_story_runs_uirsi.py", "services/api/ns_api/**", "apps/web/e2e/ux6/**"]   # 总调度 fredw-2b 11-01 18:5x 定（CODE-RSI 查出无主）   # 测试归 UIRSI：总调度 11-01（UIRSI r35 报 iter_gate 判“无主”）   # 总调度 fredw-2b 11-02 04:3x 批 SYSARCH 无主文件分配表（CONSENT 总调度）
+              "tests/test_owner_headers.py", "services/canvas_api/**", "tests/test_r43_uirsi.py", "tests/test_story_runs_uirsi.py", "services/api/ns_api/**", "apps/web/e2e/ux6/**",
+              "apps/web/e2e/w5ui/**"]   # W5 UIUX 11-03 截图 e2e（W15 ARCH-FIX：arch_scan unowned）   # 总调度 fredw-2b 11-01 18:5x 定（CODE-RSI 查出无主）   # 测试归 UIRSI：总调度 11-01（UIRSI r35 报 iter_gate 判“无主”）   # 总调度 fredw-2b 11-02 04:3x 批 SYSARCH 无主文件分配表（CONSENT 总调度）
   ASSETUX:   ["apps/web/src/v3/assets/**", "apps/web/src/v3/pages/AssetsPage.tsx", "apps/web/src/v3/pages/ScenesTab.tsx",
               "apps/web/e2e/assetux/**", "docs/assetux/**", "services/api/ns_api/character_hub.py",
               "tests/test_character_hub_assetux.py"]   # 测试归 ASSETUX：总调度 11-01 定

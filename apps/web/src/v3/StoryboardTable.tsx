@@ -13,6 +13,7 @@ import { Pop } from "./widgets";
 import { frameState, isSysText, sceneOf, scriptGaps } from "./status";
 import { useSop } from "./sop.helpers";
 import { ProduceHistoryChip } from "./ProduceHistory";
+import { sceneLabel, sopSceneId, useSceneLabel } from "./sceneLabel";
 
 const short = (id: string) => id.split("-")[1];
 
@@ -118,40 +119,21 @@ type Col = {
 };
 
 /** UX4（审查 R10）：场景列和审片行的场景小卡用同一套识别顺序（ReviewRow.useShotScene）：
- *  场景库名 → data/scenes.json 里 scene_id 的名字 → 剧本地点 → scene_id。场景名表整页只读一次。 */
-let sceneNamesP: Promise<Map<string, string>> | null = null;
-function loadSceneNames(): Promise<Map<string, string>> {
-  if (!sceneNamesP)
-    sceneNamesP = fetch("/api/projects")
-      .then((r) => (r.ok ? r.json() : []))
-      .then((ps: { slug: string; is_default?: boolean }[]) => {
-        const slug = (ps.find((p) => p.is_default) ?? ps[0])?.slug;
-        return slug ? fetch(`/api/projects/${encodeURIComponent(slug)}/file/data/scenes.json`).then((r) => (r.ok ? r.json() : null)) : null;
-      })
-      .then((d: { scenes?: { scene_id: string; place?: string; name?: string }[] } | null) => new Map((d?.scenes ?? []).map((x) => [x.scene_id, x.name || x.place || x.scene_id] as [string, string])))
-      .catch(() => new Map<string, string>());
-  return sceneNamesP;
-}
+ *  场景库名 → 剧本 **场景** id → SOP 带出且属于当前剧本的状态表 id → 剧本地点；名字只从当前剧的场景登记取（v3/sceneLabel）。
+ *  UIFIX-F 11-03：不再读 data/scenes.json（V1 状态表的产物，L-126）。 */
 function useSceneNameOf(details: ReturnType<typeof useStudio>["details"]) {
   const { sop } = useSop();
-  const [names, setNames] = useState<Map<string, string> | null>(null);
-  useEffect(() => {
-    let alive = true;
-    void loadSceneNames().then((m) => alive && setNames(m));
-    return () => {
-      alive = false;
-    };
-  }, []);
+  useSceneLabel(null); // 场景登记到了重渲染
   return useMemo(() => {
-    const ids = new Map((sop?.shots ?? []).map((x) => [x.id, (x as { scene_id?: string | null }).scene_id ?? null] as [string, string | null]));
+    const sops = new Map((sop?.shots ?? []).map((x) => [x.id, x] as const));
     return (s: ShotSummary): string => {
       const vs = (details[s.id]?.visual_spec?.scene ?? null) as Record<string, unknown> | string | null;
       const x = s as { scene_name?: string | null; scene?: { name?: string } | null };
-      const id = ids.get(s.id) ?? (vs && typeof vs === "object" && typeof vs.id === "string" ? vs.id : null);
+      const id = storyboardOf(s, details[s.id])?.scene_id ?? sopSceneId(sops.get(s.id)) ?? (vs && typeof vs === "object" && typeof vs.id === "string" ? vs.id : null);
       const place = vs && typeof vs === "object" && typeof vs.place === "string" ? vs.place : typeof vs === "string" ? vs : null;
-      return x.scene_name || x.scene?.name || (id ? names?.get(id) : null) || place || sceneOf(details[s.id]) || id || "";
+      return x.scene_name || x.scene?.name || (id ? sceneLabel(id) : null) || place || sceneOf(details[s.id]) || "";
     };
-  }, [details, sop, names]);
+  }, [details, sop]);
 }
 
 /** 视频提示词：默认一整列；分四块时 = 开头对齐 / 画面 / 环境声 / 配乐 */

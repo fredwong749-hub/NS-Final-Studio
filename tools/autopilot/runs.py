@@ -323,13 +323,15 @@ def set_status(run: str, status: str, by: str, why: str, root: Path | None = Non
 
 def register_run(run: str, source: str = "import", episode: int | None = None, priority: int = 10,
                  root: Path | None = None) -> dict:
-    """导入新剧本 = 追加一条（已有就只补缺失字段）；不改 primary"""
+    """导入新剧本 = 追加一条（已有就只补缺失字段）；不改 primary。
+    PRODMERGE-O 11-03：新剧默认 status=preparing（不再直接 producing 绕过 SOP）；preparing → producing 只由
+    tools/master/sop_gate.py promote（L-154 自动 / 总调度 --apply）按阶段证据提升。已有剧的 status 不动"""
     root = root or ROOT
     p = root / "config/pipeline/runs.json"
     d = registry(root)
     e = dict((d.get("runs") or {}).get(run) or {})
     e.setdefault("priority", priority)
-    e.setdefault("status", "producing")
+    e.setdefault("status", "preparing")
     e.setdefault("created_at", time.strftime("%Y-%m-%dT%H:%M:%S"))
     e.setdefault("source", source)
     if episode is not None:

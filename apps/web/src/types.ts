@@ -797,8 +797,28 @@ export interface SopOwnerAction {
   episode?: number;
   plate?: string | null;
   scene_id?: string;
+  /** UIFIX-F 11-03（gate=look）：人物资产是否齐到能确认造型（身份脸 / 清单 / 本集排期，口径 tools/master/episode_ready）；
+   *  false 时 asset_wait 是给项目方看的一句话（“X的形象还在出候选，选定后再确认造型”），入口不开。旧后端没有这两个字段 = 按就绪 */
+  asset_ready?: boolean;
+  asset_wait?: string | null;
+  /** V2CUT-O 11-03（gate=look，资产包剧）：每集一条，列出本集全部人物（人名 / 本集造型 / 缩略图），一键确认整集；
+   *  和通知中心 pick:look 同一个后端（ns_api.look_confirm），哪边确认了两边同时消失。前端一律显示 display_name，不显示 cid */
+  per_episode?: boolean;
+  people?: LookPerson[];
+  pick_id?: string | null;
   actionable: boolean;
   waiting_on: string[];
+}
+
+export interface LookPerson {
+  cid: string;
+  display_name: string;
+  look_id: string | null;
+  look_name: string;
+  thumb_url: string | null;
+  thumb_note?: string | null;
+  ready: boolean;
+  wait: string | null;
 }
 
 export interface SopGate {

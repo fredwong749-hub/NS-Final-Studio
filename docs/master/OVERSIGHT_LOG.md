@@ -4,6 +4,423 @@
 
 ---
 
+## REVIEW-G4b cut B · 11-03 11:2x–12:0x · G4 视频 / 后期 / 配音（33 文件）发版前复审（Fable，只读；L-153 / L-157）
+
+**派单口径说明**：上一位 REVIEW-G4 审的是出图编译子集；本轮按 CUT_PLAN_sv17 §4 **G4 = tools/series10_video|bgm|v2style|voice10|vidlab/*、services/post/*、config/music_v2.json、video_policy.json**（33 个）逐文件 diff / 新文件通读。
+
+**结论：G4 按现状不能进 cut B，P0 = 1（night.py 的 V2 收尾路径死路，两处连环），另有 1 个清单漏项不补则 night / deploy / sync 导入即炸。** 两处修法都是几行（见 P0 / P1-1），修完 + 补入 hosts.py 即可入版。V1（legacy）路径逐行核过没动；写真实数据副作用 0 处新增；V1 剧名 / 人物 id 硬编码只剩 legacy 分支（NAME2ID_V1 / HOST_OF_EP_V1 / ALT_SHEET，非 V1 剧全部不用）；Q9-先于-视频闸门改成失败关闭（_q9_ok / _q9_ok_file 看图模块缺 = 不过）；camera_moves 只在 camera_ab.py 的试听页标“项目方已选”，没有改启用；At 时间码（L-141）只在 vidlab/acting.py 分拍正则加了自然语言分拍，没有写死 At。
+
+### 清单核对（`git status --porcelain -uall`，WSL 上 >120 s）
+- §4 G4 的 33 个全部仍未提交（25 M + 8 ??），按归组规则（tools/series10_video|bgm|v2style|voice10|vidlab、services/post）扫全树：**没有漏在组外的 G4 文件**。
+- **G4 的跨组硬依赖，其中一个不在任何组**：
+
+| 依赖 | 被谁 import | 在哪组 |
+|---|---|---|
+| `tools/factory/hosts.py` 的 `video_root / video_code_managed`（工作树新增 20 行，HEAD 没有） | night.py / deploy.py / sync.py **导入时**就调 `_video_root()` → HEAD 版 `AttributeError` | **不在任何组**（§4 G6 清单只有 api_watchdog / decisions_guard / deps / repart）→ 必须补入 |
+| `services/post/ns_post/run_media.py`（新） | tts.py / assemble_series / cut_export / deliver / bgm_library / night / run_ctx | G3（§4 已注明） |
+| `tools/autopilot/runs.py` current_run / gate_legacy_tool / legacy_run | run_ctx / deliver / voice10 / tts._current_run | G1（cut A 已带） |
+| `tools/master/sop_gate.py` filter_video_specs / video_dispatch_ok / vidgen_guard | build_jobs / night / vidgen | G1（cut A 已带） |
+| `ns_recipes.compiler.video_policy`、`ns_agent.gen_contract.style.segment_of`、`ns_agent.cast_table.speaker_cast / char_ids`、`ns_agent.run_paths` | build_jobs / bgm_library / speakers / tts | G2 / G3，合发即可 |
+| `tools/director/edit_lock.py`（check / bgm_request / XFADE_S） | bgm_library | HEAD 已有，未改 |
+| `config/factory/hosts.json` video_root | hosts.video_root | HEAD 已有 video_root（工作树只改 2 行，不在组内；不补也能跑） |
+
+### 实跑（`.venv/Scripts/python.exe -m pytest -q -n 6`，PYTHONIOENCODING=utf-8，Windows python，工作树）
+- 26 个文件 = §4 列的 5 个（test_bgm / test_cuts_v2_compose / test_merge_vid_o / test_v2_media / test_video10_resilience）+ 直接 import G4 改动模块的 21 个（test_post / test_narrator_voice / test_cutedit_assemble / test_cutedit_export / test_acting_beats / test_acting_system / test_voice10_fix / test_voice10_s10 / test_post_h3_dialogue_aud / test_fix_ep02_assemble / test_fix_ep02_round2 / test_recipe_pika_default / test_prodmerge_o / test_shot_audio_uirsi / test_voice_preview_uirsi / test_factory_hosts / test_sop_gate / test_vqagate / test_motion_qc / test_t42_projects / test_colormatch）：
+
+```
+FAILED tests/test_merge_vid_o.py::test_build_base_keeps_v2_scoped_camera_move
+FAILED tests/test_prodmerge_o.py::test_fanout_spreads_seeds_over_free_lanes
+2 failed, 357 passed, 1 skipped, 33 warnings in 685.82s (0:11:25)
+EXIT=1
+```
+- 2 红定性（都不是 G4 的真 bug）：
+  1. `test_merge_vid_o::test_build_base_keeps_v2_scoped_camera_move` = **陈旧测试（数据快照）**：测试把 ep01-S8 H3 里的 `"The camera pushes in with small amplitude"`（大写 T）替换成 V2 运镜句再断言；V2 导入稿 `data/import/runs/series10_v2/script_v2.json`（04:50 重导，晚于测试 04:22）里这句现在是 `"…and the camera pushes in with small amplitude"`（小写），replace 成空操作 → 断言红。实跑 `build_jobs.set_run('series10_v2'); load_specs()['ep01-S8']` 确认 H3 含该句（小写）。改测试用不区分大小写的替换即可；不是 build_jobs / prompt.py 的问题。
+  2. `test_prodmerge_o::test_fanout_spreads_seeds_over_free_lanes` = **陈旧测试，且属 G6**（文件 ?? 未跟踪、不在清单）：第 277 行断言真实 `config/pipeline/producer.json` fanout.enabled is True，而总调度 L-161 已把它关成 false（`_note` 写明“cut B 进版关”）。测试要跟着决定改；G4 无关。
+- 用 `-n 6` 时 conftest 的 real-data-guard 汇总行没有打印（串行才有）；退出码 1 只来自上面 2 红。
+- 额外实跑（见 P0）：`NS_RUN=series10_v2` 下 `import night; night.voices_ok()` → True；`night.tts_missing()` → `"音色表读不了：当前剧 series10_v2 是资产包模式：音色必须按剧取（load_voice_config(run=...)）…"`；`NS_RUN=series10_v2 tools/assemble_episode.py ep01` → 退出码 2（guard_asset_pack_run 拒绝）。
+- 曲库：config/music_v2.json 三条曲目文件都在、sha256 全对。
+
+### P0
+- **P0-1 · night.py 对非 V1 剧的 finalize 永远走不到合成（两处连环，同一函数）**。`night.py:357` `tts_missing()` 调 `tts_preflight(root=ROOT)` **没传 run** → `tts.py:318` 走 `load_voice_config(root/config/voices.json)` → 路径等于 VOICES_JSON 且当前剧是资产包模式 → `VoiceRunRequired` → 返回“音色表读不了” → 每集都 `hold_tts`，永不合成（实跑复现，见上）。就算把 run 传进去，`night.py:396` 接着起子进程 `tools/assemble_episode.py`，而本批给它加的 `guard_asset_pack_run()`（assemble_episode.py:62-77）对资产包剧直接退出 2 → `assemble_failed`，自动重试 3 次后终态。也就是说 MERGE-VID-O 的标题功能“V2 并回 V1 视频链”在最后一步是死的；V1（LEGACY）两处都不受影响。`test_merge_vid_o::test_deploy_and_night_follow_run` 只断言路径常量，`test_v2_media::test_assemble_episode_tool_refuses_v2` 只测 guard 本身，没有一条测试走 night.finalize 的 V2 分支。修法（CODER-PS，≈10 行）：① `tts_missing` 非 LEGACY 时 `tts_preflight(root=ROOT, run=RUN_ID)`；② `finalize` 非 LEGACY 时改调 `tools/assemble_series.py`（它已按剧取导入稿 / 曲库 / 音色，compose(run=) 11-03 已对齐）或给 assemble_episode.py 加 `--run` 走 `load_voice_config(run=)`；③ 补一条测试：`NS_RUN=series10_v2` 打桩 ssh / run 后跑 `finalize`，断言 status 不是 hold_tts / assemble_failed。失败关闭、不写坏数据，所以不是“危险”，但按 L-153 / L-157 它是本批最核心路径的真 bug。
+
+### P1
+- **P1-1 · `tools/factory/hosts.py` 必须补入 cut B**（见依赖表）：HEAD 版没有 `video_root / video_code_managed`，night / deploy / sync 三个文件在 import 时就 `importlib` 加载 hosts.py 并调 `video_root()`，快照树上必 `AttributeError`。按归组规则属 G6（tools/factory/*），§4 G6 清单没有它；`tests/test_factory_hosts.py` 也没覆盖这两个新函数（grep 0 处）。
+- **P1-2 · 没有测试覆盖的关键新路径**（不挡 cut，记给 sv18）：`night.bgm_after_assembly`（V2 集级 BGM 写入点 + 自动重合成 ≤2 次）grep tests 0 处；`deliver.choose` 的 `mode == "library"` 分支 0 处；`build_jobs.name_ids()` 非 V1 走 cast_table 的分支只经 test_merge_vid_o 间接；`vidlab/acting.py` BEAT 新增的自然语言分拍（`Around/By the … second`）test_acting_beats 0 处（L-141 的落点就靠这一条正则）。
+- **P1-3 · `tests/test_prodmerge_o.py`（G6）第 277 行断言与 L-161 冲突**，cut B 的 pick_tests 若挑到它闸门会红；转 G6 复审 / CODER-PS。
+
+### P2
+- **P2-1 · `deliver.choose` V2 换曲静默降级**：界面“换用这一版”走 `LB.deliver_episode(track=chosen_id)`，但 `pick_track` 只在该曲的 `use` 与段落匹配时才用它，不匹配就悄悄退回曲库第一首（没有报错、meta.json 里也看不出项目方指定被忽略）。建议不匹配时 raise。
+- **P2-2 · `night.write_status` 仍 `range(1, 11)` 写死 10 集**（night.py:583 一带），V2 集数不同时状态表错位；`load_specs` 已改成“导入稿里有的全部集”，这里没跟。
+- **P2-3 · `tts._current_run()` / `deliver.current_run()` 每次调用都 `sys.path.insert(0, …)`**，长驻进程 sys.path 会无限增长（night 每轮调一次）；用 `if p not in sys.path` 守一下（deliver.py 已这样写，tts.py 没有）。
+- **P2-4 · `build_jobs` 非 V1 剧 `HOST_OF_EP = {}`**，没有 `video/hosts.json` 时 `meta["host"] = None` 静默不派（注释写明是有意的）；`config/netfix/partition.json` 还没有 `runs.series10_v2.video`，退回全局 video 分区（1,3,5,7,9,10 → gpu33），能跑，但 V2 集数和 V1 不同时分区要另登记。
+- **P2-5 · `deploy.push_plan` managed=True 时不再推代码**（hosts.json 两台 video_root == repo → managed）：服务器上的 `tools/series10_video/run_ctx.py`、`video_policy.json` 都只靠 system_version deploy 下发；cut B 发版前 vidgen 在服务器上 import run_ctx 会失败（这是 PRODMERGE-O 的有意设计，记录以免当 bug 查）。
+
+### ✅ 核对通过（有出处）
+- **V1 路径没动**：`speakers.V1_CAST` = 原常量，`resolve_episode(cast=None)` 行为不变（test_narrator_voice / test_post 全绿）；`tts.load_voice_config()` 对 legacy 剧照读 config/voices.json；`deliver.out_dir()` legacy = config/bgm.json output.dir；`bgm/agent.py` legacy 照旧 ACE-Step；`build_jobs` legacy 保留 NAME2ID_V1 / HOST_OF_EP_V1 / ALT_SHEET / identity_crops；`night` LEGACY 时 PID / STATUS / EPS_OUT / music 目录全是原值；`voice10.py` 加 `gate_legacy_tool`（I-16）只认第一季。
+- **失败关闭处处到位**：run_ctx.resolve（没登记 / 不在 scope_runs → VideoRunError）；`recipe_choice()` 没文件且政策给不出 → RecipeChoiceMissing（不再默认 i2va_pdd2）；`vidgen.policy_hold` 读不到政策 → hold；`_q9_ok` 看图模块缺 → False；`alt_crops` 非 V1 → 空（不用 V1 的脸，L-126）；`default_voiceover_speaker` V2 没 voiceover_speaker → TtsError（不退回 lin_wan）；`voice_for` 人物表有、未选音色 → TtsError（不拿女主顶替）；`UnresolvedSpeaker` “他”判不出 → 报错不猜顾沉；`music_dir` 曲库 sha 不符 → V2MediaError。
+- **C-16 / L-118（BGM 整集定剪后再配）**：bgm_library 只在 edit_lock L1–L5 锁定后铺整集；night 只在合成后调它，不逐镜配。
+- **C-24（运镜词表）**：camera_ab.py 只给 bolt_push_settle / handheld_follow 的已选片打标，2.5D 视差（parallax_bt.py）页面标“项目方：效果很差，不用”，没有接进任何生产路径。
+- **loudnorm 重做保留偏差最小一次**（deliver.py:125-160）：三条新测试覆盖首遍候选 / 容差内不重做 / 保留最小偏差；逻辑核过无误。
+- **run_ctx.strip_run / arg_run**、`deploy.main` 先 strip 再校验位置参数：`--run` 不会撞到 push/control/start 的 argv 判断。
+
+**G4 可入 cut B：否（现状）。P0 = 1：night.py 非 V1 剧 finalize 两处连环（tts_missing 不传 run → 永远 hold_tts；assemble_episode.py 对资产包剧退出 2）。需补入：`tools/factory/hosts.py`（G6 规则，不在任何组；不补则 night / deploy / sync 导入即炸）。需剔除：无；但 `tests/test_prodmerge_o.py`（G6，未跟踪）与 L-161 冲突，cut B 挑到就红，要先改。P0 修掉 + hosts.py 补入后可入。**
+
+---
+
+## REVIEW-G5 cut B · 11-03 11:1x–11:4x · G5 API + 前端（67 + 6 文件）发版前复审（Fable，只读；L-153 / L-157）
+
+**派单口径说明**：派单标题写的是“视频链 night / vidgen / H3 recipes / camera_moves / dejudder”，但 CUT_PLAN_sv17 §4 的 **G5 = API + 前端**（视频链是 G4，总调度 10:56 已派 A-G3/A-G4/A-G7；night.py / vidgen.py 在 G4 清单里，ns_recipes/*、camera_moves.yaml、director_system_prompt.md 按 §4 规则归 G2，dejudder 只在 video_policy.json（G4）/ ns_recipes/compiler.py（G2））。派单正文第 1 步明确“读 §4 的 G5 清单”，本轮按 **§4 G5（API + 前端）** 审；视频链那几个文件没审，如果总调度本意是视频链，请另派。
+
+**结论：G5 可以进 cut B，P0 = 0。** 73 个文件逐个 diff / 通读（67 清单 + 6 个按 §4 规则属 G5 的漏项）；写真实数据副作用 0 处新增（启动副作用反而全部收进“正式实例”门，见 ✅）；V1 剧名 / 人物硬编码 0 处（这一批主要就是在拆 V1 硬编码：script_v2.json / scenes.json / state_timeline.json / music/series10 / voices.json 全改按当前剧取）；绕闸门分支 0。入版前要做两件事：**补入 `apps/web/src/v3/plainWords.ts`（P1-1，不补前端编译必断）**，以及另外 5 个漏项按下表补 / 留。
+
+### 清单核对（`git.exe status --porcelain -uall` 11:0x = 338 条；WSL git 在 /mnt/d 上 >120 s，用的 Windows git.exe）
+- §4 G5 的 67 个全部仍未提交，无一个已入 HEAD / 消失。
+- `services/api/ns_api/` 下不在 G5 清单的改动文件：`script_chat.py`（§2 已归 G2 ✓）、`instance.py / look_confirm.py / owner_delegate.py / owner_pick.py`（§4 注明归 G3 ✓）。
+- **按 §4 规则属 G5、但不在任何组的 6 个（补入 / 留 sv18）**：
+
+| 文件 | 状态 | 处置 |
+|---|---|---|
+| `apps/web/src/v3/plainWords.ts` | 新（??） | **必须补入**。`OwnerQueuePage.tsx` / `queueActs.ts` / `stepbar.ts`（三个都在 G5 清单）`import { plainText } from "./plainWords"`——cut B 快照少了它，`tsc -b` 必断（cut 闸门不跑前端编译，查不出） |
+| `apps/web/src/v3/assets/AssetInspector.tsx` | 改 1 行 | 补入（文案去技术词：“data/assets/proposals/”→“修改提议”，W5 同批） |
+| `apps/web/e2e/uirsi/topbar_check.mjs` | 改 | 补入（A5 P2-1 后按新布局改的检查：换集下拉在范围条 .v3-scope；不补则 G10 / iter_gate 跑旧检查对新顶栏必红） |
+| `tests/test_ui_stepbar.py` | 新，19 用例 | 补入（sop.py stepbar_view / issue_step / latest_first / pageMap 登记的唯一测试） |
+| `apps/web/e2e/w5ui/shoot_w5.py`、`shoot_w5b.py` | 新 | 可补可留（Playwright 截图脚本，只 GET，产物写 data/review_pages/；不参与闸门） |
+
+- cut B 跨组硬依赖（都在 G2–G7 里，合发即可，列出来是给拼树核对用）：`app.py` 顶层 import `instance / owner_pick / owner_inbox / pipeline_status`（G3 / G5）；`cut_project / cuts / bgm_api` → `ns_post.run_media`（G3 新文件）；`shot_audio / voice_preview` → `tts.load_voice_config(run=) / default_voiceover_speaker / speakers.Cast.from_cfg / UnresolvedSpeaker`（G4 的 tts.py / speakers.py）；`cuts._command` → `tools/assemble_series.py --dialogue-source`（G4）；`sop.py` 按路径 exec `tools/master/sop_gate.py / episode_ready.py / report_issue.py`（G1 已入 cut A / G3）；`owner_gates` → `look_confirm.confirm`、`ns_agent.looks.parse_episode_list`（G3 / HEAD 已有）；`script_autoflow` → `owner_gate.pending_fill_note`（G2；§2 表里 `KeyError: 'fill_note'` 就是它）；`wizard.import_staged` → `tools/autopilot/runs.py` 的 `registry / import_path / legacy_run / is_legacy`（G1，cut A 已带）。这些符号在当前工作树都核过存在。
+
+### 实跑（`.venv/Scripts/python.exe -m pytest -q`，PYTHONIOENCODING=utf-8；Windows python，工作树）
+- **批 1 = G5 定向**（清单 8 个测试文件 + 补入 test_ui_stepbar + 覆盖 app.py 预检门的 test_restart_api_ps1 + 覆盖 sop.py / owner_gates / bgm_api 的 test_sop / test_sop_release_fixes / test_owner_gate / test_bgm，14 个文件）：**246 passed, 4 failed，573 s**；`[real-data-guard] 写真实数据 0 次；遗留非守护线程 0；真实哨兵文件被改 0`。
+- 4 红定性：
+  1. `test_v2cut_o.py` ×3（`test_reimported_v2_scene_library_is_only_sk_white_cyc` / `test_ref_switch_only_registered_scenes_for_v2` / `test_v2_look_action_per_episode_with_names_and_thumbs`）= **陈旧测试，且已经修了**：断言写死 00:xx 的数据快照（场景库只有 sk_white_cyc、ep01 造型未确认），真实数据翻转后必红。W13 CUTB-PREP 在 **11:17:18** 改了这三条（改成“全是本剧登记 / 不含 V1 id”“两态按 look_confirm.episode_state 判”，不是放宽），我的批 1 在 11:16:26 起跑、收集的是旧文件。用当前文件重跑 `tests/test_v2cut_o.py`：**20 passed**（22 s）。cut B 带 11:17 之后的版本即可。
+  2. `test_restart_api_ps1.py::test_revive_api_started_by_someone_during_preflight_is_not_killed` = **环境 / 时序**（文件属 G6，ops/restart_api.ps1 与该测试 mtime 02:0x 都没再动）：测试假定脚本拿锁后的第一次探针在 2–3 s 内发生、假 API 6 s 后才起；本机实际“拿到锁后”那次探针已经看到假 API 健康（`why=补起前（拿到锁后）:58622 已经健康，没动它`），只是阶段名不是测试要的“停旧进程之前”——行为（exit 0、没杀健康实例、没留锁）都对。单独重跑仍红（不是并行负载）。此前第 16 / 17 轮记录这个文件 9 passed ×3 / 3 passed，说明和本机当下 PowerShell 启动耗时有关；G6 复审时请再跑一次，不是 G5 的问题。
+- **批 2 = 波及面**（import 了本批改动 API 模块、但不在 G5 清单的 23 个测试文件：test_script_inbox / test_story_runs_uirsi / test_script_chat / test_r41_uirsi / test_infra_status_uirsi / test_uirsi_check_wiring / test_review_fixes_d9 / test_editdel / test_freeze_guard / test_bad_image_uxf1 / test_h3_prompt / test_autoflow / test_factory / test_owner_run / test_prodmerge_o / test_script_ab / test_active_audit / test_audit_fixes_20261030 / test_debug_rsi / test_gpu_grab / test_llm_config_w1 / test_owner_pick / test_owner_delegate）：**438 passed, 0 failed，1033 s**（和总调度 11:26 起的 `cut --dry -n 12` 抢 CPU）。但 **real-data-guard 报“写真实数据 6 次”→ 退出码 1**：全部来自 `tests/test_factory.py::test_autoflow_resident_single_instance_and_status_filter`（`data/pipeline/asset_jobs/worker.lock`、`data/factory/agent_dispatcher/state.json.tmp*`、`data/factory/hollywood_tick.lock`）——和 REVIEW-G2 P1-1 同一个毛病（resident.tick 没打桩 asset_tick / dispatch_tick / hollywood_tick）。test_factory.py 属 G6 清单，不是 G5 的改动；但 cut B 的 pick_tests 若挑到它，闸门会红。转 G6 复审 / CODER-PS（见 P1-4）。
+- 前端：`apps/web` `npm run typecheck`（tsc -b --noEmit）**exit 0**；`node --test e2e/uirsi/scene_label.test.mjs` **4 passed**。
+- 工作树在审期间只动了 1 个 G5 文件（tests/test_v2cut_o.py 11:17，W13），其余 72 个 mtime 都早于 11:1x。cut 必须 `--tree` 冻结。
+
+### P0
+无。
+
+### P1
+- **P1-1 · `apps/web/src/v3/plainWords.ts` 不在任何组**（见清单表）。三个 G5 文件 import 它；工作树 `npm run typecheck`（`tsc -b --noEmit`）**exit 0**，但那是因为文件在工作树里；cut B 的快照不带它，前端源码就是坏的（下一次 `vite build` 断）。补一行进清单即可。
+- **P1-2 · 无测试覆盖的新路径**（不挡 cut，记给 sv18）：`character_hub._manifest_fill_parts / _manifest_items`（资产包模式人物页用清单补单品显示，含成人类 `local_only` 分支）——grep tests 0 处；`sop.asset_look_states`（资产包剧“确认造型”改按集算、`_s2_from_timeline` 过滤状态表的 look_unconfirmed）只经 test_v2cut_o 的 api 夹具间接覆盖；`cut_project._v2_library_choices` 只经 test_cutedit_api 一条覆盖。
+- **P1-3 · 清单补入**（同清单表）：`AssetInspector.tsx`、`topbar_check.mjs`、`tests/test_ui_stepbar.py` 三个按 §4 规则属 G5 的改动不在任何组；不补的话前两个只是改动漏发（下一版再带），`test_ui_stepbar.py` 漏发则 sop.py 新增的 230 行 stepbar 代码在 cut 的 pick_tests 里零覆盖。
+
+- **P1-4 · （G6 范围，顺带报）`tests/test_factory.py::test_autoflow_resident_single_instance_and_status_filter` 写真实数据 6 次**，pytest 退出码 1，cut 闸门挑到就红。修法同 REVIEW-G2 P1-1：该用例里 `monkeypatch.setattr(RES, "asset_tick", …)` / `dispatch_tick` / `hollywood_tick` 三个替身；或 cut B 清单暂拿掉 test_factory.py。
+
+### P2
+- **P2-1 · GET 带写副作用**：`owner_inbox.inbox()`（`GET /api/owner/inbox`，顶栏每 20 s 轮询）每次先调 `look_confirm.sync_picks(root)` → 可能 `owner_pick.enqueue_pick` / `_close_pick` 写 `data/owner_queue/requests.json`。幂等（已开着的不重投、只关 superseded），生产上就是“确认造型自动进通知”的设计；但 TestClient / decision_check 进程内打这个接口时也会写真数据（test_owner_inbox 传了临时 root，没触发）。建议 sync 放到 resident tick 或加 `startup_side_effects_allowed()` 门，和 app.py 其它副作用同口径。
+- **P2-2 · sop.py 每次重新 exec 模块**：`_episode_ready_module()` / `_sop_gate_module()`（sop.py:119 / :305）没有像 `pipeline_status._gate()` 那样缓存，`project_summary` 每次调用都重新 `exec_module(sop_gate.py)`，`look_asset_state` 每个 (人物, 集) 各 exec 一次 episode_ready.py；同一进程里 sop_gate 会有两份模块对象（`ns_tools_master_sop_gate` 名字相同但对象不同）。只影响性能 / 内存，不影响判定。
+- **P2-3 · wizard.import_staged 在请求线程里同步跑 producer.py 子进程**（`wizard.py:234`，timeout 1800 s）：`validate_script` 的 HTTP 请求会挂到导入完成；`subprocess.TimeoutExpired` 没接 → 500。PRODMERGE-O C-9 的方向（向导不直接写生产导入稿）是对的，只是该转成作业。
+- **P2-4 · REVIEW-C P1-3（三按钮）的现状**：后端 `owner_queue.py:277 DECIDE_OPTS` / `:325` 仍是“同意 / 不同意 / 稍后”，`POST /api/owner/decide` 仍收 `choice=later`；前端 `queueActs.twoActs` 把它折成“批准 / 修改”、“稍后”不做按钮（grep 前端新增行：0 处“稍后 / 不同意”按钮；`RejectDialog` 已从 App.tsx 摘掉）。L-123 / C-09 在界面层满足；后端选项表留 sv18 清。
+- **P2-5 · OwnerDecision 探针**：`probeOwnerDecisionApi` 每次页面加载 `POST /api/sop/owner-decision` 空 body 来探接口在不在。核过 `owner_gates.OwnerDecision.gate` 是必填 → pydantic 422，不进 `decide()`，不记录；但它会在 API 访问日志里留一条 422。
+- **P2-6 · 与第 21 轮（A5）结论的对照**：P1-1 fallback 横幅 → 已做（`TopBarV3.tsx:606` sb-banner、`PipelineMatrix.tsx:19-22`，`issues_error` 也渲染了）；P1-2 卡点取最早一条 → 已改 `latest_first`（阻断优先 + 时间降序 + 同句去重）；P2-1 换集下拉位置 → topbar_check.mjs 已按事实改（但该文件不在清单，见 P1-1 表）。
+- **P2-7 · 界面技术词**（W5 口径）：新增行里仍有 `NavTabs.helpers.ts:106`“进度接口还没生效（后台重启后出现）”、`ImageEditPage.tsx:31`“（后台重启后出现）”、`CutEditor.tsx:23` 同类——都是“后端比网页旧”时的提示，REVIEW-C P2-2 已记，不算新问题。
+
+### ✅ 核对通过（有出处）
+- **启动副作用全部进“正式实例”门**：`app.py:98-113` `_PREFLIGHT = NS_API_PREFLIGHT or not instance.startup_side_effects_allowed()` → `JOBS.restore` / `EPROD.resume_on_startup` / `PJ.resume_on_startup()` / loop watchdog `LW.start` / `_lifecycle` 留痕都受门；`frame_jobs.py:560-565` postflight sweeper 同口径；`api_snapshot.in_tests()` 非正式实例不写 `data/cache/api_snapshots`。正式实例 = `api_watchdog.py:33` 设 `NS_API_MANAGED=1`（restart_api.ps1 / laptop_autostart.ps1 都经看门狗起）。风险点：手起 uvicorn 的实例不再 restore 任务，这是 RESTARTFIX-O 的有意设计，已在第 17 轮 / REVIEW-C 记录。
+- **V1 硬编码拆除（C-14 / L-126）**：`sop.py` state_files / script_file 走 `ns_agent.run_paths`，解析失败 → None（不回退 V1 的 data/ 全局文件，阻塞项 `timeline_missing`）；`timeline_foreign` 时状态表的 scene_id / 底板一律不显示；`ref_switch.scene_map / plate_options / _default_plate` 非 V1 剧只认本剧登记场景；`scene_assets.scenes_json` 清单模式不读 `data/scenes.json`；`script_library.scene_catalog`、`trash._is_current_asset_image`、`app._inputs_sig / _cache_global_sig` 同口径；`bgm_api.music_dir / _ep_dir`、`cut_project.music_choices`、`cuts._command` 资产包剧走 `run_media`（music_v2 / voices_v2），`choose` V2 直接 409；`shot_audio / voice_preview` 音色表按 run。前端 `sceneLabel.pure.ts` 删掉 WORD 表（office→办公室、gu→顾沉 这类 V1 词），登记里没有的显示“场景未登记：id”；`ReviewRow / StoryboardTable` 不再读 `data/scenes.json`。grep G5 全部新增行：`林晚 / lin_wan / sk_office_night / series10_v1` 只出现在注释和一条测试夹具（`test_cutedit_api.py` 用 V1 曲目当反例，断言 422）。
+- **闸门没放水**：`owner_queue.decide` 对带 `pick_api` 的条目 409（必须走统一入口才生效）；`undo` 对 `via=owner_pick*` 的决定 409（已写进配置不能撤）；`character_hub._v2_adult` 清单读不到 → 一律不发（失败关闭）；`sop.look_asset_state` 算不出 → `ready=False` 带原因；`asset_look_states` 异常 → 每集不就绪；`pipeline_status` sop_gate 读不到 → 503 不猜；`cut_project.put_project` V2 曲目不在曲库 → 422。
+- **前端编译**：`apps/web` `npm run typecheck` exit 0（工作树）；`node --test e2e/uirsi/scene_label.test.mjs` 4/4 过。
+- **GET 只读**（除 P2-1）：`/api/pipeline/status`、`/api/sop/stepbar`（20 s 缓存，`_stepbar_cache` 进程内）、`/api/_instance`、character_hub 清单补显示（“不写任何文件”核过：`_manifest_fill_parts` 只改返回的 dict）。
+- `sop.py:586` 把 stepbar 路由挂到 `pipeline_status.router` 上：`app.py:43` import sop 早于 `:208 include_router(PSTAT.router)`，顺序成立；`tests/test_ui_stepbar.py:104` 也断言了 openapi 里有 `/api/sop/stepbar`。
+
+**G5 可入 cut B：是。P0 = 无。需补入：`apps/web/src/v3/plainWords.ts`（必须）、`apps/web/src/v3/assets/AssetInspector.tsx`、`apps/web/e2e/uirsi/topbar_check.mjs`、`tests/test_ui_stepbar.py`；可补可留：`apps/web/e2e/w5ui/shoot_w5.py`、`shoot_w5b.py`。需剔除：无（G5 没有一个文件需要拿出来；`tests/test_v2cut_o.py` 要带 11:17 之后的版本）。G6 侧：`tests/test_factory.py` 修 P1-4 或暂拿掉。**
+
+---
+
+## REVIEW-G6 cut B · 11-03 11:1x–11:5x · G6 常驻 / 哨兵 / 运维 / 开关（37 + 7 文件）发版前复审（Fable，只读；L-153 / L-157）
+
+**结论：G6 可以进 cut B，P0 = 0。** 37 个文件逐个 diff / 新文件通读；G6 定向 pytest 15 个文件 394 过 2 红（1 红是环境口径、W13 11:19 已修并串行重跑过；1 红是时序过严的陈旧断言），但 real-data-guard 报“写真实数据 6 次”→ 退出码 1。入版前要做四件事（P1-1～P1-4）：修一行时序断言、给 test_factory.py:782 用例补三行打桩、补入 7 个按规则属 G6 的漏项、fanout 开关由总调度定。
+
+### 清单核对（`git status --porcelain -uall` 11:1x 与 11:4x 都是 338 条，Windows git.exe 0.4 s；WSL git 在 /mnt/d 上 >120 s 被我杀掉）
+- §4 的 37 个全部仍未提交、无一个消失。untracked 5 个（producer.json、test_merge_ops_o / test_prodmerge_o / test_producer_run_identity / test_restart_api_ps1）cut 前要 `git add`。
+- 按归组规则应属 G6、但不在任何组（**P1-3，补入**）：`tools/factory/hosts.py` + `config/factory/hosts.json`（10:02，REVIEW-G3 P1-1 已点名：after_network 顶层 import 依赖）；`ops/autostart/restart_producer.ps1`（10:01，按剧重启：-Run 默认 runs.json primary、pid / 心跳 / control 走 runs.producer_dir、只停命令行含 producer.py 的 pid）；`ops/offline/ensure_runs.sh` + `ops/offline/resident_restart.sh`（10:02，video10_srv 退役 → `$R/models_cache/vision`、producer / night 带 --run、读不到 primary 退出码 2 不回退 V1）；`tools/autopilot/runs.py`（**cut A 之后又改**，10:03：register_run 新剧默认 status=preparing，test_prodmerge_o::test_register_run_defaults_to_preparing 守）；`tests/test_infra_resident.py`（11:03，REVIEW-G3 P1-3 同一个，归一组即可）。
+- 不属 G6 的未跟踪文件：`tools/factory/agent_dispatcher.py` 在 G2 ✓、`tools/factory/autoflow_resident.py` 在 G3 ✓。
+- 工作树仍在动：`tests/test_factory.py` mtime **11:19:19**（W13 CUTB-PREP：a12 用例改 Git bash / 只有 WSL 入口就 skip），我第一遍跑的是 11:1x 旧版；其余 G6 文件 11:05 后没动。cut 必须 `--tree` 冻结。
+
+### 实跑（`.venv/Scripts/python.exe -X utf8 -m pytest -q`，PYTHONIOENCODING=utf-8）
+- 15 个文件（G6 清单 9 个测试 + 按改动模块补 test_factory_hosts / test_netfix / test_producer / test_episode_pipeline / test_push_preflight_deps / test_api_instance）：**394 passed, 2 failed，901.7 s**；`[real-data-guard] 写真实数据 6 次；遗留非守护线程 0`；EXIT=1。
+- 串行重跑 2 红：`test_factory.py::test_a12_atomic_sync_writes` **passed**（W13 11:19 版）；`test_restart_api_ps1.py::test_revive_api_started_by_someone_during_preflight_is_not_killed` **仍红**（45.98 s）。
+- 红 1 定性 = **环境**（CUT_PLAN §3 #1 同类）：旧版用 `shutil.which("bash")` 拿到 `C:\Windows\system32\bash.EXE`（WSL 入口），`while read … mv` 对 C:/… 路径卡住 → 60 s TimeoutExpired。W13 已改成优先 `C:\Program Files\Git\bin\bash.exe`、只有 WSL 入口时 skip；串行重跑过 → 已销。
+- 红 2 定性 = **时序过严的陈旧断言**（两遍都红，串行也红，不是偶发）：脚本行为是对的——rc 0、写 `restart_skipped stage=already_healthy`、别人起的 API 没被杀（`api.poll() is None` 过）；只是本机 Acquire-Lock + 父进程链 6 次 Get-CimInstance 慢于夹具 `delay=6.0`（tests/test_restart_api_ps1.py:260），健康探针在“拿到锁后”那一次就命中，而 :266 断言写死 `"停旧进程之前" in why`（实际 why = “补起前（拿到锁后）:65005 已经健康，没动它”）。改法一行：只断言 stage == already_healthy（两处 Skip-Healthy 都算），或把 delay 调到拿锁之后、预检（10 s）结束之前。不改会卡 cut 的 pick_tests（该文件在 G6 清单里必被 pick，串行重跑规则救不了）。
+- **写真实数据 6 次**（会让 cut 闸门退出码 1）：`tests/test_factory.py:782 test_autoflow_resident_single_instance_and_status_filter`（HEAD 已有）调 `AR.tick(...)`，而 G3 的 `autoflow_resident.py:127` 现在每拍还调 asset_tick / dispatch_tick / hollywood_tick，用例没打桩 → 写 `data/pipeline/asset_jobs/worker.lock`、`data/factory/agent_dispatcher/state.json.tmp*`、`data/factory/hollywood_tick.lock` 各 2 次。与 REVIEW-G2 P1-1（test_epchain_o）同一类；修法照 `tests/test_epchain_o.py:88-91` 三行 monkeypatch（asset_tick / dispatch_tick / hollywood_tick → lambda {}）。
+- 另一条告警：`test_prodmerge_o::test_accept_retry_is_capped_on_rescore` 导入 ns_api.app 起的 episodes-summary 线程读真实 takes.json → `services/api/ns_api/app.py:280 data["active"]` KeyError（线程内，用例仍过；G5 范围，P2-5）。
+
+### P0
+无。
+
+### P1
+- **P1-1** `tests/test_restart_api_ps1.py:266` 时序过严断言（一行），否则 cut pick_tests 必红。
+- **P1-2** `tests/test_factory.py:782` 用例补三行 monkeypatch，否则 cut 的 real-data-guard 退出码 1。
+- **P1-3** 补入 7 个 G6 漏项：tools/factory/hosts.py、config/factory/hosts.json、ops/autostart/restart_producer.ps1、ops/offline/ensure_runs.sh、ops/offline/resident_restart.sh、tools/autopilot/runs.py（cut A 后又改）、tests/test_infra_resident.py。漏掉前两个 G3 的 after_network 一 import 就 AttributeError；漏掉 runs.py 则 test_prodmerge_o 红、新剧又默认 producing。
+- **P1-4** `config/pipeline/producer.json` **fanout.enabled=true 的出处站不住**：`_note` 写“L-155（项目方 11-03 05:0x 多卡并行）”，而 MASTER_PICTURE.md:327 这条 L-155 已标“作废：PS 侧重号”（账本正式 L-155 = 03:5x 项目方已睡；CHANNEL 10:50 MASTER-WSL：“多卡并行”若账本无记录由我补编号）。且 A1 第 19 轮 A1-11 列的“开启前补”两条都没做：① `producer.py:2399 dispatch_fanout` 不走 `hard_capped` / `obj_rate_exceeded`（:2292 / :2297 只在主循环）；② `:2640 if slot == oid: leases.release(oid)`——主槽一完成就放租约，#k 槽仍在途时对象可再被“一对象一道”派单，超 max_per_obj。现在 series10_v2 是 preparing、producer 不派单，所以不是 P0；但进版值 = 开关（同 REVIEW-G3 P2-6 口径），由总调度定：补正式编号 + 修这两处再 true，或先 false 入版。
+- **P1-5（REVIEW-C P1-2 遗留，未修）** SENTINEL 对 V2 producer 仍是盲区：`tools/sentinel/remote_probe.py:25` 第 7 个参数 PDIRS，`tools/sentinel/probes.py:115` 仍只传 6 个（root files vqa ports broken lan）→ `out["runs"]` 永远 `{}`，S2 / S3 / S7 / S13 仍只看 data/producer（V1，已归档）。不挡 cut，留 sv18 第一批。
+
+### P2
+- **P2-1** `config/policies/sentinel.yaml` S28 url 写死 `http://10.0.0.36:8893/health`（与 REVIEW-G3 P2-1 gen_contract count_host 同类）；机器地址该从 hosts.json / vqa.json lan_url 取。
+- **P2-2** `tools/autopilot/resident_sync.py:36` RUN_ID 仍是模块级 `primary_run(strict=True)` 缓存（A1-10 未修）：新加的 `producer_rel(RUN_ID)` / `producer_run_mismatch(hb, RUN_ID)` 在 loop 常驻期间 primary 一换就看旧剧目录、对新进程误报 A-RESIDENT-PROD-RUN。
+- **P2-3** `producer.Paths(run_id=None)` 在 runs.json 读不到时 `default_run()` 返回 ""：pd = data/producer/runs/（空剧名）；`main()` 的 `run_env("")` 抛 RunNotRegistered 没接。只在没有登记表的演练目录触发。
+- **P2-4（运维状态，不是 cut 问题）** 笔记本 pid 13972（11-02 01:45 起、旧代码、为已归档 V1 跑）心跳 11:18:58 仍在更新、run=None；A1b 第 22 轮“上线前提 ①：手工停掉再起新 serve”没执行；`data/producer/runs/series10_v2/` 没有 heartbeat / pid → V2 笔记本侧没有 producer。新版 restart_producer.ps1 只认 `$Pd/producer.pid`（V2 目录），停不到这个旧进程，要手工。
+- **P2-5** `services/api/ns_api/app.py:280 _active` 假定 takes.json 有 `active`（G5）。
+- **P2-6** 进版的开关值 = 现网状态，由总调度确认后入：runs.json series10_v2 preparing + episode 1；partition.json 借道 / 挂道清空、retired_lanes 只剩 gpu36:2；producer.json fanout true / accept true max_rechecks 2；gates.yaml video_requires_q9=true + brand_logo 阻断（与 config/vqa.json gate / checks 核过一致，judge.enforce=true）；`data/ops/api_guard_auto.json` 不存在 = 自动重启仍关（第 16 / 17 轮口径不变）。
+- **P2-7** `ops/restart_api.ps1` 仍写死 `$Root = "D:\NS-Final Studio"`（HEAD 已有）；`-DataDir / -LogDir / -Port` 等只给测试。
+
+### 核对通过（有出处）
+- **写真实数据副作用**：`producer.maybe_promote` 只在 sop_gate.json promote.auto=true 才写 runs.json（现 false → 只记 promote_ready；A1-4 结论不变）；serve 的 `acquire_pidfile` O_EXCL + `_pid_holder_alive`（pid + started + 心跳 ≤600 s）+ `handoff` 排空 / 复核 / draining 不谎报 exited——代码 :3248-3420 与 A1b 第 22 轮实跑的版本一致；netfix `laptop_run_controls` / `prepare_run_controls` 只对 runs.json 登记、非 legacy、未归档的剧写 `data/producer/runs/<run>/control.json`，preparing / paused 的写成 paused=true + paused_by=runs.json（K-OPS-F20），reconcile 里 try 包住不挡主剧；merge_pull 项目方决定键（locked / locked_src / locked_history / master_gate）以笔记本为准 + `_atomic_json` 原子写；resident_sync push 四处改 `atomic_install_cmd`（逐文件 mv，同文件系统 rename）；lanes.release 只清自己的（by / to / client_prefix），不带 --by 只放借道，idle_sweep 回收前查卡上非 ComfyUI 进程、探测失败不回收；api_watchdog `child_env` 只给看门狗起的实例 NS_API_MANAGED=1；restart_api.ps1 先在 8801 验新（NS_API_PREFLIGHT + NS_POSTFLIGHT_SWEEP=0 + NS_NO_API_SNAPSHOT）再停旧、只停 `api_<Port>.pid.json` 记的树（pid + 创建时间），02:04 之后没再改，第 16 / 17 轮 + REVIEW-C 已审；restart_autoflow.ps1 只停锁里 pid 树；resident_restart.sh / ensure_runs.sh 只停 run/*.pid 里命令行对得上的进程。
+- **没有绕闸门的分支**：派单候选先 `sop_gate_block` → `sop_gate.require_backoff`（首帧=出图、尾帧=尾帧；legacy 放行；判不了=不派，失败关闭）；fanout 只给已在途（已过闸门）的首帧对象加种子，每个种子算一次尝试 ≤ MAX_TRIES，兄弟种子已过只记历史不改结论；`shared_accept` 出错 → retry（score_infra）不放行，rescore 复核次数 > accept.max_rechecks 按没过处理；`--run` 只认登记表（:3752）；`register_run` 新剧默认 preparing，preparing → producing 只经 sop_gate.promote。
+- **C-14 V1 隔离**：新增行里 V1 专名只在 legacy 分支——`Paths` 的 voices / music / eps_out / review 按剧（V2 → voices_v2.json、music/<run>、episodes/<run>、review_pages/<run>_video，test_prodmerge_o 守 `"series10" not in review`）；`_run_id_from_config` 默认 "" 不再 series10_v1；deps.dryrun 改 `runs.current_run`（I-16）；decisions_guard.run_id / episode_pipeline.run_dir 改认 runs.json primary；runs.py 的 DEFAULT_PRIMARY 还在但 producer.primary_now 绝不回退它（A1b CASE A/B）；video10_srv 退役（hosts.json 两台 video_root = 发版目录、`video_code_managed` 为真、脚本 NS_QC_VISION_DIR 改 `$R/models_cache/vision`，test_prodmerge_o 守 "video10_srv" 不再出现）；roles.attribute_bug 的 --run 透传到 attribute_bug.py:215。
+- **默认值与 OWNER_CANON**：C-13 fanout 方向一致，但 L-140 整集就绪不变（sop_gate_block 按集判）✓；C-16 先图后视频：gates.yaml video_requires_q9=true 与 vqa.json 一致 ✓；C-11 promote.auto=false → 总调度 `sop_gate.py promote --apply` ✓；C-25 发版目录 = video_root ✓；K-OPS-F33 / F35 / S19 三条新规则各有 check 指向已过的测试 ✓。
+- **跨模块符号都在**：runs.current_run / run_env / is_legacy / renders_dir / producer_dir；sop_gate.stage_view / promote / promote_check / require_backoff / config（G1 已入）；vqa.contract.sanitize / reask_eye（G3）；dispatch.control_for / global_pause / apply；remote_probe `import urllib.request`；scorecard.stage_of 非 legacy 走 stage_view、v2_live 按文件路径载 sop_gate。
+- **已审轮次结论没有相悖处**：A1-1 / A1-3 / A1-5 / A1-6 修复仍在（第 22 轮核过）；第 17 轮 P1-1 端口残留 → RESTARTFIX-O 段在（REVIEW-C 核过）；第 27 轮 P1-2 untracked worker 归 G3；REVIEW-C P2-1 claim 路径仍在（设计保留）。
+- 本轮没有改任何代码 / 配置、没有重启、没读 data/master/；测试写盘除 P1-2 那 6 次被 guard 拦下外都在 tmp。
+
+### 给总调度的最后一行
+**G6 可入 cut B：是（P0 = 0；G6 清单 37 个文件无需剔除）。入版前：① 修 tests/test_restart_api_ps1.py:266 一行（时序过严断言）；② tests/test_factory.py:782 用例补三行 monkeypatch（asset_tick / dispatch_tick / hollywood_tick），否则 cut 的 real-data-guard 退出码 1；③ 补入 7 个漏项：tools/factory/hosts.py、config/factory/hosts.json、ops/autostart/restart_producer.ps1、ops/offline/ensure_runs.sh、ops/offline/resident_restart.sh、tools/autopilot/runs.py（cut A 后又改）、tests/test_infra_resident.py（与 G3 P1-3 同一个）；④ config/pipeline/producer.json fanout.enabled 由总调度定：补正式决定编号并修 A1-11 两处（dispatch_fanout 走上限检查、最后一个槽退出才放租约）后再 true，或先 false 入版。**
+
+---
+
+## REVIEW-G4 cut B · 11-03 11:0x–11:5x · G4 出图编译（compiler build_first / gen_contract preflight·postflight·accept / frame_job / shot_language / golden_v2 收薄）复审（Fable，只读；L-153 / L-157）
+
+**范围说明（先看）**：派单标题的 G4 = 出图编译 / 看图，与 CUT_PLAN_sv17 §4 的 G4（视频 / 后期 / 配音 33 个）不是同一组。§4 没有单独的"出图编译"清单，它并在 **G3（84 + 1）** 里。本轮按派单标题审 G3 里的出图编译 / 看图子集（下表 60 个文件：services/agent/ns_agent/{compiler, frame_job, shot_language, frame_spec, framing, bible, cast_table, run_paths, state_timeline, asset_refs, gen_contract/*, vqa/contract}、services/render_router/ns_render/{final_tier, unified_frame, pipeline}、tools/promptfix/*、tools/gen_contract/*、tools/assetmaster/*、tools/imgfix、tools/vqa、tools/bakeoff、tools/gen_scenes、tools/build_state_timeline、tools/s2_waiver、tools/series10_imggen、packages/qc/provenance、config/{gen_contract, compile/*, render_quality, s2_waivers, v2style, vqa, prompts/vqa_inspect}、knowledge/rules/{prompt, render_promptfix}、tests 11 个）。asset_jobs / asset_worker / asset_checks / hollywood_tick / vlm_pool / episode_ready / autoflow_resident / owner_* / run_media / instance 留给 A-G3。**CUT_PLAN §4 的 G4 视频组本轮没审**，总调度要另派。
+
+**结论：G4（出图编译子集）可以进 cut B，P0 = 0。** 定向 pytest 见下；P1 两条（画布改稿路径分段后缀错配、cast_v2 --render 仍是第二条出图账）都不挡 cut，留 sv18 第一批。
+
+### 实跑
+- 基线 HEAD = 6125b3e（sv-20261103-01）。`git status --porcelain -uall` 339 条；diff 用 `diff -u --strip-trailing-cr`（工作树 CRLF，裸 diff 会把整文件标成改动）。本子集净改动约 1 700 行（新文件 accept.py 234 / cards.py 110 / shot_language.py 162 / cast_v2.py 195 / bible_series10_v2.toml 70 + 6 个新测试）。
+- 定向 pytest 32 个文件（本子集 11 个测试 + 按改动文件 pick 的 test_gen_contract / unified_frame / image_jobs / frame_jobs_w2 / outer_items / state_timeline / t06_bible / s2_waiver / rescore_takes / imgmaster_compile / single_identity_face / partial_face_described / image_framing / prodmerge_o / v2cut_o / sop_gate / last_frame_specs / leica_sstar_lca / render_quality_q1 / scenes_s2_s3 / scene_segments_d2 等 21 个）：**420 passed，6 failed，1 skipped，903 s**；real-data-guard 写真实数据 0 次。6 红分类：
+  - **环境 / 测试隔离 ×3**（不是真 bug）：`tests/test_promptfix_v2.py::test_p15b_v2_compile_refs_all_from_assets_v2`、`::test_v2_compile_never_opens_v1_visual_bible`、`::test_l130_segment_marker_never_in_prompt`。该文件**单跑 32 passed（2 s）**；独立进程复现（NS_RUN=series10_v2，S8 原样 / 加【幻想段】各编一次）：【场景】段 + "本镜场景：" 都在、标记已剥、`style_segment` 判对、`visual_bible.toml` 打开 0 次、`trace.faces == ["lead_f"]`。32 文件同进程串跑时被别的测试污染（golden_v2 模块级 `PROJECT = _current_run()` 在首次 import 时钉死，test_merge_img_o / test_v2cut_o 等用 `setenv NS_RUN`；test_golden_v2_checks 已用独名加载规避）。另 p15b 的断言 "refs 全在 assets_v2/" 本身已陈旧：MERGE-IMG-O 之后 O4 设定图的 half_nohead 裁图按项目 crop_dir 落在 `data/pipeline/runs/series10_v2/images/refcrops/`（来源仍是 assets_v2 的设定图），单跑时 refs 全在 assets_v2/、串跑时多出这张裁图，差异来自前面测试留下的状态（原因由 A-G3 / MERGE-IMG-O 查），建议断言改为"来源 = 清单或清单派生"。
+  - **陈旧测试 / 数据态 ×3（G5，不是本组）**：`tests/test_v2cut_o.py::test_reimported_v2_scene_library_is_only_sk_white_cyc`（V2 场景库现在 6 个，全是本剧；文件 11:17 正被 W13 CUTB-PREP 改，docstring 已写明改法）、`::test_ref_switch_only_registered_scenes_for_v2`（读真实 V1 `data/state_timeline.json` 要 sk_office_night）、`::test_v2_look_action_per_episode_with_names_and_thumbs`（要第 1 集已确认造型，随 data 翻转）。
+- 本轮没改代码、没重启、没读 data/master/；只读 data/import/runs/series10_v2/script_v2.json 一次（核对段落标记在哪个字段）。
+
+### 清单核对（§4 归组）
+- G3 清单 85 个文件（含 10:50 补入的 test_w7_import_followup.py）在 `git status` 里**全部存在**，没有已消失的。
+- 本子集命名空间里**不在任何 §4 组**的改动：`knowledge/rules/render_qwen21.yaml`（1 行，HEADER-O 文案通用化"林晚 22 岁"→"全部角色为成年人"，按规则应归 G3 出图 / 看图 config）、`tools/vqa/after_network.py`（PRODMERGE-O：DEST 改读 hosts.json video_root，发版目录不再直推代码；依赖 **G6 的 tools/factory/hosts.py + config/factory/hosts.json**，它们也不在任何组）。建议：render_qwen21.yaml 补进 G3；after_network.py + hosts.py + hosts.json 三个一起补进 G6（分开会 ImportError）。
+- 整个 status 里不在任何 §4 组的其余文件（给总调度，非本组）：apps/web/e2e/uirsi/topbar_check.mjs、apps/web/src/v3/assets/AssetInspector.tsx、apps/web/src/v3/plainWords.ts、apps/web/e2e/w5ui/shoot_w5*.py（G5）；knowledge/rules/research.yaml、packages/schema/ns_schema/h3_lint.py（G2 已点名）、tools/qa/acting_lints.py（G1）；ops/autostart/restart_producer.ps1、ops/offline/ensure_runs.sh、ops/offline/resident_restart.sh、tests/test_infra_resident.py、tests/test_asset_age_judge.py、tests/test_asset_items_w9.py（G6 / G3）；tests/test_l123_no_reject_ui.py、tests/test_ui_stepbar.py、tests/test_struct_full_rewrite.py（G5 / G2）；docs/master/HANDOVER_CODER_PS_20261103.md（G1）；`series10_v2/autoflow.json`、`series10_v2/autoflow_ep02.json`（**仓库根下多出的目录，疑似误写路径，不该进版**）；vendor/_eval 三个子模块 -dirty（§1 已说不进）。
+
+### P0
+无。
+
+### P1（不挡 cut，sv18 第一批）
+- **P1-1 · 画布改稿路径的风格后缀不按段取（L-130 在 prompt_override 分支失效）。** `frame_job.build_first:311`：`prompt_override` 时用 `ST.preset_suffix()` / `ST.image_suffix()`（不带 project、不带 segment）判断 / 补后缀；`style.preset_suffix(run, None)` 对分段剧（V2）走 `segment_preset(r, None)` → 缺省段（reality）。幻想段镜头在画布整段改稿重出（`unified_frame.render_first` ← `frame_edit.py:353/374/384`）时：改稿里带的是 fantasy 后缀 → 判"没有后缀"→ 再拼一句 reality 后缀，提示词同时含两段风格句；`job["preset"]` 仍是 fantasy_c（:324 按 segment_of 取）。I7 认任一段后缀，所以闸门放行。HEAD 版 V2 只有一句临时后缀，没有这个错配，是 L-130 分段改动新引入。修法一行：`:311` 改成 `ST.preset_suffix(project, seg_in)` / `ST.image_suffix(project, seg_in)`（seg_in 提前到 :323 之前算）。正常 producer / 资产作业路径不受影响。
+- **P1-2 · `tools/promptfix/cast_v2.py --render` 仍是第二条出图 + 验收账（与 PRODMERGE-O "不再各写一套 / 帧只记 takes.json 一本账"相悖）。** golden_v2 的 --render / --rejudge 已退役（退出码 3），但 cast_v2 还保留整套 render()：借道出图写 `data/ab/v2_cast/takes.jsonl` + `data/review_pages/v2_cast/`，用自己的 vlm_check / age_check / ocr_check 判定（不走 gen_contract.accept，QB 的人数 / 合并看图口径不同）。它是 CAST-S 过渡原型，文件头自己也写"正式形态是 asset_worker"。不是 P0：只由人手动触发、编译仍走 build_first + preflight(mode=setting_candidate)、不写 takes.json。建议同 golden_v2 处理：--render 退役指向 asset_worker 的设定候选作业，或整个文件留 sv18 从清单拿掉（它只被 tests 以外的东西引用吗——grep 没有调用方）。
+
+### P2（记录，下轮跟）
+- **P2-1** `frame_job.with_note:288`、`compile_frame_v2:690`、preflight I7 非资产包分支 `:329`（`ST.preset_suffix()`）都按**当前剧**（`ST._run()`）取后缀，而 `compile_frame` 按 `project` 取：当前剧 = V2、编译 V1 归档镜（画布看 V1、frames_v2 等）时 with_note 找不到 S★ 后缀 → 补句落在风格后缀**之后**；I7 报"没有默认预设后缀"。HEAD 已如此（不是本轮退步），W7 的 V1 prompt_sha 冻结核对是在 NS_RUN=V1 下做的。sv18 统一传 project。
+- **P2-2** `gen_contract/accept.py:33` `_load` 把 `tools/vqa`、`tools/pipeline` 目录插进 `sys.path`（生产进程里 producer / final_tier 都会触发）：之后任何裸 `import accept` / `import anomaly` / `import image_jobs` 都会解析到这两个目录（tools/vqa 下有同名 accept.py = Q10 旧验收）。模块本身用了独名 spec 加载，不冲突；是全局副作用。建议 spec 加载时不动 sys.path，或只在 `_load` 内临时插入。
+- **P2-3** `accept.evaluate:` anomaly 检测 `host="gpu36"` 写死在 services 代码里（config/gen_contract.json Q1d_anomaly.host / Q10_accept.count_host 已有配置项）。
+- **P2-4** `tests/test_merge_img_o.py::test_v2_s8_close_wardrobe_and_negative`、`test_sheet_mode_has_no_gaze_lines` 直接读真实 `data/import/runs/series10_v2/script_v2.json` 第 1 集第 8 镜并断言"穿黑色漆皮抹胸紧身短裙 / 高亮镜面漆皮 / 四分之三侧脸"：ep01 正式重导（V2_LIVE 04:05 卡点）后随稿翻转（同 REVIEW-G2 P2-4）。有 skipif HAVE_V2，cut 快照硬链接 data/ 后会跑。
+- **P2-5** `config/gen_contract.json` `Q10_accept.count_host` "" → `http://10.0.0.36:8893`（gpu36 内网常驻检测服务）与 `config/vqa.json video_requires_q9 false → true`、`brand_logo blocking:true`：三处都是**运行开关**，有决定出处（V2_LIVE 11-02 21:0x VQAGATE / FACTORY；L-137；W-40），cut --dry 时按 runs.json 同样口径由总调度确认一次。
+- **P2-6** `tools/vqa/accept.py`（Q10，VQAGATE 11-02）与新 `gen_contract/accept.py`（QB，PRODMERGE-O）并存：producer（G6）两道都挂（`producer.py:885` Q10、`:3006` QB），identity / outfit / prompt / count 四项判两遍、口径不同（Q10 用 tools/vqa 的 prompt 核对，QB 用合并看图）。不矛盾但重复，留 sv18 合并。
+- **P2-7** `shot_language._spec()` / `_shot_v2()` `lru_cache(maxsize=1)` 进程内永久缓存 shot_spec_v2.yaml / shot_v2.py：resident 常驻进程改 yaml 不生效（run_style.json 每次读，不受影响）。
+- **P2-8** `frame_job.GARMENT_ALIAS = {"深灰西装裙": …}` 与 `asset_refs.NAME_ID` 四个 V1 名字仍是模块级常量（V2 名字由 `register_manifest_names` 动态登记进同一表）。只审 C-14：不是 V2 提示词会带出的内容，但"V1 造型词 → 出图叫法"这类知识应随剧配置。HEAD 已如此。
+
+### 核对通过（有出处）
+- **唯一出图路径没有第二入口**：build_first 仍是 compile_shot 的唯一调用点（`frame_job.py:68`），prompt 出口 `ST.strip_segment_marks(body)`（:316）+ 编译器出口 `_no_segment_marks`（compiler.py:865-867）两道，段落标记只进 `job.preset / style_segment / style_warning / compile_trace`。实核：V2 导入稿里标记只在 `scene_detail`（11 处：2【幻想段】/ 9【现实段】），`style.segment_of` 扫 scene_detail → 判得到；`test_l130_segment_marker_never_in_prompt` 已去 xfail。
+- **闸门没有放宽分支**：preflight I2 由"有脸槽就行"改成"主体角色必须在 face_ids 里"（:250，更严）；I3 新增 `sheet_gaps`（露脸 + 景别看得见服装 + 只有清单单品图 → fail，开关 `I3_require_sheet` 缺省 true）；I9 脸板放行只在 `_faceboard_ok`（每格 role=face、带角色 id、不重复）；I7 分段剧认任一段后缀、空镜 / 单品设定候选只认 `EMPTY_SUFFIX`，禁用词 / V1 短语照查；`apply_asset_stage` 只在 `mode=setting_candidate` 且 `asset_stage∈{face,sheet,scene,item}` 时把对应项 fail→na，写了 mode 但 stage 不认识 = I2 fail（失败关闭）；全仓只有 asset_worker.py:902 与 cast_v2.py:71 设这个 mode，API / 画布作业不带。`ContractResult.ok` 是属性，`apply_asset_stage` 在排序前改 items，结论一致。
+- **共用验收失败关闭**：`final_tier.final_accept` 验收抛错 → `ok=False` 不接替定稿；`accept_retry` → ok=False；`_make_final` 不过只留版本、`_clear_error`、不 lock（:248-253）。`accept.enabled` 只对 `not is_legacy and asset_manifest` 的剧，配置读不到 = False（V1 口径不变）。`render_quality.json auto_final_on_lock_runs.series10_v2 = false`（总调度裁定先关，L-147 等并回后开），`auto_final_on_lock(path, run)` 按剧覆盖，`test_auto_final_on_lock_per_run` 断言真实配置为 false。
+- **负面词**：`job_negative` 永远带 `compiler.MINOR_GUARD`；`unified_frame.build_graph` 只在 `unet != turbo 且 cfg > 1` 才把负面词写回编码器，Turbo 照旧不送（与 workflows.negative_for 一致）。
+- **takes.json 单一写入口（A-04）**：`unified_frame._pf_write`、`rescore_takes.py` 改走 `P.mutate_takes(path=…)`；`test_a04_no_direct_takes_json_writes_anywhere` 全仓 AST 扫（本轮跑过）。
+- **V1 / V2 切割（C-14 / L-126）**：`bible.bible_path` 资产包剧只读 `run_style.json runs.<剧>.bible`（V2 = config/compile/bible_series10_v2.toml，人物表空、无"光比1:4"、无 Leica 句），没登记 → `V1BibleRefused`；`run_paths.state_dir / timeline_json / scenes_json` 非 V1 剧指到 `data/import/runs/<run>/`，解析到 `data/` 抛 `V1PathError`；`state_timeline` 只在 legacy 剧记 V1 母版、"每镜列林晚"只对 V1；`s2_waivers` 老条目补 `run: series10_v1`、无 run 的条目只对 legacy 生效；tools/gen_contract、assetmaster、imgfix、bakeoff、series10_imggen 共 11 个历史工具把写死的 `series10_v1` 改成 `RUNS.legacy_run(ROOT)` 并加 `gate_legacy_tool`（要显式 --run）；`cards.py` V2 人物卡从本剧 P1 人物表生成，config 里的 lin_wan / gu_chen / chen_yu 卡只给旧剧；`Q1_identity.lead` / `yaw_relax.characters "@lead"` 按 `cast_table.lead_id` 解析。本子集新增代码里没有新的 V1 剧名 / 人物硬编码（除 P2-8 的既有常量）。
+- **默认值与 OWNER_CANON / 决定表**：L-130（fantasy_c / reality_c2、缺省现实段 + 告警）、L-145（英文 Leica / ARRI / Kodak 质感句进 V2 后缀、中文"徕卡 / S★ / 50mm f/2 / 暖调通透"仍挡——`v1_style_phrases` 去掉了 "Leica"/"leica"，`strip_brand` 仍去镜头句里的 Leica 型号）、L-148（后缀删灯光 / 时间词）、L-149（lens auto + fusion 开）、L-147（定稿档按剧开关、先关）都能在 run_style.json / render_quality.json / test_merge_img_o 里对上，与 OVERSIGHT_LOG 第 18–27 轮结论（W7 归档剧编译冻结、W2 探针 build_first+preflight、A2 F4 括注 label、ISS-1103-023528-1509 脸板逐格、ISS-1103-024205-8856 一体件）没有相悖处。
+- **golden_v2 收薄**：只剩 `--compile / --summary`，必须 `--shot`（退出码 2），`--render / --rejudge` 退出码 3；不再 import shutil、不写 data/ab、data/review_pages；`load_imported` 从 `runs.import_path` 取镜、成人镜拒绝、多人镜不再拒；`test_no_v1_skeleton_or_hardcoded_text` 守"frozen_v1 / 外滩 / 风衣 / 陆家嘴"不回来。
+
+### 建议留到 sv18 / 从 cut B 清单拿掉 / 补入
+- 本子集 60 个文件**都不用拿掉**；P1-2 若总调度要收口，可把 `tools/promptfix/cast_v2.py` 暂拿掉（没有调用方，asset_worker 不依赖它）。
+- **补入**：`knowledge/rules/render_qwen21.yaml` → G3；`tools/vqa/after_network.py` + `tools/factory/hosts.py` + `config/factory/hosts.json` → G6（三者同进同退）。`series10_v2/autoflow*.json`（仓库根）不进版、让 CODER-PS 查写错路径的调用方。
+- P1-1（一行）、P1-2、P2-1～P2-8 留 sv18 第一批。
+
+**G4 可入 cut B：是。P0 列表：无。需剔除：无（可选剔除 tools/promptfix/cast_v2.py）；需补入：knowledge/rules/render_qwen21.yaml（G3）、tools/vqa/after_network.py + tools/factory/hosts.py + config/factory/hosts.json（G6）。另：CUT_PLAN §4 原 G4 视频组（33 个）未审，请另派。**
+
+---
+
+## REVIEW-G3 cut B · 11-03 11:0x–11:2x · G3 资产作业 asset_jobs / asset_worker / asset_checks / owner_pick / inbox（84 + 1 文件）发版前复审（Fable，只读；L-153 / L-157）
+
+**结论：G3 可以进 cut B，P0 = 0。** 85 个文件逐个 diff / 通读；G3 定向 pytest 407 过 2 红（2 红都是随真实数据翻转的陈旧断言，不是代码 bug）；写真实数据 0 次。入版前要做三件事（P1-1～P1-3）：补入 4 个按规则属 G3 的漏项、cut B 必带 G6 的 hosts.py / hosts.json（G3 顶层 import 依赖）、修 tests/test_promptfix_v2.py 两条一行断言（或暂拿掉该文件）。
+
+### 清单核对（`git status --porcelain -uall` 11:0x = 336 条，Windows git.exe 1 s；WSL git 在 /mnt/d 上 >120 s）
+- §4 的 84 个 + §528 补入的 tests/test_w7_import_followup.py：85 个全部仍未提交，无一个消失 / 已入 HEAD。camera_norm.py / importer/script_md.py 按 §2 已归 G2 ✓。
+- 按归组规则应属 G3、但不在任何组（**P1-3，补入**）：`tests/test_asset_age_judge.py`（新，06:22，W6b 判词器 25 + 28 句回归）、`tests/test_asset_items_w9.py`（新，04:59，W9 单品规格）、`tests/test_infra_resident.py`（改 +213 行，11:03，W12 / W12b 7 个用例）、`tools/vqa/after_network.py`（改，10:02，PRODMERGE-O：DEST 改读 hosts.video_root、发版目录不再直推代码）。`knowledge/rules/render_qwen21.yaml`、`research.yaml`（HEADER-O 04:25 各 1 行去 V1 人名）归 G2 同批或 G3 都行，别漏。
+- **跨组硬依赖，不在任何组（P1-1）**：`tools/factory/hosts.py`（新函数 video_root / video_code_managed）+ `config/factory/hosts.json`（video_root 两台改成发版目录 /root/work/fredw/offline_20261101/repo）。`tools/vqa/after_network.py:36` 顶层 `DEST = _video_root()` 直接调 hosts.video_root()，HEAD 的 hosts.py 没有这个函数 → cut B 漏掉它们，after_network 一 import 就 AttributeError（syntax_guard 只编译、查不出）。G4 series10_video 的 deploy 同样用 video_code_managed。按规则归 G6，G6 复审请一并确认。
+- 工作树仍在动：asset_worker.py / autoflow_resident.py / test_infra_resident.py mtime **11:03**（W12b：A12 第 27 轮 P1-1 的 drop_pyc + import_dep + 心跳 reloaded_deps），晚于 CUT_PLAN（04:5x）与第 27 轮（06:39）；本轮读的是这一版。cut 必须 `--tree` 冻结。
+
+### 实跑（`.venv/Scripts/python.exe -X utf8 -m pytest`，PYTHONIOENCODING=utf-8）
+- 21 个测试文件（G3 清单 19 + 补入 test_asset_age_judge / test_asset_items_w9 / test_infra_resident）：**407 passed, 2 failed, 1 skipped，198.8 s**；`[real-data-guard] 写真实数据 0 次；遗留非守护线程 0`；退出码 1 只因 2 红。
+- 另跑 G6 清单里的 `tests/test_prodmerge_o.py`（覆盖 G3 的 gen_contract/accept.py 三态、final_tier.final_accept、golden_v2 收薄）：**28 passed**，2 s。
+- CUT_PLAN §3 #4 `test_pending_job_left_with_passed_candidates_is_salvaged` **已转绿**（test_asset_pipeline 70 用例全过）。
+- 2 红定性 = **陈旧测试**（都在 tests/test_promptfix_v2.py，`need_v2` 读真实 data/，随真实数据翻转；cut 快照硬链接 data/ 后一样红）：
+  1. `test_p15b_v2_compile_refs_all_from_assets_v2`：refs 多了 `data/pipeline/runs/series10_v2/images/refcrops/lead_f_O4_sheet_s1102_half_nohead.png`——O4 设定图登记后 asset_refs.sheet_crop 按 crop_dir（config/recipes/asset_refs.json）裁的去头半身参考，源图在 assets_v2；断言“全部以 assets_v2/ 开头”过窄（测试 03:08 写时 O4 还没设定图）。不是 V1 泄漏（同一断言的 `"lin_wan" not in asset_refs` 没触发）。改法：前缀允许 crop_dir，或断言 trace 里每张参考的 source。
+  2. `test_l130_segment_marker_never_in_prompt`：04:50 重导（MERGE-OPS-O）后导入稿 ep01-S8 的 scene_detail 本身 = “【现实段】透明亚克力椅在白幕左前…”，测试断言**原始** `sh.scene_detail`（带标记）在 prompt 里——与它自己要守的 L-130“标记一律不进提示词”矛盾，数据带标记后必红。改法：比较 `ST.strip_segment_marks(sh.scene_detail)`。
+  两条各一行（**P1-2**）；来不及改就把 tests/test_promptfix_v2.py 暂拿出 cut B——但它另外 20 个用例是 V1 bible 失败关闭 / W-40 去 logo 参考 / L-130 分段风格的守卫，建议改不建议拿。
+
+### P0
+无。
+
+### P1
+- **P1-1** cut B 必带 `tools/factory/hosts.py` + `config/factory/hosts.json`（G6 规则，目前不在任何组；G3 的 after_network.py 顶层依赖）。
+- **P1-2** tests/test_promptfix_v2.py 两条陈旧断言会让 cut 的 pick_tests 闸门红（该文件在 G3 清单里必被 pick）。
+- **P1-3** 补入 4 个 G3 漏项（test_asset_age_judge / test_asset_items_w9 / test_infra_resident / after_network），否则 W6b 判词器、W9 单品契约、W12 重载的回归不进版，after_network 的“发版目录不直推代码”也不进版。
+
+### P2
+- **P2-1** `config/gen_contract.json` Q10_accept.count_host 从 "" 改成写死 `http://10.0.0.36:8893`（03:06，MERGE-IMG-O 批次，无出处说明）。机器地址该从 config/factory/hosts.json 或 vqa.json lan_url 取（K-OPS arch_scan 口径）；只影响服务器端 Q10 人数判（笔记本资产线走 anomaly.check(host="gpu36") 不读它）。
+- **P2-2** `tools/promptfix/cast_v2.py`（新 195 行）把 V2 三个配角的外貌 / 服装 / 提示词和 SCENE_ID 写死在代码里（docstring 自称“过渡期原型，正式形态是 asset_worker”）。不是 V1 内容（sk_white_cyc 是 V2 场景），但 C-01 / C-02 口径下应退役进 _quarantine 或改读 P1（sv18）。
+- **P2-3** `tools/pipeline/vlm_pool.py` 没有直接测试（test_hollywood_tick 注入 probe / generate 绕过它）；K-REV-V01“只认本机地址”靠 _is_local 一个守卫，建议补 1 条“非本机 url 拒绝”。
+- **P2-4** render_quality.json `auto_final_on_lock_runs.series10_v2=false`（L-147 注释“等共用验收并回后由总调度打开”）：PRODMERGE-O 已把 final_accept 挂进 render_final、test_prodmerge_o 过——开关仍关，开不开归总调度；§3 #7 的“项目方 11-03 05:0x”时间字样仍在（final_tier docstring 同），入账前核。
+- **P2-5** §3 #8 asset_refs.json looks_file：已在 `_looks_doc` 写明（资产包模式造型唯一来源 = 清单；tests/test_w2_merge_img.py 守住）→ 可销。
+- **P2-6** 进版的开关值 = 现网状态：asset_worker.json apply_meta / render / push 开、voice / golden 关、max_parallel 2（L-140）；owner_delegate.json enabled=false 且 03:49 已到期；hollywood_score.json enabled=true（总调度 02:4x）。与 G6 runs.json 同理，由总调度确认后入。
+- **P2-7** 已审轮次的 P1 均已落地：A9 第 25 轮 ①②（item_skip_reason：“无 / 0件 / 项目方编号 / （参考照）/ 项目方已上传”跳过；scene 走 sheet 模式 + person_phrases 守卫扩到 scene）✓；A12 第 27 轮 P1-1 drop_pyc ✓（test_w12b ×4 过）；A6b P2“子进程覆盖已定案状态”→ _child_save / _settled_by_tick ✓；A2 第 18 轮 F1（extras 搬入改 V1 提示词）→ W7 freeze_archived_extras 归档剧冻结 ✓。
+
+### 核对通过（有出处）
+- **写真实数据副作用**：作业 / 待办 / 清单写入全部经 `asset_jobs.guard_run`（只认 runs.json 登记剧；demo_v2 这类试跑剧拒绝）；子进程按 `root_of_job` 取数据根、`--root` 不一致不跑；`_spawn` 在 PYTEST_CURRENT_TEST 下拒起；`run_voice` 非真实仓库必须注入 runner；owner_pick 启动补执行只在 NS_API_MANAGED=1 + 单实例锁 + holds_port（instance.py）；look_confirm 只写 run 目录 look_confirm.json；hollywood_tick 只追加 metrics ledger、两边 /health 都空闲才打、Q9 一来让路；push 走 sync.verified_install 核 sha、失败只登记卡点不回滚本地清单；清单写入前核 sha0、原子写；A-04：takes.json 只经 mutate_takes（_pf_write 改走它，test_a04 守）。
+- **没有绕闸门的分支**：出图候选必经 `sop_filter` → `sop_gate.require_backoff`（按 (run, 集) 退避，A1-6 稳定签名，状态落文件）；preflight `mode=setting_candidate` 只豁免 ASSET_STAGE_WAIVE 列的项，asset_stage 不认识 → I2 fail（失败关闭）；I3 露脸无设定图 → fail（C-16 资料齐全才出）；sheet 作业必须 `registered_face` 且参考按完整 sha256 对上；adult / local_only 一律拒；Q9 untested 不算过、排队超时只 retry 不换种子；年龄判词失败关闭（A6b 25/25 + 28 句）；杀子进程前 verify_proc 三要素（pid + 创建时间 + 命令行指纹）核不上不杀；salvage 只认 sha 对得上的 passed 候选且不少于 salvage_min。
+- **代选 L-136**：never_reason 写死（成人 / 拍板类 / 候选 adult / local_only / 条目文字含成人词），配置打不开；owner_direction 下不冒充项目方；系统已自动选用（notice / auto_picked）的不再代选（不重复登记）；项目方在代选条目上改选 → 转 revise；到期检查读 data/audit 项目方 2xx 写请求。
+- **C-14 V1 隔离**：新增行里 V1 专名只在 V1 分支（state_timeline `v1_cast`、s2_waivers 老条目补 run=series10_v1、legacy 工具经 `RUNS.gate_legacy_tool` 后用 `_LEGACY`）；compiler / frame_spec 的 V1 缺省表是 HEAD 原有且标“运行时一律经 _char_ids()”；V2 编译 `bible.bible_path` 只读 run_style.json 登记的 bible_series10_v2.toml、没登记 → V1BibleRefused（test_v2_compile_never_opens_v1_visual_bible 守）；gen_contract Q1 `lead` / `@lead` + Q1a `cards_by_run` 让 V2 不落 V1 键；run_style v1_style_phrases 去掉英文 Leica 有 L-145 出处，中文“徕卡 / S★ / R0”照挡。
+- **默认值与 OWNER_CANON**：C-05 两段预设 fantasy_c / reality_c2 按 L-129 / L-130 selected、后缀只留质感（L-148）；C-09 / C-10 pick 只有“用这张 / 修改”，自动选用发“已自动选用，可修改”告知；C-13 max_parallel 2 按 L-140；C-22 成人只项目方本人；C-23 项目方上传单品不重画（owner_item_for）。
+- 本轮没有改任何代码 / 配置、没有重启；测试写盘都在 tmp（real-data-guard 0 次）。
+
+### 给总调度的最后一行
+**G3 可入 cut B：是（P0 = 0；G3 清单 85 个文件无需剔除）。入版前：① 补入 tests/test_asset_age_judge.py、tests/test_asset_items_w9.py、tests/test_infra_resident.py、tools/vqa/after_network.py（knowledge/rules/render_qwen21.yaml、research.yaml 随 G2 HEADER-O 批）；② cut B 必带 G6 的 tools/factory/hosts.py + config/factory/hosts.json；③ 修 tests/test_promptfix_v2.py 两条陈旧断言（各一行）或暂拿掉该文件。**
+
+---
+
+## REVIEW-G2 cut B · 11-03 10:3x–10:5x · G2 写作链 autoflow / 派单器（70 文件）增量复审（Fable，只读；L-157）
+
+**结论：G2 可以进 cut B**，条件是先修 P1-1（一行夹具，否则 cut 的 pick_tests 闸门必红）并把 P1-2 的漏项补进清单。REVIEW-A 第 2 轮之后的增量改动（K211-F 第 3 轮 / MERGE-OPS-O / MIGRATE-O / HEADER-O / SV17-O / 派单器测试编码）逐项核过，没有新入口、守卫没有误拦；没有 P0。
+
+### 实跑
+- 20 个文件（G2 清单 16 个测试 + test_merge_ops_o / test_fact_patch_guide / test_v1_leak / test_w7_import_followup）：**283 passed，0 failed，83 s**；CUT_PLAN §3 #3 的 `test_owner_gate::…took_over_via_gate` 已转绿（夹具不再带 V1 场景 id）。
+- 但 **real-data-guard 报“写真实数据 2 次”，pytest 退出码 1**（见 P1-1）。
+- `tools/knowledge/compile.py --check`：OK kb-20261103-6d634b14，668 条规则（HEADER-O 的 concrete_id_check 没拦任何现行规则）。
+- 增量范围（mtime 晚于 04:15 的 G2 文件）：hollywood_facts / hollywood_judge / writer_*.yaml / director_system_prompt / writer_knowledge（通用化文案）、validate_qwen_script.py（QW-C1 词表单一来源 + V2 硬规则）、script_md.py（镜头 extras 读 shot_spec_v2.yaml）、import_script.py（single_source / scope_globals / v1_gate）、autoflow.py、autoflow_agent.py、test_timeline_o / test_header_o / test_agent_dispatcher。STRUCT-O 的结构项分支在这两个文件里还没有落盘（没有 STRUCT-O 标记，mtime 04:49/04:50），本轮没看到在制代码。
+
+### P0
+无。
+
+### P1
+- **P1-1 · 测试写真实数据（会卡 cut 闸门）。** `tests/test_epchain_o.py:88` 的 `test_resident_spawns_next_episode` 只打桩了 `asset_tick`，没打桩 `dispatch_tick` / `hollywood_tick`：`resident.tick` → `agent_dispatcher.tick(root=ROOT)`（config enabled=true）写 `data/factory/agent_dispatcher/state.json.tmp*`，`hollywood_tick` 建 `data/factory/hollywood_tick.lock`。guard 抛错、被 resident 的 try/except 吞掉，用例显示通过，但会话结束 guard 报 2 次 → **退出码 1**。修法：`tests/test_epchain_o.py:88` 下面再加两行 `monkeypatch.setattr(RES, "dispatch_tick", lambda ad=None: {})` / `monkeypatch.setattr(RES, "hollywood_tick", lambda runs=None, ht=None: {})`，测试不删。来不及修就把 `tests/test_epchain_o.py` 从 cut B 清单暂拿掉（代码 `autoflow.next_episodes` 不受影响）。
+- **P1-2 · 本轮增量改动有 6 个文件不在 CUT_PLAN 任何一组里**（按 §4 归组规则都该是 G2，不补进去 cut B 快照就少了这些改动）：`tools/script_rsi/hollywood.py`（04:39，K211-F 第 3 轮 `worse_detail` :383 / :449，I6 拒收带 lint 原文）；`tools/knowledge/compile.py`（04:28，HEADER-O `concrete_id_check` :362 / :390）；`tests/test_fact_patch_guide.py`（04:39，测 `autoflow.FACT_PATCH_GUIDE`，已过）；`tests/test_w7_import_followup.py`（04:44，测 episode_ready，归 G3）；`packages/schema/ns_schema/h3_lint.py:328` 与 `tools/pipeline/hard_constraints.py:101`（HEADER-O 文案通用化，一行各）。
+- **P1-A（REVIEW-A 第 2 轮遗留）· 未修。** `tools/pipeline/run_chain.py:176-181` 仍在 api 后端直接写 `P4_epNN.md`，不经 `adopt_full_p4`、不看 hard_blocks。仍是休眠路径：`autoflow.py:842` `be == "claude_agent"` 才走 `AG.run`，api 分支现在走不到。另外同一分支 `autoflow.py:741` 导入失败只 set `import_failed`、不写 `import_fail_sig`，一旦切回 api 后端，`pending_done`（:1071）会每拍重导（空转）。留 sv18，不挡 cut。
+- **P1-B（REVIEW-A 第 2 轮遗留）· 未修。** `tools/script_rsi/v1_leak.py:39-43` `old_runs` 仍 = runs.json 里除本剧外所有剧；`docs/master/PIPELINE_SOP_V2.md` 没有“开第 3 部剧时前作 id 白名单”的步骤。第 3 部剧第一天必撞 HeaderMissing（有 `record_run_error` 3 次 halted_error 兜底，不空转）。留 sv18。
+
+### P2
+- **P2-1** `tools/validate_qwen_script.py:1020` 用模块级 `_RUN["run"]` 传“本剧”给 `motion_move` / `camera_vocab`：同进程并发 validate（API + resident 线程）会串剧；临时路径认不出剧时退回 legacy → V2 硬规则不生效（p4_adapter :101 显式传 run，主路径没问题）。
+- **P2-2** `autoflow_agent.py:1181` 只在“重导失败”分支记 `import_fail_sig`；首导失败（api 后端 `autoflow.py:741`）没有，见 P1-A。
+- **P2-3** REVIEW-A P2-C 仍在：`config/v1_guard.json` props 20 个硬命中常用词（纹身 / 门卡 / 红绳…）04:04 之后没改。
+- **P2-4** SV17-O 夹具化没做完：`tests/test_merge_ops_o.py:22/206/227`、`tests/test_timeline_o.py:21-22`、`tests/test_header_o.py:22-28`、`tests/test_epchain_o.py:16` 仍只读真实 `data/pipeline/runs/series10_v2` / `data/import`（有 skipif，cut 快照硬链接 data/ 后能跑，但随真实数据翻转）。
+- **P2-5** `autoflow_agent.py:1089` `code_n =len(` 少个空格（纯格式）。
+
+### 核对通过（增量）
+- **没有第二个入口**：推进只有 `autoflow.py run`（resident `autoflow_resident.py:102`、`owner_delegate.py:429`、`script_autoflow.py:72` 都起它，跨进程推进锁 `acquire_advance_lock`）；派单器 `agent_dispatcher.py` 只起 claude.exe（:263-286），不调 autoflow；写作包只从 `autoflow_agent.packet`（:116）出，派人请求一包一文件 `packet_request`（:297）。整集稿仍只有 `adopt_full_p4`（:1722）一个来源，chain_step / `intake_full_p4`（:1764）共用。
+- **K211-F 第 3 轮**：`autoflow.py:265` `fact_id` = sha1(kind|ref)[:6]，事实偏差 id 不再随位置漂；`:278` `FACT_PATCH_GUIDE` 只追加到 fact 类目标（`patch_user` :467）；`hollywood.py:383` `worse_detail` 只改 I6 detail 文本。
+- **MERGE-OPS-O**：`import_script.py:362` `single_source=bool(run)` 只对非 V1 剧；`:351` 拒绝拿 V1 导入稿当合并底稿；`:294` `v1_gate` 闸门自身出错 = 不放行；`autoflow.py:1037` `import_retry_sig` 按导入器 / 词表 / 本剧 bible 指纹，`pending_done` 只在指纹变了才重导、`halted_error` 跳过、`reopened` 自动接手。
+- **MIGRATE-O**：`l141_migrate.apply_file` 只对 CLEAN_CUT 剧、原稿复制到 `data/_quarantine/l141_migrate_<日期>/`（测试用 `NSFS_L141_QUARANTINE` 指到 tmp）、审计写 run 目录；出错不挡推进。
+- **守卫没有误拦**：`assert_no_v1` 只抛不改、legacy 剧直接放行；三处出口（packet :125、`final_v1_hits` :1497、导入 `v1_gate`）同一词表；QW-C1 只在 `hard_run(run)`（非 legacy）才升 block，词表按剧（`camera_norm.is_enabled(id, run)`）；本轮 283 用例没有一条因守卫误拦失败。
+- **派单器测试编码**：`tests/test_agent_dispatcher.py:20` 假 claude 改为 `sys.stdin.buffer.read().decode("utf-8")`，cp936 机器已过。
+- 本轮没有读 data/master/、没有改代码、没有重启；跑测试写盘都在 tmp_path（除 P1-1 那两次被 guard 拦下的）。
+
+### 建议留到 sv18 / 从 cut B 清单拿掉
+- G2 的 70 个文件**都不用拿掉**；P1-1 若来不及改，只暂拿掉 `tests/test_epchain_o.py`。
+- 把 P1-2 的 6 个文件补进 cut B（hollywood.py / compile.py / test_fact_patch_guide.py / h3_lint.py / hard_constraints.py 进 G2，test_w7_import_followup.py 进 G3）。
+- P1-A / P1-B / P2-1～P2-4 留 sv18 第一批。
+
+---
+
+## 第 27 轮（A12 · Fable，Orca 工人 ctx_f95513df610e，总调度 MASTER-WSL 派）· 11-03 06:39 · W12 RESIDENT-RELOAD 复核
+
+**结论：P0=0；可进 sv-17（先 git add 两个未跟踪 worker 文件）；可受控重启（已于 06:3x 执行，新 pid 45872）；P1×2（同秒同 size 改动 pyc 陈旧 → W12b；untracked 文件须入 cut B）。**
+
+# A12 · 独立审计 W12 RESIDENT-RELOAD（只审不改）— 2026-11-03 06:3x
+
+审的对象：`tools/pipeline/asset_worker.py`（RELOAD_DEPS / sync_deps 头段）、`tools/factory/autoflow_resident.py`（asset_tick phase、run_loop 连错计数 / P0 登记）、`tools/master/master_check.py sec_resident_assets`、`tests/test_infra_resident.py` 两个 w12 用例。
+方法：读代码 + 真跑（Windows venv python、NTFS 临时副本 `C:\Users\fredw\AppData\Local\Temp\w12audit\root`，复现脚本 `...\w12audit\repro.py` / `pyc.py`；不碰仓库 data/）。
+
+### P0
+- 无。
+
+### P1（这轮必须修，不阻断 sv-17 / 重启）
+**P1-1 · 版本戳比 CPython 的 .pyc 校验更细，"同秒 + 同 size" 改动会重载到旧字节码（静默半新半旧）**
+- 实测（NTFS + Windows python，`pyc.py`）：隔秒写 MARK=4 → 重载、MARK=4 ✔；**同一秒内同 size 写 MARK=5 → sync_deps 返回 ['asset_checks']（戳 mtime_ns 变了、判对了）但模块里 MARK 仍是 4** ✘；同秒写 MARK=6 并先删 `__pycache__` 里的 pyc 再 sync_deps → MARK=6 ✔。
+- 原因：pyc 头只记源文件 mtime（秒）+ size，同秒同 size 判"pyc 有效"，`importlib.reload` 直接执行旧字节码。戳再细（哪怕加内容 hash）都救不了这一步——问题在 reload 本身。
+- 触发面：agent 一秒内对同一文件改两次且长度相同（如把 `(900, 1800)` 改成 `(600, 1200)`）；`copy2 / robocopy / rsync -t` 这类保留 mtime 的工具同 size 覆盖也一样（见 P2-1）。概率低但正是 W12 要消灭的那类"重载了却是旧代码"，且无任何报错。
+- 同一问题其实也适用于 resident 对 `asset_worker.py` 本身及所有 `_load()` 的模块（spec_from_file_location 同样走 pyc 缓存）——这是 W12 之前就有的，不算 W12 退步。
+- 建议（一行量级）：`sync_deps` 里 `importlib.reload(m)` 之前 `Path(importlib.util.cache_from_source(str(src))).unlink(missing_ok=True)`；或常驻进程起时 `sys.dont_write_bytecode=True` 并清一次 `__pycache__`。顺手把戳加上内容 sha1（3 个文件 <200KB/拍，可忽略）。
+
+**P1-2 · 进 sv-17 的前提：`tools/pipeline/asset_worker.py`、`tools/pipeline/asset_checks.py` 在 git 里是 UNTRACKED（不是 ignore）**
+- `git ls-files` 查：asset_worker.py / asset_checks.py 未跟踪；autoflow_resident.py / master_check.py / sop_gate.py / test_infra_resident.py 已跟踪。HEAD（sv-20261103-01）里根本没有 asset_worker.py。tests/ 下也有 ~20 个未跟踪测试（test_asset_pipeline.py、test_asset_worker_sop_backoff.py 都在内）。
+- 历次 sv 提交显然不 `git add` 新文件 → "W12 进 sv-17" 对 worker 侧改动等于没进。总调度定：sv-17 前 `git add tools/pipeline/asset_worker.py tools/pipeline/asset_checks.py tests/test_asset_pipeline.py tests/test_asset_worker_sop_backoff.py`（以及是否把其它未跟踪的 tools/tests 一并收编，仓库卫生问题，非 W12 责任）。
+
+### P2（记录，下轮跟）
+**P2-1 · 戳粒度（问题 3）**：mtime_ns + size 在 NTFS（100ns）上同秒覆盖能判出（实测）；漏的只有"同 size + mtime 被保留"（实测 `os.utime` 回拨后 sync_deps 返回 []、MARK 停在旧值）。NTFS/WSL 混写不额外漏：WSL 经 drvfs 写也由 NTFS 打 mtime，resident 是 Windows python 直读 NTFS，无属性缓存。加内容 hash 是对的但要和 P1-1 的删 pyc 一起做，否则 hash 判出了、reload 仍可能拿旧 pyc。
+**P2-2 · asset_checks 第一次懒加载后必多一次无谓 reload**：首拍 sync_deps 时它不在 sys.modules（跳过，连戳都不记），AC_bundle 内 `import asset_checks` 后无戳，下一拍"无戳 = 不知新旧"→ 重载一次。无害（同代码），只是每个进程第二拍多一次。
+**P2-3 · 心跳里看不到 reloaded_deps**：run_loop 只把 `a["reloaded_deps"]` 写进 life.log，不进心跳（复现里拍 5 心跳 reloaded=None、life.log 有 `['asset_jobs','asset_checks']`）。master_check ⑥ 想显示"上拍重载了谁"做不到。
+**P2-4 · 登记失败不再重试**：`report_asset_stuck` 返回 None → issue_id="登记失败"，之后整段连错不再尝试登记；只有 life.log 一行。建议 None 时下一拍再试。
+**P2-5 · tick_fn 整体抛异常那一拍，心跳没有 state / asset_* 字段**（走 outer except 的精简心跳）→ 停摆期间若某拍 advance_runs 抛错，⑥ 那一拍会瞬时不显示资产线停摆；streak 计数不丢，下一拍恢复显示。
+**P2-6 · 旧 P0 还开着**：master_check 顶部仍列 ISS-1103-051601-5d74（WATCHDOG，资产线自 04:56 全停）；现在 worker 心跳已正常（06:29，started/failed 空），受控重启后由总调度关掉。
+
+### ✅ 核对通过（有出处）
+- **问题 1 · reload 副作用 / 类身份**：asset_jobs 定义 `TrialRunInRealRepo`、`RegisterError`，sop_gate 定义 `SopGateError`，asset_checks 无类。实测 reload 后 `RegisterError is 旧类 = False`，`except 旧类` 接不住新类——但全仓库（tools / ns_* / apps / tests）**没有任何** `from asset_jobs|sop_gate|asset_checks import X` 绑定；asset_worker 里全是 `AJ.` / `_SOP.` 属性访问（运行时取到新类），且 worker 本身每拍重新执行、在 sync_deps 之后才引用。常驻进程内其它持有者：`tools.autopilot.runs` / autoflow（af）不 import 这三者；agent_dispatcher / hollywood_tick 每拍 `_load` 新对象；producer / master_check / v2_live / scorecard / episode_retro 都是别的进程或 `_load` 成独名模块（不在 sys.modules 同名下，sync_deps 不碰）。三个依赖顶层只 import 标准库，模块级只有常量 / 正则；`require_backoff` 每次 `os.open` 追加、无常驻句柄 → reload 不丢状态。ns_* 不纳入的理由成立。
+- **问题 2 · 失败关闭逐拍**（`repro.py`，asset_checks.py 注入 `def broken(:`，真 `_load` + 真 `report_issue.report` 写临时 issues.jsonl / live.md）：
+  拍1 state=ok phase=load streak=1 issue=None（SyntaxError，载入失败 = 不派）；拍2 streak=2；**拍3 state=reload_failed streak=3 issue=ISS-1103-062709-7d16**（issues.jsonl +1 行，who=resident blocking=true "P0 资产 tick 连续 3 拍出错（reload_failed，phase=load）"，V2_LIVE 卡点行 +1）；拍4 streak=4 **issue 同一个 id、issues.jsonl 不再加行**；拍5 修好 → state=ok、asset_error/streak/issue 全清、life.log "第 5 拍 asset_tick 恢复（此前连续 4 拍出错，卡点 …）"+"重载依赖：['asset_jobs','asset_checks']"，模块 AUDIT_MARK 就地更新；拍6/7 只重载 asset_jobs（ALWAYS_RELOAD 口径）。脚本跑了两遍 → 两行 issue，各自一遍一行 = "只一次"成立。
+- **问题 4 · master_check ⑥**：真跑 `master_check.py` ⑥ 行 "resident pid 26588 第118拍 13s 前；asset_worker 13s 前（render=True …）"，无资产线告警（正确：当前 worker 正常）。用复现心跳喂 `sec_resident_assets`：停摆 → "⚠ resident 资产线停了（state=reload_failed：新旧代码对不上 / 依赖重载失败，连续 3 拍，卡点 ISS-…）"；未到线 → "资产 tick 本拍出错（连续 1 拍，未到登记线）"；正常 → []；**旧版心跳（无 state 键，即现在还在跑的 pid 26588）→ []，不误报**。与 W8 draining 无交集：draining 是 producer 心跳（`producer.py:3329`）由 sec_producers 显示，⑥ 只读 resident 心跳且只认 reload_failed/asset_failed 两值。
+- **问题 5 · 测试**：`pytest tests/test_infra_resident.py tests/test_asset_pipeline.py tests/test_asset_worker_sop_backoff.py -q` → **83 passed, 1 warning, 29.6s, exit 0**（W12 报 149 是别的集合；这三个文件 83 全过）。W12 复现输出已读到（修复前 3 拍 AttributeError BACKOFF_S、修复后拍 1 重载 sop_gate），与我的复现一致。
+- **sync_deps 顺序 / 失败关闭语义**：`_FRESH` 在 import 之前算；`RELOADED_DEPS = sync_deps(...)` 在任何 `AJ.` / `_SOP.` 顶层引用之前；reload 抛错原样外抛，戳在 reload 之后才 set → 坏代码不记戳、下一拍重试（测试 + 复现都验证）。`Path(f).resolve() != src` 守卫在真仓库路径（D:\NS-Final Studio，Windows 大小写）上成立：pid 26588 自 06:21 起每拍重新执行含 sync_deps 的新 worker，worker 心跳 06:29 正常、无 error。
+- **现网状态**：resident pid 26588 05:26:12 启动，`autoflow_resident.py` 05:51:49 改 → **它跑的是旧 run_loop（心跳无 state 键），W12 的连错计数 / P0 / 心跳字段尚未生效；worker 侧 RELOAD_DEPS 因每拍重执行已经生效**。当前无 running 资产作业、无 ASSET-WORKER 道占用；`ops/restart_autoflow.ps1` 用 `taskkill /T /F` 杀树，此刻不会误杀在途出图子进程。
+
+### 给总调度的问题（需你定）
+1. P1-2：sv-17 前是否 `git add` 这两个 worker 文件 + 两个未跟踪测试？其余 ~20 个未跟踪 tools/tests 是否一并收编？
+2. P1-1 删 pyc 的一行修法让 W12 顺手做还是另开单？
+
+### 结论
+**W12 可进 sv-17：是（附 P1-2：先 git add，否则 worker 侧没进）。可否现在受控重启 autoflow_resident 让它生效：是（P0 = 0；此刻无 running 作业、无道占用，`ops/restart_autoflow.ps1` 即可；重启后关 ISS-1103-051601-5d74）。P1-1（同秒同 size 改动拿旧 pyc）不阻断，下一轮修。**
+
+---
+
+## 第 26 轮（A-G1b · Fable，Orca 工人 ctx_99cbd0e4ffff，总调度 MASTER-WSL 派）· 11-03 06:18 · W11 闸门修复复核（cut A 最后一道）
+
+**结论：W11 六项核实、闸门没放水；cut A 可以发（前置：重跑干净的 dry 全绿）；tree 用不带 W12 未审改动的版本。**
+
+## 第 23 轮（A-G1b · Fable，Orca 工人 task_3c963a75445a，总调度派）· 11-03 05:3x–06:0x · 复核 W11 RELEASE-PREP（cut A 发版前最后一道，只审不改）
+
+**结论：W11 的 6 项声称全部核实、闸门没放水；cut A 代码面可以发。但 05:57 本人与总调度两个 `cut --dry` 撞进同一个快照目录（P0，本人造成的一半）：总调度正在跑的 a3b25713 dry 用的快照里 master_check.py / OVERSIGHT_LOG.md / CUT_PLAN 是我那棵树（2b2c35c9）的文件，结果作废；我的失败进程退出时把 cut_lock.json 写成 active=false、LOCKS.md 写回“未冻结”，而总调度的 pid 34492 还在跑。真 cut 前必须等 34492 退出、重跑一次 --dry。**
+
+实跑：按 CUT_PLAN §4（含 hash-object blob 步骤）在临时 GIT_INDEX_FILE 重拼树 → T=10bc6655（05:52）；diff-tree 对 W11 9741c3be、总调度两棵树 2b2c35c9 / a3b25713；Windows python 跑 test_system_version -k truncated（1 passed 2.07 s，不是 skip）、test_decision_propagation + test_sop_gate_promote（12 passed）；decision_propagation 构造实验 4 组（脚本 C:\Users\fredw\AppData\Local\Temp\a_g1b\exp.py）；`cut --dry --tree 2b2c35c9` 05:57:18 起跑、05:57:38 在 build_snapshot 炸（见第 5 条）。
+
+### 1. LOG_STREAMS 没放水，但豁免面比原来的 stale_allow 宽（P2）
+- **谁说了什么**：W11：V2_LIVE.md / CHANNEL.md “不做 stale 扫描、propagate 照查”，撤 D-VQA-01 的 stale_allow。
+- **实际是什么**：diff 只有一处生效点 `scan_files()`：`r not in LOG_STREAMS`（decision_propagation.py:59）→ 两个文件从**所有决定**的 stale 扫描里拿掉；propagate 对它们只剩 `check_decision` 第 148 行“文件里有没有 new_terms”这一项（propagate 本来就只查这一项，过期口径靠 scan 抓）。构造实验（D-VQA-01 真实 stale_terms）：C1 V2_LIVE 里写一行“总调度 决定：VQA 只记录、不拦截，标定过 0.85 并经总调度批准才转阻断”→ stale 0，**不报**；C2 同句 + 列进 propagate、无新口径 → unsynced“没有新口径”，报；C3 同句 + 新口径“转拦截”同在 → 不报；C4 同句放 docs/master/PLAN.md → stale 1，报。即“propagate 照查”只对“完全没写新口径”成立，旧口径文字本身在这两个文件里永远不报。D-VQA-01 绿的原因：真实 V2_LIVE.md 命中 10 行（:11/13/17/18… 全是 report_issue 自动插的“⚠ 卡点（ASSET-WORKER）…q9=fail、prompt_vlm=fail”），现在整个文件不扫 → stale 0。
+- **是否放水**：今天不算——第 22 轮在真实工作树跑全量 propagation 退出码 0，说明除这 10 行外没有别的决定命中这两个文件，LOG_STREAMS 的实际效果 = 原 stale_allow。但 CHANNEL.md 现有 5 行 `| DECISION |`（MASTER-WSL 写的决定）、V2_LIVE.md 有 87 行非卡点行，以后在这两处写的旧口径决定永远不会被抓。
+- **证据**：exp.py 输出 A=10 / B stale=0 / C1 0 / C2 报 / C3 0 / C4 报；`grep -c "| DECISION |" docs/master/CHANNEL.md` = 5。
+- **建议（P2，不挡 cut）**：豁免收窄到 report_issue 的行前缀（“⚠ 卡点（”）而不是整个文件；或 DECISION 行照扫。测试 test_log_streams_skipped_for_stale_but_still_checked_in_propagate 已锁定现行语义，改时同改。
+
+### 2. truncated_stdin 测试：skip 条件不宽，本机真跑过 ✅
+- skip 只有两种：没有任何 bash；或 `os.name == "nt"` 且 bash 路径含 `\system32\` / `\windowsapps\`（WSL 入口）。Windows 上优先写死 `C:\Program Files\Git\bin\bash.exe`，Linux / 服务器走 `shutil.which("bash")` 照常真跑。本机 `.venv/Scripts/python.exe -m pytest tests/test_system_version.py -k truncated -rs` → **1 passed**（-rs 无 skip 行）。
+- P2：Git 装在别处（便携版 / D 盘）的 Windows 机会退回 which("bash") → 可能拿到 System32 而 skip；要更稳就从 `git --exec-path` 推 bash 路径。
+
+### 3. sop_gate “按 run”：V2 剧按 run 名；legacy 仍是 "series10" 字面量，两处（P2，不算 C-14 未修的 P0）
+- sop_gate.py:92-108 `_episodes_rel`：run_ctx.py 在 → `run_ctx.episodes_out(run)`；不在（cut A 树、服务器）→ `Path("data/episodes") / ("series10" if is_legacy(run) else run)`。而 run_ctx.episodes_out（tools/series10_video/run_ctx.py:126-128，G4 未跟踪）本身就是同一句 `"series10" if is_legacy(run) else run`。所以“退回同一规则”属实，规则本身对 legacy 仍写死目录名，只是唯一口径挪到 run_ctx、sop_gate 保留一份复制；is_legacy 来自 runs.json `legacy_unprefixed_run`，V2 剧（series10_v2）已按 run 取 data/episodes/series10_v2。
+- 定性：C-14 要的是旧内容不进网页 / 新剧不沾旧名；这里是 V1 自己的目录常量，不影响 V2。P2：runs.json 注册表加 legacy 目录字段，run_ctx 读它；cut B 后删 sop_gate 的复制（docstring 已写明）。
+
+### 4. 决策表 blob：只多 D-CLN-05 一处 ✅
+- 9741c3be / 2b2c35c9 / a3b25713 三棵树里 config/owner_decisions.yaml 都是 blob 4614109，对 HEAD 的 diff = D-CLN-05 title 改 + `run: series10_v1` 一行（2 插 1 删）。我按 §4 步骤从 HEAD 文本重做得到同一哈希 461410909788…。工作树决策表另有 +120 行（D-PRM-141、D-V2-127～140、D-IMG new_terms 改、D-VQA-01 注释）**均不在 cut A**。
+
+### 5. 复现：树已变 + 两个 dry 撞车（P0）
+- **tree 对比**：我 05:52 按 §4 重拼 = 10bc6655 ≠ 9741c3be。差 6 个文件：docs/CHANGELOG_AGENTS.md +3、docs/master/CHANNEL.md +7、docs/overnight/morning_20261103.md +7、docs/system_versions/CUT_PLAN_sv17.md +31、docs/uimaster/LOCKS.md ±8（锁状态文字）、**tools/master/master_check.py +15/−1**（W12 RESIDENT-RELOAD 新函数 sec_resident_assets，文件 mtime 05:51:59，未经审计）。
+- 总调度期间自己拼了两棵：**2b2c35c9**（05:51:16 起 dry，pid 15316，05:56 前正常结束、锁释放）= 9741 + 上面 4 个 docs，**代码与 W11 树逐字节相同**；**a3b25713**（05:57:08 起 dry，pid 34492）= 2b2c + OVERSIGHT_LOG +42、CUT_PLAN ±1、master_check W12 +15。
+- **撞车**：我 05:57:18 起 `cut --dry --tree 2b2c35c9`，和 34492 同用 D:\nsfs_cut_snapshots\sv-20261103-01：我的 build_snapshot 把对方刚建的空目录转成 .old1793653041，两边 tar 解包进同一目录，我的进程在硬链接 apps/web/e2e/uipixel/ovd.log 时 FileExistsError → copy2 PermissionError，EXIT=1（05:57:38）；退出时 cut_lock 写 `active=false / "cut 结束：失败"`、LOCKS.md 回“未冻结”，而 34492 仍在跑（05:59 在 arch_scan）。快照现状：master_check.py = 2ae639ef（2b2c 版，不是 a3b2 的 daa5df96）、OVERSIGHT_LOG.md = 66ee5668（不是 5c01ab26）、CUT_PLAN = 0e422a67（不是 26f025f7）。→ **总调度这次 a3b25713 的 dry 测的是混树，结果作废；我没拿到自己的闸门输出。**
+- 根因（P1，system_version.py）：cut_lock 只是建议锁，`cut --tree` 不检查已有 active 锁（pid 活着）就起跑；快照目录名固定 sv-<id>，并发必撞。建议：active 且 pid 活 → 拒绝起跑；快照目录带 pid。
+- 日志：/tmp/claude-1000/-mnt-d-NS-Final-Studio/0c635d56-1e88-48d9-9f28-7358aa6c9b9e/scratchpad/cut_dry_2b2c.log
+
+### 6. 部署面：cut 不会 deploy，但非 dry 会推 GitHub ✅
+- `cut()`（system_version.py:659-）不调 deploy；main 的 cut 分支只有 cut + record_cut。非 dry 走 commit-tree → update-ref（CAS）→ tag → `push_remote()`（:750 → :777，`git push origin <分支> --follow-tags`，推前 PUSH_SECRET_RE 扫描，命中不推写 alerts）。origin = github.com/fredwong749-hub/NS-Final-Studio。deploy 是独立子命令且默认自动 verify（第 22 轮 §6 已核）。“只入 git 不 deploy”成立，知道会推远端即可。
+
+### 7. 其余声称抽核
+- arch_scan 4 处：episode_metrics `_atomic_write`（:71-75，用于 :886/:890/:903/:904）、:141 的 parents[2] 已去；system_version `_write_verify` tmp+os.replace（:1243-1249）；test_sv_verify_lock.py:117 `timeout=60`。arch_scan.py 未改、data/sysarch/baseline.json（未跟踪）mtime 11-02 19:20 → 棘轮没被挪基线。
+- master_check ④：SWITCH_EXPECT 新增 `("sop_gate.enabled", config/pipeline/sop_gate.json, eq True)`，当前值 true。
+- tests/test_sop_gate_promote.py 新增，12 条（含 propagation）本机过。
+
+**cut A 可以发：是，有一个前置条件。P0：等 pid 34492 退出后（或杀掉它）重跑一次 `cut --dry --tree <T>` 全绿再真 cut；本轮两个并发 dry 都不能作数。真 cut 用的 tree：`2b2c35c983327c917694ce09bb599ec91574931a`（= W11 已全绿的 9741c3be 代码 + 4 个 docs，不带 W12 未审的 master_check 改动）。若总调度决定带上 W12 那 15 行，则改用 `a3b257130830c87d9aa4c3806d67b08a604b53f4`，但要先有人审它。**
+
+---
+
 ## 第 25 轮（A9 · Fable，Orca 工人 task_7f93286072b6，总调度派）· 11-03 06:0x · 独立审计 W9 ASSET-ITEMS（只审不改，代码零改动）
 
 **结论：W9 六条声称基本成立，P0 无；P1×2（都是“下一步就会踩”的前瞻风险，不是 W9 改坏的）、P2×5。W9 可进 sv-17。项目方待选 4 条：别选 卓琳 nails1 s1100、卓琳 outfit1 s1102、江予白 acc1 s1102；卓琳 acc1 两张都行、建议 s1101。**

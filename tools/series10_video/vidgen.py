@@ -15,7 +15,7 @@ restart normal。
   video/_thumbs/*.jpg（印样）、video/scores/<镜>__<变体>.json、video/state_<host>.json、video/vidgen_<host>.log
 控制：video/control_<host>.json {"jobs": "jobs.json", "eps": [1,3,...], "hold_lanes": [], "stop": false, "per_lane": 2}
 
-    python tools/series10_video/vidgen.py run gpu33|gpu36
+    python tools/series10_video/vidgen.py run gpu33|gpu36 --run <剧>      # MERGE-VID-O：剧必须显式给（--run 或 NS_RUN），不默认第一季
 """
 from __future__ import annotations
 
@@ -34,8 +34,22 @@ import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-RUN = ROOT / "data/pipeline/runs/series10_v1"
-VID = RUN / "video"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import run_ctx as RC  # noqa: E402
+
+# MERGE-VID-O（ISS-1103-024206-3737，L-137）：视频目录按剧（main 里 set_run；服务器上没有 runs.py，剧必须由 --run / NS_RUN 显式给）
+RUN_ID: str | None = None
+RUN: Path | None = None
+VID: Path | None = None
+VID_REL: str | None = None
+
+
+def set_run(run: str) -> str:
+    global RUN_ID, RUN, VID, VID_REL
+    RUN_ID, VID_REL = run, RC.vid_rel(run)
+    RUN, VID = RC.run_dir(run), RC.vid_dir(run)
+    os.environ["NS_RUN"] = run           # 打分子进程（score_clip）同一部剧
+    return run
 LIP_REDO = ROOT / "data" / "director" / "redo_requests.json"   # DIRECTOR K-EDT-805 口型重出单（finish.py 写，check_lip_redo 读）
 PORTS = {"gpu33": {"gpu33:0": 8188, "gpu33:1": 8189, "gpu33:3": 8191},
          "gpu36": {"gpu36:0": 8188, "gpu36:1": 8189, "gpu36:2": 8190}}
@@ -94,7 +108,7 @@ def policy_hold(var: dict) -> str | None:
     try:
         pol = (json.loads(POLICY.read_text(encoding="utf-8")).get("pika_only") or {})
     except (OSError, ValueError):
-        return None
+        return "hold：读不到 config/pipeline/video_policy.json（MERGE-VID-O：政策缺失失败关闭，不派）"
     if pol.get("enabled") and var.get("recipe") not in (pol.get("allowed") or []):
         return f"hold：配方 {var.get('recipe')} 不在 video_policy.pika_only.allowed（L-088 视频全部用 Pika），等重编 jobs.json"
     return None
@@ -567,8 +581,8 @@ class Runner:
             with self.lock:
                 x["score"] = s
                 x["state"] = "scored"
-                x["preview"] = f"data/pipeline/runs/series10_v1/video/_preview/{sid}__{v}.mp4"
-                x["thumb"] = f"data/pipeline/runs/series10_v1/video/_thumbs/{sid}__{v}.jpg"
+                x["preview"] = f"{VID_REL}/_preview/{sid}__{v}.mp4"
+                x["thumb"] = f"{VID_REL}/_thumbs/{sid}__{v}.jpg"
             g = (s.get("gate") or {})
             log(self.host, "SCORE", sid, v, "PASS" if g.get("pass") else "/".join(g.get("fails") or ["ERR"]),
                 "mean", s.get("mean"), "J4", s.get("J4"), "red", s.get("cheek_red_max"), "cuts", len(s.get("cuts") or []),
@@ -696,6 +710,13 @@ def proxies(host, ep):
 
 
 def main(argv):
+    try:
+        set_run(RC.resolve(argv, server=True))   # 失败关闭：没给剧就不跑
+    except RC.VideoRunError as e:
+        print(f"vidgen：{e}")
+        return 2
+    (ROOT / "tools/master/sop_gate.py").is_file() and ((sys.path.append(str(ROOT)) if str(ROOT) not in sys.path else None) or __import__("tools.master.sop_gate", fromlist=["_"]).vidgen_guard(RUN_ID, VID, ROOT))  # HARNESS-O：SOP 阶段闸门（服务器上没有证据 = 不挡）
+    argv = RC.strip_run(argv)
     if len(argv) == 3 and argv[0] == "proxies" and argv[1] in PORTS:
         proxies(argv[1], int(argv[2]))
         return 0

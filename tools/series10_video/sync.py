@@ -16,8 +16,21 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-VID_REL = "data/pipeline/runs/series10_v1/video"
-DEST = "/root/work/fredw/video10_srv"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import run_ctx as RC  # noqa: E402
+
+RUN_ID = RC.resolve()                 # MERGE-VID-O（L-137）：按剧（--run / NS_RUN / 当前剧；失败关闭）
+VID_REL = RC.vid_rel(RUN_ID)
+def _video_root() -> str:
+    """PRODMERGE-O 11-03：服务器视频代码根只从 config/factory/hosts.json video_root 取（= 发版部署目录，video10_srv 退役）"""
+    import importlib.util as _u
+    sp = _u.spec_from_file_location("hosts_video_root", Path(__file__).resolve().parents[2] / "tools" / "factory" / "hosts.py")
+    m = _u.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m.video_root()
+
+
+DEST = _video_root()
 MARK = ROOT / VID_REL / "_sync_marks.json"
 
 

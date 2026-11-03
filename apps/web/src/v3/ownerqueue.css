@@ -129,3 +129,34 @@ p.oq-fail { margin: 14px 0 0; font-size: 13px; }
 .v3-top-status.col { display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 8px; min-width: 240px; }
 .v3-top-grid .v3-step span, .v3-top-grid .v3-step small { white-space: nowrap; overflow: visible; text-overflow: clip; }
 .v3-top-grid .v3-steps li, .v3-top-grid .v3-step { flex: none; min-width: max-content; }
+/* L-134 写作闸门通知：没有图，只有一句话 + 一个“去处理” */
+.oq-it.oq-gate { grid-template-columns: 34px minmax(300px, 1fr) 200px; cursor: pointer; }
+.oq-acts a.oq-go { display: flex; align-items: center; height: 34px; border-radius: 2px; background: #e9e6e0; color: #111; padding: 0 12px; font-size: 13px; text-decoration: none; }
+
+/* INBOXPICK-S：统一入口的挑选卡（每个候选内嵌试听 / 缩略图，“用这个”一次选定；只有“用这个 / 修改”） */
+.oq-it.oq-pickapi { grid-template-columns: 34px minmax(300px, 1fr); }
+.oq-pk { grid-column: 2; margin-top: 14px; display: grid; gap: 10px; }
+.oq-pk-row { display: flex; flex-wrap: wrap; gap: 12px; }
+.oq-pk-c { flex: 1 1 250px; max-width: 320px; display: grid; gap: 8px; padding: 12px; border: 1px solid var(--oq-line2); border-radius: 2px; align-content: start; }
+.oq-pk-c.rec { border-color: var(--oq-t1); }
+.oq-pk-h { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.oq-pk-h em { font-style: normal; font-size: 11px; color: var(--oq-t1); border: 1px solid var(--oq-t1); border-radius: 2px; padding: 0 5px; }
+.oq-pk-c audio { width: 100%; height: 36px; }
+.oq-pk-c img { width: 100%; max-height: 200px; object-fit: cover; display: block; }
+.oq-pk-c button, .oq-pk-rv button { height: 34px; border: 1px solid var(--oq-line2); border-radius: 2px; background: none; color: inherit; padding: 0 12px; font-size: 13px; cursor: pointer; }
+.oq-pk-c button.oq-main { background: #e9e6e0; color: #111; border-color: #e9e6e0; }
+.oq-pk-c button:disabled, .oq-pk-rv button:disabled { opacity: .5; cursor: default; }
+.oq-pk-rv { display: flex; gap: 8px; align-items: center; }
+.oq-pk-rv input { flex: 1; max-width: 420px; height: 34px; box-sizing: border-box; background: none; border: 1px solid var(--oq-line2); color: inherit; padding: 0 10px; font-size: 13px; }
+.oq-pk-note { font-size: 12.5px; color: var(--oq-t2); margin: 0; }
+
+/* W5 UIUX 11-03：每条两个动作（批准 / 用这张 + 修改）；点了原地变“已收到，系统处理中” */
+.oq-two { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.oq-two .oq-rev { display: inline-flex; gap: 6px; align-items: center; }
+.oq-two .oq-rev input { min-width: 220px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--c-line-2, #555); background: transparent; color: inherit; font: inherit; }
+.oq-it.oq-ack { opacity: 0.8; border-left: 3px solid var(--c-ok, #4caf7d); }
+.oq-it.oq-ack h3 { color: var(--c-ok, #4caf7d); }
+.oq-grp h2 span { margin-right: 4px; }
+/* W5b：卡片右栏窄，“要求修改”输入框 + 提交按钮上下排，不再挤出卡片 */
+.oq-two .oq-rev { display: flex; flex-direction: column; align-items: stretch; width: 100%; min-width: 0; }
+.oq-two .oq-rev input { min-width: 0; width: 100%; box-sizing: border-box; }
