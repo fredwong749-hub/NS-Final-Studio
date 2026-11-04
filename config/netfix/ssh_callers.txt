@@ -33,3 +33,7 @@ tools/vqa/after_network.py
 tools/qa/arch_scan.py
 tools/sentinel/probes.py
 # ↑ tools/sentinel/probes.py：只是按进程名 ssh.exe 统计会话 shell 起的轮询（S20 扩展），本身不起 ssh（NETFIX 14:3x 登记）
+tools/master/partial_pull.py
+# ↑ tools/master/partial_pull.py（W46，11-04 登记）：只有 sftp_get 一处，是 Git sftp -S ssh.exe 经 <host>-hk 单独连接拉整集大文件，
+#   与 rssh.bulk_put 同走法（运维 FONG-QUICK：大文件不走 -t 命令主连接，免得占满主连接 / 底座）；清单与小文件仍走 rssh.run_retry。
+#   不是 ControlMaster=no 的命令直连；通道抖动时的直连兜底只在会话 scratchpad，不进仓库。

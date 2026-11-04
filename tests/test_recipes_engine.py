@@ -127,7 +127,7 @@ def test_i2va_prompt_official(reg):
     assert t.splitlines()[0] == PR.I2VA_LINE
     assert "Picture 2" not in t and "<Picture 1>" in t
     assert p["mode"] == "i2va" and "last_frame" not in p["graph"]["131"]["inputs"]
-    assert p["frames"] == 158 and (p["frames"] - 5) % 17 == 0
+    assert p["frames"] == 141 and (p["frames"] - 5) % 17 == 0     # W46：6 s 不再向上对齐成 158（6.58 s，超 C-08）
     assert p["api"]["compatible"] and p["api"]["body"]["base"] == "official_base"
     assert p["api"]["body"]["last_frame_mode"] == "none"
 

@@ -58,3 +58,17 @@ def test_marker_recoat_same_style_ok_but_restyle_blocked():
            "black nail polish", "short nails", "指甲剪成短的"]
     for t in bad:
         assert HC.check_look_lock(t), t
+
+
+def test_w38_nail_lock_v1_only():
+    """W38（ep01 S1）：V2 卓琳的标志物就是“long bright red nails”——资产包剧（nail_lock=False）不按 V1 林晚甲锁拦；发色改变照拦"""
+    import importlib.util
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    sp = importlib.util.spec_from_file_location("hc_w38", root / "tools/pipeline/hard_constraints.py")
+    HC = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(HC)
+    t = "a small gold-chain clutch, long bright red nails standing at the left"
+    assert HC.check_look_lock(t)                                   # V1 口径：拦
+    assert HC.check_look_lock(t, nail_lock=False) == []            # V2：不拦
+    assert HC.check_look_lock("她把头发染成了金色", nail_lock=False)  # 发色改变：V2 也拦

@@ -63,6 +63,20 @@
      "to": "paused",
      "by": "eval/smoke.py（W26）",
      "why": "冒烟 G4 窗口结束：翻回 paused（常驻进程不碰）"
+    },
+    {
+     "at": "2026-11-04T02:04:56",
+     "from": "paused",
+     "to": "producing",
+     "by": "eval/smoke.py（W26）",
+     "why": "冒烟 G4 窗口：临时放行 producer"
+    },
+    {
+     "at": "2026-11-04T02:29:57",
+     "from": "producing",
+     "to": "paused",
+     "by": "eval/smoke.py（W26）",
+     "why": "冒烟 G4 窗口结束：翻回 paused（常驻进程不碰）"
     }
    ]
   }

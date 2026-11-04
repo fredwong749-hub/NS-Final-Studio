@@ -15,9 +15,9 @@
   "lan_url": "http://10.0.0.36:8870",
   "_lan_url": "NETFIX 11-01（K-OPS-N03，总调度 fredw-2b 派）：gpu36 内网入口 tools/netfix/lan_proxy.py，只听 10.0.0.36、只认 10.0.0.33；gpu33 常驻 producer 用（client._lan_url）",
   "gpus": [
-   0,
    1
   ],
+  "_gpus": "W45（总调度 11-04 05:0x，W43 查实）：gpu36 看图 :8870 固定 GPU1——GPU0 跑 Pika（19.3 GB），同卡争显存 → score_infra；GPU1 上另有人数检测 :8893（~2.4 GB），看图 nf4 峰值 ~8.3 GB，合计 < 24 GB。读取方：tools/autopilot/resident_sync.vqa_env（vqa_guard 拉起）、tools/vqa/deploy_offline.sh——两处必须一致（tests/test_w45_vqa_gpu1.py 核）；GPU2 坏卡永不用",
   "comfy_ports": {
    "0": 8188,
    "1": 8189
@@ -292,8 +292,8 @@
   "busy_wait_s": 600,
   "poll_s": 10,
   "health_timeout_s": 3,
-  "timeouts": {"image": 240, "video": 300, "ask": 60},
-  "log": "data/vqa/route.jsonl"
+  "timeouts": {"image": 240, "video": 300, "ask": 180},
+  "log": "data/vqa/route.jsonl", "_w38": "W38 11-04：ask 60→180 s——gpu33 producer 同时 3 打分 + 3 重打分共用 gpu36 8870，Q10 提示词核对（ask，带图）在服务端排队超 60 s → Q10 untested → score_infra 循环（ep01 S7 t3 02:43）；超时仍是 untested 不判 fail"
  },
  "upscale_4k": {
   "_doc": "R11-7：只对已批准（预览 / 定稿）的片做，后处理一步，不进出片循环。引擎 = gpu33 SeedVR2 3B（scripts/upscale_4k.py，本机 services/post/ns_post/upscale4k.py）。",

@@ -430,3 +430,81 @@ def test_sop_step6_documents_duration_patch():
     t = (ROOT / "docs/master/PIPELINE_SOP_V2.md").read_text(encoding="utf-8")
     row = next(l for l in t.splitlines() if l.startswith("| 6 | 导入 |"))
     assert "duration_patch" in row and "cannot_fit" in row and "non_tl_blocking 返回 99" in row
+
+
+# ---------------------------------------------------------------- W41（11-04，C-14）：跨剧版本不进视频
+def test_foreign_run_takes_never_reach_video(monkeypatch, tmp_path):
+    """V2 takes.json 的 active.image / active.last 指向 V1 前缀（renders/ep01/…）的版本 → passed_frames / passed_lasts 都不算"""
+    B = _bj()
+    from ns_agent.vqa import contract as VQ
+    real = json.loads((ROOT / "config/vqa.json").read_text(encoding="utf-8"))
+    real["judge"]["enforce"] = real["gate"]["enforce"] = True
+    monkeypatch.setattr(VQ, "cfg", lambda: real)
+    try:
+        B.set_run(V2)
+        monkeypatch.setattr(B, "ROOT", tmp_path)
+        monkeypatch.setattr(B, "VID", tmp_path / "vid")
+        monkeypatch.setattr(B, "FRAMES_OK", tmp_path / "vid" / "frames_ok.json")
+        _take(tmp_path, "ep01-S1", "pass")                       # 本剧版本：照常
+        _take(tmp_path, "ep01-S10", "pass")
+        tj = tmp_path / "data/renders" / V2 / "ep01/S10/takes.json"
+        d = json.loads(tj.read_text(encoding="utf-8"))
+        v1 = tmp_path / "data/renders/ep01/S10/takes"
+        v1.mkdir(parents=True)
+        from PIL import Image
+        Image.new("RGB", (8, 8)).save(v1 / "image_006.png")
+        Image.new("RGB", (8, 8)).save(v1 / "last_002.png")
+        pf = d["takes"][0]["postflight"]
+        d["takes"] += [{"stage": "image", "n": 6, "file": "renders/ep01/S10/takes/image_006.png", "postflight": pf},
+                       {"stage": "last", "n": 2, "file": "renders/ep01/S10/takes/last_002.png", "postflight": {"ok": True}}]
+        d["active"] = {"image": 6, "last": 2}
+        d["locked"] = {"last": 2}                                 # 定稿锁也不放行跨剧版本
+        tj.write_text(json.dumps(d), encoding="utf-8")
+        assert set(B.passed_frames()) == {"ep01-S1"}
+        assert "跨剧" in B.ANOMALY_SKIPPED["ep01-S10"]
+        assert B.passed_lasts() == {}
+    finally:
+        B.set_run("series10_v1")
+
+
+def test_own_take_prefix_per_run():
+    B = _bj()
+    try:
+        B.set_run(V2)
+        assert B.own_take(f"renders/{V2}/ep01/S10/takes/last_001.png")
+        assert not B.own_take("renders/ep01/S10/takes/last_002.png")
+        assert not B.own_take("renders/series10_s2/ep01/S10/takes/x.png")
+        B.set_run("series10_v1")
+        assert B.own_take("renders/ep01/S10/takes/image_006.png")
+        assert not B.own_take(f"renders/{V2}/ep01/S10/takes/last_001.png")   # V1 也不收 V2 的
+    finally:
+        B.set_run("series10_v1")
+
+
+def test_l183_review_needed_first_frame_reaches_video(monkeypatch, tmp_path):
+    """L-183：Q10 不过但按 Q1–Q9 全过取用（postflight.review_needed=true）的首帧进视频；同样 Q10 不过、没标 review_needed 的不进"""
+    B = _bj()
+    from ns_agent.vqa import contract as VQ
+    real = json.loads((ROOT / "config/vqa.json").read_text(encoding="utf-8"))
+    real["judge"]["enforce"] = real["gate"]["enforce"] = True
+    monkeypatch.setattr(VQ, "cfg", lambda: real)
+    try:
+        B.set_run(V2)
+        monkeypatch.setattr(B, "ROOT", tmp_path)
+        monkeypatch.setattr(B, "VID", tmp_path / "vid")
+        monkeypatch.setattr(B, "FRAMES_OK", tmp_path / "vid" / "frames_ok.json")
+        for sid, rv in (("ep01-S4", True), ("ep01-S5", False)):
+            _take(tmp_path, sid, "pass")
+            tj = tmp_path / "data/renders" / V2 / "ep01" / sid.split("-")[1] / "takes.json"
+            d = json.loads(tj.read_text(encoding="utf-8"))
+            pf = d["takes"][0]["postflight"]
+            for i in pf["items"]:
+                if i["id"] == "Q10":
+                    i["status"] = "fail"
+            if rv:
+                pf["review_needed"] = True
+            tj.write_text(json.dumps(d), encoding="utf-8")
+        got = B.passed_frames()
+        assert "ep01-S4" in got and "ep01-S5" not in got
+    finally:
+        B.set_run("series10_v1")

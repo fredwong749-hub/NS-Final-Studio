@@ -47,7 +47,7 @@ def test_items_follow_scene_cast_and_size():
     it = GV.check_items(_job("L1", size="全景", cast=(("ch_a", "甲"), ("ch_b", "乙"))), _shot("sk_bar", "吧台尽头", "两人对坐"), LOOKS)
     j = NL.join(it)
     assert it[0].startswith("画面里恰好 2 个人（甲、乙）")
-    assert "场景是 sk_bar：吧台尽头" in j and "景别是全景" in j and "两人对坐" in j
+    assert "场景是 sk_bar" in j and "本镜场景陈设（道具 / 方位）：吧台尽头" in j and "景别是全景" in j and "两人对坐" in j
     assert "乙的造型 L1 在造型表里没有单品登记" in j          # 缺登记如实写，不拿甲的造型顶替
     for hard in ("黑色漆皮", "亚克力椅", "外滩", "白幕"):    # 旧版写死的内容不得再出现
         assert hard not in j

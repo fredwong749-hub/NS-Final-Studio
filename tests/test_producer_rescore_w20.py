@@ -176,3 +176,65 @@ def test_two_person_board_keeps_faceboard(monkeypatch):
     sr = types.SimpleNamespace(project="p", refs=[types.SimpleNamespace(role="sheet", file="s.png", label="造型")])
     out = F2.two_person_board(sr, plan)
     assert [s.kind for s in out.slots] == ["faceboard", "board"] and out.slots[1].index == 2
+
+
+def test_w38_board_members_keep_zone(monkeypatch):
+    """W38（ep01 S9）：参考板格成员带原参考的 zone / character —— 鞋格 zone=feet，preflight I4 才认得到板里的鞋"""
+    import dataclasses
+    sys.path.insert(0, str(ROOT / "tools" / "assetmaster"))
+    import frames_v2 as F2
+    from ns_agent import asset_refs as AR
+    monkeypatch.setattr(AR, "make_board", lambda project, tiles: "board.png")
+
+    @dataclasses.dataclass
+    class Plan:
+        slots: list
+        capacity: int = 3
+        prompt_prefix: str = ""
+        dropped: list = dataclasses.field(default_factory=list)
+    plan = Plan(slots=[_slot("face", "a.png"), _slot("face", "b.png")])
+    ns = types.SimpleNamespace
+    sr = ns(project="p", refs=[ns(role="item", file="shoe.png", label="鞋：透明尖头细高跟", zone="feet", character="lead_f", item_id="SH1"),
+                               ns(role="sheet", file="s.png", label="造型", zone=None, character="ch_b", item_id=None)])
+    out = F2.two_person_board(sr, plan)
+    mem = out.slots[-1].members
+    assert mem[0]["zone"] == "feet" and mem[0]["character"] == "lead_f" and mem[0]["item_id"] == "SH1"
+    assert "zone" not in mem[1] and mem[1]["role"] == "sheet"
+
+
+def _pf(ok, q9="pass", model=True, blocking=(), q1=0.6, extra=None):
+    it = [{"id": "Q1", "status": "pass", "evidence": {"value": q1}},
+          {"id": "Q9", "status": q9, "evidence": {"model": "m"} if model else {}}] + list(extra or [])
+    return {"ok": ok, "blocking": list(blocking), "items": it}
+
+
+def test_l183_q19_clean_and_pick():
+    """L-183：Q1–Q9 全过（Q9 na 须真看过）才可取；取 score_key 最高；被驳回 / 坏图不取"""
+    assert PR.q19_clean(_pf(False, blocking=["QB"]))
+    assert PR.q19_clean(_pf(False, q9="na"))                                       # 只记录项 na（看过）
+    assert not PR.q19_clean(_pf(False, q9="na", model=False))                      # 没看成
+    assert not PR.q19_clean(_pf(False, extra=[{"id": "Q2", "status": "fail"}]))
+    assert not PR.q19_clean({"items": [{"id": "Q1", "status": "pass"}]})           # 没有 Q9
+    td = {"takes": [{"stage": "image", "n": 1, "postflight": _pf(False, blocking=["QB"], q1=0.5)},
+                    {"stage": "image", "n": 2, "postflight": _pf(False, blocking=["QB"], q1=0.7)},
+                    {"stage": "image", "n": 3, "postflight": _pf(False, blocking=["QB"], q1=0.9), "master_reject": {"by": "x"}},
+                    {"stage": "image", "n": 4, "postflight": _pf(False, extra=[{"id": "Q2", "status": "fail"}], q1=0.99)}]}
+    assert PR.review_pick(td, "image") == 2 and PR.review_pick(td, "image", {1}) == 1 and PR.review_pick(td, "last") is None
+
+
+def test_l183_review_adopt_marks_and_activates(tmp_path, monkeypatch):
+    from ns_render import pipeline as P
+    td = {"active": {}, "takes": [{"stage": "last", "n": 5, "postflight": _pf(False, blocking=["Q10", "QB"])}]}
+    seen = {}
+    monkeypatch.setattr(P, "load_takes", lambda sid: td)
+    monkeypatch.setattr(P, "mutate_takes", lambda sid, fn, **k: fn(td))
+    monkeypatch.setattr(P, "set_active", lambda sid, stage, n, **k: seen.update(sid=sid, stage=stage, n=n))
+    monkeypatch.setattr(PR, "promote_live", lambda root, line: seen.update(live=line))
+    _pr0, paths = _pr(tmp_path)
+    n = PR.review_adopt(paths, "last:ep01-S6", by="W38")
+    pf = td["takes"][0]["postflight"]
+    assert n == 5 and seen["n"] == 5 and seen["stage"] == "last"
+    assert pf["ok"] is True and pf["review_needed"] and pf["ok_before_review"] is False and pf["blocking_before_review"] == ["Q10", "QB"]
+    assert "待项目方复核" in seen["live"]
+    td["takes"][0]["postflight"] = _pf(False, extra=[{"id": "Q2", "status": "fail"}])
+    assert PR.review_adopt(paths, "last:ep01-S6") is None

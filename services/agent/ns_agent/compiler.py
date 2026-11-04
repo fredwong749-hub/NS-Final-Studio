@@ -701,6 +701,7 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
     vid_kept = [t for t in shot.motion_triggers if t in by_trigger and by_trigger[t].file in available_loras]
 
     img_body = _no_segment_marks(_strip_triggers(shot.img_prompt, shot.img_triggers)) or ""      # L-130：标记不进正文
+    img_body = FR.off_axis_gaze(img_body)                  # C-07 / W38：静帧“视线落在画面右前方”≈ 看镜头 → 改向画面一侧
     reasons = classify_adult(ep, shot, b)
     lock_names = [c.name for c in g.character_locks]
     names = present_characters(shot, img_body, lock_names + [c.name for c in b.characters if c.name not in lock_names], b)
@@ -789,7 +790,7 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
         # K-REN-902（IMGLAB 11-02）：脸部特写 + ≥2 人露脸 → 首句改双人近景构图（不再同时写“脸占六成”和“两张脸都入画”）
         if FR.two_face_close_conflict(frame_size, subject, len(faced)) and FR.two_face_close_mode() == "two_shot_mcu":
             framing_lead = FR.TWO_FACE_CLOSE_LEAD
-        two_shot = FR.two_shot_clause(len(faced), subject)
+        two_shot = FR.two_shot_clause(len(faced), subject, img_body, faced)
         if two_shot:
             framing_lead = framing_lead + "，" + two_shot
         from ns_agent import asset_refs as _AR
@@ -847,7 +848,7 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
     legacy_video_prompt = _join("，".join(vid_kept), motion_body, g.motion_suffix, video_style, b.video_tail) \
         + soundscape_block(v_sound, v_music)
 
-    end = end_state(motion_body)
+    end = FR.off_axis_gaze(end_state(motion_body))         # C-07 / W38：尾帧结束状态同上（ep01 S8 尾帧 7 版看镜头）
     # 尾帧与首帧同一套规格词（G1，2026-10-30）：触发词、纠正器条目、材质条目按首帧原文 + 结束状态匹配，
     # 规则同首帧；否则尾帧的鞋跟 / 漆皮 / 脚趾甲 / 特写 / 暗场 / 安全镜句缺失，首尾帧造型对不上
     # 去重只对照尾帧自己的文字（结束状态 + 锁 + 造型）：首帧原文写过的条目尾帧照样要补，结束状态里写过的不再加

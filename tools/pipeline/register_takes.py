@@ -177,10 +177,63 @@ def retract_stale_video10(log=print) -> list[dict]:
     return out
 
 
+def _origin_shas(t: dict) -> set[str]:
+    """一条 take 认领的全部 sha256：登记文件本身 + 裁前原片（src_sha256）+ 裁后与它同内容的别的原片（alias_sha256）"""
+    o = (t.get("params") or {}).get("origin") or {}
+    return {o.get("sha256"), o.get("src_sha256"), *(o.get("alias_sha256") or [])} - {None}
+
+
 def registered_shas(shot_id: str, stage: str) -> set[str]:
     from ns_render import pipeline as P
-    return {((t.get("params") or {}).get("origin") or {}).get("sha256")
-            for t in P.load_takes(shot_id).get("takes", []) if t.get("stage") == stage} - {None}
+    out: set[str] = set()
+    for t in P.load_takes(shot_id).get("takes", []):
+        if t.get("stage") == stage:
+            out |= _origin_shas(t)
+    return out
+
+
+def _take_with_sha(shot_id: str, stage: str, sha: str) -> dict | None:
+    from ns_render import pipeline as P
+    return next((t for t in P.load_takes(shot_id).get("takes", []) if t.get("stage") == stage and sha in _origin_shas(t)), None)
+
+
+# W46（W43 第 13 轮查实 06:02 S3 回退）：视频登记必须先过 C-08 时长核——超 6 s 先经 clip_trim 裁（尾部裁、首帧保留），
+# 登记的是裁后的片；读不到时长 / 裁后仍超 = C08 fail → 只登记为候选、不设当前（失败关闭）。测试可替换这两个钩子。
+def _clip_trim():
+    d = str(ROOT / "tools/series10_video")
+    if d not in sys.path:
+        sys.path.insert(0, d)
+    import clip_trim as CT
+    return CT
+
+
+def _dur(p: Path) -> float:
+    return _clip_trim().duration(p)
+
+
+def _trim(p: Path) -> Path:
+    return _clip_trim().trim_le(p, dur=_dur)
+
+
+def c08_video(src: Path) -> tuple[Path, dict]:
+    """→ (要登记的文件, C08 postflight 项)。≤6 s 原样；超了裁到 _le6；裁失败 / 读不到时长 → 原样 + fail"""
+    CT = _clip_trim()
+    lim = CT.MAX_S + CT.TOL_S
+    secs = _dur(src)
+    if not secs:
+        return src, {"id": "C08", "status": "fail", "detail": "读不到视频时长，C-08 无法核（失败关闭：不设当前）"}
+    if secs <= lim:
+        return src, {"id": "C08", "status": "pass", "detail": f"时长 {secs:.3f} s（≤ {CT.MAX_S} s）", "secs": round(secs, 3)}
+    try:
+        out = _trim(src)
+    except (RuntimeError, OSError) as e:  # noqa: PERF203
+        return src, {"id": "C08", "status": "fail", "detail": f"时长 {secs:.3f} s 超 {CT.MAX_S} s，裁切失败：{e}"[:300],
+                     "secs": round(secs, 3)}
+    new = _dur(out) if out != src else secs
+    ok = 0 < new <= lim
+    return out, {"id": "C08", "status": "pass" if ok else "fail", "trimmed": out != src,
+                 "detail": f"原片 {secs:.3f} s → clip_trim 裁到 {new:.3f} s（≤ {CT.MAX_S} s，尾部裁、首帧保留）",
+                 "secs": round(new, 3), "src_secs": round(secs, 3)}
 
 
 def register(item: dict, *, label: str, dry: bool = False) -> dict:
@@ -196,11 +249,35 @@ def register(item: dict, *, label: str, dry: bool = False) -> dict:
         return {"shot": shot, "stage": stage, "status": "missing", "file": item["file"]}
     sha = _sha(src)
     if sha in registered_shas(shot, stage):
-        return {"shot": shot, "stage": stage, "status": "skipped", "reason": "已登记（sha256 相同）"}
+        hit = _take_with_sha(shot, stage, sha)
+        return {"shot": shot, "stage": stage, "status": "skipped", "reason": "已登记（sha256 相同）",
+                **({"n": hit["n"]} if hit else {})}
     if dry:
         return {"shot": shot, "stage": stage, "status": "would_register"}
     lab = item.get("label") or label
+    c08 = None
+    src_sha = None
+    if stage == "video":
+        reg, c08 = c08_video(src)
+        if reg != src:
+            src_sha, src = sha, reg
+            sha = _sha(src)
+            lab = f"{lab}（C-08 裁 {c08.get('src_secs')}→{c08.get('secs')} s）"
+            dup = _take_with_sha(shot, stage, sha)
+            if dup is not None:
+                # 裁后与已登记的某版同内容（06:16 S3：v1 变体原片裁后 == t2）→ 不新登记；把原片 sha 记到那版名下（下轮按 sha 跳过），
+                # 不在这里改当前（那版当初登记时已按门 + C08 决定过当前，项目方之后改的选择不被原片重现挤掉）
+                def _alias(data, _n=dup["n"], _s=src_sha):
+                    for t in data["takes"]:
+                        if t.get("stage") == "video" and t.get("n") == _n:
+                            o = t.setdefault("params", {}).setdefault("origin", {})
+                            o["alias_sha256"] = sorted(set(o.get("alias_sha256") or []) | {_s})
+                P.mutate_takes(shot, _alias, op="register_takes.c08_alias", by="tools/pipeline/register_takes.py",
+                               op_id=f"register_takes:{shot}:video:{dup['n']}:alias:{src_sha[:12]}")
+                return {"shot": shot, "stage": stage, "status": "skipped", "n": dup["n"],
+                        "reason": f"裁到 ≤6 s 后与已登记 v{dup['n']} 同内容（sha256 相同），原片记为其别名"}
     origin = {**(item.get("origin") or {}), "file": item["file"], "sha256": sha,
+              **({"src_sha256": src_sha, "c08_trimmed_file": str(src)} if src_sha else {}),
               "registered_by": "tools/pipeline/register_takes.py", "registered_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
     with P.shot_lock(shot):
         n = P._next_n(shot, stage)
@@ -219,7 +296,16 @@ def register(item: dict, *, label: str, dry: bool = False) -> dict:
                             **({"rendered_size": size} if size else {})})
         P._add_take(shot, take, activate=False)        # 候选：不设为当前、不加锁
     pf = item.get("postflight")
+    if c08 is not None and pf is not None:
+        # C-08 进 postflight：调用方给的 C08 项（trim_takes 已核过）被这里的实测替换；C08 fail → ok=False → 不设当前
+        pf = dict(pf or {"ok": True, "items": [], "reasons": []})
+        pf["items"] = [x for x in pf.get("items") or [] if x.get("id") != "C08"] + [c08]
+        if c08["status"] != "pass":
+            pf["ok"] = False
+            pf["reasons"] = list(pf.get("reasons") or []) + [f"C08：{c08['detail']}"]
     out = {"shot": shot, "stage": stage, "status": "registered", "n": take.n, "label": lab}
+    if c08 is not None:
+        out["c08"] = c08
     if pf is not None:
         # 总调度 2026-11-01 接口决定：契约通过的首 / 尾帧，把 postflight 结果写进该 take，并设为当前
         # （项目方授权“全部默认同意” = 后台自动采用；VIDEO10 night.py 读 takes.json 的 postflight / active）

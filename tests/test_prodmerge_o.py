@@ -487,3 +487,101 @@ def test_golden_worker_quarantined_with_manifest():
     assert not (ROOT / "tools/pipeline/golden_worker.py").exists() and (q / "tools/pipeline/golden_worker.py").is_file()
     m = (q / "MANIFEST.md").read_text(encoding="utf-8")
     assert "dispatch_fanout" in m and "L-151" in m and "W1" in m
+
+
+def test_w38_accept_anomaly_host_server_uses_http(tmp_path, monkeypatch):
+    """W38（11-04）：服务器上（OFFLINE_SELF）共用验收的人数检测走 Q10 常驻检测服务 HTTP（两台之间无 ssh 互信，host=gpu36 恒 rc=255）"""
+    from ns_agent.gen_contract import accept as A
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config/gen_contract.json").write_text(
+        json.dumps({"image_thresholds": {"Q10_accept": {"count_host": "http://10.0.0.36:8893"}}}), encoding="utf-8")
+    monkeypatch.delenv("OFFLINE_SELF", raising=False)
+    assert A.anomaly_host(tmp_path) == "gpu36"                       # 笔记本：照旧经常驻主连接
+    monkeypatch.setenv("OFFLINE_SELF", "gpu33")
+    assert A.anomaly_host(tmp_path) == "http://10.0.0.36:8893"
+    (tmp_path / "config/gen_contract.json").write_text(json.dumps({"image_thresholds": {"Q10_accept": {"count_host": ""}}}), encoding="utf-8")
+    assert A.anomaly_host(tmp_path) == "gpu36"                       # 没配 HTTP 入口 = 原口径
+    assert A.anomaly_host(ROOT) == json.loads((ROOT / "config/gen_contract.json").read_text(encoding="utf-8"))[
+        "image_thresholds"]["Q10_accept"]["count_host"]             # 真实配置的位置（防夹具与真配置层级不一致）
+    seen = {}
+    (tmp_path / "config/gen_contract.json").write_text(
+        json.dumps({"image_thresholds": {"Q10_accept": {"count_host": "http://10.0.0.36:8893"}}}), encoding="utf-8")
+    A.evaluate("x.png", {"items": [{"id": "Q9", "status": "pass", "evidence": {"model": "m"}}]},
+               {"asset_refs": {"characters": [{"name": "甲"}]}, "cast": [{"name": "甲"}]}, None, "r",
+               q9_fn=lambda p, i, j: p, anomaly_fn=lambda img, cast, host: seen.setdefault("host", host) and {"status": "pass"},
+               bundle_fn=lambda img, items, on: {"status": "pass"}, looks={}, root=tmp_path)
+    assert seen["host"] == "http://10.0.0.36:8893"
+
+
+def test_w38_last_frame_checks_use_end_state():
+    """W38（ep01 S11）：尾帧的共用验收 / Q10 提示词核对用结束状态（compiler.end_state），首帧仍用 img_prompt"""
+    from ns_agent.gen_contract import accept as A
+    shot = {"img_prompt": "江予白的左手撑在环形灯架的横杆上，右手从卡槽抽出存储卡",
+            "motion_prompt": "camera push in 小幅推近，江予白从相机卡槽抽出存储卡，再把拳头伸进包口夹层——近景，江予白的左手拎着相机包，"
+                             "握着存储卡的拳头伸在包口夹层里，视线落在包口，嘴唇抿紧"}
+    assert A.shot_description(shot) == shot["img_prompt"]
+    end = A.shot_description(shot, "last")
+    assert "左手拎着相机包" in end and "撑在环形灯架" not in end
+    assert A.shot_description({"img_prompt": "x"}, "last") == "x"                 # 没有运动描述 = 退回首帧描述
+    items = A.check_items({"stage": "last", "asset_refs": {}}, shot, looks={}, run="r")
+    assert any("左手拎着相机包" in i for i in items) and not any("撑在环形灯架" in i for i in items)
+    items1 = A.check_items({"asset_refs": {}}, shot, looks={}, run="r")
+    assert any("撑在环形灯架" in i for i in items1)
+
+
+def test_w38_q10_prompt_check_last_uses_end_state(monkeypatch):
+    import importlib
+    VA = importlib.import_module("tools.vqa.accept")
+    from ns_agent.vqa import client as VC
+    from ns_agent.vqa import continuity as CT
+    shot = {"img_prompt": "左手撑在横杆上", "motion_prompt": "推近，抽卡——近景，左手拎着相机包"}
+    monkeypatch.setattr(CT, "shot_rec", lambda sid: shot)
+    seen = []
+    monkeypatch.setattr(VC, "generate", lambda req, **k: seen.append(req["text"]) or {"text": '{"people_count":"符合"}'})
+    VA.prompt_check("ep01-S11", "x.png", stage="last")
+    VA.prompt_check("ep01-S11", "x.png")
+    assert "左手拎着相机包" in seen[0] and "撑在横杆" not in seen[0] and "撑在横杆" in seen[1]
+
+
+def test_l183_description_row_record_only_both_stages():
+    """L-183：共用验收“与分镜描述一致”那条首帧 / 尾帧都只记录；其它条不过照样 fail；没答（untested）不改"""
+    from ns_agent.gen_contract import accept as A
+    items = ["画面里恰好 1 个人", A.DESC_PREFIX + "左手拎包", "画面里没有文字"]
+    b = {"status": "fail", "items": [{"n": 1, "ok": True}, {"n": 2, "ok": False, "text": "不符合"}, {"n": 3, "ok": True}]}
+    r = A.description_record_only(b, items)
+    assert r["status"] == "pass" and r["items"][1]["record_only"] and r["record_only_rows"] == [2]
+    b2 = {"status": "fail", "items": [{"n": 1, "ok": False}, {"n": 2, "ok": False}, {"n": 3, "ok": True}]}
+    assert A.description_record_only(b2, items)["status"] == "fail"
+    assert A.description_record_only({"status": "untested", "items": []}, items)["status"] == "untested"
+    st, why = A.verdict({}, {"identity": "pass", "prompt": "pass"}, r)
+    assert st == "pass" and not why
+
+
+def test_l183_qb_count_reuses_q10_count():
+    """L-183 c：QB 人数以 Q10 count 为准（last:S6 t9 两路口径打架）；Q10 没结论才自己测"""
+    from ns_agent.gen_contract import accept as A
+    post = {"items": [{"id": "Q9", "status": "pass", "evidence": {"model": "m"}},
+                      {"id": "Q10", "status": "pass", "evidence": {"count": {"status": "pass", "heads": "1/1"}}}]}
+    called = []
+    res = A.evaluate("x.png", post, {"asset_refs": {"characters": [{"name": "甲"}]}, "cast": [{"name": "甲"}]}, None, "r",
+                     q9_fn=lambda p, i, j: p, anomaly_fn=lambda *a, **k: called.append(1) or {"status": "fail"},
+                     bundle_fn=lambda img, items, on: {"status": "pass", "items": []}, looks={})
+    assert not called and res["label"]["count"] == "pass" and res["anomaly"]["source"] == "Q10 count"
+    post["items"][1]["evidence"]["count"] = {"status": "untested"}
+    A.evaluate("x.png", post, {"asset_refs": {"characters": [{"name": "甲"}]}, "cast": [{"name": "甲"}]}, None, "r",
+               q9_fn=lambda p, i, j: p, anomaly_fn=lambda *a, **k: called.append(1) or {"status": "pass"},
+               bundle_fn=lambda img, items, on: {"status": "pass", "items": []}, looks={})
+    assert called == [1]
+
+
+def test_l183_q10_prompt_record_only_on_last(monkeypatch):
+    import importlib
+    VA = importlib.import_module("tools.vqa.accept")
+    monkeypatch.setattr(VA, "prompt_check", lambda sid, image, via, stage="image": {"status": "fail", "why": "action不符"})
+    monkeypatch.setattr(VA, "count_check", lambda *a, **k: {"status": "pass"})
+    monkeypatch.setattr(VA, "identity", lambda pf: {"status": "pass"})
+    monkeypatch.setattr(VA, "outfit", lambda pf, sid, image: {"status": "pass"})
+    last = VA.label("ep01-S6", "last", "x.png", {})
+    assert last["ok"] == "pass" and last["prompt"]["record_only"] and last["prompt"]["would"] == "fail"
+    first = VA.label("ep01-S6", "image", "x.png", {})
+    assert first["ok"] == "fail"                                                   # 首帧 Q10 prompt 仍阻断

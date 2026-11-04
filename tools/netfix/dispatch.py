@@ -485,9 +485,14 @@ def held_lanes(part: dict, now_t: float | None = None) -> set:
             return ts > now_t
         except ValueError:   # arch-ok: 到期时间写坏 → 当作还在借（失败关闭：宁可多 hold 一条道，也不往借出道派单）
             return True
-    out = set(part.get("retired_lanes") or [])
+    # W44 ④（11-04 02:25 gpu33:0 被 hold 到 02:40 之后）：tools/debug/lanes.py hold()/lend() 同时写 retired_lanes 和 _temp_holds/_lent_lanes，
+    # 到期后 sweep 没跑，retired_lanes 里那条就永久 hold。有借道 / 临时 hold 记录的道以记录到期时间为准；没有记录的 retired_lanes = 真退役
+    rec: dict = {}
     for f in ("_lent_lanes", "_temp_holds"):
-        out |= {k for k, v in (part.get(f) or {}).items() if alive(v)}
+        for k, v in (part.get(f) or {}).items():
+            rec[k] = rec.get(k, False) or alive(v)
+    out = {ln for ln in part.get("retired_lanes") or [] if ln not in rec}
+    out |= {k for k, a in rec.items() if a}
     return out
 
 

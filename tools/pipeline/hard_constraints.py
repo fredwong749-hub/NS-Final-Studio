@@ -88,10 +88,16 @@ _LOOK_CHANGE = re.compile(
     r"|\b(?:red|black|pink|nude|purple|gold|green)\s+(?:nail\s*polish|nails)\b|\bshort\s+nails\b|\bnew\s+nails\b", re.I)
 
 
-def check_look_lock(text: str, extra_banned: list[str] | None = None) -> list[dict]:
-    """extra_banned：已作废的标志物写法（如 “痣”、“mole”），出现即 block"""
+_NAIL_HIT = re.compile(r"甲|nail", re.I)
+
+
+def check_look_lock(text: str, extra_banned: list[str] | None = None, nail_lock: bool = True) -> list[dict]:
+    """extra_banned：已作废的标志物写法（如 “痣”、“mole”），出现即 block。
+    nail_lock=False（W38 11-04，V2 资产包剧）：指甲 / 甲色条款是 V1 林晚（5 厘米透明镶钻水晶甲）的锁，V2 角色的标志物各不相同
+    （卓琳 = 鲜红色长指甲），照 V1 一律拦 “red nails” 会把本剧角色的锁定标志物当成“改外貌”（ep01 S1 视频 7 个变体全被 I10 挡，C-14 串剧）。
+    V2 外貌锁由资产清单 + Q2 管；发色 / 发型改变条款照样拦"""
     out = []
-    hits = sorted({m.group(0) for m in _LOOK_CHANGE.finditer(text or "")})
+    hits = sorted({m.group(0) for m in _LOOK_CHANGE.finditer(text or "") if nail_lock or not _NAIL_HIT.search(m.group(0))})
     if hits:
         out.append({"rule": "HC-07", "level": "block",
                     "message": f"剧情改变了已锁定角色的外貌锚点（发色 / 发型 / 标志物不得改变）：{hits}；换一个不改变外貌的等效情节点"})

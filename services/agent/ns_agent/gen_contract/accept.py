@@ -93,33 +93,141 @@ def _g(o, k, d=None):
     return o.get(k, d) if isinstance(o, dict) else getattr(o, k, d)
 
 
-def check_items(job: dict, shot, looks: dict | None = None, run: str | None = None) -> list[str]:
-    """人数 + 人物 + 造型单品 ← job.asset_refs.characters + 造型表（asset_refs.load_looks）；场景 ← 本镜 scene_id + scene_detail；
-    景别 ← asset_refs.size；分镜描述 ← 本镜 img_prompt。造型缺单品登记时如实写，不拿别的顶替（ISS-1103-003851-4541）"""
+DESC_PREFIX = "画面内容与下面这段分镜描述一致（姿势、视线、手里的物件）："
+
+
+def q10_count(post: dict | None) -> dict | None:
+    """L-183 c（W43 第 6 轮：last:S6 t9 同一张图 Q10 count pass、QB count fail）：人数统一以 Q10 出图后验收的 count 为准
+    （tools/vqa/accept.count_check：按剧本 cast 的在画 / 方位，经常驻检测服务），QB 不再用通用 cast 另跑一遍 anomaly。
+    Q10 有 pass / fail 结论 → 返回 anomaly 形状的结果；Q10 没跑 / count 未测 / 推迟 → None（调用方照旧自己测）"""
+    q10 = next((i for i in (post or {}).get("items") or [] if i.get("id") == "Q10"), None)
+    c = ((q10 or {}).get("evidence") or {}).get("count") or {}
+    if c.get("status") in ("pass", "fail"):
+        return {"status": c["status"], "source": "Q10 count", "reasons": [c.get("why")] if c.get("why") else [], "mode": "q10"}
+    return None
+
+
+# L-184 行标签：check_rows 每条核对项带一个标签（来自编译结果的字段，不从文字猜）
+#   count 人数 / outfit 主服装（含非点选的鞋、身份记号）/ owner_pick 项目方点选单品（owner_inputs：O1–O4、SH1/SH2、J1/J2）/
+#   accessory 非点选配饰（slot=accessory / nails）/ scene 场景 id / props 本镜场景陈设子句（scene_detail，compiler.scene_segment
+#   的“本镜场景”段）/ size 景别 / desc 分镜描述 / text 文字 / hands 手指
+RECORD_ONLY_TAGS = ("desc", "props", "accessory")          # 首尾帧都只记录
+RECORD_ONLY_LAST_TAGS = ("owner_pick",)                    # 只在尾帧只记录（首帧照样阻断）
+
+
+def record_only_rows(tags: list[str] | None, items: list[str], stage: str | None = None) -> list[int]:
+    """哪几条（1 起）只记录。没有标签（旧调用）= 只认“与分镜描述一致”那条（L-183 原口径）"""
+    if tags is None or len(tags) != len(items):
+        return [i + 1 for i, t in enumerate(items) if str(t).startswith(DESC_PREFIX)]
+    ro = RECORD_ONLY_TAGS + (RECORD_ONLY_LAST_TAGS if stage == "last" else ())
+    return [i + 1 for i, t in enumerate(tags) if t in ro]
+
+
+def description_record_only(bundle: dict, items: list[str], tags: list[str] | None = None, stage: str | None = None) -> dict:
+    """L-183（总调度 11-04 04:2x）+ L-184（05:0x）：共用验收逐条里这些行只记录、不阻断——
+    ① “与分镜描述一致”（道具 / 方位 / 手势细节）首尾帧；② 场景行的道具子句（本镜场景陈设）首尾帧；
+    ③ 造型行里非项目方点选的配饰 / 指甲子句首尾帧；④ 项目方点选的 O1–O4 / SH1–SH2（J1/J2）尾帧（首帧照样阻断）。
+    首帧的整体提示词核对仍由 Q10 prompt 阻断；尾帧不是成片输入（L-088 Pika 只给首帧）。
+    该行照记（record_only=True，审片可见），不进 status / 阻断原因；身份 / 主服装 / 人数 / 场景 / 景别 / 文字 / 手指
+    与年龄、OCR 照样判。回答缺项（untested）不改"""
+    idx = record_only_rows(tags, items, stage)
+    if not idx or bundle.get("status") == "untested":
+        return bundle
+    rows = [dict(r, record_only=True) if r.get("n") in idx else r for r in bundle.get("items") or []]
+    st = "pass" if all(r.get("ok") or r.get("record_only") for r in rows) else "fail"
+    return {**bundle, "items": rows, "status": st, "record_only_rows": idx}
+
+
+def shot_description(shot, stage: str | None = None) -> str:
+    """要核对的分镜描述：首帧 = img_prompt；尾帧（stage=last）= 编译器同一函数 compiler.end_state(motion_prompt) 取的结束状态
+    （尾帧提示词“只把画面改为这个镜头动作结束时的瞬间：…”就是它）。W38 11-04：原来尾帧也拿首帧描述核 → ep01 S11 尾帧
+    （左手拎相机包、拳头伸进包口）对着“左手撑横杆、从卡槽抽卡”判不符，三次耗尽 best_effort。取不到结束状态 = 退回 img_prompt"""
+    img = _g(shot, "img_prompt") or ""
+    if stage != "last":
+        return img
+    try:
+        from .. import compiler as C
+        end = C.end_state(_g(shot, "motion_prompt") or "")
+    except Exception:  # noqa: BLE001  # arch-ok: 编译器载不进来 = 退回首帧描述（原口径）
+        end = ""
+    return f"（镜头结束时的画面）{end}" if end else img
+
+
+def owner_picks(run: str | None) -> set:
+    """项目方点选单品（assets_v2/owner_inputs.json，经清单 owner_inputs 指过去）→ {(角色, 造型 id / 单品 id)}：
+    outfit 条目给 outfit_id（O1–O4），item 条目给 item_id（SH1/SH2/J1/J2）。读不到 = 空集（= 没有点选，按普通造型判）"""
+    if not run:
+        return set()
+    try:
+        from .. import asset_refs as AR
+        rel = (AR.manifest(run) or {}).get("owner_inputs")
+        d = json.loads((ROOT / rel).read_text(encoding="utf-8")) if rel else {}
+    except Exception:  # noqa: BLE001  # arch-ok: 没有点选登记 = 无点选单品（主服装照样阻断，不放宽）
+        return set()
+    out = set()
+    for it in d.get("items") or []:
+        cid = it.get("character")
+        for k in ("outfit_id", "item_id"):
+            if cid and it.get(k):
+                out.add((cid, it[k]))
+    return out
+
+
+def check_rows(job: dict, shot, looks: dict | None = None, run: str | None = None,
+               picks: set | None = None) -> list[tuple[str, str]]:
+    """→ [(核对项, 行标签)]（标签见 RECORD_ONLY_TAGS 上方说明）。
+    人数 + 人物 + 造型单品 ← job.asset_refs.characters + 造型表（asset_refs.load_looks）；单品按 LookPart.slot 分行：
+    点选（owner_inputs）一行、主服装（outfit / shoes / marker）一行、非点选配饰（accessory / nails）一行；
+    场景 ← 本镜 scene_id（场景）+ scene_detail（本镜陈设子句，另起一行）；景别 ← asset_refs.size；分镜描述 ← 本镜 img_prompt。
+    造型缺单品登记时如实写，不拿别的顶替（ISS-1103-003851-4541）"""
     ar = job.get("asset_refs") or {}
     on = [c for c in ar.get("characters") or [] if (c.get("presence") or "在画") == "在画"]
     if looks is None:
         from .. import asset_refs as AR
         looks = AR.load_looks(run)
+    if picks is None:
+        picks = owner_picks(run)
     names = "、".join(c.get("name") or c.get("character") or "?" for c in on) or "无人"
-    items = [f"画面里恰好 {len(on)} 个人（{names}），每个人都是成年人"]
+    rows = [(f"画面里恰好 {len(on)} 个人（{names}），每个人都是成年人", "count")]
     zones = set(ar.get("zones") or [])        # 编译器判定的可见部位：鞋 / 配饰 / 美甲不在画就不核，服装本体总是核
+    seen = "（只核对画面里看得到的部分）"
     for c in on:
-        name, lid = c.get("name") or c.get("character"), c.get("look")
-        lk = (looks.get(c.get("character")) or {}).get(lid) if lid else None
-        parts = [p.label for p in (lk.parts if lk else []) if not getattr(p, "extra", False)
+        cid = c.get("character")
+        name, lid = c.get("name") or cid, c.get("look")
+        lk = (looks.get(cid) or {}).get(lid) if lid else None
+        parts = [p for p in (lk.parts if lk else []) if not getattr(p, "extra", False)
                  and (not zones or getattr(p, "slot", "outfit") == "outfit" or getattr(p, "zone", None) in zones)]
-        if parts:
-            items.append(f"{name}的穿着与造型 {lid} 一致：{'；'.join(parts)}")
-        else:
-            items.append(f"{name}的造型 {lid or '未定'} 在造型表里没有单品登记：只核对穿着与分镜描述一致")
+        picked = (cid, lid) in picks
+        own = [p for p in parts if getattr(p, "slot", "outfit") in ("outfit", "shoes") and picked
+               or (cid, getattr(p, "item_id", None)) in picks]
+        acc = [p for p in parts if p not in own and getattr(p, "slot", "outfit") in ("accessory", "nails")]
+        main = [p for p in parts if p not in own and p not in acc]
+        if not parts:
+            rows.append((f"{name}的造型 {lid or '未定'} 在造型表里没有单品登记：只核对穿着与分镜描述一致", "outfit"))
+            continue
+        if own:
+            rows.append((f"{name}的穿着与项目方指定造型 {lid} 一致{seen}：{'；'.join(p.label for p in own)}", "owner_pick"))
+        if main or not own:
+            zh = str(getattr(lk, "zh", "") or "")
+            body = "；".join(p.label for p in main) or (zh.split("=", 1)[1] if zh.startswith("服装=") else "")
+            if body:
+                rows.append((f"{name}的穿着与造型 {lid} 一致{seen}：{body}", "outfit"))
+        if acc:
+            rows.append((f"{name}的配饰（造型 {lid}）：{'；'.join(p.label for p in acc)}", "accessory"))
     sid, sdet = _g(shot, "scene_id"), _g(shot, "scene_detail")
-    items.append(f"场景是 {sid or '未登记场景'}" + (f"：{sdet}" if sdet else ""))
+    rows.append((f"场景是 {sid or '未登记场景'}", "scene"))
+    if sdet:
+        rows.append((f"本镜场景陈设（道具 / 方位）：{sdet}", "props"))
     if ar.get("size"):
-        items.append(f"景别是{ar['size']}")
-    items.append(f"画面内容与下面这段分镜描述一致（姿势、视线、手里的物件）：{_g(shot, 'img_prompt') or ''}")
-    items += ["画面里没有文字、水印、logo", "手指数量正常、没有多出来的手"]
-    return items
+        rows.append((f"景别是{ar['size']}", "size"))
+    rows.append((DESC_PREFIX + shot_description(shot, job.get("stage")), "desc"))
+    rows += [("画面里没有文字、水印、logo", "text"), ("手指数量正常、没有多出来的手", "hands")]
+    return rows
+
+
+def check_items(job: dict, shot, looks: dict | None = None, run: str | None = None, picks: set | None = None) -> list[str]:
+    """核对项文字（check_rows 去掉标签）"""
+    return [t for t, _ in check_rows(job, shot, looks, run, picks)]
 
 
 # ------------------------------------------------------------------ 判定（原 golden_v2.judge_bundle / verdict）
@@ -129,7 +237,8 @@ def judge_bundle(post: dict, an: dict, bundle: dict) -> tuple[dict, dict]:
     items = {i.get("id"): i for i in (post or {}).get("items") or []}
     q2 = (items.get("Q2") or {}).get("status", "untested")
     rows = bundle.get("items") or []
-    b2 = ("pass" if rows[1].get("ok") else "fail") if len(rows) >= 2 and bundle.get("status") != "untested" else "untested"
+    b2 = ("pass" if rows[1].get("ok") or rows[1].get("record_only") else "fail") \
+        if len(rows) >= 2 and bundle.get("status") != "untested" else "untested"
     q9 = str((items.get("Q9") or {}).get("status"))
     lab = {"identity": (items.get("Q1") or {}).get("status", "untested"),
            "outfit": q2 if q2 in ("pass", "fail") else b2,
@@ -151,7 +260,7 @@ def verdict(post: dict, lab: dict, bundle: dict) -> tuple[str, list[str]]:
         if q and q.get("status") not in ("pass", "na"):
             reasons.append(f"{qid}：{str(q.get('detail') or q.get('status'))[:100]}")
     for it in bundle.get("items") or []:
-        if not it.get("ok"):
+        if not it.get("ok") and not it.get("record_only"):
             reasons.append(f"看图第{it.get('n')}条：{str(it.get('text') or '')[:80]}")
     if (bundle.get("age") or {}).get("status") == "fail":
         reasons.append(f"年龄：{str(bundle['age'].get('text'))[:60]}")
@@ -166,6 +275,22 @@ def verdict(post: dict, lab: dict, bundle: dict) -> tuple[str, list[str]]:
     return "reject", reasons
 
 
+def anomaly_host(root: Path = ROOT) -> str:
+    """人数检测走哪：服务器上（OFFLINE_SELF 有值）两台之间没有 ssh 互信，host="gpu36" 一律 rc=255 → count 永远 untested →
+    QB retry → score_infra 循环（W38 11-04 实测 gpu33 ep01）。服务器上改走 Q10 同一个常驻检测服务 HTTP 入口
+    （config/gen_contract.json image_thresholds.Q10_accept.count_host，10.0.0.36:8893，只放行 gpu33）；笔记本照旧 "gpu36"（经常驻主连接）"""
+    import os
+    if os.environ.get("OFFLINE_SELF"):
+        try:
+            gc = json.loads((Path(root) / "config/gen_contract.json").read_text(encoding="utf-8"))
+            ch = (((gc.get("image_thresholds") or {}).get("Q10_accept") or {}).get("count_host") or "")   # 与 vqa.contract.accept_gate 同一处
+        except (OSError, ValueError):   # arch-ok: 配置读不到 = 原口径 gpu36（结果照旧 untested，不放宽）
+            ch = ""
+        if ch.startswith(("http://", "https://")):
+            return ch
+    return "gpu36"
+
+
 def evaluate(img: str, post: dict, job: dict, shot, run: str, *, q9_fn=None, anomaly_fn=None, bundle_fn=None,
              looks: dict | None = None, root: Path = ROOT) -> dict:
     """一张已打完 postflight 的图过共用验收 → {status, label, label_source, reasons, check_items, anomaly, bundle, post}。
@@ -175,20 +300,25 @@ def evaluate(img: str, post: dict, job: dict, shot, run: str, *, q9_fn=None, ano
     if q9_timeout(post):
         post = q9_fn(post, img, job)
     on = [c for c in (job.get("asset_refs") or {}).get("characters") or [] if (c.get("presence") or "在画") == "在画"]
-    if on:
+    q10c = q10_count(post)
+    if on and q10c:
+        an = q10c                                    # L-183 c：人数只认一个来源（Q10 出图后验收的 count），不再各跑一遍
+    elif on:
         if anomaly_fn is None:
             anomaly_fn = _load("anomaly_for_accept", "tools/vqa/anomaly.py", root).check
         an = anomaly_fn(img, [{"name": c.get("name"), "presence": "在画", "faced": True, "x": c.get("x") or "中"}
-                              for c in job.get("cast") or [] if (c.get("presence") or "在画") == "在画"], host="gpu36")
+                              for c in job.get("cast") or [] if (c.get("presence") or "在画") == "在画"], host=anomaly_host(root))
     else:
         an = {"status": "na", "note": "空镜 / 物件：不判人数"}
-    items = check_items(job, shot, looks, run)
+    crow = check_rows(job, shot, looks, run)
+    items, tags = [t for t, _ in crow], [g for _, g in crow]
     if bundle_fn is None:
         bundle_fn = _load("asset_checks_for_accept", "tools/pipeline/asset_checks.py", root).bundle_check
     bundle = bundle_fn(img, items, bool(on))
+    bundle = description_record_only(bundle, items, tags, job.get("stage"))
     lab, src = judge_bundle(post, an, bundle)
     status, reasons = verdict(post, lab, bundle)
-    return {"status": status, "label": lab, "label_source": src, "reasons": reasons, "check_items": items, "anomaly": an,
+    return {"status": status, "label": lab, "label_source": src, "reasons": reasons, "check_items": items, "check_tags": tags, "anomaly": an,
             "bundle": {k: bundle.get(k) for k in ("status", "text", "items", "age", "ocr", "error", "summary")}, "post": post}
 
 
@@ -202,7 +332,7 @@ def apply(pf: dict, acc: dict) -> dict:
     st = {"pass": "pass", "reject": "fail", "retry": "untested"}[acc["status"]]
     items.append({"id": "QB", "title": "共用验收（看图逐条 + 年龄 + OCR + 人数，PRODMERGE-O）", "status": st,
                   "detail": "；".join(acc.get("reasons") or [])[:400],
-                  "evidence": {k: acc.get(k) for k in ("label", "label_source", "check_items", "anomaly", "bundle")}})
+                  "evidence": {k: acc.get(k) for k in ("label", "label_source", "check_items", "check_tags", "anomaly", "bundle")}})
     pf["items"] = items
     pf["accept"] = {"status": acc["status"], "label": acc.get("label"), "reasons": acc.get("reasons")}
     if acc["status"] == "reject":
@@ -231,4 +361,4 @@ def accept(file_rel: str, job: dict, host: str | None, shot, run: str, *, post: 
     return apply(pf, acc)
 
 
-__all__ = ["accept", "apply", "check_items", "config", "enabled", "ensure_q9", "evaluate", "judge_bundle", "q9_timeout", "verdict"]
+__all__ = ["accept", "apply", "check_items", "check_rows", "description_record_only", "owner_picks", "config", "enabled", "ensure_q9", "evaluate", "judge_bundle", "q9_timeout", "verdict"]

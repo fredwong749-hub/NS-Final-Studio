@@ -8,6 +8,8 @@ decision_propagation、push_check / push_gate、resident_sync 的分级推送与
 
   cut [--base REF] [--dry]     过闸门 → git add（.gitignore 口径：只跟踪代码 / 规则 / 配置 / 文档）→ commit（Co-Authored-By）→ tag sv-YYYYMMDD-NN
                                → docs/system_versions/<sv>.md + INDEX.md + data/system_versions/index.json（界面只读接口）
+  cut … --on gpu33|local       W45：闸门在哪跑（默认 NS_CUT_ON > release.json gates_on）；gpu33 = tools/qa/remote_gates.py 把冻结树按 blob sha
+                               增量推到服务器独立快照目录、在那里跑七门、结果与耗时拉回本报告；commit / tag / push 仍在笔记本
   deploy [SV] [--hosts gpu33,gpu36]
                                推到服务器：resident_sync 第一级推送（内含 push_gate）→ 代码按该版本的 git 快照逐个核 sha、不同就重推
                                → 服务器写 data/system_version.txt（= override system）→ 热重启常驻（resident_sync.restart 默认模式）
@@ -730,14 +732,19 @@ def gate_results(since: float) -> list[dict]:
     return out
 
 
-def metrics(gate_rows: list[dict], root: Path | None = None, env: dict | None = None) -> dict:
-    root = root or ROOT
+def kb_meta() -> dict:
     m = {}
     try:
         idx = json.loads((ROOT / "knowledge/generated/index.json").read_text(encoding="utf-8"))
         m["kb_version"], m["rules"] = idx.get("kb_version"), idx.get("n")
     except (OSError, ValueError):
         pass
+    return m
+
+
+def metrics(gate_rows: list[dict], root: Path | None = None, env: dict | None = None) -> dict:
+    root = root or ROOT
+    m = kb_meta()
     for r in gate_rows:
         if r["id"] == "decision":
             m["decision_check"] = r["detail"]
@@ -1114,7 +1121,43 @@ def build_snapshot(tree: str, dest: Path) -> dict:
     return {"dir": str(dest), "files": n, "linked": linked, "env": env}
 
 
-def cut(base: str | None = None, dry: bool = False, sv: str | None = None, run_tests: bool = True, tree: str | None = None) -> dict:
+def load_remote_gates():
+    """W45：tools/qa/remote_gates.py（cut 七门在 gpu33 上跑）"""
+    return sys.modules.get("ns_remote_gates_sv") or _load_mod(ROOT / "tools/qa/remote_gates.py", "ns_remote_gates_sv")
+
+
+def _load_mod(path: Path, name: str):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(name, path)
+    m = importlib.util.module_from_spec(spec)
+    sys.modules[name] = m
+    spec.loader.exec_module(m)
+    return m
+
+
+def gates_on(on: str | None = None) -> str | None:
+    """W45：闸门在哪跑。--on（"local" = 本机）> 环境变量 NS_CUT_ON > release.json gates_on > 本机。→ 主机名或 None（本机）"""
+    v = on if on not in (None, "") else (os.environ.get("NS_CUT_ON") or release_cfg().get("gates_on") or "local")
+    return None if str(v).lower() in ("local", "laptop", "none", "off") else str(v)
+
+
+def run_on_server(tree: str, sv: str, changed: list[str], run_tests: bool, dry: bool, on: str | None) -> tuple[tuple | None, dict]:
+    """W45：on = 主机 → remote_gates（服务器快照 + 七门 + 耗时）→ ((快照信息, 闸门行), 附加报告字段)；on = None → (None, {})。
+    服务器基础设施失败 → release.json gates_on_fallback："local"（默认：返回 None，cut 退回本机并记 gates_on_fallback）/ "fail"（失败关闭）"""
+    if not on:
+        return None, {}
+    r = load_remote_gates().remote_cut_gates(tree, sv, changed, run_tests, want_metrics=not dry, host=on, sv=sys.modules[__name__])
+    if not r.get("error"):
+        return (r["snapshot"], r["gates"]), {"gates_on": on, "gate_timings": r.get("timings"), "gates_s": r.get("gates_s"),
+                                             "gates_wall_s": r.get("wall_s"), "remote_metrics": r.get("metrics"), "remote_job": r.get("job")}
+    extra = {"gates_on_fallback": f"{on} 不可用 → 本机：{r['error'][:400]}"}
+    if str(release_cfg().get("gates_on_fallback") or "local") == "fail":
+        return ({}, [{"id": "remote", "name": f"闸门在 {on} 上跑（W45）", "ok": False, "detail": r["error"][:600]}]), extra
+    return None, extra
+
+
+def cut(base: str | None = None, dry: bool = False, sv: str | None = None, run_tests: bool = True, tree: str | None = None,
+        on: str | None = None) -> dict:
     """发版（K-OPS-V01 / K-OPS-F08）：冻结窗口 → 冻结树 → 快照 → 闸门全部对快照跑 → 提交冻结树（不是此刻的工作树）→ tag。
     cut 期间别的 agent 改的文件不进这一版、也不会让闸门失败（留给下一版）"""
     prev = prev_ref(base)
@@ -1149,9 +1192,15 @@ def cut(base: str | None = None, dry: bool = False, sv: str | None = None, run_t
         else:
             tree, ienv = freeze_tree(idx_file)
         frozen = [x for x in gitx(ienv, "diff", "--cached", "--name-only", "HEAD").split("\n") if x]
-        snap = build_snapshot(tree, SNAP_BASE / sv)
-        rep.update(tree=tree, snapshot={k: v for k, v in snap.items() if k != "env"}, frozen_files=len(frozen))
-        g = gates(frozen or files, run_tests, root=Path(snap["dir"]), env=snap["env"], sv=sv)
+        srv, extra = run_on_server(tree, sv, frozen or files, run_tests, dry, gates_on(on))   # W45：默认在 gpu33 上跑
+        if srv:
+            snap, g = srv
+        else:
+            snap = build_snapshot(tree, SNAP_BASE / sv)
+            t_g = time.time()
+            g = gates(frozen or files, run_tests, root=Path(snap["dir"]), env=snap["env"], sv=sv)
+            extra.update(gates_on="local", gates_s=round(time.time() - t_g, 1))
+        rep.update(tree=tree, snapshot={k: v for k, v in snap.items() if k != "env"}, frozen_files=len(frozen), **extra)
         rep["gates"] = g
         plog = next((x["log"] for x in g if x.get("log")), None)
         if plog:                                         # W22：cut_lock note 引用完整 pytest 输出
@@ -1175,7 +1224,8 @@ def cut(base: str | None = None, dry: bool = False, sv: str | None = None, run_t
             return rep
         rd, cd, cs = rule_diff(prev, tree), config_diff(prev, tree), code_stats(prev, tree)
         dec = owner_decisions(prev, tree)
-        mt = metrics(g, Path(snap["dir"]), snap["env"])
+        mt = ({**(extra.get("remote_metrics") or {}), **kb_meta()} if extra.get("gates_on") not in (None, "local")
+              else metrics(g, Path(snap["dir"]), snap["env"]))
         DOCS.mkdir(parents=True, exist_ok=True)
         chg = [("M", f) for f in frozen]
         (DOCS / f"{sv}.md").write_text(version_md(sv, prev, g, rd, cd, cs, gr, dec, mt, chg, loops_line), encoding="utf-8")
@@ -1775,6 +1825,7 @@ def main(argv=None) -> int:
     c.add_argument("--id")
     c.add_argument("--tree", default=None, help="用指定的 git 树代替冻结工作树（总调度批准的快照修补）")
     c.add_argument("--report-json", default=None, help="完整 cut 报告另写到这个文件（release_tick 读）")
+    c.add_argument("--on", default=None, help="W45：闸门在哪跑（gpu33 / local）；不给 = NS_CUT_ON > release.json gates_on > local")
     d = sp.add_parser("deploy")
     d.add_argument("sv", nargs="?")
     d.add_argument("--hosts")
@@ -1812,13 +1863,14 @@ def main(argv=None) -> int:
     except Exception:  # noqa: BLE001
         pass
     if a.cmd == "cut":
-        out = cut(a.base, a.dry, a.id, tree=a.tree)
+        out = cut(a.base, a.dry, a.id, tree=a.tree, on=a.on)
         record_cut(out, a.dry)
         if a.report_json:
             _write_report(a.report_json, out)
         print(json.dumps({k: v for k, v in out.items() if k != "gates"}, ensure_ascii=False, indent=1)[:4000])
         for gg in out.get("gates", []):
-            print(f"  {'✅' if gg['ok'] else '❌'} {gg['name']}：{gg['detail'][:200]}")
+            print(f"  {'✅' if gg['ok'] else '❌'} {gg['name']}" + (f"（{gg['elapsed_s']} s）" if gg.get("elapsed_s") is not None else "")
+                  + f"：{gg['detail'][:200]}")
         return 0 if out.get("ok") else 1
     if a.cmd == "deploy":
         out = deploy(a.sv, a.hosts.split(",") if a.hosts else None, not a.no_restart, a.allow_old, a.urgent, a.hotfix_of,

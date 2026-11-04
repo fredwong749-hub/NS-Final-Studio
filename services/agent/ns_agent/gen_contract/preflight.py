@@ -444,7 +444,12 @@ def check(req: dict) -> ContractResult:
         add("I12", "fail", f"本地专用资产检查失败：{e!r}"[:300])
     # I10
     HC = _hc()
-    iss = [x for x in HC.check_text(prompt) + HC.check_look_lock(prompt) if x.get("level") == "block"]
+    try:                                         # W38：V2 资产包剧不套 V1 林晚的指甲锁（hard_constraints.check_look_lock nail_lock）
+        from ns_agent import asset_refs as _AR10
+        _v2 = bool(proj and _AR10.manifest_rel(proj))
+    except Exception:  # noqa: BLE001  # arch-ok: 判不了 = 按原口径（指甲锁照拦，失败关闭）
+        _v2 = False
+    iss = [x for x in HC.check_text(prompt) + HC.check_look_lock(prompt, nail_lock=not _v2) if x.get("level") == "block"]
     add("I10", "fail" if iss else "pass", "；".join(x["message"] for x in iss) if iss else "成年人 / 锁定外貌检查通过")
     apply_asset_stage(req, items)
     order = {k: n for n, k in enumerate(TITLES)}

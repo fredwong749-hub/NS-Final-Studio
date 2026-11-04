@@ -270,6 +270,22 @@ def _hold(spec: ShotSpec, rid: str, sel: Selection, why: str) -> dict:
     return plan
 
 
+SHOT_MAX_S = 6.0   # C-08 / L-141：单镜 ≤ 6 秒
+
+
+def cap_frames_c08(frames: int, seconds: float, fps: int = 24) -> int:
+    """W46（总调度 05:1x 定，gpu36 实测 ep01-S2/S3 = 6.58 s）：frames_for_seconds 按官方模板向上对齐到 17k+5，
+    剧本 6.0 s → 144 → 158 帧（6.58 s），超 C-08。剧本 ≤ 6 s 的镜，对齐后超过 6 s 就改取 ≤ 6 s 的最大 17k+5（141 帧 = 5.875 s；
+    Pika 12 fps 约 71 帧 ≤ 72）。剧本本身 > 6 s 的不在这里改（导入闸门 / 写作规则挡）"""
+    cap = int(round(SHOT_MAX_S * fps))
+    if float(seconds or 0) > SHOT_MAX_S + 1e-9 or frames <= cap:
+        return frames
+    n = cap
+    while n % 17 != 5 and n > 5:
+        n -= 1
+    return n
+
+
 def compile_shot(spec: ShotSpec, registry: Registry, *, attempt: int = 1, recipe_id: str | None = None,
                  overrides: dict | None = None, selection: Selection | None = None,
                  allow_experimental: set[str] | None = None) -> dict:
@@ -288,6 +304,7 @@ def compile_shot(spec: ShotSpec, registry: Registry, *, attempt: int = 1, recipe
         applied[path] = val
     mode, use_last = _mode(rc, spec)
     frames = frames_for_seconds(spec.duration_s, rc["frames"]["fps"])
+    frames = cap_frames_c08(frames, spec.duration_s, rc["frames"]["fps"])   # W46：17k+5 向上对齐把 6 s 拉成 158 帧（Pika 79 帧@12 = 6.58 s）
     if frames > rc["frames"]["max"]:
         raise CompileError(f"{spec.id} {spec.duration_s}s = {frames} 帧，超过 H3 上限 {rc['frames']['max']}")
     w, h = int(rc["resolution"]["width"]), int(rc["resolution"]["height"])

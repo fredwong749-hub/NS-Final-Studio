@@ -209,26 +209,72 @@ def _prompt_file(root: Path, run: str, ep: int) -> Path:
     return root / "data/pipeline/sop_gate" / run / f"ep{ep:02d}_prompts.json"
 
 
-def _manifest_sha(root: Path, run: str) -> str | None:
+def _manifest_path(root: Path, run: str) -> Path:
     reg = (_registry(root).get("runs") or {}).get(run) or {}
-    mp = root / (reg.get("assets_manifest") or f"assets_v2/manifest.json")
+    return root / (reg.get("assets_manifest") or f"assets_v2/manifest.json")
+
+
+# W38（11-04）：清单里每次写入都会刷新的字段——不进按集指纹（别集的资产作业一写清单就把本集证据判过期，ep01 因此反复卡在“提示词”）
+MANIFEST_VOLATILE = ("updated_at",)
+MANIFEST_SCOPED = ("characters", "scenes")
+
+
+def _manifest_sha(root: Path, run: str, keys: list | None = None) -> str | None:
+    """keys=None → 整个清单文件的 sha（旧口径，旧证据沿用）；keys=["characters/<cid>", "scenes/<sid>", ...] → 只对本集用到的
+    人物 / 场景条目 + 其余顶层字段（去掉 updated_at）算 sha：别集的人物 / 场景变了不作废本集证据，本集用到的变了照样作废"""
+    mp = _manifest_path(root, run)
     try:
-        return hashlib.sha256(mp.read_bytes()).hexdigest()[:16]
+        raw = mp.read_bytes()
     except OSError:     # arch-ok: 没有清单 = 指纹 None（与证据里的 None 相等，测试夹具用）
         return None
+    if keys is None:
+        return hashlib.sha256(raw).hexdigest()[:16]
+    try:
+        m = json.loads(raw.decode("utf-8"))
+    except ValueError:  # arch-ok: 清单读不成 JSON = 按整文件 sha（失败关闭：与按集指纹对不上 → 证据过期）
+        return hashlib.sha256(raw).hexdigest()[:16]
+    want = {tuple(str(k).split("/", 1)) for k in keys if "/" in str(k)}
+    sub = {k: v for k, v in m.items() if k not in MANIFEST_VOLATILE and k not in MANIFEST_SCOPED}
+    for sec in MANIFEST_SCOPED:
+        sub[sec] = {i: v for i, v in (m.get(sec) or {}).items() if (sec, i) in want}
+        sub[sec].update({i: None for s, i in want if s == sec and i not in sub[sec]})   # 用到但清单里没有 = None（之后补上即过期）
+    blob = json.dumps(sub, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return "k:" + hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 
-def prompt_fingerprint(root: Path, run: str, ep: int) -> dict:
-    """提示词证据的有效条件：导入稿 sha（autoflow import 段）+ 资产清单 sha；任何一个变了，旧证据作废"""
-    return {"import_sha": _stage_of(_af(root, run, ep), "import").get("sha256"), "manifest_sha": _manifest_sha(root, run)}
+def manifest_keys_for(root: Path, run: str, job: dict) -> list[str]:
+    """编译出的作业实际用到的清单条目：人物 / 场景的 id、display_name 或其资产路径出现在作业（提示词 / 参考 / 资产引用 / 演员表）里"""
+    try:
+        m = json.loads(_manifest_path(root, run).read_text(encoding="utf-8"))
+    except (OSError, ValueError):   # arch-ok: 没有清单 = 无条目（指纹仍会带上其余字段）
+        return []
+    text = json.dumps({k: job.get(k) for k in ("prompt", "refs", "asset_refs", "cast")}, ensure_ascii=False, default=str)
+    out = []
+    for sec in MANIFEST_SCOPED:
+        for i, v in (m.get(sec) or {}).items():
+            names = [i] + ([v["display_name"]] if isinstance(v, dict) and v.get("display_name") else [])
+            if any(n and n in text for n in names):
+                out.append(f"{sec}/{i}")
+    return sorted(out)
+
+
+def prompt_fingerprint(root: Path, run: str, ep: int, keys: list | None = None) -> dict:
+    """提示词证据的有效条件：导入稿 sha（autoflow import 段）+ 资产清单 sha；任何一个变了，旧证据作废。
+    keys（证据里的 manifest_keys）给了 → 清单只按本集用到的条目算（W38）"""
+    return {"import_sha": _stage_of(_af(root, run, ep), "import").get("sha256"), "manifest_sha": _manifest_sha(root, run, keys)}
 
 
 def check_prompts(root: Path, run: str, ep: int, shot: int | None = None) -> dict:
     ev = _j(_prompt_file(root, run, ep), None)
     if not ev:
         return _ok("提示词", False, "还没有逐镜编译 + preflight 证据（跑 sop_gate.py probe-prompts）", shots={})
-    fp = prompt_fingerprint(root, run, ep)
-    if ev.get("fingerprint") != fp:
+    # W38：整文件指纹对得上（旧口径）或按集指纹对得上（证据带 manifest_keys + fingerprint_scoped）都算有效——
+    # 别集资产作业写清单只刷新整文件 sha，不动本集用到的条目
+    keys = ev.get("manifest_keys")
+    scoped = prompt_fingerprint(root, run, ep, keys) if isinstance(keys, list) else None
+    fresh = ev.get("fingerprint") == prompt_fingerprint(root, run, ep) or (
+        scoped is not None and scoped in (ev.get("fingerprint"), ev.get("fingerprint_scoped")))
+    if not fresh:
         return _ok("提示词", False, f"证据过期（{ev.get('at')} 之后导入稿或资产清单变了，重跑 probe-prompts）", shots={})
     rows = {int(k): v for k, v in (ev.get("shots") or {}).items()}
     want, pend = _want(run, ep, root, shot, rows)
@@ -252,8 +298,16 @@ def _want(run: str, ep: int, root: Path, shot: int | None, rows) -> tuple[list[i
 
 
 def _q9_pass(pf: dict) -> bool:
+    """Q9 过 = pass；或 na 且看图模型真看过（evidence.model 有值 = 只记录项缺陷，config/vqa.json 定为不阻断）。
+    W38（11-04）：原来只认 pass → 看图只报“只记录”缺陷（accessory_mismatch / posed_stiff 等）的首帧，producer 判过并定稿、
+    视频编单（vqa.contract.q9_passed：pass / na）也认，唯独本闸门永远“出图检测”不过 → 尾帧全挡（ep01 S6）。
+    没看成的 na（“只记录（没有本地看图结果）”，evidence 无 model）仍不过（失败关闭）"""
     q9 = next((i for i in pf.get("items") or [] if i.get("id") == "Q9"), None)
-    return bool(q9) and q9.get("status") == "pass"
+    if not q9:
+        return False
+    if q9.get("status") == "pass":
+        return True
+    return q9.get("status") == "na" and bool((q9.get("evidence") or {}).get("model"))
 
 
 def shot_frames(root: Path, run: str, ep: int) -> dict[int, dict]:
@@ -280,7 +334,32 @@ def shot_frames(root: Path, run: str, ep: int) -> dict[int, dict]:
         if tl and tl.get("file") and (root / "data" / tl["file"]).exists():
             pfl = tl.get("postflight") or tl.get("contract") or {}
             row["last"] = row["last"] or locked or bool(pfl.get("ok"))
+    # L-185（总调度 11-04 06:3x）：视频走 i2va 只给首帧（L-088），尾帧“尽力、不阻断”——首帧已过检 且 尾帧尽力用尽（producer 账本
+    # last:<镜> final=best_effort）→ 本镜按尾帧已过处理（last_best_effort=True），尾帧后台继续重出，产出后标待复核
+    # 证据两路：本机 producer 账本 best_effort；或 takes.json 里已有 ≥ LAST_TRIES 版打过分的尾帧且没有一版过（视频机 gpu36 没有
+    # gpu33 的账本，只有 relay 过来的 takes.json）
+    led = _producer_ledger(root, run)
+    for n, row in out.items():
+        if row["last"] or not row["checked"]:
+            continue
+        tj = _j(base / f"S{n}" / "takes.json", {}) or {}
+        lasts = [x for x in tj.get("takes") or [] if x.get("stage") == "last" and isinstance(x.get("postflight"), dict)
+                 and x["postflight"].get("ok") is not None]
+        if (led.get(f"last:ep{int(ep):02d}-S{n}") or {}).get("final") == "best_effort" or (
+                len(lasts) >= LAST_TRIES and not any(x["postflight"].get("ok") for x in lasts)):
+            row["last"] = True
+            row["last_best_effort"] = True
     return out
+
+
+LAST_TRIES = 3          # = producer.MAX_TRIES（尾帧自动重出次数）
+
+
+def _producer_ledger(root: Path, run: str) -> dict:
+    """producer 账本（data/producer/runs/<剧>/attempts.json；V1 legacy = data/producer/attempts.json）；读不到 = {}（L-185 不放行）"""
+    p = root / "data/producer" / ("attempts.json" if is_legacy(run, root) else f"runs/{run}/attempts.json")
+    d = _j(p, {}) or {}
+    return d.get("objects", d) if isinstance(d, dict) else {}
 
 
 def _per_shot(stage: str, key: str, root: Path, run: str, ep: int, shot: int | None, what: str) -> dict:
@@ -517,23 +596,31 @@ def filter_jobs(run: str, jobs: list[dict], stage: str = "资产就绪", rec: di
     return out
 
 
+def _shot_no(sid) -> int | None:
+    m = re.search(r"S(\d+)$", str(sid))
+    return int(m.group(1)) if m else None
+
+
+def video_shots_ok(run: str, ep: int, root: Path = ROOT) -> list[int]:
+    """本集能进“视频”的镜（逐镜判：该镜首帧过检 + 尾帧有当前版；提示词仍按整集 L-140）"""
+    return [n for n in shots_of(run, ep, root) if judge(run, ep, "视频", n, root).get("ok")]
+
+
 def filter_video_specs(run: str, specs: dict, root: Path = ROOT) -> dict:
-    """build_jobs：没过“视频”闸门的集不编视频作业（spec.episode）"""
+    """build_jobs：没过“视频”闸门的镜不编视频作业。
+    W38（项目方 11-04 04:3x“不等 11 镜齐，现在就出视频”）：原来按整集判——ep01 只要还有一镜没首帧，已有首尾帧的镜也一条视频都不编；
+    改为逐镜 require(视频, shot)（没过的镜照记违规、不编），镜号取不到的按整集判（原口径）"""
     if is_legacy(run, root):
         return specs
-    ok_eps: dict[int, bool] = {}
     out = {}
     for sid, spec in specs.items():
         ep = int(getattr(spec, "episode", None) or (spec.get("episode") if isinstance(spec, dict) else 0) or 0)
-        if ep not in ok_eps:
-            try:
-                require(run, ep, "视频", root=root, by="build_jobs")
-                ok_eps[ep] = True
-            except SopGateError as e:
-                ok_eps[ep] = False
-                sys.stderr.write(f"[sop_gate] {e}\n")
-        if ok_eps[ep]:
+        n = _shot_no(sid)
+        try:
+            require(run, ep, "视频", shot=n, root=root, by="build_jobs")
             out[sid] = spec
+        except SopGateError as e:
+            sys.stderr.write(f"[sop_gate] {e}\n")
     return out
 
 
@@ -547,6 +634,9 @@ def video_dispatch_ok(vid_rel: str, root: Path = ROOT) -> bool:
     eps = sorted({int(e) for e in (_j(root / vid_rel / "hosts.json", {}) or {})})
     ok = []
     for ep in eps:
+        if video_shots_ok(run, ep, root):       # W38：有镜可进视频就派（作业已由 filter_video_specs 逐镜过滤）
+            ok.append(ep)
+            continue
         try:
             require(run, ep, "视频", root=root, by="night")
             ok.append(ep)
@@ -559,9 +649,15 @@ def vidgen_guard(run: str, vid_dir: Path, root: Path = ROOT) -> None:
     """vidgen（在服务器上跑）：本机有笔记本证据就按控制文件里的集过“视频”闸门；服务器镜像没有证据 = 不挡（笔记本 build_jobs / night 已挡）"""
     if not run or is_legacy(run, root) or not (_run_dir(root, run) / "autoflow.json").exists():
         return
-    for host_ctrl in Path(vid_dir).glob("control_*.json"):
-        for ep in (_j(host_ctrl, {}) or {}).get("eps") or []:
-            require(run, int(ep), "视频", root=root, by="vidgen")
+    eps = sorted({int(ep) for host_ctrl in Path(vid_dir).glob("control_*.json") for ep in (_j(host_ctrl, {}) or {}).get("eps") or []})
+    # W38（11-04 04:4x gpu36 实测）：控制文件里的集逐个判，原来一集不过就抛 → 整个 vidgen 退出，连 ep01 可进视频的镜也不出。
+    # 改为：有镜可进视频的集放行；没有的集照记违规（require_backoff 不抛）；控制文件里一集都没有可进的镜才抛（失败关闭）
+    ok = [ep for ep in eps if video_shots_ok(run, ep, root)]
+    for ep in eps:
+        if ep not in ok:
+            require_backoff(run, ep, "视频", root=root, by="vidgen")
+    if eps and not ok:
+        require(run, eps[0], "视频", root=root, by="vidgen")
 
 
 # ------------------------------------------------------------------ 提示词证据（逐镜编译 + preflight，不出图）
@@ -596,7 +692,8 @@ def compile_preflight(run: str, ep: int, root: Path = ROOT, lane: str | None = N
             pf = PF.check(req)
             rows[n] = {"ok": bool(pf.ok), "why": "；".join(pf.reasons())[:300],
                        "prompt_sha": hashlib.sha256((job.get("prompt") or "").encode("utf-8")).hexdigest()[:16],
-                       "refs_sha": (job.get("compile_trace") or {}).get("refs_sha")}
+                       "refs_sha": (job.get("compile_trace") or {}).get("refs_sha"),
+                       "manifest_keys": manifest_keys_for(root, run, job)}
         except Exception as ex:  # noqa: BLE001  # arch-ok: 编译出错 = 这一镜没过（原因写进证据）
             rows[n] = {"ok": False, "why": f"编译出错：{type(ex).__name__}: {ex}"[:300]}
     return rows
@@ -623,8 +720,17 @@ def probe_prompts(run: str, ep: int, root: Path = ROOT, runner=None) -> dict:
     """逐镜 build_first + preflight（不出图），写证据文件。runner(run, ep, root, cfg) → rows（测试注入；默认隔离子进程）"""
     cfg = config(root)
     rows = (runner or _probe_subprocess)(run, ep, root, cfg)
+    # W38：每镜都编译成功且带了 manifest_keys → 按集指纹；有一镜没带（编译出错 / 旧探针 / 测试注入）→ 整文件指纹（旧口径，失败关闭）
+    keyed = [r for r in rows.values() if isinstance(r, dict) and not r.get("pending_owner")]
+    keys = sorted({k for r in keyed for k in r.get("manifest_keys") or []}) \
+        if keyed and all(isinstance(r.get("manifest_keys"), list) for r in keyed) else None
     ev = {"schema": "nsfs.sop_gate.prompts/2", "run": run, "episode": ep, "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
           "probe": "build_first+preflight", "fingerprint": prompt_fingerprint(root, run, ep), "shots": rows}
+    if keys is not None:
+        # 按集指纹（不含 updated_at / 别集条目）= 同一输入两遍字节一致（冒烟 G7 幂等）；整文件 sha 每次清单写入都变，不再写进证据。
+        # fingerprint_scoped 同值照写：hf-20261104-01 rev2 的服务器只从这个字段认按集指纹
+        ev["manifest_keys"] = keys
+        ev["fingerprint"] = ev["fingerprint_scoped"] = prompt_fingerprint(root, run, ep, keys)
     p = _prompt_file(root, run, ep)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".tmp")

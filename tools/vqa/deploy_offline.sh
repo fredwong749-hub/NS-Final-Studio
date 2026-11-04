@@ -26,7 +26,7 @@ fi
 
 # 本地看图服务（重启自己的）
 [ -f $B/server.pid ] && kill "$(cat $B/server.pid)" 2>/dev/null; sleep 2
-if [ "$SELF" = gpu33 ]; then ENV="VQA_DEVICE=cpu VQA_THREADS=24"; else ENV="VQA_GPUS=0,1 VQA_COMFY=0:8188,1:8189"; fi
+if [ "$SELF" = gpu33 ]; then ENV="VQA_DEVICE=cpu VQA_THREADS=24"; else ENV="VQA_GPUS=1 VQA_COMFY=1:8189"; fi   # W45 11-04：gpu36 看图固定 GPU1（GPU0 = Pika；与 config/vqa.json model.gpus 一致）
 cd $B && env $ENV HF_HOME=$B/hf PYTHONUNBUFFERED=1 setsid nohup $B/venv/bin/python -u $B/server.py </dev/null >>$B/logs/server.log 2>&1 &
 echo $! > $B/server.pid
 
@@ -39,7 +39,7 @@ echo $! > $P
 grep -q "VQA 看图复核" $OFF/TASKS.md || cat >> $OFF/TASKS.md <<EOF
 
 ## VQA 看图复核（11-01 追加，总调度派，只记录）
-- 进程：watcher（run/vqa.pid，logs/vqa.out）+ 本地看图服务 Qwen3-VL-8B（/root/work/fredw/vqa/server.pid，127.0.0.1:8870，日志 /root/work/fredw/vqa/logs/server.log）。$( [ "$SELF" = gpu33 ] && echo "gpu33 只用 CPU（24 线程），不占 GPU" || echo "gpu36 只用 GPU0/1，ComfyUI 队列空 + 显存余量 ≥7 GB 才加载，来活即卸载，不碰功耗墙" )。
+- 进程：watcher（run/vqa.pid，logs/vqa.out）+ 本地看图服务 Qwen3-VL-8B（/root/work/fredw/vqa/server.pid，127.0.0.1:8870，日志 /root/work/fredw/vqa/logs/server.log）。$( [ "$SELF" = gpu33 ] && echo "gpu33 只用 CPU（24 线程），不占 GPU" || echo "gpu36 只用 GPU1（GPU0 让给 Pika），ComfyUI 队列空 + 显存余量 ≥7 GB 才加载，来活即卸载，不碰功耗墙" )。
 - 做什么：冻结之后新出的首帧 / 尾帧逐张在本机看图（图片不出服务器、不调外部 API）→ repo/data/vqa/（verdicts、index.json 供 postflight Q9、records.jsonl 含规则裁判的修改建议）。不改 takes.json、不重派。
 - 停：kill \$(cat run/vqa.pid)；resume_from_gpu33.sh 会一并停。
 EOF

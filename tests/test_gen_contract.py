@@ -24,6 +24,28 @@ PROJECT = "series10_v1"
 need_data = pytest.mark.skipif(not SCRIPT.exists() or not AR.project_cfg(PROJECT), reason="series10 数据缺")
 
 
+@pytest.fixture(autouse=True)
+def _v1_fixture_derived_in_sandbox(monkeypatch):
+    """cut D 11-04：夹具剧 series10_v1 已归档（L-126 只读），data/ 不进 git → cut 快照里没有它的 refcrops / refboards 缓存，
+    编译时要重生成，被归档守卫拦（DerivedWriteRefused）。守卫本身是对的（test_derived_out / test_promptfix_v2 另测）；
+    这里只在派生图写出根已指到测试沙盒（conftest DERIVED_OUT）时，给夹具剧放行“写沙盒”，真实 V1 目录照样不碰"""
+    if AR.DERIVED_OUT is None:            # 没沙盒（NS_REAL_DATA_GUARD=off 排查）：不放行，照旧拦
+        return
+    real = AR.derived_writable
+    monkeypatch.setattr(AR, "derived_writable", lambda run: run == PROJECT or real(run))
+    out = Path(AR.DERIVED_OUT)
+    yield
+    # 收尾自己清沙盒里的 derived/data/…（绝对路径逐个删）：会话收尾 shutil.rmtree 用 os.rmdir("data", dir_fd=…) 相对名，
+    # real_data_guard 不认 dir_fd，会把它当成仓库根 data/ 记一次“写真实数据”（误报，守卫归 ITERAUDIT，这里不动它）
+    import os
+    top = out / "data"
+    if top.is_dir():
+        for d, dirs, files in os.walk(top, topdown=False):
+            for f in files:
+                (Path(d) / f).unlink()
+            Path(d).rmdir()
+
+
 def _shot(ep_n, idx, img=None):
     d = json.loads(SCRIPT.read_text(encoding="utf-8"))
     ep = next(e for e in d["episodes"] if e["number"] == ep_n)
@@ -157,7 +179,7 @@ def test_item_map_overrides_merge(tmp_path, monkeypatch):
 def test_missing_shoe_asset_blocked(monkeypatch, look_a):
     """缺鞋资产图被阻断：鞋没有衣橱图、设定图也没有 → 资产缺图，I4 不通过，拒交"""
     monkeypatch.setattr(AR, "sheet_of", lambda project, cid, lid: None)
-    monkeypatch.setattr(AR, "item_image", lambda iid, project=None: None)
+    monkeypatch.setattr(AR, "item_image", lambda iid, project=None, *a, **k: None)
     req, sr, plan = _req(*FULL)
     assert any(m["kind"] == "资产缺图" and "鞋" in m["detail"] for m in sr.missing)
     r = PF.check(req)
@@ -284,7 +306,7 @@ def test_image_jobs_dry_rebuild_uses_asset_plan():
 
 
 @need_data
-@pytest.mark.real_data          # 参考板是按内容哈希的缓存，换了覆盖会现做一张（写 data/pipeline/runs/…/refboards）
+# cut D 11-04：去掉 real_data——换了覆盖会现做一张参考板，现在写测试沙盒（DERIVED_OUT）；标 real_data 会关沙盒、写归档的 V1 目录被守卫拦
 def test_hub_extra_look_and_episode_override(tmp_path, monkeypatch):
     """资产中心“＋ 新造型”并入 P1 之后（id 重复以 P1 为准）；“排期：角色 × 集”整集覆盖本镜造型（在逐镜登记之上）"""
     hl = tmp_path / "hub_extra_looks.json"

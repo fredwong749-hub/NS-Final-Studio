@@ -207,6 +207,14 @@ def test_manifest_violations_check_sha_and_derived_index():
 
 
 @need_v2
+def test_manifest_allows_own_video_inputs_only():
+    """W41：视频首帧输入 JPEG（本剧 video/inputs/）不挡 I11；别的剧的 video/inputs 照挡"""
+    assert AR.manifest_violations(V2, [f"data/pipeline/runs/{V2}/video/inputs/ep01-S10_1ecbaecd.jpg"]) == []
+    assert AR.manifest_violations(V2, ["data/pipeline/runs/series10_v1/video/inputs/ep01-S10_084acef2.jpg"])
+    assert AR.manifest_violations(V2, [f"data/pipeline/runs/{V2}/video/clips/x.jpg"])
+
+
+@need_v2
 def test_v2_manifest_names_and_looks():
     AR.register_manifest_names(V2)
     assert AR.NAME_ID.get("女主") == "lead_f" or AR.NAME_ID.get(AR.ID_NAME.get("lead_f")) == "lead_f"

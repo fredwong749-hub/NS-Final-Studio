@@ -139,11 +139,13 @@ PROMPT_Q = ("下面是这张图的编译稿（出图提示词）。只按画面�
             "action = 主要动作是否一致；scene = 场景是否一致。\n编译稿：")
 
 
-def prompt_check(sid: str, image, via_tunnel: bool = False) -> dict:
+def prompt_check(sid: str, image, via_tunnel: bool = False, stage: str = "image") -> dict:
     from ns_agent.vqa import client as VC
     from ns_agent.vqa import continuity as CT
     from ns_agent.vqa.contract import rubric_loads
-    text = (CT.shot_rec(sid) or {}).get("img_prompt") or ""
+    from ns_agent.gen_contract.accept import shot_description
+    # W38：尾帧核结束状态（与共用验收 QB 同一函数），不再拿首帧描述核尾帧
+    text = shot_description(CT.shot_rec(sid) or {}, "last" if stage == "last" else None)
     if not text:
         return {"status": "untested", "why": "没有编译稿"}
     if via_tunnel:
@@ -204,9 +206,13 @@ def summarize(lab: dict) -> str:
 
 def label(sid: str, stage: str, image, pf: dict, *, feat: dict | None = None, via_tunnel: bool = False, host: str | None = None,
           defer_count: bool = False) -> dict:
-    pr = prompt_check(sid, image, via_tunnel)          # 先跑：via_tunnel 时它会把本机 8870 判为不可用，后面的看图都走隧道
+    pr = prompt_check(sid, image, via_tunnel, stage)          # 先跑：via_tunnel 时它会把本机 8870 判为不可用，后面的看图都走隧道
     cnt = {"status": "deferred", "why": "本机没有检测卡（gpu33 的 GPU2 是坏卡）：人数检测由笔记本发起的批量验收在 gpu36 上做，"
                                         "结果写 data/vqa/accept/epNN.json，视频闸门读它"} if defer_count else count_check(sid, image, feat, host)
+    if stage == "last" and pr.get("status") in ("fail", "untested"):
+        # L-183（总调度 11-04 04:1x/04:2x）：尾帧不是成片输入（L-088 Pika 只给首帧）→ 提示词 positions/action 核对只记录、不阻断；
+        # 原结论留在 would / why 里（审片可见）。身份 / 造型 / 人数照样判
+        pr = {**pr, "status": "na", "record_only": True, "would": pr.get("status"), "why": "尾帧只记录：" + str(pr.get("why") or "")}
     lab = {"identity": identity(pf), "outfit": outfit(pf, sid, image), "prompt": pr, "count": cnt}
     lab["ok"] = summarize(lab)
     lab["at"] = time.strftime("%Y-%m-%dT%H:%M:%S")

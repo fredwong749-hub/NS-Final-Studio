@@ -104,6 +104,17 @@ RESCORE_TIMEOUT_S = int(os.environ.get("NS_PRODUCER_RESCORE_TIMEOUT_S", "900")) 
 RESCORE_MAX = int(os.environ.get("NS_PRODUCER_RESCORE_MAX", "3"))                  # 同时在跑的只重打分（含超时后还没回来的）上限
 RESCORE_BACKOFF = (300, 600, 1200, 1800, 3600)    # 同一对象连续只重打分没拿到结论：逐级退避
 SCORE_CHAIN_COOL_S = 300                          # 打分链路（gpu33 ssh / 共用验收）刚出过错：这么久内不再派只重打分
+# W44（11-04 项目方“ep01 都做不出来”→ 无人介入）：② 只重打分每镜每小时 ≤3 次，超了退避 30 分钟（ev=rescore_cap）；
+# 看图 health 恢复 loaded 后自动清零（ev=rescore_cap_reset）
+RESCORE_HOURLY_MAX = int(os.environ.get("NS_PRODUCER_RESCORE_HOURLY_MAX", "3"))
+RESCORE_CAP_BACKOFF_S = 1800
+# W44 ①：canary 暂停按“谁、用哪份代码判的”失效：每条结论记 code_sha（本进程启动时 ns_agent + autopilot 的内容 sha）；
+# 暂停后 pid / code_sha 变了 → 旧 canary 自动失效并恢复（ev=canary_auto_resume）；到 expires_at → 重评估（ev=canary_reeval）
+CODE_SHA_DIRS = ("services/agent/ns_agent", "tools/autopilot")
+CANARY_EXPIRE_S = 1800                           # 第一次 canary 暂停 30 分钟后重评估；同一份代码再触发逐次翻倍
+CANARY_EXPIRE_MAX_S = 4 * 3600
+# W44 ④：坏卡永远 hold（CLAUDE.md 红线）；本机道只在分区登记（退役 / 未到期借道 / 未到期临时 hold）或 lane_notes 显式 held_by 时 hold
+BAD_LANES = ("gpu33:2", "gpu36:2")
 CODE_RETRY_S = 5 * 60               # 系统代码 / 接口不匹配：5 分钟后再试（多半已热修），不再停 30 分钟         # preflight 不过：资料可能被别的会话补上，30 分钟后再查
 # 出图道（gpu36:2 是长镜头视频专用道，不派出图；gpu33 GPU2 永不使用）
 IMAGE_LANES = {"gpu33:0": "http://127.0.0.1:18188", "gpu33:1": "http://127.0.0.1:18189", "gpu33:3": "http://127.0.0.1:18191",
@@ -1050,6 +1061,20 @@ def render_image_only_lanes() -> dict:
         return {}
 
 
+def vlm_health() -> dict:
+    """W44 ②：看图服务 health（与 ns_agent.vqa.client 路由同一来源：服务器上先内网 lan_url，再本机 8870）→ {loaded, url}"""
+    try:
+        from ns_agent.vqa import client as VC
+        for u in [x for x in (VC._lan_url(), VC._url()) if x]:
+            if VC._local_up(u):
+                h = VC._HEALTH.get(u) or {}
+                if h.get("loaded"):
+                    return {"loaded": True, "url": u, "queue": h.get("queue")}
+        return {"loaded": False}
+    except Exception as e:  # noqa: BLE001  # arch-ok: 探不到 = 不清零（保持退避），原因带回
+        return {"loaded": False, "error": repr(e)[:160]}
+
+
 def lane_held(lane: str) -> bool:
     """LOCALGPU：render_endpoints 里 hold=true 的道（就绪、等总调度开派）按 hold_lanes 处理"""
     try:
@@ -1057,6 +1082,131 @@ def lane_held(lane: str) -> bool:
         return EP.held(lane)
     except Exception:  # noqa: BLE001
         return False
+
+
+_CODE_SHA: dict = {}
+
+
+def code_sha(root: Path = ROOT, dirs=CODE_SHA_DIRS, fresh: bool = False) -> str:
+    """W44 ①：本进程代码的内容 sha（*.py 相对路径 + 内容，排序后 sha256 前 16 位）。按 root 缓存 = 进程启动时算一次：
+    之后磁盘上热推了新文件，这个值不变（进程没加载就不算新代码），重启后才变"""
+    import hashlib
+    key = str(root)
+    if key in _CODE_SHA and not fresh:
+        return _CODE_SHA[key]
+    h = hashlib.sha256()
+    for d in dirs:
+        base = Path(root) / d
+        for f in sorted(base.rglob("*.py")) if base.is_dir() else []:
+            if "__pycache__" in f.parts:
+                continue
+            try:
+                h.update(f.relative_to(root).as_posix().encode() + b"\0" + f.read_bytes() + b"\0")
+            except OSError:
+                h.update(f.as_posix().encode() + b"\0?\0")
+    _CODE_SHA[key] = h.hexdigest()[:16]
+    return _CODE_SHA[key]
+
+
+def canary_key(paths: "Paths", version: str | None = None, pid: int | None = None, sha: str | None = None) -> str:
+    """W44 ①：canary 计数的版本键 = 规则 / 资产版本 + 本进程 code_sha + pid + 重评估轮次（control.canary_epoch）。
+    旧进程 / 旧代码判的结论不进新进程的计数；到点重评估换一轮，从头数 6 镜"""
+    if version is None:
+        from ns_agent.vqa import canary as CN
+        version = CN.version_key()
+    ep = int((jl(paths.ctrl, {}) or {}).get("canary_epoch") or 0)
+    return f"{version}+{sha or code_sha()}+p{pid or os.getpid()}+e{ep}"
+
+
+def canary_tick(paths: "Paths", pid: int | None = None, sha: str | None = None, t: float | None = None) -> dict | None:
+    """W44 ①：producer 每拍（在 pause_tick 之前）处理 kind=canary 的暂停 → None 或 {action, why}。
+    · 暂停记录没有 pid / code_sha（W44 前的旧 canary），或与本进程不同 → 结论出自旧进程 / 旧代码：自动恢复（canary_auto_resume）
+    · 同一进程同一份代码、到 expires_at → 重评估：canary_epoch+1（新一轮 6 镜从头数）并恢复（canary_reeval）；
+      再触发时暂停时长翻倍（canary_strikes），最多 4 小时——不会永久停着等人"""
+    c = jl(paths.ctrl, {}) or {}
+    if not c.get("paused") or c.get("reason_kind") != "canary":
+        return None
+    pid, sha, t = pid or os.getpid(), sha or code_sha(), now() if t is None else t
+    meta = c.get("canary") or {}
+    why = None
+    if not meta.get("pid") or not meta.get("code_sha"):
+        why = "暂停记录没有 pid / code_sha（W44 之前的 canary，判定代码无法核对），按旧代码结论失效"
+    elif str(meta.get("code_sha")) != sha:
+        why = f"判定时代码 {meta.get('code_sha')} ≠ 现在加载的 {sha}（热修 / 换代后重启），旧结论失效"
+    elif int(meta.get("pid")) != int(pid):
+        why = f"判定进程 pid {meta.get('pid')} 已不是本进程 {pid}（重启过），旧结论失效，新进程重新数"
+    if why:
+        set_paused(paths, False, by="CANARY_AUTO_RESUME", note=why)
+        c2 = jl(paths.ctrl, {}) or {}
+        c2.update(canary_epoch=int(c2.get("canary_epoch") or 0) + 1, canary_strikes=0)
+        js(paths.ctrl, c2)
+        log_event(paths, "canary_auto_resume", why=why, was=meta or None, pid=pid, code_sha=sha, counted=False)
+        return {"action": "canary_auto_resume", "why": why}
+    exp = ts_epoch(c.get("expires_at"))
+    if exp is not None and t >= exp:
+        why = f"canary 暂停到点（{c.get('expires_at')}）：换一轮重新数 {meta.get('n') or 6} 镜再判（同一份代码再触发会暂停更久）"
+        set_paused(paths, False, by="CANARY_REEVAL", note=why)
+        c2 = jl(paths.ctrl, {}) or {}
+        c2.update(canary_epoch=int(c2.get("canary_epoch") or 0) + 1, canary_strikes=int(c.get("canary_strikes") or 0) + 1)
+        js(paths.ctrl, c2)
+        log_event(paths, "canary_reeval", why=why, was=meta, strikes=c2["canary_strikes"], counted=False)
+        return {"action": "canary_reeval", "why": why}
+    return None
+
+
+def canary_pause(paths: "Paths", hit: dict, pid: int | None = None, sha: str | None = None) -> dict:
+    """W44 ①：canary 触发 → 暂停（kind=canary）并记下判定进程 pid / code_sha；暂停时长 30 分钟 × 2^strikes（≤4 小时）"""
+    pid, sha = pid or os.getpid(), sha or code_sha()
+    strikes = int((jl(paths.ctrl, {}) or {}).get("canary_strikes") or 0)
+    exp_s = min(CANARY_EXPIRE_S * (2 ** strikes), CANARY_EXPIRE_MAX_S)
+    c = set_paused(paths, True, by="POLICY_CANARY", kind="canary", expires_s=exp_s,
+                   note=f"换版首批复核：前 {hit['n']} 镜 {hit['item']} 不过占 {hit['frac']:.0%}（{'、'.join(hit['shots'])}），"
+                        f"版本 {hit['version']}；判定 pid {pid} code_sha {sha}，{int(exp_s // 60)} 分钟后重评估")
+    c["canary"] = {"pid": pid, "code_sha": sha, "version": hit.get("version"), "item": hit.get("item"), "n": hit.get("n"),
+                   "shots": hit.get("shots"), "at": iso()}
+    js(paths.ctrl, c)
+    return c
+
+
+def partition_held(part: dict, t: float | None = None) -> set:
+    """W44 ④：分区里真正该 hold 的道（与 tools/netfix/dispatch.held_lanes 同口径，含其修正）：
+    retired_lanes 里有对应借道 / 临时 hold 记录的，以记录的到期时间为准（tools/debug/lanes.py hold() 两处都写，
+    到期后 sweep 没跑，retired_lanes 里那条就永远 hold——11-04 02:40 ASSET-WORKER 的 gpu33:0 就是这样）；
+    没有记录的 retired_lanes = 真退役；坏卡永远 hold"""
+    t = now() if t is None else t
+
+    def alive(v) -> bool:
+        u = (v or {}).get("until") or (v or {}).get("expires_at")
+        e = ts_epoch(u) if u else None
+        return True if not u or e is None else e > t      # 没写 / 写坏到期时间 = 还在（失败关闭）
+    rec = {}
+    for f in ("_lent_lanes", "_temp_holds"):
+        for k, v in (part.get(f) or {}).items():
+            rec[k] = rec.get(k, False) or alive(v)
+    out = {ln for ln in part.get("retired_lanes") or [] if ln not in rec}
+    out |= {k for k, a in rec.items() if a}
+    return out | set(BAD_LANES)
+
+
+def effective_holds(ctrl: dict, lanes, part: dict | None, t: float | None = None) -> tuple[set, dict]:
+    """W44 ④（K-OPS-N04“hold = 别的机器的道”）：control.json hold_lanes 是 dispatch.py 某一刻的快照（02:25 写的 gpu33:0 临时 hold
+    02:40 到期后没人重算，ep01 一度只剩 1 条道）。本机（dispatch_by.host）的道只在分区仍登记 hold、或 lane_notes 写了 held_by
+    （人工显式 hold）时才 hold；别的机器的道照 hold；坏卡永远 hold。读不到分区 / 不知道本机 = 原样照 hold（失败关闭）。
+    → (hold 集合, {放开的道: 原因})"""
+    hold = set(ctrl.get("hold_lanes") or []) | set(BAD_LANES)
+    host = ((ctrl.get("dispatch_by") or {}).get("host")) or None
+    if not part or not host or host == "laptop":
+        return hold, {}
+    mine = set((part.get("lanes") or {}).get(host) or [])
+    keep = partition_held(part, t)
+    notes = ctrl.get("lane_notes") or {}
+    released = {}
+    for ln in sorted(hold):
+        if ln in mine and ln not in keep and not (notes.get(ln) or {}).get("held_by"):
+            hold.discard(ln)
+            released[ln] = (f"本机（{host}）的道，分区 partition.json 已不再 hold（退役 / 借道 / 临时 hold 都没有或已到期），"
+                            f"control.json 的 hold 是 dispatch {(ctrl.get('dispatch_by') or {}).get('at')} 的旧快照")
+    return hold, released
 
 
 def lane_split(lane: str) -> tuple[str, int]:
@@ -1171,6 +1321,67 @@ def score_key(pf: dict) -> tuple:
     q1 = (items.get("Q1") or {}).get("evidence") or {}
     v = next((q1[k] for k in ("value", "min", "score") if isinstance(q1.get(k), (int, float))), 0.0)
     return (bool(pf.get("ok")), -len(pf.get("blocking") or []), v)
+
+
+L183_ITEMS = ("Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7", "Q8", "Q9")
+
+
+def q19_clean(pf: dict) -> bool:
+    """L-183：Q1–Q9 全过（pass；na 也算——Q9 的 na 须看图模型真看过 = evidence.model，与 sop_gate._q9_pass 同口径）。
+    Q1、Q9 必须有（没打分 / 没看图的版本不算）"""
+    st = {i.get("id"): i for i in (pf or {}).get("items") or []}
+    if "Q1" not in st or "Q9" not in st:
+        return False
+    for q in L183_ITEMS:
+        it = st.get(q)
+        if it is None:
+            continue
+        s = it.get("status")
+        if s == "pass" or (s == "na" and (q != "Q9" or (it.get("evidence") or {}).get("model"))):
+            continue
+        return False
+    return True
+
+
+def review_pick(td: dict, stage: str, ns: set | None = None) -> int | None:
+    """L-183：这一阶段（只看 ns 里的版本，None = 全部）Q1–Q9 全过、没被驳回 / 标坏的版本里 score_key 最高的一版"""
+    c = [t for t in td.get("takes") or [] if t.get("stage") == stage and (ns is None or t.get("n") in ns)
+         and not t.get("bad") and not t.get("master_reject") and q19_clean(take_pf(t))]
+    return max(c, key=lambda t: score_key(take_pf(t)))["n"] if c else None
+
+
+def review_adopt(paths: "Paths", oid: str, n: int | None = None, by: str = "L-183 自动", ns: set | None = None) -> int | None:
+    """L-183（总调度 11-04 04:2x / 05:0x，项目方“不卡整集”）：尽力用尽不再排除出拼接——取 Q1–Q9 全过里分数最高的一版设为当前，
+    postflight 标 review_needed=true 并改 ok=true（原结论留 ok_before_review / blocking_before_review，审片可见），
+    这样尾帧 / 出图检测 / 视频编单都按“过”往下走；V2_LIVE 记“待项目方复核”。没有 Q1–Q9 全过的版本 → None（照旧尽力）"""
+    from ns_render import pipeline as P
+    kind, sid = oid.split(":", 1)
+    stage = "image" if kind == "first" else "last"
+    td = P.load_takes(sid)
+    if n is None:
+        n = review_pick(td, stage, ns)
+    t = next((x for x in td.get("takes") or [] if x.get("stage") == stage and x.get("n") == n), None) if n else None
+    if t is None or not q19_clean(take_pf(t)):
+        return None
+    note = {"by": by, "at": iso(), "rule": "L-183", "why": "尽力用尽，取 Q1–Q9 全过里分数最高的一版，待项目方复核"}
+
+    def _mark(d):
+        for x in d.get("takes") or []:
+            if x.get("stage") == stage and x.get("n") == n:
+                pf = x.get("postflight") if isinstance(x.get("postflight"), dict) else take_pf(x)
+                if pf.get("review_needed"):
+                    return
+                pf.update(ok_before_review=pf.get("ok"), blocking_before_review=list(pf.get("blocking") or []),
+                          ok=True, blocking=[], review_needed=True, review=note)
+                x["postflight"] = pf
+    P.mutate_takes(sid, _mark, op="review_adopt", by=f"producer（{by}）")
+    P.set_active(sid, stage, n, reason=f"L-183 尽力用尽取 v{n}（Q1–Q9 全过），待项目方复核", actor=f"producer.review_adopt（{by}）")
+    log_event(paths, "review_adopt", obj=oid, take=n, by=by, counted=False)
+    try:
+        promote_live(paths.root, f"W38/L-183：{oid} 尽力用尽 → 取 v{n}（Q1–Q9 全过、分数最高）设为当前，待项目方复核 {sid}")
+    except Exception:  # noqa: BLE001  # arch-ok: V2_LIVE 写不进去不挡（takes.json review_needed 是权威）
+        pass
+    return n
 
 
 # ---------------------------------------------------------------------------------------------- 状态推导
@@ -1330,7 +1541,9 @@ def derive(w: World, ledger: dict, leases: dict, run_summary: dict | None = None
             bo.update(status="pending", waiting_for="BGM10 出本集配乐（缺时合成用 --no-bgm，不挡成片）", where="BGM10", optional=True)
         ao_ = obj("assembly", f"ep{n:02d}", ep=n)
         night_ep = (w.night.get("eps") or {}).get(str(n)) or {}
-        final = p.eps_out / f"ep{n:02d}_v1.mp4"
+        finals = sorted((f for f in (p.eps_out.glob(f"ep{n:02d}_v*.mp4") if p.eps_out.is_dir() else [])
+                         if f.stem.rsplit("_v", 1)[-1].isdigit()), key=lambda f: int(f.stem.rsplit("_v", 1)[-1]))   # 按版本号取最新
+        final = finals[-1] if finals else p.eps_out / f"ep{n:02d}_v1.mp4"     # W44 ③：night finalize 出 ep01_vN（N 递增），不只认 v1
         if final.exists():
             ao_.update(status="passed", reason=str(final.relative_to(p.root)).replace("\\", "/"))
         elif night_ep.get("status") == "assemble_failed":
@@ -1347,8 +1560,10 @@ def derive(w: World, ledger: dict, leases: dict, run_summary: dict | None = None
             ao_.update(status="ready" if not waits and shot_objs else "pending", waiting_for="、".join(waits) or None,
                        where="VIDEO10 night.py" if night_alive else AGENT)
         po = obj("preview", f"ep{n:02d}", ep=n)
-        if (p.review / f"ep{n:02d}" / "index.html").exists():
-            po.update(status="passed", reason=f"data/review_pages/series10_video/ep{n:02d}/index.html")
+        if final.exists():                       # W44 ③：与 sop_gate“整集预览”同一口径——night finalize 的 epNN_vN.mp4 就是整集预览
+            po.update(status="passed", reason=str(final.relative_to(p.root)).replace("\\", "/"))
+        elif (p.review / f"ep{n:02d}" / "index.html").exists():
+            po.update(status="passed", reason=str((p.review / f"ep{n:02d}" / "index.html").relative_to(p.root)).replace("\\", "/"))
         else:
             po.update(status="pending", waiting_for="合成后自动生成")
         E["objects"].update(voice=vo_, bgm=bo, assembly=ao_, preview=po)
@@ -1719,7 +1934,12 @@ class FrameExec:
                 import remote_score as RS
                 from ns_render import image_params as IP
                 req = {"cast": job.get("cast"), "asset_refs": job.get("asset_refs") or {}}
-                d = RS.postflight_full("gpu33", [{"id": "x", "host_path": host_path,
+                # W41（11-04）：host_path 不在本机（笔记本上跑 producer）时同时给本机交付图 file——远端打分仍按 host_path 读原始输出
+                # （full_score：有 host_path 不上传），postflight_full 在本进程里跑的 G1 视线 / Q9 看图改读 file；以前笔记本上
+                # cv2.imread 服务器路径 → G1“读不到图”、Q9 看不到图。服务器上 host_path 就在本机，行为不变
+                from ns_render import pipeline as P
+                local = {} if Path(host_path).is_file() else {"file": str(P.DATA / file_rel)}
+                d = RS.postflight_full("gpu33", [{"id": "x", "host_path": host_path, **local,
                                                    "post": RS.post_of(IP.resolve(job.get("preset") or UF.preset_id(), {"style_suffix": ""})),
                                                    "request": req}])["x"]
                 if not d.get("measure_error"):
@@ -1742,12 +1962,13 @@ class FrameExec:
         vlm = vqa_gate(sid, stage, file_rel, job, pf)   # VQAGATE：本地看图闸门（enforce 期不过 = 不设为当前、自动重出）
         if not pf.get("score_infra"):
             pf = shared_accept(self.p, self.script, sid, file_rel, job, pf)   # PRODMERGE-O：共用验收（bundle + retry 三态）
-        try:                                     # canary_after_redo：换版后前 6 镜同一阻断项失败 > 34% → 暂停派单（kind=canary，不自动恢复）
-            from ns_agent.vqa import canary as CN
-            hit = CN.observe(sid, stage, pf)
+        pf["code_sha"] = code_sha()               # W44 ①：每条结论记“哪份代码判的”（本进程启动时的内容 sha）
+        pf["judged_pid"] = os.getpid()
+        try:                                     # canary_after_redo：换版后前 6 镜同一阻断项失败 > 34% → 暂停派单（kind=canary）
+            from ns_agent.vqa import canary as CN  # W44 ①：只数本进程 / 本代码的结论；pid / code_sha 变了自动恢复，到点重评估
+            hit = CN.observe(sid, stage, pf, key=canary_key(self.p, CN.version_key()))
             if hit:
-                set_paused(self.p, True, by="POLICY_CANARY", kind="canary",
-                           note=f"换版首批复核：前 {hit['n']} 镜 {hit['item']} 不过占 {hit['frac']:.0%}（{'、'.join(hit['shots'])}），版本 {hit['version']}")
+                canary_pause(self.p, hit)
         except Exception as e:  # noqa: BLE001 — canary 出错不挡出图，但要记
             log_event(self.p, "canary_err", obj=f"{stage}:{sid}", error=repr(e)[:200])
         try:
@@ -1812,6 +2033,9 @@ class FakeFrameExec:
 
 
 # ---------------------------------------------------------------------------------------------- 视频桥
+NIGHT_STALE_S = 1200          # W44 ③：night_state.json 这么久没更新 = night 不在跑（resident health A-RESIDENT-NIGHT 同一口径 20 分钟）
+
+
 class VideoBridge:
     """VIDEO10 night.py 在跑：只在“本集每镜首尾帧都定下”时写 force_eps 放行（night 下一轮自己派）；
     workers.video = producer（night 退役后）：本服务每轮直接调 night.loop_once"""
@@ -1841,13 +2065,72 @@ class VideoBridge:
                     logf("video_release_skipped", ep=E["ep"], counted=False,
                          why="本集有尽力镜：不整集放行（尽力镜不进合成）；过了契约的镜照常逐镜出视频")
         if (ctrl.get("workers") or {}).get("video") == "producer" and not night_alive:
-            import night as NT  # noqa: PLC0415
+            NT = self._night_mod()
             if self._night_state is None:
                 self._night_state = jl(NT.STATE, None) or {"eps": {}, "pending_shots": {}, "started": time.time()}
             try:
                 NT.loop_once(self._night_state)
             except Exception as e:  # noqa: BLE001
                 logf("video_err", error=repr(e)[:300], kind=classify(repr(e)))
+            return
+        why = self.night_stalled(reg, night_alive) if ctrl.get("video_takeover", True) else None
+        if why:
+            self.takeover(why, logf)
+
+    def _night_mod(self):
+        """night.py 按 NS_RUN 定剧（import 时求值）：本进程第一次 import 前钉成本剧；已 import 成别的剧 → 拒绝（不跨剧出片）"""
+        os.environ.setdefault("NS_RUN", self.p.run_id)
+        import night as NT  # noqa: PLC0415
+        if getattr(NT, "RUN_ID", self.p.run_id) != self.p.run_id:
+            raise RuntimeError(f"night 模块已按 {NT.RUN_ID} 加载，不替 {self.p.run_id} 出片")
+        return NT
+
+    def night_stalled(self, reg: dict, night_alive: bool, t: float | None = None) -> str | None:
+        """W44 ③ 阶段自动接力：有镜首尾帧都定下、视频 ready（等派），但本机没有 night 进程、night_state.json 不在或
+        ≥ NIGHT_STALE_S 没更新 → 视频段没人接（W18 lifecycle 只在整集阶段 ≥ 尾帧才起 night，一镜卡住全集视频都等）。
+        → 原因（producer 接手跑 night.loop_once）；None = 不用接"""
+        if night_alive:
+            return None
+        t = now() if t is None else t
+        # 总调度 05:1x（W38 落地）：只接本机分区里的集——partition.json video 把这一集分给本机（OFFLINE_SELF）才接手，
+        # 否则会和分区主机的 night 抢（ep01 视频现归 gpu36，gpu33 不能起 night）。笔记本（无 OFFLINE_SELF）/ 分区读不到 = 不接
+        me = os.environ.get("OFFLINE_SELF")
+        try:
+            part = self._night_mod().partition_hosts() if me else {}
+        except Exception:  # noqa: BLE001  # arch-ok: 分区读不到 = 不接手（失败关闭，不和别的机器抢）
+            part = {}
+        mine = {int(e) for e, h in (part or {}).items() if h == me}
+        ready = [S["shot"] for E in reg.get("episodes") or [] if int(E.get("ep") or 0) in mine for S in E.get("shots") or []
+                 if ((S.get("objects") or {}).get("video") or {}).get("status") == "ready"]
+        if not ready:
+            return None
+        sp = self.p.vid / "night_state.json"
+        age = t - sp.stat().st_mtime if sp.exists() else None
+        if age is not None and age < NIGHT_STALE_S:
+            return None
+        return (f"{len(ready)} 镜视频等派（{'、'.join(ready[:6])}{'…' if len(ready) > 6 else ''}），本机没有 night 进程，"
+                f"night_state {'不存在' if age is None else f'{round(age / 60)} 分钟没更新'}：producer 接手跑 night.loop_once")
+
+    def takeover(self, why: str, logf) -> bool:
+        """后台线程跑一轮 night.loop_once（单飞：上一轮没完不再起；不挡 producer 主循环）。night 进程一出现就自动停（night_stalled=None）"""
+        th = getattr(self, "_takeover_th", None)
+        if th is not None and th.is_alive():
+            return False
+        if why != getattr(self, "_takeover_why", None):
+            self._takeover_why = why
+            logf("video_takeover", why=why, counted=False)
+
+        def run():
+            try:
+                NT = self._night_mod()
+                if self._night_state is None:
+                    self._night_state = jl(NT.STATE, None) or {"eps": {}, "pending_shots": {}, "started": time.time()}
+                NT.loop_once(self._night_state)
+            except Exception as e:  # noqa: BLE001
+                logf("video_err", error=repr(e)[:300], kind=classify(repr(e)), takeover=True)
+        self._takeover_th = threading.Thread(target=run, name="producer-night-takeover", daemon=True)
+        self._takeover_th.start()
+        return True
 
 
 class FakeVideo:
@@ -2039,6 +2322,10 @@ class Producer:
     # -- 一轮 --
     def tick(self, dispatch: bool = True) -> dict:
         try:
+            canary_tick(self.p)                    # W44 ①：旧进程 / 旧代码的 canary 自动失效；到点重评估（在 pause_tick 之前）
+        except Exception as e:  # noqa: BLE001
+            self.logf("canary_tick_err", error=repr(e)[:200])
+        try:
             pause_tick(self.p)                     # K-OPS-E08：运维暂停到点自动恢复；显式暂停超时只报警
         except Exception as e:  # noqa: BLE001
             self.logf("pause_tick_err", error=repr(e)[:200])
@@ -2081,6 +2368,10 @@ class Producer:
                     self.escalate_exhausted(reg)  # K-OPS-E09：驳回阶梯用完的对象自动定下一步（不停下等人）
                 except Exception as e:  # noqa: BLE001
                     self.logf("escalate_err", error=repr(e)[:300])
+                try:
+                    self.rescore_cap_reset()           # W44 ②：看图 health 恢复 loaded → 封顶的只重打分清零
+                except Exception as e:  # noqa: BLE001
+                    self.logf("rescore_cap_reset_err", error=repr(e)[:300])
                 try:
                     self.dispatch_rescores(reg)        # W20：只重打分独立派（不要空闲道、熔断 + 上限 + 退避）
                 except Exception as e:  # noqa: BLE001
@@ -2295,7 +2586,14 @@ class Producer:
         return out
 
     def probe_lanes(self, ctrl) -> dict:
-        hold = set(ctrl.get("hold_lanes") or []) | {ln for ln in self.lanes if lane_held(ln)}
+        part = jl(self.p.root / "config" / "netfix" / "partition.json", None)
+        hold, released = effective_holds(ctrl, self.lanes, part)     # W44 ④：本机道的过期 hold 快照不再挡派单
+        rel_sig = json.dumps(released, sort_keys=True, ensure_ascii=False)
+        if released and rel_sig != getattr(self, "_hold_rel_sig", None):
+            self.logf("hold_stale_release", lanes=sorted(released), why=released, dispatch_at=(ctrl.get("dispatch_by") or {}).get("at"),
+                      counted=False)
+        self._hold_rel_sig = rel_sig if released else None
+        hold |= {ln for ln in self.lanes if lane_held(ln)}
         out = {}
         for ln, url in self.lanes.items():
             q = self.lane_probe(url)
@@ -2684,6 +2982,12 @@ class Producer:
                 # G3：没过契约的版本绝不设为当前；契约分最好的一版只记下来给人看
                 reason = (f"试了 {attempt} 次（{' → '.join(str(h.get('rung') or h.get('source') or '?') for h in hist)}）仍没过：{why}；契约分最好的是 v{best}"
                           f"（没过契约，不设为当前），标“尽力”，不进合成")
+                ra = review_adopt(self.p, oid, ns={h.get("take") for h in hist if h.get("take")})   # L-183：不再排除出拼接
+                if ra:
+                    self.led_update(oid, tries=attempt, history=hist, final="passed", last_error=why,
+                                    reason=f"试了 {attempt} 次没全过；L-183 取 Q1–Q9 全过里分数最高的 v{ra} 设为当前，待项目方复核")
+                    self.logf("passed", obj=oid, take=ra, attempt=attempt, review_needed=True, rule="L-183")
+                    return
                 self.led_update(oid, tries=attempt, history=hist, final="best_effort", reason=reason, last_error=why)
                 self.logf("best_effort", obj=oid, reason=reason, strategy=rung.get("strategy"), variant=rung.get("variant"),
                           blocking=pf.get("blocking"), render_s=render_s, contract_s=contract_s, gpu_s=res.get("gpu_s"))
@@ -2754,7 +3058,33 @@ class Producer:
         if float(led.get("backoff_until") or 0) > now():
             return None
         rt = led.get("rescore_take") or o.get("rescore_take")
-        return int(rt) if rt else None
+        if not rt:
+            return None
+        recent = [x for x in led.get("rescore_times") or [] if now() - float(x) < 3600]
+        if len(recent) >= RESCORE_HOURLY_MAX:      # W44 ②：每镜每小时 ≤3 次只重打分；超了退避 30 分钟（不重出、不计次）
+            until = now() + RESCORE_CAP_BACKOFF_S
+            self.led_update(o["id"], rescore_times=recent, rescore_capped=True, backoff_until=until,
+                            reason=f"1 小时内已只重打分 {len(recent)} 次仍没拿到结论（看图 / 打分链路），"
+                                   f"退避 {RESCORE_CAP_BACKOFF_S // 60} 分钟；看图 health 恢复 loaded 后自动清零")
+            self.logf("rescore_cap", obj=o["id"], take=int(rt), n_1h=len(recent), max=RESCORE_HOURLY_MAX,
+                      until=iso(until), counted=False)
+            return None
+        return int(rt)
+
+    def rescore_cap_reset(self, health_fn=None, every_s: float = 60) -> list:
+        """W44 ②：有对象因 rescore_cap 退避时，每 every_s 探一次看图 health；loaded=True → 清零这些对象的次数和退避
+        （ev=rescore_cap_reset），马上可以再重打分。没有被封顶的对象就不探"""
+        capped = [k for k, r in self.ledger().items() if isinstance(r, dict) and r.get("rescore_capped")]
+        if not capped or now() - getattr(self, "_cap_health_at", 0.0) < every_s:
+            return []
+        self._cap_health_at = now()
+        h = (health_fn or getattr(self, "vlm_health_fn", None) or vlm_health)()
+        if not h.get("loaded"):
+            return []
+        for k in capped:
+            self.led_update(k, rescore_times=[], rescore_capped=None, backoff_until=0, rescore_infra=None)
+        self.logf("rescore_cap_reset", objs=capped, health=h, counted=False)
+        return capped
 
     def score_chain_trip(self, why: str, cool_s: float = SCORE_CHAIN_COOL_S) -> None:
         """W20：打分链路（gpu33 ssh 打分 / 共用验收）刚出错 → 熔断一段时间：期间不派只重打分（出图照派，打分积压闸照管）"""
@@ -2785,7 +3115,7 @@ class Producer:
             if busy >= RESCORE_MAX:
                 if getattr(self, "_last_rs_cap_log", 0) < now() - 300:
                     self._last_rs_cap_log = now()
-                    self.logf("rescore_cap", busy=busy, max=RESCORE_MAX, waiting=len(pend) - n, counted=False)
+                    self.logf("rescore_busy", busy=busy, max=RESCORE_MAX, waiting=len(pend) - n, counted=False)   # W44：原名 rescore_cap（并发上限），改名让出给每镜上限
                 break
             oid = o["id"]
             if not self.leases.acquire(oid, holder_note="rescore"):
@@ -2796,6 +3126,8 @@ class Producer:
                 self._rescore_futs[oid] = self.rescore_pool.submit(self._rescore_one, o, rt)
             busy += 1
             n += 1
+            L0 = self.ledger().get(oid) or {}
+            self.led_update(oid, rescore_times=[x for x in L0.get("rescore_times") or [] if now() - float(x) < 3600] + [now()])
             self.logf("rescore_dispatch", obj=oid, take=rt, counted=False)
         return n
 
@@ -2855,7 +3187,7 @@ class Producer:
                 return
             hist = [dict(h, ok=bool(pf.get("ok")), blocking=pf.get("blocking")) if h.get("take") == n else h
                     for h in L.get("history") or []]
-            self.led_update(oid, rescore_take=None, rescore_infra=None, history=hist,
+            self.led_update(oid, rescore_take=None, rescore_infra=None, rescore_times=[], rescore_capped=None, history=hist,
                             **({"final": "passed", "reason": None} if pf.get("ok") else {"reason": "重打分后：" + pf_reason(pf)}))
             self.logf("rescore", obj=oid, take=n, ok=pf.get("ok"), blocking=pf.get("blocking"), counted=False)
         except Exception as e:  # noqa: BLE001
@@ -3402,6 +3734,7 @@ def set_paused(paths: Paths, paused: bool, by: str = "owner", note: str = "", ki
         c.update(paused=False, paused_by=None, paused_at=None, note=note or None, reason_kind=None,
                  expires_at=None, overdue_alert_t=None)
     c.pop("expires_t", None)
+    c.pop("canary", None)                      # W44 ①：canary 判定记录只属于那一次 canary 暂停（canary_pause 写完再补）
     js(paths.ctrl, c)
     log_event(paths, "pause" if paused else "resume", by=by, note=note,
               **({"reason_kind": c.get("reason_kind"), "expires_at": c.get("expires_at")} if paused else {}))
@@ -3654,7 +3987,8 @@ def serve(paths: Paths, pinned: bool = False, *, producer=None, spawn=None, slee
         return 0
     if producer is None:
         pr.frames = FrameExec(paths, pr.script())
-    log_event(paths, "start", pid=os.getpid(), lanes=list(pr.lanes), run=paths.run_id, run_source=pr.run_source)
+    log_event(paths, "start", pid=os.getpid(), lanes=list(pr.lanes), run=paths.run_id, run_source=pr.run_source,
+              code_sha=code_sha())   # W44 ①：启动时算一次代码 sha（之后热推不变，重启才变）
     n = 0
     suspect, seen = None, 0
     while max_ticks is None or n < max_ticks:
@@ -4204,7 +4538,7 @@ def main(argv=None) -> int:
     except Exception:  # noqa: BLE001
         pass
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["serve", "once", "status", "pause", "resume", "dryrun", "rescore", "reject", "approve", "unwait", "uncap", "retry", "reset-best-effort", "import-staged",
+    ap.add_argument("cmd", choices=["serve", "once", "status", "pause", "resume", "dryrun", "rescore", "reject", "approve", "unwait", "uncap", "retry", "reset-best-effort", "review-adopt", "import-staged",
                                         "quarantine-foreign"])
     ap.add_argument("--obj", default="")
     ap.add_argument("--n", type=int, default=0)
@@ -4261,6 +4595,15 @@ def main(argv=None) -> int:
         return reset_best_effort(paths, a.note or "门槛 / 编译器更新后重新给 3 次（总调度 11-01）", a.by, shots)
     if a.cmd == "import-staged":          # 总调度派的整稿导入（走 PRODUCER 令牌通道）：--obj <暂存稿路径> --reason <sha256> --note
         return import_staged(paths, a.obj, a.reason, a.note, a.by, skip_rubric_gate=a.skip_rubric_gate, run=a.run or None)
+    if a.cmd == "review-adopt":           # L-183 手工：--obj first:ep01-S4 [--n N]（不给 N = Q1–Q9 全过里分数最高的一版）
+        r = review_adopt(paths, a.obj, a.n or None, by=a.by)
+        if r:                             # 与主循环同口径：账本改 passed（否则对象仍按“尽力”推导，尾帧 / 视频不往下走）
+            L = jl(paths.ledger, {}) or {}
+            L.setdefault(a.obj, {}).update(final="passed", hard_capped=None,
+                                           reason=f"L-183 取 v{r}（Q1–Q9 全过）设为当前，待项目方复核（{a.by}）")
+            js(paths.ledger, L)
+        print(json.dumps({"obj": a.obj, "adopted": r}, ensure_ascii=False))
+        return 0 if r else 1
     if a.cmd == "uncap":                  # K-OPS-E28：人工看过后多放 N 次（24 小时有效），不清计数
         L = jl(paths.ledger, {}) or {}
         L.setdefault(a.obj, {}).update(cap_extra={"n": max(1, a.n or 3), "t": now(), "at": iso(), "by": a.by, "note": a.note},

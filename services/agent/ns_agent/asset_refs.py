@@ -485,16 +485,37 @@ def wardrobe() -> dict[str, dict]:
         return {}
 
 
-def item_image(item_id: str, project: str | None = None) -> str | None:
+def _manifest_item_entries(c: dict, item_id: str, look_id: str | None = None) -> list:
+    """一个角色清单里某单品的候选条目：本镜造型的 looks.<lid>.items 优先，再角色级 items，再其它造型"""
+    looks = c.get("looks") or {}
+    out = []
+    if look_id is not None and str(look_id) in looks:
+        out.append((looks[str(look_id)].get("items") or {}).get(item_id))
+    out.append((c.get("items") or {}).get(item_id))
+    out += [(lk.get("items") or {}).get(item_id) for k, lk in looks.items() if k != str(look_id)]
+    return [e for e in out if e]
+
+
+def item_image(item_id: str, project: str | None = None, cid: str | None = None,
+               look_id: str | None = None) -> str | None:
     if project and manifest_rel(project):                       # V2 资产包模式：单品只认清单
-        for c in ((manifest(project) or {}).get("characters") or {}).values():
-            f = _manifest_file((c.get("items") or {}).get(item_id))
-            if f:
-                return f
-            for lk in (c.get("looks") or {}).values():
-                f = _manifest_file((lk.get("items") or {}).get(item_id))
+        # W42 Q2-OUTFIT（11-04）：V2 清单里单品 id 按角色/造型命名（A_outfit1 / A_shoes1 / A_acc1 在江雨白、卓琳、唐瑶下
+        # 各有一件），旧逻辑全清单找第一个命中 → 唐瑶 S10 拿到卓琳的服装图（出图参考 + Q2 比对都错，ep01 首帧 Q2 全 fail）。
+        # 现在：给了 cid 只在该角色里找（不借别人的单品，失败关闭）；没给 cid 且多个角色都有同名单品 → None（歧义不猜）
+        chars = (manifest(project) or {}).get("characters") or {}
+        if cid is not None:
+            for e in _manifest_item_entries(chars.get(cid) or {}, item_id, look_id):
+                f = _manifest_file(e)
                 if f:
                     return f
+            return None
+        owners = [c for c in chars.values() if _manifest_item_entries(c, item_id)]
+        if len(owners) != 1:
+            return None
+        for e in _manifest_item_entries(owners[0], item_id, look_id):
+            f = _manifest_file(e)
+            if f:
+                return f
         return None
     it = wardrobe().get(item_id)
     if not it:
@@ -811,7 +832,10 @@ def _manifest_file(e):
 def manifest_derived_dirs(project: str) -> tuple:
     """资产包模式下允许的派生 / 生产路径：本项目的 refcrops / refboards（由清单里的图生成）与本剧渲染目录（尾帧用首帧）"""
     pc = project_cfg(project)
-    return tuple(x.rstrip("/") + "/" for x in (pc.get("crop_dir"), pc.get("board_dir"), f"data/renders/{project}") if x) + (
+    # W41（11-04）：视频首帧输入 = build_jobs.passed_frames 把本剧过契约首帧转成的 JPEG（data/pipeline/runs/<剧>/video/inputs/
+    # <镜>_<源 PNG sha8>.jpg）。以前不在这里 → V2 每个视频变体 preflight I11 fail → vidgen 一条都不提交（V2 视频从没出过的根因之一）
+    return tuple(x.rstrip("/") + "/" for x in (pc.get("crop_dir"), pc.get("board_dir"), f"data/renders/{project}",
+                                                f"data/pipeline/runs/{project}/video/inputs") if x) + (
         "data/renders/_first_frame_placeholder.png",)
 
 
@@ -1589,7 +1613,7 @@ def resolve_shot(project: str, ep, shot, *, kept_triggers=None, looks=None, two_
             continue
         L = cl[lid]
         sheet = sheet_of(project, cid, lid)
-        if not sheet and manifest_rel(project) and any(p.item_id and item_image(p.item_id, project) for p in L.parts):
+        if not sheet and manifest_rel(project) and any(p.item_id and item_image(p.item_id, project, cid, lid) for p in L.parts):
             # V2 资产包：造型就是项目方给的单品图（设定图在资产阶段 S3 才出），单品图进参考槽即为造型锁定，不算缺图
             warns.append({"character": name, "kind": "造型参考用清单单品图", "detail": f"{name} 造型{lid} 还没有设定图，造型参考用资产包单品图"})
         elif not sheet:
@@ -1635,7 +1659,7 @@ def resolve_shot(project: str, ep, shot, *, kept_triggers=None, looks=None, two_
                 warns.append({"character": name, "kind": "手部单品不进参考槽", "item": _short(p.label), "rule": "K-REN-955",
                               "detail": f"{_short(p.label)} 的参考图是手部照片，手不是本镜主体：不送参考，走文字"})
                 continue
-            if p.force_missing and not (p.item_id and item_image(p.item_id, project)):
+            if p.force_missing and not (p.item_id and item_image(p.item_id, project, cid, lid)):
                 lab_ = _short(p.label)
                 if p.extra or lab_ in img:
                     missing.append({"character": name, "kind": "资产缺图",
@@ -1645,7 +1669,7 @@ def resolve_shot(project: str, ep, shot, *, kept_triggers=None, looks=None, two_
                                   "detail": f"{name} 造型{lid} 的“{lab_}”登记为缺图；本镜正文没写到，不阻断（画面按设定图 / 正文走）"})
                 continue
             if p.item_id:
-                f = item_image(p.item_id, project)
+                f = item_image(p.item_id, project, cid, lid)
                 src = "wardrobe" if f else ""
                 if not f:
                     warns.append({"character": name, "kind": "单品图缺失", "detail": f"{p.item_id} 映射了但没有图片"})
@@ -2083,7 +2107,7 @@ def look_inventory(project: str, char: str | None = None) -> list[dict]:
             sheet = sheet_of(project, cid, lid)
             parts = []
             for p in L.parts:
-                f = item_image(p.item_id, project) if p.item_id else None
+                f = item_image(p.item_id, project, cid, lid) if p.item_id else None
                 st = "wardrobe" if f else ("missing" if p.force_missing or not sheet else "sheet_only")
                 if p.slot == "marker":
                     st = "identity"

@@ -173,14 +173,25 @@ def rule_fallback(vlm: dict, why: str | None) -> dict:
             "action": "reprompt", "by": f"rule_fallback（{why}）"}
 
 
+_REF_NOTE = re.compile(r"图\d+是[^。]*。")     # 编译器参考图标注句（frame_job / asset_refs 生成，preflight I6 核对）
+
+
 def apply_delta(prompt: str, delta: dict | None) -> str:
     """一次只改一个维度：先做 replace，再把 append 句插到“无字幕、无文字、无水印”系统尾巴之前（没有就加在末尾）"""
     p = prompt or ""
     if not delta:
         return p
     for a, b in delta.get("replace") or []:
-        if a and a in p:
-            p = p.replace(a, b, 1)
+        if not a:
+            continue
+        # W38（11-04）：编译器的参考图标注句（“图N是……。”）是 preflight I6 逐字核对的，不许改——原来 replace 命中标注句
+        # （ep01 S8：“图3是…黑色薄透丝袜…必须与图3完全一致”）→ 每次重出 I6 挡、一张都出不来。只改标注句以外的第一处；只出现在标注里 = 不改
+        guard = [m.span() for m in _REF_NOTE.finditer(p)]
+        i = p.find(a)
+        while i >= 0 and any(s0 <= i < e0 for s0, e0 in guard):
+            i = p.find(a, i + 1)
+        if i >= 0:
+            p = p[:i] + b + p[i + len(a):]
     add = (delta.get("append") or "").strip().rstrip("，,。")
     if add and add not in p:
         tail = "，无字幕、无文字、无水印"

@@ -876,9 +876,12 @@ def test_k_ops_f30_no_mass_kill_by_name_or_port():
 
 
 def test_anomaly_resident_script():
-    """检测器常驻服务：只在 gpu36 GPU2、单实例 pid 文件、只听 127.0.0.1:8893、内网 lan_proxy 只放行 gpu33；不按名字批量杀（K-OPS-F30）"""
+    """检测器常驻服务：只在 gpu36、GPU 走 ANOMALY_GPU（默认 1，W40 11-04：给 2 = 坏卡红线直接拒绝）、单实例 pid 文件、
+    只听 127.0.0.1:8893、内网 lan_proxy 只放行 gpu33；不按名字批量杀（K-OPS-F30）"""
     t = (ROOT / "ops/factory/anomaly_resident.sh").read_text(encoding="utf-8")
-    assert "CUDA_VISIBLE_DEVICES=2" in t and '[ "$SELF" = gpu36 ]' in t and "ANOMALY_PORT=$PORT" in t and "PORT=8893" in t
+    assert "GPU=${ANOMALY_GPU:-1}" in t and "CUDA_VISIBLE_DEVICES=$GPU" in t and "CUDA_VISIBLE_DEVICES=2" not in t
+    assert '[ "$GPU" = 2 ] &&' in t and "exit 3" in t
+    assert '[ "$SELF" = gpu36 ]' in t and "ANOMALY_PORT=$PORT" in t and "PORT=8893" in t
     assert "--allow 10.0.0.33" in t and "--bind 10.0.0.36" in t and "alive $PIDF" in t
     assert "pkill -f" not in t and "rm -" not in t
 
@@ -944,7 +947,7 @@ def test_a12_atomic_sync_writes(tmp_path):
     import shutil
     import subprocess
     src = (ROOT / "tools/autopilot/resident_sync.py").read_text(encoding="utf-8")
-    assert "cp -a $T/. {R}/" not in src and src.count("atomic_install_cmd(R)") == 4
+    assert "cp -a $T/. {R}/" not in src and src.count("atomic_install_cmd(R)") >= 4 and "cp -a" not in src.replace("以前 cp -a 原地覆盖", "")
     mp = (ROOT / "ops/offline/merge_pull.py").read_text(encoding="utf-8")
     assert "def _atomic_json(" in mp and mp.count("_atomic_json(") >= 4
     # W13 CUTB-PREP 11-03：环境口径，与 tests/test_system_version.py::test_verified_install_refuses_truncated_stdin 同一条（A-G1 第 22 轮 #4）：
@@ -1108,3 +1111,37 @@ def test_restartfix_lanes_cli_release_without_by_warns(monkeypatch, capsys):
     monkeypatch.setattr(L, "release", lambda lane, part=None, by=None, kind=None: {"_lent_lanes": {}})
     L.main(["release", "gpu3"])
     assert "没有清理任何 hold" not in capsys.readouterr().out
+
+
+def test_producer_postflight_gives_local_file_when_host_path_remote(tmp_path, monkeypatch):
+    """W41（11-04）：笔记本上跑 producer 时 host_path 是 gpu33 路径 → 作业同时带本机交付图 file（G1 / Q9 读得到图）；
+    host_path 在本机（服务器上）→ 不加 file，行为不变"""
+    sys.path.insert(0, str(ROOT / "tools/autopilot"))
+    import producer as PR
+    sys.path.insert(0, str(ROOT / "tools" / "gen_contract"))
+    import remote_score as RS
+    from ns_render import pipeline as P
+    from ns_render import unified_frame as UF
+    seen = []
+
+    def fake_full(host, jobs, label=None):
+        seen.append(dict(jobs[0]))
+        return {"x": {"ok": True, "items": [], "reasons": []}}
+    monkeypatch.setattr(RS, "postflight_full", fake_full)
+    monkeypatch.setattr(PR, "vqa_gate", lambda *a, **k: None)
+    monkeypatch.setattr(PR, "shared_accept", lambda p, script, sid, f, job, pf: pf)
+    monkeypatch.setattr(PR, "vqa_record", lambda *a, **k: None)
+    monkeypatch.setattr(PR, "outbox_emit", lambda *a, **k: None)
+    monkeypatch.setattr(UF, "preset_id", lambda: "x")
+    from ns_render import image_params as IP
+    monkeypatch.setattr(IP, "resolve", lambda *a, **k: {})
+    monkeypatch.setattr(RS, "post_of", lambda *a, **k: None)
+    fx = PR.FrameExec.__new__(PR.FrameExec)
+    fx.p, fx.script = PR.Paths(pd=tmp_path / "pd", run_id="series10_v2"), None
+    fx._postflight("ep01-S10", "last", 1, "renders/series10_v2/ep01/S10/takes/last.png", {}, "gpu33",
+                   "/root/nowhere/gpu1/ns_final/x.png")
+    assert seen[-1]["file"] == str(P.DATA / "renders/series10_v2/ep01/S10/takes/last.png")
+    here = tmp_path / "raw.png"
+    here.write_bytes(b"x")
+    fx._postflight("ep01-S10", "last", 1, "renders/series10_v2/ep01/S10/takes/last.png", {}, "gpu33", str(here))
+    assert "file" not in seen[-1] and seen[-1]["host_path"] == str(here)

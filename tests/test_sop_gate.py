@@ -230,3 +230,174 @@ def test_l140_whole_episode_prompts_by_default(tmp_path):
     assert SG.check_prompts(r, RUN, 1, shot=1)["ok"]          # 单查提示词阶段仍可按镜看
     _prompts(r, ok=(1, 2))
     assert SG.require(RUN, 1, "出图", shot=1, root=r)["ok"]
+
+
+# ------------------------------------------------------------------ W38：按集清单指纹（别集资产作业写清单不再作废本集证据）
+def _manifest(r, chars=None, scenes=None, updated="t0"):
+    _w(r / "assets_v2/manifest.json", {"schema": "nsfs.assets_manifest/1", "updated_at": updated,
+                                       "characters": chars if chars is not None else {"lead_f": {"display_name": "祁念", "face": "a"},
+                                                                                      "ch_b": {"display_name": "黎岸", "face": None}},
+                                       "scenes": scenes if scenes is not None else {"sk_1": {"base": "s1"}}})
+
+
+def _probe_keyed(r, keys=("characters/lead_f", "scenes/sk_1")):
+    rows = {"1": {"ok": True, "manifest_keys": list(keys)}, "2": {"ok": True, "manifest_keys": []}}
+    return SG.probe_prompts(RUN, 1, root=r, runner=lambda run, ep, root, cfg: rows)
+
+
+def _bump(r, fn):
+    p = r / "assets_v2/manifest.json"
+    d = json.loads(p.read_text(encoding="utf-8"))
+    fn(d)
+    p.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+
+
+def test_w38_other_episode_manifest_write_keeps_evidence(tmp_path):
+    """ep02 的身份脸作业登记 ch_b + 刷 updated_at → 整文件 sha 变了，但 ep01 只用 lead_f / sk_1 → 证据仍有效"""
+    r = _root(tmp_path)
+    _manifest(r)
+    ev = _probe_keyed(r)
+    assert ev["manifest_keys"] == ["characters/lead_f", "scenes/sk_1"] and ev["fingerprint_scoped"]["manifest_sha"].startswith("k:")
+    assert ev["fingerprint"] == ev["fingerprint_scoped"]            # 按集指纹（rev2 服务器读 fingerprint_scoped）
+    assert SG.check_prompts(r, RUN, 1)["ok"]
+    _bump(r, lambda d: (d["characters"]["ch_b"].update(face="new"), d.update(updated_at="t1")))
+    assert SG.check_prompts(r, RUN, 1)["ok"]
+
+
+def test_w38_used_entry_change_expires_evidence(tmp_path):
+    r = _root(tmp_path)
+    _manifest(r)
+    _probe_keyed(r)
+    _bump(r, lambda d: d["characters"]["lead_f"].update(face="b"))
+    c = SG.check_prompts(r, RUN, 1)
+    assert not c["ok"] and "过期" in c["why"]
+    r2 = _root(tmp_path / "s")
+    _manifest(r2)
+    _probe_keyed(r2)
+    _bump(r2, lambda d: d["scenes"]["sk_1"].update(base="s2"))
+    assert not SG.check_prompts(r2, RUN, 1)["ok"]
+
+
+def test_w38_used_entry_added_later_expires(tmp_path):
+    """本集用到的条目当时清单里还没有（None）→ 之后补上 = 过期（重编译才知道新资产进没进参考）"""
+    r = _root(tmp_path)
+    _manifest(r, chars={"lead_f": {"display_name": "祁念"}})
+    _probe_keyed(r, keys=("characters/lead_f", "characters/ch_b"))
+    assert SG.check_prompts(r, RUN, 1)["ok"]
+    _bump(r, lambda d: d["characters"].update(ch_b={"display_name": "黎岸"}))
+    assert not SG.check_prompts(r, RUN, 1)["ok"]
+
+
+def test_w38_rows_without_keys_fall_back_to_whole_file(tmp_path):
+    """有一镜没带 manifest_keys（编译出错 / 旧探针）→ 不写按集指纹，只认整文件指纹（失败关闭）"""
+    r = _root(tmp_path)
+    _manifest(r)
+    rows = {"1": {"ok": True, "manifest_keys": ["characters/lead_f"]}, "2": {"ok": False, "why": "编译出错"}}
+    ev = SG.probe_prompts(RUN, 1, root=r, runner=lambda run, ep, root, cfg: rows)
+    assert "manifest_keys" not in ev and "fingerprint_scoped" not in ev
+    _bump(r, lambda d: d.update(updated_at="t9"))
+    assert "过期" in SG.check_prompts(r, RUN, 1, shot=1)["why"]
+
+
+def test_w38_manifest_keys_for_matches_id_name_and_path(tmp_path):
+    r = _root(tmp_path)
+    _manifest(r, chars={"lead_f": {"display_name": "祁念"}, "ch_b": {"display_name": "黎岸"}, "ch_c": {"display_name": "周旭"}},
+              scenes={"sk_1": {}, "sk_2": {}})
+    job = {"prompt": "祁念站在白幕前", "refs": ["assets_v2/scenes/sk_1/base.png"], "cast": [{"name": "黎岸"}], "asset_refs": {}}
+    assert SG.manifest_keys_for(r, RUN, job) == ["characters/ch_b", "characters/lead_f", "scenes/sk_1"]
+
+
+def test_w38_probe_evidence_idempotent_across_manifest_rewrites(tmp_path):
+    """冒烟 G7：同一输入两遍证据（去掉 at）字节一致——别集条目 / updated_at 变了也一样（整文件 sha 不进证据）"""
+    r = _root(tmp_path)
+    _manifest(r)
+    p = r / f"data/pipeline/sop_gate/{RUN}/ep01_prompts.json"
+    _probe_keyed(r)
+    a = json.loads(p.read_text(encoding="utf-8"))
+    _bump(r, lambda d: (d.update(updated_at="t7"), d["characters"]["ch_b"].update(face="z")))
+    _probe_keyed(r)
+    b = json.loads(p.read_text(encoding="utf-8"))
+    a.pop("at"), b.pop("at")
+    assert json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
+
+
+def test_w38_rev2_server_compat(tmp_path):
+    """已部署的 rev2 判法：fingerprint 对整文件 或 fingerprint_scoped 对按集——新证据在 rev2 下仍有效"""
+    r = _root(tmp_path)
+    _manifest(r)
+    ev = _probe_keyed(r)
+    _bump(r, lambda d: d.update(updated_at="t8"))
+    keys = ev["manifest_keys"]
+    rev2_fresh = ev["fingerprint"] == SG.prompt_fingerprint(r, RUN, 1) or ev["fingerprint_scoped"] == SG.prompt_fingerprint(r, RUN, 1, keys)
+    assert rev2_fresh and SG.check_prompts(r, RUN, 1)["ok"]
+
+
+def test_w38_q9_record_only_na_counts_as_checked(tmp_path):
+    """看图真看过、只报“只记录”缺陷（Q9 na + evidence.model）= 出图检测过；没看成的 na（无 model）/ untested / fail 不过"""
+    assert SG._q9_pass({"items": [{"id": "Q9", "status": "na", "evidence": {"model": "Qwen3-VL-8B-Instruct", "record_only": True}}]})
+    assert not SG._q9_pass({"items": [{"id": "Q9", "status": "na", "detail": "只记录（没有本地看图结果）", "evidence": {}}]})
+    assert not SG._q9_pass({"items": [{"id": "Q9", "status": "untested"}]})
+    assert not SG._q9_pass({"items": [{"id": "Q9", "status": "fail", "evidence": {"model": "m"}}]})
+    assert not SG._q9_pass({"items": []})
+    r = _root(tmp_path)
+    _take(r, 1, 1, q9="na")
+    d = r / f"data/renders/{RUN}/ep01/S1/takes.json"
+    j = json.loads(d.read_text(encoding="utf-8"))
+    j["takes"][0]["postflight"]["items"][0]["evidence"] = {"model": "m", "record_only": True}
+    d.write_text(json.dumps(j), encoding="utf-8")
+    assert SG.shot_frames(r, RUN, 1)[1]["checked"]
+
+
+def test_w38_video_gate_per_shot(tmp_path):
+    """项目方 11-04 04:3x“不等 11 镜齐”：镜 1 首尾帧齐、镜 2 没首帧 → 只编镜 1 的视频作业；night / vidgen 不因整集没齐全挡"""
+    r = _root(tmp_path)
+    _prompts(r)
+    _take(r, 1, 1, last=True)
+    specs = {"ep01-S1": {"episode": 1}, "ep01-S2": {"episode": 1}}
+    assert SG.video_shots_ok(RUN, 1, r) == [1]
+    assert list(SG.filter_video_specs(RUN, specs, r)) == ["ep01-S1"]
+    vid = f"data/pipeline/runs/{RUN}/video"
+    _w(r / vid / "hosts.json", {"1": "gpu36"})
+    assert SG.video_dispatch_ok(vid, r)
+
+
+def test_w38_vidgen_guard_one_ep_ready_does_not_abort(tmp_path):
+    """gpu36 04:4x：控制文件 eps=[1,2]，ep01 镜 1 可进视频、ep02 不行 → vidgen 不退出；一集都不行才抛"""
+    r = _root(tmp_path, eps=(1, 2))
+    _prompts(r)
+    _take(r, 1, 1, last=True)
+    vid = r / f"data/pipeline/runs/{RUN}/video"
+    _w(vid / "control_gpu36.json", {"eps": [1, 2]})
+    SG.vidgen_guard(RUN, vid, r)
+    _w(vid / "control_gpu36.json", {"eps": [2]})
+    with pytest.raises(SG.SopGateError):
+        SG.vidgen_guard(RUN, vid, r)
+
+
+def test_l185_last_best_effort_does_not_block_video(tmp_path):
+    """L-185：首帧已过检 + 尾帧尽力用尽（账本 best_effort）→ 本镜可进视频；尾帧没尽力（还在重出）仍挡"""
+    r = _root(tmp_path, shots=(1,))
+    _prompts(r, ok=(1,))
+    _take(r, 1, 1)                                        # 只有首帧
+    assert SG.video_shots_ok(RUN, 1, r) == []
+    led = r / f"data/producer/runs/{RUN}/attempts.json"
+    _w(led, {"last:ep01-S1": {"final": None, "tries": 2}})
+    assert SG.video_shots_ok(RUN, 1, r) == []
+    _w(led, {"last:ep01-S1": {"final": "best_effort", "tries": 3}})
+    row = SG.shot_frames(r, RUN, 1)[1]
+    assert row["last"] and row["last_best_effort"] and SG.video_shots_ok(RUN, 1, r) == [1]
+
+
+def test_l185_last_exhausted_from_takes_without_ledger(tmp_path):
+    """视频机（gpu36）没有 gpu33 的 producer 账本：takes.json 里 ≥3 版尾帧打过分且都没过 = 尽力用尽 → 可进视频；2 版不够"""
+    r = _root(tmp_path, shots=(1,))
+    _prompts(r, ok=(1,))
+    _take(r, 1, 1)
+    tj = r / f"data/renders/{RUN}/ep01/S1/takes.json"
+    d = json.loads(tj.read_text(encoding="utf-8"))
+    d["takes"] += [{"stage": "last", "n": k, "file": "img/e1s1.png", "postflight": {"ok": False}} for k in (1, 2)]
+    tj.write_text(json.dumps(d), encoding="utf-8")
+    assert SG.video_shots_ok(RUN, 1, r) == []
+    d["takes"].append({"stage": "last", "n": 3, "file": "img/e1s1.png", "postflight": {"ok": False}})
+    tj.write_text(json.dumps(d), encoding="utf-8")
+    assert SG.video_shots_ok(RUN, 1, r) == [1]

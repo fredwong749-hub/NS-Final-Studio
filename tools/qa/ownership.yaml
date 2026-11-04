@@ -114,7 +114,8 @@ owners:
   PAGEWATCH: ["apps/web/e2e/pagewatch/**", "docs/pagewatch/**"]
   NETFIX:    ["tools/netfix/**", "config/netfix/**", "data/netfix/**", "tests/test_netfix.py", "knowledge/rules/netfix.yaml", "ops/autostart/tunnel.sh", "ops/autostart/tunnel_gpu36.sh"]   # 总调度 fredw-2b 11-01 22:1x NETFIX 派单（隧道监管 / 派单分区 / 看图内网入口）
   CODERSI:  ["tools/qa/syntax_guard.py", "tests/test_syntax_guard.py", "tools/qa/push_check.py", "tests/test_push_check.py", "knowledge/rules/ops_code_rsi.yaml", "data/qa/syntax_guard/**", "data/qa/push_check/**",
-              "tools/qa/system_version.py", "tests/test_system_version.py", "docs/system_versions/**", "data/system_versions/**"]   # 总调度 fredw-2b 11-01 18:1x 派 CODE-RSI（全仓体检；授权见 docs/uimaster/LOCKS.md CONSENT）
+              "tools/qa/system_version.py", "tests/test_system_version.py", "docs/system_versions/**", "data/system_versions/**",
+              "tools/qa/remote_gates.py", "tools/qa/remote_pytest.py", "tests/test_w45_remote_gates.py", "config/qa/remote_dev.json"]   # 总调度 fredw-2b 11-01 18:1x 派 CODE-RSI（全仓体检；授权见 docs/uimaster/LOCKS.md CONSENT）
   RECALL:    ["docs/master/**", "config/owner_decisions.yaml", "tools/qa/decision_check.py", "ops/cleanup/**"]   # 总调度 11-01 晚认领（RECALL 不在跑）；ITERAUDIT / RSI 为协作者，授权见 docs/uimaster/LOCKS.md CONSENT
   CLEANUP:   ["tools/qa/quarantine_refcheck.py", "tools/qa/quarantine_safe_move.py", "tests/test_quarantine_refcheck.py", "tests/test_import_sources.py", "services/api/ns_api/import_sources.py", "knowledge/rules/ops_cleanup.yaml", "knowledge/archive/**", "data/_quarantine_20261101b/**"]   # 总调度 fredw-2b 11-01 18:3x 派 CLEANUP（L-091）；写作附录 / owner_requirements 按总调度 r2 决定 8 归 ITERAUDIT，CLEANUP 协作
   # 写作合同文件（script_chat_rules / production_rules_v3 / qwen_writer_system_prompt / qwen_writing_contract / importer script_md / validate_script_strict）：RSI 11-01 暂登记给 ITERAUDIT（K-OPS-D03 测试查出无主），待总调度确认

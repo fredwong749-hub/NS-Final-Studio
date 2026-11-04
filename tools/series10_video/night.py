@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -297,7 +298,11 @@ def retry_assembly(st) -> None:
     版本号照常递增）；超过 3 次停在 assemble_failed，交总调度看 assemble_err"""
     for e, x in st["eps"].items():
         s = x.get("status")
-        if s == "hold_tts" and not tts_missing():
+        # W46：hold_voices 原来是死胡同（音色资产后到 → 本集永远不合成）；音色到位就回到 rendering
+        if s == "hold_voices" and voices_ok():
+            x["status"] = "rendering"
+            log("RETRY_ASSEMBLE", f"ep{int(e):02d}", "音色表已到位")
+        elif s == "hold_tts" and not tts_missing():
             x["status"] = "rendering"
             log("RETRY_ASSEMBLE", f"ep{int(e):02d}", "配音解释器已到位")
         elif s == "assemble_failed" and int(x.get("assemble_retries", 0)) < ASM_RETRY_MAX \
@@ -348,6 +353,14 @@ def assembly_sources(man: dict) -> tuple[dict, list[str]]:
         pw, ph = clip_wh(ROOT / s["proxy"]) if (ROOT / s["proxy"]).is_file() else (0, 0)
         if not sw or (pw and sw * sh <= pw * ph):
             bad.append(f"{s['shot']} 原片分辨率 {sw}×{sh} 不高于代理 {pw}×{ph}")
+            continue
+        try:   # W46（总调度 05:1x）：进合成前单镜裁到 ≤ 6.0 s（C-08，尾部裁、首帧保留；Pika 79 帧@12 = 6.58 s 的已出片兜底）
+            from clip_trim import trim_le
+            t6 = trim_le(use)
+            if t6 != use:
+                use, tag = t6, tag + "，裁到 ≤6 s"
+        except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
+            bad.append(f"{s['shot']} 裁到 6 s 失败：{e}"[:200])
             continue
         shots.append({"index": s["index"], "kind": "video", "file": str(use.relative_to(ROOT)).replace("\\", "/"),
                       "origin": f"VIDEO10 {s['shot']} {s.get('chosen')} {s.get('recipe')} seed {s.get('seed')}（{tag}）"})
@@ -414,6 +427,14 @@ def finalize(ep, host, st, ctrl):
     if rc:
         st["eps"][str(ep)]["assemble_err"] = out.strip()[-300:]
     final = None
+    if cands and not LEGACY:
+        hr = episode_hard_rules(cands[-1])
+        st["eps"][str(ep)]["hard_rules"] = hr
+        log("HARD_RULES", f"ep{ep:02d}", ("pass" if hr["ok"] else "FAIL") + (f"（{len(hr.get('warnings') or [])} 条只记）" if hr.get("warnings") else ""),
+            json.dumps(hr, ensure_ascii=False)[:400])
+        if not hr["ok"]:   # W46：不合硬规矩的合成片不进 data/episodes/<剧>/（sop_gate“整集预览”与复盘只认那里），留在 _work 交人看
+            st["eps"][str(ep)]["assemble_err"] = "硬规矩不过：" + "；".join(hr["fails"])[:300]
+            cands = []
     if cands:
         final = EPS_OUT / f"ep{ep:02d}_{ver}.mp4"
         shutil.copy2(cands[-1], final)
@@ -442,6 +463,99 @@ def finalize(ep, host, st, ctrl):
                               lip_redo=[r.get("shot") for r in director.get("lip_redo") or []] if director else [])
     if final and not LEGACY:
         bgm_after_assembly(ep, ver, used_bgm="--no-bgm" not in args, st=st)
+        st["eps"][str(ep)]["retro"] = retro_after_assembly(ep)
+
+
+EP_SECONDS = (60.0, 120.0)     # L-092：集时长 60–120 秒
+SHOT_MAX_S = 6.0               # C-08：单镜 ≤ 6 秒
+SHOT_TOL_S = 0.05              # 帧取整余量（24 fps 一帧 0.042 s）
+
+
+def _ffprobe(p: Path) -> dict:
+    """时长 + 流类型。服务器上的 ffprobe 是 offline_20261101/bin/ffprobe 兼容壳（只认 -show_streams -show_format -of json 等两种调用，
+    别的写法输出 {}；且只报 Video / Audio 流）→ 用它认得的写法；字幕流另用 ffmpeg -i 的 stderr 判（壳看不见字幕流）"""
+    exe = shutil.which("ffprobe") or "ffprobe"
+    r = subprocess.run([exe, "-v", "error", "-show_streams", "-show_format", "-of", "json", str(p)],
+                       capture_output=True, text=True, timeout=120)
+    if r.returncode:
+        return {"error": (r.stderr or "")[-200:]}
+    try:
+        d = json.loads(r.stdout or "{}")
+    except ValueError:
+        return {"error": f"ffprobe 输出不是 JSON：{(r.stdout or '')[:120]}"}
+    if not (d.get("format") or {}).get("duration"):
+        return {"error": f"ffprobe 没给时长：{(r.stdout or '')[:120]}"}
+    ff = shutil.which("ffmpeg") or "ffmpeg"
+    try:
+        e = subprocess.run([ff, "-hide_banner", "-i", str(p)], capture_output=True, text=True, errors="replace", timeout=120).stderr or ""
+        if re.search(r"Stream #\d+:\d+[^\n]*: Subtitle:", e):
+            d.setdefault("streams", []).append({"codec_type": "subtitle"})
+    except (OSError, subprocess.TimeoutExpired) as ex:
+        return {"error": f"ffmpeg -i 判字幕流失败：{ex!r}"[:200]}
+    return d
+
+
+def episode_hard_rules(mp4: Path, probe=None) -> dict:
+    """W46：整集进 data/episodes/<剧>/ 之前的硬规矩（代码判，失败关闭）：
+    挡：C-08 每镜 ≤ 6 s（timeline shots[].duration_s，末镜尾帧定格不算）；C-07 / L-002 无字幕流（ffprobe + ffmpeg -i，
+        timeline subtitles=false）；有视频流；L-092 集长 60–120 s 按**剧本时长**（shots[].script_duration_s 之和，写作规则口径）。
+    只记不挡（warnings，进 night_state / 日志）：合成后实长不在 60–120 s（剪辑规则按运动量 / 对白修头尾，沙箱实测真 Pika 片 5.17→4.0 s，
+        11 镜可能掉到 60 s 以下）；合成器 gates.verdict=fail（对白溢出 / 缺镜：“不能当成片”，预览照出）。
+    C-06 不看镜头 / L-141 At 只标切镜在视频编译层判（build_jobs / hard_rule_check），成片层不重复"""
+    fails, warns = [], []
+    pr = (probe or _ffprobe)(mp4)
+    if pr.get("error"):
+        return {"ok": False, "fails": [f"ffprobe 读不了：{pr['error']}"], "warnings": []}
+    dur = float((pr.get("format") or {}).get("duration") or 0)
+    kinds = [s.get("codec_type") for s in pr.get("streams") or []]
+    if "subtitle" in kinds:
+        fails.append("C-07 成片里有字幕流")
+    if "video" not in kinds:
+        fails.append("没有视频流")
+    tl = jl(mp4.with_suffix(".timeline.json"), None)
+    script_s = None
+    if not tl:
+        fails.append("没有 timeline.json（判不了单镜时长）")
+    else:
+        if tl.get("subtitles"):
+            fails.append("C-07 timeline subtitles=true")
+        long_shots = [f"{s.get('shot')} {_shot_s(s):.2f}s" for s in tl.get("shots") or [] if _shot_s(s) > SHOT_MAX_S + SHOT_TOL_S]
+        if long_shots:
+            fails.append("C-08 单镜超 6 秒：" + "、".join(long_shots))
+        sd = [float(s["script_duration_s"]) for s in tl.get("shots") or [] if s.get("script_duration_s") is not None]
+        script_s = round(sum(sd), 3) if sd else None
+        if script_s is not None and not EP_SECONDS[0] <= script_s <= EP_SECONDS[1]:
+            fails.append(f"L-092 剧本集长 {script_s:.1f}s 不在 {EP_SECONDS[0]:.0f}–{EP_SECONDS[1]:.0f}s")
+        if (tl.get("gates") or {}).get("verdict") == "fail":
+            warns.append(f"合成闸门 verdict=fail（预览照出，不能当成片）：{json.dumps(tl.get('gates'), ensure_ascii=False)[:160]}")
+    if not EP_SECONDS[0] <= dur <= EP_SECONDS[1]:
+        (warns if script_s is not None else fails).append(f"L-092 合成实长 {dur:.1f}s 不在 {EP_SECONDS[0]:.0f}–{EP_SECONDS[1]:.0f}s"
+                                                         + ("（剧本 %.1fs；剪辑修头尾所致，交剪辑 / 写手）" % script_s if script_s is not None else ""))
+    return {"ok": not fails, "fails": fails, "warnings": warns, "duration_s": round(dur, 3), "script_s": script_s, "streams": kinds,
+            "shots": len((tl or {}).get("shots") or []), "max_shot_s": max([_shot_s(s) for s in (tl or {}).get("shots") or []] + [0]),
+            "tail_hold_s": (tl or {}).get("tail_hold_s")}
+
+
+def _shot_s(s: dict) -> float:
+    """单镜时长：本镜视频段 duration_s（末镜的尾帧定格 tail_hold 不算镜头本身，assemble 把它并进末镜 picture_s）；没有再用 picture_s"""
+    return float(s.get("duration_s") or s.get("picture_s") or 0)
+
+
+def retro_after_assembly(ep: int) -> dict:
+    """W46：整集预览一进 data/episodes/<剧>/ 就走 episode_retro.auto（与 --auto 同一条路：生成 / 登记跟进 / 按配置自动 done）。
+    原来写的“常驻 autoflow_resident.retro_tick”从没接上（代码与 git 历史都没有）→ 预览出了复盘也没人跑，第 N+1 集出图永远卡“复盘”。
+    在 night 所在机器（服务器：producer video_takeover / night 常驻）跑，写本机 docs/master/RETRO_*.md——服务器 producer 的出图闸门读这一份。
+    出错只记日志（复盘不挡成片）"""
+    try:
+        import importlib.util as _u
+        sp = _u.spec_from_file_location("episode_retro_night", ROOT / "tools/master/episode_retro.py")
+        m = _u.module_from_spec(sp)
+        sp.loader.exec_module(m)
+        res = m.auto(RUN_ID, int(ep), ROOT)
+    except Exception as e:  # noqa: BLE001  # arch-ok: 复盘出错不影响成片，记进 night_state 交总调度
+        res = {"error": repr(e)[:300]}
+    log("RETRO", f"ep{int(ep):02d}", json.dumps(res, ensure_ascii=False, default=str)[:300])
+    return res
 
 
 BGM_AUTO_MAX = 2    # 同一份剪辑签名最多自动重合成 2 次（一次确认签名 L5，一次带 BGM）
@@ -609,7 +723,12 @@ def loop_once(st):
     eps_specs = specs_by_ep()
     ready_eps(eps_specs, ctrl)                     # 只为 force_eps 入账
     rs, files = ready_shots(eps_specs, ctrl)
-    sig = json.dumps({"shots": rs, "files": files}, sort_keys=True, ensure_ascii=False)
+    try:   # W46：尾帧过契约才过逐镜“视频”闸门（hf-08）→ 尾帧变了也要重编作业（原来只看首帧，S4 / S6 尾帧到了也不进 jobs.json）
+        lasts = {k: (v.get("file") if isinstance(v, dict) else v) for k, v in (_B().passed_lasts() or {}).items()}
+    except Exception as e:  # noqa: BLE001  # arch-ok: 尾帧清单读不了 = 签名不含尾帧（退回原口径），记日志
+        log("LASTS_SIG", repr(e)[:160])
+        lasts = {}
+    sig = json.dumps({"shots": rs, "files": files, "lasts": lasts}, sort_keys=True, ensure_ascii=False)
     if rs and sig != st.get("ready_sig"):
         hosts = jl(VID / "hosts.json", {}) or {}
         touched = set()
@@ -631,6 +750,10 @@ def loop_once(st):
                    "--label", "VIDEO10 预览片"], 1800)
     if rc:
         log("register_takes", rc, out.strip()[-200:].replace("\n", " "))
+    if not LEGACY and st.get("eps"):   # W46（总调度 05:4x）：已登记的当前视频 > 6 s → _le6 版登记并设为当前（原版保留）
+        rc_t, out_t = run([PY, "tools/series10_video/trim_takes.py", "--run", RUN_ID, "--eps", ",".join(sorted(st["eps"]))], 1800)
+        if rc_t or '"changed": []' not in out_t:
+            log("TRIM_TAKES", rc_t, out_t.strip()[-300:].replace("\n", " "))
     retry_assembly(st)
     for e, x in st["eps"].items():
         if x.get("status") == "assembled" and x.get("resolved_sig") and x["resolved_sig"] != ep_sig(int(e), x["host"]):

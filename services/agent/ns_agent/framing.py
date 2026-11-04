@@ -437,7 +437,24 @@ def partial_clause(partial: list[tuple[str, str]], subject: str | None, extra: d
     return "，".join(out)
 
 
-def two_shot_clause(n_people: int, subject: str | None) -> str:
+_FRONT_GAZE = re.compile(r"((?:视线|目光|眼神|眼睛)[^，。；]{0,3}(?:落在|看向|望向|朝向|看着))画面(右|左|正)?前方")
+
+
+def off_axis_gaze(text: str) -> str:
+    """C-07 / W38（11-04，ep01 S8 首尾帧 10 版里 7 版真看镜头）：静帧里“视线落在画面右前方 / 左前方 / 正前方”≈ 朝镜头（本剧环形灯架
+    就在相机位）→ 改成“画面右侧 / 左侧远处（与镜头方向错开）”；只改视线落点这一处，落点后面的物件原文保留"""
+    def _sub(m):
+        side = {"右": "右", "左": "左"}.get(m.group(2) or "", "右")
+        return f"{m.group(1)}画面{side}侧远处（与镜头方向错开）"
+    return _FRONT_GAZE.sub(_sub, text or "")
+
+
+def has_own_gaze(body: str, name: str) -> bool:
+    """剧本 img 原文给这个人写了视线落点（“X的视线落在 / 目光落在 / 眼睛看着 / 看向 …”）"""
+    return bool(re.search(re.escape(name) + r"[^，。；]{0,6}(视线|目光|眼睛|眼神)[^，。；]{0,12}(落在|看着|看向|盯着|望向|朝向)", body or ""))
+
+
+def two_shot_clause(n_people: int, subject: str | None, body: str | None = None, names: list | None = None) -> str:
     """K-REV-122 / 总调度第二轮：双人镜第二个人常不出脸 → 写清两人朝向（局部特写不加）。
     SCRIPT-RSI 11-01（K-REN-703 / D-SCR-07，项目方 18:2x“所有图片不要看镜头”）：原句“各自至少四分之三侧脸朝向镜头（… toward the camera）”
     让两人都对镜头（VIDEO-RCA：首帧看镜头 → 片头看镜头 49/54）。改成正向视线落点；Qwen Image cfg 1 负面不生效，不写“不看镜头”。
@@ -451,11 +468,17 @@ def two_shot_clause(n_people: int, subject: str | None) -> str:
     → 按 G0 有实测证据的优先，切回实测句 TWO_SHOT_TESTED（A/B 0/12）。"""
     if n_people < 2 or subject in ("part", "object"):
         return ""
+    # W38 / 总调度 11-04 03:3x 定 B：剧本已给每个露脸的人写了视线落点 → 不再加“互相看着对方”（与剧本“卓琳看刻度、祁念看灯架”
+    # 自相矛盾，ep01 S4 Q10 每版 action 不符）；保留实测有效的侧脸朝向 + 不看镜头（防对镜，K-REN-703），视线交给剧本原文
+    if body and names and len(names) >= 2 and all(has_own_gaze(body, n) for n in names):
+        return TWO_SHOT_OWN_GAZE
     return TWO_SHOT_TESTED
 
 
 TWO_SHOT_TESTED = ("两人同框，两张脸都清晰入画，两人以侧脸到四分之三侧脸互相看着对方，目光落在对方脸上，眼睛不看镜头"
                    "（both faces visible in profile to three-quarter view, each looking at the other person, eyes off the lens）")
+TWO_SHOT_OWN_GAZE = ("两人同框，两张脸都清晰入画，两人以侧脸到四分之三侧脸入画，各自的视线落在下面写的落点上，眼睛不看镜头"
+                     "（both faces visible in profile to three-quarter view, each gaze on its own target described below, eyes off the lens）")
 TWO_SHOT_POSITIVE = ("两人同框，两张脸都清晰入画，侧脸到四分之三侧脸，各自的视线落在画面里的人或物上"
                      "（both faces visible in profile to three-quarter view, each gaze resting on a person or object in the scene）")
 

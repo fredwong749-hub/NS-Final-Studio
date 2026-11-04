@@ -166,3 +166,13 @@ def test_4k_sop_in_config_and_never_gpu2():
     assert u["engine"] == "seedvr2_3b" and u["target"] == [2160, 3840] and "final" in u["only_when"]
     src = (ROOT / "services/post/ns_post/upscale4k.py").read_text(encoding="utf-8")
     assert re.search(r'GPUS\s*=\s*"3"', src)          # gpu33 GPU2 永不用
+
+
+def test_w38_apply_delta_keeps_reference_annotations():
+    """W38（ep01 S8）：replace 不改编译器参考图标注句（preflight I6 逐字核对），只改标注以外第一处；只在标注里出现 = 不改"""
+    note = "图3是祁念这一镜穿戴的服装：抹胸裙 + 黑色薄透丝袜 + 透明高跟，必须与图3完全一致（款式、颜色、材质、细节）。"
+    p = note + "近景构图，祁念穿黑色薄透丝袜站着，无字幕、无文字、无水印"
+    out = judge.apply_delta(p, {"replace": [["黑色薄透丝袜", "裸腿"]], "append": "脚部可见"})
+    assert out.startswith(note) and "祁念穿裸腿站着" in out and "脚部可见，无字幕" in out
+    only = judge.apply_delta(note + "近景构图", {"replace": [["黑色薄透丝袜", "裸腿"]]})
+    assert only == note + "近景构图"

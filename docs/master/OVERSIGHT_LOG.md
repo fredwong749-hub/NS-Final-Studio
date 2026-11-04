@@ -4,6 +4,418 @@
 
 ---
 
+## 11-04 ep01 冲刺 · 终审（W43 OVERSIGHT-F · Fable，task_9d1a583bc1ef）· 08:05–08:15 · 共 15 轮（02:27–07:52）+ 终审；全程只读、零写 data/、零重启、零花钱、未动 eval/
+
+### 1. 成片
+- **路径**：gpu36 `/root/work/fredw/offline_20261101/repo/data/episodes/series10_v2/ep01_v1.mp4`（sha256 971306c6…，38,443,849 B）；`ep01_v2.mp4`（07:59 第二次 finalize）**与 v1 同 sha、逐镜 timeline 相同** = 重复产物（P2-a）；`_work/ep01_PREVIEW_未完成_v1.mp4` 同 sha（工作文件名带"PREVIEW_未完成"，是 night 的工作命名，不是未完成）。
+- **实测（imageio_ffmpeg）**：45.04 s、1080×1920、24 fps / 1081 帧、h264 + aac 48 kHz，**无字幕流**；timeline：integrated −14.11 LUFS / true peak −3.86 dBTP、bgm disabled、subtitles=False、gates verdict=pass、missing_shots=[]。
+- **闸门**：gpu36 night.log 07:54:52 / 07:59:53 `HARD_RULES ep01 pass（1 条只记）`，只记项 = **L-092 合成实长 45.0 s 不在 60–120 s（剧本 64.0 s；剪辑修头尾所致）**；07:56/08:01 RETRO_ep01.md 已写并 done；gpu36 `sop_gate status`：**ep01 当前：完成，九阶段证据齐，复盘 done**。
+- **账本分叉（P1-a）**：gpu33 `sop_gate status` 仍 "ep01 当前：视频，0/11 镜有片段"（视频 takes 与成片只在 gpu36）；笔记本 `data/episodes/series10_v2/ep01_v1.mp4.part` 08:08 仅 3.5 MB/38 MB（W45 限速 50 KB/s 续推，约 12 分钟后落地）。"ep01 完成"目前只在 gpu36 为真；gpu33/笔记本要等 relay_pull + RETRO 同步后才能据此放 ep02。
+
+### 2. 每镜 adopt 的 take 与分数（gpu33 首/尾帧 takes.json 实读 08:0x；gpu36 视频 takes.json 实读 07:52）
+契约分 = postflight items 通过/不过/不适用/未测；身份 = Q10 人脸相似度；Q2 = 设定图 CLIP；R = L-183/185 待项目方复核（blocking_before_review）
+| 镜 | 首帧 | 尾帧 | 视频（当前版 → 成片段） |
+|---|---|---|---|
+| S1 | v2：10/0/4/0，卓琳 .683 / 祁念 .756 / 唐瑶 .60，Q2 .965 | v2：10/0/3/0 | v1（mot 变体）5.17 s，motion 1.39，视线离轴 → 段 3.468 s |
+| S2 | v2：9/0/4/1（1 未测），祁念 .573 / 唐瑶 .561，Q2 .961 | v2：9/0/3/1 | **v2 = _le6 裁切版 6.00 s**（原 alt 6.58 s，末帧 6.54 s 看镜头已裁掉；总调度 06:20 裁定）→ 段 4.0 s |
+| S3 | v1：9/0/4/0，江予白 .676，Q2 .956 | v2：9/0/3/1 | **v2 = _le6 6.00 s**（t3 6.58 s 原片曾被 legacy_save 抢当前，W46 06:46 改回）→ 段 4.0 s |
+| S4 | **v12 R[Q10]**：9/1/4/0，卓琳 .673 / 祁念 .841，Q2 .935（12 版 hard_cap 后 W38 approve + L-183） | v4：10/0/3/0 | v1 5.88 s（141 帧），motion 0.25，视线离轴 → 段 4.47 s |
+| S5 | v1：9/0/4/1，卓琳 .694 / 唐瑶 .615，Q2 .888 | **v8 R[QB]**：9/1/3/0 | v1 5.88 s，motion 0.83 → 段 5.25 s |
+| S6 | v3：8/0/5/1，卓琳 .861，Q2 .957 | v10：9/0/4/0（04:50 新口径第一张过） | v1 5.88 s，motion 1.12 → 段 5.88 s |
+| S7 | v3：10/0/4/0，江予白 .743 / 卓琳 .706，Q2 .897 | **v7 R[QB]**：9/1/3/0 | v1 5.88 s，motion 1.27，eye_contact ok → 段 3.0 s |
+| S8 | **v1 R[QB]**：8/1/5/0，祁念 .751，Q2 .976 | **无当前版**（10 版全部 Q9 真看镜头；L-185 尽力不阻断） | v1 5.88 s，motion 2.95，视线离轴 → 段 3.0 s |
+| S9 | **v8 R[QB]**：9/1/4/0，祁念 .713 / 江予白 .705，Q2 .904 | v3：10/0/3/0 | v1 5.88 s，motion 0.35 → 段 4.0 s |
+| S10 | v7：10/0/4/0，唐瑶 .791，Q2 .944（W42 asset_refs 修后 02:58 过） | v1：9/0/4/0 | v1 5.17 s（124 帧），motion 1.38，视线离轴 14/14 → 段 4.0 s |
+| S11 | v3：9/0/4/1，江予白 .772，Q2 .969 | **v1 R[QB]**：8/1/4/0 | v1 5.88 s，motion 0.80 → 段 4.0 s |
+
+### 3. 各镜时长核对
+- 源片（gpu36 active.video 实测）：S1/S10 5.17 s；S2/S3 6.00 s（裁切版）；S4–S9/S11 5.88 s（141 帧 cap_frames_c08）→ **11/11 ≤ 6.0 s**。
+- 成片段（timeline shots，duration_source=script）：3.468 / 4.0 / 4.0 / 4.47 / 5.25 / 5.88 / 3.0 / 3.0 / 4.0 / 4.0 / 4.0 = **45.04 s**，每段 ≤ 源片且 ≤ 6 s；每段一源一镜，无镜内切。
+- 过程中违规并已纠正：S2/S3 v1 原片 6.583 s（158 帧）05:04 出片并 05:20 登记为当前（第 9 轮查出）→ 05:57 trim_takes 换 _le6；S3 06:02 被 legacy_save 换回 6.58 s（第 13 轮查出）→ 06:46 改回 + hf-w46-04 register_takes 加 C08 守卫。
+
+### 4. 硬规矩逐条
+| 规矩 | 结论 | 证据 |
+|---|---|---|
+| 单镜 ≤ 6 s（C-08 / CLAUDE） | ✅ | §3；成片段最长 5.88 s |
+| 无字幕（C-06/07） | ✅ | 成片与 11 源片均无 subtitle 流；timeline subtitles=False；caption suspect=false ×9（S2/S3 裁切版沿用原结论） |
+| 不看镜头（C-07） | ✅（2 镜证据为推论） | 视频级 eye：视线离轴 ×9 + S7 eye_contact ok；**S2/S3 _le6 文件本身无视线分析**（S2 原片 0–6.4 s 未看镜头、6.54 s 末帧已裁掉——总调度裁定；S3 同法未单独复核；W38 rescore36 至终审未跑）→ P2-b |
+| At 只标切镜（L-141） | ✅（拼接层） | 11 段各一源，无镜内切；剧本 At 标记未在本任务范围内复核 |
+| 成人镜只等项目方 | ✅ | producer 01:43 起 adult_wait_owner 180 条、adult dispatch 0（gpu33）；gpu36 producer only=__none__ |
+| 不删文件 | ✅ | 迁移 18 件"只搬"、S2/S3 v1 原片保留、所有热修留 .bak |
+| 不碰 gpu33:2 / gpu36:2 | ✅ | 15 轮 nvidia-smi：gpu33 GPU2 15 MiB / gpu36 GPU2 18 MiB、0%；vidgen usable_lanes（hf-05）+ asset_worker exclude 都排除 :2 |
+| 没人改 eval/、没人 commit | ✅ | `git status eval/` 只有 eval/results/（冒烟产物）；HEAD 全程 e56e5e1 |
+| 热修走台账 + .bak | ✅（2 处瑕疵） | hf-01…17 + hf-w46-02/03/04 两台 sha 逐条核对一致；瑕疵：hf-16 build_jobs.py 条目 sha 为空（P2-c）、hf-w46-02 曾 1 小时未入账后补 |
+
+### 5. 期间 P0 / P1 与处置（按轮）
+| 轮 | 级别 | 发现 | 处置 / 结果 |
+|---|---|---|---|
+| 1 | P0 候选 | producer 02:30 被 POLICY_CANARY 暂停且 kind=canary 不自动恢复；触发它的 6 个 QB fail 来自未加载 accept.py 热修的旧 pid | 总调度 02:40 亲自 resume；W44 改 canary 按 code_sha/pid 计数（hf-11） |
+| 1–2 | P1 | hf-01 已落地但账本 pending、无批准记录；笔记本 accept.py 漂移 | 02:42 账本 applied + 批准人；后续热修都带批准口径 |
+| 2 | P1 | S9 refboard 板根本没生成（不是没推） | W38 03:1x 为 11 镜生成并推 |
+| 2–4 | P1 | ASSET-WORKER 借走 gpu33 两条道，ep01 只剩 1 道 | 总调度 03:4x 改 asset_worker exclude gpu33:*，资产作业落 gpu36:0/1 |
+| 3 | P1 | 笔记本 03:03 起 pytest 留孤儿树；03:36 又跑 | 总调度定口径（remote_pytest 交付后再在笔记本跑才算违规）；W45 remote_pytest 上线 |
+| 6 | P1 | 18 张 0 过 = QB 逐条把道具/方位/手势当硬条件 | L-182/183/184 三次放宽（尾帧→首帧→造型/场景行道具子句） |
+| 6 | P1 | 同一张图 Q10 count pass / QB count fail | hf-07 L-183c 人数只认 Q10 |
+| 7 | P1 | 新规则落地后无人重判、L-183 设当前未实现 | W38 reset + review-adopt CLI（hf-11）；06:01 六项落地 |
+| 9 | **P1（硬规矩）** | S2/S3 视频 6.583 s > 6 s，裁剪代码只在笔记本 | W46 clip_trim + cap_frames（hf-w46-02/03）、trim_takes 换版 |
+| 9 | P1 | Pika 与 8870 同卡 → score_infra 周期熔断 | W45 8870 固定 GPU1（05:1x） |
+| 12 | **P1（C-14 真泄漏）** | S1 视频 I10 被 V1 林晚"red nails"指甲锁拦 = V1 规则套到 V2 | hf-13 HC-07 按剧隔离 |
+| 13 | **P1（硬规矩回退）** | S3 当前版被 legacy_save 换回 6.58 s | W46 改回 t2 + hf-w46-04 register C08 守卫 |
+| 13 | P1 | S8 尾帧 10 版全看镜头 | 总调度 L-185：尾帧尽力不阻断视频 |
+| 14–15 | P1 | gpu36 复用通道 07:00 起 ~1 h backoff | 直连可通；回拉/取证改直连；netfix 待查 |
+| 多轮 | P1 | 两台重启排队长时间不执行（hf-11 / night） | 总调度查 restart_queue；05:38 / 05:55 / 07:28 / 07:36 陆续执行 |
+未报 P0（无泄漏到成片、无红线触碰、无假证据；最长无进展窗口 03:41–04:50 有真活动但 0 过图，按 P1 处理）。
+
+### 6. 待项目方复核清单（L-183 / L-185，账本 final=passed、takes review_needed=true）
+1. 首帧 S4 v12（Q10 不过：双人站位/视线细节；A2 两版用完）
+2. 首帧 S8 v1（QB：透明高跟未穿 → L-184 后只记）
+3. 首帧 S9 v8（QB：腕带非相机皮带等道具条）
+4. 尾帧 S5 v8（QB 道具条 + 唐瑶眼神）
+5. 尾帧 S7 v7（QB：相机皮带/相机包横杆）
+6. 尾帧 S11 v1（QB：左手拎包/握卡）
+另：S8 尾帧无当前版（L-185 尽力态）；S1 视频 mot 变体（v1"动作不足"重出）。
+
+### 7. 跨剧泄漏（C-14）结论
+- **数据面 ✅ 干净**：15 轮逐轮扫 gpu33 11 镜 active 指针（首/尾/视频 21 个）0 个指向 renders/ep01/、lin_wan、林晚；W41 01:56 摘掉的 7 个 V1 指针之后没有复发；W38 03:22 迁移 18 件（V1 前缀→series10_v2）V1 takes.json 0 引用、takes_before 备份在；成片 11 段全部来自 renders/series10_v2 与 video/clips/ep01。
+- **规则面 ⚠ 发现 1 处真泄漏并已修**：HC-07 指甲锁把 V1 林晚"透明水晶甲"的锁套到 V2 卓琳（标志物本就是鲜红色长指甲），拦住 S1 视频 7 个变体 2 小时；hf-13 按剧隔离（资产包剧不套 V1 条款）。建议把"V1 专属锁/口径"再扫一遍（HC-* 全部条款按剧隔离），进 BACKLOG。
+
+### 8. P2（不挡交付）
+a. ep01_v1 / v2 同 sha 重复 finalize；b. S2/S3 裁切版缺视线证据（rescore36 未跑）；c. hf-16 账本 build_jobs.py sha 空；d. timeline warnings 11 镜 "colour match skipped"；e. L-092 成片 45 s vs 剧本 64 s（只记，项目方应知）；f. 账本措辞 master_approve "总调度复核通过"易误读（已进 BACKLOG）。
+
+
+## 11-04 ep01 冲刺 第 15 轮 07:18–07:52（W43 OVERSIGHT-F · Fable；只读；gpu36 复用通道 07:00–07:5x 全程 backoff，本轮 gpu36 取证走一次性直连 ssh（ControlPath=none，同 rssh 退路口径）、gpu33 走复用主连接）
+
+### 视频 11/11 ✅ 逐镜实测（gpu36 takes.json active.video → 文件 → imageio_ffmpeg）
+| 镜 | 当前版 | 时长 | 字幕流 | 视线（postflight） |
+|---|---|---|---|---|
+| S1 | v1 | 5.17 s | 0 | 视线离轴 / eye_contact ok |
+| S2 | v2（_le6） | 6.00 s | 0 | —（裁切版沿用原门结论；总调度 06:20 裁定接受） |
+| S3 | v2（_le6） | 6.00 s | 0 | —（同上；已从 6.58 s 的 t3 改回 t2 ✅） |
+| S4 | v1 | 5.88 s | 0 | 视线离轴 / ok（首帧 v12 为 L-183 待复核版，hf-16 放行） |
+| S5 | v1 | 5.88 s | 0 | 视线离轴 / ok |
+| S6 | v1 | 5.88 s | 0 | 视线离轴 / ok |
+| S7 | v1 | 5.88 s | 0 | eye_contact ok |
+| S8 | v1 | 5.88 s | 0 | 视线离轴 / ok（L-185：尾帧尽力用尽放行） |
+| S9 | v1 | 5.88 s | 0 | 视线离轴 / ok |
+| S10 | v1 | 5.17 s | 0 | 视线离轴（14/14 采样） |
+| S11 | v1 | 5.88 s | 0 | 视线离轴 / ok |
+全部 ≤6.0 s ✅、无字幕流 ✅、11 镜 pf.ok=true ✅；S2/S3 的 _le6 版没有对裁切文件本身的视线分析（P2，rescore36 仍未补）。night.log：07:28 READY ep01=11 → **07:44:42 EP_RESOLVED ep01 11 镜 done** → 07:44:51 proxies 11/11 → 07:48 upscale（lanczos_unsharp）进行中 → 待拼接/硬规矩/finalize → `data/episodes/series10_v2/ep01_v1.mp4`（07:49 尚未出现；_partial 07:45 版 45.0 s 已有）。
+
+### gpu33 侧
+- hf-16（compiler c941de6f / framing 26c6d427）两台 OK；**账本 hf-16 的 build_jobs.py 条目 sha256_new_lf 为空**（P2 台账不全，gpu33 现 d141568f）。producer 07:36:50 重启（pid 605215，hf-17 编译器视线离轴）→ W38 07:38:45 reset last:S8 重给 3 次 → t8/t9 仍 Q9+QB（真看镜头）→ 07:46:18 best_effort。**S8 尾帧累计 10 版全部看镜头**，按 L-185 不阻断视频，尾帧留"尽力、待复核"。
+- 更正上轮 P1-39：W38 07:27 说明 S8 尾帧 06:13–06:22 确实出了 take 4–7（我按 producer 事件计数漏看了 redo 路径），"没在跑"不成立；撤回。
+- **C-14 ✅ 0**；**红线 ✅**：gpu33 GPU2 15 MiB、gpu36 GPU2 18 MiB（直连实读）；HEAD e56e5e1 无 commit；eval/ 未动；adult dispatch 0。
+- hf-w46-04（register_takes.py 5a12330b 含 C08 守卫、trim_takes 5d9329d9）gpu33 OK、.bak 在；gpu36 本轮未核 sha（直连次数控制）。
+
+### 发现
+- **P1-41 netfix**：gpu36 复用通道（cmd×4 / l0 / l1 / vqa）07:00 起持续 backoff 近 1 小时，监管进程重拉不成功；直连可通（W46 拉回循环与本轮取证都是直连）。整集 ep01_v1.mp4 回拉靠直连循环，可用但每次握手 20–40 s；要 netfix 线查跳板侧对 gpu36 的限制（gpu33 同跳板正常）。
+- **P2**：hf-16 账本 build_jobs.py 无 sha；S2/S3 _le6 视线证据缺。
+
+### 一句话
+ep01 真实阶段 = 视频 11/11 过闸登记、night 已 EP_RESOLVED（07:44）在升采样/拼接，整集预览 ep01_v1.mp4 预计数分钟内；最大卡点 = 无（等 finalize + 回拉）；谁在盯 = W46（拉回）、W38（finalize 硬规矩）、总调度。下轮若 ep01_v1.mp4 落地即做终审。
+
+
+## 11-04 ep01 冲刺 第 14 轮 06:58–07:08（W43 OVERSIGHT-F · Fable；只读，零写 data/；gpu36 自 ≈07:00 隧道全部 backoff，本轮 gpu36 侧只核到 07:00 前的一条 sha）
+
+### 总调度指定四项
+- **① S3 当前版 ≤6 s — 未能独立复核（gpu36 不可达）**：W46 06:46 报已 `P.set_active` 改回 t2（sha fdd5ee61，6.00 s），并查明 06:02 的 t3 不是 r24 而是 vidgen state chosen 换成 v1 变体 → `register_takes.register` 门过即 set_active、**不核时长**，且 trim 出的 _le6 与 t2 同 sha 被当重复跳过。两台"堵口"（register 前核 C08）是否已推：账本 06:47 后无新条，**未见 hf 记录**→ 下轮核 register_takes 代码与账本。
+- **② S1 登记 — 不是漏登记（W46 06:5x 查实，合理）**：vidgen 06:17:28 DONE → 06:19:18 SCORE "动作不足"（运动均值 0.377，gate pass=False）→ state retry、chosen=None；night 只登记 done+chosen 的片 → 失败片不进当前是对的。S1 下一变体排队。**本轮无法从 gpu36 读 state 复核。**
+- **③ S8 进视频 ✅（gpu33 实判）**：hf-15（sop_gate.py d96160ec）gpu33 与 gpu36（07:00 前 sha 已核 d96160ec）与笔记本一致；gpu33 `sop_gate.py status --run series10_v2` 实跑：**ep01 当前：视频，已过 …→出图检测→尾帧**（L-185 把 S8 尾帧尽力用尽视为可进视频）；"0/11 镜有片段" 是因为 gpu33 没有 gpu36 的 video takes（账以 gpu36 为准，W46 relay_pull 回拉后才显示）。
+- **④ hf 落地 ✅**：hf-15 两台 sha 一致、账本 applied（总调度授权口径）。gpu33 producer 仍 06:32 的 pid 591571，不需重启（sop_gate 由 producer 每单 import？——若 producer 进程内缓存了 sop_gate 模块，L-185 判定在 gpu33 要重启才生效；status 子命令是新进程所以实判是新代码。标 P2 待 W38 确认）。
+
+### 其它
+- **gpu33 06:41 后 0 事件**（inflight 0）：S8 尾帧 W38 说"仍在重出"，但 producer 无派单（best_effort 06:22 后没 uncap/reset）→ S8 尾帧后台续出**没有真的在跑**（P1-39，归 W38）。
+- **C-14 ✅ 0**（gpu33 11 镜 active 全 V2 前缀）；**红线 ✅**：gpu33 GPU2 15 MiB；gpu36 07:00 前 GPU2 18 MiB；HEAD e56e5e1 无 commit；eval/ 未动；adult dispatch 0。
+- **P1-40 netfix**：net_status 07:02 gpu36-cmd/cmd2/cmd3/cmd4/l0/l1/vqa 全部 backoff/connecting（base-a/b up、gpu33 正常），07:03–07:07 gpu36 主连接 socket 一个没回来；W38 06:3x 也提过"06:2x 跳板全断过"。gpu36 本机出片不受影响（Pika/night 都在本机），但笔记本侧 relay_pull / 部分预览回拉 / 我的复核全停；每镜视频 ≈6–8 min，整集拼好后 ep01_v1.mp4 回拉也走这条线。
+
+### 一句话
+ep01 真实阶段 = 视频阶段（sop_gate 两台实判"视频"；gpu36 已出 S1/S2/S3/S5/S6/S10 六条、登记 5 镜，S7 在渲、S4/S9/S11/S8 排队；S1 动作不足重出）；最大卡点 = gpu36 单道 Pika 吞吐（≈7 min/镜，剩 6 镜 ≈45 min）+ gpu36 隧道 07:00 起全断（回拉/复核停）；谁在修 = W46（register C08 堵口）、W38（S8 尾帧续出、L-185 producer 侧生效确认）、netfix 监管进程自动重连。
+
+
+## 11-04 ep01 冲刺 第 13 轮 06:36–06:41（W43 OVERSIGHT-F · Fable；只读，零写 data/；视频用 gpu36 venv imageio_ffmpeg 实测）
+
+### 总调度指定两项
+- **① S2 _le6 视线复核**：gpu36 S2 active.video=2 = video_002_pipeline_b8651713.mp4，实测 **6.00 s**、h264+aac、无字幕流；postflight 只有 C08 一项（"时长 6.000 s ≤ 6.0 s" pass）——**没有对 _le6 文件本身的视线分析**（trim_takes 登记时沿用原门结论）。按总调度裁定（末帧 6.54 s 看镜头、已裁掉）可接受；但 W38 06:14 起的 rescore36（视频级看图补测）日志仍为空、未跑，所以"_le6 版视线"目前只有推论、无直接证据。待 rescore36 跑完再核。
+- **② S3 第三条视频长度 ✗ 6.58 s，且已被设为当前版（硬规矩回退，P1-38）**：S3 takes.json：t2 = 05:57 trim_takes 登记的 6.00 s 版；**t3 = 06:02:16 `pipeline._save_takes legacy_save` 登记 video_003_pipeline_d3ea6bf1.mp4，实测 6.58 s（158 帧原片）**，active.video=3。即 trim 换版 5 分钟后 night/vidgen 把 r24 原片又登记了一版并抢了当前位——S3 现行当前版再次 >6 s。W46 的"trim 接力"（hf-w46-03）没拦住这条 legacy_save 路径。要 W46：①把 S3 当前版改回 t2（或对 t3 再 trim 登记 t4）；②堵住 legacy_save 不经 C08 检查就设当前的口子（night 重启后 S5/S6 出的是 5.88 s，说明新片没问题，问题只在旧片重登记）。
+
+### 其它复核
+- **新视频 ✅ 长度都合规**：ep01-S1__v1（06:17，5.17 s）、ep01-S5__v1（06:27，5.88 s = 141 帧，cap_frames_c08 生效）、ep01-S6__v1（06:34，5.88 s）；S5 已登记 active.video=1，**S1 出片 20 分钟仍未登记进 takes.json（active.video None）**、S6 刚出待登记。
+- gpu36：night/producer 06:16:40 进程，vidgen 364985（06:08）在途，8870 空闲卸载 loaded=false（hf-12 后按需回载，正常），GPU0 100%（Pika 在出下一条）。
+- gpu33：producer **06:32:26 重启（pid 591571）→ hf-14（L-184）两台都进进程 ✅**。
+- **S8 尾帧仍缺**：06:13 插队重出 2 版 redo_fail（Q9 真看镜头）→ 06:22:54 best_effort，无 Q1–Q9 全过版可 review-adopt → S8 尾帧 0 当前版；视频 S8 不受影响（L-088 只用首帧），但 sop_gate"尾帧"阶段按镜要过，整集会卡在 S8。需要总调度定：S8 尾帧是否按 L-183 口径"视线项"放宽一次，或接受 S8 无尾帧进视频。
+- **C-14 ✅ 0**；**红线 ✅**：gpu33 GPU2 15 MiB、gpu36 GPU2 18 MiB；HEAD e56e5e1；eval/ 未动；adult dispatch 0。
+- 部分预览仍 05:24 版（未按新视频重拼；partial_preview 循环是否还在要 W46 看）。
+
+### 一句话
+ep01 真实阶段 = 视频阶段（正式视频已出 6 条：S1/S2/S3/S5/S6/S10，登记 4 镜：S2/S3/S5/S10；首帧 11/11、尾帧 10/11 缺 S8）；最大卡点 = S3 当前版被旧片重登记回 6.58 s（硬规矩回退）+ S1 出片未登记 + S8 尾帧无法过（真看镜头）；谁在修 = W46（S3 当前版/legacy_save 口子/登记）、W38（S8 尾帧口径、rescore36）。
+
+
+## 11-04 ep01 冲刺 第 12 轮 06:16–06:20（W43 OVERSIGHT-F · Fable；只读，零写 data/）
+
+### 复核（出处）
+- **review-adopt（L-183）✅ 已执行且账本同口径**：gpu33 takes.json active：S4 image12(R) / S8 image1(R) / S9 image8(R) / S5 last8(R) / S7 last7(R) / S11 last1(R)，R = postflight.review_needed=true；W38 06:01 还把 review-adopt CLI 改成同时写账本 final=passed（否则尾帧不派）。→ **首帧 11/11 有当前版（3 镜待项目方复核）、尾帧 10/11（S8 缺；S5/S7/S11 待复核；S9 last v3 06:13 过）**。
+- **hf-13 / hf-14 两台落盘 ✅**：gen_contract/accept.py f0c91fc1（W42 L-184）、preflight.py 74fd7dd4、hard_constraints.py a4a09472 两台一致、.bak 在。gpu36 producer+night 06:16:40 已重启（hf-14 在进程）；**gpu33 producer 仍 05:55 的 pid 563810**（hf-14 重启排队中）→ gpu33 侧 L-184 还没进程。
+- **8870 → GPU1 ✅**：gpu36 `vqa/server.py` 新 pid 363351（06:06:42），health `gpu=1 loaded=true queue=0`；GPU0 现只剩 Pika/comfy。W45 完成。score_infra 06:06:31 一次（last:S9 t3，W38 定为 lan 断连）后无。
+- **S1 视频 I10 ✅ 根因是串剧**：W38 查实 HC-07 的"red nails"锁来自 V1 林晚（C-14 串剧条款），V2 卓琳本就是"鲜红色长指甲"；hf-13 按剧隔离后 06:11:10 vidgen SUBMIT S1 v1（gpu36:0，vidgen pid 364985 在途），06:18 尚未出片。这条是**真 C-14 泄漏**（V1 规则套到 V2 判定），已修；记入终审。
+- **视频**：gpu36 active.video S2=2（6.00 s）/ S3=3（新第 3 版，待核时长）/ S10=1；S1 在途；S4/S6 没进 jobs（等 night 重启后签名修复——06:16:40 night 已重启，下一拍应进）；clips/ 7 个 mp4；部分预览仍 05:24 版。
+- **尾帧 S8**：t1–t3 真看镜头 → 06:08 best_effort 无 Q1–Q9 全过版 → W38 06:13 `master_reject --n 0` 插队重出 2 版并改视线词；在途。
+- **C-14 ✅ 0**（11 镜 active 全 V2 前缀）；**红线 ✅**：gpu33 GPU2 15 MiB、gpu36 GPU2 18 MiB；HEAD e56e5e1 无 commit；eval/ 未动；adult dispatch 0。
+
+### 发现
+- **P1-37**：gpu33 producer 还没为 hf-14 重启（排队），L-184 在 gpu33 侧未生效；但本轮已无对象等它（S5/S7/S8 都走了 review-adopt），影响降为"以后新出图的判定口径两台不一致"，重启后消。
+- **P2**：S3 video 第 3 版是什么（r24 变体重登记？）、时长是否 ≤6 s，下轮核；S2 alt 视频"eye_contact 标 defect 但证据否定"的矛盾口径（W38 05:59 提到）仍未定，视频级 Q9 的判定可信度要 W38 给口径。
+- **待项目方复核清单（L-183，累计 6 项）**：first S4 v12 / S8 v1 / S9 v8；last S5 v8 / S7 v7 / S11 v1。
+
+### 一句话
+ep01 真实阶段 = 视频阶段推进中（首帧 11/11、尾帧 10/11、正式视频 3/11 + S1 在途；6 项待项目方复核）；最大卡点 = 视频吞吐（gpu36 单道 Pika，每条 ≈8 min；S4/S6/S5/S7/S9/S11 待 night 排队）+ S8 尾帧重出；谁在修 = W38（S8、视频级看图补测）、W46（night/jobs）、gpu33 hf-14 重启排队。
+
+
+## 11-04 ep01 冲刺 第 11 轮 05:56–06:02（W43 OVERSIGHT-F · Fable；只读，零写 data/）
+
+### 总调度指定四项
+- **① 两台重启 ✅ 都执行了**：gpu36 producer 349746 + night 349748 = 05:38:08 JST 起（我 05:38:05 那次探针恰在重启前 2 秒，上一轮"未重启"已过期）；gpu33 producer 05:52:28/05:53:53 两次排空 → 05:55:30 新 pid 563810 → 05:56:59 resume（有记录）。hf-11（producer.py d5b2b202，review_adopt ×6 处）与 hf-12（vqa/client.py bc160809，两台 sha 一致）已进进程。
+- **② review_adopt 把 S9/S11 设当前 ✗ 还没有**：05:57 后 gpu33 0 事件、inflight 0；S8/S9 active 仍空，S5/S7/S11 仍只有首帧。总调度 05:57 已令 W38 对 S9/S11/S5/S7/S8 跑 review-adopt，06:00 未见执行。
+- **③ _le6 换版 ✅**：gpu36 `trim_takes.py` 05:57:21/22 把 S2/S3 各登记 video 第 2 版（video_001_*_le6.mp4，ffmpeg 实测 **6.00 s**，h264 单视频流无字幕）并设 active.video=2；v1（6.58 s）保留不删。附带好处：W38 05:59 对 S2 alt 逐帧视线复核，只有最后一帧（≈6.54 s）"左女直视镜头"，裁到 6.00 s 后那帧已不在片内 → C-06 不看镜头 ✓。S10 5.17 s 不动。注意 takes.json 第 2 版的 frames 字段仍写 158（继承的元数据，文件实为 144 帧），审片工具若按 frames 算时长会错（P2）。
+- **④ 8870 gpu=1 ✗**：gpu36 8870 health 仍 `gpu=0`（GPU0 19.3 GB 与 Pika 同卡，GPU1 11.5 GB 闲）；W45 要等 Pika 空档重启，未完成。score_infra 05:24 后仍 0 次。
+
+### 其它复核
+- **hf-w46-02 / 03 已补入 hotfix_ledger ✅**（grep hf-w46 现有记录；上轮 P2 已消）：trim_takes.py 2fc2d0e5 新、night.py aa31db3a（trim 接力 + 尾帧签名）、vidgen.py f6a93e0d（first_take_first）两台落盘，gpu36 vidgen 05:58 重起 pid 357106 已加载；但 **night 05:38 的进程早于 hf-w46-03**，night.py 新逻辑（S4/S6 进 jobs 的就绪签名修复、trim 自动接力）要再排一次 night-only 重启。
+- **S1 视频为何一直没出（W46 05:58 查实）**：jobs.json 里 S1 七个变体 preflight 全 ok=False —— I10"剧情改变了已锁定角色的外貌锚点：['red nails']"（HC-07），vidgen 不提交；要改 S1 提示词（去红指甲或等效动作）。三条"可进视频"的镜里 S1 实际从未可派，归 W38/写手。
+- **C-14 ✅ 0**；**红线 ✅**：gpu33 GPU2 15 MiB、gpu36 GPU2 18 MiB；HEAD e56e5e1；eval/ 未动；adult dispatch 0。
+- 部分预览仍是 05:24 那版（S2/S3 换 _le6 后未重拼，等 partial_preview 下一拍）。
+
+### 发现
+- **P1-34**：review-adopt 五镜（S9/S11/S5/S7/S8）总调度 05:57 已令、06:00 未执行，ep01 仍只有 3 镜可进视频；这是现在进整集预览的唯一路径（L-183）。
+- **P1-35**：S1 I10 红指甲锚点冲突 → S1 视频 0 变体可派，需要改词；不改则 S1 永远进不了视频。
+- **P1-36**：gpu36 night 需再重启一次才加载 hf-w46-03（S4/S6 就绪签名修复），否则 S4/S6 的视频作业进不了 jobs。
+- **P2**：_le6 第 2 版 takes.json frames=158 元数据不实（文件 144 帧 6.00 s）。
+
+### 一句话
+ep01 真实阶段 = 视频阶段（正式视频 3/11 且 S2/S3 已换 ≤6 s 版、S10 5.17 s；首帧 9/11、尾帧 6/11；部分预览 v1）；最大卡点 = 五镜 review-adopt 未执行（无法扩到 11 镜进视频）+ S1 I10 锚点冲突 + gpu36 night 待再重启加载 hf-w46-03 + 8870 仍与 Pika 同卡；谁在修 = W38（review-adopt、S1 改词）、W46（night 重启）、W45（8870 → GPU1）。
+
+
+## 11-04 ep01 冲刺 第 10 轮 05:36–05:42（W43 OVERSIGHT-F · Fable；只读，零写 data/）
+
+### 总调度指定四项
+- **① 片长 / S2 S3 登记 — 裁剪代码两台落盘 ✅、进程未加载 ✗、S2/S3 超长片已被登记 ✗**：gpu36 与 gpu33 night.py 都已是 e6bed63c（SHOT_MAX_S ×2）、clip_trim.py 24890d59 在、.bak-hf-w46-02 在；但 **gpu36 night 进程仍是 04:38 的 pid 296433、producer 296431 也未重启**（hf-11 重启排队 e2549e58bad6 未执行）→ 新逻辑没加载、clips/ 下没有任何 *_le6.mp4。同时 gpu36 takes.json：**S2 active.video=1（video_001_pipeline_65244543.mp4，158 帧）、S3 active.video=1（b725afb5，158 帧）postflight ok=true** — 即 6.58 s 的原片在裁剪落地前已登记为当前版（总调度 05:23 定"落地前 night 不得登记 >6 s；已登记则 reject 重出"）。S10 124 帧 ✓。
+- **② L-184 — 仍无代码**：两台 gen_contract/accept.py 仍 965b121e（hf-07），笔记本 f0c91fc1 含 "L-184" ×2（W42 在写，未推、未入账本）。S5/S7 尾帧、S8 首帧未重判。
+- **③ 车道 — score_infra 05:24 后 0 次 ✅；但 8870 在 GPU0 不是 GPU1**：gpu36 8870 health `loaded=true gpu=0 queue=0 served 705`；GPU0 19.3 GB（Pika + 看图同卡）、GPU1 11.5 GB 0%（被 hold 闲置）。现在不争是因为 Pika 刚好空闲；下一条视频提交时又会同卡。`control_gpu36.json` 我按猜的路径没读到 hold（W46 说写在 video/night_control.json + control_gpu36.json，05:20 LANE_POLICY hold=gpu36:1 已生效），以 W46/W38 的日志为准。
+- **④ S4 措辞**：W38 05:28 解释"总调度复核通过替换版"是 master_approve 内置 set_active 审计文案、approve note 写的是"待项目方复核（L-183）"，takes.json review_needed=true ✓ — 可接受，但那条内置文案以后会继续误导，建议改。
+
+### 其它复核
+- **S4 尾帧 t4 过 ✅**（gpu33 active last=4）→ 尾帧 6/11（S1/S2/S3/S4/S6/S10）；首帧 9/11（缺 S8/S9）。
+- **S9 解封后仍不过**：t8/t9 Q10+QB fail → 05:28:49 best_effort（I4 鞋参考已不再挡 ✓，hf-09 有效；现在是内容）。**last:S11 再 3 版 QB fail → 05:28:00 hard_cap**（累计 16 版）。S8 未动。gpu33 producer 05:38 inflight 0：剩余对象又全在终态。
+- **部分预览 ✅ 硬规矩**：gpu36 `_partial/ep01_preview_partial_0524.mp4` 59.0 s、1080×1920、h264 + aac、**无字幕流**（.srt 是旁路文件、只给预览看镜号）；真镜 S2/S3/S10 各上屏 4.0 s（合成时裁的）。C-14：预览只读 series10_v2 账。
+- **红线 ✅**：gpu33 GPU2 15 MiB、gpu36 GPU2 18 MiB；HEAD e56e5e1；eval/ 未动；adult dispatch 0；C-14 11 镜 active 0 泄漏。
+- **账本缺口（P2）**：W46 的 hf-w46-02（compiler/clip_trim/night/dejudder/ffprobe_shim 五文件两台）**没有写进 data/system_versions/hotfix_ledger.jsonl**（grep hf-w46 = 0），只在 V2_LIVE；hf-11 有账。
+
+### 发现
+- **P1-31**：S2/S3 6.58 s 原片已登记为 active.video —— 按总调度 05:23 口径应 reject 重出（或由裁剪在合成时兜底，但 takes.json 的"当前版"仍是超长片，审片/复盘会按它算）。归 W46。
+- **P1-32**：两台 producer（hf-11 review_adopt / video_takeover）与 gpu36 night（裁剪）都只落盘未重启，排队 15 分钟+；重启前 L-183 自动设当前、≤6 s 裁剪都不生效。
+- **P1-33**：剩余 5 个对象（S8/S9 首帧、S5/S7/S11 尾帧）全部再度终态，producer 空转；L-184 不落地它们不会动。
+
+### 一句话
+ep01 真实阶段 = 视频阶段（正式视频 3/11 登记：S2/S3/S10，其中 S2/S3 超长待 reject 或裁剪；部分预览 v1 59 s 已出；首帧 9/11、尾帧 6/11）；最大卡点 = 两台重启排队未执行（裁剪/review_adopt 不生效）+ L-184 代码未推 + 5 个对象终态；谁在修 = W46（night 重启 + S2/S3）、W42（L-184）、W38（重启队列 + S8/S9/S11）。
+
+
+## 11-04 ep01 冲刺 第 9 轮 05:16–05:24（W43 OVERSIGHT-F · Fable；只读，零写 data/；视频用 gpu36 venv 的 cv2 + imageio_ffmpeg 实测）
+
+### 总调度指定三项
+- **① gpu36 第一批 mp4 硬规矩（实测）**：
+  | 片 | 文件 | 帧/fps | 时长 | 字幕流 | 不看镜头 | 结论 |
+  |---|---|---|---|---|---|---|
+  | S2 v1 | video/clips/ep01/ep01-S2__v1_s1195444633.mp4（4.97 MB） | 158 @24 | **6.583 s** | 无（只有 h264 + aac） | 未测（未登记） | **>6 s 违 C-08/CLAUDE"单镜 ≤6 秒"** |
+  | S3 v1 | ep01-S3__v1_s3786420798.mp4（2.57 MB） | 158 @24 | **6.583 s** | 无 | 未测 | **>6 s** |
+  | S10 v1 | ep01-S10__v1_s4109283544.mp4 = renders/…/S10/takes/video_001_pipeline_429943b8.mp4 | 124 @24 | 5.167 s ✓ | 无 ✓ | ✓ eye：status"视线离轴"、measured 14/14、ratio 0.14；caption suspect=false | **全过**，takes.json active.video=1、postflight ok=true reasons=[] ✓ |
+  S10 是 ep01 **第一条过硬规矩并登记的正式视频**。S2/S3 还没登记进 takes.json（night 下一拍）；**W46 05:1x 的"进合成前单镜裁到 ≤6.0 s"（night.py:357 / SHOT_MAX_S=6.0）只在笔记本树（night.py e6bed63c），gpu36 与 gpu33 的 night.py 都是 15b7936f、grep SHOT_MAX_S=0** → 现在 gpu36 night 登记 S2/S3 时没有 ≤6 s 闸门，裁剪也不会发生；W38 说 S2/S3 是 Pika 79 帧@12 fps 的输出（实际文件 158 帧@24）。S10 是 124 帧——同一引擎两种长度，要问 vidgen 的 frames 参数为什么不一致。
+  At 只标切镜（L-141）：单镜片内无切镜，不适用；整集拼接时再核。
+- **② L-184 落地后 S5/S7 尾帧、S8 首帧结论 — L-184 代码未落地**：gpu33/gpu36 gen_contract/accept.py 仍 hf-07 版 965b121e（grep L-184 = 0）；笔记本 accept.py 已变成 b4c65f88 但也 grep L-184 = 0（可能还在写）；账本 hf-10 之后无新条。W38 05:07:02 `reset_best_effort n=0`（"L-182/L-184 尾帧口径"）实际 0 个对象被重置：last:S5 / last:S7 attempts 仍 tries=3 final=best_effort、S8 仍 best_effort → **三镜都没按 L-184 重判**。last:S11 05:05:02 uncap n=3 ✓（tries 0，等派）；last:S4 t1 05:06:47 fail（Q1 身份 + Q6 景别 + Q9 + QB）。
+- **③ S4 是否已设当前 ✅**：05:04:44 `master_approve first:ep01-S4 t12 by=W38` → ledger_sync "当前换成 v12；总调度复核通过"，takes.json active image=12、postflight review_needed=true（REVIEW 标记在）；05:19 L-142 系统代选也指到 v12。措辞提醒：L-183 写的是"待项目方复核"，ledger_sync 写成"总调度复核通过"，账面上别把项目方复核算成已过。
+
+### 其它复核
+- producer 05:08:42 重启（pid 544339，排空/恢复有记录）→ hf-09 生效；05:09:50 `retry first:ep01-S9 by=W38`（blocked_until 0）✓ S9 解封，首帧在出（t8 待分）。
+- **score_infra 又来 2 次（05:0x–05:1x）**：原因 = W38 05:10 报的 gpu36 显存争用——Pika 占 GPU0 23.7 GB + GPU1，8870 看图加载不了（05:17 已回 loaded=true queue 6→1）。只要 Pika 和看图共卡，gpu33 出图检测就会周期性 score_infra；唯一空卡是红线 gpu36:2，**不能用**——车道分配要总调度定（例：Pika 只占 gpu36:1，8870 固定 gpu36:0）。
+- **C-14 ✅ 0**（11 镜 active 全 V2 前缀，S10 video 文件也在 renders/series10_v2/）；**红线 ✅**：gpu33 GPU2 15 MiB、gpu36 GPU2 18 MiB、Pika 没碰 :2；HEAD e56e5e1 无 commit；eval/ 未动；adult dispatch 0。
+- gpu36 partial_preview（pid 320677）跑着但 _partial/ 仍无产物（需 ≥3 镜 active.video，现 1）。
+
+### 发现
+- **P1-28（硬规矩，急）**：S2/S3 片 6.583 s > 6 s，且 ≤6 s 裁剪/闸门代码未上 gpu36 → night 登记时会把超长片设为 active.video。要 W46/W38 先把 night.py 的 SHOT_MAX_S 裁剪推到 gpu36（走热修台账）再让 night 登记，或登记前先 reject 这两条重出 ≤6 s（查 vidgen frames 参数为何 S2/S3=158、S10=124）。
+- **P1-29**：L-184 已定 20 分钟仍无代码、无账本，S5/S7/S8 等它；W38 05:07 的 reset n=0 是空操作，要在 L-184 热推 + 重启后再 reset 这三镜。
+- **P1-30**：gpu36 Pika 与看图共卡 → score_infra 周期性熔断；车道归总调度定。
+
+### 一句话
+ep01 真实阶段 = 视频阶段已开（正式视频 1/11：S10 全过硬规矩；S2/S3 已出片但 6.58 s 超长待处理；首帧 9/11 缺 S8/S9；尾帧 5/11）；最大卡点 = ≤6 s 裁剪未部署 gpu36 + L-184 未落地 + Pika/看图共卡；谁在修 = W46/W38（night 裁剪热推）、W38（L-184 热修 + reset S5/S7/S8）、总调度（gpu36 车道）。
+
+
+## 11-04 ep01 冲刺 第 8 轮 04:56–05:02（W43 OVERSIGHT-F · Fable；只读，零写 data/）
+
+### 总调度指定三项
+- **① reset 后重判（L-182/183 口径）— 有 1 过、其余照旧**：W38 04:46:41 `reset_best_effort n=6 by=W38`（写明 L-182/183 口径）→ 04:46–04:56 派 9 单（gpu33:0 ×6 / :1 ×2 / :3 ×1）出 10 张：**last:ep01-S6 t10 passed（04:50:18）= 03:41 以来第一张新过图**，S6 尾帧已设当前（active last=10）。其余：last:S5 t8/t9 fail（t9：Q9 真看镜头"唐瑶左眼珠朝向镜头"+ QB）、last:S7 t8/t9 fail（t9：Q9 pass，**只剩 QB**）、first:S4 t12 Q10 fail → **hard_cap 04:51:42**（12 版）、first:S8 t7/t8 redo_fail（Q9 真看镜头"（重问）眼睛和瞳孔正对镜头"= 视线改词没起作用）→ best_effort；last:S11 **hard_cap 04:46:57**（reset 后没重出，24 h 硬上限先挡）。04:56:12 起 producer inflight 0 又空转。
+  - **L-182/183 代码口径比决定窄（P1-27，根因）**：笔记本/gpu33 `gen_contract/accept.py description_record_only` 只把共用验收里**"与分镜描述一致"那一条**（DESC_PREFIX）标 record_only，docstring 明写"其余各条（人数 / 造型 / 场景 / 景别 / 文字 / 手指）照样判"。而 S7 尾帧 t9（04:54 新口径下出的）QB 挂的是**看图第 2 条（造型行里的"两圈黑色相机皮带"→ 画面是腕带）和第 4 条（场景行里的"相机包在灯架横杆上"→ 画面没相机）**；S5 尾帧 t9 挂第 4 条（场景行"落地风机、环形灯架"没画）；S8 首帧挂第 2 条（造型行"透明尖头细高跟"没穿）。即**道具/配饰细节散在"造型"和"场景"两行里，不在"分镜描述"那一条**，所以 L-182/183 对这几镜等于没放宽。要么把造型行的配饰子句（皮带/鞋/腕带）与场景行的道具子句（风机/灯架/相机包）也归 record_only（身份、主服装、人数、看镜头、文字仍阻断），要么改设定图/提示词别写这些细节——这是创作口径，请总调度定。
+  - **S4 t12 = Q1–Q9 + QB 全 pass、只 Q10 fail**，正是 L-183"用尽取 Q1–Q9 全过最高分版设当前并标待复核"的对象，但 05:00 S4 active 仍空：producer.py gpu33 仍 99eb1abe（grep L-183 = 0），04:59 重启也还没发生（pid 474359 自 04:29）。总调度 04:42 说"仍不过的用 producer approve 手工设当前" — 未见执行。
+- **② gpu36 第一条 mp4 — 在出、未出**：gpu36 `vidgen.py run gpu36 --run series10_v2` pid 304514 04:52 起（已 400 s+），comfy 8188/8189 各 23 GB、GPU0/1 100%；ep01 11 目录 + S1/S2/S10 takes.json 当前版都在（04:4x 总调度更正属实，我 04:40 看时 relay 未完）；两台 + data/episodes 05:00 仍 0 mp4；night_state/night.log 在 gpu36 生产库里没找到（find data 无 night_state*.json）。
+- **③ hf-09 后 S9 retry — 未发生**：04:59 重启没到（05:00:50 仍 pid 474359），S9 blocked_until ≈10:14 不变，04:56 后 0 事件。
+
+### 其它
+- **C-14 ✅ 0**（11 镜 active 全 V2 前缀）；**红线 ✅**：gpu33 GPU2 15 MiB、gpu36 GPU2 18 MiB；HEAD e56e5e1；eval/ 未动；adult dispatch 0；笔记本无 pytest/arch_scan（只有 remote_pytest 调度器）。
+- **硬规矩**：仍 0 正式视频；gpu36 出第一条后下轮 ffprobe 核 ≤6 s / 无字幕流 / 不看镜头（Q9）。
+
+### 一句话
+ep01 真实阶段 = 出图收尾 + 视频开出（首帧 8/11 缺 S4/S8/S9；尾帧 5/11：S1/S2/S3/S6/S10；gpu36 视频在渲染、0 成品）；最大卡点 = L-182/183 代码只豁免"分镜描述"一条、造型/场景行里的道具子句仍阻断（S5/S7/S11 尾帧、S8 首帧）+ S4 已满足 L-183 却无人设当前 + 04:59 重启未发生；谁在修 = W38（重启、S9 retry、approve S4）、口径扩不扩归总调度。
+
+
+## 11-04 ep01 冲刺 第 7 轮 04:36–04:44（W43 OVERSIGHT-F · Fable；只读，零写 data/）
+
+### 总调度指定三项
+- **① L-182/L-183 是否真落地 — 代码落地 ✅、效果 ✗ 还没发生**：gpu33 hf-07（gen_contract/accept.py 965b121e + tools/vqa/accept.py 948846b2）/ hf-08（sop_gate 598319c4）/ hf-09（tools/assetmaster/frames_v2.py b12bed3b）sha 与账本一致、.bak 各在；producer 04:28:49 排空 → 04:29:23 新 pid 474359 → hf-07/08 生效（hf-09 等 04:59 重启）。笔记本 accept.py:100/111/238 确有 L-183 c（人数只认 Q10 count）与 L-183 描述条只记录。**但 04:29 重启后到 04:36:49 producer 0 派单、inflight/scoring 0**：7 个对象（first S4/S8/S9，last S5/S6/S7/S11）attempts 仍 `final=best_effort`、`be_basis.rule=d1302dd91f2cbc74` 没变 → K-OPS-E11"规则变了自动重置"没触发（be_basis 的 rule 指纹不含 accept.py），**没有任何一张图被按新规则重判**，所以"S5/S6/S7 尾帧是否过"= 还没判。takes.json 里 record_only=true 大量存在，但那是 Q9 na 旧字段，不能当 L-182 生效证据。L-183 的"best_effort 用尽取 Q1–Q9 全过最高分版设当前并标待复核"在 producer.py 没有实现（gpu33 producer.py 仍 99eb1abe；笔记本 producer.py grep 'L-183/待复核' = 0）→ S4/S8/尾帧四镜不会自动设当前。
+- **② S9 是否提前放回 ✗ 未放**：S9 blocked_until 仍 1793754848（≈10:14 JST），W38 04:36 说 hf-09 "04:59 后重启生效，然后 retry"——合理，但到 04:59 前 S9 不动。
+- **③ gpu36 热修同步 ✅ 完成且已重启**：gpu36 九文件 sha（sop_gate 598319c4 / gen_contract/accept 965b121e / asset_refs 521242fb / vqa.json 1a353b1d / judge bea9d7c3 / tools/vqa/accept 948846b2 / compiler 9c33ddf5 / framing 23ebab84 / frames_v2 b12bed3b）与账本 hf-sync36 + hf-07/08/09 全一致；gpu36 producer + night 04:38:12 JST 起（restart_queue 345ee26c81ac 已执行）。
+
+### 视频线
+- gpu36 `data/renders/series10_v2/ep01/` 只有 S7 目录、没有 S1 takes.json → **W46 relay 还没把 S1/S2/S10 送到 gpu36**，night 04:38 起了但无料可做；两台 + data/episodes 都 0 个 mp4；W46 partial_preview 循环在 gpu33（pid 474291）但 _partial/ 目录还没产生（需 ≥3 镜 active.video）。gpu33 night（pid 474361）仍在、策略 yield。
+- **C-14 ✅ 0**；**红线 ✅**：gpu33 GPU2 15 MiB、gpu36 GPU2 18 MiB；HEAD e56e5e1；eval/ 未动；adult dispatch 0；笔记本 04:34 跑的是 tools/qa/remote_pytest.py（W45 远程跑测，合规）。
+- **硬规矩**：0 正式视频，不适用。
+
+### 发现
+- **P1-25（本轮最要紧）**：L-182/183 热修已在进程里，但 7 个终态对象没人重判也没人 reset，producer 空转 7 分钟 +；ep01 自 03:41 起 0 张新过图（63 分钟）。要 W38：hf-07 后立即 `reset-best-effort` S5/S6/S7/S11 尾帧 + S4/S8 首帧（或 rescore 现有最好一版），并把 L-183 的"取最高分版设当前并标待复核"落成代码或由总调度手工设当前；否则 L-183 等于没定。
+- **P1-26**：relay 未到位 → gpu36 night 空转；S1/S2/S10 三镜本可立即进视频。归 W46。
+- **P2**：W38 04:36 "S8 近景无脚部 zone，'未穿透明高跟'来自描述条，L-183 后只记录"——但 S8 的真阻断是 Q9 看镜头 ×3，改词那条（总调度 04:2x 派）还没见回报。
+
+### 一句话
+ep01 真实阶段 = 出图收尾（首帧 8/11、尾帧 4/11、0 视频；63 分钟 0 张新过图）；最大卡点 = 新规则落地后没人触发重判/设当前（7 对象原地 best_effort、producer 空转）+ relay 未把 S1/S2/S10 送到 gpu36；谁在修 = W38（应 reset/重判，04:59 重启后 retry S9）、W46（relay）。
+
+
+## 11-04 ep01 冲刺 第 6 轮 04:16–04:24（W43 OVERSIGHT-F · Fable；只读，零写 data/）
+
+### 复核（出处）
+- **W38 04:05 解终态 ✅ 都做了、都署名有原因**：gpu33 log 03:58:43 `uncap first:ep01-S4 by=W38 n=2`、`retry first:ep01-S8 by=W38`、04:01:46 `reset_best_effort n=5 by=W38`（S9 + last S5/S6/S7，原因写明 hf-04/hf-06），last:S11 `master_reject` → `redo_fail ×2` → `redo_escalate`。三条道都用上了（03:58–04:17 派 19 单：gpu33:0 ×14 / :1 ×4 / :3 ×1，inflight 3）。
+- **结果 ✗ 18 张 0 过**（03:58–04:17 rendered 18、content_fail 10、best_effort 3、passed 0）：S4 t11 尽力（Q2 卓琳单品 clip 0.736<0.8 + QB 椅子左后/右后不符）；S8 t2–t4 → 04:15 尽力（**Q9 真看镜头**"瞳孔未偏右正对镜头"+ QB"未穿透明尖头细高跟"）；S9 t6/t7 Q2"鞋可见但没有测鞋"+ QB 腕带非相机皮带 → **04:14:08 preflight_block I4"鞋在画面里可见，但参考里没有鞋的单品图"，blocked_until ≈ 10:14 JST（6 小时）**；last S5/S6/S7 各两版再 fail（Q10 动作/位置细节 + QB 逐条：没风机/没环形灯架、手没悬在邀请卡上方半寸、左肘没撑横杆、"两圈相机皮带"是腕带…）；last:S11 插队 2 版同样原因 fail。
+- **判定：不是误判，是"提示词逐条细节 vs 出图模型可画性"的系统性墙**——QB 看图逐条把分镜每个道具/方位/手势都当硬条件核，SD 类模型画不出"两圈相机皮带""相机架在横杆上""手悬半寸"这种精度；首帧能过是因为首帧描述较粗。总调度 04:2x 已定 **L-182**：尾帧阶段 Q10 prompt/动作 + QB 分镜一致条改只记录（身份/造型/人数/看镜头/未成年/文字仍阻断），依据 L-088 视频只给首帧——与本轮证据一致 ✅，W38 执行中（hf 台账待看）。
+- **C-14 ✅ 0**；**红线 ✅**：gpu33 GPU2 15 MiB、gpu36 GPU2 18 MiB；HEAD e56e5e1；eval/ 未动；adult dispatch 0；笔记本无 pytest/arch_scan 进程。
+- **硬规矩**：0 正式视频，不适用。
+
+### 发现
+- **P1-21 QB 与 Q10 人数结论自相矛盾（具体 bug，给 W38）**：last:ep01-S6 t9：Q10 `count pass`（同一张图）而 QB `count=fail`（其它项全 pass，就 count 一项挂）→ QB 的人数走 8893 count_host、Q10 走另一路，两路口径不一；单人镜被 QB 人数判挂是假 fail。L-182 后 count 仍阻断，所以这条会继续挡 S6 尾帧，要先核。
+- **P1-22 S9 首帧 6 小时 I4 封锁**：鞋的单品图（祁念 O4 SH1 透明尖头高跟 / 江予白黑色短靴）在现行 resolve 里没进参考（W42 03:1x 表写 S9 有 SH1，但 hf-06 重编译后 I4 判缺）；S8 QB 也挂"未穿透明尖头细高跟"。需要 W42/W38 查 hf-06 编译后 item 参考槽为什么丢鞋，修后 `retry first:ep01-S9` 提前放回，否则 S9 到 10:14 才自动再试。
+- **P1-23 gpu36 八个热修文件全是 e56e5e1 旧版**（sop_gate 8da54474 / gen_contract/accept 9a15aa2a / asset_refs 2268c5f6 / vqa.json 2bb7bf4e / judge c077a474 / tools/vqa/accept 6c3a0454 / compiler 8f0c8cd7 / framing a598ad42）；gpu36 producer only=__none__、log 停在 02:09，现在不碰 ep01，所以暂无害——但 W46 若把 ep01 视频段放 gpu36，必须先同步（W46 04:05 已列清单）。
+- **P1-24 S8 Q9 真看镜头 ×3**（C-07 硬规矩）：三版瞳孔正对镜头，提示词里"不看镜头"约束对这镜无效（祁念单人近景、正面）；需要改词（给视线落点）而不是换 seed。
+- **P2**：W38 04:05 的"S5/S6/S7/S11 重出中"读起来像在推进，实际每镜再 2 版全 fail；建议按镜写"再出 N 版 M 过"。
+
+### 一句话
+ep01 真实阶段 = 出图收尾（首帧 8/11 缺 S4/S8/S9；尾帧 4/11；0 视频）；最大卡点 = 逐条细节核验的系统墙（18 张 0 过），L-182 放宽尾帧后首帧 S8（看镜头）/S9（I4 缺鞋图）/S4（Q2 单品 clip）仍要人改词/补图；谁在修 = W38（L-182 热修 + S4 A2）、W42 应接 S9/S8 鞋参考、W46 评估 gpu36 视频前要先同步 8 文件。
+
+
+## 11-04 ep01 冲刺 第 5 轮 03:54–03:58（W43 OVERSIGHT-F · Fable；只读，零写 data/）
+
+### 总调度指定四项
+- **① hf 生效后 S8/S9 是否出图 ✗ 都没动**：03:41:22 重启（pid 381190，RESTART_QUEUE 排空/恢复有记录）后到 03:54 只派了 3 单、全是 last:ep01-S11（gpu33:0）。attempts.json：`first:ep01-S8` blocked_until 14:00:51 EST（=04:00 JST）、last_error 仍 I6"图3 的'必须一致'标注不在提示词里"（hf-03 改的是看图修正不改标注，I6 是 preflight 侧，04:00 再试才知道）；`first:ep01-S9` **final=best_effort（03:00:57 降级）**、reason 还是 DerivedRefMissing——板 03:11 已推上，但 S9 停在尽力态没人 reset，所以不会再派。`first:ep01-S4` hard_capped 10/10（K-OPS-E28，转人工），W38 03:50 说按 A2 方案 B 后最多 2 版——需要先解 hard_cap。
+- **② 尾帧 QB 是否不再误判 ✅ hf-04 生效、但 S11 仍真不过**：last:S11 t4/t5（03:50:38 / 03:52:46）的 Q10/QB 判词已对着"（镜头结束时的画面）近景，江予白的左手拎着相机包，握着存储卡的拳头伸在包口夹层里…"核（不再是首帧描述）→ W38 hf-04 声明成立。但两版都 fail 且原因一致：画面是右手在包口、没握成拳/没见存储卡（Q10 prompt fail），QB 看图第 2/3/5 条：手腕是腕带不是"两圈黑色相机皮带"、画面里没有相机/相机没架在环形灯横杆上、左手没拎包。= 出图模型画不出这组细节（左手拎包+拳头握卡+相机架横杆），是提示词/细节取舍问题，不是判定误判；再 reset 重出大概率同样结果。last:S5（Q1 身份+Q9+QB）/S6（Q10+QB）/S7（Q10+QB）仍 final=best_effort"不进合成"，03:41 后没人 reset。
+- **③ S4 两版**：03:41 后 S4 0 派单（hard_cap 未解）。
+- **④ 资产作业是否真落 gpu36 ✅**：`config/pipeline/asset_worker.json exclude_lanes = gpu33:0/1/2/3 + gpu36:2`；笔记本 partition `_temp_holds` 只剩 gpu36:0/gpu36:1；asset_jobs：face-ch_li_an running gpu36:0（03:54:28）、scene-sk_lane_attic running gpu36:1（03:54:04）；gpu36 GPU1 显存 2.7→13.0 GB（comfy 8189 上模型了）。gpu33 control 03:54:37 hold = gpu36:0/1/2 + laptop:0 → **ep01 三条道 gpu33:0/1/3 全在手里，但 03:41–03:54 同时只用了 1 条（inflight 1）**。
+
+### 其它复核
+- **C-14 ✅ 0**（11 镜 active 全 V2 前缀）；**红线 ✅**：gpu33 GPU2 15 MiB、gpu36 GPU2 18 MiB、asset_worker 也排除 gpu36:2；HEAD e56e5e1；eval/ 未动；adult dispatch 0。gpu33 生产 producer.py 99eb1abe / dispatch.py 1563a5ed 仍旧版（W44 未上线，只有笔记本 resident_sync 03:47 加载了 dispatch.py）。
+- gpu36 8870 loaded=false 但 served 553→562 还在涨 = 按需加载、空闲卸载，不是故障；8893 served 98 errors 0。
+- 笔记本 03:55:27 在跑 `tools/qa/arch_scan.py --files tools/qa/remote_gates.py tools/qa/remote_pytest.py …`（W45 线，定向小扫描，几秒）——按总调度 03:4x 口径（remote_pytest 交付后再在笔记本跑测试才算违规）记 P2 不记违规。
+- **硬规矩**：0 正式视频，不适用。
+
+### 判定
+- **不是 P0 死循环**（有 3 单派出、有真判定），但 **ep01 剩余 7 个对象（S4/S8/S9 首帧、S5/S6/S7/S11 尾帧）全部处在 hard_cap / best_effort / preflight 终态，重启不会自动解开**，三条道闲两条。要 W38 逐个处置：S9 reset（板已在）、S4 解 cap 按 A2 出 2 版、S8 等 04:00 看 I6、尾帧四镜先改词（S11 的"左手拎包+拳头握卡+相机架横杆"要减细节）再 reset。
+- **P1-20**：W38 03:50 写"hf-03/04/06 生效"没错，但没写 S9 仍在尽力态、S4 仍 hard_cap——读者会以为 S8/S9/S4 已在重出。
+
+### 一句话
+ep01 真实阶段 = 出图收尾（首帧 8/11 缺 S4/S8/S9；尾帧 4/11 定 S1/S2/S3/S10，S5/S6/S7/S11 尽力态不进合成；0 视频）；最大卡点 = 7 个对象卡在终态等人工 reset/改词，三条道闲两条；谁在修 = W38（只做了 S11 reset，两版又真不过）。
+
+
+## 11-04 ep01 冲刺 第 4 轮 03:36–03:41（W43 OVERSIGHT-F · Fable；只读，零写 data/）
+
+### 复核（出处）
+- **热修 hf-03/04/05/06 ✅ 全部落地且 sha 一致**：gpu33 实读 compiler.py 9c33ddf5 / framing.py 23ebab84 / gen_contract/accept.py 65c91e85 / vqa/judge.py bea9d7c3 / vidgen.py 7eacb7b4 / tools/vqa/accept.py 4fb020cd 与账本 sha256_new_lf 相同，每件都有 .bak-hf-20261104-0x；gpu36 vidgen.py 7eacb7b4 ✅（hf-05 两台）。账本写明"总调度 03:0x 授权：同类单文件热修（有测试、有 .bak、有台账）直接做、做完报备"——授权口径有出处 ✅。但 **03:17–03:32 四条热修都还没进生产进程**（producer pid 328820 03:10 起、未重启；W38 预告 03:40 重启）。
+- **W38 迁移 migrate_renders_prefix --apply ✅ 干净**：manifest `planned 18 / moved 18 / conflicts 0 / errors 0 / takes_rewritten 18 / shots_rewritten 7 / takes_skipped_foreign 4`，takes_before/ 备份目录在；18 个 src（renders/ep01/…）已不在原处、18 个 dst 都在；V1 的 data/renders/ep01/S*/takes.json 对这 18 个文件名 **0 引用**（没动到 V1 账）；重写后条目保留 file_legacy。**11 镜 active 文件逐个核：全部 renders/series10_v2/ 前缀且文件存在**（S1 i2/l2、S2 i2/l2、S3 i1/l2、S5 i1、S6 i3、S7 i3、S10 i7/l1、S11 i3）。
+- **C-14 ✅ 0**；**红线 ✅**：gpu33 GPU2 15 MiB、gpu36 GPU2 18 MiB；HEAD e56e5e1 无 commit；eval/ 只 eval/results/；adult dispatch 0。
+- **硬规矩**：0 正式视频，不适用。
+
+### 发现
+- **P1-16 producer 03:32:15 起 0 事件、inflight/scoring/rendering 全 0（03:37:16 心跳）**：剩余对象全部停派——S4 hard_cap（t10）、S8 I6 preflight_block（03:30:51 再挡一次）、S9 03:06 后没派、last:S5/S6/S7/S11 best_effort 用尽（S6 03:25 被 K-OPS-E11 自动 reset 后 t3/t4 又 QB 不过 03:32 再用尽）。也就是 ep01 现在**靠 03:40 重启 + hf-04（尾帧核结束状态）+ 人工 reset 才能动**；若 03:40 重启没发生或重启后无人 reset S4/S9/S11/尾帧，就是 >20 分钟无进展。下轮 03:56 判定。
+- **P1-17 ASSET-WORKER 占走 gpu33 两条道**：笔记本 partition.json `_temp_holds` 03:30:24 gpu33:3（sheet-lead_f-O2，到 05:00）+ gpu33:0（face-ch_li_an），retired = gpu36:2/gpu33:3/gpu33:0；gpu33 control 03:37:13 hold = gpu33:0/gpu33:3/gpu36:*/laptop:0 → **ep01 只剩 gpu33:1**。而这些资产作业是 ep02/ep03 的（sheet-lead_f-O1 03:28 还连败 3 张报阻断）。第 2 轮已问、未有定论；现在已升级为 2/3 道被借 → 再 ask 总调度。
+- **P1-18 笔记本又跑 pytest（第二次）**：03:36:27 Win32 `python.exe -m pytest -q tests/test_night_v2_finalize.py tests/test_merge_vid_o.py tests/test_sop_gate.py …`（pid 53044/9840），03:38 已退出、本次没留孤儿；03:03 那棵孤儿树（api_watchdog+fake_asgi:58186）03:36 已不在。项目方 03:0x 明令"重活一律上服务器、正在跑的立即停"，03:36 这次是令后第二次（测试集与 hf-04/05 对应，W38 线）。
+- **P2-19 gpu36 看图 8870 loaded=false gpu=null**（03:39；GPU0 显存 22.3→14.5 GB，served 553 继续累计）= 模型卸了（空闲卸载或重载中），8893 正常。下轮核是否按需回载；W40 常驻探测应能看到。
+- **P2**：hf-04 账本一条里 accept.py 出现两次（gen_contract/accept.py 65c91e85 与 tools/vqa/accept.py 4fb020cd），文件名相同、路径不同，读账本容易看错，建议 ledger 行用全路径。
+
+### 一句话
+ep01 真实阶段 = 出图收尾（首帧当前版 8/11 缺 S4/S8/S9；尾帧定 4：S1/S2/S3/S10；0 视频）；最大卡点 = 剩余对象全部 cap/block 停派 + 只剩 gpu33:1 一条道，等 03:40 重启让 hf-04/06 生效并人工 reset；谁在修 = W38（重启 + reset S4/S9/S11/尾帧），资产作业借道待总调度定。
+
+
+## 11-04 ep01 冲刺 第 3 轮 03:16–03:22（W43 OVERSIGHT-F · Fable；只读 + 在 gpu33 重跑，零写 data/；按项目方 03:0x 令本轮起 pytest 一律在服务器跑）
+
+### 复核（出处）
+- **hf-20261104-02 ✅ 已落地**：账本 02:59:56 `applied 批准=项目方（03:0x，总调度转达）`；gpu33 实读 sop_gate.py cfc58c46 / config/vqa.json 1a353b1d 与账本一致，`*.bak-hf-20261104-02` 两件在；producer 03:09:53 `pause by=RESTART_QUEUE 重启前排空` → 03:10:15 新 pid 328820 → 03:10:19 `resume 重启完成`（这次重启有记录、有排空 ✅）。效果：03:10:36 起 last:S5/S6/S7 开始派（之前被 Q9=na 挡），W38 的 Q9=na 修法在生产生效。
+- **W38 S9 refboard ✅ 推到位**：gpu33 `refboards/board_0317a0b4ea14.png` mtime 03:11:37、`_derived_index.json` 03:14:01、`.bak-w38` 在、目录 26 张。但 **S9 03:06:44 之后没再派过**（attempts 里 first:ep01-S9 只剩 backoff_until，t4/t5 03:04/03:06 Q2+Q9+QB content_fail）→ 板推上后要有人 retry S9（W38）。
+- **W44 ✅ 可复现**：笔记本树 producer.py c43dea41 / dispatch.py c892f656 与其报的一致；gpu33 沙箱 `/root/work/fredw/w44/repo` 同 sha；在沙箱用生产 venv + pylib pytest 重跑 `tests/test_producer_w44.py` = **18 passed**（0.8 s）。生产 gpu33 producer.py 仍 99eb1abe / dispatch.py 1563a5ed = 旧版，W44 的 canary/rescore 上限/hold/接力都还没上线（等 W38 热推 + producer-only 重启）。
+- **C-14 ✅ 0**：11 镜 active 指针 0 命中 V1。服务器 active：S1 i2/l2、S2 i2/l2、S3 i1/l2、S5 i1、S6 i3、S7 i3、S10 **i7/l1**（首尾帧都定）、S11 i3；S4/S8/S9 无。
+- **红线 ✅**：gpu33 GPU2 15 MiB、gpu36 GPU2 18 MiB、gpu36:2 在 retired；HEAD e56e5e1 无 commit；eval/ 只 eval/results/；adult dispatch 0；gpu36 8870 served 526 / 8893 served 79 errors 0。
+- **硬规矩**：ep01 仍 0 正式视频，不适用。
+
+### 发现
+- **P1-12 项目方 03:0x"重活不上笔记本"令后，笔记本 03:03:11 仍起了 pytest 且留下孤儿进程树**：Win32 进程 23816→53148→33712→50752（`tools/factory/api_watchdog.py --by pytest -- -m uvicorn fake_asgi:app --port 58186 --app-dir …\pytest-5921\test_old_tree_with_child_holdi0`），父 pytest 31864 已退出、四个子进程 03:16 仍活着（13 分钟）= test_restart_api_ps1/api_watchdog 的"old tree with child"用例没收尾（与 11-03 proc-guard 同类）。谁跑的未署名（03:03 在跑测试的是 W38/W44）。建议：跑的人自己按 pid 收掉（只许停自己记下的 pid），并把该用例的 teardown 补上；以后 pytest 一律上 gpu33。
+- **P1-13 hold_lanes 又换了一条：ep01 现在只有 gpu33:3 一条道**：笔记本 partition.json `_temp_holds` 02:59:30 换成 **gpu33:1（ASSET-WORKER sheet-lead_f-O1，到 04:29:30）**、retired_lanes = [gpu36:2, gpu33:1]；gpu33 control 03:16:49 重算 hold = gpu33:0/gpu33:1/gpu36:*/laptop:0（gpu33:0 为何也 hold 待 W44 说明：按 03:05 W44 ④ 的分析就是"到期 hold 没 sweep 变永久"）。03:11 之后 ep01 全部派单都在 gpu33:3；GPU1 65%/16 GB 是 comfy 8189 在给资产作业出图。W44 的修法未上线前这个问题每次 dispatch 重算都会重现。
+- **P1-14 S4 到 t10 后 hard_cap**（03:17:01；t4–t10 全 Q10 不过，03:06:03 还被 K-OPS-E11 自动 reset 多给 3 次）= 一镜烧了 7 张图没人看图；S4 现在停派、无 active。同样待人看图的：S8（I6 preflight 挡，仍无新派单）、last:S11（best_effort 用尽）。W38 02:48 表后没再更新这三镜。
+- **P1-15 尾帧 QB 连败模式**：last:S5 t1（Q1 身份+Q9+QB）、last:S6 t1（仅 QB）、last:S7 t1（Q10+QB）、last:S11 t1–t3（都含 QB）、last:S1 t1（Q1+Q9+QB）——尾帧第一版 6/6 含 QB fail，首帧同期 QB 多数过。建议 W38 抽一张尾帧看 QB 的 count_host 结论是真人数不对还是尾帧构图触发误判（若误判 = 又一个假 fail 源）。
+- **P2**：W44 ③ 自述"视频硬规矩（≤6 s/不看镜头/无字幕/At）在生产 build_jobs 链里没有检查点（只在 W41 试跑工具里）"——到视频阶段这是 C-06/07/08 的闸门缺口，需在出第一条正式视频前补（记 BACKLOG/总调度定归谁）。
+
+### 一句话
+ep01 真实阶段 = 出图（首帧当前版 8/11：S1/S2/S3/S5/S6/S7/S10/S11；尾帧定 S1/S2/S3/S10，S5/S6/S7/S11 在出；0 视频）；最大卡点 = 只剩 gpu33:3 一条道 + S4/S8/S9/last:S11 四处要人看图/retry；谁在修 = W38（S9 retry、S4/S8/S11 看图、推 W44 两文件），W44 修法待上线，资产作业借道归总调度定。
+
+
+## 11-04 ep01 冲刺 第 2 轮 02:56–03:02（W43 OVERSIGHT-F · Fable；只读 + 重跑，零写 data/）
+
+### 总调度指定三项
+- **① 新 accept.py 下 QB 结论 ✅ 不是 100% fail**：gpu33 log（新 pid 278513，02:40:28 MASTER-WSL resume 后）：`passed first:ep01-S1 t2`（02:46:42）、`rescore first:ep01-S7 t3 ok=true blocking=[]`（02:51:35，ledger_sync 当前换 v3）、`passed last:ep01-S1 t2`（02:52:39）、`passed first:ep01-S10 t7`（02:58:39）——QB 均在 blocking 之外；QB fail 的只剩内容镜（S4 t4/t6 Q3/Q9/Q10+QB、last:S11 t1–t3 QB/Q10/Q6/Q9）。W38 02:46"新 accept.py 在 gpu33 生效、得真 QB 结论"成立，不用回退。
+- **② hold_lanes 根因 = ASSET-WORKER 临时借道**：`config/netfix/partition.json` 工作树 diff：`_temp_holds` 01:10:33 gpu33:0（scene-sk_rooftop_bar，到 02:40:33）→ 02:53:24 换成 **gpu33:3（face-ch_zhou_xu，到 04:23:24）**，`retired_lanes` 同步从 gpu33:0 换成 gpu33:3；dispatch.py 02:56:28 按它重算 control → hold_lanes 现 = gpu33:0?/gpu33:3/gpu36:0/1/2/laptop:0（02:57 实读 hold 含 gpu33:3，02:57:53 起派单走 gpu33:0 + gpu33:1）。该资产作业 `data/pipeline/asset_jobs/series10_v2/face-ch_zhou_xu.json` episode=2、state=pending（03:00:01 仍没开跑）却占着 gpu33:3 90 分钟。W41 02:39 放回 gpu33:1 的改法被 dispatch 重算覆盖是设计如此（W41 自己预警了）。dispatch.py:488 注释显示 W44 已在处理 hold/lend 写法。**建议总调度定**：ep01 冲刺期 ASSET-WORKER 的 ep02+ 作业是否暂停借 gpu33 道（或改借 gpu36:0/1 之外的时段），否则 ep01 始终 2 道。
+- **③ 账本 ✅**：hotfix_ledger.jsonl 02:42:00 `hf-20261104-01 status=applied，批准=项目方（02:3x 亲手跑批文，总调度转达）`，三文件 sha（6be032c6/1b59d31d/521242fb）与 gpu33 实读一致、.bak 在。新增 `hf-20261104-02 pending`（sop_gate cfc58c46 + vqa.json 1a353b1d）= 笔记本 sop_gate.py 现 sha cfc58c46 ✓ 对上。
+
+### 其它复核
+- **W42 Q2 ✅ 生产验证**：02:43:51 `retry first:ep01-S10 by=W42`（注明原因）、02:56:22 `reset_best_effort by=W42`、02:56:32 派 t7、**02:58:39 passed** → 唐瑶参考修对后 S10 首帧过 Q2；随即 last:S10 t1 已出（02:59:35，打分中）。
+- **W38 "sop 测试 49 passed" ⚠ 口径不明（P2）**：本机重跑 `tests/test_sop_gate.py` = **24 passed**（45.6 s）、加 `test_sop_gate_promote.py` = 29 passed；49 应是再加 test_sop.py/test_sop_release_fixes.py，报数时请写文件名。
+- **C-14 ✅ 0**：11 镜 active 指针再扫 0 命中 V1 路径。服务器 active：S1 image2/last2、S2 image2/last2、S3 image1/last2、S5 image1、S6 image3、S7 image3、S11 image3；S4/S8/S9/S10 无 active（S10 t7 passed 后 auto_current 待看下轮）。
+- **红线 ✅**：gpu33 GPU2 15 MiB、gpu36 GPU2 18 MiB；gpu36:2 在 retired_lanes+hold；HEAD e56e5e1 无 commit；eval/ 只有 eval/results/ 未跟踪产物；adult dispatch 0（adult_wait_owner 继续记录）。gpu36 8870 served 493 / 8893 served 64 errors 0，anomaly_server 在 GPU1。
+- **硬规矩**：ep01 仍 0 正式视频（find *.mp4 新于 vidgen.py = 0），不适用。
+
+### 新发现
+- **P1-8 S9 出不了图（归 W40 同步线）**：02:48:03 `content_error first:ep01-S9 DerivedRefMissing: 派生参考图 data/pipeline/runs/series10_v2/images/refboards/board_0317a0b4ea14.png 服务器上没有（只在笔记本生成，按 sha 推送；K-OPS-F23）`；笔记本该目录 15 个 refboard 里**也没有** board_0317a0b4ea14.png → 不是没推，是没生成（提示词证据引用了一张不存在的板）。要 W38 重跑 S9 的 probe-prompts/refboard 生成再推。
+- **P1-9 score_infra 还在**：resume 后 17 分钟 3 次（S7 t3 02:43:35、S4 t6 02:50:30、S11 t3 02:50:35，error=None），每次拉 5 分钟 score_chain_down 熔断；W38 定为 Q10 prompt 看图 lan 60 s 超时，修法在 hf-20261104-02（vqa ask 180 s）待项目方批 → 这是现在最大的吞吐杀手。
+- **P1-10 last:S11 三连败 best_effort 用尽**（t1 QB、t2 Q10+QB、t3 Q6+Q9+QB，02:57:24 best_effort）：内容问题，需要 W38 看图改词再 retry。S4 首帧到 t7（Q10 内容反复不过）同样要人看图，不该再盲重出。
+- **P1-11 S8 仍被 I6 挡**：02:30:31 preflight_block 后无新派单；W38 02:48 说"S8 QB 不过（内容）"指的是旧 t1，新图根本出不来。
+- **P2**：02:53:32 `pause by=reset-best-effort`（expires 02:56:32）是 W42 reset 命令的副作用暂停，按 ops 到期自动恢复 ✅；笔记本 accept.py 仍 8633c7cf ≠ 服务器 1b59d31d（P1-2 未处理）。
+
+### 一句话
+ep01 真实阶段 = 出图（首帧当前版 7/11：S1/S2/S3/S5/S6/S7/S11，+S10 t7 刚过；尾帧 S1/S2/S3 有、S10/S11 在出；0 视频）；最大卡点 = score_infra 看图超时熔断（hf-02 待项目方批）+ S9 缺 refboard + S4/S8/last:S11 要人看图；谁在修 = W38（hf-02、S4/S11）、W40 应接 S9 refboard、总调度定 ASSET-WORKER 借道。
+
+
+## 11-04 ep01 冲刺 第 1 轮 02:27–02:37（W43 OVERSIGHT-F · Fable，task_9d1a583bc1ef；只读 + 重跑，零写 data/）
+
+### 实跑核对（出处）
+- **W42 Q2-OUTFIT ✅**：`.venv/Scripts/python.exe -m pytest tests/test_w42_item_image_scope.py -q` 重跑 **5 passed**（4.1 s）。笔记本 asset_refs.py sha256 = 521242fb…（与 W42 报的一致）；gpu33 `/root/work/fredw/offline_20261101/repo` 上同文件 sha 亦 = 521242fb… → 已热推到位。
+- **W38 热修 hf-20261104-01 ⚠ 账本未更新（P1-1）**：gpu33 三个文件 sha 已是账本 rev2 的新值（sop_gate 6be032c6 / accept 1b59d31d / asset_refs 521242fb），mtime 02:28:16–02:28:24 JST，旁边有 `*.bak-hf-20261104-01` 回退件 ✅；但 `data/system_versions/hotfix_ledger.jsonl` 两条仍 `status=pending`，V2_LIVE 没有"谁批、何时推、何时重启 producer"的记录。producer 02:32:52 已重启（pidfile_stale 204016 → 新 pid 278513），同样无记录。
+- **笔记本 accept.py 漂移（P1-2）**：笔记本工作树 accept.py sha 8633c7cf… ≠ 账本 rev2 / 服务器 1b59d31d…。账本之后又改过，哪版是终版要在 cut 前再登记。
+- **C-14 跨剧泄漏 ✅ 0**：gpu33 `data/renders/series10_v2/ep01/S1–S11/takes.json` 的 active 指针逐个扫（renders/ep\d+/、lin_wan、林晚）= 0 命中；笔记本副本也 0（但笔记本副本 take 条目里仍留着 V1 历史条目 S3 8/S5 7/S7 9/S8 10/S9 13/S10 9，只隔离未删，符合 W41 口径）。服务器 active：S2 image2/last2、S3 image1/last2、S5 image1、S6 image3，其余 7 镜无 active；与 W38 02:21 表一致（S5 多一个 active image=1 表里没标定稿）。
+- **红线 ✅**：gpu33 GPU2 15 MiB/0%，gpu36 GPU2 18 MiB/0%（nvidia-smi）；control.json hold_lanes 含 gpu36:2 ✅；producer start lanes 不含 :2；HEAD 仍 e56e5e1 无新 commit ✅；`git status eval/` 只有未跟踪的 eval/results/（冒烟门产物），评估器代码未动 ✅；成人：producer 日志 adult_wait_owner 39 条、dispatch 里 adult 0 条 ✅。
+- **看图/人数检测 ✅**：gpu36 本机 8870 `loaded=true served=437 queue=0`，8893 `loaded=true served=32 errors=0`，anomaly_server 跑在 GPU1（2663 MiB），8893 lan_proxy 在；与 W40 02:19 所述一致。
+- **硬规矩（≤6 s/无字幕/不看镜头/At 只切镜）**：本轮 ep01 还没有任何 V2 正式视频（find series10_v2/ep01 *.mp4 比 vidgen.py 新 = 0），不适用；W41 试跑 5.167 s 本轮未找到文件，下轮核。
+
+### 发现
+- **P0 候选 → 已 ask 总调度：producer 被 POLICY_CANARY 暂停、不会自动恢复**。gpu33 log 02:30:33 `pause by=POLICY_CANARY kind=canary`："换版首批复核：前 6 镜 QB 不过占 100%（S10/S2/S6/S4/S8/S11）版本 d970fbdb"，expires_at 02:33:33；producer.py:1750 注释明写 kind=canary **不自动恢复**（只有 ops_kinds 到期恢复）。02:32:52 重启后 control.json 仍 paused=true，heartbeat 02:35:53 paused=true inflight/scoring/rescoring=0，之后 0 事件。触发 canary 的 6 个 QB fail 全发生在 02:30:04–02:31:01，即旧 pid 204016（01:49 起、没加载 02:28 热推的 accept.py）——是**旧代码的结论触发的 canary**，新代码一张都没验过。建议：W38 resume（带 by/原因）后立刻看第一批 rescore 的 QB；若新 accept.py 下 QB 仍 fail，则"gpu33 实跑验证 QB pass"的声明不成立。
+- **P1-3 S8 派不出**：02:30:31 `preflight_block first:ep01-S8 I6 提示词 = 系统编译器输出：图3 的"必须一致"标注不在提示词里`。W38 表里 S8 写"未测 Q9/Q10"，实际 S8 无 active、新派被 I6 挡，要修 S8 提示词/编译证据。
+- **P1-4 S4 score_infra 两次 error=None**（take3 02:24:18、take4 02:32:19，各触发 5 分钟 score_chain_down）：与 W40 ISS-1104-021952 同一症状；旧代码期发生，重启后待复核。
+- **P1-5 sop_gate_block 仍在**：02:22–02:23 S7/S8/S9/S11 "证据过期（02:04:26 之后清单变了）"，即 W38 按集指纹热修前的症状；热修后（02:28）+ 重启（02:32）尚未产生新判定，下轮核。
+- **P1-6 netfix**：笔记本 gpu33-cmd/cmd2/cmd3/cmd4 主连接 socket 02:30:38 全部消失，net_status.json 02:29:14 后不再更新（监管进程心跳过期）；rssh_calls 02:32 起走 direct（每次握手 23–60 s）。本轮审计只得按 rssh 的同一退路（status 过期 → 直连 BatchMode）取证。不归 ep01 工人，但拖慢四个工人。
+- **P1-7 只有 1 条道在出 ep01**：control.json hold_lanes = gpu33:0/1、gpu36:0/1/2、laptop:0 → series10_v2 实际只剩 gpu33:3 在派（02:30 S4、S8 都 gpu33:3）；smoke_v2 producer 同机另起一份（pid 278539）。若 hold 是冒烟门/W41 沙箱占用，冒烟结束应放回，否则 11 镜×重出全排一条道。
+- **P2**：仓库根目录 w42_*.tmp.py ×5 未跟踪临时文件；V2_LIVE 两条 W42 行时间戳写成"02:5x/02:4x"（晚于实际 02:3x 之前写入）。
+
+### 一句话
+ep01 真实阶段 = 出图（首帧 4/11 有当前版：S2/S3/S5/S6，S2/S3 有尾帧；0 视频）；最大卡点 = producer 02:30 起被 canary 暂停且不自动恢复（0 进度 6 分钟+）；谁在修 = 无人认领（已 ask 总调度，建议 W38）。
+
+
 ## 第 30 轮（A18b · Fable，Orca 工人 task_1633ece01376，总调度派）· 11-03 15:1x–15:3x · W18b LIFECYCLE-P0 复审（只审不改，25 分钟时间盒；两个开关仍默认关）
 
 ### 复核范围

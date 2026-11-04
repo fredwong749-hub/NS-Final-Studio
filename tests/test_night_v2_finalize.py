@@ -101,6 +101,9 @@ def test_finalize_v2_reaches_assembly(night_v2, monkeypatch, tmp_path):
     monkeypatch.setattr(N, "voices_ok", lambda: True)
     monkeypatch.setattr(N, "ssh", lambda host, cmd, timeout=600: "")
     monkeypatch.setattr(N, "bgm_after_assembly", lambda *a, **k: {})
+    # W46：finalize 加了整集硬规矩（假 mp4 读不了时长）与复盘接力（tests/test_w46_finalize.py 单测），这里只测合成路径
+    monkeypatch.setattr(N, "episode_hard_rules", lambda p, probe=None: {"ok": True, "fails": []})
+    monkeypatch.setattr(N, "retro_after_assembly", lambda ep: {"episode": ep})
     clip = tmp_path / "clip.mp4"
     clip.write_bytes(b"\0")
     ep_dir = N.VID / "episodes" / "ep01"

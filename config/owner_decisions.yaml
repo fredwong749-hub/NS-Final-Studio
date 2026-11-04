@@ -397,7 +397,7 @@ checks:
       - '"?enforce"?\s*[=:]\s*false'
       - 'BLOCK\s*=\s*False'
     new_terms: ['转拦截', 'enforce"?\s*[:=]\s*true', '先于视频', '闸门先于', '命中就重出']
-    stale_allow: [docs/ITERATION_PROTOCOL.md, knowledge/rules/ops_decisions.yaml, 'docs/series10_video/ep*_review.md', 'docs/audit/*', docs/master/MASTER_PICTURE.md, docs/master/TODO_BOARD.md]   # 决定本身的记录 / 审片当时的快照；⤴ W11 11-03：V2_LIVE.md（report_issue 自动卡点流水）改由 decision_propagation.LOG_STREAMS 统一不扫，不在单条决定里放过
+    stale_allow: [docs/ITERATION_PROTOCOL.md, knowledge/rules/ops_decisions.yaml, 'docs/series10_video/ep*_review.md', 'docs/audit/*', docs/master/MASTER_PICTURE.md, docs/master/TODO_BOARD.md, 'docs/master/handover/*', docs/master/OVERSIGHT_LOG.md, BACKLOG.md, ITERATION_LOG.md]   # ⤴ 总调度 11-04 08:4x：工人交付报告 / 审计记录 / 停车场 / 轮次账本是记录流，不是口径来源；ep01 冲刺 L-182～L-185 把部分判定项改只记录（细动作/道具/非点选配饰），enforce 仍 true、点选造型/身份/人数/看镜头仍阻断   # 决定本身的记录 / 审片当时的快照；⤴ W11 11-03：V2_LIVE.md（report_issue 自动卡点流水）改由 decision_propagation.LOG_STREAMS 统一不扫，不在单条决定里放过
     propagate: [docs/REQUIREMENTS.md, docs/vqa/STATE.md, docs/acting/STATE.md, docs/GEN_CONTRACT.md, docs/SOP_production.md,
                 config/vqa.json, knowledge/rules/vqa.yaml, knowledge/rules/acting.yaml]
   - id: D-VQA-02

@@ -128,3 +128,13 @@ def test_cache_hit_no_route(env):
 def test_route_cfg_present():
     rc = json.loads((ROOT / "config" / "vqa.json").read_text(encoding="utf-8"))["route"]
     assert all(v >= 60 for v in rc["timeouts"].values()) and rc["queue_max"] > 0 and rc["busy_wait_s"] > 0
+
+
+def test_w38_server_sends_to_unloaded_local(monkeypatch):
+    """W38：服务器上本机 8870 空闲卸模型（loaded=false）仍算可用（服务端按需加载）；笔记本上 loaded=false 照旧不算"""
+    from ns_agent.vqa import client as C
+    monkeypatch.setattr(C, "_local_up", lambda url: C._HEALTH.__setitem__(url, {"loaded": False, "queue": 1}) or True)
+    monkeypatch.setenv("OFFLINE_SELF", "gpu36")
+    assert C._ready("http://127.0.0.1:8870") == (True, 1)
+    monkeypatch.delenv("OFFLINE_SELF")
+    assert C._ready("http://127.0.0.1:8870") == (False, 0)

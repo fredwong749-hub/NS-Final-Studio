@@ -267,3 +267,17 @@ def test_w5_writer_lint_hand_vs_neck():
     assert "QW-W10" in ids(IMG_S3)
     assert "QW-W10" not in ids(IMG_S8)
     assert "QW-W10" not in ids("大特写，林晚的眼睛看向肩头的手")     # 写到脸 = 脸部特写，不归这条
+
+
+def test_vidgen_never_uses_broken_or_disabled_lanes(tmp_path):
+    """W41：gpu36:2（坏卡，hosts.json enabled=false）/ gpu33:2 永不进视频道；hosts.json 读不到也只去掉坏卡"""
+    vg = _load("vidgen")
+    real = vg.usable_lanes("gpu36")
+    assert "gpu36:2" not in real and set(real) <= {"gpu36:0", "gpu36:1"}
+    assert "gpu33:2" not in vg.usable_lanes("gpu33")
+    assert set(vg.usable_lanes("gpu36", tmp_path / "missing.json")) == {"gpu36:0", "gpu36:1"}
+    hf = tmp_path / "hosts.json"
+    hf.write_text(json.dumps({"hosts": {"gpu33": {"broken_gpus": [1], "lanes": {
+        "gpu33:0": {"enabled": True, "roles": ["image", "video"]}, "gpu33:1": {"enabled": True, "roles": ["video"]},
+        "gpu33:3": {"enabled": True, "roles": ["image"]}}}}}), encoding="utf-8")
+    assert set(vg.usable_lanes("gpu33", hf)) == {"gpu33:0"}      # broken_gpus / 不含 video 角色的道都去掉

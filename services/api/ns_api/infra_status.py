@@ -65,6 +65,8 @@ def _hm(t: float | None) -> str | None:
     if not t:
         return None
     try:
+        if float(t) < 0:      # W45：Linux 的 localtime 接受负数（1938 年的时间），Windows 才抛 OSError——两边一律判非法
+            return None
         return time.strftime("%H:%M:%S", time.localtime(float(t)))
     except (OSError, OverflowError, ValueError, TypeError):   # arch-ok: 非法时间戳 = 不显示时间，状态照出
         return None

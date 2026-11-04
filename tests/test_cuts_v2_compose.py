@@ -118,3 +118,44 @@ def test_compose_v2_takes_media_by_run_not_v1(monkeypatch, tmp_path):
     assert ("check_music", "series10_v2", "series10_v2") in calls
     assert not any(c[1] in ("series10_v1", None) for c in calls)
     assert not any("series10" == str(c[-1]) for c in calls)                  # 没走 V1 的 data/music/series10
+
+
+def test_preview_plan_without_hosts_json_uses_own_active_first(monkeypatch, tmp_path):
+    """W41（11-04）：V2 还没派过视频（没有 video/hosts.json）→ 不抛 FileNotFoundError；占位首帧取本剧 takes.json 当前首帧，
+    当前首帧不在本剧前缀下（跨剧 V1 版本，C-14）→ 不用"""
+    import json
+    from tools import assemble_series as AS
+    vid = tmp_path / "vid"
+    vid.mkdir()
+    monkeypatch.setattr(AS, "VID", vid)
+    monkeypatch.setattr(AS, "RUN", tmp_path / "run")
+    monkeypatch.setattr(AS, "ROOT", tmp_path)
+    monkeypatch.setattr(AS, "RUN_ID", "series10_v2")
+    rd = tmp_path / "data/renders/series10_v2"
+    monkeypatch.setattr(AS.RUNS, "renders_dir", lambda run, root=None: rd)
+    sp = tmp_path / "script_v2.json"
+    sp.write_text(json.dumps({"episodes": [{"number": 1, "shots": [{"index": 1}, {"index": 2}]}]}), encoding="utf-8")
+    monkeypatch.setattr(AS.RUNS, "script_path", lambda run, root=None: sp)
+    for s, f in (("S1", "renders/series10_v2/ep01/S1/takes/image_001.png"), ("S2", "renders/ep01/S2/takes/image_006.png")):
+        (tmp_path / "data" / f).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "data" / f).write_bytes(b"x")
+        (rd / "ep01" / s).mkdir(parents=True, exist_ok=True)
+        (rd / "ep01" / s / "takes.json").write_text(json.dumps(
+            {"active": {"image": 1}, "takes": [{"stage": "image", "n": 1, "file": f}]}), encoding="utf-8")
+    assert AS.hosts_all() == [] and AS.host_of(1) is None
+    rows = AS.plan(1, AS.merged_state(False), best_effort_video=True)
+    assert rows[0]["kind"] == "placeholder" and rows[0]["file"] == "data/renders/series10_v2/ep01/S1/takes/image_001.png"
+    assert rows[1]["file"] is None          # V1 前缀的当前首帧不拿来占位
+
+
+def test_cli_out_dir_reaches_build(monkeypatch):
+    from tools import assemble_series as AS
+    seen = {}
+
+    def fake_build(ep, variant="v1", **kw):
+        seen.update(kw)
+        return {"output": "x", "complete": False, "video_shots": 0, "best_effort_shots": 0, "placeholder_shots": 0, "duration_s": 0}
+    monkeypatch.setattr(AS, "build", fake_build)
+    monkeypatch.setattr(sys, "argv", ["assemble_series.py", "ep01", "--preview", "--no-pull", "--out-dir", "data/_w41_trial/x"])
+    assert AS.main() == 0
+    assert str(seen["out_dir"]).replace("\\", "/").endswith("data/_w41_trial/x") and seen["preview"] is True

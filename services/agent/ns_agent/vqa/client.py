@@ -83,7 +83,10 @@ def _ready(url: str) -> tuple[bool, int]:
     if not _local_up(url):
         return False, 0
     h = _HEALTH.get(url) or {}
-    if h.get("loaded") is False:
+    # W38（11-04 05:3x gpu36 实测）：看图服务空闲会卸模型（loaded=false），来请求再加载（load_s≈3 s）；原来 loaded=false 一律判“不在”
+    # → 服务器上谁都不发请求 → 永远不重新加载 → 看图全线“未测”（视频 Q9、首尾帧 Q9/QB 反复 score_infra）。
+    # 服务器上（OFFLINE_SELF）本机 8870 就是正主：通了即用，loaded=false 照发（服务端排队加载）；笔记本保持原口径（未加载 → 走隧道）
+    if h.get("loaded") is False and not os.environ.get("OFFLINE_SELF"):
         return False, 0
     try:
         return True, int(h.get("queue") or 0)

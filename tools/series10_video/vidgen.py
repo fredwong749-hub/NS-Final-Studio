@@ -134,6 +134,19 @@ def policy_ok(var: dict) -> bool:
     return why is None
 
 
+def first_take_first(todo: list, shots: dict, recs: dict, ctrl: dict | None = None) -> list:
+    """W46（总调度 05:3x 冲刺规则）：每镜先各出 1 条，全部有片之前不出第 2 变体——作业里还有“一条都没出过”的镜
+    （有变体、没完结、renders 为空）→ 本轮只派这些镜的第一条，失败镜的重试 / 换变体等它们都起跑后再排。
+    control_<host>.json "first_take_first": false 关掉（恢复原来按集、镜顺序逐镜重试）"""
+    if (ctrl or {}).get("first_take_first", True) is False:
+        return todo
+    fresh = {sid for sid, sh in shots.items() if sh.get("variants") and not (recs.get(sid) or {}).get("renders")
+             and (recs.get(sid) or {}).get("status") not in ("done", "best_effort", "blocked")}
+    if not fresh:
+        return todo
+    return [(sid, v) for sid, v in todo if sid in fresh]
+
+
 def next_variant(shot: dict, rec: dict) -> str | None:
     """规则阶梯（见模块文档）；rec = 本镜状态"""
     used = {r["variant"] for r in rec["renders"]}
@@ -263,13 +276,31 @@ class Lane:
         return {"error": "no_output", "gpu_s": gpu_s} if st.get("completed") else None
 
 
+BROKEN_LANES = {"gpu33:2", "gpu36:2"}   # CLAUDE.md 红线：坏卡，任何情况都不派
+
+
+def usable_lanes(host: str, hosts_file: Path | None = None) -> dict:
+    """W41（11-04）：本机可派视频的道 = PORTS 去掉坏卡 / config/factory/hosts.json 里 enabled=false、不含 video 角色、
+    broken_gpus 的道。以前 Runner 直接用 PORTS 全部三道：gpu36:2（坏卡，hosts.json 已 enabled=false）不在 shared_lanes，
+    按专用道每道 2 个照派——只是 :8190 没起才没出事。hosts.json 读不到 → 只去掉写死的坏卡（失败关闭到更少的道）"""
+    lanes = {n: p for n, p in PORTS.get(host, {}).items() if n not in BROKEN_LANES}
+    try:
+        h = json.loads(Path(hosts_file or ROOT / "config/factory/hosts.json").read_text(encoding="utf-8"))["hosts"][host]
+    except (OSError, ValueError, KeyError):
+        return lanes
+    broken = {f"{host}:{g}" for g in h.get("broken_gpus") or []}
+    spec = h.get("lanes") or {}
+    return {n: p for n, p in lanes.items() if n not in broken and n in spec and spec[n].get("enabled", True)
+            and "video" in (spec[n].get("roles") or ["video"])}
+
+
 class Runner:
     def __init__(self, host):
         self.host = host
         self.ctrl_p = VID / f"control_{host}.json"
         jf = (jload(self.ctrl_p, {}) or {}).get("jobs", "jobs.json")
         self.state_p = VID / (f"state_{host}.json" if jf == "jobs.json" else f"state_{host}_validate.json")
-        self.lanes = {n: Lane(n, p) for n, p in PORTS[host].items()}
+        self.lanes = {n: Lane(n, p) for n, p in usable_lanes(host).items()}
         self.st = jload(self.state_p) or {"host": host, "started": time.time(), "shots": {}, "events": []}
         if jf == "jobs.json" and any(x.get("variant", "").startswith(("pdd_", "b24_", "i2v_"))
                                      for r in self.st["shots"].values() for x in r["renders"]):
@@ -331,7 +362,7 @@ class Runner:
             v = next_variant(sh, r)
             if v:
                 out.append((sid, v))
-        return out
+        return out if validate else first_take_first(out, shots, self.st["shots"], self.ctrl())
 
     def check_lip_redo(self, sid, r):
         """DIRECTOR K-EDT-805（总调度 11-02 批复 r2 第 3 条）：成片里画内对白被 TTS 兜底的镜（data/director/redo_requests.json，
@@ -384,6 +415,10 @@ class Runner:
 
     # ------------------------------------------------------------------ 长镜头道
     def set_lane_mode(self, mode):
+        if LONG_LANE not in self.lanes:   # W41：长镜头道是坏卡 / 已停用 → 不切模式；超长镜头留 pending（V2 单镜 ≤6 s 不会走到）
+            if mode == "long":
+                log(self.host, "LONG_LANE_UNAVAILABLE", LONG_LANE, "坏卡 / hosts.json 停用，超长镜头不派")
+            return False
         lane = self.lanes[LONG_LANE]
         mine, foreign = lane.queue()
         unfetched = [x for r in self.st["shots"].values() for x in r["renders"]

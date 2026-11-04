@@ -124,6 +124,8 @@ def run(host: str, cmd: str, input: bytes | None = None, timeout: float = 900, c
     每次调用的结果记一行 data/netfix/rssh_calls.jsonl（监管进程汇总成 net_status.rssh 成功率）"""
     t0 = time.time()
     argv = rewrite(["ssh", host, cmd]) if enabled() else None
+    if argv and os.name != "nt" and argv[:len(WSL)] == WSL:
+        argv = argv[len(WSL):]      # W45：笔记本 WSL 里直接调（已经在 WSL 内，不再套 wsl.exe），同一批主连接 socket
     tried = []
     if argv:
         socks = [argv[argv.index("-S") + 1]] + [s for s in POOL.get(host, []) if s != argv[argv.index("-S") + 1]]

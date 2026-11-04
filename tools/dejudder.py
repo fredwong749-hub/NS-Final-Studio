@@ -46,8 +46,19 @@ def phase_weights(path: Path) -> tuple[np.ndarray, int]:
     return w, len(g)
 
 
+def video_wh(path: Path) -> tuple[int, int]:
+    """W46：宽高用 -show_streams -of json 取——服务器上的 ffprobe 是兼容壳（offline_20261101/bin/ffprobe），
+    只认这种写法；原来的 -show_entries stream=width,height -of csv 在服务器上输出 {} → 每条片 minterpolate 跑完 4–5 分钟后才报错"""
+    import json
+    r = subprocess.run(["ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", str(path)],
+                       capture_output=True, text=True, timeout=120)
+    v = next(s for s in json.loads(r.stdout or "{}").get("streams") or [] if s.get("codec_type") == "video")
+    return int(v["width"]), int(v["height"])
+
+
 def main(src: str, dst: str):
     src, dst = Path(src), Path(dst)
+    w_, h_ = video_wh(src)          # W46：先取宽高（失败就别白跑几分钟 minterpolate）
     w, n = phase_weights(src)
     T = np.concatenate([[0.0], np.cumsum([w[(i + 1) % 4] for i in range(n - 1)])])
     T = T * (n - 1) / T[-1]
@@ -61,9 +72,6 @@ def main(src: str, dst: str):
         subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-an", "-vf",
                         f"minterpolate=fps={24 * UP}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1",
                         "-c:v", "ffv1", str(up)], check=True)
-        w_, h_ = (int(x) for x in subprocess.run(
-            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of",
-             "csv=p=0", str(src)], capture_output=True, text=True).stdout.strip().split(","))
         fs = w_ * h_ * 3
         want = {}
         for k, p in enumerate(pick):

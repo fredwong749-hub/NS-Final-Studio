@@ -16,6 +16,8 @@ fwd.py 把 1818x 转到本机 8188/8189/8191），笔记本只做控制面。复
   auto                      无人值守：等跳板 TCP 恢复 → switch → loop
   health HOST               服务器侧每张卡利用率 / 队列 / producer 心跳 / night 心跳；空闲但有活 ≥ 10 分钟写报警
   lifecycle [--dry|--apply] W18：主剧阶段 ≥ 出图 → 自动起 producer（笔记本 restart_producer.ps1 / 服务器 request_restart）；≥ 尾帧 → night
+  run_sync [HOST…] [--dry]  W40：在产剧 run 级产物（sop_gate 证据 / 派生参考图 / asset_jobs / 导入稿 / 资产清单）增量推服务器（loop 每 2 分钟）
+  vqa [--dry]               W40：gpu36 看图 :8870 + watcher + 人数检测 :8893（GPU1，不碰 GPU2）+ 其内网入口，不在就拉起；gpu33 内网入口；score_infra 上限报警（loop 每 5 分钟）
   loop                      常驻：5 分钟一次 health；20 分钟两台各 pull 一次；代码有改动就 push --code-only + restart
 不删任何文件（两边都不删）。日志 ops/logs/resident_sync.log，状态 data/autopilot/resident_sync.json。
 """
@@ -24,6 +26,8 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -800,17 +804,18 @@ def push_control(host: str, force: bool = False) -> dict:
     st = jl(STATE, {}) or {}
     hs = st.setdefault(host, {}).setdefault("control_sha", {})
     done = {}
-    for rel in CONTROL_FILES:
+    for rel in control_files():          # W40：含每部在产剧的 run 级 ready 清单（L-178）
         f = ROOT / rel
         if not f.is_file():
             continue
         sha = hashlib.sha256(f.read_bytes()).hexdigest()[:16]
         if hs.get(rel) == sha and not force:
             continue
-        ssh(host, f"cat > /tmp/ctl_{Path(rel).name}", data=f.read_bytes(), timeout=300, tries=4)
+        tmpn = "/tmp/ctl_" + rel.replace("/", "__")        # W40：旧路径与 run 级都叫 ready_episodes.json，临时名按全路径区分
+        ssh(host, f"cat > {tmpn}", data=f.read_bytes(), timeout=300, tries=4)
         code = REMOTE_MERGE.replace("__R__", R)
         ssh(host, f"cat > /tmp/ctl_merge.py", data=code.encode(), timeout=120, tries=4)
-        out = ssh(host, f"{PY[host]} /tmp/ctl_merge.py {rel} /tmp/ctl_{Path(rel).name}", timeout=120, tries=4)
+        out = ssh(host, f"{PY[host]} /tmp/ctl_merge.py {rel} {tmpn}", timeout=120, tries=4)
         hs[rel] = sha
         done[rel] = out.decode("utf-8", "replace").strip()
     js(STATE, st)
@@ -1326,6 +1331,864 @@ def lifecycle_thread(every_s: int = 60) -> None:
         time.sleep(max(5.0, every_s - (time.time() - t0)))
 
 
+# ------------------------------------------------------------------ W40 SYNC+VQA-RESIDENT（总调度 11-04 01:4x；L-163 自动化写在代码上）
+# STATE 坏点①：服务器 producer 依赖的笔记本产物不自动同步（L-178/179/180，ISS-1103-181531 / 181720：11-03 晚全靠手工 tar 推 gpu33）。
+# STATE 坏点②：gpu36 看图服务（127.0.0.1:8870 server.py + watcher）不在 resident 管辖，死了没人知道 → Q9/Q10 untested → score_infra 循环
+# （ISS-1103-220512）。两件都做成 loop 里的独立守护线程，失败 report_issue 阻断（连续失败才登，恢复前不重登），不静默。
+W40_WHO = "resident_sync.W40"
+RUN_SYNC_TICK = True
+RUN_SYNC_EVERY_S = 120
+RUN_SYNC_STATE = ROOT / "data/autopilot/run_sync.json"
+RUN_SYNC_FAIL_REPORT = 2                    # 连续 2 拍失败才登记阻断卡点（一拍断线不报）
+RUN_SYNC_BIG = 512 * 1024                   # 单文件 ≥ 512 KB 算大文件：走 <host>-hk 单独传（FONG-QUICK：大文件不走 -t）
+RUN_SYNC_SMALL_BATCH = 2 * 1024 * 1024      # 小文件走命令主连接 stdin tar，每批 ≤ 2 MB
+RUN_SYNC_BIG_BATCH = 32 * 1024 * 1024       # 大文件每个 tar ≤ 32 MB，经 rssh.bulk_put（sftp <host>-hk）传到 {OFF}/.inbox 再原子安装
+RUN_SYNC_MTIME_SLACK = 2.0
+# 不推的：写手包 / 评审 / 作废稿 / 备份（服务器不读）；服务器自己写的（producer 状态、sop_gate 退避、视频状态）；追加日志
+RUN_SYNC_SKIP_PARTS = {"writer_tasks", "writer_out", "writer_tasks_void", "writer_out_void", "judge_p1", "superseded", "backups",
+                       "_recheck", "metrics", "hollywood", "video"}
+RUN_SYNC_SKIP_PART_PREFIX = ("_rejected",)
+RUN_SYNC_SKIP_NAMES = {"_producer.json", "_sop_backoff.json", "_recheck"}
+RUN_SYNC_SKIP_EXT = (".log", ".jsonl", ".bak", ".done", ".tmp")
+
+
+def run_sync_runs() -> list[str]:
+    """要同步的剧：主剧 + runs.json 里 status=producing 的（第二季等），去重保序"""
+    out = [RUN_ID]
+    try:
+        out += [r for r in _RUNS.list_runs(status="producing") if r not in out]
+    except Exception as e:  # noqa: BLE001
+        log("run_sync", "在产剧列表读不了，只同步主剧", repr(e)[:160])
+    return out
+
+
+def run_media_dirs(run: str) -> list[str]:
+    """W46：night finalize（服务器上合成整集）按剧读的声音 / 配乐资产目录——config/voices_v2.json 各候选 ref_wav 所在的顶层目录
+    （data/assets/voices_v2）、config/music_v2.json 曲库文件目录（data/music/v2_style）、集级 BGM 目录 data/music/<剧>。
+    11-04 03:2x 实测两台服务器都没有 data/assets/voices_v2 → ns_post.run_media.voice_config 校验失败 → night 每集 hold_voices。
+    只收 config 里登记了 run = 本剧的；读不到 = 不加（不影响别的同步项）"""
+    out = []
+    try:
+        for name in ("voices_v2.json", "music_v2.json"):
+            d = jl(ROOT / "config" / name, {}) or {}
+            if d.get("run") not in (None, run) and name == "music_v2.json":
+                continue
+            for m in re.finditer(r'"(?:ref_wav|file|sample_wav)"\s*:\s*"(data/(?:assets|music)/[^/"]+)/', json.dumps(d, ensure_ascii=False)):
+                out.append(m.group(1))
+        if not _is_legacy_run(run):
+            out.append(f"data/music/{run}")
+    except Exception as e:  # noqa: BLE001  # arch-ok: 媒体目录推导失败只少推这一项，记日志
+        log("run_sync", "声音 / 配乐目录推导失败", repr(e)[:160])
+    return [d for d in dict.fromkeys(out) if (ROOT / d).is_dir()]
+
+
+def _is_legacy_run(run: str) -> bool:
+    reg = jl(ROOT / "config/pipeline/runs.json", {}) or {}
+    return run == reg.get("legacy_unprefixed_run")
+
+
+def run_sync_sources(run: str) -> tuple[list[str], list[str]]:
+    """→ (目录, 单文件)：服务器侧 sop_gate / producer 读的 run 级产物（tools/master/sop_gate.py check_* 的读路径）+ 派生参考图 + 资产清单"""
+    dirs = [f"data/pipeline/runs/{run}",               # P4_epNN.md / autoflow_epNN.json / assets/ / images/（refcrops、refboards + _derived_index.json）/ looks / continuity
+            f"data/pipeline/sop_gate/{run}",           # epNN_prompts.json（提示词证据）
+            f"data/pipeline/asset_jobs/{run}",         # _ready_epNN.json（资产就绪）
+            f"data/import/runs/{run}"]                 # 导入稿 script_v2.json（sop_gate.episodes_of / shots_of）
+    dirs += run_media_dirs(run)
+    files = []
+    mf = (((jl(ROOT / "config/pipeline/runs.json", {}) or {}).get("runs") or {}).get(run) or {}).get("assets_manifest")
+    if mf:
+        files.append(str(mf).replace("\\", "/"))       # sop_gate.prompt_fingerprint 的 manifest_sha
+    return dirs, files
+
+
+def run_sync_skip(rel: str) -> bool:
+    parts = rel.split("/")
+    return (skipped(rel) or any(p in RUN_SYNC_SKIP_PARTS or p.startswith(RUN_SYNC_SKIP_PART_PREFIX) for p in parts[:-1])
+            or parts[-1] in RUN_SYNC_SKIP_NAMES or rel.endswith(RUN_SYNC_SKIP_EXT) or ".bak-" in parts[-1])
+
+
+def run_sync_local(runs: list[str] | None = None) -> tuple[dict, list[str]]:
+    """→ (本地清单 {rel: (size, mtime)}, 远端要列的路径)"""
+    loc, rem_paths = {}, []
+    for run in runs or run_sync_runs():
+        dirs, files = run_sync_sources(run)
+        rem_paths += dirs + files
+        for rel, v in local_manifest(dirs).items():
+            if not run_sync_skip(rel):
+                loc[rel] = v
+        for rel in files:
+            p = ROOT / rel
+            if p.is_file():
+                st = p.stat()
+                loc[rel] = (st.st_size, st.st_mtime)
+    return loc, sorted(set(rem_paths))
+
+
+def run_sync_todo(loc: dict, rem: dict, slack: float = RUN_SYNC_MTIME_SLACK) -> list[str]:
+    """只推“服务器没有”或“笔记本比服务器新”的；服务器更新的不盖（W38 等在服务器上直接改的证据不被旧值盖回去）。小文件先"""
+    out = [rel for rel, (s, t) in loc.items() if rel not in rem or t > rem[rel][1] + slack]
+    return sorted(out, key=lambda f: (loc[f][0], f))
+
+
+def _pack(files: list[str], loc: dict, cap: int) -> list[list[str]]:
+    out, cur, n = [], [], 0
+    for f in files:
+        s = loc[f][0]
+        if cur and n + s > cap:
+            out.append(cur)
+            cur, n = [], 0
+        cur.append(f)
+        n += s
+    if cur:
+        out.append(cur)
+    return out
+
+
+def _install_stdin(host: str, blob: bytes, ssh_fn=None) -> None:
+    (ssh_fn or ssh)(host, f"set -e; T=$(mktemp -d {OFF}/.push.XXXXXX); tar xf - -C $T; " + atomic_install_cmd(R) + "; echo ok",
+                    data=blob, timeout=BATCH_TIMEOUT_S, tries=3)
+
+
+def _install_bulk(host: str, blob: bytes, ssh_fn=None, bulk_fn=None) -> str:
+    """大文件：tar 落本机临时文件 → rssh.bulk_put（sftp 经 <host>-hk 单独一条连接）→ 命令主连接只发一句解包 + 原子安装。
+    bulk 不可用（非 Windows / NS_BULK_UPLOAD=off）或失败 → 退回命令主连接 stdin（记日志，不当成功也不吞）。→ 走的哪条路"""
+    import tempfile
+    name = f"rs_{int(time.time() * 1000)}_{os.getpid()}.tar"
+    fd, tmp = tempfile.mkstemp(suffix=".tar")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(blob)
+        res = (bulk_fn or _rssh().bulk_put)(host, [(tmp, name)], f"{OFF}/.inbox", timeout=max(300, len(blob) // 200_000 + 120))
+    finally:
+        try:
+            os.unlink(tmp)            # 本机临时 tar（自己刚写的传输件，不是项目文件）
+        except OSError as e:
+            log("run_sync", host, "本机临时 tar 删不掉", tmp, repr(e)[:80])
+    if res is None or getattr(res, "returncode", 1) != 0:
+        err = "" if res is None else (getattr(res, "stderr", b"") or b"")[-200:].decode("utf-8", "replace")
+        log("run_sync", host, "hk 单独传不可用 / 失败 → 退回命令主连接", f"{len(blob) / 1e6:.2f} MB", err.replace("\n", " "))
+        _install_stdin(host, blob, ssh_fn)
+        return "stdin"
+    (ssh_fn or ssh)(host, f"set -e; T=$(mktemp -d {OFF}/.push.XXXXXX); tar xf {OFF}/.inbox/{name} -C $T; rm -f {OFF}/.inbox/{name}; "
+                          + atomic_install_cmd(R) + "; echo ok", timeout=BATCH_TIMEOUT_S, tries=3)
+    return "hk"
+
+
+def _w40_issue(step: str, what: str, fix_hint: str, run: str | None = None, ep: int = 0) -> str | None:
+    ri = _lc_mod(ROOT, "tools/master/report_issue.py", "ns_report_issue_w40")
+    rec = ri.report(run or RUN_ID, ep, step, W40_WHO, what, True, fix_hint,
+                    issues=ROOT / "data/pipeline/issues.jsonl", live=ROOT / "docs/master/V2_LIVE.md")
+    return rec.get("id")
+
+
+def _w40_fail(st: dict, key: str, what: str, step: str, fix_hint: str, after: int, issue_fn=None) -> str | None:
+    """连续失败计数；到 after 次且这一段失败还没登记过 → 登记阻断卡点一次（恢复后 _w40_ok 清掉，下次再坏再登）"""
+    rec = st.setdefault(key, {})
+    rec["fails"] = int(rec.get("fails") or 0) + 1
+    rec["last_error"] = what[:300]
+    rec["last_fail_at"] = time.strftime("%F %T")
+    if rec["fails"] >= after and not rec.get("issue"):
+        try:
+            rec["issue"] = (issue_fn or _w40_issue)(step, what, fix_hint)
+        except Exception as e:  # noqa: BLE001
+            log("W40 report_issue 失败", key, repr(e)[:200])        # 登记失败也留痕：下拍再试
+        log("W40 登记阻断卡点", key, rec.get("issue"), what[:200])
+    return rec.get("issue")
+
+
+def _w40_ok(st: dict, key: str) -> None:
+    rec = st.setdefault(key, {})
+    if rec.get("fails"):
+        log("W40 恢复", key, f"之前连续失败 {rec.get('fails')} 拍", "卡点" if rec.get("issue") else "", rec.get("issue") or "")
+    rec.update(fails=0, issue=None, last_ok_at=time.strftime("%F %T"))
+
+
+def _stat_now(rel: str) -> tuple | None:
+    try:
+        st = (ROOT / rel).stat()
+    except OSError:
+        return None           # 推完被移走 / 改名：同样按“途中变了”处理，下拍清单自然不再要它
+    return (st.st_size, st.st_mtime)
+
+
+def run_sync_authoritative(runs: list[str] | None = None) -> list[str]:
+    """笔记本为唯一真源的单文件（run_sync_sources 的 files：资产包清单 assets_v2/manifest.json）——服务器 sop_gate 提示词证据指纹
+    （manifest_sha）拿它算，两边必须逐字节一致"""
+    out = []
+    for run in runs or run_sync_runs():
+        out += run_sync_sources(run)[1]
+    return list(dict.fromkeys(out))
+
+
+def run_sync_sha_todo(host: str, loc: dict, rem: dict | None = None, runs: list[str] | None = None, ssh_fn=None) -> list[str]:
+    """W46（总调度 04:0x 令 ③）：mtime 规则“服务器更新的不盖”对这几个真源文件会误判——11-04 03:5x gpu36 的
+    assets_v2/manifest.json 与笔记本 / gpu33 不同（09f9… vs 8e89…），而服务器副本的 mtime 比笔记本晚（04:0x 实测两台都比笔记本晚 6–13 s），
+    笔记本这份不算“更新” → 不推 → gpu36 上 ep01 提示词证据判“过期”。这里对真源单文件比 sha：远端有且 sha 不同 → 推（不看 mtime）。
+    只查 mtime 规则会放过的那种（远端在、且远端 mtime 比笔记本新过余量 = 判成“服务器更新”；正常 tar 推送 mtime 相同）；远端读不到 / 解析不了 = 不加"""
+    files = [f for f in run_sync_authoritative(runs) if f in loc
+             and (rem is None or (f in rem and rem[f][1] > loc[f][1] + RUN_SYNC_MTIME_SLACK))]
+    if not files:
+        return []
+    import hashlib
+    try:
+        raw = (ssh_fn or ssh)(host, f"cd {R} && sha256sum {' '.join(files)} 2>/dev/null; true", timeout=120)
+        rem = {}
+        for ln in (raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw)).splitlines():
+            parts = ln.split(None, 1)
+            if len(parts) == 2 and len(parts[0]) == 64:
+                rem[parts[1].strip().lstrip("*")] = parts[0]
+        out = []
+        for f in files:
+            if f in rem and rem[f] != hashlib.sha256((ROOT / f).read_bytes()).hexdigest():
+                out.append(f)
+        return out
+    except Exception as e:  # noqa: BLE001  # arch-ok: sha 比对失败只少这一项，mtime 规则照常
+        log("run_sync", host, "真源文件 sha 比对失败", repr(e)[:160])
+        return []
+
+
+def run_sync_tick(host: str, dry: bool = False, ssh_fn=None, bulk_fn=None, rem_fn=None, issue_fn=None, runs=None) -> dict:
+    """一拍：在产剧 run 级产物（ready 清单另由 push_control 按对象合并推）→ host 增量同步 → 复核 → 失败登记。返回本拍摘要"""
+    st = jl(RUN_SYNC_STATE, {}) or {}
+    key = f"sync:{host}"
+    res = {"host": host, "at": time.strftime("%F %T")}
+    try:
+        loc, rem_paths = run_sync_local(runs)
+        rem = (rem_fn or remote_manifest)(host, rem_paths)
+        todo = run_sync_todo(loc, rem)
+        shad = [f for f in run_sync_sha_todo(host, loc, rem, runs, ssh_fn) if f not in todo]
+        if shad:
+            res["sha_mismatch"] = shad
+            todo += shad
+        res.update(local=len(loc), todo=len(todo), mb=round(sum(loc[f][0] for f in todo) / 1e6, 2), sample=todo[:5])
+        if dry or not todo:
+            res["sent"] = 0
+            if not dry:
+                _w40_ok(st, key)
+            return res
+        small = [f for f in todo if loc[f][0] < RUN_SYNC_BIG]
+        big = [f for f in todo if loc[f][0] >= RUN_SYNC_BIG]
+        via = {"stdin": 0, "hk": 0}
+        for b in _pack(small, loc, RUN_SYNC_SMALL_BATCH):
+            _install_stdin(host, tar_bytes(b), ssh_fn)
+            via["stdin"] += len(b)
+        for b in _pack(big, loc, RUN_SYNC_BIG_BATCH):
+            via[_install_bulk(host, tar_bytes(b), ssh_fn, bulk_fn)] += len(b)
+        rem2 = (rem_fn or remote_manifest)(host, rem_paths)
+        moved = [f for f in todo if _stat_now(f) != loc[f]]       # 推的途中笔记本又改了（asset_worker 等在写）→ 下拍按新清单再推，不算失败
+        left = [f for f in todo if f not in moved and (f not in rem2 or rem2[f][0] != loc[f][0])]
+        res.update(sent=len(todo) - len(left) - len(moved), via=via, left=left[:20], changed_during=len(moved))
+        if left:
+            raise RuntimeError(f"推完复核仍缺 / 大小不符 {len(left)} 个（例 {left[:3]}）")
+        _w40_ok(st, key)
+    except Exception as e:  # noqa: BLE001
+        res["error"] = repr(e)[:300]
+        _w40_fail(st, key, f"笔记本 → {host} 的 run 级产物同步失败（连续 {int((st.get(key) or {}).get('fails') or 0) + 1} 拍）：{repr(e)[:200]}",
+                  "同步", f"看 ops/logs/resident_sync.log 的 run_sync 行；手工补：resident_sync.py run_sync {host}；"
+                         f"大文件走 {host}-hk（FONG-QUICK），检查 tunnel_supervisor", RUN_SYNC_FAIL_REPORT, issue_fn)
+    finally:
+        st[f"last:{host}"] = res
+        js(RUN_SYNC_STATE, st)
+    log("run_sync", host, json.dumps({k: res.get(k) for k in ("todo", "mb", "sent", "via", "changed_during", "error") if k in res}, ensure_ascii=False),
+        ("例 " + ", ".join(res.get("sample") or [])[:200]) if res.get("todo") else "无差异")
+    return res
+
+
+# ---------------------------------------------------------------- W46 RELAY：出图机 → 视频机的首尾帧中继（总调度 04:0x 定）
+# 项目方 03:5x：“gpu36 也并行一起跑这样更快”→ ep01 视频段可放 gpu36（partition video 改给 gpu36 时）。前提①：通过的首尾帧要到 gpu36。
+# 原机制都不行：push_frames 只在手动 video_up 里调；run_sync 不含 data/renders；笔记本的 ep01 takes.json 与 gpu33 已分叉（active 版本号不同、
+# 文件缺），不能用笔记本那份。做法：以出图机（partition images）为真源，经笔记本两条常驻主连接 ssh src tar | ssh dst 安装，
+# 只传“视频归 dst、出图归别机”的集：每镜 takes.json + 当前 image / last 文件。安装时只覆盖不删；takes.json 合并 = 出图机的
+# image / last（及其它非视频阶段）+ 视频机自己的 video 版本与 active.video（视频机 register_takes 登记的不被冲掉）。
+# 不是跨机共享出图（work_stealing=false 照旧）：出图机照常出，视频机只读。开关 NS_RELAY_FRAMES=off；每 RELAY_EVERY_S 一拍。
+RELAY_EVERY_S = 300
+RELAY_STATE = ROOT / "data/autopilot/relay_frames.json"
+RELAY_TIMEOUT_S = 600
+RELAY_FAIL_REPORT = 3
+
+def merge_takes(src, dst):
+    out = dict(src)
+    keep = [t for t in (dst or {}).get("takes") or [] if t.get("stage") == "video"]
+    out["takes"] = [t for t in src.get("takes") or [] if t.get("stage") != "video"] + keep
+    act = dict(src.get("active") or {})
+    act.pop("video", None)
+    if ((dst or {}).get("active") or {}).get("video") is not None:
+        act["video"] = dst["active"]["video"]
+    out["active"] = act
+    return out
+
+
+import inspect as _inspect
+RELAY_MERGE_SRC = "\n" + _inspect.getsource(merge_takes)   # 远端安装脚本内嵌同一段源码（本地与远端同一份；W46：不再 exec，静态检查能看到定义）
+
+RELAY_LIST = r"""
+import hashlib, json, os, sys
+run, eps = sys.argv[1], [int(x) for x in sys.argv[2].split(",") if x]
+def sha(p):
+    return hashlib.sha256(open(p, "rb").read()).hexdigest()
+out = {}
+for ep in eps:
+    base = "data/renders/%s/ep%02d" % (run, ep)
+    if not os.path.isdir(base):
+        continue
+    for sd in sorted(os.listdir(base)):
+        tj = base + "/" + sd + "/takes.json"
+        if not os.path.isfile(tj):
+            continue
+        try:
+            d = json.load(open(tj, encoding="utf-8"))
+        except ValueError:
+            continue
+        out[tj] = [os.path.getsize(tj), sha(tj)]
+        act = d.get("active") or {}
+        for t in d.get("takes") or []:
+            st = t.get("stage")
+            if st in ("image", "last") and act.get(st) == t.get("n") and t.get("file"):
+                f = "data/" + str(t["file"]).replace(chr(92), "/").lstrip("/")
+                if f.startswith("data/renders/%s/" % run) and os.path.isfile(f):
+                    out[f] = [os.path.getsize(f), None]
+print(json.dumps(out))
+"""
+
+RELAY_INSTALL = r"""
+import fcntl, io, json, os, sys, tarfile, time
+MERGE
+PREFIX = sys.argv[1]          # 本剧渲染根（runs.renders_dir 相对路径 + "/"，调用方传）
+blob = sys.stdin.buffer.read()
+done = []
+with tarfile.open(fileobj=io.BytesIO(blob)) as tf:
+    for m in tf.getmembers():
+        n = m.name
+        if not m.isfile() or ".." in n or not n.startswith(PREFIX):
+            continue
+        data = tf.extractfile(m).read()
+        os.makedirs(os.path.dirname(n), exist_ok=True)
+        tmp = n + ".relay.tmp"
+        if n.endswith("/takes.json"):
+            lk = open(os.path.join(os.path.dirname(n), "takes.json.lock"), "a+")
+            t0 = time.time()
+            while True:
+                try:
+                    fcntl.flock(lk.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    if time.time() - t0 > 60:
+                        raise
+                    time.sleep(0.2)
+            try:
+                try:
+                    cur = json.load(open(n, encoding="utf-8")) if os.path.isfile(n) else None
+                except ValueError:
+                    cur = None
+                new = merge_takes(json.loads(data.decode("utf-8")), cur)
+                open(tmp, "w", encoding="utf-8").write(json.dumps(new, ensure_ascii=False, indent=1))
+                os.replace(tmp, n)
+            finally:
+                fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
+                lk.close()
+        else:
+            open(tmp, "wb").write(data)
+            os.utime(tmp, (m.mtime, m.mtime))
+            os.replace(tmp, n)
+        done.append(n)
+print(json.dumps({"installed": len(done)}))
+""".replace("MERGE", RELAY_MERGE_SRC)
+
+
+def _renders_prefix(run: str) -> str:
+    """本剧渲染根的仓库相对前缀（runs.renders_dir，K-OPS-F24；V2 = data/renders/<剧>/）"""
+    return _RUNS.renders_dir(run, ROOT).relative_to(ROOT).as_posix() + "/"
+
+
+def relay_pairs(run: str, part: dict | None = None) -> list[tuple[str, str, int]]:
+    """→ [(出图机, 视频机, 集)]：partition（按剧 runs.<剧> 优先，同 night.partition_hosts 口径）里视频归 dst、出图归另一台服务器的集"""
+    if part is None:
+        sys.path.insert(0, str(ROOT / "tools/netfix"))
+        import dispatch as _D
+        part = _D.read_partition()
+    sec = ((part or {}).get("runs") or {}).get(run) or part or {}
+    img = {int(e): h for h, eps in (sec.get("images") or (part or {}).get("images") or {}).items() for e in eps}
+    vid = {int(e): h for h, eps in (sec.get("video") or (part or {}).get("video") or {}).items() for e in eps}
+    return sorted((img[e], h, e) for e, h in vid.items() if e in img and img[e] != h and img[e] in HOSTS and h in HOSTS)
+
+
+def relay_video_frames(run: str | None = None, part: dict | None = None, ssh_fn=None, state_path: Path | None = None) -> dict:
+    """一拍：每对（出图机 → 视频机）列出真源上的 takes.json（带 sha）+ 当前首尾帧文件 → 只传变了的（takes.json 按上次中继的 sha，
+    图按视频机上没有 / 大小不同）→ 视频机按 RELAY_INSTALL 安装（合并 takes.json，原子替换，不删）。返回摘要"""
+    run = run or RUN_ID
+    fn = ssh_fn or ssh
+    sp = state_path or RELAY_STATE
+    st = jl(sp, {}) or {}
+    res = {"run": run, "pairs": []}
+    groups: dict[tuple[str, str], list[int]] = {}
+    for src, dst, ep in relay_pairs(run, part):
+        groups.setdefault((src, dst), []).append(ep)
+    for (src, dst), eps in sorted(groups.items()):
+        key = f"relay:{src}>{dst}"
+        row = {"src": src, "dst": dst, "eps": eps}
+        try:
+            arg = f"{run} {','.join(map(str, eps))}"
+            have = json.loads(fn(src, f"cd {R} && python3 - {arg}", data=RELAY_LIST.encode(), timeout=RELAY_TIMEOUT_S).decode("utf-8", "replace").strip().splitlines()[-1])
+            imgs = [f for f in have if not f.endswith("/takes.json")]
+            q = "".join(f"[ -f '{f}' ] && stat -c '%n\t%s' '{f}'; " for f in imgs) + "true"
+            got = {}
+            for ln in fn(dst, f"cd {R} && {q}", timeout=RELAY_TIMEOUT_S).decode("utf-8", "replace").splitlines():
+                a = ln.split("\t")
+                if len(a) == 2:
+                    got[a[0]] = int(a[1])
+            sent_sha = (st.get(key) or {}).get("takes_sha") or {}
+            todo = [f for f, (size, h) in have.items() if (f.endswith("/takes.json") and sent_sha.get(f) != h)
+                    or (not f.endswith("/takes.json") and got.get(f) != size)]
+            todo = sorted(f for f in todo if not f.endswith("/takes.json")) + sorted(f for f in todo if f.endswith("/takes.json"))   # 先图后账：账到时图已在
+            row.update(listed=len(have), todo=len(todo), mb=round(sum(have[f][0] for f in todo) / 1e6, 2))
+            if todo:
+                lst = "\n".join(todo).encode()
+                blob = fn(src, f"cd {R} && tar cf - -T - 2>/dev/null; true", data=lst, timeout=RELAY_TIMEOUT_S)
+                out = fn(dst, f"cd {R} && python3 -c {shlex_quote(RELAY_INSTALL)} {shlex_quote(_renders_prefix(run))}", data=blob, timeout=RELAY_TIMEOUT_S)
+                row["installed"] = json.loads(out.decode("utf-8", "replace").strip().splitlines()[-1]).get("installed")
+                rec = st.setdefault(key, {})
+                rec.setdefault("takes_sha", {}).update({f: have[f][1] for f in todo if f.endswith("/takes.json")})
+            _w40_ok(st, key)
+        except Exception as e:  # noqa: BLE001
+            row["error"] = repr(e)[:300]
+            _w40_fail(st, key, f"{src} → {dst} 首尾帧中继失败（集 {eps}）：{repr(e)[:200]}", "视频",
+                      f"看 ops/logs/resident_sync.log 的 relay 行；手工：resident_sync.py relay；视频机缺首尾帧 = 视频段不派", RELAY_FAIL_REPORT)
+        res["pairs"].append(row)
+        log("relay", src, ">", dst, json.dumps({k: row.get(k) for k in ("eps", "todo", "mb", "installed", "error") if k in row}, ensure_ascii=False))
+    js(sp, st)
+    return res
+
+
+def _local_lock(p: Path, wait_s: float = 60):
+    """跨进程锁 takes.json.lock（与 ns_render.pipeline._file_lock 同一个文件：Windows msvcrt / Linux fcntl）"""
+    import contextlib
+
+    @contextlib.contextmanager
+    def cm():
+        f = open(p, "a+b")
+        t0 = time.time()
+        try:
+            while True:
+                try:
+                    if os.name == "nt":
+                        import msvcrt
+                        f.seek(0)
+                        msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                    else:
+                        import fcntl
+                        fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    if time.time() - t0 > wait_s:
+                        raise TimeoutError(f"拿不到 {p}")
+                    time.sleep(0.2)
+            yield
+        finally:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    f.seek(0)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+            f.close()
+    return cm()
+
+
+def relay_pull_laptop(run: str | None = None, part: dict | None = None, ssh_fn=None, state_path: Path | None = None,
+                      root: Path | None = None) -> dict:
+    """W46（总调度 04:4x 定：ep01 以 gpu33 为准）：中继的同一批集，出图机 → 笔记本回拉（笔记本 takes.json 已分叉）。
+    takes.json：出图机的 image / last 段覆盖、笔记本自己的 video 段与 active.video 保留（merge_takes），第一次覆盖前留
+    <takes.json>.bak-w46-pull（已有不覆盖）；当前首尾帧文件：本机没有 / 大小不同才拉。增量：takes.json 按上次回拉的远端 sha"""
+    run = run or RUN_ID
+    root = root or ROOT
+    fn = ssh_fn or ssh
+    sp = state_path or RELAY_STATE
+    st = jl(sp, {}) or {}
+    res = {"run": run, "pulls": []}
+    groups: dict[str, list[int]] = {}
+    for src, _dst, ep in relay_pairs(run, part):
+        groups.setdefault(src, []).append(ep)
+    for src, eps in sorted(groups.items()):
+        key = f"pull:{src}>laptop"
+        row = {"src": src, "eps": eps}
+        try:
+            have = json.loads(fn(src, f"cd {R} && python3 - {run} {','.join(map(str, eps))}", data=RELAY_LIST.encode(),
+                                 timeout=RELAY_TIMEOUT_S).decode("utf-8", "replace").strip().splitlines()[-1])
+            sent_sha = (st.get(key) or {}).get("takes_sha") or {}
+            todo = [f for f, (size, h) in have.items()
+                    if (f.endswith("/takes.json") and sent_sha.get(f) != h)
+                    or (not f.endswith("/takes.json") and not ((root / f).is_file() and (root / f).stat().st_size == size))]
+            todo = sorted(f for f in todo if not f.endswith("/takes.json")) + sorted(f for f in todo if f.endswith("/takes.json"))
+            row.update(listed=len(have), todo=len(todo), mb=round(sum(have[f][0] for f in todo) / 1e6, 2))
+            if todo:
+                blob = fn(src, f"cd {R} && tar cf - -T - 2>/dev/null; true", data="\n".join(todo).encode(), timeout=RELAY_TIMEOUT_S)
+                n, backed = 0, []
+                with tarfile.open(fileobj=io.BytesIO(blob)) as tf:
+                    for m in tf.getmembers():
+                        if not m.isfile() or ".." in m.name or not m.name.startswith(_renders_prefix(run)) or m.name not in todo:
+                            continue
+                        data = tf.extractfile(m).read()
+                        dst = root / m.name
+                        dst.parent.mkdir(parents=True, exist_ok=True)
+                        tmp = dst.with_name(dst.name + ".relay.tmp")
+                        if m.name.endswith("/takes.json"):
+                            with _local_lock(dst.with_name("takes.json.lock")):
+                                cur = jl(dst, None)
+                                bak = dst.with_name("takes.json.bak-w46-pull")
+                                if dst.is_file() and not bak.exists():
+                                    shutil.copy2(dst, bak)
+                                    backed.append(str(bak.relative_to(root)).replace("\\", "/"))
+                                tmp.write_text(json.dumps(merge_takes(json.loads(data.decode("utf-8")), cur), ensure_ascii=False, indent=1),
+                                               encoding="utf-8")
+                                os.replace(tmp, dst)
+                        else:
+                            tmp.write_bytes(data)
+                            os.utime(tmp, (m.mtime, m.mtime))
+                            os.replace(tmp, dst)
+                        n += 1
+                row.update(installed=n, backups=backed)
+                st.setdefault(key, {}).setdefault("takes_sha", {}).update({f: have[f][1] for f in todo if f.endswith("/takes.json")})
+            _w40_ok(st, key)
+        except Exception as e:  # noqa: BLE001
+            row["error"] = repr(e)[:300]
+            _w40_fail(st, key, f"{src} → 笔记本 首尾帧回拉失败（集 {eps}）：{repr(e)[:200]}", "视频",
+                      "看 ops/logs/resident_sync.log 的 relay_pull 行；手工：resident_sync.py relay", RELAY_FAIL_REPORT)
+        res["pulls"].append(row)
+        log("relay_pull", src, "> laptop", json.dumps({k: row.get(k) for k in ("eps", "todo", "mb", "installed", "backups", "error") if k in row},
+                                                     ensure_ascii=False)[:400])
+    js(sp, st)
+    return res
+
+
+def shlex_quote(s: str) -> str:
+    import shlex
+    return shlex.quote(s)
+
+
+def relay_thread(every_s: int = RELAY_EVERY_S) -> None:
+    """每 every_s 秒一拍 relay_video_frames；NS_RELAY_FRAMES=off 只停这条线；分区里没有“视频归别机”的集 = 空转"""
+    while True:
+        t0 = time.time()
+        if os.environ.get("NS_RELAY_FRAMES", "").lower() not in ("off", "0", "no"):
+            try:
+                for run in run_sync_runs():
+                    relay_video_frames(run)
+                    relay_pull_laptop(run)        # 同一批集回拉笔记本（以出图机为准）
+            except Exception as e:  # noqa: BLE001
+                log("relay error", repr(e)[:300])
+        time.sleep(max(5.0, every_s - (time.time() - t0)))
+
+
+def run_sync_thread(every_s: int = RUN_SYNC_EVERY_S) -> None:
+    """每 every_s 秒对每台服务器跑一拍 run_sync_tick（一台失败不影响另一台）；NS_RUN_SYNC=off 只停这条线"""
+    while True:
+        t0 = time.time()
+        if os.environ.get("NS_RUN_SYNC", "").lower() not in ("off", "0", "no"):
+            for h in HOSTS:
+                try:
+                    run_sync_tick(h)
+                except Exception as e:  # noqa: BLE001
+                    log("run_sync error", h, repr(e)[:300])
+        time.sleep(max(5.0, every_s - (time.time() - t0)))
+
+
+def control_files() -> list[str]:
+    """push_control 推的控制小文件：固定的 + 每部在产剧的 run 级 ready 清单（runs.ready_paths；V2 只认 data/autopilot/runs/<run>/，
+    L-178 / ISS-1103-181531：以前只推旧路径 data/autopilot/ready_episodes.json，服务器 producer 对 V2 永远 only=__none__）"""
+    out = list(CONTROL_FILES)
+    for run in run_sync_runs():
+        try:
+            for p in _RUNS.ready_paths(run, ROOT):
+                rel = Path(p).relative_to(ROOT).as_posix()
+                if rel not in out:
+                    out.append(rel)
+        except Exception as e:  # noqa: BLE001
+            log("control_files", run, "ready 路径算不出", repr(e)[:160])
+    return out
+
+
+# ---- 坏点②：gpu36 看图服务纳入 resident 管辖
+VQA_TICK = True
+VQA_EVERY_S = 300                          # 与 health 同拍
+VQA_HOST = "gpu36"
+VQA_STATE = ROOT / "data/autopilot/vqa_guard.json"
+VQA_DOWN_REPORT = 2                        # 拉起后仍连续 2 拍（10 分钟）/health 不通 → 阻断卡点
+VQA_LAN_REPORT = 2                         # gpu33 → 10.0.0.36:8870 连续 2 拍不通（本机通）→ 阻断卡点
+VQA_STUCK_S = 1800                         # 有排队但 30 分钟没出一个结论 → 阻断卡点（不自动杀：线上重启先审）
+SCORE_INFRA_WINDOW_S = 1800
+SCORE_INFRA_MAX = 12                       # 30 分钟内某台 producer score_infra / rescore_timeout ≥ 12 次 = 循环（ISS-1103-220512）→ 报警
+
+
+def vqa_env() -> dict:
+    """看图服务启动环境：照 tools/vqa/deploy_offline.sh（gpu36：VQA_GPUS=1 让道模式 + ComfyUI 端口），卡号读 config/vqa.json model.gpus；
+    gpu36:2 坏卡 / 专用卡一律剔除（红线）"""
+    m = (jl(ROOT / "config/vqa.json", {}) or {}).get("model") or {}
+    gpus = [int(g) for g in (m.get("gpus") or [1]) if int(g) != 2] or [1]   # W45 11-04：固定 GPU1（GPU0 让给 Pika）
+    ports = m.get("comfy_ports") or {"0": 8188, "1": 8189}
+    return {"VQA_GPUS": ",".join(map(str, gpus)), "VQA_COMFY": ",".join(f"{g}:{ports.get(str(g), 8188 + g)}" for g in gpus),
+            "port": int(m.get("port") or 8870), "lan_url": m.get("lan_url") or "http://10.0.0.36:8870"}
+
+
+REMOTE_VQA = r"""
+import json, os, subprocess, time, urllib.request
+START = __START__; SVCS = json.loads(r'''__SVCS__''')
+out = {"now": time.time(), "started": [], "services": {}}
+def pids(script, extra):
+    # 按 argv 认：argv[0] 是 python、某个参数正好是这个脚本（11-03 22:0x 手工起留下的 bash -c 外壳命令行里也带脚本路径，pgrep -f 会误数）
+    found = []
+    try:
+        names = os.listdir("/proc")
+    except OSError as e:
+        out.setdefault("errors", []).append("proc " + repr(e)[:80])
+        return found
+    for d in names:
+        if not d.isdigit() or int(d) == os.getpid():
+            continue
+        try:
+            argv = open("/proc/" + d + "/cmdline", "rb").read().decode("utf-8", "replace").split("\0")
+        except OSError:
+            continue          # 进程刚退出
+        if argv and "python" in os.path.basename(argv[0]) and script in argv[1:] and all(x in argv for x in extra):
+            found.append(int(d))
+    return found
+def health(port):
+    try:
+        return json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=8).read()), None
+    except Exception as e:
+        return None, repr(e)[:160]
+def spawn(sv):
+    os.makedirs(os.path.dirname(sv["log"]), exist_ok=True)
+    p = subprocess.Popen(sv["argv"], cwd=sv["cwd"], env={**os.environ, **sv["env"]}, stdin=subprocess.DEVNULL,
+                         stdout=open(sv["log"], "ab"), stderr=subprocess.STDOUT, start_new_session=True)
+    if sv.get("pidf"):
+        os.makedirs(os.path.dirname(sv["pidf"]), exist_ok=True)
+        with open(sv["pidf"], "w") as f:
+            f.write(str(p.pid))
+    return p.pid
+for sv in SVCS:
+    r = {"pids": pids(sv["script"], sv.get("match") or [])}
+    if sv.get("port"):
+        r["health"], r["health_error"] = health(sv["port"])
+    # 端口有人应答（如 router / proxy 占着）就不起；没有健康端口的（watcher / 内网转发）只看进程
+    down = (r.get("health") is None) if sv.get("port") else True
+    script_ok = os.path.isfile(sv["script"] if sv["script"].startswith("/") else os.path.join(sv["cwd"], sv["script"]))
+    if START and down and not r["pids"] and script_ok:
+        r["started"] = spawn(sv)
+        out["started"].append([sv["name"], r["started"]])
+    out["services"][sv["name"]] = r
+if out["started"]:
+    time.sleep(8)
+    for sv in SVCS:
+        r = out["services"][sv["name"]]
+        r["pids"] = pids(sv["script"], sv.get("match") or [])
+        if sv.get("port"):
+            r["health"], r["health_error"] = health(sv["port"])
+S = out["services"]
+out["server_pids"] = (S.get("vqa") or {}).get("pids") or []
+out["watcher_pids"] = (S.get("watcher") or {}).get("pids") or []
+out["health"] = (S.get("vqa") or {}).get("health")
+if (S.get("vqa") or {}).get("health_error"):
+    out["health_error"] = S["vqa"]["health_error"]
+print(json.dumps(out))
+"""
+
+REMOTE_LAN = r"""
+import json, urllib.request
+try:
+    h = json.loads(urllib.request.urlopen("__URL__/health", timeout=8).read())
+    print(json.dumps({"ok": True, "queue": h.get("queue"), "loaded": h.get("loaded")}))
+except Exception as e:
+    print(json.dumps({"ok": False, "error": repr(e)[:160]}))
+"""
+
+REMOTE_SCORE_INFRA = r"""
+import json, time, collections
+P = "__P__"; WIN = __WIN__
+now = time.time(); c = collections.Counter(); objs = set(); errs = collections.Counter(); last = 0
+try:
+    lines = open(P, encoding="utf-8", errors="replace").read().splitlines()[-3000:]
+except OSError as e:
+    print(json.dumps({"error": repr(e)[:160], "now": now})); raise SystemExit(0)
+for ln in lines:
+    try:
+        e = json.loads(ln)
+    except ValueError:
+        continue
+    t = float(e.get("t") or 0)
+    if e.get("ev") in ("score_infra", "rescore_timeout") and t >= now - WIN:
+        c[e["ev"]] += 1; objs.add(str(e.get("obj"))); errs[str(e.get("error") or "")[:60]] += 1; last = max(last, t)
+print(json.dumps({"now": now, "counts": dict(c), "n": sum(c.values()), "objs": sorted(objs)[:20], "errors": errs.most_common(3), "last": last}))
+"""
+
+
+def _remote_json(host: str, script: str, ssh_fn=None, timeout: int = 90) -> dict:
+    raw = (ssh_fn or ssh)(host, "python3 -", data=script.encode("utf-8"), timeout=timeout, tries=2).decode("utf-8", "replace")
+    rows = [ln for ln in raw.splitlines() if ln.startswith("{")]
+    if not rows:
+        raise RuntimeError(f"{host} 探测没有 JSON 输出：{raw[-200:]}")
+    return json.loads(rows[-1])
+
+
+ANOMALY_PORT = 8893
+ANOMALY_GPU_DEFAULT = 1                    # W38 02:1x 实测 GPU1 可用；原 ops/factory/anomaly_resident.sh 写死 GPU2 = 坏卡红线
+
+
+def anomaly_gpu() -> int:
+    """人数检测常驻用哪张卡：config/vqa.json anomaly.gpu（没有就 1）；2 一律拒（gpu36:2 红线）→ 退回 1"""
+    g = ((jl(ROOT / "config/vqa.json", {}) or {}).get("anomaly") or {}).get("gpu", ANOMALY_GPU_DEFAULT)
+    try:
+        g = int(g)
+    except (TypeError, ValueError):
+        g = ANOMALY_GPU_DEFAULT
+    return ANOMALY_GPU_DEFAULT if g == 2 else g
+
+
+def vqa_services(host: str = VQA_HOST) -> list[dict]:
+    """gpu36 上 resident 管的四个进程（起法照 tools/vqa/deploy_offline.sh 与 ops/factory/anomaly_resident.sh，但卡号在这里定、不碰 GPU2）：
+    vqa 看图 :8870 / watcher / anomaly 人数检测 :8893 / anomaly 的内网入口 10.0.0.36:8893（8870 的内网入口由 lan_proxy_keepalive 管）"""
+    env = vqa_env()
+    fw = OFF.rsplit("/", 1)[0]                       # = config/vqa.json model.dir 的上级（与 OFF 同根，不另写死）
+    b = fw + "/vqa"
+    lan_host = env["lan_url"].split("//", 1)[-1].split(":", 1)[0]
+    return [
+        {"name": "vqa", "port": env["port"], "script": b + "/server.py", "cwd": b, "argv": [b + "/venv/bin/python", "-u", b + "/server.py"],
+         "env": {"VQA_GPUS": env["VQA_GPUS"], "VQA_COMFY": env["VQA_COMFY"], "HF_HOME": b + "/hf", "PYTHONUNBUFFERED": "1"},
+         "log": b + "/logs/server.log", "pidf": b + "/server.pid"},
+        {"name": "watcher", "script": "tools/vqa/watch.py", "cwd": R, "argv": [b + "/venv/bin/python", "-u", "tools/vqa/watch.py"],
+         "env": {"OFFLINE_SELF": host, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}, "log": OFF + "/logs/vqa.out", "pidf": OFF + "/run/vqa.pid"},
+        {"name": "anomaly", "port": ANOMALY_PORT, "script": "tools/vqa/anomaly_server.py", "cwd": R,
+         "argv": [fw + "/venv/bin/python", "-u", "tools/vqa/anomaly_server.py"],
+         "env": {"CUDA_VISIBLE_DEVICES": str(anomaly_gpu()), "CUDA_DEVICE_ORDER": "PCI_BUS_ID", "ANOMALY_PORT": str(ANOMALY_PORT),
+                 "ANOMALY_COMFY_ROOT": fw + "/comfy", "NS_SCORE_THREADS": "4", "OMP_NUM_THREADS": "4", "MKL_NUM_THREADS": "4"},
+         "log": fw + "/factory/logs/anomaly_resident.log", "pidf": fw + "/factory/run/anomaly_resident.pid"},
+        {"name": "anomaly_lan", "script": "tools/netfix/lan_proxy.py", "match": [str(ANOMALY_PORT)], "cwd": R,
+         "argv": ["python3", "tools/netfix/lan_proxy.py", "--bind", lan_host, "--port", str(ANOMALY_PORT), "--allow", "10.0.0.33",
+                  "--target", f"127.0.0.1:{ANOMALY_PORT}"],
+         "env": {}, "log": fw + "/factory/logs/anomaly_lan_proxy.log", "pidf": fw + "/factory/run/anomaly_lan_proxy.pid"},
+    ]
+
+
+def vqa_probe(host: str = VQA_HOST, start: bool = True, ssh_fn=None) -> dict:
+    script = (REMOTE_VQA.replace("__START__", "True" if start else "False")
+              .replace("__SVCS__", json.dumps(vqa_services(host), ensure_ascii=False)))
+    return _remote_json(host, script, ssh_fn, timeout=150)
+
+
+def score_infra_probe(host: str, run: str = RUN_ID, ssh_fn=None) -> dict:
+    script = (REMOTE_SCORE_INFRA.replace("__P__", f"{R}/{producer_rel(run)}/log.jsonl").replace("__WIN__", str(SCORE_INFRA_WINDOW_S)))
+    return _remote_json(host, script, ssh_fn)
+
+
+def vqa_tick(ssh_fn=None, issue_fn=None, live_fn=None, start: bool = True) -> dict:
+    """一拍：① gpu36 本机探 /health + server / watcher 进程，不在就按 deploy_offline.sh 的口径拉起（只起不在的、不杀在跑的）；
+    ② 从 gpu33 经 lan_proxy 探 10.0.0.36:8870（producer 实际走的路）；③ 每台 producer 的 score_infra 次数（ISS-1103-220512）。
+    拉起成功 → V2_LIVE 一行；拉起后仍不通 / 卡住 / 内网不通 / score_infra 超上限 → report_issue 阻断（每段只登一次）"""
+    st = jl(VQA_STATE, {}) or {}
+    res = {"at": time.strftime("%F %T")}
+    live = live_fn or (lambda line: _lc_live(ROOT, line))
+    try:
+        p = vqa_probe(VQA_HOST, start=start, ssh_fn=ssh_fn)
+        h = p.get("health") or None
+        res.update(local_ok=bool(h), server=len(p.get("server_pids") or []), watcher=len(p.get("watcher_pids") or []), started=p.get("started"),
+                   loaded=(h or {}).get("loaded"), queue=(h or {}).get("queue"), served=(h or {}).get("served"),
+                   health_error=p.get("health_error"))
+        an = (p.get("services") or {}).get("anomaly") or {}
+        res.update(anomaly=len(an.get("pids") or []), anomaly_loaded=(an.get("health") or {}).get("loaded"),
+                   anomaly_lan_proxy=len(((p.get("services") or {}).get("anomaly_lan") or {}).get("pids") or []))
+        if p.get("started"):
+            live(f"🔧 resident_sync（W40）：{VQA_HOST} {[x[0] for x in p['started']]} 不在 → 已自动拉起（人数检测卡 GPU{anomaly_gpu()}，不碰 GPU2）；"
+                 f"看图 /health {'通' if h else '暂未通'}，人数检测 /health {'通' if an.get('health') else '暂未通'}（加载中下拍再看）")
+        if "anomaly" in (p.get("services") or {}):
+            if an.get("health"):
+                _w40_ok(st, "vqa:anomaly")
+            else:
+                _w40_fail(st, "vqa:anomaly", f"{VQA_HOST} 人数检测 127.0.0.1:{ANOMALY_PORT}/health 不通（进程 {res['anomaly']} 个；"
+                                             f"{'本拍已自动拉起' if any(x[0] == 'anomaly' for x in p.get('started') or []) else '进程在但不应答'}）："
+                                             f"{an.get('health_error')} → QB count=untested → score_infra 循环", "出图检测",
+                          f"gpu36 上看 factory/logs/anomaly_resident.log；起法 ops/factory/anomaly_resident.sh（GPU{anomaly_gpu()}，GPU2 红线）",
+                          VQA_DOWN_REPORT, issue_fn)
+        if h:
+            _w40_ok(st, "vqa:health")
+            now = float(p.get("now") or time.time())
+            q, last_job = int(h.get("queue") or 0), float(h.get("last_job") or h.get("started") or now)
+            if q > 0 and now - last_job > VQA_STUCK_S:
+                _w40_fail(st, "vqa:stuck", f"{VQA_HOST} 看图服务排队 {q} 张，{int((now - last_job) / 60)} 分钟没出一个结论"
+                                           f"（loaded={h.get('loaded')} waiting={h.get('why_waiting')}）", "看图",
+                          "看 /root/work/…/vqa/logs/server.log；卡在等显存就查 ComfyUI 队列；确认后手工重启 server.py", 1, issue_fn)
+            else:
+                _w40_ok(st, "vqa:stuck")
+        else:
+            _w40_fail(st, "vqa:health", f"{VQA_HOST} 看图服务 127.0.0.1:{vqa_env()['port']}/health 不通（server 进程 {res['server']} 个、"
+                                        f"watcher {res['watcher']} 个；{'本拍已自动拉起' if p.get('started') else '进程在但不应答'}）：{p.get('health_error')}",
+                      "看图", "gpu36 上看 vqa/logs/server.log；进程在但不应答需人工重启（resident 不杀在跑的进程）", VQA_DOWN_REPORT, issue_fn)
+    except Exception as e:  # noqa: BLE001
+        res["error"] = repr(e)[:300]
+        _w40_fail(st, "vqa:health", f"{VQA_HOST} 看图服务探测失败：{repr(e)[:200]}", "看图",
+                  "检查 gpu36 命令主连接（tunnel_supervisor）；连上后下一拍自动探测 / 拉起", VQA_DOWN_REPORT + 1, issue_fn)
+    lan_from = [x for x in HOSTS if x != VQA_HOST]
+    an_url = vqa_env()["lan_url"].rsplit(":", 1)[0] + f":{ANOMALY_PORT}"
+    for src in lan_from:
+        try:
+            alan = _remote_json(src, REMOTE_LAN.replace("__URL__", an_url), ssh_fn)
+            res[f"anomaly_lan_from_{src}"] = alan
+            if alan.get("ok") or not res.get("anomaly_loaded"):
+                _w40_ok(st, f"vqa:anomaly_lan:{src}")
+            else:
+                _w40_fail(st, f"vqa:anomaly_lan:{src}", f"{src} → {an_url} 人数检测内网入口不通（gpu36 本机通）：{alan.get('error')}",
+                          "出图检测", "gpu36 上 anomaly 的 lan_proxy（tools/netfix/lan_proxy.py --port 8893）；resident 下拍会补起", VQA_LAN_REPORT, issue_fn)
+        except Exception as e:  # noqa: BLE001
+            res[f"anomaly_lan_from_{src}"] = {"error": repr(e)[:160]}
+        try:
+            lan = _remote_json(src, REMOTE_LAN.replace("__URL__", vqa_env()["lan_url"]), ssh_fn)
+            res[f"lan_from_{src}"] = lan
+            if lan.get("ok"):
+                _w40_ok(st, f"vqa:lan:{src}")
+            elif res.get("local_ok"):                                  # 本机通、内网不通 = lan_proxy 的事
+                try:
+                    lan_proxy_keepalive()
+                except Exception as e:  # noqa: BLE001
+                    log("vqa_tick lan_proxy_keepalive", repr(e)[:160])
+                _w40_fail(st, f"vqa:lan:{src}", f"{src} → {vqa_env()['lan_url']} 看图内网入口不通（gpu36 本机通）：{lan.get('error')}",
+                          "看图", "gpu36 上 bash netfix/lan_proxy.sh；查 10.0.0.33→10.0.0.36:8870 防火墙", VQA_LAN_REPORT, issue_fn)
+        except Exception as e:  # noqa: BLE001
+            res[f"lan_from_{src}"] = {"error": repr(e)[:160]}
+    for hst in HOSTS:
+        try:
+            si = score_infra_probe(hst, ssh_fn=ssh_fn)
+            res[f"score_infra_{hst}"] = si.get("n")
+            if int(si.get("n") or 0) >= SCORE_INFRA_MAX:
+                _w40_fail(st, f"score_infra:{hst}",
+                          f"{hst} producer 30 分钟内 score_infra / rescore_timeout {si.get('n')} 次（{si.get('counts')}，"
+                          f"涉及 {len(si.get('objs') or [])} 个对象，例 {(si.get('objs') or [])[:3]}，错误 {si.get('errors')}）= 只重打分循环"
+                          f"（ISS-1103-220512）；gpu36 看图本拍：server={res.get('server')} loaded={res.get('loaded')} queue={res.get('queue')} "
+                          f"内网={((res.get('lan_from_gpu33') or {}).get('ok'))}", "出图检测",
+                          "看图通 → 查 producer 打分链路（ns_render postflight remote_error）；看图不通 → 先修 gpu36 看图；"
+                          "producer 侧重打分次数上限需改 producer.py（W38 所有）", 1, issue_fn)
+            else:
+                _w40_ok(st, f"score_infra:{hst}")
+        except Exception as e:  # noqa: BLE001
+            res[f"score_infra_{hst}"] = {"error": repr(e)[:160]}
+    st["last"] = res
+    js(VQA_STATE, st)
+    log("vqa_tick", json.dumps(res, ensure_ascii=False)[:600])
+    return res
+
+
+def vqa_thread(every_s: int = VQA_EVERY_S) -> None:
+    while True:
+        t0 = time.time()
+        if os.environ.get("NS_VQA_GUARD", "").lower() not in ("off", "0", "no"):
+            try:
+                vqa_tick()
+            except Exception as e:  # noqa: BLE001
+                log("vqa_tick error", repr(e)[:300])
+        time.sleep(max(5.0, every_s - (time.time() - t0)))
+
+
 def loop(pull_every_s: int = 1200, health_every_s: int = 300):
     """5 分钟一次健康 / 报警；20 分钟一次并回；代码有改动 → 推代码 + 服务器热重启（每台独立，一台断连不影响另一台）"""
     last_pull = {h: 0.0 for h in HOSTS}
@@ -1343,6 +2206,15 @@ def loop(pull_every_s: int = 1200, health_every_s: int = 300):
     if LIFECYCLE_TICK:                   # W18：主剧到“出图”自动起 producer / night（开关 sop_gate.json lifecycle.apply，默认只算计划）
         import threading
         threading.Thread(target=lifecycle_thread, name="lifecycle_tick", daemon=True).start()
+    if RUN_SYNC_TICK:                    # W40 坏点①：在产剧 run 级产物（sop_gate 证据 / 派生参考图 / 资产清单 / 导入稿）每 2 分钟增量同步两台
+        import threading
+        threading.Thread(target=run_sync_thread, name="run_sync", daemon=True).start()
+        threading.Thread(target=relay_thread, name="relay_frames", daemon=True).start()   # W46：出图机 → 视频机首尾帧中继
+        log("run_sync", "线程已启动", RUN_SYNC_EVERY_S, "s 一拍", list(HOSTS))
+    if VQA_TICK:                         # W40 坏点②：gpu36 看图服务 / watcher 探测 + 不在就拉起 + 内网入口 + score_infra 上限报警（与 health 同拍）
+        import threading
+        threading.Thread(target=vqa_thread, name="vqa_guard", daemon=True).start()
+        log("vqa_guard", "线程已启动", VQA_EVERY_S, "s 一拍", VQA_HOST)
     while True:
         for h in HOSTS:
             try:
@@ -1812,6 +2684,19 @@ def main(argv):
     elif cmd == "lifecycle":     # W18：lifecycle [--dry|--apply]（不给 = 按 sop_gate.json lifecycle.apply）
         dry = True if "--dry" in argv else (False if "--apply" in argv else None)
         print(json.dumps(lifecycle_tick(dry=dry), ensure_ascii=False, indent=1, default=str))
+    elif cmd == "run_sync":      # W40：run_sync [HOST…] [--dry]（不给 HOST = 两台）
+        for h in [a for a in argv[1:] if not a.startswith("--")] or list(HOSTS):
+            print(json.dumps(run_sync_tick(h, dry="--dry" in argv), ensure_ascii=False)[:2000])
+    elif cmd == "relay":         # W46：relay [--pairs]（--pairs = 只打印按 partition 算出的 出图机→视频机 集，不传）
+        if "--pairs" in argv:
+            print(json.dumps(relay_pairs(RUN_ID), ensure_ascii=False))
+        else:
+            print(json.dumps(relay_video_frames(), ensure_ascii=False, indent=1)[:3000])
+            print(json.dumps(relay_pull_laptop(), ensure_ascii=False, indent=1)[:3000])
+        if "--loop" in argv:                  # W46：常驻没重启时单独跑这条线（同一份代码，每 RELAY_EVERY_S 一拍）
+            relay_thread()
+    elif cmd == "vqa":           # W40：vqa [--dry]（--dry = 只探不拉起）
+        print(json.dumps(vqa_tick(start="--dry" not in argv), ensure_ascii=False, indent=1)[:3000])
     elif cmd == "loop":
         loop()
     else:

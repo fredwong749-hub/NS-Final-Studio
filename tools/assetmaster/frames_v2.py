@@ -97,7 +97,15 @@ def two_person_board(sr, plan):
     n = len(faces) + 1
     line = (f"图{n}是本镜参考板（{len(tiles)} 格，按格号）：" + "；".join(f"格{i}是{lab}" for i, (_, lab) in enumerate(tiles, 1)) +
             "。两人的服装、鞋、饰品必须与参考板对应格完全一致（款式、颜色、材质、细节），场景格只取空间、陈设与光线；参考板的背景与排版不取。")
-    members = [{"file": f, "label": lab, "role": next((r.role for r in sr.refs if r.file == f), "item"), "source": "board"} for f, lab in tiles]
+    # W38（11-04，ep01 S9）：格成员带上原参考的 zone / character / item_id——原来只留 role，鞋格 zone=None → preflight I4
+    # “鞋在画面里可见，但参考里没有鞋的单品图”，凡露脚的双人镜第 3 档（两张脸 + 参考板）一律被挡（鞋其实就在参考板里）
+    def _member(f, lab):
+        r = next((x for x in sr.refs if x.file == f and x.label == lab), None) or next((x for x in sr.refs if x.file == f), None)
+        m = {"file": f, "label": lab, "role": r.role if r else "item", "source": "board"}
+        if r is not None:
+            m.update({k: v for k in ("zone", "character", "item_id") if (v := getattr(r, k, None)) is not None})
+        return m
+    members = [_member(f, lab) for f, lab in tiles]
     slots = [*faces, AR.Slot(n, "board", board, None, [lab for _, lab in tiles], members, line, 0)]
     import dataclasses
     return dataclasses.replace(plan, slots=slots, prompt_prefix="".join(sl.line for sl in faces) + line,

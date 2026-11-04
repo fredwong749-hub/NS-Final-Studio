@@ -163,6 +163,15 @@ def _q9_ok_file(file: str) -> bool:
     return VQ.q9_passed({"items": [{"id": "Q9", "status": st}]})
 
 
+def own_take(file: str) -> bool:
+    """W41（11-04，C-14）：版本文件必须在本剧渲染根下（V1 = renders/epNN/SN/…，其它剧 = renders/<剧>/epNN/SN/…）。
+    V2 的 takes.json 里混进了 V1 版本并被设为当前（ep01-S8 / S10 的 active.image / active.last = 林晚），以前这里不查前缀
+    → 视频会拿 V1 首尾帧出 V2 片。不在本剧前缀下 = 不算（失败关闭）"""
+    rel_f = "data/" + str(file or "").replace("\\", "/").lstrip("/")
+    base = str(RENDERS).replace("\\", "/").rstrip("/") + "/"
+    return rel_f.startswith(base) and re.match(r"ep\d{2}/S\d+/", rel_f[len(base):]) is not None
+
+
 def passed_frames() -> dict:
     """已过契约（GEN_CONTRACT §2 postflight）并设为当前的首帧 → {镜: {file, postflight}}。
     来源：① data/renders/epNN/SN/takes.json 的 active.image，且该版本带 postflight.ok（或 contract.ok）；
@@ -183,12 +192,19 @@ def passed_frames() -> dict:
         # VQAGATE（项目方 11-01：“image 做出来后用本地图像模型检测……再跑视频”）：只给图片闸门（Q9）通过的首帧派视频；
         # 没有看图结果 = 未通过（config/vqa.json gate.video_requires_q9；enforce 关掉时 q9_passed 恒真）
         sid_k = f"{tj.parent.parent.name}-{tj.parent.name}"
+        if t and t.get("file") and not own_take(t["file"]):
+            ANOMALY_SKIPPED[sid_k] = f"v{n} 当前首帧不在本剧渲染目录（{t['file']}，跨剧版本 C-14），不进视频"
+            continue
         why_block = anomaly_block(sid_k, t["file"], pf, rows) if t and t.get("file") and pf.get("ok") else None
         if why_block:
             ANOMALY_SKIPPED[sid_k] = f"v{n} 首帧 anomaly 判出：{why_block}，不进视频（等重出）"
             continue
         if ACCEPT_REQUIRED and t and t.get("file") and pf.get("ok"):
             acc = accept_status(sid_k, t["file"], pf, rows)
+            # L-183（总调度 11-04）：尽力用尽后按 Q1–Q9 全过取的版本（postflight.review_needed=true）就是因为 Q10 / QB 没过才被取，
+            # 照 Q10 再挡一遍等于 L-183 白做（ep01 S4 v12 06:21 被挡）→ 视同验收通过、进视频，待项目方复核；人数 anomaly 照样挡（上面）
+            if acc != "pass" and pf.get("review_needed"):
+                acc = "pass"
             if acc != "pass":
                 ANOMALY_SKIPPED[sid_k] = (f"v{n} 首帧还没跑出图后验收，跑完通过再进视频" if acc is None
                                           else f"v{n} 首帧出图后验收 {acc}，不进视频")
@@ -286,6 +302,8 @@ def passed_lasts() -> dict:
         if not locked:
             n = (d.get("active") or {}).get("last")
         t = next((x for x in d.get("takes") or [] if x.get("stage") == "last" and x.get("n") == n), None)
+        if t and t.get("file") and not own_take(t["file"]):     # W41：跨剧尾帧（C-14）不当关键帧，定稿锁也不行
+            continue
         pf = (t or {}).get("postflight") or (t or {}).get("contract") or {}
         if t and t.get("file") and (locked or pf.get("ok")) and not t.get("master_reject") and (ROOT / "data" / t["file"]).exists():
             out[f"{tj.parent.parent.name}-{tj.parent.name}"] = {"file": "data/" + t["file"], "created_at": str(t.get("created_at") or "")}

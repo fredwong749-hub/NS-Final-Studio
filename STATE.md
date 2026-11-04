@@ -8,22 +8,22 @@
 ## 能跑到的环节（series10_v2 真实数据）
 - 剧本 → 导入闸门 → 资产就绪 → 提示词 ✅（ep01）；ep02 卡"资产就绪"（5 缺口，身份脸作业被 count=untested 误判 failed）；ep03 写手已交 a3（15:34），autoflow 待接续
 - 出图（首帧）✅ 能出（ep01 7 镜 14:17 已出）；出图检测 ❌ 经隧道打分/看图 12–30 分钟/镜、超时循环
-- 尾帧 ✅ 一镜（S10）；视频 ❌ 未到；整集预览 ❌；复盘 ❌
+- 尾帧 ❌（W41 01:5x 查实：S8/S10 的 active.image/last 与 S3/S7/S8/S10 的 active.video 都是 V1 林晚版指针，C-14 泄漏，已摘并隔离记录；V2 尾帧要从 V2 首帧重做）；视频 🎬 11/11 全部过闸登记（07:4x）；ep01 视频段已划 gpu36，帧由 relay 从 gpu33 送）；整集预览 🎬 07:54 成片已出并 08:45 拉回笔记本 data/episodes/series10_v2/ep01_v2.mp4（45.04 s，硬规矩 pass；L-092 整集 45<60 s 只记）；复盘 ✅ 07:56 RETRO_ep01.md 自动 done（film_score 28.3/50）；gpu36 sop_gate ep01=完成（九阶段全有证据）
 - 换代完成：服务器 sv-20261103-02；gpu33 producer 在跑、control only_n=11（ep01）；笔记本 resident_sync loop 17:48 已换新代码；gpu36 重启排队。根因链：V2 run 级 ready 清单从未写（L-178）
 
 ## 已知坏点（≤5）
-1. **服务器 producer 依赖的笔记本产物不自动同步**（ready 清单 / run 产物 / sop_gate 证据 / 派生参考图）：今晚全部手工 tar 推 gpu33 后才出图（L-178/179/180；ISS-181531/181720）
-2. **gpu36 看图服务不在 resident 管辖**：server.py/watcher 死了没人知道 → gpu33 出图后 Q9/Q10 untested → score_infra 循环（ISS-220512；22:0x 手工拉起中）
-3. **cut C 被挡**（A-G3 预检 docs/system_versions/CUTC_PRECHECK.md）：_kill_tree pid 复用误杀（= 今天 :8800/常驻被杀机制，P0）、K-OPS-W03 证据被 LIVE_PID_RE 排除、arch_scan 6 处退化 → W37 第一任 11-03 22:17 断网崩（①_kill_tree 已改完、31 测试过），11-04 重派第二任 ctx_aa966545c36c（Sonnet）只修 ②③ 剩 4 处；test_v1_leak 词表（W35）
+1. ~~服务器 producer 依赖的笔记本产物不自动同步~~（W40 02:30 已入码 run_sync，待下次 cut 入版；真实宕机自动拉起未验证）（ready 清单 / run 产物 / sop_gate 证据 / 派生参考图）：今晚全部手工 tar 推 gpu33 后才出图（L-178/179/180；ISS-181531/181720）
+2. ~~gpu36 看图服务不在 resident 管辖~~（W40 vqa_guard 已入码；score_infra 真因 = 8893 人数检测没人拉起，已起在 GPU1）：server.py/watcher 死了没人知道 → gpu33 出图后 Q9/Q10 untested → score_infra 循环（ISS-220512；22:0x 手工拉起中）
+3. **cut C 已入版 = sv-20261104-01（e56e5e1，tree addb1e0f，130 文件，七门全绿 694 passed）**：01:27 cut 的 git reset 撞上 11-03 17:29 陈旧 .git/index.lock（pid 复用误杀留下的，W37 已修根因；锁已改名隔离 index.lock.stale-20261103-1729），tag/index/状态快照由总调度 01:3x 补完；GitHub 推送第一次断线，已重试。**deploy 已完成**（项目方 01:45 亲手跑）：gpu33/gpu36 两台 ok；gpu33 01:49 排空后重启（producer pid 204016）；gpu36 重启 340461cfe44a 排队中；verify 02:02 两台 ok（golden ep01-S8 server_ok、manifest 一致）。冒烟 02:04–02:30 重跑 = **1/8**（eval/results/20261104-0204.json；G1 笔记本 :8870 没起、G3/G4 smoke_v2 无出图、G7 sop_gate 两遍不一致→W38）；best 不动 44e6c37。best 仍 = 44e6c37，等冒烟分升再移。
 4. merge_pull 并回按剧过滤已修（W36：否决 role/origin/path + 正证据，失败关闭；拒绝记 data/quarantine/<run>/merge_rejects_*.jsonl）——待入版 cut C；下次并回后看一次 live 统计
-5. 冒烟 2/8（R2）；R3（看门狗补起 :8800 + resident_guard 看护）代码已入树，冒烟未重跑——等 gpu36 看图恢复后跑
+5. 冒烟 1/8（R4，02:30；R2 曾 2/8）；R3（看门狗补起 :8800 + resident_guard 看护）代码已入树，冒烟未重跑——等 gpu36 看图恢复后跑
 - 已修待入版（cut C）：W17b/W18b/W20～W23/W6c/W14/W26/W26b/W27～W34/A-G3 分期 1
 
 ## 本轮工人（项目方 17:3x 放开并行）
-- W35（v1_leak 词表）、W36（merge_pull 按剧）、W37（cut C 前置修复）、A-G3（owner_inbox silent_read → 然后重跑 cut C dry）
+- 项目方 11-04 01:4x 原话："ep01搞了几天也搞不好,你现在只有一个命令,立马启动全部agents,一口气做完,做不完,不停止"。W38 ✅ 08:19 收工 + ✅ 11:1x cut D 红清（imgfix 测试改为真有分才断言；push_preflight_deps 已绿）（ep01 提示词→完成；hf-01..17 + sync36；报告 docs/master/handover/W38_EP01_REPORT.md；未完：S8 尾帧 Q9 结论与证据矛盾、vidgen rescore 不跑视频 VLM、6 版待项目方复核）、W40 ✅ 02:30 交付（resident_sync 新增 run_sync 每 120 s 推两台 + vqa_guard 每 300 s 探/拉起 gpu36 8870/8893；37+92 测试过；已重启常驻单份）、W41 ✅ 03:1x 交付（尾帧/视频/整集预览三段在 gpu33 沙箱实跑通：视频 5.167 s 硬规矩全过、预览 63 s；修 5 个 V2 视频链 bug；runbook docs/master/handover/EP01_VIDEO_STAGE_RUNBOOK.md；注意 episode_retro --auto 只认 night finalize 产出）、W42 ✅ 03:0x 交付（asset_refs 按角色取单品；S10 take7 Q2 pass）+ ✅ 06:08 L-184 + ✅ 09:10 cut D gen_contract 9 红清（测试过时：V1 夹具归档守卫；只改测试）、W44 ✅ 03:12 交付（producer.py：canary 按 code_sha+pid 隔离并自动恢复、rescore 每镜每小时 ≤3、尾帧→视频 night 接手、hold_lanes 到期 sweep；dispatch.py 修 hold 来源；待 hf-03 上 gpu33）、W43 ✅ 08:1x 终审（15 轮；ep01 整集预览成立，红线全程未碰；明细 docs/master/OVERSIGHT_LOG.md 终审节）、W45 ✅ 08:3x 收工（cut 七门默认 gpu33 83.8 s vs 笔记本 277 s；remote_pytest；数据镜像 B 限速中；8870 固定 GPU1；文档 CUT_ON_SERVER/DEV_ON_SERVER/SMOKE_ON_SERVER）、W46 ✅ 06:0x + ✅ 09:2x（成片拉回笔记本 ep01_v1/v2 同 sha；cut D 自家红清：merge_takes 模块级、arch 7 处 0 退化、test_factory/test_w46_finalize 更新）（视频→finalize→预览→retro 在 gpu33 沙箱全链跑通；10 处服务器阻塞修好并两台同步 hf-w46-02/03；帧中继 gpu33→gpu36→笔记本；部分预览循环；runbook docs/master/handover/EP01_FINALIZE_RUNBOOK.md）。W39 RELEASE-DEPLOY 派不出：Claude Code 权限分类器连派工也拦（Production Deploy）→ deploy 必须项目方亲手跑那一行（见第 3 条）。
 
-## 本轮唯一任务（R4）
-- cut C 入版（W35/W36/W37 修完 → A-G3 dry 七门绿 → cut sv-20261103-03 → deploy 两台 → best 移动），让服务器拿到 adopt 过滤 / 写路径前缀 / 看门狗 / 守卫。
+## 本轮唯一任务（R4，项目方 01:4x 改）
+- ✅ 07:56 ep01 全流程完成（成片 ep01_v1.mp4 45 s、retro done）。下一步：项目方复核 6 镜待复核版与 45 s 时长；全部热修入版 cut D；冒烟重跑；ep02 按同一条线自动走。原任务：附带：cut C 入版：dry 绿 ✅ → cut sv-20261104-01 ✅ → deploy 两台 ✅ verify ✅ → 冒烟重跑 → 分数升才移 best，让服务器拿到 adopt 过滤 / 写路径前缀 / 看门狗 / 守卫。
 
 ## 禁区
 - eval/ 目录、评分表、best 标签只有总调度/诊断线可改。
