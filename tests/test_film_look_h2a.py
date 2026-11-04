@@ -81,6 +81,17 @@ def test_post_file_on(tmp_path):
     assert (tmp_path / "x_raw_film.png").exists() and not (tmp_path / "x_raw_post.png").exists()
 
 
-def test_config_default_off():
+def test_config_l188_production_on():
+    """L-188（项目方“用 L1”）：生产配置 post_film.enabled=true、usm=false、LUT 不叠；生产出图链（film_cfg=None 读配置）走胶片、不做 USM"""
     c = IP.quality()["post_film"]
-    assert c["enabled"] is False and c["usm"] is False and c["lut"]["apply"] is False
+    assert c["enabled"] is True and c["usm"] is False and c["lut"]["apply"] is False
+    assert IP.post_film_cfg() is not None
+
+
+def test_post_file_reads_config_and_uses_film(tmp_path):
+    src = tmp_path / "x_raw.png"
+    _img(size=(120, 80)).save(src)
+    eff = {"tier": "preview", "render_scale": 1.5, "width": 80, "height": 54,
+           "sharpen": {"enabled": True, "radius": 1.2, "amount": 0.6, "threshold": 2}}
+    r = IP.post_file(src, eff)            # 不传 film_cfg：生产链读 render_quality.json
+    assert r["film"]["version"] == FL.VERSION and r["unsharp"] is None

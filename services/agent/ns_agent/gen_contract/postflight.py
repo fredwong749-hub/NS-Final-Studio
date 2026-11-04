@@ -326,6 +326,26 @@ def _q9_live(VQ, image, req: dict) -> dict | None:
         return None
 
 
+FOCUS_DEPTHS = ("中", "焦点")
+
+
+def focus_face(faces: list, req: dict, floor: float = 0.45) -> tuple[dict, str | None]:
+    """Q3 量脸高用的脸：cast 里在画且 depth=中 / 焦点 的那位（身份分最高的那张脸；同一人多张取最大）；
+    cast 没写这样的人 / 不止一位在焦点 / 认不出 → (faces[0], None)，与旧行为一致"""
+    foc = [NAME_ID.get(c.get("name"), c.get("name")) for c in req.get("cast") or []
+           if c.get("presence") == "在画" and c.get("depth") in FOCUS_DEPTHS]
+    if len(foc) != 1 or len((req.get("cast") or [])) < 2:
+        return faces[0], None
+    cid = foc[0]
+    def sim(f):
+        v = (f.get("sims") or {}).get(cid)
+        return (v[0] if isinstance(v, (list, tuple)) else v) if v is not None else -1.0
+    cand = [f for f in faces if sim(f) >= floor]
+    if not cand:
+        return faces[0], None
+    return max(cand, key=sim), cid
+
+
 def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross: dict | None = None,
              hands: dict | None = None, local: dict | None = None, vlm: dict | None = None) -> ContractResult:
     th = (cfg().get("image_thresholds") or {})
@@ -573,10 +593,13 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
         if not faces:
             add("Q3", "fail", "没有检测到脸，无法判景别")
         else:
-            got = band(faces[0]["h_ratio"], t3.get("bands", [0.45, 0.27, 0.17, 0.115, 0.095, 0.05]))
+            # L-188 L1：多人前 / 中 / 后分层时，景别按“在焦点的主体”（cast depth=中 / 焦点）的脸高量；没有这类信息或认不出 → 退回 faces[0]（最大脸）
+            ff, who = focus_face(faces, req, t1.get("recognize_floor", 0.45))
+            got = band(ff["h_ratio"], t3.get("bands", [0.45, 0.27, 0.17, 0.115, 0.095, 0.05]))
             ok = abs(got - want) <= int(t3.get("tolerance", 1))
-            add("Q3", "pass" if ok else "fail", f"要 {rec.get('size')}（档 {want}），脸高 {faces[0]['h_ratio']:.3f} → 档 {got}",
-                h_ratio=faces[0]["h_ratio"])
+            add("Q3", "pass" if ok else "fail",
+                f"要 {rec.get('size')}（档 {want}），{'焦点主体 ' + who + ' ' if who else ''}脸高 {ff['h_ratio']:.3f} → 档 {got}",
+                h_ratio=ff["h_ratio"], **({"focus": who} if who else {}))
     # Q4
     t4 = th.get("Q4_texture") or {}
     q4 = (local or {}).get("Q4")

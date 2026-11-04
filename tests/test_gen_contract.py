@@ -634,3 +634,19 @@ def test_q9_vqa_enforced_blocks(monkeypatch):
     r = PO.evaluate("nowhere.png", {"asset_refs": rec, "cast": []}, vlm=None, local={"Q2": [], "Q4": None, "Q7": None})
     q9 = next((i for i in r.items if i.id == "Q9"), None)
     assert q9 is not None and q9.status == "untested" and "Q9" in [i.id for i in r.blocking]
+
+
+def test_q3_framing_measures_focus_subject_not_largest_face():
+    """L-188 L1：前景大脸 + 中景主体——景别按 cast depth=中 的那位量脸高；没有 depth 信息退回最大脸"""
+    rec = {"size": "中景", "subject": None, "zones": ["upper"], "primary": "lin_wan", "slots": [], "missing": [], "characters": []}
+    loc = {"Q2": [], "Q4": None, "Q7": None}
+    faces = [{"h_ratio": 0.30, "bbox": [0, 0, 1, 1], "sims": {"gu_chen": 0.8}},      # 前景大脸（过肩的人）
+             {"h_ratio": 0.17, "bbox": [2, 0, 3, 1], "sims": {"lin_wan": 0.8}}]      # 焦点主体：中景脸高档
+
+    def q3(cast):
+        req = {"asset_refs": rec, "cast": cast}
+        return next(i for i in postflight.evaluate("x.png", req, remote={"faces": faces, "text": []}, hands={"flags": []}, local=loc).items if i.id == "Q3")
+    with_depth = q3([{"name": "林晚", "presence": "在画", "depth": "中"}, {"name": "顾沉", "presence": "在画", "depth": "前"}])
+    assert with_depth.status == "pass" and with_depth.evidence.get("h_ratio") == 0.17
+    no_depth = q3([{"name": "林晚", "presence": "在画"}, {"name": "顾沉", "presence": "在画"}])
+    assert no_depth.evidence.get("h_ratio") == 0.30 and no_depth.status == "fail"

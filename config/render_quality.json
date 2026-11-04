@@ -1034,8 +1034,8 @@
   "frame_redo_preset": "frame_v9",
   "frame_redo_preset_note": "ASSETMASTER 2026-11-01：series10 首帧全量重出默认 frame_v9（项目方较新原话“v9 v10+场景底图这个还可以”）；frame_v9_heavy（“v10H 同上（写实·重）”）为备选。default_preset 仍是 leica_sstar。",
   "post_film": {
-    "_doc": "H2a 胶片后期档（L-? 待项目方点选；PS-MASTER 2026-11-04 H2a；docs/master/PLAN_HOLLYWOOD_LOOK.md §3）。enabled=false（默认）时出图后期与以前逐字节一致。enabled=true：放大出图缩回 -> （usm=true 才做 USM 锐化，默认关）-> 胶片调色（film 参数，services/render_router/ns_render/film_look.py）-> （lut.apply=true 才叠 post_lut 指向的 config/post/luts/*.cube，strength 0..1）-> 写 *_post.png，take.params.post 记录参数与版本。颗粒种子由图片内容 sha256 派生，同输入同输出。重后期旧图用 tools/pipeline/repost.py",
-    "enabled": false,
+    "_doc": "L-188（2026-11-04 项目方“用 L1”）：生产开 enabled=true、usm=false（胶片调色，关 USM 锐化）。H2a 胶片后期档（原：L-? 待项目方点选；PS-MASTER 2026-11-04 H2a；docs/master/PLAN_HOLLYWOOD_LOOK.md §3）。enabled=false（默认）时出图后期与以前逐字节一致。enabled=true：放大出图缩回 -> （usm=true 才做 USM 锐化，默认关）-> 胶片调色（film 参数，services/render_router/ns_render/film_look.py）-> （lut.apply=true 才叠 post_lut 指向的 config/post/luts/*.cube，strength 0..1）-> 写 *_post.png，take.params.post 记录参数与版本。颗粒种子由图片内容 sha256 派生，同输入同输出。重后期旧图用 tools/pipeline/repost.py",
+    "enabled": true,
     "usm": false,
     "film": {"knee": 0.78, "knee_a": 0.66, "s_curve": 0.12, "lift": 0.0156863, "gamma": 1.0, "sat": 1.08, "vib": 0.08, "skin_keep": 0.5, "shadow": [-0.012, 0.0, 0.018], "high": [0.016, 0.008, -0.012], "grain": 0.012},
     "lut": {"apply": false, "strength": 1.0, "file": "config/post/luts/v2_reality_c2.cube"}

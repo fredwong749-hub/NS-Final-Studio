@@ -593,3 +593,33 @@ def mirror_hand_checks(shots: list, blocks: list[str]) -> dict:
     hint = ("；改法：只改这一镜 **分拍** / **表演节拍**（及对应 H3 正文），留 ≤2 拍手部动作，其余拍改写成视线 / 呼吸 / 肩线 / 表情；"
             "“已经…”写首帧状态、“到镜尾还在…”写延续都不算新动作" if busy else "")
     return {1: (not touch, f"镜面场景手碰反光面：{touch[:8] or '无'}"), 2: (not busy, f"≤8 秒镜手部动作超过 2 拍：{busy[:8] or '无'}{hint}")}
+
+
+# ---- L1（L-188，项目方 11-04“用 L1”；PLAN_HOLLYWOOD_LOOK §6；K-WRT-L1a / L1b / L1c）：平光禁用词、多人三层构图。只在写作 / 导入闸门用，不碰已导入的剧
+FLAT_LIGHT = re.compile(r"正面高亮|正面平光|平光|(?:把|将)?(?:影子|阴影)(?:全部|都)?打平|打平(?:了)?(?:影子|阴影)|白幕反射(?:补|打|照)?脸|反射补脸|无影(?:光|灯)?|均匀(?:的)?(?:柔)?(?:光|布光)")
+L1_LIGHT_LABELS = ("**灯光**", "**光线**", "**场景**", "【灯光】", "【光线】", "【场景】")
+L1_COMP_LABELS = ("**构图**", "【构图】")
+L1_LAYERS = (("前景", ("前景",)), ("中景", ("中景",)), ("背景", ("背景", "后景")))
+
+
+def _label_lines(block: str, labels: tuple) -> list[str]:
+    return [ln for ln in block.split("\n") if ln.lstrip().startswith(labels)]
+
+
+def l1_checks(shots: list, blocks: list[str]) -> dict:
+    """→ {"flat#<镜号>": (ok, 说明), "layers#<镜号>": (ok, 说明)}，只返回有问题的镜（失败项）。
+    flat：【灯光】/【光线】/【场景】行出现平光句 -> 阻断；layers：两人以上在画（cast presence=在画）的镜，【构图】缺前景 / 中景 / 背景任一层 -> 阻断"""
+    bad: dict = {}
+    for s, b in zip(shots, blocks):
+        hit = [m.group(0) for ln in _label_lines(b, L1_LIGHT_LABELS) for m in FLAT_LIGHT.finditer(ln)]
+        if hit:
+            bad[f"flat#{s.index}"] = (False, f"镜{s.index} 灯光 / 光线 / 场景行写了平光句「{'、'.join(dict.fromkeys(hit))}」："
+                                              "改写有动机主光（方向 + 光比 ≤3:1）+ 负补光 + 背景比人物低 1–2 档")
+        on = [c.name for c in (s.cast or []) if getattr(c, "presence", "") == "在画"]
+        if len(on) >= 2:
+            comp = " ".join(_label_lines(b, L1_COMP_LABELS))
+            miss = [nm for nm, ws in L1_LAYERS if not any(w in comp for w in ws)]
+            if miss:
+                bad[f"layers#{s.index}"] = (False, f"镜{s.index} {len(on)} 人在画，构图缺{'、'.join(miss)}："
+                                                    "写“前景=谁的什么部位略在焦外｜中景=谁在焦点上｜背景=谁或什么陈设”，cast 的 depth 与之一致")
+    return bad

@@ -689,6 +689,7 @@ def check_v3(imp, text: str, require: bool) -> tuple[list[dict], dict[int, list[
     for ep in imp.episodes:
         ep_out = eps.setdefault(ep.number, [])
         ep_out.extend(WL.check_episode(ep, _wl_fields))          # QW-W4 造型行下装品类（ITERAUDIT 11-01）
+        ep_out.extend(WL.check_l1(ep, text))                     # QW-L1 / QW-L2（L-188 L1：平光句 / 多人三层构图）
         ep_out.extend(WL.check_rubric(ep, text))                 # QW-RB1 清单代码判定（HOLLYWOOD r7，CONSENT 总调度 -> HOLLYWOOD）
         idx = {s.index for s in ep.shots}
         all_cast = [c for s in ep.shots for c in (s.cast or [])]

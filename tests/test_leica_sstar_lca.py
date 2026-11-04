@@ -105,7 +105,7 @@ def test_post_file_equals_experiment_pipeline(tmp_path):
     im.putdata([(rnd.randrange(256), rnd.randrange(256), rnd.randrange(256)) for _ in range(1152 * 2016)])
     raw = tmp_path / "x.png"
     im.save(raw)
-    post = IP.post_file(raw, IP.resolve("leica_sstar", None))
+    post = IP.post_file(raw, IP.resolve("leica_sstar", None), film_cfg={"enabled": False})   # L-188 生产默认走胶片（关 USM）；本测验 USM 老链路
     assert raw.exists() and post["rendered_size"] == [1152, 2016] and post["size"] == [768, 1344]
     assert post["unsharp"] == {"radius": 1.2, "percent": 60, "threshold": 2}
     # 实验脚本：down() 存盘 → usm() 再开

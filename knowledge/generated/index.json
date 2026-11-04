@@ -1,10 +1,10 @@
 {
- "kb_version": "kb-20261103-6246e5ad",
- "n": 668,
+ "kb_version": "kb-20261104-b0dff6f2",
+ "n": 671,
  "by_domain": {
   "render": 101,
   "prompt": 28,
-  "writer": 100,
+  "writer": 103,
   "edit": 49,
   "review": 68,
   "loop": 9,
@@ -19,7 +19,7 @@
   "P11-P12": 28,
   "P11-RETRY": 48,
   "P2-P3": 3,
-  "P3-P4": 116,
+  "P3-P4": 119,
   "P4-P5": 41,
   "P4-P6": 30,
   "P4-P7": 26,
@@ -15711,6 +15711,96 @@
    "confidence": "high",
    "status": "确认",
    "date": "2026-11-02",
+   "_file": "knowledge/rules/writer_camera.yaml"
+  },
+  {
+   "id": "K-WRT-807",
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "L1 光线：只写有动机主光 + 光比 ≤3:1 + 负补光 + 背景比人物低 1–2 档；禁平光句（L-188）",
+   "when": "每镜【灯光】/【光线】/【场景】行，以及场景表“光线”列",
+   "then": "代码判定 tools/script_rsi/rubric_code.l1_checks（flat#）：出现“正面高亮 / 把影子打平 / 白幕反射补脸 / 平光 / 均匀布光”类平光句 → 写作链路阻断（QW-L1），导入闸门（rubric_audit.gate，V2 run）阻断；写法 = 动机光源（方向）+ 光比 ≤3:1 + 负补光（黑旗 / 吸光）+ 背景比人物低 1–2 档",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "镜头字段"
+    }
+   ],
+   "writer_text": "灯光只写有动机的主光：一个画面里看得见的光源 + 方向 + 光比（≤3:1），再写负补光（暗侧用黑旗吸光，不补亮）和背景比人物低 1–2 档的亮度。禁止“正面高亮 / 把影子打平 / 白幕反射补脸 / 平光 / 均匀布光”这类平光句——它们会让画面发白、没有立体感。场景表里的光线列同样不许写。",
+   "evidence": [
+    {
+     "src": "docs/master/PLAN_HOLLYWOOD_LOOK.md",
+     "note": "§6 草稿第 3 条；H2b E 档实测：改源头光线句有效，尾句无效"
+    },
+    {
+     "src": "docs/master/MASTER_PICTURE.md",
+     "note": "L-188 项目方 11-04“用 L1”"
+    }
+   ],
+   "check": [
+    "tests/test_l1_rules.py"
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-04",
+   "_file": "knowledge/rules/writer_camera.yaml"
+  },
+  {
+   "id": "K-WRT-808",
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "L1 站位：两人以上在画必须写前 / 中 / 后三层，cast depth 一致，焦点主体脸高不低于景别档下限（L-188）",
+   "when": "两人以上在画（cast presence=在画）的镜的【构图】行",
+   "then": "代码判定 rubric_code.l1_checks（layers#）：【构图】缺前景 / 中景 / 背景任一层 → 写作链路阻断（QW-L2），导入闸门（V2 run）阻断；Q3 景别契约按“在焦点的主体”（cast depth=中 / 焦点）量脸高，没有该信息退回最大脸（gen_contract.postflight.focus_face）",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "镜头字段"
+    }
+   ],
+   "writer_text": "两人以上在画时，【构图】必须写前 / 中 / 后三层：“前景=谁的什么部位略在焦外｜中景=谁在焦点上｜背景=谁或什么陈设”，cast 里的 depth（前 / 中 / 后）要和它一致。在焦点上的主体脸高不得低于本镜景别档位的下限（错落写过头会把中景拍成中全景，小脸不过身份检查）。",
+   "evidence": [
+    {
+     "src": "docs/master/PLAN_HOLLYWOOD_LOOK.md",
+     "note": "§6 草稿第 2 条；H3b S1 实测"
+    },
+    {
+     "src": "docs/master/MASTER_PICTURE.md",
+     "note": "L-188"
+    }
+   ],
+   "check": [
+    "tests/test_l1_rules.py",
+    "tests/test_gen_contract.py"
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-04",
+   "_file": "knowledge/rules/writer_camera.yaml"
+  },
+  {
+   "id": "K-WRT-809",
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "L1 机位：同场连续镜头不许都是正面 / 侧面平视的一字排开，至少一镜换机位或景别（L-188）",
+   "when": "同一场景里连续的镜头",
+   "then": "写作规则（写手自检，暂无代码判定）：同一场连续两镜不许都是“正面 / 侧面平视 + 全身或中景一字排开”；至少一镜要换机位（侧 45° / 过肩 / 俯仰）或换景别（中近景 / 近景）",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "镜头字段"
+    }
+   ],
+   "writer_text": "同一场里连续的镜头，不许连续两镜都是“正面 / 侧面平视 + 全身或中景一字排开”：至少一镜换机位（侧 45° / 过肩 / 俯仰）或换景别（中近景 / 近景）。",
+   "evidence": [
+    {
+     "src": "docs/master/PLAN_HOLLYWOOD_LOOK.md",
+     "note": "§6 草稿第 1 条"
+    }
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-04",
    "_file": "knowledge/rules/writer_camera.yaml"
   },
   {

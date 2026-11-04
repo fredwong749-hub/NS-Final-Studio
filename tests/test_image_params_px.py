@@ -133,7 +133,8 @@ from tests.test_frame_jobs_w2 import SHOT, _job, _wait, env  # noqa: E402,F401
 
 
 @pytest.mark.skipif(not P.SCRIPT_JSON.exists(), reason="data/import/script_v2.json missing")
-def test_c_frame_job_records_params(env):
+def test_c_frame_job_records_params(env, monkeypatch):
+    monkeypatch.setattr(IP, "post_film_cfg", lambda path=None: None)   # L-188 生产开了胶片后期；本测只验出图参数记录，假图只有 64×112，不测后期
     c, data, clients = env
     t = _job(c, {"stage": "first", "mode": "regen", "seed": 11, "preset": "c_turbo_texture"})["take"]
     wf = clients[0][-1].workflows[-1]

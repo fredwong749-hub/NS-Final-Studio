@@ -273,6 +273,8 @@ RULES["QW-W13"] = ("warn", "cast 写“局部”（不露脸）的人，景别�
 RULES["QW-W14"] = ("warn", "两人以上在画的镜头不写倒影 / 映出 / 镜中，视线落点写实物（K-WRT-212：倒影会被画成多出来的真人）。")
 RULES["QW-RB1"] = ("warn", "HOLLYWOOD 可核对清单的代码判定条目（rubric_code，K-WRT-H07 / H08）：字段写全、分拍按秒切到镜长、镜1 近景或中景、"
                            "近景不写下半身、台词后下一镜写听者反应、分拍不写穿脱过程、不写回头 / 看镜头、不用情绪直陈句、人物卡原文（发型 / 服装 / 饰品）")
+RULES["QW-L1"] = ("warn", "L1（L-188，K-WRT-L1a）：【灯光】/【光线】/【场景】行禁平光句（正面高亮 / 把影子打平 / 白幕反射补脸）；只写有动机主光（方向 + 光比 ≤3:1）+ 负补光 + 背景比人物低 1–2 档。")
+RULES["QW-L2"] = ("warn", "L1（L-188，K-WRT-L1b）：两人以上在画的镜，【构图】必须写前景 / 中景 / 背景三层（前景=谁的什么部位略在焦外｜中景=谁在焦点上｜背景=谁或陈设），cast depth 与之一致。")
 _RUBRIC = None
 
 
@@ -295,6 +297,22 @@ def check_rubric(ep, text: str) -> list[dict]:
         items = [("error", f"rubric_code 运行失败：{e!r}"[:200])]
     return [{"rule_id": "QW-RB1", "level": RUBRIC_LEVEL, "detail": f"[{it}] {why}"[:300], "field": "清单", "rule": RULES["QW-RB1"][1]}
             for it, why in items]
+
+
+def check_l1(ep, text: str) -> list[dict]:
+    """QW-L1 平光禁用词 / QW-L2 多人三层构图（L-188）。级别跟 WRITER_LINT_LEVEL（导入校验 warn；写作链路 block；导入闸门走 rubric_audit.gate 的 l1# 阻断）"""
+    rc = _rubric()
+    chunk = rc.episode_chunk(text, ep.number)
+    if not chunk:
+        return []
+    _head, blocks = rc.split_blocks(chunk)
+    shots = sorted(ep.shots, key=lambda s: s.index)
+    if len(blocks) != len(shots):
+        return []
+    out = []
+    for k, (_ok, why) in rc.l1_checks(shots, blocks).items():
+        out.append(_issue("QW-L1" if k.startswith("flat") else "QW-L2", why, "灯光" if k.startswith("flat") else "构图"))
+    return out
 
 
 def check_episode(ep, fields: dict | None = None) -> list[dict]:

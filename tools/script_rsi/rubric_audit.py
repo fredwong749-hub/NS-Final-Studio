@@ -160,6 +160,9 @@ def gate(path: Path, eps: list[int] | None = None) -> dict:
             fails += [f"k211#{i} {why[:160]}" for i, (ok, why) in k211.items() if not ok]
             v3 = {**v3, **{f"scene#{i}": x for i, x in scn.items()}, **{f"k211#{i}": x for i, x in k211.items()}}
             r["fails"] = list(r["fails"]) + [{"item": f"v3#{i}"} for i, (ok, _w) in v3.items() if not ok]
+            l1 = RC6.l1_checks(sh3, [RL.block_text(ch, k) for k in range(len(sh3))])      # L-188：平光禁用词 / 多人三层构图（只在 V2 run 闸门）
+            fails += [f"l1#{i} {why[:160]}" for i, (ok, why) in l1.items() if not ok]
+            r["fails"] = list(r["fails"]) + [{"item": f"l1#{i}"} for i in l1]
         fails += [f"staging#镜{x['shot']} {ST.why(x)[:160]}" for x in st_bad]
         res["eps"][ep] = {"met": r["met"], "total": r["total"], "fails": fails, "unshootable": [x["shot"] for x in bad],
                           "staging_bad": [x["shot"] for x in st_bad]}
