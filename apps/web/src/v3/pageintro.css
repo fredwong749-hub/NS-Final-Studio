@@ -93,3 +93,5 @@
   justify-content: space-between;
   gap: 8px;
 }
+/* 11-04 UM-0611…：可点区至少 24px 高（视觉大小不变） */
+.pg-intro-todo { display: inline-flex; align-items: center; min-height: 24px; }

@@ -152,7 +152,8 @@ def test_frontend_wiring_genstate_on_asset_regen():
     assert "else window.setTimeout(reload, 60000)" in hub                                   # 只有没拿到 job 才退回老的盲等
     assert hub.count("<GenTiles") >= 5                                                      # 设定图 x2、身份脸、单品 x2
     g = (web / "GenState.tsx").read_text(encoding="utf-8")
-    assert "export function GenTiles" in g and "export function GenDock" in g and "export const useJobs" in g
+    st = (web / "GenState.store.ts").read_text(encoding="utf-8")         # PW-019：store（useJobs / trackGen）挪到 GenState.store.ts，组件仍在 .tsx
+    assert "export function GenTiles" in g and "export function GenDock" in g and "export const useJobs" in st
     css = (web / "genstate.css").read_text(encoding="utf-8")
     assert "ns-breathe" in css and "red" not in css.lower()
 

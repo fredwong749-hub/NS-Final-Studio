@@ -70,20 +70,63 @@ def import_cutoffs() -> tuple[dict[int, str], str | None]:
     return per, whole
 
 
+def _tools_ap(name: str):
+    import sys  # noqa: PLC0415
+    ap = str(REPO / "tools" / "autopilot")
+    if ap not in sys.path:
+        sys.path.insert(0, ap)
+    return __import__(name)
+
+
+def _run_legacy() -> tuple[str, bool]:
+    """当前剧 + 是不是 legacy（V1，不带前缀旧路径）。V2 等其它剧：导入稿 / 导入记录都按剧取（K-OPS-F24）"""
+    RN = _tools_ap("runs")
+    run = RN.primary_run(REPO)
+    return run, RN.is_legacy(run, REPO)
+
+
+def _script_file() -> Path:
+    run, legacy = _run_legacy()
+    return SCRIPT if legacy else _tools_ap("runs").script_path(run, REPO)
+
+
 def script_sha() -> str | None:
+    sc = _script_file()
     try:
-        mt = SCRIPT.stat().st_mtime
+        mt = (str(sc), sc.stat().st_mtime)
     except OSError:
         return None
     if _sha_cache["mt"] != mt:
-        _sha_cache.update(mt=mt, val=hashlib.sha256(SCRIPT.read_bytes()).hexdigest())
+        _sha_cache.update(mt=mt, val=hashlib.sha256(sc.read_bytes()).hexdigest())
     return _sha_cache["val"]
 
 
-def cutoff_for(ep: int) -> str | None:
-    per, whole = import_cutoffs()
-    c = [x for x in (per.get(ep), whole) if x]
-    return max(c) if c else None
+_tbl_cache: dict = {"key": None, "val": None}
+
+
+def import_table() -> dict:
+    """{ep: {集号: 整集导入时间}, whole: 整本导入时间, shot: {镜号: 该镜提示词最后一次变更的导入时间}}。
+    legacy 剧（V1）：import_log.jsonl 按集（口径不变）；其它剧：data/autopilot/imports.jsonl 按镜作废（PS-MASTER 11-04：
+    只有提示词变了的镜，其导入前的候选才算旧版本；没有镜级信息的旧事件按整集）"""
+    run, legacy = _run_legacy()
+    if legacy:
+        per, whole = import_cutoffs()
+        return {"ep": per, "whole": whole or "", "shot": {}}
+    IE = _tools_ap("import_events")
+    try:
+        key = (run, IE.EVENTS.stat().st_mtime)
+    except OSError:
+        return {"ep": {}, "whole": "", "shot": {}}
+    if _tbl_cache["key"] != key:
+        _tbl_cache.update(key=key, val=IE.cutoff_table(run))
+    return _tbl_cache["val"]
+
+
+def cutoff_for(ep: int, shot: int | None = None) -> str | None:
+    """本集（给 shot = 本镜）的作废线：早于它出的版本 = 旧剧本版本"""
+    IE = _tools_ap("import_events")
+    c = IE.shot_cutoff(import_table(), ep, shot)
+    return c or None
 
 
 QDIR_NAME = "_quarantine_20261102_oldscript"
@@ -109,19 +152,19 @@ def _prompt_sha(t: dict) -> str | None:
     return None
 
 
-def script_version(t: dict, ep: int) -> str:
+def script_version(t: dict, ep: int, shot: int | None = None) -> str:
     """'current' / 'old'（旧剧本版本）/ 'unknown'（没有导入记录）"""
     sha = _prompt_sha(t)
     if sha and sha == script_sha():
         return "current"
-    cut = cutoff_for(ep)
+    cut = cutoff_for(ep, shot)
     if not cut or not t.get("created_at"):     # 没有导入记录 / 这一版没记出图时间：判不了，不藏
         return "unknown"
     return "current" if t["created_at"] >= cut else "old"
 
 
-def cutoff_label(ep: int) -> str:
-    cut = cutoff_for(ep)
+def cutoff_label(ep: int, shot: int | None = None) -> str:
+    cut = cutoff_for(ep, shot)
     return f"{cut[5:10].replace('-', '/')} {cut[11:16]}" if cut else "?"
 
 
@@ -194,9 +237,9 @@ def candidates(ep: int, history: bool = False, only_passing: bool = False):
                 prm = t.get("params") or {}
                 bad = P.bad_reason(t) if hasattr(P, "bad_reason") else None
                 ok, why = _verdict(t, bad)
-                ver = script_version(t, ep)
+                ver = script_version(t, ep, int(m.group(1)))
                 if ver == "old":     # 旧剧本版本：不作候选（不管它过没过契约）；历史区仍可看。原来的“不合格 / 脸不像”等原因保留在前面
-                    old_why = f"旧剧本版本（剧本 {cutoff_label(ep)} 更新前出的，镜头可能已重新编号）"
+                    old_why = f"旧剧本版本（本镜剧本 {cutoff_label(ep, int(m.group(1)))} 更新前出的，镜头可能已重新编号）"
                     ok, why = False, f"{why}；{old_why}" if why else old_why
                 post = ((t.get("gen_contract") or {}).get("post") or {}) if isinstance(t.get("gen_contract"), dict) else {}
                 q = t.get("quarantined") if isinstance(t.get("quarantined"), dict) else ({"moved_to": {"file": f"data/_quarantine_20261102_oldscript/data/{t.get('file')}"}} if is_quarantined(t) else None)
@@ -220,7 +263,7 @@ def candidates(ep: int, history: bool = False, only_passing: bool = False):
         vt = [x for x in data.get("takes") or [] if x.get("stage") == "video" and (history or not is_quarantined(x))]
         if vt:
             row["video"] = {"active": (data.get("active") or {}).get("video"),
-                            "takes": [{"n": x["n"], "script": script_version(x, ep), "created_at": x.get("created_at")} for x in vt]}
+                            "takes": [{"n": x["n"], "script": script_version(x, ep, int(m.group(1))), "created_at": x.get("created_at")} for x in vt]}
         # UIRSI r40（项目方：“哪些是重置的,过期的,就给它用不同的颜色 label 一下”）：状态标签，汇总 producer 登记 / 剧本版本 / 看图判定
         try:
             from ns_api import shot_status  # noqa: PLC0415

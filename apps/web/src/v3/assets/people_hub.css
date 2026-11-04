@@ -58,7 +58,7 @@
 .hub-face-img:hover .hub-hover, .hub-face-img:focus-visible .hub-hover { opacity: 1; }
 
 /* ---- 造型 ---- */
-.hub-look-counts { display: flex; flex-wrap: wrap; gap: var(--sp-1); justify-content: flex-end; }
+.hub-look-counts { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-1); justify-content: flex-end; }
 .hub-look-body { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr); gap: var(--sp-6); align-items: start; }
 .hub-sheet { display: grid; gap: var(--sp-3); min-width: 0; }
 .hub-sheet-main { position: relative; display: block; width: 100%; aspect-ratio: 16 / 9; padding: 0; border: 0; border-radius: var(--r-l); overflow: hidden; background: var(--c-on-media); cursor: zoom-in; }
@@ -280,3 +280,5 @@
 .hub-use-t { color: var(--c-text-2); font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hub-use-sc { display: flex; flex-wrap: wrap; gap: 2px var(--sp-4); font-size: var(--fs-sm); }
 .hub-use-sc .int { color: var(--c-accent-text); }
+@media (max-height: 800px) { .ac-page .ac-nav-i { height: 28px; min-height: 24px; } }
+.ac-page .ac-nav-i, .ac-page .ac-nav-i.in { min-height: 24px; }

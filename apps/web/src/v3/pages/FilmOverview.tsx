@@ -50,7 +50,6 @@ export function MediaIcons({ m }: { m: NonNullable<FilmFrame["media"]> }) {
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
 import { leicaLens } from "../lens"; // NAVIA：徕卡刻字格式全站共享（v3/lens.ts）
-export { leicaLens };
 
 /** 真实 35mm 正片几何（FILMUI r3，项目方 12:0x“不太像胶片”；参照 Wikimedia Commons 放映拷贝近照，见 docs/research/filmui/refs.md §6）。
  *  画高 H 对应 24.9 mm；片边 rail = 5.05 mm = 0.203H，其中：外侧片边 2.01 mm（0.081H，印片边字 / KeyKode）、KS 齿孔 1.98 × 2.79 mm（0.0795H × 0.112H，

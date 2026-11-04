@@ -38,6 +38,11 @@ class CastCtx:
 
     def __init__(self, script):
         self.project = project_for(script)
+        if self.project:
+            # 资产包（V2）角色名 → cid 登记是 asset_refs 的模块级表，原来只在 load_looks 里顺带登记：
+            # 一进程里第一镜（ep01-S1 卓琳）在 reg() / looks() 被碰之前就查 NAME_ID，拿到的是名字本身（11-04 重启后实测）
+            from ns_agent import asset_refs as AR
+            AR.register_manifest_names(self.project)
         self._reg: dict | None = None
         self._looks: dict | None = None
         self._face: dict[str, str | None] = {}

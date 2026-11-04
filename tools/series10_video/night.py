@@ -81,9 +81,21 @@ def js(p, d):
     tmp.replace(p)
 
 
+_CHILD_PATHS = ("", "services/post", "services/agent", "services/recipes", "services/render_router", "services/api",
+                "packages/schema", "packages/qc")
+
+
+def child_env() -> dict:
+    """子进程环境：服务器 venv 没有 pip install -e 本项目（ns_schema / ns_agent / ns_post 导不进）→ 一律把仓库里的包目录
+    放进 PYTHONPATH（口径同 tools/ 下各脚本的 sys.path.insert），不依赖安装方式。已有 PYTHONPATH 保留在后面"""
+    paths = [str(ROOT / p) if p else str(ROOT) for p in _CHILD_PATHS]
+    old = os.environ.get("PYTHONPATH")
+    return {**os.environ, "PYTHONUTF8": "1", "PYTHONPATH": os.pathsep.join(paths + ([old] if old else []))}
+
+
 def run(args, timeout=3600):
     r = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
-                       cwd=str(ROOT), env={**__import__("os").environ, "PYTHONUTF8": "1"})
+                       cwd=str(ROOT), env=child_env())
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
@@ -305,12 +317,26 @@ def retry_assembly(st) -> None:
         elif s == "hold_tts" and not tts_missing():
             x["status"] = "rendering"
             log("RETRY_ASSEMBLE", f"ep{int(e):02d}", "配音解释器已到位")
+        elif s == "assemble_failed" and x.get("resolved_sig") and x["resolved_sig"] != ep_sig(int(e), x["host"]):
+            # 镜头集合 / 版本变了 = 新输入，值得再试：重置自动重试次数（不论是否已用完）
+            x["assemble_retries"] = 0
+            x["status"] = "rendering"
+            log("REOPEN", f"ep{int(e):02d}", "合成失败后入选版本 / 镜头集合有变，重置自动重试并重新合成")
         elif s == "assemble_failed" and int(x.get("assemble_retries", 0)) < ASM_RETRY_MAX \
                 and time.time() - float(x.get("finalized") or 0) >= ASM_RETRY_S:
             x["assemble_retries"] = int(x.get("assemble_retries", 0)) + 1
             x["status"] = "rendering"
             log("RETRY_ASSEMBLE", f"ep{int(e):02d}", f"第 {x['assemble_retries']}/{ASM_RETRY_MAX} 次自动重试",
                 str(x.get("assemble_err") or "")[-120:])
+
+
+def reopen_changed(st) -> None:
+    """已合成的集，入选版本 / 镜头集合（resolved_sig）变了 → 一律回 rendering（不看是否已全部完成；
+    全部完成则同一轮 rendering 分支立刻 finalize，版本号递增）"""
+    for e, x in st["eps"].items():
+        if x.get("status") == "assembled" and x.get("resolved_sig") and x["resolved_sig"] != ep_sig(int(e), x["host"]):
+            x["status"] = "rendering"
+            log("REOPEN", f"ep{int(e):02d}", "入选版本有变，按新版本号重合成")
 
 
 def clip_wh(p: Path) -> tuple[int, int]:
@@ -755,12 +781,8 @@ def loop_once(st):
         if rc_t or '"changed": []' not in out_t:
             log("TRIM_TAKES", rc_t, out_t.strip()[-300:].replace("\n", " "))
     retry_assembly(st)
+    reopen_changed(st)
     for e, x in st["eps"].items():
-        if x.get("status") == "assembled" and x.get("resolved_sig") and x["resolved_sig"] != ep_sig(int(e), x["host"]):
-            fin, _r = ep_resolved(int(e), x["host"])
-            if not fin:
-                x["status"] = "rendering"
-                log("REOPEN", f"ep{int(e):02d}", "入选版本有变（重出中），完成后按新版本号重合成")
         if x.get("status") == "rendering":
             fin, recs = ep_resolved(int(e), x["host"])
             st["pending_shots"][e] = sum(1 for r in recs.values() if r.get("status") not in ("done", "best_effort", "blocked"))

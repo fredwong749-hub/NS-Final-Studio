@@ -104,11 +104,13 @@ def activate_in_sandbox(shot: str, stage: str, n: int, *, lock: bool = False) ->
     from ns_render import pipeline as P
     p = P.shot_dir(shot) / "takes.json"
     assert str(p).startswith(str(SANDBOX)), p
-    td = json.loads(p.read_text(encoding="utf-8"))
-    td.setdefault("active", {})[stage] = n
-    if lock:
-        td.setdefault("locked", {})[stage] = n
-    write_atomic(p, json.dumps(td, ensure_ascii=False, indent=1))
+
+    def _set(td: dict) -> None:
+        td.setdefault("active", {})[stage] = n
+        if lock:
+            td.setdefault("locked", {})[stage] = n
+    # PS-MASTER 11-04（test_a04）：takes.json 只走唯一写入口 mutate_takes（沙箱同样，显式传沙箱路径）
+    P.mutate_takes(shot, _set, op="video_stage_trial.activate", by="video_stage_trial（沙箱）", path=p)
 
 
 def cmd_last(a) -> dict:

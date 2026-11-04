@@ -169,7 +169,7 @@ function PersonCard({
           {edit ? (
             <input className="pp-name-in" value={name} onChange={(e) => setName(e.target.value)} />
           ) : (
-            <b className="pp-name">{p.name}</b>
+            <b className="pp-name" title={p.id}>{/^[a-z]+_[a-z0-9_]+$/.test(p.name) ? "未命名人物（待起名）" : p.name}</b>
           )}
           <code className="muted small">{p.id}</code>
           {p.archived && <span className="pp-tag">已归档</span>}

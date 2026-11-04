@@ -484,9 +484,9 @@ export function TopBarV3({ page }: { page: V3Page | null }) {
           const tot = stepbar.v?.episodes_total ?? ps?.episodes_total ?? 0;
           const cnt = sb ? (
             <small className="v3-step-n pipe v3-step-cnt">
-              <span className="c-done">完成 {sb.done}</span>
-              {sb.doing ? <span className="c-doing"> · 进行 {sb.doing}</span> : null}
-              {sb.blocked ? <span className="c-blocked"> · 卡住 {sb.blocked}</span> : null}
+              <span className="c-done"><i className="w">完成 </i>{sb.done}</span>
+              {sb.doing ? <span className="c-doing"> · <i className="w">进行 </i>{sb.doing}</span> : null}
+              {sb.blocked ? <span className="c-blocked"> · <i className="w">卡住 </i>{sb.blocked}</span> : null}
             </small>
           ) : stepbar.err ? null : (
             <small className="v3-step-n">…</small>

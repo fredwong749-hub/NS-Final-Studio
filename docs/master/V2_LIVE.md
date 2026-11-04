@@ -1,4 +1,5 @@
 13:2x W46：✅ test_netfix::test_no_new_direct_ssh_outside_allowlist 红已清——唯一命中是 tools/master/partial_pull.py 的 sftp_get（Git sftp -S ssh.exe 经 <host>-hk 拉大文件，同 rssh.bulk_put/FONG-QUICK 走法，不是 ControlMaster=no 命令直连；relay 走 RS.ssh 未命中）→ 选②登记 config/netfix/ssh_callers.txt 并写明理由；gpu33 remote_pytest tests/test_netfix.py 41 passed rc=0。
+16:54 🖼 首帧代选（L-142，系统代选·可改）：series10_v2 ep01-S9 → v13（契约分 0.8，过检后等了 88 分钟）
 13:38 总调度（WSL/Fable）：✅ cut D 入版 sv-20261104-02（bfc4e158，84 文件，七门绿，GitHub 已推）。按项目方令本会话停止全部调度，指挥权交 PowerShell 的 claude 会话；交接块在 STATE.md 顶部“⚡ 交接”。未做：deploy sv-20261104-02 两台（留给接手方）。
 13:32 总调度：cut D 收口——dry3（树 ec43e2f0，xdist N=4）六门绿、pytest 只剩 6 条时区红 + 1 条 imgfix；给进程设 TZ=JST-9 后 27 条时区红全绿 → 真 cut 已起（--id sv-20261104-02，TZ=JST-9，N=4）。GitHub 已补推 master e56e5e1 + 两标签。
 11:04 W38：cut D 定向红清完——gpu33 remote_pytest（tests/test_gen_contract.py + test_hard_constraints.py + test_imgfix.py + test_push_preflight_deps.py）74 passed / 1 skipped / 0 failed。gen_contract 4 条由 W42 夹具一并修（测试过时：V1 已归档、快照无派生缓存）；push_preflight_deps 同根因，当前树已绿、未改；imgfix k264 = 环境测不了：gpu33 快照无人脸检测权重（ns_qc.gaze._models()→None）→ s101 IN2 全 untested，测试改为只在 IN2 测出分数时断言（tests/test_imgfix.py），代码未改。入版走 cut，无热推。

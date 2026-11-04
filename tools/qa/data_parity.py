@@ -62,6 +62,7 @@ def _runs():
 
 RUN = _runs().current_run(ROOT)                  # I-16（总调度 21:3x）：按当前剧比较（以前拿 V1 导入稿比 V2 接口，20:4x 跑出 12 项假不一致）
 SCRIPT = _runs().script_path(RUN, ROOT)
+RDIR = _runs().renders_dir(RUN, ROOT)           # takes.json / 版本图 / 视频：按剧取（V1 = data/renders，其它 = data/renders/<run>）
 CFG = ROOT / "config" / "recipes" / "asset_refs.json"
 HUB_EP = ROOT / "data" / "looks" / "hub_episode_looks.json"
 FACE_OV = ROOT / "data" / "looks" / "face_overrides.json"
@@ -72,19 +73,88 @@ BUILDER_FILES = [ROOT / "services" / "agent" / "ns_agent" / f for f in
 
 
 IMPORT_LOG = ROOT / "data" / "import" / "import_log.jsonl"
+IMPORT_EVENTS = ROOT / "data" / "autopilot" / "imports.jsonl"
+_EP_RE = re.compile(r"_ep(\d{2})_")
 
 
-def last_import_at(log: Path = IMPORT_LOG, script: Path = SCRIPT) -> str:
-    """现行导入稿的导入时刻（import_log.jsonl 最后一条的 at；没有日志时用 script_v2.json 修改时间）"""
-    import time as _t
+def import_cutoffs(run: str = RUN, log: Path = IMPORT_LOG, events: Path = IMPORT_EVENTS, root: Path = ROOT) -> tuple[dict[int, str], str, dict[str, str]]:
+    """本剧导入时刻 → ({集号: 整集导入时刻}, 整本最后一次导入, {镜号: 该镜提示词最后一次变更的导入时刻})。
+    legacy 剧（V1，不带前缀旧路径）：data/import/import_log.jsonl 按集（episodes / 路径 _epNN_，rc 非 0 不算），镜级为空（口径不变）；
+    其它剧：data/autopilot/imports.jsonl 该剧的事件，按镜作废（changed_shots；历史事件由 changed_shots_backfill 补记；
+    没有任何镜级信息的旧事件按整集——tools/autopilot/import_events.cutoff_table）"""
+    legacy = _runs().for_root(root).is_legacy(run, root)
+    if not legacy:
+        import_events = _ie()
+        t = import_events.cutoff_table(run, events)
+        return t["ep"], t["whole"], t["shot"]
+    per: dict[int, str] = {}
+    whole = ""
     try:
-        rows = [json.loads(x) for x in log.read_text(encoding="utf-8").splitlines() if x.strip()]
-        ats = [str(r.get("at") or "") for r in rows if r.get("at")]
-        if ats:
-            return max(ats)
-    except (OSError, ValueError):
-        pass
+        lines = log.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return per, whole, {}
+    for ln in lines:
+        try:
+            e = json.loads(ln)
+        except ValueError:
+            continue
+        if not e.get("at") or e.get("rc") not in (0, None):
+            continue
+        eps = {int(x) for x in (e.get("episodes") or []) if str(x).isdigit()}
+        if not eps:
+            m = _EP_RE.search(str(e.get("path") or ""))
+            eps = {int(m.group(1))} if m else set()
+        if eps:
+            for k in eps:
+                per[k] = max(per.get(k, ""), e["at"])
+        else:
+            whole = max(whole, e["at"])
+    return per, whole, {}
+
+
+def _ie(root: Path = ROOT):
+    import importlib.util as _u
+    sp = _u.spec_from_file_location("import_events_dp", Path(root) / "tools" / "autopilot" / "import_events.py")
+    m = _u.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m
+
+
+def shot_cutoff(sid: str, per: dict, whole: str, shot: dict) -> str:
+    """镜 sid（ep01-S3）的作废线 = max(该镜变更导入, 本集整集导入, 整本导入)"""
+    n = int(sid[2:4])
+    return max(shot.get(sid, ""), per.get(n, ""), whole)
+
+
+def last_import_at(log: Path | None = None, script: Path = SCRIPT, run: str = RUN, events: Path = IMPORT_EVENTS, root: Path = ROOT) -> str:
+    """现行导入稿的导入时刻（各种导入时刻的最大值；没有日志时用 script_v2.json 修改时间）"""
+    import time as _t
+    per, whole, shot = import_cutoffs(run, log or IMPORT_LOG, events, root)
+    ats = [a for a in [*per.values(), whole, *shot.values()] if a]
+    if ats:
+        return max(ats)
     return _t.strftime("%Y-%m-%dT%H:%M:%S", _t.localtime(script.stat().st_mtime)) if script.exists() else ""
+
+
+def imaging_episodes(run: str = RUN, root: Path = ROOT) -> set[int] | None:
+    """已进入“出图”阶段的集（该剧 ready_episodes.json 登记了的集）。legacy 剧（V1）→ None = 不限（口径不变）；
+    其它剧：还没进 ready 清单的集（sop_gate 卡在资产就绪）没有出图可跟，不算 pending_redo / 过期"""
+    rn = _runs().for_root(root)
+    if rn.is_legacy(run, root):
+        return None
+    out: set[int] = set()
+    for p in rn.ready_paths(run, root):
+        d = rj(p, {}) or {}
+        out |= {int(k) for k in (d.get("episodes") or {}) if str(k).isdigit()}
+    return out
+
+
+def is_legacy_redo(t: dict) -> bool:
+    """重出版本（producer 第 2 次起 / 驳回重出 / 带项目方修改要求）且没有 params.redo_fix_clause 记录 = 旧版：
+    追加进提示词的修正句没登记，D-FRESH 只能降为警告；新版本（有记录）或没重出过的照常 FAIL"""
+    pr = t.get("producer") or {}
+    redo = (pr.get("attempt") or 0) >= 2 or str(pr.get("rung") or "").startswith("驳回") or bool(t.get("owner_edit"))
+    return bool(redo and not (t.get("params") or {}).get("redo_fix_clause"))
 
 
 def pending_redo(takes: dict, import_at: str) -> str | None:
@@ -277,8 +347,11 @@ def main() -> int:
     fails: list[str] = []
     warns: list[str] = []
     checked = {"shots": 0, "fields": 0}
+    imp_by_sid: dict[str, str] = {}       # pending 镜 → 该集导入时刻
     pending: dict[str, str] = {}          # 镜号 → pending_redo 原因（导入后出图未跟上，L-088 全量重做补）
     import_at = last_import_at()
+    cut_ep_, cut_all_, cut_shot_ = import_cutoffs()
+    img_eps = imaging_episodes()
 
     def eq(code: str, sid: str, what: str, got, want):
         checked["fields"] += 1
@@ -369,10 +442,14 @@ def main() -> int:
         p4 = p4_shots(run_dir, n) if project and os.environ.get("NS_ALLOW_P4_SOURCE") == "1" else None
         stale_ep = {}   # 当前首帧早于现行导入（或没有首帧）的镜：照常比对，比不上才记 pending_redo，不算不一致
         for s_ in shots:
+            if img_eps is not None and n not in img_eps:
+                break                                                     # 本集还没进出图阶段：无首帧是正常的，不算待重做
             sid_ = f"ep{n:02d}-S{s_['index']}"
-            why = pending_redo(rj(ROOT / "data" / "renders" / f"ep{n:02d}" / f"S{s_['index']}" / "takes.json", {}) or {}, import_at)
+            imp_ep = import_at if img_eps is None else shot_cutoff(sid_, cut_ep_, cut_all_, cut_shot_)   # V1：整剧最后导入（口径不变）；其它剧：本镜作废线（按镜）
+            why = pending_redo(rj(RDIR / f"ep{n:02d}" / f"S{s_['index']}" / "takes.json", {}) or {}, imp_ep)
             if why:
                 stale_ep[sid_] = why
+                imp_by_sid[sid_] = imp_ep
         sop_scene = {x["id"]: x.get("scene_id") for x in sop.get("shots") or []}
         by_id = {s["id"]: s for s in ash}
         exp_keys, got_keys, exp_txt, got_txt, key_sids = [], [], [], [], []
@@ -384,6 +461,9 @@ def main() -> int:
             cast = [(nm, pr) for nm, pr in parse_cast(s.get("cast_raw") or "") if pr in ON_SCREEN]
             ek = tuple(sorted((name_id.get(nm, nm), letter(name_id.get(nm, nm), n, sid) or "") for nm, _ in cast))
             gk = tuple(sorted((c["character"], c.get("look_label") or "") for c in x.get("characters") or []))
+            if img_eps is not None and n not in img_eps:
+                # 还没进出图阶段的集（非 legacy 剧、ready 清单没有）：造型登记 / 排期还不存在，造型字母没有“出图用的那套”可比，只比人选
+                ek, gk = tuple((c, "") for c, _ in ek), tuple((c, "") for c, _ in gk)
             exp_keys.append(ek)
             key_sids.append(sid)
             got_keys.append(gk)
@@ -438,7 +518,7 @@ def main() -> int:
         builder_mt = fmt(max([SCRIPT.stat().st_mtime] + [f.stat().st_mtime for f in BUILDER_FILES if f.is_file()]))
         for x in ash:
             ep_s, sn = x["id"].split("-")
-            tk = rj(ROOT / "data" / "renders" / ep_s / sn / "takes.json", {}) or {}
+            tk = rj(RDIR / ep_s / sn / "takes.json", {}) or {}
             act = tk.get("active") or {}
             for st, key, url_key, lab in (("image", "first_frame_take", "first_frame", "首帧"), ("last", "last_frame_take", "last_frame_target", "尾帧"),
                                        ("video", None, "video", "视频")):
@@ -454,7 +534,8 @@ def main() -> int:
                     checked["fields"] += 1
                     u = urllib.parse.unquote((x.get(url_key) or "").split("?")[0])
                     if not u.endswith(str(t.get("file") or "")):
-                        fails.append(f"D-CUR {x['id']} 当前{lab} #{t.get('n')}={t.get('file')}，接口 {url_key}={x.get(url_key)!r}")
+                        miss_ = "（takes.json 登记的文件本机盘上不存在：两台同步未拉到，非检查器问题）" if t.get("file") and not (ROOT / "data" / t["file"]).exists() else ""
+                        fails.append(f"D-CUR {x['id']} 当前{lab} #{t.get('n')}={t.get('file')}，接口 {url_key}={x.get(url_key)!r}{miss_}")
                 if not t or str(t.get("created_at") or "") <= script_mt:
                     continue
                 checked["fields"] += 1
@@ -463,6 +544,10 @@ def main() -> int:
                     fails.append(f"D-FRESH {x['id']} {lab} #{t.get('n')}（{t.get('created_at')}，{t.get('workflow')}）晚于剧本改动 {script_mt}，却标“剧本已改”")
                 v9 = t.get("workflow") == "frame_v9_unified" or ((t.get("params") or {}).get("origin") or {}).get("recipe") == "frame_v9"
                 if v9 and str(t.get("created_at")) > builder_mt and (loc or glo):
+                    if is_legacy_redo(t):
+                        warns.append(f"D-FRESH {x['id']} {lab} #{t.get('n')}（重出版本，producer 第 {(t.get('producer') or {}).get('attempt')} 次 / {(t.get('producer') or {}).get('rung')}）"
+                                     f"标过期 {loc + glo}：重出修正句未登记（旧版，params.redo_fix_clause 缺）")
+                        continue
                     fails.append(f"D-FRESH {x['id']} {lab} #{t.get('n')}（frame_v9，{t.get('created_at')}）晚于剧本和拼提示词代码（{builder_mt}），却标过期 {loc + glo}")
         for k, sid_ in enumerate(key_sids):
             if sid_ in stale_ep and k < len(got_keys) and got_keys[k] != exp_keys[k]:
@@ -505,7 +590,7 @@ def main() -> int:
                     continue
                 checked["fields"] += 1
                 ep_s, sn = sid.split("-")
-                tk = rj(ROOT / "data" / "renders" / ep_s / sn / "takes.json", {}) or {}
+                tk = rj(RDIR / ep_s / sn / "takes.json", {}) or {}
                 vt = [t for t in tk.get("takes") or [] if t.get("stage") == "video"
                       and (((t.get("params") or {}).get("origin") or {}).get("variant") == ch)
                       and (((t.get("params") or {}).get("origin") or {}).get("host") == st.get("host"))]
@@ -532,7 +617,7 @@ def main() -> int:
             continue
         n = hist[-1].get("take")
         ep_s, sn = sid.split("-")
-        tk = rj(ROOT / "data" / "renders" / ep_s / sn / "takes.json", {}) or {}
+        tk = rj(RDIR / ep_s / sn / "takes.json", {}) or {}
         t = next((x for x in tk.get("takes") or [] if x.get("stage") == st and x.get("n") == n), None)
         pf_ok = ((t or {}).get("postflight") or {}).get("ok")
         cur_n = (tk.get("active") or {}).get(st)
@@ -559,31 +644,15 @@ def main() -> int:
     try:
         import hashlib as _hl
         import re as _re
-        cut_ep: dict[int, str] = {}
-        cut_all = ""
-        for ln in (IMPORT_LOG.read_text(encoding="utf-8").splitlines() if IMPORT_LOG.exists() else []):
-            try:
-                ie = json.loads(ln)
-            except ValueError:
-                continue
-            if ie.get("rc") not in (0, None) or not ie.get("at"):
-                continue
-            es = {int(x) for x in (ie.get("episodes") or []) if str(x).isdigit()}
-            m_ = _re.search(r"_ep(\d{2})_", str(ie.get("path") or ""))
-            es = es or ({int(m_.group(1))} if m_ else set())
-            if es:
-                for k in es:
-                    cut_ep[k] = max(cut_ep.get(k, ""), ie["at"])
-            else:
-                cut_all = max(cut_all, ie["at"])
+        cut_ep, cut_all, cut_shot = import_cutoffs()
         cur_sha = _hl.sha256(SCRIPT.read_bytes()).hexdigest()
 
-        def _cur(tk: dict, n_: int) -> bool:
+        def _cur(tk: dict, n_: int, sid_: str = "") -> bool:
             for src in (tk, tk.get("params") or {}):
                 ps = src.get("prompt_source") if isinstance(src, dict) else None
                 if isinstance(ps, dict) and ps.get("sha256") == cur_sha:
                     return True
-            c_ = max(cut_ep.get(n_, ""), cut_all)
+            c_ = shot_cutoff(sid_, cut_ep, cut_all, cut_shot) if sid_ else max(cut_ep.get(n_, ""), cut_all)
             return not c_ or (tk.get("created_at") or "") >= c_
 
         season_n: dict[str, int] = {}
@@ -600,15 +669,15 @@ def main() -> int:
             cd = api.get(f"/api/candidates?ep={n}").get("shots") or {}
             for sid, row in cd.items():
                 m2 = _re.fullmatch(r"ep\d{2}-S(\d+)", sid)
-                tj = rj(ROOT / "data" / "renders" / f"ep{n:02d}" / f"S{m2.group(1) if m2 else '0'}" / "takes.json", {}) or {}
+                tj = rj(RDIR / f"ep{n:02d}" / f"S{m2.group(1) if m2 else '0'}" / "takes.json", {}) or {}
                 by_n = {(x.get("stage"), x.get("n")): x for x in tj.get("takes") or []}
                 for stg in ("image", "last"):
                     x = row.get(stg) or {}
                     shown = [tk for tk in x.get("takes") or [] if tk.get("ok") is not False and not tk.get("bad")]
-                    old = [tk["n"] for tk in shown if not _cur(by_n.get((stg, tk.get("n"))) or {}, n)]
+                    old = [tk["n"] for tk in shown if not _cur(by_n.get((stg, tk.get("n"))) or {}, n, sid)]
                     checked["fields"] += 1
                     if old:
-                        fails.append(f"D-CANDVER {sid} {stg}: 接口把旧剧本版本当候选 #{old}（出图早于本集最后一次导入 {max(cut_ep.get(n, ''), cut_all)}）")
+                        fails.append(f"D-CANDVER {sid} {stg}: 接口把旧剧本版本当候选 #{old}（出图早于本镜作废线 {shot_cutoff(sid, cut_ep, cut_all, cut_shot)}）")
                     if stg == "image" and sid in season_n and x.get("active") is None:
                         eq("D-CANDVER", sid, "总览候选数 = 现行剧本版本的合格候选数", season_n[sid], len(shown) - len(old))
     except Exception as ex:  # noqa: BLE001
@@ -631,7 +700,7 @@ def main() -> int:
                 m3 = _re2.fullmatch(r"ep(\d+)-S(\d+)", x.get("id") or "")
                 if not m3 or "lens_actual" not in x:
                     continue
-                tj = rj(ROOT / "data" / "renders" / f"ep{int(m3.group(1)):02d}" / f"S{int(m3.group(2))}" / "takes.json", {}) or {}
+                tj = rj(RDIR / f"ep{int(m3.group(1)):02d}" / f"S{int(m3.group(2))}" / "takes.json", {}) or {}
                 ts_ = [t for t in tj.get("takes") or [] if t.get("stage") == "image"]
                 if not ts_:
                     continue
@@ -652,7 +721,7 @@ def main() -> int:
                 m4 = _re3.fullmatch(r"ep(\d+)-S(\d+)", x.get("id") or "")
                 if not m4:
                     continue
-                tj = rj(ROOT / "data" / "renders" / f"ep{int(m4.group(1)):02d}" / f"S{int(m4.group(2))}" / "takes.json", {}) or {}
+                tj = rj(RDIR / f"ep{int(m4.group(1)):02d}" / f"S{int(m4.group(2))}" / "takes.json", {}) or {}
                 act_ = tj.get("active") or {}
                 why_ = str((x.get("status") or {}).get("why") or "")
                 for stg_, word_ in (("image", "首帧"), ("last", "尾帧")):
@@ -674,7 +743,7 @@ def main() -> int:
             m5 = re.fullmatch(r"ep(\d+)-S(\d+)", sid_)
             if not m5:
                 continue
-            tj = rj(ROOT / "data" / "renders" / f"ep{int(m5.group(1)):02d}" / f"S{int(m5.group(2))}" / "takes.json", {}) or {}
+            tj = rj(RDIR / f"ep{int(m5.group(1)):02d}" / f"S{int(m5.group(2))}" / "takes.json", {}) or {}
             for stg_, n_ in st_.items():
                 eq("D-QUEUE", sid_, f"机签通过的{stg_}版本 = 当前版本", n_, (tj.get("active") or {}).get(stg_))
                 eq("D-QUEUE", sid_, f"{stg_} 不同时是机签通过和待抽检", (sid_, stg_) in spot_sids, False)
@@ -730,7 +799,12 @@ def main() -> int:
 
     regcons_check(ROOT / "data/producer/consistency.json", fails, warns)
     max_h = pending_max_hours()
-    overdue, age_h = overdue_pending(pending, import_at, max_h)
+    overdue, age_h = [], 0.0
+    for _imp in sorted({imp_by_sid.get(k, import_at) for k in pending}):          # 各集导入时刻不同：分组算过期
+        o_, a_ = overdue_pending({k: v for k, v in pending.items() if imp_by_sid.get(k, import_at) == _imp}, _imp, max_h)
+        overdue += o_
+        age_h = max(age_h, a_)
+    overdue = sorted(overdue)
     try:
         sync_pending_alert(overdue, age_h, max_h)
     except OSError as ex:

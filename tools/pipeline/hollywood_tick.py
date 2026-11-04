@@ -11,6 +11,7 @@
 开关：config/pipeline/hollywood_score.json（enabled / max_per_tick / max_attempts / wait_s / require_idle）。
 
   python tools/pipeline/hollywood_tick.py status [--run R]      # 待打多少、看图服务是否空闲
+  python tools/pipeline/hollywood_tick.py score-episode --run R --episode N [--force]   # 逐镜打正片首帧（+look_metrics）
   python tools/pipeline/hollywood_tick.py once [--run R] [--force]   # 手工跑一拍（--force 不等空闲，只给排查用）
 """
 from __future__ import annotations
@@ -33,13 +34,20 @@ CFG_PATH = "config/pipeline/hollywood_score.json"
 DEFAULTS = {"enabled": False, "max_per_tick": 1, "max_attempts": 2, "wait_s": 300, "max_pixels": 1400000, "require_idle": True,
             "lock_stale_s": 1800}
 LABEL = "hollywood_score"
-KEYS = ("composition", "lighting", "texture", "performance", "consistency")
+KEYS_OLD = ("composition", "lighting", "texture", "performance", "consistency")
+KEYS = KEYS_OLD + ("exposure", "depth", "grade", "ai_look")
 RUBRIC = (
-    "你是电影画面质量评审。只看这一张图，按下面 5 项各打 1–10 分（10 = 好莱坞院线级）：\n"
+    "你是电影画面质量评审。只看这一张图，按下面 9 项各打 1–10 分（10 = 好莱坞院线级）：\n"
     "composition 构图（主体位置、景别选择、画面平衡）；lighting 光线（光比、方向、层次、是否有电影感）；"
     "texture 质感（皮肤 / 材质真实度、没有塑料感 / 坏块 / 低清）；performance 表演（表情、姿态、眼神是否可信、有情绪）；"
-    "consistency 一致性（五官 / 服装 / 场景与常识一致，没有畸形或多余肢体）。\n"
-    "只输出一个 JSON 对象，不要别的文字：{\"composition\": n, \"lighting\": n, \"texture\": n, \"performance\": n, \"consistency\": n, \"note\": \"一句话\"}"
+    "consistency 一致性（五官 / 服装 / 场景与常识一致，没有畸形或多余肢体）；"
+    "exposure 曝光（高光是否溢出成死白、暗部是否死黑；大面积死白背景或细节被吃掉要明显扣分，层次完整 = 高分）；"
+    "depth 景深层次（前中后景分离、主体清楚而背景有虚化 / 明暗层次；全画面一样清楚、像平面贴图要扣分）；"
+    "grade 调色与胶片感（色调统一、有意图的调色、高光柔和滚落、像胶片印片；中性灰白目录感 / 数码硬边要扣分）；"
+    "ai_look 去 AI 感（10 = 像真人实拍；1 = AI 美颜 / 瓷娃娃 / 塑料皮肤 / 发丝白边 / 过度锐化）。\n"
+    "要严格：普通商业图 5–6 分，只有真正院线剧照才给 8 以上。\n"
+    "只输出一个 JSON 对象，不要别的文字：{\"composition\": n, \"lighting\": n, \"texture\": n, \"performance\": n, \"consistency\": n, "
+    "\"exposure\": n, \"depth\": n, \"grade\": n, \"ai_look\": n, \"note\": \"一句话\"}"
 )
 SYSTEM = "你是严谨的电影画面评审，只输出 JSON。"
 
@@ -189,9 +197,32 @@ def parse_scores(text: str) -> dict | None:
     for k in KEYS:
         v = d.get(k)
         if not isinstance(v, (int, float)) or isinstance(v, bool) or not 1 <= float(v) <= 10:
-            return None
+            if k in KEYS_OLD:
+                return None
+            continue        # 新 4 项缺失 = 旧 5 项记录 / 模型漏项，向后兼容
         sc[k] = float(v)
     return {"scores": sc, "mean": round(sum(sc.values()) / len(sc), 2), "note": str(d.get("note") or "")[:120]}
+
+
+def production_first_frames(root: Path, run: str, ep: int) -> list[dict]:
+    """正片首帧：epNN/SNN/takes.json 的 active.image 对应的文件（renders_dir 口径）；没有 = missing"""
+    import importlib.util
+    sp = importlib.util.spec_from_file_location("ap_runs_h0", ROOT / "tools" / "autopilot" / "runs.py")    # 口径同 tools/autopilot/runs.py
+    RUNS = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(RUNS)
+    rd = RUNS.renders_dir(run, root) / f"ep{ep:02d}"
+    out = []
+    shots = sorted((d for d in rd.glob("S*") if d.is_dir() and re.fullmatch(r"S\d+", d.name)), key=lambda d: int(d.name[1:])) if rd.is_dir() else []
+    for sd in shots:
+        tj = _jload(sd / "takes.json", {}) or {}
+        n = (tj.get("active") or {}).get("image")
+        take = next((t for t in tj.get("takes") or [] if t.get("stage") == "image" and t.get("n") == n), None) if n is not None else None
+        f = norm_file((take or {}).get("file"))
+        item = {"file": f, "source": "production_first", "episode": ep, "shot": sd.name, "take": n}
+        if not f or not (root / "data" / f).is_file():
+            item["missing"] = True
+        out.append(item)
+    return out
 
 
 def score_one(root: Path, run: str, item: dict, cfg: dict, generate=None) -> dict:
@@ -201,14 +232,22 @@ def score_one(root: Path, run: str, item: dict, cfg: dict, generate=None) -> dic
     img = root / "data" / item["file"]
     res = generate({"system": SYSTEM, "text": RUBRIC, "images": [{"path": str(img), "max_pixels": int(cfg.get("max_pixels") or 1400000)}]})
     rec = {"at": _now(), "run": run, "episode": item["episode"], "source": item["source"], "file": item["file"], "job": item.get("job"),
-           "shot": item.get("shot"), "model": res.get("model"), "via": res.get("via"), "seconds": res.get("seconds"),
+           "shot": item.get("shot"), "take": item.get("take"), "model": res.get("model"), "via": res.get("via"), "seconds": res.get("seconds"),
            "raw": (res.get("text") or "")[:600], "error": res.get("error"), "by": "tools/pipeline/hollywood_tick.py"}
     parsed = parse_scores(res.get("text") or "")
+    if item.get("source") == "production_first":
+        try:
+            import look_metrics as LM
+            rec["look"] = LM.measure(img)
+        except Exception as e:  # noqa: BLE001  确定性指标失败不影响看图分
+            rec["look_error"] = repr(e)[:160]
     if parsed:
         rec.update(parsed)
     elif not rec["error"]:
-        rec["error"] = "看图模型输出不是 1–10 的五项 JSON"
+        rec["error"] = "看图模型输出不是 1–10 的评分 JSON"
     lp = ledger(root, run, item["episode"])
+    if item.get("source") == "reference_compare":      # 参考对照（raw vs post 等）不进 hollywood_epNN.jsonl，不影响集均值
+        lp = lp.parent / "hollywood_ref.jsonl"
     lp.parent.mkdir(parents=True, exist_ok=True)
     with open(lp, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
@@ -298,9 +337,36 @@ def tick(root: Path = ROOT, runs: list[str] | None = None, cfg: dict | None = No
     return rec
 
 
+def score_episode(root: Path, run: str, ep: int, cfg: dict, force: bool = False, generate=None, probe=None) -> int:
+    """逐镜打正片首帧；本地看图空闲才打（--force 不等）；缺图的镜只记 missing"""
+    done = {(r.get("shot"), r.get("take")) for r in _jlines(ledger(root, run, ep))
+            if r.get("source") == "production_first" and isinstance(r.get("scores"), dict)}
+    for it in production_first_frames(root, run, ep):
+        if not re.fullmatch(r"S\d+", str(it.get("shot"))):     # 只认正片镜
+            continue
+        if not force and (it["shot"], it.get("take")) in done:
+            print(json.dumps({"shot": it["shot"], "take": it.get("take"), "skipped": "同 take 已有有效打分（--force 重打）"}, ensure_ascii=False))
+            continue
+        if it.get("missing"):
+            print(json.dumps({"shot": it["shot"], "missing": True}, ensure_ascii=False))
+            continue
+        if not force and cfg.get("require_idle", True) and not vlm_idle(probe)[0]:
+            print(json.dumps({"shot": it["shot"], "skipped": "看图服务忙 / 不在"}, ensure_ascii=False))
+            continue
+        try:
+            r = score_one(root, run, it, cfg, generate)
+        except Exception as e:  # noqa: BLE001
+            print(json.dumps({"shot": it["shot"], "error": repr(e)[:200]}, ensure_ascii=False))
+            continue
+        print(json.dumps({"shot": it["shot"], "take": it.get("take"), "mean": r.get("mean"), "scores": r.get("scores"),
+                          "look": r.get("look"), "error": r.get("error")}, ensure_ascii=False))
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["status", "once"])
+    ap.add_argument("cmd", choices=["status", "once", "score-episode"])
+    ap.add_argument("--episode", type=int, default=1)
     ap.add_argument("--run")
     ap.add_argument("--force", action="store_true", help="不等看图服务空闲（只给排查用）")
     ap.add_argument("--root", default=str(ROOT))
@@ -318,6 +384,8 @@ def main(argv=None) -> int:
                 by[i["source"]] = by.get(i["source"], 0) + 1
             print(f"{run}: 待打 {len(items)} {by}")
         return 0
+    if a.cmd == "score-episode":
+        return score_episode(root, a.run or "series10_v2", a.episode, cfg, force=a.force)
     rec = tick(root, runs, cfg, force=a.force)
     print(json.dumps(rec, ensure_ascii=False, indent=1))
     return 0

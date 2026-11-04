@@ -126,3 +126,39 @@ def test_postflight_g1_record_only(tmp_path):
     cv2.imwrite(str(p), np.full((640, 360, 3), 128, np.uint8))
     st, d, ev = PF.gaze_item(p)
     assert st in ("na", "untested") and "未测" in d
+
+
+def test_shot_language_lead_note_roundtrip_in_match_target():
+    """镜头语言段（shot_language_note）在其余补句之前、与它们同一次 with_note 放进正文：match_target 带 lead_note 必须还原，
+    否则所有 frame_v9 版本被误标“编译器升级”（D-FRESH，11-04 ep01-S12~S15）"""
+    from ns_agent import asset_refs as AR
+    from ns_agent import frame_job as FJ
+    from ns_api.unified_stale import match_target
+    body = "中景，平视，林晚坐在转椅上，专业电影画面，无字幕、无文字、无水印"
+    lead = "镜头：35mm 镜头，光圈 f/2.8。构图：前景：转椅。"
+    eye = AR.EYELINE_NOTE.format(name="林晚", target="窗外") + "。"
+    assert match_target(FJ.with_note(body, lead), body, lead) == FJ.with_note(body, lead)          # 只有镜头语言段
+    sent = FJ.with_note(body, lead + eye)
+    assert match_target(sent, body, lead) == sent                                                   # 镜头语言段 + 视线句
+    assert match_target(sent, body) != sent                                                         # 不带 lead 就是老行为（对不上）
+
+
+def test_strip_redo_fix_and_legacy_redo_flag():
+    """重出修正句（params.redo_fix_clause）：owner_edit 追加句、vqa_delta 的 append / replace 都能还原；旧版重出（无记录）D-FRESH 降警告"""
+    import sys
+    from pathlib import Path
+    from ns_api.unified_stale import strip_redo_fix
+    from ns_agent.vqa import judge as VJ
+    base = "中景，林晚看着窗外，专业电影画面，无字幕、无文字、无水印"
+    dl = {"replace": [["看着窗外", "望着窗外"]], "append": "双眼瞳孔明确偏向画面左侧，绝不与镜头对视"}
+    p1 = VJ.apply_delta(base, dl)
+    assert p1 != base and strip_redo_fix(p1, [{"kind": "vqa_delta", "replace": dl["replace"], "append": dl["append"]}]) == base
+    p2 = base + "\n项目方要求修改（只改这一点，其余保持不变）：笑一点"
+    assert strip_redo_fix(p2, [{"kind": "owner_edit", "prompt": "笑一点"}]) == base
+    assert strip_redo_fix(base, None) == base
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools/qa"))
+    import data_parity as DP
+    assert DP.is_legacy_redo({"producer": {"attempt": 2}}) is True
+    assert DP.is_legacy_redo({"producer": {"attempt": 1, "rung": "驳回重出 1/2：x"}}) is True
+    assert DP.is_legacy_redo({"producer": {"attempt": 2}, "params": {"redo_fix_clause": [{"kind": "owner_edit"}]}}) is False
+    assert DP.is_legacy_redo({"producer": {"attempt": 1, "rung": "首发"}}) is False

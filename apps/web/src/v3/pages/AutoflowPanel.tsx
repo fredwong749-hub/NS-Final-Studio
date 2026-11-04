@@ -4,7 +4,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStudio } from "../../store";
 import { useLiveEvent } from "../live";
-import { P1Gate, ReviewBlock, canShowP1, p1Round, p1Status } from "./P1Review";
+import { P1Gate, ReviewBlock } from "./P1Review";
+import { canShowP1, p1Round, p1Status } from "./P1Review.logic";
+import { FLOW_EVENT, zhState } from "./AutoflowPanel.logic";
 
 type AStage = { id: string; name: string; status: string; decider?: string; usd?: number | null; detail?: string[] | string; fails?: number };
 type AScore = { at: string; sum?: number; sum_code?: number; of?: number; judge_sums?: number[] };
@@ -29,13 +31,6 @@ export type LookChar = { name: string; marker?: string; looks?: Look[] };
 type RunOpt = { id: string; title: string };
 
 // ---------- 中文词表（W-07）：状态词只在这里翻译，页面上不出现英文状态 ----------
-const VERDICT: Record<string, string> = {
-  not_started: "还没开始", running: "正在写", awaiting_writer: "等写手交稿", awaiting_reviewer: "等核查", awaiting_owner_p1: "等你看故事线",
-  held_by_p1_gate: "等你看完故事线再写", needs_patch: "正在返修", reopened: "重新打开了", stopped_in_chain: "写到一半停了", not_importable: "还有没过的项",
-  blocked_by_gate: "导入前的检查没过", importable: "可以导入", imported: "已导入", awaiting_owner: "等你看", owner_direction: "等你定方向", reused: "复用", ok: "通过", pending: "等待",
-  fails_left: "还有没过的项", failed: "没过", needs_writer: "等写手", dry_run: "试跑", revise_requested: "已收下修改，正在重写", waiting_p1_review: "评审中", awaiting_p1_judges: "故事线在评审", awaiting_judges: "等评委打分", voided: "已作废，重写中", p1_review_failed: "评审三轮没过，已转总调度",
-};
-export const zhState = (k?: string | null) => (k ? VERDICT[k] ?? "进行中" : "");
 const DECIDER: Record<string, string> = { code: "自动检查", api_model: "写手", agent: "写手", owner: "你" };
 const STAGE_NAME: Record<string, string> = { P0: "提纲", P1: "故事线", P1L: "造型表", P1G: "你看故事线", P2: "分集大纲", P3: "单集剧本", P4: "分镜", facts: "事实表", code: "自动检查", factcheck: "事实核查", score: "打分", gate: "导入前检查", import: "导入" };
 const money = (v: number | null | undefined) => `$${(v ?? 0).toFixed(2)}`;
@@ -65,9 +60,6 @@ async function listRuns(): Promise<RunOpt[]> {
   return ok.filter((x): x is NonNullable<typeof x> => !!x).map((it) => ({ id: it.id, title: it.title || "新剧（未定名）" }));
 }
 const getJson = <T,>(url: string) => fetch(`${url}?t=${Date.now()}`).then((r) => (r.ok ? (r.json() as Promise<T>) : null)).catch(() => null);
-
-/** 提纲表单提交后通知面板切到这部剧 */
-export const FLOW_EVENT = "ns:flowrun";
 
 export function AutoflowPanel() {
   const st = useStudio();

@@ -437,6 +437,8 @@ def _stale_split(shot_id: str, take: dict, s, compiled, edit: ShotEdit, act: dic
         prompt = _strip_plate(prompt)            # 尾帧渲染时在第一句后插了身份底板说明（不是编译器输出）
     if take.get("workflow") in FE.NO_PROMPT_WORKFLOWS or take.get("source") in FE.NO_PROMPT_SOURCES:
         target = ""                              # 上传 / 引用的版本没有提示词可比
+    if (take.get("params") or {}).get("redo_fix_clause"):
+        prompt = UST.strip_redo_fix(prompt, take["params"]["redo_fix_clause"])      # 重出修正句（params.redo_fix_clause）先剥掉再比
     # DATAALIGN（UIPIXEL P1）：唯一出图路径（unified_frame）的版本和“同一条路径现在拼出的正文”比，不和旧编译器比
     # （旧比较对 unified 版本必然失败 → 一出来就“剧本已改”）；见 ns_api/unified_stale.py
     unified = UST.is_unified(take) and stage in ("image", "last") and take.get("basis_prompt") is None         and take.get("mode") not in FE.EDIT_MODES
@@ -446,7 +448,7 @@ def _stale_split(shot_id: str, take: dict, s, compiled, edit: ShotEdit, act: dic
         except Exception:  # noqa: BLE001
             ub = None
         if ub and ub.get(stage):
-            target = UST.match_target(prompt, ub[stage]) if stage == "image" else ub[stage]
+            target = UST.match_target(prompt, ub[stage], ub.get("image_note") or "") if stage == "image" else ub[stage]
     if UST.is_video10(take):
         target = ""                              # VIDEO10 片子：不和画布 H3 视图比提示词，只按 from_first 判首帧已换
     v1_video = stage == "video" and bool((take.get("params") or {}).get("first"))   # §D 视频任务出的版本（W3）

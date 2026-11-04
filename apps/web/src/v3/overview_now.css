@@ -99,3 +99,4 @@
 .sb-banner.slim { margin: 0; padding: 4px 10px; font-size: 12px; }
 .now-unknown { color: var(--c-warn, #d6a23a); font-weight: 600; }
 .sb-banner.sb-top { margin: 0; border-radius: 0; border-left: 0; border-right: 0; text-align: center; flex: none; }
+.now-link { min-height: 24px; display: inline-flex; align-items: center; }

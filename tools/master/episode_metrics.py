@@ -27,7 +27,7 @@ MODEL_SUFFIX = ("fable", "opus", "sonnet", "haiku")
 SYSTEM_LANE_ACTORS = ("ASSET-WORKER", "producer", "DEBUG-RSI（IMGFIX", "idle")
 WRITER_MODEL_FALLBACK = {"model": "fable（claude_agent）", "model_source": "PIPELINE_SOP_V2 步骤 1 / L-109：包与 .done 不记录模型，按 SOP 标注，不是测得的"}
 MANUAL_WORDS = ("手工", "手动", "人工", "补救", "补记", "接手", "临时")
-HOLLYWOOD_KEYS = ("composition", "lighting", "texture", "performance", "consistency")   # rubric 本体在 tools/pipeline/hollywood_tick.py
+HOLLYWOOD_KEYS = ("composition", "lighting", "texture", "performance", "consistency", "exposure", "depth", "grade", "ai_look")   # rubric 本体在 tools/pipeline/hollywood_tick.py
 
 
 # ---------- 小工具 ----------
@@ -638,16 +638,37 @@ def gpu_util(P: Paths, w0: datetime | None, w1: datetime | None, nulls: Nulls) -
 
 
 # ---------- 好莱坞质感分 ----------
+def hollywood_rows(path) -> list[dict]:
+    r"""读 hollywood_epNN.jsonl 并整理：production_first 只认 shot=S\d+，按 (shot, take) 去重取最后一行；
+    source=reference_compare / 非 S\d+ 的正片行不计；其它来源（资产 / 金样）原样保留。不改写文件。"""
+    out, last = [], {}
+    for r in jlines(path):
+        src = r.get("source")
+        if src == "reference_compare":
+            continue
+        if src == "production_first":
+            if not re.fullmatch(r"S\d+", str(r.get("shot"))):
+                continue
+            last[(r.get("shot"), r.get("take"))] = len(out)
+        out.append(r)
+    keep = set(last.values())
+    return [r for i, r in enumerate(out) if r.get("source") != "production_first" or i in keep]
+
+
 def hollywood_read(P: Paths, ep: int, nulls: Nulls) -> dict:
     """只读 metrics/hollywood_epNN.jsonl（由 tools/pipeline/hollywood_tick.py 在看图空闲时自动写；总调度 1c46 ①：这里不现场跑）"""
-    allrows = jlines(P.hollywood(ep))
+    allrows = hollywood_rows(P.hollywood(ep))
     rows = [r for r in allrows if isinstance(r.get("scores"), dict)]
     failed = sum(1 for r in allrows if not isinstance(r.get("scores"), dict))
     if not rows:
         nulls.add("quality.hollywood", "还没有分：metrics/hollywood_epNN.jsonl 不存在或没有打成的行（自动打分拍 hollywood_tick 只在本地看图空闲时跑，"
                   f"开关 config/pipeline/hollywood_score.json；失败行 {failed}）")
         return {"n": 0, "mean": None, "by_item": {}, "by_source": {}, "scale": "1-10", "calls": len(allrows), "failed_attempts": failed}
-    by_item = {k: round(sum(float(r["scores"].get(k, 0)) for r in rows) / len(rows), 2) for k in HOLLYWOOD_KEYS}
+    by_item = {}
+    for k in HOLLYWOOD_KEYS:      # 旧 5 项记录没有新 4 项：只对有该项的行取均值
+        vs = [float(r["scores"][k]) for r in rows if k in r["scores"]]
+        if vs:
+            by_item[k] = round(sum(vs) / len(vs), 2)
     by_src: dict[str, list[float]] = {}
     for r in rows:
         by_src.setdefault(r.get("source") or "?", []).append(float(r.get("mean") or 0))
@@ -773,7 +794,7 @@ def headline(root: Path, run: str, ep: int, nulls: Nulls | None = None) -> dict:
            "basis": "producer 日志 rendered.gpu_s 合计 ÷（本集 dispatch→rendered 墙钟 × 用到的道数）"}
     if gpu["ratio"] is None:
         nulls.add("headline.gpu_util", "producer 日志里本集没有 dispatch→rendered 墙钟")
-    hw = [float(r["mean"]) for r in jlines(P.hollywood(ep)) if isinstance(r.get("scores"), dict) and r.get("mean") is not None]
+    hw = [float(r["mean"]) for r in hollywood_rows(P.hollywood(ep)) if isinstance(r.get("scores"), dict) and r.get("mean") is not None]
     iss = [d for d in jlines(P.issues) if d.get("event") == "open" and d.get("run") == run and d.get("episode") in (ep, str(ep))
            and d.get("who") != "RETRO"]
     closed = {d.get("id") for d in jlines(P.issues) if d.get("event") == "close"}

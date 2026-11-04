@@ -167,3 +167,61 @@ def test_parse_scores_and_cfg(tmp_path):
 def test_real_config_is_sane():
     c = json.loads((ROOT / HT.CFG_PATH).read_text(encoding="utf-8"))
     assert c["require_idle"] is True and c["max_per_tick"] >= 1 and c["max_attempts"] >= 1
+
+
+def test_rubric_nine_keys_and_backcompat():
+    assert len(HT.KEYS) == 9 and all(k in HT.RUBRIC for k in HT.KEYS)
+    old = '{"composition":5,"lighting":6,"texture":5,"performance":5,"consistency":7,"note":"x"}'
+    r = HT.parse_scores(old)
+    assert r and r["mean"] == 5.6 and len(r["scores"]) == 5
+    new = '{"composition":5,"lighting":6,"texture":5,"performance":5,"consistency":7,"exposure":3,"depth":4,"grade":4,"ai_look":3,"note":"x"}'
+    r = HT.parse_scores(new)
+    assert len(r["scores"]) == 9 and r["mean"] == round(42 / 9, 2)
+
+
+def test_score_episode_production_first(tmp_path):
+    import cv2
+    import numpy as np
+    root = tmp_path / "repo"
+    rd = root / "data" / "renders" / RUN / "ep01"
+    img = np.full((120, 160, 3), 255, np.uint8)
+    (rd / "S1" / "takes").mkdir(parents=True)
+    cv2.imwrite(str(rd / "S1" / "takes" / "image_001_raw_post.png"), img)
+    _w(rd / "S1" / "takes.json", {"takes": [{"n": 1, "stage": "image", "file": f"renders/{RUN}/ep01/S1/takes/image_001_raw_post.png"}], "active": {"image": 1}})
+    _w(rd / "S2" / "takes.json", {"takes": [], "active": {}})
+    items = HT.production_first_frames(root, RUN, 1)
+    assert [i.get("missing") for i in items] == [None, True] and items[0]["take"] == 1
+    gen = lambda req: {"text": '{"composition":5,"lighting":5,"texture":5,"performance":5,"consistency":5,"exposure":2,"depth":4,"grade":4,"ai_look":3}', "model": "fake"}  # noqa: E731
+    rec = HT.score_one(root, RUN, items[0], HT.DEFAULTS, gen)
+    assert rec["source"] == "production_first" and rec["shot"] == "S1" and rec["look"]["clip_hi"] > 0.99 and rec["mean"] == round(38 / 9, 2)
+
+
+def test_score_episode_skips_done_and_dedups_read(tmp_path, capsys):
+    import cv2
+    import numpy as np
+    root = tmp_path / "repo"
+    rd = root / "data" / "renders" / RUN / "ep01"
+    (rd / "S1" / "takes").mkdir(parents=True)
+    cv2.imwrite(str(rd / "S1" / "takes" / "image_001_raw_post.png"), np.full((60, 80, 3), 128, np.uint8))
+    _w(rd / "S1" / "takes.json", {"takes": [{"n": 1, "stage": "image", "file": f"renders/{RUN}/ep01/S1/takes/image_001_raw_post.png"}], "active": {"image": 1}})
+    calls = []
+
+    def gen(req):
+        calls.append(1)
+        return {"text": '{"composition":5,"lighting":5,"texture":5,"performance":5,"consistency":5,"exposure":5,"depth":5,"grade":5,"ai_look":5}', "model": "f"}
+    cfg = {**HT.DEFAULTS, "require_idle": False}
+    HT.score_episode(root, RUN, 1, cfg, generate=gen)
+    HT.score_episode(root, RUN, 1, cfg, generate=gen)
+    assert len(calls) == 1                       # 同 take 已有分 → 跳过
+    HT.score_episode(root, RUN, 1, cfg, force=True, generate=gen)
+    assert len(calls) == 2                       # --force 才重打
+    ref = HT.score_one(root, RUN, {"file": f"renders/{RUN}/ep01/S1/takes/image_001_raw_post.png", "source": "reference_compare", "episode": 1, "shot": "S1-ref"}, HT.DEFAULTS, gen)
+    assert ref["scores"] and (root / "data/pipeline/runs" / RUN / "metrics" / "hollywood_ref.jsonl").is_file()
+    lp = HT.ledger(root, RUN, 1)
+    rows = [json.loads(x) for x in lp.read_text(encoding="utf-8").splitlines()]
+    assert all(r["source"] == "production_first" for r in rows)
+    lp.write_text(lp.read_text(encoding="utf-8") + json.dumps({"source": "production_first", "shot": "S1", "take": 1, "scores": {"composition": 9}, "mean": 9.0}) + "\n"
+                  + json.dumps({"source": "production_first", "shot": "S4-ref", "take": 4, "scores": {"composition": 1}, "mean": 1.0}) + "\n"
+                  + json.dumps({"source": "reference_compare", "shot": "S2", "take": 1, "scores": {"composition": 1}, "mean": 1.0}) + "\n", encoding="utf-8")
+    got = EM.hollywood_rows(lp)
+    assert [(r["shot"], r["mean"]) for r in got] == [("S1", 9.0)]   # 同 (shot,take) 取最后一行；参考行不计

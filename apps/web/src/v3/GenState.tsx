@@ -1,51 +1,10 @@
 // ASSETUX L-120：全站通用生成状态。任何“再生成 / 编辑 / 重出”按钮提交后，调 trackGen() 登记 job；
 // 同一位置放 <GenTiles where=…/>（原位占位卡：琥珀呼吸灯 + 排队第 N / 生成中 + 预计完成钟点），页面放一个 <GenPoller onDone=…/>（轮询 /api/jobs，完成后回调刷新）。
 // 页面右下 <GenDock/> 汇总所有在跑的（点一条 = 滚到对应位置）。呼吸灯样式沿用 breathe.css 的 ns-breathe（2.7 s），排队静止灰点。
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef } from "react";
+import { emit, getItems, getJobs, setJobs, untrackGen, useGen, type GenItem } from "./GenState.store";
 import { fmtClock, fmtRemain, genView, jobId, statusText, type GenView, type JobLite } from "./GenState.helpers";
 import "./genstate.css";
-
-export type GenItem = {
-  id: string; // job id
-  where: string; // 位置键：sheet:A / face / item:<id> / shot:ep01-S3:first …
-  title: string;
-  summary?: string; // 它理解的改动（prompt_rewrite 的 zh_summary）
-  at: number;
-};
-
-let items: GenItem[] = [];
-let jobs: JobLite[] = [];
-let tick = 0;
-const subs = new Set<() => void>();
-const emit = () => {
-  tick++;
-  subs.forEach((f) => f());
-};
-const sub = (f: () => void) => (subs.add(f), () => subs.delete(f));
-let snap = { items, jobs, tick };
-const get = () => {
-  if (snap.tick !== tick) snap = { items, jobs, tick };
-  return snap;
-};
-
-export function trackGen(it: Omit<GenItem, "at">) {
-  if (!it.id || items.some((x) => x.id === it.id)) return;
-  items = [...items, { ...it, at: Date.now() }];
-  emit();
-}
-export function untrackGen(id: string) {
-  items = items.filter((x) => x.id !== id);
-  emit();
-}
-export function useGen() {
-  return useSyncExternalStore(sub, get);
-}
-/** 测试用：清空 */
-export function _resetGen() {
-  items = [];
-  jobs = [];
-  emit();
-}
 
 /** 轮询 /api/jobs：有在跟踪的 job 才轮询（3 s），完成 / 失败时回调一次（完成的自动从跟踪里拿掉，失败的留着给“重试”） */
 export function GenPoller({ onDone, onFail }: { onDone?: (it: GenItem, j: JobLite) => void; onFail?: (it: GenItem, j: JobLite) => void }) {
@@ -62,9 +21,8 @@ export function GenPoller({ onDone, onFail }: { onDone?: (it: GenItem, j: JobLit
         if (!r.ok) return;
         const all = (await r.json()) as JobLite[];
         if (!alive) return;
-        jobs = all;
-        emit();
-        for (const it of items) {
+        setJobs(all);
+        for (const it of getItems()) {
           const j = all.find((x) => jobId(x) === it.id);
           const v = genView(j, all, Date.now());
           if (!j || !v || seen.current.has(it.id)) continue;
@@ -98,6 +56,7 @@ export function GenPoller({ onDone, onFail }: { onDone?: (it: GenItem, j: JobLit
 }
 
 function view(it: GenItem): GenView | null {
+  const jobs = getJobs();
   const j = jobs.find((x) => jobId(x) === it.id);
   // 刚提交、/api/jobs 还没轮到：当作排队第 1，用兜底估时
   return genView(j ?? { id: it.id, state: "queued", created_at: new Date(it.at).toISOString() }, jobs, Date.now());
@@ -176,6 +135,3 @@ export function GenDock() {
     </div>
   );
 }
-
-/** 别名：任务轮询状态（和 trackGen 配套） */
-export const useJobs = useGen;

@@ -136,3 +136,39 @@ def test_finalize_v2_reaches_assembly(night_v2, monkeypatch, tmp_path):
     assert asm and asm[0][asm[0].index("--run") + 1] == V2
     assert x["status"] == "assembled", x
     assert Path(x["final"]).parent == N.EPS_OUT and Path(x["final"]).is_file()
+
+
+# ---- 11-04：服务器合成缺 ns_schema + 重开漏洞 ----
+def test_child_env_makes_assembly_importable_without_install(night_v2):
+    """未安装项目、无 PYTHONPATH 的子进程（python -S 去掉 site-packages / 可编辑安装）也要能 import 合成链"""
+    import os
+    import subprocess
+    env = night_v2.child_env()
+    env = {k: v for k, v in env.items() if k != "PYTHONHOME"}
+    code = "import ns_schema.h3_lint, ns_agent.h3_prompt, ns_post; print('ok')"
+    r = subprocess.run([sys.executable, "-S", "-c", code], capture_output=True, text=True, env=env, cwd=str(night_v2.ROOT), timeout=120)
+    # -S 丢掉 site-packages：第三方依赖若缺只能算环境问题，但绝不能是 ns_schema 找不到
+    assert "No module named 'ns_schema'" not in r.stderr, r.stderr
+    assert "No module named 'ns_agent'" not in r.stderr, r.stderr
+    bare = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    r0 = subprocess.run([sys.executable, "-S", "-c", "import ns_schema"], capture_output=True, text=True, env=bare, cwd=os.getcwd(), timeout=120)
+    assert r0.returncode != 0   # 对照：没有 PYTHONPATH 时确实导不进（复现服务器症状）
+
+
+def test_reopen_assembled_when_sig_changed_even_if_all_done(night_v2, monkeypatch):
+    monkeypatch.setattr(night_v2, "ep_sig", lambda ep, host: "NEW")
+    st = {"eps": {"1": {"host": "h", "status": "assembled", "resolved_sig": "OLD"},
+                  "2": {"host": "h", "status": "assembled", "resolved_sig": "NEW"}}}
+    night_v2.reopen_changed(st)
+    assert st["eps"]["1"]["status"] == "rendering" and st["eps"]["2"]["status"] == "assembled"
+
+
+def test_assemble_failed_sig_changed_resets_retries(night_v2, monkeypatch):
+    monkeypatch.setattr(night_v2, "ep_sig", lambda ep, host: "NEW")
+    st = {"eps": {"1": {"host": "h", "status": "assemble_failed", "resolved_sig": "OLD", "assemble_retries": 3,
+                        "finalized": __import__("time").time()},
+                  "2": {"host": "h", "status": "assemble_failed", "resolved_sig": "NEW", "assemble_retries": 3,
+                        "finalized": 0}}}
+    night_v2.retry_assembly(st)
+    assert st["eps"]["1"]["status"] == "rendering" and st["eps"]["1"]["assemble_retries"] == 0
+    assert st["eps"]["2"]["status"] == "assemble_failed"   # 同输入用完 3 次 = 仍停住

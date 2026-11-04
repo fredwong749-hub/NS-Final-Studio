@@ -69,6 +69,11 @@ export function humanValue(v: string): string | null {
   if (m) return `${shotName(m[3] ?? m[1])} · ${/\/last|_last/.test(s) ? "尾帧" : /\.mp4$/i.test(s) ? "视频" : "首帧"}（还没登记的图）`;
   m = /^(ep\d+-S\d+)$/i.exec(s);
   if (m) return shotName(m[1]);
+  // 单品挑选 pick:item:<cid>:<槽位>（UM-0924…）、v2 选角 v2cast-<id>
+  m = /^pick:(?:item|sheet):([a-z0-9_]+):/i.exec(s);
+  if (m) return `${charName(m[1]) ?? "角色"}的设定 / 单品（挑图）`;
+  m = /^v2cast-(.+)$/.exec(s);
+  if (m) return humanValue(m[1]) ?? "选角设置";
   // 场景 sk_xxx（可能带路径）
   if (/(^|\/)sk_[a-z0-9_]+/.test(s)) return `场景「${sceneLabel(s)}」`;
   // 单品 am-<cid>-xxxx / lw-<类>-xxx

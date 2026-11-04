@@ -735,7 +735,7 @@ def _story_images(run: str | None):
     try:
         from ns_api import takes_ui as _TU  # noqa: PLC0415
         for sid in list(by_shot):
-            cut = _TU.cutoff_for(int(sid[2:4]))
+            cut = _TU.cutoff_for(int(sid[2:4]), int(sid.split("-S")[1]))
             if not cut:
                 continue
             cut_t = time.mktime(time.strptime(cut[:19], "%Y-%m-%dT%H:%M:%S"))

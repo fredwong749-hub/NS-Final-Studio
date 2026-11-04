@@ -72,7 +72,8 @@ export function ZoomLayer() {
     const g = groupOf(img);
     const i = Math.max(0, g.indexOf(img));
     // UM-0531：关框后焦点回到“那张小图”（自己可聚焦就用它，否则用包着它的按钮 / 链接），不回到放大镜（放大镜一开框就卸载了）
-    const back = img.tabIndex >= 0 ? img : img.closest<HTMLElement>("button, a[href], [role=button], [tabindex]:not([tabindex='-1'])");
+    let back: HTMLElement | null = img.tabIndex >= 0 ? img : img.closest<HTMLElement>("button, a[href], [role=button], [tabindex]:not([tabindex='-1'])");
+    if (!back) { img.tabIndex = 0; back = img; } // 没有可回的控件：让小图自己可聚焦并接住焦点
     setOpen({ items: (g.length ? g : [img]).map(itemOf), i, back });
     setMag(null);
   }, []);

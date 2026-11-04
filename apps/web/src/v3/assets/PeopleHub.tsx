@@ -12,7 +12,8 @@ import { assetsV1, type LightEpisode } from "../api_v1_pages";
 import { ACTION_TEXT, CATS, catOf, choicesFor, hubApi, partFor, type FaceCand, type HubChar, type HubItem, type HubList, type HubLook, type Part } from "./hub_api";
 import { Verdict } from "./Verdict";
 import { RegenDialog } from "../RegenButton";
-import { GenDock, GenPoller, GenTiles, trackGen } from "../GenState";
+import { GenDock, GenPoller, GenTiles } from "../GenState";
+import { trackGen } from "../GenState.store";
 import type { GearRef } from "../RegenButton.helpers";
 import "./people_hub.css";
 

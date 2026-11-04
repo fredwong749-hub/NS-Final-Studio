@@ -13,8 +13,10 @@ import "./story.css";
 import { LiveProgress } from "../../ds/StageProgress";
 import { useLiveEvent } from "../live";
 import { ProducerPanel } from "../ProducerPanel";
-import { AutoflowPanel, FLOW_EVENT } from "./AutoflowPanel";
-import { P1Extras, canShowP1, p1Round, p1Status, useAutoflow } from "./P1Review";
+import { AutoflowPanel } from "./AutoflowPanel";
+import { FLOW_EVENT } from "./AutoflowPanel.logic";
+import { P1Extras } from "./P1Review";
+import { canShowP1, p1Round, p1Status, useAutoflow } from "./P1Review.logic";
 import type { AFlow } from "./AutoflowPanel";
 
 const runIdOf = () => new URLSearchParams(location.hash.split("?")[1] ?? "").get("run");

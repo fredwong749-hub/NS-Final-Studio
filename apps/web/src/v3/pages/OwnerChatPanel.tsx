@@ -1,6 +1,7 @@
 // W30 · PLAN_OWNER_CHAT 分期 2：#/queue 顶部常驻的项目方助手（只读）。
 // 后端 POST /api/owner/chat {message, history[]} → {reply, need, proposed_actions[]}；GET /api/owner/chat/digest → {sentence}。
 // 本期动作不执行：proposed_actions 画成灰色、不可点的按钮，标“下一期”。挂法：OwnerQueuePage 顶部 <OwnerChatPanel />（由 A-G3 加那一行）。
+import { postChat } from "./OwnerChatPanel.logic";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 
 export type ChatAction = { tool: string; args: Record<string, unknown>; label: string; executable: boolean; phase?: string };
@@ -22,19 +23,6 @@ const S: Record<string, CSSProperties> = {
   input: { flex: 1, minWidth: 0, background: "var(--oq-base, #030303)", color: "inherit", border: "1px solid var(--oq-line2, rgba(255,255,255,.16))", borderRadius: 4, padding: "6px 8px", fontSize: 14 },
   send: { border: "1px solid var(--oq-line2, rgba(255,255,255,.16))", background: "transparent", borderRadius: 4, padding: "6px 14px", cursor: "pointer" },
 };
-
-export async function postChat(message: string, history: { role: string; content: string }[]): Promise<ChatReply> {
-  const r = await fetch("/api/owner/chat", {
-    method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, history }),
-  });
-  if (!r.ok) {
-    let why = `助手没回上来（HTTP ${r.status}）`;
-    try { const j = await r.json(); if (j?.detail) why = String(j.detail); } catch { /* 非 JSON */ }
-    throw new Error(why);
-  }
-  return (await r.json()) as ChatReply;
-}
 
 export default function OwnerChatPanel() {
   const [digest, setDigest] = useState<string>("");

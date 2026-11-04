@@ -76,7 +76,7 @@ def test_story_images_hide_old_script_drafts(monkeypatch, tmp_path):
     from ns_api import takes_ui as T
     src = Path(SR.__file__).read_text(encoding="utf-8")
     assert "old_drafts_hidden" in src and "cutoff_for" in src
-    monkeypatch.setattr(T, "cutoff_for", lambda ep: "2026-11-01T23:21:00")
+    monkeypatch.setattr(T, "cutoff_for", lambda ep, shot=None: "2026-11-01T23:21:00")
     cut = _t.mktime(_t.strptime("2026-11-01T23:21:00", "%Y-%m-%dT%H:%M:%S"))
     old = tmp_path / "old.png"
     new = tmp_path / "new.png"

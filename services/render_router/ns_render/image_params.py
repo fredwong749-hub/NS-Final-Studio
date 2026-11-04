@@ -723,12 +723,29 @@ def post_effective(eff: dict | None, graph: dict | None, post: dict | None) -> d
     return out
 
 
-def post_file(src: Path, eff: dict | None) -> dict | None:
+def post_film_cfg(path: Path | None = None) -> dict | None:
+    """H2a 胶片后期档配置（config/render_quality.json post_film）；没开 → None"""
+    try:
+        c = quality(path).get("post_film") or {}
+    except (OSError, ValueError):
+        return None
+    return c if c.get("enabled") else None
+
+
+def post_file(src: Path, eff: dict | None, film_cfg: dict | None = None, dst: Path | None = None) -> dict | None:
     """缩回 + 锐化（同 tools/ab/leica_sharp.py down / usm：PIL lanczos → PIL UnsharpMask），写 <stem>_post.png。
-    不需要后处理 → None。返回 {path, steps, rendered_size, size, sharpen}"""
+    H2a：post_film.enabled=true 时 缩回 →（usm=true 才 USM）→ 胶片调色 →（LUT）；false 时与以前逐字节一致。
+    film_cfg：显式传入则用它（None = 读配置文件）。dst：另存路径（重后期用；缺省 <stem>_post.png）。
+    不需要后处理 → None。返回 {path, steps, rendered_size, size, unsharp[, film]}"""
+    if film_cfg is None:
+        film_cfg = post_film_cfg()
+    elif not film_cfg.get("enabled"):
+        film_cfg = None
     size = target_size(eff)
     sh = (eff or {}).get("sharpen") or {}
-    if not size and not sh.get("enabled"):
+    if film_cfg:
+        sh = sh if film_cfg.get("usm") else {}
+    if not size and not sh.get("enabled") and not film_cfg:
         return None
     from PIL import Image, ImageFilter
     src = Path(src)
@@ -743,9 +760,24 @@ def post_file(src: Path, eff: dict | None) -> dict | None:
                "threshold": int(sh.get("threshold") or 0)}
         im = im.filter(ImageFilter.UnsharpMask(**usm))
         steps.append(f"USM radius {usm['radius']} percent {usm['percent']} threshold {usm['threshold']}")
-    dst = src.with_name(src.stem + "_post.png")
+    film = None
+    if film_cfg:
+        from . import film_look as FL
+        lut = film_cfg.get("lut") or {}
+        lut_path = None
+        if lut.get("apply"):
+            lut_path = Path(lut["file"]) if lut.get("file") else None
+            if lut_path and not lut_path.is_absolute():
+                lut_path = P.ROOT / lut_path
+        im, film = FL.grade_image(im, film_cfg.get("film") or {}, lut, lut_path)
+        film["usm"] = bool(usm)
+        steps.append("film " + FL.VERSION + (f" + LUT {film['lut']['file']}" if film.get("lut") else ""))
+    dst = Path(dst) if dst else src.with_name(src.stem + "_post.png")
     im.save(dst)
-    return {"path": str(dst), "steps": steps, "rendered_size": before, "size": list(im.size), "unsharp": usm}
+    out = {"path": str(dst), "steps": steps, "rendered_size": before, "size": list(im.size), "unsharp": usm}
+    if film:
+        out["film"] = film
+    return out
 
 
 def finish(shot_id: str, stage: str, n: int, eff: dict | None, wf: dict | None, *, overrides: dict | None = None,

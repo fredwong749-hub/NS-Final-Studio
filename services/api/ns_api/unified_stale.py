@@ -62,7 +62,10 @@ def _unified_bodies(script, ep, shot) -> dict[str, str] | None:
         g, _removed = AR.locks_without_wardrobe(g)
     c = C.compile_shot(ep, FJ.retrigger(shot, g), g, set(), image_style=ST.image_suffix(), bible=load_bible(),
                        framing_project=project)
-    return {"image": c.image_prompt, "last": c.last_prompt or ""}
+    # 镜头语言模板 v2 的首帧段（镜头 / 构图 / 灯光 / 融合句，frame_job.build_first → shot_language_note）也是 unified 正文的一部分，
+    # 位置在 plan_note 等补句之前；原来这里不带它 → 11-03 起所有 frame_v9 版本都被误标“编译器升级”（D-FRESH，11-04 ep01-S12~S15 实测）
+    sl = FJ.shot_language_note(project, shot, "shot")
+    return {"image": c.image_prompt, "last": c.last_prompt or "", "image_note": sl}
 
 
 def is_video10(take: dict) -> bool:
@@ -79,13 +82,35 @@ def is_video10(take: dict) -> bool:
 from ns_agent.asset_refs import TEXT_NOTE_RES as _NOTE_RES  # noqa: E402  系统固定说明句的唯一来源（asset_refs，按拼接顺序）
 
 
-def match_target(prompt: str, body: str) -> str:
+def match_target(prompt: str, body: str, lead_note: str = "") -> str:
     """unified 版本的比较基准：提示词里带槽位不足说明 → 现在正文 + 同样的说明（同一个 frame_job.with_note）"""
-    if not body or prompt.endswith(body):
+    if not body or (prompt.endswith(body) and not lead_note):
         return body
     from ns_agent import frame_job as FJ
     # PRODUCER 11-01（K-REN-101 外层单品说明，与 DATAALIGN 协调）：槽位不足说明在前、外层单品说明在后，与 compile_frame 拼的顺序一致
     notes = [n for rx in _NOTE_RES for n in rx.findall(prompt or "")]
-    if not notes:
+    if not notes and not lead_note:
         return body
-    return FJ.with_note(body, "".join(f"{n}。" for n in notes))
+    # lead_note = 镜头语言段（shot_language_note，固定在最前；build_first 把它和其余补句一次 with_note 放进去）
+    return FJ.with_note(body, lead_note + "".join(f"{n}。" for n in notes))
+
+
+def strip_redo_fix(prompt: str, fixes: list | None) -> str:
+    """把重出时追加 / 替换进提示词的文本（take.params.redo_fix_clause，unified_frame 记录）还原掉，再和现编正文比：
+    owner_edit = 末尾 “换行+项目方要求修改（…）：<prompt>”；vqa_delta = 先剥 append（插在“无字幕…”尾巴前的 “，<append>”），再把 replace 的 b 换回 a（只动第一处）"""
+    p = prompt or ""
+    for f in reversed(fixes or []):
+        if not isinstance(f, dict):
+            continue
+        if f.get("kind") == "owner_edit":
+            tail = chr(10) + "项目方要求修改（只改这一点，其余保持不变）：" + str(f.get("prompt") or "")
+            if p.endswith(tail):
+                p = p[: -len(tail)]
+        elif f.get("kind") == "vqa_delta":
+            add = str(f.get("append") or "").strip().rstrip("，,。")
+            if add and f"，{add}" in p:
+                p = p.replace(f"，{add}", "", 1)
+            for a, b in reversed(f.get("replace") or []):
+                if a and b and b in p:
+                    p = p.replace(b, a, 1)
+    return p

@@ -386,7 +386,7 @@ def apply_owner_edit(job: dict, edit: dict | None) -> dict:
     base = str(job.get("prompt") or "")
     if p in base:
         return job
-    return {**job, "prompt": base + "\n项目方要求修改（只改这一点，其余保持不变）：" + p, "owner_edit": (edit or {}).get("id")}
+    return {**job, "prompt": base + "\n项目方要求修改（只改这一点，其余保持不变）：" + p, "owner_edit": (edit or {}).get("id"), "owner_edit_prompt": p}
 
 
 def episode_order_key(c: tuple) -> tuple:
@@ -3654,7 +3654,7 @@ def import_staged_run(paths: Paths, path: str, sha: str, note: str, by: str, run
     RN.register_run(run, source="import", episode=min(eps) if eps else None, root=paths.root)
     try:
         import import_events as IE
-        IE.append_import(eps, by=f"PRODUCER import_staged（{by}）", source=path, note=note, run_id=run)
+        IE.append_import(eps, by=f"PRODUCER import_staged（{by}）", source=path, note=note, run_id=run, old_script=backup or (out.parent / "_none_.json"))
     except Exception as e:  # noqa: BLE001
         log_event(paths, "import_event_err", path=path, run=run, error=repr(e)[:200])
     log_event(paths, "imported_staged", path=path, sha=sha, status=200, by=by, note=note, run=run, out=str(out.relative_to(paths.root)),

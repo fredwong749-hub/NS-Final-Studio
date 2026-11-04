@@ -1,35 +1,11 @@
 // L-123 延伸：全系统出图队列（项目方 17:0x：“提示整个系统的排队阵列”）。通用组件：出图页、资产页、视频页都放同一个。
 // 数据：/api/frame-queue（producer registry 的 ready / running，按 K-OPS-E30 排序：按集、集内插队 / 驳回先、尾帧先、镜号）。
 // 收起时一行：“出图队列 12 · 你提交的 3 条：排第 2、5、9”；点开是完整列表（按集顺序），你提交的那几条高亮。
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useFrameQueue, type Item } from "./QueueDock.helpers";
 import { fmtClock } from "./GenState.helpers";
 import { GenLamp } from "./GenState";
 import "./genstate.css";
-
-type Item = { oid: string; shot: string; ep: number; idx: number; kind: "first" | "last"; state: "running" | "queued"; pos: number; eta_at: number; redo: boolean };
-type Mine = { id: string; shot: string; stage: "first" | "last"; state: string; word: string; pos: number | null; eta_at: number | null; text: string; msg: string };
-type Q = { per_shot_s: number; lanes: number; running: number; queued: number; stale?: boolean | null; items: Item[]; mine: Mine[] };
-
-export function useFrameQueue(ms = 5000): Q | null {
-  const [q, setQ] = useState<Q | null>(null);
-  useEffect(() => {
-    let alive = true;
-    const load = () =>
-      fetch("/api/frame-queue")
-        .then((r) => (r.ok ? (r.json() as Promise<Q>) : null))
-        .then((x) => alive && x && setQ(x))
-        .catch(() => undefined);
-    load();
-    const t = window.setInterval(load, ms);
-    window.addEventListener("ns-frames-refresh", load);
-    return () => {
-      alive = false;
-      window.clearInterval(t);
-      window.removeEventListener("ns-frames-refresh", load);
-    };
-  }, [ms]);
-  return q;
-}
 
 export function QueueDock() {
   const q = useFrameQueue();

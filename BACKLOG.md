@@ -42,3 +42,11 @@
 - [PS-MASTER 11-04] L-186 规则级：写作时长目标按剪后算（剪前≈目标÷0.7），QW-T 时长检查改为预估剪后时长（assemble pace_trims 同口径），镜数上限 D-SCR-06 跟剪前秒数。
 - [PS-MASTER 11-04] episode_pipeline.prepare 对 primary 剧走旧 V1 路径（RUN 常量 + full_redo.reset_redo 整集），series10_v2 已是 primary → 误用会推倒整集；应让 primary 也走 prepare_run 或拒绝。
 - [PS-MASTER 11-04] producer serve 启动时缓存导入稿（self.script），重新导入后不重读 → 新镜派单 KeyError（pipeline.find_shot）；应按 import sha 变化热重载或 import-staged 后自动排 producer-only 重启。
+- [PS-MASTER 11-04] producer master_approve 对契约未过的版本会被 reconcile_demoted 下一轮撤下（只认 take_pf.ok），总调度亲审通过应走 review-adopt；建议 master_approve 对未过版本拒绝并提示改用 review-adopt，或 reconcile 认 master_review.ok。
+- [PS-MASTER 11-04] K-OPS-E21 runaway：code_error（派单前代码异常、未出图）不应计入每小时派单数；producer retry 应同时释放该对象的 runaway_hold 条目；缺一个解冻 CLI。
+- [PS-MASTER 11-04] 看图模型好莱坞分偏宽松（consistency 近全 10、对 USM 光晕不敏感）：需要用项目方评判建校准集 / 改成成对比较，再当闸门。
+- [PS-MASTER 11-04] Q9 判词出现 V1 名字（“顾沉长发、林晚发色发暗”）：Q9 规则 / 提示词文本残留 V1 例句，L-126 应清。
+- [PS-MASTER 11-04] Q10/QB 左右方位判反（S15 v1/v2 判词互相矛盾）与 Q9 看镜头“证据说没看、结论说看”（S16 v2、S8 尾帧）：需判词自洽检查（结论与证据矛盾 → 重问 / 判未测）。
+- [PS-MASTER 11-04] config/render_quality.json reality_c2.post_lut 在出图链无任何代码应用（只有 tools/v2style 用）。
+- [PS-MASTER 11-04 UI] /api/thumb 404（未曝光卡片）；v3-step 步骤按钮文字裁切；assets 页左对齐差 8–16px；/api/factory/health 8 s；拉回新文件后 API 摘要缓存不刷新需重启。
+- [PS-MASTER 11-04] Q3 景别契约按“最大脸”量脸高；前景人物半虚 + 主体退中景的构图（H3b 写法）会被前景大脸算错档 → 改为按在焦点的主体量。

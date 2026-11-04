@@ -106,6 +106,16 @@ def _run(client, shot_id: str, stage: str, job: dict, seed: int, timeout_s: floa
         ct.update(seed=seed, seed_policy=job.get("seed_policy") or "caller", sent_prompt_sha=_sha16(sent),
                   final_prompt_sha=_sha16(job.get("prompt") or ""))   # final ≠ compile 的 prompt_sha = 编译后又被改过（owner_edit / vqa_delta）
         take.params = {**(take.params or {}), "compile_trace": ct}
+    # 重出时追加 / 替换进提示词的文本（producer.apply_owner_edit 的项目方修改要求、vqa judge 的一维修正）记进 params.redo_fix_clause：
+    # ns_api.unified_stale.strip_redo_fix 比较前按它剥掉，否则重出版本一律被标“编译器升级”（D-FRESH，ep01-S13 / S16）。只记录，不改出图行为
+    fixes = []
+    if job.get("owner_edit_prompt"):
+        fixes.append({"kind": "owner_edit", "id": job.get("owner_edit"), "prompt": job["owner_edit_prompt"]})
+    if job.get("vqa_delta"):
+        d_ = job["vqa_delta"]
+        fixes.append({"kind": "vqa_delta", "replace": [list(x) for x in (d_.get("replace") or [])], "append": d_.get("append") or ""})
+    if fixes:
+        take.params = {**(take.params or {}), "redo_fix_clause": fixes}
     # 交付尺寸记录（11-01 bug：画布 take 7 被判“坏图：768×1344 与请求的 1152×2016 不符”——图是对的（1.5× 出图 →
     # lanczos 缩回 768×1344 → USM），是 params 只记了放大出图的图尺寸）：后处理记成 params.post，effective 记交付尺寸
     post_rec = ({k: v for k, v in post.items() if k != "path"} | {"file": rel, "from": raw}) if post else None

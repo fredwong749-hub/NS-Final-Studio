@@ -1,11 +1,10 @@
 // NAVIA：大图还在从服务器传回时显示“原图传输中”，不显示空白或裂图（项目方 20:1x）。
 // 过程：加载中（超过 0.3 s 才出提示，避免缓存图闪一下）→ 失败时自动重试 4 次（间隔 3 / 6 / 9 / 12 秒，文件可能正在同步）→ 仍然没有才写“文件不在”。
 import { useEffect, useState, type ImgHTMLAttributes } from "react";
+import { IMG_RETRIES, imgWord, type ImgSt } from "./LoadImg.helpers";
 import "./loadimg.css";
 
-type St = "loading" | "slow" | "retry" | "ok" | "gone";
-export const IMG_RETRIES = 4;
-export const imgWord: Record<St, string> = { loading: "", slow: "原图传输中", retry: "原图传输中", ok: "", gone: "文件不在" };
+type St = ImgSt;
 
 export function LoadImg({ src, onLoad, onError, style, alt = "", ...rest }: ImgHTMLAttributes<HTMLImageElement> & { src: string }) {
   const [st, setSt] = useState<St>("loading");
