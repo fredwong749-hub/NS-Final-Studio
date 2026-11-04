@@ -2982,7 +2982,9 @@ class Producer:
                 # G3：没过契约的版本绝不设为当前；契约分最好的一版只记下来给人看
                 reason = (f"试了 {attempt} 次（{' → '.join(str(h.get('rung') or h.get('source') or '?') for h in hist)}）仍没过：{why}；契约分最好的是 v{best}"
                           f"（没过契约，不设为当前），标“尽力”，不进合成")
-                ra = review_adopt(self.p, oid, ns={h.get("take") for h in hist if h.get("take")})   # L-183：不再排除出拼接
+                ra = auto_review_adopt(self.p, oid, {h.get("take") for h in hist if h.get("take")})   # L-183；L-187：开关默认关
+                if not ra and not review_adopt_auto(self.p.root):
+                    reason += "；L-187 自动取最高分已关，等项目方在 #/queue 挑"
                 if ra:
                     self.led_update(oid, tries=attempt, history=hist, final="passed", last_error=why,
                                     reason=f"试了 {attempt} 次没全过；L-183 取 Q1–Q9 全过里分数最高的 v{ra} 设为当前，待项目方复核")
@@ -3553,7 +3555,23 @@ def producer_cfg(root: Path = ROOT) -> dict:
     """config/pipeline/producer.json（fanout 一镜多种子分道、accept 共用验收）；读不到 = 默认（fanout 关、accept 开）"""
     d = jl(Path(root) / "config" / "pipeline" / "producer.json", {}) or {}
     fan = {"enabled": False, "max_per_obj": 3, "runs": [], **(d.get("fanout") or {})}
-    return {"fanout": fan, "accept": d.get("accept") or {}}
+    return {"fanout": fan, "accept": d.get("accept") or {}, "review_adopt_auto": d.get("review_adopt_auto") is True}
+
+
+def review_adopt_auto(root: Path = ROOT) -> bool:
+    """L-187（项目方 11-04）：重试用尽后是否自动取 Q1–Q9 全过里最高分设为当前（L-183）；缺键 / 读不到 / 非 true = 关（失败关闭）"""
+    try:
+        return bool(producer_cfg(root)["review_adopt_auto"])
+    except Exception:  # noqa: BLE001  # arch-ok: 配置读不到 = 关
+        return False
+
+
+def auto_review_adopt(paths: "Paths", oid: str, ns: set | None = None) -> int | None:
+    """主循环用：开关关 = 不取（走原 best_effort，等项目方挑）；开 = review_adopt（L-183）。手工 CLI review-adopt 不经此处"""
+    if not review_adopt_auto(paths.root):
+        log_event(paths, "review_adopt_skipped", obj=oid, rule="L-187", counted=False, note="自动取最高分开关关")
+        return None
+    return review_adopt(paths, oid, ns=ns)
 
 
 def shared_accept(paths: "Paths", script, sid: str, file_rel: str, job: dict, pf: dict, evaluate_fn=None) -> dict:

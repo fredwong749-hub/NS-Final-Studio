@@ -456,6 +456,22 @@ def keyframe_candidates(clip: Path, data: Path = DATA) -> dict:
         for f in sorted((other / "takes").glob("image_*.png"), reverse=True):
             if not f.stem.endswith("_raw"):
                 add(first, f"{other.relative_to(data).as_posix()}/takes/{f.name}", f)
+    # V2: data/pipeline/runs/<run>/video/clips/epNN/<shot>__<tag>.mp4 -> <run>/video/jobs.json (first_frame_src, first_frame)
+    vdir = clip.parent.parent.parent
+    if clip.parent.parent.name == "clips" and vdir.name == "video" and "__" in clip.stem:
+        shot = clip.stem.split("__", 1)[0]
+        try:
+            jobs = json.loads((vdir / "jobs.json").read_text(encoding="utf-8"))
+            rows2 = jobs.get("shots") if isinstance(jobs, dict) else jobs
+            job = next((j for j in rows2 or [] if isinstance(j, dict) and j.get("shot") == shot), None)
+        except (OSError, ValueError, AttributeError):
+            job = None
+        if job:
+            for key in ("first_frame_src", "first_frame"):
+                v = job.get(key)
+                if isinstance(v, str) and v:
+                    pp = Path(v)
+                    add(first, f"jobs.{key}", pp if pp.is_absolute() else data.parent / pp)
     return {"shot_dir": shot_dir, "take": take, "first": first, "last": last}
 
 

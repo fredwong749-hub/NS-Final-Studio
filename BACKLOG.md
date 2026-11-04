@@ -38,3 +38,7 @@
 - [11-04 09:2x W46 遗留] gpu36 BGM 重合成 3 次失败（assemble_episode.py sys.path 缺 ns_schema；补丁在 W46 scratchpad assemble_ns_schema.patch，gpu36 验证 import OK）→ 入码；night_state ep01=assemble_failed final=None 需复位（成片 v1/v2 已验收）；gpu33 无 ffmpeg（test_assembly_never_uses_proxy skip）；快照环境红：data/sysarch/baseline.json 缺、viewer_token 写被 real_data_guard 拦
 - [11-04 11:0x] Windows 时区被改为 Central Standard Time（谁改的未知，08:xx–10:5x 之间）：system_version 的 sv 号/快照目录按本地日期算 → 应改为按 JST 或 UTC 固定；项目方 Set-TimeZone 回 Tokyo
 - [11-04 11:1x 项目方] 成片命名 ep01_v1/_v2 的 v 是合成版本号，项目方误读成 V1/V2 剧 → night finalize 输出名改为 <run>_<剧名>_epNN_<集名>_<日期>.mp4（已手工复制一份清晰命名）
+- [PS-MASTER 11-04] v1_leak 词表把 smoke_v2（与 series10_v2 同一份《透明高跟》storyline）当旧剧 → 本剧人名被报 24 处“V1 命中”；应把同源冒烟剧排除出词表（tools/script_rsi/v1_leak.py）。
+- [PS-MASTER 11-04] L-186 规则级：写作时长目标按剪后算（剪前≈目标÷0.7），QW-T 时长检查改为预估剪后时长（assemble pace_trims 同口径），镜数上限 D-SCR-06 跟剪前秒数。
+- [PS-MASTER 11-04] episode_pipeline.prepare 对 primary 剧走旧 V1 路径（RUN 常量 + full_redo.reset_redo 整集），series10_v2 已是 primary → 误用会推倒整集；应让 primary 也走 prepare_run 或拒绝。
+- [PS-MASTER 11-04] producer serve 启动时缓存导入稿（self.script），重新导入后不重读 → 新镜派单 KeyError（pipeline.find_shot）；应按 import sha 变化热重载或 import-staged 后自动排 producer-only 重启。

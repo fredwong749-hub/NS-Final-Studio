@@ -6,6 +6,8 @@
   "runs": [],
   "_note": "L-161 总调度 11-03：一镜多种子分道（PRODMERGE-O）未经 A/B、A1-11 前提未修，cut B 进版关；验证后再开"
  },
+ "_review_adopt_auto": "L-187 项目方 11-04：重试用尽仍没全过时，是否自动取 Q1–Q9 全过里分数最高的一版设为当前（review_adopt，标 review_needed，进成片，即 L-183 行为）。默认 false = 关：照旧标 best_effort、不设当前、不进成片，等项目方在 #/queue 挑。手工 CLI review-adopt 不受此开关影响",
+ "review_adopt_auto": false,
  "accept": {
   "enabled": true,
   "scope": "asset_bundle_runs",

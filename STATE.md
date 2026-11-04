@@ -2,7 +2,7 @@
 
 - 更新：2026-11-03 22:05（MASTER-WSL）
 - 当前阶段：**Phase R（跑通）**——冒烟门 eval/run_smoke.ps1 已建（W26），基线 1/8
-- 最佳版本：git tag best = 44e6c37（sv-20261103-02，15:53 cut 七门全绿；2 条并行偶发串行重跑通过）；deploy #1 15:56–16:03 两台 ssh rc=255（项目方 15:5x 称远程 GPU 停机 1 小时）→ 后台每 2 分钟探两台，通了自动 deploy #2 + 验证，然后 L-152 换代
+- 当前版本：sv-20261104-02（bfc4e158，cut D，11-04 13:38，已推 GitHub，未 deploy）；最佳版本：git tag best = 44e6c37（sv-20261103-02，15:53 cut 七门全绿；2 条并行偶发串行重跑通过）；deploy #1 15:56–16:03 两台 ssh rc=255（项目方 15:5x 称远程 GPU 停机 1 小时）→ 后台每 2 分钟探两台，通了自动 deploy #2 + 验证，然后 L-152 换代
 - 冒烟分数：**2/8**（R2 16:52：G2、G7；G1/G8 因 :8800 当时不通；eval/results/20261103-1652.json）
 
 ## 能跑到的环节（series10_v2 真实数据）
@@ -10,6 +10,12 @@
 - 出图（首帧）✅ 能出（ep01 7 镜 14:17 已出）；出图检测 ❌ 经隧道打分/看图 12–30 分钟/镜、超时循环
 - 尾帧 ❌（W41 01:5x 查实：S8/S10 的 active.image/last 与 S3/S7/S8/S10 的 active.video 都是 V1 林晚版指针，C-14 泄漏，已摘并隔离记录；V2 尾帧要从 V2 首帧重做）；视频 🎬 11/11 全部过闸登记（07:4x）；ep01 视频段已划 gpu36，帧由 relay 从 gpu33 送）；整集预览 🎬 07:54 成片已出并 08:45 拉回笔记本 data/episodes/series10_v2/ep01_v2.mp4（45.04 s，硬规矩 pass；L-092 整集 45<60 s 只记）；复盘 ✅ 07:56 RETRO_ep01.md 自动 done（film_score 28.3/50）；gpu36 sop_gate ep01=完成（九阶段全有证据）
 - 换代完成：服务器 sv-20261103-02；gpu33 producer 在跑、control only_n=11（ep01）；笔记本 resident_sync loop 17:48 已换新代码；gpu36 重启排队。根因链：V2 run 级 ready 清单从未写（L-178）
+
+## ⚡ 交接（11-04 13:38，项目方令：本会话停止全部调度，指挥权交 PowerShell 的 claude 会话）
+- 本会话（WSL/Fable 总调度）已停：不再派工、不再发信、监听已关；Orca run_ecd99b164f7a 无存活工人（W38/W42/W43/W45/W46 均 worker_done）。
+- 刚完成：cut D 已入版 = sv-20261104-02（commit bfc4e158，树 ec43e2f0，84 文件，七门全绿；进程级 TZ=JST-9 + xdist 4），GitHub 已自动推送 master + 标签。**两台服务器尚未 deploy 这一版**（服务器现为 sv-20261104-01 + 热推文件，内容与 sv-20261104-02 一致）。
+- 接手方下一步：① deploy 两台：`.venv\Scripts\python.exe tools/qa/system_version.py deploy sv-20261104-02 --report-json data/system_versions/deploy_sv-20261104-02_report.json`，之后 `verify sv-20261104-02 --shot 8 --run series10_v2`，再 best 标签按冒烟分定（上次冒烟 1/8，R4）；② Windows 时区被改成 Central Standard Time → 项目方 `Set-TimeZone -Id 'Tokyo Standard Time'`（否则 sv 号按本地日期算错、6 条时间测试红；进程级 TZ=JST-9 可绕）；③ 项目方复核 ep01 的 6 个待复核版（首帧 S4 v12 / S8 v1 / S9 v8，尾帧 S5 v8 / S7 v7 / S11 v1）与整集 45 s<60 s（L-092）；④ ep02 是否开跑由项目方定（故事线《透明高跟》第 5 稿 32/40，停在“等项目方定方向”）；⑤ BACKLOG 里 W43/W46 遗留 P1/P2。
+- 工具与坑：工人测试走 tools/qa/remote_pytest.py（gpu33）；cut 七门默认 gpu33（release.json gates_on），服务器缺数据会多 2 条环境红，本地用 --on local；gpu36 复用 ssh 通道反复抖，直连（ControlMaster=no）可通；tunnel_supervisor 僵死用 stop + kill + ensure；restart_queue 30 分钟间隔；deploy 命令在本会话被 Claude Code 权限分类器拦，PowerShell 侧请自行确认权限。
 
 ## 已知坏点（≤5）
 1. ~~服务器 producer 依赖的笔记本产物不自动同步~~（W40 02:30 已入码 run_sync，待下次 cut 入版；真实宕机自动拉起未验证）（ready 清单 / run 产物 / sop_gate 证据 / 派生参考图）：今晚全部手工 tar 推 gpu33 后才出图（L-178/179/180；ISS-181531/181720）
