@@ -50,3 +50,4 @@
 - [PS-MASTER 11-04] config/render_quality.json reality_c2.post_lut 在出图链无任何代码应用（只有 tools/v2style 用）。
 - [PS-MASTER 11-04 UI] /api/thumb 404（未曝光卡片）；v3-step 步骤按钮文字裁切；assets 页左对齐差 8–16px；/api/factory/health 8 s；拉回新文件后 API 摘要缓存不刷新需重启。
 - [PS-MASTER 11-04] Q3 景别契约按“最大脸”量脸高；前景人物半虚 + 主体退中景的构图（H3b 写法）会被前景大脸算错档 → 改为按在焦点的主体量。
+- [PS-MASTER 11-04] validate_qwen_script QW-CH1 不认人物 presence“局部”，而 staging.py（K-WRT-H16）建议写“局部”——两套口径不一致；H3-X4 把“局部”当不在画。需统一。

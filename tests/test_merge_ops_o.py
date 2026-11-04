@@ -253,3 +253,18 @@ def test_import_failed_retries_only_when_importer_changed(tmp_path):
     (rd / "autoflow_ep01.json").write_text(json.dumps(st), encoding="utf-8")
     assert AF.pending_done(rd) == []                                          # 导入器没变 → 不空转
     assert b"\x00" not in (ROOT / "tools/script_rsi/autoflow.py").read_bytes()
+
+
+# ---------------------------------------------------------------- L-188：非 V1 剧重导，新稿全剧场景表盖住旧场景定义
+def test_single_source_scene_table_new_overrides_old():
+    from ns_schema.script import SceneEntry
+    base = _result(triggers=(), shot_trig=())
+    base.globals.scene_library = [SceneEntry(scene_id="sk_a", name="A", light="环形灯正面高亮", fixtures="椅", defined_in=[None, 1])]
+    new = _result(triggers=(), shot_trig=())
+    new.globals.scene_library = [SceneEntry(scene_id="sk_a", name="A", light="顶灯上侧 45° 主光", fixtures="", defined_in=[None, 1])]
+    g = IS.merge_globals(base.globals, new.globals, {1}, single_source=True)
+    e = g.scene_library[0]
+    assert e.light == "顶灯上侧 45° 主光" and e.fixtures == "椅"            # 新稿覆盖，新稿空格沿用
+    assert any("场景表更新" in w for w in IS.registry_drift(base.globals, new.globals, {1}, single_source=True))
+    g_v1 = IS.merge_globals(base.globals, new.globals, {1})                  # V1 / 默认口径不变：先登记为准
+    assert g_v1.scene_library[0].light == "环形灯正面高亮"

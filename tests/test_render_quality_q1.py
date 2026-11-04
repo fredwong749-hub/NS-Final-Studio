@@ -135,7 +135,10 @@ def test_tier_routing_and_final_replaces_lock(env, monkeypatch):
     tf = j["take"]
     assert (tf["mode"], tf["parent"], tf["seed"], tf["workflow"]) == ("final", t1["n"], t1["seed"], FT.FINAL_WORKFLOW)
     assert tf["params"]["tier"] == "final" and tf["params"]["steps"] == 35 and tf["params"]["pass2_steps"] == 14
-    assert tf["raw_file"] and tf["grade"]["strength"] == 0.6 and tf["file"].endswith("_final.png")
+    # L-188（PS-MASTER 11-04）：post_film 开启时定稿档同样走胶片后期，另存 *_final_post.png（与预览档同色调）
+    from ns_render import image_params as _IP
+    want = "_final_post.png" if (_IP.post_film_cfg() or {}).get("enabled") else "_final.png"
+    assert tf["raw_file"] and tf["grade"]["strength"] == 0.6 and tf["file"].endswith(want)
     wf = clients[0][-1].workflows[-1]
     assert wf["10"]["inputs"]["unet_name"] == "qwen_image_2.1_int8_convrot.safetensors"
     assert wf["37"]["inputs"]["steps"] == 35 and wf["38"]["inputs"]["cfg"] == 3.0

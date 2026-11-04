@@ -603,7 +603,7 @@
           "amount": 0.6,
           "threshold": 2
         },
-        "style_suffix": "时尚杂志大片，色彩明艳温暖，肤色金润，70mm电影胶片质感，Leica lens rendering with crisp sharpness and fine micro-contrast, ARRI Alexa cinema latitude with natural true-to-life skin tones, Kodak film color with fine organic grain"
+        "style_suffix": "时尚杂志大片，色彩明艳温暖，肤色金润，70mm电影胶片质感，焦平面上是 Leica 镜头的光学锐利、焦外柔和过渡，ARRI Alexa 柔和反差与高宽容度，高光柔和滚落，Kodak 2383 印片色与细腻胶片颗粒（Leica optical sharpness on the focal plane with gentle falloff out of focus, ARRI Alexa soft contrast and wide latitude, soft highlight roll-off, Kodak 2383 print color with fine film grain）"
       },
       "post_lut": "config/post/luts/v2_fantasy_c.cube",
       "lang": "fantasy",
@@ -774,7 +774,7 @@
           "amount": 0.6,
           "threshold": 2
         },
-        "style_suffix": "纪实杂志快照，高反差，真实皮肤质感，轻微颗粒，Leica lens rendering with crisp sharpness and fine micro-contrast, ARRI Alexa cinema latitude with natural true-to-life skin tones, Kodak film color with fine organic grain"
+        "style_suffix": "电影剧照，真实皮肤质感与毛孔，轻微颗粒，焦平面上是 Leica 镜头的光学锐利、焦外柔和过渡，ARRI Alexa 柔和反差与高宽容度，高光柔和滚落，Kodak 2383 印片色与细腻胶片颗粒（Leica optical sharpness on the focal plane with gentle falloff out of focus, ARRI Alexa soft contrast and wide latitude, soft highlight roll-off, Kodak 2383 print color with fine film grain）"
       },
       "post_lut": "config/post/luts/v2_reality_c2.cube",
       "lang": "reality",

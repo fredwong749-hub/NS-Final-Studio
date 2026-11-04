@@ -30,7 +30,7 @@ def merge_into(base_path: Path, new, single_source: bool = False):
     if len(new.episodes) != len(new_eps_all):
         warnings.append(f"新稿里有重复的集号：{sorted(n for n in new_eps_all if sum(e.number == n for e in new.episodes) > 1)}，只保留最后一个")
     warnings.append(f"合并导入：以 {base_path.name} 为底，替换集 {replaced}，其余 {len(episodes) - len(replaced)} 集保持不变")
-    warnings += registry_drift(base.globals, new.globals, new_eps_all)
+    warnings += registry_drift(base.globals, new.globals, new_eps_all, single_source=single_source)
     # 封板修复 P1：被替换的集从旧来源的 episodes 里删掉，按集取版本不会命中旧条目
     old = [s.model_copy(update={"episodes": [n for n in s.episodes if n not in new_eps_all]}) for s in base.sources]
     return ScriptImport(sources=dedupe_sources([*old, *new.sources]), globals=g, episodes=episodes,
@@ -48,7 +48,7 @@ def base_registered(o, replaced) -> bool:
     return not d or None in d or any(n not in replaced for n in d)
 
 
-def registry_drift(base_g, new_g, replaced: set[int]) -> list[str]:
+def registry_drift(base_g, new_g, replaced: set[int], single_source: bool = False) -> list[str]:
     """fredw-92/D2：新稿把底稿已登记的人物 / 场景改写了（EN / VOICE / 场景格不同）时提示“登记冲突”。
     fredw-92 2026-10-31 定：冲突时保留先登记的（底稿），不覆盖（merge_globals）；新稿这几集逐字引用的新文字会对不上，要按底稿返修"""
     out = []
@@ -59,7 +59,9 @@ def registry_drift(base_g, new_g, replaced: set[int]) -> list[str]:
             if o is None:
                 continue
             diff = [label for f, label in fields.items() if getattr(o, f, "") and getattr(e, f, "") != getattr(o, f, "")]
-            if diff and base_registered(o, replaced):
+            if diff and single_source and attr == "scene_library" and None in (getattr(e, "defined_in", None) or []):
+                out.append(f"场景表更新：{key(e)} 的 {'、'.join(diff)} 以新稿全剧场景表为准，覆盖旧定义（L-188，非 V1 剧）")
+            elif diff and base_registered(o, replaced):
                 where = "、".join("全剧表" if n is None else f"ep{n:02d}" for n in (getattr(o, "defined_in", None) or []))
                 out.append(f"登记冲突：{key(e)} 的 {'、'.join(diff)} 与先登记的（{where or '底稿'}）不同，保留先登记的、不覆盖；"
                            f"新稿第 {sorted(replaced)} 集里逐字引用的新文字会对不上，请按先登记的返修")
@@ -85,6 +87,13 @@ def merge_globals(base, new, replaced: set[int] | frozenset = frozenset(), singl
             o = d.get(key(x))
             if o is None or not base_registered(o, replaced):
                 d[key(x)] = x
+            elif single_source and attr == "scene_library" and None in (x.defined_in or []):
+                # L-188：非 V1 剧（单一来源）重导时，新稿全剧场景表里的场景定义是最新口径——盖住旧定义（旧的光线句等不再回流），
+                # 新稿空格沿用旧值，defined_in 取并集；V1 仍按“先登记为准”
+                upd = {f: getattr(x, f) or getattr(o, f) for f in REGISTRY_FIELDS[attr][1] if f != "name"}
+                upd["name"] = x.name or o.name
+                upd["defined_in"] = list(dict.fromkeys([*(o.defined_in or []), *(x.defined_in or [])]))
+                d[key(x)] = x.model_copy(update=upd)
         return list(d.values())
     pick = (lambda k: getattr(new, k)) if single_source else (lambda k: getattr(new, k) or getattr(base, k))   # noqa: E731
     if single_source:
