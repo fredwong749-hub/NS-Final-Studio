@@ -1424,9 +1424,30 @@ def push_remote(prev: str, sv: str) -> dict:
         with open(f, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(alert, ensure_ascii=False) + chr(10))
         return {"at": at, "ok": False, "blocked": "密钥扫描命中", "hits": hits[:20]}
-    branch = git("branch", "--show-current").strip() or "master"
-    code, out = sh(["git", "push", "origin", branch, "--follow-tags"], 3600)
-    return {"at": at, "ok": code == 0, "remote": "origin", "branch": branch, "detail": tail(out, 3)[:400]}
+    # 项目方 11-06 08:3x：“版本合成一个 Git 分支……每次做 latest 的时候，就做一个分支上去，做一个 PR 上去”——
+    # 每版推独立分支 release/<sv>（指向本版提交 + tag），开 PR 合到 master；不再直接推 master
+    base = git("branch", "--show-current").strip() or "master"
+    rel = f"release/{sv}"
+    code, out = sh(["git", "push", "origin", f"{sv}^{{commit}}:refs/heads/{rel}"], 3600)
+    if code != 0:
+        return {"at": at, "ok": False, "remote": "origin", "branch": rel, "detail": tail(out, 3)[:400]}
+    sh(["git", "push", "origin", f"refs/tags/{sv}"], 600)
+    return {"at": at, "ok": True, "remote": "origin", "branch": rel, "detail": tail(out, 3)[:400], "pr": open_pr(sv, rel, base)}
+
+
+def open_pr(sv: str, rel: str, base: str = "master") -> dict:
+    """release/<sv> → base 开 PR（gh CLI）；正文 = docs/system_versions/<sv>.md。已有同分支 PR / gh 不在 = 只记录，不影响发版"""
+    notes = ROOT / "docs/system_versions" / f"{sv}.md"
+    body = (notes.read_text(encoding="utf-8") if notes.is_file() else f"系统版本 {sv}") + chr(10) * 2 +         "🤖 Generated with [Claude Code](https://claude.com/claude-code)" + chr(10)
+    bf = ROOT / "data/system_versions" / f"{sv}_pr_body.md"
+    bf.parent.mkdir(parents=True, exist_ok=True)
+    bf.write_text(body, encoding="utf-8")
+    title = f"{sv}：系统版本"
+    first = next((ln for ln in body.splitlines() if ln.startswith("- 本版包含：")), "")
+    if first and first.strip() != "- 本版包含：—":
+        title = f"{sv}：{first.split('：', 1)[1].strip()[:80]}"
+    code, out = sh(["gh", "pr", "create", "--base", base, "--head", rel, "--title", title, "--body-file", str(bf)], 300)
+    return {"ok": code == 0, "url": out.strip().splitlines()[-1] if code == 0 and out.strip() else None, "detail": tail(out, 3)[:300]}
 
 
 def load_rs():
