@@ -859,6 +859,14 @@ checks:
     path: [whole_episode_prompts]
     op: eq
     value: false
+  - id: D-V2-202
+    decision: L-202（项目方 11-06 08:0x 选 A“按镜判”：资产就绪按镜判，本镜用到的脸 / 造型 / 场景底图齐了就出首帧和视频，缺的镜单独等、补齐自动放行；取代 L-140 整集资产齐了才出图）
+    title: sop_gate.json whole_episode_assets = false
+    type: json
+    file: config/pipeline/sop_gate.json
+    path: [whole_episode_assets]
+    op: eq
+    value: false
   - id: D-V2-196
     decision: L-196（项目方 11-05 20:2x “我需要你全自动，不要检测那么多了”：首 / 尾帧闸门只留 Q1 身份、人数、无字幕水印、成人安全；Q9 / QB / Q10 只记录不挡）。⤴ L-200（11-06 07:3x）修订硬项清单：加 gaze 视线 / 排排站
     title: gen_contract.json blocking_items = [Q1, count, text, adult, gaze]

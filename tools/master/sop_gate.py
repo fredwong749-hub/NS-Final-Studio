@@ -23,7 +23,8 @@
 
 证据全部复用现有产物，不另起平行状态：
   剧本 / 导入闸门 ← data/pipeline/runs/<run>/P4_epNN.md + autoflow_epNN.json（gate=ok 且 import=imported|reimported；reopened = 不过）
-  资产就绪       ← data/pipeline/asset_jobs/<run>/_ready_epNN.json（episode_ready 写；ready 且 gaps=0）
+  资产就绪       ← data/pipeline/asset_jobs/<run>/_ready_epNN.json（asset_jobs.generate 写；ready 且 gaps=0 = 整集就绪；
+                   L-202 按镜：shot_gaps{镜号|*: [缺口]} 里没有本镜 = 本镜资产齐（旧文件没这一段 → 按 created/existing/reopened 作业的 shots 推）
   提示词         ← data/pipeline/sop_gate/<run>/epNN_prompts.json（probe-prompts 逐镜调唯一编译入口 build_first + preflight 写；导入稿 sha / 资产清单变了即过期）
   出图 / 检测 / 尾帧 ← data/renders/<run>/epNN/SN/takes.json（active image / last + postflight + Q9）——帧只记这一本账（ab 金样账不再认）
   视频           ← data/pipeline/runs/<run>/video/clips/epNN/epNN-SN__*.mp4
@@ -196,13 +197,55 @@ def check_import(root: Path, run: str, ep: int) -> dict:
     return _ok("导入闸门", False, why, sha=im.get("sha256"), earlier_import=bool(im.get("sha256")))
 
 
-def check_assets(root: Path, run: str, ep: int) -> dict:
+ASSET_JOB_NO_BLOCK = {"voice"}        # 音色不挡首帧（episode_ready.FIRST_FRAME_KINDS 同口径：首帧是画面，音色是配音阶段的事）
+
+
+def asset_shot_gaps(root: Path, run: str, ep: int, ready: dict | None = None) -> dict[int | None, list[str]]:
+    """L-202：本集每镜还缺的首帧资产（人物脸 / 造型 / 单品 / 场景底图）→ {镜号: [缺口…]}；键 None = 挡全部镜的缺口（没写镜号）。
+    来源 ① _ready_epNN.json shot_gaps（asset_jobs.generate 按 episode_ready 缺口写，键 "镜号" 或 "*"）；
+    来源 ② 旧 _ready 文件没有 shot_gaps → 按 created / existing / reopened 列的作业文件推：没收尾（state != done）的作业挡它 shots 里的镜，
+    shots 为空 = 挡全部镜（失败关闭）。音色作业不挡"""
+    r = ready if ready is not None else (_j(root / "data/pipeline/asset_jobs" / run / f"_ready_ep{ep:02d}.json", None) or {})
+    out: dict[int | None, list[str]] = {}
+    sg = r.get("shot_gaps")
+    if isinstance(sg, dict):
+        for k, labels in sg.items():
+            key = None if str(k) == "*" else int(k)
+            out.setdefault(key, []).extend(str(x) for x in (labels or []))
+        return out
+    jd = root / "data/pipeline/asset_jobs" / run
+    for jid in [*(r.get("created") or []), *(r.get("existing") or []), *(r.get("reopened") or [])]:
+        j = _j(jd / f"{jid}.json", None)
+        if not isinstance(j, dict):
+            out.setdefault(None, []).append(f"{jid}：作业文件读不出")
+            continue
+        if j.get("state") == "done" or j.get("kind") in ASSET_JOB_NO_BLOCK:
+            continue
+        label = f"[{j.get('kind')}] {j.get('who')}：{j.get('what')}"
+        for n in (j.get("shots") or [None]):
+            out.setdefault(None if n is None else int(n), []).append(label)
+    return out
+
+
+def check_assets(root: Path, run: str, ep: int, shot: int | None = None) -> dict:
+    """整集：ready 且 gaps=0。L-202（shot 给了）：本镜用到的资产齐了就过，别的镜缺什么不管；没给镜号仍按整集判（why 里带按镜概况）"""
     r = _j(root / "data/pipeline/asset_jobs" / run / f"_ready_ep{ep:02d}.json", None)
     if not r:
         return _ok("资产就绪", False, "没有 episode_ready 结果（_ready_epNN.json）")
     if r.get("ready") and not r.get("gaps"):
         return _ok("资产就绪", True, f"episode_ready 全部就绪 {r.get('at', '')}", at=r.get("at"))
-    return _ok("资产就绪", False, f"episode_ready 缺口 {r.get('gaps')} 个", at=r.get("at"))
+    gaps = asset_shot_gaps(root, run, ep, r)
+    allb = gaps.get(None) or []
+    if shot is not None:
+        bl = allb + (gaps.get(int(shot)) or [])
+        if bl:
+            return _ok("资产就绪", False, f"镜{int(shot)} 等资产：{'；'.join(bl)[:160]}", at=r.get("at"), bad=[int(shot)], blockers=bl)
+        return _ok("资产就绪", True, f"镜{int(shot)} 用到的资产齐（L-202 按镜；本集还缺 {r.get('gaps')} 项不挡本镜）", at=r.get("at"))
+    want, _pend = _want(run, ep, root, None, [])
+    blocked = sorted(n for n in want if allb or gaps.get(n))
+    free = [n for n in want if n not in blocked]
+    tail = (f"；L-202 按镜：镜 {','.join(map(str, blocked[:12]))} 等资产" + (f"，镜 {','.join(map(str, free[:12]))} 可放行" if free else "")) if want else ""
+    return _ok("资产就绪", False, f"episode_ready 缺口 {r.get('gaps')} 个{tail}", at=r.get("at"), bad=blocked, ready_shots=free)
 
 
 def _prompt_file(root: Path, run: str, ep: int) -> Path:
@@ -502,9 +545,11 @@ def check_preview(root: Path, run: str, ep: int) -> dict:
 
 def evaluate(run: str, ep: int, root: Path = ROOT, shot: int | None = None) -> list[dict]:
     """九个阶段逐一判（不短路，status 要看全貌）。L-140（整集就绪才出图）：config whole_episode_prompts=true 时，
-    提示词阶段永远按整集判（给了镜号也一样）——按镜进“出图”前，本集每个非成人镜都要编译 + preflight 过"""
+    提示词阶段永远按整集判（给了镜号也一样）——按镜进“出图”前，本集每个非成人镜都要编译 + preflight 过。
+    L-195 / L-202：whole_episode_prompts / whole_episode_assets = false → 提示词 / 资产就绪按镜判，缺的镜单独等，补齐自动放行"""
     p_shot = None if config(root).get("whole_episode_prompts", True) else shot
-    return [check_script(root, run, ep), check_import(root, run, ep), check_assets(root, run, ep),
+    a_shot = None if config(root).get("whole_episode_assets", True) else shot   # L-202：资产就绪按镜（取代 L-140 整集齐了才出图）
+    return [check_script(root, run, ep), check_import(root, run, ep), check_assets(root, run, ep, a_shot),
             check_prompts(root, run, ep, p_shot), check_images(root, run, ep, shot), check_image_qc(root, run, ep, shot),
             check_lasts(root, run, ep, shot), check_video(root, run, ep), check_preview(root, run, ep)]
 
@@ -743,7 +788,7 @@ def _shot_no(sid) -> int | None:
 
 
 def video_shots_ok(run: str, ep: int, root: Path = ROOT) -> list[int]:
-    """本集能进“视频”的镜（逐镜判：该镜首帧过检 + 尾帧有当前版；提示词仍按整集 L-140）"""
+    """本集能进“视频”的镜（逐镜判：该镜首帧过检 + 尾帧有当前版；提示词 / 资产按 config 整集或按镜，L-195 / L-202）"""
     return [n for n in shots_of(run, ep, root) if judge(run, ep, "视频", n, root).get("ok")]
 
 
@@ -909,14 +954,24 @@ def promote_check(run: str, root: Path = ROOT) -> dict:
     if st != "preparing":
         return {"run": run, "status": st, "promote": False, "why": f"status={st}，不是 preparing（只有 preparing 会被提升）", "episodes": []}
     ok_eps, why = [], []
+    cfg = config(root)
+    per_shot = not cfg.get("whole_episode_prompts", True) or not cfg.get("whole_episode_assets", True)
     for ep in episodes_of(run, root):
         j = judge(run, ep, stage, root=root)
         if j["ok"]:
             ok_eps.append(ep)
-        else:
-            why.append(f"ep{ep:02d}：" + "；".join(j["missing"])[:200])
+            continue
+        if per_shot:                                      # L-195 / L-202：有一镜能进就提升，缺资产 / 提示词的镜单独等
+            want, _pend = _want(run, ep, root, None, [])
+            oks = [n for n in want if judge(run, ep, stage, n, root=root).get("ok")]
+            if oks:
+                ok_eps.append(ep)
+                why.append(f"ep{ep:02d}：镜 {','.join(map(str, oks[:12]))} 可进“{stage}”（按镜，L-202）")
+                continue
+        why.append(f"ep{ep:02d}：" + "；".join(j["missing"])[:200])
     return {"run": run, "status": st, "promote": bool(ok_eps), "episodes": ok_eps, "stage": stage,
-            "why": (f"第 {ok_eps} 集已可进“{stage}”" if ok_eps else ("；".join(why) or "还没有任何一集开工"))}
+            "why": (f"第 {ok_eps} 集已可进“{stage}”" + ("；" + "；".join(w for w in why if "按镜" in w) if per_shot else "")
+                    if ok_eps else ("；".join(why) or "还没有任何一集开工"))}
 
 
 def promote(run: str, root: Path = ROOT, by: str = "sop_gate", apply: bool = False) -> dict:

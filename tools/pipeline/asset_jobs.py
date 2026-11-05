@@ -550,12 +550,29 @@ def _checker():
     return m.check
 
 
+FIRST_FRAME_KINDS = ("face", "name", "schedule", "look", "item", "scene", "script")   # = episode_ready.FIRST_FRAME_KINDS（音色不挡首帧）
+
+
+def shot_gaps(res: dict) -> dict[str, list[str]]:
+    """L-202（资产就绪按镜判）：episode_ready 缺口 → {"镜号": [缺口…]}，没写镜号的缺口记在 "*"（挡全部镜，失败关闭）。
+    写进 _ready_epNN.json shot_gaps，sop_gate.check_assets(shot) 只看本镜这一段；不另算缺口，口径仍是 episode_ready.check"""
+    out: dict[str, list[str]] = {}
+    for g in res.get("gaps") or []:
+        if g.get("kind") not in FIRST_FRAME_KINDS:
+            continue
+        label = f"[{g.get('kind')}] {g.get('who')}：{g.get('what')}"
+        for n in (g.get("shots") or ["*"]):
+            out.setdefault(str(n), []).append(label)
+    return out
+
+
 def generate(run: str, episode: int, root: Path = ROOT, res: dict | None = None, check=None) -> dict:
-    """缺口 → 作业文件（幂等）。返回 {ready, gaps, created, existing, skipped, golden}"""
+    """缺口 → 作业文件（幂等）。返回 {ready, gaps, created, existing, skipped, golden, shot_gaps}"""
     guard_run(root, run)
     res = res or (check or _checker())(run, episode)
     out = {"run": run, "episode": episode, "ready": bool(res.get("ready")), "gaps": len(res.get("gaps") or []),
-           "created": [], "existing": [], "skipped": [], "reopened": [], "golden": None, "at": _now()}
+           "created": [], "existing": [], "skipped": [], "reopened": [], "golden": None, "at": _now(),
+           "shot_gaps": shot_gaps(res)}
     story, looks = ({}, [])
     if res.get("gaps"):
         try:
