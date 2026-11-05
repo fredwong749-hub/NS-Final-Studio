@@ -24,7 +24,7 @@ import json
 import os
 import re
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -636,7 +636,7 @@ def main(argv=None) -> int:
         fetch(a.run)
     src = load_sources(a.run, a.episode, a.video_start_date)
     wins = [analyze((pt(s), pt(u)), src, a.episode) for s, u in zip(a.since, a.until)]
-    result = {"run": a.run, "episode": a.episode, "generated_at": datetime.now().isoformat(timespec="seconds"), "windows": wins}
+    result = {"run": a.run, "episode": a.episode, "generated_at": datetime.now(timezone(timedelta(hours=9))).isoformat(timespec="seconds"), "windows": wins}
     ep = f"ep{a.episode:02d}"
     oj = Path(a.out_json) if a.out_json else ROOT / "data" / "metrics" / a.run / f"{ep}_timeline.json"
     oh = Path(a.out_html) if a.out_html else ROOT / "data" / "review_pages" / "metrics" / f"{ep}_timeline.html"

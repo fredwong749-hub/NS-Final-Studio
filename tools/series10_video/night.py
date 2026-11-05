@@ -56,7 +56,7 @@ LOG = VID / "night.log"
 STATUS = ROOT / ("docs/series10_video/STATUS.md" if LEGACY else f"docs/series10_video/{RUN_ID}/STATUS.md")
 EPS_OUT = RC.episodes_out(RUN_ID)        # V1 = data/episodes/series10（原样），其它剧 = data/episodes/<剧>
 # 道归属（总调度 10-31 夜）：gpu33 三道 = 出图优先（让道模式）；gpu36:0/1 = BAKEOFF（让道模式，可写 hold 文件借用）；gpu36:2 = 视频
-DEFAULT_CTRL = {"force_eps": [], "shared_lanes": ["gpu33:0", "gpu33:1", "gpu33:3", "gpu36:0", "gpu36:1"],
+DEFAULT_CTRL = {"force_eps": [], "shared_lanes": ["gpu33:0", "gpu33:1", "gpu33:3", "gpu36:0", "gpu36:1", "gpu36:2"],
                 "hold_lanes": [], "per_lane": 2, "yield_s": 180, "bgm": "auto",
                 "poll_s": None}   # SLIM-CDE 11-05 D：轮询间隔（秒）；None = 旧 V1 120 s / V2 默认 45 s（首尾帧一锁定最迟 ~1 min 内编作业派单，原 ~2.3 min）
 
@@ -815,7 +815,9 @@ def expire_holds(ctrl: dict) -> dict:
     if not hl:
         return ctrl
     try:
-        sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+        _ap = str(ROOT / "tools" / "autopilot")
+        if _ap not in sys.path:
+            sys.path.insert(0, _ap)
         import hold_expiry as HX
         he = ctrl.get("hold_expires") or ctrl.get("hold_expires_at")
         exp = {x: he for x in hl} if isinstance(he, str) else dict(he or {})

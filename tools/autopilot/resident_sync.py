@@ -402,11 +402,27 @@ def push(host: str, code_only: bool = False, tier: int = 2, yes: bool = False, b
 DEFAULT_MODE = "all"     # ⤴ 总调度 22:2x（NETFIX）：服务器 producer 和 night 都起（取代 18:4x 的 night-only）；producer 的 only 由 dispatch.py 算
 
 
+def restart_vidgen(host: str) -> str:
+    """FIX-A 11-05（gpu36 vidgen 跑了 37 h 的旧代码）：night-only / all 重启只换 night.py，不换视频执行器 vidgen。
+    笔记本侧调 tools/series10_video/deploy.py stop → start（当前剧；deploy 自己经 rssh 在该机执行）。失败只记日志、不挡重启。"""
+    outs = []
+    for act in ("stop", "start"):
+        try:
+            r = subprocess.run([sys.executable, str(ROOT / "tools/series10_video/deploy.py"), act, host], cwd=str(ROOT),
+                               capture_output=True, timeout=180)
+            outs.append(f"vidgen {act}: " + (r.stdout + r.stderr).decode("utf-8", "replace").strip()[-120:])
+        except Exception as e:  # noqa: BLE001  # arch-ok: vidgen 重启失败不阻断 night 重启，记进输出让人看到
+            outs.append(f"vidgen {act} 失败：{e!r}"[:160])
+    return chr(10).join(outs)
+
+
 def restart(host: str, mode: str = DEFAULT_MODE) -> str:
     prep_arg = "video-only" if mode == "night-only" else ""
     out = ssh(host, f"cd {R} && {PY[host]} ops/offline/resident_prep.py {host} {prep_arg} && bash {R}/ops/offline/resident_restart.sh {host} {mode}",
               timeout=300)
     txt = out.decode("utf-8", "replace")
+    if mode in ("night-only", "all"):
+        txt += chr(10) + restart_vidgen(host)
     log("restart", host, txt.strip().replace("\n", " | ")[-400:])
     return txt
 
@@ -1040,7 +1056,7 @@ def episode_run_cfg(path: Path | None = None) -> dict:
 def episode_run_tick_once(cfg: dict | None = None, tick_fn=None, hb_path: Path | None = None) -> dict:
     """每个 target 推进一次；单个 target 抛错只记日志，不影响其它。心跳 / 摘要写 episode_run_heartbeat.json（原子）"""
     cfg = cfg or episode_run_cfg()
-    out: dict = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "enabled": cfg["enabled"], "targets": {}}
+    out: dict = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() + 9 * 3600)) + "+09:00", "enabled": cfg["enabled"], "targets": {}}
     if cfg["enabled"]:
         if tick_fn is None:
             sys.path.insert(0, str(ROOT / "tools/master"))

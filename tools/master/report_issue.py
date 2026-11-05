@@ -15,7 +15,16 @@ import os
 import secrets
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+JST = timezone(timedelta(hours=9))
+
+
+def jst_now() -> datetime:
+    """REVIEW-C：时间戳一律 JST（+09:00），不随进程 TZ（笔记本是美东）变"""
+    return datetime.now(JST)
+
 
 ROOT = Path(__file__).resolve().parents[2]
 ISSUES = ROOT / "data" / "pipeline" / "issues.jsonl"
@@ -38,24 +47,26 @@ def _insert_live(line: str, live: Path = LIVE) -> None:
     """在第一行之后插一行（tmp + os.replace 原子写）"""
     if not live.is_file():
         return
-    text = live.read_text(encoding="utf-8")
-    head, sep, rest = text.partition("\n")
-    new = head + "\n" + line + "\n" + rest if sep else head + "\n" + line + "\n"
+    raw = live.read_bytes()                                  # 字节原样：保留换行风格（CRLF / LF）和坏字节，不经文本层转换
+    head, sep, rest = raw.partition(b"\n")
+    nl = b"\r\n" if head.endswith(b"\r") else b"\n"
+    ins = line.encode("utf-8", errors="surrogateescape") + nl
+    new = (head + b"\n" + ins + rest) if sep else (head + nl + ins)
     tmp = live.with_name(live.name + f".tmp{os.getpid()}")
-    tmp.write_text(new, encoding="utf-8")
+    tmp.write_bytes(new)
     os.replace(tmp, live)
 
 
 def report(run: str, episode: int, step: str, who: str, what: str, blocking: bool, fix_hint: str = "",
            issues: Path = ISSUES, live: Path | None = LIVE) -> dict:
-    now = time.localtime()
-    rec = {"id": f"ISS-{time.strftime('%m%d-%H%M%S', now)}-{secrets.token_hex(2)}", "event": "open",
-           "time": time.strftime("%F %T", now), "run": run, "episode": episode, "step": str(step), "who": who,
+    now = jst_now()
+    rec = {"id": f"ISS-{now.strftime('%m%d-%H%M%S')}-{secrets.token_hex(2)}", "event": "open",
+           "time": now.strftime("%Y-%m-%d %H:%M:%S+09:00"), "run": run, "episode": episode, "step": str(step), "who": who,
            "what": what, "blocking": bool(blocking), "fix_hint": fix_hint, "status": "open"}
     _append_line(issues, rec)
     if live is not None:
         tail = f"（建议：{fix_hint}）" if fix_hint else ""
-        _insert_live(f"{time.strftime('%H:%M', now)} ⚠ 卡点（{who}）：{run} 第{episode}集 步骤{step}"
+        _insert_live(f"{now.strftime('%H:%M')} ⚠ 卡点（{who}）：{run} 第{episode}集 步骤{step}"
                      f"{'【阻断】' if blocking else ''}：{what}{tail} [{rec['id']}]", live)
     return rec
 
@@ -83,7 +94,7 @@ def close(issue_id: str, sop_updated: bool, issues: Path = ISSUES) -> tuple[bool
     cur = {i["id"]: i for i in load(issues)}
     if issue_id not in cur:
         return False, f"没有这条：{issue_id}"
-    _append_line(issues, {"id": issue_id, "event": "close", "time": time.strftime("%F %T"), "sop_updated": bool(sop_updated)})
+    _append_line(issues, {"id": issue_id, "event": "close", "time": jst_now().strftime("%Y-%m-%d %H:%M:%S+09:00"), "sop_updated": bool(sop_updated)})
     return True, ("已关闭。" if sop_updated else "已关闭。提示：" + SOP_HINT)
 
 

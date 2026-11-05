@@ -67,12 +67,17 @@ def _face_hidden(name: str, clauses: list[str], names: list[str]) -> bool:
         from ns_schema.prompt_v2 import hidden_face
     except Exception:                                     # arch-ok: 编译层不可用时按旧口径（算露脸），不放宽
         return False
-    mine, cur = [], None
+    try:
+        from ns_agent.asset_refs import clause_subjects
+    except Exception:                                     # arch-ok: 取不到就退回“最靠前的人名”
+        clause_subjects = None
+    mine, cur = [], ()
     for c in clauses:
         hit = [n for n in names if n in c]
         if hit:
-            cur = hit[0]
-        if cur == name:
+            # REVIEW-B 11-05：主语 = 小句里最靠前的人名（“卓琳蹲在祁念左前”主语是卓琳，不按 cast 顺序）；并列主语“X和Y背对镜头”两人都是主语（与 asset_refs.clause_subjects 同口径）
+            cur = (clause_subjects(c, names, cur) if clause_subjects else ()) or (min(hit, key=c.find),)
+        if name in cur:
             mine.append(c)
     return bool(mine) and hidden_face("，".join(mine))[0]
 

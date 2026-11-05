@@ -114,7 +114,7 @@ def test_first_stage_done_wait_owner_blocked(tmp_path):
     assert ER.check_first(env, st, args())["status"] == "wait"
     env.remote_fn = lambda h, c: snap({"s1": "passed", "s2": "best_effort"})
     r = ER.check_first(env, st, args())
-    assert r["status"] == "owner" and r["shots"] == ["s2"] and "queue" in r["link"]
+    assert r["status"] == "done" and r["owner_todo"] and r["shots"] == ["s2"] and "queue" in r["link"]   # FIX-A：尽力版不拦整集
     env.remote_fn = lambda h, c: snap({"s1": "passed", "s2": "ready"}, pause_hold=[{"shot": "s2", "expires_at": "2026-11-05T12:00:00"}])
     r = ER.check_first(env, st, args())
     assert r["status"] == "blocked" and "pause_shots" in r["msg"]
@@ -170,11 +170,12 @@ def test_regen_waits_for_sync_then_todo_then_done(tmp_path):
     sha = ER.sha256_file(s)
     env.remote_fn = lambda h, c: (0, (sha + "  x\n").encode(), "")
     r = ER.check_regen(env, st, args())
-    assert r["status"] == "todo" and "regen" in r["plan"]
+    assert r["status"] == "todo" and "probe-prompts" in r["plan"]
     r = ER.act_regen(env, st, args(), r)
     assert r["status"] == "done" and st["regen"]["sha"] == "abc"
-    regen_cmds = [c for _h, c in env.remote_log if "producer.py regen" in c]
-    assert regen_cmds and "OFFLINE_SELF=gpu33" in regen_cmds[-1] and "probe-prompts" in env.remote_log[-1][1]   # 11-05：regen 后紧跟探针
+    assert not [c for _h, c in env.remote_log if "producer.py regen" in c]                 # FIX-A：不整集 regen
+    probes = [h for h, c in env.remote_log if "probe-prompts" in c]
+    assert set(probes) == {env.image_host, env.video_host}                                  # 探针两台机都跑
     assert ER.check_regen(env, st, args())["status"] == "done"       # 幂等：不再重复下达
 
 
@@ -284,13 +285,12 @@ def test_image_snap_falls_back_when_producer_has_no_json(tmp_path):
     assert s["shots"][0]["first"] == "passed" and len(env.remote_log) == 2
 
 
-def test_act_regen_uses_json_and_records_shots(tmp_path):
+def test_act_regen_never_orders_whole_episode_regen_and_records(tmp_path):
     env = FakeEnv(tmp_path)
-    env.remote_fn = lambda h, c: (0, b'ts line\n{"regen": ["ep01-S1", "ep01-S2"], "skipped": {}, "dry": false, "at": "2026-11-05T12:00:00"}\n', "")
     st = {"import": {"sha": "abcdef12"}, "regen": {}, "blockers": {}, "stage_started": {}}
     r = ER.act_regen(env, st, args(), {})
-    assert r["status"] == "done" and "--json" in env.remote_log[0][1]
-    assert st["regen"]["shots"] == ["ep01-S1", "ep01-S2"] and st["regen"]["at"] == "2026-11-05T12:00:00"
+    assert r["status"] == "done" and st["regen"]["sha"] == "abcdef12" and st["regen"]["mode"] == "e24_per_shot"
+    assert all("producer.py regen" not in c for _h, c in env.remote_log)
 
 
 def test_unattended_metric(tmp_path):
@@ -349,15 +349,60 @@ def test_resident_thread_tick(tmp_path):
     c = tmp_path / "c.json"
     c.write_text(json.dumps({"enabled": True, "interval_s": 5, "targets": [{"run": "a", "ep": 1}, {"run": "b"}]}), encoding="utf-8")
     assert RS.episode_run_cfg(c)["interval_s"] == 60 and len(RS.episode_run_cfg(c)["targets"]) == 1
-    assert RS.episode_run_cfg(ROOT / "config/pipeline/episode_run.json")["enabled"] is True
+    assert isinstance(RS.episode_run_cfg(ROOT / "config/pipeline/episode_run.json")["enabled"], bool)   # FIX-A：开关由 PS-MASTER 控制
 
 
-def test_act_regen_runs_probe_and_blocks_on_bad_shot(tmp_path):
+def test_act_regen_probe_fail_blocks_but_records_and_rechecks(tmp_path):
     env = FakeEnv(tmp_path)
     env.probe_fail = True
     bad = "r1 ep01 提示词证据：15/16 镜编译 + preflight 过 → x" + chr(10) + "  镜16：I2 身份脸部参考缺"
-    env.remote_fn = lambda h, c: ((1, bad.encode("utf-8"), "") if "probe-prompts" in c
-                                  else (0, b'{"regen": ["ep01-S1"], "at": "t"}', ""))
+    env.remote_fn = lambda h, c: (1, bad.encode("utf-8"), "")
+    s = write_script(tmp_path)
+    sha = ER.sha256_file(s)
     st = {"import": {"sha": "abc"}}
     r = ER.act_regen(env, st, {}, {})
-    assert r["status"] == "blocked" and "镜16" in r["msg"] and st["regen"]["probe"]["ok"] is False
+    assert r["status"] == "blocked" and "镜16" in r["msg"] and st["regen"]["probe"]["ok"] is False   # rc≠0 也记录（非幂等动作）
+    env.remote_fn = lambda h, c: (0, (sha + "  x" + chr(10)).encode(), "") if "sha256sum" in c else (1, bad.encode("utf-8"), "")
+    assert ER.check_regen(env, st, args())["status"] == "todo"        # 探针没过 → 下拍重探，不当 done
+
+
+def test_probe_runs_on_video_host_too_and_video_fail_blocks(tmp_path):
+    env = FakeEnv(tmp_path)
+    ok = "r1 ep01 提示词证据：16/16 镜编译 + preflight 过 → x".encode("utf-8")
+    env.remote = lambda host, cmd, timeout=120, tries=2, input=None: (env.remote_log.append((host, cmd)) or
+        ((1, b"x", "") if host == env.video_host else (0, ok, "")))
+    st = {"import": {"sha": "abc"}}
+    r = ER.act_regen(env, st, {}, {})
+    assert r["status"] == "blocked" and env.video_host in r["msg"] and st["regen"]["probe"]["ok"] and not st["regen"]["probe_video"]["ok"]
+
+
+def test_check_first_best_effort_does_not_stop_episode(tmp_path):
+    env = FakeEnv(tmp_path)
+    env.remote_fn = lambda h, c: snap({"s1": "passed", "s2": "best_effort"})
+    r = ER.check_first(env, {}, args())
+    assert r["status"] == "done" and r["owner_todo"] and r["shots"] == ["s2"]
+    env.remote_fn = lambda h, c: snap({"s1": "passed", "s2": "best_effort", "s3": "pending"})
+    assert ER.check_first(env, {}, args())["status"] == "wait"        # 还有没出的镜 → 继续等，不 owner
+    env.remote_fn = lambda h, c: snap({"s1": "best_effort"})
+    assert ER.check_first(env, {}, args())["status"] == "wait"
+
+
+def test_import_resets_timers_blockers_run_started(tmp_path):
+    env = FakeEnv(tmp_path)
+    st = {"import": {}, "regen": {}, "blockers": {"first:x": "ISS-1"}, "stage_started": {"first": "2026-01-01T00:00:00+09:00"},
+          "run_started": "2026-01-01T00:00:00+09:00"}
+    ER.act_import(env, st, args(), {"p4": "a/b.md", "sha": "abcdef12345"})
+    assert st["stage_started"] == {} and st["blockers"] == {} and st["run_started"] == ER.now_iso(env.t)
+
+
+def test_stage_start_cleared_when_done(tmp_path):
+    env = FakeEnv(tmp_path)
+    ER.save_state(env, {"stage_started": {"first": ER.now_iso(env.t - 5000)}, "blockers": {}, "import": {}, "regen": {}})
+    env.remote_fn = lambda h, c: snap({"s1": "passed"})
+    ER.orchestrate(env, args(), ["first"])
+    assert "first" not in ER.load_state(env)["stage_started"]
+
+
+def test_now_iso_is_jst_and_parse_roundtrip():
+    assert ER.now_iso(0) == "1970-01-01T09:00:00+09:00"
+    assert ER.parse_iso(ER.now_iso(1_800_000_000.0)) == 1_800_000_000.0

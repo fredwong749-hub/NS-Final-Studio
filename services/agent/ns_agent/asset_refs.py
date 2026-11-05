@@ -1479,20 +1479,45 @@ BACK_TXT_WORDS = ("背影", "背对镜头", "背身", "背朝镜头")   # “背
 _OBJ_PREP_RE = re.compile(r"[在向朝对比从跟和与给把看望盯靠挨越过着替帮]$")   # 人名前一字是介词 / 动词 → 这个人名是宾语（“蹲在祁念左前”），不是主语
 
 
-def clause_subject(clause: str, names, prev: str | None = None) -> str | None:
-    """小句的主语：最靠前、且前面不是介词 / 动词的人名；没有人名 → 沿用上一小句的主语（“顾沉的背影在远处，背对镜头走”）"""
-    cands = []
-    for n in names:
-        if not n:
-            continue
+_COORD_RE = re.compile(r"[和与跟及、]$")
+
+
+def clause_subjects(clause: str, names, prev=()) -> tuple:
+    """小句的主语（可多个）：最靠前、且前面不是介词 / 动词的人名；并列主语“X和Y背对镜头”里 Y 前是 和/与/跟/及/、 且连接词前正好是另一个人名 → X、Y 都是主语
+    （REVIEW-B 11-05）；和/与/跟 前面是动词（“蹲在祁念和…”“对祁念和…”）仍只是宾语介词。没有人名 → 沿用上一小句的主语"""
+    ns = [n for n in names if n]
+    hits = []
+    for n in ns:
         for m in re.finditer(re.escape(n), clause):
             if clause[m.end():].startswith(FACE_PLACE):
                 continue
-            pre = clause[max(0, m.start() - 1):m.start()]
-            if pre and _OBJ_PREP_RE.search(pre):
+            hits.append((m.start(), m.end(), n))
+    hits.sort()
+    subs = []
+    for st, en, n in hits:
+        pre = clause[max(0, st - 1):st]
+        if pre and _OBJ_PREP_RE.search(pre):
+            # 连接词前正好是已认定的主语 → 并列主语；否则（前面是动词 / 别的）是宾语
+            if not (_COORD_RE.search(pre) and any(e == st - 1 for _s, e, _n in subs)):
                 continue
-            cands.append((m.start(), n))
-    return min(cands)[1] if cands else prev
+        subs.append((st, en, n))
+    if not subs:
+        return tuple(prev) if prev else ()
+    out = [subs[0][2]]
+    end = subs[0][1]
+    for st, en, n in subs[1:]:       # 只收和第一个主语连成一串的并列项（X和Y和Z）
+        if st - 1 == end:
+            out.append(n)
+            end = en
+        else:
+            break
+    return tuple(out)
+
+
+def clause_subject(clause: str, names, prev: str | None = None) -> str | None:
+    """小句的第一个主语（见 clause_subjects）；没有人名 → 沿用 prev"""
+    r = clause_subjects(clause, names, (prev,) if prev else ())
+    return r[0] if r else prev
 
 
 def back_in_text(name: str, img: str, others=()) -> bool:
@@ -1501,18 +1526,18 @@ def back_in_text(name: str, img: str, others=()) -> bool:
     if not name or name not in (img or ""):
         return False
     names = [name] + [o for o in (others or ()) if o and o != name]
-    subj = None
+    subj = ()
     for clause in re.split(r"[，；。]", img):
         c = clause.strip()
         if not c:
             continue
-        subj = clause_subject(c, names, subj)
+        subj = clause_subjects(c, names, subj)
         owner = re.search(r"(" + "|".join(re.escape(n) for n in names) + r")的(?:背影|背面|背身)", c)   # “顾沉的背影”：所有格直接归属，不看主语
         if owner:
             if owner.group(1) == name:
                 return True
             continue
-        if subj == name and any(w in c for w in BACK_TXT_WORDS):
+        if name in subj and any(w in c for w in BACK_TXT_WORDS):
             return True
     return False
 

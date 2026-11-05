@@ -12,6 +12,8 @@ $AfHb = Join-Path $Root "data\factory\autoflow_resident.json"
 $AfLock = Join-Path $Root "data\factory\autoflow_resident.lock"
 $AfRestart = Join-Path $Root "ops\restart_autoflow.ps1"
 $afNext = [datetime]::MinValue
+$HealthHb = Join-Path $Root "data\master\health\health.json"                 # SELF-HEAL：autoflow_resident 里的健康线程每 ≤60 s 写；超过 5 分钟没写 = 线程死了
+$HealthFlag = Join-Path $Root "data\master\health\want_restart_autoflow.json"  # 健康线程发现 autoflow 跑的是旧代码时写旗（它不杀自己）
 $RelLock = Join-Path $Root "data\system_versions\release_lock.json"
 $CutLock = Join-Path $Root "data\system_versions\cut_lock.json"
 New-Item -ItemType Directory -Force $Logs | Out-Null
@@ -65,16 +67,68 @@ function AutoflowDown {
   } catch { }
   return $true
 }
+# SELF-HEAL 11-05（FIX-B 复核加固）：autoflow 进程在、心跳也新，但 (a) 健康线程死了 或 (b) 健康线程写了“要重启”旗 → 也走 restart_autoflow.ps1（只停锁里 pid）。
+# 加固：(a) 只有在 health.json 里的 pid == autoflow 心跳 pid（同一个进程写的）、且该进程已运行 > 10 分钟时才判“线程死了”（刚起的进程 / 别的进程写的 health.json 不算）；
+#       自愈类重启（非“进程已死”）退避 + 每小时上限：每次重启后下一次最早 = 10 分钟 * 2^已重启次数；一小时内最多 $AfHealMax 次，超了只记日志不再重启（交总调度看）。
+$AfHealMax = 2
+$afHealTimes = @()
+function AutoflowWanted {
+  try {
+    $hb = $null
+    if (Test-Path $AfHb) { $hb = Get-Content $AfHb -Raw -Encoding utf8 | ConvertFrom-Json }
+    if ($null -eq $hb) { return $null }
+    $up = $null
+    $proc = Get-Process -Id ([int]$hb.pid) -ErrorAction SilentlyContinue
+    if ($proc) { $up = ((Get-Date) - $proc.StartTime).TotalMinutes }
+    if ($null -eq $up -or $up -le 10) { return $null }     # 进程不在（走原“心跳死 + pid 不在”路径）或刚起 10 分钟内：不做自愈判断
+    if (Test-Path $HealthFlag) { return "健康线程要求重启（旗 want_restart_autoflow.json）" }
+    if (Test-Path $HealthHb) {
+      $h = Get-Content $HealthHb -Raw -Encoding utf8 | ConvertFrom-Json
+      $hbAge = ((Get-Date) - [datetime]::Parse($hb.at)).TotalMinutes
+      $hAge = ((Get-Date) - (Get-Item $HealthHb).LastWriteTime).TotalMinutes
+      if ([int]$h.pid -eq [int]$hb.pid -and $hbAge -le 3 -and $hAge -gt 5) { return "autoflow 心跳正常但 health.json $([int]$hAge) 分钟没更新（同一 pid $($hb.pid) 的健康线程死了，已运行 $([int]$up) 分钟）" }
+    }
+  } catch { }
+  return $null
+}
 function AutoflowGuard {
   if ((Get-Date) -lt $afNext) { return }
-  if (-not (AutoflowDown)) { return }
-  $script:afNext = (Get-Date).AddMinutes(3)
-  Log "autoflow_resident 心跳超过 3 分钟没拍且锁里 pid 不在：调 ops/restart_autoflow.ps1"
+  $want = AutoflowWanted
+  $down = AutoflowDown
+  if (-not $down -and -not $want) { return }
+  if (-not $down -and $want) {
+    $script:afHealTimes = @($afHealTimes | Where-Object { $_ -gt (Get-Date).AddHours(-1) })
+    if ($afHealTimes.Count -ge $AfHealMax) {
+      $script:afNext = (Get-Date).AddMinutes(10)
+      Log "autoflow 自愈重启一小时内已达上限 $AfHealMax 次，不再重启（$want）——交总调度看"
+      return
+    }
+    Log "autoflow 需要重启：$want"
+    if (Test-Path $HealthFlag) { Move-Item $HealthFlag ($HealthFlag + "." + (Get-Date -Format "yyyyMMddHHmmss") + ".done") -Force -ErrorAction SilentlyContinue }   # 不删，改名留账
+    $script:afHealTimes = @($afHealTimes) + (Get-Date)
+    $script:afNext = (Get-Date).AddMinutes(10 * [math]::Pow(2, $afHealTimes.Count - 1))      # 退避：10 / 20 分钟
+  } else {
+    $script:afNext = (Get-Date).AddMinutes(3)
+    Log "autoflow_resident 心跳超过 3 分钟没拍且锁里 pid 不在：调 ops/restart_autoflow.ps1"
+  }
   try { & powershell -NoProfile -ExecutionPolicy Bypass -File $AfRestart | Out-Null; Log "restart_autoflow.ps1 退出码 $LASTEXITCODE" } catch { Log "restart_autoflow.ps1 调用失败：$($_.Exception.Message)" }
+}
+
+
+# SELF-HEAL 11-05：互相拉起——另一个守护（monitor_guard）不在就用计划任务把它起来（计划任务单实例 + 命名互斥体，重复起无害）。每 2 分钟最多一次。
+$peerNext = [datetime]::MinValue
+function PeerGuard {
+  if ((Get-Date) -lt $peerNext) { return }
+  $up = Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -match "monitor_guard\.ps1" }
+  if ($up) { return }
+  $script:peerNext = (Get-Date).AddMinutes(2)
+  Log "守护 monitor_guard 不在：Start-ScheduledTask NS-Studio-Monitor-Guard"
+  try { Start-ScheduledTask -TaskName "NS-Studio-Monitor-Guard" -ErrorAction Stop } catch { Log "拉起 NS-Studio-Monitor-Guard 失败：$($_.Exception.Message)" }
 }
 
 Log "守护启动 pid $PID"
 while ($true) {
+  PeerGuard
   AutoflowGuard
   $p = Procs
   if ($p -and (TickStale)) {

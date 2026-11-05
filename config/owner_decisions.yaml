@@ -691,13 +691,13 @@ checks:
     pattern: 'L-139'
     paths: [tools/pipeline/asset_jobs.py]
   - id: D-V2-140
-    decision: L-140（项目方 11-03 03:1x：出图维持整集就绪再出，不做按镜就绪；撤回按镜出图与 5 道并行）
-    title: asset_worker max_parallel 回到 2
+    decision: L-140 资产并行部分已被 11-05 项目方“素材工人怎么提效？全部显卡给他”取代（L-197 记账：asset_worker 开放全部 6 道、max_parallel=6）
+    title: asset_worker max_parallel = 6（L-197 取代 L-140 的 2）
     type: json
     file: config/pipeline/asset_worker.json
     path: [max_parallel]
     op: eq
-    value: 2
+    value: 6
   - id: D-V2-142
     decision: L-142（项目方 11-03 04:2x：ep01 首帧由系统代选——过检 + 总调度亲审后；项目方事后可在 #/queue 修改）
     title: 计划 v3 定稿记了 L-142；代选走 L-136 同一开关（owner_delegate.py），不另开入口

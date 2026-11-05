@@ -150,7 +150,8 @@ def test_run_for_dir():
 
 
 # ---- 运镜：写手包只给本剧 enabled 的运镜（camera_moves.yaml 单一来源）
-DISABLED_PHRASES = ("pan left", "pan right", "truck left", "truck right", "tilt up", "tilt down", "pedestal up",
+# L-192（11-05）：pull_out / pedestal_up 已 enabled，pedestal up 不再算“停用运镜的手写短语”
+DISABLED_PHRASES = ("pan left", "pan right", "truck left", "truck right", "tilt up", "tilt down",
                     "pedestal down", "arc shot", "tracking shot", "zoom in", "zoom out")
 
 

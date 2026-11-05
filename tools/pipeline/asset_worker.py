@@ -10,7 +10,8 @@
   ② 收尸：running 的作业子进程没了 → failed（attempts < max_attempts 下一拍重排），道按 by=ASSET-WORKER 释放；
      超时杀子进程前按作业文件里的 proc（pid + 创建时间 + 命令行指纹）核身份，核不上不杀、定案 failed（why=pid_mismatch，W6b）；
   ③ meta 作业（display_name / 造型骨架 / 造型排期）直接从 P1 写入（apply_meta 开关）；
-  ④ face / scene / sheet / item 作业：找空闲 GPU 道（排除 gpu33:2 / gpu36:2、别人 hold / lend 的道、队列里有活的道），
+  ④ face / scene / sheet / item 作业：找空闲 GPU 道（排除坏卡——单一来源 config/factory/hosts.json hosts.<主机>.broken_gpus，L-194 后只剩 gpu33:2；
+     再减 config exclude_lanes、别人 hold / lend 的道、队列里有活的道），
      lanes hold --by ASSET-WORKER，起子进程 run-job（每道一个，最多 max_parallel 个），用完 release（render 开关）；
   ⑤ voice 作业：起子进程 run-voice（voice_v2 --roles-file，gpu36 CPU；voice 开关）；
   ⑥ golden 作业（阶段 B）：已停（W6 11-03 / L-151），阶段 B 走 producer，资产线不再生成也不执行；历史 golden-epNN 作业 W6b 标 retired，
@@ -34,6 +35,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools" / "pipeline"))
+import episode_lock as EL  # noqa: E402  清单独占旗标（PIPELINE_CHECKLIST）
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
@@ -125,7 +127,7 @@ BY = "ASSET-WORKER"
 CONFIG = ROOT / "config" / "pipeline" / "asset_worker.json"
 ADVANCE_STATUSES = ("preparing", "active", "producing")     # 与 autoflow_resident.ADVANCE_STATUSES 同口径
 DEFAULTS = {"enabled": True, "apply_meta": False, "render": False, "voice": False, "push": True, "golden": False, "max_parallel": 2,
-            "exclude_lanes": ["gpu33:2", "gpu36:2"], "hold_minutes": 90, "max_attempts": 2, "ready_every_s": 300,
+            "exclude_lanes": [], "hold_minutes": 90, "max_attempts": 2, "ready_every_s": 300,   # 坏卡不写这里：broken_lanes() 读 hosts.json（L-194）
             "candidates": {"face": 3, "scene": 2, "sheet": 3, "item": 2}, "voice_host": "gpu36"}
 _PROCS: dict[str, subprocess.Popen] = {}
 
@@ -286,6 +288,20 @@ def _lanes_mod():
     return _load("lanes_for_asset_worker", "tools/debug/lanes.py")
 
 
+def broken_lanes(hosts_mod=None, d: dict | None = None) -> set[str]:
+    """坏卡道 {"gpu33:2", ...}：单一来源 config/factory/hosts.json hosts.<主机>.broken_gpus（REVIEW-C 11-05，L-194：gpu36:2 已归 NS 出图，
+    只剩 gpu33:2 坏卡；代码里不再写死任何道）。车道表读不出 / 假车道表没有 load → 直接读文件；仍读不出 = 空集（H.lanes 自己会报错）"""
+    if d is None:
+        try:
+            d = (hosts_mod or _load("hosts_for_asset_worker", "tools/factory/hosts.py")).load()
+        except Exception:  # noqa: BLE001  # arch-ok: 测试里的假 hosts 模块没有 load；退回直接读车道表文件
+            try:
+                d = json.loads((ROOT / "config" / "factory" / "hosts.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):  # arch-ok: 车道表读不出 = 没有坏卡信息（H.lanes 读同一文件会报错，不会静默派单）
+                return set()
+    return {f"{hn}:{g}" for hn, h in ((d or {}).get("hosts") or {}).items() if isinstance(h, dict) for g in (h.get("broken_gpus") or [])}
+
+
 def free_lanes(cfg: dict, in_use: set[str], part: dict | None = None, probe=None, hosts_mod=None, by: str = BY) -> list[str]:
     """空闲道：车道表 image 道 − 排除表 − 别人挡着 / 借着 / hold 着的道 − 本 worker 正在用的道；再经 ComfyUI 队列探测确认没活。
     本 worker 自己残留的 hold（作业已不在跑）→ 视为空闲（下面 hold 会覆盖）。by = 借道人（阶段 B 金样用 GOLDEN-WORKER，同一套规则）"""
@@ -293,7 +309,7 @@ def free_lanes(cfg: dict, in_use: set[str], part: dict | None = None, probe=None
     LN = _lanes_mod()
     part = part if part is not None else LN._read_live()
     probe = probe or LN.probe_lane
-    excl = set(cfg.get("exclude_lanes") or [])
+    excl = set(cfg.get("exclude_lanes") or []) | broken_lanes(H)
     lent, holds = part.get("_lent_lanes") or {}, part.get("_temp_holds") or {}
     out = []
     for lane in sorted(H.lanes(role="image")):
@@ -475,7 +491,10 @@ def tick(root: Path = ROOT, cfg: dict | None = None, runs: dict | None = None, s
                 rec.setdefault("sheet_waiting_face", []).extend(j["id"] for j in gated)
                 pend = [j for j in pend if j not in gated]
             pend = sop_filter(root, run, pend, rec)   # HARNESS-O：SOP 阶段闸门（没过导入闸门的集不出资产候选）；ISS-1103-033742-73be：没变就退避
-            if pend and cfg.get("render") and not dry:
+            lock = EL.active(root)                    # 清单独占：一集在跑时（episode_run 旗标），资产 render 不占 GPU 道
+            if pend and cfg.get("render") and lock:
+                rec.setdefault("render_skipped_episode_lock", {"run": lock.get("run"), "ep": lock.get("ep"), "until": lock.get("until")})
+            if pend and cfg.get("render") and not dry and not lock:
                 slots = max(0, int(cfg.get("max_parallel") or 1) - len(in_use))
                 if slots:
                     LN = LN or _lanes_mod()
@@ -812,7 +831,21 @@ def reject_summary(recs: list[dict]) -> str:
 def q9_queue_timeout(post: dict) -> bool:
     """Q9 没拿到看图结果（服务排队 / 未跑，evidence 里没有 model）= 不是图的问题，应重试"""
     q9 = next((i for i in (post or {}).get("items") or [] if i.get("id") == "Q9"), None)
-    return bool(q9 and q9.get("status") in ("untested", None) and not (q9.get("evidence") or {}).get("model"))
+    missing = bool(q9 and q9.get("status") in ("untested", None) and not (q9.get("evidence") or {}).get("model"))
+    if missing and not q9_blocking():          # L-196（项目方 11-05“全自动，不要检测那么多了”）：Q9 不在硬闸 → 没测出只记录，不排队重试
+        q9["status"] = "na"
+        q9["status_recorded"] = "untested（L-196 只记录）"
+        return False
+    return missing
+
+
+def q9_blocking(root: Path = ROOT) -> bool:
+    """config/gen_contract.json blocking_items 里有没有 Q9（L-196 硬闸 = Q1 / count / text / adult）；读不到按原口径（挡）"""
+    try:
+        items = json.loads((root / "config" / "gen_contract.json").read_text(encoding="utf-8")).get("blocking_items")
+    except (OSError, ValueError):   # arch-ok: 读不到配置 = 原口径（Q9 挡），失败偏保守
+        return True
+    return items is None or "Q9" in items
 
 
 def is_infra_error(e: BaseException) -> bool:

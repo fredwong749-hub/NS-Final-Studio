@@ -183,6 +183,8 @@ def people_gate_on(project: str | None = None) -> bool:
         t = (GC().get("image_thresholds") or {}).get("Q10_accept") or {}
         if t.get("people_count_strict"):
             return True
+        if "count" in (GC().get("blocking_items") or []):   # REVIEW-B 11-05：L-196 人数是硬项 → 严格人数闸不随首帧档（base35 / turbo_previz）变
+            return True
         from ns_agent import frame_job as FJ
         if project is None:
             from ns_agent.gen_contract import style as ST

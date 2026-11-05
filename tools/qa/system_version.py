@@ -1212,7 +1212,68 @@ def run_on_server(tree: str, sv: str, changed: list[str], run_tests: bool, dry: 
     return None, extra
 
 
+CUT_MUTEX = DATA / "cut.mutex"
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if os.name == "nt":       # Windows 的 os.kill(pid, 0) 会真的发信号，只能用 tasklist
+        try:
+            r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True, timeout=30)
+            return str(pid) in (r.stdout or "")
+        except (OSError, subprocess.TimeoutExpired):  # arch-ok: 查不到当作还活着（宁可拒绝，不抢锁）
+            return True
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def cut_mutex_acquire(mutex: Path | None = None) -> tuple[bool, str]:
+    """全局 cut 互斥（REVIEW-C 🔴）：O_CREAT|O_EXCL 建锁文件记 pid；已有锁且持有者还活着 = 拒绝；持有者已死 = 清掉重建"""
+    mutex = mutex or CUT_MUTEX
+    mutex.parent.mkdir(parents=True, exist_ok=True)
+    for _ in range(2):
+        try:
+            fd = os.open(str(mutex), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                owner = int((mutex.read_text(encoding="utf-8").strip() or "0").split()[0])
+            except (OSError, ValueError, IndexError):  # arch-ok: 锁文件读不出 pid = 当作有人持有，拒绝
+                return False, "cut.mutex 存在但读不出持有者 pid"
+            if owner != os.getpid() and _pid_alive(owner):
+                return False, f"另一个 cut 正在进行（pid {owner}，{mutex}）"
+            mutex.unlink(missing_ok=True)       # 持有者已死 = 陈旧锁
+            continue
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(f"{os.getpid()} {time.strftime('%Y-%m-%dT%H:%M:%S%z')}\n")
+        return True, ""
+    return False, "cut.mutex 抢不到"
+
+
 def cut(base: str | None = None, dry: bool = False, sv: str | None = None, run_tests: bool = True, tree: str | None = None,
+        on: str | None = None) -> dict:
+    """发版入口：全局互斥（cut_lock 有别的活进程在冻结 → 拒绝；再抢 cut.mutex）→ 指定 --id 时核对 tag 不存在 → _cut_impl。
+    拒绝时 rc 3（main 里 out['rc']）"""
+    lk = cut_locked()
+    if lk and int(lk.get("pid") or 0) != os.getpid() and _pid_alive(int(lk.get("pid") or 0)):
+        return {"ok": False, "rc": 3, "reason": f"别的 cut 正在冻结中（pid {lk.get('pid')}，sv {lk.get('sv')}）"}
+    ok, why = cut_mutex_acquire()
+    if not ok:
+        return {"ok": False, "rc": 3, "reason": why}
+    try:
+        if sv and sv in sv_tags():
+            return {"ok": False, "rc": 3, "id": sv, "reason": f"tag {sv} 已存在，不覆盖"}
+        return _cut_impl(base, dry, sv, run_tests, tree, on)
+    finally:
+        CUT_MUTEX.unlink(missing_ok=True)
+
+
+def _cut_impl(base: str | None = None, dry: bool = False, sv: str | None = None, run_tests: bool = True, tree: str | None = None,
         on: str | None = None) -> dict:
     """发版（K-OPS-V01 / K-OPS-F08）：冻结窗口 → 冻结树 → 快照 → 闸门全部对快照跑 → 提交冻结树（不是此刻的工作树）→ tag。
     cut 期间别的 agent 改的文件不进这一版、也不会让闸门失败（留给下一版）"""
@@ -2055,14 +2116,15 @@ def main(argv=None) -> int:
                 return 2
             a.tree = build_tree_from_manifests(a.manifests, a.base or "HEAD")["tree"]
         out = cut(a.base, a.dry, a.id, tree=a.tree, on=a.on)
-        record_cut(out, a.dry)
-        if a.report_json:
+        if out.get("rc") != 3:                        # 互斥拒绝不算一次 cut 尝试（不覆盖别人正在跑的 last_cut）
+            record_cut(out, a.dry)
+        if a.report_json and out.get("rc") != 3:
             _write_report(a.report_json, out)
         print(json.dumps({k: v for k, v in out.items() if k != "gates"}, ensure_ascii=False, indent=1)[:4000])
         for gg in out.get("gates", []):
             print(f"  {'✅' if gg['ok'] else '❌'} {gg['name']}" + (f"（{gg['elapsed_s']} s）" if gg.get("elapsed_s") is not None else "")
                   + f"：{gg['detail'][:200]}")
-        return 0 if out.get("ok") else 1
+        return 0 if out.get("ok") else int(out.get("rc") or 1)
     if a.cmd == "deploy":
         out = deploy(a.sv, a.hosts.split(",") if a.hosts else None, not a.no_restart, a.allow_old, a.urgent, a.hotfix_of,
                      hold_data=[x for x in (a.hold_data or "").split(",") if x], verify_shot=a.verify_shot,

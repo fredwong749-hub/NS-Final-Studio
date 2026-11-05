@@ -118,9 +118,10 @@ CANARY_EXPIRE_MAX_S = 4 * 3600
 # W44 ④：坏卡永远 hold（CLAUDE.md 红线）；本机道只在分区登记（退役 / 未到期借道 / 未到期临时 hold）或 lane_notes 显式 held_by 时 hold
 BAD_LANES = ("gpu33:2",)      # L-194（11-05）：gpu36:2 归 NS 出图 / 视频，只剩 gpu33:2 坏卡
 CODE_RETRY_S = 5 * 60               # 系统代码 / 接口不匹配：5 分钟后再试（多半已热修），不再停 30 分钟         # preflight 不过：资料可能被别的会话补上，30 分钟后再查
-# 出图道（gpu36:2 是长镜头视频专用道，不派出图；gpu33 GPU2 永不使用）
+# 出图道（L-194：gpu36:2 也出图；gpu33 GPU2 永不使用）
 IMAGE_LANES = {"gpu33:0": "http://127.0.0.1:18188", "gpu33:1": "http://127.0.0.1:18189", "gpu33:3": "http://127.0.0.1:18191",
-               "gpu36:0": "http://127.0.0.1:18288", "gpu36:1": "http://127.0.0.1:18289"}
+               "gpu36:0": "http://127.0.0.1:18288", "gpu36:1": "http://127.0.0.1:18289",
+               "gpu36:2": "http://127.0.0.1:18290"}   # L-194（11-05）：gpu36:2 归 NS 出图 / 视频（gpu36 自己的 producer 用；gpu33 经 lane_relay）
 DEFAULT_CTRL = {"paused": False, "run": None, "hold_lanes": [], "only": [],          # run：ctrl() 按 Paths.run_id 填（不读导入时缓存）
                 "workers": {"frames": "producer", "video": "VIDEO10"}, "auto_force_eps": True}
 STATUSES = ("pending", "ready", "running", "passed", "failed", "best_effort")
@@ -158,7 +159,9 @@ def heavy_cannot_fix(led: dict, lad: dict) -> list | None:
     skip = {str(x) for x in (lad.get("skip_heavy_on") or [])}
     if not skip:
         return None
-    hist = (led.get("redo_history") or []) + (led.get("history") or [])
+    hist = (led.get("history") or []) + (led.get("redo_history") or [])
+    # FIX-A 11-05（REVIEW-A 🟡⑤）：按时间戳取最近一次失败（at / ts / created_at），不靠两个列表的拼接顺序；没有时间戳的保持原顺序排最前
+    hist = sorted(hist, key=lambda h: (ts_epoch(h.get("at") or h.get("ts") or h.get("created_at")) or -1.0))
     last = next((h for h in reversed(hist) if h.get("ok") is False or h.get("blocking")), None)
     hit = sorted(skip & {str(b) for b in (last or {}).get("blocking") or []})
     return hit or None
@@ -2619,7 +2622,7 @@ class Producer:
                 for k in ("first", "last"):
                     o = S["objects"][k]
                     led = self.ledger().get(o["id"]) or {}
-                    if o.get("status") != "best_effort" or led.get("final") != "best_effort" or (led.get("tries") or 0) < MAX_TRIES:
+                    if o.get("status") != "best_effort" or led.get("final") != "best_effort" or                             not (led.get("redo_exhausted") or (led.get("tries") or 0) >= MAX_TRIES):   # FIX-A：驳回阶梯用尽（tries 常 <3）也采用
                         continue
                     r = review_adopt(self.p, o["id"], by="L-196 自动", relaxed=True)
                     if r:
@@ -3861,7 +3864,7 @@ def canary_ignore_items(root: Path) -> set:
     try:
         d = json.loads((root / "config" / "pipeline" / "producer.json").read_text(encoding="utf-8"))
         return {str(x) for x in ((d.get("canary") or {}).get("ignore_items") or [])}
-    except (OSError, ValueError):  # arch-ok: 配置读不到 = 空集 = 原口径（canary 照常计 Q1），不放宽
+    except (OSError, ValueError):  # arch-ok: 配置读不到 = 用缺省（原口径），不放宽
         return set()
 
 
@@ -3909,7 +3912,7 @@ def run_import_path_ok(run: str | None, path: str, root: Path) -> bool:
     try:
         p = (Path(root) / path).resolve()
         base = _runs().run_dir(run, root).resolve()
-    except (OSError, ValueError):  # arch-ok: 配置读不到 = 用缺省（原口径），不放宽
+    except (OSError, ValueError):
         return False
     return p.suffix == ".md" and base in p.parents and p.is_file()
 
@@ -5102,7 +5105,7 @@ def main(argv=None) -> int:
         r = regen_cmd(paths, a.episode, [x for x in a.shots.split(",") if x.strip()], a.reason or a.note, a.by, a.plan.split(","),
                       dry=a.dry)
         print(json.dumps(r, ensure_ascii=False))
-        return 0 if r.get("regen") else 1
+        return 0 if (r.get("regen") or not r.get("error")) else 1      # FIX-A：{"regen":[],"skipped":…}（没有要换的镜）算成功
     if a.cmd == "resume" and a.shots:
         print(json.dumps(resume_shots(paths, [x for x in a.shots.split(",") if x], a.by, a.note), ensure_ascii=False))
         return 0

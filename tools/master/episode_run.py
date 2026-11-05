@@ -30,6 +30,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[2]
 STAGES = ["import", "preflight", "regen", "first", "video", "finalize", "pull", "compare", "timeline"]
@@ -56,7 +57,15 @@ def sha256_file(p: Path) -> str:
 
 
 def now_iso(t: float | None = None) -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t if t is not None else time.time()))
+    """固定 JST（+09:00，与 producer.iso 同口径；PS 会话 / 常驻线程 / 服务器时区不同也一致）。解析一律只看前 19 位"""
+    t = t if t is not None else time.time()
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t + 9 * 3600)) + "+09:00"
+
+
+def parse_iso(v: str) -> float:
+    """now_iso 的反函数（前 19 位按 JST 解析；旧状态文件里不带时区的值也按 JST 当）"""
+    import calendar
+    return calendar.timegm(time.strptime(str(v)[:19], "%Y-%m-%dT%H:%M:%S")) - 9 * 3600
 
 
 # ---------------------------------------------------------------- 远程 / 本地执行（可注入，测试里替换）
@@ -181,8 +190,9 @@ VIDEO_SNAP = (
     'st={};[st.update((J(f).get("shots") or {})) for f in glob.glob(V+"state_*.json")];'
     'recs={i:(st.get(i) or {}).get("status") for i in ids};'
     'age=(time.time()-os.path.getmtime(V+"night_state.json")) if os.path.exists(V+"night_state.json") else None;'
+    'rn={i:[{"lane":q.get("lane"),"t":q.get("t_sub")} for q in ((st.get(i) or {}).get("renders") or []) if q.get("state")=="submitted"] for i in ids};'
     'fin=x.get("final");sz=(os.path.getsize(fin) if fin and os.path.exists(fin) else None);'
-    'print(json.dumps({"night":x,"night_age_s":age,"shots":recs,"final_size":sz,"lane_mode":ns.get("lane_mode")},ensure_ascii=False))'
+    'print(json.dumps({"night":x,"night_age_s":age,"shots":recs,"renders":rn,"final_size":sz,"lane_mode":ns.get("lane_mode")},ensure_ascii=False))'
 )
 
 
@@ -247,7 +257,10 @@ def act_import(env, st, a, res) -> dict:
     if rc != 0:
         return R("blocked", f"import-staged 失败 rc={rc}：{(out + err)[-240:].strip()}", hint="看 producer log 的 import_blocked 原因（rubric 闸门 / sha / validate）")
     st["import"] = {"sha": res["sha"], "path": res["p4"], "at": now_iso(env.now())}
-    st["regen"] = {}                                     # 新稿 → 换代要重做
+    st["regen"] = {}                                     # 新稿 → 探针要重做
+    st["stage_started"] = {}                             # FIX-A：新稿 = 新一轮，各段计时 / 卡点去重 / 整集起点都清零
+    st["blockers"] = {}
+    st["run_started"] = now_iso(env.now())
     return R("done", f"已导入（sha {res['sha'][:8]}）", p4=res["p4"], sha=res["sha"])
 
 
@@ -265,6 +278,9 @@ def check_preflight(env, st, a) -> dict:
 
 
 def check_regen(env, st, a) -> dict:
+    """FIX-A 11-05（REVIEW-A 🔴①）：不再对整集下 producer regen。输入变了的镜由 producer 自己的 K-OPS-E24（first_input_changed：
+    passed_input_sig 与现在的 input_sig 不同 → 回 ready 重出）逐镜处理；没过闸的镜本来就按新编译出。本段只剩一件事：
+    新稿同步后在出图机 + 视频 owner 机两边重跑提示词探针（L-140），两边都过才算 done。"""
     imp = st.get("import") or {}
     script = import_script_path(env)
     if not script.is_file():
@@ -278,36 +294,32 @@ def check_regen(env, st, a) -> dict:
         return R("unknown", f"读不到 {env.image_host} 的导入稿 sha（SSH rc={rc}）")
     if got != want:
         return R("wait", f"导入稿还没同步到 {env.image_host}（本机 {want[:8]} / 服务器 {got[:8]}；resident_sync 每 120 s 推一次）")
-    if (st.get("regen") or {}).get("sha") == imp.get("sha") and imp.get("sha"):
-        return R("done", "本稿换代已下达（producer regen 已执行）")
+    rg = st.get("regen") or {}
+    if rg.get("sha") == imp.get("sha") and imp.get("sha") and (rg.get("probe") or {}).get("ok") and (rg.get("probe_video") or {}).get("ok", True):
+        return R("done", "本稿提示词探针已在两台机过（输入变了的镜由 E24 逐镜重出，不整集换代）")
     if not imp.get("sha"):
         return R("done", "本次没有导入新稿（沿用现有导入稿，不换代）")
-    return R("todo", "新稿已同步，下达换代（不撤旧当前版，过闸自动换上）",
-             plan=f"[{env.image_host}] producer.py regen --run {env.run} --episode {env.ep}")
+    return R("todo", "新稿已同步：两台机重跑提示词探针（不整集 regen；变更镜走 E24）",
+             plan=f"[{env.image_host} + {env.video_host}] sop_gate.py probe-prompts --run {env.run} --episode {env.ep}")
 
 
 def act_regen(env, st, a, res) -> dict:
-    h = env.image_host
-    cmd = (f"cd {shlex.quote(env.root_of(h))} && OFFLINE_SELF={h} {shlex.quote(env.py_of(h))} tools/autopilot/producer.py regen "
-           f"--run {shlex.quote(env.run)} --episode {env.ep} --reason {shlex.quote('episode_run 新稿换代 ' + (st['import'].get('sha') or '')[:8])} --by {shlex.quote(BY)} --json")
-    rc, out, err = env.remote(h, cmd, timeout=TIMEOUT_S["regen"], tries=1)     # 非幂等动作：连接层失败也只试一次，下拍再看
-    if rc != 0:
-        return R("blocked", f"regen 失败 rc={rc}：{(out.decode('utf-8', 'replace') + err)[-240:].strip()}", hint="看 producer log")
-    d = parse_json_tail(out) or {}                      # producer regen 输出 JSON（旧版本只有 {"regen": [...]}，没有 at / dry）
-    st["regen"] = {"sha": st["import"].get("sha"), "at": d.get("at") or now_iso(env.now()), "shots": d.get("regen") or [],
-                   "skipped": d.get("skipped") or {}}
+    """只跑探针（不下 producer regen）。动作一执行就记 st['regen']（含探针结果），探针没过则 blocked，下拍重探。"""
     pr = probe_prompts(env)
-    st["regen"]["probe"] = pr
-    if not pr.get("ok"):
-        return R("blocked", f"换代已下达（{len(st['regen']['shots'])} 镜），但提示词探针没过：{pr.get('msg')}",
-                 regen_shots=st["regen"]["shots"], hint="L-140 整集提示词过了才出图：修这一镜（分镜 / 编译）后重跑 sop_gate.py probe-prompts")
-    return R("done", f"换代已下达（{len(st['regen']['shots'])} 镜）；提示词探针 {pr.get('msg')}", regen_shots=st["regen"]["shots"])
+    pv = probe_prompts(env, env.video_host) if env.video_host != env.image_host else dict(pr)
+    st["regen"] = {"sha": st["import"].get("sha"), "at": now_iso(env.now()), "mode": "e24_per_shot", "shots": [], "skipped": {},
+                   "probe": pr, "probe_video": pv}
+    bad = [(h, x) for h, x in ((env.image_host, pr), (env.video_host, pv)) if not x.get("ok")]
+    if bad:
+        return R("blocked", "提示词探针没过：" + "；".join(f"{h} {x.get('msg')}" for h, x in bad),
+                 hint="L-140 整集提示词过了才出图：修这一镜（分镜 / 编译）后重跑 sop_gate.py probe-prompts（两台机都要过）")
+    return R("done", f"提示词探针两台机都过：{pr.get('msg')}")
 
 
-def probe_prompts(env) -> dict:
+def probe_prompts(env, host: str | None = None) -> dict:
     """11-05 PS-MASTER（项目方“处理这个拖慢逻辑”）：新稿导入 / 换代后立刻在出图机重跑 sop_gate probe-prompts。
     否则 producer 的 sop_gate 会因“提示词证据过期”整集退避 15–30 分钟（L-140 整集就绪才出图），显卡空等。"""
-    h = env.image_host
+    h = host or env.image_host
     cmd = (f"cd {shlex.quote(env.root_of(h))} && {shlex.quote(env.py_of(h))} tools/master/sop_gate.py probe-prompts "
            f"--run {shlex.quote(env.run)} --episode {env.ep}")
     rc, out, err = env.remote(h, cmd, timeout=900, tries=1)
@@ -375,8 +387,14 @@ def check_first(env, st, a) -> dict:
         return R("blocked", f"首帧 {len(passed)}/{total}；" + "；".join(blockers), counts=summary,
                  hint="按镜解除暂停：producer.py resume --shots <镜> --by 总调度；释放冻结：unhold / retry；封道属于总调度决策，episode_run 不动")
     if be:
-        return R("owner", f"首帧 {len(passed)}/{total}；{len(be)} 镜是“尽力版”等项目方看图（用这张 / 修改）：{','.join(be)}",
-                 counts=summary, link=OWNER_URL, shots=be)
+        rest = [x for x in pending_ids if x not in be]
+        if not rest and passed:
+            # FIX-A 11-05（REVIEW-A 🟡③，L-196/L-198）：尽力版不拦整集——其余镜已过闸就往下做视频，尽力版只给项目方登一条待办
+            return R("done", f"首帧 {len(passed)}/{total} 过闸；{len(be)} 镜是“尽力版”（项目方看图：用这张 / 修改，不拦本集）：{','.join(be)}",
+                     counts=summary, link=OWNER_URL, shots=be, owner_todo=True)
+        if not rest:
+            return R("wait", f"首帧 0/{total} 过闸，{len(be)} 镜尽力版（等 L-196 自动采用 / 项目方看图）：{','.join(be)}",
+                     counts=summary, link=OWNER_URL, shots=be, owner_todo=True)
     why = "；".join(f"{s['shot']}:{s['why']}" for s in shots if s.get("first") != "passed" and s.get("why"))[:200]
     return R("wait", f"首帧 {len(passed)}/{total}（{summary}）" + (f"；{why}" if why else ""), counts=summary)
 
@@ -384,7 +402,7 @@ def check_first(env, st, a) -> dict:
 def _secs_between(a: str, b: str) -> float:
     f = "%Y-%m-%dT%H:%M:%S"
     try:
-        return time.mktime(time.strptime(b[:19], f)) - time.mktime(time.strptime(a[:19], f))
+        return parse_iso(b) - parse_iso(a)
     except ValueError:
         return 0.0
 
@@ -664,6 +682,12 @@ def absorb(env: Env, st: dict, stage: str, res: dict) -> None:
 def orchestrate(env: Env, a, stages: list[str]) -> dict:
     st = load_state(env)
     st.setdefault("run_started", now_iso(env.now()))
+    enforce = bool(getattr(a, "enforce", False)) and not env.dry
+    CL = _load("tools/master/episode_checklist.py", "episode_checklist_er") if (enforce or not env.dry) else None
+    tb = CL.load_table(env) if CL else None
+    er_api = SimpleNamespace(image_snap=image_snap, video_snap=video_snap, remote_py_json=remote_py_json)
+    if enforce:
+        CL.tick(env, er_api, tb)                         # 清单执法：独占旗标 + 任务表 + 超时重做（每拍 / --watch 每 ≤30 s）
     rows: list[dict] = []
     final_status, stopped = "done", None
     for stage in stages:
@@ -672,12 +696,17 @@ def orchestrate(env: Env, a, stages: list[str]) -> dict:
             res = run_stage(env, st, stage, a)
             absorb(env, st, stage, res)
             if res["status"] == "done":
+                if res.get("owner_todo") and not env.dry:
+                    register_blocker(env, st, stage, dict(res, status="owner"))
+                if not env.dry and stage in st["stage_started"]:
+                    t_done_start = st["stage_started"].pop(stage)     # 段完成 → 清起点（下次进该段重新计时）
+                    res["started_at"] = t_done_start
                 break
             if res["status"] in ("todo", "unknown") and env.dry:
                 break
             if not env.dry:
                 t_start = st["stage_started"].setdefault(stage, now_iso(env.now()))
-                elapsed = env.now() - time.mktime(time.strptime(t_start, "%Y-%m-%dT%H:%M:%S"))
+                elapsed = env.now() - parse_iso(t_start)
                 if res["status"] in ("wait", "todo", "unknown") and elapsed > TIMEOUT_S[stage]:
                     res = R("blocked", f"超时：{STAGE_ZH[stage]} 已 {int(elapsed // 60)} 分钟（上限 {TIMEOUT_S[stage] // 60}）仍未完成；当时状态：{res['msg']}",
                             hint="看该段报告；必要时调整 --timeout 或排查卡点")
@@ -686,10 +715,18 @@ def orchestrate(env: Env, a, stages: list[str]) -> dict:
                 break
             if res["status"] in ("wait", "unknown") and a.watch and not env.dry:
                 save_state(env, st)
-                env.sleep(max(30, a.interval))
+                tick_s = int(getattr(a, "tick_s", 0) or 0)
+                if enforce and tick_s:                   # 清单执法每 tick_s（≤30 s）一拍，整体间隔不变
+                    for _ in range(max(1, -(-max(30, a.interval) // tick_s))):
+                        env.sleep(tick_s)
+                        CL.tick(env, er_api, tb)
+                else:
+                    env.sleep(max(30, a.interval))
                 continue
             break
         res["stage"] = stage
+        if tb is not None and not env.dry:
+            CL.note_stage(tb, stage, res, env.now(), st["stage_started"].get(stage) or res.get("started_at"))
         rows.append(res)
         if res["status"] not in ("done",) and not env.dry:
             final_status, stopped = EXIT_KEY(res["status"]), stage
@@ -697,8 +734,12 @@ def orchestrate(env: Env, a, stages: list[str]) -> dict:
         if env.dry and res["status"] not in ("done", "todo"):
             if stopped is None and res["status"] in ("wait", "blocked", "owner"):
                 final_status, stopped = res["status"], stage
+    if enforce and final_status == "done":
+        CL.release(env, tb)                              # 整集完成：撤旗标、还原 night 控制
+    if tb is not None and not env.dry:
+        CL.save_table(env, tb)
     save_state(env, st)
-    return {"run": env.run, "episode": env.ep, "at": now_iso(env.now()), "dry_run": env.dry, "status": final_status,
+    return {"checklist": tb, "run": env.run, "episode": env.ep, "at": now_iso(env.now()), "dry_run": env.dry, "status": final_status,
             "stopped_at": stopped, "stages": rows, "exit": EXIT.get(final_status, 1),
             "unattended": unattended_metric(env, st.get("run_started"))}
 
@@ -725,6 +766,8 @@ def render_md(rep: dict) -> str:
             lines.append(f"  - 项目方入口：{r['link']}")
         if r.get("issue"):
             lines.append(f"  - 卡点已登记：{r['issue']}")
+    if rep.get("checklist") and rep["checklist"].get("rows"):
+        lines.append(_load("tools/master/episode_checklist.py", "episode_checklist_er").render_table_md(rep["checklist"]))
     return "\n".join(lines) + "\n"
 
 
@@ -749,6 +792,7 @@ def main(argv=None) -> int:
     ap.add_argument("--timeout", action="append", default=[], metavar="STAGE=秒", help="覆盖某段超时，可重复")
     ap.add_argument("--kick-night", action="store_true", help="night 状态陈旧时手动拍一轮（默认只报卡点）")
     a = ap.parse_args(argv)
+    a.enforce, a.tick_s = (not a.dry_run and not a.offline), 30      # 清单执法（PIPELINE_CHECKLIST）：旗标 + 任务表 + 超时重做
     for kv in a.timeout:
         k, _, v = kv.partition("=")
         if k in TIMEOUT_S and v.isdigit():
@@ -780,7 +824,7 @@ def tick_once(run: str, ep: int, env: Env | None = None, interval: int = 120) ->
     """常驻入口（resident_sync.episode_run_thread 每拍每个目标调一次）：推进一次、不 watch、不死循环；写 status / report；
     卡点经 register_blocker 去重登记。与命令行同一套规则：不覆盖 pause_shots / hold_lanes / runaway_hold，不代项目方点“用这张”。"""
     env = env or Env(run, ep)
-    a = argparse.Namespace(p4=None, compare_to=None, watch=False, interval=interval, kick_night=False)
+    a = argparse.Namespace(p4=None, compare_to=None, watch=False, interval=interval, kick_night=False, enforce=True, tick_s=0)
     rep = orchestrate(env, a, list(STAGES))
     write_outputs(env, rep)
     return {"run": run, "ep": ep, "status": rep["status"], "stopped_at": rep["stopped_at"], "exit": rep["exit"],

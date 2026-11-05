@@ -43,8 +43,19 @@ def on(run: str | None) -> bool:
 
 
 def segment_of(spec) -> str:
-    txt = "；".join([str(getattr(getattr(spec, "scene", None), "detail", "") or "")] + [str(v) for v in (getattr(spec, "extras", None) or {}).values()])
-    return "fantasy" if "幻想" in txt else "reality"
+    """幻想 / 现实段。REVIEW-B 11-05：与 ns_agent 同一个判法（gen_contract.style.segment_of：字段 段落= / 剧本段落标记【幻想段】…），
+    两条视频路出同一句布光；原先这里按“幻想”二字出现与否判，会与 ns_agent 不一致。ns_agent 不可用时退回旧判法"""
+    ex = dict(getattr(spec, "extras", None) or {})
+    try:
+        from ns_agent.gen_contract import style as ST
+    except Exception:  # arch-ok: ns_recipes 可独立运行（不依赖 ns_agent 包）→ 退回旧判法
+        txt = "；".join([str(getattr(getattr(spec, "scene", None), "detail", "") or "")] + [str(v) for v in ex.values()])
+        return "fantasy" if "幻想" in txt else "reality"
+    shot = {"extras": ex, "scene_detail": getattr(getattr(spec, "scene", None), "detail", "") or "",
+            "img_prompt": getattr(getattr(spec, "first_frame", None), "text", "") or "",
+            "motion_prompt": getattr(getattr(spec, "motion", None), "text", "") or "",
+            "h3_check": getattr(getattr(spec, "h3", None), "text", "") or ""}
+    return ST.segment_of(shot)[0] or "reality"
 
 
 def video_dict(spec, run: str | None) -> dict:

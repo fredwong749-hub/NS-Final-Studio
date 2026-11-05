@@ -29,6 +29,14 @@ def _lab_bad(lab: dict, key: str) -> bool:
     return st in BAD
 
 
+def _q10_prompt_people_bad(ev: dict) -> bool:
+    """Q10 evidence.prompt 判 fail 且原因是人数（people_count）→ 算人数硬项"""
+    p = ev.get("prompt")
+    if not isinstance(p, dict) or p.get("status") != "fail":
+        return False
+    return "people_count" in str(p.get("why") or "")
+
+
 def _is_hard(it: dict, hard: set) -> bool:
     iid, ev = it.get("id"), it.get("evidence") or {}
     if iid in hard:
@@ -41,7 +49,12 @@ def _is_hard(it: dict, hard: set) -> bool:
             return True
         return False
     if iid == "Q10":
-        return any(_lab_bad(ev, k) for h, ks in Q10_HARD.items() if h in hard for k in ks)
+        if any(_lab_bad(ev, k) for h, ks in Q10_HARD.items() if h in hard for k in ks):
+            return True
+        # REVIEW-B 11-05：L-191 的“看图人数闸”（tools/vqa/accept.prompt_check：visible_people vs cast → people_count 不符）落在 Q10 的
+        # prompt 子项，不在 count（检测器，gpu33 上常 deferred）。count 是硬项时它判出的“多画了人 / 少人”同样要挡，否则 35 步多画人直接放行
+        return "count" in hard and _q10_prompt_people_bad(ev)
+
     if iid == "QB":
         lab = ev.get("label") or {}
         return any(_lab_bad(lab, k) for h, ks in QB_HARD.items() if h in hard for k in ks)

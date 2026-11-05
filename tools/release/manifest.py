@@ -244,6 +244,9 @@ def manifest_check(ids: list[str], root: Path | None = None, pin: bool = True, w
 def build_list_text(ids: list[str], root: Path | None = None) -> tuple[str, dict]:
     """manifest-check（钉 blob）-> 清单文本（path@blob + 删除项）；有 error 就抛"""
     root = root or ROOT
+    missing = [m for m in ids if load_pin(root, m) is None]
+    if missing:        # REVIEW-C：发版时不许现场钉当前工作树——必须交付时已 manifest-check 钉过
+        raise RuntimeError("交付清单缺 pin 文件（先跑 manifest-check 交付时钉住，发版不现场钉工作树）：" + "、".join(missing))
     rep = manifest_check(ids, root, pin=True)
     if rep["errors"]:
         raise RuntimeError("交付清单检查不过：" + "；".join(rep["errors"][:6]))

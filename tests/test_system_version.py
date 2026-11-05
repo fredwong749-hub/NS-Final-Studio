@@ -431,3 +431,28 @@ def test_deploy_records_post_verify(tmp_path):
     (tmp_path / "tools").mkdir(exist_ok=True)
     r = SV.deploy_host(rs, "gpu36", tmp_path, [], [], "sv-x", "c", restart=False, pc=pc)
     assert "post_verify" in r and r["post_verify"].get("ok") is False
+
+
+def test_cut_global_mutex_refuses_concurrent_and_existing_tag(tmp_path, monkeypatch):
+    """REVIEW-C 🔴：并发 cut 撞 id——别的活进程持锁 → rc 3 拒绝；--id 的 tag 已存在 → 拒绝；陈旧锁（持有者已死）可接管"""
+    mutex = tmp_path / "cut.mutex"
+    monkeypatch.setattr(SV, "CUT_MUTEX", mutex)
+    monkeypatch.setattr(SV, "cut_locked", lambda now=None: None)
+    monkeypatch.setattr(SV, "sv_tags", lambda: ["sv-20261105-01"])
+    called = []
+    monkeypatch.setattr(SV, "_cut_impl", lambda *a, **k: called.append(1) or {"ok": True})
+    # 1) 别人持锁且活着
+    mutex.write_text("99999 x\n", encoding="utf-8")
+    monkeypatch.setattr(SV, "_pid_alive", lambda p: True)
+    out = SV.cut(sv="sv-20261105-02")
+    assert out["ok"] is False and out["rc"] == 3 and not called and mutex.exists()
+    # 2) 持有者已死 = 陈旧锁，接管；但 tag 已存在仍拒绝，且锁释放
+    monkeypatch.setattr(SV, "_pid_alive", lambda p: False)
+    out = SV.cut(sv="sv-20261105-01")
+    assert out["rc"] == 3 and "已存在" in out["reason"] and not called and not mutex.exists()
+    # 3) 正常：跑 _cut_impl，结束释放
+    assert SV.cut(sv="sv-20261105-02")["ok"] is True and called and not mutex.exists()
+    # 4) cut_lock 里有别的活进程在冻结 → 拒绝
+    monkeypatch.setattr(SV, "cut_locked", lambda now=None: {"pid": 12345, "sv": "sv-x"})
+    monkeypatch.setattr(SV, "_pid_alive", lambda p: True)
+    assert SV.cut()["rc"] == 3

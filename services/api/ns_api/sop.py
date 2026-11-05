@@ -1034,6 +1034,26 @@ def open_issues(run: str, issues: list[dict] | None = None) -> list[dict]:
     return [i for i in rows if i.get("status") != "closed" and str(i.get("run") or "") == run]
 
 
+def _ts_jst(v) -> float | None:
+    """REVIEW-C：卡点 time / import_at 都解析成带时区的时刻再比（无时区串按 JST——项目口径；带 +09:00 / Z 的按其自带时区），解析不了 = None"""
+    import datetime as _dt
+    t = str(v or "").strip().replace("Z", "+00:00")
+    if not t:
+        return None
+    try:
+        d = _dt.datetime.fromisoformat(t)
+    except ValueError:
+        return None
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=_dt.timezone(_dt.timedelta(hours=9)))
+    return d.timestamp()
+
+
+def _is_older(t, ref) -> bool:
+    a, b = _ts_jst(t), _ts_jst(ref)
+    return a is not None and b is not None and a < b
+
+
 def latest_first(rows: list[dict]) -> list[dict]:
     """A5 P1-2 / P2-4：同一卡点（同 id）只留最新一条，再按 阻断优先 + 时间降序（最新在前）排；
     同一句话（issue_plain 相同）的重复登记也只留最新一条（详情列表不再一样的话刷 5 遍）"""
@@ -1083,7 +1103,7 @@ def stepbar_view(pipe: dict, issues: list[dict]) -> dict:
             # UI-STATUS 11-05：登记时间早于本集最近一次导入的阻断卡点 = 说的是上一版稿 / 上一轮环境，不再挡格子（仍列在详情里，标“旧”）
             imp = str(e.get("import_at") or "")
             if imp:
-                its = [({**x, "blocking": False, "old": True} if x.get("blocking") and str(x.get("time") or "9") < imp else x) for x in its]
+                its = [({**x, "blocking": False, "old": True} if x.get("blocking") and _is_older(x.get("time"), imp) else x) for x in its]
             stale = 0
             if c["state"] == "done":                                    # 已完成的格子不再挂过时的“挡路”（那些单子总调度去关）
                 stale = sum(1 for x in its if x.get("blocking"))

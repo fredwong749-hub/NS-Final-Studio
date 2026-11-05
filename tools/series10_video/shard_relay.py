@@ -108,6 +108,34 @@ def push_to_owner(owner: str, files: list[str], dry: bool = False, marks_p: Path
     return n
 
 
+def arbitrate_claims(run: str, vid: Path, vid_rel: str, c: dict, ep: int, busy: dict | None = None, now: float | None = None) -> dict:
+    """动态抢活仲裁（只在笔记本）：读合并后的整集状态，空闲台领别台没开工的镜，写 shard_claims.json。返回新的领取表。
+    busy 缺省 = 各台 state 里 state==submitted 的渲染数（笔记本上 sync 来的 state）"""
+    now = time.time() if now is None else now
+    jobs = json.loads((vid / "jobs.json").read_text(encoding="utf-8")) if (vid / "jobs.json").is_file() else {}
+    shots = [s for s in jobs.get("shots", []) if int(s.get("ep") or 0) == int(ep)]
+    plan_map = {s["shot"]: s.get("host") for s in shots if s.get("host") in c["hosts"]}
+    # jobs.json 里的 host 已含旧领取；还原成静态计划再叠，避免领取“固化”
+    old = VS.load_claims(vid)
+    for sid, cl in old.items():
+        if sid in plan_map and cl.get("from") in c["hosts"] and plan_map[sid] == cl.get("host"):
+            plan_map[sid] = cl["from"]
+    merged = VS.merged_shots(vid, ep, c["hosts"], jobs)
+    if busy is None:
+        busy = {}
+        for h in c["hosts"]:
+            try:
+                st = json.loads((vid / f"state_{h}.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):   # arch-ok: 读不到这台 state = 当它忙（不抢，宁可少派）
+                busy[h] = 1
+                continue
+            busy[h] = sum(1 for r in (st.get("shots") or {}).values() for x in r.get("renders") or [] if x.get("state") == "submitted")
+    new = VS.decide_claims(c, plan_map, merged, old, busy, now)
+    if new != old:
+        VS.save_claims(vid, new)
+    return new
+
+
 def once(run: str, dry: bool = False) -> dict:
     import run_ctx as RC
     vid_rel = RC.vid_rel(run)
@@ -121,6 +149,15 @@ def once(run: str, dry: bool = False) -> dict:
                 pull_from_helper(helper, helper_payload(vid, vid_rel, helper, ep, only_local=False))
             files = helper_payload(vid, vid_rel, helper, ep)
             res[f"ep{ep:02d}:{helper}->{c['owner']}"] = {"files": len(files), "pushed": push_to_owner(c["owner"], files, dry)}
+        if not dry:
+            try:
+                cl = arbitrate_claims(run, vid, vid_rel, c, ep)
+                cf = [f"{vid_rel}/{VS.CLAIMS_NAME}"] if (vid / VS.CLAIMS_NAME).is_file() else []
+                for h in c["hosts"]:                      # 领取表送到两台（互不信任，只经笔记本）；已有标记的不重复送
+                    push_to_owner(h, cf, dry)
+                res[f"ep{ep:02d}:claims"] = {"n": len(cl)}
+            except Exception as e:  # noqa: BLE001  # arch-ok: 仲裁失败 = 回到静态计划，不影响 state / 片子中转
+                res[f"ep{ep:02d}:claims"] = {"error": repr(e)[:160]}
     return res
 
 

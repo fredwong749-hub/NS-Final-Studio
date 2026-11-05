@@ -497,7 +497,7 @@ def _shard_hosts(specs: dict) -> dict:
     """video_shard.json 开着且本剧本集配了分片 → {镜: 主机}；否则 {}（原行为）。分片台不足 / 配置坏 = {}"""
     try:
         import video_shard as VS
-        return VS.plan_all(RUN_ID, specs)
+        return VS.plan_all(RUN_ID, specs, claims=VS.load_claims(VID))   # 动态抢活：笔记本 relay 仲裁后送来的领取叠在静态计划上
     except ImportError:   # arch-ok: 服务器镜像没带分片模块 = 不分片（原行为）
         return {}
 

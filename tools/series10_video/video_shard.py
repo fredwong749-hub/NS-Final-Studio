@@ -59,8 +59,9 @@ def plan(c: dict, shots: list[tuple[str, float]]) -> dict[str, str]:
     return out
 
 
-def plan_all(run: str, specs: dict, cfg: dict | None = None) -> dict[str, str]:
-    """specs = {镜 id: ShotSpec（.episode / .duration_s）} → {镜: 主机}（只含配了分片的集的镜；没开 = {}）"""
+def plan_all(run: str, specs: dict, cfg: dict | None = None, claims: dict | None = None, now: float | None = None) -> dict[str, str]:
+    """specs = {镜 id: ShotSpec（.episode / .duration_s）} → {镜: 主机}（只含配了分片的集的镜；没开 = {}）。
+    claims（动态抢活，FIX-A 11-05）给了就把仍有效的领取叠在静态计划上：镜改派给领取台"""
     cfg = load() if cfg is None else cfg
     by_ep: dict[int, list[tuple[str, float]]] = {}
     for sid, s in specs.items():
@@ -70,6 +71,8 @@ def plan_all(run: str, specs: dict, cfg: dict | None = None) -> dict[str, str]:
         c = ep_cfg(run, ep, cfg)
         if c:
             out.update(plan(c, shots))
+    if claims:
+        out = apply_claims(out, claims, now)
     return out
 
 
@@ -127,3 +130,74 @@ def ep_hosts(run: str, ep: int, owner: str, cfg: dict | None = None) -> list[str
     """读这一集状态要看的主机：分片 → 全部分片台（owner 在前）；否则 [owner]"""
     c = ep_cfg(run, ep, cfg)
     return [owner] + [h for h in c["hosts"] if h != owner] if c else [owner]
+
+
+# ---------------------------------------------------------------- 动态抢活（FIX-A 11-05，项目方“pipeline 不要漏掉这 2 台 gpu 服务器”）
+# 静态分片的缺点：一台先出完，整台空着，另一台还剩一堆镜。改成：静态计划只是“初始偏好”，
+# 剩余没开始的镜，任一台空了就能领。仲裁者只有笔记本（shard_relay，唯一写者）——两台服务器互不信任、不互相通信，
+# 领取写成 shard_claims.json {镜: {host, from, at}}，由 relay 同时送到两台；两台的 build_jobs 读它叠在静态计划上，
+# 所以 jobs.json 里每镜的 host 仍是唯一裁决（vidgen 只出 host == 本机的镜）。领取超时没开工 → 回收（镜回原台）。
+CLAIMS_NAME = "shard_claims.json"
+CLAIM_LEASE_S = 1800          # 领取后这么久镜还没出现任何渲染记录 → 作废（领取台可能掉线）
+SETTLED = ("done", "best_effort", "blocked")
+
+
+def load_claims(vid: Path) -> dict:
+    try:
+        d = json.loads((Path(vid) / CLAIMS_NAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):   # arch-ok: 没有 / 写坏 = 没有领取（回到静态计划）
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def save_claims(vid: Path, claims: dict) -> None:
+    import os
+    p = Path(vid) / CLAIMS_NAME
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(claims, ensure_ascii=False, indent=1, sort_keys=True), encoding="utf-8")
+    os.replace(tmp, p)
+
+
+def _started(rec: dict | None) -> bool:
+    """镜在某台已经有渲染记录 / 状态不是待办 = 已开工，不可再被抢（避免两台重复出同一镜）"""
+    return bool(rec) and (bool(rec.get("renders")) or rec.get("status") not in (None, "", "pending", "queued"))
+
+
+def live_claims(claims: dict, merged: dict, now: float, lease_s: float = CLAIM_LEASE_S) -> dict:
+    """仍有效的领取：镜已开工 / 已落定 → 保留（主机归属不能再变，否则 jobs.json 的 host 会翻）；
+    还没开工且超过 lease_s → 作废（超时回收）"""
+    out = {}
+    for sid, c in (claims or {}).items():
+        if _started((merged or {}).get(sid)) or now - float(c.get("at") or 0) <= lease_s:
+            out[sid] = c
+    return out
+
+
+def apply_claims(plan_map: dict, claims: dict, now: float | None = None, hosts: set | None = None, lease_s: float = CLAIM_LEASE_S) -> dict:
+    """静态计划 + 领取 → 实际 {镜: 主机}。没有 merged 状态可看时只按时间判过期（调用方想精确就先 live_claims）"""
+    import time as _t
+    now = _t.time() if now is None else now
+    out = dict(plan_map)
+    for sid, c in (claims or {}).items():
+        if sid in out and (hosts is None or c.get("host") in hosts) and c.get("host"):
+            out[sid] = c["host"]
+    return out
+
+
+def decide_claims(c: dict, plan_map: dict, merged: dict, claims: dict, busy: dict, now: float,
+                  lease_s: float = CLAIM_LEASE_S, per_host: int = 1) -> dict:
+    """c = ep_cfg；plan_map = 静态 {镜: 主机}；merged = 整集状态；busy = {主机: 在跑 / 排队的渲染数}（关心的是“空”）。
+    返回新的领取表（含旧的有效领取）：空闲台（busy==0 且自己名下没有未开工的镜）从别台名下领“没开工、没被领”的镜，
+    每台每轮最多 per_host 个（尾部的镜先领，owner 继续从前往后出）"""
+    cl = live_claims(claims, merged, now, lease_s)
+    eff = apply_claims(plan_map, cl)
+    for h in sorted(c["hosts"]):
+        if int(busy.get(h, 0)) > 0:
+            continue
+        if any(eff.get(s) == h and not _started((merged or {}).get(s)) for s in eff):
+            continue                                   # 自己名下还有没开工的镜 = 不算闲（作业会陆续派给它）
+        cand = [s for s in sorted(eff, reverse=True) if eff[s] != h and not _started((merged or {}).get(s)) and s not in cl]
+        for s in cand[:per_host]:
+            cl[s] = {"host": h, "from": eff[s], "at": now}
+    return cl

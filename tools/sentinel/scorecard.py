@@ -136,12 +136,16 @@ def structure_top(n: int = 5) -> dict:
 
 def current_sv() -> str | None:
     """真实线上版本。根因（11-05）：data/system_version.txt 是 deploy 在“被部署的服务器”上写的（= override system），
-    笔记本（SENTINEL 跑的地方）从不被 deploy，文件停在 sv-20261102-04。真相源 = git sv-* 标签 / data/system_versions/index.json（入版即写），
-    三处取字典序最大（sv-YYYYMMDD-NN 可排序）。"""
-    cands = [(jl("data/system_version.txt") or {}).get("id")]
-    cands += [v.get("id") for v in ((jl("data/system_versions/index.json") or {}).get("versions") or [])[-3:]]
-    tags = _run(["git", "tag", "-l", "sv-*"], 30)
-    cands += (tags or "").split()
+    笔记本（SENTINEL 跑的地方）从不被 deploy，文件停在 sv-20261102-04。真相源优先级（REVIEW-C）：本机 data/system_version.txt（deploy 写）> index.json 里 deployed 非空的最新版 > tag / 账本里最新（未部署，deployed=false）。"""
+    loc = (jl("data/system_version.txt") or {}).get("id")
+    vers = (jl("data/system_versions/index.json") or {}).get("versions") or []
+    dep = [v.get("id") for v in vers if v.get("deployed")]      # 账本里标了已部署的版本
+    dep += [loc]                                                # 本机 data/system_version.txt（deploy 写；笔记本不被 deploy 时可能落后，所以和账本取最新）
+    dep = [c for c in dep if isinstance(c, str) and c.startswith("sv-")]
+    if dep:
+        return max(dep)
+    cands = [v.get("id") for v in vers[-3:]]                    # 最后退回：已发版但未部署（deployed=false）的 tag / 账本
+    cands += (_run(["git", "tag", "-l", "sv-*"], 30) or "").split()
     ok = [c for c in cands if isinstance(c, str) and c.startswith("sv-")]
     return max(ok) if ok else None
 

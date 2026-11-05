@@ -12,6 +12,7 @@ def test_build_list_text_drops_data_paths(tmp_path):
     w(repo, "pkg/a.py", "A = 1\n")
     w(repo, "data/x/y.json", "{}\n")
     mk_manifest(repo, "w1-1105", ["pkg/a.py", "data/x/y.json"])
+    M.manifest_check(["w1-1105"], repo, pin=True)
     text, rep = M.build_list_text(["w1-1105"], repo)
     assert "pkg/a.py@" in text and "data/x/y.json" not in text
     assert any("data/x/y.json" in x for x in rep["warnings"])

@@ -636,8 +636,11 @@ def auto_probe_stale(run: str, ep: int, root: Path = ROOT, missing: list | None 
         import subprocess
         logf = open(root / "data/pipeline/sop_gate" / "auto_probe.log", "a", encoding="utf-8")
         kw = {"creationflags": 0x00000008 | 0x00000200} if os.name == "nt" else {"start_new_session": True}
-        subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "probe-prompts", "--run", run, "--episode", str(int(ep))],
-                         cwd=str(root), stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **kw)
+        try:
+            subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "probe-prompts", "--run", run, "--episode", str(int(ep))],
+                             cwd=str(root), stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **kw)
+        finally:
+            logf.close()                       # FIX-A：子进程已继承句柄，父进程这份关掉（不泄漏）
         sys.stderr.write(f"[sop_gate] 提示词证据过期 → 自动后台 probe-prompts {run} ep{int(ep):02d}（K-OPS-I13）\n")
         return "started"
     except OSError as e:  # arch-ok: 起不了探针 = 退回原行为（退避 + 人工），不影响判定

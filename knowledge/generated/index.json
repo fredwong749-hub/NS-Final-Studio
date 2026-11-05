@@ -1,5 +1,5 @@
 {
- "kb_version": "kb-20261105-ce82830f",
+ "kb_version": "kb-20261105-066027e8",
  "n": 693,
  "by_domain": {
   "render": 102,
@@ -16254,14 +16254,14 @@
    "link": "P3-P4",
    "title": "L2 动机运镜：每镜【运镜】= 词表 enabled 运镜名｜幅度｜起幅 → 落幅｜动机=；与 motion / 【镜头运动】同一种；固定镜头整集 ≤20% 且写不动的理由（L2）",
    "when": "每镜【运镜】【镜头运动】与 motion 首段",
-   "then": "代码判定 rubric_code.l2_checks（move#n / static#0）：【运镜】首段不在 config/director/camera_moves.yaml、或 disabled / 本剧不可用（camera_norm.is_enabled(id, run)）、或没写“动机=”、或与 motion / 【镜头运动】的运镜不是同一种 → QW-L3；固定镜头数 / 镜数 > 0.20 → QW-L3。V2 现可执行：推近（情绪推高 / 发现 / 对白加压）、bolt_push_settle（幻想段登场 / 爆点）、handheld_follow（现实段走动镜）、固定（人物出画 / 重复比较节拍 / 等答案）；横移 / 摇 / 俯仰 / 环绕 / 升降 Pika 不按提示词执行（词表 exec_modes），不要写，等 camctl A/B 通过再放开",
+   "then": "代码判定 rubric_code.l2_checks（move#n / static#0）：【运镜】首段不在 config/director/camera_moves.yaml、或 disabled / 本剧不可用（camera_norm.is_enabled(id, run)）、或没写“动机=”、或与 motion / 【镜头运动】的运镜不是同一种 → QW-L3；固定镜头数 / 镜数 > 0.20 → QW-L3。L-192 起六种 enabled：static 固定（人物出画 / 重复比较节拍 / 等答案）、push_in 推近（情绪推高 / 发现 / 对白加压）、pull_out 拉远（收束 / 揭示全貌 / 孤立）、bolt_push_settle（幻想段登场 / 爆点）、handheld_follow（现实段走动镜）、pedestal_up 升（视线 / 气势上抬）；多人在画（≥2 人）的镜只许 static / push_in / pull_out / handheld_follow（camera_norm.multi_person_fallback 会把别的退回 push_in / static）；横移 truck / 环绕 arc / 摇 / 俯仰 Pika 不按提示词执行（词表 exec_modes），不要写，等 camctl A/B 通过再放开",
    "targets": [
     {
      "kind": "writer_prompt",
      "section": "镜头字段"
     }
    ],
-   "writer_text": "每镜【运镜】写四项：词表里 enabled 的运镜名｜幅度｜起幅 → 落幅｜动机=这镜为什么动（情绪推高、发现、说话人开口、跟随走动、登场爆点）；motion 开头和【镜头运动】要是同一种运镜。固定镜头整集不超过 20%，而且要写清为什么不动（人物出画、重复比较、等对方回答）。只用 camera_moves.yaml 里 enabled 的运镜——现在是推近、固定、幻想段的 bolt_push_settle、走动镜的 handheld_follow；横移 / 摇 / 俯仰 / 环绕 / 升降 视频模型做不出，不要写。",
+   "writer_text": "每镜【运镜】写四项：词表里 enabled 的运镜名｜幅度｜起幅 → 落幅｜动机=这镜为什么动（情绪推高、发现、说话人开口、跟随走动、登场爆点）；motion 开头和【镜头运动】要是同一种运镜。固定镜头整集不超过 20%，而且要写清为什么不动（人物出画、重复比较、等对方回答）。只用 camera_moves.yaml 里 enabled 的运镜——现在六种（L-192）：static 固定、push_in 推近、pull_out 拉远、幻想段的 bolt_push_settle、走动镜的 handheld_follow、pedestal_up 升；一镜里有 2 个以上的人在画时只写 static / push_in / pull_out / handheld_follow；横移 / 环绕 / 摇 / 俯仰 视频模型做不出，不要写。",
    "evidence": [
     {
      "src": "docs/master/PLAN_HOLLYWOOD_LOOK.md",

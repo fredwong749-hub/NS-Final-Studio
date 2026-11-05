@@ -936,7 +936,7 @@ def test_stale_pending_jobs_close_when_gap_gone(root):
     assert "face-ch_zhuo_lin" not in g2["closed"]
 
 
-def test_sheet_checks_only_big_pieces_and_reject_reasons_are_written(root):
+def test_sheet_checks_only_big_pieces_and_reject_reasons_are_written(root, monkeypatch):
     """总调度 11-03：设定图只核大件（上衣 / 外套 / 裤裙 / 鞋）；每张候选的拒因汇总进 error / log；Q9 排队超时 = 重排不算失败"""
     story, looks = AJ.p1(root, RUN)
     spec = AJ.spec_sheet(story, looks, "ch_zhuo_lin", "A", 1)
@@ -962,6 +962,13 @@ def test_sheet_checks_only_big_pieces_and_reject_reasons_are_written(root):
     j2 = AW.run_job(jp, "gpu36:0", root, renderer=slow, cfg=cfg)
     assert j2["state"] == "pending" and "排队超时" in j2["error"] and j2["attempts"] == 0
     post = {"items": [{"id": "Q9", "status": "untested", "detail": "没有本地看图复核结果（服务排队 / 未跑）", "evidence": {}}]}
+    # L-196（项目方 11-05“全自动，不要检测那么多了”）：Q9 不在 gen_contract.blocking_items（Q1/count/text/adult）→ 没测出只记录、不排队重试（返回 False，状态记 na）
+    monkeypatch.setattr(AW, "q9_blocking", lambda root=None: False)
+    post_l196 = json.loads(json.dumps(post))
+    assert AW.q9_queue_timeout(post_l196) is False
+    assert post_l196["items"][0]["status"] == "na" and "L-196" in post_l196["items"][0]["status_recorded"]
+    # Q9 回到硬闸（旧口径）时：没拿到看图结果 = 排队超时、要重试
+    monkeypatch.setattr(AW, "q9_blocking", lambda root=None: True)
     assert AW.q9_queue_timeout(post) and not AW.q9_queue_timeout({"items": [{"id": "Q9", "status": "untested", "evidence": {"model": "m"}}]})
 
 
@@ -1375,7 +1382,8 @@ def test_real_compile_four_kinds(monkeypatch, kind):
         j["spec"].setdefault("negative", AJ.EMPTY_NEGATIVE)
     p = AW._compile(j, AJ.ROOT)["prompt"]
     if kind == "face":
-        assert "镜头：" in p and AW.person_phrases(p)
+        # face 仍是剧情镜（不在本次范围），但镜头信息现在是行内写法（“特写，平视…135mm 镜头 T1.2，极浅景深”），不再有“镜头：”标签——旧断言过期
+        assert ("镜头：" in p or "mm 镜头" in p) and "景深" in p and AW.person_phrases(p)
     else:
         assert "镜头：" not in p and not any(x in p for x in ("人物和场景是同一次拍摄", "人物和环境一起清楚", "环境光染到皮肤", "四分之三侧脸"))
     if kind in ("item", "scene"):

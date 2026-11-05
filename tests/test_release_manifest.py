@@ -150,6 +150,7 @@ def test_build_tree_pins_blob_not_worktree(tmp_path):
     w(repo, "pkg/a.py", "A = 1\n")
     w(repo, "pkg/old.py", "X = 9\n")
     mk_manifest(repo, "w1-1105", ["pkg/a.py", "pkg/old.py"])
+    M.manifest_check(["w1-1105"], repo, pin=True)        # 交付时钉住；发版不现场钉
     out = SV.build_tree_from_manifests(["w1-1105"], "HEAD", repo=repo)
     names = g(repo, "ls-tree", "-r", "--name-only", out["tree"]).split()
     assert "pkg/a.py" in names and "pkg/old.py" in names
@@ -169,11 +170,13 @@ def test_build_tree_refuses_on_gap(tmp_path):
     w(repo, "pkg/old.py", "from pkg import newmod\n")
     w(repo, "pkg/newmod.py", "Y = 1\n")
     mk_manifest(repo, "w1-1105", ["pkg/old.py"])
+    rep = M.manifest_check(["w1-1105"], repo, pin=True)
+    assert any("伴随缺口" in x for x in rep["errors"])
     try:
-        SV.build_tree_from_manifests(["w1-1105"], "HEAD", repo=repo)
+        SV.build_tree_from_manifests(["w1-1105"], "HEAD", repo=repo)     # 有缺口 → 没有 pin → 同样拒绝
         assert False, "应拒绝"
-    except RuntimeError as e:
-        assert "伴随缺口" in str(e)
+    except RuntimeError:
+        pass
 
 
 def test_release_tick_accepts_manifests():
@@ -195,3 +198,16 @@ def test_cli_lease_and_check(tmp_path, monkeypatch, capsys):
     w(repo, "pkg/a.py", "A = 1\n")
     mk_manifest(repo, "w1-1105", ["pkg/a.py"])
     assert SV.main(["manifest-check", "w1-1105", "--no-pin"]) == 0
+
+
+def test_build_tree_requires_existing_pin(tmp_path):
+    """REVIEW-C：发版（--manifests）时清单没有 pin 文件 = 拒绝，不现场钉当前工作树"""
+    repo = repo_fx(tmp_path)
+    w(repo, "pkg/a.py", "A = 1\n")
+    mk_manifest(repo, "w1-1105", ["pkg/a.py"])
+    try:
+        SV.build_tree_from_manifests(["w1-1105"], "HEAD", repo=repo)
+        assert False, "应拒绝"
+    except RuntimeError as e:
+        assert "缺 pin" in str(e)
+    assert not (repo / "data/system_versions/pins/w1-1105.json").exists()
