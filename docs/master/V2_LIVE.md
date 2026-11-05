@@ -1,4 +1,26 @@
 13:2x W46：✅ test_netfix::test_no_new_direct_ssh_outside_allowlist 红已清——唯一命中是 tools/master/partial_pull.py 的 sftp_get（Git sftp -S ssh.exe 经 <host>-hk 拉大文件，同 rssh.bulk_put/FONG-QUICK 走法，不是 ControlMaster=no 命令直连；relay 走 RS.ssh 未命中）→ 选②登记 config/netfix/ssh_callers.txt 并写明理由；gpu33 remote_pytest tests/test_netfix.py 41 passed rc=0。
+22:01 ⚠ 卡点（ASSET-WORKER）：series10_v2 第3集 步骤8 资产就绪【阻断】：资产作业 item-lead_f-O2-nails1（祁念（lead_f））连续失败：子进程超时（跑了 841 分钟 > 90，pid 38432），核过身份（pid + 创建时间 + 命令行一致），已杀掉（建议：看 data/pipeline/asset_jobs/<run>/<job>.json 的 log；修好后把 state 改回 pending） [ISS-1105-220158-49e9]
+21:55 ⚠ 卡点（ASSET-WORKER）：series10_v2 第2集 步骤8 资产就绪【阻断】：资产作业 face-ch_zhou_xu（周序（ch_zhou_xu））连续失败：子进程超时（跑了 840 分钟 > 90，pid 12572），核过身份（pid + 创建时间 + 命令行一致），已杀掉（建议：看 data/pipeline/asset_jobs/<run>/<job>.json 的 log；修好后把 state 改回 pending） [ISS-1105-215524-a55f]
+21:52 ⚠ 卡点（ASSET-WORKER）：series10_v2 第2集 步骤8 资产就绪【阻断】：资产作业 face-ch_li_an（黎岸（ch_li_an））连续失败：子进程超时（跑了 887 分钟 > 90，pid 29756），核过身份（pid + 创建时间 + 命令行一致），已杀掉（建议：看 data/pipeline/asset_jobs/<run>/<job>.json 的 log；修好后把 state 改回 pending） [ISS-1105-215206-b801]
+07:31 ⏫ 看门狗（WATCHDOG-CODE）：阻断卡点超 2 小时无人 close / 回应 4 条：ISS-1105-001734-1f66（resident_sync.W40，7h）、ISS-1105-001923-47bc（resident_sync.W40，7h）、ISS-1105-002439-a048（resident_sync.W40，7h）、ISS-1105-002623-7383（resident_sync.W40，7h）（data/pipeline/issues.jsonl）
+07:31 ⚠ 卡点（WATCHDOG-CODE）：- 第0集 步骤开关【阻断】：P0 开关和决策对不上：asset_worker.max_parallel=6，要求 le 2（L-140 否决 5 道并行 → 2；tools/master/master_check.py ④ SWITCH_EXPECT） 〔wd:r8:asset_worker.max_parallel=6〕（建议：按决策号改回开关；若决策已变，先改 SWITCH_EXPECT 再改开关） [ISS-1105-073147-9fce]
+21:24 ⚠ 卡点（resident_sync.W40）：series10_v2 第0集 步骤看图【阻断】：gpu36 看图服务排队 1 张，50 分钟没出一个结论（loaded=False waiting=GPU1 ComfyUI 有任务）（建议：看 /root/work/…/vqa/logs/server.log；卡在等显存就查 ComfyUI 队列；确认后手工重启 server.py） [ISS-1105-212428-23b6]
+19:12 ⚠ 卡点（EPISODE_RUN）：series10_v2 第1集 步骤episode_run/regen【阻断】：[换代重出] regen 失败 rc=1：, "ep01-S10": "没有当前首帧（走常规出图）", "ep01-S11": "已在重出 / 换代中", "ep01-S12": "没有当前首帧（走常规出图）", "ep01-S13": "已在重出 / 换代中", "ep01-S14": "没有当前首帧（走常规出图）", "ep01-S15": "没有当前首帧（走常规出图）", "ep01-S16": "已在重出 / 换代中"}, "dry": false, "at": "2026-11-05T19:12:08"}（建议：看 producer log） [ISS-1105-191208-44d9]
+19:09 ⚠ 卡点（EPISODE_RUN）：series10_v2 第1集 步骤episode_run/import【阻断】：[导入剧本] import-staged 失败 rc=1：中近景里 祁念、江予白 两人都露脸（K-WRT-H16）——改成中景以上，或把其中一人写成前景“局部”（肩 / 背影 / 手）", "staging#镜14 中近景里 卓琳、祁念 两人都露脸（K-WRT-H16）——改成中景以上，或把其中一人写成前景“局部”（肩 / 背影 / 手）", "staging#镜15 中近景里 卓琳、唐瑶 两人都露脸（K-WRT-H16）——改成中景以上，或把其中一人写成前景“局部”（肩 / 背影 / 手）"]}, "error": null}（建议：看 producer log 的 import_blocked 原因（rubric 闸门 / sha / validate）） [ISS-1105-190955-a8f1]
+04:09 ⚠ 卡点（ASSET-WORKER）：series10_v2 第3集 步骤8 资产就绪：sheet lead_f:O2 已登记进清单，但推送 gpu33,gpu36 失败：RuntimeError: gpu33 rc=1: sha256sum: /root/work/fredw/offline_20261101/repo/assets_v2/manifest.json.tmp: No such file or directory
+sha256sum: WARNING: 1 listed file could not be read
+sha 不符，未替换 /root/work/fredw/offline_20261101/repo/assets_v2/manifest.json（收到  字节，应为 35513）
+；RuntimeError: gpu36 rc=1: sha256sum: /root/work/fredw/offline_20261101/repo/assets_v2/manifest.json.tmp: No such file or directory
+sha256sum: WARNING: 1 listed file could not be read
+sha 不符，未替换 /root/work/fredw/offline_20261101/repo/assets_v2/manifest.json（收到  字节，应为 35513）
+（建议：FACTORY sync.py auto 每 10 分钟会补推；推不上就查 rssh 主连接） [ISS-1105-040920-757b]
+18:56 🖼 首帧代选（L-142，系统代选·可改）：series10_v2 ep01-S16 → v4（契约分 1.0，过检后等了 30 分钟）
+18:36 🖼 首帧代选（L-142，系统代选·可改）：series10_v2 ep01-S14 → v1（契约分 1.0，过检后等了 30 分钟）
+18:36 🖼 首帧代选（L-142，系统代选·可改）：series10_v2 ep01-S12 → v1（契约分 1.0，过检后等了 30 分钟）
+00:26 ⚠ 卡点（resident_sync.W40）：series10_v2 第0集 步骤视频【阻断】：gpu33 → gpu36 首尾帧中继失败（集 [1]）：RuntimeError('ssh gpu33 失败（rc=255，tries=5）：Connection closed by UNKNOWN port 65535\r\n')（建议：看 ops/logs/resident_sync.log 的 relay 行；手工：resident_sync.py relay；视频机缺首尾帧 = 视频段不派） [ISS-1105-002623-7383]
+00:24 ⚠ 卡点（resident_sync.W40）：series10_v2 第0集 步骤看图【阻断】：gpu36 看图服务探测失败：RuntimeError('ssh gpu36 失败（rc=255，tries=2）：Connection closed by UNKNOWN port 65535\r\n')（建议：检查 gpu36 命令主连接（tunnel_supervisor）；连上后下一拍自动探测 / 拉起） [ISS-1105-002439-a048]
+00:19 ⚠ 卡点（resident_sync.W40）：series10_v2 第0集 步骤同步【阻断】：笔记本 → gpu36 的 run 级产物同步失败（连续 2 拍）：RuntimeError('ssh gpu36 失败（rc=255，tries=5）：Connection closed by UNKNOWN port 65535\r\n')（建议：看 ops/logs/resident_sync.log 的 run_sync 行；手工补：resident_sync.py run_sync gpu36；大文件走 gpu36-hk（FONG-QUICK），检查 tunnel_supervisor） [ISS-1105-001923-47bc]
+00:17 ⚠ 卡点（resident_sync.W40）：series10_v2 第0集 步骤同步【阻断】：笔记本 → gpu33 的 run 级产物同步失败（连续 2 拍）：RuntimeError('ssh gpu33 失败（rc=255，tries=5）：Connection closed by UNKNOWN port 65535\r\n')（建议：看 ops/logs/resident_sync.log 的 run_sync 行；手工补：resident_sync.py run_sync gpu33；大文件走 gpu33-hk（FONG-QUICK），检查 tunnel_supervisor） [ISS-1105-001734-1f66]
 16:54 🖼 首帧代选（L-142，系统代选·可改）：series10_v2 ep01-S9 → v13（契约分 0.8，过检后等了 88 分钟）
 13:38 总调度（WSL/Fable）：✅ cut D 入版 sv-20261104-02（bfc4e158，84 文件，七门绿，GitHub 已推）。按项目方令本会话停止全部调度，指挥权交 PowerShell 的 claude 会话；交接块在 STATE.md 顶部“⚡ 交接”。未做：deploy sv-20261104-02 两台（留给接手方）。
 13:32 总调度：cut D 收口——dry3（树 ec43e2f0，xdist N=4）六门绿、pytest 只剩 6 条时区红 + 1 条 imgfix；给进程设 TZ=JST-9 后 27 条时区红全绿 → 真 cut 已起（--id sv-20261104-02，TZ=JST-9，N=4）。GitHub 已补推 master e56e5e1 + 两标签。

@@ -127,7 +127,7 @@
    "base": "base-a"
   },
   "gpu36-vqa": {
-   "ssh_host": "gpu36",
+   "ssh_host": "gpu33",
    "forwards": [
     [
      8871,
@@ -139,7 +139,8 @@
    ],
    "via": "t",
    "base": "base-a",
-   "_note": "12:1x VQAGATE 报 8871 断：原挂在 gpu36-l0（出图道）上，l0 忙时探测超时 / ServerAlive 断线重建（14 次）连带断看图；拆成独立连接，互不牵连"
+   "_note": "12:1x VQAGATE 报 8871 断：原挂在 gpu36-l0（出图道）上，l0 忙时探测超时 / ServerAlive 断线重建（14 次）连带断看图；拆成独立连接，互不牵连",
+   "_psm_1105": "PS-MASTER 11-05 22:2x：L-194 看图集中到 gpu33:3（:8870）；gpu36 GPU1 已给出图 / 视频，gpu36 看图实例无卡（OOM / 等不到空闲卡）→ 笔记本 8871 改转 gpu33:8870（键名保留以免牵连引用）"
   },
   "gpu36-l1": {
    "ssh_host": "gpu36",
