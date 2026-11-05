@@ -352,6 +352,10 @@ def shot_frames(root: Path, run: str, ep: int) -> dict[int, dict]:
     if _no_last(run, ep, root):        # L-197 A：本集视频只用首帧（I2VA），尾帧不需要 → 全镜按“尾帧已过”处理，不挡视频
         for row in out.values():
             row["last"], row["last_na"] = True, True
+    else:                              # L-201：逐镜 I2VA 名单（video_mode.shots）里的镜同样不等尾帧
+        for n, row in out.items():
+            if _no_last(run, ep, root, shot=f"ep{int(ep):02d}-S{n}"):
+                row["last"], row["last_na"] = True, True
     return out
 
 
@@ -386,11 +390,11 @@ def check_image_qc(root, run, ep, shot=None):
     return _per_shot("出图检测", "checked", root, run, ep, shot, "首帧过契约 + Q9")
 
 
-def _no_last(run, ep, root) -> bool:
-    """L-197 A：config/compile/run_style.json runs.<run>.video_mode（ns_agent.video_mode.no_last，唯一入口）"""
+def _no_last(run, ep, root, shot=None) -> bool:
+    """L-197 A：config/compile/run_style.json runs.<run>.video_mode（ns_agent.video_mode.no_last，唯一入口）；L-201 shot = 逐镜名单"""
     _sys_paths(Path(root))
     from ns_agent import video_mode as VM
-    return VM.no_last(run, ep, Path(root))
+    return VM.no_last(run, ep, Path(root), shot=shot)
 
 
 def check_lasts(root, run, ep, shot=None):

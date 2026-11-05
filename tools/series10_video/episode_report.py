@@ -23,7 +23,7 @@ RUN_ID = RC.resolve()                    # MERGE-VID-O：按剧（night 传 NS_R
 VID = RC.vid_dir(RUN_ID)
 _SUB = "" if RC.is_legacy(RUN_ID) else f"{RUN_ID}/"     # 非 V1 的审阅文档 / 页面放本剧子目录，不覆盖 V1
 # K-REV-302：项目方授权的是“预览”不是“成片”。闸门全过的镜只能叫“预览·V6/V7 未测”，不得写“契约通过”
-LABEL = {"done": "预览", "best_effort": "未达契约（尽力版，不进合成）", "waiting_frame": "等首帧", "blocked": "阻断"}
+LABEL = {"done": "预览", "best_effort": "未达契约（尽力版，用尽采用最好一版进合成，L-196）", "waiting_frame": "等首帧", "blocked": "阻断"}
 CAUSE = {"身份偏离": "身份：首帧路线跟首帧身份走（K-REN-R04）/ Ref2VA 男角弱（K-REN-301）→ 阶梯 r24 → alt",
          "景别不符": "景别：Ref2VA / 两段式构图来自提示词（K-REV-301）→ 阶梯 i2v / 换 seed",
          "脸部泛红": "泛红：提示词脸红词 + 只给首帧随时间加重（lab_recipes 批 1）→ 阶梯 r24",

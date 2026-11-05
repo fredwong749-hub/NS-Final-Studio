@@ -21,13 +21,17 @@ def _cfg(root: Path | None = None) -> dict:
         return {}
 
 
-def no_last(run: str | None, ep: int | None, root: Path | None = None) -> bool:
-    """本剧本集是否走 I2VA（不出尾帧、视频不等尾帧）。NS_VIDEO_MODE=fl2va 环境变量可一键强制关"""
+def no_last(run: str | None, ep: int | None, root: Path | None = None, shot: str | None = None) -> bool:
+    """本剧本集是否走 I2VA（不出尾帧、视频不等尾帧）。NS_VIDEO_MODE=fl2va 环境变量可一键强制关。
+    L-201（项目方 11-06）：video_mode.shots = ["ep01-S1", ...] 逐镜改 I2VA（首尾帧差别不明显的镜头，运镜交给视频模型）；
+    传了 shot 且在名单里 = True（不看 from_episode）"""
     if not run or os.environ.get("NS_VIDEO_MODE") == "fl2va":
         return False
     vm = (((_cfg(root).get("runs") or {}).get(run) or {}).get("video_mode")) or {}
     if not isinstance(vm, dict) or vm.get("mode") != "i2va":
         return False
+    if shot and shot in set(map(str, vm.get("shots") or [])):
+        return True
     try:
         return int(ep or 0) >= int(vm.get("from_episode") or 1)
     except (TypeError, ValueError):

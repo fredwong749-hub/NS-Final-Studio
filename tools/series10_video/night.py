@@ -406,7 +406,7 @@ def assembly_sources(man: dict) -> tuple[dict, list[str]]:
     shots, bad = [], []
     for s in man.get("shots", []):
         if not s.get("proxy"):
-            continue                        # 尽力版 / 没出片：本来就不进合成（manifest excluded）
+            continue                        # 没出片 / 阻断：不进合成（manifest excluded）；尽力版有代理，照进（L-196，VID-LOOP 11-06）
         src = ROOT / str(s.get("source") or "")
         if not s.get("source") or not src.is_file():
             bad.append(f"{s['shot']} 原片不在本机（{s.get('source')}）")

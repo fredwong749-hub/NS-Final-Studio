@@ -22,10 +22,11 @@ from pathlib import Path
 import numpy as np
 
 from . import ROOT, ContractResult, Item, cfg
+from .blocking import hard_set
 
 TITLES = {"Q8": "林晚发色（相对身份参考与同帧肤色亮度）", "Q1": "身份余弦（ArcFace）", "Q1a": "逐人头发属性（发色 / 发长，对人物卡）", "Q2": "造型一致（服装 / 鞋 / 饰品区域相似度 + 颜色直方图）", "Q3": "景别符合度（脸高档位）",
           "Q4": "真人质感 / 油光", "Q5": "坏手 / 多肢 / 多人", "Q6": "文字 / 水印", "Q7": "场景一致",
-          "G1": "演员看镜头（只记录，ACTING R11-2）"}
+          "G1": "演员看镜头（ACTING R11-2；L-200 起 blocking_items 含 gaze 时挡）"}
 
 
 def gaze_item(image) -> tuple[str, str, dict]:
@@ -45,11 +46,14 @@ def gaze_item(image) -> tuple[str, str, dict]:
         return "untested", f"视线检测出错：{e}"[:160], {}
     ev = {"gaze": r.get("status"), "faces": [{k: f.get(k) for k in ("iod", "yaw_n", "pitch_n", "iris_dx", "gaze_x", "status")}
                                              for f in r.get("faces") or []][:4], "provisional": GZ.PROVISIONAL}
+    # L-200（项目方 11-06：看镜头 / 排排站 = 硬项）：gen_contract.json blocking_items 含 gaze 时 G1 不等 YuNet 标定（BLOCK）就判 fail；
+    # 脸太小 / 没检出 = na（不当未测挡人，看图 Q9 eye_contact / lineup 兜底）；blocking.apply 里看图真看过且没报视线缺陷 → G1 改只记录
+    l200 = "gaze" in (hard_set() or set())
     if r["status"] == "未测":
         return ("untested" if GZ.BLOCK else "na"), f"未测（{r.get('why')}）", ev
     bad = r["status"] == "疑似看镜头"
-    if GZ.BLOCK:
-        return ("fail" if bad else "pass"), r["status"], ev
+    if GZ.BLOCK or l200:
+        return ("fail" if bad else "pass"), (r["status"] + ("" if GZ.BLOCK else "（L-200 硬项；看图有结论时以看图为准）")), ev
     return "na", f"只记录（未标定，不阻断）：{r['status']}", {**ev, "would_fail": bad, "record_only": True}
 SIZE_BAND = {"极近特写": 0, "大特写": 0, "特写": 1, "近景": 2, "中近景": 2, "中景": 3, "中全景": 4, "全身": 5, "全景": 5,
              "远景": 6, "大远景": 6}

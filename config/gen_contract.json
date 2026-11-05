@@ -51,8 +51,8 @@
  ],
  "suffix_banned_note": "I7：旧头 / visual_bible fallback_suffix 里的“奶油般柔焦虚化”“浓郁饱和的暖色调电影调色”“色彩丰富艳丽”会让皮肤发油发糊（项目方批评“油光、假”）。剧本正文里写服装材质的“漆皮光泽”不在此列——只查系统后缀段（提示词最后一个“【场景】”段之后 / 预设后缀位置）与整句“油光落皮肤”类写法",
  "require_ref_lines": true,
- "blocking_items": ["Q1", "count", "text", "adult"],
- "_blocking_items": "L-196 项目方 11-05“我需要你全自动，不要检测那么多了”：首 / 尾帧闸门只有这些硬项挡（Q1 身份 / count 人数 / text 文字水印字幕 / adult 成人安全）；其余项（Q1a/Q1x/Q2–Q5/Q7/Q8/Q9 其余缺陷/Q10 其余/QB）照跑照记、不挡（services/agent/ns_agent/gen_contract/blocking.py）。删本键 = 旧口径",
+ "blocking_items": ["Q1", "count", "text", "adult", "gaze"],
+ "_blocking_items": "L-196 项目方 11-05“我需要你全自动，不要检测那么多了”：首 / 尾帧闸门只有这些硬项挡（Q1 身份 / count 人数 / text 文字水印字幕 / adult 成人安全）；其余项（Q1a/Q1x/Q2–Q5/Q7/Q8/Q9 其余缺陷/Q10 其余/QB）照跑照记、不挡（services/agent/ns_agent/gen_contract/blocking.py）。删本键 = 旧口径。L-200（项目方 11-06 看 ep01 总览：三人正面排排站看镜头被“用尽采用最好一版”采用）加 gaze 视线 / 排排站：画中任何人看镜头（Q9 eye_contact / G1 YuNet）或多人正面并排站成一排合影式（Q9 lineup，config/vqa.json checks.lineup）= 不过、换种子重出；看图与 G1 都有结论时以看图为准；这类版本不进 review_adopt / best_effort 采用（tools/autopilot/producer.py gaze_bad）",
  "image_thresholds": {
   "Q1_identity": {
    "lin_wan": 0.7,

@@ -134,13 +134,95 @@ def policy_ok(var: dict) -> bool:
     return why is None
 
 
+# VID-LOOP（11-06，ep01-S1 口型重出 51 次死循环）：K-EDT-805 的重出单每次合成都换新的 timeline 版本号，check_lip_redo 按
+# timeline@at 判“新请求”→ 每版都作废全部出片重出（ComfyUI 缓存，同 seed 出的还是同一条）→ 尽力 → 重合成 → 再开单。
+# 上限：config/post/director.json lip_redo_max_per_shot（默认 1，每镜最多作废重出一次）；到上限后请求只记账不作废，
+# 用尽采用最好一版（L-196）。重出视频改不了的兜底原因（no H3 audio：镜头本来就没进成片 / 没有 H3 音轨）一律不作废。
+DIRECTOR_CFG = ROOT / "config/post/director.json"
+LIP_REDO_CAP_DEFAULT = 1
+LIP_REDO_UNFIXABLE = ("no H3 audio",)
+LIP_REDO_RULE = "K-EDT-805"
+IN_FLIGHT = ("submitted", "fetched", "scoring")
+SETTLED = ("done", "best_effort", "blocked")
+
+
+def lip_redo_cap(cfg_path: Path | None = None) -> int:
+    try:
+        v = json.loads((cfg_path or DIRECTOR_CFG).read_text(encoding="utf-8")).get("lip_redo_max_per_shot", LIP_REDO_CAP_DEFAULT)
+        return max(0, int(v))
+    except (OSError, ValueError, TypeError):   # arch-ok: 配置读不到 / 写坏 = 默认上限 1（不回到无上限）
+        return LIP_REDO_CAP_DEFAULT
+
+
+def lip_redo_count(rec: dict) -> int:
+    """这一镜已用掉的口型重出次数：新记录看 lip_redo_n；旧记录（上限出现之前的 state）按已消费的请求键数算，
+    所以线上已被打回 51 次的镜一升级就是“已到上限”"""
+    n = rec.get("lip_redo_n")
+    return int(n) if n is not None else len(rec.get("lip_redo_applied") or [])
+
+
+def lip_unfixable(q: dict) -> bool:
+    return str(q.get("fallback_reason") or "") in LIP_REDO_UNFIXABLE
+
+
+def in_flight(rec: dict) -> bool:
+    return any(x.get("state") in IN_FLIGHT for x in rec.get("renders") or [])
+
+
+def restore_lip_superseded(rec: dict, first_frame: str | None) -> int:
+    """口型重出作废（rule K-EDT-805）的版本里，首帧和现首帧一致的拿回 renders（按 变体+seed 去重，取最新一条；
+    renders 里已有的不重复）→ 和现有版本一起挑最好的（L-196）。返回拿回的条数"""
+    sup = rec.get("superseded") or []
+    if not first_frame:          # 现首帧不明 → 不拿（别把旧首帧的版本混进来）
+        return 0
+    pick: dict[tuple, dict] = {}
+    keep = []
+    for x in sup:
+        if x.get("rule") == LIP_REDO_RULE and x.get("state") == "scored" and x.get("file") and x.get("first_frame") == first_frame:
+            k = (x.get("variant"), x.get("seed"))
+            if k not in pick or float(x.get("t_done") or 0) >= float(pick[k].get("t_done") or 0):
+                pick[k] = x
+        else:
+            keep.append(x)
+    have = {(x.get("variant"), x.get("seed")) for x in rec.get("renders") or []}
+    back = []
+    for k, x in pick.items():
+        if k in have:
+            continue
+        y = {kk: v for kk, v in x.items() if kk not in ("superseded_at", "why", "rule")}
+        y["restored_from_lip_redo"] = True
+        back.append(y)
+    if not back and len(keep) == len(sup):
+        return 0
+    rec.setdefault("renders", []).extend(sorted(back, key=lambda x: float(x.get("t_done") or 0)))
+    rec["superseded"] = keep
+    return len(back)
+
+
+def settle_rec(rec: dict) -> str:
+    """没有在出 / 在打分的版本时定下这一镜（after_score 的收尾；L-196 用尽采用最好一版）：有过门的 → done 取 penalty 最小；
+    只有没过门的 → best_effort 取 penalty 最小；一条打分都没有 → blocked。返回新状态"""
+    scored = [x for x in rec.get("renders") or [] if x.get("state") == "scored" and not (x.get("score") or {}).get("error")]
+    passed = [x for x in scored if (x["score"].get("gate") or {}).get("pass")]
+    pool = passed or scored
+    if pool:
+        best = min(pool, key=lambda x: x["score"].get("penalty", 9))
+        rec.update(status="done" if passed else "best_effort", chosen=best["variant"])
+    else:
+        rec.update(status="blocked")
+    return rec["status"]
+
+
 def first_take_first(todo: list, shots: dict, recs: dict, ctrl: dict | None = None) -> list:
     """W46（总调度 05:3x 冲刺规则）：每镜先各出 1 条，全部有片之前不出第 2 变体——作业里还有“一条都没出过”的镜
     （有变体、没完结、renders 为空）→ 本轮只派这些镜的第一条，失败镜的重试 / 换变体等它们都起跑后再排。
     control_<host>.json "first_take_first": false 关掉（恢复原来按集、镜顺序逐镜重试）"""
     if (ctrl or {}).get("first_take_first", True) is False:
         return todo
-    fresh = {sid for sid, sh in shots.items() if sh.get("variants") and not (recs.get(sid) or {}).get("renders")
+    # VID-LOOP（11-06）：只算本轮真能派出的“一条都没出过”的镜（在 todo 里）。以前按“有变体 + 没出过”算——变体全被政策 /
+    # preflight 挡住（next_variant 永远 None）的镜也算“新鲜”，todo 被它们过滤成空，别的镜的重试永远排不上（整台空转）
+    in_todo = {sid for sid, _v in todo}
+    fresh = {sid for sid in in_todo if not (recs.get(sid) or {}).get("renders")
              and (recs.get(sid) or {}).get("status") not in ("done", "best_effort", "blocked")}
     if not fresh:
         return todo
@@ -366,6 +448,7 @@ class Runner:
             if not validate:
                 self.check_stale(sid, sh, r)
                 self.check_lip_redo(sid, r)
+                self.repair_idle(sid, sh, r)
             if r["status"] in ("done", "best_effort", "blocked"):
                 continue
             if not sh.get("variants"):           # 无可出变体（如无人露脸镜首帧未过契约）→ 等资料，不出
@@ -396,23 +479,78 @@ class Runner:
         if not new or any(x.get("state") in ("submitted", "scoring") for x in r["renders"]):
             return
         q = new[-1]
+        keys = sorted(done | {f"{x.get('timeline')}@{x.get('at')}" for x in new})
+        n, cap = lip_redo_count(r), lip_redo_cap()
+        # VID-LOOP（11-06）：重出视频改不了的兜底原因（no H3 audio）→ 只记账，不作废（镜头没进成片 / 没音轨，重出同一条也一样）
+        if lip_unfixable(q) and not q.get("variants"):
+            with self.lock:
+                r["lip_redo_applied"] = keys
+                r["lip_redo_n"] = n            # 记账不计次（lip_redo_count 对旧记录按键数算，这里要写死）
+                r["lip_redo_skipped"] = int(r.get("lip_redo_skipped") or 0) + len(new)
+            log(self.host, "LIP_REDO_SKIP", sid, q.get("fallback_reason"), "重出视频改不了，不作废", q.get("timeline"))
+            self.event("lip_redo_skip", shot=sid, fallback_reason=q.get("fallback_reason"), timeline=q.get("timeline"), rule=LIP_REDO_RULE)
+            return
+        if n >= cap:                     # 每镜最多作废重出 cap 次（config/post/director.json lip_redo_max_per_shot）；到上限只记账
+            with self.lock:
+                r["lip_redo_applied"] = keys
+                r["lip_redo_n"] = n
+                r["lip_redo_capped"] = True
+            log(self.host, "LIP_REDO_CAPPED", sid, f"已重出 {n}/{cap} 次，不再作废（L-196 用尽采用最好一版）", q.get("timeline"))
+            self.event("lip_redo_capped", shot=sid, n=n, cap=cap, timeline=q.get("timeline"), rule=LIP_REDO_RULE)
+            return
         if q.get("variants"):            # 加变体再试（不作废已有出片，最后在全部出片里挑最好的；L-124 ep01-S4）
             with self.lock:
                 r["force_queue"] = [v for v in q["variants"] if v not in {x["variant"] for x in r["renders"]}]
                 r["status"] = "pending"
-                r["lip_redo_applied"] = sorted(done | {f"{x.get('timeline')}@{x.get('at')}" for x in new})
+                r["lip_redo_applied"] = keys
+                r["lip_redo_n"] = n + 1
             log(self.host, "EXTRA_VARIANTS", sid, r["force_queue"], q.get("reason"))
             self.event("extra_variants", shot=sid, variants=r["force_queue"], reason=q.get("reason"))
             return
         with self.lock:
-            r.setdefault("superseded", []).extend({**x, "superseded_at": time.time(), "why": q.get("reason"), "rule": "K-EDT-805"}
+            r.setdefault("superseded", []).extend({**x, "superseded_at": time.time(), "why": q.get("reason"), "rule": LIP_REDO_RULE}
                                                   for x in r["renders"])
             r["renders"] = []
             r["status"] = "pending"
             r["chosen"] = None
-            r["lip_redo_applied"] = sorted(done | {f"{x.get('timeline')}@{x.get('at')}" for x in new})
-        log(self.host, "LIP_REDO", sid, q.get("reason"), q.get("timeline"))
-        self.event("lip_redo", shot=sid, reason=q.get("reason"), timeline=q.get("timeline"), rule="K-EDT-805")
+            r["lip_redo_applied"] = keys
+            r["lip_redo_n"] = n + 1
+        log(self.host, "LIP_REDO", sid, q.get("reason"), q.get("timeline"), f"第 {n + 1}/{cap} 次")
+        self.event("lip_redo", shot=sid, reason=q.get("reason"), timeline=q.get("timeline"), rule=LIP_REDO_RULE)
+
+    def repair_idle(self, sid, sh, r):
+        """VID-LOOP（11-06）状态修复：没有在出 / 在打分的版本却停在 rendering / retry / pending 的镜不能一直挂着——
+        ① 口型重出已到上限 → 作废的同首帧版本拿回来一起挑（L-196）；② 已有出片且阶梯用尽（next_variant 为 None）→ 当场定下
+        （done / best_effort / blocked，与 after_score 同一条路）。还有变体能出的照常派，不在这里动"""
+        if r["status"] in SETTLED or r["status"] == "waiting_frame" or in_flight(r):
+            return
+        if r.get("lip_redo_capped") and sh.get("first_frame"):   # 只在“又来了请求但已到上限”之后拿回；允许的那一次作废照常重出
+            with self.lock:
+                n = restore_lip_superseded(r, sh.get("first_frame"))
+            if n:
+                log(self.host, "LIP_REDO_RESTORE", sid, f"口型重出到上限，拿回 {n} 条同首帧的作废版本一起挑")
+                self.event("lip_redo_restore", shot=sid, n=n, rule=LIP_REDO_RULE)
+        if r["renders"] and next_variant(sh, r) is None:
+            with self.lock:
+                st = settle_rec(r)
+            log(self.host, "SETTLE_IDLE", sid, st, r.get("chosen"), f"renders={len(r['renders'])}（没有在出的版本、阶梯用尽）")
+            self.event("shot_done", shot=sid, chosen=r.get("chosen"), status=st, renders=len(r["renders"]), why="settle_idle")
+
+    def repair_orphans(self, shots):
+        """VID-LOOP（11-06）：state 里有、本机作业里已没有的镜（分片抢活 / 控制文件 eps 改了之后换了主机）停在 rendering / retry
+        且没有在出的版本 → 用已有打分定下（done / best_effort），没有打分的回 pending。分片的整集视图按 jobs.json 的 host 取记录，
+        这里只是不让本机记录永远挂在 rendering（ep01-S1 11-06 06:14 起被 gpu33 领走后 gpu36 记录空挂）"""
+        for sid, r in list(self.st["shots"].items()):
+            if sid in shots or r.get("status") not in ("rendering", "retry") or in_flight(r):
+                continue
+            with self.lock:
+                if any(x.get("state") == "scored" for x in r.get("renders") or []):
+                    st = settle_rec(r)
+                else:
+                    r["status"], st = "pending", "pending"
+                r["orphan_settled"] = {"t": time.time(), "status": st}
+            log(self.host, "ORPHAN_SETTLED", sid, st, r.get("chosen"), "镜已不在本机作业里，记录不再挂在 rendering")
+            self.event("orphan_settled", shot=sid, status=st, chosen=r.get("chosen"))
 
     def check_stale(self, sid, sh, r):
         """首帧换版或被撤（postflight 不再 ok）→ 旧片作废：挪进 superseded，状态回到待出 / 等首帧（总调度 11-01：
@@ -665,18 +803,16 @@ class Runner:
             return
         passed = [x for x in scored if (x["score"].get("gate") or {}).get("pass")]
         if passed:
-            best = min(passed, key=lambda x: x["score"].get("penalty", 9))
-            r.update(status="done", chosen=best["variant"])
-            self.event("shot_done", shot=sid, chosen=best["variant"], renders=len(r["renders"]))
-            log(self.host, "SHOT_PASS", sid, best["variant"], f"renders={len(r['renders'])}")
+            settle_rec(r)
+            self.event("shot_done", shot=sid, chosen=r["chosen"], renders=len(r["renders"]))
+            log(self.host, "SHOT_PASS", sid, r["chosen"], f"renders={len(r['renders'])}")
             return
         if next_variant(sh, r) is None:
-            if scored:
-                best = min(scored, key=lambda x: x["score"].get("penalty", 9))
-                r.update(status="best_effort", chosen=best["variant"])
+            st = settle_rec(r)     # 用尽采用最好一版（L-196）/ 一条打分都没有 → blocked
+            if st == "best_effort":
+                best = next(x for x in scored if x["variant"] == r["chosen"])
                 log(self.host, "SHOT_BEST_EFFORT", sid, best["variant"], best["score"].get("gate", {}).get("fails"))
             else:
-                r.update(status="blocked")
                 log(self.host, "SHOT_BLOCKED", sid)
             self.event("shot_done", shot=sid, chosen=r.get("chosen"), status=r["status"], renders=len(r["renders"]))
         else:
@@ -705,6 +841,8 @@ class Runner:
             try:
                 self.poll(shots)
                 self.collect(shots)
+                if c.get("mode") != "validate":
+                    self.repair_orphans(shots)
                 self.submit_round(shots, c)
             except Exception as e:  # noqa: BLE001
                 log(self.host, "LOOP_ERR", repr(e)[:300])
@@ -759,9 +897,13 @@ def proxies(host, ep):
             continue
         x = next((x for x in r["renders"] if x["variant"] == r.get("chosen") and x.get("file")), None)
         ent = {"shot": sid, "index": int(sid.split("-S")[1]), "status": r.get("status"), "chosen": r.get("chosen")}
-        if x and r.get("status") != "done":       # 尽力 / 未达契约：不进合成，只在审阅页“未达契约”组里出现
-            ent["excluded"] = "未达契约（尽力版不进合成，ITERATION_PROTOCOL §3）"
+        # VID-LOOP（11-06，L-196 用尽采用最好一版）：尽力版（best_effort 的 chosen）也进合成，manifest 标 best_effort；
+        # 以前只进 done → 尽力镜在成片里是黑场 / 静帧占位（ep01 S3=black/none），还被当“没 H3 音轨”开口型重出单（S1 死循环）
+        if x and r.get("status") not in ("done", "best_effort"):
+            ent["excluded"] = f"未达契约（状态 {r.get('status')}，不进合成）"
             x = None
+        elif x and r.get("status") == "best_effort":
+            ent["best_effort"] = "尽力版：阶梯用尽采用最好一版（L-196），进合成；闸门不过项见 gate"
         if x:
             dst = out_dir / f"{sid}.mp4"
             subprocess.run([FFMPEG[host] + "/ffmpeg", "-v", "error", "-y", "-threads", "4", "-i", str(ROOT / x["file"]),

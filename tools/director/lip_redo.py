@@ -14,7 +14,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 REQ = ROOT / "data" / "director" / "redo_requests.json"
+CFG = ROOT / "config" / "post" / "director.json"
 REASON = "口型与成片声音不一致（画内对白 H3 原声回听不合格，TTS 兜底）"
+CAP_DEFAULT = 1
+
+
+def cap(cfg_path: Path | None = None) -> int:
+    """每镜最多开几张口型重出单（config/post/director.json lip_redo_max_per_shot，默认 1；与 vidgen.lip_redo_cap 同一键）。
+    VID-LOOP 11-06：每次重合成 timeline 版本号都变，以前每版都追加一张“新”单 → ep01-S1 51 张、作废重出 51 次"""
+    try:
+        return max(0, int(json.loads((cfg_path or CFG).read_text(encoding="utf-8")).get("lip_redo_max_per_shot", CAP_DEFAULT)))
+    except (OSError, ValueError, TypeError):   # arch-ok: 配置读不到 = 默认上限 1
+        return CAP_DEFAULT
 
 
 def blocking(tl: dict) -> list[dict]:
@@ -39,9 +50,15 @@ def record(tl_path: Path) -> list[dict]:
     cur = json.loads(REQ.read_text(encoding="utf-8")) if REQ.exists() else {"_doc": __doc__.strip().splitlines()[0], "requests": []}
     seen = {(r["shot"], r["timeline"]) for r in cur["requests"]}
     rel = str(tl_path.resolve().relative_to(ROOT)).replace("\\", "/") if tl_path.resolve().is_relative_to(ROOT) else str(tl_path)
+    limit = cap()
     for r in rows:
-        if (r["shot"], rel) not in seen:
-            cur["requests"].append({**r, "timeline": rel, "at": time.strftime("%Y-%m-%d %H:%M:%S"), "status": "pending"})
+        if (r["shot"], rel) in seen:
+            continue
+        prior = sum(1 for x in cur["requests"] if x.get("shot") == r["shot"])
+        if prior >= limit:     # 已到上限：不再追加同一镜的单（vidgen 那边也不会再作废）；返回行里标 capped 给 finish / night 看
+            r["capped"] = prior
+            continue
+        cur["requests"].append({**r, "timeline": rel, "at": time.strftime("%Y-%m-%d %H:%M:%S"), "status": "pending"})
     REQ.write_text(json.dumps(cur, ensure_ascii=False, indent=1), encoding="utf-8")
     return rows
 

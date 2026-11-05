@@ -860,13 +860,27 @@ checks:
     op: eq
     value: false
   - id: D-V2-196
-    decision: L-196（项目方 11-05 20:2x “我需要你全自动，不要检测那么多了”：首 / 尾帧闸门只留 Q1 身份、人数、无字幕水印、成人安全；Q9 / QB / Q10 只记录不挡）
-    title: gen_contract.json blocking_items = [Q1, count, text, adult]
+    decision: L-196（项目方 11-05 20:2x “我需要你全自动，不要检测那么多了”：首 / 尾帧闸门只留 Q1 身份、人数、无字幕水印、成人安全；Q9 / QB / Q10 只记录不挡）。⤴ L-200（11-06 07:3x）修订硬项清单：加 gaze 视线 / 排排站
+    title: gen_contract.json blocking_items = [Q1, count, text, adult, gaze]
     type: json
     file: config/gen_contract.json
     path: [blocking_items]
     op: eq
-    value: [Q1, count, text, adult]
+    value: [Q1, count, text, adult, gaze]
+  - id: D-V2-200
+    decision: L-200（项目方 11-06 07:3x 看 ep01 总览选 A：首帧硬闸加“视线 / 排排站”——任何人看镜头、或多人正面并排站成一排合影式 = 不过、换种子重出，不能被“用尽采用最好一版”采用）
+    title: vqa.json checks.lineup.blocking = true（排排站由本地看图判，同一次调用多一项）
+    type: json
+    file: config/vqa.json
+    path: [checks, lineup, blocking]
+    op: eq
+    value: true
+  - id: D-V2-200b
+    decision: L-200（看镜头 / 排排站的版本不进 review_adopt / best_effort 采用）
+    title: producer.py 有 gaze_bad 且 safe_take 先查它
+    type: grep_present
+    pattern: 'def gaze_bad'
+    paths: [tools/autopilot/producer.py]
   - id: D-V2-196b
     decision: L-196（QB 共用验收不再挡：不跑，省整张再看一遍）
     title: producer.json accept.run_qb = false

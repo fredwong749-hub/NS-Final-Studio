@@ -388,7 +388,7 @@ def recipe_choice() -> dict:
 
 def _no_last(spec) -> bool:
     from ns_agent import video_mode as VM
-    return VM.no_last(RUN_ID, getattr(spec, "episode", None), ROOT)
+    return VM.no_last(RUN_ID, getattr(spec, "episode", None), ROOT, shot=getattr(spec, "id", None))
 
 
 def compile_variant(spec, reg, rid, attempt, variant, frames_of, *, seed=None, extra=None):

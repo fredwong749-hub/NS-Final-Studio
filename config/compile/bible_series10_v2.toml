@@ -56,7 +56,8 @@ negative = "裸露、走光、低俗姿势"
 first_frame = ["triggers", "character_dna", "shot_size_angle", "wardrobe_look", "pose_expression_start",
                "scene", "lighting", "script_img_verbatim", "materials", "shot_rules", "director_boost",
                "lens", "style_suffix"]
-last_frame_keep = "图1是本镜头的首帧画面。保持图1的场景、机位、景别、光线、人物身份、发型与服装完全不变（同一场景同一人物同一服装），只把画面改为这个镜头动作结束时的瞬间："
+# L-201（项目方 11-06：S1/S2 首尾帧几乎一样）：尾帧按分镜“落幅”出——只锁人物身份、发型、服装、场景与光线；机位与景别跟落幅走（推镜收紧、拉镜放宽、急推改到落幅角度）
+last_frame_keep = "图1是本镜头的首帧画面。保持图1的人物身份、发型、服装、场景与光线不变（同一场景同一人物同一服装）；机位与景别按下面写的镜头结束状态调整（推镜就收紧、拉镜就放宽、换角度就转到结束时的角度），把画面改为这个镜头动作结束时的瞬间："
 script_verbatim = true
 director_boost = "owner_only"
 

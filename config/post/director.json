@@ -10,6 +10,8 @@
   "post_pass": true,
   "film_score": true,
   "lip_redo": true,
+  "lip_redo_max_per_shot": 1,
+  "_lip_redo_max_per_shot": "VID-LOOP 11-06：每镜最多作废重出几次（K-EDT-805 口型重出单）。每次重合成 timeline 版本号都变、每版都开新单 → ep01-S1 被作废重出 51 次（ComfyUI 同 seed 缓存，出的还是同一条）。到上限后 lip_redo.record 不再追加单、vidgen.check_lip_redo 只记账不作废，用尽采用最好一版（L-196）；fallback_reason = no H3 audio（镜头没进成片 / 没音轨，重出改不了）一律不作废。0 = 关掉作废重出",
   "shot_music_off": true,
   "_shot_music_off": "K-EDT-820（总调度 13:1x 派，项目方：按镜头配乐断层、不连贯）：合成时 H3 轨只留画内对白句（h3_music=dialogue_only），Pika 提示词 non_diegetic_music 写 N/A；配乐只用集级 BGM（剪辑锁定后按整集情绪曲线出），场景底噪由 post_pass 铺",
   "camera_norm": true,

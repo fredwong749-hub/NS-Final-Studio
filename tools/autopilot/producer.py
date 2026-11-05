@@ -1421,15 +1421,33 @@ def q19_clean(pf: dict) -> bool:
     return True
 
 
+GAZE_DEFECTS = ("eye_contact", "lineup")      # L-200：看图里的“看镜头 / 排排站”（与 ns_agent.gen_contract.blocking.GAZE_DEFECTS 同名单）
+
+
+def gaze_bad(pf: dict) -> bool:
+    """L-200（项目方 11-06：ep01-S1 三人正面排排站看镜头被“用尽采用最好一版”采用）：这一版有人看镜头 / 排排站 → 任何采用路径都不收。
+    Q9 看图报 eye_contact / lineup（不论 enforce 开关，asset 阶段 ignored_defects 的除外）；或 G1（YuNet）判 fail 且没被看图否掉（record_only）"""
+    for i in (pf or {}).get("items") or []:
+        ev = i.get("evidence") or {}
+        if i.get("id") == "Q9" and (set(ev.get("defects") or []) - set(ev.get("ignored_defects") or [])) & set(GAZE_DEFECTS):
+            return True
+        if i.get("id") == "G1" and i.get("status") == "fail" and not i.get("record_only"):
+            return True
+    return False
+
+
 def review_pick(td: dict, stage: str, ns: set | None = None) -> int | None:
-    """L-183：这一阶段（只看 ns 里的版本，None = 全部）Q1–Q9 全过、没被驳回 / 标坏的版本里 score_key 最高的一版"""
+    """L-183：这一阶段（只看 ns 里的版本，None = 全部）Q1–Q9 全过、没被驳回 / 标坏的版本里 score_key 最高的一版（L-200：看镜头 / 排排站的不算）"""
     c = [t for t in td.get("takes") or [] if t.get("stage") == stage and (ns is None or t.get("n") in ns)
-         and not t.get("bad") and not t.get("master_reject") and q19_clean(take_pf(t))]
+         and not t.get("bad") and not t.get("master_reject") and q19_clean(take_pf(t)) and not gaze_bad(take_pf(t))]
     return max(c, key=lambda t: score_key(take_pf(t)))["n"] if c else None
 
 
 def safe_take(pf: dict) -> bool:
-    """L-196 兜底采用：没有成人安全 / 文字水印硬项不过（身份 / 人数不过的最好一版允许采用，标 review_needed）"""
+    """L-196 兜底采用：没有成人安全 / 文字水印硬项不过（身份 / 人数不过的最好一版允许采用，标 review_needed）；
+    L-200：看镜头 / 排排站（gaze_bad）也不许兜底采用——全部版本都这样就停在 best_effort、不采用"""
+    if gaze_bad(pf):
+        return False
     for i in (pf or {}).get("items") or []:
         if i.get("status") in ("fail", "untested") and i.get("id") in ("Q6", "Q9", "QB") and not i.get("record_only"):
             ev = i.get("evidence") or {}
@@ -1457,7 +1475,9 @@ def review_adopt(paths: "Paths", oid: str, n: int | None = None, by: str = "L-18
     if n is None:
         n = review_pick(td, stage, ns) or (review_pick_relaxed(td, stage, ns) if relaxed else None)
     t = next((x for x in td.get("takes") or [] if x.get("stage") == stage and x.get("n") == n), None) if n else None
-    if t is None or not (q19_clean(take_pf(t)) or (relaxed and safe_take(take_pf(t)))):
+    if t is None or gaze_bad(take_pf(t)) or not (q19_clean(take_pf(t)) or (relaxed and safe_take(take_pf(t)))):
+        if t is not None and gaze_bad(take_pf(t)):
+            log_event(paths, "review_adopt_refused", obj=oid, take=n, by=by, rule="L-200", counted=False, note="看镜头 / 排排站的版本不采用")
         return None
     note = {"by": by, "at": iso(), "rule": "L-183", "why": "尽力用尽，取 Q1–Q9 全过里分数最高的一版，待项目方复核"}
 
@@ -1616,7 +1636,7 @@ def derive(w: World, ledger: dict, leases: dict, run_summary: dict | None = None
             lo = _frame_obj("last", "last", sid, n, td, fv, ledger, leases, canvas, n in fv2_eps, deps_ok=fo["status"] == "passed",
                             first=fo, stale=stl.get("last"))
             fo = first_input_changed(w.p, sid, fo, ledger.get(f"first:{sid}") or {})   # K-OPS-E24：重新导入后作业变了 → 重出
-            if _VM.no_last(w.p.run_id, n, w.p.root):  # L-197 A：本集视频只用首帧（I2VA）→ 尾帧对象 = 不适用（不创建 / 不派 / 不评分 / 不挡视频）
+            if _VM.no_last(w.p.run_id, n, w.p.root, shot=sid):  # L-197 A：本集视频只用首帧（I2VA）→ 尾帧对象 = 不适用（不创建 / 不派 / 不评分 / 不挡视频）
                 lo = {**obj("last", sid, ep=n, shot=sid), "status": "passed", "na": True, "i2va_no_last": True,
                       "reason": "L-197：视频只用首帧（I2VA），不出尾帧", "attempts": 0, "max_attempts": None}
             lo = last_consistent(td, fo, lo)          # K-OPS-E13：尾帧不能比首帧旧、首帧没过尾帧不能算过

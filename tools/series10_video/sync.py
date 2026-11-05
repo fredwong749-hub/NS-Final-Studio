@@ -86,7 +86,7 @@ def chosen_clips(host: str) -> list[str]:
         return []
     out = []
     for sid, r in sorted((st.get("shots") or {}).items(), key=lambda kv: (kv[0][:4], int(kv[0].split("-S")[1]))):
-        if r.get("status") != "done" or not r.get("chosen"):   # 尽力版不进合成（manifest excluded），不占慢链路
+        if r.get("status") not in ("done", "best_effort") or not r.get("chosen"):   # VID-LOOP 11-06：尽力版也进合成（L-196），原片同样要拉回
             continue
         x = next((x for x in r.get("renders") or [] if x.get("variant") == r["chosen"] and x.get("file")), None)
         f = (x or {}).get("file") or ""

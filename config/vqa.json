@@ -202,6 +202,14 @@
    "severity": "soft",
    "blocking": false
   },
+  "lineup": {
+   "zh": "排排站 / 合影式：两人及以上正面并排站成一排朝向镜头",
+   "contract": "Q9",
+   "video": "V9",
+   "severity": "hard",
+   "blocking": true,
+   "_doc": "L-200（项目方 11-06 07:3x 看 ep01 总览：S1 三人正面排排站看镜头被采用）：与 eye_contact 同属 gen_contract blocking_items 的 gaze 硬项，命中 = 换种子重出、不得被“用尽采用最好一版”采用；单人 / 局部 / 物件特写写 na。同一次看图调用多一项，不另起模型调用"
+  },
   "item_on_wrong_person": {
    "zh": "单品串人：一个角色的标志性单品（指甲 / 手套 / 首饰等，参考板或原文写明属于谁）出现在另一个角色身上",
    "contract": "Q2",
