@@ -223,7 +223,7 @@ class CliRunner:
         return rep
 
     def cut(self, tree: str, dry: bool) -> dict:
-        env = {"NS_CUT_PYTEST_N": str(int(self.cfg.get("pytest_n") or 4)),
+        env = {"TZ": "JST-9", "NS_CUT_PYTEST_N": str(int(self.cfg.get("pytest_n") or 4)),
                "NS_CUT_XDIST_STALL_S": str(float(self.cfg.get("xdist_stall_min") or 10) * 60)}
         return self._run(["cut", "--tree", tree, *(["--dry"] if dry else [])], int(self.cfg.get("cut_timeout_s") or 4 * 3600), env)
 

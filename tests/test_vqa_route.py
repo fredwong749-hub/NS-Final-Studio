@@ -183,9 +183,9 @@ def test_balance_all_busy_untested_and_off_by_default(env, monkeypatch):
     assert C._balance_cands("http://127.0.0.1:8870") == []
 
 
-def test_balance_cfg_defaults_off():
+def test_balance_cfg_state():   # 11-05 CODER-I：gpu33:3 本机看图实例健康（:8870 loaded，文本 0.5 s）→ route.balance 开；Q10 parallel 仍关
     d = json.loads((ROOT / "config" / "vqa.json").read_text(encoding="utf-8"))["route"]
-    assert d["balance"] is False and d["extra_local_ports"] == []
+    assert d["balance"] is True and d["extra_local_ports"] == [] and d["balance_lan"] is True
     g = json.loads((ROOT / "config" / "gen_contract.json").read_text(encoding="utf-8"))
     assert g["image_thresholds"]["Q10_accept"]["parallel"] is False
 

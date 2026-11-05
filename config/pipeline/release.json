@@ -6,7 +6,8 @@
  "_pytest_n": "L-162：xdist 12 worker 在本机僵死两次 → release_tick 跑 cut 时设 NS_CUT_PYTEST_N=pytest_n（手工 cut 不受影响）",
  "xdist_stall_min": 10,
  "_xdist_stall_min": "cut 定向 pytest：这么多分钟内整棵进程树 CPU 合计 < 1 s = 僵死 → 杀掉，以 max(1, N/2) 重试一次，记进 cut 报告 xdist_heal",
- "gates_on": "gpu33",
+ "gates_on": "local",
+ "_trigger": "触发一次发版 = 写 data/system_versions/release_request.json（schema nsfs.release_request/1）：{\"schema\":\"nsfs.release_request/1\",\"list\":\"docs/system_versions/LIST_cutX.txt\",\"reviews\":[{\"group\":\"G2\",\"verdict\":\"可入\",\"p0\":[]},…G2–G7 各一组],\"requested_by\":\"谁\",\"deploy\":true,\"handover\":false}；resident_sync 每 every_s 拍 release_tick.tick() 拼树 → cut --dry → cut → deploy --verify，结果 release_result.json；同一份请求（内容 sha）只跑一次，改内容才再跑。L-190 项目方授权：发版 / 部署交本流水线。注意：tick 跑在 resident_sync 里，那个进程不在就不会发——手工入口仍是 ops/psmaster/cut_deploy_*.sh。",
  "gates_on_fallback": "local",
  "_gates_on": "W45（总调度 11-04 定 B）：cut 七门默认在 gpu33 跑（tools/qa/remote_gates.py，结果与耗时拉回 cut 报告；commit/tag/push 仍在笔记本）。服务器基础设施失败 → gates_on_fallback=local 退回本机并在报告记 gates_on_fallback（fail = 失败关闭）。临时改回：cut --on local 或 NS_CUT_ON=local。说明 docs/master/handover/CUT_ON_SERVER.md",
  "hosts": [

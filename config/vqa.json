@@ -293,7 +293,7 @@
   "poll_s": 10,
   "health_timeout_s": 3,
   "timeouts": {"image": 240, "video": 300, "ask": 180},
-  "balance": false, "extra_local_ports": [], "balance_lan": true, "max_wait_s": null,
+  "balance": true, "extra_local_ports": [], "balance_lan": true, "max_wait_s": null,
   "_b1": "B1 检测提速（11-05，默认全关）：balance=true 且在服务器上（OFFLINE_SELF）时，在『本机实例（127.0.0.1:主端口 + extra_local_ports）+ gpu36 内网入口』里挑排队最少的（并列本机优先），全忙才排队等；gpu33 起了本机看图实例（tools/vqa/start_gpu33_vqa.sh）后打开。balance_lan=false = 只用本机实例（不跨内网）。max_wait_s = 单次看图请求最长等待（秒，null = 由调用方 wait_s 定，现 900）；超时仍是 untested 不判 fail。HTTP 超时仍按 timeouts[kind]×(排队数+1)",
   "log": "data/vqa/route.jsonl", "_w38": "W38 11-04：ask 60→180 s——gpu33 producer 同时 3 打分 + 3 重打分共用 gpu36 8870，Q10 提示词核对（ask，带图）在服务端排队超 60 s → Q10 untested → score_infra 循环（ep01 S7 t3 02:43）；超时仍是 untested 不判 fail"
  },
