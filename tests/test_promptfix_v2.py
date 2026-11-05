@@ -455,7 +455,13 @@ def test_l130_segment_marker_never_in_prompt(v2_env, monkeypatch):
     # W13 CUTB-PREP 11-03：数据态陈旧（不是放宽）。04:50 重导后导入稿 ep01-S8 的 scene_detail 本身带【现实段】，原断言拿“原始”
     # scene_detail 去 prompt 里找，等于要求标记进提示词，与本测试守的 L-130 自相矛盾。改为比去标记后的场景细节（编译器同一函数）。
     from ns_agent.gen_contract import style as ST
-    assert "本镜场景：" in job["prompt"] and (ST.strip_segment_marks(sh.scene_detail) or "").strip() in job["prompt"]   # 场景细节保留，只去标记
+    # 11-05 series10_v2 开 prompt_template v2（项目方“基于最新架构和规则重跑 ep01”）：v2 场景块只留本镜陈设、不带“本镜场景：”原文；
+    # “场景细节原文保留”只对 v1 编译成立 → 用 v1 强制复核，v2 只守“标记不进提示词”（下方）
+    from ns_agent import prompt_template_v2 as PT2
+    with PT2.force(image="v1"):
+        job_v1 = FJ.build_first(V2, ep, sh2, sc.globals)
+    assert "本镜场景：" in job_v1["prompt"] and (ST.strip_segment_marks(sh.scene_detail) or "").strip() in job_v1["prompt"]   # 场景细节保留，只去标记
+    assert mk not in job_v1["prompt"] and "【现实段】" not in job_v1["prompt"]
     assert "【现实段】" not in job["prompt"]
     for k in ("prompt", "last_prompt"):
         assert mk not in (job.get(k) or ""), k

@@ -37,8 +37,8 @@ items:
     status: code_reads
     owner: PRODUCER（不在岗，经总调度派；DEBUG-RSI 只有 K-OPS-E05 授权）
   redo_ladder:
-    value: {heavy_plan: [frame_v9_heavy, frame_v9_heavy], on_input_change: reset_not_counted, on_exhausted: best_effort_plus_sentinel_ticket, hold_waits: true}
-    source: 总调度 11-02 02:4x（G1：取消“等总调度定”，c + b 写成代码）；K-OPS-E09
+    value: {heavy_plan: [frame_v9_heavy, frame_v9_heavy], on_input_change: reset_not_counted, on_exhausted: best_effort_plus_sentinel_ticket, hold_waits: true, skip_heavy_on: [Q1]}
+    source: 总调度 11-02 02:4x（G1：取消“等总调度定”，c + b 写成代码）；K-OPS-E09。skip_heavy_on（AUDIT-PERF 11-05，默认 [] = 原口径）：最后一次不过项含其中任一（如 [Q1]）→ 不排重档、直接标尽力版——重档只换写实预设不改脸约束，11-04/05 日志 26 单重档只过 1 单，上次含 Q1 的 11 单全败（每单 ~600 s 出图 + 140 s 打分）
     enforced_by: tools/autopilot/producer.py:Producer.escalate_exhausted / redo_ladder_policy
     status: code_reads
     decider: code

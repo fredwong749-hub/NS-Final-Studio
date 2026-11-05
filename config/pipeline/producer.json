@@ -11,6 +11,8 @@
  "accept": {
   "enabled": true,
   "scope": "asset_bundle_runs",
-  "max_rechecks": 2
+  "max_rechecks": 2,
+  "skip_prefailed": true,
+  "_skip_prefailed": "AUDIT-PERF 11-05（默认关）：true = 契约 / 看图已判不过（pf.ok=false）的图不再做共用验收 QB——QB 只会加不过项、从不翻回通过，而它的 ensure_q9 会把 vqa_gate 刻意跳过的整张看图再跑一遍 + bundle 再看一遍（11-05 实测每张白耗 4–6 次看图、~160 s 看图 GPU、~80 s 关键路径）。关 = 原口径"
  }
 }

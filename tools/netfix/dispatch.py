@@ -481,8 +481,10 @@ def held_lanes(part: dict, now_t: float | None = None) -> set:
             return True
         try:
             d = datetime.fromisoformat(str(u))
-            ts = d.timestamp() if d.tzinfo else time.mktime(d.timetuple())
-            return ts > now_t
+            if d.tzinfo is None:          # AUDIT-PERF 11-05（K-OPS-E18 / I10）：无时区串按项目时区 +09:00 读，与 producer.ts_epoch 同口径
+                from datetime import timedelta, timezone   # （以前 mktime 按本机时钟：笔记本美东 → 借出道“到期”判错 14 h）
+                d = d.replace(tzinfo=timezone(timedelta(hours=9)))
+            return d.timestamp() > now_t
         except ValueError:   # arch-ok: 到期时间写坏 → 当作还在借（失败关闭：宁可多 hold 一条道，也不往借出道派单）
             return True
     # W44 ④（11-04 02:25 gpu33:0 被 hold 到 02:40 之后）：tools/debug/lanes.py hold()/lend() 同时写 retired_lanes 和 _temp_holds/_lent_lanes，

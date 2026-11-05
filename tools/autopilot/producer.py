@@ -138,7 +138,7 @@ def vlm_instances() -> int:
 
 def redo_ladder_policy() -> dict:
     """config/policies/retry.yaml redo_ladder（单一来源）；读不到按默认"""
-    d = {"heavy_plan": ["frame_v9_heavy", "frame_v9_heavy"]}
+    d = {"heavy_plan": ["frame_v9_heavy", "frame_v9_heavy"], "skip_heavy_on": []}
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         import policy as POL
@@ -147,6 +147,19 @@ def redo_ladder_policy() -> dict:
     except Exception:  # noqa: BLE001
         pass
     return d
+
+
+def heavy_cannot_fix(led: dict, lad: dict) -> list | None:
+    """AUDIT-PERF 11-05：驳回阶梯的重档（frame_v9_heavy = 换 krea2 写实预设）只改画风、不改脸参考约束——日志 11-04/05 重档 26 单只过 1 单
+    （10 705 s 出图 + ~26×140 s 打分白耗），其中上次不过项含 Q1（身份）的 11 单全败。retry.yaml redo_ladder.skip_heavy_on = ["Q1", ...]
+    时：最后一次失败的不过项与之有交集 → 不排重档、直接标尽力版；返回交集（空 / 开关没开 → None）"""
+    skip = {str(x) for x in (lad.get("skip_heavy_on") or [])}
+    if not skip:
+        return None
+    hist = (led.get("redo_history") or []) + (led.get("history") or [])
+    last = next((h for h in reversed(hist) if h.get("ok") is False or h.get("blocking")), None)
+    hit = sorted(skip & {str(b) for b in (last or {}).get("blocking") or []})
+    return hit or None
 
 
 def job_sig(paths, sid: str) -> str | None:
@@ -461,6 +474,19 @@ def prefetch_depth() -> int:
         return 2
 
 
+def render_timeout_s() -> float:
+    """一单出图（含同道前面排队的单）最长等多久。AUDIT-PERF 11-05：unified_frame._run 缺省 900 s 是按 8 步档定的；
+    L-191 base35 实测 gpu_s 300–461 s、每道预取 2 单 → 墙钟 600–854 s，再慢一点就超时 → cancel + 整张白算、道冷却。
+    NS_PRODUCER_RENDER_TIMEOUT_S 优先；否则 900 × 预取深度（深度 2 = 1800 s，仍小于租约 45 min）"""
+    try:
+        v = os.environ.get("NS_PRODUCER_RENDER_TIMEOUT_S")
+        if v:
+            return max(60.0, float(v))
+    except ValueError:
+        pass
+    return 900.0 * max(1, prefetch_depth())
+
+
 def dynamic_backlog(done_times: list, t: float, lanes: int, depth: int, window_s: float = 900, horizon_min: float = 15) -> int:
     """K-OPS-E17：积压上限按打分（契约 + 看图）实测吞吐定——最近 window_s 完成数折算每分钟，允许积压约 horizon_min 分钟的打分量；
     下限 = 道数 × 预取深度（保证每道至少能把预取填满）。不再写死 2×道数×实例数"""
@@ -649,8 +675,15 @@ def now() -> float:
     return time.time()
 
 
+PROJECT_TZ_H = 9      # K-OPS-E18 / K-OPS-I10：项目时间一律 Asia/Tokyo
+
+
 def iso(t: float | None = None) -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t or now()))
+    """无时区串一律按项目时区（+09:00）写——ts_epoch 把无时区串按 +09:00 读，两边必须同口径。
+    AUDIT-PERF 11-05：以前用 time.localtime，Windows 没有 tzset（上面的 TZ 强制只在 Linux 生效）→ 笔记本（美东）写出的
+    pause / canary expires_at 早 14 h，ts_epoch 一读就“已过期”（test_producer_b2 / w44 在本机时钟下红的根因）"""
+    from datetime import datetime, timedelta, timezone
+    return datetime.fromtimestamp(t or now(), timezone(timedelta(hours=PROJECT_TZ_H))).strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def jl(p, d=None):
@@ -1929,7 +1962,7 @@ class FrameExec:
                 raise ComfyError(f"{sid} 生成契约 preflight 不通过，未提交：I12 本地专用资产只许项目方自有机器的道（{'；'.join(job.get('route_reasons') or [])[:200]}）")
             stage = "last"
         job = {**job, "seed_policy": rung.get("seed_info") or "producer"}  # K-REN-954：种子来源进 compile_trace
-        take = UF._run(client, sid, stage, job, rung["seed"])[0]       # REFLOCK 11-01 起返回 (take, eff, post_rec)
+        take = UF._run(client, sid, stage, job, rung["seed"], timeout_s=render_timeout_s())[0]   # REFLOCK 11-01 起返回 (take, eff, post_rec)
         P._add_take(sid, take, activate=False)        # G3：过了契约才由 auto_current.on_contract 设为当前
         bad = next((t.get("bad") for t in P.load_takes(sid).get("takes") or [] if t.get("stage") == stage and t.get("n") == take.n), None)
         if bad:                                   # 坏图只记版本、不设为当前（pipeline._add_take）→ 算一次内容失败
@@ -1997,7 +2030,10 @@ class FrameExec:
         pf.setdefault("reasons", [])
         vlm = vqa_gate(sid, stage, file_rel, job, pf)   # VQAGATE：本地看图闸门（enforce 期不过 = 不设为当前、自动重出）
         if not pf.get("score_infra"):
-            pf = shared_accept(self.p, self.script, sid, file_rel, job, pf)   # PRODMERGE-O：共用验收（bundle + retry 三态）
+            if pf.get("ok") is False and accept_skip_prefailed(self.p.root):
+                mark_qb_skipped(pf)                 # AUDIT-PERF 11-05：已判不过的图不再做共用验收（开关 accept.skip_prefailed）
+            else:
+                pf = shared_accept(self.p, self.script, sid, file_rel, job, pf)   # PRODMERGE-O：共用验收（bundle + retry 三态）
         pf["code_sha"] = code_sha()               # W44 ①：每条结论记“哪份代码判的”（本进程启动时的内容 sha）
         pf["judged_pid"] = os.getpid()
         try:                                     # canary_after_redo：换版后前 6 镜同一阻断项失败 > 34% → 暂停派单（kind=canary）
@@ -2198,6 +2234,8 @@ class FakeVideo:
 
 # ---------------------------------------------------------------------------------------------- 监督
 class Producer:
+    relay_lanes: set = frozenset()      # 类默认：测试用 object.__new__ 绕过 __init__ 构造时也有（AUDIT-PERF 11-05，test_debug_rsi e17）
+
     def __init__(self, paths: Paths | None = None, *, script=None, frames=None, video=None, lanes: dict | None = None,
                  lane_probe=None, only: set | None = None, run_summary_fn=None, train_locks_fn=None, lock_now_fn=None):
         self.p = paths or Paths()
@@ -2583,7 +2621,7 @@ class Producer:
             return False
         items = {it.get("shot"): it for it in d.get("shots") or [] if not it.get("released")}
         if o["shot"] not in items:
-            exp = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t + 6 * 3600))
+            exp = iso(t + 6 * 3600)
             items[o["shot"]] = {"shot": o["shot"], "run": self.p.run_id, "objects": [f"first:{o['shot']}", f"last:{o['shot']}"], "expires_at": exp,
                                 "why": f"1 小时内派了 {len(recent)} 次（上限 {cap}）", "at": iso()}
             d.update(active=True, reason_kind=d.get("reason_kind") or "runaway",
@@ -2659,14 +2697,15 @@ class Producer:
                                         reason="输入已更新（" + changed + "），驳回重出重新给，不计次")
                         self.logf("redo_reset", obj=oid, counted=False, why="输入已更新：" + changed)
                         out["reset"] += 1
-                    elif not led.get("ladder_plan"):
+                    elif not led.get("ladder_plan") and not heavy_cannot_fix(led, lad):
                         plan = [plan_item(x) for x in lad["heavy_plan"]]
                         self.led_update(oid, ladder_plan=plan, ladder_sig=sig, reason="驳回重出用完、输入没变 → 下一级：" + "、".join(lad["heavy_plan"]))
                         self.logf("redo_escalate", obj=oid, counted=False, plan=lad["heavy_plan"])
                         out["heavy"] += 1
                     else:
                         stats = fail_stats(led)
-                        why = "驳回阶梯走完仍没过（" + "、".join(f"{a}×{b}" for a, b in stats.items()) + "），标尽力版，不进合成"
+                        skipped = heavy_cannot_fix(led, lad) if not led.get("ladder_plan") else None
+                        why = (("重档跳过：上次不过项 " + "、".join(skipped) + " 换预设救不回（retry.redo_ladder.skip_heavy_on）；") if skipped else "") +                               "驳回阶梯走完仍没过（" + "、".join(f"{a}×{b}" for a, b in stats.items()) + "），标尽力版，不进合成"
                         self.led_update(oid, redo_exhausted=True, final="best_effort", reason=why)
                         sentinel_ticket(self.p, oid, why, stats, led)
                         self.logf("best_effort", obj=oid, reason=why, via="redo_ladder", counted=False)
@@ -3714,6 +3753,26 @@ def shared_accept(paths: "Paths", script, sid: str, file_rel: str, job: dict, pf
         return pf
 
 
+def accept_skip_prefailed(root: Path) -> bool:
+    """config/pipeline/producer.json accept.skip_prefailed（默认 false）：契约 / 看图已不过的图不再做共用验收（见 FrameExec._postflight）"""
+    try:
+        from ns_agent.gen_contract import accept as ACC
+        return bool(ACC.config(root).get("skip_prefailed"))
+    except Exception:  # noqa: BLE001  # arch-ok: 读不到配置 = 关（原口径：照做共用验收）
+        return False
+
+
+def mark_qb_skipped(pf: dict) -> dict:
+    """AUDIT-PERF 11-05（开关 config/pipeline/producer.json accept.skip_prefailed，默认关）：契约 / 看图已判不过（ok=False）的图，
+    共用验收只会再加 QB、从不翻回通过（gen_contract.accept.apply）；而它的 ensure_q9 会把 vqa_gate 刻意跳过的整张看图再跑一遍
+    （+ bundle 再看一遍）——11-05 实测每张白耗 4–6 次看图、~160 s 看图 GPU、~80 s 关键路径。QB 记 na（不挡），结论不变"""
+    pf["items"] = [i for i in pf.get("items") or [] if i.get("id") != "QB"] + [
+        {"id": "QB", "title": "共用验收（看图逐条 + 年龄 + OCR + 人数，PRODMERGE-O）", "status": "na", "blocking": False,
+         "detail": "前置契约不过（" + "、".join(str(b) for b in pf.get("blocking") or []) + "），未做共用验收（accept.skip_prefailed）"}]
+    pf["accept"] = {"status": "skipped", "why": "prefailed", "blocking": list(pf.get("blocking") or [])}
+    return pf
+
+
 def run_status(root: Path, run_id: str) -> str | None:
     """runs.json 里这部剧的 status（producing / paused / ...）；登记表读不到 → None（不改变 control 的判断）"""
     try:
@@ -3870,7 +3929,7 @@ def set_paused(paths: Paths, paused: bool, by: str = "owner", note: str = "", ki
         cap = pause_ops_max_s()
         exp = now() + (min(float(expires_s or cap), cap) if is_ops_kind(kind) else float(expires_s or cap))
         c.update(paused=True, paused_by=by, paused_at=iso(), note=note or None, reason_kind=kind,
-                 expires_at=time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(exp)), overdue_alert_t=None)
+                 expires_at=iso(exp), overdue_alert_t=None)
     else:
         c.update(paused=False, paused_by=None, paused_at=None, note=note or None, reason_kind=None,
                  expires_at=None, overdue_alert_t=None)
@@ -3888,7 +3947,7 @@ def pause_shots(paths: Paths, shots: list, by: str, note: str, minutes: float = 
     f = paths.data / "autopilot" / "pause_hold.json"
     d = jl(f, {}) or {}
     items = {it["shot"]: it for it in d.get("shots") or [] if it.get("shot")}
-    exp = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(now() + minutes * 60))
+    exp = iso(now() + minutes * 60)
     for sid in shots:
         items[sid] = {"shot": sid, "run": paths.run_id, "objects": [f"first:{sid}", f"last:{sid}"], "by": by, "note": note, "at": iso(),
                       "expires_at": exp}
@@ -4439,7 +4498,7 @@ def status_json(paths: Paths, ep: int | None = None) -> dict:
     return {"run": paths.run_id, "counts": reg.get("counts"), "episodes": eps, "paused": ctl.get("paused"),
             "hold_lanes": ctl.get("hold_lanes") or [], "only": ctl.get("only") or [],
             "pause_hold": hold("pause_hold.json"), "runaway_hold": hold("runaway_hold.json"),
-            "heartbeat": hb.get("ts"), "server_now": time.strftime("%Y-%m-%dT%H:%M:%S")}
+            "heartbeat": hb.get("ts"), "server_now": iso()}
 
 
 def shots_of_episode(paths: Paths, ep: int) -> list:

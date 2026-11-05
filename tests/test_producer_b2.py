@@ -24,7 +24,7 @@ def _pr(paths):
 def _hold(paths, name, shot, **kw):
     f = paths.data / "autopilot" / name
     f.parent.mkdir(parents=True, exist_ok=True)
-    exp = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() + 3600))
+    exp = PR.iso(time.time() + 3600)      # AUDIT-PERF 11-05：无时区串按项目时区写（和 ts_epoch 同口径），本机时钟是美东也不红
     f.write_text(json.dumps({"active": True, "shots": [{"shot": shot, "run": "rb2", "objects": [f"first:{shot}", f"last:{shot}"],
                                                         "expires_at": exp, **kw}]}), encoding="utf-8")
     return f
