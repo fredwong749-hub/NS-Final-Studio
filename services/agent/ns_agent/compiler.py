@@ -437,6 +437,7 @@ class CompiledShot:
     h3_base_prompt: str = ""         # 覆盖前的 H3 提示词（剧本 / 笔记本草稿），项目方修改的起点
     h3_override: dict | None = None  # 项目方覆盖（ShotEdit.h3_prompt_override + 元数据），apply_edit 填写
     h3_norm: list[dict] = field(default_factory=list)   # DIRECTOR K-REN-801：编译层运镜句规范化的改动 [{rule, from, to}]；H3 正文除此之外只能经项目方覆盖改
+    h3_template: str = ""            # 阶段 2.1：视频提示词模板（"" = 现行 v1；"v2" = 官方写法重编，改动在 h3_norm 里带 template）
     # FIX（ep02_iter P0）：视频 LoRA 按在画角色确定（与 GPU 道无关）；去掉的触发词及原因；只被提到（物件所有格）的角色；
     # 编译后静态校验（原文遮脸 / 全黑却仍有对立系统词）
     video_loras_dropped: list[str] = field(default_factory=list)
@@ -837,14 +838,30 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
                                             if getattr(shot, "h3_prompt", "") else None, ep_music_default,
                                             getattr(shot, "music_cue", "") or "")
     h3_text = h3.text
+    from . import camera_norm as CN
+    # 阶段 2.1 视频模板 v2（CODER-PT 11-05，PLAN_EP01_FINISH §9）：按剧开关 run_style.json runs.<剧>.prompt_template.video；
+    # v2 = H3 正文按官方写法重编（短锚点句 + 运镜独立成句（词表 h3_official，enabled 仍按 camera_norm / L-129）+ 写作方分拍），
+    # 整段改动记成一条带规则号的 h3_norm（denormalize 可倒回原文）；默认 v1 = 不进此分支
+    h3_norm: list[dict] = []
+    h3_template = ""
+    if h3_text.startswith(H3.ALIGN_PREFIX):
+        from . import prompt_template_v2 as PT2
+        if PT2.video_on(framing_project):
+            new, rec = PT2.video_h3_text(ep, shot, g, framing_project, h3_text)
+            if new != h3_text:
+                h3_norm.append({"rule": "K-REN-801", "from": rec["from_body"], "to": rec["to_body"], "move": rec.get("move_id"),
+                                "why": "prompt_template v2：官方写法（运镜独立成句紧跟构图句）" + (f"；运镜退回：{rec['fallback_why']}" if rec.get("fallback_why") else ""),
+                                "vocab": CN.vocab().get("version"), "template": PT2.TEMPLATE_ID})
+                h3_text, h3_template = new, PT2.TEMPLATE_ID
     # 项目方 2026-10-31（独白镜加嘴唇闭合）“加”：纯独白镜、人在画 → 正文第一句补官方嘴唇闭合句（剧本文字不改）
     lips_added = False
     if names and H3.monologue_only(shot) and h3_text.startswith(H3.ALIGN_PREFIX):
         new = H3.add_lips_closed(h3_text)
         lips_added, h3_text = new != h3_text, new
     # DIRECTOR 11-02（总调度批复 r2 第 1 条，CONSENT → DIRECTOR）：运镜句确定性规范化到 Pika 稳定范围（K-REN-801），改动记进 h3_norm
-    from . import camera_norm as CN
-    h3_text, h3_norm = CN.normalize_video_prompt(h3_text, motion_body, run=framing_project)   # 显式传本镜所属的剧（K-REN-961）
+    if not h3_template:                                     # v2 已按词表生成运镜句（is_enabled 同一口径），不再二次规范化
+        h3_text, h3_norm = CN.normalize_video_prompt(h3_text, motion_body, run=framing_project,   # 显式传本镜所属的剧（K-REN-961）
+                                                     n_people=len(names) if getattr(shot, "cast", None) is not None else None)   # L-192 多人镜白名单
     legacy_video_prompt = _join("，".join(vid_kept), motion_body, g.motion_suffix, video_style, b.video_tail) \
         + soundscape_block(v_sound, v_music)
 
@@ -874,7 +891,7 @@ def compile_shot(ep: Episode, shot: Shot, g: ScriptGlobals, available_loras: set
         image_loras=img_loras,
         video_prompt=h3_text, legacy_video_prompt=legacy_video_prompt, h3_prompt_source=h3.source,
         h3_lips_closed_added=lips_added,
-        h3_norm=h3_norm,
+        h3_norm=h3_norm, h3_template=h3_template,
         h3_frames=h3.frames, h3_missing=h3.missing,
         video_negative=_negative(b.video_negative, g.base_negative, b.style_negative, bible=b),
         video_loras=vid_loras, dropped_triggers=dropped,

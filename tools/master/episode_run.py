@@ -132,7 +132,34 @@ def remote_py_json(env: Env, host: str, code: str, timeout: float = 120) -> dict
     return None
 
 
-# 服务器上只读汇总（输出一行 JSON）。注意：单引号包裹 → 代码里只用双引号
+def parse_json_tail(out) -> dict | None:
+    txt = out.decode("utf-8", "replace") if isinstance(out, (bytes, bytearray)) else out
+    for ln in reversed(txt.strip().splitlines()):
+        ln = ln.strip()
+        if ln.startswith("{"):
+            try:
+                return json.loads(ln)
+            except ValueError:  # arch-ok: 末行 JSON 坏 = 当作无结果，调用方走回退
+                return None
+    return None
+
+
+def image_snap(env: Env) -> dict | None:
+    """优先 producer.py status --json（服务器不跑内联 python）；老版本 producer 不认 --json / 输出不可解析 → 回退内联 IMAGE_SNAP"""
+    h = env.image_host
+    cmd = (f"cd {shlex.quote(env.root_of(h))} && OFFLINE_SELF={h} {shlex.quote(env.py_of(h))} tools/autopilot/producer.py status "
+           f"--run {shlex.quote(env.run)} --episode {env.ep} --json")
+    rc, out, _err = env.remote(h, cmd, timeout=120)
+    d = parse_json_tail(out) if rc == 0 else None
+    if d and "episodes" in d:
+        e = next((x for x in d["episodes"] if x.get("ep") == env.ep), None) or {}
+        return {**{k: v for k, v in d.items() if k != "episodes"}, "shots": e.get("shots") or [], "headline": e.get("headline")}
+    if d and "shots" in d:
+        return d
+    return remote_py_json(env, h, IMAGE_SNAP % {"run": env.run, "ep": env.ep})
+
+
+# 服务器上只读汇总（输出一行 JSON）。注意：单引号包裹 → 代码里只用双引号（回退路径；首选 producer.py status --json）
 IMAGE_SNAP = (
     'import json,os,time;R="%(run)s";E=%(ep)d;P="data/producer/runs/"+R+"/";'
     'J=lambda p:(json.load(open(p,encoding="utf-8")) if os.path.exists(p) else {});'
@@ -261,12 +288,14 @@ def check_regen(env, st, a) -> dict:
 def act_regen(env, st, a, res) -> dict:
     h = env.image_host
     cmd = (f"cd {shlex.quote(env.root_of(h))} && OFFLINE_SELF={h} {shlex.quote(env.py_of(h))} tools/autopilot/producer.py regen "
-           f"--run {shlex.quote(env.run)} --episode {env.ep} --reason {shlex.quote('episode_run 新稿换代 ' + (st['import'].get('sha') or '')[:8])} --by {shlex.quote(BY)}")
+           f"--run {shlex.quote(env.run)} --episode {env.ep} --reason {shlex.quote('episode_run 新稿换代 ' + (st['import'].get('sha') or '')[:8])} --by {shlex.quote(BY)} --json")
     rc, out, err = env.remote(h, cmd, timeout=TIMEOUT_S["regen"], tries=1)     # 非幂等动作：连接层失败也只试一次，下拍再看
     if rc != 0:
         return R("blocked", f"regen 失败 rc={rc}：{(out.decode('utf-8', 'replace') + err)[-240:].strip()}", hint="看 producer log")
-    st["regen"] = {"sha": st["import"].get("sha"), "at": now_iso(env.now())}
-    return R("done", "换代已下达")
+    d = parse_json_tail(out) or {}                      # producer regen 输出 JSON（旧版本只有 {"regen": [...]}，没有 at / dry）
+    st["regen"] = {"sha": st["import"].get("sha"), "at": d.get("at") or now_iso(env.now()), "shots": d.get("regen") or [],
+                   "skipped": d.get("skipped") or {}}
+    return R("done", f"换代已下达（{len(st['regen']['shots'])} 镜）", regen_shots=st["regen"]["shots"])
 
 
 def hold_blockers(env: Env, snap: dict, shots: list[str], lanes: list[str]) -> list[str]:
@@ -301,7 +330,7 @@ def lanes_of(env: Env, host: str, role: str) -> list[str]:
 def check_first(env, st, a) -> dict:
     if env.offline:
         return R("unknown", "离线模式")
-    snap = remote_py_json(env, env.image_host, IMAGE_SNAP % {"run": env.run, "ep": env.ep})
+    snap = image_snap(env)
     if snap is None:
         return R("unknown", f"读不到 {env.image_host} producer 状态（SSH 失败）")
     shots = snap.get("shots") or []
@@ -523,6 +552,57 @@ CHECK = {"import": check_import, "preflight": check_preflight, "regen": check_re
 ACT = {"import": act_import, "regen": act_regen, "pull": act_pull, "compare": act_compare, "timeline": act_timeline}
 
 
+# ---------------------------------------------------------------- 无人值守指标
+# 人工 / 手动干预 = 这些事件且 by 不是自动方；自动进展 = 出图 / 派单 / 采纳事件。数据源：笔记本 data/producer/runs/<run>/log.jsonl
+MANUAL_EVS = {"master_reject", "master_approve", "regen", "resume", "pause", "uncap", "retry", "unhold", "review_adopt",
+              "best_effort_reset", "imported_staged", "unwait", "approve", "reject"}
+AUTO_EVS = {"rendered", "dispatch", "adopt", "video_done"}
+AUTO_BY_PREFIX = ("auto", "AUTO", "CANARY", "POLICY", "PRODUCER", "producer", "WORKFLOW", "resident_sync")
+ORCH_BY_PREFIX = ("总调度 episode_run", "EPISODE_RUN")
+
+
+def _ev_ep(rec: dict) -> int | None:
+    import re
+    m = re.search(r"ep(\d+)-S", str(rec.get("obj") or rec.get("shot") or ""))
+    return int(m.group(1)) if m else None
+
+
+def unattended_metric(env: Env, since: str | None = None) -> dict:
+    """人工干预次数 vs 自动进展（RSI 记分卡读 status JSON 的 unattended 字段）。
+    manual = MANUAL_EVS 且 by 非自动方（PS-MASTER / 总调度 / 空 by 的手工命令）；by=owner（项目方点“用这张 / 修改”）单独记 owner_actions；
+    by=episode_run 记 orchestrated（编排器自己发的，算自动）；auto = AUTO_EVS。无 obj 的事件（pause / resume / import）算整剧，有 obj 的只算本集。
+    ratio = manual / (manual + auto)，越低越好；since 缺省 = 本集 run_started。"""
+    p = env.root / "data" / "producer" / "runs" / env.run / "log.jsonl"
+    manual, auto, owner, orch = {}, 0, 0, 0
+    try:
+        lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:  # arch-ok: 日志读不到 = 指标留空（available=false），不挡编排
+        return {"source": str(p), "available": False}
+    for ln in lines:
+        try:
+            r = json.loads(ln)
+        except ValueError:  # arch-ok: 日志坏行跳过
+            continue
+        if since and str(r.get("ts") or "") < since:
+            continue
+        e = _ev_ep(r)
+        if e is not None and e != env.ep:
+            continue
+        ev, by = r.get("ev"), str(r.get("by") or "")
+        if ev in AUTO_EVS:
+            auto += 1
+        elif ev in MANUAL_EVS:
+            if by == "owner":
+                owner += 1
+            elif by.startswith(ORCH_BY_PREFIX):
+                orch += 1
+            elif not by.startswith(AUTO_BY_PREFIX):
+                manual[by or "(manual)"] = manual.get(by or "(manual)", 0) + 1
+    m = sum(manual.values())
+    return {"available": True, "source": "producer log.jsonl（笔记本）", "since": since, "manual": m, "manual_by": manual, "owner_actions": owner,
+            "orchestrated": orch, "auto": auto, "ratio": round(m / (m + auto), 4) if (m + auto) else None}
+
+
 # ---------------------------------------------------------------- 编排
 def register_blocker(env: Env, st: dict, stage: str, res: dict) -> str | None:
     """同一段同一原因只登记一次（状态里按 stage+原因哈希去重）"""
@@ -598,7 +678,8 @@ def orchestrate(env: Env, a, stages: list[str]) -> dict:
                 final_status, stopped = res["status"], stage
     save_state(env, st)
     return {"run": env.run, "episode": env.ep, "at": now_iso(env.now()), "dry_run": env.dry, "status": final_status,
-            "stopped_at": stopped, "stages": rows, "exit": EXIT.get(final_status, 1)}
+            "stopped_at": stopped, "stages": rows, "exit": EXIT.get(final_status, 1),
+            "unattended": unattended_metric(env, st.get("run_started"))}
 
 
 def EXIT_KEY(s: str) -> str:
@@ -654,16 +735,35 @@ def main(argv=None) -> int:
     env = Env(a.run, a.ep, image_host=a.image_host, video_host=a.video_host, dry=a.dry_run, offline=a.offline)
     stages = [a.only] if a.only else STAGES[STAGES.index(a.from_stage):]
     rep = orchestrate(env, a, stages)
+    md = write_outputs(env, rep)
+    print(md)
+    return rep["exit"]
+
+
+def write_outputs(env: Env, rep: dict) -> str:
     md = render_md(rep)
-    if not a.dry_run:
+    if not env.dry:
         env.out_dir.mkdir(parents=True, exist_ok=True)
         sp = env.out_dir / f"{env.tag}_status.json"
         stmp = sp.with_suffix(".json.part")
         stmp.write_text(json.dumps(rep, ensure_ascii=False, indent=1), encoding="utf-8")
         os.replace(stmp, sp)
-        (env.out_dir / f"{env.tag}_report.md").write_text(md, encoding="utf-8")
-    print(md)
-    return rep["exit"]
+        rp = env.out_dir / f"{env.tag}_report.md"
+        rtmp = rp.with_suffix(".md.part")
+        rtmp.write_text(md, encoding="utf-8")
+        os.replace(rtmp, rp)
+    return md
+
+
+def tick_once(run: str, ep: int, env: Env | None = None, interval: int = 120) -> dict:
+    """常驻入口（resident_sync.episode_run_thread 每拍每个目标调一次）：推进一次、不 watch、不死循环；写 status / report；
+    卡点经 register_blocker 去重登记。与命令行同一套规则：不覆盖 pause_shots / hold_lanes / runaway_hold，不代项目方点“用这张”。"""
+    env = env or Env(run, ep)
+    a = argparse.Namespace(p4=None, compare_to=None, watch=False, interval=interval, kick_night=False)
+    rep = orchestrate(env, a, list(STAGES))
+    write_outputs(env, rep)
+    return {"run": run, "ep": ep, "status": rep["status"], "stopped_at": rep["stopped_at"], "exit": rep["exit"],
+            "msg": next((r["msg"] for r in rep["stages"] if r["stage"] == rep["stopped_at"]), ""), "unattended": rep.get("unattended")}
 
 
 if __name__ == "__main__":

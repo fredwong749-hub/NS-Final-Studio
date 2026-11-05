@@ -123,7 +123,7 @@ rules:
     domain: render
     link: P5-P6
     title: Qwen-Image 2.1 首帧走徕卡 S★ 出图路径（Turbo 8 步 + krea2 胶片质感 + 1.5× 出图缩回 + USM），不用 Base 25 步 cfg1 的 plan_c 图
-    when: series10 起所有首帧 / 尾帧作业（作业图必须由系统出图路径 W.qwen_edit + image_params.apply(leica_sstar) 生成）
+    when: 只限 V1（series10_v1）首帧 / 尾帧作业（作业图必须由系统出图路径 W.qwen_edit + image_params.apply(leica_sstar) 生成）。V2（series10_v2）首帧按 L-191（项目方 11-05 选 A）走 Base 35 步 cfg 3 定稿档（render_quality.json first_frame_tier.runs.series10_v2 = base35，负面词生效、人数闸随之开），本条“Turbo 8 步 / cfg 1”不再适用于 V2（AUDIT-RULES 11-05 改范围，不改 V1 行为）
     then: 作业图用 ns_render.workflows.qwen_edit（参考 ref_resolution 0 / 不裁）+ image_params.apply(resolve("leica_sstar"))；出图后 image_params.post_file 缩回 768×1344 + USM；cfg 保持 1（Base cfg 2.5 让林晚身份掉到 0.45–0.72）
     evidence:
       - {src: data/pipeline/runs/series10_v1/images/imgfix/results.json, note: 4 镜同 seed：S★ 系列 Laplacian 方差为 Base 系列 2–4 倍（ep01-S5 218 vs 63–95），脸部高频 +40–90%，油光 ≈0；v4 cfg2.5 林晚 0.45–0.72}

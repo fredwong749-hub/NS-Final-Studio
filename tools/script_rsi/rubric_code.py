@@ -738,3 +738,93 @@ def l2_checks(shots: list, blocks: list[str], head: str = "", run: str | None = 
     if shots and n_static / len(shots) > L2_STATIC_MAX:
         bad["static#0"] = (False, f"固定镜头 {n_static}/{len(shots)} = {n_static / len(shots):.0%} > {L2_STATIC_MAX:.0%}：每镜要有动机运镜（词表 enabled 的推近 / 按剧运镜），固定只留给有理由的镜")
     return bad
+
+
+# ---- L3 焦段光圈表（L-192 ③，项目方 11-05“要 f/1.2 光学虚化、焦段不对、没电影感”；K-WRT-816–818）。只给 warn，级别跟 WRITER_LINT_LEVEL
+#      （kind, mm 范围, T 范围）；每镜【光学】= 焦段(全画幅等效 mm)｜T 光圈｜高度=机位高度
+L3_TABLE = {"establishing": ((24, 35), (2.8, 4.0), "全景 / 远景 / 中全景（建立镜头，一场最多一个）"),
+            "medium": ((40, 50), (2.0, 2.0), "双人 / 中景（人物前后错落）"),
+            "ots_mcu": ((65, 85), (1.4, 2.0), "过肩 / 单人近景 / 中近景"),
+            "closeup": ((85, 135), (1.2, 1.4), "特写 / 大特写"),
+            "insert": ((90, 105), (2.0, 2.0), "插入镜头（微距 100mm）")}
+L3_LABELS = ("光学", "镜头", "机位与景别", "机位")
+L3_MM = re.compile(r"(\d{2,3})\s*(?:mm|毫米)", re.I)
+L3_T = re.compile(r"(?<![A-Za-z_])T\s*(\d+(?:\.\d+)?)", re.I)
+L3_HEIGHT = re.compile(r"(?:机位)?高度\s*[=：:]?\s*[^｜；，。\s]{1,12}")
+L3_PRACTICAL = re.compile(r"灯架|灯泡|灯串|灯光|灯|霓虹|反光板|监视器|摄影器材|器材|柔光箱|光源|烛|窗|电视|屏幕|路灯|车灯")
+L3_SIDE = re.compile(r"并排|并肩|一字排开|横排|横向排开|平行站|正对镜头|面向镜头|对着镜头")
+L3_OVERSHOULDER = re.compile(r"过肩|OTS", re.I)
+L3_INSERT = re.compile(r"插入|微距|道具特写|物件特写|手部特写")
+
+
+def _lens_spec(lid: str) -> str:
+    """lenses.yaml id → “85mm T1.4”（【镜头】只写 id 时，QW-L9 从这里取焦段 / T 值，与 QW-L4 口径合一：L4 只管 id 合法 + 同场同景别同焦段，表内范围只由 L9 报一次）"""
+    if "lens_full" not in _L2_CACHE:
+        import yaml
+        d = yaml.safe_load(L2_LENSES.read_text(encoding="utf-8")) if L2_LENSES.exists() else {}
+        _L2_CACHE["lens_full"] = {str(x["id"]): x for x in (d.get("lenses") or [])}
+    x = _L2_CACHE["lens_full"].get(lid.strip())
+    if not x or not x.get("focal_mm"):
+        return ""
+    ap = re.search(r"\d+(?:\.\d+)?", str(x.get("aperture") or ""))
+    return f"{int(x['focal_mm'])}mm" + (f" T{ap.group(0)}" if ap else "")
+
+
+def l3_shot_type(s, b: str) -> str:
+    img = _img(b)
+    on = [c for c in (s.cast or []) if getattr(c, "presence", "") == "在画"]
+    sz = _size(img) or ""
+    if L3_INSERT.search(img[:80]) and not on:
+        return "insert"
+    if L3_OVERSHOULDER.search(img + _field(b, "构图")):
+        return "ots_mcu"
+    if sz in ("全景", "远景", "中全景"):
+        return "establishing"
+    if sz in ("特写", "大特写"):
+        return "closeup"
+    if sz in ("近景", "中近景"):
+        return "ots_mcu"
+    return "medium"
+
+
+def l3_checks(shots: list, blocks: list[str]) -> dict:
+    """→ {"<项>#<镜号|scene>": (ok, 说明)}，只返回失败项。
+    optic#n  【光学】缺焦段 mm / T 光圈 / 机位高度；或 焦段 + T 不在该景别档的允许表里          K-WRT-816
+    estab#s  同一场建立镜头（24–35mm）多于一个                                              K-WRT-816
+    bokeh#n  【构图】背景层没写远处的实景光源 / 器材（焦外光斑的素材）                          K-WRT-817
+    twoshot#n 两人以上在画：【构图】写并排 / 并肩 / 正对镜头，或 cast 景深层全相同             K-WRT-818"""
+    bad: dict = {}
+    estab: dict = {}
+    for s, b in zip(shots, blocks):
+        i = s.index
+        txt = " ".join(_field(b, lb) for lb in L3_LABELS)
+        if not L3_MM.search(_field(b, "光学")):      # 没写【光学】：用【镜头】id 对应的焦段 / T 值（lenses.yaml）
+            txt += " " + _lens_spec(_field(b, "镜头").split("｜", 1)[0])
+        typ = l3_shot_type(s, b)
+        (mlo, mhi), (tlo, thi), name = L3_TABLE[typ]
+        mm = L3_MM.search(txt)
+        tt = L3_T.search(txt)
+        hh = L3_HEIGHT.search(txt)
+        miss = [n for n, v in (("焦段 mm", mm), ("T 光圈", tt), ("机位高度", hh)) if not v]
+        if miss:
+            bad[f"optic#{i}"] = (False, f"镜{i} 【光学】缺{'、'.join(miss)}：写“{mlo}–{mhi}mm｜T{tlo:g}–{thi:g}｜高度=…”（{name}）")
+        else:
+            m, t = int(mm.group(1)), float(tt.group(1))
+            if not (mlo <= m <= mhi) or not (tlo - 1e-6 <= t <= thi + 1e-6):
+                bad[f"optic#{i}"] = (False, f"镜{i} {name}：{m}mm T{t:g} 不在允许表（{mlo}–{mhi}mm、T{tlo:g}–{thi:g}）")
+        if typ == "establishing":
+            sc = getattr(s, "scene_id", None) or ""
+            if sc in estab:
+                bad[f"estab#{i}"] = (False, f"镜{i} 与镜{estab[sc]} 同场都是建立镜头（24–35mm）：一场最多一个，其余用 40mm 以上")
+            else:
+                estab[sc] = i
+        comp = _field(b, "构图")
+        bg = comp.split("背景", 1)[1] if "背景" in comp else ""
+        if comp and not L3_PRACTICAL.search(bg):
+            bad[f"bokeh#{i}"] = (False, f"镜{i} 【构图】背景层没写远处的实景光源 / 器材（灯架、灯泡、霓虹、监视器、窗…）：焦外要有东西才有光斑")
+        on = [c for c in (s.cast or []) if getattr(c, "presence", "") == "在画"]
+        if len(on) >= 2:
+            depths = {getattr(c, "depth", None) for c in on} - {None, ""}
+            if L3_SIDE.search(comp) or (depths and len(depths) == 1 and len(on) >= 2):
+                bad[f"twoshot#{i}"] = (False, f"镜{i} {len(on)} 人在画：不要并排 / 并肩 / 正对镜头站（景深层全相同），要前后错落、身体斜 45°")
+    return bad

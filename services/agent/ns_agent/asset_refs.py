@@ -23,6 +23,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 import os
+import sys
 from pathlib import Path
 
 from ns_agent import framing as FR
@@ -1475,16 +1476,43 @@ def blocking_of(shot) -> list[dict]:
 BACK_TXT_WORDS = ("背影", "背对镜头", "背身", "背朝镜头")   # “背对床 / 背对他”不是背对镜头（ep04-S10）
 
 
+_OBJ_PREP_RE = re.compile(r"[在向朝对比从跟和与给把看望盯靠挨越过着替帮]$")   # 人名前一字是介词 / 动词 → 这个人名是宾语（“蹲在祁念左前”），不是主语
+
+
+def clause_subject(clause: str, names, prev: str | None = None) -> str | None:
+    """小句的主语：最靠前、且前面不是介词 / 动词的人名；没有人名 → 沿用上一小句的主语（“顾沉的背影在远处，背对镜头走”）"""
+    cands = []
+    for n in names:
+        if not n:
+            continue
+        for m in re.finditer(re.escape(n), clause):
+            if clause[m.end():].startswith(FACE_PLACE):
+                continue
+            pre = clause[max(0, m.start() - 1):m.start()]
+            if pre and _OBJ_PREP_RE.search(pre):
+                continue
+            cands.append((m.start(), n))
+    return min(cands)[1] if cands else prev
+
+
 def back_in_text(name: str, img: str, others=()) -> bool:
+    """这个人自己的小句写了背影 / 背对镜头。PS-MASTER 11-05（psm7 S4 “卓琳蹲在祁念左前、背对镜头”把背影记到祁念头上 → I2 失败）：
+    按主语从句归属——背对 / 背影 的主语 = 小句里最靠前、不带介词的人名（“在祁念左前”的祁念是宾语），小句没人名就沿用上一小句主语"""
     if not name or name not in (img or ""):
         return False
-    for m in re.finditer(re.escape(name), img):
-        seg = img[m.end():]
-        cut = min([i for i in (seg.find(o) for o in others if o and o != name) if i >= 0]
-                  + [i for i in (seg.find("。"), seg.find("；")) if i >= 0] + [len(seg)])
-        if seg.startswith(FACE_PLACE):
+    names = [name] + [o for o in (others or ()) if o and o != name]
+    subj = None
+    for clause in re.split(r"[，；。]", img):
+        c = clause.strip()
+        if not c:
             continue
-        if any(w in seg[:cut] for w in BACK_TXT_WORDS):
+        subj = clause_subject(c, names, subj)
+        owner = re.search(r"(" + "|".join(re.escape(n) for n in names) + r")的(?:背影|背)", c)   # “顾沉的背影”：所有格直接归属，不看主语
+        if owner:
+            if owner.group(1) == name:
+                return True
+            continue
+        if subj == name and any(w in c for w in BACK_TXT_WORDS):
             return True
     return False
 
@@ -1789,7 +1817,16 @@ class SlotPlan:
 
 
 def _pron(project: str, cid: str | None) -> str:
-    return "她" if cid in (project_cfg(project).get("female") or []) else "他"
+    """参考板 / 设定图标注句的代词：她 / 他 按角色性别。V1 读 asset_refs.json female；资产包剧（V2）读本剧人物表性别
+    （cast_table.speaker_cast → P1_storyline characters.gender；PS-MASTER 11-05 审 dump：卓琳 / 唐瑶被写成“他”）"""
+    fem = set(project_cfg(project).get("female") or [])        # asset_refs.json 只登记了女主 lead_f；配角性别在人物表
+    if manifest_rel(project):
+        try:
+            from . import cast_table as _CT
+            fem |= set((_CT.speaker_cast(project) or {}).get("female") or [])
+        except Exception as e:  # noqa: BLE001  # arch-ok: 人物表读不到只影响标注句代词，退回“他”并打印
+            print(f"[asset_refs._pron] {project} 人物表性别读不到：{e}", file=sys.stderr)
+    return "她" if cid in fem else "他"
 
 
 def make_board(project: str, tiles: list[tuple[str, str]]) -> str:

@@ -233,7 +233,8 @@ def test_recipe_prompt_records_camera_norm(monkeypatch):   # K-REN-801：Pika �
     sys.path[:0] = [str(ROOT / "services" / "recipes"), str(ROOT / "packages" / "schema")]
     from ns_recipes import prompt as PR
     monkeypatch.setattr(PR._camera_norm(), "enabled", lambda: True)
-    body = "[Shot 1] Live-action, a medium shot begins. The camera pulls out with small amplitude as she sits. At 00:02.000, she looks up."
+    # L-192（11-05）：pull_out 已进白名单，不再退回；这里改用仍 disabled 的 tilt_up 守“disabled → static + 记 K-REN-801”
+    body = "[Shot 1] Live-action, a medium shot begins. The camera tilts up with small amplitude as she sits. At 00:02.000, she looks up."
 
     class Spec:
         id = "t"
@@ -324,11 +325,11 @@ def test_v2_lighting_motivated_source_and_lens():
     home = V.image_clauses_zh(_v2_shot("暖黄顶灯从上方打来，小餐桌"))
     assert home["scheme"] == "home_dinner_warm" and home["key_side"] == "上方" and home["decider"] == "code"
     office = V.image_clauses_zh(_v2_shot("深夜写字楼，暖黄台灯从右侧逆光", size="近景"))
-    assert office["scheme"] == "office_night_lamp" and "画面右侧" in office["lighting_zh"] and office["lens_id"] == "summilux_50_f14"
+    assert office["scheme"] == "office_night_lamp" and "画面右侧" in office["lighting_zh"] and office["lens_id"] == "arri_cine_85_t14"   # L-192 缺省：近景 → 85mm T1.4
     peak = V.image_clauses_zh(_v2_shot("深夜写字楼，暖黄台灯从右侧逆光", cue="推到高点，强度3"))
     assert peak["scheme"] == "office_night_tense"
     assert "雾霾天蓝色发丝" in office["lighting_zh"]                       # 人物适配
-    assert V.pick_lens(_v2_shot("x", size="特写"))["focal_mm"] == 75     # 按景别
+    assert V.pick_lens(_v2_shot("x", size="特写"))["focal_mm"] == 135    # 按景别（L-192 缺省：特写 → 135mm T1.2）
     assert V.pick_lens(_v2_shot("x", size="特写"), "summicron_35_f2")["id"] == "summicron_35_f2"   # 剧本【镜头】覆盖
 
 
@@ -342,7 +343,7 @@ def test_v2_compile_order_constraints_and_speaker():
     nos = [s[0] for s in r["segments"]]
     assert nos == ["①", "②", "③", "④", "⑤", "⑥", "⑦"]
     assert r["video"].endswith(V.SPEC["constraints_en"])
-    assert "Shot on a Leica" in r["video"] and "clear, visible mouth movement" in r["video"]
+    assert "Shot on an ARRI cine prime 50mm" in r["video"] and "clear, visible mouth movement" in r["video"]   # L-192 缺省：中景 → ARRI 50mm T2
     assert "⑤" not in "".join(s[0] for s in r["segments"] if s[2] in r["image"]) and "Lit by" in r["image"]
 
 

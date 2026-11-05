@@ -38,6 +38,7 @@ RULES: dict[str, tuple[str, str]] = {
     # 写作方要么把手以外的部位移出本镜，要么把景别写成近景；只查可实现性，不评价内容
     "QW-W10": ("warn", "局部 / 大特写写的是手（手套、指尖、握笔…），同一句又写到肩、颈、锁骨或胸口：模型会出成带肩颈 / 脸的近景。"
                        "只要手，就把肩颈部位挪到下一镜；肩颈也要入画，就把景别写成“近景（手与肩颈）”"),
+    "QW-T3": ("warn", "L-186（K-WRT-819）：写作时长按剪后算：预估剪后 = 各镜时长之和 × 0.7（assemble 剪掉约 30%），整集 <60 秒就补镜（剪前要 ≥86 秒），不拉长单镜"),
     "QW-T2": ("warn", "目标总时长用镜数凑，不用拉长单镜：本集平均镜长 >6.5 秒、而镜数还没到上限时，先加镜（无台词过渡 / 反应 / 局部特写镜）"),
     # RSI r7（VIDEO-RCA r2 实测，K-WRT-702）：分拍写了对身上正穿着的衣服的整理动作 → 8/8 外套先消失再穿回；去掉这一拍 0/2
     "QW-W11": ("warn", "分拍动作不要写对身上正穿着的衣服的整理动作（抚平外套下摆、拉衣角、收紧衣领 / smooths the hem of her blazer…）："
@@ -58,6 +59,8 @@ GARMENT_OFF = re.compile(r"脱|解开|褪下|滑落|take[sn]? off|taking off|sli
 GARMENT_ACT_EN = re.compile(r"\b(smooth|adjust|tug|straighten|tighten|pull|draw|lift|tuck|button|zip|fix|smooth)(?:s|es|ed|ing)?\b"
                             r"[^.;]{0,40}?\b(blazer|jacket|coat|skirt|blouse|shirt|collar|cuff|hem|sleeve|lapel)s?\b", re.I)
 PACE_MAX_S = 6.0          # K-WRT-005：单镜 ≤6 秒（超过剪辑会拆刀）
+PACE_TRIM_KEEP = 0.7      # L-186：assemble pace_tighten 后保留比例（ep01 64 s → 45 s）
+EPISODE_MIN_S = 60.0      # L-092 整集 ≥60 秒（成片）
 PACE_AVG_S = 6.5          # 本集平均镜长线（K-EDT-I01 剪辑每刀 ≤4.5 秒；单镜一刀时写作侧放宽到 6.5）
 SPEECH_CPS = 4.5          # 中文台词每秒字数（defect_hunt DH-S06 用 5 字 / 秒为“说不完”上限）
 
@@ -261,6 +264,11 @@ def check_pacing(ep) -> list[dict]:
         avg, cap = sum(s.duration for s in shots) / len(shots), _shot_cap(ep)
         if avg > PACE_AVG_S and (cap is None or len(shots) < cap):
             out.append(warn("QW-T2", f"本集 {len(shots)} 镜、平均 {avg:.1f} 秒（>{PACE_AVG_S:g}）；镜数上限 {cap if cap else '?'}，还能加镜", "时长"))
+    if shots:
+        total = sum(s.duration for s in shots)
+        est = total * PACE_TRIM_KEEP
+        if est < EPISODE_MIN_S:
+            out.append(warn("QW-T3", f"本集各镜共 {total:g} 秒，预估剪后 {est:.0f} 秒（×{PACE_TRIM_KEEP:g}）<{EPISODE_MIN_S:g}：剪前要 ≥{EPISODE_MIN_S / PACE_TRIM_KEEP:.0f} 秒，补镜（不拉长单镜）", "时长"))
     return out
 
 
@@ -277,11 +285,14 @@ RULES["QW-L1"] = ("warn", "L1（L-188，K-WRT-L1a）：【灯光】/【光线】
 RULES["QW-L2"] = ("warn", "L1（L-188，K-WRT-L1b）：两人以上在画的镜，【构图】必须写前景 / 中景 / 背景三层（前景=谁的什么部位略在焦外｜中景=谁在焦点上｜背景=谁或陈设），cast depth 与之一致。")
 # L2 镜头语言（项目方 11-05“取景缺一致性 / 没有运镜 / 像手机拍的”；K-WRT-810–815；rubric_code.l2_checks）
 RULES["QW-L3"] = ("warn", "L2（K-WRT-813）：每镜【运镜】写词表（config/director/camera_moves.yaml，enabled 且本剧可用）里的运镜名｜幅度｜起幅 → 落幅｜动机=…；与 motion、【镜头运动】是同一种；固定镜头整集 ≤20% 且写不动的理由。")
-RULES["QW-L4"] = ("warn", "L2（K-WRT-812）：每镜【镜头】写 config/director/lenses.yaml 的 id；同一场同景别档用同一焦段（中景 / 中全景 35、近景 / 中近景 50、特写 75），正反打两镜同焦段。")
+RULES["QW-L4"] = ("warn", "L2（K-WRT-812）：每镜【镜头】写 config/director/lenses.yaml 的 id；同一场同景别档用同一焦段，正反打两镜同焦段。焦段 / T 值是否落在 L-192 表内只由 QW-L9 判（不重复报）。")
 RULES["QW-L5"] = ("warn", "L2（K-WRT-811）：【构图】视线方向=“甲向左 / 右看乙”要和人物行里乙的左右位置一致（180° 轴线：同场同两人左右不互换，视线对着对方所在的一侧）。")
 RULES["QW-L6"] = ("warn", "L2（K-WRT-814）：【下镜】只写 动作匹配切 / 视线匹配切 / 声音匹配切 / 声音先行 N 秒 / 硬切 / 叠化 + 落点动作；同场相邻镜切在动作中段或视线落点，硬切要写理由=…。")
 RULES["QW-L7"] = ("warn", "L2（K-WRT-815）：竖屏 9:16：单人镜【构图】写主体在上三分之一 + 视线方向留出空间；两人以上写前 / 中 / 后三层（QW-L2）。")
 RULES["QW-L8"] = ("warn", "L2（K-WRT-810）：集头写“本集镜头规划”段：每场的轴线（谁在左谁在右、看向哪侧）、焦段档位（lenses.yaml id）、主镜头 / 过肩 / 单人的分配与景别递进。")
+RULES["QW-L9"] = ("warn", "L3（K-WRT-816，L-192）：每镜【光学】写 焦段 mm｜T 光圈｜高度=机位高度，且落在景别档表里（建立 24–35 T2.8–4 一场最多一个；双人 / 中景 40–50 T2；过肩 / 近景 65–85 T1.4–2；特写 85–135 T1.2–1.4；插入 100 微距 T2）。")
+RULES["QW-L10"] = ("warn", "L3（K-WRT-817）：【构图】背景层要有远处的实景光源 / 器材（灯架、灯泡、霓虹、监视器、窗…）：给焦外光斑留素材，别拍空白幕。")
+RULES["QW-L11"] = ("warn", "L3（K-WRT-818）：两人以上在画不要并排 / 并肩 / 正对镜头站；前后错落（深度不同）、身体斜 45°。")
 _RUBRIC = None
 
 
@@ -339,6 +350,26 @@ def check_l2(ep, text: str, run: str | None = None) -> list[dict]:
     out = []
     for k, (_ok, why) in rc.l2_checks(shots, blocks, head, run).items():
         rid, field = L2_RULE.get(k.split("#", 1)[0], ("QW-L3", "运镜"))
+        out.append(_issue(rid, why, field))
+    return out
+
+
+L3_RULE = {"optic": ("QW-L9", "镜头"), "estab": ("QW-L9", "镜头"), "bokeh": ("QW-L10", "构图"), "twoshot": ("QW-L11", "构图")}
+
+
+def check_l3(ep, text: str) -> list[dict]:
+    """QW-L9–L11 焦段光圈表 / 背景光源 / 双人站位（K-WRT-816–818，rubric_code.l3_checks）。默认 warn；尚未接进 validate_qwen_script 主流程"""
+    rc = _rubric()
+    chunk = rc.episode_chunk(text, ep.number)
+    if not chunk:
+        return []
+    _head, blocks = rc.split_blocks(chunk)
+    shots = sorted(ep.shots, key=lambda s: s.index)
+    if len(blocks) != len(shots):
+        return []
+    out = []
+    for k, (_ok, why) in rc.l3_checks(shots, blocks).items():
+        rid, field = L3_RULE.get(k.split("#", 1)[0], ("QW-L9", "镜头"))
         out.append(_issue(rid, why, field))
     return out
 

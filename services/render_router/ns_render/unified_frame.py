@@ -108,6 +108,8 @@ def _run(client, shot_id: str, stage: str, job: dict, seed: int, timeout_s: floa
         take.params = {**(take.params or {}), "compile_trace": ct}
     if job.get("tier_overrides"):      # L-191：记档（producer.redo_inputs_changed 据此判 8 步旧版 ≠ 35 步）
         take.params = {**(take.params or {}), "tier": {"id": job.get("tier"), "overrides": job["tier_overrides"]}}
+    if job.get("prompt_template"):     # 阶段 2.1：提示词模板 v2 记进 take（producer.redo_inputs_changed 据此判“模板变了”）
+        take.params = {**(take.params or {}), "prompt_template": job["prompt_template"]}
     # 重出时追加 / 替换进提示词的文本（producer.apply_owner_edit 的项目方修改要求、vqa judge 的一维修正）记进 params.redo_fix_clause：
     # ns_api.unified_stale.strip_redo_fix 比较前按它剥掉，否则重出版本一律被标“编译器升级”（D-FRESH，ep01-S13 / S16）。只记录，不改出图行为
     fixes = []

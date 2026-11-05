@@ -58,6 +58,8 @@ DEFAULTS: dict = {
     #   其他人物（脸面积 ≥ 焦点脸 × min_face_ratio）与焦点的视差差 Δ：半径 × (min_ratio + (1-min_ratio) × smoothstep(Δ/tol))
     #   → 与焦点主体几乎同一深度的人物几乎不虚，前后拉开才逐渐虚到满
     "all_faces_min_ratio": 0.3,    # focus=all_faces：脸面积 ≥ 最大脸 × 此比例的都算焦点
+    # L-192 ③ v2 真实光学（默认关；参数全集见 lens_sim_v2.V2_DEFAULTS；enabled 与 optics_v2.enabled 都为真才走 v2，v1 路径不变）
+    "optics_v2": {"enabled": False},
 }
 
 LEVELS = (0.0, 0.7, 1.4, 2.2, 3.2, 4.5, 6.0, 8.0, 10.5, 13.5, 17.0, 21.0, 26.0, 32.0, 40.0)
@@ -450,6 +452,9 @@ def apply(im, p: dict | None = None, *, depth: np.ndarray | None = None, depth_o
         return im, {"version": VERSION, "enabled": False}
     from PIL import Image
     rgb = np.asarray(im.convert("RGB"))
+    if (p.get("optics_v2") or {}).get("enabled"):
+        from . import lens_sim_v2
+        return lens_sim_v2.apply_v2(im, p, depth=depth, depth_out=depth_out)
     d = prepare_depth(rgb, p, depth)
     if depth_out is not None:
         Path(depth_out).parent.mkdir(parents=True, exist_ok=True)

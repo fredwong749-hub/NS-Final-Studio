@@ -1026,6 +1026,61 @@ def release_thread(every_s: int | None = None) -> None:
         time.sleep(max(1.0, every - (time.time() - t0)))
 
 
+EPISODE_RUN_TICK = True            # CODER-RES：episode_run 常驻（开关以 config/pipeline/episode_run.json enabled 为准，每拍重读）
+EPISODE_RUN_CFG = ROOT / "config/pipeline/episode_run.json"
+EPISODE_RUN_HB = ROOT / "data/autopilot/episode_run_heartbeat.json"
+
+
+def episode_run_cfg(path: Path | None = None) -> dict:
+    d = jl(path or EPISODE_RUN_CFG, {}) or {}
+    return {"enabled": bool(d.get("enabled", False)), "interval_s": max(60, int(d.get("interval_s") or 300)),
+            "targets": [t for t in d.get("targets") or [] if t.get("run") and t.get("ep")]}
+
+
+def episode_run_tick_once(cfg: dict | None = None, tick_fn=None, hb_path: Path | None = None) -> dict:
+    """每个 target 推进一次；单个 target 抛错只记日志，不影响其它。心跳 / 摘要写 episode_run_heartbeat.json（原子）"""
+    cfg = cfg or episode_run_cfg()
+    out: dict = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "enabled": cfg["enabled"], "targets": {}}
+    if cfg["enabled"]:
+        if tick_fn is None:
+            sys.path.insert(0, str(ROOT / "tools/master"))
+            import episode_run as ER
+            tick_fn = ER.tick_once
+        for t in cfg["targets"]:
+            k = f"{t['run']}/ep{int(t['ep']):02d}"
+            try:
+                r = tick_fn(t["run"], int(t["ep"]))
+                out["targets"][k] = {x: r.get(x) for x in ("status", "stopped_at", "exit", "msg")}
+            except Exception as e:  # noqa: BLE001
+                out["targets"][k] = {"status": "error", "msg": repr(e)[:200]}
+                log("episode_run error", k, repr(e)[:300])
+    hp = hb_path or EPISODE_RUN_HB
+    hp.parent.mkdir(parents=True, exist_ok=True)
+    tmp = hp.with_suffix(".json.part")
+    tmp.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, hp)
+    return out
+
+
+def episode_run_thread(every_s: int | None = None) -> None:
+    """episode_run 常驻线程：与 release_thread 同生命周期（daemon、异常只记日志、每拍重读配置）。tick 里的远程 / 子进程调用各有超时"""
+    last = None
+    while True:
+        t0 = time.time()
+        every = every_s or 300
+        try:
+            cfg = episode_run_cfg()
+            every = every_s or cfg["interval_s"]
+            r = episode_run_tick_once(cfg)
+            sig = json.dumps(r.get("targets"), ensure_ascii=False, sort_keys=True, default=str)
+            if cfg["enabled"] and sig != last:
+                log("episode_run", sig[:600])
+            last = sig
+        except Exception as e:  # noqa: BLE001
+            log("episode_run error", repr(e)[:300])
+        time.sleep(max(1.0, every - (time.time() - t0)))
+
+
 # ---------------------------------------------------------------- W18 PRODUCER-LIFECYCLE：主剧到“出图”就自动起 producer / night（L-154 / C-16）
 # 每拍：runs.json primary（preparing / producing）的 sop_gate 唯一阶段视图 →
 #   ① 有一集已到“出图”且 status=preparing → sop_gate.promote（与 producer.maybe_promote 同一规则；promote.auto=true 才写，status_history by=auto:…）
@@ -2203,6 +2258,9 @@ def loop(pull_every_s: int = 1200, health_every_s: int = 300):
     if RELEASE_TICK:                     # W17：发版流水线（复审通过标记 → 拼树 → dry → cut → deploy --verify → 换代 L-152）
         import threading
         threading.Thread(target=release_thread, name="release_tick", daemon=True).start()
+    if EPISODE_RUN_TICK:                 # CODER-RES：episode_run 常驻（无人值守推进一集；config/pipeline/episode_run.json enabled）
+        import threading
+        threading.Thread(target=episode_run_thread, name="episode_run", daemon=True).start()
     if LIFECYCLE_TICK:                   # W18：主剧到“出图”自动起 producer / night（开关 sop_gate.json lifecycle.apply，默认只算计划）
         import threading
         threading.Thread(target=lifecycle_thread, name="lifecycle_tick", daemon=True).start()

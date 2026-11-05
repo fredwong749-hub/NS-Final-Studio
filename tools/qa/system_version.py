@@ -50,7 +50,10 @@ CO_AUTHOR = "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 MEDIA_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".webm", ".mov", ".wav", ".mp3", ".flac",
              ".safetensors", ".ckpt", ".pt", ".pth", ".onnx", ".gguf", ".bin")
 SECRET_RE = re.compile(r"(sk-[A-Za-z0-9]{24,}|\"(?:api_?key|secret|password|token)\"\s*:\s*\"[A-Za-z0-9_\-]{16,}\")", re.I)
-ENV = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+# AUDIT-RULES 11-05：cut / 定向 pytest 一律按 JST（TZ=JST-9，与 ops/psmaster/cut_deploy_*.sh、release_tick 同口径）——笔记本时钟是美东，
+# 测试按 JST 解析无时区串（debug_rsi e19/e21/e28）在本机时钟下会红；调用方已设 TZ 时不覆盖
+ENV = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1", "TZ": os.environ.get("TZ") or "JST-9"}
+LOCAL_VERSION_FILE = "data/system_version.txt"
 
 
 # ---------------------------------------------------------------- 基础
@@ -386,7 +389,9 @@ def _ident_table() -> dict[int, dict] | None:
         try:
             r = subprocess.run(["powershell.exe", "-NoProfile", "-Command", ps], capture_output=True, timeout=60,
                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            d = json.loads(r.stdout.decode("utf-8", "replace") or "[]")
+            # strict=False：别人的进程命令行里带控制字符（tab / 换行）时 ConvertTo-Json 原样输出，默认 json.loads 整表报错
+            # → 进程表取不到 → 只杀 .venv 转发器根进程、真正干活的 Python312 子进程活着（AUDIT-RULES 11-05 根因，test_run_watched_kills_stalled_tree）
+            d = json.loads(r.stdout.decode("utf-8", "replace") or "[]", strict=False)
         except (OSError, subprocess.TimeoutExpired, ValueError) as e:
             _kill_log(f"进程表取不到（{e!r}）→ 只杀持有句柄的根进程")
             return None
@@ -539,7 +544,21 @@ def run_watched(cmd: list[str], timeout: int, cwd: Path | None = None, env: dict
             out += f"\n超时 {timeout}s：{' '.join(cmd)[:120]}"
         return code, out, info
     finally:
-        Path(fn).unlink(missing_ok=True)
+        _unlink_tolerant(Path(fn), info)
+
+
+def _unlink_tolerant(p: Path, info: dict | None = None, tries: int = 6, wait_s: float = 0.5, sleep=time.sleep) -> bool:
+    """删 run_watched 的输出临时文件：Windows 上被杀进程树的残留子进程（.venv 转发器的 Python312 子进程）还握着 stdout 句柄时
+    unlink 抛 PermissionError（WinError 32）——清理失败不能把“已判僵死 / 已超时”的结果变成异常；重试几次后留在 %TEMP%，记 info"""
+    for _ in range(tries):
+        try:
+            p.unlink(missing_ok=True)
+            return True
+        except PermissionError:  # arch-ok: 临时文件被残留子进程占用，稍后重试 / 放弃
+            sleep(wait_s)
+    if info is not None:
+        info["tmp_left"] = str(p)
+    return False
 
 
 def _git_at(repo: Path, env: dict, *a, input_text: str | None = None) -> str:
@@ -597,6 +616,21 @@ def build_tree_from_list(list_path: Path, base: str = "HEAD", repo: Path | None 
         return {"tree": tree, "base": base, "items": len(items), "added": len(add), "removed": rm, "blobs": blobs}
     finally:
         Path(idx).unlink(missing_ok=True)
+
+
+def load_manifest_mod():
+    """tools/release/manifest.py（交付清单 + 租约；不 import 本模块）"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("nsfs_release_manifest", ROOT / "tools/release/manifest.py")
+    m = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault("nsfs_release_manifest", m)
+    spec.loader.exec_module(m)
+    return m
+
+
+def build_tree_from_manifests(ids: list[str], base: str = "HEAD", repo: Path | None = None) -> dict:
+    """按交付清单拼树：HEAD + 各清单文件在 manifest-check 时钉住的 blob（复用 build_tree_from_list）"""
+    return load_manifest_mod().build_tree_from_manifests(ids, build_tree_from_list, base, repo or ROOT)
 
 
 def staged_problems(env: dict | None = None) -> list[str]:
@@ -1074,6 +1108,24 @@ def _hardlink_tree(src: Path, dst: Path) -> int:
     return n
 
 
+def _hardlink_tree_missing(src: Path, dst: Path) -> int:
+    n = 0
+    for dp, dns, fns in os.walk(src):
+        dns[:] = [d for d in dns if d not in ("__pycache__", "node_modules")]
+        rel = Path(dp).relative_to(src)
+        (dst / rel).mkdir(parents=True, exist_ok=True)
+        for f in fns:
+            t = dst / rel / f
+            if LIVE_PID_RE.search(f) or t.exists():
+                continue
+            try:
+                os.link(Path(dp) / f, t)
+                n += 1
+            except OSError:
+                pass
+    return n
+
+
 CODE_TOP = ("tools/", "services/", "packages/", "config/", "knowledge/", "ops/", "tests/")
 CODE_EXT = (".py", ".sh", ".ps1", ".yaml", ".yml", ".toml", ".json", ".md", ".txt", ".cube", ".service", ".timer", ".mjs", ".ts", ".tsx")
 
@@ -1110,7 +1162,11 @@ def build_snapshot(tree: str, dest: Path) -> dict:
         if rel.startswith((".git", ".venv", ".pytest_cache", "nsfs_cut_snapshots")) or "__pycache__" in rel or rel.endswith(".pyc")                 or rel.endswith("_selftest_take"):
             continue
         src = ROOT / rel
-        if not src.exists() or (dest / rel).exists():
+        if not src.exists():
+            continue
+        if (dest / rel).exists():
+            if src.is_dir() and (dest / rel).is_dir() and not (dest / rel).is_symlink():
+                linked += _hardlink_tree_missing(src, dest / rel)     # 树里带了该目录的少量文件：补链其余（原先整目录被跳过）
             continue
         if src.is_dir() and not rel.endswith(JUNCTION_OK):    # 默认逐文件硬链接（resolve 不跳出快照）；只有超大且没人 resolve 的目录用联接
             linked += _hardlink_tree(src, dest / rel)       # 数据目录逐文件硬链接：路径 resolve 仍落在快照里（目录联接会跳回工作树）
@@ -1600,6 +1656,21 @@ def record_incident(sv: str, kind: str, fixed_by: str | None, note: str = "") ->
     return rec
 
 
+def write_local_version(sv: str, commit: str, at: str | None = None, root: Path | None = None) -> str:
+    """AUDIT-RULES 11-05：deploy 只在服务器写 data/system_version.txt，笔记本那份停在 sv-20261102-04 → 本机工具
+    （policy.min_code_sv / film_score / sentinel probes / vidlab score / post_verify）读到旧版本。部署成功（任一台 ok）后本机同格式写一份；
+    原子写（临时文件 + replace），内容与服务器 stamp 同 schema（id / commit / at / by）"""
+    root = root or ROOT
+    p = root / LOCAL_VERSION_FILE
+    p.parent.mkdir(parents=True, exist_ok=True)
+    stamp = json.dumps({"id": sv, "commit": commit, "at": at or time.strftime("%Y-%m-%dT%H:%M:%S"),
+                        "by": "tools/qa/system_version.py deploy"}, ensure_ascii=False)
+    tmp = p.with_suffix(".txt.tmp")
+    tmp.write_text(stamp + "\n", encoding="utf-8")
+    os.replace(tmp, p)
+    return LOCAL_VERSION_FILE
+
+
 def deploy(sv: str | None = None, hosts: list[str] | None = None, restart: bool = True, allow_old: bool = False,
            urgent: bool = False, hotfix_of: str | None = None, hold_data: list[str] | None = None,
            verify_shot: int | None = None, verify_run: str | None = None, manifest_prefix: str | None = None,
@@ -1627,6 +1698,8 @@ def deploy(sv: str | None = None, hosts: list[str] | None = None, restart: bool 
         if v["id"] == sv:
             v.setdefault("deployed", {}).update({h: r for h, r in res["hosts"].items() if r.get("ok")})
             write_index(v)
+    if any(r.get("ok") for r in res["hosts"].values()):
+        res["local_version_file"] = write_local_version(sv, commit, res.get("at") or time.strftime("%Y-%m-%dT%H:%M:%S"))
     if hotfix_of and res["hosts"] and all(x.get("ok") for x in res["hosts"].values()):
         res["incident"] = record_incident(hotfix_of, "hotfix", sv, f"{sv} 热修 {hotfix_of}")
     ok_hosts = [h for h, r in res["hosts"].items() if r.get("ok")]
@@ -1821,6 +1894,7 @@ def main(argv=None) -> int:
     sp = ap.add_subparsers(dest="cmd", required=True)
     c = sp.add_parser("cut")
     c.add_argument("--base")
+    c.add_argument("--manifests", nargs="+", default=None, metavar="ID", help="按交付清单拼树（HEAD + 钉住的 blob），与 --tree 互斥")
     c.add_argument("--dry", action="store_true")
     c.add_argument("--id")
     c.add_argument("--tree", default=None, help="用指定的 git 树代替冻结工作树（总调度批准的快照修补）")
@@ -1848,6 +1922,16 @@ def main(argv=None) -> int:
     v.add_argument("--local", action="store_true", help="同时跑本地 golden dry-run，要求与服务器一致（根因模式 #2）")
     r = sp.add_parser("rollback")
     r.add_argument("sv")
+    mc = sp.add_parser("manifest-check", help="核对交付清单：文件在 / 钉 blob / 伴随缺口 / 重叠 / 别人的租约；有 error 退出码 1")
+    mc.add_argument("ids", nargs="+")
+    mc.add_argument("--no-pin", action="store_true", help="不写 blob / 不落 pins 文件（只看）")
+    mc.add_argument("--repin", nargs="*", default=None, metavar="ID", help="作者显式重钉已有 pin（默认已有 pin 只校验不改）；不带 id = 全部，带 id = 只重钉这些")
+    mc.add_argument("--by", default=None, help="pin 文件记 pinned_by（默认清单 worker）")
+    ls_ = sp.add_parser("lease", help="建议性文件租约：take / release / list（glob 可用）")
+    ls_.add_argument("action", choices=["take", "release", "list"])
+    ls_.add_argument("--worker")
+    ls_.add_argument("--paths", nargs="*", default=[])
+    ls_.add_argument("--ttl-h", type=float, default=6.0)
     sp.add_parser("status")
     sp.add_parser("lock-status")
     ho = sp.add_parser("handover", help="L-152 换代（W17）：--dry 只列将做的步骤；--apply 执行（条件不满足不动）")
@@ -1862,7 +1946,33 @@ def main(argv=None) -> int:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:  # noqa: BLE001
         pass
+    if a.cmd == "manifest-check":
+        rep = load_manifest_mod().manifest_check(a.ids, ROOT, pin=not a.no_pin, repin=(True if a.repin == [] else (a.repin or False)), by=a.by)
+        print(json.dumps(rep, ensure_ascii=False, indent=1)[:6000])
+        return 0 if rep["ok"] else 1
+    if a.cmd == "lease":
+        M = load_manifest_mod()
+        if a.action == "list":
+            print(json.dumps(M.leases_active(ROOT), ensure_ascii=False, indent=1))
+            return 0
+        if not a.worker:
+            print("lease take|release 需要 --worker")
+            return 2
+        if a.action == "take":
+            if not a.paths:
+                print("lease take 需要 --paths")
+                return 2
+            out = M.lease_take(a.worker, a.paths, ROOT, a.ttl_h)
+        else:
+            out = M.lease_release(a.worker, a.paths or None, ROOT)
+        print(json.dumps(out, ensure_ascii=False, indent=1))
+        return 3 if out.get("conflicts") else 0      # 3 = 租到了但和别人重叠（建议性）
     if a.cmd == "cut":
+        if a.manifests:
+            if a.tree:
+                print("--manifests 与 --tree 互斥")
+                return 2
+            a.tree = build_tree_from_manifests(a.manifests, a.base or "HEAD")["tree"]
         out = cut(a.base, a.dry, a.id, tree=a.tree, on=a.on)
         record_cut(out, a.dry)
         if a.report_json:
@@ -1900,7 +2010,12 @@ def main(argv=None) -> int:
             return 0 if out.get("ok", True) else 1
         if a.build_tree_only:
             req = RT.read_request()
-            out = build_tree_from_list(ROOT / req["list"], req.get("base") or "HEAD") if req else {"error": "没有 release_request.json"}
+            if not req:
+                out = {"error": "没有 release_request.json"}
+            elif req.get("manifests"):
+                out = build_tree_from_manifests(list(req["manifests"]), req.get("base") or "HEAD")
+            else:
+                out = build_tree_from_list(ROOT / req["list"], req.get("base") or "HEAD")
         else:
             out = RT.release_once(sv=sys.modules[__name__])
         print(json.dumps(out, ensure_ascii=False, indent=1)[:6000])

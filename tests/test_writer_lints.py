@@ -125,9 +125,9 @@ def test_pacing_lints_fixed_warn():
              _NS(index=3, duration=6, dialogue=[d("好")], voiceover=None)]                   # 6 s 正常
     W._shot_cap = lambda ep: 8
     out = W.check_pacing(_NS(shots=shots))
-    assert [(i["rule_id"], i["level"]) for i in out] == [("QW-T1", "warn"), ("QW-T1", "warn"), ("QW-T2", "warn")]
+    assert [(i["rule_id"], i["level"]) for i in out] == [("QW-T1", "warn"), ("QW-T1", "warn"), ("QW-T2", "warn"), ("QW-T3", "warn")]   # T3 = L-186 预估剪后 <60 s
     W._shot_cap = lambda ep: 3                # 镜数已到上限：不再要求加镜
-    assert [i["rule_id"] for i in W.check_pacing(_NS(shots=shots))] == ["QW-T1", "QW-T1"]
+    assert [i["rule_id"] for i in W.check_pacing(_NS(shots=shots))] == ["QW-T1", "QW-T1", "QW-T3"]
 
 
 def test_w9_light_needs_direction():

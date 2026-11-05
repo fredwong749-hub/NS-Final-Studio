@@ -49,7 +49,7 @@ def _shot_spec_labels() -> frozenset:
 SHOT_SPEC_FALLBACK = ("机位与景别", "镜头", "构图", "灯光", "运镜", "表演节拍", "声音")
 # ISS-1103-031008-8c50（MERGE-IMG-O 11-03，L-148）：镜头语言 v2 七段 + 光线 / 分拍 归到本镜 extras（原来落进集级 extras，
 # 编译 shot_language / frame_job.first_beat_gaze 拿不到），label 不变
-SHOT_EXTRA_LABELS = set(LEGACY_SHOT_EXTRA_LABELS) | set(_shot_spec_labels()) | {"光线", "分拍"}
+SHOT_EXTRA_LABELS = set(LEGACY_SHOT_EXTRA_LABELS) | set(_shot_spec_labels()) | {"光线", "分拍", "光学"}   # 光学（K-WRT-816，CODER-PT 11-05）：焦段｜T｜高度=，prompt_template_v2.lens_of 先读它
 # v3 每镜的 **H3提示词**：SOP §9A.1 官方 FL2VA 全文，多行（含空行），原样保留到下一个 **字段** / 镜头 / 集标题
 H3_LABELS = {"H3提示词", "H3 提示词"}
 H3_CHECK_LABELS = {"H3校验", "H3 校验"}   # 如 **H3校验**：暂缓（露骨内容）→ Shot.h3_check（原文）

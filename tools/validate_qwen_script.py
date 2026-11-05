@@ -692,6 +692,7 @@ def check_v3(imp, text: str, require: bool) -> tuple[list[dict], dict[int, list[
         ep_out.extend(WL.check_l1(ep, text))                     # QW-L1 / QW-L2（L-188 L1：平光句 / 多人三层构图）
         if hard_run(_RUN["run"]):                                # QW-L3–L8（L2 镜头语言，K-WRT-810–815；只对 V2 及以后的剧）
             ep_out.extend(WL.check_l2(ep, text, _RUN["run"]))
+            ep_out.extend(WL.check_l3(ep, text))                 # QW-L9–L11（L3 焦段光圈表 / 背景光源 / 双人站位，K-WRT-816–818，warn）
         ep_out.extend(WL.check_rubric(ep, text))                 # QW-RB1 清单代码判定（HOLLYWOOD r7，CONSENT 总调度 -> HOLLYWOOD）
         idx = {s.index for s in ep.shots}
         all_cast = [c for s in ep.shots for c in (s.cast or [])]

@@ -253,7 +253,7 @@ def test_dry_run_has_no_side_effects(tmp_path):
     assert not (tmp_path / "data/pipeline/runs/r1/episode_run").exists()
     # 只有读命令：没有 import-staged / regen / producer 写命令
     assert all("import-staged" not in " ".join(a) for a in env.local_log)
-    assert all("producer.py" not in c for _, c in env.remote_log)
+    assert all(" regen " not in c and "import-staged" not in c for _, c in env.remote_log)   # status --json 是只读，允许
     assert rep["stages"][0]["status"] == "todo" and rep["stopped_at"] == "first"
 
 
@@ -261,3 +261,89 @@ def test_render_md_marks_downstream(tmp_path):
     rep = {"run": "r1", "episode": 1, "at": "t", "dry_run": True, "status": "blocked", "stopped_at": "first", "exit": 2,
            "stages": [{"stage": "first", "status": "blocked", "msg": "x"}, {"stage": "video", "status": "done", "msg": "y"}]}
     assert "上游未完成" in ER.render_md(rep)
+
+
+# ---------------------------------------------------------------- CODER-RES：status --json / regen --json / 无人值守 / 常驻
+def test_image_snap_prefers_producer_status_json(tmp_path):
+    env = FakeEnv(tmp_path)
+    d = {"run": "r1", "episodes": [{"ep": 1, "headline": "h", "shots": [{"shot": "s1", "first": "passed", "why": ""}]}],
+         "paused": False, "hold_lanes": [], "pause_hold": [], "runaway_hold": [], "heartbeat": "2026-11-05T10:00:00", "server_now": "2026-11-05T10:01:00"}
+    env.remote_fn = lambda h, c: (0, (json.dumps(d) + "\n").encode(), "")
+    s = ER.image_snap(env)
+    assert s["shots"][0]["shot"] == "s1" and s["heartbeat"] and len(env.remote_log) == 1
+    assert "producer.py status" in env.remote_log[0][1] and "--json" in env.remote_log[0][1]
+
+
+def test_image_snap_falls_back_when_producer_has_no_json(tmp_path):
+    env = FakeEnv(tmp_path)
+    env.remote_fn = lambda h, c: (2, b"", "unrecognized --json") if "producer.py status" in c else snap({"s1": "passed"})
+    s = ER.image_snap(env)
+    assert s["shots"][0]["first"] == "passed" and len(env.remote_log) == 2
+
+
+def test_act_regen_uses_json_and_records_shots(tmp_path):
+    env = FakeEnv(tmp_path)
+    env.remote_fn = lambda h, c: (0, b'ts line\n{"regen": ["ep01-S1", "ep01-S2"], "skipped": {}, "dry": false, "at": "2026-11-05T12:00:00"}\n', "")
+    st = {"import": {"sha": "abcdef12"}, "regen": {}, "blockers": {}, "stage_started": {}}
+    r = ER.act_regen(env, st, args(), {})
+    assert r["status"] == "done" and "--json" in env.remote_log[0][1]
+    assert st["regen"]["shots"] == ["ep01-S1", "ep01-S2"] and st["regen"]["at"] == "2026-11-05T12:00:00"
+
+
+def test_unattended_metric(tmp_path):
+    env = FakeEnv(tmp_path)
+    p = tmp_path / "data/producer/runs/r1/log.jsonl"
+    p.parent.mkdir(parents=True)
+    ev = [dict(ts="2026-11-05T09:00:00", ev="regen", obj="first:ep01-S1", by="PS-MASTER"),
+          dict(ts="2026-11-05T09:01:00", ev="resume", by="PS-MASTER"),
+          dict(ts="2026-11-05T09:02:00", ev="regen", obj="first:ep01-S2", by="总调度 episode_run"),
+          dict(ts="2026-11-05T09:03:00", ev="master_approve", obj="first:ep01-S2", by="owner"),
+          dict(ts="2026-11-05T09:04:00", ev="pause", by="CANARY_AUTO"),
+          dict(ts="2026-11-05T09:05:00", ev="rendered", obj="first:ep01-S1"),
+          dict(ts="2026-11-05T09:06:00", ev="rendered", obj="first:ep01-S2"),
+          dict(ts="2026-11-05T09:07:00", ev="dispatch", obj="first:ep02-S1"),
+          dict(ts="2026-11-04T09:00:00", ev="regen", obj="first:ep01-S1", by="PS-MASTER")]
+    p.write_text("\n".join(json.dumps(e) for e in ev) + "\nbad line\n", encoding="utf-8")
+    m = ER.unattended_metric(env, "2026-11-05T00:00:00")
+    assert m["manual"] == 2 and m["manual_by"] == {"PS-MASTER": 2} and m["owner_actions"] == 1 and m["orchestrated"] == 1
+    assert m["auto"] == 2 and m["ratio"] == 0.5
+    assert ER.unattended_metric(FakeEnv(tmp_path / "nope"))["available"] is False
+
+
+def test_tick_once_writes_status_with_unattended(tmp_path):
+    env = FakeEnv(tmp_path)
+    env.remote_fn = lambda h, c: (1, b"", "x")
+    env.local_fn = lambda a: (0, json.dumps({"ready": True, "shots": []}), "")
+    r = ER.tick_once("r1", 1, env=env)
+    assert r["status"] == "blocked" and r["stopped_at"] == "import"          # 没有 P4
+    sj = json.loads((tmp_path / "data/pipeline/runs/r1/episode_run/ep01_status.json").read_text(encoding="utf-8"))
+    assert "unattended" in sj
+    r2 = ER.tick_once("r1", 1, env=env)                                      # 同一卡点第二拍不重复登记
+    assert len(env.issues) == 1 and r2["status"] == "blocked"
+
+
+def test_resident_thread_tick(tmp_path):
+    spec2 = importlib.util.spec_from_file_location("rs_t", ROOT / "tools/autopilot/resident_sync.py")
+    import sys
+    sys.path.insert(0, str(ROOT / "tools/autopilot"))
+    RS = importlib.util.module_from_spec(spec2)
+    spec2.loader.exec_module(RS)
+    calls = []
+
+    def fake(run, ep):
+        calls.append((run, ep))
+        if ep == 2:
+            raise RuntimeError("boom")
+        return {"status": "wait", "stopped_at": "first", "exit": 3, "msg": "m"}
+    hb = tmp_path / "hb.json"
+    cfg = {"enabled": True, "interval_s": 300, "targets": [{"run": "r1", "ep": 1}, {"run": "r1", "ep": 2}]}
+    out = RS.episode_run_tick_once(cfg, tick_fn=fake, hb_path=hb)
+    assert calls == [("r1", 1), ("r1", 2)] and out["targets"]["r1/ep01"]["status"] == "wait" and out["targets"]["r1/ep02"]["status"] == "error"
+    assert json.loads(hb.read_text(encoding="utf-8"))["enabled"] is True
+    calls.clear()                                                             # 关闭开关 = 不调用
+    out = RS.episode_run_tick_once({**cfg, "enabled": False}, tick_fn=fake, hb_path=hb)
+    assert calls == [] and out["targets"] == {}
+    c = tmp_path / "c.json"
+    c.write_text(json.dumps({"enabled": True, "interval_s": 5, "targets": [{"run": "a", "ep": 1}, {"run": "b"}]}), encoding="utf-8")
+    assert RS.episode_run_cfg(c)["interval_s"] == 60 and len(RS.episode_run_cfg(c)["targets"]) == 1
+    assert RS.episode_run_cfg(ROOT / "config/pipeline/episode_run.json")["enabled"] is True

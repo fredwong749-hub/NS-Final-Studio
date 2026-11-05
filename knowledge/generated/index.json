@@ -1,15 +1,15 @@
 {
- "kb_version": "kb-20261105-302a5575",
- "n": 677,
+ "kb_version": "kb-20261105-a4e3d045",
+ "n": 684,
  "by_domain": {
   "render": 101,
   "prompt": 28,
-  "writer": 109,
+  "writer": 113,
   "edit": 49,
   "review": 68,
   "loop": 9,
   "asset": 44,
-  "ops": 204,
+  "ops": 207,
   "ui": 65
  },
  "by_link": {
@@ -19,14 +19,14 @@
   "P11-P12": 28,
   "P11-RETRY": 48,
   "P2-P3": 3,
-  "P3-P4": 125,
+  "P3-P4": 129,
   "P4-P5": 41,
   "P4-P6": 30,
   "P4-P7": 26,
   "P4-P9": 16,
   "P5-P6": 224,
   "P6-P7": 42,
-  "P7-P8": 114,
+  "P7-P8": 117,
   "P8-P10": 19,
   "P8-P9": 12,
   "P9-P10": 21
@@ -6438,6 +6438,82 @@
    "_file": "knowledge/rules/ops_infra.yaml"
   },
   {
+   "id": "K-OPS-I08",
+   "domain": "ops",
+   "link": [
+    "P7-P8"
+   ],
+   "check": [
+    "tests/test_audit_rules_1105.py::test_proc_instances_collapses_venv_launcher_pair",
+    "tools/ops/proc_instances.py"
+   ],
+   "title": "Windows 上 .venv 的 python.exe 是转发器：同一命令行的“.venv 父 + Python312 子”两个 pid = 一份服务，不是重复",
+   "when": "盘点 / 守护 / 重启笔记本常驻进程（resident_sync loop、monitor/server.py、sentinel serve、:8800 api），或任何“按进程名数份数”的检查",
+   "then": "份数用 tools/ops/proc_instances.py（父子合并成一条逻辑实例；api 链 = 看门狗 → 转发器 → uvicorn 转发器 → uvicorn 也算一份）；守护脚本的 match 同时命中父子是正常的，taskkill 时按父 pid /T 一起停；不许按解释器路径只杀“系统 Python 那份”（那是唯一干活的子进程）",
+   "evidence": [
+    {
+     "src": "tools/ops/proc_instances.py",
+     "note": "11-05 实查：resident_sync 19180→25584、monitor 48428→20812、sentinel 16080→12632，父子创建时间差 1 s、参数串相同；逻辑实例各 1 份"
+    },
+    {
+     "src": "ops/restart_api.ps1",
+     "note": "第 313 行注：父子两个算同一份服务，不是重复（K-OPS-F30 的 W-34 证据同）"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-05",
+   "_file": "knowledge/rules/ops_infra.yaml"
+  },
+  {
+   "id": "K-OPS-I09",
+   "enforced": false,
+   "domain": "ops",
+   "link": [
+    "P7-P8"
+   ],
+   "title": "从 Git Bash / PowerShell 调 wsl.exe 时命令串里的 $VAR 会被 WSL 侧 bash 再展开一次、/mnt/c 路径会被 MSYS 转换——脚本用 stdin 管进去，不拼在参数里",
+   "when": "笔记本辅助脚本经 wsl.exe 跑 WSL 侧 bash / ssh（PS-MASTER 辅助脚本、监视器、重试脚本）",
+   "then": "脚本正文走 `wsl.exe -e bash -s < script.sh`（或 heredoc 管进 stdin），参数里不放 $VAR / 反引号；Git Bash 调 wsl.exe 前设 MSYS_NO_PATHCONV=1；时间戳一律 TZ=JST-9（见 K-OPS-I10）",
+   "evidence": [
+    {
+     "src": "docs/master/CHANNEL.md",
+     "note": "11-04 18:0x PS-MASTER：监视器 / 重试 0 事件的原因是 Git Bash 调 wsl.exe 时 /mnt/c 路径被转换（需 MSYS_NO_PATHCONV=1）；11-05 brief：wsl.exe expands $VARS — pipe scripts"
+    }
+   ],
+   "confidence": "medium",
+   "status": "确认",
+   "date": "2026-11-05",
+   "_file": "knowledge/rules/ops_infra.yaml"
+  },
+  {
+   "id": "K-OPS-I10",
+   "domain": "ops",
+   "link": [
+    "P7-P8"
+   ],
+   "check": [
+    "tests/test_audit_rules_1105.py::test_sv_env_defaults_tz_jst"
+   ],
+   "title": "测试 / cut / 发版 / CHANNEL 时间戳一律 JST（TZ=JST-9）；笔记本系统时钟是美东，不设 TZ 会让按 JST 解析无时区串的测试红",
+   "when": "跑 pytest（cut 七门、定向 pytest、工人自测）、写 CHANNEL / 清单 / 账本时间、在 Git Bash 取当前时间",
+   "then": "system_version.ENV 默认 TZ=JST-9（调用方已设 TZ 不覆盖）、release_tick 与 ops/psmaster/cut_deploy_*.sh 同口径；取时间用 `TZ=JST-9 date`（Git Bash 无 zoneinfo，`TZ=Asia/Tokyo` 会退成 UTC，11-05 实测 07:37 vs 16:38）；测试不按本机时钟写时区假设",
+   "evidence": [
+    {
+     "src": "docs/master/CHANNEL.md",
+     "note": "11-05 15:23 CODER-I：debug_rsi e19/e21/e28 在 JST 下全过，笔记本美东时钟会红，非代码缺陷；15:3x PS-MASTER 更正两条非 JST 时间戳"
+    },
+    {
+     "src": "tools/autopilot/release_tick.py",
+     "note": "第 230 行 env TZ=JST-9"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-05",
+   "_file": "knowledge/rules/ops_infra.yaml"
+  },
+  {
    "id": "K-OPS-Q01",
    "domain": "ops",
    "link": [
@@ -8852,7 +8928,7 @@
    "domain": "render",
    "link": "P5-P6",
    "title": "Qwen-Image 2.1 首帧走徕卡 S★ 出图路径（Turbo 8 步 + krea2 胶片质感 + 1.5× 出图缩回 + USM），不用 Base 25 步 cfg1 的 plan_c 图",
-   "when": "series10 起所有首帧 / 尾帧作业（作业图必须由系统出图路径 W.qwen_edit + image_params.apply(leica_sstar) 生成）",
+   "when": "只限 V1（series10_v1）首帧 / 尾帧作业（作业图必须由系统出图路径 W.qwen_edit + image_params.apply(leica_sstar) 生成）。V2（series10_v2）首帧按 L-191（项目方 11-05 选 A）走 Base 35 步 cfg 3 定稿档（render_quality.json first_frame_tier.runs.series10_v2 = base35，负面词生效、人数闸随之开），本条“Turbo 8 步 / cfg 1”不再适用于 V2（AUDIT-RULES 11-05 改范围，不改 V1 行为）",
    "then": "作业图用 ns_render.workflows.qwen_edit（参考 ref_resolution 0 / 不裁）+ image_params.apply(resolve(\"leica_sstar\"))；出图后 image_params.post_file 缩回 768×1344 + USM；cfg 保持 1（Base cfg 2.5 让林晚身份掉到 0.45–0.72）",
    "evidence": [
     {
@@ -15877,16 +15953,16 @@
    "id": "K-WRT-812",
    "domain": "writer",
    "link": "P3-P4",
-   "title": "L2 焦段：每镜写【镜头】= lenses.yaml 的 id；同场同景别档同焦段，正反打两镜同焦段，全集只用三档（35 / 50 / 75）（L2）",
+   "title": "L2 焦段：每镜【镜头】= lenses.yaml 的 id（按 L-192 焦段光圈表选档）；同场同景别档同焦段，正反打两镜同焦段（L2；表内范围由 QW-L9 判）",
    "when": "每镜【镜头】行",
-   "then": "代码判定 rubric_code.l2_checks（lens#n）：缺【镜头】或不是 config/director/lenses.yaml 的 id → QW-L4；同 scene_id 且 img 景别相同的两镜 id 不同（跳档）→ QW-L4。档位：中景 / 中全景 = summicron_35_f2（全景 summilux_35_f14）、近景 / 中近景 = summilux_50_f14、特写 = apo_summicron_75_f2；编译层 shot_language.lens_clause 读这个字段（V2 去品牌只写焦段光圈）",
+   "then": "代码判定 rubric_code.l2_checks（lens#n）：缺【镜头】或不是 config/director/lenses.yaml 的 id → QW-L4；同 scene_id 且 img 景别相同的两镜 id 不同（跳档）→ QW-L4。档位按 L-192③ 表（11-05 改，取代旧“全集三档 35/50/75”）：建立 24–35mm T2.8–4（leica_cine_28_t28 / leica_cine_35_t4，一场最多一个）；双人 / 中景 40–50mm T2（arri_cine_50_t2）；过肩 / 单人近景 / 中近景 65–85mm T1.4–2（arri_cine_65_t14 / arri_cine_85_t14）；特写 85–135mm T1.2–1.4（arri_cine_85_t14 / leica_cine_135_t12）；插入 100mm 微距 T2（leica_cine_100_macro_t2）。QW-L4 与 QW-L9 口径合一：L4 只管 id 合法 + 同场同景别同焦段；焦段 / T / 机位高度是否落在表内只由 QW-L9 报一次（没写【光学】行时 L9 用【镜头】id 的焦段 / T）。旧 id（summicron_35_f2 等）仍合法但表内判 L9 warn",
    "targets": [
     {
      "kind": "writer_prompt",
      "section": "镜头字段"
     }
    ],
-   "writer_text": "每镜写一行【镜头】，只写 config/director/lenses.yaml 的 id：中景 / 中全景用 summicron_35_f2，近景 / 中近景用 summilux_50_f14，特写用 apo_summicron_75_f2，全景用 summilux_35_f14。同一场里同一个景别档永远是同一支镜头，正反打的两镜用同一支镜头（同焦段、同离轴角度），一集不超过三档。",
+   "writer_text": "每镜写一行【镜头】，只写 config/director/lenses.yaml 的 id，并按景别取档（L-192）：建立镜头 leica_cine_28_t28 或 leica_cine_35_t4（24–35mm T2.8–4，一场最多一个）；双人 / 中景 arri_cine_50_t2（50mm T2）；过肩 / 单人近景 arri_cine_65_t14 或 arri_cine_85_t14（65–85mm T1.4）；特写 arri_cine_85_t14 或 leica_cine_135_t12（85–135mm T1.2–1.4）；插入镜头 leica_cine_100_macro_t2（100mm 微距 T2）。同一场里同一个景别档永远是同一支镜头，正反打的两镜用同一支镜头。也可以直接在【光学】行写 焦段mm｜T 值｜高度=…（K-WRT-816）。",
    "evidence": [
     {
      "src": "docs/master/PLAN_HOLLYWOOD_LOOK.md",
@@ -15898,7 +15974,8 @@
     }
    ],
    "check": [
-    "tests/test_l2_rules.py"
+    "tests/test_l2_rules.py",
+    "tests/test_lens_rules.py"
    ],
    "lint": [
     "QW-L4"
@@ -16016,6 +16093,130 @@
     "QW-L7"
    ],
    "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-05",
+   "_file": "knowledge/rules/writer_camera.yaml"
+  },
+  {
+   "id": "K-WRT-816",
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "L3 焦段光圈表：每镜【光学】写 焦段 mm｜T 光圈｜高度=机位高度，且按景别档取表内值（L-192）",
+   "when": "每镜 P4 分镜，【光学】行（全画幅等效 mm）",
+   "then": "代码判定 rubric_code.l3_checks（optic#n / estab#场）→ QW-L9（warn）：缺焦段 / T / 机位高度，或不在表内。表：建立镜头 24–35mm T2.8–4（一场最多一个）；双人 / 中景 40–50mm T2（人物前后错落）；过肩 / 单人近景 / 中近景 65–85mm T1.4–2；特写 / 大特写 85–135mm T1.2–1.4；插入镜头 100mm 微距 T2。下游 lens_sim v2 与出图提示词读这一行",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "镜头字段"
+    }
+   ],
+   "writer_text": "每镜在【光学】写三项：焦段（全画幅等效 mm）｜T 光圈｜高度=机位高度（例：85mm｜T1.4｜高度=1.5m 眼平）。按景别取表：建立镜头 24–35mm T2.8–4，一场最多一个；双人 / 中景 40–50mm T2，人物前后错落；过肩 / 单人近景 / 中近景 65–85mm T1.4–2；特写 85–135mm T1.2–1.4；插入镜头 100mm 微距 T2。长焦 + 大光圈才有真正的焦外光斑和压缩感，不要整集用同一支镜头。",
+   "evidence": [
+    {
+     "src": "docs/master/MASTER_PICTURE.md",
+     "note": "L-192 ③ 焦段光圈表；项目方 11-05 判 lens_sim S4 不合格“想想 f/1.2 的虚化、焦段不对、没有电影感”"
+    }
+   ],
+   "check": [
+    "tests/test_lens_rules.py"
+   ],
+   "lint": [
+    "QW-L9"
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-05",
+   "_file": "knowledge/rules/writer_camera.yaml"
+  },
+  {
+   "id": "K-WRT-817",
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "L3 背景要有远处光源 / 器材：给焦外光斑留素材（L-192）",
+   "when": "每镜【构图】的背景层",
+   "then": "代码判定 rubric_code.l3_checks（bokeh#n）→ QW-L10（warn）：背景层没写灯架 / 灯泡 / 霓虹 / 监视器 / 反光板 / 窗 / 器材等远处实景光源 → 报。空白幕做不出光斑，虚化只会变成一片糊",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "镜头字段"
+    }
+   ],
+   "writer_text": "背景层要有远处的实景光源或器材（灯架、亮着的灯泡、霓虹、监视器、窗外的灯、反光板），它们在大光圈长焦下才会变成圆形光斑；不要把背景写成一片空白幕。",
+   "evidence": [
+    {
+     "src": "docs/master/MASTER_PICTURE.md",
+     "note": "L-192；lens_sim S4 对空白白幕均匀模糊 = 手机人像模式观感"
+    }
+   ],
+   "check": [
+    "tests/test_lens_rules.py"
+   ],
+   "lint": [
+    "QW-L10"
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-05",
+   "_file": "knowledge/rules/writer_camera.yaml"
+  },
+  {
+   "id": "K-WRT-818",
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "L3 双人镜站位：前后错落、身体斜 45°，不并排正对镜头（L-192）",
+   "when": "两人以上在画的镜头【构图】与 cast 景深",
+   "then": "代码判定 rubric_code.l3_checks（twoshot#n）→ QW-L11（warn）：【构图】写并排 / 并肩 / 一字排开 / 正对镜头，或 cast 景深层全相同 → 报",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "镜头字段"
+    }
+   ],
+   "writer_text": "两人同框要前后错落（一人靠前、一人靠后，景深不同），身体斜 45° 对着对方，不要并排站成一排正对镜头——那是合影，不是电影。",
+   "evidence": [
+    {
+     "src": "docs/master/MASTER_PICTURE.md",
+     "note": "L-192；L-188 ③ 前 / 中 / 后三层站位"
+    }
+   ],
+   "check": [
+    "tests/test_lens_rules.py"
+   ],
+   "lint": [
+    "QW-L11"
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-05",
+   "_file": "knowledge/rules/writer_camera.yaml"
+  },
+  {
+   "id": "K-WRT-819",
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "写作时长按“剪后”算：剪前秒数 = 目标 ÷0.7，整集预估剪后时长 ≥60 秒（L-186 规则级修法）",
+   "when": "规划镜数 / 每镜时长，和写完后自检总时长",
+   "then": "代码判定 writer_lints.check_pacing（QW-T3，warn）：预估剪后 = Σ 每镜时长 × 0.7（assemble 的 pace_tighten 对白掐头尾、无对白镜收紧，实测约剪掉 30%）；<60 秒 → 报，补镜（不拉长单镜）。QW-T1 / T2 不变",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "时长与节奏"
+    }
+   ],
+   "writer_text": "整集成片要 ≥60 秒，但剪辑会收紧节奏、剪掉约 30%。所以写作时按剪后算：想要 60 秒成片，P4 各镜时长加起来要 ≥86 秒（60 ÷ 0.7）。不够就补镜（无台词过渡 / 反应 / 局部特写），不要拉长单镜。",
+   "evidence": [
+    {
+     "src": "docs/master/MASTER_PICTURE.md",
+     "note": "L-186：ep01 计划 64 秒 → 成片 45.04 秒（assemble pace_tighten 剪掉约 30%）；规则级修法 = 写作时长按剪后算（÷0.7）、QW-T 改预估剪后"
+    }
+   ],
+   "check": [
+    "tests/test_lens_rules.py"
+   ],
+   "lint": [
+    "QW-T3"
+   ],
+   "confidence": "high",
    "status": "待验",
    "date": "2026-11-05",
    "_file": "knowledge/rules/writer_camera.yaml"

@@ -134,6 +134,51 @@ def structure_top(n: int = 5) -> dict:
     return {"scan_at": scan.get("at"), "total": sum(per.values()), "files": top_f, "modules": top_m, "file_detail": detail}
 
 
+def current_sv() -> str | None:
+    """真实线上版本。根因（11-05）：data/system_version.txt 是 deploy 在“被部署的服务器”上写的（= override system），
+    笔记本（SENTINEL 跑的地方）从不被 deploy，文件停在 sv-20261102-04。真相源 = git sv-* 标签 / data/system_versions/index.json（入版即写），
+    三处取字典序最大（sv-YYYYMMDD-NN 可排序）。"""
+    cands = [(jl("data/system_version.txt") or {}).get("id")]
+    cands += [v.get("id") for v in ((jl("data/system_versions/index.json") or {}).get("versions") or [])[-3:]]
+    tags = _run(["git", "tag", "-l", "sv-*"], 30)
+    cands += (tags or "").split()
+    ok = [c for c in cands if isinstance(c, str) and c.startswith("sv-")]
+    return max(ok) if ok else None
+
+
+def stale_video(run: str, stage: str) -> dict:
+    """本集还没有视频：报最近一次有分的视频线（标 stale），不再给 null；并附运镜执行基准（阶段 0.2b 36 臂，官方写法 Pika 白名单 6 种）"""
+    last = None
+    try:
+        for ln in SCORES.read_text(encoding="utf-8").splitlines()[-4000:]:
+            try:
+                r = json.loads(ln)
+            except ValueError:  # arch-ok: 账本里的坏行跳过（只找最近一条有分的视频记录）
+                continue
+            if r.get("line") == "video" and r.get("score") is not None and not (r.get("evidence") or {}).get("stale"):
+                last = r
+    except OSError:  # arch-ok: 没有历史 = 真没测过
+        pass
+    bench = cam_exec_bench()
+    if not last:
+        return {"score": None, "pending_stage": f"{run} 在 {stage}，还没有视频，也没有历史视频分", "src": "tools/vidlab/score.py", "evidence": {"cam_exec_bench": bench}}
+    return {"score": last["score"], "parts": last.get("parts") or {}, "lowest": last.get("lowest"),
+            "src": f"tools/vidlab/score.py（沿用 {last['at']} · {last.get('run') or '旧语料'} 的分，stale；{run} 在 {stage} 还没有视频）",
+            "evidence": {"stale": True, "scored_at": last["at"], "scored_sv": last.get("sv"), "cam_exec_bench": bench}}
+
+
+WHITELIST_MOVES = ("static", "push_in", "pull_out", "bolt_push_settle", "handheld_follow", "pedestal_up")
+
+
+def cam_exec_bench() -> dict | None:
+    """运镜执行基准：data/ab/adherence_video/results.json（运镜执行基准脚本（研究目录，不入发版）measure 同口径 score_move）里
+    官方写法 × Pika × i2va 臂、白名单运镜的平均服从分（0–1）"""
+    r = jl("data/ab/adherence_video/results.json") or {}
+    xs = [v["adherence"]["score"] for k, v in r.items() if not k.startswith("_") and isinstance(v, dict) and v.get("adherence")
+          and v.get("style") == "official" and v.get("base") == "pika" and v.get("mode") == "i2va" and v.get("move") in WHITELIST_MOVES]
+    return {"mean": round(sum(xs) / len(xs), 2), "n": len(xs)} if xs else None
+
+
 def existing_scores() -> dict:
     from tools.autopilot import runs as RUNS
     out = {}
@@ -147,14 +192,22 @@ def existing_scores() -> dict:
         d = IS.score(takes) if takes else None
     except Exception as e:  # noqa: BLE001  # arch-ok: 记未测
         d, out["_image_err"] = None, repr(e)[:120]
-    out["image"] = ({"score": d["score"], "parts": d.get("items") or {}, "lowest": d.get("lowest"), "src": f"tools/imglab/score.py（{run}）"} if d and d.get("score") is not None
-                    else {"score": None, "pending_stage": f"{run} 在 {stage}，还没有出图版本", "src": "tools/imglab/score.py"})
+    if d and d.get("score") is not None:
+        pic = (d.get("detail") or {}).get("picture") or {}
+        parts = {**{k: v for k, v in (d.get("parts_pct") or {}).items()}, **{f"画面·{k}": v for k, v in (pic.get("parts_pct") or {}).items()}}
+        out["image"] = {"score": d["score"], "parts": parts, "lowest": (min((pic.get("parts_pct") or {"-": 0}), key=(pic.get("parts_pct") or {"-": 0}).get) if pic else d.get("lowest")),
+                        "src": f"tools/imglab/score.py v2（{run}；契约分 {d.get('contract_score')} × 0.35 + 画面指数 {pic.get('picture_index')} × 0.65）",
+                        "unmeasured": pic.get("unmeasured"),
+                        "evidence": {"contract_score": d.get("contract_score"), "picture_index": pic.get("picture_index"), "picture_n": pic.get("n"),
+                                     "capped_by": pic.get("capped_by"), "per_shot": pic.get("per_shot")}}
+    else:
+        out["image"] = {"score": None, "pending_stage": f"{run} 在 {stage}，还没有出图版本", "src": "tools/imglab/score.py"}
     vdir = RUNS.run_dir(run) / "video"
     if order.index(stage) >= order.index("S4") and vdir.exists() and any(vdir.iterdir()):
         d = _first_json(_run(["tools/vidlab/score.py", "score", "--no-write", "--corpus", str(vdir)], 900))
         out["video"] = d and {"score": d["score"], "parts": d.get("items") or {}, "lowest": d.get("lowest"), "src": f"tools/vidlab/score.py score（{run}）"}
     else:
-        out["video"] = {"score": None, "pending_stage": f"{run} 在 {stage}，还没有视频", "src": "tools/vidlab/score.py"}
+        out["video"] = stale_video(run, stage)
     d = _first_json(_run(["tools/script_rsi/line3_score.py", "--run-dir", str(RUNS.run_dir(run).relative_to(ROOT)), "--no-write"], 600))
     out["script"] = d and {"score": d["score"], "parts": d.get("parts") or {}, "lowest": d.get("lowest"), "src": f"tools/script_rsi/line3_score.py（{run}）"}
     if out["script"] and not any((v or 0) > 0 for v in (out["script"]["parts"] or {}).values()):
@@ -387,7 +440,7 @@ def compute(write: bool = True) -> dict:
     res["ui"] = ui_score(c)
     res["workflow"] = workflow_score(c)
     res["gpu"] = gpu_score(c)
-    sv = (jl("data/system_version.txt") or {}).get("id")
+    sv = current_sv()
     now = time.time()
     if write:
         with SCORES.open("a", encoding="utf-8") as f:

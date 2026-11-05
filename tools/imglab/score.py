@@ -8,7 +8,9 @@
   light    20   合成感 / 动机光一致 / VLM 融合题——SENTINEL composite 接口阈值未定 → 记 missing，partial=true，不计入总分分母
   gaze     10   G1 看镜头的脸占比 g：得分 = 1 − g / 0.20
   pass_speed 15 一半：每镜第一个版本一次过契约率 / 0.80；一半：出图耗时 p50（≤90 s 满分，≥240 s 记 0）
-总分 = Σ 权重 × 分项得分 ÷ 已测权重和 × 100。写 data/rsi/scores.jsonl（line=image）。
+总分 = Σ 权重 × 分项得分 ÷ 已测权重和 × 100（契约分，只量缺陷）。
+v2（L-189）：出图线总分 = 0.35 × 契约分 + 0.65 × 画面指数（tools/imglab/picture_index.py：dof / bg / scale / lineup / layers）；
+项目方抽检“不合格”（data/rsi/owner_spotcheck.json）封顶 60。写 data/rsi/scores.jsonl（line=image）。
 
     .venv/Scripts/python.exe tools/imglab/score.py                 # 最近 24 h 的版本
     .venv/Scripts/python.exe tools/imglab/score.py --since 2026-11-01T12:00 --no-write --json
@@ -23,6 +25,9 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from tools.imglab import picture_index as PI  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1].parent
 WEIGHTS = {"identity": 25, "hands": 15, "pose": 15, "light": 20, "gaze": 10, "pass_speed": 15}
@@ -52,7 +57,30 @@ def _items(t: dict) -> dict:
     return {i.get("id"): i for i in ((t.get("postflight") or {}).get("items") or [])}
 
 
-def score(takes: list[dict]) -> dict:
+def picture_part(takes: list[dict], max_shots: int = 16) -> dict | None:
+    """v2 尺子（L-189）：每镜最新一个出图版本（文件在本机）算画面指数，取均值。返回 {index, n, per_shot, parts}"""
+    latest = {}
+    for t in sorted(takes, key=lambda t: t.get("created_at") or ""):
+        if t.get("file") and (ROOT / "data" / t["file"]).exists():
+            latest[t["_shot"]] = t
+    per, acc = {}, {k: [] for k in PI.PI_W}
+    for shot, t in list(latest.items())[-max_shots:]:
+        try:
+            m = PI.measure(ROOT / "data" / t["file"], PI.faces_from_take(t) or None, PI.band_from_take(t))
+        except Exception as e:  # noqa: BLE001  # arch-ok: 单张读不了 / 缺依赖，跳过该镜，不阻断打分
+            per[shot] = {"error": repr(e)[:80]}
+            continue
+        per[shot] = m["index"]
+        for k, v in m["parts"].items():
+            acc[k].append(v)
+    vals = [v for v in per.values() if isinstance(v, (int, float))]
+    if not vals:
+        return None
+    return {"index": round(sum(vals) / len(vals), 1), "n": len(vals), "per_shot": per,
+            "parts_pct": {k: round(100 * sum(v) / len(v), 1) for k, v in acc.items() if v}, "unmeasured": PI.UNMEASURED}
+
+
+def score(takes: list[dict], picture: bool = True, owner: dict | None = None) -> dict:
     measured = [t for t in takes if (t.get("postflight") or {}).get("items")]
     parts, detail, missing = {}, {}, {}
     # identity
@@ -125,11 +153,16 @@ def score(takes: list[dict]) -> dict:
         missing["pass_speed"] = "没有版本"
     wsum = sum(WEIGHTS[k] for k in parts)
     total = round(sum(WEIGHTS[k] * v for k, v in parts.items()) / wsum * 100, 2) if wsum else 0.0
+    contract_total = total
+    pic = picture_part(takes) if picture else None
+    if pic and pic.get("index") is not None:
+        total, comb = PI.combine(contract_total if wsum else None, pic["index"], PI.load_owner() if owner is None else owner)
+        detail["picture"] = {**pic, **comb}
     lowest = min(parts, key=lambda k: parts[k]) if parts else None
     return {"score": total, "parts": {k: round(v * WEIGHTS[k], 2) for k, v in parts.items()},
             "parts_pct": {k: round(v * 100, 1) for k, v in parts.items()}, "weights": WEIGHTS,
             "partial": bool(missing), "missing": missing, "detail": detail, "lowest": lowest,
-            "n_takes": len(takes), "n_measured": len(measured)}
+            "n_takes": len(takes), "n_measured": len(measured), "contract_score": contract_total}
 
 
 def _sv() -> str | None:

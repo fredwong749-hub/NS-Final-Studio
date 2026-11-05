@@ -740,8 +740,11 @@ def shot_cast(sid: str) -> list[dict] | None:
     from ns_agent import framing as FR
     names = [c.name for c in ep_shot[1].cast]
     faced, _partial = FR.faced_people(ep_shot[1], names)      # 编译稿口径：在画，或局部但原文写到脸 / 头发
+    from ns_agent import prompt_template_v2 as PT2
+    hidden = PT2.hidden_people(ep_shot[1])                    # PS-MASTER 11-05：过肩前景只露肩 / 后脑、背影 → face_hidden（人数闸计上限不计下限）
     acc = shot_accessories(sid)
     return [{"name": c.name, "presence": c.presence, "part": c.part, "faced": c.name in faced, "x": getattr(c, "x", None),
+             **({"face_hidden": True, "hidden_part": hidden[c.name]} if c.name in hidden else {}),
              **({"look_acc": acc[_ids().get(c.name, c.name)]} if _ids().get(c.name, c.name) in acc else {})} for c in ep_shot[1].cast]
 
 

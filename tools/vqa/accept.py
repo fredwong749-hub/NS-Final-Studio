@@ -193,11 +193,14 @@ def people_gate_on(project: str | None = None) -> bool:
 
 
 def people_range(cast: list | None) -> tuple[int, int] | None:
-    """分镜 cast → (最少, 最多)可见人数：最少 = 在画；最多 = 在画 + 局部 + 背影。没有 cast → None"""
+    """分镜 cast → (最少, 最多)可见人数：最少 = 在画且露脸；最多 = 在画 + 局部 + 背影。没有 cast → None。
+    PS-MASTER 11-05：过肩前景只露肩 / 后脑、背影、被遮的人（cast 项 face_hidden=True，ns_agent.prompt_template_v2.hidden_people 判）
+    计入上限、不计入下限——看图模型可能只数出露脸的人"""
     if not cast:
         return None
-    lo = sum(1 for c in cast if c.get("presence") == "在画")
-    hi = lo + sum(1 for c in cast if c.get("presence") in ("局部", "背影"))
+    on = [c for c in cast if c.get("presence") == "在画"]
+    lo = sum(1 for c in on if not c.get("face_hidden"))
+    hi = len(on) + sum(1 for c in cast if c.get("presence") in ("局部", "背影"))
     return lo, hi
 
 

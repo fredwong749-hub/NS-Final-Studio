@@ -42,7 +42,9 @@ def _proc_table() -> dict[int, tuple[int, str]] | None:
         try:
             r = run(["powershell.exe", "-NoProfile", "-Command", ps], capture_output=True, timeout=60,
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            d = json.loads(r.stdout.decode("utf-8", "replace") or "[]")
+            # strict=False：别人的进程命令行里带控制字符时整表解析失败 → “认不出”→ 把测试自己起的进程树也拦下（AUDIT-RULES 11-05，
+            # test_run_watched_kills_stalled_tree 第二层根因；与 system_version._ident_table 同口径）
+            d = json.loads(r.stdout.decode("utf-8", "replace") or "[]", strict=False)
         except (OSError, subprocess.TimeoutExpired, ValueError):  # arch-ok: 进程表取不到 = 按“认不出”处理（拦）
             return None
         d = [d] if isinstance(d, dict) else d or []

@@ -106,8 +106,12 @@ def validate_request(req) -> list[str]:
     bad = []
     if req.get("schema") not in (None, REQ_SCHEMA):
         bad.append(f"schema 应为 {REQ_SCHEMA}")
-    if not isinstance(req.get("list"), str) or not req.get("list"):
-        bad.append("缺 list（清单文件路径，仓库相对）")
+    mf = req.get("manifests")
+    if mf is not None:
+        if not isinstance(mf, list) or not mf or not all(isinstance(x, str) and x for x in mf):
+            bad.append("manifests 要是交付清单 id 列表（data/system_versions/deliverables/<id>.json）")
+    elif not isinstance(req.get("list"), str) or not req.get("list"):
+        bad.append("缺 list（清单文件路径，仓库相对）或 manifests（交付清单 id 列表）")
     rv = req.get("reviews")
     if not isinstance(rv, list) or not rv:
         bad.append("缺 reviews（至少一组复审结论）")
@@ -331,7 +335,10 @@ def release_once(root: Path = ROOT, sv=None, runner=None, cfg: dict | None = Non
 
         res["step"] = "tree"
         try:
-            bt = sv.build_tree_from_list(root / req["list"], req.get("base") or "HEAD", repo=root)
+            if req.get("manifests"):
+                bt = sv.build_tree_from_manifests(list(req["manifests"]), req.get("base") or "HEAD", repo=root)
+            else:
+                bt = sv.build_tree_from_list(root / req["list"], req.get("base") or "HEAD", repo=root)
         except Exception as e:  # noqa: BLE001
             return fail("tree", f"按清单拼树失败：{e}")
         res["tree"], res["steps"]["tree"] = bt["tree"], bt
@@ -363,7 +370,7 @@ def release_once(root: Path = ROOT, sv=None, runner=None, cfg: dict | None = Non
         _wj(root / RES_REL, res)
         groups = "、".join(str(r.get("group")) for r in req.get("reviews") or [])
         dep = f"已部署 {'、'.join(res.get('deployed_hosts') or [])} 并 verify 通过" if res["deployed"] else "只入 git，不 deploy"
-        changelog(root, f"- {_now()[:16].replace('T', ' ')} 发版 {res['sv']}（release_tick 自动，W17 / K-OPS-V01）：清单 {req['list']}"
+        changelog(root, f"- {_now()[:16].replace('T', ' ')} 发版 {res['sv']}（release_tick 自动，W17 / K-OPS-V01）：清单 {req.get('list') or 'manifests:' + ','.join(req.get('manifests') or [])}"
                         f"（{bt['items']} 项），tree {bt['tree'][:8]}，commit {str(res.get('commit') or '')[:7]}；复审 {groups} 全部可入、P0 0；"
                         f"闸门全绿（cut --dry + cut）；{dep}；请求人 {req.get('requested_by') or '—'}。")
         live(root, f"✅ 发版（{WHO}）：{res['sv']} tree {bt['tree'][:8]} commit {str(res.get('commit') or '')[:7]}，{dep}"

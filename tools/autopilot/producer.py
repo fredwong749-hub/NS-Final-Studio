@@ -159,6 +159,8 @@ def job_sig(paths, sid: str) -> str | None:
     parts = [job.get("prompt") or "", str(job.get("compiler_inputs_sha") or "")]
     if job.get("tier_overrides"):        # L-191：首帧档（35 步 base）进签名，缓存的 8 步版不算同一作业；preview 不加段，旧签名不变
         parts.append("tier=" + json.dumps(job["tier_overrides"], sort_keys=True))
+    if job.get("prompt_template"):       # 阶段 2.1：提示词模板（v2）进签名；v1 不加段，旧签名不变
+        parts.append("template=" + str(job["prompt_template"]))
     for r in job.get("refs") or []:
         try:
             parts.append(f"{r}@{round((paths.root / str(r)).stat().st_mtime)}")
@@ -200,6 +202,8 @@ def redo_inputs_changed(paths, sid: str, kind: str, led: dict) -> str | None:
             return "提示词变了"
         if kind == "first" and ((job.get("tier_overrides") or None) != (((t.get("params") or {}).get("tier") or {}).get("overrides") or None)):
             return "出图档变了（预览 8 步 ↔ 35 步 base）"
+        if kind == "first" and ((job.get("prompt_template") or None) != ((t.get("params") or {}).get("prompt_template") or None)):
+            return "提示词模板变了（v1 ↔ v2，阶段 2.1）"
         if job.get("compiler_inputs_sha") and t.get("inputs_sha") and job["compiler_inputs_sha"] != t["inputs_sha"]:
             return "编译输入哈希变了"
         old = t.get("refs") or t.get("references") or []
@@ -249,6 +253,8 @@ def shot_inputs_sig(paths, sid: str) -> dict:
            "prompt_sha": hashlib.sha256((job.get("prompt") or "").encode()).hexdigest()[:16]}
     if job.get("tier_overrides"):        # L-191
         out["tier"] = job.get("tier")
+    if job.get("prompt_template"):       # 阶段 2.1：模板 v2
+        out["template"] = job.get("prompt_template")
     return out
 
 
@@ -4372,12 +4378,12 @@ def master_approve(paths: Paths, oid: str, n: int, by: str, note: str = "", forc
     return 0
 
 
-def regen_shots(paths: Paths, shots: list, reason: str, by: str, presets: list | None = None) -> dict:
+def regen_shots(paths: Paths, shots: list, reason: str, by: str, presets: list | None = None, dry: bool = False) -> dict:
     """B2 换代入口：对选中镜的当前首帧标“换代中”并按默认方案重出。走驳回重出（master_rejects，n=0）那条已有链路——
     不撤下当前版（active 不清空，视频 / 合成仍可用旧版；_redo_obj 对 regen 标 regen_keep，视频不等首帧），新版过契约 + 看图闸门后
     master_approve 换成当前（首帧换了 → 尾帧随首帧重做的现有逻辑）。没有当前首帧 / 已在重出 / 在换代的镜跳过"""
     from ns_render import pipeline as P
-    out = {"regen": [], "skipped": {}}
+    out = {"regen": [], "skipped": {}, "dry": bool(dry), "at": iso()}
     for sid in shots:
         oid = f"first:{sid}"
         if (P.load_takes(sid).get("active") or {}).get("image") is None:
@@ -4386,6 +4392,9 @@ def regen_shots(paths: Paths, shots: list, reason: str, by: str, presets: list |
         rj0 = (jl(paths.rejects, {}) or {}).get(oid)
         if rj0 and not rj0.get("cleared"):
             out["skipped"][sid] = "已在重出 / 换代中"
+            continue
+        if dry:                                  # --dry：只列“会换代”的镜，不写 rejects / ledger / log
+            out["regen"].append(sid)
             continue
         master_reject(paths, oid, 0, reason, presets or ["frame_v9", "frame_v9"], None, by)
         rj = jl(paths.rejects, {}) or {}
@@ -4399,6 +4408,30 @@ def regen_shots(paths: Paths, shots: list, reason: str, by: str, presets: list |
     return out
 
 
+def status_json(paths: Paths, ep: int | None = None) -> dict:
+    """status --json：episode_run 等外部编排器只读用（不在服务器上跑内联 python）。字段与 episode_run.IMAGE_SNAP 同口径"""
+    reg = jl(paths.registry, {}) or {}
+    ctl = jl(paths.ctrl, {}) or {}
+    hb = jl(paths.heartbeat, {}) or {}
+
+    def hold(f):
+        return [x for x in (jl(paths.root / "data" / "autopilot" / f, {}) or {}).get("shots") or [] if not x.get("released")]
+    eps = []
+    for E in reg.get("episodes") or []:
+        if ep and int(E.get("ep") or 0) != int(ep):
+            continue
+        shots = []
+        for S in E.get("shots") or []:
+            fo = (S.get("objects") or {}).get("first") or {}
+            shots.append({"shot": S.get("shot"), "first": fo.get("status"),
+                          "why": str(fo.get("last_error") or fo.get("waiting_for") or "")[:120]})
+        eps.append({"ep": E.get("ep"), "headline": E.get("headline"), "shots": shots})
+    return {"run": paths.run_id, "counts": reg.get("counts"), "episodes": eps, "paused": ctl.get("paused"),
+            "hold_lanes": ctl.get("hold_lanes") or [], "only": ctl.get("only") or [],
+            "pause_hold": hold("pause_hold.json"), "runaway_hold": hold("runaway_hold.json"),
+            "heartbeat": hb.get("ts"), "server_now": time.strftime("%Y-%m-%dT%H:%M:%S")}
+
+
 def shots_of_episode(paths: Paths, ep: int) -> list:
     reg = jl(paths.registry, {}) or {}
     for E in reg.get("episodes") or []:
@@ -4407,7 +4440,7 @@ def shots_of_episode(paths: Paths, ep: int) -> list:
     return []
 
 
-def regen_cmd(paths: Paths, ep: int, shots: list, reason: str, by: str, presets: list | None = None) -> dict:
+def regen_cmd(paths: Paths, ep: int, shots: list, reason: str, by: str, presets: list | None = None, dry: bool = False) -> dict:
     norm = []
     for x in shots:
         x = x.strip()
@@ -4418,7 +4451,7 @@ def regen_cmd(paths: Paths, ep: int, shots: list, reason: str, by: str, presets:
         norm = shots_of_episode(paths, ep)
     if not norm:
         return {"regen": [], "error": f"登记表里找不到第 {ep} 集的镜"}
-    return regen_shots(paths, norm, reason or "换代", by, presets)
+    return regen_shots(paths, norm, reason or "换代", by, presets, dry=dry)
 
 
 def dispatch_ok_cfg(root: Path) -> bool:
@@ -4813,10 +4846,11 @@ def main(argv=None) -> int:
                     help="pause 的 reason_kind：line_switch / restart / deploy = 运维暂停（≤180 s 到点恢复）；master / owner = 显式暂停（不自动恢复，超 180 s 报警）；不写按 --by 推断")
     ap.add_argument("--expires-s", type=float, default=0, help="pause：到点自动恢复的秒数（ops 上限 180）")
     ap.add_argument("--inject-fail", action="store_true")
-    ap.add_argument("--dry", action="store_true", help="quarantine-foreign：只出清单（缺省即 dry）；reset-best-effort：只列会重置的对象（W33）")
+    ap.add_argument("--dry", action="store_true", help="quarantine-foreign：只出清单（缺省即 dry）；reset-best-effort：只列会重置的对象（W33）；regen：只列会换代的镜，不写任何文件")
     ap.add_argument("--apply", action="store_true", help="quarantine-foreign：真的隔离（只移不删，写 manifest）")
     ap.add_argument("--rules", default="origin,role", help="quarantine-foreign：判据 origin / role / path（逗号分隔；path 在 ns_render 路径前缀修好前会误伤本剧版本）")
-    ap.add_argument("--episode", type=int, default=0, help="regen：集号")
+    ap.add_argument("--episode", type=int, default=0, help="regen / status --json：集号")
+    ap.add_argument("--json", action="store_true", help="status：机器可读 JSON（登记表摘要 + pause_hold / runaway_hold / hold_lanes / 心跳）")
     ap.add_argument("--force", action="store_true", help="approve：跳过“契约没过拒绝”的保护（B2）")
     ap.add_argument("--keep", action="store_true")
     ap.add_argument("--skip-rubric-gate", action="store_true", help="import-staged：跳过 rubric 导入闸门（只有总调度能批，--by 须写总调度，记审计）")
@@ -4883,7 +4917,8 @@ def main(argv=None) -> int:
         print(json.dumps(unhold(paths, a.obj, a.by, a.note), ensure_ascii=False))
         return 0
     if a.cmd == "regen":
-        r = regen_cmd(paths, a.episode, [x for x in a.shots.split(",") if x.strip()], a.reason or a.note, a.by, a.plan.split(","))
+        r = regen_cmd(paths, a.episode, [x for x in a.shots.split(",") if x.strip()], a.reason or a.note, a.by, a.plan.split(","),
+                      dry=a.dry)
         print(json.dumps(r, ensure_ascii=False))
         return 0 if r.get("regen") else 1
     if a.cmd == "resume" and a.shots:
@@ -4899,6 +4934,9 @@ def main(argv=None) -> int:
     if a.cmd in ("pause", "resume"):
         print(json.dumps(set_paused(paths, a.cmd == "pause", a.by, a.note, kind=a.kind or None, expires_s=a.expires_s or None),
                          ensure_ascii=False))
+        return 0
+    if a.cmd == "status" and a.json:
+        print(json.dumps(status_json(paths, a.episode or None), ensure_ascii=False))
         return 0
     if a.cmd == "status":
         reg = jl(paths.registry, {}) or {}

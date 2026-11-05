@@ -96,3 +96,23 @@
     .venv/Scripts/python.exe tools/master/pending_requests.py --all      # 含已交稿 / 已作废
 
 派单器（tools/factory/agent_dispatcher.py，L-138 已开）：写手经一次性启动器起（DETACHED + 新进程组 + CREATE_BREAKAWAY_FROM_JOB），不在 resident 进程树里；重启 resident（ops/restart_autoflow.ps1 的 taskkill /T）不会带走在跑的写手，新 resident 按 data/factory/agent_dispatcher/state.json 的 pid + 创建时间接回，不重排（ISS-1103-033131-1efe，tests/test_agent_dispatcher.py::test_resident_restart_does_not_kill_or_requeue_writer）。
+
+## ep01 收尾阶段的项目方决定怎么落进流水线（L-186…L-192，AUDIT-RULES 11-05 补；原文 docs/master/MASTER_PICTURE.md §1 末尾，机检 config/owner_decisions.yaml D-V2-187…192c）
+
+| 决定 | 流水线里的落点 | 状态（11-05 16:4x JST） |
+|---|---|---|
+| L-186 整集 ≥60 s：写作时长目标按**剪后**算（剪前 ≈ 目标 ÷ 0.7），QW-T 时长检查改为预估剪后时长；节奏规则不放松 | 第 3 步写作：writer 规则 + tools/qa/writer_lints.py 的 QW-T 时长检查 | ⏳ 规则级修法还没写进 writer 规则 / QW-T（只做了 ep01 补镜 S12–16）；归 CODER-LENS（writer_lints / writer_camera）下一轮 |
+| L-187 L-183 自动“尽力取最高分进片”改开关、**默认关** | config/pipeline/producer.json review_adopt_auto=false；重试用尽停 best_effort 进 #/queue | ✅ D-V2-187 |
+| L-188 L1 画风基线：有动机主光 + 光比 ≤3:1 + 负补光 + 背景低 1–2 档、禁平光句；sk_white_cyc 低调底图 1104；多人三层站位；post_film 开 / 关 USM；祁念短款裸粉甲 | K-WRT-807/808/809 + QW-L1/L2 阻断；run_style.json lighting_en；render_quality post_film；P1_looks | ✅ D-V2-188 / 188b；🟡 run_style.json lighting_en.fantasy 仍写 “warm ring light … from the front right” —— 幻想段按 L-130 幻想 C 高调暖金可以高调，但“环形灯 / 正面”是 L1 明令关掉的灯（H3a 6/6 关着才算过），建议改成有动机暖主光（CODER-PT 文件，待其改） |
+| L-189 KPI 改“画面指数”（bg_lum↓、subj_bg_ratio↑、dof_ratio↑、halo↓）+ 亲看抽检；VLM 只做单图缺陷 | tools/imglab/picture_index.py + tools/sentinel/scorecard.py v2（CODER-SCORE） | ✅ D-V2-189 |
+| L-190 发版 / 部署交 release_tick 自动（一次授权） | config/pipeline/release.json enabled=true；请求 data/system_versions/release_request.json（list 或 manifests） | ✅ D-V2-190；注意 tick 跑在 resident_sync loop 里 |
+| L-191 ep01 首帧 35 步 base 定稿档 + 人数闸；过肩 / 俯拍等机位不靠文字 | render_quality.json first_frame_tier.runs.series10_v2=base35（作业签名带档位）；Q10 visible_people 闸随 base35 自动开；K-REN-124 已改为只限 V1 | ✅ D-V2-191 |
+| L-192 ① 运镜白名单 6 种（static / push_in / pull_out / bolt_push_settle / handheld_follow / pedestal_up）；truck / arc 方向反写 + 中档幅度复测后项目方看样片再开；双人镜只用推 / 拉 / 固定 / 手持 | config/director/camera_moves.yaml enabled + multi_person_moves + camera_norm.multi_person_fallback；H3 官方写法运镜句 = run_style.json prompt_template.video=v2（默认 v1，待开） | ✅ D-V2-192a/b；🟡 multi_person_moves 里多了 bolt_push_settle（PS-MASTER 审 dump 后加，属推近类）—— 项目方原话是四种，开 v2 前请项目方确认 |
+| L-192 ② 构图“先摆位再出图”：3D 摆位 → 深度 / 姿势控制图 → Qwen-Image ControlNet；S4 先试 3 版 | tools/previz（CODER-PV 的 blocking 摆位脚本 + 3 份 S4 摆位 JSON），ControlNet 模型经 hf-dl；生产 workflows.py 仍不含 ControlNet（D-V2-143 注明 L-192 ② 修订路径） | ⏳ S4 3 版出图中 |
+| L-192 ③ 焦段光圈表（建立 24–35mm T2.8–4 / 双人 40–50 T2 / 过肩单人 65–85 T1.4–2 / 特写 85–135 T1.2–1.4 / 物件 100 微距）、背景须有远处实景光源、⤴ L-192 取代 L-002 旧“85mm f/1.2 奶油虚化”后缀口径（仅 lens_sim 光学标定用 f/1.2，不是出图提示词后缀）：lens_sim 按 85mm f/1.2 重标定 | K-WRT L3 条（QW-L9/L10/L11 warn）+ run_style.json lens_table 兜底 + lens_sim_v2 | ✅ D-V2-192c；🔴 **冲突**：K-WRT-812（L2 焦段“全集只用三档 35 / 50 / 75，特写 = apo_summicron_75_f2”，QW-L4）与 L-192 表（特写 85–135）互相矛盾，config/director/lenses.yaml 没有 85 / 100 / 135 档且光圈（f/2–2.8）低于表 → 按 L-192 改 K-WRT-812 档位与 lenses.yaml（加 Summilux-M 90 f/1.5 等效 85–90、APO 135），CODER-LENS 文件，待其改 |
+
+### 当天验证有效的运维规矩（已写进 knowledge/rules/ops_infra.yaml K-OPS-I08…I10）
+- **转发器父子 = 一份服务**：.venv\Scripts\python.exe 是 venv launcher，再起 Python312 子进程；resident_sync / monitor / sentinel 各“两份”实为一份。盘点用 `python tools/ops/proc_instances.py`，不按解释器路径杀。
+- **wsl.exe 会再展开 $VAR、MSYS 会转换 /mnt/c 路径**：WSL 侧脚本从 stdin 管进去（`wsl.exe -e bash -s < x.sh`），Git Bash 调 wsl.exe 前 `MSYS_NO_PATHCONV=1`。
+- **时间一律 JST（TZ=JST-9）**：笔记本时钟美东；system_version.ENV / release_tick / cut_deploy_*.sh 同口径；Git Bash 取时间用 `TZ=JST-9 date`（`TZ=Asia/Tokyo` 退成 UTC）。
+- **deploy 后本机也写 data/system_version.txt**（之前只写服务器，本机工具读到 11-02 旧版本）。

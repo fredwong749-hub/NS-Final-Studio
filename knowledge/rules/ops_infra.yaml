@@ -101,3 +101,42 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-01
+  # ---- AUDIT-RULES 11-05（项目方常令“每次做对的规则写到系统去”）：当天运维里验证有效的三条
+  - id: K-OPS-I08
+    domain: ops
+    link: [P7-P8]
+    check: [tests/test_audit_rules_1105.py::test_proc_instances_collapses_venv_launcher_pair, tools/ops/proc_instances.py]
+    title: Windows 上 .venv 的 python.exe 是转发器：同一命令行的“.venv 父 + Python312 子”两个 pid = 一份服务，不是重复
+    when: 盘点 / 守护 / 重启笔记本常驻进程（resident_sync loop、monitor/server.py、sentinel serve、:8800 api），或任何“按进程名数份数”的检查
+    then: 份数用 tools/ops/proc_instances.py（父子合并成一条逻辑实例；api 链 = 看门狗 → 转发器 → uvicorn 转发器 → uvicorn 也算一份）；守护脚本的 match 同时命中父子是正常的，taskkill 时按父 pid /T 一起停；不许按解释器路径只杀“系统 Python 那份”（那是唯一干活的子进程）
+    evidence:
+      - {src: tools/ops/proc_instances.py, note: "11-05 实查：resident_sync 19180→25584、monitor 48428→20812、sentinel 16080→12632，父子创建时间差 1 s、参数串相同；逻辑实例各 1 份"}
+      - {src: ops/restart_api.ps1, note: "第 313 行注：父子两个算同一份服务，不是重复（K-OPS-F30 的 W-34 证据同）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-05
+  - id: K-OPS-I09
+    enforced: false   # 规则级；还没有机检（候选：arch_scan 扫 Git Bash 脚本里 wsl.exe 后带 $ 的参数）
+    domain: ops
+    link: [P7-P8]
+    title: 从 Git Bash / PowerShell 调 wsl.exe 时命令串里的 $VAR 会被 WSL 侧 bash 再展开一次、/mnt/c 路径会被 MSYS 转换——脚本用 stdin 管进去，不拼在参数里
+    when: 笔记本辅助脚本经 wsl.exe 跑 WSL 侧 bash / ssh（PS-MASTER 辅助脚本、监视器、重试脚本）
+    then: 脚本正文走 `wsl.exe -e bash -s < script.sh`（或 heredoc 管进 stdin），参数里不放 $VAR / 反引号；Git Bash 调 wsl.exe 前设 MSYS_NO_PATHCONV=1；时间戳一律 TZ=JST-9（见 K-OPS-I10）
+    evidence:
+      - {src: docs/master/CHANNEL.md, note: "11-04 18:0x PS-MASTER：监视器 / 重试 0 事件的原因是 Git Bash 调 wsl.exe 时 /mnt/c 路径被转换（需 MSYS_NO_PATHCONV=1）；11-05 brief：wsl.exe expands $VARS — pipe scripts"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-05
+  - id: K-OPS-I10
+    domain: ops
+    link: [P7-P8]
+    check: [tests/test_audit_rules_1105.py::test_sv_env_defaults_tz_jst]
+    title: 测试 / cut / 发版 / CHANNEL 时间戳一律 JST（TZ=JST-9）；笔记本系统时钟是美东，不设 TZ 会让按 JST 解析无时区串的测试红
+    when: 跑 pytest（cut 七门、定向 pytest、工人自测）、写 CHANNEL / 清单 / 账本时间、在 Git Bash 取当前时间
+    then: system_version.ENV 默认 TZ=JST-9（调用方已设 TZ 不覆盖）、release_tick 与 ops/psmaster/cut_deploy_*.sh 同口径；取时间用 `TZ=JST-9 date`（Git Bash 无 zoneinfo，`TZ=Asia/Tokyo` 会退成 UTC，11-05 实测 07:37 vs 16:38）；测试不按本机时钟写时区假设
+    evidence:
+      - {src: docs/master/CHANNEL.md, note: "11-05 15:23 CODER-I：debug_rsi e19/e21/e28 在 JST 下全过，笔记本美东时钟会红，非代码缺陷；15:3x PS-MASTER 更正两条非 JST 时间戳"}
+      - {src: tools/autopilot/release_tick.py, note: "第 230 行 env TZ=JST-9"}
+    confidence: high
+    status: 确认
+    date: 2026-11-05

@@ -228,6 +228,14 @@ def build_base(spec: ShotSpec, recipe: dict, mode: str, frames: int, attempt: in
         if why:
             raise NeedsWriter(f"{spec.id} 缺时间轴：{why}")
     notes = []
+    run = video_run(spec)
+    # 阶段 2.1 视频模板 v2（CODER-PT 11-05，PLAN_EP01_FINISH §9）：按剧开关 run_style.json runs.<剧>.prompt_template.video；
+    # v2 = 正文按官方写法重编（短锚点句 + 运镜独立成句（词表 h3_official）+ 写作方分拍），在 I2VA 转换之前做（FL2VA 形态）；默认 v1 不进
+    from . import prompt_v2 as PV2
+    template_v2 = PV2.on(run)
+    if template_v2:
+        body, n2 = PV2.video_body_for_spec(spec, run)
+        notes += n2
     if mode == "i2va":
         body, n = to_i2va_body(body)
         notes += n
@@ -241,8 +249,12 @@ def build_base(spec: ShotSpec, recipe: dict, mode: str, frames: int, attempt: in
         if gone:
             notes.append("删去景别外造型分句（prompt.hide_offframe_parts）：" + " | ".join(gone))
     # DIRECTOR 11-02（总调度批复 r2 第 1 条，K-REN-801）：运镜句确定性规范化到 Pika 稳定范围，改动记进 notes（jobs.json prompt_notes）
-    body, cam_changes = _camera_norm().normalize_video_prompt(body, getattr(getattr(spec, "motion", None), "text", "") or "",
-                                                              run=video_run(spec))   # MERGE-VID-O：按本镜所属的剧取运镜（ISS-0474）
+    # 模板 v2 的运镜句已按同一词表 / 同一 is_enabled 生成，不再二次规范化
+    cam_changes: list[dict] = []
+    if not template_v2:
+        body, cam_changes = _camera_norm().normalize_video_prompt(body, getattr(getattr(spec, "motion", None), "text", "") or "",
+                                                                  run=run,   # MERGE-VID-O：按本镜所属的剧取运镜（ISS-0474）
+                                                                  n_people=len(spec.visible) if hasattr(spec, "visible") else None)   # L-192 多人镜白名单（测试替身不判）
     for ch in cam_changes:
         notes.append(f"{ch['rule']} 运镜规范化：{ch['from']} → {ch['to']}")
     # ACTING 11-01（R11-2 / R11-8）：开头即动 + 视线落点，两句系统固定提示（_base.yaml prompt.open_motion_cue / eyeline_cue），

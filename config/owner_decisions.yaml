@@ -705,8 +705,8 @@ checks:
     pattern: 'L-142'
     paths: [docs/master/PLAN_V2_MASTER.md]
   - id: D-V2-143
-    decision: L-143（项目方 11-03 04:2x：IMGLAB 结构化控制 ControlNet pose/depth、Face/HandDetailer、PuLID、IC-Light ep01 不上；ep02 起逐项 A/B、指标证明才留）
-    title: 生产出图工作流（ns_render/workflows.py）不含结构化控制节点
+    decision: L-143（项目方 11-03 04:2x：IMGLAB 结构化控制 ControlNet pose/depth、Face/HandDetailer、PuLID、IC-Light ep01 不上；ep02 起逐项 A/B、指标证明才留）。L-192 ②（11-05）局部修订：构图走“3D 摆位 → 深度 / 姿势控制图 → Qwen-Image ControlNet 出图”，先在 tools/previz（CODER-PV）对 S4 试 3 版给项目方看；项目方点头铺开时本条改为“生产工作流的 ControlNet 节点受按剧开关控制、默认关”，在那之前生产 workflows.py 仍不含（AUDIT-RULES 11-05 注）
+    title: 生产出图工作流（ns_render/workflows.py）不含结构化控制节点（previz 试验路径在 tools/previz，不在此文件）
     type: grep_absent
     pattern: 'ControlNet|PuLID|IC-Light|FaceDetailer|HandDetailer'
     paths: [services/render_router/ns_render/workflows.py]
@@ -716,3 +716,64 @@ checks:
     type: grep_present
     pattern: 'L-144'
     paths: [docs/master/PLAN_V2_MASTER.md]
+
+  # ---------------- ep01 收尾决策 L-186…L-192（AUDIT-RULES 11-05 补登；原文见 docs/master/MASTER_PICTURE.md §1 末尾）
+  - id: D-V2-187
+    decision: L-187（项目方 11-04 15:3x：L-183 自动“尽力取最高分进片”改为开关、默认关；重试用尽停 best_effort 进 #/queue 等项目方挑）
+    title: producer.json review_adopt_auto = false（默认关）
+    type: json
+    file: config/pipeline/producer.json
+    path: [review_adopt_auto]
+    op: eq
+    value: false
+  - id: D-V2-188
+    decision: L-188（项目方 11-04 20:4x “用 L1”：只写有动机主光 + 光比 ≤3:1 + 负补光 + 背景低 1–2 档，禁平光句；sk_white_cyc 换低调底图；多人三层站位；post_film 开 / 关 USM；祁念短款裸粉甲）
+    title: 写作规则有 L-188 光线条（K-WRT-807 / QW-L1 阻断）
+    type: grep_present
+    pattern: 'L-188'
+    paths: [knowledge/rules/writer_camera.yaml]
+  - id: D-V2-188b
+    decision: L-188 ①禁平光句——编译配置里不得再有“正面高亮 / 把影子打平 / flattening the shadows / 白幕反射补脸”
+    title: run_style.json / render_quality.json 无平光句
+    type: grep_absent
+    pattern: '正面高亮|把影子打平|flattening the shadows|白幕反射补脸|bright ring light from the front'
+    paths: [config/compile/run_style.json, config/render_quality.json]
+  - id: D-V2-189
+    decision: L-189（项目方 11-04 20:4x：KPI“好莱坞质感分（VLM）”改为确定性“画面指数”+ 亲看抽检；本地 VLM 只做单图缺陷）
+    title: 画面指数模块在（tools/imglab/picture_index.py，CODER-SCORE 尺子 v2）
+    type: exists
+    paths: [tools/imglab/picture_index.py]
+  - id: D-V2-190
+    decision: L-190（项目方 11-05 10:5x “1，2，3 都同意”：发版 / 部署交常驻 release_tick 自动执行，一次授权）
+    title: release.json enabled = true（release_tick 随 resident_sync 每拍自动 cut → deploy）
+    type: json
+    file: config/pipeline/release.json
+    path: [enabled]
+    op: eq
+    value: true
+  - id: D-V2-191
+    decision: L-191（项目方 11-05 12:xx 选 A：ep01 首帧改 35 步 base 定稿档；多画人由 Q1 + 看图人数闸挡）
+    title: render_quality.json first_frame_tier.runs.series10_v2 = base35
+    type: json
+    file: config/render_quality.json
+    path: [first_frame_tier, runs, series10_v2]
+    op: eq
+    value: base35
+  - id: D-V2-192a
+    decision: L-192 ①（项目方 11-05 16:3x 运镜表选 A：白名单扩为 6 种 static / push_in / pull_out / bolt_push_settle / handheld_follow / pedestal_up；truck / arc 复测后再定）
+    title: camera_moves.yaml 记了 L-192 启用（pull_out / pedestal_up enabled_by L-192）
+    type: grep_present
+    pattern: 'enabled_by: "L-192'
+    paths: [config/director/camera_moves.yaml]
+  - id: D-V2-192b
+    decision: L-192 ①“双人镜只用推 / 拉 / 固定 / 手持”——编译层 multi_person_moves 白名单 + camera_norm.multi_person_fallback
+    title: camera_moves.yaml 有 multi_person_moves
+    type: grep_present
+    pattern: '^multi_person_moves:'
+    paths: [config/director/camera_moves.yaml]
+  - id: D-V2-192c
+    decision: L-192 ③（焦段光圈表：建立 24–35mm T2.8–4 / 双人 40–50 T2 / 过肩单人 65–85 T1.4–2 / 特写 85–135 T1.2–1.4 / 物件 100 微距；背景须有远处实景光源；lens_sim 按 85mm f/1.2 重标定）
+    title: 写作规则有 L-192 焦段光圈表条（K-WRT L3 / QW-L9）且编译兜底表记 L-192
+    type: grep_present
+    pattern: 'L-192'
+    paths: [knowledge/rules/writer_camera.yaml, config/compile/run_style.json]

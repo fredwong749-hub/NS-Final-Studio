@@ -56,3 +56,10 @@
 | 发版 | 15 | cut 一次通过率；服务器版本落后 ≤ 1 | ≥ 80% | 100% |
 | 结构健康 | 20 | arch_scan 棘轮各项总数（只许减） | 每轮下降 | 清零 |
 | 规则覆盖 | 15 | 今晚每个人工判断都有对应规则 + check | 100% | 100% |
+
+## v2 尺子（11-05，L-189 落地，CODER-SCORE）
+- 版本号：scorecard 原读 data/system_version.txt（deploy 在被部署的服务器上写；笔记本从不被 deploy，停在 sv-20261102-04）。改 `current_sv()`：取 txt / data/system_versions/index.json / git sv-* 标签的最大者。
+- 出图线 = 0.35 × 契约分（只量缺陷，旧 89.5 的来源）+ 0.65 × 画面指数。画面指数 `tools/imglab/picture_index.py`：dof 0.25（脸框/背景锐度，复用 lens_sim_ab.metrics）、bg 0.20（背景亮度 + 白幕空白）、scale 0.15（脸高 ÷ 景别档下限，焦段代理）、lineup 0.20（多人一排站惩罚）、layers 0.20（纵深层次：深度图或 12×8 格锐度三档）。未测：灭点 / 机位高度 / 前景遮挡语义。
+- 项目方抽检：`data/rsi/owner_spotcheck.json` verdict=不合格 → 出图线封顶 60，直到改成“合格”（有更新版本被亲看通过）。当前登记：ep01 v3/v4 + S4 lens_sim 不合格。
+- 锚点：data/ab/adherence_img 20 张，t35 均值高于 t8（63.4 → 71.1）；弱点：与项目方 1–4 分相关仅 0.26（秩相关），仍需抽检校准，不得单凭指数宣称“好莱坞”。
+- 视频线：本集无视频时沿用最近一次有分的视频线（标 stale，evidence.stale / scored_at），附运镜执行基准（adherence_video 官方写法 Pika 白名单 6 种均分）；有视频时仍走 vidlab score（cam / act / lip / cons / stab / film）。

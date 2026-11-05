@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from ns_agent import asset_refs as AR
 from ns_agent import compiler as C
+from ns_agent import prompt_template_v2 as PT2
 import re
 
 
@@ -294,7 +295,11 @@ def with_note(body: str, note: str) -> str:
 
 
 def cast_of(shot) -> list[dict]:
-    return [{"name": AR.g(c, "name"), "presence": AR.g(c, "presence"), "x": AR.g(c, "x"), "depth": AR.g(c, "depth")}
+    """作业 cast（人数闸 tools/vqa/accept.people_range 读）。face_hidden：在画但不露脸（过肩前景只露肩 / 后脑、背影、被遮，
+    prompt_template_v2.hidden_people）→ 计上限不计下限（PS-MASTER 11-05）"""
+    hidden = PT2.hidden_people(shot) if AR.g(shot, "cast") else {}
+    return [{"name": AR.g(c, "name"), "presence": AR.g(c, "presence"), "x": AR.g(c, "x"), "depth": AR.g(c, "depth"),
+             **({"face_hidden": True, "hidden_part": hidden[AR.g(c, "name")]} if AR.g(c, "name") in hidden else {})}
             for c in (AR.g(shot, "cast") or [])]
 
 
@@ -307,6 +312,16 @@ def build_first(project: str, ep, shot, g, *, bible=None, model: str = "qwen_ima
     sid = f"ep{n:02d}-S{AR.g(shot, 'index')}"
     full, c, sr, plan = compile_frame(ep, shot, g, project, bible=bible, model=model, mode=mode, **plan_kw)
     body = full[len(plan.prompt_prefix):]
+    tmpl, tmpl_trace, neg_extra = None, None, []
+    if not prompt_override and mode == "shot" and PT2.image_on(project):
+        # 阶段 2.1 提示词模板 v2（CODER-PT 11-05，PLAN_EP01_FINISH §8 ①–⑤）：正文按 Qwen-Image 模板重编（机位首句置前、去【角色】块、
+        # 人物一行、场景 + 一句布光、否定进负面词、按露脸人数写同框）；参考槽标注（plan.prompt_prefix）与契约补句（with_note）不变。
+        # 按剧开关 run_style.json runs.<剧>.prompt_template.image，默认 v1 = 本分支不进
+        seg_t, _ = ST.segment_of(shot)
+        body, neg_extra, tmpl_trace = PT2.image_body(project, ep, shot, g, c, sr, plan, style_suffix=ST.image_suffix(project, seg_t))
+        body = with_note(body, plan.prompt_note + outer_items_note(project, ep, shot, sr, body) + eyeline_note(shot, sr, body)
+                         + garment_detail_note(project, ep, shot, sr, body) + blocking_note(shot, body))
+        tmpl = PT2.TEMPLATE_ID
     if prompt_override:
         seg_in, seg_src = ST.segment_of(shot)       # P1-1（REVIEW-G4）：改稿路径按本剧本段取后缀（与 :323 同一函数），不再取当前剧缺省段
         body = prompt_override if ST.preset_suffix(project, seg_in) in prompt_override else f"{prompt_override}，{ST.image_suffix(project, seg_in)}"
@@ -332,7 +347,10 @@ def build_first(project: str, ep, shot, g, *, bible=None, model: str = "qwen_ima
     tier, tier_ov = first_frame_tier(project)                                  # L-191：按剧开 35 步 base 首帧档（默认 preview，不加字段）
     if tier_ov:
         job["tier"], job["tier_overrides"] = tier, tier_ov
-    job["negative"] = job_negative(c.image_negative, AR.brand_negative(project, plan))
+    job["negative"] = job_negative(c.image_negative, AR.brand_negative(project, plan), "、".join(neg_extra))
+    if tmpl:                                                                   # 阶段 2.1：模板进作业（签名 / take.params / 重出判定都认它）
+        job["prompt_template"], job["prompt_template_trace"] = tmpl, tmpl_trace
+        job["compiled_by"] += " + ns_agent.prompt_template_v2"
     job["adult_reasons"] = AR.plan_adult(project, sr, plan)                    # L-128 不变项：成人画面作业只由项目方触发
     job["adult"] = bool(job["adult_reasons"])
     job["compile_trace"] = trace_of(job)
@@ -360,6 +378,7 @@ def trace_of(job: dict) -> dict:
             "prompt_sha": _sha16(job.get("prompt") or ""), "refs": refs,
             "refs_sha": _sha16(json.dumps([r["sha"] or r["file"] for r in refs])),
             "compiler_inputs_sha": job.get("compiler_inputs_sha"), "blocking": job.get("blocking"),
+            "prompt_template": job.get("prompt_template"),            # 阶段 2.1：v2 模板随 take 落账（None = 现行 v1）
             "faces": face_ids(ar.get("slots") or []),
             "last_faces": job.get("last_faces"), "style_preset": job.get("preset"), "style_segment": job.get("style_segment"),
             "style_warning": job.get("style_warning"), "route": job.get("route"), "route_reasons": job.get("route_reasons"), "adult": job.get("adult"),

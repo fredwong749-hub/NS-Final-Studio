@@ -1,5 +1,6 @@
 """H4：光学模拟后期 lens_sim（不依赖深度模型：用合成视差）"""
 import sys
+import cv2
 from pathlib import Path
 
 import numpy as np
@@ -179,3 +180,134 @@ def test_new_params_do_not_change_disabled_path():
     im, d = _two_people()
     out, rec = LS.apply(im, {"enabled": False, "focus": "all_faces"}, depth=d)
     assert out is im and rec["enabled"] is False
+
+
+# ---------------------------------------------------------------- v2 真实光学（L-192 ③）
+from ns_render import lens_sim_v2 as V2  # noqa: E402
+
+
+def test_v2_coc_sanity_85mm_f12():
+    """85mm f/1.2，主体 2.5 m，背景再远 5 m，1152 宽（24 mm 短边）→ ≈ 80 px 直径"""
+    d = float(V2.coc_diameter_px(85, 1.2, 2.5, 7.5, V2.pitch_mm_for(1152)))
+    assert 77 < d < 83
+    assert float(V2.coc_diameter_px(85, 1.2, 2.5, 2.5, 0.02)) < 1e-3                     # 对焦点 = 0
+    assert V2.coc_diameter_px(50, 2.0, 2.5, 7.5, 0.02) < V2.coc_diameter_px(85, 1.2, 2.5, 7.5, 0.02)   # 短焦 + 小光圈更不虚
+    assert V2.coc_diameter_px(85, 1.2, 2.5, 1.5, 0.02) > 0                                 # 前景也有弥散
+
+
+def test_v2_optics_line_parse():
+    o = V2.parse_optics_line("85mm｜T1.4｜高度=1.5m 眼平｜焦点=祁念｜距离=2.5m")
+    assert o == {"focal_mm": 85.0, "t_stop": 1.4, "camera_height_m": 1.5, "focus_subject": "祁念", "focus_distance_m": 2.5}
+    assert V2.optics_from_spec({"focal_mm": 50, "光学": "85mm｜T1.4"})["focal_mm"] == 50.0
+
+
+def _bokeh_scene():
+    """焦平面（视差 0.8）整幅高频纹理 + 背景（视差 0.1）暗底上一个 3×3 亮点 → 应成圆盘"""
+    rng = np.random.default_rng(3)
+    a = np.full((480, 288, 3), 20, np.uint8)
+    a[:, :120] = rng.integers(40, 200, (480, 120, 3), dtype=np.uint8)
+    a[240:243, 150:153] = 255
+    d = np.full((480, 288), 0.1, np.float32)
+    d[:, :120] = 0.8
+    return a, d
+
+
+def _v2p(**o):
+    opt = {"enabled": True, "focal_mm": 85.0, "t_stop": 1.2, "focus_distance_m": 2.5, "bg_distance_m": 7.5, "cat_eye": 0.0, "rim": 0.0,
+           "face_falloff": {"enabled": False}, "max_radius_frac": 0.2}
+    opt.update(o)
+    return dict(LS.DEFAULTS, enabled=True, focus=[0.2, 0.5], vignette=0.0, ca=0.0, halation={"gain": 0.0, "thr": 0.8, "sigma": 0.01}, optics_v2=opt)
+
+
+def test_v2_highlight_becomes_disc():
+    a, d = _bokeh_scene()
+    y = a.astype(np.float32) / 255
+    fi = LS.pick_focus(d, [], [0.2, 0.5], 0.05)
+    out, rec = V2.lens_array_v2(y, d, _v2p(), fi)
+    g = out.mean(-1)
+    r = rec["coc_bg_diam_px"] / 2
+    assert r > 8 and rec["hl_blobs"] >= 1
+    cy, cx = 241, 151
+    assert g[cy, cx] > 0.5                                  # 圆斑中心够亮（能量补回），不是灰糊
+    ins = g[cy, cx + int(r * 0.6)]                          # 圆盘：半径内近似平顶，半径外迅速衰减
+    outs = g[cy, cx + int(r * 1.5)]
+    assert ins > 0.4 and ins > 3 * outs
+    assert (g[cy - int(r * 0.6):cy + int(r * 0.6), cx - 2:cx + 3] > 0.4).all()
+
+
+def test_v2_focus_plane_untouched_and_disabled_identical():
+    a, d = _bokeh_scene()
+    y = a.astype(np.float32) / 255
+    fi = LS.pick_focus(d, [], [0.2, 0.5], 0.05)
+    out, _ = V2.lens_array_v2(y, d, _v2p(), fi)
+    assert np.abs(out[:, :100] - y[:, :100]).max() < 1e-6      # 焦平面像素不动
+    im = Image.fromarray(a)
+    o2, rec = LS.apply(im, {"enabled": True, "optics_v2": {"enabled": False}, "focus": [0.2, 0.5], "vignette": 0, "ca": 0,
+                            "halation": {"gain": 0}, "depth_refine": {"radius": 0, "eps": 1e-3}}, depth=d)
+    assert rec["version"] == LS.VERSION                       # v2 关 → 走 v1
+
+
+def test_v2_no_halo_around_in_focus_subject():
+    """亮背景 + 暗的焦内主体：主体边缘外的亮背景不能被暗色渗入（遮挡感知），主体内部也不渗背景的亮"""
+    y = np.full((240, 144, 3), 0.9, np.float32)
+    y[60:200, 40:80] = 0.1
+    d = np.full((240, 144), 0.1, np.float32)
+    d[60:200, 40:80] = 0.8
+    fi = LS.pick_focus(d, [], [0.4, 0.5], 0.05)
+    out, _ = V2.lens_array_v2(y, d, _v2p(max_radius_frac=0.1), fi)
+    assert out[100, 50].max() < 0.13                          # 主体内部没被背景白渗入
+    assert out[100, 60].max() < 0.13
+    assert out[100, 120].min() > 0.85                         # 远处背景没被暗色染脏
+    assert (out[100, 82:90] >= 0.8).all() or out[100, 88].min() > 0.8   # 主体外一圈没有变暗 / 白晕（均匀白背景保持白）
+    assert float(out[100, 82:100].max()) < 1.0 + 1e-6
+
+
+def test_v2_face_falloff_ears_softer_than_eyes():
+    a = np.random.default_rng(5).integers(60, 200, (200, 200, 3), dtype=np.uint8)
+    d = np.full((200, 200), 0.8, np.float32)
+    y = a.astype(np.float32) / 255
+    face = [60.0, 50.0, 80.0, 100.0, 0.9]
+    fi = {"mode": "face", "disp": 0.8, "band": [0.75, 0.85], "face": face, "faces": 1}
+    o = _v2p(face_falloff={"enabled": True, "ear_depth_m": 0.12, "width": 1.25}, bg_distance_m=None, max_radius_frac=0.1, focus_distance_m=2.0)
+    out, _ = V2.lens_array_v2(y, d, o, fi, [face])
+    import cv2
+    lap = lambda r: float(cv2.Laplacian(cv2.cvtColor((out[r] * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY), cv2.CV_32F).var())  # noqa: E731
+    eyes = lap((slice(85, 100), slice(85, 115)))
+    ears = lap((slice(85, 100), slice(60, 72)))
+    assert ears < eyes * 0.8
+
+
+def test_v2_anamorphic_oval_and_cat_eye_kernels():
+    k = V2.bokeh_kernel(12, aspect=1.8)
+    assert k.shape[0] > k.shape[1]                            # 竖椭圆
+    assert abs(float(k.sum()) - 1.0) < 1e-4
+    kc = V2.bokeh_kernel(12, squash=0.5, direction=(1.0, 0.0))
+    base = V2.bokeh_kernel(12)
+    assert int((kc.sum(0) > 0).sum()) < int((base.sum(0) > 0).sum())   # 沿偏移方向变窄 = 柠檬形
+    kr = V2.bokeh_kernel(12, rim=0.5)
+    c = kr.shape[0] // 2
+    assert kr[c, c + 10] > kr[c, c]                           # 边缘增亮
+
+
+def test_v2_no_dark_halo_outside_dark_edge():
+    """深色主体（头发）外侧的亮背景亮度不下降：深度边缘糊（过渡 0.2–0.6）时，v2 默认设置下外圈不能出现暗 / 灰斑"""
+    h, w = 480, 288
+    y = np.full((h, w, 3), 0.88, np.float32)
+    yy, xx = np.mgrid[0:h, 0:w]
+    head = ((xx - 144) / 70.0) ** 2 + ((yy - 220) / 90.0) ** 2 <= 1.0
+    y[head] = 0.06
+    inner = cv2.erode(head.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)))     # 深度图比真实轮廓小 4 px（发丝边缘判成远景）
+    dm = inner.astype(np.float32) * 0.75 + 0.05
+    dm = cv2.GaussianBlur(dm, (0, 0), 3)                    # 再加边缘的糊
+    import cv2 as _c  # noqa: F401
+    fi = {"mode": "face", "disp": 0.7, "band": [0.65, 0.75], "face": [100.0, 180.0, 90.0, 110.0, 0.9], "faces": 1}
+    o = {"enabled": True, "focal_mm": 85.0, "t_stop": 1.2, "focus_distance_m": 2.5, "bg_distance_m": 7.5}
+    p = dict(LS.DEFAULTS, enabled=True, vignette=0.0, ca=0.0, halation={"gain": 0.0, "thr": 0.8, "sigma": 0.01}, optics_v2=o)
+    out, _ = V2.lens_array_v2(y, dm, p, fi, [fi["face"]])
+    g = out.mean(-1)
+    kd = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25, 25))
+    ring = (cv2.dilate(head.astype(np.uint8), kd) > 0) & (cv2.dilate(head.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))) == 0)
+    assert ring.sum() > 500
+    assert float(g[ring].min()) > 0.86 and float((g[ring] - 0.88).mean()) > -0.003      # 暗晕版：0.81 / -0.0137（occlusion 0）、0.833 / -0.0054（0.008）
+    far = (cv2.dilate(head.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (81, 81))) == 0)
+    assert float(g[far].min()) > 0.86

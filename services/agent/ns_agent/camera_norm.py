@@ -137,17 +137,36 @@ def enabled() -> bool:
         return True
 
 
-def norm_clause_info(c: str, big_action: bool, run: str | None = None) -> tuple[str, str, str | None]:
-    """→ (新句子不含 “The camera ” 前缀, 词表 id, 退回原因或 None)"""
+def multi_person_moves() -> list[str]:
+    """L-192：双人及以上在画只允许的运镜（camera_moves.yaml multi_person_moves；没写 = 不限）"""
+    return list(vocab().get("multi_person_moves") or [])
+
+
+def multi_person_ok(mid: str | None, n_people: int | None) -> bool:
+    allow = multi_person_moves()
+    return not (n_people and n_people >= 2 and allow) or (mid in allow)
+
+
+def multi_person_fallback(mid: str | None, n_people: int | None, run: str | None = None) -> tuple[str | None, str | None]:
+    """不合规 → (退回 id, 原因)；合规 → (mid, None)。退回 push_in（本剧 enabled）否则 static"""
+    if multi_person_ok(mid, n_people):
+        return mid, None
+    why = f"{mid}：L-192 {n_people} 人在画只允许 {' / '.join(multi_person_moves())}"
+    return ("push_in" if is_enabled("push_in", run) else "static"), why
+
+
+def norm_clause_info(c: str, big_action: bool, run: str | None = None, n_people: int | None = None) -> tuple[str, str, str | None]:
+    """→ (新句子不含 “The camera ” 前缀, 词表 id, 退回原因或 None)。n_people：在画人数（L-192 多人镜白名单；None = 不判）"""
     raw = c.strip()
     mid = match_en(raw)
     d = "left" if re.search(r"\bleft\b", raw, re.I) else "right"
     why = None
-    if mid and run_scoped(mid) and is_enabled(mid, run):
+    if mid and run_scoped(mid) and is_enabled(mid, run) and multi_person_ok(mid, n_people):
         return raw, mid, None                    # 本剧可用的按剧运镜：写作方照词表模板写的原句保留（速度词是它的一部分）
     if mid is None or not is_enabled(mid, run):
         mid, why = fallback(mid, big_action)
-    return clause(mid, d)[len("The camera "):], mid, why
+    mid, why2 = multi_person_fallback(mid, n_people, run)
+    return clause(mid, d)[len("The camera "):], mid, why2 or why
 
 
 def norm_clause(c: str, big_action: bool, run: str | None = None) -> str:
@@ -161,15 +180,15 @@ def denormalize(text: str, changes: list[dict]) -> str:
     return text
 
 
-def normalize_video_prompt(text: str, motion_body: str = "", run: str | None = None) -> tuple[str, list[dict]]:
-    """→ (规范化后的提示词, 改动记录 [{rule, from, to, move, why, vocab}])"""
+def normalize_video_prompt(text: str, motion_body: str = "", run: str | None = None, n_people: int | None = None) -> tuple[str, list[dict]]:
+    """→ (规范化后的提示词, 改动记录 [{rule, from, to, move, why, vocab}])。n_people：在画人数（L-192；None = 不判，旧调用不变）"""
     if not text or not enabled():
         return text, []
     big = bool(BIG_ACTION.search(motion_body or "") or BIG_ACTION.search(text))
     changes = []
 
     def sub(m):
-        new, mid, why = norm_clause_info(m.group(1), big, run)
+        new, mid, why = norm_clause_info(m.group(1), big, run, n_people)
         if new != m.group(1).strip():
             changes.append({"rule": "K-REN-801", "from": "The camera " + m.group(1).strip(), "to": "The camera " + new,
                             "move": mid, "why": why or "按词表模板（小幅、去速度词）", "vocab": vocab().get("version")})
