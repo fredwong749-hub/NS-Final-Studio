@@ -6,7 +6,10 @@ gpu33 / gpu36 互不信任（K-OPS-Y02），所以 gpu33 的 producer 要用 gpu
     gpu33   producer 启动时读配置：enabled 且 OFFLINE_SELF == consumer_host → self.lanes 多一条 gpu36:0 = http://127.0.0.1:<listen_port>
 
 代理只放行 ComfyUI 出图要用的 method+path（见 ALLOW），别的一律 403；上游只能是配置里写死的隧道口（不接受请求里的地址）。
-黑名单道（gpu36:1 看图卡 / gpu33:2 / gpu36:2 坏卡与长镜头道）和非 image 角色的道，配置里写了也拒绝。
+黑名单道（只剩 gpu33:2 坏卡；L-194 11-05 项目方授权 gpu36:0/1/2 全归 NS，原 gpu36:1 / gpu36:2 黑名单撤销）和非 image 角色的道，配置里写了也拒绝。
+
+阶段交接（出图 → 视频）：借来的道在视频阶段要还给 gpu36 本机视频作业。手动开关 = 文件 data/pipeline/lane_relay_hold.json
+{"hold": ["gpu36:1", "gpu36:2"]}（或 "all"）；producer 每轮 probe_lanes 现读，列在里面的借道不再派首帧（在跑的做完）；删文件 / 清空 = 恢复。
 """
 from __future__ import annotations
 
@@ -24,7 +27,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CFG = ROOT / "config" / "pipeline" / "lane_relay.json"
-NEVER = ("gpu33:2", "gpu36:2", "gpu36:1")           # 坏卡 / 长镜头道 / 看图实例（~11.5 GB）：永不借
+NEVER = ("gpu33:2",)                                 # 坏卡：永不借（L-194：gpu36:1 / gpu36:2 已归 NS，不再黑名单）
+HOLD_FILE = ROOT / "data" / "pipeline" / "lane_relay_hold.json"
 ALLOW = [("GET", r"/system_stats"), ("GET", r"/queue"), ("GET", r"/object_info(/[\w.\-]+)?"), ("GET", r"/history(/[\w\-]+)?"),
          ("GET", r"/view"), ("GET", r"/prompt"), ("POST", r"/prompt"), ("POST", r"/upload/image"), ("GET", r"/view_metadata/.+"),
          ("POST", r"/interrupt"), ("POST", r"/free"), ("POST", r"/queue")]
@@ -70,6 +74,18 @@ def consumer_lanes(cfg: dict | None = None, host: str | None = None, lane_ok=_im
     if not cfg.get("enabled") or not host or host != cfg.get("consumer_host"):
         return {}
     return {ln: f"http://127.0.0.1:{int(rec['listen_port'])}" for ln, rec in valid_lanes(cfg, lane_ok).items()}
+
+
+def runtime_hold(lanes, path: Path | None = None) -> set:
+    """阶段交接开关（现读，读不到 / 坏 = 不挡）：{"hold": ["gpu36:1", ...]} 或 {"hold": "all"} → 这些借道本轮不派首帧"""
+    try:
+        d = json.loads(Path(path or HOLD_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):   # arch-ok: 开关文件没有 / 坏 = 不挡（默认继续借）
+        return set()
+    h = d.get("hold") if isinstance(d, dict) else None
+    if h == "all":
+        return set(lanes)
+    return {str(x) for x in h if str(x) in set(lanes)} if isinstance(h, list) else set()
 
 
 def allowed(method: str, path: str) -> bool:

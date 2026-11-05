@@ -274,7 +274,7 @@ def test_manual_and_retired_and_unknown_kept():
     assert "gpu33:0" in PR.effective_holds(CTRL, PR.IMAGE_LANES, None, t=after)[0]       # 读不到分区：失败关闭
     c2 = {**CTRL, "dispatch_by": {}}
     assert "gpu33:0" in PR.effective_holds(c2, PR.IMAGE_LANES, PART, t=after)[0]         # 不知道本机：失败关闭
-    assert {"gpu33:2", "gpu36:2"} <= PR.effective_holds({}, PR.IMAGE_LANES, None)[0]
+    assert "gpu33:2" in PR.effective_holds({}, PR.IMAGE_LANES, None)[0]   # L-194（11-05 项目方授权）：gpu36:2 不再写死坏卡；只剩 gpu33:2
 
 
 def test_probe_lanes_uses_effective_holds_and_logs_once(tmp_path):

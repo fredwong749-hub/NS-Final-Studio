@@ -279,6 +279,23 @@ def _lim():
     except Exception:
         pass
 R, IDM, HAND, RL, CPY, EXCL, MINFREE, SRC = sys.argv[1:9]
+# AUDIT-PERF 提案 A：常驻打分服务（tools/gen_contract/score_srv.py；idm 8873 / hand 8874，只听 127.0.0.1）。开关 NS_SCORE_RESIDENT=1 才试；
+# 任何失败（没起 / 409 代码换了 / 500 / 超时）当次退回旧子进程，原因记 score_resident.<kind>_error
+_RES = {}
+def _resident(kind, route, obj):
+    if os.environ.get("NS_SCORE_RESIDENT") != "1":
+        return None
+    try:
+        import urllib.request
+        port = os.environ.get("NS_SCORE_SRV_PORT_" + kind.upper(), {"idm": "8873", "hand": "8874"}[kind])
+        rq = urllib.request.Request("http://127.0.0.1:" + port + "/" + route, data=json.dumps(obj).encode(), headers={"Content-Type": "application/json"})
+        out = json.loads(urllib.request.urlopen(rq, timeout=300).read())
+        _RES[kind] = True
+        return out
+    except Exception as e:
+        _RES[kind] = False
+        _RES[kind + "_error"] = repr(e)[:160]
+        return None
 req = json.load(sys.stdin)
 os.makedirs(os.path.join(RL, "refs"), exist_ok=True)
 # K-OPS-F18：不再把请求方的 metrics.py / clip_srv.py 写进 reflock（旁路拷贝 = 两个入口）；度量代码只用服务器仓库部署目录里的那份
@@ -295,9 +312,11 @@ try:
             open(p, "wb").write(base64.b64decode(it["b64"]))
         items.append({"id": it["id"], "path": p})
     refs = {k: [v] for k, v in req["face_refs"].items() if os.path.exists(v)}
-    r = subprocess.run([IDM, os.path.join(SRC, "tools/series10_imggen/score_remote.py"), "-"], cwd=R, input=json.dumps({"refs": refs, "items": items}), capture_output=True, text=True, env=SENV, preexec_fn=_lim)
-    out = [ln for ln in r.stdout.splitlines() if ln.startswith("{")]
-    s = json.loads(out[-1]) if out else {"items": {}, "cross": {}, "error": "score_remote: " + r.stderr[-300:]}
+    s = _resident("idm", "score", {"refs": refs, "items": items})      # AUDIT-PERF 提案 A：常驻（开关 NS_SCORE_RESIDENT=1）；不在 / 409 / 出错 → 退回旧子进程
+    if s is None:
+        r = subprocess.run([IDM, os.path.join(SRC, "tools/series10_imggen/score_remote.py"), "-"], cwd=R, input=json.dumps({"refs": refs, "items": items}), capture_output=True, text=True, env=SENV, preexec_fn=_lim)
+        out = [ln for ln in r.stdout.splitlines() if ln.startswith("{")]
+        s = json.loads(out[-1]) if out else {"items": {}, "cross": {}, "error": "score_remote: " + r.stderr[-300:]}
     for it in s.get("items", {}).values():
         for f in it.get("faces", []):
             if (f.get("h_ratio") or 0) >= 0.04 and f.get("emb"):      # Q1x（VQAGATE 11-02）：够大的脸带特征回本机，postflight 落 data/identity/emb/
@@ -305,10 +324,13 @@ try:
             else:
                 f.pop("emb", None)
     hi = [{"id": i["id"], "path": i["path"], "faces": len(s["items"].get(i["id"], {}).get("faces", []))} for i in items]
-    rh = subprocess.run([HAND, os.path.join(SRC, "tools/series10_imggen/hands_remote.py")], cwd=R, input=json.dumps({"items": hi}), capture_output=True, text=True, env=SENV, preexec_fn=_lim)
-    ho = [ln for ln in rh.stdout.splitlines() if ln.startswith("{")]
-    res = {"items": s.get("items", {}), "cross": s.get("cross", {}), "hands": json.loads(ho[-1]) if ho else {},
-           "refs": list(refs), "score_error": s.get("error")}
+    hd = _resident("hand", "hands", {"items": hi})
+    if hd is None:
+        rh = subprocess.run([HAND, os.path.join(SRC, "tools/series10_imggen/hands_remote.py")], cwd=R, input=json.dumps({"items": hi}), capture_output=True, text=True, env=SENV, preexec_fn=_lim)
+        ho = [ln for ln in rh.stdout.splitlines() if ln.startswith("{")]
+        hd = json.loads(ho[-1]) if ho else {}
+    res = {"items": s.get("items", {}), "cross": s.get("cross", {}), "hands": hd,
+           "refs": list(refs), "score_error": s.get("error"), "score_resident": dict(_RES)}
     clip_items = []
     by = {i["id"]: i["path"] for i in items}
     for it in req["items"]:
@@ -383,6 +405,18 @@ def _known_path(host: str) -> Path:
     return _data_root() / "cache" / f"reflock_remote_refs_{host}.json"
 
 
+def _resident_env() -> str:
+    """AUDIT-PERF 提案 A 开关：config/pipeline/score_resident.json enabled（默认 false；env NS_SCORE_RESIDENT=1/0 覆盖）→ 远端命令前缀"""
+    v = os.environ.get("NS_SCORE_RESIDENT")
+    if v is None:
+        try:
+            cfg = json.loads((Path(__file__).resolve().parents[2] / "config/pipeline/score_resident.json").read_text(encoding="utf-8"))
+            v = "1" if cfg.get("enabled") else "0"
+        except (OSError, ValueError):
+            v = "0"
+    return "NS_SCORE_RESIDENT=1 " if v == "1" else ""
+
+
 def full_score(host: str, items: list[dict], timeout: float = 900, label: str | None = None) -> dict:
     """出图后契约的全部像素度量，一次 ssh（机器上：ArcFace / OCR / mediapipe / CLIP-GPU）。
     items: [{"id", "host_path": 机器上的原始输出 | None, "file": 本机交付图（没有 host_path 时上传），"post": {"size", "usm"} | None
@@ -418,7 +452,7 @@ def full_score(host: str, items: list[dict], timeout: float = 900, label: str | 
     rev = {v: k for k, v in sha_of.items()}
     send = {s for s in sha_of.values() if s not in known}
     script = base64.b64encode(_FULL.encode()).decode()
-    cmd = (f'python3 -c "$(echo {script} | base64 -d)" {R} {IDM} {HAND} {RL} {comfy_py(host)} {",".join(sorted(GPU_EXCLUDE)) or "-"} {CLIP_MIN_FREE_MB} '
+    cmd = (f'{_resident_env()}python3 -c "$(echo {script} | base64 -d)" {R} {IDM} {HAND} {RL} {comfy_py(host)} {",".join(sorted(GPU_EXCLUDE)) or "-"} {CLIP_MIN_FREE_MB} '
            f'{srv_repo(host)}')
     d = {}
     hb = _hb_start(host, items, label)

@@ -23,17 +23,23 @@ def d(a, b):
     return math.hypot(a.x - b.x, a.y - b.y)
 
 
-def main():
-    import mediapipe as mp
+def load_models():
+    """mediapipe 手 / 姿态模型；常驻服务 score_srv.py 只调一次"""
+    import mediapipe as mp  # noqa: F401
     from mediapipe.tasks import python as mpt
     from mediapipe.tasks.python import vision as V
-    man = json.load(sys.stdin)
     hl = V.HandLandmarker.create_from_options(V.HandLandmarkerOptions(
         base_options=mpt.BaseOptions(model_asset_path=f"{M}/hand_landmarker.task"), num_hands=8,
         min_hand_detection_confidence=0.4))
     pl = V.PoseLandmarker.create_from_options(V.PoseLandmarkerOptions(
         base_options=mpt.BaseOptions(model_asset_path=f"{M}/pose_landmarker_full.task"), num_poses=4,
         min_pose_detection_confidence=0.5))
+    return hl, pl
+
+
+def detect(man, models=None):
+    import mediapipe as mp
+    hl, pl = models or load_models()
     out = {}
     for it in man["items"]:
         try:
@@ -74,7 +80,12 @@ def main():
             except (IndexError, ZeroDivisionError):
                 pass
         out[it["id"]] = {"hands": len(hands), "poses": len(poses), "flags": flags}
-    print(json.dumps(out, ensure_ascii=False))
+    return out
+
+
+def main():
+    man = json.load(sys.stdin)
+    print(json.dumps(detect(man), ensure_ascii=False))
 
 
 if __name__ == "__main__":

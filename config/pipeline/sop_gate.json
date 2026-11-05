@@ -15,8 +15,8 @@
  },
  "_prodmerge": "PRODMERGE-O 11-03（PLAN_V2_MASTER v4 1-4 / 1-5）：prompt_probe 改为本模块 compile_preflight（唯一编译入口 build_first + preflight.check，隔离子进程，按剧环境 runs.run_env），不再调 golden_v2；probe_lane = preflight I12 判本地专用资产用的道。promote = runs.json preparing → producing 的规则：任一集 judge(stage) 通过即可提升；auto=false 时 producer 只在日志里报“可以提升”，由总调度 sop_gate.py promote --apply（auto=true 时 producer 每拍自动提升并写 status_history）。",
  "_observe_note": "L-156 项目方 11-03 07:3x 点选：清空、全部 enforce（总调度 MASTER-WSL 执行）",
- "whole_episode_prompts": true,
- "_whole_episode_prompts": "L-140（项目方 11-03 03:1x 否决按镜出图）不变：任何镜进“出图”及以后，提示词阶段按整集判；L-154 自动提升与 L-155 分道并行都在这条之后",
+ "whole_episode_prompts": false,
+ "_whole_episode_prompts": "L-195（项目方 11-05 选 B）取代 L-140 的整集判：提示词阶段按镜判，过关的镜先出图，没过的单独卡住；原注（L-140 项目方 11-03 03:1x 否决按镜出图）：任何镜进“出图”及以后，提示词阶段按整集判；L-154 自动提升与 L-155 分道并行都在这条之后",
  "lifecycle": {
   "apply": true,
   "hb_stale_min": 5,

@@ -114,7 +114,7 @@ CODE_SHA_DIRS = ("services/agent/ns_agent", "tools/autopilot")
 CANARY_EXPIRE_S = 1800                           # 第一次 canary 暂停 30 分钟后重评估；同一份代码再触发逐次翻倍
 CANARY_EXPIRE_MAX_S = 4 * 3600
 # W44 ④：坏卡永远 hold（CLAUDE.md 红线）；本机道只在分区登记（退役 / 未到期借道 / 未到期临时 hold）或 lane_notes 显式 held_by 时 hold
-BAD_LANES = ("gpu33:2", "gpu36:2")
+BAD_LANES = ("gpu33:2",)      # L-194（11-05）：gpu36:2 归 NS 出图 / 视频，只剩 gpu33:2 坏卡
 CODE_RETRY_S = 5 * 60               # 系统代码 / 接口不匹配：5 分钟后再试（多半已热修），不再停 30 分钟         # preflight 不过：资料可能被别的会话补上，30 分钟后再查
 # 出图道（gpu36:2 是长镜头视频专用道，不派出图；gpu33 GPU2 永不使用）
 IMAGE_LANES = {"gpu33:0": "http://127.0.0.1:18188", "gpu33:1": "http://127.0.0.1:18189", "gpu33:3": "http://127.0.0.1:18191",
@@ -2234,6 +2234,7 @@ class FakeVideo:
 
 # ---------------------------------------------------------------------------------------------- 监督
 class Producer:
+    _relay_hold_fn = None
     relay_lanes: set = frozenset()      # 类默认：测试用 object.__new__ 绕过 __init__ 构造时也有（AUDIT-PERF 11-05，test_debug_rsi e17）
 
     def __init__(self, paths: Paths | None = None, *, script=None, frames=None, video=None, lanes: dict | None = None,
@@ -2250,6 +2251,7 @@ class Producer:
             if str(Path(__file__).resolve().parent) not in sys.path:
                 sys.path.insert(0, str(Path(__file__).resolve().parent))
             import lane_relay as LR
+            self._relay_hold_fn = LR.runtime_hold
             rl = LR.consumer_lanes()
             self.lanes.update(rl)
             self.relay_lanes = set(rl)
@@ -2737,6 +2739,8 @@ class Producer:
         hold |= {ln for ln in self.lanes if lane_held(ln)}
         hold -= self.relay_lanes                 # 借道：别机的道（dispatch 照“别的机器的道”hold）在开关打开时归本机用；坏卡仍 hold
         hold |= set(BAD_LANES)
+        if self.relay_lanes and self._relay_hold_fn:
+            hold |= self._relay_hold_fn(self.relay_lanes)       # 阶段交接：出图 → 视频，借道还给 gpu36 本机（data/pipeline/lane_relay_hold.json）
         out = {}
         for ln, url in self.lanes.items():
             q = self.lane_probe(url)

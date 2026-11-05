@@ -226,6 +226,21 @@
    "probe_http": [],
    "via": "t",
    "base": "base-a"
+  },
+  "gpu36-l2": {
+   "ssh_host": "gpu36",
+   "forwards": [
+    [
+     18290,
+     8190
+    ]
+   ],
+   "probe_http": [
+    18290
+   ],
+   "via": "t",
+   "base": "base-a",
+   "_note": "L-194（11-05）：gpu36 三卡全归 NS，GPU2 恢复出图 / 视频 ComfyUI :8190；由 _retired 移回（CODER-POOL）。需监管进程重启（plan → stop → ensure）后生效"
   }
  },
  "tick_s": 5,
@@ -281,22 +296,6 @@
  "_inner_gate_note": "内层连接握手的是服务器 sshd（经底座），不经跳板 → 同时握手 ≤4（服务器 sshd MaxStartups 10）；底座 / 跳板握手 ≤ max_connecting=2。",
  "_r3_note": "r3（总调度 02:24：单条底座成了单点，第 4 次重启）：base-a 固定香港、base-b 固定直连，互为备份；内层按道分摊（l1 / cmd2 / cmd4 挂 b，其余挂 a）。某条底座断 → 只清其上内层并立刻改挂另一条（不等底座退避）；首选底座稳定 120 s 后逐条迁回。底座 banner 读不到但还在搬数据、或其上内层还通 → 不杀（02:24 的事故是误杀）。修：adopt 原先对 \"10.0.0.36:22\" 规格永不匹配，每次重载都杀底座。",
  "_retired": {
-  "gpu36-l2": {
-   "ssh_host": "gpu36",
-   "forwards": [
-    [
-     18290,
-     8190
-    ]
-   ],
-   "probe_http": [
-    18290
-   ],
-   "via": "t",
-   "base": "base-a",
-   "retired_at": "2026-11-02T03:1x",
-   "why": "L-100：gpu36 GPU2 改作看图卡（vqa_router → :8870），ComfyUI :8190 已停（03:10 实测 ss 无监听，探测 remote_down）；隧道本身是通的。恢复 = 移回 hosts"
-  },
   "base-c": {
    "kind": "base",
    "route": "hk",

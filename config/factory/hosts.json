@@ -105,12 +105,15 @@
      "comfy_port": 8190,
      "tunnel_port": 18290,
      "roles": [
-      "vlm"
+      "image",
+      "video"
      ],
-     "enabled": false,
+     "enabled": true,
      "comfy_output": "/root/work/fredw/comfy/output/gpu2",
-     "max_frames": 362,
-     "note": "L-100：GPU2 专用看图卡（vqa_router 3 实例），ComfyUI :8190 已停；视频阶段长镜头道再规划"
+     "recipe_max_frames": {
+      "h3_funcontrolnet": 107
+     },
+     "note": "L-194（11-05）：gpu36 三卡全归 NS，GPU2 出图 + 视频（原 L-100 看图专用卡作废）；启动 /root/work/fredw/comfy/comfy.sh start 2；隧道 gpu36-l2 已移回 tunnels.json hosts"
     }
    },
    "owner_controlled": true,

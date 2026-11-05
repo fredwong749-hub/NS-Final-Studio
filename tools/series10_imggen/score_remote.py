@@ -19,13 +19,20 @@ import cv2
 import numpy as np
 
 
-def main():
-    man = json.load(sys.stdin if sys.argv[1] == "-" else open(sys.argv[1], encoding="utf-8"))
+def load_app():
+    """ArcFace（insightface buffalo_l，CPU）；常驻服务 score_srv.py 只调一次"""
     from insightface.app import FaceAnalysis
     app = FaceAnalysis(name="buffalo_l", root=__import__("os").environ.get("NS_IDM_ROOT", "/root/work/fredw/idm_models"), allowed_modules=["detection", "recognition"],
                        providers=["CPUExecutionProvider"])
     app.prepare(ctx_id=-1, det_size=(640, 640))
-    ocr = None
+    return app
+
+
+def score(man, app=None, ocr_box=None, ref_cache=None):
+    """man → 结果 dict。app / ocr_box（[ocr 或 None]）/ ref_cache（参考脸特征缓存，键 = 路径 + mtime + 大小）由常驻服务传入；
+    不传 = 单次子进程旧行为"""
+    app = app or load_app()
+    ocr_box = ocr_box if ocr_box is not None else [None]
 
     def faces(img, min_px=24):
         out = []
@@ -36,8 +43,22 @@ def main():
             out.append((f, [x1, y1, x2, y2]))
         return out
 
+    def _key(paths):
+        import os
+        try:
+            return tuple((p, os.stat(p).st_mtime_ns, os.stat(p).st_size) for p in paths)
+        except OSError:
+            return None
+
     refs, notes = {}, {}
     for name, paths in man.get("refs", {}).items():
+        ck = _key(paths) if ref_cache is not None else None
+        if ck is not None and ck in ref_cache:
+            e, n = ref_cache[ck]
+            if e is not None:
+                refs[name] = e
+            notes[name] = n
+            continue
         es = []
         for p in paths:
             img = cv2.imread(p)
@@ -54,10 +75,13 @@ def main():
             if fs:
                 fs.sort(key=lambda t: -(t[1][2] - t[1][0]))
                 es.append(fs[0][0].normed_embedding.astype(np.float32))
+        m_ = None
         if es:
             m = np.mean(es, axis=0)
-            refs[name] = m / np.linalg.norm(m)
+            m_ = refs[name] = m / np.linalg.norm(m)
         notes[name] = len(es)
+        if ck is not None and es:
+            ref_cache[ck] = (m_, len(es))
     cross = {f"{a}~{b}": round(float(refs[a] @ refs[b]), 3) for i, a in enumerate(refs) for b in list(refs)[i + 1:]}
     res = {}
     for it in man["items"]:
@@ -76,17 +100,22 @@ def main():
         fl.sort(key=lambda d: -d["h_ratio"])
         txt = []
         if it.get("ocr", True):
-            if ocr is None:
+            if ocr_box[0] is None:
                 from rapidocr_onnxruntime import RapidOCR
-                ocr = RapidOCR()
-            r, _ = ocr(img)
+                ocr_box[0] = RapidOCR()
+            r, _ = ocr_box[0](img)
             for box, s, conf in (r or []):
                 ys = [p[1] for p in box]
                 hh = (max(ys) - min(ys)) / H
                 if conf >= 0.6 and hh >= 0.012 and len(s.strip()) >= 2:
                     txt.append({"text": s, "conf": round(float(conf), 3), "h": round(hh, 4)})
         res[it["id"]] = {"size": [W, H], "faces": fl, "text": txt}
-    print(json.dumps({"refs": notes, "cross": cross, "ref_emb": {n: [round(float(v), 5) for v in r] for n, r in refs.items()}, "items": res}, ensure_ascii=False))
+    return {"refs": notes, "cross": cross, "ref_emb": {n: [round(float(v), 5) for v in r] for n, r in refs.items()}, "items": res}
+
+
+def main():
+    man = json.load(sys.stdin if sys.argv[1] == "-" else open(sys.argv[1], encoding="utf-8"))
+    print(json.dumps(score(man), ensure_ascii=False))
 
 
 if __name__ == "__main__":

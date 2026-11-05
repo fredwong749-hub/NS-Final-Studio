@@ -19,10 +19,11 @@ CFG = {"enabled": True, "consumer_host": "gpu33",
 
 
 def test_shipped_config_matches_l193():
-    # L-193（项目方 11-05 选 B）：首帧跨两台开；只借 gpu36:0，且只在 gpu33 消费
+    # L-193 首帧跨两台开；L-194（11-05）gpu36:0/1/2 全归 NS：三道都借，只在 gpu33 消费
     assert LR.load_cfg().get("enabled") is True
     lanes = LR.consumer_lanes(host="gpu33")
-    assert set(lanes) == {"gpu36:0"}
+    assert set(lanes) == {"gpu36:0", "gpu36:1", "gpu36:2"}
+    assert lanes["gpu36:2"] == "http://127.0.0.1:28290" and lanes["gpu36:1"] == "http://127.0.0.1:28289"
     assert LR.consumer_lanes(host="gpu36") == {}
 
 
@@ -35,7 +36,8 @@ def test_broken_config_is_off(tmp_path):
 
 def test_consumer_lanes_filters():
     got = LR.consumer_lanes(CFG, "gpu33", OK)
-    assert got == {"gpu36:0": "http://127.0.0.1:28288"}      # gpu36:1 / gpu33:2 黑名单，gpu36:3 上游非回环
+    assert got == {"gpu36:0": "http://127.0.0.1:28288", "gpu36:1": "http://127.0.0.1:28289"}   # 只有 gpu33:2 黑名单，gpu36:3 上游非回环
+    assert LR.NEVER == ("gpu33:2",)
     assert LR.consumer_lanes(CFG, "gpu36", OK) == {}           # 只给 consumer_host
     assert LR.consumer_lanes(CFG, None, OK) == {}              # 不知道本机 = 不借
     assert LR.consumer_lanes({**CFG, "enabled": False}, "gpu33", OK) == {}
@@ -106,7 +108,19 @@ def test_proxy_upstream_down_is_502():
 
 def test_serve_off_does_nothing():
     assert LR.serve({"enabled": False}) == 0
-    assert LR.serve({"enabled": True, "lanes": {"gpu36:1": {"listen_port": 1, "upstream": "http://127.0.0.1:2"}}}) == 2
+    assert LR.serve({"enabled": True, "lanes": {"gpu33:2": {"listen_port": 1, "upstream": "http://127.0.0.1:2"}}}) == 2
+
+
+def test_runtime_hold_switch(tmp_path):
+    f = tmp_path / "h.json"
+    lanes = {"gpu36:0", "gpu36:1", "gpu36:2"}
+    assert LR.runtime_hold(lanes, f) == set()                       # 没文件 = 不挡
+    f.write_text('{"hold": ["gpu36:1", "gpu36:2", "gpu99:0"]}', encoding="utf-8")
+    assert LR.runtime_hold(lanes, f) == {"gpu36:1", "gpu36:2"}
+    f.write_text('{"hold": "all"}', encoding="utf-8")
+    assert LR.runtime_hold(lanes, f) == lanes
+    f.write_text("{坏", encoding="utf-8")
+    assert LR.runtime_hold(lanes, f) == set()
 
 
 def test_producer_wiring(monkeypatch, tmp_path):
@@ -119,3 +133,9 @@ def test_producer_wiring(monkeypatch, tmp_path):
     out = pr.probe_lanes({"hold_lanes": ["gpu36:0", "gpu36:1", "gpu33:2"], "dispatch_by": {"host": "gpu33"}})
     assert out["gpu36:0"]["free"] is True
     assert out["gpu36:1"]["free"] is False
+    # 阶段交接：开关文件列出的借道不派；坏卡 gpu33:2 仍 hold
+    monkeypatch.setattr(LR, "HOLD_FILE", tmp_path / "hold.json")
+    (tmp_path / "hold.json").write_text('{"hold": ["gpu36:0"]}', encoding="utf-8")
+    pr._relay_hold_fn = lambda lanes: LR.runtime_hold(lanes, tmp_path / "hold.json")
+    out = pr.probe_lanes({"hold_lanes": [], "dispatch_by": {"host": "gpu33"}})
+    assert out["gpu36:0"]["free"] is False

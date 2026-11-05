@@ -276,7 +276,7 @@ class Lane:
         return {"error": "no_output", "gpu_s": gpu_s} if st.get("completed") else None
 
 
-BROKEN_LANES = {"gpu33:2", "gpu36:2"}   # CLAUDE.md 红线：坏卡，任何情况都不派
+BROKEN_LANES = {"gpu33:2"}   # CLAUDE.md 红线：坏卡，任何情况都不派（L-194 11-05：gpu36:2 归 NS，视频可派）
 
 
 def gpu_free_mib(lane_name: str) -> int | None:

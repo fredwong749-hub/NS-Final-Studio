@@ -750,7 +750,7 @@ def apply_lane_policy(st, ctrl):
             c["vram_gate"] = gate
         run([PY, "tools/series10_video/deploy.py", "control", host, json.dumps(c, ensure_ascii=False)])
         if mode == "video_lane_only":
-            ports = {"gpu33": [8188, 8189, 8191], "gpu36": [8188, 8189]}[host]
+            ports = {"gpu33": [8188, 8189, 8191], "gpu36": [8188, 8189, 8190]}[host]
             py = ("import json,urllib.request\n"
                   f"for p in {ports}:\n"
                   "    d=json.load(urllib.request.urlopen(f'http://127.0.0.1:{p}/queue',timeout=5))\n"

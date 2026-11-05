@@ -28,10 +28,14 @@ def _specs(n=16, ep=1, dur=4.0):
     return {f"ep{ep:02d}-S{i}": SimpleNamespace(episode=ep, duration_s=dur) for i in range(1, n + 1)}
 
 
-def test_shipped_config_default_off():
-    assert VS.load().get("enabled") is False
-    assert VS.shard_eps(RUN) == {}
-    assert VS.plan_all(RUN, _specs()) == {}
+def test_shipped_config_ep01_shard_on():
+    # cut L（11-05）开分片；L-194：权重按道数 gpu36 三道（0/1/2）: gpu33 两道（0/1）；gpu33:3 仍排除
+    c = VS.load()
+    assert c.get("enabled") is True
+    e = VS.ep_cfg(RUN, 1, c)
+    assert e and e["owner"] == "gpu36" and e["weights"] == {"gpu36": 3.0, "gpu33": 2.0}
+    assert VS.exclude_lanes("gpu33", c) == ["gpu33:3"]
+    assert VS.ep_cfg(RUN, 2, c) is None
 
 
 def test_off_means_no_plan_no_extra_eps_no_exclude():

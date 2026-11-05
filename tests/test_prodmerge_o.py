@@ -278,7 +278,7 @@ def test_fanout_spreads_seeds_over_free_lanes(tmp_path):
     # 一镜多种子分道未经 A/B、A1-11 前提未修。改断言为 L-161 口径；共用验收 accept 仍开不变
     assert cfg["fanout"]["enabled"] is False and "L-161" in cfg["fanout"]["_note"] and cfg["accept"]["enabled"] is True   # L-161 进版关
     sg = json.loads((ROOT / "config/pipeline/sop_gate.json").read_text(encoding="utf-8"))
-    assert sg["promote"]["auto"] is True and "L-154" in sg["promote"]["_decision"] and sg["whole_episode_prompts"] is True   # L-154 / L-140
+    assert sg["promote"]["auto"] is True and "L-154" in sg["promote"]["_decision"] and sg["whole_episode_prompts"] is False   # L-154；L-195（11-05 项目方选 B）取代 L-140 整集判
 
 
 # ====================================================================== 1-5 共用验收
