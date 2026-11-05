@@ -1831,6 +1831,7 @@ def _headline(E: dict) -> str:
 class FrameExec:
     """真出图：唯一出图路径（K-REN-134）。一次占一条道；postflight 放 CPU 线程池（不占道，K-OPS-I06）"""
 
+    script_fn = None                            # 类默认：绕过 __init__ 构造（测试 / 子类）时也有该属性
     def __init__(self, paths: Paths, script, script_fn=None):
         self.p, self._script = paths, script
         self.script_fn = script_fn              # B2：每次出图现取最新导入稿（Producer.script 按 sha / mtime 热重载）；None = 固定稿

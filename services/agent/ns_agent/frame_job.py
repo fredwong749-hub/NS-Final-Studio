@@ -329,6 +329,9 @@ def build_first(project: str, ep, shot, g, *, bible=None, model: str = "qwen_ima
                                 if dflt else None)
     # CARRYOVER 第 11 项（MERGE-IMG-O 11-03）：负面词 = 编译器负面词（剧本 base_negative + bible style / safe 负面 + 未成年人外观硬负面）
     # ∪ W-40 品牌负面词。原来直接覆盖成 brand_negative（V2 多为空），硬负面词进不了作业。硬负面永远在（job_negative 兜底）
+    tier, tier_ov = first_frame_tier(project)                                  # L-191：按剧开 35 步 base 首帧档（默认 preview，不加字段）
+    if tier_ov:
+        job["tier"], job["tier_overrides"] = tier, tier_ov
     job["negative"] = job_negative(c.image_negative, AR.brand_negative(project, plan))
     job["adult_reasons"] = AR.plan_adult(project, sr, plan)                    # L-128 不变项：成人画面作业只由项目方触发
     job["adult"] = bool(job["adult_reasons"])
@@ -364,6 +367,18 @@ def trace_of(job: dict) -> dict:
             "wardrobe_scope": {c.get("name"): c.get("wardrobe_scope") for c in ar.get("characters") or []
                                if c.get("wardrobe_scope") is not None},
             "rules": ["K-REN-950", "K-REN-951", "K-REN-952", "K-REN-953", "K-REN-954", "K-REN-955", "K-REN-957"]}
+
+
+def first_frame_tier(project: str | None) -> tuple[str, dict]:
+    """L-191：按剧取首帧出图档（config/render_quality.json first_frame_tier）。→ ("preview", {}) 默认；("base35", 采样覆盖)"""
+    try:
+        cfg = _json.loads((_ROOT / "config" / "render_quality.json").read_text(encoding="utf-8")).get("first_frame_tier") or {}
+    except (OSError, ValueError):
+        return "preview", {}
+    tier = (cfg.get("runs") or {}).get(project or "") or "preview"
+    if tier == "base35" and cfg.get("base35"):
+        return "base35", dict(cfg["base35"])
+    return "preview", {}
 
 
 def job_negative(*parts: str) -> str:

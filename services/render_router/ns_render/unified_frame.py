@@ -35,7 +35,7 @@ def preset_id() -> str:
 def build_graph(job: dict, seed: int, upload, prefix: str, size=(768, 1344), overrides: dict | None = None):
     names = [upload(ROOT / r if not Path(r).is_absolute() else Path(r)) for r in job["refs"]]
     # PRODUCER：总调度驳回重出可指定预设（如 frame_v9_heavy）；overrides 只给 scope=ab 实验用（RESEARCH 11-01），生产调用不传
-    eff = IP.resolve(job.get("preset") or preset_id(), {"style_suffix": "", **(overrides or {})})
+    eff = IP.resolve(job.get("preset") or preset_id(), {"style_suffix": "", **(job.get("tier_overrides") or {}), **(overrides or {})})
     wf = W.qwen_edit(job["prompt"], job.get("negative") or "", names, size[0], size[1], seed, prefix, m=W.QwenModel(), loras=[],   # W-40
                      ref_resolution=0, crop=False)
     wf = IP.apply(wf, eff, set())
@@ -106,6 +106,8 @@ def _run(client, shot_id: str, stage: str, job: dict, seed: int, timeout_s: floa
         ct.update(seed=seed, seed_policy=job.get("seed_policy") or "caller", sent_prompt_sha=_sha16(sent),
                   final_prompt_sha=_sha16(job.get("prompt") or ""))   # final ≠ compile 的 prompt_sha = 编译后又被改过（owner_edit / vqa_delta）
         take.params = {**(take.params or {}), "compile_trace": ct}
+    if job.get("tier_overrides"):      # L-191：记档（producer.redo_inputs_changed 据此判 8 步旧版 ≠ 35 步）
+        take.params = {**(take.params or {}), "tier": {"id": job.get("tier"), "overrides": job["tier_overrides"]}}
     # 重出时追加 / 替换进提示词的文本（producer.apply_owner_edit 的项目方修改要求、vqa judge 的一维修正）记进 params.redo_fix_clause：
     # ns_api.unified_stale.strip_redo_fix 比较前按它剥掉，否则重出版本一律被标“编译器升级”（D-FRESH，ep01-S13 / S16）。只记录，不改出图行为
     fixes = []
