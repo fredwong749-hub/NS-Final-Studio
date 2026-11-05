@@ -2207,6 +2207,14 @@ class Producer:
         self.frames = frames
         self.video = video or VideoBridge(self.p)
         self.lanes = lanes if lanes is not None else {**IMAGE_LANES, **render_image_only_lanes()}
+        self.relay_lanes: set = set()
+        if lanes is None:                          # 跨机借道（CODER-XH 11-05，config/pipeline/lane_relay.json 默认关）：gpu33 producer 经笔记本代理用 gpu36:0
+            if str(Path(__file__).resolve().parent) not in sys.path:
+                sys.path.insert(0, str(Path(__file__).resolve().parent))
+            import lane_relay as LR
+            rl = LR.consumer_lanes()
+            self.lanes.update(rl)
+            self.relay_lanes = set(rl)
         self.lane_probe = lane_probe or lane_queue
         # 训练锁（K-OPS-A02，IMGPERF 11-01 报：10-31 OOM 就是往训练中的卡派了活）：与 ns_api.jobs.pick_lane 同一来源
         self.train_locks_fn = train_locks_fn or train_locks_cached
@@ -2688,13 +2696,15 @@ class Producer:
                       counted=False)
         self._hold_rel_sig = rel_sig if released else None
         hold |= {ln for ln in self.lanes if lane_held(ln)}
+        hold -= self.relay_lanes                 # 借道：别机的道（dispatch 照“别的机器的道”hold）在开关打开时归本机用；坏卡仍 hold
+        hold |= set(BAD_LANES)
         out = {}
         for ln, url in self.lanes.items():
             q = self.lane_probe(url)
             mine = list(self.lane_busy.get(ln) or [])
             cool = self.lane_cool.get(ln, 0)
             srv, idx = lane_split(ln)
-            locks = self.train_locks_fn(srv)          # None = 这台的锁还没读到过 → 当作不可用（宁可不派）
+            locks = set() if ln in self.relay_lanes else self.train_locks_fn(srv)   # 借道：gpu36 的训练锁本机读不到（服务器不互连）；开借道前由人确认 gpu36:0 无训练
             locked = locks is None or idx in locks
             # 道上只有“让道模式”的任务（VIDEO10 视频、BAKEOFF 对比；夜间道归属：gpu33 三道出图优先、gpu36:0/1 BAKEOFF 让道）
             # → 出图照样排进去（队列深度 ≤ 1 个别人的任务，K-OPS-I06），对方按让道规则停交新活
@@ -3003,7 +3013,7 @@ class Producer:
         url = self.lanes[lane]
         t0 = now()
         try:
-            if self.lock_now_fn(lane):            # 出发前现读一次训练锁（不走缓存，在派单线程里读，不卡主循环）
+            if lane not in self.relay_lanes and self.lock_now_fn(lane):            # 出发前现读一次训练锁（不走缓存，在派单线程里读，不卡主循环）
                 raise RuntimeError(f"训练锁：{lane} 上锁了（train.lock），未提交，换道")
             res = self.frames.render(kind, sid, lane, url, attempt, rung, tag)
             if res.get("na"):

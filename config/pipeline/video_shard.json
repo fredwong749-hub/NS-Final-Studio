@@ -1,19 +1,24 @@
 {
  "_doc": "视频按镜分片（PLAN_EP01_FINISH §11；默认关）。enabled=false 或本剧本集没配 = 原行为（整集一台）。开了以后：该集的镜按 weights 分给 hosts（确定性：同一份配置 + 同一份剧本 = 两台各自算出同一张表，不需要互相通信 / 租约文件）；owner 那台负责合成 / 出片，其它台只出镜头（helper），由笔记本 shard_relay.py 把 helper 的 state / 片子经笔记本送到 owner。改本文件只能在该集视频作业空闲时改（否则已出的镜会被重新分配）。",
- "enabled": false,
+ "enabled": true,
  "runs": {
   "series10_v2": {
    "eps": {
     "1": {
      "owner": "gpu36",
-     "weights": {"gpu36": 1, "gpu33": 2},
+     "weights": {
+      "gpu36": 1,
+      "gpu33": 2
+     },
      "map": {}
     }
    }
   }
  },
  "exclude_lanes": {
-  "gpu33": ["gpu33:3"],
+  "gpu33": [
+   "gpu33:3"
+  ],
   "_why": "gpu33:3 上有看图 :8870 + comfy --reserve-vram 9，H3 DiT int8 约 20 GB 放不下 → 分片不派该道；gpu36:1 同理由 video_boost 的 vram_gate 管，这里不动"
  }
 }

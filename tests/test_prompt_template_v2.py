@@ -156,12 +156,12 @@ def test_vocab_l192_six_enabled_and_h3_official_present():
 
 def test_l192_multi_person_whitelist():
     from ns_agent import camera_norm as CN
-    # PS-MASTER 11-05 审 dump：bolt 是推近类，加回多人白名单（L-192 原意是禁横移 / 环绕 / 升这类双人镜失控的）
-    assert CN.multi_person_moves() == ["static", "push_in", "pull_out", "handheld_follow", "bolt_push_settle"]
+    # L-192 项目方原话“双人镜只用推 / 拉 / 固定 / 手持”；bolt 是否允许待项目方确认，未确认前不在多人白名单
+    assert CN.multi_person_moves() == ["static", "push_in", "pull_out", "handheld_follow"]
     assert CN.multi_person_fallback("pedestal_up", 1, V2) == ("pedestal_up", None)
     mid, why = CN.multi_person_fallback("pedestal_up", 2, V2)
     assert mid == "push_in" and "L-192" in why
-    assert CN.multi_person_fallback("bolt_push_settle", 3, V2) == ("bolt_push_settle", None)
+    assert CN.multi_person_fallback("bolt_push_settle", 3, V2)[0] == "push_in"
     assert CN.multi_person_fallback("arc", 2, V2)[0] == "push_in"
     assert CN.multi_person_fallback("static", 2, V2) == ("static", None) and CN.multi_person_fallback("pull_out", 2, V2) == ("pull_out", None)
     # v1 规范化路径同一规则（n_people 不给 = 旧行为不变）
@@ -224,17 +224,20 @@ def test_switch_default_v1_for_all_runs(monkeypatch):
     monkeypatch.delenv("NS_PROMPT_TEMPLATE", raising=False)
     rs = json.loads((ROOT / "config/compile/run_style.json").read_text(encoding="utf-8"))
     assert rs["runs"][V2]["prompt_template"] == {k: v for k, v in rs["runs"]["smoke_v2"]["prompt_template"].items()}
-    for run in (V2, "smoke_v2", "series10_v1", None):
+    # 11-05 项目方“基于最新架构和规则重跑 ep01”→ series10_v2 / smoke_v2 开 v2；其余剧仍 v1
+    for run in (V2, "smoke_v2"):
+        assert PT2.image_on(run) and PT2.video_on(run), run
+    for run in ("series10_v1", None):
         assert not PT2.image_on(run) and not PT2.video_on(run), run
-    with PT2.force(image="v2"):
-        assert PT2.image_on(V2) and not PT2.video_on(V2)
-    assert not PT2.image_on(V2)
+    with PT2.force(image="v1"):
+        assert not PT2.image_on(V2) and PT2.video_on(V2)
+    assert PT2.image_on(V2)
     monkeypatch.setenv("NS_PROMPT_TEMPLATE", "v2")
     assert PT2.image_on(V2) and PT2.video_on("series10_v1")
     from ns_recipes import prompt_v2 as RPV2
     assert RPV2.on(V2)
     monkeypatch.delenv("NS_PROMPT_TEMPLATE")
-    assert not RPV2.on(V2)
+    assert RPV2.on(V2) and not RPV2.on("series10_v1")
 
 
 def test_job_sig_and_inputs_sig_change_with_template(monkeypatch, tmp_path):
@@ -279,7 +282,8 @@ def test_real_image_prompt_v2_vs_v1(psm6):
     # S4 过肩：祁念只以左肩和腰侧入画 → 不算露脸（PS-MASTER 11-05）；人数闸 people_range 仍按 cast 在画 / 局部 计，不受影响
     for n, count, extra_neg in ((1, "三人同框", "第四个人"), (4, "卓琳的脸清晰入画，祁念只以虚化的左肩和腰侧在前景", "第三个人")):
         sh = _shot(e, n)
-        v1 = FJ.build_first(V2, e, sh, s.globals)
+        with PT2.force(image="v1"):
+            v1 = FJ.build_first(V2, e, sh, s.globals)
         assert "prompt_template" not in v1 and "template=" not in v1["compiled_by"]
         with PT2.force(image="v2"):
             job = FJ.build_first(V2, e, sh, s.globals)
@@ -315,19 +319,20 @@ def test_real_video_prompt_v2_two_paths_agree(psm6):
     from ns_recipes.spec_import import specs_from_import
     from ns_recipes import prompt as RP, prompt_v2 as RPV2
     specs = {x.index: x for x in specs_from_import(s, 1, with_assets=False)}
-    # S2 = bolt_push_settle（2 人在画；bolt 在多人白名单里，PS-MASTER 11-05）→ 官方 bolt 句保持
+    # S2 = bolt_push_settle（2 人在画；L-192 原话多人只 4 种，bolt 待项目方确认）→ 退回 push_in
     for n, cam in ((1, "The camera pushes in with small amplitude toward her face."),
-                   (2, "The camera pushes in with large amplitude at fast speed within the first second, then holds a static shot for the rest of the shot."),
+                   (2, "The camera pushes in with small amplitude toward her face."),
                    (13, "The camera pushes in with small amplitude toward his face.")):
         sh = _shot(e, n)
         seg = ST.segment_of(sh)[0]
-        c1 = C.compile_shot(e, sh, s.globals, set(), image_style=ST.image_suffix(V2, seg), framing_project=V2)
+        with PT2.force(video="v1"):
+            c1 = C.compile_shot(e, sh, s.globals, set(), image_style=ST.image_suffix(V2, seg), framing_project=V2)
         assert c1.h3_template == ""
         with PT2.force(video="v2"):
             c = C.compile_shot(e, sh, s.globals, set(), image_style=ST.image_suffix(V2, seg), framing_project=V2)
         assert c.h3_template == "v2" and len(c.h3_norm) == 1 and c.h3_norm[0]["rule"] == "K-REN-801"
         if n == 2:
-            assert "L-192" not in c.h3_norm[0]["why"] and c.h3_norm[0]["move"] == "bolt_push_settle"
+            assert "L-192" in c.h3_norm[0]["why"] and c.h3_norm[0]["move"] == "push_in"
         assert CN.denormalize(c.video_prompt, c.h3_norm) == sh.h3_prompt.strip("\n")       # 倒回 = 剧本原文
         body = L.parse_h3(c.video_prompt)["fields"][L.FIELDS[0]]
         sents = body.split(". ")

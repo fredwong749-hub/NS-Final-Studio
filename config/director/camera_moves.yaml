@@ -27,9 +27,9 @@ constraints_en: >-
   Her face stays stable and sharp throughout, with no clipping through objects, no duplicate people, and no on-screen text or watermark.
 constraints_zh: 人物面部稳定、无穿模卡顿、禁止分身、无字幕水印
 # L-192（项目方 11-05，MASTER_PICTURE；L-129 修订）：白名单 2 → 6 种 static / push_in / pull_out / bolt_push_settle / handheld_follow / pedestal_up；
-# 双人及以上在画的镜头只允许下面五种（阶段 0.2b 基准：双人中景的横移 / 环绕 / 升都被做成“后拉 + 升”，不受控；bolt 是推近类，PS-MASTER 11-05 审 dump 后加回）。编译层 camera_norm.multi_person_ok 判，
+# 双人及以上在画的镜头只允许下面四种（阶段 0.2b 基准：双人中景的横移 / 环绕 / 升都被做成“后拉 + 升”，不受控；bolt_push_settle 是否允许待项目方确认，暂按 L-192 原话只 4 种）。编译层 camera_norm.multi_person_ok 判，
 # 不合规退回 push_in（enabled 时）否则 static，改动记 h3_norm / notes。truck / arc 继续 disabled（只留 h3_official_candidate 待复测）
-multi_person_moves: [static, push_in, pull_out, handheld_follow, bolt_push_settle]
+multi_person_moves: [static, push_in, pull_out, handheld_follow]
 # amp：只用 small（K-PRM-101 / Pika P16）；speed 词一律不写（项目方：节奏慢）；dir 由导演层按视线 / 站位给 left|right
 # h3_official（CODER-PT 11-05，PLAN_EP01_FINISH §9 阶段 0.2b 基准 + §4 2.1）：提示词模板 v2 的官方写法运镜句（H3 base-en §4.3：
 #   动词 + 幅度 + 速度，独立成句紧跟构图句）。占位：{amp}=with small/large amplitude（medium 不写）、{speed}=at slow/fast speed（normal 不写）、

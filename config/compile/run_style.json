@@ -29,8 +29,8 @@
    "post_lut": true,
    "decision": "L-130（项目方 11-02 21:1x 选定）：幻想段 v2_editorial_fantasy_c、现实段 v2_editorial_reality_c2，替换临时风格句；风格句单一来源 = render_quality.json 对应预设的 style_suffix；段落标记取自剧本节拍（【幻想段】/【现实段】），没标记按 default_segment 并告警；LUT 走后期（post_lut）",
    "prompt_template": {
-    "image": "v1",
-    "video": "v1",
+    "image": "v2",
+    "video": "v2",
     "_doc": "阶段 2.1 提示词模板（CODER-PT 11-05，PLAN_EP01_FINISH §4 2.1 / §8 / §9）：image = v1（现编译）| v2（Qwen-Image 机位首句置前、去【角色】块、人物一行、场景+一句布光、否定进负面词、按露脸人数写同框）；video = v1 | v2（H3 官方写法：运镜独立成句紧跟构图句，官方动词+幅度+速度，分拍沿用写作方时间轴）。默认 v1 = 其它剧与现行提示词逐字不变；改 v2 后作业签名随提示词变（producer.job_sig 带 template= 段，redo_inputs_changed 报“提示词模板变了”）。选项见顶层 prompt_template_v2"
    }
   },
@@ -60,8 +60,8 @@
    "post_lut": true,
    "decision": "W26b SMOKE R2（11-03）：冒烟门专用迷你剧，与 series10_v2 同 bible（同一文件引用，不复制）/ 同段落预设 / 同后缀；series10_v2 条目改了这里要跟着改（eval/test_smoke_harness.py 有对齐测试）",
    "prompt_template": {
-    "image": "v1",
-    "video": "v1",
+    "image": "v2",
+    "video": "v2",
     "_doc": "阶段 2.1 提示词模板（CODER-PT 11-05，PLAN_EP01_FINISH §4 2.1 / §8 / §9）：image = v1（现编译）| v2（Qwen-Image 机位首句置前、去【角色】块、人物一行、场景+一句布光、否定进负面词、按露脸人数写同框）；video = v1 | v2（H3 官方写法：运镜独立成句紧跟构图句，官方动词+幅度+速度，分拍沿用写作方时间轴）。默认 v1 = 其它剧与现行提示词逐字不变；改 v2 后作业签名随提示词变（producer.job_sig 带 template= 段，redo_inputs_changed 报“提示词模板变了”）。选项见顶层 prompt_template_v2"
    }
   }
