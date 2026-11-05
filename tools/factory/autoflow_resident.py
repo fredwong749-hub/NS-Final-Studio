@@ -7,6 +7,7 @@
   - 不写任何 control / 暂停字段（不清别人的暂停，A-09 ③ / K-OPS-F26）；
   - 每拍再调一次 tools/pipeline/asset_worker.tick（阶段 A 资产作业：缺口 → 作业 → 候选 → 待办通知；M-AUTOPIPE-01，AUTOPIPE-A 11-03）；
   - 每 30 分钟跑一轮看门狗 tools/master/watchdog.run（W19，L-163：总调度巡检规则写成代码；连续 3 轮出错登记 P0）；
+  - 守护线程：health_tick（SELF-HEAL）+ idle_watch（L-202 ② 空卡巡检，config/pipeline/idle_watch.json），各自每 ≤60 s 一拍、永不退出；
   - 心跳 data/factory/autoflow_resident.json（pid / t / 在推进的剧 / 最近一次起的集），SENTINEL 按心跳年龄判掉线。
 用法：.venv/Scripts/python.exe tools/factory/autoflow_resident.py [--interval 30] [--once]；拉起 / 重启：ops/restart_autoflow.ps1
 """
@@ -288,6 +289,44 @@ def _install_signal_log() -> None:
                 pass
 
 
+def health_start(loader=None, spawn=None) -> object | None:
+    """SELF-HEAL 11-05：健康一拍（tools/master/health_tick.py）放在独立守护线程里每 ≤60 s 一拍（不挂在 tick 上：tick 里 asset / hollywood 可能很久）。
+    载入失败只记生命日志，不影响写作推进；线程自己吞异常永不退出；死了由 resident_guard 看 data/master/health/health.json 年龄拉起本常驻"""
+    import threading
+    try:
+        ht = (loader or _load)("health_tick_for_resident", "tools/master/health_tick.py")
+    except BaseException as e:  # noqa: BLE001
+        if isinstance(e, (KeyboardInterrupt, SystemExit)):
+            raise
+        life(f"health_tick 载入失败（本进程不跑自愈线程）：{e!r}")
+        return None
+    t = (spawn or threading.Thread)(target=ht.thread_loop, kwargs={"log": life}, name="health_tick", daemon=True)
+    t.start()
+    life("health_tick 线程已起")
+    return t
+
+
+def idle_watch_start(loader=None, spawn=None) -> object | None:
+    """L-202 ②（11-06）：空卡巡检 tools/autopilot/idle_watch.py 也放在独立守护线程里（每 interval_s 一拍，探测走 rssh / 隧道、各自带超时，
+    不挂在 tick 上）。config/pipeline/idle_watch.json enabled=false → 不起线程；载入失败只记生命日志。线程自己吞异常永不退出；
+    本常驻挂了由 resident_guard 拉起 = 巡检一起拉起"""
+    import threading
+    try:
+        iw = (loader or _load)("idle_watch_for_resident", "tools/autopilot/idle_watch.py")
+        if not iw.load_cfg().get("enabled"):
+            life("idle_watch 未启用（config/pipeline/idle_watch.json enabled=false），不起线程")
+            return None
+    except BaseException as e:  # noqa: BLE001
+        if isinstance(e, (KeyboardInterrupt, SystemExit)):
+            raise
+        life(f"idle_watch 载入失败（本进程不跑空卡巡检）：{e!r}")
+        return None
+    t = (spawn or threading.Thread)(target=iw.thread_loop, kwargs={"log": life}, name="idle_watch", daemon=True)
+    t.start()
+    life("idle_watch 线程已起")
+    return t
+
+
 def run_loop(interval: int, once: bool, tick_fn=None, sleep=time.sleep, max_ticks: int | None = None, reporter=None) -> int:
     """主循环：每拍任何异常（含 BaseException 里除退出信号外的）都记进心跳 + 生命日志后继续；退出前必写原因。
     asset_tick 连续出错 ≥ ASSET_FAIL_STREAK 拍：心跳 state=reload_failed / asset_failed + 登记一次 P0 卡点（同一段连续出错只登记一次）"""
@@ -405,6 +444,9 @@ def main(argv=None) -> int:
         return 3
     life(f"启动 interval={a.interval} {_parent_info()}")
     _install_signal_log()
+    if not a.once:
+        health_start()
+        idle_watch_start()
     try:
         return run_loop(a.interval, a.once)
     finally:
