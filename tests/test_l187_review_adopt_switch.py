@@ -25,7 +25,7 @@ def test_switch_missing_or_bad_is_off(tmp_path):
 
 
 def test_switch_repo_default_off():
-    assert PR.review_adopt_auto(ROOT) is False
+    assert PR.review_adopt_auto(ROOT) is True   # L-196（项目方 11-05 “全自动”）修订 L-187 默认关
 
 
 def test_off_does_not_adopt(tmp_path, monkeypatch):
@@ -45,7 +45,7 @@ def test_off_string_true_still_off(tmp_path, monkeypatch):
 
 def test_on_calls_review_adopt(tmp_path, monkeypatch):
     seen = {}
-    monkeypatch.setattr(PR, "review_adopt", lambda paths, oid, n=None, by="", ns=None: seen.update(oid=oid, ns=ns) or 5)
+    monkeypatch.setattr(PR, "review_adopt", lambda paths, oid, n=None, by="", ns=None, relaxed=False: seen.update(oid=oid, ns=ns) or 5)
     paths = _paths(tmp_path, {"review_adopt_auto": True})
     assert PR.auto_review_adopt(paths, "first:ep01-S4", {1, 2}) == 5
     assert seen == {"oid": "first:ep01-S4", "ns": {1, 2}}

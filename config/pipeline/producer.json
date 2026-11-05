@@ -6,13 +6,15 @@
   "runs": [],
   "_note": "L-161 总调度 11-03：一镜多种子分道（PRODMERGE-O）未经 A/B、A1-11 前提未修，cut B 进版关；验证后再开"
  },
- "_review_adopt_auto": "L-187 项目方 11-04：重试用尽仍没全过时，是否自动取 Q1–Q9 全过里分数最高的一版设为当前（review_adopt，标 review_needed，进成片，即 L-183 行为）。默认 false = 关：照旧标 best_effort、不设当前、不进成片，等项目方在 #/queue 挑。手工 CLI review-adopt 不受此开关影响",
- "review_adopt_auto": false,
+ "_review_adopt_auto": "L-196 项目方 11-05“我需要你全自动，不要检测那么多了”：true = 重试用尽后自动取最高分版设为当前（标 review_needed，进成片；没有 Q1–Q9 全过版也取，成人安全 / 文字水印不过的除外）。修订 L-187 默认关；手工 CLI review-adopt 不受此开关影响",
+ "review_adopt_auto": true,
  "accept": {
   "enabled": true,
   "scope": "asset_bundle_runs",
   "max_rechecks": 2,
   "skip_prefailed": true,
-  "_skip_prefailed": "AUDIT-PERF 11-05（默认关）：true = 契约 / 看图已判不过（pf.ok=false）的图不再做共用验收 QB——QB 只会加不过项、从不翻回通过，而它的 ensure_q9 会把 vqa_gate 刻意跳过的整张看图再跑一遍 + bundle 再看一遍（11-05 实测每张白耗 4–6 次看图、~160 s 看图 GPU、~80 s 关键路径）。关 = 原口径"
+  "_skip_prefailed": "AUDIT-PERF 11-05（默认关）：true = 契约 / 看图已判不过（pf.ok=false）的图不再做共用验收 QB——QB 只会加不过项、从不翻回通过，而它的 ensure_q9 会把 vqa_gate 刻意跳过的整张看图再跑一遍 + bundle 再看一遍（11-05 实测每张白耗 4–6 次看图、~160 s 看图 GPU、~80 s 关键路径）。关 = 原口径",
+  "run_qb": false,
+  "_run_qb": "L-196：false = 不跑共用验收 QB（只记录不挡，省整张再看一遍）；缺键 = true 原口径"
  }
 }

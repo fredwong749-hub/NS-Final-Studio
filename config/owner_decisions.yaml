@@ -719,13 +719,13 @@ checks:
 
   # ---------------- ep01 收尾决策 L-186…L-192（AUDIT-RULES 11-05 补登；原文见 docs/master/MASTER_PICTURE.md §1 末尾）
   - id: D-V2-187
-    decision: L-187（项目方 11-04 15:3x：L-183 自动“尽力取最高分进片”改为开关、默认关；重试用尽停 best_effort 进 #/queue 等项目方挑）
-    title: producer.json review_adopt_auto = false（默认关）
+    decision: L-196（项目方 11-05 原话“我需要你全自动，不要检测那么多了”，修订 L-187：重试用尽自动取最高分版进片，闸门只留 Q1 / 人数 / 文字水印 / 成人安全）
+    title: producer.json review_adopt_auto = true（L-196 开；原 L-187 默认关已修订）
     type: json
     file: config/pipeline/producer.json
     path: [review_adopt_auto]
     op: eq
-    value: false
+    value: true
   - id: D-V2-188
     decision: L-188（项目方 11-04 20:4x “用 L1”：只写有动机主光 + 光比 ≤3:1 + 负补光 + 背景低 1–2 档，禁平光句；sk_white_cyc 换低调底图；多人三层站位；post_film 开 / 关 USM；祁念短款裸粉甲）
     title: 写作规则有 L-188 光线条（K-WRT-807 / QW-L1 阻断）

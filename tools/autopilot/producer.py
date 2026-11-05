@@ -1399,7 +1399,25 @@ def review_pick(td: dict, stage: str, ns: set | None = None) -> int | None:
     return max(c, key=lambda t: score_key(take_pf(t)))["n"] if c else None
 
 
-def review_adopt(paths: "Paths", oid: str, n: int | None = None, by: str = "L-183 自动", ns: set | None = None) -> int | None:
+def safe_take(pf: dict) -> bool:
+    """L-196 兜底采用：没有成人安全 / 文字水印硬项不过（身份 / 人数不过的最好一版允许采用，标 review_needed）"""
+    for i in (pf or {}).get("items") or []:
+        if i.get("status") in ("fail", "untested") and i.get("id") in ("Q6", "Q9", "QB") and not i.get("record_only"):
+            ev = i.get("evidence") or {}
+            if i.get("id") == "Q6" or "underage_look" in (ev.get("defects") or []) or (ev.get("label") or {}).get("age") == "fail"                     or (ev.get("label") or {}).get("ocr") == "fail":
+                return False
+    return True
+
+
+def review_pick_relaxed(td: dict, stage: str, ns: set | None = None) -> int | None:
+    """L-196：重试用尽、没有 Q1–Q9 全过的版本时，取没被驳回 / 标坏、成人安全与文字水印没挡的版本里 score_key 最高的一版"""
+    c = [t for t in td.get("takes") or [] if t.get("stage") == stage and (ns is None or t.get("n") in ns)
+         and not t.get("bad") and not t.get("master_reject") and t.get("file") is not None and safe_take(take_pf(t))]
+    return max(c, key=lambda t: score_key(take_pf(t)))["n"] if c else None
+
+
+def review_adopt(paths: "Paths", oid: str, n: int | None = None, by: str = "L-183 自动", ns: set | None = None,
+                 relaxed: bool = False) -> int | None:
     """L-183（总调度 11-04 04:2x / 05:0x，项目方“不卡整集”）：尽力用尽不再排除出拼接——取 Q1–Q9 全过里分数最高的一版设为当前，
     postflight 标 review_needed=true 并改 ok=true（原结论留 ok_before_review / blocking_before_review，审片可见），
     这样尾帧 / 出图检测 / 视频编单都按“过”往下走；V2_LIVE 记“待项目方复核”。没有 Q1–Q9 全过的版本 → None（照旧尽力）"""
@@ -1408,9 +1426,9 @@ def review_adopt(paths: "Paths", oid: str, n: int | None = None, by: str = "L-18
     stage = "image" if kind == "first" else "last"
     td = P.load_takes(sid)
     if n is None:
-        n = review_pick(td, stage, ns)
+        n = review_pick(td, stage, ns) or (review_pick_relaxed(td, stage, ns) if relaxed else None)
     t = next((x for x in td.get("takes") or [] if x.get("stage") == stage and x.get("n") == n), None) if n else None
-    if t is None or not q19_clean(take_pf(t)):
+    if t is None or not (q19_clean(take_pf(t)) or (relaxed and safe_take(take_pf(t)))):
         return None
     note = {"by": by, "at": iso(), "rule": "L-183", "why": "尽力用尽，取 Q1–Q9 全过里分数最高的一版，待项目方复核"}
 
@@ -2030,10 +2048,13 @@ class FrameExec:
         pf.setdefault("reasons", [])
         vlm = vqa_gate(sid, stage, file_rel, job, pf)   # VQAGATE：本地看图闸门（enforce 期不过 = 不设为当前、自动重出）
         if not pf.get("score_infra"):
-            if pf.get("ok") is False and accept_skip_prefailed(self.p.root):
+            if not accept_run_qb(self.p.root):
+                mark_qb_skipped(pf, why="L-196 全自动：QB 只记录不挡，不再整张再看一遍（accept.run_qb=false；人数 / 文字 / 年龄已由 Q10 / Q6 / Q9 覆盖）")
+            elif pf.get("ok") is False and accept_skip_prefailed(self.p.root):
                 mark_qb_skipped(pf)                 # AUDIT-PERF 11-05：已判不过的图不再做共用验收（开关 accept.skip_prefailed）
             else:
                 pf = shared_accept(self.p, self.script, sid, file_rel, job, pf)   # PRODMERGE-O：共用验收（bundle + retry 三态）
+        pf = apply_blocking_policy(pf)            # L-196：只有 gen_contract.json blocking_items 里的硬项挡，其余只记录
         pf["code_sha"] = code_sha()               # W44 ①：每条结论记“哪份代码判的”（本进程启动时的内容 sha）
         pf["judged_pid"] = os.getpid()
         try:                                     # canary_after_redo：换版后前 6 镜同一阻断项失败 > 34% → 暂停派单（kind=canary）
@@ -3737,7 +3758,7 @@ def auto_review_adopt(paths: "Paths", oid: str, ns: set | None = None) -> int | 
     if not review_adopt_auto(paths.root):
         log_event(paths, "review_adopt_skipped", obj=oid, rule="L-187", counted=False, note="自动取最高分开关关")
         return None
-    return review_adopt(paths, oid, ns=ns)
+    return review_adopt(paths, oid, ns=ns, relaxed=True)   # L-196：没有全过版也取最高分版
 
 
 def shared_accept(paths: "Paths", script, sid: str, file_rel: str, job: dict, pf: dict, evaluate_fn=None) -> dict:
@@ -3766,14 +3787,33 @@ def accept_skip_prefailed(root: Path) -> bool:
         return False
 
 
-def mark_qb_skipped(pf: dict) -> dict:
+def accept_run_qb(root: Path) -> bool:
+    """config/pipeline/producer.json accept.run_qb（L-196；缺键 = true 原口径）：false = 不跑共用验收 QB"""
+    try:
+        from ns_agent.gen_contract import accept as ACC
+        return bool(ACC.config(root).get("run_qb", True))
+    except Exception:  # noqa: BLE001  # arch-ok: 读不到配置 = 照跑（原口径）
+        return True
+
+
+def apply_blocking_policy(pf: dict) -> dict:
+    """L-196：gen_contract.json blocking_items（Q1 / count / text / adult）以外的项只记录不挡；缺键 = 旧口径。出错不改结论"""
+    try:
+        from ns_agent.gen_contract import blocking as BL
+        return BL.apply(pf)
+    except Exception:  # noqa: BLE001  # arch-ok: 策略出错 = 保持原判（更严），不放宽
+        pf.setdefault("reasons", [])
+        return pf
+
+
+def mark_qb_skipped(pf: dict, why: str | None = None) -> dict:
     """AUDIT-PERF 11-05（开关 config/pipeline/producer.json accept.skip_prefailed，默认关）：契约 / 看图已判不过（ok=False）的图，
     共用验收只会再加 QB、从不翻回通过（gen_contract.accept.apply）；而它的 ensure_q9 会把 vqa_gate 刻意跳过的整张看图再跑一遍
     （+ bundle 再看一遍）——11-05 实测每张白耗 4–6 次看图、~160 s 看图 GPU、~80 s 关键路径。QB 记 na（不挡），结论不变"""
     pf["items"] = [i for i in pf.get("items") or [] if i.get("id") != "QB"] + [
         {"id": "QB", "title": "共用验收（看图逐条 + 年龄 + OCR + 人数，PRODMERGE-O）", "status": "na", "blocking": False,
-         "detail": "前置契约不过（" + "、".join(str(b) for b in pf.get("blocking") or []) + "），未做共用验收（accept.skip_prefailed）"}]
-    pf["accept"] = {"status": "skipped", "why": "prefailed", "blocking": list(pf.get("blocking") or [])}
+         "detail": why or ("前置契约不过（" + "、".join(str(b) for b in pf.get("blocking") or []) + "），未做共用验收（accept.skip_prefailed）")}]
+    pf["accept"] = {"status": "skipped", "why": "L-196" if why else "prefailed", "blocking": list(pf.get("blocking") or [])}
     return pf
 
 

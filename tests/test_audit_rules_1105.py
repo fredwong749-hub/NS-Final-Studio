@@ -152,7 +152,7 @@ def test_owner_decisions_encode_l187_to_l192():
 
 def test_l187_auto_adopt_default_off_and_l191_base35():
     prod = json.loads((ROOT / "config/pipeline/producer.json").read_text(encoding="utf-8"))
-    assert prod["review_adopt_auto"] is False
+    assert prod["review_adopt_auto"] is True   # L-196（项目方 11-05 “全自动”）修订 L-187 默认关
     rq = json.loads((ROOT / "config/render_quality.json").read_text(encoding="utf-8"))
     assert rq["first_frame_tier"]["runs"]["series10_v2"] == "base35" and rq["first_frame_tier"]["base35"]["steps"] == 35
 
