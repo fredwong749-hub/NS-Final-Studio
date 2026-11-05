@@ -31,6 +31,8 @@ class FakeEnv(ER.Env):
 
     def remote(self, host, cmd, timeout=120, tries=2, input=None):
         self.remote_log.append((host, cmd))
+        if "probe-prompts" in cmd and not getattr(self, "probe_fail", False):   # 11-05：regen 后自动探针（默认假成功）
+            return 0, "r1 ep01 提示词证据：16/16 镜编译 + preflight 过 → x".encode("utf-8"), ""
         return self.remote_fn(host, cmd)
 
     def local(self, args, timeout=600):
@@ -171,7 +173,8 @@ def test_regen_waits_for_sync_then_todo_then_done(tmp_path):
     assert r["status"] == "todo" and "regen" in r["plan"]
     r = ER.act_regen(env, st, args(), r)
     assert r["status"] == "done" and st["regen"]["sha"] == "abc"
-    assert "OFFLINE_SELF=gpu33" in env.remote_log[-1][1] and "regen" in env.remote_log[-1][1]
+    regen_cmds = [c for _h, c in env.remote_log if "producer.py regen" in c]
+    assert regen_cmds and "OFFLINE_SELF=gpu33" in regen_cmds[-1] and "probe-prompts" in env.remote_log[-1][1]   # 11-05：regen 后紧跟探针
     assert ER.check_regen(env, st, args())["status"] == "done"       # 幂等：不再重复下达
 
 
@@ -347,3 +350,14 @@ def test_resident_thread_tick(tmp_path):
     c.write_text(json.dumps({"enabled": True, "interval_s": 5, "targets": [{"run": "a", "ep": 1}, {"run": "b"}]}), encoding="utf-8")
     assert RS.episode_run_cfg(c)["interval_s"] == 60 and len(RS.episode_run_cfg(c)["targets"]) == 1
     assert RS.episode_run_cfg(ROOT / "config/pipeline/episode_run.json")["enabled"] is True
+
+
+def test_act_regen_runs_probe_and_blocks_on_bad_shot(tmp_path):
+    env = FakeEnv(tmp_path)
+    env.probe_fail = True
+    bad = "r1 ep01 提示词证据：15/16 镜编译 + preflight 过 → x" + chr(10) + "  镜16：I2 身份脸部参考缺"
+    env.remote_fn = lambda h, c: ((1, bad.encode("utf-8"), "") if "probe-prompts" in c
+                                  else (0, b'{"regen": ["ep01-S1"], "at": "t"}', ""))
+    st = {"import": {"sha": "abc"}}
+    r = ER.act_regen(env, st, {}, {})
+    assert r["status"] == "blocked" and "镜16" in r["msg"] and st["regen"]["probe"]["ok"] is False

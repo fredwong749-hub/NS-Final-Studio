@@ -1507,7 +1507,7 @@ def back_in_text(name: str, img: str, others=()) -> bool:
         if not c:
             continue
         subj = clause_subject(c, names, subj)
-        owner = re.search(r"(" + "|".join(re.escape(n) for n in names) + r")的(?:背影|背)", c)   # “顾沉的背影”：所有格直接归属，不看主语
+        owner = re.search(r"(" + "|".join(re.escape(n) for n in names) + r")的(?:背影|背面|背身)", c)   # “顾沉的背影”：所有格直接归属，不看主语
         if owner:
             if owner.group(1) == name:
                 return True

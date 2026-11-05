@@ -49,13 +49,32 @@ def check_shot(img: str, cast: list[tuple[str, str]]) -> dict:
         if any(UPRIGHT.search(c) and FRONTAL.search(c) for c in mine):
             frontal.append(n)
     size = _size(img or "")
-    tight_pair = len(on) >= 2 and size in TIGHT
+    # 11-05 PS-MASTER（L-192 过肩 coverage）：前景只露肩 / 后脑 / 背影的人不算“露脸”——按小句主语延续归属（无人名小句沿用上一句主语），
+    # 与编译层 ns_schema.prompt_v2.hidden_face 同一口径；否则过肩中近景（K-WRT-816 要求 85mm）永远被 H16 挡
+    faces = [n for n in on if not _face_hidden(n, clauses, [x for x, _p in cast])]
+    tight_pair = len(faces) >= 2 and size in TIGHT
     # 插断的分句（FACTCHECK 11-02 发现：补丁把“<名>的手 / 肩 + 接触”插进了另一句中间，如“视线落在林晚的左手扶着矮柜边缘”“停在林晚的后背贴在砖墙上”）
     names = [n for n, _p in cast]
     spliced = [c.strip()[:40] for c in clauses for a in names for b in names
                if a != b and re.search(re.escape(a) + r"[^，；。]{1,14}?" + re.escape(b) + SPLICE_PART, c)]
     return {"ok": not no_contact and not frontal and not tight_pair and not spliced, "no_contact": no_contact, "frontal": frontal,
-            "tight_pair": on if tight_pair else [], "size": size, "spliced": sorted(set(spliced))}
+            "tight_pair": faces if tight_pair else [], "size": size, "spliced": sorted(set(spliced))}
+
+
+def _face_hidden(name: str, clauses: list[str], names: list[str]) -> bool:
+    """这个人的小句（含其后无人名的延续小句）里写了 背对镜头 / 背影 / 只露… / 以…入画 / 被…遮 → 不露脸"""
+    try:
+        from ns_schema.prompt_v2 import hidden_face
+    except Exception:                                     # arch-ok: 编译层不可用时按旧口径（算露脸），不放宽
+        return False
+    mine, cur = [], None
+    for c in clauses:
+        hit = [n for n in names if n in c]
+        if hit:
+            cur = hit[0]
+        if cur == name:
+            mine.append(c)
+    return bool(mine) and hidden_face("，".join(mine))[0]
 
 
 def staging_rows(text: str, ep_no: int | None = None) -> list[dict]:

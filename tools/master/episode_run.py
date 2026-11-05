@@ -24,6 +24,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -295,7 +296,27 @@ def act_regen(env, st, a, res) -> dict:
     d = parse_json_tail(out) or {}                      # producer regen 输出 JSON（旧版本只有 {"regen": [...]}，没有 at / dry）
     st["regen"] = {"sha": st["import"].get("sha"), "at": d.get("at") or now_iso(env.now()), "shots": d.get("regen") or [],
                    "skipped": d.get("skipped") or {}}
-    return R("done", f"换代已下达（{len(st['regen']['shots'])} 镜）", regen_shots=st["regen"]["shots"])
+    pr = probe_prompts(env)
+    st["regen"]["probe"] = pr
+    if not pr.get("ok"):
+        return R("blocked", f"换代已下达（{len(st['regen']['shots'])} 镜），但提示词探针没过：{pr.get('msg')}",
+                 regen_shots=st["regen"]["shots"], hint="L-140 整集提示词过了才出图：修这一镜（分镜 / 编译）后重跑 sop_gate.py probe-prompts")
+    return R("done", f"换代已下达（{len(st['regen']['shots'])} 镜）；提示词探针 {pr.get('msg')}", regen_shots=st["regen"]["shots"])
+
+
+def probe_prompts(env) -> dict:
+    """11-05 PS-MASTER（项目方“处理这个拖慢逻辑”）：新稿导入 / 换代后立刻在出图机重跑 sop_gate probe-prompts。
+    否则 producer 的 sop_gate 会因“提示词证据过期”整集退避 15–30 分钟（L-140 整集就绪才出图），显卡空等。"""
+    h = env.image_host
+    cmd = (f"cd {shlex.quote(env.root_of(h))} && {shlex.quote(env.py_of(h))} tools/master/sop_gate.py probe-prompts "
+           f"--run {shlex.quote(env.run)} --episode {env.ep}")
+    rc, out, err = env.remote(h, cmd, timeout=900, tries=1)
+    txt = (out.decode("utf-8", "replace") + err).strip()
+    first = next((l for l in txt.splitlines() if "提示词证据" in l), txt[-200:])
+    bad = [l.strip() for l in txt.splitlines() if l.strip().startswith("镜")]
+    m = re.search(r"(\d+)/(\d+) 镜", first)
+    ok = rc == 0 and bool(m) and m.group(1) == m.group(2)
+    return {"ok": ok, "rc": rc, "msg": (first + ("；" + "；".join(bad[:3]) if bad else ""))[:300]}
 
 
 def hold_blockers(env: Env, snap: dict, shots: list[str], lanes: list[str]) -> list[str]:
