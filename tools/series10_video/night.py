@@ -57,7 +57,8 @@ STATUS = ROOT / ("docs/series10_video/STATUS.md" if LEGACY else f"docs/series10_
 EPS_OUT = RC.episodes_out(RUN_ID)        # V1 = data/episodes/series10（原样），其它剧 = data/episodes/<剧>
 # 道归属（总调度 10-31 夜）：gpu33 三道 = 出图优先（让道模式）；gpu36:0/1 = BAKEOFF（让道模式，可写 hold 文件借用）；gpu36:2 = 视频
 DEFAULT_CTRL = {"force_eps": [], "shared_lanes": ["gpu33:0", "gpu33:1", "gpu33:3", "gpu36:0", "gpu36:1"],
-                "hold_lanes": [], "per_lane": 2, "yield_s": 180, "bgm": "auto"}
+                "hold_lanes": [], "per_lane": 2, "yield_s": 180, "bgm": "auto",
+                "poll_s": None}   # SLIM-CDE 11-05 D：轮询间隔（秒）；None = 旧 V1 120 s / V2 默认 45 s（首尾帧一锁定最迟 ~1 min 内编作业派单，原 ~2.3 min）
 
 
 def log(*a):
@@ -797,9 +798,38 @@ def sync_hosts_from_partition(part: dict | None = None) -> dict:
     return cur
 
 
+def poll_seconds(ctrl: dict) -> float:
+    """SLIM-CDE 11-05 D：night 轮询间隔。night_control.json poll_s 优先；没写 = V1 120 s、V2 45 s（逐镜派单本来就按镜判，
+    慢的只是这个 sleep：实测 READY→下一轮 build_jobs 间隔 134 s，其中 sleep 120 s，其余 ~14 s 是 build/sync/register）"""
+    try:
+        v = float(ctrl.get("poll_s")) if ctrl.get("poll_s") is not None else (120.0 if LEGACY else 45.0)
+    except (TypeError, ValueError):
+        v = 120.0
+    return min(max(v, 15.0), 600.0)
+
+
+def expire_holds(ctrl: dict) -> dict:
+    """K-OPS-I15（SLIM-CDE 11-05）：night_control.json 的 hold_lanes 必须带 expires_at（hold_expires: {道: iso} 或整串 iso）；
+    没带的挂满 6 h 自动忽略并记日志（11-05 10:3x 视频基准加的 gpu36:0 hold 没撤 → 21:1x 六卡全空）"""
+    hl = list(ctrl.get("hold_lanes") or [])
+    if not hl:
+        return ctrl
+    try:
+        sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
+        import hold_expiry as HX
+        he = ctrl.get("hold_expires") or ctrl.get("hold_expires_at")
+        exp = {x: he for x in hl} if isinstance(he, str) else dict(he or {})
+        kept = HX.filter_lane_holds(hl, exp, VID / "night_hold_seen.json",
+                                    log=lambda ln, why: log("HOLD_EXPIRED_IGNORED", ln, why, "night_control.json hold_lanes"))
+    except Exception as e:  # noqa: BLE001  # arch-ok: 过期判断出错 = 原样挂着（失败关闭，不凭空放开），记日志
+        log("HOLD_EXPIRY_ERR", repr(e)[:160])
+        return ctrl
+    return {**ctrl, "hold_lanes": kept}
+
+
 def loop_once(st):
     sync_hosts_from_partition()
-    ctrl = {**DEFAULT_CTRL, **(jl(CTRL, {}) or {})}
+    ctrl = expire_holds({**DEFAULT_CTRL, **(jl(CTRL, {}) or {})})
     apply_lane_policy(st, ctrl)
     if st.get("lane_mode") == "video_lane_only":
         ctrl = {**ctrl, "hold_lanes": IMAGE_LANES}
@@ -870,7 +900,7 @@ def main(argv):
             log("LOOP_ERR", repr(e)[:300])
         if "--once" in argv:
             return 0
-        time.sleep(120)
+        time.sleep(poll_seconds({**DEFAULT_CTRL, **(jl(CTRL, {}) or {})}))
 
 
 if __name__ == "__main__":

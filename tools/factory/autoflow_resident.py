@@ -49,8 +49,12 @@ def _pid_alive(pid: int) -> bool:
     if pid <= 0:
         return False
     if os.name == "nt":
-        r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True, timeout=30)
-        return str(pid) in (r.stdout or "")
+        # UI-STATUS 11-05：原来 str(pid) in stdout 是子串匹配（别的进程的内存数 / pid 里含同样数字会误判“还活着”→ 陈旧锁不接管）；
+        # 改成 CSV 第二列（PID）逐行精确比对
+        r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH", "/FO", "CSV"], capture_output=True, text=True, timeout=30)
+        import csv
+        import io
+        return any(len(row) > 1 and row[1].strip() == str(pid) for row in csv.reader(io.StringIO(r.stdout or "")))
     try:
         os.kill(pid, 0)
         return True

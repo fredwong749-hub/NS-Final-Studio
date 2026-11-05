@@ -18,6 +18,7 @@
     }
    },
    "default_segment": "reality",
+   "video_mode": {"mode": "i2va", "from_episode": 2, "_doc": "L-197 A（项目方 11-05）：砍尾帧，视频只用首帧（H3 I2VA）；不出尾帧、视频不等尾帧、提示词不带 Picture 2。只管第 2 集起的新作业（ep01 已按 FL2VA 编好的不动）；mode 改 fl2va 或删本项即恢复；env NS_VIDEO_MODE=fl2va 临时强关。读取方 ns_agent.video_mode"},
    "shot_language": {
     "lens": "auto",
     "composition": "script",

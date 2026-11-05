@@ -5,6 +5,8 @@
  "retro_enforce": true,
  "prompt_probe": "build_first+preflight",
  "probe_timeout_s": 900,
+ "_auto_probe_stale": "SLIM-CDE 11-05 E2（K-OPS-I13 自动化）：true = 阻断原因是“提示词证据过期”时 require_backoff 自动后台起 probe-prompts（分离子进程，不出图不占 GPU；每集 5 min 冷却）并把退避封顶 120 s；false / env NS_SOP_AUTO_PROBE=0 = 原行为（等人工 probe，退避 900/1800 s）",
+ "auto_probe_stale": true,
  "_master": "11-03 03:5x HARNESS-O 首版：总调度要求“sop_gate 不能挡住第 1 集正常往下走”。第 1 集实测卡在导入闸门（02:52 TIMELINE-O 严格时间轴把 gate/import 改成 reopened，11 项 TL-）→ 出图侧（资产就绪 / 提示词 / 出图）先 observe，出图检测 / 尾帧 / 视频 / 整集预览 enforce。第 1 集过导入闸门后由总调度把 observe_stages 清空。",
  "probe_lane": "gpu36:0",
  "promote": {

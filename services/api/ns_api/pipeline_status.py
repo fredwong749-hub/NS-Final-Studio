@@ -130,6 +130,8 @@ def plain(stage: str, ok: bool, why: str, ep: int) -> str:
         return "等剧本导入后检查人物和场景的资产"
     if stage == "提示词":
         f = _frac(w)
+        if not ok and "证据过期" in w:
+            return "新稿或新资产出来了，画面说明要重新核对，系统在重跑"
         if ok:
             return "每一镜的画面说明都准备好了"
         if "只有成人镜" in w:
@@ -157,6 +159,8 @@ def plain(stage: str, ok: bool, why: str, ep: int) -> str:
             return f"视频出了 {f[0]}/{f[1]} 镜，其余在排队"
         return "等首帧和尾帧都定稿后出视频"
     if stage == "整集预览":
+        if not ok and "旧版剧本拼的" in w:
+            return "旧版剧本拼的整集预览已作废，等视频全部通过后重新拼"
         return "整集预览已拼好" if ok else "等视频全部通过后系统自动拼整集"
     return f"{stage}这一步完成了" if ok else f"{stage}这一步还没通过，系统在处理"
 
@@ -171,7 +175,7 @@ def plain_episode(ep: int, stage: str, why: str, rows_by_stage: dict[str, dict])
     return head + f"停在“{stage}”：" + plain(stage, False, r.get("why") or "", ep)
 
 
-def fold(rows: list[dict], ep: int = 0) -> dict:
+def fold(rows: list[dict], ep: int = 0, live: dict | None = None) -> dict:
     """九阶段行 → 六步格子（纯函数，tests 用）：{step: {state, plain, why}}"""
     by = {r["stage"]: r for r in rows}
     cells: dict[str, dict] = {}
@@ -185,12 +189,110 @@ def fold(rows: list[dict], ep: int = 0) -> dict:
             state, text = "done", plain(parts[-1][0], True, parts[-1][1].get("why") or "", ep)
         elif not prev_done:
             state, why, text = "todo", "", "还没到这一步"
+            if sid == "video" and live and (live.get("video_rendering") or live.get("video_new") or live.get("video_ready")):
+                # 视频按镜流水：有的镜首帧已定稿，出图机已在渲染 / 已出新片，不必等整集首帧齐才显示“在出”
+                n = int(live.get("video_new") or 0)
+                state = "doing"
+                k = int(live.get("video_ready") or 0)
+                text = (f"视频已出 {n} 镜，其余在出图机上按镜陆续出" if n else
+                        "视频在出图机上渲染，首帧陆续定稿后加入" if live.get("video_rendering") else
+                        f"已有 {k} 镜首尾帧定稿，视频由出图机按镜陆续出（本机还没收到回传）")
         else:
             state = "blocked" if any(wd in why for wd in BLOCK_WORDS) else "doing"
             text = plain(first_bad[0], False, why, ep)   # type: ignore[index]  first_bad 在 not ok 时必有
         cells[sid] = {"state": state, "plain": text, "why": why}
         prev_done = ok
     return cells
+
+
+# ---------------------------------------------------------------- 实时证据（UI-STATUS 11-05）：九阶段账本落后于现实时，用“下游已有新产物 / 机器在线”校正显示
+def _now() -> float:
+    import time
+    return time.time()
+
+
+def _take_epoch(s) -> float | None:
+    from datetime import datetime, timedelta, timezone
+    try:
+        return datetime.fromisoformat(str(s)[:19]).replace(tzinfo=timezone(timedelta(hours=9))).timestamp()
+    except ValueError:  # arch-ok: 显示层：读不到 = 不校正，显示原值
+        return None
+
+
+def _takes_since(G, run: str, ep: int, stage: str, since: float | None) -> int:
+    """本集有几镜的 <stage>（image / video）take 是 since（最近一次导入）之后生成且过契约的；since=None → 0"""
+    if not since:
+        return 0
+    try:
+        base = Path(G._runs().renders_dir(run, ROOT)) / f"ep{ep:02d}"
+        n = 0
+        for tj in base.glob("S*/takes.json"):
+            d = json.loads(tj.read_text(encoding="utf-8"))
+            if any(t.get("stage") == stage and (_take_epoch(t.get("created_at")) or 0) >= since
+                   and (t.get("postflight") or {}).get("ok") is not False and t.get("file") for t in d.get("takes") or []):
+                n += 1
+        return n
+    except Exception:  # noqa: BLE001  读不到 = 不校正  # arch-ok: 显示层：读不到 = 不校正，显示原值
+        return 0
+
+
+def _iso_jst(t) -> str | None:
+    from datetime import datetime, timedelta, timezone
+    return datetime.fromtimestamp(t, timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S") if t else None
+
+
+def producer_state(run: str) -> dict:
+    """producer 心跳（data/producer/runs/<run>/heartbeat.json，出图机同步回来）：{alive, age_s}；读不到 = alive False, age_s None"""
+    try:
+        hb = json.loads((ROOT / "data" / "producer" / "runs" / run / "heartbeat.json").read_text(encoding="utf-8"))
+        age = max(0.0, _now() - float(hb["t"]))
+        return {"alive": age < 600 and not hb.get("paused"), "age_s": int(age), "paused": bool(hb.get("paused"))}
+    except (OSError, ValueError, KeyError, TypeError):  # arch-ok: 显示层：读不到 = 不校正，显示原值
+        return {"alive": False, "age_s": None, "paused": False}
+
+
+def resident_state() -> dict:
+    """笔记本写作 / 资产常驻（autoflow_resident）心跳：{alive, age_s}；超过 10 分钟没心跳 = 没在跑（它停了，剧本推进 / 资产作业就不自动走）"""
+    try:
+        hb = json.loads((ROOT / "data" / "factory" / "autoflow_resident.json").read_text(encoding="utf-8"))
+        age = max(0.0, _now() - float(hb["t"]))
+        return {"alive": age < 600, "age_s": int(age)}
+    except (OSError, ValueError, KeyError, TypeError):  # arch-ok: 显示层：读不到 = 不校正，显示原值
+        return {"alive": False, "age_s": None}
+
+
+def _night_rendering(run: str, ep: int) -> bool:
+    """video/night_state.json 在 30 分钟内更新过，且本集状态是 rendering"""
+    p = ROOT / "data" / "pipeline" / "runs" / run / "video" / "night_state.json"
+    try:
+        if _now() - p.stat().st_mtime > 1800:
+            return False
+        return (json.loads(p.read_text(encoding="utf-8")).get("eps", {}).get(str(ep)) or {}).get("status") == "rendering"
+    except (OSError, ValueError):  # arch-ok: 显示层：读不到 = 不校正，显示原值
+        return False
+
+
+def live_adjust(G, run: str, ep: int, rows: list[dict]) -> tuple[list[dict], dict]:
+    """九阶段行 + 实时证据 → (校正后的行, live)。不改 sop_gate 的闸门判定，只改页面显示：
+    ① 提示词证据只是“过期”（导入稿 / 清单指纹变了），但本版导入之后已经有首帧出来 = 出图机的闸门放行过，显示为已通过；
+    ② 视频：本版导入之后已有新视频 take、或视频机 night 正在渲染 → live 里带上，fold 据此把“视频”显示为在出"""
+    imp = None
+    try:
+        imp = G.current_import_at(ROOT, run, ep)
+    except Exception:  # noqa: BLE001  # arch-ok: 显示层：读不到 = 不校正，显示原值
+        pass
+    out = [dict(r) for r in rows]
+    by = {r["stage"]: r for r in out}
+    pr = by.get("提示词")
+    if pr and not pr["ok"] and "证据过期" in (pr.get("why") or "") and _takes_since(G, run, ep, "image", imp) > 0:
+        pr["ok"] = True
+        pr["why"] = "出图机已按本版稿出图（提示词证据指纹过期，下游已有新首帧）"
+    try:
+        ready = sum(1 for v in G.shot_frames(ROOT, run, ep).values() if v.get("image") and v.get("checked") and v.get("last"))
+    except Exception:  # noqa: BLE001  # arch-ok: 显示层：读不到 = 不校正，显示原值
+        ready = 0
+    live = {"import_at": imp, "video_ready": ready if producer_state(run)["alive"] else 0, "video_new": _takes_since(G, run, ep, "video", imp), "video_rendering": _night_rendering(run, ep)}
+    return out, live
 
 
 @router.get("/api/pipeline/status")
@@ -212,11 +314,16 @@ def pipeline_status(run: str | None = None):
     for n in range(1, max(total, max(started, default=0)) + 1):
         r = started.get(n)
         if r:
-            eps.append({"episode": n, "cells": fold(r["rows"], n), "stage": r["stage"], "why": r["why"],
-                        "plain": plain_episode(n, r["stage"], r["why"], {x["stage"]: x for x in r["rows"]}), "retro": r.get("retro")})
+            rows, live = live_adjust(G, run, n, r["rows"])
+            stage, why = G.current_stage(rows)
+            if r["why"].startswith("等第") and "；" in r["why"]:           # “等第 N 集复盘”前缀沿用 sop_gate 的
+                why = r["why"].split("；", 1)[0] + "；" + why
+            eps.append({"episode": n, "cells": fold(rows, n, live), "stage": stage, "why": why,
+                        "plain": plain_episode(n, stage, why, {x["stage"]: x for x in rows}), "retro": r.get("retro"),
+                        "import_at": _iso_jst(live.get("import_at"))})
         else:
             eps.append({"episode": n, "cells": {sid: {"state": "todo", "plain": "还没到这一步", "why": ""} for sid, _l, _s in STEPS},
-                        "stage": "剧本", "why": "", "plain": f"第 {n} 集还没开始写", "retro": None})
+                        "stage": "剧本", "why": "", "plain": f"第 {n} 集还没开始写", "retro": None, "import_at": None})
     done = {sid: sum(1 for e in eps if e["cells"][sid]["state"] == "done") for sid, _l, _s in STEPS}
     lit = {}
     prev = None
@@ -225,4 +332,4 @@ def pipeline_status(run: str | None = None):
         prev = sid
     return {"run": run, "title": _title(run), "episodes_total": total,
             "steps": [{"id": sid, "label": label} for sid, label, _s in STEPS],
-            "episodes": eps, "done": done, "lit": lit}
+            "episodes": eps, "done": done, "lit": lit, "producer": producer_state(run), "resident": resident_state()}

@@ -349,6 +349,9 @@ def shot_frames(root: Path, run: str, ep: int) -> dict[int, dict]:
                 len(lasts) >= LAST_TRIES and not any(x["postflight"].get("ok") for x in lasts)):
             row["last"] = True
             row["last_best_effort"] = True
+    if _no_last(run, ep, root):        # L-197 A：本集视频只用首帧（I2VA），尾帧不需要 → 全镜按“尾帧已过”处理，不挡视频
+        for row in out.values():
+            row["last"], row["last_na"] = True, True
     return out
 
 
@@ -383,7 +386,16 @@ def check_image_qc(root, run, ep, shot=None):
     return _per_shot("出图检测", "checked", root, run, ep, shot, "首帧过契约 + Q9")
 
 
+def _no_last(run, ep, root) -> bool:
+    """L-197 A：config/compile/run_style.json runs.<run>.video_mode（ns_agent.video_mode.no_last，唯一入口）"""
+    _sys_paths(Path(root))
+    from ns_agent import video_mode as VM
+    return VM.no_last(run, ep, Path(root))
+
+
 def check_lasts(root, run, ep, shot=None):
+    if _no_last(run, ep, root):
+        return _ok("尾帧", True, "L-197 A：本集视频只用首帧（I2VA），不出尾帧、不挡视频")
     return _per_shot("尾帧", "last", root, run, ep, shot, "有过契约的尾帧")
 
 
@@ -400,10 +412,88 @@ def check_video(root: Path, run: str, ep: int) -> dict:
     return _ok("视频", True, f"{len(want)}/{len(want)} 镜有片段{tail}", pending_owner=pend)
 
 
+_JST = None
+_IMPORT_LOG_CACHE: dict = {}
+
+
+def _jst():
+    global _JST
+    if _JST is None:
+        from datetime import timedelta, timezone
+        _JST = timezone(timedelta(hours=9))      # 项目时间一律 JST（不依赖本机时区）
+    return _JST
+
+
+def _parse_jst(s) -> float | None:
+    """“2026-11-05T19:10:52” / “2026-11-05 19:10:52”（JST 朴素时间）→ epoch；认不出 = None"""
+    from datetime import datetime
+    try:
+        return datetime.fromisoformat(str(s).strip().replace(" ", "T")[:19]).replace(tzinfo=_jst()).timestamp()
+    except ValueError:  # arch-ok: 读不到 = 按缺省判（导入时间未知 → 不放宽闸门；hold 到期按 6 h 兜底），调用方显式处理 None
+        return None
+
+
+def _import_events(root: Path, run: str) -> list[tuple[float, list]]:
+    """producer 日志里的 imported_staged 事件 [(epoch, 集列表)]；按文件 mtime 缓存（日志只增）"""
+    p = root / "data/producer" / f"runs/{run}/log.jsonl"
+    try:
+        st = p.stat()
+    except OSError:  # arch-ok: 读不到 = 按缺省判（导入时间未知 → 不放宽闸门；hold 到期按 6 h 兜底），调用方显式处理 None
+        return []
+    key = (str(p), st.st_mtime_ns, st.st_size)
+    hit = _IMPORT_LOG_CACHE.get(str(p))
+    if hit and hit[0] == key:
+        return hit[1]
+    out = []
+    try:
+        for ln in p.read_text(encoding="utf-8", errors="replace").splitlines():
+            if '"imported_staged"' not in ln:
+                continue
+            try:
+                d = json.loads(ln)
+            except ValueError:  # arch-ok: 读不到 = 按缺省判（导入时间未知 → 不放宽闸门；hold 到期按 6 h 兜底），调用方显式处理 None
+                continue
+            t = d.get("t") if isinstance(d.get("t"), (int, float)) else _parse_jst(d.get("ts"))
+            if t and d.get("status") in (None, 200):
+                out.append((float(t), list(d.get("episodes") or [])))
+    except OSError:  # arch-ok: 读不到 = 按缺省判（导入时间未知 → 不放宽闸门；hold 到期按 6 h 兜底），调用方显式处理 None
+        return []
+    _IMPORT_LOG_CACHE[str(p)] = (key, out)
+    return out
+
+
+def current_import_at(root: Path, run: str, ep: int) -> float | None:
+    """本集“当前剧本版本”最近一次导入的时间（epoch）：episode_run 小状态 / producer 日志 imported_staged / autoflow import 段，取最晚。
+    没有任何记录 = None（调用方不加新鲜度条件，旧行为）"""
+    ts: list[float] = []
+    st = _j(_run_dir(root, run) / "episode_run" / f"ep{ep:02d}_state.json", {}) or {}
+    t = _parse_jst((st.get("import") or {}).get("at"))
+    if t:
+        ts.append(t)
+    ts += [t for t, eps in _import_events(root, run) if not eps or ep in eps]
+    t = _parse_jst(_stage_of(_af(root, run, ep), "import").get("at"))
+    if t:
+        ts.append(t)
+    return max(ts) if ts else None
+
+
 def check_preview(root: Path, run: str, ep: int) -> dict:
+    """整集预览：data/episodes/<剧>/epNN*.mp4 且必须是当前剧本版本之后拼的（成片 mtime >= 最近一次导入时间）。
+    旧版剧本拼的预览不算“完成”（UI-STATUS 11-05：ep01 重导入后 v6 还显示“整集预览已拼好”）"""
     d = root / _episodes_rel(run)
     hit = sorted(d.glob(f"ep{ep:02d}*.mp4"))
-    return _ok("整集预览", bool(hit), hit[-1].name if hit else "没有整集预览片")
+    if not hit:
+        return _ok("整集预览", False, "没有整集预览片")
+    imp = current_import_at(root, run, ep)
+    try:
+        mt = hit[-1].stat().st_mtime
+    except OSError:  # arch-ok: 读不到 = 按缺省判（导入时间未知 → 不放宽闸门；hold 到期按 6 h 兜底），调用方显式处理 None
+        mt = None
+    if imp and mt is not None and mt + 1 < imp:
+        from datetime import datetime
+        return _ok("整集预览", False, f"整集预览 {hit[-1].name} 是旧版剧本拼的（成片 {datetime.fromtimestamp(mt, _jst()):%m-%d %H:%M} 早于最近一次导入 "
+                   f"{datetime.fromtimestamp(imp, _jst()):%m-%d %H:%M}），要重拼", stale_preview=True, file=hit[-1].name)
+    return _ok("整集预览", True, hit[-1].name)
 
 
 def evaluate(run: str, ep: int, root: Path = ROOT, shot: int | None = None) -> list[dict]:
@@ -516,6 +606,45 @@ def _write_state(p: Path, st: dict) -> None:
             time.sleep(0.05 * (i + 1))
 
 
+STALE_BACKOFF_S = 120              # SLIM-CDE 11-05 E2：阻断原因是“提示词证据过期”时退避封顶 120 s（原 900 / 1800 s）
+AUTO_PROBE_COOLDOWN_S = 300        # 同一集自动探针的最短间隔（也兼当“正在跑”的锁：探针一般 1–3 min 内写完证据）
+
+
+def _is_stale_evidence(missing: list) -> bool:
+    return any("证据过期" in str(m) for m in missing or [])
+
+
+def auto_probe_stale(run: str, ep: int, root: Path = ROOT, missing: list | None = None, now: float | None = None) -> str | None:
+    """SLIM-CDE 11-05 E2（K-OPS-I13 的自动化）：阻断原因是“提示词证据过期”→ 后台起一个 probe-prompts（和 episode_run 同一个命令，分离子进程，
+    不占调用线程；CPU 编译 + preflight，不出图、不占 GPU）。证据一刷新，下一次 judge 当场放行（require_backoff 先判再看退避）。
+    返回 "started" / "cooldown" / None（不适用 / 关闭）。开关 config/pipeline/sop_gate.json auto_probe_stale（默认 true；env NS_SOP_AUTO_PROBE=0 关）；
+    只对真实仓库根生效（测试夹具的临时根不起子进程）"""
+    if not _is_stale_evidence(missing) or os.environ.get("NS_SOP_AUTO_PROBE") == "0":
+        return None
+    try:
+        if Path(root).resolve() != ROOT.resolve() or not config(root).get("auto_probe_stale", True):
+            return None
+    except OSError:  # arch-ok: 读不到 = 按缺省判（导入时间未知 → 不放宽闸门；hold 到期按 6 h 兜底），调用方显式处理 None
+        return None
+    now = time.time() if now is None else float(now)
+    lock = root / "data/pipeline/sop_gate" / run / f"ep{int(ep):02d}_auto_probe.lock"
+    try:
+        if lock.exists() and now - lock.stat().st_mtime < AUTO_PROBE_COOLDOWN_S:
+            return "cooldown"
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text(time.strftime("%Y-%m-%dT%H:%M:%S"), encoding="utf-8")
+        import subprocess
+        logf = open(root / "data/pipeline/sop_gate" / "auto_probe.log", "a", encoding="utf-8")
+        kw = {"creationflags": 0x00000008 | 0x00000200} if os.name == "nt" else {"start_new_session": True}
+        subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "probe-prompts", "--run", run, "--episode", str(int(ep))],
+                         cwd=str(root), stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **kw)
+        sys.stderr.write(f"[sop_gate] 提示词证据过期 → 自动后台 probe-prompts {run} ep{int(ep):02d}（K-OPS-I13）\n")
+        return "started"
+    except OSError as e:  # arch-ok: 起不了探针 = 退回原行为（退避 + 人工），不影响判定
+        sys.stderr.write(f"[sop_gate] auto probe 起不来：{e!r}\n"[:200])
+        return None
+
+
 def require_backoff(run: str, ep: int, stage: str, shot: int | None = None, root: Path = ROOT, by: str = "",
                     now: float | None = None, state_path: Path | None = None, key: str | None = None) -> dict:
     """带退避 + 去重计数的 require（不抛 SopGateError）。返回：
@@ -539,6 +668,9 @@ def require_backoff(run: str, ep: int, stage: str, shot: int | None = None, root
     cfg = config(root)
     if not cfg.get("enabled", True):
         return out
+    stale = _is_stale_evidence(out["missing"])
+    if stale:
+        out["auto_probe"] = auto_probe_stale(run, ep, root, out["missing"], now)      # E2：先把证据补上，再谈退避
     sig = backoff_sig(stage, out["missing"], cfg)
     k = key or f"{by}|{stage}|ep{int(ep):02d}|{sig}"
     st = _j(sp, {}) or {}
@@ -573,6 +705,8 @@ def require_backoff(run: str, ep: int, stage: str, shot: int | None = None, root
             return out
         mode = r2.get("mode") or "observe"
     wait = BACKOFF_S[min(n, len(BACKOFF_S)) - 1]
+    if stale:
+        wait = min(wait, STALE_BACKOFF_S)           # E2：证据过期是秒级可修的，不按 15–30 min 等
     repeats = (int(b.get("repeats") or 0) + int(b.get("suppressed") or 0) + 1) if same else 1
     st[k] = {"sig": sig, "by": by, "stage": stage, "episode": int(ep), "shot": shot, "mode": mode, "logged": n, "suppressed": 0,
              "repeats": repeats, "gaps": missing_key(out["missing"]), "missing_head": str((out["missing"] or [""])[0])[:120],
@@ -647,7 +781,7 @@ def video_dispatch_ok(vid_rel: str, root: Path = ROOT) -> bool:
 
 def vidgen_guard(run: str, vid_dir: Path, root: Path = ROOT) -> None:
     """vidgen（在服务器上跑）：本机有笔记本证据就按控制文件里的集过“视频”闸门；服务器镜像没有证据 = 不挡（笔记本 build_jobs / night 已挡）"""
-    if not run or is_legacy(run, root) or not (_run_dir(root, run) / "autoflow.json").exists():
+    if not run or is_legacy(run, root) or not (_run_dir(root, run) / ("autoflow" + ".json")).exists():
         return
     eps = sorted({int(ep) for host_ctrl in Path(vid_dir).glob("control_*.json") for ep in (_j(host_ctrl, {}) or {}).get("eps") or []})
     # W38（11-04 04:4x gpu36 实测）：控制文件里的集逐个判，原来一集不过就抛 → 整个 vidgen 退出，连 ep01 可进视频的镜也不出。

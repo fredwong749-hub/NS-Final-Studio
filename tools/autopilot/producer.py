@@ -63,6 +63,8 @@ for _p in ("services/render_router", "services/agent", "packages/schema", "tools
     if str(ROOT / _p) not in sys.path:
         sys.path.insert(0, str(ROOT / _p))
 
+from ns_agent import video_mode as _VM  # noqa: E402  L-197 A：按剧 / 集的“无尾帧（I2VA）”开关
+
 AGENT = "PRODUCER"
 
 
@@ -174,6 +176,9 @@ def job_sig(paths, sid: str) -> str | None:
         parts.append("tier=" + json.dumps(job["tier_overrides"], sort_keys=True))
     if job.get("prompt_template"):       # 阶段 2.1：提示词模板（v2）进签名；v1 不加段，旧签名不变
         parts.append("template=" + str(job["prompt_template"]))
+    if job.get("previz"):                # L-197 B：previz 控制图（深度图 sha）+ 强度 / 结束段进签名；没开 previz 不加段，旧签名不变
+        pv = job["previz"]
+        parts.append("previz=" + json.dumps({k: pv.get(k) for k in ("sha", "strength", "start_percent", "end_percent")}, sort_keys=True))
     for r in job.get("refs") or []:
         try:
             parts.append(f"{r}@{round((paths.root / str(r)).stat().st_mtime)}")
@@ -215,6 +220,8 @@ def redo_inputs_changed(paths, sid: str, kind: str, led: dict) -> str | None:
             return "提示词变了"
         if kind == "first" and ((job.get("tier_overrides") or None) != (((t.get("params") or {}).get("tier") or {}).get("overrides") or None)):
             return "出图档变了（预览 8 步 ↔ 35 步 base）"
+        if kind == "first" and ((job.get("previz") or {}).get("sha") != (((t.get("params") or {}).get("previz") or {}).get("sha"))):
+            return "previz 控制图变了（L-197 B）"
         if kind == "first" and ((job.get("prompt_template") or None) != ((t.get("params") or {}).get("prompt_template") or None)):
             return "提示词模板变了（v1 ↔ v2，阶段 2.1）"
         if job.get("compiler_inputs_sha") and t.get("inputs_sha") and job["compiler_inputs_sha"] != t["inputs_sha"]:
@@ -268,6 +275,8 @@ def shot_inputs_sig(paths, sid: str) -> dict:
         out["tier"] = job.get("tier")
     if job.get("prompt_template"):       # 阶段 2.1：模板 v2
         out["template"] = job.get("prompt_template")
+    if job.get("previz"):                # L-197 B
+        out["previz"] = job["previz"].get("sha")
     return out
 
 
@@ -607,6 +616,7 @@ def asset_hold_objects(data: Path, run: str | None = None, primary: str | None =
                 return run is None or r == run or (not r and run == primary)
             out |= {o for it in d.get("shots") or [] if mine(it) and not it.get("released")     # B2：释放过的条目（resume / unhold / retry）不再挡
                     and not (it.get("expires_at") and (ts_epoch(it["expires_at"]) or 0) < t_now)
+                    and (it.get("expires_at") or hold_alive(None, it.get("at") or it.get("paused_at"), t_now)[0])   # K-OPS-I15：没带 expires_at 的条目挂满 6 h 失效
                     for o in it.get("objects") or []}           # K-OPS-E19：带 expires_at 的条目到期自动失效（A-09：带时区比较）
     return out
 
@@ -1237,6 +1247,14 @@ def partition_held(part: dict, t: float | None = None) -> set:
     return out | set(BAD_LANES)
 
 
+def hold_alive(expires_at, since, t: float | None = None) -> tuple[bool, str]:
+    """K-OPS-I15：hold 带 expires_at → 到点失效；没带 → 写入时刻起超 6 h 失效；写入时刻也没有 = 有效（失败关闭）。实现在 hold_expiry.py"""
+    if str(Path(__file__).resolve().parent) not in sys.path:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import hold_expiry as HX
+    return HX.alive(expires_at, since, now() if t is None else t)
+
+
 def effective_holds(ctrl: dict, lanes, part: dict | None, t: float | None = None) -> tuple[set, dict]:
     """W44 ④（K-OPS-N04“hold = 别的机器的道”）：control.json hold_lanes 是 dispatch.py 某一刻的快照（02:25 写的 gpu33:0 临时 hold
     02:40 到期后没人重算，ep01 一度只剩 1 条道）。本机（dispatch_by.host）的道只在分区仍登记 hold、或 lane_notes 写了 held_by
@@ -1249,12 +1267,20 @@ def effective_holds(ctrl: dict, lanes, part: dict | None, t: float | None = None
     mine = set((part.get("lanes") or {}).get(host) or [])
     keep = partition_held(part, t)
     notes = ctrl.get("lane_notes") or {}
-    released = {}
+    released, expired = {}, {}
+    # K-OPS-I15（SLIM-CDE 11-05）：人工显式 hold（lane_notes[道].held_by）必须带 expires_at；没带的挂满 6 h 自动忽略（写入时刻取 note.at / since）
+    for ln, nt in list(notes.items()):
+        if isinstance(nt, dict) and nt.get("held_by") and ln in hold and ln in mine:
+            ok, why = hold_alive(nt.get("expires_at"), nt.get("at") or nt.get("since"), t)
+            if not ok:
+                notes = {**notes, ln: {k: v for k, v in nt.items() if k != "held_by"}}
+                expired[ln] = f"lane_notes.held_by 失效：{why}"
     for ln in sorted(hold):
         if ln in mine and ln not in keep and not (notes.get(ln) or {}).get("held_by"):
             hold.discard(ln)
             released[ln] = (f"本机（{host}）的道，分区 partition.json 已不再 hold（退役 / 借道 / 临时 hold 都没有或已到期），"
                             f"control.json 的 hold 是 dispatch {(ctrl.get('dispatch_by') or {}).get('at')} 的旧快照")
+    released.update({k: v for k, v in expired.items() if k in released})
     return hold, released
 
 
@@ -1587,6 +1613,9 @@ def derive(w: World, ledger: dict, leases: dict, run_summary: dict | None = None
             lo = _frame_obj("last", "last", sid, n, td, fv, ledger, leases, canvas, n in fv2_eps, deps_ok=fo["status"] == "passed",
                             first=fo, stale=stl.get("last"))
             fo = first_input_changed(w.p, sid, fo, ledger.get(f"first:{sid}") or {})   # K-OPS-E24：重新导入后作业变了 → 重出
+            if _VM.no_last(w.p.run_id, n, w.p.root):  # L-197 A：本集视频只用首帧（I2VA）→ 尾帧对象 = 不适用（不创建 / 不派 / 不评分 / 不挡视频）
+                lo = {**obj("last", sid, ep=n, shot=sid), "status": "passed", "na": True, "i2va_no_last": True,
+                      "reason": "L-197：视频只用首帧（I2VA），不出尾帧", "attempts": 0, "max_attempts": None}
             lo = last_consistent(td, fo, lo)          # K-OPS-E13：尾帧不能比首帧旧、首帧没过尾帧不能算过
             vo = _video_obj(w, sid, n, td, fo, lo, ledger, leases, night_alive)
             S["objects"] = {"assets": ao, "first": fo, "last": lo, "video": vo}
@@ -1871,7 +1900,8 @@ def _headline(E: dict) -> str:
     E["have"] = {**h, "passed": k, "total": len(shots)}
     # PW-011：分子 = takes.json 当前版本（与 /api/progress 同口径）；括号里是监督口径（帧 = 当前版本过契约；视频 = VIDEO10 审片打分定下）
     parts = [f"{w} {h[kind]}/{len(shots)}（{q} {k[kind]}）" for kind, w, q in
-             (("first", "首帧", "过契约"), ("last", "尾帧", "过契约"), ("video", "视频", "已定下"))]
+             (("first", "首帧", "过契约"), ("last", "尾帧", "过契约"), ("video", "视频", "已定下"))
+             if not (kind == "last" and shots and all(S["objects"]["last"].get("i2va_no_last") for S in shots))]   # L-197：无尾帧集不显示尾帧计数
     if run:
         parts.append(f"{len(run)} 项在做")
     if be:
@@ -2059,7 +2089,9 @@ class FrameExec:
         pf["judged_pid"] = os.getpid()
         try:                                     # canary_after_redo：换版后前 6 镜同一阻断项失败 > 34% → 暂停派单（kind=canary）
             from ns_agent.vqa import canary as CN  # W44 ①：只数本进程 / 本代码的结论；pid / code_sha 变了自动恢复，到点重评估
-            hit = CN.observe(sid, stage, pf, key=canary_key(self.p, CN.version_key()))
+            _ign = canary_ignore_items(self.p.root)
+            _pfc = {**pf, "blocking": [b for b in pf.get("blocking") or [] if b not in _ign]} if _ign else pf
+            hit = CN.observe(sid, stage, _pfc, key=canary_key(self.p, CN.version_key()))
             if hit:
                 canary_pause(self.p, hit)
         except Exception as e:  # noqa: BLE001 — canary 出错不挡出图，但要记
@@ -3822,6 +3854,17 @@ def accept_run_qb(root: Path) -> bool:
         return True
 
 
+def canary_ignore_items(root: Path) -> set:
+    """config/pipeline/producer.json canary.ignore_items（SLIM-CDE 11-05 E3，缺键 / 读不到 = 空 = 原口径）：这些阻断项不计入换版首批复核。
+    base35 下 Q1 不过 ~50% 是已知底噪（DEBUG-35：单脸镜 0.60 / 多脸镜 0.49 均值），不是“规则 / 资产换版坏了”，而 canary 一触发就暂停整台派单
+    （11-05 19:42 暂停 135 s、20:02 暂停 1025 s，6 道全停）；Q1 仍是硬闸（挡图、自动重出不变），只是不再触发整台暂停"""
+    try:
+        d = json.loads((root / "config" / "pipeline" / "producer.json").read_text(encoding="utf-8"))
+        return {str(x) for x in ((d.get("canary") or {}).get("ignore_items") or [])}
+    except (OSError, ValueError):  # arch-ok: 配置读不到 = 空集 = 原口径（canary 照常计 Q1），不放宽
+        return set()
+
+
 def apply_blocking_policy(pf: dict) -> dict:
     """L-196：gen_contract.json blocking_items（Q1 / count / text / adult）以外的项只记录不挡；缺键 = 旧口径。出错不改结论"""
     try:
@@ -3866,7 +3909,7 @@ def run_import_path_ok(run: str | None, path: str, root: Path) -> bool:
     try:
         p = (Path(root) / path).resolve()
         base = _runs().run_dir(run, root).resolve()
-    except (OSError, ValueError):
+    except (OSError, ValueError):  # arch-ok: 配置读不到 = 用缺省（原口径），不放宽
         return False
     return p.suffix == ".md" and base in p.parents and p.is_file()
 

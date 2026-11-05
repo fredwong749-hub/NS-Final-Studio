@@ -386,8 +386,15 @@ def recipe_choice() -> dict:
             "decided_by": "config 默认（video_policy.pika_only.allowed）", "derived": True}
 
 
+def _no_last(spec) -> bool:
+    from ns_agent import video_mode as VM
+    return VM.no_last(RUN_ID, getattr(spec, "episode", None), ROOT)
+
+
 def compile_variant(spec, reg, rid, attempt, variant, frames_of, *, seed=None, extra=None):
     ov = dict(KITCHEN)
+    if _no_last(spec):     # L-197 A：本集视频只用首帧（I2VA）；配方不送尾帧 → 提示词编成 I2VA 形态（没有 Picture 2 对齐句）
+        ov["keyframes.last_frame_mode"] = "none"
     ov.update(extra or {})
     if seed is not None:
         ov["seed.value"] = int(seed)

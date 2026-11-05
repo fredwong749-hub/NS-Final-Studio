@@ -1080,6 +1080,10 @@ def stepbar_view(pipe: dict, issues: list[dict]) -> dict:
             c = dict((e.get("cells") or {}).get(sid) or {"state": "todo", "plain": "还没到这一步"})
             c.pop("why", None)                                   # sop_gate 原文只给开发者，不进这个接口
             its = latest_first(by_cell.get((n, sid)) or [])
+            # UI-STATUS 11-05：登记时间早于本集最近一次导入的阻断卡点 = 说的是上一版稿 / 上一轮环境，不再挡格子（仍列在详情里，标“旧”）
+            imp = str(e.get("import_at") or "")
+            if imp:
+                its = [({**x, "blocking": False, "old": True} if x.get("blocking") and str(x.get("time") or "9") < imp else x) for x in its]
             stale = 0
             if c["state"] == "done":                                    # 已完成的格子不再挂过时的“挡路”（那些单子总调度去关）
                 stale = sum(1 for x in its if x.get("blocking"))
@@ -1098,7 +1102,7 @@ def stepbar_view(pipe: dict, issues: list[dict]) -> dict:
             c.setdefault("ahead", False)
             c.setdefault("block", "")
             c["issues"] = [{"id": x.get("id"), "text": issue_plain(x.get("what"), 60), "owner": owner_label(x.get("who")),
-                            "blocking": bool(x.get("blocking")), "at": x.get("time")} for x in its[:5]]
+                            "blocking": bool(x.get("blocking")), "at": x.get("time"), "old": bool(x.get("old"))} for x in its[:5]]
             c["issues_more"] = max(0, len(its) - 5)
             c["stale"] = stale
             cells[sid] = c

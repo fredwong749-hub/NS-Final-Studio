@@ -8,6 +8,8 @@
  },
  "_review_adopt_auto": "L-196 项目方 11-05“我需要你全自动，不要检测那么多了”：true = 重试用尽后自动取最高分版设为当前（标 review_needed，进成片；没有 Q1–Q9 全过版也取，成人安全 / 文字水印不过的除外）。修订 L-187 默认关；手工 CLI review-adopt 不受此开关影响",
  "review_adopt_auto": true,
+ "_canary": "SLIM-CDE 11-05 E3：ignore_items = 不计入“换版首批复核”的阻断项（默认 []，原口径）。建议 [\"Q1\"]：base35 下 Q1 不过 ~50% 是底噪，canary 触发会暂停整台派单（11-05 实测停 135 s + 1025 s，6 道全空）；Q1 仍是硬闸，只是不再触发整台暂停",
+ "canary": {"ignore_items": ["Q1"]},
  "accept": {
   "enabled": true,
   "scope": "asset_bundle_runs",

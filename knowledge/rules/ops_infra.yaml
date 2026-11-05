@@ -194,3 +194,15 @@ rules:
     confidence: medium
     status: 确认
     date: 2026-11-05
+  - id: K-OPS-I15
+    enforced: true   # 代码：tools/autopilot/hold_expiry.py + night.expire_holds + producer.effective_holds / asset_hold_objects；测试 tests/test_slim_cde_20261105.py
+    domain: ops
+    link: [P7-P8]
+    title: 临时 hold 必须带 expires_at；没带的挂满 6 小时自动忽略并记日志
+    when: 往 night_control.json（hold_lanes + hold_expires）/ producer control.json lane_notes[道].held_by / data/autopilot/*_hold.json 条目 / 分区 temp_holds 写任何“暂时不派”的 hold
+    then: 写法 = hold 的同时写 expires_at（JST ISO，建议 ≤ 2 h）；night 与 producer 每拍过滤：有 expires_at 到点失效，没有 expires_at 从首次被看到起算 6 h 后失效（night 日志 HOLD_EXPIRED_IGNORED、producer 事件 hold_stale_release / 条目静默失效）；坏卡（BAD_LANES）与分区结构性 hold（别的机器的道、真退役）不受影响；基准 / A-B / 资产出图结束必须自己撤 hold，不靠 6 h 兜底；另：阻断原因是“提示词证据过期”时 sop_gate 自动后台 probe-prompts、退避封顶 120 s（K-OPS-I13 自动化，config/pipeline/sop_gate.json auto_probe_stale）
+    evidence:
+      - {src: docs/master/CHANNEL.md, note: "11-05 21:12 PS-MASTER：10:3x 为视频基准加的 gpu36:0 night_control hold 基准结束后没撤 + W46 的 gpu36:1 hold，ep01 视频阶段 gpu36 无道可用、21:1x 六卡全空"}
+    confidence: high
+    status: 确认
+    date: 2026-11-05
