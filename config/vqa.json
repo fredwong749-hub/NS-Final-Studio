@@ -296,6 +296,8 @@
  },
  "route": {
   "_doc": "W23 VQA-ROUTE（总调度 11-03）：每次调用先探本机 8870 /health（loaded=true 且 queue < queue_max）→ 只用本机；本机忙（queue ≥ queue_max）就等最多 busy_wait_s，不切隧道（隧道是瓶颈）；本机不在 / 未 loaded 才用 8871 隧道（服务器上用 model.lan_url）；都不在 / 超时 = untested（reason 服务不可用 / 超时 / 本机忙），绝不判 fail。timeouts = 本机实测 P95×2、至少 60 s（11-03 近 3 天 gpu0 缓存：整张复核 n=308 P50 54 s P95 118 s；短问 n=255 P95 17.5 s），HTTP 超时 = timeouts[kind] ×（排队数+1），不超过调用方 wait_s+120。每次调用记 log（route local|tunnel|none）",
+  "laptop_prefer_tunnel": true,
+  "_laptop_prefer_tunnel": "PS-MASTER 11-06（项目方“gpu 资源不能空闲”）：笔记本上先走 8871 隧道（gpu33 看图服务，3090），不通或排满再用笔记本本机 8870；服务器（OFFLINE_SELF）不受影响",
   "queue_max": 6,
   "busy_wait_s": 600,
   "poll_s": 10,

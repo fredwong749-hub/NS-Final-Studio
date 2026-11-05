@@ -38,7 +38,7 @@ STATUSES = {"确认", "建议", "待验", "待许可登记", "项目方闸门"}
 INBOX_STATUSES = STATUSES | {"待确认"}
 CONFIDENCE = {"high", "medium", "low"}
 REQUIRED = ("id", "domain", "link", "title", "when", "then", "evidence", "confidence", "status", "date")
-ID_RE = re.compile(r"^K-(REN|PRM|WRT|EDT|REV|LOOP|AST|OPS|UI)-[A-Z]?\d{2,3}$")
+ID_RE = re.compile(r"^K-(REN|PRM|WRT|EDT|REV|LOOP|AST|OPS|UI)-[A-Z]?\d{2,3}[a-z]?$")   # 末尾小写字母 = 同一决定的分条（K-WRT-L201a / b）
 GEN_HEADER = "自动生成，勿手改：改 knowledge/ 后运行 tools/knowledge/compile.py"
 WRITER_SECTIONS = ("镜头字段", "分拍与动作", "时长与节奏", "身份锚点", "H3 正文", "声音")
 DIRECTOR_SECTIONS = ("判定标准", "打分")
@@ -198,7 +198,7 @@ def consistency(rules: list[dict], root: Path = ROOT) -> list[str]:
 
 
 # ---------------------------------------------------------------------------------------------- 生成
-LEDGER_ID_RE = re.compile(r"(?<![A-Za-z0-9-])K-(?:[A-Z]{2,4})-[A-Z]?\d{2,3}(?!\d)")
+LEDGER_ID_RE = re.compile(r"(?<![A-Za-z0-9-])K-(?:[A-Z]{2,4})-[A-Z]?\d{2,3}[a-z]?(?![0-9a-z])")
 
 
 def ledger_check(rules: list[dict], root: Path = ROOT) -> list[str]:

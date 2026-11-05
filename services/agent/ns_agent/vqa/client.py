@@ -218,6 +218,13 @@ def _pick(url: str, wait_s: float) -> tuple[str | None, str, int, str]:
     cands = _balance_cands(url)
     if cands:
         return _pick_balanced(cands, wait_s)
+    if rc.get("laptop_prefer_tunnel") and not os.environ.get("OFFLINE_SELF"):
+        # PS-MASTER 11-06：笔记本自带看图（笔记本显卡，OOM、排队 6）把 ep02 素材验收堵了 6 小时；笔记本上优先走 8871 隧道（gpu33 3090），
+        # 隧道不通或排满才回本机
+        alt0 = url.rsplit(":", 1)[0] + ":" + str(int(url.rsplit(":", 1)[1].split("/")[0]) + 1)
+        aup, aq = _ready(alt0)
+        if aup and aq < int(rc.get("queue_max", 6)):
+            return alt0, "tunnel", aq, ""
     up, q = _ready(url)
     if up:
         qmax = int(rc.get("queue_max", 6))

@@ -629,7 +629,8 @@ def l1_checks(shots: list, blocks: list[str]) -> dict:
 #      焦段档位、轴线 / 视线方向、剪辑点、竖屏构图。只在写作 / 导入闸门用，不碰已导入的剧
 L2_STATIC_MAX = 0.20                      # 固定镜头整集占比上限（K-WRT-813）
 L2_PLAN_LABEL = "本集镜头规划"
-L2_CUT_TYPES = ("动作匹配切", "视线匹配切", "声音匹配切", "声音先行", "硬切", "叠化")
+L2_CUT_TYPES = ("动作匹配切", "视线匹配切", "声音匹配切", "声音先行", "硬切", "叠化",
+                "光闪匹配切")   # L-201 ③：现实↔幻想切换用灯亮 / 白闪做触发画面，上一镜以光闪收尾、下一镜从光闪余晖进
 L2_GAZE = re.compile(r"([一-龥]{2,3})(?:向|往)(左|右)(?:前方|后方|前|后|上|下)?(?:看|望|瞥|扫)([^，；｜。]*)")
 L2_LENSES = Path(__file__).resolve().parents[2] / "config" / "director" / "lenses.yaml"
 _L2_CACHE: dict = {}
@@ -827,4 +828,65 @@ def l3_checks(shots: list, blocks: list[str]) -> dict:
             depths = {getattr(c, "depth", None) for c in on} - {None, ""}
             if L3_SIDE.search(comp) or (depths and len(depths) == 1 and len(on) >= 2):
                 bad[f"twoshot#{i}"] = (False, f"镜{i} {len(on)} 人在画：不要并排 / 并肩 / 正对镜头站（景深层全相同），要前后错落、身体斜 45°")
+    return bad
+
+
+# ---- L-201 ③（项目方 11-06 看 ep01_v59：“第一转场不行……s1 和 s2 的首尾帧几乎一样”；K-WRT-L201a / L201b）：
+#      同场相邻两镜景别或机位至少一项要变；【场景】在【现实段】↔【幻想段】之间切换时，上一镜的分拍 / 下镜和下一镜的衔接都要写出触发画面
+L201_SEG_MARKS = (("fantasy", ("【幻想段】", "【幻想】", "幻想段")), ("reality", ("【现实段】", "【现实】", "现实段")))
+L201_TRIGGER = re.compile(r"光闪|闪光|灯亮|亮起|灯灭|熄灭|白闪|闪白|闪黑|黑场|白场|过曝|曝光|光匹配|闪回|叠化|灯啪|啪地亮|灯光变|换光")
+L201_ANGLE = re.compile(r"过肩|俯拍|俯视|略俯|仰拍|微仰|略仰|平视|眼平|高机位|低机位|正面偏右|正面偏左|正面|侧面|侧前|侧后|"
+                        r"右前|左前|右后|左后|背后|正后|侧\s*\d+\s*°|\d+\s*°|越[一-龥]{1,3}(?=拍)|[A-H]\s*区")   # 越谁拍 / 机位区也算机位换了
+L201_SIZES = ("大特写", "中近景", "中全景", "特写", "近景", "中景", "全景", "远景")      # 长词在前
+
+
+def l201_segment(block: str) -> str | None:
+    """镜头块的段落：【场景】行（或 段落= 字段）里的 【现实段】/【幻想段】 → reality | fantasy | None"""
+    txt = _field(block, "场景") + "｜" + _field(block, "段落")
+    hits = {seg: min([txt.find(m) for m in marks if m in txt] or [10 ** 9]) for seg, marks in L201_SEG_MARKS}
+    seg = min(hits, key=hits.get)
+    return seg if hits[seg] < 10 ** 9 else None
+
+
+def l201_framing(block: str) -> tuple[str, str]:
+    """→ (景别, 机位签名)。景别 = 【机位与景别】首段或 img 开头的景别词；机位签名 = 【机位与景别】第二段（没有就取 img 前 40 字）
+    里的方位 / 俯仰词集合 + 【光学】的机位高度（去空格）"""
+    cam = _field(block, "机位与景别")
+    segs = [p.strip() for p in re.split(r"[｜|]", cam)] if cam else []
+    img = _img(block)
+    size_src = (segs[0] if segs else "") + "｜" + img[:16]
+    size = next((s for s in L201_SIZES if s in size_src), "")
+    ang_src = segs[1] if len(segs) > 1 else img[:40]
+    toks = sorted({re.sub(r"\s", "", m.group(0)) for m in L201_ANGLE.finditer(ang_src)})
+    hh = L3_HEIGHT.search(_field(block, "光学") + " " + cam)
+    height = re.sub(r"\s", "", hh.group(0)) if hh else ""
+    return size, "+".join(toks) + "@" + height
+
+
+def l201_checks(shots: list, blocks: list[str]) -> dict:
+    """→ {"adj#<镜号>": (ok, 说明), "seg#<镜号>": (ok, 说明)}，只返回失败项（镜号 = 后一镜）。
+    adj#n  同场相邻两镜：景别相同 且 机位签名（方位 / 俯仰词 + 机位高度）相同 → 首尾帧会长得一样            K-WRT-L201a
+    seg#n  【场景】现实段↔幻想段切换：上一镜【分拍】/【下镜】或本镜【衔接】没写触发画面（光闪 / 灯亮 / 白闪 / 黑场…）  K-WRT-L201b"""
+    bad: dict = {}
+    prev = None
+    for s, b in zip(shots, blocks):
+        i = s.index
+        if prev is not None:
+            ps, pb = prev
+            same_scene = (getattr(ps, "scene_id", None) or "") == (getattr(s, "scene_id", None) or "")
+            if same_scene:
+                sz0, sig0 = l201_framing(pb)
+                sz1, sig1 = l201_framing(b)
+                if sz0 and sz0 == sz1 and sig0 == sig1:
+                    bad[f"adj#{i}"] = (False, f"镜{ps.index}→镜{i} 同场相邻两镜景别（{sz1}）和机位（{sig1.replace('@', ' ')}）都没变："
+                                              "景别或机位（方位 / 俯仰 / 高度）至少改一项，否则首尾帧长得一样")
+            seg0, seg1 = l201_segment(pb), l201_segment(b)
+            if seg0 and seg1 and seg0 != seg1:
+                out_ok = bool(L201_TRIGGER.search(_field(pb, "分拍") + "｜" + _field(pb, "下镜")))
+                in_ok = bool(L201_TRIGGER.search(_field(b, "衔接")))
+                if not (out_ok and in_ok):
+                    miss = [w for w, ok in ((f"镜{ps.index} 【分拍】/【下镜】", out_ok), (f"镜{i} 【衔接】", in_ok)) if not ok]
+                    bad[f"seg#{i}"] = (False, f"镜{ps.index}→镜{i} {'现实段→幻想段' if seg1 == 'fantasy' else '幻想段→现实段'}：{'、'.join(miss)}"
+                                              "没写触发画面（光闪 / 灯亮 / 白闪 / 闪白 / 黑场 / 叠化…）：上一镜以它收尾、本镜从它的余晖进")
+        prev = (s, b)
     return bad

@@ -287,7 +287,7 @@ RULES["QW-L2"] = ("warn", "L1（L-188，K-WRT-L1b）：两人以上在画的镜�
 RULES["QW-L3"] = ("warn", "L2（K-WRT-813）：每镜【运镜】写词表（config/director/camera_moves.yaml，enabled 且本剧可用）里的运镜名｜幅度｜起幅 → 落幅｜动机=…；与 motion、【镜头运动】是同一种；固定镜头整集 ≤20% 且写不动的理由。")
 RULES["QW-L4"] = ("warn", "L2（K-WRT-812）：每镜【镜头】写 config/director/lenses.yaml 的 id；同一场同景别档用同一焦段，正反打两镜同焦段。焦段 / T 值是否落在 L-192 表内只由 QW-L9 判（不重复报）。")
 RULES["QW-L5"] = ("warn", "L2（K-WRT-811）：【构图】视线方向=“甲向左 / 右看乙”要和人物行里乙的左右位置一致（180° 轴线：同场同两人左右不互换，视线对着对方所在的一侧）。")
-RULES["QW-L6"] = ("warn", "L2（K-WRT-814）：【下镜】只写 动作匹配切 / 视线匹配切 / 声音匹配切 / 声音先行 N 秒 / 硬切 / 叠化 + 落点动作；同场相邻镜切在动作中段或视线落点，硬切要写理由=…。")
+RULES["QW-L6"] = ("warn", "L2（K-WRT-814）：【下镜】只写 动作匹配切 / 视线匹配切 / 声音匹配切 / 声音先行 N 秒 / 硬切 / 叠化 / 光闪匹配切（现实↔幻想切换，L-201） + 落点动作；同场相邻镜切在动作中段或视线落点，硬切要写理由=…。")
 RULES["QW-L7"] = ("warn", "L2（K-WRT-815）：竖屏 9:16：单人镜【构图】写主体在上三分之一 + 视线方向留出空间；两人以上写前 / 中 / 后三层（QW-L2）。")
 RULES["QW-L8"] = ("warn", "L2（K-WRT-810）：集头写“本集镜头规划”段：每场的轴线（谁在左谁在右、看向哪侧）、焦段档位（lenses.yaml id）、主镜头 / 过肩 / 单人的分配与景别递进。")
 RULES["QW-L9"] = ("warn", "L3（K-WRT-816，L-192）：每镜【光学】写 焦段 mm｜T 光圈｜高度=机位高度，且落在景别档表里（建立 24–35 T2.8–4 一场最多一个；双人 / 中景 40–50 T2；过肩 / 近景 65–85 T1.4–2；特写 85–135 T1.2–1.4；插入 100 微距 T2）。")
@@ -371,6 +371,33 @@ def check_l3(ep, text: str) -> list[dict]:
     for k, (_ok, why) in rc.l3_checks(shots, blocks).items():
         rid, field = L3_RULE.get(k.split("#", 1)[0], ("QW-L9", "镜头"))
         out.append(_issue(rid, why, field))
+    return out
+
+
+# L-201 ③（项目方 11-06 看 ep01_v59：“第一转场不行……s1 和 s2 的首尾帧几乎一样……修这个问题先”；K-WRT-L201a / L201b；rubric_code.l201_checks）：
+# 两条进导入自动检查、导入即阻断——级别固定 L201_LEVEL（默认 block，不跟 WRITER_LINT_LEVEL 降 warn）；只对 V2 及以后的剧（validate 里 hard_run）
+L201_LEVEL = "block"
+RULES["QW-L12"] = ("block", "L-201（K-WRT-L201a）：同场相邻两镜，景别或机位（方位 / 俯仰 / 高度）至少一项要变：两镜景别相同、"
+                            "【机位与景别】方位词 + 【光学】高度也相同 → 首尾帧长得一样，阻断。")
+RULES["QW-L13"] = ("block", "L-201（K-WRT-L201b）：【场景】在【现实段】↔【幻想段】之间切换时，上一镜【分拍】/【下镜】和本镜【衔接】都要写出触发画面"
+                            "（光闪 / 灯亮 / 白闪 / 闪白 / 黑场 / 叠化…）：上一镜以它收尾、本镜从它的余晖进；缺一侧阻断。")
+L201_RULE = {"adj": ("QW-L12", "机位与景别"), "seg": ("QW-L13", "衔接")}
+
+
+def check_l201(ep, text: str) -> list[dict]:
+    """QW-L12 / QW-L13 同场相邻镜景别或机位要变 / 现实↔幻想切换要有触发画面（K-WRT-L201a / L201b，rubric_code.l201_checks）。级别 L201_LEVEL（block）"""
+    rc = _rubric()
+    chunk = rc.episode_chunk(text, ep.number)
+    if not chunk:
+        return []
+    _head, blocks = rc.split_blocks(chunk)
+    shots = sorted(ep.shots, key=lambda s: s.index)
+    if len(blocks) != len(shots):
+        return []
+    out = []
+    for k, (_ok, why) in rc.l201_checks(shots, blocks).items():
+        rid, field = L201_RULE.get(k.split("#", 1)[0], ("QW-L12", "机位与景别"))
+        out.append({**_issue(rid, why, field), "level": L201_LEVEL})
     return out
 
 
