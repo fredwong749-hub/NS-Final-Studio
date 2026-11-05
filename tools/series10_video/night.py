@@ -208,12 +208,13 @@ def dispatch_hosts(hosts_touched: set, st, ctrl) -> bool:
         log("push", host, rc, out.strip()[-200:].replace("\n", " "))
         if rc:
             return False
-        eps_on = sorted(int(e) for e, h in hosts.items() if h == host)
+        eps_on = _eps_on(hosts, host)
         hold, per_lane, shared = ctrl.get("hold_lanes", []), ctrl["per_lane"], ctrl.get("shared_lanes", [])
         if ctrl.get("ep01_lane") and host == hosts.get("1"):
             hold = [x for x in IMAGE_LANES if x != "gpu33:3"]
             eps_on, per_lane, shared = [1], 1, [x for x in shared if x != "gpu33:3"]
         hold, gate = video_boost(ctrl, hold)
+        hold = _shard_hold(host, hold)
         c = {"jobs": "jobs.json", "mode": "prod", "eps": eps_on, "per_lane": per_lane, "linger": True,
              "hold_lanes": hold, "shared_lanes": shared, "yield_s": ctrl["yield_s"]}
         if gate:
@@ -244,17 +245,57 @@ def dispatch(ep, host, st, ctrl):   # 旧接口（整集派单），保留给手
     return True
 
 
-def ep_sig(ep, host) -> str:
+def _VS():
+    """视频按镜分片模块（默认关；服务器镜像没带 = None → 全部走原逻辑）"""
+    try:
+        import video_shard as VS
+        return VS
+    except ImportError:   # arch-ok: 没有分片模块 = 不分片
+        return None
+
+
+def _shard_cfg(ep) -> dict | None:
+    VS = _VS()
+    return VS.ep_cfg(RUN_ID, int(ep)) if VS else None
+
+
+def _eps_on(hosts: dict, host: str) -> list[int]:
+    """本机该出的集：按集归属 ∪（开了分片时）分片集里本机是分片台的；分片关 = 原来的 sorted(int(e) for e, h in hosts.items() if h == host)"""
+    VS = _VS()
+    return VS.eps_on_host(RUN_ID, host, hosts) if VS else sorted(int(e) for e, h in hosts.items() if h == host)
+
+
+def _eps_on_shard(host: str) -> bool:
+    VS = _VS()
+    return bool(VS) and any(host in c["hosts"] for c in VS.shard_eps(RUN_ID).values())
+
+
+def _shard_hold(host: str, hold: list) -> list:
+    """分片开着：本机不适合跑 H3 的道（gpu33:3 = 看图 + reserve-vram 9）并进挂道；关 = 原样"""
+    VS = _VS()
+    ex = VS.exclude_lanes(host) if VS else []
+    return sorted(set(hold) | set(ex)) if ex and _eps_on_shard(host) else hold
+
+
+def ep_shots(ep, host) -> dict:
+    """这一集的镜状态：没分片 = state_<host>.json 里本集的镜（原行为）；分片 = 各分片台 state 合并（owner 上 helper 的 state 由 shard_relay 送来，只读）"""
+    if _shard_cfg(ep):
+        VS = _VS()
+        return VS.merged_shots(VID, int(ep), VS.ep_hosts(RUN_ID, int(ep), host), jl(VID / "jobs.json", {}) or {})
     stt = jl(VID / f"state_{host}.json", {}) or {}
+    return {sid: r for sid, r in (stt.get("shots") or {}).items() if int(sid[2:4]) == int(ep)}
+
+
+def ep_sig(ep, host) -> str:
     return json.dumps({sid: [r.get("status"), r.get("chosen"), len(r.get("renders") or [])]
-                       for sid, r in sorted((stt.get("shots") or {}).items()) if int(sid[2:4]) == ep}, ensure_ascii=False)
+                       for sid, r in sorted(ep_shots(ep, host).items())}, ensure_ascii=False)
 
 
 def ep_resolved(ep, host) -> tuple[bool, dict]:
-    stt = jl(VID / f"state_{host}.json", {}) or {}
+    shots_st = ep_shots(ep, host)
     jobs = jl(VID / "jobs.json", {}) or {}
     ids = [s["shot"] for s in jobs.get("shots", []) if s["ep"] == ep]
-    recs = {sid: (stt.get("shots") or {}).get(sid, {}) for sid in ids}
+    recs = {sid: shots_st.get(sid, {}) for sid in ids}
     fin = all(r.get("status") in ("done", "best_effort", "blocked") for r in recs.values()) and ids
     return bool(fin), recs
 
@@ -408,7 +449,7 @@ def finalize(ep, host, st, ctrl):
         log("HOLD_TTS", f"ep{ep:02d}", why)
         return
     old_man = jl(VID / "episodes" / f"ep{ep:02d}" / "manifest.json", {}) or {}
-    ep_renders = [x for sid, v in ((jl(VID / f"state_{host}.json", {}) or {}).get("shots") or {}).items()
+    ep_renders = [x for sid, v in ep_shots(ep, host).items()
                   if sid.startswith(f"ep{ep:02d}-") for x in v.get("renders") or []]
     if old_man.get("shots") and (old_man.get("t") or 0) >= max([float(x.get("t_done") or 0) for x in ep_renders] + [0]):
         _tl, bad0 = assembly_sources(old_man)
@@ -687,11 +728,12 @@ def apply_lane_policy(st, ctrl):
         "assembled", "assemble_failed", "hold_voices")
     key = mode + ("+ep01@gpu33:3" if ep01_open else "") + "|hold=" + ",".join(sorted(ctrl.get("hold_lanes", []) or []))   # K-OPS-E20：挂道变了要重算
     key += "|gate=" + json.dumps(video_boost(ctrl, [])[1], sort_keys=True)
+    key += "|shard=" + ",".join(f"{e}:{c['owner']}" for e, c in sorted((_VS().shard_eps(RUN_ID) if _VS() else {}).items()))   # 分片开关变了要重算
     if st.get("lane_mode") == mode and st.get("lane_key") == key:
         return ctrl
     hosts = jl(VID / "hosts.json", {}) or {}
     for host in _hosts_here():   # A-07
-        eps_on = sorted(int(e) for e, h in hosts.items() if h == host)
+        eps_on = _eps_on(hosts, host)
         # DEBUG-RSI 11-02（K-OPS-E20，CONSENT VIDEO10 → DEBUG_RSI by 总调度）：video_lane_only 模式原来只挡出图道、不看
         # control 的 hold_lanes → 挂道挡不住视频（gpu36:0 两次重启窗口被 VIDEO10 视频占住）。现在两者合并
         ctl_hold = list(ctrl.get("hold_lanes", []) or [])
@@ -701,6 +743,7 @@ def apply_lane_policy(st, ctrl):
             hold = sorted(set(x for x in IMAGE_LANES if x != "gpu33:3") | set(ctl_hold))
             eps_on, per_lane, shared = [1], 1, [x for x in shared if x != "gpu33:3"]
         hold, gate = video_boost(ctrl, hold)
+        hold = _shard_hold(host, hold)
         c = {"jobs": "jobs.json", "mode": "prod", "eps": eps_on, "per_lane": per_lane, "linger": True,
              "hold_lanes": hold, "shared_lanes": shared, "yield_s": ctrl["yield_s"]}
         if gate:
@@ -780,7 +823,13 @@ def loop_once(st):
                 log("NO_PARTITION", f"ep{ep:02d}", "partition.json video 分区里没有这一集，跳过")
                 continue
             touched.add(hosts[str(ep)])
+            sc = _shard_cfg(ep)
+            if sc:   # 分片集：另一台（helper）也要派；本机不是 owner = helper，只出镜、不合成（owner 那台合成）
+                touched |= set(sc["hosts"])
             x = st["eps"].setdefault(str(ep), {"host": hosts[str(ep)], "dispatched": time.time(), "status": "rendering"})
+            if sc:
+                me = os.environ.get("OFFLINE_SELF")
+                x["shard_helper"] = bool(me) and me != sc["owner"]
             x["ready_shots"] = ids
             st.setdefault("pending_shots", {})[str(ep)] = len(eps_specs[ep])
         if touched and dispatch_hosts(touched, st, ctrl):
@@ -799,7 +848,7 @@ def loop_once(st):
     retry_assembly(st)
     reopen_changed(st)
     for e, x in st["eps"].items():
-        if x.get("status") == "rendering":
+        if x.get("status") == "rendering" and not x.get("shard_helper"):
             fin, recs = ep_resolved(int(e), x["host"])
             st["pending_shots"][e] = sum(1 for r in recs.values() if r.get("status") not in ("done", "best_effort", "blocked"))
             if fin:

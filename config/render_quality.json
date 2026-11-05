@@ -1033,7 +1033,7 @@
   },
   "first_frame_tier": {
     "_doc": "L-191（项目方 11-05 选 A）：首帧出图档按剧选。runs[剧] = \"preview\"（默认，预设自带 Turbo 8 步）或 \"base35\"（Qwen-Image 2.1 Base 35 步 cfg 3 euler/simple；1152×2016 出图 + 缩回 + 后期不变，只覆盖 overrides 里的采样字段；负面词生效）。开启办法：把 runs.series10_v2 改成 \"base35\" 并重新导入 / regen（作业签名随之变，旧 8 步版不再等同）。实测 ~328 s / 张（8 步 ~61 s）；渲染超时 900 s、租约 45 min 已够。没列的剧一律 preview。来源 tools/research/adherence_img_ab.py T35_OVERRIDES",
-    "runs": {"series10_v2": "preview"},
+    "runs": {"series10_v2": "base35"},
     "base35": {"unet": "base", "steps": 35, "cfg": 3.0, "sampler": "euler", "scheduler": "simple"}
   },
   "frame_redo_preset": "frame_v9",

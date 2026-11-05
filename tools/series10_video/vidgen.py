@@ -744,6 +744,13 @@ def rescore(host):
 def proxies(host, ep):
     """整集出完后：每镜入选版本转 540×960 合成代理（≤2 MB，crf 26），写 video/episodes/epNN/manifest.json，供笔记本合成预览版"""
     st = jload(VID / f"state_{host}.json", {}) or {}
+    try:   # 视频按镜分片（默认关）：分片集合并各台 state（helper 的 state / 片子由 shard_relay 送来）；关 = 原样
+        import video_shard as VS
+        sc = VS.ep_cfg(RUN_ID, ep)
+        if sc:
+            st = {"shots": VS.merged_shots(VID, ep, VS.ep_hosts(RUN_ID, ep, host), jload(VID / "jobs.json", {}) or {})}
+    except ImportError:   # arch-ok: 没有分片模块 = 不分片
+        pass
     out_dir = VID / "episodes" / f"ep{ep:02d}"
     out_dir.mkdir(parents=True, exist_ok=True)
     man = {"ep": ep, "host": host, "t": time.time(), "shots": []}

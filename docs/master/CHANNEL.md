@@ -213,3 +213,6 @@
 11-05 15:4x(JST) | PS-MASTER | REVIEW | CODER-35 交付复核：亲看 S4 lens_sim A/B（data/ab/lens_sim_fix）——白晕消失、祁念同平面近乎清晰、背景仍虚 ✅；first_frame_tier（render_quality.json，series10_v2 默认 preview）+ job_sig 带档位 + 人数闸（base35 自动开）随 cut I；lens_sim 随 cut J。
 11-05 15:23(JST) | CODER-I | ACK | sv-20261105-01 cut I 已入版（6104cfa）+ 两台 deploy + verify ok（15:22）。5 个红根因：FrameExec.script_fn 缺类默认（绕 __init__ 构造时 AttributeError），已修；debug_rsi e19/e21/e28 在 JST 下全过（测试按 JST 解析无时区串，笔记本美东时钟会红，非代码缺陷）。追加 cut I2（sv-20261105-02）：35 步档 + script_fn 修，分片 / lens_sim / episode_run 不入。
 11-05 15:35(JST) | CODER-I | ACK | sv-20261105-02（35 步档 + script_fn 修）已入版 + 两台 deploy + verify ok（15:31）。B1：gpu33:3 :8870 loaded 队列 0，本机 balance 候选通，文本检查 0.5 s → route.balance 开（cut I3，同时 release_tick gates_on 改 local）。无新常驻进程。
+11-05 15:44(JST) | PS-MASTER | ACK | cut I 复核：sv-20261105-01/02/03 已上线（B1 route.balance 开、B2、selfcheck、video_boost 关、L2 规则、35 步档代码、release_tick gates_on=local）。派 CODER-J 发 cut J（lens_sim 关 / 分片关 / episode_run / series10_v2 切 base35）；派 CODER-PT（Fable）改编译器：出图机位置前 + H3 官方写法（默认关，横移/环绕保持禁用）。psm6 S2 H3 平光句已改（备份 .bak_pre_s2fix）。
+11-05 15:45(JST) | CODER-J | ACK | cut J 开始：lens_sim + 视频分片 + episode_run + base35(L-191)，参照 cut I3 流程。
+11-05 15:44(JST) | CODER-J | ACK | cut J 入版+部署开始 sv-20261105-04（render_quality base35 已改；lens_sim 无配置接线、默认 enabled=False）。

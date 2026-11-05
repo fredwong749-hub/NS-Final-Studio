@@ -33,6 +33,12 @@ CAUSE = {"身份偏离": "身份：首帧路线跟首帧身份走（K-REN-R04）
 
 def main(ep: int, host: str, ver: str = "v1"):
     st = json.loads((VID / f"state_{host}.json").read_text(encoding="utf-8"))
+    try:   # 视频按镜分片（默认关）：分片集合并各台 state；关 = 原样
+        import video_shard as VS
+        if VS.ep_cfg(RUN_ID, ep):
+            st = {**st, "shots": VS.merged_shots(VID, ep, VS.ep_hosts(RUN_ID, ep, host), json.loads((VID / "jobs.json").read_text(encoding="utf-8")))}
+    except (ImportError, OSError, ValueError):   # arch-ok: 没有分片模块 / jobs 读不到 = 不合并（原行为）
+        pass
     man = json.loads((VID / "episodes" / f"ep{ep:02d}" / "manifest.json").read_text(encoding="utf-8")) \
         if (VID / "episodes" / f"ep{ep:02d}" / "manifest.json").exists() else {"shots": []}
     final = RC.episodes_out(RUN_ID) / f"ep{ep:02d}_{ver}.mp4"

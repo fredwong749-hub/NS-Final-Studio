@@ -486,6 +486,15 @@ def score_refs(spec, reg) -> dict:
     return out
 
 
+def _shard_hosts(specs: dict) -> dict:
+    """video_shard.json 开着且本剧本集配了分片 → {镜: 主机}；否则 {}（原行为）。分片台不足 / 配置坏 = {}"""
+    try:
+        import video_shard as VS
+        return VS.plan_all(RUN_ID, specs)
+    except ImportError:   # arch-ok: 服务器镜像没带分片模块 = 不分片（原行为）
+        return {}
+
+
 def build_all(validate_only=False) -> dict:
     if RUN_ID is None:
         raise RC.VideoRunError(_RUN_ERR or "build_jobs 没有设剧（set_run）")
@@ -496,6 +505,7 @@ def build_all(validate_only=False) -> dict:
     LASTS_OF.clear()
     LASTS_OF.update(passed_lasts())
     alts = alt_crops()
+    shard_host = _shard_hosts(specs)   # 视频按镜分片（默认关 = {}；PLAN_EP01_FINISH §11）
     VID.mkdir(parents=True, exist_ok=True)
     (VID / "specs").mkdir(exist_ok=True)
     (VID / "prompts").mkdir(exist_ok=True)
@@ -511,6 +521,8 @@ def build_all(validate_only=False) -> dict:
         meta = shot_meta(spec)
         hosts = json.loads((VID / "hosts.json").read_text(encoding="utf-8")) if (VID / "hosts.json").exists() else {}
         meta["host"] = hosts.get(str(spec.episode)) or HOST_OF_EP.get(spec.episode)   # night.py 按卡空闲情况分集；非 V1 没有 hosts.json = None（不派）
+        if sid in shard_host:
+            meta["host"] = shard_host[sid]     # 分片集：每镜自己的主机（owner 仍在 hosts.json，由它合成）
         meta["first_frame"] = (frames_of.get(sid) or {}).get("file")
         meta["first_frame_status"] = (frames_of.get(sid) or {}).get("status")
         # DATAALIGN（register_takes from_first）：输入 JPEG 名里的 sha8 = 源 PNG 的 sha256 前 8 位；这里把源文件和版本号也写明
