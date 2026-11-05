@@ -140,3 +140,57 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-05
+  # ---- RULES-1105 11-05（项目方 20:2x 原话“把最新的规则和细节写到系统来，然后全部 gpu 做完 ep01”）：当天验证的四条运维规矩
+  - id: K-OPS-I11
+    domain: ops
+    link: [P7-P8]
+    check: [tests/test_rules_1105.py::test_dispatch_restart_plan_urgent_producer_only, tests/test_rules_1105.py::test_deploy_wires_dispatch_restart_plan, tools/qa/system_version.py]
+    title: deploy 改了派单相关配置 = 立刻紧急重启 producer，不等 30 分钟重启间隔（只改配置 → producer-only；同版还改了代码 → 全部）
+    when: system_version deploy 的版本相对上一次部署改了 config/factory/hosts.json、config/pipeline/lane_relay.json、config/pipeline/sop_gate.json、config/gen_contract.json、config/pipeline/producer.json、config/render_quality.json、config/compile/run_style.json、config/pipeline/video_shard.json 任一（system_version.DISPATCH_CONFIG）
+    then: deploy 自动把重启请求升为 urgent（restart_queue 当场排空执行，审计 urgent_jump + res.urgent_auto 写明哪几个文件）；同版只改了这些配置 → mode=producer-only（night 不动、视频不打断），还改了别的代码 → mode 留空 = all；上一次部署版本取本机 data/system_version.txt（AUDIT-RULES 11-05 写的那份），读不到取前一个 sv tag；git 判不了按“改了”处理。--no-restart 不受影响
+    evidence:
+      - {src: docs/master/CHANNEL.md, note: "11-05 20:14 PS-MASTER：gpu33 producer（19:44 启动）未随 cut O 重启（30 min 重启间隔），未加载 gpu36:1/2 借道与 L-195；道空闲而 ep01 S11/S12/S14 ready → 紧急插队 producer-only 重启；20:20 重启后派单才出现 gpu36:1"}
+      - {src: tools/autopilot/restart_queue.py, note: "urgent 可插队（不受 30 分钟限制），mode producer-only / night-only / all 合并规则"}
+    confidence: high
+    status: 确认
+    date: 2026-11-05
+  - id: K-OPS-I12
+    domain: ops
+    link: [P5-P6, P7-P8]
+    check: [tests/test_rules_1105.py::test_l193_l194_six_lanes_in_dispatch_configs, config/owner_decisions.yaml]
+    title: 可用 6 卡 = gpu33:0/1/3 + gpu36:0/1/2，按阶段全卡集中；首帧经 lane_relay 借 gpu36 三道，看图集中 gpu33:3 本机实例；只有 gpu33:2（坏卡）永不派（L-193 / L-194，修订 L-100）
+    when: 派首帧 / 尾帧 / 视频；改 config/factory/hosts.json 道表、config/pipeline/lane_relay.json、config/pipeline/video_shard.json；阶段交接（出图 → 视频）
+    then: hosts.json gpu36:0/1/2 enabled 且 roles=[image, video]（gpu36:2 不再是看图专用卡，L-100 作废）；lane_relay.json enabled=true、lanes 恰为 gpu36:0/1/2（笔记本白名单代理 + ssh -R，只放行 ComfyUI 出图接口，笔记本 lane_relay.py serve 由项目方亲启）；lane_relay 的 lanes 里永远没有 gpu33:2，producer / asset_worker 的 exclude_lanes 保留 gpu33:2；video_shard ep01 owner=gpu36、权重按道数 gpu36:gpu33 = 3:2；出图 → 视频交接写 data/pipeline/lane_relay_hold.json 把 gpu36 道还给本机 night，删文件恢复借道；任何阶段不许有闲卡（项目方“每个环节集中 gpu 资源处理一个事情，不要分散或空闲”）
+    evidence:
+      - {src: docs/master/MASTER_PICTURE.md, note: "L-193（18:2x 项目方“gpu3 和 gpu6 一起跑，加快”→ 选 B）、L-194（19:5x 项目方原话“授权：gpu36 三张卡（0/1/2）都归 NS 项目用……修订 L-100 和‘不碰 gpu36:2’”）"}
+      - {src: config/factory/hosts.json, note: "gpu36:2 note：L-194 GPU2 出图 + 视频，comfy.sh start 2，隧道 gpu36-l2 移回 tunnels.json"}
+      - {src: docs/master/CHANNEL.md, note: "11-05 20:03 PS-MASTER：gpu33 上 28288/28289/28290 三口均返回 gpu36:0/1/2 队列"}
+    confidence: high
+    status: 确认
+    date: 2026-11-05
+  - id: K-OPS-I13
+    domain: ops
+    link: [P4-P6, P5-P6]
+    check: [tests/test_rules_1105.py::test_episode_run_probes_prompts_right_after_regen, tests/test_rules_1105.py::test_sop_gate_backoff_yields_when_evidence_refreshed]
+    title: 新分镜导入 / 换代后立刻重跑提示词探针（sop_gate probe-prompts），不让 producer 因“提示词证据过期”整集退避
+    when: episode_run import → regen 段；任何人手工 producer.py import-staged / regen 之后；sop_gate 提示词证据 fingerprint 变了
+    then: episode_run.act_regen 执行 regen 后同一拍在出图机跑 tools/master/sop_gate.py probe-prompts --run <剧> --episode N，没全过 = 该段 blocked 并列出没过的镜（L-195 按镜判：过的镜先出，没过的镜单独卡住）；绕开 episode_run 手工导入的人必须自己紧接着跑 probe-prompts（写进 CHANNEL）；sop_gate.require_backoff 每次先 judge 再看退避——证据刷新、judge 通过就当场放行（带 key 的调用同时清掉旧退避条目），不需要人工清退避；退避只压制重复写违规，不压制重判
+    evidence:
+      - {src: docs/master/CHANNEL.md, note: "11-05 19:23 PS-MASTER“显卡没有用起来”根因链 ③导入后 sop_gate 提示词证据过期，producer 整集退避 → 手跑 probe-prompts 15/16；19:31 cut N 后 probe 16/16、清退避 → 4 道全在出首帧"}
+      - {src: tools/master/episode_run.py, note: "probe_prompts：新稿导入 / 换代后立刻在出图机重跑 sop_gate probe-prompts，否则 producer 整集退避 15–30 分钟"}
+    confidence: high
+    status: 确认
+    date: 2026-11-05
+  - id: K-OPS-I14
+    enforced: false   # 规则级；交给项目方的命令没有机检入口（候选：CHANNEL 扫“项目方执行”行里的 $_ / $VAR）
+    domain: ops
+    link: [P7-P8]
+    title: 交给项目方亲手执行的命令一律给 PowerShell 工具语法或脚本文件，不给带 $_ / $VAR 的 Git Bash 一行命令
+    when: 需要项目方在笔记本亲启 / 重启进程（lane_relay serve、tunnel_supervisor、分类器拦住的 Expose Local Services 动作）
+    then: 给 python tools/...py <子命令> 或 ops/ 下现成脚本（stop 等 ~20 s 再 ensure 分两条给）；不写 kill $_、$(...)、反引号、$VAR（Git Bash 把 $_ 展开成上一条命令末参数 → 旧进程没停、新进程又起，两份同时跑）；WSL 侧同 K-OPS-I09（stdin 管进去）；PID 操作先 proc_instances.py 列出再按 pid 停
+    evidence:
+      - {src: docs/master/CHANNEL.md, note: "11-05 20:03 PS-MASTER：lane_relay 重启：项目方命令里的 $_ 被 bash 展开导致旧进程未停、新进程已起 → 按 PID 停掉旧实例（2660/43636 及父进程）"}
+      - {src: docs/master/CHANNEL.md, note: "11-05 20:1x CODER-POOL：tunnel_supervisor stop→ensure 被分类器拦，需 PS-MASTER 在笔记本分两条执行"}
+    confidence: medium
+    status: 确认
+    date: 2026-11-05

@@ -54,7 +54,7 @@ def test_on_calls_review_adopt(tmp_path, monkeypatch):
 def test_manual_cli_works_with_switch_off(tmp_path, monkeypatch, capsys):
     paths = _paths(tmp_path, {"review_adopt_auto": False})
     monkeypatch.setattr(PR, "Paths", lambda *a, **k: paths)
-    monkeypatch.setattr(PR, "review_adopt", lambda p, oid, n=None, by="": 4)
+    monkeypatch.setattr(PR, "review_adopt", lambda p, oid, n=None, by="", relaxed=False: 4)
     monkeypatch.setattr(PR, "default_run", lambda: "r")
     from unittest.mock import MagicMock
     monkeypatch.setattr(PR, "_runs", lambda: MagicMock())

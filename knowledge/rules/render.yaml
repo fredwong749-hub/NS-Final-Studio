@@ -277,3 +277,19 @@ rules:
     status: 待验
     experiment: PLANB-B2
     date: 2026-10-31
+  # ---- RULES-1105 11-05：V2 首帧生产配方（L-191 / L-192 / cfg 小批）单一来源；SOP 对应段 docs/master/PIPELINE_SOP_V2.md “V2 首帧生产配方”
+  - id: K-REN-963
+    domain: render
+    link: [P4-P6, P5-P6]
+    check: [tests/test_rules_1105.py::test_v2_first_frame_recipe_single_source, config/owner_decisions.yaml]
+    title: V2（series10_v2）首帧配方 = 提示词模板 v2 + base35（35 步 cfg 3.0）+ L-192 焦段表 + 人数硬闸；不改 cfg（cfg 小批证明 2.0 无改善、1.5 画面变平）
+    when: 编译 / 派发 series10_v2 首帧、尾帧作业；改 config/render_quality.json first_frame_tier、config/compile/run_style.json prompt_template、config/director/lenses.yaml
+    then: run_style.json runs.series10_v2.prompt_template.image=v2 / video=v2（机位首句置前、去【角色】块、按露脸人数写同框；H3 官方运镜句）；render_quality.json first_frame_tier.runs.series10_v2=base35，base35 = unet base / steps 35 / cfg 3.0 / euler simple（身份不够靠换种子 + 提示词 v2，不降 cfg）；焦段按分镜【光学】行 > 【镜头】id > lenses.yaml by_kind（establishing 28 T2.8 / two_shot 50 T2 / 过肩单人 85 T1.4 / closeup 135 T1.2 / insert 100 微距）；人数闸 = Q1 身份 + count（L-196 硬项），过肩前景只露肩 / 背影的人不算露脸（K-WRT-H16 修订）；过肩 / 俯拍等机位不靠文字——走 L-192 ② previz 摆位路线（tools/previz，接入生产前 S4 仍走文字）
+    params: {first_frame_tier: base35, steps: 35, cfg: 3.0, prompt_template_image: v2, prompt_template_video: v2}
+    evidence:
+      - {src: docs/master/MASTER_PICTURE.md, note: "L-191（项目方选 A：35 步 base 定稿档）、L-192（焦段光圈表 / 构图先摆位再出图）"}
+      - {src: docs/master/CHANNEL.md, note: "11-05 18:59 PS-MASTER：cfg 小批（DEBUG-35，36 张）cfg3 身份+人数 5/12、cfg2 5/11、cfg1.5 7/12 但画面变平 + 多人 → 保持 cfg 3.0（电影感优先）"}
+      - {src: config/render_quality.json, note: "first_frame_tier.base35 = {unet: base, steps: 35, cfg: 3.0, sampler: euler, scheduler: simple}"}
+    confidence: high
+    status: 确认
+    date: 2026-11-05

@@ -304,3 +304,17 @@ rules:
     confidence: medium
     status: 确认
     date: 2026-11-01
+  # ---- RULES-1105 11-05：背影判定词表（PS-MASTER 19:23 根因链 ④）
+  - id: K-REV-807
+    domain: review
+    link: [P4-P6, P5-P6]
+    check: [tests/test_rules_1105.py::test_back_view_words_only_whitelist, services/agent/ns_agent/asset_refs.py]
+    title: 首帧 img 里“这个人是背影”只认 背影 / 背面 / 背身 / 背对镜头 / 背朝镜头，且按小句主语归属；“背脊 / 后背 / 背对他”不算
+    when: asset_refs.back_in_text / back_view 判某人本镜是否背影（决定要不要送身份脸参考、I2 认人）；改 BACK_TXT_WORDS 或所有格正则
+    then: 所有格正则只匹配 <名>的(背影|背面|背身)；主语小句只认 BACK_TXT_WORDS（背影 / 背对镜头 / 背身 / 背朝镜头）；“落在祁念的背脊”“背对他 / 背对床”“后背”都不是背对镜头，不许用“的背”这类前缀匹配；判背影的人才丢身份脸参考槽，误判 = 整集被 I2 挡
+    evidence:
+      - {src: docs/master/CHANNEL.md, note: "11-05 19:23 PS-MASTER：S16 因 img“落在祁念的背脊”被 asset_refs 所有格正则“的背”误判背影 → 丢身份脸参考槽 → 整集被挡；修：正则只认 背影/背面/背身"}
+      - {src: services/agent/ns_agent/asset_refs.py, note: "BACK_TXT_WORDS + back_in_text 的所有格 / 主语两路判定"}
+    confidence: high
+    status: 确认
+    date: 2026-11-05

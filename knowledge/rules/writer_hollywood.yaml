@@ -304,14 +304,16 @@ rules:
     link: P3-P4
     title: 双人镜（≥2 人在画露脸）用中景以上，或把其中一人写成前景局部
     when: 首帧 img 景别 + 人物行（同上融合样本：“贴图”多是双人、特写；K-REN-902 只管特写，这条扩到近景 / 中近景）
-    then: staging.check_shot：人物行 ≥2 个“在画”且 img 开头景别是 大特写 / 特写 / 近景 / 中近景 = 不过；改中景 / 中全景 / 全景，或把其中一人改成“局部”（肩 / 背影 / 手，人物行写 <名>（局部｜<部位>｜<左/中/右>））
+    then: staging.check_shot：人物行 ≥2 个“在画”且 img 开头景别是 大特写 / 特写 / 近景 / 中近景 = 不过；改中景 / 中全景 / 全景，或把其中一人改成“局部”（肩 / 背影 / 手，人物行写 <名>（局部｜<部位>｜<左/中/右>））。过肩前景不算露脸（RULES-1105 修订，PS-MASTER 11-05 19:23 / L-192 过肩 coverage）：某人自己的小句（含其后无人名的延续小句）写了 背对镜头 / 背影 / 只露… / 以…入画 / 被…遮（prompt_v2.HIDDEN_FACE_RE 认的写法；“被越过 / 只以…在前景”不算，要写成“只露肩”）→ 这个人不计入“露脸”，过肩中近景 85mm 只算一人露脸、放行；判定与编译层 ns_schema.prompt_v2.hidden_face 同一口径（staging._face_hidden），编译层不可用时按旧口径（算露脸，不放宽）
     targets: [{kind: writer_prompt, section: 镜头字段}]
-    writer_text: 两个人都要露脸的镜头用中景或更宽；要拍近景或特写时，只让一个人露脸，另一个人写成前景的肩、背影或手（人物行写“局部”）。
+    writer_text: 两个人都要露脸的镜头用中景或更宽；要拍近景或特写时，只让一个人露脸，另一个人写成前景的肩、背影或手（人物行写“局部”，或在 img 里该人自己的小句写“只露肩 / 背影 / 被越过”——这样的过肩前景不算露脸）。
     evidence:
       - {src: data/rsi/staging_dist_s2.json, note: "第二季双人紧景别 12 镜；第一季 11 镜"}
+      - {src: docs/master/CHANNEL.md, note: "11-05 19:23 PS-MASTER“显卡没有用起来”根因链 ①导入被 K-WRT-H16 挡（过肩前景只露肩也算露脸）→ 修 staging.check_shot"}
+      - {src: tools/script_rsi/staging.py, note: "_face_hidden：前景只露肩 / 后脑 / 背影的人不算露脸，与 prompt_v2.hidden_face 同口径"}
     confidence: medium
-    status: 待验
-    date: 2026-11-02
+    status: 确认
+    date: 2026-11-05
   - id: K-WRT-H17
     check: [tests/test_judge_agent.py]
     domain: writer

@@ -102,7 +102,7 @@
 | 决定 | 流水线里的落点 | 状态（11-05 16:4x JST） |
 |---|---|---|
 | L-186 整集 ≥60 s：写作时长目标按**剪后**算（剪前 ≈ 目标 ÷ 0.7），QW-T 时长检查改为预估剪后时长；节奏规则不放松 | 第 3 步写作：writer 规则 + tools/qa/writer_lints.py 的 QW-T 时长检查 | ⏳ 规则级修法还没写进 writer 规则 / QW-T（只做了 ep01 补镜 S12–16）；归 CODER-LENS（writer_lints / writer_camera）下一轮 |
-| L-187 L-183 自动“尽力取最高分进片”改开关、**默认关** | config/pipeline/producer.json review_adopt_auto=false；重试用尽停 best_effort 进 #/queue | ✅ D-V2-187 |
+| L-187 L-183 自动“尽力取最高分进片”改开关、默认关 ⤴ **已被 L-196 修订（11-05 20:2x）：review_adopt_auto=true，用尽自动采用最好一版** | config/pipeline/producer.json review_adopt_auto=true（CODER-AUTO）；项目方事后仍可在 #/queue“修改” | ✅ D-V2-187（已改为 L-196 口径） |
 | L-188 L1 画风基线：有动机主光 + 光比 ≤3:1 + 负补光 + 背景低 1–2 档、禁平光句；sk_white_cyc 低调底图 1104；多人三层站位；post_film 开 / 关 USM；祁念短款裸粉甲 | K-WRT-807/808/809 + QW-L1/L2 阻断；run_style.json lighting_en；render_quality post_film；P1_looks | ✅ D-V2-188 / 188b；🟡 run_style.json lighting_en.fantasy 仍写 “warm ring light … from the front right” —— 幻想段按 L-130 幻想 C 高调暖金可以高调，但“环形灯 / 正面”是 L1 明令关掉的灯（H3a 6/6 关着才算过），建议改成有动机暖主光（CODER-PT 文件，待其改） |
 | L-189 KPI 改“画面指数”（bg_lum↓、subj_bg_ratio↑、dof_ratio↑、halo↓）+ 亲看抽检；VLM 只做单图缺陷 | tools/imglab/picture_index.py + tools/sentinel/scorecard.py v2（CODER-SCORE） | ✅ D-V2-189 |
 | L-190 发版 / 部署交 release_tick 自动（一次授权） | config/pipeline/release.json enabled=true；请求 data/system_versions/release_request.json（list 或 manifests） | ✅ D-V2-190；注意 tick 跑在 resident_sync loop 里 |
@@ -111,7 +111,31 @@
 | L-192 ② 构图“先摆位再出图”：3D 摆位 → 深度 / 姿势控制图 → Qwen-Image ControlNet；S4 先试 3 版 | tools/previz（CODER-PV 的 blocking 摆位脚本 + 3 份 S4 摆位 JSON），ControlNet 模型经 hf-dl；生产 workflows.py 仍不含 ControlNet（D-V2-143 注明 L-192 ② 修订路径） | ⏳ S4 3 版出图中 |
 | L-192 ③ 焦段光圈表（建立 24–35mm T2.8–4 / 双人 40–50 T2 / 过肩单人 65–85 T1.4–2 / 特写 85–135 T1.2–1.4 / 物件 100 微距）、背景须有远处实景光源、⤴ L-192 取代 L-002 旧“85mm f/1.2 奶油虚化”后缀口径（仅 lens_sim 光学标定用 f/1.2，不是出图提示词后缀）：lens_sim 按 85mm f/1.2 重标定 | K-WRT L3 条（QW-L9/L10/L11 warn）+ run_style.json lens_table 兜底 + lens_sim_v2 | ✅ D-V2-192c；🔴 **冲突**：K-WRT-812（L2 焦段“全集只用三档 35 / 50 / 75，特写 = apo_summicron_75_f2”，QW-L4）与 L-192 表（特写 85–135）互相矛盾，config/director/lenses.yaml 没有 85 / 100 / 135 档且光圈（f/2–2.8）低于表 → 按 L-192 改 K-WRT-812 档位与 lenses.yaml（加 Summilux-M 90 f/1.5 等效 85–90、APO 135），CODER-LENS 文件，待其改 |
 
-### 当天验证有效的运维规矩（已写进 knowledge/rules/ops_infra.yaml K-OPS-I08…I10）
+### 11-05 晚追加（L-193…L-196 + 运维教训，RULES-1105 补；规则层 K-OPS-I11…I14 / K-OPS-D05 / D06 / K-REN-963 / K-REV-807，机检 D-V2-191b…196b、D-V2-OPS-I11）
+
+| 决定 | 流水线里的落点 | 状态（11-05 20:5x JST） |
+|---|---|---|
+| L-193 首帧跨两台：gpu33 producer 经 lane_relay 借 gpu36 道出首帧（笔记本白名单代理 + ssh -R，只放行 ComfyUI 出图接口）；视频按镜跨两台同时开 | config/pipeline/lane_relay.json enabled=true、lanes=gpu36:0/1/2（笔记本 `lane_relay.py serve` 由项目方亲启；producer 重启后读）；config/pipeline/video_shard.json enabled=true；阶段交接写 data/pipeline/lane_relay_hold.json 还道 | ✅ D-V2-193 / 193b / 193c / 194d |
+| L-194 可用 6 卡 = gpu33:0/1/3 + gpu36:0/1/2（gpu33:2 坏卡）；按阶段全卡集中，无闲卡；看图集中 gpu33:3 本机实例；gpu36:2 不再看图专用（修订 L-100） | config/factory/hosts.json gpu36:2 enabled + roles=[image, video]（ComfyUI :8190，隧道 gpu36-l2）；video_shard ep01 权重 gpu36:gpu33 = 3:2；K-OPS-I12 | ✅ D-V2-194 / 194b / 194c |
+| L-195 提示词阶段按镜判：过关的镜先出图，没过的镜单独卡住（取代 L-140 整集就绪才出图；asset_worker 并行回 2 不变） | config/pipeline/sop_gate.json whole_episode_prompts=false（sop_gate.judge 按 shot 取证据）；K-OPS-D05 | ✅ D-V2-195 |
+| L-196 全自动：首 / 尾帧闸门只留硬项（Q1 身份 / 人数 / 无字幕水印 / 成人安全），Q9 / QB / Q10 看图类只记录不挡（⤴ 局部取代 D-VQA-01 “看图复核闭环 enforce”：看图照跑照记、next_prompt 不再触发重出；未成年外观 / 成人安全仍挡）；重出用尽自动采用最好一版；总调度只看 episode_run 报告 | config/gen_contract.json blocking_items=[Q1, count, text, adult]（gen_contract/blocking.py）；producer.json review_adopt_auto=true、accept.run_qb=false（CODER-AUTO）；K-OPS-D06 | ✅ D-V2-187 / 196 / 196b |
+
+#### V2 首帧生产配方（单一来源 K-REN-963；改任何一项先改规则再改配置）
+
+| 项 | 现行值（series10_v2，11-05） | 文件 | 机检 |
+|---|---|---|---|
+| 提示词模板 | image=v2 / video=v2（机位首句置前、去【角色】块、人物一行、按露脸人数写同框；H3 官方运镜句紧跟构图句） | config/compile/run_style.json runs.series10_v2.prompt_template | D-V2-191c |
+| 出图档位 | base35 = unet base / 35 步 / cfg **3.0** / euler simple（cfg 小批：2.0 无改善、1.5 画面变平 → 不降 cfg，身份靠换种子 + 模板 v2） | config/render_quality.json first_frame_tier | D-V2-191 / 191b |
+| 焦段 | 分镜【光学】行 > 【镜头】id > lenses.yaml by_kind：建立 28 T2.8 / 双人 50 T2 / 过肩单人 85 T1.4 / 特写 135 T1.2 / 插入 100 微距（L-192 ③） | config/director/lenses.yaml、ns_schema.prompt_v2.lens_of | D-V2-192c |
+| 人数 / 身份闸 | 硬项只有 Q1 身份 + count 人数 + text + adult（L-196）；过肩前景只露肩 / 背影的人不算露脸（K-WRT-H16 修订，staging._face_hidden = prompt_v2.hidden_face） | config/gen_contract.json blocking_items；tools/script_rsi/staging.py | D-V2-196 |
+| 背影判定 | 只认 背影 / 背面 / 背身 / 背对镜头 / 背朝镜头，按小句主语归属；“背脊 / 后背 / 背对他”不算（K-REV-807） | services/agent/ns_agent/asset_refs.py back_in_text | tests/test_rules_1105.py |
+| 机位 | 过肩 / 俯拍等不靠文字：L-192 ② previz 摆位 → 控制图 → ControlNet（tools/previz，S4 三版已验可行；接入生产前 S4 仍走文字） | tools/previz | D-V2-143 注 |
+| 道 | 首帧阶段 6 道：gpu33:0/1/3 本机 + gpu36:0/1/2 经 lane_relay（L-193 / L-194） | hosts.json / lane_relay.json | D-V2-193… |
+
+### 当天验证有效的运维规矩（已写进 knowledge/rules/ops_infra.yaml K-OPS-I08…I14）
+- **deploy 改了派单相关配置 = 立刻紧急重启 producer（K-OPS-I11）**：hosts.json / lane_relay.json / sop_gate.json / gen_contract.json / producer.json / render_quality.json / run_style.json / video_shard.json 任一相对上次部署有改 → `system_version.py deploy` 自动把重启请求升 urgent（只改配置 → producer-only，night 不动；同版还改了代码 → all），不等 30 分钟重启间隔（20:00–20:15 gpu33 producer 没读到 cut O 的 gpu36:1/2 借道与 L-195，道空着）。
+- **新稿导入 / 换代后立刻 probe-prompts（K-OPS-I13）**：episode_run 的 regen 段已自动跑；手工 `producer.py import-staged` / `regen` 的人必须紧接着跑 `tools/master/sop_gate.py probe-prompts --run <剧> --episode N`。sop_gate.require_backoff 每次先 judge 再看退避，证据刷新即放行，不需要手清退避（tests/test_rules_1105.py）。
+- **交给项目方亲手执行的命令给 PowerShell 工具语法或脚本（K-OPS-I14）**：不给带 `$_` / `$VAR` 的 Git Bash 一行命令（20:03 lane_relay 旧进程没停、新进程又起）；WSL 侧 stdin 管进去（K-OPS-I09）；时间一律 TZ=JST-9（K-OPS-I10）。
 - **转发器父子 = 一份服务**：.venv\Scripts\python.exe 是 venv launcher，再起 Python312 子进程；resident_sync / monitor / sentinel 各“两份”实为一份。盘点用 `python tools/ops/proc_instances.py`，不按解释器路径杀。
 - **wsl.exe 会再展开 $VAR、MSYS 会转换 /mnt/c 路径**：WSL 侧脚本从 stdin 管进去（`wsl.exe -e bash -s < x.sh`），Git Bash 调 wsl.exe 前 `MSYS_NO_PATHCONV=1`。
 - **时间一律 JST（TZ=JST-9）**：笔记本时钟美东；system_version.ENV / release_tick / cut_deploy_*.sh 同口径；Git Bash 取时间用 `TZ=JST-9 date`（`TZ=Asia/Tokyo` 退成 UTC）。

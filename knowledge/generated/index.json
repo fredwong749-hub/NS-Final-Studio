@@ -1,15 +1,15 @@
 {
- "kb_version": "kb-20261105-a4e3d045",
- "n": 684,
+ "kb_version": "kb-20261105-ba3c6528",
+ "n": 692,
  "by_domain": {
-  "render": 101,
+  "render": 102,
   "prompt": 28,
   "writer": 113,
   "edit": 49,
-  "review": 68,
+  "review": 69,
   "loop": 9,
   "asset": 44,
-  "ops": 207,
+  "ops": 213,
   "ui": 65
  },
  "by_link": {
@@ -21,12 +21,12 @@
   "P2-P3": 3,
   "P3-P4": 129,
   "P4-P5": 41,
-  "P4-P6": 30,
+  "P4-P6": 34,
   "P4-P7": 26,
   "P4-P9": 16,
-  "P5-P6": 224,
+  "P5-P6": 230,
   "P6-P7": 42,
-  "P7-P8": 117,
+  "P7-P8": 120,
   "P8-P10": 19,
   "P8-P9": 12,
   "P9-P10": 21
@@ -3638,6 +3638,35 @@
    "_file": "knowledge/rules/gen_contract.yaml"
   },
   {
+   "id": "K-REV-807",
+   "domain": "review",
+   "link": [
+    "P4-P6",
+    "P5-P6"
+   ],
+   "check": [
+    "tests/test_rules_1105.py::test_back_view_words_only_whitelist",
+    "services/agent/ns_agent/asset_refs.py"
+   ],
+   "title": "首帧 img 里“这个人是背影”只认 背影 / 背面 / 背身 / 背对镜头 / 背朝镜头，且按小句主语归属；“背脊 / 后背 / 背对他”不算",
+   "when": "asset_refs.back_in_text / back_view 判某人本镜是否背影（决定要不要送身份脸参考、I2 认人）；改 BACK_TXT_WORDS 或所有格正则",
+   "then": "所有格正则只匹配 <名>的(背影|背面|背身)；主语小句只认 BACK_TXT_WORDS（背影 / 背对镜头 / 背身 / 背朝镜头）；“落在祁念的背脊”“背对他 / 背对床”“后背”都不是背对镜头，不许用“的背”这类前缀匹配；判背影的人才丢身份脸参考槽，误判 = 整集被 I2 挡",
+   "evidence": [
+    {
+     "src": "docs/master/CHANNEL.md",
+     "note": "11-05 19:23 PS-MASTER：S16 因 img“落在祁念的背脊”被 asset_refs 所有格正则“的背”误判背影 → 丢身份脸参考槽 → 整集被挡；修：正则只认 背影/背面/背身"
+    },
+    {
+     "src": "services/agent/ns_agent/asset_refs.py",
+     "note": "BACK_TXT_WORDS + back_in_text 的所有格 / 主语两路判定"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-05",
+   "_file": "knowledge/rules/gen_contract.yaml"
+  },
+  {
    "id": "K-LOOP-001",
    "domain": "loop",
    "link": [
@@ -5153,6 +5182,63 @@
    "_file": "knowledge/rules/ops_decisions.yaml"
   },
   {
+   "id": "K-OPS-D05",
+   "domain": "ops",
+   "link": [
+    "P4-P6",
+    "P5-P6"
+   ],
+   "check": [
+    "tests/test_rules_1105.py::test_l195_per_shot_prompt_gate",
+    "config/owner_decisions.yaml"
+   ],
+   "title": "提示词阶段按镜判——过关的镜先出图，没过的镜单独卡住（L-195 取代 L-140 的“整集提示词就绪才出图”）",
+   "when": "producer / asset_worker 进“出图”“尾帧”阶段前过 sop_gate；改 config/pipeline/sop_gate.json",
+   "then": "sop_gate.json whole_episode_prompts=false（judge 的提示词证据按 shot 取：这一镜 ok 就放行，不看同集其它镜）；L-140 关于 asset_worker 并行回 2 的部分不变；整集就绪的旧口径只在 whole_episode_prompts=true 时存在，不得再写进 SOP / 提示",
+   "evidence": [
+    {
+     "src": "docs/master/MASTER_PICTURE.md",
+     "note": "L-195（2026-11-05 20:0x，项目方选 B）"
+    },
+    {
+     "src": "config/pipeline/sop_gate.json",
+     "note": "whole_episode_prompts=false，_whole_episode_prompts 注 L-195 取代 L-140"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-05",
+   "_file": "knowledge/rules/ops_decisions.yaml"
+  },
+  {
+   "id": "K-OPS-D06",
+   "domain": "ops",
+   "link": [
+    "P5-P6"
+   ],
+   "check": [
+    "tests/test_rules_1105.py::test_l196_hard_gates_only",
+    "config/owner_decisions.yaml"
+   ],
+   "title": "首帧 / 尾帧闸门只留硬项（Q1 身份、人数、无字幕水印、成人安全）；Q9 / QB / Q10 看图类只记录不挡；重出用尽自动采用最好一版（L-196，修订 L-187）",
+   "when": "首帧 / 尾帧验收（gen_contract blocking）、重出用尽后的采用；改 config/gen_contract.json / config/pipeline/producer.json",
+   "then": "gen_contract.json blocking_items=[Q1, count, text, adult]（其余项照跑照记，不挡；services/agent/ns_agent/gen_contract/blocking.py）；producer.json review_adopt_auto=true（用尽自动取最高分版设为当前，标 review_needed 进成片；成人安全 / 文字水印不过的除外）、accept.run_qb=false（不跑共用验收 QB）；总调度不逐镜盯，只看 episode_run 报告；项目方事后仍可在",
+   "evidence": [
+    {
+     "src": "docs/master/MASTER_PICTURE.md",
+     "note": "L-196（2026-11-05 20:2x，项目方“我需要你全自动，不要检测那么多了”）"
+    },
+    {
+     "src": "config/gen_contract.json",
+     "note": "blocking_items + _blocking_items（CODER-AUTO 11-05）"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-05",
+   "_file": "knowledge/rules/ops_decisions.yaml"
+  },
+  {
    "id": "K-OPS-X01",
    "domain": "ops",
    "link": [
@@ -6509,6 +6595,122 @@
     }
    ],
    "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-05",
+   "_file": "knowledge/rules/ops_infra.yaml"
+  },
+  {
+   "id": "K-OPS-I11",
+   "domain": "ops",
+   "link": [
+    "P7-P8"
+   ],
+   "check": [
+    "tests/test_rules_1105.py::test_dispatch_restart_plan_urgent_producer_only",
+    "tests/test_rules_1105.py::test_deploy_wires_dispatch_restart_plan",
+    "tools/qa/system_version.py"
+   ],
+   "title": "deploy 改了派单相关配置 = 立刻紧急重启 producer，不等 30 分钟重启间隔（只改配置 → producer-only；同版还改了代码 → 全部）",
+   "when": "system_version deploy 的版本相对上一次部署改了 config/factory/hosts.json、config/pipeline/lane_relay.json、config/pipeline/sop_gate.json、config/gen_contract.json、config/pipeline/producer.json、config/render_quality.json、config/compile/run_style.json、config/pipeline/video_shard.json 任一（system_version.DISPATCH_CONFIG）",
+   "then": "deploy 自动把重启请求升为 urgent（restart_queue 当场排空执行，审计 urgent_jump + res.urgent_auto 写明哪几个文件）；同版只改了这些配置 → mode=producer-only（night 不动、视频不打断），还改了别的代码 → mode 留空 = all；上一次部署版本取本机 data/system_version.txt（AUDIT-RULES 11-05 写的那份），读不到取前一个 sv tag；git 判不了按“改了”处理。--no-restart 不受影响",
+   "evidence": [
+    {
+     "src": "docs/master/CHANNEL.md",
+     "note": "11-05 20:14 PS-MASTER：gpu33 producer（19:44 启动）未随 cut O 重启（30 min 重启间隔），未加载 gpu36:1/2 借道与 L-195；道空闲而 ep01 S11/S12/S14 ready → 紧急插队 producer-only 重启；20:20 重启后派单才出现 gpu36:1"
+    },
+    {
+     "src": "tools/autopilot/restart_queue.py",
+     "note": "urgent 可插队（不受 30 分钟限制），mode producer-only / night-only / all 合并规则"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-05",
+   "_file": "knowledge/rules/ops_infra.yaml"
+  },
+  {
+   "id": "K-OPS-I12",
+   "domain": "ops",
+   "link": [
+    "P5-P6",
+    "P7-P8"
+   ],
+   "check": [
+    "tests/test_rules_1105.py::test_l193_l194_six_lanes_in_dispatch_configs",
+    "config/owner_decisions.yaml"
+   ],
+   "title": "可用 6 卡 = gpu33:0/1/3 + gpu36:0/1/2，按阶段全卡集中；首帧经 lane_relay 借 gpu36 三道，看图集中 gpu33:3 本机实例；只有 gpu33:2（坏卡）永不派（L-193 / L-194，修订 L-100）",
+   "when": "派首帧 / 尾帧 / 视频；改 config/factory/hosts.json 道表、config/pipeline/lane_relay.json、config/pipeline/video_shard.json；阶段交接（出图 → 视频）",
+   "then": "hosts.json gpu36:0/1/2 enabled 且 roles=[image, video]（gpu36:2 不再是看图专用卡，L-100 作废）；lane_relay.json enabled=true、lanes 恰为 gpu36:0/1/2（笔记本白名单代理 + ssh -R，只放行 ComfyUI 出图接口，笔记本 lane_relay.py serve 由项目方亲启）；lane_relay 的 lanes 里永远没有 gpu33:2，producer / asset_worker 的 exclude_lanes 保留 gpu33:2；video_shard ep01 owner=gpu36、权重按道数 gpu36:gpu33 = 3:2；出图 → 视频交接写 data/pipeline/lane_relay_hold.json 把 gpu36 道还给本机 night，删文件恢复借道；任何阶段不许有闲卡（项目方“每个环节集中 gpu 资源处理一个事情，不要分散或空闲”）",
+   "evidence": [
+    {
+     "src": "docs/master/MASTER_PICTURE.md",
+     "note": "L-193（18:2x 项目方“gpu3 和 gpu6 一起跑，加快”→ 选 B）、L-194（19:5x 项目方原话“授权：gpu36 三张卡（0/1/2）都归 NS 项目用……修订 L-100 和‘不碰 gpu36:2’”）"
+    },
+    {
+     "src": "config/factory/hosts.json",
+     "note": "gpu36:2 note：L-194 GPU2 出图 + 视频，comfy.sh start 2，隧道 gpu36-l2 移回 tunnels.json"
+    },
+    {
+     "src": "docs/master/CHANNEL.md",
+     "note": "11-05 20:03 PS-MASTER：gpu33 上 28288/28289/28290 三口均返回 gpu36:0/1/2 队列"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-05",
+   "_file": "knowledge/rules/ops_infra.yaml"
+  },
+  {
+   "id": "K-OPS-I13",
+   "domain": "ops",
+   "link": [
+    "P4-P6",
+    "P5-P6"
+   ],
+   "check": [
+    "tests/test_rules_1105.py::test_episode_run_probes_prompts_right_after_regen",
+    "tests/test_rules_1105.py::test_sop_gate_backoff_yields_when_evidence_refreshed"
+   ],
+   "title": "新分镜导入 / 换代后立刻重跑提示词探针（sop_gate probe-prompts），不让 producer 因“提示词证据过期”整集退避",
+   "when": "episode_run import → regen 段；任何人手工 producer.py import-staged / regen 之后；sop_gate 提示词证据 fingerprint 变了",
+   "then": "episode_run.act_regen 执行 regen 后同一拍在出图机跑 tools/master/sop_gate.py probe-prompts --run <剧> --episode N，没全过 = 该段 blocked 并列出没过的镜（L-195 按镜判：过的镜先出，没过的镜单独卡住）；绕开 episode_run 手工导入的人必须自己紧接着跑 probe-prompts（写进 CHANNEL）；sop_gate.require_backoff 每次先 judge 再看退避——证据刷新、judge 通过就当场放行（带 key 的调用同时清掉旧退避条目），不需要人工清退避；退避只压制重复写违规，不压制重判",
+   "evidence": [
+    {
+     "src": "docs/master/CHANNEL.md",
+     "note": "11-05 19:23 PS-MASTER“显卡没有用起来”根因链 ③导入后 sop_gate 提示词证据过期，producer 整集退避 → 手跑 probe-prompts 15/16；19:31 cut N 后 probe 16/16、清退避 → 4 道全在出首帧"
+    },
+    {
+     "src": "tools/master/episode_run.py",
+     "note": "probe_prompts：新稿导入 / 换代后立刻在出图机重跑 sop_gate probe-prompts，否则 producer 整集退避 15–30 分钟"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-05",
+   "_file": "knowledge/rules/ops_infra.yaml"
+  },
+  {
+   "id": "K-OPS-I14",
+   "enforced": false,
+   "domain": "ops",
+   "link": [
+    "P7-P8"
+   ],
+   "title": "交给项目方亲手执行的命令一律给 PowerShell 工具语法或脚本文件，不给带 $_ / $VAR 的 Git Bash 一行命令",
+   "when": "需要项目方在笔记本亲启 / 重启进程（lane_relay serve、tunnel_supervisor、分类器拦住的 Expose Local Services 动作）",
+   "then": "给 python tools/...py <子命令> 或 ops/ 下现成脚本（stop 等 ~20 s 再 ensure 分两条给）；不写 kill $_、$(...)、反引号、$VAR（Git Bash 把 $_ 展开成上一条命令末参数 → 旧进程没停、新进程又起，两份同时跑）；WSL 侧同 K-OPS-I09（stdin 管进去）；PID 操作先 proc_instances.py 列出再按 pid 停",
+   "evidence": [
+    {
+     "src": "docs/master/CHANNEL.md",
+     "note": "11-05 20:03 PS-MASTER：lane_relay 重启：项目方命令里的 $_ 被 bash 展开导致旧进程未停、新进程已起 → 按 PID 停掉旧实例（2660/43636 及父进程）"
+    },
+    {
+     "src": "docs/master/CHANNEL.md",
+     "note": "11-05 20:1x CODER-POOL：tunnel_supervisor stop→ensure 被分类器拦，需 PS-MASTER 在笔记本分两条执行"
+    }
+   ],
+   "confidence": "medium",
    "status": "确认",
    "date": "2026-11-05",
    "_file": "knowledge/rules/ops_infra.yaml"
@@ -8259,6 +8461,46 @@
    "status": "待验",
    "experiment": "PLANB-B2",
    "date": "2026-10-31",
+   "_file": "knowledge/rules/render.yaml"
+  },
+  {
+   "id": "K-REN-963",
+   "domain": "render",
+   "link": [
+    "P4-P6",
+    "P5-P6"
+   ],
+   "check": [
+    "tests/test_rules_1105.py::test_v2_first_frame_recipe_single_source",
+    "config/owner_decisions.yaml"
+   ],
+   "title": "V2（series10_v2）首帧配方 = 提示词模板 v2 + base35（35 步 cfg 3.0）+ L-192 焦段表 + 人数硬闸；不改 cfg（cfg 小批证明 2.0 无改善、1.5 画面变平）",
+   "when": "编译 / 派发 series10_v2 首帧、尾帧作业；改 config/render_quality.json first_frame_tier、config/compile/run_style.json prompt_template、config/director/lenses.yaml",
+   "then": "run_style.json runs.series10_v2.prompt_template.image=v2 / video=v2（机位首句置前、去【角色】块、按露脸人数写同框；H3 官方运镜句）；render_quality.json first_frame_tier.runs.series10_v2=base35，base35 = unet base / steps 35 / cfg 3.0 / euler simple（身份不够靠换种子 + 提示词 v2，不降 cfg）；焦段按分镜【光学】行 > 【镜头】id > lenses.yaml by_kind（establishing 28 T2.8 / two_shot 50 T2 / 过肩单人 85 T1.4 / closeup 135 T1.2 / insert 100 微距）；人数闸 = Q1 身份 + count（L-196 硬项），过肩前景只露肩 / 背影的人不算露脸（K-WRT-H16 修订）；过肩 / 俯拍等机位不靠文字——走 L-192 ② previz 摆位路线（tools/previz，接入生产前 S4 仍走文字）",
+   "params": {
+    "first_frame_tier": "base35",
+    "steps": 35,
+    "cfg": 3.0,
+    "prompt_template_image": "v2",
+    "prompt_template_video": "v2"
+   },
+   "evidence": [
+    {
+     "src": "docs/master/MASTER_PICTURE.md",
+     "note": "L-191（项目方选 A：35 步 base 定稿档）、L-192（焦段光圈表 / 构图先摆位再出图）"
+    },
+    {
+     "src": "docs/master/CHANNEL.md",
+     "note": "11-05 18:59 PS-MASTER：cfg 小批（DEBUG-35，36 张）cfg3 身份+人数 5/12、cfg2 5/11、cfg1.5 7/12 但画面变平 + 多人 → 保持 cfg 3.0（电影感优先）"
+    },
+    {
+     "src": "config/render_quality.json",
+     "note": "first_frame_tier.base35 = {unet: base, steps: 35, cfg: 3.0, sampler: euler, scheduler: simple}"
+    }
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-05",
    "_file": "knowledge/rules/render.yaml"
   },
   {
@@ -16834,23 +17076,31 @@
    "link": "P3-P4",
    "title": "双人镜（≥2 人在画露脸）用中景以上，或把其中一人写成前景局部",
    "when": "首帧 img 景别 + 人物行（同上融合样本：“贴图”多是双人、特写；K-REN-902 只管特写，这条扩到近景 / 中近景）",
-   "then": "staging.check_shot：人物行 ≥2 个“在画”且 img 开头景别是 大特写 / 特写 / 近景 / 中近景 = 不过；改中景 / 中全景 / 全景，或把其中一人改成“局部”（肩 / 背影 / 手，人物行写 <名>（局部｜<部位>｜<左/中/右>））",
+   "then": "staging.check_shot：人物行 ≥2 个“在画”且 img 开头景别是 大特写 / 特写 / 近景 / 中近景 = 不过；改中景 / 中全景 / 全景，或把其中一人改成“局部”（肩 / 背影 / 手，人物行写 <名>（局部｜<部位>｜<左/中/右>））。过肩前景不算露脸（RULES-1105 修订，PS-MASTER 11-05 19:23 / L-192 过肩 coverage）：某人自己的小句（含其后无人名的延续小句）写了 背对镜头 / 背影 / 只露… / 以…入画 / 被…遮（prompt_v2.HIDDEN_FACE_RE 认的写法；“被越过 / 只以…在前景”不算，要写成“只露肩”）→ 这个人不计入“露脸”，过肩中近景 85mm 只算一人露脸、放行；判定与编译层 ns_schema.prompt_v2.hidden_face 同一口径（staging._face_hidden），编译层不可用时按旧口径（算露脸，不放宽）",
    "targets": [
     {
      "kind": "writer_prompt",
      "section": "镜头字段"
     }
    ],
-   "writer_text": "两个人都要露脸的镜头用中景或更宽；要拍近景或特写时，只让一个人露脸，另一个人写成前景的肩、背影或手（人物行写“局部”）。",
+   "writer_text": "两个人都要露脸的镜头用中景或更宽；要拍近景或特写时，只让一个人露脸，另一个人写成前景的肩、背影或手（人物行写“局部”，或在 img 里该人自己的小句写“只露肩 / 背影 / 被越过”——这样的过肩前景不算露脸）。",
    "evidence": [
     {
      "src": "data/rsi/staging_dist_s2.json",
      "note": "第二季双人紧景别 12 镜；第一季 11 镜"
+    },
+    {
+     "src": "docs/master/CHANNEL.md",
+     "note": "11-05 19:23 PS-MASTER“显卡没有用起来”根因链 ①导入被 K-WRT-H16 挡（过肩前景只露肩也算露脸）→ 修 staging.check_shot"
+    },
+    {
+     "src": "tools/script_rsi/staging.py",
+     "note": "_face_hidden：前景只露肩 / 后脑 / 背影的人不算露脸，与 prompt_v2.hidden_face 同口径"
     }
    ],
    "confidence": "medium",
-   "status": "待验",
-   "date": "2026-11-02",
+   "status": "确认",
+   "date": "2026-11-05",
    "_file": "knowledge/rules/writer_hollywood.yaml"
   },
   {

@@ -381,7 +381,7 @@ checks:
     value: i2va_pika_flex
   - id: D-VQA-01
     decision: 项目方 2026-11-01 原话“启动图像识别模型,然后自动检测,一旦发现不对,叫系统重写做”“image做出来后,用本地图像模型去检测图片是否达标……然后再跑视频rendering”（总调度 fredw-2b 转；MASTER_PICTURE §1 账本编号待 RECALL 补）
-    title: 看图复核闭环 enforce = true（命中就按 next_prompt 重出；图片过闸门后才进视频）
+    title: 看图复核闭环 enforce = true（命中就按 next_prompt 重出；图片过闸门后才进视频）。⤴ L-196（11-05 20:2x）局部修订：首 / 尾帧只有 gen_contract blocking_items（Q1 / count / text / adult）挡，Q9 看图照跑照记但不再触发重出（D-V2-196）；本条 judge.enforce 仍为 true（看图闭环本身不关）
     type: json
     file: config/vqa.json
     path: [judge, enforce]
@@ -777,3 +777,107 @@ checks:
     type: grep_present
     pattern: 'L-192'
     paths: [knowledge/rules/writer_camera.yaml, config/compile/run_style.json]
+
+  # ---------------- 11-05 晚 L-191 配方 / L-193…L-196 + 当天运维规矩（RULES-1105 补登；规则层 K-OPS-I11…I14 / K-OPS-D05 / D06 / K-REN-963 / K-REV-807）
+  - id: D-V2-191b
+    decision: L-191 + cfg 小批（PS-MASTER 11-05 18:59：cfg3 身份+人数 5/12、cfg2 5/11、cfg1.5 7/12 但画面变平 → 保持 cfg 3.0，电影感优先）
+    title: render_quality.json base35 档 = 35 步 cfg 3.0（K-REN-963 首帧配方）
+    type: json
+    file: config/render_quality.json
+    path: [first_frame_tier, base35, cfg]
+    op: eq
+    value: 3.0
+  - id: D-V2-191c
+    decision: L-191 / L-192 配方（PS-MASTER 11-05 17:52 cut L：series10_v2 prompt_template image / video 开 v2）
+    title: run_style.json series10_v2 提示词模板 image = v2
+    type: json
+    file: config/compile/run_style.json
+    path: [runs, series10_v2, prompt_template, image]
+    op: eq
+    value: v2
+  - id: D-V2-193
+    decision: L-193（项目方 11-05 18:2x “gpu3 和 gpu6 一起跑，加快”→ 选 B：首帧跨两台 lane_relay 今天开）
+    title: lane_relay.json enabled = true（gpu33 producer 借 gpu36 道出首帧）
+    type: json
+    file: config/pipeline/lane_relay.json
+    path: [enabled]
+    op: eq
+    value: true
+  - id: D-V2-193b
+    decision: L-193 / L-194（只放行 gpu36 的道；gpu33:2 坏卡永不借）
+    title: lane_relay.json lanes 只含 gpu36:0 / gpu36:1 / gpu36:2
+    type: json
+    file: config/pipeline/lane_relay.json
+    path: [lanes]
+    op: keys_subset
+    value: ["gpu36:0", "gpu36:1", "gpu36:2"]
+  - id: D-V2-193c
+    decision: L-194（gpu36 三张卡都借给首帧阶段，不只是 gpu36:0）
+    title: lane_relay.json lanes 含 gpu36:0 / 1 / 2 三道
+    type: json
+    file: config/pipeline/lane_relay.json
+    path: [lanes]
+    op: keys_superset
+    value: ["gpu36:0", "gpu36:1", "gpu36:2"]
+  - id: D-V2-194
+    decision: L-194（项目方 11-05 19:5x 原话“授权：gpu36 三张卡（0/1/2）都归 NS 项目用，可以在 gpu36:2 启动 ComfyUI……修订 L-100 和‘不碰 gpu36:2’”）
+    title: hosts.json gpu36:2 enabled = true
+    type: json
+    file: config/factory/hosts.json
+    path: [hosts, gpu36, lanes, "gpu36:2", enabled]
+    op: eq
+    value: true
+  - id: D-V2-194b
+    decision: L-194（gpu36:2 不再专用看图：出图 + 视频）
+    title: hosts.json gpu36:2 roles = [image, video]
+    type: json
+    file: config/factory/hosts.json
+    path: [hosts, gpu36, lanes, "gpu36:2", roles]
+    op: eq
+    value: [image, video]
+  - id: D-V2-194c
+    decision: L-194（视频阶段全卡集中：ep01 视频按镜跨两台，权重按道数 gpu36 三道比 gpu33 两道 = 3:2）
+    title: video_shard.json 开、ep01 分片 hosts = gpu36 + gpu33
+    type: json
+    file: config/pipeline/video_shard.json
+    path: [runs, series10_v2, eps, "1", weights]
+    op: keys_superset
+    value: [gpu36, gpu33]
+  - id: D-V2-194d
+    decision: L-194（视频按镜跨两台同时开，L-193 ②）
+    title: video_shard.json enabled = true
+    type: json
+    file: config/pipeline/video_shard.json
+    path: [enabled]
+    op: eq
+    value: true
+  - id: D-V2-195
+    decision: L-195（项目方 11-05 20:0x 选 B：提示词阶段按镜判，过关的镜先出图；取代 L-140 整集就绪才出图）
+    title: sop_gate.json whole_episode_prompts = false
+    type: json
+    file: config/pipeline/sop_gate.json
+    path: [whole_episode_prompts]
+    op: eq
+    value: false
+  - id: D-V2-196
+    decision: L-196（项目方 11-05 20:2x “我需要你全自动，不要检测那么多了”：首 / 尾帧闸门只留 Q1 身份、人数、无字幕水印、成人安全；Q9 / QB / Q10 只记录不挡）
+    title: gen_contract.json blocking_items = [Q1, count, text, adult]
+    type: json
+    file: config/gen_contract.json
+    path: [blocking_items]
+    op: eq
+    value: [Q1, count, text, adult]
+  - id: D-V2-196b
+    decision: L-196（QB 共用验收不再挡：不跑，省整张再看一遍）
+    title: producer.json accept.run_qb = false
+    type: json
+    file: config/pipeline/producer.json
+    path: [accept, run_qb]
+    op: eq
+    value: false
+  - id: D-V2-OPS-I11
+    decision: K-OPS-I11（RULES-1105 11-05：deploy 改了派单相关配置 → 紧急 producer 重启；根因 20:00–20:15 gpu33 producer 卡在 30 分钟重启间隔外）
+    title: system_version.py 有 dispatch_restart_plan（派单配置变更自动升 urgent）
+    type: grep_present
+    pattern: 'def dispatch_restart_plan'
+    paths: [tools/qa/system_version.py]

@@ -2484,6 +2484,10 @@ class Producer:
                 except Exception as e:  # noqa: BLE001
                     self.logf("asset_release_err", error=repr(e)[:300])
                 try:
+                    self.adopt_best_effort_sweep(reg)  # L-196：用尽停在 best_effort 的自动取最高分版
+                except Exception as e:  # noqa: BLE001
+                    self.logf("be_adopt_err", error=repr(e)[:300])
+                try:
                     self.auto_reset_best_effort(reg)   # K-OPS-E11：尽力版在规则 / 资产版本变化时自动重置
                 except Exception as e:  # noqa: BLE001
                     self.logf("be_reset_err", error=repr(e)[:300])
@@ -2570,6 +2574,28 @@ class Producer:
                     self.logf("best_effort_reset", obj=o["id"], counted=False, why=why, changed=changed)
                     out["reset"] += 1
         return out
+
+    def adopt_best_effort_sweep(self, reg, every_s: float = 120) -> list:
+        """L-196（项目方 11-05“全自动”）：已经停在 best_effort（重试用尽）的首 / 尾帧，review_adopt_auto 开时自动取最高分版设为当前
+        （标 review_needed，下游照常往下走）；与主循环用尽那一刻同口径，补上开关打开之前就已停下的对象。每 2 分钟查一次"""
+        if now() - getattr(self, "_ba_check_t", 0) < every_s or not review_adopt_auto(self.p.root):
+            return []
+        self._ba_check_t = now()
+        done = []
+        for E in reg.get("episodes") or []:
+            for S in E["shots"]:
+                for k in ("first", "last"):
+                    o = S["objects"][k]
+                    led = self.ledger().get(o["id"]) or {}
+                    if o.get("status") != "best_effort" or led.get("final") != "best_effort" or (led.get("tries") or 0) < MAX_TRIES:
+                        continue
+                    r = review_adopt(self.p, o["id"], by="L-196 自动", relaxed=True)
+                    if r:
+                        self.led_update(o["id"], final="passed", hard_capped=None,
+                                        reason=f"L-196 重试用尽，自动取最高分 v{r} 设为当前，待项目方复核")
+                        self.logf("passed", obj=o["id"], take=r, review_needed=True, rule="L-196", via="adopt_sweep")
+                        done.append(o["id"])
+        return done
 
     def release_waiting_assets(self, every_s: float = 60) -> list:
         """K-OPS-E26：等资产的对象，资产登记签名或期望 refs 表签名变了 → 清退避、回到 ready（不计次）。每分钟查一次"""
@@ -4999,7 +5025,7 @@ def main(argv=None) -> int:
     if a.cmd == "import-staged":          # 总调度派的整稿导入（走 PRODUCER 令牌通道）：--obj <暂存稿路径> --reason <sha256> --note
         return import_staged(paths, a.obj, a.reason, a.note, a.by, skip_rubric_gate=a.skip_rubric_gate, run=a.run or None)
     if a.cmd == "review-adopt":           # L-183 手工：--obj first:ep01-S4 [--n N]（不给 N = Q1–Q9 全过里分数最高的一版）
-        r = review_adopt(paths, a.obj, a.n or None, by=a.by)
+        r = review_adopt(paths, a.obj, a.n or None, by=a.by, relaxed=True)   # L-196：没有全过版也取最高分版
         if r:                             # 与主循环同口径：账本改 passed（否则对象仍按“尽力”推导，尾帧 / 视频不往下走）
             L = jl(paths.ledger, {}) or {}
             L.setdefault(a.obj, {}).update(final="passed", hard_capped=None,

@@ -53,3 +53,30 @@ rules:
     confidence: high
     status: 确认
     date: 2026-11-01
+  # ---- RULES-1105 11-05：L-195 / L-196 项目方决定的规则层（机检 config/owner_decisions.yaml D-V2-195 / 196）
+  - id: K-OPS-D05
+    domain: ops
+    link: [P4-P6, P5-P6]
+    check: [tests/test_rules_1105.py::test_l195_per_shot_prompt_gate, config/owner_decisions.yaml]
+    title: 提示词阶段按镜判——过关的镜先出图，没过的镜单独卡住（L-195 取代 L-140 的“整集提示词就绪才出图”）
+    when: producer / asset_worker 进“出图”“尾帧”阶段前过 sop_gate；改 config/pipeline/sop_gate.json
+    then: sop_gate.json whole_episode_prompts=false（judge 的提示词证据按 shot 取：这一镜 ok 就放行，不看同集其它镜）；L-140 关于 asset_worker 并行回 2 的部分不变；整集就绪的旧口径只在 whole_episode_prompts=true 时存在，不得再写进 SOP / 提示
+    evidence:
+      - {src: docs/master/MASTER_PICTURE.md, note: "L-195（2026-11-05 20:0x，项目方选 B）"}
+      - {src: config/pipeline/sop_gate.json, note: "whole_episode_prompts=false，_whole_episode_prompts 注 L-195 取代 L-140"}
+    confidence: high
+    status: 确认
+    date: 2026-11-05
+  - id: K-OPS-D06
+    domain: ops
+    link: [P5-P6]
+    check: [tests/test_rules_1105.py::test_l196_hard_gates_only, config/owner_decisions.yaml]
+    title: 首帧 / 尾帧闸门只留硬项（Q1 身份、人数、无字幕水印、成人安全）；Q9 / QB / Q10 看图类只记录不挡；重出用尽自动采用最好一版（L-196，修订 L-187）
+    when: 首帧 / 尾帧验收（gen_contract blocking）、重出用尽后的采用；改 config/gen_contract.json / config/pipeline/producer.json
+    then: gen_contract.json blocking_items=[Q1, count, text, adult]（其余项照跑照记，不挡；services/agent/ns_agent/gen_contract/blocking.py）；producer.json review_adopt_auto=true（用尽自动取最高分版设为当前，标 review_needed 进成片；成人安全 / 文字水印不过的除外）、accept.run_qb=false（不跑共用验收 QB）；总调度不逐镜盯，只看 episode_run 报告；项目方事后仍可在 #/queue 用“修改”换版（L-123 口径不变）
+    evidence:
+      - {src: docs/master/MASTER_PICTURE.md, note: "L-196（2026-11-05 20:2x，项目方“我需要你全自动，不要检测那么多了”）"}
+      - {src: config/gen_contract.json, note: "blocking_items + _blocking_items（CODER-AUTO 11-05）"}
+    confidence: high
+    status: 确认
+    date: 2026-11-05

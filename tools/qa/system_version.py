@@ -1477,7 +1477,7 @@ def hot_files(rs, now: float | None = None, hot_s: float = HOT_S) -> list[str]:
 
 def deploy_host(rs, h: str, snap: Path, names: list[str], tracked_code: list[str], sv: str, commit: str,
                 restart: bool = True, pc=None, rq=None, urgent: bool = False, expected: bytes | None = None,
-                hold_data: list[str] | None = None) -> dict:
+                hold_data: list[str] | None = None, restart_mode: str | None = None) -> dict:
     """一台机器的部署（FACTORY D9 / K-OPS-F06，总调度 01:3x 批准）：
     ① 代码只发该版本的 git 快照（export_tag 解出的目录）：推送前检查也对快照做（P1–P4），工作树里 tag 之外的新文件 / 改动根本不参与，
        不会再因“cut 之后又新建了代码文件”判“没推到”而整台失败（11-02 01:23 gpu36 sv-02 事故）；
@@ -1537,8 +1537,11 @@ def deploy_host(rs, h: str, snap: Path, names: list[str], tracked_code: list[str
             r["paused_at"] = time.strftime("%H:%M:%S")
         if restart:      # K-OPS-W16（DJ-20）：不直接重启，写重启队列（resident_sync loop 排空后合并执行，同台 30 分钟最多一次）
             rq = rq or load_restart_queue()
-            q = rq.request(h, f"system_version deploy {sv}", by="system_version deploy", urgent=urgent)
+            mode_kw = {"mode": restart_mode} if restart_mode else {}     # K-OPS-I11：只改派单配置 → producer-only；不传 = 队列默认 all
+            q = rq.request(h, f"system_version deploy {sv}", by="system_version deploy", urgent=urgent, **mode_kw)
             r["restart"] = f"queued {q['id']}（tools/autopilot/restart_queue.py，执行记录 data/autopilot/restart_done.jsonl）"
+            if restart_mode:
+                r["restart_mode"] = restart_mode
             if urgent and hasattr(rq, "process"):     # K-OPS-F13：urgent 不等 loop 下一拍，当场按队列规则（排空 ≤90 s）执行，重启后 resume
                 done = rq.process(h, rs) or {}
                 r["restart"] += (f"；当场执行 ok={done.get('ok')} drain={done.get('drain_mode') or done.get('drained')} {done.get('secs')} s"
@@ -1671,6 +1674,75 @@ def write_local_version(sv: str, commit: str, at: str | None = None, root: Path 
     return LOCAL_VERSION_FILE
 
 
+DISPATCH_CONFIG = ("config/factory/hosts.json", "config/pipeline/lane_relay.json", "config/pipeline/sop_gate.json",
+                   "config/gen_contract.json", "config/pipeline/producer.json", "config/render_quality.json",
+                   "config/compile/run_style.json", "config/pipeline/video_shard.json")
+DISPATCH_RESTART_MODE = "producer-only"
+
+
+def local_deployed_sv(root: Path | None = None) -> str | None:
+    """上一次部署成功的版本 id（deploy 成功后 write_local_version 写的本机 data/system_version.txt）；读不到 = None"""
+    p = (root or ROOT) / LOCAL_VERSION_FILE
+    try:
+        return str(json.loads(p.read_text(encoding="utf-8")).get("id") or "") or None
+    except Exception:  # noqa: BLE001  # arch-ok: 本机版本文件缺 / 坏 = 无上次版本 → 调用方按“改了派单配置”处理（失败偏安全：紧急重启）
+        return None
+
+
+def previous_deployed_sv(sv: str, tags: list[str] | None = None) -> str | None:
+    """上一次部署的版本：本机 data/system_version.txt 记的 id；没有就取 sv 前一个 tag；都没有 / 与 sv 相同 = None"""
+    prev = local_deployed_sv()
+    if not prev:
+        tags = tags if tags is not None else sv_tags()
+        prev = next((tags[i - 1] for i in range(1, len(tags)) if tags[i] == sv), None)
+    return prev if prev and prev != sv else None
+
+
+def changed_between(prev: str, sv: str, paths, git_fn=None) -> list[str] | None:
+    """prev..sv 之间 paths 里改动的文件（git diff --name-only）；git 失败（旧 tag 不在等）= None（判不了）"""
+    git_fn = git_fn or git
+    try:
+        out = git_fn("diff", "--name-only", prev, sv, "--", *paths)
+    except Exception:  # noqa: BLE001  # arch-ok: git 判不了 = None → dispatch_config_changed 当“改了”（失败偏安全）
+        return None
+    return sorted({x.strip().replace("\\", "/") for x in out.split("\n") if x.strip()})
+
+
+def dispatch_config_changed(sv: str, prev: str | None = None, files: tuple[str, ...] = DISPATCH_CONFIG,
+                            git_fn=None, tags: list[str] | None = None) -> list[str]:
+    """K-OPS-I11（RULES-1105，项目方 11-05 20:1x “显卡没有用起来”）：本版相对上一次部署的版本改了哪些**派单相关配置**
+    （hosts / lane_relay / sop_gate / gen_contract / producer / render_quality / run_style / video_shard）。
+    改了 = producer 必须立刻读到：deploy 自动把重启请求升为 urgent（cut O 之后 gpu33 producer 卡在 30 分钟重启间隔外，
+    gpu36:1/2 借道与 L-195 都没加载，20:00–20:15 道空着、ep01 S11/S12/S14 ready 没人派）。
+    prev 默认 = previous_deployed_sv；判不了（git 失败）= 按全部改了处理（宁可多重启一次，不让 producer 读旧配置）"""
+    prev = prev or previous_deployed_sv(sv, tags)
+    if not prev or prev == sv:
+        return []
+    out = changed_between(prev, sv, files, git_fn)
+    return list(files) if out is None else out
+
+
+def dispatch_restart_plan(sv: str, prev: str | None = None, code_dirs=None, git_fn=None, tags: list[str] | None = None,
+                          urgent: bool = False) -> dict:
+    """K-OPS-I11 的重启计划：{changed: 派单配置改动, others: 同版其它代码改动数, urgent, mode, why}。
+    派单配置改了 → urgent；只改了派单配置（没别的代码）→ mode=producer-only（night 不动，视频不被打断）；
+    还改了别的代码 → mode 留空（= all，与原部署行为一致：全部进程读新版）"""
+    prev = prev or previous_deployed_sv(sv, tags)
+    changed = dispatch_config_changed(sv, prev, git_fn=git_fn, tags=tags) if prev else []
+    plan = {"prev": prev, "changed": changed, "others": 0, "urgent": bool(urgent), "mode": None, "why": None}
+    if not changed:
+        return plan
+    code_dirs = list(code_dirs or [])
+    allc = changed_between(prev, sv, code_dirs, git_fn) if code_dirs else None
+    others = [x for x in (allc or []) if x not in set(changed)] if allc is not None else None
+    plan["others"] = len(others) if others is not None else -1
+    plan["urgent"] = True
+    plan["mode"] = DISPATCH_RESTART_MODE if others == [] else None
+    plan["why"] = (f"K-OPS-I11：派单配置变更 {changed} → 重启请求升为 urgent"
+                   + (f" + {DISPATCH_RESTART_MODE}" if plan["mode"] else f"（同版另有 {plan['others']} 个代码改动 → 全部重启）"))
+    return plan
+
+
 def deploy(sv: str | None = None, hosts: list[str] | None = None, restart: bool = True, allow_old: bool = False,
            urgent: bool = False, hotfix_of: str | None = None, hold_data: list[str] | None = None,
            verify_shot: int | None = None, verify_run: str | None = None, manifest_prefix: str | None = None,
@@ -1686,13 +1758,22 @@ def deploy(sv: str | None = None, hosts: list[str] | None = None, restart: bool 
     drift = drift_files(sv, rs.CODE_DIRS)
     res = {"id": sv, "commit": commit, "hosts": {}, "drift_local": len(drift), "drift_files": drift[:50],
            "drift_note": "工作树里 tag 之外的代码改动只报不推（K-OPS-F06），留给下一版" if drift else None}
+    restart_mode = None
+    if restart:      # K-OPS-I11：派单相关配置变了 → 紧急重启（不等 30 分钟间隔；只改配置时 producer-only），审计记原因
+        plan = dispatch_restart_plan(sv, code_dirs=rs.CODE_DIRS, urgent=urgent)
+        res["dispatch_config_changed"] = plan["changed"]
+        if plan["changed"]:
+            restart_mode = plan["mode"]
+            if plan["urgent"] and not urgent:
+                res["urgent_auto"] = plan["why"]
+            urgent = urgent or plan["urgent"]
     with tempfile.TemporaryDirectory(prefix="nsfs_sv_") as td:
         names = export_tag(sv, rs.CODE_DIRS, Path(td))
         pc = load_push_check()
         expected, res["expected_refs"] = build_expected(sv)
         for h in hosts:
             res["hosts"][h] = deploy_host(rs, h, Path(td), names, tracked_code, sv, commit, restart=restart, pc=pc, urgent=urgent,
-                                          expected=expected, hold_data=hold_data)
+                                          expected=expected, hold_data=hold_data, restart_mode=restart_mode)
     idx = write_index()
     for v in idx["versions"]:
         if v["id"] == sv:
