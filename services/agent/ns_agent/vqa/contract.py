@@ -245,10 +245,14 @@ def eye_contradiction(c: dict) -> bool:
     neg = any(n in e for n in _NEG_EYE) or bool(_DIR_AWAY.search(e))
     pos = any(k in e for k in _POS_EYE) and not any(n in e for n in _NEG_EYE)
     if c.get("s") == "defect":
-        return neg and not pos
-    if c.get("s") == "ok":
-        return pos and not neg
-    return False
+        old = neg and not pos
+    elif c.get("s") == "ok":
+        old = pos and not neg
+    else:
+        old = False
+    # 11-04：“非直视镜头 / 未直视 / 看向右下鞋尖”这类否定短语里的“直视镜头”不能当肯定（ep01-S16 v2、S8 尾帧判 defect 的证据）
+    from . import selfcheck
+    return old or selfcheck.gaze_contradiction(str(c.get("s")), e)
 
 
 def _sanitize_eye(v: dict) -> None:

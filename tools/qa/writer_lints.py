@@ -275,6 +275,13 @@ RULES["QW-RB1"] = ("warn", "HOLLYWOOD 可核对清单的代码判定条目（rub
                            "近景不写下半身、台词后下一镜写听者反应、分拍不写穿脱过程、不写回头 / 看镜头、不用情绪直陈句、人物卡原文（发型 / 服装 / 饰品）")
 RULES["QW-L1"] = ("warn", "L1（L-188，K-WRT-L1a）：【灯光】/【光线】/【场景】行禁平光句（正面高亮 / 把影子打平 / 白幕反射补脸）；只写有动机主光（方向 + 光比 ≤3:1）+ 负补光 + 背景比人物低 1–2 档。")
 RULES["QW-L2"] = ("warn", "L1（L-188，K-WRT-L1b）：两人以上在画的镜，【构图】必须写前景 / 中景 / 背景三层（前景=谁的什么部位略在焦外｜中景=谁在焦点上｜背景=谁或陈设），cast depth 与之一致。")
+# L2 镜头语言（项目方 11-05“取景缺一致性 / 没有运镜 / 像手机拍的”；K-WRT-810–815；rubric_code.l2_checks）
+RULES["QW-L3"] = ("warn", "L2（K-WRT-813）：每镜【运镜】写词表（config/director/camera_moves.yaml，enabled 且本剧可用）里的运镜名｜幅度｜起幅 → 落幅｜动机=…；与 motion、【镜头运动】是同一种；固定镜头整集 ≤20% 且写不动的理由。")
+RULES["QW-L4"] = ("warn", "L2（K-WRT-812）：每镜【镜头】写 config/director/lenses.yaml 的 id；同一场同景别档用同一焦段（中景 / 中全景 35、近景 / 中近景 50、特写 75），正反打两镜同焦段。")
+RULES["QW-L5"] = ("warn", "L2（K-WRT-811）：【构图】视线方向=“甲向左 / 右看乙”要和人物行里乙的左右位置一致（180° 轴线：同场同两人左右不互换，视线对着对方所在的一侧）。")
+RULES["QW-L6"] = ("warn", "L2（K-WRT-814）：【下镜】只写 动作匹配切 / 视线匹配切 / 声音匹配切 / 声音先行 N 秒 / 硬切 / 叠化 + 落点动作；同场相邻镜切在动作中段或视线落点，硬切要写理由=…。")
+RULES["QW-L7"] = ("warn", "L2（K-WRT-815）：竖屏 9:16：单人镜【构图】写主体在上三分之一 + 视线方向留出空间；两人以上写前 / 中 / 后三层（QW-L2）。")
+RULES["QW-L8"] = ("warn", "L2（K-WRT-810）：集头写“本集镜头规划”段：每场的轴线（谁在左谁在右、看向哪侧）、焦段档位（lenses.yaml id）、主镜头 / 过肩 / 单人的分配与景别递进。")
 _RUBRIC = None
 
 
@@ -312,6 +319,27 @@ def check_l1(ep, text: str) -> list[dict]:
     out = []
     for k, (_ok, why) in rc.l1_checks(shots, blocks).items():
         out.append(_issue("QW-L1" if k.startswith("flat") else "QW-L2", why, "灯光" if k.startswith("flat") else "构图"))
+    return out
+
+
+L2_RULE = {"plan": ("QW-L8", "集头"), "axis": ("QW-L5", "构图"), "lens": ("QW-L4", "镜头"), "move": ("QW-L3", "运镜"),
+           "static": ("QW-L3", "运镜"), "cut": ("QW-L6", "下镜"), "vert": ("QW-L7", "构图")}
+
+
+def check_l2(ep, text: str, run: str | None = None) -> list[dict]:
+    """QW-L3–L8 镜头语言（K-WRT-810–815，rubric_code.l2_checks）。级别跟 WRITER_LINT_LEVEL；run = 本剧（按剧运镜 enabled 判定）"""
+    rc = _rubric()
+    chunk = rc.episode_chunk(text, ep.number)
+    if not chunk:
+        return []
+    head, blocks = rc.split_blocks(chunk)
+    shots = sorted(ep.shots, key=lambda s: s.index)
+    if len(blocks) != len(shots):
+        return []
+    out = []
+    for k, (_ok, why) in rc.l2_checks(shots, blocks, head, run).items():
+        rid, field = L2_RULE.get(k.split("#", 1)[0], ("QW-L3", "运镜"))
+        out.append(_issue(rid, why, field))
     return out
 
 

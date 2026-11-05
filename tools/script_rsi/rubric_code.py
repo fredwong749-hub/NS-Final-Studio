@@ -623,3 +623,118 @@ def l1_checks(shots: list, blocks: list[str]) -> dict:
                 bad[f"layers#{s.index}"] = (False, f"镜{s.index} {len(on)} 人在画，构图缺{'、'.join(miss)}："
                                                     "写“前景=谁的什么部位略在焦外｜中景=谁在焦点上｜背景=谁或什么陈设”，cast 的 depth 与之一致")
     return bad
+
+
+# ---- L2（镜头语言，项目方 11-05“镜头取景缺一致性、没有运镜、像手机拍的”；K-WRT-810–815）：集头镜头规划、运镜词表 + 动机 + 固定占比、
+#      焦段档位、轴线 / 视线方向、剪辑点、竖屏构图。只在写作 / 导入闸门用，不碰已导入的剧
+L2_STATIC_MAX = 0.20                      # 固定镜头整集占比上限（K-WRT-813）
+L2_PLAN_LABEL = "本集镜头规划"
+L2_CUT_TYPES = ("动作匹配切", "视线匹配切", "声音匹配切", "声音先行", "硬切", "叠化")
+L2_GAZE = re.compile(r"([一-龥]{2,3})(?:向|往)(左|右)(?:前方|后方|前|后|上|下)?(?:看|望|瞥|扫)([^，；｜。]*)")
+L2_LENSES = Path(__file__).resolve().parents[2] / "config" / "director" / "lenses.yaml"
+_L2_CACHE: dict = {}
+
+
+def _camera_norm_mod():
+    """services/agent/ns_agent/camera_norm.py（按文件路径载入；词表 + enabled 判定单一来源）"""
+    if "cn" not in _L2_CACHE:
+        import importlib.util
+        f = Path(__file__).resolve().parents[2] / "services" / "agent" / "ns_agent" / "camera_norm.py"
+        sp = importlib.util.spec_from_file_location("rubric_camera_norm", f)
+        m = importlib.util.module_from_spec(sp)
+        sp.loader.exec_module(m)
+        _L2_CACHE["cn"] = m
+    return _L2_CACHE["cn"]
+
+
+def lens_ids() -> set[str]:
+    if "lens" not in _L2_CACHE:
+        import yaml
+        d = yaml.safe_load(L2_LENSES.read_text(encoding="utf-8")) if L2_LENSES.exists() else {}
+        _L2_CACHE["lens"] = {str(x["id"]) for x in (d.get("lenses") or [])}
+    return _L2_CACHE["lens"]
+
+
+def l2_move_id(text: str) -> str | None:
+    """【运镜】/【镜头运动】首段、motion 触发词后前两段 → 词表 id（camera_norm.match_zh，最长别名优先）"""
+    head = "，".join([p for p in re.split(r"[｜|]", text or "", 1)][:1])
+    return _camera_norm_mod().match_zh(head) if head.strip() else None
+
+
+def l2_motion_id(motion: str) -> str | None:
+    segs = [p.strip() for p in re.split(r"[，,]", motion or "") if p.strip()]
+    cn = _camera_norm_mod()
+    for k in range(min(3, len(segs))):          # 触发词可能占第一段；运镜 id 本身（bolt_push_settle）是一段
+        t = segs[k].lower()
+        if cn.move(t):
+            return t
+        mid = cn.match_zh(segs[k])
+        if mid:
+            return mid
+    return None
+
+
+def l2_checks(shots: list, blocks: list[str], head: str = "", run: str | None = None) -> dict:
+    """→ {"<项>#<镜号|0>": (ok, 说明)}，只返回失败项。
+    plan#0   集头缺“本集镜头规划”段（轴线 / 焦段档位 / coverage）                                   K-WRT-810
+    axis#n   【构图】视线方向=“甲向左看乙”与人物行里乙的左右位置矛盾                                  K-WRT-811
+    lens#n   【镜头】缺或不是 lenses.yaml 的 id；lens#scene 同场同景别两镜焦段不同（跳档）              K-WRT-812
+    move#n   【运镜】首段不在词表 / 本剧不可用 / 没写“动机=”；与 motion、【镜头运动】的运镜不是同一种   K-WRT-813
+    static#0 固定镜头占比 > 20%                                                                       K-WRT-813
+    cut#n    【下镜】类型不在 动作匹配切 / 视线匹配切 / 声音匹配切 / 声音先行 / 硬切 / 叠化；硬切没写理由  K-WRT-814
+    vert#n   单人镜【构图】没写“上三分之一”或“留出空间 / 留白”（竖屏）                                 K-WRT-815"""
+    bad: dict = {}
+    cn = _camera_norm_mod()
+    if head is not None and head != "" and L2_PLAN_LABEL not in head:
+        bad["plan#0"] = (False, f"集头缺“{L2_PLAN_LABEL}”段：写本集每场的轴线、焦段档位（lenses.yaml id）、主镜头 / 过肩 / 单人分配")
+    n_static = 0
+    lens_by_key: dict[tuple, dict] = {}
+    for s, b in zip(shots, blocks):
+        i = s.index
+        cam = _field(b, "运镜")
+        mid = l2_move_id(cam)
+        if not cam:
+            bad[f"move#{i}"] = (False, f"镜{i} 没写【运镜】：写词表运镜名｜幅度｜起幅 → 落幅｜动机=…")
+        elif mid is None:
+            bad[f"move#{i}"] = (False, f"镜{i} 【运镜】首段“{cam.split('｜')[0][:12]}”不在运镜词表 config/director/camera_moves.yaml 里")
+        elif not cn.is_enabled(mid, run, motion=_field(b, "motion") or None):
+            bad[f"move#{i}"] = (False, f"镜{i} 【运镜】{mid} 在词表里 disabled 或本剧不可用（视频端会退回固定）：换 enabled 的运镜")
+        elif "动机=" not in cam:
+            bad[f"move#{i}"] = (False, f"镜{i} 【运镜】没写“动机=”：每镜运镜要写它为什么动（情绪 / 发现 / 跟随 / 高点…），固定镜头写为什么不动")
+        else:
+            others = {k: v for k, v in (("motion", l2_motion_id(_field(b, "motion"))), ("镜头运动", l2_move_id(_field(b, "镜头运动"))))
+                      if v is not None and v != mid}
+            if others:
+                bad[f"move#{i}"] = (False, f"镜{i} 【运镜】{mid} 与 " + "、".join(f"{k} 的 {v}" for k, v in others.items()) + " 不是同一种运镜")
+        if mid == "static":
+            n_static += 1
+        lens = _field(b, "镜头").strip()
+        lid = lens.split("｜", 1)[0].strip()
+        if not lens:
+            bad[f"lens#{i}"] = (False, f"镜{i} 没写【镜头】：写 config/director/lenses.yaml 的 id（同场同景别档同焦段）")
+        elif lid not in lens_ids():
+            bad[f"lens#{i}"] = (False, f"镜{i} 【镜头】“{lid[:24]}”不是 lenses.yaml 的 id")
+        else:
+            key = (getattr(s, "scene_id", None) or "", _size(_img(b)) or "")
+            prev = lens_by_key.setdefault(key, {"shot": i, "lens": lid})
+            if prev["lens"] != lid:
+                bad[f"lens#{i}"] = (False, f"镜{i} 与镜{prev['shot']} 同场同景别（{key[1]}）焦段不同（{prev['lens']} / {lid}）：同场同景别档用同一焦段")
+        pos = {c.name: getattr(c, "x", None) for c in (s.cast or []) if getattr(c, "presence", "") == "在画"}
+        comp = _field(b, "构图")
+        gaze = comp.split("视线方向=", 1)[1] if "视线方向=" in comp else ""
+        for who, d, rest in L2_GAZE.findall(gaze):
+            tgt = next((nm for nm in pos if nm != who and nm in rest), None)
+            if tgt and pos.get(tgt) in ("左", "右") and pos[tgt] != d:
+                bad[f"axis#{i}"] = (False, f"镜{i} 构图视线方向“{who}向{d}看{tgt}”与人物行 {tgt} 在{pos[tgt]}矛盾（轴线 / 视线不一致）")
+                break
+        cut = _field(b, "下镜")
+        ctype = cut.split("｜", 1)[0].strip()
+        if cut and not any(ctype.startswith(t) for t in L2_CUT_TYPES):
+            bad[f"cut#{i}"] = (False, f"镜{i} 【下镜】类型“{ctype[:10]}”不在 {' / '.join(L2_CUT_TYPES)} 里")
+        elif ctype.startswith("硬切") and "理由" not in cut:
+            bad[f"cut#{i}"] = (False, f"镜{i} 【下镜】硬切没写理由：同场相邻镜用动作 / 视线 / 声音匹配切，硬切写“理由=…”")
+        if len(pos) == 1 and comp and not (re.search(r"三分之一|1/3", comp) and re.search(r"留出空间|留白|留空", comp)):
+            bad[f"vert#{i}"] = (False, f"镜{i} 单人镜【构图】要写主体在上三分之一 + 视线方向留出空间（竖屏 9:16）")
+    if shots and n_static / len(shots) > L2_STATIC_MAX:
+        bad["static#0"] = (False, f"固定镜头 {n_static}/{len(shots)} = {n_static / len(shots):.0%} > {L2_STATIC_MAX:.0%}：每镜要有动机运镜（词表 enabled 的推近 / 按剧运镜），固定只留给有理由的镜")
+    return bad

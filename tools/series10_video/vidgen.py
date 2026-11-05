@@ -279,6 +279,27 @@ class Lane:
 BROKEN_LANES = {"gpu33:2", "gpu36:2"}   # CLAUDE.md 红线：坏卡，任何情况都不派
 
 
+def gpu_free_mib(lane_name: str) -> int | None:
+    """本机该道所在卡的空闲显存（MiB，nvidia-smi 只读查询）；查不到 → None（调用方按“不够”处理，失败关闭）"""
+    try:
+        gpu = lane_name.split(":")[1]
+        r = subprocess.run(["nvidia-smi", "-i", gpu, "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+                           capture_output=True, text=True, timeout=15)
+        return int(r.stdout.strip().splitlines()[0])
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        return None
+
+
+def vram_gate_ok(name: str, gate: dict, free_fn=None) -> bool:
+    """VIDEO-PAR（开关默认关）：control 的 vram_gate = {"gpu36:1": 21000}——这条道所在卡被别的服务（看图 8870 / 人数检测 8893）
+    共用时，只有空闲显存 >= 阈值（Pika 约 19 GB + 余量）才提交；没配该道 = 不设限（原行为）"""
+    need = (gate or {}).get(name)
+    if need is None:
+        return True
+    free = (free_fn or gpu_free_mib)(name)
+    return free is not None and free >= int(need)
+
+
 def usable_lanes(host: str, hosts_file: Path | None = None) -> dict:
     """W41（11-04）：本机可派视频的道 = PORTS 去掉坏卡 / config/factory/hosts.json 里 enabled=false、不含 video 角色、
     broken_gpus 的道。以前 Runner 直接用 PORTS 全部三道：gpu36:2（坏卡，hosts.json 已 enabled=false）不在 shared_lanes，
@@ -459,6 +480,7 @@ class Runner:
         # 且本工具每道最多 1 个，保证出图任务随时能插进来
         shared = set(c.get("shared_lanes") or [])
         yield_s = float(c.get("yield_s", 180))
+        gate = c.get("vram_gate") or {}
         todo = self.pending(shots, validate)
         long_todo = [(s, v) for s, v in todo if shots[s]["variants"][v]["frames"] > LANE_MAX_FRAMES]
         long_inflight = any(x.get("state") == "submitted" and x.get("long") for r in self.st["shots"].values()
@@ -474,6 +496,8 @@ class Runner:
         normal = [t for t in todo if t not in long_todo]
         for name, lane in self.lanes.items():
             if name in hold or (name == LONG_LANE and self.hold_long):
+                continue
+            if gate and not vram_gate_ok(name, gate):
                 continue
             try:
                 mine, foreign = lane.queue()

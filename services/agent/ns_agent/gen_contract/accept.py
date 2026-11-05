@@ -81,6 +81,9 @@ def ensure_q9(post: dict, img: str, job: dict) -> dict:
     if v is None:                                   # _q9_live 只认 data/renders/epNN/SN 下的图；别处的图直接调本地看图
         from ..vqa import client as VC
         v = VC.inspect_image(img, job.get("prompt") or "", list(job.get("refs") or []), wait_s=900)
+    if v and not v.get("error"):
+        VQ.sanitize(v)
+        VQ.reask_eye(v, img)                        # 11-04：看镜头判词自相矛盾 → 只问视线重问一次（尾帧也走这里）
     st, d, ev = PO._q9_item(VQ, VQ.q9(v))
     new = {"id": "Q9", "title": (q9 or {}).get("title") or "本地看图复核", "status": st, "detail": d, "evidence": ev}
     post = dict(post or {})
@@ -291,6 +294,16 @@ def anomaly_host(root: Path = ROOT) -> str:
     return "gpu36"
 
 
+def bundle_cast_ok(fn) -> bool:
+    """bundle_fn 接不接 cast=（测试里注入的旧签名 lambda 不接）"""
+    import inspect
+    try:
+        ps = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return "cast" in ps or any(p.kind is p.VAR_KEYWORD for p in ps.values())
+
+
 def evaluate(img: str, post: dict, job: dict, shot, run: str, *, q9_fn=None, anomaly_fn=None, bundle_fn=None,
              looks: dict | None = None, root: Path = ROOT) -> dict:
     """一张已打完 postflight 的图过共用验收 → {status, label, label_source, reasons, check_items, anomaly, bundle, post}。
@@ -314,7 +327,7 @@ def evaluate(img: str, post: dict, job: dict, shot, run: str, *, q9_fn=None, ano
     items, tags = [t for t, _ in crow], [g for _, g in crow]
     if bundle_fn is None:
         bundle_fn = _load("asset_checks_for_accept", "tools/pipeline/asset_checks.py", root).bundle_check
-    bundle = bundle_fn(img, items, bool(on))
+    bundle = bundle_fn(img, items, bool(on), cast=job.get("cast")) if bundle_cast_ok(bundle_fn) else bundle_fn(img, items, bool(on))
     bundle = description_record_only(bundle, items, tags, job.get("stage"))
     lab, src = judge_bundle(post, an, bundle)
     status, reasons = verdict(post, lab, bundle)

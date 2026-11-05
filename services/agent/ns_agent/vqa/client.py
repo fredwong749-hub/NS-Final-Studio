@@ -174,10 +174,50 @@ def _post_ssh(body: dict, timeout: float) -> dict:
         return {"error": (p.stdout or b"")[:300].decode("utf-8", "replace")}
 
 
+def _balance_cands(url: str) -> list[tuple[str, str]]:
+    """B1（11-05）服务器侧多实例分发：[(url, route)]，本机实例（主端口 + route.extra_local_ports，只许 127.0.0.1）在前，gpu36 内网入口殿后。
+    只在 route.balance 打开且在服务器上（OFFLINE_SELF）才有；返回 [] = 走原 W23 路由。K-REV-V01：仍然只有本机 / 10. 内网地址"""
+    rc = _rcfg()
+    if not (rc.get("balance") and os.environ.get("OFFLINE_SELF")):
+        return []
+    out = [(url, "local")] + [(f"http://127.0.0.1:{int(p)}", "local") for p in rc.get("extra_local_ports") or []]
+    lan = _lan_url()                                  # 内网入口健康通才返回（顺手填 _HEALTH）
+    if lan and rc.get("balance_lan", True):
+        out.append((lan, "lan"))
+    return out
+
+
+def _pick_balanced(cands: list[tuple[str, str]], wait_s: float) -> tuple[str | None, str, int, str]:
+    """在候选实例里挑排队最少且 < queue_max 的（并列取靠前者 = 本机优先）；全忙就按 poll_s 轮询，最多等 min(busy_wait_s, wait_s)；
+    都不在 / 等满 = (None, none, 排队数, 原因)，调用方记 untested，绝不判 fail"""
+    rc = _rcfg()
+    qmax = int(rc.get("queue_max", 6))
+    t_end = time.monotonic() + min(float(rc.get("busy_wait_s", 600)), wait_s)
+    while True:
+        best, any_up, qlast = None, False, 0
+        for u, route in cands:
+            up, q = _ready(u)
+            if not up:
+                continue
+            any_up, qlast = True, q
+            if q < qmax and (best is None or q < best[2]):
+                best = (u, route, q)
+        if best:
+            return best[0], best[1], best[2], ""
+        if not any_up:
+            return None, "none", 0, "服务不可用"
+        if time.monotonic() >= t_end:
+            return None, "none", qlast, "本机忙"
+        time.sleep(max(0.0, min(float(rc.get("poll_s", 10)), t_end - time.monotonic())))
+
+
 def _pick(url: str, wait_s: float) -> tuple[str | None, str, int, str]:
     """W23 路由 → (url, route, 排队数, 未测原因)。本机 8870 在且已加载 → 只用本机（忙就等，不切隧道）；
     本机不在 / 未加载 → 8871 隧道（tools/vqa/tunnel.ps1 → gpu36:8870）；服务器上（OFFLINE_SELF / VQA_LAN=1）→ model.lan_url；都不在 → 未测"""
     rc = _rcfg()
+    cands = _balance_cands(url)
+    if cands:
+        return _pick_balanced(cands, wait_s)
     up, q = _ready(url)
     if up:
         qmax = int(rc.get("queue_max", 6))
@@ -215,6 +255,8 @@ def generate(req: dict, *, wait_s: float = 1800, refresh: bool = False, label: s
             "max_new_tokens": int((cfg().get("model") or {}).get("max_new_tokens", 900)),
             "images": [{k: v for k, v in im.items()} for im in req["images"]], "refresh": refresh}
     t0 = time.monotonic()
+    if _rcfg().get("max_wait_s"):                      # B1：首帧检测的最长等待可配（默认不限，由调用方 wait_s 定）
+        wait_s = min(wait_s, float(_rcfg()["max_wait_s"]))
     url, route, q, why = _pick(_url(), wait_s)
     if not url:
         _log_route("none", (time.monotonic() - t0) * 1000, False, kind, why)

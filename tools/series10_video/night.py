@@ -213,8 +213,11 @@ def dispatch_hosts(hosts_touched: set, st, ctrl) -> bool:
         if ctrl.get("ep01_lane") and host == hosts.get("1"):
             hold = [x for x in IMAGE_LANES if x != "gpu33:3"]
             eps_on, per_lane, shared = [1], 1, [x for x in shared if x != "gpu33:3"]
+        hold, gate = video_boost(ctrl, hold)
         c = {"jobs": "jobs.json", "mode": "prod", "eps": eps_on, "per_lane": per_lane, "linger": True,
              "hold_lanes": hold, "shared_lanes": shared, "yield_s": ctrl["yield_s"]}
+        if gate:
+            c["vram_gate"] = gate
         run([PY, "tools/series10_video/deploy.py", "control", host, json.dumps(c, ensure_ascii=False)])
         run([PY, "tools/series10_video/deploy.py", "start", host])
         log("DISPATCH", host, "eps", eps_on, "hold", hold)
@@ -663,6 +666,15 @@ def frames_busy() -> int:
     return n
 
 
+def video_boost(ctrl: dict, hold: list) -> tuple[list, dict]:
+    """VIDEO-PAR（开关默认关）：night_control.json {"video_boost": {"enabled": true, "vram_gate": {"gpu36:1": 21000}}}。
+    开 → gate 里的道从 hold 里摘掉，改由 vidgen 按卡上空闲显存放行（看图 / 人数检测占着就不提交）；关 / 没配 → 原样。
+    返回（挂道, vram_gate）"""
+    b = ctrl.get("video_boost") or {}
+    gate = {str(k): int(v) for k, v in (b.get("vram_gate") or {}).items()} if b.get("enabled") else {}
+    return [x for x in hold if x not in gate], gate
+
+
 def apply_lane_policy(st, ctrl):
     """总调度 11-01 05:4x：首帧 / 尾帧还有在排或在跑的 → 视频只用 gpu36:2，图片道全部挂住（不再让道式插队，
     一条 9 分钟的视频会让刚到的首帧白等整条）；首帧全出完后才恢复让道模式。挂住时撤回本工具在图片道上排队未跑的任务"""
@@ -674,6 +686,7 @@ def apply_lane_policy(st, ctrl):
     ep01_open = mode == "video_lane_only" and (st["eps"].get("1") or {}).get("status") not in (
         "assembled", "assemble_failed", "hold_voices")
     key = mode + ("+ep01@gpu33:3" if ep01_open else "") + "|hold=" + ",".join(sorted(ctrl.get("hold_lanes", []) or []))   # K-OPS-E20：挂道变了要重算
+    key += "|gate=" + json.dumps(video_boost(ctrl, [])[1], sort_keys=True)
     if st.get("lane_mode") == mode and st.get("lane_key") == key:
         return ctrl
     hosts = jl(VID / "hosts.json", {}) or {}
@@ -687,8 +700,11 @@ def apply_lane_policy(st, ctrl):
         if ep01_open and host == hosts.get("1"):
             hold = sorted(set(x for x in IMAGE_LANES if x != "gpu33:3") | set(ctl_hold))
             eps_on, per_lane, shared = [1], 1, [x for x in shared if x != "gpu33:3"]
+        hold, gate = video_boost(ctrl, hold)
         c = {"jobs": "jobs.json", "mode": "prod", "eps": eps_on, "per_lane": per_lane, "linger": True,
              "hold_lanes": hold, "shared_lanes": shared, "yield_s": ctrl["yield_s"]}
+        if gate:
+            c["vram_gate"] = gate
         run([PY, "tools/series10_video/deploy.py", "control", host, json.dumps(c, ensure_ascii=False)])
         if mode == "video_lane_only":
             ports = {"gpu33": [8188, 8189, 8191], "gpu36": [8188, 8189]}[host]

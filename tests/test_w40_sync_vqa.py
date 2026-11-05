@@ -251,7 +251,8 @@ def test_vqa_probe_script_runs_locally_no_start(sandbox, tmp_path):
              "env": {}, "log": str(tmp_path / "l.log")},
             {"name": "watcher", "script": "tools/vqa/watch.py", "cwd": str(tmp_path), "argv": ["x"], "env": {}, "log": str(tmp_path / "w.log")}]
     script = RS.REMOTE_VQA.replace("__START__", "False").replace("__SVCS__", json.dumps(svcs))
-    r = subprocess.run([sys.executable, "-"], input=script, capture_output=True, text=True, timeout=60)
+    r = subprocess.run([sys.executable, "-X", "utf8", "-"], input=script, capture_output=True, text=True, encoding="utf-8",
+                       timeout=60)   # PS-MASTER 11-05：脚本含中文，Windows 默认 cp1252 会编码失败（生产走 ssh bytes 不受影响）
     out = json.loads([ln for ln in r.stdout.splitlines() if ln.startswith("{")][-1])
     assert out["health"] is None and out["started"] == [] and "health_error" in out and out["server_pids"] == []
     assert set(out["services"]) == {"vqa", "watcher"}
@@ -302,7 +303,8 @@ def test_score_infra_script_counts_window(tmp_path):
     p = tmp_path / "log.jsonl"
     p.write_text("\n".join(json.dumps(x) for x in rows) + "\nnot json\n", encoding="utf-8")
     script = RS.REMOTE_SCORE_INFRA.replace("__P__", str(p).replace("\\", "/")).replace("__WIN__", "1800")
-    r = subprocess.run([sys.executable, "-"], input=script, capture_output=True, text=True, timeout=60)
+    r = subprocess.run([sys.executable, "-X", "utf8", "-"], input=script, capture_output=True, text=True, encoding="utf-8",
+                       timeout=60)   # PS-MASTER 11-05：脚本含中文，Windows 默认 cp1252 会编码失败（生产走 ssh bytes 不受影响）
     out = json.loads(r.stdout.strip().splitlines()[-1])
     assert out["n"] == 2 and out["counts"] == {"score_infra": 1, "rescore_timeout": 1} and out["objs"] == ["first:ep01-S5", "first:ep01-S7"]
 

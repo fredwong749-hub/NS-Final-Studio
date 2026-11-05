@@ -1,10 +1,10 @@
 {
- "kb_version": "kb-20261104-b0dff6f2",
- "n": 671,
+ "kb_version": "kb-20261105-302a5575",
+ "n": 677,
  "by_domain": {
   "render": 101,
   "prompt": 28,
-  "writer": 103,
+  "writer": 109,
   "edit": 49,
   "review": 68,
   "loop": 9,
@@ -19,7 +19,7 @@
   "P11-P12": 28,
   "P11-RETRY": 48,
   "P2-P3": 3,
-  "P3-P4": 119,
+  "P3-P4": 125,
   "P4-P5": 41,
   "P4-P6": 30,
   "P4-P7": 26,
@@ -27,7 +27,7 @@
   "P5-P6": 224,
   "P6-P7": 42,
   "P7-P8": 114,
-  "P8-P10": 18,
+  "P8-P10": 19,
   "P8-P9": 12,
   "P9-P10": 21
  },
@@ -15801,6 +15801,223 @@
    "confidence": "medium",
    "status": "待验",
    "date": "2026-11-04",
+   "_file": "knowledge/rules/writer_camera.yaml"
+  },
+  {
+   "id": "K-WRT-810",
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "L2 coverage：集头先写“本集镜头规划”（每场轴线 / 焦段档位 / 主镜头 → 过肩 → 单人分配），再写各镜（L2）",
+   "when": "每集 P4 分镜，写镜1 之前",
+   "then": "代码判定 rubric_code.l2_checks（plan#0）：集头缺“**本集镜头规划**”段 → QW-L8；段内每场写 轴线=谁在左谁在右、各自看向哪侧｜焦段=各景别档用 lenses.yaml 哪个 id｜coverage=主镜头（全员入画、最宽）→ 过肩 → 单人，景别随情绪递进",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "镜头字段"
+    }
+   ],
+   "writer_text": "写分镜前先在集头写“本集镜头规划”：每一场一行——轴线（谁在画面左、谁在右、各自看向哪一侧）、焦段档位（每个景别档用 lenses.yaml 的哪个 id）、coverage（先一镜最宽的主镜头把所有人放进画面，再过肩，再单人；景别随情绪由宽到紧）。之后每一镜的机位、景别、焦段都从这段规划里取，不临时发明。",
+   "evidence": [
+    {
+     "src": "docs/master/PLAN_HOLLYWOOD_LOOK.md",
+     "note": "§9 研究第 1 条：StudioBinder film coverage“start with the widest shots, then progressively move closer”；Wikipedia Master shot“the foundation of what is called camera coverage”"
+    },
+    {
+     "src": "data/pipeline/runs/series10_v2/staging/P4_ep01.L2_psm6.md",
+     "note": "ep01 集头“本集镜头规划”示例"
+    }
+   ],
+   "check": [
+    "tests/test_l2_rules.py"
+   ],
+   "lint": [
+    "QW-L8"
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-05",
+   "_file": "knowledge/rules/writer_camera.yaml"
+  },
+  {
+   "id": "K-WRT-811",
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "L2 轴线 / 视线：同场同两人左右位置不互换（QW-AX1），【构图】视线方向要指向对方所在的一侧（L2）",
+   "when": "同一场景里有两人以上的镜头，以及正反打相邻镜",
+   "then": "代码判定 rubric_code.l2_checks（axis#n）：【构图】“视线方向=甲向左 / 右看乙”与人物行里乙的左 / 右矛盾 → QW-L5；相邻镜左右互换仍由 QW-AX1 判；越轴只允许中性镜或在一个镜头内机位可见地跨过去，并在【衔接】写“越轴”",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "镜头字段"
+    }
+   ],
+   "writer_text": "一场戏开拍前定一条轴线（两个人之间的连线），所有机位都在轴线同一侧：同一场里甲永远在画面左、乙永远在画面右；【构图】的“视线方向=甲向右看乙”必须和人物行里乙在右一致。要越轴只用两种办法——先插一镜机位正压在轴线上的中性镜，或在一个镜头里让机位可见地跨过去——并在【衔接】写明“越轴”。",
+   "evidence": [
+    {
+     "src": "docs/master/PLAN_HOLLYWOOD_LOOK.md",
+     "note": "§9 第 2 条：StudioBinder 180° rule“When the camera jumps over the invisible axis, this is known as crossing the line”“your line resets”"
+    },
+    {
+     "src": "tools/qa/acting_lints.py",
+     "note": "QW-AX1 相邻镜左右互换（K-WRT-104）已有；本条补视线方向与站位的一致"
+    }
+   ],
+   "check": [
+    "tests/test_l2_rules.py"
+   ],
+   "lint": [
+    "QW-L5"
+   ],
+   "confidence": "high",
+   "status": "待验",
+   "date": "2026-11-05",
+   "_file": "knowledge/rules/writer_camera.yaml"
+  },
+  {
+   "id": "K-WRT-812",
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "L2 焦段：每镜写【镜头】= lenses.yaml 的 id；同场同景别档同焦段，正反打两镜同焦段，全集只用三档（35 / 50 / 75）（L2）",
+   "when": "每镜【镜头】行",
+   "then": "代码判定 rubric_code.l2_checks（lens#n）：缺【镜头】或不是 config/director/lenses.yaml 的 id → QW-L4；同 scene_id 且 img 景别相同的两镜 id 不同（跳档）→ QW-L4。档位：中景 / 中全景 = summicron_35_f2（全景 summilux_35_f14）、近景 / 中近景 = summilux_50_f14、特写 = apo_summicron_75_f2；编译层 shot_language.lens_clause 读这个字段（V2 去品牌只写焦段光圈）",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "镜头字段"
+    }
+   ],
+   "writer_text": "每镜写一行【镜头】，只写 config/director/lenses.yaml 的 id：中景 / 中全景用 summicron_35_f2，近景 / 中近景用 summilux_50_f14，特写用 apo_summicron_75_f2，全景用 summilux_35_f14。同一场里同一个景别档永远是同一支镜头，正反打的两镜用同一支镜头（同焦段、同离轴角度），一集不超过三档。",
+   "evidence": [
+    {
+     "src": "docs/master/PLAN_HOLLYWOOD_LOOK.md",
+     "note": "§9 第 3 条：Animation Mentor“we use the same lens, in millimeters, in both shots”；wolfcrow 85mm“flattering compression of facial features”；NFS 35mm“captures more of the background than a 50mm”"
+    },
+    {
+     "src": "config/director/lenses.yaml",
+     "note": "焦段 / 光圈 / 景深单一来源；by_size 兜底"
+    }
+   ],
+   "check": [
+    "tests/test_l2_rules.py"
+   ],
+   "lint": [
+    "QW-L4"
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-05",
+   "_file": "knowledge/rules/writer_camera.yaml"
+  },
+  {
+   "id": "K-WRT-813",
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "L2 动机运镜：每镜【运镜】= 词表 enabled 运镜名｜幅度｜起幅 → 落幅｜动机=；与 motion / 【镜头运动】同一种；固定镜头整集 ≤20% 且写不动的理由（L2）",
+   "when": "每镜【运镜】【镜头运动】与 motion 首段",
+   "then": "代码判定 rubric_code.l2_checks（move#n / static#0）：【运镜】首段不在 config/director/camera_moves.yaml、或 disabled / 本剧不可用（camera_norm.is_enabled(id, run)）、或没写“动机=”、或与 motion / 【镜头运动】的运镜不是同一种 → QW-L3；固定镜头数 / 镜数 > 0.20 → QW-L3。V2 现可执行：推近（情绪推高 / 发现 / 对白加压）、bolt_push_settle（幻想段登场 / 爆点）、handheld_follow（现实段走动镜）、固定（人物出画 / 重复比较节拍 / 等答案）；横移 / 摇 / 俯仰 / 环绕 / 升降 Pika 不按提示词执行（词表 exec_modes），不要写，等 camctl A/B 通过再放开",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "镜头字段"
+    }
+   ],
+   "writer_text": "每镜【运镜】写四项：词表里 enabled 的运镜名｜幅度｜起幅 → 落幅｜动机=这镜为什么动（情绪推高、发现、说话人开口、跟随走动、登场爆点）；motion 开头和【镜头运动】要是同一种运镜。固定镜头整集不超过 20%，而且要写清为什么不动（人物出画、重复比较、等对方回答）。只用 camera_moves.yaml 里 enabled 的运镜——现在是推近、固定、幻想段的 bolt_push_settle、走动镜的 handheld_follow；横移 / 摇 / 俯仰 / 环绕 / 升降 视频模型做不出，不要写。",
+   "evidence": [
+    {
+     "src": "docs/master/PLAN_HOLLYWOOD_LOOK.md",
+     "note": "§9 第 4 条：NFS“Good camera movement doesn't have to be fancy, it just has to be motivated”；StudioBinder push-in“indicate growing tension”"
+    },
+    {
+     "src": "config/director/camera_moves.yaml",
+     "note": "exec_modes.measured_by：push_in 1.0 / static 1.0 / arc 0.64 / truck 0.10 / tilt_up 0.0；V2 bolt_push_settle 3/3、handheld_follow 走动镜 2/2"
+    },
+    {
+     "src": "data/pipeline/runs/series10_v2/staging/P4_ep01.L1_psm5.md",
+     "note": "psm5 固定镜头 10/16 = 62.5%（项目方 11-05“没有任何的运镜”）"
+    }
+   ],
+   "check": [
+    "tests/test_l2_rules.py"
+   ],
+   "lint": [
+    "QW-L3"
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-05",
+   "_file": "knowledge/rules/writer_camera.yaml"
+  },
+  {
+   "id": "K-WRT-814",
+   "domain": "writer",
+   "link": [
+    "P3-P4",
+    "P8-P10"
+   ],
+   "title": "L2 剪辑点：【下镜】写 动作匹配切 / 视线匹配切 / 声音匹配切 / 声音先行 N 秒 / 硬切 / 叠化 + 落点动作；硬切写理由；对白后反应镜用声音先行（J-cut）（L2）",
+   "when": "每镜【下镜】行",
+   "then": "代码判定 rubric_code.l2_checks（cut#n）：类型不在六种之内 → QW-L6；硬切没写“理由=” → QW-L6。写法：同场相邻镜在动作中段切（上一镜结尾留一个进行中的动作，下一镜从同一动作的后半进入）或接视线落点；上一镜台词说完接听者反应时写“声音先行 0.3–0.5 秒”（J-cut），由 cut_plan 执行",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "镜头字段"
+    }
+   ],
+   "writer_text": "每镜【下镜】写“切法｜落点动作”：同一场里相邻两镜切在动作中段（上一镜结尾留一个还在进行的动作，下一镜从这个动作的后半开始）或接视线落点；对白说完接听者反应时写“声音先行 0.3–0.5 秒”；硬切只在换段 / 换场用并写“理由=”。切法只用：动作匹配切 / 视线匹配切 / 声音匹配切 / 声音先行 N 秒 / 硬切 / 叠化。",
+   "evidence": [
+    {
+     "src": "docs/master/PLAN_HOLLYWOOD_LOOK.md",
+     "note": "§9 第 5 条：NFS cut on action“helps hide edits that occur during an action”；StudioBinder J/L cut“a more natural rhythm to a conversation”"
+    },
+    {
+     "src": "tools/director/cut_plan.py",
+     "note": "K-EDT-812 / 814：转场按【衔接】、J/L-cut 由导演层执行"
+    }
+   ],
+   "check": [
+    "tests/test_l2_rules.py"
+   ],
+   "lint": [
+    "QW-L6"
+   ],
+   "confidence": "high",
+   "status": "待验",
+   "date": "2026-11-05",
+   "_file": "knowledge/rules/writer_camera.yaml"
+  },
+  {
+   "id": "K-WRT-815",
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "L2 竖屏构图：单人镜主体在上三分之一 + 视线方向留出空间；多人镜前 / 中 / 后三层；少写横向运动（L2）",
+   "when": "每镜【构图】行（9:16）",
+   "then": "代码判定 rubric_code.l2_checks（vert#n）：单人镜（在画 1 人）【构图】没有“三分之一 / 1/3”或没有“留出空间 / 留白” → QW-L7；多人镜三层由 QW-L2 判。竖屏横向视野窄，横移 / 横摇在竖屏里容易晕，运镜优先推近（纵向）与前景纵深",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "镜头字段"
+    }
+   ],
+   "writer_text": "竖屏 9:16 构图：单人镜把主体放在上三分之一（眼睛落在上方三分线附近），人物看向哪边就在哪边留出空间，下三分之一只放手 / 道具 / 前景，不放关键信息（会被字幕和界面挡住）；两人以上写前景 / 中景 / 背景三层，用前景物件做纵深；横向摇移在竖屏里容易晕，运镜优先推近。",
+   "evidence": [
+    {
+     "src": "docs/master/PLAN_HOLLYWOOD_LOOK.md",
+     "note": "§9 第 6 条：CSU vertical video“allow their eye to fall near one of the top intersection points”；Adam Sebire 9:16“Pans or rapid action moving across the frame can be discombobulating”"
+    },
+    {
+     "src": "knowledge/rules/writer_camera.yaml",
+     "note": "K-WRT-107 竖屏景别偏近 / 上 1/3 / 留空（写法），本条补代码判定"
+    }
+   ],
+   "check": [
+    "tests/test_l2_rules.py"
+   ],
+   "lint": [
+    "QW-L7"
+   ],
+   "confidence": "medium",
+   "status": "待验",
+   "date": "2026-11-05",
    "_file": "knowledge/rules/writer_camera.yaml"
   },
   {

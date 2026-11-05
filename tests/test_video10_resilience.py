@@ -281,3 +281,20 @@ def test_vidgen_never_uses_broken_or_disabled_lanes(tmp_path):
         "gpu33:0": {"enabled": True, "roles": ["image", "video"]}, "gpu33:1": {"enabled": True, "roles": ["video"]},
         "gpu33:3": {"enabled": True, "roles": ["image"]}}}}}), encoding="utf-8")
     assert set(vg.usable_lanes("gpu33", hf)) == {"gpu33:0"}      # broken_gpus / 不含 video 角色的道都去掉
+
+
+# ---- VIDEO-PAR：vram_gate（开关默认关）/ video_boost ----
+def test_vram_gate_and_boost():
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools/series10_video"))
+    import vidgen as V
+    import night as N
+    assert V.vram_gate_ok("gpu36:1", {}, lambda n: 0)                      # 没配 = 不设限
+    assert V.vram_gate_ok("gpu36:0", {"gpu36:1": 21000}, lambda n: 0)      # 别的道不受影响
+    assert not V.vram_gate_ok("gpu36:1", {"gpu36:1": 21000}, lambda n: 12000)
+    assert not V.vram_gate_ok("gpu36:1", {"gpu36:1": 21000}, lambda n: None)   # 查不到 → 失败关闭
+    assert V.vram_gate_ok("gpu36:1", {"gpu36:1": 21000}, lambda n: 22000)
+    off = {"video_boost": {"enabled": False, "vram_gate": {"gpu36:1": 21000}}}
+    assert N.video_boost(off, ["gpu36:1"]) == (["gpu36:1"], {})
+    on = {"video_boost": {"enabled": True, "vram_gate": {"gpu36:1": 21000}}}
+    assert N.video_boost(on, ["gpu36:1", "gpu33:0"]) == (["gpu33:0"], {"gpu36:1": 21000})

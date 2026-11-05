@@ -139,6 +139,85 @@ PROMPT_Q = ("下面是这张图的编译稿（出图提示词）。只按画面�
             "action = 主要动作是否一致；scene = 场景是否一致。\n编译稿：")
 
 
+POS_REASK_Q = ("只核对画面里人物的左右站位。已知（以此为准，不要复述原文）：{note}。画面里是否如此？只输出 JSON："
+               '{{"positions": "符合|不符|看不清", "e": "一句话：画面里谁在左、谁在右"}}。')
+
+
+def position_selfcheck(sid: str, image, d: dict, cast: list | None = None, ask=None) -> tuple[dict, bool]:
+    """positions 判不符时的自洽检查：判词里模型复述的“原文”左右与 cast（编译输入的站位）不一致 / 原文与画面说同一侧 → 作废重问一次。
+    → (新判词, 仍未定)。判词自洽 / 取不到 cast = 原样返回、不重问"""
+    from ns_agent.vqa import selfcheck as SC
+    if cast is None:
+        try:
+            from tools.vqa import anomaly as AN
+            cast = AN.shot_cast(sid)
+        except Exception:  # noqa: BLE001  # arch-ok: 取不到 cast = 不做自洽检查（判词原样，不放宽）
+            cast = None
+    why = SC.position_contradiction(str(d.get("e") or ""), cast)
+    if not why:
+        return d, False
+    if ask is None:
+        from ns_agent.vqa import client as VC
+        ask = VC.generate
+    from ns_agent.vqa.contract import rubric_loads
+    res = ask({"system": "你是画面质检员，只看图、只报事实，只输出 JSON。", "text": POS_REASK_Q.format(note=SC.truth_note(cast)),
+               "images": [{"path": str(image), "label": "【待检】", "max_pixels": 600000}]}, wait_s=900, refresh=True)
+    r2 = rubric_loads(res.get("text", "")) if "error" not in res else None
+    if not r2 or r2.get("positions") not in ("符合", "不符"):
+        return {**d, "selfcheck": why, "reask": r2 or {"error": res.get("error")}}, True
+    if r2["positions"] == "不符" and SC.position_contradiction(str(r2.get("e") or ""), cast):
+        return {**d, "selfcheck": why, "reask": r2}, True
+    return {**d, "positions": r2["positions"], "e": str(r2.get("e") or ""), "selfcheck": why, "reask": r2}, False
+
+
+# L-191：35 步 base 会多画人（S1 2/5 张出第 4 人）。严格人数闸：同一次看图里加问“可见人数”（整数，不告诉它期望值，免得被带偏），
+# 代码按分镜 cast 比对——少于“在画”人数或多于“在画 + 局部 + 背影”人数 = people_count 不符 → Q10 fail → 换种子重出。
+# 开关：config/gen_contract.json image_thresholds.Q10_accept.people_count_strict = true，或本剧首帧档 first_frame_tier = base35（自动跟随）
+PEOPLE_Q = ('另外在同一个 JSON 里加一项 "visible_people": 整数——画面里能看到的人数（含背影、侧脸、远处、只露一部分的人；'
+            "不含海报 / 照片 / 屏幕 / 镜中倒影里的人）。\n")
+
+
+def people_gate_on(project: str | None = None) -> bool:
+    try:
+        from ns_agent.gen_contract import cfg as GC
+        t = (GC().get("image_thresholds") or {}).get("Q10_accept") or {}
+        if t.get("people_count_strict"):
+            return True
+        from ns_agent import frame_job as FJ
+        if project is None:
+            from ns_agent.gen_contract import style as ST
+            project = ST._run()
+        return FJ.first_frame_tier(project)[0] == "base35"
+    except Exception:  # noqa: BLE001  # arch-ok: 读不到配置 = 不开严格闸（只回到原有 people_count 判法）
+        return False
+
+
+def people_range(cast: list | None) -> tuple[int, int] | None:
+    """分镜 cast → (最少, 最多)可见人数：最少 = 在画；最多 = 在画 + 局部 + 背影。没有 cast → None"""
+    if not cast:
+        return None
+    lo = sum(1 for c in cast if c.get("presence") == "在画")
+    hi = lo + sum(1 for c in cast if c.get("presence") in ("局部", "背影"))
+    return lo, hi
+
+
+def people_verdict(visible, cast: list | None) -> str | None:
+    """→ 不符说明；符合 / 看图没给整数 / 没有 cast → None（不新增判定）"""
+    try:
+        n = int(visible)
+    except (TypeError, ValueError):
+        return None
+    rng = people_range(cast)
+    if rng is None:
+        return None
+    lo, hi = rng
+    if n > hi:
+        return f"画面可见 {n} 人，分镜最多 {hi} 人（在画 {lo}）：多画了人"
+    if n < lo:
+        return f"画面可见 {n} 人，分镜在画 {lo} 人：少人"
+    return None
+
+
 def prompt_check(sid: str, image, via_tunnel: bool = False, stage: str = "image") -> dict:
     from ns_agent.vqa import client as VC
     from ns_agent.vqa import continuity as CT
@@ -151,12 +230,26 @@ def prompt_check(sid: str, image, via_tunnel: bool = False, stage: str = "image"
     if via_tunnel:
         _up = VC._local_up
         VC._local_up = lambda u: False if u.rstrip("/").endswith(":8870") else _up(u)
-    res = VC.generate({"system": "你是画面质检员，只看图、只报事实，只输出 JSON。", "text": PROMPT_Q + text[:1800],
+    strict = people_gate_on()
+    res = VC.generate({"system": "你是画面质检员，只看图、只报事实，只输出 JSON。", "text": (PEOPLE_Q if strict else "") + PROMPT_Q + text[:1800],
                        "images": [{"path": str(image), "label": "【待检】", "max_pixels": 600000}]}, wait_s=900)
     if "error" in res:
         return {"status": "untested", "why": "本地看图没跑成：" + str(res["error"])[:150]}
     d = rubric_loads(res.get("text", "")) or {}
+    if d.get("positions") == "不符":
+        d, undecided = position_selfcheck(sid, image, d)
+        if undecided:
+            # 11-04 判词自洽：模型把“原文”左右读反（ep01-S15 v1/v2），重问仍矛盾 → untested（infra：只重打分，不算 fail、不计重出次数）
+            return {"status": "untested", "checks": d, "infra": True, "why": "站位判词与编译输入矛盾、重问仍未定：" + str(d.get("e") or "")[:120]}
     bad = [k for k in ("people_count", "positions", "action", "scene") if d.get(k) == "不符"]
+    if strict and "people_count" not in bad:
+        try:
+            from tools.vqa import anomaly as AN
+            pv = people_verdict(d.get("visible_people"), AN.shot_cast(sid))
+        except Exception:  # noqa: BLE001  # arch-ok: 取不到 cast = 不加判定（原有 people_count 判法照旧）
+            pv = None
+        if pv:
+            return {"status": "fail", "checks": d, "why": "people_count 不符：" + pv}
     if bad:
         return {"status": "fail", "checks": d, "why": "、".join(bad) + "不符：" + str(d.get("e") or "")[:120]}
     if not d:
@@ -204,16 +297,38 @@ def summarize(lab: dict) -> str:
     return "pass"
 
 
+def _parallel_on() -> bool:
+    """config/gen_contract.json image_thresholds.Q10_accept.parallel（默认关）"""
+    try:
+        from ns_agent.gen_contract import cfg as GC
+        return bool(((GC().get("image_thresholds") or {}).get("Q10_accept") or {}).get("parallel"))
+    except Exception:  # noqa: BLE001  # arch-ok: 读不到配置 = 关（原串行口径）
+        return False
+
+
 def label(sid: str, stage: str, image, pf: dict, *, feat: dict | None = None, via_tunnel: bool = False, host: str | None = None,
           defer_count: bool = False) -> dict:
-    pr = prompt_check(sid, image, via_tunnel, stage)          # 先跑：via_tunnel 时它会把本机 8870 判为不可用，后面的看图都走隧道
-    cnt = {"status": "deferred", "why": "本机没有检测卡（gpu33 的 GPU2 是坏卡）：人数检测由笔记本发起的批量验收在 gpu36 上做，"
-                                        "结果写 data/vqa/accept/epNN.json，视频闸门读它"} if defer_count else count_check(sid, image, feat, host)
+    deferred = {"status": "deferred", "why": "本机没有检测卡（gpu33 的 GPU2 是坏卡）：人数检测由笔记本发起的批量验收在 gpu36 上做，"
+                                             "结果写 data/vqa/accept/epNN.json，视频闸门读它"}
+    if _parallel_on() and not via_tunnel:
+        # B1（11-05，默认关）：提示词核对 / 谁穿什么（各自调看图）/ 人数检测（打 :8893）互不依赖，并发发出；
+        # 看图侧靠 client 多实例分发（route.balance）才真正并行，单实例时只是把排队交给服务端、总耗时不变也不变差。各项判定与证据照旧
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=3, thread_name_prefix="q10") as ex:
+            f_pr = ex.submit(prompt_check, sid, image, False, stage)
+            f_cnt = None if defer_count else ex.submit(count_check, sid, image, feat, host)
+            f_out = ex.submit(outfit, pf, sid, image)
+            pr, out = f_pr.result(), f_out.result()
+            cnt = deferred if f_cnt is None else f_cnt.result()
+    else:
+        pr = prompt_check(sid, image, via_tunnel, stage)      # 先跑：via_tunnel 时它会把本机 8870 判为不可用，后面的看图都走隧道
+        cnt = deferred if defer_count else count_check(sid, image, feat, host)
+        out = None
     if stage == "last" and pr.get("status") in ("fail", "untested"):
         # L-183（总调度 11-04 04:1x/04:2x）：尾帧不是成片输入（L-088 Pika 只给首帧）→ 提示词 positions/action 核对只记录、不阻断；
         # 原结论留在 would / why 里（审片可见）。身份 / 造型 / 人数照样判
         pr = {**pr, "status": "na", "record_only": True, "would": pr.get("status"), "why": "尾帧只记录：" + str(pr.get("why") or "")}
-    lab = {"identity": identity(pf), "outfit": outfit(pf, sid, image), "prompt": pr, "count": cnt}
+    lab = {"identity": identity(pf), "outfit": out if out is not None else outfit(pf, sid, image), "prompt": pr, "count": cnt}
     lab["ok"] = summarize(lab)
     lab["at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     return lab

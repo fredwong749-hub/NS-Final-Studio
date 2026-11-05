@@ -152,9 +152,47 @@ def parse_bundle(text: str, n_items: int) -> dict:
             "ocr": {"status": ("pass" if _ocr_clean(ocr) else ("fail" if ocr else "untested")), "text": ocr}, "summary": summary}
 
 
-def bundle_check(image: str, items: list[str], want_person: bool = True) -> dict:
+def audit_rows(items: list[str], rows: list[dict], cast: list | None) -> dict[int, str]:
+    """判不符的行里找“结论与证据矛盾”（确定性，selfcheck）：方位（模型复述的原文左右与 cast 不一致）/ 造型鞋型（证据物件 = 应为物件）。→ {行号: 原因}"""
+    from ns_agent.vqa import selfcheck as SC
+    bad = {}
+    for r in rows:
+        n = r.get("n")
+        if r.get("ok") or not n or n > len(items) or str(r.get("text") or "").startswith("（没答"):
+            continue
+        why = SC.position_contradiction(r.get("text") or "", cast) or None
+        if not why and SC.outfit_contradiction(r.get("text") or "", items[n - 1]):
+            why = "判不符，但证据里的物件与应为物件相同"
+        if why:
+            bad[n] = why
+    return bad
+
+
+def reask_rows(image: str, items: list[str], rows: list[dict], bad: dict[int, str], cast: list | None) -> list[dict]:
+    """矛盾的行各重问一次（只问这一条；方位行把真实站位写进题里，不让模型复述原文）。重问仍矛盾 → 该行 untested（不算 fail）"""
+    from ns_agent.vqa import selfcheck as SC
+    note = SC.truth_note(cast)
+    out = []
+    for r in rows:
+        n = r["n"]
+        if n not in bad:
+            out.append(r)
+            continue
+        extra = f"（已知站位：{note}；以此为准，只核对画面里是否如此，不要复述原文）" if note and "站位" not in bad[n] and "原文" in bad[n] else ""
+        res = _ask(HEAD + f"1. {items[n - 1]}{extra}", image, "asset_bundle_reask")
+        got = (parse_bundle(res.get("text") or "", 1)["items"] or [{}])[0] if not res.get("error") else {}
+        again = audit_rows([items[n - 1]], [{**got, "n": 1}], cast) if got.get("text") and got.get("text") != "（没答）" else {1: "重问没答"}
+        if again:
+            out.append({"n": n, "ok": False, "untested": True, "text": f"（判词自相矛盾：{bad[n]}；重问仍未定）{r.get('text') or ''}"[:300], "was": r.get("text")})
+        else:
+            out.append({"n": n, "ok": bool(got.get("ok")), "text": f"（重问）{got.get('text')}"[:300], "was": r.get("text")})
+    return out
+
+
+def bundle_check(image: str, items: list[str], want_person: bool = True, cast: list | None = None) -> dict:
     """逐条核对 + 年龄 + OCR 一次问完。status：全部条目“符合”且总结没写“有不符合”= pass；回答缺项 = untested；否则 fail。
-    age / ocr 各自带 status（不想判年龄的空镜：want_person=False → age 不计）"""
+    age / ocr 各自带 status（不想判年龄的空镜：want_person=False → age 不计）。
+    判词自洽检查（11-04）：判不符的行里证据与结论矛盾（方位 / 造型物件）→ 该行重问一次，仍矛盾 → 该行 untested（整体不判 fail）"""
     q = HEAD + "\n".join(f"{i}. {t}" for i, t in enumerate(items, 1)) + "\n" + AGE_LINE + OCR_LINE + SUM_LINE
     r = _ask(q, image, "asset_bundle")
     t = r.get("text") or ""
@@ -165,6 +203,17 @@ def bundle_check(image: str, items: list[str], want_person: bool = True) -> dict
         st = "pass"
     else:
         st = "fail"
+    if st == "fail":
+        bad = audit_rows(items, p["items"], cast)
+        if bad:
+            p["items"] = reask_rows(image, items, p["items"], bad, cast)
+            p["selfcheck"] = {str(k): v for k, v in bad.items()}
+            if any(x["ok"] is False and not x.get("untested") for x in p["items"]):
+                st = "fail"
+            elif any(x.get("untested") for x in p["items"]):
+                st = "untested"
+            else:
+                st = "pass"
     if not want_person:
         p["age"] = {"status": "na", "text": "空镜 / 物件，不判年龄"}
     elif p["age"]["status"] == "untested" and not r.get("error"):

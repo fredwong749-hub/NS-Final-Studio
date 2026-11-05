@@ -138,3 +138,69 @@ def test_w38_server_sends_to_unloaded_local(monkeypatch):
     assert C._ready("http://127.0.0.1:8870") == (True, 1)
     monkeypatch.delenv("OFFLINE_SELF")
     assert C._ready("http://127.0.0.1:8870") == (False, 0)
+
+
+# ---- B1（11-05）服务器侧多实例分发：route.balance，默认关
+def _bal(monkeypatch, env, extra=(), lan=True, **rc):
+    monkeypatch.setenv("OFFLINE_SELF", "gpu33")
+    base = {"queue_max": 3, "busy_wait_s": 0.3, "poll_s": 0.1, "timeouts": {"image": 240, "ask": 30},
+            "balance": True, "extra_local_ports": list(extra), **rc}
+    monkeypatch.setattr(C, "_rcfg", lambda: base)
+    monkeypatch.setattr(C, "cfg", lambda: {"model": {"port": 8870, "host": "gpu36", "lan_url": "http://10.0.0.36:8870"}})
+    if not lan:
+        env["health"].pop("8870x", None)
+
+
+def test_balance_prefers_local_on_tie_and_least_queue(env, monkeypatch):
+    _bal(monkeypatch, env, extra=[8880])
+    env["health"] = {"8870": {"loaded": True, "queue": 2}, "8880": {"loaded": True, "queue": 0}}
+    r = C.generate(dict(REQ), refresh=True, kind="ask")
+    assert r["route"] == "local" and env["posts"][0][0] == "http://127.0.0.1:8880"
+    env["posts"].clear()
+    env["health"] = {"8870": {"loaded": True, "queue": 1}, "8880": {"loaded": True, "queue": 1}}
+    C.generate(dict(REQ), refresh=True, kind="ask")
+    assert env["posts"][0][0] == "http://127.0.0.1:8870"          # 并列 = 本机主实例优先
+
+
+def test_balance_spills_to_lan_when_local_busy(env, monkeypatch):
+    _bal(monkeypatch, env)
+    # lan 与主端口同为 8870（不同主机）：桩按端口区分不了，改用 _ready 桩
+    ready = {"http://127.0.0.1:8870": (True, 3), "http://10.0.0.36:8870": (True, 1)}
+    monkeypatch.setattr(C, "_lan_url", lambda: "http://10.0.0.36:8870")
+    monkeypatch.setattr(C, "_ready", lambda u: ready.get(u, (False, 0)))
+    r = C.generate(dict(REQ), refresh=True, kind="ask")
+    assert r["route"] == "lan" and env["posts"][0][0] == "http://10.0.0.36:8870"
+
+
+def test_balance_all_busy_untested_and_off_by_default(env, monkeypatch):
+    _bal(monkeypatch, env)
+    monkeypatch.setattr(C, "_lan_url", lambda: None)
+    monkeypatch.setattr(C, "_ready", lambda u: (True, 9))
+    r = C.generate(dict(REQ), refresh=True, kind="ask")
+    assert r["status"] == "untested" and r["reason"] == "本机忙" and not env["posts"]
+    # 关闭（默认）：不走 balance 分支
+    monkeypatch.setattr(C, "_rcfg", lambda: {"queue_max": 3})
+    assert C._balance_cands("http://127.0.0.1:8870") == []
+
+
+def test_balance_cfg_defaults_off():
+    d = json.loads((ROOT / "config" / "vqa.json").read_text(encoding="utf-8"))["route"]
+    assert d["balance"] is False and d["extra_local_ports"] == []
+    g = json.loads((ROOT / "config" / "gen_contract.json").read_text(encoding="utf-8"))
+    assert g["image_thresholds"]["Q10_accept"]["parallel"] is False
+
+
+def test_q10_parallel_label_same_result(monkeypatch):
+    sys.path.insert(0, str(ROOT))
+    from tools.vqa import accept as A
+    monkeypatch.setattr(A, "prompt_check", lambda *a, **k: {"status": "pass"})
+    monkeypatch.setattr(A, "count_check", lambda *a, **k: {"status": "pass"})
+    monkeypatch.setattr(A, "outfit", lambda *a, **k: {"status": "pass"})
+    monkeypatch.setattr(A, "identity", lambda pf: {"status": "pass"})
+    res = []
+    for on in (False, True):
+        monkeypatch.setattr(A, "_parallel_on", lambda on=on: on)
+        res.append(A.label("ep01-S1", "first", "x.png", {}, host="h"))
+    for r in res:
+        r.pop("at")
+    assert res[0] == res[1] and res[0]["ok"] == "pass"

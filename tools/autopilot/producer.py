@@ -157,6 +157,8 @@ def job_sig(paths, sid: str) -> str | None:
     if not job:
         return None
     parts = [job.get("prompt") or "", str(job.get("compiler_inputs_sha") or "")]
+    if job.get("tier_overrides"):        # L-191：首帧档（35 步 base）进签名，缓存的 8 步版不算同一作业；preview 不加段，旧签名不变
+        parts.append("tier=" + json.dumps(job["tier_overrides"], sort_keys=True))
     for r in job.get("refs") or []:
         try:
             parts.append(f"{r}@{round((paths.root / str(r)).stat().st_mtime)}")
@@ -196,6 +198,8 @@ def redo_inputs_changed(paths, sid: str, kind: str, led: dict) -> str | None:
             return None
         if kind == "first" and (job.get("prompt") or "").strip() != (t.get("prompt") or "").strip():
             return "提示词变了"
+        if kind == "first" and ((job.get("tier_overrides") or None) != (((t.get("params") or {}).get("tier") or {}).get("overrides") or None)):
+            return "出图档变了（预览 8 步 ↔ 35 步 base）"
         if job.get("compiler_inputs_sha") and t.get("inputs_sha") and job["compiler_inputs_sha"] != t["inputs_sha"]:
             return "编译输入哈希变了"
         old = t.get("refs") or t.get("references") or []
@@ -241,8 +245,11 @@ def shot_inputs_sig(paths, sid: str) -> dict:
             mt = max(mt, (paths.root / str(r)).stat().st_mtime)
         except OSError:
             pass
-    return {"inputs": job.get("compiler_inputs_sha"), "refs_mtime": round(mt, 1),
-            "prompt_sha": hashlib.sha256((job.get("prompt") or "").encode()).hexdigest()[:16]}
+    out = {"inputs": job.get("compiler_inputs_sha"), "refs_mtime": round(mt, 1),
+           "prompt_sha": hashlib.sha256((job.get("prompt") or "").encode()).hexdigest()[:16]}
+    if job.get("tier_overrides"):        # L-191
+        out["tier"] = job.get("tier")
+    return out
 
 
 _INPUT_SIG_CACHE: dict = {}
@@ -566,7 +573,7 @@ def asset_hold_objects(data: Path, run: str | None = None, primary: str | None =
                 # （以前 runaway_hold 全局共用：对象 id 不分季，第一季的暂停把第二季同号镜也挡了；V2 不能继承 V1 的遗留 hold）
                 r = it.get("run") or d.get("run")
                 return run is None or r == run or (not r and run == primary)
-            out |= {o for it in d.get("shots") or [] if mine(it)
+            out |= {o for it in d.get("shots") or [] if mine(it) and not it.get("released")     # B2：释放过的条目（resume / unhold / retry）不再挡
                     and not (it.get("expires_at") and (ts_epoch(it["expires_at"]) or 0) < t_now)
                     for o in it.get("objects") or []}           # K-OPS-E19：带 expires_at 的条目到期自动失效（A-09：带时区比较）
     return out
@@ -932,6 +939,9 @@ def vqa_gate(sid: str, stage: str, file_rel: str, job: dict, pf: dict) -> dict |
         VQ.q1d(sid, stage, str(P.DATA / file_rel), pf)      # Q1d 本地图片异常检测（记日志、不拦；开关 Q1d_anomaly.enabled，默认关）
         VQ.accept_gate(sid, stage, str(P.DATA / file_rel), pf)   # Q10 出图后验收：身份 / 服装 / 提示词 / 人数四项全过（ALIGNMENT 第 8 步）
         VQ.apply(pf, v)
+        if v.get("contradiction") and not v.get("error") and pf.get("ok") is False and pf.get("blocking") == ["Q9"]:
+            pf["score_infra"] = True       # 11-04：判词自相矛盾、重问仍未定 = untested，不算 fail、不计重出次数（只重打分）
+            pf["remote_error"] = pf.get("remote_error") or "本地看图判词自相矛盾、重问仍未定：" + "、".join(v["contradiction"])
         if v.get("error") and pf.get("ok") is False and pf.get("blocking") == ["Q9"]:
             pf["score_infra"] = True
             pf["remote_error"] = pf.get("remote_error") or ("本地看图服务：" + str(v["error"])[:200])
@@ -1720,15 +1730,23 @@ def _redo_obj(kind, sid, n, td, ledger, leases, rj, first=None) -> dict:
     k = int(led.get("redo_tries") or 0)
     o.update(redo=True, attempts=k, max_attempts=len(plan) or None, master_reject=rj.get("reason"),
              reason=("总调度驳回 v{}：{}".format(rj.get("reject_n"), rj.get("reason")) if rj.get("reject_n") else "总调度插队：" + str(rj.get("reason"))))
+    if rj.get("regen"):                    # B2：换代中——旧当前版保留（视频 / 合成仍可用），新版过闸前不清空
+        ot = active_take(td, "image" if kind == "first" else "last")
+        o.update(reason="换代中：" + str(rj.get("reason")), regen=True)
+        if ot and take_pf(ot).get("ok"):
+            o["regen_keep"] = f"v{ot['n']}"
     lease = leases.get(oid)
     if lease:
         return {**o, "status": "running", "where": lease.get("lane"), "reason": o["reason"] + "；" + str(lease.get("rung"))}
+    if led.get("redo_candidate") and rj.get("regen"):
+        return {**o, "status": "pending",
+                "waiting_for": "换代版 v{} 已过契约，等看图闸门 / 复核后换成当前（旧当前版仍有效）".format(led["redo_candidate"])}
     if led.get("redo_candidate"):
         return {**o, "status": "pending",
                 "waiting_for": "总调度复核替换版 v{}（已过契约；驳回版 v{} 已撤下，这一镜暂无当前版本）".format(led["redo_candidate"], rj.get("reject_n"))}
     if rj.get("wait"):
         return {**o, "status": "pending", "waiting_for": rj["wait"]}
-    if kind == "last" and first and first.get("redo"):
+    if kind == "last" and first and first.get("redo") and not first.get("regen_keep"):
         return {**o, "status": "pending", "waiting_for": "首帧被驳回、替换版复核后再重做尾帧"}
     if k >= len(plan):
         # K-OPS-E09（总调度 02:4x，G1）：取消“等总调度定”——阶梯用完交给 Producer.escalate_exhausted 自动定下一步
@@ -1753,7 +1771,7 @@ def _video_obj(w: World, sid, n, td, fo, lo, ledger, leases, night_alive) -> dic
         st = rec.get("status")
         tries = len([x for x in rec.get("renders") or [] if x.get("state") not in ("cancelled",)])
         o["attempts"] = tries
-        if st in ("done", "best_effort") and fo["status"] != "passed":
+        if st in ("done", "best_effort") and fo["status"] != "passed" and not fo.get("regen_keep"):
             return {**o, "status": "pending", "where": host, "waiting_for": "首帧过契约（现有视频是用旧首帧出的，新首帧定下后重出）"}
         if st == "done":
             return {**o, "status": "passed", "reason": f"{rec.get('chosen')} 过审片打分", "where": host}
@@ -1766,7 +1784,7 @@ def _video_obj(w: World, sid, n, td, fo, lo, ledger, leases, night_alive) -> dic
             b = busy[-1]
             return {**o, "status": "running", "where": f"{host} {b.get('lane', '')}".strip(),
                     "reason": f"第 {tries}/{MAX_TRIES + 1} 版 {b.get('variant', '')}（{b.get('state')}）"}
-    if fo["status"] != "passed" or lo["status"] not in ("passed", "best_effort"):
+    if (fo["status"] != "passed" and not fo.get("regen_keep")) or lo["status"] not in ("passed", "best_effort"):
         why = "首帧过契约" if fo["status"] != "passed" else "尾帧定下"
         if fo["status"] == "best_effort":
             return {**o, "status": "pending", "waiting_for": "首帧尽力：本集放行后走纯 Ref2VA（K-REN-301）"}
@@ -1813,9 +1831,20 @@ def _headline(E: dict) -> str:
 class FrameExec:
     """真出图：唯一出图路径（K-REN-134）。一次占一条道；postflight 放 CPU 线程池（不占道，K-OPS-I06）"""
 
-    def __init__(self, paths: Paths, script):
-        self.p, self.script = paths, script
+    def __init__(self, paths: Paths, script, script_fn=None):
+        self.p, self._script = paths, script
+        self.script_fn = script_fn              # B2：每次出图现取最新导入稿（Producer.script 按 sha / mtime 热重载）；None = 固定稿
         self.post_pool = cf.ThreadPoolExecutor(max_workers=3, thread_name_prefix="producer-postflight")
+
+    @property
+    def script(self):
+        if self.script_fn is not None and script_hot_reload(self.p.root):
+            return self.script_fn()
+        return self._script
+
+    @script.setter
+    def script(self, v):
+        self._script = v
 
     def render(self, kind: str, sid: str, lane: str, url: str, attempt: int, rung: dict, tag: dict) -> dict:
         """→ {"take": n, "file": data 相对路径, "job": 作业, "pf_future": Future|None} ；出错抛异常（调用方分类）"""
@@ -2205,11 +2234,28 @@ class Producer:
 
     # -- 输入 --
     def script(self):
-        if self._script is None or self._script_mtime != self._mtime():
+        mt = self._mtime()
+        if self._script is None or self._script_mtime != mt:
             from ns_render import pipeline as P
+            old = self._script is not None
             self._script = P.load_script()
-            self._script_mtime = self._mtime()
+            self._script_mtime = mt
+            sha = self._script_sha()
+            if old and sha != getattr(self, "_script_sha_v", None):     # B2：导入稿变了 → 热重载，不用重启（以前 FrameExec 手里的旧稿 → find_shot KeyError）
+                try:
+                    self.logf("script_reloaded", old_sha=getattr(self, "_script_sha_v", None), new_sha=sha, counted=False)
+                except Exception:  # noqa: BLE001  # arch-ok: 日志写不进不挡重载
+                    pass
+            self._script_sha_v = sha
         return self._script
+
+    def _script_sha(self):
+        import hashlib
+        from ns_render import pipeline as P
+        try:
+            return hashlib.sha256(Path(P.SCRIPT_JSON).read_bytes()).hexdigest()[:16]
+        except OSError:  # arch-ok: 读不到 = 无签名，不触发热重载（保持旧稿，下一拍再试）
+            return None
 
     _script_mtime = None
 
@@ -2337,6 +2383,7 @@ class Producer:
                   shots_filter=only if getattr(self, "derive_only", False) else None)
         leases = self.leases.all()
         self.reconcile_demoted(w)
+        self.auto_regen_tick(w)
         led_all = {**self.ledger(), "_master_rejects": jl(self.p.rejects, {}) or {}}
         reg = derive(w, led_all, leases, self.run_summary_fn())
         lanes = self.probe_lanes(ctrl)
@@ -2511,16 +2558,21 @@ class Producer:
         hist = self.__dict__.setdefault("_obj_disp", {})
         recent = [x for x in hist.get(o["id"], []) if t - x <= 3600]
         hist[o["id"]] = recent
-        if len(recent) < cap:
-            return False
         f = self.p.data / "autopilot" / "runaway_hold.json"
         d = jl(f, {}) or {}
-        items = {it.get("shot"): it for it in d.get("shots") or []}
+        rel = max([float((it.get("released") or {}).get("t") or ts_epoch((it.get("released") or {}).get("at")) or 0) for it in d.get("shots") or []
+                   if it.get("shot") == o["shot"] and it.get("released")] or [0])
+        if rel:                                         # B2：人工释放（retry / unhold）之前的派单不再计数
+            recent = hist[o["id"]] = [x for x in recent if x > rel]
+        if len(recent) < cap:
+            return False
+        items = {it.get("shot"): it for it in d.get("shots") or [] if not it.get("released")}
         if o["shot"] not in items:
             exp = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t + 6 * 3600))
             items[o["shot"]] = {"shot": o["shot"], "run": self.p.run_id, "objects": [f"first:{o['shot']}", f"last:{o['shot']}"], "expires_at": exp,
                                 "why": f"1 小时内派了 {len(recent)} 次（上限 {cap}）", "at": iso()}
-            d.update(active=True, reason_kind=d.get("reason_kind") or "runaway", shots=list(items.values()),
+            d.update(active=True, reason_kind=d.get("reason_kind") or "runaway",
+                     shots=[it for it in d.get("shots") or [] if it.get("released")] + list(items.values()),   # 释放记录保留历史
                      rule="K-OPS-E21 单对象出图速率超限自动暂停；到期（expires_at）自动失效")
             f.parent.mkdir(parents=True, exist_ok=True)
             js(f, d)
@@ -2528,6 +2580,41 @@ class Producer:
                             {"per_hour": len(recent), "cap": cap}, self.ledger().get(o["id"]) or {})
             self.logf("runaway_hold", obj=o["id"], per_hour=len(recent), cap=cap, counted=False)
         return True
+
+    def regen_auto_approve(self, oid: str, n: int, pf: dict) -> bool:
+        """B2：换代版（master_rejects[oid].regen）过了契约，且看图闸门没开（开了的由 auto_review_redo 管）→ 自动换成当前"""
+        try:
+            rj = (jl(self.p.rejects, {}) or {}).get(oid) or {}
+            if not rj.get("regen"):
+                return False
+            from ns_agent.vqa import contract as VQ
+            if VQ.enforced():
+                return False
+            return master_approve(self.p, oid, n, "REGEN", f"换代版过契约（{rj.get('reason')}）") == 0
+        except Exception as e:  # noqa: BLE001
+            log_event(self.p, "regen_auto_approve_err", obj=oid, take=n, error=repr(e)[:200], counted=False)
+            return False
+
+    def auto_regen_tick(self, w, every_s: float = 60) -> dict | None:
+        if not dispatch_ok_cfg(self.p.root) or now() - getattr(self, "_last_regen_chk", 0) < every_s:
+            return None
+        self._last_regen_chk = now()
+        try:
+            shots = shots_of_all(self.p)
+            r = auto_regen_check(self.p, shots)
+            if r.get("regen"):
+                self.logf("auto_regen", shots=r["regen"], counted=False)
+            return r
+        except Exception as e:  # noqa: BLE001
+            self.logf("auto_regen_err", error=repr(e)[:200], counted=False)
+            return None
+
+    def uncount_dispatch(self, oid: str) -> None:
+        """把最近一次派单时刻从 obj_rate 计数里去掉（派单后在出图前就失败 = 没占 GPU）"""
+        with self.mu:
+            h = self.__dict__.setdefault("_obj_disp", {}).get(oid)
+            if h:
+                h.pop()
 
     def escalate_exhausted(self, reg) -> dict:
         """K-OPS-E09 驳回阶梯（config/policies/retry.yaml redo_ladder，decider=code）：
@@ -2950,7 +3037,7 @@ class Producer:
                                                           "preset": rung.get("preset"), "at": iso()}]
                 if pf.get("ok"):
                     self.led_update(oid, redo_tries=attempt, redo_history=rh, redo_candidate=res["take"])
-                    if auto_review_redo(self.p, oid, res["take"], pf):   # G0：替换版过了本地看图闸门 → 自动换上（总调度改抽查）
+                    if auto_review_redo(self.p, oid, res["take"], pf) or self.regen_auto_approve(oid, res["take"], pf):   # G0：替换版过了本地看图闸门 → 自动换上（总调度改抽查）
                         self.logf("redo_auto_approved", obj=oid, take=res["take"], counted=False, render_s=render_s,
                                   contract_s=contract_s)
                         return
@@ -3004,6 +3091,8 @@ class Producer:
             err = f"{type(e).__name__}: {e}"
             k = classify(err)
             L = self.ledger().get(oid) or {}
+            if k in ("code", "preflight"):     # B2（K-OPS-E21）：派单前异常没出图，不算 runaway 的“每小时派单数”
+                self.uncount_dispatch(oid)
             if k == "code":            # 系统代码 / 接口不匹配：不算内容尝试，30 分钟后再试，日志带 traceback 给负责会话修
                 self.led_update(oid, backoff_until=now() + CODE_RETRY_S, last_error=err[:300],
                                 reason="系统代码出错（不算一次尝试），已记日志等修：" + err[:120])
@@ -3555,7 +3644,24 @@ def producer_cfg(root: Path = ROOT) -> dict:
     """config/pipeline/producer.json（fanout 一镜多种子分道、accept 共用验收）；读不到 = 默认（fanout 关、accept 开）"""
     d = jl(Path(root) / "config" / "pipeline" / "producer.json", {}) or {}
     fan = {"enabled": False, "max_per_obj": 3, "runs": [], **(d.get("fanout") or {})}
-    return {"fanout": fan, "accept": d.get("accept") or {}, "review_adopt_auto": d.get("review_adopt_auto") is True}
+    return {"fanout": fan, "accept": d.get("accept") or {}, "review_adopt_auto": d.get("review_adopt_auto") is True,
+            "script_hot_reload": d.get("script_hot_reload") is not False,        # B2：默认开
+            "auto_regen_on_change": d.get("auto_regen_on_change") is True,        # B2：默认关
+            "approve_guard": d.get("approve_guard") is not False}                 # B2：默认开
+
+
+def script_hot_reload(root: Path = ROOT) -> bool:
+    try:
+        return bool(producer_cfg(root)["script_hot_reload"])
+    except Exception:  # noqa: BLE001  # arch-ok: 配置读不到 = 开（默认）
+        return True
+
+
+def cfg_flag(root: Path, key: str) -> bool:
+    try:
+        return bool(producer_cfg(root)[key])
+    except Exception:  # noqa: BLE001  # arch-ok: 读不到 = 取默认
+        return key == "approve_guard"
 
 
 def review_adopt_auto(root: Path = ROOT) -> bool:
@@ -3774,6 +3880,38 @@ def pause_shots(paths: Paths, shots: list, by: str, note: str, minutes: float = 
     js(f, d)
     log_event(paths, "pause_shots", shots=shots, by=by, note=note, expires_at=exp, counted=False)
     return d
+
+
+def release_holds(paths: Paths, shots: list, by: str, why: str, files=("pause_hold.json", "runaway_hold.json")) -> list:
+    """B2：按镜释放 data/autopilot/<file> 里的条目（不删历史：条目加 released={by, why, at}，asset_hold_objects 不再算它）→ 释放了的 [文件:镜]"""
+    out = []
+    for fn in files:
+        f = paths.data / "autopilot" / fn
+        d = jl(f, {}) or {}
+        hit = False
+        for it in d.get("shots") or []:
+            if it.get("shot") in shots and not it.get("released") and (not it.get("run") or it.get("run") == paths.run_id):
+                it["released"] = {"by": by, "why": why, "at": iso(), "t": now()}
+                out.append(f"{fn}:{it['shot']}")
+                hit = True
+        if hit:
+            if not any(not it.get("released") for it in d.get("shots") or []):
+                d["active"] = False
+            js(f, d)
+    if out:
+        log_event(paths, "hold_released", shots=shots, by=by, why=why, released=out, counted=False)
+    return out
+
+
+def resume_shots(paths: Paths, shots: list, by: str, note: str = "") -> dict:
+    """B2：解除按镜暂停（pause --shots 的对称命令；不再需要“再 pause 一个极短时间”）。runaway 冻结用 unhold"""
+    return {"released": release_holds(paths, shots, by, note or "resume --shots", files=("pause_hold.json",))}
+
+
+def unhold(paths: Paths, oid: str, by: str, note: str = "") -> dict:
+    """B2：解冻 K-OPS-E21 runaway（也清 pause_hold 里这一镜的条目）"""
+    sid = oid.split(":", 1)[-1]
+    return {"obj": oid, "released": release_holds(paths, [sid], by, note or "unhold")}
 
 
 def pause_tick(paths: Paths, t: float | None = None, apply: bool = True, alerts: Path | None = None) -> dict:
@@ -4004,7 +4142,7 @@ def serve(paths: Paths, pinned: bool = False, *, producer=None, spawn=None, slee
         print("PRODUCER 已在运行 pid", old.get("pid"), "run", old.get("run"))
         return 0
     if producer is None:
-        pr.frames = FrameExec(paths, pr.script())
+        pr.frames = FrameExec(paths, pr.script(), script_fn=pr.script)
     log_event(paths, "start", pid=os.getpid(), lanes=list(pr.lanes), run=paths.run_id, run_source=pr.run_source,
               code_sha=code_sha())   # W44 ①：启动时算一次代码 sha（之后热推不变，重启才变）
     n = 0
@@ -4184,13 +4322,23 @@ def note_auto_reject(paths: Paths, oid: str, n: int, pf: dict) -> None:
         pass
 
 
-def master_approve(paths: Paths, oid: str, n: int, by: str, note: str = "") -> int:
+def master_approve(paths: Paths, oid: str, n: int, by: str, note: str = "", force: bool = False) -> int:
     """总调度复核通过替换版：设为当前、清掉 master_gate 和驳回记录；首帧换了 → 同镜在等首帧的尾帧开始重做"""
     from ns_render import pipeline as P
     from ns_render import frame_edit as FE
     kind, sid = oid.split(":", 1)
     stage = "image" if kind == "first" else "last"
     from ns_render import auto_current as AC
+    if cfg_flag(paths.root, "approve_guard") and not force:
+        # B2：契约没过的版本 approve 会被 reconcile_demoted 下一轮撤下（只认 take_pf.ok）→ 拒绝并指路（不自动转：review-adopt 要 Q1–Q9 全过，
+        # 转不转由总调度明确选，免得悄悄改了语义）
+        t = next((x for x in P.load_takes(sid).get("takes") or [] if x.get("stage") == stage and x.get("n") == n), None)
+        pf = take_pf(t)
+        if pf and pf.get("ok") is False and not pf.get("review_needed"):
+            msg = f"拒绝 approve {oid} v{n}：这一版契约没过（{pf_reason(pf)[:120]}），approve 会被下一轮 reconcile 撤下；请用 review-adopt --obj {oid} --n {n}"
+            log_event(paths, "approve_refused", obj=oid, take=n, by=by, why=msg, counted=False)
+            print(msg, file=sys.stderr)
+            return 2
     FE.annotate(sid, stage, n, master_review={"ok": True, "by": by, "at": iso(), "note": note})
     P.mutate_takes(sid, lambda d: [(d.get("master_gate") or {}).pop(stage, None), None][1], op="master_approve", by=f"producer（{by}）")
     # K-OPS-Q23：唯一入口 set_active（拒绝驳回版、自己记一条审计，传操作人；不再另记 AC.audit_change，免得重复）
@@ -4221,6 +4369,91 @@ def master_approve(paths: Paths, oid: str, n: int, by: str, note: str = "") -> i
     js(paths.ledger, L)
     log_event(paths, "master_approve", obj=oid, take=n, by=by)
     return 0
+
+
+def regen_shots(paths: Paths, shots: list, reason: str, by: str, presets: list | None = None) -> dict:
+    """B2 换代入口：对选中镜的当前首帧标“换代中”并按默认方案重出。走驳回重出（master_rejects，n=0）那条已有链路——
+    不撤下当前版（active 不清空，视频 / 合成仍可用旧版；_redo_obj 对 regen 标 regen_keep，视频不等首帧），新版过契约 + 看图闸门后
+    master_approve 换成当前（首帧换了 → 尾帧随首帧重做的现有逻辑）。没有当前首帧 / 已在重出 / 在换代的镜跳过"""
+    from ns_render import pipeline as P
+    out = {"regen": [], "skipped": {}}
+    for sid in shots:
+        oid = f"first:{sid}"
+        if (P.load_takes(sid).get("active") or {}).get("image") is None:
+            out["skipped"][sid] = "没有当前首帧（走常规出图）"
+            continue
+        rj0 = (jl(paths.rejects, {}) or {}).get(oid)
+        if rj0 and not rj0.get("cleared"):
+            out["skipped"][sid] = "已在重出 / 换代中"
+            continue
+        master_reject(paths, oid, 0, reason, presets or ["frame_v9", "frame_v9"], None, by)
+        rj = jl(paths.rejects, {}) or {}
+        rj[oid].update(regen={"by": by, "reason": reason, "at": iso()}, label="换代重出")
+        js(paths.rejects, rj)
+        L = jl(paths.ledger, {}) or {}
+        L.setdefault(oid, {}).update(redo_exhausted=None, ladder_plan=[])
+        js(paths.ledger, L)
+        log_event(paths, "regen", obj=oid, reason=reason, by=by, counted=False)
+        out["regen"].append(sid)
+    return out
+
+
+def shots_of_episode(paths: Paths, ep: int) -> list:
+    reg = jl(paths.registry, {}) or {}
+    for E in reg.get("episodes") or []:
+        if int(E.get("ep") or 0) == int(ep):
+            return [S["shot"] for S in E.get("shots") or [] if S.get("shot")]
+    return []
+
+
+def regen_cmd(paths: Paths, ep: int, shots: list, reason: str, by: str, presets: list | None = None) -> dict:
+    norm = []
+    for x in shots:
+        x = x.strip()
+        norm.append(f"ep{int(ep):02d}-S{x.lstrip('Ss')}" if re.fullmatch(r"[Ss]?\d+", x) else x)
+    if not norm:
+        if not ep:
+            return {"regen": [], "error": "要 --episode N 或 --shots"}
+        norm = shots_of_episode(paths, ep)
+    if not norm:
+        return {"regen": [], "error": f"登记表里找不到第 {ep} 集的镜"}
+    return regen_shots(paths, norm, reason or "换代", by, presets)
+
+
+def dispatch_ok_cfg(root: Path) -> bool:
+    return cfg_flag(root, "auto_regen_on_change")
+
+
+def shots_of_all(paths: Paths) -> list:
+    reg = jl(paths.registry, {}) or {}
+    return [S["shot"] for E in reg.get("episodes") or [] for S in E.get("shots") or [] if S.get("shot")]
+
+
+def regen_signature(paths: Paths, sid: str) -> str | None:
+    """auto_regen_on_change 的签名：本镜剧本输入（input_sig）+ 画风 / 契约配置（be_rule_sig）"""
+    isg = input_sig(paths, sid)
+    return None if isg is None else f"{isg}|{be_rule_sig(paths.root)}"
+
+
+def auto_regen_check(paths: Paths, shots: list, by: str = "AUTO_REGEN") -> dict:
+    """B2 可选（producer.json auto_regen_on_change，默认关）：签名变了的镜自动 regen；首次见到只记基线，不出图。
+    签名记在 <pd>/regen_sigs.json"""
+    f = paths.pd / "regen_sigs.json"
+    sigs = jl(f, {}) or {}
+    changed = []
+    for sid in shots:
+        sg = regen_signature(paths, sid)
+        if sg is None:
+            continue
+        if sid not in sigs:
+            sigs[sid] = sg
+        elif sigs[sid] != sg:
+            changed.append(sid)
+            sigs[sid] = sg
+    js(f, sigs)
+    res = regen_shots(paths, changed, "导入稿 / 画风配置签名变化，自动换代", by) if changed else {"regen": [], "skipped": {}}
+    res["changed"] = changed
+    return res
 
 
 def best_effort_objs(paths: Paths, shots: set[str] | None = None) -> list[dict]:
@@ -4292,8 +4525,10 @@ def retry_obj(paths: Paths, oid: str, by: str, note: str = "") -> dict:
     if isinstance(a, dict) and a.get("blocked"):
         a.update(blocked=False, released_at=now(), released_by=by)
     js(paths.ledger, L)
-    log_event(paths, "retry", obj=oid, by=by, note=note, counted=False, before=before, assets_blocked_before=a_before)
-    return {"obj": oid, "before": before, "assets_blocked_before": a_before, "tries": r.get("tries")}
+    released = release_holds(paths, [sid], by, note or "retry 放回重派", files=("runaway_hold.json",))   # B2：同时释放 runaway 冻结
+    log_event(paths, "retry", obj=oid, by=by, note=note, counted=False, before=before, assets_blocked_before=a_before,
+              runaway_released=released)
+    return {"obj": oid, "before": before, "assets_blocked_before": a_before, "tries": r.get("tries"), "runaway_released": released}
 
 
 def rescore(paths: Paths, items: set) -> int:
@@ -4557,7 +4792,7 @@ def main(argv=None) -> int:
         pass
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["serve", "once", "status", "pause", "resume", "dryrun", "rescore", "reject", "approve", "unwait", "uncap", "retry", "reset-best-effort", "review-adopt", "import-staged",
-                                        "quarantine-foreign"])
+                                        "quarantine-foreign", "regen", "unhold"])
     ap.add_argument("--obj", default="")
     ap.add_argument("--n", type=int, default=0)
     ap.add_argument("--reason", default="")
@@ -4580,6 +4815,8 @@ def main(argv=None) -> int:
     ap.add_argument("--dry", action="store_true", help="quarantine-foreign：只出清单（缺省即 dry）；reset-best-effort：只列会重置的对象（W33）")
     ap.add_argument("--apply", action="store_true", help="quarantine-foreign：真的隔离（只移不删，写 manifest）")
     ap.add_argument("--rules", default="origin,role", help="quarantine-foreign：判据 origin / role / path（逗号分隔；path 在 ns_render 路径前缀修好前会误伤本剧版本）")
+    ap.add_argument("--episode", type=int, default=0, help="regen：集号")
+    ap.add_argument("--force", action="store_true", help="approve：跳过“契约没过拒绝”的保护（B2）")
     ap.add_argument("--keep", action="store_true")
     ap.add_argument("--skip-rubric-gate", action="store_true", help="import-staged：跳过 rubric 导入闸门（只有总调度能批，--by 须写总调度，记审计）")
     a = ap.parse_args(argv)
@@ -4640,7 +4877,17 @@ def main(argv=None) -> int:
             log_event(paths, "unwait", obj=a.obj, by=a.by)
         return 0
     if a.cmd == "approve":
-        return master_approve(paths, a.obj, a.n, a.by, a.note)
+        return master_approve(paths, a.obj, a.n, a.by, a.note, force=a.force)
+    if a.cmd == "unhold":
+        print(json.dumps(unhold(paths, a.obj, a.by, a.note), ensure_ascii=False))
+        return 0
+    if a.cmd == "regen":
+        r = regen_cmd(paths, a.episode, [x for x in a.shots.split(",") if x.strip()], a.reason or a.note, a.by, a.plan.split(","))
+        print(json.dumps(r, ensure_ascii=False))
+        return 0 if r.get("regen") else 1
+    if a.cmd == "resume" and a.shots:
+        print(json.dumps(resume_shots(paths, [x for x in a.shots.split(",") if x], a.by, a.note), ensure_ascii=False))
+        return 0
     if a.cmd == "rescore":
         return rescore(paths, set(a.items.split(",")))
     if a.cmd == "dryrun":
@@ -4661,7 +4908,7 @@ def main(argv=None) -> int:
         return 0
     only = set(x for x in a.only.split(",") if x) or None
     pr = Producer(paths, only=only)
-    pr.frames = FrameExec(paths, pr.script())
+    pr.frames = FrameExec(paths, pr.script(), script_fn=pr.script)
     reg = pr.tick(dispatch=not a.no_dispatch)
     if a.wait:
         t_end = now() + 3 * 3600
