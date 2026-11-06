@@ -25,6 +25,7 @@ import re
 import shutil
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -46,12 +47,22 @@ def _sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
-def atomic_json(p: Path, obj) -> None:
+def atomic_json(p: Path, obj, tries: int = 8) -> None:
+    """原子写。W-PICK 11-07：Windows 上 os.replace 撞上正在读清单的进程会 PermissionError（11-06 两条设定图挑选就这样失败），
+    与 tools/autopilot/runs._js 一样退避重试"""
     p.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=p.name + ".", suffix=".tmp")
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(json.dumps(obj, ensure_ascii=False, indent=1))
-    os.replace(tmp, p)
+    for i in range(tries):
+        try:
+            os.replace(tmp, p)
+            return
+        except PermissionError:
+            if i == tries - 1:
+                Path(tmp).unlink(missing_ok=True)
+                raise
+            time.sleep(0.05 * (i + 1))
 
 
 def _read_json(p: Path, what: str):
@@ -724,9 +735,9 @@ AUTO_PICK_KINDS = ("face", "scene", "sheet", "item")
 AUTO_BY = "系统自动（派生资产，按分数选用）"
 AUTO_DETAIL = {
     "face": "{who}的身份脸按 L-198 由系统代选：候选都过了人数 / 成年 / 无裸露 / 五官与 OCR，系统按分数（看图逐项通过率）选用了 {label}，"
-            "已登记进清单、造型设定图随即开出。想换请到资产中心换脸（下游设定图 / 单品会重做）；不合适点“修改”写一句意见。",
+            "已登记进清单、造型设定图随即开出。想换就点别的候选“用这个”（下游设定图 / 单品会重做）；点的就是这张 = 确认；不合适点“修改”写一句意见。",
     "scene": "{who}的场景底图按 L-198 由系统代选：候选都过了空镜契约与看图核对，系统按分数选用了 {label}，已登记、流程继续。"
-             "想换请到资产中心换底图；不合适点“修改”写一句意见。",
+             "想换就点别的候选“用这个”；点的就是这张 = 确认；不合适点“修改”写一句意见。",
 }
 
 
@@ -758,7 +769,7 @@ def auto_pick(root: Path, job: dict, cands: list[dict], who: str, what: str, pus
     （仍是同一个 pick：项目方点别的候选 = 换成那张，register_pick 走替换，下游自动重做）"""
     best = max(cands, key=lambda c: float(c.get("score") or 0))
     title = f"已自动选用：{who} {what}（{best.get('label')}），可修改"
-    if job.get("kind") in AUTO_DETAIL:                      # L-198：身份脸 / 场景底图（register_pick 不覆盖，换要走资产中心）
+    if job.get("kind") in AUTO_DETAIL:                      # L-198：身份脸 / 场景底图（W-PICK 11-07：项目方点别的候选 = 替换，下游重做）
         detail = AUTO_DETAIL[job["kind"]].format(who=who, label=best.get("label"))
     else:
         detail = (f"{who}的{what}是派生资产（身份脸和 P1 造型已定），系统按分数（身份相似度 + 看图逐项通过率）自动选用了 {best.get('label')}，已登记、流程继续。"
@@ -775,20 +786,126 @@ def auto_pick(root: Path, job: dict, cands: list[dict], who: str, what: str, pus
 
 
 def _replace_ok(entry: dict | None) -> bool:
-    """已登记的是系统自动选用的派生资产 → 项目方“修改”时允许换（身份脸 / 场景底图仍不覆盖）"""
+    """已登记的是系统自动选用的派生资产 → 系统 / 代选也可以换它（项目方本人的选择任何时候都能换，见 may_replace）"""
     return bool(entry and str(entry.get("picked_by") or "").startswith("系统自动"))
 
 
-def _redo_downstream_of_sheet(root: Path, run: str, d: dict, cid: str, lid: str, old_file: str, new_entry: dict) -> list[str]:
-    """换了设定图：从旧设定图裁出的单品移到 items_replaced，对应 item 作业改指新设定图、重新排队（先裁，裁不出再出候选）"""
-    lk = ((d.get("characters") or {}).get(cid) or {}).get("looks", {}).get(lid) or {}
+NON_OWNER_BY = ("系统自动", "总调度代选", "POLICY", "ASSET-WORKER", "delegate")
+
+
+def is_owner_by(by: str | None) -> bool:
+    """by 是项目方本人（登录会话名）而不是系统 / 代选 / 自动裁图"""
+    return bool(by) and not str(by).startswith(NON_OWNER_BY)
+
+
+def may_replace(old: dict | None, by: str) -> bool:
+    """W-PICK 11-07（项目方 11-07 01:1x“点了好几次没记录”）：已登记的东西谁能换——项目方本人的选择永远赢；
+    系统 / 代选只能换系统自动选用的那张，不能推翻项目方或代选登记的"""
+    return is_owner_by(by) or _replace_ok(old)
+
+
+def run_writable(root: Path, run: str) -> None:
+    """冻结 / 归档的剧不改资产（runs.json status），失败关闭并说清楚"""
+    try:
+        st = (((json.loads((root / "config" / "pipeline" / "runs.json").read_text(encoding="utf-8")).get("runs") or {}).get(run) or {}).get("status"))
+    except (OSError, ValueError):   # arch-ok: 读不出登记表 = run_for_pick 已经会拒绝，这里不重复判
+        return
+    if st in ("frozen", "archived"):
+        raise RegisterError(f"这部剧（{run}）已{'冻结' if st == 'frozen' else '归档'}，资产不再改；要改先在 runs.json 解冻")
+
+
+QUARANTINE_TAG = "pick_replace"
+_REG_LOCK = threading.RLock()     # 同一进程里并发的挑选（FastAPI 后台任务线程池）逐条写清单，不再互相撞（11-06 PermissionError）
+
+
+def _live_files(d) -> list[str]:
+    """清单里在用的 file（不含 replaced / items_replaced / sheets_replaced 历史）"""
+    out = []
+    if isinstance(d, dict):
+        for k, v in d.items():
+            if k in ("replaced", "items_replaced", "sheets_replaced"):
+                continue
+            if k == "file" and isinstance(v, str):
+                out.append(v)
+            else:
+                out += _live_files(v)
+    elif isinstance(d, list):
+        for v in d:
+            out += _live_files(v)
+    return out
+
+
+def retire(root: Path, d: dict, old: dict, why: str, moved: list) -> dict:
+    """被替换的登记 → replaced[] 的一条历史；旧文件移进 data/_quarantine/<时间>_pick_replace/<原路径>（不删）。
+    清单里别处还在用同一个文件就不移。moved 收集 (隔离路径, 原路径)，写清单失败时 unretire 回滚"""
+    hist = {k: v for k, v in old.items() if k != "replaced"}
+    hist.update(replaced_at=_now(), replaced_why=why)
+    rel = str(old.get("file") or "")
+    src = root / rel
+    if rel and src.is_file() and _live_files(d).count(rel) <= 1:
+        q = root / "data" / "_quarantine" / f"{time.strftime('%Y%m%d-%H%M%S')}_{QUARANTINE_TAG}" / rel
+        while q.exists():
+            q = q.with_name(f"{q.stem}_{len(moved) + 1}{q.suffix}")
+        q.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(q))
+        moved.append((q, src))
+        qrel = str(q.relative_to(root)).replace(os.sep, "/")
+        hist.update(file=qrel, original_file=rel, quarantined_to=qrel)
+    return hist
+
+
+def unretire(moved: list) -> None:
+    for q, src in reversed(moved):
+        if Path(q).is_file() and not Path(src).exists():
+            shutil.move(str(q), str(src))
+
+
+def _retire_sheets_of_face(d: dict, cid: str, new_file: str) -> list[str]:
+    """换了身份脸 = 这个人往下全部换人（清单部分）：已登记的造型设定图移到 looks[lid].sheets_replaced（文件不动），
+    从它们裁出的单品一并移到 items_replaced。返回退掉的造型 id"""
+    looks = (((d.get("characters") or {}).get(cid) or {}).get("looks") or {})
+    out = []
+    for lid, lk in looks.items():
+        sh = (lk or {}).get("sheet") if isinstance(lk, dict) else None
+        if not (sh or {}).get("file"):
+            continue
+        lk.setdefault("sheets_replaced", []).append({**lk.pop("sheet"), "replaced_at": _now(), "replaced_why": f"身份脸换成 {new_file}"})
+        _retire_items_of_sheet(lk, sh["file"])
+        out.append(lid)
+    return out
+
+
+def _requeue_sheets_of_face(root: Path, run: str, cid: str, old_file: str, new_file: str) -> list[str]:
+    """（作业部分，清单写成功后才做）该人的 sheet 作业重新排队：asset_worker 派 sheet 时送新脸（registered_face），
+    新设定图登记后单品照常从新图裁"""
+    redo = []
+    for j in list_jobs(root, run):
+        if j.get("kind") == "sheet" and (j.get("spec") or {}).get("cid") == cid and j.get("state") != "retired":
+            j.update(state="pending", attempts=0, final=False, error=None, candidates=[])
+            log(j, f"身份脸换成 {new_file}（原 {old_file}），设定图按新脸重出")
+            save_job(root, j)
+            redo.append(j["id"])
+    return redo
+
+
+def _retire_items_of_sheet(lk: dict, old_file: str) -> list[str]:
+    """（清单部分）从旧设定图裁出的单品移到 items_replaced；项目方本人挑定的单品不是从旧图裁的，不动"""
     items = lk.get("items") or {}
-    for iid in [k for k, v in items.items() if isinstance(v, dict) and v.get("source") == old_file]:
+    gone = [k for k, v in items.items() if isinstance(v, dict) and v.get("source") == old_file]
+    for iid in gone:
         lk.setdefault("items_replaced", []).append({**items.pop(iid), "iid": iid, "replaced_at": _now()})
+    return gone
+
+
+def _requeue_items_of_sheet(root: Path, run: str, lk: dict, old_file: str, new_entry: dict) -> list[str]:
+    """（作业部分，清单写成功后才做）从旧设定图裁的 item 作业改指新设定图、重新排队（先裁，裁不出再出候选）；
+    这件单品已由项目方本人挑定的，作业不重排"""
+    items = lk.get("items") or {}
     redo = []
     for j in list_jobs(root, run):
         sp = j.get("spec") or {}
-        if j.get("kind") == "item" and (sp.get("from_sheet") or {}).get("file") == old_file:
+        if (j.get("kind") == "item" and (sp.get("from_sheet") or {}).get("file") == old_file
+                and not is_owner_by((items.get(sp.get("iid")) or {}).get("picked_by"))):
             sp["from_sheet"] = {"file": new_entry["file"], "sha256": new_entry["sha256"]}
             sp.pop("crop_failed", None)
             j.update(state="pending", attempts=0, final=False, error=None, spec=sp)
@@ -903,87 +1020,143 @@ def run_for_pick(root: Path, req: dict) -> tuple[str, dict | None]:
 
 def register_pick(root: Path, kind: str, req: dict, choice: str, by: str, pusher=None, push: bool = True) -> dict:
     """CONTRACT（owner_pick）：选中 → 拷进资产包目录、写清单（file + sha256，其余候选 archived）、推两台并核 sha。
-    face：characters[cid].face；scene：scenes[sid].base；sheet：characters[cid].looks[look].sheet；item：looks[look].items[<id>]"""
+    face：characters[cid].face；scene：scenes[sid].base；sheet：characters[cid].looks[look].sheet；item：looks[look].items[<id>]
+    已有登记时（W-PICK 11-07，项目方的选择永远赢）：
+      · 选的就是现在这张（sha 相同）→ 成功、不改清单（noop“已是这张”）；
+      · 不同 → 替换：旧 entry 进新 entry 的 replaced[]，旧文件移进 data/_quarantine/<时间>_pick_replace/（不删），新图登记并推两台，
+        下游重做（sheet → 从旧图裁的单品重裁；face → 该人设定图全部重出，并登记卡点）。
+        项目方本人可以换任何一张；系统 / 代选只能换系统自动选用的（may_replace）。冻结 / 归档的剧一律拒绝"""
+    with _REG_LOCK:
+        return _register_pick(root, kind, req, choice, by, pusher, push)
+
+
+def _slot(d: dict, kind: str, obj: list, mdir: Path, choice: str, suffix: str, req: dict, job: dict | None) -> tuple[dict, str, Path, str]:
+    """清单里这个对象的登记位：(holder, key, 新文件路径, 中文名)"""
+    chars = d.setdefault("characters", {})
+    if kind == "face":
+        cid = obj[0]
+        return chars.setdefault(cid, {}), "face", mdir / "characters" / cid / "face" / f"{cid}_face_{safe_name(choice)}{suffix}", f"{cid} 的身份脸"
+    if kind == "scene":
+        sid = obj[0]
+        if not isinstance(d.get("scenes"), dict):
+            d["scenes"] = {}
+        return d["scenes"].setdefault(sid, {}), "base", mdir / "scenes" / sid / f"{sid}_base_{safe_name(choice)}{suffix}", f"场景 {sid} 的底图"
+    if kind == "sheet":
+        cid, lid = obj[0], obj[1]
+        lk = chars.setdefault(cid, {}).setdefault("looks", {}).setdefault(lid, {"name": lid, "route": "server_ok", "adult": False, "items": {}})
+        return lk, "sheet", mdir / "characters" / cid / "looks" / f"{cid}_{safe_name(lid)}_sheet_{safe_name(choice)}{suffix}", f"{cid} 造型 {lid} 的设定图"
+    if kind == "item":
+        cid, iid = obj[0], obj[1]
+        jspec = (job or {}).get("spec") or {}
+        lid = req.get("look") or (req.get("spec") or {}).get("look") or jspec.get("look")
+        holder = chars.setdefault(cid, {})
+        if lid:
+            holder = holder.setdefault("looks", {}).setdefault(lid, {"name": lid, "route": "server_ok", "adult": False, "items": {}})
+        return holder.setdefault("items", {}), iid, mdir / "characters" / cid / "items" / f"{safe_name(iid)}_{safe_name(choice)}{suffix}", f"{cid} 单品 {iid}"
+    raise RegisterError(f"不认识的类型 {kind}")
+
+
+def _register_pick(root: Path, kind: str, req: dict, choice: str, by: str, pusher=None, push: bool = True) -> dict:
     run, job = run_for_pick(root, req)
+    run_writable(root, run)
     req = {**req, "run": run, "job": req.get("job") or (job or {}).get("id"), "episode": req.get("episode") or (job or {}).get("episode")}
     mp = manifest_path(root, run)
     c, src = _cand_file(root, req, choice)
     k2, obj = pick_object(str(req["id"]))
     if k2 != kind or not obj:
         raise RegisterError(f"pick id {req['id']} 不是 {kind} 类")
-    mdir = mp.parent
     d, sha0 = _read_manifest(mp)
-    chars = d.setdefault("characters", {})
-    if kind == "face":
-        cid = obj[0]
-        dst = mdir / "characters" / cid / "face" / f"{cid}_face_{safe_name(choice)}{src.suffix.lower()}"
-        if (chars.get(cid) or {}).get("face", {}).get("file"):
-            raise RegisterError(f"{cid} 已经有身份脸（{chars[cid]['face']['file']}），不重复登记；要换请走资产中心")
+    holder, key, dst, what = _slot(d, kind, obj, mp.parent, choice, src.suffix.lower(), req, job)
+    old = holder.get(key) or {}
+    base = {"run": run, "kind": kind, "picked_by": by, "object": ":".join(obj), "picked": choice, "pick_id": req["id"], "job": req.get("job"),
+            "episode": req.get("episode")}
+    if old.get("file"):
+        if old.get("sha256") == c["sha256"]:          # 点的就是现在这张 = 确认，清单不动、不推
+            return {**base, "file": old["file"], "sha256": old["sha256"], "confirmed": True, "noop": "已是这张",
+                    "current_picked_by": old.get("picked_by"), "push": {"skipped": "已是这张，清单没变"}}
+        if not may_replace(old, by):
+            raise RegisterError(f"{what}已由{old.get('picked_by') or '别人'}登记（{old['file']}），{by} 不覆盖；只有项目方本人能换")
+    moved: list = []
+    try:
+        hist = retire(root, d, old, f"{by} 改选候选 {choice}", moved) if old.get("file") else None
         rel = _copy_in(root, src, dst)
-        entry = chars.setdefault(cid, {})
-        entry["face"] = _entry(rel, root, c, by, req)
-        if not entry.get("display_name"):                       # 总调度 11-03：登记脸时一并写 display_name（来源 P1 人物表）
+        entry = _entry(rel, root, c, by, req)
+        if kind == "item":
+            jspec = (job or {}).get("spec") or {}
+            entry.update(slot=req.get("slot") or jspec.get("slot") or "item", name=req.get("item_name") or jspec.get("label") or key, no_brand=True)
+        if hist:
+            entry["replaced"] = (old.get("replaced") or []) + [hist]
+        holder[key] = entry
+        if kind == "face" and not holder.get("display_name"):       # 总调度 11-03：登记脸时一并写 display_name（来源 P1 人物表）
             try:
                 story, _ = p1(root, run)
-                pc = p1_char(story, cid)
+                pc = p1_char(story, obj[0])
             except RuntimeError:
                 pc = None
-            if pc and pc.get("name"):
-                entry["display_name"] = pc["name"]
-            else:
-                raise RegisterError(f"{cid} 清单里没有 display_name，P1 人物表也查不到名字，不登记")
-    elif kind == "scene":
-        sid = obj[0]
-        dst = mdir / "scenes" / sid / f"{sid}_base_{safe_name(choice)}{src.suffix.lower()}"
-        scenes = d.get("scenes")
-        if not isinstance(scenes, dict):
-            scenes = d["scenes"] = {}
-        if (scenes.get(sid) or {}).get("base", {}).get("file"):
-            raise RegisterError(f"场景 {sid} 已经有底图，不重复登记")
-        rel = _copy_in(root, src, dst)
-        scenes.setdefault(sid, {})["base"] = _entry(rel, root, c, by, req)
-    elif kind == "sheet":
-        cid, lid = obj[0], obj[1]
-        dst = mdir / "characters" / cid / "looks" / f"{cid}_{safe_name(lid)}_sheet_{safe_name(choice)}{src.suffix.lower()}"
-        lk = chars.setdefault(cid, {}).setdefault("looks", {}).setdefault(lid, {"name": lid, "route": "server_ok", "adult": False, "items": {}})
-        old = lk.get("sheet") or {}
-        if old.get("file") and not _replace_ok(old):
-            raise RegisterError(f"{cid} 造型 {lid} 已经有设定图，不重复登记")
-        if old.get("file") and old.get("sha256") == c.get("sha256"):     # 项目方点的就是系统已选用的那张 = 确认，不改清单
-            old["confirmed_by"], old["confirmed_at"] = by, _now()
-            _write_manifest(mp, d, sha0)
-            return {"run": run, "kind": kind, "object": ":".join(obj), "picked": choice, "file": old["file"], "sha256": old["sha256"],
-                    "pick_id": req["id"], "job": req.get("job"), "episode": req.get("episode"), "confirmed": True, "push": {"skipped": "清单文件没变"}}
-        rel = _copy_in(root, src, dst)
-        lk["sheet"] = _entry(rel, root, c, by, req)
-        if old.get("file"):                                   # 项目方“修改”换掉系统自动选用的那张：留档 + 下游重做
-            lk["sheet"]["replaced"] = (old.get("replaced") or []) + [{k: v for k, v in old.items() if k != "replaced"}]
-            redone = _redo_downstream_of_sheet(root, run, d, cid, lid, old["file"], lk["sheet"])
-            lk["sheet"]["redo_jobs"] = redone
-    elif kind == "item":
-        cid, iid = obj[0], obj[1]
-        jspec = (job or {}).get("spec") or {}
-        lid = req.get("look") or (req.get("spec") or {}).get("look") or jspec.get("look")
-        dst = mdir / "characters" / cid / "items" / f"{safe_name(iid)}_{safe_name(choice)}{src.suffix.lower()}"
-        rel = _copy_in(root, src, dst)
-        _put_item(chars, cid, lid, iid, {**_entry(rel, root, c, by, req), "slot": req.get("slot") or jspec.get("slot") or "item",
-                                          "name": req.get("item_name") or jspec.get("label") or iid, "no_brand": True})
-    else:
-        raise RegisterError(f"不认识的类型 {kind}")
-    sha1 = _write_manifest(mp, d, sha0)
+            if not (pc and pc.get("name")):
+                raise RegisterError(f"{obj[0]} 清单里没有 display_name，P1 人物表也查不到名字，不登记")
+            holder["display_name"] = pc["name"]
+        retired_items = _retire_items_of_sheet(holder, old["file"]) if (kind == "sheet" and hist) else []
+        retired_sheets = _retire_sheets_of_face(d, obj[0], rel) if (kind == "face" and hist) else []
+        sha1 = _write_manifest(mp, d, sha0)
+    except Exception:
+        unretire(moved)
+        raise
+    res = {**base, "file": rel, "sha256": _sha((root / rel).read_bytes()), "manifest_sha_before": sha0[:12], "manifest_sha_after": sha1[:12],
+           "archived": [str(x.get("key")) for x in req.get("candidates") or [] if isinstance(x, dict) and str(x.get("key")) != str(choice)]}
+    if hist:
+        res["replaced"] = {"file": old["file"], "sha256": old.get("sha256"), "picked_by": old.get("picked_by"), "quarantined_to": hist.get("quarantined_to")}
+        if kind == "sheet":
+            res["redo_jobs"] = _requeue_items_of_sheet(root, run, holder, old["file"], entry)
+            res["items_retired"] = retired_items
+        elif kind == "face":
+            res["redo_jobs"] = _requeue_sheets_of_face(root, run, obj[0], old["file"], rel)
+            res["sheets_retired"] = retired_sheets
+            _report(root, run, req.get("episode") or 0, "8 资产就绪",
+                    f"身份脸被{by}换了：{obj[0]} {old['file']} → {rel}；这个人的设定图 {retired_sheets or '无'} 已退下、作业 {res['redo_jobs'] or '无'} 按新脸重出，"
+                    "已出的镜头首帧仍是旧脸", False, "设定图重出并登记后单品自动重裁；已出首帧要不要重出由总调度定")
     rels = [str(mp.relative_to(root)).replace(os.sep, "/"), rel]
     if kind == "item" and ((job or {}).get("spec") or {}).get("part_label"):
         rels.append(map_item_part(root, run, obj[0], ((job or {}).get("spec") or {}).get("look"), job["spec"]["part_label"], obj[1]))
-    res = {"run": run, "kind": kind, "picked_by": by, "object": ":".join(obj), "picked": choice, "file": rel, "sha256": _sha((root / rel).read_bytes()),
-           "manifest_sha_before": sha0[:12], "manifest_sha_after": sha1[:12], "pick_id": req["id"], "job": req.get("job"),
-           "archived": [str(x.get("key")) for x in req.get("candidates") or [] if isinstance(x, dict) and str(x.get("key")) != str(choice)],
-           "episode": req.get("episode")}
     res["push"] = push_files(root, rels, pusher=pusher) if (push and push_enabled(root)) else {"skipped": "push 关着（config/pipeline/asset_worker.json）"}
     bad = [h for h, v in (res["push"] or {}).items() if isinstance(v, dict) and v.get("ok") is False]
     if bad:
         _report(root, run, req.get("episode") or 0, "8 资产就绪", f"{kind} {':'.join(obj)} 已登记进清单，但推送 {','.join(bad)} 失败："
                 + "；".join(str(res["push"][h].get("error")) for h in bad), False, "FACTORY sync.py auto 每 10 分钟会补推；推不上就查 rssh 主连接")
     return res
+
+
+def preview_pick(root: Path, kind: str, req: dict, choice: str, by: str) -> dict:
+    """只读：这次选择如果现在登记会怎样（owner_pick reapply 的 dry-run 用）。
+    action：noop（已是这张）/ new（还没登记）/ replace（换掉现在的）/ refuse（不能换：冻结归档、系统想覆盖人工、候选坏了…，why 写原因）；
+    conflict=True：现在这张也是项目方本人登记的（推翻他自己更早的选择），默认不自动执行，交总调度确认"""
+    out = {"kind": kind, "id": req.get("id"), "choice": choice, "by": by}
+    try:
+        run, job = run_for_pick(root, req)
+        out["run"] = run
+        run_writable(root, run)
+        c, _src = _cand_file(root, {**req, "run": run}, choice)
+        out["chosen_sha"] = c["sha256"]
+        k2, obj = pick_object(str(req["id"]))
+        if k2 != kind or not obj:
+            raise RegisterError(f"pick id {req['id']} 不是 {kind} 类")
+        mp = manifest_path(root, run)
+        d, _ = _read_manifest(mp)
+        holder, key, _dst, what = _slot(json.loads(json.dumps(d)), kind, obj, mp.parent, choice, ".png", req, job)
+        old = holder.get(key) or {}
+        out.update(before_file=old.get("file"), before_sha=old.get("sha256"), before_by=old.get("picked_by"))
+        if not old.get("file"):
+            out["action"] = "new"
+        elif old.get("sha256") == c["sha256"]:
+            out["action"] = "noop"
+        elif may_replace(old, by):
+            out["action"] = "replace"
+            out["conflict"] = is_owner_by(old.get("picked_by"))
+        else:
+            out.update(action="refuse", why=f"{what}已由{old.get('picked_by')}登记，{by} 不覆盖")
+    except (RegisterError, RuntimeError, OSError, ValueError) as e:   # arch-ok: 预演只报原因，不写任何东西
+        out.update(action="refuse", why=str(e)[:200])
+    return out
 
 
 def registered_face(root: Path, run: str, cid: str) -> dict | None:
@@ -1092,8 +1265,8 @@ def _put_item(chars: dict, cid: str, lid: str | None, iid: str, entry: dict) -> 
         holder = holder.setdefault("looks", {}).setdefault(lid, {"name": lid, "route": "server_ok", "adult": False, "items": {}})
     items = holder.setdefault("items", {})
     old = items.get(iid) or {}
-    if old.get("file") and not _replace_ok(old):
-        raise RegisterError(f"{cid} 单品 {iid} 已经有图，不重复登记")
+    if old.get("file") and not may_replace(old, str(entry.get("picked_by") or "")):
+        raise RegisterError(f"{cid} 单品 {iid} 已由{old.get('picked_by') or '别人'}登记，自动裁图不覆盖")
     if old.get("file"):
         entry["replaced"] = (old.get("replaced") or []) + [{k: v for k, v in old.items() if k != "replaced"}]
     items[iid] = entry

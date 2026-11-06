@@ -85,6 +85,9 @@ export interface OwnerQueue {
   /** 通知直说：按阻塞程度计数；readonly = 只读告知（灰、无按钮、不进 count） */
   levels?: Record<BlockLevel, number>;
   readonly?: QueueItem[];
+  /** W-PICK 11-07：系统 / 代选已选用并生效的挑选（只是告知，不进 count）；折叠显示，卡片里仍可点别的候选换掉 */
+  delegated?: QueueItem[];
+  delegated_label?: string;
   auto_today: { passed: number; rejected: number; signed: number; policy: number; redo: number; n_image: number; n_last: number; n_video: number; agreement?: number | null; agreement_n?: number | null; total: number };
   master_waits: { n: number; title: string };
   machine_signed: Record<string, { image?: number; last?: number }>;

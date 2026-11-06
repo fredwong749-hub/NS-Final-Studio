@@ -30,6 +30,7 @@ SERVERS = ("gpu33", "gpu36")
 NEVER_LANES = ("gpu33:2",)
 KPI_EPISODE_MIN = 50          # L-205
 SCHEMA = "nsfs.brain_snapshot/1"
+API_BASE = "http://127.0.0.1:8800"
 CODE = {"passed": "P", "ready": "R", "running": "G", "pending": "W", "failed": "F", "best_effort": "B", "blocked": "X",
         "waiting_frame": "H", "done": "D"}
 LEGEND = "P=passed R=ready(可派) G=running W=pending F=failed B=best_effort X=blocked -=na；镜串 'F:状态/尝试 L:状态/尝试 V:状态'"
@@ -229,6 +230,12 @@ try:
 except Exception:
     out["vqa"] = None
 out["lane_roles_state"] = ((J("data/pipeline/lane_roles_state.json") or {}).get(RUN) or {})
+out["ctrl_files"] = {}
+for nm in ("owner_triggers.json", "master_rejects.json"):
+    try:
+        out["ctrl_files"][nm] = os.path.getmtime(PD + "/" + nm)
+    except OSError:
+        out["ctrl_files"][nm] = None
 print(NL + json.dumps(out, ensure_ascii=False))
 """
 
@@ -272,6 +279,8 @@ class Env:
     def __init__(self, root: Path = ROOT):
         self.root = Path(root)
         self._hosts = None
+        # W-SCAN：本机 API（网页看到的口径）只在真仓库根上查；测试的临时根 = None → 自查跳过 API 类检查
+        self.api_base = API_BASE if self.root.resolve() == ROOT.resolve() else None
 
     def now(self) -> float:
         return time.time()
@@ -355,9 +364,11 @@ def kpi(now: float, probes: dict, budget_min: int = KPI_EPISODE_MIN) -> dict:
         for ep, E in ((pr.get("registry") or {}).get("episodes") or {}).items():
             hv = E.get("have") or {}
             tot, done, ff, ll = int(hv.get("t") or 0), int(hv.get("v") or 0), int(hv.get("f") or 0), int(hv.get("l") or 0)
-            cur = have.get(ep)
-            if cur is None or tot > cur["total"] or done > cur["video_done"]:
-                have[ep] = {"total": tot, "video_done": done, "first_done": ff, "last_done": ll, "assembled": bool(E.get("asm"))}
+            # W-SCAN 11-07：逐字段取两台最大值。以前整条记录“总数或视频数更大才替换”→ 两台视频都是 0 时先探到的 gpu33（首帧 0）
+            # 把 gpu36（首帧 14）盖掉，大脑看到 ep02 0/16
+            cur = have.setdefault(ep, {"total": 0, "video_done": 0, "first_done": 0, "last_done": 0, "assembled": False})
+            cur.update(total=max(cur["total"], tot), video_done=max(cur["video_done"], done), first_done=max(cur["first_done"], ff),
+                       last_done=max(cur["last_done"], ll), assembled=cur["assembled"] or bool(E.get("asm")))
     for ep in sorted(set(starts) | set(have), key=lambda x: int(x) if str(x).isdigit() else 0):
         h = have.get(ep) or {}
         t0 = starts.get(ep)
@@ -414,6 +425,7 @@ def host_view(pr: dict | None, now: float) -> dict:
             "master_rejects_open": pr.get("master_rejects_open"), "video": pr.get("video"),
             "registry": pr.get("registry"), "log_fails": (pr.get("log") or {}).get("fails"),
             "ev_counts_tail": (pr.get("log") or {}).get("ev_counts_tail"), "lane_roles_state": pr.get("lane_roles_state"),
+            "ctrl_files": pr.get("ctrl_files"),
             "errors": {k: v for k, v in pr.items() if k.endswith("_error")}}
 
 
@@ -450,6 +462,8 @@ def compact(snap: dict, max_bytes: int) -> dict:
     def size(d):
         return len(json.dumps(d, ensure_ascii=False).encode("utf-8"))
     cuts = [
+        lambda: [v.update(evidence=str(v.get("evidence") or "")[:90], fix="", surface="")
+                 for v in ((snap.get("self_check") or {}).get("violations") or []) if isinstance(v, dict)],
         lambda: [h.update(ev_counts_tail=None) for h in snap["hosts"].values()],
         lambda: [h.update(night_log_tail=(h.get("night_log_tail") or [])[-3:]) for h in snap["hosts"].values() if h.get("probe") is not False],
         lambda: [h["video"].update(active=dict(list((h["video"].get("active") or {}).items())[:6])) for h in snap["hosts"].values() if h.get("video")],
@@ -459,6 +473,8 @@ def compact(snap: dict, max_bytes: int) -> dict:
         lambda: [h.update(log_fails=(h.get("log_fails") or [])[-3:], night_state=None) for h in snap["hosts"].values()],
         lambda: [h["registry"].update(shots_dropped=True) or [E.pop("shots", None) for E in (h["registry"].get("episodes") or {}).values()]
                  for h in snap["hosts"].values() if h.get("registry")],
+        lambda: isinstance(snap.get("self_check"), dict) and snap["self_check"].update(   # 红在前已排好；只留前 12 项，其余看 issues.jsonl
+            violations_n=len(snap["self_check"].get("violations") or []), violations=(snap["self_check"].get("violations") or [])[:12]),
     ]
     for cut in cuts:
         if size(snap) <= max_bytes:
@@ -508,6 +524,13 @@ def snapshot(env: Env | None = None, cfg: dict | None = None, save: bool = True)
     except Exception as e:  # noqa: BLE001  # arch-ok: 证据项
         snap["issues_open"] = {"error": repr(e)[:80]}
     snap["recent_decisions"] = recent_decisions(env.root, cfg["decisions_n"])
+    if cfg.get("self_check", True):
+        try:   # W-SCAN 11-07：系统自查（tools/brain/invariants.py）——违规开 / 更新 / 自动关卡点，列在 snapshot.md 最上面
+            INV = _load("invariants_for_brain", "tools/brain/invariants.py", env.root)
+            snap["self_check"] = INV.cycle(snap, env, now, sync=save)
+        except Exception as e:  # noqa: BLE001  # arch-ok: 自查本身出错只记一条，不影响快照
+            snap["self_check"] = {"error": repr(e)[:160]}
+    sc_full = json.loads(json.dumps(snap.get("self_check"), ensure_ascii=False))   # md 列全量；JSON 里按预算裁
     snap = compact(snap, cfg["max_bytes"])
     snap["hash"] = hashlib.sha256(json.dumps({k: v for k, v in snap.items() if k not in ("hash", "bytes", "at", "t")},
                                              ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:12]
@@ -515,7 +538,7 @@ def snapshot(env: Env | None = None, cfg: dict | None = None, save: bool = True)
         _jw(env.root / OUT_REL / "snapshot.json", snap)
         p = env.root / OUT_REL / "snapshot.md"
         tmp = p.with_name(p.name + f".{os.getpid()}.tmp")
-        tmp.write_text(summary_md(snap), encoding="utf-8")
+        tmp.write_text(summary_md({**snap, "self_check": sc_full} if sc_full is not None else snap), encoding="utf-8")
         os.replace(tmp, p)
     return snap
 
@@ -524,6 +547,14 @@ def summary_md(s: dict) -> str:
     """一屏 markdown 摘要（给人 / 给会话内大脑）"""
     L = [f"# 全局快照 {s.get('at')}  run={s.get('run')}  hash={s.get('hash')}  {s.get('bytes', '?')} B"
          + (f"  探针失败: {s['probe_errors']}" if s.get("probe_errors") else "")]
+    sc = s.get("self_check")
+    if isinstance(sc, dict) and sc.get("error"):
+        L.append(f"## 🔴 系统自查发现：自查本身出错 {sc['error']}")
+    elif isinstance(sc, dict) and sc.get("violations"):
+        L.append(f"## 🔴 系统自查发现（{len(sc['violations'])} 项；卡点新开 {sc.get('opened', 0)} / 自动关 {sc.get('closed', 0)}）")
+        L += [f"- {v.get('sev')} {v.get('title')} —— {v.get('evidence')} [{v.get('key')}{' ' + v['issue'] if v.get('issue') else ''}]" for v in sc["violations"]]
+    elif isinstance(sc, dict):
+        L.append(f"## 🟢 系统自查：{len(sc.get('ran') or [])} 类检查全过")
     L.append("## KPI（L-205 每集 ≤ 50 min）")
     for ep, k in (s.get("kpi") or {}).items():
         L.append(f"- ep{int(ep):02d}: {k.get('state')} 起 {k.get('start')} 已 {k.get('elapsed_min')} min · 首 {k.get('first_done')}/{k.get('total')} "

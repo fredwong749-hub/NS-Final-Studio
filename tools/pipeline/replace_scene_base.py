@@ -1,8 +1,8 @@
 """换场景底图（L-188 / L1：sk_white_cyc 换低调影棚版）——资产包清单里已有底图时的入口。
 
-asset_jobs.register_pick 对“已有底图”的场景失败关闭（不重复登记），所以换底图走这里：
-  - 复用 asset_jobs 的 manifest_path / _read_manifest / _write_manifest（清单 sha 防并发）/ _copy_in（sha 核对）/ push_files；
-  - 旧底图 entry 整条挂到新 entry 的 replaced[]（历史保留），旧图文件不删；
+总调度用任意源图（不是某条挑选的候选）换底图走这里；项目方在待办里点别的候选由 asset_jobs.register_pick 直接替换（W-PICK 11-07），两边同一套：
+  - 复用 asset_jobs 的 manifest_path / _read_manifest / _write_manifest（清单 sha 防并发）/ _copy_in（sha 核对）/ retire（旧图进隔离区）/ push_files；
+  - 旧底图 entry 整条挂到新 entry 的 replaced[]（历史保留），旧图文件移进 data/_quarantine/<时间>_pick_replace/（不删，replaced[].file 指向那里）；
   - 默认 dry-run（只打印计划，不拷贝、不写清单）；--apply 才写。
 
 用法：
@@ -38,13 +38,20 @@ def plan_replace(root: Path, run: str, scene: str, src_rel: str, name: str, by: 
            "new": {"src": src_rel, "file": rel, "sha256": sha_src[:12], "exists_already": dst.is_file()}}
     if not apply:
         return out
-    rel = AJ._copy_in(root, src, dst)
-    hist = [{k: v for k, v in old.items() if k != "replaced"}] if old.get("file") else []
-    new = {"file": rel, "sha256": AJ._sha((root / rel).read_bytes()), "sha256_source": "computed_at_register",
-           "source": f"{src_rel}（{note}）", "picked_by": by, "picked_at": AJ._now(), "route": "server_ok", "adult": False,
-           "replaced": (old.get("replaced") or []) + hist}
-    d.setdefault("scenes", {}).setdefault(scene, {})["base"] = new
-    sha1 = AJ._write_manifest(mp, d, sha0)
+    moved: list = []
+    with AJ._REG_LOCK:
+        try:
+            AJ.run_writable(root, run)
+            hist = [AJ.retire(root, d, old, f"{by} 换底图（{note}）", moved)] if old.get("file") else []   # 与项目方点选替换同一套：旧图进隔离区、不删
+            rel = AJ._copy_in(root, src, dst)
+            new = {"file": rel, "sha256": AJ._sha((root / rel).read_bytes()), "sha256_source": "computed_at_register",
+                   "source": f"{src_rel}（{note}）", "picked_by": by, "picked_at": AJ._now(), "route": "server_ok", "adult": False,
+                   "replaced": (old.get("replaced") or []) + hist}
+            d.setdefault("scenes", {}).setdefault(scene, {})["base"] = new
+            sha1 = AJ._write_manifest(mp, d, sha0)
+        except Exception:
+            AJ.unretire(moved)
+            raise
     out["manifest_sha_after"] = sha1[:12]
     out["push"] = AJ.push_files(root, [out["manifest"], rel]) if (push and AJ.push_enabled(root)) else {"skipped": "push 关着或 --no-push"}
     return out

@@ -1,0 +1,24 @@
+/* L-128 / L-210 成人镜本人触发（AdultTrigger.tsx）：纯文字，不放图 */
+.adt-hdr { position: relative; display: inline-flex; }
+.adt-pop { position: absolute; top: 100%; right: 0; z-index: 30; min-width: 340px; margin-top: 4px; padding: 8px 10px;
+  background: var(--panel, #1c1c1f); border: 1px solid var(--line, #444); border-radius: 6px; box-shadow: 0 6px 18px rgba(0, 0, 0, .35); }
+.adt-panel { margin: 10px 0; padding: 10px 12px; border: 1px solid #b0607a; border-radius: 6px; }
+.adt-panel h2 { margin: 0 0 4px; font-size: 15px; }
+.adt-ep { padding: 6px 0; border-top: 1px dashed var(--line, #444); }
+.adt-ep:first-of-type { border-top: 0; }
+.adt-eph { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.adt-m { opacity: .75; font-size: 12px; }
+.adt-btn { padding: 3px 10px; border: 1px solid #b0607a; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
+.adt-btn.adt-sm { padding: 1px 8px; font-size: 12px; }
+.adt-btn.adt-go { background: #b0607a; color: #fff; }
+.adt-btn:disabled { opacity: .6; cursor: default; }
+.adt-link { border: 0; background: transparent; color: inherit; opacity: .8; cursor: pointer; text-decoration: underline; font-size: 12px; }
+.adt-act { display: inline-flex; gap: 6px; align-items: center; }
+.adt-ask { font-size: 12px; }
+.adt-err { color: #e07070; font-size: 12px; }
+.adt-shots { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 3px; }
+.adt-shot { display: flex; gap: 10px; align-items: center; font-size: 13px; }
+.adt-st { min-width: 6em; }
+.adt-shot.st-waiting .adt-st { color: #e0b050; }
+.adt-shot.st-rendering .adt-st { color: #60a8e0; }
+.adt-shot.st-done .adt-st { color: #70c080; }

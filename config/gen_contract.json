@@ -66,6 +66,8 @@
    "default": 0.6,
    "other_floor": 0.4,
    "other_margin": 0.05,
+   "other_rel_margin": 0.15,
+   "_other_rel_margin": "L-211 ②（项目方 11-07 01:2x 回 2a）：Q1 互像检查（“本人的脸像另一个角色”）只有 对方分数 ≥ 本人分数 − 0.15 才挡（仍不低于 other_floor），取代 两张参考脸互像 + other_margin 的固定线（ep02 黎岸 / 周序两张新脸彼此 0.39 → 线 0.444，S1 v4 黎岸 0.754 / 周序 0.459 被误挡）。删本键 = 旧口径。gen_contract.postflight.evaluate",
    "recognize_floor": 0.45,
    "min_face_ratio": 0.04,
    "side_face": {"enabled": true, "yaw_min": 0.4, "iod_w_max": 0.30, "lo_delta": -0.10, "_doc": "W-DETECT 11-06：ep01 当天 Q1 63 次不过里 36 次是四分之三侧脸 0.40–0.50 被“直接不过”（S2 ×7、S4 尾帧 ×10、S5 ×7、S10 ×3 …），亲看 S2 v17 / S4 尾帧 v11 都是本人。YuNet 对上同一张脸：|yaw_n| ≥ yaw_min 或 眼距/脸宽 ≤ iod_w_max → 复核下限下移 lo_delta（近中景 0.50→0.40、小脸 0.40→0.30），只把“直接不过”改成进复核带交本地看图左右并排复核；通过线不动（身份硬项语义不变）。gen_contract.postflight.side_face_relax"},

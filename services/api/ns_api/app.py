@@ -207,6 +207,8 @@ from ns_api import owner_inbox as OWNERINBOX  # noqa: E402  L-134 待办通知�
 app.include_router(OWNERINBOX.router)
 from ns_api import owner_pick as OWNERPICK  # noqa: E402  INBOXPICK-S 待办中心里直接挑选并生效：POST /api/owner/pick（按 id 类型分派）
 app.include_router(OWNERPICK.router)
+from ns_api import adult_trigger as ADULTTRIG  # noqa: E402  L-128 / L-210 成人镜本人触发：GET / POST /api/owner/adult-trigger（只认登录的项目方）
+app.include_router(ADULTTRIG.router)
 from ns_api import owner_chat as OWNERCHAT  # noqa: E402  W30 PLAN_OWNER_CHAT 分期 2：POST /api/owner/chat（只读助手）、GET /api/owner/chat/digest
 app.include_router(OWNERCHAT.router)
 from ns_api import image_workshop as IWS  # noqa: E402  FILMUI 图像工坊：/api/image-workshop/bases · history（只读）· jobs（非 Qwen 先 501）

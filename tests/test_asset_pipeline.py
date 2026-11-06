@@ -272,8 +272,11 @@ def test_register_refuses_second_face_and_bad_candidate(root):
         AJ.register_pick(root, "face", req, "bad", "fred", push=False)
     res = AJ.register_pick(root, "face", req, "a", "fred", push=False)
     assert res["archived"] == ["bad", "nc"] and _j(root / "assets_v2/manifest.json")["characters"]["ch_tang_yao"]["display_name"] == "唐瑶"
-    with pytest.raises(AJ.RegisterError, match="已经有身份脸"):
-        AJ.register_pick(root, "face", req, "a", "fred", push=False)
+    again = AJ.register_pick(root, "face", req, "a", "fred", push=False)          # W-PICK 11-07：点的就是现在这张 = 确认（不再报“已经有”）
+    assert again["noop"] == "已是这张" and again["confirmed"] and again["file"] == res["file"]
+    _w(root / "data/review_pages/x/b.png", b"img-b")
+    with pytest.raises(AJ.RegisterError, match="只有项目方本人能换"):           # 系统不能覆盖项目方登记的脸
+        AJ.register_pick(root, "face", {**req, "candidates": [{"key": "b", "file": "data/review_pages/x/b.png", "contract_ok": True}]}, "b", AJ.AUTO_BY, push=False)
     with pytest.raises(AJ.RegisterError, match="不是 scene 类"):
         AJ.register_pick(root, "scene", req, "a", "fred", push=False)
 
@@ -1011,14 +1014,17 @@ def test_sheet_auto_picks_best_and_owner_can_switch_with_downstream_redo(root, m
     row = OP.process(root, job["pick_id"], "s1100", "fred")
     assert row["state"] == "done", row.get("error")
     lk = _j(root / "assets_v2/manifest.json")["characters"]["ch_zhuo_lin"]["looks"]["A"]
-    assert lk["sheet"]["file"].endswith("_s1100.png") and lk["sheet"]["replaced"][0]["file"] == sheet["file"]
+    hist = lk["sheet"]["replaced"][0]
+    assert lk["sheet"]["file"].endswith("_s1100.png") and hist["original_file"] == sheet["file"]
+    assert hist["file"].startswith("data/_quarantine/") and (root / hist["file"]).is_file() and not (root / sheet["file"]).exists()   # 旧图隔离不删
     assert "A_shoes1" not in lk["items"] and lk["items_replaced"][0]["iid"] == "A_shoes1"
     ij = AJ.load_job(AJ.job_path(root, RUN, "item-ch_zhuo_lin-A-shoes1"))
     assert ij["state"] == "pending" and ij["spec"]["from_sheet"]["file"] == lk["sheet"]["file"] and AW.is_crop_job(ij)
-    # 已登记的人工选择不许被覆盖（身份脸换要走资产中心）
-    with pytest.raises(AJ.RegisterError, match="已经有身份脸"):
-        AJ.register_pick(root, "face", {"id": "pick:face:ch_zhuo_lin", "run": RUN, "candidates": [{"key": "a", "file": "data/review_pages/x/zf.png", "contract_ok": True}]},
-                         "a", "fred", push=False)
+    # 已登记的人工选择不许被系统覆盖（项目方本人改选见 test_w_pick_*）
+    _w(root / "data/review_pages/x/zf2.png", b"zhuo-face-2")
+    with pytest.raises(AJ.RegisterError, match="只有项目方本人能换"):
+        AJ.register_pick(root, "face", {"id": "pick:face:ch_zhuo_lin", "run": RUN, "candidates": [{"key": "a", "file": "data/review_pages/x/zf2.png", "contract_ok": True}]},
+                         "a", AJ.AUTO_BY, push=False)
     # L-198（11-05）：身份脸 / 场景底图也进代选（W-ASSETS 11-06）；仍只在代选开着时生效（deliver 查 delegate_active）
     assert "face" in AJ.AUTO_PICK_KINDS and "scene" in AJ.AUTO_PICK_KINDS
 

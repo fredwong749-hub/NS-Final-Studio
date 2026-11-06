@@ -315,6 +315,14 @@ def image_body(project: str, ep, shot, g, c, sr, plan, *, style_suffix: str) -> 
         lines.append(line)
         negs += [x for x in ng if x not in negs]
     count = PV.frame_sentence(faced, hidden)                  # 按露脸人数；不露脸的人写“只以虚化的 X 在前景”
+    # L-211 ①（项目方 11-07 01:2x）：过肩前景 / 背影的不露脸者（hidden_people = 作业 cast.face_hidden；原文写到他的脸的除外）
+    # → 明写“背对镜头，只见后脑与肩”，他的脸 / 侧脸进本镜负面词（ep02-S5/S7/S13 前景男人露出侧脸、没送脸 = 陌生脸，19 张里 5 张）。
+    # 只对本镜这些人加；露出部位是手 / 腰侧等（被遮、局部）的不加
+    described_n = {x.get("name") for x in (sr.characters or []) if x.get("face_described")}
+    turned = [n for n, part in hidden.items() if n not in described_n and (part == "背影" or "肩" in part or "后脑" in part)]
+    if turned:
+        count = "，".join(x for x in (count, "，".join(f"{n}只见后脑与肩" if hidden[n] == "背影" else f"{n}背对镜头，只见后脑与肩" for n in turned)) if x)
+    turned_negs = [x for n in turned for x in (f"{n}的脸", f"{n}的侧脸", f"{n}的侧面轮廓")]
     # ③ 场景 + 一句布光
     from ns_agent.gen_contract import style as ST
     seg = segment_of(shot)
@@ -337,10 +345,10 @@ def image_body(project: str, ep, shot, g, c, sr, plan, *, style_suffix: str) -> 
              "，".join(extras) + "。" if extras else "", ref_note + "。"]
     body = "".join(p for p in parts if p)
     body = body.rstrip("。") + "，" + style_suffix
-    neg_extra = list(opt.get("negative_extra") or []) + negs
+    neg_extra = list(opt.get("negative_extra") or []) + negs + [x for x in turned_negs if x not in negs]
     n_vis = len([r for r in cast if r["presence"] == "在画"])
     if opt.get("extra_person_negative", True) and n_vis:
-        neg_extra.append(f"第{PV.ZH_NUM.get(n_vis + 1, n_vis + 1)}个人")
+        neg_extra.append(f"第{({2: '二'}.get(n_vis + 1) or PV.ZH_NUM.get(n_vis + 1, n_vis + 1))}个人")  # 序数：第二个人（不是“第两个人”）
     trace = {"template": TEMPLATE_ID, "size": size, "angle": a, "lens": L, "focus": sharp, "soft": soft, "n_faced": n_faced,
              "people": len(cast), "negations_dropped": negs}
     return body, neg_extra, trace

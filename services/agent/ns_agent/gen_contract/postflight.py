@@ -569,8 +569,13 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
             for o, v in sims.items():
                 if o == me:
                     continue
-                cr = (cross or {}).get(f"{me}~{o}", (cross or {}).get(f"{o}~{me}", 0.0))
-                lim = max(t1.get("other_floor", 0.4), cr + t1.get("other_margin", 0.05))
+                if t1.get("other_rel_margin") is not None:
+                    # L-211 ②（项目方 11-07 01:2x）：只有“对方分数 ≥ 本人分数 − other_rel_margin”才算像对方（原固定线 = 两张参考脸互像 + 0.05，
+                    # ep02 两张新男脸彼此 0.39 → 线 0.444，S1 v4 黎岸 0.754 / 周序 0.459 被误挡）；other_floor 仍是下限
+                    lim = max(t1.get("other_floor", 0.4), sims[me] - float(t1["other_rel_margin"]))
+                else:
+                    cr = (cross or {}).get(f"{me}~{o}", (cross or {}).get(f"{o}~{me}", 0.0))
+                    lim = max(t1.get("other_floor", 0.4), cr + t1.get("other_margin", 0.05))
                 if v >= lim and o not in allowed:
                     bad.append(f"{me} 的脸像 {o}（{v:.3f} ≥ {lim:.3f}）")
         add("Q1", "fail" if bad else "pass", "；".join(bad) if bad else

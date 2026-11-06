@@ -19,6 +19,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -49,7 +50,18 @@ def _atomic_json(p: Path, obj) -> None:
     fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=p.name + ".", suffix=".tmp")
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(json.dumps(obj, ensure_ascii=False, indent=1))
-    os.replace(tmp, p)
+    for i in range(8):   # W-SCAN #1（11-07）：Windows 上别的线程正读时 os.replace 报 WinError 5 → 点卡 500；短重试，最后失败清 tmp 再抛
+        try:
+            os.replace(tmp, p)
+            return
+        except PermissionError:
+            if i == 7:
+                try:
+                    os.unlink(tmp)
+                except OSError:  # arch-ok: tmp 已被清
+                    pass
+                raise
+            time.sleep(0.05 * (i + 1))
 
 
 def _sha_bytes(b: bytes) -> str:
@@ -83,12 +95,23 @@ def hidden_ids(root: Path) -> set[str]:
 DELEGATE_SHOW_S = 72 * 3600     # L-136：代选的条目在通知里保留这么久（显示“已代选：候选 N（可修改）”）
 
 
+NON_OWNER_BY = ("总调度代选", "POLICY", "系统自动", "ASSET-WORKER", "delegate")
+
+
+def is_owner(by) -> bool:
+    """这一步是项目方本人点的（登录会话名），不是代选 / 系统"""
+    return bool(by) and not str(by).startswith(NON_OWNER_BY)
+
+
 def delegated_ids(root: Path) -> set[str]:
-    """代选（ns_api.owner_delegate）选定、项目方还没处理完的条目：done（已代选）/ revise_requested（项目方点了修改）"""
+    """代选（ns_api.owner_delegate）选定、项目方还没处理完的条目：done（已代选）/ revise_requested（项目方点了修改）。
+    W-PICK 11-07：项目方本人已经点过且已收下 / 生效的（by 是项目方）不再算“代选待看”，卡片按 hidden_ids 消失"""
     out = set()
     for i, s in state(root).items():
         dg = (s or {}).get("delegate") or {}
         if not dg or (s or {}).get("state") not in ("done", "revise_requested", "processing", "accepted", "failed"):
+            continue
+        if is_owner((s or {}).get("by")) and (s or {}).get("state") in BLOCKING:
             continue
         try:
             age = time.time() - time.mktime(time.strptime(str(dg.get("at")), "%Y-%m-%dT%H:%M:%S"))
@@ -298,9 +321,22 @@ def enqueue_pick(root: Path, req: dict) -> dict:
     p = OQ._paths(root)["requests"]
     with _lock:
         rows = OQ.requests(root) if p.is_file() else []
+        prev = next((r for r in rows if str(r.get("id")) == str(req["id"])), None)
         rows = [r for r in rows if str(r.get("id")) != str(req["id"])] + [req]
         _atomic_json(p, rows)
+        # W-PICK 11-07：同一条挑选换了一批新候选（下游重做后重出）= 新问题；旧的 done / failed 状态不能再把新卡片藏掉或挂旧原因
+        if prev is not None and _cand_sig(prev) != _cand_sig(req):
+            st = state(root)
+            row = st.get(str(req["id"]))
+            if row and row.get("state") in ("done", "failed"):
+                st[str(req["id"])] = {"state": "reposted", "updated": _now(), "prev": {k: row.get(k) for k in ("state", "choice", "by", "updated", "error")}}
+                _atomic_json(_state_path(root), st)
     return req
+
+
+def _cand_sig(req: dict) -> list:
+    return sorted((str(c.get("key")), str(c.get("file") or c.get("audio") or ""), str(c.get("sha256") or ""))
+                  for c in req.get("candidates") or [] if isinstance(c, dict))
 
 
 def register(kind: str, fn, wired: bool = True) -> None:
@@ -336,6 +372,14 @@ for _k in ("face", "scene", "sheet", "item"):
 
 
 
+REPICK_KINDS = ("face", "scene", "sheet", "item")     # register_pick 支持“已登记时替换”的类型（W-PICK 11-07）
+
+
+def repickable(item_id: str) -> bool:
+    k = kind_of(item_id)
+    return ALIASES.get(k, k) in REPICK_KINDS
+
+
 def handler_of(item_id: str):
     k = kind_of(item_id)
     return HANDLERS.get(ALIASES.get(k, k))
@@ -364,12 +408,19 @@ def accept(root: Path, item_id: str, choice: str, reason: str, by: str) -> dict:
         raise HTTPException(501, f"{kind_of(item_id) or item_id} 类挑选的落地还没接，先走 /api/owner/decide")
     with _lock:
         cur = state(root).get(item_id) or {}
-        if choice != "revise" and cur.get("delegate") and cur.get("state") == "done" and not str(by).startswith("总调度代选"):
-            # L-136：项目方在已代选的条目上改选别的候选 = “修改”（登记处理器不覆盖已登记的脸 / 音色，按原有修改机制由下游重做）
-            reason = f"改选候选 {choice}（推翻代选的 {cur.get('choice')}）" + (f"：{reason}" if reason else "")
-            choice = "revise"
-        if choice != "revise" and cur.get("state") in BLOCKING:
-            return {"duplicate": True, "state": cur}
+        if choice != "revise":
+            if cur.get("state") in ("accepted", "processing"):
+                return {"duplicate": True, "state": cur}
+            if cur.get("state") == "done" and (str(cur.get("choice")) == choice or not is_owner(by)):
+                # W-PICK 11-07：点的就是已生效的那个 = 已经记下了（以前会被下面改成“修改”，11-06 造型确认就这样多出一条修改）；代选不改已生效的
+                return {"duplicate": True, "state": cur}
+            if cur.get("state") == "done" and not repickable(item_id):
+                if not cur.get("delegate"):
+                    return {"duplicate": True, "state": cur}
+                # L-136：音色 / 造型确认这类处理器不能覆盖的，项目方改选别的候选 = “修改”（按原有修改机制由下游重做）
+                reason = f"改选候选 {choice}（推翻代选的 {cur.get('choice')}）" + (f"：{reason}" if reason else "")
+                choice = "revise"
+            # face / scene / sheet / item：已生效后项目方改选别的 → 照常处理，register_pick 替换（旧图隔离 + 下游重做），项目方的选择永远赢
         row = {**cur, "state": "revise_requested" if choice == "revise" else "accepted", "choice": choice, "by": by, "reason": reason[:300],
                "accepted_at": _now(), "error": None, "updated": _now()}
         st = state(root)
@@ -395,12 +446,36 @@ def process(root: Path, item_id: str, choice: str, by: str, apply_fn=None, repla
         if replayed_from:
             res = {**res, "replayed_from": replayed_from}
     except PickError as e:
-        return _set_state(root, item_id, state="failed", error=str(e))
-    except Exception as e:  # noqa: BLE001  任何异常都别吞：标 failed、带原因
-        return _set_state(root, item_id, state="failed", error=f"{type(e).__name__}: {e}"[:300])
+        return _set_state(root, item_id, state="failed", error=human_error(str(e)), error_raw=str(e)[:500], failed_at=_now())
+    except Exception as e:  # noqa: BLE001  任何异常都别吞：标 failed、带原因（给项目方一句人话，原文留 error_raw）
+        raw = f"{type(e).__name__}: {e}"[:500]
+        return _set_state(root, item_id, state="failed", error=human_error(raw), error_raw=raw, failed_at=_now())
     row = _set_state(root, item_id, state="done", result=res, done_at=_now(), error=None)
     _record(root, item_id, choice, by, "", res, via)
     return row
+
+
+HUMAN_ERRORS = (    # (原因里出现的词, 给项目方看的一句话)；按顺序第一条命中
+    (("PermissionError", "被别人改了", "Access is denied"), "这次正好撞上别的程序在写资产清单，没写进去；再点一次就行"),
+    (("已冻结", "已归档"), None),                                        # 原文已经是人话
+    (("只有项目方本人能换",), "这张已由系统或代选登记，这次的自动操作没覆盖它；你本人点选会直接换"),
+    (("没过契约",), "这张候选没过检查，不能用；请换一张，或点“修改”写一句"),
+    (("sha 与作业登记不符", "sha 与候选不符", "sha 变了"), "这张候选图和当时出的不一致了，不敢用；请换一张，或点“修改”写一句"),
+    (("的图不存在", "没有候选"), "这张候选图找不到了；请换一张，或点“修改”写一句"),
+    (("已存在且与候选内容不同",), "资产包里已有一张同名但内容不同的图，没覆盖；总调度会处理，你不用再点"),
+    (("找不到对应的资产作业", "没在 runs.json 登记", "不一致，不登记"), "这条挑选对应不上哪部剧，没登记；总调度会处理，你不用再点"),
+)
+
+
+def human_error(raw: str) -> str:
+    """失败原因 → 项目方能看懂的一句话（W-PICK 11-07：卡片重新出现时必须说清为什么，不能像没点过一样）"""
+    raw = str(raw or "")
+    for keys, say in HUMAN_ERRORS:
+        if any(k in raw for k in keys):
+            return say or raw[:120]
+    if raw and not raw.isascii() and len(raw) <= 120 and ":" not in raw[:30]:
+        return raw
+    return "系统处理这次选择时出错了，已记下原因，总调度会处理；你也可以再点一次"
 
 
 def _record(root: Path, item_id: str, choice: str, by: str, reason: str, res: dict | None, via: str = "owner_pick") -> None:
@@ -461,6 +536,90 @@ def replay(root: Path = REPO, apply_fn=None, deadline: float | None = None, stal
             _atomic_json(_state_path(root), st)
         row = process(root, iid, str(d["choice"]), str(d["by"]), apply_fn, replayed_from=f"{d.get('at')} {iid}", via=via)
         out.append({"id": iid, "choice": d["choice"], "by": d["by"], "state": row.get("state"), "error": row.get("error")})
+    return out
+
+
+# ------------------------------------------------------------------ reapply：项目方点过、却因旧处理器失败 / 卡住的挑选，用修好的处理器再执行一次（W-PICK 11-07）
+REVISE_BOGUS_RE = re.compile(r"^改选候选 (\S+)（推翻代选的 \1）$")
+
+
+def _bogus_revise(root: Path, iid: str, row: dict) -> dict | None:
+    """11-06 旧 accept 把“点已生效的同一个选项”误改成“修改”（理由形如“改选候选 X（推翻代选的 X）”）。
+    最近一次真正生效的决定就是 X → 返回那条决定（应恢复成 done）；否则 None"""
+    from ns_api import owner_queue as OQ  # noqa: PLC0415
+    m = REVISE_BOGUS_RE.match(str(row.get("reason") or ""))
+    if row.get("state") != "revise_requested" or not m:
+        return None
+    applied = [d for d in OQ.decisions(root) if str(d.get("id")) == iid and d.get("applied") and d.get("choice") != "revise"]
+    return applied[-1] if applied and str(applied[-1].get("choice")) == m.group(1) else None
+
+
+def reapply_plan(root: Path = REPO, stale_s: float | None = REPLAY_STALE_S, only: set | None = None) -> list[dict]:
+    """要补的条目（只读）：项目方本人（is_owner）点的、不是“修改”、类型支持替换（REPICK_KINDS）、
+    state=failed，或 accepted / processing 超过 stale_s 没更新（当时的处理进程没了）；外加被误改成“修改”的（restore_done）"""
+    AJ = _asset_jobs()
+    out = []
+    now = time.time()
+    for iid, row in state(root).items():
+        row = row or {}
+        if only and iid not in only:
+            continue
+        dec = _bogus_revise(root, iid, row)
+        if dec is not None:
+            out.append({"id": iid, "choice": dec.get("choice"), "by": row.get("by"), "state": row.get("state"), "action": "restore_done",
+                        "why": f"{dec.get('at')} 已生效的 {dec.get('choice')} 被误记成修改"})
+            continue
+        if not is_owner(row.get("by")) or row.get("choice") in (None, "", "revise") or not repickable(iid):
+            continue
+        st = row.get("state")
+        if st in ("accepted", "processing"):
+            try:
+                age = now - time.mktime(time.strptime(str(row.get("updated")), "%Y-%m-%dT%H:%M:%S"))
+            except ValueError:
+                age = 0
+            if stale_s is not None and age < stale_s:
+                continue
+        elif st != "failed":
+            continue
+        req = _request_of(root, iid)
+        if not req:
+            out.append({"id": iid, "choice": row["choice"], "by": row["by"], "state": st, "action": "refuse", "why": "通知里已没有这条请求"})
+            continue
+        k = ALIASES.get(kind_of(iid), kind_of(iid))
+        out.append({**AJ.preview_pick(root, k, req, str(row["choice"]), str(row["by"])), "state": st, "error_before": row.get("error")})
+    return out
+
+
+def reapply(root: Path = REPO, apply: bool = False, include_conflicts: bool = False, stale_s: float | None = REPLAY_STALE_S,
+            only: set | None = None, apply_fn=None) -> list[dict]:
+    """dry-run（默认）只列计划；apply=True 才执行：noop / new / replace 走 process（与项目方点选同一处理器，via=owner_pick:reapply，
+    by = 当时点的项目方）；conflict（推翻项目方自己更早的选择）默认跳过，include_conflicts 才做；refuse 不做；restore_done 把误记的“修改”恢复成 done。
+    幂等：补完的条目变 done，再跑不会再出现在计划里"""
+    plan = reapply_plan(root, stale_s, only)
+    if not apply:
+        return plan
+    out = []
+    for p in plan:
+        iid, act = p["id"], p.get("action")
+        if act == "restore_done":
+            with _lock:
+                st = state(root)
+                row = st.get(iid) or {}
+                st[iid] = {**row, "state": "done", "choice": p["choice"], "reason": "", "error": None, "updated": _now(),
+                           "restored": {"at": _now(), "why": p["why"], "was": {k: row.get(k) for k in ("state", "choice", "reason", "updated")}}}
+                _atomic_json(_state_path(root), st)
+            out.append({**p, "after": "done"})
+            continue
+        if act not in ("noop", "new", "replace") or (p.get("conflict") and not include_conflicts):
+            out.append({**p, "after": "skipped"})
+            continue
+        with _lock:
+            st = state(root)
+            st[iid] = {**(st.get(iid) or {}), "state": "accepted", "error": None, "replay": True, "via": "owner_pick:reapply", "pid": os.getpid(),
+                       "accepted_at": _now(), "updated": _now()}
+            _atomic_json(_state_path(root), st)
+        row = process(root, iid, str(p["choice"]), str(p["by"]), apply_fn, replayed_from=f"{p.get('state')} {iid}", via="owner_pick:reapply")
+        out.append({**p, "after": row.get("state"), "error_after": row.get("error"), "result_noop": (row.get("result") or {}).get("noop")})
     return out
 
 
@@ -549,6 +708,14 @@ if __name__ == "__main__":
         res = replay(REPO, stale_s=stale, via="owner_pick:cli")
         print(json.dumps(res, ensure_ascii=False, indent=1) if res else "没有需要补执行的旧决定")
         sys.exit(1 if any(r["state"] != "done" for r in res) else 0)
-    print("用法：python services/api/ns_api/owner_pick.py replay")
+    if len(sys.argv) > 1 and sys.argv[1] == "reapply":
+        for p_ in (str(REPO / "services" / "api"),):
+            if p_ not in sys.path:
+                sys.path.insert(0, p_)
+        only = next((set(a.split("=", 1)[1].split(",")) for a in sys.argv[2:] if a.startswith("--only=")), None)
+        res = reapply(REPO, apply="--apply" in sys.argv, include_conflicts="--include-conflicts" in sys.argv, only=only)
+        print(json.dumps(res, ensure_ascii=False, indent=1) if res else "没有要补执行的挑选")
+        sys.exit(0)
+    print("用法：python services/api/ns_api/owner_pick.py replay | reapply [--apply] [--include-conflicts] [--only=id1,id2]")
     sys.exit(2)
 

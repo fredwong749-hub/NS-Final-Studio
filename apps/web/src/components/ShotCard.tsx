@@ -391,8 +391,8 @@ export const ShotCard = memo(function ShotCard({ s, detail, job, selected, inMul
         <span className="rv-text">{REVIEW_LABEL[s.review.state]}</span>
         <span className="grow" />
         {s.adult && (
-          <span className="badge b-adult" title="成人路由，本地渲染">
-            本地
+          <span className="badge b-adult" title="成人镜头：只在你点了之后才出">
+            成人
           </span>
         )}
         {s.explicit_hold && (

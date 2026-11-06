@@ -336,6 +336,32 @@ def _cand_ok(root: Path, c: dict) -> tuple[bool, dict | None]:
     return c.get("contract_ok") is True, None
 
 
+ASSET_LINK = {"face": "#/assets?type=people", "sheet": "#/assets?type=people", "item": "#/assets?type=people", "scene": "#/assets?type=scene"}
+
+
+def pick_link(root: Path, r: dict) -> str | None:
+    """W-PICK 11-07（项目方 01:3x 指着 sheet-ch_li_an-A 那个链接）：资产作业的 link 是候选图目录 data/review_pages/...，
+    目录里没有网页，打开落到前端外壳、又像要他挑一次。没有 index.html 的目录链接一律换成资产中心（在那里看 / 换）"""
+    link = r.get("link")
+    if not link or str(link).startswith(("#", "http", "/api/")):
+        return link
+    rel = str(link).lstrip("/")
+    p = root / rel
+    if rel.startswith("data/review_pages/") and (p.is_dir() and not (p / "index.html").is_file() or not p.exists()):
+        from ns_api import owner_pick as OP   # noqa: PLC0415
+        return ASSET_LINK.get(OP.kind_of(str(r.get("id"))), "#/assets")
+    return link
+
+
+def delegated_notice(r: dict, ps: dict | None) -> bool:
+    """W-PICK 11-07（项目方“点过了又弹出来”）：系统 / 代选已经选用并生效的挑选只是告知，不进“待你看”，放进折叠的“系统已代选（可改）”。
+    项目方点过但没成功（failed）、提了修改（revise_requested）、正在处理的，仍算要他看"""
+    st = (ps or {}).get("state")
+    if st in ("failed", "revise_requested", "accepted", "processing"):
+        return False
+    return bool(r.get("auto_picked") or r.get("notice")) or bool((ps or {}).get("delegate") and st == "done")
+
+
 def pick_items(root: Path, closed: set[str]) -> tuple[list[dict], list[dict]]:
     """返回（进队列的挑选, 系统自动选掉的挑选）"""
     from ns_api import owner_pick as OP   # 统一入口 POST /api/owner/pick（INBOXPICK-S）
@@ -365,12 +391,13 @@ def pick_items(root: Path, closed: set[str]) -> tuple[list[dict], list[dict]]:
             continue
         rec = str(r.get("recommend")) if str(r.get("recommend")) in {c["key"] for c in cands} else \
             max(cands, key=lambda c: float(c.get("score") or 0))["key"]
-        out.append({"id": str(r["id"]), "kind": "pick", "category": "pick", "category_label": "挑一张", "title": r.get("title") or "挑一张",
+        ps = OP.state_of(root, str(r["id"])) if via_pick else {}
+        out.append({"delegated_notice": delegated_notice(r, ps),"id": str(r["id"]), "kind": "pick", "category": "pick", "category_label": "挑一张", "title": r.get("title") or "挑一张",
                     "detail": r.get("detail") or "", "source": r.get("source") or r.get("by") or "", "at": r.get("at") or "",
                     "media": [{"url": c["url"], "kind": c["kind"], "label": c["label"], "key": c["key"]} for c in cands],
                     "candidates": cands, "scores": next((c["scores"] for c in cands if c["key"] == rec), []),
                     "options": [{"key": c["key"], "label": c["label"]} for c in cands] + ([] if via_pick else [{"key": "later", "label": "稍后"}]),
-                    "recommend": {"choice": rec, "why": r.get("why") or "系统推荐（契约分最高）"}, "apply": r.get("apply"), "link": r.get("link"),
+                    "recommend": {"choice": rec, "why": r.get("why") or "系统推荐（契约分最高）"}, "apply": r.get("apply"), "link": pick_link(root, r),
                     # 统一入口：有 pick_api 的条目，前端点“用这个”直接 POST 到它，选定后真正生效（voice_v2 已接；图片类等资产线接）
                     "pick_api": "/api/owner/pick" if via_pick else None, "pick_state": OP.state_of(root, str(r["id"])) if via_pick else None,
                     # V2CUT-O 11-03：确认本集造型（look）一条列出全部人物：人名 / 本集造型 / 缩略图（look_confirm.sync_picks 投递）
@@ -640,24 +667,30 @@ def _humanize(it: dict, delegate_on: bool) -> dict:
         elif sub == "face":
             say = (f"挑{name}的身份脸：{n} 张候选" if name else f"挑身份脸：{_strip_pick(title) or '这个人'}（{n} 张候选）") + (f"，推荐{_rec_label(it)}" if rec else "")
             why = f"{ep or '这一集'}要用这个人，没有身份脸出不了图"
-            acts = _pick_actions(it, rec, revise=True, link_label="看候选大图")
+            acts = _pick_actions(it, rec, revise=True, link_label="去资产页看 / 换")
             level = "red"
         elif sub == "scene":
             say = f"挑场景底图：{_strip_pick(title)}（{n} 张候选）" if _strip_pick(title) else f"挑场景底图（{n} 张候选）"
             why = f"{ep or '这一集'}在这个场景拍，没有底图出不了图"
-            acts = _pick_actions(it, rec, revise=True, link_label="看候选大图")
+            acts = _pick_actions(it, rec, revise=True, link_label="去资产页看 / 换")
             level = "red"
+        elif auto and sub in ("face", "scene"):
+            what = "身份脸" if sub == "face" else "场景底图"
+            say = f"不用你做事：系统已选好{name or _strip_pick(title) or ''}的{what}，想换再点别的"
+            why = rec_why or "系统按分数代选并已登记，流程没停；点别的候选“用这个”就换成那张"
+            acts = _pick_actions(it, None, revise=True, link_label="去资产页看 / 换")
+            level = "yellow"
         elif sub in ("sheet", "item"):
             what = "造型设定图" if sub == "sheet" else "单品图"
             if auto:
                 say = f"不用你做事：系统已替{name or '这个人'}选好{what}，想换再点别的"
                 why = rec_why or "身份脸和造型已定，系统按分数自动选用，流程没停"
-                acts = _pick_actions(it, None, revise=True, link_label="看候选大图")
+                acts = _pick_actions(it, None, revise=True, link_label="去资产页看 / 换")
                 level = "yellow"
             else:
                 say = (f"挑{name}的{what}：{n} 张候选" if name else f"挑{what}：{_strip_pick(title)}（{n} 张候选）") + (f"，推荐{_rec_label(it)}" if rec else "")
                 why = "设定图定了才能裁单品、出首帧" if sub == "sheet" else "单品图定了首帧的穿戴才前后一致"
-                acts = _pick_actions(it, rec, revise=True, link_label="看候选大图")
+                acts = _pick_actions(it, rec, revise=True, link_label="去资产页看 / 换")
                 level = "red"
         elif sub == "frame":
             sid = next((c.get("sid") for c in it.get("candidates") or [] if c.get("sid")), None)
@@ -742,7 +775,13 @@ def _build(root: Path, now: float, _errors: list[str]) -> dict:
     scan = scan_takes(root)
     items += [x for x in spot_items(root, scan) if x["id"] not in closed]
     picks, auto_picks = pick_items(root, closed)
-    items += picks
+    items += [x for x in picks if not x.get("delegated_notice")]
+    delegated = [x for x in picks if x.get("delegated_notice")]
+    for x in delegated:
+        x["kind_label"] = KIND_LABEL.get(x["kind"], x["kind"])
+    enrich(delegated, root)
+    for x in delegated:          # 只是告知：灰、不进 count；卡片里仍可点别的候选“用这个”换掉（register_pick 替换 + 下游重做）
+        x.update(block_level="grey", level_label=LEVEL_LABEL["grey"])
     for a in auto_picks:     # 只剩一张过契约 → 系统直接选（记 by=POLICY，不再出现）
         _auto_pick(root, a)
     for x in items:
@@ -764,6 +803,7 @@ def _build(root: Path, now: float, _errors: list[str]) -> dict:
                            "total": sum(scan["by_stage"].values()) + policy_today},
             "levels": level_counts(items), "level_label": LEVEL_LABEL,
             "master_waits": master_waits, "machine_signed": machine_signed(root, scan), "autosign_mode": autosign_mode(root),
+            "delegated": delegated, "delegated_label": "系统已代选（可改）",
             "source_errors": errs, "complete": not errs, "status": "error" if errs else "ok",
             "status_label": ("队列读取失败：" + "、".join(dict.fromkeys(_src_name(e) for e in errs))) if errs else ""}
 

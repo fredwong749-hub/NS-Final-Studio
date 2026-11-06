@@ -638,8 +638,23 @@ def owner_trigger_ids(paths) -> set:
     """项目方在界面上点了“出这一镜”的对象 id（data/producer[/runs/<run>]/owner_triggers.json {"objects": [...]}）；读不到 = 空（不放行成人镜）"""
     try:
         return set((json.loads((paths.pd / "owner_triggers.json").read_text(encoding="utf-8")) or {}).get("objects") or [])
-    except (OSError, ValueError):   # arch-ok: 没有触发记录 = 一个都不放（失败关闭）
+    except (OSError, ValueError, AttributeError):   # arch-ok: 没有触发记录 / 格式坏 = 一个都不放（失败关闭）
         return set()
+
+
+def triggered_shots(triggers: set) -> set:
+    """项目方已触发的成人镜号（first:/last: 任一在触发清单里；兼容 <run>/first:<镜> 写法）"""
+    out = set()
+    for t in triggers or ():
+        kind, _, sid = str(t).rsplit("/", 1)[-1].partition(":")
+        if kind in ("first", "last") and sid:
+            out.add(sid)
+    return out
+
+
+def adult_blocked(o: dict, adult_shots: set, owner_triggers: set) -> bool:
+    """L-128 不变项：成人镜对象没在项目方触发清单里 = 不派（L-210：触发后照常走 gpu33 / gpu36 的出图道，不限笔记本）"""
+    return o["shot"] in adult_shots and o["id"] not in owner_triggers
 
 
 def is_server_lane(lane: str) -> bool:
@@ -3563,8 +3578,8 @@ class Producer:
         if not LRO.enabled(cfg):
             self._lr_phases, self._lr_active = {}, None
             return {}
-        try:
-            adult = adult_shot_ids(self.script())
+        try:      # L-210：项目方已触发的成人镜按普通镜算阶段（否则集已过首尾帧段 → 出图道 = []，触发了也派不出去）
+            adult = adult_shot_ids(self.script()) - triggered_shots(owner_trigger_ids(self.p))
         except Exception:  # noqa: BLE001  # arch-ok: 剧本读不到 = 不排除成人镜（阶段只会更保守地留在 frames）
             adult = set()
         held = LRO.apply_hold_regen(reg, cfg, jl(self.p.rejects, {}) or {})
@@ -3756,7 +3771,7 @@ class Producer:
                     self._local_only_logged.add(o["id"])
                     self.logf("local_only_skip", obj=o["id"], counted=False, why="剧本 H3校验 标了本地生成 / 占位，空闲道都不在项目方自有机器上")
                 continue
-            if o["shot"] in adult_shots and o["id"] not in owner_triggers:   # L-128 不变项：成人画面只由项目方在界面触发
+            if adult_blocked(o, adult_shots, owner_triggers):   # L-128 不变项：成人画面只由项目方在界面触发
                 if o["id"] not in self.__dict__.setdefault("_adult_wait_logged", set()):
                     self._adult_wait_logged.add(o["id"])
                     self.logf("adult_wait_owner", obj=o["id"], counted=False, why="成人画面：等项目方在界面触发（系统 / agent 不自动派）")
@@ -5256,6 +5271,15 @@ def serve(paths: Paths, pinned: bool = False, *, producer=None, spawn=None, slee
     pr = producer or Producer(paths)
     pr.run_source = "--run" if pinned else "runs.json:primary"
     pr.started_at = iso()
+    try:   # L-206 审图位（11-07 PS-MASTER 查实）：首尾帧看图也只去审图位 gpu33:3（以前只有视频打分 score_clip 套用，
+           # gpu36 首尾帧看图一直走本机 8870 = 出图卡上的看图，等显存 9–16 分钟超时，ep02 首尾帧被拖住）
+        sys.path.insert(0, str(paths.root / "tools" / "series10_video"))
+        import lane_roles as _LR
+        got = _LR.apply_review_env()
+        if got:
+            pr.logf("review_route", env=got, counted=False, rule="L-206")
+    except Exception as e:  # noqa: BLE001  # arch-ok: 套不上 = 旧路由（本机 8870），只记日志
+        pr.logf("review_route_err", error=repr(e)[:200], counted=False)
     why = identity_drift(paths, pinned)
     if why:                                      # 一启动就不对（例：V1 已归档还有人起 serve）：隔一会儿再确认一次（A1-1），仍不对才交接退出
         sleep(2)

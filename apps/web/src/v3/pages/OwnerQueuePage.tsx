@@ -14,6 +14,7 @@ import { LookPeople } from "../OwnerDecision";
 import { editReason, itemSentence, twoActs } from "../queueActs";
 import { plainText } from "../plainWords";
 import OwnerChatPanel from "./OwnerChatPanel"; // W30：chat 助手（分期 2 只读问答），挂在 oq-head 之后 // W5b：卡片标题 / 候选名过人话词典（词典只在 v3/plainWords.ts） // W5 UIUX：每条只有“批准 / 用这张”+“修改”
+import { AdultQueuePanel } from "../AdultTrigger"; // L-128 / L-210：成人镜本人触发（只给登录的项目方，只列镜号和状态）
 
 // 通知直说：分组只按阻塞程度（颜色只表阻塞程度）；同级里后端已按类型排好（拍板 → 稿子 → 资产 → 镜头 → 抽检）
 const LEVELS: { lv: BlockLevel; title: string; sub: string; mark: string }[] = [
@@ -79,7 +80,7 @@ function PickCards({ item, onPick, onRevise, hideRevise }: { item: QueueItem; on
     <div className="oq-pk" onClick={(e) => e.stopPropagation()}>
       {ps?.state === "failed" ? (
         <p className="oq-fail" role="alert">
-          上次没处理成功（{ps.error}），系统会再试；你也可以再点一次。
+          上次没生效：{ps.error}
         </p>
       ) : null}
       {ps?.delegate && ps.state === "done" ? (
@@ -605,6 +606,7 @@ export default function OwnerQueuePage() {
         <OwnerChatPanel />
       </div>
       <DelegateBanner />
+      <AdultQueuePanel />
       {fail && q && q.count > 0 ? (
         <p className="oq-fail" role="alert">
           {fail}（下面的数可能不全）
@@ -727,6 +729,40 @@ export default function OwnerQueuePage() {
             </article>
           ))}
         </section>
+      )}
+      {(q?.delegated?.length ?? 0) > 0 && (flt === "all" || flt === "grey") && (
+        // W-PICK 11-07：系统 / 代选已选用并生效的，只是告知；默认收起，不进“待你看”。展开后仍可点别的候选换掉（下游自动重做）
+        <details className="oq-group oq-deleg" aria-label="系统已代选">
+          <summary className="oq-grp">
+            <i className="oq-dot grey" />
+            <h2>
+              <span aria-hidden>⚪</span> {q?.delegated_label ?? "系统已代选（可改）"} · {q?.delegated?.length}
+            </h2>
+            <span>已生效、流程没停；想换就展开点别的候选，或去资产页换</span>
+          </summary>
+          {(q?.delegated ?? []).map((it) => (
+            <article key={it.id} className="oq-it oq-ro lv-grey oq-pickapi" data-id={it.id}>
+              <span className="oq-no">·</span>
+              <div className="oq-tx">
+                <h3 className="oq-say ro">{it.say_what ?? plainText(it.title)}</h3>
+                {it.why ? <p className="oq-why">{it.why}</p> : null}
+                {it.link ? (
+                  <p className="oq-src">
+                    <a href={it.link}>去资产页看 / 换 ›</a>
+                  </p>
+                ) : null}
+              </div>
+              {it.pick_api ? (
+                <PickCards
+                  item={it}
+                  hideRevise
+                  onPick={(k) => decide(it, k)}
+                  onRevise={async () => undefined}
+                />
+              ) : null}
+            </article>
+          ))}
+        </details>
       )}
       {done.length > 0 && (
         <section className="oq-group" aria-label="刚处理">

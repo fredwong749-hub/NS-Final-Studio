@@ -30,6 +30,7 @@ import { Pop } from "../widgets";
 import { countKinds, hasKind, tagsTitle, type ShotStatusTags, type TagKind } from "../StatusTags.helpers";
 import { NowPanel, PipelineMatrix } from "../PipelineMatrix"; // NAVFLOW-F L-146：各集进度矩阵；W5：首页“现在”四问
 import { EpisodeKpiPanel } from "../EpisodeKpi";
+import { AdultEpButton } from "../AdultTrigger"; // L-128 / L-210：成人镜本人触发（只给登录的项目方，只显示文字）
 import { BrainPanel } from "../BrainPanel"; // UIUX-LOOP-2 r6：大脑最近决定 / 给项目方的话（data/brain/STATUS.md 只读） // UIUX-LOOP r3：每集进度 / KPI（L-205 ≤ 50 min、L-207 三段、每镜首尾帧 / 视频小图）
 
 type SShot = { id: string; index: number; size: string | null; scene_id: string | null; scene: string | null; link: string | null; carry: string | null; cast: { name: string; presence: string }[]; switch: string[]; seconds: number | null; adult: boolean; img?: string; lens?: string | null; lens_actual?: string | null; lens_plan?: string | null; camera_move?: string | null; lighting_sources?: string[]; lighting_name?: string | null; video?: string | null; video_old?: string | null; cand_url: string | null; cand_n: number; old_script_n?: number; first_old?: boolean; last_old?: boolean; status?: ShotStatusTags };
@@ -378,6 +379,7 @@ export default function SeasonPage() {
                 <button type="button" className="v3p-link sea-selall" onClick={() => st.setMulti(new Set(e.shots.map((s) => s.id)))} title="选中整集（之后可在画布批量出图 / 审片）">
                   选中整集
                 </button>
+                <AdultEpButton ep={e.number} />
               </div>
               <ol className="sea-row">
                 {e.shots.map((x, i) => {
@@ -397,7 +399,7 @@ export default function SeasonPage() {
                           {lk?.[0] ?? (sameScene ? "─" : "┃")}
                         </span>
                       )}
-                      <button type="button" className={`sea-card k-${x.status?.main ?? "none"}`} onClick={(ev) => go(ev, x.id)} onDoubleClick={() => goCanvas(x.id)} title={`${x.id} · ${x.size ?? ""} · ${x.scene ?? ""} · ${x.seconds ?? "?"} 秒${x.cand_n ? ` · ${x.cand_n} 张候选` : ""}${x.adult ? " · 成人镜头（只在本机生成）" : ""}\n${tagsTitle(x.status)}\n${s?.img_summary ?? ""}\n${statusWord(x.status as MainStatus)}${(x.status as MainStatus | undefined)?.why ? `：${(x.status as MainStatus).why}` : ""}
+                      <button type="button" className={`sea-card k-${x.status?.main ?? "none"}`} onClick={(ev) => go(ev, x.id)} onDoubleClick={() => goCanvas(x.id)} title={`${x.id} · ${x.size ?? ""} · ${x.scene ?? ""} · ${x.seconds ?? "?"} 秒${x.cand_n ? ` · ${x.cand_n} 张候选` : ""}${x.adult ? " · 成人镜头（你点了才出）" : ""}\n${tagsTitle(x.status)}\n${s?.img_summary ?? ""}\n${statusWord(x.status as MainStatus)}${(x.status as MainStatus | undefined)?.why ? `：${(x.status as MainStatus).why}` : ""}
 单击：右侧看详情；双击：进画布这一镜；Ctrl / Shift 点：多选`}>
                         {/* r45 胶卷（项目方 04:3x：“改成像胶卷那种模式吧，就像传统胶卷那样”）：片框上边码 S1 · 景别 · 时长，下边码 镜头参数 · 场景，片框下一排身份脸 */}
                         <span className="film-edge top">{`S${x.index} · ${x.size ?? "景别未标"} · ${x.seconds ? `${x.seconds}s` : "?"}`}</span>
@@ -412,7 +414,7 @@ export default function SeasonPage() {
                           {(!s?.first_frame || x.first_old) && x.cand_n > 0 && <span className="sea-cand" title={`有 ${x.cand_n} 张合格的首帧候选，还没选定用哪张`}>{x.cand_n} 张候选</span>}
                           {s?.job === "running" && <span className="sea-busy">生成中</span>}
                           {s?.job === "queued" && <span className="sea-busy is-queued">排队中</span>}
-                          {x.adult && <span className="sea-adult" title="成人镜头：只在本机生成">本地</span>}
+                          {x.adult && <span className="sea-adult" title="成人镜头：只在你点了之后才出">成人</span>}
                         </span>
                         <span className="sea-segs" style={breatheDelay(x.id)} aria-label="首帧 · 尾帧 · 视频 · 通过">
                           {sg.map((g, k) => (

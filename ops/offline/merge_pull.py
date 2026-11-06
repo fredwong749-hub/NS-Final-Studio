@@ -10,7 +10,8 @@
       data/producer/log.jsonl、current_changes.jsonl  追加：服务器上笔记本没有的行，按 ts 排序后追加
       .../video/night.log                             同上（追加没有的行）
       .../video/night_state.json                      eps 按 host 合并
-  - 不拉回：data/producer/control.json（笔记本保持自己的）、leases/、*.pid、heartbeat.json、registry.json（producer 会重建）。
+  - 不拉回：data/producer/control.json（笔记本保持自己的）、leases/、*.pid、heartbeat.json、registry.json（producer 会重建）、
+    owner_triggers.json（成人镜触发清单，只有笔记本网页写，L-210）。
 用法：python ops/offline/merge_pull.py [--dry]
 """
 from __future__ import annotations
@@ -87,7 +88,8 @@ def owns(host: str, rel: str, ep: int) -> bool:
         return ep in OWN_VID.get(host, set())
     m = OWN_IMG if rel.startswith(("data/renders/", "data/producer/")) else OWN_VID
     return ep in m.get(host, set())
-SKIP_NAMES = {"control.json", "heartbeat.json", "producer.pid", "registry.json", "night.pid"}
+SKIP_NAMES = {"control.json", "heartbeat.json", "producer.pid", "registry.json", "night.pid",
+              "owner_triggers.json"}   # L-210 / W-ADULT：成人镜触发清单只由笔记本网页（项目方本人）写，服务器副本永不拉回盖本机
 APPEND = {"data/producer/log.jsonl", "data/producer/current_changes.jsonl",
           "data/pipeline/runs/series10_v1/video/night.log"}
 DRY = "--dry" in sys.argv

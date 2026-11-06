@@ -147,22 +147,27 @@ def test_revoke_stops_delegate(env, monkeypatch):
 
 
 def test_owner_revise_and_repick_override_delegate(env, monkeypatch):
+    """W-PICK 11-07：项目方在已代选的身份脸 / 底图上改选别的候选 = 直接执行（register_pick 替换），不再降级成“修改”；
+    再点已生效的同一个 = 已记下（duplicate），不会多出一条“修改”"""
     root, calls = env
     OD.tick(root, sync_looks=False)
     c = _client(monkeypatch, {"name": "fred", "role": "owner"})
-    r = c.post("/api/owner/pick", json={"id": FACE, "choice": "s1", "reason": "这张更像"})   # 在已代选的条目上改选 = 修改
+    r = c.post("/api/owner/pick", json={"id": FACE, "choice": "s1", "reason": "这张更像"})   # 在已代选的条目上改选 = 换成这张
     assert r.status_code == 202 and r.json()["duplicate"] is False
     st = OP.state_of(root, FACE)
-    assert st["state"] == "revise_requested" and st["by"] == "fred" and "改选候选 s1" in st["reason"]
-    assert len([x for x in calls if x["id"] == FACE]) == 1                               # 处理器不重跑（原有修改机制）
+    assert st["state"] == "done" and st["by"] == "fred" and st["choice"] == "s1"
+    assert len([x for x in calls if x["id"] == FACE]) == 2                               # 处理器按项目方的选择再跑一次
+    r = c.post("/api/owner/pick", json={"id": FACE, "choice": "s1"})                    # 同一个再点 = 已记下
+    assert r.json()["duplicate"] is True and OP.state_of(root, FACE)["state"] == "done"
     r = c.post("/api/owner/pick", json={"id": SCENE, "choice": "revise", "reason": "要更暗"})
     assert OP.state_of(root, SCENE)["state"] == "revise_requested"
     items, _ = OQ.pick_items(root, OQ._closed(root, 0))
-    assert {FACE, SCENE} <= {i["id"] for i in items}                                     # 仍在通知里显示“已提修改意见”
+    ids = {i["id"] for i in items}
+    assert SCENE in ids and FACE not in ids                                             # 修改意见仍显示；项目方已选定的消失
     dec = [d for d in OQ.decisions(root) if d["id"] == FACE]
-    assert dec[-1]["choice"] == "revise" and dec[-1]["by"] == "fred"
+    assert dec[-1]["choice"] == "s1" and dec[-1]["by"] == "fred"
     OD.tick(root, sync_looks=False)                                                     # 代选不再碰项目方动过的条目
-    assert len([x for x in calls if x["id"] == FACE]) == 1
+    assert len([x for x in calls if x["id"] == FACE]) == 2
 
 
 def test_adult_items_never_delegated(env):

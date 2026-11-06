@@ -139,7 +139,8 @@ def test_last_preflight_raises_on_contract_fail(monkeypatch):
 def test_last_preflight_wired_once_before_double_face():
     src = (ROOT / "tools/autopilot/producer.py").read_text(encoding="utf-8")
     assert src.count("last_preflight(job, sid)") == 1
-    i = src.index("job = FJ.build_last(first_job")
+    i = src.index("job = last_job_for_rung(")              # W-REFS 11-06：尾帧作业构造挪进 last_job_for_rung（内部仍是 FJ.build_last）
+    assert "FJ.build_last(first_job" in src[src.index("def last_job_for_rung"):]
     j = src.index("last_preflight(job, sid)")
     k = src.index('if rung.get("variant") == "double_face" and job.get("face_files"):')
     assert i < j < k

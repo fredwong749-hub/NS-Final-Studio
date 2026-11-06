@@ -433,7 +433,7 @@ def restart(host: str, mode: str = DEFAULT_MODE) -> str:
 REMOTE_ACTIVE_VIDEOS = r"""
 import json, glob, os
 out = {}
-for f in glob.glob("data/renders/ep*/*/takes.json"):
+for f in glob.glob("data/renders/ep*/*/takes.json") + glob.glob("data/renders/*/ep*/*/takes.json"):   # W-SCAN 11-07: V2 = renders/<run>/epNN/Sx
     try:
         d = json.load(open(f, encoding="utf-8"))
     except Exception:
@@ -2042,6 +2042,18 @@ def control_files() -> list[str]:
                     out.append(rel)
         except Exception as e:  # noqa: BLE001
             log("control_files", run, "ready 路径算不出", repr(e)[:160])
+        try:      # L-210 / W-ADULT：项目方在网页点的成人镜触发清单（只有笔记本 API 写；服务器 producer 只读）
+            rel = (Path(_RUNS.producer_dir(run, ROOT)) / "owner_triggers.json").relative_to(ROOT).as_posix()
+            if rel not in out:
+                out.append(rel)
+        except Exception as e:  # noqa: BLE001
+            log("control_files", run, "触发清单路径算不出", repr(e)[:160])
+        try:      # 复审 11-07：V2 项目方“修改 / 重出”写在 data/producer/runs/<run>/master_rejects.json，以前只推旧路径 → 服务器 producer 永远看不到
+            rel = (Path(_RUNS.producer_dir(run, ROOT)) / "master_rejects.json").relative_to(ROOT).as_posix()
+            if rel not in out:
+                out.append(rel)
+        except Exception as e:  # noqa: BLE001
+            log("control_files", run, "修改清单路径算不出", repr(e)[:160])
     return out
 
 
