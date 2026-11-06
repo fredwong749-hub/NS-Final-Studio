@@ -206,9 +206,9 @@
    "zh": "排排站 / 合影式：两人及以上正面并排站成一排朝向镜头",
    "contract": "Q9",
    "video": "V9",
-   "severity": "hard",
-   "blocking": true,
-   "_doc": "L-200（项目方 11-06 07:3x 看 ep01 总览：S1 三人正面排排站看镜头被采用）：与 eye_contact 同属 gen_contract blocking_items 的 gaze 硬项，命中 = 换种子重出、不得被“用尽采用最好一版”采用；单人 / 局部 / 物件特写写 na。同一次看图调用多一项，不另起模型调用"
+   "severity": "soft",
+   "blocking": false,
+   "_doc": "⤴ L-196/L-200 L-200（项目方 11-06 07:3x 看 ep01 总览：S1 三人正面排排站看镜头被采用）：排排站是 gaze 硬项，但看图这一项 11-06 W-DETECT 复审改为只记录（口径放宽未标定；11-06 对 ep01 S1/S14/S15 并排图 0 命中、召回 0/5）——硬判改由 G1 几何排排站 ns_qc.gaze.lineup_geo 承担（标定 5/5 正例、14 反例 0 误报，gen_contract.blocking 不被看图否掉）。单人 / 局部 / 物件特写写 na。同一次看图调用多一项，不另起模型调用"
   },
   "item_on_wrong_person": {
    "zh": "单品串人：一个角色的标志性单品（指甲 / 手套 / 首饰等，参考板或原文写明属于谁）出现在另一个角色身上",
@@ -278,7 +278,7 @@
   "auto_review_redo": true,
   "auto_review_by": "VQAGATE 本地看图闸门",
   "_extra_limbs": "总调度 11-01 23:0x：extra_limbs 两口径一致率仅 0.828，单独拦会来回重出 → 看图这一项本身不拦；视频层改成 V6 手数规则命中且看图 extra_limbs = defect 两者同时成立才判多肢（score_clip.gate），只有一方命中只记录；等 V6 看图复核（多手 vs 衣物形变）做完再评估",
-  "_blocking_v1": "16:5x 首版 blocking = eye_contact、continuity_break、hair_mismatch、framing_mismatch、extra_person（+ underage_look）：项目方点名的看镜头 / 不连贯 / 发色，总调度 G0 点名的景别，和极少误报的多人；outfit / accessory / plastic_doll / posed_stiff / extra_limbs 在 ep01–ep03 首扫命中率 30–60%、和总调度标签对不上，误报高，先写进证据不挡。18:1x 总调度定（和 WORKFLOW 对齐）：V6 阈值落定前多肢一律判不过 → extra_limbs 也拦（自相矛盾的“各5指 / 被遮挡”降为拿不准，contract.sanitize）。依据 data/vqa/gate_scan/rates.json、docs/vqa/GATE_CALIBRATION.md。11-02 21:1x 总调度 W-40 点名 brand_logo 阻断（出图永远不画品牌标志，K-REN-959；未走标定）",
+  "_blocking_v1": "⤴ L-196/L-200 16:5x 首版 blocking = eye_contact、continuity_break、hair_mismatch、framing_mismatch、extra_person（+ underage_look）：项目方点名的看镜头 / 不连贯 / 发色，总调度 G0 点名的景别，和极少误报的多人；outfit / accessory / plastic_doll / posed_stiff / extra_limbs 在 ep01–ep03 首扫命中率 30–60%、和总调度标签对不上，误报高，先写进证据不挡。18:1x 总调度定（和 WORKFLOW 对齐）：V6 阈值落定前多肢一律判不过 → extra_limbs 也拦（自相矛盾的“各5指 / 被遮挡”降为拿不准，contract.sanitize）。依据 data/vqa/gate_scan/rates.json、docs/vqa/GATE_CALIBRATION.md。11-02 21:1x 总调度 W-40 点名 brand_logo 阻断（出图永远不画品牌标志，K-REN-959；未走标定）。11-06 07:3x L-200 项目方点名 lineup（排排站 / 合影式）阻断：与 eye_contact 同属视线硬项，命中换种子重出、不得被“用尽采用最好一版”采用（未走标定，项目方原话）。11-06 项目方 L-200 点名排排站硬闸：硬项只认 G1 几何判 lineup_geo（标定 5/5、14/14 无误报，W-DETECT）；看图 lineup 措辞未标定 → 只记录（blocking=false，复审 11-06）",
   "video_requires_q9": true,
   "_video_requires_q9": "L-137（项目方 11-03 03:1x：V2 并回 V1，看图闸门先于视频）+ ISS-1103-024206-4b21：MERGE-VID-O 打开；没过 Q9 的首帧不进视频（build_jobs.passed_frames → contract.q9_passed），D-VQA-02 的回扫条件由 L-137 取代",
   "band_sharp": {"min": 42.3, "recalib_every_days": 7, "tool": "tools/vqa/band_recalib.py", "auto_log": "data/vqa/gate_calib/band_sharp_auto.jsonl", "_doc": "Q1 复核带确定性清晰度（总调度 11-02 批准）：被清晰度拦下的自动记入 auto_log，补标签后每周按标定集重算，提议写 data/vqa/gate_calib/band_recalib.json（当前提议 42.3；正例最低 60.6、反例 23.9）"},

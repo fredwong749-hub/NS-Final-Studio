@@ -156,7 +156,10 @@ def cast_info(cast: list[dict] | None) -> dict:
     partial = [c for c in cast if c.get("presence") in ("在画", "局部", "背影") and not is_faced(c)]
     inframe = [c for c in cast if c.get("presence") in ("在画", "局部", "背影")]
     known_ids = set(_ids().values())
-    refless = [c for c in cast if _ids().get(c.get("name"), c.get("name")) not in known_ids and c.get("presence") != "画外"]
+    # W-ASSETS 11-06：cast 行可带 refless=True（身份脸候选作业：这个人就是还没有身份脸，按“没有身份参照的人”只数头，
+    # 不判陌生人、不因缺参照记 untested）。原来 face-ch_* 的候选张张 count=untested（在场角色的身份脸缺），ep02 被挡两天
+    refless = [c for c in cast if c.get("presence") != "画外"
+               and (c.get("refless") or _ids().get(c.get("name"), c.get("name")) not in known_ids)]
     return {"faced": faced, "n_faced": len(faced), "n_partial": len(partial), "n_in_frame": len(inframe), "known": True,
             "has_back": any(back(c) for c in cast), "refless": len(refless),
             "in_frame_ids": [_ids().get(c.get("name"), c.get("name")) for c in inframe]}

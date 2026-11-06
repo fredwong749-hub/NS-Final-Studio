@@ -717,8 +717,17 @@ def post_pick(root: Path, job: dict, cands: list[dict], title: str, detail: str,
 
 
 # ------------------------------------------------------------------ 派生资产自动选用（总调度 11-03：项目方已睡、目标全自动）
-AUTO_PICK_KINDS = ("sheet", "item")     # 派生资产：脸（项目方选）+ P1 造型文字（项目方放行）已定 → 代选模式开着时系统按分数自动登记，可修改（L-139）
+# L-139：派生资产（sheet / item）代选模式开着时系统按分数自动登记，可修改。
+# L-198（11-05 21:5x，项目方“你可以全自动……8 小时内做完”）：黎岸 / 周序 身份脸、造型、场景底图也由系统按分代选（W-ASSETS 11-06 加 face / scene）。
+# 仍只在代选开着且没到期时生效（delegate_active）；代选关着照旧投 #/queue 等项目方挑；成人 / 删除 / 花钱 / 推翻旧决定永不代
+AUTO_PICK_KINDS = ("face", "scene", "sheet", "item")
 AUTO_BY = "系统自动（派生资产，按分数选用）"
+AUTO_DETAIL = {
+    "face": "{who}的身份脸按 L-198 由系统代选：候选都过了人数 / 成年 / 无裸露 / 五官与 OCR，系统按分数（看图逐项通过率）选用了 {label}，"
+            "已登记进清单、造型设定图随即开出。想换请到资产中心换脸（下游设定图 / 单品会重做）；不合适点“修改”写一句意见。",
+    "scene": "{who}的场景底图按 L-198 由系统代选：候选都过了空镜契约与看图核对，系统按分数选用了 {label}，已登记、流程继续。"
+             "想换请到资产中心换底图；不合适点“修改”写一句意见。",
+}
 
 
 def delegate_active(root: Path) -> tuple[bool, str]:
@@ -749,8 +758,11 @@ def auto_pick(root: Path, job: dict, cands: list[dict], who: str, what: str, pus
     （仍是同一个 pick：项目方点别的候选 = 换成那张，register_pick 走替换，下游自动重做）"""
     best = max(cands, key=lambda c: float(c.get("score") or 0))
     title = f"已自动选用：{who} {what}（{best.get('label')}），可修改"
-    detail = (f"{who}的{what}是派生资产（身份脸和 P1 造型已定），系统按分数（身份相似度 + 看图逐项通过率）自动选用了 {best.get('label')}，已登记、流程继续。"
-              f"想换就点别的候选“用这个”，下游（单品裁图等）会自动重做；不合适点“修改”写一句意见。")
+    if job.get("kind") in AUTO_DETAIL:                      # L-198：身份脸 / 场景底图（register_pick 不覆盖，换要走资产中心）
+        detail = AUTO_DETAIL[job["kind"]].format(who=who, label=best.get("label"))
+    else:
+        detail = (f"{who}的{what}是派生资产（身份脸和 P1 造型已定），系统按分数（身份相似度 + 看图逐项通过率）自动选用了 {best.get('label')}，已登记、流程继续。"
+                  f"想换就点别的候选“用这个”，下游（单品裁图等）会自动重做；不合适点“修改”写一句意见。")
     guard_run(root, job["run"])
     req = {"id": job["pick_id"], "kind": "pick", "title": title, "detail": detail, "source": "ASSET-WORKER（阶段 A 资产作业）", "by": "ASSET-WORKER",
            "at": _now(), "run": job["run"], "episode": job["episode"], "job": job["id"], "candidates": cands, "recommend": best["key"],

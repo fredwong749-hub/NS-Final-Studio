@@ -18,7 +18,13 @@ from __future__ import annotations
 from . import cfg
 
 BAD = ("fail", "untested")
-GAZE_DEFECTS = {"eye_contact", "lineup"}       # L-200：看图里算“视线 / 排排站”的缺陷 id（config/vqa.json checks）
+GAZE_DEFECTS = {"eye_contact"}                 # L-200：看图里算“视线”硬项的缺陷 id（config/vqa.json checks）
+# W-DETECT 11-06（复审）：看图的 lineup 口径放宽了但没标定 → 只记录、不挡、不算 never_adopt（VQA_RECORD_DEFECTS）；
+# 排排站硬项只认 G1 的几何判 lineup_geo（ns_qc.gaze.lineup_geo，11-06 标定 5/5 正例、14 反例 0 误报）
+VQA_RECORD_DEFECTS = {"lineup"}
+# W-DETECT 11-06：看图报 eye_contact、但 YuNet（G1）测得的每张脸 |gaze_x| 都 ≥ 此值（明显离轴）→ 视线项降为只记录。
+# 今天 ep01 15 张 Q9 eye_contact 全部 G1 离轴（gaze_x 0.64–1.30，最小 0.506）；亲看 S4 v24 / S14 v12 / S15 v16 都在看画面里的人，不看镜头
+EYE_OFFAXIS_X = 0.45
 Q9_HARD = {"count": {"extra_person"}, "text": {"text_watermark", "brand_logo"}, "adult": {"underage_look"}, "gaze": GAZE_DEFECTS}
 QB_HARD = {"Q1": ("identity",), "count": ("count",), "text": ("ocr",), "adult": ("age",)}
 Q10_HARD = {"Q1": ("identity",), "count": ("count",)}
@@ -36,11 +42,27 @@ def _lab_bad(lab: dict, key: str) -> bool:
 
 
 def _q10_prompt_people_bad(ev: dict) -> bool:
-    """Q10 evidence.prompt 判 fail 且原因是人数（people_count）→ 算人数硬项"""
+    """Q10 evidence.prompt 判 fail 且原因是人数（people_count）→ 算人数硬项。
+    W-DETECT 11-06：accept.prompt_check 给了结构化 people（可见人数 vs cast 区间）就以它为准——看图模型把“positions / action 不符”
+    也写成“people_count、positions、action不符”抬头（ep01 S2 ×7、S15 ×5 只是站位 / 动作不符，人数其实对），字符串匹配会把它当人数硬项"""
     p = ev.get("prompt")
     if not isinstance(p, dict) or p.get("status") != "fail":
         return False
+    people = p.get("people")
+    if isinstance(people, dict) and people.get("status") in ("pass", "fail"):
+        return people["status"] == "fail"
     return "people_count" in str(p.get("why") or "")
+
+
+def _eye_contact_contradicted(defects: set, g1_ev: dict | None) -> bool:
+    """看图只报 eye_contact（没报 lineup），而 YuNet 测得的每张脸都明显离轴（|gaze_x| ≥ EYE_OFFAXIS_X）→ 矛盾，视线项只记录"""
+    if not g1_ev or (defects & (GAZE_DEFECTS | VQA_RECORD_DEFECTS)) != {"eye_contact"}:
+        return False
+    rows = g1_ev.get("faces") or []
+    if int(g1_ev.get("n_faces") or len(rows)) > len(rows):
+        return False                                   # 证据里的脸被截断（只存前 4 张）→ 没看全，不降级
+    faces = [f for f in rows if f.get("status") != "未测" and f.get("gaze_x") is not None]
+    return bool(faces) and all(abs(float(f["gaze_x"])) >= EYE_OFFAXIS_X for f in faces)
 
 
 def vqa_gaze_verdict(pf: dict) -> bool | None:
@@ -53,19 +75,25 @@ def vqa_gaze_verdict(pf: dict) -> bool | None:
     return not (set(ev.get("defects") or []) & GAZE_DEFECTS)
 
 
-def _is_hard(it: dict, hard: set, vqa_gaze: bool | None = None) -> bool:
+def _is_hard(it: dict, hard: set, vqa_gaze: bool | None = None, g1_ev: dict | None = None) -> bool:
     iid, ev = it.get("id"), it.get("evidence") or {}
     if iid in hard:
         return True
     if iid == "FL":
         return False        # L-203：FL 不在名单里 = 只记录（名单里有 "FL" 已在上一行判硬）
     if iid == "G1":
+        if "gaze" in hard and (ev.get("lineup_geo") or {}).get("lineup"):
+            return True     # W-DETECT 11-06：排排站几何判（ns_qc.gaze.lineup_geo）不被看图否掉——看图对合影式并排全漏（ep01 S1 / S14 / S15）
         # L-200：gaze 硬项时 YuNet 的 G1 挡，但看图真看过且没报视线缺陷 → 以看图为准（G1 只记录，防 YuNet 误报）
         return "gaze" in hard and vqa_gaze is not True
     if iid == "Q6":
         return "text" in hard
     if iid == "Q9":
         defects = set(ev.get("defects") or [])
+        if "gaze" in hard and _eye_contact_contradicted(defects, g1_ev):
+            ev["eye_contact_demoted"] = "看图报看镜头，但 YuNet 测得每张脸都明显离轴（|gaze_x| ≥ %.2f）→ 视线只记录" % EYE_OFFAXIS_X
+            ev["ignored_defects"] = sorted(set(ev.get("ignored_defects") or []) | {"eye_contact"})   # producer.gaze_bad 同口径（不算 never_adopt）
+            defects = defects - {"eye_contact"}
         if any(defects & Q9_HARD[k] for k in Q9_HARD if k in hard):
             return True
         return False
@@ -88,8 +116,9 @@ def apply(pf: dict, conf: dict | None = None) -> dict:
         return pf
     kept, recorded = [], []
     vqa_gaze = vqa_gaze_verdict(pf) if "gaze" in hard else None
+    g1_ev = next((i.get("evidence") or {} for i in pf["items"] if i.get("id") == "G1"), None)
     for it in pf["items"]:
-        if it.get("status") in BAD and it.get("blocking", True) is not False and not _is_hard(it, hard, vqa_gaze):
+        if it.get("status") in BAD and it.get("blocking", True) is not False and not _is_hard(it, hard, vqa_gaze, g1_ev):
             it["status_recorded"] = it["status"]
             it["record_only"] = True
             it["detail"] = "只记录（L-196 全自动闸门，不挡）：" + str(it.get("detail") or "")

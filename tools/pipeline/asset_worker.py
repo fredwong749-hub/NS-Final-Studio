@@ -820,6 +820,12 @@ def cand_score(r: dict) -> float:
     return round(ident + ratio, 4)
 
 
+def pick_what(job: dict) -> str:
+    """自动选用告知里的“什么东西”（L-198：身份脸 / 场景底图也由系统代选）"""
+    sp = job.get("spec") or {}
+    return {"face": "身份脸", "scene": "场景底图", "sheet": f"造型 {sp.get('look')} 的设定图"}.get(job.get("kind") or "", f"单品“{sp.get('label')}”的图")
+
+
 def auto_pick_waiting(root: Path, j: dict) -> dict | None:
     """待选中的派生资产 pick（项目方还没点、不是自动选用投的）→ 用候选记录（review_dir/<id>_s<seed>.json）算分并自动选用"""
     sys.path.insert(0, str(ROOT / "services" / "api"))
@@ -839,8 +845,7 @@ def auto_pick_waiting(root: Path, j: dict) -> dict | None:
     if not cands:
         return None
     who = j["spec"].get("name") or j.get("target")
-    what = f"造型 {j['spec'].get('look')} 的设定图" if j["kind"] == "sheet" else f"单品“{j['spec'].get('label')}”的图"
-    got = AJ.auto_pick(root, j, cands, who, what)
+    got = AJ.auto_pick(root, j, cands, who, pick_what(j))
     jj = AJ.load_job(AJ.job_path(root, j["run"], j["id"]))
     AJ.log(jj, f"规则上线前投的待选：系统按分数自动选用 {got['picked']}（score {got['score']}），inbox 改为“已自动选用，可修改”")
     AJ.save_job(root, jj)
@@ -944,6 +949,19 @@ def vlm_items(job: dict) -> tuple[list[str], bool]:
     return AJ.item_checks(spec), False         # W9：物件契约（无人 / 无人体部位 / 无人脸、单一物件、颜色材质、纯白底无标志）
 
 
+def count_fallback(an: dict, bundle: dict) -> dict:
+    """W-ASSETS 11-06：人数检测器没出结论（rssh / 隧道断、远端无结果）时，用合并看图第 1 条（“画面里只有一个人…”）兜底判人数。
+    L-196 人数是硬闸：有结论才放 / 挡；看图本身也没答（error / untested）→ 仍 untested（作业照旧退避重试）。检测器有结论的原样返回"""
+    if str(an.get("status")) in ("pass", "fail"):
+        return an
+    it = next((x for x in (bundle.get("items") or []) if x.get("n") == 1), None)
+    if bundle.get("error") or not it or it.get("untested") or not isinstance(it.get("ok"), bool):
+        return an
+    why = "；".join(str(r) for r in (an.get("reasons") or [])) or str(an.get("status"))
+    return {**an, "status": "pass" if it["ok"] else "fail", "fallback": "vlm_item1",
+            "note": f"检测器没出结论（{why[:120]}），按看图第 1 条兜底：{str(it.get('text') or '')[:80]}"}
+
+
 def _compile(job: dict, root: Path = ROOT):
     for p in ("packages/schema", "services/render_router", "services/agent", "packages/qc", "tools/vqa", "tools/gen_contract", ""):
         sys.path.insert(0, str(ROOT / p))
@@ -955,9 +973,18 @@ def _compile(job: dict, root: Path = ROOT):
     # 整段进了单品提示词，11-03 第二轮 item 候选张张出模特）。frame_job 里“不加这些段”的唯一开关就是 mode="sheet"
     # （单品镜没有 cast，sheet 模式别的分支不触发）
     # W6c+（A9 P1-②）：scene 空镜底图同理——没有人，镜头语言段 / L-110 融合句（“人物和环境一起清楚…环境光染到皮肤”）
-    # 进空镜提示词会往底图里长人 → 也走“不加这些段”的 sheet 模式；face 证件胸像仍走 shot 模式（不在本次范围）
+    # 进空镜提示词会往底图里长人 → 也走“不加这些段”的 sheet 模式
+    # W-ASSETS 11-06：face 身份脸也走 sheet 模式 + prompt_override=spec.img（P1 年龄 / 体型 / 发型 / 标记 / 五官 + 中性纯色背景）。
+    # 原来走 shot 模式：提示词模板 v2（11-05 起按剧开 image=v2）把【角色】块去掉、人物只剩“周序（服装），在画面中央……
+    # 脸、发型、服装以参考图为准”——身份脸作业本来就没有参考图，年龄 / 长相全丢，再叠 135mm T1.2 光斑段：
+    # 周序（25 岁）16/16 出成 40 岁中年、背景成城市夜景光斑。身份脸的唯一来源就是 spec.img（P1 原文不改），再按年龄加编译期锚点
+    face = job["kind"] == "face"
+    kw = {"prompt_override": face_prompt(job["spec"])} if face else {}
     jc = FJ.build_first(job["run"], s.episodes[0], s.episodes[0].shots[0], s.globals,
-                        mode="sheet" if job["kind"] in NO_SHOT_LANGUAGE_KINDS else "shot")
+                        mode="sheet" if (face or job["kind"] in NO_SHOT_LANGUAGE_KINDS) else "shot", **kw)
+    if face:
+        jc["negative"] = "，".join(x for x in (jc.get("negative"), face_negative(job["spec"])) if x)
+        jc["compile_trace"] = FJ.trace_of(jc)
     if jc.get("adult") or jc.get("route") == "local_only":
         raise RuntimeError(f"拒绝：成人 / 本地专用（{jc.get('adult_reasons') or jc.get('route_reasons')}）")
     if job["kind"] in ("scene", "item"):
@@ -973,7 +1000,49 @@ def _compile(job: dict, root: Path = ROOT):
     return jc
 
 
-NO_SHOT_LANGUAGE_KINDS = ("sheet", "item", "scene")     # 编译走 mode="sheet"（不加镜头语言段 / 融合句 / 视线句）；face 仍是 shot
+NO_SHOT_LANGUAGE_KINDS = ("sheet", "item", "scene")     # 编译走 mode="sheet"（不加镜头语言段 / 融合句 / 视线句）；face 走 sheet + prompt_override（见 _compile）
+
+
+# W-ASSETS 11-06：身份脸年龄锚点（编译期加，不改项目方写的 P1 / spec 原文）。写法按提示词规则用正向描述（要什么写什么），
+# 否定项（皱纹 / 发际线后移…）走负面词 face_negative。分档：≤27 青年；28–34 青壮年；35–49 成熟成年；≥50 年长
+AGE_ANCHORS = (
+    (27, "看起来就是{age}岁的年轻人：皮肤紧致光滑有弹性、肤色均匀，发际线饱满、头发浓密乌黑，眉眼清爽有神，额头和眼周平滑，青年的脸型轮廓"),
+    (34, "看起来就是{age}岁的青壮年：皮肤紧致有光泽，发际线饱满、头发浓密，面部干净利落，额头和眼周平滑"),
+    (49, "看起来就是{age}岁的成熟成年人：皮肤有成熟质感但紧致，脸部轮廓清晰"),
+    (999, "看起来就是{age}岁的年长成年人：面部有岁月感，神态沉稳"),
+)
+AGE_NEGATIVE = (
+    (27, "皱纹、抬头纹、眼袋、法令纹、发际线后移、头发稀疏、白发、胡茬、中年人外观、老年人外观"),
+    (34, "深皱纹、发际线后移、头发稀疏、白发、老年人外观"),
+    (49, "老年人外观、满脸深皱纹"),
+    (999, ""),
+)
+
+
+def _age_band(age: int, table: tuple) -> str:
+    return next(t for hi, t in table if int(age) <= hi)
+
+
+def face_prompt(spec: dict) -> str:
+    """身份脸提示词 = spec.img（asset_jobs.spec_face：胸像构图 + P1 年龄 / 体型 / 发型 / 标记 / 五官 + 服装 + 中性纯色背景）
+    + 按 spec.age 的年龄锚点（插在“{age}岁，”之后；找不到就接在描述末尾、背景句之前）"""
+    img, age = str(spec.get("img") or ""), int(spec.get("age") or 0)
+    if not img or age <= 0:
+        raise RuntimeError(f"preflight 不过：身份脸作业没有 spec.img / spec.age（{spec.get('cid')}），请重新生成作业")
+    anchor = _age_band(age, AGE_ANCHORS).format(age=age)
+    if age <= 27:                                     # 胸像外壳句“成熟的五官轮廓”（asset_jobs.PORTRAIT 模板句，不是 P1 原文）对青年是反向锚点
+        img = img.replace("成熟的五官轮廓", "清晰的五官轮廓")
+    key = f"{age}岁，"
+    if key in img:
+        return img.replace(key, key + anchor + "，", 1)
+    neutral = AJ.NEUTRAL
+    return img.replace(neutral, "，" + anchor + neutral, 1) if neutral in img else f"{img}，{anchor}"
+
+
+def face_negative(spec: dict) -> str:
+    return _age_band(int(spec.get("age") or 0), AGE_NEGATIVE)
+
+
 ITEM_PERSON_PHRASES = ("人物和场景是同一次拍摄", "人物和环境一起清楚", "环境光染到皮肤", "眼睛看", "四分之三侧脸", "人物被闪光打亮", "真实皮肤质感")
 
 
@@ -1072,11 +1141,15 @@ def render_one(job: dict, lane: str, seed: int, root: Path = ROOT) -> dict:
     items, person = vlm_items(job)
     if person:
         import anomaly as A
-        an = A.check(img, [{"name": job["spec"]["name"], "presence": "在画", "faced": True, "x": "中"}], host="gpu36")
+        # W-ASSETS 11-06：face 作业的人就是还没有身份脸的那个人 → refless=True（只数头，不判陌生人；原来 judge 因“在场角色的身份脸缺”
+        # 把每张都记 untested，作业永远“没测出”退避）。sheet 的脸已登记，照常按身份参照判
+        an = A.check(img, [{"name": job["spec"]["name"], "presence": "在画", "faced": True, "x": "中", "refless": job["kind"] == "face"}], host="gpu36")
     else:
         an = {"status": "pass", "note": "空镜 / 物件，跳过人数检查"}
     bundle = AC.bundle_check(img, items, person)
     bundle["questions"] = items                    # W9：拒因里写“哪一条问的是什么”
+    if person:
+        an = count_fallback(an, bundle)            # 检测器没跑成（隧道 / rssh 断）→ 用看图第 1 条“只有一个人”兜底，不永远“没测出”
     q9 = str(next((i.get("status") for i in post.get("items") or [] if i.get("id") == "Q9"), "untested"))
     lab = {"identity": "na", "count": {"pass": "pass", "fail": "fail"}.get(str(an.get("status")), "untested"),
            "q9": {"pass": "pass", "na": "pass", "fail": "fail"}.get(q9, "untested"),
@@ -1101,6 +1174,7 @@ def render_one(job: dict, lane: str, seed: int, root: Path = ROOT) -> dict:
 
 def deliver(root: Path, jp: Path, job: dict, passed: list[dict]) -> dict:
     """过检候选 → 代选开着且是派生资产：按分数自动登记；否则投待办通知（pick）等项目方挑。run_job 正常收尾与 salvage（子进程没收尾时接管）共用"""
+    auto_failed = None
     if job["kind"] in AJ.AUTO_PICK_KINDS and AJ.delegate_active(root)[0]:
         cands = [{"key": f"s{r['seed']}", "label": f"候选 {n}（seed {r['seed']}）", "contract_ok": True, "file": r["review_file"],
                   "thumb": r.get("thumb") or r["review_file"], "sha256": r.get("sha256"), "score": cand_score(r)} for n, r in enumerate(passed, 1)]
@@ -1108,11 +1182,17 @@ def deliver(root: Path, jp: Path, job: dict, passed: list[dict]) -> dict:
         job.update(state="awaiting_pick", error=None)
         AJ.save_job(root, job)
         who = job["spec"].get("name") or job.get("target")
-        what = f"造型 {job['spec'].get('look')} 的设定图" if job["kind"] == "sheet" else f"单品“{job['spec'].get('label')}”的图"
-        got = AJ.auto_pick(root, job, cands, who, what)
-        job = AJ.load_job(jp)                                       # after_pick 已把作业标 done
-        AJ.log(job, f"{len(cands)} 个候选过检，系统按分数自动选用 {got['picked']}（score {got['score']}），已登记；inbox 发了“已自动选用，可修改”的告知")
-    else:
+        try:
+            got = AJ.auto_pick(root, job, cands, who, pick_what(job))
+            job = AJ.load_job(jp)                                       # after_pick 已把作业标 done
+            AJ.log(job, f"{len(cands)} 个候选过检，系统按分数自动选用 {got['picked']}（score {got['score']}），已登记；inbox 发了“已自动选用，可修改”的告知")
+        except AJ.RegisterError as e:
+            # W-DETECT 11-06（复审 5）：代选登记被拒（例：身份脸已由项目方登记 / 清单被改）→ 不让 run_job 主路径崩：作业照常收尾，
+            # 候选改投待办让项目方挑（下面的 pick 路径），原因记进作业日志
+            auto_failed = str(e)[:200]
+            job = AJ.load_job(jp)
+            AJ.log(job, f"代选登记被拒（{auto_failed}），改投待办让项目方挑")
+    if auto_failed is not None or not (job["kind"] in AJ.AUTO_PICK_KINDS and AJ.delegate_active(root)[0]):
         cands = [{"key": f"s{r['seed']}", "label": f"候选 {n}（seed {r['seed']}）", "contract_ok": True, "file": r["review_file"],
                   "thumb": r.get("thumb") or r["review_file"], "sha256": r.get("sha256"), "score": n} for n, r in enumerate(passed, 1)]
         who = job["spec"].get("name") or job.get("target")
@@ -1122,6 +1202,8 @@ def deliver(root: Path, jp: Path, job: dict, passed: list[dict]) -> dict:
         AJ.post_pick(root, job, cands, title, pick_detail(f"{who}的{ {'face': '身份脸', 'scene': '场景底图', 'sheet': '造型设定图', 'item': '单品图'}[job['kind']]}", len(cands),
                                                           "都过了出图契约、本地看图、年龄观感和 OCR"), why="契约全过，按出图顺序第一张")
         job.update(state="awaiting_pick", error=None)
+        if auto_failed is not None:
+            job["auto_pick_failed"] = auto_failed
         AJ.log(job, f"{len(cands)} 个候选过检，已投待办通知 {job['pick_id']}")
     return job
 

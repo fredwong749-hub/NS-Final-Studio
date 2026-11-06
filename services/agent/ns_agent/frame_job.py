@@ -340,7 +340,7 @@ def cast_of(shot) -> list[dict]:
 
 
 def build_first(project: str, ep, shot, g, *, bible=None, model: str = "qwen_image_2.1", prompt_override: str | None = None,
-                mode: str = "shot", continuity_ref: tuple[str, str] | None = None, **plan_kw) -> dict:
+                mode: str = "shot", continuity_ref: tuple[str, str] | None = None, frame_stage: str | None = None, **plan_kw) -> dict:
     """首帧作业（= 生成契约请求的超集）。prompt_override：画布一次性整段替换的正文（槽位标注照加在前面）。
     continuity_ref=(文件, 标注句模板)（L-203 尾帧 compose 用）：在槽位参考之后再挂一张“连续性参考”（通过契约的首帧），标注句
     放在槽位标注之后、正文之前，模板里的 {n} = 它的图号；参考槽逻辑（脸 / 造型 / 场景底图）与首帧完全同一套"""
@@ -390,7 +390,8 @@ def build_first(project: str, ep, shot, g, *, bible=None, model: str = "qwen_ima
     # ∪ W-40 品牌负面词。原来直接覆盖成 brand_negative（V2 多为空），硬负面词进不了作业。硬负面永远在（job_negative 兜底）
     tier, tier_ov = first_frame_tier(project, episode=n)                       # L-191 / L-206 ②：按剧 + 按集取首帧档（默认 preview，不加字段）
     if tier == "turbo_previz":                                                 # L-206 ②：8 步 turbo + 摆位图（previz 深度控制）
-        stage_pv = "last" if continuity_ref else "first"                       # 尾帧 compose：摆位图按落幅改写后的字段算（config last_frame.previz）
+        stage_pv = frame_stage or ("last" if continuity_ref else "first")      # 尾帧 compose：摆位图按落幅改写后的字段算（config last_frame.previz）；
+        # W-DETECT 11-06（复审）：阶段显式传（frame_stage），不再从“有没有首帧参考”推——fl_escalate 去掉首帧参考时尾帧摆位图照算
         pv, why = previz_or_none(sid, shot, g, stage=stage_pv)
         if pv:
             job["previz"] = pv
@@ -724,6 +725,49 @@ def compose_last_shot(shot, end_text: str):
     return shot.model_copy(update=upd)
 
 
+TIGHTER_NOTE = "（比首帧明显更紧：人物在画面里更大、画面边缘裁掉首帧里的环境，构图与首帧不同）"
+
+
+def tighten_size(size: str | None, level: int) -> str | None:
+    """景别词紧 level 档（framing.SIZES 从紧到松排：极近特写 … 大远景）；没写景别 → None"""
+    if not size or size not in AR.FR.SIZES or level <= 0:
+        return size
+    i = AR.FR.SIZES.index(size)
+    return AR.FR.SIZES[max(0, i - level)]
+
+
+def tighten_last_shot(shot2, end_text: str, level: int):
+    """W-DETECT 11-06：落幅镜再紧 level 档——**机位与景别** 第一段换成更紧的景别词、img_prompt 里的景别词同步替换并加 TIGHTER_NOTE。
+    → (shot2', end_text')；落幅没写景别词时只加说明句"""
+    from ns_schema.script import Extra
+    size = AR.FR.size_of(end_text)
+    new = tighten_size(size, level)
+    txt = end_text
+    if size and new and new != size:
+        txt = end_text.replace(size, new, 1)
+    txt = txt.rstrip("，,。；; ") + TIGHTER_NOTE
+    extras = []
+    for e in AR.g(shot2, "extras") or []:
+        lab = _LABEL_PAREN_RE.sub("", str(AR.g(e, "label") or "")).strip("*：: ")
+        if lab == "机位与景别":
+            parts = PV.split_field(str(AR.g(e, "text") or ""))
+            if parts and size and new and parts[0].strip() == size:
+                parts[0] = new
+            elif parts and new and new != parts[0].strip():
+                parts[0] = tighten_size(parts[0].strip(), level) or parts[0]
+            extras.append(Extra(label="机位与景别", text="｜".join(parts)))
+        else:
+            extras.append(Extra(**e) if isinstance(e, dict) else e)
+    img = str(AR.g(shot2, "img_prompt") or "")
+    if size and new and new != size:
+        img = img.replace(size, new, 1)
+    img = img.rstrip("，,。；; ") + TIGHTER_NOTE
+    upd = {"img_prompt": img, "motion_prompt": txt, "extras": extras}
+    if isinstance(shot2, dict):
+        return {**shot2, **upd, "extras": [x.model_dump() for x in extras]}, txt
+    return shot2.model_copy(update=upd), txt
+
+
 def build_last_compose(project: str, ep, shot, g, first_job: dict, first_file: str, *, bible=None,
                        prompt_override: str | None = None, plan_kw: dict | None = None) -> dict:
     """L-203 尾帧（compose）：落幅当一张新图编——提示词 = 首帧同一套模板（景别 / 机位 / 构图 / 人物 / 道具 / 光线 + 风格 / 镜头 /
@@ -737,13 +781,22 @@ def build_last_compose(project: str, ep, shot, g, first_job: dict, first_file: s
         job["last_frame_mode"], job["last_frame_mode_why"] = "edit_fallback", "分镜没写落幅（motion 无“——”、运镜无 落幅=）"
         return job
     kw = dict(plan_kw or {})
+    fl_level = int(kw.pop("fl_escalate", 0) or 0)
     model = first_job.get("model") or "qwen_image_2.1"
     shot2 = compose_last_shot(shot, end_text)                          # 参考槽与首帧同一套逻辑；槽满时首帧顶掉最后一个非脸槽（continuity_slot）
+    cont = (first_file, LAST_CONTINUITY_LINE)
+    if fl_level:
+        # W-DETECT 11-06（L-203 换构图阶梯）：上一版尾帧与首帧太像（FL）→ 落幅景别紧 fl_level 档、不再把首帧挂进参考（首帧一进参考，
+        # 编辑模型就照抄构图：ep01 S9 25 版 / S4 12 版 / S7 5 版 全部 0.82–0.99），服装 / 场景一致改靠设定图 + 场景底图 + 文字
+        shot2, end_text = tighten_last_shot(shot2, end_text, fl_level)
+        cont = None
     job = build_first(project, ep, shot2, g, bible=bible, model=model, prompt_override=prompt_override,
-                      continuity_ref=(first_file, LAST_CONTINUITY_LINE), **kw)
+                      continuity_ref=cont, frame_stage="last", **kw)
     job.update({"id": first_job["id"] + ":last", "stage": "last", "last_prompt": first_job.get("last_prompt"),
                 "last_frame_mode": "compose", "end_framing": end_text, "first_frame_file": first_file,
                 "last_faces": first_job.get("last_faces") or [], "first_prompt_sha": _sha16(first_job.get("prompt") or "")})
+    if fl_level:
+        job["fl_escalate"] = {"level": fl_level, "continuity_ref": False, "why": "上一版尾帧与首帧太像（FL），落幅紧档、去首帧参考"}
     # L-206 ②：尾帧档跟首帧同一张按集表（first_frame_tier(episode)）；turbo_previz 时 build_first 已按落幅改写后的字段（shot2：景别 / 机位 /
     # 构图）算了尾帧自己的摆位图（stage=last，与首帧的起幅摆位图不同一张），算不出 → 裸 turbo（previz_missing）。首帧的起幅深度图从不给尾帧用
     if job.get("previz") and job["previz"].get("auto", {}).get("stage") != "last":

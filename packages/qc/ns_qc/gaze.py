@@ -29,6 +29,11 @@ FREEZE_RATIO = 0.35           # 首秒帧差 < 0.35 × 后段中位帧差 → �
 FREEZE_ABS = 0.6              # 且首秒平均帧差 < 0.6（0–255 灰度、160 px 宽缩略图）
 STILL_ABS = 1.2               # 逐帧“静止”= 帧差 < min(0.35 × 后段中位, 1.2)
 FREEZE_RUN_S = 0.5            # 从第 0 帧起连续静止 ≥ 0.5 s → 开头定格（项目方：“停顿 1 秒多”）
+# ---- L-200 排排站（W-DETECT 11-06 几何判：看图模型对 ep01 S1 / S14 / S15 的合影式并排全部漏判）
+# 两张（含）以上测得的脸两两满足：脸高比 ≥ size_ratio（同一纵深）、脸心纵向差 ≤ dy（同一排）、横向间距 ≥ dx_k × 大脸高（肩并肩不是叠着）、
+# 眼距 / 脸宽 ≥ iod_w（朝向镜头，不是侧脸）、|yaw_n| ≤ yaw（不是明显转头）。标定（data/_offline_pull ep01 11-06）：
+# 正例 S1 v3 / S14 v2 / S15 v12 / S14 v11（三人一排、两人并排）4/4 命中；反例过肩镜 S4 / S5 / S12、前后错落 S7 / S9、单人 共 14 张 0 误报
+LINEUP = {"size_ratio": 0.72, "dy": 0.08, "dx_k": 1.2, "iod_w": 0.26, "yaw": 0.6, "min_faces": 2}
 
 
 def _models(root: Path | None = None):
@@ -105,7 +110,33 @@ def image_gaze(bgr: np.ndarray, models=None, min_face_h: float = 0.0) -> dict:
     if not measured:
         return {"status": "未测", "why": "；".join(sorted({r.get("why", "") for r in rows})), "faces": rows}
     st = "疑似看镜头" if any(r["camera_gaze"] for r in measured) else "视线离轴"
-    return {"status": st, "faces": rows, "measured": len(measured), "provisional": PROVISIONAL}
+    H, W = bgr.shape[:2]
+    return {"status": st, "faces": rows, "measured": len(measured), "provisional": PROVISIONAL, "lineup": lineup_geo(rows, W, H)}
+
+
+def lineup_geo(rows: list[dict], W: int, H: int, thr: dict | None = None) -> dict:
+    """L-200 排排站几何判（见 LINEUP）：rows = face_gaze 行（box=[x,y,w,h] 像素、iod、yaw_n、status）。
+    → {"lineup": bool, "n": 同一排的人数, "pairs": [[i, j], …], "thr": 阈值}；只有测得的脸（status != 未测）参与"""
+    t = {**LINEUP, **(thr or {})}
+    feats = []
+    for i, r in enumerate(rows or []):
+        if r.get("status") == "未测" or not r.get("box") or not W or not H:
+            continue
+        x, y, w, h = [float(v) for v in r["box"][:4]]
+        if w <= 0 or h <= 0:
+            continue
+        feats.append((i, (x + w / 2) / W, (y + h / 2) / H, h / H, float(r.get("iod") or 0) / w, abs(float(r.get("yaw_n") or 0))))
+    pairs, members = [], set()
+    for a in range(len(feats)):
+        for b in range(a + 1, len(feats)):
+            ia, cxa, cya, ha, iwa, ya = feats[a]
+            ib, cxb, cyb, hb, iwb, yb = feats[b]
+            big = max(ha, hb)
+            if (min(ha, hb) / big >= t["size_ratio"] and abs(cya - cyb) <= t["dy"] and abs(cxa - cxb) >= t["dx_k"] * big
+                    and min(iwa, iwb) >= t["iod_w"] and max(ya, yb) <= t["yaw"]):
+                pairs.append([ia, ib])
+                members |= {ia, ib}
+    return {"lineup": len(members) >= int(t["min_faces"]) and bool(pairs), "n": len(members), "pairs": pairs, "thr": t}
 
 
 def _thumb(frame: np.ndarray) -> np.ndarray:

@@ -29,32 +29,106 @@ TITLES = {"Q8": "林晚发色（相对身份参考与同帧肤色亮度）", "Q1
           "G1": "演员看镜头（ACTING R11-2；L-200 起 blocking_items 含 gaze 时挡）"}
 
 
+def _gaze_raw(image: str, _sig: tuple | None = None) -> dict:
+    """YuNet 整图测一次（G1 视线 / 排排站 + Q1 侧脸放宽共用）；读不到图 / 出错 → {"status": "未测", "why": …}"""
+    qc = str(ROOT / "packages" / "qc")
+    if qc not in sys.path:
+        sys.path.insert(0, qc)
+    import cv2
+    from ns_qc import gaze as GZ
+    bgr = cv2.imread(str(image))
+    if bgr is None:
+        return {"status": "未测", "why": "读不到图", "faces": [], "error": "unreadable"}
+    return GZ.image_gaze(bgr)
+
+
+@lru_cache(maxsize=32)
+def _gaze_cached(image: str, sig: tuple) -> dict:
+    return _gaze_raw(image, sig)
+
+
+def gaze_raw(image) -> dict:
+    """同一张图（路径 + mtime + size）只跑一次 YuNet；任何异常 → 未测（不冒充通过，也不挡：G1 脸太小 / 没检出本来就是 na）"""
+    try:
+        st = os.stat(str(image))
+        return _gaze_cached(str(image), (int(st.st_mtime), int(st.st_size)))
+    except Exception as e:  # noqa: BLE001  # arch-ok: YuNet / 读图失败记未测，由调用方按“未测”处理
+        return {"status": "未测", "why": f"视线检测出错：{e}"[:160], "faces": [], "error": repr(e)[:120]}
+
+
+def face_pose_for(image, bbox, min_iou: float = 0.3) -> dict | None:
+    """Q1 侧脸放宽用：把 ArcFace 的脸框（x1,y1,x2,y2 像素）对上 YuNet 的脸行 → {yaw_n, iod_w, status}；对不上 → None"""
+    if not bbox or len(bbox) < 4:
+        return None
+    r = gaze_raw(image)
+    x1, y1, x2, y2 = [float(v) for v in bbox[:4]]
+    best, best_iou = None, 0.0
+    for f in r.get("faces") or []:
+        b = f.get("box") or []
+        if len(b) < 4:
+            continue
+        bx1, by1, bx2, by2 = float(b[0]), float(b[1]), float(b[0]) + float(b[2]), float(b[1]) + float(b[3])
+        iw, ih = max(0.0, min(x2, bx2) - max(x1, bx1)), max(0.0, min(y2, by2) - max(y1, by1))
+        inter = iw * ih
+        union = (x2 - x1) * (y2 - y1) + float(b[2]) * float(b[3]) - inter
+        iou = inter / union if union > 0 else 0.0
+        if iou > best_iou:
+            best, best_iou = f, iou
+    if best is None or best_iou < min_iou:
+        return None
+    w = float((best.get("box") or [0, 0, 1, 1])[2]) or 1.0
+    return {"yaw_n": best.get("yaw_n"), "iod_w": round(float(best.get("iod") or 0) / w, 3), "status": best.get("status"), "iou": round(best_iou, 3)}
+
+
+def side_face_relax(image, bbox, t1: dict) -> tuple[float, str | None]:
+    """W-DETECT 11-06（ep01 Q1 63 次不过里 36 次是四分之三侧脸 0.40–0.50 被“直接不过”，亲看 S2 v17 / S4 尾帧 v11 都是本人）：
+    脸明显转开（|yaw_n| ≥ yaw_min 或 眼距 / 脸宽 ≤ iod_w_max）→ 复核下限下移 lo_delta（默认 −0.10），只是把“直接不过”改成进复核带
+    交本地看图左右并排复核，通过线不动（身份硬项语义不变）。config image_thresholds.Q1_identity.side_face；对不上 YuNet 脸行 = 不放宽"""
+    sf = t1.get("side_face") or {}
+    if not sf.get("enabled", True):
+        return 0.0, None
+    p = face_pose_for(image, bbox)
+    if not p or p.get("yaw_n") is None:
+        return 0.0, None
+    yaw, iw = abs(float(p["yaw_n"])), float(p.get("iod_w") or 1.0)
+    if yaw >= float(sf.get("yaw_min", 0.4)) or iw <= float(sf.get("iod_w_max", 0.30)):
+        return float(sf.get("lo_delta", -0.10)), f"侧脸（yaw {yaw:.2f}，眼距/脸宽 {iw:.2f}）复核下限下移 {abs(float(sf.get('lo_delta', -0.10))):.2f}"
+    return 0.0, None
+
+
 def gaze_item(image) -> tuple[str, str, dict]:
     """ACTING 11-01（项目方 R11-2“演员的眼睛不要看镜头”）：YuNet 五点头部朝向 + 眼球偏移估视线（packages/qc/ns_qc/gaze.py）。
-    标定前只记录（status 恒为 na，evidence.would_fail）；ns_qc.gaze.BLOCK=True（总调度批准、标定分得开）后才判 fail。没检出脸 = 未测"""
+    标定前只记录（status 恒为 na，evidence.would_fail）；ns_qc.gaze.BLOCK=True（总调度批准、标定分得开）后才判 fail。没检出脸 = 未测。
+    L-200 排排站：ns_qc.gaze.lineup_geo（几何：同一排、同一纵深、朝向镜头的两张以上脸）命中 → fail，evidence.lineup_geo；
+    看图模型对合影式并排漏判（ep01 S1 / S14 / S15 都是它放过的），所以这一项不被看图“没报缺陷”否掉（blocking._is_hard）"""
     try:
-        qc = str(ROOT / "packages" / "qc")
-        if qc not in sys.path:
-            sys.path.insert(0, qc)
-        import cv2
         from ns_qc import gaze as GZ
-        bgr = cv2.imread(str(image))
-        if bgr is None:
-            return "untested", "读不到图", {}
-        r = GZ.image_gaze(bgr)
-    except Exception as e:  # noqa: BLE001
-        return "untested", f"视线检测出错：{e}"[:160], {}
-    ev = {"gaze": r.get("status"), "faces": [{k: f.get(k) for k in ("iod", "yaw_n", "pitch_n", "iris_dx", "gaze_x", "status")}
-                                             for f in r.get("faces") or []][:4], "provisional": GZ.PROVISIONAL}
+    except Exception:  # noqa: BLE001  # arch-ok: 先补路径再导入（gaze_raw 会加 sys.path）
+        GZ = None
+    r = gaze_raw(image)
+    if r.get("error") == "unreadable":
+        return "untested", "读不到图", {}
+    if r.get("error"):
+        return "untested", str(r.get("why") or "视线检测出错")[:160], {}
+    if GZ is None:
+        from ns_qc import gaze as GZ  # noqa: N811
+    lu = r.get("lineup") or {}
+    ev = {"gaze": r.get("status"), "faces": [{k: f.get(k) for k in ("iod", "yaw_n", "pitch_n", "iris_dx", "gaze_x", "status", "box")}
+                                             for f in r.get("faces") or []][:4], "n_faces": len(r.get("faces") or []), "provisional": GZ.PROVISIONAL,
+          "lineup_geo": {"lineup": bool(lu.get("lineup")), "n": lu.get("n", 0), "pairs": lu.get("pairs") or []}}
     # L-200（项目方 11-06：看镜头 / 排排站 = 硬项）：gen_contract.json blocking_items 含 gaze 时 G1 不等 YuNet 标定（BLOCK）就判 fail；
     # 脸太小 / 没检出 = na（不当未测挡人，看图 Q9 eye_contact / lineup 兜底）；blocking.apply 里看图真看过且没报视线缺陷 → G1 改只记录
     l200 = "gaze" in (hard_set() or set())
     if r["status"] == "未测":
         return ("untested" if GZ.BLOCK else "na"), f"未测（{r.get('why')}）", ev
     bad = r["status"] == "疑似看镜头"
+    label = r["status"]
+    if lu.get("lineup"):
+        bad = True
+        label = f"疑似排排站（{lu.get('n')} 人同一排正面并排，几何判）" + ("，且疑似看镜头" if r["status"] == "疑似看镜头" else "")
     if GZ.BLOCK or l200:
-        return ("fail" if bad else "pass"), (r["status"] + ("" if GZ.BLOCK else "（L-200 硬项；看图有结论时以看图为准）")), ev
-    return "na", f"只记录（未标定，不阻断）：{r['status']}", {**ev, "would_fail": bad, "record_only": True}
+        return ("fail" if bad else "pass"), (label + ("" if GZ.BLOCK else "（L-200 硬项；看镜头以看图为准，排排站几何判不被看图否掉）")), ev
+    return "na", f"只记录（未标定，不阻断）：{label}", {**ev, "would_fail": bad, "record_only": True}
 SIZE_BAND = {"极近特写": 0, "大特写": 0, "特写": 1, "近景": 2, "中近景": 2, "中景": 3, "中全景": 4, "全身": 5, "全景": 5,
              "远景": 6, "大远景": 6}
 from ..asset_refs import NAME_ID   # noqa: E402  OVERSIGHT-F P2（PROMPTFIX）：同一张人物表（V2 清单角色由 register_manifest_names 登记进来）
@@ -414,6 +488,9 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
                 q1_idx[cid] = k_best
                 h = float(faces[k_best].get("h_ratio") or 0)
                 need, lo, tname = band_lines(cid, h, t1)
+                sf_delta, sf_note = side_face_relax(image, faces[k_best].get("bbox"), t1)   # W-DETECT 11-06：侧脸只下移复核下限
+                if sf_delta:
+                    lo, tname = round(max(0.0, lo + sf_delta), 3), f"{tname}·侧脸"
                 face_verdict[k_best] = (cid, "过")
                 if best < lo:
                     face_verdict[k_best] = (cid, "不像")
@@ -422,7 +499,8 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
                     face_verdict[k_best] = (cid, "复核带")
                     bad.append(f"{cid} {best:.3f}（对 {ref}）在复核带 {lo}–{need}（{tname}），待本地看图并排复核")
                     q1_band.append({"cid": cid, "sim": round(best, 3), "lo": lo, "need": need, "tier": tname,
-                                 "bbox": faces[k_best].get("bbox"), "h_ratio": round(h, 3)})
+                                 "bbox": faces[k_best].get("bbox"), "h_ratio": round(h, 3),
+                                 **({"side_face": sf_note} if sf_note else {})})
                 elif (faces[k_best].get("anchor") or {}).get(cid) is not None and faces[k_best]["anchor"][cid] < need:
                     # L-098 身份库 A/B（11-02）：top-k 把 03-S2 v14（脸圆发糊、亲审不合格，锚 0.573）抬到 0.611–0.650，
                     # 会绕开复核带的清晰度把关 → 锚自己没过线时仍进复核带，只是免本地看图（top-k 已证明是同一人），清晰度照查

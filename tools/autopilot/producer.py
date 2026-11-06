@@ -349,9 +349,13 @@ def first_input_changed(paths, sid: str, fo: dict, led: dict) -> dict:
             "reason": f"v{fo.get('take')} 之后作业输入变了（重新导入 / 重编），自动重出，不算之前的次数"}
 
 
-def last_consistent(td: dict, fo: dict, lo: dict) -> dict:
+def last_consistent(td: dict, fo: dict, lo: dict, led: dict | None = None) -> dict:
     """K-OPS-E13（总调度 11-02 02:2x：以 takes.json 当前版本和契约结果为准，不反过来改 takes）：
-    尾帧 passed 但①首帧不是 passed，或②当前尾帧比当前首帧旧（首帧换过）→ 尾帧作废，回到 ready（首帧过了）/ pending（首帧没过），不计次"""
+    尾帧 passed 但①首帧不是 passed，或②当前尾帧比当前首帧旧（首帧换过）→ 尾帧作废，回到 ready（首帧过了）/ pending（首帧没过），不计次。
+    W-DETECT 11-06（ep01-S9 尾帧一天 26 版：旧尾帧 v3 一直是“当前”、新尾帧每次不过都不设当前 → 每拍都 stale → 作废清零 → 再出 →
+    直到硬上限 30）：作废只做一次——void_reset 同时撤掉过期的当前尾帧（stale_active_last）。万一它还挂着（撤之前的同一拍 / 撤失败），
+    只数账本 voided_at 之后配新首帧出的尾帧（历史版本不算）：1–2 次 → ready 接着数；≥ MAX_TRIES → 终态 best_effort
+    （last_redo_exhausted；stale_last_sweep 把账本标 best_effort → adopt_best_effort_sweep / L-204 D8 I2VA 回退）"""
     if lo.get("status") != "passed" or lo.get("na") or lo.get("owner_locked"):
         return lo                    # K-OPS-E23 优先：项目方定稿锁的尾帧不因首帧换版作废（ep01-S1：E13 无视定稿锁 → 新尾帧设不成当前 → 撤回 → 重出，24 小时 108 版）
     fa, la = active_take(td, "image"), active_take(td, "last")
@@ -359,10 +363,34 @@ def last_consistent(td: dict, fo: dict, lo: dict) -> dict:
     first_ok = first_ok_for_last(fo)       # L-204 D4：换代中（regen_keep）当前首帧仍有效，尾帧不作废
     if first_ok and not stale:
         return lo
+    if stale and first_ok:
+        n = last_tries_for(td, fa, la, since=(led or {}).get("voided_at"))
+        if n >= MAX_TRIES:
+            return {**lo, "status": "best_effort", "attempts": n, "stale_active_last": la.get("n"), "last_redo_exhausted": True,
+                    "redo_for_first": fa.get("n"),
+                    "reason": "首帧换成 v{} 后尾帧已重出 {} 次都没过（3 次用尽），标尽力：自动采用最好一版或退回 I2VA（L-204 D8）".format(fa.get("n"), n)}
+        if n:
+            return {**lo, "status": "ready", "attempts": n, "waiting_for": "空闲道", "redo_for_first": fa.get("n"), "stale_active_last": la.get("n"),
+                    "reason": "首帧换成 v{} 后尾帧已按新首帧重出 {} 次都没过，按 3 次规则继续（不再作废清零）".format(fa.get("n"), n)}
     why = ("首帧换过（当前首帧 v{} 比尾帧 v{} 新），尾帧作废，跟着重出，不计次".format(fa.get("n"), la.get("n")) if stale
            else "首帧现在不是“已通过”（{}），尾帧作废，等首帧过契约后重出".format(fo.get("status")))
     return {**lo, "status": "ready" if first_ok else "pending", "attempts": 0, "reason": why,
-            "waiting_for": "空闲道" if first_ok else "首帧过契约", "voided": True}
+            "waiting_for": "空闲道" if first_ok else "首帧过契约", "voided": True,
+            **({"stale_active_last": la.get("n")} if stale and la else {})}
+
+
+def last_tries_for(td: dict, fa: dict | None, la: dict | None = None, since: str | None = None) -> int:
+    """配当前首帧 fa 出的、不是当前版、且在 since（账本 voided_at，ISO）之后出的尾帧数 = 这次作废后已重出几次；
+    没有首帧 / 没有 since（还没作废过 → 先走作废那一步）→ 0。只数本次作废后的版本，历史的 27 版不算"""
+    if not fa or not since:
+        return 0
+    n = 0
+    for t in (td.get("takes") or []):
+        if t.get("stage") != "last" or (la and t.get("n") == la.get("n")):
+            continue
+        if str(t.get("created_at") or "") > str(since) and last_paired(t, fa):
+            n += 1
+    return n
 
 
 def first_ok_for_last(fo: dict) -> bool:
@@ -1046,7 +1074,9 @@ def vqa_gate(sid: str, stage: str, file_rel: str, job: dict, pf: dict) -> dict |
         from ns_render import pipeline as P
         if not VQ.enforced():
             return None
-        other = [b for b in (pf.get("blocking") or []) if b not in ("Q9", "Q1")]
+        # W-DETECT 11-06：G1（YuNet 视线，误报多）单独不过时也要看图——L-200 定“看图有结论以看图为准”，可原来 G1 一挡就跳过看图，
+        # 看图永远给不出结论、G1 自己把图毙掉（今天 ep01 12 张：S9 尾帧 10 张全是男演员看祁念被 YuNet 判成看镜头）
+        other = [b for b in (pf.get("blocking") or []) if b not in ("Q9", "Q1", "G1")]
         q1a = next((i for i in pf.get("items") or [] if i.get("id") == "Q1a"), None)
         if q1a and q1a.get("status") == "untested" and (q1a.get("evidence") or {}).get("q1a_mode") == "unavailable":
             other = [b for b in other if b != "Q1a"]   # K-REV-V19：分割不可用的 Q1a 要靠看图逐人问答判，不能因此跳过看图
@@ -1511,7 +1541,8 @@ def q19_clean(pf: dict) -> bool:
     return True
 
 
-GAZE_DEFECTS = ("eye_contact", "lineup")      # L-200：看图里的“看镜头 / 排排站”（与 ns_agent.gen_contract.blocking.GAZE_DEFECTS 同名单）
+GAZE_DEFECTS = ("eye_contact",)               # L-200：看图里的“看镜头”（与 ns_agent.gen_contract.blocking.GAZE_DEFECTS 同名单）；
+# W-DETECT 11-06（复审）：看图的 lineup 未标定、只记录——排排站硬项只认 G1 的几何判 lineup_geo（G1 fail 已在下面算 never_adopt）
 
 
 def gaze_bad(pf: dict) -> bool:
@@ -1795,7 +1826,7 @@ def derive(w: World, ledger: dict, leases: dict, run_summary: dict | None = None
             if _VM.no_last(w.p.run_id, n, w.p.root, shot=sid):  # L-197 A：本集视频只用首帧（I2VA）→ 尾帧对象 = 不适用（不创建 / 不派 / 不评分 / 不挡视频）
                 lo = {**obj("last", sid, ep=n, shot=sid), "status": "passed", "na": True, "i2va_no_last": True,
                       "reason": "L-197：视频只用首帧（I2VA），不出尾帧", "attempts": 0, "max_attempts": None}
-            lo = last_consistent(td, fo, lo)          # K-OPS-E13：尾帧不能比首帧旧、首帧没过尾帧不能算过
+            lo = last_consistent(td, fo, lo, ledger.get(f"last:{sid}") or {})   # K-OPS-E13：尾帧不能比首帧旧、首帧没过尾帧不能算过
             vo = _video_obj(w, sid, n, td, fo, lo, ledger, leases, night_alive)
             S["objects"] = {"assets": ao, "first": fo, "last": lo, "video": vo}
             shot_objs.append(S)
@@ -2802,6 +2833,15 @@ class Producer:
                 except Exception as e:  # noqa: BLE001
                     self.logf("gaze_regen_err", error=repr(e)[:300])
                 try:
+                    if not getattr(self, "_stale_resweep", False) and self.stale_last_sweep(reg):  # W-DETECT 11-06：过期当前尾帧撤掉 / 重出用尽标尽力
+                        self._stale_resweep = True        # 复审 11-06：一拍最多重推一次，撤不掉 / 持续抛错不递归
+                        try:
+                            return self.tick(dispatch)
+                        finally:
+                            self._stale_resweep = False
+                except Exception as e:  # noqa: BLE001
+                    self.logf("stale_last_sweep_err", error=repr(e)[:300])
+                try:
                     self.adopt_best_effort_sweep(reg)  # L-196：用尽停在 best_effort 的自动取最高分版（L-204 D8 兜底也在这里）
                 except Exception as e:  # noqa: BLE001
                     self.logf("be_adopt_err", error=repr(e)[:300])
@@ -2973,7 +3013,47 @@ class Producer:
                             last_unavailable=None, last_frame_fallback=None, last_fallback_first_n=None, voided_at=iso(),
                             history=[dict(h, before_void=True) for h in led.get("history") or []], reason=why)
         self.logf("last_void_reset", obj=oid, counted=False, why=why, rule="L-204 D5", tries_before=led.get("tries"))
+        self.clear_stale_last(o, why)
         return r
+
+    def clear_stale_last(self, o: dict, why: str) -> bool:
+        """W-DETECT 11-06：首帧换版作废尾帧时把过期的当前尾帧（登记表 stale_active_last）撤掉——不撤它，下一拍 last_consistent 又判 stale、
+        又作废清零（S9 一天 26 版的根因）。撤了之后尾帧走正常账本路径：3 次 → best_effort → adopt / L-204 D8 I2VA"""
+        n = o.get("stale_active_last")
+        if n is None:
+            return False
+        try:
+            from ns_render import pipeline as P
+            P.clear_active(o["shot"], "last", f"首帧换版，过期尾帧 v{n} 撤下（{str(why)[:80]}）", actor="producer.clear_stale_last")
+            self.logf("stale_last_cleared", obj=o["id"], take=n, counted=False, rule="W-DETECT 11-06", why=str(why)[:160])
+            return True
+        except Exception as e:  # noqa: BLE001  # arch-ok: 撤不掉只记日志，下一拍 last_consistent 仍按 voided_at 计次、不会清零
+            self.logf("stale_last_clear_err", obj=o["id"], take=n, error=repr(e)[:200], counted=False)
+            return False
+
+    def stale_last_sweep(self, reg) -> list:
+        """W-DETECT 11-06：登记表里带 stale_active_last、且不是 voided 的尾帧（过期当前尾帧还挂着、已在按新首帧重出）→ 撤掉它；
+        账本 final 还是旧采用的 passed → 清成 None、tries=已出次数；已重出 ≥ MAX_TRIES（last_redo_exhausted）→ 账本 final=best_effort
+        （终态：adopt_best_effort_sweep 取最好一版；候选全是 FL / 看镜头 → gaze_fallback D8 换种子加轮 → I2VA 回退）。每拍跑，空操作很便宜"""
+        out = []
+        for E in reg.get("episodes") or []:
+            for S in E.get("shots") or []:
+                o = (S.get("objects") or {}).get("last") or {}
+                if o.get("stale_active_last") is None or o.get("voided"):
+                    continue                                        # voided 的由 dispatch → void_reset 处理（那里清账本次数 + 撤当前）
+                changed = self.clear_stale_last(o, o.get("reason") or "首帧换版")
+                led = self.ledger().get(o["id"]) or {}
+                n = max(int(o.get("attempts") or 0), int(led.get("tries") or 0))
+                if o.get("last_redo_exhausted") and led.get("final") != "best_effort":
+                    self.led_update(o["id"], final="best_effort", tries=n, redo_exhausted=True, reason=o.get("reason"))
+                    self.logf("best_effort", obj=o["id"], reason=o.get("reason"), counted=False, rule="W-DETECT 11-06", via="stale_last_sweep")
+                    changed = True
+                elif not o.get("last_redo_exhausted") and led.get("final") == "passed":
+                    self.led_update(o["id"], final=None, tries=n, reason=o.get("reason"))
+                    changed = True
+                if changed:                                        # 复审 11-06：只有真改了状态才计入（触发重推一拍）
+                    out.append(o["id"])
+        return out
 
     def gaze_fallback(self, o: dict, led: dict) -> int | None:
         """D8：3 次用尽、review_adopt 没取到（候选全部是 L-200 看镜头 / 排排站 或 L-203 首尾太像 = never_adopt）：
@@ -3054,6 +3134,38 @@ class Producer:
             self.logf("report_issue_err", obj=o.get("id"), error=repr(e)[:200], counted=False)
             return None
 
+    def lineup_recheck(self, sid: str, t: dict, pf: dict) -> bool:
+        """W-DETECT 11-06（ep01 v65 成片里 S1 三人一排、S14 / S15 两人并排仍在：三张当前首帧都是 L-200 之前判的，看图没跑过 lineup，
+        G1 证据里也没有几何排排站）：双人以上的镜、当前首帧 G1 证据缺 lineup_geo → 本机 YuNet 几何判一次（ns_qc.gaze.lineup_geo）；
+        命中 → 原地把 pf 的 G1 改成 fail（证据 lineup_geo、gaze_recheck），返回 True 交 gaze_regen_sweep 撤下重出；其它 → False"""
+        key = (sid, t.get("n")) if t else None
+        seen = self.__dict__.setdefault("_lineup_seen", set())
+        if key in seen:
+            return False                                             # 本进程已判过（阴性）：120 s 一拍不再跑 YuNet
+        try:
+            g1 = next((i for i in pf.get("items") or [] if i.get("id") == "G1"), None)
+            if g1 is None or "lineup_geo" in (g1.get("evidence") or {}) or not self.two_person(sid):
+                seen.add(key)
+                return False
+            from ns_agent.gen_contract import postflight as PF
+            from ns_render import frame_edit as FE
+            from ns_render import pipeline as P
+            r = PF.gaze_raw(str(P.DATA / t["file"]))
+            lu = r.get("lineup") or {}
+            g1["evidence"] = {**(g1.get("evidence") or {}), "lineup_geo": {"lineup": bool(lu.get("lineup")), "n": lu.get("n", 0),
+                                                                           "pairs": lu.get("pairs") or []},
+                              "gaze_recheck": {"at": iso(), "by": "producer.lineup_recheck", "rule": "L-200 / W-DETECT 11-06"}}
+            seen.add(key)
+            if not lu.get("lineup"):
+                FE.annotate(sid, "image", t["n"], postflight=pf)     # 阴性也落盘：重启后 lineup_geo 在证据里，不再重判
+                return False
+            g1.update(status="fail", record_only=False,
+                      detail=f"疑似排排站（{lu.get('n')} 人同一排正面并排，几何判；L-200 补判，撤下重出）")
+            return True
+        except Exception as e:  # noqa: BLE001  # arch-ok: 补判失败只记日志，不撤图（下一拍再试）
+            self.logf("lineup_recheck_err", obj=f"first:{sid}", error=repr(e)[:200], counted=False)
+            return False
+
     def gaze_regen_sweep(self, reg, every_s: float = 120) -> list:
         """D11（L-200 补课）：当前首帧过了契约、但 postflight 里有视线缺陷（Q9 eye_contact / lineup、G1 fail）且没按 L-200 重判过
         （= L-200 之前判的；现在这种版本根本设不成当前）→ 撤下当前、postflight 改判不过（ok_before_gaze 留痕）、账本 final 清掉，
@@ -3075,7 +3187,9 @@ class Producer:
                     continue
                 t = active_take(td, "image")
                 pf = take_pf(t)
-                if not t or not pf.get("ok") or not gaze_bad(pf) or pf.get("gaze_waived") or pf.get("gaze_rejudged"):
+                if not t or not pf.get("ok") or pf.get("gaze_waived") or pf.get("gaze_rejudged"):
+                    continue
+                if not gaze_bad(pf) and not self.lineup_recheck(S["shot"], t, pf):
                     continue
                 n = t["n"]
                 pf2 = {**pf, "ok": False, "ok_before_gaze": pf.get("ok"), "blocking": sorted(set(pf.get("blocking") or []) | {"gaze"}),
@@ -3720,6 +3834,19 @@ class Producer:
         seed, sinfo = self.seed_pick(o, attempt)
         if attempt == 1:
             return {"name": "第 1 次（frame_v9 默认）", "seed": seed, "seed_info": sinfo}
+        fl = self.fl_escalate_level(o, attempt)
+        if fl:
+            # W-DETECT 11-06：尾帧上一次因 FL（首尾太像）不过 → 换 seed 救不了（S9 25 版 / S4 12 版 / S7 5 版 全是同一构图 0.82–0.99），
+            # 下一次改构图：落幅紧一档 + 不再把首帧挂进参考（frame_job.build_last_compose fl_escalate；只有 compose 模式有这一步，
+            # edit 模式 plan_kw 不生效 → 阶梯名如实写“只换 seed”）
+            try:
+                compose = _VM.last_frame_mode(self.p.run_id, self.p.root) == "compose"
+            except Exception:  # noqa: BLE001  # arch-ok: 读不到模式按 edit 记（名字保守）
+                compose = False
+            name = (f"第 {attempt} 次：首尾太像 → 落幅紧 {fl} 档、去掉首帧参考（L-203 换构图）" if compose
+                    else f"第 {attempt} 次：首尾太像，但尾帧是 edit 模式（无换构图）→ 只换 seed")
+            return {"name": name, "seed": seed, "seed_info": sinfo, "plan_kw": {"fl_escalate": fl} if compose else {},
+                    "variant": "fl_escalate" if compose else "fl_seed_only"}
         if attempt == 2:
             return {"name": "第 2 次：换 seed", "seed": seed, "seed_info": sinfo}
         plan_kw = {}
@@ -3740,6 +3867,18 @@ class Producer:
             return sum(1 for c in shot.cast if getattr(c, "presence", None) == "在画") >= 2
         except Exception:  # noqa: BLE001
             return False
+
+    def fl_escalate_level(self, o: dict, attempt: int) -> int:
+        """W-DETECT 11-06：尾帧第 2 次起、上一次不过项含 FL（首尾太像）→ 换构图档位 = 1（紧一档）、2（紧两档）…；其它 → 0"""
+        if o.get("kind") != "last" or attempt < 2:
+            return 0
+        try:
+            hist = [h for h in ((self.ledger().get(o["id"]) or {}).get("history") or []) if not h.get("before_void")]
+        except Exception:  # noqa: BLE001  # arch-ok: 账本读不到 = 按旧阶梯（换 seed）
+            return 0
+        if not hist or "FL" not in (hist[-1].get("blocking") or []):
+            return 0
+        return min(2, sum(1 for h in hist if "FL" in (h.get("blocking") or [])))
 
     def rung_strategy(self, o: dict, attempt: int, led: dict) -> dict | None:
         """总调度 11-01 09:5x 批：第二轮 Q1 自修——账本 strategy = "A"（双人：只挂脸）/ "B"（单人、尾帧：双份脸）；
@@ -4803,7 +4942,9 @@ def pause_tick(paths: Paths, t: float | None = None, apply: bool = True, alerts:
     c = jl(paths.ctrl, {}) or {}
     d = _pol().pause_decision(c, t, ROOT)
     try:                                       # K-OPS-E19：全道暂停超过 30 分钟 → 给 SENTINEL 开工单（每次暂停一张）
-        t0 = time.mktime(time.strptime(str(c.get("paused_at"))[:19], "%Y-%m-%dT%H:%M:%S")) if c.get("paused") else None
+        # W-INFRA 11-06：paused_at 是项目时区（+09:00）串，必须用 ts_epoch 读；原 mktime(strptime) 按本机时区读 → 笔记本（美东）上
+        # 差 14 h，30 分钟工单永远开不出来（test_e19 在本机红的根因）；服务器设了 TZ=Asia/Tokyo 所以没暴露
+        t0 = ts_epoch(c.get("paused_at")) if c.get("paused") else None
         if apply and t0 and t - t0 > 1800 and c.get("ticket_for") != c.get("paused_at"):
             sentinel_ticket(paths, "global_pause", f"整条道全局暂停已 {round((t - t0) / 60)} 分钟（{c.get('paused_by')}，"
                             f"{c.get('reason_kind') or '没写类型'}）：能不能改成只停受影响的镜（producer.py pause --shots）",

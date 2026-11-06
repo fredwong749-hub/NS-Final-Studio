@@ -33,17 +33,21 @@ def test_config_has_gaze_hard_item_and_lineup_check():
     assert gc["blocking_items"] == ["Q1", "count", "text", "adult", "gaze", "FL"] and "L-200" in gc["_blocking_items"]   # L-203 加 FL
     vq = json.loads((ROOT / "config/vqa.json").read_text(encoding="utf-8"))
     assert vq["checks"]["eye_contact"]["blocking"] is True
-    assert vq["checks"]["lineup"]["blocking"] is True and vq["checks"]["lineup"]["contract"] == "Q9"
+    # W-DETECT 11-06 复审：看图 lineup 只记录（未标定），排排站硬项 = G1 几何判 lineup_geo（tests/test_wdetect_1106.py）
+    assert vq["checks"]["lineup"]["blocking"] is False and vq["checks"]["lineup"]["contract"] == "Q9"
     tpl = (ROOT / "config/prompts/vqa_inspect.md").read_text(encoding="utf-8")
     assert '"lineup":' in tpl and tpl.count("- lineup：") == 1        # 同一次看图调用多一项
-    assert BL.Q9_HARD["gaze"] == BL.GAZE_DEFECTS == {"eye_contact", "lineup"}
+    assert BL.Q9_HARD["gaze"] == BL.GAZE_DEFECTS == {"eye_contact"} and BL.VQA_RECORD_DEFECTS == {"lineup"}
     assert set(PR.GAZE_DEFECTS) == BL.GAZE_DEFECTS
 
 
 # ---------------------------------------------------------------- blocking
 def test_q9_gaze_defects_block():
     assert BL.apply(_pf(_q9(["eye_contact"])), CONF)["blocking"] == ["Q9"]
-    assert BL.apply(_pf(_q9(["lineup"])), CONF)["blocking"] == ["Q9"]
+    # W-DETECT 11-06 复审：看图 lineup 只记录；排排站硬项 = G1 几何判 lineup_geo（看图“没报缺陷”也否不掉）
+    assert BL.apply(_pf(_q9(["lineup"])), CONF)["ok"] is True
+    geo = BL.apply(_pf(_it("G1", lineup_geo={"lineup": True, "n": 2}), _q9([], "pass")), CONF)
+    assert geo["ok"] is False and "G1" in geo["blocking"] and not geo.get("record_only_items")
     pf = BL.apply(_pf(_q9(["eye_contact"])), copy.deepcopy(OLD))            # L-196 旧清单：照旧只记录
     assert pf["ok"] is True and pf["items"][0]["record_only"]
 
@@ -67,7 +71,8 @@ def test_vqa_verdict_overrides_yunet():
 
 def test_vqa_gaze_verdict_helper():
     assert BL.vqa_gaze_verdict(_pf(_q9([], "pass"))) is True
-    assert BL.vqa_gaze_verdict(_pf(_q9(["lineup"]))) is False
+    assert BL.vqa_gaze_verdict(_pf(_q9(["eye_contact"]))) is False
+    assert BL.vqa_gaze_verdict(_pf(_q9(["lineup"]))) is True              # 看图 lineup 只记录，不算视线结论
     assert BL.vqa_gaze_verdict(_pf(_q9([], "untested", model=None))) is None
     assert BL.vqa_gaze_verdict(_pf(_it("Q1"))) is None
 
@@ -75,7 +80,9 @@ def test_vqa_gaze_verdict_helper():
 # ---------------------------------------------------------------- 采用排除
 def test_gaze_bad_detects_vqa_and_yunet():
     assert PR.gaze_bad(_pf(_q9(["eye_contact"])))
-    assert PR.gaze_bad(_pf(_q9(["lineup"], "na")))                                          # 只记录的旧判定也算
+    assert PR.gaze_bad(_pf(_q9(["eye_contact"], "na")))                                     # 只记录的旧判定也算
+    assert not PR.gaze_bad(_pf(_q9(["lineup"], "na")))                                      # 看图 lineup 只记录（W-DETECT 11-06）
+    assert PR.gaze_bad(_pf(_it("G1", lineup_geo={"lineup": True, "n": 2})))                 # 几何排排站 = never_adopt
     assert PR.gaze_bad(_pf(_it("G1")))
     assert not PR.gaze_bad(_pf(_it("G1", "na", would_fail=True)))                           # YuNet 只记录（未标定）不算
     assert not PR.gaze_bad(_pf({**_it("G1"), "record_only": True}))                         # 被看图否掉的 G1
@@ -93,14 +100,15 @@ def _ok_pf(q1=0.8, *extra):
 
 
 def test_pick_and_relaxed_pick_exclude_gaze():
-    td = {"takes": [_take(1, _ok_pf(0.9, _q9(["lineup"]))),                              # 分最高但排排站
+    td = {"takes": [_take(1, _ok_pf(0.9, _q9(["eye_contact"]))),                         # 分最高但看镜头
                     _take(2, _ok_pf(0.7)),                                                # 干净
                     _take(3, {**_ok_pf(0.95), "items": [_it("Q1", "pass", value=0.95), _q9([], "pass"), _it("G1")], "ok": False})]}
     assert PR.review_pick(td, "image") == 2
     assert PR.review_pick_relaxed(td, "image") == 2
     only_bad = {"takes": [_take(1, _ok_pf(0.9, _q9(["eye_contact"]))), _take(2, {"ok": False, "blocking": ["G1"], "items": [_it("Q1", "pass", value=0.8), _it("G1")]})]}
     assert PR.review_pick(only_bad, "image") is None and PR.review_pick_relaxed(only_bad, "image") is None   # 全看镜头 → 不采用（停在 best_effort）
-    assert PR.safe_take(_ok_pf(0.9, _q9(["lineup"]))) is False and PR.safe_take(_ok_pf(0.5, _it("Q1"))) is True
+    assert PR.safe_take(_ok_pf(0.9, _q9(["eye_contact"]))) is False and PR.safe_take(_ok_pf(0.5, _it("Q1"))) is True
+    assert PR.safe_take(_ok_pf(0.9, _it("G1", lineup_geo={"lineup": True, "n": 2}))) is False     # 几何排排站不采用
 
 
 def test_review_adopt_refuses_gaze_take_even_when_named(tmp_path, monkeypatch):

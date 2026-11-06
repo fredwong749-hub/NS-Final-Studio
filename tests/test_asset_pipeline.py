@@ -1015,11 +1015,12 @@ def test_sheet_auto_picks_best_and_owner_can_switch_with_downstream_redo(root, m
     assert "A_shoes1" not in lk["items"] and lk["items_replaced"][0]["iid"] == "A_shoes1"
     ij = AJ.load_job(AJ.job_path(root, RUN, "item-ch_zhuo_lin-A-shoes1"))
     assert ij["state"] == "pending" and ij["spec"]["from_sheet"]["file"] == lk["sheet"]["file"] and AW.is_crop_job(ij)
-    # 身份脸仍不自动：已登记的人工选择不许被覆盖
+    # 已登记的人工选择不许被覆盖（身份脸换要走资产中心）
     with pytest.raises(AJ.RegisterError, match="已经有身份脸"):
         AJ.register_pick(root, "face", {"id": "pick:face:ch_zhuo_lin", "run": RUN, "candidates": [{"key": "a", "file": "data/review_pages/x/zf.png", "contract_ok": True}]},
                          "a", "fred", push=False)
-    assert "face" not in AJ.AUTO_PICK_KINDS and "scene" not in AJ.AUTO_PICK_KINDS
+    # L-198（11-05）：身份脸 / 场景底图也进代选（W-ASSETS 11-06）；仍只在代选开着时生效（deliver 查 delegate_active）
+    assert "face" in AJ.AUTO_PICK_KINDS and "scene" in AJ.AUTO_PICK_KINDS
 
 
 def test_tick_auto_picks_legacy_waiting_sheet_pick(root, monkeypatch):
@@ -1052,7 +1053,7 @@ def test_worker_reload_keeps_asset_jobs_in_sync(monkeypatch):
     """常驻服务每拍重载 asset_worker：asset_jobs 也要跟着重载（02:17 新 worker + 旧 asset_jobs → AttributeError）"""
     monkeypatch.setattr(AJ, "AUTO_PICK_KINDS", None)                  # 模拟进程里还是旧的 asset_jobs
     AW2 = _load("asset_worker_reload_t", "tools/pipeline/asset_worker.py")
-    assert AW2.AJ.AUTO_PICK_KINDS == ("sheet", "item")
+    assert AW2.AJ.AUTO_PICK_KINDS == ("face", "scene", "sheet", "item")
 
 
 def _delegate(root, on: bool):
@@ -1333,9 +1334,9 @@ def _fake_fj(monkeypatch, prompt):
 
     class FakeFJ:
         @staticmethod
-        def build_first(run, ep, shot, g, mode="shot"):
-            seen["mode"] = mode
-            return {"prompt": prompt, "refs": []}
+        def build_first(run, ep, shot, g, mode="shot", prompt_override=None):
+            seen["mode"], seen["override"] = mode, prompt_override
+            return {"prompt": prompt_override or prompt, "refs": []}
 
         @staticmethod
         def trace_of(jc):
@@ -1351,11 +1352,14 @@ def _fake_fj(monkeypatch, prompt):
     return seen
 
 
-@pytest.mark.parametrize("kind,mode", [("face", "shot"), ("sheet", "sheet"), ("item", "sheet"), ("scene", "sheet")])
+@pytest.mark.parametrize("kind,mode", [("face", "sheet"), ("sheet", "sheet"), ("item", "sheet"), ("scene", "sheet")])
 def test_compile_mode_per_kind(monkeypatch, kind, mode):
+    """W-ASSETS 11-06：face 也走 sheet 模式（prompt_override = spec.img + 年龄锚点），其余不变"""
     seen = _fake_fj(monkeypatch, "空镜，无人物，影棚白幕")
-    AW._compile({"kind": kind, "run": "demo", "spec": {}})
+    spec = {"img": AJ.PORTRAIT + "成年女性卓琳，35岁，薄唇" + AJ.NEUTRAL, "age": 35} if kind == "face" else {}
+    AW._compile({"kind": kind, "run": "demo", "spec": spec})
     assert seen["mode"] == mode
+    assert (seen.get("override") or "").startswith(AJ.PORTRAIT) if kind == "face" else seen.get("override") is None
 
 
 def test_scene_compile_guard_blocks_person_paragraph(monkeypatch):
@@ -1363,7 +1367,7 @@ def test_scene_compile_guard_blocks_person_paragraph(monkeypatch):
     with pytest.raises(RuntimeError, match="空镜底图"):
         AW._compile({"kind": "scene", "run": "demo", "spec": {}})
     AW._compile({"kind": "sheet", "run": "demo", "spec": {}})       # sheet / face 不加这道守卫（人像本来就有人）
-    AW._compile({"kind": "face", "run": "demo", "spec": {}})
+    AW._compile({"kind": "face", "run": "demo", "spec": {"img": AJ.PORTRAIT + "成年女性卓琳，35岁，薄唇" + AJ.NEUTRAL, "age": 35}})
 
 
 REAL_JOBS = {"face": "face-ch_zhuo_lin", "sheet": "sheet-lead_f-O4", "item": "item-ch_zhuo_lin-A-acc1", "scene": "scene-sk_white_cyc"}
@@ -1371,7 +1375,8 @@ REAL_JOBS = {"face": "face-ch_zhuo_lin", "sheet": "sheet-lead_f-O4", "item": "it
 
 @pytest.mark.parametrize("kind", list(REAL_JOBS))
 def test_real_compile_four_kinds(monkeypatch, kind):
-    """真编译（真实作业文件只读，不出图）：item / scene 无镜头语言段、无人像融合句；sheet 无镜头语言段；face 仍是剧情镜（不在本次范围）"""
+    """真编译（真实作业文件只读，不出图）：item / scene 无镜头语言段、无人像融合句；sheet 无镜头语言段；
+    face（W-ASSETS 11-06）= sheet 模式 + prompt_override：spec.img 原文 + 年龄锚点，无镜头语言段 / 融合句 / 视线句"""
     jp = AJ.job_path(AJ.ROOT, "series10_v2", REAL_JOBS[kind])
     if not jp.is_file():
         pytest.skip(f"没有真实作业 {jp.name}")
@@ -1382,8 +1387,10 @@ def test_real_compile_four_kinds(monkeypatch, kind):
         j["spec"].setdefault("negative", AJ.EMPTY_NEGATIVE)
     p = AW._compile(j, AJ.ROOT)["prompt"]
     if kind == "face":
-        # face 仍是剧情镜（不在本次范围），但镜头信息现在是行内写法（“特写，平视…135mm 镜头 T1.2，极浅景深”），不再有“镜头：”标签——旧断言过期
-        assert ("镜头：" in p or "mm 镜头" in p) and "景深" in p and AW.person_phrases(p)
+        # 身份脸 = spec.img 原文（P1 年龄 / 长相 / 中性纯色背景）+ 年龄锚点 + 本剧风格后缀；不再有剧情镜的镜头段 / 融合句 / “以参考图为准”
+        sp = j["spec"]
+        assert AJ.PORTRAIT in p and f"{sp['age']}岁，看起来就是{sp['age']}岁" in p and AJ.NEUTRAL.strip("，") in p   # 真实清单里卓琳已有脸 → 前面可能带参考槽标注
+        assert "以参考图为准" not in p and "极浅景深" not in p and "人物和场景是同一次拍摄" not in p and "人物和环境一起清楚" not in p
     else:
         assert "镜头：" not in p and not any(x in p for x in ("人物和场景是同一次拍摄", "人物和环境一起清楚", "环境光染到皮肤", "四分之三侧脸"))
     if kind in ("item", "scene"):
@@ -1591,3 +1598,56 @@ def test_comfy_unavailable_backs_off_not_failed_scene_w31(root):
     assert j1["state"] == "failed"
     AW._fail(root, j1, cfg, j1["error"], {"failed": []}, final=True)
     assert "项目方挑场景底图" in issues.read_text(encoding="utf-8")
+
+
+# ------------------------------------------------------------------ W-ASSETS 11-06：身份脸作业（ep02 黎岸 / 周序 被挡两天的三个根因）
+def test_face_prompt_anchors_age_and_keeps_p1_text():
+    """身份脸提示词 = spec.img（P1 原文不改）+ 按 spec.age 的编译期年龄锚点（正向写法）；否定项进负面词。
+    根因：提示词模板 v2 的 shot 模式把人物描述换成“以参考图为准”，身份脸没有参考图 → 25 岁周序 16/16 出成 40 岁"""
+    base = AJ.PORTRAIT + "成年男性周序，25岁，结实中等身高，黑色寸头，表情平静自然，真实皮肤质感与成熟的五官轮廓" + AJ.NEUTRAL
+    p = AW.face_prompt({"cid": "ch_zhou_xu", "img": base, "age": 25})
+    assert p.startswith(AJ.PORTRAIT) and "25岁，看起来就是25岁的年轻人：皮肤紧致光滑" in p and "发际线饱满" in p
+    assert "结实中等身高，黑色寸头" in p and p.endswith(AJ.NEUTRAL)                     # P1 段落原样保留、背景句仍在末尾
+    assert "成熟的五官轮廓" not in p and "清晰的五官轮廓" in p                        # 外壳句对青年是反向锚点
+    assert "发际线后移" in AW.face_negative({"age": 25}) and "中年人外观" in AW.face_negative({"age": 25})
+    p38 = AW.face_prompt({"cid": "ch_li_an", "img": base.replace("周序，25岁", "黎岸，38岁"), "age": 38})
+    assert "38岁，看起来就是38岁的成熟成年人" in p38 and "成熟的五官轮廓" in p38 and "发际线后移" not in AW.face_negative({"age": 38})
+    with pytest.raises(RuntimeError, match="spec.img / spec.age"):
+        AW.face_prompt({"cid": "x", "img": "", "age": 25})
+
+
+def test_face_count_refless_and_vlm_fallback():
+    """人数检查：身份脸作业的人就是还没有身份脸的那个人 → cast 行 refless=True 只数头（原来 judge 因“身份参照没加载”张张 untested，
+    作业永远退避）；检测器真没跑成（隧道 / rssh 断）→ 用合并看图第 1 条兜底，看图也没答才仍 untested"""
+    sys.path.insert(0, str(ROOT / "tools/vqa"))
+    import anomaly as A
+    feat = {"H": 1000, "W": 800, "faces": [{"box": [300, 200, 500, 450], "score": 0.9, "emb": [1.0, 0.0], "sims": {}}], "refs_loaded": [], "persons": [], "dw": [], "hands": []}
+    cast = [{"name": "周序", "presence": "在画", "faced": True, "x": "中", "refless": True}]
+    r = A.judge(feat, cast)
+    assert r["verdict"] == "clean" and not r["untested"]
+    two = {**feat, "faces": feat["faces"] + [{"box": [50, 200, 250, 450], "score": 0.9, "emb": [0.0, 1.0], "sims": {}}]}
+    assert [d["code"] for d in A.judge(two, cast)["defects"]] == ["extra_head"]
+    an = {"status": "untested", "reasons": ["常驻检测服务不可用"], "mode": "error"}
+    assert AW.count_fallback(an, {"items": [{"n": 1, "ok": True, "text": "符合"}]})["status"] == "pass"
+    assert AW.count_fallback(an, {"items": [{"n": 1, "ok": False, "text": "不符合，两个人"}]})["status"] == "fail"
+    assert AW.count_fallback(an, {"error": "看图挂了", "items": [{"n": 1, "ok": True}]})["status"] == "untested"
+    assert AW.count_fallback(an, {"items": [{"n": 1, "ok": True, "untested": True}]})["status"] == "untested"
+    assert AW.count_fallback({"status": "fail", "reasons": ["extra_head"]}, {"items": [{"n": 1, "ok": True}]})["status"] == "fail"
+
+
+def test_face_auto_pick_when_delegate_on_l198(root, monkeypatch):
+    """L-198：代选开着 → 身份脸候选过检后系统按分数自动登记（manifest characters[cid].face，picked_by 系统自动），
+    inbox 一条“已自动选用，可修改”的告知；代选关着（test_full_round…）照旧投 #/queue"""
+    _delegate(root, True)
+    monkeypatch.setattr(AJ, "_checker", lambda: fake_check(root))
+    story, looks = AJ.p1(root, RUN)
+    plan = AJ.plan_from_gap({"kind": "face", "who": "卓琳（ch_zhuo_lin）", "what": "没有身份脸", "owner": "资产线", "shots": [1]}, story, looks, 1)
+    job = AJ._new_job(RUN, 1, plan, {"who": "卓琳（ch_zhuo_lin）", "what": "没有身份脸"})
+    AJ.save_job(root, job)
+    j = AW.run_job(AJ.job_path(root, RUN, job["id"]), "gpu36:0", root, renderer=fake_renderer(root), cfg={**AW.config(root), "candidates": {"face": 2}})
+    assert j["state"] == "done" and any("自动选用 s1100" in l for l in j["log"]), j["log"]
+    face = _j(root / "assets_v2/manifest.json")["characters"]["ch_zhuo_lin"]["face"]
+    assert face["file"].endswith("_s1100.png") and face["picked_by"].startswith("系统自动")
+    req = next(r for r in _j(root / "data/owner_queue/requests.json") if r["id"] == job["pick_id"])
+    assert req["auto_picked"] == "s1100" and req["title"].startswith("已自动选用：卓琳 身份脸") and "L-198" in req["detail"]
+    assert AJ.registered_face(root, RUN, "ch_zhuo_lin")["sha256"] == face["sha256"]       # 设定图闸门此后放行

@@ -247,19 +247,38 @@ def prompt_check(sid: str, image, via_tunnel: bool = False, stage: str = "image"
             # 11-04 判词自洽：模型把“原文”左右读反（ep01-S15 v1/v2），重问仍矛盾 → untested（infra：只重打分，不算 fail、不计重出次数）
             return {"status": "untested", "checks": d, "infra": True, "why": "站位判词与编译输入矛盾、重问仍未定：" + str(d.get("e") or "")[:120]}
     bad = [k for k in ("people_count", "positions", "action", "scene") if d.get(k) == "不符"]
-    if strict and "people_count" not in bad:
+    people = None
+    if strict:
+        # W-DETECT 11-06：严格人数闸以“可见人数（整数）vs 分镜 cast 区间”为准（结构化 people），看图模型自由判的 people_count=不符
+        # 只在它没给整数时才算数——ep01-S2 7 张：cast 唐瑶=局部背影（上限 2 人）、画面 2 人，模型却按“编译稿只写 1 人”判不符；
+        # S15 5 张抬头写 people_count 实为站位 / 动作不符。blocking._q10_prompt_people_bad 读 people.status 判人数硬项
         try:
             from tools.vqa import anomaly as AN
-            pv = people_verdict(d.get("visible_people"), AN.shot_cast(sid))
+            cast = AN.shot_cast(sid)
         except Exception:  # noqa: BLE001  # arch-ok: 取不到 cast = 不加判定（原有 people_count 判法照旧）
-            pv = None
-        if pv:
-            return {"status": "fail", "checks": d, "why": "people_count 不符：" + pv}
+            cast = None
+        rng = people_range(cast)
+        pv = people_verdict(d.get("visible_people"), cast)
+        if rng is not None and isinstance(d.get("visible_people"), int):
+            people = {"status": "fail" if pv else "pass", "visible": d["visible_people"], "range": list(rng), "why": pv}
+            if not pv and "people_count" in bad:
+                bad.remove("people_count")
+                d["people_count_vlm"] = "不符（只记录：可见人数 %d 在分镜区间 %d–%d 内）" % (d["visible_people"], rng[0], rng[1])
+        elif pv:
+            people = {"status": "fail", "visible": d.get("visible_people"), "range": list(rng) if rng else None, "why": pv}
+        if pv and "people_count" not in bad:
+            return {"status": "fail", "checks": d, "people": people, "why": "people_count 不符：" + pv}
     if bad:
-        return {"status": "fail", "checks": d, "why": "、".join(bad) + "不符：" + str(d.get("e") or "")[:120]}
+        out = {"status": "fail", "checks": d, "why": "、".join(bad) + "不符：" + str(d.get("e") or "")[:120]}
+        if people is not None:
+            out["people"] = people
+        return out
     if not d:
         return {"status": "untested", "why": "看图输出不是 JSON"}
-    return {"status": "pass", "checks": d}
+    out = {"status": "pass", "checks": d}
+    if people is not None:
+        out["people"] = people
+    return out
 
 
 def count_check(sid: str, image, feat: dict | None = None, host: str | None = None) -> dict:
