@@ -376,7 +376,15 @@ def apply(pf: dict, lab: dict) -> dict:
         infra = [k for k in ORDER if lab.get(k, {}).get("status") == "untested"]
         if st == "untested" and set(pf["blocking"]) <= {"Q10", "Q9"} and infra:
             pf["score_infra"] = True
+            # W-SCORE 11-07：原来只标 score_infra、不带原因 → producer 日志 error=""，看不出是人数检测连不上（gpu36 自连内网入口被拒）
+            pf["infra_error"] = infra_error_text(lab, infra)
     return item
+
+
+def infra_error_text(lab: dict, infra: list) -> str:
+    """Q10 哪几项没测成 + 各自原因 → 一行（永不为空）：'Q10 未测 count：检测器没跑成：…；prompt：本地看图没跑成：…'"""
+    parts = [f"{k}：{str((lab.get(k) or {}).get('why') or '无原因字段')[:160]}" for k in infra]
+    return ("Q10 未测 " + "；".join(parts))[:400] if parts else "Q10 未测（无未测子项记录）"
 
 
 # ───────────────────────── 批量（ep01 表 / 回归集） ─────────────────────────

@@ -1064,6 +1064,92 @@ def lead_sheet_variant(project, ep, shot, job: dict, plan_kw: dict, lead: str | 
 linwan_sheet_variant = lead_sheet_variant      # 旧名兼容（外部脚本 / 旧测试）
 
 
+# W-REFS 11-06（gpu36 23:36 ep02-S13 第 3 次“退到 两张脸 + 参考板（B）”→ DerivedRefMissing board_1394f5efddbd.png）：
+# 派生参考图（refcrops / refboards）只在笔记本生成、按 sha 推（K-OPS-F23）；原来笔记本只编默认档，阶梯后几档要的参考板从没生成过，
+# 服务器上每次第 3 档都缺图、白烧一次尝试。两处修：① 本档的作业构建抽成 first_job_for_rung / last_job_for_rung（producer 与笔记本预生成
+# tools/pipeline/preflight_deps.rung_deps 共用同一函数，生成的就是 producer 会要的那张）；② 本档派生图缺 → 本次退回默认参考（第 1 档的挂法，
+# 默认档的参考 required_data 一直推），rung 里记 rung_skip，_run_one 打 rung_skip 日志——不再按内容错误烧掉这次尝试
+def _rung_core(project, ep, shot, g, rung: dict, kind: str, run_id: str | None) -> dict:
+    from ns_agent import frame_job as FJ
+    first_job = FJ.build_first(project, ep, shot, g, **(rung.get("plan_kw") or {}))
+    if rung.get("preset"):
+        first_job = {**first_job, "preset": rung["preset"]}
+    if rung.get("variant") == "faces_only" and kind == "first":    # 策略 A：只挂脸，服装靠正文外层单品句（总调度 11-01 09:5x）
+        first_job = faces_only_variant(project, ep, shot, first_job, rung.get("plan_kw") or {})
+    if rung.get("variant") == "double_face" and kind == "first":   # 策略 B：同一张身份脸放两槽，加身份权重
+        first_job = double_face_variant(project, ep, shot, first_job, rung.get("plan_kw") or {})
+    if rung.get("variant") == "faces_look" and kind == "first":   # 双人镜 A 版：两张脸 + 主角本镜造型设定图（第 3 槽）
+        first_job = lead_sheet_variant(project, ep, shot, first_job, rung.get("plan_kw") or {}, lead=lead_char(run_id))
+    if rung.get("board") and kind == "first":       # 双人镜 B 版：两张脸 + 参考板（与 ASSETMASTER frames_v2 同一函数）
+        from ns_agent import asset_refs as AR
+        if str(ROOT / "tools" / "assetmaster") not in sys.path:
+            sys.path.insert(0, str(ROOT / "tools" / "assetmaster"))
+        import frames_v2 as F2
+        sr, plan = AR.plan_for(project, ep, shot, "qwen_image_2.1", **(rung.get("plan_kw") or {}))
+        plan2 = F2.two_person_board(sr, plan)
+        if first_job["prompt"].startswith(plan.prompt_prefix) and plan2 is not plan:
+            body = first_job["prompt"][len(plan.prompt_prefix):]
+            first_job = {**first_job, "prompt": plan2.prompt_prefix + body, "refs": plan2.files,
+                         "asset_refs": AR.record(sr, plan2), "face_files": face_files_of(plan2.slots)}
+    return first_job
+
+
+def _is_default_rung(rung: dict) -> bool:
+    return not (rung.get("plan_kw") or rung.get("variant") or rung.get("board"))
+
+
+def _mark_rung_skip(rung: dict, err: Exception, stage: str) -> None:
+    rung["rung_skip"] = {"from": rung.get("name"), "variant": rung.get("variant"), "plan_kw": rung.get("plan_kw"),
+                         "board": bool(rung.get("board")), "stage": stage, "error": f"{type(err).__name__}: {err}"[:300]}
+    rung["name"] = f"{rung.get('name')} → 本档派生参考图缺，退回默认参考（W-REFS）"
+    rung["variant"] = "derived_missing_default"
+
+
+def first_job_for_rung(project, ep, shot, g, rung: dict, kind: str = "first", run_id: str | None = None) -> dict:
+    """本档（rung）的首帧作业（尾帧也先编首帧作业）。本档派生参考图缺（DerivedRefMissing，服务器上没推到）且本档不是默认档 →
+    退回默认档（不带 plan_kw / variant / board）重编，rung 原地记 rung_skip、改 name / variant（调用方据此打日志）；默认档也缺 → 照抛"""
+    from ns_agent import asset_refs as AR
+    try:
+        return _rung_core(project, ep, shot, g, rung, kind, run_id)
+    except AR.DerivedRefMissing as e:
+        if _is_default_rung(rung):
+            raise
+        _mark_rung_skip(rung, e, "first_job")
+        return _rung_core(project, ep, shot, g, {k: v for k, v in rung.items() if k == "preset"}, kind, run_id)
+
+
+def last_job_for_rung(project, ep, shot, g, first_job: dict, first_file: str, rung: dict) -> dict:
+    """本档的尾帧作业（L-203 compose / edit 按 run_style）。本档派生图缺 → 退回 plan_kw={} 重编并记 rung_skip（同 first_job_for_rung）"""
+    from ns_agent import asset_refs as AR
+    from ns_agent import frame_job as FJ
+    kw = rung.get("plan_kw") or {}
+    try:
+        return FJ.build_last(first_job, first_file, project=project, ep=ep, shot=shot, g=g, plan_kw=kw)
+    except AR.DerivedRefMissing as e:
+        if not kw:
+            raise
+        _mark_rung_skip(rung, e, "last_job")
+        return FJ.build_last(first_job, first_file, project=project, ep=ep, shot=shot, g=g, plan_kw={})
+
+
+def prebuild_rungs(kind: str, two_person: bool) -> list[dict]:
+    """笔记本预生成派生参考图要覆盖的档（与 rung / rung_ab / rung_strategy / 驳回重出计划能选到的 plan_kw × variant 同一组合）。
+    preset / seed 不影响参考图，不列。改了阶梯 → 同一次改动里补这里（tests/test_rung_refs_prebuild.py 对照）"""
+    both = {"two_person": "both_faces"}
+    if kind == "first":
+        out = [{"name": "默认"}, {"name": "策略 B 双份脸", "variant": "double_face"}]
+        if two_person:
+            out += [{"name": "两张脸各占一槽", "plan_kw": both},
+                    {"name": "A 两张脸 + 主角造型设定图", "plan_kw": both, "variant": "faces_look"},
+                    {"name": "策略 A 只挂脸", "plan_kw": both, "variant": "faces_only"},
+                    {"name": "B 两张脸 + 参考板", "plan_kw": both, "variant": "faces_board", "board": True}]
+        return out
+    out = [{"name": "默认"}, {"name": "FL 换构图 1", "plan_kw": {"fl_escalate": 1}}, {"name": "FL 换构图 2", "plan_kw": {"fl_escalate": 2}}]
+    if two_person:
+        out.append({"name": "两张脸各占一槽", "plan_kw": both})
+    return out
+
+
 def vqa_gate(sid: str, stage: str, file_rel: str, job: dict, pf: dict) -> dict | None:
     """VQAGATE（项目方 11-01 16:10 / 16:3x：“image 做出来后用本地图像模型检测是否达标……再跑视频”）：
     契约之后、设为当前之前，gpu36 本地 Qwen3-VL 按 config/vqa.json 检查（含跨镜连贯：同场上一镜首帧 / 本镜首帧作参考），
@@ -1213,6 +1299,33 @@ def vqa_record(sid: str, stage: str, n: int, file_rel: str, job: dict, pf: dict,
             log_event(Paths(), "vqa_skip", obj=f"{stage}:{sid}", take=n, error=repr(e)[:160])
         except Exception:  # noqa: BLE001
             pass
+
+
+def infra_error(pf: dict) -> str:
+    """W-SCORE 11-07：score_infra 的原因（类型 + 上下文），永不为空。gpu36 11-06 22:02–00:00 ep02-S10 / S11 只重打分 8 轮
+    日志全是 error=""：Q10 出图后验收人数检测连不上（只标 score_infra、不带原因），还被当成审图位不通触发 review_fallback。
+    顺序：契约远端错 → 测量错 → 本机错 → Q10 / QB 带的 infra_error → 从未测项现拼 → 兜底列 blocking"""
+    for k in ("remote_error", "measure_error", "error", "infra_error"):
+        if pf.get(k):
+            return f"{k}: {str(pf[k])[:300]}"
+    unt = [f"{i.get('id')}：{str(i.get('detail') or '')[:120]}" for i in pf.get("items") or [] if i.get("status") == "untested"]
+    if unt:
+        return "untested: " + "；".join(unt)[:300]
+    return f"no_reason: score_infra 无原因字段（ok={pf.get('ok')} blocking={pf.get('blocking')} accept_retry={bool(pf.get('accept_retry'))}）"
+
+
+def infra_is_vlm(pf: dict) -> bool:
+    """这次 score_infra 跟看图（审图位 VLM）有关吗：Q9 未测 / Q10 提示词或服装没看成 / QB retry / 看图判词矛盾。
+    只有这些才算“审图位没结论”去推 review_fallback；人数检测 / 契约 ssh 打分出错与审图位无关，退回旧路由只会把看图挪到出图卡上"""
+    if pf.get("accept_retry"):
+        return True
+    st = {i.get("id"): i for i in pf.get("items") or []}
+    if (st.get("Q9") or {}).get("status") == "untested":
+        return True
+    ev = (st.get("Q10") or {}).get("evidence") or {}
+    if any((ev.get(k) or {}).get("status") == "untested" for k in ("prompt", "outfit")):
+        return True
+    return "看图" in str(pf.get("remote_error") or "")
 
 
 def score_unmeasured(pf: dict) -> bool:
@@ -2227,7 +2340,6 @@ class FrameExec:
 
     def render(self, kind: str, sid: str, lane: str, url: str, attempt: int, rung: dict, tag: dict) -> dict:
         """→ {"take": n, "file": data 相对路径, "job": 作业, "pf_future": Future|None} ；出错抛异常（调用方分类）"""
-        from ns_agent import frame_job as FJ
         from ns_render import pipeline as P
         from ns_render import unified_frame as UF
         from ns_render.comfy_client import ComfyClient, ComfyError
@@ -2242,26 +2354,7 @@ class FrameExec:
         host = "gpu36" if lane.startswith("gpu36") else "local" if lane in render_image_only_lanes() else "gpu33"   # LOCALGPU：本机道 → 本机打分
         project = UF.project_for(self.script) or self.p.run_id
         ep, shot = P.find_shot(self.script, sid)
-        first_job = FJ.build_first(project, ep, shot, self.script.globals, **(rung.get("plan_kw") or {}))
-        if rung.get("preset"):
-            first_job = {**first_job, "preset": rung["preset"]}
-        if rung.get("variant") == "faces_only" and kind == "first":    # 策略 A：只挂脸，服装靠正文外层单品句（总调度 11-01 09:5x）
-            first_job = faces_only_variant(project, ep, shot, first_job, rung.get("plan_kw") or {})
-        if rung.get("variant") == "double_face" and kind == "first":   # 策略 B：同一张身份脸放两槽，加身份权重
-            first_job = double_face_variant(project, ep, shot, first_job, rung.get("plan_kw") or {})
-        if rung.get("variant") == "faces_look" and kind == "first":   # 双人镜 A 版：两张脸 + 主角本镜造型设定图（第 3 槽）
-            first_job = lead_sheet_variant(project, ep, shot, first_job, rung.get("plan_kw") or {}, lead=lead_char(self.p.run_id))
-        if rung.get("board") and kind == "first":       # 双人镜 B 版：两张脸 + 参考板（与 ASSETMASTER frames_v2 同一函数）
-            from ns_agent import asset_refs as AR
-            if str(ROOT / "tools" / "assetmaster") not in sys.path:
-                sys.path.insert(0, str(ROOT / "tools" / "assetmaster"))
-            import frames_v2 as F2
-            sr, plan = AR.plan_for(project, ep, shot, "qwen_image_2.1", **(rung.get("plan_kw") or {}))
-            plan2 = F2.two_person_board(sr, plan)
-            if first_job["prompt"].startswith(plan.prompt_prefix) and plan2 is not plan:
-                body = first_job["prompt"][len(plan.prompt_prefix):]
-                first_job = {**first_job, "prompt": plan2.prompt_prefix + body, "refs": plan2.files,
-                             "asset_refs": AR.record(sr, plan2), "face_files": face_files_of(plan2.slots)}
+        first_job = first_job_for_rung(project, ep, shot, self.script.globals, rung, kind, self.p.run_id)   # W-REFS：派生图缺 → 本档退默认参考
         owner_edit = ((jl(self.p.rejects, {}) or {}).get(f"{kind}:{sid}") or {}).get("edit")
         if kind == "first":
             job = apply_owner_edit(first_job, owner_edit)
@@ -2289,8 +2382,7 @@ class FrameExec:
             if not first_job.get("last_prompt"):
                 return {"na": True}
             # L-203：尾帧按 run_style last_frame_mode（compose = 落幅单独构图，需要 ep / shot / g；edit = 旧法）；种子仍走本对象的种子流
-            job = FJ.build_last(first_job, f"data/{ft['file']}", project=project, ep=ep, shot=shot, g=self.script.globals,
-                                plan_kw=rung.get("plan_kw") or {})
+            job = last_job_for_rung(project, ep, shot, self.script.globals, first_job, f"data/{ft['file']}", rung)
             job = apply_owner_edit(job, owner_edit)
             if rung.get("preset"):
                 job["preset"] = rung["preset"]
@@ -3929,6 +4021,8 @@ class Producer:
             if lane not in self.relay_lanes and self.lock_now_fn(lane):            # 出发前现读一次训练锁（不走缓存，在派单线程里读，不卡主循环）
                 raise RuntimeError(f"训练锁：{lane} 上锁了（train.lock），未提交，换道")
             res = self.frames.render(kind, sid, lane, url, attempt, rung, tag)
+            if rung.get("rung_skip"):            # W-REFS：本档派生参考图服务器上缺 → 本次已退回默认参考（不当内容错误烧掉这次）
+                self.logf("rung_skip", obj=oid, attempt=attempt, counted=True, **rung["rung_skip"])
             if res.get("na"):
                 self.led_update(oid, na=True, final="na", reason="剧本这一镜没有结束状态，不需要尾帧")
                 self.logf("na", obj=oid)
@@ -3956,7 +4050,7 @@ class Producer:
                                 reason=("共用验收没拿到结论（看图排队 / 超时：retry，不判 fail），1 分钟后只重打分、不重出，不算一次尝试"
                                         if pf.get("accept_retry") else
                                         "契约打分时 gpu33 出错（显存 / 连接），1 分钟后只重打分、不重出，不算一次尝试"))
-                self.logf("score_infra", obj=oid, take=res["take"], error=str(pf.get("remote_error") or pf.get("error"))[:200],
+                self.logf("score_infra", obj=oid, take=res["take"], error=infra_error(pf)[:300],
                           counted=False, render_s=render_s, contract_s=contract_s, gpu_s=res.get("gpu_s"))
                 self.score_chain_trip(f"{oid} 出图后契约打分 score_infra",
                                       err="" if pf.get("accept_retry") else str(pf.get("remote_error") or pf.get("error") or ""))
@@ -4249,9 +4343,9 @@ class Producer:
                 back = RESCORE_BACKOFF[min(ki - 1, len(RESCORE_BACKOFF) - 1)]
                 self.led_update(oid, rescore_infra=ki, backoff_until=now() + back,
                                 reason=f"契约打分 / 共用验收仍没拿到结论，{back // 60} 分钟后再试（不重出、不计次）")
-                self.logf("score_infra", obj=oid, take=n, counted=False, backoff_s=back,
-                          error=str(pf.get("remote_error") or pf.get("error") or "")[:200])
-                self.review_fallback(ki, oid)      # MINOR 3：审图位连续 N 轮没结论 → 看图退回旧路由（不无限只重打分）
+                self.logf("score_infra", obj=oid, take=n, counted=False, backoff_s=back, error=infra_error(pf)[:300])
+                if infra_is_vlm(pf):               # W-SCORE 11-07：只有看图没结论才推退路（人数检测 / ssh 打分出错与审图位无关）
+                    self.review_fallback(ki, oid)  # MINOR 3：审图位连续 N 轮没结论 → 看图退回旧路由（不无限只重打分）
                 self.score_chain_trip(f"{oid} 只重打分 score_infra",
                                       err="" if pf.get("accept_retry") else str(pf.get("remote_error") or pf.get("error") or ""))
                 return
@@ -5620,7 +5714,7 @@ def rescore(paths: Paths, items: set) -> int:
             job = FJ.build_first(project, ep, shot, script.globals)
             new = UF._postflight(t["file"], {"cast": job.get("cast"), "asset_refs": job.get("asset_refs")}, "gpu33")
             if score_unmeasured(new):
-                log_event(paths, "score_infra", obj=sid, take=t["n"], error=str(new.get("remote_error"))[:200], counted=False)
+                log_event(paths, "score_infra", obj=sid, take=t["n"], error=infra_error(new)[:300], counted=False)
                 continue
             new["rescored"] = {"at": iso(), "why": "契约门槛改了（Q4 / Q8 只记录、Q5 停肢体比例），用新代码重打，不重出、不计次",
                                "old_blocking": sorted(fails)}

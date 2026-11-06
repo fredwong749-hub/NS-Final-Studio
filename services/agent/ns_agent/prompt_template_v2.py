@@ -266,6 +266,9 @@ def image_body(project: str, ep, shot, g, c, sr, plan, *, style_suffix: str) -> 
     angle_seg = af[1] if len(af) >= 2 else angle_field
     focus_seg = af[2] if len(af) >= 3 else ""
     a = PV.parse_angle(angle_seg + ("｜" + focus_seg if "过肩" in angle_seg or "越" in focus_seg else ""), names)
+    # W-PASS 11-07：第三段“起幅：…；落幅：…”只取起幅（首帧 = 起幅；尾帧走 frame_job.compose_last_shot 已换成落幅段）。
+    # 原来整段进首句 → 一张图里写了两个时刻，ep02-S8 4 版里 2 版画成上下两格拼图
+    focus_seg = PV.start_end(focus_seg)[0]
     reg = registry_en(g)
     en_of = lambda n: PV.short_en(reg.get(n, "")) if reg.get(n) else "the figure"   # noqa: E731
     sharp, soft = PV.focus_names(angle_field, comp_field, names)

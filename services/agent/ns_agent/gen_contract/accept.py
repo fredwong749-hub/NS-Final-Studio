@@ -395,6 +395,8 @@ def apply(pf: dict, acc: dict) -> dict:
     elif acc["status"] == "retry":
         pf["accept_retry"] = True
         pf["score_infra"] = True          # producer：图已入库，只重打分、不重出、不计次
+        pf["infra_error"] = ("QB 共用验收 retry：" + "；".join(str(r) for r in acc.get("reasons") or [])[:300]) \
+            if acc.get("reasons") else "QB 共用验收 retry（无原因字段）"   # W-SCORE 11-07：score_infra 永远带原因
     return pf
 
 

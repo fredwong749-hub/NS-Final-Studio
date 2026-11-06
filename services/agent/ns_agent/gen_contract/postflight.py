@@ -434,10 +434,17 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
         items.append(Item(i, TITLES[i], st, d, ev))
 
     face_visible = rec.get("subject") not in ("part", "object")
-    expect = [NAME_ID.get(c.get("name"), c.get("name")) for c in req.get("cast") or [] if c.get("presence") == "在画"]
     # K-AST-236：局部角色原文写到脸 / 头发（asset_refs 给他挂了身份脸）→ 画面里他的脸要过他自己的身份阈值（不只 recognize_floor）；
     # 只写到头发、脸可能不入画，所以不要求“必须出脸”
     described = {c["character"] for c in rec.get("characters") or [] if c.get("face_described")}
+    # W-PASS 11-07（ep02 21:53 后首帧 19 张只过 4 张，Q1 占 15 张不过里的 13 张）：在画但不露脸的人——过肩前景只露肩 / 后脑、背影
+    # （作业 cast.face_hidden = prompt_template_v2.hidden_people；asset_refs 角色 back_view = 编译没送他的脸）——不要求出脸，
+    # 与预检（preflight K-REN-957）、人数闸（accept.people_range 下限不计）、编译（不挂身份脸）同一口径。
+    # 他的脸真露出来了照样按下面“每张脸都要认得出”判（像本人 = 放行，陌生脸 = 不过）
+    hidden_ids = ({NAME_ID.get(c.get("name"), c.get("name")) for c in req.get("cast") or [] if c.get("face_hidden")}
+                  | {c.get("character") for c in rec.get("characters") or [] if c.get("back_view")}) - described
+    expect = [NAME_ID.get(c.get("name"), c.get("name")) for c in req.get("cast") or [] if c.get("presence") == "在画"]
+    expect = [c for c in expect if c not in hidden_ids]
     # Q1
     t1 = th.get("Q1_identity") or {}
     from . import cards as _CARDS
@@ -474,10 +481,15 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
         q1_idx = {}                                   # Q1x：同上，脸在 faces 里的下标（取特征）
         face_verdict: dict[int, tuple[str | None, str]] = {}   # 逐脸结论（总调度 20:1x：多人镜要指出是哪张脸错了）
         refd = {k for f in faces for k in f["sims"]}
-        for cid in expect:
+
+        def _top(cid):
+            return max((f["sims"].get(cid, (-1, ""))[0] for f in faces), default=-1)
+        # W-PASS 11-07：一张脸只认给一个角色——按各自最高分从高到低认领，认过的脸别人不能再用
+        # （原来每个角色各取全图最像自己的脸：ep02-S2 v5 只有祁念一张脸 0.841，黎岸也拿这张脸 0.113 → “黎岸不像”，逐脸结论还把祁念的脸标成黎岸）
+        for cid in sorted(expect, key=lambda c: -_top(c)):
             if faces and cid not in refd:                 # 没有身份脸参考的角色（路人）：不判，下面按“可抵一张认不出的脸”算
                 continue
-            cand = [(f["sims"].get(cid, (-1, "")), k) for k, f in enumerate(faces)]
+            cand = [(f["sims"].get(cid, (-1, "")), k) for k, f in enumerate(faces) if k not in used]
             (best, ref), k_best = max(cand, default=((None, ""), None))
             got[cid], via[cid] = best, ref
             if best is None or best < 0:
@@ -524,7 +536,7 @@ def evaluate(image: str | Path, req: dict, *, remote: dict | None = None, cross:
                 continue
             sims = {c: v[0] for c, v in f["sims"].items()}
             # 认出 = 像本镜 cast 里某个角色 ≥ recognize_floor（在画者另一张脸 = 镜像 / 重复人物，只记录待目检；“外国脸 / 陌生人”才挡）
-            ok = [c for c in allowed if c in sims and sims[c] >= (_CARDS.identity_line(c, t1, _proj) if c in described and c not in got else floor)]
+            ok = [c for c in allowed if c in sims and sims[c] >= (_CARDS.identity_line(c, t1, _proj) if (c in described or c in hidden_ids) and c not in got else floor)]  # 复审 11-07：背身者转身露脸按身份线判，不按 0.45
             if ok:
                 me = max(ok, key=sims.get)
                 pres = next((c.get("presence") for c in req.get("cast") or [] if NAME_ID.get(c.get("name"), c.get("name")) == me), None)

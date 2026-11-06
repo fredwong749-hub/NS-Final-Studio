@@ -38,6 +38,21 @@ def split_field(text: str) -> list[str]:
     return [p.strip() for p in re.split(r"[｜|]", text or "") if p.strip()]
 
 
+_END_MARK_RE = re.compile(r"落幅\s*[：:=＝]")
+_START_MARK_RE = re.compile(r"^\s*起幅\s*[：:=＝]\s*")
+
+
+def start_end(seg: str) -> tuple[str, str]:
+    """W-PASS 11-07：**机位与景别** 第三段写成“起幅：A；落幅：B”（L-203 分镜，ep01 psm11 / ep02 psm7 全部 16 镜）→ (A, B)。
+    首帧只该画起幅（ep02-S8 v1 / v3 把起幅 + 落幅画成上下两格拼图、v2 一亮一暗两部手机）；没写 落幅 标记 → (原文, "")"""
+    seg = seg or ""
+    m = _END_MARK_RE.search(seg)
+    if not m:
+        return seg, ""
+    start = _START_MARK_RE.sub("", seg[:m.start()]).rstrip(" ；;，,、→-—>")
+    return start.strip(), seg[m.end():].strip()
+
+
 def kv_field(text: str) -> dict[str, str]:
     """“动机光源=…｜布光=…｜色温=…” → dict（只认第一个 = ）"""
     out = {}

@@ -573,9 +573,44 @@ print("@@RES@@" + json.dumps(res))
 REMOTE_SRC = REMOTE_SRC.replace("@@WRIST_RED@@", WRIST_RED_SRC)
 
 
+_SELF_IP: dict[str, bool] = {}
+
+
+def _is_self_ip(ip: str) -> bool:
+    """这个 IP 是不是本机网卡上的地址：UDP 套接字能 bind 上 = 本机（不发包、不写盘）；结果缓存"""
+    import socket
+    if ip not in _SELF_IP:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.bind((ip, 0))
+            _SELF_IP[ip] = True
+        except OSError:   # arch-ok: bind 不上 = 不是本机地址（别台 / 不可解析），照原地址发
+            _SELF_IP[ip] = False
+        finally:
+            s.close()
+    return _SELF_IP[ip]
+
+
+def self_loopback(url: str, is_self=None) -> str:
+    """W-SCORE 11-07：count_host 是本机自己的内网入口（gpu36 上的 http://10.0.0.36:8893）→ 改走 127.0.0.1:<同端口>。
+    内网入口是 lan_proxy（--allow 10.0.0.33，只放行对端），本机从 10.0.0.36 连自己的 10.0.0.36 被直接 reset
+    （gpu36 producer 11-06 22:02 起 Q10 人数检测全 untested → score_infra 空错误、ep02-S10 / S11 无限只重打分）。
+    127.0.0.1:<同端口> 就是 lan_proxy 转发的那个常驻检测服务：同一个服务、同一张卡、结果相同"""
+    from urllib.parse import urlsplit, urlunsplit
+    try:
+        u = urlsplit(url)
+        host, port = u.hostname, u.port
+    except ValueError:   # arch-ok: 地址解析不了 = 原样返回（下游照旧报“常驻检测服务不可用”带原因）
+        return url
+    if not host or host in ("127.0.0.1", "localhost") or not (is_self or _is_self_ip)(host):
+        return url
+    return urlunsplit((u.scheme, f"127.0.0.1:{port}" if port else "127.0.0.1", u.path, u.query, u.fragment))
+
+
 def _measure_http(files: dict[str, Path], url: str, batch: int, refs: dict) -> dict:
     """常驻检测服务（VQAGATE 11-02 20:1x，总调度：人脸 / 人数 / 手形模型常驻，不每次冷启动；图片只进本地 / 自有服务器模型）"""
     import urllib.request
+    url = self_loopback(url)          # W-SCORE 11-07：本机自己的内网入口 → 127.0.0.1（lan_proxy 不放行本机来源）
     out: dict = {}
     ids = list(files)
     for i in range(0, max(1, len(ids)), batch):
@@ -587,7 +622,7 @@ def _measure_http(files: dict[str, Path], url: str, batch: int, refs: dict) -> d
                 out.update(json.loads(r.read()))
         except Exception as e:  # noqa: BLE001 — 服务不可用 = 这批 untested（调用方按 error 记），不当通过
             for k in part:
-                out[k] = {"error": f"常驻检测服务不可用：{type(e).__name__}: {e}"[:300]}
+                out[k] = {"error": f"常驻检测服务不可用（{url}）：{type(e).__name__}: {e}"[:300]}
         if not ids:
             break
     return out

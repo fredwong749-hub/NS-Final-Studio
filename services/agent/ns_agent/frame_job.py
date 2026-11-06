@@ -691,7 +691,8 @@ def last_angle_field(shot, end_text: str) -> str:
         if pair:
             camera += f"、越过{pair[0]}的肩拍{pair[1]}"
     m = _END_RE.search(PT2.script_field(shot, "运镜"))
-    tail = (m.group(1).strip() if m else "") or (af[2] if len(af) >= 3 else "")
+    # W-PASS 11-07：沿用首帧第三段时只取其中的落幅（“起幅：…；落幅：…”写法；首帧那边只取起幅，PV.start_end）
+    tail = (m.group(1).strip() if m else "") or ((PV.start_end(af[2])[1] or af[2]) if len(af) >= 3 else "")
     return "｜".join(x for x in (size, camera, tail) if x)
 
 
