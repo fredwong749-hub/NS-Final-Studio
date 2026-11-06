@@ -3779,6 +3779,22 @@ class Producer:
         if allow is None:
             return list(free)
         ok = [ln for ln in free if ln in allow]
+        # 11-07 PS-MASTER（项目方“GPU 资源不能空闲”）：L-207 严格分段下，active 集没有活给这条道时（道已连续空闲 ≥ idle_overlap_s），
+        # 允许它接下一集的首尾帧——以前 ep02 在视频段却无视频可出，6 张卡全空、ep03/ep04 首帧干等
+        fs = self.__dict__.setdefault("_lane_free_since", {})
+        t_now = now()
+        for ln in free:
+            fs.setdefault(ln, t_now)
+        for ln in [x for x in fs if x not in free]:
+            fs.pop(ln, None)
+        idle_s = float(cfg.get("idle_overlap_s", 120) or 0) if isinstance(cfg, dict) else 0.0
+        if not ok and idle_s > 0:
+            ok = [ln for ln in free if t_now - fs.get(ln, t_now) >= idle_s]
+            if ok:
+                seen_o = self.__dict__.setdefault("_lr_overlap_logged", {})
+                if t_now - float(seen_o.get(o["id"]) or 0) >= 600:
+                    seen_o[o["id"]] = t_now
+                    self.logf("lane_idle_overlap", obj=o["id"], ep=o.get("ep"), lanes=ok, idle_s=idle_s, counted=False, rule="L-207+不空卡")
         if not ok:
             seen = self.__dict__.setdefault("_lr_wait_logged", {})
             if now() - float(seen.get(o["id"]) or 0) >= 600:

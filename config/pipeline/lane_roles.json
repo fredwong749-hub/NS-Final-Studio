@@ -58,6 +58,8 @@
  "_hold_regen_downstream": "某镜首帧在换代（regen / master_reject 未 cleared）时，不派它的尾帧、不派它的视频，等新首帧定下再派（L-206；ep01 S2/S4/S16 白跑）",
  "_L207": "L-207（项目方 11-06）：一集严格三段 首尾帧（出图 4 + 审图 1 + 视频 1）→ 首尾帧全定下后 全部 6 张卡做视频（gpu33:3 同时保留 1 个看图实例供视频打分，约 7.5 GB + H3 约 13 GB，ComfyUI --reserve-vram 9）→ 合成（CPU，可与下一集首尾帧重叠）→ 下一集首尾帧。run 级排序源 = data/pipeline/lane_roles_state.json <run>._active（producer 写；只有 active 集在 frames 段才派首尾帧；下一集等 active 集视频全定下）；成人镜不计。",
  "frames_idle_fallback_s": 1200,
+ "idle_overlap_s": 120,
+ "_idle_overlap_s": "11-07 PS-MASTER（项目方“GPU 资源不能空闲”）：L-207 下 active 集没活给某条道、该道连续空闲 ≥ 这么多秒 → 允许接下一集首尾帧（0 = 关）",
  "_frames_idle_fallback_s": "C2（L-207 复审）：首尾帧阶段 ≥1 镜定下、没有 ready/running 的首尾帧 → 立刻进 videos；或定下数连续这么多秒没变且没有在跑 → 进 videos（卡住的镜之后就绪照常回切）",
  "review_scale": {
   "enabled": true,
