@@ -16,6 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 EVENTS = ROOT / "data/autopilot/imports.jsonl"
+_REAL_EVENTS = EVENTS
 SCRIPT = ROOT / "data/import/script_v2.json"
 
 
@@ -63,7 +64,8 @@ def append_import(episodes: list[int], by: str, source: str | None = None, note:
         sys.path.insert(0, str(Path(__file__).parent))
         import runs as RN
         script = RN.import_path(run_id)
-    rec = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "run_id": run_id, "episodes": sorted({int(e) for e in episodes}),
+    # ts：S2.1 无歧义时刻（at 是写入机本地时间，笔记本美东 / 服务器 JST 不一）
+    rec = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "ts": round(time.time(), 1), "run_id": run_id, "episodes": sorted({int(e) for e in episodes}),
            "script_sha": script_sha(script), "source": source, "by": by, "note": note}
     if old_script is not None:      # 镜级作废口径：只有提示词变了的镜，导入前的候选才算旧版本（无此字段的旧事件按整集）
         rec["changed_shots"] = changed_shots(old_script if Path(old_script).exists() else None, script)
@@ -71,7 +73,21 @@ def append_import(episodes: list[int], by: str, source: str | None = None, note:
     p.parent.mkdir(parents=True, exist_ok=True)
     with open(p, "a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    if p.resolve() == _REAL_EVENTS.resolve():   # L-216（W-KICKOFF）：开项目常设授权 → 新导入的成人镜自动入触发清单（只按 id）；测试换了事件文件就不动真清单
+        rec["kickoff_adult"] = _kickoff_adult(run_id)
     return rec
+
+
+def _kickoff_adult(run_id: str) -> dict:
+    try:
+        import sys
+        if str(ROOT / "tools" / "pipeline") not in sys.path:
+            sys.path.insert(0, str(ROOT / "tools" / "pipeline"))
+        import kickoff as KO
+        r = KO.sync_adult(run_id)
+        return {"added": len(r.get("added") or []), **({"skipped": r["skipped"]} if r.get("skipped") else {})}
+    except Exception as e:  # noqa: BLE001  # arch-ok: 导入已成功；入清单失败带回调用方，owner_delegate 每拍还会再同步
+        return {"error": f"{type(e).__name__}: {e}"[:200]}
 
 
 def read_events(events: Path | None = None) -> list[dict]:

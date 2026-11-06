@@ -19,6 +19,7 @@ import { ImpactDrawer, type ImpactSource } from "./ImpactDrawer";
 import { loadCenter, shotLookKey, TREE, type AssetCardData, type CenterData, type ShotCharLike } from "./center";
 import { LoraTablePanel, PropsPanel, TemplatesPanel } from "./P1Panels";
 import { VoiceStudio } from "./VoiceStudio";
+import { BestEffortMarks } from "./BestEffortMarks";
 import { LookConfirm } from "../pages/AssetsPage";
 import ScenesTab from "../pages/ScenesTab";
 import { lazy } from "react";
@@ -204,6 +205,7 @@ export default function AssetCenter() {
       </nav>
 
       <main className="ac-main">
+        <BestEffortMarks />
         {!peopleMode && (
         <header className="ac-head">
           <div className="ac-crumbs">

@@ -630,12 +630,36 @@ def stamp_versions(shot_id: str, take: Take) -> Take:
             take.inputs_sha = shot_inputs_sha(shot_id, ROOT)
     except Exception:  # noqa: BLE001 — 盖章失败不影响存版本
         pass
+    try:   # S2.1：签名 {script_sig, prompt_sha, rule_fp}（tools/autopilot/take_sig.py；producer 每拍拿它比当前编译）
+        if getattr(take, "sig", None) is None:
+            take.sig = _take_sig(shot_id, take)
+    except Exception:  # noqa: BLE001  # arch-ok: 盖不上签名 = 这一版按“未知”处理（record 只计数），不影响存版本
+        pass
     try:   # UX5-B P0：所用资产版本（定妆 / 身份 LoRA / 视频基底 / 附加视频 LoRA）；预设在 image_params 补
         from ns_agent.asset_revs import stamp
         stamp(shot_id, take, ROOT)
     except Exception:  # noqa: BLE001
         pass
     return take
+
+
+_TAKE_SIG_MOD: dict = {}
+
+
+def _take_sig(shot_id: str, take: Take) -> dict | None:
+    """本进程渲染根（RENDERS）对应的剧 → 该剧导入稿（SCRIPT_JSON）+ 首帧作业表 → take_sig.for_new_take"""
+    import importlib.util as _ilu   # 复审 11-07：按文件路径单独加载，不往本进程 sys.path 塞 tools/autopilot（那里有 policy / director 等同名模块）
+    TS = _TAKE_SIG_MOD.get("m")
+    if TS is None:
+        spec = _ilu.spec_from_file_location("ns_take_sig", str(ROOT / "tools" / "autopilot" / "take_sig.py"))
+        TS = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(TS)
+        _TAKE_SIG_MOD["m"] = TS
+    run = RENDERS.name if RENDERS.parent == DATA / "renders" else _legacy_and_primary()[0]
+    if not run:
+        return None
+    jobs = DATA / "pipeline" / "runs" / run / "assets" / "first_frame_jobs.json"
+    return TS.for_new_take(ROOT, shot_id, take.stage, take.model_dump(), SCRIPT_JSON, jobs)
 
 
 def _add_take(shot_id: str, take: Take, activate: bool = True):

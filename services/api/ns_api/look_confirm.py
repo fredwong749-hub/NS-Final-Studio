@@ -167,6 +167,21 @@ def _open_look_picks(root: Path) -> list[dict]:
     return [r for r in OQ.requests(Path(root)) if str(r.get("id", "")).startswith("pick:look:") and str(r["id"]) not in closed]
 
 
+AUTO_BY = "系统（开项目规则 L-215：造型按排期自动确认）"
+
+
+def look_auto(root: Path, run: str) -> bool:
+    """开项目确认单 look_confirm=auto（缺省零等待）：每集造型来自 P1 排期 / hub_episode_looks / shot_looks，不再逐集问项目方"""
+    import importlib.util  # noqa: PLC0415
+    try:
+        sp = importlib.util.spec_from_file_location("kickoff_for_look", REPO / "tools" / "pipeline" / "kickoff.py")
+        m = importlib.util.module_from_spec(sp)
+        sp.loader.exec_module(m)
+        return bool(m.is_on("look_confirm", run, Path(root)))
+    except Exception:  # noqa: BLE001  # arch-ok: 确认单读不到 = 旧行为（投通知等项目方确认）
+        return False
+
+
 def sync_picks(root: Path = REPO) -> list[str]:
     """把当前资产包剧每集“确认造型”投进通知中心（每集一条，已有不重投）；确认过 / 排期改了的旧条目关掉。返回现在开着的 id"""
     from ns_api import owner_pick as OP  # noqa: PLC0415
@@ -175,9 +190,16 @@ def sync_picks(root: Path = REPO) -> list[str]:
         return []
     sc = _script(Path(root), run)
     want: dict[str, dict] = {}
+    auto = look_auto(root, run)
     for e in (sc.episodes if sc else []):
         st = episode_state(root, run, e.number)
         if st["people"] and st["ready"] and not st["confirmed"]:
+            if auto:                # L-215：开项目定了 look_confirm=auto → 按排期直接确认，不投通知（旧条目下面一并作废）
+                try:
+                    confirm(root, run, e.number, AUTO_BY, quote="开项目确认单 look_confirm=auto（L-215）", via="kickoff")
+                except ValueError:  # arch-ok: 资产刚好变得不齐 = 下拍再确认（不投通知，不等项目方）
+                    pass
+                continue
             want[st["pick_id"]] = st
     opened = {str(r["id"]) for r in _open_look_picks(root)}
     for old in opened - set(want):

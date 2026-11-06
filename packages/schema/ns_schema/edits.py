@@ -171,4 +171,6 @@ class Take(BaseModel):
     # fredw-92/UXF1：坏图（ns_render.image_check：短边 < 256 px、文件 < 10 KB、尺寸与请求差 > 10 %）→ 原因；
     # 坏图不设为当前、不能定稿
     bad: str | None = None
+    # S2.1：出图时的签名 {script_sig, prompt_sha, rule_fp, v}（tools/autopilot/take_sig.py）；与当前编译不符 = 过期，producer 按开关换代
+    sig: dict | None = None
     quarantined: str | None = None      # 已挪进 takes/_quarantine/ 的时间（tools/quarantine_bad_takes.py）

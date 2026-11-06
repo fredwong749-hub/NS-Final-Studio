@@ -100,6 +100,9 @@ def roles_for_host(host: str, eps_specs: dict, st: dict, rs: dict | None = None)
     # W-SCHED 11-06：ep01 的首帧永远在 ready 里 → 以前只要本机 eps 含 1，整台永远“旧行为”（两台 night DISPATCH roles None，
     # ep02 的 L-207 视频段从没生效）。< from_episode 的集只有本机还有没落定的视频时才否决分卡；落定了就不算在出（结论里记 legacy_settled，
     # 阶段 / 视频道变化由 loop_once 的 LANE_ROLES 一行日志记）
+    es = RC.episode_state()                     # L-209 S2.2：enforce 下关闭的集不算本机在出（不否决分卡、不占卡）
+    cl = es.enforce_closed(RUN_ID, ROOT) if es else set()
+    active = [ep for ep in active if ep not in cl]
     legacy = [ep for ep in active if not LR.applies(ep, cfg)]
     if any(legacy_video_open(ep, host) for ep in legacy):
         return None
@@ -339,6 +342,8 @@ def dispatch_hosts(hosts_touched: set, st, ctrl) -> bool:
         if rc:
             return False
         eps_on = _eps_on(hosts, host)
+        cl = RC.closed_now(RUN_ID)            # L-209 S2.2：enforce 下关闭的集不进编排器 control.eps（vidgen 不再给它出片）
+        eps_on = [e for e in eps_on if not (e in cl and RC.closed_skip(RUN_ID, e, f"video:ep{int(e):02d}", "night.control", cl))]
         hold, per_lane, shared = ctrl.get("hold_lanes", []), ctrl["per_lane"], ctrl.get("shared_lanes", [])
         if ctrl.get("ep01_lane") and host == hosts.get("1"):
             hold = [x for x in IMAGE_LANES if x != "gpu33:3"]
@@ -1282,6 +1287,8 @@ def loop_once(st):
     pf = _B().passed_frames()                      # FIX-NIGHT2 #3：每轮只算一次（原来 ready_eps / ready_shots 各算一遍）
     ready_eps(eps_specs, ctrl, pf)                 # 只为 force_eps 入账
     rs, files = ready_shots(eps_specs, ctrl, pf)
+    closed = RC.closed_now(RUN_ID)                 # L-209 S2.2：关闭的集不再派视频（enforce）；record 只记 ep_closed_skip
+    rs = {ep: ids for ep, ids in rs.items() if not (ep in closed and RC.closed_skip(RUN_ID, ep, f"video:ep{int(ep):02d}", "night", closed))}
     # L-206 工位分卡：每台一个结论（阶段 + 视频道），进 lane_key / 就绪签名；阶段翻转（frames → videos）就重写 control + 重编作业
     old_roles = roles_key(st)
     st["lane_roles"] = {h: roles_for_host(h, eps_specs, st, rs) for h in _hosts_here()}

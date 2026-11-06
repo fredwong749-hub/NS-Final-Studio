@@ -80,6 +80,25 @@ def _lane_roles():   # L-206 工位分卡（config/pipeline/lane_roles.json 单�
     return LRO
 
 
+_ES_FAIL = {"t": 0.0, "err": None}       # L-209 S2.2：模块导入失败缓存（服务器没部署 → 10 分钟内不重试）
+
+
+def _episode_state():   # L-209 S2.2 集关闭标记（tools/autopilot/episode_state.py；开关 config/pipeline/state.json episode_closed）
+    """→ 模块；导入失败 = None（10 分钟内直接返回 None，不每个对象重试）"""
+    if _ES_FAIL["err"] and time.time() - _ES_FAIL["t"] < 600:
+        return None
+    d = str(Path(__file__).resolve().parent)
+    if d not in sys.path:
+        sys.path.insert(0, d)
+    try:
+        import episode_state as ES
+    except Exception as e:  # noqa: BLE001  # arch-ok: 模块没部署 / 坏 = 不挡（旧行为），调用方 10 分钟记一次
+        _ES_FAIL.update(t=time.time(), err=repr(e)[:200])
+        return None
+    _ES_FAIL["err"] = None
+    return ES
+
+
 def _run_id_from_config(default: str = "", root: Path | None = None) -> str:
     """现行主剧。PRODMERGE-O 11-03（PLAN_V2_MASTER v4 1-3）：“当前剧”只认 config/pipeline/runs.json 的 primary
     （tools/autopilot/runs.primary_run）；config/pipeline/run.json 是 runs.sync_run_ptr 派生的指针，只在没有 runs.json 的
@@ -2955,11 +2974,13 @@ class Producer:
         only = self.only or (set(ctrl.get("only") or []) or None)
         # PW-005：共享登记表永远是整季（分母 = 每集镜数）；--only / control.only 只限制派单。演练（临时目录）才按 only 推导
         self._dispatch_only = only
+        self._ep_closed = self.ep_closed_now()      # L-209 S2.2：本拍关闭的集（一拍读一次）
         w = World(self.p, script=self._script if getattr(self, "_fixed_script", False) else self.script(),
                   shots_filter=only if getattr(self, "derive_only", False) else None)
         leases = self.leases.all()
         self.reconcile_demoted(w)
         self.auto_regen_tick(w)
+        self.take_sig_tick()                       # S2.1：当前版签名 vs 当前编译（record 只记 / enforce 换代）
         led_all = {**self.ledger(), "_master_rejects": jl(self.p.rejects, {}) or {}}
         reg = derive(w, led_all, leases, self.run_summary_fn())
         vrec = {x["obj"]: x for x in getattr(w, "video_reconciled", [])}    # W-FIX-PIPE #7：假“在跑”纠正，每个对象进入时记一次
@@ -3054,6 +3075,7 @@ class Producer:
         js(self.p.registry, reg)
         js(self.p.heartbeat, {"ts": iso(), "t": now(), "pid": os.getpid(), "paused": reg["paused"],
                               **self.hb_counts(),                    # K-OPS-F12：重启队列只等 rendering=0
+                              **getattr(self, "_take_sig_hb", {}),   # S2.1：sig_stale / unknown 按 first / last / video
                               **self.identity()})                    # ISS-1103-033310-5833：心跳带 run 身份（为哪部剧在跑、从哪读的）
         sig = json.dumps([[(o["id"], o["status"], o.get("attempts")) for S in E["shots"] for o in S["objects"].values()]
                           for E in reg["episodes"]] + [reg["paused"]], ensure_ascii=False)
@@ -3211,6 +3233,8 @@ class Producer:
                 o = (S.get("objects") or {}).get("last") or {}
                 if o.get("stale_active_last") is None or o.get("voided"):
                     continue                                        # voided 的由 dispatch → void_reset 处理（那里清账本次数 + 撤当前）
+                if self.ep_closed_skip(o, "stale_last"):            # L-209 S2.2：关闭的集不动
+                    continue
                 changed = self.clear_stale_last(o, o.get("reason") or "首帧换版")
                 led = self.ledger().get(o["id"]) or {}
                 n = max(int(o.get("attempts") or 0), int(led.get("tries") or 0))
@@ -3360,6 +3384,8 @@ class Producer:
                 if not t or not pf.get("ok") or pf.get("gaze_waived") or pf.get("gaze_rejudged"):
                     continue
                 if not gaze_bad(pf) and not self.lineup_recheck(S["shot"], t, pf):
+                    continue
+                if self.ep_closed_skip(o, "gaze_regen"):            # L-209 S2.2：关闭的集不撤当前、不重出
                     continue
                 n = t["n"]
                 pf2 = {**pf, "ok": False, "ok_before_gaze": pf.get("ok"), "blocking": sorted(set(pf.get("blocking") or []) | {"gaze"}),
@@ -3551,14 +3577,66 @@ class Producer:
             return None
         self._last_regen_chk = now()
         try:
-            shots = shots_of_all(self.p)
+            shots = [s for s in shots_of_all(self.p) if not self.ep_closed_skip(f"regen:{s}", "auto_regen", quiet_record=True)]
             r = auto_regen_check(self.p, shots)
+            for s in r.get("regen") or []:               # L-209 S2.2 record：记下关闭集里本会换代的镜
+                self.ep_closed_skip(f"regen:{s}", "auto_regen")
             if r.get("regen"):
                 self.logf("auto_regen", shots=r["regen"], counted=False)
             return r
         except Exception as e:  # noqa: BLE001
             self.logf("auto_regen_err", error=repr(e)[:200], counted=False)
             return None
+
+    def take_sig_tick(self) -> dict | None:
+        """S2.1（tools/autopilot/take_sig.py）：每 every_s 秒比一次本剧每镜当前版签名；mode 见 config/pipeline/state.json"""
+        try:   # 复审 11-07：模块 / 配置出错不能让整拍抛错（tick 停摆）
+            import take_sig as TS
+            c = TS.cfg(self.p.root)
+        except Exception as e:  # noqa: BLE001
+            if now() - getattr(self, "_take_sig_err_t", 0) > 600:
+                self._take_sig_err_t = now()
+                self.logf("take_sig_err", error=repr(e)[:200], counted=False)
+            return None
+        if c["mode"] == "off" or now() - getattr(self, "_take_sig_chk", 0) < c["every_s"]:
+            return None
+        self._take_sig_chk = now()
+        try:
+            from ns_render import pipeline as P
+            st = ((jl(self.p.root / "config" / "pipeline" / "runs.json", {}) or {}).get("runs") or {}).get(self.p.run_id) or {}
+            enforce = c["mode"] == "enforce"
+            shots, closed_by_ep = self.take_sig_closed_split(shots_of_all(self.p))     # L-209 S2.2：关闭集不占换代名额
+            hb = TS.check_run(self.p.root, self.p.run_id, shots, P.load_takes, mode=c["mode"], c=c,
+                              adult_shots=adult_shot_ids(self.script()) if enforce else set(),
+                              triggers=owner_trigger_ids(self.p) if enforce else set(), run_status=st.get("status"),
+                              rejects=jl(self.p.rejects, {}) or {}, state_file=self.p.pd / "take_sig_state.json",
+                              regen_fn=lambda shots, why: regen_shots(       # S2.2 关闭的集不换代（W-S22 开关）
+                                  self.p, [s for s in shots if not self.ep_closed_skip(f"first:{s}", "take_sig")], why, TS.BY),
+                              log=self.logf)
+            self._take_sig_hb = {"sig_mode": hb["mode"], "sig_stale": hb["stale"], "sig_unknown": hb["unknown"],
+                                 "sig_stale_closed": self.sig_stale_closed(TS, P, c, closed_by_ep)}
+            return hb
+        except Exception as e:  # noqa: BLE001  # arch-ok: 签名检查出错 = 本拍不换代（安全方向），记日志
+            self.logf("take_sig_err", error=repr(e)[:300], counted=False)
+            return None
+
+    def sig_stale_closed(self, TS, P, c: dict, closed_by_ep: dict) -> dict:
+        """关闭集里签名过期的镜数 {集: n}（只算不换代：check_run 按 record 跑、不写换代状态）；集合变了记一条
+        sig_stale_closed“规则变了 → 关闭的集受影响”（每次变化一条，不每拍刷）"""
+        out = {}
+        for ep, ss in sorted(closed_by_ep.items()):
+            h = TS.check_run(self.p.root, self.p.run_id, ss, P.load_takes, mode="record", c=c, adult_shots=set(), triggers=set(),
+                             run_status=None, rejects={}, state_file=self.p.pd / "take_sig_state.json",
+                             regen_fn=lambda *a: {"regen": []}, log=lambda *a, **k: None)
+            n = sum((h.get("stale") or {}).values())
+            if n:
+                out[str(ep)] = n
+        if out != getattr(self, "_sig_closed_prev", {}):
+            self._sig_closed_prev = out
+            if out:
+                self.logf("sig_stale_closed", eps=out, counted=False,
+                          note="规则 / 签名变了 → 关闭的集受影响（enforce 下不自动换代；要改请重新打开该集）")
+        return out
 
     def uncount_dispatch(self, oid: str) -> None:
         """把最近一次派单时刻从 obj_rate 计数里去掉（派单后在出图前就失败 = 没占 GPU）"""
@@ -3859,6 +3937,8 @@ class Producer:
             okl = self.lanes_allowed(o, free)    # L-206：只派给本集当前阶段 image 角色的道（审图位 gpu33:3 永不收出图单；视频阶段 image 为空）
             if not okl:
                 continue
+            if self.ep_closed_skip(o, "frames"):     # L-209 S2.2：关闭的集 0 新派单（record 只记）
+                continue
             led = self.ledger().get(o["id"]) or {}
             if led.get("rescore_take") or o.get("rescore_take"):   # 只重打分归 dispatch_rescores（W20），这里不派、不占道
                 continue
@@ -3919,6 +3999,61 @@ class Producer:
             self.pool.submit(self._run_one, o, lane, attempt, rung, tag)
         self.dispatch_fanout(cands, free)
 
+    def _ep_closed_err(self, err) -> None:
+        """ep_closed_err 每 10 分钟最多记一条（服务器没部署模块时不刷屏）"""
+        if now() - getattr(self, "_ep_closed_err_t", 0) >= 600:
+            self._ep_closed_err_t = now()
+            self.logf("ep_closed_err", error=str(err)[:200], counted=False)
+
+    def ep_closed_now(self) -> set:
+        """L-209 S2.2：data/pipeline/runs/<run>/episode_state.json 里关闭的集（笔记本算、推来；读不到 = 空 = 旧行为）。
+        一拍读一次：同时缓存本拍开关 self._ep_mode（ep_closed_skip 不再每个对象读配置）"""
+        ES = _episode_state()
+        if ES is None:
+            self._ep_mode = "off"
+            self._ep_closed_err(_ES_FAIL["err"])
+            return set()
+        try:
+            self._ep_mode = ES.mode(self.p.root)
+            return ES.closed_eps(self.p.run_id, self.p.root)
+        except Exception as e:  # noqa: BLE001  # arch-ok: 读不了 = 没有集关闭（不挡），记日志
+            self._ep_closed_err(repr(e))
+            return set()
+
+    def ep_closed_skip(self, o, actor: str, quiet_record: bool = False) -> bool:
+        """L-209 S2.2（W-S22）：本集已关闭 → enforce 返回 True（不派 / 不动）；record 只记 ep_closed_skip（每对象每小时一条）照常派；off 不管。
+        quiet_record = 预过滤用（record 下不记，由调用方在真要动时再记）"""
+        ES = _episode_state()
+        if ES is None:
+            self._ep_closed_err(_ES_FAIL["err"])
+            return False
+        try:
+            m = getattr(self, "_ep_mode", None) or ES.mode(self.p.root)
+            if quiet_record and m != "enforce":
+                return False
+            return ES.skip(self.p.run_id, o["id"] if isinstance(o, dict) else o, actor=f"producer.{actor}", root=self.p.root,
+                           closed=getattr(self, "_ep_closed", None), log=self.logf, mode_now=m)
+        except Exception as e:  # noqa: BLE001  # arch-ok: 判不了 = 不挡（关闭是额外限制，旧行为照派），记日志
+            self._ep_closed_err(repr(e))
+            return False
+
+    def take_sig_closed_split(self, shots: list) -> tuple[list, dict]:
+        """L-209 S2.2 × S2.1（Fable 复审 1）：enforce 下关闭集的镜不进 take_sig.check_run（否则它们每拍占满换代名额，开着的集永远换不到）。
+        → (给 check_run 的镜, {集: [关闭集的镜]})；record / off = 原样（行为不变）"""
+        closed = getattr(self, "_ep_closed", None) or set()
+        ES = _episode_state() if closed else None
+        cl: dict = {}
+        if ES is None or (getattr(self, "_ep_mode", None) or "record") != "enforce":
+            return list(shots), cl
+        keep = []
+        for s in shots:
+            ep = ES.ep_of(s)
+            if ep in closed:
+                cl.setdefault(ep, []).append(s)
+            else:
+                keep.append(s)
+        return keep, cl
+
     def sop_gate_block(self, o: dict) -> bool:
         """派单前按镜过 SOP 闸门（HARNESS-O 的 require 下沉到 producer 派单，PRODMERGE-O）：首帧 = “出图”、尾帧 = “尾帧”。
         legacy 剧直接放行；observe 阶段只记违规；enforce 没过 → 本拍不派（不计次），10 分钟记一次日志"""
@@ -3962,6 +4097,8 @@ class Producer:
                 if not free:
                     break
                 if o["kind"] != "first" or o["id"] not in self.inflight:
+                    continue
+                if self.ep_closed_skip(o, "frames_fanout"):     # L-209 S2.2
                     continue
                 with self.mu:
                     mine = [k for k in self.inflight if k == o["id"] or k.startswith(o["id"] + "#")]
@@ -4340,7 +4477,7 @@ class Producer:
             busy = len(self._rescore_futs)
         pend = [o for E in reg.get("episodes") or [] for S in E.get("shots") or []
                 for k in ("last", "first") for o in [(S.get("objects") or {}).get(k)] if o]
-        pend = [(o, rt) for o in pend for rt in [self._rescore_dispatchable(o)] if rt]
+        pend = [(o, rt) for o in pend for rt in [self._rescore_dispatchable(o)] if rt and not self.ep_closed_skip(o, "rescore")]   # L-209 S2.2
         if not pend:
             return 0
         if self._score_down_until > now():

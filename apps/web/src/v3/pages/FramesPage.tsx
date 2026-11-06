@@ -3,6 +3,7 @@
 // 全部集 × 每镜首尾帧当前版；徽标只有 已定稿 / 当前 / 新（L-123 没有“不要”）；生成中 / 排队 = 呼吸灯 + 预计时间；
 // 按集、状态（缺图 / 待你看 / 尽力版 / 已定稿）、人物筛选（服务端做）；点格子 = 右侧抽屉（大图 + 用这张 / 修改）。数据：/api/frames-index。
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { RedoButton } from "../RedoButton";
 import { Empty, LoadError, Skel } from "../../ds";
 import { Verdict } from "../Verdict";
 import { LoadImg } from "../../ds/LoadImg";
@@ -326,6 +327,10 @@ export default function FramesPage() {
                   <div key={s.id} className="fp-shot">
                     <CellView c={s.first} label={`S${s.index} 首帧`} onOpen={() => setPeek({ id: s.id, stage: "first" })} />
                     <CellView c={s.last} label={`S${s.index} 尾帧`} onOpen={() => setPeek({ id: s.id, stage: "last" })} />
+                    <div className="redo-row">
+                      <RedoButton shot={s.id} kind="first" onDone={() => window.setTimeout(load, 600)} />
+                      <RedoButton shot={s.id} kind="last" onDone={() => window.setTimeout(load, 600)} />
+                    </div>
                   </div>
                 ))}
               </div>

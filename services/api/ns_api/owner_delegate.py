@@ -125,9 +125,27 @@ def _close(root: Path, cfg: dict, reason: str, kind: str) -> dict:
     return cfg
 
 
+def _kickoff():
+    sp = importlib.util.spec_from_file_location("kickoff_for_delegate", _CODE_ROOT / "tools" / "pipeline" / "kickoff.py")
+    m = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m
+
+
+def delegate_always(root: Path = REPO) -> bool:
+    """L-215（W-KICKOFF）：开项目确认单 picks=delegate_always → 代选一直开（项目方在网页做决定不再让它到期；他的选择照样随时覆盖）。
+    项目方明确撤销（expired_kind=revoked）仍算数——他的话永远赢"""
+    try:
+        return bool(_kickoff().is_on("picks", None, Path(root)))
+    except Exception:  # noqa: BLE001  # arch-ok: 确认单读不到 = 旧规则（L-136 到期）
+        return False
+
+
 def active(root: Path = REPO) -> tuple[bool, str]:
     """代选现在是否生效（顺带做到期检查：到期 = 把 enabled 写成 false，留原因）"""
     cfg = load_cfg(root)
+    if delegate_always(root) and (cfg.get("expiry") or {}).get("expired_kind") != "revoked":
+        return True, ""
     if not cfg.get("enabled"):
         return False, (cfg.get("expiry") or {}).get("expired_reason") or "开关没开"
     if not cfg.get("enabled_at"):
@@ -154,7 +172,8 @@ def enable(root: Path = REPO, by: str = "总调度") -> dict:
 
 def revoke(root: Path = REPO, by: str = "项目方", why: str = "") -> dict:
     cfg = load_cfg(root)
-    if not cfg.get("enabled"):
+    already = (cfg.get("expiry") or {}).get("expired_kind") == "revoked"
+    if not cfg.get("enabled") and (already or not delegate_always(root)):   # 代选常开（L-215）时 enabled 不算数：没撤销过就要真撤销
         return cfg
     return _close(root, cfg, f"{by} 撤销代选" + (f"：{why}" if why else ""), "revoked")
 
@@ -872,6 +891,13 @@ def tick(root: Path = REPO, apply_fn=None, spawn=None, sync_looks=True, frame_lo
     except Exception as e:  # noqa: BLE001  一类出错不拖累另一类
         ferr = f"frames: {e!r}"[:300]
         log(root, {"event": "error", "where": "frames", "error": repr(e)[:300]})
+    kick = None
+    try:                            # L-216：开项目常设授权——新导入的成人镜自动入触发清单（只按 id；不看不出成人内容）
+        kick = _kickoff().sync_adult_all(Path(root)) if Path(root) == REPO else None
+    except Exception as e:  # noqa: BLE001  # arch-ok: 同步失败记日志，下拍再试
+        log(root, {"event": "error", "where": "kickoff_adult", "error": repr(e)[:300]})
+    if kick and any(k.get("added") or k.get("error") for k in kick):
+        log(root, {"event": "kickoff_adult", "runs": [{"run": k.get("run"), "added": len(k.get("added") or []), "error": k.get("error")} for k in kick]})
     ok, why = active(root)
     if not ok:
         return {"active": False, "why": why, "frames": frames, "errors": [ferr] if ferr else []}
@@ -954,12 +980,15 @@ def render_page(root: Path = REPO) -> Path:
 
 # ------------------------------------------------------------------ 状态 / HTTP
 def status(root: Path = REPO) -> dict:
+    on, _why = active(root)            # 报实际是否生效（代选常开时 enabled 字段不算数）
     cfg = load_cfg(root)
     rows = log_rows(root)
     since = str(cfg.get("enabled_at") or "")
     picks = [r for r in rows if r.get("event") == "pick" and str(r.get("at", "")) >= since]
     gates = [r for r in rows if str(r.get("event", "")).startswith("gate_") and str(r.get("at", "")) >= since]
-    return {"enabled": bool(cfg.get("enabled")), "label": "代选模式开启中（L-136）" if cfg.get("enabled") else None,
+    always = on and delegate_always(root)
+    return {"enabled": on, "always": always,
+            "label": ("代选一直开着（开项目时定的规则），你随时可以换或撤销" if always else "代选模式开启中（L-136）") if on else None,
             "authority": cfg.get("authority"), "enabled_at": cfg.get("enabled_at"), "expiry": cfg.get("expiry"),
             "picked": len(picks), "gates": len(gates), "page": "/files/review_pages/delegate/index.html"}
 

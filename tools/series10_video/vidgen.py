@@ -472,6 +472,33 @@ def usable_lanes(host: str, hosts_file: Path | None = None) -> dict:
             and "video" in (spec[n].get("roles") or ["video"])}
 
 
+_OWNER_RJ: dict = {"key": None, "data": {}}
+
+
+def _owner_rejects() -> dict:
+    """producer master_rejects.json（按 路径 + mtime 缓存：每拍每镜都调，文件没变就不重读）"""
+    try:
+        f = RC._runs_mod().producer_dir(RUN_ID) / "master_rejects.json"
+        key = (str(f), f.stat().st_mtime_ns)
+    except Exception:  # noqa: BLE001  # arch-ok: 没有文件 / 剧目表读不到 = 没有项目方重做请求（口型重出单照常）
+        return {}
+    if _OWNER_RJ["key"] != key:
+        d = jload(f, {}) or {}
+        _OWNER_RJ.update(key=key, data=d if isinstance(d, dict) else {})
+    return _OWNER_RJ["data"]
+
+
+def owner_redo_requests(sid: str) -> list[dict]:
+    """L-215 块 J（W-KICKOFF）：项目方在网页点“重做视频” → 笔记本写 producer master_rejects.json[video:<镜号>]（control_files 推到本机）。
+    这里转成口型重出单同口径的请求（timeline=owner-redo，at = 点的时刻；每次点 at 不同 = 新请求，一条只用一次）"""
+    rj = _owner_rejects()
+    e = rj.get(f"video:{sid}")
+    if not isinstance(e, dict) or not e.get("owner_redo") or not e.get("at"):
+        return []
+    return [{"shot": sid, "status": "pending", "reason": e.get("reason") or "项目方点了“重做视频”", "timeline": "owner-redo",
+             "at": e["at"], "by": e.get("by"), "owner_redo": True}]
+
+
 class Runner:
     def __init__(self, host):
         self.host = host
@@ -512,8 +539,11 @@ class Runner:
         claims = _claims() if c.get("jobs", "jobs.json") == "jobs.json" else {}
         now = time.time()
         out = {}
+        closed = RC.closed_now(RUN_ID)       # L-209 S2.2：集关闭标记（enforce = 关闭的集不派；record 只记）
         for s in d["shots"]:
             if s["ep"] not in eps:
+                continue
+            if closed and RC.closed_skip(RUN_ID, s["ep"], f"video:{s['shot']}", "vidgen", closed):
                 continue
             mine = s["host"] == self.host
             if claims:   # FIX-VID D13：笔记本仲裁的领取（shard_claims.json）不等 night 重编 jobs.json 就生效，两台不会同时出同一镜
@@ -560,7 +590,7 @@ class Runner:
         tools/director/finish.py 写）→ 走和“首帧换版”同一条作废路径：现有视频挪进 superseded（带原因），状态回到待出，
         变体从头算（不计次）。每条请求只用一次（r.lip_redo_applied 记请求键），不写回请求文件"""
         reqs = [q for q in (jload(LIP_REDO, {}) or {}).get("requests") or []
-                if q.get("shot") == sid and q.get("status", "pending") == "pending"]
+                if q.get("shot") == sid and q.get("status", "pending") == "pending"] + owner_redo_requests(sid)
         done = set(r.get("lip_redo_applied") or [])
         new = [q for q in reqs if f"{q.get('timeline')}@{q.get('at')}" not in done]
         if not new or any(x.get("state") in ("submitted", "scoring") for x in r["renders"]):
@@ -568,8 +598,9 @@ class Runner:
         q = new[-1]
         keys = sorted(done | {f"{x.get('timeline')}@{x.get('at')}" for x in new})
         n, cap = lip_redo_count(r), lip_redo_cap()
+        owner = bool(q.get("owner_redo"))   # L-215 块 J：项目方点“重做视频”——他本人的要求，不受口型重出上限 / “改不了”判定
         # VID-LOOP（11-06）：重出视频改不了的兜底原因（no H3 audio）→ 只记账，不作废（镜头没进成片 / 没音轨，重出同一条也一样）
-        if lip_unfixable(q) and not q.get("variants"):
+        if lip_unfixable(q) and not q.get("variants") and not owner:
             with self.lock:
                 r["lip_redo_applied"] = keys
                 r["lip_redo_n"] = n            # 记账不计次（lip_redo_count 对旧记录按键数算，这里要写死）
@@ -577,7 +608,7 @@ class Runner:
             log(self.host, "LIP_REDO_SKIP", sid, q.get("fallback_reason"), "重出视频改不了，不作废", q.get("timeline"))
             self.event("lip_redo_skip", shot=sid, fallback_reason=q.get("fallback_reason"), timeline=q.get("timeline"), rule=LIP_REDO_RULE)
             return
-        if n >= cap:                     # 每镜最多作废重出 cap 次（config/post/director.json lip_redo_max_per_shot）；到上限只记账
+        if n >= cap and not owner:       # 每镜最多作废重出 cap 次（config/post/director.json lip_redo_max_per_shot）；到上限只记账
             with self.lock:
                 r["lip_redo_applied"] = keys
                 r["lip_redo_n"] = n
@@ -601,8 +632,8 @@ class Runner:
             r["status"] = "pending"
             r["chosen"] = None
             r["lip_redo_applied"] = keys
-            r["lip_redo_n"] = n + 1
-        log(self.host, "LIP_REDO", sid, q.get("reason"), q.get("timeline"), f"第 {n + 1}/{cap} 次")
+            r["lip_redo_n"] = n if owner else n + 1     # 项目方重做不占口型重出次数
+        log(self.host, "LIP_REDO", sid, q.get("reason"), q.get("timeline"), "项目方重做（不计次）" if owner else f"第 {n + 1}/{cap} 次")
         self.event("lip_redo", shot=sid, reason=q.get("reason"), timeline=q.get("timeline"), rule=LIP_REDO_RULE)
 
     def repair_idle(self, sid, sh, r):

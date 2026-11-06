@@ -286,6 +286,18 @@ DECIDE_OPTS = [{"key": "approve", "label": "同意"}, {"key": "reject", "label":
 REVISE_OPTS = [{"key": "revise", "label": "修改"}]
 
 
+def asset_revise_notice(root: Path) -> bool:
+    """开项目确认单 asset_revise=notice（L-215，缺省零等待）：“需要修改描述”一律改成“事后可改”告知"""
+    import importlib.util  # noqa: PLC0415
+    try:
+        sp = importlib.util.spec_from_file_location("kickoff_for_queue", REPO / "tools" / "pipeline" / "kickoff.py")
+        m = importlib.util.module_from_spec(sp)
+        sp.loader.exec_module(m)
+        return bool(m.is_on("asset_revise", None, Path(root)))
+    except Exception:  # noqa: BLE001  # arch-ok: 确认单读不到 = 旧行为（红卡）
+        return False
+
+
 def enqueue_asset_revise(root: Path, req: dict) -> dict:
     """投一条 asset_revise（同 id 已有则替换；之前的“修改”决定作废 → 重新出现）。req：id / run / job / name / what / spec_text / reason"""
     if not req.get("id") or not req.get("job") or not req.get("run"):
@@ -674,6 +686,12 @@ def _humanize(it: dict, delegate_on: bool) -> dict:
         if it.get("link"):
             acts.append(_act("open", "去对应页面看", style="link", href=str(it["link"])))
         level = "red"
+    elif kind == "asset_revise" and it.get("notice"):
+        say = f"事后可改：{title}先按尽力版继续了"
+        why = (f"一直卡在：{it.get('reason')}" if it.get("reason") else "换了几种做法都没出来") + "；流水线没停，想改随时在对话里说或点“修改”"
+        acts = [_act("revise", "修改", style="link", path="/api/owner/decide", body={"id": it["id"], "choice": "revise"}, needs_reason=True,
+                     ask="想让它长什么样？写一句（会加进描述里重新出）")]
+        level = "grey"
     elif kind == "asset_revise":
         say = f"需要你改一句描述：{title}"
         why = (f"一直卡在：{it.get('reason')}" if it.get("reason") else "换了几批都出不来") + (f"；现在写的是：{detail[:60]}" if detail else "")
@@ -802,9 +820,15 @@ def _build(root: Path, now: float, _errors: list[str]) -> dict:
             it = _decide_item(r)
             if it:
                 items.append(it)
+    revise_notice = asset_revise_notice(root)
+    after_notes: list[dict] = []
     for r in requests(root):
         if r.get("kind") == "asset_revise" and str(r["id"]) not in closed:
-            items.append(_asset_revise_item(r))
+            it = _asset_revise_item(r)
+            if r.get("notice") or revise_notice:      # L-215：开工后不等项目方——“事后可改”告知（灰、不进计数、不挡流水线）
+                after_notes.append({**it, "notice": True})
+            else:
+                items.append(it)
     for r in master_rows(root):
         if r["id"] not in closed:
             items.append({**r, "category_label": CATEGORIES[r["category"]], "options": DECIDE_OPTS, "media": [], "scores": [],
@@ -818,7 +842,7 @@ def _build(root: Path, now: float, _errors: list[str]) -> dict:
     items += [x for x in spot_items(root, scan) if x["id"] not in closed]
     picks, auto_picks = pick_items(root, closed)
     items += [x for x in picks if not x.get("delegated_notice")]
-    delegated = [x for x in picks if x.get("delegated_notice")]
+    delegated = [x for x in picks if x.get("delegated_notice")] + after_notes
     for x in delegated:
         x["kind_label"] = KIND_LABEL.get(x["kind"], x["kind"])
     enrich(delegated, root)
@@ -879,7 +903,8 @@ def _activate(sid: str, stage: str, n: int, who: str) -> str:
 
 def _find(root: Path, item_id: str) -> dict | None:
     q = build(root)
-    return next((x for x in q["items"] if x["id"] == item_id), None)
+    notes = [x for x in q.get("delegated") or [] if x.get("kind") == "asset_revise"]   # L-215 事后可改告知：仍可点“修改”
+    return next((x for x in q["items"] + notes if x["id"] == item_id), None)
 
 
 def _autosign():

@@ -54,6 +54,7 @@ RELOAD_DEPS: dict[str, str] = {              # sys.modules 名 → 相对仓库�
     "asset_jobs": "tools/pipeline/asset_jobs.py",
     "tools.master.sop_gate": "tools/master/sop_gate.py",
     "asset_checks": "tools/pipeline/asset_checks.py",   # AC_bundle 懒加载；已在 sys.modules 里才管
+    "kickoff": "tools/pipeline/kickoff.py",             # L-215 开项目确认单（W-KICKOFF）：改了规则常驻下一拍就生效
 }
 # asset_jobs 保持 02:17 修复以来的行为：每次载入无条件重载（不看戳；原有回归 test_worker_reload_keeps_asset_jobs_in_sync 按此口径）
 ALWAYS_RELOAD = frozenset({"asset_jobs"})
@@ -712,6 +713,8 @@ def escalate(root: Path, j: dict, why: str, rec: dict) -> str:
         rec.setdefault("escalated", []).append({"id": j["id"], "kind": "reported"})
         return "reported"
     prob = _main_problem(why)
+    if kickoff_on("asset_failure", j.get("run"), root):       # L-215：不投卡等项目方——换策略兜底，最后尽力版继续
+        return fallback_ladder(root, j, why, rec, who, what, prob)
     line = f"需要修改描述：{who}的{what}换了 {tries + 1} 批种子都出不来（一直卡在：{prob}）"
     req = {"id": f"rv:{j['id']}", "run": j["run"], "job": j["id"], "episode": j.get("episode"), "asset_kind": j.get("kind"),
            "name": who, "what": what, "spec_text": str(sp.get("label") or sp.get("object") or sp.get("img") or "")[:160], "reason": prob,
@@ -729,6 +732,133 @@ def escalate(root: Path, j: dict, why: str, rec: dict) -> str:
     AJ.save_job(root, j)
     rec.setdefault("escalated", []).append({"id": j["id"], "kind": "need_revise"})
     return "need_revise"
+
+
+# L-215 / L-216（W-KICKOFF 11-07，PLAN_5H 块 J）：开工后不等项目方。自动换种子重排用尽之后按顺序换策略（每步重排一次）：
+#   ① simplify：去掉最容易出错的细节（logo / 字样 / 商标…；OCR 读到字时连“图案”一起）——提示词里删掉这些词所在的分句、负面词加上；
+#   ② reseed：换一批离得很远的种子（seed_offset）；
+#   ③ borrow（只限单品；设定图 / 脸 / 底图不借）：同一角色另一套造型里同部位、描述最接近的已通过图，系统自动选用登记（项目方随时可换）；
+#   都不行 → best_effort：作业留定案失败（不再派），记日志 + 一条灰色“事后可改”告知（不进待办计数、不挡流水线）。
+#   项目方想改：在对话里说一句，或在告知上点“修改”（asset_jobs.owner_revise，写进 owner_notes 重排）。
+LADDER = ("simplify", "reseed", "borrow")
+RISKY_TERMS = ("logo", "LOGO", "Logo", "商标", "标志", "标识", "字样", "字母", "文字", "铭牌", "刺绣字", "印花字", "品牌")
+NEGATED = re.compile(r"(没有|不要|不带|无)")
+FAR_SEED_OFFSET = 50000
+
+
+def kickoff_on(key: str, run: str | None, root: Path) -> bool:
+    try:
+        KO = import_dep("kickoff", root=ROOT)
+        return bool(KO.is_on(key, run, root))
+    except Exception:  # noqa: BLE001  # arch-ok: 确认单读不到 = 旧行为（需要修改描述卡）
+        return False
+
+
+def drop_terms_for(j: dict, why: str) -> list[str]:
+    """这件资产描述里（不算“没有任何标志…”这种否定句）出现的易出错元素；OCR 读到字时加“图案 / 印花”"""
+    sp = j.get("spec") or {}
+    text = "，".join(str(sp.get(k) or "") for k in ("label", "object", "img", "part_label"))
+    pos = "，".join(seg for seg in re.split(r"[，；。,;]", text) if not NEGATED.search(seg))
+    terms = [t for t in RISKY_TERMS if t in pos]
+    if "读到了字" in str(why) or "ocr=fail" in str(why):
+        terms += [t for t in ("图案", "印花") if t in pos]
+    return list(dict.fromkeys(terms))
+
+
+def drop_clauses(prompt: str, terms: list[str]) -> str:
+    """删掉含易出错元素的分句；否定句（“没有任何标志、字母和文字”）保留——那正是要的"""
+    parts = re.split(r"([，；。,;])", prompt)
+    out = []
+    for i in range(0, len(parts), 2):
+        seg, sep = parts[i], parts[i + 1] if i + 1 < len(parts) else ""
+        if any(t in seg for t in terms) and not NEGATED.search(seg):
+            continue
+        out.append(seg + sep)
+    return "".join(out).strip("，；,; ") or prompt
+
+
+def _requeue(root: Path, j: dict, step: str, msg: str, rec: dict, **kw) -> str:
+    done = list(j.get("fallback_steps") or []) + [step]
+    j.update(state="pending", final=False, retry_after=None, fallback_steps=done, **kw)
+    AJ.log(j, f"开工后不等项目方（L-215）：{msg}")
+    AJ.save_job(root, j)
+    rec.setdefault("fallback", []).append({"id": j["id"], "step": step})
+    return f"fallback_{step}"
+
+
+def borrow_candidate(root: Path, j: dict) -> dict | None:
+    """同一角色另一套造型、同部位单品里最接近的已登记通过图"""
+    from difflib import SequenceMatcher
+    if j.get("kind") != "item":        # PS-MASTER 11-07：只借单品；设定图不借（另一套造型的整身图不能顶替）
+        return None
+    sp = j.get("spec") or {}
+    best, score = None, -1.0
+    for o in AJ.list_jobs(root, j["run"]):
+        osp = o.get("spec") or {}
+        f = (o.get("result") or {}).get("file")
+        if o.get("id") == j["id"] or o.get("kind") != j["kind"] or o.get("state") != "done" or not f:
+            continue
+        if osp.get("cid") != sp.get("cid") or osp.get("look") == sp.get("look"):
+            continue
+        if j["kind"] == "item" and osp.get("slot") != sp.get("slot"):
+            continue
+        r = SequenceMatcher(None, str(osp.get("label") or ""), str(sp.get("label") or "")).ratio()
+        if r > score and (root / f).is_file():
+            best, score = {"job": o["id"], "file": f, "look": osp.get("look"), "label": osp.get("label"), "sim": round(r, 2)}, r
+    return best
+
+
+def _try_borrow(root: Path, j: dict, steps: list, rec: dict, who: str, what: str, prob: str) -> str | None:
+    b = borrow_candidate(root, j)
+    if not (b and j.get("pick_id")):
+        return None
+    cand = {"key": f"borrow-{b['job']}", "file": b["file"], "label": f"借用造型 {b['look']}：{b['label'] or ''}"[:60],
+            "score": 0, "passed": True, "contract_ok": True}
+    try:
+        AJ.auto_pick(root, j, [cand], who, what)
+    except Exception as e:  # noqa: BLE001  # arch-ok: 借用登记失败 → 落到尽力版告知，原因进作业日志
+        AJ.log(j, f"借用 {b['job']} 登记失败：{type(e).__name__}: {e}"[:200])
+        return None
+    jj = AJ.load_job(AJ.job_path(root, j["run"], j["id"]))
+    jj.update(fallback_steps=steps, escalated={"at": AJ._now(), "kind": "best_effort", "fallback": b, "why": prob})
+    AJ.log(jj, f"开工后不等项目方（L-215）：几种做法都出不来（{prob}），借用同一角色造型 {b['look']} 最接近的通过图，已登记（可随时换）")
+    AJ.save_job(root, jj)
+    rec.setdefault("fallback", []).append({"id": j["id"], "step": "borrow", "from": b["job"]})
+    return "best_effort_borrow"
+
+
+def fallback_ladder(root: Path, j: dict, why: str, rec: dict, who: str, what: str, prob: str) -> str:
+    """→ fallback_simplify | fallback_reseed（已重排）| best_effort_borrow | best_effort"""
+    steps = list(j.get("fallback_steps") or [])
+    if "simplify" not in steps:
+        terms = drop_terms_for(j, why)
+        if terms:
+            return _requeue(root, j, "simplify", f"去掉容易出错的细节（{'、'.join(terms)}）再出一次", rec, drop_terms=terms)
+        steps.append("simplify")
+        j["fallback_steps"] = steps
+    if "reseed" not in steps:
+        return _requeue(root, j, "reseed", "换一批离得很远的种子再出一次", rec, seed_offset=FAR_SEED_OFFSET)
+    if "borrow" not in steps and j.get("kind") == "item":
+        steps.append("borrow")
+        j["fallback_steps"] = steps
+        got = _try_borrow(root, j, steps, rec, who, what, prob)
+        if got:
+            return got
+    line = f"{who}的{what}换了几种做法都没出来（一直卡在：{prob}），先按尽力版继续，事后可改"
+    j.update(fallback_steps=steps, escalated={"at": AJ._now(), "kind": "best_effort", "why": line})
+    AJ.log(j, f"开工后不等项目方（L-215）：{line}")
+    AJ.save_job(root, j)
+    try:
+        AJ.guard_run(root, j["run"])
+        sp = j.get("spec") or {}
+        _owner_queue().enqueue_asset_revise(root, {"id": f"rv:{j['id']}", "run": j["run"], "job": j["id"], "episode": j.get("episode"),
+                                                   "asset_kind": j.get("kind"), "name": who, "what": what, "reason": prob, "notice": True,
+                                                   "spec_text": str(sp.get("label") or sp.get("object") or "")[:160],
+                                                   "source": "资产线（尽力版，事后可改）"})
+    except Exception as e:  # noqa: BLE001  # arch-ok: 告知投不进只记心跳（不挡流水线）
+        rec.setdefault("escalate_errors", []).append(f"{j['id']}: notice {type(e).__name__}: {e}"[:200])
+    rec.setdefault("escalated", []).append({"id": j["id"], "kind": "best_effort"})
+    return "best_effort"
 
 
 def _owner_queue():
@@ -1092,6 +1222,10 @@ def _compile(job: dict, root: Path = ROOT):
         jc["compile_trace"] = FJ.trace_of(jc)
     if job.get("owner_notes"):                    # W-FIX-PIPE #13：项目方在“需要修改描述”写的话，原样加在提示词最后
         jc["prompt"] = with_owner_notes(jc["prompt"], job)
+        jc["compile_trace"] = FJ.trace_of(jc)
+    if job.get("drop_terms"):                     # L-215 兜底 ①：去掉易出错元素（分句删掉 + 负面词加上）
+        jc["prompt"] = drop_clauses(jc["prompt"], job["drop_terms"])
+        jc["negative"] = "，".join(x for x in (jc.get("negative"), "，".join(job["drop_terms"])) if x)
         jc["compile_trace"] = FJ.trace_of(jc)
     if job["kind"] in ("scene", "item"):          # 物件 / 底图类：编译器再往里塞人像段就在出图前拦下（W9 守卫，W6c+ 扩到 scene）
         bad = person_phrases(jc["prompt"])
@@ -1484,7 +1618,7 @@ def run_job(jp: Path, lane: str, root: Path = ROOT, renderer=None, cfg: dict | N
     cfg = cfg or config(root)
     job = AJ.load_job(jp)
     need = int((cfg.get("candidates") or {}).get(job["kind"]) or 2)
-    base = 1000 + 100 * int(job.get("attempts") or 1)
+    base = 1000 + 100 * int(job.get("attempts") or 1) + int(job.get("seed_offset") or 0)   # L-215 兜底 ②：远种子
     seeds = fresh_seeds(job, base, need * 2)
     passed: list[dict] = []
     errors: list[str] = []

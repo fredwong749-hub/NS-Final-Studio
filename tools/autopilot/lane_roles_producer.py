@@ -372,8 +372,28 @@ def apply_override(phases: dict, run, now: float | None = None, root: Path | Non
     return phases
 
 
-def episode_stages(reg: dict, cfg: dict, adult: set | None = None, prev: dict | None = None, now: float | None = None) -> dict[int, str]:
-    """{ep: stage}（frames / videos / assembly / done），只含 applies 的集；大脑的阶段覆盖（apply_override）对 frames / videos 两段同样生效"""
+_ES_MOD = None
+
+
+def closed_enforced(run, root: Path | None = None) -> set[int]:
+    """L-209 S2.2：enforce 下已关闭的集（tools/autopilot/episode_state.py；record / off / 读不到 = 空集，行为不变）"""
+    global _ES_MOD
+    try:
+        if _ES_MOD is None:      # 复审 5：模块只加载一次
+            import importlib.util
+            sp = importlib.util.spec_from_file_location("ns_episode_state_lro", Path(__file__).resolve().parent / "episode_state.py")
+            m = importlib.util.module_from_spec(sp)
+            sp.loader.exec_module(m)
+            _ES_MOD = m
+        return _ES_MOD.enforce_closed(str(run), root or ROOT) if run else set()
+    except Exception:  # noqa: BLE001  # arch-ok: 关闭标记读不了 = 不排除（旧行为）
+        return set()
+
+
+def episode_stages(reg: dict, cfg: dict, adult: set | None = None, prev: dict | None = None, now: float | None = None,
+                   closed: set | None = None) -> dict[int, str]:
+    """{ep: stage}（frames / videos / assembly / done），只含 applies 的集；大脑的阶段覆盖（apply_override）对 frames / videos 两段同样生效。
+    L-209 S2.2：enforce 下已关闭的集一律 done（不再是 L-207 active 占卡集）；closed=None = 按 episode_state 现读"""
     out = {}
     idle = frames_idle_fallback_s(cfg)
     for E in reg.get("episodes") or []:
@@ -386,6 +406,9 @@ def episode_stages(reg: dict, cfg: dict, adult: set | None = None, prev: dict | 
     for ep, ph in read_override(reg.get("run"), None, now).items():
         if out.get(ep) in ("frames", "videos"):
             out[ep] = ph
+    for ep in (closed_enforced(reg.get("run")) if closed is None else closed):
+        if int(ep) in out:
+            out[int(ep)] = "done"
     return out
 
 

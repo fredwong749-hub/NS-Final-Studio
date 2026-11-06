@@ -209,6 +209,12 @@ from ns_api import owner_pick as OWNERPICK  # noqa: E402  INBOXPICK-S 待办中�
 app.include_router(OWNERPICK.router)
 from ns_api import adult_trigger as ADULTTRIG  # noqa: E402  L-128 / L-210 成人镜本人触发：GET / POST /api/owner/adult-trigger（只认登录的项目方）
 app.include_router(ADULTTRIG.router)
+from ns_api import owner_redo as OWNERREDO  # noqa: E402  L-215 块 J：每镜“重做”按钮 POST /api/owner/redo（只认登录的项目方）
+app.include_router(OWNERREDO.router)
+from ns_api import best_effort_assets as BESTEFFORT  # noqa: E402  L-215 块 J：资产“尽力版”标记 GET /api/assets/best-effort
+app.include_router(BESTEFFORT.router)
+from ns_api import episode_reopen as EPREOPEN  # noqa: E402  L-209 S2.2 集关闭标记：POST /api/owner/episode-reopen / episode-final（只认登录的项目方）、GET episode-state
+app.include_router(EPREOPEN.router)
 from ns_api import owner_chat as OWNERCHAT  # noqa: E402  W30 PLAN_OWNER_CHAT 分期 2：POST /api/owner/chat（只读助手）、GET /api/owner/chat/digest
 app.include_router(OWNERCHAT.router)
 from ns_api import image_workshop as IWS  # noqa: E402  FILMUI 图像工坊：/api/image-workshop/bases · history（只读）· jobs（非 Qwen 先 501）

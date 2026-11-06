@@ -790,7 +790,7 @@ try:
 except Exception:
     cur = {}
 out = dict(cur)
-if rel in ("data/netfix/laptop_ctrl.json", "data/netfix/override_state.json"):          # 快照：整文件覆盖
+if rel in ("data/netfix/laptop_ctrl.json", "data/netfix/override_state.json") or rel.endswith("/episode_state.json"):   # 快照：整文件覆盖（S2.2 集关闭标记只有笔记本算）
     tmp = os.path.join(R, rel) + ".tmp"
     os.makedirs(os.path.dirname(tmp), exist_ok=True)
     json.dump(new, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
@@ -815,10 +815,25 @@ print("merged", rel, n)
 """
 
 
+def episode_state_tick() -> None:
+    """L-209 S2.2（W-S22）：每部在产剧重算 data/pipeline/runs/<run>/episode_state.json（变了才原子写；off = 不写）。出错只记日志"""
+    try:
+        import episode_state as ES
+    except ImportError as e:   # arch-ok: 模块没部署 = 不算（执行器读不到文件 = 没有集关闭，旧行为）
+        log("episode_state", "模块缺", repr(e)[:160])
+        return
+    for run in run_sync_runs():
+        try:
+            ES.compute(run, ROOT, log=log)
+        except Exception as e:  # noqa: BLE001
+            log("episode_state", run, "重算失败", repr(e)[:200])
+
+
 def push_control(host: str, force: bool = False) -> dict:
     """NETFIX 接口（总调度 22:2x）：master_rejects.json、ready_episodes.json 变了才推；到服务器按对象合并（K-OPS-Q20），
     服务器上更晚的对象不被笔记本旧值盖回去"""
     import hashlib
+    episode_state_tick()                 # L-209 S2.2：推之前先按口径重算集关闭标记（含自动重开）
     st = jl(STATE, {}) or {}
     hs = st.setdefault(host, {}).setdefault("control_sha", {})
     done = {}
@@ -2107,6 +2122,9 @@ def control_files() -> list[str]:
                 out.append(rel)
         except Exception as e:  # noqa: BLE001
             log("control_files", run, "修改清单路径算不出", repr(e)[:160])
+        rel = f"data/pipeline/runs/{run}/episode_state.json"   # L-209 S2.2：集关闭标记（只有笔记本写；服务器 producer / night / vidgen 只读）
+        if rel not in out:
+            out.append(rel)
     return out
 
 

@@ -1359,7 +1359,11 @@ def _cut_impl(base: str | None = None, dry: bool = False, sv: str | None = None,
             g = gates(frozen or files, run_tests, root=Path(snap["dir"]), env=snap["env"], sv=sv)
             extra.update(gates_on="local", gates_s=round(time.time() - t_g, 1))
         rep.update(tree=tree, snapshot={k: v for k, v in snap.items() if k != "env"}, frozen_files=len(frozen), **extra)
-        e2e = e2e_owner_gate(sv, code_root=Path(snap["dir"]) if snap.get("dir") and Path(snap["dir"]).is_dir() else ROOT)
+        try:   # 复审 11-07：验收闸门自身出错不能让 cut 崩；record 下记一行过，enforce 下记不过
+            e2e = e2e_owner_gate(sv, code_root=Path(snap["dir"]) if snap.get("dir") and Path(snap["dir"]).is_dir() else ROOT)
+        except Exception as ex:  # noqa: BLE001
+            e2e = {"id": "e2e_owner", "name": "项目方路径验收（e2e_owner）", "ok": e2e_gate_mode() != "enforce",
+                   "detail": f"验收闸门自身出错：{type(ex).__name__}: {ex}"[:300]}
         if e2e:                                          # W-E2E（L-214）：项目方路径验收；release.json e2e_owner_gate = record（只记）/ enforce（挡）/ off
             g = g + [e2e]
         rep["gates"] = g

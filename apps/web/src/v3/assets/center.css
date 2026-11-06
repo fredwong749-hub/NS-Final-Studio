@@ -251,3 +251,8 @@
 /* UM-0513（G4）：人物登记页（PeoplePage）嵌在资产中心里时，.pp-view 自己的 overflow:auto + height:100% 不会真的滚（真正在滚的是 .ac-main），
    却是吸顶条最近的 overflow 祖先，检测器在它上面量到 scroll-padding-top=0。资产中心里去掉它的 overflow，只留 .ac-main 一层滚动。 */
 .ac-main > .pp-view { overflow: visible; height: auto; }
+
+/* L-215 块 J：资产“尽力版”小标记 */
+.ac-besteffort { display: flex; flex-direction: column; gap: 4px; margin: 0 0 10px; font-size: 12px; color: var(--ds-muted, #666); }
+.ac-besteffort-i { display: flex; gap: 6px; align-items: baseline; }
+.ac-besteffort-tag { padding: 0 6px; border-radius: 8px; background: #fff3d6; color: #8a5a00; font-weight: 600; white-space: nowrap; }

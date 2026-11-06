@@ -89,7 +89,7 @@ def owns(host: str, rel: str, ep: int) -> bool:
     m = OWN_IMG if rel.startswith(("data/renders/", "data/producer/")) else OWN_VID
     return ep in m.get(host, set())
 SKIP_NAMES = {"control.json", "heartbeat.json", "producer.pid", "registry.json", "night.pid",
-              "owner_triggers.json"}   # L-210 / W-ADULT：成人镜触发清单只由笔记本网页（项目方本人）写，服务器副本永不拉回盖本机
+              "owner_triggers.json", "episode_state.json"}   # L-210 / W-ADULT：成人镜触发清单只由笔记本网页（项目方本人）写，服务器副本永不拉回盖本机
 APPEND = {"data/producer/log.jsonl", "data/producer/current_changes.jsonl",
           "data/pipeline/runs/series10_v1/video/night.log"}
 DRY = "--dry" in sys.argv

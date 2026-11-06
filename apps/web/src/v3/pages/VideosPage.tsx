@@ -3,6 +3,7 @@
 // 数据：GET /api/videos/overview（后端按 vidgen 队列与历史中位时长给预计时间，前端只显示）。没有任何一种情况会出现白板：空 / 读不到都有说明和出口。
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Verdict } from "../Verdict";
+import { RedoButton } from "../RedoButton";
 import { useStudio } from "../../store";
 import { fmtEta } from "../NavTabs.helpers";
 import { SHOT_WORD, VIDEO_STATE_KIND, shotWord } from "../shotWord";
@@ -115,6 +116,7 @@ function Drawer({ r, ep, onClose, onChanged, next }: { r: Row; ep: number; onClo
             {chain ? "连播中 · 点此停止" : "从这一镜连播"}
           </button>
         )}
+        <RedoButton shot={r.id} kind="video" onDone={() => window.setTimeout(onChanged, 700)} />
         <a className="v3-btn sm" href={`#ep${String(ep).padStart(2, "0")}`} title="在画布里看这一集的这一镜（一镜一行）">
           在画布里看
         </a>

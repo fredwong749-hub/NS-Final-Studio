@@ -43,5 +43,7 @@
    "audio_post\\.py"
   ],
   "_protect": "永不停（叠加 config/policies/sentinel.yaml S16_laptop_procs 的进程清单与 producer / night / fwd / ComfyUI 默认表）；nsfs_canvas / audio_post 不在 L-152 范围，总调度另定"
- }
+ },
+ "e2e_owner_gate": "record",
+ "_e2e_owner_gate": "W-E2E（L-214，总调度派）：cut 闸门之外再跑 tools/qa/e2e_owner.py（项目方路径验收：页面 GET 对真相 + 沙箱 POST：用这张 / 修改 / 成人镜触发 / 改描述；只读、不连服务器）。record = 第一版只记进 cut 报告（data/system_versions/<sv>_e2e_owner.json）不挡发版；下一版起改 enforce = 有不过就不发；off = 不跑。真机冒烟 tools/qa/e2e_smoke.py 不进闸门（手动）。"
 }

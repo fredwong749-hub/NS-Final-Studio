@@ -43,3 +43,8 @@
   :root .v3-rows:not(.sf-fullrows) .v3-frames > .v3-frame:is(:hover, :focus-within) > .ds-tiletop { opacity: 1; }
   :root .v3-rows:not(.sf-fullrows) .v3-frames > .v3-frame:is(:hover, :focus-within) > .ds-tiletop > * { pointer-events: auto; }
 }
+
+/* L-215/216 每镜“重做”：小号文字按钮，一行放下（首帧 / 尾帧 / 视频） */
+.redo-row { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; font-size: 11px; color: var(--c-text-3, #8a8a8a); margin-top: 2px; }
+.redo-row .redo-btn { padding: 1px 6px; font-size: 11px; line-height: 1.5; }
+.fp-shot .redo-row { flex-direction: column; justify-content: flex-end; align-items: stretch; margin-top: 0; }

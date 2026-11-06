@@ -3,6 +3,7 @@
 // Ctrl / Shift 点 = 多选；悬停 = 大图放大镜（图高 420px + 片边信息：集 · 镜 · 景别 · 时长 · 实拍 / 计划镜头，D-LENS）。
 // 片条按真实 35mm 比例画：片基黑、上下 KS 齿孔（竖幅横走 3 齿 / 帧）、片边暖灰小字（镜号），片头竖写 EPxx。
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
+import { RedoButton } from "../RedoButton";
 import { thumb } from "../../thumb";
 import { filmOn } from "../uiStyle";
 import { hasAudio, soundUnlocked, unlockSound, useFilmSound } from "../filmSound";
@@ -271,6 +272,9 @@ export function FilmOverview({ eps, onOpen, onCanvas, onMulti }: { eps: OvEp[]; 
                     <div key={x.id} className="fo-d" style={{ width: w }} title={[x.lens.v ? `镜头 ${x.lens.v}` : "", x.light.v ? `灯光 ${x.light.v}` : "", x.faces.length ? `人物 ${x.faces.map((c) => c.name).join("、")}` : ""].filter(Boolean).join("\n")}>
                       {/* FILMUI r3（项目方 12:0x）：片条下面只留重要信息，一行最多两项：镜头 · 运镜；镜号 / 时长 / 景别印在片边，人物头像去掉 */}
                       <span className="mono"><F f={{ ...x.lens, v: leicaLens(x.lens.v) }} /></span> · <F f={x.move} />
+                      <div className="redo-row" title="重做：点一下直接重出这一格">
+                        重做 <RedoButton shot={x.id} kind="first" short /><RedoButton shot={x.id} kind="last" short /><RedoButton shot={x.id} kind="video" short />
+                      </div>
                     </div>
                   ))}
                 </div>

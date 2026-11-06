@@ -25,6 +25,38 @@ class VideoRunError(RuntimeError):
     """视频链认不出 / 不认这部剧（没给剧、没登记、没有视频政策）：失败关闭"""
 
 
+def episode_state():
+    """L-209 S2.2 集关闭标记模块（tools/autopilot/episode_state.py）；没部署 = None（不挡，旧行为）"""
+    if "_ES" not in globals():
+        p = ROOT / "tools" / "autopilot" / "episode_state.py"
+        m = None
+        if p.is_file():
+            import importlib.util as _u   # noqa: PLC0415
+            sp = _u.spec_from_file_location("episode_state_for_video_ctx", p)
+            m = _u.module_from_spec(sp)
+            sp.loader.exec_module(m)
+        globals()["_ES"] = m
+    return globals()["_ES"]
+
+
+def closed_skip(run: str, ep, obj: str, actor: str, closed: set | None = None) -> bool:
+    """视频侧派单前调：True = enforce 下本集已关闭，不派；record 只记 ep_closed_skip；出错 = False（不挡）"""
+    try:
+        m = episode_state()
+        return bool(m and m.skip(run, ep, obj, actor=actor, root=ROOT, closed=closed))
+    except Exception:  # noqa: BLE001  # arch-ok: 关闭标记判不了 = 不挡（旧行为）
+        return False
+
+
+def closed_now(run: str) -> set:
+    """本轮关闭的集（一轮读一次传给 closed_skip）；读不到 = 空"""
+    try:
+        m = episode_state()
+        return m.closed_eps(run, ROOT) if m else set()
+    except Exception:  # noqa: BLE001  # arch-ok: 读不到 = 没有集关闭
+        return set()
+
+
 def _runs_mod():
     p = ROOT / "tools" / "autopilot" / "runs.py"
     if not p.is_file() or not (ROOT / "config" / "pipeline" / "runs.json").is_file():

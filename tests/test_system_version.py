@@ -1,5 +1,6 @@
 """K-OPS-V01：系统版本工具（tools/qa/system_version.py，CODE-RSI r3）。不提交、不推送，只测纯函数与闸门判定。"""
 import importlib.util
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -456,3 +457,43 @@ def test_cut_global_mutex_refuses_concurrent_and_existing_tag(tmp_path, monkeypa
     monkeypatch.setattr(SV, "cut_locked", lambda now=None: {"pid": 12345, "sv": "sv-x"})
     monkeypatch.setattr(SV, "_pid_alive", lambda p: True)
     assert SV.cut()["rc"] == 3
+
+
+# ------------------------------------------------------------------ W-E2E（L-214）：项目方路径验收闸门（record / enforce / off）
+def _e2e_runner(rep):
+    def run(cmd, timeout=1800):
+        assert "tools/qa/e2e_owner.py" in cmd[1].replace("\\", "/") and "--root" in cmd
+        return (0 if rep and not rep.get("failed") else 1), ("日志一行\n" + json.dumps(rep, ensure_ascii=False) if rep else "崩了")
+    return run
+
+
+def test_e2e_owner_gate_record_never_blocks(tmp_path):
+    import importlib.util as _u
+    sp_ = _u.spec_from_file_location("sv_e2e", Path(__file__).resolve().parents[1] / "tools/qa/system_version.py")
+    SV = _u.module_from_spec(sp_)
+    sp_.loader.exec_module(SV)
+    rep = {"n": 3, "failed": 1, "results": [{"ok": False, "line": "视频页黑"}, {"ok": True, "line": "x"}, {"ok": True, "line": "y"}]}
+    row = SV.e2e_owner_gate("sv-x", mode="record", runner=_e2e_runner(rep), out_dir=tmp_path)
+    assert row["ok"] and not row["real_ok"] and row["detail"].startswith("记录模式") and "视频页黑" in row["detail"]
+    row = SV.e2e_owner_gate("sv-x", mode="enforce", runner=_e2e_runner(rep), out_dir=tmp_path)
+    assert not row["ok"] and "2/3 过" in row["detail"] and "log" not in row      # 不占 pytest 的 log 键
+    row = SV.e2e_owner_gate("sv-x", mode="enforce", runner=_e2e_runner({"n": 2, "failed": 0, "results": []}), out_dir=tmp_path)
+    assert row["ok"] and row["real_ok"]
+    row = SV.e2e_owner_gate("sv-x", mode="enforce", runner=_e2e_runner(None), out_dir=tmp_path)
+    assert not row["ok"] and "没跑出结果" in row["detail"]
+    assert SV.e2e_owner_gate("sv-x", mode="off", runner=_e2e_runner(rep)) is None
+
+
+def test_e2e_gate_mode_from_release_cfg(tmp_path):
+    import importlib.util as _u
+    sp_ = _u.spec_from_file_location("sv_e2e2", Path(__file__).resolve().parents[1] / "tools/qa/system_version.py")
+    SV = _u.module_from_spec(sp_)
+    sp_.loader.exec_module(SV)
+    (tmp_path / "config/pipeline").mkdir(parents=True)
+    for v, want in (("enforce", "enforce"), ("off", "off"), ("乱写", "record")):
+        (tmp_path / "config/pipeline/release.json").write_text(json.dumps({"e2e_owner_gate": v}), encoding="utf-8")
+        assert SV.e2e_gate_mode(tmp_path) == want
+    assert SV.e2e_gate_mode(ROOT_FOR_E2E) == "record"
+
+
+ROOT_FOR_E2E = Path(__file__).resolve().parents[1]

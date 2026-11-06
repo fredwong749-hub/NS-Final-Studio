@@ -512,6 +512,9 @@ def snapshot(env: Env | None = None, cfg: dict | None = None, save: bool = True)
     except Exception as e:  # noqa: BLE001  # arch-ok: 证据项
         snap["issues_open"] = {"error": repr(e)[:80]}
     snap["recent_decisions"] = recent_decisions(env.root, cfg["decisions_n"])
+    sc_line = (_j(env.root / "data/brain/scorecard.json", {}) or {}).get("line")   # W-E2E：tools/qa/scorecard.py 的“做完”记分卡一行
+    if sc_line:
+        snap["scorecard"] = str(sc_line)[:300]
     if cfg.get("self_check", True):
         try:   # W-SCAN 11-07：系统自查（tools/brain/invariants.py）——违规开 / 更新 / 自动关卡点，列在 snapshot.md 最上面
             INV = _load("invariants_for_brain", "tools/brain/invariants.py", env.root)
@@ -535,6 +538,8 @@ def summary_md(s: dict) -> str:
     """一屏 markdown 摘要（给人 / 给会话内大脑）"""
     L = [f"# 全局快照 {s.get('at')}  run={s.get('run')}  hash={s.get('hash')}  {s.get('bytes', '?')} B"
          + (f"  探针失败: {s['probe_errors']}" if s.get("probe_errors") else "")]
+    if s.get("scorecard"):
+        L.append(str(s["scorecard"]))
     sc = s.get("self_check")
     if isinstance(sc, dict) and sc.get("error"):
         L.append(f"## 🔴 系统自查发现：自查本身出错 {sc['error']}")
