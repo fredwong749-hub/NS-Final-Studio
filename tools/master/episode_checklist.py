@@ -220,7 +220,7 @@ HOST_VID_SNAP = (
     'import json,os,glob;R="%(run)s";E=%(ep)d;H="%(host)s";V="data/pipeline/runs/"+R+"/video/";'
     'J=lambda p:(json.load(open(p,encoding="utf-8")) if os.path.exists(p) else {});'
     'jobs=J(V+"jobs.json");ids=[s["shot"] for s in jobs.get("shots",[]) if s.get("ep")==E];'
-    'st={};[st.update((J(f).get("shots") or {})) for f in glob.glob(V+"state_*.json")];'
+    'st={};[st.update({k:r for k,r in (J(f).get("shots") or {}).items() if not r.get("orphan")}) for f in glob.glob(V+"state_*.json")];'   # W-SCHED 11-06：孤儿记录（被别台领走，pending）不盖掉领取台的 done
     'mine=(J(V+"state_"+H+".json").get("shots") or {});'
     'busy=sum(1 for r in mine.values() for x in (r.get("renders") or []) if x.get("state")=="submitted");'
     'q=[i for i in ids if (st.get(i) or {}).get("status") not in ("done","best_effort","blocked")];'

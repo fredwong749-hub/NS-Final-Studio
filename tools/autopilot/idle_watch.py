@@ -94,7 +94,7 @@ for m in jobs.get("shots") or []:
     for v in (m.get("variants") or {}).values():
         if str(v.get("status")) in ("ready", "lint_error") and (not allowed or v.get("recipe") in allowed):
             readyv.add(m.get("shot"))
-disp = [sid for sid, r in (st.get("shots") or {}).items() if r.get("status") not in ("done", "best_effort", "blocked", "waiting_frame") and sid in readyv]
+disp = [sid for sid, r in (st.get("shots") or {}).items() if r.get("status") not in ("done", "best_effort", "blocked", "waiting_frame") and sid in readyv and not r.get("orphan")]   # W-SCHED 11-06：被别台领走的孤儿记录（status 停在 pending）不是本机的活
 out["video_dispatchable"] = sorted(disp)[:40]
 out["video_dispatchable_n"] = len(disp)
 try:                                       # L-206 审图位：本机看图分发器 /health（queue = 在审的张数；空 = 审图卡没活，不算“空卡有活”）

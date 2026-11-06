@@ -67,7 +67,7 @@ def _reg(*eps):
 # ================================================================ ① 契约文件 + 纯函数
 def test_contract_file_matches_l206():
     cfg = LRO.load_cfg(ROOT)
-    assert cfg["enabled"] is True and LRO.from_episode(cfg) == 2
+    assert cfg["enabled"] is True and LRO.from_episode(cfg) == 1   # L-208 ⑤A：ep01 起生效
     fr, vd = cfg["phases"]["frames"], cfg["phases"]["videos"]
     assert "gpu33:3" not in fr["image"] and "gpu33:3" not in vd["image"] and vd["image"] == []
     assert LRO.review_lane(cfg) == "gpu33:3" and LRO.review_host(cfg) == "gpu33" and LRO.review_gpu(cfg) == 3

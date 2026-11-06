@@ -54,7 +54,7 @@ def _done(first_at="2026-11-06T10:00:00", **top):
 # ---------------------------------------------------------------- ① 配置 / 道 / 阶段
 def test_shipped_config_contract():
     c = LR.load()
-    assert c["enabled"] is True and int(c["from_episode"]) == 2
+    assert c["enabled"] is True and int(c["from_episode"]) == 1   # L-208 ⑤A
     assert LR.lanes("frames", "video", c) == ["gpu36:2"]
     assert LR.lanes("videos", "video", c) == ["gpu33:0", "gpu33:1", "gpu33:3", "gpu36:0", "gpu36:1", "gpu36:2"]   # L-207：视频阶段 6 卡全上
     assert "gpu33:2" not in json.dumps(c["phases"])                              # 坏卡不在任何道清单里
@@ -398,3 +398,39 @@ def test_score_clip_review_route_wired(monkeypatch):
     assert SC.review_route() == {"VQA_REVIEW_ONLY": "1"} and calls == [1]
     src = (ROOT / "tools/series10_video/score_clip.py").read_text(encoding="utf-8")
     assert "review_route()" in src.split("def v9_vlm", 1)[1].split("def ", 1)[0]
+
+
+def test_night_roles_legacy_ep_settled_does_not_veto(night_v2, monkeypatch):
+    """W-SCHED 11-06：ep01 首帧永远在 ready 里 → 两台 night 一直 roles None（ep02 的 L-207 从没生效）。
+    < from_episode 的集只有本机还有没落定的视频才否决；孤儿记录（被别台领走的 pending）不算；读不到 jobs / state = 否决（旧行为）"""
+    N = night_v2
+    (N.VID / "hosts.json").write_text(json.dumps({"1": "gpu36", "2": "gpu36"}), encoding="utf-8")
+    monkeypatch.setattr(LR, "load", lambda path=None: CFG)
+    monkeypatch.setattr(LR, "phase_of", lambda run, ep, ids, cfg=None, root=None, state_path=None: "videos")
+    monkeypatch.setattr(LR, "active_from_state", lambda run: None, raising=False)
+    monkeypatch.setattr(N, "_VS", lambda: None)
+    specs = {**_specs(1), **_specs(2)}
+    rs = {1: ["ep01-S1", "ep01-S2"], 2: ["ep02-S1"]}
+    st = {"eps": {"1": {"status": "assembled"}, "2": {"status": "rendering"}}}
+    assert N.roles_for_host("gpu36", specs, st, rs) is None                       # jobs / state 读不到 → 旧行为（失败关闭）
+    var = {"v1": {"status": "ready"}}
+    jobs = {"shots": [{"shot": "ep01-S1", "ep": 1, "host": "gpu36", "variants": var},
+                      {"shot": "ep01-S2", "ep": 1, "host": "gpu33", "variants": var},
+                      {"shot": "ep02-S1", "ep": 2, "host": "gpu36", "variants": var}]}
+    (N.VID / "jobs.json").write_text(json.dumps(jobs), encoding="utf-8")
+    state = {"shots": {"ep01-S1": {"status": "done", "renders": [{"state": "scored"}]},
+                       "ep01-S2": {"status": "pending", "renders": [], "orphan": True},     # 孤儿：别台的镜
+                       "ep02-S1": {"status": "pending", "renders": []}}}
+    (N.VID / "state_gpu36.json").write_text(json.dumps(state), encoding="utf-8")
+    r = N.roles_for_host("gpu36", specs, st, rs)
+    assert r and r["phase"] == "videos" and r["eps"] == {"2": "videos"} and r["legacy_settled"] == [1]
+    assert r["lanes"]["video"] == ["gpu36:0", "gpu36:1", "gpu36:2"]
+    # ep01 本机还有没落定的镜（重开 / 重出）→ 整台旧行为（L-206：ep01 不中途改调度）
+    state["shots"]["ep01-S1"] = {"status": "pending", "renders": []}
+    (N.VID / "state_gpu36.json").write_text(json.dumps(state), encoding="utf-8")
+    assert N.roles_for_host("gpu36", specs, st, rs) is None
+    # 本机记录（非孤儿）有在出的版本（领取来的镜，jobs 还写着别台）→ 也否决
+    state["shots"]["ep01-S1"] = {"status": "done", "renders": []}
+    state["shots"]["ep01-S2"] = {"status": "rendering", "renders": [{"state": "submitted"}]}
+    (N.VID / "state_gpu36.json").write_text(json.dumps(state), encoding="utf-8")
+    assert N.roles_for_host("gpu36", specs, st, rs) is None

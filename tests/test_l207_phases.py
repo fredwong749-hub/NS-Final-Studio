@@ -88,7 +88,7 @@ def test_shipped_config_l207_contract():
     assert LRO.vqa_instances_for({**cfg, "review": {**cfg["review"], "vqa_instances_by_phase": {"videos": 9}}}, "videos") == 3   # 不超上限
     assert LRO.frames_idle_fallback_s(cfg) == 1200.0 and LRO.frames_idle_fallback_s({}) == LRO.FRAMES_IDLE_S
     lp = cfg["review"]["lan_proxy"]
-    assert lp["enabled"] is False                                                     # PS-MASTER 11-06 21:xx：内网入口要项目方批准才开（审图内网入口）
+    assert lp["enabled"] is True                                                      # L-208 ②A（项目方 11-06 22:5x 批准开审图内网入口）
     assert lp["bind"].startswith("10.") and lp["allow"] == ["10.0.0.36"] and lp["port"] == 8870   # 参数仍只许内网地址 / 白名单
     assert "gpu33:2" not in json.dumps(cfg["phases"])
     assert LRO.review_scale_cmd(cfg, 1, "/root/repo") == "cd /root/repo && bash tools/vqa/review_instances.sh scale 1"

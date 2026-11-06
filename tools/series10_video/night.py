@@ -97,9 +97,14 @@ def roles_for_host(host: str, eps_specs: dict, st: dict, rs: dict | None = None)
     ready = {int(e) for e in (rs or {})}
     active = [ep for ep in _eps_on(hosts, host)
               if ep in ready or (st.get("eps", {}).get(str(ep)) or {}).get("status") == "rendering"]
-    if not active:
+    # W-SCHED 11-06：ep01 的首帧永远在 ready 里 → 以前只要本机 eps 含 1，整台永远“旧行为”（两台 night DISPATCH roles None，
+    # ep02 的 L-207 视频段从没生效）。< from_episode 的集只有本机还有没落定的视频时才否决分卡；落定了就不算在出（结论里记 legacy_settled，
+    # 阶段 / 视频道变化由 loop_once 的 LANE_ROLES 一行日志记）
+    legacy = [ep for ep in active if not LR.applies(ep, cfg)]
+    if any(legacy_video_open(ep, host) for ep in legacy):
         return None
-    if any(not LR.applies(ep, cfg) for ep in active):
+    active = [ep for ep in active if ep not in legacy]
+    if not active:
         return None
     phases = {str(ep): LR.phase_of(RUN_ID, ep, [s.id for s in eps_specs.get(ep) or []], cfg) for ep in active}
     act = LR.active_from_state(RUN_ID) if hasattr(LR, "active_from_state") else None
@@ -112,7 +117,33 @@ def roles_for_host(host: str, eps_specs: dict, st: dict, rs: dict | None = None)
     out = {"phase": phase, "eps": phases, "lanes": LR.control_lanes(host, phase, cfg)}
     if act:
         out["active"] = {"ep": act["ep"], "phase": act["phase"]}
+    if legacy:
+        out["legacy_settled"] = legacy
     return out
+
+
+SETTLED_VIDEO = ("done", "best_effort", "blocked")
+
+
+def legacy_video_open(ep: int, host: str) -> bool:
+    """本机这一集还有没落定的视频：jobs.json 归本机、有变体、本机记录没落定的镜，或本机记录（非孤儿）有在出 / 在打分的版本。
+    jobs / state 读不到 → True（失败关闭 = 旧行为）。孤儿记录（被别台领走，vidgen repair_orphans 标 orphan）不算"""
+    jobs = jl(VID / "jobs.json", None)
+    stt = jl(VID / f"state_{host}.json", None)
+    if not isinstance(jobs, dict) or not isinstance(stt, dict):
+        return True
+    try:  # 复审 11-06：坏数据（非 dict 记录 / 缺 shot 键）不抛进主循环，按读不到处理 = 失败关闭
+        recs = stt.get("shots") or {}
+        for s in jobs.get("shots") or []:
+            if s.get("ep") == ep and s.get("host") == host and s.get("variants") \
+                    and (recs.get(s["shot"]) or {}).get("status") not in SETTLED_VIDEO:
+                return True
+        pre = f"ep{int(ep):02d}-"
+        return any(sid.startswith(pre) and not r.get("orphan")
+                   and any(x.get("state") in ("submitted", "fetched", "scoring") for x in r.get("renders") or [])
+                   for sid, r in recs.items())
+    except (AttributeError, KeyError, TypeError, ValueError):  # arch-ok: 坏数据 = 旧行为（视作未落定）
+        return True
 
 
 def roles_control(host: str, st: dict, c: dict) -> dict:
