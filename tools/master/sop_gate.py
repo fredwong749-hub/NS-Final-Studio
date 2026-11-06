@@ -722,7 +722,7 @@ def judge(run: str, ep: int, stage: str, shot: int | None = None, root: Path = R
         back = 2 if config(root).get("retro_parallel", True) else 1
         if int(ep) - back >= 1:
             retro = retro_state(run, int(ep) - back, root)
-            if retro != "done":
+            if retro != "done" and config(root).get("retro_mode", "enforce") != "record":   # 11-07：retro_mode=record = 复盘只记录（res.retro），不挡出图（L-215）
                 missing.append(f"第{int(ep) - back}集复盘：{retro}（tools/master/episode_retro.py 生成并 done 后，第{int(ep)}集才能出图）")
     res = {"ok": not missing, "missing": missing, "retro": retro}
     if rv_row:

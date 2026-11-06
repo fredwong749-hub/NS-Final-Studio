@@ -39,3 +39,13 @@ def test_q9_na_accepted_when_producer_passed():
     assert not SG._q9_pass({"ok": False, "blocking": [], "items": [q9]})
     assert not SG._q9_pass({"ok": True, "blocking": ["Q1"], "items": [q9]})
     assert not SG._q9_pass({"ok": True, "blocking": [], "items": [{"id": "Q9", "status": "fail"}]})
+
+
+def test_retro_record_only_when_not_enforced(tmp_path, monkeypatch):
+    """L-215：retro_enforce=false → 复盘没 done 也不挡出图（res.retro 照记）"""
+    monkeypatch.setattr(SG, "config", lambda root=None: {"enabled": True, "retro_enforce": False, "retro_parallel": True})
+    monkeypatch.setattr(SG, "retro_state", lambda run, ep, root: "missing")
+    called = {}
+    import inspect
+    src = inspect.getsource(SG.judge)
+    assert 'config(root).get("retro_mode", "enforce") != "record"' in src

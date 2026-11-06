@@ -3,6 +3,8 @@
  "enabled": true,
  "observe_stages": [],
  "retro_enforce": true,
+ "retro_mode": "record",
+ "_retro_mode_1107": "PS-MASTER 11-07 05:0x（L-214 自主 / L-215 开工后 0 等待）：retro_mode=record = 复盘改只记录，不再挡下一集出图——ep01/ep02 未合成完、复盘文件只在笔记本，服务器判 missing，ep03/ep04 整集停摆；复盘照常生成，供 RSI 学习，不作闸门",
  "retro_parallel": true,
  "_retro_parallel": "FIX-ORCH O8（L-205 KPI 一集 ≤ 50 min，11-06）：true（默认）= 第 N 集复盘还没 done 时第 N+1 集照样进出图（复盘与下一集并行），复盘最多落后一集——第 N+2 集出图前第 N 集复盘必须 done（retro_enforce 照样 enforce）；false = 旧口径（第 N 集复盘 done 后第 N+1 集才能出图）",
  "prompt_probe": "build_first+preflight",
