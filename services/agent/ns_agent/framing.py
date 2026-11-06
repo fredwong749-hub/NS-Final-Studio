@@ -254,11 +254,20 @@ def lower_focus(img_raw: str, kept_triggers=None) -> bool:
     return not visible(first, size)
 
 
+# W-PROD 11-07（ep03-S4 K-REN-708 误报）：“X 的视线从画外…落在…”= 看的人在画外（插入镜只露手），不代表画面里有脸；
+# rubric specificity#1 又要求每镜 img 写“视线”，两条规则只能靠这句话同时满足 → 判脸前去掉这类分句
+OFFSCREEN_GAZE = re.compile(r"[^，,；;。]*(?:视线|目光)从画外[^，,；;。]*")
+
+
+def strip_offscreen_gaze(text: str) -> str:
+    return OFFSCREEN_GAZE.sub("", text or "")
+
+
 def closeup_subject(img_body: str, size: str | None) -> str | None:
     """特写类镜头的主体：face（写了脸 / 眼 / 视线…）、part（只写手 / 腰 / 鞋…等局部）、object（都没写）；非特写 → None"""
     if size not in CLOSE:
         return None
-    t = (img_body or "").replace("眼睛为真实人眼大小", "")      # 写作方的通用质感句，不代表画面里有脸
+    t = strip_offscreen_gaze(img_body).replace("眼睛为真实人眼大小", "")      # 写作方的通用质感句 / 画外视线，不代表画面里有脸
     if any(w in t for w in FACE_WORDS):
         return "face"
     if any(w in t for w in PART_WORDS):

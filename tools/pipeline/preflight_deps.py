@@ -126,6 +126,19 @@ def adult_shot(shot) -> bool:
     return bool(shot.get("adult") if isinstance(shot, dict) else getattr(shot, "adult", False))
 
 
+def shot_triggered(run: str, shot_id: str) -> bool:
+    """L-216：这一镜是否已被项目方触发（读 sop_gate.triggered_adult_shots，与闸门同一口径）；读不到 = 没触发（fail-closed）"""
+    m = re.match(r"ep(\d+)-S(\d+)", str(shot_id))
+    if not m:
+        return False
+    try:
+        sys.path.insert(0, str(ROOT / "tools" / "master"))
+        import sop_gate as _SG
+        return int(m.group(2)) in _SG.triggered_adult_shots(run, int(m.group(1)), ROOT)
+    except Exception:  # noqa: BLE001  # arch-ok: 读不到触发清单 = 当作没触发，不预建
+        return False
+
+
 def _ep_no(shot_id: str) -> int | None:
     m = re.match(r"ep(\d+)-S(\d+)", str(shot_id))
     return int(m.group(1)) if m else None
@@ -173,7 +186,7 @@ def rung_deps(sc, run: str, default_jobs: dict, *, episodes: set[int] | None = N
             if (episodes is not None and n not in episodes) or (ok_eps is not None and n not in ok_eps):
                 continue
             j0 = default_jobs.get(sh.id)
-            if j0 is None or adult_shot(sh):              # 成人镜只由项目方触发（L-128），不预生成；口径同 sop_gate
+            if j0 is None or (adult_shot(sh) and not shot_triggered(run, sh.id)):   # 未触发的成人镜不预生成；已触发的（L-216）照常预建；口径同 sop_gate
                 continue
             try:
                 ft = PR.active_take(P.load_takes(sh.id), "image")

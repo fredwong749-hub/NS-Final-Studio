@@ -1415,7 +1415,7 @@ def partial_face_visible(name: str, img: str, cast_names: list[str] | tuple = ()
     others = [n for n in cast_names if n and n != name]
     if others:
         return False
-    body = (img or "").replace("眼睛为真实人眼大小", "")
+    body = FR.strip_offscreen_gaze(img).replace("眼睛为真实人眼大小", "")      # “视线从画外…”= 看的人在画外（W-PROD 11-07）
     if any(w in body for w in FACE_VIS_WORDS):
         return True
     if size is None:

@@ -329,6 +329,9 @@ class _FakeProducer:
     def ledger(self):
         return self._led
 
+    def ep_closed_skip(self, *a, **k):          # S2.2：集关闭判定（测试里集都开着）
+        return False
+
     def led_update(self, oid, **kw):
         self.updates.append((oid, kw))
         self._led.setdefault(oid, {}).update(kw)

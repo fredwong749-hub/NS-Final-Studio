@@ -38,9 +38,27 @@ def resolve_cid(run: str, cid: str, name: str) -> str:
         return cid
 
 
-def character_gaps(run: str, cid: str, name: str, episode: int, mchars: dict | None = None) -> list[dict]:
+def shot_registered_looks(run: str, cid: str, episode: int, shots) -> dict[int, str]:
+    """W-PROD 11-07（K 块，ep03 祁念 O1 + 亲密镜 O2）：逐镜结构化登记（shot_looks.json 画布 overrides / 系统登记 shots）里
+    该人物在本集各镜的造型 id → {镜号: 造型}；没登记的镜不进结果。一集两套造型（整集排期写不下）时用逐镜登记代替整集排期"""
+    from ns_agent import asset_refs as AR
+    ovs, reg = AR.shot_overrides(run)[0], AR.registry_looks(run)
+    out: dict[int, str] = {}
+    for i in shots or ():
+        sid = f"ep{int(episode):02d}-S{int(i)}"
+        lid = ((ovs.get(sid) or {}).get(cid) or {}).get("look")
+        if not lid:
+            r = (reg.get(sid) or {}).get(cid)
+            lid = r.get("look") if isinstance(r, dict) else r
+        if isinstance(lid, str) and lid:
+            out[int(i)] = lid
+    return out
+
+
+def character_gaps(run: str, cid: str, name: str, episode: int, mchars: dict | None = None, shots=None) -> list[dict]:
     """一个人物在某集的人物级资产缺口（UIFIX-F 11-03：和 check() 同一份代码，网页“确认造型”入口也按它判断，不另写口径）：
-    身份脸（AR.face_of）、清单 display_name、本集造型排期（AR.episode_look_override）。每项 {kind, who, what, cid, name}"""
+    身份脸（AR.face_of）、清单 display_name、本集造型排期（AR.episode_look_override）。每项 {kind, who, what, cid, name}
+    shots（本集该人物出场镜号）给了且每镜都有逐镜结构化登记（shot_registered_looks，造型在清单里）= 已排期，不报 schedule"""
     from ns_agent import asset_refs as AR
     if mchars is None:
         mchars = (AR.manifest(run) or {}).get("characters") or {}
@@ -54,7 +72,10 @@ def character_gaps(run: str, cid: str, name: str, episode: int, mchars: dict | N
         g("face", "没有身份脸")
     if not (mchars.get(cid) or {}).get("display_name"):
         g("name", "清单里没有 display_name")
-    if cid in mchars and (mchars[cid].get("looks") or {}) and not AR.episode_look_override(run, cid, episode):
+    mlooks = (mchars.get(cid) or {}).get("looks") or {}
+    per_shot = shot_registered_looks(run, cid, episode, shots) if shots else {}
+    by_shot = bool(shots) and len(per_shot) == len(set(shots)) and all(v in mlooks for v in per_shot.values())
+    if cid in mchars and mlooks and not AR.episode_look_override(run, cid, episode) and not by_shot:
         g("schedule", "本集造型排期还没写进 hub_episode_looks.json（出图前先做本集造型排期）")
     return out
 
@@ -117,7 +138,7 @@ def check(run: str, episode: int, root: Path = ROOT) -> dict:
         shots_out.append({"index": idx, "adult": bool(s.get("adult")), "reasons": s.get("adult_reasons") or [],
                           "scene": sr.scene_id, "cast": [c["name"] for c in sr.characters]})
     for cid, d in sorted(chars.items()):
-        for g in character_gaps(run, resolve_cid(run, cid, d["name"]), d["name"], episode, mchars):
+        for g in character_gaps(run, resolve_cid(run, cid, d["name"]), d["name"], episode, mchars, shots=d["shots"]):
             gap(g["kind"], g["who"], g["what"], d["shots"])
     # 音色：本集说话人（对白）→ 人物表 → run_media.voice_config
     speakers: dict[str, set] = {}

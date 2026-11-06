@@ -101,6 +101,7 @@ def test_rung_deps_respects_frozen_run(monkeypatch):
 
 
 def test_rung_deps_builds_once_then_cached(monkeypatch, tmp_path):
+    monkeypatch.setattr(PD, "shot_triggered", lambda run, sid: False)   # L-216：线上已触发成人镜，本测只验“未触发的成人镜不做”
     asset = next(iter(sorted((ROOT / "assets").rglob("*.png"))), None)
     if asset is None:
         pytest.skip("仓库里没有 assets/*.png")
@@ -142,6 +143,7 @@ def test_adult_filter_matches_sop_gate_per_shot(monkeypatch, tmp_path):
     rel = asset.relative_to(ROOT).as_posix()
     raw = [{"index": i, "adult": i >= 8} for i in range(1, 12)]            # ep03 式混合：S8–S11 成人
     monkeypatch.setattr(SG, "_ep_shots", lambda run, ep, root: raw)
+    monkeypatch.setattr(SG, "triggered_adult_shots", lambda run, ep, root=None: set())   # 本测只验口径，不读线上触发清单（L-216 已触发的另测）
     want_adult = SG.adult_shots_of("series10_v2", 3)
     assert want_adult == {8, 9, 10, 11}
     assert {r["index"] for r in raw if PD.adult_shot(r)} == want_adult
@@ -171,3 +173,12 @@ def test_preflight_deps_survives_rung_deps_error(monkeypatch):
     assert isinstance(r.get("files"), list)
     errs = r.get("errors") or {}
     assert "_rungs" not in errs or "corrupt" in errs["_rungs"]
+
+
+def test_triggered_adult_shot_is_prebuilt(monkeypatch):
+    """L-216：项目方已触发的成人镜照常预建参考板（未触发的仍跳过）"""
+    sh = types.SimpleNamespace(id="ep03-S2", adult=True, cast=[])
+    monkeypatch.setattr(PD, "shot_triggered", lambda run, sid: sid == "ep03-S2")
+    assert PD.adult_shot(sh) and PD.shot_triggered("series10_v2", sh.id)
+    monkeypatch.setattr(PD, "shot_triggered", lambda run, sid: False)
+    assert not PD.shot_triggered("series10_v2", sh.id)

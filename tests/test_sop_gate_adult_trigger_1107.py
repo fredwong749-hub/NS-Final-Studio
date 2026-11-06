@@ -30,3 +30,12 @@ def test_unreadable_triggers_fail_closed(tmp_path, monkeypatch):
     monkeypatch.setattr(SG, "_runs", lambda: R)
     monkeypatch.setattr(SG, "_ep_shots", lambda run, ep, root: [{"index": 1, "adult": True}])
     assert SG.adult_shots_of("r", 3, tmp_path) == {1}
+
+
+def test_q9_na_accepted_when_producer_passed():
+    """L-215：producer 终判 ok=true 且无阻断、Q9 na（前序只记录、没跑看图）→ 闸门同口径算过；ok=false 或有阻断仍不过"""
+    q9 = {"id": "Q9", "status": "na", "evidence": {"key": "x"}}
+    assert SG._q9_pass({"ok": True, "blocking": [], "items": [q9]})
+    assert not SG._q9_pass({"ok": False, "blocking": [], "items": [q9]})
+    assert not SG._q9_pass({"ok": True, "blocking": ["Q1"], "items": [q9]})
+    assert not SG._q9_pass({"ok": True, "blocking": [], "items": [{"id": "Q9", "status": "fail"}]})

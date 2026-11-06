@@ -471,7 +471,11 @@ def _q9_pass(pf: dict) -> bool:
         return False
     if q9.get("status") == "pass":
         return True
-    return q9.get("status") == "na" and bool((q9.get("evidence") or {}).get("model"))
+    if q9.get("status") == "na" and bool((q9.get("evidence") or {}).get("model")):
+        return True
+    # 11-07 PS-MASTER（L-215 开工后 0 等待 / 单一真相）：producer 已定稿（postflight ok=true、无阻断项）而 Q9 因前序只记录项未跑看图（na）的版本，
+    # 与 producer 同口径算过——以前要手工 review-adopt 才放行（ep02 S8/S9/S15 尾帧被挡），闸门不再二次否决 producer 的终判
+    return q9.get("status") == "na" and pf.get("ok") is True and not (pf.get("blocking") or [])
 
 
 def shot_frames(root: Path, run: str, ep: int) -> dict[int, dict]:
