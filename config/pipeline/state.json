@@ -10,5 +10,10 @@
  "episode_closed": {
   "mode": "record",
   "_doc": "S2.2 集关闭标记（W-S22）：off = 不算不挡；record（默认）= 照算，执行器只记 ep_closed_skip（照常派）；enforce = 关闭的集 0 新派单。状态 data/pipeline/runs/<run>/episode_state.json（笔记本算、推两台），口径见 tools/autopilot/episode_state.py"
+ },
+ "run_phase": {
+  "mode": "record",
+  "max_age_s": 900,
+  "_doc": "S2.4 集阶段只算一次（W-S234）：off = 各台自算（旧行为）；record（默认）= 笔记本每拍用两台合并登记表算 L-207 active 集 / 每集阶段 → data/pipeline/runs/<run>/run_phase.json（原子写，推两台），服务器照旧自算，只记 run_phase_disagree；enforce = 服务器 producer / night / lane_roles 用中心结果。中心文件缺或超过 max_age_s 秒没更新 → 退回本机自算，记 run_phase_fallback（10 分钟一条）。口径见 tools/autopilot/run_phase.py"
  }
 }

@@ -84,6 +84,10 @@ class SceneCard(_Strict):
     time_of_day: str
     light: str
     fixtures: str
+    # L-203（项目方 11-06：背景按机位视向拆子场景）：P1 登记的视向子场景带 parent = 母场景 scene_id、_by = 登记人 / 依据。
+    # 以前 SceneCard 严格不收这两格 → 11-06 登记 17 个子场景后整份 P1 过不了 SL-01，autoflow 把 P1 当没写、重发 P1 写手包（test_epchain_o 红的根因）
+    parent: str = ""
+    by: str = Field("", alias="_by")
 
 
 class World(_Strict):

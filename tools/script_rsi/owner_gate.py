@@ -69,10 +69,27 @@ def owner_direction_text(run_dir: Path) -> str:
     return f"{head}都在 {round(means[-1])} 分左右，没到 {min_mean}" if n > 1 else f"评审 {round(means[-1])} 分，没到 {min_mean}"
 
 
+def p1_sha(text: str) -> str:
+    """P1 故事线版本 sha（唯一实现：owner_direction / 三评委每轮 / 转项目方 / 补占位 / p1_review_ok 都用它）。
+    PS-MASTER 11-07 决定（W-S234）：L-203 背景视向子场景（scenes 里 parent 非空的卡）和 _by（登记人）是总调度登记的技术项，
+    不属于项目方对 P1 的创作放行（故事 / 人物 / 母场景）→ 算 sha 时去掉。没有这两样的稿 = 原文 sha（与旧值逐字一致）；
+    有 = 去掉后按正式稿写法（autoflow.write_json：indent=1、ensure_ascii=False）重排再算——与“登记子场景之前那一稿”的原文 sha 相同"""
+    import hashlib
+    try:
+        d = json.loads(text)
+    except ValueError:   # arch-ok: 不是 JSON（写坏 / 半个文件）= 原文 sha（对不上任何放行，失败关闭）
+        d = None
+    sc = d.get("scenes") if isinstance(d, dict) else None
+    if isinstance(sc, list) and any(isinstance(s, dict) and (s.get("parent") or "_by" in s) for s in sc):
+        d = {**d, "scenes": [{k: v for k, v in s.items() if k != "_by"} if isinstance(s, dict) else s
+                             for s in sc if not (isinstance(s, dict) and s.get("parent"))]}
+        text = json.dumps(d, ensure_ascii=False, indent=1, default=str)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
 def owner_direction(run_dir: Path) -> dict | None:
     """总调度把低于门槛的 P1 转给项目方定方向（只能由总调度动作触发：review-state --escalate-owner --by 总调度）。
     只对当时那一稿有效（sha 对得上）；P1 换稿后自动失效。返回 {at, by, round, mean, sha} 或 None"""
-    import hashlib
     sp = run_dir / "judge_p1" / "STATE.json"
     canon = run_dir / "P1_storyline.json"
     if not (sp.exists() and canon.exists()):
@@ -80,14 +97,12 @@ def owner_direction(run_dir: Path) -> dict | None:
     od = json.loads(sp.read_text(encoding="utf-8")).get("owner_direction")
     if not od:
         return None
-    sha = hashlib.sha256(canon.read_text(encoding="utf-8").encode("utf-8")).hexdigest()[:16]
-    return od if od.get("sha") == sha else None
+    return od if od.get("sha") == p1_sha(canon.read_text(encoding="utf-8")) else None
 
 
 def p1_review_ok(run_dir: Path) -> tuple[bool, str]:
     """P1 三评委过没过（V2-WALK W-25：“用这版”不能绕过 34 分门槛）：judge_p1/STATE.json 最后一轮 passed=True，且那一轮评的 sha = 当前 P1_storyline.json 的 sha。
     没有评审状态：完全切割的 run 算没过（V2 必须评审）；旧 run 不设这道门槛"""
-    import hashlib
     if owner_direction(run_dir):                    # 总调度已转项目方定方向：低于门槛也允许项目方拍板（审计里记“低于门槛、项目方放行”）
         return True, ""
     sp = run_dir / "judge_p1" / "STATE.json"
@@ -106,7 +121,7 @@ def p1_review_ok(run_dir: Path) -> tuple[bool, str]:
     if not rounds:
         return False, "故事线还没过三评委评审"
     cur = rounds[-1]
-    sha = hashlib.sha256(canon.read_text(encoding="utf-8").encode("utf-8")).hexdigest()[:16]
+    sha = p1_sha(canon.read_text(encoding="utf-8"))
     if cur.get("sha") != sha:
         return False, f"当前故事线还没评审（第 {len(rounds) + 1} 轮评审包出来、评分过了门槛才能用这版）"
     if not cur.get("passed"):

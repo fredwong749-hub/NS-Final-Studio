@@ -479,16 +479,41 @@ def read_state(root: Path | None = None) -> dict:
     return d if isinstance(d, dict) else {}
 
 
+_RP_MOD = None
+
+
+def _central(run, root: Path | None = None) -> dict | None:
+    """L-209 S2.4：run_phase=enforce 且笔记本算的中心 run_phase.json 新鲜 → 它；否则 None（读本机状态文件，旧行为）"""
+    global _RP_MOD
+    try:
+        if _RP_MOD is None:
+            import importlib.util
+            sp = importlib.util.spec_from_file_location("ns_run_phase_lro", Path(__file__).resolve().parent / "run_phase.py")
+            m = importlib.util.module_from_spec(sp)
+            sp.loader.exec_module(m)
+            _RP_MOD = m
+        return _RP_MOD.enforced(str(run), root or ROOT) if run else None
+    except Exception:  # noqa: BLE001  # arch-ok: 中心阶段读不了 = 本机状态文件（旧行为）；producer 侧 run_phase_err 记原因
+        return None
+
+
 def read_phase(run: str, ep, root: Path | None = None) -> str | None:
-    """视频侧读：None = 该集不归 lane_roles 管（旧行为）"""
+    """视频侧读：None = 该集不归 lane_roles 管（旧行为）。S2.4：enforce 下先认中心 run_phase.json"""
+    c = _central(run, root)
+    if c is not None:
+        ph = (c.get("phases") or {}).get(str(int(ep)))
+        return ph if ph in PHASES else None
     rec = ((read_state(root).get(str(run)) or {}).get(str(int(ep))) or {}) if run else {}
     ph = rec.get("phase")
     return ph if ph in PHASES else None
 
 
 def read_active(run: str, root: Path | None = None) -> dict | None:
-    """L-207 run 级 active 集 {ep, phase, since, ...}；没有 / null = 没有集在占卡（或不适用）"""
-    a = ((read_state(root).get(str(run)) or {}).get("_active")) if run else None
+    """L-207 run 级 active 集 {ep, phase, since, ...}；没有 / null = 没有集在占卡（或不适用）。S2.4：enforce 下先认中心 run_phase.json"""
+    c = _central(run, root)
+    a = c.get("active") if c is not None else None
+    if c is None:
+        a = ((read_state(root).get(str(run)) or {}).get("_active")) if run else None
     if not isinstance(a, dict) or a.get("phase") not in PHASES:
         return None
     try:

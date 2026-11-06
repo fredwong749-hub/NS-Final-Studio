@@ -149,9 +149,20 @@ def write_ready(ep: int, shots: list[str]) -> dict:
     return d
 
 
+def _partition_load(root=None) -> dict:
+    """L-209 S2.3：分区唯一一份 data/state/netfix/partition.json（tools/netfix/partition.load，过期 hold 已剔除）"""
+    import sys as _sys
+    from pathlib import Path as _P
+    d = str(_P(__file__).resolve().parents[2] / "tools" / "netfix")
+    if d not in _sys.path:
+        _sys.path.insert(0, d)
+    import partition as _PT  # noqa: PLC0415
+    return _PT.load(root)
+
+
 def owner_of_ep(ep: int) -> str:
-    """负责这一集的机器（config/netfix/partition.json，归 NETFIX）；没有就按 resident_sync 旧分集"""
-    part = jl(ROOT / "config/netfix/partition.json", {}) or {}
+    """负责这一集的机器（分区唯一一份 data/state/netfix/partition.json，L-209 S2.3）；没有就按 resident_sync 旧分集"""
+    part = _partition_load(ROOT) or {}
     for host, eps in (part.get("images") or {}).items():      # 出图（驳回 / 账本）归属看 images
         if isinstance(eps, list) and ep in [int(x) for x in eps]:
             return host

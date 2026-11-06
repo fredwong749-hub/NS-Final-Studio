@@ -184,6 +184,14 @@ def test_dry_run_ep01_imported_to_ep02_p3(AF, AG, PR, tmp_path, monkeypatch):
     _st = json.loads((rd / "autoflow_ep01.json").read_text(encoding="utf-8"))
     _st.update(verdict="imported", awaiting=None)
     (rd / "autoflow_ep01.json").write_text(json.dumps(_st, ensure_ascii=False), encoding="utf-8")
+    # 真实 P1 在 11-02 放行（judge_p1/STATE.json owner_direction.sha = a9401ccf）之后，11-05 ASSET-EP02 按 PS-MASTER 决定改了母场景
+    # sk_rooftop_bar 的 light（备份 P1_storyline.json.bak_ep02asset_1105）→ 放行按 PS-MASTER 11-07 口径（owner_gate.p1_sha：只忽略 L-203 子场景 / _by）
+    # 仍然失效，autoflow 会出第 6 轮 P1 评审包。本用例只测“ep01 已导入 → 开 ep02”，夹具里把放行重新绑到复制过来的这一稿（真实数据不动）
+    _sp = rd / "judge_p1/STATE.json"
+    _js = json.loads(_sp.read_text(encoding="utf-8"))
+    if _js.get("owner_direction"):
+        _js["owner_direction"]["sha"] = AG._p1_sha((rd / "P1_storyline.json").read_text(encoding="utf-8"))
+        _sp.write_text(json.dumps(_js, ensure_ascii=False), encoding="utf-8")
 
     assert json.loads((rd / "autoflow_ep01.json").read_text(encoding="utf-8"))["verdict"] == "imported"
     # 一拍：ep01 已导入 → 开 ep02

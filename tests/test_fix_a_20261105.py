@@ -191,6 +191,10 @@ def test_plan_all_overlays_claims(tmp_path):
 
 def test_relay_arbitrate_writes_claims_file_only_for_idle_host(tmp_path):
     SR = _load("tools/series10_video/shard_relay.py", "shard_relay_fix_a")
+    # 本测试只测 FIX-A 的空闲领活仲裁，不测 L-206 工位分卡。以前靠 lane_roles.json from_episode=2 让 ep01“不适用”；
+    # L-208 ⑤（sv-20261106-11 起 from_episode=1，卡位规则 ep01 起生效）后 ep01 在首尾帧阶段 gpu33 没有视频道 → 被当忙、不领。
+    # 固定为“不适用”（None），不读真实仓库的 lane_roles 配置 / 阶段表（分卡下的领活另由 test_l206_lane_roles_vid 覆盖）
+    SR.role_video_hosts = lambda run, ep, shot_ids: None
     vid = tmp_path / "video"
     vid.mkdir()
     (vid / "jobs.json").write_text(json.dumps({"shots": [{"shot": s, "ep": 1, "host": h, "variants": {"v1": {}}} for s, h in PLAN.items()]}), encoding="utf-8")

@@ -15,7 +15,8 @@ class H:
 
 
 def _iso(t):
-    return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t))
+    from datetime import datetime, timedelta, timezone   # L-209 S2.3：分区 hold 时间一律 JST 串（tools/netfix/partition.jst）
+    return datetime.fromtimestamp(t, timezone(timedelta(hours=9))).strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def test_expired_hold_and_retired_idle_lane_are_free(monkeypatch):

@@ -305,15 +305,17 @@ def broken_lanes(hosts_mod=None, d: dict | None = None) -> set[str]:
     return {f"{hn}:{g}" for hn, h in ((d or {}).get("hosts") or {}).items() if isinstance(h, dict) for g in (h.get("broken_gpus") or [])}
 
 
+def _partition_mod():
+    d = str(ROOT / "tools" / "netfix")
+    if d not in sys.path:
+        sys.path.insert(0, d)
+    import partition as PT  # noqa: PLC0415  L-209 S2.3：分区读法 / 到期口径唯一实现
+    return PT
+
+
 def _hold_expired(h: dict, now: float | None = None) -> bool:
-    """hold 带 expires_at（ISO 本地时间）且已过 → True；没有 / 读不出 = 不过期"""
-    exp = (h or {}).get("expires_at")
-    if not exp:
-        return False
-    try:
-        return time.mktime(time.strptime(str(exp)[:19], "%Y-%m-%dT%H:%M:%S")) < (now or time.time())
-    except (ValueError, OverflowError):   # arch-ok: 读不出到期时间 = 按没过期（保守，不抢别人的道）
-        return False
+    """L-209 S2.3：与所有分区读者同口径（tools/netfix/partition.alive：到期按 JST；没带到期 = 写入后 2 h；什么都没带 = 不认）"""
+    return not _partition_mod().alive(h, now)[0]
 
 
 def lane_roles_policy(root: Path, runs: dict | None) -> dict:
@@ -343,7 +345,7 @@ def free_lanes(cfg: dict, in_use: set[str], part: dict | None = None, probe=None
     policy（C1，lane_roles_policy）：allow 不为 None → 只用 allow 里的道（[] = 一条不借）；deny 一律不借（审图位）"""
     H = hosts_mod or _load("hosts_for_asset_worker", "tools/factory/hosts.py")
     LN = _lanes_mod()
-    part = part if part is not None else LN._read_live()
+    part = _partition_mod().live(part if part is not None else LN._read_live())   # S2.3：过期的借道 / hold 不算
     probe = probe or LN.probe_lane
     excl = set(cfg.get("exclude_lanes") or []) | broken_lanes(H)
     pol = policy or {}

@@ -72,6 +72,16 @@ def _sha(t: str) -> str:
     return hashlib.sha256(t.encode("utf-8")).hexdigest()[:16]
 
 
+def _p1_sha(t: str) -> str:
+    """P1 故事线版本 sha：唯一实现在 tools/script_rsi/owner_gate.p1_sha（去 L-203 背景视向子场景 / _by，PS-MASTER 11-07）"""
+    if "og" not in _P1SHA:
+        _P1SHA["og"] = _load("owner_gate", "tools/script_rsi/owner_gate.py")
+    return _P1SHA["og"].p1_sha(t)
+
+
+_P1SHA: dict = {}
+
+
 def out_path(run_dir: Path, step: str, attempt: int, fmt: str) -> Path:
     return run_dir / WO / f"{step}_a{attempt}.{EXT[fmt]}"
 
@@ -409,7 +419,7 @@ def review_escalate_owner(run_dir: Path, by: str, why: str = "", token_file: str
     canon = run_dir / "P1_storyline.json"
     if not canon.exists():
         raise FileNotFoundError("当前没有 P1 正式稿（可能还在返修），不能转项目方")
-    sha = hashlib.sha256(canon.read_text(encoding="utf-8").encode("utf-8")).hexdigest()[:16]
+    sha = _p1_sha(canon.read_text(encoding="utf-8"))        # PS-MASTER 11-07：P1 sha 唯一实现（去 L-203 子场景 / _by）
     cur = state["rounds"][-1] if state.get("rounds") else {}
     if cur.get("sha") != sha:
         raise ValueError("当前这一稿还没评审完，等评分出来再转")
@@ -527,7 +537,7 @@ def _p1_review(RCH, run_dir: Path, ep: int, st, ctx: dict, canon: Path, sl: dict
     JA = _load("judge_agent", "tools/script_rsi/judge_agent.py")
     sp = run_dir / REVIEW_STATE
     state = json.loads(sp.read_text(encoding="utf-8")) if sp.exists() else {"rounds": []}
-    sha = JA._sha(canon.read_text(encoding="utf-8"))
+    sha = _p1_sha(canon.read_text(encoding="utf-8"))        # PS-MASTER 11-07：P1 sha 唯一实现（去 L-203 子场景 / _by）
     cur = state["rounds"][-1] if state["rounds"] else None
     took = bool(state.get("owner_took_over"))       # 项目方已接手：轮数上限不再适用（评审只作参考）
     if cur is None or cur.get("sha") != sha:
@@ -825,11 +835,11 @@ def _p1_fill(RCH, run_dir: Path, ep: int, st, ctx: dict, canon: Path, sl: dict) 
     old_text = canon.read_text(encoding="utf-8")
     canon.rename(canon.with_name(canon.stem + f".prefill{time.strftime('%H%M%S')}" + canon.suffix))
     AF.write_json(canon, new)
-    new_sha = _sha(canon.read_text(encoding="utf-8"))
+    new_sha = _p1_sha(canon.read_text(encoding="utf-8"))    # 评审 / 转交记录用 P1 sha 唯一实现
     sp = run_dir / REVIEW_STATE
     if sp.exists():                                   # 这一稿内容（除了补的字段）没变：评审结果和转交记录跟着指向新 sha，不再进三评委
         state = json.loads(sp.read_text(encoding="utf-8"))
-        old_sha = _sha(old_text)
+        old_sha = _p1_sha(old_text)
         if (state.get("owner_direction") or {}).get("sha") == old_sha:
             state["owner_direction"]["sha"] = new_sha
         if state.get("rounds") and state["rounds"][-1].get("sha") == old_sha:

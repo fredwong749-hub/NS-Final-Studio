@@ -27,6 +27,12 @@ PART = ROOT / "data" / "state" / "netfix" / "partition.json"   # 12:39 起以新
 LOCK = ROOT / "data" / "netfix" / "partition.lock"
 AUDIT = ROOT / "data" / "debug" / "lane_loans.jsonl"
 TS = "%Y-%m-%dT%H:%M:%S"
+sys.path.insert(0, str(ROOT / "tools" / "netfix"))
+import partition as _PT  # noqa: E402  L-209 S2.3：分区到期口径唯一实现（时间一律 JST 串，笔记本时钟是美东）
+
+
+def _jst(t: float) -> str:
+    return _PT.jst(t)
 
 
 @contextlib.contextmanager
@@ -113,16 +119,15 @@ def lend(lane: str, to: str, minutes: float, prefix: str, by: str, part: Path | 
     if job_kind != "comfy":
         raise LendRefused(f"{lane}：{job_kind} 不走 ComfyUI，必须用 hold 挂道（lanes.py hold），不能 lend（K-OPS-F33）")
     t = now or time.time()
-    exp = time.strftime(TS, time.localtime(t + minutes * 60))
-    t_now = time.strftime(TS, time.localtime(t))
+    exp = _jst(t + minutes * 60)
 
     def fn(d):
         h = (d.get("_temp_holds") or {}).get(lane)       # K-OPS-F35（STYLE-V2 11-02 20:53）：道上有有效 hold → 拒绝借，报出 hold 的 why
-        if h and str(h.get("expires_at") or "")[:19] >= t_now:
+        if h and _PT.alive(h, t)[0]:
             raise LendRefused(f"{lane} 已被 {h.get('by') or '?'} hold 到 {h.get('expires_at')}（{h.get('why') or ''}），不能 lend（K-OPS-F35）")
         rl = [x for x in d.get("retired_lanes") or [] if x != lane] + [lane]
         loans = dict(d.get("_lent_lanes") or {})
-        loans[lane] = {"to": to, "until": exp, "expires_at": exp, "client_prefix": prefix, "by": by, "at": time.strftime(TS, time.localtime(t))}
+        loans[lane] = {"to": to, "until": exp, "expires_at": exp, "client_prefix": prefix, "by": by, "at": _jst(t)}
         d["retired_lanes"], d["_lent_lanes"] = rl, loans
     d = _mutate(fn, part)
     _audit({"ev": "lend", "lane": lane, "to": to, "expires_at": exp, "client_prefix": prefix, "by": by},
@@ -132,12 +137,12 @@ def lend(lane: str, to: str, minutes: float, prefix: str, by: str, part: Path | 
 
 def hold(lane: str, minutes: float, why: str, part: Path | None = None, now: float | None = None, by: str = "DEBUG-RSI") -> dict:
     t = now or time.time()
-    exp = time.strftime(TS, time.localtime(t + minutes * 60))
+    exp = _jst(t + minutes * 60)
 
     def fn(d):
         rl = [x for x in d.get("retired_lanes") or [] if x != lane] + [lane]
         th = dict(d.get("_temp_holds") or {})
-        th[lane] = {"why": why, "at": time.strftime(TS, time.localtime(t)), "by": by, "expires_at": exp}
+        th[lane] = {"why": why, "at": _jst(t), "by": by, "expires_at": exp}
         d["retired_lanes"], d["_temp_holds"] = rl, th
     d = _mutate(fn, part)
     _audit({"ev": "hold", "lane": lane, "by": by, "why": why, "expires_at": exp},        # K-OPS-F35：hold 也进审计，by 用调用方的名字
@@ -177,15 +182,14 @@ def release(lane: str, part: Path | None = None, by: str | None = None, kind: st
 
 def sweep(part: Path | None = None, now: float | None = None) -> list[str]:
     """到期的借道 / 临时挂道自动清掉（含 retired_lanes 里对应的道）→ 清掉的道"""
-    t_now = time.strftime(TS, time.localtime(now or time.time()))
+    t = now or time.time()
     gone: list[str] = []
 
     def fn(d):
         for k in ("_lent_lanes", "_temp_holds"):
             m = dict(d.get(k) or {})
             for lane, rec in list(m.items()):
-                exp = str(rec.get("expires_at") or rec.get("until") or "")[:19]
-                if exp and exp < t_now:
+                if not _PT.alive(rec, t)[0]:          # L-209 S2.3：同读者口径（到期按 JST；没带到期 2 h；什么都没带 = 清）
                     m.pop(lane)
                     gone.append(lane)
             d[k] = m
@@ -270,10 +274,7 @@ def idle_sweep(idle_min: float = IDLE_MIN, probe=None, part: Path | None = None,
     d = (_load(part) if part else _read_live())
     gone = []
     for lane, rec in (d.get("_lent_lanes") or {}).items():
-        try:
-            at = time.mktime(time.strptime(str(rec.get("at") or "")[:19], TS))
-        except ValueError:
-            at = 0
+        at = _PT.ts_epoch(rec.get("at")) or 0
         if t - at < idle_min * 60:
             continue
         st = probe(lane)

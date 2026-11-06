@@ -56,10 +56,19 @@ def _server_root() -> str:
 R = _server_root()
 OFF = R.rsplit("/", 1)[0]                        # 离线根（FREEZE_TS / run / logs / venv 都在它下面）
 PY = {h: _HOSTS.python(h) for h in SERVERS}
+def _partition_live(root: Path) -> dict:
+    """L-209 S2.3：分区唯一一份（tools/netfix/partition.load：过期借道 / 临时 hold 已剔除）"""
+    d = str(Path(__file__).resolve().parents[1] / "netfix")
+    if d not in sys.path:
+        sys.path.insert(0, d)
+    import partition as PT  # noqa: PLC0415
+    return PT.load(root)
+
+
 def _partition_hosts() -> dict[str, list[int]]:
-    """NETFIX 22:2x：按集归属改读 config/netfix/partition.json（images ∪ video；laptop 不是服务器，不在内）；读不到用旧分集"""
+    """按集归属读分区唯一一份 data/state/netfix/partition.json（L-209 S2.3；images ∪ video；laptop 不是服务器，不在内）；读不到用旧分集"""
     try:
-        part = json.loads((ROOT / "config/netfix/partition.json").read_text(encoding="utf-8"))
+        part = _partition_live(ROOT)
         out = {}
         for kind in ("images", "video"):
             for h, eps in (part.get(kind) or {}).items():
@@ -78,7 +87,8 @@ DATA_DIRS = ["data", "assets", "docs/series10_video"]
 SKIP_PARTS = {"node_modules", ".venv", "__pycache__", ".git", "_offline_pull", "leases", ".pytest_cache"}
 SKIP_PREFIX = ("data/_quarantine", "data/_offline_pull", "data/cache/", "data/ab/", "data/api_8800", "data/review_pages/",
                "data/qa/iter_gate/", "data/autopilot/repair_chain/", "data/staging", "ops/logs/", "data/lb/")
-SKIP_NAMES = {"control.json", "heartbeat.json", "producer.pid", "registry.json", "night.pid", "night_control.json"}
+SKIP_NAMES = {"control.json", "heartbeat.json", "producer.pid", "registry.json", "night.pid", "night_control.json",
+              "run_phase.json"}   # S2.4：run 级阶段只由笔记本算，不回拉
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=40", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4"]
 BATCH = 24 * 1024 * 1024
 STATE = ROOT / "data/autopilot/resident_sync.json"
@@ -790,7 +800,7 @@ try:
 except Exception:
     cur = {}
 out = dict(cur)
-if rel in ("data/netfix/laptop_ctrl.json", "data/netfix/override_state.json") or rel.endswith("/episode_state.json"):   # 快照：整文件覆盖（S2.2 集关闭标记只有笔记本算）
+if rel in ("data/netfix/laptop_ctrl.json", "data/netfix/override_state.json") or rel.endswith("/episode_state.json") or rel.endswith("/run_phase.json"):   # 快照：整文件覆盖（S2.2 集关闭标记 / S2.4 run 级阶段只有笔记本算）
     tmp = os.path.join(R, rel) + ".tmp"
     os.makedirs(os.path.dirname(tmp), exist_ok=True)
     json.dump(new, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
@@ -829,11 +839,29 @@ def episode_state_tick() -> None:
             log("episode_state", run, "重算失败", repr(e)[:200])
 
 
+_RP_LAST = {"t": 0.0}
+
+
+def run_phase_tick(min_gap_s: float = 20.0) -> None:
+    """L-209 S2.4（W-S234）：每部在产剧算 data/pipeline/runs/<run>/run_phase.json（变了或满 5 分钟才原子写；off = 不写）。
+    push_control 每台调一次 → min_gap_s 内不重复算。出错只记日志"""
+    if time.time() - _RP_LAST["t"] < min_gap_s:
+        return
+    _RP_LAST["t"] = time.time()
+    try:
+        import run_phase as RP
+    except ImportError as e:   # arch-ok: 模块没部署 = 不算（服务器读不到中心文件 = 本机自算，旧行为）
+        log("run_phase", "模块缺", repr(e)[:160])
+        return
+    RP.tick(run_sync_runs(), ROOT, log=log)
+
+
 def push_control(host: str, force: bool = False) -> dict:
     """NETFIX 接口（总调度 22:2x）：master_rejects.json、ready_episodes.json 变了才推；到服务器按对象合并（K-OPS-Q20），
     服务器上更晚的对象不被笔记本旧值盖回去"""
     import hashlib
     episode_state_tick()                 # L-209 S2.2：推之前先按口径重算集关闭标记（含自动重开）
+    run_phase_tick()                     # L-209 S2.4：推之前算一次 run 级阶段（两台登记表合并）
     st = jl(STATE, {}) or {}
     hs = st.setdefault(host, {}).setdefault("control_sha", {})
     done = {}
@@ -1187,7 +1215,7 @@ def lifecycle_stage(root: Path, run: str) -> dict:
 
 
 def lifecycle_partition(root: Path = ROOT) -> dict:
-    d = jl(Path(root) / "config/netfix/partition.json", {}) or {}
+    d = _partition_live(Path(root)) or {}      # L-209 S2.3：唯一一份 data/state/netfix/partition.json
     return {k: {h: [int(x) for x in eps] for h, eps in (d.get(k) or {}).items() if h != "laptop"} for k in ("images", "video")}
 
 
@@ -2123,6 +2151,9 @@ def control_files() -> list[str]:
         except Exception as e:  # noqa: BLE001
             log("control_files", run, "修改清单路径算不出", repr(e)[:160])
         rel = f"data/pipeline/runs/{run}/episode_state.json"   # L-209 S2.2：集关闭标记（只有笔记本写；服务器 producer / night / vidgen 只读）
+        if rel not in out:
+            out.append(rel)
+        rel = f"data/pipeline/runs/{run}/run_phase.json"       # L-209 S2.4：run 级阶段（只有笔记本算；服务器 producer / night / lane_roles 读）
         if rel not in out:
             out.append(rel)
     return out

@@ -80,6 +80,33 @@ def _lane_roles():   # L-206 工位分卡（config/pipeline/lane_roles.json 单�
     return LRO
 
 
+def _partition_live(root: Path) -> dict:
+    """L-209 S2.3：分区唯一一份 data/state/netfix/partition.json（tools/netfix/partition.load：过期借道 / 临时 hold 已剔除）"""
+    d = str(Path(__file__).resolve().parents[1] / "netfix")
+    if d not in sys.path:
+        sys.path.insert(0, d)
+    import partition as PT  # noqa: PLC0415
+    return PT.load(root)
+
+
+_RP_FAIL = {"t": 0.0}
+
+
+def _run_phase():   # L-209 S2.4：run 级阶段中心结果（tools/autopilot/run_phase.py；开关 config/pipeline/state.json run_phase）
+    """→ 模块；导入失败 = None（10 分钟内不重试）"""
+    if time.time() - _RP_FAIL["t"] < 600:
+        return None
+    d = str(Path(__file__).resolve().parent)
+    if d not in sys.path:
+        sys.path.insert(0, d)
+    try:
+        import run_phase as RP  # noqa: PLC0415
+        return RP
+    except ImportError:   # arch-ok: 模块没部署 = 本机自算（旧行为）；10 分钟后再试
+        _RP_FAIL["t"] = time.time()
+        return None
+
+
 _ES_FAIL = {"t": 0.0, "err": None}       # L-209 S2.2：模块导入失败缓存（服务器没部署 → 10 分钟内不重试）
 
 
@@ -3729,10 +3756,12 @@ class Producer:
         phases = LRO.episode_phases(reg, cfg, adult, prev, t)
         stages = LRO.episode_stages(reg, cfg, adult, prev, t)
         active = LRO.active_episode(stages, prev.get("_active") if isinstance(prev.get("_active"), dict) else None)
+        phases, stages, active, ph_src = self.run_phase_apply(phases, stages, active)    # L-209 S2.4：笔记本算的中心阶段（record 只比对）
         self._lr_phases, self._lr_active = phases, active
         reg["lane_roles"] = {"enabled": True, "from_episode": LRO.from_episode(cfg), "phases": {str(k): v for k, v in phases.items()},
                              "stages": {str(k): v for k, v in stages.items()}, "active": active,
-                             "hold_regen": held, "review": LRO.review_lane(cfg), "depth": LRO.image_prefetch_depth(cfg), "rule": "L-206/L-207"}
+                             "hold_regen": held, "review": LRO.review_lane(cfg), "depth": LRO.image_prefetch_depth(cfg), "rule": "L-206/L-207",
+                             "phase_source": ph_src}
         if phases:
             LRO.write_state(self.p.root, self.p.run_id, phases, t=t, log=self.logf, active=active,
                             settled=LRO.settled_counts(reg, cfg, adult), stages=stages)
@@ -3742,6 +3771,19 @@ class Producer:
             except Exception as e:  # noqa: BLE001  # arch-ok: 伸缩钩子出错不影响派单（用活着的实例）
                 self.logf("review_scale_err", error=repr(e)[:200], counted=False)
         return phases
+
+    def run_phase_apply(self, phases: dict, stages: dict, active):
+        """L-209 S2.4：本机自算 → (phases, stages, active, 来源)。record = 照用本机、与中心不一致记 run_phase_disagree；
+        enforce = 用中心（缺 / 过期退回本机，记 run_phase_fallback）；off / 模块缺 = 本机"""
+        RP = _run_phase()
+        if RP is None:
+            return phases, stages, active, "local"
+        try:
+            return RP.apply(self.p.run_id, phases, stages, active, root=self.p.root, log=self.logf,
+                            actor=os.environ.get("OFFLINE_SELF") or "laptop")
+        except Exception as e:  # noqa: BLE001  # arch-ok: 中心阶段出错 = 本机自算（旧行为），原因记日志
+            self.logf("run_phase_err", error=repr(e)[:200], counted=False)
+            return phases, stages, active, "local"
 
     def lane_depth(self, lane: str) -> int:
         """这条道的预取深度（MINOR 1）：lane_roles 开着、active 集在首尾帧阶段、且这条道是本阶段出图位 → image_prefetch_depth（每卡只排 1 单）；
@@ -3807,7 +3849,11 @@ class Producer:
         return ok
 
     def probe_lanes(self, ctrl) -> dict:
-        part = jl(self.p.root / "config" / "netfix" / "partition.json", None)
+        try:                                     # L-209 S2.3：只读唯一一份分区（config/netfix 旧副本弃用）
+            part = _partition_live(self.p.root) or None
+        except Exception as e:  # noqa: BLE001  # arch-ok: 分区读不了 = None → effective_holds 原样照 hold（失败关闭），原因记日志
+            part = None
+            self.logf("partition_read_err", error=repr(e)[:200], counted=False)
         hold, released = effective_holds(ctrl, self.lanes, part)     # W44 ④：本机道的过期 hold 快照不再挡派单
         rel_sig = json.dumps(released, sort_keys=True, ensure_ascii=False)
         if released and rel_sig != getattr(self, "_hold_rel_sig", None):

@@ -492,7 +492,7 @@ def snapshot(env: Env | None = None, cfg: dict | None = None, save: bool = True)
             "kpi": kpi(now, probes, imports=env.import_epochs(run)), "lanes": lane_view(lanes, probes, lr_cfg, phases),
             "lane_roles": {"enabled": lr_cfg.get("enabled"), "from_episode": lr_cfg.get("from_episode"), "phases": phases,
                            "tables": lr_cfg.get("phases"), "override": (ovr.get(run) or {}) if isinstance(ovr, dict) else {}},
-            "partition": (env.j("data/state/netfix/partition.json", None) or env.j("config/netfix/partition.json", {}) or {}).get("images"),
+            "partition": (env.j("data/state/netfix/partition.json", {}) or {}).get("images"),     # L-209 S2.3：只认唯一一份
             "hosts": {h: host_view(probes.get(h), now) for h in SERVERS},
             "probe_errors": [h for h in SERVERS if probes.get(h) is None]}
     try:

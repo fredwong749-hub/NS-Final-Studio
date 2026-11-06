@@ -277,7 +277,7 @@ class Env:
         _jw(self.root / RELAY_HOLD_REL, d)
 
     def partition_images(self) -> dict:
-        p = self.j("data/state/netfix/partition.json", None) or self.j("config/netfix/partition.json", {}) or {}
+        p = self.j("data/state/netfix/partition.json", {}) or {}     # L-209 S2.3：只认唯一一份（config/netfix 旧副本弃用）
         return p.get("images") or {}
 
     def hold_alive(self, expires_at, since) -> tuple[bool, str]:

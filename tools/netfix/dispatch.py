@@ -31,6 +31,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/factory"))
 import state_paths as SP  # noqa: E402   ARCH_ROADMAP §10：运行期状态唯一入口（sv-10 兼容期：先新后旧并留痕）
 PART_NAME, OV_NAME = "netfix/partition", "netfix/override"
+sys.path.insert(0, str(ROOT / "tools/netfix"))
+import partition as _PT  # noqa: E402   L-209 S2.3：分区唯一一份 data/state/netfix/partition.json 的读法 / 到期口径
 PARTITION = SP.state_path(PART_NAME, ROOT)              # 新位置 data/state/netfix/partition.json（旧 config/netfix/partition.json 兼容期仍可读）
 PARTITION_OLD = SP.legacy_path(PART_NAME, ROOT)
 READY = ROOT / "data/autopilot/ready_episodes.json"
@@ -71,7 +73,8 @@ def migrate_state(root: Path | None = None) -> list[str]:
 
 
 def read_partition(root: Path | None = None) -> dict:
-    """兼容期：先新后旧（读旧会在 data/state/legacy_reads.jsonl 留痕）；NS_STATE_STRICT=1（sv-11）时只认新位置，只有旧 → raise"""
+    """原样读（写者读-改-写用；读者用 tools/netfix/partition.load，过期 hold 已剔除）。
+    兼容期：先新后旧（读旧会在 data/state/legacy_reads.jsonl 留痕）；NS_STATE_STRICT=1（sv-11）时只认新位置，只有旧 → raise"""
     r = root or ROOT
     if os.environ.get("NS_STATE_STRICT") == "1" and not SP.state_path(PART_NAME, r).is_file():
         raise SP.StateError(f"{PART_NAME}：新位置不在（sv-11 起不再读旧位置 {SP.legacy_path(PART_NAME, r)}）")
@@ -474,31 +477,10 @@ class partition_lock:
 
 
 def held_lanes(part: dict, now_t: float | None = None) -> set:
-    """所有 producer（主剧 + 每个 run）一律 hold 的道：退役道 + 未到期借出道 + 临时 hold（12:2x DEBUG-RSI：第二季 control 漏了借出道）"""
-    from datetime import datetime
-    now_t = now_t or time.time()
-
-    def alive(v) -> bool:
-        u = (v or {}).get("until") or (v or {}).get("expires_at")
-        if not u:
-            return True
-        try:
-            d = datetime.fromisoformat(str(u))
-            if d.tzinfo is None:          # AUDIT-PERF 11-05（K-OPS-E18 / I10）：无时区串按项目时区 +09:00 读，与 producer.ts_epoch 同口径
-                from datetime import timedelta, timezone   # （以前 mktime 按本机时钟：笔记本美东 → 借出道“到期”判错 14 h）
-                d = d.replace(tzinfo=timezone(timedelta(hours=9)))
-            return d.timestamp() > now_t
-        except ValueError:   # arch-ok: 到期时间写坏 → 当作还在借（失败关闭：宁可多 hold 一条道，也不往借出道派单）
-            return True
-    # W44 ④（11-04 02:25 gpu33:0 被 hold 到 02:40 之后）：tools/debug/lanes.py hold()/lend() 同时写 retired_lanes 和 _temp_holds/_lent_lanes，
-    # 到期后 sweep 没跑，retired_lanes 里那条就永久 hold。有借道 / 临时 hold 记录的道以记录到期时间为准；没有记录的 retired_lanes = 真退役
-    rec: dict = {}
-    for f in ("_lent_lanes", "_temp_holds"):
-        for k, v in (part.get(f) or {}).items():
-            rec[k] = rec.get(k, False) or alive(v)
-    out = {ln for ln in part.get("retired_lanes") or [] if ln not in rec}
-    out |= {k for k, a in rec.items() if a}
-    return out
+    """所有 producer（主剧 + 每个 run）一律 hold 的道：退役道 + 未到期借出道 + 临时 hold（12:2x DEBUG-RSI：第二季 control 漏了借出道）。
+    W44 ④：有借道 / 临时 hold 记录的道以记录到期为准；没有记录的 retired_lanes = 真退役。
+    L-209 S2.3：到期口径唯一实现 tools/netfix/partition.alive（JST；没带到期 = 写入后 2 h；什么都没带 = 不认）"""
+    return _PT.held(part, now_t)
 
 
 def push_server_control(host: str) -> dict:

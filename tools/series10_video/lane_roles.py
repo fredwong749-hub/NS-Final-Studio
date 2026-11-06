@@ -78,8 +78,45 @@ def host_lanes(host: str, hosts_file: Path | None = None) -> list[str]:
 
 
 # ---------------------------------------------------------------- 阶段
+_RP_MOD = None
+
+
+def _run_phase_central(run: str) -> dict | None:
+    """L-209 S2.4：run_phase=enforce 且笔记本推来的中心 run_phase.json 新鲜 → 它；否则 None（照旧读本机 lane_roles_state / 自算）"""
+    global _RP_MOD
+    try:
+        if _RP_MOD is None:
+            import importlib.util
+            sp = importlib.util.spec_from_file_location("ns_run_phase_lr", Path(__file__).resolve().parents[1] / "autopilot" / "run_phase.py")
+            m = importlib.util.module_from_spec(sp)
+            sp.loader.exec_module(m)
+            _RP_MOD = m
+        return _RP_MOD.enforced(run, ROOT, log=_rp_log, actor="night")
+    except Exception as e:  # noqa: BLE001  # arch-ok: 中心阶段读不了 = 旧行为（本机），原因记一行
+        _rp_log("run_phase_fallback", run=run, why=f"run_phase 模块读不了 {e!r}"[:200])
+        return None
+
+
+_RP_LOGGED = {"t": 0.0}
+
+
+def _rp_log(ev: str, **k) -> None:
+    """退回本机自算的原因：每 10 分钟最多一行到 stderr（night.log）"""
+    if time.time() - _RP_LOGGED["t"] < 600:
+        return
+    _RP_LOGGED["t"] = time.time()
+    print(f"LANE_ROLES {ev} {json.dumps(k, ensure_ascii=False)}", file=sys.stderr, flush=True)
+
+
 def phase_from_state(run: str, ep: int, path: Path | None = None) -> str | None:
-    """producer 写的阶段表；没有 / 坏 / 没这一集 / 值不合法 = None（调用方自己算）"""
+    """producer 写的阶段表；没有 / 坏 / 没这一集 / 值不合法 = None（调用方自己算）。
+    L-209 S2.4：不给 path 时先认笔记本算的中心 run_phase.json（enforce 且新鲜）"""
+    if path is None:
+        c = _run_phase_central(run)
+        if c is not None:
+            ph = (c.get("phases") or {}).get(str(int(ep)))
+            if ph in PHASES:
+                return ph
     try:
         d = json.loads(Path(path or STATE).read_text(encoding="utf-8"))
     except (OSError, ValueError):   # arch-ok: 阶段表没有 = 本模块按 takes / registry 自己算（compute_phase）
@@ -91,7 +128,18 @@ def phase_from_state(run: str, ep: int, path: Path | None = None) -> str | None:
 
 def active_from_state(run: str, path: Path | None = None) -> dict | None:
     """L-207 run 级占卡集（producer 写的 lane_roles_state.json <run>._active = {ep, phase, ...}）；没有 / null / 不合法 = None。
-    有它 = 整个剧此刻只有这一集在占卡：本机视频道按它的阶段取表（不再逐集取“最保守”）"""
+    有它 = 整个剧此刻只有这一集在占卡：本机视频道按它的阶段取表（不再逐集取“最保守”）。
+    L-209 S2.4：不给 path 时先认中心 run_phase.json（enforce 且新鲜；中心说没有集占卡 = None）"""
+    if path is None:
+        c = _run_phase_central(run)
+        if c is not None:
+            a = c.get("active")
+            if not isinstance(a, dict) or a.get("phase") not in PHASES:
+                return None
+            try:
+                return {"ep": int(a.get("ep")), "phase": a["phase"], "since": a.get("since"), "stages": a.get("stages") or {}}
+            except (TypeError, ValueError):
+                return None
     try:
         d = json.loads(Path(path or STATE).read_text(encoding="utf-8"))
     except (OSError, ValueError):   # arch-ok: 阶段表没有 = 没有 run 级排序（逐集算，旧 L-206 行为）

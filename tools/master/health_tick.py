@@ -322,7 +322,7 @@ def check_server(env: Env, cfg: dict, st: dict, now: float, procs: list[dict]) -
 
 def held_lanes(env: Env) -> set:
     nc = env.j("config/pipeline/night_control.json", {}) or {}
-    ret = (env.j("config/netfix/partition.json", {}) or {}).get("retired_lanes") or []
+    ret = (env.j("data/state/netfix/partition.json", {}) or {}).get("retired_lanes") or []     # L-209 S2.3：唯一一份
     return {str(x) for x in list(nc.get("hold_lanes") or []) + list(ret)}
 
 

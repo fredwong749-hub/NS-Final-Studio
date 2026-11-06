@@ -176,7 +176,12 @@ def test_push_control_distinct_tmp_names(sandbox, monkeypatch):
     monkeypatch.setattr(RS, "ssh", fake_ssh)
     done = RS.push_control("gpu33")
     assert f"data/autopilot/runs/{RUN}/ready_episodes.json" in done
-    assert len(cats) == len(set(cats)) == 2
+    # 本测试只管“临时名按全路径区分”（W40）。L-209 S2.2 起 push_control 先算并推 data/pipeline/runs/<run>/episode_state.json，
+    # S2.4 起还推 run_phase.json（沙箱里没有两台登记表 → 不生成），所以推的文件数不再固定为 2：只要求不重名、两份 ready 都在、多出的只能是这两类快照
+    assert len(cats) == len(set(cats))
+    ready = {"/tmp/ctl_data__autopilot__ready_episodes.json", f"/tmp/ctl_data__autopilot__runs__{RUN}__ready_episodes.json"}
+    assert ready <= set(cats)
+    assert all(c.endswith(("__episode_state.json", "__run_phase.json")) for c in set(cats) - ready), cats
 
 
 def test_vqa_env_never_gpu2(sandbox):
