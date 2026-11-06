@@ -401,6 +401,26 @@ def check_l201(ep, text: str) -> list[dict]:
     return out
 
 
+# L-203（项目方 11-06：“我发现你所有的首尾帧都是一模一样的图片……第一件事就是去幻想、联想一下首尾帧应该怎么做”；K-WRT-L203；rubric_code.l203_checks）：
+# 每镜 起幅（img + 【机位与景别】）与 落幅（motion“——”后）至少两项明显不同；进导入自动检查、导入即阻断，级别同 L201（只对 V2 及以后的剧）
+RULES["QW-L14"] = ("block", "L-203（K-WRT-L203）：每镜 img = 起幅，motion“——”后 = 落幅完整画面；两者在 景别 / 机位（方位 / 俯仰 / 高度）/ "
+                            "人物姿态或位置 / 关键动作完成或道具状态 / 光线 里至少两项明显不同（固定镜：后三项里至少两项）；"
+                            "落幅不足 40 字或不同项 < 2 → 阻断。")
+
+
+def check_l203(ep, text: str) -> list[dict]:
+    """QW-L14 首尾帧设想：起幅（img + 机位与景别）与落幅（motion“——”后）至少两项不同（K-WRT-L203，rubric_code.l203_checks）。级别 L201_LEVEL（block）"""
+    rc = _rubric()
+    chunk = rc.episode_chunk(text, ep.number)
+    if not chunk:
+        return []
+    _head, blocks = rc.split_blocks(chunk)
+    shots = sorted(ep.shots, key=lambda s: s.index)
+    if len(blocks) != len(shots):
+        return []
+    return [{**_issue("QW-L14", why, "motion"), "level": L201_LEVEL} for _k, (_ok, why) in rc.l203_checks(shots, blocks).items()]
+
+
 def check_episode(ep, fields: dict | None = None) -> list[dict]:
     out = check_pacing(ep)
     names = {c.name for s in getattr(ep, "shots", []) for c in (s.cast or [])}

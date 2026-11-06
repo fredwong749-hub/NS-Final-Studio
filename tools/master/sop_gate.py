@@ -3,6 +3,7 @@
 每集只认一条阶段序列（docs/master/PIPELINE_SOP_V2.md 第 6–10 步）：
   剧本 → 导入闸门 → 资产就绪 → 提示词（编译 + preflight 都过）→ 出图 → 出图检测 → 尾帧 → 视频（必须先过 Q9）→ 整集预览
 另一条：第 N+1 集要进“出图”，第 N 集的复盘 RETRO（tools/master/episode_retro.py）必须已经 done；写作阶段不挡。
+FIX-ORCH O8（L-205）：config retro_parallel=true（默认）时复盘与下一集并行——第 N 集复盘在写不挡第 N+1 集，第 N+2 集出图前第 N 集必须 done。
 
 对外：
   require(run, ep, stage, shot=None)   进入 stage 前调用；前面任一阶段没有通过证据 → 抛 SopGateError（enforce）
@@ -51,7 +52,7 @@ GATE_OK = {"ok"}
 IMPORT_OK = {"imported", "reimported"}
 PENDING_OWNER_STAGES = {"提示词", "出图", "出图检测", "尾帧", "视频"}   # 成人镜在这些阶段 = 等项目方触发，不算阻断
 DEFAULT_CFG = {"enabled": True, "observe_stages": [], "prompt_probe": "build_first+preflight", "probe_lane": "gpu36:0",
-               "probe_timeout_s": 900, "promote": {"auto": False, "stage": "出图"}}
+               "probe_timeout_s": 900, "promote": {"auto": False, "stage": "出图"}, "retro_parallel": True}
 # 旧网页 S1–S5 与本模型九阶段的对应（ns_api/sop.py、scorecard 显示用；判定只在这里）
 LEGACY_STAGE = {"剧本": "S1", "导入闸门": "S1", "资产就绪": "S2", "提示词": "S3", "出图": "S3", "出图检测": "S3", "尾帧": "S3",
                 "视频": "S4", "整集预览": "S5", "完成": "done"}
@@ -307,6 +308,32 @@ def prompt_fingerprint(root: Path, run: str, ep: int, keys: list | None = None) 
     return {"import_sha": _stage_of(_af(root, run, ep), "import").get("sha256"), "manifest_sha": _manifest_sha(root, run, keys)}
 
 
+def shot_input_fp(root: Path, run: str, ep: int, shot: int, keys: list | None = None) -> str | None:
+    """FIX-ORCH O1(e)：单镜的编译输入指纹 = 导入稿里这一镜 + 本集除 shots 外的字段（演员表 / 造型 / 场景）+ globals + 本镜用到的清单条目。
+    整集证据过期（别的镜改了 / 导入稿重导）时，本镜这几样都没变 → 上次 ok 的结果在刷新期间仍可用（不让 16 镜一起等一次探针）"""
+    doc = _j(_runs().import_path(run, root), {}) or {}
+    e = next((x for x in doc.get("episodes") or [] if int(x.get("number") or -1) == int(ep)), None)
+    if e is None:
+        return None
+    sh = next((s for s in e.get("shots") or [] if int(s.get("index") or -1) == int(shot)), None)
+    if sh is None:
+        return None
+    blob = json.dumps({"shot": sh, "ep": {k: v for k, v in e.items() if k != "shots"}, "globals": doc.get("globals"),
+                       "manifest": _manifest_sha(root, run, keys if isinstance(keys, list) else [])},
+                      ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+def _sticky_ok(root: Path, run: str, ep: int, rows: dict, want: list[int]) -> list[int]:
+    """刷新中仍可派的镜：上次证据 ok + 记了 input_fp + 本镜输入指纹没变"""
+    out = []
+    for n in want:
+        r = rows.get(n) or {}
+        if r.get("ok") and r.get("input_fp") and r["input_fp"] == shot_input_fp(root, run, ep, n, r.get("manifest_keys")):
+            out.append(n)
+    return out
+
+
 def check_prompts(root: Path, run: str, ep: int, shot: int | None = None) -> dict:
     ev = _j(_prompt_file(root, run, ep), None)
     if not ev:
@@ -317,12 +344,27 @@ def check_prompts(root: Path, run: str, ep: int, shot: int | None = None) -> dic
     scoped = prompt_fingerprint(root, run, ep, keys) if isinstance(keys, list) else None
     fresh = ev.get("fingerprint") == prompt_fingerprint(root, run, ep) or (
         scoped is not None and scoped in (ev.get("fingerprint"), ev.get("fingerprint_scoped")))
-    if not fresh:
-        return _ok("提示词", False, f"证据过期（{ev.get('at')} 之后导入稿或资产清单变了，重跑 probe-prompts）", shots={})
     rows = {int(k): v for k, v in (ev.get("shots") or {}).items()}
+    if fresh and ev.get("unkeyed") and ev.get("manifest_sha_full") is not None:
+        # O1(d)：编译出错的镜没记到用了哪些清单条目 → 清单整文件变了就当这几镜过期（失败关闭；别的镜仍按集指纹）
+        uk = [int(x) for x in ev["unkeyed"] if shot is None or int(x) == int(shot)]
+        if uk and _manifest_sha(root, run) != ev["manifest_sha_full"]:
+            fresh = False
+    if not fresh:
+        why = f"证据过期（{ev.get('at')} 之后导入稿或资产清单变了，重跑 probe-prompts）"
+        if probe_running(run, ep, root):
+            # O1(e)：刷新中，上次 ok 且本镜输入没变的镜照样可派；整集判（shot=None）仍报过期（自动探针照常触发）
+            want, pend = _want(run, ep, root, shot, rows)
+            keep = _sticky_ok(root, run, ep, rows, want)
+            if shot is not None and want and keep == want:
+                return _ok("提示词", True, f"证据刷新中，镜{int(shot)} 输入未变，沿用 {ev.get('at')} 结果", shots=rows, sticky=True)
+            return _ok("提示词", False, why + f"；刷新中，镜 {','.join(map(str, keep[:16]))} 输入未变仍可派", shots={}, ready_shots=keep)
+        return _ok("提示词", False, why, shots={})
     want, pend = _want(run, ep, root, shot, rows)
     bad = [n for n in want if not (rows.get(n) or {}).get("ok")]
     tail = f"；成人镜 {','.join(map(str, pend))} 等项目方触发" if pend else ""
+    if ev.get("probe_timeout") and bad:
+        tail += f"；探针超时 {int(ev.get('probe_timeouts') or 1)} 次（自动退避重试）"
     if bad:
         eg = (rows.get(bad[0]) or {}).get("why") or "没有这一镜的证据"
         return _ok("提示词", False, f"{len(want) - len(bad)}/{len(want)} 镜过；镜{bad[0]}：{str(eg)[:90]}{tail}", shots=rows, bad=bad,
@@ -344,7 +386,11 @@ def _q9_pass(pf: dict) -> bool:
     """Q9 过 = pass；或 na 且看图模型真看过（evidence.model 有值 = 只记录项缺陷，config/vqa.json 定为不阻断）。
     W38（11-04）：原来只认 pass → 看图只报“只记录”缺陷（accessory_mismatch / posed_stiff 等）的首帧，producer 判过并定稿、
     视频编单（vqa.contract.q9_passed：pass / na）也认，唯独本闸门永远“出图检测”不过 → 尾帧全挡（ep01 S6）。
-    没看成的 na（“只记录（没有本地看图结果）”，evidence 无 model）仍不过（失败关闭）"""
+    没看成的 na（“只记录（没有本地看图结果）”，evidence 无 model）仍不过（失败关闭）。
+    L-204 D9（11-06）：L-196 用尽自动采用的版本（postflight.review_needed=true：Q9 只记录、待项目方复核）也算过——与
+    build_jobs.passed_frames（review_needed 视同验收通过）同口径，否则 producer 定稿了、本闸门永远“出图检测”不过、尾帧全挡"""
+    if pf.get("review_needed"):
+        return True
     q9 = next((i for i in pf.get("items") or [] if i.get("id") == "Q9"), None)
     if not q9:
         return False
@@ -388,6 +434,10 @@ def shot_frames(root: Path, run: str, ep: int) -> dict[int, dict]:
         tj = _j(base / f"S{n}" / "takes.json", {}) or {}
         lasts = [x for x in tj.get("takes") or [] if x.get("stage") == "last" and isinstance(x.get("postflight"), dict)
                  and x["postflight"].get("ok") is not None]
+        fb = tj.get("last_frame_fallback") or {}     # L-204 D8：producer 写在 takes.json 顶层（两台都同步到）、绑定当时的首帧
+        if isinstance(fb, dict) and fb.get("mode") == "i2va" and fb.get("first_n") == (tj.get("active") or {}).get("image"):
+            row["last"], row["last_best_effort"], row["last_fallback"] = True, True, "i2va"
+            continue
         if (led.get(f"last:ep{int(ep):02d}-S{n}") or {}).get("final") == "best_effort" or (
                 len(lasts) >= LAST_TRIES and not any(x["postflight"].get("ok") for x in lasts)):
             row["last"] = True
@@ -584,9 +634,13 @@ def judge(run: str, ep: int, stage: str, shot: int | None = None, root: Path = R
     missing = [f"{r['stage']}：{r['why']}" for r in rows if not r["ok"]]
     retro = None
     if idx >= RETRO_FROM and int(ep) > 1:
-        retro = retro_state(run, int(ep) - 1, root)
-        if retro != "done":
-            missing.append(f"第{int(ep) - 1}集复盘：{retro}（tools/master/episode_retro.py 生成并 done 后，第{int(ep)}集才能出图）")
+        # FIX-ORCH O8（L-205 KPI：一集 ≤ 50 min）：retro_parallel=true（默认）= 第 N 集复盘还在写时第 N+1 集照样开工出图，
+        # 复盘最多落后一集：第 N+2 集出图前第 N 集复盘必须 done。false = 旧口径（第 N 集 done 后第 N+1 集才能出图）
+        back = 2 if config(root).get("retro_parallel", True) else 1
+        if int(ep) - back >= 1:
+            retro = retro_state(run, int(ep) - back, root)
+            if retro != "done":
+                missing.append(f"第{int(ep) - back}集复盘：{retro}（tools/master/episode_retro.py 生成并 done 后，第{int(ep)}集才能出图）")
     return {"ok": not missing, "missing": missing, "retro": retro}
 
 
@@ -656,17 +710,95 @@ def _write_state(p: Path, st: dict) -> None:
 
 
 STALE_BACKOFF_S = 120              # SLIM-CDE 11-05 E2：阻断原因是“提示词证据过期”时退避封顶 120 s（原 900 / 1800 s）
-AUTO_PROBE_COOLDOWN_S = 300        # 同一集自动探针的最短间隔（也兼当“正在跑”的锁：探针一般 1–3 min 内写完证据）
+AUTO_PROBE_COOLDOWN_S = 300        # 探针没写成证据就退出（崩了）后的重试间隔；超时按 300→600→1200→2400 s 退避（AUTO_PROBE_MAX_BACKOFF_S 封顶）
+AUTO_PROBE_MIN_GAP_S = 30          # FIX-ORCH O1(c)：上一次探针正常写完证据后，证据又过期 → 30 s 后就能再探（不再一律等 5 分钟）
+AUTO_PROBE_MAX_BACKOFF_S = 3600
+STALE_MARKERS = ("证据过期", "还没有逐镜编译 + preflight 证据", "探针超时")   # O1(a)(b)：缺证据 / 超时同样自动探
 
 
 def _is_stale_evidence(missing: list) -> bool:
-    return any("证据过期" in str(m) for m in missing or [])
+    """提示词证据要（重新）探：过期、还没有（新集）、上次探针超时。导入闸门没过时不探（编译必然失败，白跑）"""
+    ms = [str(m) for m in missing or []]
+    if any(m.startswith("导入闸门") for m in ms):
+        return False
+    return any(k in m for m in ms for k in STALE_MARKERS)
+
+
+def _pid_alive(pid) -> bool:
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        k = ctypes.windll.kernel32
+        h = k.OpenProcess(0x1000, False, pid)          # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return k.GetLastError() == 5               # 拒绝访问 = 进程在（别的用户）
+        try:
+            code = ctypes.c_ulong()
+            return bool(k.GetExitCodeProcess(h, ctypes.byref(code))) and code.value == 259   # STILL_ACTIVE
+        finally:
+            k.CloseHandle(h)
+    try:
+        os.kill(pid, 0)                                # POSIX：信号 0 只探存活（Windows 上不能这么用，会杀进程）
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def _probe_lock(root: Path, run: str, ep: int) -> Path:
+    return root / "data/pipeline/sop_gate" / run / f"ep{int(ep):02d}_auto_probe.lock"
+
+
+def _read_lock(lock: Path) -> dict:
+    """锁 = JSON {pid, t, nonce}；旧锁（只有时间字符串）→ {t: mtime}，pid 不明 = 当作不在跑"""
+    try:
+        d = json.loads(lock.read_text(encoding="utf-8"))
+        if isinstance(d, dict):
+            return d
+    except (OSError, ValueError):   # arch-ok: 旧格式 / 读不出 = 只按 mtime 判
+        pass
+    try:
+        return {"t": lock.stat().st_mtime}
+    except OSError:   # arch-ok: 没有锁 = 空
+        return {}
+
+
+def probe_running(run: str, ep: int, root: Path = ROOT, timeout_s: float | None = None) -> bool:
+    """O1(c)：本集的自动探针是否正在跑（锁里的 pid 活着，且没跑过 probe_timeout_s + 120 s）"""
+    lk = _read_lock(_probe_lock(root, run, ep))
+    if not lk.get("pid") or not _pid_alive(lk.get("pid")):
+        return False
+    lim = float(timeout_s if timeout_s is not None else (config(root).get("probe_timeout_s") or 900)) + 120
+    return time.time() - float(lk.get("t") or 0) < lim
+
+
+def probe_wait_s(run: str, ep: int, root: Path = ROOT) -> float:
+    """上次探针之后至少要等多久再探：超时退避 / 崩了 5 min / 正常写完 30 s"""
+    lk = _read_lock(_probe_lock(root, run, ep))
+    if not lk:
+        return 0.0
+    ev = _j(_prompt_file(root, run, ep), None) or {}
+    if ev.get("probe_timeout"):
+        return float(min(AUTO_PROBE_MAX_BACKOFF_S, AUTO_PROBE_COOLDOWN_S * 2 ** max(0, int(ev.get("probe_timeouts") or 1) - 1)))
+    try:
+        wrote = _prompt_file(root, run, ep).stat().st_mtime >= float(lk.get("t") or 0)
+    except OSError:   # arch-ok: 没有证据文件 = 上次没写成
+        wrote = False
+    return float(AUTO_PROBE_MIN_GAP_S if wrote else AUTO_PROBE_COOLDOWN_S)
 
 
 def auto_probe_stale(run: str, ep: int, root: Path = ROOT, missing: list | None = None, now: float | None = None) -> str | None:
-    """SLIM-CDE 11-05 E2（K-OPS-I13 的自动化）：阻断原因是“提示词证据过期”→ 后台起一个 probe-prompts（和 episode_run 同一个命令，分离子进程，
+    """SLIM-CDE 11-05 E2（K-OPS-I13 的自动化）：阻断原因是“提示词证据过期 / 还没有证据 / 探针超时”（FIX-ORCH O1）→ 后台起一个 probe-prompts（和 episode_run 同一个命令，分离子进程，
     不占调用线程；CPU 编译 + preflight，不出图、不占 GPU）。证据一刷新，下一次 judge 当场放行（require_backoff 先判再看退避）。
-    返回 "started" / "cooldown" / None（不适用 / 关闭）。开关 config/pipeline/sop_gate.json auto_probe_stale（默认 true；env NS_SOP_AUTO_PROBE=0 关）；
+    返回 "started" / "running"（锁里的探针进程还活着，不叠跑）/ "cooldown"（退避中）/ None（不适用 / 关闭）。开关 config/pipeline/sop_gate.json auto_probe_stale（默认 true；env NS_SOP_AUTO_PROBE=0 关）；
     只对真实仓库根生效（测试夹具的临时根不起子进程）"""
     if not _is_stale_evidence(missing) or os.environ.get("NS_SOP_AUTO_PROBE") == "0":
         return None
@@ -676,21 +808,32 @@ def auto_probe_stale(run: str, ep: int, root: Path = ROOT, missing: list | None 
     except OSError:  # arch-ok: 读不到 = 按缺省判（导入时间未知 → 不放宽闸门；hold 到期按 6 h 兜底），调用方显式处理 None
         return None
     now = time.time() if now is None else float(now)
-    lock = root / "data/pipeline/sop_gate" / run / f"ep{int(ep):02d}_auto_probe.lock"
+    lock = _probe_lock(root, run, ep)
     try:
-        if lock.exists() and now - lock.stat().st_mtime < AUTO_PROBE_COOLDOWN_S:
+        if probe_running(run, ep, root):
+            return "running"                                   # O1(c)：按 pid 判在跑（不再只靠 mtime 冷却），不叠跑
+        lk = _read_lock(lock)
+        if lk and now - float(lk.get("t") or 0) < probe_wait_s(run, ep, root):
             return "cooldown"
         lock.parent.mkdir(parents=True, exist_ok=True)
-        lock.write_text(time.strftime("%Y-%m-%dT%H:%M:%S"), encoding="utf-8")
+        nonce = f"{os.getpid()}-{time.time_ns()}"
+        _tmp = lock.with_name(lock.name + ".tmp")
+        _tmp.write_text(json.dumps({"pid": None, "t": now, "nonce": nonce, "by": os.getpid()}), encoding="utf-8")
+        os.replace(_tmp, lock)                          # 原子写（arch_scan nonatomic_json）
+        if (_read_lock(lock).get("nonce")) != nonce:           # 两个进程同时抢：后写的赢，输的不起
+            return "running"
         import subprocess
         logf = open(root / "data/pipeline/sop_gate" / "auto_probe.log", "a", encoding="utf-8")
         kw = {"creationflags": 0x00000008 | 0x00000200} if os.name == "nt" else {"start_new_session": True}
         try:
-            subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "probe-prompts", "--run", run, "--episode", str(int(ep))],
-                             cwd=str(root), stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **kw)
+            p = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "probe-prompts", "--run", run, "--episode", str(int(ep))],
+                                 cwd=str(root), stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **kw)
         finally:
             logf.close()                       # FIX-A：子进程已继承句柄，父进程这份关掉（不泄漏）
-        sys.stderr.write(f"[sop_gate] 提示词证据过期 → 自动后台 probe-prompts {run} ep{int(ep):02d}（K-OPS-I13）\n")
+        _tmp = lock.with_name(lock.name + ".tmp")
+        _tmp.write_text(json.dumps({"pid": getattr(p, "pid", None), "t": now, "nonce": nonce, "by": os.getpid()}), encoding="utf-8")
+        os.replace(_tmp, lock)                          # 原子写（arch_scan nonatomic_json）
+        sys.stderr.write(f"[sop_gate] 提示词证据要刷新 → 自动后台 probe-prompts {run} ep{int(ep):02d}（K-OPS-I13）\n")
         return "started"
     except OSError as e:  # arch-ok: 起不了探针 = 退回原行为（退避 + 人工），不影响判定
         sys.stderr.write(f"[sop_gate] auto probe 起不来：{e!r}\n"[:200])
@@ -757,8 +900,8 @@ def require_backoff(run: str, ep: int, stage: str, shot: int | None = None, root
             return out
         mode = r2.get("mode") or "observe"
     wait = BACKOFF_S[min(n, len(BACKOFF_S)) - 1]
-    if stale:
-        wait = min(wait, STALE_BACKOFF_S)           # E2：证据过期是秒级可修的，不按 15–30 min 等
+    if stale and (out.get("auto_probe") is not None or any("证据过期" in str(m) for m in out["missing"])):
+        wait = min(wait, STALE_BACKOFF_S)           # E2：证据过期 / 探针已在补（O1）是秒级可修的，不按 15–30 min 等
     repeats = (int(b.get("repeats") or 0) + int(b.get("suppressed") or 0) + 1) if same else 1
     st[k] = {"sig": sig, "by": by, "stage": stage, "episode": int(ep), "shot": shot, "mode": mode, "logged": n, "suppressed": 0,
              "repeats": repeats, "gaps": missing_key(out["missing"]), "missing_head": str((out["missing"] or [""])[0])[:120],
@@ -885,15 +1028,23 @@ def compile_preflight(run: str, ep: int, root: Path = ROOT, lane: str | None = N
     return rows
 
 
+class ProbeTimeout(RuntimeError):
+    """探针子进程超时（O1(b)：probe_prompts 写“探针超时”证据，auto_probe 退避重试）"""
+
+
 def _probe_subprocess(run: str, ep: int, root: Path, cfg: dict) -> dict[str, dict]:
-    """隔离进程跑 compile_preflight（按剧环境只设在子进程里，API / 常驻进程不被污染）"""
+    """隔离进程跑 compile_preflight（按剧环境只设在子进程里，API / 常驻进程不被污染）。超时 → ProbeTimeout（subprocess.run 已杀子进程）"""
     py = root / ".venv/Scripts/python.exe"
     py = str(py) if py.is_file() else sys.executable
     env = {k: v for k, v in os.environ.items() if k not in _runs().RUN_ENV_KEYS}
     env.update(_runs().run_env(run, root))
-    p = subprocess.run([py, "-X", "utf8", str(Path(__file__).resolve()), "_probe-one", "--run", run, "--episode", str(int(ep)),
-                        "--lane", str(cfg.get("probe_lane") or "")], cwd=root, capture_output=True, text=True, encoding="utf-8",
-                       errors="replace", timeout=int(cfg.get("probe_timeout_s") or 900), env=env)
+    t = int(cfg.get("probe_timeout_s") or 900)
+    try:
+        p = subprocess.run([py, "-X", "utf8", str(Path(__file__).resolve()), "_probe-one", "--run", run, "--episode", str(int(ep)),
+                            "--lane", str(cfg.get("probe_lane") or "")], cwd=root, capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=t, env=env)
+    except subprocess.TimeoutExpired as e:
+        raise ProbeTimeout(f"探针超时（{t} s）") from e
     m = re.search(r"PROBE_ROWS (\{.*\})", p.stdout or "")
     if not m:
         tail = [x for x in ((p.stdout or "") + (p.stderr or "")).strip().splitlines() if x.strip()]
@@ -905,18 +1056,41 @@ def _probe_subprocess(run: str, ep: int, root: Path, cfg: dict) -> dict[str, dic
 def probe_prompts(run: str, ep: int, root: Path = ROOT, runner=None) -> dict:
     """逐镜 build_first + preflight（不出图），写证据文件。runner(run, ep, root, cfg) → rows（测试注入；默认隔离子进程）"""
     cfg = config(root)
-    rows = (runner or _probe_subprocess)(run, ep, root, cfg)
-    # W38：每镜都编译成功且带了 manifest_keys → 按集指纹；有一镜没带（编译出错 / 旧探针 / 测试注入）→ 整文件指纹（旧口径，失败关闭）
+    prev = _j(_prompt_file(root, run, ep), None) or {}
+    timeout = None
+    try:
+        rows = (runner or _probe_subprocess)(run, ep, root, cfg)
+    except ProbeTimeout as e:
+        # O1(b)：超时也写证据（不再让旧证据 / 没证据一直挂着）：上次 ok 且本镜输入没变的镜沿用，其余记“探针超时”；auto_probe 按次数退避重试
+        timeout = str(e)
+        rows = {}
+        for n in shots_of(run, ep, root):
+            pr = (prev.get("shots") or {}).get(str(n)) or {}
+            if pr.get("ok") and pr.get("input_fp") and pr["input_fp"] == shot_input_fp(root, run, ep, n, pr.get("manifest_keys")):
+                rows[str(n)] = {**pr, "carried": prev.get("at")}
+            else:
+                rows[str(n)] = {"ok": False, "why": f"{timeout}，自动退避重试"}
+    for n, r in rows.items():                                   # O1(e)：每镜记编译输入指纹（刷新期间判“本镜没变”）
+        if isinstance(r, dict) and not r.get("pending_owner") and "input_fp" not in r and str(n).isdigit():
+            r["input_fp"] = shot_input_fp(root, run, ep, int(n), r.get("manifest_keys"))
+    # W38 + O1(d)：manifest_keys 总是写（编译成功各镜的并集）→ 按集指纹；编译出错没带 keys 的镜记 unkeyed + 整文件 sha，
+    # 清单整文件变了只把这几镜当过期（失败关闭），不再因一镜出错让全集退回整文件指纹（别集资产作业一写清单全集就过期）
     keyed = [r for r in rows.values() if isinstance(r, dict) and not r.get("pending_owner")]
-    keys = sorted({k for r in keyed for k in r.get("manifest_keys") or []}) \
-        if keyed and all(isinstance(r.get("manifest_keys"), list) for r in keyed) else None
+    keys = sorted({k for r in keyed for k in r.get("manifest_keys") or []})
+    unkeyed = sorted((n for n, r in rows.items() if isinstance(r, dict) and not r.get("pending_owner")
+                      and not isinstance(r.get("manifest_keys"), list)), key=lambda x: int(x) if str(x).isdigit() else 0)
     ev = {"schema": "nsfs.sop_gate.prompts/2", "run": run, "episode": ep, "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
           "probe": "build_first+preflight", "fingerprint": prompt_fingerprint(root, run, ep), "shots": rows}
-    if keys is not None:
-        # 按集指纹（不含 updated_at / 别集条目）= 同一输入两遍字节一致（冒烟 G7 幂等）；整文件 sha 每次清单写入都变，不再写进证据。
-        # fingerprint_scoped 同值照写：hf-20261104-01 rev2 的服务器只从这个字段认按集指纹
-        ev["manifest_keys"] = keys
-        ev["fingerprint"] = ev["fingerprint_scoped"] = prompt_fingerprint(root, run, ep, keys)
+    if timeout:
+        ev["probe_timeout"] = True
+        ev["probe_timeouts"] = int(prev.get("probe_timeouts") or 0) + 1 if prev.get("probe_timeout") else 1
+    # 按集指纹（不含 updated_at / 别集条目）= 同一输入两遍字节一致（冒烟 G7 幂等）；整文件 sha 每次清单写入都变，不进证据（unkeyed 时例外）。
+    # fingerprint_scoped 同值照写：hf-20261104-01 rev2 的服务器只从这个字段认按集指纹
+    ev["manifest_keys"] = keys
+    ev["fingerprint"] = ev["fingerprint_scoped"] = prompt_fingerprint(root, run, ep, keys)
+    if unkeyed:
+        ev["unkeyed"] = unkeyed
+        ev["manifest_sha_full"] = _manifest_sha(root, run)
     p = _prompt_file(root, run, ep)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".tmp")
@@ -989,8 +1163,9 @@ def status(run: str, root: Path = ROOT) -> list[dict]:
     for ep in episodes_of(run, root):
         rows = evaluate(run, ep, root)
         st, why = current_stage(rows)
-        if st not in ("剧本", "导入闸门", "资产就绪", "提示词") and ep > 1 and retro_state(run, ep - 1, root) != "done":
-            why = f"等第{ep - 1}集复盘 done；" + why
+        back = 2 if config(root).get("retro_parallel", True) else 1      # O8：复盘并行（最多落后一集）
+        if st not in ("剧本", "导入闸门", "资产就绪", "提示词") and ep - back >= 1 and retro_state(run, ep - back, root) != "done":
+            why = f"等第{ep - back}集复盘 done；" + why
         out.append({"episode": ep, "stage": st, "why": why, "retro": retro_state(run, ep, root),
                     "passed": [r["stage"] for r in rows if r["ok"]], "rows": rows})
     return out

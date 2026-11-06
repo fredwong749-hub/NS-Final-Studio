@@ -106,8 +106,12 @@ def exclude_lanes(host: str, cfg: dict | None = None) -> list[str]:
 
 def merged_shots(vid: Path, ep: int, hosts: list[str], jobs: dict | None = None) -> dict:
     """整集视图：读 hosts 各台的 state_<host>.json，按镜合并成 {镜: 记录}（只读）。
-    同一镜两台都有记录（配置中途改过）→ 取 jobs.json 里 host 对得上的那台；没 jobs → 渲染版本多的那台"""
+    同一镜两台都有记录（配置中途改过 / 抢活）→ 取 jobs.json 里 host 对得上的那台（FIX-VID D13：shard_claims.json 的领取
+    叠在 jobs 的 host 上，领取台的记录优先——两台都出了同一镜时只认一份）；没 jobs → 渲染版本多的那台"""
     jh = {s["shot"]: s.get("host") for s in (jobs or {}).get("shots", [])}
+    for sid, c in load_claims(vid).items():
+        if sid in jh and c.get("host") in hosts:
+            jh[sid] = c["host"]
     out: dict = {}
     src: dict = {}
     for h in hosts:
@@ -166,12 +170,44 @@ def _started(rec: dict | None) -> bool:
 
 def live_claims(claims: dict, merged: dict, now: float, lease_s: float = CLAIM_LEASE_S) -> dict:
     """仍有效的领取：镜已开工 / 已落定 → 保留（主机归属不能再变，否则 jobs.json 的 host 会翻）；
-    还没开工且超过 lease_s → 作废（超时回收）"""
+    还没开工且超过 lease_s → 作废（超时回收）。sticky=True 的领取（FIX-VID D1：helper 失联后 owner 收回的镜）不按租约作废，
+    镜落定才由调用方清理"""
     out = {}
     for sid, c in (claims or {}).items():
-        if _started((merged or {}).get(sid)) or now - float(c.get("at") or 0) <= lease_s:
+        if c.get("sticky") or _started((merged or {}).get(sid)) or now - float(c.get("at") or 0) <= lease_s:
             out[sid] = c
     return out
+
+
+HELPER_STALE_S = 900          # FIX-VID D1：helper 的 state 超过这么久没更新（或拉不到）= 失联，owner 收回它名下没落定的镜
+STATE_FRESH_S = 300           # state 在这么久内更新过 = “没开工”的判断可信，才允许别台从它名下领镜（D13：避免两台重复出同一镜）
+
+
+def state_age(vid: Path, host: str, now: float | None = None) -> float:
+    """state_<host>.json 的 saved 距今秒数；文件没有 / 坏 / 没 saved = inf（当失联）"""
+    import time as _t
+    now = _t.time() if now is None else now
+    try:
+        st = json.loads((Path(vid) / f"state_{host}.json").read_text(encoding="utf-8"))
+        return max(0.0, now - float(st.get("saved") or 0)) if st.get("saved") else float("inf")
+    except (OSError, ValueError, TypeError):   # arch-ok: 读不到这台 state = 失联（调用方据此收回，不是放行）
+        return float("inf")
+
+
+def effective_mine(host: str, sid: str, jobs_host: str | None, claim: dict | None, started_here: bool,
+                   now: float, lease_s: float = CLAIM_LEASE_S) -> bool:
+    """vidgen 用（FIX-VID D13）：这一镜现在归不归本机。jobs.json 的 host 是静态裁决，shard_claims.json 的领取不用等重编就生效：
+      · 领取台 = 本机（jobs 还写着别台）→ 本机已开工或租约未过 → 归本机；
+      · 被领走（from = 本机，jobs 还写着本机）→ 租约内且本机没开工 → 不归本机（别台在出）；本机已开工 → 仍归本机（领取方会被 relay 看到已开工后作废）；
+      · 领取已进 jobs（jobs host = 领取台）→ 按 jobs；
+      · 没领取 → 按 jobs"""
+    if claim and claim.get("host") == host and jobs_host != host:
+        return started_here or claim.get("sticky") or now - float(claim.get("at") or 0) <= lease_s
+    if claim and claim.get("from") == host and jobs_host == host and claim.get("host") != host:
+        if started_here:
+            return True
+        return not (claim.get("sticky") or now - float(claim.get("at") or 0) <= lease_s)
+    return jobs_host == host
 
 
 def apply_claims(plan_map: dict, claims: dict, now: float | None = None, hosts: set | None = None, lease_s: float = CLAIM_LEASE_S) -> dict:
@@ -186,18 +222,31 @@ def apply_claims(plan_map: dict, claims: dict, now: float | None = None, hosts: 
 
 
 def decide_claims(c: dict, plan_map: dict, merged: dict, claims: dict, busy: dict, now: float,
-                  lease_s: float = CLAIM_LEASE_S, per_host: int = 1) -> dict:
+                  lease_s: float = CLAIM_LEASE_S, per_host: int = 1, claim_from: set | None = None,
+                  stale_hosts: set | None = None) -> dict:
     """c = ep_cfg；plan_map = 静态 {镜: 主机}；merged = 整集状态；busy = {主机: 在跑 / 排队的渲染数}（关心的是“空”）。
     返回新的领取表（含旧的有效领取）：空闲台（busy==0 且自己名下没有未开工的镜）从别台名下领“没开工、没被领”的镜，
-    每台每轮最多 per_host 个（尾部的镜先领，owner 继续从前往后出）"""
+    每台每轮最多 per_host 个（尾部的镜先领，owner 继续从前往后出）。
+    FIX-VID：claim_from = 允许从哪些台名下领（state 新鲜、“没开工”可信的台；None = 全部，D13）；
+    stale_hosts = 失联的 helper（state 太久没更新 / 拉不到）→ 它名下所有没落定的镜一次全收回给 owner（sticky，不限 per_host、不看开工；D1）；
+    已落定的领取保留（合并视图靠它认领取台的记录；表按集很小）"""
     cl = live_claims(claims, merged, now, lease_s)
     eff = apply_claims(plan_map, cl)
+    owner = c.get("owner")
+    for h in sorted(stale_hosts or ()):
+        if h == owner or owner not in c["hosts"]:
+            continue
+        for s in sorted(eff):
+            if eff[s] == h and (merged or {}).get(s, {}).get("status") not in SETTLED:
+                cl[s] = {"host": owner, "from": h, "at": now, "sticky": True, "why": "helper_stale"}
+        eff = apply_claims(plan_map, cl)
     for h in sorted(c["hosts"]):
-        if int(busy.get(h, 0)) > 0:
+        if h in (stale_hosts or ()) or int(busy.get(h, 0)) > 0:
             continue
         if any(eff.get(s) == h and not _started((merged or {}).get(s)) for s in eff):
             continue                                   # 自己名下还有没开工的镜 = 不算闲（作业会陆续派给它）
-        cand = [s for s in sorted(eff, reverse=True) if eff[s] != h and not _started((merged or {}).get(s)) and s not in cl]
+        cand = [s for s in sorted(eff, reverse=True) if eff[s] != h and not _started((merged or {}).get(s)) and s not in cl
+                and (claim_from is None or eff[s] in claim_from)]
         for s in cand[:per_host]:
             cl[s] = {"host": h, "from": eff[s], "at": now}
     return cl

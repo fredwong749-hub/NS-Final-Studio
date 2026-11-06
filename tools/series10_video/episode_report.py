@@ -31,6 +31,17 @@ CAUSE = {"身份偏离": "身份：首帧路线跟首帧身份走（K-REN-R04）
          "镜内硬切": "硬切：seed 相关（K-REV-R05）→ 换 seed"}
 
 
+def placeholder_lines(man: dict) -> list[str]:
+    """manifest 里没有代理（不进合成）的镜 → 报告行：阻断原因 / 过期片 / 状态"""
+    out = []
+    for s in man.get("shots") or []:
+        if s.get("proxy"):
+            continue
+        why = s.get("block_reason") or s.get("excluded") or LABEL.get(s.get("status"), s.get("status")) or "没出片"
+        out.append(f"- {s.get('shot')}{'（阻断）' if s.get('status') == 'blocked' else '（过期片）' if s.get('stale') else ''}：{why}")
+    return out
+
+
 def main(ep: int, host: str, ver: str = "v1"):
     st = json.loads((VID / f"state_{host}.json").read_text(encoding="utf-8"))
     try:   # 视频按镜分片（默认关）：分片集合并各台 state；关 = 原样
@@ -83,6 +94,8 @@ def main(ep: int, host: str, ver: str = "v1"):
           f"- 通过率（首版 / 最终）：{sum(1 for _s, r in shots if r['renders'] and ((r['renders'][0].get('score') or {}).get('gate') or {}).get('pass'))}/{len(shots)}"
           f" / {n_pass}/{len(shots)}", "", "## 问题与根因（按不合格项计数）", ""]
     L += [f"- {k} × {v}：{CAUSE.get(k, '—')}" for k, v in fails.most_common()] or ["- 无"]
+    L += ["", "## 静帧占位的镜（没进合成的片子：阻断 / 过期 / 等闸门，成片用首帧静帧缓推，FIX-VID D8 / D10）", ""]
+    L += placeholder_lines(man) or ["- 无"]
     L += ["", "## 未测项", "", "- V6 / V7：检测器接上前打分的镜为“未测”；V8 只测了景别，造型未测；发色只记录（K-REV-303）", ""]
     doc = ROOT / f"docs/series10_video/{_SUB}ep{ep:02d}_review.md"
     doc.parent.mkdir(parents=True, exist_ok=True)

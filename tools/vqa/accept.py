@@ -312,7 +312,10 @@ def _parallel_on() -> bool:
 
 
 def label(sid: str, stage: str, image, pf: dict, *, feat: dict | None = None, via_tunnel: bool = False, host: str | None = None,
-          defer_count: bool = False) -> dict:
+          defer_count: bool = False, skip_outfit: bool = False) -> dict:
+    """skip_outfit（L-205 P2，contract.skip_nonblocking("Q10")）：服装不在硬项名单 → 不跑“谁穿什么”看图，记 na skipped_nonblocking
+    （summarize 不算 fail / untested）。身份（契约 Q1）、提示词核对（含看图人数 people_count，count 硬项）、人数检测照跑"""
+    skipped = {"status": "na", "record_only": True, "skipped": "skipped_nonblocking", "why": "服装非硬项（L-196），L-205 不跑看图"}
     deferred = {"status": "deferred", "why": "本机没有检测卡（gpu33 的 GPU2 是坏卡）：人数检测由笔记本发起的批量验收在 gpu36 上做，"
                                              "结果写 data/vqa/accept/epNN.json，视频闸门读它"}
     if _parallel_on() and not via_tunnel:
@@ -322,13 +325,13 @@ def label(sid: str, stage: str, image, pf: dict, *, feat: dict | None = None, vi
         with ThreadPoolExecutor(max_workers=3, thread_name_prefix="q10") as ex:
             f_pr = ex.submit(prompt_check, sid, image, False, stage)
             f_cnt = None if defer_count else ex.submit(count_check, sid, image, feat, host)
-            f_out = ex.submit(outfit, pf, sid, image)
-            pr, out = f_pr.result(), f_out.result()
+            f_out = None if skip_outfit else ex.submit(outfit, pf, sid, image)
+            pr, out = f_pr.result(), (skipped if f_out is None else f_out.result())
             cnt = deferred if f_cnt is None else f_cnt.result()
     else:
         pr = prompt_check(sid, image, via_tunnel, stage)      # 先跑：via_tunnel 时它会把本机 8870 判为不可用，后面的看图都走隧道
         cnt = deferred if defer_count else count_check(sid, image, feat, host)
-        out = None
+        out = skipped if skip_outfit else None
     if stage == "last" and pr.get("status") in ("fail", "untested"):
         # L-183（总调度 11-04 04:1x/04:2x）：尾帧不是成片输入（L-088 Pika 只给首帧）→ 提示词 positions/action 核对只记录、不阻断；
         # 原结论留在 would / why 里（审片可见）。身份 / 造型 / 人数照样判

@@ -146,7 +146,8 @@ RULES: dict[str, tuple[str, str]] = {
     "QW-CH5": ("block", "对白和 🎙 的说话人都在 `**人物**` 行；人物行标“画外”的人，对白括号里带画外标记（画外/电话/语音/OS/VO）"),
     "QW-LK1": ("block", "每镜在 `**人物**` 下一行写 `**衔接**：<接力 / 同场换机位 / 换场 / 接上一集>｜承：<延续项>`；"
                         "镜1 只能写 换场 或 接上一集；接力时 `承：` 必填"),
-    "QW-LK2": ("block", "接力 / 同场换机位：场景 id 与上一镜相同；接力时本镜 img 景别与上一镜结束状态景别最多差一档"),
+    "QW-LK2": ("block", "接力 / 同场换机位：场景 id 与上一镜相同（同一空间的背景视向子场景 <父场景id>_<视向> 算同场，K-WRT-L203b）；"
+                        "接力时本镜 img 景别与上一镜结束状态景别最多差一档"),
     "QW-LK3": ("block", "换场：场景 id 与上一镜不同，或 img 备注 / motion 写了换段词（次日、第二天、翌日、闪回、回忆、梦境、"
                         "数日后、几天后、一周后、当晚、句首“周X”）"),
     "QW-C4": ("warn", "motion 的英文运镜与 H3 正文里的运镜是同一种"),
@@ -492,6 +493,22 @@ PRONOUN_RE = re.compile(r"(?<!其)[她他]")
 WARDROBE = ROOT / "data" / "looks" / "wardrobe.json"
 
 
+def same_place(a: str | None, b: str | None, lib: dict) -> bool:
+    """两个场景 id 是不是同一个物理空间（K-WRT-L203b，项目方 11-06 “每一个 episode 里面的 scenes 都一样”）：
+    同一间影棚按机位方向分背景视向，子场景 id = <父场景id>_<视向>（sk_white_cyc_rev / _door / _mirror / _top），父场景已在场景表登记；
+    同 id、或其中一个是另一个的父场景、或两个是同一父场景的视向 → 同场（接力 / 同场换机位 不算换场）"""
+    if not a or not b:
+        return a == b
+    if a == b:
+        return True
+
+    def parents(x: str) -> set[str]:
+        parts = x.split("_")
+        return {"_".join(parts[:k]) for k in range(2, len(parts)) if "_".join(parts[:k]) in lib}
+    pa, pb = parents(a) | {a}, parents(b) | {b}
+    return bool((pa & pb) - {a, b}) or (b in parents(a)) or (a in parents(b))
+
+
 def size_of(text: str) -> str | None:
     """文本里第一个景别词（同一位置取最长的）"""
     best = None
@@ -694,6 +711,7 @@ def check_v3(imp, text: str, require: bool) -> tuple[list[dict], dict[int, list[
             ep_out.extend(WL.check_l2(ep, text, _RUN["run"]))
             ep_out.extend(WL.check_l3(ep, text))                 # QW-L9–L11（L3 焦段光圈表 / 背景光源 / 双人站位，K-WRT-816–818，warn）
             ep_out.extend(WL.check_l201(ep, text))               # QW-L12 / L13（L-201 ③：同场相邻镜景别或机位要变 / 现实↔幻想触发画面，block）
+            ep_out.extend(WL.check_l203(ep, text))               # QW-L14（L-203：起幅 img 与落幅 motion“——”后至少两项不同，block）
         ep_out.extend(WL.check_rubric(ep, text))                 # QW-RB1 清单代码判定（HOLLYWOOD r7，CONSENT 总调度 -> HOLLYWOOD）
         idx = {s.index for s in ep.shots}
         all_cast = [c for s in ep.shots for c in (s.cast or [])]
@@ -851,7 +869,7 @@ def check_v3(imp, text: str, require: bool) -> tuple[list[dict], dict[int, list[
             else:
                 if sh.link == "接力" and not sh.link_carry:
                     out.append(_issue("QW-LK1", "接力时要写 `｜承：<延续项>`", field="衔接"))
-                if prev is not None and sh.link in ("接力", "同场换机位") and sh.scene_id != prev.scene_id:
+                if prev is not None and sh.link in ("接力", "同场换机位") and not same_place(sh.scene_id, prev.scene_id, lib):
                     out.append(_issue("QW-LK2", f"{sh.link}：场景 {sh.scene_id} 与上一镜 {prev.scene_id} 不同", field="衔接"))
                 if prev is not None and sh.link == "接力":
                     a, b = size_of(img), size_of(end_state(prev))

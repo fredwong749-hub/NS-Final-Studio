@@ -99,7 +99,7 @@ def test_push_tiers_and_warn(monkeypatch):
     assert RS.tier_of("data/assets/identity_refs/lin_wan/lin_wan_face_ref2va.png", 200000) == 1
     assert RS.tier_of("data/renders/ep01/S1/takes/image_004.png", 2000000) == 2
     est = RS.estimate(["a", "b"], {"a": (15_000_000, 0), "b": (10_000_000, 0)})
-    assert est["mb"] == 25.0 and est["eta_min"] > 20
+    assert est["mb"] == 25.0 and est["eta_min"] == round(25.0 * 1000 / RS.LINK_KBPS / 60, 1)   # FIX-ORCH O4：LINK_KBPS 按实测（不写死旧值）
     # 超过 20 MB 不带 yes：只报估计，不推
     monkeypatch.setattr(RS, "ssh", lambda *a, **k: b"0")
     monkeypatch.setattr(RS, "log", lambda *a: None)

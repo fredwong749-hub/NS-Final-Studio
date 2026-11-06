@@ -110,7 +110,7 @@ def test_finalize_v2_reaches_assembly(night_v2, monkeypatch, tmp_path):
     ep_dir.mkdir(parents=True)
     (ep_dir / "manifest.json").write_text(json.dumps({"shots": [{"index": 1, "shot": "ep01-S1", "proxy": "p.mp4"}]}),
                                           encoding="utf-8")
-    monkeypatch.setattr(N, "assembly_sources", lambda man: ({"shots": [
+    monkeypatch.setattr(N, "assembly_sources", lambda man, stills=None: ({"shots": [
         {"index": 1, "kind": "video", "file": str(clip), "origin": "test"}]}, []))
     calls = []
 
@@ -136,6 +136,8 @@ def test_finalize_v2_reaches_assembly(night_v2, monkeypatch, tmp_path):
     assert asm and asm[0][asm[0].index("--run") + 1] == V2
     assert x["status"] == "assembled", x
     assert Path(x["final"]).parent == N.EPS_OUT and Path(x["final"]).is_file()
+    fin = [c for c in calls if c[1].replace("\\", "/") == "tools/director/finish.py"]
+    assert fin and fin[0][fin[0].index("--script") + 1] == str(N.RC.script_path(V2))   # FIX-VID D12：传本剧导入稿，不用 V1 默认
 
 
 # ---- 11-04：服务器合成缺 ns_schema + 重开漏洞 ----

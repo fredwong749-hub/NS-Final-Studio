@@ -413,6 +413,8 @@ def faced_people(shot, names: list[str]) -> tuple[list[str], list[tuple[str, str
             continue
         if pr == "在画" and _AR.back_view(shot, n):        # K-REN-957：在画但本人分句写背影 → 不算露脸（按背影局部处理）
             partial.append((n, "背影"))
+        elif pr == "局部" and _AR.back_part(shot, n):      # L-204 ①：过肩前景 / 背影的局部人物不露脸（正文写到头发也不算）
+            partial.append((n, (gv(c, "part") or "").strip() or "背影"))
         elif pr == "在画" or (pr == "局部" and _AR.partial_face_visible(n, img, [gv(x, "name") for x in cast if gv(x, "presence") in ("在画", "局部")])):
             faced.append(n)
         elif (pr == "局部" and not _AR.back_part(shot, n) and _AR.pf_on("face_exposure_guard") and not _AR.crop_guaranteed(shot)
@@ -437,7 +439,10 @@ def partial_clause(partial: list[tuple[str, str]], subject: str | None, extra: d
     return "，".join(out)
 
 
-_FRONT_GAZE = re.compile(r"((?:视线|目光|眼神|眼睛)[^，。；]{0,3}(?:落在|看向|望向|朝向|看着))画面(右|左|正)?前方")
+# L-200 / FIX-PRE 11-06（REVIEW-PRE E）：视线动词再加 钉在 / 停在 / 投向 / 移向 / 转向 / 锁在 / 盯着；没有“视线”主语的
+# “抬眼看向画面右前方”“看向画面正前方”也改（只认看 / 望 / 盯类动词，“手停在画面右前方”不动）
+_FRONT_GAZE = re.compile(r"((?:视线|目光|眼神|眼睛)[^，。；]{0,3}(?:落在|看向|望向|朝向|看着|望着|盯着|钉在|停在|投向|移向|转向|锁在)"
+                         r"|(?:抬眼|垂眼|回头|转头|侧头)?(?:看向|望向|看着|望着|盯着|瞥向))画面(右|左|正)?前方")
 
 
 def off_axis_gaze(text: str) -> str:

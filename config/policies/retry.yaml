@@ -44,9 +44,9 @@ items:
     decider: code
     owner: DEBUG_RSI（producer 所有者）
   hard_cap:
-    value: {per_stage_24h: 10}
-    source: 总调度 11-02 FOCUS 第 2 条（ep05-S3 首帧出到第 92 版：E09 bug 重置 30 次 + runaway_hold 过期后 E11 尽力版重置又给 3 次，没有跨重置路径的绝对上限）；K-OPS-E28
-    enforced_by: tools/autopilot/producer.py:Producer.hard_capped（takes.json 该阶段 24 小时自动版本数，派单前查；uncap 人工多放）
+    value: {per_stage_24h: 30}
+    source: 总调度 11-02 FOCUS 第 2 条（ep05-S3 首帧出到第 92 版：E09 bug 重置 30 次 + runaway_hold 过期后 E11 尽力版重置又给 3 次，没有跨重置路径的绝对上限）；K-OPS-E28。L-204 D2（11-06）：10 → 30，只是安全阀——到顶不再静默跳过，producer 标用尽 → 尽力版 → 自动采用最好一版继续（ev=hard_cap_exhausted）
+    enforced_by: tools/autopilot/producer.py:Producer.hard_capped（takes.json 该阶段 24 小时自动版本数，派单前查；uncap 人工多放）+ Producer.cap_exhaust（到顶 → best_effort → adopt_best_effort_sweep）
     status: code_reads
     decider: code
     owner: DEBUG_RSI（producer 所有者）

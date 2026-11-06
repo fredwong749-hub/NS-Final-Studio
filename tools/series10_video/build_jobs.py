@@ -310,6 +310,31 @@ def passed_lasts() -> dict:
     return out
 
 
+LAST_FALLBACK: dict = {}   # build_all 开头按 last_frame_fallbacks() 填；compile_variant 据此把该镜编成 I2VA
+
+
+def last_frame_fallbacks() -> dict:
+    """FIX-VID D8（与 FIX-PROD 约定）：尾帧用尽出不来的镜，producer 在该镜 takes.json 写 "last_frame_fallback": "i2va"
+    （顶层；也认 active.last_frame_fallback，值可以是字符串或 {"mode": "i2va", ...}）→ {镜: "i2va"}。
+    该镜视频改走只给首帧（I2VA，L-201 路径：keyframes.last_frame_mode=none），不再只编出 no_last_frame 的废变体"""
+    out = {}
+    for tj in sorted((ROOT / RENDERS).glob("ep*/S*/takes.json")):
+        try:
+            d = json.loads(tj.read_text(encoding="utf-8"))
+        except (OSError, ValueError):   # arch-ok: 这一镜 takes 读不到 = 没有兜底标记（照旧编 FL2VA）
+            continue
+        v = d.get("last_frame_fallback") or (d.get("active") or {}).get("last_frame_fallback")
+        if isinstance(v, dict):
+            # producer 写 {mode, first_n}：回退绑定当时的首帧；首帧换了（active.image ≠ first_n）→ 回退作废（尾帧会重出），照旧编 FL2VA
+            fa_n = (d.get("active") or {}).get("image")
+            if v.get("first_n") is not None and fa_n is not None and v["first_n"] != fa_n:
+                continue
+            v = v.get("mode")
+        if v:
+            out[f"{tj.parent.parent.name}-{tj.parent.name}"] = str(v)
+    return out
+
+
 def chosen_frames() -> dict:
     """IMGGEN 旧首帧（只给 S10V-1 对照的 i2v 组用过；正式出片用 passed_frames）"""
     st = json.loads(IMG_STATE.read_text(encoding="utf-8"))["jobs"]
@@ -393,7 +418,9 @@ def _no_last(spec) -> bool:
 
 def compile_variant(spec, reg, rid, attempt, variant, frames_of, *, seed=None, extra=None):
     ov = dict(KITCHEN)
-    if _no_last(spec):     # L-197 A：本集视频只用首帧（I2VA）；配方不送尾帧 → 提示词编成 I2VA 形态（没有 Picture 2 对齐句）
+    # L-197 A / L-201：本集 / 本镜视频只用首帧（I2VA）；配方不送尾帧 → 提示词编成 I2VA 形态（没有 Picture 2 对齐句）
+    # FIX-VID D8：尾帧出不来（takes.json last_frame_fallback=i2va，FIX-PROD 写）的镜同样走 I2VA，而不是编出只会 no_last_frame 的变体
+    if _no_last(spec) or LAST_FALLBACK.get(getattr(spec, "id", None)) == "i2va":
         ov["keyframes.last_frame_mode"] = "none"
     ov.update(extra or {})
     if seed is not None:
@@ -507,10 +534,17 @@ def build_all(validate_only=False) -> dict:
         raise RC.VideoRunError(_RUN_ERR or "build_jobs 没有设剧（set_run）")
     holds = video_holds()
     reg = R.load()
-    specs = (sys.path.append(str(ROOT)) if str(ROOT) not in sys.path else None) or __import__("tools.master.sop_gate", fromlist=["_"]).filter_video_specs(RUN_ID, load_specs())  # HARNESS-O：SOP 阶段闸门（没过“视频”闸门的集不编作业）
+    all_specs = load_specs()
+    specs = (sys.path.append(str(ROOT)) if str(ROOT) not in sys.path else None) or __import__("tools.master.sop_gate", fromlist=["_"]).filter_video_specs(RUN_ID, all_specs)  # HARNESS-O：SOP 阶段闸门（没过“视频”闸门的集不编作业）
+    # FIX-VID D10：没过闸门的镜不编变体，但仍留在 jobs.json（route=hold, gate_excluded）——vidgen 才会对它跑 check_stale，
+    # 首帧换版后的旧片不会经 state → manifest 混进成片；整集落定时它按“等闸门”算（成片用首帧静帧占位，闸门开了自动重编放行）
+    gate_excluded = {sid: s for sid, s in all_specs.items() if sid not in specs}
+    specs = {sid: all_specs[sid] for sid in all_specs if sid in specs or sid in gate_excluded}
     frames_of = chosen_frames() if validate_only else passed_frames()
     LASTS_OF.clear()
     LASTS_OF.update(passed_lasts())
+    LAST_FALLBACK.clear()
+    LAST_FALLBACK.update({} if validate_only else last_frame_fallbacks())
     alts = alt_crops()
     shard_host = _shard_hosts(specs)   # 视频按镜分片（默认关 = {}；PLAN_EP01_FINISH §11）
     VID.mkdir(parents=True, exist_ok=True)
@@ -536,8 +570,12 @@ def build_all(validate_only=False) -> dict:
         meta["first_frame_src"] = (frames_of.get(sid) or {}).get("src")
         meta["first_frame_take"] = (frames_of.get(sid) or {}).get("take")
         meta["score_refs"] = score_refs(spec, reg)
+        if LAST_FALLBACK.get(sid):
+            meta["last_frame_fallback"] = LAST_FALLBACK[sid]
         vs = {}
-        if validate_only:
+        if sid in gate_excluded:
+            meta["route"], meta["hold"], meta["gate_excluded"] = "hold", "gate：没过“视频”闸门（sop_gate），不编变体", True
+        elif validate_only:
             for arm, rid in VALIDATE["arms"].items():
                 for k, sd in enumerate(VALIDATE["seeds"], 1):
                     vs[f"{arm}_s{k}"] = compile_variant(spec, reg, rid, 1, f"{arm}_s{k}", frames_of, seed=sd)

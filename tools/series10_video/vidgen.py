@@ -199,6 +199,48 @@ def restore_lip_superseded(rec: dict, first_frame: str | None) -> int:
     return len(back)
 
 
+def _VS():
+    """视频分片模块（服务器镜像没带 = None → 不看领取，按 jobs.json 的 host）"""
+    try:
+        import video_shard as VS
+        return VS
+    except ImportError:   # arch-ok: 没有分片模块 = 不分片（原行为）
+        return None
+
+
+def _claims() -> dict:
+    VS = _VS()
+    return VS.load_claims(VID) if VS else {}
+
+
+def undispatchable_reason(shot: dict, rec: dict) -> str | None:
+    """FIX-VID D8：镜有变体、一条都没出过、却没有任何一个变体能派（编译状态不是 ready / preflight 不过 / 政策 hold）→ 原因串
+    （按变体列：v1=no_last_frame；s2=preflight:…）。能派 / 没变体 / 已有出片 → None"""
+    vs = shot.get("variants") or {}
+    if not vs or rec.get("renders") or next_variant(shot, rec) is not None:
+        return None
+    why = []
+    for v, var in vs.items():
+        st = var.get("status")
+        if st not in ("ready", "lint_error"):
+            why.append(f"{v}={st}")
+        elif not (var.get("preflight") or {}).get("ok", True):
+            why.append(f"{v}=preflight:{'；'.join(map(str, (var.get('preflight') or {}).get('reasons') or []))[:80]}")
+        else:
+            why.append(f"{v}={policy_hold(var) or prompt_hold(var) or '不可派'}"[:120])
+    return ("没有可派的变体（等重编 jobs.json；成片先用首帧静帧缓推占位）：" + "；".join(why))[:600]
+
+
+# 只是“尾帧 / 首帧还没到”（no_last_frame / no_first_frame）的派不了：帧还在出，先等这么久再阻断（L-205：单集 ≤ 50 min）；
+# 尾帧用尽的镜 producer 会写 last_frame_fallback=i2va → build_jobs 编成 I2VA，不会停在这里。其它原因（preflight / 编译错）当场阻断
+UNDISPATCHABLE_GRACE_S = 1800
+
+
+def frame_wait_only(shot: dict) -> bool:
+    vs = shot.get("variants") or {}
+    return bool(vs) and all(str(v.get("status") or "").startswith(("no_last_frame", "no_first_frame")) for v in vs.values())
+
+
 def settle_rec(rec: dict) -> str:
     """没有在出 / 在打分的版本时定下这一镜（after_score 的收尾；L-196 用尽采用最好一版）：有过门的 → done 取 penalty 最小；
     只有没过门的 → best_effort 取 penalty 最小；一条打分都没有 → blocked。返回新状态"""
@@ -245,8 +287,8 @@ def next_variant(shot: dict, rec: dict) -> str | None:
     if len(rec["renders"]) >= MAX_RENDERS:
         return None
     last = rec["renders"][-1] if rec["renders"] else None
-    if last is None:
-        return "v1" if ok("v1") else None
+    if last is None:   # 第一条：v1；v1 派不了（如 preflight 不过）→ 阶梯里第一个能派的（FIX-VID D8：别让整镜一条都不出）
+        return next((v for v in ["v1", *(shot.get("ladder_order") or list(vs))] if ok(v)), None)
     fails = ((last.get("score") or {}).get("gate") or {}).get("fails") or ["出片失败"]
     order = []
     if "身份偏离" in fails:          # 首帧路线身份不过 → 纯 Ref2VA 24 步（r24）→ 换参考（alt）
@@ -267,7 +309,7 @@ class Lane:
         self.uploads: dict[str, str] = {}
         self.busy_s = 0.0
         self.down = False
-        self.last_foreign = time.time()      # 新起的编排器先观察 yield_s 秒再在让道道上提交
+        self.last_foreign = 0.0              # FIX-VID（L-205 KPI）：新起 / 重启的编排器不再先空等 yield_s；道上有别人的任务照样让（foreign 当场判）
 
     def queue(self):
         d = json.loads(api(self.port, "/queue", timeout=15))
@@ -434,7 +476,19 @@ class Runner:
         c = self.ctrl()
         d = jload(VID / c.get("jobs", "jobs.json"), {"shots": []})
         eps = set(c.get("eps") or range(1, 11))
-        return {s["shot"]: s for s in d["shots"] if s["host"] == self.host and s["ep"] in eps}, c
+        claims = _claims() if c.get("jobs", "jobs.json") == "jobs.json" else {}
+        now = time.time()
+        out = {}
+        for s in d["shots"]:
+            if s["ep"] not in eps:
+                continue
+            mine = s["host"] == self.host
+            if claims:   # FIX-VID D13：笔记本仲裁的领取（shard_claims.json）不等 night 重编 jobs.json 就生效，两台不会同时出同一镜
+                started = bool((self.st["shots"].get(s["shot"]) or {}).get("renders"))
+                mine = _VS().effective_mine(self.host, s["shot"], s.get("host"), claims.get(s["shot"]), started, now)
+            if mine:
+                out[s["shot"]] = s
+        return out, c
 
     def rec(self, sid):
         return self.st["shots"].setdefault(sid, {"renders": [], "status": "pending", "chosen": None})
@@ -521,8 +575,30 @@ class Runner:
     def repair_idle(self, sid, sh, r):
         """VID-LOOP（11-06）状态修复：没有在出 / 在打分的版本却停在 rendering / retry / pending 的镜不能一直挂着——
         ① 口型重出已到上限 → 作废的同首帧版本拿回来一起挑（L-196）；② 已有出片且阶梯用尽（next_variant 为 None）→ 当场定下
-        （done / best_effort / blocked，与 after_score 同一条路）。还有变体能出的照常派，不在这里动"""
+        （done / best_effort / blocked，与 after_score 同一条路）。还有变体能出的照常派，不在这里动。
+        FIX-VID D8：③ 有变体、没出过、一个都派不了 → blocked（写明原因；整集能落定，成片用静帧占位）；重编后有变体能派 → 自动解封"""
+        if r["status"] == "blocked" and r.get("block_kind") == "undispatchable" and not r["renders"] \
+                and sh.get("variants") and next_variant(sh, r) is not None:
+            with self.lock:
+                r["status"] = "pending"
+                r.pop("block_kind", None)
+                r.pop("block_reason", None)
+            log(self.host, "UNBLOCK", sid, "重编后有可派的变体")
+            self.event("unblock", shot=sid)
+            return
         if r["status"] in SETTLED or r["status"] == "waiting_frame" or in_flight(r):
+            return
+        why = undispatchable_reason(sh, r)
+        if not why:
+            r.pop("undispatchable_since", None)
+        elif frame_wait_only(sh) and time.time() - float(r.setdefault("undispatchable_since", time.time())) < UNDISPATCHABLE_GRACE_S:
+            return                      # 帧还在出：先等（宽限内不阻断，免得整集提前拿占位合成）
+        if why:
+            with self.lock:
+                r.pop("undispatchable_since", None)
+                r.update(status="blocked", block_kind="undispatchable", block_reason=why, chosen=None)
+            log(self.host, "SHOT_BLOCKED_NO_VARIANT", sid, why[:300])
+            self.event("shot_done", shot=sid, chosen=None, status="blocked", renders=0, why="undispatchable")
             return
         if r.get("lip_redo_capped") and sh.get("first_frame"):   # 只在“又来了请求但已到上限”之后拿回；允许的那一次作废照常重出
             with self.lock:
@@ -892,15 +968,26 @@ def proxies(host, ep):
     out_dir = VID / "episodes" / f"ep{ep:02d}"
     out_dir.mkdir(parents=True, exist_ok=True)
     man = {"ep": ep, "host": host, "t": time.time(), "shots": []}
+    # FIX-VID D10：当前作业里每镜的首帧输入（没过闸门的镜 build_jobs 也留在 jobs 里、route=hold）；片子的首帧和它不一致 = 过期片，不进成片
+    jobs_ff = {s["shot"]: s for s in (jload(VID / "jobs.json", {}) or {}).get("shots", []) if int(s.get("ep") or 0) == ep}
     for sid, r in sorted(st.get("shots", {}).items(), key=lambda kv: int(kv[0].split("-S")[1])):
         if int(sid[2:4]) != ep:
             continue
         x = next((x for x in r["renders"] if x["variant"] == r.get("chosen") and x.get("file")), None)
         ent = {"shot": sid, "index": int(sid.split("-S")[1]), "status": r.get("status"), "chosen": r.get("chosen")}
+        js_ = jobs_ff.get(sid)
+        if js_ is not None:
+            ent["first_frame"] = js_.get("first_frame")
+        if r.get("status") == "blocked":
+            ent["block_reason"] = str(r.get("block_reason") or "阻断（没有打分 / 提交报错）")[:300]
         # VID-LOOP（11-06，L-196 用尽采用最好一版）：尽力版（best_effort 的 chosen）也进合成，manifest 标 best_effort；
         # 以前只进 done → 尽力镜在成片里是黑场 / 静帧占位（ep01 S3=black/none），还被当“没 H3 音轨”开口型重出单（S1 死循环）
         if x and r.get("status") not in ("done", "best_effort"):
             ent["excluded"] = f"未达契约（状态 {r.get('status')}，不进合成）"
+            x = None
+        elif x and js_ is not None and (x.get("first_frame") or None) != (js_.get("first_frame") or None):
+            ent["excluded"] = f"过期片：片子首帧 {x.get('first_frame')} ≠ 当前首帧 {js_.get('first_frame')}（D10，不进合成）"
+            ent["stale"] = True
             x = None
         elif x and r.get("status") == "best_effort":
             ent["best_effort"] = "尽力版：阶梯用尽采用最好一版（L-196），进合成；闸门不过项见 gate"

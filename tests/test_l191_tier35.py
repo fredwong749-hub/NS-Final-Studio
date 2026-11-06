@@ -15,8 +15,10 @@ from tools.vqa import accept as ACC  # noqa: E402
 import producer as PR  # noqa: E402
 
 
-def test_default_config_is_preview_for_all_runs():
-    assert FJ.first_frame_tier("series10_v2") == ("preview", {})
+def test_live_config_matches_owner_decisions():
+    # L-191：series10_v2 首帧用 base35（35 步 base）；其余剧默认 preview。
+    tier, ov = FJ.first_frame_tier("series10_v2")
+    assert tier == "base35" and ov.get("steps") == 35
     assert FJ.first_frame_tier("series10_v1") == ("preview", {})
 
 

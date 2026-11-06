@@ -96,16 +96,22 @@ def default_run(root: Path | None = None) -> str:
 
 RUN_ID = _run_id_from_config()
 MAX_TRIES = 3                       # GEN_CONTRACT：每镜每阶段内容尝试 ≤3
-TICK_S = 20
+HARD_CAP_DEFAULT = 30               # L-204 D2：K-OPS-E28 24 小时硬上限只是安全阀（config/policies/retry.yaml hard_cap 同值）
+GAZE_EXTRA_ROUNDS = 2               # L-204 D8：3 次用尽且全部看镜头 / 排排站 / 首尾太像 → 自动再给换种子的轮数（每轮 3 次）
+STUCK_MIN = 10                      # L-204：ready 却没有派单路径超过这么多分钟 → 日志 stuck_object（idle_watch 读登记表 stuck_objects）
+TICK_S = 10                         # L-205 P6：20 → 10 s（每拍开销已降：探道并发、集摘要 3 s 超时、视频后台单飞）
 LEASE_S = 45 * 60                   # 一次出图 + 取回的上限；过期视为失效
 INFRA_BACKOFF = (30, 60, 120, 300, 600)
 PREFLIGHT_RETRY_S = 30 * 60
 # W20（11-03 15:19 受控重启后 7 个“只重打分”单在隧道断时占着 inflight、心跳记成 rendering=7）：
 # 只重打分走独立通道——不占道、算 scoring 不算 rendering、有硬时限、打分链路不可用时整体退避（熔断），不无限占位
 RESCORE_TIMEOUT_S = int(os.environ.get("NS_PRODUCER_RESCORE_TIMEOUT_S", "900"))   # 一次只重打分最多占位这么久
-RESCORE_MAX = int(os.environ.get("NS_PRODUCER_RESCORE_MAX", "3"))                  # 同时在跑的只重打分（含超时后还没回来的）上限
+RESCORE_MAX = int(os.environ.get("NS_PRODUCER_RESCORE_MAX", "0"))                  # 同时在跑的只重打分上限；0 = 跟出图后打分线程池同大（L-205 P4）
 RESCORE_BACKOFF = (300, 600, 1200, 1800, 3600)    # 同一对象连续只重打分没拿到结论：逐级退避
 SCORE_CHAIN_COOL_S = 300                          # 打分链路（gpu33 ssh / 共用验收）刚出过错：这么久内不再派只重打分
+SCORE_RETRY_S = 60                                # L-205 P4：出图后打分超时 / score_infra → 只重打分的退避（原 300 s；图已在盘上，等 5 分钟白耗）
+TRANSPORT_MARKS = ("ssh", "connection", "connect", "broken pipe", "eof", "refused", "reset by peer", "tunnel", "urlerror",
+                   "remote end closed", "no route", "network", "timed out", "socket", "paramiko", "exit status 255", "隧道", "连不上", "连接")
 # W44（11-04 项目方“ep01 都做不出来”→ 无人介入）：② 只重打分每镜每小时 ≤3 次，超了退避 30 分钟（ev=rescore_cap）；
 # 看图 health 恢复 loaded 后自动清零（ev=rescore_cap_reset）
 RESCORE_HOURLY_MAX = int(os.environ.get("NS_PRODUCER_RESCORE_HOURLY_MAX", "3"))
@@ -336,13 +342,34 @@ def last_consistent(td: dict, fo: dict, lo: dict) -> dict:
     if lo.get("status") != "passed" or lo.get("na") or lo.get("owner_locked"):
         return lo                    # K-OPS-E23 优先：项目方定稿锁的尾帧不因首帧换版作废（ep01-S1：E13 无视定稿锁 → 新尾帧设不成当前 → 撤回 → 重出，24 小时 108 版）
     fa, la = active_take(td, "image"), active_take(td, "last")
-    stale = bool(fa and la and str(la.get("created_at") or "") < str(fa.get("created_at") or ""))
-    if fo.get("status") == "passed" and not stale:
+    stale = bool(fa and la and not last_paired(la, fa))
+    first_ok = first_ok_for_last(fo)       # L-204 D4：换代中（regen_keep）当前首帧仍有效，尾帧不作废
+    if first_ok and not stale:
         return lo
     why = ("首帧换过（当前首帧 v{} 比尾帧 v{} 新），尾帧作废，跟着重出，不计次".format(fa.get("n"), la.get("n")) if stale
            else "首帧现在不是“已通过”（{}），尾帧作废，等首帧过契约后重出".format(fo.get("status")))
-    return {**lo, "status": "ready" if fo.get("status") == "passed" else "pending", "attempts": 0, "reason": why,
-            "waiting_for": "空闲道" if fo.get("status") == "passed" else "首帧过契约", "voided": True}
+    return {**lo, "status": "ready" if first_ok else "pending", "attempts": 0, "reason": why,
+            "waiting_for": "空闲道" if first_ok else "首帧过契约", "voided": True}
+
+
+def first_ok_for_last(fo: dict) -> bool:
+    """L-204 D4：尾帧的依赖“首帧可用”= 首帧 passed，或换代中保留着过契约的当前首帧（regen_keep）——换代重出在跑不挡尾帧；
+    尾帧永远配当前首帧（FrameExec 取 active image），首帧真换了由 E13（last_consistent）作废尾帧重出"""
+    return fo.get("status") == "passed" or bool(fo.get("regen_keep"))
+
+
+def last_paired(t_last: dict, fa: dict | None) -> bool:
+    """L-204 D6 / L-203：这一版尾帧是不是由当前首帧 fa 做的——from_first == fa.n（画布 / 精修路径记）；或参考图里含首帧文件
+    （frame_job.build_last 两种方式都把首帧放 refs）；否则按时间：尾帧不比首帧旧（与 build_jobs stale_pair / E13 同口径）。
+    没有当前首帧 → 不另加限制"""
+    if not fa:
+        return True
+    if t_last.get("from_first") is not None:
+        return t_last.get("from_first") == fa.get("n")
+    ff = str(fa.get("file") or "")
+    if ff and any(str(r).endswith(ff) for r in (t_last.get("references") or [])):
+        return True
+    return str(t_last.get("created_at") or "") >= str(fa.get("created_at") or "")
 
 
 def registry_consistency(reg: dict) -> list[dict]:
@@ -435,7 +462,8 @@ def episode_order_key(c: tuple) -> tuple:
 
 
 def hard_cap_per_stage() -> int:
-    """K-OPS-E28：每镜每阶段 24 小时内自动出图的硬上限（config/policies/retry.yaml hard_cap.value.per_stage_24h，默认 10）。
+    """K-OPS-E28：每镜每阶段 24 小时内自动出图的硬上限（config/policies/retry.yaml hard_cap.value.per_stage_24h，默认 30）。
+    L-204 D2（11-06）：上限只是安全阀，不是静默拦路——到顶的对象由 dispatch_frames → cap_exhaust 标用尽 → 尽力版 → 自动采用最好一版。
     NS_PRODUCER_HARD_CAP 优先（测试 / 临时）"""
     try:
         v = os.environ.get("NS_PRODUCER_HARD_CAP")
@@ -443,9 +471,22 @@ def hard_cap_per_stage() -> int:
             sys.path.insert(0, str(Path(__file__).resolve().parent))
             import policy as POL
             v = (POL.item("retry.hard_cap", ROOT).get("value") or {}).get("per_stage_24h")
-        return max(1, int(v or 10))
-    except Exception:  # noqa: BLE001  # arch-ok: 政策读不到用默认 10（仍然有上限，失败关闭方向）
-        return 10
+        return max(1, int(v or HARD_CAP_DEFAULT))
+    except Exception:  # noqa: BLE001  # arch-ok: 政策读不到用默认（仍然有上限，失败关闭方向）
+        return HARD_CAP_DEFAULT
+
+
+def cap_blocked(led: dict, t: float | None = None) -> bool:
+    """L-204 D2：账本显示这一对象 24 小时内被硬上限封顶（hard_capped 新鲜）且之后没有人工 uncap（cap_extra 更新）→ 不能再自动派。
+    只看账本（不读 takes.json），给 _frame_obj / stuck 自检用；真正派单前仍由 Producer.hard_capped 按 takes.json 现算"""
+    hc = led.get("hard_capped") or {}
+    t = t or now()
+    if not hc or t - float(hc.get("t") or 0) > 24 * 3600:
+        return False
+    ex = led.get("cap_extra") or {}
+    if ex and float(ex.get("t") or 0) >= float(hc.get("t") or 0) and t - float(ex.get("t") or 0) < 24 * 3600:
+        return False
+    return True
 
 
 def ts_epoch(s) -> float | None:
@@ -504,7 +545,25 @@ def dynamic_backlog(done_times: list, t: float, lanes: int, depth: int, window_s
     下限 = 道数 × 预取深度（保证每道至少能把预取填满）。不再写死 2×道数×实例数"""
     recent = [x for x in done_times if t - x <= window_s]
     rate = len(recent) / (window_s / 60.0)
-    return max(lanes * depth, int(round(rate * horizon_min)))
+    return max(lanes * depth * 2, int(round(rate * horizon_min)))     # L-205 P3：下限 道 × 深度 × 2（图在盘上，打分忙不该停出图）
+
+
+def post_pool_workers(root: Path = ROOT, lanes: int | None = None) -> int:
+    """L-205 P1：出图后打分（契约 + 看图）线程池大小——config/pipeline/producer.json post_pool.max_workers 优先；
+    否则 max(6, 道数 × 预取深度)（原写死 3：6 道 × 深度 2 出图时打分线程只有 3 个，出好的图排队等线程，GPU 闲着）"""
+    try:
+        v = ((jl(Path(root) / "config" / "pipeline" / "producer.json", {}) or {}).get("post_pool") or {}).get("max_workers")
+        if v:
+            return max(1, int(v))
+    except Exception:  # noqa: BLE001  # arch-ok: 配置读不到用默认公式
+        pass
+    return max(6, int(lanes if lanes is not None else 6) * prefetch_depth())
+
+
+def is_transport_error(err) -> bool:
+    """L-205 P4：打分出错是不是 ssh / 隧道 / 连接类（传输层）。只有这类才熔断打分链路；看图 untested / 共用验收 retry / 内容类不熔断"""
+    s = str(err or "").lower()
+    return bool(s) and any(m in s for m in TRANSPORT_MARKS)
 
 
 LOCAL_ONLY_MARKS = ("本地生成", "占位", "暂缓")
@@ -1373,6 +1432,16 @@ def lane_queue(url: str) -> dict:
 
 
 # ---------------------------------------------------------------------------------------------- 契约结果
+def last_preflight(job: dict, sid: str) -> None:
+    """L-204 / FIX-PRE 11-06（REVIEW-PRE F）：尾帧作业派单前走和首帧同一道生成契约 preflight（ns_render.unified_frame._contract，
+    I1–I9 含 continuity 槽）；原来尾帧 compose 直接提交、I2 / I9 都没查。不过 → ComfyError（“preflight 不通过”归 preflight 类，不计内容尝试）"""
+    from ns_render import unified_frame as UF
+    from ns_render.comfy_client import ComfyError
+    pf = UF._contract(job)
+    if not pf.ok:
+        raise ComfyError(f"{sid} 尾帧生成契约 preflight 不通过，未提交：" + "；".join(pf.reasons()))
+
+
 def take_pf(t: dict | None) -> dict:
     """这一版的出图后契约：take.postflight（register_takes / 本服务）或 take.contract（ok / postflight，画布 unified 路径）"""
     if not t:
@@ -1474,8 +1543,10 @@ def first_last_check(paths, pf: dict, job: dict, file_rel: str) -> dict:
 
 def review_pick(td: dict, stage: str, ns: set | None = None) -> int | None:
     """L-183：这一阶段（只看 ns 里的版本，None = 全部）Q1–Q9 全过、没被驳回 / 标坏的版本里 score_key 最高的一版（L-200：看镜头 / 排排站的不算）"""
+    fa = active_take(td, "image") if stage == "last" else None
     c = [t for t in td.get("takes") or [] if t.get("stage") == stage and (ns is None or t.get("n") in ns)
-         and not t.get("bad") and not t.get("master_reject") and q19_clean(take_pf(t)) and not never_adopt(take_pf(t))]
+         and not t.get("bad") and not t.get("master_reject") and q19_clean(take_pf(t)) and not never_adopt(take_pf(t))
+         and (stage != "last" or last_paired(t, fa))]          # L-204 D6：尾帧只在“由当前首帧做的版本”里挑
     return max(c, key=lambda t: score_key(take_pf(t)))["n"] if c else None
 
 
@@ -1485,6 +1556,12 @@ def safe_take(pf: dict) -> bool:
     L-203：首尾帧太像的尾帧（fl_bad）同样不许兜底采用"""
     if never_adopt(pf):
         return False
+    return safe_core(pf)
+
+
+def safe_core(pf: dict) -> bool:
+    """L-196 兜底采用的“绝对不收”项（不含 L-200 / L-203 的 never_adopt）：成人安全（Q6 / 年龄）与文字水印（OCR）不过 → False。
+    L-204 D8 的最后兜底（换种子轮也用尽）只看这一项"""
     for i in (pf or {}).get("items") or []:
         if i.get("status") in ("fail", "untested") and i.get("id") in ("Q6", "Q9", "QB") and not i.get("record_only"):
             ev = i.get("evidence") or {}
@@ -1494,14 +1571,24 @@ def safe_take(pf: dict) -> bool:
 
 
 def review_pick_relaxed(td: dict, stage: str, ns: set | None = None) -> int | None:
-    """L-196：重试用尽、没有 Q1–Q9 全过的版本时，取没被驳回 / 标坏、成人安全与文字水印没挡的版本里 score_key 最高的一版"""
+    """L-196：重试用尽、没有 Q1–Q9 全过的版本时，取没被驳回 / 标坏、成人安全与文字水印没挡的版本里 score_key 最高的一版
+    （L-204 D6：尾帧只在由当前首帧做的版本里挑）"""
+    fa = active_take(td, "image") if stage == "last" else None
     c = [t for t in td.get("takes") or [] if t.get("stage") == stage and (ns is None or t.get("n") in ns)
-         and not t.get("bad") and not t.get("master_reject") and t.get("file") is not None and safe_take(take_pf(t))]
+         and not t.get("bad") and not t.get("master_reject") and t.get("file") is not None and safe_take(take_pf(t))
+         and (stage != "last" or last_paired(t, fa))]
     return max(c, key=lambda t: score_key(take_pf(t)))["n"] if c else None
 
 
+def adopt_candidates(td: dict, stage: str) -> list[dict]:
+    """L-204 D8：兜底采用的候选池——这一阶段没标坏 / 没被驳回 / 有文件的版本（尾帧只认由当前首帧做的）"""
+    fa = active_take(td, "image") if stage == "last" else None
+    return [t for t in td.get("takes") or [] if t.get("stage") == stage and not t.get("bad") and not t.get("master_reject")
+            and t.get("file") is not None and (stage != "last" or last_paired(t, fa))]
+
+
 def review_adopt(paths: "Paths", oid: str, n: int | None = None, by: str = "L-183 自动", ns: set | None = None,
-                 relaxed: bool = False) -> int | None:
+                 relaxed: bool = False, waive_gaze: bool = False) -> int | None:
     """L-183（总调度 11-04 04:2x / 05:0x，项目方“不卡整集”）：尽力用尽不再排除出拼接——取 Q1–Q9 全过里分数最高的一版设为当前，
     postflight 标 review_needed=true 并改 ok=true（原结论留 ok_before_review / blocking_before_review，审片可见），
     这样尾帧 / 出图检测 / 视频编单都按“过”往下走；V2_LIVE 记“待项目方复核”。没有 Q1–Q9 全过的版本 → None（照旧尽力）"""
@@ -1512,18 +1599,27 @@ def review_adopt(paths: "Paths", oid: str, n: int | None = None, by: str = "L-18
     if n is None:
         n = review_pick(td, stage, ns) or (review_pick_relaxed(td, stage, ns) if relaxed else None)
     t = next((x for x in td.get("takes") or [] if x.get("stage") == stage and x.get("n") == n), None) if n else None
-    if t is None or never_adopt(take_pf(t)) or not (q19_clean(take_pf(t)) or (relaxed and safe_take(take_pf(t)))):
+    # L-204 D8：首帧换种子轮也用尽后的最后兜底（waive_gaze）——只放过 L-200 视线项（成人 / 文字仍绝不收），版本标 gaze_waived 并报卡点
+    waived = bool(waive_gaze and t is not None and stage == "image" and gaze_bad(take_pf(t)) and safe_core(take_pf(t)))
+    if t is None or (never_adopt(take_pf(t)) and not waived) or not (q19_clean(take_pf(t)) or (relaxed and (safe_take(take_pf(t)) or waived))):
         if t is not None and gaze_bad(take_pf(t)):
             log_event(paths, "review_adopt_refused", obj=oid, take=n, by=by, rule="L-200", counted=False, note="看镜头 / 排排站的版本不采用")
         elif t is not None and fl_bad(take_pf(t)):
             log_event(paths, "review_adopt_refused", obj=oid, take=n, by=by, rule="L-203", counted=False, note="尾帧与首帧太像的版本不采用")
         return None
+    if stage == "last" and not last_paired(t, active_take(td, "image")):     # L-204 D6：尾帧不是由当前首帧做的 → 不采用
+        log_event(paths, "review_adopt_refused", obj=oid, take=n, by=by, rule="L-204 D6", counted=False, note="尾帧不是由当前首帧做的，不采用")
+        return None
     note = {"by": by, "at": iso(), "rule": "L-183", "why": "尽力用尽，取 Q1–Q9 全过里分数最高的一版，待项目方复核"}
+    if waived:
+        note = {"by": by, "at": iso(), "rule": "L-204 D8", "why": "换种子加轮仍全部看镜头 / 排排站，采用最好一版继续（不停集），待项目方复核"}
 
     def _mark(d):
         for x in d.get("takes") or []:
             if x.get("stage") == stage and x.get("n") == n:
                 pf = x.get("postflight") if isinstance(x.get("postflight"), dict) else take_pf(x)
+                if waived and not pf.get("gaze_waived"):
+                    pf["gaze_waived"] = {"by": by, "at": note["at"], "rule": "L-204 D8"}
                 if pf.get("review_needed"):
                     return
                 pf.update(ok_before_review=pf.get("ok"), blocking_before_review=list(pf.get("blocking") or []),
@@ -1561,7 +1657,7 @@ class World:
     def _summary(self) -> dict:
         """总调度 11-01（PW-011）：“当前帧 / 视频”统一读集摘要 first_frame / last_frame_target / video（与 /api/shots frames 同源）"""
         try:
-            with urllib.request.urlopen("http://127.0.0.1:8800/api/episodes/summary", timeout=20) as r:
+            with urllib.request.urlopen("http://127.0.0.1:8800/api/episodes/summary", timeout=3) as r:   # L-205 P6：20 → 3 s（每拍都读，超时退回空摘要）
                 d = json.loads(r.read())
             return {s.get("id"): s for e in d.get("episodes") or [] for s in e.get("shots") or []}
         except Exception:  # noqa: BLE001
@@ -1672,8 +1768,8 @@ def derive(w: World, ledger: dict, leases: dict, run_summary: dict | None = None
             stl = stale_requeue_map((sm or {}).get("stale") or {})   # 剧本 / 输入改了：画布摘要的过期标记（与 /api/shots 同源）；K-REN-956 去掉编译变化
             fo = _frame_obj("first", "image", sid, n, td, fv, ledger, leases, canvas, n in fv2_eps, deps_ok=ao["status"] == "passed",
                             stale=stl.get("image"))
-            lo = _frame_obj("last", "last", sid, n, td, fv, ledger, leases, canvas, n in fv2_eps, deps_ok=fo["status"] == "passed",
-                            first=fo, stale=stl.get("last"))
+            lo = _frame_obj("last", "last", sid, n, td, fv, ledger, leases, canvas, n in fv2_eps, deps_ok=first_ok_for_last(fo),
+                            first=fo, stale=stl.get("last"))      # L-204 D4：换代中保留的当前首帧（regen_keep）不挡尾帧
             fo = first_input_changed(w.p, sid, fo, ledger.get(f"first:{sid}") or {})   # K-OPS-E24：重新导入后作业变了 → 重出
             if _VM.no_last(w.p.run_id, n, w.p.root, shot=sid):  # L-197 A：本集视频只用首帧（I2VA）→ 尾帧对象 = 不适用（不创建 / 不派 / 不评分 / 不挡视频）
                 lo = {**obj("last", sid, ep=n, shot=sid), "status": "passed", "na": True, "i2va_no_last": True,
@@ -1871,6 +1967,8 @@ def _frame_obj(kind, stage, sid, n, td, fv, ledger, leases, canvas, fv2_owned, d
     o["attempts"] = int(led.get("tries") or 0)
     o["last_error"] = led.get("last_error")
     o["infra_errors"] = int(led.get("infra") or 0)
+    if led.get("gaze_rounds"):
+        o["gaze_round"] = int(led["gaze_rounds"])      # L-204 D8：换种子加轮（seed_pick 用它换种子流 salt）
     t = active_take(td, stage)
     pf = take_pf(t)
     fvs = (fv.get(stage) or {})
@@ -1915,8 +2013,21 @@ def _frame_obj(kind, stage, sid, n, td, fv, ledger, leases, canvas, fv2_owned, d
                 "reason": "画布上有这一镜的任务在排 / 在跑，不重复提交"}
     if fv2_owned and not fvf:
         return {**o, "status": "running", "where": "ASSETMASTER frames_v2", "reason": f"ASSETMASTER 在做（已试 {fv_tries} 次）"}
+    if kind == "last" and led.get("last_unavailable"):
+        # L-204 D8：尾帧换种子轮也用尽、全部看镜头 / 太像 → 本镜视频退回只给首帧（I2VA）。回退绑定当时的首帧：首帧换了 → 回退作废、尾帧重出
+        fa_n = (td.get("active") or {}).get("image")
+        if fa_n is not None and led.get("last_fallback_first_n") not in (None, fa_n):
+            return {**o, "status": "ready" if deps_ok else "pending", "voided": True, "attempts": 0,
+                    "waiting_for": "空闲道" if deps_ok else "首帧过契约",
+                    "reason": f"首帧换成 v{fa_n} 后尾帧 I2VA 回退作废，重新出尾帧，不计次"}
+        return {**o, "status": "best_effort", "last_unavailable": True, "last_frame_fallback": "i2va",
+                "reason": led.get("reason") or "尾帧出不来（看镜头 / 太像），视频退回只给首帧（I2VA）"}
     if led.get("final") == "best_effort" and led.get("reason"):
         return {**o, "status": "best_effort", "reason": led["reason"]}
+    if led.get("final") != "passed" and cap_blocked(led):
+        # L-204 D2：封顶的对象不再显示“等空闲道”——dispatch_frames.cap_exhaust 会把它标成尽力版、交 adopt_best_effort_sweep 采用最好一版
+        return {**o, "status": "best_effort", "cap_blocked": True,
+                "reason": led.get("reason") or "24 小时内自动出图到硬上限（K-OPS-E28），按 L-204 自动采用最好一版继续"}
     if led.get("final") == "best_effort" or (fvf.get("status") == "不合格" and not led.get("demoted_at")) or o["attempts"] >= MAX_TRIES:
         why =led.get("reason") or ("；".join(fvf.get("why") or [])[:160] if fvf.get("why") else None) or (pf_reason(pf) if pf else None)
         return {**o, "status": "best_effort", "reason": f"试了 {max(o['attempts'], fv_tries)} 次仍没过契约，取最好一版标“尽力”，不进合成。"
@@ -2046,10 +2157,11 @@ class FrameExec:
     """真出图：唯一出图路径（K-REN-134）。一次占一条道；postflight 放 CPU 线程池（不占道，K-OPS-I06）"""
 
     script_fn = None                            # 类默认：绕过 __init__ 构造（测试 / 子类）时也有该属性
-    def __init__(self, paths: Paths, script, script_fn=None):
+    def __init__(self, paths: Paths, script, script_fn=None, post_workers: int | None = None):
         self.p, self._script = paths, script
         self.script_fn = script_fn              # B2：每次出图现取最新导入稿（Producer.script 按 sha / mtime 热重载）；None = 固定稿
-        self.post_pool = cf.ThreadPoolExecutor(max_workers=3, thread_name_prefix="producer-postflight")
+        self.post_workers = int(post_workers or post_pool_workers(paths.root))      # L-205 P1：原写死 3
+        self.post_pool = cf.ThreadPoolExecutor(max_workers=self.post_workers, thread_name_prefix="producer-postflight")
 
     @property
     def script(self):
@@ -2130,6 +2242,7 @@ class FrameExec:
             job = apply_owner_edit(job, owner_edit)
             if rung.get("preset"):
                 job["preset"] = rung["preset"]
+            last_preflight(job, sid)                       # L-204：尾帧 compose 作业也过生成契约 preflight（FIX-PRE 11-06；策略 B 只是复制已查过的脸）
             if rung.get("variant") == "double_face" and job.get("face_files"):     # 策略 B（尾帧）：身份脸再放一槽
                 f0 = job["face_files"][0]
                 k = len(job["refs"]) + 1
@@ -2173,7 +2286,7 @@ class FrameExec:
         from ns_render import frame_edit as FE
         from ns_render import unified_frame as UF
         pf = None
-        for k in range(3 if host_path else 0):    # gpu33 打分偶发 OOM / ssh 抖：退避重试，不当成内容不过
+        for k in range(2 if host_path else 0):    # gpu33 打分偶发 OOM / ssh 抖：重试一次（L-205 P5：原 3 次、睡 30 / 60 / 90 s），不当成内容不过
             try:
                 if str(ROOT / "tools" / "gen_contract") not in sys.path:
                     sys.path.insert(0, str(ROOT / "tools" / "gen_contract"))
@@ -2196,7 +2309,8 @@ class FrameExec:
             except Exception as e:  # noqa: BLE001
                 err = repr(e)[:200]
             log_event(self.p, "score_retry", obj=f"{stage}:{sid}", error=str(err)[:200], k=k + 1)
-            time.sleep(30 * (k + 1))
+            if k == 0:
+                time.sleep(10)                    # L-205 P5：只等 10 s 重试一次；再不行退回 UF._postflight
         if pf is None:
             try:
                 pf = UF._postflight(file_rel, job, host)
@@ -2321,13 +2435,7 @@ class VideoBridge:
                     logf("video_release_skipped", ep=E["ep"], counted=False,
                          why="本集有尽力镜：不整集放行（尽力镜不进合成）；过了契约的镜照常逐镜出视频")
         if (ctrl.get("workers") or {}).get("video") == "producer" and not night_alive:
-            NT = self._night_mod()
-            if self._night_state is None:
-                self._night_state = jl(NT.STATE, None) or {"eps": {}, "pending_shots": {}, "started": time.time()}
-            try:
-                NT.loop_once(self._night_state)
-            except Exception as e:  # noqa: BLE001
-                logf("video_err", error=repr(e)[:300], kind=classify(repr(e)))
+            self.bg_loop(logf)                    # L-205 P6：原同步跑 night.loop_once（一轮几十秒，整拍卡住出图派单）→ 后台单飞
             return
         why = self.night_stalled(reg, night_alive) if ctrl.get("video_takeover", True) else None
         if why:
@@ -2376,6 +2484,14 @@ class VideoBridge:
             self._takeover_why = why
             logf("video_takeover", why=why, counted=False)
 
+        return self.bg_loop(logf, takeover=True)
+
+    def bg_loop(self, logf, takeover: bool = False) -> bool:
+        """night.loop_once 放后台线程跑一轮（单飞：上一轮没完不再起；接手 / workers.video=producer 共用同一线程位）"""
+        th = getattr(self, "_takeover_th", None)
+        if th is not None and th.is_alive():
+            return False
+
         def run():
             try:
                 NT = self._night_mod()
@@ -2383,8 +2499,8 @@ class VideoBridge:
                     self._night_state = jl(NT.STATE, None) or {"eps": {}, "pending_shots": {}, "started": time.time()}
                 NT.loop_once(self._night_state)
             except Exception as e:  # noqa: BLE001
-                logf("video_err", error=repr(e)[:300], kind=classify(repr(e)), takeover=True)
-        self._takeover_th = threading.Thread(target=run, name="producer-night-takeover", daemon=True)
+                logf("video_err", error=repr(e)[:300], kind=classify(repr(e)), **({"takeover": True} if takeover else {}))
+        self._takeover_th = threading.Thread(target=run, name="producer-night-takeover" if takeover else "producer-night", daemon=True)
         self._takeover_th.start()
         return True
 
@@ -2459,7 +2575,8 @@ class Producer:
         self.rescoring: set[str] = set()           # W20：只重打分的对象（不占道；心跳算 scoring，不算 rendering）
         self._rescore_futs: dict[str, cf.Future] = {}   # 对象 → 只重打分的 future（超时放位后仍留着，回来前不重派、占上限）
         self._score_down_until = 0.0               # W20：打分链路熔断到（这之前不派只重打分）
-        self.rescore_pool = cf.ThreadPoolExecutor(max_workers=max(2, RESCORE_MAX + 2), thread_name_prefix="producer-rescore")
+        self.rescore_max = RESCORE_MAX or post_pool_workers(self.p.root, len(self.lanes) or None)   # L-205 P4：跟出图后打分线程池同大
+        self.rescore_pool = cf.ThreadPoolExecutor(max_workers=max(2, self.rescore_max + 2), thread_name_prefix="producer-rescore")
         self._backlog_env = int(os.environ.get("NS_PRODUCER_SCORE_BACKLOG", "0"))
         self.score_backlog_max = self._backlog_env or 2 * (len(self.lanes) or 1) * vlm_instances()     # 启动值；之后按实测吞吐动态更新
         # 11-02 02:2x 复核：gpu33 线程池 18 < 积压上限 48，等打分的线程占满后新单在池里排 50–100 s 才开始（dispatch 02:08:30 → rendered
@@ -2651,7 +2768,12 @@ class Producer:
                 except Exception as e:  # noqa: BLE001
                     self.logf("asset_release_err", error=repr(e)[:300])
                 try:
-                    self.adopt_best_effort_sweep(reg)  # L-196：用尽停在 best_effort 的自动取最高分版
+                    if self.gaze_regen_sweep(reg):     # L-204 D11：L-200 之前判过的当前首帧有视线缺陷 → 撤下重出（计次）
+                        return self.tick(dispatch)     # 登记表变了，重推一拍再派
+                except Exception as e:  # noqa: BLE001
+                    self.logf("gaze_regen_err", error=repr(e)[:300])
+                try:
+                    self.adopt_best_effort_sweep(reg)  # L-196：用尽停在 best_effort 的自动取最高分版（L-204 D8 兜底也在这里）
                 except Exception as e:  # noqa: BLE001
                     self.logf("be_adopt_err", error=repr(e)[:300])
                 try:
@@ -2681,6 +2803,10 @@ class Producer:
                 except Exception as e:  # noqa: BLE001
                     self.logf("import_err", error=repr(e)[:300])
             self.raise_gates(reg)
+        try:                                         # L-204 不变量：ready 却没有派单路径 ≥ STUCK_MIN 分钟 → stuck_objects（idle_watch 读）
+            reg["stuck_objects"] = self.stuck_objects(reg)
+        except Exception as e:  # noqa: BLE001
+            self.logf("stuck_check_err", error=repr(e)[:200])
         try:                                         # K-OPS-E13 登记表自检（data_parity 读同一份文件）
             probs = registry_consistency(reg)
             js(self.p.pd / "consistency.json", {"at": iso(), "n": len(probs), "problems": probs[:200], "rule": "K-OPS-E13"})
@@ -2756,13 +2882,234 @@ class Producer:
                     led = self.ledger().get(o["id"]) or {}
                     if o.get("status") != "best_effort" or led.get("final") != "best_effort" or                             not (led.get("redo_exhausted") or (led.get("tries") or 0) >= MAX_TRIES):   # FIX-A：驳回阶梯用尽（tries 常 <3）也采用
                         continue
+                    if led.get("last_unavailable"):      # L-204 D8 已退回 I2VA 的尾帧：终态，不再反复试采用
+                        continue
                     r = review_adopt(self.p, o["id"], by="L-196 自动", relaxed=True)
                     if r:
                         self.led_update(o["id"], final="passed", hard_capped=None,
                                         reason=f"L-196 重试用尽，自动取最高分 v{r} 设为当前，待项目方复核")
+                        self.clear_reject(o["id"], f"L-196 重试用尽已自动采用 v{r}，驳回 / 换代记录清掉（L-204 D7）")
                         self.logf("passed", obj=o["id"], take=r, review_needed=True, rule="L-196", via="adopt_sweep")
                         done.append(o["id"])
+                        continue
+                    try:
+                        r2 = self.gaze_fallback(o, led)     # L-204 D8：全部看镜头 / 排排站 / 太像 → 加轮换种子；轮也用尽 → 尾帧 I2VA / 首帧兜底
+                    except Exception as e:  # noqa: BLE001  # arch-ok: 兜底出错不挡其它对象，原因进日志
+                        self.logf("gaze_fallback_err", obj=o["id"], error=repr(e)[:300], counted=False)
+                        r2 = None
+                    if r2:
+                        done.append(o["id"])
         return done
+
+    # -- L-204（项目方 11-06：每镜最多 3 次，过了就用，否则自动采用最好一版继续；绝不停集）--
+    def clear_reject(self, oid: str, why: str) -> bool:
+        """D7：对象走到“用尽 / 已采用”时把 master_rejects[oid] 标 cleared、takes.json 这一阶段的 master_gate 撤掉——
+        否则 regen_shots 会一直“已在重出 / 换代中”跳过，auto_current 也永远不敢自动换当前（11-06 08:06 ep01 S1/S2 根因）"""
+        rf = getattr(self.p, "rejects", None)
+        rj = (jl(rf, {}) or {}) if rf else {}
+        if oid not in rj or rj[oid].get("cleared"):
+            return False
+        rj[oid]["cleared"] = {"by": "producer", "at": iso(), "why": why}
+        js(self.p.rejects, rj)
+        try:
+            from ns_render import pipeline as P
+            kind, sid = oid.split(":", 1)
+            stage = "image" if kind == "first" else "last"
+            P.mutate_takes(sid, lambda d: [(d.get("master_gate") or {}).pop(stage, None), None][1], op="reject_cleared", by="producer（L-204 D7）")
+        except Exception as e:  # noqa: BLE001  # arch-ok: takes.json 改不动只记日志（rejects 已 cleared，_frame_obj 不再走驳回路径）
+            self.logf("reject_clear_gate_err", obj=oid, error=repr(e)[:200], counted=False)
+        self.logf("reject_cleared", obj=oid, why=why, counted=False, rule="L-204 D7")
+        return True
+
+    def cap_exhaust(self, o: dict) -> bool:
+        """D2：K-OPS-E28 硬上限到顶 → 不再静默跳过：标用尽（redo_exhausted）+ 尽力版（final=best_effort）→ adopt_best_effort_sweep
+        下一拍采用最好一版（L-196 / L-204）。已标过的不重复"""
+        oid = o["id"]
+        led = self.ledger().get(oid) or {}
+        if led.get("final") == "best_effort" and led.get("redo_exhausted"):
+            return False
+        hc = led.get("hard_capped") or {}
+        why = (f"24 小时内自动出图到硬上限（{hc.get('n')}/{hc.get('lim')}，K-OPS-E28）→ 按 L-204 标用尽，自动采用最好一版继续，不等人工")
+        self.led_update(oid, final="best_effort", redo_exhausted=True, cap_exhausted={"t": now(), "at": iso()}, reason=why)
+        self.clear_reject(oid, "硬上限到顶，驳回 / 换代阶梯视为走完（L-204 D2）")
+        self.logf("hard_cap_exhausted", obj=oid, renders_24h=hc.get("n"), cap=hc.get("lim"), counted=False, rule="L-204 D2", why=why)
+        return True
+
+    def void_reset(self, o: dict, led: dict) -> dict:
+        """D5：E13 / 首帧换版作废的尾帧（登记表 voided）→ 账本 tries / final / 换种子轮 / I2VA 回退一并清零（不计次），
+        历史条目标 before_void 留痕。以前只有登记表 attempts=0、账本 tries 还是 3 → attempt > MAX_TRIES 永远派不出"""
+        oid = o["id"]
+        why = o.get("reason") or "尾帧作废（首帧换版），重新给 3 次，不计次"
+        r = self.led_update(oid, tries=0, final=None, redo_exhausted=None, ladder_plan=[], gaze_rounds=None,
+                            last_unavailable=None, last_frame_fallback=None, last_fallback_first_n=None, voided_at=iso(),
+                            history=[dict(h, before_void=True) for h in led.get("history") or []], reason=why)
+        self.logf("last_void_reset", obj=oid, counted=False, why=why, rule="L-204 D5", tries_before=led.get("tries"))
+        return r
+
+    def gaze_fallback(self, o: dict, led: dict) -> int | None:
+        """D8：3 次用尽、review_adopt 没取到（候选全部是 L-200 看镜头 / 排排站 或 L-203 首尾太像 = never_adopt）：
+          ① 自动再给一轮换种子（gaze_rounds+1，最多 GAZE_EXTRA_ROUNDS 轮；账本 tries / final 清零，不计前面的；硬上限放行 3 次）；
+          ② 轮也用尽：尾帧 → 标 last_unavailable，takes.json 顶层写 last_frame_fallback={mode:"i2va", first_n}（视频侧 build_jobs 读，
+             与当前首帧绑定），视频退回只给首帧；首帧 → 取没看镜头的最好一版，没有就取最好一版（成人 / 文字不过的除外）标 review_needed
+             + gaze_waived，并报卡点（项目方规矩：不停集）。
+        候选里有成人 / 文字挡的（不是 never_adopt 的原因）→ 不归这里，照旧停在 best_effort。返回采用的版本号 / 加轮 -1 / None"""
+        from ns_render import pipeline as P
+        oid = o["id"]
+        kind, sid = oid.split(":", 1)
+        stage = "image" if kind == "first" else "last"
+        if led.get("last_unavailable"):
+            return None
+        td = P.load_takes(sid)
+        cands = adopt_candidates(td, stage)
+        if not cands or not all(never_adopt(take_pf(t)) for t in cands):
+            return None
+        rounds = int(led.get("gaze_rounds") or 0)
+        if rounds < GAZE_EXTRA_ROUNDS:
+            why = (f"{len(cands)} 版全部{'看镜头 / 排排站' if kind == 'first' else '看镜头 / 排排站或与首帧太像'}（L-200 / L-203 硬闸，不采用）"
+                   f"→ L-204 自动再给第 {rounds + 1}/{GAZE_EXTRA_ROUNDS} 轮换种子（3 次），不计之前的次数")
+            self.led_update(oid, tries=0, final=None, redo_exhausted=None, ladder_plan=[], gaze_rounds=rounds + 1, gaze_round_at=iso(),
+                            cap_extra={"n": MAX_TRIES, "t": now(), "at": iso(), "by": "producer.gaze_fallback", "note": "L-204 D8 换种子加轮"},
+                            history=[dict(h, before_gaze_round=True) for h in led.get("history") or []], reason=why)
+            self.clear_reject(oid, "换种子加轮（L-204 D8），驳回 / 换代阶梯视为走完")
+            self.logf("gaze_round", obj=oid, round=rounds + 1, max_rounds=GAZE_EXTRA_ROUNDS, n_cands=len(cands), counted=False,
+                      rule="L-204 D8", why=why)
+            return -1
+        if kind == "last":
+            fa = active_take(td, "image")
+            first_n = fa.get("n") if fa else None
+            why = (f"尾帧 3 次 + {rounds} 轮换种子仍全部看镜头 / 排排站或与首帧太像 → 本镜视频退回只给首帧（I2VA），运镜交给视频模型"
+                   f"（L-204 D8；绑定首帧 v{first_n}，首帧换了自动重出尾帧）")
+            flag = {"mode": "i2va", "first_n": first_n, "at": iso(), "by": "producer.gaze_fallback", "rule": "L-204 D8", "why": why}
+            P.mutate_takes(sid, lambda d: d.__setitem__("last_frame_fallback", flag), op="last_frame_fallback", by="producer（L-204 D8）")
+            self.led_update(oid, final="best_effort", last_unavailable=True, last_frame_fallback="i2va", last_fallback_first_n=first_n,
+                            reason=why)
+            self.clear_reject(oid, "尾帧退回 I2VA（L-204 D8）")
+            self.logf("last_unavailable", obj=oid, first_n=first_n, fallback="i2va", rounds=rounds, counted=False, rule="L-204 D8", why=why)
+            self.report_issue(o, why, "视频按 I2VA 出；想要尾帧可改分镜落幅后 regen 尾帧", blocking=False)
+            return first_n or -1
+        ok_gaze = [t for t in cands if not gaze_bad(take_pf(t)) and safe_core(take_pf(t))]
+        pool = ok_gaze or [t for t in cands if safe_core(take_pf(t))]
+        if not pool:
+            sig = sorted(int(t["n"]) for t in cands)          # 防重复：同一批候选只记一次日志 + 报一次卡点（扫每 2 分钟一次）
+            if led.get("gaze_fallback_none") == sig:
+                return None
+            self.led_update(oid, gaze_fallback_none=sig)
+            self.logf("gaze_fallback_none", obj=oid, counted=False, rule="L-204 D8", note="候选都有成人 / 文字硬项，不能采用")
+            self.report_issue(o, f"{oid} 换种子加轮后 {len(cands)} 版仍全部看镜头 / 排排站，且都有成人 / 文字硬项，无法兜底采用（L-204 D8）",
+                              "项目方在 #/queue 用“修改”，或改分镜后 regen", blocking=False)
+            return None
+        n = max(pool, key=lambda t: score_key(take_pf(t)))["n"]
+        r = review_adopt(self.p, oid, n=n, by="L-204 D8 兜底", relaxed=True, waive_gaze=True)
+        if not r:
+            return None
+        why = (f"首帧 3 次 + {rounds} 轮换种子仍全部看镜头 / 排排站 → 采用最好一版 v{r}"
+               f"{'（没看镜头）' if ok_gaze else '（仍看镜头，标 gaze_waived）'}继续，待项目方复核（L-204 D8）")
+        self.led_update(oid, final="passed", hard_capped=None, gaze_waived=not ok_gaze, reason=why)
+        self.clear_reject(oid, "L-204 D8 兜底已采用")
+        self.logf("passed", obj=oid, take=r, review_needed=True, gaze_waived=not ok_gaze, rule="L-204 D8", via="gaze_fallback")
+        self.report_issue(o, why, "项目方在 #/queue 用“修改”换一版；或改分镜视线写法后 regen", blocking=False)
+        return r
+
+    def report_issue(self, o: dict, what: str, fix_hint: str, blocking: bool = False) -> str | None:
+        """报卡点（tools/master/report_issue.report，who=PRODUCER）：文件按本进程 root（演练 / 测试根不碰真实 issues.jsonl）"""
+        try:
+            import importlib.util as _u
+            sp = _u.spec_from_file_location("report_issue_for_producer_issue", ROOT / "tools/master/report_issue.py")
+            m = _u.module_from_spec(sp)
+            sp.loader.exec_module(m)
+            live = Path(self.p.root) / "docs/master/V2_LIVE.md"
+            rec = m.report(self.p.run_id, int(o.get("ep") or 0), "producer", AGENT, what[:900], blocking, fix_hint,
+                           issues=Path(self.p.root) / "data/pipeline/issues.jsonl", live=live if live.is_file() else None)
+            return rec.get("id")
+        except Exception as e:  # noqa: BLE001  # arch-ok: 报卡点失败不挡流程（账本 / 日志已记）
+            self.logf("report_issue_err", obj=o.get("id"), error=repr(e)[:200], counted=False)
+            return None
+
+    def gaze_regen_sweep(self, reg, every_s: float = 120) -> list:
+        """D11（L-200 补课）：当前首帧过了契约、但 postflight 里有视线缺陷（Q9 eye_contact / lineup、G1 fail）且没按 L-200 重判过
+        （= L-200 之前判的；现在这种版本根本设不成当前）→ 撤下当前、postflight 改判不过（ok_before_gaze 留痕）、账本 final 清掉，
+        **tries 不清**（计入 3 次）；用尽后走 adopt → D8。gaze_waived（D8 兜底采用的）不动。启动第一拍就跑，之后每 2 分钟"""
+        if now() - getattr(self, "_gaze_check_t", 0) < every_s:
+            return []
+        self._gaze_check_t = now()
+        from ns_render import pipeline as P
+        from ns_render import frame_edit as FE
+        out = []
+        for E in reg.get("episodes") or []:
+            for S in E["shots"]:
+                o = S["objects"]["first"]
+                if o.get("status") != "passed" or o.get("owner_locked") or not o.get("take"):
+                    continue
+                try:
+                    td = P.load_takes(S["shot"])
+                except Exception:  # noqa: BLE001  # arch-ok: 读不到这一镜就跳过，下一拍再看
+                    continue
+                t = active_take(td, "image")
+                pf = take_pf(t)
+                if not t or not pf.get("ok") or not gaze_bad(pf) or pf.get("gaze_waived") or pf.get("gaze_rejudged"):
+                    continue
+                n = t["n"]
+                pf2 = {**pf, "ok": False, "ok_before_gaze": pf.get("ok"), "blocking": sorted(set(pf.get("blocking") or []) | {"gaze"}),
+                       "gaze_rejudged": {"at": iso(), "rule": "L-200 / L-204 D11", "by": "producer.gaze_regen_sweep"}}
+                pf2.setdefault("reasons", [])
+                pf2["reasons"] = list(pf2["reasons"]) + ["L-200 视线 / 排排站硬闸补判：有人看镜头或排排站，撤下重出"]
+                FE.annotate(S["shot"], "image", n, postflight=pf2)
+                P.clear_active(S["shot"], "image", f"L-200 补判 v{n} 看镜头 / 排排站，撤下当前、按 3 次规则重出（L-204 D11）",
+                               actor="producer.gaze_regen_sweep")
+                led = self.ledger().get(o["id"]) or {}
+                self.led_update(o["id"], final=None, demoted_at=iso(), gaze_regen={"take": n, "at": iso()},
+                                reason=f"v{n} 按 L-200 补判看镜头 / 排排站，撤下重出（已用 {int(led.get('tries') or 0)}/{MAX_TRIES} 次）")
+                self.logf("gaze_regen", obj=o["id"], take=n, counted=True, rule="L-200 / L-204 D11", tries=led.get("tries"))
+                out.append(o["id"])
+        return out
+
+    def undispatchable_why(self, o: dict, led: dict, rj: dict) -> str | None:
+        """L-204 不变量：这个 ready 对象现在有没有派单路径（没有 → 原因人话）。暂时性的（退避 / 只重打分 / 作废待清零）不算"""
+        if str(o.get("waiting_for") or "").startswith("基础设施退避") or led.get("rescore_take") or o.get("rescore_take") or o.get("voided"):
+            return None
+        if o.get("redo"):
+            plan = ((rj.get(o["id"]) or {}).get("plan") or []) + list(led.get("ladder_plan") or [])
+            if int(led.get("redo_tries") or 0) >= len(plan):
+                return f"驳回计划 {len(plan)} 步已用完却仍 ready（没进阶梯 escalate）"
+            return None
+        if cap_blocked(led):
+            return "24 小时硬上限封顶却仍 ready（没标尽力版）"
+        attempt = max(int(led.get("tries") or 0), int(o.get("attempts") or 0)) + 1
+        if attempt > MAX_TRIES:
+            return f"次数已用尽（账本 tries={led.get('tries')}，登记 attempts={o.get('attempts')}）却仍 ready（没标尽力版）"
+        return None
+
+    def stuck_objects(self, reg) -> list[dict]:
+        """L-204 不变量自检（每拍）：ready 但没有派单路径的首 / 尾帧，持续 ≥ STUCK_MIN 分钟 → 登记表 stuck_objects + 日志
+        stuck_object（每对象 30 分钟一条；idle_watch 读登记表报出）。regen_shots / escalate 任何一处把对象留在 ready 又派不出都会在这里暴露"""
+        t = now()
+        seen = self.__dict__.setdefault("_stuck_since", {})
+        logged = self.__dict__.setdefault("_stuck_logged", {})
+        L = self.ledger()
+        rj = jl(self.p.rejects, {}) or {}
+        live, out = set(), []
+        for E in reg.get("episodes") or []:
+            for S in E.get("shots") or []:
+                for k in ("first", "last"):
+                    o = (S.get("objects") or {}).get(k) or {}
+                    if o.get("status") != "ready":
+                        continue
+                    why = self.undispatchable_why(o, L.get(o["id"]) or {}, rj)
+                    if not why:
+                        continue
+                    live.add(o["id"])
+                    since = seen.setdefault(o["id"], t)
+                    mins = (t - since) / 60
+                    if mins >= STUCK_MIN:
+                        out.append({"obj": o["id"], "why": why, "min": round(mins, 1), "since": iso(since)})
+                        if t - float(logged.get(o["id"]) or 0) >= 1800:
+                            logged[o["id"]] = t
+                            self.logf("stuck_object", obj=o["id"], why=why, min=round(mins, 1), counted=False, rule="L-204")
+        for oid in list(seen):
+            if oid not in live:
+                seen.pop(oid, None)
+                logged.pop(oid, None)
+        return out
 
     def release_waiting_assets(self, every_s: float = 60) -> list:
         """K-OPS-E26：等资产的对象，资产登记签名或期望 refs 表签名变了 → 清退避、回到 ready（不计次）。每分钟查一次"""
@@ -2924,6 +3271,7 @@ class Producer:
                         why = (("重档跳过：上次不过项 " + "、".join(skipped) + " 换预设救不回（retry.redo_ladder.skip_heavy_on）；") if skipped else "") +                               "驳回阶梯走完仍没过（" + "、".join(f"{a}×{b}" for a, b in stats.items()) + "），标尽力版，不进合成"
                         self.led_update(oid, redo_exhausted=True, final="best_effort", reason=why)
                         sentinel_ticket(self.p, oid, why, stats, led)
+                        self.clear_reject(oid, "驳回阶梯走完，标尽力版，交自动采用（L-204 D7）")   # 不留“已在重出 / 换代中”的死记录
                         self.logf("best_effort", obj=oid, reason=why, via="redo_ladder", counted=False)
                         out["best_effort"] += 1
         if any(out[x] for x in ("reset", "heavy", "best_effort")):
@@ -2956,8 +3304,9 @@ class Producer:
         if self.relay_lanes and self._relay_hold_fn:
             hold |= self._relay_hold_fn(self.relay_lanes)       # 阶段交接：出图 → 视频，借道还给 gpu36 本机（data/pipeline/lane_relay_hold.json）
         out = {}
+        qs = self.probe_queues()                 # L-205 P6：各道队列并发探（原串行，一道慢 / 断拖整拍）
         for ln, url in self.lanes.items():
-            q = self.lane_probe(url)
+            q = qs.get(ln) or {"ok": False}
             mine = list(self.lane_busy.get(ln) or [])
             cool = self.lane_cool.get(ln, 0)
             srv, idx = lane_split(ln)
@@ -2992,6 +3341,20 @@ class Producer:
                        "prefetch": self.depth}
         return out
 
+    def probe_queues(self) -> dict:
+        """L-205 P6：lane_probe 各道并发（线程池，单道出错 = 连不上，不拖别的道）"""
+        items = list(self.lanes.items())
+
+        def one(kv):
+            try:
+                return self.lane_probe(kv[1])
+            except Exception as e:  # noqa: BLE001  # arch-ok: 单道探测出错 = 这道连不上（不派），原因进 why
+                return {"ok": False, "error": repr(e)[:200]}
+        if len(items) <= 1:
+            return {ln: one((ln, u)) for ln, u in items}
+        with cf.ThreadPoolExecutor(max_workers=min(8, len(items)), thread_name_prefix="producer-probe") as ex:
+            return dict(zip([ln for ln, _ in items], ex.map(one, items)))
+
     # -- 派单 --
     def dispatch_frames(self, reg, lanes, ctrl) -> None:
         free = [ln for ln, s in lanes.items() if s["free"]]
@@ -3010,7 +3373,8 @@ class Producer:
                 self.logf("decision_files_block", problems=dprobs[:8], alarm=True, counted=False)
             return
         with self.mu:
-            backlog = len(self.scoring)
+            # L-205 P3：只数“等着开始打分”的图——正在打分线程里跑的（≤ post_pool 大小）不算积压；图都在盘上，打分忙不该停出图
+            backlog = max(0, len(self.scoring) - self.scoring_running())
             if not self._backlog_env and len(self.score_done) >= 3:
                 self.score_backlog_max = dynamic_backlog(self.score_done, now(), len(self.lanes) or 1, self.depth)
         if backlog >= self.score_backlog_max:
@@ -3053,7 +3417,8 @@ class Producer:
                     self.logf("adult_wait_owner", obj=o["id"], counted=False, why="成人画面：等项目方在界面触发（系统 / agent 不自动派）")
                 continue
             try:
-                if self.hard_capped(o):                  # K-OPS-E28：每镜每阶段 24 小时硬上限，到了就停、转人工 / 本地修
+                if self.hard_capped(o):                  # K-OPS-E28：每镜每阶段 24 小时硬上限（安全阀）
+                    self.cap_exhaust(o)                  # L-204 D2：不再悄悄跳过——标用尽 → 尽力版 → adopt_best_effort_sweep 采用最好一版
                     continue
             except Exception as e:  # noqa: BLE001  # arch-ok: 计数读不到 = 这一单不派（失败关闭），记日志
                 self.logf("hard_cap_err", obj=o["id"], error=repr(e)[:200], counted=False)
@@ -3104,6 +3469,8 @@ class Producer:
                           seed=rung["seed"], redo=True, counted=False, comfy_tag=tag)
                 self.pool.submit(self._run_one, o, lane, k + 1, rung, tag)
                 continue
+            if o.get("voided") and (led.get("tries") or led.get("final") or led.get("last_unavailable")):
+                led = self.void_reset(o, led)        # L-204 D5：E13 作废的尾帧账本次数清零，下一次不会被 >MAX_TRIES 拦住
             # 总调度 11-01：ASSETMASTER frames_v2 已出的尝试计入 3 次上限（o["attempts"] 已含 frames_v2 的次数）
             attempt = max(int(led.get("tries") or 0), int(o.get("attempts") or 0)) + 1
             if attempt > MAX_TRIES:
@@ -3197,6 +3564,10 @@ class Producer:
         """K-REN-954 种子流（ns_render.seed_stream）：这一镜这一 stage 用过的种子一律跳过，重试永不复用；开关 promptfix.seed_stream"""
         from ns_render import pipeline as P
         from ns_agent import asset_refs as AR
+        gr = int(o.get("gaze_round") or 0)          # L-204 D8：换种子加轮 → 种子键 / 盐带轮号，保证不是前几次的种子
+        if gr:
+            salt = f"{salt}/gaze{gr}"
+            legacy_key = (legacy_key or f"{o['shot']}/producer/{o['kind']}") + f"/gaze{gr}"
         if not AR.pf_on("seed_stream"):
             return P.seed_for(legacy_key or f"{o['shot']}/producer/{o['kind']}", attempt), None
         from ns_render import seed_stream as SS
@@ -3288,21 +3659,22 @@ class Producer:
             try:
                 pf = res["pf_future"].result(timeout=1800)
             except Exception as e:  # noqa: BLE001  # A-02（总调度：进 sv-14）：图已入库，打分超时 / 出错只重打分、不重出、不计次
-                self.led_update(oid, rescore_take=res["take"], backoff_until=now() + 300,
-                                reason=f"契约打分超时或出错（{type(e).__name__}），图已入库，5 分钟后只重打分、不重出，不算一次尝试")
+                self.led_update(oid, rescore_take=res["take"], backoff_until=now() + SCORE_RETRY_S,
+                                reason=f"契约打分超时或出错（{type(e).__name__}），图已入库，1 分钟后只重打分、不重出，不算一次尝试")
                 self.logf("score_timeout", obj=oid, take=res["take"], error=repr(e)[:200], counted=False,
                           render_s=render_s, contract_s=round(now() - t1, 1), gpu_s=res.get("gpu_s"))
-                self.score_chain_trip(f"{oid} 出图后契约打分超时")
+                self.score_chain_trip(f"{oid} 出图后契约打分超时", err=repr(e))
                 return
             contract_s = round(now() - t1, 1)
             if pf.get("score_infra"):
-                self.led_update(oid, rescore_take=res["take"], backoff_until=now() + 300,
-                                reason=("共用验收没拿到结论（看图排队 / 超时：retry，不判 fail），5 分钟后只重打分、不重出，不算一次尝试"
+                self.led_update(oid, rescore_take=res["take"], backoff_until=now() + SCORE_RETRY_S,
+                                reason=("共用验收没拿到结论（看图排队 / 超时：retry，不判 fail），1 分钟后只重打分、不重出，不算一次尝试"
                                         if pf.get("accept_retry") else
-                                        "契约打分时 gpu33 出错（显存 / 连接），5 分钟后只重打分、不重出，不算一次尝试"))
+                                        "契约打分时 gpu33 出错（显存 / 连接），1 分钟后只重打分、不重出，不算一次尝试"))
                 self.logf("score_infra", obj=oid, take=res["take"], error=str(pf.get("remote_error") or pf.get("error"))[:200],
                           counted=False, render_s=render_s, contract_s=contract_s, gpu_s=res.get("gpu_s"))
-                self.score_chain_trip(f"{oid} 出图后契约打分 score_infra")
+                self.score_chain_trip(f"{oid} 出图后契约打分 score_infra",
+                                      err="" if pf.get("accept_retry") else str(pf.get("remote_error") or pf.get("error") or ""))
                 return
             L = self.ledger().get(oid) or {}
             if rung.get("redo"):
@@ -3380,6 +3752,26 @@ class Producer:
                                 reason=plain_reason(k, err))
                 self.logf("infra_error", obj=oid, lane=lane, error=err[:300], backoff_s=back, counted=False,
                           reason=plain_reason(k, err))
+            elif k == "preflight" and oid.startswith("last:") and "尾帧生成契约" in err:
+                # REVIEW-SV 11-06 CRITICAL：尾帧 preflight 不过是确定性的内容问题，不能按“基础设施 30 分钟退避、不计次”无限重来，
+                # 也不能把 assets:{sid} 标 blocked 连带挡住首帧。按次计数，60 s 后重编重试；满 MAX_TRIES 次 → 本镜视频退回 I2VA（同 L-204 D8）
+                nf = int(L.get("last_pf_fails") or 0) + 1
+                if nf >= MAX_TRIES:
+                    from ns_render import pipeline as P
+                    td = P.load_takes(sid)
+                    fa = active_take(td, "image")
+                    first_n = fa.get("n") if fa else None
+                    why = f"尾帧生成契约 preflight 连续 {nf} 次不过 → 本镜视频退回只给首帧（I2VA，L-204 D8 同路径；绑定首帧 v{first_n}）：{err[:160]}"
+                    flag = {"mode": "i2va", "first_n": first_n, "at": iso(), "by": "producer.last_preflight", "rule": "L-204 D8", "why": why}
+                    P.mutate_takes(sid, lambda d: d.__setitem__("last_frame_fallback", flag), op="last_frame_fallback", by="producer（尾帧 preflight）")
+                    self.led_update(oid, last_pf_fails=nf, final="best_effort", last_unavailable=True, last_frame_fallback="i2va",
+                                    last_fallback_first_n=first_n, last_error=err[:300], reason=why)
+                    self.clear_reject(oid, "尾帧 preflight 用尽，退回 I2VA")
+                    self.logf("last_unavailable", obj=oid, first_n=first_n, fallback="i2va", counted=False, rule="L-204 D8", why=why)
+                else:
+                    self.led_update(oid, last_pf_fails=nf, blocked_until=now() + 60, last_error=err[:300],
+                                    reason=f"尾帧生成契约 preflight 第 {nf} 次不过，60 s 后重编重试（满 {MAX_TRIES} 次退回 I2VA）")
+                    self.logf("last_preflight_fail", obj=oid, n=nf, error=err[:300], counted=False)
             elif k == "preflight":
                 reasons = [x for x in re.split(r"[；;]", err.split("：", 1)[-1]) if x.strip()]
                 gate = bool(GATE_PAT.search(err))
@@ -3451,8 +3843,17 @@ class Producer:
         self.logf("rescore_cap_reset", objs=capped, health=h, counted=False)
         return capped
 
-    def score_chain_trip(self, why: str, cool_s: float = SCORE_CHAIN_COOL_S) -> None:
-        """W20：打分链路（gpu33 ssh 打分 / 共用验收）刚出错 → 熔断一段时间：期间不派只重打分（出图照派，打分积压闸照管）"""
+    def scoring_running(self) -> int:
+        """L-205 P3：正在出图后打分线程里跑的图数 ≈ min(等打分的图, 打分线程池大小)"""
+        fr = getattr(self, "frames", None)
+        return min(len(self.scoring), int(getattr(fr, "post_workers", 0) or 0))
+
+    def score_chain_trip(self, why: str, cool_s: float = SCORE_CHAIN_COOL_S, err=None) -> None:
+        """W20：打分链路（gpu33 ssh 打分 / 共用验收）刚出错 → 熔断一段时间：期间不派只重打分（出图照派，打分积压闸照管）。
+        L-205 P4：给了 err 时只有 ssh / 隧道 / 连接类错误才熔断（看图 untested、共用验收 retry、打分超时不熔断）；err=None = 调用方已判定是链路问题"""
+        if err is not None and not is_transport_error(err):
+            self.logf("score_chain_skip", why=str(why)[:200], error=str(err)[:200], counted=False)
+            return
         until = now() + cool_s
         if until > self._score_down_until:
             self._score_down_until = until
@@ -3476,11 +3877,12 @@ class Producer:
                           why="打分链路刚出错（隧道 / gpu33 打分 / 共用验收），熔断期内不派只重打分，不占位")
             return 0
         n = 0
+        cap = RESCORE_MAX or int(getattr(self, "rescore_max", 0) or 3)     # L-205 P4：默认跟出图后打分线程池同大
         for o, rt in pend:
-            if busy >= RESCORE_MAX:
+            if busy >= cap:
                 if getattr(self, "_last_rs_cap_log", 0) < now() - 300:
                     self._last_rs_cap_log = now()
-                    self.logf("rescore_busy", busy=busy, max=RESCORE_MAX, waiting=len(pend) - n, counted=False)   # W44：原名 rescore_cap（并发上限），改名让出给每镜上限
+                    self.logf("rescore_busy", busy=busy, max=cap, waiting=len(pend) - n, counted=False)   # W44：原名 rescore_cap（并发上限），改名让出给每镜上限
                 break
             oid = o["id"]
             if not self.leases.acquire(oid, holder_note="rescore"):
@@ -3548,7 +3950,8 @@ class Producer:
                                 reason=f"契约打分 / 共用验收仍没拿到结论，{back // 60} 分钟后再试（不重出、不计次）")
                 self.logf("score_infra", obj=oid, take=n, counted=False, backoff_s=back,
                           error=str(pf.get("remote_error") or pf.get("error") or "")[:200])
-                self.score_chain_trip(f"{oid} 只重打分 score_infra")
+                self.score_chain_trip(f"{oid} 只重打分 score_infra",
+                                      err="" if pf.get("accept_retry") else str(pf.get("remote_error") or pf.get("error") or ""))
                 return
             hist = [dict(h, ok=bool(pf.get("ok")), blocking=pf.get("blocking")) if h.get("take") == n else h
                     for h in L.get("history") or []]
@@ -3561,7 +3964,7 @@ class Producer:
             back = RESCORE_BACKOFF[min(ki - 1, len(RESCORE_BACKOFF) - 1)]
             self.led_update(oid, rescore_infra=ki, backoff_until=now() + back, last_error=repr(e)[:200])
             self.logf("rescore_err", obj=oid, take=n, error=repr(e)[:200], backoff_s=back)
-            self.score_chain_trip(f"{oid} 只重打分出错：{repr(e)[:120]}")
+            self.score_chain_trip(f"{oid} 只重打分出错：{repr(e)[:120]}", err=repr(e))
         finally:
             with self.mu:
                 mine = (self.inflight.get(oid) or {}).get("rescore")
@@ -3691,7 +4094,9 @@ class Producer:
         from ns_render import pipeline as P
         td = P.load_takes(sid)
         ns = {h.get("take") for h in hist if h.get("take")}
-        cands = [t for t in td.get("takes") or [] if t.get("stage") == stage and t.get("n") in ns and not t.get("bad")]
+        fa = active_take(td, "image") if stage == "last" else None
+        cands = [t for t in td.get("takes") or [] if t.get("stage") == stage and t.get("n") in ns and not t.get("bad")
+                 and (stage != "last" or last_paired(t, fa))]      # L-204 D6：尾帧只在由当前首帧做的版本里挑
         if not cands:
             return None
         return max(cands, key=lambda t: score_key(take_pf(t)))["n"]
@@ -4466,7 +4871,7 @@ def serve(paths: Paths, pinned: bool = False, *, producer=None, spawn=None, slee
         print("PRODUCER 已在运行 pid", old.get("pid"), "run", old.get("run"))
         return 0
     if producer is None:
-        pr.frames = FrameExec(paths, pr.script(), script_fn=pr.script)
+        pr.frames = FrameExec(paths, pr.script(), script_fn=pr.script, post_workers=post_pool_workers(paths.root, len(pr.lanes) or None))
     log_event(paths, "start", pid=os.getpid(), lanes=list(pr.lanes), run=paths.run_id, run_source=pr.run_source,
               code_sha=code_sha())   # W44 ①：启动时算一次代码 sha（之后热推不变，重启才变）
     n = 0
@@ -4606,7 +5011,7 @@ def master_reject(paths: Paths, oid: str, n: int, reason: str, presets: list, wa
     js(paths.rejects, rj)
     L = jl(paths.ledger, {}) or {}
     rec = L.setdefault(oid, {})
-    rec.update(redo_tries=0, redo_candidate=None)
+    rec.update(redo_tries=0, redo_candidate=None, redo_exhausted=None, ladder_plan=[])   # L-204 D7：新驳回从头走阶梯（与 regen_shots 同）
     if rec.get("final") == "passed":   # 驳回即撤下（L-089）：账本同步成待重出，不留 passed（CLEANUP D-LEDGER 19:2x；WORKFLOW 改，CONSENT PRODUCER -> AUTOPILOT）
         rec.update(final=None, demoted_at=iso(), reason=f"总调度驳回 v{n}：{reason}（驳回即撤下，等替换版）")
     js(paths.ledger, L)
@@ -4675,7 +5080,9 @@ def master_approve(paths: Paths, oid: str, n: int, by: str, note: str = "", forc
         if lt is not None and AC.owner_lock(d, "last") is None:
             P.clear_active(sid, "last", f"首帧换成 v{n}，旧尾帧作废、自动重做", actor=f"producer.master_approve（{by}）")
             FE.annotate(sid, "last", lt, superseded={"why": f"首帧换成 v{n}（总调度复核），由旧首帧做的尾帧作废", "at": iso()})
-            L0.setdefault(f"last:{sid}", {}).update(final=None, tries=0, demoted_at=iso(),
+            L0.setdefault(f"last:{sid}", {}).update(final=None, tries=0, demoted_at=iso(), history=[], redo_history=[],
+                                                    redo_exhausted=None, ladder_plan=[], gaze_rounds=None,      # L-204 D6：旧首帧的历史清掉
+                                                    last_unavailable=None, last_frame_fallback=None, last_fallback_first_n=None,
                                                     reason=f"首帧换成 v{n}（总调度复核），尾帧自动重做")
             js(paths.ledger, L0)
             log_event(paths, "last_requeued", obj=f"last:{sid}", old=lt, first=n)
@@ -5264,7 +5671,7 @@ def main(argv=None) -> int:
         return 0
     only = set(x for x in a.only.split(",") if x) or None
     pr = Producer(paths, only=only)
-    pr.frames = FrameExec(paths, pr.script(), script_fn=pr.script)
+    pr.frames = FrameExec(paths, pr.script(), script_fn=pr.script, post_workers=post_pool_workers(paths.root, len(pr.lanes) or None))
     reg = pr.tick(dispatch=not a.no_dispatch)
     if a.wait:
         t_end = now() + 3 * 3600

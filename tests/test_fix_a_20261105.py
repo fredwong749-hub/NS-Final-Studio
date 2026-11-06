@@ -21,6 +21,7 @@ def _load(rel, name):
 class FakeProd:
     """只借 adopt_best_effort_sweep（用真实方法绑到最小对象上）"""
     adopt_best_effort_sweep = PR.Producer.adopt_best_effort_sweep
+    clear_reject = PR.Producer.clear_reject          # FIX-PROD-2 D7：采用后清驳回记录
 
     def __init__(self, led):
         self.p = type("P", (), {"root": ROOT})()
@@ -192,9 +193,10 @@ def test_relay_arbitrate_writes_claims_file_only_for_idle_host(tmp_path):
     SR = _load("tools/series10_video/shard_relay.py", "shard_relay_fix_a")
     vid = tmp_path / "video"
     vid.mkdir()
-    (vid / "jobs.json").write_text(json.dumps({"shots": [{"shot": s, "ep": 1, "host": h} for s, h in PLAN.items()]}), encoding="utf-8")
-    (vid / "state_gpu33.json").write_text(json.dumps({"shots": {"ep01-S2": {"status": "done", "renders": [{"state": "done"}]}}}), encoding="utf-8")
-    (vid / "state_gpu36.json").write_text(json.dumps({"shots": {"ep01-S1": {"status": "rendering", "renders": [{"state": "submitted"}]}}}), encoding="utf-8")
+    (vid / "jobs.json").write_text(json.dumps({"shots": [{"shot": s, "ep": 1, "host": h, "variants": {"v1": {}}} for s, h in PLAN.items()]}), encoding="utf-8")
+    (vid / "state_gpu33.json").write_text(json.dumps({"saved": 100.0, "shots": {"ep01-S2": {"status": "done", "renders": [{"state": "done"}]}}}), encoding="utf-8")
+    (vid / "state_gpu36.json").write_text(json.dumps({"saved": 100.0, "shots": {"ep01-S1": {"status": "rendering", "renders": [{"state": "submitted"}]}}}), encoding="utf-8")
+    # FIX-VID D1 / D13：state 带 saved（新鲜才可领、失联才收回）；只有有变体的镜进静态计划
     cl = SR.arbitrate_claims("r1", vid, "video", C, 1, now=100.0)
     assert list(cl) == ["ep01-S4"] and cl["ep01-S4"]["host"] == "gpu33"
     assert VS.load_claims(vid) == cl

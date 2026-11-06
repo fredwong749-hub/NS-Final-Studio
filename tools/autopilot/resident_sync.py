@@ -292,7 +292,7 @@ TIER1_DATA_PREFIX = ("data/assets/identity_refs/",)          # 身份脸（项�
 TIER1_SMALL = 2 * 1024 * 1024
 BATCH_TIMEOUT_S = 300                                          # 总调度 00:01：单批卡住超过 5 分钟就杀掉 ssh 重连（2 MB 批在 15 KB/s 下约 140 s）
 WARN_MB = 20                                                   # K-OPS-W09：单次推送超过 20 MB 必须先报估计耗时
-LINK_KBPS = 18                                                 # 跳板实测 17–20 KB/s（总调度 18:03；16:24 推 11.8 MB 约 10 分钟）
+LINK_KBPS = 1500                                               # FIX-ORCH O4（11-06）：主连接 / 独立 hk 连接实测 MB/s 级（11-01 跳板 17–20 KB/s 已过时，按旧值估 25 MB 要 23 分钟 → 推送被吓退）
 
 
 def tier_of(rel: str, size: int) -> int:
@@ -1672,7 +1672,8 @@ def run_sync_tick(host: str, dry: bool = False, ssh_fn=None, bulk_fn=None, rem_f
 # 只传“视频归 dst、出图归别机”的集：每镜 takes.json + 当前 image / last 文件。安装时只覆盖不删；takes.json 合并 = 出图机的
 # image / last（及其它非视频阶段）+ 视频机自己的 video 版本与 active.video（视频机 register_takes 登记的不被冲掉）。
 # 不是跨机共享出图（work_stealing=false 照旧）：出图机照常出，视频机只读。开关 NS_RELAY_FRAMES=off；每 RELAY_EVERY_S 一拍。
-RELAY_EVERY_S = 300
+RELAY_EVERY_S = 60                 # FIX-ORCH O4（L-205 KPI）：300 → 60 s；另外每 RELAY_POLL_S 看一眼 puller 回执，出图机有新成品就立刻中继
+RELAY_POLL_S = 15
 RELAY_STATE = ROOT / "data/autopilot/relay_frames.json"
 RELAY_TIMEOUT_S = 600
 RELAY_FAIL_REPORT = 3
@@ -1940,18 +1941,51 @@ def shlex_quote(s: str) -> str:
     return shlex.quote(s)
 
 
-def relay_thread(every_s: int = RELAY_EVERY_S) -> None:
-    """每 every_s 秒一拍 relay_video_frames；NS_RELAY_FRAMES=off 只停这条线；分区里没有“视频归别机”的集 = 空转"""
-    while True:
-        t0 = time.time()
-        if os.environ.get("NS_RELAY_FRAMES", "").lower() not in ("off", "0", "no"):
-            try:
-                for run in run_sync_runs():
-                    relay_video_frames(run)
-                    relay_pull_laptop(run)        # 同一批集回拉笔记本（以出图机为准）
-            except Exception as e:  # noqa: BLE001
-                log("relay error", repr(e)[:300])
-        time.sleep(max(5.0, every_s - (time.time() - t0)))
+def relay_signal() -> dict:
+    """O4 事件触发（便宜：只读笔记本本地文件，不连服务器）：puller 每并回一条服务器 outbox（打分完成的首尾帧）acked_total 就 +1
+    → {host: acked_total}。变了 = 出图机有新成品，不等定时拍"""
+    ps = jl(ROOT / "data/netfix/puller_status.json", {}) or {}
+    return {h: int(((ps.get("hosts") or {}).get(h) or {}).get("acked_total") or 0) for h in HOSTS}
+
+
+def relay_due(now: float, last_t: float, sig: dict, last_sig: dict | None, every_s: float = RELAY_EVERY_S) -> str | None:
+    """→ "timer" / "outbox" / None"""
+    if now - last_t >= every_s:
+        return "timer"
+    if last_sig is not None and sig != last_sig:
+        return "outbox"
+    return None
+
+
+def relay_thread(every_s: int = RELAY_EVERY_S, poll_s: float = RELAY_POLL_S, sleep=time.sleep, ticks: int | None = None,
+                 sig_fn=None, tick_fn=None) -> None:
+    """每 every_s 秒一拍 relay_video_frames，另每 poll_s 秒看 puller 回执，出图机有新成品立刻拍一次（O4）；
+    NS_RELAY_FRAMES=off 只停这条线；分区里没有“视频归别机”的集 = 空转。ticks / sig_fn / tick_fn 给测试用"""
+    sig_fn = sig_fn or relay_signal
+
+    def _tick():
+        for run in run_sync_runs():
+            relay_video_frames(run)
+            relay_pull_laptop(run)        # 同一批集回拉笔记本（以出图机为准）
+    tick_fn = tick_fn or _tick
+    last_t, last_sig, n = 0.0, None, 0
+    while ticks is None or n < ticks:
+        n += 1
+        try:
+            sig = sig_fn()
+        except Exception:  # noqa: BLE001  # arch-ok: 回执读不了 = 只按定时拍
+            sig = last_sig
+        why = relay_due(time.time(), last_t, sig, last_sig, every_s)
+        if why:
+            last_t, last_sig = time.time(), sig
+            if os.environ.get("NS_RELAY_FRAMES", "").lower() not in ("off", "0", "no"):
+                try:
+                    tick_fn()
+                except Exception as e:  # noqa: BLE001
+                    log("relay error", repr(e)[:300])
+        elif last_sig is None:
+            last_sig = sig
+        sleep(max(1.0, float(poll_s)))
 
 
 def run_sync_thread(every_s: int = RUN_SYNC_EVERY_S) -> None:
@@ -2290,6 +2324,12 @@ def loop(pull_every_s: int = 1200, health_every_s: int = 300):
         threading.Thread(target=vqa_thread, name="vqa_guard", daemon=True).start()
         log("vqa_guard", "线程已启动", VQA_EVERY_S, "s 一拍", VQA_HOST)
     while True:
+        try:                                     # FIX-ORCH O2（L-202 按镜）：资产按镜齐了的镜并进 ready（本地文件），下面 push_control 照常推
+            import episode_pipeline as _EPL
+            for _run in _RUNS.list_runs(ROOT):
+                _EPL.sync_shot_ready(_run, push=lambda _h: None)
+        except Exception as e:  # noqa: BLE001
+            log("shot_ready error", repr(e)[:200])
         for h in HOSTS:
             try:
                 health(h)

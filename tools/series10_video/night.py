@@ -57,8 +57,14 @@ STATUS = ROOT / ("docs/series10_video/STATUS.md" if LEGACY else f"docs/series10_
 EPS_OUT = RC.episodes_out(RUN_ID)        # V1 = data/episodes/series10（原样），其它剧 = data/episodes/<剧>
 # 道归属（总调度 10-31 夜）：gpu33 三道 = 出图优先（让道模式）；gpu36:0/1 = BAKEOFF（让道模式，可写 hold 文件借用）；gpu36:2 = 视频
 DEFAULT_CTRL = {"force_eps": [], "shared_lanes": ["gpu33:0", "gpu33:1", "gpu33:3", "gpu36:0", "gpu36:1", "gpu36:2"],
-                "hold_lanes": [], "per_lane": 2, "yield_s": 180, "bgm": "auto",
+                "hold_lanes": [], "per_lane": 2, "yield_s": 30, "bgm": "auto",   # FIX-VID（L-205 KPI）：让道观察 180→30 s，道空 3 分钟才派太慢
                 "poll_s": None}   # SLIM-CDE 11-05 D：轮询间隔（秒）；None = 旧 V1 120 s / V2 默认 45 s（首尾帧一锁定最迟 ~1 min 内编作业派单，原 ~2.3 min）
+
+
+def video_shared(shared, ctrl) -> list:
+    """FIX-VID（L-205 KPI）：night_control.json 的 video_lanes = 专用视频道，不受让道（shared_lanes + yield_s）节流"""
+    ded = set(ctrl.get("video_lanes") or [])
+    return [x for x in shared or [] if x not in ded]
 
 
 def log(*a):
@@ -217,7 +223,7 @@ def dispatch_hosts(hosts_touched: set, st, ctrl) -> bool:
         hold, gate = video_boost(ctrl, hold)
         hold = _shard_hold(host, hold)
         c = {"jobs": "jobs.json", "mode": "prod", "eps": eps_on, "per_lane": per_lane, "linger": True,
-             "hold_lanes": hold, "shared_lanes": shared, "yield_s": ctrl["yield_s"]}
+             "hold_lanes": hold, "shared_lanes": video_shared(shared, ctrl), "yield_s": ctrl["yield_s"]}
         if gate:
             c["vram_gate"] = gate
         run([PY, "tools/series10_video/deploy.py", "control", host, json.dumps(c, ensure_ascii=False)])
@@ -238,7 +244,7 @@ def dispatch(ep, host, st, ctrl):   # 旧接口（整集派单），保留给手
         return False
     eps_on = sorted({int(e) for e, h in hosts.items() if h == host and st["eps"].get(e, {}).get("dispatched")} | {ep})
     c = {"jobs": "jobs.json", "mode": "prod", "eps": eps_on, "per_lane": ctrl["per_lane"], "linger": True,
-         "hold_lanes": ctrl.get("hold_lanes", []), "shared_lanes": ctrl.get("shared_lanes", []), "yield_s": ctrl["yield_s"]}
+         "hold_lanes": ctrl.get("hold_lanes", []), "shared_lanes": video_shared(ctrl.get("shared_lanes", []), ctrl), "yield_s": ctrl["yield_s"]}
     run([PY, "tools/series10_video/deploy.py", "control", host, json.dumps(c, ensure_ascii=False)])
     run([PY, "tools/series10_video/deploy.py", "start", host])
     st["eps"][str(ep)] = {"host": host, "dispatched": time.time(), "status": "rendering"}
@@ -293,11 +299,16 @@ def ep_sig(ep, host) -> str:
 
 
 def ep_resolved(ep, host) -> tuple[bool, dict]:
+    """整集落定 = jobs 里本集每镜都 done / best_effort / blocked。FIX-VID D10：没过闸门的镜（build_jobs route=hold, gate_excluded）
+    按“等闸门”算落定（它出不了，成片用首帧静帧占位；闸门开了 → 重编有变体 → 状态变 → ep_sig 变 → REOPEN 重合成）"""
     shots_st = ep_shots(ep, host)
     jobs = jl(VID / "jobs.json", {}) or {}
-    ids = [s["shot"] for s in jobs.get("shots", []) if s["ep"] == ep]
+    rows = [s for s in jobs.get("shots", []) if s["ep"] == ep]
+    ids = [s["shot"] for s in rows]
+    excl = {s["shot"] for s in rows if s.get("gate_excluded") and not s.get("variants")}
     recs = {sid: shots_st.get(sid, {}) for sid in ids}
-    fin = all(r.get("status") in ("done", "best_effort", "blocked") for r in recs.values()) and ids
+    fin = all(r.get("status") in ("done", "best_effort", "blocked") or sid in excl for sid, r in recs.items()) and ids \
+        and any(sid not in excl for sid in ids)   # 整集都没过闸门 = 没开始，不算落定（否则每轮空跑 proxies / sync）
     return bool(fin), recs
 
 
@@ -347,6 +358,27 @@ def tts_missing() -> str | None:
 
 
 ASM_RETRY_S, ASM_RETRY_MAX = 1200, 3
+# FIX-VID（视频审计 perf）：代码类错误（缺模块 / 语法 / 导入失败）等 20 分钟重试 3 次也不会好 → 不定时重试，当场报告；
+# 合成相关代码有变（发版修好了）才再试一次
+ASM_FATAL_RE = re.compile(r"ImportError|ModuleNotFoundError|SyntaxError|IndentationError|cannot import name|No module named")
+ASM_CODE = ("tools/assemble_episode.py", "services/post/ns_post", "packages/schema/ns_schema", "services/agent/ns_agent")
+
+
+def asm_code_sig() -> str:
+    """合成器相关代码的指纹（各文件 mtime 最大值 + 文件数）；代码类错误后只有它变了才重试"""
+    ts, n = 0.0, 0
+    for rel in ASM_CODE:
+        p = ROOT / rel
+        for f in ([p] if p.is_file() else p.glob("*.py") if p.is_dir() else []):
+            try:
+                ts, n = max(ts, f.stat().st_mtime), n + 1
+            except OSError:   # arch-ok: 文件刚被换掉 = 少算一个，指纹下一轮再变
+                continue
+    return f"{int(ts)}:{n}"
+
+
+def asm_fatal(err: str | None) -> bool:
+    return bool(ASM_FATAL_RE.search(str(err or "")))
 
 
 def retry_assembly(st) -> None:
@@ -367,6 +399,16 @@ def retry_assembly(st) -> None:
             x["assemble_retries"] = 0
             x["status"] = "rendering"
             log("REOPEN", f"ep{int(e):02d}", "合成失败后入选版本 / 镜头集合有变，重置自动重试并重新合成")
+        elif s == "assemble_failed" and asm_fatal(x.get("assemble_err")):
+            # 代码类错误：不按 20 分钟 × 3 次空等，当场报告（只记一次）；合成代码变了（发版修好）→ 立即再试
+            sig = asm_code_sig()
+            if x.get("assemble_fatal_sig") is None:
+                x["assemble_fatal_sig"] = sig
+                log("ASSEMBLE_FATAL", f"ep{int(e):02d}", "代码类错误，不自动重试，等发版修复：", str(x.get("assemble_err") or "")[-200:])
+            elif x["assemble_fatal_sig"] != sig:
+                x.pop("assemble_fatal_sig", None)
+                x["status"] = "rendering"
+                log("RETRY_ASSEMBLE", f"ep{int(e):02d}", "合成相关代码有变，重试代码类错误")
         elif s == "assemble_failed" and int(x.get("assemble_retries", 0)) < ASM_RETRY_MAX \
                 and time.time() - float(x.get("finalized") or 0) >= ASM_RETRY_S:
             x["assemble_retries"] = int(x.get("assemble_retries", 0)) + 1
@@ -399,14 +441,40 @@ def upscaled_for(src: Path) -> Path | None:
     return p if p.is_file() else None
 
 
-def assembly_sources(man: dict) -> tuple[dict, list[str]]:
+def jobs_first_frames(ep: int) -> dict:
+    """本集 jobs.json 里每镜当前首帧输入（video/inputs/<镜>_<sha8>.jpg）→ {镜: 文件 | None}；镜不在 jobs 里就不出现"""
+    jobs = jl(VID / "jobs.json", {}) or {}
+    return {s["shot"]: s.get("first_frame") for s in jobs.get("shots", []) if int(s.get("ep") or 0) == int(ep)}
+
+
+def drop_stale(man: dict, jff: dict) -> list[str]:
+    """FIX-VID D10：manifest 里片子首帧 ≠ 当前首帧（jobs.json）的镜去掉代理（不进成片，用静帧占位）。返回去掉的镜。
+    manifest 没记 first_frame 的旧条目不判（服务器 vidgen.proxies 已判过一遍，这里是 owner 侧第二道）"""
+    out = []
+    for s in man.get("shots", []):
+        if s.get("proxy") and "first_frame" in s and s["shot"] in jff and (s.get("first_frame") or None) != (jff[s["shot"]] or None):
+            s["excluded"] = f"过期片：片子首帧 {s.get('first_frame')} ≠ 当前首帧 {jff[s['shot']]}（D10，不进合成）"
+            s["stale"] = True
+            s.pop("proxy", None)
+            out.append(s["shot"])
+    return out
+
+
+def assembly_sources(man: dict, stills: dict | None = None) -> tuple[dict, list[str]]:
     """K-EDT-V10（项目方 11-01“s5等视频出来很糊”“估计你的参数坏了”）：成片只用原片（manifest.source = video/clips/…，
     768×1344 级）或它的放大版；540×960 代理（manifest.proxy）只给审片页，禁止进成片。
-    每条输入的宽高必须 ≥ 原片宽高（放大版必须更大）；不满足的镜列进 bad，整集不合成"""
+    每条输入的宽高必须 ≥ 原片宽高（放大版必须更大）；不满足的镜列进 bad，整集不合成。
+    FIX-VID D8：stills = {镜: 当前首帧文件}——没出片的镜（阻断 / 过期 / 等闸门）给合成器一条 kind=still 的来源，
+    合成器用首帧静帧缓推占位（ns_post.assemble PLACEHOLDER_PUSH），不再是黑场；时间线照标 missing，报告列出"""
     shots, bad = [], []
     for s in man.get("shots", []):
         if not s.get("proxy"):
-            continue                        # 没出片 / 阻断：不进合成（manifest excluded）；尽力版有代理，照进（L-196，VID-LOOP 11-06）
+            # 没出片 / 阻断：不进合成（manifest excluded）；尽力版有代理，照进（L-196，VID-LOOP 11-06）
+            ff = (stills or {}).get(s.get("shot"))
+            if ff and (ROOT / ff).is_file():
+                shots.append({"index": s["index"], "kind": "still", "file": str(ff).replace("\\", "/"),
+                              "origin": f"VIDEO10 {s['shot']} 首帧静帧占位（{s.get('block_reason') or s.get('excluded') or s.get('status')}）"[:300]})
+            continue
         src = ROOT / str(s.get("source") or "")
         if not s.get("source") or not src.is_file():
             bad.append(f"{s['shot']} 原片不在本机（{s.get('source')}）")
@@ -440,6 +508,8 @@ def assembly_sources(man: dict) -> tuple[dict, list[str]]:
 
 def finalize(ep, host, st, ctrl):
     ver = f"v{int(st['eps'][str(ep)].get('assembled_n', 0)) + 1}"   # 每次重合成递增：已亲审签字的旧版不覆盖
+    for k in ("assemble_err", "wait_msg", "hold_why", "assemble_fatal_sig"):   # FIX-VID D12：上一轮的旧错误不带进这一轮（ep01 挂着 11-04 的 ns_schema 报错）
+        st["eps"][str(ep)].pop(k, None)
     if not voices_ok():
         st["eps"][str(ep)]["status"] = "hold_voices"
         log("HOLD", f"ep{ep:02d}", "config/voices.json 不是 series10 演员表，暂不合成")
@@ -452,8 +522,10 @@ def finalize(ep, host, st, ctrl):
     old_man = jl(VID / "episodes" / f"ep{ep:02d}" / "manifest.json", {}) or {}
     ep_renders = [x for sid, v in ep_shots(ep, host).items()
                   if sid.startswith(f"ep{ep:02d}-") for x in v.get("renders") or []]
+    jff = jobs_first_frames(ep)
     if old_man.get("shots") and (old_man.get("t") or 0) >= max([float(x.get("t_done") or 0) for x in ep_renders] + [0]):
-        _tl, bad0 = assembly_sources(old_man)
+        drop_stale(old_man, jff)
+        _tl, bad0 = assembly_sources(old_man, jff)
         if bad0:   # K-EDT-V10：原片还没拉回来（每轮 sync 补 4 条）→ 先等，不每轮重做代理
             msg = f"等原片 {len(bad0)} 条：" + "; ".join(bad0)[:200]
             if st["eps"][str(ep)].get("wait_msg") != msg:
@@ -464,16 +536,26 @@ def finalize(ep, host, st, ctrl):
     log("proxies", f"ep{ep:02d}", out.strip()[-200:])
     run([PY, "tools/series10_video/sync.py"], 3600)
     man = jl(VID / "episodes" / f"ep{ep:02d}" / "manifest.json", {}) or {}
+    stale = drop_stale(man, jff)   # FIX-VID D10：过期片（首帧换版后的旧片）不进成片
+    if stale:
+        log("STALE_CLIPS", f"ep{ep:02d}", stale)
     rc_up, out_up = run([PY, "tools/series10_video/upscale_preview.py", f"ep{ep:02d}"], 3600)   # K-EDT-V10：原片放大到 1080 宽
     log("upscale", f"ep{ep:02d}", rc_up, out_up.strip()[-200:].replace("\n", " "))
-    tl, bad = assembly_sources(man)
+    tl, bad = assembly_sources(man, jff)
     tlp = VID / "episodes" / f"ep{ep:02d}" / "sources.timeline.json"
     js(tlp, tl)
+    # FIX-VID D8：阻断 / 过期 / 等闸门的镜 → 首帧静帧缓推占位，记进 night_state（报告标出），不挡整集按时交付（L-204）
+    placeholders = {s["shot"]: str(s.get("block_reason") or s.get("excluded") or s.get("status") or "")[:200]
+                    for s in man.get("shots", []) if not s.get("proxy")}
+    st["eps"][str(ep)]["placeholder_shots"] = placeholders
+    st["eps"][str(ep)]["blocked_shots"] = {s["shot"]: str(s.get("block_reason") or "")[:200] for s in man.get("shots", []) if s.get("status") == "blocked"}
+    if placeholders:
+        log("PLACEHOLDER_SHOTS", f"ep{ep:02d}", json.dumps(placeholders, ensure_ascii=False)[:400])
     want = sum(1 for s in man.get("shots", []) if s.get("proxy"))
-    if not want or len(tl["shots"]) < want:
+    if not want or sum(1 for s in tl["shots"] if s.get("kind") == "video") < want:
         # 11-01 ep01 首次合成：代理没同步回来，合成器拿全静帧占位也“成功”了 → 必须拦
         # K-EDT-V10：进成片的必须是原片（或原片的放大版），原片没拉回来 / 分辨率低于原片 → 不合成
-        log("ASSEMBLE_BLOCKED", f"ep{ep:02d}", f"原片 {len(tl['shots'])}/{want} 到位", "; ".join(bad)[:300])
+        log("ASSEMBLE_BLOCKED", f"ep{ep:02d}", f"原片 {sum(1 for s in tl['shots'] if s.get('kind') == 'video')}/{want} 到位", "; ".join(bad)[:300])
         st["eps"][str(ep)]["status"] = "rendering"
         return
     bgm = ctrl.get("bgm", "auto")
@@ -514,7 +596,12 @@ def finalize(ep, host, st, ctrl):
             shutil.copy2(tlj, EPS_OUT / f"ep{ep:02d}_{ver}.timeline.json")
     director = {}
     if final:   # DIRECTOR 11-02（总调度批准，CONSENT VIDEO10/WORKFLOW → DIRECTOR）：调色 + 音效 + 响度、成片分、口型重出单（K-EDT-816 / 805）
-        rc_d, out_d = run([PY, "tools/director/finish.py", str(final)], 3600)
+        try:   # FIX-VID D12：finish.py 默认 data/import/script_v2.json 是 V1 剧本（post_pass SystemExit“10 镜 vs 16 镜”）→ 传本剧导入稿
+            fargs = ["--script", str(RC.script_path(RUN_ID))]
+        except Exception as e:  # noqa: BLE001  # arch-ok: 导入稿解析不了 = 不传（finish 照跑 lip_redo / film_score，post_pass 报错记进 errors）
+            log("director", f"ep{ep:02d}", "导入稿路径解析失败", str(e)[:200])
+            fargs = []
+        rc_d, out_d = run([PY, "tools/director/finish.py", str(final), *fargs], 3600)
         try:
             director = json.loads([x for x in out_d.splitlines() if x.startswith("{")][-1])
         except (IndexError, ValueError):
@@ -746,7 +833,7 @@ def apply_lane_policy(st, ctrl):
         hold, gate = video_boost(ctrl, hold)
         hold = _shard_hold(host, hold)
         c = {"jobs": "jobs.json", "mode": "prod", "eps": eps_on, "per_lane": per_lane, "linger": True,
-             "hold_lanes": hold, "shared_lanes": shared, "yield_s": ctrl["yield_s"]}
+             "hold_lanes": hold, "shared_lanes": video_shared(shared, ctrl), "yield_s": ctrl["yield_s"]}
         if gate:
             c["vram_gate"] = gate
         run([PY, "tools/series10_video/deploy.py", "control", host, json.dumps(c, ensure_ascii=False)])

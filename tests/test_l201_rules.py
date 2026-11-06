@@ -124,9 +124,10 @@ def test_validator_wires_l201():
     assert "WL.check_l201(ep, text)" in src
 
 
-@pytest.mark.parametrize("name, want", [("P4_ep01.L3_psm7.md", {"QW-L13"}), ("P4_ep01.L3_psm8.md", set())])
+@pytest.mark.parametrize("name, want", [("P4_ep01.L3_psm7.md", {"QW-L13"}), ("P4_ep01.L3_psm8.md", set()), ("P4_ep01.L3_psm9.md", set())])
 def test_ep01_staging_s1_s2(name, want):
-    """psm7 的 S1→S2（现实→幻想）只写“下巴抬起”→ QW-L13；psm8 写了光闪触发 + 机位 / 高度都换 → 两条都不报"""
+    """psm7 的 S1→S2（现实→幻想）只写“下巴抬起”→ QW-L13；psm8 / psm9 写了光闪触发 + 机位 / 高度都换 → 两条都不报
+    （psm8 会被 L-203 的 QW-L14 拦：首尾帧几乎一样；psm9 = L-203 回写，block 0）"""
     p = ROOT / "data/pipeline/runs/series10_v2/staging" / name
     if not p.exists():
         pytest.skip(f"{name} 不在本机")
@@ -136,4 +137,7 @@ def test_ep01_staging_s1_s2(name, want):
     got = {i["rule_id"] for i in ep.get("issues", []) if i["rule_id"] in ("QW-L12", "QW-L13")}
     assert got == want
     if not want:
-        assert rep["blocking"] == 0
+        other = {i["rule_id"] for i in ep.get("issues", []) if i["level"] == "block"} - {"QW-L14"}
+        assert not other, other
+        if name.endswith("psm9.md"):
+            assert rep["blocking"] == 0

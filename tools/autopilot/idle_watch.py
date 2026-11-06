@@ -9,6 +9,8 @@
   动作  某道空闲 ≥ idle_min 分钟且有活：
         a) 卡点：tools/master/report_issue.report（who=IDLE-WATCH，附证据：哪些道空、什么活、为什么没派——暂停 / hold / only / yield_s /
            episode_lock / sop_gate 阻断 / 心跳过期）；同一台 report_repeat_min 内只记一次；CHANNEL 一行。
+        O3（FIX-ORCH 11-06）跨机借道：gpu36 的借道空闲 ≥ idle_min 且 gpu33 分区有 ready 首尾帧 → 改 lane_relay 阶段交接开关
+           （data/pipeline/lane_relay_hold.json）把这几条道借给 gpu33；gpu33 分区没 ready 了 → 还原借之前的 hold（relay_plan）。
         b) 现成的安全动作（每项可关）：该台 night.py --once 重派（和 episode_checklist lane_idle 同一条命令；act_gap_s 一次）；
            过期 hold 点名（hold_expiry.alive；读方已自动忽略，这里只让人看见，不改文件）；producer / night 心跳过期 →
            restart_queue.request（urgent，restart_gap_s = 30 分钟一台一次；已有待办请求不重复）。
@@ -45,8 +47,9 @@ DEFAULT_CFG = {
     "enabled": True, "interval_s": 60, "idle_min": 5, "util_idle_pct": 5, "dry_run": False, "act_gap_s": 600, "restart_gap_s": 1800,
     "report_repeat_min": 60, "issue_blocking": False, "producer_stale_min": 5, "night_stale_min": 10, "probe_timeout_s": 40,
     "queue_timeout_s": 6, "night_once_timeout_s": 180,
-    "actions": {"night_once": True, "restart_request": True, "report_issue": True, "channel": True},
+    "actions": {"night_once": True, "restart_request": True, "report_issue": True, "channel": True, "lane_relay": True},
 }
+RELAY_HOLD_REL = "data/pipeline/lane_relay_hold.json"     # lane_relay.HOLD_FILE 同一个文件（producer 每轮现读）
 
 # 服务器侧探针（只读；__RUN__ / __LANES__ / __HOST__ / __PD__ 由 Env.probe_host 填）
 REMOTE_PROBE = r"""
@@ -239,6 +242,25 @@ class Env:
             out["_error"] = repr(e)[:120]
         return out
 
+    # ---- O3 跨机借道（复用 tools/autopilot/lane_relay.py：配置 + 阶段交接开关文件；不新增通道、不做跨机接手）
+    def relay_cfg(self) -> dict:
+        return _j(self.root / "config/pipeline/lane_relay.json", {}) or {"enabled": False}
+
+    def relay_lanes(self, rcfg: dict) -> list[str]:
+        """配置里合格的借道（lane_relay.valid_lanes：非坏卡、image 角色、上游只许回环）"""
+        LR = _load("lane_relay_for_idle_watch", "tools/autopilot/lane_relay.py", ROOT)
+        return sorted(LR.valid_lanes(rcfg))
+
+    def relay_hold_read(self) -> dict | None:
+        return _j(self.root / RELAY_HOLD_REL, None)
+
+    def relay_hold_write(self, d: dict) -> None:
+        _jw(self.root / RELAY_HOLD_REL, d)
+
+    def partition_images(self) -> dict:
+        p = self.j("data/state/netfix/partition.json", None) or self.j("config/netfix/partition.json", {}) or {}
+        return p.get("images") or {}
+
     def hold_alive(self, expires_at, since) -> tuple[bool, str]:
         return _load("hold_expiry_for_idle_watch", "tools/autopilot/hold_expiry.py", self.root).alive(expires_at, since, self.now())
 
@@ -270,7 +292,7 @@ class Env:
 # ------------------------------------------------------------------ 纯逻辑
 def frames_ready(reg: dict) -> dict:
     """登记表 → {ready: n, ready_eps: [...], running_idle_candidates: [{obj, where, since}]}：ready 首尾帧 = 按镜可派（L-202 ①）"""
-    ready, eps, running = 0, set(), []
+    ready, eps, running, by_ep = 0, set(), [], {}
     for E in reg.get("episodes") or []:
         for S in E.get("shots") or []:
             for k in ("first", "last"):
@@ -278,9 +300,43 @@ def frames_ready(reg: dict) -> dict:
                 if o.get("status") == "ready":
                     ready += 1
                     eps.add(int(E.get("ep") or 0))
+                    by_ep[int(E.get("ep") or 0)] = by_ep.get(int(E.get("ep") or 0), 0) + 1
                 elif o.get("status") == "running":
                     running.append({"obj": f"{S.get('shot')}/{k}", "where": o.get("where"), "since": o.get("since")})
-    return {"ready": ready, "ready_eps": sorted(eps), "running": running}
+    return {"ready": ready, "ready_eps": sorted(eps), "running": running, "ready_by_ep": by_ep}
+
+
+def relay_plan(cfg: dict, st: dict, now: float, lane_st: dict, fr: dict, images: dict, rcfg: dict, relay_lanes: list[str],
+               hold: dict | None) -> dict | None:
+    """FIX-ORCH O3（L-202 ②“GPU 不能空闲”）：跨机借道的自动开 / 还，复用 lane_relay 的阶段交接开关文件（producer 每轮现读）。
+      借：借道配置开着、消费机（consumer_host，gpu33）分区里有 ready 首尾帧、某条借道（gpu36:x）空闲 ≥ idle_min → 从 hold 里拿掉这条道；
+      还：消费机分区没有 ready 了 → 把本巡检借出去的道放回 hold（恢复借之前的 hold，人工 hold 原样还原）。
+    只动开关文件，不起 / 停进程，不碰 gpu33:2（valid_lanes 已排除），不做跨机接手（work_stealing=false 照旧）。→ 动作 dict 或 None"""
+    if not cfg["actions"].get("lane_relay") or not rcfg.get("enabled") or not relay_lanes:
+        return None
+    cons = str(rcfg.get("consumer_host") or "")
+    cons_eps = {int(e) for e in images.get(cons) or []}
+    backlog = sum(n for e, n in (fr.get("ready_by_ep") or {}).items() if int(e) in cons_eps)
+    rs = st.setdefault("relay", {})
+    lent = [ln for ln in rs.get("lent") or [] if ln in relay_lanes]
+    h = (hold or {}).get("hold") if isinstance(hold, dict) else None
+    cur = set(relay_lanes) if h == "all" else ({str(x) for x in h if str(x) in relay_lanes} if isinstance(h, list) else set())
+    lender = sorted({ln.split(":", 1)[0] for ln in relay_lanes})
+    host = lender[0] if lender else "gpu36"
+    if backlog > 0:
+        take = sorted(ln for ln in cur if (lane_st.get(ln) or {}).get("idle_min", 0) >= cfg["idle_min"])
+        if take:
+            return {"kind": "lane_relay", "key": "lane_relay", "host": host, "op": "lend", "lanes": take,
+                    "hold": sorted(cur - set(take)), "prev_hold": rs.get("prev_hold", h) if lent else h,
+                    "why": f"{cons} 分区 ready 首尾帧 {backlog} 个，{take} 空闲 ≥ {cfg['idle_min']} 分钟 → 借给 {cons}（lane_relay）"}
+        return None
+    if lent:
+        prev = rs.get("prev_hold")
+        back = set(relay_lanes) if prev == "all" else ({str(x) for x in prev if str(x) in relay_lanes} if isinstance(prev, list) else set())
+        new = sorted(cur | (set(lent) & back))
+        return {"kind": "lane_relay", "key": "lane_relay", "host": host, "op": "return", "lanes": sorted(set(lent) & back),
+                "hold": new, "prev_hold": None, "why": f"{cons} 分区没有 ready 首尾帧了 → 借出的道还原 hold（{sorted(set(lent) & back) or '原本就不挡'}）"}
+    return None
 
 
 def blockers(env: Env, probe: dict | None, run: str, lanes_of_host: list[str], cfg: dict) -> list[str]:
@@ -426,6 +482,16 @@ def execute(env: Env, cfg: dict, st: dict, acts: list[dict], now: float, run: st
                 else:
                     rec["result"] = "request " + str(env.rq_request(a["host"], f"{WHO}：{a['why']}"[:200], a["mode"], bool(a.get("urgent"))).get("id"))
                 last_act[a["key"]] = now
+            elif a["kind"] == "lane_relay":
+                rs = st.setdefault("relay", {})
+                env.relay_hold_write({"hold": a["hold"], "by": WHO, "at": jst(now, "%Y-%m-%dT%H:%M:%S+09:00"), "why": a["why"][:200]})
+                if a["op"] == "lend":
+                    rs.update(lent=sorted(set(rs.get("lent") or []) | set(a["lanes"])), prev_hold=a.get("prev_hold"), at=now)
+                else:
+                    rs.update(lent=[], prev_hold=None, at=now)
+                rec["result"] = f"lane_relay_hold → {a['hold']}"
+                if cfg["actions"].get("channel"):
+                    env.channel(f"🟢 借道 {a['op']} {a['lanes']}：{a['why'][:200]}", now)
             elif a["kind"] == "report":
                 iid = env.report(run, a["what"][:900], a["fix_hint"], bool(cfg["issue_blocking"])) if cfg["actions"].get("report_issue") else None
                 rec["result"] = f"卡点 {iid}"
@@ -465,13 +531,22 @@ def tick(env: Env | None = None, cfg: dict | None = None, state: dict | None = N
     if fr["ready_eps"]:
         work["sop"] = env.sop_blocks(run, fr["ready_eps"][:3])
     acts = decide(env, cfg, st, now, lanes, lane_st, work, probes, run)
+    try:                                   # O3：跨机借道自动开 / 还（读不到配置 = 不动）
+        rcfg = env.relay_cfg()
+        if rcfg.get("enabled"):
+            ra = relay_plan(cfg, st, now, lane_st, fr, env.partition_images(), rcfg, env.relay_lanes(rcfg), env.relay_hold_read())
+            if ra:
+                acts.append(ra)
+    except Exception as e:  # noqa: BLE001  # arch-ok: 借道判定出错只记，不影响别的动作
+        work["relay_error"] = repr(e)[:120]
     done = execute(env, cfg, st, acts, now, run, dry)
     idle_lanes = sorted(ln for ln, s in lane_st.items() if s["idle"])
     has_work = fr["ready"] > 0 or work["assets_pending"] > 0 or any(v > 0 for v in work["video"].values())
     res = {"at": jst(now, "%Y-%m-%d %H:%M:%S+09:00"), "t": now, "run": run, "dry_run": dry, "has_work": has_work, "lanes": lane_st,
            "work": {k: v for k, v in work.items() if k != "sop" or v}, "idle_lanes": idle_lanes,
            "probe_errors": [h for h in SERVERS if probes.get(h) is None], "actions": done,
-           "_state": {"idle_since": st.get("idle_since", {}), "last_act": st.get("last_act", {}), "reported": st.get("reported", {})}}
+           "_state": {"idle_since": st.get("idle_since", {}), "last_act": st.get("last_act", {}), "reported": st.get("reported", {}),
+                      "relay": st.get("relay", {})}}
     if save:
         env.write_status(res)
         env.log(f"{res['at']} idle={idle_lanes} work=ready{fr['ready']}/video{work['video']}/assets{work['assets_pending']} "

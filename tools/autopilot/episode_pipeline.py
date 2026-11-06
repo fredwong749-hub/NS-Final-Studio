@@ -343,6 +343,78 @@ def write_ready_run(run: str, ep: int, shots: list[str]) -> list[str]:
     return written
 
 
+def _sop_gate():
+    if "_SG_FOR_EP" not in globals():
+        sp = importlib.util.spec_from_file_location("sop_gate_for_episode_pipeline",
+                                                    Path(__file__).resolve().parents[2] / "tools/master/sop_gate.py")   # 代码随本文件；数据走 ROOT
+        m = importlib.util.module_from_spec(sp)
+        sp.loader.exec_module(m)
+        globals()["_SG_FOR_EP"] = m
+    return globals()["_SG_FOR_EP"]
+
+
+def shot_ready_eps(run: str) -> dict[int, list[str]]:
+    """FIX-ORCH O2（L-202 ①按镜判）：每集资产就绪文件 data/pipeline/asset_jobs/<run>/_ready_epNN.json 的 shot_gaps 里没有缺口的镜
+    → {集: [epNN-SK…]}。键 "*"（挡全部镜的缺口）在 = 本集一镜都不放；还没有 _ready 文件的集不放（资产作业没生成过 = 不知道缺什么）"""
+    import runs as RN
+    SG = _sop_gate()
+    d = jl(RN.import_path(run, ROOT), {}) or {}
+    out = {}
+    for e in d.get("episodes") or []:
+        ep = int(e.get("number") or 0)
+        rf = ROOT / "data/pipeline/asset_jobs" / run / f"_ready_ep{ep:02d}.json"
+        r = jl(rf, None)
+        if not ep or not isinstance(r, dict):
+            continue
+        gaps = SG.asset_shot_gaps(ROOT, run, ep, r)
+        if gaps.get(None):
+            continue
+        ok = [f"ep{ep:02d}-S{int(s['index'])}" for s in e.get("shots") or [] if s.get("index") is not None and not gaps.get(int(s["index"]))]
+        if ok:
+            out[ep] = sorted(ok)
+    return out
+
+
+def sync_shot_ready(run: str, push=None) -> dict:
+    """O2：把按镜就绪的镜并进该剧 ready_episodes.json（dispatch.control_for 的 only = 分区 ∩ ready，按镜就能派）。
+    整集已准备（prepare 写的、没有 partial 标记）的条目不动；partial 条目只增不减地按当前就绪镜重写（缺口补齐 = 自动放行）。
+    有变化 → 经现成 resident_sync.push_control 推给负责出图的机器（服务器上按对象合并 + server-control 重算 only）。返回 {集: 镜数}"""
+    import runs as RN
+    want = shot_ready_eps(run)
+    tag = (lambda x: x) if RN.is_primary(run, ROOT) else (lambda x: f"{run}/{x}")
+    changed = {}
+    for path in RN.ready_paths(run, ROOT):
+        d = jl(path, {}) or {}
+        eps = d.setdefault("episodes", {})
+        dirty = False
+        for ep, shots in want.items():
+            cur = eps.get(str(ep)) or {}
+            if cur and not cur.get("partial"):
+                continue                                   # 整集已准备：prepare 那份为准
+            ids = sorted(set(tag(x) for x in shots) | set(cur.get("shots") or []))
+            if ids != sorted(cur.get("shots") or []):
+                eps[str(ep)] = {"ready_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "shots": ids, "partial": True,
+                                "by": "FIX-ORCH O2 按镜就绪（L-202）"}
+                changed[ep] = len(ids)
+                dirty = True
+        if dirty:
+            d.update(by="WORKFLOW episode_pipeline", at=time.strftime("%Y-%m-%dT%H:%M:%S"), run_id=run)
+            js(path, d)
+    if changed:
+        log("shot_ready", run, json.dumps(changed, ensure_ascii=False))
+        hosts = {owner_of_ep(ep) for ep in changed} - {"laptop", None}
+        for h in sorted(hosts):
+            try:
+                if push is not None:
+                    push(h)
+                else:
+                    import resident_sync as RS
+                    RS.push_control(h)
+            except Exception as e:  # noqa: BLE001  # arch-ok: 推不上 = resident_sync loop 下一拍按 sha 变化再推
+                log("shot_ready push", h, repr(e)[:200])
+    return changed
+
+
 def prepare_run(run: str, ep: int, st: dict) -> dict:
     """非 primary run 的一集：按该 run 的导入稿重编作业 → jobs_vs_import(该 run) 对这一集无缺 / 多 / 过期 → 写该 run 的 ready。
     新剧本没有旧版本，不需要 full_redo / reset-redo；作业 / ready 都在该 run 自己的目录，与 primary 的同名镜（ep01-S1）互不覆盖"""
@@ -476,6 +548,12 @@ def watch(interval: int = 60) -> None:
                         st["eps"][str(ep)].update(status="error", error=repr(e)[:300])
                         log("prepare error", f"ep{ep:02d}", repr(e)[:300])
             watch_other_runs(st)             # §0.1：非 primary 的 run 各自准备（primary 上面原样）
+            import runs as RN
+            for run in RN.list_runs(ROOT):   # O2（L-202）：资产按镜齐了的镜不等整集，并进 ready
+                try:
+                    sync_shot_ready(run)
+                except Exception as e:  # noqa: BLE001
+                    log("shot_ready error", run, repr(e)[:300])
             refresh_timings(st)
             report(st)
         except Exception as e:  # noqa: BLE001

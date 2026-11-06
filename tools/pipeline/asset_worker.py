@@ -127,7 +127,8 @@ BY = "ASSET-WORKER"
 CONFIG = ROOT / "config" / "pipeline" / "asset_worker.json"
 ADVANCE_STATUSES = ("preparing", "active", "producing")     # 与 autoflow_resident.ADVANCE_STATUSES 同口径
 DEFAULTS = {"enabled": True, "apply_meta": False, "render": False, "voice": False, "push": True, "golden": False, "max_parallel": 2,
-            "exclude_lanes": [], "hold_minutes": 90, "max_attempts": 2, "ready_every_s": 300,   # 坏卡不写这里：broken_lanes() 读 hosts.json（L-194）
+            "exclude_lanes": [], "hold_minutes": 15, "job_timeout_min": 90, "max_attempts": 2, "ready_every_s": 300,   # 坏卡不写这里：broken_lanes() 读 hosts.json（L-194）
+            # FIX-ORCH O6（11-06）：道 hold 15 分钟（原 90）+ 作业活着时每拍续期（hold_renew）；worker 死了道最多空挂 15 分钟。作业超时单独 job_timeout_min
             "candidates": {"face": 3, "scene": 2, "sheet": 3, "item": 2}, "voice_host": "gpu36"}
 _PROCS: dict[str, subprocess.Popen] = {}
 
@@ -322,7 +323,7 @@ def free_lanes(cfg: dict, in_use: set[str], part: dict | None = None, probe=None
     probe = probe or LN.probe_lane
     excl = set(cfg.get("exclude_lanes") or []) | broken_lanes(H)
     lent, holds = part.get("_lent_lanes") or {}, part.get("_temp_holds") or {}
-    out = []
+    cand = []
     for lane in sorted(H.lanes(role="image")):
         if lane in excl or lane in in_use or lane in lent:
             continue
@@ -333,11 +334,31 @@ def free_lanes(cfg: dict, in_use: set[str], part: dict | None = None, probe=None
             continue
         # PS-MASTER 11-06（L-202 卡不能空）：retired_lanes 只说明笔记本派单层不派这条道（两台服务器各自 producer 派），
         # 不代表道上有活——下面 probe 确认 ComfyUI 队列空才用；以前“retired 且没 hold 就跳过”让 gpu36:2 空转
-        st = probe(lane)
-        if not st.get("ok") or st.get("busy"):
-            continue
-        out.append(lane)
-    return out
+        cand.append(lane)
+    if not cand:
+        return []
+    # FIX-ORCH O6：各道探针并发（每道一次 rssh 5–40 s；原串行 6 道一拍最多 4 分钟）；顺序按道名不变
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _p(lane):
+        try:
+            return probe(lane) or {}
+        except Exception:  # noqa: BLE001  # arch-ok: 探不到 = 这条道这拍不用（与 ok=False 同口径）
+            return {"ok": False}
+    with ThreadPoolExecutor(max_workers=min(8, len(cand))) as ex:
+        sts = list(ex.map(_p, cand))
+    return [lane for lane, st in zip(cand, sts) if st.get("ok") and not st.get("busy")]
+
+
+def hold_renew(LN, j: dict, lane: str, cfg: dict, now: float | None = None) -> bool:
+    """O6：作业还活着 → hold 过半就续一次（hold_minutes 短了以后不让道在作业中途到期被别人派单）。返回是否续了"""
+    now = time.time() if now is None else now
+    mins = float(cfg.get("hold_minutes") or 15)
+    if now - float(j.get("lane_held_t") or 0) < mins * 30:
+        return False
+    LN.hold(lane, mins, f"{BY} {j['id']}（续期）", by=BY)
+    j["lane_held_t"] = now
+    return True
 
 
 # ------------------------------------------------------------------ 一拍
@@ -402,7 +423,7 @@ def tick(root: Path = ROOT, cfg: dict | None = None, runs: dict | None = None, s
                             why = f"pid_mismatch：pid {pid} 还在但创建时间对不上（记的 {ident['sig']}，眼前 {live_sig}），原子进程已退出、pid 被复用；未杀"
                     else:
                         alive = _pid_alive(pid)                   # 旧作业没记身份：只能看 pid 在不在（超时也不杀，见下）
-                    age, limit = _started_age_s(j), float(cfg.get("job_timeout_min") or cfg.get("hold_minutes") or 90) * 60
+                    age, limit = _started_age_s(j), float(cfg.get("job_timeout_min") or 90) * 60     # O6：超时不再跟 hold_minutes 走
                     if alive and age is not None and age > limit and not dry:     # W6：活着但超时 = 僵尸；W6b：核过身份才杀
                         ok, detail = verify_proc(pid, ident)
                         if ok:
@@ -416,6 +437,12 @@ def tick(root: Path = ROOT, cfg: dict | None = None, runs: dict | None = None, s
                     if alive:
                         if lane:
                             in_use.add(lane)
+                            if not dry:
+                                try:
+                                    if hold_renew(LN or _lanes_mod(), j, lane, cfg):
+                                        AJ.save_job(root, j)
+                                except Exception as e:  # noqa: BLE001  续期失败记心跳；下拍再续
+                                    rec.setdefault("lane_errors", []).append(f"renew {lane}: {e!r}"[:160])
                         continue
                     j = AJ.load_job(AJ.job_path(root, run, j["id"]))      # 子进程可能刚写完状态
                     if j.get("state") == "running" and unverified:
@@ -517,7 +544,8 @@ def tick(root: Path = ROOT, cfg: dict | None = None, runs: dict | None = None, s
                         free, rec["lane_errors"] = [], rec.get("lane_errors", []) + [f"free_lanes: {e!r}"[:160]]
                     for j, lane in zip(pend, free):
                         try:
-                            LN.hold(lane, float(cfg.get("hold_minutes") or 90), f"{BY} {j['id']}", by=BY)
+                            LN.hold(lane, float(cfg.get("hold_minutes") or 15), f"{BY} {j['id']}", by=BY)
+                            j["lane_held_t"] = time.time()
                             _start(root, j, lane, spawn, rec)
                             in_use.add(lane)
                         except Exception as e:  # noqa: BLE001
@@ -1073,7 +1101,7 @@ def deliver(root: Path, jp: Path, job: dict, passed: list[dict]) -> dict:
 # tick 只会标“子进程退出但作业没收尾”→ pending 重排，已过检的候选白扔，而且排在 item 作业后面一直等道。
 # 改法：① 收尸时（子进程死了 / 超时被杀）先看作业里已经落盘、sha 对得上的过检候选，够 salvage_min（默认 2，且不超过本类型要的数量）
 # 就直接走 deliver 收尾（投待办 / 代选登记），不再重出；② pending 作业同样先看能不能接管（上次没收尾留下的）；
-# ③ 子进程活着但跑过 job_timeout_min（默认 = hold_minutes）→ 杀掉按“超时”落 failed/重排，不留僵尸 running。
+# ③ 子进程活着但跑过 job_timeout_min（默认 90，O6 起不再跟 hold_minutes）→ 杀掉按“超时”落 failed/重排，不留僵尸 running。
 def salvage_records(root: Path, job: dict) -> list[dict]:
     """作业 candidates 里 passed 且复核图在盘上、sha256 对得上的 → run_job 同口径的候选记录（带回 review JSON 里的 postflight / vlm 供打分）"""
     out, seen = [], set()

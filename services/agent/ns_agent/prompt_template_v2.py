@@ -202,16 +202,21 @@ def hidden_people(shot, angle: dict | None = None) -> dict[str, str]:
             seg += "｜" + af[2]
         angle = PV.parse_angle(seg, names)
     out: dict[str, str] = {}
+    a = angle or {}
+    by_text = a.get("ots_by") == "text"
+    ots_from = a.get("ots_from") if by_text else None             # FIX-PRE 11-06：按 cast 顺序猜出来的“被越的人”不作数
     for r in cast:
         n = r["name"]
         if r["presence"] != "在画":
             continue
+        if by_text and n == a.get("ots_to") and not AR.back_view(shot, n):
+            continue                                            # 过肩被拍的人 = 焦点主体，永远不记成不露脸（REVIEW-PRE B）
         hid, part = PV.hidden_face(stand.get(n, "") + "｜" + "，".join(per.get(n) or []))
         if hid and part not in ("", "肩与背", "背影"):          # 写明了露出的部位（“只以右肩与后脑…入画”）最具体，优先
             out[n] = part
         elif AR.back_view(shot, n):
             out[n] = "背影"
-        elif hid or (angle or {}).get("ots_from") == n or n not in faced_all:
+        elif hid or ots_from == n or n not in faced_all:
             out[n] = part if hid and part else "肩与背"
     return out
 

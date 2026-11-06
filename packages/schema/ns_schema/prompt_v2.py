@@ -79,19 +79,61 @@ def parse_angle(text: str, names: list[str] | None = None) -> dict:
         az = "side45"
     elif "正面" in t:
         az = "front"
-    frm = to = None
+    frm = to = by = None
     if az == "ots":
-        m = re.search(r"从(.{1,12}?)(?:的)?(?:左肩|右肩|肩|腰侧|后方|右后方|左后方)", raw)
-        if m:
-            frm = next((n for n in names if n in m.group(1)), None)
-        m2 = re.search(r"拍(.{1,8})", raw)
-        if m2:
-            to = next((n for n in names if n in m2.group(1)), None)
-        if frm is None:
-            frm = next((n for n in names if n in raw), None)
-        if to is None:
-            to = next((n for n in names if n != frm and n in raw), None)
-    return {"height": h, "azimuth": az, "ots_from": frm, "ots_to": to, "raw": raw}
+        frm, to, by = ots_pair(raw, names)
+    return {"height": h, "azimuth": az, "ots_from": frm, "ots_to": to, "ots_by": by, "raw": raw}
+
+
+_NAME_CLAUSE = r"[^，；。｜|]"
+
+
+def _ots_pats(alt: str) -> tuple[list[str], list[str], str]:
+    """（越 X 拍 Y 成对式, 只给 from 的式子, 只给 to 的式子）。名字后允许括注 / 说明（调用方先去括号再匹配原文）"""
+    pair = [rf"越过?着?\s*({alt})(?:的)?{_NAME_CLAUSE}{{0,14}}?拍\s*({alt})",                              # 越X拍Y / 越过X的左肩略仰拍Y
+            rf"从\s*({alt}){_NAME_CLAUSE}{{0,20}}?(?:肩|腰侧|后方|身后|背后){_NAME_CLAUSE}{{0,16}}?拍\s*({alt})"]   # 从X的右肩后方越肩拍Y
+    frm = [rf"从\s*({alt}){_NAME_CLAUSE}{{0,20}}?(?:肩|腰侧|后方|身后|背后)",
+           rf"(?:相机|机位)在\s*({alt}){_NAME_CLAUSE}{{0,12}}?(?:肩|身|背)后",
+           rf"越过?着?\s*({alt})(?:的)?{_NAME_CLAUSE}{{0,6}}?肩"]
+    return pair, frm, rf"拍\s*({alt})"
+
+
+def _ots_text(text: str) -> str:
+    """过肩认人用的文本：括注里写了“越…拍…”的展开成独立小句（保留原文位置），其余括注（站位 / 说明）去掉"""
+    return _PAREN_RE.sub(lambda m: ("，" + m.group(0)[1:-1] + "，") if re.search(r"越[^）)]{0,24}拍", m.group(0)) else "", text or "")
+
+
+def ots_pair(text: str, names: list[str]) -> tuple[str | None, str | None, str | None]:
+    """过肩镜的（被越的人, 被拍的人, 依据）。依据 text = 原文写明（「越X拍Y」「从X的(左|右)?肩(后方)?越过…拍Y」「越过X的…肩拍Y」，
+    名字后带括注 / 说明也认，按原文先后取第一处）；fallback = 原文没写明、按 cast 顺序猜（FIX-PRE 11-06：S12 / S14 / S15 原来
+    括注一长就匹配不上，退到 cast 顺序把被拍的主体当成了被越的前景）；None = 没有人名"""
+    names = [n for n in (names or []) if n]
+    if not names:
+        return None, None, None
+    alt = "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
+    pair, frm_pats, to_pat = _ots_pats(alt)
+    for t in (_ots_text(text),):                         # 名字后的括注去掉（“从卓琳（左下，前景）右肩后方…”），写着越 / 拍的括注展开（“（越江予白拍祁念）”），原文先后不变
+        hits = [(m.start(), m.group(1), m.group(2)) for p in pair for m in re.finditer(p, t) if m.group(1) != m.group(2)]
+        if hits:
+            _, a, b = min(hits)
+            return a, b, "text"
+        f = min((m for p in frm_pats for m in re.finditer(p, t)), key=lambda m: m.start(), default=None)
+        f_name = f.group(1) if f else None
+        g_ = next((m for m in re.finditer(to_pat, t) if m.group(1) != f_name), None)
+        t_name = g_.group(1) if g_ else None
+        if f_name and t_name:
+            return f_name, t_name, "text"
+        if f_name or t_name:
+            order = [n for n in names if n in t] or names
+            if f_name is None:
+                f_name = next((n for n in order if n != t_name), None)
+            else:
+                t_name = next((n for n in order if n != f_name), None)
+            return f_name, t_name, "fallback"
+    raw = text or ""
+    frm = next((n for n in names if n in raw), None)
+    to = next((n for n in names if n != frm and n in raw), None)
+    return frm, to, "fallback"
 
 
 HEIGHT_ZH = {"eye": "平视（相机与人物眼睛同高）", "slightly_high": "略俯", "high": "高机位俯拍（相机高过头顶、向下看）",
@@ -269,22 +311,30 @@ def frame_count_sentence(n_faced: int) -> str:
     return f"{z}人同框，{z}张脸都清晰入画，各自的视线落在自己写明的落点上"
 
 
-HIDDEN_FACE_RE = re.compile(r"以[^，；。｜|]{0,16}入画|只露|背影|背对镜头|被[^，；。]{0,6}遮")
-_HIDDEN_PART_RE = re.compile(r"以([^，；。｜|]{1,14}?)(?:在[^，；。]{0,8})?入画")
+# FIX-PRE 11-06（REVIEW-PRE G）：只认“露出的是身体部位”的不露脸写法——“以侧脸入画”“只露出一道金边”“被手掌盖住”都不是不露脸；
+# 部位里带 脸 / 眼 / 嘴 / 唇 / 眉 的（“以半边脸与肩入画”）也不算
+_BODY_PART = r"(?:肩|背|后脑|腰|手|臂|肘|发|头顶|脖|颈|腿|脚|膝|臀|躯干|身)"
+_FACE_PART_RE = re.compile(r"脸|颜|眼|眉|嘴|唇|鼻|面")
+_BACK_RE = re.compile(r"背影|背对镜头|背向镜头|背身|背朝镜头")
+_HIDDEN_PART_RE = re.compile(rf"以([^，；。｜|]{{1,14}}?{_BODY_PART}[^，；。｜|]{{0,8}}?)(?:在[^，；。]{{0,8}})?入画")
+_ONLY_SHOW_RE = re.compile(rf"只露(?:出)?[^，；。｜|]{{0,6}}?{_BODY_PART}")
+_FACE_COVERED_RE = re.compile(r"(?:整张脸|全脸|脸完全|整个脸)被[^，；。]{0,6}(?:遮|挡|盖)")
+HIDDEN_FACE_RE = re.compile("|".join(p.pattern for p in (_HIDDEN_PART_RE, _ONLY_SHOW_RE, _BACK_RE, _FACE_COVERED_RE)))
 
 
 def hidden_face(text: str) -> tuple[bool, str]:
-    """站位 / img 里这个人的描述 → (不露脸?, 露出的部位)：前景遮挡 / 局部 / 背影 / 只露肩的人不算露脸（PS-MASTER 11-05 审 dump）"""
+    """站位 / img 里这个人的描述 → (不露脸?, 露出的部位)：前景遮挡 / 局部 / 背影 / 只露肩的人不算露脸（PS-MASTER 11-05 审 dump）。
+    只认挂在身体部位上的写法（以…肩 / 后脑…入画、只露出…手、背影 / 背对镜头、整张脸被遮）；部位写的是脸 / 侧脸 / 物件不算"""
     t = text or ""
-    if not HIDDEN_FACE_RE.search(t):
-        return False, ""
-    m = _HIDDEN_PART_RE.search(t)
+    m = next((m for m in _HIDDEN_PART_RE.finditer(t) if not _FACE_PART_RE.search(m.group(1))), None)
     part = (m.group(1) if m else "").strip("的 ")
     if part:                                   # 写明了露出的部位（“背对镜头｜只以右肩与后脑…入画”）比笼统的“背影”更具体，优先
         return True, part
-    if re.search(r"背影|背对镜头", t):
+    if _BACK_RE.search(t):
         return True, "背影"
-    return True, "肩与背"
+    if _ONLY_SHOW_RE.search(t) or _FACE_COVERED_RE.search(t):
+        return True, "肩与背"
+    return False, ""
 
 
 def frame_sentence(faced: list[str], hidden: dict[str, str]) -> str:

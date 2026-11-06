@@ -1,10 +1,10 @@
 {
- "kb_version": "kb-20261106-815b0d8f",
- "n": 695,
+ "kb_version": "kb-20261106-3339c2fb",
+ "n": 697,
  "by_domain": {
   "render": 102,
   "prompt": 28,
-  "writer": 115,
+  "writer": 117,
   "edit": 49,
   "review": 69,
   "loop": 9,
@@ -19,7 +19,7 @@
   "P11-P12": 28,
   "P11-RETRY": 48,
   "P2-P3": 3,
-  "P3-P4": 131,
+  "P3-P4": 133,
   "P4-P5": 41,
   "P4-P6": 34,
   "P4-P7": 26,
@@ -16512,6 +16512,68 @@
    ],
    "confidence": "high",
    "status": "确认",
+   "date": "2026-11-06",
+   "_file": "knowledge/rules/writer_camera.yaml"
+  },
+  {
+   "id": "K-WRT-L203",
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "每镜先做首尾帧设想：起幅 = img、落幅 = motion“——”后的完整尾帧，两格至少两项明显不同（L-203）",
+   "when": "写每一镜的 img 与 motion",
+   "then": "代码判定 rubric_code.l203_checks（pair#n）→ QW-L14（block，导入即阻断）：起幅（img + 【机位与景别】起幅段）与落幅（motion 最后一个“——”之后）在 景别（含 紧 / 略紧 / 松 一档）/ 机位（方位 / 俯仰 / 高度）/ 人物姿态或位置 / 关键动作完成或道具状态 / 光线 里不同项 < 2 → 阻断；固定镜不算前两项、后三项里要 ≥ 2；落幅不足 40 字（没写成完整画面）→ 阻断。推 / 拉要推一档景别才算景别变（小幅只紧半档、首尾帧看不出差别 → 写中幅）",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "镜头字段"
+    }
+   ],
+   "writer_text": "每一镜先想好两格分镜再写：起幅是铺垫（img 原样写它），落幅是本镜的落点，写在 motion 最后一个“——”之后，要写成一张完整的画（景别 + 机位 + 构图 + 每个人的姿态 / 视线 / 表情 + 道具状态 + 光线），尾帧会照它单独出图。两格至少两项明显不同：景别推一档（中景 → 中近景，小幅推只紧半档不算）、机位换方位 / 俯仰、人物换姿态或位置（弯腰 → 站直、入画 / 出画、肩隔一掌 → 贴上）、关键动作做完 / 道具换状态（卡被手盖 → 完整露出、软尺勒腰 → 收回、拉链一半 → 拉到头）、光线变（环形灯亮 / 灭、屏幕亮起补下颌）。固定镜的变化全由动作承担，至少两项。两格一样，导入会被拦。",
+   "evidence": [
+    {
+     "src": "docs/master/MASTER_PICTURE.md",
+     "note": "L-203：每镜在出图前先做首尾帧设想，两帧至少两项明显不同，导入检查首尾帧描述差异；ep01 设想 docs/master/EP01_FRAME_PAIRS.md → P4_ep01.L3_psm9.md"
+    }
+   ],
+   "check": [
+    "tests/test_l203_frame_pair_lint.py"
+   ],
+   "lint": [
+    "QW-L14"
+   ],
+   "confidence": "high",
+   "status": "确认",
+   "date": "2026-11-06",
+   "_file": "knowledge/rules/writer_camera.yaml"
+  },
+  {
+   "id": "K-WRT-L203b",
+   "domain": "writer",
+   "link": "P3-P4",
+   "title": "同一影棚按机位方向分背景视向子场景（<父场景id>_<视向>），相邻镜换视向、不算换场（L-203）",
+   "when": "一集所有镜都在同一个场景里（影棚 / 房间），各镜的【场景】与 img 背景层",
+   "then": "代码判定 validate_qwen_script.same_place → QW-LK2：子场景 id = <父场景id>_<视向>（sk_white_cyc_rev / _door / _mirror / _top），父场景已登记时，接力 / 同场换机位 跨子场景不报 QW-LK2；每个视向在本集场景表登记一行（名称 / 空间描述 / 光线 / 固定陈设 1–3 件）并写【场景定稿】，img 背景层照该视向写（QW-SC7 认名称或固定陈设），相邻两镜不同视向（配对镜除外），正反打两镜相反视向",
+   "targets": [
+    {
+     "kind": "writer_prompt",
+     "section": "镜头字段"
+    }
+   ],
+   "writer_text": "一集都在同一间影棚 / 房间时，不要每镜都对着同一面背景（“每一个 episode 里面的 scenes 都一样，S6 和 S1 一模一样”）。按机位方向把同一个空间分成几个背景视向，各登记一个子场景 id（<父场景id>_<视向>，例 sk_xxx_rev 反打侧 / sk_xxx_door 门口 / sk_xxx_mirror 化妆区 / sk_xxx_top 俯视），本集场景表各写一行，每镜【场景】写自己的视向、img 背景层照它写（反打看相机位那一侧的灯架 / 监视器 / 远处门，门口机位看带小窗的门和器材箱，高机位看地胶标记和桁架影子）。相邻两镜不同视向（过肩复刻对、光闪配对除外），正反打两镜相反视向，白幕正面最多占一半的镜。同一空间、同一套灯、同一条轴线，衔接仍写“同场换机位”。",
+   "evidence": [
+    {
+     "src": "docs/master/MASTER_PICTURE.md",
+     "note": "L-203 同日项目方：“每一个 episode 里面的 scenes 都一样，S6 和 S1 一模一样，S1/S2/S3/S4/S8/S10/S11/S12 都一样”；ep01 psm9 五个视向：sk_white_cyc 1/2/4/5/12、_rev 3/7/11/13、_mirror 6/8/14、_top 9/16、_door 10/15"
+    }
+   ],
+   "check": [
+    "tests/test_l203_frame_pair_lint.py"
+   ],
+   "lint": [
+    "QW-LK2"
+   ],
+   "confidence": "medium",
+   "status": "待验",
    "date": "2026-11-06",
    "_file": "knowledge/rules/writer_camera.yaml"
   },

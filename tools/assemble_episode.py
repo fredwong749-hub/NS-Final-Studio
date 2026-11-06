@@ -45,6 +45,13 @@ def _sources_from(timeline: Path) -> dict[int, dict]:
     tl = json.loads(timeline.read_text(encoding="utf-8"))
     out = {}
     for sh in tl["shots"]:
+        if sh.get("kind") == "still" and sh.get("file"):
+            # FIX-VID D8：night 给没出片的镜（阻断 / 过期 / 等闸门）的首帧静帧占位 → 合成器缓推（PLACEHOLDER_PUSH），时间线标 missing
+            p = Path(sh["file"]) if Path(sh["file"]).is_absolute() else ROOT / sh["file"]
+            if p.is_file():
+                out[int(sh["index"])] = {"kind": "still", "origin": sh.get("origin"), "path": str(p),
+                                         "missing": True, "missing_reason": sh.get("origin") or "没有合格视频版本"}
+            continue
         if sh.get("kind") != "video" or not sh.get("file"):
             continue
         p = Path(sh["file"]) if Path(sh["file"]).is_absolute() else ROOT / sh["file"]

@@ -43,6 +43,22 @@ def enforced() -> bool:
     return bool(gate_cfg().get("enforce")) and bool((cfg().get("judge") or {}).get("enforce"))
 
 
+SKIPPED = "skipped_nonblocking"
+
+
+def skip_nonblocking(item_id: str) -> bool:
+    """L-205 P2（KPI 一集 ≤50 min）：config/gen_contract.json vqa_skip_nonblocking=true 且 L-196 blocking_items 生效时，
+    不在硬项名单里的看图子检查（Q1a 逐人头发看图、Q1x 同场跨镜、Q10 服装）不再跑——反正只记录不挡，白占看图 GPU。
+    名单里显式写了该项 id → 照跑。硬项（Q1 身份复核带 / 人数 / 文字 / 成人 / 视线 / FL）永远照跑（不经过这里）"""
+    from ns_agent.gen_contract import cfg as GC
+    from ns_agent.gen_contract import blocking as BK
+    c = GC()
+    if c.get("vqa_skip_nonblocking") is not True:
+        return False
+    hard = BK.hard_set(c)
+    return hard is not None and item_id not in hard
+
+
 def _item(v: dict | None, video: bool) -> tuple[str, str, dict]:
     if not v:
         return "untested", "没有本地看图复核结果（服务排队 / 未跑）", {}
@@ -582,6 +598,9 @@ def q1a_vlm(pf: dict, image) -> str | None:
     seg_off = it.get("status") == "untested" and ev.get("q1a_mode") == "unavailable"
     if it.get("status") != "pass" and not seg_off:
         return None
+    if skip_nonblocking("Q1a"):              # L-205 P2：Q1a 非硬项 → 不跑看图逐人问答（确定性分割结论照留、只记录）
+        it["evidence"] = {**ev, "vlm": SKIPPED}
+        return None
     from ns_agent.gen_contract import cfg as GC
     from . import hair_attr as HA
     # ISS-1103-024206-c8c0：用 postflight 判 Q1a 时那份按剧人物卡（evidence.cards）；旧记录没有时退回 config cards
@@ -683,6 +702,11 @@ def q1x(sid: str, stage: str, image, pf: dict) -> dict | None:
     t = (GC().get("image_thresholds") or {}).get("Q1x_scene") or {}
     if not t.get("enabled"):
         return None
+    if skip_nonblocking("Q1x"):              # L-205 P2：Q1x 非硬项 → 不跑，记 na（只记录）
+        item = {"id": "Q1x", "title": "同场跨镜身份一致（对同场其他镜头当前首帧）", "status": "na", "record_only": True,
+                "detail": SKIPPED + "（L-196 非硬项，L-205 不跑）", "evidence": {"skipped": SKIPPED}}
+        pf["items"] = [i for i in pf.get("items") or [] if i.get("id") != "Q1x"] + [item]
+        return item
     mine = _emb_of(image)
     peers = {}
     for o in same_scene_peers(sid):
@@ -753,7 +777,8 @@ def accept_gate(sid: str, stage: str, image, pf: dict) -> dict | None:
     # 配了常驻检测服务（count_host = http 地址，gpu36 内网入口）就不推迟：服务器上也能直接测人数
     defer = bool(host) and not host.startswith(("http://", "https://")) and _h.get("detector_gpu", AN.DETECTOR_GPU.get(host)) is None
     try:
-        lab = ACC.label(sid, stage, image, pf, host=host or None, defer_count=defer)
+        lab = ACC.label(sid, stage, image, pf, host=host or None, defer_count=defer,
+                        skip_outfit=skip_nonblocking("Q10"))     # L-205 P2：服装（谁穿什么看图）非硬项不跑；身份 / 提示词人数 / 人数照跑
     except Exception as e:  # noqa: BLE001 — 验收本身出错 = untested（闸门挡、记 score_infra），不当通过
         lab = {k: {"status": "untested", "why": f"验收出错：{type(e).__name__}: {e}"[:200]} for k in ACC.ORDER}
         lab["ok"] = "untested"

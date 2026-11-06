@@ -4,7 +4,9 @@
   gpu33 / gpu36 各跑一个常驻 producer（服务器上 127.0.0.1:181xx/182xx 经 fwd.py 到本机 ComfyUI，不经跳板），笔记本 producer 只派 laptop:0。
 每个 producer 的 control.json 由本模块按同一份规则算（唯一来源，不手写）：
   only       = config/netfix/partition.json images[本机] ∩ data/autopilot/ready_episodes.json（WORKFLOW episode_pipeline 写）的镜；
-               交集为空 → ["__none__"]（一个都不派；producer 的 only 为空表示“全部”，所以不能留空）
+               交集为空 → ["__none__"]（一个都不派；producer 的 only 为空表示“全部”，所以不能留空）。
+               FIX-ORCH O2（L-202 按镜）：ready 里的条目可以是 partial（episode_pipeline.sync_shot_ready 写：整集还没齐、
+               但本镜资产 shot_gaps 为空）→ 这些镜照样进 only，不等整集
   hold_lanes = 不属于本机的全部道（服务器上 laptop:0 的地址不通，也要挂住）
   paused     = 跟随笔记本 control.json 的全局暂停（paused_by 属于 global_pause_ignore_by 的不算）
 跨机不重叠：分区按集互斥（check_partition 校验），所以两台不会派同一个对象；没有跨机共享锁，不做跨机接手（steal_plan 只出评估）。
@@ -318,7 +320,8 @@ def control_for(host: str, laptop_ctrl: dict | None, ready: dict | None, part: d
               "dispatch_by": {"by": "NETFIX dispatch.py", "at": iso(), "host": host,
                               "partition_eps": eps, "ready_eps": ready_eps, "override_phases": ph, "laptop_takes_eps": taken,
                               "extra_runs": runs_extra, "run": run_id or "primary",
-                              "rule": "K-OPS-N04 only = 分区 ∩ 已准备好的集；hold = 别的机器的道；paused 跟随笔记本全局暂停；"
+                              "partial_eps": sorted(e for e in ready_eps if ((ready or {}).get("episodes") or {}).get(str(e), {}).get("partial")),
+                              "rule": "K-OPS-N04 only = 分区 ∩ 已准备好的集（L-202：含按镜就绪的 partial 集）；hold = 别的机器的道；paused 跟随笔记本全局暂停；"
                                       "K-OPS-N06 临时覆盖：phase=laptop 的服务器分区由笔记本经隧道派、服务器 only=__none__"}}
     if host != "laptop":                     # 笔记本的 paused 就是全局开关本身，不改
         lc0 = laptop_ctrl or {}

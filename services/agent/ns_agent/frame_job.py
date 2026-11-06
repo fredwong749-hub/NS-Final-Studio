@@ -123,6 +123,8 @@ def outer_items(project: str, ep, shot, sr=None, body: str | None = None) -> lis
         cid, lid, name = ch.get("character"), ch.get("look"), ch.get("name") or ch.get("character")
         if ch.get("wardrobe_scope") is not None or ch.get("back_view"):   # K-REN-951 / 957：局部不露脸、背影的人不补“要穿全”
             continue
+        if ch.get("presence") == "局部" and not ch.get("face_described"):   # FIX-PRE 11-06（REVIEW-PRE D）：局部的人只露部位 → partial_items
+            continue
         L = (looks.get(cid) or {}).get(lid) if lid else None
         if L is None:
             continue
@@ -153,9 +155,42 @@ def outer_items(project: str, ep, shot, sr=None, body: str | None = None) -> lis
     return out
 
 
+def partial_items(project: str, ep, shot, sr=None, body: str | None = None) -> list[tuple[str, str, list[str]]]:
+    """FIX-PRE 11-06（REVIEW-PRE D / K-REN-951）：局部（不露脸 / 过肩前景 / 背影）的人 → [(名字, 部位, [部位内看得到、正文没写到的
+    鞋 / 饰品 / 指甲短名])]。可见区 = cast 部位（asset_refs.part_scope_zones），服装件不补（不露整套），对不上部位 = 不补"""
+    img = AR.g(shot, "img_prompt") or ""
+    n_ep = int(AR.g(ep, "number") or 0)
+    looks = AR.load_looks(project)
+    text = body if body is not None else img
+    parts_by_name = {AR.g(c, "name"): str(AR.g(c, "part") or "").strip() for c in AR.g(shot, "cast") or []}
+    out = []
+    for ch in (sr.characters if sr is not None else None) or []:
+        if ch.get("presence") != "局部" or ch.get("face_described"):
+            continue
+        cid, lid, name = ch.get("character"), ch.get("look"), ch.get("name") or ch.get("character")
+        L = (looks.get(cid) or {}).get(lid) if lid else None
+        scope = set(ch["wardrobe_scope"]) if ch.get("wardrobe_scope") is not None else AR.part_scope_zones(shot, name)
+        if L is None or not scope:
+            continue
+        names = []
+        for x in sorted(L.parts, key=lambda x: AR.ZONE_ORDER.get(x.zone, 9)):
+            if x.zone not in scope or x.slot in ("outfit", "marker") or not AR.part_active(x, n_ep, img):
+                continue
+            lab = AR._short(x.label)
+            core = lab.split("：", 1)[-1].strip()
+            if lab and lab not in text and core not in text and lab not in names:
+                names.append(lab)
+        if names:
+            out.append((name, parts_by_name.get(name) or "部位", names))
+    return out
+
+
 def outer_items_note(project: str, ep, shot, sr, body: str = "") -> str:
+    """整套造型的人：OUTER_NOTE（要穿全）；局部的人：AR.PART_ITEMS_NOTE（只补部位内单品）。顺序 = TEXT_NOTE_RES（整套在前、局部在后）"""
     items = outer_items(project, ep, shot, sr, body=body or None)
-    return "".join(OUTER_NOTE.format(name=n, lid=lid, items="、".join(xs)) + "。" for n, lid, xs in items if xs)
+    part = partial_items(project, ep, shot, sr, body=body or None)
+    return ("".join(OUTER_NOTE.format(name=n, lid=lid, items="、".join(xs)) + "。" for n, lid, xs in items if xs)
+            + "".join(AR.PART_ITEMS_NOTE.format(name=n, part=pt, items="、".join(xs)) + "。" for n, pt, xs in part if xs))
 
 
 # ACTING 11-01（R11-2 / R11-8）：出图正文没写视线（frame_spec.GAZE_WORDS 一个都没有）时，补一句固定视线说明；
@@ -385,7 +420,9 @@ def continuity_slot(plan, model: str, file: str, line_tmpl: str) -> dict:
     cap = AR.model_slots(model)
     replaced = None
     if len(plan.slots) >= cap:
-        victim = next((s_ for s_ in reversed(plan.slots) if s_.kind not in ("face", "faceboard")), None)
+        # L-204 ②（11-06）：让位的是造型设定图 / 参考板 / 单品（首帧本身带着服装），不是场景底板；只剩底板可让时才让底板
+        victim = (next((s_ for s_ in reversed(plan.slots) if s_.kind in ("sheet", "board", "item")), None)
+                  or next((s_ for s_ in reversed(plan.slots) if s_.kind not in ("face", "faceboard")), None))
         if victim is not None:
             joined = "".join(s_.line for s_ in plan.slots)
             head = plan.prompt_prefix[:-len(joined)] if joined and plan.prompt_prefix.endswith(joined) else plan.prompt_prefix
@@ -565,6 +602,14 @@ def last_angle_field(shot, end_text: str) -> str:
         hm = _HEIGHT_RE.search(_LABEL_PAREN_RE.sub("", af[1]))
         if hm:
             camera += "、" + hm.group(0)
+    # FIX-PRE 11-06（REVIEW-PRE B / L-204 ①）：过肩镜的“越谁拍谁”写进尾帧机位段——落幅原文写明了就按落幅，没写明沿用首帧
+    # （原来机位段去掉了带人名的小句，parse_angle 退到 cast 顺序猜，S4 尾帧猜成“越过祁念的肩拍卓琳”、被拍的主体被写成不露脸）
+    if names and PV.parse_angle(camera, names)["azimuth"] == "ots" and PV.parse_angle(camera, names).get("ots_by") != "text":
+        a_end = PV.parse_angle(end_text, names)
+        a_first = PV.parse_angle("｜".join(af[1:3]), names) if len(af) >= 2 else {}
+        pair = next(((a["ots_from"], a["ots_to"]) for a in (a_end, a_first) if a.get("ots_by") == "text" and a["ots_from"] and a["ots_to"]), None)
+        if pair:
+            camera += f"、越过{pair[0]}的肩拍{pair[1]}"
     m = _END_RE.search(PT2.script_field(shot, "运镜"))
     tail = (m.group(1).strip() if m else "") or (af[2] if len(af) >= 3 else "")
     return "｜".join(x for x in (size, camera, tail) if x)

@@ -56,6 +56,9 @@ PART_ZONES = (  # 局部特写：part_name → 可见区域
 )
 SHEET_PANEL_BY_SIZE = {"极近特写": "half", "大特写": "half", "特写": "half", "近景": "half", "中近景": "half"}
 ZONE_ORDER = {"feet": 0, "lower": 1, "body": 2, "upper": 3, "waist": 4, "hand": 5, "neck": 6, "face": 7}
+# 参考槽优先级（L-204 ②A，11-06）：身份脸（0 / 0.5）> 主体造型设定图（1）+ 主体单品（2.x，槽满时并进主体参考板）> 场景底板（5）
+# > 第二人设定图（11）> 第二人单品（12.x）。原来场景是 30、槽满先让位（plan_slots），ep01 16 镜首帧只有 3 镜送了底板
+SCENE_SLOT_PRIO = 5.0
 SLOT_LABEL = {"outfit": "服装", "shoes": "鞋", "accessory": "饰品", "nails": "指甲", "marker": "标志"}
 
 
@@ -1302,13 +1305,20 @@ def visible_zones(img: str, kept_triggers=None) -> tuple[str | None, str | None,
 
 
 BACK_WORDS = ("背影", "背面", "背身", "背对", "后背", "背部")
+# L-204 ① / FIX-PRE 11-06（REVIEW-PRE D）：过肩前景的局部人物（部位写“背影右肩”“左肩侧后”、正文写“只以左肩与肩背入画、背向镜头”）
+# 同样是背影：不送身份脸、不按 K-REN-950 改送脸、不补“要穿全”
+BACK_PART_WORDS = BACK_WORDS + ("后脑", "肩背", "肩后", "侧后")
+BACK_PART_TXT_WORDS = ("背影", "背对镜头", "背向镜头", "背身", "背朝镜头")
 
 
 def back_part(shot, name: str) -> bool:
-    """cast 里这个人是局部、部位写的是背影 / 背面（剧本原文）"""
+    """cast 里这个人是局部、部位写的是背影 / 背面 / 后脑 / 肩背 / 肩后（剧本原文），或局部且本人在 img 的分句写了背影 / 背对 / 背向镜头"""
     for c in g(shot, "cast") or []:
         if g(c, "name") == name and g(c, "presence") == "局部":
-            return any(w in str(g(c, "part") or "") for w in BACK_WORDS)
+            if any(w in str(g(c, "part") or "") for w in BACK_PART_WORDS):
+                return True
+            names = [g(x, "name") for x in g(shot, "cast") or [] if g(x, "presence") in ("在画", "局部")]
+            return back_in_text(name, g(shot, "img_prompt") or "", names, words=BACK_PART_TXT_WORDS)
     return False
 
 
@@ -1520,7 +1530,7 @@ def clause_subject(clause: str, names, prev: str | None = None) -> str | None:
     return r[0] if r else prev
 
 
-def back_in_text(name: str, img: str, others=()) -> bool:
+def back_in_text(name: str, img: str, others=(), words: tuple = BACK_TXT_WORDS) -> bool:
     """这个人自己的小句写了背影 / 背对镜头。PS-MASTER 11-05（psm7 S4 “卓琳蹲在祁念左前、背对镜头”把背影记到祁念头上 → I2 失败）：
     按主语从句归属——背对 / 背影 的主语 = 小句里最靠前、不带介词的人名（“在祁念左前”的祁念是宾语），小句没人名就沿用上一小句主语"""
     if not name or name not in (img or ""):
@@ -1537,7 +1547,7 @@ def back_in_text(name: str, img: str, others=()) -> bool:
             if owner.group(1) == name:
                 return True
             continue
-        if name in subj and any(w in c for w in BACK_TXT_WORDS):
+        if name in subj and any(w in c for w in words):
             return True
     return False
 
@@ -1591,6 +1601,25 @@ def _side_note(shot, body: str = "") -> str:
     return "站位：" + "，".join(parts) + "（按此左右站位，不互换）。"
 
 
+def ots_roles(shot) -> tuple[str | None, str | None]:
+    """L-204 ① / FIX-PRE 11-06：过肩镜 **机位与景别** 原文写明的（被越的前景人, 被拍的焦点主体）；没写明 / 不是过肩 → (None, None)。
+    与 prompt_template_v2.hidden_people 同一份判定（ns_schema.prompt_v2.parse_angle，ots_by == "text" 才作数）"""
+    from ns_schema import prompt_v2 as PV
+    field_ = ""
+    for e in g(shot, "extras") or []:
+        if re.sub(r"（[^）]*）|\([^)]*\)", "", str(g(e, "label") or "")).strip("*：: ") == "机位与景别":
+            field_ = str(g(e, "text") or "")
+    af = PV.split_field(field_)
+    seg = af[1] if len(af) >= 2 else ""
+    if len(af) >= 3 and ("过肩" in seg or "越" in af[2]):
+        seg += "｜" + af[2]
+    names = [g(c, "name") for c in g(shot, "cast") or [] if g(c, "name")]
+    a = PV.parse_angle(seg, names) if seg and names else {}
+    if a.get("azimuth") == "ots" and a.get("ots_by") == "text":
+        return a.get("ots_from"), a.get("ots_to")
+    return None, None
+
+
 def resolve_shot(project: str, ep, shot, *, kept_triggers=None, looks=None, two_person: str | None = None) -> ShotRefs:
     """一镜每个在画角色必须锁定的参考图（未排槽位）。ep / shot：导入器对象或 script_v2.json 的 dict"""
     n_ep = int(g(ep, "number") or g(shot, "episode") or 0)
@@ -1608,6 +1637,9 @@ def resolve_shot(project: str, ep, shot, *, kept_triggers=None, looks=None, two_
     chars = []
     face_visible = subject not in ("part", "object")
     primary = next((NAME_ID.get(n, n) for n, pr in on if pr == "在画"), None) or (NAME_ID.get(on[0][0]) if on else None)
+    ots_fg, ots_to = ots_roles(shot)
+    if ots_to and any(n == ots_to and pr == "在画" for n, pr in on):    # 过肩镜：主体 = 被拍的人（不按 cast 顺序）
+        primary = NAME_ID.get(ots_to, ots_to)
     panel = SHEET_PANEL_BY_SIZE.get(size or "", "front")
     for k, (name, pr) in enumerate(on):
         cid = NAME_ID.get(name, name)
@@ -1630,8 +1662,11 @@ def resolve_shot(project: str, ep, shot, *, kept_triggers=None, looks=None, two_
                 how = f"script_match {score:.2f}"
                 if lid and dev:
                     warns.append({"character": name, "kind": "造型偏离", "detail": "；".join(dev), "look": lid})
-        partial_face = pr == "局部" and partial_face_visible(name, img, [n for n, _ in on], size, subject)
+        back_partial = pr == "局部" and back_part(shot, name)        # L-204 ①：过肩前景 / 背影的局部人物 = 背影，不露脸、不送脸
+        partial_face = pr == "局部" and not back_partial and partial_face_visible(name, img, [n for n, _ in on], size, subject)
         info = {"character": cid, "name": name, "presence": pr, "primary": is_primary, "look": lid, "look_how": how}
+        if back_partial:
+            info["back_view"] = True
         # K-REN-950（PROMPTFIX 11-02，ep07-S3 尾帧陌生女人 / ep05-S3 92 版）：cast 写局部（不露脸）但构图可能露脸 → 报矛盾、按送脸处理
         if (pr == "局部" and not partial_face and not back_part(shot, name) and face_exposure_conflict(size, subject)
                 and not crop_guaranteed(shot) and pf_on("face_exposure_guard")):
@@ -1648,6 +1683,9 @@ def resolve_shot(project: str, ep, shot, *, kept_triggers=None, looks=None, two_
         # 局部 / 物件特写不挂身份脸（挂了模型就会画出脸，总调度 11-01）；原文写到这个人的脸（face_described）例外
         # K-AST-263（IMGFIX 11-02）：局部且原文没写脸的人不挂身份脸——主角也一样（ep05-S3 林晚“只露出肩头”挂了脸，模型画出了脸）
         bv = pr == "在画" and back_view(shot, name)                       # K-REN-957：在画但写背影 → 不送正脸
+        if pr == "在画" and not bv and name == ots_fg:                    # L-204 ①：过肩前景人物首尾帧都不露脸（与 hidden_people 一致）→ 按背影送
+            bv = True
+            info["ots_foreground"] = True
         if bv:
             info["back_view"] = True
         if (face_visible or partial_face) and (pr == "在画" or partial_face) and not bv and (is_primary or (two_person or _cfg().get("two_person")) == "both_faces"):
@@ -1674,7 +1712,8 @@ def resolve_shot(project: str, ep, shot, *, kept_triggers=None, looks=None, two_
         part_shot = subject == "part"
         # K-REN-951（PROMPTFIX 11-02，fb-0007 ep08-S5 顾沉穿上林晚的漆皮风衣）：局部、不露脸、不是背影的人只送 cast 部位看得到的
         # 单品，不送设定图 / 整套参考板（整套女装进了参考槽，模型把它穿到画面里唯一露脸的男人身上）
-        scope_zones = (part_scope_zones(shot, name) if (pr == "局部" and not partial_face and not back_part(shot, name)
+        # FIX-PRE 11-06（REVIEW-PRE D / L-204 ①）：过肩前景 / 背影的局部人物同样只按部位送单品，不送整张（背面）设定图
+        scope_zones = (part_scope_zones(shot, name) if (pr == "局部" and not partial_face
                                                         and pf_on("partial_wardrobe_scope")) else None)
         if scope_zones is not None:
             info["wardrobe_scope"] = sorted(scope_zones)
@@ -1759,7 +1798,7 @@ def resolve_shot(project: str, ep, shot, *, kept_triggers=None, looks=None, two_
             or scene_ref(sid_scene, project)
         sdir, sst = scene_dir(sid_scene)
         if sr:
-            refs.append(Ref("scene", None, sr, f"场景 {sid_scene}", 30, None, "scene"))
+            refs.append(Ref("scene", None, sr, f"场景 {sid_scene}", SCENE_SLOT_PRIO, None, "scene"))   # L-204 ②：底板排在第二人设定图之前
             if sst:
                 warns.append({"character": None, "kind": "场景资产状态", "detail": f"{sid_scene} → assets/scenes/{sdir}：{sst}"})
         else:
@@ -1791,6 +1830,9 @@ TEXT_FALLBACK_RE = re.compile(r"[^，。、；]{1,12}的服装、鞋、饰品按
 # 与上面同一规矩：改句式 = 同一次改动里改这里的 RE（DATAALIGN 11-01 把两句并到这一处，唯一来源）
 OUTER_ITEMS_NOTE = "{name}本镜造型{lid}要穿全：{items}（造型设定图上有，正文没写也必须入画）"
 OUTER_ITEMS_RE = re.compile(r"[^，。、；]{1,12}本镜造型[A-Za-z0-9]{0,3}要穿全：[^（。]{1,120}（造型设定图上有，正文没写也必须入画）")
+# FIX-PRE 11-06（REVIEW-PRE D）：局部（不露脸 / 背影）的人只补 cast 部位看得到的单品（part_scope_zones），不写“要穿全…必须入画”
+PART_ITEMS_NOTE = "{name}露出的{part}上要有：{items}（只画这一部位的单品，不补整套造型）"
+PART_ITEMS_RE = re.compile(r"[^，。、；]{1,12}露出的[^，。；：]{1,16}上要有：[^（。]{1,80}（只画这一部位的单品，不补整套造型）")
 # frame_v9 正文里系统插的全部固定说明，按 compile_frame 拼接顺序（槽位不足在前、外层单品在后）——
 # ns_api.unified_stale.match_target 按这个顺序认出来再用 frame_job.with_note 放回去比对
 # 视线说明（ACTING 11-01，项目方 R11-2“演员的眼睛不要看镜头”、R11-8“每个镜头第一帧演员都看着镜头”）：出图正文没写视线时，
@@ -1802,7 +1844,7 @@ EYELINE_RE = re.compile(r"[^，。、；]{1,12}的视线落在[^（。]{1,40}上
 GARMENT_DETAIL_NOTE = "{name}的{label}：{desc}"
 # 描述里不放逗号（逗号是正文分句符，识别式靠它定界）；袖口写在括号里
 GARMENT_DETAIL_RE = re.compile(r"[^，。、；：①-⑩]{1,12}的[^，。、；：①-⑩]{0,12}(?:外套|西装|风衣|大衣|皮衣|夹克|围裙|开衫|披肩)：[^，。；：]{1,60}")
-TEXT_NOTE_RES = (TEXT_FALLBACK_RE, OUTER_ITEMS_RE, EYELINE_RE, GARMENT_DETAIL_RE, BLOCKING_NOTE_RE, LAYER_NOTE_RE)   # BLOCKING：K-REN-952
+TEXT_NOTE_RES = (TEXT_FALLBACK_RE, OUTER_ITEMS_RE, PART_ITEMS_RE, EYELINE_RE, GARMENT_DETAIL_RE, BLOCKING_NOTE_RE, LAYER_NOTE_RE)   # BLOCKING：K-REN-952
 
 
 def garment_details(project: str, cid: str, lid: str | None) -> list[tuple[str, str]]:
@@ -1942,7 +1984,9 @@ def _apply_sheet_gaps(project: str, slots: list) -> None:
 
 def plan_slots(sr: ShotRefs, model: str = "qwen_image_2.1", capacity: int | None = None, scene_protected: bool = False) -> SlotPlan:
     """按模型槽位排参考图（I9）。规则：脸不进参考板；一块板只放同一角色、最多一张带脸的图（设定图）；
-    超出时先合并同角色低优先级项为参考板，仍超出才丢（场景 → 第二人单品 → 第二人设定图），丢弃项记 dropped（走文字）"""
+    超出时先合并同角色低优先级项为参考板，仍超出才按 prio 从低往高丢（第二人单品 → 第二人设定图 / 板 → 场景底板），
+    身份脸与主体角色的造型永不丢；丢弃项记 dropped（走文字）。L-204 ②A（11-06）：场景底板（SCENE_SLOT_PRIO=5）排在第二人设定图（11）
+    之前——原来场景不论 prio 一律先让位，双人镜几乎从不送底板。scene_protected=True（plan_slots_v2）：场景连主体造型都不让"""
     N = capacity or model_slots(model)
     max_tiles = int((_cfg().get("board") or {}).get("max_tiles", 6))
     groups: list[list[Ref]] = [[r] for r in sr.refs]           # 已按 prio 排好
@@ -1960,13 +2004,6 @@ def plan_slots(sr: ShotRefs, model: str = "qwen_image_2.1", capacity: int | None
         return sum(r.has_face for r in a + b) <= 1 and len(a) + len(b) <= max_tiles
 
     while len(groups) > N:
-        sc = [k for k, gr in enumerate(groups) if gr[0].role == "scene"] if not scene_protected else []   # IMGMASTER：场景不让位
-        if sc:                                                   # 优先级最低：场景先让位（走文字 + 【场景】段）
-            for r in groups[sc[-1]]:
-                dropped.append({"file": r.file, "label": r.label, "character": None, "role": "scene",
-                                "why": f"{model} 只有 {N} 个参考槽，场景让位给人物资产，走文字"})
-            del groups[sc[-1]]
-            continue
         merged = False
         for i in range(len(groups) - 1, 0, -1):                 # 从低优先级往前找能合并的相邻组
             for j in range(i - 1, -1, -1):
@@ -1988,7 +2025,8 @@ def plan_slots(sr: ShotRefs, model: str = "qwen_image_2.1", capacity: int | None
         k = max(cand, key=lambda k: min(r.prio for r in groups[k]))
         for r in groups[k]:
             dropped.append({"file": r.file, "label": r.label, "character": r.character, "role": r.role,
-                            "why": f"{model} 只有 {N} 个参考槽，改走文字"})
+                            "why": (f"{model} 只有 {N} 个参考槽，场景让位给身份脸 / 主体造型，走文字" if r.role == "scene"
+                                    else f"{model} 只有 {N} 个参考槽，改走文字")})
         del groups[k]
     slots: list[Slot] = []
     for n, gr in enumerate(groups, 1):
@@ -2005,8 +2043,12 @@ def plan_slots(sr: ShotRefs, model: str = "qwen_image_2.1", capacity: int | None
                      names, members, faces=len(gr))
         else:
             labels = [("造型" + (r.look_id or "") + "设定图") if r.role == "sheet" else r.label for r in gr]
-            s = Slot(n, "board", make_board(sr.project, [(r.file, lab) for r, lab in zip(gr, labels)]), r0.character,
-                     labels, members, faces=sum(r.has_face for r in gr))
+            try:
+                s = Slot(n, "board", make_board(sr.project, [(r.file, lab) for r, lab in zip(gr, labels)]), r0.character,
+                         labels, members, faces=sum(r.has_face for r in gr))
+            except DerivedWriteRefused:
+                # PS-MASTER 11-06：已归档 / 冻结的剧（V1）不许写新参考板——退回只送第一张（其余走文字），不让编译失败
+                s = Slot(n, r0.role, r0.file, r0.character, [r0.label], members[:1], faces=int(r0.has_face))
         s.line = _line(sr.project, s)
         if manifest_rel(sr.project):                    # K-REN-959：带品牌 logo 的参考只取款式（正向写法；cfg=1 负面词不生效）
             meta = manifest_meta(sr.project)
@@ -2049,6 +2091,8 @@ def gaze_target(shot) -> str:
         from ns_agent import frame_job as _FJ
         t = _FJ.first_beat_gaze(shot)
     t = (t or "画面里的人或物").strip()
+    if re.match(r"画面[右左正]?前方", t):                    # L-200 / FIX-PRE 11-06：落点“画面右前方”≈ 镜头方向 → 同 framing.off_axis_gaze 改向一侧
+        t = FR.off_axis_gaze("视线落在" + t)[len("视线落在"):]
     return t[:-1] if t.endswith("上") and len(t) > 1 else t
 
 
@@ -2080,9 +2124,6 @@ def _apply_single_turn(plan: SlotPlan, line: str) -> None:
     # 放在提示词最前面（参考说明之前）：验收时放在身份脸句之后 ep01-S1 仍正对镜头（data/ab/imgfix ACC s20261201），
     # 放最前面 S1 / S2 各 2 seed 都转开（T3）。仍算参考说明段的一部分（prompt_prefix），正文切分不变
     plan.prompt_prefix = line + plan.prompt_prefix
-
-
-SCENE_SLOT_PRIO = 5.0      # IMGMASTER：身份脸（prio < 5）> 场景局部底图（5）> 本场造型（>5）> 其它；场景槽不再被挤掉
 
 
 def scene_look_refs(per_shot: list[ShotRefs]) -> dict[str, list[Ref]]:

@@ -209,7 +209,7 @@ def test_overlay_doc_raises_on_corrupt_not_silent(tmp_path):
 def test_producer_dispatch_checks_decision_files_first():
     s = (ROOT / "tools/autopilot/producer.py").read_text(encoding="utf-8")
     d = s[s.index("    def dispatch_frames("):]
-    assert d.index("decision_file_problems(self.p.run_id)") < d.index("backlog = len(self.scoring)")
+    assert d.index("decision_file_problems(self.p.run_id)") < d.index("backlog = max(0, len(self.scoring)")
     fn = s[s.index("def decision_file_problems("):s.index("def refs_guard(")]
     assert "return [" in fn                       # 校验器自身出错也算问题（失败关闭）
 

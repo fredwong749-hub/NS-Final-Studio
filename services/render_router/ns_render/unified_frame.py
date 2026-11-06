@@ -94,7 +94,8 @@ def _job_for(script, shot_id: str, project: str, prompt_override: str | None):
 
 def _contract(job: dict):
     from ns_agent.gen_contract import preflight as PF
-    req = {k: job.get(k) for k in ("model", "cast", "prompt", "refs", "asset_refs", "loras", "compiled_by", "route", "route_reasons", "lane")}
+    req = {k: job.get(k) for k in ("model", "cast", "prompt", "refs", "asset_refs", "loras", "compiled_by", "route", "route_reasons", "lane",
+                                   "continuity_ref")}     # continuity_ref：L-203 尾帧 compose 的首帧连续性参考（preflight I9 认它）
     req.update(kind="image", project=job.get("framing_project"), shot_id=job["shot"])
     if job.get("stage") == "last":
         req["kind"] = "image"

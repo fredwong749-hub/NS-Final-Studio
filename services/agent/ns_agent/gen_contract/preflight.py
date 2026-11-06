@@ -188,6 +188,22 @@ def _kinds(rec: dict, *kinds) -> list[dict]:
     return [m for m in (rec.get("missing") or []) if m.get("kind") in kinds]
 
 
+CONTINUITY_LINE_RE = re.compile(r"图(\d+)是本镜头首帧")      # frame_job.LAST_CONTINUITY_LINE 的图号（尾帧 compose 的连续性参考）
+
+
+def _continuity_ok(req: dict, refs: list, files_in_slots: list, prompt: str) -> bool:
+    """I9（L-203 / FIX-PRE 11-06）：尾帧 compose 在槽位参考之后多挂一张“本镜头首帧”作连续性参考——refs = 槽位文件 + 这一张，
+    且作业 continuity_ref.file 就是它、或提示词里“图N是本镜头首帧”的 N 正好是它的位置 → 算合法槽，不是“参考与规划不一致”"""
+    k = len(files_in_slots)
+    if len(refs) != k + 1 or refs[:k] != files_in_slots:
+        return False
+    cont = req.get("continuity_ref") or {}
+    if isinstance(cont, dict) and cont.get("file") and cont.get("file") == refs[k]:
+        return True
+    m = CONTINUITY_LINE_RE.search(prompt or "")
+    return bool(m and int(m.group(1)) == k + 1)
+
+
 def check(req: dict) -> ContractResult:
     c = cfg()
     kind = req.get("kind", "image")
@@ -293,7 +309,7 @@ def check(req: dict) -> ContractResult:
             cap = int(rec.get("capacity") or 0)
             if cap and len(slots) > cap:
                 bad.append(f"参考 {len(slots)} 张 > {rec.get('model')} 槽位 {cap}")
-            if refs != files_in_slots:
+            if refs != files_in_slots and not _continuity_ok(req, refs, files_in_slots, prompt):
                 bad.append("实际送进模型的参考图与槽位规划不一致")
             # 脸板（K-AST-263：露脸 ≥3 人且槽位不够，每格一张标了名字的身份脸）不算“同一槽两张脸”；其它槽仍只许一张
             if any(int(s.get("faces") or 0) > 1 and not (s.get("kind") == "faceboard" and _faceboard_ok(s)) for s in slots):

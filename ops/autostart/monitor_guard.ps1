@@ -30,8 +30,21 @@ function Alive($j) {
   return $true
 }
 
+
+# SELF-HEAL 11-05：互相拉起——另一个守护（resident_guard）不在就用计划任务把它起来（计划任务单实例 + 命名互斥体，重复起无害）。每 2 分钟最多一次。
+$peerNext = [datetime]::MinValue
+function PeerGuard {
+  if ((Get-Date) -lt $peerNext) { return }
+  $up = Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -match "resident_guard\.ps1" }
+  if ($up) { return }
+  $script:peerNext = (Get-Date).AddMinutes(2)
+  Log "守护 resident_guard 不在：Start-ScheduledTask NS-Studio-ResidentSync-Guard"
+  try { Start-ScheduledTask -TaskName "NS-Studio-ResidentSync-Guard" -ErrorAction Stop } catch { Log "拉起 NS-Studio-ResidentSync-Guard 失败：$($_.Exception.Message)" }
+}
+
 Log "守护启动 pid $PID"
 while ($true) {
+  PeerGuard
   foreach ($j in $jobs) {
     if (Alive $j) { $fail[$j.name] = 0; continue }
     if ((Get-Date) -lt $next[$j.name]) { continue }

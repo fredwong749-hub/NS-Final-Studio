@@ -736,6 +736,7 @@ def test_q1a_item_unavailable_is_untested_not_silent(monkeypatch, tmp_path):
 
 def test_q1a_vlm_overrides_pass_and_tolerates_outage(monkeypatch, tmp_path):
     """K-REV-V19：确定性过、看图说顾沉是长发 → Q1a fail；看图没跑成 → 只记录不改判"""
+    monkeypatch.setattr(VQ, "skip_nonblocking", lambda iid: False)   # L-205 P2 开关另测（test_l205_perf），这里测检查本身
     from ns_agent.vqa import hair_attr as HA
     def pf():
         return {"ok": True, "blocking": [], "reasons": [], "items": [{"id": "Q1a", "status": "pass", "detail": "",
@@ -892,6 +893,7 @@ def test_hair_primary_switch(enf):
 
 def test_q1x_same_scene_identity(monkeypatch, enf):
     """Q1x（总调度批准）：同场其他镜头同一角色取最像 3 张平均——换人 < 0.50 不过；同一人过；复核带只记录；同场没可比 = na"""
+    monkeypatch.setattr(VQ, "skip_nonblocking", lambda iid: False)   # L-205 P2 开关另测（test_l205_perf），这里测检查本身
     import numpy as np
     from ns_agent.vqa import continuity as CT
     rng = np.random.default_rng(0)

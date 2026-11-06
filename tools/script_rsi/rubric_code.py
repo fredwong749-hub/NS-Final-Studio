@@ -890,3 +890,81 @@ def l201_checks(shots: list, blocks: list[str]) -> dict:
                                               "没写触发画面（光闪 / 灯亮 / 白闪 / 闪白 / 黑场 / 叠化…）：上一镜以它收尾、本镜从它的余晖进")
         prev = (s, b)
     return bad
+
+
+# ---- L-203（项目方 11-06：“我发现你所有的首尾帧都是一模一样的图片……现在全部都错了”；K-WRT-L203；writer_lints QW-L14）：
+#      每镜 起幅（img + 【机位与景别】）与 落幅（motion“——”后的尾帧描述）至少两项明显不同：
+#      景别 / 机位（方位 / 俯仰 / 高度）/ 人物姿态或位置 / 关键动作完成或道具状态 / 光线；固定镜不算镜头两项，动作类至少两项
+L203_SIZE_Q = re.compile(r"(大特写|中近景|中全景|特写|近景|中景|全景|远景)\s*(偏紧|略紧|紧|略松|松|偏松)?")
+L203_POSE = re.compile(r"站直|站起|挺直|直起|弯腰|弯下|前倾|低头|低着头|抬头|抬眼|下巴抬|下巴平|下巴压|肩线转|转向|侧向|出画|出了画面|入画|蹲|坐下|坐在|跪|"
+                       r"贴上|挨上|挨着|没有缝隙|隔着一掌|垂到身侧|垂在身侧|举到胸前|举在胸前|伸进|攥|握紧|撑在|扶在|掐|按在|收到身后|藏到身后|"
+                       r"展开|扬起|扬到|脚跟落地|脚跟离地|碾|踩着|脸抬起|肩沉|肩压低|独占|缩成|升到|只剩.{0,5}(?:肩|角)|进入画面|正对|3/4 侧脸|回头")
+L203_PROP = re.compile(r"收回|垂落|垂着|绷直|甩直|合上|打开|敞开|拉到头|拉到一半|全开|进包|进手包|塞进|上肩|挂上|挂在|悬在|悬空|离开|露出|完整|盖住|"
+                       r"不见|消失|没有尺|在鞋尖|鞋尖里|透出|弹出|握进|拳头|藏|亮着|亮了|暗着|灭|已正|扶正|歪着|放低|贴眼|贴在|留在|退到|摊在|提上|"
+                       r"勒|捏起|捏着|拿起|套回|踩着|停在|按下|保存|卡槽|取景器|触点|收到身后|藏到身后|收在身后")
+L203_LIGHT = re.compile(r"亮起|啪地亮|灯灭|熄灭|灯亮|过曝|闪满|光闪|余晖|反光|高光|阴影|柱冷光|落回|暗环|亮环|补亮|打亮|映亮|最亮|屏幕冷光|屏幕亮|灯圈亮|"
+                        r"从暖白落|从暖金落|只剩.{0,6}冷白|冷灰只剩")   # 只认光的“事件 / 落点”词，不认暖白 / 冷白这类泛描述
+L203_SAME_CAM = re.compile(r"同机位|机位不动")
+L203_MIN_TAIL = 40
+
+
+def l203_tail(block: str) -> str:
+    """落幅 = motion 最后一个“——”之后的文字（与 validate_qwen_script.end_state 同口径）"""
+    mo = _field(block, "motion")
+    return mo.rsplit("——", 1)[1].strip(" ，。；、") if "——" in mo else ""
+
+
+def l203_is_static(block: str) -> bool:
+    mv = _field(block, "镜头运动") + "｜" + _field(block, "运镜")
+    mo = _field(block, "motion").strip().lower()
+    return mv.startswith("固定") or "｜固定" in mv or mo.startswith("static")
+
+
+def _l203_size(txt: str) -> str:
+    m = L203_SIZE_Q.search(txt)
+    return (m.group(1) + (m.group(2) or "")) if m else ""
+
+
+def _l203_new_tokens(rx: re.Pattern, start: str, tail: str) -> list[str]:
+    """落幅里出现、起幅里没有的状态词（按匹配到的字面去重）"""
+    have = {m.group(0) for m in rx.finditer(start)}
+    return sorted({m.group(0) for m in rx.finditer(tail)} - have)
+
+
+def l203_diff(block: str) -> dict:
+    """一镜的首尾帧差异 → {"size": (变了?, 说明), "cam": …, "pose": …, "prop": …, "light": …, "tail": 落幅, "static": bool}"""
+    img, cam = _img(block), _field(block, "机位与景别")
+    cam = re.split(r"[；;｜|，,]\s*落幅", cam, 1)[0]            # 【机位与景别】里写了“落幅：…”的，只拿起幅那段当起幅
+    start = img + "｜" + cam
+    tail = l203_tail(block)
+    sz0, sz1 = _l203_size(cam.split("｜", 1)[0] + "｜" + img[:16]), _l203_size(tail[:20])
+    size_ok = bool(sz0 and sz1 and sz0 != sz1)
+    segs = [p.strip() for p in re.split(r"[｜|]", cam)] if cam else []
+    ang0 = {re.sub(r"\s", "", m.group(0)) for m in L201_ANGLE.finditer(segs[1] if len(segs) > 1 else img[:40])}
+    ang1 = {re.sub(r"\s", "", m.group(0)) for m in L201_ANGLE.finditer(tail[:40])}      # 落幅开头 = 景别 + 机位句；后面的“右前方的灯架”是视线不是机位
+    cam_ok = bool(ang1) and not L203_SAME_CAM.search(tail) and bool(ang1 - ang0)
+    pose, prop, light = (_l203_new_tokens(rx, start, tail) for rx in (L203_POSE, L203_PROP, L203_LIGHT))
+    return {"size": (size_ok, f"景别 {sz0 or '?'}→{sz1 or '?'}"), "cam": (cam_ok, "机位 " + ("/".join(sorted(ang1 - ang0)) or "同")),
+            "pose": (bool(pose), "姿态 " + ("、".join(pose[:4]) or "同")), "prop": (bool(prop), "道具 / 动作 " + ("、".join(prop[:4]) or "同")),
+            "light": (bool(light), "光线 " + ("、".join(light[:4]) or "同")), "tail": tail, "static": l203_is_static(block)}
+
+
+def l203_checks(shots: list, blocks: list[str]) -> dict:
+    """→ {"pair#<镜号>": (False, 说明)}，只返回失败项。
+    pair#n  起幅（img + 【机位与景别】）与 落幅（motion“——”后）不同项 < 2（固定镜：姿态 / 道具 / 光线里 < 2），或落幅没写成完整画面   K-WRT-L203"""
+    bad: dict = {}
+    for s, b in zip(shots, blocks):
+        i = s.index
+        d = l203_diff(b)
+        if len(d["tail"]) < L203_MIN_TAIL or not d["tail"]:
+            bad[f"pair#{i}"] = (False, f"镜{i} 落幅（motion“——”后）只有 {len(d['tail'])} 字：要写成完整尾帧（景别 + 机位 + 构图 + 每人姿态 / 视线 / 表情 + 道具 + 光线），"
+                                      "尾帧按它单独构图出图")
+            continue
+        cats = ("pose", "prop", "light") if d["static"] else ("size", "cam", "pose", "prop", "light")
+        hit = [d[k][1] for k in cats if d[k][0]]
+        if len(hit) < 2:
+            miss = [d[k][1] for k in cats if not d[k][0]]
+            kind = "固定镜：姿态 / 道具 / 光线里" if d["static"] else "景别 / 机位 / 姿态 / 道具 / 光线里"
+            bad[f"pair#{i}"] = (False, f"镜{i} 起幅与落幅{kind}只有 {len(hit)} 项不同（{'；'.join(hit) or '无'}｜未变：{'；'.join(miss)}）："
+                                      "至少两项明显不同，变化来自本镜的运镜与动作，否则首尾帧一模一样")
+    return bad

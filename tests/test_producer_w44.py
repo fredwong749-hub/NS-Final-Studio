@@ -205,6 +205,9 @@ def test_night_stalled_and_takeover_runs_loop_once(tmp_path, monkeypatch):
                                  partition_hosts=lambda: part)
     monkeypatch.setitem(sys.modules, "night", fake)
     monkeypatch.setenv("OFFLINE_SELF", "gpu33")
+    monkeypatch.setenv("NS_RUN", os.environ.get("NS_RUN", ""))  # PS-MASTER 11-06：VideoBridge 会 setdefault NS_RUN=tv_w44，测完由 monkeypatch 还原，免得污染后面的测试
+    if not os.environ.get("NS_RUN"):
+        monkeypatch.delenv("NS_RUN")
     assert vb.night_stalled(_vreg(), night_alive=True) is None          # night 在跑：不接
     assert vb.night_stalled(_vreg("pending"), night_alive=False) is None  # 没有等派的视频：不接
     why = vb.night_stalled(_vreg(), night_alive=False)

@@ -52,6 +52,8 @@
  "suffix_banned_note": "I7：旧头 / visual_bible fallback_suffix 里的“奶油般柔焦虚化”“浓郁饱和的暖色调电影调色”“色彩丰富艳丽”会让皮肤发油发糊（项目方批评“油光、假”）。剧本正文里写服装材质的“漆皮光泽”不在此列——只查系统后缀段（提示词最后一个“【场景】”段之后 / 预设后缀位置）与整句“油光落皮肤”类写法",
  "require_ref_lines": true,
  "blocking_items": ["Q1", "count", "text", "adult", "gaze", "FL"],
+ "vqa_skip_nonblocking": true,
+ "_vqa_skip_nonblocking": "L-205 P2（KPI 一集 ≤50 min）：true = blocking_items 生效时，非硬项的看图子检查不跑（Q1a 逐人头发看图、Q1x 同场跨镜、Q10 服装“谁穿什么”），记 na skipped_nonblocking（只记录）；硬项照跑：视线 reask_eye（L-200）、Q1 复核带、背影多脸复核 / 人数、文字、成人、FL。代码 ns_agent.vqa.contract.skip_nonblocking。false / 删键 = 全跑（旧口径）",
  "_blocking_items_l203": "L-203（项目方 11-06 08:3x“你所有的首尾帧都是一模一样的图片”）加 FL 首尾帧差异硬项（只有尾帧阶段有此项）：尾帧出图后与通过契约的首帧比对（services/agent/ns_agent/gen_contract/first_last.py），太像 = 不过、换种子重出尾帧；不进 review_adopt / best_effort 采用（producer.fl_bad）。阈值见 first_last",
  "first_last": {"struct_max": 0.80, "ssim_max": 0.85, "width": 256},
  "_first_last": "L-203 首尾帧比对阈值：struct = 24×42 模糊亮度相关（ns_qc.media.structure_match，色彩无关只看大构图）≥ struct_max 判太像；ssim = 缩到宽 256 的亮度 SSIM ≥ ssim_max 判太像。11-06 在 ep01 已出的 111 对首尾帧上校准：struct 中位 0.82 / p75 0.94（项目方点名几乎一样的 S1 v7 = 0.858、S2 v3 = 0.828；真推近的 S8 v21 = 0.736）；ssim 中位 0.57 / p90 0.78",

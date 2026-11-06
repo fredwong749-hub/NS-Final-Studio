@@ -10,7 +10,9 @@
  "exclude_lanes": [
   "gpu33:2"
  ],
- "hold_minutes": 90,
+ "hold_minutes": 15,
+ "job_timeout_min": 90,
+ "_hold_minutes": "FIX-ORCH O6（11-06，L-202 / L-205）：道 hold 90 → 15 分钟，作业活着时 tick 每过半续期一次（hold_renew），子进程收尾即放道（run_job finally + tick 收尸各放一次，release 幂等）；worker 挂了道最多空挂 15 分钟（原 90）。作业超时单独 job_timeout_min=90（原来跟 hold_minutes 走）。free_lanes 各道探针并发。",
  "max_attempts": 2,
  "ready_every_s": 300,
  "candidates": {

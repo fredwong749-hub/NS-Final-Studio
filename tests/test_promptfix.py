@@ -126,7 +126,10 @@ def test_fb0007_partial_woman_no_wardrobe_on_man(S):
 def test_fb0007_switch_off_restores_old(S, monkeypatch):
     monkeypatch.setattr(AR, "pf_on", lambda k: False)
     job, _sh = S("ep08-S5")
-    assert any(s["character"] == "lin_wan" and s["kind"] in ("board", "sheet") for s in job["asset_refs"]["slots"])
+    # L-204 ②A（11-06）：第二人设定图排在场景底板之后——槽满时让位、记 dropped（走文字），不再挤掉底板
+    sent = [s for s in job["asset_refs"]["slots"] if s["character"] == "lin_wan" and s["kind"] in ("board", "sheet")]
+    dropped = [d for d in job["asset_refs"].get("dropped") or [] if d.get("character") == "lin_wan" and d.get("role") in ("board", "sheet")]
+    assert sent or dropped
     assert "站位：" not in job["prompt"]
 
 
@@ -222,7 +225,10 @@ def test_k957_ep01_s9_back_person_no_face(S):
     """ep01-S9：顾沉 cast 在画｜右｜后，剧本写背影 → 不送正脸、送背面设定图、首句不写“两张脸都清晰入画”、加层次句"""
     job, _sh = S("ep01-S9")
     assert "gu_chen" not in job["compile_trace"]["faces"]
-    assert any("back_nohead" in f for f in job["refs"])
+    # L-204 ②A（11-06）：第二人的背面设定图排在场景底板之后，槽满让位（dropped 走文字）
+    assert any("back_nohead" in f for f in job["refs"]) or any(
+        "back_nohead" in d["file"] for d in job["asset_refs"].get("dropped") or [])
+    assert any(s["kind"] == "scene" for s in job["asset_refs"]["slots"])
     assert "两张脸都清晰入画" not in job["prompt"]
     assert "层次：顾沉在后景，背对镜头的背影，人物较小、离镜头远（远小近大）" in job["prompt"]
     assert AR.LAYER_NOTE_RE in AR.TEXT_NOTE_RES

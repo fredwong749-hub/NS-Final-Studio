@@ -125,7 +125,8 @@ def test_observe_mode_does_not_raise(tmp_path):
 
 
 def test_retro_blocks_next_episode_images_not_writing(tmp_path):
-    r = _root(tmp_path, eps=(1, 2), cfg={"enabled": True, "observe_stages": ["出图"]})
+    # 旧口径（retro_parallel=false）；默认并行口径见 tests/test_fix_orch_1106.py（FIX-ORCH O8 / L-205）
+    r = _root(tmp_path, eps=(1, 2), cfg={"enabled": True, "observe_stages": ["出图"], "retro_parallel": False})
     _prompts(r, ep=2)
     assert SG.judge(RUN, 2, "导入闸门", root=r)["ok"]          # 写作 / 导入不挡
     with pytest.raises(SG.SopGateError, match="复盘"):         # observe 也挡（retro_enforce）
@@ -289,14 +290,16 @@ def test_w38_used_entry_added_later_expires(tmp_path):
 
 
 def test_w38_rows_without_keys_fall_back_to_whole_file(tmp_path):
-    """有一镜没带 manifest_keys（编译出错 / 旧探针）→ 不写按集指纹，只认整文件指纹（失败关闭）"""
+    """FIX-ORCH O1(d)：有一镜没带 manifest_keys（编译出错）→ 仍写按集指纹；没带的镜记 unkeyed + 整文件 sha，
+    清单整文件变了只把这几镜当过期（失败关闭），带了 keys 的镜不受连累"""
     r = _root(tmp_path)
     _manifest(r)
     rows = {"1": {"ok": True, "manifest_keys": ["characters/lead_f"]}, "2": {"ok": False, "why": "编译出错"}}
     ev = SG.probe_prompts(RUN, 1, root=r, runner=lambda run, ep, root, cfg: rows)
-    assert "manifest_keys" not in ev and "fingerprint_scoped" not in ev
+    assert ev["manifest_keys"] == ["characters/lead_f"] and ev["unkeyed"] == ["2"] and ev["fingerprint_scoped"]
     _bump(r, lambda d: d.update(updated_at="t9"))
-    assert "过期" in SG.check_prompts(r, RUN, 1, shot=1)["why"]
+    assert SG.check_prompts(r, RUN, 1, shot=1)["ok"]
+    assert "过期" in SG.check_prompts(r, RUN, 1, shot=2)["why"] and "过期" in SG.check_prompts(r, RUN, 1)["why"]
 
 
 def test_w38_manifest_keys_for_matches_id_name_and_path(tmp_path):

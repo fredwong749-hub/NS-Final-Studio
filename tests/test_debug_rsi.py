@@ -492,7 +492,7 @@ def test_e17_prefetch_and_dynamic_backlog(monkeypatch, tmp_path):
     monkeypatch.setenv("NS_PRODUCER_PREFETCH", "2")
     assert PR.prefetch_depth() == 2
     t = 10_000.0
-    assert PR.dynamic_backlog([], t, 3, 2) == 6                                   # 下限 = 道数 × 深度
+    assert PR.dynamic_backlog([], t, 3, 2) == 12                                  # 下限 = 道数 × 深度 × 2（L-205 P3）
     assert PR.dynamic_backlog([t - i * 20 for i in range(45)], t, 3, 2) == 45      # 15 分钟 45 张 = 3/分 × 15
     import threading
     pr = object.__new__(PR.Producer)

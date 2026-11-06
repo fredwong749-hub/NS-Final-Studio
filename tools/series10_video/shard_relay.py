@@ -5,11 +5,16 @@
     python tools/series10_video/shard_relay.py --run series10_v2 --dry-run  # 只列要送什么
     python tools/series10_video/shard_relay.py --run series10_v2 --loop     # 每 120 s 一轮（与 sync.py 同节奏）
 
-送的东西（只送增量：owner 上没有 / 大小不同的）：
+送的东西（只送增量：owner 上没有 / 内容不同的）：
   · state_<helper>.json（owner 只读它；owner 的 vidgen 只写 state_<owner>.json，两边不会互相覆盖）
   · helper 入选版本的原片 clips/*.mp4（合成只认原片，K-EDT-V10）
   · scores/<镜>__*.json（审片页 / 登记要读）
 分片没开（video_shard.json enabled=false）= 什么都不做。
+
+FIX-VID（11-06，REVIEW-RUN D1 / D13）：每轮先把各分片台的 state_<host>.json（和 owner 的 jobs.json）拉到笔记本——以前只在笔记本本机已有
+state 时才列清单，而笔记本从来没有 helper 的 state（sync.py 的 ssh 不经 rssh），owner 永远看不到 helper 的镜、整集永远不落定。
+helper 的 state 超过 helper_stale_s（默认 900 s）没更新 / 拉不到 = 失联 → 它名下没落定的镜收回给 owner（sticky 领取）；
+只从 state 新鲜（≤ 300 s）的台名下抢镜（“没开工”才可信，避免两台重复出同一镜）。状态写 _shard_relay_status.json。
 """
 from __future__ import annotations
 
@@ -25,8 +30,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import video_shard as VS  # noqa: E402
 
 
-def helper_payload(vid: Path, vid_rel: str, helper: str, ep: int, root: Path = ROOT, only_local: bool = True) -> list[str]:
+def helper_payload(vid: Path, vid_rel: str, helper: str, ep: int, root: Path | None = None, only_local: bool = True) -> list[str]:
     """要送给 owner 的文件（相对仓库根的路径）。state 先于片子；只含本集 helper 台的镜。only_local=True 只列笔记本本机已有的；False 列全部（用来决定要从 helper 拉哪些）"""
+    root = ROOT if root is None else root
     st_rel = f"{vid_rel}/state_{helper}.json"
     if not (root / st_rel).is_file():
         return []
@@ -49,11 +55,15 @@ def helper_payload(vid: Path, vid_rel: str, helper: str, ep: int, root: Path = R
     return list(dict.fromkeys(out))
 
 
-def pull_from_helper(helper: str, files: list[str]) -> int:
-    """helper → 笔记本：本机没有的片子 / scores（state 由 sync.py 拉）。与 sync.pull_clips 同一条 ssh + tar 流"""
+STATUS_NAME = "_shard_relay_status.json"
+
+
+def pull_from_helper(helper: str, files: list[str], force: bool = False) -> int:
+    """helper → 笔记本：本机没有的片子 / scores；force=True 连本机已有的也重拉（state_<host>.json / jobs.json 每轮要最新的）。
+    与 sync.pull_clips 同一条 ssh + tar 流，走 rssh 常驻主连接"""
     import deploy as D
     import sync as S
-    want = [f for f in files if not (ROOT / f).is_file()]
+    want = [f for f in files if force or not (ROOT / f).is_file()]
     if not want:
         return 0
     rem = f"cd {S.DEST} 2>/dev/null || exit 0; tar cf - --ignore-failed-read {' '.join(want)} 2>/dev/null"
@@ -75,8 +85,59 @@ def pull_from_helper(helper: str, files: list[str]) -> int:
 
 
 def _sig(p: Path) -> list:
+    """送过的标记：≤ 8 MB 按内容 sha（state 每轮重拉、mtime 必变，内容没变就别重送 1.5 MB）；更大的按大小 + mtime"""
+    import hashlib
     s = p.stat()
+    if s.st_size <= 8_000_000:
+        return [s.st_size, hashlib.sha256(p.read_bytes()).hexdigest()[:16]]
     return [s.st_size, int(s.st_mtime)]
+
+
+def pull_states(vid: Path, vid_rel: str, hosts: list[str]) -> dict:
+    """FIX-VID D1：各分片台的 state_<host>.json 先拉到笔记本（owner 的也拉：仲裁 busy / 整集视图要用）。
+    返回 {host: {"ok": 拉到了, "age": state.saved 距今秒, "err": 错误}}；拉不到 = age 按本机旧文件算（没有 = inf = 失联）"""
+    out = {}
+    for h in hosts:
+        try:
+            n = pull_from_helper(h, [f"{vid_rel}/state_{h}.json"], force=True)
+            out[h] = {"ok": n > 0, "age": VS.state_age(vid, h)}
+            if not n:
+                out[h]["err"] = "state 没拉到（远端没有 / 连接失败）"
+        except Exception as e:  # noqa: BLE001  # arch-ok: 这台拉不到 = 记失联原因，按旧 state 的年龄判；不中断别的台
+            out[h] = {"ok": False, "age": VS.state_age(vid, h), "err": repr(e)[:160]}
+    return out
+
+
+def pull_jobs(owner: str, vid_rel: str, status: dict) -> bool:
+    """owner 的 jobs.json 拉到笔记本（仲裁要知道哪些镜有变体、静态归属）；只在远端大小 / mtime 变了才拉（~0.9 MB）"""
+    import deploy as D
+    import sync as S
+    rel = f"{vid_rel}/jobs.json"
+    r = D.ssh(owner, f"stat -c '%s %Y' {S.DEST}/{rel} 2>/dev/null", timeout=120)
+    sig = (r.stdout or b"").decode(errors="replace").strip()
+    if not sig:
+        return False
+    if status.get("jobs_sig") == sig and (ROOT / rel).is_file():
+        return False
+    if pull_from_helper(owner, [rel], force=True):
+        status["jobs_sig"] = sig
+        return True
+    return False
+
+
+def load_status(vid: Path) -> dict:
+    try:
+        d = json.loads((vid / STATUS_NAME).read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):   # arch-ok: 状态文件没有 / 坏 = 空（只影响“jobs 要不要重拉”）
+        return {}
+
+
+def save_status(vid: Path, st: dict) -> None:
+    vid.mkdir(parents=True, exist_ok=True)
+    tmp = vid / (STATUS_NAME + ".tmp")
+    tmp.write_text(json.dumps(st, ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp.replace(vid / STATUS_NAME)
 
 
 def push_to_owner(owner: str, files: list[str], dry: bool = False, marks_p: Path | None = None) -> int:
@@ -108,13 +169,22 @@ def push_to_owner(owner: str, files: list[str], dry: bool = False, marks_p: Path
     return n
 
 
-def arbitrate_claims(run: str, vid: Path, vid_rel: str, c: dict, ep: int, busy: dict | None = None, now: float | None = None) -> dict:
+def arbitrate_claims(run: str, vid: Path, vid_rel: str, c: dict, ep: int, busy: dict | None = None, now: float | None = None,
+                     health: dict | None = None) -> dict:
     """动态抢活仲裁（只在笔记本）：读合并后的整集状态，空闲台领别台没开工的镜，写 shard_claims.json。返回新的领取表。
-    busy 缺省 = 各台 state 里 state==submitted 的渲染数（笔记本上 sync 来的 state）"""
+    busy 缺省 = 各台 state 里 state==submitted 的渲染数（笔记本上 relay 拉来的 state）。
+    health = pull_states 的结果（{host: {"age"}}）；缺省按本机 state 文件算。helper 失联（age > helper_stale_s）→ 收回给 owner（D1）；
+    只从 state 新鲜（age ≤ state_fresh_s）的台名下领镜（D13）。只有变体的镜才算在静态计划里（没变体 = 等资料，领了也出不了）"""
     now = time.time() if now is None else now
     jobs = json.loads((vid / "jobs.json").read_text(encoding="utf-8")) if (vid / "jobs.json").is_file() else {}
     shots = [s for s in jobs.get("shots", []) if int(s.get("ep") or 0) == int(ep)]
-    plan_map = {s["shot"]: s.get("host") for s in shots if s.get("host") in c["hosts"]}
+    plan_map = {s["shot"]: s.get("host") for s in shots if s.get("host") in c["hosts"] and s.get("variants")}
+    cfg = VS.load()
+    stale_s = float(cfg.get("helper_stale_s") or VS.HELPER_STALE_S)
+    fresh_s = float(cfg.get("state_fresh_s") or VS.STATE_FRESH_S)
+    ages = {h: float((health or {}).get(h, {}).get("age", VS.state_age(vid, h, now))) for h in c["hosts"]}
+    stale_hosts = {h for h in c["hosts"] if h != c["owner"] and ages[h] > stale_s}
+    claim_from = {h for h in c["hosts"] if ages[h] <= fresh_s}
     # jobs.json 里的 host 已含旧领取；还原成静态计划再叠，避免领取“固化”
     old = VS.load_claims(vid)
     for sid, cl in old.items():
@@ -130,9 +200,13 @@ def arbitrate_claims(run: str, vid: Path, vid_rel: str, c: dict, ep: int, busy: 
                 busy[h] = 1
                 continue
             busy[h] = sum(1 for r in (st.get("shots") or {}).values() for x in r.get("renders") or [] if x.get("state") == "submitted")
-    new = VS.decide_claims(c, plan_map, merged, old, busy, now)
+    new = VS.decide_claims(c, plan_map, merged, old, busy, now, claim_from=claim_from, stale_hosts=stale_hosts)
     if new != old:
         VS.save_claims(vid, new)
+        back = [s for s, x in new.items() if x.get("sticky") and s not in old]
+        if back:
+            print(time.strftime("%H:%M:%S"), f"RECLAIM ep{ep:02d}", sorted(stale_hosts), "→", c["owner"], back,
+                  {h: (round(ages[h]) if ages[h] < 1e12 else "失联") for h in stale_hosts}, flush=True)
     return new
 
 
@@ -141,23 +215,39 @@ def once(run: str, dry: bool = False) -> dict:
     vid_rel = RC.vid_rel(run)
     vid = ROOT / vid_rel
     res = {}
+    status = load_status(vid)
     for ep, c in VS.shard_eps(run).items():
+        health = {}
+        if not dry:   # FIX-VID D1：state 先拉到笔记本（以前没有这一步 → helper_payload 永远 []、owner 永远等不到 helper 的镜）
+            health = pull_states(vid, vid_rel, c["hosts"])
+            try:
+                pull_jobs(c["owner"], vid_rel, status)
+            except Exception as e:  # noqa: BLE001  # arch-ok: jobs 拉不到 = 用本机旧的 / 没有就不仲裁，state / 片子照送
+                res[f"ep{ep:02d}:jobs"] = {"error": repr(e)[:160]}
+            res[f"ep{ep:02d}:health"] = health
         for helper in c["hosts"]:
             if helper == c["owner"]:
                 continue
-            if not dry:
-                pull_from_helper(helper, helper_payload(vid, vid_rel, helper, ep, only_local=False))
-            files = helper_payload(vid, vid_rel, helper, ep)
-            res[f"ep{ep:02d}:{helper}->{c['owner']}"] = {"files": len(files), "pushed": push_to_owner(c["owner"], files, dry)}
+            try:
+                if not dry:
+                    pull_from_helper(helper, helper_payload(vid, vid_rel, helper, ep, only_local=False))
+                files = helper_payload(vid, vid_rel, helper, ep)
+                res[f"ep{ep:02d}:{helper}->{c['owner']}"] = {"files": len(files), "pushed": push_to_owner(c["owner"], files, dry)}
+            except Exception as e:  # noqa: BLE001  # arch-ok: 这台中转失败 = 记下、下一轮再来；不影响仲裁（失联由仲裁收回）
+                res[f"ep{ep:02d}:{helper}->{c['owner']}"] = {"error": repr(e)[:160]}
         if not dry:
             try:
-                cl = arbitrate_claims(run, vid, vid_rel, c, ep)
+                cl = arbitrate_claims(run, vid, vid_rel, c, ep, health=health)
                 cf = [f"{vid_rel}/{VS.CLAIMS_NAME}"] if (vid / VS.CLAIMS_NAME).is_file() else []
                 for h in c["hosts"]:                      # 领取表送到两台（互不信任，只经笔记本）；已有标记的不重复送
                     push_to_owner(h, cf, dry)
                 res[f"ep{ep:02d}:claims"] = {"n": len(cl)}
             except Exception as e:  # noqa: BLE001  # arch-ok: 仲裁失败 = 回到静态计划，不影响 state / 片子中转
                 res[f"ep{ep:02d}:claims"] = {"error": repr(e)[:160]}
+        status.setdefault("eps", {})[str(ep)] = {"t": time.time(), "health": {h: {**x, "age": x["age"] if x.get("age", 0) < 1e12 else None} for h, x in health.items()}, "claims": res.get(f"ep{ep:02d}:claims")}
+    if not dry:
+        status["t"] = time.time()
+        save_status(vid, status)
     return res
 
 

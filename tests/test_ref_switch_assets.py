@@ -84,14 +84,22 @@ def test_view_shape_matches_old_contract(env):
     assert {"looks", "parts"} <= set(c["options"]) and c["effective"]["look"] == "A"
 
 
+def _sent_files(job) -> list[str]:
+    """送进模型的参考文件 + 参考板成员（L-204 ②A 起场景底板保住槽位，设定图常与单品并成参考板，文件名不再带 lookX）"""
+    out = list(job["refs"])
+    for s in job["asset_refs"]["slots"]:
+        out += [str(m.get("file") or "") for m in s.get("members") or []]
+    return out
+
+
 def test_switch_look_changes_next_render_refs(env):
     before = _plan(env)
-    assert any("lookA" in r for r in before["refs"])
+    assert any("lookA" in r for r in _sent_files(before))
     RA.apply(env, SHOT, _body(scope="shot", change={"characters": {"林晚": {"look": "B"}}}))
     after = _plan(env)
     lw = next(c for c in after["asset_refs"]["characters"] if c["character"] == "lin_wan")
     assert lw["look"] == "B" and lw["look_how"] == "shot_override"
-    assert after["refs"] != before["refs"] and any("lookB" in r for r in after["refs"])
+    assert after["refs"] != before["refs"] and any("lookB" in r for r in _sent_files(after))
     assert RA.view(env, SHOT)["characters"][0]["source"] == "shot"
     RA.apply(env, SHOT, _body(scope="shot", change={"reset": True}))
     assert _plan(env)["refs"] == before["refs"]
