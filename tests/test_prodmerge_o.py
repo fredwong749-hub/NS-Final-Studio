@@ -495,6 +495,7 @@ def test_w38_accept_anomaly_host_server_uses_http(tmp_path, monkeypatch):
     (tmp_path / "config").mkdir()
     (tmp_path / "config/gen_contract.json").write_text(
         json.dumps({"image_thresholds": {"Q10_accept": {"count_host": "http://10.0.0.36:8893"}}}), encoding="utf-8")
+    monkeypatch.setattr(A, "review_local_anomaly", lambda *a, **k: None)        # W-INFRA 11-06：不探 127.0.0.1:8893（网络守卫）
     monkeypatch.delenv("OFFLINE_SELF", raising=False)
     assert A.anomaly_host(tmp_path) == "gpu36"                       # 笔记本：照旧经常驻主连接
     monkeypatch.setenv("OFFLINE_SELF", "gpu33")

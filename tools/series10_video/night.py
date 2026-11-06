@@ -1176,6 +1176,11 @@ def reap_finalize(e: str, x: dict, st: dict) -> bool:
         nx["finalize_wait_until"] = time.time() + FINALIZE_WAIT_S
     st["eps"][str(e)] = nx
     log("FINALIZE_DONE", f"ep{ep:02d}", nx.get("status"), nx.get("final") or nx.get("assemble_err") or nx.get("wait_msg") or "")
+    try:   # W-KPI 11-06：合成收尾 → 后台起每集耗时报告（L-205；不等、不阻塞主循环，起不来只记日志）
+        subprocess.Popen([PY, str(ROOT / "tools/master/episode_kpi_report.py"), "--run", RUN_ID, "--episode", str(ep), "--quiet"],
+                         cwd=str(ROOT), env=child_env(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+    except Exception as ex:  # noqa: BLE001  # arch-ok: KPI 报告只是旁路，任何失败都不能影响 night 收尾
+        log("KPI_SPAWN_ERR", f"ep{ep:02d}", repr(ex)[:200])
     return True
 
 

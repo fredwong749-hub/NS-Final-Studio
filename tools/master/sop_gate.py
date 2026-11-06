@@ -52,7 +52,8 @@ GATE_OK = {"ok"}
 IMPORT_OK = {"imported", "reimported"}
 PENDING_OWNER_STAGES = {"提示词", "出图", "出图检测", "尾帧", "视频"}   # 成人镜在这些阶段 = 等项目方触发，不算阻断
 DEFAULT_CFG = {"enabled": True, "observe_stages": [], "prompt_probe": "build_first+preflight", "probe_lane": "gpu36:0",
-               "probe_timeout_s": 900, "promote": {"auto": False, "stage": "出图"}, "retro_parallel": True}
+               "probe_timeout_s": 900, "promote": {"auto": False, "stage": "出图"}, "retro_parallel": True,
+               "import_revalidate": {"mode": "report"}}
 # 旧网页 S1–S5 与本模型九阶段的对应（ns_api/sop.py、scorecard 显示用；判定只在这里）
 LEGACY_STAGE = {"剧本": "S1", "导入闸门": "S1", "资产就绪": "S2", "提示词": "S3", "出图": "S3", "出图检测": "S3", "尾帧": "S3",
                 "视频": "S4", "整集预览": "S5", "完成": "done"}
@@ -180,11 +181,67 @@ def check_script(root: Path, run: str, ep: int) -> dict:
     return _ok("剧本", True, "P4 在")
 
 
+def _reval_mod():
+    """tools/master/import_revalidate.py（W-GATE 11-06）；镜像树里还没有这个文件 = 不复验（旧行为）"""
+    if "_REVAL" in globals():
+        return globals()["_REVAL"]
+    if time.time() - globals().get("_REVAL_FAIL_AT", 0) < 60:       # 上次载入失败：60 s 内不重试，按 off
+        return None
+    p = Path(__file__).resolve().parent / "import_revalidate.py"
+    m = None
+    if p.is_file():
+        try:
+            import importlib.util as _u
+            sp = _u.spec_from_file_location("import_revalidate_for_sop_gate", p)
+            m = _u.module_from_spec(sp)
+            sp.loader.exec_module(m)
+        except Exception as e:  # noqa: BLE001  同步到一半 / 坏文件：复验当 off，不能让闸门每拍抛错挡住派单
+            globals()["_REVAL_FAIL_AT"] = time.time()
+            sys.stderr.write(f"[sop_gate] import_revalidate 载入失败，复验按 off：{e!r}\n")
+            return None
+    globals()["_REVAL"] = m
+    return m
+
+
+def _import_doc(root: Path, run: str) -> dict:
+    """导入稿 JSON 按 (路径, mtime_ns, size) 缓存（producer 每拍每镜都会判导入闸门）"""
+    p = _runs().import_path(run, root)
+    try:
+        st = p.stat()
+        k = (str(p), st.st_mtime_ns, st.st_size)
+    except OSError:   # arch-ok: 没有导入稿 = 空文档（复验找不到稿 → 不复验）
+        return {}
+    memo = globals().setdefault("_IMPORT_DOC_MEMO", {})
+    hit = memo.get(k[0])
+    if not hit or hit[0] != k:
+        hit = memo[k[0]] = (k, _j(p, {}) or {})
+    return hit[1]
+
+
+def import_revalidate(root: Path, run: str, ep: int, af: dict | None = None) -> tuple[dict | None, dict]:
+    """导入稿按现行写作规则复验（导入闸门只在导入那一刻判；之后新加的 QW-L12/L13/L14 不会回头查已导入的集）。
+    → (复验结果 | None, 复验配置)；mode=off / 模块缺 / 找不到导入稿 → None。缓存键 = 稿 sha + 规则集指纹，命中不跑校验器"""
+    m = _reval_mod()
+    if m is None:
+        return None, {"mode": "off"}
+    rc = m.cfg_of(config(root))
+    if rc["mode"] == "off":
+        return None, rc
+    doc = _import_doc(root, run)
+    return m.revalidate(run, ep, root, import_doc=doc, autoflow=af if af is not None else _af(root, run, ep), cfg=rc), rc
+
+
 def check_import(root: Path, run: str, ep: int) -> dict:
     af = _af(root, run, ep)
     g, im = _stage_of(af, "gate"), _stage_of(af, "import")
     if g.get("status") in GATE_OK and im.get("status") in IMPORT_OK:
-        return _ok("导入闸门", True, f"gate=ok import={im.get('status')} {im.get('at', '')}", sha=im.get("sha256"))
+        why = f"gate=ok import={im.get('status')} {im.get('at', '')}"
+        rv, rc = import_revalidate(root, run, ep, af)
+        if rv is None:
+            return _ok("导入闸门", True, why, sha=im.get("sha256"))
+        why += "；" + _reval_mod().summary(rv) + ("" if rc["mode"] == "enforce" else f"（{rc['mode']} 模式，不挡）")
+        return _ok("导入闸门", True, why, sha=im.get("sha256"), revalidate=rv, revalidate_mode=rc["mode"],
+                   revalidate_blocks=_reval_mod().enforce_blocks(rv, rc), revalidate_from=rc.get("enforce_from") or "出图")
     code = _stage_of(af, "code")
     fails = code.get("fails")
     why = f"gate={g.get('status') or '无'} import={im.get('status') or '无'}"
@@ -632,6 +689,10 @@ def judge(run: str, ep: int, stage: str, shot: int | None = None, root: Path = R
     idx = STAGES.index(stage)
     rows = evaluate(run, int(ep), root, shot)[:idx]
     missing = [f"{r['stage']}：{r['why']}" for r in rows if not r["ok"]]
+    rv_row = next((r for r in rows if r["stage"] == "导入闸门" and r.get("revalidate")), None)
+    if rv_row and rv_row.get("revalidate_blocks") and idx >= _stage_idx(rv_row.get("revalidate_from")):
+        # W-GATE（11-06）：import_revalidate.mode=enforce——导入稿按现行规则 block > 0 的集不能进“出图”及以后（开 enforce = 项目方决策）
+        missing.append(f"导入闸门复验：{_reval_mod().summary(rv_row['revalidate'])}——按现行写作规则返修该集后重新导入")
     retro = None
     if idx >= RETRO_FROM and int(ep) > 1:
         # FIX-ORCH O8（L-205 KPI：一集 ≤ 50 min）：retro_parallel=true（默认）= 第 N 集复盘还在写时第 N+1 集照样开工出图，
@@ -641,7 +702,15 @@ def judge(run: str, ep: int, stage: str, shot: int | None = None, root: Path = R
             retro = retro_state(run, int(ep) - back, root)
             if retro != "done":
                 missing.append(f"第{int(ep) - back}集复盘：{retro}（tools/master/episode_retro.py 生成并 done 后，第{int(ep)}集才能出图）")
-    return {"ok": not missing, "missing": missing, "retro": retro}
+    res = {"ok": not missing, "missing": missing, "retro": retro}
+    if rv_row:
+        res["import_revalidate"] = {**rv_row["revalidate"], "mode": rv_row.get("revalidate_mode")}
+    return res
+
+
+def _stage_idx(stage: str | None) -> int:
+    """enforce_from 写错 = 按“出图”"""
+    return STAGES.index(stage) if stage in STAGES else STAGES.index("出图")
 
 
 def require(run: str, ep: int, stage: str, shot: int | None = None, root: Path = ROOT, by: str = "") -> dict:
@@ -1166,8 +1235,14 @@ def status(run: str, root: Path = ROOT) -> list[dict]:
         back = 2 if config(root).get("retro_parallel", True) else 1      # O8：复盘并行（最多落后一集）
         if st not in ("剧本", "导入闸门", "资产就绪", "提示词") and ep - back >= 1 and retro_state(run, ep - back, root) != "done":
             why = f"等第{ep - back}集复盘 done；" + why
+        imp = rows[1]
+        rv = imp.get("revalidate")
+        st_i = STAGES.index(st) if st in STAGES else len(STAGES)
+        if imp.get("revalidate_blocks") and st_i >= _stage_idx(imp.get("revalidate_from")):
+            why = f"导入稿复验 block {rv.get('blocking')}，不能进“{imp.get('revalidate_from') or '出图'}”（enforce）；" + why
         out.append({"episode": ep, "stage": st, "why": why, "retro": retro_state(run, ep, root),
-                    "passed": [r["stage"] for r in rows if r["ok"]], "rows": rows})
+                    "passed": [r["stage"] for r in rows if r["ok"]], "rows": rows,
+                    "import_revalidate": ({**rv, "mode": imp.get("revalidate_mode")} if rv else None)})
     return out
 
 
@@ -1209,12 +1284,18 @@ def main(argv=None) -> int:
         for r in rows:
             print(f"ep{r['episode']:02d}  当前：{r['stage']:<5} 已过：{'→'.join(r['passed']) or '—'}  复盘：{r['retro']}")
             print(f"      卡在：{r['why']}")
+            if r.get("import_revalidate"):
+                rv = r["import_revalidate"]
+                print(f"      {_reval_mod().summary(rv)}｜{rv.get('mode')} 模式｜{rv.get('source', '')}"
+                      + ("（缓存）" if rv.get("cached") else ""))
         if not rows:
             print(f"{a.run} 还没有任何一集开工")
         return 0
     if a.cmd == "check":
         res = judge(a.run, a.episode, a.stage, a.shot)
         print(("可以进入" if res["ok"] else "不能进入") + f"“{a.stage}”" + ("" if res["ok"] else "：\n  " + "\n  ".join(res["missing"])))
+        if res.get("import_revalidate"):
+            print(f"  {_reval_mod().summary(res['import_revalidate'])}｜{res['import_revalidate'].get('mode')} 模式")
         return 0 if res["ok"] else 1
     ev = probe_prompts(a.run, a.episode)
     ok = sum(1 for v in ev["shots"].values() if v["ok"])

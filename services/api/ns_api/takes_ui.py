@@ -78,11 +78,26 @@ def _tools_ap(name: str):
     return __import__(name)
 
 
+_run_cache: dict = {"key": None, "val": None}
+
+
 def _run_legacy() -> tuple[str, bool]:
-    """当前剧 + 是不是 legacy（V1，不带前缀旧路径）。V2 等其它剧：导入稿 / 导入记录都按剧取（K-OPS-F24）"""
+    """当前剧 + 是不是 legacy（V1，不带前缀旧路径）。V2 等其它剧：导入稿 / 导入记录都按剧取（K-OPS-F24）。
+    UIUX-LOOP-2 r6：每个版本都要问一次（candidates 一集 ~800 次 → runs.json / run.json 各读 800 次，/api/season 四集 0.3 s 花在这）；
+    按 (钉剧环境变量, runs.json / run.json 改动时间) 记住，改了文件立刻失效（测试里换 NS_PRIMARY_RUN / 换 runs.json 都会换 key）"""
+    import os  # noqa: PLC0415
     RN = _tools_ap("runs")
-    run = RN.primary_run(REPO)
-    return run, RN.is_legacy(run, REPO)
+
+    def _mt(p: Path):
+        try:
+            return p.stat().st_mtime_ns
+        except OSError:  # arch-ok: 文件不存在也是 key 的一部分（runs.primary_run 自己会按缺失处理）
+            return None
+    key = (os.environ.get("NS_PRIMARY_RUN"), str(REPO), _mt(REPO / "config/pipeline/runs.json"), _mt(REPO / "config/pipeline/run.json"))
+    if _run_cache["key"] != key:
+        run = RN.primary_run(REPO)
+        _run_cache.update(key=key, val=(run, RN.is_legacy(run, REPO)))
+    return _run_cache["val"]
 
 
 def _script_file() -> Path:
@@ -166,6 +181,15 @@ def script_version(t: dict, ep: int, shot: int | None = None) -> str:
 def cutoff_label(ep: int, shot: int | None = None) -> str:
     cut = cutoff_for(ep, shot)
     return f"{cut[5:10].replace('-', '/')} {cut[11:16]}" if cut else "?"
+
+
+def _ledger_passed(shot: str, stage: str, n: int | None) -> bool:
+    """活的 producer 登记表说这一阶段 passed 且 take 号对上（shot_status.ledger_passed）；读不到 = False（不改旧口径）"""
+    try:
+        from ns_api import shot_status  # noqa: PLC0415
+        return shot_status.ledger_passed(shot, stage, n)
+    except Exception:  # noqa: BLE001  # arch-ok: 登记表读坏 = 按导入作废线的旧口径
+        return False
 
 
 def _verdict(t: dict, bad: str | None) -> tuple[bool, str | None]:
@@ -254,11 +278,14 @@ def candidates(ep: int, history: bool = False, only_passing: bool = False):
             if not ts:
                 continue
             items = []
+            a0 = (data.get("active") or {}).get(st)
             for t in ts:
                 prm = t.get("params") or {}
                 bad = P.bad_reason(t) if hasattr(P, "bad_reason") else None
                 ok, why = _verdict(t, bad)
                 ver = script_version(t, ep, int(m.group(1)))
+                if ver == "old" and a0 is not None and t.get("n") == a0 and _ledger_passed(sid, st, a0):
+                    ver = "current"      # UIUX-LOOP r4：producer 导入后按编译提示词核过、仍 passed 的当前版，不算旧剧本版本（登记表为准）
                 if ver == "old":     # 旧剧本版本：不作候选（不管它过没过契约）；历史区仍可看。原来的“不合格 / 脸不像”等原因保留在前面
                     old_why = f"旧剧本版本（本镜剧本 {cutoff_label(ep, int(m.group(1)))} 更新前出的，镜头可能已重新编号）"
                     ok, why = False, f"{why}；{old_why}" if why else old_why

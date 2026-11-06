@@ -20,6 +20,8 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import sys
+import threading
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -165,14 +167,20 @@ def plain(stage: str, ok: bool, why: str, ep: int) -> str:
     return f"{stage}这一步完成了" if ok else f"{stage}这一步还没通过，系统在处理"
 
 
-def plain_episode(ep: int, stage: str, why: str, rows_by_stage: dict[str, dict]) -> str:
-    """集级一句话：停在哪一步 + 那一步的大白话；前面有“等第 N 集复盘”就先说这个"""
+def plain_episode(ep: int, stage: str, why: str, rows_by_stage: dict[str, dict], cells: dict | None = None) -> str:
+    """集级一句话：停在哪一步 + 那一步的大白话；前面有“等第 N 集复盘”就先说这个。
+    cells（UIUX-LOOP-3 r10）：格子文案若已按登记表改写（r8 视频“全部定下 16/16 · 本机已收到 11/16 段”），集级一句话跟格子同口径，
+    不再同一屏一个写 16/16、一个写“出了 11/16 其余在排队”"""
     if stage == "完成":
         return "这一集全部完成"
     m = _RETRO.search(why or "")
     head = f"要等第 {m.group(1)} 集复盘完成才能继续；" if m else ""
     r = rows_by_stage.get(stage) or {}
-    return head + f"停在“{stage}”：" + plain(stage, False, r.get("why") or "", ep)
+    body = plain(stage, False, r.get("why") or "", ep)
+    cell = (cells or {}).get("video") if stage == "视频" else None
+    if cell and str(cell.get("plain") or "").startswith("视频全部定下"):
+        body = cell["plain"]
+    return head + f"停在“{stage}”：" + body
 
 
 def fold(rows: list[dict], ep: int = 0, live: dict | None = None) -> dict:
@@ -200,6 +208,13 @@ def fold(rows: list[dict], ep: int = 0, live: dict | None = None) -> dict:
         else:
             state = "blocked" if any(wd in why for wd in BLOCK_WORDS) else "doing"
             text = plain(first_bad[0], False, why, ep)   # type: ignore[index]  first_bad 在 not ok 时必有
+            vl = (live or {}).get("video_ledger") if sid == "video" else None
+            if vl and vl.get("total") and vl["done"] >= vl["total"] and first_bad[0] == "视频":   # type: ignore[index]
+                # r8：登记表说视频全部定下，闸门只是还没在本机看到全部片子 → 写清楚，不写“其余在排队”
+                f = _frac(why)
+                got = f" · 本机已收到 {f[0]}/{f[1]} 段" if f else ""
+                text = f"视频全部定下 {vl['done']}/{vl['total']} 镜" + (f"（{vl['best']} 镜尽力版等你定）" if vl.get("best") else "") + got
+                state = "doing"
         cells[sid] = {"state": state, "plain": text, "why": why}
         prev_done = ok
     return cells
@@ -291,8 +306,51 @@ def live_adjust(G, run: str, ep: int, rows: list[dict]) -> tuple[list[dict], dic
         ready = sum(1 for v in G.shot_frames(ROOT, run, ep).values() if v.get("image") and v.get("checked") and v.get("last"))
     except Exception:  # noqa: BLE001  # arch-ok: 显示层：读不到 = 不校正，显示原值
         ready = 0
-    live = {"import_at": imp, "video_ready": ready if producer_state(run)["alive"] else 0, "video_new": _takes_since(G, run, ep, "video", imp), "video_rendering": _night_rendering(run, ep)}
+    live = {"import_at": imp, "video_ready": ready if producer_state(run)["alive"] else 0, "video_new": _takes_since(G, run, ep, "video", imp), "video_rendering": _night_rendering(run, ep),
+            "video_ledger": _video_ledger(ep)}
     return out, live
+
+
+def _video_ledger(ep: int) -> dict | None:
+    """UIUX-LOOP-2 r8：活的 producer 登记表里本集视频 定下（passed / best_effort）/ 总镜数。sop_gate 的“视频”证据是本机 clips 目录
+    （片子要同步回来才算），登记表已 16/16 时它还写“视频出了 11/16 镜，其余在排队”——显示层按登记表写清楚，闸门判定不动"""
+    try:
+        from ns_api import shot_status as SS  # noqa: PLC0415
+        reg = SS._registry()
+    except Exception:  # noqa: BLE001  # arch-ok: 登记表读不到 = 不校正，显示闸门原文
+        return None
+    pre = f"ep{ep:02d}-S"
+    objs = [(sid, v.get("video")) for sid, v in reg.items() if str(sid).startswith(pre) and isinstance(v, dict)]
+    if not objs:
+        return None
+    done = sum(1 for _s, o in objs if isinstance(o, dict) and o.get("status") in ("passed", "best_effort"))
+    best = sum(1 for _s, o in objs if isinstance(o, dict) and o.get("status") == "best_effort")
+    return {"done": done, "best": best, "total": len(objs)}
+
+
+_cache: dict[str, tuple[float, dict]] = {}
+CACHE_TTL_S = 20.0   # UIUX-LOOP r1：sop_gate.status 一次 5–7 s；顶栏 / 总览 / 成片页都在轮询，同一剧 20 s 内复用（sop/stepbar 同口径 STEPBAR_TTL_S）
+STALE_MAX_S = 300.0  # UIUX-LOOP-3 r13：过期 ≤ 5 分钟先回旧值、后台刷（stale-while-revalidate）；再久就同步重算（不给太旧的）
+_refreshing: set[str] = set()
+_refresh_lock = threading.Lock()
+
+
+def _kick_refresh(run: str, reg: dict) -> None:
+    """后台重算一次（单飞：同一剧只跑一个），算完换缓存；失败只记日志，旧值仍在，过期超 STALE_MAX_S 会回到同步重算"""
+    with _refresh_lock:
+        if run in _refreshing:
+            return
+        _refreshing.add(run)
+
+    def go():
+        try:
+            _cache[run] = (_now(), _pipeline_status(run, reg))
+        except Exception as e:  # noqa: BLE001  # arch-ok: 后台刷新失败只记日志；旧值还在，过期超 STALE_MAX_S 时下一次请求同步重算并把错误抛给页面
+            print(f"[pipeline_status] 后台刷新失败（{run}）：{e!r}", file=sys.stderr)
+        finally:
+            with _refresh_lock:
+                _refreshing.discard(run)
+    threading.Thread(target=go, daemon=True, name=f"pipeline-status-refresh-{run}").start()
 
 
 @router.get("/api/pipeline/status")
@@ -301,6 +359,20 @@ def pipeline_status(run: str | None = None):
     run = run or reg.get("primary")
     if not run or run not in (reg.get("runs") or {}):
         raise HTTPException(404, "没有这部剧")
+    hit = _cache.get(run)
+    now = _now()
+    if hit and now - hit[0] < CACHE_TTL_S:
+        return hit[1]
+    if hit and now - hit[0] < STALE_MAX_S:
+        # r13：实测活接口 sop_gate 重算一次 3–11 s，每 20 s 就有一个顶栏 / 总览 / 成片页的轮询被卡住 → 过期先回旧值，后台刷新
+        _kick_refresh(run, reg)
+        return hit[1]
+    out = _pipeline_status(run, reg)
+    _cache[run] = (now, out)
+    return out
+
+
+def _pipeline_status(run: str, reg: dict) -> dict:
     try:
         G = _gate()
         rows = G.status(run, ROOT)
@@ -318,8 +390,9 @@ def pipeline_status(run: str | None = None):
             stage, why = G.current_stage(rows)
             if r["why"].startswith("等第") and "；" in r["why"]:           # “等第 N 集复盘”前缀沿用 sop_gate 的
                 why = r["why"].split("；", 1)[0] + "；" + why
-            eps.append({"episode": n, "cells": fold(rows, n, live), "stage": stage, "why": why,
-                        "plain": plain_episode(n, stage, why, {x["stage"]: x for x in rows}), "retro": r.get("retro"),
+            cells = fold(rows, n, live)
+            eps.append({"episode": n, "cells": cells, "stage": stage, "why": why,
+                        "plain": plain_episode(n, stage, why, {x["stage"]: x for x in rows}, cells), "retro": r.get("retro"),
                         "import_at": _iso_jst(live.get("import_at"))})
         else:
             eps.append({"episode": n, "cells": {sid: {"state": "todo", "plain": "还没到这一步", "why": ""} for sid, _l, _s in STEPS},

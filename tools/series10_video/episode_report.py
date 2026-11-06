@@ -14,7 +14,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).parent))
-from report import contract  # noqa: E402
+import importlib.util as _ilu  # noqa: E402
+
+_rs = _ilu.spec_from_file_location("s10v_report", Path(__file__).resolve().parent / "report.py")   # W-INFRA 11-06：同目录 report.py 按唯一名加载，
+_rm = _ilu.module_from_spec(_rs)                                                                     # 别和 tools/bgm/report.py 撞名（script_name_guard）
+_rs.loader.exec_module(_rm)
+contract = _rm.contract
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import run_ctx as RC  # noqa: E402

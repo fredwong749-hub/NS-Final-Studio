@@ -15,7 +15,7 @@ import hostkey as HK  # noqa: E402
 import tunnel_supervisor as TS  # noqa: E402
 
 NEW = ROOT / "config/netfix/tunnels.hk.json"
-LANES = ("gpu33-l0", "gpu33-l1", "gpu33-l3", "gpu36-l0", "gpu36-l1")
+LANES = ("gpu33-l0", "gpu33-l1", "gpu33-l3", "gpu36-l0", "gpu36-l1", "gpu36-l2")   # W-INFRA 11-06：L-194 gpu36-l2 回归
 
 
 def _sup(conf=NEW):
@@ -58,7 +58,7 @@ def test_ssh_cmd_route_hk_lane():
         assert _eff(cmd, "ServerAliveInterval") == "15" and _eff(cmd, "ServerAliveCountMax") == "3"   # 运维：15 s × 3
         assert "-F" in cmd and f"Tag=nsnetfix-{h}" in " ".join(cmd) and "ExitOnForwardFailure=yes" in cmd
         assert s.is_lane(h)
-    assert s.ssh_cmd("gpu36-vqa")[-1] == "gpu36-t" and not s.is_lane("gpu36-vqa")
+    assert s.ssh_cmd("gpu36-vqa")[-1] == s.c["hosts"]["gpu36-vqa"]["ssh_host"] + "-t" and not s.is_lane("gpu36-vqa")   # PSM 11-05：8871 改转 gpu33:8870
     assert s.ssh_cmd("gpu33-cmd")[-1] == "gpu33-t" and not s.is_lane("gpu33-cmd")
     assert s.ssh_cmd("base-a")[-1] == "194relay-hk" and not s.is_lane("base-a")
     s.route_bad_until["hk"] = TS.now() + 600                            # 香港路被判坏 → 道临时走直连
@@ -185,7 +185,9 @@ def rs(monkeypatch, tmp_path):
 
 
 def _payload(sent):
-    return json.loads(next(stdin for cmd, stdin in sent if cmd.startswith("python3")))
+    # W-INFRA 11-06：打分命令现带环境前缀（NS_SCORE_RESIDENT=1 python3 …，FIX-SCORE36），按“去掉 VAR=val 前缀后以 python3 开头”匹配
+    import re
+    return json.loads(next(stdin for cmd, stdin in sent if re.match(r"^(?:\w+=\S*\s+)*python3", cmd)))
 
 
 def test_full_score_uploads_via_independent_conn(rs, monkeypatch):

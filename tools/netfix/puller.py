@@ -208,18 +208,39 @@ def mirror(state: dict) -> dict:
         if rel not in rels:
             rels.append(rel)
     for host in HOSTS:
+        got = mirror_fetch(host, rels)
         for rel in rels:
-            r = remote(host, f"cat {OFF}/repo/{rel}", timeout=60)
-            ok = r.returncode == 0 and r.stdout[:1] in (b"{", b"[")
+            body = got.get(rel)
+            ok = body is not None and body[:1] in (b"{", b"[")
             if ok:
                 dst = STAGE / host / rel
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 tmp = dst.with_suffix(dst.suffix + ".part")
-                tmp.write_bytes(r.stdout)
+                tmp.write_bytes(body)
                 os.replace(tmp, dst)
-            out[f"{host}:{rel}"] = {"ok": ok, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "bytes": len(r.stdout) if ok else 0,
-                                    "rc": r.returncode}
+            out[f"{host}:{rel}"] = {"ok": ok, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "bytes": len(body) if ok else 0,
+                                    "rc": got.get("_rc")}
     state["_mirror_last"] = out
+    return out
+
+
+def mirror_fetch(host: str, rels: list[str]) -> dict:
+    """W-INFRA 11-06：一台一次调用把全部小文件 tar 回来（原先每个 rel 一次 cat：4 个 run × 2 台 = 8 次 / 90 s ≈ 320 次 / h，
+    占命令通道约 1/10）。→ {rel: bytes}（缺的文件不在里面）+ "_rc"；tar 整体失败 → 只有 _rc"""
+    if not rels:
+        return {"_rc": 0}
+    r = remote(host, f"cd {OFF}/repo && tar cf - -T - 2>/dev/null; true", data=("\n".join(rels) + "\n").encode(), timeout=120)
+    out: dict = {"_rc": r.returncode}
+    if r.returncode != 0 or not r.stdout:
+        return out
+    try:
+        with tarfile.open(fileobj=io.BytesIO(r.stdout)) as tf:
+            for m in tf.getmembers():
+                name = m.name[2:] if m.name.startswith("./") else m.name
+                if m.isfile() and name in rels and ".." not in name:
+                    out[name] = tf.extractfile(m).read()
+    except tarfile.TarError as e:
+        log("mirror tar 读不全（断连）", repr(e)[:120], "→ 本轮缺的文件记 ok=False、下轮重拉")
     return out
 
 

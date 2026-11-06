@@ -15,7 +15,11 @@ type Gen = { state: string; eta_s: number | null; job_id: string | null; started
 type Edit = { id: string; state: string; word: string; pos: number | null; eta_at: number | null; retry: number; msg: string };
 /** pending（ORPHAN-TAKE）：比当前版新、还给不了看的最新一版——等打分 / 图在传输中；没图可给时格子写这个字，不写“文件不在” */
 type Pending = { n: number; word: string; why?: string };
-type Cell = { n: number | null; url: string | null; state: "none" | "current" | "final"; new_n: number | null; new_url: string | null; gen: Gen | null; sys_retry?: number; edit?: Edit | null; pending?: Pending | null };
+/** fallback（L-204 D8 / L-203）：尾帧兜底生效——这一镜只给首帧，运镜交给视频模型；格子写“不用尾帧”，不算缺图、不标“新”、不写“在重出” */
+type Fallback = { mode: string; word: string; why: string; at?: string | null; by?: string | null };
+/** ledger（UIUX-LOOP-2 r7）：没有本机图时，活的登记表说这一格在干什么（排队 / 正在出 / 等上一步 / 没出来）——排队中的镜也要看得见 */
+type Ledger = { state: string; word: string; take: number | null; why: string | null };
+type Cell = { n: number | null; url: string | null; state: "none" | "current" | "final" | "fallback"; new_n: number | null; new_url: string | null; gen: Gen | null; sys_retry?: number; edit?: Edit | null; pending?: Pending | null; fallback?: Fallback | null; ledger?: Ledger | null };
 type Shot = { id: string; index: number; chars: string[]; first: Cell; last: Cell; main: { kind: string; word: string } | null };
 type Index = { episodes: { ep: number; shots: Shot[] }[]; counts: { shots: number; missing: number; new: number; best: number; final: number }; gen: { running: number; queued: number } };
 const STATUS: [string, string][] = [
@@ -103,12 +107,24 @@ function EditCover({ e }: { e: Edit }) {
 
 function CellView({ c, label, onOpen }: { c: Cell; label: string; onOpen: () => void }) {
   const show = c.new_url ?? c.url;
+  if (c.state === "fallback" && c.fallback) {
+    // UIUX-LOOP r2：兜底镜的尾帧格——平静的一格“不用尾帧”，悬停看原因；点开抽屉能看说明和去画布
+    return (
+      <div className="fp-cellw">
+        <button type="button" className="fp-cell s-fallback" onClick={onOpen} title={`${label}：${c.fallback.word}\n${c.fallback.why}`}>
+          <div className="fp-miss fp-fb"><span>不用尾帧</span><small>运镜交给视频模型</small></div>
+        </button>
+        <div className="fp-cap">{label}</div>
+      </div>
+    );
+  }
   const badge = c.gen || c.edit ? null : c.new_n ? ["新", "a"] : c.state === "final" ? ["已定稿", "g"] : c.state === "current" ? ["当前", "g"] : null;
   // ORPHAN-TAKE：只给看通过且图已在本机的版本（“新”只在那时标）；有更新的一版还在等打分 / 传输中 → 缺图时格子写它，不写“文件不在”；
   // 有当前版时右下角小字提示“v12 等打分”，当前版照常显示
   const pend = !c.gen && !c.edit && c.pending ? c.pending : null;
-  const missWord = c.gen ? "" : pend ? `${label}${pend.word}` : (c.sys_retry ?? 0) > 0 ? `${label}在重出` : "还没出图";
-  const tip = c.state === "none" && !c.gen ? (pend ? `${label}${pend.word}：${pend.why ?? ""}（v${pend.n}）` : `${label}还没出图`) : `${label}：点开看大图、用这张 / 修改${pend ? `\n另有 v${pend.n} ${pend.word}` : ""}`;
+  const led = c.state === "none" && !c.gen && !pend && !(c.sys_retry ?? 0) && c.ledger ? c.ledger : null;
+  const missWord = c.gen ? "" : pend ? `${label}${pend.word}` : (c.sys_retry ?? 0) > 0 ? `${label}在重出` : led ? led.word : "还没出图";
+  const tip = c.state === "none" && !c.gen ? (pend ? `${label}${pend.word}：${pend.why ?? ""}（v${pend.n}）` : led ? `${label}${led.word}${led.why ? `：${led.why}` : ""}` : `${label}还没出图`) : `${label}：点开看大图、用这张 / 修改${pend ? `\n另有 v${pend.n} ${pend.word}` : ""}`;
   return (
     <div className="fp-cellw">
       <button type="button" className={`fp-cell s-${c.state}`} onClick={onOpen} title={tip}>
@@ -188,11 +204,18 @@ function Drawer({ shot, stage, onClose, onChanged }: { shot: Shot; stage: "first
         </button>
       </header>
       <div className="fp-big">
-        <SafeImg src={c.new_url ?? c.url} why="还没出图" />
+        <SafeImg src={c.new_url ?? c.url} why={c.state === "fallback" ? "不用尾帧" : "还没出图"} />
         {c.gen && <GenCover g={c.gen} />}
       </div>
+      {c.state === "fallback" && c.fallback && (
+        <p className="fp-note fp-fbnote">
+          <b>{c.fallback.word}。</b>
+          {c.fallback.why}
+          {c.fallback.at ? ` （${c.fallback.at.slice(5, 16).replace("T", " ")} 定）` : ""}
+        </p>
+      )}
       <div className="fp-act" onClick={onChanged}>
-        {n != null ? <Verdict shot={shot.id} stage={stage} n={n} size="md" /> : <span className="fp-note">还没有这一格的图</span>}
+        {n != null ? <Verdict shot={shot.id} stage={stage} n={n} size="md" /> : <span className="fp-note">{c.state === "fallback" ? "这一镜不出尾帧" : "还没有这一格的图"}</span>}
         <a className="fp-link" href={`#${shot.id}`}>
           在画布里打开这一镜
         </a>

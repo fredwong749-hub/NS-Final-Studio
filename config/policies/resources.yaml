@@ -10,8 +10,8 @@ schema: nsfs.policy/1
 policy: resources
 items:
   image_lanes:
-    value: ["gpu33:0", "gpu33:1", "gpu33:3", "gpu36:0", "gpu36:1"]
-    source: L-100（总调度 11-02 01:2x）；gpu33 GPU2 坏卡永不使用（K-OPS-W07）
+    value: ["gpu33:0", "gpu33:1", "gpu33:3", "gpu36:0", "gpu36:1", "gpu36:2"]
+    source: L-194（项目方 11-05 19:5x：gpu36 三卡全归 NS，修订 L-100）；gpu33 GPU2 坏卡永不使用（K-OPS-W07）
     enforced_by: tools/autopilot/producer.py:IMAGE_LANES
     status: drift_checked
     owner: PRODUCER（不在岗，经总调度派；DEBUG-RSI 只有 K-OPS-E05 授权）

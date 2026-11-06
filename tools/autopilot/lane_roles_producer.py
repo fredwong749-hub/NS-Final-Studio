@@ -65,8 +65,15 @@ FRAME_DONE = ("passed", "best_effort")
 FRAME_ACTIVE = ("ready", "running")                 # C2：还有可派 / 在跑的首尾帧活（pending = 等上游；failed = 卡死，不算活）
 FRAMES_IDLE_S = 1200                                # C2 兜底：定下数 20 min 没变 → 进 videos（config frames_idle_fallback_s 可改）
 REVIEW_SCALE_TIMEOUT_S = 300
-REVIEW_SCALE_RETRY_S = 600                          # 伸缩失败后多久再试一次
+REVIEW_SCALE_RETRY_S = 600                          # 伸缩失败后多久再试一次（第 1 次）
+REVIEW_SCALE_RETRY_MAX_S = 3600                     # W-INFRA 11-06：连续失败翻倍 600 → 1200 → 2400 → 3600 封顶（PS-MASTER：rc=1 每 10 min 刷屏）
 BAD_LANES = ("gpu33:2",)            # 坏卡（CLAUDE.md 红线）：配置里写了也剔除
+
+
+def scale_retry_wait_s(fails: int) -> float:
+    """第 fails 次连续失败后等多久再试：600 × 2^(fails-1)，封顶 3600；成功归零"""
+    n = max(1, int(fails or 1))
+    return float(min(REVIEW_SCALE_RETRY_S * (2 ** (n - 1)), REVIEW_SCALE_RETRY_MAX_S))
 REVIEW_PORT_OFFSET = 6              # 审图实例端口 = port_base + 6 + i（8876…）：避开 8871（笔记本隧道）、8873 / 8874（gpu33 打分常驻）
 
 
@@ -162,6 +169,69 @@ def review_ports(cfg: dict) -> dict:
     except (TypeError, ValueError):
         base = 8870
     return {"router": base, "instances": [base + REVIEW_PORT_OFFSET + i for i in range(review_instances(cfg))]}
+
+
+_RESIDENT_CACHE: dict = {}
+REVIEW_RESIDENT_TTL_S = 30
+
+
+def review_probe_urls(cfg: dict) -> list[str]:
+    """看图进程驻留探测地址（/health）：审图台本机 → 127.0.0.1 的分发器 + 各实例口；笔记本 → review.laptop_probe_urls
+    （默认 http://127.0.0.1:8871/health，tunnels.json gpu36-vqa 8871 → gpu33:8870）；别的服务器 → review.lan_url（10.0.0.33:8870）"""
+    r = cfg.get("review") or {}
+    me = os.environ.get("NS_FACTORY_HOST") or os.environ.get("OFFLINE_SELF") or ""
+    host = review_host(cfg)
+    if me and me == host:
+        ports = review_ports(cfg)
+        return [f"http://127.0.0.1:{ports['router']}/health"] + [f"http://127.0.0.1:{p}/health" for p in ports["instances"]]
+    if me:
+        u = str(r.get("lan_url") or "").rstrip("/")
+        return [u + "/health"] if u else []
+    return [str(u) for u in (r.get("laptop_probe_urls") or ["http://127.0.0.1:8871/health"])]
+
+
+def review_resident(cfg: dict, now: float | None = None, probe=None, ttl_s: float = REVIEW_RESIDENT_TTL_S) -> bool:
+    """审图卡上此刻是否有看图进程驻留（分发器或任一实例 /health 应答 = 驻留，不管它加载没加载——懒加载实例来单就要 7.5 GB）。
+    PS-MASTER 11-06 20:41 实况：ep01（不归 lane_roles 管，from_episode=2）的 last:ep01-S8 被派到 gpu33:3 出图 → 看图实例 CUDA OOM。
+    规则：看图进程在卡上就不往这张卡派出图单，不管空闲兜底怎么说。探测结果缓存 ttl_s；探不到 / 出错 = 不驻留（不挡）"""
+    t = time.time() if now is None else now
+    key = review_lane(cfg)
+    c = _RESIDENT_CACHE.get(key)
+    if c and t - c["t"] < ttl_s:
+        return c["resident"]
+    urls = review_probe_urls(cfg)
+    res = False
+    for u in urls:
+        try:
+            if probe is not None:
+                ok = bool(probe(u))
+            else:
+                import urllib.request
+                with urllib.request.urlopen(u, timeout=2) as r:
+                    ok = 200 <= r.status < 500
+        except Exception:  # noqa: BLE001  # arch-ok: 探不到 = 该口没进程
+            ok = False
+        if ok:
+            res = True
+            break
+    _RESIDENT_CACHE[key] = {"t": t, "resident": res, "urls": urls}
+    return res
+
+
+def block_renders_when_resident(cfg: dict) -> bool:
+    v = (cfg.get("review") or {}).get("block_renders_when_resident")
+    return True if v is None else bool(v)
+
+
+def lanes_minus_resident_review(lanes, cfg: dict, now: float | None = None, probe=None) -> tuple[list, str | None]:
+    """→ (去掉驻留审图卡后的道, 被去掉的道 | None)。lane_roles 关 / 没配审图道 / 开关关 / 没驻留 → 原样"""
+    ln = review_lane(cfg) if isinstance(cfg, dict) else ""
+    lanes = list(lanes)
+    if not ln or not enabled(cfg) or not block_renders_when_resident(cfg) or ln not in lanes:
+        return lanes, None
+    if not review_resident(cfg, now=now, probe=probe):
+        return lanes, None
+    return [x for x in lanes if x != ln], ln
 
 
 def image_prefetch_depth(cfg: dict) -> int:
@@ -589,10 +659,12 @@ def review_scale_tick(cfg: dict, root: Path | None, phase: str | None, log=None,
                 return {"skipped": "running", "want": want}
             if rec.get("want") == want and rec.get("ok"):
                 return {"skipped": "already", "want": want}
-            if rec.get("want") == want and rec.get("done") and not rec.get("ok") and t - float(rec.get("done_t") or 0) < REVIEW_SCALE_RETRY_S:
-                return {"skipped": "retry_wait", "want": want}
+            prev_fails = int(rec.get("fails") or 0) if rec.get("want") == want and rec.get("done") and not rec.get("ok") else 0
+            if prev_fails and t - float(rec.get("done_t") or 0) < scale_retry_wait_s(prev_fails):
+                return {"skipped": "retry_wait", "want": want, "fails": prev_fails, "wait_s": scale_retry_wait_s(prev_fails)}
             timeout_s = float((cfg.get("review_scale") or {}).get("timeout_s") or REVIEW_SCALE_TIMEOUT_S)
-            rec = {"want": want, "phase": phase, "started": _iso(t), "started_t": t, "done": None, "rc": None, "ok": False, "tail": ""}
+            rec = {"want": want, "phase": phase, "started": _iso(t), "started_t": t, "done": None, "rc": None, "ok": False, "tail": "",
+                   "fails": prev_fails}
             _write_scale(root, rec)
 
             def job():
@@ -601,7 +673,8 @@ def review_scale_tick(cfg: dict, root: Path | None, phase: str | None, log=None,
                 except Exception as e:  # noqa: BLE001  # arch-ok: 伸缩钩子任何异常只记结果，不影响 producer
                     rc, tail = -1, repr(e)[:300]
                 t2 = time.time()
-                rec.update(done=_iso(t2), done_t=t2, rc=rc, ok=(rc == 0), tail=str(tail)[-1500:])
+                rec.update(done=_iso(t2), done_t=t2, rc=rc, ok=(rc == 0), tail=str(tail)[-1500:],
+                           fails=0 if rc == 0 else int(rec.get("fails") or 0) + 1)   # W-INFRA 11-06：连续失败次数 → 重试间隔翻倍（刷屏止血）
                 try:
                     _write_scale(root, rec)
                 except OSError:

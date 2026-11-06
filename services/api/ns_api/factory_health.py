@@ -6,7 +6,10 @@ GET /api/factory/health   只读汇总，前端 8 s 轮询：
   · 2 张看图卡：笔记本 4080（本机 :8870）、gpu36（隧道 :8871，NETFIX 监管）各自 /health 的 loaded / queue（打分积压）/ served / last_error；
   · 两台服务器的阶段：data/netfix/net_status.json 的 dispatch_mode.phases（服务器自派 / 笔记本代派 / 交还中）；
   · producer 心跳：data/producer/heartbeat.json。
-FACTORY 以后提供 tools/factory/sync.py status：_factory_status() 读到就整份用它（同样的字段），读不到才用上面的拼法。
+FACTORY 的 tools/factory/sync.py 若提供 health_status()（与本接口同结构、只读本机文件、不连机器）→ 整份用它；没有就用上面的拼法。
+UIUX-LOOP-2 r6：原来钩子找的是 sync.status()——它对两台机器各跑一次 ssh（timeout 60 s × 4 次重试），返回的又不是本接口的结构，
+结果一律被丢掉：每 8 s 一次轮询在请求线程里空等 ssh，隧道一抖 /api/factory/health 就 60 s+ 不回，线程池被占满后
+/api/season、/api/candidates 也跟着 3–9 s。请求路径里不许连机器（gpu_live 的采集线程已经在读各道，这里只读内存 / 本机文件）。
 文案全是大白话；端口等只进 tech 字段。
 """
 from __future__ import annotations
@@ -29,7 +32,7 @@ LANES = ["gpu33:0", "gpu33:1", "gpu33:3", "gpu36:0", "gpu36:1"]
 VQA = [("laptop", "笔记本看图卡", "http://127.0.0.1:8870"), ("gpu36", "gpu36 看图卡", "http://127.0.0.1:8871")]
 PHASE = {"server": "服务器自派", "laptop": "笔记本代派", "draining": "交还中"}
 RECENT_S = 60      # r43 K1：最近 60 s 出过东西也算在出
-_cache: dict = {"t": 0.0, "vqa": None}
+_cache: dict = {"t": 0.0, "vqa": None, "thread": None}
 _lock = threading.Lock()
 
 
@@ -47,43 +50,80 @@ def _secs(s: float | None) -> str:
     return f"{s} 秒" if s < 120 else f"{s // 60} 分 {s % 60} 秒"
 
 
+_fs_mod: dict = {"mt": None, "fn": None}
+
+
 def _factory_status() -> dict | None:
-    """FACTORY 的 tools/factory/sync.py status（还没交付时返回 None）。约定：模块里有 status() → 与本接口同结构的 dict"""
-    if not FACTORY.is_file():
+    """FACTORY 的 tools/factory/sync.py health_status()（与本接口同结构的 dict、只读本机文件）。没提供 → None（用本地拼法）。
+    模块按文件改动时间只加载一次；不调 status()（那是 ssh 巡检，不是健康条的数据源）"""
+    try:
+        mt = FACTORY.stat().st_mtime
+    except OSError:  # arch-ok: 没有 sync.py = FACTORY 没交付这个钩子，用本地拼法（接口里 source=live 写明）
+        return None
+    if _fs_mod["mt"] != mt:
+        fn = None
+        try:
+            spec = importlib.util.spec_from_file_location("factory_sync", FACTORY)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)  # type: ignore[union-attr]
+            fn = getattr(mod, "health_status", None)
+        except Exception:  # noqa: BLE001 — FACTORY 那边加载出错就退回本地拼法
+            fn = None
+        _fs_mod.update(mt=mt, fn=fn if callable(fn) else None)
+    fn = _fs_mod["fn"]
+    if fn is None:
         return None
     try:
-        spec = importlib.util.spec_from_file_location("factory_sync", FACTORY)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)  # type: ignore[union-attr]
-        st = getattr(mod, "status", None)
-        out = st() if callable(st) else None
+        out = fn()
         return out if isinstance(out, dict) and out.get("lanes") is not None else None
     except Exception:  # noqa: BLE001 — FACTORY 那边出错就退回本地拼法
         return None
 
 
-def _vqa(now: float) -> list[dict]:
+def _vqa_probe_one(vid: str, label: str, url: str) -> dict:
+    try:
+        with urllib.request.urlopen(url + "/health", timeout=1.5) as r:
+            h = json.loads(r.read())
+    except Exception:  # noqa: BLE001
+        h = None
+    if h is None:
+        return {"id": vid, "label": label, "state": "down", "queue": None, "served": None, "text": "没在运行", "tech": url}
+    q = int(h.get("queue") or 0)
+    err = h.get("last_error")
+    state = "warn" if err and "memory" in str(err).lower() else ("busy" if q or h.get("last_job") else ("idle" if h.get("loaded") is not None else "down"))
+    txt = (f"积压 {q} 张" if q else "没有积压") + (f" · 已打分 {h.get('served')}" if h.get("served") is not None else "")
+    if state == "warn":
+        txt += " · 最近一次显存不够"
+    return {"id": vid, "label": label, "state": state, "queue": q, "served": h.get("served"), "loaded": h.get("loaded"),
+            "text": txt, "tech": f"{url}；GPU {h.get('gpu')}；最近报错：{str(err)[:120] if err else '无'}"}
+
+
+def _vqa_probe() -> list[dict]:
+    """两张看图卡并行探（原来串行：都连不上时 1.5 s × 2 = 3 s 每次）"""
+    from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
+    with ThreadPoolExecutor(max_workers=len(VQA)) as ex:
+        return list(ex.map(lambda v: _vqa_probe_one(*v), VQA))
+
+
+def _vqa_refresh() -> None:
+    out = _vqa_probe()
     with _lock:
-        if _cache["vqa"] is not None and now - _cache["t"] < 5:
-            return _cache["vqa"]
-    out = []
-    for vid, label, url in VQA:
-        try:
-            with urllib.request.urlopen(url + "/health", timeout=1.5) as r:
-                h = json.loads(r.read())
-        except Exception:  # noqa: BLE001
-            h = None
-        if h is None:
-            out.append({"id": vid, "label": label, "state": "down", "queue": None, "served": None, "text": "没在运行", "tech": url})
-            continue
-        q = int(h.get("queue") or 0)
-        err = h.get("last_error")
-        state = "warn" if err and "memory" in str(err).lower() else ("busy" if q or h.get("last_job") else ("idle" if h.get("loaded") is not None else "down"))
-        txt = (f"积压 {q} 张" if q else "没有积压") + (f" · 已打分 {h.get('served')}" if h.get("served") is not None else "")
-        if state == "warn":
-            txt += " · 最近一次显存不够"
-        out.append({"id": vid, "label": label, "state": state, "queue": q, "served": h.get("served"), "loaded": h.get("loaded"),
-                    "text": txt, "tech": f"{url}；GPU {h.get('gpu')}；最近报错：{str(err)[:120] if err else '无'}"})
+        _cache.update(t=time.time(), vqa=out, thread=None)
+
+
+def _vqa(now: float) -> list[dict]:
+    """看图卡健康：5 s 内直接用上次；过了 5 s 回上次的、后台线程去刷（stale-while-revalidate）；从没探过才同步探一次（并行，≤ 1.5 s）"""
+    with _lock:
+        cur, t, th = _cache["vqa"], _cache["t"], _cache.get("thread")
+        if cur is not None and now - t < 5:
+            return cur
+        if cur is not None:
+            if th is None or not th.is_alive():
+                th = threading.Thread(target=_vqa_refresh, daemon=True, name="factory-vqa-probe")
+                _cache["thread"] = th
+                th.start()
+            return cur
+    out = _vqa_probe()
     with _lock:
         _cache.update(t=now, vqa=out)
     return out

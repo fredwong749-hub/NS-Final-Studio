@@ -8,9 +8,11 @@ import { fmtEta } from "../NavTabs.helpers";
 import { SHOT_WORD, VIDEO_STATE_KIND, shotWord } from "../shotWord";
 import "../navia.css";
 
-type Row = { id: string; index: number; state: string; video_url: string | null; n: number | null; progress: number | null; queue_pos: number | null; eta: string | null; missing: string[]; candidates: number };
+/** fallback（L-204 D8）：尾帧兜底生效（i2va）——视频只用首帧；这种镜不会是“缺尾帧” */
+/** ledger（UIUX-LOOP-2 r7）：登记表说视频已定下 / 尽力版、但本机 takes.json 没当前视频时的说明（note = 片子还没拉到本机） */
+type Row = { id: string; index: number; state: string; video_url: string | null; n: number | null; progress: number | null; queue_pos: number | null; eta: string | null; missing: string[]; candidates: number; fallback?: string | null; ledger?: { state: string; word: string; why: string | null; note: string | null } | null };
 type Overview = {
-  summary: { total: number; final: number; rendering: number; queued: number; pending_review: number; need_frames: number; todo: number; failed: number; eta_all: string | null; median_s: number };
+  summary: { total: number; final: number; rendering: number; queued: number; pending_review: number; best_effort?: number; need_frames: number; todo: number; failed: number; eta_all: string | null; median_s: number };
   episodes: { ep: number; shots: Row[] }[];
 };
 // 状态词与圆点来自全站统一词表（v3/shotWord.ts）
@@ -54,9 +56,10 @@ function useOverview(ep: string) {
 function Cell({ r, ep, onOpen }: { r: Row; ep: number; onOpen: () => void }) {
   const eta = fmtEta(r.eta);
   const right = r.state === "rendering" ? (eta ? `≈${eta}` : "") : r.state === "queued" ? (eta ? `≈${eta}` : "") : r.state === "need_frames" ? "去出图" : "";
-  const word = r.state === "queued" && r.queue_pos ? `排队第 ${r.queue_pos}` : r.state === "need_frames" ? `缺${r.missing.map((m) => (m === "first" ? "首帧" : "尾帧")).join("、")}` : WORD[r.state] ?? r.state;
+  const word = r.state === "queued" && r.queue_pos ? `排队第 ${r.queue_pos}` : r.state === "need_frames" ? `缺${r.missing.map((m) => (m === "first" ? "首帧" : "尾帧")).join("、")}` : r.state === "best_effort" ? "尽力版 · 待你看" : r.state === "todo" && r.ledger?.word ? r.ledger.word : WORD[r.state] ?? r.state;
+  const fb = r.fallback ? "只用首帧" : "";
   return (
-    <button className="vd-shot" onClick={onOpen} title={`${r.id} · ${word}${eta ? ` · 预计 ${eta}` : ""}`} data-state={r.state}>
+    <button className="vd-shot" onClick={onOpen} title={`${r.id} · ${word}${r.ledger?.note ? ` · ${r.ledger.note}` : ""}${r.ledger?.why ? `（${r.ledger.why}）` : ""}${fb ? ` · ${fb}（尾帧兜底，运镜交给视频模型）` : ""}${eta ? ` · 预计 ${eta}` : ""}`} data-state={r.state === "best_effort" ? "pending_review" : r.state}>
       <div className="im">
         {r.video_url && <video src={`${r.video_url}#t=0.4`} preload="metadata" muted playsInline />}
         <span className="id">
@@ -73,7 +76,7 @@ function Cell({ r, ep, onOpen }: { r: Row; ep: number; onOpen: () => void }) {
           <i className={`vd-dot ${DOT[r.state] ?? ""}`} />
           {word}
         </span>
-        <span>{right}</span>
+        <span>{right || fb}</span>
       </div>
     </button>
   );
@@ -86,7 +89,7 @@ function Drawer({ r, ep, onClose, onChanged, next }: { r: Row; ep: number; onClo
     <aside className="vd-drawer" role="dialog" aria-label={`${r.id} 视频`}>
       <div className="row">
         <b>{r.id}</b>
-        <span style={{ color: "var(--c-text-2,#aaa)" }}>{WORD[r.state]}</span>
+        <span style={{ color: "var(--c-text-2,#aaa)" }}>{r.state === "best_effort" ? "尽力版 · 待你看" : WORD[r.state]}{r.ledger?.note ? ` · ${r.ledger.note}` : ""}</span>
         <span style={{ flex: 1 }} />
         <button className="v3-btn sm" onClick={onClose}>
           关闭
@@ -137,9 +140,10 @@ export default function VideosPage() {
     if (/^\d+$/.test(ep) && Number(ep) !== epNum) gotoEpisode(Number(ep));
   }, [ep]); // eslint-disable-line react-hooks/exhaustive-deps
   const { d, err, load } = useOverview(ep);
-  const shown = useMemo(() => (d ? d.episodes.map((e) => ({ ...e, shots: e.shots.filter((s) => !state || s.state === state) })).filter((e) => e.shots.length) : []), [d, state]);
+  const hit = (s: Row) => !state || s.state === state || (state === "pending_review" && s.state === "best_effort"); // 待你看 含 尽力版
+  const shown = useMemo(() => (d ? d.episodes.map((e) => ({ ...e, shots: e.shots.filter(hit) })).filter((e) => e.shots.length) : []), [d, state]);
   const cur = open && d ? d.episodes.flatMap((e) => e.shots.map((s) => ({ s, ep: e.ep }))).find((x) => x.s.id === open) : undefined;
-  const flat = useMemo(() => (d ? d.episodes.flatMap((e) => e.shots.filter((x) => !state || x.state === state).map((x) => ({ s: x, ep: e.ep }))) : []), [d, state]);
+  const flat = useMemo(() => (d ? d.episodes.flatMap((e) => e.shots.filter(hit).map((x) => ({ s: x, ep: e.ep }))) : []), [d, state]);
   const playNext = () => {
     const i = flat.findIndex((x) => x.s.id === open);
     const nx = flat.slice(i + 1).find((x) => x.s.video_url);

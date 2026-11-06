@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import statistics
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 SLO_TITLE = {
     "S0": "探针自身故障（读不到输入 / 远程采样失败 / 探针异常）",
@@ -29,8 +29,12 @@ def F(slo: str, key: str, violated: bool, title: str, **ev) -> dict:
     return {"slo": slo, "key": f"{slo}:{key}", "violated": bool(violated), "title": title, "evidence": ev}
 
 
+PROJECT_TZ = timezone(timedelta(hours=9))   # W-INFRA 11-06：项目时间一律 Asia/Tokyo（K-OPS-E18）。原来按本机时区读写：笔记本（美东）上
+                                            # 服务器 / producer 写的 +09:00 无时区串被当成本机时间，差 14 h → 暂停时长、心跳年龄全判错
+
+
 def iso(t: float | None) -> str | None:
-    return None if t is None else datetime.fromtimestamp(t).strftime("%Y-%m-%dT%H:%M:%S")
+    return None if t is None else datetime.fromtimestamp(t, PROJECT_TZ).strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def ts(v) -> float | None:
@@ -39,9 +43,10 @@ def ts(v) -> float | None:
     if isinstance(v, (int, float)):
         return float(v)
     try:
-        return datetime.fromisoformat(str(v)).timestamp()
+        d = datetime.fromisoformat(str(v).strip().replace("Z", "+00:00"))
     except ValueError:  # arch-ok: 时间串解析失败 = None（调用方按未知处理）
         return None
+    return (d if d.tzinfo else d.replace(tzinfo=PROJECT_TZ)).timestamp()
 
 
 # ------------------------------------------------------------------ S1 出图道利用率（lane_util.measure 的结果）

@@ -33,10 +33,13 @@ print("HOST=%s; GPU=%s; N=%d; ROUTER=%d; PORTS='%s'; ENABLED=%s" % (host, gpu, n
 PY
 )"
 [ "$GPU" = 2 ] && { echo "REFUSE ${HOST}:2（坏卡红线）"; exit 2; }
-SELF=${OFFLINE_SELF:-$(hostname -s)}
+# W-INFRA 11-06：本机身份 = OFFLINE_SELF → hosts.json hostname 映射（gpu33 真实主机名 gpu3、gpu36 是 gpu6；tools/factory/hosts.py self）→ hostname -s
+SELF=${OFFLINE_SELF:-$(python3 "$REPO/tools/factory/hosts.py" self "$(hostname -s 2>/dev/null)" 2>/dev/null)}; SELF=${SELF:-$(hostname -s)}
 if [ "$SELF" != "$HOST" ] && [ "${FORCE:-0}" != 1 ]; then echo "WRONG_HOST 本机=$SELF 审图位=$HOST（FORCE=1 可越过）"; exit 2; fi
 PER_MIB=${VQA_PEAK_MIB:-7500}          # config/vqa.json model.vram_budget：nf4 实例峰值 7206–7386 MiB
 COMFY_PORT=$((8188 + GPU))
+HB_DIR=${VQA_HB_DIR:-/root/work/fredw/gpu_heartbeats}
+PROC=${VQA_PROC:-/proc}
 
 hjson() { curl -s -m "${2:-4}" "http://127.0.0.1:$1/health"; }
 up() { hjson "$1" 2 >/dev/null 2>&1; }
@@ -66,35 +69,124 @@ stop_ports() {   # 只停本脚本 pid 文件里的实例（$@ = 端口）
   done
 }
 
-start_instances() {   # $@ = 要保证在跑的实例端口；显存不够先让该卡 ComfyUI 卸模型；仍不够退出 3（不 kill 别人）
+start_instances() {   # $@ = 要保证在跑的实例端口；显存不够先让该卡 ComfyUI 卸模型；仍放不下全部 → 放得下几个起几个（≥1）、返回 5（W-INFRA 11-06）；
+  # 一个都放不下退出 3（不 kill 别人）。分发器按 /health 用活着的实例，少起几个不影响调度；scale 钩子失败重试时再补
   [ -x "$B/venv/bin/python" ] || { echo "NO_VENV $B/venv（先跑 tools/vqa/deploy_offline.sh gpu33）"; return 1; }
   [ -f "$B/models/Qwen3-VL-8B-Instruct/config.json" ] || { echo "NO_MODEL $B/models/Qwen3-VL-8B-Instruct"; return 1; }
   cp "$REPO/tools/vqa/server.py" "$REPO/tools/vqa/vqa_router.py" "$REPO/config/vqa.json" "$B/" || { echo "COPY_FAIL"; return 1; }
-  mkdir -p "$B/logs" /root/work/fredw/gpu_heartbeats
+  mkdir -p "$B/logs" "$HB_DIR"
   need=0; for p in "$@"; do up "$p" || need=$((need+1)); done
+  fit=$need
   if [ "$need" -gt 0 ]; then
     FREE=$(nvidia-smi -i "$GPU" --query-gpu=memory.free --format=csv,noheader,nounits | head -1)
-    if [ "${FREE:-0}" -lt $((need * PER_MIB)) ]; then      # 该卡 ComfyUI（审图位 / 视频段刚出完视频）卸模型后再量一次；仍不够就退出，不 kill
+    if [ "${FREE:-0}" -lt $((need * PER_MIB)) ]; then      # 该卡 ComfyUI（审图位 / 视频段刚出完视频）卸模型后再量一次；仍不够就只起放得下的，不 kill
       curl -s -m 10 -X POST "http://127.0.0.1:$COMFY_PORT/free" -H 'Content-Type: application/json' -d '{"unload_models":true,"free_memory":true}' >/dev/null 2>&1
-      sleep 5; FREE=$(nvidia-smi -i "$GPU" --query-gpu=memory.free --format=csv,noheader,nounits | head -1)
+      sleep "${VQA_FREE_WAIT_S:-5}"; FREE=$(nvidia-smi -i "$GPU" --query-gpu=memory.free --format=csv,noheader,nounits | head -1)
     fi
-    [ "${FREE:-0}" -ge $((need * PER_MIB)) ] || { echo "VRAM_TOO_LOW GPU$GPU free=${FREE}MiB < $need×${PER_MIB}（停掉该卡上占显存的进程后再试；本脚本不 kill）"; return 3; }
+    fit=$(( ${FREE:-0} / PER_MIB )); [ "$fit" -gt "$need" ] && fit=$need
+    [ "$fit" -ge 1 ] || { echo "VRAM_TOO_LOW GPU$GPU free=${FREE}MiB < 1×${PER_MIB}（停掉该卡上占显存的进程后再试；本脚本不 kill）"; return 3; }
+    [ "$fit" -lt "$need" ] && echo "VRAM_PARTIAL GPU$GPU free=${FREE}MiB 放得下 $fit/$need 个实例：先起 $fit 个（分发器用活着的），其余等显存"
   fi
+  started=0
   for p in "$@"; do
     up "$p" && { echo "ALREADY_UP :$p"; continue; }
+    [ "$started" -lt "$fit" ] || { echo "SKIP :$p（显存不够，本轮不起）"; continue; }
     cd "$B" && env VQA_GPUS="$GPU" VQA_FORCE_GPU="$GPU" VQA_DEDICATED=1 VQA_PORT="$p" VQA_COMFY= HF_HOME="$B/hf" PYTHONUNBUFFERED=1 \
-      VQA_HB="/root/work/fredw/gpu_heartbeats/VQA-$HOST-$p.json" setsid nohup "$B/venv/bin/python" -u "$B/server.py" </dev/null >>"$B/logs/server_$p.log" 2>&1 &
+      VQA_HB="$HB_DIR/VQA-$HOST-$p.json" setsid nohup "$B/venv/bin/python" -u "$B/server.py" </dev/null >>"$B/logs/server_$p.log" 2>&1 &
     echo $! > "$B/server_$p.pid"; echo "started instance :$p pid $!（GPU$GPU）"
+    started=$((started+1))
     sleep "${VQA_STAGGER_S:-25}"                # 错开加载峰值
   done
+  [ "$fit" -lt "$need" ] && return 5
   return 0
 }
 
+is_router() { printf '%s' "$(hjson "$ROUTER")" | grep -q '"gpu": *"router"'; }
+loaded() { hjson "$1" 2 2>/dev/null | grep -q '"loaded": *true'; }
+
 start_router() {
-  if up "$ROUTER"; then echo "router :$ROUTER already up"; return 0; fi
+  if up "$ROUTER"; then
+    is_router && { echo "router :$ROUTER already up"; return 0; }
+    echo "PORT_BUSY :$ROUTER 上是旧单实例，分发器起不了 → 用 handover 交接（start --replace 同义）"; return 4
+  fi
   cd "$B" && env VQA_PORT="$ROUTER" VQA_BACKENDS="$(echo $PORTS | tr ' ' ,)" NS_SCORE_THREADS=4 PYTHONUNBUFFERED=1 \
     setsid nohup "$B/venv/bin/python" -u "$B/vqa_router.py" </dev/null >>"$B/logs/router_$ROUTER.log" 2>&1 &
   echo $! > "$B/router_$ROUTER.pid"; echo "started router :$ROUTER → $PORTS pid $!"
+}
+
+is_server_py() { tr '\0' ' ' < "$PROC/$1/cmdline" 2>/dev/null | grep -q "server.py"; }   # 这个 pid 是本仓库看图 server.py 吗
+
+old_single_pid() {   # :ROUTER 上的全部监听进程（ss；Fable 复审：10.0.0.33:8870 的内网代理 lan_proxy.py 也听这个口），只认命令行是 server.py 的那个
+  for pid in $(ss -ltnp 2>/dev/null | grep -E "[:.]$ROUTER +" | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); do
+    is_server_py "$pid" && { echo "$pid"; return 0; }
+  done
+  return 1
+}
+
+adopt_old_single() {   # 返回 0 = :ROUTER 上是旧单实例且 pid 文件在手；1 = :ROUTER 没人 / 已是分发器；2 = 有人但不是我们的进程
+  r=$(hjson "$ROUTER"); [ -n "$r" ] || return 1
+  printf '%s' "$r" | grep -q '"gpu": *"router"' && return 1
+  f="$B/server_$ROUTER.pid"
+  if [ -f "$f" ] && kill -0 "$(cat "$f")" 2>/dev/null; then       # pid 文件在、进程在：还要是 server.py 才算（pid 复用 → 当文件失效，按监听端口重认）
+    is_server_py "$(cat "$f")" && return 0
+    echo "STALE_PIDFILE $f pid $(cat "$f") 不是 server.py（pid 复用），重认"; rm -f "$f"
+  fi
+  # 11-06 实况：start --replace 杀了 pid 文件里一个已不在的 pid、又把文件删了，旧单实例（start_gpu33_vqa.sh 起的）还在跑 → 按监听端口认回来
+  pid=$(old_single_pid) || { echo "OLD_SINGLE_UNKNOWN :$ROUTER 上的进程不是本仓库 server.py（或没有 ss），不碰"; return 2; }
+  echo "$pid" > "$f"; echo "ADOPT old single :$ROUTER pid $pid（按监听端口认回 pid 文件）"; return 0
+}
+
+warm() {   # 让实例真加载：发一条不带图的文本小单（server.py 里 load.lock 互斥 + 二次量显存）；成功 = /health loaded=true
+  p=$1
+  loaded "$p" && { echo "LOADED :$p"; return 0; }
+  FREE=$(nvidia-smi -i "$GPU" --query-gpu=memory.free --format=csv,noheader,nounits | head -1)
+  if [ "${FREE:-0}" -lt "$PER_MIB" ]; then        # Fable 复审：实例早就在跑时 start_instances need=0 不会碰 ComfyUI，这里也要先让该卡 ComfyUI 卸模型再量
+    curl -s -m 10 -X POST "http://127.0.0.1:$COMFY_PORT/free" -H 'Content-Type: application/json' -d '{"unload_models":true,"free_memory":true}' >/dev/null 2>&1
+    sleep "${VQA_FREE_WAIT_S:-5}"; FREE=$(nvidia-smi -i "$GPU" --query-gpu=memory.free --format=csv,noheader,nounits | head -1)
+  fi
+  [ "${FREE:-0}" -ge "$PER_MIB" ] || { echo "WARM_SKIP :$p 显存 ${FREE}MiB < $PER_MIB（ComfyUI 卸模型后仍不够：不加载，免得 OOM）"; return 3; }
+  curl -s -m "${VQA_WARM_S:-600}" -X POST "http://127.0.0.1:$p/generate" -H 'Content-Type: application/json' \
+    -d '{"text":"ok","images":[],"max_new_tokens":1,"wait_s":90,"label":"warm"}' >/dev/null 2>&1
+  loaded "$p" && { echo "WARMED :$p"; return 0; }
+  echo "WARM_FAIL :$p $(hjson "$p" | head -c 160)"; return 4
+}
+
+warm_all() {   # 按顺序预热在跑的实例；显存不够的后面几个：未加载的停掉（只停 pid 文件里的），免得来单就加载把卡撑爆；→ 已加载个数
+  nload=0
+  for p in $PORTS; do
+    up "$p" || continue
+    if warm "$p"; then nload=$((nload+1)); else stop_ports "$p"; fi
+  done
+  echo "loaded instances: $nload"
+}
+
+handover() {
+  # W-INFRA 11-06（PS-MASTER 实况：gpu33:3 旧单实例 6.5 GB 还占 :8870、3 个懒加载实例在跑、分发器起不了 → 谁来单谁加载 → OOM）。确定性交接：
+  # ① 认回旧单实例 pid 文件（只认 server.py）② 按显存起放得下的实例（算上旧单实例占的）③ 逐个预热，放不下的停掉
+  # ④ ≥1 个加载好 → 停旧单实例 → 等 :8870 空（≤30 s，不强杀）→ 起分发器 ⑤ 显存松了再补实例、再预热 ⑥ health。失败在哪一步就停在哪一步，旧单实例不先停
+  adopt_old_single; arc=$?
+  [ "$arc" = 2 ] && return 6
+  HAD_OLD=0; [ "$arc" = 0 ] && HAD_OLD=1
+  start_instances $PORTS; SRC=$?
+  case "$SRC" in 0|5) ;; *) return $SRC;; esac
+  warm_all
+  if [ "$HAD_OLD" = 1 ]; then
+    [ "$nload" -ge 1 ] || { echo "HANDOVER_HOLD 没有一个新实例加载成功：旧单实例 :$ROUTER 留着继续服务"; return 7; }
+    opid=$(cat "$B/server_$ROUTER.pid")
+    kill "$opid" 2>/dev/null; rm -f "$B/server_$ROUTER.pid"
+    echo "$(date '+%F %T') retired old single :$ROUTER pid $opid（loaded instances=$nload）" >> "$B/retired_$ROUTER.log"
+    echo "retired old single :$ROUTER pid $opid"
+    for i in $(seq 1 30); do up "$ROUTER" || break; sleep 1; done
+    up "$ROUTER" && { echo "OLD_STILL_LISTENING :$ROUTER 30 s 没退出，不起分发器（本脚本不强杀）"; return 8; }
+    sleep "${VQA_FREE_WAIT_S:-5}"
+  fi
+  start_router || return $?
+  start_instances $PORTS; SRC=$?           # 旧单实例的显存回来了：能补几个补几个
+  case "$SRC" in 0|5) ;; *) return $SRC;; esac
+  warm_all
+  sleep "${VQA_SETTLE_S:-10}"; health; hrc=$?
+  [ "$nload" -ge 1 ] || return 7
+  return $hrc
 }
 
 case "$CMD" in
@@ -119,26 +211,30 @@ case "$CMD" in
     for p in $PORTS; do if [ "$i" -lt "$K" ]; then keep="$keep $p"; else drop="$drop $p"; fi; i=$((i+1)); done
     echo "scale → keep [$keep ] drop [$drop ]"
     [ -n "$drop" ] && stop_ports $drop
-    rc=0
-    if [ -n "$keep" ]; then start_instances $keep || rc=$?; fi
-    [ "$rc" = 0 ] && start_router
+    SRC=0                                            # 起实例的结果（别叫 rc：health() 里的 rc 是全局变量，会盖掉）
+    if [ -n "$keep" ]; then start_instances $keep || SRC=$?; fi
+    RRC=0; case "$SRC" in 0|5) start_router || RRC=$?;; esac   # 5 = 显存只够部分实例：分发器照起、用活着的（W-INFRA 11-06）
     sleep "${VQA_SETTLE_S:-30}"; health "$K"; hrc=$?
-    [ "$rc" = 0 ] || exit $rc
+    [ "$SRC" = 0 ] || exit $SRC
+    [ "$RRC" = 0 ] || exit $RRC                     # 4 = :8870 上是旧单实例（PORT_BUSY）：退出码说明原因，钩子日志能看懂
     exit $hrc;;
+  handover) handover; exit $?;;
   start) ;;
-  *) echo "usage: $0 start [--replace] | scale K | health | status | stop | anomaly"; exit 1;;
+  *) echo "usage: $0 start [--replace] | handover | scale K | health | status | stop | anomaly"; exit 1;;
 esac
 
 # ---- start
 [ "$ENABLED" = 1 ] || echo "WARN lane_roles.enabled=false（照起，但调度仍旧行为）"
 r=$(hjson "$ROUTER")
 if [ -n "$r" ] && ! printf '%s' "$r" | grep -q '"gpu": *"router"'; then
-  if [ "$OPT" = "--replace" ] && [ -f "$B/server_$ROUTER.pid" ]; then
-    kill "$(cat "$B/server_$ROUTER.pid")" 2>/dev/null; rm -f "$B/server_$ROUTER.pid"; echo "replaced old single instance :$ROUTER"; sleep 5
-  else
-    echo "PORT_BUSY :$ROUTER 上是旧单实例（start_gpu33_vqa.sh）；用 start --replace 先停它（只认 $B/server_$ROUTER.pid）"; exit 4
+  if [ "$OPT" = "--replace" ]; then       # W-INFRA 11-06：以前这里先杀旧单实例再起实例 → 实例显存不够、分发器也没起、看图停摆；改为确定性交接
+    handover; exit $?
   fi
+  echo "PORT_BUSY :$ROUTER 上是旧单实例（start_gpu33_vqa.sh）；用 handover（= start --replace）交接：先起 + 预热新实例，再停旧的、换分发器"; exit 4
 fi
-start_instances $PORTS || exit $?
+start_instances $PORTS; SRC=$?
+case "$SRC" in 0|5) ;; *) exit $SRC;; esac     # 5 = 显存只够部分实例：照起分发器、用活着的，最后以 5 退出（W-INFRA 11-06）
 start_router
-sleep 45; health
+sleep "${VQA_SETTLE_S:-45}"; health; hrc=$?
+[ "$SRC" = 0 ] || exit $SRC
+exit $hrc

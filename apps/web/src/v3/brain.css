@@ -1,0 +1,18 @@
+/* UIUX-LOOP-2 r6：总览“大脑在想什么”面板。只用主题变量，前缀 brain- */
+.brain { display: flex; flex-direction: column; gap: var(--sp-2); border: 1px solid var(--c-line); border-radius: var(--r-m); background: var(--c-raise); padding: var(--sp-2) var(--sp-3); }
+.brain-h { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.brain-tg { background: none; border: 0; color: var(--c-text); font-weight: 650; cursor: pointer; padding: 0; font-size: var(--fs-m); }
+.brain-sub, .brain-src, .brain-empty, .brain-snap { color: var(--c-text-2); font-size: var(--fs-xs); }
+.brain-src { color: var(--c-text-3); }
+.brain .grow { flex: 1; }
+.brain-body { display: flex; flex-direction: column; gap: var(--sp-2); padding-top: var(--sp-1); border-top: 1px solid var(--c-line); }
+.brain-col h4 { margin: 0 0 2px; font-size: var(--fs-xs); color: var(--c-text-3); font-weight: 600; }
+.brain-col ul { margin: 0; padding-left: 1.2em; font-size: var(--fs-xs); color: var(--c-text-2); }
+.brain-col li { margin: 2px 0; }
+.brain-col li.lv-red { color: var(--c-bad-text, var(--c-bad)); }
+.brain-col li.lv-yellow { color: var(--c-warn-text, var(--c-warn)); }
+.brain-dry { font-style: normal; margin-left: var(--sp-1); padding: 0 var(--sp-1); border-radius: var(--r-pill); background: var(--c-sunken); color: var(--c-text-3); font-size: var(--fs-xs); }
+.brain-res { color: var(--c-text-3); }
+.brain-warn { color: var(--c-warn-text, var(--c-warn)); }
+.brain-foot { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.brain-md { margin: 0; max-height: 360px; overflow: auto; font-size: var(--fs-xs); line-height: 1.45; background: var(--c-sunken); border-radius: var(--r-s, 4px); padding: var(--sp-2); white-space: pre-wrap; color: var(--c-text-2); }

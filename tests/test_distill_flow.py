@@ -52,7 +52,7 @@ def test_tuple_const(tmp_path):
 # ---------------------------------------------------------------- 判定函数
 def test_pause_overdue():
     t0 = time.time()
-    iso = lambda dt: time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t0 - dt))  # noqa: E731
+    iso = lambda dt: POL.iso_ts(t0 - dt)  # noqa: E731   W-INFRA 11-06：项目时区串（原 localtime 在美东笔记本上差 14 h）
     D = POL.pause_decision
     assert D({"paused": False}, t0) is None
     # 运维暂停：到 expires_at 自动恢复；最多 180 s
@@ -363,7 +363,7 @@ def test_snapshot_runs_from_registry(tmp_path):
 # ---------------------------------------------------------------- r3：L-109 测试期口径 + canary + 写作交稿即推进
 def test_canary_is_explicit_pause():
     t0 = time.time()
-    iso = lambda dt: time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t0 - dt))  # noqa: E731
+    iso = lambda dt: POL.iso_ts(t0 - dt)  # noqa: E731   W-INFRA 11-06：项目时区串（原 localtime 在美东笔记本上差 14 h）
     assert POL.pause_decision({"paused": True, "paused_by": "VQAGATE", "reason_kind": "canary", "paused_at": iso(60), "expires_at": iso(-60)}, t0) is None
     d = POL.pause_decision({"paused": True, "paused_by": "VQAGATE", "reason_kind": "canary", "paused_at": iso(400), "expires_at": iso(-60)}, t0)
     assert d["action"] == "alert"                                            # 不自动恢复

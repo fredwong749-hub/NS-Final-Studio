@@ -31,7 +31,8 @@ from pydantic import BaseModel
 
 ROOT = Path(__file__).resolve().parents[3]
 STATE = ROOT / "data" / "state" / "frame_edit_requests.json"
-REGISTRY = ROOT / "data" / "producer" / "registry.json"
+REGISTRY = ROOT / "data" / "producer" / "registry.json"   # legacy 位置；真正读哪份见 _registry_path()（测试可改 REGISTRY）
+_REGISTRY_DEFAULT = REGISTRY
 PARTITION = ROOT / "data" / "state" / "netfix" / "partition.json"
 PER_SHOT_S = 740.0
 MAX_AUTO_FIX = 2
@@ -95,15 +96,27 @@ def _update(rid: str, **kw) -> dict | None:
 _reg = {"mt": None, "val": []}
 
 
+def _registry_path() -> Path:
+    """UIUX-LOOP r1：队列位置读当前剧那份活的登记表（data/producer/runs/<run>/registry.json），不读 11-03 起没更新的全局旧表"""
+    if REGISTRY is not _REGISTRY_DEFAULT:
+        return REGISTRY
+    try:
+        from ns_api import run_paths as _RP
+        return _RP.producer_registry(ROOT)
+    except Exception:  # noqa: BLE001  # arch-ok: 剧目登记表读不到 = 退回旧位置（只影响排队位置显示）
+        return REGISTRY
+
+
 def registry_objects() -> list[dict]:
     """[{oid, ep, idx, kind(first|last), status, redo, shot, attempts, reason}]（只含首尾帧对象）"""
+    p = _registry_path()
     try:
-        mt = REGISTRY.stat().st_mtime
+        mt = (str(p), p.stat().st_mtime)
     except OSError:  # arch-ok: registry 文件还没同步到本机 = 队列看不到，调用方显示“排队中”不给位置
         return []
     if _reg["mt"] != mt:
         try:
-            d = json.loads(REGISTRY.read_text(encoding="utf-8"))
+            d = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, ValueError):  # arch-ok: registry 读到半截 JSON：当作空，下一次轮询（文件一写完就变）会读到完整的
             d = {}
         rows = []
@@ -161,8 +174,21 @@ def queue_eta():
     return t
 
 
+def _fallback_last(shot: str) -> bool:
+    """UIUX-LOOP-2 r8：这一镜已写尾帧兜底（L-204 D8 I2VA，frames_index.last_fallback）且没有当前尾帧 → 尾帧不出，登记表里还排着的尾帧对象不进队列
+    （改前 ep01-S4 尾帧“排第 1”，而大脑 17:49 已定 S4 用 I2VA 兜底，页面和登记表各说各的）"""
+    try:
+        from ns_api import frames_index as FI  # noqa: PLC0415
+        t = _takes(shot)
+        return (t.get("active") or {}).get("last") is None and FI.last_fallback(t) is not None   # 有当前尾帧的（首帧换过要重出）照常排
+    except Exception:  # noqa: BLE001  # arch-ok: takes.json 读不到 = 按登记表口径照常排队（旧口径）
+        return False
+
+
 def snapshot() -> dict:
     objs = registry_objects()
+    skipped = [o["oid"] for o in objs if o["kind"] == "last" and o["status"] in ("ready", "running") and _fallback_last(o["shot"])]
+    objs = [o for o in objs if o["oid"] not in skipped]
     running = [o for o in objs if o["status"] == "running"]
     ready = sorted([o for o in objs if o["status"] == "ready"], key=order_key)
     n_lane = lanes()
@@ -183,7 +209,8 @@ def snapshot() -> dict:
                 it["eta_at"] = float(o["eta_s"])
                 if it["state"] == "queued" and o.get("pos"):
                     it["pos"] = int(o["pos"])
-    return {"per_shot_s": PER_SHOT_S, "lanes": n_lane, "running": len(running), "queued": len(ready), "items": items, "stale": stale}
+    return {"per_shot_s": PER_SHOT_S, "lanes": n_lane, "running": len(running), "queued": len(ready), "items": items, "stale": stale,
+            "skipped_fallback": skipped}
 
 
 def position_of(oid: str, snap: dict | None = None) -> dict | None:
@@ -204,10 +231,17 @@ def _passing(t: dict) -> bool:
     return bool(TU._verdict(t, None)[0])
 
 
+def to_jst(s: str | None) -> str | None:
+    """UIUX-LOOP r5：记录里的 at 是本机（美东）time.strftime 的裸字符串；给页面一律转成 JST（项目方在东京）。
+    存储格式不动（同文件内比较 / 排序照旧），只在读接口转。r6：统一走 ns_api.clock（单一口径）"""
+    from ns_api.clock import local_naive_to_jst  # noqa: PLC0415
+    return local_naive_to_jst(s)
+
+
 def live_state(r: dict, snap: dict | None = None) -> dict:
     """一条修改记录现在的状态 → {state, word, pos, eta_at, ahead:[shot…], new_n, msg}"""
     st = r.get("state")
-    base = {"id": r["id"], "shot": r["shot"], "stage": r["stage"], "text": r["text"], "zh_summary": r.get("zh_summary"), "at": r["at"], "pos": None, "eta_at": None,
+    base = {"id": r["id"], "shot": r["shot"], "stage": r["stage"], "text": r["text"], "zh_summary": r.get("zh_summary"), "at": to_jst(r["at"]), "pos": None, "eta_at": None,
             "ahead": [], "new_n": None, "retry": 0, "msg": r.get("note") or ""}
     if st in ("received", "rewriting", "checking"):
         return {**base, "state": "preparing", "word": "排队中：已记下，正在整理你的要求"}
@@ -289,6 +323,7 @@ def frame_queue(mine: str | None = None):
         mine_rows.append({k: ls[k] for k in ("id", "shot", "stage", "state", "word", "pos", "eta_at", "text", "msg")})
     return {**{k: snap[k] for k in ("per_shot_s", "lanes", "running", "queued", "stale")},
             "items": [{k: i[k] for k in ("oid", "shot", "ep", "idx", "kind", "state", "pos", "eta_at", "redo")} for i in snap["items"]],
+            "skipped_fallback": snap.get("skipped_fallback") or [],   # UIUX-LOOP-3 r10：r8 只在 snapshot 里带了，路由没透出
             "mine": mine_rows}
 
 

@@ -226,7 +226,7 @@ def test_all_render_ports_supervised_once():
     ports = [lp for h in c["hosts"].values() for lp, _ in h["forwards"]]
     assert len(ports) == len(set(ports))
     assert {18188, 18189, 18191, 18288, 18289} <= set(ports)
-    assert "gpu36-l2" in c.get("_retired", {}) and 18290 not in ports      # L-100：gpu36 GPU2 改看图卡，l2 退役（隔离不删）
+    assert "gpu36-l2" in c["hosts"] and 18290 in ports                     # L-194（11-05）：gpu36 三卡全归 NS，l2 由 _retired 移回（修订 L-100）
 
 
 # ---------------------------------------------------------------- K-OPS-N03 看图内网入口

@@ -33,6 +33,32 @@ def self_host() -> str | None:
     return os.environ.get("NS_FACTORY_HOST") or os.environ.get("OFFLINE_SELF") or None
 
 
+def resolve_self(hostname: str | None = None, d: dict | None = None) -> str | None:
+    """机器真实主机名 → 车道表里的主机名（W-INFRA 11-06：gpu33 的 `hostname -s` 是 gpu3、gpu36 是 gpu6，
+    review_instances.sh / review_lan_proxy.sh 原先拿 hostname 直接和 lane 比 → 在 gpu33 本机也判 WRONG_HOST）。
+    顺序：NS_FACTORY_HOST / OFFLINE_SELF（环境契约优先）→ hosts.json 的 hostname / hostnames 字段 → 主机名本身就是表里的键 → None。
+    不套 aliases（gpu36 的别名 gpu33 是“代跑 gpu33 的活”，不是“我是 gpu33”）"""
+    me = self_host()
+    if me:
+        return me
+    if hostname is None:
+        import socket
+        hostname = socket.gethostname()
+    hn = str(hostname or "").split(".", 1)[0].strip().lower()
+    if not hn:
+        return None
+    try:
+        d = d or load()
+    except HostsError:  # arch-ok: 读不到 hosts.json = 认不出本机，调用方（review_instances.sh / lan_proxy）退回 hostname -s
+        return None
+    hosts = d.get("hosts") or {}
+    for name, rec in hosts.items():
+        names = [rec.get("hostname")] + list(rec.get("hostnames") or [])
+        if hn in {str(x).split(".", 1)[0].strip().lower() for x in names if x}:
+            return name
+    return hn if hn in hosts else None
+
+
 def host_of(lane: str) -> str:
     return str(lane).split(":", 1)[0]
 
@@ -173,3 +199,20 @@ def owner_lane(lane: str, d: dict | None = None) -> bool:
         return owner_controlled(host_of(lane), d)
     except Exception:  # noqa: BLE001  # arch-ok: 认不出道 = 不放行
         return False
+
+
+def main(argv=None) -> int:
+    """命令行（服务器上 bash 脚本用，只依赖标准库）：
+      python3 tools/factory/hosts.py self [主机名]   → 打印车道表主机名（gpu3 → gpu33）；认不出打印空行、退出码 1"""
+    import sys
+    a = list(sys.argv[1:] if argv is None else argv)
+    if a and a[0] == "self":
+        r = resolve_self(a[1] if len(a) > 1 else None)
+        print(r or "")
+        return 0 if r else 1
+    print("usage: hosts.py self [hostname]")
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

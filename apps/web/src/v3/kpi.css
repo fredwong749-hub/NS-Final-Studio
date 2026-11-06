@@ -1,0 +1,75 @@
+/* UIUX-LOOP r3：每集进度 / KPI 面板（全剧总览顶部）。只用主题变量，前缀 kpi- */
+.kpi { display: flex; flex-direction: column; gap: var(--sp-2); border: 1px solid var(--c-line); border-radius: var(--r-m); background: var(--c-raise); padding: var(--sp-2) var(--sp-3); }
+.kpi-h { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.kpi-tg { background: none; border: 0; color: var(--c-text); font-weight: 650; cursor: pointer; padding: 0; font-size: var(--fs-m); }
+.kpi-sub, .kpi-src, .kpi-empty { color: var(--c-text-2); font-size: var(--fs-xs); }
+.kpi-src { color: var(--c-text-3); }
+.kpi .grow { flex: 1; }
+.kpi-ep { display: flex; flex-direction: column; gap: var(--sp-1); padding-top: var(--sp-1); border-top: 1px solid var(--c-line); }
+.kpi-row { display: flex; align-items: center; gap: var(--sp-2) var(--sp-3); flex-wrap: wrap; font-size: var(--fs-xs); color: var(--c-text-2); }
+.kpi-epn { font-weight: 650; color: var(--c-accent-text); text-decoration: none; white-space: nowrap; font-size: var(--fs-s); }
+.kpi-epn:hover { text-decoration: underline; }
+.kpi-title { color: var(--c-text); font-size: var(--fs-s); }
+.kpi-phase { padding: 0 var(--sp-2); border-radius: var(--r-pill); background: var(--c-sunken); color: var(--c-text); white-space: nowrap; }
+.kpi-phase.ph-frames { background: var(--c-info-soft); color: var(--c-info-text); }
+.kpi-phase.ph-videos { background: var(--c-busy-soft); color: var(--c-busy-text); }
+.kpi-phase.ph-assembly { background: var(--c-warn-soft); color: var(--c-warn-text); }
+.kpi-phase.ph-done { background: var(--c-ok-soft); color: var(--c-ok-text); }
+.kpi-bud { display: inline-flex; align-items: center; gap: var(--sp-1); white-space: nowrap; }
+.kpi-bud.muted { color: var(--c-text-3); }
+.kpi-bar { display: inline-block; width: 120px; height: 6px; border-radius: 3px; background: var(--c-sunken); overflow: hidden; }
+.kpi-bar b { display: block; height: 100%; background: var(--c-ok); }
+.kpi-bud.s-over_budget .kpi-bar b { background: var(--c-bad); }
+.kpi-bud.s-over_budget { color: var(--c-bad-text, var(--c-bad)); }
+.kpi-bud.s-assembled .kpi-bar b { background: var(--c-ok); }
+.kpi-cnt small { color: var(--c-text-3); }
+.kpi-strip { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 2px; }
+.kpi-shot { flex: none; width: 56px; display: flex; flex-direction: column; gap: 2px; text-decoration: none; color: var(--c-text-2); }
+.kpi-pic { position: relative; width: 56px; aspect-ratio: 9 / 16; border-radius: 3px; overflow: hidden; background: var(--c-sunken); display: grid; place-items: center; border: 1px solid var(--c-line); }
+.kpi-pic > img:first-child { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+.kpi-pic.s-running { border-color: var(--c-busy); animation: ns-breathe var(--breathe-period, 2.7s) ease-in-out infinite; }
+.kpi-nopic { font-size: 10px; color: var(--c-text-3); }
+.kpi-last { position: absolute; right: 2px; bottom: 2px; width: 40%; aspect-ratio: 9 / 16; object-fit: cover; border: 1px solid var(--c-on-media); border-radius: 2px; }
+.kpi-last.fb { display: grid; place-items: center; font-style: normal; font-size: 10px; background: var(--c-scrim); color: var(--c-on-media); border-style: dashed; }
+.kpi-no { position: absolute; left: 2px; top: 2px; font-size: 10px; padding: 0 3px; border-radius: 2px; background: var(--c-scrim); color: var(--c-on-media); }
+.kpi-dots { display: flex; justify-content: center; gap: 4px; }
+.kpi .d { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--c-line-2); }
+.kpi .d.s-passed { background: var(--c-ok); }
+.kpi .d.s-running { background: var(--c-busy); }
+.kpi .d.s-ready { background: var(--c-text-3); }
+.kpi .d.s-pending, .kpi .d.s-na { background: var(--c-line-2); }
+.kpi .d.s-failed { background: var(--c-bad); }
+.kpi .d.s-best_effort { background: var(--c-warn); }
+.kpi .d.s-fallback { background: transparent; border: 1px dashed var(--c-text-3); }
+.kpi-legend { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); margin: 0; font-size: var(--fs-xs); color: var(--c-text-2); }
+.kpi-legend > span { display: inline-flex; align-items: center; gap: 4px; }
+.kpi-legend .muted { color: var(--c-text-3); }
+@media (max-width: 720px) {
+  .kpi-bar { width: 72px; }
+  .kpi-shot { width: 44px; }
+  .kpi-pic { width: 44px; }
+}
+.kpi-note { color: var(--c-text-3); margin-left: 2px; }
+/* UIUX-LOOP-3 r12：最新成片入口 + 首尾对照（首帧 | 尾帧 并排大图） */
+.kpi-film { display: inline-flex; align-items: center; gap: var(--sp-1); white-space: nowrap; }
+.kpi-film > a { color: var(--c-accent-text); text-decoration: none; }
+.kpi-film > a:hover { text-decoration: underline; }
+.kpi-film.none { color: var(--c-text-3); }
+.kpi-film small.ok { color: var(--c-ok-text, var(--c-ok)); }
+.kpi-film small.warn { color: var(--c-warn-text, var(--c-warn)); }
+.kpi-film small.muted { color: var(--c-text-3); }
+.kpi-pairtg { background: none; border: 0; cursor: pointer; padding: 0; font: inherit; }
+.kpi-pairtg.on { font-weight: 650; }
+.kpi-pairs { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.kpi-pair { position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; width: 232px; padding: 2px; border: 1px solid var(--c-line); border-radius: var(--r-s, 4px); background: var(--c-sunken); text-decoration: none; color: var(--c-text-2); }
+.kpi-pair:hover { border-color: var(--c-accent); }
+.kpi-pair-no { position: absolute; left: 4px; top: 4px; z-index: 1; font-size: 11px; padding: 0 4px; border-radius: 2px; background: var(--c-scrim); color: var(--c-on-media); }
+.kpi-pair-pic { position: relative; aspect-ratio: 9 / 16; overflow: hidden; border-radius: 3px; background: var(--c-raise); display: grid; place-items: center; }
+.kpi-pair-pic > img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+.kpi-pair-pic > small { position: absolute; right: 3px; bottom: 3px; font-size: 10px; padding: 0 3px; border-radius: 2px; background: var(--c-scrim); color: var(--c-on-media); }
+.kpi-pair-pic.s-running { outline: 1px solid var(--c-busy); animation: ns-breathe var(--breathe-period, 2.7s) ease-in-out infinite; }
+.kpi-pair-pic.s-fallback { border: 1px dashed var(--c-text-3); }
+.kpi-pair > .d { position: absolute; right: 4px; top: 4px; z-index: 1; width: 8px; height: 8px; border-radius: 50%; }
+@media (max-width: 720px) {
+  .kpi-pair { width: 168px; }
+}

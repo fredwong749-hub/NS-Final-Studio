@@ -93,7 +93,7 @@ def test_lanes_and_roots_from_hosts():
     sys.path.insert(0, str(ROOT / "tools/factory"))
     import hosts as H
     assert RS.LANES["gpu36"] == {str(r["gpu"]): int(r["comfy_port"]) for r in H.lanes("gpu36", role="image").values()}
-    assert "2" not in RS.LANES["gpu36"] and "2" not in RS.LANES["gpu33"]
+    assert "2" in RS.LANES["gpu36"] and "2" not in RS.LANES["gpu33"]   # L-194（11-05）：gpu36:2 回归出图 / 视频道；gpu33:2 坏卡永不用
     assert RS.R == H.server_root("gpu33") and RS.PY["gpu36"] == H.python("gpu36")
     src = (ROOT / "tools/autopilot/resident_sync.py").read_text(encoding="utf-8")
     assert '"/root/work/fredw/offline_20261101"' not in src and "8190" not in src

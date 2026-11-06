@@ -34,6 +34,13 @@ def producer_dir(root: Path | None = None, run: str | None = None) -> Path:
     return _runs().producer_dir(run, Path(root) if root else REPO)
 
 
+def producer_registry(root: Path | None = None, run: str | None = None) -> Path:
+    """当前剧 producer 登记表（出图机写、resident_sync 同步回本机）：V2 = data/producer/runs/<run>/registry.json；legacy = data/producer/registry.json。
+    UIUX-LOOP r1（11-06）：网页状态标签 / 修改队列以前读全局 data/producer/registry.json（11-03 之后没再更新），
+    全剧总览把 ep01 每一镜都标成“已重置 / 驳回待重出 / 过期”；状态必须来自活的那份。"""
+    return producer_dir(root, run) / "registry.json"
+
+
 def v1_hidden(root: Path | None = None) -> bool:
     """L-125（项目方 18:4x：网页图片资产全部下架，只显示 V2）：当前 primary 不是 legacy 剧 → 网页不显示 V1 的图 / 资产 / 任务"""
     m = _runs()
@@ -69,3 +76,21 @@ def renders_for_data(data_dir: Path | None) -> Path:
     if data_dir is None or Path(data_dir).resolve() == (REPO / "data").resolve():
         return renders_root()
     return Path(data_dir) / "renders"
+
+
+def episodes_dir(root: Path | None = None, run: str | None = None) -> Path:
+    """整集成片目录（UIUX-LOOP-3 r12；K-OPS-F24 同口径）：V2 剧 = data/episodes/<run>/（装配器 tools/assemble_episode.py --run 的落点，
+    night 合成的 ep01_vN.mp4 / _post.mp4 都在这）；只有 legacy 剧（series10_v1）用不带前缀的 data/episodes/。
+    成片页 / 整集预览 / KPI 面板以前写死 data/episodes/ → V2 的 60 多版成片一版都列不出来、项目方看不到最新成片"""
+    m = _runs()
+    r = Path(root) if root else REPO
+    run = run or m.current_run(r)
+    base = r / "data" / "episodes"
+    return base if m.is_legacy(run, r) else base / run
+
+
+def episodes_for_data(data_dir: Path | None) -> Path:
+    """同 renders_for_data：真实仓库的 data → 当前剧的成片目录；测试 / 沙箱 data → 它下面的 episodes（旧行为）"""
+    if data_dir is None or Path(data_dir).resolve() == (REPO / "data").resolve():
+        return episodes_dir()
+    return Path(data_dir) / "episodes"

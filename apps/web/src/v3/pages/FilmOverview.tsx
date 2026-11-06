@@ -284,8 +284,10 @@ export function FilmOverview({ eps, onOpen, onCanvas, onMulti }: { eps: OvEp[]; 
 }
 
 type PvShot = { shot: string; index: number; kind: "video" | "placeholder" | "best_effort"; start_s: number | null; duration_s: number | null };
-type Pv = { url: string | null; srt_url?: string; built_at?: string; built_ts?: number; duration_s?: number; shots: PvShot[]; stale: boolean; building: boolean; eta_s: number | null;
-  video_shots?: number; best_effort_shots?: number; placeholder_shots?: number };
+type Pv = { url: string | null; srt_url?: string | null; built_at?: string; built_ts?: number; duration_s?: number; shots: PvShot[]; stale: boolean; building: boolean; eta_s: number | null;
+  video_shots?: number; best_effort_shots?: number; placeholder_shots?: number;
+  /** UIUX-LOOP-3 r12：source=film 时播的是 night 合成的最新整集成片（data/episodes/<run>/epNN_vN.mp4），film 带合成闸门结论；preview = 巡检拼的预览 */
+  source?: "film" | "preview"; film?: { name: string; version: number | null; at: string; kind: "preview" | "final" | "unknown"; kind_word: string; word: string; missing_n: number; missing: { shot: string; reason: string }[] } | null };
 const KIND_ZH = { video: "视频", best_effort: "尽力版视频", placeholder: "占位（首帧缓推）" } as const;
 type SrtCue = { a: number; b: number; text: string };
 function parseSrt(s: string): SrtCue[] {
@@ -342,7 +344,13 @@ function Projector({ ep, start, sound, onClose }: { ep: OvEp; start: number; sou
     <div className="fo-proj fo-pv" role="dialog" aria-label="连播本集">
       <div className="fo-pv-top">
         <span className="mono">EP {pad2(ep.number)}</span><b>{ep.title}</b>
-        {pv?.url && <span className="fo-pv-meta">{(pv.duration_s ?? 0).toFixed(1)} 秒 · 视频 {pv.video_shots ?? 0} 镜{pv.best_effort_shots ? ` · 尽力版 ${pv.best_effort_shots} 镜` : ""} · 占位 {pv.placeholder_shots ?? 0} 镜 · 预览，非交付</span>}
+        {pv?.url && (
+          <span className="fo-pv-meta" title={pv.film ? `${pv.film.name} · ${pv.film.at.replace("T", " ")} JST\n${pv.film.word}${pv.film.missing.length ? "\n" + pv.film.missing.map((m) => `${m.shot}：${m.reason}`).join("\n") : ""}` : `巡检拼的整集预览${pv.built_at ? ` · ${pv.built_at.replace("T", " ")}` : ""}`}>
+            {pv.film ? `最新成片 ${pv.film.version != null ? `v${pv.film.version}` : pv.film.name} · ${pv.film.kind_word} · ${pv.film.word} · ` : ""}
+            {(pv.duration_s ?? 0).toFixed(1)} 秒 · 视频 {pv.video_shots ?? 0} 镜{pv.best_effort_shots ? ` · 尽力版 ${pv.best_effort_shots} 镜` : ""} · 占位 {pv.placeholder_shots ?? 0} 镜
+            {pv.film?.kind === "final" ? " · 闸门通过的成片" : pv.film?.kind === "unknown" ? " · 闸门记录还没同步到本机" : " · 预览，非交付"}
+          </span>
+        )}
         <span className="fo-pv-sp" />
         <label className="fo-pv-sw"><input type="checkbox" checked={subs} onChange={(e) => setSubs(e.target.checked)} />外挂字幕</label>
         <label className="fo-pv-sw"><input type="checkbox" checked={false} onChange={() => setShotMode(true)} />逐镜看</label>

@@ -23,7 +23,8 @@ print("ENABLED=%s; HOST=%s; BIND=%s; PORT=%s; ALLOW=%s; TARGET=%s" % (
 PY
 )"
 [ "$ENABLED" = 1 ] || { echo "DISABLED review.lan_proxy（config/pipeline/lane_roles.json）"; exit 0; }
-SELF=${OFFLINE_SELF:-$(hostname -s)}
+# W-INFRA 11-06：本机身份 = OFFLINE_SELF → hosts.json hostname 映射（gpu33 真实主机名 gpu3；tools/factory/hosts.py self）→ hostname -s
+SELF=${OFFLINE_SELF:-$(python3 "$REPO/tools/factory/hosts.py" self "$(hostname -s 2>/dev/null)" 2>/dev/null)}; SELF=${SELF:-$(hostname -s)}
 if [ "$SELF" != "$HOST" ] && [ "${FORCE:-0}" != 1 ]; then echo "WRONG_HOST 本机=$SELF 审图位=$HOST"; exit 2; fi
 case "$BIND" in 10.*) ;; *) echo "REFUSE bind=$BIND 不是 10. 内网地址（K-REV-V01）"; exit 2;; esac
 mkdir -p "$D"

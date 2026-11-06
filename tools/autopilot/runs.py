@@ -51,9 +51,37 @@ class RunRegistryMissing(RuntimeError):
     """服务器侧（strict=True）读不到 / 读坏 runs.json：失败关闭，不静默回退 DEFAULT_PRIMARY（K-OPS-F09 / K-OPS-W17）"""
 
 
+_REG_CACHE: dict[str, tuple[tuple, dict]] = {}   # runs.json 路径 → ((mtime_ns, size), 解析结果)
+
+
+def _jl_cached(p: Path):
+    """runs.json 按 (mtime_ns, size) 记住一次解析（UIUX-LOOP-3 r11：/api/readiness 一次请求经 compiler / asset_refs / run_paths
+    读 runs.json 4202 次，占 7.4 s 里的 5.4 s）。文件一换就重读；返回两层拷贝（顶层 + 每部剧的条目；deepcopy 一次 0.5 ms × 3000 次又回到秒级）——
+    register_run / set_status 就地改条目再写回，不能改到缓存；条目里更深的 status_history 列表只由 set_status 追加（它读的是新鲜的 _jl）"""
+    p = Path(p)
+    try:
+        st = p.stat()
+    except OSError:
+        _REG_CACHE.pop(str(p), None)
+        return None
+    key = (st.st_mtime_ns, st.st_size)
+    hit = _REG_CACHE.get(str(p))
+    if hit is None or hit[0] != key:
+        d = _jl(p, None)
+        if d is None:
+            _REG_CACHE.pop(str(p), None)
+            return None
+        hit = (key, d)
+        _REG_CACHE[str(p)] = hit      # B1（Fable 复审）：写完就用本地元组，不再回读字典——另一线程 pop 会 KeyError
+    d = hit[1]
+    if not isinstance(d, dict):
+        return d
+    return {**d, "runs": {k: (dict(v) if isinstance(v, dict) else v) for k, v in (d.get("runs") or {}).items()}}
+
+
 def registry(root: Path | None = None, strict: bool = False) -> dict:
     root = root or ROOT
-    d = _jl(root / "config/pipeline/runs.json", None)
+    d = _jl_cached(root / "config/pipeline/runs.json")
     if d and d.get("runs"):
         return d
     if strict:

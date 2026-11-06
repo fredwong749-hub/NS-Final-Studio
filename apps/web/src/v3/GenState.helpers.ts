@@ -83,11 +83,13 @@ export function fmtRemain(s: number | null, estimated = false): string {
   return `${estimated ? "估计" : "约"} ${t}`;
 }
 
-/** 钟点 HH:MM（本地时区） */
+/** 钟点 HH:MM，一律 JST（项目方在东京；笔记本系统时钟是美东，不能用浏览器本地时区）——UIUX-LOOP r5 */
+const JST_CLOCK = new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Tokyo", hour12: false, hour: "2-digit", minute: "2-digit" });
 export function fmtClock(ms: number | null): string {
   if (ms == null) return "";
   const d = new Date(ms);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  if (Number.isNaN(+d)) return "";
+  return JST_CLOCK.format(d).replace(/^24:/, "00:");
 }
 
 /** 叠层 / 小条上的一行状态文字 */

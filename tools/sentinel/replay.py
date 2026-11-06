@@ -26,7 +26,7 @@ from tools.sentinel.store import IssueStore  # noqa: E402
 
 FIX = ROOT / "tests/fixtures/sentinel/replay_20261102.json"
 OUT = ROOT / "data/sentinel/replay_20261102.json"
-T = lambda s: datetime.fromisoformat(s).timestamp()  # noqa: E731
+T = J.ts   # W-INFRA 11-06：项目时区（+09:00）读，与 judges / policy 同口径（原 fromisoformat 按本机时区，美东笔记本差 14 h）
 T0, T1 = T("2026-11-01T23:30:00"), T("2026-11-02T02:35:00")
 
 # 人先发现的时间（出处：docs/overnight/morning_20261102.md、SLO.md 派单、总调度 02:3x / 02:4x 派单原话）
@@ -154,7 +154,7 @@ def run(fix: dict | None = None) -> dict:
             if e["t"] > t:
                 break
             if e["ev"] == "pause":
-                ctrl = {"paused": True, "paused_by": e.get("by"), "paused_at": datetime.fromtimestamp(e["t"]).isoformat(timespec="seconds"),
+                ctrl = {"paused": True, "paused_by": e.get("by"), "paused_at": J.iso(e["t"]),
                         "reason_kind": e.get("reason_kind")}
             elif e["ev"] == "resume":
                 ctrl = {"paused": False}
@@ -243,7 +243,7 @@ def run(fix: dict | None = None) -> dict:
     if g.get("verdict"):
         det = T(g["created"]) + C["S8_vlm_sample"]["every_s"]
         res["gaze_miss"] = {"human": HUMAN["gaze_miss"][0], "human_src": HUMAN["gaze_miss"][1], "key": "S8:ep02-S4",
-                            "first_seen": datetime.fromtimestamp(det).isoformat(timespec="seconds"),
+                            "first_seen": J.iso(det),
                             "title": f"抽检判定 eye_contact={g['verdict'].get('eye_contact')}（{(g['verdict'].get('evidence') or {}).get('e', '')}）",
                             "lead_min": round((T(HUMAN['gaze_miss'][0]) - det) / 60, 1) if g["verdict"].get("eye_contact") else None,
                             "note": "最坏情况：出图后一个抽检周期（6 分钟）才抽到"}

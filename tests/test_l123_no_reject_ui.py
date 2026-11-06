@@ -41,8 +41,9 @@ def test_two_actions_only_use_and_edit():
 def test_learning_data_still_written_from_edit_sentence():
     a = read("v3/assets/Verdict.tsx")
     assert "/api/edits" in a and "/api/asset-rejects" in a and "feedback: text" in a          # 资产：口径不变
-    v = read("v3/Verdict.tsx")
-    assert "editApi.create" in v and "feedback: text" in v                                     # 镜头：口径不变
+    v = read("v3/Verdict.tsx") + read("v3/Verdict.helpers.ts")                                  # UIUX-LOOP r5：提交逻辑挪到了 Verdict.helpers.ts
+    assert "editApi.create" in v and "feedback: text" in v                                     # 镜头（视频）：口径不变
+    assert "/frame-edit`" in v                                                                 # 首尾帧：L-123 延伸的永不拒收通道
 
 
 def test_hotkeys_a_use_e_edit_and_no_watch_gate():

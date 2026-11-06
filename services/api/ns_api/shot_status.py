@@ -11,10 +11,24 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
+# legacy（V1）位置；真正读哪一份见 registry_path()（当前剧 data/producer/runs/<run>/registry.json）。测试可直接改 REGISTRY 指向临时文件
 REGISTRY = ROOT / "data" / "producer" / "registry.json"
+_REGISTRY_DEFAULT = REGISTRY
+
+
+def registry_path() -> Path:
+    """UIUX-LOOP r1：状态标签只认当前剧那份活的登记表（run_paths.producer_registry，K-OPS-F24）。REGISTRY 被改过（测试）就用改过的"""
+    if REGISTRY is not _REGISTRY_DEFAULT:
+        return REGISTRY
+    try:
+        from ns_api import run_paths as _RP
+        return _RP.producer_registry(ROOT)
+    except Exception:  # noqa: BLE001  # arch-ok: 剧目登记表读不到 = 退回旧位置（只影响标签，不影响出图）
+        return REGISTRY
 # 严重程度从高到低（main = 第一个命中的）
 KINDS = {
     "vqa_fail": "看图没过",
@@ -41,13 +55,14 @@ _reg: dict = {"mt": None, "val": {}}
 
 
 def _registry() -> dict[str, dict]:
+    p = registry_path()
     try:
-        mt = REGISTRY.stat().st_mtime
+        mt = (str(p), p.stat().st_mtime)
     except OSError:
         return {}
     if _reg["mt"] != mt:
         try:
-            d = json.loads(REGISTRY.read_text(encoding="utf-8"))
+            d = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             d = {}
         val = {}
@@ -56,6 +71,48 @@ def _registry() -> dict[str, dict]:
                 val[s.get("shot")] = s.get("objects") or {}
         _reg.update(mt=mt, val=val)
     return _reg["val"]
+
+
+_STAGE_KEY = {"image": "first", "first": "first", "last": "last", "video": "video"}
+
+
+def ledger_passed(shot: str, stage: str, n: int | None = None) -> bool:
+    """UIUX-LOOP r4：活的登记表说这一镜这一阶段已 passed（给了 take 号就要对上）。
+    用处：导入作废线（import_events changed_shots）只是“这镜的某个字段变了”，producer 导入时按编译后的提示词判断没变、把当前版保留为 passed——
+    这时当前版不是“旧剧本版本”，也不该把之后系统自动重试失败的一版当“看图没过”挂在镜头上（项目方只看通过的）。"""
+    o = (_registry().get(shot) or {}).get(_STAGE_KEY.get(stage, stage))
+    if not isinstance(o, dict) or o.get("status") != "passed":
+        return False
+    return n is None or o.get("take") is None or o.get("take") == n
+
+
+LEDGER_WORD = {"ready": "排队等空闲的卡", "running": "正在出", "pending": "等上一步", "failed": "没出来，系统在重试",
+               "best_effort": "尽力版", "passed": "已定下", "blocked": "卡住了"}
+
+
+def ledger_obj(shot: str, stage: str) -> dict | None:
+    """UIUX-LOOP-2 r7：活的登记表里这一镜这一阶段的对象（status / take / reason…）；没有 = None"""
+    o = (_registry().get(shot) or {}).get(_STAGE_KEY.get(stage, stage))
+    return o if isinstance(o, dict) else None
+
+
+def ledger_cell(shot: str, stage: str) -> dict | None:
+    """给页面格子用：{state, word, take, why}——没有本机图 / 片时写登记表说的状态（排队 / 正在出 / 等上一步 / 没出来），不写“还没出图”"""
+    o = ledger_obj(shot, stage)
+    if not o or not o.get("status"):
+        return None
+    st = str(o.get("status"))
+    return {"state": st, "word": LEDGER_WORD.get(st, st), "take": o.get("take"), "why": (str(o.get("reason") or o.get("last_error") or "")[:160] or None)}
+
+
+def ledger_shots(ep: int | None = None) -> list[tuple[int, int]]:
+    """活的登记表登记过的镜 [(集, 镜号)]（r7：出图页 / 视频页不再只认有 takes.json 目录的镜——排队中的镜也要看得见）"""
+    out = []
+    for sid in _registry():
+        m = re.fullmatch(r"ep(\d+)-S(\d+)", str(sid))
+        if m and (ep is None or int(m.group(1)) == ep):
+            out.append((int(m.group(1)), int(m.group(2))))
+    return sorted(out)
 
 
 def _full_redo(o: dict) -> bool:
@@ -94,8 +151,11 @@ def tags_for(shot: str, cand_row: dict | None, takes: dict | None = None) -> dic
     """一镜的状态标签。cand_row = takes_ui.candidates 的 shots[shot]；takes = 该镜 takes.json（看图判定用，可省）"""
     tags: list[dict] = []
     objs = _registry().get(shot) or {}
+    fb = _last_fallback(takes)   # r5：尾帧兜底（L-204 D8 I2VA）生效 = 这一镜不出尾帧，尾帧阶段的标签一律不挂
 
     def add(kind: str, stage: str, text: str):
+        if fb and STAGE_WORD.get(stage, stage) == "尾帧":
+            return
         tags.append({"kind": kind, "label": KINDS[kind], "stage": STAGE_WORD.get(stage, stage), "text": text})
 
     for st in ("first", "last", "video"):
@@ -128,9 +188,12 @@ def tags_for(shot: str, cand_row: dict | None, takes: dict | None = None) -> dic
         has_new = any(t.get("script") == "current" for t in tk)
         if (cur_old or (tk and not has_new and x.get("active") is None)) and any(t.get("script") == "old" for t in tk):
             add("old", st, "只剩剧本更新前出的旧图，没有新图")
-    # 看图判定：现行剧本版本里最新一版首帧 / 尾帧
+    # 看图判定：现行剧本版本里最新一版首帧 / 尾帧（r4：这一阶段登记表已 passed 且有当前版 → 最新一版没过只是系统内部重试，不挂到镜头上）
     if takes:
+        act_all = takes.get("active") or {}
         for st in ("image", "last"):
+            if act_all.get(st) is not None and ledger_passed(shot, st, act_all.get(st)):
+                continue
             cur = [t for t in takes.get("takes") or [] if t.get("stage") == st]
             x = (cand_row or {}).get(st) or {}
             curn = {t.get("n") for t in x.get("takes") or [] if t.get("script") == "current"}
@@ -149,7 +212,18 @@ def tags_for(shot: str, cand_row: dict | None, takes: dict | None = None) -> dic
         if k not in seen:
             seen.add(k)
             uniq.append(t)
-    return {"main": uniq[0]["kind"] if uniq else None, "tags": uniq, **m5}
+    return {"main": uniq[0]["kind"] if uniq else None, "tags": uniq, **m5, "last_fallback": bool(fb)}
+
+
+def _last_fallback(takes: dict | None) -> dict | None:
+    """尾帧兜底（frames_index.last_fallback 同一口径）且没有当前尾帧 → 兜底记录；否则 None"""
+    if not takes or (takes.get("active") or {}).get("last") is not None:
+        return None
+    try:
+        from ns_api import frames_index as FI  # noqa: PLC0415
+        return FI.last_fallback(takes)
+    except Exception:  # noqa: BLE001  # arch-ok: 兜底记录读坏 = 按没有兜底的旧口径
+        return None
 
 
 # ---------------------------------------------------------------- 板块层面（UIRSI r40；项目方 00:3x：“用颜色区分一下：哪个板块已经确认,
@@ -160,13 +234,14 @@ _REG_EP: dict = {"mt": None, "val": {}}
 
 
 def _registry_eps() -> dict[int, dict]:
+    p = registry_path()
     try:
-        mt = REGISTRY.stat().st_mtime
+        mt = (str(p), p.stat().st_mtime)
     except OSError:
         return {}
     if _REG_EP["mt"] != mt:
         try:
-            d = json.loads(REGISTRY.read_text(encoding="utf-8"))
+            d = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             d = {}
         _REG_EP.update(mt=mt, val={int(e.get("ep") or 0): e for e in d.get("episodes") or []})
@@ -208,8 +283,10 @@ def episode_blocks(ep: int, shots: list[dict]) -> dict:
                 stt = _obj_state(o)
                 tags = (s.get("status") or {}).get("tags") or []
                 word = STAGE_WORD.get(key)
-                if any(t["kind"] in ("old", "stale", "redo") and t["stage"] == word for t in tags):
-                    stt = "stale"
+                if key == "last" and (s.get("status") or {}).get("last_fallback"):
+                    stt = "done"        # r5：尾帧兜底（I2VA）= 这一镜不出尾帧，不算缺、不算过期
+                elif stt != "doing" and any(t["kind"] in ("old", "stale", "redo") and t["stage"] == word for t in tags):
+                    stt = "stale"       # r5：登记表已排进重出（ready / running）= 进行中；“过期”只给还没排进重出的（main5 同口径）
                 elif stt != "stale" and any(t["kind"] in ("busy", "queued", "judge") and t["stage"] == word for t in tags):
                     stt = "doing"
                 cnt[stt] += 1
@@ -255,8 +332,11 @@ def _reviewed(shot: str, takes: dict | None) -> str | None:
 def main5(shot: str, objs: dict, cand_row: dict | None = None, takes: dict | None = None) -> dict:
     """→ {main5: need|stale|doing|todo|done, why: 一句大白话, running: bool, step}"""
     act = (takes or {}).get("active") or {}
+    fb = _last_fallback(takes)
     for step in ("first", "last", "video"):
         o = objs.get(step)
+        if step == "last" and fb:
+            continue    # r5：尾帧兜底生效 = 这一镜不出尾帧，往视频看
         # r45（FILMUI 查出 /api/season 自相矛盾：ep01-S1 首帧已定稿 active image=19，状态却写“首帧未开始（等上一步）”）：
         # 这一步已经有定稿（当前）版本、登记表又没有在重出（没在跑 / 排队），就算这一步已确认，往下一步看
         has_cur = act.get({"first": "image", "last": "last", "video": "video"}[step]) is not None

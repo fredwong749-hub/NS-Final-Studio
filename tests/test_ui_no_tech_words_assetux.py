@@ -38,7 +38,7 @@ def test_backend_messages_shown_to_owner_are_plain():
 
 
 def test_edit_error_area_only_for_network_failure():
-    v = (WEB / "Verdict.tsx").read_text(encoding="utf-8")
+    v = (WEB / "Verdict.tsx").read_text(encoding="utf-8") + (WEB / "Verdict.helpers.ts").read_text(encoding="utf-8")   # UIUX-LOOP r5：提交逻辑在 helpers
     assert "网络不通，没有记下来" in v and "preflight" not in v.lower()      # 弹框错误区只用于“记不下来”，不显示业务校验结果
     e = (WEB / "EditBox.tsx").read_text(encoding="utf-8")
     assert "setErr((e as Error).message)" in e                                # 只显示上面这两句

@@ -390,10 +390,10 @@ def test_d9_shot_frames_reads_last_frame_fallback_from_takes(tmp_path):
 
 
 # ================================================================ D11 旧首帧视线缺陷补判重出
-def test_d11_gaze_regen_sweep_demotes_old_gaze_first(tmp_path, monkeypatch):
+def test_d11_gaze_regen_sweep_demotes_old_gaze_first(tmp_path, monkeypatch):  # 11-06 复审：看图 lineup 改只记录，触发项改用 eye_contact（硬项）
     pr = _pr(tmp_path)
     oid = "first:ep01-S1"
-    bad = {"ok": True, "blocking": [], "reasons": [], "items": [_it("Q1", "pass", value=0.8), _it("Q9", "na", defects=["lineup"], model="m")]}
+    bad = {"ok": True, "blocking": [], "reasons": [], "items": [_it("Q1", "pass", value=0.8), _it("Q9", "na", defects=["eye_contact"], model="m")]}
     td = {"active": {"image": 4}, "takes": [_take("image", 4, bad)]}
     ann, cleared = [], []
     monkeypatch.setattr(P, "load_takes", lambda sid: td)

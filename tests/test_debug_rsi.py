@@ -240,7 +240,7 @@ def test_e08_ops_pause_auto_resumes(tmp_path):
     PR, p = _pp(tmp_path)
     c = PR.set_paused(p, True, by="restart_producer", expires_s=999)
     assert c["reason_kind"] == "restart" and c["expires_at"]
-    exp = time.mktime(time.strptime(c["expires_at"], "%Y-%m-%dT%H:%M:%S"))
+    exp = PR.ts_epoch(c["expires_at"])                                      # W-INFRA 11-06：expires_at 是 +09:00 串，不能按本机时区 mktime
     assert exp - time.time() <= 181                                         # 运维暂停上限 180 s
     assert PR.pause_tick(p, t=time.time() + 60)["action"] is None
     r = PR.pause_tick(p, t=time.time() + 200)
@@ -882,7 +882,7 @@ def test_video_hold_filters_and_expires(monkeypatch, tmp_path):
 def test_e28_stage_renders_24h_counts_takes():
     PR = _producer()
     t = time.time()
-    ts = lambda h: time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t - h * 3600))
+    ts = lambda h: PR.iso(t - h * 3600)                                     # W-INFRA 11-06：与 stage_renders_24h 同口径（项目时区），不随本机时区变
     td = {"takes": [{"stage": "image", "created_at": ts(1)}, {"stage": "image", "created_at": ts(23)},
                     {"stage": "image", "created_at": ts(25)},                              # 超过 24 小时不算
                     {"stage": "image", "created_at": ts(2), "origin": "manual_edit"},      # 手工编辑不算
@@ -898,7 +898,7 @@ def test_e28_hard_cap_blocks_and_uncap(monkeypatch, tmp_path):
     pr.mu = threading.RLock(); pr.events = []
     pr.logf = lambda ev, **kw: pr.events.append((ev, kw))
     t = time.time()
-    takes = {"takes": [{"stage": "image", "n": i, "created_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t - i * 60))}
+    takes = {"takes": [{"stage": "image", "n": i, "created_at": PR.iso(t - i * 60)}
                        for i in range(10)]}
     for p in ("services/render_router", "packages/schema", "services/agent", "services/recipes"):
         if str(ROOT / p) not in sys.path:
@@ -915,7 +915,7 @@ def test_e28_hard_cap_blocks_and_uncap(monkeypatch, tmp_path):
     assert pr.hard_capped(o, cap=10) is True
     pr.led_update("first:ep05-S3", cap_extra={"n": 2, "t": time.time() - 1})    # uncap：放行之后再出 2 版
     assert pr.hard_capped(o, cap=10) is False
-    later = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() + 5))
+    later = PR.iso(time.time() + 5)
     takes["takes"] += [{"stage": "image", "n": 90, "created_at": later}, {"stage": "image", "n": 91, "created_at": later}]
     assert pr.hard_capped(o, cap=10) is True                                     # 放行后已出 2 版 → 又封顶
     assert pr.hard_capped({"id": "last:ep05-S3", "shot": "ep05-S3"}, cap=10) is False   # 阶段分开算

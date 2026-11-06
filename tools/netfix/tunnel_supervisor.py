@@ -271,8 +271,14 @@ class Supervisor:
                           *(["-F", self.c["ssh_config_wsl"]] if cfg else []), "-o", "BatchMode=yes", "-M", "-S", hc["sock"],
                           "-o", "ControlPersist=no", "-N", "-o", f"Tag={self.host_tag(h)}", target]
         extra = ["-o", "LogLevel=VERBOSE"] if hc.get("kind") == "base" else []   # r3：底座记通道开关明细，查 no_banner 根因
+        if hc.get("kind") == "base":                # W-INFRA 11-06：底座保活也放宽到 15 s × 6 = 90 s（原 ssh_opts 10 × 3 = 30 s：跳板被出图流量挤到 30 s
+            bka, bkn = self.c.get("base_keepalive") or [15, 6]   # 不回包就 “Timeout, server not responding” → 底座断 → 其上全部内层连带重连）
+            extra += ["-o", f"ServerAliveInterval={bka}", "-o", f"ServerAliveCountMax={bkn}"]
         if hc.get("via") == "t":                    # 内层经底座：保活放宽到 15 s × 6 = 90 s，底座短暂卡顿不连带把道杀掉（13:2x 抖动事故）
             extra += ["-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=6"]
+            # W-INFRA 11-06：内层握手走的是已建好的底座，ConnectTimeout 也管 banner 交换——底座慢时 20 s 内读不到 sshd banner 就
+            # “Connection timed out during banner exchange”（ssh_gpu36-vqa.err.log 整页都是），退出 → 重握手 → 更挤。放宽到 45 s
+            extra += ["-o", f"ConnectTimeout={int(self.c.get('inner_connect_timeout_s') or 45)}"]
         elif self.is_lane(h):                       # r5 运维 FONG-QUICK：独立跳板连接保活 15 s × 3（extra 在 ssh_opts 前，先出现的生效）
             ka, kn = self.c.get("lane_keepalive") or [15, 3]
             extra += ["-o", f"ServerAliveInterval={ka}", "-o", f"ServerAliveCountMax={kn}"]
@@ -419,12 +425,41 @@ class Supervisor:
         if self.c["hosts"][h].get("kind") == "base" or self.is_lane(h):   # r5：独立道连接同样在跳板握手 → 同一退避规则。运维 FONG-QUICK：快速失败 15 s 起翻倍、最多 5 分钟；跑够 60 s 再断 = 重置 15 s；不许更快
             up_s = st.get("_last_up_s", 0)
             st["_wait"] = 15 if (up_s >= 60 or not st.get("_wait")) else min(st["_wait"] * 2, 300)
-            st["next_try_t"] = now() + st["_wait"]
+            st["_short_fails"] = 0 if up_s >= 60 else st.get("_short_fails", 0) + 1
+            wait = st["_wait"] + self.standby_cooldown(h, st)
+            st["next_try_t"] = now() + self.jitter(wait)
             st["fails"] += 1
             return
         bo = self.c.get("backoff_s", [3, 6, 12, 24, 30])
-        st["next_try_t"] = now() + bo[min(st["fails"], len(bo) - 1)]
+        st["next_try_t"] = now() + self.jitter(bo[min(st["fails"], len(bo) - 1)])
         st["fails"] += 1
+
+    def jitter(self, wait: float) -> float:
+        """W-INFRA 11-06：退避只往上抖（0 ～ backoff_jitter 比例，默认 25%），永不比规则更快；同批掉线的连接不再同一秒一起重握手
+        （服务器 sshd MaxStartups 10 / 跳板限速下，整批同时握手 = 整批 banner 超时）"""
+        import random
+        j = float(self.c.get("backoff_jitter", 0.25) or 0)
+        return float(wait) * (1.0 + random.uniform(0.0, max(0.0, j)))
+
+    def standby_cooldown(self, h: str, st: dict) -> float:
+        """W-INFRA 11-06 备用底座冷却：底座上没有任何内层连接挂着（纯热备）、又连续 ≥ standby_fail_max 次活不过 60 s
+        （11-05/06 实测 base-b 直连：认证通过后 30 s “server not responding”，一天 237 次 EXIT、每次都是跳板上一次白握手）
+        → 在 15→300 s 规则退避之外再加 standby_wait_s（默认 900 s）冷却；一旦有内层要挂它、或它跑够 60 s，冷却自动消失"""
+        if self.c["hosts"][h].get("kind") != "base":
+            return 0.0
+        inner = [x for x, y in self.hosts.items() if x != h and self.c["hosts"][x].get("via") == "t"
+                 and (y.get("base") == h or (self.c["hosts"][x].get("base") == h and not y.get("base")))]
+        if any((self.hosts[x].get("pid") or self.hosts[x].get("state") in ("connecting", "up")) for x in inner):
+            return 0.0
+        if not any((self.hosts.get(b) or {}).get("state") == "up" for b in self.bases() if b != h):
+            return 0.0                                # 别的底座也不在：它就是唯一希望，不冷却（base-a 断时 REHOME 要靠它）
+        if st.get("_short_fails", 0) < int(self.c.get("standby_fail_max", 4)):
+            return 0.0
+        cd = float(self.c.get("standby_wait_s", 900))
+        if not st.get("_cooldown_logged"):
+            st["_cooldown_logged"] = True
+            self.log("STANDBY cooldown", h, f"连续 {st.get('_short_fails')} 次活不过 60 s、没有内层挂它 → 每次重连多等 {cd:.0f}s")
+        return cd
 
     # ---- 一拍
     def check_relay(self) -> bool:
@@ -597,6 +632,11 @@ class Supervisor:
                             x.pop("_popen", None)
                             moved.append(hh)
                     self.log("BASE down", h, "→ 清掉其上内层", moved, "改挂另一条底座")
+                    for b in self.bases():           # W-INFRA 11-06：备用底座若在 standby 冷却中，底座一断就叫醒它（仍守 15 s 下限）
+                        bs = self.hosts[b]
+                        if b != h and not bs.get("pid") and bs.get("next_try_t", 0) > t + 15:
+                            bs["next_try_t"] = t + 15
+                            self.log("STANDBY wake", b, "另一条底座断了，取消冷却")
                 self.schedule(h)
                 if not relay_up:
                     st["next_try_t"] = 0.0
@@ -619,6 +659,10 @@ class Supervisor:
                     continue
                 connecting = sum(1 for x in self.hosts.values() if x["state"] == "connecting" and x["pid"])
                 lim = self.c.get("max_connecting_inner", 4) if self.c["hosts"][h].get("via") == "t" else self.c.get("max_connecting", 2)
+                if self.c["hosts"][h].get("via") == "t":     # W-INFRA 11-06：底座劣化（banner 慢）时内层同时握手收到 2 条——8 条一起在慢底座里交换 banner = 全部超时再来一轮
+                    pb = self.pick_base(h)
+                    if pb and self.degraded(pb):
+                        lim = min(lim, int(self.c.get("max_connecting_inner_degraded", 2)))
                 if t >= st["next_try_t"] and connecting < lim:   # 新建连接全局串行：同时握手 ≤2（跳板 MaxStartups 10:30:100）
                     self.spawn(h, "跳板通、ssh 不在")
                 elif t >= st["next_try_t"]:

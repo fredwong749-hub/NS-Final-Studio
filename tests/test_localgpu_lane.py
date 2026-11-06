@@ -160,7 +160,7 @@ def test_producer_lane_table_includes_image_only_lanes(cfg, monkeypatch):
     assert PR.render_image_only_lanes() == {"laptop:0": "http://127.0.0.1:18388"}
     assert PR.lane_held("laptop:0") is True
     lanes = {**PR.IMAGE_LANES, **PR.render_image_only_lanes()}
-    assert "laptop:0" in lanes and "gpu36:2" not in lanes
+    assert "laptop:0" in lanes and "gpu36:2" in lanes            # L-194（11-05）：gpu36 三卡全归 NS，gpu36:2 回到出图道（修订 L-100）
 
 
 def test_producer_probe_treats_render_hold_as_hold(cfg, tmp_path):

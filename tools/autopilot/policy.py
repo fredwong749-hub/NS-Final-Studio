@@ -172,9 +172,19 @@ def _ts(v) -> float | None:
     if isinstance(v, (int, float)):
         return float(v)
     try:
-        return datetime.fromisoformat(str(v)).timestamp()
+        d = datetime.fromisoformat(str(v).strip().replace("Z", "+00:00"))
     except ValueError:
         return None
+    if d.tzinfo is None:               # W-INFRA 11-06：无时区串 = 项目时区 +09:00（与 producer.iso / ts_epoch 同口径）；原来按本机时区读，
+        from datetime import timedelta, timezone   # 笔记本（美东）上 expires_at 晚 14 h → 运维暂停永不自动恢复、显式暂停永不告警（test_e08 红的根因）
+        d = d.replace(tzinfo=timezone(timedelta(hours=9)))
+    return d.timestamp()
+
+
+def iso_ts(t: float) -> str:
+    """epoch → 项目时区（+09:00）无时区串（_ts 的逆，与 producer.iso 同口径；测试 / 写暂停字段用它，别用 time.localtime）"""
+    from datetime import timedelta, timezone
+    return datetime.fromtimestamp(float(t), timezone(timedelta(hours=9))).strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def pause_decision(ctrl: dict, now: float | None = None, root: Path = ROOT) -> dict | None:

@@ -31,6 +31,8 @@ def test_states_and_eta(tmp_path, monkeypatch):
     _shot(r, 2, 1, [], {"image": 1, "last": 1})                   # 帧齐未出
     monkeypatch.setattr(P, "RENDERS", r)
     monkeypatch.setattr(SS, "_reviewed", lambda sid, t: "passed" if sid == "ep01-S1" else None)
+    monkeypatch.setattr(VI, "_ledger_shots", lambda ep=None: [])   # UIUX-LOOP-2 r7：只测目录里的镜 / 任务表口径，不读活登记表
+    monkeypatch.setattr(SS, "ledger_cell", lambda sid, st: None)
     jobs = [{"id": "a", "shot_id": "ep01-S3", "kind": "video", "state": "running", "gpu": 3, "started_at": "2027-01-15T08:00:00+00:00", "created_at": "2027-01-15T07:59:00+00:00"},
             {"id": "b", "shot_id": "ep01-S4", "kind": "video", "state": "queued", "gpu": 3, "created_at": "2027-01-15T08:00:10+00:00"}]
     app = FastAPI()

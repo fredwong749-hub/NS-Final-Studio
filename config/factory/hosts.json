@@ -4,6 +4,7 @@
  "hosts": {
   "gpu33": {
    "ssh": "gpu33",
+   "hostname": "gpu3",
    "repo": "/root/work/fredw/offline_20261101/repo",
    "video_root": "/root/work/fredw/offline_20261101/repo",
    "python": "/root/work/fredw/offline_20261101/venv/bin/python",
@@ -64,6 +65,7 @@
   },
   "gpu36": {
    "ssh": "gpu36",
+   "hostname": "gpu6",
    "repo": "/root/work/fredw/offline_20261101/repo",
    "video_root": "/root/work/fredw/offline_20261101/repo",
    "python": "/root/work/fredw/offline_20261101/venv/bin/python",

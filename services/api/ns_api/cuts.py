@@ -32,15 +32,128 @@ TAGS = (("PREVIEW", "预览"), ("未完成", "未完成"), ("勿用", "勿用"),
 
 
 def _epdir() -> Path:
-    return P.DATA / "episodes"
+    """UIUX-LOOP-3 r12：按剧取（V2 = data/episodes/<run>/）；以前写死 data/episodes/ → 第 1 集 60 多版成片一版都列不出来"""
+    return _RP.episodes_for_data(P.DATA)
+
+
+def _jst_iso(epoch: float) -> str:
+    """文件 mtime → JST 串（页面钟点一律 JST，ns_api/clock.py）"""
+    from ns_api.clock import JST
+    from datetime import datetime
+    return datetime.fromtimestamp(float(epoch), JST).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def film_gate(tl: dict | None) -> dict | None:
+    """合成闸门（装配器写进 timeline.json 的 gates：verdict pass / fail + missing_shots）→ 页面用的诚实标签。
+    preview=True 是装配器自己标的“预览版，非交付”；闸门没过的片也只能叫预览版（缺镜用静帧 / 黑场占位）"""
+    if not isinstance(tl, dict):
+        return None
+    g = tl.get("gates") or {}
+    miss = [{"shot": str(m.get("shot") or ""), "reason": str(m.get("reason") or "")} for m in (g.get("missing_shots") or []) if isinstance(m, dict)]
+    verdict = g.get("verdict")
+    preview = bool(tl.get("preview"))
+    post = tl.get("post") if isinstance(tl.get("post"), dict) else None
+    if verdict == "fail":
+        word = f"合成闸门没过：缺 {len(miss)} 镜用占位" if miss else "合成闸门没过"
+    elif verdict == "pass":
+        word = "合成闸门通过"
+    else:
+        word = "没有闸门记录"
+    kind = "final" if verdict == "pass" and not preview else "preview"
+    return {"verdict": verdict, "missing": miss, "missing_n": len(miss), "preview": preview, "kind": kind,
+            "kind_word": "成片" if kind == "final" else "预览版", "word": word,
+            "post": {"at": post.get("at"), "steps": list(post.get("steps") or [])} if post else None,
+            "overflow": list(g.get("overflow") or [])}
+
+
+def film_version(name: str) -> int:
+    m = re.search(r"_v(\d+)", name)
+    return int(m.group(1)) if m else -1
+
+
+def _incomplete(f: Path) -> bool:
+    """还在写的文件不算：*.part、0 字节、旁边有同名 .part（同步 / 合成没写完）"""
+    try:
+        if f.name.endswith(".part") or f.stat().st_size == 0:
+            return True
+    except OSError:
+        return True
+    return f.with_name(f.name + ".part").exists()
+
+
+def film_tier(f: Path) -> int:
+    """0 = 合成闸门通过的成片；1 = 没有闸门记录（timeline 还没同步到 / 没写）；2 = 预览版 / 闸门没过"""
+    g = film_gate(_tl(f))
+    if g is None:
+        return 1
+    if g["kind"] == "final":
+        return 0
+    return 2 if (g["preview"] or g["verdict"] == "fail") else 1
+
+
+def film_rank_key(f: Path) -> tuple:
+    """成片排序（UIUX-LOOP-3 r14，PS-MASTER 定）：① 闸门通过 > 没有闸门记录 > 预览 / 闸门没过；② 同一档版本号大的在前
+    （不按 mtime——同步会重新 touch，v64_post 看起来比 v65 还“新”）；③ 没有版本号才看 mtime。元组越小越靠前"""
+    try:
+        mt = f.stat().st_mtime
+    except OSError:
+        mt = 0.0
+    return (film_tier(f), -film_version(f.name), -mt)
+
+
+def episode_films(epdir: Path, n: int) -> list[Path]:
+    """本集整集成片文件（目录顶层 epNN*.mp4，不含 _work / _partial 半成品、*.part / 0 字节 / 正在写的），按 film_rank_key 排，最好的在前"""
+    if not epdir.is_dir():
+        return []
+    files = [f for f in epdir.glob(f"ep{n:02d}*.mp4") if f.is_file() and re.match(rf"ep{n:02d}(?!\d)", f.name) and not _incomplete(f)]
+    return sorted(files, key=film_rank_key)
+
+
+def latest_film(epdir: Path, n: int, data_dir: Path | None = None) -> dict | None:
+    """最新一版整集成片（按 film_rank_key：闸门通过 > 没闸门记录 > 预览，同档版本号大的在前；r14）：{name, url, at(JST), mtime(epoch), duration_s, shots, gate}；没有 = None。
+    KPI 面板 / 整集预览 / 成片页共用这一处口径"""
+    files = episode_films(epdir, n)
+    if not files:
+        return None
+    f = files[0]
+    st = f.stat()
+    base = (data_dir or P.DATA).resolve()
+    try:
+        rel = f.resolve().relative_to(base).as_posix()
+    except ValueError:
+        rel = f"episodes/{f.name}"
+    tl = _tl(f)
+    shots = (tl or {}).get("shots") or []
+    m = re.search(r"_v(\d+)", f.name)
+    srt = f.with_suffix(".srt")
+    return {"name": f.name, "version": int(m.group(1)) if m else None, "url": f"/files/{rel}?v={int(st.st_mtime)}",
+            "srt_url": f"/files/{rel[:-4]}.srt?v={int(st.st_mtime)}" if srt.is_file() else None,
+            "at": _jst_iso(st.st_mtime), "mtime": st.st_mtime, "size": st.st_size,
+            "duration_s": (tl or {}).get("duration_s"), "shots": len(shots),
+            "video_shots": sum(1 for s in shots if s.get("kind") == "video" and not s.get("placeholder")),
+            "placeholder_shots": sum(1 for s in shots if s.get("placeholder") or s.get("kind") in ("still", "black")),
+            "gate": film_gate(tl)}
+
+
+_TL_CACHE: dict[str, tuple[tuple, dict]] = {}   # timeline.json 路径 → ((mtime_ns, size), 解析结果)（r12：66 版 × 60 KB 每次重解析 = 13 s）
 
 
 def _tl(mp4: Path) -> dict | None:
     for cand in (mp4.with_suffix(".timeline.json"), mp4.with_name(mp4.stem.removesuffix("_4k") + ".timeline.json")):
         try:
-            return json.loads(cand.read_text(encoding="utf-8"))
+            st = cand.stat()
+        except OSError:
+            continue
+        key = (st.st_mtime_ns, st.st_size)
+        hit = _TL_CACHE.get(str(cand))
+        if hit and hit[0] == key:
+            return hit[1]
+        try:
+            d = json.loads(cand.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
+        _TL_CACHE[str(cand)] = (key, d)
+        return d
     return None
 
 
@@ -66,7 +179,9 @@ def _current_video(shot_id: str) -> tuple[str | None, bool]:
     return f, lk is not None
 
 
-def _summary(mp4: Path, n: int) -> dict:
+def _summary(mp4: Path, n: int, memo: dict | None = None) -> dict:
+    """memo（r12）：同一次请求里每镜的当前视频只问一次 takes.json（66 版 × 16 镜以前问 1000 多次）"""
+    memo = {} if memo is None else memo
     st = mp4.stat()
     tl = _tl(mp4)
     try:
@@ -74,11 +189,14 @@ def _summary(mp4: Path, n: int) -> dict:
     except ValueError:
         rel = f"episodes/{mp4.name}"
     plan = re.search(r"(?:^|/)plan([A-Z])(?:/|_|$)", rel)
+    gate = film_gate(tl)
     out = {"name": (f"方案 {plan.group(1)} · " if plan else "") + mp4.name, "url": f"/files/{rel}?v={int(st.st_mtime)}", "size": st.st_size,
            "plan": plan.group(1) if plan else None,
-           "mtime": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(st.st_mtime)),
+           "mtime": _jst_iso(st.st_mtime),   # r12：页面钟点一律 JST（以前是笔记本本地 = 美东）
            "tags": ([f"方案 {plan.group(1)}"] if plan else []) + [lab for k, lab in TAGS if k.lower() in mp4.name.lower()],
-           "timeline": None, "changed": []}
+           "gate": gate, "timeline": None, "changed": []}
+    if gate and gate["kind"] == "preview" and "预览" not in out["tags"]:   # 装配器标 preview / 闸门没过 → 诚实标“预览”，不冒充成片
+        out["tags"].append("预览")
     if tl:
         shots = tl.get("shots") or []
         out["timeline"] = {"duration_s": tl.get("duration_s"), "shots": len(shots), "preview": tl.get("preview"),
@@ -90,7 +208,9 @@ def _summary(mp4: Path, n: int) -> dict:
             sid = s.get("shot")
             if not sid or s.get("kind") != "video":
                 continue
-            cur, locked = _current_video(sid)
+            if sid not in memo:
+                memo[sid] = _current_video(sid)
+            cur, locked = memo[sid]
             used = _strip_cc((s.get("file") or "").replace("\\", "/"))
             if cur and used and cur != used:
                 out["changed"].append({"shot_id": sid, "used": used, "current": cur, "current_locked": locked})
@@ -99,16 +219,14 @@ def _summary(mp4: Path, n: int) -> dict:
 
 @router.get("/api/episodes/{n}/cuts")
 def list_cuts(n: int):
-    d = _epdir()
-    files = sorted(d.glob(f"ep{n:02d}*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True) if d.is_dir() else []
-    files = [f for f in files if re.match(rf"ep{n:02d}(?!\d)", f.name)]
-    files += plan_cuts(n)
-    files += final_cuts(n)
-    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    files = episode_films(_epdir(), n)
+    files += [f for f in plan_cuts(n) + final_cuts(n) if not _incomplete(f)]
+    files.sort(key=film_rank_key)   # r14：第 1 个（页面标“最新”）= 闸门通过且版本最高的，不是 mtime 最新的
     # UIRSI：比最近一次“整份替换”导入（import_log mode=replace…）更早合成的成片标 old_script——界面默认不显示
     # 旧剧本的成片（文件不动）。按集合并导入（merge）不算换剧本。
     smt = _last_replace_import()
-    cuts = [_summary(f, n) | {"old_script": bool(smt and f.stat().st_mtime < smt)} for f in files]
+    memo: dict = {}
+    cuts = [_summary(f, n, memo) | {"old_script": bool(smt and f.stat().st_mtime < smt)} for f in files]
     fin = _final_file(n)
     for c, f in zip(cuts, files):   # CUTEDIT：剪辑器导出的版本标“剪辑”，当前定稿标“定稿”
         if "_cut_" in f.name:

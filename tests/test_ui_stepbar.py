@@ -157,7 +157,8 @@ def test_cut_editor_preview_and_image_editor_still_mounted():
 
 def test_stepbar_shows_done_doing_blocked_and_deep_links():
     top = read("v3/TopBarV3.tsx")
-    assert "完成 {sb.done}" in top and "进行 {sb.doing}" in top and "卡住 {sb.blocked}" in top
+    # UIUX-LOOP r5：W5 之后字和数分成两个节点（<i className="w">完成 </i>{sb.done}，窄屏只留数字）；口径不变
+    assert "完成 </i>{sb.done}" in top and "进行 </i>{sb.doing}" in top and "卡住 </i>{sb.blocked}" in top
     assert "stepHref(s.pipe, ep, stepbar.v?.run" in top and "focusEp(stepbar.v, s.pipe, epNum)" in top
     sb = read("v3/stepbar.ts")
     assert '"/api/sop/stepbar"' in sb and '"/api/pipeline/status"' in sb and "run=${encodeURIComponent(run)}" in sb

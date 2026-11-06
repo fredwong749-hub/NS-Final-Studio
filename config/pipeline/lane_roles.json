@@ -43,7 +43,7 @@
    "videos": 1
   },
   "lan_proxy": {
-   "enabled": true,
+   "enabled": false,
    "bind": "10.0.0.33",
    "port": 8870,
    "allow": [
@@ -51,7 +51,7 @@
    ],
    "target": "127.0.0.1:8870"
   },
-  "_lan_proxy": "L-207：gpu33 审图位内网入口（tools/netfix/review_lan_proxy.sh，lan_proxy.py 反向：只听 10.0.0.33:8870、只认 10.0.0.36），供 gpu36 视频打分走 lan_url；resident_sync 每拍保活；enabled=false = 不起（gpu36 打分退旧路由 / 未测）"
+  "_lan_proxy": "11-06 21:3x PS-MASTER：开内网入口须项目方批准（“同意开审图内网入口”），批准前 enabled=false；W-INFRA 修好认本机后保活会真起，故先关。L-207：gpu33 审图位内网入口（tools/netfix/review_lan_proxy.sh，lan_proxy.py 反向：只听 10.0.0.33:8870、只认 10.0.0.36），供 gpu36 视频打分走 lan_url；resident_sync 每拍保活；enabled=false = 不起（gpu36 打分退旧路由 / 未测）"
  },
  "_review": "视频打分（score_clip V9 看图 + 身份）也只去审图位：打分进程在 gpu33 → 127.0.0.1:port_base；在 gpu36 → lan_url（必须 10. 内网地址，K-REV-V01；需要 gpu33 上有只认 10.0.0.36 来源的内网入口，同 tools/netfix/lan_proxy 反向）。lan_url 不合规 / 没配 = 旧路由（config/vqa.json route）",
  "hold_regen_downstream": true,

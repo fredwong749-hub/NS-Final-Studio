@@ -29,6 +29,8 @@ import { dotOf, statusWord, DOT_TITLE, type MainStatus } from "./seasonDot";
 import { Pop } from "../widgets";
 import { countKinds, hasKind, tagsTitle, type ShotStatusTags, type TagKind } from "../StatusTags.helpers";
 import { NowPanel, PipelineMatrix } from "../PipelineMatrix"; // NAVFLOW-F L-146：各集进度矩阵；W5：首页“现在”四问
+import { EpisodeKpiPanel } from "../EpisodeKpi";
+import { BrainPanel } from "../BrainPanel"; // UIUX-LOOP-2 r6：大脑最近决定 / 给项目方的话（data/brain/STATUS.md 只读） // UIUX-LOOP r3：每集进度 / KPI（L-205 ≤ 50 min、L-207 三段、每镜首尾帧 / 视频小图）
 
 type SShot = { id: string; index: number; size: string | null; scene_id: string | null; scene: string | null; link: string | null; carry: string | null; cast: { name: string; presence: string }[]; switch: string[]; seconds: number | null; adult: boolean; img?: string; lens?: string | null; lens_actual?: string | null; lens_plan?: string | null; camera_move?: string | null; lighting_sources?: string[]; lighting_name?: string | null; video?: string | null; video_old?: string | null; cand_url: string | null; cand_n: number; old_script_n?: number; first_old?: boolean; last_old?: boolean; status?: ShotStatusTags };
 /** UIRSI r40：板块状态（后端 ns_api/shot_status.episode_blocks；口径同镜头格标签） */
@@ -254,6 +256,8 @@ export default function SeasonPage() {
           下面每镜一格的胶片总览原样保留 */}
       <NowPanel />
       <PipelineMatrix />
+      <EpisodeKpiPanel />
+      <BrainPanel />
       {/* r43（§二）：总进度改成一行灰字 + 一条细的单色总进度线；原 7 段彩色条在“显示细节”里 */}
       {detail ? <LiveProgress run={null} title="全剧进度" /> : <Totals p={prog} />}
       <div className="sea-legend" aria-label="图例">

@@ -3517,6 +3517,16 @@ class Producer:
 
     def lanes_allowed(self, o: dict, free: list) -> list:
         """free 里按 L-206 / L-207 过滤后可派给对象 o 的道（保持 free 顺序）；没有 → 10 分钟记一次 lane_roles_wait"""
+        # W-INFRA 11-06（PS-MASTER 20:41 实况：ep01 不归 lane_roles 管 → last:ep01-S8 派到审图卡 gpu33:3 → 看图实例 CUDA OOM）：
+        # 审图卡上有看图进程驻留（分发器 / 任一实例 /health 应答）就不往它派出图单——不管这一集归不归 lane_roles 管、不管空闲兜底
+        cfg = self._lr_cfg if isinstance(self._lr_cfg, dict) else {"enabled": False}
+        free, dropped = _lane_roles().lanes_minus_resident_review(free, cfg)
+        if dropped:
+            seen = self.__dict__.setdefault("_lr_resident_logged", {})
+            if now() - float(seen.get(dropped) or 0) >= 600:
+                seen[dropped] = now()
+                self.logf("review_resident_hold", lane=dropped, obj=o["id"], ep=o.get("ep"), counted=False, rule="L-206",
+                          why="审图卡上有看图进程驻留，不派出图单（免 OOM）")
         allow = self.image_lanes_allowed(o.get("ep"))
         if allow is None:
             return list(free)

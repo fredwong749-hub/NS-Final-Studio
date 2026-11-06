@@ -187,6 +187,10 @@ from ns_api import v2_assets as V2A  # noqa: E402  V2 资产页（只读 assets_
 app.include_router(V2A.router)
 from ns_api import video_index as VIDX  # noqa: E402  NAVIA：“视频”页索引 GET /api/videos/overview
 app.include_router(VIDX.router)
+from ns_api import episode_kpi as EKPI  # noqa: E402  UIUX-LOOP r3：每集进度 / KPI（L-205 ≤ 50 min、L-207 三段）GET /api/episodes/kpi
+app.include_router(EKPI.router)
+from ns_api import brain_status as BRAINST  # noqa: E402  UIUX-LOOP-2 r6：大脑状态（data/brain/STATUS.md）只读面板 GET /api/brain/status
+app.include_router(BRAINST.router)
 from ns_api import v1_library as V1LIB  # noqa: E402  NAVIA：Version 1 视频库（只读）
 app.include_router(V1LIB.router)
 from ns_api import producer as PRODUCER  # noqa: E402  PRODUCER 制作监督：/api/producer/status、pause / resume / gate（读 data/producer/registry.json）

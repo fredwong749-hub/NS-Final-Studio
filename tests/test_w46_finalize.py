@@ -157,7 +157,7 @@ def _finalize_env(N, monkeypatch, tmp_path, hard_ok: bool):
     monkeypatch.setattr(N, "voices_ok", lambda: True)
     monkeypatch.setattr(N, "tts_missing", lambda: None)
     monkeypatch.setattr(N, "ssh", lambda host, cmd, timeout=600: "")
-    monkeypatch.setattr(N, "assembly_sources", lambda m: ({"shots": [{"index": 1, "kind": "video", "file": "s.mp4"}]}, []))
+    monkeypatch.setattr(N, "assembly_sources", lambda m, stills=None: ({"shots": [{"index": 1, "kind": "video", "file": "s.mp4"}]}, []))
     calls = []
 
     def fake_run(args, timeout=3600):

@@ -137,6 +137,7 @@ def _producer(tmp_path, monkeypatch, lanes=ALL6, cfg=CFG):
     pr.pool.submit = lambda fn, o, lane, attempt, rung, tag: pr.sent.append((o["id"], lane))
     pr.leases.acquire = lambda oid, **kw: True
     monkeypatch.setattr(PR, "higher_priority_busy", lambda p: {})
+    monkeypatch.setattr(LRO, "review_resident", lambda *a, **k: False)          # W-INFRA 11-06：不探 127.0.0.1:8871（网络守卫）；驻留守卫另测
     monkeypatch.setattr(PR, "decision_file_problems", lambda run=None: [])
     monkeypatch.setattr(PR, "asset_hold_objects", lambda *a, **k: set())
     monkeypatch.setattr(PR, "local_only_shots", lambda s: set())

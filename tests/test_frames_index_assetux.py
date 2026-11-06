@@ -34,6 +34,7 @@ def c(tmp_path, monkeypatch):
     monkeypatch.setattr(P, "RENDERS", r)
     monkeypatch.setattr(FI, "_present", lambda rel, run=None: True)   # 这组用例不落真图；“图没拉到不算新”由 test_frames_index_orphan 测
     monkeypatch.setattr(FI, "_script_chars", lambda run=None: {"ep01-S1": ["lin_wan"], "ep01-S2": ["lin_wan", "gu_chen"], "ep02-S1": ["gu_chen"]})
+    monkeypatch.setattr(FI, "_ledger_shots", lambda ep=None: [])   # UIUX-LOOP-2 r7：这里只测目录里的镜，不并活登记表
     monkeypatch.setattr(FI, "_jobs_by_shot", lambda: {("ep01-S2", "last"): {"state": "running", "eta_s": 90, "job_id": "j1", "started_at": None, "created_at": None}})
     app = FastAPI()
     app.include_router(FI.router)

@@ -4,8 +4,17 @@
 #   producer-only：只起 fwd + producer（出图侧），night 不起——总调度 18:23：night 等 jobs.json 按 L-088 在服务器上重编后再起
 # 只停 run/*.pid 里、命令行对得上的自己的进程。
 set -u
-SELF=$1; MODE=${2:-all}; OFF=/root/work/fredw/offline_20261101
+SELF=$1; MODE=${2:-all}; OFF=${NS_RR_OFF:-/root/work/fredw/offline_20261101}
 R=$OFF/repo
+PROC=${NS_RR_PROC:-/proc}
+# W-INFRA 11-06 干跑（只给单测 tests/test_w_infra_1106.py 用，生产不设）：NS_RR_DRY=1 → 不 kill、不起进程、不调别的脚本，只打印动作；
+# NS_RR_OFF / NS_RR_PROC 指到临时目录（$PROC/<pid>/cmdline 代替 /proc；“kill” 删掉该目录 = 进程退出）
+if [ "${NS_RR_DRY:-0}" = 1 ]; then
+  kill() { if [ "$1" = -0 ]; then [ -d "$PROC/$2" ]; else echo "DRY kill $*"; rm -rf "$PROC/${*: -1}"; fi; }
+  setsid() { echo "DRY start: $*"; }
+  sleep() { :; }
+  bash() { echo "DRY bash $*"; }
+fi
 # PRODMERGE-O 11-03（PLAN_V2_MASTER v4 1-5）：按剧起——RUN = 本机 runs.json 的 primary（当前剧唯一来源），producer / night 都带 --run；
 # 读不到 = 不起（失败关闭，不回退 V1）。视觉模型目录用发版部署目录 $R/models_cache/vision（video10_srv 退役）
 RUN=$($OFF/venv/bin/python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8")).get("primary") or "")' $R/config/pipeline/runs.json 2>/dev/null)
@@ -17,7 +26,7 @@ VISION=$R/models_cache/vision
 STOP_LIST="night producer"; [ "$MODE" = "night-only" ] && STOP_LIST="night"
 for n in $STOP_LIST; do
   f=$OFF/run/$n.pid; [ -f $f ] || continue; p=$(cat $f)
-  if kill -0 $p 2>/dev/null && grep -q "night.py\|producer.py" /proc/$p/cmdline 2>/dev/null; then
+  if kill -0 $p 2>/dev/null && grep -q "night.py\|producer.py" $PROC/$p/cmdline 2>/dev/null; then
     kill $p; for i in $(seq 1 15); do kill -0 $p 2>/dev/null || break; sleep 1; done
     kill -0 $p 2>/dev/null && kill -9 $p
     echo "stopped $n $p"
@@ -55,4 +64,5 @@ elif [ "$MODE" = "night-only" ]; then
 else
   bash $OFF/start.sh $SELF
 fi
-[ "$MODE" != "night-only" ] && bash $R/ops/offline/ensure_runs.sh $SELF
+# W-INFRA 11-06：原写法 [ != ] && … 让 night-only 一律以 rc=1 退出（resident_sync.ssh 当失败抛错 → restart_queue 记 ok=false）
+[ "$MODE" = "night-only" ] || bash $R/ops/offline/ensure_runs.sh $SELF

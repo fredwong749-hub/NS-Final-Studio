@@ -186,6 +186,50 @@ def own_reserved_mib(g: int) -> int:
         return 0
 
 
+LOAD_LOCK = Path(os.environ.get("VQA_LOAD_LOCK", str(BASE / "load.lock")))
+
+
+def load_gate(timeout_s: float = 1.0):
+    """W-INFRA 11-06：同一台机器上全部看图实例共用的加载互斥（文件锁）。拿到 → with 里得到 True（锁一直握到 with 结束 = 加载完）；
+    别的实例正在加载（timeout_s 内拿不到）→ False，调用方等一会儿再量显存。没有 fcntl（Windows 单测）/ 锁文件开不了 → 当拿到"""
+    import contextlib
+
+    @contextlib.contextmanager
+    def _cm():
+        try:
+            import fcntl
+        except ImportError:   # arch-ok: Windows 没有 fcntl（只在单测里），不互斥
+            yield True
+            return
+        try:
+            LOAD_LOCK.parent.mkdir(parents=True, exist_ok=True)
+            f = open(LOAD_LOCK, "a+")
+        except OSError:   # arch-ok: 锁文件开不了 → 退回原行为（不互斥），不让看图停摆
+            yield True
+            return
+        got = False
+        try:
+            t0 = time.time()
+            while True:
+                try:
+                    fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    got = True
+                    break
+                except OSError:
+                    if time.time() - t0 >= timeout_s:
+                        break
+                    time.sleep(0.2)
+            yield got
+        finally:
+            if got:
+                try:
+                    fcntl.flock(f, fcntl.LOCK_UN)
+                except OSError:
+                    pass
+            f.close()
+    return _cm()
+
+
 def pick_gpu() -> tuple[int | None, str]:
     fm = {g: v + own_reserved_mib(g) for g, v in free_mib().items()}
     now = time.time()
@@ -345,11 +389,24 @@ def worker():
                 while _model is None:
                     g, why = pick_gpu()
                     if g is not None:
-                        STATE.update(waiting_since=None, why_waiting=None)
-                        heartbeat("本地看图模型加载中")
-                        with _mlock:
-                            load(g)
-                        break
+                        # W-INFRA 11-06 显存闸（PS-MASTER 实况：gpu33:3 旧单实例 6.5 GB 在卡上，3 个懒加载实例同时来单 → 三个同时量到
+                        # “够”→ 三个一起加载 → OOM）：同一台机器的实例加载互斥（$BASE/load.lock 文件锁），拿到锁后再量一次显存，
+                        # 不够就回去排队等（不 OOM、不 kill 别人）
+                        with load_gate() as got:
+                            if got:
+                                g2, why = pick_gpu()
+                                if g2 is None:
+                                    STATE.update(waiting_since=STATE["waiting_since"] or time.time(), why_waiting="load_gate: " + why)
+                                    continue
+                                STATE.update(waiting_since=None, why_waiting=None)
+                                heartbeat("本地看图模型加载中")
+                                with _mlock:
+                                    load(g2)
+                                break
+                        if req.get("deadline") and time.time() > req["deadline"]:   # Fable 复审：等锁也要看调用方的截止时间
+                            raise TimeoutError("等别的看图实例加载完：超过调用方截止时间")
+                        time.sleep(2)                    # 别的实例正在加载：等它加载完再量
+                        continue
                     STATE.update(waiting_since=STATE["waiting_since"] or time.time(), why_waiting=why)
                     if req.get("deadline") and time.time() > req["deadline"]:
                         raise TimeoutError("等不到空闲卡：" + why)

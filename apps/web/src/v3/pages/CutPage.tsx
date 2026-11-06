@@ -27,6 +27,8 @@ interface Cut {
   old_script?: boolean;
   /** CUTEDIT：剪辑器导出的当前定稿 */
   final?: boolean;
+  /** UIUX-LOOP-3 r12：合成闸门结论（装配器 timeline.json 的 gates）——预览版 / 成片 的诚实标签 */
+  gate?: { verdict: string | null; missing: { shot: string; reason: string }[]; missing_n: number; preview: boolean; kind: "preview" | "final"; kind_word: string; word: string; post: { at: string | null; steps: string[] } | null } | null;
 }
 interface Job {
   state: "running" | "done" | "failed" | "none";
@@ -189,7 +191,7 @@ export default function CutPage() {
                   {i === 0 && <Tag tone="accent">最新</Tag>}
                 </span>
                 <span className="ds-muted ds-small">
-                  {c.mtime.slice(5, 16).replace("T", " ")} · {fmtS(c.timeline?.duration_s)} · {(c.size / 1048576).toFixed(1)} MB
+                  {c.mtime.slice(5, 16).replace("T", " ")} JST · {fmtS(c.timeline?.duration_s)} · {(c.size / 1048576).toFixed(1)} MB
                 </span>
                 <span className="ds-row" style={{ gap: 4 }}>
                   {c.tags.map((t) => (
@@ -197,6 +199,12 @@ export default function CutPage() {
                       {t}
                     </Tag>
                   ))}
+                  {c.gate && (
+                    // r12：合成闸门结论写在版本上——闸门没过的只能叫预览版（缺镜用静帧 / 黑场占位），不冒充成片
+                    <Tag tone={c.gate.verdict === "pass" ? "ok" : c.gate.verdict === "fail" ? "warn" : "neutral"} title={`${c.gate.word}${c.gate.missing.length ? "：" + c.gate.missing.map((m) => `${m.shot}（${m.reason}）`).join("、") : ""}${c.gate.post ? `\n已调色 / 加音效（${c.gate.post.steps.join(" · ")}）` : ""}`}>
+                      {c.gate.verdict === "fail" ? `闸门没过 · 缺 ${c.gate.missing_n} 镜` : c.gate.verdict === "pass" ? "闸门通过" : "没有闸门记录"}
+                    </Tag>
+                  )}
                   {i === 0 && voiceChg.length > 0 && (
                     <Tag tone="stale" title={`这版成片之后改过音色：${voiceChg.map((v) => `${v.label}（${v.at.slice(5, 16).replace("T", " ")}）`).join("、")}；需要重新合成`}>
                       音色改过 {voiceChg.length}

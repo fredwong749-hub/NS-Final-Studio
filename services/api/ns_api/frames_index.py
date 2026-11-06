@@ -3,8 +3,9 @@
 GET /api/frames-index?ep=&status=&char=
   → {episodes:[{ep, shots:[{id, index, chars:[cid], first:{…}, last:{…}, main:{kind,word}|null}]}],
      counts:{shots, missing, new, best, final}, gen:{running, queued, eta_at}}
-每格（first / last）= {n, url, state: none|current|final, new_n / new_url（有一版比当前新、还没选用 → “新”）, gen:{state, eta_s, job_id, started_at, created_at}|None}
-  state：none = 缺图；final = 已定稿（takes.json locked）；current = 当前版（没定稿）。
+每格（first / last）= {n, url, state: none|current|final|fallback, new_n / new_url（有一版比当前新、还没选用 → “新”）, gen:{state, eta_s, job_id, started_at, created_at}|None,
+  fallback:{mode, word, why, at, by}|None}
+  state：none = 缺图；final = 已定稿（takes.json locked）；current = 当前版（没定稿）；fallback = 尾帧兜底生效（L-204 D8：只给首帧，不出尾帧，不算缺图）。
   徽标由前端按 state / new_n / gen 画：当前 / 已定稿 / 新；其余版本不标（L-123：没有“不要”）。
 筛选（服务端做，前端不猜）：status = missing（缺图）| new（待你看）| best（尽力版）| final（已定稿）；char = 人物 id；ep = 集号。
 只读：不写任何文件。
@@ -16,6 +17,8 @@ import re
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
+
+from ns_api import clock as CK  # UIUX-LOOP-2 r6：时间口径单一入口（JST）
 
 ROOT = Path(__file__).resolve().parents[3]
 router = APIRouter(tags=["frames-index"])
@@ -123,8 +126,10 @@ def _jobs_by_shot() -> dict[tuple[str, str], dict]:
             continue
         st = {"first": "image"}.get(j.get("stage"), j.get("stage")) or ("video" if j.get("kind") == "video" else None)
         if st in ("image", "last"):
+            # UIUX-LOOP-2 r6：任务表是笔记本写的裸美东串；给页面带 +09:00 的 JST（前端 genView 用它算排了多久 / 预计几点，不靠浏览器时区）
             out[(j["shot_id"], st)] = {"state": j["state"], "eta_s": j.get("eta_s"), "job_id": j.get("job_id") or j.get("id"),
-                                       "started_at": j.get("started_at"), "created_at": j.get("created_at")}
+                                       "started_at": CK.local_naive_to_jst(j.get("started_at"), with_offset=True),
+                                       "created_at": CK.local_naive_to_jst(j.get("created_at"), with_offset=True)}
     return out
 
 
@@ -154,11 +159,33 @@ def _edits_by_cell() -> dict[tuple[str, str], dict]:
         return {}
 
 
+FALLBACK_WORD = {"i2va": "不用尾帧：只给首帧，运镜交给视频模型"}
+
+
+def last_fallback(takes: dict) -> dict | None:
+    """L-204 D8 / L-203 尾帧兜底：takes.json 顶层 last_frame_fallback {mode: i2va, first_n, at, by, why}。
+    只有绑定的首帧（first_n）还是当前首帧时才有效（首帧换了，producer 会自动重出尾帧、兜底作废）。
+    UIUX-LOOP r2：以前出图页把这类镜的尾帧格写成“在重出 / 新”，视频页写“缺尾帧 · 去出图补”，和已经定下的兜底决定打架。"""
+    fb = takes.get("last_frame_fallback")
+    if not isinstance(fb, dict) or not fb.get("mode"):
+        return None
+    cur_first = (takes.get("active") or {}).get("image")
+    if fb.get("first_n") is not None and cur_first is not None and fb.get("first_n") != cur_first:
+        return None
+    mode = str(fb.get("mode"))
+    return {"mode": mode, "word": FALLBACK_WORD.get(mode, f"不用尾帧（{mode}）"), "why": str(fb.get("why") or ""), "at": fb.get("at"), "by": fb.get("by")}
+
+
 def _cell(takes: dict, stage: str, gen: dict | None, edit: dict | None = None, run: str | None = None) -> dict:
     act = (takes.get("active") or {}).get(stage)
     lst = [t for t in takes.get("takes") or [] if t.get("stage") == stage]
     cur = next((t for t in lst if t.get("n") == act), None)
     locked = bool((takes.get("locked") or {}).get(stage)) or bool(cur and cur.get("locked"))
+    fb = last_fallback(takes) if stage == "last" else None
+    if fb and not cur:
+        # 兜底生效、没有当前尾帧：这一格不是“缺图 / 在重出 / 新”，是“不用尾帧”；没通过的旧版本留在系统里，不给项目方看
+        return {"n": None, "url": None, "state": "fallback", "new_n": None, "new_url": None, "gen": gen, "sys_retry": 0, "edit": edit,
+                "pending": None, "fallback": fb}
     # 项目方 17:0x（ep07-S3 尾帧 #19 Q1 fail 是陌生人，却当“新”给他看）：只有通过验收的版本才算“新”；没通过的留在系统里自动重出
     # W34：被 merge_pull 等并回本剧 takes.json 的 V1 版本（文件只在 V1 目录，v1_guard 不给地址）不算“新”，否则它的 n 更大会把本剧真版本挡住
     # ORPHAN-TAKE（11-06）：图还没拉到笔记本的也不算“新”（_present）；打分没结论的 _passing 已经不认（takes_ui.unscored）。
@@ -175,7 +202,16 @@ def _cell(takes: dict, stage: str, gen: dict | None, edit: dict | None = None, r
             new_n, new_url = top.get("n"), _url(top.get("file"), run)
     state = "none" if not cur else ("final" if locked else "current")
     return {"n": act if cur else None, "url": _url(cur.get("file"), run) if cur else None, "state": state, "new_n": new_n, "new_url": new_url, "gen": gen,
-            "sys_retry": len(bad_after), "edit": edit, "pending": pending}
+            "sys_retry": len(bad_after), "edit": edit, "pending": pending, "fallback": fb}
+
+
+def _ledger_shots(ep: int | None = None) -> list[tuple[int, int]]:
+    """活的登记表登记过的镜（shot_status.ledger_shots）；读不到 = []（只按目录）"""
+    try:
+        from ns_api import shot_status as SS
+        return SS.ledger_shots(ep)
+    except Exception:  # noqa: BLE001  # arch-ok: 登记表读坏 = 只按 takes.json 目录列镜（旧口径），调用方当没有额外的镜
+        return []
 
 
 def build(ep: int | None = None, status: str | None = None, char: str | None = None, *, renders: Path | None = None,
@@ -191,23 +227,32 @@ def build(ep: int | None = None, status: str | None = None, char: str | None = N
     edits = _edits_by_cell()
     eps: dict[int, list[dict]] = {}
     counts = {"shots": 0, "missing": 0, "new": 0, "best": 0, "final": 0}
+    # UIUX-LOOP-2 r7：镜的集合 = 有 takes.json 的目录 ∪ 活的登记表登记过的镜（ep02 登记 16 镜、只有 8 镜出过图 → 原来页面只见 8 镜，
+    # 排队中的 8 镜根本不显示）。没目录的镜 takes={}，格子写登记表的状态（排队 / 正在出 / 等上一步）
+    found: dict[tuple[int, int], Path | None] = {}
     for d in sorted(base.glob("ep*/S*")):
         m = re.fullmatch(r"ep(\d+)", d.parent.name)
         s = re.fullmatch(r"S(\d+)", d.name)
-        if not (m and s and (d / "takes.json").is_file()):
-            continue
-        n_ep, idx = int(m.group(1)), int(s.group(1))
+        if m and s and (d / "takes.json").is_file():
+            found[(int(m.group(1)), int(s.group(1)))] = d / "takes.json"
+    for key in _ledger_shots(ep):
+        found.setdefault(key, None)
+    for (n_ep, idx), tp in sorted(found.items()):
         if ep is not None and n_ep != ep:
             continue
         sid = f"ep{n_ep:02d}-S{idx}"
         if char and char not in chars.get(sid, []):
             continue
-        try:
-            takes = json.loads((d / "takes.json").read_text(encoding="utf-8"))
-        except (OSError, ValueError):  # arch-ok: 这一镜的 takes.json 读坏：跳过这一镜，其余照常显示
-            continue
+        takes: dict = {}
+        if tp is not None:
+            try:
+                takes = json.loads(tp.read_text(encoding="utf-8"))
+            except (OSError, ValueError):  # arch-ok: 这一镜的 takes.json 读坏：跳过这一镜，其余照常显示
+                continue
         first = _cell(takes, "image", jobs.get((sid, "image")), edits.get((sid, "image")), run)
         last = _cell(takes, "last", jobs.get((sid, "last")), edits.get((sid, "last")), run)
+        for st, c in (("first", first), ("last", last)):
+            c["ledger"] = SS.ledger_cell(sid, st) if c["state"] == "none" and not c["gen"] else None
         try:
             kind = SS.tags_for(sid, None, takes).get("main")
         except Exception:  # noqa: BLE001  状态标签是锦上添花；算不出就不标  # arch-ok: 状态标签算不出就不标，调用方 tag 为空

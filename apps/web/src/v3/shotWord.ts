@@ -19,6 +19,7 @@ export const VIDEO_STATE_KIND: Record<string, ShotKind> = {
   queued: "queued",
   rendering: "running",
   pending_review: "review",
+  best_effort: "review", // 尽力版（试了几次没全过，系统取最好的一版）：也是“待你看”——用这版 / 修改
   need_frames: "stuck",
   failed: "stuck",
   final: "final",
