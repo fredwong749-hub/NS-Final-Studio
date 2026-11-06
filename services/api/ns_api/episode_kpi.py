@@ -6,8 +6,9 @@ GET /api/episodes/kpi?run=
                 first_done, last_done, fallback_n, video_done, assembled,
                 shots:[{id, index, first:{state,url}, last:{state,url,fallback}, video:{state,url}}]}]}
 来源（只读、都是本机已有的文件，不在请求里连机器）：
-  · KPI 计时 = data/brain/snapshot.json 的 kpi（telemetry.kpi：两台里最早派单为起点、已定视频 / 总镜外推 ETA），30 分钟内才认；
-    没有 / 过期 → 本机同步回来的 producer log.jsonl 第一次 dispatch 当起点（只有一台的，标 source=local）
+  · 集级数字（起点 / 用时 / 完成数 / 状态）= tools/brain/kpi_core.episodes（和大脑 telemetry.kpi 同一函数，L-212 #9）：
+    起点 = max(首派, 最近导入)；首派 = 大脑快照（两台最早，30 分钟内才认）与本机 producer log.jsonl 取早；
+    完成数 = 本机登记表 have.passed 与快照两台逐字段取最大（best_effort 不算视频完成）
   · 每镜状态 = 当前剧活的 producer 登记表（shot_status.registry_path，r1 同一来源）：passed / ready / running / pending / failed / best_effort
   · 图 = 每镜 takes.json 的当前版（通过才会是当前）；尾帧兜底（frames_index.last_fallback）单独标 fallback
   · 阶段 = data/pipeline/lane_roles_state.json <run>._active（L-207 run 级唯一排序源）优先；没有就按登记表自算：
@@ -105,24 +106,29 @@ def derive_phase(total: int, first_done: int, last_done: int, fallback_n: int, v
     return "not_started"
 
 
-def _import_epoch(ep: int) -> float | None:
-    """本集最后一次导入剧本的时刻（takes_ui.cutoff_for，JST 裸串）→ epoch；没有 = None"""
-    try:
-        from ns_api import takes_ui as TU  # noqa: PLC0415
-        cut = TU.cutoff_for(ep)
-        return datetime.fromisoformat(str(cut)[:19]).replace(tzinfo=JST).timestamp() if cut else None
-    except Exception:  # noqa: BLE001  # arch-ok: 导入记录读不到 = 不标“起点早于本版剧本”，其余照常
-        return None
+_KC = None
+
+
+def _kc():
+    """tools/brain/kpi_core.py（每集 KPI 唯一口径，L-212 #9）"""
+    global _KC
+    if _KC is None:
+        import importlib.util  # noqa: PLC0415
+        sp = importlib.util.spec_from_file_location("kpi_core_for_api", ROOT / "tools" / "brain" / "kpi_core.py")
+        m = importlib.util.module_from_spec(sp)
+        sp.loader.exec_module(m)
+        _KC = m
+    return _KC
 
 
 def build(*, registry: dict, renders: Path, snapshot: dict | None, local_starts: dict[str, float], now: float | None = None,
-          budget_min: int = BUDGET_MIN, active: dict[str, dict] | None = None, url=None, vurl=None, import_epoch=None,
+          budget_min: int = BUDGET_MIN, active: dict[str, dict] | None = None, url=None, vurl=None, imports: dict | None = None,
           film_of=None) -> dict:
     """纯函数（tests 用）。url / vurl：rel → /files 地址（默认 frames_index._url / video_index._url）；
-    import_epoch(ep) → 本集本版剧本导入时刻（默认 _import_epoch）——起点早于它 = 计时含之前几轮重做（UIUX-LOOP-2 r9，面板写明）；
+    imports {集: 最近导入 epoch}（kpi_core.import_epochs；默认 {}）——计时起点 = max(首派, 最近导入)（L-212 #9，和大脑同一函数）；
     film_of(ep) → 最新一版整集成片（cuts.latest_film：name / url / at / gate），没有 = None（UIUX-LOOP-3 r12：面板每集一个“最新成片”入口，
     标签诚实：预览版（合成闸门没过：缺 N 镜用占位）/ 成片（闸门通过））"""
-    import_epoch = import_epoch or _import_epoch
+    imports = imports or {}
     film_of = film_of or (lambda ep: None)
     from ns_api import frames_index as FI
     from ns_api import video_index as VI
@@ -168,28 +174,40 @@ def build(*, registry: dict, renders: Path, snapshot: dict | None, local_starts:
             last_done += cell["last"]["state"] == "passed"
             video_done += cell["video"]["state"] in ("passed", "best_effort")
             shots.append({"id": sid, "index": int(m.group(2)), **cell})
-        total = len(shots) or int(((E.get("have") or {}).get("total")) or 0)
-        asm = ((E.get("objects") or {}).get("assembly") or {}).get("status") == "passed"
+        # L-212 #9：集级数字（起点 / 用时 / 首尾视频完成数 / 状态）只走 tools/brain/kpi_core（和大脑同一函数）。
+        # 完成数 = 登记表 have.passed 与大脑快照（两台最大）逐字段取最大；登记表没有 have（旧格式 / 测试）才用逐镜数
+        KC = _kc()
+        if E.get("have"):
+            have = KC.merge_have(None, **KC.have_from_registry_episode(E))
+        else:
+            have = KC.merge_have(None, total=len(shots), first=first_done, last=last_done, video=video_done,
+                                 assembled=((E.get("objects") or {}).get("assembly") or {}).get("status") == "passed")
         k = kpi.get(str(ep)) or {}
-        asm = asm or bool(k.get("assembled"))
-        t0 = local_starts.get(str(ep))
-        start = k.get("start") if k else _jst(t0)
-        elapsed = k.get("elapsed_min") if k and k.get("elapsed_min") is not None else (round((now - t0) / 60, 1) if t0 else None)
+        if "total" in k:
+            have = KC.merge_have(have, total=k.get("total"), first=k.get("first_done"), last=k.get("last_done"),
+                                 video=k.get("video_done"), assembled=k.get("assembled"))
+        elif k.get("assembled"):
+            have["assembled"] = True
+        fd = [x for x in (local_starts.get(str(ep)), k.get("first_dispatch_t")) if x]
+        if k and "first_dispatch_t" not in k and k.get("elapsed_min") is not None:
+            fd = [now - float(k["elapsed_min"]) * 60]      # 旧版快照只有用时，没有首派时刻
+        rec = KC.episodes(now, {str(ep): min(fd)} if fd else {}, {str(ep): have}, imports, budget_min).get(str(ep)) or {}
+        if k and "first_dispatch_t" not in k and k.get("eta_min") is not None:
+            rec["eta_min"] = k["eta_min"]
+        total = have["total"] or len(shots)
+        first_done, last_done, video_done, asm = have["first_done"], have["last_done"], have["video_done"], have["assembled"]
+        start, elapsed, eta = rec.get("start"), rec.get("elapsed_min"), rec.get("eta_min")
         ph = (active or {}).get(str(ep), {}).get("phase")
         phase = ph if ph in PHASE_WORD else derive_phase(total, first_done, last_done, fallback_n, video_done, asm, bool(start) or active_n > 0)
-        if asm and video_done >= total:
-            state = "assembled"
-        elif elapsed is None:
-            state = "not_started"
-        else:
-            state = "over_budget" if elapsed > budget_min else "in_budget"
-        eta = k.get("eta_min") if k else (round(elapsed / (video_done / total) - elapsed, 1) if elapsed and total and video_done else None)
-        imp = import_epoch(ep)
-        start_t = (now - float(elapsed) * 60) if elapsed is not None else None
-        before_import = bool(imp and start_t and start_t < imp - 60)
+        state = rec.get("state") or "not_started"
+        if state == "no_registry":
+            state = "in_budget" if elapsed is not None and elapsed <= budget_min else "over_budget"
+        imp = rec.get("import_t")
+        fdt = rec.get("first_dispatch_t")
+        before_import = bool(imp and fdt and fdt < imp - 60)      # 本集首派早于本版剧本导入 → 计时已从导入重新算（面板写明）
         eps_out.append({"ep": ep, "title": str(E.get("title") or ""), "total": total, "phase": phase, "phase_word": PHASE_WORD[phase],
                         "state": state, "start": start, "elapsed_min": elapsed, "eta_min": eta,
-                        "import_at": _jst(imp), "start_before_import": before_import,
+                        "import_at": _jst(imp), "start_before_import": before_import, "clock_from": rec.get("clock_from"),
                         "over_min": round(elapsed - budget_min, 1) if elapsed is not None and elapsed > budget_min and state != "assembled" else None,
                         "first_done": first_done, "last_done": last_done, "fallback_n": fallback_n, "video_done": video_done,
                         "assembled": asm, "film": _film_brief(film_of(ep)), "shots": shots})
@@ -221,10 +239,11 @@ def _build_live(run: str | None) -> dict:
     from ns_api import cuts as C
     run = run or RP.current_run(ROOT)
     pd = RP.producer_dir(ROOT, run)
-    reg = _j(SS.registry_path() if run == RP.current_run(ROOT) else pd / "registry.json", {}) or {}
+    reg = SS.merged_registry(SS.registry_path() if run == RP.current_run(ROOT) else pd / "registry.json") or {}   # W-FIX-PIPE #8：两台按对象合并
     epdir = RP.episodes_dir(ROOT, run)
     return build(registry=reg, renders=RP.renders_root(ROOT, run), snapshot=_j(SNAPSHOT, None),
                  local_starts=first_dispatch_local(pd / "log.jsonl"), budget_min=_budget(), active=_active_phase(run),
+                 imports=_kc().import_epochs(ROOT, run),
                  film_of=lambda ep: C.latest_film(epdir, ep, ROOT / "data"))
 
 

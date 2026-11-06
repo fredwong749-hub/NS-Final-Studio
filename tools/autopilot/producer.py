@@ -1830,6 +1830,8 @@ class World:
             self.vstate[h] = (jl(paths.vid / f"state_{h}.json", {}) or {}).get("shots") or {}
         self.night = jl(paths.vid / "night_state.json", {}) or {}
         self.nctrl = jl(paths.vid / "night_control.json", {}) or {}
+        self.vjobs_host, self.vclaims = video_owner_maps(paths.vid)   # W-FIX-PIPE #7：视频镜归属（jobs.json host + shard_claims）
+        self.video_reconciled: list[dict] = []
         self.voices = jl(paths.voices, {}) or {}
         self.api_jobs = self._api_jobs() if paths.root == ROOT else []
         self.summary = self._summary() if paths.root == ROOT else {}
@@ -2261,6 +2263,58 @@ def _redo_obj(kind, sid, n, td, ledger, leases, rj, first=None) -> dict:
     return {**o, "status": "ready", "waiting_for": "空闲道（驳回重出，第 {}/{} 次：{}）".format(k + 1, len(plan), plan[k].get("name"))}
 
 
+# W-FIX-PIPE #7（SCAN_20261107，L-212）：producer 把整集交给 night 后就把每镜视频标“在跑”；night 没排（镜归另一台 / 被抢活领走 /
+# vidgen 没开工）也不回退 → gpu33 ep01 5 镜假“在跑”（state_gpu33 pending、无渲染；jobs.json + shard_claims 归 gpu36）。
+# 改：① 镜归另一台（vidgen 同一口径 video_shard.effective_mine）→ pending “归 gpu36 出”，不算本机在跑；
+#     ② 本镜没排队 / 渲染记录、本机这集也没有任何在出的镜、本集派出已超 VIDEO_FAKE_RUNNING_S → ready（退回，写 log 一次）。
+VIDEO_FAKE_RUNNING_S = 1800
+VIDEO_BUSY = ("submitted", "fetched", "scoring")
+
+
+def video_owner_maps(vid: Path) -> tuple[dict, dict]:
+    jobs = jl(Path(vid) / "jobs.json", {}) or {}
+    jh = {s.get("shot"): s.get("host") for s in (jobs.get("shots") or []) if isinstance(s, dict) and s.get("shot")}
+    cl = jl(Path(vid) / "shard_claims.json", {}) or {}
+    return jh, (cl if isinstance(cl, dict) else {})
+
+
+def video_owner(w, sid: str, me: str | None) -> str | None:
+    """这一镜视频现在归哪台（与 vidgen 同一口径：jobs.json host 叠 shard_claims 领取，video_shard.effective_mine）；不知道 = None"""
+    jh, c = (getattr(w, "vjobs_host", None) or {}).get(sid), (getattr(w, "vclaims", None) or {}).get(sid)
+    if not me:
+        return (c or {}).get("host") or jh
+    if not jh and not c:
+        return None
+    import video_shard as _VS  # noqa: PLC0415  tools/series10_video 已在 sys.path
+    started = bool(((w.vstate.get(me) or {}).get(sid) or {}).get("renders"))
+    if _VS.effective_mine(me, sid, jh, c, started, now()):
+        return me
+    return c["host"] if c and c.get("host") and c.get("host") != me else jh
+
+
+def video_fake_running(w, sid: str, n: int, rec: dict | None, ep_disp: dict) -> dict | None:
+    """→ None（真在排 / 刚派出，照旧“在跑”）或 {kind: other_host|stale, owner, age_min, obj: 覆盖字段}"""
+    me = os.environ.get("OFFLINE_SELF") or os.environ.get("NS_FACTORY_HOST")
+    owner = video_owner(w, sid, me)
+    if me and owner and owner != me:
+        return {"kind": "other_host", "owner": owner, "age_min": None,
+                "obj": {"status": "pending", "where": f"VIDEO10 {owner}", "owned_by": owner,
+                        "waiting_for": f"这一镜视频归 {owner} 出（jobs.json / 抢活领取），结果看 {owner} 那份，本机不出"}}
+    t0 = float(ep_disp.get("dispatched") or 0)
+    age = now() - t0 if t0 else 0.0
+    if not t0 or age < VIDEO_FAKE_RUNNING_S:
+        return None
+    host = me or ep_disp.get("host")
+    mine = (w.vstate.get(host) or {}) if host else {}
+    if any(x.get("state") in VIDEO_BUSY for r in mine.values() for x in (r.get("renders") or [])):
+        return None    # 复审 11-07：本机任何一集还有镜在出 = night 活着、本镜在 vidgen 队列里排着，照旧“在跑”（以前只看本集 → 两集之间来回翻）
+    st = (rec or {}).get("status")
+    return {"kind": "stale", "owner": host, "age_min": round(age / 60),
+            "obj": {"status": "ready", "where": f"VIDEO10 {host}" if host else None, "reconciled": "fake_running",
+                    "waiting_for": f"night {round(age / 60)} 分钟前派出本集，这一镜{'在 night 那边是 ' + st if st else '在 night 那边没有记录'}、"
+                                   f"没排队也没在渲染 → 退回“可派”（不算在跑），等 night 下一轮"}}
+
+
 def _video_obj(w: World, sid, n, td, fo, lo, ledger, leases, night_alive) -> dict:
     o = obj("video", sid, ep=n, shot=sid)
     t = active_take(td, "video")
@@ -2295,6 +2349,10 @@ def _video_obj(w: World, sid, n, td, fo, lo, ledger, leases, night_alive) -> dic
         return {**o, "status": "pending", "waiting_for": why}
     ep_disp = (w.night.get("eps") or {}).get(str(n))
     if ep_disp:
+        fake = video_fake_running(w, sid, n, rec, ep_disp)          # W-FIX-PIPE #7：“在跑”必须对得上 night / vidgen 的真实记录
+        if fake:
+            getattr(w, "video_reconciled", []).append({"obj": o["id"], **{k: fake.get(k) for k in ("kind", "owner", "age_min")}})
+            return {**o, **fake["obj"]}
         return {**o, "status": "running", "where": f"VIDEO10 {ep_disp.get('host')}", "reason": "已随本集派出，等编排器排到"}
     return {**o, "status": "ready", "where": "VIDEO10 night.py" if night_alive else AGENT,
             "waiting_for": "本集每镜首尾帧都定下后整集派出（VIDEO10 按集出片、整集合成）"}
@@ -2904,6 +2962,11 @@ class Producer:
         self.auto_regen_tick(w)
         led_all = {**self.ledger(), "_master_rejects": jl(self.p.rejects, {}) or {}}
         reg = derive(w, led_all, leases, self.run_summary_fn())
+        vrec = {x["obj"]: x for x in getattr(w, "video_reconciled", [])}    # W-FIX-PIPE #7：假“在跑”纠正，每个对象进入时记一次
+        for k in set(vrec) - getattr(self, "_vrec_seen", set()):
+            self.logf("video_fake_running_reset" if vrec[k]["kind"] == "stale" else "video_owned_by_other_host", obj=k,
+                      owner=vrec[k].get("owner"), age_min=vrec[k].get("age_min"), counted=False)
+        self._vrec_seen = set(vrec)
         try:
             self.lane_roles_tick(reg)              # L-206：首帧换代中不派尾帧；每集阶段 → data/pipeline/lane_roles_state.json；出图预取深度
         except Exception as e:  # noqa: BLE001  # arch-ok: 分卡推导出错 = 本拍按旧行为（全部道），记日志不停派

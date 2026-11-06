@@ -19,6 +19,8 @@ import re
 import shutil
 import tempfile
 import time
+
+from ns_api import clock as _clock   # L-212 #10：页面时间一律 JST
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -48,7 +50,7 @@ def _draft_info(p: Path) -> dict:
     sha = SI._sha(p)
     st = p.stat()
     return {"path": SI._rel(p), "name": p.name, "size": st.st_size, "sha256": sha,
-            "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(st.st_mtime)),
+            "mtime": _clock.epoch_jst(st.st_mtime, "%Y-%m-%d %H:%M"),
             "validation": SI._load_cache().get(sha)}
 
 

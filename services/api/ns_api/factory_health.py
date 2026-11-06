@@ -18,6 +18,8 @@ import importlib.util
 import json
 import threading
 import time
+
+from ns_api import clock as _clock   # L-212 #10：页面时间一律 JST
 import urllib.request
 from pathlib import Path
 
@@ -194,7 +196,7 @@ def build(now: float | None = None) -> dict:
         light = {"level": "warn", "text": "生产偏慢"}
     else:
         light = {"level": "ok", "text": "生产正常"}
-    return {"at": time.strftime("%H:%M:%S", time.localtime(now)), "lanes": lanes, "vqa": vq, "phases": phases,
+    return {"at": _clock.epoch_jst(now, "%H:%M:%S"), "lanes": lanes, "vqa": vq, "phases": phases,
             "producer": producer, "source": "live", "busy": busy, "total": len(lanes), "light": light}
 
 

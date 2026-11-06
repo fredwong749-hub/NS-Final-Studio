@@ -1512,6 +1512,22 @@ def main(argv=None) -> int:
     return 0
 
 
+def owner_revise(root: Path, run: str, job_id: str, note: str, by: str) -> dict:
+    """W-FIX-PIPE #13（L-212）：项目方在“需要修改描述”上写的一句 → 记进作业 owner_notes（asset_worker._compile 加进提示词），作业重排。
+    重排计数清零（attempts / auto_requeues / escalated），下一轮用没用过的种子"""
+    guard_run(root, run)
+    note = str(note or "").strip()
+    if not note:
+        raise RegisterError("要写一句想怎么改")
+    jp = job_path(root, run, job_id)
+    job = load_job(jp)
+    notes = list(job.get("owner_notes") or []) + [note[:200]]
+    job.update(owner_notes=notes, state="pending", attempts=0, auto_requeues=0, final=False, error=None, escalated=None, retry_after=None)
+    log(job, f"项目方修改（{by}）：{note[:200]}——加进描述，重新出候选")
+    save_job(root, job)
+    return {"job": job_id, "state": "pending", "owner_notes": notes}
+
+
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8")
     raise SystemExit(main())

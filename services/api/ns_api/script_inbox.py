@@ -24,6 +24,8 @@ import subprocess
 import sys
 import threading
 import time
+
+from ns_api import clock as _clock   # L-212 #10：页面时间一律 JST
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -126,7 +128,7 @@ def _current() -> dict | None:
                 continue
     last = rows[-1] if rows else None
     return {"path": _rel(IMPORT_JSON) if IMPORT_JSON.exists() else None,
-            "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(IMPORT_JSON.stat().st_mtime))
+            "mtime": _clock.epoch_jst(IMPORT_JSON.stat().st_mtime, "%Y-%m-%d %H:%M")
             if IMPORT_JSON.exists() else None,
             "last_import": last}
 
@@ -151,7 +153,7 @@ def list_inbox():
     for p in candidates():
         sha = _sha(p)
         items.append({"path": _rel(p), "name": p.name, "size": p.stat().st_size, "sha256": sha,
-                      "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(p.stat().st_mtime)),
+                      "mtime": _clock.epoch_jst(p.stat().st_mtime, "%Y-%m-%d %H:%M"),
                       "source": "qwen-mailbox" if "/qwen/" in _rel(p)
                       else "script-chat" if "/script_chat/" in _rel(p)
                       else "input" if "/staging_input/" in _rel(p) else "staging",

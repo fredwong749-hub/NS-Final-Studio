@@ -37,6 +37,11 @@ export function twoActs(it: QueueItem): { use: Act; edit: Act } {
     const href = it.link ?? "#/queue";
     return { use: { kind: "link", href, label: "去看 · 用这版" }, edit: { kind: "link", href, label: "修改" } };
   }
+  if (it.kind === "asset_revise") {
+    // W-FIX-PIPE #13：资产换了几批都没过 → 只有“修改”（写一句想让它长什么样），没有“用这张”（不给看没过的图，L-123）
+    const a = it.actions?.find((x) => x.needs_reason);
+    return { use: { kind: "none", label: "", why: "" }, edit: { kind: "choice", key: "revise", label: "修改", ask: a?.ask ?? "想让它长什么样？写一句", submit: "按这句话修改" } };
+  }
   const opts = (it.options ?? []).filter((o) => !LATER.includes(o.key));
   const editLink: Act = link ? { kind: "link", href: link, label: "修改" } : { kind: "none", label: "修改", why: "这一条没有对应的页面，请在详情里写一句话" };
   if (it.kind === "pick") {

@@ -27,6 +27,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -499,6 +500,14 @@ def tick(root: Path = ROOT, cfg: dict | None = None, runs: dict | None = None, s
                     j["lane"] = None
                     j["last_lane"] = lane
                     AJ.save_job(root, j)
+            # ②b W-FIX-PIPE #13：已定案失败、还没升级过的旧作业 → 同一条路（换种子重排 / 挑一张 / 需要修改描述），每拍最多 ESCALATE_PER_TICK 个
+            if not dry:
+                for j in [j for j in jobs if j.get("state") == "failed" and j.get("final") and not j.get("escalated")
+                          and not j.get("lane_suspect") and j.get("kind") in AJ.RENDER_KINDS][:ESCALATE_PER_TICK]:
+                    try:
+                        after_final_fail(root, j, cfg, str(j.get("error") or "失败"), rec)
+                    except Exception as e:  # noqa: BLE001  # arch-ok: 升级出错只记心跳，下拍再试
+                        rec.setdefault("escalate_errors", []).append(f"{j.get('id')}: {type(e).__name__}: {e}"[:200])
             # ③ meta
             for j in jobs:
                 if j.get("kind") != "meta" or j.get("state") != "pending":
@@ -653,6 +662,12 @@ def _fail(root: Path, j: dict, cfg: dict, why: str, rec: dict, final: bool = Fal
     AJ.log(j, ("失败，下一拍重排：" if retry else "失败，不再重试：") + why)
     AJ.save_job(root, j)
     rec["failed"].append({"id": j["id"], "why": why[:120], "retry": retry})
+    if not retry and not final:                # W-FIX-PIPE #13：定案失败不留死角——换种子重排 / 差一点候选卡 / 需要修改描述卡
+        try:
+            if after_final_fail(root, j, cfg, why, rec) != "skip":
+                return
+        except Exception as e:  # noqa: BLE001  # arch-ok: 升级动作出错 → 退回原来的卡点登记（下面），记心跳
+            rec.setdefault("escalate_errors", []).append(f"{j.get('id')}: {type(e).__name__}: {e}"[:200])
     if not retry:
         try:
             AJ._report(root, j["run"], j.get("episode") or 0, "8 资产就绪", f"资产作业 {j['id']}（{j.get('who')}）连续失败：{why}", True,
@@ -661,6 +676,91 @@ def _fail(root: Path, j: dict, cfg: dict, why: str, rec: dict, final: bool = Fal
                         else "看 data/pipeline/asset_jobs/<run>/<job>.json 的 log；修好后把 state 改回 pending"))
         except Exception:  # noqa: BLE001  登记卡点失败不影响作业状态
             pass
+
+
+# W-FIX-PIPE #13（SCAN_20261107，L-212）：资产作业定案失败后没人管（item-ch_jiang_yubai-A-outfit1 失败两次，没有卡）。改：
+#   ① 定案失败（内容不过，非身份核不上）→ 自动换一批没用过的种子重排，最多 auto_requeue_max 次（config/pipeline/asset_worker.json，默认 2）；
+#   ② 用尽 → 待你看“需要修改描述”（owner_queue kind=asset_revise：名字 + 现在的描述 + 一直卡在哪一句大白话 + 唯一动作“修改”）。
+#      PS-MASTER 11-07：“只给看通过的图”优先——没过的候选一律不给看。项目方写的一句进作业 owner_notes → _compile 加进提示词 → 重排。
+#      不是内容不过（子进程没收尾 / 起不来）→ 原来的“连续失败”卡点交总调度。
+#   每个作业只升级一次（job.escalated）；tick 每拍顺带扫已定案没升级的旧作业（每拍最多 ESCALATE_PER_TICK 个）。
+AUTO_REQUEUE_MAX = 2
+ESCALATE_PER_TICK = 3
+
+
+def _main_problem(why: str) -> str:
+    """一句大白话：这件东西一直卡在哪"""
+    m = re.search(r"Q9 报的缺陷：(?:设定候选口径：)?([^（；|｜]+)", str(why))
+    if m:
+        return m.group(1).strip()[:60]
+    m = re.search(r"：(\d+ 张候选里：[^。]+)", str(why))
+    return (m.group(1) if m else str(why))[:80]
+
+
+def escalate(root: Path, j: dict, why: str, rec: dict) -> str:
+    """重排用尽 → need_revise（内容不过：待你看“需要修改描述”）/ reported（非内容失败：原“连续失败”卡点）"""
+    sp = j.get("spec") or {}
+    who = sp.get("name") or j.get("target")
+    what = {"face": "身份脸", "scene": "场景底图", "sheet": "造型设定图"}.get(j.get("kind") or "", f"单品“{sp.get('label') or j.get('target')}”")
+    tries = int(j.get("auto_requeues") or 0)
+    if not any(k in str(why) for k in ("张不过", "preflight 不过", "过检")):
+        # 不是内容不过（子进程没收尾 / 起不来 / 写入失败）：改描述没用，按原来的“连续失败”卡点交总调度（不说成要项目方改）
+        AJ._report(root, j["run"], j.get("episode") or 0, "8 资产就绪", f"资产作业 {j['id']}（{j.get('who')}）连续失败（自动重排 {tries} 次后）：{why}", True,
+                   "看 data/pipeline/asset_jobs/<run>/<job>.json 的 log；修好后把 state 改回 pending")
+        j.update(escalated={"at": AJ._now(), "kind": "reported", "why": str(why)[:200]})
+        AJ.save_job(root, j)
+        rec.setdefault("escalated", []).append({"id": j["id"], "kind": "reported"})
+        return "reported"
+    prob = _main_problem(why)
+    line = f"需要修改描述：{who}的{what}换了 {tries + 1} 批种子都出不来（一直卡在：{prob}）"
+    req = {"id": f"rv:{j['id']}", "run": j["run"], "job": j["id"], "episode": j.get("episode"), "asset_kind": j.get("kind"),
+           "name": who, "what": what, "spec_text": str(sp.get("label") or sp.get("object") or sp.get("img") or "")[:160], "reason": prob,
+           "source": "资产线（自动重排用尽）"}
+    try:
+        AJ.guard_run(root, j["run"])
+        _owner_queue().enqueue_asset_revise(root, req)
+        how = "待你看“需要修改描述”"
+    except Exception as e:  # noqa: BLE001  # arch-ok: 投不进待你看 → 退回卡点板（不静默），记心跳
+        rec.setdefault("escalate_errors", []).append(f"{j['id']}: enqueue_asset_revise {type(e).__name__}: {e}"[:200])
+        AJ._report(root, j["run"], j.get("episode") or 0, "8 资产就绪", line, True, "在资产中心改这一项的描述，改完系统自动重出")
+        how = "卡点板（待你看投递失败）"
+    j.update(escalated={"at": AJ._now(), "kind": "need_revise", "why": line, "card": req["id"]})
+    AJ.log(j, f"{line} → {how}")
+    AJ.save_job(root, j)
+    rec.setdefault("escalated", []).append({"id": j["id"], "kind": "need_revise"})
+    return "need_revise"
+
+
+def _owner_queue():
+    AJ._owner_pick()                        # 把 services/api 放进 sys.path（与 post_pick 同一入口）
+    from ns_api import owner_queue as OQ   # noqa: PLC0415
+    return OQ
+
+
+def fresh_seeds(job: dict, base: int, n: int) -> list[int]:
+    """从 base 起 n 粒本作业没用过的种子（人工 requeue 会把 attempts 归零 → 同一批种子重出，自动重排要真换一批）"""
+    used = {c.get("seed") for c in job.get("candidates") or [] if isinstance(c, dict)}
+    out, x = [], int(base)
+    while len(out) < n:
+        if x not in used:
+            out.append(x)
+        x += 1
+    return out
+
+
+def after_final_fail(root: Path, j: dict, cfg: dict, why: str, rec: dict) -> str:
+    """定案失败之后的下一步 → requeued | need_revise | reported | skip（不适用：非出图作业 / 身份核不上 / 已升级过）"""
+    if j.get("kind") not in AJ.RENDER_KINDS or j.get("lane_suspect") or j.get("escalated"):
+        return "skip"
+    k = int(cfg.get("auto_requeue_max", AUTO_REQUEUE_MAX))
+    n = int(j.get("auto_requeues") or 0)
+    if n < k and "preflight 不过" not in str(why):
+        j.update(state="pending", final=False, auto_requeues=n + 1, retry_after=None)
+        AJ.log(j, f"定案失败后自动换一批新种子重排（第 {n + 1}/{k} 次）：{str(why)[:160]}")
+        AJ.save_job(root, j)
+        rec.setdefault("auto_requeued", []).append({"id": j["id"], "n": n + 1})
+        return "requeued"
+    return escalate(root, j, why, rec)
 
 
 def _suspect_alive(ps: dict) -> bool:
@@ -990,6 +1090,9 @@ def _compile(job: dict, root: Path = ROOT):
     if job["kind"] in ("scene", "item"):
         jc = empty_suffix(jc, job["spec"])
         jc["compile_trace"] = FJ.trace_of(jc)
+    if job.get("owner_notes"):                    # W-FIX-PIPE #13：项目方在“需要修改描述”写的话，原样加在提示词最后
+        jc["prompt"] = with_owner_notes(jc["prompt"], job)
+        jc["compile_trace"] = FJ.trace_of(jc)
     if job["kind"] in ("scene", "item"):          # 物件 / 底图类：编译器再往里塞人像段就在出图前拦下（W9 守卫，W6c+ 扩到 scene）
         bad = person_phrases(jc["prompt"])
         if bad:
@@ -998,6 +1101,11 @@ def _compile(job: dict, root: Path = ROOT):
     if job["kind"] == "sheet":
         require_face_ref(root, job, jc)
     return jc
+
+
+def with_owner_notes(prompt: str, job: dict) -> str:
+    notes = [str(x).strip() for x in job.get("owner_notes") or [] if str(x).strip()]
+    return f"{prompt}；" + "；".join(notes) if notes else prompt
 
 
 NO_SHOT_LANGUAGE_KINDS = ("sheet", "item", "scene")     # 编译走 mode="sheet"（不加镜头语言段 / 融合句 / 视线句）；face 走 sheet + prompt_override（见 _compile）
@@ -1377,6 +1485,7 @@ def run_job(jp: Path, lane: str, root: Path = ROOT, renderer=None, cfg: dict | N
     job = AJ.load_job(jp)
     need = int((cfg.get("candidates") or {}).get(job["kind"]) or 2)
     base = 1000 + 100 * int(job.get("attempts") or 1)
+    seeds = fresh_seeds(job, base, need * 2)
     passed: list[dict] = []
     errors: list[str] = []
     rejects: list[str] = []
@@ -1392,7 +1501,7 @@ def run_job(jp: Path, lane: str, root: Path = ROOT, renderer=None, cfg: dict | N
             if streak >= int(cfg.get("unmeasured_streak") or 2):
                 AJ.log(job, f"连续 {streak} 张候选没测出（看图服务不可用），不再出新种子，等退避后重试")
                 break
-            seed = base + i
+            seed = seeds[i]                    # W-FIX-PIPE #13：跳过本作业用过的种子（自动重排 = 真换一批）
             try:
                 r = (renderer or render_one)(job, lane, seed, root)
             except Exception as e:  # noqa: BLE001  一张失败记下继续下一粒种子

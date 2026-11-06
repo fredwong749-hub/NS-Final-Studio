@@ -1172,7 +1172,9 @@ def test_dead_child_without_enough_candidates_fails_then_reports(root, monkeypat
     j = _sheet_job_with_cands(root, monkeypatch, n_pass=1)
     j["attempts"] = 2
     AJ.save_job(root, j)
-    AW.tick(root, cfg=AW.config(root), runs={RUN: 1}, spawn=lambda *a: None, lanes=lambda c, u: [], check=lambda run, ep: {"ready": False, "gaps": []}, ln=FakeLanes())
+    # W-FIX-PIPE #13：定案失败默认先自动换种子重排（auto_requeue_max）；这里关掉它，验原来的“定案 + 报卡点”
+    AW.tick(root, cfg={**AW.config(root), "auto_requeue_max": 0}, runs={RUN: 1}, spawn=lambda *a: None, lanes=lambda c, u: [],
+            check=lambda run, ep: {"ready": False, "gaps": []}, ln=FakeLanes())
     j2 = AJ.load_job(AJ.job_path(root, RUN, j["id"]))
     assert j2["state"] == "failed" and j2["final"] is True and "没收尾" in j2["error"]
     assert "连续失败" in (root / "data/pipeline/issues.jsonl").read_text(encoding="utf-8")

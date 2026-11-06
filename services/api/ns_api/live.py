@@ -29,6 +29,8 @@ import os
 import re
 import threading
 import time
+
+from ns_api import clock as _clock   # L-212 #10：页面时间一律 JST
 from pathlib import Path
 
 from fastapi import APIRouter, Request
@@ -450,7 +452,7 @@ def _why_down(seg: str) -> str:
     if seg == "voice":
         try:
             mt = (REPO / "config" / "voices.json").stat().st_mtime
-            return f"演员表 / 音色 {time.strftime('%H:%M', time.localtime(mt))} 改了，这些句子要按新音色重配"
+            return f"演员表 / 音色 {_clock.epoch_jst(mt, '%H:%M')} 改了，这些句子要按新音色重配"
         except OSError:
             return "音色改了，这些句子要重配"
     if seg in ("first", "last", "video"):

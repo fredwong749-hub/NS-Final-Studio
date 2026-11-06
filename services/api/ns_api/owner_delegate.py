@@ -31,6 +31,8 @@ import sys
 import tempfile
 import threading
 import time
+
+from ns_api import clock as _clock   # L-212 #10：V2_LIVE 行首钟点 JST（和 CHANNEL 同口径）
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -859,7 +861,7 @@ def _frame_live(root: Path, line: str) -> None:
     sp = importlib.util.spec_from_file_location("report_issue_for_delegate", _CODE_ROOT / "tools" / "master" / "report_issue.py")
     m = importlib.util.module_from_spec(sp)
     sp.loader.exec_module(m)
-    m._insert_live(f"{time.strftime('%H:%M')} {line}", Path(root) / "docs" / "master" / "V2_LIVE.md")
+    m._insert_live(f"{_clock.jst_now_str('%H:%M')} {line}", Path(root) / "docs" / "master" / "V2_LIVE.md")
 
 
 # ------------------------------------------------------------------ 一拍

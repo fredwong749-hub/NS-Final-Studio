@@ -18,6 +18,20 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools" / "autopilot"))
 sys.path.insert(0, str(ROOT / "services" / "agent"))
 import producer as PR  # noqa: E402
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _keep_ns_run(monkeypatch):
+    """W-FIX-PIPE：接力测试里的 VideoBridge 会 setdefault NS_RUN=tv_w44 / OFFLINE_SELF，不还原就漏进后面的 test_fix_night2（run_ctx 判剧名失败）"""
+    for k in ("NS_RUN", "OFFLINE_SELF"):
+        if k in os.environ:
+            monkeypatch.setenv(k, os.environ[k])
+        else:
+            monkeypatch.delenv(k, raising=False)
+            monkeypatch.setenv(k, "")
+            monkeypatch.delenv(k)
+    yield
 
 
 def _paths(tmp_path):

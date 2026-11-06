@@ -58,18 +58,17 @@ def test_video_ledger_counts_from_registry(monkeypatch):
 
 
 def test_kpi_marks_start_before_import(tmp_path):
-    """r9：大脑 KPI 的起点（两台里最早派单）早于本版剧本导入 → start_before_import=True，面板写“含之前几轮重做”；晚于 → False"""
+    """r9 → L-212 #9：首派早于本版剧本导入 → 计时从导入重新算（clock_from=import，start_before_import=True）；导入更早 → 按首派"""
     from ns_api import episode_kpi as K
     now = 1_800_000_000.0
     reg = {"run": "r", "episodes": [{"ep": 1, "title": "一", "shots": [{"shot": "ep01-S1", "index": 1, "objects": {"first": {"status": "passed"}}}]}]}
     snap = {"t": now - 10, "kpi": {"1": {"start": "11-03 21:47", "elapsed_min": 4000.0}}}
     out = K.build(registry=reg, renders=tmp_path, snapshot=snap, local_starts={}, now=now, url=lambda r: None, vurl=lambda r: None,
-                  import_epoch=lambda ep: now - 300 * 60)
+                  imports={"1": now - 300 * 60})
     e = out["episodes"][0]
-    assert e["start_before_import"] is True and e["import_at"] is not None and e["elapsed_min"] == 4000.0
+    assert e["start_before_import"] is True and e["import_at"] is not None and e["elapsed_min"] == 300.0 and e["clock_from"] == "import"
     out = K.build(registry=reg, renders=tmp_path, snapshot=snap, local_starts={}, now=now, url=lambda r: None, vurl=lambda r: None,
-                  import_epoch=lambda ep: now - 5000 * 60)
-    assert out["episodes"][0]["start_before_import"] is False
-    out = K.build(registry=reg, renders=tmp_path, snapshot=snap, local_starts={}, now=now, url=lambda r: None, vurl=lambda r: None,
-                  import_epoch=lambda ep: None)
+                  imports={"1": now - 5000 * 60})
+    assert out["episodes"][0]["start_before_import"] is False and out["episodes"][0]["elapsed_min"] == 4000.0
+    out = K.build(registry=reg, renders=tmp_path, snapshot=snap, local_starts={}, now=now, url=lambda r: None, vurl=lambda r: None)
     assert out["episodes"][0]["start_before_import"] is False and out["episodes"][0]["import_at"] is None

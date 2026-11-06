@@ -1,6 +1,6 @@
 """整集“当前最新预览”接口（ASSEMBLY 11-02，项目方 16:4x：连播本集要看真正拼好的整集）。
 
-    GET /api/episodes/{n}/preview → {url, srt_url, built_at, shots:[{shot, index, kind: video|placeholder|best_effort,
+    GET /api/episodes/{n}/preview → {url, srt_url, state: ready|building|none（没预览也回 200，url=null）, built_at, shots:[{shot, index, kind: video|placeholder|best_effort,
                                     start_s, duration_s}], duration_s, stale, building, eta_s}
 
 文件由 tools/assemble_series.py --preview 产出（data/renders/epNN/_final/preview_latest.mp4 + _manifest.json），
@@ -13,7 +13,7 @@ from ns_api import run_paths as _RP   # K-OPS-F24：渲染根目录按当前剧�
 import json
 import time
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
 from ns_render import pipeline as P
 
@@ -43,7 +43,7 @@ def _film_view(film: dict, tl: dict | None) -> dict:
             "duration_s": film.get("duration_s"), "bgm": ((tl or {}).get("bgm") or {}).get("file") if isinstance((tl or {}).get("bgm"), dict) else None,
             "video_shots": sum(1 for s in shots if s["kind"] == "video"), "best_effort_shots": sum(1 for s in shots if s["kind"] == "best_effort"),
             "placeholder_shots": sum(1 for s in shots if s["kind"] == "placeholder"),
-            "shots": shots, "stale": False, "building": False, "eta_s": None,
+            "shots": shots, "stale": False, "building": False, "eta_s": None, "state": "ready",
             "source": "film", "film": {"name": film["name"], "version": film.get("version"), "at": film["at"], "size": film.get("size"),
                                        "kind": g.get("kind") or "unknown", "kind_word": g.get("kind_word") or "整集成片", "word": g.get("word") or "闸门记录还没同步到本机",
                                        "verdict": g.get("verdict"), "missing_n": g.get("missing_n"), "missing": g.get("missing") or [],
@@ -63,9 +63,12 @@ def episode_preview(n: int):
     if film and (not have_pv or float(film["mtime"]) >= (fin / "preview_latest.mp4").stat().st_mtime):
         return _film_view(film, C._tl(_RP.episodes_for_data(P.DATA) / film["name"]))
     if not have_pv:
+        # L-212 #15：没预览 = 正常状态，回 200 + state（以前 404，前端每 20 s 轮询 → 日志里每集 4000+ 条 404）
         if sw.get("building"):
-            return {"url": None, "building": True, "stale": True, "eta_s": sw.get("eta_s"), "shots": []}
-        raise HTTPException(404, "这一集还没有拼好的预览（等巡检拼，或手动跑 tools/assemble_series.py epNN --preview）")
+            return {"url": None, "srt_url": None, "state": "building", "building": True, "stale": True,
+                    "eta_s": sw.get("eta_s"), "shots": [], "word": "这一集的整集预览正在拼"}
+        return {"url": None, "srt_url": None, "state": "none", "building": False, "stale": False, "eta_s": None,
+                "shots": [], "word": "这一集还没有拼好的整集预览，先用逐镜看"}
     mt = int((fin / "preview_latest.mp4").stat().st_mtime)
     eta = None
     if sw.get("building"):
@@ -77,7 +80,7 @@ def episode_preview(n: int):
     return {
         "url": f"/files/{rel}/preview_latest.mp4?v={mt}",
         "srt_url": f"/files/{rel}/preview_latest.srt?v={mt}",
-        "source": "preview", "film": None,
+        "source": "preview", "film": None, "state": "ready",
         "built_at": man.get("built_at_iso"), "built_ts": man.get("built_at"),
         "duration_s": man.get("duration_s"), "bgm": man.get("bgm"),
         "video_shots": man.get("video_shots"), "best_effort_shots": man.get("best_effort_shots"),

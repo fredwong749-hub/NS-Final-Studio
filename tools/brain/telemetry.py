@@ -285,6 +285,13 @@ class Env:
     def now(self) -> float:
         return time.time()
 
+    def import_epochs(self, run: str) -> dict:
+        """本机 imports.jsonl → {集: 最近导入 epoch}（KPI 计时起点用，L-212 #9）"""
+        try:
+            return _load("kpi_core_for_brain", "tools/brain/kpi_core.py", self.root).import_epochs(self.root, run)
+        except Exception:  # noqa: BLE001  # arch-ok: 读不到导入记录 = 起点按首派
+            return {}
+
     def j(self, rel, default=None):
         return _j(self.root / rel, default)
 
@@ -351,9 +358,10 @@ class Env:
 
 
 # ------------------------------------------------------------------ 纯逻辑
-def kpi(now: float, probes: dict, budget_min: int = KPI_EPISODE_MIN) -> dict:
-    """每集 KPI 计时：起点 = 两台里该集最早的首次派单；完成比 = 已定下视频 / 总镜；ETA 线性外推"""
-    out = {}
+def kpi(now: float, probes: dict, budget_min: int = KPI_EPISODE_MIN, imports: dict | None = None) -> dict:
+    """每集 KPI：两台探针 → 起点（各台首派取最早）+ 完成数（逐字段取最大）→ kpi_core.episodes（L-212 #9：和网页 KPI 面板同一函数；
+    起点 = max(首派, 最近导入)，imports = kpi_core.import_epochs）"""
+    KC = _load("kpi_core_for_brain", "tools/brain/kpi_core.py")
     starts, have = {}, {}
     for pr in probes.values():
         if not pr:
@@ -362,29 +370,9 @@ def kpi(now: float, probes: dict, budget_min: int = KPI_EPISODE_MIN) -> dict:
             if ep not in starts or t < starts[ep]:
                 starts[ep] = t
         for ep, E in ((pr.get("registry") or {}).get("episodes") or {}).items():
-            hv = E.get("have") or {}
-            tot, done, ff, ll = int(hv.get("t") or 0), int(hv.get("v") or 0), int(hv.get("f") or 0), int(hv.get("l") or 0)
-            # W-SCAN 11-07：逐字段取两台最大值。以前整条记录“总数或视频数更大才替换”→ 两台视频都是 0 时先探到的 gpu33（首帧 0）
-            # 把 gpu36（首帧 14）盖掉，大脑看到 ep02 0/16
-            cur = have.setdefault(ep, {"total": 0, "video_done": 0, "first_done": 0, "last_done": 0, "assembled": False})
-            cur.update(total=max(cur["total"], tot), video_done=max(cur["video_done"], done), first_done=max(cur["first_done"], ff),
-                       last_done=max(cur["last_done"], ll), assembled=cur["assembled"] or bool(E.get("asm")))
-    for ep in sorted(set(starts) | set(have), key=lambda x: int(x) if str(x).isdigit() else 0):
-        h = have.get(ep) or {}
-        t0 = starts.get(ep)
-        rec = {"start": jst(t0, "%m-%d %H:%M") if t0 else None, "elapsed_min": round((now - t0) / 60, 1) if t0 else None,
-               "budget_min": budget_min, **h}
-        if h.get("assembled"):
-            rec["state"] = "assembled"
-        elif t0 and h.get("total"):
-            frac = h["video_done"] / h["total"]
-            rec["done_frac"] = round(frac, 2)
-            rec["eta_min"] = round(rec["elapsed_min"] / frac - rec["elapsed_min"], 1) if frac > 0 else None
-            rec["state"] = "over_budget" if rec["elapsed_min"] > budget_min else "in_budget"
-        else:
-            rec["state"] = "not_started" if not t0 else "no_registry"
-        out[str(ep)] = rec
-    return out
+            # W-SCAN 11-07：逐字段取两台最大值（以前整条替换 → gpu33 首帧 0 把 gpu36 的 14 盖掉）
+            have[ep] = KC.merge_have(have.get(ep), **KC.have_from_registry_episode(E))
+    return KC.episodes(now, starts, have, imports, budget_min)
 
 
 def lane_view(lanes: dict, probes: dict, lr_cfg: dict, phases: dict) -> dict:
@@ -501,7 +489,7 @@ def snapshot(env: Env | None = None, cfg: dict | None = None, save: bool = True)
                 phases[str(ep)] = rec["phase"]
     ovr = env.j("data/pipeline/lane_roles_override.json", {}) or {}
     snap = {"schema": SCHEMA, "at": jst(now, "%Y-%m-%d %H:%M:%S+09:00"), "t": now, "run": run, "legend": LEGEND,
-            "kpi": kpi(now, probes), "lanes": lane_view(lanes, probes, lr_cfg, phases),
+            "kpi": kpi(now, probes, imports=env.import_epochs(run)), "lanes": lane_view(lanes, probes, lr_cfg, phases),
             "lane_roles": {"enabled": lr_cfg.get("enabled"), "from_episode": lr_cfg.get("from_episode"), "phases": phases,
                            "tables": lr_cfg.get("phases"), "override": (ovr.get(run) or {}) if isinstance(ovr, dict) else {}},
             "partition": (env.j("data/state/netfix/partition.json", None) or env.j("config/netfix/partition.json", {}) or {}).get("images"),

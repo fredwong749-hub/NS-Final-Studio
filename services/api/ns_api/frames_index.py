@@ -13,6 +13,8 @@ GET /api/frames-index?ep=&status=&char=
 from __future__ import annotations
 
 import json
+
+from ns_api import swr as _swr
 import re
 from pathlib import Path
 
@@ -282,4 +284,9 @@ def frames_index(ep: int | None = None, status: str | None = None, char: str | N
         raise HTTPException(422, f"status 只能是 {' | '.join(STATUS)}")
     if run is not None and not re.fullmatch(r"[A-Za-z0-9_\-]+", run):
         raise HTTPException(422, "run 只能是剧名（字母数字下划线横线）")
-    return build(ep, status, char, run=run)
+    # L-212（SCAN #16）：首次 6.2 s → 先回旧值、后台重算（ns_api/swr.py，口径同 pipeline_status r13）
+    from ns_render import pipeline as _P  # noqa: PLC0415  数据根进缓存键（测试会换临时目录）
+    return _SWR.get((str(_P.DATA), ep, status, char, run), lambda: build(ep, status, char, run=run))
+
+
+_SWR = _swr.SWRCache("frames-index", fresh_s=5.0, stale_s=120.0)

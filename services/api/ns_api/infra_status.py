@@ -17,6 +17,8 @@ from __future__ import annotations
 import json
 import threading
 import time
+
+from ns_api import clock as _clock   # L-212 #10：页面时间一律 JST
 import urllib.request
 from pathlib import Path
 
@@ -65,9 +67,9 @@ def _hm(t: float | None) -> str | None:
     if not t:
         return None
     try:
-        if float(t) < 0:      # W45：Linux 的 localtime 接受负数（1938 年的时间），Windows 才抛 OSError——两边一律判非法
+        if float(t) < 0:      # W45：负数时间戳一律判非法
             return None
-        return time.strftime("%H:%M:%S", time.localtime(float(t)))
+        return _clock.epoch_jst(float(t), "%H:%M:%S")   # L-212 #10：页面时间 JST
     except (OSError, OverflowError, ValueError, TypeError):   # arch-ok: 非法时间戳 = 不显示时间，状态照出
         return None
 

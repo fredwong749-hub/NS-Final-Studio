@@ -23,7 +23,7 @@ const LEVELS: { lv: BlockLevel; title: string; sub: string; mark: string }[] = [
   { lv: "grey", title: "只是告诉你，不用做事", sub: "系统正在处理，处理完会自己消失", mark: "⚪" },
 ];
 const levelOf = (it: QueueItem): BlockLevel => it.block_level ?? (it.kind === "info" ? "grey" : it.kind === "decide" || it.kind === "gate" ? "red" : "yellow");
-const KIND_ORDER: Record<string, number> = { decide: 0, gate: 1, look: 2, face: 3, scene: 4, sheet: 5, item: 6, frame: 7, voice: 8, pick: 9, spot: 10, info: 11 };
+const KIND_ORDER: Record<string, number> = { decide: 0, asset_revise: 0, gate: 1, look: 2, face: 3, scene: 4, sheet: 5, item: 6, frame: 7, voice: 8, pick: 9, spot: 10, info: 11 };
 const LV_ORDER: Record<BlockLevel, number> = { red: 0, yellow: 1, grey: 2 };
 /** 打开一个链接动作：页面内锚点换 hash；审核页 / 外部文件开新页 */
 function openHref(href: string) {
@@ -32,6 +32,7 @@ function openHref(href: string) {
 }
 const REASONS: Record<QueueItem["kind"], string[]> = {
   info: [],
+  asset_revise: [],
   gate: [],
   decide: ["同意系统建议", "要先看更多", "以后都这样处理"],
   spot: ["身份不像", "造型不对", "手 / 肢体坏", "场景不对", "画面假"],
@@ -231,7 +232,7 @@ function TwoActs({ item, onDecide, onOpen, reason, sticky }: { item: QueueItem; 
   const said = (reason ?? "").trim();
   return (
     <div className={`oq-acts oq-two${sticky ? " sticky" : ""}`} onClick={(e) => e.stopPropagation()}>
-      {use.kind === "choice" ? (
+      {use.kind === "none" && !use.label ? null : use.kind === "choice" ? (
         <button className="oq-main" data-act="use" onClick={() => onDecide(use.key, said)} title={`${use.label}（键盘 1）`}>
           <span>{use.label}</span>
           <kbd>1</kbd>

@@ -143,8 +143,9 @@ def test_preview_prefers_newer_film_and_fixes_url(box):
     now = time.time() + 5
     os.utime(box / "data" / "episodes" / "ep01_v9.mp4", (now, now))
     assert c.get("/api/episodes/1/preview").json()["source"] == "film"
-    # 第 2 集什么都没有 → 404（口径不变）
-    assert c.get("/api/episodes/2/preview").status_code == 404
+    # 第 2 集什么都没有 → L-212 #15：200 + url=null + state=none（以前 404，前端轮询刷满日志）
+    r2 = c.get("/api/episodes/2/preview")
+    assert r2.status_code == 200 and r2.json()["url"] is None and r2.json()["state"] == "none"
     C._TL_CACHE.clear()
 
 

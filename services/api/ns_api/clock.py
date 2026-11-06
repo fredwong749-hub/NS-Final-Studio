@@ -43,3 +43,16 @@ def server_naive_jst(s: str | None, with_offset: bool = False) -> str | None:
 
 def jst_now_str(fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
     return datetime.now(JST).strftime(fmt)
+
+
+def epoch_jst(t: float | None, fmt: str = "%Y-%m-%dT%H:%M:%S") -> str | None:
+    """epoch（time.time() / 文件 mtime）→ JST 串。页面上显示“现在 / 文件改动时刻”一律走这里（L-212 #10）；
+    别用 time.strftime(fmt, time.localtime(t))——笔记本系统时钟是美东，页面会差 14 小时。非法值 → None"""
+    if t is None or t == "":
+        return None
+    try:
+        if float(t) < 0:
+            return None
+        return datetime.fromtimestamp(float(t), JST).strftime(fmt)
+    except (OSError, OverflowError, ValueError, TypeError):  # arch-ok: 显示层：非法时间戳 = 不显示时间
+        return None

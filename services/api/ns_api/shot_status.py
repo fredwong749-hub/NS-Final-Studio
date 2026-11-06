@@ -52,19 +52,67 @@ CHECK_WORD = {"Q1": "身份脸不像 / 缺身份脸", "Q2": "造型不对（缺�
               "accessory_mismatch": "饰品不对", "outfit_mismatch": "服装不对", "shoes_mismatch": "鞋不对", "plastic_doll": "塑料感",
               "people": "人数不对", "text": "画面里有文字", "framing": "景别不对"}
 _reg: dict = {"mt": None, "val": {}}
+HOSTS = ("gpu33", "gpu36")
+HOST_REG_MAX_AGE_S = 6 * 3600     # 那台登记表心跳超过这么久 = 旧的，不参与合并
+_MERGED: dict = {"key": None, "val": {}}
+
+
+def _host_copies(p: Path) -> list[Path]:
+    """resident_sync.pull 拉回的两台登记表：data/_offline_pull/<host>/<同一相对路径>（只对仓库里的登记表；测试临时文件 = 无）"""
+    try:
+        rel = p.resolve().relative_to(ROOT.resolve())
+    except ValueError:
+        return []
+    return [ROOT / "data" / "_offline_pull" / h / rel for h in HOSTS]
+
+
+def _mt(f: Path) -> float | None:
+    try:
+        return f.stat().st_mtime
+    except OSError:  # arch-ok: 没有 / 正被替换 = 当作缺
+        return None
+
+
+def merged_registry(p: Path | None = None) -> dict:
+    """W-FIX-PIPE #8（L-212）：本机登记表 + 两台拉回的登记表按对象合并（tools/brain/reg_merge：走得最远的状态赢，驳回 / 重做标记优先）。
+    网页标签 / 阶段块 / KPI 面板都读这一份。按 (路径, mtime) 缓存；合并模块读不到 = 只用本机那份"""
+    import time as _t
+    p = p or registry_path()
+    files = [p] + _host_copies(p)
+    key = tuple((str(f), _mt(f)) for f in files)
+    if _MERGED["key"] == key:
+        return _MERGED["val"]
+    try:
+        base = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        base = {}
+    others = {}
+    for h, f in zip(HOSTS, files[1:]):
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):  # arch-ok: 那台的登记表还没拉回 / 正在写 = 这一拍不合并它
+            continue
+        if _t.time() - float(d.get("heartbeat") or 0) <= HOST_REG_MAX_AGE_S:
+            others[h] = d
+    val = base
+    if others:
+        try:
+            from tools.brain import reg_merge as _RM  # noqa: PLC0415
+            val = _RM.merge_registries(base, others)
+        except Exception:  # noqa: BLE001  # arch-ok: 合并出错 = 退回本机那份（只影响显示）
+            val = base
+    _MERGED.update(key=key, val=val)
+    return val
 
 
 def _registry() -> dict[str, dict]:
     p = registry_path()
     try:
-        mt = (str(p), p.stat().st_mtime)
+        mt = (str(p), p.stat().st_mtime, tuple(_mt(f) for f in _host_copies(p)))
     except OSError:
         return {}
     if _reg["mt"] != mt:
-        try:
-            d = json.loads(p.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            d = {}
+        d = merged_registry(p)
         val = {}
         for ep in d.get("episodes") or []:
             for s in ep.get("shots") or []:
@@ -236,14 +284,11 @@ _REG_EP: dict = {"mt": None, "val": {}}
 def _registry_eps() -> dict[int, dict]:
     p = registry_path()
     try:
-        mt = (str(p), p.stat().st_mtime)
+        mt = (str(p), p.stat().st_mtime, tuple(_mt(f) for f in _host_copies(p)))
     except OSError:
         return {}
     if _REG_EP["mt"] != mt:
-        try:
-            d = json.loads(p.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            d = {}
+        d = merged_registry(p)
         _REG_EP.update(mt=mt, val={int(e.get("ep") or 0): e for e in d.get("episodes") or []})
     return _REG_EP["val"]
 

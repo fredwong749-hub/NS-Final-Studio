@@ -21,8 +21,8 @@ type Ep = {
   ep: number; title: string; total: number; phase: string; phase_word: string;
   state: "assembled" | "in_budget" | "over_budget" | "not_started";
   start: string | null; elapsed_min: number | null; eta_min: number | null; over_min: number | null;
-  /** r9：起点早于本版剧本导入（计时含之前几轮重做，L-205 的 50 分钟不该这么算；口径由大脑定，这里只写明） */
-  import_at?: string | null; start_before_import?: boolean;
+  /** L-212 #9：起点 = max(首次派单, 最近导入)（和大脑同一函数）；clock_from=import = 重新导入后从导入时刻重新计时 */
+  import_at?: string | null; start_before_import?: boolean; clock_from?: "dispatch" | "import" | null;
   first_done: number; last_done: number; fallback_n: number; video_done: number; assembled: boolean; shots: Shot[];
   /** r12：最新一版整集成片（没有 = null） */
   film?: Film | null;
@@ -56,11 +56,11 @@ function Budget({ e, budget }: { e: Ep; budget: number }) {
   const pct = e.elapsed_min == null ? 0 : Math.min(100, (e.elapsed_min / budget) * 100);
   const over = e.state === "over_budget";
   return (
-    <span className={`kpi-bud s-${e.state}`} title={`起点 ${e.start ?? "未知"}（JST，两台里最早派单）${e.start_before_import ? ` · 早于本版剧本导入 ${e.import_at ?? ""}：计时含之前几轮重做` : ""}· 预算 ${budget} 分钟（L-205）${e.eta_min != null ? ` · 按已定视频比例外推还要 ${fmtMin(e.eta_min)}` : ""}`}>
+    <span className={`kpi-bud s-${e.state}`} title={`起点 ${e.start ?? "未知"}（JST，${e.clock_from === "import" ? "本版剧本导入时刻" : "两台里最早派单"}）· 预算 ${budget} 分钟（L-205）${e.eta_min != null ? ` · 按已定视频比例外推还要 ${fmtMin(e.eta_min)}` : ""}`}>
       <i className="kpi-bar"><b style={{ width: `${pct}%` }} /></i>
       <span>
         {e.state === "assembled" ? `用时 ${fmtMin(e.elapsed_min)} · 已合成` : over ? `用时 ${fmtMin(e.elapsed_min)} · 超预算 ${fmtMin(e.over_min)}` : `用时 ${fmtMin(e.elapsed_min)} / ${budget} 分钟`}
-        {e.start_before_import ? <small className="kpi-note">（含之前几轮重做）</small> : null}
+        {e.clock_from === "import" ? <small className="kpi-note">（从本版剧本导入算起）</small> : null}
       </span>
     </span>
   );

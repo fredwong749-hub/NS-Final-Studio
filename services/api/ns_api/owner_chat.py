@@ -30,6 +30,8 @@ import re
 import subprocess
 import threading
 import time
+
+from ns_api import clock as _clock   # L-212 #10：页面时间一律 JST
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -171,7 +173,7 @@ def digest_sentence(q: dict) -> str:
 
 def digest(root: Path = REPO) -> dict:
     q = queue(root)
-    return {"schema": "nsfs.owner_chat_digest/1", "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "sentence": digest_sentence(q),
+    return {"schema": "nsfs.owner_chat_digest/1", "at": _clock.jst_now_str("%Y-%m-%dT%H:%M:%S"), "sentence": digest_sentence(q),
             "count": q.get("count", len(q.get("items") or [])), "counts": q.get("counts") or {}}
 
 

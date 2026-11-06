@@ -34,7 +34,7 @@ export interface QueueAction {
 export type BlockLevel = "red" | "yellow" | "grey";
 export interface QueueItem {
   id: string;
-  kind: "gate" | "decide" | "spot" | "pick" | "info";
+  kind: "gate" | "decide" | "spot" | "pick" | "info" | "asset_revise";
   kind_label: string;
   /** 通知直说（L-172）：一句“要你做什么”/ 为什么找你 / ≤3 个按钮 / 阻塞程度（red 卡住 · yellow 等你 · grey 只读） */
   say_what?: string;

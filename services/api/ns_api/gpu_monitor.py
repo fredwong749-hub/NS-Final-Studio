@@ -13,6 +13,8 @@ import json
 import subprocess
 import threading
 import time
+
+from ns_api import clock as _clock   # L-212 #10：页面时间一律 JST
 import urllib.request
 
 from fastapi import APIRouter
@@ -180,10 +182,10 @@ def collect(now: float | None = None, ssh: bool = True) -> dict:
             "power_limit_w": (eg.get(str(i)) or {}).get("power_limit_w"),
             "processes": procs, "train_lock": lock_owner, "gpu_lock": _owner(b.get("busy_by")) if not tl else None,
             "lend": lend, "comfy": b.get("comfy"), "busy": busy,
-            "last_busy_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(_last_busy[i])),
+            "last_busy_at": _clock.epoch_jst(_last_busy[i]),
             "idle_s": round(idle_s), "locked_idle": bool(lock_owner) and not busy and idle_s >= IDLE_WARN_S,
         })
-    return {"at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(now)), "gpus": out, "qwen": qwen,
+    return {"at": _clock.epoch_jst(now), "gpus": out, "qwen": qwen,
             "sources": {"bridge": bridge is not None, "ssh": extra is not None, "qwen_mailbox": qwen["reachable"]},
             "idle_warn_s": IDLE_WARN_S}
 

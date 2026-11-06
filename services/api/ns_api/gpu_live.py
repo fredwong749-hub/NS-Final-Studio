@@ -25,6 +25,8 @@ import statistics
 import subprocess
 import threading
 import time
+
+from ns_api import clock as _clock   # L-212 #10：页面时间一律 JST
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -641,7 +643,7 @@ def snapshot() -> dict:
                 "hw_age_s": hosts[h]["age_s"],
             })
     unplaced = [b for b in hbs if not any(b in c["heartbeats"] for c in cards)]
-    return {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "cards": cards, "hosts": hosts, "heartbeats": unplaced,
+    return {"at": _clock.jst_now_str("%Y-%m-%dT%H:%M:%S"), "cards": cards, "hosts": hosts, "heartbeats": unplaced,
             "warming": not lanes}
 
 

@@ -13,6 +13,8 @@ state：rendering 出视频中 | queued 排队 | pending_review 待你看（含�
 from __future__ import annotations
 
 import json
+
+from ns_api import swr as _swr
 import re
 import statistics
 import time
@@ -240,4 +242,9 @@ def build(ep: int | None = None, state: str | None = None, *, renders: Path | No
 def videos_overview(ep: int | None = None, state: str | None = None):
     if state and state not in STATES:
         raise HTTPException(422, f"state 只能是 {' | '.join(STATES)}")
-    return build(ep, state)
+    # L-212（SCAN #16）：首次 6.0 s → 先回旧值、后台重算（ns_api/swr.py，口径同 pipeline_status r13）
+    from ns_render import pipeline as _P  # noqa: PLC0415  数据根进缓存键（测试会换临时目录）
+    return _SWR.get((str(_P.DATA), ep, state), lambda: build(ep, state))
+
+
+_SWR = _swr.SWRCache("videos-overview", fresh_s=5.0, stale_s=120.0)

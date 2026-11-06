@@ -18,6 +18,8 @@ import subprocess
 import sys
 import threading
 import time
+
+from ns_api import clock as _clock   # L-212 #10：页面时间一律 JST
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -235,7 +237,7 @@ def list_cuts(n: int):
             c["tags"].insert(0, "定稿")
             c["final"] = True
     return {"episode": n, "cuts": cuts, "job": _job_view(n),
-            "script_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(smt)) if smt else None}
+            "script_at": _clock.epoch_jst(smt) if smt else None}
 
 
 def _last_replace_import() -> float | None:

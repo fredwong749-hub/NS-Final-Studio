@@ -690,9 +690,25 @@ def post_pick(body: Pick, request: Request, bg: BackgroundTasks):
     return JSONResponse({"ok": True, "accepted": True, "duplicate": r["duplicate"], "state": r["state"].get("state")}, status_code=202)
 
 
+STATE_TIME_KEYS = ("updated", "accepted_at", "failed_at", "done_at", "picked_at", "at")
+
+
+def state_view(row: dict | None) -> dict | None:
+    """L-212 #10（W-FIX-PIPE）：pick_state 里的时间是本进程（笔记本，系统时钟美东）time.strftime 写的裸串——存储不动
+    （replay / reapply / 去重都按这个格式比），给页面时转成 JST（clock.local_naive_to_jst，带 +09:00 的原样换算）"""
+    if not isinstance(row, dict):
+        return row
+    from ns_api import clock as _clock  # noqa: PLC0415
+    out = {k: (_clock.local_naive_to_jst(v) if k in STATE_TIME_KEYS and isinstance(v, str) else v) for k, v in row.items()}
+    for k in ("delegate", "restored"):
+        if isinstance(out.get(k), dict) and isinstance(out[k].get("at"), str):
+            out[k] = {**out[k], "at": _clock.local_naive_to_jst(out[k]["at"])}
+    return out
+
+
 @router.get("/api/owner/pick/{item_id:path}")
 def get_pick_state(item_id: str):
-    return state_of(REPO, item_id) or {"state": "none"}
+    return state_view(state_of(REPO, item_id)) or {"state": "none"}
 
 
 from ns_api import owner_delegate as _OD  # noqa: E402  L-136 代选：状态 / 一键撤销接口挂在本路由上（app.py 不用另加 include_router）

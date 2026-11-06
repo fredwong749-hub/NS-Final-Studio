@@ -1279,8 +1279,56 @@ def _lc_issue(root: Path, run: str, ep: int, target: str, what: str) -> str | No
     return rec.get("id")
 
 
+# W-FIX-PIPE #6（SCAN_20261107，L-212）：导入稿 / 资产清单一变提示词证据就过期，但 sop_gate.auto_probe_stale 只在有人调 require_backoff
+# （producer 派单 / asset_worker）时才起——没人派（证据过期 → 阶段停在“提示词” → 不起 producer）= 死锁，11-07 夜 ep02 35 帧 5 道空等数小时。
+# 改：lifecycle_tick 每拍（60 s）对过了导入闸门的集查一次 check_prompts，证据要刷新 → 笔记本（编译在这里）调同一个 auto_probe_stale
+# （锁 / pid / 退避都在那里），每集至少隔 auto_probe_tick_min 分钟（config/pipeline/sop_gate.json，默认 5）才再触发一次。
+AUTO_PROBE_STATE = ROOT / "data/autopilot/auto_probe.json"
+AUTO_PROBE_TICK_MIN = 5.0
+
+
+def auto_probe_tick(root: Path, run: str, episodes: list, now: float, dry: bool, probe_fn=None, check_fn=None) -> dict:
+    """→ {epNN: {why, action: started|running|cooldown|debounce|would_probe|skip|error}}；只看 stage_index > 导入闸门 的集"""
+    sg = _lc_mod(root, "tools/master/sop_gate.py", "ns_sop_gate_lc")
+    cfg = jl(Path(root) / "config/pipeline/sop_gate.json", {}) or {}
+    gap = float(cfg.get("auto_probe_tick_min") or AUTO_PROBE_TICK_MIN) * 60
+    gate_i = sg.STAGES.index("导入闸门")
+    sp = AUTO_PROBE_STATE if Path(root) == ROOT else Path(root) / "data/autopilot/auto_probe.json"
+    sd = jl(sp, {}) or {}
+    out: dict = {}
+    for e in episodes:
+        if int(e.get("stage_index") or 0) <= gate_i:
+            continue
+        ep = int(e["episode"])
+        try:
+            r = (check_fn or sg.check_prompts)(Path(root), run, ep)
+        except Exception as ex:  # noqa: BLE001  # arch-ok: 判不了 = 本集这拍不探，记下原因
+            out[f"ep{ep:02d}"] = {"action": "error", "why": f"check_prompts：{type(ex).__name__}: {ex}"[:200]}
+            continue
+        why = str(r.get("why") or "")
+        if r.get("ok") or not sg._is_stale_evidence([why]):
+            continue
+        k = f"{run}:ep{ep:02d}"
+        last = float((sd.get(k) or {}).get("t") or 0)
+        a = {"why": why[:160]}
+        if now - last < gap:
+            a.update(action="debounce", next_s=round(gap - (now - last)))
+        elif dry:
+            a["action"] = "would_probe"
+        else:
+            res = (probe_fn or sg.auto_probe_stale)(run, ep, Path(root), [why], now)
+            a["action"] = res or "skip"
+            if res == "started":
+                sd[k] = {"t": now, "at": time.strftime("%F %T", time.localtime(now)), "why": why[:160]}
+                js(sp, sd)
+            if res not in ("running", "cooldown"):       # 在跑 / 退避中每拍都会命中，不刷日志
+                log("auto_probe", json.dumps({"run": run, "ep": ep, **a}, ensure_ascii=False))
+        out[f"ep{ep:02d}"] = a
+    return out
+
+
 def lifecycle_tick(root: Path = ROOT, dry: bool | None = None, now: float | None = None, stage_fn=None, hb_fn=None,
-                   laptop_fn=None, server_fn=None, promote_fn=None, issue_fn=None, live_fn=None, rq_fn=None) -> dict:
+                   laptop_fn=None, server_fn=None, promote_fn=None, issue_fn=None, live_fn=None, rq_fn=None, probe_fn=None) -> dict:
     """一拍。dry=None → 按 lifecycle.apply 决定（apply=false 即 dry）。返回完整计划 + 每个目标的动作（dry 下 would_*）。
     W18b P1-2：服务器目标的 attempts 数的是“restart_queue 真执行过、执行后 grace_min 仍没有心跳”的次数，不是写了几次请求——
     该机还有待办请求 = queued（不计数、不再写）；执行了还在 grace 内 = waiting；连续 max_fails 次执行后仍没心跳才登记 P0"""
@@ -1301,6 +1349,11 @@ def lifecycle_tick(root: Path = ROOT, dry: bool | None = None, now: float | None
     if st.get("status") not in ("preparing", "producing"):
         out["skip"] = f"runs.json status={st.get('status')}（只有 preparing / producing 会自动起；paused / archived = 项目方 / 总调度停的，不动）"
         return out
+    try:                                         # W-FIX-PIPE #6：过了导入闸门、提示词证据过期的集 → 笔记本自动 probe-prompts（去抖）
+        out["auto_probe"] = auto_probe_tick(root, run, st.get("episodes") or [], now, dry, probe_fn=probe_fn)
+    except Exception as e:  # noqa: BLE001  # arch-ok: 自动探针出错不拦生命周期（下一拍再试），记日志
+        out["auto_probe"] = {"error": f"{type(e).__name__}: {e}"[:200]}
+        log("auto_probe error", out["auto_probe"]["error"])
     want = lifecycle_want(st, lifecycle_partition(root))
     out.update(producer_eps=want["producer_eps"], night_eps=want["night_eps"])
     if not want["targets"]:

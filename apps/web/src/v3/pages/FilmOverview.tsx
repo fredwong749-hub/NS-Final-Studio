@@ -285,6 +285,8 @@ export function FilmOverview({ eps, onOpen, onCanvas, onMulti }: { eps: OvEp[]; 
 
 type PvShot = { shot: string; index: number; kind: "video" | "placeholder" | "best_effort"; start_s: number | null; duration_s: number | null };
 type Pv = { url: string | null; srt_url?: string | null; built_at?: string; built_ts?: number; duration_s?: number; shots: PvShot[]; stale: boolean; building: boolean; eta_s: number | null;
+  /** L-212 #15：没预览也回 200；state=none 时 word 是给项目方的一句话 */
+  state?: "ready" | "building" | "none"; word?: string;
   video_shots?: number; best_effort_shots?: number; placeholder_shots?: number;
   /** UIUX-LOOP-3 r12：source=film 时播的是 night 合成的最新整集成片（data/episodes/<run>/epNN_vN.mp4），film 带合成闸门结论；preview = 巡检拼的预览 */
   source?: "film" | "preview"; film?: { name: string; version: number | null; at: string; kind: "preview" | "final" | "unknown"; kind_word: string; word: string; missing_n: number; missing: { shot: string; reason: string }[] } | null };
@@ -361,6 +363,8 @@ function Projector({ ep, start, sound, onClose }: { ep: OvEp; start: number; sou
       )}
       {err && !pv?.url ? (
         <div className="fo-pv-empty">{err}<br /><button onClick={() => setShotMode(true)}>先用逐镜看</button></div>
+      ) : pv && !pv.url && pv.state === "none" ? (
+        <div className="fo-pv-empty">{pv.word || "这一集还没有拼好的整集预览"}<br /><button onClick={() => setShotMode(true)}>先用逐镜看</button></div>
       ) : pv && !pv.url ? (
         <div className="fo-pv-empty"><i className="fo-pv-dot" aria-hidden />这一集的整集预览正在拼，约 {Math.max(1, Math.ceil((pv.eta_s ?? 150) / 60))} 分钟<br /><button onClick={() => setShotMode(true)}>先用逐镜看</button></div>
       ) : url0 ? (

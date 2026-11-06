@@ -60,7 +60,7 @@ HARD_PATHS = ("/root/work/fredw", "offline_20261101")
 READ_ATTRS = {"read_text", "read_bytes", "load", "loads", "safe_load", "open"}
 METRICS = ("no_timeout", "direct_ssh", "ssh_unlisted", "def_ssh", "hard_run", "hard_path", "silent_read",
            "nonatomic_json", "untracked_code", "unowned", "pipe_gate", "mtime_run_guess", "mtime_latest", "prompt_bypass", "bypass_script",
-           "hard_import_path")
+           "hard_import_path", "naive_time")
 # L-118 四道关之四（总调度 11-02 13:3x 定）：编译模块以外的代码往提示词字段里拼接句子 = 规则又散落了。
 # 只许经 config/compile/plugins.yaml 登记的插件改本段（IMGMASTER 合入）。现有散落处进基线，只许减。
 PROMPT_FIELDS = {"prompt", "img_prompt", "positive", "positive_prompt", "text_prompt", "prompt_text", "pos", "full_prompt"}
@@ -78,6 +78,21 @@ PIPE_GATE_RE = re.compile(r"(lock-status|pytest|system_version|iter_gate|decisio
 BYPASS_RES = (re.compile(r"\[\s*[A-Za-z_][\w.]*\s*,\s*[\"'][\w-]+\.py[\"']"),                  # [PY, "x.py", ...]：按 cwd 相对跑
               re.compile(r"cd \{?\$?[A-Za-z_]\w*\}?\s*&&\s*\S+\s+[\w-]+\.py\b"),               # cd {R} && {PY} x.py
               re.compile(r"/root/work/fredw/(?!offline_20261101/repo/)[\w./-]+?\.py\b"))      # 仓库外绝对路径的 .py
+# L-212 #10（W-FIX-UI 11-07）：笔记本系统时钟是美东，ns_api 里用本机时区取 / 格式化时间 = 页面差 14 小时。
+# 页面时间一律走 ns_api/clock.py（epoch_jst / jst_now_str / local_naive_to_jst）。存量（写进文件的记录 / 文件名戳 / 比较键）进基线，只许减；
+# 确实不是给人看的（文件名戳、和同文件旧记录比较）在行尾写 # arch-ok: 原因
+NAIVE_TIME_SCOPE = "services/api/ns_api/"
+NAIVE_TIME_ALLOW = {"services/api/ns_api/clock.py"}
+NAIVE_TIME_RE = re.compile(r"\btime\.(?:localtime|ctime|asctime)\(|\bdatetime\.now\(\s*\)|\bdatetime\.today\(\)"
+                           r"|\bdatetime\.fromtimestamp\([^,()]*(?:\([^()]*\))?[^,()]*\)|\btime\.strftime\((?!.*\bgmtime\()")
+
+
+def naive_time_count(path: str, lines: list[str]) -> int:
+    if not path.startswith(NAIVE_TIME_SCOPE) or path in NAIVE_TIME_ALLOW or is_test(path):
+        return 0
+    return sum(1 for ln in lines if NAIVE_TIME_RE.search(ln) and "# arch-ok:" not in ln and not ln.lstrip().startswith("#"))
+
+
 HARD_IMPORT_ALLOW = {"tools/autopilot/runs.py", "services/api/ns_api/run_paths.py", "tools/qa/arch_scan.py"}
 HARD_IMPORT_RE = re.compile(r"script_v2\.json|(?:^|/)data/looks(?:/|$)|^data/renders/?$|(?:^|/)data/renders/ep\d")
 
@@ -247,6 +262,7 @@ def scan_source(path: str, src: str) -> dict[str, int]:
         c["bypass_script"] = sum(len(rx.findall(x)) for x in strs for rx in BYPASS_RES)
     if path not in HARD_IMPORT_ALLOW and not is_test(path):
         c["hard_import_path"] = hard_import_count(strs)
+    c["naive_time"] = naive_time_count(path, lines)
     for ln in (lines if path != "tools/qa/arch_scan.py" else []):   # 本文件的正则自己会命中
         if "# arch-ok:" in ln or ln.lstrip().startswith("#"):
             continue

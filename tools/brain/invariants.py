@@ -182,13 +182,46 @@ def check_ctrl_push(snap: dict, root: Path, run: str) -> list[dict]:
 
 
 # ------------------------------------------------------------------ 本机文件族
+def _naive_utc(s) -> float | None:
+    """裸串按 UTC 读成 epoch（只用来和文件 mtime 比出写入方的时区偏移）；带时区的 = None"""
+    try:
+        d = datetime.fromisoformat(str(s).replace(" ", "T"))
+    except (TypeError, ValueError):  # arch-ok: 坏串 = 不参与推算
+        return None
+    return None if d.tzinfo is not None else d.replace(tzinfo=timezone.utc).timestamp()
+
+
+def writer_offset_s(rows: dict, mtime: float | None) -> float | None:
+    """W-FIX-PIPE（L-212 #10）：pick_state 是笔记本 API（系统时钟美东）写的裸串；自查常驻在 TZ=JST-9 下跑时“按本机时区读”差 14 小时
+    （45 分钟的条目报 885 分钟）。不靠读的人的时区：文件最后一次写入的 updated ≈ 文件 mtime → 写入方偏移 = 最新裸串（当 UTC 读）− mtime，
+    按 15 分钟取整。推不出 = None（退回按本机时区读）"""
+    ts = [t for r in (rows or {}).values() if isinstance(r, dict) for t in [_naive_utc(r.get("updated"))] if t is not None]
+    if not ts or not mtime:
+        return None
+    off = round((max(ts) - float(mtime)) / 900.0) * 900.0
+    return off if abs(off) <= 14 * 3600 else None        # 超出真实时区范围 = 文件被别的东西碰过（拷贝 / 夹具），推不出
+
+
+def pick_ts(s, off: float | None) -> float | None:
+    """pick_state 时间 → epoch：带时区按自带；裸串有推出的写入方偏移就按它，否则按本机时区"""
+    t = _naive_utc(s)
+    if t is None or off is None:
+        return _local_ts(s)
+    return t - off
+
+
 def check_picks(root: Path, now: float) -> list[dict]:
     out = []
-    st = _j(root / "data/owner_queue/pick_state.json", {}) or {}
+    pp = root / "data/owner_queue/pick_state.json"
+    st = _j(pp, {}) or {}
+    try:
+        off = writer_offset_s(st, pp.stat().st_mtime)
+    except OSError:  # arch-ok: 文件没有 = 没有挑选，off 无用
+        off = None
     for pid, r in st.items():
         if not isinstance(r, dict):
             continue
-        s, t = r.get("state"), _local_ts(r.get("updated") or r.get("accepted_at"))
+        s, t = r.get("state"), pick_ts(r.get("updated") or r.get("accepted_at"), off)
         if s in ("processing", "accepted") and t and now - t > PICK_STUCK_MIN * 60:
             out.append(V(f"pick_stuck:{pid}", RED, f"你点过的 {pid} 卡在 {s} {round((now - t) / 60)} 分钟",
                          f"updated={r.get('updated')} by={r.get('by')} choice={r.get('choice')}", "#/queue",

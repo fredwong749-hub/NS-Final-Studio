@@ -15,7 +15,8 @@ from __future__ import annotations
 from ns_api import run_paths as _RP   # K-OPS-F24：渲染根目录按当前剧（V1 已归档，不在网页显示）
 import json
 import re
-import time
+
+from ns_api import clock as _clock   # L-212 #10：页面时间一律 JST
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -46,7 +47,7 @@ def _run_dir(run: str) -> Path:
 
 
 def _mt(p: Path) -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(p.stat().st_mtime))
+    return _clock.epoch_jst(p.stat().st_mtime)
 
 
 def run_title_of(d: Path) -> str:

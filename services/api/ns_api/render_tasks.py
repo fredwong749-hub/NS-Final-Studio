@@ -23,6 +23,8 @@ from ns_api import run_paths as _RP   # K-OPS-F24：按当前剧取路径（V1 �
 import json
 import re
 import time
+
+from ns_api import clock as _clock   # L-212 #10：页面时间一律 JST
 import urllib.request
 from pathlib import Path
 
@@ -448,7 +450,7 @@ def build(run: str | None = DEFAULT_RUN) -> dict:
     src["cancelled_jobs_excluded"] = cancelled
     lane_q = {name: {"running": len(ln.get("running") or []), "pending": len(ln.get("pending") or []),
                      "reachable": ln.get("reachable")} for name, ln in lanes.items()}
-    return {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "ts": time.time(), "run": run, "counts": counts, "rows": rows,
+    return {"at": _clock.jst_now_str("%Y-%m-%dT%H:%M:%S"), "ts": time.time(), "run": run, "counts": counts, "rows": rows,
             "sources": src, "lanes": lane_q, "episodes": sorted({r["episode"] for r in rows if r["episode"]}),
             "types": sorted({r["type"] for r in rows}), "warming": not lanes}
 

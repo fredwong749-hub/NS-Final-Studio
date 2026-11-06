@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -21,8 +22,28 @@ def _runs_file(data_dir=None) -> Path:
     return _data_root(data_dir).parent / "config" / "pipeline" / "runs.json"
 
 
-def _runs(data_dir=None) -> dict:
-    return json.loads(_runs_file(data_dir).read_text(encoding="utf-8"))
+_runs_last: dict = {}   # runs.json 路径 → 上一次读成功的内容（L-212 #14）
+_FALLBACK: dict = {}    # runs.json 路径 → 最近一次 _runs 是否退回了旧副本
+
+
+def _runs(data_dir=None, tries: int = 3, wait_s: float = 0.05) -> dict:
+    """读 runs.json。Windows 上别人 os.replace 的一瞬间读会 PermissionError（SCAN #14，偶发页面 500）→
+    重试 tries 次（间隔 wait_s）；仍不行且之前读成功过 → 用上一份；从没读成功过 → 抛出（fail-closed 不变）"""
+    f = _runs_file(data_dir)
+    key = str(f)
+    for i in range(max(1, tries)):
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+            _runs_last[key] = d
+            _FALLBACK[key] = False
+            return d
+        except (PermissionError, json.JSONDecodeError):   # 正被替换 / 半截文件
+            if i + 1 < tries:
+                time.sleep(wait_s)
+    if key in _runs_last:
+        _FALLBACK[key] = True                     # 复审 11-07：这次用的是旧副本 → 调用方不能把结果记在新的修改时间下
+        return _runs_last[key]
+    raise PermissionError(f"runs.json 读不到（重试 {tries} 次）：{f}")
 
 
 def v2_prefix(data_dir=None) -> str | None:
@@ -40,7 +61,7 @@ def scoped(rel: str | None, prefix: str | None = ..., data_dir=None) -> str | No
     """rel 属于当前剧才原样返回；属于别的剧（V1）→ None"""
     if not rel:
         return None
-    pre = v2_prefix(data_dir) if prefix is ... else prefix
+    pre = _prefix_cached(data_dir) if prefix is ... else prefix   # L-212：按 runs.json 修改时间缓存（frames-index 一次调 249 遍，每遍读一次 json）
     r = rel.replace("\\", "/").lstrip("/")
     if r.startswith("data/"):
         r = r[5:]
@@ -62,7 +83,10 @@ def _prefix_cached(data_dir=None) -> str | None:
     mt = f.stat().st_mtime_ns if f.exists() else None
     hit = _cache.get(root)
     if hit is None or hit[0] != mt:
-        hit = (mt, v2_prefix(data_dir))
+        val = v2_prefix(data_dir)
+        if _FALLBACK.get(str(f)):                 # 复审 11-07：退回旧副本的结果不缓存（下一次请求再读新文件），避免旧的放行永久留在新 mtime 下
+            return val
+        hit = (mt, val)
         _cache[root] = hit
     return hit[1]
 

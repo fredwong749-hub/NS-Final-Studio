@@ -23,6 +23,7 @@
 """
 from __future__ import annotations
 
+from ns_api import clock as _clock   # L-212 #10：页面时间 JST
 from ns_api import run_paths as _RP   # K-OPS-F24：渲染根目录按当前剧（V1 已归档，不在网页显示）
 import contextvars
 import glob
@@ -43,7 +44,8 @@ router = APIRouter(tags=["owner-queue"])
 _lock = threading.Lock()
 
 CATEGORIES = {"spend": "花钱", "license": "下载许可", "delete": "删除", "overturn": "推翻旧审美", "import_season": "导入新季"}
-KIND_LABEL = {"decide": "要你拍板", "spot": "机签抽检", "pick": "挑一张"}
+LOCAL_AT_KINDS = ("decide", "pick", "asset_revise")   # at 来自 requests.json（笔记本本机写）；抽检的 at 是出图机 JST，不转
+KIND_LABEL = {"decide": "要你拍板", "spot": "机签抽检", "pick": "挑一张", "asset_revise": "改一句描述"}
 SNOOZE_S = 4 * 3600
 OWNER_WORDS = ("等项目方", "项目方点选", "项目方定", "项目方拍板", "项目方决定")
 STAGES = ("image", "last")
@@ -278,6 +280,37 @@ def requests(root: Path) -> list[dict]:
 DECIDE_OPTS = [{"key": "approve", "label": "同意"}, {"key": "reject", "label": "不同意"}, {"key": "later", "label": "稍后"}]
 
 
+# W-FIX-PIPE #13（L-212，PS-MASTER 11-07）：资产作业自动换种子重排用尽、一张都没过 → “需要修改描述”。
+# 不给看没过的图（只给看通过的图）；只有一个动作“修改”（L-123：没有接受 / 拒绝）：项目方写一句 → 记进作业 owner_notes、
+# 加进提示词、作业重排（asset_jobs.owner_revise）。asset_worker.escalate 投递，id = rv:<作业 id>
+REVISE_OPTS = [{"key": "revise", "label": "修改"}]
+
+
+def enqueue_asset_revise(root: Path, req: dict) -> dict:
+    """投一条 asset_revise（同 id 已有则替换；之前的“修改”决定作废 → 重新出现）。req：id / run / job / name / what / spec_text / reason"""
+    if not req.get("id") or not req.get("job") or not req.get("run"):
+        raise ValueError("asset_revise 至少要有 id / run / job")
+    req = {"kind": "asset_revise", "at": time.strftime("%Y-%m-%dT%H:%M:%S"), **req}
+    p = _paths(root)["requests"]
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with _lock:
+        rows = [r for r in (requests(root) if p.is_file() else []) if str(r.get("id")) != str(req["id"])] + [req]
+        tmp = p.with_name(p.name + f".{threading.get_ident()}.tmp")
+        tmp.write_text(json.dumps(rows, ensure_ascii=False, indent=1), encoding="utf-8")
+        tmp.replace(p)
+    if str(req["id"]) in _closed(root, time.time()):          # 上一轮改过又没出来 = 新问题，重新打开
+        _record(root, {"id": str(req["id"]), "kind": "asset_revise", "choice": "undo", "by": "ASSET-WORKER", "reason": "重排后仍没过，重新请你改"})
+    return req
+
+
+def _asset_revise_item(r: dict) -> dict:
+    name, what = plain(r.get("name") or ""), plain(r.get("what") or "这项资产")
+    return {"id": str(r["id"]), "kind": "asset_revise", "category": "asset_revise", "title": f"{name}的{what}".strip("的"),
+            "detail": plain(r.get("spec_text") or ""), "reason": plain(r.get("reason") or ""), "source": r.get("source") or "资产线",
+            "at": r.get("at") or "", "run": r.get("run"), "job": r.get("job"), "episode": r.get("episode"),
+            "media": [], "scores": [], "options": REVISE_OPTS, "recommend": None, "link": ASSET_LINK.get(str(r.get("asset_kind")), "#/assets")}
+
+
 def _decide_item(r: dict) -> dict | None:
     cat = r.get("category")
     if cat not in CATEGORIES:
@@ -399,7 +432,7 @@ def pick_items(root: Path, closed: set[str]) -> tuple[list[dict], list[dict]]:
                     "options": [{"key": c["key"], "label": c["label"]} for c in cands] + ([] if via_pick else [{"key": "later", "label": "稍后"}]),
                     "recommend": {"choice": rec, "why": r.get("why") or "系统推荐（契约分最高）"}, "apply": r.get("apply"), "link": pick_link(root, r),
                     # 统一入口：有 pick_api 的条目，前端点“用这个”直接 POST 到它，选定后真正生效（voice_v2 已接；图片类等资产线接）
-                    "pick_api": "/api/owner/pick" if via_pick else None, "pick_state": OP.state_of(root, str(r["id"])) if via_pick else None,
+                    "pick_api": "/api/owner/pick" if via_pick else None, "pick_state": OP.state_view(OP.state_of(root, str(r["id"]))) if via_pick else None,
                     # V2CUT-O 11-03：确认本集造型（look）一条列出全部人物：人名 / 本集造型 / 缩略图（look_confirm.sync_picks 投递）
                     **({"people": r["people"], "run": r.get("run"), "episode": r.get("episode")} if r.get("people") else {})})
     return out, auto
@@ -512,7 +545,7 @@ def machine_signed(root: Path, scan: dict | None = None) -> dict:
 #   block_level  red = 生产线卡在这等你 · yellow = 等你一下，系统先往下走 · grey = 只读告知（没有按钮）
 LEVEL_LABEL = {"red": "卡住了，要你定", "yellow": "等你一下", "grey": "只是告诉你，不用做事"}
 LEVEL_ORDER = {"red": 0, "yellow": 1, "grey": 2}
-KIND_ORDER = {"decide": 0, "gate": 1, "look": 2, "face": 3, "scene": 4, "sheet": 5, "item": 6, "frame": 7, "voice": 8, "pick": 9, "spot": 10, "info": 11}
+KIND_ORDER = {"decide": 0, "asset_revise": 0, "gate": 1, "look": 2, "face": 3, "scene": 4, "sheet": 5, "item": 6, "frame": 7, "voice": 8, "pick": 9, "spot": 10, "info": 11}
 CONSEQUENCE = {"spend": "不批准就不花这笔钱，相关的事停在这里", "license": "不批准就不下载，对应功能先不用",
                "delete": "不批准文件原样保留、不会删", "overturn": "不批准就沿用你之前定的", "import_season": "不批准新一季先不导入"}
 _SCRUB = [(re.compile(r"[（(]\s*seed\s*\d+\s*[）)]"), ""), (re.compile(r"\bpick:[\w:.\-]+"), ""), (re.compile(r"\b(?:ch|sk|lead)_[A-Za-z0-9_]+"), ""),
@@ -641,6 +674,12 @@ def _humanize(it: dict, delegate_on: bool) -> dict:
         if it.get("link"):
             acts.append(_act("open", "去对应页面看", style="link", href=str(it["link"])))
         level = "red"
+    elif kind == "asset_revise":
+        say = f"需要你改一句描述：{title}"
+        why = (f"一直卡在：{it.get('reason')}" if it.get("reason") else "换了几批都出不来") + (f"；现在写的是：{detail[:60]}" if detail else "")
+        acts = [_act("revise", "修改", style="primary", path="/api/owner/decide", body={"id": it["id"], "choice": "revise"}, needs_reason=True,
+                     ask="想让它长什么样？写一句（会加进描述里重新出）")]
+        level = "red"
     elif kind == "gate":
         say = _gate_say(it, title)
         why = detail[:120]
@@ -763,6 +802,9 @@ def _build(root: Path, now: float, _errors: list[str]) -> dict:
             it = _decide_item(r)
             if it:
                 items.append(it)
+    for r in requests(root):
+        if r.get("kind") == "asset_revise" and str(r["id"]) not in closed:
+            items.append(_asset_revise_item(r))
     for r in master_rows(root):
         if r["id"] not in closed:
             items.append({**r, "category_label": CATEGORIES[r["category"]], "options": DECIDE_OPTS, "media": [], "scores": [],
@@ -795,7 +837,10 @@ def _build(root: Path, now: float, _errors: list[str]) -> dict:
     if errs:
         _alert(root, errs)
     st = _json(_paths(root)["state"], {}) or {}
-    return {"schema": "nsfs.owner_queue/1", "at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(now)), "count": len(items),
+    for x in items:          # L-212 #10：页面时间一律 JST——请求 / 挑选是笔记本本机写的裸串（美东），只在这里转，存储不动
+        if x.get("kind") in LOCAL_AT_KINDS and isinstance(x.get("at"), str):
+            x["at"] = _clock.local_naive_to_jst(x["at"])
+    return {"schema": "nsfs.owner_queue/1", "at": _clock.epoch_jst(now), "count": len(items),
             "counts": counts, "items": items,
             "auto_today": {"passed": scan["auto_pass"], "rejected": scan["auto_fail"], "signed": signed_today + len(scan["today_signed"]),
                            "policy": policy_today, "redo": scan["redo"], **{f"n_{k}": v for k, v in scan["by_stage"].items()},
@@ -900,7 +945,7 @@ def spot_fail_redo(root: Path, it: dict, reason: str, user: str, redo_fn=None) -
     return {"obj": oid, "n": n, "plan": plan, "reason": why, **res}
 
 
-def decide(root: Path, item_id: str, choice: str, reason: str, user: str, spot_fn=None, redo_fn=None) -> dict:
+def decide(root: Path, item_id: str, choice: str, reason: str, user: str, spot_fn=None, redo_fn=None, revise_fn=None) -> dict:
     it = _find(root, item_id)
     if not it:
         raise HTTPException(404, f"队列里没有 {item_id}（可能已经处理过）")
@@ -924,6 +969,16 @@ def decide(root: Path, item_id: str, choice: str, reason: str, user: str, spot_f
             raise HTTPException(409, str(e.code)) from e
         if choice == "fail":
             row["redo"] = spot_fail_redo(root, it, reason or "", user, redo_fn)
+    if it["kind"] == "asset_revise":
+        if not (reason or "").strip():
+            raise HTTPException(400, "写一句想怎么改")
+        try:
+            from ns_api import owner_pick as _OP  # noqa: PLC0415
+            row["applied"] = (revise_fn or _OP._asset_jobs().owner_revise)(root, it["run"], it["job"], reason.strip(), user)
+        except HTTPException:
+            raise
+        except Exception as e:  # noqa: BLE001  # arch-ok: 改不进去 = 400 带原因，条目留在队列里（不记决定）
+            raise HTTPException(400, f"没改成：{e}"[:200]) from e
     if it["kind"] == "pick" and choice != "later" and it.get("apply") == "activate":
         c = next((c for c in it.get("candidates") or [] if c["key"] == choice), {})
         if c.get("sid") and c.get("stage") and c.get("n") is not None:
