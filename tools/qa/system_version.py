@@ -301,6 +301,47 @@ RELEASE_CFG_REL = "config/pipeline/release.json"
 RELEASE_DEFAULTS = {"enabled": True, "pytest_n": 4, "xdist_stall_min": 10, "hosts": ["gpu33", "gpu36"], "every_s": 60}
 
 
+E2E_GATE_MODES = ("off", "record", "enforce")
+E2E_GATE_TIMEOUT_S = 600
+
+
+def e2e_gate_mode(root: Path | None = None) -> str:
+    """config/pipeline/release.json e2e_owner_gate：record（默认，第一版只记不挡）/ enforce / off；写错 = record"""
+    m = str(release_cfg(root).get("e2e_owner_gate") or "record").strip().lower()
+    return m if m in E2E_GATE_MODES else "record"
+
+
+def e2e_owner_gate(sv: str, mode: str | None = None, code_root: Path | None = None, runner=None, out_dir: Path | None = None) -> dict | None:
+    """W-E2E（L-214）：发版前跑 tools/qa/e2e_owner.py（只读页面对真相 + 沙箱里把项目方会点的 POST 走一遍；不连服务器、不写真实数据）。
+    数据永远读本机真实仓库（--root ROOT，页面打本机 :8800）；代码用这一版的冻结快照（code_root）。record = 结果记进 cut 报告但不挡发版"""
+    mode = mode or e2e_gate_mode()
+    if mode == "off":
+        return None
+    code_root = code_root or ROOT
+    out = (out_dir or DATA) / f"{sv}_e2e_owner.json"
+    code, txt = (runner or sh)([PY, str(code_root / "tools/qa/e2e_owner.py"), "--json", "--root", str(ROOT), "--out", str(out)],
+                               E2E_GATE_TIMEOUT_S)
+    rep = None
+    for ln in reversed((txt or "").strip().splitlines()):
+        try:
+            rep = json.loads(ln)
+            break
+        except ValueError:   # arch-ok: 不是 JSON 行（日志）→ 往上找；全没有 = 下面按“没跑出结果”处理
+            continue
+    if not isinstance(rep, dict) or "failed" not in rep:
+        real_ok, detail = False, f"e2e_owner 没跑出结果（rc={code}）：{tail(txt or '', 2)}"
+    else:
+        bad = [r.get("line", "") for r in rep.get("results") or [] if not r.get("ok")]
+        real_ok = rep["failed"] == 0
+        detail = f"{rep['n'] - rep['failed']}/{rep['n']} 过" + ("；不过：" + "；".join(bad[:8]) if bad else "")
+    try:
+        rel = out.relative_to(ROOT).as_posix()
+    except ValueError:   # arch-ok: 测试里 out_dir 在临时目录 = 记绝对路径
+        rel = str(out)
+    return {"id": "e2e_owner", "name": "项目方路径验收 e2e_owner（L-214）", "ok": real_ok if mode == "enforce" else True,
+            "detail": ("记录模式（不挡发版）：" if mode == "record" else "") + detail, "mode": mode, "real_ok": real_ok, "report": rel}
+
+
 def release_cfg(root: Path | None = None) -> dict:
     """config/pipeline/release.json（W17 RELEASE-AUTO）；读不到 = 默认值"""
     try:
@@ -1318,6 +1359,9 @@ def _cut_impl(base: str | None = None, dry: bool = False, sv: str | None = None,
             g = gates(frozen or files, run_tests, root=Path(snap["dir"]), env=snap["env"], sv=sv)
             extra.update(gates_on="local", gates_s=round(time.time() - t_g, 1))
         rep.update(tree=tree, snapshot={k: v for k, v in snap.items() if k != "env"}, frozen_files=len(frozen), **extra)
+        e2e = e2e_owner_gate(sv, code_root=Path(snap["dir"]) if snap.get("dir") and Path(snap["dir"]).is_dir() else ROOT)
+        if e2e:                                          # W-E2E（L-214）：项目方路径验收；release.json e2e_owner_gate = record（只记）/ enforce（挡）/ off
+            g = g + [e2e]
         rep["gates"] = g
         plog = next((x["log"] for x in g if x.get("log")), None)
         if plog:                                         # W22：cut_lock note 引用完整 pytest 输出
@@ -1432,7 +1476,14 @@ def push_remote(prev: str, sv: str) -> dict:
     if code != 0:
         return {"at": at, "ok": False, "remote": "origin", "branch": rel, "detail": tail(out, 3)[:400]}
     sh(["git", "push", "origin", f"refs/tags/{sv}"], 600)
-    return {"at": at, "ok": True, "remote": "origin", "branch": rel, "detail": tail(out, 3)[:400], "pr": open_pr(sv, rel, base)}
+    pr = open_pr(sv, rel, base)
+    # 项目方 11-07 04:3x：“先合并一下……用 nsfinalstudio 的名字合并一份上去，每次做完之后就把那个分支 copy 上去”——
+    # 发版通过后本版提交快进推到 master（PR 随之自动标已合并）和 nsfinalstudio（最新完整版的固定名字）；只快进，不强推
+    merged = {}
+    for tgt in (base, "nsfinalstudio"):
+        c2, o2 = sh(["git", "push", "origin", f"{sv}^{{commit}}:refs/heads/{tgt}"], 3600)
+        merged[tgt] = {"ok": c2 == 0, "detail": tail(o2, 2)[:300]}
+    return {"at": at, "ok": True, "remote": "origin", "branch": rel, "detail": tail(out, 3)[:400], "pr": pr, "merged": merged}
 
 
 def open_pr(sv: str, rel: str, base: str = "master") -> dict:

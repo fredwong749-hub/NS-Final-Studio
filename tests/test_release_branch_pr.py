@@ -24,7 +24,11 @@ def test_push_remote_pushes_release_branch_and_opens_pr(monkeypatch, tmp_path):
     r = SV.push_remote("sv-prev", "sv-20990101-01")
     pushes = [c for c in calls if c[:2] == ["git", "push"]]
     assert ["git", "push", "origin", "sv-20990101-01^{commit}:refs/heads/release/sv-20990101-01"] in pushes
-    assert not any(c[-2:] == ["master", "--follow-tags"] or c[3:4] == ["master"] for c in pushes)
+    assert not any(c[-2:] == ["master", "--follow-tags"] or c[3:4] == ["master"] for c in pushes)   # 不直接推裸 master
+    # 项目方 11-07：发版后本版提交快进推到 master 与 nsfinalstudio（PR 自动标已合并）
+    assert ["git", "push", "origin", "sv-20990101-01^{commit}:refs/heads/master"] in pushes
+    assert ["git", "push", "origin", "sv-20990101-01^{commit}:refs/heads/nsfinalstudio"] in pushes
+    assert all(x["ok"] for x in r["merged"].values())
     pr = next(c for c in calls if c[:3] == ["gh", "pr", "create"])
     assert pr[pr.index("--base") + 1] == "master" and pr[pr.index("--head") + 1] == "release/sv-20990101-01"
     assert r["ok"] and r["branch"] == "release/sv-20990101-01" and r["pr"]["url"].endswith("/pull/7")

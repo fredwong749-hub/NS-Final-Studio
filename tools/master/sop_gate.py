@@ -140,9 +140,27 @@ def shots_of(run: str, ep: int, root: Path = ROOT) -> list[int]:
     return sorted(int(s.get("index")) for s in _ep_shots(run, ep, root))
 
 
+def triggered_adult_shots(run: str, ep: int, root: Path = ROOT) -> set[int]:
+    """L-128 / L-210 / L-216：项目方已触发（owner_triggers.json 里有 first:epNN-SM）的成人镜号——按普通镜走阶段与编译。
+    读不到 = 空（不放行）"""
+    try:
+        f = Path(_runs().producer_dir(run, root)) / "owner_triggers.json"
+        objs = (json.loads(f.read_text(encoding="utf-8")) or {}).get("objects") or [] if f.is_file() else []
+    except (OSError, ValueError, AttributeError, TypeError):  # arch-ok: 触发清单读不到 = 不放行任何成人镜（fail-closed）
+        return set()
+    pre = f"first:ep{int(ep):02d}-S"
+    out = set()
+    for o in objs:
+        if isinstance(o, str) and o.startswith(pre) and o[len(pre):].isdigit():
+            out.add(int(o[len(pre):]))
+    return out
+
+
 def adult_shots_of(run: str, ep: int, root: Path = ROOT) -> set[int]:
-    """导入稿里带成人标记的镜（shot.adult）：只由项目方触发，阶段判定记 pending_owner"""
-    return {int(s.get("index")) for s in _ep_shots(run, ep, root) if s.get("adult")}
+    """导入稿里带成人标记、且项目方还没触发的镜（shot.adult）：只由项目方触发，阶段判定记 pending_owner。
+    11-07 PS-MASTER：已触发的成人镜不再算 pending（以前闸门不读触发清单，项目方触发后 ep03/ep04 仍被挡）"""
+    trig = triggered_adult_shots(run, ep, root)
+    return {int(s.get("index")) for s in _ep_shots(run, ep, root) if s.get("adult") and int(s.get("index")) not in trig}
 
 
 def _af(root: Path, run: str, ep: int) -> dict:
@@ -1078,9 +1096,10 @@ def compile_preflight(run: str, ep: int, root: Path = ROOT, lane: str | None = N
     rows: dict[str, dict] = {}
     if e is None:
         return rows
+    trig = triggered_adult_shots(run, ep, root)
     for sh in e.shots:
         n = str(int(sh.index))
-        if getattr(sh, "adult", False):
+        if getattr(sh, "adult", False) and int(sh.index) not in trig:
             rows[n] = {"ok": None, "pending_owner": True, "why": "成人镜：只由项目方触发（L-128），不自动编译出图"}
             continue
         try:
