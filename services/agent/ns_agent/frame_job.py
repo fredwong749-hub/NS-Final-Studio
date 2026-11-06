@@ -388,15 +388,16 @@ def build_first(project: str, ep, shot, g, *, bible=None, model: str = "qwen_ima
                                 if dflt else None)
     # CARRYOVER 第 11 项（MERGE-IMG-O 11-03）：负面词 = 编译器负面词（剧本 base_negative + bible style / safe 负面 + 未成年人外观硬负面）
     # ∪ W-40 品牌负面词。原来直接覆盖成 brand_negative（V2 多为空），硬负面词进不了作业。硬负面永远在（job_negative 兜底）
-    tier, tier_ov = first_frame_tier(project)                                  # L-191：按剧开 35 步 base 首帧档（默认 preview，不加字段）
-    if tier == "turbo_previz":                                                 # L-197 B：8 步 turbo + previz 深度控制；没有深度图 → 退回 base35，不裸出 turbo
-        pv = previz_inputs(sid)
+    tier, tier_ov = first_frame_tier(project, episode=n)                       # L-191 / L-206 ②：按剧 + 按集取首帧档（默认 preview，不加字段）
+    if tier == "turbo_previz":                                                 # L-206 ②：8 步 turbo + 摆位图（previz 深度控制）
+        stage_pv = "last" if continuity_ref else "first"                       # 尾帧 compose：摆位图按落幅改写后的字段算（config last_frame.previz）
+        pv, why = previz_or_none(sid, shot, g, stage=stage_pv)
         if pv:
-            job["tier"], job["tier_overrides"], job["previz"] = tier, tier_ov, pv
-        else:
-            tier, tier_ov = first_frame_tier(project, force="base35")
-            job["previz_missing"] = True
-    if tier_ov and not job.get("previz"):
+            job["previz"] = pv
+        else:                                                                  # 摆位图算不出 / 没开 → 裸 turbo（同采样参数、不挂控制图），永不拦本集
+            tier, tier_ov = first_frame_tier(project, force=previz_fallback_tier())
+            job["previz_missing"] = why
+    if tier_ov:
         job["tier"], job["tier_overrides"] = tier, tier_ov
     job["negative"] = job_negative(c.image_negative, AR.brand_negative(project, plan), "、".join(neg_extra))
     if tmpl:                                                                   # 阶段 2.1：模板进作业（签名 / take.params / 重出判定都认它）
@@ -473,37 +474,115 @@ def trace_of(job: dict) -> dict:
             "rules": ["K-REN-950", "K-REN-951", "K-REN-952", "K-REN-953", "K-REN-954", "K-REN-955", "K-REN-957"]}
 
 
-def first_frame_tier(project: str | None, force: str | None = None) -> tuple[str, dict]:
-    """L-191：按剧取首帧出图档（config/render_quality.json first_frame_tier）。→ ("preview", {}) 默认；("base35", 采样覆盖)；
-    L-197 B：("turbo_previz", {unet: turbo, steps: 8, cfg: 1.0})——8 步 turbo + previz 深度控制（控制图见 previz_inputs）。force 仅供回退"""
+TIER_SAMPLING_KEYS = ("unet", "steps", "cfg", "sampler", "scheduler")
+
+
+def _tier_cfg() -> dict:
     try:
-        cfg = _json.loads((_ROOT / "config" / "render_quality.json").read_text(encoding="utf-8")).get("first_frame_tier") or {}
-    except (OSError, ValueError):
+        return _json.loads((_ROOT / "config" / "render_quality.json").read_text(encoding="utf-8")).get("first_frame_tier") or {}
+    except (OSError, ValueError):  # arch-ok: 读不到 render_quality.json = 没有首帧档（preview 默认路径，不放行任何闸门）
+        return {}
+
+
+def tier_name(runs_value, episode: int | None = None) -> str:
+    """L-206 ②：runs[剧] 的两种写法 → 档名。字符串 = 全剧一档（L-191 旧写法，原样兼容）；
+    {"default": "base35", "from_episode": {"2": "turbo_previz"}} = 从第 N 集起改档（取 ≤ 本集的最大集号；没给集号 / 都不够 → default）。
+    非法键（非整数）忽略；其它类型 → preview"""
+    if runs_value is None:
+        return "preview"
+    if isinstance(runs_value, str):
+        return runs_value or "preview"
+    if not isinstance(runs_value, dict):
+        return "preview"
+    tier = str(runs_value.get("default") or "preview")
+    if episode is None:
+        return tier
+    best = None
+    for k, v in (runs_value.get("from_episode") or {}).items():
+        try:
+            kn = int(k)
+        except (TypeError, ValueError):
+            continue
+        if kn <= int(episode) and (best is None or kn > best[0]) and v:
+            best = (kn, str(v))
+    return best[1] if best else tier
+
+
+def first_frame_tier(project: str | None, force: str | None = None, episode: int | None = None) -> tuple[str, dict]:
+    """L-191：按剧取首帧出图档（config/render_quality.json first_frame_tier）。→ ("preview", {}) 默认；("base35", 采样覆盖)；
+    L-206 ②：("turbo_previz", {unet: turbo, steps: 8, cfg: 1.0})——8 步 turbo + 摆位图深度控制（控制图见 previz_inputs）；
+    ("turbo", 同采样参数) = turbo_previz 的退路（摆位图算不出）。episode：按集切档（tier_name）。force 仅供回退 / 实验"""
+    cfg = _tier_cfg()
+    if not cfg:
         return "preview", {}
-    tier = force or (cfg.get("runs") or {}).get(project or "") or "preview"
+    tier = force or tier_name((cfg.get("runs") or {}).get(project or ""), episode)
     if tier == "base35" and cfg.get("base35"):
-        return "base35", dict(cfg["base35"])
+        return "base35", {k: v for k, v in cfg["base35"].items() if not k.startswith("_")}
     if tier == "turbo_previz" and cfg.get("turbo_previz"):
-        return "turbo_previz", {k: v for k, v in cfg["turbo_previz"].items() if k in ("unet", "steps", "cfg", "sampler", "scheduler")}
+        return "turbo_previz", {k: v for k, v in cfg["turbo_previz"].items() if k in TIER_SAMPLING_KEYS}
+    if tier == "turbo" and (cfg.get("turbo") or cfg.get("turbo_previz")):
+        src = cfg.get("turbo") or cfg.get("turbo_previz")
+        return "turbo", {k: v for k, v in src.items() if k in TIER_SAMPLING_KEYS}
     return "preview", {}
 
 
-def previz_inputs(sid: str) -> dict | None:
-    """L-197 B：本镜 previz 深度图（tools/previz/auto_blocking.py 生成：data/previz/<ep>-S<n>/out/S<n>_depth.png）+ 控制参数（config turbo_previz）。
-    → {control, sha, shot_spec(摆位 JSON 的 sha), strength, start_percent, end_percent}；没有深度图 → None"""
+def previz_fallback_tier() -> str:
+    """turbo_previz 摆位图算不出时的档（config turbo_previz.fallback，默认 turbo = 同 8 步不挂控制图；L-206 ②“永不拦本集”）"""
+    return str((_tier_cfg().get("turbo_previz") or {}).get("fallback") or "turbo")
+
+
+def previz_or_none(sid: str, shot, g, stage: str = "first") -> tuple[dict | None, str]:
+    """previz_inputs 的失败关闭包装：→ (previz, "") 或 (None, 原因)。摆位图任何异常都只是“本镜不挂控制图”，不抛、不拦"""
+    cfg = _tier_cfg().get("turbo_previz") or {}
+    if stage == "last" and not (cfg.get("last_frame") or {}).get("previz", True):
+        return None, "config turbo_previz.last_frame.previz=off（尾帧裸 turbo）"
     try:
-        cfg = (_json.loads((_ROOT / "config" / "render_quality.json").read_text(encoding="utf-8")).get("first_frame_tier") or {}).get("turbo_previz") or {}
-    except (OSError, ValueError):  # arch-ok: 读不到 render_quality.json = 不挂 previz 深度控制，走原首帧路径（不放行任何闸门）
+        pv = previz_inputs(sid, shot=shot, g=g, stage=stage)
+    except Exception as e:  # noqa: BLE001  # arch-ok: L-206 ②：摆位图算不出 → 退回裸 turbo，不拦本集；原因记进作业 previz_missing
+        return None, f"摆位图失败 {type(e).__name__}: {str(e)[:160]}"
+    return (pv, "") if pv else (None, "没有摆位图（auto 关 / 没有手工深度图）")
+
+
+def _auto_previz(sid: str, shot, g, cfg: dict, stage: str) -> dict:
+    """tools/previz/auto_blocking.ensure_previz（CPU 光线投射，按输入哈希缓存）。sys.path 懒加载同 sheet_intake 的做法"""
+    import sys as _sys
+    for p in (str(_ROOT / "tools" / "previz"), str(_ROOT / "packages" / "schema")):
+        if p not in _sys.path:
+            _sys.path.insert(0, p)
+    import auto_blocking as AB
+    auto = cfg.get("auto") or {}
+    fields = AB.fields_from_shot(shot)
+    cast = AB.cast_from_locks(AR.g(g, "character_locks") if g is not None else None)
+    return AB.ensure_previz(sid, fields, cast, root=_ROOT, dir_=cfg.get("dir") or "data/previz",
+                            scale=float(auto.get("render_scale") or AB.DEFAULT_SCALE), stage=stage)
+
+
+def previz_inputs(sid: str, shot=None, g=None, stage: str = "first") -> dict | None:
+    """L-206 ②：本镜摆位图（深度控制图）+ 控制参数（config turbo_previz）。
+    给了 shot（导入稿镜对象）且 auto.enabled → 自动摆位（auto_blocking.ensure_previz：分镜字段 → 摆位 JSON → 深度图，按输入哈希缓存
+    data/previz/<ep>-S<n>/auto[_last]/<sha12>/）；没给 shot / auto 关 → 旧的手工深度图 data/previz/<ep>-S<n>/out/S<n>_depth.png。
+    → {control, sha, file_sha, shot_spec, strength, start_percent, end_percent, auto{…}}；没有 → None；自动摆位出错原样抛（previz_or_none 接）。
+    sha = 输入哈希（两台机器各自算同输入必相同；作业签名 / 重出判定认它，不认 PNG 字节）"""
+    cfg = _tier_cfg().get("turbo_previz") or {}
+    if not cfg:
         return None
     m = re.match(r"^(ep\d+)-S(\d+)$", sid or "")
     if not m:
         return None
-    base = _ROOT / (cfg.get("dir") or "data/previz") / f"{m.group(1)}-S{m.group(2)}"
-    dp = base / "out" / f"S{m.group(2)}_depth.png"
-    if not dp.is_file():
-        return None
-    spec = base / f"S{m.group(2)}.json"
-    pv = {"control": dp.relative_to(_ROOT).as_posix(), "sha": AR.sha_file(dp), "shot_spec": AR.sha_file(spec) if spec.is_file() else None}
+    auto = cfg.get("auto") or {}
+    if shot is not None and auto.get("enabled", True):
+        rec = _auto_previz(sid, shot, g, cfg, stage)
+        dp, spec = rec["depth"], rec["spec"]
+        pv = {"control": dp.relative_to(_ROOT).as_posix(), "sha": rec["inputs_sha"][:16], "file_sha": AR.sha_file(dp),
+              "shot_spec": AR.sha_file(spec) if spec.is_file() else None,
+              "auto": {"stage": stage, "cached": rec["cached"], "seconds": rec["seconds"], "scale": rec["scale"], "dir": rec["dir"].relative_to(_ROOT).as_posix()}}
+    else:
+        base = _ROOT / (cfg.get("dir") or "data/previz") / f"{m.group(1)}-S{m.group(2)}"
+        dp = base / "out" / f"S{m.group(2)}_depth.png"
+        if not dp.is_file():
+            return None
+        spec = base / f"S{m.group(2)}.json"
+        pv = {"control": dp.relative_to(_ROOT).as_posix(), "sha": AR.sha_file(dp), "shot_spec": AR.sha_file(spec) if spec.is_file() else None}
     for k, d in (("strength", 0.55), ("start_percent", 0.0), ("end_percent", 0.7)):
         pv[k] = float((cfg.get("control") or {}).get(k, d))
     return pv
@@ -665,9 +744,12 @@ def build_last_compose(project: str, ep, shot, g, first_job: dict, first_file: s
     job.update({"id": first_job["id"] + ":last", "stage": "last", "last_prompt": first_job.get("last_prompt"),
                 "last_frame_mode": "compose", "end_framing": end_text, "first_frame_file": first_file,
                 "last_faces": first_job.get("last_faces") or [], "first_prompt_sha": _sha16(first_job.get("prompt") or "")})
-    if job.pop("previz", None) is not None or job.get("tier") == "turbo_previz":   # 首帧的 previz 深度图是起幅的，尾帧不能用
-        tier, ov = first_frame_tier(project, force="base35")
-        job["tier"], job["tier_overrides"], job["previz_skipped"] = tier, ov, "L-203：尾帧按落幅重新构图，不用首帧 previz 深度图"
+    # L-206 ②：尾帧档跟首帧同一张按集表（first_frame_tier(episode)）；turbo_previz 时 build_first 已按落幅改写后的字段（shot2：景别 / 机位 /
+    # 构图）算了尾帧自己的摆位图（stage=last，与首帧的起幅摆位图不同一张），算不出 → 裸 turbo（previz_missing）。首帧的起幅深度图从不给尾帧用
+    if job.get("previz") and job["previz"].get("auto", {}).get("stage") != "last":
+        job.pop("previz")
+        tier, ov = first_frame_tier(project, force=previz_fallback_tier())
+        job["tier"], job["tier_overrides"], job["previz_missing"] = tier, ov, "L-203：尾帧按落幅重新构图，不用首帧（起幅）摆位图"
     job["compile_trace"] = trace_of(job)
     return job
 

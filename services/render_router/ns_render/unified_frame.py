@@ -180,7 +180,11 @@ def _postflight(final_rel: str, job: dict, host: str | None):
         err = d["measure_error"]
     except Exception as e:  # noqa: BLE001
         err = repr(e)[:200]
-    d = PO.run("image", {"image": str(img), "request": req, "remote": None, "cross": None, "hands": None})
+    try:
+        d = PO.run("image", {"image": str(img), "request": req, "remote": None, "cross": None, "hands": None})
+    except Exception as e:  # noqa: BLE001  # arch-ok: 本机退回打分也跑不了（服务器 producer venv 没 torch）= 没量成，不是不过；保留远端真因
+        # FIX-SCORE36（11-06）：原来这里抛 ModuleNotFoundError('torch') 把远端真因（full_score 崩）盖掉，日志只见 torch
+        return {"ok": None, "items": [], "error": "本机退回打分失败：" + repr(e)[:160], "remote_error": err}
     d.pop("local", None)
     d["remote_error"] = err
     return d

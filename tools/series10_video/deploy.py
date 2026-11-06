@@ -41,7 +41,7 @@ DEST = _video_root()
 PY = "/root/work/fredw/venv_idm/bin/python"
 CODE_FILES = ["config/pipeline/video_policy.json", "config/vqa.json", "config/prompts/vqa_inspect.md", "services/agent/ns_agent/__init__.py",
               "config/render_quality.json", "tools/motion_judder.py", "tools/ep02_director/review.py", "tools/lab_ep02/lab_score.py",
-              "tools/ep02_iter/cut_check.py"]
+              "tools/ep02_iter/cut_check.py", "config/pipeline/lane_roles.json"]   # L-206 工位分卡（vidgen / score_clip 在服务器上读）
 CODE_DIRS = ["tools/series10_video", "services/render_router/ns_render", "packages/qc/ns_qc", "services/agent/ns_agent/vqa"]
 VISION = ["models_cache/vision/face_detection_yunet_2023mar.onnx", "models_cache/vision/face_recognition_sface_2021dec.onnx"]
 
@@ -126,7 +126,30 @@ def push_plan(host: str, files: list[str], managed=None) -> tuple[list[str], lis
     return [f for f in files if f not in CODE_FILES], []
 
 
+def other_host(host: str) -> bool:
+    """FIX-NIGHT2 #7：服务器上（OFFLINE_SELF 有值）目标不是本机 = 另一台。不看 OFFLINE_ALIASES（那是给打分路由用的：gpu36 上把
+    full_score("gpu33") 当本机执行）——deploy / night 若也按别名当本机，gpu36 会把 gpu33 的作业推到自己目录并报 “push gpu33 PUSH_OK”"""
+    import os
+    me = os.environ.get("OFFLINE_SELF")
+    return bool(me) and host.split("@", 1)[-1] not in (me, f"{me}-t", f"{me}-tb", "localhost", "127.0.0.1")
+
+
+def remote_have(host: str, files: list[str]) -> set | None:
+    """服务器上已有的文件（输入图按 sha8 命名，存在即正确）→ 只推缺的（FIX-NIGHT2 #3：每轮 3.5–12 MB 全量重推改成增量）。
+    探测失败 → None（调用方按全推）"""
+    if not files:
+        return set()
+    r = ssh(host, f"cd {DEST} 2>/dev/null || exit 0; for f in {' '.join(files)}; do [ -s \"$f\" ] && echo \"$f\"; done; echo __END__")
+    out = r.stdout.decode(errors="replace") if r.stdout else ""
+    if "__END__" not in out:
+        return None
+    return {ln.strip() for ln in out.splitlines() if ln.strip() and ln.strip() != "__END__"}
+
+
 def push(host, jobs_file="jobs.json", with_vision=None):
+    if other_host(host):
+        print(f"REFUSE_OTHER_HOST {host}：服务器之间不推（无互信；OFFLINE_ALIASES 只给打分路由用），这台的集由它自己的 night 派")
+        return False
     if not thread_guard_ok():
         return False
     chk = ssh(host, f"cd {DEST} 2>/dev/null && ls {' '.join(VISION)} 2>/dev/null | wc -l")
@@ -135,13 +158,22 @@ def push(host, jobs_file="jobs.json", with_vision=None):
         # K-OPS-311 附：探测 ssh 没连上时 have = ""，旧代码把 36 MB 视觉模型也塞进推送包（16:57 推 48.1 MB，跳板约 17 KB/s）
         print(f"连不上 {host}（{chk.stderr.decode(errors='replace').strip()[-160:]}），这轮不推")
         return False
-    files = CODE_FILES + [f"{VID_REL}/{jobs_file}"] + inputs_for(host, jobs_file)
+    inputs = inputs_for(host, jobs_file)
+    had = remote_have(host, inputs)
+    if had is not None:
+        inputs = [f for f in inputs if f not in had]
+    files = CODE_FILES + [f"{VID_REL}/{jobs_file}"] + inputs
     if with_vision or have != "2":
-        files += VISION
+        # FIX-NIGHT2 #5：身份模型是硬依赖（没有 → score_clip 只能 score_infra、不判身份）：本地也没有就大声报出
+        missing = [v for v in VISION if not (ROOT / v).is_file()]
+        if missing:
+            print(f"VISION_MODELS_MISSING {host}：服务器只有 {have}/2 个身份模型，本地也缺 {missing}——视频打分将不判身份（score_infra）")
+        files += [v for v in VISION if v not in missing]
     files = [f for f in files if not f.startswith(VID_REL + "/control_")]
     files, dirs = push_plan(host, files)
     blob = build_tar(files, dirs)
-    print(f"推送 {len(files)} 个文件 + {len(dirs)} 个目录，{len(blob) / 1e6:.1f} MB → {host}:{DEST}")
+    print(f"推送 {len(files)} 个文件 + {len(dirs)} 个目录，{len(blob) / 1e6:.1f} MB → {host}:{DEST}"
+          + (f"（输入图增量：服务器已有 {len(had)}，补 {len(inputs)}）" if had is not None else ""))
     pre = ""
     if host == "gpu36":
         pre = ("mkdir -p /root/work/fredw/tools_bin && ln -sf /root/work/fredw/venv/lib/python3.12/site-packages/imageio_ffmpeg/"

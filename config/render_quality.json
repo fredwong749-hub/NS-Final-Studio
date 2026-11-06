@@ -1033,8 +1033,21 @@
   },
   "first_frame_tier": {
     "_doc": "L-191（项目方 11-05 选 A）：首帧出图档按剧选。runs[剧] = \"preview\"（默认，预设自带 Turbo 8 步）或 \"base35\"（Qwen-Image 2.1 Base 35 步 cfg 3 euler/simple；1152×2016 出图 + 缩回 + 后期不变，只覆盖 overrides 里的采样字段；负面词生效）。开启办法：把 runs.series10_v2 改成 \"base35\" 并重新导入 / regen（作业签名随之变，旧 8 步版不再等同）。实测 ~328 s / 张（8 步 ~61 s）；渲染超时 900 s、租约 45 min 已够。没列的剧一律 preview。来源 tools/research/adherence_img_ab.py T35_OVERRIDES",
-    "runs": {"series10_v2": "base35"},
-    "base35": {"unet": "base", "steps": 35, "cfg": 3.0, "sampler": "euler", "scheduler": "simple"}
+    "runs": {"series10_v2": {"default": "base35", "from_episode": {"2": "turbo_previz"}}},
+    "_runs_doc": "L-206 ②A（项目方 11-06 16:2x）：runs[剧] 两种写法——字符串 = 全剧一档（L-191 旧写法照旧）；{default, from_episode:{集号: 档}} = 从该集起改档（取 ≤ 本集的最大集号）。series10_v2：ep01 保持 base35 跑完作基线，ep02 起 turbo_previz（切换前先用 tools/research/turbo_previz_ab.py 出 ep01 S1–S4 对照给项目方看）。读法唯一入口 ns_agent.frame_job.first_frame_tier(project, episode=集号)；尾帧（compose）同一张表",
+    "base35": {"unet": "base", "steps": 35, "cfg": 3.0, "sampler": "euler", "scheduler": "simple"},
+    "turbo": {
+      "_doc": "8 步 turbo、不挂摆位图（= turbo_previz 的退路：摆位图算不出 / auto 关 / 尾帧 previz 关）。采样同 turbo_previz；作业签名带 tier= 段，与 preview（预设自带 turbo，不加段）区分",
+      "unet": "turbo", "steps": 8, "cfg": 1.0
+    },
+    "turbo_previz": {
+      "_doc": "L-206 ②A（修订 L-191 base35；L-197 B 的落地）：首帧 = Turbo 8 步 + 摆位图深度控制（Qwen-Image 2.1 Fun ControlNet Union，节点链见 ns_render.unified_frame.add_fun_controlnet）。摆位图由 tools/previz/auto_blocking.py 在编作业时从导入稿字段（机位与景别 / 光学 / 构图 / cast 站位 / 场景）确定性算出（CPU 光线投射，render_scale 0.5 单镜约 5–10 s），按输入哈希缓存 data/previz/<ep>-S<n>/auto/<sha12>/；两台机器各自算同输入同哈希，作业签名认输入哈希。算不出 → fallback 档（turbo，裸 8 步），永不拦本集。身份：参考槽（身份脸 / 脸板 / 造型 / 场景底图）与 base35 完全同一套（L-191 实测 turbo Q1 均值 0.72 vs base35 0.51），控制图只到 end_percent=0.7，后 30% 采样留给参考脸收身份。control.strength/end_percent 待 ep01 S1–S4 对照定",
+      "unet": "turbo", "steps": 8, "cfg": 1.0, "dir": "data/previz",
+      "auto": {"enabled": true, "render_scale": 0.5},
+      "control": {"strength": 0.55, "start_percent": 0.0, "end_percent": 0.7},
+      "last_frame": {"previz": true, "_doc": "尾帧（L-203 compose）也走 turbo：previz=true 时按落幅改写后的景别 / 机位 / 构图单独算一张尾帧摆位图（stage=last，缓存 auto_last/），不用首帧的起幅图；false 或算不出 → 裸 turbo"},
+      "fallback": "turbo"
+    }
   },
   "frame_redo_preset": "frame_v9",
   "frame_redo_preset_note": "ASSETMASTER 2026-11-01：series10 首帧全量重出默认 frame_v9（项目方较新原话“v9 v10+场景底图这个还可以”）；frame_v9_heavy（“v10H 同上（写实·重）”）为备选。default_preset 仍是 leica_sstar。",

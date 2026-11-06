@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -104,8 +105,26 @@ def video_holds(now: float | None = None) -> dict:
             for sid, v in (d.get("items") or {}).items() if str(v.get("expires_at") or "9999")[:19] > t}
 
 
+def regen_holds(shot_ids: list) -> dict:
+    """L-206 hold_regen_downstream（config/pipeline/lane_roles.json）：首帧换代中（takes.json master_gate.image 未撤 /
+    master_rejects 未 cleared）的镜 → {镜: 原因}，与 video_holds 同样按镜 hold（route=hold，vidgen 无变体 → waiting_frame）。
+    只对 ep ≥ from_episode 生效；分卡模块不在 / 关 = {}"""
+    try:
+        import lane_roles as LR
+    except ImportError:   # arch-ok: 服务器镜像没带分卡模块 = 不 hold（旧行为）
+        return {}
+    return LR.regen_holds(RUN_ID, [str(s) for s in shot_ids])
+
+
 def rel(p: Path) -> str:
     return str(Path(p).resolve().relative_to(ROOT)).replace("\\", "/")
+
+
+def jl_safe(p: Path):
+    try:
+        return json.loads(Path(p).read_text(encoding="utf-8"))
+    except (OSError, ValueError):   # arch-ok: 上一版 jobs.json 没有 / 坏 = 没有缓存，全量重编
+        return None
 
 
 def load_specs(eps=None, source: str | None = None) -> dict:
@@ -205,6 +224,8 @@ def passed_frames() -> dict:
             # 照 Q10 再挡一遍等于 L-183 白做（ep01 S4 v12 06:21 被挡）→ 视同验收通过、进视频，待项目方复核；人数 anomaly 照样挡（上面）
             if acc != "pass" and pf.get("review_needed"):
                 acc = "pass"
+            if acc in NA_STATES and na_resolve(sid_k, t["file"]):   # FIX-NIGHT2 #6：检测 na 挂满 → 补跑一次仍 na → 按待复核放行（L-196）
+                acc = "pass"
             if acc != "pass":
                 ANOMALY_SKIPPED[sid_k] = (f"v{n} 首帧还没跑出图后验收，跑完通过再进视频" if acc is None
                                           else f"v{n} 首帧出图后验收 {acc}，不进视频")
@@ -275,6 +296,61 @@ def accept_status(sid: str, file: str, pf: dict, rows: dict) -> str | None:
     return (r or {}).get("ok")
 
 
+NA_STATES = (None, "na", "untested")
+NA_RECHECK_S = int(os.environ.get("NS_NA_RECHECK_S", "600"))   # 检测没判出（na）挂满这么久 → 后台补跑一次验收
+NA_GRACE_S = int(os.environ.get("NS_NA_GRACE_S", "600"))       # 补跑起了这么久仍 na → 视同待复核通过（L-196）
+
+
+def _na_recheck_launch(sid: str, file: str) -> bool:
+    """默认补跑：后台起 tools/vqa/accept.py --shots <镜>（不等结果，build_jobs 不被 VQA 拖住）；测试 / 服务器可换 NA_RECHECK_FN"""
+    import subprocess
+    try:
+        subprocess.Popen([sys.executable, str(ROOT / "tools/vqa/accept.py"), "--shots", sid], cwd=str(ROOT),
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+        return True
+    except OSError as e:   # arch-ok: 补跑起不来 = 记下原因，按“已补跑”计时（不能让一镜永远挂在 na）
+        print(f"[na_recheck] {sid} 补跑起不来：{e}", file=sys.stderr)
+        return False
+
+
+NA_RECHECK_FN = _na_recheck_launch
+
+
+def na_resolve(sid: str, file: str, now: float | None = None) -> bool:
+    """FIX-NIGHT2 #6（L-196）：首帧验收结论是 None / na / untested（检测没判出）不能无限挡视频：
+    首次看到记时（VID/_accept_na.json）；挂满 NA_RECHECK_S → 后台补跑一次验收（NA_RECHECK_FN）；补跑后再过 NA_GRACE_S 仍 na →
+    返回 True（视同 review_needed 通过、进视频，报告标 accept_na）。判出 pass / fail 的不走这里"""
+    now = now or time.time()
+    f = VID / "_accept_na.json"
+    try:
+        d = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+    except (OSError, ValueError):   # arch-ok: 记时文件坏 = 从头计时（不放行）
+        d = {}
+    key = f"{sid}|{Path(str(file)).name}"
+    r = d.get(key) or {"since": now}
+    changed = key not in d
+    if r.get("rechecked") is None and now - float(r["since"]) >= NA_RECHECK_S:
+        NA_RECHECK_FN(sid, file)
+        r["rechecked"] = now
+        changed = True
+    ok = r.get("rechecked") is not None and now - float(r["rechecked"]) >= NA_GRACE_S
+    if ok and not r.get("waived"):
+        r["waived"] = now
+        changed = True
+        ANOMALY_SKIPPED.pop(sid, None)
+        print(f"[na_resolve] {sid} 验收 na 补跑后仍没判出，按待复核通过进视频（L-196）", file=sys.stderr)
+    if changed:
+        d[key] = r
+        try:
+            VID.mkdir(parents=True, exist_ok=True)
+            tmp = f.with_name(f.name + ".tmp")
+            tmp.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+            tmp.replace(f)
+        except OSError as e:   # arch-ok: 记时写不下 = 这轮不放行，下一轮重算
+            print(f"[na_resolve] 记时写失败：{e}", file=sys.stderr)
+    return ok
+
+
 def anomaly_block(sid: str, file: str, pf: dict, rows: dict) -> str | None:
     """总调度 11-02 17:3x：anomaly 判出重复人 / 多余人头的首帧不许进视频（ep04-S10 v6 就是这样进了视频）。
     依据：postflight Q10（出图后验收）人数项，或验收批量结果里同一版首帧的 count.defects。没判过的不拦"""
@@ -306,8 +382,64 @@ def passed_lasts() -> dict:
             continue
         pf = (t or {}).get("postflight") or (t or {}).get("contract") or {}
         if t and t.get("file") and (locked or pf.get("ok")) and not t.get("master_reject") and (ROOT / "data" / t["file"]).exists():
-            out[f"{tj.parent.parent.name}-{tj.parent.name}"] = {"file": "data/" + t["file"], "created_at": str(t.get("created_at") or "")}
+            out[f"{tj.parent.parent.name}-{tj.parent.name}"] = {"file": "data/" + t["file"], "created_at": str(t.get("created_at") or ""),
+                                                               "take": n}
     return out
+
+
+_SHA_CACHE: dict = {}
+
+
+def sha16(p: Path) -> str | None:
+    """文件 sha256 前 16 位（按路径 + mtime + 大小缓存：每轮编作业不重复读 16 张尾帧）"""
+    try:
+        st = Path(p).stat()
+        key = (str(p), st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+    if key not in _SHA_CACHE:
+        _SHA_CACHE[key] = hashlib.sha256(Path(p).read_bytes()).hexdigest()[:16]
+    return _SHA_CACHE[key]
+
+
+def paired_last(sid: str, ff: dict | None) -> dict | None:
+    """L-203：本镜与当前首帧成对的尾帧 → LASTS_OF 项 | None。尾帧比所用首帧旧 = 由旧首帧做的，不能配（E13 同理）"""
+    lf = LASTS_OF.get(sid)
+    if not lf or not ff:
+        return None
+    if str(lf.get("created_at") or "") < str(ff.get("created_at") or ""):
+        return None
+    return lf
+
+
+def recipe_wants_last(reg, rid: str, ov: dict) -> bool:
+    """配方要送尾帧：keyframes.last_frame_mode=use、不是 Ref2VA、且本变体没被覆盖成 none（I2VA）"""
+    if str(ov.get("keyframes.last_frame_mode") or "") == "none":
+        return False
+    try:
+        rc = reg.resolve(rid)
+    except Exception:  # noqa: BLE001  # arch-ok: 配方解析不了 → compile_shot 自己报错；这里不额外拦
+        return False
+    if rc.get("mode") == "ref2va" or (rc.get("ref2va") or {}).get("enabled"):
+        return False
+    return (rc.get("keyframes") or {}).get("last_frame_mode", "none") == "use"
+
+
+def attach_last(spec, lf: dict | None) -> bool:
+    """FIX-NIGHT2 #1（L-203 被违反：尾帧从没送进视频模型）：把成对尾帧写进 spec.keyframes["last"]，编译器 _mode 才按 FL2VA 编
+    （H3 提示词带 Picture 2 对齐句、图里有 @last_frame）。以前只有导入稿 locked.last 的镜（ep01 S1）有这一项 → 15/16 镜编成 I2VA。
+    lf=None → 去掉 last（首帧换代后旧尾帧不配 / 兜底 I2VA）。返回是否带尾帧"""
+    kf = getattr(spec, "keyframes", None)
+    if not isinstance(kf, dict):
+        return False
+    if not lf:
+        kf.pop("last", None)
+        return False
+    from ns_schema.shot_spec import IdentityRef
+    cur = kf.get("last")
+    if cur is None or getattr(cur, "path", None) != lf["file"]:
+        kf["last"] = IdentityRef(path=lf["file"], sha=sha16(ROOT / lf["file"]), version=f"last#{lf.get('take')}")
+    return True
 
 
 LAST_FALLBACK: dict = {}   # build_all 开头按 last_frame_fallbacks() 填；compile_variant 据此把该镜编成 I2VA
@@ -332,6 +464,41 @@ def last_frame_fallbacks() -> dict:
             v = v.get("mode")
         if v:
             out[f"{tj.parent.parent.name}-{tj.parent.name}"] = str(v)
+    # FIX-NIGHT2 #6：producer 账本里尾帧已硬上限封顶（hard_capped 新鲜且没人工 uncap）/ 已标 last_unavailable 的镜，
+    # 即使 takes.json 还没写 last_frame_fallback，也按 I2VA 兜底（否则这镜视频等一张永远不会来的尾帧）
+    for sid, why in ledger_last_fallbacks().items():
+        out.setdefault(sid, "i2va")
+    return out
+
+
+def ledger_last_fallbacks(now: float | None = None) -> dict:
+    """data/producer[/runs/<剧>]/attempts.json 的 last:<镜> 项 → {镜: 原因}（硬上限封顶 24 h 内且 cap_extra 没更新 / last_unavailable）。
+    目录按 tools/autopilot/runs.producer_dir（legacy = data/producer）；读不到 = {}"""
+    now = now or time.time()
+    try:
+        ap = str(ROOT / "tools/autopilot")
+        if ap not in sys.path:
+            sys.path.insert(0, ap)
+        import runs as _RN
+        f = Path(_RN.producer_dir(RUN_ID, ROOT)) / "attempts.json"
+        L = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+    except Exception:  # noqa: BLE001  # arch-ok: 账本读不到 = 没有账本兜底（takes.json 的标记照用）
+        return {}
+    out = {}
+    for oid, led in (L or {}).items():
+        if not str(oid).startswith("last:") or not isinstance(led, dict):
+            continue
+        sid = oid[5:]
+        if led.get("last_unavailable") or led.get("last_frame_fallback") == "i2va":
+            out[sid] = "ledger:last_unavailable"
+            continue
+        hc = led.get("hard_capped") or {}
+        if not hc or now - float(hc.get("t") or 0) > 24 * 3600:
+            continue
+        ex = led.get("cap_extra") or {}
+        if ex and float(ex.get("t") or 0) >= float(hc.get("t") or 0) and now - float(ex.get("t") or 0) < 24 * 3600:
+            continue
+        out[sid] = f"ledger:hard_capped（24 h 内 {hc.get('n')} 版，上限 {hc.get('lim')}）"
     return out
 
 
@@ -425,6 +592,17 @@ def compile_variant(spec, reg, rid, attempt, variant, frames_of, *, seed=None, e
     ov.update(extra or {})
     if seed is not None:
         ov["seed.value"] = int(seed)
+    sid = getattr(spec, "id", None)
+    ff = frames_of.get(sid)
+    lf = paired_last(sid, ff)
+    want_last = recipe_wants_last(reg, rid, ov)
+    attach_last(spec, lf if want_last else None)
+    if want_last and not lf:
+        # 视频闸门（L-203 / FIX-NIGHT2 #1）：首帧过 ∧（尾帧成对过 ∨ 兜底 I2VA ∨ 配方不用尾帧）。没成对尾帧 = 等（vidgen 对
+        # no_last_frame 有等帧宽限），绝不再悄悄编成 I2VA
+        if not ff:
+            return {"status": "no_first_frame"}
+        return {"status": "no_last_frame:stale_pair" if LASTS_OF.get(sid) else "no_last_frame"}
     plan = C.compile_shot(spec, reg, attempt=attempt, recipe_id=rid, overrides=ov, allow_experimental={rid})
     if plan["status"] == "needs_writer":
         return {"status": "needs_writer", "reason": plan.get("reason")}
@@ -437,7 +615,6 @@ def compile_variant(spec, reg, rid, attempt, variant, frames_of, *, seed=None, e
     if BAD_STYLE_RE.search(sys_style):
         return {"status": f"bad_style_lead:{sys_style}"}
     inputs = {}
-    ff = frames_of.get(spec.id)
     for n in plan["graph"].values():
         for v in (n.get("inputs") or {}).values():
             if not isinstance(v, str) or not v.startswith("@"):
@@ -447,11 +624,8 @@ def compile_variant(spec, reg, rid, attempt, variant, frames_of, *, seed=None, e
                     return {"status": "no_first_frame"}
                 inputs[v] = ff["file"]
             elif v == "@last_frame":          # 配方送尾帧时必须有尾帧输入，否则 vidgen 提交 KeyError（L-124 ep01-S1）
-                lf = LASTS_OF.get(spec.id)
-                if not lf or not ff:
-                    return {"status": "no_last_frame"}
-                if lf["created_at"] < str(ff.get("created_at") or ""):   # 首尾要成对：尾帧比所用首帧旧 = 由旧首帧做的，不能配（E13 同理）
-                    return {"status": "no_last_frame:stale_pair"}
+                if not lf or not ff:          # 成对判定在 paired_last（首尾要成对：尾帧比所用首帧旧 = 由旧首帧做的，E13 同理）
+                    return {"status": "no_last_frame:stale_pair" if LASTS_OF.get(sid) else "no_last_frame"}
                 inputs[v] = lf["file"]
             elif v.startswith("@look:"):      # Ref2VA 造型槽（REFLOCK 审过的 look_refs，K-REN-303）
                 name = v[6:]
@@ -487,6 +661,7 @@ def compile_variant(spec, reg, rid, attempt, variant, frames_of, *, seed=None, e
     return {
         "preflight": pf,
         "status": plan["status"], "recipe": rid, "mode": plan["mode"], "attempt": attempt, "variant": variant,
+        "last_frame": lf["file"] if (lf and "@last_frame" in inputs) else None,
         "seed": plan["seed"], "frames": plan["frames"], "long": plan["lane"]["long"], "prompt": plan["prompt"]["text"],
         "prompt_notes": plan["prompt"]["notes"], "graph": plan["graph"], "inputs": inputs,
         "ref_slots": plan["ref_slots"], "acceptance": plan["acceptance"], "plan_hash": plan["plan_hash"],
@@ -494,6 +669,44 @@ def compile_variant(spec, reg, rid, attempt, variant, frames_of, *, seed=None, e
         "lint_warns": [i["code"] for i in plan["lint"] if i["level"] != "error"],
         "compiled_by": "ns_recipes.compiler.compile_shot", "compiler_version": plan["compiler_version"],
     }
+
+
+def dedupe_variants(vs: dict) -> tuple[dict, dict]:
+    """FIX-NIGHT2 #4：同（配方, 种子, 输入图, 提示词）的变体只留第一个（pika_only 下 r24 ≡ v1、alt ≡ s2 → 同一条片出两遍：
+    S3 r24 重渲、S2 r24 3.8 s 缓存命中）。→ (去重后的变体表, {被去掉的变体: 等价的那个})"""
+    seen, out, dups = {}, {}, {}
+    for k, v in vs.items():
+        if v.get("status") not in ("ready", "lint_error"):
+            out[k] = v
+            continue
+        key = (v.get("recipe"), v.get("seed"), json.dumps(v.get("inputs") or {}, sort_keys=True), v.get("prompt") or "")
+        if key in seen:
+            dups[k] = seen[key]
+            continue
+        seen[key] = k
+        out[k] = v
+    return out, dups
+
+
+def shot_cache_key(spec, ff: dict | None, lf: dict | None, fallback, hold, excluded: bool, ch: dict, reg, alts: dict) -> str:
+    """FIX-NIGHT2 #3：一镜变体的编译输入指纹（spec_hash + 首帧 + 尾帧 + 配方口径 + 注册表 / 编译器版本 + hold）——
+    没变就沿用上一版 jobs.json 的变体，不重编（编 16 镜 × 7 变体 ≈ 分钟级，每轮都重编是固定成本）"""
+    return hashlib.sha256(json.dumps([
+        spec.spec_hash() if hasattr(spec, "spec_hash") else getattr(spec, "id", None),
+        (ff or {}).get("file"), (ff or {}).get("take"), (lf or {}).get("file"), sha16(ROOT / lf["file"]) if lf else None,
+        fallback, hold, excluded, ch, getattr(reg, "source_hash", None), getattr(C, "COMPILER_VERSION", None),
+        sorted((alts or {}).items())], sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()[:16]
+
+
+def _cached_variants(prev: dict | None, key: str) -> dict | None:
+    """上一版 jobs.json 里同指纹、且全部变体 ready + preflight 过的镜 → 沿用其 variants（否则重编：preflight 可能因资产到位而变）。
+    NS_BUILD_NOCACHE=1 关掉"""
+    if not prev or os.environ.get("NS_BUILD_NOCACHE") == "1" or prev.get("cache_key") != key:
+        return None
+    vs = prev.get("variants") or {}
+    if not vs or not all(v.get("status") == "ready" and (v.get("preflight") or {}).get("ok") for v in vs.values()):
+        return None
+    return vs
 
 
 def shot_meta(spec) -> dict:
@@ -535,6 +748,8 @@ def build_all(validate_only=False) -> dict:
     holds = video_holds()
     reg = R.load()
     all_specs = load_specs()
+    if not validate_only:
+        holds = {**holds, **regen_holds(list(all_specs))}   # L-206 hold_regen_downstream：首帧换代中的镜不编变体（等新首帧定下）
     specs = (sys.path.append(str(ROOT)) if str(ROOT) not in sys.path else None) or __import__("tools.master.sop_gate", fromlist=["_"]).filter_video_specs(RUN_ID, all_specs)  # HARNESS-O：SOP 阶段闸门（没过“视频”闸门的集不编作业）
     # FIX-VID D10：没过闸门的镜不编变体，但仍留在 jobs.json（route=hold, gate_excluded）——vidgen 才会对它跑 check_stale，
     # 首帧换版后的旧片不会经 state → manifest 混进成片；整集落定时它按“等闸门”算（成片用首帧静帧占位，闸门开了自动重编放行）
@@ -554,8 +769,13 @@ def build_all(validate_only=False) -> dict:
     # 配方里的身份裁切是 V1 的脸：只给 legacy 剧；其它剧的身份槽只走 asset_refs.face_of（compiler.ref_slots，L-126）
     crops = ((reg.resolve("ref2va_pdd2").get("ref2va") or {}).get("identity_crops") or {}) if RC.is_legacy(RUN_ID) else {}
     ids = name_ids()
+    prev_jobs = {} if validate_only else {s.get("shot"): s for s in (jl_safe(VID / "jobs.json") or {}).get("shots") or []}
+    cache_hits = 0
     shots = []
     for sid, spec in specs.items():
+        # L-203：成对尾帧先挂到 spec（spec.json / spec_hash / 变体编译同一口径）；兜底 I2VA / 逐镜 I2VA 的镜不挂
+        lf = None if (validate_only or LAST_FALLBACK.get(sid) == "i2va" or _no_last(spec)) else paired_last(sid, frames_of.get(sid))
+        attach_last(spec, lf)
         (VID / "specs" / f"{sid}.spec.json").write_text(spec.model_dump_json(indent=1, by_alias=True), encoding="utf-8")
         if validate_only and sid not in VALIDATE["shots"]:
             continue
@@ -572,8 +792,20 @@ def build_all(validate_only=False) -> dict:
         meta["score_refs"] = score_refs(spec, reg)
         if LAST_FALLBACK.get(sid):
             meta["last_frame_fallback"] = LAST_FALLBACK[sid]
+        meta["last_frame"] = lf["file"] if lf else None
+        meta["last_frame_take"] = lf.get("take") if lf else None
         vs = {}
-        if sid in gate_excluded:
+        cached = None
+        if not validate_only:
+            meta["cache_key"] = shot_cache_key(spec, frames_of.get(sid), lf, LAST_FALLBACK.get(sid), holds.get(sid),
+                                               sid in gate_excluded, ch, reg, alts)
+            cached = _cached_variants(prev_jobs.get(sid), meta["cache_key"])
+        if cached is not None:
+            vs = cached
+            meta["route"] = prev_jobs[sid].get("route")
+            meta["dedup"] = prev_jobs[sid].get("dedup") or {}
+            cache_hits += 1
+        elif sid in gate_excluded:
             meta["route"], meta["hold"], meta["gate_excluded"] = "hold", "gate：没过“视频”闸门（sop_gate），不编变体", True
         elif validate_only:
             for arm, rid in VALIDATE["arms"].items():
@@ -616,8 +848,11 @@ def build_all(validate_only=False) -> dict:
         if not validate_only and sid in holds:      # 按镜 hold：不出变体（vidgen 无变体 → waiting_frame，不派单）
             vs = {}
             meta["route"], meta["hold"] = "hold", holds[sid]
+        if not validate_only and cached is None:
+            vs, dups = dedupe_variants(vs)
+            meta["dedup"] = dups
         for k, v in vs.items():
-            if v.get("prompt"):
+            if v.get("prompt") and cached is None:
                 (VID / "prompts" / f"{sid}.{k}.txt").write_text(v["prompt"], encoding="utf-8")
         meta["variants"] = vs
         meta["ladder_order"] = list(vs)
@@ -632,7 +867,7 @@ def build_all(validate_only=False) -> dict:
         shots = split
     shots.sort(key=lambda m: (m["ep"], m["idx"]))
     out = {"schema": "series10_video.jobs/1", "run": RUN_ID, "built_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-           "built_by": "tools/series10_video/build_jobs.py", "recipe_choice": ch,
+           "built_by": "tools/series10_video/build_jobs.py", "recipe_choice": ch, "cache_hits": cache_hits,
            "validate": VALIDATE if validate_only else None, "anomaly_skipped": dict(ANOMALY_SKIPPED), "shots": shots}
     blob = json.dumps(out, ensure_ascii=False, indent=1)
     out_p = VID / ("validate_jobs.json" if validate_only else "jobs.json")

@@ -766,7 +766,12 @@ def accept_gate(sid: str, stage: str, image, pf: dict) -> dict | None:
     from tools.vqa import accept as ACC
     from tools.vqa import anomaly as AN
     import os
-    host = t.get("count_host") or os.environ.get("OFFLINE_SELF") or ""
+    try:                                  # L-206：审图位主机本机常驻检测活着 → 人数检测留在审图位（CPU / 审图卡），不发到出图位的卡
+        from ns_agent.gen_contract import accept as GA
+        local = GA.review_local_anomaly(ROOT)
+    except Exception:  # noqa: BLE001  # arch-ok: 探测出错 = 原口径 count_host
+        local = None
+    host = local or t.get("count_host") or os.environ.get("OFFLINE_SELF") or ""
     # 总调度 11-02 17:4x：服务器上没有检测卡的主机（gpu33：GPU2 是坏卡，硬规则永远不用）内联不跑人数检测，记 deferred；
     # 人数检测统一由笔记本发起的批量验收在 gpu36（有镜面分割）上做，视频闸门读 data/vqa/accept/epNN.json
     try:

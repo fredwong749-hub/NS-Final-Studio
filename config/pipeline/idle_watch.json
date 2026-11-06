@@ -14,5 +14,11 @@
  "probe_timeout_s": 40,
  "queue_timeout_s": 6,
  "night_once_timeout_s": 180,
- "actions": {"night_once": true, "restart_request": true, "report_issue": true, "channel": true}
+ "actions": {
+  "night_once": false,
+  "restart_request": true,
+  "report_issue": true,
+  "channel": true
+ },
+ "_night_once_off": "PS-MASTER 11-06 17:5x：AUDIT-NIGHT 发现 night --once 与常驻 night 并发写 jobs/state/control（REOPEN×2、半截 JSON）；关掉"
 }

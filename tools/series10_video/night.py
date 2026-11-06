@@ -58,13 +58,94 @@ EPS_OUT = RC.episodes_out(RUN_ID)        # V1 = data/episodes/series10（原样�
 # 道归属（总调度 10-31 夜）：gpu33 三道 = 出图优先（让道模式）；gpu36:0/1 = BAKEOFF（让道模式，可写 hold 文件借用）；gpu36:2 = 视频
 DEFAULT_CTRL = {"force_eps": [], "shared_lanes": ["gpu33:0", "gpu33:1", "gpu33:3", "gpu36:0", "gpu36:1", "gpu36:2"],
                 "hold_lanes": [], "per_lane": 2, "yield_s": 30, "bgm": "auto",   # FIX-VID（L-205 KPI）：让道观察 180→30 s，道空 3 分钟才派太慢
-                "poll_s": None}   # SLIM-CDE 11-05 D：轮询间隔（秒）；None = 旧 V1 120 s / V2 默认 45 s（首尾帧一锁定最迟 ~1 min 内编作业派单，原 ~2.3 min）
+                "poll_s": None}   # SLIM-CDE 11-05 D：轮询间隔（秒）；None = 旧 V1 120 s / V2 默认 15 s（FIX-NIGHT2 #3：45 → 15）
+
+
+def _host_is_other(host: str) -> bool:
+    """FIX-NIGHT2 #7：服务器上（OFFLINE_SELF）目标不是本机 = 另一台。不看 OFFLINE_ALIASES——那只给打分路由（gpu36 上把
+    full_score("gpu33") 当本机执行）；night / deploy 若也按别名当本机，gpu36 会把 gpu33 的作业推到自己目录并报 “push gpu33 PUSH_OK”"""
+    me = os.environ.get("OFFLINE_SELF")
+    return bool(me) and str(host).split("@", 1)[-1] != me
 
 
 def video_shared(shared, ctrl) -> list:
     """FIX-VID（L-205 KPI）：night_control.json 的 video_lanes = 专用视频道，不受让道（shared_lanes + yield_s）节流"""
     ded = set(ctrl.get("video_lanes") or [])
     return [x for x in shared or [] if x not in ded]
+
+
+def _LR():
+    """L-206 工位分卡模块（config/pipeline/lane_roles.json 唯一来源）；服务器镜像没带 = None → 旧行为"""
+    try:
+        import lane_roles as LR
+        return LR
+    except ImportError:   # arch-ok: 没有分卡模块 = 不分卡（旧行为：全部道共享）
+        return None
+
+
+def roles_for_host(host: str, eps_specs: dict, st: dict, rs: dict | None = None) -> dict | None:
+    """L-206：本机本轮的工位分卡结论 {"phase", "eps": {集: 阶段}, "lanes": {"video", "hold"}}。
+    None = 不适用：关 / 本机没有在出的集 / 本机还有 ep < from_episode 的集在出（ep01 不中途改调度 → 整台旧行为）。
+    阶段 = 本机在出的各适用集里只要有一集还在首尾帧阶段就按 frames（只有 gpu36:2 出视频），全部进视频阶段才 videos（5 张视频道）"""
+    LR = _LR()
+    if LR is None:
+        return None
+    cfg = LR.load()
+    if not cfg.get("enabled"):
+        return None
+    hosts = jl(VID / "hosts.json", {}) or {}
+    ready = {int(e) for e in (rs or {})}
+    active = [ep for ep in _eps_on(hosts, host)
+              if ep in ready or (st.get("eps", {}).get(str(ep)) or {}).get("status") == "rendering"]
+    if not active:
+        return None
+    if any(not LR.applies(ep, cfg) for ep in active):
+        return None
+    phases = {str(ep): LR.phase_of(RUN_ID, ep, [s.id for s in eps_specs.get(ep) or []], cfg) for ep in active}
+    act = LR.active_from_state(RUN_ID) if hasattr(LR, "active_from_state") else None
+    if act:
+        # L-207：run 级只有一集在占卡（producer 写 _active）——本机视频道按它的阶段取表：videos = 6 张卡全出视频（含 gpu33:3）；
+        # 别的集此刻要么已进合成 / 完成（没视频要出），要么还没开首尾帧（不会有 ready 镜），不再按“最保守”取 frames
+        phase = act["phase"]
+    else:
+        phase = "frames" if any(p != "videos" for p in phases.values()) else "videos"
+    out = {"phase": phase, "eps": phases, "lanes": LR.control_lanes(host, phase, cfg)}
+    if act:
+        out["active"] = {"ep": act["ep"], "phase": act["phase"]}
+    return out
+
+
+def roles_control(host: str, st: dict, c: dict) -> dict:
+    """把工位分卡写进本机 control：video_lanes = 本阶段视频道（专用、不让道，FIX-VID-2 的 video_lanes 键）；
+    hold_lanes 并入本机非视频道（出图位 / 审图位不派视频）；shared_lanes 去掉视频道；lane_roles 给 vidgen 做第二道闸。不适用 = 原样"""
+    r = (st.get("lane_roles") or {}).get(host)
+    if not r:
+        return c
+    vid = list(r["lanes"]["video"])
+    hold = sorted(set(c.get("hold_lanes") or []) | set(r["lanes"]["hold"]))
+    vid = [x for x in vid if x not in hold]        # 手工 hold（带到期，K-OPS-I15）/ 借道 hold 仍优先
+    c["hold_lanes"] = hold
+    c["video_lanes"] = vid
+    c["shared_lanes"] = [x for x in c.get("shared_lanes") or [] if x not in vid]
+    c["lane_roles"] = {"phase": r["phase"], "eps": r["eps"], "video": vid, "rule": "L-206"}
+    return c
+
+
+def roles_key(st: dict) -> str:
+    return json.dumps({h: ((r or {}).get("phase"), sorted((r or {}).get("lanes", {}).get("video") or []))
+                       for h, r in sorted((st.get("lane_roles") or {}).items())}, ensure_ascii=False)
+
+
+def regen_holds_now(eps_specs: dict) -> dict:
+    """L-206 hold_regen_downstream：首帧换代中的镜（视频不派）；进就绪签名，变化就重编作业"""
+    LR = _LR()
+    if LR is None:
+        return {}
+    try:
+        return LR.regen_holds(RUN_ID, [s.id for ss in eps_specs.values() for s in ss])
+    except Exception as e:  # noqa: BLE001  # arch-ok: 换代信号读不了 = 不 hold（记日志；build_jobs 同一函数会再算一次）
+        log("REGEN_HOLDS_ERR", repr(e)[:160])
+        return {}
 
 
 def log(*a):
@@ -100,7 +181,19 @@ def child_env() -> dict:
     return {**os.environ, "PYTHONUTF8": "1", "PYTHONPATH": os.pathsep.join(paths + ([old] if old else []))}
 
 
+def heartbeat(step: str) -> None:
+    """FIX-NIGHT2（PS-MASTER 17:5x）：night 心跳 VID/night_heartbeat.json——轮开始和每个子步骤（sync / register / trim / build / push）前写。
+    以前 resident_sync 只看 night_state.json 的 mtime（一轮结束才写），刚起的第一轮 5–15 min 没心跳 → lifecycle 判死 → 再次重启，自我打败"""
+    try:
+        VID.mkdir(parents=True, exist_ok=True)
+        js(VID / "night_heartbeat.json", {"t": time.time(), "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "step": str(step)[:80],
+                                           "pid": os.getpid(), "run": RUN_ID})
+    except OSError:   # arch-ok: 心跳写不下不能拦主循环（state 的 mtime 仍是第二路心跳）
+        pass
+
+
 def run(args, timeout=3600):
+    heartbeat("run:" + str(args[1] if len(args) > 1 else args[0]).replace("\\", "/").rsplit("/", 1)[-1])
     r = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
                        cwd=str(ROOT), env=child_env())
     return r.returncode, (r.stdout or "") + (r.stderr or "")
@@ -149,9 +242,9 @@ def specs_by_ep():
     return eps
 
 
-def ready_eps(eps_specs, ctrl) -> list[int]:
+def ready_eps(eps_specs, ctrl, pf: dict | None = None) -> list[int]:
     B = _B()
-    pf = B.passed_frames()
+    pf = B.passed_frames() if pf is None else pf     # FIX-NIGHT2 #3：loop_once 算一次传进来
     ok = jl(B.FRAMES_OK, {}) or {}
     done = set(ok.get("_episodes_done") or []) | set(ctrl.get("force_eps") or [])
     for ep in ctrl.get("force_eps") or []:
@@ -164,10 +257,10 @@ def ready_eps(eps_specs, ctrl) -> list[int]:
     return [ep for ep, ss in sorted(eps_specs.items()) if ep in done or all(s.id in pf for s in ss)]
 
 
-def ready_shots(eps_specs, ctrl) -> dict[int, list[str]]:
+def ready_shots(eps_specs, ctrl, pf: dict | None = None) -> dict[int, list[str]]:
     """→ {集: [首帧已过契约的镜]}（逐镜派单用；force_eps 的集全部镜都算就绪）"""
     B = _B()
-    pf = B.passed_frames()
+    pf = B.passed_frames() if pf is None else pf
     force = set(ctrl.get("force_eps") or [])
     out = {}
     for ep, ss in sorted(eps_specs.items()):
@@ -203,12 +296,11 @@ def dispatch_hosts(hosts_touched: set, st, ctrl) -> bool:
     if rc:
         return False
     hosts = jl(VID / "hosts.json", {}) or {}
-    rs = _rssh()
     for host in sorted(hosts_touched):
         # DEBUG-RSI（总调度 FOCUS 第 5 条，11-02 16:1x）：两台各跑一个 night，服务器之间没有 ssh 互信。分给另一台的集推不过去，
         # 以前这里 return False → ready_sig 不更新 → 每轮重推本机 8 MB、另一台那几集永远派不出（ep07 / 09 / 10 视频 31 条卡住）。
-        # 现在跳过另一台（它的集由那台自己的 night 派），不算失败
-        if getattr(rs, "_local_self", lambda h: None)(host) == "other":
+        # 现在跳过另一台（它的集由那台自己的 night 派），不算失败。FIX-NIGHT2 #7：按 OFFLINE_SELF 判，不认 OFFLINE_ALIASES
+        if _host_is_other(host):
             log("SKIP_OTHER_HOST", host, "服务器之间不推（无互信），这台的集由它自己的 night 派")
             continue
         rc, out = run([PY, "tools/series10_video/deploy.py", "push", host], 3600)
@@ -221,14 +313,15 @@ def dispatch_hosts(hosts_touched: set, st, ctrl) -> bool:
             hold = [x for x in IMAGE_LANES if x != "gpu33:3"]
             eps_on, per_lane, shared = [1], 1, [x for x in shared if x != "gpu33:3"]
         hold, gate = video_boost(ctrl, hold)
-        hold = _shard_hold(host, hold)
+        hold = _shard_hold(host, hold, st)      # L-207：本阶段的视频道不被分片排除表挂住（gpu33:3 视频段出视频）
         c = {"jobs": "jobs.json", "mode": "prod", "eps": eps_on, "per_lane": per_lane, "linger": True,
              "hold_lanes": hold, "shared_lanes": video_shared(shared, ctrl), "yield_s": ctrl["yield_s"]}
         if gate:
             c["vram_gate"] = gate
+        roles_control(host, st, c)      # L-206：按阶段分卡（video_lanes / hold_lanes / lane_roles）
         run([PY, "tools/series10_video/deploy.py", "control", host, json.dumps(c, ensure_ascii=False)])
         run([PY, "tools/series10_video/deploy.py", "start", host])
-        log("DISPATCH", host, "eps", eps_on, "hold", hold)
+        log("DISPATCH", host, "eps", eps_on, "hold", c["hold_lanes"], "roles", (c.get("lane_roles") or {}).get("phase"), c.get("video_lanes"))
     return True
 
 
@@ -277,10 +370,14 @@ def _eps_on_shard(host: str) -> bool:
     return bool(VS) and any(host in c["hosts"] for c in VS.shard_eps(RUN_ID).values())
 
 
-def _shard_hold(host: str, hold: list) -> list:
-    """分片开着：本机不适合跑 H3 的道（gpu33:3 = 看图 + reserve-vram 9）并进挂道；关 = 原样"""
+def _shard_hold(host: str, hold: list, st: dict | None = None) -> list:
+    """分片开着：本机不适合跑 H3 的道（gpu33:3 = 看图 + reserve-vram 9）并进挂道；关 = 原样。
+    L-207：lane_roles 本阶段把该道列为视频道（videos 段 gpu33:3 出视频 + 1 个看图实例，ComfyUI --reserve-vram 9 给看图留显存）→ 不挂"""
     VS = _VS()
     ex = VS.exclude_lanes(host) if VS else []
+    if ex and st:
+        vid = set((((st.get("lane_roles") or {}).get(host) or {}).get("lanes") or {}).get("video") or [])
+        ex = [x for x in ex if x not in vid]
     return sorted(set(hold) | set(ex)) if ex and _eps_on_shard(host) else hold
 
 
@@ -298,6 +395,26 @@ def ep_sig(ep, host) -> str:
                        for sid, r in sorted(ep_shots(ep, host).items())}, ensure_ascii=False)
 
 
+HOLD_RESOLVE_S = int(os.environ.get("NS_HOLD_RESOLVE_S", "900"))    # MINOR 6（L-205 50 min KPI）：等闸门的镜 45 → 15 min 按落定算
+
+
+def gate_hold_aged(ep, excl: set, now: float | None = None) -> set:
+    """等闸门的镜：记首次看到的时间（VID/_gate_hold_since.json），连续等满 HOLD_RESOLVE_S 的才返回（才可按落定算）"""
+    f = VID / "_gate_hold_since.json"
+    now = now or time.time()
+    d = jl(f, {}) or {}
+    key = str(ep)
+    cur = {sid: t for sid, t in (d.get(key) or {}).items() if sid in excl}
+    for sid in excl:
+        cur.setdefault(sid, now)
+    if cur != (d.get(key) or {}):
+        d[key] = cur
+        tmp = f.with_name(f.name + ".tmp")
+        tmp.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, f)
+    return {sid for sid, t in cur.items() if now - float(t) >= HOLD_RESOLVE_S}
+
+
 def ep_resolved(ep, host) -> tuple[bool, dict]:
     """整集落定 = jobs 里本集每镜都 done / best_effort / blocked。FIX-VID D10：没过闸门的镜（build_jobs route=hold, gate_excluded）
     按“等闸门”算落定（它出不了，成片用首帧静帧占位；闸门开了 → 重编有变体 → 状态变 → ep_sig 变 → REOPEN 重合成）"""
@@ -306,6 +423,9 @@ def ep_resolved(ep, host) -> tuple[bool, dict]:
     rows = [s for s in jobs.get("shots", []) if s["ep"] == ep]
     ids = [s["shot"] for s in rows]
     excl = {s["shot"] for s in rows if s.get("gate_excluded") and not s.get("variants")}
+    # PS-MASTER 11-06 17:0x（ep01 实测）：等首尾帧的镜立刻按“落定”算 → 每来一镜就整集合成一遍预览（finalize 同步阻塞 night 主循环
+    # 5–10 min，gpu36 三卡空转）。改：等闸门的镜要连续等满 HOLD_RESOLVE_S（默认 15 min，L-207 前 45 min）才按落定算（真出不来才静帧占位）
+    excl = gate_hold_aged(ep, excl)
     recs = {sid: shots_st.get(sid, {}) for sid in ids}
     fin = all(r.get("status") in ("done", "best_effort", "blocked") or sid in excl for sid, r in recs.items()) and ids \
         and any(sid not in excl for sid in ids)   # 整集都没过闸门 = 没开始，不算落定（否则每轮空跑 proxies / sync）
@@ -389,15 +509,15 @@ def retry_assembly(st) -> None:
         s = x.get("status")
         # W46：hold_voices 原来是死胡同（音色资产后到 → 本集永远不合成）；音色到位就回到 rendering
         if s == "hold_voices" and voices_ok():
-            x["status"] = "rendering"
+            x["status"], x["force_finalize"] = "rendering", True
             log("RETRY_ASSEMBLE", f"ep{int(e):02d}", "音色表已到位")
         elif s == "hold_tts" and not tts_missing():
-            x["status"] = "rendering"
+            x["status"], x["force_finalize"] = "rendering", True
             log("RETRY_ASSEMBLE", f"ep{int(e):02d}", "配音解释器已到位")
         elif s == "assemble_failed" and x.get("resolved_sig") and x["resolved_sig"] != ep_sig(int(e), x["host"]):
             # 镜头集合 / 版本变了 = 新输入，值得再试：重置自动重试次数（不论是否已用完）
             x["assemble_retries"] = 0
-            x["status"] = "rendering"
+            x["status"], x["force_finalize"] = "rendering", True
             log("REOPEN", f"ep{int(e):02d}", "合成失败后入选版本 / 镜头集合有变，重置自动重试并重新合成")
         elif s == "assemble_failed" and asm_fatal(x.get("assemble_err")):
             # 代码类错误：不按 20 分钟 × 3 次空等，当场报告（只记一次）；合成代码变了（发版修好）→ 立即再试
@@ -407,23 +527,41 @@ def retry_assembly(st) -> None:
                 log("ASSEMBLE_FATAL", f"ep{int(e):02d}", "代码类错误，不自动重试，等发版修复：", str(x.get("assemble_err") or "")[-200:])
             elif x["assemble_fatal_sig"] != sig:
                 x.pop("assemble_fatal_sig", None)
-                x["status"] = "rendering"
+                x["status"], x["force_finalize"] = "rendering", True
                 log("RETRY_ASSEMBLE", f"ep{int(e):02d}", "合成相关代码有变，重试代码类错误")
         elif s == "assemble_failed" and int(x.get("assemble_retries", 0)) < ASM_RETRY_MAX \
                 and time.time() - float(x.get("finalized") or 0) >= ASM_RETRY_S:
             x["assemble_retries"] = int(x.get("assemble_retries", 0)) + 1
-            x["status"] = "rendering"
+            x["status"], x["force_finalize"] = "rendering", True
             log("RETRY_ASSEMBLE", f"ep{int(e):02d}", f"第 {x['assemble_retries']}/{ASM_RETRY_MAX} 次自动重试",
                 str(x.get("assemble_err") or "")[-120:])
 
 
-def reopen_changed(st) -> None:
-    """已合成的集，入选版本 / 镜头集合（resolved_sig）变了 → 一律回 rendering（不看是否已全部完成；
-    全部完成则同一轮 rendering 分支立刻 finalize，版本号递增）"""
+REOPEN_MIN_S = int(os.environ.get("NS_REOPEN_MIN_S", "300"))        # FIX-NIGHT2 #2：合成完 ≥ 5 min 才许因版本变化重开
+REOPEN_MAX_PER_H = int(os.environ.get("NS_REOPEN_MAX_PER_H", "4"))  # 每集每小时最多重开 N 次（ep01 17:05 两轮各 REOPEN 一次）
+
+
+def reopen_changed(st, now: float | None = None) -> None:
+    """已合成的集，入选版本 / 镜头集合（resolved_sig）变了 → 回 rendering（全部完成则 rendering 分支再起 finalize，版本号递增）。
+    FIX-NIGHT2 #2 去抖：距上次合成 < REOPEN_MIN_S 或 1 小时内已重开 ≥ REOPEN_MAX_PER_H 次 → 先不重开（记 reopen_pending，只记一次日志）"""
+    now = now or time.time()
     for e, x in st["eps"].items():
-        if x.get("status") == "assembled" and x.get("resolved_sig") and x["resolved_sig"] != ep_sig(int(e), x["host"]):
-            x["status"] = "rendering"
-            log("REOPEN", f"ep{int(e):02d}", "入选版本有变，按新版本号重合成")
+        if x.get("status") != "assembled" or not x.get("resolved_sig"):
+            continue
+        sig = ep_sig(int(e), x["host"])
+        if x["resolved_sig"] == sig:
+            x.pop("reopen_pending", None)
+            continue
+        hist = [t for t in x.get("reopen_hist") or [] if now - float(t) < 3600]
+        if now - float(x.get("finalized") or 0) < REOPEN_MIN_S or len(hist) >= REOPEN_MAX_PER_H:
+            if x.get("reopen_pending") != sig:
+                x["reopen_pending"] = sig
+                log("REOPEN_DEBOUNCE", f"ep{int(e):02d}", f"版本有变，但距上次合成 {now - float(x.get('finalized') or 0):.0f}s / 1h 内已重开 {len(hist)} 次，先不重开")
+            continue
+        x["reopen_hist"] = hist + [now]
+        x.pop("reopen_pending", None)
+        x["status"], x["force_finalize"] = "rendering", True
+        log("REOPEN", f"ep{int(e):02d}", "入选版本有变，按新版本号重合成")
 
 
 def clip_wh(p: Path) -> tuple[int, int]:
@@ -741,6 +879,7 @@ def bgm_after_assembly(ep: int, ver: str, used_bgm: bool, st: dict) -> dict:
         auto[lock.get("sig") or "-"] = n + 1
         x["status"] = "rendering"          # 下一轮 EP_RESOLVED → finalize 重合成（版本号照常递增）
         x["resolved_sig"] = None
+        x["force_finalize"] = True         # FIX-NIGHT2 #2：同签名的 finalize 默认不重跑，BGM 确认 / 带 BGM 这两次显式放行（≤ BGM_AUTO_MAX）
         log("BGM_REASSEMBLE", f"ep{ep:02d}", "确认剪辑签名" if res.get("status") != "delivered" else "带上集级 BGM")
     x["bgm"] = res
     return res
@@ -752,6 +891,9 @@ def write_status(st):
     L = [f"# {RUN_ID} 视频 · 夜间进度（night.py 自动写；交总调度）", "", f"更新：{time.strftime('%Y-%m-%d %H:%M:%S')}", "",
          f"当前配方（{VID_REL}/recipe_choice.json）：{rtxt}", "",
          "成片输入：原片（video/clips/）或其放大版 `_sr1080.mp4`；540×960 代理只给审片页（K-EDT-V10）", "",
+         "工位分卡（L-206，config/pipeline/lane_roles.json）：" + "；".join(
+             f"{h} {r['phase']} 视频道 {r['lanes']['video']}（集 {r['eps']}）" if r else f"{h} 不适用（旧行为）"
+             for h, r in sorted((st.get("lane_roles") or {}).items())), "",
          "| 集 | 主机 | 状态 | 成片 | 审阅 |", "|---|---|---|---|---|"]
     for e in range(1, 11):
         x = st["eps"].get(str(e), {})
@@ -817,6 +959,7 @@ def apply_lane_policy(st, ctrl):
     key = mode + ("+ep01@gpu33:3" if ep01_open else "") + "|hold=" + ",".join(sorted(ctrl.get("hold_lanes", []) or []))   # K-OPS-E20：挂道变了要重算
     key += "|gate=" + json.dumps(video_boost(ctrl, [])[1], sort_keys=True)
     key += "|shard=" + ",".join(f"{e}:{c['owner']}" for e, c in sorted((_VS().shard_eps(RUN_ID) if _VS() else {}).items()))   # 分片开关变了要重算
+    key += "|roles=" + roles_key(st)        # L-206：阶段 / 视频道变了要重写 control（一集内每卡至多切换一次：frames → videos）
     if st.get("lane_mode") == mode and st.get("lane_key") == key:
         return ctrl
     hosts = jl(VID / "hosts.json", {}) or {}
@@ -831,11 +974,12 @@ def apply_lane_policy(st, ctrl):
             hold = sorted(set(x for x in IMAGE_LANES if x != "gpu33:3") | set(ctl_hold))
             eps_on, per_lane, shared = [1], 1, [x for x in shared if x != "gpu33:3"]
         hold, gate = video_boost(ctrl, hold)
-        hold = _shard_hold(host, hold)
+        hold = _shard_hold(host, hold, st)      # L-207：本阶段的视频道不被分片排除表挂住（gpu33:3 视频段出视频）
         c = {"jobs": "jobs.json", "mode": "prod", "eps": eps_on, "per_lane": per_lane, "linger": True,
              "hold_lanes": hold, "shared_lanes": video_shared(shared, ctrl), "yield_s": ctrl["yield_s"]}
         if gate:
             c["vram_gate"] = gate
+        roles_control(host, st, c)      # L-206：按阶段分卡
         run([PY, "tools/series10_video/deploy.py", "control", host, json.dumps(c, ensure_ascii=False)])
         if mode == "video_lane_only":
             ports = {"gpu33": [8188, 8189, 8191], "gpu36": [8188, 8189, 8190]}[host]
@@ -889,10 +1033,188 @@ def poll_seconds(ctrl: dict) -> float:
     """SLIM-CDE 11-05 D：night 轮询间隔。night_control.json poll_s 优先；没写 = V1 120 s、V2 45 s（逐镜派单本来就按镜判，
     慢的只是这个 sleep：实测 READY→下一轮 build_jobs 间隔 134 s，其中 sleep 120 s，其余 ~14 s 是 build/sync/register）"""
     try:
-        v = float(ctrl.get("poll_s")) if ctrl.get("poll_s") is not None else (120.0 if LEGACY else 45.0)
+        v = float(ctrl.get("poll_s")) if ctrl.get("poll_s") is not None else (120.0 if LEGACY else 15.0)   # FIX-NIGHT2 #3：V2 45 → 15 s
     except (TypeError, ValueError):
         v = 120.0
     return min(max(v, 15.0), 600.0)
+
+
+# ---------------------------------------------------------------- FIX-NIGHT2 #2 / #3 / #7：后台 finalize、固定成本门、单实例锁
+REGISTER_EVERY_S = int(os.environ.get("NS_REGISTER_EVERY_S", "1800"))   # 没有新定下的镜时，register / trim 最多每 30 min 兜底跑一次
+FINALIZE_WAIT_S = 120            # finalize 子进程以“等原片 / 原片没到位”收尾 → 至少隔这么久再起
+FINALIZE_PROCS: dict = {}        # {集: Popen}（本进程起的 finalize 子进程；重启后按 pid 判活）
+SETTLED = ("done", "best_effort", "blocked")
+
+
+def settled_sig(st) -> str:
+    """已定下的镜（done / best_effort）+ 其入选片是否已在本机 → 签名。变了 = 有新东西要登记（register_takes / trim_takes）"""
+    rows = {}
+    for e, x in (st.get("eps") or {}).items():
+        if not x.get("host"):
+            continue
+        for sid, r in ep_shots(int(e), x["host"]).items():
+            if r.get("status") in ("done", "best_effort") and r.get("chosen"):
+                f = next((y.get("file") for y in r.get("renders") or [] if y.get("variant") == r["chosen"]), None)
+                rows[sid] = [r["status"], r["chosen"], bool(f and (ROOT / f).is_file())]
+    return json.dumps(rows, sort_keys=True, ensure_ascii=False)
+
+
+def register_due(st, now: float | None = None) -> bool:
+    """FIX-NIGHT2 #3：register_takes（2.5–3 min）/ trim_takes（~1 min）以前每轮都跑——只在定下的镜有变化、或距上次 ≥ REGISTER_EVERY_S 时跑"""
+    now = now or time.time()
+    try:
+        sig = settled_sig(st)
+    except Exception as e:  # noqa: BLE001  # arch-ok: 签名算不出 = 照旧每轮跑（退回原行为）
+        log("SETTLED_SIG_ERR", repr(e)[:160])
+        return True
+    if sig == st.get("settled_sig") and now - float(st.get("registered_at") or 0) < REGISTER_EVERY_S:
+        return False
+    st["settled_sig"], st["registered_at"] = sig, now
+    return True
+
+
+def pid_alive(pid) -> bool:
+    """进程还在？Windows 不能用 os.kill(pid, 0)（会 TerminateProcess）→ OpenProcess + GetExitCodeProcess；Linux os.kill 0"""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        k = ctypes.windll.kernel32
+        h = k.OpenProcess(0x1000, False, pid)        # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            return bool(k.GetExitCodeProcess(h, ctypes.byref(code))) and code.value == 259   # STILL_ACTIVE
+        finally:
+            k.CloseHandle(h)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def finalize_sync(ctrl: dict) -> bool:
+    """旧路径（同步 finalize，阻塞主循环）：night_control.json "finalize_sync": true 或 NS_FINALIZE_SYNC=1"""
+    return bool(ctrl.get("finalize_sync")) or os.environ.get("NS_FINALIZE_SYNC") == "1"
+
+
+def start_finalize(ep: int, host: str, st: dict, ctrl: dict, spawn=None) -> bool:
+    """FIX-NIGHT2 #2：整集落定 → finalize 放到后台子进程（night.py --finalize <集>），主循环继续派单（原来代理 / 同步 / 放大 / 合成 /
+    导演 11–14 min 同步阻塞，gpu36 三卡空转）。同一 resolved_sig 已合成过（finalize_done_sig）且没有显式放行（force_finalize：
+    REOPEN / 重试 / BGM 确认）→ 不再起；上一次以“等原片”收尾 → 至少隔 FINALIZE_WAIT_S。返回是否起了"""
+    x = st["eps"][str(ep)]
+    if finalize_sync(ctrl):
+        finalize(ep, host, st, ctrl)
+        x["finalize_done_sig"] = x.get("resolved_sig")
+        x.pop("force_finalize", None)
+        return True
+    sig = ep_sig(ep, host)
+    now = time.time()
+    if x.get("finalize_done_sig") == sig and not x.get("force_finalize"):
+        if x.get("finalize_skip_sig") != sig:
+            x["finalize_skip_sig"] = sig
+            log("FINALIZE_SKIP", f"ep{ep:02d}", "同一入选版本已合成过，不重跑（版本变 / 重试 / BGM 确认才重跑）")
+        return False
+    if now < float(x.get("finalize_wait_until") or 0):
+        return False
+    job = {"id": f"{ep}:{int(now)}", "pid": None, "sig": sig, "started": now}
+    args = [PY, "tools/series10_video/night.py", "--finalize", str(ep), "--job", job["id"], "--run", RUN_ID]
+    try:
+        if spawn is not None:
+            job["pid"] = spawn(args)
+        else:
+            out = open(VID / f"finalize_ep{ep:02d}.out", "ab")
+            p = subprocess.Popen(args, cwd=str(ROOT), env=child_env(), stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+            FINALIZE_PROCS[str(ep)] = p
+            job["pid"] = p.pid
+    except OSError as e:   # arch-ok: 子进程起不来 = 当场按合成失败记（retry_assembly 20 min 后再试），主循环不阻塞
+        x.update(status="assemble_failed", assemble_err=f"finalize 子进程起不来：{e}"[:300], finalized=now)
+        log("FINALIZE_SPAWN_ERR", f"ep{ep:02d}", repr(e)[:200])
+        return False
+    x.pop("force_finalize", None)
+    x.pop("finalize_skip_sig", None)
+    x.update(status="finalizing", finalize_job=job)
+    log("FINALIZE_BG", f"ep{ep:02d}", "pid", job["pid"], "sig", sig[:60])
+    return True
+
+
+def reap_finalize(e: str, x: dict, st: dict) -> bool:
+    """后台 finalize 结束了 → 把子进程写的结果（VID/finalize_epNN.result.json）并回 night_state；还在跑 → False"""
+    job = x.get("finalize_job") or {}
+    proc = FINALIZE_PROCS.get(str(e))
+    alive = (proc.poll() is None) if proc is not None else pid_alive(job.get("pid"))
+    if alive:
+        return False
+    FINALIZE_PROCS.pop(str(e), None)
+    ep = int(e)
+    res = jl(VID / f"finalize_ep{ep:02d}.result.json", None)
+    if not isinstance(res, dict) or res.get("id") != job.get("id"):
+        x.update(status="assemble_failed", assemble_err=f"finalize 子进程无结果（pid {job.get('pid')}，看 {VID_REL}/finalize_ep{ep:02d}.out）",
+                 finalized=time.time())
+        x.pop("finalize_job", None)
+        log("FINALIZE_NO_RESULT", f"ep{ep:02d}", x["assemble_err"])
+        return True
+    nx = dict(res.get("x") or {})
+    nx["host"] = x.get("host") or nx.get("host")
+    nx.pop("finalize_job", None)
+    if res.get("err"):
+        nx["assemble_err"] = str(res["err"])[:300]
+        if nx.get("status") in ("rendering", "finalizing", None):
+            nx["status"] = "assemble_failed"
+            nx["finalized"] = time.time()
+    if nx.get("status") in ("assembled", "assemble_failed"):
+        nx["finalize_done_sig"] = job.get("sig")
+    elif nx.get("status") == "rendering":          # 以“等原片 / 原片没到位”收尾：下一轮还要起，但别每轮都起
+        nx["finalize_wait_until"] = time.time() + FINALIZE_WAIT_S
+    st["eps"][str(e)] = nx
+    log("FINALIZE_DONE", f"ep{ep:02d}", nx.get("status"), nx.get("final") or nx.get("assemble_err") or nx.get("wait_msg") or "")
+    return True
+
+
+def finalize_child(ep: int, job_id: str) -> int:
+    """night.py --finalize <集> --job <id>：子进程里跑 finalize（只读 night_state，结果写 finalize_epNN.result.json，由主循环并回）"""
+    st = jl(STATE, None) or {"eps": {}}
+    x = dict((st.get("eps") or {}).get(str(ep)) or {})
+    host = x.get("host") or (jl(VID / "hosts.json", {}) or {}).get(str(ep))
+    if not host:
+        log("FINALIZE_CHILD_ERR", f"ep{ep:02d}", "没有主机")
+        return 2
+    x.pop("finalize_job", None)
+    x["status"] = "rendering"
+    local = {"eps": {str(ep): x}, "pending_shots": {}}
+    ctrl = expire_holds({**DEFAULT_CTRL, **(jl(CTRL, {}) or {})})
+    err = None
+    try:
+        finalize(int(ep), host, local, ctrl)
+    except Exception as e:  # noqa: BLE001  # arch-ok: 子进程里的任何异常都要落到结果文件（主循环按合成失败处理），不能静默
+        err = repr(e)[:300]
+        log("FINALIZE_CHILD_ERR", f"ep{ep:02d}", err)
+    js(VID / f"finalize_ep{ep:02d}.result.json", {"id": job_id, "ep": ep, "done": time.time(), "err": err, "x": local["eps"][str(ep)]})
+    return 0 if not err else 1
+
+
+def resident_pid() -> int | None:
+    """常驻 night 的 pid（VID/night.pid，还活着才算）"""
+    d = jl(VID / "night.pid", None)
+    pid = (d or {}).get("pid") if isinstance(d, dict) else None
+    return int(pid) if pid and pid_alive(pid) else None
+
+
+def acquire_lock() -> bool:
+    """FIX-NIGHT2 #7：night 单实例（同一台两个 night 写同一份 night_state / control 会互相覆盖）"""
+    rp = resident_pid()
+    if rp and rp != os.getpid():
+        return False
+    js(VID / "night.pid", {"pid": os.getpid(), "started": time.time(), "host": os.environ.get("OFFLINE_SELF"), "run": RUN_ID})
+    return True
 
 
 def expire_holds(ctrl: dict) -> dict:
@@ -917,22 +1239,31 @@ def expire_holds(ctrl: dict) -> dict:
 
 
 def loop_once(st):
+    heartbeat("loop_start")
     sync_hosts_from_partition()
     ctrl = expire_holds({**DEFAULT_CTRL, **(jl(CTRL, {}) or {})})
+    eps_specs = specs_by_ep()
+    pf = _B().passed_frames()                      # FIX-NIGHT2 #3：每轮只算一次（原来 ready_eps / ready_shots 各算一遍）
+    ready_eps(eps_specs, ctrl, pf)                 # 只为 force_eps 入账
+    rs, files = ready_shots(eps_specs, ctrl, pf)
+    # L-206 工位分卡：每台一个结论（阶段 + 视频道），进 lane_key / 就绪签名；阶段翻转（frames → videos）就重写 control + 重编作业
+    old_roles = roles_key(st)
+    st["lane_roles"] = {h: roles_for_host(h, eps_specs, st, rs) for h in _hosts_here()}
+    if roles_key(st) != old_roles:
+        log("LANE_ROLES", roles_key(st))
     apply_lane_policy(st, ctrl)
     if st.get("lane_mode") == "video_lane_only":
         ctrl = {**ctrl, "hold_lanes": IMAGE_LANES}
         if "+ep01@gpu33:3" in str(st.get("lane_key")):
             ctrl["ep01_lane"] = True
-    eps_specs = specs_by_ep()
-    ready_eps(eps_specs, ctrl)                     # 只为 force_eps 入账
-    rs, files = ready_shots(eps_specs, ctrl)
     try:   # W46：尾帧过契约才过逐镜“视频”闸门（hf-08）→ 尾帧变了也要重编作业（原来只看首帧，S4 / S6 尾帧到了也不进 jobs.json）
         lasts = {k: (v.get("file") if isinstance(v, dict) else v) for k, v in (_B().passed_lasts() or {}).items()}
     except Exception as e:  # noqa: BLE001  # arch-ok: 尾帧清单读不了 = 签名不含尾帧（退回原口径），记日志
         log("LASTS_SIG", repr(e)[:160])
         lasts = {}
-    sig = json.dumps({"shots": rs, "files": files, "lasts": lasts}, sort_keys=True, ensure_ascii=False)
+    regen = regen_holds_now(eps_specs)             # L-206 hold_regen_downstream：换代中的镜进签名（hold 出现 / 解除都重编）
+    sig = json.dumps({"shots": rs, "files": files, "lasts": lasts, "roles": roles_key(st), "regen": sorted(regen)},
+                     sort_keys=True, ensure_ascii=False)
     if rs and sig != st.get("ready_sig"):
         hosts = jl(VID / "hosts.json", {}) or {}
         touched = set()
@@ -956,39 +1287,63 @@ def loop_once(st):
             log("READY", {f"ep{e:02d}": len(v) for e, v in rs.items()})
     run([PY, "tools/series10_video/sync.py"], 1800)
     # DATAALIGN 11-01：过门的镜登记进 takes.json（/api/progress、集摘要、画布才读得到）；按 sha256 去重，重复调无害
-    rc, out = run([PY, "tools/pipeline/register_takes.py", "--video10", VID_REL,
-                   "--label", "VIDEO10 预览片"], 1800)
-    if rc:
-        log("register_takes", rc, out.strip()[-200:].replace("\n", " "))
-    if not LEGACY and st.get("eps"):   # W46（总调度 05:4x）：已登记的当前视频 > 6 s → _le6 版登记并设为当前（原版保留）
-        rc_t, out_t = run([PY, "tools/series10_video/trim_takes.py", "--run", RUN_ID, "--eps", ",".join(sorted(st["eps"]))], 1800)
-        if rc_t or '"changed": []' not in out_t:
-            log("TRIM_TAKES", rc_t, out_t.strip()[-300:].replace("\n", " "))
+    # FIX-NIGHT2 #3：只在有新定下的镜（settled_sig 变）或距上次 ≥ REGISTER_EVERY_S 时跑（原来每轮固定 3.5–4 min）
+    if register_due(st):
+        rc, out = run([PY, "tools/pipeline/register_takes.py", "--video10", VID_REL,
+                       "--label", "VIDEO10 预览片"], 1800)
+        if rc:
+            log("register_takes", rc, out.strip()[-200:].replace("\n", " "))
+        if not LEGACY and st.get("eps"):   # W46（总调度 05:4x）：已登记的当前视频 > 6 s → _le6 版登记并设为当前（原版保留）
+            rc_t, out_t = run([PY, "tools/series10_video/trim_takes.py", "--run", RUN_ID, "--eps", ",".join(sorted(st["eps"]))], 1800)
+            if rc_t or '"changed": []' not in out_t:
+                log("TRIM_TAKES", rc_t, out_t.strip()[-300:].replace("\n", " "))
     retry_assembly(st)
     reopen_changed(st)
-    for e, x in st["eps"].items():
+    for e, x in list(st["eps"].items()):
+        if x.get("status") == "finalizing" and reap_finalize(e, x, st):   # FIX-NIGHT2 #2：后台 finalize 收尾
+            apply_lane_policy(st, ctrl)
+            x = st["eps"][e]
         if x.get("status") == "rendering" and not x.get("shard_helper"):
             fin, recs = ep_resolved(int(e), x["host"])
-            st["pending_shots"][e] = sum(1 for r in recs.values() if r.get("status") not in ("done", "best_effort", "blocked"))
+            st["pending_shots"][e] = sum(1 for r in recs.values() if r.get("status") not in SETTLED)
             if fin:
-                log("EP_RESOLVED", f"ep{int(e):02d}", {k: v.get("status") for k, v in recs.items()})
-                finalize(int(e), x["host"], st, ctrl)
-                apply_lane_policy(st, ctrl)
+                if x.get("finalize_done_sig") != ep_sig(int(e), x["host"]) or x.get("force_finalize"):
+                    log("EP_RESOLVED", f"ep{int(e):02d}", {k: v.get("status") for k, v in recs.items()})
+                if start_finalize(int(e), x["host"], st, ctrl):
+                    apply_lane_policy(st, ctrl)
     js(STATE, st)
     write_status(st)
 
 
 def main(argv):
     sys.stdout.reconfigure(encoding="utf-8")
+    if "--finalize" in argv:                       # FIX-NIGHT2 #2：后台 finalize 子进程入口
+        ep = int(argv[argv.index("--finalize") + 1])
+        job = argv[argv.index("--job") + 1] if "--job" in argv else ""
+        return finalize_child(ep, job)
     log("RUN", RUN_ID, VID_REL)
     st = jl(STATE, None) or {"eps": {}, "pending_shots": {}, "started": time.time()}
+    if "--once" in argv:
+        rp = resident_pid()
+        if rp:                                     # FIX-NIGHT2 #7：常驻在跑 → --once 只读（不写 night_state / control / jobs）
+            log("ONCE_READONLY", f"常驻 night pid {rp} 在跑，--once 不写状态")
+            print(json.dumps({"resident_pid": rp, "eps": {e: {k: x.get(k) for k in ("host", "status", "final", "ready_shots")}
+                                                         for e, x in st["eps"].items()}}, ensure_ascii=False, indent=1))
+            return 0
+        try:
+            loop_once(st)
+        except Exception as e:  # noqa: BLE001
+            log("LOOP_ERR", repr(e)[:300])
+        return 0
+    if not acquire_lock():
+        log("ALREADY_RUNNING", f"常驻 night pid {resident_pid()} 在跑，本实例退出（单实例锁 {VID_REL}/night.pid）")
+        return 1
+    heartbeat("start")
     while True:
         try:
             loop_once(st)
         except Exception as e:  # noqa: BLE001
             log("LOOP_ERR", repr(e)[:300])
-        if "--once" in argv:
-            return 0
         time.sleep(poll_seconds({**DEFAULT_CTRL, **(jl(CTRL, {}) or {})}))
 
 

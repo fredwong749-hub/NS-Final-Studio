@@ -268,23 +268,56 @@ def first_take_first(todo: list, shots: dict, recs: dict, ctrl: dict | None = No
              and (recs.get(sid) or {}).get("status") not in ("done", "best_effort", "blocked")}
     if not fresh:
         return todo
-    return [(sid, v) for sid, v in todo if sid in fresh]
+    # FIX-NIGHT2 #8：失败镜的重试不能无限排在新镜后面——上一条出完 / 报错已超 RETRY_AGE_S 的重试和新镜一起派（按年龄放行）
+    now = (ctrl or {}).get("_now") or time.time()
+    aged = {sid for sid in in_todo if sid not in fresh and retry_age(recs.get(sid) or {}, now) >= RETRY_AGE_S}
+    return [(sid, v) for sid, v in todo if sid in fresh or sid in aged]
+
+
+RETRY_AGE_S = int(os.environ.get("NS_RETRY_AGE_S", "900"))
+
+
+def retry_age(rec: dict, now: float | None = None) -> float:
+    """这一镜等重试的时长：最后一条版本结束（t_done / t_sub）到现在；没有版本 = 0"""
+    ts = [float(x.get("t_done") or x.get("t_sub") or 0) for x in rec.get("renders") or []]
+    ts = [t for t in ts if t > 0]            # 没记时间的（旧记录 / 测试替身）不算“等很久”
+    return ((now or time.time()) - max(ts)) if ts else 0.0
+
+
+def render_sig(x: dict) -> tuple:
+    """一条版本的“内容签名”：同（配方, 种子）= 同一条片（FIX-NIGHT2 #4）；旧记录没有种子就按变体名"""
+    return (x.get("recipe"), x.get("seed")) if x.get("seed") is not None else ("variant", x.get("variant"))
+
+
+def distinct_renders(rec: dict) -> int:
+    return len({render_sig(x) for x in rec.get("renders") or []})
+
+
+def lane_order(lanes: dict, k: int) -> list:
+    """道的轮换顺序：第 k 轮从第 k % n 条道起（保持原相对顺序）——FIX-NIGHT2 #8，gpu36:2 不被前两道饿死"""
+    items = list(lanes.items())
+    if not items:
+        return items
+    i = k % len(items)
+    return items[i:] + items[:i]
 
 
 def next_variant(shot: dict, rec: dict) -> str | None:
     """规则阶梯（见模块文档）；rec = 本镜状态"""
     used = {r["variant"] for r in rec["renders"]}
+    used_sig = {render_sig(r) for r in rec["renders"]}    # FIX-NIGHT2 #4：同（配方, 种子）已出过 = 跳过，不重渲同一条片
     vs = shot["variants"]
     # GEN_CONTRACT：preflight 不过的变体不提交（validate 对照模式除外，见 pending）
     ok = lambda v: (v in vs and v not in used and vs[v].get("status") in ("ready", "lint_error")  # noqa: E731
-                    and (vs[v].get("preflight") or {}).get("ok", True) and policy_ok(vs[v]))
+                    and (vs[v].get("preflight") or {}).get("ok", True) and policy_ok(vs[v])
+                    and (vs[v].get("seed") is None or (vs[v].get("recipe"), vs[v].get("seed")) not in used_sig))
     fq = [v for v in rec.get("force_queue") or [] if ok(v)]   # 总调度批的“加 N 个变体再试”（redo_requests 带 variants）：不受 MAX_RENDERS 限制
     if fq:
         return fq[0]
     fn = rec.get("force_next")          # 系统修复后指定先出的变体（如 K-REN-302 的 mot），用一次就清
     if fn and ok(fn):              # 只在真正派出时清掉（dispatch 里），没派出（道被挂住）下一轮还认
         return fn
-    if len(rec["renders"]) >= MAX_RENDERS:
+    if distinct_renders(rec) >= MAX_RENDERS:      # FIX-NIGHT2 #4：按不同的片数计（重复渲染不吃阶梯）
         return None
     last = rec["renders"][-1] if rec["renders"] else None
     if last is None:   # 第一条：v1；v1 派不了（如 preflight 不过）→ 阶梯里第一个能派的（FIX-VID D8：别让整镜一条都不出）
@@ -617,13 +650,21 @@ class Runner:
         且没有在出的版本 → 用已有打分定下（done / best_effort），没有打分的回 pending。分片的整集视图按 jobs.json 的 host 取记录，
         这里只是不让本机记录永远挂在 rendering（ep01-S1 11-06 06:14 起被 gpu33 领走后 gpu36 记录空挂）"""
         for sid, r in list(self.st["shots"].items()):
-            if sid in shots or r.get("status") not in ("rendering", "retry") or in_flight(r):
+            if sid in shots:
+                if r.pop("orphan", None):           # 镜又回到本机作业里 → 撤掉孤儿标记（领取回来 / control eps 改回）
+                    log(self.host, "ORPHAN_BACK", sid, r.get("status"))
+                continue
+            if r.get("status") not in ("rendering", "retry", "pending", "blocked") or in_flight(r) or r.get("orphan"):
                 continue
             with self.lock:
                 if any(x.get("state") == "scored" for x in r.get("renders") or []):
                     st = settle_rec(r)
                 else:
+                    # FIX-NIGHT2 #8：被领走的 pending / 阻断（没变体可派）镜也标孤儿：阻断字段清掉（别台在出，合并视图不再显示本机旧阻断）
+                    r.pop("block_kind", None)
+                    r.pop("block_reason", None)
                     r["status"], st = "pending", "pending"
+                r["orphan"] = True
                 r["orphan_settled"] = {"t": time.time(), "status": st}
             log(self.host, "ORPHAN_SETTLED", sid, st, r.get("chosen"), "镜已不在本机作业里，记录不再挂在 rendering")
             self.event("orphan_settled", shot=sid, status=st, chosen=r.get("chosen"))
@@ -695,6 +736,11 @@ class Runner:
         shared = set(c.get("shared_lanes") or [])
         yield_s = float(c.get("yield_s", 180))
         gate = c.get("vram_gate") or {}
+        # L-206 工位分卡（night 按 config/pipeline/lane_roles.json 写进 control）：lane_roles.video = 本阶段本机视频道，
+        # 不在清单里的道一律不派（出图位 / 审图位）；video_lanes = 专用视频道，不受让道（FIX-VID-2）。没写 = 旧行为
+        role_video = (c.get("lane_roles") or {}).get("video")
+        dedicated = set(c.get("video_lanes") or [])
+        shared -= dedicated
         todo = self.pending(shots, validate)
         long_todo = [(s, v) for s, v in todo if shots[s]["variants"][v]["frames"] > LANE_MAX_FRAMES]
         long_inflight = any(x.get("state") == "submitted" and x.get("long") for r in self.st["shots"].values()
@@ -708,9 +754,11 @@ class Runner:
             else:
                 self.hold_long = False
         normal = [t for t in todo if t not in long_todo]
-        for name, lane in self.lanes.items():
+        for name, lane in lane_order(self.lanes, self.rr_next()):   # FIX-NIGHT2 #8：道按轮换起点派，gpu36:2 不被前两道饿死
             if name in hold or (name == LONG_LANE and self.hold_long):
                 continue
+            if isinstance(role_video, list) and name not in role_video:
+                continue                      # L-206：本阶段这条道不是视频位
             if gate and not vram_gate_ok(name, gate):
                 continue
             try:
@@ -741,6 +789,10 @@ class Runner:
                 if pool is normal:
                     pass
                 todo = [t for t in todo if t != (sid, v)]
+
+    def rr_next(self) -> int:
+        self._rr = getattr(self, "_rr", -1) + 1
+        return self._rr
 
     def dispatch(self, sh, v, lane):
         var = sh["variants"][v]

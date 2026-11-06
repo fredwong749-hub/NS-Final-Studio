@@ -18,23 +18,36 @@ from pathlib import Path
 R = "/root/work/fredw/imggen"     # 只作数据目录（in/ 上传批、refs/ 身份脸缓存）；脚本一律从服务器仓库部署目录跑（K-OPS-F18）
 
 
-def srv_repo(host: str) -> str:
-    """服务器仓库部署目录（config/factory/hosts.json 唯一来源）。总调度 11-02 16:5x：生产打分原来跑 imggen/ 下 10-31 的旁路拷贝，
-    sv-13 的补边修复没生效（L-122 新脸 Q1 失效）——脚本只许来自这里"""
-    import importlib.util as _u
-    sp = _u.spec_from_file_location("factory_hosts", Path(__file__).resolve().parents[2] / "tools/factory/hosts.py")
-    m = _u.module_from_spec(sp)
-    sp.loader.exec_module(m)
-    return m.server_root(host)
-
-
-def comfy_py(host: str) -> str:
-    """A-07（总调度 19:2x）：CLIP 单次子进程的解释器按主机取 hosts.json comfy_python（原来 resident_prep 在 gpu36 上就地改本文件的 COMFY_PY）"""
+def _hosts_mod():
     import importlib.util as _u
     sp = _u.spec_from_file_location("factory_hosts_rs", Path(__file__).resolve().parents[2] / "tools/factory/hosts.py")
     m = _u.module_from_spec(sp)
     sp.loader.exec_module(m)
-    return m.load()["hosts"].get(host, {}).get("comfy_python") or COMFY_PY
+    return m
+
+
+def srv_repo(host: str) -> str:
+    """服务器仓库部署目录（config/factory/hosts.json 唯一来源）。总调度 11-02 16:5x：生产打分原来跑 imggen/ 下 10-31 的旁路拷贝，
+    sv-13 的补边修复没生效（L-122 新脸 Q1 失效）——脚本只许来自这里。FIX-SCORE36：按实际执行机取（别名 → 本机）"""
+    m = _hosts_mod()
+    return m.server_root(m.exec_host(host))
+
+
+def comfy_py(host: str) -> str:
+    """A-07（总调度 19:2x）：CLIP 单次子进程的解释器按主机取 hosts.json comfy_python（原来 resident_prep 在 gpu36 上就地改本文件的 COMFY_PY）。
+    FIX-SCORE36（11-06）：按实际执行机取——gpu36 上 full_score("gpu33") 是本机执行，原来拿了 gpu33 的 comfy_python
+    （gpu36 上不存在）→ 远端脚本崩 → 退回进程内 CPU 打分 → producer venv 没 torch，ep02-S10 一直 score_infra"""
+    m = _hosts_mod()
+    return m.load()["hosts"].get(m.exec_host(host), {}).get("comfy_python") or COMFY_PY
+
+
+def gpu_exclude(host: str) -> set[str]:
+    """不放 CLIP 的坏卡：按实际执行机的 hosts.json broken_gpus（原来写死 gpu33 的 {"2"}，gpu36 上把常驻 CLIP 钉的 GPU2 也排除了）"""
+    try:
+        m = _hosts_mod()
+        return set(m.broken_gpus(m.exec_host(host)))
+    except Exception:  # noqa: BLE001  # arch-ok: 车道表读不到 → 用旧的写死值（只影响 CLIP 选卡，不影响判分）
+        return set(GPU_EXCLUDE)
 
 
 SCORE_PY = "tools/series10_imggen/score_remote.py"
@@ -452,7 +465,7 @@ def full_score(host: str, items: list[dict], timeout: float = 900, label: str | 
     rev = {v: k for k, v in sha_of.items()}
     send = {s for s in sha_of.values() if s not in known}
     script = base64.b64encode(_FULL.encode()).decode()
-    cmd = (f'{_resident_env()}python3 -c "$(echo {script} | base64 -d)" {R} {IDM} {HAND} {RL} {comfy_py(host)} {",".join(sorted(GPU_EXCLUDE)) or "-"} {CLIP_MIN_FREE_MB} '
+    cmd = (f'{_resident_env()}python3 -c "$(echo {script} | base64 -d)" {R} {IDM} {HAND} {RL} {comfy_py(host)} {",".join(sorted(gpu_exclude(host))) or "-"} {CLIP_MIN_FREE_MB} '
            f'{srv_repo(host)}')
     d = {}
     hb = _hb_start(host, items, label)

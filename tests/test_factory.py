@@ -725,6 +725,62 @@ def test_a07_no_in_place_source_patching(monkeypatch):
     assert RS.comfy_py("gpu36") == "/root/work/fredw/venv/bin/python" and "comfy" in RS.comfy_py("gpu33")
 
 
+def test_score36_alias_uses_self_host_python(monkeypatch, tmp_path):
+    """FIX-SCORE36（11-06）：gpu36 上 producer 调 full_score("gpu33")（rssh 按别名本机执行），CLIP 解释器 / 坏卡必须按 gpu36 取；
+    原来拿 gpu33 的 comfy_python（gpu36 上没有）→ 远端脚本崩 → 退回进程内打分 → venv 没 torch → ep02-S10 一直 score_infra"""
+    sys.path.insert(0, str(ROOT / "tools/gen_contract"))
+    import remote_score as RS
+    gpu33_py = RS.comfy_py("gpu33")
+    assert RS.gpu_exclude("gpu33") == {"2"} and RS.gpu_exclude("gpu36") == set()
+    monkeypatch.setenv("OFFLINE_SELF", "gpu36")
+    monkeypatch.setenv("OFFLINE_ALIASES", "gpu33")
+    assert RS.comfy_py("gpu33") == "/root/work/fredw/venv/bin/python" != gpu33_py
+    assert RS.gpu_exclude("gpu33") == set()
+    seen = {}
+    monkeypatch.setattr(RS, "face_refs", lambda host, project=None: {})
+    monkeypatch.setattr(RS, "_bulk_upload", lambda host, need: (None, {"mode": "none"}))
+    monkeypatch.setattr(RS, "_hb_start", lambda *a, **k: None)
+    monkeypatch.setattr(RS, "_known_path", lambda host: tmp_path / "known.json")
+    monkeypatch.setattr(RS, "_full_call", lambda host, cmd, *a: seen.update(cmd=cmd) or {"items": {}, "local": {}})
+    RS.full_score("gpu33", [{"id": "x", "host_path": "/tmp/x.png"}])
+    args = seen["cmd"].split('base64 -d)" ', 1)[1].split()
+    assert args[4] == "/root/work/fredw/venv/bin/python" and args[5] == "-", args   # CPY / EXCL
+    # gpu33 本机（无别名）照旧
+    monkeypatch.setenv("OFFLINE_SELF", "gpu33")
+    monkeypatch.delenv("OFFLINE_ALIASES")
+    assert RS.comfy_py("gpu33") == gpu33_py and RS.gpu_exclude("gpu33") == {"2"}
+    monkeypatch.setenv("OFFLINE_SELF", "gpu33")
+    assert RS.comfy_py("gpu36") == "/root/work/fredw/venv/bin/python"     # 非别名 → 不改写
+
+
+def test_score36_cpu_fallback_keeps_remote_error(monkeypatch, tmp_path):
+    """FIX-SCORE36：远端打分失败、本机退回打分也跑不了（服务器 venv 没 torch）→ 返回“没量成”且保留远端真因，不抛 torch 错盖掉它"""
+    sys.path.insert(0, str(ROOT / "services/render_router"))
+    sys.path.insert(0, str(ROOT / "services/agent"))
+    sys.path.insert(0, str(ROOT / "tools/gen_contract"))
+    import remote_score as RS
+    from ns_agent.gen_contract import postflight as PO
+    import importlib.util as _u
+    import ns_render  # noqa: F401
+    sp = _u.spec_from_file_location("ns_render._uf_score36", ROOT / "services/render_router/ns_render/unified_frame.py")
+    UF = _u.module_from_spec(sp)          # conftest 把 ns_render.unified_frame._postflight 换成桩了：另载一份拿原函数
+    sp.loader.exec_module(UF)
+
+    def boom_remote(*a, **k):
+        raise RuntimeError("full_score@gpu33: FileNotFoundError comfy python")
+
+    def boom_local(*a, **k):
+        raise ModuleNotFoundError("No module named 'torch'")
+    monkeypatch.setattr(RS, "postflight_full", boom_remote)
+    monkeypatch.setattr(PO, "run", boom_local)
+    d = UF._postflight("x.png", {"cast": [], "asset_refs": {}}, "gpu33")
+    assert d["ok"] is None and not d["items"]
+    assert "FileNotFoundError" in d["remote_error"] and "torch" in d["error"]
+    sys.path.insert(0, str(ROOT / "tools/autopilot"))
+    import producer as PR
+    assert PR.score_unmeasured(d)
+
+
 def test_pause_state_real_layout(tmp_path):
     """OVERSIGHT-F P1-3：用真实目录结构判“已被别人暂停”——legacy 剧读 data/producer/control.json，其它剧读 runs/<run>/control.json；
     runs.json status 不是 producing 也算暂停（F20）；登记表坏 = 当作已暂停"""

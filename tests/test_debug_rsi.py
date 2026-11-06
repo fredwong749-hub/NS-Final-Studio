@@ -928,7 +928,8 @@ def test_night_skips_other_host(monkeypatch):
     import night as N
     calls = []
     monkeypatch.setattr(N, "run", lambda args, timeout=3600: (calls.append(list(args)), (0, "ok"))[1])
-    monkeypatch.setattr(N, "_rssh", lambda: type("R", (), {"_local_self": staticmethod(lambda h: "other" if h == "gpu36" else "self")}))
+    monkeypatch.setenv("OFFLINE_SELF", "gpu33")      # FIX-NIGHT2 #7：按 OFFLINE_SELF 判另一台（不再看 rssh._local_self / OFFLINE_ALIASES）
+    monkeypatch.setenv("OFFLINE_ALIASES", "gpu36")   # 别名只给打分路由用，night 不许据此把 gpu36 当本机
     monkeypatch.setattr(N, "jl", lambda p, d=None: {"7": "gpu33", "8": "gpu36"} if str(p).endswith("hosts.json") else d)
     monkeypatch.setattr(N, "log", lambda *a: None)
     ctrl = {"hold_lanes": [], "per_lane": 2, "shared_lanes": [], "yield_s": 180}
@@ -1000,7 +1001,7 @@ def test_l124_build_jobs_last_frame_pairing(monkeypatch, tmp_path):
         {"stage": "last", "n": 11, "file": "renders/ep01/S1/last_011.png", "created_at": "2026-11-01T05:00:00"},
         {"stage": "last", "n": 12, "file": "renders/ep01/S1/missing.png", "postflight": {"ok": True}}]}), encoding="utf-8")
     got = B.passed_lasts()
-    assert got == {"ep01-S1": {"file": "data/renders/ep01/S1/last_011.png", "created_at": "2026-11-01T05:00:00"}}   # 定稿锁优先
+    assert got == {"ep01-S1": {"file": "data/renders/ep01/S1/last_011.png", "created_at": "2026-11-01T05:00:00", "take": 11}}   # 定稿锁优先
     src = (ROOT / "tools/series10_video/build_jobs.py").read_text(encoding="utf-8")
     assert '"@last_frame"' in src and "stale_pair" in src
 

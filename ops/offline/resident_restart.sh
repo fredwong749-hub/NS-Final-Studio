@@ -13,7 +13,9 @@ RUN=$($OFF/venv/bin/python -c 'import json,sys; print(json.load(open(sys.argv[1]
 VISION=$R/models_cache/vision
 # 第二季等额外剧的 producer（ensure_runs.sh，K-OPS-W25）：night-only 以外的模式先停、最后再按 runs.json 起
 [ "$MODE" != "night-only" ] && bash $R/ops/offline/ensure_runs.sh $SELF stop
-for n in night producer; do
+# PS-MASTER 11-06 18:2x：night-only 只停 night（以前连 producer 一起停、又只起 night →gpu36 出图停了 25 min；“出图归笔记本”是 V1 旧假设）
+STOP_LIST="night producer"; [ "$MODE" = "night-only" ] && STOP_LIST="night"
+for n in $STOP_LIST; do
   f=$OFF/run/$n.pid; [ -f $f ] || continue; p=$(cat $f)
   if kill -0 $p 2>/dev/null && grep -q "night.py\|producer.py" /proc/$p/cmdline 2>/dev/null; then
     kill $p; for i in $(seq 1 15); do kill -0 $p 2>/dev/null || break; sleep 1; done
@@ -49,7 +51,7 @@ elif [ "$MODE" = "night-only" ]; then
   alive $OFF/run/night.pid || { setsid nohup $OFF/venv/bin/python -u tools/series10_video/night.py --run $RUN </dev/null >>$OFF/logs/night.out 2>&1 & echo $! >$OFF/run/night.pid; }
   sleep 3
   for n in fwd night; do echo "$n pid $(cat $OFF/run/$n.pid) $(alive $OFF/run/$n.pid && echo alive || echo DEAD)"; done
-  echo "producer not started (night-only：出图归笔记本)"
+  echo "producer untouched (night-only 只换 night)"
 else
   bash $OFF/start.sh $SELF
 fi

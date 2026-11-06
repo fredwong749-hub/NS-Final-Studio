@@ -284,6 +284,9 @@ def anomaly_host(root: Path = ROOT) -> str:
     （config/gen_contract.json image_thresholds.Q10_accept.count_host，10.0.0.36:8893，只放行 gpu33）；笔记本照旧 "gpu36"（经常驻主连接）"""
     import os
     if os.environ.get("OFFLINE_SELF"):
+        local = review_local_anomaly(root)     # L-206：审图位主机本机常驻检测（CPU / 审图卡）活着 → 用它，不发到出图位的卡
+        if local:
+            return local
         try:
             gc = json.loads((Path(root) / "config/gen_contract.json").read_text(encoding="utf-8"))
             ch = (((gc.get("image_thresholds") or {}).get("Q10_accept") or {}).get("count_host") or "")   # 与 vqa.contract.accept_gate 同一处
@@ -292,6 +295,43 @@ def anomaly_host(root: Path = ROOT) -> str:
         if ch.startswith(("http://", "https://")):
             return ch
     return "gpu36"
+
+
+REVIEW_ANOMALY_PORT = 8893          # 与 tools/autopilot/resident_sync.ANOMALY_PORT / tools/vqa/anomaly_server.py 默认一致
+_REVIEW_ANOMALY = {"at": 0.0, "url": None}
+
+
+def review_local_anomaly(root: Path = ROOT, probe=None, ttl_s: float = 60.0) -> str | None:
+    """L-206：lane_roles 开着且本机（OFFLINE_SELF）= 审图位主机（config/pipeline/lane_roles.json review.lane 的主机）且本机
+    127.0.0.1:8893 常驻人数 / 身份检测 /health 通 → 返回该地址（人数检测留在审图位 CPU / 审图卡，永不发到出图位 gpu36:1）；
+    否则 None（退回 count_host 原口径，不让检测断掉）。60 s 缓存探测结果"""
+    import os
+    import time
+    import urllib.request
+    try:
+        lr = json.loads((Path(root) / "config/pipeline/lane_roles.json").read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):   # arch-ok: 配置缺 = 旧口径
+        return None
+    if not isinstance(lr, dict) or not lr.get("enabled"):
+        return None
+    host = str((lr.get("review") or {}).get("lane") or "").split(":", 1)[0]
+    if not host or os.environ.get("OFFLINE_SELF") != host:
+        return None
+    url = f"http://127.0.0.1:{REVIEW_ANOMALY_PORT}"
+    now = time.time()
+    if probe is None and now - _REVIEW_ANOMALY["at"] < ttl_s:
+        return _REVIEW_ANOMALY["url"]
+
+    def _probe(u: str) -> bool:
+        try:
+            with urllib.request.urlopen(u + "/health", timeout=3) as r:
+                return r.status == 200
+        except (OSError, ValueError):   # arch-ok: 不通 = 不用本机（退回原口径）
+            return False
+    up = bool((probe or _probe)(url))
+    if probe is None:
+        _REVIEW_ANOMALY.update(at=now, url=url if up else None)
+    return url if up else None
 
 
 def bundle_cast_ok(fn) -> bool:

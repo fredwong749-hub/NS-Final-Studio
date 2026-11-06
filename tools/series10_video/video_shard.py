@@ -250,3 +250,31 @@ def decide_claims(c: dict, plan_map: dict, merged: dict, claims: dict, busy: dic
         for s in cand[:per_host]:
             cl[s] = {"host": h, "from": eff[s], "at": now}
     return cl
+
+
+ROLE_WHY = "lane_roles"
+
+
+def role_claims(c: dict, plan_map: dict, merged: dict, claims: dict, video_hosts: set | None, now: float,
+                lease_s: float = CLAIM_LEASE_S) -> dict:
+    """L-206 工位分卡叠在抢活之上（纯函数，relay 在 decide_claims 之后调）。video_hosts = 本集当前阶段有视频道的台
+    （None = 不适用，原样返回）。
+    · 首尾帧阶段（只有 gpu36:2 出视频）：没有视频道的台（gpu33）名下没开工的镜，整批领给有视频道的台（owner 优先；非 sticky，
+      按租约；why=lane_roles），不看 claim_from——它本阶段根本不出视频，“没开工”不靠 state 新鲜度；已开工 / 已落定的不动。
+    · 视频阶段（全部台都有视频道）：上一阶段为分卡而领、还没开工的领取作废 → 镜回静态计划（两台按 video_shard 权重 + 正常抢活）。
+    · 有视频道的台名下的镜不因分卡改派"""
+    if video_hosts is None:
+        return claims
+    cl = dict(claims or {})
+    no_video = [h for h in c["hosts"] if h not in video_hosts]
+    takers = [h for h in ([c["owner"]] + sorted(c["hosts"])) if h in video_hosts]
+    if not no_video or not takers:
+        for s, x in list(cl.items()):
+            if str(x.get("why") or "").startswith(ROLE_WHY) and not x.get("sticky") and not _started((merged or {}).get(s)):
+                cl.pop(s)
+        return cl
+    eff = apply_claims(plan_map, cl)
+    for s in sorted(eff):
+        if eff[s] in no_video and not _started((merged or {}).get(s)) and (s not in cl or cl[s].get("host") in no_video):
+            cl[s] = {"host": takers[0], "from": eff[s], "at": now, "why": f"{ROLE_WHY}:frames"}
+    return cl

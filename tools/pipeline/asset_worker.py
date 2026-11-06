@@ -314,18 +314,45 @@ def _hold_expired(h: dict, now: float | None = None) -> bool:
         return False
 
 
-def free_lanes(cfg: dict, in_use: set[str], part: dict | None = None, probe=None, hosts_mod=None, by: str = BY) -> list[str]:
+def lane_roles_policy(root: Path, runs: dict | None) -> dict:
+    """C1（L-206 / L-207）：资产作业能借哪些道——读 config/pipeline/lane_roles.json + 各在产剧的 data/pipeline/lane_roles_state.json（producer 写）：
+    审图位（gpu33:3）永不借（不往审图卡放出图模型）；某剧有集在占卡：首尾帧段只借该段出图位、视频段一条不借（全卡出视频，资产等）。
+    关 / 读不到 = {"allow": None, "deny": []}（旧行为：全部 image 道）"""
+    try:
+        LRO = _load("lane_roles_for_asset_worker", "tools/autopilot/lane_roles_producer.py")
+        cfg = LRO.load_cfg(root)
+        if not LRO.enabled(cfg):
+            return {"allow": None, "deny": [], "why": "lane_roles 关"}
+        acts = [a for a in (LRO.read_active(run, root) for run in (runs or {})) if a]
+        if not acts:
+            return LRO.asset_lane_policy(cfg, None)
+        pols = [LRO.asset_lane_policy(cfg, a) for a in acts]
+        allows = [set(p["allow"]) for p in pols if p["allow"] is not None]
+        allow = sorted(set.intersection(*allows)) if allows else None
+        return {"allow": allow, "deny": sorted({x for p in pols for x in p["deny"]}), "why": "；".join(p["why"] for p in pols)}
+    except Exception as e:  # noqa: BLE001  # arch-ok: 分卡读不了 = 旧行为（审图位仍由 exclude_lanes / 总调度 hold 挡），记在 why
+        return {"allow": None, "deny": [], "why": f"lane_roles 读不了：{e!r}"[:160]}
+
+
+def free_lanes(cfg: dict, in_use: set[str], part: dict | None = None, probe=None, hosts_mod=None, by: str = BY,
+               policy: dict | None = None) -> list[str]:
     """空闲道：车道表 image 道 − 排除表 − 别人挡着 / 借着 / hold 着的道 − 本 worker 正在用的道；再经 ComfyUI 队列探测确认没活。
-    本 worker 自己残留的 hold（作业已不在跑）→ 视为空闲（下面 hold 会覆盖）。by = 借道人（阶段 B 金样用 GOLDEN-WORKER，同一套规则）"""
+    本 worker 自己残留的 hold（作业已不在跑）→ 视为空闲（下面 hold 会覆盖）。by = 借道人（阶段 B 金样用 GOLDEN-WORKER，同一套规则）。
+    policy（C1，lane_roles_policy）：allow 不为 None → 只用 allow 里的道（[] = 一条不借）；deny 一律不借（审图位）"""
     H = hosts_mod or _load("hosts_for_asset_worker", "tools/factory/hosts.py")
     LN = _lanes_mod()
     part = part if part is not None else LN._read_live()
     probe = probe or LN.probe_lane
     excl = set(cfg.get("exclude_lanes") or []) | broken_lanes(H)
+    pol = policy or {}
+    excl |= set(pol.get("deny") or [])
+    allow = pol.get("allow")
     lent, holds = part.get("_lent_lanes") or {}, part.get("_temp_holds") or {}
     cand = []
     for lane in sorted(H.lanes(role="image")):
         if lane in excl or lane in in_use or lane in lent:
+            continue
+        if allow is not None and lane not in allow:
             continue
         h = holds.get(lane)
         if h and _hold_expired(h):
@@ -538,8 +565,11 @@ def tick(root: Path = ROOT, cfg: dict | None = None, runs: dict | None = None, s
                 slots = max(0, int(cfg.get("max_parallel") or 1) - len(in_use))
                 if slots:
                     LN = LN or _lanes_mod()
+                    pol = lane_roles_policy(root, runs)        # C1：按工位分卡 / 占卡集的阶段限道（审图位永不借；视频段不借）
+                    if pol.get("allow") is not None or pol.get("deny"):
+                        rec["lane_roles_policy"] = pol
                     try:
-                        free = (lanes(cfg, in_use) if lanes else free_lanes(cfg, in_use))[:slots]
+                        free = (lanes(cfg, in_use) if lanes else free_lanes(cfg, in_use, policy=pol))[:slots]
                     except Exception as e:  # noqa: BLE001  探不到道 = 这拍不派
                         free, rec["lane_errors"] = [], rec.get("lane_errors", []) + [f"free_lanes: {e!r}"[:160]]
                     for j, lane in zip(pend, free):
@@ -903,7 +933,7 @@ def vlm_items(job: dict) -> tuple[list[str], bool]:
     kind, spec = job["kind"], job["spec"]
     if kind == "face":
         return [f"画面里只有一个人，是{spec['sex']}，接近正脸、目光落在画面右侧，胸像构图", f"外观明显是成年人（大约{spec['age']}岁，不像未成年）",
-                "背景是中性纯色，没有场景杂物", "没有裸露，穿着日常", "五官清晰自然、没有畸形，手指数量正常"], True
+                "没有裸露", "五官清晰自然、没有畸形，手指数量正常"], True   # PS-MASTER 11-06：去掉“背景中性纯色 / 穿着日常”——与角色设定冲突（黎岸设定穿正式西装、身份脸提示词带环境光），ep02 两张身份脸 15/15 被误判；身份脸只核人数 / 成年 / 无裸露 / 五官
     if kind == "sheet":
         big = sheet_big_pieces(spec)
         return [f"画面里只有一个人，是{spec['sex']}，正面全身站立，从头到脚完整入画", f"外观明显是成年人（大约{spec['age']}岁，不像未成年）",

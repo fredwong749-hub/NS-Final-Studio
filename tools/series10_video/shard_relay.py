@@ -140,6 +140,14 @@ def save_status(vid: Path, st: dict) -> None:
     tmp.replace(vid / STATUS_NAME)
 
 
+def relay_cmd(dest: str) -> str:
+    """FIX-NIGHT2 #7（多写者）：owner 上 vidgen 正在读 state_<helper>.json，`tar xf -` 直接覆盖活文件会读到半截 →
+    先解到 DEST 下的临时目录，再逐个 mv（同一文件系统 = rename，原子）到位，临时目录删掉"""
+    return (f"mkdir -p {dest} && cd {dest} && tmp=$(mktemp -d -p . .relay_XXXXXX) && tar xf - -C \"$tmp\" && "
+            f"(cd \"$tmp\" && find . -type f) | while read -r f; do f=${{f#./}}; mkdir -p \"$(dirname \"$f\")\"; "
+            f"mv -f \"$tmp/$f\" \"$f\"; done; rm -rf \"$tmp\"; echo RELAY_OK")
+
+
 def push_to_owner(owner: str, files: list[str], dry: bool = False, marks_p: Path | None = None) -> int:
     """笔记本 → owner：打一个 tar 经 deploy.ssh 解到 owner 的发版目录（与 deploy.push 同一通道）。
     只送自上次成功以来变了的文件（大小 / mtime 记在 _shard_relay_marks.json，成功后才写）"""
@@ -159,7 +167,7 @@ def push_to_owner(owner: str, files: list[str], dry: bool = False, marks_p: Path
             n += 1
     if dry or not n:
         return n
-    r = D.ssh(owner, f"mkdir -p {D.DEST} && cd {D.DEST} && tar xf - && echo RELAY_OK", buf.getvalue(), timeout=3600)
+    r = D.ssh(owner, relay_cmd(D.DEST), buf.getvalue(), timeout=3600)
     if b"RELAY_OK" not in (r.stdout or b""):
         raise RuntimeError(f"relay → {owner} 失败：{(r.stderr or b'').decode(errors='replace')[-200:]}")
     marks.update({key(f): _sig(ROOT / f) for f in todo})
@@ -200,7 +208,13 @@ def arbitrate_claims(run: str, vid: Path, vid_rel: str, c: dict, ep: int, busy: 
                 busy[h] = 1
                 continue
             busy[h] = sum(1 for r in (st.get("shots") or {}).values() for x in r.get("renders") or [] if x.get("state") == "submitted")
+    # L-206 工位分卡：本集当前阶段没有视频道的台（首尾帧阶段的 gpu33）不抢活（当它忙），它名下没开工的镜领给有视频道的台；
+    # 视频阶段把为分卡领走、还没开工的还回静态计划。不适用（关 / ep < from_episode / 模块不在）= video_hosts None = 原样
+    video_hosts = role_video_hosts(run, ep, [s["shot"] for s in shots])
+    if video_hosts is not None:
+        busy = {**busy, **{h: max(1, int(busy.get(h, 0))) for h in c["hosts"] if h not in video_hosts}}
     new = VS.decide_claims(c, plan_map, merged, old, busy, now, claim_from=claim_from, stale_hosts=stale_hosts)
+    new = VS.role_claims(c, plan_map, merged, new, video_hosts, now)
     if new != old:
         VS.save_claims(vid, new)
         back = [s for s, x in new.items() if x.get("sticky") and s not in old]
@@ -208,6 +222,17 @@ def arbitrate_claims(run: str, vid: Path, vid_rel: str, c: dict, ep: int, busy: 
             print(time.strftime("%H:%M:%S"), f"RECLAIM ep{ep:02d}", sorted(stale_hosts), "→", c["owner"], back,
                   {h: (round(ages[h]) if ages[h] < 1e12 else "失联") for h in stale_hosts}, flush=True)
     return new
+
+
+def role_video_hosts(run: str, ep: int, shot_ids: list[str]) -> set[str] | None:
+    """L-206：本集当前阶段有视频道的台；不适用 = None。阶段 = producer 阶段表，没有就按 takes / registry 算（lane_roles.phase_of）"""
+    try:
+        import lane_roles as LR
+    except ImportError:   # arch-ok: 没有分卡模块 = 不分卡（抢活原样）
+        return None
+    cfg = LR.load()
+    ph = LR.phase_of(run, ep, shot_ids, cfg)
+    return LR.hosts_with(ph, "video", cfg) if ph else None
 
 
 def once(run: str, dry: bool = False) -> dict:

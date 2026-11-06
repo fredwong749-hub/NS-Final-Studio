@@ -6,6 +6,9 @@
         道 = config/factory/hosts.json 启用的出图道（gpu33:0/1/3 + gpu36:0/1/2）；gpu33:2 坏卡永远不在表里（NEVER_LANES 双保险）。
   判定  idle = util < util_idle_pct 且队列 running+pending == 0（探不到 = 不判，不凭空报）；
         有活 = 登记表 data/producer/runs/<run>/registry.json 有 ready 首尾帧（按镜判，L-202 ①）/ 该台有可派视频镜 / 资产作业 pending。
+        L-206 工位分卡（config/pipeline/lane_roles.json，tools/autopilot/lane_roles_producer.py）：归它管的集按该集阶段给每条道定角色——
+        image 道只对 ready 首尾帧 / 资产作业算有活；video 道（首尾帧阶段的 gpu36:2）只对本台可派视频算有活；review 道（gpu33:3）
+        只在看图分发器 /health queue > 0 时算有活（看图排队空 = 审图卡该空着，不报）。不归它管的集（ep01）= 旧行为。
   动作  某道空闲 ≥ idle_min 分钟且有活：
         a) 卡点：tools/master/report_issue.report（who=IDLE-WATCH，附证据：哪些道空、什么活、为什么没派——暂停 / hold / only / yield_s /
            episode_lock / sop_gate 阻断 / 心跳过期）；同一台 report_repeat_min 内只记一次；CHANNEL 一行。
@@ -94,6 +97,11 @@ for m in jobs.get("shots") or []:
 disp = [sid for sid, r in (st.get("shots") or {}).items() if r.get("status") not in ("done", "best_effort", "blocked", "waiting_frame") and sid in readyv]
 out["video_dispatchable"] = sorted(disp)[:40]
 out["video_dispatchable_n"] = len(disp)
+try:                                       # L-206 审图位：本机看图分发器 /health（queue = 在审的张数；空 = 审图卡没活，不算“空卡有活”）
+    h = json.loads(urllib.request.urlopen("http://127.0.0.1:__VQA_PORT__/health", timeout=3).read())
+    out["vqa"] = {"queue": h.get("queue"), "loaded": h.get("loaded"), "instances": h.get("instances")}
+except Exception:
+    out["vqa"] = None
 print(json.dumps(out))
 """
 
@@ -182,8 +190,12 @@ class Env:
         """服务器侧探针 → dict；连不上 / 解析不了 = None（本拍该台不判）"""
         H = self.hosts()
         ports = {str(v["gpu"]): v["comfy_port"] for v in lanes.values() if v["host"] == host}
+        try:
+            vqa_port = int(self.lane_roles_mod().review_ports(self.lane_roles_cfg())["router"])
+        except Exception:  # noqa: BLE001  # arch-ok: lane_roles 读不到 = 看图分发器默认端口
+            vqa_port = 8870
         code = (REMOTE_PROBE.replace("__LANES__", json.dumps(ports)).replace("__RUN__", run).replace("__HOST__", host)
-                .replace("__PD__", self.producer_rel(run)))
+                .replace("__PD__", self.producer_rel(run)).replace("__VQA_PORT__", str(vqa_port)))
         cmd = f"cd {H.server_root(host)} && python3 -"
         try:
             r = self._rssh().run_retry(host, cmd, input=code.encode("utf-8"), timeout=timeout, tries=1)
@@ -241,6 +253,13 @@ class Env:
         except Exception as e:  # noqa: BLE001  # arch-ok: 只是证据之一；sop_gate 读不了写进证据，不影响判定
             out["_error"] = repr(e)[:120]
         return out
+
+    # ---- L-206 工位分卡（tools/autopilot/lane_roles_producer.py 唯一读法；配置缺 = 关 = 旧行为）
+    def lane_roles_mod(self):
+        return _load("lane_roles_for_idle_watch", "tools/autopilot/lane_roles_producer.py", self.root)
+
+    def lane_roles_cfg(self) -> dict:
+        return self.lane_roles_mod().load_cfg(self.root)
 
     # ---- O3 跨机借道（复用 tools/autopilot/lane_relay.py：配置 + 阶段交接开关文件；不新增通道、不做跨机接手）
     def relay_cfg(self) -> dict:
@@ -306,8 +325,78 @@ def frames_ready(reg: dict) -> dict:
     return {"ready": ready, "ready_eps": sorted(eps), "running": running, "ready_by_ep": by_ep}
 
 
+ALL_ROLES = {"image", "video"}          # 旧行为：每条道什么活都算（lane_roles 关 / 集不归它管）
+
+
+def lane_roles_map(LRO, lr: dict, reg: dict, lanes: dict, adult: set | None = None, active: dict | None = None,
+                   prev: dict | None = None) -> dict:
+    """L-206：每条道此刻的角色与它能做的首尾帧活 {lane: {roles: set, img_ready: n, legacy: bool, phases: {ep: phase}}}。
+    不归 lane_roles 管的集（关 / ep < from_episode / 登记表没集）= 旧行为：每条道 image+video、ready 首尾帧全算；
+    归它管的集按该集阶段的三张表：image 道算该集 ready 首尾帧，video 道只算视频活，review 道只算看图排队。
+    L-207：给了 active（run 级占卡集 {ep, phase}）→ 适用集一律按 active 的阶段取表，ready 首尾帧只算 active 集的
+    （下一集的 ready 首尾帧不算“有活”：它按序等 active 集的视频全定下）；prev = 状态文件本剧记录（C2 时间兜底同口径）"""
+    out = {ln: {"roles": set(), "img_ready": 0, "legacy": False, "phases": {}} for ln in lanes}
+    eps = reg.get("episodes") or []
+    if not eps:
+        for r in out.values():
+            r["roles"], r["legacy"] = set(ALL_ROLES), True
+        return out
+    for E in eps:
+        try:
+            ep = int(E.get("ep") or 0)
+        except (TypeError, ValueError):
+            continue
+        n_ready = sum(1 for S in E.get("shots") or [] for k in ("first", "last")
+                      if ((S.get("objects") or {}).get(k) or {}).get("status") == "ready")
+        if not LRO.applies(lr, ep):
+            for r in out.values():
+                r["roles"] |= ALL_ROLES
+                r["img_ready"] += n_ready
+                r["legacy"] = True
+            continue
+        rec = (prev or {}).get(str(ep)) if isinstance(prev, dict) else None
+        try:
+            ph = LRO.episode_phase(E, adult, rec)
+        except TypeError:   # arch-ok: 旧版分卡模块没有 prev 参数
+            ph = LRO.episode_phase(E, adult)
+        if active:
+            if int(active["ep"]) != ep:
+                n_ready = 0            # L-207：不是占卡集 → 它的 ready 首尾帧此刻不算活
+            ph = active["phase"]
+        for role in LRO.ROLES:
+            for ln in LRO.lanes_for(lr, ph, role):
+                if ln in out:
+                    out[ln]["roles"].add(role)
+                    out[ln]["phases"][ep] = ph
+                    if role == "image":
+                        out[ln]["img_ready"] += n_ready
+    return out
+
+
+def lane_work(rec: dict, host: str, work: dict, probes: dict) -> list[str]:
+    """这条道按角色有没有活（人话列表；空 = 没活 → 空着不算“空卡有活”）"""
+    out = []
+    roles = rec.get("roles") or set()
+    if "image" in roles:
+        if rec.get("img_ready", 0) > 0:
+            out.append(f"ready 首尾帧 {rec['img_ready']}")
+        if work.get("assets_pending", 0) > 0:
+            out.append(f"资产作业 {work['assets_pending']}")
+    if "video" in roles and (work.get("video") or {}).get(host, 0) > 0:
+        out.append(f"本台可派视频 {work['video'][host]} 镜")
+    if "review" in roles:
+        q = ((probes.get(host) or {}).get("vqa") or {}).get("queue")
+        if q:
+            out.append(f"看图排队 {q}")
+    return out
+
+
+def default_roles(lanes: dict, fr: dict) -> dict:
+    return {ln: {"roles": set(ALL_ROLES), "img_ready": fr.get("ready", 0), "legacy": True, "phases": {}} for ln in lanes}
+
+
 def relay_plan(cfg: dict, st: dict, now: float, lane_st: dict, fr: dict, images: dict, rcfg: dict, relay_lanes: list[str],
-               hold: dict | None) -> dict | None:
+               hold: dict | None, roles: dict | None = None) -> dict | None:
     """FIX-ORCH O3（L-202 ②“GPU 不能空闲”）：跨机借道的自动开 / 还，复用 lane_relay 的阶段交接开关文件（producer 每轮现读）。
       借：借道配置开着、消费机（consumer_host，gpu33）分区里有 ready 首尾帧、某条借道（gpu36:x）空闲 ≥ idle_min → 从 hold 里拿掉这条道；
       还：消费机分区没有 ready 了 → 把本巡检借出去的道放回 hold（恢复借之前的 hold，人工 hold 原样还原）。
@@ -324,7 +413,8 @@ def relay_plan(cfg: dict, st: dict, now: float, lane_st: dict, fr: dict, images:
     lender = sorted({ln.split(":", 1)[0] for ln in relay_lanes})
     host = lender[0] if lender else "gpu36"
     if backlog > 0:
-        take = sorted(ln for ln in cur if (lane_st.get(ln) or {}).get("idle_min", 0) >= cfg["idle_min"])
+        take = sorted(ln for ln in cur if (lane_st.get(ln) or {}).get("idle_min", 0) >= cfg["idle_min"]
+                      and (roles is None or "image" in (roles.get(ln) or {}).get("roles", ALL_ROLES)))   # L-206：视频位 / 审图位不借去出图
         if take:
             return {"kind": "lane_relay", "key": "lane_relay", "host": host, "op": "lend", "lanes": take,
                     "hold": sorted(cur - set(take)), "prev_hold": rs.get("prev_hold", h) if lent else h,
@@ -398,9 +488,14 @@ def probe_lanes(env: Env, lanes: dict, probes: dict, cfg: dict) -> dict:
     return out
 
 
-def decide(env: Env, cfg: dict, st: dict, now: float, lanes: dict, lane_st: dict, work: dict, probes: dict, run: str) -> list[dict]:
-    """→ 动作列表（kind: night_once / restart_request / report）；st 持久（idle_since / last_act / reported），由调用方落盘"""
+def decide(env: Env, cfg: dict, st: dict, now: float, lanes: dict, lane_st: dict, work: dict, probes: dict, run: str,
+           roles: dict | None = None) -> list[dict]:
+    """→ 动作列表（kind: night_once / restart_request / report）；st 持久（idle_since / last_act / reported），由调用方落盘。
+    roles（L-206，lane_roles_map）：每条道只按自己的角色判“有活”——审图位看图排队空 = 没活；首尾帧阶段的视频位只看视频活；None = 旧行为"""
     acts = []
+    roles = roles or default_roles(lanes, work["frames"])
+    lane_has = {ln: lane_work(roles.get(ln) or {"roles": set(ALL_ROLES), "img_ready": work["frames"]["ready"]}, v["host"], work, probes)
+                for ln, v in lanes.items()}
     idle_since = st.setdefault("idle_since", {})
     for ln, s in lane_st.items():
         if s["idle"] is True:
@@ -411,21 +506,24 @@ def decide(env: Env, cfg: dict, st: dict, now: float, lanes: dict, lane_st: dict
         idle_since.pop(ln)
     for ln, s in lane_st.items():
         s["idle_min"] = round((now - idle_since[ln]) / 60, 1) if ln in idle_since else 0.0
-    has_work = work["frames"]["ready"] > 0 or work["assets_pending"] > 0 or any(v > 0 for v in work["video"].values())
+    has_work = any(lane_has.values())
     if not has_work:
         return acts
     last_act = st.setdefault("last_act", {})
     reported = st.setdefault("reported", {})
     for host in SERVERS:
         mine = [ln for ln, v in lanes.items() if v["host"] == host]
-        stuck = [ln for ln in mine if lane_st[ln]["idle_min"] >= cfg["idle_min"]]
+        stuck = [ln for ln in mine if lane_st[ln]["idle_min"] >= cfg["idle_min"] and lane_has[ln]]   # L-206：按角色有活才算“空卡有活”
         if not stuck:
             continue
         pr = probes.get(host)
         why = blockers(env, pr, run, mine, cfg)
+        role_txt = "" if all((roles.get(x) or {}).get("legacy") for x in stuck) else \
+            "；工位（L-206）：" + "、".join(f"{x}={'/'.join(sorted((roles.get(x) or {}).get('roles') or [])) or '-'}（{'、'.join(lane_has[x])}）" for x in stuck)
         evid = (f"{host} 道 {stuck} 空闲 {max(lane_st[x]['idle_min'] for x in stuck):.0f} 分钟（全台空：{len(stuck) == len(mine)}）；"
                 f"活：ready 首尾帧 {work['frames']['ready']}（ep {work['frames']['ready_eps']}）/ 本台可派视频 {work['video'].get(host, 0)} 镜 / "
-                f"资产作业 {work['assets_pending']}；原因线索：{'；'.join(why) or '没探到明确阻断（看 producer 日志 / sop_gate）'}")
+                f"资产作业 {work['assets_pending']}{role_txt}；原因线索：{'；'.join(why) or '没探到明确阻断（看 producer 日志 / sop_gate）'}")
+        stuck_video = any("video" in ((roles.get(x) or {}).get("roles") or ALL_ROLES) for x in stuck)
         if work.get("sop"):
             evid += f"；sop_gate 出图阻断 {work['sop']}"
         if work.get("episode_lock"):
@@ -447,7 +545,7 @@ def decide(env: Env, cfg: dict, st: dict, now: float, lanes: dict, lane_st: dict
                              "why": f"{host} 心跳过期（producer {hb_age / 60 if hb_age is not None else '?'} min / night {nsa}）且道空有活"})
         # b) 该台有可派视频且 night 心跳新鲜 → night --once 重派（act_gap_s 一次）
         key = f"night_once:{host}"
-        if (pr and cfg["actions"].get("night_once") and work["video"].get(host, 0) > 0
+        if (pr and cfg["actions"].get("night_once") and work["video"].get(host, 0) > 0 and stuck_video
                 and (pr.get("night_state_age_s") or 0) <= cfg["night_stale_min"] * 60
                 and now - float(last_act.get(key) or 0) >= cfg["act_gap_s"]):
             acts.append({"kind": "night_once", "key": key, "host": host, "why": f"{host} 可派视频 {work['video'][host]} 镜而道空"})
@@ -530,19 +628,34 @@ def tick(env: Env | None = None, cfg: dict | None = None, state: dict | None = N
         work["episode_lock_error"] = repr(e)[:120]
     if fr["ready_eps"]:
         work["sop"] = env.sop_blocks(run, fr["ready_eps"][:3])
-    acts = decide(env, cfg, st, now, lanes, lane_st, work, probes, run)
+    roles, lr_info = None, {"enabled": False}
+    try:                                   # L-206：每条道按角色判活（配置缺 / 读不了 = 旧行为）
+        LRO = env.lane_roles_mod()
+        lr = env.lane_roles_cfg()
+        active = LRO.read_active(run, env.root) if hasattr(LRO, "read_active") else None     # L-207：run 级占卡集（producer 写）
+        prev = (LRO.read_state(env.root).get(str(run)) or {}) if hasattr(LRO, "read_state") else None
+        roles = lane_roles_map(LRO, lr, reg, lanes, active=active, prev=prev)
+        lr_info = {"enabled": LRO.enabled(lr), "from_episode": LRO.from_episode(lr), "active": active,
+                   "phases": {str(e): r["phases"].get(e) for r in roles.values() for e in r.get("phases") or {}}}
+    except Exception as e:  # noqa: BLE001  # arch-ok: 分卡读不了只记，判定退回旧行为
+        work["lane_roles_error"] = repr(e)[:120]
+        roles = None
+    acts = decide(env, cfg, st, now, lanes, lane_st, work, probes, run, roles=roles)
     try:                                   # O3：跨机借道自动开 / 还（读不到配置 = 不动）
         rcfg = env.relay_cfg()
         if rcfg.get("enabled"):
-            ra = relay_plan(cfg, st, now, lane_st, fr, env.partition_images(), rcfg, env.relay_lanes(rcfg), env.relay_hold_read())
+            ra = relay_plan(cfg, st, now, lane_st, fr, env.partition_images(), rcfg, env.relay_lanes(rcfg), env.relay_hold_read(), roles=roles)
             if ra:
                 acts.append(ra)
     except Exception as e:  # noqa: BLE001  # arch-ok: 借道判定出错只记，不影响别的动作
         work["relay_error"] = repr(e)[:120]
     done = execute(env, cfg, st, acts, now, run, dry)
     idle_lanes = sorted(ln for ln, s in lane_st.items() if s["idle"])
-    has_work = fr["ready"] > 0 or work["assets_pending"] > 0 or any(v > 0 for v in work["video"].values())
+    rl = roles or default_roles(lanes, fr)
+    has_work = any(lane_work(rl.get(ln) or {}, v["host"], work, probes) for ln, v in lanes.items())
     res = {"at": jst(now, "%Y-%m-%d %H:%M:%S+09:00"), "t": now, "run": run, "dry_run": dry, "has_work": has_work, "lanes": lane_st,
+           "lane_roles": {**lr_info, "lanes": {ln: {"roles": sorted(r.get("roles") or []), "img_ready": r.get("img_ready", 0),
+                                                   "work": lane_work(r, lanes[ln]["host"], work, probes)} for ln, r in rl.items()}},
            "work": {k: v for k, v in work.items() if k != "sop" or v}, "idle_lanes": idle_lanes,
            "probe_errors": [h for h in SERVERS if probes.get(h) is None], "actions": done,
            "_state": {"idle_since": st.get("idle_since", {}), "last_act": st.get("last_act", {}), "reported": st.get("reported", {}),

@@ -158,6 +158,7 @@ def process(host: str, rs=None, now: float | None = None) -> dict | None:
            "by": sorted({r.get("by") or "?" for r in todo}), "reasons": [r.get("reason") for r in todo][:20],
            "urgent_jump": bool(urgent and not gap_ok), "since_last_restart_min": round((now - last) / 60, 1) if last else None,
            "mode": merged_mode(todo), "modes_requested": sorted({str(r.get("mode")) for r in todo})}
+    executed = False
     try:
         # A-09（V2_READINESS）：重启前已经被别人暂停（运维 / 部署 / 人工）→ 不再 pause、重启后也不 resume（以前无条件 resume，
         # 把别人的全局暂停清掉了）；只解自己设的暂停
@@ -167,6 +168,8 @@ def process(host: str, rs=None, now: float | None = None) -> dict | None:
             rs.ssh(host, f"cd {rs.R} && {rs.PY[host]} tools/autopilot/producer.py pause --by RESTART_QUEUE --note '重启前排空'",
                    timeout=120, tries=3)
         rec.update(drain(host, rs))
+        executed = True                                 # 重启命令一旦发出，这批请求就算执行过（不论之后 resume / 校验成败）
+        rec["restart_executed"] = True
         rec["restart_out"] = str(rs.restart(host, rec["mode"])).strip()[-300:]
         if not pre:
             rs.ssh(host, f"cd {rs.R} && {rs.PY[host]} tools/autopilot/producer.py resume --by RESTART_QUEUE --note '重启完成'",
@@ -176,11 +179,14 @@ def process(host: str, rs=None, now: float | None = None) -> dict | None:
         rec["ok"] = False
         rec["error"] = repr(e)[:300]
     rec["secs"] = round(time.time() - t0, 1)
-    if rec["ok"]:
+    if rec["ok"] or executed:
+        # FIX-NIGHT2（PS-MASTER 11-06 17:5x）：以前只有 ok 才记 done——重启后 resume / 校验抛错 → 请求留着 → 下一拍又重启
+        # （17:54 / 17:59 同一请求两次杀掉刚起的 night，第一轮 5–15 min 的作业重编永远跑不完）。现在 restart 已执行就记 done
+        # （error 留在记录里），绝不重跑同一请求；只有 pause / 排空阶段就失败（重启没发出）才留着重试
         st = rs.jl(rs.STATE, {}) or {}
         st.setdefault(host, {})["last_restart"] = time.time()
         rs.js(rs.STATE, st)
-        _append(DONE, rec)                              # 失败的不记 done：请求留着，下一拍再试
+        _append(DONE, rec)
     rs.log("restart_queue", host, json.dumps({k: rec.get(k) for k in ("request_ids", "by", "mode", "urgent_jump", "drained", "ok", "secs")},
                                               ensure_ascii=False))
     return rec

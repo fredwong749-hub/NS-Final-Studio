@@ -753,12 +753,20 @@ checks:
     value: true
   - id: D-V2-191
     decision: L-191（项目方 11-05 12:xx 选 A：ep01 首帧改 35 步 base 定稿档；多画人由 Q1 + 看图人数闸挡）
-    title: render_quality.json first_frame_tier.runs.series10_v2 = base35
+    title: render_quality.json first_frame_tier.runs.series10_v2.default = base35（⤴ L-206：ep02 起 turbo_previz，见 D-V2-206）
     type: json
     file: config/render_quality.json
-    path: [first_frame_tier, runs, series10_v2]
+    path: [first_frame_tier, runs, series10_v2, default]
     op: eq
     value: base35
+  - id: D-V2-206
+    decision: L-206 ②A（项目方 11-06 选“①A ②A”：ep02 起首帧改 8 步 turbo + 机位摆位图，修订 L-191）
+    title: render_quality.json first_frame_tier.runs.series10_v2.from_episode.2 = turbo_previz
+    type: json
+    file: config/render_quality.json
+    path: [first_frame_tier, runs, series10_v2, from_episode, "2"]
+    op: eq
+    value: turbo_previz
   - id: D-V2-192a
     decision: L-192 ①（项目方 11-05 16:3x 运镜表选 A：白名单扩为 6 种 static / push_in / pull_out / bolt_push_settle / handheld_follow / pedestal_up；truck / arc 复测后再定）
     title: camera_moves.yaml 记了 L-192 启用（pull_out / pedestal_up enabled_by L-192）

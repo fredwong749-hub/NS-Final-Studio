@@ -661,10 +661,12 @@ try:
     out["hb"] = json.load(open(R + "/__PD__/heartbeat.json"))
 except Exception:
     out["hb"] = None
-try:
-    out["ns"] = os.stat(R + "/data/pipeline/runs/__RUN__/video/night_state.json").st_mtime
-except OSError:
-    out["ns"] = 0
+out["ns"] = 0
+for _f in ("night_state.json", "night_heartbeat.json"):   # FIX-NIGHT2：night 第一轮 5–15 min 不写 state，心跳文件在子步骤之间写
+    try:
+        out["ns"] = max(out["ns"], os.stat(R + "/data/pipeline/runs/__RUN__/video/" + _f).st_mtime)
+    except OSError:
+        pass
 try:
     st = json.load(open(R + "/data/pipeline/runs/__RUN__/video/state___HOST__.json"))
     jobs = json.load(open(R + "/data/pipeline/runs/__RUN__/video/jobs.json"))
@@ -849,6 +851,26 @@ def push_control(host: str, force: bool = False) -> dict:
 def lan_proxy_keepalive() -> str:
     """NETFIX：gpu36 看图服务开放内网给 gpu33（/root/work/fredw/netfix/lan_proxy.sh 幂等保活），每个 health 拍调一次"""
     out = ssh("gpu36", "bash /root/work/fredw/netfix/lan_proxy.sh", timeout=60, tries=2)
+    return out.decode("utf-8", "replace").strip()[-200:]
+
+
+def review_lan_proxy_host() -> str | None:
+    """L-207：审图位内网入口要起在哪台（config/pipeline/lane_roles.json enabled + review.lan_proxy.enabled → review.lane 的主机）；关 / 没配 = None"""
+    d = jl(ROOT / "config/pipeline/lane_roles.json", {}) or {}
+    rv = d.get("review") or {}
+    if not d.get("enabled") or not (rv.get("lan_proxy") or {}).get("enabled"):
+        return None
+    return str(rv.get("lane") or "").split(":")[0] or None
+
+
+def review_lan_proxy_keepalive(host: str | None = None) -> str:
+    """L-207：gpu33 审图位看图分发器开放内网给 gpu36 视频打分（仓库里的 tools/netfix/review_lan_proxy.sh，幂等保活；参数全在 lane_roles.json）。
+    host 不是审图台 / 开关关 = 不跑（返回 skip）"""
+    want = review_lan_proxy_host()
+    host = host or want
+    if not want or host != want:
+        return "skip"
+    out = ssh(host, f"cd {R} && bash tools/netfix/review_lan_proxy.sh", timeout=60, tries=2)
     return out.decode("utf-8", "replace").strip()[-200:]
 
 
@@ -1109,9 +1131,16 @@ LIFECYCLE_TICK = True
 LIFECYCLE_STATE = ROOT / "data/autopilot/lifecycle.json"
 LC_PRODUCER_STAGES = ("出图", "出图检测", "尾帧", "视频")
 LC_NIGHT_FROM = "尾帧"
-LC_DEFAULT = {"apply": False, "hb_stale_min": 5, "grace_min": 10, "max_fails": 3, "health_max_age_min": 15,
+LC_DEFAULT = {"apply": False, "hb_stale_min": 5, "grace_min": 10, "night_grace_min": 20, "max_fails": 3, "health_max_age_min": 15,
               "laptop_ps1": "ops/autostart/restart_producer.ps1"}
 LC_WHO = "resident_sync.lifecycle"
+
+
+def lc_grace_min(cfg: dict, kind: str) -> float:
+    """起过之后等心跳的宽限：night 目标 ≥ night_grace_min（默认 20 min——night 刚起的第一轮 sync / register / build 要 5–15 min，
+    FIX-NIGHT2：10 min 宽限 + 8 min 心跳判死 = 刚起就被再次重启，自我打败）；其它目标 grace_min"""
+    g = float(cfg.get("grace_min") or 10)
+    return max(g, float(cfg.get("night_grace_min") or 20)) if kind == "night" else g
 
 
 def lifecycle_cfg(root: Path = ROOT) -> dict:
@@ -1328,7 +1357,7 @@ def lifecycle_tick(root: Path = ROOT, dry: bool | None = None, now: float | None
                 except Exception as e:  # noqa: BLE001  # arch-ok: 队列读不了 = 当作还在排队（不写新请求、不计失败）
                     q = {"pending": True, "error": f"{type(e).__name__}: {e}"[:200]}
                 if rec.get("req_id") and q.get("done_t") is not None and not rec.get("req_counted"):
-                    if now - float(q["done_t"]) < float(cfg["grace_min"]) * 60:
+                    if now - float(q["done_t"]) < lc_grace_min(cfg, v["kind"]) * 60:
                         q = {**q, "grace": True}
                     elif not dry:
                         rec.update(attempts=int(rec.get("attempts") or 0) + 1, req_counted=True)
@@ -1340,11 +1369,11 @@ def lifecycle_tick(root: Path = ROOT, dry: bool | None = None, now: float | None
                 started_hosts[v["host"]] = None
             elif q and q.get("grace"):
                 a["action"] = "waiting"
-                a["why"] = f"restart_queue {round((now - float(q['done_t'])) / 60, 1)} 分钟前执行了重启，{cfg['grace_min']} 分钟内等心跳"
+                a["why"] = f"restart_queue {round((now - float(q['done_t'])) / 60, 1)} 分钟前执行了重启，{lc_grace_min(cfg, v['kind']):.0f} 分钟内等心跳"
                 started_hosts[v["host"]] = None
-            elif v["host"] == "laptop" and rec.get("last_try") and now - float(rec["last_try"]) < float(cfg["grace_min"]) * 60:
+            elif v["host"] == "laptop" and rec.get("last_try") and now - float(rec["last_try"]) < lc_grace_min(cfg, v["kind"]) * 60:
                 a["action"] = "waiting"
-                a["why"] = f"{round((now - float(rec['last_try'])) / 60, 1)} 分钟前刚起过，{cfg['grace_min']} 分钟内不重复起"
+                a["why"] = f"{round((now - float(rec['last_try'])) / 60, 1)} 分钟前刚起过，{lc_grace_min(cfg, v['kind']):.0f} 分钟内不重复起"
             elif int(rec.get("attempts") or 0) >= int(cfg["max_fails"]):
                 a["action"] = "gave_up"
                 if not rec.get("issue") and not dry:
@@ -2352,6 +2381,8 @@ def loop(pull_every_s: int = 1200, health_every_s: int = 300):
                 push_control(h)
                 if h == "gpu36":
                     lan_proxy_keepalive()
+                if h == review_lan_proxy_host():          # L-207：审图位（gpu33）内网入口保活（开关 lane_roles.json review.lan_proxy）
+                    review_lan_proxy_keepalive(h)
             except Exception as e:  # noqa: BLE001
                 log("control sync error", h, repr(e)[:200])
             if time.time() - last_pull[h] < pull_every_s:

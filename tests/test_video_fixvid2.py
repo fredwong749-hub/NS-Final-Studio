@@ -276,6 +276,7 @@ def night_v2(monkeypatch, tmp_path):
 
 def test_ep_resolved_counts_gate_excluded(night_v2, monkeypatch):
     N = night_v2
+    monkeypatch.setattr(N, "HOLD_RESOLVE_S", 0)   # PS-MASTER 11-06：等闸门满时长才算落定；此用例测“满时长后”
     monkeypatch.setattr(VS, "CONFIG", Path("/nonexistent"))
     (N.VID / "jobs.json").write_text(json.dumps({"shots": [
         {"shot": "ep01-S1", "ep": 1, "host": "gpu36", "variants": {"v1": {}}},
@@ -339,3 +340,15 @@ def test_episode_report_lists_placeholders():
                                             {"shot": "ep01-S2", "status": "blocked", "block_reason": "没有可派的变体"},
                                             {"shot": "ep01-S3", "status": "done", "stale": True, "excluded": "过期片"}]})
     assert lines == ["- ep01-S2（阻断）：没有可派的变体", "- ep01-S3（过期片）：过期片"]
+
+
+def test_gate_hold_aged_needs_45min(tmp_path, monkeypatch):
+    """PS-MASTER 11-06：等闸门的镜要连续等满 HOLD_RESOLVE_S 才按落定算（否则每来一镜就整集合成预览、阻塞 night）"""
+    import importlib, sys
+    night = sys.modules.get("night") or importlib.import_module("night")
+    monkeypatch.setattr(night, "VID", tmp_path)
+    assert night.gate_hold_aged(1, {"ep01-S5"}, now=1000.0) == set()
+    assert night.gate_hold_aged(1, {"ep01-S5"}, now=1000.0 + night.HOLD_RESOLVE_S - 1) == set()
+    assert night.gate_hold_aged(1, {"ep01-S5"}, now=1000.0 + night.HOLD_RESOLVE_S) == {"ep01-S5"}
+    assert night.gate_hold_aged(1, set(), now=5000.0) == set()            # 不再等闸门 → 计时清掉
+    assert night.gate_hold_aged(1, {"ep01-S5"}, now=6000.0) == set()       # 重新计时

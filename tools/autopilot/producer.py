@@ -74,6 +74,12 @@ def _runs():   # W1 11-03：须在模块级 RUN_ID 求值前定义（_run_id_fro
     return RN
 
 
+def _lane_roles():   # L-206 工位分卡（config/pipeline/lane_roles.json 单一来源；tools/autopilot/lane_roles_producer.py 唯一读法（视频侧另有 tools/series10_video/lane_roles.py））
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import lane_roles_producer as LRO
+    return LRO
+
+
 def _run_id_from_config(default: str = "", root: Path | None = None) -> str:
     """现行主剧。PRODMERGE-O 11-03（PLAN_V2_MASTER v4 1-3）：“当前剧”只认 config/pipeline/runs.json 的 primary
     （tools/autopilot/runs.primary_run）；config/pipeline/run.json 是 runs.sync_run_ptr 派生的指针，只在没有 runs.json 的
@@ -116,6 +122,7 @@ TRANSPORT_MARKS = ("ssh", "connection", "connect", "broken pipe", "eof", "refuse
 # 看图 health 恢复 loaded 后自动清零（ev=rescore_cap_reset）
 RESCORE_HOURLY_MAX = int(os.environ.get("NS_PRODUCER_RESCORE_HOURLY_MAX", "3"))
 RESCORE_CAP_BACKOFF_S = 1800
+REVIEW_FALLBACK_ROUNDS = int(os.environ.get("NS_PRODUCER_REVIEW_FALLBACK_ROUNDS", "4"))   # MINOR 3：审图位连续 N 轮没结论 → 看图退回旧路由
 # W44 ①：canary 暂停按“谁、用哪份代码判的”失效：每条结论记 code_sha（本进程启动时 ns_agent + autopilot 的内容 sha）；
 # 暂停后 pid / code_sha 变了 → 旧 canary 自动失效并恢复（ev=canary_auto_resume）；到 expires_at → 重评估（ev=canary_reeval）
 CODE_SHA_DIRS = ("services/agent/ns_agent", "tools/autopilot")
@@ -139,9 +146,15 @@ def vlm_instances() -> int:
     """K-OPS-E05：看图（VLM）并发实例数——config/vqa.json model.instances（VQAGATE 加多实例时填），环境变量 NS_VQA_INSTANCES 优先；
     打分积压上限 = 2 × 道数 × 实例数（总调度 01:0x：阈值跟着看图并发数自动算）"""
     try:
-        v = os.environ.get("NS_VQA_INSTANCES") or (json.loads((ROOT / "config" / "vqa.json").read_text(encoding="utf-8")).get("model") or {}).get("instances")
+        v = os.environ.get("NS_VQA_INSTANCES")
+        if not v:
+            LRO = _lane_roles()
+            lr = LRO.load_cfg(ROOT)
+            if LRO.enabled(lr):                  # L-206：审图位 = lane_roles.review.vqa_instances（gpu33:3 上 N 个 nf4 实例）
+                return LRO.review_instances(lr)
+            v = (json.loads((ROOT / "config" / "vqa.json").read_text(encoding="utf-8")).get("model") or {}).get("instances")
         return max(1, int(v or 1))
-    except (OSError, ValueError, TypeError):
+    except (OSError, ValueError, TypeError, ImportError):
         return 1
 
 
@@ -551,13 +564,21 @@ def dynamic_backlog(done_times: list, t: float, lanes: int, depth: int, window_s
 def post_pool_workers(root: Path = ROOT, lanes: int | None = None) -> int:
     """L-205 P1：出图后打分（契约 + 看图）线程池大小——config/pipeline/producer.json post_pool.max_workers 优先；
     否则 max(6, 道数 × 预取深度)（原写死 3：6 道 × 深度 2 出图时打分线程只有 3 个，出好的图排队等线程，GPU 闲着）"""
+    floor = 0
+    try:                                      # L-206：打分线程 ≥ 3 × 审图实例数（3 实例全忙时还有线程在排契约 / 看图，不让审图卡空转）
+        LRO = _lane_roles()
+        lr = LRO.load_cfg(Path(root))
+        if LRO.enabled(lr):
+            floor = 3 * LRO.review_instances(lr)
+    except Exception:  # noqa: BLE001  # arch-ok: lane_roles 读不到 = 没有下限（旧公式）
+        floor = 0
     try:
         v = ((jl(Path(root) / "config" / "pipeline" / "producer.json", {}) or {}).get("post_pool") or {}).get("max_workers")
         if v:
-            return max(1, int(v))
+            return max(1, int(v), floor)
     except Exception:  # noqa: BLE001  # arch-ok: 配置读不到用默认公式
         pass
-    return max(6, int(lanes if lanes is not None else 6) * prefetch_depth())
+    return max(6, int(lanes if lanes is not None else 6) * prefetch_depth(), floor)
 
 
 def is_transport_error(err) -> bool:
@@ -2536,6 +2557,9 @@ class FakeVideo:
 class Producer:
     _relay_hold_fn = None
     relay_lanes: set = frozenset()      # 类默认：测试用 object.__new__ 绕过 __init__ 构造时也有（AUDIT-PERF 11-05，test_debug_rsi e17）
+    _lr_phases: dict = {}               # L-206：{ep: "frames" | "videos"}（lane_roles_tick 每拍重算；类默认 = 没推过 = 旧行为）
+    _lr_active = None                   # L-207：run 级占卡集 {ep, phase, stages}（None = 没有集在占卡 / 不适用）
+    _lr_cfg: dict = {"enabled": False}
 
     def __init__(self, paths: Paths | None = None, *, script=None, frames=None, video=None, lanes: dict | None = None,
                  lane_probe=None, only: set | None = None, run_summary_fn=None, train_locks_fn=None, lock_now_fn=None):
@@ -2742,6 +2766,11 @@ class Producer:
         self.auto_regen_tick(w)
         led_all = {**self.ledger(), "_master_rejects": jl(self.p.rejects, {}) or {}}
         reg = derive(w, led_all, leases, self.run_summary_fn())
+        try:
+            self.lane_roles_tick(reg)              # L-206：首帧换代中不派尾帧；每集阶段 → data/pipeline/lane_roles_state.json；出图预取深度
+        except Exception as e:  # noqa: BLE001  # arch-ok: 分卡推导出错 = 本拍按旧行为（全部道），记日志不停派
+            self.logf("lane_roles_err", error=repr(e)[:300])
+            self._lr_phases, self._lr_cfg = {}, {"enabled": False}
         lanes = self.probe_lanes(ctrl)
         try:
             self.reap_rescores()                   # W20：超时的只重打分放位（暂停时也照做，不让心跳一直挂着 inflight）
@@ -3165,7 +3194,29 @@ class Producer:
             sentinel_ticket(self.p, o["id"], f"重出硬上限：{stage} 24 小时 {n} 版（上限 {lim}），已停止自动重出，转人工 / 本地修",
                             {"renders_24h": n, "cap": lim}, led)
             self.logf("hard_cap", obj=o["id"], renders_24h=n, cap=lim, counted=False)
+            if kind == "last":
+                self.last_capped_fallback(sid, td, n, lim)
         return True
+
+    def last_capped_fallback(self, sid: str, td: dict, n: int, lim: int) -> dict | None:
+        """FIX-NIGHT2 #6：尾帧硬上限封顶 = 这镜尾帧不会再自动出 → 必须写 takes.json last_frame_fallback（绑定当前首帧），
+        视频侧 build_jobs 才会把它编成 I2VA（否则 L-203 闸门下视频永远等一张不会来的尾帧）。已有兜底标记 / 没有当前首帧 = 不写"""
+        from ns_render import pipeline as P
+        if td.get("last_frame_fallback"):
+            return None
+        fa = active_take(td, "image")
+        if not fa:
+            return None
+        first_n = fa.get("n")
+        why = f"尾帧 24 小时内已自动出 {n} 版（硬上限 {lim}）→ 本镜视频退回只给首帧（I2VA），绑定首帧 v{first_n}（K-OPS-E28 / FIX-NIGHT2 #6）"
+        flag = {"mode": "i2va", "first_n": first_n, "at": iso(), "by": "producer.hard_capped", "rule": "K-OPS-E28", "why": why}
+        try:
+            P.mutate_takes(sid, lambda d: d.__setitem__("last_frame_fallback", flag), op="last_frame_fallback", by="producer（硬上限）")
+        except Exception as e:  # noqa: BLE001  # arch-ok: takes 写不上 = 账本仍标 last_unavailable（build_jobs 读账本兜底），下轮再试
+            self.logf("last_fallback_write_err", obj=f"last:{sid}", err=repr(e)[:200], counted=False)
+        self.led_update(f"last:{sid}", last_unavailable=True, last_frame_fallback="i2va", last_fallback_first_n=first_n)
+        self.logf("last_unavailable", obj=f"last:{sid}", first_n=first_n, fallback="i2va", counted=False, rule="K-OPS-E28", why=why)
+        return flag
 
     def obj_rate_exceeded(self, o: dict, cap: int = 8) -> bool:
         """K-OPS-E21（总调度 08:0x P0：ep05-S3 出到第 82 版、S7 46 次，计次没拦住）：同一对象最近 1 小时派单 ≥ cap →
@@ -3290,6 +3341,83 @@ class Producer:
                                                              "last_error", "reason", "waiting_for", "where", "since")})
         return out
 
+    # -- L-206 工位分卡 --
+    def lane_roles_cfg(self) -> dict:
+        return _lane_roles().load_cfg(self.p.root)
+
+    def lane_roles_tick(self, reg) -> dict:
+        """每拍（derive 之后、探道之前）：① hold_regen_downstream——适用集里首帧换代中的镜，ready 尾帧改 pending（登记表写明原因）；
+        ② 每集阶段 frames / videos（从登记表现推）→ reg["lane_roles"] + data/pipeline/lane_roles_state.json（视频侧 night / vidgen 读）；
+        ③ 有适用集在首尾帧阶段 → 出图预取深度 = lane_roles.image_prefetch_depth（每卡只排 1 单），否则按旧配置。
+        enabled=false 或没有适用集 = 全部旧行为。→ {ep: phase}"""
+        LRO = _lane_roles()
+        cfg = self.lane_roles_cfg()
+        self._lr_cfg = cfg
+        self.depth = prefetch_depth()            # 全局深度 = 旧配置；出图位的 L-206 深度按道给（lane_depth），ep01 等旧行为的道不受影响
+        if not LRO.enabled(cfg):
+            self._lr_phases, self._lr_active = {}, None
+            return {}
+        try:
+            adult = adult_shot_ids(self.script())
+        except Exception:  # noqa: BLE001  # arch-ok: 剧本读不到 = 不排除成人镜（阶段只会更保守地留在 frames）
+            adult = set()
+        held = LRO.apply_hold_regen(reg, cfg, jl(self.p.rejects, {}) or {})
+        prev = LRO.read_state(self.p.root).get(str(self.p.run_id)) or {}
+        t = now()
+        phases = LRO.episode_phases(reg, cfg, adult, prev, t)
+        stages = LRO.episode_stages(reg, cfg, adult, prev, t)
+        active = LRO.active_episode(stages, prev.get("_active") if isinstance(prev.get("_active"), dict) else None)
+        self._lr_phases, self._lr_active = phases, active
+        reg["lane_roles"] = {"enabled": True, "from_episode": LRO.from_episode(cfg), "phases": {str(k): v for k, v in phases.items()},
+                             "stages": {str(k): v for k, v in stages.items()}, "active": active,
+                             "hold_regen": held, "review": LRO.review_lane(cfg), "depth": LRO.image_prefetch_depth(cfg), "rule": "L-206/L-207"}
+        if phases:
+            LRO.write_state(self.p.root, self.p.run_id, phases, t=t, log=self.logf, active=active,
+                            settled=LRO.settled_counts(reg, cfg, adult), stages=stages)
+            try:                                 # L-207：阶段钩子——审图实例 frames 3 ↔ videos 1（后台线程、幂等、失败只记）
+                LRO.review_scale_tick(cfg, self.p.root, active["phase"] if active else None, log=self.logf,
+                                      runner=self.__dict__.get("_scale_runner"))
+            except Exception as e:  # noqa: BLE001  # arch-ok: 伸缩钩子出错不影响派单（用活着的实例）
+                self.logf("review_scale_err", error=repr(e)[:200], counted=False)
+        return phases
+
+    def lane_depth(self, lane: str) -> int:
+        """这条道的预取深度（MINOR 1）：lane_roles 开着、active 集在首尾帧阶段、且这条道是本阶段出图位 → image_prefetch_depth（每卡只排 1 单）；
+        其它道（ep01 旧行为的道 / 视频位 / 审图位）= 旧配置 prefetch_depth"""
+        cfg = self._lr_cfg if isinstance(self._lr_cfg, dict) else {}
+        if not cfg.get("enabled"):
+            return self.depth
+        LRO = _lane_roles()
+        act = getattr(self, "_lr_active", None)
+        ph = act["phase"] if act else ("frames" if any(v == "frames" for v in (self._lr_phases or {}).values()) else None)
+        if ph == "frames" and lane in LRO.lanes_for(cfg, "frames", "image"):
+            return LRO.image_prefetch_depth(cfg)
+        return self.depth
+
+    def image_lanes_allowed(self, ep) -> set | None:
+        """这一集此刻能收出图单的道；None = 不归 lane_roles 管（旧行为：任何空闲道）。L-207：只有 active 集（frames 段）有出图道"""
+        LRO = _lane_roles()
+        cfg = self._lr_cfg if isinstance(self._lr_cfg, dict) else {"enabled": False}
+        lanes = LRO.lanes_now(cfg, self._lr_phases or {}, ep, "image", getattr(self, "_lr_active", None))
+        return None if lanes is None else set(lanes)
+
+    def lanes_allowed(self, o: dict, free: list) -> list:
+        """free 里按 L-206 / L-207 过滤后可派给对象 o 的道（保持 free 顺序）；没有 → 10 分钟记一次 lane_roles_wait"""
+        allow = self.image_lanes_allowed(o.get("ep"))
+        if allow is None:
+            return list(free)
+        ok = [ln for ln in free if ln in allow]
+        if not ok:
+            seen = self.__dict__.setdefault("_lr_wait_logged", {})
+            if now() - float(seen.get(o["id"]) or 0) >= 600:
+                seen[o["id"]] = now()
+                act = getattr(self, "_lr_active", None)
+                self.logf("lane_roles_wait", obj=o["id"], ep=o.get("ep"), phase=(self._lr_phases or {}).get(int(o.get("ep") or 0), "frames"),
+                          image_lanes=sorted(allow), free=list(free), counted=False, rule="L-206",
+                          active=({"ep": act["ep"], "phase": act["phase"]} if act else None),
+                          why=_lane_roles().wait_reason(act, o.get("ep") or 0))
+        return ok
+
     def probe_lanes(self, ctrl) -> dict:
         part = jl(self.p.root / "config" / "netfix" / "partition.json", None)
         hold, released = effective_holds(ctrl, self.lanes, part)     # W44 ④：本机道的过期 hold 快照不再挡派单
@@ -3318,8 +3446,9 @@ class Producer:
             foreign = [a for a in agents if not a.upper().startswith(AGENT.upper())]
             yielding_only = bool(foreign) and all(a.upper().startswith(YIELDING_AGENTS) for a in foreign) and len(foreign) <= 1
             # K-OPS-E17 预取：队列里只有自己的单（或至多 1 个让道任务）且总数 < 预取深度 → 还能再交一单
-            qfree = q.get("ok") and (not foreign or yielding_only) and (q.get("n") or 0) < self.depth + (1 if yielding_only else 0)
-            free = qfree and len(mine) < self.depth and ln not in hold and cool <= now() and not locked
+            depth = self.lane_depth(ln)          # MINOR 1：预取深度按道（出图位 L-206 = 1；ep01 旧行为的道 = 旧配置）
+            qfree = q.get("ok") and (not foreign or yielding_only) and (q.get("n") or 0) < depth + (1 if yielding_only else 0)
+            free = qfree and len(mine) < depth and ln not in hold and cool <= now() and not locked
             why = None
             if free and yielding_only:
                 why = "排在让道任务后面（出图优先）：" + "、".join(sorted(set(agents)))
@@ -3331,14 +3460,14 @@ class Producer:
                 why = "render_endpoints hold（道就绪，等总调度开派）" if lane_held(ln) else "control.json hold_lanes"
             elif not q.get("ok"):
                 why = "连不上（隧道 / 服务）"
-            elif len(mine) >= self.depth:
+            elif len(mine) >= depth:
                 why = f"PRODUCER 在做 {'、'.join(mine)}"
             elif foreign and not yielding_only:
                 why = "让道：" + "、".join(sorted(set(q.get("agents") or [])))[:80]
             elif cool > now():
                 why = f"出错冷却到 {iso(cool)[11:]}"
             out[ln] = {"free": bool(free), "why": why, "queue": q.get("n"), "agents": q.get("agents"), "mine": mine,
-                       "prefetch": self.depth}
+                       "prefetch": depth}
         return out
 
     def probe_queues(self) -> dict:
@@ -3433,11 +3562,14 @@ class Producer:
                 continue
             if not free:
                 break
+            okl = self.lanes_allowed(o, free)    # L-206：只派给本集当前阶段 image 角色的道（审图位 gpu33:3 永不收出图单；视频阶段 image 为空）
+            if not okl:
+                continue
             led = self.ledger().get(o["id"]) or {}
             if led.get("rescore_take") or o.get("rescore_take"):   # 只重打分归 dispatch_rescores（W20），这里不派、不占道
                 continue
             tried = set(led.get("lanes_failed") or [])
-            lane = next((ln for ln in free if ln not in tried), free[0])
+            lane = next((ln for ln in okl if ln not in tried), okl[0])
             if o.get("redo"):                    # 总调度驳回重出：按驳回计划，不计入 3 次上限
                 rj = (jl(self.p.rejects, {}) or {}).get(o["id"]) or {}
                 k = int(led.get("redo_tries") or 0)
@@ -3546,7 +3678,11 @@ class Producer:
                 if attempt > MAX_TRIES or led.get("final") == "passed":
                     continue
                 key = f"{o['id']}#{attempt}"
-                lane = free.pop(0)
+                okl = self.lanes_allowed(o, free)     # L-206：分道并行也只用本集当前阶段的 image 道
+                if not okl:
+                    continue
+                lane = okl[0]
+                free.remove(lane)
                 rung = self.rung_strategy(o, attempt, led) or self.rung_ab(o, attempt) or self.rung(o, attempt)
                 rung = {**rung, "name": rung["name"] + "（分道并行）", "fanout": key}
                 from ns_agent import comfy_tag as CT
@@ -3828,6 +3964,22 @@ class Producer:
             return None
         return int(rt)
 
+    def review_fallback(self, infra_rounds: int, oid: str = "") -> bool:
+        """MINOR 3（L-206 审图位）：同一对象连续 infra_rounds ≥ REVIEW_FALLBACK_ROUNDS 轮只重打分都没拿到结论（审图位实例起着但不出结论 /
+        不可达）→ 本进程看图退回旧路由（VQA_REVIEW_FALLBACK=1：client 不再只认审图位；本机 8870 / 隧道 / 内网入口都可用），记 review_fallback；
+        之后任一对象拿到结论（infra_rounds=0）→ 撤回。只在 lane_roles 开着时有意义。返回当前是否在退路"""
+        on = os.environ.get("VQA_REVIEW_FALLBACK") == "1"
+        if infra_rounds >= REVIEW_FALLBACK_ROUNDS and (self._lr_cfg or {}).get("enabled"):
+            if not on:
+                os.environ["VQA_REVIEW_FALLBACK"] = "1"
+                self.logf("review_fallback", obj=oid, rounds=infra_rounds, on=True, counted=False,
+                          why=f"审图位连续 {infra_rounds} 轮只重打分没结论，看图退回旧路由（本机 / 隧道 / 内网入口）")
+            return True
+        if infra_rounds == 0 and on:
+            os.environ.pop("VQA_REVIEW_FALLBACK", None)
+            self.logf("review_fallback", obj=oid, on=False, counted=False, why="审图位拿到结论，撤回退路")
+        return os.environ.get("VQA_REVIEW_FALLBACK") == "1"
+
     def rescore_cap_reset(self, health_fn=None, every_s: float = 60) -> list:
         """W44 ②：有对象因 rescore_cap 退避时，每 every_s 探一次看图 health；loaded=True → 清零这些对象的次数和退避
         （ev=rescore_cap_reset），马上可以再重打分。没有被封顶的对象就不探"""
@@ -3950,11 +4102,13 @@ class Producer:
                                 reason=f"契约打分 / 共用验收仍没拿到结论，{back // 60} 分钟后再试（不重出、不计次）")
                 self.logf("score_infra", obj=oid, take=n, counted=False, backoff_s=back,
                           error=str(pf.get("remote_error") or pf.get("error") or "")[:200])
+                self.review_fallback(ki, oid)      # MINOR 3：审图位连续 N 轮没结论 → 看图退回旧路由（不无限只重打分）
                 self.score_chain_trip(f"{oid} 只重打分 score_infra",
                                       err="" if pf.get("accept_retry") else str(pf.get("remote_error") or pf.get("error") or ""))
                 return
             hist = [dict(h, ok=bool(pf.get("ok")), blocking=pf.get("blocking")) if h.get("take") == n else h
                     for h in L.get("history") or []]
+            self.review_fallback(0, oid)           # 拿到结论 = 审图位可用，撤回退路
             self.led_update(oid, rescore_take=None, rescore_infra=None, rescore_times=[], rescore_capped=None, history=hist,
                             **({"final": "passed", "reason": None} if pf.get("ok") else {"reason": "重打分后：" + pf_reason(pf)}))
             self.logf("rescore", obj=oid, take=n, ok=pf.get("ok"), blocking=pf.get("blocking"), counted=False)

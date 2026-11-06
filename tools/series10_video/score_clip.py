@@ -278,12 +278,26 @@ def v9_vlm(path: Path, meta: dict) -> dict:
         sys.path.insert(0, str(ROOT / "services/agent"))
         if _os.name != "nt":            # 服务器上：gpu36 本机 8870 不通时走 gpu36 内网入口（NETFIX K-OPS-N03，client._lan_url 要 VQA_LAN=1）
             _os.environ.setdefault("VQA_LAN", "1")
+        review_route()                  # L-206：看图只去审图位（config/pipeline/lane_roles.json review），不占视频卡
         from ns_agent.vqa import client as VC
         refs = [p for p in [meta.get("first_frame"), *((meta.get("refs") or {}).values())] if p]
         refs = [str(ROOT / p) if not Path(p).is_absolute() else p for p in refs]
         return VC.inspect_video(str(path), meta.get("prompt") or "", references=refs, wait_s=600)
     except Exception as e:  # noqa: BLE001
         return {"error": f"VQA 调用失败：{e}"[:300]}
+
+
+def review_route() -> dict:
+    """L-206 ①：视频打分的看图（V9）路由到审图位（lane_roles.review，gpu33:3 的 Qwen3-VL 实例）而不是视频卡上的看图：
+    打分进程在审图台 → VQA_URL=127.0.0.1:port_base；在别台 → VQA_LAN_URL=review.lan_url + VQA_REVIEW_ONLY=1（client 只去内网审图位）。
+    分卡关 / 模块不在 / lan_url 不合规 = {}（旧路由）。返回实际写入的环境键"""
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import lane_roles as LR
+        return LR.apply_review_env()
+    except Exception as e:  # noqa: BLE001  # arch-ok: 分卡模块读不了 = 旧路由（看图仍只走本机 / 10. 内网，K-REV-V01 由 client 把关）
+        print(f"[score_clip] lane_roles review 路由不可用：{e!r}"[:200], file=sys.stderr)
+        return {}
 
 
 def gate(s: dict, refs: dict) -> dict:
@@ -295,7 +309,8 @@ def gate(s: dict, refs: dict) -> dict:
     if len(s.get("cuts") or []) > GATE["cuts_max"]:
         fails.append("镜内硬切")
     low = []
-    for n in refs:
+    # FIX-NIGHT2 #5：身份模型（YuNet / SFace onnx）不在 = 基础设施问题（score_infra），不判“身份偏离”、不吃阶梯——只记 soft，待复核
+    for n in (refs if not s.get("score_infra") else []):
         it = (s.get("identity") or {}).get(n) or {}
         if it.get("sface_med") is None or (it.get("seen") or 0) < GATE["seen_min"]:
             low.append(f"{n}没出脸")
@@ -303,6 +318,8 @@ def gate(s: dict, refs: dict) -> dict:
             low.append(f"{n}{it['sface_med']}")
     if low:
         fails.append("身份偏离")
+    if s.get("score_infra") and refs:
+        soft.append(f"身份未判（score_infra：{s['score_infra']}）")
     want = SIZE_IDX.get(s.get("size_wanted") or "")
     if want is not None and s.get("face_h_med") is not None and abs(size_class(s["face_h_med"]) - want) >= 2:
         fails.append("景别不符")
@@ -379,6 +396,12 @@ def main(argv):
     hc = CC.hist_cuts(path, 24.0)
     stamps = [int(m.group(1)) * 60 + float(m.group(2)) for m in STAMP.finditer(meta.get("prompt") or "")]
     ir = identity_and_red(path, refs)
+    if ir.get("error"):
+        # FIX-NIGHT2 #5：人脸模型不在 → 以前整条打分带 error（vidgen 当“打分出错”，这一条白出、阶梯少一级）；
+        # 现在只标 score_infra（身份项未判，待复核 review_needed），其它指标照打、照进门
+        ir = {"identity": {}, "score_infra": str(ir["error"])[:200], "review_needed": True}
+        print(f"[score_clip] 身份模型不可用：{ir['score_infra']}（score_infra，不判身份偏离；deploy.push 必须把 models_cache/vision 推上来）",
+              file=sys.stderr)
     try:
         hc_ = hair_and_colour(path, meta.get("first_frame"), refs.get("林晚"))
     except Exception as e:  # noqa: BLE001

@@ -12,6 +12,7 @@ dependencies = [
     "torch>=2.15.0",
     "transformers>=5.22.0",
     "pillow>=13.0.0",
+    "anthropic>=2.6.0",
 ]
 
 [dependency-groups]

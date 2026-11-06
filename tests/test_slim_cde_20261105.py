@@ -2,7 +2,7 @@
 E1 K-OPS-I15：hold 带 expires_at；没带挂满 6 h 失效（night_control / lane_notes / *_hold.json 条目）
 E2 sop_gate：证据过期 → 退避封顶 120 s、自动探针（临时根不起子进程）
 E3 canary.ignore_items 默认空 = 原口径
-D  night 轮询间隔：V2 默认 45 s，night_control.poll_s 可覆盖
+D  night 轮询间隔：V2 默认 15 s（FIX-NIGHT2 #3，原 45 s），night_control.poll_s 可覆盖
 """
 import importlib.util
 import json
@@ -104,7 +104,7 @@ def test_night_poll_seconds():
     N = _load_night()
     assert N.poll_seconds({"poll_s": 30}) == 30
     assert N.poll_seconds({"poll_s": 1}) == 15 and N.poll_seconds({"poll_s": 9999}) == 600
-    assert N.poll_seconds({}) in (45.0, 120.0)
+    assert N.poll_seconds({}) in (15.0, 120.0)      # FIX-NIGHT2 #3：V2 默认 15 s（V1 仍 120 s）
 
 
 def _load_night():

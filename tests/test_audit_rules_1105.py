@@ -154,7 +154,12 @@ def test_l187_auto_adopt_default_off_and_l191_base35():
     prod = json.loads((ROOT / "config/pipeline/producer.json").read_text(encoding="utf-8"))
     assert prod["review_adopt_auto"] is True   # L-196（项目方 11-05 “全自动”）修订 L-187 默认关
     rq = json.loads((ROOT / "config/render_quality.json").read_text(encoding="utf-8"))
-    assert rq["first_frame_tier"]["runs"]["series10_v2"] == "base35" and rq["first_frame_tier"]["base35"]["steps"] == 35
+    # L-206 ②（11-06）：runs[剧] 改成按集表——ep01 仍 base35（跑完作基线），ep02 起 turbo_previz；读法唯一入口 frame_job.tier_name
+    if str(ROOT / "services/agent") not in sys.path:
+        sys.path.insert(0, str(ROOT / "services/agent"))
+    from ns_agent import frame_job as FJ
+    runs_v = rq["first_frame_tier"]["runs"]["series10_v2"]
+    assert FJ.tier_name(runs_v, 1) == "base35" and FJ.tier_name(runs_v, 2) == "turbo_previz" and rq["first_frame_tier"]["base35"]["steps"] == 35
 
 
 def test_imggen_turbo8_rule_scoped_to_v1_after_l191():

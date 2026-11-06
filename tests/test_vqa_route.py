@@ -27,6 +27,7 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(C, "_rcfg", lambda: {"queue_max": 3, "busy_wait_s": 0.3, "poll_s": 0.1,
                                              "timeouts": {"image": 240, "ask": 30}})
     monkeypatch.setattr(C.time, "sleep", lambda s: None)
+    monkeypatch.setattr(C, "_lane_roles_cfg", lambda: {"enabled": False})   # L-206 工位分卡关：本文件测的是旧路由；开的情形见 tests/test_l206_lane_roles_prod.py
     st = {"health": {}, "posts": []}
 
     def up(u):

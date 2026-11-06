@@ -1106,6 +1106,7 @@ def test_accept_gate_defers_count_on_gpu33(monkeypatch):
     from tools.vqa import accept as ACC
     seen = {}
     monkeypatch.setenv("OFFLINE_SELF", "gpu33")
+    monkeypatch.setattr("ns_agent.gen_contract.accept.review_local_anomaly", lambda *a, **k: None)   # L-206 审图位本机检测：这里不探网（见 test_l206_lane_roles_prod）
     monkeypatch.setattr("ns_agent.gen_contract.cfg", lambda: {"image_thresholds": {"Q10_accept": {"enabled": True, "count_host": ""}}})
     def fake_label(sid, stage, image, pf, host=None, defer_count=False, **k):
         seen["defer"] = defer_count

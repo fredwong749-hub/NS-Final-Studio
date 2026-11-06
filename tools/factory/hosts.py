@@ -125,6 +125,25 @@ def aliases(host: str, d: dict | None = None) -> list[str]:
     return list(_host(host, d).get("aliases") or [])
 
 
+def exec_host(host: str, d: dict | None = None) -> str:
+    """命令实际在哪台机器上跑（FIX-SCORE36 11-06）：服务器上目标是本机的别名（hosts.json aliases / env OFFLINE_ALIASES，
+    与 rssh._local_self 同口径：gpu36 上 "gpu33" = 本机执行）→ 返回本机名；否则原样。
+    按主机取的解释器 / 坏卡 / 仓库路径必须按这台取——原来 gpu36 上 full_score("gpu33") 拿 gpu33 的 comfy_python（gpu36 上没有这个文件）"""
+    me = self_host()
+    if not me or me == host or me == "laptop":
+        return host
+    env_al = {a.strip() for a in os.environ.get("OFFLINE_ALIASES", "").split(",") if a.strip()}
+    try:
+        al = set(aliases(me, d))
+    except HostsError:
+        al = set()
+    return me if host in (al | env_al) else host
+
+
+def broken_gpus(host: str, d: dict | None = None) -> list[str]:
+    return [str(g) for g in (_host(host, d).get("broken_gpus") or [])]
+
+
 def python(host: str, d: dict | None = None) -> str:
     v = _host(host, d).get("python")
     if not v:

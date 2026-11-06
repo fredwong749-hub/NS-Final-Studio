@@ -183,7 +183,8 @@ def test_l196_hard_gates_only():
 # ---------------------------------------------------------------- K-REN-963 / L-191 配方单一来源
 def test_v2_first_frame_recipe_single_source():
     rq = _json("config/render_quality.json")["first_frame_tier"]
-    assert rq["runs"]["series10_v2"] == "base35"
+    # L-206 ②（11-06）：runs[剧] = {default: base35, from_episode: {2: turbo_previz}}（ep01 基线不动，ep02 起 turbo + 摆位图）
+    assert rq["runs"]["series10_v2"]["default"] == "base35" and rq["runs"]["series10_v2"]["from_episode"] == {"2": "turbo_previz"}
     assert rq["base35"]["steps"] == 35 and float(rq["base35"]["cfg"]) == 3.0 and rq["base35"]["unet"] == "base"
     rs = _json("config/compile/run_style.json")["runs"]["series10_v2"]["prompt_template"]
     assert rs["image"] == "v2" and rs["video"] == "v2"

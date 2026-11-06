@@ -37,9 +37,13 @@ def _lan_url() -> str | None:
         return None
     m = cfg().get("model") or {}
     u = m.get("lan_url")
-    if not u or os.environ.get("OFFLINE_SELF") == m.get("host"):
+    if os.environ.get("VQA_LAN_URL") is not None:
+        # L-206 工位分卡：审图位由 config/pipeline/lane_roles.json review 定（tools/series10_video/lane_roles.review_env 写环境）：
+        # 显式给的内网入口优先（空串 = 不走内网）；仍只认 10. 内网地址（K-REV-V01），“同一台”判断不适用（审图位可能就是别台）
+        u = os.environ["VQA_LAN_URL"] or None
+    elif not u or os.environ.get("OFFLINE_SELF") == m.get("host"):
         return None
-    if not u.split("//", 1)[-1].split(":", 1)[0].startswith("10."):
+    if not u or not u.split("//", 1)[-1].split(":", 1)[0].startswith("10."):
         return None
     return u if _local_up(u) else None
 
@@ -181,10 +185,33 @@ def _balance_cands(url: str) -> list[tuple[str, str]]:
     if not (rc.get("balance") and os.environ.get("OFFLINE_SELF")):
         return []
     out = [(url, "local")] + [(f"http://127.0.0.1:{int(p)}", "local") for p in rc.get("extra_local_ports") or []]
+    if _review_local_only(out):                      # L-206：本机是审图位且本机实例活着 → 全部看图留在审图卡，不分流到 gpu36（那张卡是出图位）
+        return out
     lan = _lan_url()                                  # 内网入口健康通才返回（顺手填 _HEALTH）
     if lan and rc.get("balance_lan", True):
         out.append((lan, "lan"))
     return out
+
+
+def _lane_roles_cfg() -> dict:
+    """config/pipeline/lane_roles.json（L-206 工位分卡单一来源）；读不到 = 关"""
+    try:
+        d = json.loads((ROOT / "config" / "pipeline" / "lane_roles.json").read_text(encoding="utf-8-sig"))
+        return d if isinstance(d, dict) else {"enabled": False}
+    except (OSError, ValueError):   # arch-ok: 配置缺 = 旧路由
+        return {"enabled": False}
+
+
+def _review_local_only(local_cands: list) -> bool:
+    """L-206：lane_roles 开着、本机（OFFLINE_SELF）就是审图位主机（review.lane 的主机，gpu33）、且至少一个本机实例 /health 通
+    → 只用本机候选（8870 分发器 → gpu33:3 上的 N 个实例）。本机全不在 → False（退回原路由：还能走 gpu36 内网入口，不让看图断掉）"""
+    lr = _lane_roles_cfg()
+    if not lr.get("enabled") or os.environ.get("VQA_REVIEW_FALLBACK") == "1":   # MINOR 3：producer 判审图位连续没结论 → 旧路由
+        return False
+    host = str((lr.get("review") or {}).get("lane") or "").split(":", 1)[0]
+    if not host or os.environ.get("OFFLINE_SELF") != host:
+        return False
+    return any(_ready(u)[0] for u, _ in local_cands)
 
 
 def _pick_balanced(cands: list[tuple[str, str]], wait_s: float) -> tuple[str | None, str, int, str]:
@@ -215,6 +242,13 @@ def _pick(url: str, wait_s: float) -> tuple[str | None, str, int, str]:
     """W23 路由 → (url, route, 排队数, 未测原因)。本机 8870 在且已加载 → 只用本机（忙就等，不切隧道）；
     本机不在 / 未加载 → 8871 隧道（tools/vqa/tunnel.ps1 → gpu36:8870）；服务器上（OFFLINE_SELF / VQA_LAN=1）→ model.lan_url；都不在 → 未测"""
     rc = _rcfg()
+    if os.environ.get("VQA_REVIEW_ONLY") == "1" and os.environ.get("VQA_REVIEW_FALLBACK") != "1":
+        # L-206：看图只去审图位（lane_roles.review 的内网入口）——本机 8870（视频卡上的看图）/ 8871 隧道都不用；不通 = 未测，不判 fail
+        # MINOR 3：VQA_REVIEW_FALLBACK=1（审图位连续没结论）→ 跳过只认审图位，走下面的旧路由
+        lan = _lan_url()
+        if not lan:
+            return None, "none", 0, "审图位不可达"
+        return _pick_balanced([(lan, "lan")], wait_s)
     cands = _balance_cands(url)
     if cands:
         return _pick_balanced(cands, wait_s)
