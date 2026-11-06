@@ -18,7 +18,9 @@
     }
    },
    "default_segment": "reality",
-   "video_mode": {"mode": "i2va", "from_episode": 2, "shots": ["ep01-S1", "ep01-S2"], "_shots": "L-201（项目方 11-06：S1/S2 首尾帧几乎一样、转场不行）：逐镜改 I2VA，运镜交给视频模型，不等尾帧", "_doc": "L-197 A（项目方 11-05）：砍尾帧，视频只用首帧（H3 I2VA）；不出尾帧、视频不等尾帧、提示词不带 Picture 2。只管第 2 集起的新作业（ep01 已按 FL2VA 编好的不动）；mode 改 fl2va 或删本项即恢复；env NS_VIDEO_MODE=fl2va 临时强关。读取方 ns_agent.video_mode"},
+   "video_mode": {"mode": "fl2va", "_doc": "L-203（项目方 11-06 08:3x“你所有的首尾帧都是一模一样的图片……现在全部都错了”，选 A）：撤回 L-197 A 与 L-201 ②——每镜都出首帧 + 尾帧，视频在两张不同画面之间生成（FL2VA）；ep01 / ep02 的尾帧对象恢复创建、sop_gate 尾帧阶段照旧要求、build_jobs 送 @last_frame。I2VA 代码路径（ns_agent.video_mode.no_last）原样保留：mode 改回 i2va（from_episode / shots）才生效；env NS_VIDEO_MODE=fl2va 仍可一键强关", "_history": "L-197 A（11-05）mode i2va from_episode 2；L-201（11-06 07:5x）shots [ep01-S1, ep01-S2] 逐镜 I2VA——均由 L-203 撤回"},
+   "last_frame_mode": "compose",
+   "_last_frame_mode": "L-203：尾帧按分镜 **motion** “——”之后的落幅单独构图出图（compose）：提示词像首帧一样从落幅文字编（景别 / 机位 / 构图 / 人物 / 道具 / 光线 + 同一套风格 / 镜头 / 纠正器 / 材质词），参考 = 身份脸 / 造型 / 场景底图照首帧槽位逻辑（留一槽）+ 通过契约的首帧作最后一张参考、只保持人物服装 / 发型 / 场景陈设 / 光线一致；出图后首尾两张比对（gen_contract.first_last，FL 硬项）太像 = 换种子重出尾帧。\"edit\" = 旧法（首帧作图1 + bible last_frame_keep 固定开头小改）。读取方 ns_agent.video_mode.last_frame_mode；env NS_LAST_FRAME_MODE 临时覆盖",
    "shot_language": {
     "lens": "auto",
     "composition": "script",

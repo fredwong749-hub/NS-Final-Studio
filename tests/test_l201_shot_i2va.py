@@ -28,9 +28,11 @@ def test_env_force_off_wins(tmp_path, monkeypatch):
     assert VM.no_last("r", 1, r, shot="ep01-S1") is False
 
 
-def test_live_config_lists_s1_s2():
+def test_live_config_no_shot_list_after_l203():
+    """L-203 撤回 L-201 ②：线上 video_mode 不再逐镜 I2VA（mode fl2va、无 shots）；逐镜名单逻辑只在上面的 mock 测试里保留"""
     vm = json.loads((ROOT / "config/compile/run_style.json").read_text(encoding="utf-8"))["runs"]["series10_v2"]["video_mode"]
-    assert {"ep01-S1", "ep01-S2"} <= set(vm["shots"])
+    assert vm["mode"] == "fl2va" and not vm.get("shots")
+    assert VM.no_last("series10_v2", 1, ROOT, shot="ep01-S1") is False
 
 
 def test_last_frame_keep_follows_end_framing():

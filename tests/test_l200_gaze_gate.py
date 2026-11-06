@@ -30,7 +30,7 @@ def _q9(defects, st="fail", model="qwen3-vl"):
 # ---------------------------------------------------------------- 配置
 def test_config_has_gaze_hard_item_and_lineup_check():
     gc = json.loads((ROOT / "config/gen_contract.json").read_text(encoding="utf-8"))
-    assert gc["blocking_items"] == ["Q1", "count", "text", "adult", "gaze"] and "L-200" in gc["_blocking_items"]
+    assert gc["blocking_items"] == ["Q1", "count", "text", "adult", "gaze", "FL"] and "L-200" in gc["_blocking_items"]   # L-203 加 FL
     vq = json.loads((ROOT / "config/vqa.json").read_text(encoding="utf-8"))
     assert vq["checks"]["eye_contact"]["blocking"] is True
     assert vq["checks"]["lineup"]["blocking"] is True and vq["checks"]["lineup"]["contract"] == "Q9"

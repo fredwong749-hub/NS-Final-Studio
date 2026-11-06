@@ -302,6 +302,17 @@ def broken_lanes(hosts_mod=None, d: dict | None = None) -> set[str]:
     return {f"{hn}:{g}" for hn, h in ((d or {}).get("hosts") or {}).items() if isinstance(h, dict) for g in (h.get("broken_gpus") or [])}
 
 
+def _hold_expired(h: dict, now: float | None = None) -> bool:
+    """hold 带 expires_at（ISO 本地时间）且已过 → True；没有 / 读不出 = 不过期"""
+    exp = (h or {}).get("expires_at")
+    if not exp:
+        return False
+    try:
+        return time.mktime(time.strptime(str(exp)[:19], "%Y-%m-%dT%H:%M:%S")) < (now or time.time())
+    except (ValueError, OverflowError):   # arch-ok: 读不出到期时间 = 按没过期（保守，不抢别人的道）
+        return False
+
+
 def free_lanes(cfg: dict, in_use: set[str], part: dict | None = None, probe=None, hosts_mod=None, by: str = BY) -> list[str]:
     """空闲道：车道表 image 道 − 排除表 − 别人挡着 / 借着 / hold 着的道 − 本 worker 正在用的道；再经 ComfyUI 队列探测确认没活。
     本 worker 自己残留的 hold（作业已不在跑）→ 视为空闲（下面 hold 会覆盖）。by = 借道人（阶段 B 金样用 GOLDEN-WORKER，同一套规则）"""
@@ -316,10 +327,12 @@ def free_lanes(cfg: dict, in_use: set[str], part: dict | None = None, probe=None
         if lane in excl or lane in in_use or lane in lent:
             continue
         h = holds.get(lane)
+        if h and _hold_expired(h):
+            h = None                                           # PS-MASTER 11-06：过期的临时 hold 不算数（gpu36:1 被 11-04 的 MASTER-WSL hold 挡了两天）
         if h and h.get("by") != by:
             continue
-        if lane in (part.get("retired_lanes") or []) and not h:
-            continue                                           # 派单层挡着（不是我们 hold 的）
+        # PS-MASTER 11-06（L-202 卡不能空）：retired_lanes 只说明笔记本派单层不派这条道（两台服务器各自 producer 派），
+        # 不代表道上有活——下面 probe 确认 ComfyUI 队列空才用；以前“retired 且没 hold 就跳过”让 gpu36:2 空转
         st = probe(lane)
         if not st.get("ok") or st.get("busy"):
             continue

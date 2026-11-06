@@ -19,7 +19,7 @@ def _it(i, st="fail", **ev):
 
 def test_config_lists_hard_items():
     d = json.loads((ROOT / "config/gen_contract.json").read_text(encoding="utf-8"))
-    assert d["blocking_items"] == ["Q1", "count", "text", "adult", "gaze"]     # L-200 加 gaze（视线 / 排排站）
+    assert d["blocking_items"] == ["Q1", "count", "text", "adult", "gaze", "FL"]     # L-200 加 gaze（视线 / 排排站）；L-203 加 FL（首尾帧差异）
     p = json.loads((ROOT / "config/pipeline/producer.json").read_text(encoding="utf-8"))
     assert p["review_adopt_auto"] is True and p["accept"]["run_qb"] is False
 

@@ -175,7 +175,7 @@ def test_l195_per_shot_prompt_gate():
 # ---------------------------------------------------------------- K-OPS-D06 / L-196
 def test_l196_hard_gates_only():
     gc = _json("config/gen_contract.json")
-    assert gc["blocking_items"] == ["Q1", "count", "text", "adult", "gaze"]     # L-200 加 gaze（视线 / 排排站）
+    assert gc["blocking_items"] == ["Q1", "count", "text", "adult", "gaze", "FL"]     # L-200 加 gaze（视线 / 排排站）；L-203 加 FL
     prod = _json("config/pipeline/producer.json")
     assert prod["review_adopt_auto"] is True and prod["accept"]["run_qb"] is False
 

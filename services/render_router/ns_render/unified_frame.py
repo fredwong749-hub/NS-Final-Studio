@@ -46,8 +46,31 @@ def build_graph(job: dict, seed: int, upload, prefix: str, size=(768, 1344), ove
         for n in wf.values():
             if "TextEncodeQwenImage" in n.get("class_type", "") and "negative_prompt" in n.get("inputs", {}):
                 n["inputs"]["negative_prompt"] = job.get("negative") or ""
+    if job.get("previz"):
+        wf = add_fun_controlnet(wf, job["previz"], upload)
     sent = next((n["inputs"].get("prompt") for n in wf.values() if "TextEncodeQwenImage" in n.get("class_type", "")), job["prompt"])
     return wf, eff, sent
+
+
+FUN_CN_PATCH = "qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors"
+
+
+def add_fun_controlnet(wf: dict, previz: dict, upload) -> dict:
+    """L-197 B：previz 深度图 → Qwen-Image 2.1 Fun ControlNet Union（model_patches）。节点链
+    LoraLoaderModelOnly → ZImageFunControlnet → QwenImage21Cache（把 Cache 的 model 输入改接到 ControlNet 节点，其余不动）。
+    previz = {control: 相对仓库根的深度图路径, strength, start_percent, end_percent}。没有 previz 不调用，图逐字节不变。"""
+    ctl = Path(previz["control"])
+    name = upload(ROOT / ctl if not ctl.is_absolute() else ctl)
+    src = wf["13"]["inputs"]["model"]
+    wf = {**wf}
+    wf["200"] = {"class_type": "ModelPatchLoader", "inputs": {"name": previz.get("patch") or FUN_CN_PATCH}}
+    wf["201"] = {"class_type": "LoadImage", "inputs": {"image": name}}
+    wf["202"] = {"class_type": "ZImageFunControlnet",
+                 "inputs": {"model": src, "model_patch": ["200", 0], "vae": ["12", 0], "strength": float(previz.get("strength", 0.55)),
+                            "image": ["201", 0], "start_percent": float(previz.get("start_percent", 0.0)),
+                            "end_percent": float(previz.get("end_percent", 0.7))}}
+    wf["13"] = {**wf["13"], "inputs": {**wf["13"]["inputs"], "model": ["202", 0]}}
+    return wf
 
 
 def project_for(script) -> str | None:
@@ -106,6 +129,8 @@ def _run(client, shot_id: str, stage: str, job: dict, seed: int, timeout_s: floa
         ct.update(seed=seed, seed_policy=job.get("seed_policy") or "caller", sent_prompt_sha=_sha16(sent),
                   final_prompt_sha=_sha16(job.get("prompt") or ""))   # final ≠ compile 的 prompt_sha = 编译后又被改过（owner_edit / vqa_delta）
         take.params = {**(take.params or {}), "compile_trace": ct}
+    if job.get("previz"):              # L-197 B：控制图（深度）与参数记进 take，重出判定 / 复盘据此
+        take.params = {**(take.params or {}), "previz": {k: job["previz"].get(k) for k in ("control", "sha", "strength", "start_percent", "end_percent", "shot_spec")}}
     if job.get("tier_overrides"):      # L-191：记档（producer.redo_inputs_changed 据此判 8 步旧版 ≠ 35 步）
         take.params = {**(take.params or {}), "tier": {"id": job.get("tier"), "overrides": job["tier_overrides"]}}
     if job.get("prompt_template"):     # 阶段 2.1：提示词模板 v2 记进 take（producer.redo_inputs_changed 据此判“模板变了”）
@@ -224,11 +249,11 @@ def render_ab(client, script, shot_id: str, *, experiment: str, tier: str, seed:
     if preset:
         job["preset"] = preset
     # job_patch（IMGMASTER 11-02）：新编译入口的 prompt / refs / asset_refs 直接替换作业对应字段（只给 scope=ab；
-    # 不写账本；字段限 prompt、refs、asset_refs）
+    # 不写账本；字段限 prompt、refs、asset_refs、previz、tier、tier_overrides）
     if job_patch:
-        bad = set(job_patch) - {"prompt", "refs", "asset_refs"}
+        bad = set(job_patch) - {"prompt", "refs", "asset_refs", "previz", "tier", "tier_overrides"}      # L-197 B：previz / tier 供 turbo_previz 小样
         if bad:
-            raise ValueError(f"job_patch 只允许 prompt / refs / asset_refs，收到 {sorted(bad)}")
+            raise ValueError(f"job_patch 只允许 prompt / refs / asset_refs / previz / tier / tier_overrides，收到 {sorted(bad)}")
         job.update(job_patch)
     prompt = job["prompt"]
     for pair in prompt_edits or []:
@@ -273,13 +298,22 @@ def render_last(client, script, shot_id: str, first_file_data_rel: str, *, seed:
     from .comfy_client import ComfyError
     project = project_for(script)
     first = _job_for(script, shot_id, project, None)
-    job = FJ.build_last(first, f"data/{first_file_data_rel}", prompt_override=prompt_override)
+    ep, shot = P.find_shot(script, shot_id)
+    # L-203：尾帧方式按 run_style last_frame_mode（compose = 落幅单独构图；edit = 旧法），与 producer 同一入口 FJ.build_last
+    job = FJ.build_last(first, f"data/{first_file_data_rel}", prompt_override=prompt_override, project=project, ep=ep, shot=shot,
+                        g=script.globals)
     s = seed if seed is not None else P.seed_for(shot_id + "/v9last", P._next_n(shot_id, "last"))
     take, _eff, post_rec = _run(client, shot_id, "last", job, s)
     P._add_take(shot_id, take, activate=False)
     meta = {"contract": {"asset_refs": first["asset_refs"]}, "v9_post": post_rec, "v9_preset": preset_id()}
     if postflight:
-        meta["contract"]["postflight"] = _postflight(take.file, {**job, "asset_refs": first["asset_refs"]}, host)
+        pf = _postflight(take.file, {**job, "asset_refs": first["asset_refs"]}, host)
+        try:                                   # L-203：首尾帧比对（FL）并入尾帧 postflight；太像 = 不过
+            from ns_agent.gen_contract import first_last as FL
+            pf = FL.apply(pf, ROOT / f"data/{first_file_data_rel}", P.DATA / take.file)
+        except Exception:  # noqa: BLE001  # arch-ok: 画布旧入口比对失败不改其它结论（producer 路径失败关闭）
+            pass
+        meta["contract"]["postflight"] = pf
     return take.model_dump(), meta, job
 
 

@@ -23,10 +23,10 @@ STATUS = ("missing", "new", "best", "final")
 STAGES = (("first", "image"), ("last", "last"))
 
 
-def _url(rel: str | None, run: str | None = None) -> str | None:
-    """版本文件 rel（相对 data/）→ /files/ 地址。W34：先经 render_paths.resolve_rel 把旧口径 renders/epNN/…
-    解析到本剧已迁移的位置 renders/<run>/epNN/…（迁移前 / 写入方旧代码留下的 rel 也能出图）；
-    解析后仍不在本剧目录下（= V1 文件）→ v1_guard 挡掉（L-126）"""
+def _rel(rel: str | None, run: str | None = None) -> str | None:
+    """版本文件 rel（相对 data/）→ 本剧目录下的 data/ 相对路径（_url / _present 共用）。W34：先经 render_paths.resolve_rel 把旧口径
+    renders/epNN/… 解析到本剧已迁移的位置 renders/<run>/epNN/…（迁移前 / 写入方旧代码留下的 rel 也能出图）；
+    解析后仍不在本剧目录下（= V1 文件）→ v1_guard 挡掉（L-126）→ None"""
     from ns_api import v1_guard
     from ns_render import pipeline as _P
     from ns_render import render_paths as RPS
@@ -41,10 +41,37 @@ def _url(rel: str | None, run: str | None = None) -> str | None:
         except (ValueError, OSError):  # arch-ok: 解析不出新位置 = 按原 rel 交给 v1_guard（V1 口径照旧挡掉）
             pass
     r = v1_guard.scoped(r, data_dir=_P.DATA)   # NAVIA：V1 的文件不给 V2 页面（L-126）
-    if not r:
-        return None
-    # takes.json 里的 file 相对 data/ 目录（renders/<run>/ep01/…）
-    return "/files/" + r.lstrip("/")
+    return r.lstrip("/") if r else None
+
+
+def _url(rel: str | None, run: str | None = None) -> str | None:
+    """版本文件 rel（相对 data/）→ /files/ 地址（takes.json 里的 file 相对 data/ 目录：renders/<run>/ep01/…）"""
+    r = _rel(rel, run)
+    return ("/files/" + r) if r else None
+
+
+def _present(rel: str | None, run: str | None = None) -> bool:
+    """ORPHAN-TAKE（11-06）：这一版的图在不在笔记本上。服务器出的图要经 puller 拉回；没拉到的不能当“新”给项目方看——
+    否则格子标“新”却写“文件不在”（项目方：ep01 S5 尾帧“一直出不来”）"""
+    from ns_render import pipeline as _P
+    r = _rel(rel, run)
+    return bool(r) and (Path(_P.DATA) / r).is_file()
+
+
+def _pending(lst: list[dict], act: int | None, run: str | None) -> dict | None:
+    """ORPHAN-TAKE：比当前版新、还给不了项目方看的最新一版及原因——等打分（postflight 没结论）/ 图在传输中（通过了、原图还没拉到）。
+    orphan（打分被进程重启打断、系统另出）和没通过的不算“待”，它们归 sys_retry（系统在重出）"""
+    from ns_api import takes_ui as TU
+    for t in sorted(lst, key=lambda t: t.get("n") or 0, reverse=True):
+        n = t.get("n") or 0
+        if t.get("quarantined") or t.get("void") or (act is not None and n <= act):
+            continue
+        u = TU.unscored(t)
+        if u == "等打分" or (u and "链路" in u):
+            return {"n": n, "word": "等打分", "why": u}
+        if not u and _passing(t) and _url(t.get("file"), run) and not _present(t.get("file"), run):
+            return {"n": n, "word": "图在传输中", "why": "通过了，原图还没从服务器拉到笔记本"}
+    return None
 
 
 def _script_path(run: str | None):
@@ -134,8 +161,13 @@ def _cell(takes: dict, stage: str, gen: dict | None, edit: dict | None = None, r
     locked = bool((takes.get("locked") or {}).get(stage)) or bool(cur and cur.get("locked"))
     # 项目方 17:0x（ep07-S3 尾帧 #19 Q1 fail 是陌生人，却当“新”给他看）：只有通过验收的版本才算“新”；没通过的留在系统里自动重出
     # W34：被 merge_pull 等并回本剧 takes.json 的 V1 版本（文件只在 V1 目录，v1_guard 不给地址）不算“新”，否则它的 n 更大会把本剧真版本挡住
-    live = [t for t in lst if _passing(t) and _url(t.get("file"), run)]
-    bad_after = [t for t in lst if not _passing(t) and not t.get("quarantined") and (act is None or (t.get("n") or 0) > act)]
+    # ORPHAN-TAKE（11-06）：图还没拉到笔记本的也不算“新”（_present）；打分没结论的 _passing 已经不认（takes_ui.unscored）。
+    # 它们进 pending（“等打分 / 图在传输中”），格子没图可给时写这个字，不写“文件不在”
+    from ns_api import takes_ui as TU
+    live = [t for t in lst if _passing(t) and _url(t.get("file"), run) and _present(t.get("file"), run)]
+    pending = _pending(lst, act, run)
+    bad_after = [t for t in lst if not _passing(t) and not t.get("quarantined") and (act is None or (t.get("n") or 0) > act)
+                 and not (pending and pending["n"] == t.get("n") and TU.unscored(t))]
     new_n, new_url = None, None
     if live:
         top = max(live, key=lambda t: t.get("n") or 0)
@@ -143,7 +175,7 @@ def _cell(takes: dict, stage: str, gen: dict | None, edit: dict | None = None, r
             new_n, new_url = top.get("n"), _url(top.get("file"), run)
     state = "none" if not cur else ("final" if locked else "current")
     return {"n": act if cur else None, "url": _url(cur.get("file"), run) if cur else None, "state": state, "new_n": new_n, "new_url": new_url, "gen": gen,
-            "sys_retry": len(bad_after), "edit": edit}
+            "sys_retry": len(bad_after), "edit": edit, "pending": pending}
 
 
 def build(ep: int | None = None, status: str | None = None, char: str | None = None, *, renders: Path | None = None,

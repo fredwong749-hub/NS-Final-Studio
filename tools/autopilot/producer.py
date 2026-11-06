@@ -1436,17 +1436,54 @@ def gaze_bad(pf: dict) -> bool:
     return False
 
 
+def fl_bad(pf: dict) -> bool:
+    """L-203（项目方 11-06：“你所有的首尾帧都是一模一样的图片”）：这一版尾帧与首帧太像（FL 项 fail）→ 任何采用路径都不收，
+    与 L-200 gaze_bad 同一待遇（全部版本都太像就停在 best_effort、不采用）"""
+    try:
+        from ns_agent.gen_contract import first_last as FL
+        return FL.too_similar(pf)
+    except Exception:  # noqa: BLE001  # arch-ok: 模块读不到 = 按项直接判（同一口径），不放宽
+        return any(i.get("id") == "FL" and i.get("status") == "fail" and not i.get("record_only") for i in (pf or {}).get("items") or [])
+
+
+def never_adopt(pf: dict) -> bool:
+    """看镜头 / 排排站（L-200）或首尾帧太像（L-203）的版本：review_adopt / best_effort 兜底都不采用"""
+    return gaze_bad(pf) or fl_bad(pf)
+
+
+def first_last_check(paths, pf: dict, job: dict, file_rel: str) -> dict:
+    """L-203：尾帧 postflight 并入 FL 首尾帧比对（gen_contract/first_last.py）：首帧 = job.first_frame_file（build_last 两种方式都记），
+    太像 / 读不到图 → ok=False、blocking 加 FL；apply_blocking_policy 里 FL 是硬项（gen_contract.json blocking_items）"""
+    from pathlib import Path as _P
+    try:
+        from ns_agent.gen_contract import first_last as FL
+        from ns_render import pipeline as P
+        ff = job.get("first_frame_file")
+        first = None
+        if ff:
+            first = _P(ff) if _P(ff).is_absolute() else (paths.root / str(ff))
+        return FL.apply(pf, first, P.DATA / file_rel)
+    except Exception as e:  # noqa: BLE001  # arch-ok: 比对模块本身出错 → 记 untested 并挡（失败关闭），其它结论不动
+        pf.setdefault("items", []).append({"id": "FL", "title": "首尾帧差异（L-203）", "status": "untested", "blocking": True,
+                                           "detail": f"首尾帧比对出错：{e!r}"[:300]})
+        pf["ok"] = False
+        pf["blocking"] = sorted(set(pf.get("blocking") or []) | {"FL"})
+        pf.setdefault("reasons", []).append(f"FL 首尾帧比对出错：{e!r}"[:200])
+        return pf
+
+
 def review_pick(td: dict, stage: str, ns: set | None = None) -> int | None:
     """L-183：这一阶段（只看 ns 里的版本，None = 全部）Q1–Q9 全过、没被驳回 / 标坏的版本里 score_key 最高的一版（L-200：看镜头 / 排排站的不算）"""
     c = [t for t in td.get("takes") or [] if t.get("stage") == stage and (ns is None or t.get("n") in ns)
-         and not t.get("bad") and not t.get("master_reject") and q19_clean(take_pf(t)) and not gaze_bad(take_pf(t))]
+         and not t.get("bad") and not t.get("master_reject") and q19_clean(take_pf(t)) and not never_adopt(take_pf(t))]
     return max(c, key=lambda t: score_key(take_pf(t)))["n"] if c else None
 
 
 def safe_take(pf: dict) -> bool:
     """L-196 兜底采用：没有成人安全 / 文字水印硬项不过（身份 / 人数不过的最好一版允许采用，标 review_needed）；
-    L-200：看镜头 / 排排站（gaze_bad）也不许兜底采用——全部版本都这样就停在 best_effort、不采用"""
-    if gaze_bad(pf):
+    L-200：看镜头 / 排排站（gaze_bad）也不许兜底采用——全部版本都这样就停在 best_effort、不采用；
+    L-203：首尾帧太像的尾帧（fl_bad）同样不许兜底采用"""
+    if never_adopt(pf):
         return False
     for i in (pf or {}).get("items") or []:
         if i.get("status") in ("fail", "untested") and i.get("id") in ("Q6", "Q9", "QB") and not i.get("record_only"):
@@ -1475,9 +1512,11 @@ def review_adopt(paths: "Paths", oid: str, n: int | None = None, by: str = "L-18
     if n is None:
         n = review_pick(td, stage, ns) or (review_pick_relaxed(td, stage, ns) if relaxed else None)
     t = next((x for x in td.get("takes") or [] if x.get("stage") == stage and x.get("n") == n), None) if n else None
-    if t is None or gaze_bad(take_pf(t)) or not (q19_clean(take_pf(t)) or (relaxed and safe_take(take_pf(t)))):
+    if t is None or never_adopt(take_pf(t)) or not (q19_clean(take_pf(t)) or (relaxed and safe_take(take_pf(t)))):
         if t is not None and gaze_bad(take_pf(t)):
             log_event(paths, "review_adopt_refused", obj=oid, take=n, by=by, rule="L-200", counted=False, note="看镜头 / 排排站的版本不采用")
+        elif t is not None and fl_bad(take_pf(t)):
+            log_event(paths, "review_adopt_refused", obj=oid, take=n, by=by, rule="L-203", counted=False, note="尾帧与首帧太像的版本不采用")
         return None
     note = {"by": by, "at": iso(), "rule": "L-183", "why": "尽力用尽，取 Q1–Q9 全过里分数最高的一版，待项目方复核"}
 
@@ -1727,6 +1766,71 @@ def _age_s(ts) -> float:
         return now() - time.mktime(time.strptime(str(ts)[:19], "%Y-%m-%dT%H:%M:%S"))
     except (ValueError, TypeError):
         return 0.0
+
+
+ORPHAN_TAKE_S = 600           # ORPHAN-TAKE：非当前版 postflight 一直没结论、对象没活租约、创建超过这么久 = 打分线程随进程重启丢了
+ORPHAN_SWEEP_MAX = 20         # 每拍最多处理这么多版（takes.json 逐镜写，别一拍把 IO 占满）
+
+
+def take_unscored(t: dict) -> bool:
+    """这一版出好了、打分却没结论：postflight 记了（producer 出图前写 state=running）但 ok=None 且没逐项结果 / state 仍是 running。
+    没有 postflight 记录的（画布 / 手工 / 旧版本）不算；已标 orphan 的不算"""
+    pf = t.get("postflight") if isinstance(t.get("postflight"), dict) else None
+    if pf is None or pf.get("state") == "orphan":
+        return False
+    return pf.get("state") == "running" or (pf.get("ok") is None and not pf.get("items"))
+
+
+def orphan_take_sweep(pr, reg: dict, every_s: float = 120, age_s: float | None = None, t: float | None = None) -> list:
+    """ORPHAN-TAKE（11-06；ep01-S5 尾帧 v12：gpu36:1 借道 20:31 出好 → producer 20:33 重启 → 打分线程没了，postflight 永远
+    {state: running, ok: null}，outbox 也没写 → 笔记本 takes.json 有这一版、图没有 → 总览“新 / 文件不在”一直出不来）。
+    K-OPS-F12 只看当前版；这里扫本剧每镜 image / last 全部 producer 出的版本：postflight 没结论（take_unscored）、对象没活租约、
+    本进程没在打它的分、创建超过 age_s（config/pipeline/producer.json orphan_take.age_s，默认 ORPHAN_TAKE_S）→
+      ① takes.json 标 postflight.state=orphan / ok=False（界面 / 候选一律不给看，takes_ui.unscored 认这个标）；
+      ② 对象还在 ready 且账本没别的只重打分 → rescore_take=n，交 dispatch_rescores 只重打分（不占道、不重出、不计次）；
+         打完 _postflight 会重写 postflight 并写 outbox，puller 照常把图拉回笔记本。
+    每 every_s 一拍、每拍最多 ORPHAN_SWEEP_MAX 版；返回 [(oid, n, action)]"""
+    t = now() if t is None else t
+    if t - float(getattr(pr, "_orphan_t", 0) or 0) < every_s:
+        return []
+    pr._orphan_t = t
+    if age_s is None:
+        cfg = jl(Path(pr.p.root) / "config" / "pipeline" / "producer.json", {}) or {}
+        age_s = float((cfg.get("orphan_take") or {}).get("age_s") or ORPHAN_TAKE_S)
+    leases = pr.leases.all()
+    status = {o["id"]: o for E in reg.get("episodes") or [] for S in E.get("shots") or []
+              for o in (S.get("objects") or {}).values() if isinstance(o, dict) and o.get("id")}
+    led = pr.ledger()
+    out = []
+    for tj in sorted(pr.p.renders.glob("ep*/S*/takes.json")):
+        sid = f"{tj.parent.parent.name}-{tj.parent.name}"
+        td = jl(tj, {}) or {}
+        for tk in td.get("takes") or []:
+            stage = tk.get("stage")
+            if stage not in ("image", "last") or not tk.get("producer") or not take_unscored(tk):
+                continue
+            if (td.get("active") or {}).get(stage) == tk.get("n"):    # 当前版打分中断归 K-OPS-F12（_frame_obj 只重打分），这里不碰
+                continue
+            oid = f"{'first' if stage == 'image' else 'last'}:{sid}"
+            with pr.mu:
+                busy = oid in pr.inflight
+            if busy or oid in leases or not (_age_s(tk.get("created_at")) > age_s):
+                continue
+            n, pf0 = tk.get("n"), tk.get("postflight") if isinstance(tk.get("postflight"), dict) else {}
+            why = f"v{n} 出好后打分一直没结论（{int(_age_s(tk.get('created_at')) // 60)} 分钟，没活租约）：打分线程随进程重启丢了"
+            from ns_render import frame_edit as FE
+            FE.annotate(sid, stage, n, postflight={**pf0, "state": "orphan", "ok": False, "reasons": [why],
+                                                    "orphan": {"at": iso(), "why": why, "rule": "ORPHAN-TAKE", "pf_before": pf0}})
+            act = "orphan"
+            o = status.get(oid) or {}
+            if o.get("status") == "ready" and not (led.get(oid) or {}).get("rescore_take"):
+                pr.led_update(oid, rescore_take=n, reason=why + "；只重打分（不占道、不重出、不计次）")
+                act = "orphan+rescore"
+            pr.logf("orphan_take", obj=oid, take=n, action=act, why=why, counted=False)
+            out.append((oid, n, act))
+            if len(out) >= ORPHAN_SWEEP_MAX:
+                return out
+    return out
 
 
 # K-REN-956（PROMPTFIX × DEBUG-RSI 11-02，总调度定“先验收、后重出”）：编译规则变化（编译器升级 / 系统固定句变了）不作废已通过的版本；
@@ -2020,7 +2124,9 @@ class FrameExec:
                 raise ComfyError(f"{sid} 首帧没有过契约的当前版本，不能做尾帧（preflight 不通过）")
             if not first_job.get("last_prompt"):
                 return {"na": True}
-            job = FJ.build_last(first_job, f"data/{ft['file']}")
+            # L-203：尾帧按 run_style last_frame_mode（compose = 落幅单独构图，需要 ep / shot / g；edit = 旧法）；种子仍走本对象的种子流
+            job = FJ.build_last(first_job, f"data/{ft['file']}", project=project, ep=ep, shot=shot, g=self.script.globals,
+                                plan_kw=rung.get("plan_kw") or {})
             job = apply_owner_edit(job, owner_edit)
             if rung.get("preset"):
                 job["preset"] = rung["preset"]
@@ -2107,6 +2213,8 @@ class FrameExec:
                 mark_qb_skipped(pf)                 # AUDIT-PERF 11-05：已判不过的图不再做共用验收（开关 accept.skip_prefailed）
             else:
                 pf = shared_accept(self.p, self.script, sid, file_rel, job, pf)   # PRODMERGE-O：共用验收（bundle + retry 三态）
+        if stage == "last":
+            pf = first_last_check(self.p, pf, job, file_rel)   # L-203：尾帧与首帧太像 = FL 不过（硬项），换种子重出
         pf = apply_blocking_policy(pf)            # L-196：只有 gen_contract.json blocking_items 里的硬项挡，其余只记录
         pf["code_sha"] = code_sha()               # W44 ①：每条结论记“哪份代码判的”（本进程启动时的内容 sha）
         pf["judged_pid"] = os.getpid()
@@ -2522,6 +2630,10 @@ class Producer:
             self.reap_rescores()                   # W20：超时的只重打分放位（暂停时也照做，不让心跳一直挂着 inflight）
         except Exception as e:  # noqa: BLE001
             self.logf("rescore_reap_err", error=repr(e)[:300])
+        try:
+            orphan_take_sweep(self, reg)           # ORPHAN-TAKE 11-06：打分被进程重启打断的版本 → 标 orphan / 只重打分
+        except Exception as e:  # noqa: BLE001
+            self.logf("orphan_sweep_err", error=repr(e)[:300])
         self.heal_lanes()                          # ASSIGN D：卡死道自愈（定向打断自己 / 孤儿的超时单；过期锁、读不到锁登记）
         reg.update(updated=iso(), heartbeat=now(), pid=os.getpid(), paused=bool(ctrl.get("paused")),
                    paused_by=ctrl.get("paused_by"), lanes=lanes, workers=ctrl["workers"],

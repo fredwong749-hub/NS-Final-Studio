@@ -13,7 +13,9 @@ import "./frames.css";
 
 type Gen = { state: string; eta_s: number | null; job_id: string | null; started_at: string | null; created_at: string | null };
 type Edit = { id: string; state: string; word: string; pos: number | null; eta_at: number | null; retry: number; msg: string };
-type Cell = { n: number | null; url: string | null; state: "none" | "current" | "final"; new_n: number | null; new_url: string | null; gen: Gen | null; sys_retry?: number; edit?: Edit | null };
+/** pending（ORPHAN-TAKE）：比当前版新、还给不了看的最新一版——等打分 / 图在传输中；没图可给时格子写这个字，不写“文件不在” */
+type Pending = { n: number; word: string; why?: string };
+type Cell = { n: number | null; url: string | null; state: "none" | "current" | "final"; new_n: number | null; new_url: string | null; gen: Gen | null; sys_retry?: number; edit?: Edit | null; pending?: Pending | null };
 type Shot = { id: string; index: number; chars: string[]; first: Cell; last: Cell; main: { kind: string; word: string } | null };
 type Index = { episodes: { ep: number; shots: Shot[] }[]; counts: { shots: number; missing: number; new: number; best: number; final: number }; gen: { running: number; queued: number } };
 const STATUS: [string, string][] = [
@@ -102,11 +104,17 @@ function EditCover({ e }: { e: Edit }) {
 function CellView({ c, label, onOpen }: { c: Cell; label: string; onOpen: () => void }) {
   const show = c.new_url ?? c.url;
   const badge = c.gen || c.edit ? null : c.new_n ? ["新", "a"] : c.state === "final" ? ["已定稿", "g"] : c.state === "current" ? ["当前", "g"] : null;
+  // ORPHAN-TAKE：只给看通过且图已在本机的版本（“新”只在那时标）；有更新的一版还在等打分 / 传输中 → 缺图时格子写它，不写“文件不在”；
+  // 有当前版时右下角小字提示“v12 等打分”，当前版照常显示
+  const pend = !c.gen && !c.edit && c.pending ? c.pending : null;
+  const missWord = c.gen ? "" : pend ? `${label}${pend.word}` : (c.sys_retry ?? 0) > 0 ? `${label}在重出` : "还没出图";
+  const tip = c.state === "none" && !c.gen ? (pend ? `${label}${pend.word}：${pend.why ?? ""}（v${pend.n}）` : `${label}还没出图`) : `${label}：点开看大图、用这张 / 修改${pend ? `\n另有 v${pend.n} ${pend.word}` : ""}`;
   return (
     <div className="fp-cellw">
-      <button type="button" className={`fp-cell s-${c.state}`} onClick={onOpen} title={c.state === "none" && !c.gen ? `${label}还没出图` : `${label}：点开看大图、用这张 / 修改`}>
-        {c.state === "none" && !c.new_url ? <div className="fp-miss"><span>{c.gen ? "" : "还没出图"}</span></div> : <SafeImg src={show} />}
+      <button type="button" className={`fp-cell s-${c.state}`} onClick={onOpen} title={tip}>
+        {c.state === "none" && !c.new_url ? <div className="fp-miss"><span>{missWord}</span></div> : <SafeImg src={show} />}
         {badge && <span className={`fp-badge ${badge[1]}`}>{badge[0]}</span>}
+        {pend && (c.state !== "none" || c.new_url) && <span className="fp-pend" title={pend.why ?? ""}>v{pend.n} {pend.word}</span>}
         {c.edit ? <EditCover e={c.edit} /> : c.gen ? <GenCover g={c.gen} /> : null}
       </button>
       <div className="fp-cap">{label}</div>

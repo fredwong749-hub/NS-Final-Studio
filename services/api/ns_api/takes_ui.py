@@ -190,7 +190,28 @@ def _verdict(t: dict, bad: str | None) -> tuple[bool, str | None]:
     fails = [it for it in pf.get("items") or [] if isinstance(it, dict) and str(it.get("status") or "").lower() == "fail"]
     if fails:
         return False, "未通过：" + "；".join(f"{it.get('id')} {str(it.get('detail') or it.get('title') or '').strip()[:60]}" for it in fails[:3])
+    u = unscored(t)            # ORPHAN-TAKE：打分没出结论的版本不给项目方挑
+    if u:
+        return False, u
+    if pf.get("ok") is False:  # 只给看通过的图：契约结论 ok=false（硬项在 blocking 里）也不作候选，哪怕 items 里没逐项 fail
+        return False, "未通过：" + "、".join(str(b) for b in (pf.get("blocking") or pf.get("reasons") or ["契约没过"])[:3])[:120]
     return True, None
+
+
+def unscored(t: dict) -> str | None:
+    """ORPHAN-TAKE（11-06，项目方：总览 ep01 S5 尾帧“新 / 文件不在”一直出不来）：打分没出结论的版本不给项目方看——
+    postflight.state=running / ok=None 且没逐项结果（打分线程随 producer 进程重启丢了）、state=orphan（producer orphan_take_sweep 标的）、
+    score_infra（打分链路出错，不是内容结论）。没有 postflight 记录的（画布 / 手工 / 旧版本）不算，照原口径。→ 原因字 / None"""
+    pf = t.get("postflight") if isinstance(t.get("postflight"), dict) else None
+    if pf is None:
+        return None
+    if pf.get("state") == "orphan":
+        return "打分被进程重启打断，这一版不用（系统另出）"
+    if pf.get("score_infra"):
+        return "打分链路出错，还没有结论"
+    if pf.get("ok") is None and (pf.get("state") == "running" or not pf.get("items")):
+        return "等打分"
+    return None
 
 
 def _P():

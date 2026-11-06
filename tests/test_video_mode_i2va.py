@@ -34,8 +34,11 @@ def test_switch_scope(monkeypatch):
     assert not VM.no_last("series10_v2", 2)
 
 
-def test_real_config_only_ep02_plus():
-    assert VM.no_last("series10_v2", 2) and not VM.no_last("series10_v2", 1) and not VM.no_last("series10_v1", 3)
+def test_real_config_fl2va_after_l203():
+    """L-203（项目方 11-06）：撤回 L-197 A——线上配置 series10_v2 video_mode.mode = fl2va，任何集 / 任何镜都要尾帧；代码路径仍在（上面的 mock 测试）"""
+    assert not VM.no_last("series10_v2", 2) and not VM.no_last("series10_v2", 1) and not VM.no_last("series10_v1", 3)
+    assert not VM.no_last("series10_v2", 1, shot="ep01-S1") and not VM.no_last("series10_v2", 1, shot="ep01-S2")
+    assert VM.last_frame_mode("series10_v2") == "compose"
 
 
 def _specs():

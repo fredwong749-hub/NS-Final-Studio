@@ -291,6 +291,12 @@ def takes_scan(state: dict) -> dict:
                             acts[m.name] = MP.merge_file(host, m.name, dst)
                         except Exception as e:  # noqa: BLE001
                             acts[m.name] = f"error:{repr(e)[:100]}"
+                            continue
+                        if not str(acts[m.name]).startswith(("skipped", "error", "corrupt")):   # ORPHAN-TAKE：并回后补拉通过版的原图
+                            try:
+                                queue_missing_takes(host, m.name)
+                            except Exception as e:  # noqa: BLE001
+                                log("queue_missing_takes", host, m.name, repr(e)[:100])
             except tarfile.TarError as e:
                 acts["_tar"] = repr(e)[:100]
         state[f"_scan_since_{host}"] = t_start if not any(str(v).startswith("error") for v in acts.values()) else since
@@ -326,6 +332,69 @@ def takes_scan(state: dict) -> dict:
 FETCH_QUEUE = ROOT / "data/netfix/fetch_queue.jsonl"
 FETCH_STATUS = ROOT / "data/netfix/fetch_status.json"
 FETCH_MB_PER_TICK = 12
+
+
+def takes_to_fetch(host: str, rel: str, td: dict, stages, exists=None) -> list[dict]:
+    """ORPHAN-TAKE（11-06）：takes.json 并回后，本台负责 stage 里“当前版 / 已打分通过”的版本原图笔记本还没有 → 要拉的队列项。
+    打分没结论（state=running / ok=None）、orphan、没通过的不拉——只给项目方看通过的图，它们在服务器上打完分才会经 outbox 过来。
+    exists(rel) 可注入（测试）；默认看 ROOT 下有没有"""
+    import re as _re
+    exists = exists or (lambda r: (ROOT / r).exists())
+    active = td.get("active") or {}
+    out, seen = [], set()
+    for t in td.get("takes") or []:
+        st, f = t.get("stage"), t.get("file")
+        if st not in set(stages or ()) or not f or t.get("quarantined") or t.get("void"):
+            continue
+        pf = t.get("postflight") if isinstance(t.get("postflight"), dict) else {}
+        passing = pf.get("ok") is True and pf.get("state") not in ("running", "orphan")
+        if not (passing or active.get(st) == t.get("n")):
+            continue
+        frel = "data/" + _re.sub(r"^data/", "", str(f).replace("\\", "/"))
+        if frel in seen or exists(frel):
+            continue
+        seen.add(frel)
+        out.append({"host": host, "rel": frel, "stage": st, "shot_rel": rel, "at": time.time(), "why": "orphan_take:scored_missing"})
+    return out
+
+
+def enqueue_fetch(items: list[dict], queue: Path | None = None) -> int:
+    """追加进 fetch_queue.jsonl（按 rel 去重：队列里已有的不再写）→ 新写条数"""
+    q = queue or FETCH_QUEUE
+    have = set()
+    try:
+        for ln in q.read_text(encoding="utf-8").splitlines():
+            try:
+                have.add(json.loads(ln).get("rel"))
+            except ValueError:   # arch-ok: 半行跳过
+                continue
+    except OSError:   # arch-ok: 没有队列文件 = 空队列
+        pass
+    new = [it for it in items if it.get("rel") and it["rel"] not in have]
+    if new:
+        q.parent.mkdir(parents=True, exist_ok=True)
+        with open(q, "a", encoding="utf-8") as fh:
+            for it in new:
+                fh.write(json.dumps(it, ensure_ascii=False) + "\n")
+    return len(new)
+
+
+def queue_missing_takes(host: str, rel: str, queue: Path | None = None) -> int:
+    """takes_scan 并回一份 takes.json 后调：本台负责 stage 的当前版 / 通过版原图没在笔记本 → 排进按需拉取队列"""
+    import re as _re
+    sys.path.insert(0, str(ROOT / "ops/offline"))
+    import merge_pull as MP
+    m = _re.search(r"/ep(\d{2})/", rel)
+    if not m:
+        return 0
+    stages = MP.own_stages(host, int(m.group(1)))
+    if not stages:
+        return 0
+    try:
+        td = json.loads((ROOT / rel).read_text(encoding="utf-8"))
+    except (OSError, ValueError):   # arch-ok: 刚并好的 takes.json 读不出 = 这镜本轮不排拉取（下轮 scan 再来）
+        return 0
+    return enqueue_fetch(takes_to_fetch(host, rel, td, stages), queue)
 
 
 def fetch_queue(state: dict) -> dict:

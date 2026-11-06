@@ -32,6 +32,7 @@ def c(tmp_path, monkeypatch):
     _shot(r, 1, 3, [], {})
     _shot(r, 2, 1, [T(3, "image", quarantined={"at": "x"}), T(1, "image")], {"image": 1}, {})
     monkeypatch.setattr(P, "RENDERS", r)
+    monkeypatch.setattr(FI, "_present", lambda rel, run=None: True)   # 这组用例不落真图；“图没拉到不算新”由 test_frames_index_orphan 测
     monkeypatch.setattr(FI, "_script_chars", lambda run=None: {"ep01-S1": ["lin_wan"], "ep01-S2": ["lin_wan", "gu_chen"], "ep02-S1": ["gu_chen"]})
     monkeypatch.setattr(FI, "_jobs_by_shot", lambda: {("ep01-S2", "last"): {"state": "running", "eta_s": 90, "job_id": "j1", "started_at": None, "created_at": None}})
     app = FastAPI()

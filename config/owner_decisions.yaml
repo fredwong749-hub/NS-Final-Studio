@@ -868,13 +868,35 @@ checks:
     op: eq
     value: false
   - id: D-V2-196
-    decision: L-196（项目方 11-05 20:2x “我需要你全自动，不要检测那么多了”：首 / 尾帧闸门只留 Q1 身份、人数、无字幕水印、成人安全；Q9 / QB / Q10 只记录不挡）。⤴ L-200（11-06 07:3x）修订硬项清单：加 gaze 视线 / 排排站
-    title: gen_contract.json blocking_items = [Q1, count, text, adult, gaze]
+    decision: L-196（项目方 11-05 20:2x “我需要你全自动，不要检测那么多了”：首 / 尾帧闸门只留 Q1 身份、人数、无字幕水印、成人安全；Q9 / QB / Q10 只记录不挡）。⤴ L-200（11-06 07:3x）修订硬项清单：加 gaze 视线 / 排排站；⤴ L-203（11-06 08:3x）再加 FL 首尾帧差异（只对尾帧）
+    title: gen_contract.json blocking_items = [Q1, count, text, adult, gaze, FL]
     type: json
     file: config/gen_contract.json
     path: [blocking_items]
     op: eq
-    value: [Q1, count, text, adult, gaze]
+    value: [Q1, count, text, adult, gaze, FL]
+  - id: D-V2-203
+    decision: L-203（项目方 11-06 08:3x “你所有的首尾帧都是一模一样的图片……现在全部都错了”，选 A：撤回 L-197 A 不出尾帧；每镜首尾帧都出、视频在两张不同画面之间生成 FL2VA）
+    title: run_style.json runs.series10_v2.video_mode.mode = fl2va（I2VA 开关关，代码路径保留）
+    type: json
+    file: config/compile/run_style.json
+    path: [runs, series10_v2, video_mode, mode]
+    op: eq
+    value: fl2va
+  - id: D-V2-203b
+    decision: L-203（尾帧按落幅单独构图出图，脸 / 服装 / 场景照参考保持一致，不再拿首帧做小改）
+    title: run_style.json runs.series10_v2.last_frame_mode = compose
+    type: json
+    file: config/compile/run_style.json
+    path: [runs, series10_v2, last_frame_mode]
+    op: eq
+    value: compose
+  - id: D-V2-203c
+    decision: L-203（出图后比对首尾两张，太像就重出尾帧；太像的版本不进 best_effort 采用）
+    title: producer.py 有 fl_bad 且 never_adopt 把它与 gaze_bad 并列
+    type: grep_present
+    pattern: 'def fl_bad'
+    paths: [tools/autopilot/producer.py]
   - id: D-V2-200
     decision: L-200（项目方 11-06 07:3x 看 ep01 总览选 A：首帧硬闸加“视线 / 排排站”——任何人看镜头、或多人正面并排站成一排合影式 = 不过、换种子重出，不能被“用尽采用最好一版”采用）
     title: vqa.json checks.lineup.blocking = true（排排站由本地看图判，同一次调用多一项）

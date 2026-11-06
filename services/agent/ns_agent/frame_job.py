@@ -16,6 +16,7 @@ from ns_agent import asset_refs as AR
 from ns_agent import compiler as C
 from ns_agent import prompt_template_v2 as PT2
 import re
+from ns_schema import prompt_v2 as PV
 
 
 def retrigger(shot, g):
@@ -304,8 +305,10 @@ def cast_of(shot) -> list[dict]:
 
 
 def build_first(project: str, ep, shot, g, *, bible=None, model: str = "qwen_image_2.1", prompt_override: str | None = None,
-                mode: str = "shot", **plan_kw) -> dict:
-    """首帧作业（= 生成契约请求的超集）。prompt_override：画布一次性整段替换的正文（槽位标注照加在前面）"""
+                mode: str = "shot", continuity_ref: tuple[str, str] | None = None, **plan_kw) -> dict:
+    """首帧作业（= 生成契约请求的超集）。prompt_override：画布一次性整段替换的正文（槽位标注照加在前面）。
+    continuity_ref=(文件, 标注句模板)（L-203 尾帧 compose 用）：在槽位参考之后再挂一张“连续性参考”（通过契约的首帧），标注句
+    放在槽位标注之后、正文之前，模板里的 {n} = 它的图号；参考槽逻辑（脸 / 造型 / 场景底图）与首帧完全同一套"""
     from ns_agent.gen_contract import style as ST
     n = int(AR.g(ep, "number"))
     shot = freeze_archived_extras(project, shot)          # W7：归档剧编译冻结（eyeline / 镜头语言段读同一份）
@@ -328,13 +331,19 @@ def build_first(project: str, ep, shot, g, *, bible=None, model: str = "qwen_ima
         body = with_note(body, shot_language_note(project, shot, mode) + plan.prompt_note + outer_items_note(project, ep, shot, sr, body)
                          + ("" if mode == "sheet" else eyeline_note(shot, sr, body))
                          + garment_detail_note(project, ep, shot, sr, body) + blocking_note(shot, body))
+    cont, cont_line, extra_refs = None, "", []
+    if continuity_ref:                                                         # L-203：首帧作最后一张参考（弱指令，只保一致性）
+        cont = continuity_slot(plan, model, continuity_ref[0], continuity_ref[1])
+        cont_line, extra_refs = cont["line"], [continuity_ref[0]]
     job = {"id": sid, "shot": sid, "ep": n, "index": AR.g(shot, "index"), "stage": "image", "model": model,
-            "prompt": plan.prompt_prefix + ST.strip_segment_marks(body), "refs": plan.files, "asset_refs": AR.record(sr, plan), "cast": cast_of(shot),
+            "prompt": plan.prompt_prefix + cont_line + ST.strip_segment_marks(body), "refs": plan.files + extra_refs, "asset_refs": AR.record(sr, plan), "cast": cast_of(shot),
             "loras": [["krea2_film_texture_qwen21.safetensors", 0.5]],
             "compiled_by": "ns_agent.frame_job.build_first → ns_agent.compiler.compile_shot", "framing_project": project,
             "recipe": "frame_v9（K-REN-134 唯一出图路径）", "last_prompt": c.last_prompt,
             "face_files": [s.file for s in plan.slots if s.kind == "face"], "compiler_inputs_sha": c.inputs_sha,
             "blocking": AR.blocking_of(shot), "last_faces": last_face_plan(project, shot, c.last_prompt, plan)}
+    if cont:
+        job["continuity_ref"] = cont
     job["route"], job["route_reasons"] = AR.plan_route(project, sr, plan)      # K-REN-958：本地专用资产 → 只许自有机器的道（L-128）
     seg_in, seg_src = ST.segment_of(shot)                                      # L-130：幻想 / 现实段 → 风格预设
     pid, seg, dflt = ST.segment_preset(project, seg_in)
@@ -345,7 +354,14 @@ def build_first(project: str, ep, shot, g, *, bible=None, model: str = "qwen_ima
     # CARRYOVER 第 11 项（MERGE-IMG-O 11-03）：负面词 = 编译器负面词（剧本 base_negative + bible style / safe 负面 + 未成年人外观硬负面）
     # ∪ W-40 品牌负面词。原来直接覆盖成 brand_negative（V2 多为空），硬负面词进不了作业。硬负面永远在（job_negative 兜底）
     tier, tier_ov = first_frame_tier(project)                                  # L-191：按剧开 35 步 base 首帧档（默认 preview，不加字段）
-    if tier_ov:
+    if tier == "turbo_previz":                                                 # L-197 B：8 步 turbo + previz 深度控制；没有深度图 → 退回 base35，不裸出 turbo
+        pv = previz_inputs(sid)
+        if pv:
+            job["tier"], job["tier_overrides"], job["previz"] = tier, tier_ov, pv
+        else:
+            tier, tier_ov = first_frame_tier(project, force="base35")
+            job["previz_missing"] = True
+    if tier_ov and not job.get("previz"):
         job["tier"], job["tier_overrides"] = tier, tier_ov
     job["negative"] = job_negative(c.image_negative, AR.brand_negative(project, plan), "、".join(neg_extra))
     if tmpl:                                                                   # 阶段 2.1：模板进作业（签名 / take.params / 重出判定都认它）
@@ -355,6 +371,38 @@ def build_first(project: str, ep, shot, g, *, bible=None, model: str = "qwen_ima
     job["adult"] = bool(job["adult_reasons"])
     job["compile_trace"] = trace_of(job)
     return job
+
+
+_REF_NO_RE = re.compile(r"^图\d+是")
+LAST_OUTFIT_BY_FIRST = "；{name}的服装、鞋、饰品以本镜头首帧为准"
+
+
+def continuity_slot(plan, model: str, file: str, line_tmpl: str) -> dict:
+    """L-203：给“连续性参考”（通过契约的首帧）腾出最后一个图位。参考槽按首帧同一套逻辑排好后，模型还有空位 → 直接追加；
+    槽已满（TextEncodeQwenImage21 只有 image_1..3）→ 最后一个非身份脸槽（造型板 / 单品 / 场景底图）让位给首帧（首帧本身就带着
+    这一镜的服装与陈设），身份脸 / 脸板一张不丢（Q1 硬项）；让位的槽记进 plan.dropped、标注句末尾补“X 的服装以首帧为准”。
+    原地改 plan（slots / prompt_prefix）→ {file, n, line, replaced}"""
+    cap = AR.model_slots(model)
+    replaced = None
+    if len(plan.slots) >= cap:
+        victim = next((s_ for s_ in reversed(plan.slots) if s_.kind not in ("face", "faceboard")), None)
+        if victim is not None:
+            joined = "".join(s_.line for s_ in plan.slots)
+            head = plan.prompt_prefix[:-len(joined)] if joined and plan.prompt_prefix.endswith(joined) else plan.prompt_prefix
+            plan.slots.remove(victim)
+            for k, s_ in enumerate(plan.slots, 1):
+                if s_.index != k:
+                    s_.line = _REF_NO_RE.sub(f"图{k}是", s_.line, count=1)
+                    s_.index = k
+            plan.prompt_prefix = head + "".join(s_.line for s_ in plan.slots)
+            plan.dropped.append({"file": victim.file, "label": "、".join(victim.labels), "character": victim.character, "role": victim.kind,
+                                 "why": "L-203 尾帧：参考槽已满，让位给本镜头首帧（服装 / 陈设以首帧为准）"})
+            replaced = {"file": victim.file, "kind": victim.kind, "character": victim.character, "labels": list(victim.labels)}
+    n_ref = len(plan.slots) + 1
+    line = line_tmpl.format(n=n_ref)
+    if replaced and replaced.get("character"):
+        line = line.rstrip("。") + LAST_OUTFIT_BY_FIRST.format(name=AR.ID_NAME.get(replaced["character"], replaced["character"])) + "。"
+    return {"file": file, "n": n_ref, "line": line, "replaced": replaced}
 
 
 # ---------------------------------------------------------------- PROMPTFIX 11-02（ALIGNMENT 第 2 / 5 / 6 步）
@@ -388,16 +436,40 @@ def trace_of(job: dict) -> dict:
             "rules": ["K-REN-950", "K-REN-951", "K-REN-952", "K-REN-953", "K-REN-954", "K-REN-955", "K-REN-957"]}
 
 
-def first_frame_tier(project: str | None) -> tuple[str, dict]:
-    """L-191：按剧取首帧出图档（config/render_quality.json first_frame_tier）。→ ("preview", {}) 默认；("base35", 采样覆盖)"""
+def first_frame_tier(project: str | None, force: str | None = None) -> tuple[str, dict]:
+    """L-191：按剧取首帧出图档（config/render_quality.json first_frame_tier）。→ ("preview", {}) 默认；("base35", 采样覆盖)；
+    L-197 B：("turbo_previz", {unet: turbo, steps: 8, cfg: 1.0})——8 步 turbo + previz 深度控制（控制图见 previz_inputs）。force 仅供回退"""
     try:
         cfg = _json.loads((_ROOT / "config" / "render_quality.json").read_text(encoding="utf-8")).get("first_frame_tier") or {}
     except (OSError, ValueError):
         return "preview", {}
-    tier = (cfg.get("runs") or {}).get(project or "") or "preview"
+    tier = force or (cfg.get("runs") or {}).get(project or "") or "preview"
     if tier == "base35" and cfg.get("base35"):
         return "base35", dict(cfg["base35"])
+    if tier == "turbo_previz" and cfg.get("turbo_previz"):
+        return "turbo_previz", {k: v for k, v in cfg["turbo_previz"].items() if k in ("unet", "steps", "cfg", "sampler", "scheduler")}
     return "preview", {}
+
+
+def previz_inputs(sid: str) -> dict | None:
+    """L-197 B：本镜 previz 深度图（tools/previz/auto_blocking.py 生成：data/previz/<ep>-S<n>/out/S<n>_depth.png）+ 控制参数（config turbo_previz）。
+    → {control, sha, shot_spec(摆位 JSON 的 sha), strength, start_percent, end_percent}；没有深度图 → None"""
+    try:
+        cfg = (_json.loads((_ROOT / "config" / "render_quality.json").read_text(encoding="utf-8")).get("first_frame_tier") or {}).get("turbo_previz") or {}
+    except (OSError, ValueError):  # arch-ok: 读不到 render_quality.json = 不挂 previz 深度控制，走原首帧路径（不放行任何闸门）
+        return None
+    m = re.match(r"^(ep\d+)-S(\d+)$", sid or "")
+    if not m:
+        return None
+    base = _ROOT / (cfg.get("dir") or "data/previz") / f"{m.group(1)}-S{m.group(2)}"
+    dp = base / "out" / f"S{m.group(2)}_depth.png"
+    if not dp.is_file():
+        return None
+    spec = base / f"S{m.group(2)}.json"
+    pv = {"control": dp.relative_to(_ROOT).as_posix(), "sha": AR.sha_file(dp), "shot_spec": AR.sha_file(spec) if spec.is_file() else None}
+    for k, d in (("strength", 0.55), ("start_percent", 0.0), ("end_percent", 0.7)):
+        pv[k] = float((cfg.get("control") or {}).get(k, d))
+    return pv
 
 
 def job_negative(*parts: str) -> str:
@@ -453,8 +525,128 @@ def last_face_plan(project: str, shot, last_prompt: str | None, plan) -> list[di
     return out
 
 
-def build_last(first_job: dict, first_file: str, *, prompt_override: str | None = None) -> dict:
-    """尾帧：通过契约的首帧作图1、项目方挑定的身份脸作图2；提示词 = 编译器 last_prompt（与 ASSETMASTER frames_v2 同法）。
+# ---------------------------------------------------------------- L-203 尾帧按落幅单独构图（compose）
+LAST_CONTINUITY_LINE = "图{n}是本镜头首帧，只用来保持人物服装、发型、场景陈设与光线一致；构图、机位、景别按下面的结束画面重新构图。"
+_CAM_WORDS = ("机位", "仰", "俯", "过肩", "越肩", "正面", "侧", "背", "平视", "眼平", "航拍", "鸟瞰", "跟拍", "锁定")
+_LAST_DROP_EXTRAS = ("分拍", "表演节拍")        # 第一拍的视线 / 反应是起幅的，尾帧不用（eyeline_note 退到结束画面里的视线落点）
+_END_RE = re.compile(r"落幅\s*[=＝]\s*([^｜|]+)")
+_HEIGHT_RE = re.compile(r"平视[^、，（）]*|略低微仰|略高微俯|微仰|微俯|略仰|略俯|仰拍|俯拍|低机位[^、，（）]*|高机位[^、，（）]*|眼平|仰|俯")
+_LABEL_PAREN_RE = re.compile(r"（[^）]*）|\([^)]*\)")
+
+
+def end_framing(shot) -> str:
+    """L-203：本镜落幅原文 = 分镜 **motion** 最后一个“——”之后的文字（比喻段跳过，同 compiler.end_state 的切法）；
+    motion 没写“——”时退到 **运镜** 行的 落幅=…；都没有 → ""（调用方退回旧尾帧法）"""
+    motion = str(AR.g(shot, "motion_prompt") or "")
+    segs = C.split_dash(C.split_camera(motion)[1]) if motion else []
+    while len(segs) > 1 and segs[-1].strip().startswith(C.SIMILE):
+        segs.pop()
+    if len(segs) > 1 and segs[-1].strip("，,。；; "):
+        return segs[-1].strip("，,。；; ")
+    m = _END_RE.search(PT2.script_field(shot, "运镜"))
+    return m.group(1).strip("，,。；; ") if m else ""
+
+
+def _cast_names(shot) -> list[str]:
+    return [n for n in (AR.g(c, "name") for c in (AR.g(shot, "cast") or [])) if n]
+
+
+def last_angle_field(shot, end_text: str) -> str:
+    """尾帧的 **机位与景别**：景别 = 落幅第一个景别词；机位 = 落幅里写了机位 / 仰俯 / 过肩 / 正面侧面就用它，没写沿用首帧机位段
+    （机位不变是默认，变了要分镜写明）；第三段 = **运镜** 的 落幅=… 文字（焦点 / 同框说明），没有沿用首帧第三段"""
+    first = PT2.script_field(shot, "机位与景别")
+    af = PV.split_field(first) if first else []
+    size = AR.FR.size_of(end_text) or (af[0] if af else "")
+    clauses = [c.strip() for c in re.split(r"[，,；;]", end_text) if c.strip()]
+    names = _cast_names(shot)
+    cam = [c for c in clauses[:3] if any(w in c for w in _CAM_WORDS) and not any(n in c for n in names) and c != size]
+    camera = "、".join(cam) if cam else (af[1] if len(af) >= 2 else "")
+    if cam and len(af) >= 2 and not _HEIGHT_RE.search(camera):       # 落幅只写了方位没写高度 → 高度沿用首帧（机位高度默认不变）
+        hm = _HEIGHT_RE.search(_LABEL_PAREN_RE.sub("", af[1]))
+        if hm:
+            camera += "、" + hm.group(0)
+    m = _END_RE.search(PT2.script_field(shot, "运镜"))
+    tail = (m.group(1).strip() if m else "") or (af[2] if len(af) >= 3 else "")
+    return "｜".join(x for x in (size, camera, tail) if x)
+
+
+def compose_last_shot(shot, end_text: str):
+    """L-203：把本镜改写成“落幅镜”——img_prompt = 落幅原文（触发词沿用首帧），**机位与景别** 按落幅改，**构图** 换成 运镜 的 落幅=…
+    （没有就去掉），分拍 / 表演节拍去掉；人物表、场景、灯光、镜头、光学、造型沿用（身份 / 服装 / 场景 / 光线一致由参考图与这些字段保证）"""
+    from ns_schema.script import Extra
+    trig = list(AR.g(shot, "img_triggers") or [])
+    img = ("，".join(trig) + "，" if trig else "") + end_text
+    m = _END_RE.search(PT2.script_field(shot, "运镜"))
+    comp = ("落幅=" + m.group(1).strip()) if m else ""
+    angle = Extra(label="机位与景别", text=last_angle_field(shot, end_text))
+    new_extras, seen_angle = [], False
+    for e in AR.g(shot, "extras") or []:
+        lab = _LABEL_PAREN_RE.sub("", str(AR.g(e, "label") or "")).strip("*：: ")
+        if lab in _LAST_DROP_EXTRAS:
+            continue
+        if lab == "机位与景别":
+            new_extras.append(angle)
+            seen_angle = True
+        elif lab == "构图":
+            if comp:
+                new_extras.append(Extra(label="构图", text=comp))
+        else:
+            new_extras.append(Extra(**e) if isinstance(e, dict) else e)
+    if not seen_angle:
+        new_extras.append(angle)
+    upd = {"img_prompt": img, "motion_prompt": end_text, "motion_triggers": [], "extras": new_extras}
+    if isinstance(shot, dict):
+        return {**shot, **upd, "extras": [x.model_dump() for x in new_extras]}
+    return shot.model_copy(update=upd)
+
+
+def build_last_compose(project: str, ep, shot, g, first_job: dict, first_file: str, *, bible=None,
+                       prompt_override: str | None = None, plan_kw: dict | None = None) -> dict:
+    """L-203 尾帧（compose）：落幅当一张新图编——提示词 = 首帧同一套模板（景别 / 机位 / 构图 / 人物 / 道具 / 光线 + 风格 / 镜头 /
+    纠正器 / 材质词），参考 = 身份脸 / 造型 / 场景底图照首帧槽位逻辑（留一槽），通过契约的首帧挂在最后一张、只保持服装 / 发型 /
+    陈设 / 光线一致（槽满时顶掉最后一个非脸槽，见 continuity_slot）。放最后 + 弱指令的理由：Qwen-Image 多图编辑里 图1 是“被改的底图”，
+    首帧放图1 + “保持不变”正是 L-203 点名的复制问题（11-06 校准：旧法 111 对里 51% 构图相关 ≥ 0.80）；身份脸 / 造型放前面保住 Q1。
+    落幅写不出（motion 没有“——”、运镜没有 落幅=）→ 退回旧法（job.last_frame_mode = edit_fallback）"""
+    end_text = end_framing(shot)
+    if not end_text:
+        job = _build_last_edit(first_job, first_file, prompt_override=prompt_override)
+        job["last_frame_mode"], job["last_frame_mode_why"] = "edit_fallback", "分镜没写落幅（motion 无“——”、运镜无 落幅=）"
+        return job
+    kw = dict(plan_kw or {})
+    model = first_job.get("model") or "qwen_image_2.1"
+    shot2 = compose_last_shot(shot, end_text)                          # 参考槽与首帧同一套逻辑；槽满时首帧顶掉最后一个非脸槽（continuity_slot）
+    job = build_first(project, ep, shot2, g, bible=bible, model=model, prompt_override=prompt_override,
+                      continuity_ref=(first_file, LAST_CONTINUITY_LINE), **kw)
+    job.update({"id": first_job["id"] + ":last", "stage": "last", "last_prompt": first_job.get("last_prompt"),
+                "last_frame_mode": "compose", "end_framing": end_text, "first_frame_file": first_file,
+                "last_faces": first_job.get("last_faces") or [], "first_prompt_sha": _sha16(first_job.get("prompt") or "")})
+    if job.pop("previz", None) is not None or job.get("tier") == "turbo_previz":   # 首帧的 previz 深度图是起幅的，尾帧不能用
+        tier, ov = first_frame_tier(project, force="base35")
+        job["tier"], job["tier_overrides"], job["previz_skipped"] = tier, ov, "L-203：尾帧按落幅重新构图，不用首帧 previz 深度图"
+    job["compile_trace"] = trace_of(job)
+    return job
+
+
+def build_last(first_job: dict, first_file: str, *, prompt_override: str | None = None, project: str | None = None,
+               ep=None, shot=None, g=None, bible=None, mode: str | None = None, plan_kw: dict | None = None) -> dict:
+    """尾帧作业。方式按 run_style.json runs.<剧>.last_frame_mode（ns_agent.video_mode.last_frame_mode）：
+    edit（默认）= 旧法：通过契约的首帧作图1、项目方挑定的身份脸作图2；提示词 = bible last_frame_keep + 编译器 last_prompt；
+    compose（L-203）= 落幅单独构图（build_last_compose），需要 project / ep / shot / g；缺了退回旧法并记 edit_fallback。
+    两种都在作业里记 first_frame_file（尾帧 postflight 的 FL 首尾帧比对读它）"""
+    from ns_agent import video_mode as VM
+    proj = project or first_job.get("framing_project")
+    m = mode or VM.last_frame_mode(proj)
+    if m == "compose" and ep is not None and shot is not None and g is not None:
+        return build_last_compose(proj or "", ep, shot, g, first_job, first_file, bible=bible,
+                                  prompt_override=prompt_override, plan_kw=plan_kw)
+    job = _build_last_edit(first_job, first_file, prompt_override=prompt_override)
+    if m == "compose":
+        job["last_frame_mode"], job["last_frame_mode_why"] = "edit_fallback", "调用方没给 ep / shot / g（旧入口）"
+    return job
+
+
+def _build_last_edit(first_job: dict, first_file: str, *, prompt_override: str | None = None) -> dict:
+    """尾帧（旧法 edit）：通过契约的首帧作图1、项目方挑定的身份脸作图2；提示词 = 编译器 last_prompt（与 ASSETMASTER frames_v2 同法）。
     K-REN-953：首帧没送脸、尾帧结束状态写到脸 → 补送该人身份脸（first_job.last_faces）"""
     faces = list(first_job.get("face_files") or [])[:1]
     lines = ""
@@ -466,7 +658,8 @@ def build_last(first_job: dict, first_file: str, *, prompt_override: str | None 
         faces = [lf["file"]]
         lines = f"图2是{AR.ID_NAME.get(lf['character'], lf['character'])}的脸部参考（只取脸和发型，必须一致）。"
     job = {**first_job, "id": first_job["id"] + ":last", "stage": "last",
-           "prompt": lines + (prompt_override or first_job.get("last_prompt") or ""), "refs": [first_file] + faces}
+           "prompt": lines + (prompt_override or first_job.get("last_prompt") or ""), "refs": [first_file] + faces,
+           "first_frame_file": first_file, "last_frame_mode": "edit"}
     job["compile_trace"] = trace_of(job)
     return job
 

@@ -8,6 +8,8 @@ config/gen_contract.json "blocking_items"（缺键 / 非列表 = 不启用本策
   gaze   视线 / 排排站（L-200 项目方 11-06 看 ep01 总览：画中任何人看镜头、或多人正面并排站成一排合影式 = 不过、换种子重出）：
          Q9 看图 eye_contact / lineup 缺陷 + G1（YuNet 头部朝向）疑似看镜头。两者都有结论时以看图为准：看图真看过
          （evidence.model）且没报视线缺陷 → G1 只记录（YuNet 误报多）；看图没结果 → G1 自己挡。
+  FL     首尾帧差异（L-203 项目方 11-06：尾帧与通过契约的首帧太像 = 不过、换种子重出；只有尾帧阶段才有 FL 项，
+         gen_contract/first_last.py 出；首帧 postflight 里没有这一项，所以“只对 stage=last 生效”）
   也可直接写项 id（如 "Q3"），该项整项照旧挡。
 不在名单里的项（Q1a/Q1x/Q2–Q5/Q7/Q8/G1/Q9 其余缺陷/Q10 其余/QB 其余）照常跑、照常记，但 status 改成 na（原判留
 status_recorded + record_only=true），不进 blocking。apply() 原地改 pf 并返回；ok / blocking / score_infra 重算。"""
@@ -55,6 +57,8 @@ def _is_hard(it: dict, hard: set, vqa_gaze: bool | None = None) -> bool:
     iid, ev = it.get("id"), it.get("evidence") or {}
     if iid in hard:
         return True
+    if iid == "FL":
+        return False        # L-203：FL 不在名单里 = 只记录（名单里有 "FL" 已在上一行判硬）
     if iid == "G1":
         # L-200：gaze 硬项时 YuNet 的 G1 挡，但看图真看过且没报视线缺陷 → 以看图为准（G1 只记录，防 YuNet 误报）
         return "gaze" in hard and vqa_gaze is not True
