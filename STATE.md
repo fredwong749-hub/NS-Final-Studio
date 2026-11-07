@@ -1,5 +1,5 @@
 当前线：线 4（§2 防重合成验收）——线 2 ✅ 清零；线 3 卡在 G4（#4/#5 已执行 A11 仍 3/8；#7/#8 批准后核实前提不成立 → R4，待改写后的 #7/#8）
-已同步至：1aca3ee7（GitHub master / nsfinalstudio = 本地 HEAD，11-07 22:5x JST）
+已同步至：9a05bb6f（GitHub master = 本地 HEAD，11-08 08:5x JST）
 新基线冒烟：3/8（eval/results/20261107-0838.json；code=1aca3ee7）；最新 A11 3/8（eval/results/20261107-1347.json，code c9faf54d；首帧已出、尾帧 / 视频未出）
 线 4 验收：同输入连跑两遍 0 新版本文件；断一台同步 30 分钟 0 新版本文件；ep01 版本号只因真实新素材 +1；查清 ep_sig 的 "missing:<路径>" 嫌疑并给结论
 
