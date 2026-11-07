@@ -52,3 +52,14 @@
 3. 第四层（评估器误报，证据成立）：eval/smoke.py:44 OOM_RE 含 OOM；producer.py:3853 review_resident_hold 的 why 文本写着“（免 OOM）”→ 只要审图卡驻留，G4 就记“日志有 OOM”判失败，即使出了图。evaluator 冻结不动。
 4. review_resident_hold gpu33:3 本身正常（L-206 审图卡不派出图），不是拦截层。
 需要项目方：裁决清单 #4（第三层）、#5（第四层）。
+| A11 | 2026-11-08 03:4x | 总指令 第二部分 裁决 #4/#5 | G4：冒烟剧进期望 refs 表（1f593bc5）+ OOM 误报判定（75df58a9）；手动 inbox build 后表含 smoke_v2:3 | 两个 commit | **3/8**（G1/G2/G7） | 平 → 保留（项目方裁决，非盲试；首帧已出 = 实质推进）→ 根因报告 R3 | eval/results/20261107-1347.json，code c9faf54d；G4 首帧 3/3 镜有本窗口版本（每镜 8 版）、G3 缺项 6→3（只剩尾帧）；尾帧 / 视频 0；1500 s 超时；OOM 仍报（review_scale 尾巴的旧 last_error） |
+
+### R3 根因报告：A11 后 G4 仍不过（11-08 04:2x；G4 第 5 次不过，止损）
+推进：两层拦截已除（R1 第一层、R2 第三层）——冒烟 producer 本窗口真派图，三镜首帧各出 8 版（eval/results/20261107-1347.json G4 evidence.first）。
+剩下三层（证据只来自 results 的 once 输出尾巴与 oom 摘录；窗口日志又被 G7 重建清掉）：
+5. 尾帧拦截：once 尾巴 = ep01-S3 "尾帧生成契约 preflight 连续 3 次不过 → 本镜视频退回只给首帧（I2VA，L-204 D8；绑定首帧 v7）"，
+   preflight 理由 I6 “图3 的‘必须一致’标注不在提示词里”、I9 “实际送进模型的参考……与槽位规划不符”。I2VA 兜底 = 设计上不出尾帧，
+   而 G4 过门要 3 张尾帧（评估口径不动）→ 只要兜底触发，G4 必不过。待查：是冒烟夹具 eval/smoke/P4_smoke.md 尾帧行写法，还是编译器对 3 参考尾帧漏标（生产剧同型？ep01-S4 尾帧兜底同路径）。
+6. 视频：本窗口 0 段。冒烟剧的视频由谁出未核实（服务器 vidgen 按 series10_v2 jobs.json；smoke_v2 不在任何视频作业表里——待查证，不下结论）。
+7. OOM 判定：review_scale 事件的 tail 带 :8878 看图实例的历史 last_error（真 CUDA OOM，非本窗口生成）→ 每次都记“日志有 OOM”。属评估口径问题，按红线不改 eval。
+需要项目方：裁决清单 #6 / #7 / #8。
