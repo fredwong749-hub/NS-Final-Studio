@@ -1,10 +1,15 @@
+当前线：线 1（G4 取证）
+已同步至：1aca3ee7（GitHub master / nsfinalstudio = 本地 HEAD，11-07 22:5x JST）
+新基线冒烟：3/8（eval/results/20261107-0838.json；code=1aca3ee7；G1/G2/G7 过，G4 超时 0 派图）
+线 1 验收：G4 通过；或根因报告成立（写入者是谁、为什么停不掉/升不了、需要项目方做什么）
+
 # STATE — NS-Final Studio（唯一当前真相；每个会话结束覆盖更新；≤80 行）
 
-- 更新：2026-11-07 10:4x JST（PS-MASTER，按《审计与修复指令 20261106》Step 2 重写；旧文不抄）
+- 更新：2026-11-07 23:1x JST（PS-MASTER；工作方式按《破循环指令 20261107》，代码项按审计 20261106 + 补丁 v3）
 - 当前阶段：**Phase R（跑通）—— 冻结期**：禁止新功能、新计划文档、cut 新版本；唯一目标 = 冒烟可证明 ≥6/8
-- 仓库 HEAD / 服务器实跑：**sv-20261107-13**（ec89806e，11-07 20:24 deploy 两台；补丁 v3 §2 + 闸门修正）。已知：发版工具的提交信息仍是“系统版本（K-OPS-V01）”模板（违反审计规则，待改）
+- 仓库 HEAD：1aca3ee7（已推送）；服务器实跑：**sv-20261107-13**（ec89806e，11-07 20:24 deploy 两台）。已知：发版工具提交信息仍是“系统版本（K-OPS-V01）”模板（违反审计规则，排队）
 - 自动发版：**已冻结**（config/pipeline/release.json enabled=false，11-07 10:4x）
-- 冒烟分数：**3/8**（11-07 18:5x，code be687475 + A6，eval/results/20261107-0432.json；G1/G2/G7 过）。基线 2/8 → A6 升到 3/8。下一门 G4：producer once 25 分钟 0 派图
+- 冒烟分数：**3/8**（11-07 23:06，code 1aca3ee7，eval/results/20261107-0838.json；G1/G2/G7 过）。证据：A9 后 smoke_v2 control 22:40:59 写成 only=[S1,S2,S3]、hold 仅 gpu36:2/laptop:0 且窗口内未被覆盖；smoke producer 只记 priority_yield→series10_v2（22:45:02），0 派图
 
 ## 各环节最后一次成功证据（series10_v2 真实数据，非冒烟）
 - 剧本 / 分镜 / 提示词：ep01–ep04 已过（sop_gate 阶段见 data/pipeline/runs/series10_v2/）
