@@ -139,6 +139,9 @@ def dryrun(eps: list[int], only: set[str] | None = None, rec: Recorder | None = 
         try:
             ep, shot = P.find_shot(script, sid)
             job = FJ.build_first(project, ep, shot, script.globals)
+            # 11-07 PS-MASTER（L-128 / L-210）：期望 refs 表按“会在服务器出图”编——不指定道时 I12 本地专用资产一律失败关闭，
+            # 已触发的成人镜（ep03 S3/S5/S7）进不了期望表，服务器 refs_mismatch 永远挡。gpu33 / gpu36 都是项目方自有机器
+            job.setdefault("lane", os.environ.get("NS_DRYRUN_LANE", "gpu33:0"))
             pf = UF._contract(job)
             refs = [str(r) for r in job.get("refs") or []]
             res["shots"][sid] = {"ok": bool(pf.ok), "reasons": list(pf.reasons()) if not pf.ok else [], "refs": refs,
