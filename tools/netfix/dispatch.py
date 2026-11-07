@@ -155,6 +155,14 @@ def extra_runs() -> list[tuple[str, int]]:
     return sorted(out, key=lambda x: x[1])
 
 
+def is_smoke_run(run: str | None) -> bool:
+    """11-07 审计 Step 3 / G4（A9）：runs.json kind=smoke 的冒烟夹具剧——笔记本 producer 独占派图，不按分区、不挂服务器道；
+    服务器侧一单不派（防两边重复）。正式剧不受影响"""
+    if not run:
+        return False
+    return (((jl(RUNS, {}) or {}).get("runs") or {}).get(run) or {}).get("kind") == "smoke"
+
+
 NO_CONTROL_STATUS = ("archived",)   # 归档的剧不准备 control
 
 
@@ -301,6 +309,9 @@ def control_for(host: str, laptop_ctrl: dict | None, ready: dict | None, part: d
         taken = sorted({e for h, p in ph.items() if p == "laptop" for e in (part["images"].get(h) or [])})
         eps = sorted(set(eps) | set(taken))
     rs = ready_shots(ready)
+    smoke = is_smoke_run(run_id)
+    if smoke and host == "laptop":           # A9：冒烟剧的全部就绪集都由笔记本派
+        eps = sorted(rs)
     ready_eps = [e for e in eps if e in rs]
     only = sorted({norm_shot(s, run_id) for e in ready_eps for s in rs[e]})
     runs_extra = {}
@@ -311,12 +322,16 @@ def control_for(host: str, laptop_ctrl: dict | None, ready: dict | None, part: d
             if n:
                 runs_extra[run] = n
     only = only or [NONE]
-    if host == "laptop":
+    if host == "laptop" and smoke:           # A9：冒烟剧不挂服务器道（只留 laptop_hold / 退役 / 借出道）
+        hold = sorted(set(ov.get("laptop_hold") or []) | held_lanes(part))
+    elif host == "laptop":
         hold = sorted({ln for h, ls in (part.get("lanes") or {}).items() if h != "laptop" and ph.get(h, "server") != "laptop"
                        for ln in ls} | set(ov.get("laptop_hold") or []) | held_lanes(part))   # L-100（总调度 01:5x）：laptop_hold 无条件生效（笔记本 4080 / gpu36 GPU2 专做看图），不再只在代派阶段生效
     else:
         hold = sorted({ln for h, ls in (part.get("lanes") or {}).items() if h != host for ln in ls} | held_lanes(part))   # 主剧 / 每个 run 同一套
         if ph.get(host, "server") in ON_LAPTOP:  # 本机分区正由笔记本代派（或交还中）：一单都不派，防重复
+            only = [NONE]
+        if smoke:                                # A9：冒烟剧只由笔记本派
             only = [NONE]
     gp, by = global_pause(laptop_ctrl, part)
     fields = {"only": only, "hold_lanes": hold,

@@ -43,6 +43,7 @@
    ]
   },
   "smoke_v2": {
+   "kind": "smoke",
    "priority": 50,
    "status": "paused",
    "source": "eval-smoke",
