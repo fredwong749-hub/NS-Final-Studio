@@ -717,6 +717,26 @@ def assembly_sources(man: dict, stills: dict | None = None) -> tuple[dict, list[
     return {"shots": shots}, bad
 
 
+def assembly_input_sig(ep, host, args, music) -> str:
+    """§2b：合成输入指纹 = 入选内容签名（ep_sig）+ 配乐（不配 / 配乐文件内容 sha）"""
+    bgm = "no-bgm" if "--no-bgm" in args else (_file_sha(music) if music else None)
+    return hashlib.sha256(json.dumps([ep_sig(ep, host), bgm], ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
+
+
+def same_input_skip(ep, host, st, args, music) -> bool:
+    """逻辑纪律补丁 v3 §2b（11-07）：finalize 入口自检。输入指纹与上次成功版相同、上次成片还在 → 不合成、不占版本号，
+    状态回 assembled（resolved_sig 刷成当前签名，reopen_changed 不再拿它重开）。返回是否跳过"""
+    x = st["eps"][str(ep)]
+    sig = assembly_input_sig(ep, host, args, music)
+    last = x.get("final")
+    if x.get("assembled_input_sig") == sig and last and Path(last).exists():
+        x.update(status="assembled", resolved_sig=ep_sig(ep, host))
+        x.pop("force_finalize", None)
+        log("FINALIZE_SAME_INPUT", f"ep{int(ep):02d}", f"合成输入与 v{x.get('assembled_n')} 相同（{sig}），不重合成、不占版本号")
+        return True
+    return False
+
+
 def finalize(ep, host, st, ctrl):
     ver = f"v{int(st['eps'][str(ep)].get('assembled_n', 0)) + 1}"   # 每次重合成递增：已亲审签字的旧版不覆盖
     for k in ("assemble_err", "wait_msg", "hold_why", "assemble_fatal_sig"):   # FIX-VID D12：上一轮的旧错误不带进这一轮（ep01 挂着 11-04 的 ns_schema 报错）
@@ -782,6 +802,9 @@ def finalize(ep, host, st, ctrl):
         args.append("--no-bgm")   # data/music/epNN.wav 是旧剧（《为他而骚》）的 BGM，不能用在 series10
     else:
         args += ["--music-dir", str(mdir.relative_to(ROOT)).replace("\\", "/")]   # 整集 BGM（V1：tools/bgm/agent.py；V2：tools/bgm/bgm_library.py）
+    if same_input_skip(ep, host, st, args, music):
+        return
+    in_sig = assembly_input_sig(ep, host, args, music)
     t_asm = time.time()
     rc, out = run(args, 5400)
     log("assemble", f"ep{ep:02d}", rc, out.strip()[-300:].replace("\n", " "))
@@ -828,6 +851,7 @@ def finalize(ep, host, st, ctrl):
     st["eps"][str(ep)].update(status="assembled" if final else "assemble_failed", final=str(final) if final else None,
                               finalized=time.time(), assembled_n=int(ver[1:]) if final else int(ver[1:]) - 1,
                               resolved_sig=ep_sig(ep, host),
+                              assembled_input_sig=in_sig if final else st["eps"][str(ep)].get("assembled_input_sig"),
                               director={k: director.get(k) for k in ("film_score", "film_score_post", "lip_redo", "errors", "steps", "delivery_gate")} if director else None,
                               lip_redo=[r.get("shot") for r in director.get("lip_redo") or []] if director else [])
     if final and not LEGACY:
