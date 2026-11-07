@@ -113,7 +113,8 @@ def _runs(root: Path) -> tuple[str, list[str]]:
     # 总调度 20:1x：只给“在做”的剧建期望表（preparing / active / producing）；归档 / 冻结 / 暂停的剧（V1、第二季）跳过——
     # sv-15 部署时给已归档的 V1 跑 dryrun 报“没出结果”。恢复生产（status 改回）后下一次 auto 自动补上
     live = set(m.list_runs(root, status=None)) & {r for r, v in (m.registry(root).get("runs") or {}).items()
-                                                    if (v or {}).get("status") in LIVE_STATUSES}
+                                                    if (v or {}).get("status") in LIVE_STATUSES
+                                                    or (v or {}).get("kind") == "smoke"}   # 11-08 裁决 #4：冒烟夹具剧平时 paused、只在 G4 窗口翻 producing，也要有期望表（否则 F03 拒派）
     allr = [r for r in sorted(live) if m.import_path(r, root).exists()]
     return prim, ([prim] + [r for r in allr if r != prim]) if prim in allr else allr
 
