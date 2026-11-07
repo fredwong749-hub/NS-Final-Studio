@@ -2,7 +2,7 @@
 
 - 更新：2026-11-07 10:4x JST（PS-MASTER，按《审计与修复指令 20261106》Step 2 重写；旧文不抄）
 - 当前阶段：**Phase R（跑通）—— 冻结期**：禁止新功能、新计划文档、cut 新版本；唯一目标 = 冒烟可证明 ≥6/8
-- 仓库 HEAD：sv-20261107-12（010d2a26，master = nsfinalstudio）。**服务器实跑：sv-20261107-11**（59917a43，data/system_version.txt，11-07 10:04 deploy）；-12 的部署被我加的 timeout 中途杀掉（未完成）；sv-20261107-13 在闸门阶段被内存回收杀掉（未 cut）
+- 仓库 HEAD / 服务器实跑：**sv-20261107-13**（ec89806e，11-07 20:24 deploy 两台；补丁 v3 §2 + 闸门修正）。已知：发版工具的提交信息仍是“系统版本（K-OPS-V01）”模板（违反审计规则，待改）
 - 自动发版：**已冻结**（config/pipeline/release.json enabled=false，11-07 10:4x）
 - 冒烟分数：**3/8**（11-07 18:5x，code be687475 + A6，eval/results/20261107-0432.json；G1/G2/G7 过）。基线 2/8 → A6 升到 3/8。下一门 G4：producer once 25 分钟 0 派图
 
@@ -16,7 +16,7 @@
 ## 已知坏点（≤5）
 1. **冒烟三天没测**：没有任何证据证明当前 HEAD 过自己的冒烟门（审计 P0-2）
 2. ~~gpu33 视频道为 0~~ 11-07 18:24 已修：项目方 a 放行，两台 run_phase enforce（回退：ops/psmaster/runphase_enforce_1107.py --revert）；ep03 11 镜 rendering。gpu36 三卡仍空：ep02 3 镜排队未派（jobs.json 未重建，待查）
-3. ~~ep01 整集反复合成~~ 代码已修未上线（补丁 v3 §2）：a 内容签名 6107bdd2、b 同输入不占版本号 3de38aa1、c 单一递增者=视频机 ef01f578、d 预算按集累计 043333a7、e sweep 熔断 5b53e5d5。night 跑在 gpu36（ep01 assembled_n=75），冻结期未部署 → 验收（同输入两遍 0 新版本 / 断同步 30 min 0 新版本）待部署后做
+3. ~~ep01 整集反复合成~~ 代码已修未上线（补丁 v3 §2）：a 内容签名 6107bdd2、b 同输入不占版本号 3de38aa1、c 单一递增者=视频机 ef01f578、d 预算按集累计 043333a7、e sweep 熔断 5b53e5d5。已上线 sv-20261107-13（11-07 20:24，项目方 both 放行）；签名口径切换致 ep01/ep04 各重开一次（ep01→v76，预期）；验收（同输入 0 新版本 / 断同步 30 min 0 新版本）观察中
 4. **常驻进程动物园**：resident_sync / autoflow / api / tunnel / producer / night / gpu36 看图 多进程分三台；死一个就停（11-07 视频页全黑 = 当前版本视频回拉只剩手动，01:45 自查已报无人修；已加常驻回拉线，笔记本侧生效）
 5. 冒烟 G4 永远 0 派图：笔记本冒烟 producer 的 smoke_v2 control 被一个仍跑 11-01 版 dispatch 的常驻进程每拍写成 hold 全部 6 道 / only=__none__（A7 证据）；候选 = 11-03 起没重启的笔记本 producer serve / sentinel / monitor。另：笔记本内存常剩 4–7 GB
 
