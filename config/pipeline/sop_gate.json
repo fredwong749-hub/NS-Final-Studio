@@ -25,6 +25,8 @@
   "mode": "enforce",
   "enforce_from": "出图",
   "timeout_s": 30,
+  "expected_blocks": {"smoke_v2": ["QW-E2", "QW-E3"]},
+  "_expected_blocks": "11-07 审计 Step 3 / A5：按剧豁免的预期 block。只给冒烟夹具 smoke_v2（3 镜 15 秒，按设计过不了 6–8 镜 / 60–120 秒；与 eval/smoke.py EXPECTED_VALIDATE_BLOCKS 同口径）；正式剧不得加",
   "_doc": "W-GATE 11-06（tools/master/import_revalidate.py）：导入闸门只在导入那一刻判，之后新加的写作规则（QW-L12/L13/L14，L-201/L-203）不回头查已导入的集。这里按现行规则复验当前导入稿（validate_qwen_script --episode N，缓存键 = 稿 sha + 规则集指纹）。mode：off = 不复验；report（默认）= status / check 显示“导入稿按现行规则复验：block N（…）”，新结果写 data/pipeline/sop_gate/import_revalidate.jsonl 并开一条卡点，不挡任何东西；enforce = block>0 的集不能进 enforce_from 及以后阶段——开 enforce 是项目方决策，未启用"
  },
  "whole_episode_prompts": false,

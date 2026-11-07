@@ -227,6 +227,21 @@ def _report_issue(root: Path, run: str, ep: int, res: dict) -> None:
              issues=Path(root) / "data/pipeline/issues.jsonl", live=None)
 
 
+def _ensure_on_disk(root: Path, run: str, ep: int, key: str, res: dict) -> None:
+    """记忆里有、文件里没有（目录被隔离清空 / 别的进程写坏）→ 补写本集这一条；写不上不抛"""
+    try:
+        cp = _cache_path(root, run)
+        cache = _read_json(cp)
+        if key in (cache.get("results") or {}):
+            return
+        results = {k: v for k, v in (cache.get("results") or {}).items() if not k.startswith(f"ep{int(ep):02d}|")}
+        results[key] = res
+        _write_json(cp, {"_doc": "tools/master/import_revalidate.py 缓存：键 = epNN|导入稿 sha|规则集指纹", "fp": res.get("fp"),
+                         "results": results, "reported": dict(cache.get("reported") or {})})
+    except Exception as e:  # noqa: BLE001
+        sys.stderr.write(f"[import_revalidate] 补写缓存没写上：{e!r}" + chr(10))
+
+
 def revalidate(run: str, ep: int, root: Path = ROOT, import_doc: dict | None = None, autoflow: dict | None = None,
                cfg: dict | None = None, runner=None) -> dict | None:
     """当前导入稿按现行规则复验（缓存键 = 稿 sha + 规则集指纹）。找不到导入稿 → None。
@@ -244,6 +259,7 @@ def revalidate(run: str, ep: int, root: Path = ROOT, import_doc: dict | None = N
     key = f"ep{int(ep):02d}|{src['sha']}|{fp}"
     mk = ("res", str(Path(root).resolve()), run, key)
     if mk in _MEMO:
+        _ensure_on_disk(root, run, ep, key, _MEMO[mk])   # 11-07 冒烟 A6：进程内记忆命中也要保证落盘（目录被清后不写 = G7 两遍不一致）
         return {**_MEMO[mk], "cached": True}
     ek = ("err",) + mk[1:]
     if ek in _MEMO and time.time() - _MEMO[ek][0] < ERR_TTL_S:      # 出错结果记 ERR_TTL_S，期间不重跑校验器
@@ -264,6 +280,13 @@ def revalidate(run: str, ep: int, root: Path = ROOT, import_doc: dict | None = N
     try:
         rep = (runner or RUNNER)(Path(root), src["path"], int(ep), float(c.get("timeout_s") or DEFAULT["timeout_s"]))
         res.update(blocking=int(rep.get("blocking") or 0), by_rule=by_rule(rep), episodes_found=rep.get("episodes_found"))
+        exp = set(((c.get("expected_blocks") or {}).get(run)) or ())   # 11-07 冒烟 A5：测试剧的预期 block（如 3 镜夹具的 QW-E2/E3）不算
+        if exp:
+            waived = {k: v for k, v in res["by_rule"].items() if k in exp}
+            if waived:
+                res["by_rule"] = {k: v for k, v in res["by_rule"].items() if k not in exp}
+                res["blocking"] = max(0, res["blocking"] - sum(waived.values()))
+                res["waived"] = waived
         if not rep.get("episodes_found"):
             res["error"] = "校验器在该稿里没解析出本集"
     except Exception as e:  # noqa: BLE001  校验器自身出错：记错误（本进程 ERR_TTL_S 内不重跑），不写文件缓存

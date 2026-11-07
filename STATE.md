@@ -4,7 +4,7 @@
 - 当前阶段：**Phase R（跑通）—— 冻结期**：禁止新功能、新计划文档、cut 新版本；唯一目标 = 冒烟可证明 ≥6/8
 - 仓库 HEAD：sv-20261107-12（010d2a26，master = nsfinalstudio）。**服务器实跑：sv-20261107-11**（59917a43，data/system_version.txt，11-07 10:04 deploy）；-12 的部署被我加的 timeout 中途杀掉（未完成）；sv-20261107-13 在闸门阶段被内存回收杀掉（未 cut）
 - 自动发版：**已冻结**（config/pipeline/release.json enabled=false，11-07 10:4x）
-- 冒烟分数：**2/8**（11-07 11:0x 基线，HEAD effe0bd0，eval/results/20261106-2103.json；G1/G7 过）。A4 降 1/8 已回滚；A5 持平 2/8（G2 首次过、G7 红）已回滚；A6（A5 + 复验落盘修复）被内存回收杀掉未出分，改动在工作区待重跑
+- 冒烟分数：**3/8**（11-07 18:5x，code be687475 + A6，eval/results/20261107-0432.json；G1/G2/G7 过）。基线 2/8 → A6 升到 3/8。下一门 G4：producer once 25 分钟 0 派图
 
 ## 各环节最后一次成功证据（series10_v2 真实数据，非冒烟）
 - 剧本 / 分镜 / 提示词：ep01–ep04 已过（sop_gate 阶段见 data/pipeline/runs/series10_v2/）
