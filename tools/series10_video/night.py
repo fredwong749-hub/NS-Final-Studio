@@ -18,6 +18,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
@@ -426,9 +427,45 @@ def ep_shots(ep, host) -> dict:
     return {sid: r for sid, r in (stt.get("shots") or {}).items() if int(sid[2:4]) == int(ep)}
 
 
+_SHA_MEMO: dict = {}
+
+
+def _file_sha(p) -> str | None:
+    """文件内容 sha256（前 16 位）；按 (路径, 大小, mtime_ns) 记忆，免每拍重读大文件。文件不在 = None"""
+    try:
+        fp = Path(p) if Path(p).is_absolute() else ROOT / p
+        stt = fp.stat()
+    except OSError:
+        return None
+    key = (str(fp), stt.st_size, stt.st_mtime_ns)
+    if key not in _SHA_MEMO:
+        h = hashlib.sha256()
+        with open(fp, "rb") as fh:
+            for blk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(blk)
+        _SHA_MEMO[key] = h.hexdigest()[:16]
+    return _SHA_MEMO[key]
+
+
+def _chosen_file(r: dict) -> str | None:
+    ch = r.get("chosen")
+    if not ch:
+        return None
+    for x in list(r.get("renders") or []) + list(r.get("superseded") or []):
+        if x.get("variant") == ch and x.get("file"):
+            return x["file"]
+    return None
+
+
 def ep_sig(ep, host) -> str:
-    return json.dumps({sid: [r.get("status"), r.get("chosen"), len(r.get("renders") or [])]
-                       for sid, r in sorted(ep_shots(ep, host).items())}, ensure_ascii=False)
+    """逻辑纪律补丁 v3 §2a（11-07）：签名 = 各镜入选 take 的文件内容 sha。状态 / renders 条数一律不进签名——
+    vidgen 在镜落定后挪 superseded、清 renders 不再触发重合成（ep01 v1…v73 的头号成因）。
+    没入选 = None；入选文件本机读不到 = "missing:<路径>"（换了入选文件照样算变）"""
+    out = {}
+    for sid, r in sorted(ep_shots(ep, host).items()):
+        f = _chosen_file(r)
+        out[sid] = None if not f else (_file_sha(f) or f"missing:{f}")
+    return json.dumps(out, ensure_ascii=False, sort_keys=True)
 
 
 HOLD_RESOLVE_S = int(os.environ.get("NS_HOLD_RESOLVE_S", "900"))    # MINOR 6（L-205 50 min KPI）：等闸门的镜 45 → 15 min 按落定算
