@@ -1,4 +1,4 @@
-当前线：线 2（素材清零）——线 1 以根因报告 R1 验收（ITERATION_LOG），G4 待裁决 #1
+当前线：线 2（素材清零，清单 ASSETS-MISSING.md：4 项）——线 1 以根因报告 R1 验收（ITERATION_LOG），G4 待裁决 #1
 已同步至：1aca3ee7（GitHub master / nsfinalstudio = 本地 HEAD，11-07 22:5x JST）
 新基线冒烟：3/8（eval/results/20261107-0838.json；code=1aca3ee7；G1/G2/G7 过，G4 超时 0 派图）
 线 2 验收：ASSETS-MISSING.md（仓库根目录）清零；或剩余项全部转入本文末尾裁决清单（每条带缺省）
