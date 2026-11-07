@@ -1,0 +1,4 @@
+[
+ "{\"ts\": \"2026-11-08T03:22:28\", \"t\": 1794075748.91, \"ev\": \"review_resident_hold\", \"lane\": \"gpu33:3\", \"obj\": \"first:ep01-S1\", \"ep\": 1, \"counted\": false, \"rule\": \"L-206\", \"why\": \"审图卡上有看图进程驻留，不派出图单（免 OOM）\"}",
+ "2026-11-08T03:22:28 review_resident_hold {\"lane\": \"gpu33:3\", \"obj\": \"first:ep01-S1\", \"ep\": 1, \"counted\": false, \"rule\": \"L-206\", \"why\": \"审图卡上有看图进程驻留，不派出图单（免 OOM）\"}"
+]

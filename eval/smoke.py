@@ -43,6 +43,15 @@ CONFIG_IMPORTS = ["tools.autopilot.runs", "tools.master.sop_gate", "ns_schema.sc
 PROCS = {"autoflow_resident": "autoflow_resident.py", "tunnel_supervisor": "tunnel_supervisor.py"}
 OOM_RE = re.compile(r"out of memory|CUDA_ERROR_OUT_OF_MEMORY|\bOOM\b|torch\.cuda\.OutOfMemoryError", re.I)
 TIMEOUT_RE = re.compile(r"timed? ?out|超时", re.I)
+# 11-08 裁决 #5（R2 第四层，只修误报判定、不动口径）：producer 的预防性停派事件在说明文字里写“免 OOM”，不是 OOM 发生
+OOM_PREVENTIVE_EVS = ("review_resident_hold",)
+
+
+def is_oom_line(ln: str) -> bool:
+    """这一行算不算 OOM：OOM_RE 命中，且不是预防性停派事件（JSON 行 "ev": "<名>" 或 stdout 行 “<时间> <名> {…}”）"""
+    if not OOM_RE.search(ln):
+        return False
+    return not any(f'"ev": "{e}"' in ln or f" {e} " in ln for e in OOM_PREVENTIVE_EVS)
 VOLATILE_KEYS = {"at", "imported_at", "created_at", "generated_at", "updated_at", "ts", "t", "started_at", "done_at", "mtime"}
 TS_IN_NAME = re.compile(r"\d{8}[-_T]?\d{4,6}")
 # W32：:8800 冷启动慢（R2 16:52 G1 “TimeoutError: timed out”）→ 单次 30 s、失败再试 2 次（共 3 次）；G1 / G8 都走这里
@@ -678,7 +687,7 @@ def scan_g4_outputs(root: Path = ROOT, t0: float | None = None) -> dict:
     f["excluded_count"] = len(excluded)
     log = root / "data/producer/runs" / RUN / "log.jsonl"
     txt = log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""
-    f["oom"] = [ln for ln in txt.splitlines() if OOM_RE.search(ln)][:5]
+    f["oom"] = [ln for ln in txt.splitlines() if is_oom_line(ln)][:5]
     f["timeouts"] = [ln for ln in txt.splitlines() if TIMEOUT_RE.search(ln) and '"ev": "rendered"' not in ln][:5]
     return f
 
@@ -698,7 +707,7 @@ def collect_g4(pre_ok: bool, pre_why: str) -> dict:
     finally:
         RN.set_status(RUN, "paused", by="eval/smoke.py（W26）", why="冒烟 G4 窗口结束：翻回 paused（常驻进程不碰）", root=ROOT)
     f = {"rc": rc, "timeout_s": tmo, "tail": out.strip()[-300:], **scan_g4_outputs(t0=t0)}
-    f["oom"] = f["oom"] + [ln for ln in out.splitlines() if OOM_RE.search(ln)][:3]
+    f["oom"] = f["oom"] + [ln for ln in out.splitlines() if is_oom_line(ln)][:3]
     return f
 
 
