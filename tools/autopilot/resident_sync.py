@@ -88,7 +88,7 @@ SKIP_PARTS = {"node_modules", ".venv", "__pycache__", ".git", "_offline_pull", "
 SKIP_PREFIX = ("data/_quarantine", "data/_offline_pull", "data/cache/", "data/ab/", "data/api_8800", "data/review_pages/",
                "data/qa/iter_gate/", "data/autopilot/repair_chain/", "data/staging", "ops/logs/", "data/lb/")
 SKIP_NAMES = {"control.json", "heartbeat.json", "producer.pid", "registry.json", "night.pid", "night_control.json",
-              "run_phase.json", "registry_merged.json"}   # S2.4：run 级阶段只由笔记本算，不回拉；S2.5：合并登记表同（只推不拉）
+              "run_phase.json", "registry_merged.json", "sched_assign.json"}   # S3：调度器派单决定同（只推不拉）；S2.4：run 级阶段只由笔记本算，不回拉；S2.5：合并登记表同（只推不拉）
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=40", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4"]
 BATCH = 24 * 1024 * 1024
 STATE = ROOT / "data/autopilot/resident_sync.json"
@@ -482,14 +482,15 @@ def _local_ok(rel: str, size: int) -> bool:
     return p.is_file() and p.stat().st_size == size
 
 
-def pull_active_videos(host: str, dry: bool = False, batch_mb: float = 64.0) -> dict:
+def pull_active_videos(host: str, dry: bool = False, batch_mb: float = 64.0, quiet: bool = False) -> dict:
     """补拉：服务器 active.video 里笔记本没有（或大小不符）的片，分批 tar 拉回，按服务器大小核对后原子写进仓库对应路径"""
     av = remote_active_videos(host)
     todo = sorted(k for k, v in av.items() if not _local_ok(k, v))
     res = {"host": host, "active_videos": len(av), "missing": len(todo), "got": 0, "bad": [], "mb": round(sum(av[k] for k in todo) / 1e6, 1)}
     if dry or not todo:
         res["todo"] = todo[:200]
-        log("pull_active_videos", host, json.dumps({k: res[k] for k in ("active_videos", "missing", "mb")}, ensure_ascii=False), "dry" if dry else "")
+        if dry or not quiet:                 # 常驻线每 5 分钟一拍：没缺就不写日志（复审 nit 1）
+            log("pull_active_videos", host, json.dumps({k: res[k] for k in ("active_videos", "missing", "mb")}, ensure_ascii=False), "dry" if dry else "")
         return res
     global BATCH
     old, BATCH = BATCH, int(batch_mb * 1024 * 1024)
@@ -506,12 +507,16 @@ def pull_active_videos(host: str, dry: bool = False, batch_mb: float = 64.0) -> 
                             res["bad"].append(m.name)
                             continue
                         p = ROOT / m.name
-                        p.parent.mkdir(parents=True, exist_ok=True)
                         tmp = p.with_name(p.name + ".pulltmp")
-                        tmp.write_bytes(data)
-                        os.replace(tmp, p)
-                        os.utime(p, (m.mtime, m.mtime))
-                        res["got"] += 1
+                        try:                 # 复审 nit 3：单个文件写不进（审片页正开着它）只跳过这一个，下拍再补
+                            p.parent.mkdir(parents=True, exist_ok=True)
+                            tmp.write_bytes(data)
+                            os.replace(tmp, p)
+                            os.utime(p, (m.mtime, m.mtime))
+                            res["got"] += 1
+                        except OSError as e:
+                            res["bad"].append(m.name)
+                            log("pull_active_videos", host, "写不进", m.name, repr(e)[:80])
             except tarfile.TarError as e:
                 log("pull_active_videos", host, "批次 tar 读不全", repr(e)[:120])
                 res["bad"] += b
@@ -800,7 +805,7 @@ try:
 except Exception:
     cur = {}
 out = dict(cur)
-if rel in ("data/netfix/laptop_ctrl.json", "data/netfix/override_state.json") or rel.endswith("/episode_state.json") or rel.endswith("/run_phase.json") or rel.endswith("/registry_merged.json"):   # 快照：整文件覆盖（S2.2 集关闭标记 / S2.4 run 级阶段 / S2.5 合并登记表只有笔记本算）
+if rel in ("data/netfix/laptop_ctrl.json", "data/netfix/override_state.json") or rel.endswith("/episode_state.json") or rel.endswith("/run_phase.json") or rel.endswith("/registry_merged.json") or rel.endswith("/sched_assign.json"):   # 快照（S3 调度器派单决定同）：整文件覆盖（S2.2 集关闭标记 / S2.4 run 级阶段 / S2.5 合并登记表只有笔记本算）
     tmp = os.path.join(R, rel) + ".tmp"
     os.makedirs(os.path.dirname(tmp), exist_ok=True)
     json.dump(new, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
@@ -873,6 +878,27 @@ def registry_merged_tick(min_gap_s: float = 20.0) -> None:
     RMG.tick(run_sync_runs(), ROOT, log=log)
 
 
+_SA_LAST = {"t": 0.0}
+
+
+def sched_assign_tick(min_gap_s: float = 20.0) -> None:
+    """L-209 S3（W-S3）：每部在产剧算 data/pipeline/runs/<run>/sched_assign.json（tools/sched/assign.py；合并登记表 + run 级阶段 +
+    两台道状态 → Board.plan；变了或满 2 分钟才原子写；off = 不写）+ 记录“会派 vs 现网”。push_control 每台调一次 → min_gap_s 内不重复算。
+    出错只记日志（读者读不到 / 过期 = 静态分区，旧行为）"""
+    if time.time() - _SA_LAST["t"] < min_gap_s:
+        return
+    _SA_LAST["t"] = time.time()
+    try:
+        import importlib.util
+        sp = importlib.util.spec_from_file_location("ns_sched_assign_rs", ROOT / "tools/sched/assign.py")
+        SA = importlib.util.module_from_spec(sp)
+        sp.loader.exec_module(SA)
+    except Exception as e:   # noqa: BLE001  # arch-ok: 模块没部署 / 坏了 = 不算（执行器读不到决定 = 静态分区，旧行为），不能拖垮 push_control
+        log("sched_assign", "模块缺", repr(e)[:160])
+        return
+    SA.tick(run_sync_runs(), ROOT, log=log)
+
+
 def push_control(host: str, force: bool = False) -> dict:
     """NETFIX 接口（总调度 22:2x）：master_rejects.json、ready_episodes.json 变了才推；到服务器按对象合并（K-OPS-Q20），
     服务器上更晚的对象不被笔记本旧值盖回去"""
@@ -880,6 +906,7 @@ def push_control(host: str, force: bool = False) -> dict:
     episode_state_tick()                 # L-209 S2.2：推之前先按口径重算集关闭标记（含自动重开）
     run_phase_tick()                     # L-209 S2.4：推之前算一次 run 级阶段（两台登记表合并）
     registry_merged_tick()               # L-209 S2.5：推之前合并一次登记表（推两台只读）
+    sched_assign_tick()                  # L-209 S3：推之前算一次唯一调度器派单决定（推两台只读；enforce 时视频跨台）
     st = jl(STATE, {}) or {}
     hs = st.setdefault(host, {}).setdefault("control_sha", {})
     done = {}
@@ -1925,7 +1952,24 @@ def relay_pairs(run: str, part: dict | None = None) -> list[tuple[str, str, int]
     sec = ((part or {}).get("runs") or {}).get(run) or part or {}
     img = {int(e): h for h, eps in (sec.get("images") or (part or {}).get("images") or {}).items() for e in eps}
     vid = {int(e): h for h, eps in (sec.get("video") or (part or {}).get("video") or {}).items() for e in eps}
-    return sorted((img[e], h, e) for e, h in vid.items() if e in img and img[e] != h and img[e] in HOSTS and h in HOSTS)
+    out = {(img[e], h, e) for e, h in vid.items() if e in img and img[e] != h and img[e] in HOSTS and h in HOSTS}
+    for e in sched_relay_eps(run):      # L-209 S3：调度分片集——被派台出视频要本集首尾帧，从出图台中继给另一台
+        if img.get(e) in HOSTS:
+            out |= {(img[e], h, e) for h in HOSTS if h != img[e]}
+    return sorted(out)
+
+
+def sched_relay_eps(run: str) -> list[int]:
+    """调度分片集（video_shard.sched_eps：enforce 且决定没过期时有跨台视频的集 ∪ 已有调度领取的集）；模块缺 / 出错 = []"""
+    try:
+        import importlib.util
+        sp = importlib.util.spec_from_file_location("ns_video_shard_rs", ROOT / "tools/series10_video/video_shard.py")
+        VS = importlib.util.module_from_spec(sp)
+        sp.loader.exec_module(VS)
+        return [int(e) for e in VS.sched_eps(run)]
+    except Exception as e:  # noqa: BLE001  # arch-ok: 调度分片读不到 = 只按分区中继（旧行为），记日志
+        log("relay", run, "调度分片集读不到", repr(e)[:160])
+        return []
 
 
 def relay_video_frames(run: str | None = None, part: dict | None = None, ssh_fn=None, state_path: Path | None = None) -> dict:
@@ -2132,6 +2176,29 @@ def relay_thread(every_s: int = RELAY_EVERY_S, poll_s: float = RELAY_POLL_S, sle
         sleep(max(1.0, float(poll_s)))
 
 
+ACTIVE_VIDEOS_EVERY_S = int(os.environ.get("NS_ACTIVE_VIDEOS_EVERY_S", "300"))
+
+
+def active_videos_thread(every_s: int = ACTIVE_VIDEOS_EVERY_S, sleep=time.sleep, ticks: int | None = None, pull_fn=None) -> None:
+    """11-07 项目方撞到“视频页全黑”：puller 接管后 pull_active_videos 只剩手动调用，服务器新出的当前版本视频不回笔记本；
+    自查 media_missing 报了但没人修。现常驻：每 every_s 秒两台各补拉一次（没缺 = 只一次 ssh 列表）。NS_ACTIVE_VIDEOS=off 只停这条线"""
+    pull_fn = pull_fn or pull_active_videos
+    n = 0
+    while ticks is None or n < ticks:
+        n += 1
+        t0 = time.time()
+        if os.environ.get("NS_ACTIVE_VIDEOS", "").lower() not in ("off", "0", "no"):
+            for h in HOSTS:
+                try:
+                    pull_fn(h, quiet=True)
+                except Exception as e:  # noqa: BLE001  # arch-ok: 一台失败不影响另一台，下拍再补
+                    try:
+                        log("active_videos error", h, repr(e)[:200])
+                    except Exception:  # noqa: BLE001  # arch-ok: 日志写不了也不能让线程死（复审 nit 4）
+                        pass
+        sleep(max(5.0, every_s - (time.time() - t0)))
+
+
 def run_sync_thread(every_s: int = RUN_SYNC_EVERY_S) -> None:
     """每 every_s 秒对每台服务器跑一拍 run_sync_tick（一台失败不影响另一台）；NS_RUN_SYNC=off 只停这条线"""
     while True:
@@ -2173,6 +2240,9 @@ def control_files() -> list[str]:
         if rel not in out:
             out.append(rel)
         rel = f"data/pipeline/runs/{run}/run_phase.json"       # L-209 S2.4：run 级阶段（只有笔记本算；服务器 producer / night / lane_roles 读）
+        if rel not in out:
+            out.append(rel)
+        rel = f"data/pipeline/runs/{run}/sched_assign.json"    # L-209 S3：唯一调度器派单决定（只有笔记本算；服务器 video_shard 读，enforce 才生效）
         if rel not in out:
             out.append(rel)
         try:      # L-209 S2.5：两台合并登记表（只有笔记本写；服务器只读，producer 按开关比对 / 取别台事实）
@@ -2486,6 +2556,7 @@ def loop(pull_every_s: int = 1200, health_every_s: int = 300):
         import threading
         threading.Thread(target=run_sync_thread, name="run_sync", daemon=True).start()
         threading.Thread(target=relay_thread, name="relay_frames", daemon=True).start()   # W46：出图机 → 视频机首尾帧中继
+        threading.Thread(target=active_videos_thread, name="active_videos", daemon=True).start()   # 11-07：当前版本视频常驻回拉
         log("run_sync", "线程已启动", RUN_SYNC_EVERY_S, "s 一拍", list(HOSTS))
     if VQA_TICK:                         # W40 坏点②：gpu36 看图服务 / watcher 探测 + 不在就拉起 + 内网入口 + score_infra 上限报警（与 health 同拍）
         import threading
