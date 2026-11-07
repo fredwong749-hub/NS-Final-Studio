@@ -23,7 +23,7 @@
 2. ~~gpu33 视频道为 0~~ 11-07 18:24 已修：项目方 a 放行，两台 run_phase enforce（回退：ops/psmaster/runphase_enforce_1107.py --revert）；ep03 11 镜 rendering。gpu36 三卡仍空：ep02 3 镜排队未派（jobs.json 未重建，待查）
 3. ~~ep01 整集反复合成~~ 代码已修未上线（补丁 v3 §2）：a 内容签名 6107bdd2、b 同输入不占版本号 3de38aa1、c 单一递增者=视频机 ef01f578、d 预算按集累计 043333a7、e sweep 熔断 5b53e5d5。已上线 sv-20261107-13（11-07 20:24，项目方 both 放行）；签名口径切换致 ep01/ep04 各重开一次（ep01→v76，预期）；验收（同输入 0 新版本 / 断同步 30 min 0 新版本）观察中
 4. **常驻进程动物园**：resident_sync / autoflow / api / tunnel / producer / night / gpu36 看图 多进程分三台；死一个就停（11-07 视频页全黑 = 当前版本视频回拉只剩手动，01:45 自查已报无人修；已加常驻回拉线，笔记本侧生效）
-5. 冒烟 G4 0 派图：第一层（旧码 tunnel_supervisor 每 30 s 写 smoke control）已除；第二层 = producer.py:3959 优先级让路（smoke_v2 priority 50 让 series10_v2 9）→ 根因报告 R1，待裁决 #1。另：笔记本内存常剩 4–7 GB
+5. 冒烟 G4 0 派图：第一层（旧码 tunnel_supervisor 每 30 s 写 smoke control）已除；第二层 = producer.py:3959 优先级让路（smoke_v2 priority 50 让 series10_v2 0）→ 根因报告 R1，待裁决 #1。另：笔记本内存常剩 4–7 GB
 
 ## 线序（破循环指令 §3；前一线不过不进下一线）
 - 线 0 ✅ 462b230f：已推送 + 基线 3/8
@@ -33,7 +33,7 @@
 - 线 4：§2 两条硬验收 + 查 night.py ep_sig 的 "missing:<路径>" 嫌疑（已观察：ep01 停 v76，22:23:55 FINALIZE_SAME_INPUT 跳过，但 22:23:28 仍有 REOPEN）
 
 ## 项目方裁决清单（≤5，每条带缺省；清单外不停工）
-1. G4 第二层：冒烟窗口内把 smoke_v2 priority 50→1（只改 config/pipeline/runs.json 一个数，可逆；代价 = 每次冒烟约 25 分钟主剧笔记本侧暂停派新图）。**缺省：改**。止损律要求等裁决，未执行
+1. ✅ 项目方 11-08 00:0x 批准（原文“改 1”；更正：series10_v2 是 0 不是 9，1 仍让路 → 按批准意图改 -1）。G4 第二层：smoke_v2 priority 50→-1（只改 config/pipeline/runs.json 一个数，可逆；代价 = 每次冒烟约 25 分钟主剧笔记本侧暂停派新图）。**缺省：改**。止损律要求等裁决，未执行
 2. A9（41da4458）按“平→回滚”规则回滚与否：回滚 = 重新挂上已证实的第一层拦截，且需再重启 tunnel_supervisor 才生效。**缺省：保留**
 3. ep01 整集 45 s < 60 s（L-092）与 11-04 起 6 个待复核版本。**缺省：线 4 验收后逐一给结论，旧版本标废弃不删**
 

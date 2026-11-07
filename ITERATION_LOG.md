@@ -36,8 +36,8 @@
 5. 处置（选“升级”不选“停”）：tunnel_supervisor 管隧道，停掉 = 笔记本到两台服务器断线；22:36 重启到当前码（PID 26356），隧道 ADOPT 原连接，两台 hostname 探测通。
 6. 处置后证据：A9 窗口 22:40:59 control = only=[ep01-S1,S2,S3]、hold 仅 [gpu36:2, laptop:0]、paused=false；窗口内 mtime 不再变；23:04:46 窗口结束由 runs.json 改回 paused（正确）。
 第二层（未除）——优先级让路：
-7. data/producer/runs/smoke_v2/log.jsonl 22:40–23:05：只有 review_scale ×12 与 priority_yield ×1（22:45:02 to={series10_v2: 9}），0 条派单。
+7. data/producer/runs/smoke_v2/log.jsonl 22:40–23:05：只有 review_scale ×12 与 priority_yield ×1（22:45:02 to={series10_v2: 9}；9 = 该剧 ready 帧数，不是优先级），0 条派单。
 8. 代码：tools/autopilot/producer.py:3959-3965 dispatch_frames 先调 higher_priority_busy（:523-538）：priority 数字更小且 producing 的剧登记表里有 ready 首/尾帧 → 本剧整拍不派。
-9. 配置：config/pipeline/runs.json smoke_v2.priority=50、series10_v2.priority=9；series10_v2 生产中几乎总有 ready 帧 → 冒烟剧永远让路。
+9. 配置：config/pipeline/runs.json smoke_v2.priority=50、series10_v2.priority=0；series10_v2 生产中几乎总有 ready 帧 → 冒烟剧永远让路。
 10. 该层从 A5 起就在（第一层把它挡住看不见），不是 A9 引入。
 需要项目方：裁决清单 #1（冒烟窗口内 smoke_v2 priority）。producer.py 冻结，不改让路逻辑。
