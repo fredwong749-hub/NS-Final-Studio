@@ -1,6 +1,7 @@
 {
  "_doc": "W17 RELEASE-AUTO（总调度 MASTER-WSL 11-03；L-160 / L-163 “把所有自动化写在代码上”）：发版流水线开关与参数。读取方 tools/autopilot/release_tick.py（resident_sync loop 每拍）、tools/qa/system_version.py（release_cfg / xdist_stall_s）。请求文件 data/system_versions/release_request.json（nsfs.release_request/1），结果 data/system_versions/release_result.json。",
- "enabled": true,
+ "enabled": false,
+ "_enabled_audit_1107": "11-07 项目方转来《审计与修复指令》Step 1：冻结 K-OPS 自动 cut / release 分支，只留手工提交；冒烟 ≥6/8 后由项目方解冻。",
  "every_s": 60,
  "pytest_n": 4,
  "_pytest_n": "L-162：xdist 12 worker 在本机僵死两次 → release_tick 跑 cut 时设 NS_CUT_PYTEST_N=pytest_n（手工 cut 不受影响）",

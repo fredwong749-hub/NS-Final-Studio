@@ -97,3 +97,7 @@ gpu.lock.*
 assets_v2/
 # 总调度令牌（OVERSIGHT-F P1-4a）：由总调度会话生成，不进版本；agent 不许读 data/master/
 data/master/escalate.token
+
+# 11-07 审计 Step 1：运行时开关与生成物不入库（仓库留 state.example.json）
+config/pipeline/state.json
+knowledge/generated/

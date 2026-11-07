@@ -1,5 +1,13 @@
 # CLAUDE.md — NS-Final Studio 宪法（≤100 行，极少改）
 
+## ⛔ 硬规则（11-07 审计与修复指令 Step 1，优先于下文一切）
+- 每个会话结束必须覆盖更新 `STATE.md`（≤80 行：当前版本、冒烟分数+时间、能跑到哪一步、已知坏点 ≤5、下一轮候选）；没更新 STATE 的会话视为未完成。每做完一步在 `ITERATION_LOG.md` 追加一行（日期、做了什么、证据路径）。
+- 自动 cut / release 分支已冻结（config/pipeline/release.json enabled=false），只留手工提交；冒烟 ≥6/8 前禁止 cut 新版本、禁止新增功能、禁止新写计划文档。
+- 提交信息必须写清改了什么、为什么；禁止“系统版本（K-OPS-V01）”模板提交。（下文“commit 只走 system_version.py cut”冻结期间作废。）
+- `config/pipeline/state.json` 与 `knowledge/generated/` 不入库（.gitignore；仓库留 `config/pipeline/state.example.json`）。
+- 汇报发布状态不许只说“七门全绿”，必须同时报冒烟分数。
+- `tools/autopilot/producer.py` 冻结：只许改冒烟门直接相关的行，新功能写新模块（冒烟 ≥6/8 后由项目方解冻）。
+
 ## 项目是什么
 - 短剧全自动生产线：新剧本 P0 → 分镜/提示词 → 首帧/尾帧 → 视频 → 整集成片，目标 100% 无人介入（OWNER_CANON C-01）。
 - 当前主剧 run = `series10_v2`（config/pipeline/runs.json primary）；V1（series10）内容彻底隔离，只带方法论（C-14）。
