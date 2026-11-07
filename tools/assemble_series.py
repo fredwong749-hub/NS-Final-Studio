@@ -366,6 +366,21 @@ def build(ep: int, variant: str = "v1", *, preview: bool = False, pull_on: bool 
 
 # ---------------- 巡检（infra_watchdog 调用） ----------------
 
+SWEEP_BREAKER_N = 3      # 逻辑纪律补丁 v3 §2e：同集连续重拼 ≥ N 次且输入指纹集合没变 → 停拼报警
+SWEEP_SEEN_MAX = 8
+
+
+def _alarm(ep: int, why: str) -> None:
+    """熔断报警：登记卡点（data/pipeline/issues.jsonl）；登记失败只打印"""
+    try:
+        sys.path.insert(0, str(ROOT / "tools/master"))
+        import report_issue as RI
+        RI.report(run=RUN_ID, episode=int(ep), step="预览重拼熔断", who="assemble_series.sweep", what=why, blocking=False,
+                  fix_hint="查两台视频 state 合并为何摇摆（state_<host>.json 拉取 / 分片合并），修好后指纹出现新值即自动解除")
+    except Exception as e:  # noqa: BLE001
+        print(f"[assemble_series] 熔断报警没登记上：{e!r}", file=sys.stderr)
+
+
 def sweep(now: float | None = None, eps=range(1, N_EPS + 1), refresh: bool = True) -> list[int]:
     """哪集的入选来源指纹和预览 manifest 不同 → 记 sig_now（API 判过期）；距上次拼 ≥ MIN_GAP_S 且没有别的集在拼 → 重拼最多一集。
     返回本次拼了哪些集。防抖：同一集 10 分钟内最多一次；全局同一时刻只拼一集（BUILD_LOCK）"""
@@ -375,8 +390,11 @@ def sweep(now: float | None = None, eps=range(1, N_EPS + 1), refresh: bool = Tru
     try:
         merged = merged_state(refresh)
     except Exception as e:  # noqa: BLE001
+        # 逻辑纪律补丁 v3 §2e：拉取失败不得用旧副本算指纹（旧副本 + 两台摇摆 = 指纹永不对齐 = 每 600 s 重拼）→ 本拍不判
         st["last_error"] = repr(e)[:200]
-        merged = merged_state(False)
+        st["checked_at"] = now
+        write_json(SWEEP_STATE, st)
+        return []
     todo = []
     for e in eps:
         rows = plan(e, merged, best_effort_video=True)
@@ -386,6 +404,11 @@ def sweep(now: float | None = None, eps=range(1, N_EPS + 1), refresh: bool = Tru
         info["sig_now"] = sig
         info["stale"] = cur.get("signature") != sig
         info["built_at"] = cur.get("built_at")
+        if info.get("breaker") and sig not in (info.get("seen_sigs") or []):
+            info.pop("breaker", None)                    # 来了从没见过的新输入 → 熔断自动解除
+            info["streak"] = 0
+        if info.get("breaker"):
+            continue
         if info["stale"] and now - float(cur.get("built_at") or 0) >= MIN_GAP_S and now - float(info.get("last_try") or 0) >= MIN_GAP_S:
             todo.append(e)
     st["checked_at"] = now
@@ -398,6 +421,17 @@ def sweep(now: float | None = None, eps=range(1, N_EPS + 1), refresh: bool = Tru
         write_json(BUILD_LOCK, {"t": now, "ep": e})
         st["eps"][str(e)].update(building=True, build_started=now, eta_s=EST_BUILD_S, last_try=now)
         write_json(SWEEP_STATE, st)
+        info = st["eps"][str(e)]
+        sig = info.get("sig_now")
+        seen = list(info.get("seen_sigs") or [])
+        info["streak"] = (int(info.get("streak") or 0) + 1) if sig in seen else 1   # 连续重拼且输入指纹没出现新值
+        info["seen_sigs"] = (seen + ([sig] if sig not in seen else []))[-SWEEP_SEEN_MAX:]
+        if info["streak"] >= SWEEP_BREAKER_N:
+            info["breaker"] = True
+            write_json(SWEEP_STATE, st)
+            write_json(BUILD_LOCK, {"t": 0})
+            _alarm(e, f"连续 {info['streak']} 次重拼，输入指纹集合没变（{sorted(set(info['seen_sigs']))[:4]}）：停拼等人查")
+            break
         try:
             build(e, preview=True)
             built.append(e)
