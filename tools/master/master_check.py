@@ -35,7 +35,7 @@ ACTIVE = ("preparing", "active", "producing")
 SWITCH_EXPECT = [
     ("agent_dispatcher.enabled", "config/pipeline/agent_dispatcher.json", ["enabled"], "eq", True, "L-138 做完测过就开"),
     ("agent_dispatcher.max_concurrent", "config/pipeline/agent_dispatcher.json", ["max_concurrent"], "le", 2, "L-138 限 2 并发"),
-    ("asset_worker.max_parallel", "config/pipeline/asset_worker.json", ["max_parallel"], "le", 2, "L-140 否决 5 道并行 → 2"),
+    ("asset_worker.max_parallel", "config/pipeline/asset_worker.json", ["max_parallel"], "le", 6, "11-05 项目方“全部显卡给他”取代 L-140 的 asset_worker 部分：≤ 6（除坏卡 gpu33:2 外全部道）"),
     ("asset_worker.render", "config/pipeline/asset_worker.json", ["render"], "info", None, "总调度 01:1x 开"),
     ("asset_worker.voice", "config/pipeline/asset_worker.json", ["voice"], "info", None, "总调度：未批"),
     ("asset_worker.golden", "config/pipeline/asset_worker.json", ["golden"], "info", None, "阶段 B 待开"),
