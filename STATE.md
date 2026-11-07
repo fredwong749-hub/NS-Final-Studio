@@ -15,7 +15,7 @@
 
 ## 已知坏点（≤5）
 1. **冒烟三天没测**：没有任何证据证明当前 HEAD 过自己的冒烟门（审计 P0-2）
-2. **gpu33 视频道为 0**：run_phase 仍 record，gpu33 本机算阶段（只看自己数据）≠ 中心结果 → ep03 11 镜干等；修法（run_phase enforce）在未发的 X 版里
+2. ~~gpu33 视频道为 0~~ 11-07 18:24 已修：项目方 a 放行，两台 run_phase enforce（回退：ops/psmaster/runphase_enforce_1107.py --revert）；ep03 11 镜 rendering。gpu36 三卡仍空：ep02 3 镜排队未派（jobs.json 未重建，待查）
 3. **ep01 整集反复合成**：data/episodes/series10_v2/ 有 ep01_v1…v73，几十个大小完全相同 → 合成触发条件有环，浪费算力
 4. **常驻进程动物园**：resident_sync / autoflow / api / tunnel / producer / night / gpu36 看图 多进程分三台；死一个就停（11-07 视频页全黑 = 当前版本视频回拉只剩手动，01:45 自查已报无人修；已加常驻回拉线，笔记本侧生效）
 5. 笔记本内存紧（32 GB 常剩 4–7 GB）：cut 闸门与冒烟 G4（1500 s）都被 Claude Code 内存回收杀过；G4 另有自身问题：producer once 只做了看图扩容、没派一张图（A5 证据）
