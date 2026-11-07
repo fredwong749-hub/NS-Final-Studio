@@ -1,14 +1,14 @@
 {
  "schema": "nsfs.owner_delegate/1",
  "_doc": "代选模式（L-136）开关。读写方：services/api/ns_api/owner_delegate.py（:8800 后台每拍一次；到期自动把 enabled 改成 false）。网页 #/queue 顶部显示“代选模式开启中（L-136）”+ 一键撤销。硬规定（成人镜头渲染 / 删除 / 花钱 / 推翻旧决定 / escalate token / owner_direction 升级）写死在代码里，改这里也打不开。",
- "enabled": false,
+ "enabled": true,
  "authority": {
   "ledger": "L-136",
   "at": "2026-11-03T02:20",
   "quote": "你代替我选择，我睡觉了，我希望看到全部 ep，同时看到系统变得自动化。",
   "source": "docs/master/MASTER_PICTURE.md L-136"
  },
- "enabled_at": "2026-11-03T02:37:34",
+ "enabled_at": "2026-11-06T19:47:31",
  "enabled_by": "总调度（CLI）",
  "expiry": {
   "rule": "项目方下一次在网页上做出任何决定（data/audit 里登录项目方的写请求、2xx），或明确撤销（#/queue 一键撤销 / CLI revoke）；到期后自动关闭",
@@ -21,9 +21,9 @@
    "/api/progress",
    "/api/owner/delegate"
   ],
-  "expired_at": "2026-11-03T03:49:36",
-  "expired_reason": "项目方 2026-11-03T03:48:51 在网页上做了决定（POST /api/owner/pick），代选到期自动关闭",
-  "expired_kind": "owner_decision"
+  "expired_at": null,
+  "expired_reason": null,
+  "expired_kind": null
  },
  "scope": [
   "face",

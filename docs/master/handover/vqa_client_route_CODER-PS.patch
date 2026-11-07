@@ -1,0 +1,117 @@
+diff --git a/services/agent/ns_agent/vqa/client.py b/services/agent/ns_agent/vqa/client.py
+index 86a8df9..62c966e 100644
+--- a/services/agent/ns_agent/vqa/client.py
++++ b/services/agent/ns_agent/vqa/client.py
+@@ -15,7 +15,14 @@ from pathlib import Path
+ from . import ROOT, cfg, rubric
+ 
+ CACHE = ROOT / "data" / "vqa" / "verdicts"
++ROUTE_LOG = ROOT / "data" / "vqa" / "route.jsonl"
+ LOCAL_HOSTS = ("127.0.0.1", "localhost")
++# MASTER-WSL 15:30 ASSIGN（项目方：“启动多线程 agents 修复 debug”）：14:34–14:48 本机 8870 一直在、排队 37 单，
++# producer vqa_gate 全部 TimeoutError——原因：①/health 只给 3 秒，本机忙时探测超时就当“不在”改走 8871（隧道当时断）；
++# ②单次超时 wait_s+120 不够排队；③TimeoutError 直接抛出。现在：本机 loaded 就只走本机；超时按实测 ×2 × 排队算；超时 = 未测（retry）
++HEALTH_TIMEOUT_S = 10
++PER_JOB_DEFAULT_S = 60.0
++TIMEOUT_CAP_S = 3 * 3600
+ 
+ 
+ def _url() -> str:
+@@ -60,6 +67,58 @@ def _local_up(url: str) -> bool:
+         return False
+ 
+ 
++def _health(url: str) -> dict | None:
++    """本机服务 /health → dict（loaded / queue …）；没响应但端口开着（单线程服务正忙）→ {"busy": True}；端口都不通 → None"""
++    try:
++        with urllib.request.urlopen(url + "/health", timeout=HEALTH_TIMEOUT_S) as r:
++            try:
++                return json.loads(r.read() or b"{}") or {"loaded": None}
++            except ValueError:
++                return {"loaded": None}
++    except (OSError, urllib.error.URLError):
++        import socket
++        hp = url.split("//", 1)[-1].split("/", 1)[0]
++        host, _, port = hp.partition(":")
++        try:
++            with socket.create_connection((host, int(port or 80)), timeout=2):
++                return {"busy": True}
++        except OSError:
++            return None
++
++
++def _per_job_s() -> float:
++    """本机看图实测单次耗时：route.jsonl 里最近 50 次本机成功的 seconds 中位数；没有记录 → PER_JOB_DEFAULT_S"""
++    try:
++        rows = ROUTE_LOG.read_text(encoding="utf-8").splitlines()[-400:]
++    except OSError:   # arch-ok: 还没有路由日志 = 用默认单次耗时
++        return PER_JOB_DEFAULT_S
++    xs = []
++    for ln in rows:
++        try:
++            r = json.loads(ln)
++        except ValueError:   # arch-ok: 坏行跳过
++            continue
++        if r.get("route") == "local" and r.get("ok") and r.get("seconds"):
++            xs.append(float(r["seconds"]))
++    xs = sorted(xs[-50:])
++    return xs[len(xs) // 2] if xs else PER_JOB_DEFAULT_S
++
++
++def client_timeout(wait_s: float, health: dict | None) -> float:
++    """单次超时：max(wait_s + 120, 本机实测单次耗时 × 2 × (排队数 + 1))，封顶 TIMEOUT_CAP_S"""
++    q = int((health or {}).get("queue") or 0)
++    return float(min(TIMEOUT_CAP_S, max(wait_s + 120, 2 * _per_job_s() * (q + 1))))
++
++
++def _route_log(rec: dict) -> None:
++    try:
++        ROUTE_LOG.parent.mkdir(parents=True, exist_ok=True)
++        with ROUTE_LOG.open("a", encoding="utf-8") as f:
++            f.write(json.dumps({"at": time.strftime("%F %T"), **rec}, ensure_ascii=False) + chr(10))
++    except OSError:   # arch-ok: 路由日志写不了不挡看图
++        pass
++
++
+ def _post_local(url: str, body: dict, timeout: float) -> dict:
+     r = urllib.request.Request(url + "/generate", data=json.dumps(body).encode("utf-8"),
+                                headers={"Content-Type": "application/json"})
+@@ -117,13 +176,17 @@ def generate(req: dict, *, wait_s: float = 1800, refresh: bool = False, label: s
+             "max_new_tokens": int((cfg().get("model") or {}).get("max_new_tokens", 900)),
+             "images": [{k: v for k, v in im.items()} for im in req["images"]], "refresh": refresh}
+     url = _url()
+-    if not _local_up(url):
++    h = _health(url)
++    route = "local" if h is not None else None          # 本机 loaded / 正忙（端口开着）→ 只走本机排队，不跳隧道
++    if h is None:
+         # VQAGATE 11-01：本机服务（8870，笔记本 4080）没起时，先试常驻 ssh 隧道 127.0.0.1:8871 → gpu36:8870（tools/vqa/tunnel.ps1；
+         # 一条长连接，免得每张图都走一次跳板握手），再退回单次 ssh 管道
+         alt = url.rsplit(":", 1)[0] + ":" + str(int(url.rsplit(":", 1)[1].split("/")[0]) + 1)
+         url = alt if _local_up(alt) else None
++        route = "tunnel" if url else None
+         if not url:                     # NETFIX 11-01（K-OPS-N03）：在服务器上跑（gpu33 常驻 producer）时走 gpu36 内网入口
+             url = _lan_url()
++            route = "lan" if url else None
+         if url:                       # 隧道那头是 gpu36，读不到本机路径：和 ssh 管道一样先缩图转字节（20:xx gpu36 FileNotFoundError）
+             for im in body["images"]:
+                 if "path" in im and Path(im["path"]).exists():
+@@ -144,7 +207,18 @@ def generate(req: dict, *, wait_s: float = 1800, refresh: bool = False, label: s
+             if "path" in im and Path(im["path"]).exists():
+                 im["b64"] = base64.b64encode(_shrink(Path(im["path"]), im.get("max_pixels"))).decode()
+                 im.pop("path")
+-    res = _post_local(url, body, wait_s + 120) if url else _post_ssh(body, wait_s + 120)
++        route = "lan"
++    route = route or "ssh"
++    tmo = client_timeout(wait_s, h if route == "local" else None)
++    t0 = time.time()
++    try:
++        res = _post_local(url, body, tmo) if url else _post_ssh(body, tmo)
++    except (TimeoutError, subprocess.TimeoutExpired, OSError, urllib.error.URLError) as e:
++        # 超时 / 断连 = 没测成（untested，下游 Q9 记“未测”、按退避重试），不判 fail
++        res = {"error": f"看图未测（{route} {type(e).__name__}，等了 {round(time.time() - t0)} 秒）", "untested": True, "retry": True}
++    _route_log({"route": route, "url": url, "label": label, "key": key, "queue": (h or {}).get("queue"),
++                "loaded": (h or {}).get("loaded"), "busy": bool((h or {}).get("busy")), "timeout_s": round(tmo),
++                "seconds": round(time.time() - t0, 1), "ok": "error" not in res, "error": (res.get("error") or "")[:200] or None})
+     if "error" not in res:
+         res["key"] = key
+         cf.write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
