@@ -744,13 +744,13 @@ checks:
     type: exists
     paths: [tools/imglab/picture_index.py]
   - id: D-V2-190
-    decision: L-190（项目方 11-05 10:5x “1，2，3 都同意”：发版 / 部署交常驻 release_tick 自动执行，一次授权）
-    title: release.json enabled = true（release_tick 随 resident_sync 每拍自动 cut → deploy）
+    decision: L-190（项目方 11-05 10:5x 自动发版）→ 11-07 被项目方转来的《审计与修复指令 20261106》Step 1 取代：冻结自动 cut，只留手工发版；冒烟 ≥6/8 后由项目方解冻
+    title: release.json enabled = false（审计冻结期：release_tick 不自动 cut / deploy）
     type: json
     file: config/pipeline/release.json
     path: [enabled]
     op: eq
-    value: true
+    value: false
   - id: D-V2-191
     decision: L-191（项目方 11-05 12:xx 选 A：ep01 首帧改 35 步 base 定稿档；多画人由 Q1 + 看图人数闸挡）
     title: render_quality.json first_frame_tier.runs.series10_v2.default = base35（⤴ L-206：ep02 起 turbo_previz，见 D-V2-206）
