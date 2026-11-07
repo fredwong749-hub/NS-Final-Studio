@@ -199,6 +199,11 @@ class Env:
         ri = _load("report_issue_for_health", "tools/master/report_issue.py", self.root)
         return ri.report(run=run, episode=0, step=step, who=WHO, what=what, blocking=blocking, fix_hint=fix_hint).get("id")
 
+    def close_issue(self, issue_id: str) -> None:
+        """11-07：恢复 / 重报时关掉旧卡点（之前只写 CHANNEL“已恢复”，卡点一直 open，堆到 72 条把真问题淹了）"""
+        ri = _load("report_issue_for_health", "tools/master/report_issue.py", self.root)
+        ri.close(issue_id, sop_updated=False)
+
     def channel(self, level: str, text: str, now: float) -> None:
         line = f"{jst_hm(now)}(JST) | {WHO} | {level} | {text}\n"
         fd = os.open(self.root / "docs/master/CHANNEL.md", os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
@@ -525,6 +530,11 @@ def report_finding(env: Env, cfg: dict, st: dict, f: dict, act: dict, now: float
         env.channel("ERROR" if breaker else "NOTE", f"[{f['key']}] {what}（动作：{act.get('action')}；卡点 {issue or '登记失败'}）", now)
     except OSError:   # arch-ok: CHANNEL 写不了 = 状态文件里仍有记录
         pass
+    if issue and r.get("issue") and r["issue"] != issue:      # 同一问题重报：旧卡点关掉，只留最新一条
+        try:
+            env.close_issue(r["issue"])
+        except Exception:  # noqa: BLE001  # arch-ok
+            pass
     rep[f["key"]] = {"at": now, "issue": issue, "breaker": breaker}
 
 
@@ -556,7 +566,12 @@ def tick(env: Env | None = None, cfg: dict | None = None, state: dict | None = N
         cnt.pop(k)
         if k in (st.get("reported") or {}):
             out["resolved"].append(k)
-            st["reported"].pop(k, None)
+            old = (st["reported"].pop(k, None) or {}).get("issue")
+            if old:
+                try:
+                    env.close_issue(old)
+                except Exception:  # noqa: BLE001  # arch-ok: 关不掉 = 卡点留着，不拖垮一拍
+                    pass
             (st.get("remedy") or {}).get(k, {}).pop("streak", None)
             try:
                 env.channel("NOTE", f"[{k}] 已恢复", now)

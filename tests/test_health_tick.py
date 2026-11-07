@@ -32,6 +32,7 @@ class FakeEnv(H.Env):
         self.calls, self.chan, self.issues, self.pending = [], [], [], {}
         self.stale, self.probe_ret, self.report_exc, self.run_ok = [], "started", None, True
         self.mt = {}
+        self.closed = []
 
     def now(self): return self._now
     def procs(self): return list(self._procs)
@@ -48,6 +49,7 @@ class FakeEnv(H.Env):
             raise self.report_exc
         self.issues.append((step, what, blocking)); return f"ISS-{len(self.issues)}"
     def channel(self, level, text, now): self.chan.append((level, text))
+    def close_issue(self, issue_id): self.closed.append(issue_id)
     def mtime(self, path):
         return self.mt.get(Path(path).name, super().mtime(path))
 
@@ -465,3 +467,16 @@ def test_guard_scripts_peer_and_health_hooks():
     assert r"data\master\health\health.json" in rg and "want_restart_autoflow.json" in rg and "Move-Item" in rg and "Remove-Item" not in rg.split("function AutoflowWanted", 1)[1].split("Log \"守护启动", 1)[0]
     for f in ("register_resident_guard.ps1", "register_monitor_guard.ps1"):
         assert "-RepetitionInterval (New-TimeSpan -Minutes 5)" in (ROOT / "ops/autostart" / f).read_text(encoding="utf-8-sig")
+
+
+def test_recovery_closes_issue(tmp_path):
+    """11-07：恢复时关掉 SELF-HEAL 自己开的卡点（之前一直 open，堆到 72 条）"""
+    e = base(tmp_path, procs=GUARDS + TUN)
+    st = {}
+    for i in range(6):
+        e._now = NOW + i * 45
+        H.tick(e, cfg(), st, save=False)
+    assert e.issues and not e.closed
+    e._procs = ALL_UP
+    H.tick(e, cfg(), st, save=False)
+    assert e.closed and set(e.closed) <= {f"ISS-{i + 1}" for i in range(len(e.issues))}
