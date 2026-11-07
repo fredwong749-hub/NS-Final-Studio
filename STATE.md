@@ -1,7 +1,7 @@
-当前线：线 2（素材清零，清单 ASSETS-MISSING.md：4 项）——线 1 以根因报告 R1 验收（ITERATION_LOG），G4 待裁决 #1
+当前线：线 4（§2 防重合成验收）——线 2 ✅ 清零；线 3 卡在 G4（裁决 #4/#5 未回），按止损律跳线
 已同步至：1aca3ee7（GitHub master / nsfinalstudio = 本地 HEAD，11-07 22:5x JST）
 新基线冒烟：3/8（eval/results/20261107-0838.json；code=1aca3ee7）；最新 A10 3/8（eval/results/20261107-1322.json，code 354e80c0）
-线 2 验收：ASSETS-MISSING.md（仓库根目录）清零；或剩余项全部转入本文末尾裁决清单（每条带缺省）
+线 4 验收：同输入连跑两遍 0 新版本文件；断一台同步 30 分钟 0 新版本文件；ep01 版本号只因真实新素材 +1；查清 ep_sig 的 "missing:<路径>" 嫌疑并给结论
 
 # STATE — NS-Final Studio（唯一当前真相；每个会话结束覆盖更新；≤80 行）
 
@@ -28,9 +28,9 @@
 ## 线序（破循环指令 §3；前一线不过不进下一线）
 - 线 0 ✅ 462b230f：已推送 + 基线 3/8
 - 线 1 ✅（根因报告 R1）：G4 待裁决 #1
-- 线 2 ▶ 素材清零：ASSETS-MISSING.md，第一项 ep01 S1 首帧
-- 线 3：冒烟冲 6/8（G5→G6→G8，一门一 commit）
-- 线 4：§2 两条硬验收 + 查 night.py ep_sig 的 "missing:<路径>" 嫌疑（已观察：ep01 停 v76，22:23:55 FINALIZE_SAME_INPUT 跳过，但 22:23:28 仍有 REOPEN）
+- 线 2 ✅ 素材清零：ASSETS-MISSING.md 4/4 销账（ep01-S1 首尾帧 + 新视频；ep02-S1/S4/S7 本剧首帧）
+- 线 3 ⏸ 冒烟冲 6/8：G4 未过 → G5 起全跳；等裁决 #4/#5
+- 线 4 ▶ §2 两条硬验收 + 查 night.py ep_sig 的 "missing:<路径>" 嫌疑（已观察：ep01 停 v76，22:23:55 FINALIZE_SAME_INPUT 跳过，但 22:23:28 仍有 REOPEN）
 
 ## 项目方裁决清单（≤5，每条带缺省；清单外不停工）
 1. ✅ 已执行 354e80c0（项目方批准“改 1”，按意图取 -1：series10_v2 是 0）。结果 A10：3/8 平，G4 不再超时、15.8 s 结束，新拦截见 R2
