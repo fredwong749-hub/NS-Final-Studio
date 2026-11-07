@@ -24,4 +24,20 @@
 | A7 | 2026-11-07 19:0x | Phase R | G4：dispatch.py 对 kind=smoke 剧不挂服务器道 → 笔记本冒烟 producer 能派图 | tools/netfix/dispatch.py control_for + runs.json smoke_v2.kind | **3/8**（G1/G2/G7） | 持平 → 已回滚 | 改动没生效：A7 窗口 19:03:42 写 smoke_v2 control 的是一个仍跑 11-01 版 dispatch（无 L-202 字样）的常驻进程，照旧 hold 全部 6 道、only=__none__；候选为 11-03 起没重启过的笔记本 producer serve / sentinel / monitor。eval/results/20261107-0503.json |
 | P2 | 2026-11-07 20:2x | 冻结期例外（项目方 both） | 补丁 v3 §2 上线 gpu36 + 笔记本 11-03 起的旧常驻进程重启 | 发版 sv-20261107-13（ec89806e；night.py / assemble_series.py + 7 测试；闸门三修：RUNTIME_IGNORED 豁免、D-V2-190 跟随冻结、ops/psmaster 归 FACTORY）；producer serve / sentinel / monitor 重启 | —（非冒烟） | 已部署 | 20:24 两台 night 跑新码；签名口径切换 → ep01/ep04 各重开一次（预期，ep01 将到 v76）；验收（同输入 0 新版本）观察中；注意：发版工具生成的提交信息仍是“系统版本（K-OPS-V01）”模板，违反审计规则，待改 system_version.py |
 | B1 | 2026-11-07 20:5x | Phase R 基线 | P2（sv-13 上线 + 旧常驻进程重启）后重跑 | 无代码改动 | **3/8**（G1/G2/G7） | 平 → 记基线（无改动可回滚） | eval/results/20261107-0625.json，code 8d9e4135；G4 仍 0 派图 |
-| A9 | 2026-11-07 22:4x | Phase R / 线 0 基线 | G4：重启 11-05 起跑旧码的 tunnel_supervisor（每 30 s reconcile 写 smoke control）+ dispatch 对 kind=smoke 剧笔记本独占派图 | 41da4458（dispatch.py + runs.json kind + 测试）；tunnel_supervisor 22104→26356 | **3/8**（G1/G2/G7） | 平 → 回滚（线 1 执行） | eval/results/20261107-0838.json，code 1aca3ee7；control 已对（22:40:59 only=[S1,S2,S3]、hold 仅 gpu36:2/laptop:0、窗口内未被覆盖），但 producer 22:45:02 priority_yield→series10_v2(9)，0 派图 |
+| A9 | 2026-11-07 22:4x | Phase R / 线 0 基线 | G4：重启 11-05 起跑旧码的 tunnel_supervisor（每 30 s reconcile 写 smoke control）+ dispatch 对 kind=smoke 剧笔记本独占派图 | 41da4458（dispatch.py + runs.json kind + 测试）；tunnel_supervisor 22104→26356 | **3/8**（G1/G2/G7） | 平 → 根因报告 R1（G4 第 3 次不过，止损；回滚与否入裁决清单 #2） | eval/results/20261107-0838.json，code 1aca3ee7；control 已对（22:40:59 only=[S1,S2,S3]、hold 仅 gpu36:2/laptop:0、窗口内未被覆盖），但 producer 22:45:02 priority_yield→series10_v2(9)，0 派图 |
+
+### R1 根因报告：冒烟 G4 0 派图（11-07 23:2x，线 1；A5/A7/A9 三次不过，止损）
+结论：G4 有两层拦截，第一层已除（证据成立），第二层是 producer 的优先级让路，冻结区代码，止损待裁决。
+第一层（已除）——写 control 的进程：
+1. 写者唯一：全仓只有 tools/netfix/dispatch.py 写 data/producer/runs/<run>/control.json（laptop_run_controls / pause_run_control / apply）。
+2. 调用者：tools/netfix/tunnel_supervisor.py:723-735 每 30 s 后台线程 dispatch.reconcile() → laptop_run_controls；dispatch 只在启动时 import，不 reload。
+3. 进程：pythonw tunnel_supervisor.py serve，PID 22104/13456，CreationDate 2026-11-05 22:24 JST（11-05 08:24 EST），跑启动时那份 dispatch。
+4. 时间序列：A7 窗口 19:03:42 smoke_v2 control 被写成 hold 全部 6 道 + only=__none__（ITERATION_LOG A7 行）；A5/A6/B1 窗口同样 0 派图。
+5. 处置（选“升级”不选“停”）：tunnel_supervisor 管隧道，停掉 = 笔记本到两台服务器断线；22:36 重启到当前码（PID 26356），隧道 ADOPT 原连接，两台 hostname 探测通。
+6. 处置后证据：A9 窗口 22:40:59 control = only=[ep01-S1,S2,S3]、hold 仅 [gpu36:2, laptop:0]、paused=false；窗口内 mtime 不再变；23:04:46 窗口结束由 runs.json 改回 paused（正确）。
+第二层（未除）——优先级让路：
+7. data/producer/runs/smoke_v2/log.jsonl 22:40–23:05：只有 review_scale ×12 与 priority_yield ×1（22:45:02 to={series10_v2: 9}），0 条派单。
+8. 代码：tools/autopilot/producer.py:3959-3965 dispatch_frames 先调 higher_priority_busy（:523-538）：priority 数字更小且 producing 的剧登记表里有 ready 首/尾帧 → 本剧整拍不派。
+9. 配置：config/pipeline/runs.json smoke_v2.priority=50、series10_v2.priority=9；series10_v2 生产中几乎总有 ready 帧 → 冒烟剧永远让路。
+10. 该层从 A5 起就在（第一层把它挡住看不见），不是 A9 引入。
+需要项目方：裁决清单 #1（冒烟窗口内 smoke_v2 priority）。producer.py 冻结，不改让路逻辑。

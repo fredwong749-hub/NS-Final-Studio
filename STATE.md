@@ -1,7 +1,7 @@
-当前线：线 1（G4 取证）
+当前线：线 2（素材清零）——线 1 以根因报告 R1 验收（ITERATION_LOG），G4 待裁决 #1
 已同步至：1aca3ee7（GitHub master / nsfinalstudio = 本地 HEAD，11-07 22:5x JST）
 新基线冒烟：3/8（eval/results/20261107-0838.json；code=1aca3ee7；G1/G2/G7 过，G4 超时 0 派图）
-线 1 验收：G4 通过；或根因报告成立（写入者是谁、为什么停不掉/升不了、需要项目方做什么）
+线 2 验收：ASSETS-MISSING.md（仓库根目录）清零；或剩余项全部转入本文末尾裁决清单（每条带缺省）
 
 # STATE — NS-Final Studio（唯一当前真相；每个会话结束覆盖更新；≤80 行）
 
@@ -19,22 +19,23 @@
 - 复盘：RETRO_ep01.md（11-04 07:56，film_score 28.3/50）
 
 ## 已知坏点（≤5）
-1. **冒烟三天没测**：没有任何证据证明当前 HEAD 过自己的冒烟门（审计 P0-2）
+1. ~~冒烟三天没测~~ 11-07 23:06 HEAD 1aca3ee7 出分 3/8（eval/results/20261107-0838.json，462b230f）
 2. ~~gpu33 视频道为 0~~ 11-07 18:24 已修：项目方 a 放行，两台 run_phase enforce（回退：ops/psmaster/runphase_enforce_1107.py --revert）；ep03 11 镜 rendering。gpu36 三卡仍空：ep02 3 镜排队未派（jobs.json 未重建，待查）
 3. ~~ep01 整集反复合成~~ 代码已修未上线（补丁 v3 §2）：a 内容签名 6107bdd2、b 同输入不占版本号 3de38aa1、c 单一递增者=视频机 ef01f578、d 预算按集累计 043333a7、e sweep 熔断 5b53e5d5。已上线 sv-20261107-13（11-07 20:24，项目方 both 放行）；签名口径切换致 ep01/ep04 各重开一次（ep01→v76，预期）；验收（同输入 0 新版本 / 断同步 30 min 0 新版本）观察中
 4. **常驻进程动物园**：resident_sync / autoflow / api / tunnel / producer / night / gpu36 看图 多进程分三台；死一个就停（11-07 视频页全黑 = 当前版本视频回拉只剩手动，01:45 自查已报无人修；已加常驻回拉线，笔记本侧生效）
-5. 冒烟 G4 永远 0 派图：笔记本冒烟 producer 的 smoke_v2 control 被一个仍跑 11-01 版 dispatch 的常驻进程每拍写成 hold 全部 6 道 / only=__none__（A7 证据）；候选 = 11-03 起没重启的笔记本 producer serve / sentinel / monitor。另：笔记本内存常剩 4–7 GB
+5. 冒烟 G4 0 派图：第一层（旧码 tunnel_supervisor 每 30 s 写 smoke control）已除；第二层 = producer.py:3959 优先级让路（smoke_v2 priority 50 让 series10_v2 9）→ 根因报告 R1，待裁决 #1。另：笔记本内存常剩 4–7 GB
 
-## 下一步（按审计 Step 顺序，前一步不过不进下一步）
-- Step 3：在 HEAD 上跑 eval/run_smoke.ps1，结果 eval/results/*.json 入库；G1→G8 一次只修一门
-- Step 4：ops/start_all.ps1 + ops/health.ps1；看门狗只留一个（其余停用，不删）
-- Step 6：冒烟连续两次 ≥6/8 后才把 take_sig / e2e_owner_gate 改 enforce
-- Step 7：测试瘦身（Phase R 之后）
+## 线序（破循环指令 §3；前一线不过不进下一线）
+- 线 0 ✅ 462b230f：已推送 + 基线 3/8
+- 线 1 ✅（根因报告 R1）：G4 待裁决 #1
+- 线 2 ▶ 素材清零：ASSETS-MISSING.md，第一项 ep01 S1 首帧
+- 线 3：冒烟冲 6/8（G5→G6→G8，一门一 commit）
+- 线 4：§2 两条硬验收 + 查 night.py ep_sig 的 "missing:<路径>" 嫌疑（已观察：ep01 停 v76，22:23:55 FINALIZE_SAME_INPUT 跳过，但 22:23:28 仍有 REOPEN）
 
-## 下一轮候选（等项目方拍板，本轮不开工）
-- ep01：整集 45 s < 60 s（L-092）怎么办；11-04 起挂的 6 个待复核版本逐一给结论 / 废弃
-- ep02：资产就绪缺口清单 + 故事线方向
-- X 版内容（S3 调度器 record、run_phase enforce、自愈卡点自动关、master_check 口径）：冻结期内是否单独放行 run_phase enforce（它是 ep03 不出视频的直接原因）
+## 项目方裁决清单（≤5，每条带缺省；清单外不停工）
+1. G4 第二层：冒烟窗口内把 smoke_v2 priority 50→1（只改 config/pipeline/runs.json 一个数，可逆；代价 = 每次冒烟约 25 分钟主剧笔记本侧暂停派新图）。**缺省：改**。止损律要求等裁决，未执行
+2. A9（41da4458）按“平→回滚”规则回滚与否：回滚 = 重新挂上已证实的第一层拦截，且需再重启 tunnel_supervisor 才生效。**缺省：保留**
+3. ep01 整集 45 s < 60 s（L-092）与 11-04 起 6 个待复核版本。**缺省：线 4 验收后逐一给结论，旧版本标废弃不删**
 
 ## 禁区
 - eval/ 评分表与冒烟判定逻辑：修门期间不许改（评估器与工人分离）
