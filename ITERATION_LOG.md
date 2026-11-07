@@ -63,3 +63,7 @@
 6. 视频：本窗口 0 段。冒烟剧的视频由谁出未核实（服务器 vidgen 按 series10_v2 jobs.json；smoke_v2 不在任何视频作业表里——待查证，不下结论）。
 7. OOM 判定：review_scale 事件的 tail 带 :8878 看图实例的历史 last_error（真 CUDA OOM，非本窗口生成）→ 每次都记“日志有 OOM”。属评估口径问题，按红线不改 eval。
 需要项目方：裁决清单 #6 / #7 / #8。
+R3 补（04:4x，裁决 #6/#7 缺省 = 只读取证，已做）：
+- #6 尾帧 I6/I9：series10_v2 生产日志“尾帧生成契约 preflight”0 次 → 冒烟专有。I6 判定在 services/agent/ns_agent/gen_contract/preflight.py:333-338（非脸槽的 slot.line 必须原文出现在提示词里）。
+  定位到具体哪一槽 / 哪句需要冒烟窗口的 preflight 报告，而该日志与 data/renders/smoke_v2 每次被 G7 重建清掉 → 本次取证止于“冒烟专有”。下次 G4 窗口由总调度在旁拷贝 log.jsonl 与尾帧作业记录（不改 eval）。
+- #7 视频：两台服务器常驻只有 vidgen.py run <host> --run series10_v2 与 night.py，笔记本无视频工人；全仓 tools/series10_video 无 smoke 字样 → 冒烟剧视频**无人出**，G4“视频 3/3”在现有部署下不可达（结构性，非偶发）。
