@@ -4,7 +4,7 @@
 - 当前阶段：**Phase R（跑通）—— 冻结期**：禁止新功能、新计划文档、cut 新版本；唯一目标 = 冒烟可证明 ≥6/8
 - 仓库 HEAD：sv-20261107-12（010d2a26，master = nsfinalstudio）。**服务器实跑：sv-20261107-11**（59917a43，data/system_version.txt，11-07 10:04 deploy）；-12 的部署被我加的 timeout 中途杀掉（未完成）；sv-20261107-13 在闸门阶段被内存回收杀掉（未 cut）
 - 自动发版：**已冻结**（config/pipeline/release.json enabled=false，11-07 10:4x）
-- 冒烟分数：**未知（最近一次实测 1/8，11-04 02:04，code e56e5e1，eval/results/20261104-0204.json）**。11-04→11-07 约 20 个版本从未重跑冒烟 → 一切“七门全绿”都不代表能跑通
+- 冒烟分数：**2/8**（11-07 11:0x 基线，HEAD effe0bd0，eval/results/20261106-2103.json；G1/G7 过）。A4 降 1/8 已回滚；A5 持平 2/8（G2 首次过、G7 红）已回滚；A6（A5 + 复验落盘修复）被内存回收杀掉未出分，改动在工作区待重跑
 
 ## 各环节最后一次成功证据（series10_v2 真实数据，非冒烟）
 - 剧本 / 分镜 / 提示词：ep01–ep04 已过（sop_gate 阶段见 data/pipeline/runs/series10_v2/）
@@ -18,7 +18,7 @@
 2. **gpu33 视频道为 0**：run_phase 仍 record，gpu33 本机算阶段（只看自己数据）≠ 中心结果 → ep03 11 镜干等；修法（run_phase enforce）在未发的 X 版里
 3. **ep01 整集反复合成**：data/episodes/series10_v2/ 有 ep01_v1…v73，几十个大小完全相同 → 合成触发条件有环，浪费算力
 4. **常驻进程动物园**：resident_sync / autoflow / api / tunnel / producer / night / gpu36 看图 多进程分三台；死一个就停（11-07 视频页全黑 = 当前版本视频回拉只剩手动，01:45 自查已报无人修；已加常驻回拉线，笔记本侧生效）
-5. 笔记本内存紧（32 GB 剩 4.6 GB）：cut 闸门 pytest -n 4 会被 Claude Code 内存回收杀掉
+5. 笔记本内存紧（32 GB 常剩 4–7 GB）：cut 闸门与冒烟 G4（1500 s）都被 Claude Code 内存回收杀过；G4 另有自身问题：producer once 只做了看图扩容、没派一张图（A5 证据）
 
 ## 下一步（按审计 Step 顺序，前一步不过不进下一步）
 - Step 3：在 HEAD 上跑 eval/run_smoke.ps1，结果 eval/results/*.json 入库；G1→G8 一次只修一门
