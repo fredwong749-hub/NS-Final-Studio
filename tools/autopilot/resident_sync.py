@@ -88,7 +88,7 @@ SKIP_PARTS = {"node_modules", ".venv", "__pycache__", ".git", "_offline_pull", "
 SKIP_PREFIX = ("data/_quarantine", "data/_offline_pull", "data/cache/", "data/ab/", "data/api_8800", "data/review_pages/",
                "data/qa/iter_gate/", "data/autopilot/repair_chain/", "data/staging", "ops/logs/", "data/lb/")
 SKIP_NAMES = {"control.json", "heartbeat.json", "producer.pid", "registry.json", "night.pid", "night_control.json",
-              "run_phase.json"}   # S2.4：run 级阶段只由笔记本算，不回拉
+              "run_phase.json", "registry_merged.json"}   # S2.4：run 级阶段只由笔记本算，不回拉；S2.5：合并登记表同（只推不拉）
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=40", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4"]
 BATCH = 24 * 1024 * 1024
 STATE = ROOT / "data/autopilot/resident_sync.json"
@@ -800,7 +800,7 @@ try:
 except Exception:
     cur = {}
 out = dict(cur)
-if rel in ("data/netfix/laptop_ctrl.json", "data/netfix/override_state.json") or rel.endswith("/episode_state.json") or rel.endswith("/run_phase.json"):   # 快照：整文件覆盖（S2.2 集关闭标记 / S2.4 run 级阶段只有笔记本算）
+if rel in ("data/netfix/laptop_ctrl.json", "data/netfix/override_state.json") or rel.endswith("/episode_state.json") or rel.endswith("/run_phase.json") or rel.endswith("/registry_merged.json"):   # 快照：整文件覆盖（S2.2 集关闭标记 / S2.4 run 级阶段 / S2.5 合并登记表只有笔记本算）
     tmp = os.path.join(R, rel) + ".tmp"
     os.makedirs(os.path.dirname(tmp), exist_ok=True)
     json.dump(new, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
@@ -850,10 +850,27 @@ def run_phase_tick(min_gap_s: float = 20.0) -> None:
     _RP_LAST["t"] = time.time()
     try:
         import run_phase as RP
-    except ImportError as e:   # arch-ok: 模块没部署 = 不算（服务器读不到中心文件 = 本机自算，旧行为）
+    except Exception as e:   # noqa: BLE001  # arch-ok: 模块没部署 / 坏了 = 不算（服务器读不到中心文件 = 本机自算，旧行为）
         log("run_phase", "模块缺", repr(e)[:160])
         return
     RP.tick(run_sync_runs(), ROOT, log=log)
+
+
+_RM_LAST = {"t": 0.0}
+
+
+def registry_merged_tick(min_gap_s: float = 20.0) -> None:
+    """L-209 S2.5（W-S25）：每部在产剧把两台拉回的登记表合并成 data/producer/runs/<run>/registry_merged.json（唯一合并函数
+    registry_merged.merge；变了或满 5 分钟才原子写；off = 不写）。push_control 每台调一次 → min_gap_s 内不重复算。出错只记日志"""
+    if time.time() - _RM_LAST["t"] < min_gap_s:
+        return
+    _RM_LAST["t"] = time.time()
+    try:
+        import registry_merged as RMG
+    except Exception as e:   # noqa: BLE001  # arch-ok: 模块没部署 / 坏了 = 不算（读者读不到合并表 = 退回本机登记表，旧行为）；复审 11-07 不能拖垮 push_control
+        log("registry_merged", "模块缺", repr(e)[:160])
+        return
+    RMG.tick(run_sync_runs(), ROOT, log=log)
 
 
 def push_control(host: str, force: bool = False) -> dict:
@@ -862,6 +879,7 @@ def push_control(host: str, force: bool = False) -> dict:
     import hashlib
     episode_state_tick()                 # L-209 S2.2：推之前先按口径重算集关闭标记（含自动重开）
     run_phase_tick()                     # L-209 S2.4：推之前算一次 run 级阶段（两台登记表合并）
+    registry_merged_tick()               # L-209 S2.5：推之前合并一次登记表（推两台只读）
     st = jl(STATE, {}) or {}
     hs = st.setdefault(host, {}).setdefault("control_sha", {})
     done = {}
@@ -882,6 +900,7 @@ def push_control(host: str, force: bool = False) -> dict:
     js(STATE, st)
     if done:
         log("push_control", host, done)
+    if {k for k in done if not k.endswith("/registry_merged.json")}:     # S2.5：只有合并登记表变了不用重算服务器 control
         try:      # NETFIX：推完在服务器上按分区 ∩ 已准备集 ∩ 笔记本全局暂停 重算本机 producer 的 control
             out = ssh(host, f"cd {R} && {PY[host]} tools/netfix/dispatch.py server-control {host} "
                             f"--laptop-ctrl data/netfix/laptop_ctrl.json --write", timeout=120, tries=3)
@@ -2156,6 +2175,12 @@ def control_files() -> list[str]:
         rel = f"data/pipeline/runs/{run}/run_phase.json"       # L-209 S2.4：run 级阶段（只有笔记本算；服务器 producer / night / lane_roles 读）
         if rel not in out:
             out.append(rel)
+        try:      # L-209 S2.5：两台合并登记表（只有笔记本写；服务器只读，producer 按开关比对 / 取别台事实）
+            rel = (Path(_RUNS.producer_dir(run, ROOT)) / "registry_merged.json").relative_to(ROOT).as_posix()
+            if rel not in out:
+                out.append(rel)
+        except Exception as e:  # noqa: BLE001
+            log("control_files", run, "合并登记表路径算不出", repr(e)[:160])
     return out
 
 

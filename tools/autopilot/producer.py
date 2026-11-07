@@ -107,6 +107,24 @@ def _run_phase():   # L-209 S2.4：run 级阶段中心结果（tools/autopilot/r
         return None
 
 
+_RMG_FAIL = {"t": 0.0}
+
+
+def _registry_merged():   # L-209 S2.5：笔记本推来的两台合并登记表（tools/autopilot/registry_merged.py；开关 config/pipeline/state.json registry_merged）
+    """→ 模块；导入失败 = None（10 分钟内不重试）"""
+    if time.time() - _RMG_FAIL["t"] < 600:
+        return None
+    d = str(Path(__file__).resolve().parent)
+    if d not in sys.path:
+        sys.path.insert(0, d)
+    try:
+        import registry_merged as RMG  # noqa: PLC0415
+        return RMG
+    except Exception:   # noqa: BLE001  # arch-ok: 模块没部署 / 坏了 = 不比对（旧行为）；10 分钟后再试（复审 11-07：不止 ImportError）
+        _RMG_FAIL["t"] = time.time()
+        return None
+
+
 _ES_FAIL = {"t": 0.0, "err": None}       # L-209 S2.2：模块导入失败缓存（服务器没部署 → 10 分钟内不重试）
 
 
@@ -3100,6 +3118,7 @@ class Producer:
         except Exception as e:  # noqa: BLE001
             self.logf("consistency_err", error=repr(e)[:200])
         js(self.p.registry, reg)
+        self.cross_host_check(reg)                    # L-209 S2.5：照旧写本机登记表；和合并登记表比对（record 只记日志）
         js(self.p.heartbeat, {"ts": iso(), "t": now(), "pid": os.getpid(), "paused": reg["paused"],
                               **self.hb_counts(),                    # K-OPS-F12：重启队列只等 rendering=0
                               **getattr(self, "_take_sig_hb", {}),   # S2.1：sig_stale / unknown 按 first / last / video
@@ -3111,6 +3130,20 @@ class Producer:
             js(self.p.mirror, {"updated": reg["updated"], "counts": reg["counts"], "paused": reg["paused"],
                                "note": "PRODUCER 状态变了（live.py 据此推 stage 事件，界面重取 /api/producer/status）"})
         return reg
+
+    def cross_host_check(self, reg: dict) -> None:
+        """L-209 S2.5：服务器 producer 每拍和笔记本推来的合并登记表比对。off = 不比；record = 不一致记 registry_merged_disagree
+        （每种 10 分钟一条），行为不变；enforce = self.cross_host_reg = 合并表（只给别台事实用，S3 前没有读者改派单）。
+        缺 / 过期记 registry_merged_fallback。只在服务器（OFFLINE_SELF）"""
+        self.cross_host_reg = None
+        host = os.environ.get("OFFLINE_SELF")
+        RMG = _registry_merged() if host else None
+        if RMG is None:
+            return
+        try:
+            self.cross_host_reg = RMG.cross_host(self.p.run_id, reg, host, root=self.p.root, log=self.logf)
+        except Exception as e:  # noqa: BLE001
+            self.logf("registry_merged_err", error=repr(e)[:200], counted=False)
 
     def hb_counts(self) -> dict:
         """心跳口径：inflight = 全部在途；scoring = 出好等打分 + 只重打分（W20：只重打分不占道，不算 rendering）；

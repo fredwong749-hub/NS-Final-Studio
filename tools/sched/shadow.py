@@ -317,6 +317,9 @@ def model_of_kind(kind: str) -> str:
 
 
 # ------------------------------------------------------------------ 环境（真机只读；测试用 Fake 子类）
+_RM_MOD: dict = {}
+
+
 class Env:
     def __init__(self, root: Path = ROOT):
         self.root = Path(root)
@@ -336,6 +339,16 @@ class Env:
     def lanes(self) -> dict:
         T = _load("telemetry_for_shadow", "tools/brain/telemetry.py", self.root)
         return T.Env(self.root).lanes()
+
+    def merged_registry(self, run: str) -> dict | None:
+        """L-209 S2.5：笔记本写的唯一合并登记表（新鲜才给；缺 / 过期 = None → 退回两台探针各自合并）"""
+        try:
+            if "m" not in _RM_MOD:
+                _RM_MOD["m"] = _load("registry_merged_for_shadow", "tools/autopilot/registry_merged.py", self.root)
+            RM = _RM_MOD["m"]
+            return RM.fresh(run, self.root, self.now(), log=RM.default_log("shadow"), actor="shadow")
+        except Exception:  # noqa: BLE001  # arch-ok: 模块 / 文件读不到 = 退回探针合并
+            return None
 
     def adult_ids(self, run: str) -> set:
         A = _load("actions_for_shadow", "tools/brain/actions.py", self.root)
@@ -361,13 +374,38 @@ def _owner_hosts(probes: dict, shot: str) -> list:
     return [h for h, p in probes.items() if p and shot in ((p.get("ctrl") or {}).get("only") or [])]
 
 
-def merge_registry(probes: dict) -> tuple[dict, list]:
-    """两台登记表 → 一份：首尾帧 / 资产以 control.only 归属台为准（没有归属 = 取最靠后状态），视频取各台登记表 + vidgen 状态最靠后。
+def compact_registry(reg: dict) -> dict:
+    """完整登记表 → 探针的紧凑格式 {ep: {"asm", "shots": {shot: {k: [st, att, max, na, lu, where, why]}}}}（同 REMOTE_PROBE）"""
+    eps = {}
+    for E in (reg or {}).get("episodes") or []:
+        shots = {}
+        for S in E.get("shots") or []:
+            ob = S.get("objects") or {}
+            rec = {}
+            for k in ("assets", "first", "last", "video"):
+                o = ob.get(k) or {}
+                rec[k] = [o.get("status"), o.get("attempts") or 0, o.get("max_attempts") or 3, 1 if o.get("na") else 0,
+                          1 if o.get("last_unavailable") else 0, str(o.get("where") or "")[:30],
+                          str(o.get("waiting_for") or o.get("reason") or "")[:60]]
+            shots[str(S.get("shot"))] = rec
+        eps[str(E.get("ep"))] = {"asm": ((E.get("objects") or {}).get("assembly") or {}).get("status"), "shots": shots}
+    return eps
+
+
+def merge_registry(probes: dict, merged: dict | None = None) -> tuple[dict, list]:
+    """两台登记表 → 一份。L-209 S2.5：给了新鲜的唯一合并登记表（registry_merged.json）→ 只用它（divergent = 它的真冲突）；
+    否则旧退路：首尾帧 / 资产以 control.only 归属台为准（没有归属 = 取最靠后状态），视频取各台登记表最靠后。两种都再用 vidgen 状态补强视频。
     返回 (eps, divergent)；eps = {ep: {"asm": bool, "shots": {shot: {k: {"st", "att", "max", "lu", "src"}}}}}"""
     eps: dict = {}
     divergent = []
     views: dict = {}
-    for h, p in probes.items():
+    if merged:
+        divergent = [{"obj": f"{c.get('kind')}:{c.get('shot') or 'ep' + str(c.get('ep'))}", "views": c.get("views") or {},
+                      "used": c.get("used"), "why": c.get("why")} for c in merged.get("conflicts") or []]
+        probes_reg = {"merged": {"reg": compact_registry(merged), "ctrl": {}}}
+    else:
+        probes_reg = probes
+    for h, p in probes_reg.items():
         for ep, E in ((p or {}).get("reg") or {}).items():
             e = eps.setdefault(int(ep), {"asm": False, "shots": {}})
             e["asm"] = e["asm"] or E.get("asm") == "passed"
@@ -375,7 +413,7 @@ def merge_registry(probes: dict) -> tuple[dict, list]:
                 views.setdefault(sid, {})[h] = rec
     for sid, by in sorted(views.items()):
         ep = ep_of(sid)
-        owners = [h for h in _owner_hosts(probes, sid) if h in by]
+        owners = [h for h in _owner_hosts(probes_reg, sid) if h in by]
         out = {}
         for k in ("assets", "first", "last", "video"):
             cand = {h: (r.get(k) or [None, 0, 3, 0, 0, "", ""]) for h, r in by.items()}
@@ -387,7 +425,7 @@ def merge_registry(probes: dict) -> tuple[dict, list]:
             out[k] = {"st": "passed" if na else st, "att": int(att or 0), "max": int(mx or 3), "lu": bool(lu), "where": where,
                       "why": why, "src": h}
             settled = {x: (c[0] in SETTLED or bool(c[3])) for x, c in cand.items()}
-            if len(set(settled.values())) > 1:
+            if not merged and len(set(settled.values())) > 1:
                 divergent.append({"obj": f"{k}:{sid}", "views": {x: cand[x][0] for x in sorted(cand)}, "used": h})
         eps.setdefault(ep, {"asm": False, "shots": {}})["shots"][sid] = out
     for h, p in probes.items():         # 视频：vidgen 状态（两台）补强
@@ -973,7 +1011,8 @@ def tick(env: Env, every_s: float = 60, lookback_min: float = 60, seeds: int = 3
     adult = set(env.adult_ids(run))
     for p in probes.values():
         adult |= set((p or {}).get("adult_wait") or [])
-    eps, divergent = merge_registry(probes)
+    mfn = getattr(env, "merged_registry", None)      # L-209 S2.5（测试 Fake 没有 = 旧口径）
+    eps, divergent = merge_registry(probes, mfn(run) if mfn else None)
     live = live_lanes(probes, lanes)
     vrun = video_running(probes)
     gates = recent_gates(probes, now)

@@ -181,7 +181,7 @@ def test_push_control_distinct_tmp_names(sandbox, monkeypatch):
     assert len(cats) == len(set(cats))
     ready = {"/tmp/ctl_data__autopilot__ready_episodes.json", f"/tmp/ctl_data__autopilot__runs__{RUN}__ready_episodes.json"}
     assert ready <= set(cats)
-    assert all(c.endswith(("__episode_state.json", "__run_phase.json")) for c in set(cats) - ready), cats
+    assert all(c.endswith(("__episode_state.json", "__run_phase.json", "__registry_merged.json")) for c in set(cats) - ready), cats   # S2.5 合并登记表
 
 
 def test_vqa_env_never_gpu2(sandbox):

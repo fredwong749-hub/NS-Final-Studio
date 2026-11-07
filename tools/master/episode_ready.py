@@ -112,8 +112,10 @@ def check(run: str, episode: int, root: Path = ROOT) -> dict:
         idx = s.get("index")
         sr = AR.resolve_shot(run, ep, s)          # 与 preflight 的 asset_refs 同一个函数
         for c in sr.characters:
-            d = chars.setdefault(c["character"], {"name": c["name"], "looks": set(), "shots": set()})
+            d = chars.setdefault(c["character"], {"name": c["name"], "looks": set(), "shots": set(), "onscreen": set()})
             d["shots"].add(idx)
+            if c.get("presence") != "画外":           # 11-07：画外不出镜，不算进“逐镜造型排期”要覆盖的镜（ep03-S10 祁念画外把整集卡住）
+                d["onscreen"].add(idx)
             if c.get("look"):
                 d["looks"].add(c["look"])
         if sr.scene_id:
@@ -138,7 +140,7 @@ def check(run: str, episode: int, root: Path = ROOT) -> dict:
         shots_out.append({"index": idx, "adult": bool(s.get("adult")), "reasons": s.get("adult_reasons") or [],
                           "scene": sr.scene_id, "cast": [c["name"] for c in sr.characters]})
     for cid, d in sorted(chars.items()):
-        for g in character_gaps(run, resolve_cid(run, cid, d["name"]), d["name"], episode, mchars, shots=d["shots"]):
+        for g in character_gaps(run, resolve_cid(run, cid, d["name"]), d["name"], episode, mchars, shots=d.get("onscreen") or d["shots"]):
             gap(g["kind"], g["who"], g["what"], d["shots"])
     # 音色：本集说话人（对白）→ 人物表 → run_media.voice_config
     speakers: dict[str, set] = {}

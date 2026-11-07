@@ -18,7 +18,7 @@
     issue_backlog   卡点 open 超过 6 小时（汇总一条）
   快照（两台探针）
     kpi_brain       快照 KPI 与两台登记表最大值不一致（大脑看错数）
-    host_disagree   同一集两台登记表首 / 尾 / 视频数相差 ≥ 2
+    host_disagree   同一集两台登记表首 / 尾 / 视频数相差 ≥ 2（L-209 S2.5 有合并登记表时：只报合并时的真冲突）
     phase_disagree  同一集两台 lane_roles 阶段不同
     phantom_run     某台登记表有视频 running，但本台没有渲染中视频、本台所有道都空
     stuck           attention 里 ready / running 等了 > 60 分钟
@@ -93,9 +93,35 @@ def host_have(snap: dict) -> dict:
     return out
 
 
+def check_merged(snap: dict, mv: dict) -> list[dict]:
+    """L-209 S2.5：有唯一合并登记表时——KPI 对它核；host_disagree 只报合并时的真冲突（两台都定下但版本不同 / 归属台缺集），
+    两台各自登记表数字不同（别台残影、中继结果）不再算"""
+    out = []
+    for ep, h in (mv.get("have") or {}).items():
+        k = (snap.get("kpi") or {}).get(str(ep)) or {}
+        if k and (int(k.get("first_done") or 0), int(k.get("last_done") or 0)) != (int(h.get("f") or 0), int(h.get("l") or 0)):
+            out.append(V(f"kpi_brain:ep{ep}", RED, f"大脑 KPI 第{ep}集数错了",
+                         f"快照 首{k.get('first_done')} 尾{k.get('last_done')}，合并登记表 首{h.get('f')} 尾{h.get('l')}",
+                         "brain / snapshot.md", "telemetry.kpi 读合并登记表"))
+    by: dict = {}
+    for c in mv.get("conflicts") or []:
+        f = {"first": "f", "last": "l", "video": "v", "episode": "e"}.get(str(c.get("kind")))
+        if f:
+            by.setdefault((str(c.get("ep")), f), []).append(c)
+    word = {"f": "首帧", "l": "尾帧", "v": "视频", "e": "归属"}
+    for (ep, f), cs in sorted(by.items()):
+        ev = "；".join(f"{c.get('shot') or '整集'} {c.get('why')} {c.get('views') or c.get('owner') or ''}" for c in cs[:4])
+        out.append(V(f"host_disagree:ep{ep}:{f}", YEL, f"两台对第{ep}集{word[f]}有真冲突（{len(cs)} 处）", ev,
+                     "registry_merged", "查两台为何各自定下不同版本 / 归属台为何没有这一集"))
+    return out
+
+
 def check_snapshot(snap: dict, now: float) -> list[dict]:
     out = []
-    hh = host_have(snap)
+    mv = snap.get("registry_merged")
+    if isinstance(mv, dict) and mv.get("have") is not None:
+        out += check_merged(snap, mv)
+    hh = {} if isinstance(mv, dict) and mv.get("have") is not None else host_have(snap)
     for ep, per in hh.items():
         mx = {k: max(x[k] for x in per.values()) for k in ("f", "l", "v")}
         k = (snap.get("kpi") or {}).get(ep) or {}
@@ -360,7 +386,11 @@ def check_pages(pages: dict, timings: dict, root: Path, snap: dict, now: float) 
                              "API 用 datetime.now(JST) 写 at"))
     kp = pages.get("/api/episodes/kpi")
     if isinstance(kp, dict):
-        hh = host_have(snap)
+        mv = snap.get("registry_merged")
+        if isinstance(mv, dict) and mv.get("have") is not None:     # L-209 S2.5：页面和合并登记表对
+            hh = {ep: {"merged": {k: int(h.get(k) or 0) for k in ("t", "f", "l", "v")}} for ep, h in mv["have"].items()}
+        else:
+            hh = host_have(snap)
         for e in kp.get("episodes") or []:
             per = hh.get(str(e.get("ep")))
             if not per:

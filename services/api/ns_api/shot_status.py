@@ -73,11 +73,36 @@ def _mt(f: Path) -> float | None:
         return None
 
 
+def _rm():
+    from tools.brain import reg_merge as _RMG  # noqa: PLC0415
+    return _RMG._rm()
+
+
+def _merged_file(p: Path) -> dict | None:
+    """L-209 S2.5：登记表旁边笔记本每拍写的 registry_merged.json（唯一合并表）；新鲜 = 它，缺 / 过期 / off = None（退回本机，
+    registry_merged_fallback 每 10 分钟记一条到 stderr）"""
+    try:
+        RM = _rm()
+        return RM.fresh_path(p.parent / RM.NAME, ROOT, log=RM.default_log("ns_api"), actor="ns_api")
+    except Exception:  # noqa: BLE001  # arch-ok: 合并表模块读不到 = 退回本机（只影响显示）
+        return None
+
+
+def reg_key(p: Path) -> tuple:
+    """缓存键：本机登记表 + 两台拉回的 + 合并表（mtime、是否新鲜）"""
+    m = _merged_file(p)
+    return (str(p), _mt(p), tuple(_mt(f) for f in _host_copies(p)), (m or {}).get("computed_t"))
+
+
 def merged_registry(p: Path | None = None) -> dict:
-    """W-FIX-PIPE #8（L-212）：本机登记表 + 两台拉回的登记表按对象合并（tools/brain/reg_merge：走得最远的状态赢，驳回 / 重做标记优先）。
-    网页标签 / 阶段块 / KPI 面板都读这一份。按 (路径, mtime) 缓存；合并模块读不到 = 只用本机那份"""
+    """L-209 S2.5：先读唯一合并表 registry_merged.json（笔记本每拍写，tools/autopilot/registry_merged.merge）；
+    缺 / 过期 → 退回 W-FIX-PIPE #8：本机登记表为底 + 两台拉回的登记表只补已定下（tools/brain/reg_merge 转调同一个合并函数）。
+    网页标签 / 阶段块 / 首尾帧 / 视频页 / KPI 面板都读这一份。按 (路径, mtime) 缓存"""
     import time as _t
     p = p or registry_path()
+    m = _merged_file(p)
+    if m is not None:
+        return m
     files = [p] + _host_copies(p)
     key = tuple((str(f), _mt(f)) for f in files)
     if _MERGED["key"] == key:
@@ -108,9 +133,10 @@ def merged_registry(p: Path | None = None) -> dict:
 def _registry() -> dict[str, dict]:
     p = registry_path()
     try:
-        mt = (str(p), p.stat().st_mtime, tuple(_mt(f) for f in _host_copies(p)))
+        p.stat()
     except OSError:
         return {}
+    mt = reg_key(p)
     if _reg["mt"] != mt:
         d = merged_registry(p)
         val = {}
@@ -284,9 +310,10 @@ _REG_EP: dict = {"mt": None, "val": {}}
 def _registry_eps() -> dict[int, dict]:
     p = registry_path()
     try:
-        mt = (str(p), p.stat().st_mtime, tuple(_mt(f) for f in _host_copies(p)))
+        p.stat()
     except OSError:
         return {}
+    mt = reg_key(p)
     if _REG_EP["mt"] != mt:
         d = merged_registry(p)
         _REG_EP.update(mt=mt, val={int(e.get("ep") or 0): e for e in d.get("episodes") or []})

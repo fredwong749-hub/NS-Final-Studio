@@ -24,7 +24,6 @@ lane_roles_producer 读它。
 """
 from __future__ import annotations
 
-import copy
 import json
 import os
 import sys
@@ -163,44 +162,9 @@ def _settled(o) -> bool:
 
 def merge_for_phase(regs: dict, owner: dict | None = None) -> dict:
     """regs = {host: 登记表}；owner = {ep: 出图归属 host}。→ 一份登记表（不改入参）：每集取归属台的那份为底，
-    别台只补已定下（passed / best_effort / na）而底表没定下、且底表没有驳回 / 重做标记的对象"""
-    hosts = [h for h in regs if isinstance(regs.get(h), dict)]
-    if not hosts:
-        return {}
-    eps_by: dict = {}
-    for h in hosts:
-        for E in regs[h].get("episodes") or []:
-            try:
-                eps_by.setdefault(int(E.get("ep")), {})[h] = E
-            except (TypeError, ValueError):
-                continue
-    first = regs[hosts[0]]
-    out = {k: v for k, v in first.items() if k != "episodes"}
-    out["episodes"] = []
-    for ep in sorted(eps_by):
-        per = eps_by[ep]
-        own = (owner or {}).get(ep)
-        bh = own if own in per else next(iter(per))
-        E = copy.deepcopy(per[bh])
-        E["phase_base"] = bh
-        shots = {S.get("shot"): S for S in E.get("shots") or []}
-        for h, oE in per.items():
-            if h == bh:
-                continue
-            for oS in oE.get("shots") or []:
-                S = shots.get(oS.get("shot"))
-                if S is None:
-                    continue
-                ob = S.setdefault("objects", {})
-                for k in KINDS:
-                    b, o = ob.get(k), (oS.get("objects") or {}).get(k)
-                    if _settled(o) and not _settled(b) and not any((b or {}).get(x) for x in ("redo", "master_reject", "stale", "regen")):
-                        ob[k] = {**o, "merged_from": h}
-            a, oa = (E.get("objects") or {}).get("assembly"), (oE.get("objects") or {}).get("assembly")
-            if (oa or {}).get("status") == "passed" and (a or {}).get("status") != "passed":
-                E.setdefault("objects", {})["assembly"] = {**oa, "merged_from": h}
-        out["episodes"].append(E)
-    return out
+    别台只补已定下（passed / best_effort / na）而底表没定下、且底表没有驳回 / 重做标记的对象。
+    L-209 S2.5：转调唯一合并函数 registry_merged.merge（同一口径；项目方驳回哪台带都赢；孤儿镜丢掉）"""
+    return _mod("registry_merged").merge(regs, owner)
 
 
 def pulled_registries(run: str, root: Path | None = None, now: float | None = None) -> tuple[dict, dict]:

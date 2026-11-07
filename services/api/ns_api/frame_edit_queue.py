@@ -110,15 +110,14 @@ def _registry_path() -> Path:
 def registry_objects() -> list[dict]:
     """[{oid, ep, idx, kind(first|last), status, redo, shot, attempts, reason}]（只含首尾帧对象）"""
     p = _registry_path()
+    from ns_api import shot_status as _SS  # noqa: PLC0415  L-209 S2.5：两台合并的唯一登记表（缺 / 过期退回本机）
     try:
-        mt = (str(p), p.stat().st_mtime)
+        p.stat()
     except OSError:  # arch-ok: registry 文件还没同步到本机 = 队列看不到，调用方显示“排队中”不给位置
         return []
+    mt = _SS.reg_key(p)
     if _reg["mt"] != mt:
-        try:
-            d = json.loads(p.read_text(encoding="utf-8"))
-        except (OSError, ValueError):  # arch-ok: registry 读到半截 JSON：当作空，下一次轮询（文件一写完就变）会读到完整的
-            d = {}
+        d = _SS.merged_registry(p) or {}
         rows = []
         for E in d.get("episodes") or []:
             for S in E.get("shots") or []:

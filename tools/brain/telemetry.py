@@ -262,6 +262,16 @@ def _load(name: str, rel: str, root: Path = ROOT):
     return m
 
 
+_RM_MOD: dict = {}
+
+
+def _rm_mod():
+    """registry_merged 模块只加载一次（它的“每 10 分钟记一条”限流在模块里）"""
+    if "m" not in _RM_MOD:
+        _RM_MOD["m"] = _load("registry_merged_for_brain", "tools/autopilot/registry_merged.py")
+    return _RM_MOD["m"]
+
+
 def jst(now: float, fmt: str = "%m-%d %H:%M") -> str:
     return time.strftime(fmt, time.gmtime(now + 9 * 3600))
 
@@ -342,6 +352,14 @@ class Env:
         except (OSError, ValueError, IndexError, AttributeError):   # arch-ok: 探针失败 = 本拍该台 None（快照 probe_errors 列出）
             return None
 
+    def merged_registry(self, run: str) -> dict | None:
+        """L-209 S2.5：笔记本写的唯一合并登记表（新鲜才给；缺 / 过期 = None → KPI / 自查退回两台探针）"""
+        try:
+            RM = _rm_mod()
+            return RM.fresh(run, self.root, self.now(), log=RM.default_log("brain"), actor="brain")
+        except Exception:  # noqa: BLE001  # arch-ok: 模块 / 文件读不到 = 退回两台探针
+            return None
+
     def asset_jobs(self, run: str) -> list[dict]:
         AJ = _load("asset_jobs_for_brain", "tools/pipeline/asset_jobs.py", self.root)
         return AJ.list_jobs(self.root, run)
@@ -358,9 +376,10 @@ class Env:
 
 
 # ------------------------------------------------------------------ 纯逻辑
-def kpi(now: float, probes: dict, budget_min: int = KPI_EPISODE_MIN, imports: dict | None = None) -> dict:
-    """每集 KPI：两台探针 → 起点（各台首派取最早）+ 完成数（逐字段取最大）→ kpi_core.episodes（L-212 #9：和网页 KPI 面板同一函数；
-    起点 = max(首派, 最近导入)，imports = kpi_core.import_epochs）"""
+def kpi(now: float, probes: dict, budget_min: int = KPI_EPISODE_MIN, imports: dict | None = None, merged: dict | None = None) -> dict:
+    """每集 KPI：两台探针 → 起点（各台首派取最早）+ 完成数 → kpi_core.episodes（L-212 #9：和网页 KPI 面板同一函数；
+    起点 = max(首派, 最近导入)，imports = kpi_core.import_epochs）。完成数：L-209 S2.5 合并登记表新鲜（merged = ep_have 结果）→ 只用它；
+    否则两台探针逐字段取最大（旧退路）"""
     KC = _load("kpi_core_for_brain", "tools/brain/kpi_core.py")
     starts, have = {}, {}
     for pr in probes.values():
@@ -369,10 +388,24 @@ def kpi(now: float, probes: dict, budget_min: int = KPI_EPISODE_MIN, imports: di
         for ep, t in ((pr.get("log") or {}).get("first_dispatch") or {}).items():
             if ep not in starts or t < starts[ep]:
                 starts[ep] = t
-        for ep, E in ((pr.get("registry") or {}).get("episodes") or {}).items():
-            # W-SCAN 11-07：逐字段取两台最大值（以前整条替换 → gpu33 首帧 0 把 gpu36 的 14 盖掉）
-            have[ep] = KC.merge_have(have.get(ep), **KC.have_from_registry_episode(E))
+        if merged is None:
+            for ep, E in ((pr.get("registry") or {}).get("episodes") or {}).items():
+                # W-SCAN 11-07：逐字段取两台最大值（以前整条替换 → gpu33 首帧 0 把 gpu36 的 14 盖掉）
+                have[ep] = KC.merge_have(have.get(ep), **KC.have_from_registry_episode(E))
+    for ep, h in (merged or {}).items():
+        have[str(ep)] = KC.merge_have(None, **KC.have_from_registry_episode({"have": h, "asm": h.get("asm")}))
     return KC.episodes(now, starts, have, imports, budget_min)
+
+
+def merged_view(doc: dict | None, now: float) -> dict | None:
+    """快照里的合并登记表摘要：{at, age_s, have{ep:{t,f,l,v,asm}}, conflicts[], conflicts_n, orphans_n}"""
+    if not doc:
+        return None
+    RM = _rm_mod()
+    return {"at": doc.get("computed_at"), "age_s": round(now - float(doc.get("computed_t") or now)), "have": RM.ep_have(doc),
+            "conflicts": [{k: c.get(k) for k in ("ep", "shot", "kind", "why", "views", "used", "owner")} for c in (doc.get("conflicts") or [])][:20],
+            "conflicts_n": int(doc.get("conflicts_n") or 0),
+            "orphans_n": int(((doc.get("orphans") or {}).get("shots_dropped_n")) or 0)}
 
 
 def lane_view(lanes: dict, probes: dict, lr_cfg: dict, phases: dict) -> dict:
@@ -488,8 +521,10 @@ def snapshot(env: Env | None = None, cfg: dict | None = None, save: bool = True)
             if isinstance(rec, dict) and rec.get("phase"):
                 phases[str(ep)] = rec["phase"]
     ovr = env.j("data/pipeline/lane_roles_override.json", {}) or {}
+    mfn = getattr(env, "merged_registry", None)      # L-209 S2.5：唯一合并登记表（测试 fake Env 没有 = 旧口径）
+    mv = merged_view(mfn(run) if mfn else None, now)
     snap = {"schema": SCHEMA, "at": jst(now, "%Y-%m-%d %H:%M:%S+09:00"), "t": now, "run": run, "legend": LEGEND,
-            "kpi": kpi(now, probes, imports=env.import_epochs(run)), "lanes": lane_view(lanes, probes, lr_cfg, phases),
+            "kpi": kpi(now, probes, imports=env.import_epochs(run), merged=(mv or {}).get("have")), "registry_merged": mv, "lanes": lane_view(lanes, probes, lr_cfg, phases),
             "lane_roles": {"enabled": lr_cfg.get("enabled"), "from_episode": lr_cfg.get("from_episode"), "phases": phases,
                            "tables": lr_cfg.get("phases"), "override": (ovr.get(run) or {}) if isinstance(ovr, dict) else {}},
             "partition": (env.j("data/state/netfix/partition.json", {}) or {}).get("images"),     # L-209 S2.3：只认唯一一份

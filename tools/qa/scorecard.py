@@ -238,8 +238,16 @@ def compute(root: Path = ROOT, run: str | None = None, now: float | None = None,
             open_items = list(OQ.build(root).get("items") or [])
         except Exception:  # noqa: BLE001  # arch-ok: 队列读不到 = 不计“挂着的卡”（报告里注明）
             open_items = []
+    try:   # L-209 S2.5：完成数以唯一合并登记表为准（新鲜才用；缺 / 过期 = 大脑快照 KPI，旧口径）
+        RM = _load("registry_merged_for_score", "tools/autopilot/registry_merged.py")
+        mhave = RM.ep_have(RM.fresh(run, root, now, log=RM.default_log("scorecard"), actor="scorecard") or {})
+    except Exception:  # noqa: BLE001  # arch-ok: 合并表模块读不到 = 用快照 KPI
+        mhave = {}
     eps = []
     for ep_s, k in sorted(kpi.items(), key=lambda kv: int(kv[0]) if str(kv[0]).isdigit() else 0):
+        mh = mhave.get(str(ep_s))
+        if mh:
+            k = {**k, "total": mh["t"] or k.get("total"), "first_done": mh["f"], "last_done": mh["l"], "video_done": mh["v"]}
         ep = int(ep_s)
         since = k.get("start_t") or k.get("import_t")
         asm = assembled_at(root, run, ep, k.get("start_t")) if k.get("assembled") else None
@@ -255,7 +263,7 @@ def compute(root: Path = ROOT, run: str | None = None, now: float | None = None,
         eps.append({"ep": ep, "total": k.get("total"), "first_done": k.get("first_done"), "last_done": k.get("last_done"),
                     "video_done": k.get("video_done"), "assembled": bool(k.get("assembled")), "state": k.get("state"),
                     "start": k.get("start"), "minutes": mins, "minutes_how": mins_how, "in_budget": (mins is not None and mins <= BUDGET_MIN and mins_how == "到合成"), "window": win,
-                    "full_auto": not why, "owner_needed": why, "first": fr, "last": lr, "video": vr})
+                    "counts_src": "registry_merged" if mh else "snapshot", "full_auto": not why, "owner_needed": why, "first": fr, "last": lr, "video": vr})
     fp_shots = sum(e["first"]["shots"] for e in eps)
     fp = (sum((e["first"]["first_pass"] or 0) * e["first"]["shots"] for e in eps) / fp_shots) if fp_shots else None
     ch = (root / "docs/master/CHANNEL.md")
