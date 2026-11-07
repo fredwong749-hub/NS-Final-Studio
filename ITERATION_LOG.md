@@ -15,3 +15,5 @@
 | — | 2026-11-04 13:38 → 2026-11-07 10:4x | — | **日志断裂**：此期间 STATE / ITERATION_LOG 未维护（约 20 个版本 sv-20261104-03…sv-20261107-12、冒烟未重跑），本次审计后恢复。不假装连续。 | — | — | — | 依据：《审计与修复指令 20261106》P0-1 |
 | A1 | 2026-11-07 10:4x | Phase R 冻结 | 审计 Step 1：冻结仪式 | release.json enabled=false；CLAUDE.md 顶部硬规则；producer.py 冻结令；.gitignore 去掉 state.json / knowledge/generated（留 state.example.json） | — | 完成 | 证据：config/pipeline/release.json、CLAUDE.md、.gitignore |
 | A2 | 2026-11-07 10:4x | Phase R 冻结 | 审计 Step 2：按事实重写 STATE | STATE.md 重写（服务器实跑 sv-20261107-11；冒烟最近 1/8 @11-04） | — | 完成 | 证据：STATE.md、data/system_version.txt、eval/results/20261104-0204.json |
+| A3 | 2026-11-07 11:0x | Phase R | 冒烟基线 | 无（HEAD effe0bd0 实测） | **2/8** | 基线 | G1/G7 过；G2 被 QW-L12（夹具 3 镜同景别同机位）拦；eval/results/20261106-2103.json |
+| A4 | 2026-11-07 11:1x | Phase R | 夹具镜2 改近景即可过 QW-L12 → G2 过 | eval/smoke/P4_smoke.md 第 81 行 中景→近景 | **1/8** | 降 → 已回滚 | 改夹具使 sop_gate 导入复验缓存失效，新红 H3-A1×2 + G7 不幂等（import_revalidate.json 两遍不同）；eval/results/20261106-2105.json |

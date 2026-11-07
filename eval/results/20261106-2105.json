@@ -1,0 +1,356 @@
+{
+ "schema": "nsfs.smoke/1",
+ "run_id": "smoke_v2",
+ "stamp": "20261106-2105",
+ "code_sha": "29df6ea3",
+ "gates": [
+  {
+   "id": "G1",
+   "name": "启动",
+   "ok": true,
+   "evidence": {
+    "why": "API / 进程 / 8870 / 配置 / import 全部正常",
+    "api_status": 200,
+    "api_err": "",
+    "api_attempts": 1,
+    "api_timeout_s": 30.0,
+    "procs": {
+     "autoflow_resident": true,
+     "tunnel_supervisor": true
+    },
+    "vqa_8870": true,
+    "vqa_status": 200,
+    "config_errors": [],
+    "import_errors": []
+   },
+   "secs": 7.9
+  },
+  {
+   "id": "G2",
+   "name": "输入",
+   "ok": false,
+   "evidence": {
+    "why": "提示词没过：3/3 镜编译 + preflight 过（2026-11-06T21:05:28）；导入闸门复验：导入稿按现行规则复验：block 4（H3-A1×2、QW-E2×1、QW-E3×1）——按现行写作规则返修该集后重新导入",
+    "validate_blocks": [
+     "QW-E2",
+     "QW-E3"
+    ],
+    "import_rc": 0,
+    "import_why": "34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60]\n  - ep01 有 3 镜（应为 6–8）\n  - ep01 总时长 15 秒，超出 60–120 秒",
+    "shots": 3,
+    "shot_seconds": [
+     4.0,
+     5.0,
+     6.0
+    ],
+    "assets_ready": true,
+    "asset_gaps": [],
+    "assets_why": "",
+    "prompts": {
+     "ok": false,
+     "why": "3/3 镜编译 + preflight 过（2026-11-06T21:05:28）；导入闸门复验：导入稿按现行规则复验：block 4（H3-A1×2、QW-E2×1、QW-E3×1）——按现行写作规则返修该集后重新导入"
+    },
+    "prompt_file": "data/pipeline/sop_gate/smoke_v2/ep01_prompts.json",
+    "quarantined": [
+     "data/pipeline/runs/smoke_v2",
+     "data/import/runs/smoke_v2",
+     "data/pipeline/sop_gate/smoke_v2",
+     "data/pipeline/asset_jobs/smoke_v2",
+     "data/producer/runs/smoke_v2"
+    ],
+    "seeded": 7
+   },
+   "secs": 12.4
+  },
+  {
+   "id": "G3",
+   "name": "角色",
+   "ok": false,
+   "evidence": {
+    "why": "producer log.jsonl 没有（G4 没出图）→ 出图参考按名加载无法核对",
+    "refs": {
+     "1": {
+      "cast": [
+       {
+        "name": "祁念",
+        "presence": "在画",
+        "x": "中",
+        "depth": "中"
+       },
+       {
+        "name": "唐瑶",
+        "presence": "在画",
+        "x": "右",
+        "depth": "后"
+       }
+      ],
+      "refs": [
+       "assets_v2/characters/lead_f/face/lead_f_face_v1.png",
+       "assets_v2/characters/ch_tang_yao/face/ch_tang_yao_face_ch_tang_yao_1.png",
+       "data/pipeline/runs/series10_v2/images/refboards/board_388db70eaefe.png"
+      ],
+      "face_files": [
+       "assets_v2/characters/lead_f/face/lead_f_face_v1.png",
+       "assets_v2/characters/ch_tang_yao/face/ch_tang_yao_face_ch_tang_yao_1.png"
+      ],
+      "missing_refs": [],
+      "asset_ref_keys": [
+       "blocked",
+       "capacity",
+       "characters",
+       "dropped",
+       "mirror",
+       "missing",
+       "model",
+       "primary",
+       "rule",
+       "shot_id",
+       "size",
+       "slots",
+       "subject",
+       "two_person",
+       "warnings",
+       "zones"
+      ],
+      "loras": [
+       [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+       ]
+      ],
+      "error": null
+     },
+     "2": {
+      "cast": [
+       {
+        "name": "祁念",
+        "presence": "在画",
+        "x": "中",
+        "depth": "中"
+       },
+       {
+        "name": "唐瑶",
+        "presence": "在画",
+        "x": "右",
+        "depth": "后"
+       }
+      ],
+      "refs": [
+       "assets_v2/characters/lead_f/face/lead_f_face_v1.png",
+       "assets_v2/characters/ch_tang_yao/face/ch_tang_yao_face_ch_tang_yao_1.png",
+       "data/pipeline/runs/series10_v2/images/refboards/board_388db70eaefe.png"
+      ],
+      "face_files": [
+       "assets_v2/characters/lead_f/face/lead_f_face_v1.png",
+       "assets_v2/characters/ch_tang_yao/face/ch_tang_yao_face_ch_tang_yao_1.png"
+      ],
+      "missing_refs": [],
+      "asset_ref_keys": [
+       "blocked",
+       "capacity",
+       "characters",
+       "dropped",
+       "mirror",
+       "missing",
+       "model",
+       "primary",
+       "rule",
+       "shot_id",
+       "size",
+       "slots",
+       "subject",
+       "two_person",
+       "warnings",
+       "zones"
+      ],
+      "loras": [
+       [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+       ]
+      ],
+      "error": null
+     },
+     "3": {
+      "cast": [
+       {
+        "name": "祁念",
+        "presence": "在画",
+        "x": "中",
+        "depth": "中"
+       },
+       {
+        "name": "唐瑶",
+        "presence": "在画",
+        "x": "右",
+        "depth": "后"
+       }
+      ],
+      "refs": [
+       "assets_v2/characters/lead_f/face/lead_f_face_v1.png",
+       "assets_v2/characters/ch_tang_yao/face/ch_tang_yao_face_ch_tang_yao_1.png",
+       "data/pipeline/runs/series10_v2/images/refboards/board_388db70eaefe.png"
+      ],
+      "face_files": [
+       "assets_v2/characters/lead_f/face/lead_f_face_v1.png",
+       "assets_v2/characters/ch_tang_yao/face/ch_tang_yao_face_ch_tang_yao_1.png"
+      ],
+      "missing_refs": [],
+      "asset_ref_keys": [
+       "blocked",
+       "capacity",
+       "characters",
+       "dropped",
+       "mirror",
+       "missing",
+       "model",
+       "primary",
+       "rule",
+       "shot_id",
+       "size",
+       "slots",
+       "subject",
+       "two_person",
+       "warnings",
+       "zones"
+      ],
+      "loras": [
+       [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+       ]
+      ],
+      "error": null
+     }
+    },
+    "probe_rc": 0,
+    "probe_tail": "",
+    "render_refs": null
+   },
+   "secs": 3.3
+  },
+  {
+   "id": "G4",
+   "name": "生成",
+   "ok": false,
+   "evidence": {
+    "why": "未执行：前置没过（G2 没过）",
+    "skipped": "前置没过（G2 没过）",
+    "first": {
+     "1": [],
+     "2": [],
+     "3": []
+    },
+    "last": {
+     "1": [],
+     "2": [],
+     "3": []
+    },
+    "video": {
+     "1": [],
+     "2": [],
+     "3": []
+    },
+    "t0": 1794017133.0944166,
+    "excluded": [],
+    "excluded_count": 0,
+    "oom": [],
+    "timeouts": []
+   },
+   "secs": 0.0
+  },
+  {
+   "id": "G5",
+   "name": "合成",
+   "ok": false,
+   "evidence": {
+    "why": "未执行：前置没过（G4 没过）",
+    "skipped": "前置没过（G4 没过）"
+   },
+   "secs": 0.0
+  },
+  {
+   "id": "G6",
+   "name": "规格",
+   "ok": false,
+   "evidence": {
+    "why": "未执行：G5 没有 mp4",
+    "skipped": "G5 没有 mp4"
+   },
+   "secs": 0.0
+  },
+  {
+   "id": "G7",
+   "name": "幂等",
+   "ok": false,
+   "evidence": {
+    "why": "两遍结构不一致 1 处（例 ['data/pipeline/sop_gate/smoke_v2/import_revalidate.json']）",
+    "residue_before": [],
+    "first": {
+     "files": {
+      "data/pipeline/runs/smoke_v2/autoflow_ep01.json": "3949181bfcb849ac",
+      "data/pipeline/runs/smoke_v2/looks/looks.json": "328341576b0161ca",
+      "data/pipeline/runs/smoke_v2/looks/schedule.json": "c70388e106f5f580",
+      "data/pipeline/runs/smoke_v2/looks/wardrobe.json": "b15a389ee28d233b",
+      "data/pipeline/runs/smoke_v2/P0_brief.json": "fb1142a706b09690",
+      "data/pipeline/runs/smoke_v2/P1_looks.json": "db611e1aae4c3325",
+      "data/pipeline/runs/smoke_v2/P1_storyline.json": "d9253de7dc594c27",
+      "data/pipeline/runs/smoke_v2/P4_ep01.md": "3b39ca745cee8ca7",
+      "data/import/runs/smoke_v2/script_v2.json": "53f654b73e7e059f",
+      "data/pipeline/sop_gate/smoke_v2/ep01_prompts.json": "f917c94faddb032f",
+      "data/pipeline/sop_gate/smoke_v2/import_revalidate.json": "9b704d8f22d74ea3",
+      "data/pipeline/asset_jobs/smoke_v2/_ready_ep01.json": "a7aeeaf9578f0ff9"
+     },
+     "sha": "7c6e601229eb9a81"
+    },
+    "second": {
+     "files": {
+      "data/pipeline/runs/smoke_v2/autoflow_ep01.json": "3949181bfcb849ac",
+      "data/pipeline/runs/smoke_v2/looks/looks.json": "328341576b0161ca",
+      "data/pipeline/runs/smoke_v2/looks/schedule.json": "c70388e106f5f580",
+      "data/pipeline/runs/smoke_v2/looks/wardrobe.json": "b15a389ee28d233b",
+      "data/pipeline/runs/smoke_v2/P0_brief.json": "fb1142a706b09690",
+      "data/pipeline/runs/smoke_v2/P1_looks.json": "db611e1aae4c3325",
+      "data/pipeline/runs/smoke_v2/P1_storyline.json": "d9253de7dc594c27",
+      "data/pipeline/runs/smoke_v2/P4_ep01.md": "3b39ca745cee8ca7",
+      "data/import/runs/smoke_v2/script_v2.json": "53f654b73e7e059f",
+      "data/pipeline/sop_gate/smoke_v2/ep01_prompts.json": "f917c94faddb032f",
+      "data/pipeline/asset_jobs/smoke_v2/_ready_ep01.json": "a7aeeaf9578f0ff9"
+     },
+     "sha": "071986f70c2a0023"
+    },
+    "first_g2_ok": false,
+    "second_g2_ok": false,
+    "quarantined_second": [
+     "data/pipeline/runs/smoke_v2",
+     "data/import/runs/smoke_v2",
+     "data/pipeline/sop_gate/smoke_v2",
+     "data/pipeline/asset_jobs/smoke_v2"
+    ]
+   },
+   "secs": 10.3
+  },
+  {
+   "id": "G8",
+   "name": "无人值守",
+   "ok": false,
+   "evidence": {
+    "why": "流水线没走到成片（G5 未过）→ 无法证明全程无人值守",
+    "owner_points": [],
+    "queue_status": 200,
+    "queue_err": "",
+    "pipeline_complete": false,
+    "stdin": "DEVNULL（全部子进程）"
+   },
+   "secs": 0.9
+  }
+ ],
+ "passed": 1,
+ "score": 0.125,
+ "score_text": "1/8",
+ "total_secs": 35.0,
+ "notes": [
+  "preset.json 的 image / video 低参数未生效：现有 preset 机制没有按剧覆盖入口（只有全局 config/render_quality.json + 驳回 rung.preset），冒烟不改渲染代码 / 全局配置",
+  "owner_override.json 未生效：owner_delegate / final_tier 只读主配置，没有按剧覆盖入口"
+ ]
+}
