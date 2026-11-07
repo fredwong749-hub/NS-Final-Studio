@@ -25,6 +25,8 @@
 4. **常驻进程动物园**：resident_sync / autoflow / api / tunnel / producer / night / gpu36 看图 多进程分三台；死一个就停（11-07 视频页全黑 = 当前版本视频回拉只剩手动，01:45 自查已报无人修；已加常驻回拉线，笔记本侧生效）
 5. 冒烟 G4 0 派图：第一层（旧码 tunnel_supervisor 每 30 s 写 smoke control）已除；第二层 = producer.py:3959 优先级让路（smoke_v2 priority 50 让 series10_v2 0）→ 根因报告 R1，待裁决 #1。另：笔记本内存常剩 4–7 GB
 
+- 坏点 6（项目方 11-08 报，只排队）：#/script-create?ep=5&run=series10_v2 显示的是 ep02 的镜（S11/S15 剧本原文 = ep02“零点”）。证据：NewScriptPage 用 storyApi.get(id, ep) 带 ?ep=5，但 /api/story-runs/series10_v2 忽略 ep（该写作运行 series=false、episode=2、status=void）→ ScriptFullRows ep={run.episode}=2，页面不提示“第 5 集还没写”。同屏另三处口径打架：①胶片格 ReviewRow.tsx:425 有首帧就写“定稿 #N”（first_locked=null 也写）；②“首帧已过期，需重出”来自 stale_global=编译器升级（app.py:435 自述全局升级只该在检查器显示），每镜都挂、还给“重出首帧”按钮；③“资料不全 3”（readiness：sk_rooftop_bar 无定稿底图、祁念 / 黎岸无身份参考）与事实矛盾——这两镜首帧已过契约、S11 视频已出（readiness 与 producer 用的参考来源不是一份，疑为补丁 v3 §5 影子法官同型）
+
 ## 线序（破循环指令 §3；前一线不过不进下一线）
 - 线 0 ✅ 462b230f：已推送 + 基线 3/8
 - 线 1 ✅（根因报告 R1）：G4 待裁决 #1
