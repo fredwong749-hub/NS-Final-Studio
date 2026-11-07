@@ -67,3 +67,16 @@ R3 补（04:4x，裁决 #6/#7 缺省 = 只读取证，已做）：
 - #6 尾帧 I6/I9：series10_v2 生产日志“尾帧生成契约 preflight”0 次 → 冒烟专有。I6 判定在 services/agent/ns_agent/gen_contract/preflight.py:333-338（非脸槽的 slot.line 必须原文出现在提示词里）。
   定位到具体哪一槽 / 哪句需要冒烟窗口的 preflight 报告，而该日志与 data/renders/smoke_v2 每次被 G7 重建清掉 → 本次取证止于“冒烟专有”。下次 G4 窗口由总调度在旁拷贝 log.jsonl 与尾帧作业记录（不改 eval）。
 - #7 视频：两台服务器常驻只有 vidgen.py run <host> --run series10_v2 与 night.py，笔记本无视频工人；全仓 tools/series10_video 无 smoke 字样 → 冒烟剧视频**无人出**，G4“视频 3/3”在现有部署下不可达（结构性，非偶发）。
+
+### R4 根因报告：裁决 #7/#8 批准后执行前核实，两条前提都不成立（11-08 08:5x JST；只读取证，未动任何进程）
+#8（“:8878 last_error 是旧的，重启清掉”）——错，R3 第 7 条更正：OOM 是**本窗口真 OOM**，且根因在审图卡缩容失效。
+1. gpu33 /root/work/fredw/vqa/logs/server_8878.log 最后一次写 11-08 03:54、server_8877.log 03:53 = A11 冒烟窗口内；末行均 torch.OutOfMemoryError（GPU 3）。三个实例 :8876/:8877/:8878 的 /health last_error 全是 OOM，不止 :8878。
+2. 三实例自 11-06 19:01–19:04 起一直在（pid 3972477 / 3972951 / 3976738）；/root/work/fredw/vqa/ 只有 server_8876.pid + router_8870.pid，8877/8878 无 pid 文件。
+3. 生产 producer 日志 data/producer/runs/series10_v2/log.jsonl：review_scale phase=videos want=1 共 79 次全部 ok=true（末次 11-08 05:26:56）——但实例仍是 3 个。
+4. 代码：tools/vqa/review_instances.sh:206-220 scale 只经 stop_ports（:68-73）按 pid 文件停；无 pid 文件 = 静默不停；随后 health "$K"（:217）只判“活着 ≥K”，3≥1 → rc 0。L-207“视频段审图卡只留 1 实例”从未生效。
+5. 后果一（生产）：GPU3 同卡还有视频 ComfyUI :8191（pid 1379405，comfy-launch-reserve9.sh，就是各条 OOM 文本里的“Process 1379405 868 MiB”）。journalctl 11-07 18:24–18:28 该进程 24 次 “Allocation on device 0 would exceed allowed memory (out of memory)”，:8188/:8189 0 次 → vidgen_gpu33.log 18:24:32–18:28 ep03-S1/S2/S8/S9/S10/S11 各 4 变体 RENDER_ERR → settle_rec 无打分 → blocked。gpu33 四卡此后 0% 空转（★闲卡：活在等卡）。
+6. 后果二（冒烟）：审图实例自己也 OOM → review_scale 尾巴带 OOM → G4 判“日志有 OOM”。#5 误报修正不涉及此条（它是真 OOM，评估器报得对）。
+#7（“gpu36 临时起 vidgen --run smoke_v2”）——单起工人不够：
+7. smoke_v2 在两台和笔记本都没有 data/pipeline/runs/smoke_v2/video/（无 jobs.json、无 control、无 hosts.json）。
+8. config/pipeline/video_policy.json scope_runs = [series10_v1, series10_s2, series10_v2]；tools/series10_video/build_jobs.py set_run 对登记过却不在 scope_runs 的剧失败关闭（PolicyMissing）→ 冒烟剧编不出视频作业。要出冒烟视频需：视频政策登记 + hosts 分配 + 窗口内首尾帧出完后 rebuild_jobs + control + vidgen，是一条链的配置改动，不是一个临时进程。
+需要项目方：裁决清单 #7、#8（已按本报告改写）。
