@@ -1,6 +1,6 @@
 当前线：线 2（素材清零，清单 ASSETS-MISSING.md：4 项）——线 1 以根因报告 R1 验收（ITERATION_LOG），G4 待裁决 #1
 已同步至：1aca3ee7（GitHub master / nsfinalstudio = 本地 HEAD，11-07 22:5x JST）
-新基线冒烟：3/8（eval/results/20261107-0838.json；code=1aca3ee7；G1/G2/G7 过，G4 超时 0 派图）
+新基线冒烟：3/8（eval/results/20261107-0838.json；code=1aca3ee7）；最新 A10 3/8（eval/results/20261107-1322.json，code 354e80c0）
 线 2 验收：ASSETS-MISSING.md（仓库根目录）清零；或剩余项全部转入本文末尾裁决清单（每条带缺省）
 
 # STATE — NS-Final Studio（唯一当前真相；每个会话结束覆盖更新；≤80 行）
@@ -33,9 +33,12 @@
 - 线 4：§2 两条硬验收 + 查 night.py ep_sig 的 "missing:<路径>" 嫌疑（已观察：ep01 停 v76，22:23:55 FINALIZE_SAME_INPUT 跳过，但 22:23:28 仍有 REOPEN）
 
 ## 项目方裁决清单（≤5，每条带缺省；清单外不停工）
-1. ✅ 项目方 11-08 00:0x 批准（原文“改 1”；更正：series10_v2 是 0 不是 9，1 仍让路 → 按批准意图改 -1）。G4 第二层：smoke_v2 priority 50→-1（只改 config/pipeline/runs.json 一个数，可逆；代价 = 每次冒烟约 25 分钟主剧笔记本侧暂停派新图）。**缺省：改**。止损律要求等裁决，未执行
+1. ✅ 已执行 354e80c0（项目方批准“改 1”，按意图取 -1：series10_v2 是 0）。结果 A10：3/8 平，G4 不再超时、15.8 s 结束，新拦截见 R2
 2. A9（41da4458）按“平→回滚”规则回滚与否：回滚 = 重新挂上已证实的第一层拦截，且需再重启 tunnel_supervisor 才生效。**缺省：保留**
 3. ep01 整集 45 s < 60 s（L-092）与 11-04 起 6 个待复核版本。**缺省：线 4 验收后逐一给结论，旧版本标废弃不删**
+
+4. G4 第三层（R2）：tools/factory/inbox.py _runs 把 runs.json kind=smoke 的剧也建进期望 refs 表（不论 status），附复现测试（红→绿同 commit）。代价：笔记本 inbox 每次 build 多一部 3 镜小剧。**缺省：改**
+5. G4 第四层（R2）：producer.py:3853 一行日志文案“（免 OOM）”→“（免显存不足）”，避开评估器 OOM 正则误报（评估器不动；producer 冻结的冒烟直接相关小改，1 行）。**缺省：改**
 
 ## 禁区
 - eval/ 评分表与冒烟判定逻辑：修门期间不许改（评估器与工人分离）

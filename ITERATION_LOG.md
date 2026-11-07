@@ -41,3 +41,14 @@
 9. 配置：config/pipeline/runs.json smoke_v2.priority=50、series10_v2.priority=0；series10_v2 生产中几乎总有 ready 帧 → 冒烟剧永远让路。
 10. 该层从 A5 起就在（第一层把它挡住看不见），不是 A9 引入。
 需要项目方：裁决清单 #1（冒烟窗口内 smoke_v2 priority）。producer.py 冻结，不改让路逻辑。
+| A10 | 2026-11-08 03:2x | Phase R / 线 1 裁决 #1 | G4：smoke_v2 priority 50→-1（项目方批准） | 354e80c0（runs.json 一行） | **3/8**（G1/G2/G7） | 平 → 保留（项目方裁决，非盲试）→ 根因报告 R2 | eval/results/20261107-1322.json，code 354e80c0；G4 15.8 s 即结束（不再是 1500 s 超时），0 派图 |
+
+### R2 根因报告：A10 后 G4 仍 0 派图（11-08 03:4x，线 1；G4 第 4 次不过，止损）
+证据只有两处：G4 窗口的 smoke log.jsonl 被其后 G7 两遍重建清掉（data/producer/runs/smoke_v2/ 现只剩 control.json），能看的是 results 里 once 的 stdout 尾巴和 oom 摘录。
+1. once 15.8 s rc=0 退出（之前三次都是 1500 s 超时）：派单路径行为变了，但“已越过优先级让路”**没有直接证据**（日志被清）。
+2. 第三层（证据成立）：once 输出 ep01-S2 等 reasons=["K-OPS-F03 refs 与目标状态不一致：期望 refs 表里没有剧 smoke_v2（先在笔记本 inbox.py build + sync push）"]。
+   代码：producer.py:1332 派单前调 tools/factory/inbox.check_refs；inbox.py:66-70 非主剧查 expected["runs"][run]，没有 → 拒派。
+   为什么没有：inbox.py _runs（:107-117）只给 status ∈ LIVE_STATUSES 的剧建期望表；smoke_v2 平时 paused，只在 G4 窗口里被 smoke.py 翻 producing 25 分钟，窗口内没人重建表 → 冒烟剧永远不在表里。
+3. 第四层（评估器误报，证据成立）：eval/smoke.py:44 OOM_RE 含 OOM；producer.py:3853 review_resident_hold 的 why 文本写着“（免 OOM）”→ 只要审图卡驻留，G4 就记“日志有 OOM”判失败，即使出了图。evaluator 冻结不动。
+4. review_resident_hold gpu33:3 本身正常（L-206 审图卡不派出图），不是拦截层。
+需要项目方：裁决清单 #4（第三层）、#5（第四层）。
