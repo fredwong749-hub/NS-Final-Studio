@@ -165,12 +165,16 @@ def test_reopen_assembled_when_sig_changed_even_if_all_done(night_v2, monkeypatc
     assert st["eps"]["1"]["status"] == "rendering" and st["eps"]["2"]["status"] == "assembled"
 
 
-def test_assemble_failed_sig_changed_resets_retries(night_v2, monkeypatch):
+def test_assemble_failed_sig_changed_counts_against_episode_budget(night_v2, monkeypatch):
+    # 11-07 逻辑纪律补丁 v3 §2d：原测试断言“签名变 → 重试次数清零”，那正是无上限重合成的成因；改为按集累计
     monkeypatch.setattr(night_v2, "ep_sig", lambda ep, host: "NEW")
     st = {"eps": {"1": {"host": "h", "status": "assemble_failed", "resolved_sig": "OLD", "assemble_retries": 3,
                         "finalized": __import__("time").time()},
                   "2": {"host": "h", "status": "assemble_failed", "resolved_sig": "NEW", "assemble_retries": 3,
-                        "finalized": 0}}}
+                        "finalized": 0},
+                  "3": {"host": "h", "status": "assemble_failed", "resolved_sig": "OLD", "assemble_retries": 1,
+                        "finalized": __import__("time").time()}}}
     night_v2.retry_assembly(st)
-    assert st["eps"]["1"]["status"] == "rendering" and st["eps"]["1"]["assemble_retries"] == 0
+    assert st["eps"]["1"]["status"] == "assemble_failed" and st["eps"]["1"]["assemble_retries"] == 3   # 预算用完：签名变也不再开
     assert st["eps"]["2"]["status"] == "assemble_failed"   # 同输入用完 3 次 = 仍停住
+    assert st["eps"]["3"]["status"] == "rendering" and st["eps"]["3"]["assemble_retries"] == 2        # 有预算：重开并累计

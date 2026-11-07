@@ -587,11 +587,11 @@ def retry_assembly(st) -> None:
         elif s == "hold_tts" and not tts_missing():
             x["status"], x["force_finalize"] = "rendering", True
             log("RETRY_ASSEMBLE", f"ep{int(e):02d}", "配音解释器已到位")
-        elif s == "assemble_failed" and x.get("resolved_sig") and x["resolved_sig"] != ep_sig(int(e), x["host"]):
-            # 镜头集合 / 版本变了 = 新输入，值得再试：重置自动重试次数（不论是否已用完）
-            x["assemble_retries"] = 0
+        elif s == "assemble_failed" and x.get("resolved_sig") and x["resolved_sig"] != ep_sig(int(e), x["host"])                 and int(x.get("assemble_retries", 0)) < ASM_RETRY_MAX:
+            # 镜头集合 / 版本变了 = 新输入，值得再试；逻辑纪律补丁 v3 §2d：占本集累计预算，不再清零（原来签名一摇就清零 = 无上限）
+            x["assemble_retries"] = int(x.get("assemble_retries", 0)) + 1
             x["status"], x["force_finalize"] = "rendering", True
-            log("REOPEN", f"ep{int(e):02d}", "合成失败后入选版本 / 镜头集合有变，重置自动重试并重新合成")
+            log("REOPEN", f"ep{int(e):02d}", f"合成失败后入选版本 / 镜头集合有变，重新合成（本集累计第 {x['assemble_retries']}/{ASM_RETRY_MAX} 次）")
         elif s == "assemble_failed" and asm_fatal(x.get("assemble_err")):
             # 代码类错误：不按 20 分钟 × 3 次空等，当场报告（只记一次）；合成代码变了（发版修好）→ 立即再试
             sig = asm_code_sig()
@@ -970,10 +970,11 @@ def bgm_after_assembly(ep: int, ver: str, used_bgm: bool, st: dict) -> dict:
     log("BGM_LIB", f"ep{ep:02d}", json.dumps(res, ensure_ascii=False)[:300])
     lock = res.get("lock") or {}
     auto = x.setdefault("bgm_auto", {})
-    n = int(auto.get(lock.get("sig") or "-", 0))
+    n = int(x.get("bgm_auto_total") or sum(int(v or 0) for v in auto.values()))   # §2d：按集累计（原来按剪辑签名分桶，签名一变清零）
     want = (res.get("status") == "delivered" and not used_bgm) or (not lock.get("locked") and lock.get("fails") == ["L5"])
     if want and n < BGM_AUTO_MAX:
-        auto[lock.get("sig") or "-"] = n + 1
+        auto[lock.get("sig") or "-"] = int(auto.get(lock.get("sig") or "-", 0)) + 1
+        x["bgm_auto_total"] = n + 1
         x["status"] = "rendering"          # 下一轮 EP_RESOLVED → finalize 重合成（版本号照常递增）
         x["resolved_sig"] = None
         x["force_finalize"] = True         # FIX-NIGHT2 #2：同签名的 finalize 默认不重跑，BGM 确认 / 带 BGM 这两次显式放行（≤ BGM_AUTO_MAX）
