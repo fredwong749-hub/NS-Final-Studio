@@ -388,6 +388,7 @@ def test_finalize_background_spawn_reap_and_same_sig_guard(night_v2, monkeypatch
 def test_finalize_sync_mode_calls_inline(night_v2, monkeypatch):
     N = night_v2
     calls = []
+    monkeypatch.setattr(N, "partition_hosts", lambda part=None: {"1": "gpu33"})   # 11-07 §2c：只有本集视频机才合成；本测试的前提 = gpu33 是 ep01 视频机
     monkeypatch.setattr(N, "finalize", lambda ep, host, st, ctrl: calls.append(ep) or st["eps"][str(ep)].update(status="assembled", resolved_sig="S"))
     st = {"eps": {"1": {"host": "gpu33", "status": "rendering"}}}
     assert N.start_finalize(1, "gpu33", st, {"finalize_sync": True}) is True and calls == [1]

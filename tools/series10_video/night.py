@@ -1208,6 +1208,12 @@ def start_finalize(ep: int, host: str, st: dict, ctrl: dict, spawn=None) -> bool
     导演 11–14 min 同步阻塞，gpu36 三卡空转）。同一 resolved_sig 已合成过（finalize_done_sig）且没有显式放行（force_finalize：
     REOPEN / 重试 / BGM 确认）→ 不再起；上一次以“等原片”收尾 → 至少隔 FINALIZE_WAIT_S。返回是否起了"""
     x = st["eps"][str(ep)]
+    owner = partition_hosts().get(str(int(ep)))
+    if owner and owner != host:              # 逻辑纪律补丁 v3 §2c：版本号只由该集的视频机（partition video 分区）递增，别的机只读
+        if x.get("not_owner_logged") != owner:
+            x["not_owner_logged"] = owner
+            log("FINALIZE_NOT_OWNER", f"ep{int(ep):02d}", f"本集视频机是 {owner}，本机 {host} 不合成、不占版本号")
+        return False
     if finalize_sync(ctrl):
         finalize(ep, host, st, ctrl)
         x["finalize_done_sig"] = x.get("resolved_sig")
