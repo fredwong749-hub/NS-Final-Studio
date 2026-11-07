@@ -16,9 +16,9 @@
 ## 已知坏点（≤5）
 1. **冒烟三天没测**：没有任何证据证明当前 HEAD 过自己的冒烟门（审计 P0-2）
 2. ~~gpu33 视频道为 0~~ 11-07 18:24 已修：项目方 a 放行，两台 run_phase enforce（回退：ops/psmaster/runphase_enforce_1107.py --revert）；ep03 11 镜 rendering。gpu36 三卡仍空：ep02 3 镜排队未派（jobs.json 未重建，待查）
-3. **ep01 整集反复合成**：data/episodes/series10_v2/ 有 ep01_v1…v73，几十个大小完全相同 → 合成触发条件有环，浪费算力
+3. ~~ep01 整集反复合成~~ 代码已修未上线（补丁 v3 §2）：a 内容签名 6107bdd2、b 同输入不占版本号 3de38aa1、c 单一递增者=视频机 ef01f578、d 预算按集累计 043333a7、e sweep 熔断 5b53e5d5。night 跑在 gpu36（ep01 assembled_n=75），冻结期未部署 → 验收（同输入两遍 0 新版本 / 断同步 30 min 0 新版本）待部署后做
 4. **常驻进程动物园**：resident_sync / autoflow / api / tunnel / producer / night / gpu36 看图 多进程分三台；死一个就停（11-07 视频页全黑 = 当前版本视频回拉只剩手动，01:45 自查已报无人修；已加常驻回拉线，笔记本侧生效）
-5. 笔记本内存紧（32 GB 常剩 4–7 GB）：cut 闸门与冒烟 G4（1500 s）都被 Claude Code 内存回收杀过；G4 另有自身问题：producer once 只做了看图扩容、没派一张图（A5 证据）
+5. 冒烟 G4 永远 0 派图：笔记本冒烟 producer 的 smoke_v2 control 被一个仍跑 11-01 版 dispatch 的常驻进程每拍写成 hold 全部 6 道 / only=__none__（A7 证据）；候选 = 11-03 起没重启的笔记本 producer serve / sentinel / monitor。另：笔记本内存常剩 4–7 GB
 
 ## 下一步（按审计 Step 顺序，前一步不过不进下一步）
 - Step 3：在 HEAD 上跑 eval/run_smoke.ps1，结果 eval/results/*.json 入库；G1→G8 一次只修一门
