@@ -1171,6 +1171,9 @@ CODE_TOP = ("tools/", "services/", "packages/", "config/", "knowledge/", "ops/",
 CODE_EXT = (".py", ".sh", ".ps1", ".yaml", ".yml", ".toml", ".json", ".md", ".txt", ".cube", ".service", ".timer", ".mjs", ".ts", ".tsx")
 
 
+RUNTIME_IGNORED = ("config/pipeline/state.json", "knowledge/generated/")   # 11-07 审计 Step 1：运行时开关 / 生成物刻意不入库（仓库留 state.example.json）
+
+
 def ignored_code_files() -> list[str]:
     """ARCH_MAP #1（总调度 03:0x）：代码目录里被 .gitignore 挡住、永远进不了版本的代码类文件（缓存 / 日志 / *.local.json 除外）。
     非空 → cut 阻断并列出（要么改 .gitignore 收进来，要么挪出代码目录）"""
@@ -1178,7 +1181,7 @@ def ignored_code_files() -> list[str]:
     files = [e[3:] for e in out.split("\0") if e.startswith("!! ")]
     return sorted(f for f in files if f.startswith(CODE_TOP) and f.endswith(CODE_EXT)
                   and "__pycache__" not in f and ".pytest_cache" not in f and not f.startswith("ops/logs/")
-                  and not f.endswith(".local.json"))
+                  and not f.endswith(".local.json") and not f.startswith(RUNTIME_IGNORED))
 
 
 def untracked_code_after(tree: str) -> list[str]:
@@ -1198,6 +1201,11 @@ def build_snapshot(tree: str, dest: Path) -> dict:
     with tarfile.open(fileobj=io.BytesIO(raw)) as tf:
         tf.extractall(dest, filter="fully_trusted") if hasattr(tarfile, "fully_trusted_filter") else tf.extractall(dest)
         n = sum(1 for m in tf.getmembers() if m.isfile())
+    for rel in ("config/pipeline/state.json",):          # 不入库的运行时开关：闸门要按本机现行开关跑，拷进快照
+        src, dst = ROOT / rel, dest / rel
+        if src.is_file() and not dst.exists():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
     linked = 0
     for rel in ignored_paths():
         if rel.startswith((".git", ".venv", ".pytest_cache", "nsfs_cut_snapshots")) or "__pycache__" in rel or rel.endswith(".pyc")                 or rel.endswith("_selftest_take"):
