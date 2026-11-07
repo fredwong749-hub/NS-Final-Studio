@@ -178,7 +178,7 @@ def push_to_owner(owner: str, files: list[str], dry: bool = False, marks_p: Path
 
 
 def arbitrate_claims(run: str, vid: Path, vid_rel: str, c: dict, ep: int, busy: dict | None = None, now: float | None = None,
-                     health: dict | None = None) -> dict:
+                     health: dict | None = None, status: dict | None = None) -> dict:
     """动态抢活仲裁（只在笔记本）：读合并后的整集状态，空闲台领别台没开工的镜，写 shard_claims.json。返回新的领取表。
     busy 缺省 = 各台 state 里 state==submitted 的渲染数（笔记本上 relay 拉来的 state）。
     health = pull_states 的结果（{host: {"age"}}）；缺省按本机 state 文件算。helper 失联（age > helper_stale_s）→ 收回给 owner（D1）；
@@ -208,6 +208,27 @@ def arbitrate_claims(run: str, vid: Path, vid_rel: str, c: dict, ep: int, busy: 
                 busy[h] = 1
                 continue
             busy[h] = sum(1 for r in (st.get("shots") or {}).values() for x in r.get("renders") or [] if x.get("state") == "submitted")
+    if c.get("sched"):
+        # L-209 S3：调度分片集只有唯一调度器（sched_assign.json）决定谁出哪镜：不做空闲抢活 / 工位分卡领取（busy 全当忙），
+        # 只保留失联收回（D1），再叠调度器的领取。决定过期 / 不在 enforce = want 空 → 只剩租约走完，镜回 owner
+        new = VS.decide_claims(c, plan_map, merged, old, {h: 1 for h in c["hosts"]}, now, claim_from=claim_from,
+                               stale_hosts=stale_hosts)
+        A = VS._sched()
+        doc = A.enforced(run) if A else None
+        want = A.video_hosts(doc, ep) if doc else {}
+        st = load_status(vid) if status is None else status      # once() 传自己的 status（它最后整份写回）
+        misses = (st.get("sched_misses") or {})
+        new = VS.sched_claims(c, plan_map, merged, new, want, now, misses, claim_from=claim_from)
+        st["sched_misses"] = VS.sched_misses(old, new, merged, misses, now)
+        if status is None:
+            save_status(vid, st)
+        if new != old:
+            VS.save_claims(vid, new)
+            moved = sorted(f"{s}→{x['host']}" for s, x in new.items() if str(x.get("why") or "").startswith(VS.SCHED_WHY)
+                           and (old.get(s) or {}).get("host") != x["host"])
+            if moved:
+                print(time.strftime("%H:%M:%S"), f"SCHED ep{ep:02d}", moved, flush=True)
+        return new
     # L-206 工位分卡：本集当前阶段没有视频道的台（首尾帧阶段的 gpu33）不抢活（当它忙），它名下没开工的镜领给有视频道的台；
     # 视频阶段把为分卡领走、还没开工的还回静态计划。不适用（关 / ep < from_episode / 模块不在）= video_hosts None = 原样
     video_hosts = role_video_hosts(run, ep, [s["shot"] for s in shots])
@@ -262,7 +283,7 @@ def once(run: str, dry: bool = False) -> dict:
                 res[f"ep{ep:02d}:{helper}->{c['owner']}"] = {"error": repr(e)[:160]}
         if not dry:
             try:
-                cl = arbitrate_claims(run, vid, vid_rel, c, ep, health=health)
+                cl = arbitrate_claims(run, vid, vid_rel, c, ep, health=health, status=status)
                 cf = [f"{vid_rel}/{VS.CLAIMS_NAME}"] if (vid / VS.CLAIMS_NAME).is_file() else []
                 for h in c["hosts"]:                      # 领取表送到两台（互不信任，只经笔记本）；已有标记的不重复送
                     push_to_owner(h, cf, dry)

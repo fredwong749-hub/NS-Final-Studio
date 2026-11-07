@@ -1189,6 +1189,10 @@ def report_md(row: dict, M: dict, win: dict, proj: dict, parts: dict, divergent:
         L += ["", "## 8. 上一窗口逐道差异", ""]
         for r in win_rows:
             L.append(f"- {r['lane']}: 影子 {r['shadow']} / 现网 {r['live']} → {r['cat']} {r.get('mech') or ''} {r.get('why') or ''}")
+    try:      # L-209 S3（W-S3）：唯一调度器派单决定（record / enforce）对现网的预计收益
+        L += _load("assign_for_shadow", "tools/sched/assign.py").report_lines(row.get("run") or "series10_v2")
+    except Exception as e:  # noqa: BLE001  # arch-ok: 第 9 节是附加信息，算不出只写一行原因，不影响影子报告
+        L += ["", f"（S3 调度器第 9 节读不到：{repr(e)[:120]}）"]
     L += ["", "机制编号见 docs/master/ARCH_MAP_20261106.md §2.3：" + "；".join(f"{k}={v}" for k, v in MECH.items()), ""]
     return "\n".join(L)
 

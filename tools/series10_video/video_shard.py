@@ -27,8 +27,15 @@ def load(path: Path | None = None) -> dict:
 
 
 def ep_cfg(run: str, ep: int, cfg: dict | None = None) -> dict | None:
-    """这一集的分片配置 {"owner","weights","map","hosts"}；没开 / 没配 / 不足两台 → None"""
-    cfg = load() if cfg is None else cfg
+    """这一集的分片配置 {"owner","weights","map","hosts"}；没开 / 没配 / 不足两台 → None。
+    L-209 S3：cfg 没传（= 读现网配置）且 video_shard.json 没配这一集 → 看调度分片（sched_ep_cfg）"""
+    c = _static_ep_cfg(run, ep, load() if cfg is None else cfg)
+    if c is None and cfg is None:
+        c = sched_ep_cfg(run, int(ep))
+    return c
+
+
+def _static_ep_cfg(run: str, ep: int, cfg: dict) -> dict | None:
     if not cfg.get("enabled"):
         return None
     e = (((cfg.get("runs") or {}).get(run) or {}).get("eps") or {}).get(str(int(ep)))
@@ -47,6 +54,8 @@ def ep_cfg(run: str, ep: int, cfg: dict | None = None) -> dict | None:
 def plan(c: dict, shots: list[tuple[str, float]]) -> dict[str, str]:
     """shots = [(镜 id, 时长秒)] → {镜: 主机}。显式 map 优先；其余按“时长降序、负载 / 权重最小的台先拿”贪心（确定性，平局按主机名）"""
     out = {sid: h for sid, h in c["map"].items() if h in c["weights"]}
+    if c.get("owner_only"):        # L-209 S3 调度分片集：静态计划全归 owner，只有调度器的领取（shard_claims why=sched）改派
+        return {**{sid: c["owner"] for sid, _ in shots}, **out}
     load_s = {h: 0.0 for h in c["weights"]}
     for sid, sec in shots:
         if sid in out:
@@ -62,7 +71,6 @@ def plan(c: dict, shots: list[tuple[str, float]]) -> dict[str, str]:
 def plan_all(run: str, specs: dict, cfg: dict | None = None, claims: dict | None = None, now: float | None = None) -> dict[str, str]:
     """specs = {镜 id: ShotSpec（.episode / .duration_s）} → {镜: 主机}（只含配了分片的集的镜；没开 = {}）。
     claims（动态抢活，FIX-A 11-05）给了就把仍有效的领取叠在静态计划上：镜改派给领取台"""
-    cfg = load() if cfg is None else cfg
     by_ep: dict[int, list[tuple[str, float]]] = {}
     for sid, s in specs.items():
         by_ep.setdefault(int(s.episode), []).append((sid, float(s.duration_s)))
@@ -78,11 +86,17 @@ def plan_all(run: str, specs: dict, cfg: dict | None = None, claims: dict | None
 
 def shard_eps(run: str, cfg: dict | None = None) -> dict[int, dict]:
     """{集: 分片配置}（没开 = {}）"""
+    use_sched = cfg is None
     cfg = load() if cfg is None else cfg
-    if not cfg.get("enabled"):
-        return {}
-    eps = (((cfg.get("runs") or {}).get(run) or {}).get("eps") or {})
-    return {int(e): c for e in eps if (c := ep_cfg(run, int(e), cfg))}
+    out = {}
+    if cfg.get("enabled"):
+        eps = (((cfg.get("runs") or {}).get(run) or {}).get("eps") or {})
+        out = {int(e): c for e in eps if (c := _static_ep_cfg(run, int(e), cfg))}
+    if use_sched:
+        for e in sched_eps(run):
+            if e not in out and (c := sched_ep_cfg(run, e)):
+                out[e] = c
+    return out
 
 
 def eps_on_host(run: str, host: str, hosts_map: dict, cfg: dict | None = None) -> list[int]:
@@ -278,3 +292,105 @@ def role_claims(c: dict, plan_map: dict, merged: dict, claims: dict, video_hosts
         if eff[s] in no_video and not _started((merged or {}).get(s)) and (s not in cl or cl[s].get("host") in no_video):
             cl[s] = {"host": takers[0], "from": eff[s], "at": now, "why": f"{ROLE_WHY}:frames"}
     return cl
+
+
+# ---------------------------------------------------------------- L-209 S3 phase 1（W-S3，11-07）：唯一调度器派视频跨台
+# 笔记本 tools/sched/assign.py 算 data/pipeline/runs/<run>/sched_assign.json（{道: [对象]}，带 TTL，推两台）。
+# config/pipeline/state.json sched=enforce 且决定没过期：有视频对象被派到“非本集视频归属台”的集 = 调度分片集——
+#   owner = 分区视频归属台（照旧合成），hosts = 两台，owner_only（静态计划全归 owner）；
+#   笔记本 shard_relay 按 sched_claims() 写领取（why=sched）→ 被派台 build_jobs / vidgen 照分片机制出（effective_mine），
+#   state + 原片由 shard_relay 送回 owner，首尾帧由 resident_sync relay_video_frames 从出图台送到被派台。
+# 决定过期 / 改回 record / off：不再新派；已有 why=sched 领取的集仍按分片集算（已开工的镜跑完、结果照样送回 owner，不重出）。
+SCHED_WHY = "sched"
+SCHED_MISS_COOLDOWN_S = 3600   # 派过去租约到期都没开工 → 这么久内不再把这镜派给同一台（被派台可能缺输入 / 掉线）
+_SCHED_HOSTS = ("gpu33", "gpu36")
+
+
+def _sched():
+    """tools/sched/assign.py（服务器镜像没带 = None → 不看调度器）"""
+    try:
+        import importlib.util
+        import sys as _sys
+        m = _sys.modules.get("ns_sched_assign_vs")
+        if m is None:
+            sp = importlib.util.spec_from_file_location("ns_sched_assign_vs", Path(__file__).resolve().parents[2] / "tools/sched/assign.py")
+            m = importlib.util.module_from_spec(sp)
+            sp.loader.exec_module(m)
+            _sys.modules["ns_sched_assign_vs"] = m
+        return m
+    except (ImportError, OSError, AttributeError):   # arch-ok: 调度器模块没部署 = 不看调度器（静态分区，原行为）
+        return None
+
+
+def _vid_dir(run: str) -> Path:
+    return ROOT / "data" / "pipeline" / "runs" / run / "video"
+
+
+def _sched_claims_by_ep(run: str) -> dict:
+    out: dict = {}
+    for sid, c in load_claims(_vid_dir(run)).items():
+        if str(c.get("why") or "").startswith(SCHED_WHY) and len(sid) >= 4 and sid[2:4].isdigit():
+            out.setdefault(int(sid[2:4]), {})[sid] = c
+    return out
+
+
+def sched_eps(run: str) -> list[int]:
+    """调度分片集：enforce 且决定没过期时有跨台视频的集 ∪ 已有 why=sched 领取的集"""
+    eps = set(_sched_claims_by_ep(run))
+    A = _sched()
+    doc = A.enforced(run) if A else None
+    if doc:
+        eps |= set(A.cross_video_eps(doc))
+    return sorted(eps)
+
+
+def sched_ep_cfg(run: str, ep: int) -> dict | None:
+    A = _sched()
+    doc = A.enforced(run) if A else None
+    owner = (A.cross_video_eps(doc).get(int(ep)) if doc else None)
+    if not owner:
+        cl = _sched_claims_by_ep(run).get(int(ep)) or {}
+        owner = next((c.get("owner") for c in cl.values() if c.get("owner") in _SCHED_HOSTS), None)
+    if owner not in _SCHED_HOSTS:
+        return None
+    return {"owner": owner, "weights": {h: 1.0 for h in _SCHED_HOSTS}, "map": {}, "hosts": sorted(_SCHED_HOSTS),
+            "owner_only": True, "sched": True}
+
+
+def sched_claims(c: dict, plan_map: dict, merged: dict, claims: dict, want: dict, now: float,
+                 misses: dict | None = None, lease_s: float = CLAIM_LEASE_S, claim_from=None) -> dict:
+    """纯函数（笔记本 shard_relay 调）：调度器要的 {镜: 主机} → 新领取表。
+    · 已开工 / 已落定的镜不动（主机归属不能翻）；sticky（失联收回）不动；
+    · 调度器要回 owner 的镜：撤掉没开工的 why=sched 领取；
+    · 要去别台：写 {host, from, at, why=sched, owner}；同台已领着就不刷新 at（租约照走，到期没开工 = 回 owner）；
+    · misses[镜] = {host, t}：派给那台租约到期都没开工 → SCHED_MISS_COOLDOWN_S 内不再派给它（防来回派）"""
+    cl = live_claims(claims, merged, now, lease_s)
+    for sid, h in sorted((want or {}).items()):
+        if sid not in plan_map or h not in c["hosts"] or _started((merged or {}).get(sid)):
+            continue
+        if claim_from is not None and h != plan_map[sid] and plan_map[sid] not in claim_from:
+            continue                                   # 复审 B1：owner 的 state 不新鲜（可能已开工没回报）→ 不从它那里抢，防两台都出 / 翻主机
+        cur = cl.get(sid)
+        if cur and cur.get("sticky"):
+            continue
+        if h == plan_map[sid]:
+            if cur and str(cur.get("why") or "").startswith(SCHED_WHY):
+                cl.pop(sid)
+            continue
+        if cur and cur.get("host") == h:
+            continue
+        m = (misses or {}).get(sid) or {}
+        if m.get("host") == h and now - float(m.get("t") or 0) < SCHED_MISS_COOLDOWN_S:
+            continue
+        cl[sid] = {"host": h, "from": plan_map[sid], "at": now, "why": SCHED_WHY, "owner": c["owner"]}
+    return cl
+
+
+def sched_misses(old: dict, new: dict, merged: dict, misses: dict | None, now: float, lease_s: float = CLAIM_LEASE_S) -> dict:
+    """上一轮的 why=sched 领取这一轮没了、镜也没开工、且确实是租约到期（不是调度器改主意 / 决定过期撤回，复审 B2）→ 记 miss"""
+    out = {s: m for s, m in (misses or {}).items() if now - float(m.get("t") or 0) < SCHED_MISS_COOLDOWN_S}
+    for sid, c in (old or {}).items():
+        if (str(c.get("why") or "").startswith(SCHED_WHY) and sid not in (new or {}) and not _started((merged or {}).get(sid))
+                and now - float(c.get("at") or now) >= lease_s):
+            out[sid] = {"host": c.get("host"), "t": now}
+    return out
