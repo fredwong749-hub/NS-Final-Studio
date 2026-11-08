@@ -2132,6 +2132,8 @@ class _V1VideoFiles(StaticFiles):
         return await super().get_response(path, scope)
 
 
+from ns_api import ns2_bridge as NS2B  # noqa: E402  P5 M2：前端经 /ns2/… 读新 ns2 API（隧道 18900 → gpu33:8900）
+app.include_router(NS2B.router)
 app.mount("/v1-files", _V1VideoFiles(directory=P.DATA), name="v1-files")
 app.mount("/files", StaticFiles(directory=P.DATA), name="files")
 if WEB_DIST.exists():
