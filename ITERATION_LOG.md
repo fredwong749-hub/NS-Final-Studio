@@ -103,3 +103,8 @@ C. OOM（#8）——**代码已上线两台（P4 手放），缩容真停服已�
 **P4（项目方 11-08 指令第 2 件“发版或手放均可”）**：tools/vqa/review_instances.sh（cd85d3ec 版，sha256 231c629f…）手放 gpu33 / gpu36 发版部署目录，原文件 .bak_P4_1108（两台原 sha cea6eb9e… = 修前版）。
 验收（真机，日志 gpu33 /root/work/fredw/vqa/logs/P4_accept_1108.log）：09:33:39 scale 1 → “ADOPT :8877 pid 3314870（无 pid 文件，按监听端口认回）”“stopped instance :8877 (pid 3314870)”，进程确认已退；
 活着 2 > 目标 1 → “SCALE_EXCESS … rc=6”（修前同情形 rc 0）。:8877 随即被另一路 scale 3 重起（见 R5-C），不是停不掉。
+| A13 | 2026-11-08 10:13–10:38 JST | #6 尾帧修复（95ddb0f9：冒烟 last_frame_mode = compose，与生产一致） | G4 尾帧 | 95ddb0f9 | **3/8**（G1/G2/G7） | 平 → 保留（G4 内部升：尾帧缺镜 3→1、OOM 不再报、视频链首次派单）→ R5 续 | eval/results/20261107-2013.json；窗口 scratchpad smoke_A13/：night 10:19:04 READY ep01 → DISPATCH gpu36 三道、vidgen 10:19:02 START；0 SUBMIT——逐镜 SOP 闸门：S1 首帧、S1/S2 尾帧 score_infra（Q10 :8893 不可用）没过契约；S3 尾帧窗口内没出 |
+
+R5 续（A13 后，三层状态）：A 尾帧 ✅ 已修（preflight 不再挂；缺镜 3→1，剩 S3 = 首帧过得晚、窗口内没轮到）；B 视频 = 链路全通（night 判就绪→推 jobs→起 vidgen），唯一卡点 = :8893 down 使 Q10 打不了分（裁决 #9）；
+C OOM = 本窗口 G4 未报（gpu33 视频段已空，审图卡未被挤）；冒烟常驻 producer 抢 scale 的根因仍在（裁决 #8 新）。另 G3 新出现：S1 首帧引用上一窗口的版本文件（G7 清掉后文件不存在）——登记坏点，不动手。
+时间账：本窗口尾帧最早 10:30 出、打分卡在 :8893；视频单段 ~420 s，冒烟要在 25 分钟内过 G4，首尾帧需在窗口前 15 分钟内过契约。

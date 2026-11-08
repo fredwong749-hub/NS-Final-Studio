@@ -1,0 +1,483 @@
+{
+ "schema": "nsfs.smoke/1",
+ "run_id": "smoke_v2",
+ "stamp": "20261107-2013",
+ "code_sha": "95ddb0f9",
+ "gates": [
+  {
+   "id": "G1",
+   "name": "启动",
+   "ok": true,
+   "evidence": {
+    "why": "API / 进程 / 8870 / 配置 / import 全部正常",
+    "api_status": 200,
+    "api_err": "",
+    "api_attempts": 1,
+    "api_timeout_s": 30.0,
+    "procs": {
+     "autoflow_resident": true,
+     "tunnel_supervisor": true
+    },
+    "vqa_8870": true,
+    "vqa_status": 200,
+    "config_errors": [],
+    "import_errors": []
+   },
+   "secs": 6.1
+  },
+  {
+   "id": "G2",
+   "name": "输入",
+   "ok": true,
+   "evidence": {
+    "why": "导入 + 资产就绪 + 3/3 镜提示词编译 preflight 过",
+    "validate_blocks": [
+     "QW-E2",
+     "QW-E3"
+    ],
+    "import_rc": 0,
+    "import_why": "34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60]\n  - ep01 有 3 镜（应为 6–8）\n  - ep01 总时长 15 秒，超出 60–120 秒",
+    "shots": 3,
+    "shot_seconds": [
+     4.0,
+     5.0,
+     6.0
+    ],
+    "assets_ready": true,
+    "asset_gaps": [],
+    "assets_why": "",
+    "prompts": {
+     "ok": true,
+     "why": "3/3 镜编译 + preflight 过（2026-11-07T20:13:24）；"
+    },
+    "prompt_file": "data/pipeline/sop_gate/smoke_v2/ep01_prompts.json",
+    "quarantined": [
+     "data/pipeline/runs/smoke_v2",
+     "data/import/runs/smoke_v2",
+     "data/pipeline/sop_gate/smoke_v2",
+     "data/pipeline/asset_jobs/smoke_v2",
+     "data/producer/runs/smoke_v2"
+    ],
+    "seeded": 7
+   },
+   "secs": 7.0
+  },
+  {
+   "id": "G3",
+   "name": "角色",
+   "ok": false,
+   "evidence": {
+    "why": "first:ep01-S1 出图参考没按名加载：文件不存在（renders/smoke_v2/ep01/S1/takes/image_001_28e20435_raw_post.png）；last:ep01-S3 出图参考没按名加载：本次窗口没有 ev=rendered",
+    "refs": {
+     "1": {
+      "cast": [
+       {
+        "name": "祁念",
+        "presence": "在画",
+        "x": "中",
+        "depth": "中"
+       },
+       {
+        "name": "唐瑶",
+        "presence": "在画",
+        "x": "右",
+        "depth": "后"
+       }
+      ],
+      "refs": [
+       "assets_v2/characters/lead_f/face/lead_f_face_v1.png",
+       "assets_v2/characters/ch_tang_yao/face/ch_tang_yao_face_ch_tang_yao_1.png",
+       "data/pipeline/runs/series10_v2/images/refboards/board_388db70eaefe.png"
+      ],
+      "face_files": [
+       "assets_v2/characters/lead_f/face/lead_f_face_v1.png",
+       "assets_v2/characters/ch_tang_yao/face/ch_tang_yao_face_ch_tang_yao_1.png"
+      ],
+      "missing_refs": [],
+      "asset_ref_keys": [
+       "blocked",
+       "capacity",
+       "characters",
+       "dropped",
+       "mirror",
+       "missing",
+       "model",
+       "primary",
+       "rule",
+       "shot_id",
+       "size",
+       "slots",
+       "subject",
+       "two_person",
+       "warnings",
+       "zones"
+      ],
+      "loras": [
+       [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+       ]
+      ],
+      "error": null
+     },
+     "2": {
+      "cast": [
+       {
+        "name": "祁念",
+        "presence": "在画",
+        "x": "中",
+        "depth": "中"
+       },
+       {
+        "name": "唐瑶",
+        "presence": "在画",
+        "x": "右",
+        "depth": "后"
+       }
+      ],
+      "refs": [
+       "assets_v2/characters/lead_f/face/lead_f_face_v1.png",
+       "assets_v2/characters/ch_tang_yao/face/ch_tang_yao_face_ch_tang_yao_1.png",
+       "data/pipeline/runs/series10_v2/images/refboards/board_388db70eaefe.png"
+      ],
+      "face_files": [
+       "assets_v2/characters/lead_f/face/lead_f_face_v1.png",
+       "assets_v2/characters/ch_tang_yao/face/ch_tang_yao_face_ch_tang_yao_1.png"
+      ],
+      "missing_refs": [],
+      "asset_ref_keys": [
+       "blocked",
+       "capacity",
+       "characters",
+       "dropped",
+       "mirror",
+       "missing",
+       "model",
+       "primary",
+       "rule",
+       "shot_id",
+       "size",
+       "slots",
+       "subject",
+       "two_person",
+       "warnings",
+       "zones"
+      ],
+      "loras": [
+       [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+       ]
+      ],
+      "error": null
+     },
+     "3": {
+      "cast": [
+       {
+        "name": "祁念",
+        "presence": "在画",
+        "x": "中",
+        "depth": "中"
+       },
+       {
+        "name": "唐瑶",
+        "presence": "在画",
+        "x": "右",
+        "depth": "后"
+       }
+      ],
+      "refs": [
+       "assets_v2/characters/lead_f/face/lead_f_face_v1.png",
+       "assets_v2/characters/ch_tang_yao/face/ch_tang_yao_face_ch_tang_yao_1.png",
+       "data/pipeline/runs/series10_v2/images/refboards/board_388db70eaefe.png"
+      ],
+      "face_files": [
+       "assets_v2/characters/lead_f/face/lead_f_face_v1.png",
+       "assets_v2/characters/ch_tang_yao/face/ch_tang_yao_face_ch_tang_yao_1.png"
+      ],
+      "missing_refs": [],
+      "asset_ref_keys": [
+       "blocked",
+       "capacity",
+       "characters",
+       "dropped",
+       "mirror",
+       "missing",
+       "model",
+       "primary",
+       "rule",
+       "shot_id",
+       "size",
+       "slots",
+       "subject",
+       "two_person",
+       "warnings",
+       "zones"
+      ],
+      "loras": [
+       [
+        "krea2_film_texture_qwen21.safetensors",
+        0.5
+       ]
+      ],
+      "error": null
+     }
+    },
+    "probe_rc": 0,
+    "probe_tail": "",
+    "render_refs": {
+     "first:ep01-S1": {
+      "ok": false,
+      "take": 1,
+      "lane": "gpu33:0",
+      "refs": [
+       "assets_v2/characters/lead_f/face/lead_f_face_v1.png",
+       "assets_v2/characters/ch_tang_yao/face/ch_tang_yao_face_ch_tang_yao_1.png",
+       "data/pipeline/runs/series10_v2/images/refcrops/lead_f_O4_sheet_s1102_front_nohead.png"
+      ],
+      "missing": [],
+      "faces_hit": [
+       "assets_v2/characters/lead_f/face/lead_f_face_v1.png",
+       "assets_v2/characters/ch_tang_yao/face/ch_tang_yao_face_ch_tang_yao_1.png"
+      ],
+      "why": "文件不存在（renders/smoke_v2/ep01/S1/takes/image_001_28e20435_raw_post.png）"
+     },
+     "last:ep01-S1": {
+      "ok": true,
+      "take": 1,
+      "lane": "gpu33:0",
+      "refs": [
+       "assets_v2/characters/lead_f/face/lead_f_face_v1.png",
+       "assets_v2/characters/ch_tang_yao/face/ch_tang_yao_face_ch_tang_yao_1.png",
+       "data/renders/smoke_v2/ep01/S1/takes/image_009_98dac757_raw_post.png"
+      ],
+      "missing": [],
+      "faces_hit": [
+       "assets_v2/characters/lead_f/face/lead_f_face_v1.png",
+       "assets_v2/characters/ch_tang_yao/face/ch_tang_yao_face_ch_tang_yao_1.png"
+      ],
+      "why": ""
+     },
+     "first:ep01-S2": {
+      "ok": true,
+      "take": 1,
+      "lane": "gpu33:1",
+      "refs": [
+       "assets_v2/characters/lead_f/face/lead_f_face_v1.png",
+       "assets_v2/characters/ch_tang_yao/face/ch_tang_yao_face_ch_tang_yao_1.png",
+       "data/pipeline/runs/series10_v2/images/refcrops/lead_f_O4_sheet_s1102_front_nohead.png"
+      ],
+      "missing": [],
+      "faces_hit": [
+       "assets_v2/characters/lead_f/face/lead_f_face_v1.png",
+       "assets_v2/characters/ch_tang_yao/face/ch_tang_yao_face_ch_tang_yao_1.png"
+      ],
+      "why": ""
+     },
+     "last:ep01-S2": {
+      "ok": true,
+      "take": 1,
+      "lane": "gpu36:0",
+      "refs": [
+       "assets_v2/characters/lead_f/face/lead_f_face_v1.png",
+       "assets_v2/characters/ch_tang_yao/face/ch_tang_yao_face_ch_tang_yao_1.png",
+       "data/renders/smoke_v2/ep01/S2/takes/image_001_4484574f_raw_post.png"
+      ],
+      "missing": [],
+      "faces_hit": [
+       "assets_v2/characters/lead_f/face/lead_f_face_v1.png",
+       "assets_v2/characters/ch_tang_yao/face/ch_tang_yao_face_ch_tang_yao_1.png"
+      ],
+      "why": ""
+     },
+     "first:ep01-S3": {
+      "ok": true,
+      "take": 5,
+      "lane": "gpu33:0",
+      "refs": [
+       "assets_v2/characters/lead_f/face/lead_f_face_v1.png",
+       "assets_v2/characters/ch_tang_yao/face/ch_tang_yao_face_ch_tang_yao_1.png",
+       "data/pipeline/runs/series10_v2/images/refcrops/lead_f_O4_sheet_s1102_front_nohead.png"
+      ],
+      "missing": [],
+      "faces_hit": [
+       "assets_v2/characters/lead_f/face/lead_f_face_v1.png",
+       "assets_v2/characters/ch_tang_yao/face/ch_tang_yao_face_ch_tang_yao_1.png"
+      ],
+      "why": ""
+     },
+     "last:ep01-S3": {
+      "ok": false,
+      "take": null,
+      "lane": null,
+      "refs": [],
+      "missing": [],
+      "faces_hit": [],
+      "why": "本次窗口没有 ev=rendered"
+     }
+    }
+   },
+   "secs": 2.2
+  },
+  {
+   "id": "G4",
+   "name": "生成",
+   "ok": false,
+   "evidence": {
+    "why": "超时（1500.0s）；尾帧 缺镜 ['3']；视频 缺镜 ['1', '2', '3']；另有 15 个版本不算（adopt / 旧窗口 / 不在 renders/smoke_v2/，例 S1 image v1：文件不存在（renders/smoke_v2/ep01/S1/takes/image_001_28e20435_raw_post.png）",
+    "rc": 124,
+    "timeout_s": 1500.0,
+    "tail": " 248175668795716, \"comfy_tag\": {\"agent\": \"PRODUCER\", \"kind\": \"first_frame\", \"v\": 1, \"t\": 1794101821.9, \"episode\": 1, \"shot\": \"S3\", \"label\": \"自动制作 第 2 次\n2026-11-08T10:38:16 rendered {\"obj\": \"first:ep01-S3\", \"lane\": \"gpu33:0\", \"take\": 5, \"secs\": 74.3, \"render_s\": 74.3, \"gpu_s\": 58.1}\n\n[smoke] 超时 1500s",
+    "first": {
+     "1": [
+      "data/renders/smoke_v2/ep01/S1/takes/image_009_98dac757_raw_post.png"
+     ],
+     "2": [
+      "data/renders/smoke_v2/ep01/S2/takes/image_001_4484574f_raw_post.png",
+      "data/renders/smoke_v2/ep01/S2/takes/image_009_454727f0_raw_post.png"
+     ],
+     "3": [
+      "data/renders/smoke_v2/ep01/S3/takes/image_001_3b473cb6_raw_post.png",
+      "data/renders/smoke_v2/ep01/S3/takes/image_002_c0f91fb3_raw_post.png",
+      "data/renders/smoke_v2/ep01/S3/takes/image_003_f2da56b1_raw_post.png",
+      "data/renders/smoke_v2/ep01/S3/takes/image_004_96bbc858_raw_post.png",
+      "data/renders/smoke_v2/ep01/S3/takes/image_005_fa5fa3f7_raw_post.png"
+     ]
+    },
+    "last": {
+     "1": [
+      "data/renders/smoke_v2/ep01/S1/takes/last_001_b9c3f530_raw_post.png"
+     ],
+     "2": [
+      "data/renders/smoke_v2/ep01/S2/takes/last_001_54e36325_raw_post.png"
+     ],
+     "3": []
+    },
+    "video": {
+     "1": [],
+     "2": [],
+     "3": []
+    },
+    "t0": 1794100408.24746,
+    "excluded": [
+     "S1 image v1：文件不存在（renders/smoke_v2/ep01/S1/takes/image_001_28e20435_raw_post.png）",
+     "S1 image v2：文件不存在（renders/smoke_v2/ep01/S1/takes/image_002_7691701d_raw_post.png）",
+     "S1 image v3：文件不存在（renders/smoke_v2/ep01/S1/takes/image_003_e17bfbce_raw_post.png）",
+     "S1 image v4：文件不存在（renders/smoke_v2/ep01/S1/takes/image_004_8adde4c0_raw_post.png）",
+     "S1 image v5：文件不存在（renders/smoke_v2/ep01/S1/takes/image_005_f344e747_raw_post.png）",
+     "S1 image v6：文件不存在（renders/smoke_v2/ep01/S1/takes/image_006_d67d2008_raw_post.png）",
+     "S1 image v7：文件不存在（renders/smoke_v2/ep01/S1/takes/image_007_831506cf_raw_post.png）",
+     "S1 image v8：文件不存在（renders/smoke_v2/ep01/S1/takes/image_008_4c15c508_raw_post.png）",
+     "S2 image v2：文件不存在（renders/smoke_v2/ep01/S2/takes/image_002_c9ca26ea_raw_post.png）",
+     "S2 image v3：文件不存在（renders/smoke_v2/ep01/S2/takes/image_003_120b44b6_raw_post.png）",
+     "S2 image v4：文件不存在（renders/smoke_v2/ep01/S2/takes/image_004_aeed83ef_raw_post.png）",
+     "S2 image v5：文件不存在（renders/smoke_v2/ep01/S2/takes/image_005_7c490ed4_raw_post.png）",
+     "S2 image v6：文件不存在（renders/smoke_v2/ep01/S2/takes/image_006_0e93292e_raw_post.png）",
+     "S2 image v7：文件不存在（renders/smoke_v2/ep01/S2/takes/image_007_4f676d4c_raw_post.png）",
+     "S2 image v8：文件不存在（renders/smoke_v2/ep01/S2/takes/image_008_61abd6c8_raw_post.png）"
+    ],
+    "excluded_count": 15,
+    "oom": [],
+    "timeouts": []
+   },
+   "secs": 1500.2
+  },
+  {
+   "id": "G5",
+   "name": "合成",
+   "ok": false,
+   "evidence": {
+    "why": "未执行：前置没过（G4 没过）",
+    "skipped": "前置没过（G4 没过）"
+   },
+   "secs": 0.0
+  },
+  {
+   "id": "G6",
+   "name": "规格",
+   "ok": false,
+   "evidence": {
+    "why": "未执行：G5 没有 mp4",
+    "skipped": "G5 没有 mp4"
+   },
+   "secs": 0.0
+  },
+  {
+   "id": "G7",
+   "name": "幂等",
+   "ok": true,
+   "evidence": {
+    "why": "两遍结构指纹一致 593e33c19242c278（12 个文件）",
+    "residue_before": [],
+    "first": {
+     "files": {
+      "data/pipeline/runs/smoke_v2/autoflow_ep01.json": "a3e0df0714647eb0",
+      "data/pipeline/runs/smoke_v2/looks/looks.json": "328341576b0161ca",
+      "data/pipeline/runs/smoke_v2/looks/schedule.json": "c70388e106f5f580",
+      "data/pipeline/runs/smoke_v2/looks/wardrobe.json": "b15a389ee28d233b",
+      "data/pipeline/runs/smoke_v2/P0_brief.json": "fb1142a706b09690",
+      "data/pipeline/runs/smoke_v2/P1_looks.json": "db611e1aae4c3325",
+      "data/pipeline/runs/smoke_v2/P1_storyline.json": "d9253de7dc594c27",
+      "data/pipeline/runs/smoke_v2/P4_ep01.md": "0bfb4aab64c33ee9",
+      "data/import/runs/smoke_v2/script_v2.json": "0be4ac0751989834",
+      "data/pipeline/sop_gate/smoke_v2/ep01_prompts.json": "97eed9e814ae862f",
+      "data/pipeline/sop_gate/smoke_v2/import_revalidate.json": "b7955a1dd66b5cb6",
+      "data/pipeline/asset_jobs/smoke_v2/_ready_ep01.json": "a7aeeaf9578f0ff9"
+     },
+     "sha": "593e33c19242c278"
+    },
+    "second": {
+     "files": {
+      "data/pipeline/runs/smoke_v2/autoflow_ep01.json": "a3e0df0714647eb0",
+      "data/pipeline/runs/smoke_v2/looks/looks.json": "328341576b0161ca",
+      "data/pipeline/runs/smoke_v2/looks/schedule.json": "c70388e106f5f580",
+      "data/pipeline/runs/smoke_v2/looks/wardrobe.json": "b15a389ee28d233b",
+      "data/pipeline/runs/smoke_v2/P0_brief.json": "fb1142a706b09690",
+      "data/pipeline/runs/smoke_v2/P1_looks.json": "db611e1aae4c3325",
+      "data/pipeline/runs/smoke_v2/P1_storyline.json": "d9253de7dc594c27",
+      "data/pipeline/runs/smoke_v2/P4_ep01.md": "0bfb4aab64c33ee9",
+      "data/import/runs/smoke_v2/script_v2.json": "0be4ac0751989834",
+      "data/pipeline/sop_gate/smoke_v2/ep01_prompts.json": "97eed9e814ae862f",
+      "data/pipeline/sop_gate/smoke_v2/import_revalidate.json": "b7955a1dd66b5cb6",
+      "data/pipeline/asset_jobs/smoke_v2/_ready_ep01.json": "a7aeeaf9578f0ff9"
+     },
+     "sha": "593e33c19242c278"
+    },
+    "first_g2_ok": true,
+    "second_g2_ok": true,
+    "quarantined_second": [
+     "data/pipeline/runs/smoke_v2",
+     "data/import/runs/smoke_v2",
+     "data/pipeline/sop_gate/smoke_v2",
+     "data/pipeline/asset_jobs/smoke_v2",
+     "data/renders/smoke_v2",
+     "data/producer/runs/smoke_v2",
+     "data/autopilot/runs/smoke_v2"
+    ]
+   },
+   "secs": 7.7
+  },
+  {
+   "id": "G8",
+   "name": "无人值守",
+   "ok": false,
+   "evidence": {
+    "why": "流水线没走到成片（G5 未过）→ 无法证明全程无人值守",
+    "owner_points": [],
+    "queue_status": 200,
+    "queue_err": "",
+    "pipeline_complete": false,
+    "stdin": "DEVNULL（全部子进程）"
+   },
+   "secs": 0.6
+  }
+ ],
+ "passed": 3,
+ "score": 0.375,
+ "score_text": "3/8",
+ "total_secs": 1524.5,
+ "notes": [
+  "preset.json 的 image / video 低参数未生效：现有 preset 机制没有按剧覆盖入口（只有全局 config/render_quality.json + 驳回 rung.preset），冒烟不改渲染代码 / 全局配置",
+  "owner_override.json 未生效：owner_delegate / final_tier 只读主配置，没有按剧覆盖入口"
+ ]
+}
