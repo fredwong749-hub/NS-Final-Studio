@@ -299,6 +299,7 @@ def anomaly_host(root: Path = ROOT) -> str:
 
 REVIEW_ANOMALY_PORT = 8893          # 与 tools/autopilot/resident_sync.ANOMALY_PORT / tools/vqa/anomaly_server.py 默认一致
 _REVIEW_ANOMALY = {"at": 0.0, "url": None}
+LAPTOP_ANOMALY_TUNNEL_PORT = 18893  # 笔记本隧道 127.0.0.1:18893 → gpu36 127.0.0.1:8893（线3 #9，11-08）
 
 
 def review_local_anomaly(root: Path = ROOT, probe=None, ttl_s: float = 60.0) -> str | None:
@@ -308,16 +309,21 @@ def review_local_anomaly(root: Path = ROOT, probe=None, ttl_s: float = 60.0) -> 
     import os
     import time
     import urllib.request
-    try:
-        lr = json.loads((Path(root) / "config/pipeline/lane_roles.json").read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError):   # arch-ok: 配置缺 = 旧口径
-        return None
-    if not isinstance(lr, dict) or not lr.get("enabled"):
-        return None
-    host = str((lr.get("review") or {}).get("lane") or "").split(":", 1)[0]
-    if not host or os.environ.get("OFFLINE_SELF") != host:
-        return None
-    url = f"http://127.0.0.1:{REVIEW_ANOMALY_PORT}"
+    if not os.environ.get("OFFLINE_SELF"):
+        # 线3 / G4 #9（11-08）：笔记本不在机房内网，count_host 10.0.0.36:8893 连不上（WinError 10060 → score_infra，A13 证据）。
+        # 本机隧道 127.0.0.1:18893 → gpu36 127.0.0.1:8893（同一常驻检测服务）通 → 用它；不通 → None（原口径不变）
+        url = f"http://127.0.0.1:{LAPTOP_ANOMALY_TUNNEL_PORT}"
+    else:
+        try:
+            lr = json.loads((Path(root) / "config/pipeline/lane_roles.json").read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):   # arch-ok: 配置缺 = 旧口径
+            return None
+        if not isinstance(lr, dict) or not lr.get("enabled"):
+            return None
+        host = str((lr.get("review") or {}).get("lane") or "").split(":", 1)[0]
+        if not host or os.environ.get("OFFLINE_SELF") != host:
+            return None
+        url = f"http://127.0.0.1:{REVIEW_ANOMALY_PORT}"
     now = time.time()
     if probe is None and now - _REVIEW_ANOMALY["at"] < ttl_s:
         return _REVIEW_ANOMALY["url"]
