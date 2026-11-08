@@ -38,6 +38,8 @@
    }
   },
   "smoke_v2": {
+   "last_frame_mode": "compose",
+   "_last_frame_mode_doc": "#6（11-08，A12 窗口日志 + 本地复现）：冒烟剧没配 → 走旧法 edit（_build_last_edit 换了 refs / 提示词却沿用首帧槽位记录）→ 尾帧 preflight I6/I9 必挂、I2VA 兜底；生产 series10_v2 = compose（L-203）所以 0 次。冒烟要验生产路径 → 与生产一致",
    "bible": "config/compile/bible_series10_v2.toml",
    "segments": {
     "fantasy": {
