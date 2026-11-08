@@ -19,6 +19,7 @@
 - 复盘：RETRO_ep01.md（11-04 07:56，film_score 28.3/50）
 
 ## 已知坏点（≤5）
+- 新（11-08 A14，只排队）：①smoke_v2 视频作业全部 needs_writer（gpu36 vidgen SHOT_BLOCKED_NO_VARIANT ep01-S1 v1/s2/s3/s4/mot）→ 首尾帧过了也无变体可派（G4 视频层第三卡点）；②窗口前 5 分钟 lane_roles_wait“出图位已转视频位”+ review_resident_hold；③18893 隧道是手起进程，未入 config/netfix/tunnels.json；④test_vqagate 一例会探 18893（net-guard 拦，测试仍过）
 1. 项目方 11-08 报“S4 尾帧 文件不在”：04:1x 复查 ep01–ep04 S4 原图 / 缩略图 / 候选全部 200、文件在盘（ep01-S4 是 L-204 D8 不用尾帧）；未复现。嫌疑：ep02-S4 23:10 重出后 gpu36→笔记本回拉有分钟级延迟，LoadImg 4 次重试（约 30 s）后定格“文件不在”且不再重查。待项目方给页面 / 集号；单线律下只排队
 2. ~~gpu33 视频道为 0~~ 11-07 18:24 已修（但 R4：18:24–18:28 ep03-S1/S2/S8/S9/S10/S11 被同卡审图实例挤 OOM 全部 blocked，gpu33 四卡至今 0%，见裁决 #8）：项目方 a 放行，两台 run_phase enforce（回退：ops/psmaster/runphase_enforce_1107.py --revert）；ep03 11 镜 rendering。~~gpu36 ep02 3 镜排队未派（jobs.json 未重建）~~ 已修销账：gpu36 jobs.json 11-08 00:03 重建；ep02 16 镜视频全部落定（state_gpu36：done 1 + best_effort 15，11-08 08:37 核）；ep03 六镜 08:55 重做、09:27 全部落定（best_effort，R4/#8）
 3. ~~ep01 整集反复合成~~ 代码已修未上线（补丁 v3 §2）：a 内容签名 6107bdd2、b 同输入不占版本号 3de38aa1、c 单一递增者=视频机 ef01f578、d 预算按集累计 043333a7、e sweep 熔断 5b53e5d5。已上线 sv-20261107-13（11-07 20:24，项目方 both 放行）；签名口径切换致 ep01/ep04 各重开一次（ep01→v76，预期）；验收（同输入 0 新版本 / 断同步 30 min 0 新版本）观察中
@@ -44,8 +45,8 @@
 2. A9（41da4458）按“平→回滚”规则回滚与否。**缺省：保留**（回滚 = 重新挂上已证实的第一层拦截）
 3. ep01 整集 45 s < 60 s（L-092）与 11-04 起 6 个待复核版本。**缺省：线 4 后逐一给结论，旧版标废弃不删**
 6. ✅ 已修（95ddb0f9，A13 尾帧缺镜 3→1）
-8. 冒烟常驻 producer 抢审图卡（R5-C）：gpu33 `producer.py serve --run smoke_v2`（pid 2020053）/ gpu36（pid 2916932），11-07 20:26 发版部署拉起，按冒烟 frames 段每拍 scale 3，与生产视频段 scale 1 打架 → GPU3 OOM。冒烟派单本来由笔记本 producer once 做。**缺省：停两台服务器上的冒烟常驻 producer（非我起，需你点头）；可逆 = 重新拉起**
-9. gpu36 :8893 人数检测常驻 down（R5-B）：首帧 Q10 infra_error 反复重打分、本集过不了闸门 → 冒烟视频派不出。**缺省：按 review_instances.sh anomaly 重新拉起 :8893（动服务器常驻，需你点头）**
+8. ✅ 已执行（项目方 11-08 批准）：17:31 JST 停 gpu33 2020053 / gpu36 2916932（日志 gpu33 /root/work/fredw/vqa/logs/D8_stop_smoke_1108.log、gpu36 /root/work/fredw/logs/D8_stop_smoke_1108.log；复查未重生）。原文：冒烟常驻 producer 抢审图卡（R5-C）：gpu33 `producer.py serve --run smoke_v2`（pid 2020053）/ gpu36（pid 2916932），11-07 20:26 发版部署拉起，按冒烟 frames 段每拍 scale 3，与生产视频段 scale 1 打架 → GPU3 OOM。冒烟派单本来由笔记本 producer once 做。**缺省：停两台服务器上的冒烟常驻 producer（非我起，需你点头）；可逆 = 重新拉起**
+9. ✅ 已执行（项目方 11-08 批准，改法）：核实 :8893 健康（errors 0），根因是笔记本连不到 10.0.0.36:8893（WinError 10060）→ 不重启服务；笔记本隧道 127.0.0.1:18893（pid 40588）+ 路由 908f9cca。A14 首帧 Q10 0 score_infra。原文：gpu36 :8893 人数检测常驻 down（R5-B）：首帧 Q10 infra_error 反复重打分、本集过不了闸门 → 冒烟视频派不出。**缺省：按 review_instances.sh anomaly 重新拉起 :8893（动服务器常驻，需你点头）**
 7. ✅ 已执行（P3，11-08 09:0x）：gpu36 video_policy 手放 smoke_v2 + 窗口看守（night --run smoke_v2、gpu36 三道、拉回 clips、窗口关即停）；A12 链路全程在跑，因首帧未全过（见 #9）没派视频
 
 ## 禁区
