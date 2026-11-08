@@ -20,6 +20,8 @@ import { letterOf } from "./LeftRail.helpers";
 import { leicaLine } from "./lens";
 import { badOf, camRaw, frameState, shotMeta, shotStatus, staleOf, videoBlock, breatheDelay, useLens } from "./status";
 import { useUi } from "./ui.helpers";
+
+const isLockedNow = (fs: string) => fs === "locked" || fs === "auto";
 import { useEdit } from "./edit/state";
 import { Pop, StatusLine } from "./widgets";
 import { apiV1 } from "./api_v1";
@@ -422,8 +424,9 @@ function ReviewRowInner({ s, sop, selected, inMulti, dim }: { s: ShotSummary; so
             thumbW={480}
             kk={`KODAK VISION3 500T 5219  ${short(s.id)}`}
             frames={[
-              { key: "f", src: s.first_frame, ed: s.first_frame ? `首帧 · 定稿 #${s.first_frame_take ?? "?"}` : "首帧 · 未出", empty: "首帧未出", cap: `${short(s.id)} · 首帧` },
-              { key: "l", src: s.last_frame_target, ed: s.last_frame_target ? `尾帧 · 定稿 #${s.last_frame_take ?? "?"}` : "尾帧 · 未出", empty: "尾帧未出", cap: `${short(s.id)} · 尾帧` },
+              // P5 M2（PLAN §2.4 修 bug）：只有当前版 = 定稿版（frameState locked / auto）才写“定稿 #N”，否则写“当前 #N”
+              { key: "f", src: s.first_frame, ed: s.first_frame ? `首帧 · ${isLockedNow(frameState(s, d, "image")) ? "定稿" : "当前"} #${s.first_frame_take ?? "?"}` : "首帧 · 未出", empty: "首帧未出", cap: `${short(s.id)} · 首帧` },
+              { key: "l", src: s.last_frame_target, ed: s.last_frame_target ? `尾帧 · ${isLockedNow(frameState(s, d, "last")) ? "定稿" : "当前"} #${s.last_frame_take ?? "?"}` : "尾帧 · 未出", empty: "尾帧未出", cap: `${short(s.id)} · 尾帧` },
               s.video ? { key: "v", src: s.video, kind: "video", ed: `视频 · 当前`, cap: `${short(s.id)} · 视频` } : { key: "v", src: null, ed: "视频 · 未出", empty: "视频未出" },
             ]}
             onFrame={(i) => (st.select(s.id), i === 2 && s.video ? st.setCanvasMode("edit") : undefined)}

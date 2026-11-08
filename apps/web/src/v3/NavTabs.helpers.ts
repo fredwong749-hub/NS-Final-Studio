@@ -1,4 +1,5 @@
 // NAVIA：顶栏五个 tab 的圆点（只用 灰 / 琥珀呼吸 / 琥珀实心 / 绿）与数字。优先级：琥珀实心 > 琥珀呼吸 > 灰 > 绿。
+import { NS2_OVERVIEW, toSummary, type Ov } from "./ns2";
 import { useEffect, useState } from "react";
 
 export type VideosSummary = { total: number; final: number; rendering: number; queued: number; pending_review: number; need_frames: number; todo: number; failed: number; eta_all: string | null; median_s: number };
@@ -25,7 +26,8 @@ function usePoll<T>(url: string, pick: (d: never) => T | null): T | null {
   }, [url]); // eslint-disable-line react-hooks/exhaustive-deps
   return v;
 }
-export const useVideosSummary = () => usePoll<VideosSummary>("/api/videos/overview", (d: { summary: VideosSummary }) => d.summary ?? null);
+// P5 M2：顶栏视频圆点改读新 ns2 唯一总览（口径 ns2/overview.py）
+export const useVideosSummary = () => usePoll<VideosSummary>(NS2_OVERVIEW, (d: Ov) => (d.videos ? toSummary(d) : null));
 export const useFramesCounts = () => usePoll<FramesCounts>("/api/frames-index", (d: FramesCounts) => (d.counts ? { counts: d.counts, gen: d.gen } : null));
 
 /** 按优先级合成一个点：amber = 要你看 / 卡住；run = 在出；idle = 排队 / 没开始；其余 = 全部定稿 */
