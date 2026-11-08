@@ -80,3 +80,4 @@ R3 补（04:4x，裁决 #6/#7 缺省 = 只读取证，已做）：
 7. smoke_v2 在两台和笔记本都没有 data/pipeline/runs/smoke_v2/video/（无 jobs.json、无 control、无 hosts.json）。
 8. config/pipeline/video_policy.json scope_runs = [series10_v1, series10_s2, series10_v2]；tools/series10_video/build_jobs.py set_run 对登记过却不在 scope_runs 的剧失败关闭（PolicyMissing）→ 冒烟剧编不出视频作业。要出冒烟视频需：视频政策登记 + hosts 分配 + 窗口内首尾帧出完后 rebuild_jobs + control + vidgen，是一条链的配置改动，不是一个临时进程。
 需要项目方：裁决清单 #7、#8（已按本报告改写）。
+| R4 执行 | 2026-11-08 08:5x–09:1x | 裁决 #8（改写版） | 停 gpu33 :8877/:8878（pid 3972951/3976738，核对命令行为 vqa/server.py；记 vqa/logs/switch.jsonl）→ GPU3 20.2→7.3 GB；ep03-S1/S2/S8/S9/S10/S11 写视频重做单（master_rejects，by=PS-MASTER，触发清单已在）→ 08:55:37 六镜重新提交；代码 cd85d3ec 只入库 | — | 冒烟未重跑（3/8） | 生产恢复：gpu33 三卡 0%→100%；冒烟待 #7 齐后一并重跑 | gpu33 vidgen_gpu33.log 08:55:37 SUBMIT×6 |
