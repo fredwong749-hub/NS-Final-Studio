@@ -83,3 +83,23 @@ R3 补（04:4x，裁决 #6/#7 缺省 = 只读取证，已做）：
 | R4 执行 | 2026-11-08 08:5x–09:1x | 裁决 #8（改写版） | 停 gpu33 :8877/:8878（pid 3972951/3976738，核对命令行为 vqa/server.py；记 vqa/logs/switch.jsonl）→ GPU3 20.2→7.3 GB；ep03-S1/S2/S8/S9/S10/S11 写视频重做单（master_rejects，by=PS-MASTER，触发清单已在）→ 08:55:37 六镜重新提交；代码 cd85d3ec 只入库 | — | 冒烟未重跑（3/8） | 生产恢复：gpu33 三卡 0%→100%；冒烟待 #7 齐后一并重跑 | gpu33 vidgen_gpu33.log 08:55:37 SUBMIT×6 |
 
 **P3（冻结期例外，项目方 11-08 点名批准“7a 三道”）**：gpu36 发版部署目录 /root/work/fredw/offline_20261101/repo/config/pipeline/video_policy.json 手放一行 scope_runs += smoke_v2（原文件 .bak_P3_1108；内容 = 笔记本 71271f28；下次发版自然覆盖为同内容）。核验：gpu36 上 NS_RUN=smoke_v2 run_ctx.resolve() 通过。冒烟窗口内 gpu36 三道出冒烟视频（窗口看守：night.py --run smoke_v2 + 每 20 s 拉回 clips + 取证拷贝 #6；窗口关即停 night 与 vidgen_smoke_v2.pid）。回退：恢复 .bak_P3_1108。
+| A12 | 2026-11-08 09:10–09:37 JST | 裁决 #7a（P3）+ #8 后首跑 | G4：冒烟视频链（night --run smoke_v2 + gpu36 三道 + 拉回 clips）+ 审图卡腾出 | 700cbbae | **3/8**（G1/G2/G7） | 平 → 保留（项目方批准动作，非盲试；首帧 3/3 镜本窗口有版本、G3 缺项只剩尾帧）→ 根因报告 R5 | eval/results/20261107-1910.json；窗口取证 scratchpad smoke_A12/（watch.log、night.out、snap_live 57 行 log.jsonl） |
+
+### R5 根因报告：A12 后 G4 仍不过（11-08 09:5x JST；三层各报状态，不开新一轮取证）
+A. 尾帧（#6）——**未修**。窗口日志已拷出（smoke_A12/snap_live/data/producer/runs/smoke_v2/log.jsonl）：last:ep01-S2 09:30:17 / 09:31:29 last_preflight_fail
+   “I6 图3 的‘必须一致’标注不在提示词里；I9 实际送进模型的参考图与槽位规划不一致”→ 09:32:43 last_unavailable（I2VA 兜底）。S1/S3 首帧没过，尾帧没轮到。
+   定位到代码路径：尾帧 compose = frame_job.build_last_compose → build_first(continuity_ref=首帧) → continuity_slot（:417，槽满 3 时让位最后一个非脸槽、
+   首帧挂末位）。具体是哪一槽的标注在让位 / 改号时丢失：preflight 失败的作业不落盘、日志只有理由串 → 下一步本地复现（smoke 夹具 S2 尾帧作业 + preflight），
+   结论是编译器 → 修 continuity_slot（复现测试同 commit）；生产 0 次的原因待复现确认（疑生产镜槽位多不满 3）。
+B. 视频（#7a）——**链已通、本窗口没轮到**。night --run smoke_v2 窗口全程在跑（19:10:55–19:36:02，watch.log），但 night 整集闸门要 3 镜首帧全过契约：
+   只有 S2 首帧 09:29:29 passed；S1/S3 首帧 score_infra ×4（Q10 人数检测器 http://10.0.0.36:8893 不可用 → infra_error 不计次、反复重打分）→ 本集没就绪、0 派视频。
+   阻塞点 = gpu36 :8893 anomaly 常驻 down（STATE 坏点 7③ 已记“down”，今天证实它直接卡首帧 Q10）。
+C. OOM（#8）——**代码已上线两台（P4 手放），缩容真停服已验收；但 OOM 仍在**，新根因：gpu33 上两个 producer 抢审图卡——
+   生产 producer（series10_v2，视频段）每拍 scale 1；`producer.py serve --run smoke_v2`（gpu33 pid 2020053，11-07 20:26 发版部署拉起的冒烟常驻）
+   按冒烟 frames 段每拍 scale 3。证据：gpu33 data/pipeline/review_scale.json 与 :8877 进程父链（3317351 ← bash scale 3 ← 3317320 ← 2020053）；
+   09:32–09:34 两边交替 scale 1 / scale 3。另：单实例 :8876 + 同卡 ep03 视频时 GPU3 23.5/24.5 GB，:8876 仍新 OOM（174/180 MiB）。
+需要项目方：服务器上的冒烟常驻 producer（gpu33 2020053 / gpu36 2916932，非我起）停或改为不做 review_scale——见裁决清单。
+
+**P4（项目方 11-08 指令第 2 件“发版或手放均可”）**：tools/vqa/review_instances.sh（cd85d3ec 版，sha256 231c629f…）手放 gpu33 / gpu36 发版部署目录，原文件 .bak_P4_1108（两台原 sha cea6eb9e… = 修前版）。
+验收（真机，日志 gpu33 /root/work/fredw/vqa/logs/P4_accept_1108.log）：09:33:39 scale 1 → “ADOPT :8877 pid 3314870（无 pid 文件，按监听端口认回）”“stopped instance :8877 (pid 3314870)”，进程确认已退；
+活着 2 > 目标 1 → “SCALE_EXCESS … rc=6”（修前同情形 rc 0）。:8877 随即被另一路 scale 3 重起（见 R5-C），不是停不掉。
