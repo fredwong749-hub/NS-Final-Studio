@@ -82,7 +82,7 @@ case "$url" in
       [ -f "$VQA_BASE/router_8870.pid" ] && { echo '{"gpu": "router", "instances": 3}'; exit 0; }
       exit 1
     fi
-    [ -f "$VQA_BASE/server_$port.pid" ] || exit 1
+    [ -f "$VQA_BASE/server_$port.pid" ] || [ -f "$FAKE_STATE/$port.up" ] || exit 1
     if [ -f "$FAKE_STATE/$port.loaded" ]; then echo '{"loaded": true, "gpu": 3}'; else echo '{"loaded": false, "gpu": null}'; fi; exit 0;;
   */generate) mkdir -p "$FAKE_STATE"; touch "$FAKE_STATE/$port.loaded"; echo '{"text": "ok"}'; exit 0;;
   */free) mkdir -p "$FAKE_STATE"; touch "$FAKE_STATE/freed.$port"; exit 0;;
@@ -107,7 +107,9 @@ def _fake_bin(tmp: Path, free_mib: int, hostname: str = "gpu3", live: bool = Fal
         "setsid": '#!/bin/sh\nexec "$@"\n',
         # 两条都听 8870：先是内网代理（lan_proxy.py，pid 777，不是 server.py），再是旧单实例（Fable 复审：head -1 会挑错）
         "ss": ('#!/bin/sh\necho "LISTEN 0 128 10.0.0.33:8870 0.0.0.0:* users:((\\"python3\\",pid=777,fd=3))"\n'
-               '[ -n "${FAKE_SS_PID:-}" ] && echo "LISTEN 0 128 127.0.0.1:8870 0.0.0.0:* users:((\\"python\\",pid=$FAKE_SS_PID,fd=3))"\nexit 0\n'),
+               '[ -n "${FAKE_SS_PID:-}" ] && echo "LISTEN 0 128 127.0.0.1:8870 0.0.0.0:* users:((\\"python\\",pid=$FAKE_SS_PID,fd=3))"\n'
+               # R4（11-08）：FAKE_SS_EXTRA="8877:3972951 8878:3976738" → 这些口也有监听进程（无 pid 文件的孤儿实例）
+               'for x in ${FAKE_SS_EXTRA:-}; do echo "LISTEN 0 5 127.0.0.1:${x%%:*} 0.0.0.0:* users:((\\"python\\",pid=${x##*:},fd=3))"; done\nexit 0\n'),
     }
     for n, s in scripts.items():
         (b / n).write_text(s, encoding="utf-8", newline="\n")

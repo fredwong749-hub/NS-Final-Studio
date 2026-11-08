@@ -65,7 +65,12 @@ except Exception: print("down")')
 stop_ports() {   # 只停本脚本 pid 文件里的实例（$@ = 端口）
   for p in "$@"; do
     f="$B/server_$p.pid"
-    [ -f "$f" ] && { kill "$(cat "$f")" 2>/dev/null && echo "stopped instance :$p ($(basename "$f"))"; rm -f "$f"; }
+    if [ -f "$f" ]; then kill "$(cat "$f")" 2>/dev/null && echo "stopped instance :$p ($(basename "$f"))"; rm -f "$f"; continue; fi
+    # R4（11-08）：pid 文件丢了（:8877/:8878 自 11-06 起无 pid 文件）→ 以前静默不停、scale 1 报 ok 79 次、与同卡视频 ComfyUI 互挤 OOM。
+    # 按监听端口认回；只停命令行是本仓库 server.py 的进程，别人的不碰
+    pid=$(port_server_pid "$p") || { up "$p" && echo "NOT_OURS :$p 有人在听但不是本仓库 server.py（或没有 ss），不碰"; continue; }
+    echo "ADOPT :$p pid $pid（无 pid 文件，按监听端口认回）"
+    kill "$pid" 2>/dev/null && echo "stopped instance :$p (pid $pid)"
   done
 }
 
@@ -116,12 +121,14 @@ start_router() {
 
 is_server_py() { tr '\0' ' ' < "$PROC/$1/cmdline" 2>/dev/null | grep -q "server.py"; }   # 这个 pid 是本仓库看图 server.py 吗
 
-old_single_pid() {   # :ROUTER 上的全部监听进程（ss；Fable 复审：10.0.0.33:8870 的内网代理 lan_proxy.py 也听这个口），只认命令行是 server.py 的那个
-  for pid in $(ss -ltnp 2>/dev/null | grep -E "[:.]$ROUTER +" | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); do
+port_server_pid() {   # $1 端口上的全部监听进程（ss；Fable 复审：10.0.0.33:8870 的内网代理 lan_proxy.py 也听这个口），只认命令行是 server.py 的那个
+  for pid in $(ss -ltnp 2>/dev/null | grep -E "[:.]$1 +" | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); do
     is_server_py "$pid" && { echo "$pid"; return 0; }
   done
   return 1
 }
+
+old_single_pid() { port_server_pid "$ROUTER"; }
 
 adopt_old_single() {   # 返回 0 = :ROUTER 上是旧单实例且 pid 文件在手；1 = :ROUTER 没人 / 已是分发器；2 = 有人但不是我们的进程
   r=$(hjson "$ROUTER"); [ -n "$r" ] || return 1
@@ -215,6 +222,8 @@ case "$CMD" in
     if [ -n "$keep" ]; then start_instances $keep || SRC=$?; fi
     RRC=0; case "$SRC" in 0|5) start_router || RRC=$?;; esac   # 5 = 显存只够部分实例：分发器照起、用活着的（W-INFRA 11-06）
     sleep "${VQA_SETTLE_S:-30}"; health "$K"; hrc=$?
+    # R4：缩容要“恰好 K 个”——以前只判活着 ≥K，停不掉的实例照样 rc 0（3≥1），视频段审图卡缩容从未生效也看不出
+    [ "$okn" -le "$K" ] || { echo "SCALE_EXCESS 还活着 $okn 个实例 > 目标 $K（停不掉的见上方 NOT_OURS / ADOPT）"; [ "$hrc" = 0 ] && hrc=6; }
     [ "$SRC" = 0 ] || exit $SRC
     [ "$RRC" = 0 ] || exit $RRC                     # 4 = :8870 上是旧单实例（PORT_BUSY）：退出码说明原因，钩子日志能看懂
     exit $hrc;;
