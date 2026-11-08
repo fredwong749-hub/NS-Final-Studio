@@ -623,5 +623,3 @@
 11-07 15:24(JST) | SELF-HEAL | NOTE | [gpu:idle_with_work] 6 条道空闲 > 5 分钟（gpu33:0, gpu33:1, gpu33:3, gpu36:0, gpu36:1, gpu36:2），registry 还有 17 个 ready 对象（动作：none；卡点 ISS-1107-152441-d5ab）
 11-07 17:38(JST) | SELF-HEAL | NOTE | [proc:lane_relay] lane_relay serve 不在（借道已启用）（动作：dry；卡点 ISS-1107-173858-3713）
 11-07 18:34 | IDLE-WATCH | 🔴 空卡有活 gpu33 道 ['gpu33:3'] 空闲 5 分钟（全台空：False）；活：ready 首尾帧 9（ep [1, 2, 3]）/ 本台可派视频 3 镜 / 资产作业 0；工位（L-206）：gpu33:3=review/video（本台可派视频 3 镜）；原因线索：night_control yield_s=30（卡点 ISS-1107-183409-5bd2）
-11-07 23:14 | IDLE-WATCH | 🔴 空卡有活 gpu33 道 ['gpu33:1'] 空闲 276 分钟（全台空：False）；活：ready 首尾帧 9（ep [1, 2, 3]）/ 本台可派视频 0 镜 / 资产作业 0；工位（L-206）：gpu33:1=image（ready 首尾帧 4）；原因线索：night_control yield_s=30（卡点 ISS-1107-231413-3dd3）
-11-07 23:23 | IDLE-WATCH | 🔴 空卡有活 gpu36 道 ['gpu36:1'] 空闲 5 分钟（全台空：False）；活：ready 首尾帧 7（ep [1, 2, 3]）/ 本台可派视频 1 镜 / 资产作业 0；工位（L-206）：gpu36:1=image（ready 首尾帧 2）；原因线索：night_control yield_s=30（卡点 ISS-1107-232310-6b88）

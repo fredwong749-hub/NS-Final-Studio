@@ -1,12 +1,4 @@
 15:42 HOLLYWOOD（autoflow）：series10_v2 第 6 轮 P1 评审包已出（C:/Users/fredw/AppData/Local/Temp/tmp5hf4xbvb/series10_v2/judge_p1/r6/judge_1–3），请派 3 位新评委（不同模型、不复用上一轮）
-01:39 ⏫ 看门狗（WATCHDOG-CODE）：阻断卡点超 2 小时无人 close / 回应 1 条：ISS-1107-233125-e5ed（WATCHDOG-CODE，2h）（data/pipeline/issues.jsonl）
-13:45 🖼 首帧代选（L-142，系统代选·可改）：series10_v2 ep02-S4 → v6（契约分 0.0，过检后等了 31 分钟）
-13:45 🖼 首帧代选（L-142，系统代选·可改）：series10_v2 ep02-S4 → v6（契约分 0.0，过检后等了 31 分钟）
-17:35 ⏫ 看门狗（WATCHDOG-CODE）：阻断卡点超 2 小时无人 close / 回应 1 条：ISS-1107-152441-d5ab（SELF-HEAL，2h）（data/pipeline/issues.jsonl）
-11:32 ⏫ 看门狗（WATCHDOG-CODE）：阻断卡点超 2 小时无人 close / 回应 1 条：ISS-1107-092407-a9b6（SELF-HEAL，2h）（data/pipeline/issues.jsonl）
-23:31 ⚠ 卡点（WATCHDOG-CODE）：series10_v2 第1集 步骤尾帧【阻断】：抢跑：第1集已有视频片段，但 sop_gate“尾帧”阶段没放行（当前阶段=尾帧：15/16 镜有过契约的尾帧；缺 镜1；tools/master/sop_gate.py status --run series10_v2；产物 = sop_gate.check_video 的 video/clips/ep01） 〔wd:r4:series10_v2:ep01:视频片段〕（建议：查是谁绕过 sop_gate.require 出的产物（violations.jsonl by 字段），挡住入口；产物先隔离不删） [ISS-1107-233125-e5ed]
-23:23 ⚠ 卡点（IDLE-WATCH）：series10_v2 第0集 步骤空卡巡检：gpu36 道 ['gpu36:1'] 空闲 5 分钟（全台空：False）；活：ready 首尾帧 7（ep [1, 2, 3]）/ 本台可派视频 1 镜 / 资产作业 0；工位（L-206）：gpu36:1=image（ready 首尾帧 2）；原因线索：night_control yield_s=30（建议：按清单派活：当前集逐镜 → 下一集 → 资产作业；看 control.json only / hold、night_control hold、sop_gate；心跳过期走 restart_queue（本巡检已自动请求）） [ISS-1107-232310-6b88]
-23:14 ⚠ 卡点（IDLE-WATCH）：series10_v2 第0集 步骤空卡巡检：gpu33 道 ['gpu33:1'] 空闲 276 分钟（全台空：False）；活：ready 首尾帧 9（ep [1, 2, 3]）/ 本台可派视频 0 镜 / 资产作业 0；工位（L-206）：gpu33:1=image（ready 首尾帧 4）；原因线索：night_control yield_s=30（建议：按清单派活：当前集逐镜 → 下一集 → 资产作业；看 control.json only / hold、night_control hold、sop_gate；心跳过期走 restart_queue（本巡检已自动请求）） [ISS-1107-231413-3dd3]
 22:35 🖼 首帧代选（L-142，系统代选·可改）：series10_v2 ep04-S11 → v1（契约分 0.0，过检后等了 31 分钟）
 18:34 ⚠ 卡点（IDLE-WATCH）：series10_v2 第0集 步骤空卡巡检：gpu33 道 ['gpu33:3'] 空闲 5 分钟（全台空：False）；活：ready 首尾帧 9（ep [1, 2, 3]）/ 本台可派视频 3 镜 / 资产作业 0；工位（L-206）：gpu33:3=review/video（本台可派视频 3 镜）；原因线索：night_control yield_s=30（建议：按清单派活：当前集逐镜 → 下一集 → 资产作业；看 control.json only / hold、night_control hold、sop_gate；心跳过期走 restart_queue（本巡检已自动请求）） [ISS-1107-183409-5bd2]
 04:28 ⏫ 看门狗（WATCHDOG-CODE）：阻断卡点超 2 小时无人 close / 回应 2 条：ISS-1107-021918-e6d9（WATCHDOG-CODE，2h）、ISS-1107-021918-e4cf（WATCHDOG-CODE，2h）（data/pipeline/issues.jsonl）
