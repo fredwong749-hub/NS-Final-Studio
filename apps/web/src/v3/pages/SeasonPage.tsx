@@ -10,7 +10,6 @@
 //   过滤变暗                                  → 保留（跟画布同一过滤）
 // 新增（“逻辑更好”）：景别、场景色带（同场景连成一条）、镜间衔接符号（换场 ┃ / 同场换机位 ─ / 接力 ➜ + 承接什么）、
 //   集与集之间的衔接（上一集末镜 → 本集首镜）、换装点、出场人物时间线（● 在画 · ◐ 局部 · ○ 画外）。状态随画布数据实时更新。
-import { fetchOverview, toProgress } from "../ns2";
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { useStudio } from "../../store";
 import { thumb } from "../../thumb";
@@ -80,13 +79,11 @@ function useTotals(): PData | null {
   const [tick, setTick] = useState(0);
   useEffect(() => {
     let alive = true;
-    fetchOverview()   // P5 M2：改读新 ns2 唯一总览（v3/ns2.ts toProgress）；新系统没有实时事件 → 15 秒轮询
-      .then((o) => toProgress(o) as PData)
+    fetch("/api/progress")
+      .then((r) => (r.ok ? (r.json() as Promise<PData>) : null))
       .then((x) => alive && x && setP(x), () => {});
-    const t = window.setTimeout(() => setTick((n) => n + 1), 15000);
     return () => {
       alive = false;
-      window.clearTimeout(t);
     };
   }, [tick]);
   useLiveEvent((e) => e.type === "frame" || e.type === "lastframe" || e.type === "stage", () => setTick((n) => n + 1), 3000);

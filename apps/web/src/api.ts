@@ -110,13 +110,8 @@ export const api = {
     req<{ which: string; suggestion: string; model: string }>(`/api/shots/${sid(id)}/boost/suggest`, json("POST", llm ? { which, llm } : { which })),
   activate: (id: string, stage: Stage, n: number) =>
     req<Takes>(`/api/shots/${sid(id)}/takes/${stage}/${n}/activate`, { method: "POST" }),
-  /** P5 M2（PLAN §2.4 调用点 5）：定稿 / 驳回双写——新 ns2 队列（/api/overview 的 final 唯一来源，成人镜触发也在这里清）
-   *  + 旧接口（画布角标仍读旧 review.json，M3 下线旧 API 时去掉这一半）。新系统写不进去 = 报错，不静默只写一半 */
-  review: async (id: string, state: ReviewState, reason = "") => {
-    const r = await req<Review>(`/api/shots/${sid(id)}/review`, json("PUT", { state, reason }));
-    await req<unknown>(`/ns2/api/shots/${sid(id)}/review`, json("PUT", { state, reason: reason || null }));
-    return r;
-  },
+  review: (id: string, state: ReviewState, reason = "") =>
+    req<Review>(`/api/shots/${sid(id)}/review`, json("PUT", { state, reason })),
   jobs: () => req<Job[]>("/api/jobs"),
   /** SOP 阶段 / 关口（只读） */
   sopEpisode: (n: number) => req<SopEpisode>(`/api/sop/episode/${n}`),

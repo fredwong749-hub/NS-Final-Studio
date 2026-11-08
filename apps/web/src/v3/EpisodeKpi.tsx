@@ -3,7 +3,6 @@
 // 状态全部来自 GET /api/episodes/kpi（活的 producer 登记表 + brain 快照 KPI + 每镜 takes.json 当前版），前端不猜；只给看通过的图。
 // UIUX-LOOP-3 r12：每集一个“最新成片”入口（后端 cuts.latest_film：data/episodes/<run>/epNN_vN.mp4 最新一版 + 合成闸门结论，标签诚实：
 // 预览版（闸门没过：缺 N 镜用占位）/ 成片（闸门通过））；“首尾对照”开关把每镜换成 首帧 | 尾帧 并排大图（L-203：首尾帧要一起看）。
-import { fetchOverview, toKpi } from "./ns2";
 import { useCallback, useEffect, useState } from "react";
 import { thumb } from "../thumb";
 import { useStudio } from "../store";
@@ -38,14 +37,14 @@ export function useEpisodeKpi() {
   const [d, setD] = useState<Kpi | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const load = useCallback(() => {
-    fetchOverview()   // P5 M2：改读新 ns2 唯一总览（v3/ns2.ts toKpi）
-      .then((o) => toKpi(o) as unknown as Kpi)
+    fetch("/api/episodes/kpi")
+      .then((r) => (r.ok ? (r.json() as Promise<Kpi>) : Promise.reject(new Error(r.status === 404 ? "后台还没更新到有“每集进度”接口的版本（重启后出现）" : `HTTP ${r.status}`))))
       .then((x) => (setD(x), setErr(null)))
       .catch((e: Error) => setErr(e.message));
   }, []);
   useEffect(() => {
     load();
-    const t = window.setInterval(load, 15000);   // PLAN §2.4：轮询统一 15 秒
+    const t = window.setInterval(load, 30000);
     return () => window.clearInterval(t);
   }, [load]);
   useLiveEvent((e) => e.type === "frame" || e.type === "lastframe" || e.type === "stage" || e.type === "video", load, 2000);

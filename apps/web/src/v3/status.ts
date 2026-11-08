@@ -66,15 +66,11 @@ export const whoLabel = (x?: string | null) => (x ? WHO[x] ?? x : undefined);
 /** 某格过期原因（镜头摘要 stale[stage] + stale_global[stage]（编译器升级等）+ takes.json 顶层 stale.{stage}）——过期判定只此一处。
  *  fredw-92/UXF1（审查 #11）：精修的“过期”角标一直把 stale_global 算进去，审片行没算 → 同一张图一边“过期”一边“待你审·满意就定稿”。现在两边同源 */
 export function staleOf(s: ShotSummary, d: ShotDetail | undefined, stage: Stage): string[] {
-  // P5 M2（PLAN §2.4 口径表）：stale 只含本镜输入变化；stale_global（编译器升级等全局变化）不进卡片过期，只在检查器看（staleGlobalOf）
-  const out = [...(s.stale?.[stage] ?? [])].filter((x) => x != null);
+  const out = [...(s.stale?.[stage] ?? []), ...(s.stale_global?.[stage] ?? [])].filter((x) => x != null);
   const tst = (d?.takes as { stale?: Partial<Record<string, { reason?: string } | null>> } | undefined)?.stale?.[stage];
   if (tst) out.push(tst.reason ?? "");
   return [...new Set(out)];
 }
-
-/** 全局过期原因（编译器升级等）：独立字段，只给检查器 / 编辑页显示，不算卡片过期 */
-export const staleGlobalOf = (s: ShotSummary, stage: Stage): string[] => (s.stale_global?.[stage] ?? []).filter((x) => x != null);
 
 /** fredw-92/UXF1（审查 #6）：当前首帧 / 尾帧是不是坏图（太小 / 文件太小 / 尺寸与请求不符）→ 原因 */
 export function badOf(s: ShotSummary, d: ShotDetail | undefined, stage: Stage): string | null {

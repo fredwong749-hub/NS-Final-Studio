@@ -1,7 +1,6 @@
 // NAVIA：“视频”页（#/videos?ep=all|N&state=&shot=）。全部镜头视频，每镜一格，按集顺序排（L-124）。
 // 状态（只用 灰 / 琥珀呼吸 / 琥珀实心 / 绿）：出视频中 · 排队 · 待你看 · 缺首尾帧 · 失败 · 未出 · 已定稿。点开 = 右侧抽屉，播放 + 用这版 / 修改（L-123）。
 // 数据：GET /api/videos/overview（后端按 vidgen 队列与历史中位时长给预计时间，前端只显示）。没有任何一种情况会出现白板：空 / 读不到都有说明和出口。
-import { fetchOverview, toSummary, toVideoRows } from "../ns2";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Verdict } from "../Verdict";
 import { RedoButton } from "../RedoButton";
@@ -41,8 +40,8 @@ function useOverview(ep: string) {
   const [d, setD] = useState<Overview | null>(null);
   const [err, setErr] = useState("");
   const load = useCallback(() => {
-    fetchOverview()   // P5 M2：改读新 ns2 唯一总览，适配成原 Overview 形状（v3/ns2.ts）
-      .then((o) => ({ summary: toSummary(o), episodes: toVideoRows(o, ep) }) as Overview)
+    fetch(`/api/videos/overview${ep && ep !== "all" ? `?ep=${encodeURIComponent(ep)}` : ""}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.status === 404 ? "后台还没更新到有“视频”接口的版本（等它自动重启后再点重试）" : `${r.status} ${r.statusText}`))))
       .then((x: Overview) => (setD(x), setErr("")))
       .catch((e: Error) => setErr(e.message));
   }, [ep]);
