@@ -155,6 +155,76 @@
      "to": "producing",
      "by": "eval/smoke.py（W26）",
      "why": "冒烟 G4 窗口：临时放行 producer"
+    },
+    {
+     "at": "2026-11-07T09:04:04",
+     "from": "producing",
+     "to": "paused",
+     "by": "eval/smoke.py（W26）",
+     "why": "冒烟 G4 窗口结束：翻回 paused（常驻进程不碰）"
+    },
+    {
+     "at": "2026-11-07T13:22:18",
+     "from": "paused",
+     "to": "producing",
+     "by": "eval/smoke.py（W26）",
+     "why": "冒烟 G4 窗口：临时放行 producer"
+    },
+    {
+     "at": "2026-11-07T13:22:34",
+     "from": "producing",
+     "to": "paused",
+     "by": "eval/smoke.py（W26）",
+     "why": "冒烟 G4 窗口结束：翻回 paused（常驻进程不碰）"
+    },
+    {
+     "at": "2026-11-07T13:48:10",
+     "from": "paused",
+     "to": "producing",
+     "by": "eval/smoke.py（W26）",
+     "why": "冒烟 G4 窗口：临时放行 producer"
+    },
+    {
+     "at": "2026-11-07T14:13:11",
+     "from": "producing",
+     "to": "paused",
+     "by": "eval/smoke.py（W26）",
+     "why": "冒烟 G4 窗口结束：翻回 paused（常驻进程不碰）"
+    },
+    {
+     "at": "2026-11-07T19:10:52",
+     "from": "paused",
+     "to": "producing",
+     "by": "eval/smoke.py（W26）",
+     "why": "冒烟 G4 窗口：临时放行 producer"
+    },
+    {
+     "at": "2026-11-07T19:35:53",
+     "from": "producing",
+     "to": "paused",
+     "by": "eval/smoke.py（W26）",
+     "why": "冒烟 G4 窗口结束：翻回 paused（常驻进程不碰）"
+    },
+    {
+     "at": "2026-11-07T20:13:28",
+     "from": "paused",
+     "to": "producing",
+     "by": "eval/smoke.py（W26）",
+     "why": "冒烟 G4 窗口：临时放行 producer"
+    },
+    {
+     "at": "2026-11-07T20:38:28",
+     "from": "producing",
+     "to": "paused",
+     "by": "eval/smoke.py（W26）",
+     "why": "冒烟 G4 窗口结束：翻回 paused（常驻进程不碰）"
+    },
+    {
+     "at": "2026-11-08T03:34:31",
+     "from": "paused",
+     "to": "producing",
+     "by": "eval/smoke.py（W26）",
+     "why": "冒烟 G4 窗口：临时放行 producer"
     }
    ]
   }
